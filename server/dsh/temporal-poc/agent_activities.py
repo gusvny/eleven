@@ -1652,7 +1652,7 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
         # write_allow 粗判据仅兜手动/未带写集调用——07/08 越界事故在粗判据下漏网）。
         # 第 1 项 commit 检查仍用钉死 base_ref（语义=泳道有本票产出，防快进误判
         # 0 commit），两项 base 口径分工不同。
-        wl_base, wl_err = _merge_base_ref(args.branch, REPO_ROOT)
+        wl_base, wl_err = _merge_base_ref(args.branch, lane_repo)  # 第六枪（t260903-11 二建实雷）：merge-base 也要锚泳道仓
         if not wl_base:
             # fail-closed：红 item 是 merge_check 正常通道，activity 不抛。verify_lane
             # 本轮不跑（tsc/smoke 一并缓，红已定 blocked，重试时恢复）；merge-base
@@ -1662,8 +1662,11 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
         else:
             if wl_err:  # 多行畸形输出：取首行继续，留痕可检索
                 activity.logger.info("[%s] %s", args.ticket_id, wl_err)
+            lane_admin = wt / "server" / "admin.py"
+            admin_bin = str(lane_admin if lane_admin.is_file() else
+                             Path(__file__).resolve().parents[2] / "admin.py")  # 第七枪：跨项目无引擎布局
             vp = await asyncio.create_subprocess_exec(  # t260903-09 同雷 async 化（最长 15min 冻结）
-                "python3", "server/admin.py", "call", "verify_lane",
+                "python3", admin_bin, "call", "verify_lane",
                 json.dumps({"lane": "code", "path": str(wt),
                             "base": wl_base, "require_base": True,
                             "write_set": list(args.write_set)}),
@@ -1698,7 +1701,7 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
                 # 同第 3 项白名单口径：三点 main...branch 只看泳道带来的改动，
                 # main 侧他人改的 src 不误触发 bundle 新鲜度红（t260901-16）。
                 p = _git(["diff", "--name-only", "main...%s" % args.branch],
-                         REPO_ROOT)
+                         lane_repo)  # 同族锚补：3.5 bundle 新鲜度 diff 锚泳道仓
                 changed = p.stdout.split() if p.returncode == 0 else []
                 for src, out in pairs:
                     if not any(f.startswith(src) for f in changed):
