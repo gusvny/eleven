@@ -1,0 +1,26 @@
+{
+  "name": "suyou-providers",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./node.ts",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
+    }
+  },
+  "devDependencies": {
+    "tsdown": "^0.22.2"
+  },
+  "scripts": {
+    "build": "tsdown -c tsdown.config.ts"
+  }
+}

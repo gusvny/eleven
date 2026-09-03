@@ -1,0 +1,28 @@
+# ⚠️ 真源=代码，勿手改 —— M11 v2 模版即代码（t260822-m11）。
+# 本文件由 server/dsh/temporal-poc/gen_workflows_doc.py 从 proofread.py 的
+# ProofreadWorkflow.STAGES 生成；改模版=改类定义并重跑生成器（重跑即覆盖手改）。
+id: proofread
+name: "审读"
+lane: main
+description: "审读（独立交叉）：审读→分流（blocker/major→返工单，minor→挂 pending）"
+stages:
+  - id: review
+    role: product-operation
+    name: "审读"
+    desc: "分工=proofread（dispatch_product_operation_proofread 实例，zai/glm-5.2，deny=[write,edit]）；可扇出多审读 agent，只读不改业务文件"
+    fanout: 1
+    next: report
+    parts:
+      - agent
+    acceptance:
+      - "只读不改业务文件"
+      - "报告含 severity/位置/铁律条款"
+  - id: report
+    role: integration
+    name: "分流"
+    desc: "blocker/major→开返工单（回 content-pipeline process 或 dev-lane implement），minor→挂 pending"
+    parts:
+      - agent
+    acceptance:
+      - "blocker/major→开返工单（回 content-pipeline process 或 dev-lane implement）"
+      - "minor→挂 pending"

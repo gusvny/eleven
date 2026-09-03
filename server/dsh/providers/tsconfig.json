@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "react": ["/tmp/wb-deps/node_modules/@types/react/index.d.ts"],
+      "react/jsx-runtime": ["/tmp/wb-deps/node_modules/@types/react/jsx-runtime.d.ts"],
+      "@deepseek-ai/dsh-client-runtime/client": ["/tmp/wb-deps/node_modules/@deepseek-ai/dsh-client-runtime/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-conversation/client": ["/tmp/wb-deps/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/index.d.ts"]
+    }
+  },
+  "include": ["src"]
+}

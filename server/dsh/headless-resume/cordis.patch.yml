@@ -1,0 +1,21 @@
+# dsh-headless-resume 挂载 patch（模板，通用件，无项目耦合）。
+#
+# 注意：cordis patch insert 的 name 解析规则（实测）——
+#   bare 包名   → 从 dsh bin 根解析（requireStack=/opt/homebrew/bin/dsh），
+#                 只有装进 dsh 安装树才可用；
+#   相对路径    → 相对 **profile 目录**（$DSH_HOME/profiles/<profile>/）解析，
+#                 不是相对本 patch 文件；
+#   绝对路径    → 可用，且是唯一不依赖安装位置的写法。
+# 因此本文件里的 name 不能直接用——调用方（编排系统）spawn 时把 RUNNER_ABS
+# 替换为 node.ts 的绝对路径生成一次性 patch 使用（参照 model_patch 的生成模式）。
+# 仅在显式 --patch 的 headless spawn 上生效，不进 profile 主层——console/web 不受影响。
+
+- id: headless-runner
+  disabled: true
+
+- insert:
+    - id: headless-resume
+      name: 'RUNNER_ABS'
+      inject: [headlessStartup]
+      config:
+        task: !!js ctx.headlessStartup.task

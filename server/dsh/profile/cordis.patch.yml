@@ -1,0 +1,100 @@
+# 溯游 suyou dsh profile —— 用户补丁层。
+# 在 dsh.profile.bundles（dsh-base + dsh-web-app 或 dsh-headless）之后应用；
+# profile-headless/ 下的同名文件是指向本文件的软链，两份保持一致。
+#
+# 插件以裸包名挂载：经 profile/node_modules/<包名> 软链（→ ../<插件目录>）解析，
+# profile-headless/ 下有同款软链，两份保持一致；全链无机器绝对路径
+# （经 ~/.dsh/profiles/suyou 软链解析后落到真身）。
+# （cordis 的 !!js 表达式只在 config/disabled 里求值，name 字段不支持。）
+#
+# API key 不落任何文件：Web 设置页填入后写入 $DSH_HOME/.credentials.yaml，
+# 或设 DEEPSEEK_API_KEY 环境变量（dsh 凭据 seam；详见 server/dsh/README.md）。
+
+# 管理台 UI 插件（server/dsh/ui/，包名 suyou-admin-ui）：设置面板「溯游」分区
+# （工具直调/审计流水/模型路由）。426a4c1（t260821-04 插件瘦身）曾卸载；M12
+# （t260822-m12-4）把「模型路由」页签 + /suyou-admin/api/routes 做进本插件，
+# 260822 重新挂载——不挂则宿主半 404、client 半不进 graph，M12 功能不可见。
+# 以裸包名挂载：经 profile/node_modules/suyou-admin-ui 软链（→ ../../ui）解析，
+# profile-headless 下有同款软链（headless 无 webServer，宿主半待机不挂路由）。
+- insert:
+    - id: suyou-admin-ui
+      name: 'suyou-admin-ui'
+
+# 工单工作流台插件（server/dsh/workbench/，包名 suyou-workbench，工单工作流台设计 v0.3 M2）：
+# 独立命名不寄生 admin 壳；宿主半在 dsh webServer 上挂 /suyou-workbench/api/wf/*（调
+# ticket/workflow M1 引擎，写操作 run-id 审计在 server/admin.log），浏览器半往
+# settings.section 槽注册「工单台」分区（三区：台面/详情/操作）。
+# 以裸包名挂载：经 profile/node_modules/suyou-workbench 软链（→ ../workbench）解析，
+# profile-headless 下有同款软链（headless 无 webServer，宿主半待机不挂路由）。
+- insert:
+    - id: suyou-workbench
+      name: 'suyou-workbench'
+
+# docs 知识库插件（server/dsh/knowledge/，包名 suyou-knowledge，t260821-09 步4）：
+# 宿主半在 dsh webServer 上挂 /suyou-knowledge/api/*（index/doc/refresh，纯只读文件 +
+# 按 mtime 缓存 docs/index.json），浏览器半往 conversation.view 槽注册「知识库」页签
+# （列表按分类/标签/状态过滤、关键词检索、读全文、review）。headless 无 webServer 待机。
+# 以裸包名挂载：经 profile/node_modules/suyou-knowledge 软链（→ ../knowledge）解析，
+# profile-headless 下有同款软链。
+- insert:
+    - id: suyou-knowledge
+      name: 'suyou-knowledge'
+
+# Temporal 编排工具面插件（server/dsh/temporal-tools/，包名 suyou-temporal-tools，t260821-02 步1）：
+# 模型可见工具 = start/query/signal/schedule-list/cancel（spawn temporal-poc/.venv/bin/python
+# client.py）。安全红线：无 set-stage/force_stage/改状态工具（POC 证明点①）。
+# 以裸包名挂载：经 profile/node_modules/suyou-temporal-tools 软链（→ ../temporal-tools）解析，
+# profile-headless 下有同款软链（headless 组合同样可用这套模型工具）。
+- insert:
+    - id: suyou-temporal-tools
+      name: 'suyou-temporal-tools'
+
+# LLM provider 管理与优先级插件（server/dsh/providers/，包名 suyou-providers，t260821-08）：
+# 设置面板「模型」分区 = 列 4 provider（deepseek-official/kimi-coding/zai/scnet）+ 上下移/拖拽排序
+# + 计费说明可编辑 + 「设为当前」写 agent-default-model + 「添加 provider」表单写 llm-pi-ai.providers
+# + scnet 预置（模型 id 留用户填）。安全红线：写 settings.yaml 走 dsh 设置 seam——llm-pi-ai 的
+# assertServiceable 在持久化前 dry-run 解析整段 providers，坏 provider 拒绝不落盘（deepseek-official
+# 教训根治）；deepseek-official 由 dsh-llm-deepseek 拥有，只读列出、绝不写进 llm-pi-ai.providers。
+# 优先级/计费说明存 server/dsh/providers/state.json（独立 json，不进 settings.yaml）。
+# 以裸包名挂载：经 profile/node_modules/suyou-providers 软链（→ ../providers）解析，
+# profile-headless 下有同款软链（headless 无 webServer，宿主半待机不挂路由）。
+- insert:
+    - id: suyou-providers
+      name: 'suyou-providers'
+
+# 模型显式钉在 dsh 出厂 deepseek-official 路由（与 dsh-base 默认一致，写出仅为显式）。
+# key 走凭据 seam，这里与任何配置文件中都不出现字面 key。
+- id: agent-default-model
+  config:
+    provider: deepseek-official
+    model: deepseek-v4-flash
+
+# 定时层（260820 基建⑤）：dsh-schedule——会话内持久提醒（schedule_create/list/delete，
+# at/after/every_seconds≥300）。用于晨检/晚报类周期活（红时才说话）；无人值守重活仍走
+# launchd + suyou-headless。静态注入缺服务会让组合直接失败——能启动即注入满足。
+- insert:
+    - id: schedule
+      name: '@deepseek-ai/dsh-schedule'
+
+# 多角色 preset 库（260820 基建③④；M10 五角色定稿 260822；721b3dc 起 gen.py/presets/ 退役，
+# 角色真源=server/dsh/roles/<角色>.yml cordis patch 直接维护，供 headless spawn --patch 用）。
+# GUI 控制台主会话 preset = suyou-integration：出厂 standard 组合 + integration persona，
+# 手工落 $DSH_HOME/.agent-presets/suyou-integration/（roster 每次调用现扫该目录，免重启；
+# 260824 曾随 gen.py 退役被清空、settings.yaml 仍指已删的 suyou-dispatcher → chat 起不了
+# 新会话，后按「standard 现役版 + roles/integration.yml persona」重建）。
+# roster 接线实证（rc.8）：此处曾配的 roots 会被 profile-boot overlay 钉死覆盖为出厂
+# 目录——用户 preset 唯一入口是 $DSH_HOME/.agent-presets/（实体复制，软链不被扫描）。
+# 这里只留默认 preset 指向 suyou-integration（M10：dispatcher 退役，本控制台的主要会话
+# 即全局把关；UI 选择器里手动选过的值存进 $DSH_HOME/settings.yaml，优先级高于此处——
+# settings.yaml 的 agent-presets.default 需同步改指 suyou-integration，仓库外，人改）。
+# 注：headless 组合无 roster 行（dsh-headless 不带 agent-presets），本行在那边空转无害；
+# headless 一次性任务的角色注入仍走 prompt（roles/*.yml patch）。
+- id: agent-presets
+  config:
+    default: suyou-integration
+
+# web 端口挪到 3099：本机 3080 常被其他 dsh 实例占用（EADDRINUSE）。
+- id: webserver
+  config:
+    host: 127.0.0.1
+    port: 3099

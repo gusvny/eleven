@@ -1,0 +1,102 @@
+# 溯游 Docker 测试环境（M17）—— 独立 Temporal + 独立 dsh 实例 + 独立端口。
+#
+# 铁律：生产（本机直跑）的端口一律不碰——3099 dsh 控制台 / 7233 Temporal gRPC / 8233
+# Temporal UI。本文件全部端口独立且只绑 127.0.0.1（本机测试环境，不暴露局域网）。
+#
+#   生产 Temporal：gRPC 7233 / Web UI 8233（temporal-poc/run_server.sh）
+#   测试 Temporal：gRPC 17233 / Web UI 18233（容器内 7233 / 8233）
+#   生产 dsh 控制台：3099（start-console.sh）
+#   测试 dsh 控制台：3199（本文件 dsh 服务）
+#
+# 用法（仓库根执行）：
+#   docker compose -f server/dsh/docker-compose.test.yml up -d    # 一键起测试环境
+#   docker compose -f server/dsh/docker-compose.test.yml ps       # 看状态
+#   docker compose -f server/dsh/docker-compose.test.yml down     # 停（保留数据卷）
+#   docker compose -f server/dsh/docker-compose.test.yml down -v  # 连测试数据卷一起清
+#
+# 详细指南（怎么验证、怎么跑 worker/自测、故障排查）见 server/dsh/TESTING.md。
+# 首次 up 需联网：dsh 服务要 npm 装全局 dsh + profile bundles、apt 补 python3。
+
+services:
+  # ---- 独立 Temporal（temporalite dev server，SQLite 落盘，与 temporal-poc 同款免 postgres）----
+  # 与生产（7233/8233）完全隔离：独立容器、独立端口映射、独立数据卷、独立 namespace。
+  # 注意：temporalite 无 --search-attribute 启动参数。多项目化的 ProjectKey SA 与
+  # 立项关联的 EpicCode SA 在新数据卷首次 up 后于本机注册一次（落数据卷，之后重启自带）：
+  #   server/dsh/temporal-poc/bin/temporal operator search-attribute create \
+  #     --name ProjectKey --type Keyword --namespace suyou-test --address 127.0.0.1:17233
+  #   server/dsh/temporal-poc/bin/temporal operator search-attribute create \
+  #     --name EpicCode --type Keyword --namespace suyou-test --address 127.0.0.1:17233
+  # 保留期同理（temporalite 默认 24h，关闭的 workflow 会被物理删除）首次 up 后设置一次：
+  #   server/dsh/temporal-poc/bin/temporal operator namespace update \
+  #     --retention 876000h --namespace suyou-test --address 127.0.0.1:17233
+  temporal:
+    image: temporalio/temporalite:latest
+    container_name: suyou-test-temporal
+    # 镜像自带 entrypoint 是 `temporalite start --ephemeral ...`（数据不落盘），
+    # 这里显式覆盖：namespace=suyou-test + SQLite 落盘到 /data（数据卷持久化）。
+    entrypoint: ["/temporalite", "start"]
+    command:
+      - --namespace
+      - suyou-test
+      - --ip
+      - 0.0.0.0
+      - --port
+      - "7233"
+      - --ui-port
+      - "8233"
+      - --db-filename
+      - /data/temporal.db
+    ports:
+      - "127.0.0.1:17233:7233"    # 测试 Temporal gRPC（宿主 17233 → 容器 7233）
+      - "127.0.0.1:18233:8233"    # 测试 Temporal Web UI（宿主 18233 → 容器 8233）
+    volumes:
+      - temporal-data:/data
+    restart: unless-stopped
+
+  # ---- 独立 dsh 测试控制台（3199）----
+  # 与生产同构：DSH_HOME 独立卷 + 仓库 profile 软链（~/.dsh/profiles/suyou 的容器版）。
+  # 容器内只跑控制台 UI / 工单台（workbench 的 admin.py spawn 需要 python3，apt 兜底装）；
+  # Temporal SDK 工具（worker / demo / selfcheck）一律在本机跑、用环境变量指向测试
+  # Temporal（见 TESTING.md）——temporal-poc/.venv 不在容器里。
+  dsh:
+    image: node:20-bookworm
+    container_name: suyou-test-dsh
+    working_dir: /repo
+    environment:
+      DSH_HOME: /dsh-home
+      SUYOU_TARGET_HOST: temporal:7233      # 测试控制台内插件指向测试 Temporal
+      SUYOU_NAMESPACE: suyou-test
+    volumes:
+      - ../..:/repo:ro     # 仓库根（compose 位于 server/dsh/ 下，向上两级）
+      - dsh-home:/dsh-home
+    ports:
+      - "127.0.0.1:3199:3199"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        set -eu
+        if ! command -v dsh >/dev/null 2>&1; then
+          npm i -g --no-audit --no-fund @deepseek-ai/dsh@0.1.1-rc.2
+        fi
+        if ! command -v python3 >/dev/null 2>&1; then
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends python3
+        fi
+        mkdir -p "$DSH_HOME/profiles"
+        ln -sfn /repo/server/dsh/profile "$DSH_HOME/profiles/suyou"
+        ln -sfn /repo/server/dsh/profile-headless "$DSH_HOME/profiles/suyou-headless"
+        if [ ! -d "$DSH_HOME/profiles/node_modules/@deepseek-ai" ]; then
+          cd "$DSH_HOME/profiles"
+          npm i --no-save --no-audit --no-fund \
+            @deepseek-ai/dsh-base@0.1.1-rc.2 \
+            @deepseek-ai/dsh-web-app@0.1.1-rc.2 \
+            @deepseek-ai/dsh-schedule@0.1.1-rc.2
+        fi
+        exec dsh --profile suyou --port 3199 --host 0.0.0.0 --no-open
+    depends_on:
+      - temporal
+    restart: unless-stopped
+
+volumes:
+  temporal-data:
+  dsh-home:

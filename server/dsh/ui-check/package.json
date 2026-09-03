@@ -1,0 +1,13 @@
+{
+  "name": "suyou-ui-check",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "溯游控制台 UI 验收截图通道（只读：仅打开页面+导航点击，不提交表单不碰端口）",
+  "scripts": {
+    "selftest": "node capture.mjs --selftest"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}

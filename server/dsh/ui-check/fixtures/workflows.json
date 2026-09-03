@@ -1,0 +1,260 @@
+{
+  "_fixture": true,
+  "ok": true,
+  "result": {
+    "count": 1,
+    "workflows": [
+      {
+        "id": "dev-lane",
+        "name": "开发泳道（fixture）",
+        "lane": "dev",
+        "stages": [
+          {
+            "id": "create_plan",
+            "role": "developer",
+            "name": "做方案",
+            "next": "review_plan",
+            "parts": [
+              "agent"
+            ]
+          },
+          {
+            "id": "review_plan",
+            "role": "integration",
+            "name": "审方案",
+            "next": "implement",
+            "parts": [
+              "agent"
+            ]
+          },
+          {
+            "id": "implement",
+            "role": "developer",
+            "name": "实现",
+            "next": "ui_evidence",
+            "parts": [
+              "agent"
+            ]
+          },
+          {
+            "id": "ui_evidence",
+            "role": "developer",
+            "name": "UI截图证据",
+            "next": "design_integration_tests",
+            "parts": [
+              "agent"
+            ]
+          },
+          {
+            "id": "design_integration_tests",
+            "role": "test",
+            "name": "设计集成测试",
+            "next": "run_integration_tests",
+            "parts": [
+              "agent"
+            ]
+          },
+          {
+            "id": "run_integration_tests",
+            "role": "test",
+            "name": "跑集成测试",
+            "next": "arbitrate",
+            "parts": [
+              "agent"
+            ]
+          },
+          {
+            "id": "arbitrate",
+            "role": "integration",
+            "name": "仲裁",
+            "next": "acceptance_walkthrough",
+            "parts": [
+              "agent"
+            ]
+          },
+          {
+            "id": "acceptance_walkthrough",
+            "role": "integration",
+            "name": "验收走查",
+            "next": "merge_check",
+            "parts": [
+              "agent"
+            ]
+          },
+          {
+            "id": "merge_check",
+            "role": "developer",
+            "name": "合并检查",
+            "next": "merge",
+            "parts": [
+              "script"
+            ]
+          },
+          {
+            "id": "merge",
+            "role": "integration",
+            "name": "合并（人审）",
+            "next": "suggest_next",
+            "parts": [
+              "human"
+            ]
+          },
+          {
+            "id": "suggest_next",
+            "role": "developer",
+            "name": "预跑下一单",
+            "parts": [
+              "agent"
+            ]
+          }
+        ],
+        "order": [
+          "create_plan",
+          "review_plan",
+          "implement",
+          "ui_evidence",
+          "design_integration_tests",
+          "run_integration_tests",
+          "arbitrate",
+          "acceptance_walkthrough",
+          "merge_check",
+          "merge",
+          "suggest_next"
+        ]
+      }
+    ]
+  },
+  "order": [
+    "create_plan",
+    "review_plan",
+    "implement",
+    "ui_evidence",
+    "design_integration_tests",
+    "run_integration_tests",
+    "arbitrate",
+    "acceptance_walkthrough",
+    "merge_check",
+    "merge",
+    "suggest_next"
+  ],
+  "workflows": [
+    {
+      "id": "dev-lane",
+      "name": "开发泳道（fixture）",
+      "lane": "dev",
+      "stages": [
+        {
+          "id": "create_plan",
+          "role": "developer",
+          "name": "做方案",
+          "next": "review_plan",
+          "parts": [
+            "agent"
+          ]
+        },
+        {
+          "id": "review_plan",
+          "role": "integration",
+          "name": "审方案",
+          "next": "implement",
+          "parts": [
+            "agent"
+          ]
+        },
+        {
+          "id": "implement",
+          "role": "developer",
+          "name": "实现",
+          "next": "ui_evidence",
+          "parts": [
+            "agent"
+          ]
+        },
+        {
+          "id": "ui_evidence",
+          "role": "developer",
+          "name": "UI截图证据",
+          "next": "design_integration_tests",
+          "parts": [
+            "agent"
+          ]
+        },
+        {
+          "id": "design_integration_tests",
+          "role": "test",
+          "name": "设计集成测试",
+          "next": "run_integration_tests",
+          "parts": [
+            "agent"
+          ]
+        },
+        {
+          "id": "run_integration_tests",
+          "role": "test",
+          "name": "跑集成测试",
+          "next": "arbitrate",
+          "parts": [
+            "agent"
+          ]
+        },
+        {
+          "id": "arbitrate",
+          "role": "integration",
+          "name": "仲裁",
+          "next": "acceptance_walkthrough",
+          "parts": [
+            "agent"
+          ]
+        },
+        {
+          "id": "acceptance_walkthrough",
+          "role": "integration",
+          "name": "验收走查",
+          "next": "merge_check",
+          "parts": [
+            "agent"
+          ]
+        },
+        {
+          "id": "merge_check",
+          "role": "developer",
+          "name": "合并检查",
+          "next": "merge",
+          "parts": [
+            "script"
+          ]
+        },
+        {
+          "id": "merge",
+          "role": "integration",
+          "name": "合并（人审）",
+          "next": "suggest_next",
+          "parts": [
+            "human"
+          ]
+        },
+        {
+          "id": "suggest_next",
+          "role": "developer",
+          "name": "预跑下一单",
+          "parts": [
+            "agent"
+          ]
+        }
+      ],
+      "order": [
+        "create_plan",
+        "review_plan",
+        "implement",
+        "ui_evidence",
+        "design_integration_tests",
+        "run_integration_tests",
+        "arbitrate",
+        "acceptance_walkthrough",
+        "merge_check",
+        "merge",
+        "suggest_next"
+      ]
+    }
+  ]
+}

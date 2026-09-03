@@ -1,0 +1,101 @@
+{
+  "id": "T-FIX-B",
+  "title": "【fixture 注入票】并行实现中（implement ∥ 设计集成测试，供泳道并行态截图）",
+  "workflow_id": "dev-lane",
+  "epic": "",
+  "stage": "design_integration_tests",
+  "stage_state": "running",
+  "status": "running",
+  "role": "developer",
+  "lane": "dev",
+  "worktree": ".worktrees/t-fixture-b",
+  "workspace": {
+    "type": "worktree",
+    "path": "/tmp/suyou-fixture/lane-t-fixture-b"
+  },
+  "branch": "lane/t-fixture-b",
+  "base_ref": "main",
+  "proposal_id": "",
+  "revision_count": 2,
+  "acceptance": [
+    "泳道并行态可见（fixture 验收口径）"
+  ],
+  "checks": {},
+  "handoffs": [
+    {
+      "stage": "review_plan",
+      "agent_id": "fixture",
+      "summary": "审读通过（fixture 注入台造的交接摘要）",
+      "ts": 1700000000
+    }
+  ],
+  "pending": [],
+  "log": [
+    {
+      "ts": 1700000000,
+      "status": "ok",
+      "note": "fixture 注入台造的日志行"
+    }
+  ],
+  "body": "# 工单（fixture 注入票 T-FIX-B）\n\n本票由 ui-check 状态注入台预置，仅用于截图证据。timeline 造 implement 与 design_integration_tests 双 running（running 条数 > attempts），驱动 lane-states.ts 规则 4 推导出双活跃步。",
+  "write_set": [
+    "server/dsh/ui-check/"
+  ],
+  "deliverables": "- fixture 泳道并行态截图证据",
+  "created": 1700000000,
+  "updated": 1700000000,
+  "gate_runs": [],
+  "timeline": [
+    {
+      "at": "2025-01-01T00:00:00Z",
+      "stage": "create_plan",
+      "state": "running",
+      "reason": "_enter（fixture）"
+    },
+    {
+      "at": "2025-01-01T00:01:00Z",
+      "stage": "create_plan",
+      "state": "done",
+      "reason": "_finish（fixture）"
+    },
+    {
+      "at": "2025-01-01T00:02:00Z",
+      "stage": "review_plan",
+      "state": "running",
+      "reason": "_enter（fixture）"
+    },
+    {
+      "at": "2025-01-01T00:03:00Z",
+      "stage": "review_plan",
+      "state": "done",
+      "reason": "_finish（fixture）"
+    },
+    {
+      "at": "2025-01-01T00:04:00Z",
+      "stage": "implement",
+      "state": "running",
+      "reason": "_enter（fixture，并行分叉 A）"
+    },
+    {
+      "at": "2025-01-01T00:04:00Z",
+      "stage": "design_integration_tests",
+      "state": "running",
+      "reason": "_enter（fixture，并行分叉 B）"
+    }
+  ],
+  "results": {
+    "create_plan": {
+      "status": "ok",
+      "summary": "fixture 方案",
+      "gen": 1
+    },
+    "review_plan": {
+      "status": "ok",
+      "summary": "fixture 审读通过",
+      "gen": 1
+    }
+  },
+  "signatures": {},
+  "pulse": null,
+  "_fixture": true
+}

@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "react": ["/tmp/wb-deps/node_modules/@types/react/index.d.ts"],
+      "react/jsx-runtime": ["/tmp/wb-deps/node_modules/@types/react/jsx-runtime.d.ts"],
+      "@deepseek-ai/cordis": ["/tmp/wb-deps/node_modules/@deepseek-ai/cordis/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-client-runtime/client": ["/tmp/wb-deps/node_modules/@deepseek-ai/dsh-client-runtime/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-settings/client": ["/tmp/wb-deps/node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/index.d.ts"]
+    }
+  },
+  "include": ["src", "node-shims.d.ts"]
+}

@@ -1,0 +1,11 @@
+{
+  "id": "T-FIX-A",
+  "base": "main",
+  "hasBase": true,
+  "source": "none",
+  "changed": false,
+  "emptyReason": "状态注入台（fixture）不渲染真实代码变更——审批台 diff 面留空位是注入态的预期表现，真实 diff 请以真泳道实拍为准。",
+  "files": [],
+  "filesTruncated": false,
+  "_fixture": true
+}

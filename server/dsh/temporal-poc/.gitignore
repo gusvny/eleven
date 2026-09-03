@@ -1,0 +1,10 @@
+# POC 本地工具与运行态，一律不入库（setup.sh 可重建）
+bin/
+.venv/
+.venv
+data/
+*.log
+__pycache__/
+# M6 巡检报告（运行产物，每轮覆盖当日文件——入库只会制造 git status 噪音；
+# 留档靠文件本身+工单 note 引用路径，判断见 README §10）
+out/scan/

@@ -1,0 +1,11 @@
+out/
+.venv/
+bin/
+data/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+*.log
+state.json
+.DS_Store
