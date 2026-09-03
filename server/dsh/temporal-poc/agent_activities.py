@@ -352,6 +352,9 @@ def _copy_creds(dst_dsh: Path, project_key: str = "") -> None:
     if not dst.exists():
         try:
             shutil.copy2(str(src), str(dst))
+            # t260903-12 实雷（安全事件余波）：dsh 拒载过宽权限凭据（agent rc=1 家族）。
+            # copy2 保留源权限——源若 644，泳道快照带病；拷后强制 0600。
+            os.chmod(str(dst), 0o600)
         except OSError as e:
             raise RuntimeError("凭据拷贝失败（fail-closed，源=%s）：%s" % (src, e))
         if not _perkey_is_hit(project_key, src):

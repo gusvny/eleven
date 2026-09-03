@@ -403,7 +403,13 @@ def _code(a):
                 judge, judge_src = allow, 'verify.yaml write_allow（粗判据）'
             for f in out.splitlines():
                 f = f.strip()
-                if not f or f.startswith(RUNTIME_PREFIXES):
+                if not f:
+                    continue
+                if f.startswith(RUNTIME_PREFIXES):
+                    # t260903-12 安全事件：运行时前缀出现在 diff=已被 commit 入库
+                    # （凭据/会话泄漏通道，03d128f 式收殓裸 add -A 的必红项）——
+                    # 跳过语义只对「未追踪的现场噪音」成立，入库即红。
+                    items.append({'detail': '敏感/运行时路径入库（必须 untrack）：' + f})
                     continue
                 if not _in_write_set(f, judge):
                     items.append({'detail': '越界写: %s（判据=%s：%s）' % (f, judge_src, '、'.join(judge[:6]))})
