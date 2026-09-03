@@ -8,8 +8,8 @@
  * Session」钮原地替换，SessionTopEntry + 侧栏注入语义锚）。本文件改测三件事：
  *
  *   A. 记账层关键回归照搬（自 t260831-02 版前的 hero.mjs B 组收编）：与顶部入口
- *      直接相关的四条——ticket- 工单会话不入账/不展示、MRU 降序 ≤5、切项目列表
- *      随项目走（记账层归属生效）、畸形账册输入（坏 JSON/脏条目）容错不崩。
+ *      直接相关的四条——ticket- 工单会话不入账/不展示、MRU 降序 ≤5、跨项目
+ *      混排（260904 起不按项目过滤）、畸形账册输入（坏 JSON/脏条目）容错不崩。
  *      完整记账层口径（parseLedger/touchEntry/... 全分支）在 smoke/sessions.mjs，
  *      不在本文件重复。
  *      【不带过来】旧 A 组 resolveHeroProjectKey 全分支——该函数随 shared/hero.ts
@@ -61,15 +61,15 @@ section('A 记账层关键回归（顶部入口口径，全量见 smoke/sessions
   m = touchEntry(m, { id: 'a', project: 'suyou', lastOpenedAt: 1 })
   m = touchEntry(m, { id: 'b', project: 'suyou', lastOpenedAt: 2 })
   m = touchEntry(m, { id: 'c', project: 'suyou', lastOpenedAt: 3 })
-  const r = pickSwitchTargets(m, { project: 'suyou', current: 'a' })
+  const r = pickSwitchTargets(m, { current: 'a' })
   ok(r.map(t => t.id).join(',') === 'c,b,a', 'MRU 降序')
   ok(r.find(t => t.id === 'a')?.active === true, 'current 高亮')
   const big = Array.from({ length: 8 }, (_, i) => ent(`s${i}`, { lastOpenedAt: i + 1 }))
-  const r2 = pickSwitchTargets(big, { project: 'suyou' })
+  const r2 = pickSwitchTargets(big)
   ok(r2.length === SWITCH_LIMIT && r2[0].id === 's7', '≤5 且留最新')
   const mixed = [ent('mine', { lastOpenedAt: 1 }), ent('other', { project: 'other', lastOpenedAt: 9 })]
-  const r3 = pickSwitchTargets(mixed, { project: 'suyou' })
-  ok(r3.length === 1 && r3[0].id === 'mine', '切项目列表随项目走（他项目不进）')
+  const r3 = pickSwitchTargets(mixed)
+  ok(r3.length === 2 && r3[0].id === 'other', '跨项目混排：他项目条目照常进列表且按 MRU 排（260904）')
   ok(parseLedger('not json{').length === 0 && parseLedger('[{"id":""},{"id":"x","project":"p"}]').length === 1,
     '畸形账册输入容错（坏 JSON/脏条目剔除）不崩')
 }

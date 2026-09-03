@@ -12,14 +12,16 @@
  *      ticket- 前缀工单会话与空 project 拒绝入账；不改入参。
  *   C. touchEntry 上限：超 LEDGER_CAP 淘汰最旧（MRU 收敛）。
  *   D. removeEntry：按 id 剔除，不存在的 id 无害。
- *   E. pickSwitchTargets 项目过滤：只列当前项目的账册条目，他项目不进。
+ *   E. pickSwitchTargets 跨项目混排（260904）：不按 project 过滤，账册条目
+ *      全量参排（他项目不再被滤掉）。
  *   F. MRU 排序 + 截断：lastOpenedAt 降序，7 个 → 前 5（t260831-06：打开路径
  *      不再更新 lastOpenedAt——见 handleOpen，排序语义本身不变，本段照旧全绿）。
  *   G. active 标记命中 current；无 current 全不亮。
  *   H. current 保底入选：通过过滤但排在 limit 名外 → 替换最末一名；
- *      current 是工单会话/他项目会话（不通过过滤）→ 不保底。
+ *      current 是工单会话/不在账册的会话 → 不保底。
  *   I. 标题兜底：byId 有 displayTitle 用之，账册有 list 无（磁盘已删残留）兜底 id 不崩。
- *   J. 边界：project 空串 / limit<=0 / 账册非数组 → 空数组不抛错。
+ *   J. 边界：limit<=0 / 账册非数组 / 无 opts → 空数组不抛错（260904：project
+ *      入参已移除，「未选项目空列表」分支随之废止）。
  *   K. 磁盘存量/工单/subagent 口径：账册里没有的 id 再大 updatedAt 也不出现
  *     （列表数据源=账册而非全量枚举——本单的核心口径）。
  *   L. serializeLedger ↔ parseLedger 往返一致。
@@ -114,26 +116,26 @@ section('D removeEntry')
   ok(removeEntry(null, 'a').length === 0, 'entries 非数组容错')
 }
 
-section('E pickSwitchTargets 项目过滤')
+section('E pickSwitchTargets 跨项目混排（260904：不按项目过滤）')
 {
   const l = [
     ent('chat-suyou-1', { lastOpenedAt: 3 }),
     ent('chat-other', { project: 'other', cwd: '/repo/other', lastOpenedAt: 9 }),
     ent('chat-suyou-2', { lastOpenedAt: 1 }),
   ]
-  const r = pickSwitchTargets(l, { project: 'suyou' })
-  ok(r.length === 2 && r.every(t => t.id !== 'chat-other'), '只列当前项目，他项目（哪怕更新）不进')
-  const r2 = pickSwitchTargets(l, { project: 'other' })
-  ok(r2.length === 1 && r2[0].id === 'chat-other' && r2[0].cwd === '/repo/other', '切项目列表随项目走')
+  const r = pickSwitchTargets(l)
+  ok(r.length === 3 && r.map(t => t.id).join(',') === 'chat-other,chat-suyou-1,chat-suyou-2',
+    '账册条目全量参排（他项目哪怕更旧也在），MRU 序')
+  ok(r.find(t => t.id === 'chat-other')?.cwd === '/repo/other', '条目 cwd 原样装配（project 仅登记不再过滤）')
 }
 
 section('F MRU 排序 + 截断')
 {
   const l = ['a', 'b', 'c'].map((id, i) => ent(id, { lastOpenedAt: i + 1 }))
-  const r = pickSwitchTargets(l, { project: 'suyou' })
+  const r = pickSwitchTargets(l)
   ok(r.map(t => t.id).join(',') === 'c,b,a', 'lastOpenedAt 降序')
   const big = Array.from({ length: 7 }, (_, i) => ent(`s${i}`, { lastOpenedAt: i + 1 }))
-  const r2 = pickSwitchTargets(big, { project: 'suyou' })
+  const r2 = pickSwitchTargets(big)
   ok(r2.length === SWITCH_LIMIT && SWITCH_LIMIT === 5, '上限 5')
   ok(r2.map(t => t.id).join(',') === 's6,s5,s4,s3,s2', '留最新 5 个')
 }
@@ -141,9 +143,9 @@ section('F MRU 排序 + 截断')
 section('G active 标记命中 current')
 {
   const l = [ent('a', { lastOpenedAt: 2 }), ent('b', { lastOpenedAt: 1 })]
-  const r = pickSwitchTargets(l, { project: 'suyou', current: 'b' })
+  const r = pickSwitchTargets(l, { current: 'b' })
   ok(r.find(t => t.id === 'b')?.active === true && r.find(t => t.id === 'a')?.active === false, 'active 命中')
-  ok(pickSwitchTargets(l, { project: 'suyou' }).every(t => t.active === false), '无 current 时全不亮')
+  ok(pickSwitchTargets(l).every(t => t.active === false), '无 current 时全不亮')
 }
 
 section('H current 保底入选')
@@ -151,22 +153,22 @@ section('H current 保底入选')
   // current 通过过滤但 lastOpenedAt 第 7（在 5 名外）→ 替换最末一名
   const l = Array.from({ length: 6 }, (_, i) => ent(`s${i}`, { lastOpenedAt: 100 + i }))
     .concat([ent('cur', { lastOpenedAt: 1 })])
-  const r = pickSwitchTargets(l, { project: 'suyou', current: 'cur' })
+  const r = pickSwitchTargets(l, { current: 'cur' })
   ok(r.length === 5 && r.some(t => t.id === 'cur' && t.active), 'current 掉出前 5 仍保底在列')
   ok(!r.some(t => t.id === 's0'), '被替换的是最末一名（s0）')
-  // current 是工单会话/他项目会话（不在账册过滤集内）→ 不保底，正常截断
+  // current 是工单会话/不在账册的会话 → 不保底，正常截断
   const l2 = Array.from({ length: 7 }, (_, i) => ent(`g${i}`, { lastOpenedAt: i + 1 }))
-  const r2 = pickSwitchTargets(l2, { project: 'suyou', current: 'ticket-t9' })
+  const r2 = pickSwitchTargets(l2, { current: 'ticket-t9' })
   ok(r2.length === 5 && !r2.some(t => t.id === 'ticket-t9'), 'current 是工单会话时不保底')
-  const r3 = pickSwitchTargets(l2, { project: 'suyou', current: 'other-proj-cur' })
-  ok(r3.length === 5 && r3.every(t => t.id !== 'other-proj-cur'), 'current 是他项目会话时不保底')
+  const r3 = pickSwitchTargets(l2, { current: 'not-in-ledger' })
+  ok(r3.length === 5 && r3.every(t => t.id !== 'not-in-ledger'), 'current 不在账册时不保底（260904：他项目条目已参排，仅未登记者不保底）')
 }
 
 section('I 标题兜底')
 {
   const l = [ent('chat-a', { lastOpenedAt: 2 }), ent('chat-gone', { lastOpenedAt: 1 })]
   const byId = { 'chat-a': { displayTitle: '我的会话' } }
-  const r = pickSwitchTargets(l, { project: 'suyou', byId })
+  const r = pickSwitchTargets(l, { byId })
   ok(r[0].title === '我的会话', 'displayTitle 优先')
   ok(r[1].title === 'chat-gone', '账册有 list 无（磁盘已删残留）兜底 id 不崩')
   ok(labelOf({ displayTitle: '' }, 'x') === 'x' && labelOf(undefined, 'x') === 'x', 'labelOf 空值兜底')
@@ -174,12 +176,12 @@ section('I 标题兜底')
 
 section('J 边界：缺字段 / 非法入参不抛错')
 {
-  ok(pickSwitchTargets(undefined, { project: 'suyou' }).length === 0, 'entries undefined')
-  ok(pickSwitchTargets([ent('a')], { project: '' }).length === 0, 'project 空串（未选项目）→ 空列表')
-  ok(pickSwitchTargets([ent('a')], { project: 'suyou', limit: 0 }).length === 0, 'limit=0')
-  ok(pickSwitchTargets([ent('a')], { project: 'suyou', limit: -1 }).length === 0, 'limit<0')
-  ok(pickSwitchTargets([null, ent('a', { lastOpenedAt: 1 })], { project: 'suyou' }).length === 1, '账册脏条目跳过')
-  ok(pickSwitchTargets([ent('a'), ent('b', { lastOpenedAt: 1 })], { project: 'suyou' })
+  ok(pickSwitchTargets(undefined).length === 0, 'entries undefined')
+  ok(pickSwitchTargets([ent('a')]).length === 1, '无 opts（不传 current/byId/limit）照常参排')
+  ok(pickSwitchTargets([ent('a')], { limit: 0 }).length === 0, 'limit=0')
+  ok(pickSwitchTargets([ent('a')], { limit: -1 }).length === 0, 'limit<0')
+  ok(pickSwitchTargets([null, ent('a', { lastOpenedAt: 1 })]).length === 1, '账册脏条目跳过')
+  ok(pickSwitchTargets([ent('a'), ent('b', { lastOpenedAt: 1 })])
     .map(t => t.id).join(',') === 'b,a', 'lastOpenedAt 缺失按 0 排')
 }
 
@@ -201,7 +203,7 @@ section('N tab 重命名 + title 字段（t260831-06）')
   // pickSwitchTargets：title 非空优先，空串/缺失走 displayTitle 兜底链
   const byId = { a: { displayTitle: '自动标题' }, b: { displayTitle: 'B 标题' } }
   l = [ent('a', { title: '自定义名' }), ent('b', { title: '' })]
-  const rows = pickSwitchTargets(l, { project: 'suyou', byId })
+  const rows = pickSwitchTargets(l, { byId })
   ok(rows[0].title === '自定义名', '自定义 title 优先于 displayTitle')
   ok(rows[1].title === 'B 标题', '空串 title 走 displayTitle 兜底')
   // 畸形输入：parseLedger title 非字符串 → 剔字段不崩
@@ -237,7 +239,7 @@ section('K 核心口径：列表=账册，不是全量枚举')
     'ticket-t260828-02': { displayTitle: '工单会话' },
     'sub-1': { displayTitle: 'subagent 会话' },
   }
-  const r = pickSwitchTargets(l, { project: 'suyou', byId, current: 'chat-mine' })
+  const r = pickSwitchTargets(l, { byId, current: 'chat-mine' })
   ok(r.length === 1 && r[0].id === 'chat-mine' && r[0].active, '未登记的磁盘存量/工单/subagent 会话不出现')
 }
 
@@ -257,14 +259,14 @@ section('M chat- 会话入账回归（t260831-04 缺陷①防线）')
   const sid = 'chat-20260831-120000-abcd'
   const ledger = touchEntry([], { id: sid, project: 'suyou', cwd: '/Users/user/Documents/suyou', lastOpenedAt: 1 })
   ok(ledger.length === 1 && ledger[0].id === sid, 'chat- 会话入账不被 isGlobalSessionId 门错杀')
-  const rows = pickSwitchTargets(ledger, { project: 'suyou' })
-  ok(rows.length >= 1 && rows[0].id === sid, '账册有货 + projectKey 命中 → MRU 行数 ≥1（缺陷①回归锚）')
+  const rows = pickSwitchTargets(ledger)
+  ok(rows.length >= 1 && rows[0].id === sid, '账册有货 → MRU 行数 ≥1（缺陷①回归锚；260904 起不再依赖 projectKey 命中）')
   // 缺陷③防线锚：超时不再自动 removeEntry——此处仅固化 removeEntry 语义边界，
   // 「打开链超时不动账册」属 UI 层纪律（session-entry.tsx openSession，无自动调用点）。
   const l2 = touchEntry([], { id: sid, project: 'suyou', lastOpenedAt: 2 })
   ok(removeEntry(l2, sid).length === 0 && l2.length === 1, 'removeEntry 仅显式路径可用，纯函数语义不变')
   // 往返再渲染：账册经 localStorage 序列化往返后 chat- 条目仍能渲染出行
-  const rows2 = pickSwitchTargets(parseLedger(serializeLedger(ledger)), { project: 'suyou' })
+  const rows2 = pickSwitchTargets(parseLedger(serializeLedger(ledger)))
   ok(rows2.length === 1 && rows2[0].id === sid, '账册往返后行仍在（持久化不丢入账）')
 }
 

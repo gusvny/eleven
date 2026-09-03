@@ -9,6 +9,10 @@
  * {id, project, cwd, lastOpenedAt}，MRU 排序；磁盘存量、工单会话、subagent
  * 会话一律不进账册，不做置顶/钉选（MRU 自然收敛）。
  *
+ * 260904 宿主决策（真源 notes/会话tab全项目显示决策.md）：tab 行显示
+ * **不按当前项目过滤**——账册条目跨项目混排全量参排；project 字段保留为
+ * 登记归属记录（展示/诊断用），不再参与过滤。
+ *
  * 完备性：工单台侧栏已顶掉出厂工作区浏览器，UI 上打开项目会话的入口就是
  * 本插件。t260829-06 起 hero 槽位替换落地：hero 紧凑入口复用本层
  * （useSessionEntry），新建/切换登记进同一账册——「hero 首条消息会话不进账」
@@ -34,7 +38,7 @@
 /** 账册条目：一次「UI 主动打开/新建」的登记。 */
 export interface OpenedEntry {
   id: string
-  /** 所属项目 key（projects.yaml 注册表）；会话跟项目走，列表按它过滤。 */
+  /** 所属项目 key（注册表；新建落点记录）。260904 起 tab 行不按它过滤，仅展示/诊断用。 */
   project: string
   /** 所属项目主目录（登记时的会话 cwd；展示/诊断用，过滤以 project 为准）。 */
   cwd: string
@@ -169,12 +173,15 @@ export function renameEntry(entries: OpenedEntry[], id: string, title: string): 
 }
 
 /**
- * 算侧栏切换行：账册 → 按当前项目过滤 → MRU（lastOpenedAt 降序；t260831-06 起
- * 打开路径不再更新 lastOpenedAt——排序结果=登记顺序，点 tab 停在原地）→
- * ≤limit → current 保底（通过过滤却被截断时替换最末一名，沿用 t260825-02 语义
- * ——当前活跃会话掉出列表会让「我在哪」不可感知）→ 标题/高亮装配。
+ * 算侧栏切换行：账册 → MRU（lastOpenedAt 降序；t260831-06 起打开路径不再更新
+ * lastOpenedAt——排序结果=登记顺序，点 tab 停在原地）→ ≤limit → current 保底
+ * （通过过滤却被截断时替换最末一名，沿用 t260825-02 语义——当前活跃会话掉出
+ * 列表会让「我在哪」不可感知）→ 标题/高亮装配。
  *
- * - project 为空串 = 未选项目（多项目注册表下新建按钮同步禁用）→ 空列表；
+ * - 260904 决策（宿主拍板，notes/会话tab全项目显示决策.md）：**不按
+ *   当前项目过滤**——账册条目跨项目混排全量参排（旧「project 不匹配即剔除、
+ *   空串直接返回空」口径废除；根因=新建落点项目与 tab 行过滤项目两个状态源
+ *   不同步，多项目未选/刷新重置下新会话 tab 不可见）；
  * - 标题：条目自定义 title 非空优先（tab 重命名，t260831-06），否则从 byId
  *   （ctx.sessions.list 的 byId）取 displayTitle，再缺失兜底 id（账册有、list 无
  *   = 会话已被磁盘清理的残留条目，照常渲染不崩，点击打开失败时由 UI 层
@@ -184,21 +191,19 @@ export function renameEntry(entries: OpenedEntry[], id: string, title: string): 
 export function pickSwitchTargets(
   entries: OpenedEntry[],
   opts: {
-    project: string
     current?: string
     byId?: Record<string, TitleRowLike | undefined>
     limit?: number
   },
 ): SwitchTarget[] {
   const limit = opts?.limit ?? SWITCH_LIMIT
-  if (!opts || typeof opts.project !== 'string' || opts.project === '' || limit <= 0) return []
-  const byId = opts.byId ?? {}
-  const current = opts.current
+  if (limit <= 0) return []
+  const byId = opts?.byId ?? {}
+  const current = opts?.current
   const eligible = (Array.isArray(entries) ? entries : [])
     // 工单会话不进列表（t260828-06 防御纵深）：正常口径 touchEntry 已把 ticket-
-    // 前缀挡在账册外，这里再挡一层——hero 接管后列表消费方多了一处，防线随之补齐；
-    // 合法条目不受影响（工单会话从来不该在账册里）。
-    .filter(e => e && typeof e.id === 'string' && e.project === opts.project && isGlobalSessionId(e.id))
+    // 前缀挡在账册外，这里再挡一层；合法条目不受影响（工单会话从来不该在账册里）。
+    .filter(e => e && typeof e.id === 'string' && isGlobalSessionId(e.id))
     .slice()
   eligible.sort((a, b) => (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0))
   // current 保底入选：通过过滤却被截断时，替换最末一名。

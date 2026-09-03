@@ -13,7 +13,7 @@
  *     入口渲染在侧栏顶部同一视觉位置）；找不到锚时软退化：出厂钮照常显示、
  *     我们的入口仍在侧栏顶部，功能不丢，console.warn 留痕。
  *   - <SessionTopEntry>：紧凑一行入口——「+ 新建会话」+ 最近会话切换（≤5，
- *     会话跟项目走）。与已退场的 SessionSection（t260825-02 左栏会话区，本票
+ *     会话跨项目混排，260904 起不按项目过滤）。与已退场的 SessionSection（t260825-02 左栏会话区，本票
  *     整块移除）和 HeroSessionEntry（t260829-06 hero 槽版，本票随 hero 接管
  *     拆除退场）消费同一个 useSessionEntry 同一账册，只有渲染层不同。
  *     带 data-wb-* 断言锚（UI 验收 DOM 断言用）：data-wb-session-entry（根）、
@@ -59,6 +59,11 @@
  *     本次会话内 state 仍可见（同一 hook 无第二份实现）；
  *   - 工单会话（ticket- 前缀）：isGlobalSessionId 在 touchEntry 里挡在账册外，
  *     顶部入口与账册同函数同口径，天然不混入（smoke/sessions.mjs 有断言）。
+ *
+ * 260904 宿主决策（notes/会话tab全项目显示决策.md）：tab 行显示不按
+ * 当前项目过滤——targets 推导不再传 project（账册跨项目混排全量参排），
+ * ↺「最近关闭」菜单同口径放开；「+ 新建会话」落点逻辑不变（仍走项目选单
+ * /当前视图项目绑工作区）。projectKey 仅余新建落点与 ↺ 恢复的归属兜底两职。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
@@ -253,11 +258,11 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
   const persist = useCallback((entries: OpenedEntry[]) => {
     persistLedger(entries)
   }, [])
+  // 260904：tab 行不按项目过滤——账册全量参排（MRU ≤5、current 保底在纯函数内）。
   const targets = useMemo(() => pickSwitchTargets(ledger, {
-    project: projectKey,
     current: listState?.current,
     byId: listState?.byId,
-  }), [ledger, projectKey, listState])
+  }), [ledger, listState])
   const [creating, setCreating] = useState(false)
   /** 行内可见错误/提示（t260831-04）：open 链失败不再只打 console——用户在
    *  界面上能看见「为什么没切过去」。下一次动作或 8s 后自动清除（timer 有
@@ -594,9 +599,11 @@ export function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, pr
   // cleanup，全终态回收）。
   const [reopenOpen, setReopenOpen] = useState(false)
   const reopenWrapRef = useRef<HTMLDivElement | null>(null)
-  const projectClosed = useMemo(
-    () => closedList.filter(e => e && e.project === projectKey),
-    [closedList, projectKey],
+  // 260904：↺ 菜单同口径放开——不按项目过滤，列出全部最近关闭条目
+  // （与 tab 行同一决策面；避免「刚关的 tab 换个项目就找不回」）。
+  const closedRecent = useMemo(
+    () => closedList.filter(e => e),
+    [closedList],
   )
   useEffect(() => {
     if (!reopenOpen) return
@@ -637,7 +644,7 @@ export function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, pr
   return (
     <div className="wb-sessTop" data-wb-session-entry="">
       <style>{SESSION_ENTRY_STYLES}</style>
-      {/* 行首：新建（紧凑按钮）；其后：会话切换行（≤5，项目归属，active 高亮，登记顺序）。
+      {/* 行首：新建（紧凑按钮）；其后：会话切换行（≤5，跨项目混排，active 高亮，登记顺序）。
           多项目未选：+ 变选单触发器（t260903 切换夜，选项目即落点）。 */}
       <div className="wb-sessTop-reopen-wrap" ref={projWrapRef}>
         <button
@@ -665,7 +672,7 @@ export function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, pr
       </div>
       <div className="wb-sessTop-rows">
         {targets.length === 0 ? (
-          <span className="wb-sessTop-empty">{projectKey ? '暂无最近会话' : '先点选一个项目'}</span>
+          <span className="wb-sessTop-empty">暂无最近会话</span>
         ) : targets.map(t => (
           <SessionTab
             key={t.id}
@@ -681,8 +688,9 @@ export function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, pr
           />
         ))}
       </div>
-      {/* ↺ 恢复菜单（t260831-06）：「最近关闭」非空时显示，重开=重登账册+打开 */}
-      {projectKey && projectClosed.length > 0 && (
+      {/* ↺ 恢复菜单（t260831-06）：「最近关闭」非空时显示，重开=重登账册+打开
+          （260904 起不按项目过滤） */}
+      {closedRecent.length > 0 && (
         <div className="wb-sessTop-reopen-wrap" ref={reopenWrapRef}>
           <button
             type="button"
@@ -690,12 +698,12 @@ export function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, pr
             data-wb-session-reopen=""
             aria-haspopup="menu"
             aria-expanded={reopenOpen}
-            title={`重新打开最近关闭的会话入口（${projectClosed.length} 个）`}
+            title={`重新打开最近关闭的会话入口（${closedRecent.length} 个）`}
             onClick={() => setReopenOpen(v => !v)}
-          >↺ {projectClosed.length}</button>
+          >↺ {closedRecent.length}</button>
           {reopenOpen && (
             <div className="wb-sessTop-menu" role="menu">
-              {projectClosed.map(e => (
+              {closedRecent.map(e => (
                 <button
                   key={e.id}
                   type="button"

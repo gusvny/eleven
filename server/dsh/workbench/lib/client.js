@@ -3021,12 +3021,15 @@ function renameEntry(entries, id, title) {
 	});
 }
 /**
-* 算侧栏切换行：账册 → 按当前项目过滤 → MRU（lastOpenedAt 降序；t260831-06 起
-* 打开路径不再更新 lastOpenedAt——排序结果=登记顺序，点 tab 停在原地）→
-* ≤limit → current 保底（通过过滤却被截断时替换最末一名，沿用 t260825-02 语义
-* ——当前活跃会话掉出列表会让「我在哪」不可感知）→ 标题/高亮装配。
+* 算侧栏切换行：账册 → MRU（lastOpenedAt 降序；t260831-06 起打开路径不再更新
+* lastOpenedAt——排序结果=登记顺序，点 tab 停在原地）→ ≤limit → current 保底
+* （通过过滤却被截断时替换最末一名，沿用 t260825-02 语义——当前活跃会话掉出
+* 列表会让「我在哪」不可感知）→ 标题/高亮装配。
 *
-* - project 为空串 = 未选项目（多项目注册表下新建按钮同步禁用）→ 空列表；
+* - 260904 决策（宿主拍板，notes/会话tab全项目显示决策.md）：**不按
+*   当前项目过滤**——账册条目跨项目混排全量参排（旧「project 不匹配即剔除、
+*   空串直接返回空」口径废除；根因=新建落点项目与 tab 行过滤项目两个状态源
+*   不同步，多项目未选/刷新重置下新会话 tab 不可见）；
 * - 标题：条目自定义 title 非空优先（tab 重命名，t260831-06），否则从 byId
 *   （ctx.sessions.list 的 byId）取 displayTitle，再缺失兜底 id（账册有、list 无
 *   = 会话已被磁盘清理的残留条目，照常渲染不崩，点击打开失败时由 UI 层
@@ -3035,10 +3038,10 @@ function renameEntry(entries, id, title) {
 */
 function pickSwitchTargets(entries, opts) {
 	const limit = opts?.limit ?? 5;
-	if (!opts || typeof opts.project !== "string" || opts.project === "" || limit <= 0) return [];
-	const byId = opts.byId ?? {};
-	const current = opts.current;
-	const eligible = (Array.isArray(entries) ? entries : []).filter((e) => e && typeof e.id === "string" && e.project === opts.project && isGlobalSessionId(e.id)).slice();
+	if (limit <= 0) return [];
+	const byId = opts?.byId ?? {};
+	const current = opts?.current;
+	const eligible = (Array.isArray(entries) ? entries : []).filter((e) => e && typeof e.id === "string" && isGlobalSessionId(e.id)).slice();
 	eligible.sort((a, b) => (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0));
 	if (current !== void 0 && eligible.length > limit) {
 		const curIdx = eligible.findIndex((e) => e.id === current);
@@ -3139,7 +3142,7 @@ function persistLedger(entries) {
 *     入口渲染在侧栏顶部同一视觉位置）；找不到锚时软退化：出厂钮照常显示、
 *     我们的入口仍在侧栏顶部，功能不丢，console.warn 留痕。
 *   - <SessionTopEntry>：紧凑一行入口——「+ 新建会话」+ 最近会话切换（≤5，
-*     会话跟项目走）。与已退场的 SessionSection（t260825-02 左栏会话区，本票
+*     会话跨项目混排，260904 起不按项目过滤）。与已退场的 SessionSection（t260825-02 左栏会话区，本票
 *     整块移除）和 HeroSessionEntry（t260829-06 hero 槽版，本票随 hero 接管
 *     拆除退场）消费同一个 useSessionEntry 同一账册，只有渲染层不同。
 *     带 data-wb-* 断言锚（UI 验收 DOM 断言用）：data-wb-session-entry（根）、
@@ -3185,6 +3188,11 @@ function persistLedger(entries) {
 *     本次会话内 state 仍可见（同一 hook 无第二份实现）；
 *   - 工单会话（ticket- 前缀）：isGlobalSessionId 在 touchEntry 里挡在账册外，
 *     顶部入口与账册同函数同口径，天然不混入（smoke/sessions.mjs 有断言）。
+*
+* 260904 宿主决策（notes/会话tab全项目显示决策.md）：tab 行显示不按
+* 当前项目过滤——targets 推导不再传 project（账册跨项目混排全量参排），
+* ↺「最近关闭」菜单同口径放开；「+ 新建会话」落点逻辑不变（仍走项目选单
+* /当前视图项目绑工作区）。projectKey 仅余新建落点与 ↺ 恢复的归属兜底两职。
 */
 /**
 * 出厂「⊕ New Session」钮的语义锚（aria-label 全集）：dsh-client-ui-sidebar 的
@@ -3285,14 +3293,9 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 		persistLedger(entries);
 	}, []);
 	const targets = (0, react.useMemo)(() => pickSwitchTargets(ledger, {
-		project: projectKey,
 		current: listState?.current,
 		byId: listState?.byId
-	}), [
-		ledger,
-		projectKey,
-		listState
-	]);
+	}), [ledger, listState]);
 	const [creating, setCreating] = (0, react.useState)(false);
 	/** 行内可见错误/提示（t260831-04）：open 链失败不再只打 console——用户在
 	*  界面上能看见「为什么没切过去」。下一次动作或 8s 后自动清除（timer 有
@@ -3634,7 +3637,7 @@ function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 	const cancelEdit = (0, react.useCallback)(() => setEditingId(null), []);
 	const [reopenOpen, setReopenOpen] = (0, react.useState)(false);
 	const reopenWrapRef = (0, react.useRef)(null);
-	const projectClosed = (0, react.useMemo)(() => closedList.filter((e) => e && e.project === projectKey), [closedList, projectKey]);
+	const closedRecent = (0, react.useMemo)(() => closedList.filter((e) => e), [closedList]);
 	(0, react.useEffect)(() => {
 		if (!reopenOpen) return;
 		refreshClosedList();
@@ -3723,7 +3726,7 @@ function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 				className: "wb-sessTop-rows",
 				children: targets.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 					className: "wb-sessTop-empty",
-					children: projectKey ? "暂无最近会话" : "先点选一个项目"
+					children: "暂无最近会话"
 				}) : targets.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SessionTab, {
 					target: t,
 					editing: editingId === t.id,
@@ -3742,7 +3745,7 @@ function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 					onEditCancel: cancelEdit
 				}, t.id))
 			}),
-			projectKey && projectClosed.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			closedRecent.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "wb-sessTop-reopen-wrap",
 				ref: reopenWrapRef,
 				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
@@ -3751,13 +3754,13 @@ function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 					"data-wb-session-reopen": "",
 					"aria-haspopup": "menu",
 					"aria-expanded": reopenOpen,
-					title: `重新打开最近关闭的会话入口（${projectClosed.length} 个）`,
+					title: `重新打开最近关闭的会话入口（${closedRecent.length} 个）`,
 					onClick: () => setReopenOpen((v) => !v),
-					children: ["↺ ", projectClosed.length]
+					children: ["↺ ", closedRecent.length]
 				}), reopenOpen && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "wb-sessTop-menu",
 					role: "menu",
-					children: projectClosed.map((e) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					children: closedRecent.map((e) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						type: "button",
 						role: "menuitem",
 						"data-wb-session-restore": "",
