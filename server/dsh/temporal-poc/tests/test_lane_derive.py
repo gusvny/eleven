@@ -3,14 +3,14 @@ import pytest
 
 from shared import derive_lane_workspace, LANE_WORKTREE, WS_DIR_BASE
 
-WS = {"type": "worktree", "path": ".worktrees/t260902-10"}
+WS = {"type": "worktree", "path": ".worktrees/t260902-10"}  # 旧名显式路径=兼容面（保持钉住）
 
 
 def test_all_missing_uses_default_paths():
     lane, ws, worktree, branch = derive_lane_workspace("t260902-10", LANE_WORKTREE)
     assert lane == LANE_WORKTREE
     assert ws == {"type": "worktree", "path": worktree}
-    assert worktree.startswith(".worktrees/t") and "t260902-10" in worktree
+    assert worktree.startswith(".lane/t") and "t260902-10" in worktree  # 260903 宿主令改名
     assert branch == "lane/" + worktree.rsplit("/", 1)[-1]
 
 

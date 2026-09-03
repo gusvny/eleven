@@ -21,7 +21,7 @@ op:
   create {workflow, project, title, body?, user_request?, spec?, role?, lane?, write_set?,
           acceptance?, deliverables?, id?, worktree?, branch?, workspace?, proposal_id?, book_path?}
       → 转发 client.py ticket-start（模板 id→workflow 类）；dev-lane 自动登记
-        .worktrees/t<id> + 分支 lane/t<id>（未创建，仅登记路径）
+        .lane/t<id> + 分支 lane/t<id>（未创建，仅登记路径；旧名 .worktrees 兼容读）
       → 正文=原始用户需求（user_request 逐字保留，显式优先；缺省回落 body），
         加工后派发规格独立进 spec 字段
   update {id, status?, note?, pending_add?, book_path?} → 转发 workflow update
@@ -85,7 +85,7 @@ TOOL = {
             'book_path': {'type': 'string', 'description': '内容预览定位：app/public/data/ 下相对路径（如 books/hanshu/jizhuan.json）；工单详情「预览内容」按钮按此读该书，缺省不显示预览'},
             'role': {'type': 'string', 'description': '角色（M10 五角色定稿）：developer/integration/ops/product-operation/artist（缺省取模板首段角色）'},
             'title': {'type': 'string'},
-            'lane': {'type': 'string', 'description': '工作位置：主树 或 泳道路径（.worktrees/xxx）；缺省取模板 lane'},
+            'lane': {'type': 'string', 'description': '工作位置：主树 或 泳道路径（.lane/xxx，旧 .worktrees 兼容）；缺省取模板 lane'},
             'write_set': {'type': 'array', 'items': {'type': 'string'}, 'description': '允许写的路径白名单（glob 口径文字描述即可）'},
             'allow_empty_write_set': {'type': 'boolean', 'description': 'create 显式声明本票无文件改动（t260901-01）：空写集 + 此声明才放行建票，meta 记 no_file_changes；有文件改动请传 write_set，勿用此声明绕过白名单护栏'},
             'acceptance': {'type': 'array', 'items': {'type': 'string'}, 'description': '实例验收增项（追加到模板首段清单，A5.5）'},
@@ -98,7 +98,7 @@ TOOL = {
             'note': {'type': 'string', 'description': '备注（结算摘要/验收结论/返工原因）'},
             'pending_add': {'type': 'string', 'description': '追加一条挂起项（遗留问题，不硬改交回）'},
             'to_stage': {'type': 'string', 'description': 'rework 打回目标 stage（缺省回上一段）'},
-            'worktree': {'type': 'string', 'description': 'create 显式登记泳道路径（缺省 dev-lane 自动 .worktrees/<id>）'},
+            'worktree': {'type': 'string', 'description': 'create 显式登记泳道路径（缺省 dev-lane 自动 .lane/<id>）'},
             'branch': {'type': 'string', 'description': 'create 显式登记分支名（缺省 lane/<id>）'},
             'workspace': {'type': 'object', 'description': 'create 显式登记工作空间 {type: worktree|dir, path}（缺省按模板推导：lane=worktree→泳道，模板带 workspace:dir→/tmp/suyou-ws/<id> 隔离目录）'},
             'by': {'type': 'string', 'description': 'rework 操作人（身份注入）'},
@@ -550,7 +550,7 @@ def _base_ref(primary_dir):
     """项目主目录 HEAD 短哈希（QA A2.1：create 登记 base ref，长活泳道续作基点）。"""
     try:
         main = Path(primary_dir)
-        if main.parent.name == '.worktrees':
+        if main.parent.name in ('.lane', '.worktrees'):
             main = main.parent.parent
         r = subprocess.run(['git', '-C', str(main), 'rev-parse', '--short', 'HEAD'],
                            capture_output=True, text=True, timeout=5)

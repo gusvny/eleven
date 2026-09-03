@@ -43,6 +43,8 @@ def _candidate_pythons() -> list:
     parts = POC.parts
     if ".worktrees" in parts:
         main = Path(*parts[: parts.index(".worktrees")])
+    elif ".lane" in parts:
+        main = Path(*parts[: parts.index(".lane")])
         cands.append(main / "server" / "dsh" / "temporal-poc" / ".venv" / "bin" / "python")
     return cands
 

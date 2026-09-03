@@ -1279,10 +1279,10 @@ def _log_tail(log_file: str, n: int = 400) -> str:
 # ---------- M16：工作区准备（workflow 第一个 activity） ----------
 
 def _lane_repo_root(cwd: Path) -> Path:
-    """泳道所在仓根（跨项目，t260903-10 首战教训）：按路径约定 <repo>/.worktrees/<id>
+    """泳道所在仓根（跨项目，t260903-10 首战教训）：按路径约定 <repo>/.lane/<id>
     自锚定——多项目工单（项目根≠引擎根）的 worktree add/复用/结算都应对项目仓操作，
     而非引擎仓。不符约定（显式自定义路径/主树/旧相对 payload）回落 REPO_ROOT（旧行为）。"""
-    if cwd.parent.name == ".worktrees":
+    if cwd.parent.name in (".lane", ".worktrees"):  # .lane=新名；.worktrees=旧名（在飞/存量泳道）
         return cwd.parent.parent
     return REPO_ROOT
 

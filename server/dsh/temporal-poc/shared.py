@@ -681,7 +681,9 @@ LANE_WORKTREE = "worktree"
 
 
 def default_lane_paths(ticket_id: str) -> Tuple[str, str]:
-    """worktree 泳道默认命名（.worktrees/t<日期>-<别名> / lane/t<日期>-<别名>）。
+    """worktree 泳道默认命名（.lane/t<日期>-<别名> / lane/t<日期>-<别名>；宿主令
+    20260903 改名 .worktrees→.lane——名字反映概念不反映 git 细节；旧名兼容见
+    _lane_repo_root/replay_check）。
 
     中文/长串不进目录与分支名，只留在工单/UI；日期+别名保证确定性且避免撞名；
     纯中文标题 → md5 短哈希兜底。（原 ticket.py _wf_paths，上收为单一真源。）
@@ -697,7 +699,7 @@ def default_lane_paths(ticket_id: str) -> Tuple[str, str]:
         import hashlib
         alias = hashlib.md5(rest.encode("utf-8")).hexdigest()[:6]
     wname = ("t%s-%s" % (date_part, alias)) if date_part else ("t" + alias)
-    return ".worktrees/" + wname, "lane/" + wname
+    return ".lane/" + wname, "lane/" + wname
 
 
 def derive_lane_workspace(

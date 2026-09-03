@@ -723,6 +723,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     const base = process.env.SUYOU_EVIDENCE_DIR ?? join(repo, '.suyou', 'evidence')
     const candidates = [
       resolve(base, id, file),
+      resolve(repo, '.lane', id, '.suyou', 'screenshots', file),
       resolve(repo, '.worktrees', id, '.suyou', 'screenshots', file),
     ]
     for (const abs of candidates) {
