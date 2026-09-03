@@ -288,8 +288,8 @@ sys.exit(0)
   section('F 存量迁移断言（notes/epics 真目录）')
   {
     const epics = await listEpics(join(process.cwd(), '..', '..', '..', 'notes', 'epics'))
-    ok(epics.length === 7, `真目录 7 个立项单（实得 ${epics.length}）`)
-    ok(epics.every((e) => isEpicStatus(e.status)), '七单状态全部 ∈ EPIC_STATUSES（迁移断言）')
+    ok(epics.length >= 7, `真目录立项单 ≥7（存量只增不减，t260903-07 顺修：钉死计数随新立项单腐烂；实得 ${epics.length}）`)
+    ok(epics.every((e) => isEpicStatus(e.status)), '全部立项单状态 ∈ EPIC_STATUSES（迁移断言）')
     const byCode = Object.fromEntries(epics.map((e) => [e.code, e]))
     ok(byCode['dsh-generalize']?.status === '已归档' && String(byCode['dsh-generalize']?.note ?? '').includes('sandbar'),
       'dsh-generalize = 已归档 + 备注含 sandbar（并入信息零丢失）')

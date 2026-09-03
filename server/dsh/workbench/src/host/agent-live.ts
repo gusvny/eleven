@@ -89,8 +89,9 @@ export async function resolveSessionFile(
   repo: string,
   ticketId: string,
   ticket: { worktree?: string; workspace?: { type?: string; path?: string } | null; role?: string } | null,
+  extraRoots: readonly string[] = [],
 ): Promise<SessionFileRef> {
-  const { base, reason } = resolveSuyouBaseDir(repo, ticketId, ticket)
+  const { base, reason } = resolveSuyouBaseDir(repo, ticketId, ticket, extraRoots)
   if (base === '') {
     return { refused: true, reason: reason ?? '工单工作区定位失败（拒绝读取）' }
   }

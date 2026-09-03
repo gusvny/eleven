@@ -87,17 +87,25 @@ export function resolveSuyouBaseDir(
   repo: string,
   ticketId: string,
   ticket: { worktree?: string; workspace?: { type?: string; path?: string } | null } | null,
+  extraRoots: readonly string[] = [],
 ): { base: string; reason?: string } {
+  // 跨项目（t260903-11 实雷）：extraRoots=票所属项目的注册目录（路由层喂），
+  // 守卫语义不变——只读注册领土，防穿越硬项保留；缺省空=旧行为（仅本仓）。
+  const roots = [repo, ...extraRoots]
+  const withinAny = (p: string) => roots.some((r) => {
+    const a = resolve(r)
+    return p === a || p.startsWith(a + sep)
+  })
   const ws = ticket?.workspace
   if (typeof ticket?.worktree === 'string' && ticket.worktree !== '') {
     const abs = resolve(repo, ticket.worktree)
-    if (!isWithin(repo, abs)) {
+    if (!withinAny(abs)) {
       return { base: '', reason: `工单 worktree 越界（拒绝读取）: ${ticket.worktree}` }
     }
     return { base: join(abs, '.suyou') }
   }
   if (ws !== null && ws !== undefined && typeof ws?.path === 'string' && ws.path !== '') {
-    if (ws.type === 'worktree' && isWithin(repo, ws.path)) {
+    if (ws.type === 'worktree' && withinAny(resolve(repo, ws.path))) {
       return { base: join(resolve(repo, ws.path), '.suyou') }
     }
     if (ws.type === 'dir' && ws.path.startsWith('/tmp/suyou-ws/')) {

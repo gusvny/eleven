@@ -86,13 +86,69 @@ SIGNAL_ALLOWLIST = ("sign", "retry_qc")
 # 让左栏 sandbar 驻留期有标题/角色（窗口只封顶回填成本，驻留时长是前端配置项）。
 CLOSED_HYDRATE_WINDOW_S = 7 * 86400
 
+# ---- 查询错误分级（KI-025，t260903-06）----
+# kind 语义（client 产出 → ticket.py 消费 → tools_registry 并入 → 工作台/UI 分流）：
+#   not_found：唯一「工单不存在」语义，只能由 describe 命中 NotFoundFailure 触发；
+#   transient：瞬时查询故障（超时/连接/RPC 抖动/取消传播），文案引导「刷新重试」，
+#              绝不允许出现「不存在」字样（查询失败谎报不存在=KI-025 实案 t260903-02）；
+#   terminal：workflow 已终态（TERMINATED/CANCELED/FAILED 等），永久不可查询，
+#             文案明说「刷新无效」，绝不 transient（对死票无限重试=反向谎报）；
+#   internal：兜底（畸形入参/畸形快照/未知），文案精确说哪个检查失败，非不存在非瞬时。
+# 未列出口一律默认 internal——新增 _err 出口时须在此表登记。
+KIND_NOT_FOUND = "not_found"
+KIND_TRANSIENT = "transient"
+KIND_TERMINAL = "terminal"
+KIND_INTERNAL = "internal"
+
+# ---- RUNNING snapshot query 重试参数（KI-003，t260903-06）----
+# 阶段切换 inline 突变窗 1-2 秒即恢复（KI-003 机制结论）：指数退避 0.5/1/2s ±20%
+# 抖动，3 次尝试。最坏窗口 = 3×8s 超时 + 3.5s 退避 ≈ 27.5s（超时每次尝试各付一次），
+# 工作台轮询侧配 in-flight 守卫防堆叠（同票 UI 段）。模块级常量供集成测试注入
+# 提速（t260901-23 t01/t02 直跑形态），生产不动。
+QUERY_RETRY_ATTEMPTS = 3
+QUERY_RETRY_BASE_DELAY = 0.5
+QUERY_RETRY_MAX_DELAY = 4.0
+QUERY_RETRY_JITTER = 0.2
+QUERY_TIMEOUT_S = 8.0
+# describe 重试（KI-025 另一半：describe 失败当前直接报错，1 次退避重试消抖）。
+DESCRIBE_RETRY_ATTEMPTS = 2
+DESCRIBE_BASE_DELAY = 0.5
+
 
 def _ok(result: Any) -> Dict[str, Any]:
     return {"ok": True, "result": result}
 
 
-def _err(msg: str) -> Dict[str, Any]:
-    return {"ok": False, "error": msg}
+def _err(msg: str, kind: str = KIND_INTERNAL) -> Dict[str, Any]:
+    """结构化错误回执。kind=错误分级（见上方分级表），消费方据此分流 404/503/410，
+    「工单不存在」文案只能随 kind=not_found 产出。"""
+    return {"ok": False, "error": msg, "kind": kind}
+
+
+def _is_not_found_exc(e: BaseException) -> bool:
+    """判别 describe 异常是否「工单真不存在」语义（KI-025 分级的唯一入水口）。
+
+    结构化判别优先（类名 MRO：temporalio.client.WorkflowNotFoundError 及失败族
+    命名变体），异常文案兜底；口径取窄——判不准一律 False（落 transient），
+    误判 not_found 就是 KI-025 要消灭的谎报本身。不做模块级 SDK import
+    （维持 temporalio.client/temporalio.common 最小集、_stub_temporalio 桩契约），
+    故只按类名识别、不引用具体类对象。"""
+    for t in type(e).__mro__:
+        if t.__name__ in ("WorkflowNotFoundError", "NotFoundFailureError", "NotFoundFailure"):
+            return True
+    return "not found" in str(e).lower()
+
+
+def _backoff_delay(attempt: int, base_delay: float, max_delay: float,
+                   jitter: float = 0.0) -> float:
+    """指数退避间隔：base*2^(attempt-1) 封顶 max_delay；jitter>0 时 ±jitter 比例抖动。
+
+    纯函数（时钟无关）——退避序列断言直接调它（t260901-23 t01）。"""
+    import random
+    d = min(base_delay * (2 ** max(0, attempt - 1)), max_delay)
+    if jitter > 0:
+        d = random.uniform(d * (1 - jitter), d * (1 + jitter))
+    return d
 
 
 def _ts_epoch(ts_msg: Any) -> int:
@@ -523,18 +579,22 @@ def _row_from_meta(tid: str, meta: Dict[str, Any], exec_status: str) -> Dict[str
     }
 
 
-async def _query_snapshot_with_retry(handle: Any, timeout: float = 8,
-                                     retry_delay: float = 2, attempts: int = 2) -> Any:
-    """RUNNING 工单的 snapshot query 失败重试（KI-003/KI-008 兜底）。
+async def _query_snapshot_with_retry(handle: Any, timeout: float = QUERY_TIMEOUT_S,
+                                     attempts: int = QUERY_RETRY_ATTEMPTS,
+                                     base_delay: float = QUERY_RETRY_BASE_DELAY,
+                                     max_delay: float = QUERY_RETRY_MAX_DELAY,
+                                     jitter: float = QUERY_RETRY_JITTER) -> Any:
+    """RUNNING 工单的 snapshot query 失败重试（KI-003/KI-008 兜底，t260903-06 升级）。
 
-    8s 超时多半是 stage 转换窗瞬时抖动（workflow 侧让路点见 base._breathe），
-    重试 1 次可消；重试仍败抛最后一次异常，由调用方走显式降级（详情报错文案、
-    列表 degraded 行），不再静默吞。只收 workflow handle（调用方均已持有）。
-    retry_delay/attempts 参数化供自测注入 0，避免测试拖慢。"""
+    8s 超时多半是 stage 转换窗瞬时抖动（workflow 侧让路点见 base._breathe，
+    KI-003 机制结论：inline 突变窗 1-2 秒即恢复）——指数退避 0.5/1/2s ±20% 抖动
+    3 次尝试，覆盖突变窗。重试穷尽抛最后一次异常，由调用方走显式降级（详情
+    transient 报错、列表 degraded 行），不再静默吞。只收 workflow handle
+    （调用方均已持有）。delay 参数化供自测注入 0 提速，不拖测试。"""
     last: Optional[BaseException] = None
     for i in range(max(1, attempts)):
         if i:
-            await asyncio.sleep(retry_delay)
+            await asyncio.sleep(_backoff_delay(i, base_delay, max_delay, jitter))
         try:
             return await asyncio.wait_for(handle.query("snapshot"), timeout=timeout)
         except Exception as e:
@@ -543,17 +603,45 @@ async def _query_snapshot_with_retry(handle: Any, timeout: float = 8,
     raise last
 
 
+async def _describe_with_retry(handle: Any, attempts: int = DESCRIBE_RETRY_ATTEMPTS,
+                               base_delay: float = DESCRIBE_BASE_DELAY,
+                               jitter: float = QUERY_RETRY_JITTER) -> Any:
+    """describe 带一次退避重试（KI-025 另一半）：describe 失败原样裸报是谎报
+    「不存在」的另一半来源（连接/超时类瞬时故障）。NotFoundFailure 是确定性
+    结论，不重试直接上抛；其余异常按瞬时重试 1 次，穷尽上抛最后一次异常。"""
+    last: Optional[BaseException] = None
+    for i in range(max(1, attempts)):
+        if i:
+            await asyncio.sleep(_backoff_delay(i, base_delay, base_delay, jitter))
+        try:
+            return await handle.describe()
+        except Exception as e:
+            if _is_not_found_exc(e):
+                raise
+            last = e
+    assert last is not None
+    raise last
+
+
 async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
-    """单张工单查询（v2）：snapshot 全文 + meta（JSON 兼容工单形态，ticket.py show 直接消费）。"""
+    """单张工单查询（v2）：snapshot 全文 + meta（JSON 兼容工单形态，ticket.py show 直接消费）。
+
+    错误分级契约（KI-025，t260903-06）：回执带 kind 字段，分级表见模块头。
+    「工单不存在」只能由 describe 命中 NotFoundFailure（kind=not_found）触发；
+    超时/连接/取消一律 transient；终态（TERMINATED/CANCELED/FAILED…）一律 terminal
+    （永久不可得，文案明说刷新无效）；畸形入参/快照 internal。"""
     tid = str(args.get("ticket_id") or args.get("id") or "")
     if not tid:
-        return _err("ticket-query 需要 ticket_id")
+        return _err("ticket-query 需要 ticket_id", KIND_INTERNAL)
     client = await _connect()
     handle = client.get_workflow_handle(tid)
     try:
-        desc = await handle.describe()
+        desc = await _describe_with_retry(handle)
     except Exception as e:
-        return _err("workflow 不存在或不可达：%s: %s" % (type(e).__name__, e))
+        if _is_not_found_exc(e):
+            return _err("工单不存在：%s（Temporal 无此 workflow）" % tid, KIND_NOT_FOUND)
+        return _err("查询失败（瞬时，已重试 %d 次），请刷新重试：%s: %s"
+                    % (DESCRIBE_RETRY_ATTEMPTS - 1, type(e).__name__, e), KIND_TRANSIENT)
     exec_status = desc.status.name if desc.status is not None else ""
     snap: Any = None
     if exec_status == "COMPLETED":
@@ -563,22 +651,27 @@ async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
         try:
             snap = await handle.result()
         except Exception as e:
-            return _err("workflow 结果读取失败：%s: %s" % (type(e).__name__, e))
+            return _err("workflow 结果读取失败（瞬时），请刷新重试：%s: %s"
+                        % (type(e).__name__, e), KIND_TRANSIENT)
     elif exec_status == "RUNNING":
         try:
             # KI-003/KI-008：RUNNING query 失败多为 stage 转换窗瞬时抖动（突变串
-            # 噎事件循环，t260901-23 已在 workflow 侧插让路点），重试 1 次再报。
+            # 噎事件循环，t260901-23 已在 workflow 侧插让路点），指数退避重试再报。
             snap = await _query_snapshot_with_retry(handle)
         except Exception as e:
-            return _err("snapshot 查询失败（已重试 1 次，瞬时抖动？请刷新重试）：%s: %s"
-                        % (type(e).__name__, e))
+            return _err("snapshot 查询失败（已重试 %d 次，瞬时抖动？请刷新重试）：%s: %s"
+                        % (QUERY_RETRY_ATTEMPTS - 1, type(e).__name__, e), KIND_TRANSIENT)
     else:
-        return _err("workflow 执行状态 %s，快照不可得" % (exec_status or "未知"))
+        # 终态（TERMINATED/CANCELED/FAILED 等）永久不可查询：独立 kind=terminal，
+        # 文案明说刷新无效——绝不 transient（对死票无限重试=反向谎报，KI-025 review C2）。
+        return _err("工单已终态（%s），快照不可得——终态票不再推进，刷新无效"
+                    % (exec_status or "未知"), KIND_TERMINAL)
     # 畸形输入防御（t260901-23）：query 结果非 dict（旧代码/桩/坏数据）→ 显式
     # _err，不让命令边界裸抛 AttributeError。
     if not isinstance(snap, dict):
-        return _err("snapshot 返回形态异常（预期 dict，实得 %s）"
-                    % type(snap).__name__)
+        # 文案纪律：不得含「工单不存在」子串（哪怕否定式——场景按子串守卫谎报面）。
+        return _err("snapshot 返回形态异常（预期 dict，实得 %s）——数据/版本问题，"
+                    "请核对 worker/模板版本" % type(snap).__name__, KIND_INTERNAL)
     # epic-linkage：dev-lane 的 _init 在 dev_lane.py（本工单写集外）自建 meta，
     # 不含 epic 键。epic 以 workflow 的 EpicCode SA 为真源，在查询边界回填——
     # 快照消费方（ticket.py show / 工单台）看到的 meta.epic 与 SA 恒一致。

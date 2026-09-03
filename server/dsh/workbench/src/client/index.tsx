@@ -6,7 +6,9 @@
  * 本插件注册 sidebar.workspaces（priority=-10 抢占 shell 默认浏览器），
  * WorkbenchSidebar 左列=项目分组+进行中工单+插件入口，中列=三视图
  * （WorkbenchSection 本文件 / KnowledgeSection 从 knowledge 插件 import /
- * ProvidersSection 从 providers 插件 import），点工单另开带上下文的 chat 会话。
+ * ProvidersSection 从 providers 插件 import）。t260903-07 起：点工单只开中列
+ * 详情抽屉，右栏 chat 恒为单全局会话不再切换（每工单会话联动下线，数据留存——
+ * 见 sidebar.tsx 头注与 notes/debts/design-doc-sync-t260903-07.md）。
  * 数据来自 /suyou-workbench/api/wf/* 而非会话事件。
  *
  * 页面三区（工单工作流台设计 v0.3 §5/§10）：
@@ -98,13 +100,21 @@ import { startTabPresence } from './tab-presence.ts'
 import type { TabPresence, PeerViewer } from './tab-presence.ts'
 import { buildApproveNote } from './approve-note.ts'
 import { startVisibleInterval } from './visibility-poll.ts'
+// t260903-06 KI-003③：轮询健康度状态机（连续失败阈值/分类/快照保留的纯函数半）。
+import {
+  classifyPollBody,
+  INITIAL_POLL_STATE,
+  nextPollState,
+  worstOutcome,
+  type PollHealthState,
+  type PollOutcome,
+} from './poll-health.ts'
 
 export const name = 'suyou-workbench/client'
 // workspaces（t260831-04）：顶部会话入口新建走 ctx.workspaces.startSession。
 export const inject = ['slots', 'sessions', 'workspaces']
-// 会话恢复链流程体 re-export（t260831-08）：实现在 sidebar.tsx 的模块级纯函数，
-// 从入口 re-export 让 smoke 能经构建产物（lib/client.cjs 工厂）拿到真代码断言。
-export { openTicketSessionFlow } from './sidebar.tsx'
+// t260903-07：原 openTicketSessionFlow re-export（t260831-08）随流程体一并删除——
+// 每工单会话联动下线，点工单只开中列详情，右栏 chat 恒为全局会话。
 
 /* ---------------------------------------------------------------- 样式 */
 
@@ -2662,6 +2672,32 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   const [peerNote, setPeerNote] = useState('')
   /** 1s tick：驱动 👀 徽标/在看提示随心跳 TTL 刷新（纯本地渲染，不发请求）。 */
   const [, setViewerTick] = useState(0)
+  /** 轮询健康度（KI-003③ 优雅降级，t260903-06）：连续失败计数 + 错误态。
+   *  ref 镜像供异步回调读最新值（setState 异步，回调内直读 state 拿旧值）。 */
+  const [pollHealth, setPollHealth] = useState<PollHealthState>(INITIAL_POLL_STATE)
+  const pollHealthRef = useRef<PollHealthState>(INITIAL_POLL_STATE)
+  /** 最近一次轮询失败的摘要（角标 title / 错误条附注；成功即清）。 */
+  const [pollLastError, setPollLastError] = useState('')
+  /** in-flight 守卫（review C6）：RUNNING 查询退避后最坏 ~27.5s 未归，5s 节拍
+   *  若不设守卫会同票并发堆叠——正是 KI-003 登记的「多页签轮询风暴」共犯路径，
+   *  本票 UI 段不得放大它。上一发未归 → 跳过本拍。 */
+  const listInFlight = useRef(false)
+  const detailInFlight = useRef(false)
+
+  /** 健康度转移唯一写入口：ref 与 state 同步；恢复（ok）清错误条。 */
+  function applyPollOutcome(outcome: PollOutcome, errMsg = ''): void {
+    const next = nextPollState(pollHealthRef.current, outcome)
+    pollHealthRef.current = next
+    setPollHealth(next)
+    setPollLastError(errMsg)
+    if (outcome === 'ok') {
+      setError('')
+    } else if (next.degraded) {
+      setError(outcome === 'retryable'
+        ? `工单台连续 ${next.failStreak} 次刷新失败，数据可能滞后；已转慢速自动重试，无需手动刷新。最后错误：${errMsg}`
+        : `选中工单不可查（不存在或已终态），详见详情区提示；其余工单数据可能滞后。`)
+    }
+  }
 
   const wfById = useMemo(() => {
     const m: Record<string, Wf> = {}
@@ -2669,16 +2705,36 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     return m
   }, [workflows])
 
-  async function reloadTickets(): Promise<void> {
+  /** 台面列表拉取：返回本拍分类供 pollOnce 记账。失败保留上次成功快照
+   *  （不清 tickets/workflows——「保持上次成功快照」是本票硬口径）。 */
+  async function reloadTickets(): Promise<PollOutcome> {
+    listInFlight.current = true
     try {
       const data = await apiGet(`${API}/tickets`)
       if (data?.ok !== true) throw new Error(data?.error ?? '台面加载失败')
       setTickets((data.result?.tickets ?? []) as TicketRow[])
       setWorkflows((data.workflows ?? []) as Wf[])
-      setError('')
+      return 'ok'
     } catch (err) {
-      setError(String(err instanceof Error ? err.message : err))
+      // 列表聚合口不产出 kind（Temporal 不可达=瞬时故障）：一律 retryable，
+      // 绝不让列表失败冒充「工单不存在」（KI-025 口径）。
+      return 'retryable'
+    } finally {
+      listInFlight.current = false
     }
+  }
+
+  /** 一拍轮询（健康度唯一入账口）：列表 + 打开中的详情，取最坏分类。
+   *  in-flight 守卫在此收口：上一发未归整拍跳过（不记账不叠加）。 */
+  async function pollOnce(): Promise<void> {
+    if (listInFlight.current || detailInFlight.current) return
+    const detailOpen = selectedIdRef.current !== null
+    const [listOut, detailOut] = await Promise.all([
+      reloadTickets(),
+      detailOpen ? refreshDetailSilent() : Promise.resolve('ok' as PollOutcome),
+    ])
+    const out = worstOutcome(listOut, detailOut)
+    applyPollOutcome(out, out === 'ok' ? '' : 'snapshot 查询瞬时失败（阶段切换窗？）')
   }
 
   /** Temporal server/worker 状态点：读 temporal-health（真实探测，静默失败灰显）。 */
@@ -2704,7 +2760,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     setViewProject(projectKey ?? '')
     setTickets(undefined)
     const vp = getViewProject()
-    if (vp) void reloadTickets()
+    if (vp) void pollOnce()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectKey])
 
@@ -2740,8 +2796,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     const unsub = p.onRemoteWrite((w) => {
       if (selectedIdRef.current !== null && w.ticket === selectedIdRef.current) {
         setPeerNote(`工单 ${w.ticket} 刚被另一页签操作过（${w.op} · ${w.who}），已自动刷新`)
-        void reloadTickets()
-        void refreshDetailSilent()
+        void pollOnce()
       }
     })
     const stopTick = startVisibleInterval(() => { setViewerTick(t => t + 1) }, 1000)
@@ -2777,13 +2832,27 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     setOpMsg('')
     try {
       const data = await apiGet(`${API}/tickets/${encodeURIComponent(id)}`)
-      if (data?.ok !== true) throw new Error(data?.error ?? '详情加载失败')
+      if (data?.ok !== true) {
+        // KI-025：错误体带 kind（分级产出贯穿 host 503/410/404 分流）——致命类
+        // 精确报「不存在/已终态」，瞬时类引导「自动重试中」而非手动刷新。
+        const e = new Error(data?.error ?? '详情加载失败') as Error & { kind?: unknown }
+        e.kind = data?.kind
+        throw e
+      }
       // t260901-15 跳单守卫：响应到达时若用户已改看别单，丢弃过期结果（防「点 13 跳 11」）。
       if (selectedIdRef.current !== id) return
       setDetail(data.result as TicketDetail)
     } catch (err) {
       if (selectedIdRef.current === id) {
-        setOpMsg(`详情加载失败：${String(err instanceof Error ? err.message : err)}`)
+        const kind = (err as { kind?: unknown } | null)?.kind
+        if (kind === 'not_found') {
+          setOpMsg(`工单不存在：${id}（Temporal 无此 workflow）`)
+        } else if (kind === 'terminal') {
+          setOpMsg(String(err instanceof Error ? err.message : err))
+        } else {
+          // 瞬时故障（超时/连接/取消）：不弹窗打断——保留占位提示，轮询自动补拉。
+          setOpMsg(`详情加载失败（查询瞬时故障），自动重试中：${String(err instanceof Error ? err.message : err)}`)
+        }
       }
     } finally {
       if (selectedIdRef.current === id) setDetailLoading(false)
@@ -2974,29 +3043,45 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 
   /** 详情静默刷新（自动轮询用，不置 loading 不闪屏）。t260901-15 跳单守卫：
    *  按发起时刻的 id 校验——响应到达时选中已变则丢弃（旧代码无条件 setDetail 是
-   *  「点 13 详情跳回 11」的竞态根因）。 */
-  async function refreshDetailSilent(): Promise<void> {
+   *  「点 13 详情跳回 11」的竞态根因）。t260903-06：返回本拍分类供 pollOnce 记账；
+   *  失败保留上次成功快照（不清 detail）；致命类（不存在/终态）在详情区精确提示。 */
+  async function refreshDetailSilent(): Promise<PollOutcome> {
     const id = selectedIdRef.current
-    if (!id) return
+    if (!id) return 'ok'
+    detailInFlight.current = true
     try {
       const data = await apiGet(`${API}/tickets/${encodeURIComponent(id)}`)
-      if (data?.ok === true && selectedIdRef.current === id) setDetail(data.result as TicketDetail)
-    } catch { /* 静默 */ }
+      if (data?.ok === true) {
+        if (selectedIdRef.current === id) setDetail(data.result as TicketDetail)
+        return 'ok'
+      }
+      const out = classifyPollBody(data)
+      if (out !== 'retryable' && selectedIdRef.current === id) {
+        setOpMsg(String(data?.error ?? '工单查询失败'))
+      }
+      return out
+    } catch {
+      // 网络异常=瞬时：静默保留快照，下一拍自动重试（不弹窗不打断）。
+      return 'retryable'
+    } finally {
+      detailInFlight.current = false
+    }
   }
 
-  // 台面自动刷新：5s 轮询列表；详情抽屉打开时跟随静默刷新（状态变化自动上屏，不依赖手动刷新）。
-  // t260901-15：不可见页签暂停轮询（visibility 门，隐藏零请求、回可见立即补刷）。
+  // 台面自动刷新：5s 轮询（列表+打开中的详情，最坏分类记账）；降级态退 30s 慢轮询
+  // （错误态下降低查询通道打击面，恢复探测仍持续——pollMs 变化=重建 interval，
+  // React 先跑旧 effect cleanup 再跑新 effect，startVisibleInterval 停表幂等，
+  // 终态回收不漏）。t260901-15：不可见页签暂停轮询（visibility 门）。
+  // t260903-06 C6：节拍内并发由 pollOnce 的 in-flight 守卫收口（未归跳拍）。
+  const pollMs = pollHealth.degraded ? 30_000 : 5_000
   useEffect(() => {
-    const stop = startVisibleInterval(() => {
-      void (async () => {
-        await reloadTickets()
-        await refreshDetailSilent()
-      })()
-    }, 5000)
+    const stop = startVisibleInterval(() => { void pollOnce() }, pollMs)
     return stop
-  }, [selectedId])
+    // pollOnce 只经 ref/setter 访问组件态，不进 deps；selectedId/pollMs 变化即重建。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, pollMs])
 
-  useEffect(() => { void reloadTickets() }, [])
+  useEffect(() => { void pollOnce() }, [])
 
   // Temporal 状态点 + worker 清单：5s 轮询（与台面同节奏，独立于详情选中态）。
   // t260901-15：visibility 门——不可见页签暂停轮询。
@@ -3167,7 +3252,17 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
           <option value="">角色：全部</option>
           {roles.map(r => <option key={r} value={r}>{r}</option>)}
         </select>
-        <button className="wb-btn" onClick={() => { void reloadTickets() }}>刷 新</button>
+        <button className="wb-btn" onClick={() => { void pollOnce() }}>刷 新</button>
+        {/* KI-003③（t260903-06）：轮询失败不弹窗——静默重试期间保留上次成功快照，
+            角标提示「数据可能滞后」；连续 3 次失败才升错误条（见上方 wb-err）。 */}
+        {pollHealth.failStreak > 0 && !pollHealth.degraded && (
+          <span
+            className="wb-sub"
+            title={pollLastError || '上次刷新失败，当前展示的是上次成功快照，正在自动重试'}
+          >
+            ⟳ 数据可能滞后（自动重试中）
+          </span>
+        )}
         <span className="wb-sub">{filtered.length}/{tickets?.length ?? 0} 张</span>
         {/* sandbar 驻留输入已迁走（metrics M2a，t260902-01）：收进侧栏下栏 ⚙ settings
             弹层（UI 规划 §2「settings 收进弹层」）；localStorage key 与语义不变。 */}

@@ -27,7 +27,8 @@
  * 中列：四视图由 index.tsx 注入（views prop）——工单台 WorkbenchSection（本插件）、
  *       知识库 KnowledgeSection（knowledge 插件）、模型 ProvidersSection（providers 插件）、
  *       立项单 EpicSection（本插件，t260826-02；空代号=立项清单，带代号=详情）。
- *       260823 起它们不再占 chat 顶部页签。点工单 → 中列工单台开详情抽屉 + 右栏开带上下文的会话。
+ *       260823 起它们不再占 chat 顶部页签。t260903-07 起：点工单只在中列开详情抽屉，
+ *       右栏 chat 恒为单全局会话不再切换（每工单会话联动下线，数据留存）。
  *       未选项目时中列显占位（不自动选第一个项目——不造隐形缺省）。
  */
 
@@ -37,12 +38,17 @@ import type { ComponentType } from 'react'
 import type { ObservableSnapshot, SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 // 顶部会话入口组件与记账层（t260831-02：SessionTopEntry + 出厂钮语义锚；session-entry.tsx
 // 持有 LEDGER_KEY / useSessionEntry hook；本文件留侧栏样式、布局与注入 effect）。
-import { SessionTopEntry, FACTORY_NEW_LABELS, waitForScope, waitForListed } from './session-entry.tsx'
+import { SessionTopEntry, FACTORY_NEW_LABELS } from './session-entry.tsx'
 // host 陈旧全局提醒（t260902-03）：useStaleHost 单例挂本组件；横幅渲染在
 // .wb-sb-right 共享容器（四视图排他渲染之上），所有页签/视图常驻可见。
 import { useStaleHost } from './staleness.ts'
 import { startVisibleInterval } from './visibility-poll.ts'
 import type { SessionsFace } from './session-entry.tsx'
+// 项目索引单态（t260903-07 工单②）：load() 成功分支向 chat 项目 tag 装饰器发布
+// 项目集与逐项目工单映射（失败分支不发——KI-018 同族：失败不得顶掉 last-known-good）。
+import { publishProjectEntry, publishProjects } from './project-tag-index.ts'
+// chat 项目 tag 装饰器（t260903-07 工单②）：挂/卸随本组件生命周期（插件在装即挂）。
+import { startChatProjectTagEffect } from './chat-project-tag.ts'
 // metrics M2a（t260902-01）：度量面板。t260902-05 起：入口迁出厂侧栏
 // footer.action 槽（与 dsh settings 同排，用户反馈①），面板中 pane 化挂进
 // .wb-sb-right（反馈②）。槽注册失败软退化回 .wb-sb-foot 兜底钮（console.warn）。
@@ -54,95 +60,13 @@ import { METRICS_STATE_EVENT, METRICS_TOGGLE_EVENT, footerSlotOk, mountMetricsIn
 
 /* ---------------------------------------------------------------- 类型 */
 
-/**
- * 工单点击 → 会话恢复链的依赖注入面（t260831-08）：流程体抽成模块级纯 async
- * 函数 openTicketSessionFlow，本接口只声明它用到的最小服务面（结构类型，smoke
- * 可用裸对象桩直测——本工单核心验收对象必须有真代码级断言，不是复制品）。
- */
-export interface TicketSessionFlowDeps {
-  /** fetch 注入（生产传 globalThis.fetch；smoke 传桩，按 ticket_id 脚本化应答）。 */
-  fetchImpl: typeof fetch
-  /** 客户端 sessions 服务（open/scope/refresh/list，同 SidebarProps.sessions 面）。 */
-  sessions: SessionsFace
-  /** 槽注入的打开动作（t260831-04 gen2 勘误：slot owner props 里拿不到，恒 undefined，
-   *  实际恒走 sessions.open 兜底——保留参数只为兼容，不假装它存在）。 */
-  slotOpen?: (sessionId: string) => void
-  /** 等待钩子可注入（smoke 传即返桩免等真实超时；生产缺省用既有实现）。 */
-  waitListed?(sessions: SessionsFace, id: string, ms: number): Promise<boolean>
-  waitScope?(sessions: SessionsFace, id: string, ms: number): Promise<any>
-}
-
-/**
- * 工单行点击 → 会话恢复链（t260831-08 重排，修复「切回内容丢失/上下文注不进」）。
- *
- * 正确时序（方案 gen1，勘误引用按 gen10 口径）：
- *   ① POST ticket-session/open → host：会话存在回 created:false，不存在 create 并
- *      带工单快照 context（快照契约=node.ts ticketContext，smoke 直测）；
- *   ② sessions.refresh 强拉列表（host 新建的 session 经 list 流同步有延迟）；
- *   ③ waitForListed 等 id 进客户端 list——scope 的惰性铸造时机是 first resolution
- *      （t260831-02 gen10 订正口径），open 之前等 scope 等不到；open 对未列出 id
- *      是 throw 不是静默 no-op，所以 listed 前置挡住它。超时（false）→ console.error
- *      留痕、不 open、不注入、不 throw（超时≠失败终态，工单列表可重试）；
- *   ④ open（slotOpen 缺位恒走 sessions.open），失败 loud 不吞；
- *   ⑤ waitForScope（此时才合法）取会话域；
- *   ⑥ created&&context 时 conversation.send 注入快照恰好一次（created:false 的恢复
- *      路径绝不注入——注入即污染已恢复内容）。
- * 全路径无静默假成功：每条失败分支都 console.error 留痕。
- */
-export async function openTicketSessionFlow(
-  deps: TicketSessionFlowDeps,
-  opts: { ticketId: string; project: string },
-): Promise<void> {
-  const { sessions, slotOpen, fetchImpl } = deps
-  const waitListed = deps.waitListed ?? waitForListed
-  const waitScopeFn = deps.waitScope ?? waitForScope
-  try {
-    const r = await fetchImpl('/suyou-workbench/api/ticket-session/open', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ticket_id: opts.ticketId, project: opts.project }),
-    })
-    const d = await r.json()
-    if (!d.ok) {
-      console.error('[workbench] ticket-session/open 失败：', d.error)
-      return
-    }
-    const sid = d.result.session_id as string
-    // 强拉一次列表：host 侧 create 的 session 靠 wire list 同步进 client，被动等可能迟迟不到。
-    try { await sessions.refresh?.() } catch { /* 拉取失败也继续走轮询兜底 */ }
-    // listed 前置（gen10 口径）：未列出就 open 是 throw；等不到=明确报错不假成功。
-    const listed = await waitListed(sessions, sid, 10_000)
-    if (!listed) {
-      console.error('[workbench] ticket 会话未同步进客户端列表，放弃打开（可重试）：', sid)
-      return
-    }
-    // 打开：slotOpen 缺位恒走 sessions.open（见 deps 注释），失败 loud。
-    try {
-      if (slotOpen) slotOpen(sid)
-      else sessions.open(sid)
-    } catch (err) {
-      console.error('[workbench] 打开会话失败：', sid, err)
-      return
-    }
-    // open 之后 scope 才可能解析（first resolution 铸造），此时等它是合法前置。
-    const scoped = await waitScopeFn(sessions, sid, 8000)
-    if (!scoped) {
-      console.error('[workbench] 打开后会话 scope 未解析，未注入工单上下文：', sid)
-      return
-    }
-    // 注入守卫：只在新会话（created）且 host 带了快照时发，恰好一次；
-    // 恢复路径（created:false）不注入——已有内容，注入即污染。
-    if (d.result.created && d.result.context && scoped?.conversation?.send) {
-      scoped.conversation.send(d.result.context).catch((err: unknown) => {
-        console.error('[workbench] 注入工单上下文失败：', sid, err)
-      })
-    }
-  } catch (err) {
-    console.error('[workbench] ticket-session/open 请求异常：', err)
-  }
-}
-
-/* ---------------------------------------------------------------- 类型 */
+/* t260903-07（用户拍板）：每工单会话联动下线——右侧 chat 恒为单全局会话，
+ * 点工单只在中列开详情抽屉，不再建/找/切 `ticket-<id>` 会话。
+ * 原 openTicketSessionFlow（t260831-08 会话恢复链）连同 TicketSessionFlowDeps
+ * 整体删除（无其他消费方）。服务端 /api/ticket-session/open 路由与既有
+ * ticket-* 会话数据按 ③ 口径留存（node.ts 两处留痕注释），回滚面完整。
+ * 设计文档《右栏会话入口与hero定制设计.md》目标5/Nongoal 被本票推翻——
+ * 同步债见 notes/debts/design-doc-sync-t260903-07.md（后续读者以债条目为准）。 */
 
 interface Ticket {
   id: string
@@ -540,10 +464,16 @@ export function WorkbenchSidebar(props: SidebarProps) {
         const list: Project[] = pr?.result?.projects ?? []
         if (cancelled) return
         setProjects(list)
+        // t260903-07：项目集发布给 chat 项目 tag 装饰器（整体一个请求，成功才发，
+        // 失败不发——单态保留 last-known-good）。
+        publishProjects(list.map(p => ({ key: p.key, dirs: p.dirs })))
         const entries = await Promise.all(list.map(async (p) => {
           try {
             const tr = await fetch(`/suyou-workbench/api/wf/tickets?project=${encodeURIComponent(p.key)}`).then(r => r.json())
-            return [p.key, (tr?.result?.tickets ?? []) as Ticket[]] as const
+            const tickets = (tr?.result?.tickets ?? []) as Ticket[]
+            // t260903-07：逐项目成功分支才发布工单→项目映射（catch 分支不发，见上方 import 注释）。
+            publishProjectEntry(p.key, tickets.map(t => t.id))
+            return [p.key, tickets] as const
           } catch {
             return [p.key, [] as Ticket[]] as const
           }
@@ -559,19 +489,20 @@ export function WorkbenchSidebar(props: SidebarProps) {
     return () => { cancelled = true; stopPoll() }
   }, [wide])
 
-  // 点工单：中列开工单详情 + 建/找 session 导航到右栏 chat。
-  // 会话恢复链时序与故障取舍见 openTicketSessionFlow（t260831-08，流程体抽成
-  // 模块级纯函数供 smoke 桩测——本链路是工单核心验收对象）。
+  // 点工单（t260903-07 起）：只在中列开工单详情抽屉，右栏 chat 恒为全局会话
+  // 不切换（联动下线口径见本文件头部注释）。左列行/立项单关联行/度量下钻三入口共用。
   const handleTicketClick = useCallback((t: Ticket, projectKey: string) => {
     setSelectedId(t.id)
     setViewProject(projectKey)
     setRightView('board')
     setFocusNonce(n => n + 1)
-    void openTicketSessionFlow(
-      { fetchImpl: fetch.bind(globalThis), sessions, slotOpen },
-      { ticketId: t.id, project: projectKey },
-    )
-  }, [sessions, slotOpen])
+  }, [])
+
+  // chat 项目 tag 装饰器（t260903-07 工单②）：挂/卸随本组件（插件在装即挂，
+  // 卸载=全终态回收，见 chat-project-tag.ts teardown 清单）。
+  // F1 修复（验收走查 gen0）：走 effect 形态入口——返回值就是 cleanup 函数，
+  // 杜绝「useEffect 直接返回 handle 对象被忽略 → 卸载零回收」的接线陷阱。
+  useEffect(() => startChatProjectTagEffect({ fetchImpl: fetch.bind(globalThis) }), [])
 
   // 点项目行的视图图标：中列切到该项目该视图（stopPropagation 不触发折叠）。
   // 📋 额外做两件事（t260825-05：开着详情抽屉点 📋 无反应的修复）——

@@ -115,7 +115,20 @@ import { promisify } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
 import { runAdminCli } from '../suyou-tools.ts'
 import { findProject, loadProjects, primaryDir, type ProjectEntry } from '../suyou-projects.ts'
+
+async function projectRootsFor(projectKey: unknown): Promise<string[]> {
+  // 跨项目工单（t260903-11）：票所属项目注册目录=实时态/日志读取的合法根。
+  // 注册表异常→空数组=回落旧行为（仅本仓），不放大故障面。
+  if (typeof projectKey !== 'string' || projectKey === '') return []
+  try {
+    const projects = await loadProjects()
+    const p = findProject(projects, projectKey)
+    return p ? p.dirs.filter((d): d is string => typeof d === 'string') : []
+  } catch { return [] }
+}
+
 import { computeTicketDiff, type TicketForDiff } from './src/host/changes.ts'
+import { ticketShowHttpVerdict } from './src/host/ticket-error.ts'
 import { readLatestScanReport } from './src/host/scan-report.ts'
 import { listAgentLogs, resolveSuyouBaseDir, _sessionKbFast } from './src/host/agent-logs.ts'
 import { readAgentLiveTail, resolveSessionFile } from './src/host/agent-live.ts'
@@ -317,6 +330,23 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
   /** 调 admin.py call <tool> <args>，成功/结构化失败都原样透传（含 run_id）。 */
   async function callTool(tool: string, args: unknown): Promise<any> {
     return runAdminCli(cli, ['call', tool, JSON.stringify(args ?? {})])
+  }
+
+  /** ticket show 失败的统一分流（KI-025，t260903-06）：判据=body 的 kind 机器字段
+   *  （client.py 五出口分级产出 → ticket.py QueryError → tools_registry 并入），
+   *  HTTP 裁定收口在 src/host/ticket-error.ts（单测直跑）。kind 缺失/未知一律 500
+   *  非 404——「工单不存在」只能由明确 NotFound 语义触发，谎报是本票消灭对象。 */
+  function sendTicketShowError(res: ServerResponse, s: unknown, id = ''): void {
+    const body = s as { error?: unknown; kind?: unknown } | null
+    const kind = typeof body?.kind === 'string' ? body.kind : ''
+    const msg = String(body?.error ?? (id ? `工单读取失败：${id}` : '工单读取失败'))
+    const v = ticketShowHttpVerdict(kind)
+    sendJson(res, v.status, {
+      ok: false,
+      error: msg,
+      kind: kind || 'internal',
+      ...(v.retryable ? { retryable: true } : {}),
+    })
   }
 
   /** 调 temporal-poc client.py（Temporal TicketWorkflow：sign 审批签字走这里）。 */
@@ -596,7 +626,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     try {
       const s = await callTool('ticket', { op: 'show', id })
       if (s?.ok !== true) {
-        sendJson(res, 404, { ok: false, error: `工单不存在或读取失败：${String(s?.error ?? id)}` })
+        sendTicketShowError(res, s, id)
         return
       }
       const t = s.result as TicketForDiff
@@ -778,8 +808,14 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       }
       try {
         const r = await callTool('ticket', { op: 'show', id: parts[0] })
+        if (r?.ok !== true) {
+          // KI-025 分级分流：详情不再 200 透传 ok:false——按 kind 定 HTTP
+          // （404/410/503+retryable/500），UI 据此「真不存在报错 / 瞬时保留快照静默重试」。
+          sendTicketShowError(res, r, parts[0])
+          return
+        }
         // 补充 agent 进度（轻量 stat）
-        const tk = r?.result
+        const tk = r.result
         if (tk && tk.stage_state === 'running' && tk.worktree) {
           try {
             const info = await _sessionKbFast(join(repo, tk.worktree, '.dsh', 'sessions'))
@@ -1287,11 +1323,11 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     try {
       const s = await callTool('ticket', { op: 'show', id })
       if (s?.ok !== true) {
-        sendJson(res, 404, { ok: false, error: `工单不存在或读取失败：${String(s?.error ?? id)}` })
+        sendTicketShowError(res, s, id)
         return
       }
       const t = s.result ?? {}
-      const { base, reason } = resolveSuyouBaseDir(repo, id, t)
+      const { base, reason } = resolveSuyouBaseDir(repo, id, t, await projectRootsFor(t.project))
       const result = await listAgentLogs(base)
       if (reason !== undefined && result.reason === undefined) result.reason = reason
       sendJson(res, 200, { ok: true, result })
@@ -1313,11 +1349,11 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     try {
       const s = await callTool('ticket', { op: 'show', id })
       if (s?.ok !== true) {
-        sendJson(res, 404, { ok: false, error: `工单不存在或读取失败：${String(s?.error ?? id)}` })
+        sendTicketShowError(res, s, id)
         return
       }
       const t = s.result ?? {}
-      const ref = await resolveSessionFile(repo, id, t)
+      const ref = await resolveSessionFile(repo, id, t, await projectRootsFor(t.project))
       if (ref.refused === true) {
         sendJson(res, 400, { ok: false, error: ref.reason ?? '工单字段越界（拒绝读取）' })
         return
@@ -1348,11 +1384,11 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     try {
       const s = await callTool('ticket', { op: 'show', id })
       if (s?.ok !== true) {
-        sendJson(res, 404, { ok: false, error: `工单不存在或读取失败：${String(s?.error ?? id)}` })
+        sendTicketShowError(res, s, id)
         return
       }
       const t = s.result ?? {}
-      const ref = await resolveAllSessionFiles(repo, id, t)
+      const ref = await resolveAllSessionFiles(repo, id, t, await projectRootsFor(t.project))
       if (ref.refused === true) {
         sendJson(res, 400, { ok: false, error: ref.reason ?? '工单字段越界（拒绝读取）' })
         return
@@ -1375,7 +1411,9 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     }
   }
 
-  /** 工单↔session 绑定：点工单→验存在→找/建 session，新建时附工单快照（client 作首条消息注入）。 */
+  /** 工单↔session 绑定：点工单→验存在→找/建 session，新建时附工单快照（client 作首条消息注入）。
+   *  t260903-07 起客户端无调用方（openTicketSessionFlow 已删），联动入口下线仅客户端面——
+   *  本路由按 ③ 口径保留（既有 ticket-* 会话数据留存、回滚面完整），勿标废弃。 */
   async function handleTicketSessionOpen(req: IncomingMessage, res: ServerResponse): Promise<void> {
     let body: any
     try { body = await readJsonBody(req) } catch (err) {
@@ -1403,11 +1441,24 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     }
     const primary = primaryDir(proj)
     // 存在性校验 + 快照素材：bogus id 不许建空 session（原路只验格式， bogus 也会建出孤儿会话）
+    // KI-025：show 失败按 kind 分流——只有 not_found 才许「工单不存在」；瞬时/终态/
+    // 未知走 503/410/500（传输层抛错同属瞬时面）。否则阶段切换窗开建会话会谎报不存在。
     let tk: any
     try {
       const r = await callTool('ticket', { op: 'show', id: ticketId })
-      tk = r?.result
-    } catch { tk = null }
+      if (r?.ok !== true) {
+        sendTicketShowError(res, r, ticketId)
+        return
+      }
+      tk = r.result
+    } catch (err) {
+      sendJson(res, 503, {
+        ok: false,
+        error: `工单查询失败（瞬时），请稍后重试：${String(err instanceof Error ? err.message : err)}`,
+        retryable: true,
+      })
+      return
+    }
     if (!tk || tk.id !== ticketId) {
       sendJson(res, 404, { ok: false, error: `工单不存在：${ticketId}` })
       return
@@ -1555,6 +1606,8 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         ws.register({ kind: 'prefix', path: EPICS_PREFIX, handler: handleEpicRoute }),
         ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/workspaces', handler: handleWorkspaceList }),
         ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/projects', handler: handleProjects }),
+        // t260903-07 起客户端无调用方（openTicketSessionFlow 已删），联动入口下线仅客户端面——
+        // 路由按 ③ 口径保留（数据留存/回滚面），见 handleTicketSessionOpen 头注。
         ws.register({ kind: 'exact', path: '/suyou-workbench/api/ticket-session/open', handler: handleTicketSessionOpen }),
         ws.register({ kind: 'exact', path: '/suyou-workbench/api/global-session/open', handler: handleGlobalSessionOpen }),
       ]

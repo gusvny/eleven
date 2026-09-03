@@ -210,3 +210,13 @@ sys.exit(1)
 
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed === 0 ? 0 : 1)
+
+// t260903-11 跨项目守卫放宽：extraRoots=票项目注册目录，命中放行、双失守拒
+{
+  const rOk = resolveSuyouBaseDir(repo, 't-x11', { worktree: '/otherproj/.lane/t-x11' }, ['/otherproj'])
+  ok(rOk.base === '/otherproj/.lane/t-x11/.suyou' && rOk.reason === undefined, 'extraRoots 命中 → 放行（跨项目票）')
+  const rNo = resolveSuyouBaseDir(repo, 't-x11', { worktree: '/otherproj/.lane/t-x11' })
+  ok(rNo.base === '' && (rNo.reason ?? '').includes('越界'), 'extraRoots 缺省 → 仍拒（旧行为）')
+  const rEvil = resolveSuyouBaseDir(repo, 't-x11', { worktree: '/etc' }, ['/otherproj'])
+  ok(rEvil.base === '' && (rEvil.reason ?? '').includes('越界'), 'extraRoots 外路径 → 仍拒（防穿越硬项）')
+}

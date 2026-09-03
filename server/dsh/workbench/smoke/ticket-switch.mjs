@@ -10,12 +10,8 @@
  *   B. listEvidenceFiles + 防穿：正常列表（归档+泳道两候选、去重排序）、白名单
  *      过滤（怪名文件不入列表）、目录不存在软降级 []、`../` 与非法 ticket id。
  *   C. evidenceImgSrc 契约（经构建产物 lib/client.cjs 测真代码，不是复制品）。
- *   D. 会话恢复链 openTicketSessionFlow（经构建产物测真代码；stub 会话 +
- *      stub fetch + send 按 sid 分桶）：
- *      D1 探针场景：A 开（created，快照注入恰好一次）→ A 打字 → B 开（B 快照注入、
- *         不落 A 桶——串扰断言）→ 切回 A（created:false，内容保留、不重复注入）；
- *      D2 未列出超时：不 open、不注入、不 throw（显式失败不假成功）；
- *      D3 open 失败（host !ok）：不导航不注入。
+ *   D.（t260903-07 删除）会话恢复链 openTicketSessionFlow——每工单会话联动下线，
+ *      流程体已删；服务端路由按 ③ 数据留存口径保留（node.ts 留痕注释）。
  */
 
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
@@ -135,115 +131,20 @@ function loadClientBundle() {
   return factory(makeStubRequire())
 }
 const client = loadClientBundle()
-const { openTicketSessionFlow, evidenceImgSrc } = client
-if (typeof openTicketSessionFlow !== 'function' || typeof evidenceImgSrc !== 'function') {
-  console.error('  FAIL 构建产物未导出 openTicketSessionFlow / evidenceImgSrc（检查 index.tsx re-export 与 tsdown 构建）')
+const { evidenceImgSrc } = client
+if (typeof evidenceImgSrc !== 'function') {
+  console.error('  FAIL 构建产物未导出 evidenceImgSrc（检查 tsdown 构建）')
   process.exit(1)
 }
+// t260903-07：原 D 组（openTicketSessionFlow 会话恢复链时序 D1/D2/D3）随流程体删除——
+// 每工单会话联动下线，点工单只开中列详情（右栏 chat 恒为全局会话）。
+// A 组（ticketContext 契约+畸形 tk 用例）保留：ticketContext 是活代码（服务端
+// /api/ticket-session/open 按 ③ 数据留存口径保留，node.ts 有留痕注释）。B/C 与被删链无关，不动。
 
 section('C evidenceImgSrc 契约')
 {
   ok(evidenceImgSrc('t1', 'a.png') === '/suyou-workbench/api/wf/tickets/t1/evidence/a.png', '相对路径端点契约（safeUrl 放行）')
   ok(!evidenceImgSrc('t1', 'a.png').startsWith('data:'), '不走 data: 内联（取舍清单 #4：防穿收口 host）')
-}
-
-/** stub 会话面：脚本化 listed/铸造时机，send 按 sid 分桶记账（comment 5 串扰断言的桶）。 */
-function makeStubSessions({ hostSessionIds = [], scopeResolves = true } = {}) {
-  const opened = []
-  const sends = {}   // sid -> 注入的消息数组（分桶）
-  const convs = {}   // sid -> 会话域（messages 即「会话内容」）
-  const byId = {}
-  return {
-    sends,
-    convs,
-    opened,
-    createCalls: [],
-    sessions: {
-      open(id) {
-        opened.push(id)
-        if (!(id in byId)) throw new Error(`sessions.select: unknown session ${id}`)
-      },
-      scope(id) {
-        if (!scopeResolves || !opened.includes(id)) return null
-        const c = (convs[id] ??= { messages: [], send: async (m) => { (sends[id] ??= []).push(m) } })
-        return { conversation: c }
-      },
-      refresh: async () => {
-        // 模拟 host 新建会话经 wire list 同步进客户端（hostSessionIds 空数组=永不同步）
-        for (const id of hostSessionIds) byId[id] = { displayTitle: id }
-      },
-      list: { getSnapshot: () => ({ byId, current: null }) },
-    },
-  }
-}
-
-/** stub fetch：POST ticket-session/open，每个 ticketId 首问 created:true 带快照，重问 created:false。 */
-function makeStubFetch(contexts) {
-  const asked = new Set()
-  return async (_url, init) => {
-    const body = JSON.parse(init.body)
-    const id = body.ticket_id
-    const created = !asked.has(id)
-    asked.add(id)
-    return {
-      json: async () => created
-        ? { ok: true, result: { session_id: `ticket-${id}`, created: true, context: contexts[id] } }
-        : { ok: true, result: { session_id: `ticket-${id}`, created: false } },
-    }
-  }
-}
-
-section('D1 探针场景：A 打字 → 切 B → 切回 A → 内容保留')
-{
-  const st = makeStubSessions({ hostSessionIds: ['ticket-A', 'ticket-B'] })
-  const ctxs = { A: '快照-A', B: '快照-B' }
-  const fetchImpl = makeStubFetch(ctxs)
-  const flow = (o) => openTicketSessionFlow(
-    { fetchImpl, sessions: st.sessions, waitListed: async () => true, waitScope: async (s, id) => st.sessions.scope(id) },
-    o,
-  )
-  await flow({ ticketId: 'A', project: 'suyou' })
-  ok(st.sends['ticket-A']?.length === 1 && st.sends['ticket-A'][0] === '快照-A', 'A 新建：快照注入恰好一次')
-  st.convs['ticket-A'].messages.push('user: 我在 A 打的字') // A 打字
-  await flow({ ticketId: 'B', project: 'suyou' })
-  ok(st.sends['ticket-B']?.length === 1 && st.sends['ticket-B'][0] === '快照-B', 'B 新建：B 快照注入')
-  ok(st.sends['ticket-A'].length === 1, '串扰断言：B 的注入没有落在 A 的会话里（send 按 sid 分桶）')
-  await flow({ ticketId: 'A', project: 'suyou' }) // 切回 A（created:false 恢复路径）
-  ok(st.sends['ticket-A'].length === 1, '切回 A：不重复注入（created:false 恢复路径零写入）')
-  ok(st.convs['ticket-A'].messages.includes('user: 我在 A 打的字'), '切回 A：内容保留（打的字还在）')
-  ok(st.sends['ticket-B'].length === 1, '切回 A：B 桶不受影响')
-  ok(JSON.stringify(st.opened) === JSON.stringify(['ticket-A', 'ticket-B', 'ticket-A']), `打开序列确定性 id（got ${JSON.stringify(st.opened)}）`)
-}
-
-section('D2 未列出超时：不 open、不注入、不 throw')
-{
-  const st = makeStubSessions({ hostSessionIds: [] })
-  let openedAfter = false
-  await openTicketSessionFlow(
-    {
-      fetchImpl: makeStubFetch({ A: '快照-A' }), sessions: st.sessions,
-      waitListed: async () => false, // 超时（生产 10s 轮询的终态）
-      waitScope: async () => { openedAfter = true; return null },
-    },
-    { ticketId: 'A', project: 'suyou' },
-  )
-  ok(st.opened.length === 0, '未列出 → 不调 open（挡在 throw 之前）')
-  ok(!openedAfter && st.sends['ticket-A'] === undefined, '不导航不注入（显式失败，等用户重试）')
-}
-
-section('D3 open host 失败：不导航不注入')
-{
-  const st = makeStubSessions()
-  await openTicketSessionFlow(
-    {
-      fetchImpl: async () => ({ json: async () => ({ ok: false, error: '工单不存在：A' }) }),
-      sessions: st.sessions,
-      waitListed: async () => true,
-      waitScope: async () => null,
-    },
-    { ticketId: 'A', project: 'suyou' },
-  )
-  ok(st.opened.length === 0 && st.sends['ticket-A'] === undefined, 'host !ok → 不 open 不注入，不 throw')
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

@@ -516,11 +516,32 @@ def _poc_ok(out):
     return result
 
 
+class QueryError(ValueError):
+    """工单查询失败（分级，KI-025 t260903-06）：kind 随异常存活，tools_registry.call
+    的异常出口按 hasattr(e, 'kind') 把它并入回执 dict，工作台/UI 据此分流
+    404（not_found）/503（transient）/410（terminal）/500（internal）。
+
+    红线：查询失败（超时/连接/取消）绝不伪造成「工单不存在」——不存在语义只有
+    client.py kind=not_found（describe 命中 NotFoundFailure）一个入水口。"""
+
+    def __init__(self, msg, kind='internal'):
+        super().__init__(msg)
+        self.kind = kind
+
+
 def _v2_query(tid):
-    """工单查询：返回 (meta, snapshot)；不存在/非 v2 → None。"""
+    """工单查询：返回 (meta, snapshot)。
+
+    返回 None 的唯一语义 = 工单不存在（client 回执 kind=not_found；旧引擎/非 v2
+    执行同样视为「此 id 无 v2 工单」）。其余任何失败（transient 超时/连接、
+    terminal 终态、internal 畸形）抛 QueryError(kind)——绝不回落成不存在
+    （KI-025：t260903-02 实案，查询失败谎报不存在诱导值守误操作）。"""
     out = _poc('ticket-query', {'ticket_id': tid})
     if not out.get('ok'):
-        return None
+        kind = out.get('kind') if isinstance(out.get('kind'), str) and out.get('kind') else 'internal'
+        if kind == 'not_found':
+            return None
+        raise QueryError('工单查询失败（%s）：%s' % (kind, out.get('error') or '未知错误'), kind)
     res = out.get('result') or {}
     if res.get('engine') != _shared().ENGINE_V2:
         return None
@@ -764,7 +785,9 @@ def _show(a):
     tid = a.get('id') or ''
     v2 = _v2_query(tid)
     if v2 is None:
-        raise ValueError('工单不存在: %s（Temporal 无此 workflow）' % tid)
+        # None 的唯一来源=kind=not_found（_v2_query 契约）——这里必须带 kind 抛
+        # QueryError，否则 registry 回执丢 kind，工作台 404 分流失去唯一合法判据。
+        raise QueryError('工单不存在: %s（Temporal 无此 workflow）' % tid, kind='not_found')
     return v2[0]
 
 
