@@ -96,9 +96,13 @@ export function laneBuildRejectReason(laneWbDir) {
       if (m > newestSrc) { newestSrc = m; newestPath = path.relative(laneWbDir, f); }
     }
   }
-  if (newestSrc > buildM) {
+  // 容差 2s：git checkout 按树序写文件，同批检出的 lib/src mtime 相差毫秒级
+  // （t260903-12 两建实雷：18ms 写序差被误判陈旧→拒跑）。分钟级陈旧仍必拦
+  // （防伪语义不变：拍陈旧 build 截图=证据造假）。
+  const MTIME_TOL_MS = 2000;
+  if (newestSrc > buildM + MTIME_TOL_MS) {
     return `泳道 build 陈旧：lib/client.js（${new Date(buildM).toISOString()}）早于源码 ` +
-      `${newestPath}（${new Date(newestSrc).toISOString()}）。` +
+      `${newestPath}（${new Date(newestSrc).toISOString()}，容差 ${MTIME_TOL_MS}ms）。` +
       `拍陈旧 build 的截图=证据造假，先在泳道重建 bundle 再跑。`;
   }
   return null;
