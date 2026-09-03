@@ -695,7 +695,7 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int) ->
     分支。合并进行中的代落盘唯一收口=settle_conflict_resolution（含标记
     残留校验），本函数直接跳过。正常 implement 轮无 MERGE_HEAD，行为不变。
     """
-    if not _is_worktree_of(cwd):
+    if not _is_worktree_of(cwd, _lane_repo_root(cwd)):  # 跨项目同锚（t260903-10）
         return ""
     p = _git(["rev-parse", "--verify", "MERGE_HEAD"], cwd)
     if p.returncode == 0:
@@ -2541,11 +2541,12 @@ async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
-    if not _is_worktree_of(wt):
+    wt_repo = _lane_repo_root(wt)  # 跨项目：按约定锚项目仓（t260903-10 二次实雷——漏此点曾致死票）
+    if not _is_worktree_of(wt, wt_repo):
         raise RuntimeError(
-            "settle_lane: worktree %r（解析为 %s）不是本仓库（%s）的已注册 worktree，"
+            "settle_lane: worktree %r（解析为 %s）不是其归属仓（%s）的已注册 worktree，"
             "拒绝回退主树代落盘（静默回退=该落盘的泳道什么都不落还报干净，t260901-16 实锤）"
-            % (args.worktree, wt, REPO_ROOT))
+            % (args.worktree, wt, wt_repo))
     cwd = wt
     note = _settle_worktree_lane(cwd, args.ticket_id, args.stage_id, args.gen)
     rc = _git(["rev-list", "--count", "HEAD"], cwd)
