@@ -393,7 +393,11 @@ def _code(a):
         checks.append(_check('写集白名单', items))
     elif base:
         items = []
-        rc, out = _diff_names(base, root)
+        # name-status（非 name-only）：增/改/删分开判——删除敏感路径=正确清退
+        # 不红（t260903-12 实雷：amend 致 merge-base 漂移后清除 .suyou 的 D
+        # 被误红成「入库」）；新增/修改敏感路径才是泄漏。
+        rc, out = _sh(['git', '-c', 'core.quotepath=false', 'diff',
+                       '--name-status', base + '...HEAD'], root, crop=None)
         if rc != 0:
             items.append({'detail': 'git diff 失败: %s' % out[-200:]})
         else:
@@ -401,15 +405,20 @@ def _code(a):
                 judge, judge_src = ws, '工单 write_set'
             else:
                 judge, judge_src = allow, 'verify.yaml write_allow（粗判据）'
-            for f in out.splitlines():
-                f = f.strip()
+            for ln in out.splitlines():
+                ln = ln.strip()
+                if not ln:
+                    continue
+                st = ln.split('	')[0][:1]
+                f = ln.split('	')[-1].strip()
                 if not f:
                     continue
                 if f.startswith(RUNTIME_PREFIXES):
-                    # t260903-12 安全事件：运行时前缀出现在 diff=已被 commit 入库
-                    # （凭据/会话泄漏通道，03d128f 式收殓裸 add -A 的必红项）——
-                    # 跳过语义只对「未追踪的现场噪音」成立，入库即红。
-                    items.append({'detail': '敏感/运行时路径入库（必须 untrack）：' + f})
+                    if st in ('A', 'M', 'T'):
+                        # t260903-12 安全事件：运行时前缀以新增/修改出现在 diff
+                        # =已被 commit 入库（凭据/会话泄漏通道，03d128f 式收殓裸
+                        # add -A 的必红项）；D=清退，放行。
+                        items.append({'detail': '敏感/运行时路径入库（必须 untrack）：' + f})
                     continue
                 if not _in_write_set(f, judge):
                     items.append({'detail': '越界写: %s（判据=%s：%s）' % (f, judge_src, '、'.join(judge[:6]))})
