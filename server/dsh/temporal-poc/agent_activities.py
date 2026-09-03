@@ -2038,7 +2038,7 @@ async def merge(args: MergeArgs) -> MergeResult:
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
-    res = _squash_merge(REPO_ROOT, wt, args.branch, args.ticket_id,
+    res = _squash_merge(_lane_repo_root(wt), wt, args.branch, args.ticket_id,  # 第八枪（t260903-11 终建实雷）：squash 进泳道所属仓
                         defer_teardown=bool(args.defer_teardown))
     if res.ok:
         activity.logger.info("[%s] squash 落账：%s（%s）%s", args.ticket_id,
