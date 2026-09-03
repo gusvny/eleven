@@ -11,3 +11,5 @@ state.json
 .DS_Store
 .worktrees/
 .lane/
+.dsh/
+.suyou/

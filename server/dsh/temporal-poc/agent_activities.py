@@ -1661,19 +1661,24 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
         else:
             if wl_err:  # 多行畸形输出：取首行继续，留痕可检索
                 activity.logger.info("[%s] %s", args.ticket_id, wl_err)
-            p = subprocess.run(
-                ["python3", "server/admin.py", "call", "verify_lane",
-                 json.dumps({"lane": "code", "path": str(wt),
-                             "base": wl_base, "require_base": True,
-                             "write_set": list(args.write_set)})],
-                cwd=str(wt), capture_output=True, text=True, timeout=900)
+            vp = await asyncio.create_subprocess_exec(  # t260903-09 同雷 async 化（最长 15min 冻结）
+                "python3", "server/admin.py", "call", "verify_lane",
+                json.dumps({"lane": "code", "path": str(wt),
+                            "base": wl_base, "require_base": True,
+                            "write_set": list(args.write_set)}),
+                cwd=str(wt), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             try:
-                payload = json.loads(p.stdout)
+                vo_b, ve_b = await asyncio.wait_for(vp.communicate(), timeout=900)
+                v_stdout, v_stderr = vo_b.decode("utf-8", "replace"), ve_b.decode("utf-8", "replace")
+                payload = json.loads(v_stdout)
                 res = payload.get("result") or {}
-                green = bool(payload.get("ok")) and bool(res.get("green")) and p.returncode == 0
+                green = bool(payload.get("ok")) and bool(res.get("green")) and vp.returncode == 0
                 detail = "exit=%s red=%s" % (res.get("exit_code"), res.get("red_count"))
+            except asyncio.TimeoutError:
+                vp.kill(); await vp.wait()
+                green, detail = False, "verify_lane 超时（>900s）"
             except json.JSONDecodeError:
-                green, detail = False, (p.stderr or p.stdout or "无输出").strip()[-300:]
+                green, detail = False, (v_stderr or v_stdout or "无输出").strip()[-300:]
             checks.append({"item": "泳道内 verify_lane code 绿灯", "green": green, "detail": detail})
     except Exception as e:
         checks.append({"item": "泳道内 verify_lane code 绿灯", "green": False,
@@ -2557,24 +2562,32 @@ async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
 BATCH_TIMEOUT_SEC = int(os.environ.get("SUYOU_INTEG_BATCH_TIMEOUT_SEC") or 5400)
 
 
-def _run_scenarios(wt: Path, ticket_id: str) -> IntegrationRunResult:
+async def _run_scenarios(wt: Path, ticket_id: str) -> IntegrationRunResult:
     """薄壳（宿主令 t260902 薄壳化）：声明读取/命令执行/契约解析全在 verify_lane lane=integ
     （单份实现+单份解析器），本函数只下单+把工具 JSON 翻译成 IntegrationRunResult
     （字段口径不变：ran/passed/failed/details[{name,cmd,exit,output_tail}]，arbitrate 无感）。"""
     admin = Path(__file__).resolve().parents[2] / "admin.py"
+    # t260903-09 实雷（宿主首诊命中）：async 活动里禁止阻塞 subprocess.run——
+    # 曾把 worker 事件循环冻满整套件时长，查询全体 8s 超时（诊断笔记
+    # notes/diag-query-starvation.md）。全 async 化：create_subprocess + wait_for，
+    # 超时先杀再报。
+    p = await asyncio.create_subprocess_exec(
+        "python3", str(admin), "call", "verify_lane",
+        json.dumps({"lane": "integ", "path": str(wt)}),
+        cwd=str(wt), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
-        p = subprocess.run(
-            ["python3", str(admin), "call", "verify_lane",
-             json.dumps({"lane": "integ", "path": str(wt)})],
-            cwd=str(wt), capture_output=True, text=True,
-            timeout=BATCH_TIMEOUT_SEC + 300)
-    except subprocess.TimeoutExpired:
+        p_out_b, p_err_b = await asyncio.wait_for(
+            p.communicate(), timeout=BATCH_TIMEOUT_SEC + 300)
+    except asyncio.TimeoutError:
+        p.kill(); await p.wait()
         return IntegrationRunResult(error="场景执行器整体超时（>%ds）" % BATCH_TIMEOUT_SEC)
+    p_stdout = p_out_b.decode("utf-8", "replace")
+    p_stderr = p_err_b.decode("utf-8", "replace")
     try:
-        payload = json.loads(p.stdout)
+        payload = json.loads(p_stdout)
     except json.JSONDecodeError:
         return IntegrationRunResult(error="verify_lane integ 无有效输出（exit=%s）：%s"
-                                    % (p.returncode, ((p.stdout or "") + (p.stderr or ""))[-2000:]))
+                                    % (p.returncode, (p_stdout + p_stderr)[-2000:]))
     res = payload.get("result") or {}
     if not payload.get("ok") or res.get("err"):
         return IntegrationRunResult(error=str(res.get("err") or "未知错误"))
@@ -2596,7 +2609,7 @@ async def run_integration_tests(args: IntegrationRunArgs) -> IntegrationRunResul
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
-    return _run_scenarios(wt, args.ticket_id)
+    return await _run_scenarios(wt, args.ticket_id)
 
 
 @activity.defn
@@ -2668,13 +2681,18 @@ async def acceptance_walkthrough(args: AgentStageArgs) -> StageResult:
     cap_note = ""
     try:
         lane = str(args.worktree or cwd)
-        proc = subprocess.run(
-            ["node", str(REPO_ROOT / "server" / "dsh" / "ui-check" / "capture-lane.mjs"),
-             "--lane", lane, "--out", str(cap_out)],
-            capture_output=True, text=True, timeout=UI_CAPTURE_TIMEOUT_SEC)
-        cap_note = (proc.stdout or "")[-1500:] + (proc.stderr or "")[-500:]
-        if proc.returncode != 0:
-            cap_note = "capture-lane 退出码 %s：%s" % (proc.returncode, cap_note)
+        cproc = await asyncio.create_subprocess_exec(  # t260903-09 同雷 async 化（浏览器实拍分钟级）
+            "node", str(REPO_ROOT / "server" / "dsh" / "ui-check" / "capture-lane.mjs"),
+            "--lane", lane, "--out", str(cap_out),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        try:
+            co_b, ce_b = await asyncio.wait_for(cproc.communicate(), timeout=UI_CAPTURE_TIMEOUT_SEC)
+            cap_note = co_b.decode("utf-8", "replace")[-1500:] + ce_b.decode("utf-8", "replace")[-500:]
+            if cproc.returncode != 0:
+                cap_note = "capture-lane 退出码 %s：%s" % (cproc.returncode, cap_note)
+        except asyncio.TimeoutError:
+            cproc.kill(); await cproc.wait()
+            cap_note = "capture-lane 超时（>%ss）" % UI_CAPTURE_TIMEOUT_SEC
     except Exception as e:
         cap_note = "capture-lane 启动失败：%s: %s" % (type(e).__name__, e)
     project = await _fetch_ticket_project(args.ticket_id)

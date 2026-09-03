@@ -79,17 +79,22 @@ ok(integration_route("code-fault", 0, 6).startswith("blocked:"), "code-fault >5 
 ok(integration_route("???", 0, 0).startswith("blocked:"), "未知 verdict → blocked")
 
 section("C _run_scenarios（tmp 泳道真跑项目声明执行器）")
+
+
+def _run_scenarios_sync(wt, tid):  # t260903-09 后 _run_scenarios async 化，selfcheck 同步桥
+    import asyncio as _a
+    return _a.run(_run_scenarios(wt, tid))
 from agent_activities import _run_scenarios, settle_lane  # noqa: E402
 
 tmp = Path(tempfile.mkdtemp(prefix="suyou-integ-scenarios-"))
-ok(_run_scenarios(tmp, "t-x").error != "", "verify.yaml 缺失 → error（fail-closed）")
+ok(_run_scenarios_sync(tmp, "t-x").error != "", "verify.yaml 缺失 → error（fail-closed）")
 (tmp / "verify.yaml").write_text(
     "schema: v1\nlanes:\n  code:\n    write_allow:\n      - .\n"
     "integration:\n  cmd: python3 integ_stub.py\n", encoding="utf-8")
-ok(_run_scenarios(tmp, "t-x").error != "", "cmd 指向不存在脚本 → 运行失败非崩溃（error 带退出码）")
+ok(_run_scenarios_sync(tmp, "t-x").error != "", "cmd 指向不存在脚本 → 运行失败非崩溃（error 带退出码）")
 (tmp / "integ_stub.py").write_text(
     "print('SCENARIOS ran=1 pass=0 fail=1')\nimport sys\nsys.exit(1)\n", encoding="utf-8")
-r = _run_scenarios(tmp, "t-x")
+r = _run_scenarios_sync(tmp, "t-x")
 ok(r.error != "", "exit 非零且零结果行 → error（fail-closed，交 arbitrate 判测试道自身故障）")
 (tmp / "integ_stub.py").write_text(
     "print('PASS [过]')\n"
@@ -97,7 +102,7 @@ ok(r.error != "", "exit 非零且零结果行 → error（fail-closed，交 arbi
     "print('    输出尾段样例')\n"
     "print('SCENARIOS ran=2 pass=1 fail=1')\n"
     "import sys\nsys.exit(1)\n", encoding="utf-8")
-r = _run_scenarios(tmp, "t-x")
+r = _run_scenarios_sync(tmp, "t-x")
 ok(r.error == "" and r.ran == 2 and r.passed == 1 and r.failed == 1,
    "计数：2 跑 1 过 1 败")
 ok(len(r.details) == 2 and r.details[0]["exit"] == 0 and r.details[1]["exit"] == 1
