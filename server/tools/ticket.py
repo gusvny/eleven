@@ -636,7 +636,8 @@ def _create(a):
             tid, wf['lane'], lane=a.get('lane') or '',
             workspace=a.get('workspace'), worktree=a.get('worktree') or '',
             branch=a.get('branch') or '',
-            template_workspace_dir=(wf.get('workspace') == 'dir'))
+            template_workspace_dir=(wf.get('workspace') == 'dir'),
+            project_root=proj['dirs'][0])
     except ValueError as e:
         raise ValueError('create 参数非法：%s' % e)
     _check_paths_under_project(proj, ws, worktree)

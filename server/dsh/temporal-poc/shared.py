@@ -705,8 +705,14 @@ def derive_lane_workspace(
         workspace: Optional[Dict[str, str]] = None,
         worktree: str = "", branch: str = "",
         template_workspace_dir: bool = False,
+        project_root: str = "",
 ) -> Tuple[str, Optional[Dict[str, str]], str, str]:
     """lane / workspace / worktree / branch 的推导与校验（创建链路单一真源）。
+
+    project_root（跨项目，t260903-10 首战教训）：给了则把相对泳道路径存成
+    绝对路径（锚项目注册目录）——下游九处 ``if not p.is_absolute(): REPO_ROOT/p``
+    全走直通分支，引擎根与项目根解耦。缺省空=旧行为（相对路径，运行侧锚
+    引擎根，兼容引擎住在项目里的历史 payload）。
 
     返回 (lane, workspace, worktree, branch)；非法 → ValueError（创建即拒收，
     把「跑 1.5 小时后才暴露」的错提前到创建瞬间）。规则：
@@ -753,6 +759,10 @@ def derive_lane_workspace(
             branch = "lane/" + ws["path"].rstrip("/").rsplit("/", 1)[-1]
     elif ws is None and template_workspace_dir:
         ws = {"type": "dir", "path": WS_DIR_BASE + "/" + ticket_id}
+    if project_root and ws is not None and not ws["path"].startswith("/"):
+        ws = {"type": ws["type"], "path": project_root.rstrip("/") + "/" + ws["path"]}
+        if worktree and not worktree.startswith("/"):
+            worktree = project_root.rstrip("/") + "/" + worktree
     return lane, ws, worktree, branch
 
 

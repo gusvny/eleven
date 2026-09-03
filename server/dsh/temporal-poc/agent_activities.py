@@ -517,7 +517,9 @@ def _gitdir_is_real(cwd: Path) -> bool:
         return False
     try:
         gd = Path(p.stdout.strip()).resolve()
-        return gd.is_relative_to((REPO_ROOT / ".git").resolve())
+        # 跨项目（t260903-10）：worktree 的真 gitdir 在其所属项目仓 .git 下，
+        # 按路径约定自锚定，不恒锚引擎仓（否则跨项目泳道恒误判被"修复"写坏）。
+        return gd.is_relative_to((_lane_repo_root(cwd) / ".git").resolve())
     except Exception:
         return False
 
@@ -528,7 +530,7 @@ def _restore_gitfile(cwd: Path, ticket_id: str, stage_id: str, gen: int) -> Opti
     workflow 转 blocked）。"""
     p = _git(["rev-parse", "--absolute-git-dir"], cwd)
     fake = Path(p.stdout.strip()).resolve() if p.returncode == 0 else None
-    real = REPO_ROOT / ".git" / "worktrees" / cwd.name
+    real = _lane_repo_root(cwd) / ".git" / "worktrees" / cwd.name
     if not (real / "HEAD").is_file():
         raise RuntimeError(
             "settle: gitfile 被改写（指向 %s）且真 gitdir %s 不存在，无法自动修复——人工处置"
@@ -1276,13 +1278,22 @@ def _log_tail(log_file: str, n: int = 400) -> str:
 
 # ---------- M16：工作区准备（workflow 第一个 activity） ----------
 
-def _is_worktree_of(p: Path) -> bool:
-    """p 是否**本仓库**（REPO_ROOT）的已注册 worktree：`git -C REPO worktree list --porcelain`
+def _lane_repo_root(cwd: Path) -> Path:
+    """泳道所在仓根（跨项目，t260903-10 首战教训）：按路径约定 <repo>/.worktrees/<id>
+    自锚定——多项目工单（项目根≠引擎根）的 worktree add/复用/结算都应对项目仓操作，
+    而非引擎仓。不符约定（显式自定义路径/主树/旧相对 payload）回落 REPO_ROOT（旧行为）。"""
+    if cwd.parent.name == ".worktrees":
+        return cwd.parent.parent
+    return REPO_ROOT
+
+
+def _is_worktree_of(p: Path, repo: Optional[Path] = None) -> bool:
+    """p 是否**该仓库**（缺省 REPO_ROOT）的已注册 worktree：`git -C repo worktree list --porcelain`
     里必须有 `worktree <p>` 条目（按绝对路径比对）。
     不用 `git -C p rev-parse` 判定——仓库内普通子目录会向上走到仓库根被误判成 worktree。"""
     try:
         proc = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "worktree", "list", "--porcelain"],
+            ["git", "-C", str(repo if repo is not None else REPO_ROOT), "worktree", "list", "--porcelain"],
             capture_output=True, text=True, timeout=30)
         if proc.returncode != 0:
             return False
@@ -1313,6 +1324,8 @@ def _ensure_lane_deps(lane_path: Path) -> str:
     软链=共享约定：泳道内 pnpm install 会写进主仓依赖目录（安装稀少，接受；
     要隔离就在泳道里手工 install 成真目录，本函数见已存在即不动）。
     主仓对应目录不存在（全新克隆）则跳过——verify_lane 的红字会指明原因。"""
+    if _lane_repo_root(lane_path) != REPO_ROOT:
+        return ""  # 跨项目泳道：依赖清单属引擎所在仓，不外链（t260903-10）
     linked = []
     for rel in LANE_DEP_SYMLINKS:
         src = REPO_ROOT / rel
@@ -1344,6 +1357,9 @@ async def prepare_workspace(prep: WorkspacePrep) -> WorkspacePrepResult:
     p = Path(str(ws["path"]))
     if not p.is_absolute():
         p = REPO_ROOT / p
+    # 跨项目（t260903-10）：worktree add/复用判定对**项目仓**操作（路径约定自锚定），
+    # 不再恒锚引擎仓——新单泳道路径已是绝对路径（derive_lane_workspace project_root）。
+    repo = _lane_repo_root(p)
     if ws["type"] == "dir":
         try:
             p.mkdir(parents=True, exist_ok=True)
@@ -1352,11 +1368,11 @@ async def prepare_workspace(prep: WorkspacePrep) -> WorkspacePrepResult:
                                        path=str(p), error="mkdir -p %s 失败: %s" % (p, e))
         return WorkspacePrepResult(ok=True, kind="dir", action="ensured", path=str(p))
     # worktree 泳道
-    if _is_worktree_of(p):
+    if _is_worktree_of(p, repo):
         return WorkspacePrepResult(ok=True, kind="worktree",
                                    action="reused" + _ensure_lane_deps(p), path=str(p))
     branch = prep.branch or ("lane/" + p.name)
-    cmd = ["git", "-C", str(REPO_ROOT), "worktree", "add", "-b", branch, str(p)]
+    cmd = ["git", "-C", str(repo), "worktree", "add", "-b", branch, str(p)]
     if prep.base_ref:
         cmd.append(str(prep.base_ref))
     try:
