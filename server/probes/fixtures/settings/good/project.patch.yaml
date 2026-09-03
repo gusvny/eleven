@@ -1,0 +1,3 @@
+# 声明层 patch：路由优先于 GUI（A3）
+model:
+  route: g-route

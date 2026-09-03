@@ -1,0 +1,4 @@
+# 用户层：GUI 默认模型 + 独有键
+model:
+  gui_default: g-ui
+theme: dark

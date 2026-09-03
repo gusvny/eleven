@@ -68,6 +68,13 @@ def lint_collect():
         return
     venv_py = VENV_PY
     py = str(venv_py) if venv_py.exists() else sys.executable
+    # 工具面先行分态（t260903-11）：pytest 本身缺席=工具面缺失（可见 WARN），
+    # 不得谎报成「收集失败」——报错必须精确说哪个检查失败。
+    probe = subprocess.run([py, "-c", "import pytest"], capture_output=True, text=True, timeout=60)
+    if probe.returncode != 0:
+        warn("L2 pytest 不可用（%s 无 pytest）：收集检查无法执行——工具面缺失，非收集失败"
+             % ("venv" if venv_py.exists() else "系统解释器"))
+        return
     p = subprocess.run([py, "-m", "pytest", str(td), "-q", "--collect-only"],
                        capture_output=True, text=True, timeout=180)
     m = re.search(r"(\d+) errors?", p.stdout)

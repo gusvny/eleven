@@ -1,0 +1,6 @@
+# 本文件由 agent activity 每次 spawn 时生成（运行时模型路由，真源=model-routes.yaml）。
+- id: agent-default-model
+  name: '@deepseek-ai/dsh-agent-default-model'
+  config:
+    provider: zai
+    model: glm-5.3-flash

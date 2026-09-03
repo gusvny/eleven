@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""sandbar 安装器入口（薄壳）：把 server/ 挂进 sys.path 后调 installer.cli。
+
+落点纪律（review 附条件1）：仓根 `sandbar`，不走 bin/（.gitignore `bin/` 会吞交付物）。
+管辖面：temporal dev server（7233/8233）与工单 worker；console（3099）只探测只提示。
+"""
+
+import os
+import sys
+
+SERVER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server")
+if SERVER_DIR not in sys.path:
+    sys.path.insert(0, SERVER_DIR)
+
+from installer.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main())

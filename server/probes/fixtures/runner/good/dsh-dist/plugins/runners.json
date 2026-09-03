@@ -1,0 +1,4 @@
+{"runners": [
+  {"id": "headless-runner", "inject": ["headlessStartup"], "cordis": "stock"},
+  {"id": "other-runner", "inject": []}
+]}

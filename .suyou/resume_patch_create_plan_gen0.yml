@@ -1,0 +1,9 @@
+# 本文件由 agent activity 每次 spawn 时生成（会话延续，runner 真源=server/dsh/headless-resume/）。
+- id: headless-runner
+  disabled: true
+- insert:
+    - id: headless-resume
+      name: '/Users/user/Documents/sandbar/.worktrees/t260903-10/server/dsh/headless-resume/node.ts'
+      inject: [headlessStartup]
+      config:
+        task: !!js ctx.headlessStartup.task

@@ -1,12 +1,28 @@
+# sandbar 泳道复验声明（schema v1，字段级定义见 docs/design/sandbar项目接入契约v1.md ②a）。
+# v2 契约：checks 是 lanes.code 下的列表命令制 [{id,cmd,cwd?,timeout?}]，不是顶层键。
+# t260903-11 arbitrate 修正：seed/验收段版本把 checks 写在顶层，引擎按「未知顶层键」
+# 整道 fail-closed（integ 道因此从未跑起来）——本版只动结构，两条 check 命令维持
+# 验收段 13:17 原文不改动。
 schema: v1
 lanes:
   code:
+    # 写集白名单（粗判据；工单 write_set 在场时优先于本表）：按本仓受控面实指。
+    # 引擎 _in_write_set 是「精确路径或目录前缀（补 /）」语义，原「.」匹配不到任何
+    # diff 路径（git 输出不带 ./ 前缀），等于全拒——按实指枚举修正。
     write_allow:
-      - .
-checks:
-  - id: py-compile
-    cmd: python3 -m py_compile server/tools/verify_lane.py server/tools/ticket.py server/tools/workflow.py
-  - id: guard-3099-redline
-    cmd: sh -c '! grep -rn "pkill\\|kill -9" bin/ server/ --include="*.sh" --include="*.py" 2>/dev/null | grep -v "^Binary" | grep 3099'
+      - server/
+      - integration/
+      - docs/
+      - notes/
+      - VERSION
+      - sandbar
+      - verify.yaml
+      - README.md
+      - CLAUDE.md
+    checks:
+      - id: py-compile
+        cmd: PYTHONPYCACHEPREFIX=out/pycache python3 -m py_compile sandbar server/version.py server/installer/*.py server/installer/tests/*.py server/probes/*.py server/probes/tests/*.py server/tools/*.py
+      - id: guard-3099-redline
+        cmd: sh -c '! { grep -rn "pkill\|kill -9" bin/ server/ --include="*.sh" --include="*.py" 2>/dev/null; grep -n "pkill\|kill -9" sandbar 2>/dev/null; } | grep -v "^Binary" | grep 3099'
 integration:
   cmd: python3 integration/run_scenarios.py
