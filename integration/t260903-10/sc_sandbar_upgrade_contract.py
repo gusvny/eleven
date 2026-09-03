@@ -36,7 +36,9 @@ def main():
         rc, out = run_cli(entry, ["upgrade", "--dry-run"], env, timeout=60)
         if os.path.isfile(contract):
             fail.check(rc == 0, "副本在场：upgrade --dry-run 零退出")
-            fail.check("0.1.0" in out, "展示当前 sandbar 版本 0.1.0")
+            # 版本锚单源化（t260903-12）：断言「展示值=仓根 VERSION 单源值」而非历史字面量。
+            sandbar_ver = open(os.path.join(REPO, "VERSION"), encoding="utf-8").read().strip()
+            fail.check(sandbar_ver in out, "展示当前 sandbar 版本（单源仓根 VERSION=%s）" % sandbar_ver)
             fail.check("0.1.1-rc.2" in out, "展示 dsh 已验证点 0.1.1-rc.2（⑧-1，不展示假区间）")
             for i, (code, kws) in enumerate(FOUR_CHECKS, 1):
                 hit = code in out or any(k in out for k in kws)

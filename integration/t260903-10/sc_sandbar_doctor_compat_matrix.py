@@ -15,7 +15,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lib_installer import (Fail, cleanup, find_installer_entry, make_temp_home,  # noqa: E402
+from lib_installer import (REPO, Fail, cleanup, find_installer_entry, make_temp_home,  # noqa: E402
                            run_cli, require_installer_entry)
 
 EXPECTED_PROBES = 4  # 契约四面：home 布局 / session 格式 / runner 装配 / settings resolve
@@ -61,7 +61,10 @@ def main():
         fail.check(rows_ok and len(rows) == EXPECTED_PROBES,
                    "四面全绿=%d 行（绿一行 append 一行，实得 %d）" % (EXPECTED_PROBES, len(rows)))
         blob = json.dumps(rows, ensure_ascii=False) if rows else ""
-        fail.check("0.1.0" in blob, "三轴之一 sandbar 版本 0.1.0 在案")
+        # 版本锚单源化（t260903-12）：断言的是「矩阵 sandbar 版本轴=仓根 VERSION 单源值」，
+        # 不是某个历史字面量——升版本场景不再连环红。dsh 已验证点是 ⑧-1 列举制固定值，保留字面量。
+        sandbar_ver = open(os.path.join(REPO, "VERSION"), encoding="utf-8").read().strip()
+        fail.check(sandbar_ver in blob, "三轴之一 sandbar 版本（单源仓根 VERSION=%s）在案" % sandbar_ver)
         fail.check("0.1.1-rc.2" in blob, "三轴之一 dsh 已验证点 0.1.1-rc.2 在案")
 
         _, rows_before = read_rows(mpath)

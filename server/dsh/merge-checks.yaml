@@ -1,0 +1,9 @@
+# 项目级 merge 前扩展检查（t260903-12 起用）。机制在引擎（server/dsh/temporal-poc/
+# agent_activities.py merge_check 3.5 节），策略跟项目仓库走：本文件在场才生效，
+# 形状=顶格 bundle_pairs: + 缩进「- src: <前缀>」/「out: <前缀>」成对、值裸 token；
+# 写坏行引擎 fail-closed 抛错（_parse_bundle_pairs）。
+# 语义：泳道 diff（main...branch）中 src 前缀有改动而 out 产物前缀未同批重建 →
+# merge 红灯（t260827-02 教训：src 改了没重建 bundle，合并=假上线）。
+bundle_pairs:
+  - src: server/dsh/workbench/src/client/
+    out: server/dsh/workbench/lib/

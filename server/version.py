@@ -1,7 +1,8 @@
 """sandbar 版本单源：唯一真源=仓根 VERSION 文件（契约⑧-4 口径）。
 
 三态判定，全部 fail-closed，不造历史映射：
-- 正常：内容恰为一行 semver（MAJOR.MINOR.PATCH，三段纯整数，不许前导零）；
+- 正常：内容恰为一行 semver（MAJOR.MINOR.PATCH 三段纯整数不许前导零，可带
+  -rc / -rc.<N> 预发布后缀）；
 - 缺失：VERSION 文件不存在；
 - 脏：空文件 / 多行非空内容 / 非 semver 字样。
 
@@ -14,9 +15,12 @@ from __future__ import annotations
 import pathlib
 import re
 
-# 三段整数、不许前导零（严格 semver 核心段，不带 prerelease/build 后缀——
-# 仓根 VERSION 是发布版本，不是 dsh 已验证点那种 rc 串）。
-_SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+# 三段整数、不许前导零（semver 核心段）+ 可选 prerelease 后缀（仅认 -rc 与
+# -rc.<N>，N 纯整数无前导零；0.2.0-rc 起仓根 VERSION 进入 rc 预发布期，与 dsh
+# 已验证点的 rc 串口径对齐——semver 规范本含 prerelease 段，0.1.0 期的「纯三段」
+# 收窄是实现层取舍，现回归 semver 全集，契约⑧-4「semver + 畸形 fail-closed」不变）。
+_SEMVER_RE = re.compile(
+    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-rc(\.[1-9]\d*)?)?$")
 
 
 class VersionError(RuntimeError):
@@ -28,11 +32,14 @@ VERSION_PATH = REPO_ROOT / "VERSION"
 
 
 def parse_semver(text: str):
-    """解析 semver 字符串为 (major, minor, patch)；不合法抛 VersionError。"""
+    """解析 semver 字符串为 (major, minor, patch)；不合法抛 VersionError。
+
+    prerelease 后缀（-rc / -rc.<N>）不进三元组——下游升版 diff/降版判定只看核心段。
+    """
     m = _SEMVER_RE.match(text.strip())
     if not m:
         raise VersionError("VERSION 脏（非 semver）：%r" % text)
-    return tuple(int(x) for x in m.groups())
+    return tuple(int(x) for x in m.groups()[:3])
 
 
 def read_version(path=None) -> str:
