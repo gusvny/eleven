@@ -116,13 +116,14 @@ import type { Context } from '@deepseek-ai/cordis'
 import { runAdminCli } from '../suyou-tools.ts'
 import { findProject, loadProjects, primaryDir, type ProjectEntry } from '../suyou-projects.ts'
 
-async function projectRootsFor(projectKey: unknown): Promise<string[]> {
-  // 跨项目工单（t260903-11）：票所属项目注册目录=实时态/日志读取的合法根。
+function projectRootsFor(projectKey: unknown): string[] {
+  // 跨项目工单（t260903-11/-12）：票所属项目注册目录=实时态/日志读取的合法根。
+  // 修复：findProject 是单参签名（自读注册表），首版误传 (projects, key) →恒
+  // undefined→extraRoots 恒空→守卫照旧拒（t260903-12 实雷二次报障）。
   // 注册表异常→空数组=回落旧行为（仅本仓），不放大故障面。
   if (typeof projectKey !== 'string' || projectKey === '') return []
   try {
-    const projects = await loadProjects()
-    const p = findProject(projects, projectKey)
+    const p = findProject(projectKey)
     return p ? p.dirs.filter((d): d is string => typeof d === 'string') : []
   } catch { return [] }
 }
@@ -1327,7 +1328,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         return
       }
       const t = s.result ?? {}
-      const { base, reason } = resolveSuyouBaseDir(repo, id, t, await projectRootsFor(t.project))
+      const { base, reason } = resolveSuyouBaseDir(repo, id, t, projectRootsFor(t.project))
       const result = await listAgentLogs(base)
       if (reason !== undefined && result.reason === undefined) result.reason = reason
       sendJson(res, 200, { ok: true, result })
@@ -1353,7 +1354,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         return
       }
       const t = s.result ?? {}
-      const ref = await resolveSessionFile(repo, id, t, await projectRootsFor(t.project))
+      const ref = await resolveSessionFile(repo, id, t, projectRootsFor(t.project))
       if (ref.refused === true) {
         sendJson(res, 400, { ok: false, error: ref.reason ?? '工单字段越界（拒绝读取）' })
         return
@@ -1388,7 +1389,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         return
       }
       const t = s.result ?? {}
-      const ref = await resolveAllSessionFiles(repo, id, t, await projectRootsFor(t.project))
+      const ref = await resolveAllSessionFiles(repo, id, t, projectRootsFor(t.project))
       if (ref.refused === true) {
         sendJson(res, 400, { ok: false, error: ref.reason ?? '工单字段越界（拒绝读取）' })
         return
