@@ -1561,6 +1561,7 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
+    lane_repo = _lane_repo_root(wt)  # 跨项目（t260903-11 第五枪）：分支/merge-tree 查泳道所属仓
     checks: List[Dict[str, Any]] = []
 
     # 0. KI-009（t260901-25）：dirty 红灯前自动补 settle（写集内自愈），前置段。
@@ -1603,7 +1604,7 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
 
     # 1. 泳道有 commit
     try:
-        p = _git(["log", "--oneline", "%s..%s" % (args.base_ref, args.branch)], REPO_ROOT)
+        p = _git(["log", "--oneline", "%s..%s" % (args.base_ref, args.branch)], lane_repo)
         n = len([ln for ln in p.stdout.splitlines() if ln.strip()]) if p.returncode == 0 else 0
         checks.append({"item": "泳道分支有 commit（%s..%s）" % (args.base_ref[:7], args.branch),
                        "green": p.returncode == 0 and n > 0,
@@ -1741,7 +1742,7 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     merge_tree_excerpt = ""
     rehearsal_green = False
     try:
-        p = _git(["merge-tree", "--write-tree", "main", args.branch], REPO_ROOT)
+        p = _git(["merge-tree", "--write-tree", "main", args.branch], lane_repo)
         rehearsal_green = p.returncode == 0
         if not rehearsal_green:
             out = (p.stdout or "") + ("\n" + p.stderr if p.stderr else "")
