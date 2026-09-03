@@ -3379,8 +3379,10 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 		persist,
 		projectKey
 	]);
-	const handleNew = (0, react.useCallback)(async () => {
-		if (!projectKey || creating) return;
+	const handleNew = (0, react.useCallback)(async (target) => {
+		const pk = target?.key ?? projectKey;
+		const pd = target?.dir ?? projectDir;
+		if (!pk || creating) return;
 		if (!workspaces) {
 			setEntryNotice("新建会话失败：workspaces 服务不可用");
 			console.error("[workbench] 新建会话失败：ctx.workspaces 未注入（index.tsx inject 列表缺 workspaces）");
@@ -3389,16 +3391,16 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 		setCreating(true);
 		setEntryNotice("");
 		try {
-			let ws = workspaceForDir(workspaces.list.getSnapshot()?.items ?? [], projectDir ?? "");
-			if (!ws && projectDir) ws = await workspaces.create({ path: projectDir }).then((w) => ({
+			let ws = workspaceForDir(workspaces.list.getSnapshot()?.items ?? [], pd ?? "");
+			if (!ws && pd) ws = await workspaces.create({ path: pd }).then((w) => ({
 				...w,
-				path: projectDir
+				path: pd
 			})).catch((err) => {
-				console.error("[workbench] 新建会话失败：工作区创建失败：", projectDir, err);
+				console.error("[workbench] 新建会话失败：工作区创建失败：", pd, err);
 				setEntryNotice("新建会话失败：工作区创建失败（详情见控制台）");
 			});
 			if (!ws) {
-				console.error("[workbench] 新建会话失败：项目无对应工作区且无法创建：", projectKey, projectDir);
+				console.error("[workbench] 新建会话失败：项目无对应工作区且无法创建：", pk, pd);
 				setEntryNotice("新建会话失败：项目主目录未注册为工作区");
 				return;
 			}
@@ -3417,8 +3419,8 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 			}
 			persist(touchEntry(ledger, {
 				id: staged,
-				project: projectKey,
-				cwd: projectDir ?? "",
+				project: pk,
+				cwd: pd ?? "",
 				lastOpenedAt: Date.now()
 			}));
 		} catch (err) {
@@ -3606,7 +3608,7 @@ function SessionTab({ target, editing, draftTitle, onOpen, onClose, onEditStart,
 		})]
 	});
 }
-function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, projectDir }) {
+function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, projectDir, projects }) {
 	const { ledger, targets, creating, entryNotice, handleNew, handleOpen, handleClose, handleReopen, closedList, refreshClosedList } = useSessionEntry({
 		sessions,
 		workspaces,
@@ -3649,20 +3651,73 @@ function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 			document.removeEventListener("keydown", onKey);
 		};
 	}, [reopenOpen, refreshClosedList]);
-	const newDisabled = !projectKey || creating;
+	const pickerChoices = !projectKey && (projects?.length ?? 0) > 0 ? projects : null;
+	const [projOpen, setProjOpen] = (0, react.useState)(false);
+	const projWrapRef = (0, react.useRef)(null);
+	(0, react.useEffect)(() => {
+		if (!projOpen) return;
+		const onDocDown = (e) => {
+			if (projWrapRef.current && !projWrapRef.current.contains(e.target)) setProjOpen(false);
+		};
+		const onKey = (e) => {
+			if (e.key === "Escape") setProjOpen(false);
+		};
+		document.addEventListener("mousedown", onDocDown);
+		document.addEventListener("keydown", onKey);
+		return () => {
+			document.removeEventListener("mousedown", onDocDown);
+			document.removeEventListener("keydown", onKey);
+		};
+	}, [projOpen]);
+	const newDisabled = creating || !projectKey && !pickerChoices;
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-sessTop",
 		"data-wb-session-entry": "",
 		children: [
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: SESSION_ENTRY_STYLES }),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-				type: "button",
-				className: `wb-sessTop-new ${newDisabled ? "disabled" : ""}`,
-				"data-wb-session-new": "",
-				disabled: newDisabled,
-				title: projectKey ? "新建会话（落在当前项目主目录）" : "先在左侧点选一个项目",
-				onClick: handleNew,
-				children: creating ? "新建中…" : "+ 新建会话"
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-sessTop-reopen-wrap",
+				ref: projWrapRef,
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					className: `wb-sessTop-new ${newDisabled ? "disabled" : ""}`,
+					"data-wb-session-new": "",
+					disabled: newDisabled,
+					title: projectKey ? "新建会话（落在当前项目主目录）" : pickerChoices ? "新建会话（选择项目主目录）" : "先在左侧点选一个项目",
+					onClick: () => {
+						if (pickerChoices) setProjOpen((v) => !v);
+						else handleNew();
+					},
+					children: creating ? "新建中…" : "+ 新建会话"
+				}), projOpen && pickerChoices && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-sessTop-menu",
+					role: "menu",
+					style: {
+						left: 0,
+						right: "auto"
+					},
+					children: pickerChoices.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+						type: "button",
+						role: "menuitem",
+						"data-wb-session-project-pick": "",
+						title: p.primary,
+						onClick: () => {
+							setProjOpen(false);
+							handleNew({
+								key: p.key,
+								dir: p.primary
+							});
+						},
+						children: [
+							p.name || p.key,
+							"　",
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: { opacity: .55 },
+								children: p.key
+							})
+						]
+					}, p.key))
+				})]
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "wb-sessTop-rows",
@@ -45460,6 +45515,7 @@ function WorkbenchSidebar(props) {
 					sessions,
 					workspaces,
 					slotOpen,
+					projects,
 					projectKey: viewProject || (projects.length === 1 ? projects[0].key : ""),
 					projectDir: projects.find((p) => p.key === (viewProject || (projects.length === 1 ? projects[0].key : "")))?.primary ?? ""
 				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {

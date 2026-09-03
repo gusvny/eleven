@@ -572,6 +572,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
           sessions={sessions}
           workspaces={workspaces}
           slotOpen={slotOpen}
+          projects={projects}
           projectKey={viewProject || (projects.length === 1 ? projects[0].key : '')}
           projectDir={projects.find(p => p.key === (viewProject || (projects.length === 1 ? projects[0].key : '')))?.primary ?? ''}
         />

@@ -196,10 +196,13 @@ interface SessionEntryOptions {
   workspaces?: WorkspacesFace
   /** 槽注入的打开动作（WorkspaceBrowserInjected.open；由侧栏槽注入）。 */
   slotOpen?: (sessionId: string) => void
-  /** 列表归属与新建落点的项目 key（空=未选项目：列表空、新建禁用并提示）。 */
+  /** 列表归属与新建落点的项目 key（空=未选项目：列表空，多项目时 + 弹项目选单）。 */
   projectKey: string
   /** 该项目主目录（注册表 primary；新建落点的工作区按它匹配/创建）。 */
   projectDir?: string
+  /** 注册表项目清单（sidebar 的 /wf/projects）：多项目未选时 + 按钮弹选单选项目新建
+   *  （t260903 切换夜：console 自 sandbar 起、双项目注册表下按钮曾静默禁用）。 */
+  projects?: readonly { key: string; name: string; primary: string }[]
 }
 
 /**
@@ -346,8 +349,12 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
   // 与出厂 New Session 完全同款：绑当前项目工作区、复用既有 blank 会话
   // （不再累积空会话）、正确打开。staged 的会话 id 落账册（打开链路失败也
   // 不丢入口——记账层的意义）。行内可见错误态同前。
-  const handleNew = useCallback(async () => {
-    if (!projectKey || creating) return
+  // target：多项目未选时由项目选单显式传入（t260903 切换夜）；缺省回落当前
+  // viewProject 语义（单项目兜底/点票后）——两条路同一创建链。
+  const handleNew = useCallback(async (target?: { key: string; dir: string }) => {
+    const pk = target?.key ?? projectKey
+    const pd = target?.dir ?? projectDir
+    if (!pk || creating) return
     if (!workspaces) {
       setEntryNotice('新建会话失败：workspaces 服务不可用')
       console.error('[workbench] 新建会话失败：ctx.workspaces 未注入（index.tsx inject 列表缺 workspaces）')
@@ -356,16 +363,16 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
     setCreating(true)
     setEntryNotice('')
     try {
-      let ws = workspaceForDir(workspaces.list.getSnapshot()?.items ?? [], projectDir ?? '')
-      if (!ws && projectDir) {
-        ws = await workspaces.create({ path: projectDir }).then(w => ({ ...w, path: projectDir })).catch((err: unknown) => {
-          console.error('[workbench] 新建会话失败：工作区创建失败：', projectDir, err)
+      let ws = workspaceForDir(workspaces.list.getSnapshot()?.items ?? [], pd ?? '')
+      if (!ws && pd) {
+        ws = await workspaces.create({ path: pd }).then(w => ({ ...w, path: pd })).catch((err: unknown) => {
+          console.error('[workbench] 新建会话失败：工作区创建失败：', pd, err)
           setEntryNotice('新建会话失败：工作区创建失败（详情见控制台）')
           return undefined
         })
       }
       if (!ws) {
-        console.error('[workbench] 新建会话失败：项目无对应工作区且无法创建：', projectKey, projectDir)
+        console.error('[workbench] 新建会话失败：项目无对应工作区且无法创建：', pk, pd)
         setEntryNotice('新建会话失败：项目主目录未注册为工作区')
         return
       }
@@ -379,8 +386,8 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
       }
       persist(touchEntry(ledger, {
         id: staged,
-        project: projectKey,
-        cwd: projectDir ?? '',
+        project: pk,
+        cwd: pd ?? '',
         lastOpenedAt: Date.now(),
       }))
     } catch (err) {
@@ -560,7 +567,7 @@ function SessionTab({ target, editing, draftTitle, onOpen, onClose, onEditStart,
   )
 }
 
-export function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, projectDir }: SessionEntryOptions) {
+export function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, projectDir, projects }: SessionEntryOptions) {
   const {
     ledger, targets, creating, entryNotice, handleNew, handleOpen, handleClose, handleReopen,
     closedList, refreshClosedList,
@@ -606,19 +613,56 @@ export function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, pr
     }
   }, [reopenOpen, refreshClosedList])
 
-  const newDisabled = !projectKey || creating
+  // 项目选单（t260903 切换夜）：多项目注册表 + 未选项目时，+ 按钮不再禁用，
+  // 点开弹注册表项目选单——选中的项目主目录即新建落点（未注册工作区自动 create，
+  // 与点票后新建同一链）。点外/Escape 收起（与 ↺ 菜单同模式）。
+  const pickerChoices = !projectKey && (projects?.length ?? 0) > 0 ? projects! : null
+  const [projOpen, setProjOpen] = useState(false)
+  const projWrapRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!projOpen) return
+    const onDocDown = (e: globalThis.MouseEvent) => {
+      if (projWrapRef.current && !projWrapRef.current.contains(e.target as Node)) setProjOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setProjOpen(false) }
+    document.addEventListener('mousedown', onDocDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [projOpen])
+
+  const newDisabled = creating || (!projectKey && !pickerChoices)
   return (
     <div className="wb-sessTop" data-wb-session-entry="">
       <style>{SESSION_ENTRY_STYLES}</style>
-      {/* 行首：新建（紧凑按钮）；其后：会话切换行（≤5，项目归属，active 高亮，登记顺序） */}
-      <button
-        type="button"
-        className={`wb-sessTop-new ${newDisabled ? 'disabled' : ''}`}
-        data-wb-session-new=""
-        disabled={newDisabled}
-        title={projectKey ? '新建会话（落在当前项目主目录）' : '先在左侧点选一个项目'}
-        onClick={handleNew}
-      >{creating ? '新建中…' : '+ 新建会话'}</button>
+      {/* 行首：新建（紧凑按钮）；其后：会话切换行（≤5，项目归属，active 高亮，登记顺序）。
+          多项目未选：+ 变选单触发器（t260903 切换夜，选项目即落点）。 */}
+      <div className="wb-sessTop-reopen-wrap" ref={projWrapRef}>
+        <button
+          type="button"
+          className={`wb-sessTop-new ${newDisabled ? 'disabled' : ''}`}
+          data-wb-session-new=""
+          disabled={newDisabled}
+          title={projectKey ? '新建会话（落在当前项目主目录）' : pickerChoices ? '新建会话（选择项目主目录）' : '先在左侧点选一个项目'}
+          onClick={() => { if (pickerChoices) setProjOpen(v => !v); else handleNew() }}
+        >{creating ? '新建中…' : '+ 新建会话'}</button>
+        {projOpen && pickerChoices && (
+          <div className="wb-sessTop-menu" role="menu" style={{ left: 0, right: 'auto' }}>
+            {pickerChoices.map(p => (
+              <button
+                key={p.key}
+                type="button"
+                role="menuitem"
+                data-wb-session-project-pick=""
+                title={p.primary}
+                onClick={() => { setProjOpen(false); handleNew({ key: p.key, dir: p.primary }) }}
+              >{p.name || p.key}　<span style={{ opacity: 0.55 }}>{p.key}</span></button>
+            ))}
+          </div>
+        )}
+      </div>
       <div className="wb-sessTop-rows">
         {targets.length === 0 ? (
           <span className="wb-sessTop-empty">{projectKey ? '暂无最近会话' : '先点选一个项目'}</span>
