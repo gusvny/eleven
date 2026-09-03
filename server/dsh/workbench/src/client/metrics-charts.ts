@@ -164,6 +164,48 @@ export interface DonutFactoryOptions {
 }
 
 /**
+ * 人审扇区判定（t260903-09 S1/C3）。判定依据是**契约字面**：metrics-api契约v1.md
+ * 钉死后端 donut 分类名「人审等待」（human 变体兼容历史数据）；配套 UT
+ * （tests/donut-render-dispatch.mjs）钉死「后端产出的 time 副1 categories 恒含
+ * 人审等待且本函数命中」——后端改名即测试红，不是静默掉色。
+ */
+export function isHumanSliceName(name: string): boolean {
+  return name.includes('人审') || name.toLowerCase().includes('human')
+}
+
+/** ChartSpec(kind='donut') → DonutInput（副图 donut 路径）。中心大字是主图 DOM
+ *  叠加专用（metrics.tsx time 主图），副图 donut 不带 → totalMin/humanRatio 置 0。 */
+export function specToDonutInput(spec: ChartSpec): DonutInput {
+  const data = spec.series[0]?.data ?? []
+  const slices = spec.categories.map((name, i) => ({
+    name,
+    value: typeof data[i] === 'number' && Number.isFinite(data[i]) ? data[i] : 0,
+    human: isHumanSliceName(name),
+  }))
+  return { slices, totalMin: 0, humanRatio: 0, degraded: false }
+}
+
+/** 环形图 option 单真源：主图 DonutInput 与副图 ChartSpec 两条入口共用本构造器，
+ *  改动只能落这里（t260903-09 S1：renderSpec 此前缺 donut 分支=三 donut 白板根因）。
+ *  导出仅供 UT 断言 option 形状（node 无 DOM，echarts.init 不可直跑）。 */
+export function donutOption(input: DonutInput) {
+  return {
+    animation: false,
+    tooltip: { trigger: 'item', formatter: '{b}: {c}（{d}%）' },
+    legend: { bottom: 0, textStyle: { fontSize: 11 } },
+    series: [{
+      type: 'pie', radius: ['52%', '76%'], center: ['50%', '44%'],
+      avoidLabelOverlap: true,
+      label: { show: true, formatter: '{b}', fontSize: 11 },
+      data: input.slices.map(s => ({
+        name: s.name, value: s.value,
+        itemStyle: { color: s.human ? HUMAN_COLOR : undefined },
+      })),
+    }],
+  }
+}
+
+/**
  * 环形图（饼形态主图 + 副1 donut）。人审扇区恒 HUMAN_COLOR 橙；中心大字
  * 「N 分钟 · 其中人等 X%」由 metrics.tsx 用 DonutInput 数据以绝对定位 DOM 渲染
  * （adapter 不管 DOM 叠加，专注画布）。
@@ -171,30 +213,21 @@ export interface DonutFactoryOptions {
 export function donut(opts: DonutFactoryOptions): ChartHandle {
   const live = makeLive(opts.mount)
   const inst = live.inst!
-  inst.setOption({
-    animation: false,
-    tooltip: { trigger: 'item', formatter: '{b}: {c} 分钟（{d}%）' },
-    legend: { bottom: 0, textStyle: { fontSize: 11 } },
-    series: [{
-      type: 'pie', radius: ['52%', '76%'], center: ['50%', '44%'],
-      avoidLabelOverlap: true,
-      label: { show: true, formatter: '{b}', fontSize: 11 },
-      data: opts.donut.slices.map(s => ({
-        name: s.name, value: s.value,
-        itemStyle: { color: s.human ? HUMAN_COLOR : undefined },
-      })),
-    }],
-  })
+  inst.setOption(donutOption(opts.donut))
   return { release: () => live.release() }
 }
 
-/** 按 kind 分派（未知 kind 容错返回 no-op handle，不抛——畸形数据防御）。 */
+/** 按 kind 分派（未知 kind 容错返回 no-op handle，不抛——畸形数据防御）。
+ *  t260903-09 S1：补 'donut' 分支——此前「时间去哪了」副1、「模型份额」、
+ * 「有无代码变更票占比」三张 donut spec 落 default no-op，init 后从不 setOption，
+ * 用户看到白板（数据其实已到前端）。 */
 export function renderSpec(opts: ChartFactoryOptions): ChartHandle {
   switch (opts.spec.kind) {
     case 'bar': return bar(opts)
     case 'groupBar': return groupBar(opts)
     case 'stackBar': return stackBar(opts)
     case 'hBar': return hBar(opts)
+    case 'donut': return donut({ mount: opts.mount, donut: specToDonutInput(opts.spec) })
     default: return { release: () => { /* no-op */ } }
   }
 }

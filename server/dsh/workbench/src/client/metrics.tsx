@@ -130,14 +130,25 @@ export function MetricsPanel(props: {
     return () => { ac.abort() }
   }, [])
 
-  /* 数据 fetch：打开/参数变更/手动刷新各一次；同参数切形态不重复取。
-     依赖=查询串（shape 不进查询串，metricsQueryString 五参数）+手动刷新 nonce——
-     切柱↔饼零请求（acceptance P1 修复：原依赖 [state] 含 shape，切形态必重 fetch）。 */
+  /* 数据 fetch（t260903-09 cache-first 两段式）：先 mode=fast 只读缓存快照——
+     有缓存毫秒级先渲染（角标「缓存快照 · 刷新中」），随后台全量替换摘角标；
+     全量失败保留快照+降级说明不白屏。冷缓存快照为空（reason 显式 fast 跳过），
+     加载态持续到全量回来——不假快。打开/参数变更/手动刷新各一轮；同参数切
+     形态不重复取（shape 不进查询串，切柱↔饼零请求）。 */
+  const [refreshing, setRefreshing] = useState(false)
   const metricsQuery = metricsQueryString(state)
   useEffect(() => {
     const ac = new AbortController()
     setLoading(true)
+    setRefreshing(true)
     ;(async () => {
+      try {
+        const fast = await fetch(`${API}/metrics?${metricsQuery}&mode=fast`, { signal: ac.signal }).then(r => r.json())
+        if (!ac.signal.aborted) {
+          setData(sanitizeMetricsResponse(fast))
+          setLoading(false) // 快照先上台（可能为空态，全量在后台）
+        }
+      } catch { /* fast 失败不打扰用户，直接等全量 */ }
       try {
         const res = await fetch(`${API}/metrics?${metricsQuery}`, { signal: ac.signal })
         const body = await res.json()
@@ -145,10 +156,16 @@ export function MetricsPanel(props: {
       } catch (err) {
         if (!ac.signal.aborted) {
           const msg = err instanceof Error && err.name === 'AbortError' ? '' : String(err instanceof Error ? err.message : err)
-          setData(sanitizeMetricsResponse({ error: `请求失败：${msg || '网络错误'}` }))
+          // 全量失败：已有快照则保留快照+降级说明（不白屏），无快照才报错
+          setData(prev => prev !== null && prev.error === null && prev.cache?.status === 'stale'
+            ? { ...prev, reason: `全量刷新失败（保留缓存快照）：${msg || '网络错误'}` }
+            : sanitizeMetricsResponse({ error: `请求失败：${msg || '网络错误'}` }))
         }
       } finally {
-        if (!ac.signal.aborted) setLoading(false)
+        if (!ac.signal.aborted) {
+          setLoading(false)
+          setRefreshing(false)
+        }
       }
     })()
     return () => { ac.abort() }
@@ -213,6 +230,9 @@ export function MetricsPanel(props: {
           {(workflows as any[]).map(w => <option key={String(w?.id)} value={String(w?.id)}>{String(w?.name ?? w?.id)}</option>)}
         </select>
         <span className="wb-m-hint" title={cacheTitle}>口径ⓘ</span>
+        {data?.cache?.status === 'stale' && (
+          <span className="wb-m-degrade" title="当前展示的是缓存快照（可能缺最新票），后台全量刷新中，完成后自动替换">缓存快照 · 刷新中</span>
+        )}
         <button className="wb-m-refresh" onClick={() => { setNonce(n => n + 1) }}>刷 新</button>
         <button className="wb-m-x" title="关闭（Esc）" onClick={props.onClose}>✕</button>
       </div>
@@ -238,7 +258,9 @@ export function MetricsPanel(props: {
       <div className="wb-m-body">
         {loading && <div className="wb-m-empty">加载中…</div>}
         {!loading && data?.error && <div className="wb-m-empty">{data.error}</div>}
-        {!loading && !data?.error && !data?.primary && data?.secondaries.length === 0 && (
+        {/* 快照空态不显「无数据」（后台全量在途，refreshing=true 时保持加载语义） */}
+        {!loading && refreshing && !data?.error && <div className="wb-m-empty">缓存快照已上台，全量刷新中…</div>}
+        {!loading && !refreshing && !data?.error && !data?.primary && data?.secondaries.length === 0 && (
           <div className="wb-m-empty">窗口内无可聚合数据（或聚合被 SKIP）。</div>
         )}
         {!loading && !data?.error && data?.reason && (

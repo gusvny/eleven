@@ -35,25 +35,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-import pathlib
 import re
-import sys
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
-
-
-def _sandbar_version() -> str:
-    """自报 sandbar 版本（契约⑧-4）：读仓根 VERSION，缺失/脏 fail-closed 上抛。
-
-    与 base.py 同款惰性 import（version.py 在 server/ 下）；legacy 键
-    temporal_engine_version（int）原值保留不迁移，两键并存。
-    """
-    server_dir = str(pathlib.Path(__file__).resolve().parents[2])
-    if server_dir not in sys.path:
-        sys.path.insert(0, server_dir)
-    import version as _version
-    return _version.sandbar_version()
-
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -526,7 +510,6 @@ class DevLaneWorkflow:
                 "created": inp.created or self._now_epoch(),
             },
             "temporal_engine_version": self.engine_version,
-            "sandbar_version": _sandbar_version(),
             "engine": ENGINE_V2,
             "log": [{"ts": self._now_epoch(), "status": "dispatched",
                      "note": "工单创建（dev-lane：activity 直编排，步=%s）"

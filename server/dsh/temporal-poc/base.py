@@ -26,24 +26,8 @@ signal/query/update 可直接继承。
 
 from __future__ import annotations
 
-import pathlib
-import sys
-
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
-
-
-def _sandbar_version() -> str:
-    """自报 sandbar 版本（契约⑧-4）：读仓根 VERSION，缺失/脏 fail-closed 上抛。
-
-    惰性 import：version.py 在 server/ 下，引擎模块不依赖其常驻 sys.path。
-    legacy 键 temporal_engine_version（int）原值保留不迁移，两键并存。
-    """
-    server_dir = str(pathlib.Path(__file__).resolve().parents[2])
-    if server_dir not in sys.path:
-        sys.path.insert(0, server_dir)
-    import version as _version
-    return _version.sandbar_version()
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -241,7 +225,6 @@ class TicketWorkflowBase:
                 "created": inp.created or self._now_epoch(),
             },
             "temporal_engine_version": self.engine_version,
-            "sandbar_version": _sandbar_version(),
             "engine": ENGINE_V2,
             "log": [{"ts": self._now_epoch(), "status": "dispatched",
                      "note": "工单创建（v2 模版即代码：%s → %s，stage=%s）"

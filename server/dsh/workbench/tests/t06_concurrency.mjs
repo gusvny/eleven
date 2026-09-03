@@ -64,7 +64,17 @@ async function withStub(stub, fn) {
   const p = join(tmp, `stub-${Math.random().toString(36).slice(2)}.json`)
   await writeFile(p, JSON.stringify(stub))
   process.env.SUYOU_METRICS_STUB = p
-  try { return await fn() } finally { delete process.env.SUYOU_METRICS_STUB }
+  // t260903-09：宇宙补全（list ∪ 缓存存量）后，各子测试必须用独立缓存目录——
+  // 共享目录会把先前子测试的缓存票当 archived 并进当前聚合，污染断言面。
+  const prevDir = process.env.SUYOU_METRICS_DIR
+  const cacheRoot = join(tmp, `cache-${Math.random().toString(36).slice(2)}`)
+  await mkdir(cacheRoot, { recursive: true })
+  process.env.SUYOU_METRICS_DIR = cacheRoot
+  try { return await fn() } finally {
+    delete process.env.SUYOU_METRICS_STUB
+    if (prevDir === undefined) delete process.env.SUYOU_METRICS_DIR
+    else process.env.SUYOU_METRICS_DIR = prevDir
+  }
 }
 
 try {
