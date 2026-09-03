@@ -147,12 +147,18 @@ export function parseProjectYaml(text: string, fileLabel: string): ProjectEntry 
   let inDirs = false
   let sawProject = false
   let schema: string | null = null
+  let inPaths = false   // ①d 放开（t260903 切换夜）：顶层 paths: 透传不解析
   const lines = text.split('\n')
   for (let i = 0; i < lines.length; i++) {
     const line = stripLine(lines[i])
     if (line === null) continue
+    if (inPaths) {
+      if (/^\s/.test(lines[i])) continue        // ①d 放开：paths 节透传（python 侧 project_paths 负责语义）
+      inPaths = false
+    }
+    if (line === 'paths:') { inPaths = true; continue }
     if (!/^\s/.test(lines[i]) && line !== 'project:' && !line.startsWith('schema:') && i + 1 > 1) {
-      throw new Error(`${fileLabel}:${i + 1} 顶层只认 schema: 与 project:`)
+      throw new Error(`${fileLabel}:${i + 1} 顶层只认 schema:/project:/paths:`)
     }
     if (line === 'project:') {
       if (sawProject) throw new Error(`${fileLabel}:${i + 1} project: 重复`)

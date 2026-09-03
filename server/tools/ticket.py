@@ -203,13 +203,21 @@ def _parse_project_file(text, label):
     cur = None
     in_dirs = False
     saw_project = False
-    schema = None
-    for i, raw in enumerate(text.split('\n'), 1):
+    in_paths = False   # ①d 放开（t260903 切换夜落地，债 notes/debts/ 对应项销账）：
+    schema = None      # 顶层 paths: 节装载器透传不解析（语义/锚点 fail-closed 归
+    for i, raw in enumerate(text.split('\n'), 1):  # shared.project_paths ①d 读取器）
         line = _strip_line(raw)
         if line is None:
             continue
+        if in_paths:
+            if raw[:1].isspace():
+                continue    # paths 节内行：透传（①d 读取器负责形状与锚点）
+            in_paths = False    # 非缩进行=paths 节结束，落回正常顶层处理
+        if line == 'paths:':
+            in_paths = True
+            continue
         if not raw[:1].isspace() and line != 'project:' and not line.startswith('schema:') and i > 1:
-            raise ValueError('%s:%d 顶层只认 schema: 与 project:' % (label, i))
+            raise ValueError('%s:%d 顶层只认 schema:/project:/paths:' % (label, i))
         if line == 'project:':
             if saw_project:
                 raise ValueError('%s:%d project: 重复' % (label, i))
