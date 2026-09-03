@@ -217,6 +217,34 @@ async function aggregateOneFile(path: string, windows: StageWindow[], out: Agent
 }
 
 /**
+ * 项目级 usage 账本探测缝（t260903-09 KI-017③ 前向契约）：
+ * 泳道拆除后 `.dsh/sessions` 陪葬，token 维唯一存活希望=引擎侧在 merge 时刻把
+ * usage 出仓到项目级账本（agent_activities.py，本票写集外——登记
+ * notes/debts/known-issues.md KI-017③）。本函数只做探测：
+ *   约定路径 = $SUYOU_USAGE_LEDGER_DIR/<工单id>/*.jsonl.zstd（格式与
+ *   session.jsonl.zstd 同构，复用同一聚合通路；env 亦为测试缝）。
+ * 未配置/无目录/无文件 → paths=[] + 人话 reason（不静默，不做假 0）。
+ */
+export async function resolveLedgerSessionFiles(ticketId: string): Promise<{ paths: string[]; reason?: string }> {
+  const root = process.env.SUYOU_USAGE_LEDGER_DIR ?? ''
+  if (root === '') {
+    return { paths: [], reason: '泳道会话不存在，且项目级 usage 账本未配置（SUYOU_USAGE_LEDGER_DIR 未设；KI-017③ 引擎侧出仓待落地）' }
+  }
+  const dir = join(root, ticketId)
+  let entries: string[] = []
+  try {
+    entries = (await readdir(dir)).filter((f) => f.endsWith('.jsonl.zstd'))
+  } catch {
+    return { paths: [], reason: `项目级 usage 账本无本票目录: ${dir}（KI-017③ 出仓未覆盖本票）` }
+  }
+  const paths = entries.map((f) => join(dir, f))
+  if (paths.length === 0) {
+    return { paths: [], reason: `项目级 usage 账本无 *.jsonl.zstd: ${dir}` }
+  }
+  return { paths }
+}
+
+/**
  * 工单 usage 聚合入口（只读）。全部会话文件加总 + 按 stage 时间窗切分。
  * 任一文件有内容即 exists:true；全部文件不可读/无 usage → exists:false + 人话 reason。
  */

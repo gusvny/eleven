@@ -12,9 +12,12 @@
  *   stageWindowsFromTimeline（乱序按 from 排序）；末窗封口是本模块新增语义
  *   （agent-usage 末窗 toMs=null 开放式，L82-93），实现为 closeStageWindows
  *   包装、不改本体签名——既有消费方（agent-usage 端点、M1b 泳道图）零回退。
- * - 交付维：base 钉死取工单 base_ref 进 delivery.base；git diff --numstat 分列
- *   add/del（不并净值）+ rev-list count；git 失败 → delivery=null + reason 软降级。
- * - token 维：复用 aggregateTicketUsage（块 5 八项故障模式随函数全量带入）。
+ * - 交付维（t260903-09 KI-017①② 重写）：泳道在=泳道三点 diff（活口径）；泳道
+ *   拆了/字段缺失/直并票=主仓归档口径（票 id grep 提交集，frozen=true），
+ *   reason 显式标注口径，两口径不静默混用；git 双路失败 → null+reason。
+ * - token 维：复用 aggregateTicketUsage（块 5 八项故障模式随函数全量带入）；
+ *   泳道会话陪葬后回落项目级 usage 账本（SUYOU_USAGE_LEDGER_DIR 前向契约），
+ *   缓存存量降维保留（engine_version 失配不再整条作废）。
  * - 纳票/归窗口径（契约真空，gen2 成文、已上报用户裁决）：closed 票归窗时刻=
  *   闭单终态时刻，未结票=创建时刻；KPI 分母与 charts 聚合同一口径、跨视图一致。
  * - health 视图：直查不读缓存（块 2 L157）；kpis 恒冻结四字段（tokens_total=
@@ -34,7 +37,7 @@
  */
 
 import { execFile } from 'node:child_process'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import net from 'node:net'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -43,7 +46,7 @@ import { runAdminCli } from '../../../suyou-tools.ts'
 import { findProject, loadProjects } from '../../../suyou-projects.ts'
 import { listEpics, resolveEpicsDir } from './epics.ts'
 import {
-  aggregateTicketUsage, resolveAllSessionFiles, stageWindowsFromTimeline,
+  aggregateTicketUsage, resolveAllSessionFiles, resolveLedgerSessionFiles, stageWindowsFromTimeline,
   type StageWindow,
 } from './agent-usage.ts'
 
@@ -85,6 +88,8 @@ export async function mapPool<T, R>(items: T[], concurrency: number, fn: (item: 
 // 契约 v1 块 2 枚举变更候选已落 integration/t260902-05/contract-bump-candidate.md 上报）
 const WINDOWS: Record<string, number> = { '1d': 86_400_000, '3d': 3 * 86_400_000, '7d': 7 * 86400_000, '30d': 30 * 86400_000, all: 0 }
 const VIEWS = ['time', 'delivery', 'token', 'health']
+/** 取数模式（t260903-09 cache-first）：full=全量惰性计算（缺省）；fast=只读缓存聚合（缺票不现算，cache.status='stale'）。 */
+const MODES = ['full', 'fast']
 const NUM_RE = /^\d+(\.\d+)?$/
 
 /* ------------------------------------------------ 参数解析（契约块 2 防穿） */
@@ -95,6 +100,7 @@ export interface MetricsParams {
   project: string
   template: string
   view: string
+  mode: string
 }
 
 export type ParsedQuery = { ok: true; params: MetricsParams } | { ok: false; status: number; error: string }
@@ -115,14 +121,17 @@ export function parseMetricsQuery(input: URLSearchParams | Record<string, string
     if (all.length > 1) return { err: `同名重复参数 '${key}' 出现 ${all.length} 次（无取首个容错）` }
     return { v: all[0] }
   }
-  const out: MetricsParams = { window: '7d', epic: 'all', project: '', template: 'dev-lane', view: '' }
+  const out: MetricsParams = { window: '7d', epic: 'all', project: '', template: 'dev-lane', view: '', mode: 'full' }
   const projectGiven = get('project').length > 0
-  for (const [key, def] of [['window', '7d'], ['epic', 'all'], ['project', ''], ['template', 'dev-lane'], ['view', '']] as const) {
+  for (const [key, def] of [['window', '7d'], ['epic', 'all'], ['project', ''], ['template', 'dev-lane'], ['view', ''], ['mode', 'full']] as const) {
     const r = once(key)
     if (r.err) return { ok: false, status: 400, error: r.err }
     if (r.v !== undefined && r.v !== '') (out as any)[key] = r.v
   }
   if (!(out.window in WINDOWS)) return { ok: false, status: 400, error: `window 非法：'${out.window}'（枚举 1d|3d|7d|30d|all）` }
+  if (!MODES.includes(out.mode)) {
+    return { ok: false, status: 400, error: `mode 非法：'${out.mode}'（枚举 full|fast）` }
+  }
   if (out.epic !== 'all' && out.epic !== 'none') {
     if (out.epic.length > 41 || !/^[a-z0-9][a-z0-9-]{0,40}$/.test(out.epic)) {
       return { ok: false, status: 400, error: `epic 非法：'${out.epic.slice(0, 60)}'（立项代号形状 all|none|<code>）` }
@@ -253,6 +262,11 @@ export interface MetricsCacheRecord {
   engine_version: string
   updated_ts: string
   computed_at: string
+  /* 归窗锚点（t260903-09 契约 bump：派生字段入缓存、不入响应）——fast 路径与
+   * 缓存命中路径据此免 showTicket spawn 补锚点；旧版记录无此两键 → null → 走
+   * 既有「list 行 timeline / show 取 timeline」补齐路径，读侧向后兼容。 */
+  created_ms?: number | null
+  closed_ms?: number | null
 }
 
 /**
@@ -284,8 +298,16 @@ export function engineVersionOf(stages: unknown): string {
   return (fnv(text) + fnv(text.split('').reverse().join(''))).slice(0, 12)
 }
 
-/** 读缓存：文件缺/坏 JSON/双版本失配 → null（作废重算，契约块 3）。 */
-export async function readTicketCache(dir: string, id: string, engineVersion: string): Promise<MetricsCacheRecord | null> {
+/** 读缓存返回：rec=记录本体；engineStale=stages 链指纹失配（时间维须按现行链重算，
+ *  delivery/tokens 两维与 stage 链无关 → 降维保留不陪葬，t260903-09 KI-017②③）。 */
+export interface CachedTicket {
+  rec: MetricsCacheRecord
+  engineStale: boolean
+}
+
+/** 读缓存：文件缺/坏 JSON/source_version 失配 → null（schema 失配整条作废，形状不可信）；
+ *  engine_version 失配 → 返回记录+engineStale=true（只作废时间维，见 CachedTicket 注）。 */
+export async function readTicketCache(dir: string, id: string, engineVersion: string): Promise<CachedTicket | null> {
   let raw: string
   try {
     raw = await readFile(join(dir, `${id}.json`), 'utf8')
@@ -298,8 +320,8 @@ export async function readTicketCache(dir: string, id: string, engineVersion: st
   } catch {
     return null // 坏缓存当未命中
   }
-  if (rec?.source_version !== SOURCE_VERSION || rec?.engine_version !== engineVersion) return null
-  return rec as MetricsCacheRecord
+  if (rec?.source_version !== SOURCE_VERSION) return null
+  return { rec: rec as MetricsCacheRecord, engineStale: rec.engine_version !== engineVersion }
 }
 
 /** 写缓存（失败静默：目录不可写 → 本次直算回包+reason，不 5xx）。 */
@@ -386,41 +408,100 @@ function isoMs(at: unknown): number {
 
 /* ------------------------------------------------ 交付维 / token 维 */
 
-/** 单票交付维：base 钉死 base_ref；numstat 分列 add/del；rev-list count。git 失败 → null+reason。 */
-export async function computeDelivery(
-  deps: MetricsDeps, ticket: any,
-): Promise<{ delivery: MetricsCacheRecord['delivery']; reason?: string }> {
+/** 单票交付维结果：frozen=true=归档口径（主仓回落成功或缓存存量降维保留），
+ *  落 rec.delivery_frozen——读侧 reason 据此标注「冻结快照」，KI-017② 收口。 */
+export interface DeliveryResult {
+  delivery: MetricsCacheRecord['delivery']
+  reason?: string
+  frozen?: boolean
+}
+
+function parseNumstatTotal(numstat: string): { add: number; del: number } {
+  let add = 0
+  let del = 0
+  for (const line of numstat.split('\n')) {
+    const m = /^(\d+|-)\t(\d+|-)\t/.exec(line)
+    if (!m) continue
+    add += m[1] === '-' ? 0 : Number(m[1])
+    del += m[2] === '-' ? 0 : Number(m[2])
+  }
+  return { add, del }
+}
+
+/**
+ * 单票交付维（t260903-09 KI-017①② 收口重写）：
+ * - 泳道在且 git 可读：泳道三点 diff（活口径，frozen=false）。已知病灶=区间 diff
+ *   会吸收中途并 main 的进度（t260902-02 实证显示 8 万 vs squash 实测 +2,557），
+ *   活口径语义不变，主仓回落口径见下——两口径差异在 reason 显式标注，不静默混用。
+ * - 泳道拆了 / base_ref·worktree 缺失（直并收口票）/ 泳道 git 失败：回落**主仓
+ *   归档口径**——`git log --grep <票id>` 取引用本票的提交集（merge/squash commit
+ *   message 均带票 id）+ numstat 合计。票 id grep 为主键，不依赖 base_ref/worktree
+ *   （绕开旧实现的字段早退——直并票恰无这两字段又最需要补账）；提交集口径天然不含
+ *   main 无关进度，正面收口 KI-017①。frozen=true，主仓历史不随泳道拆除蒸发。
+ * - 两路全失败：delivery=null + reason（人话，含两路失败原因），不做静默 0。
+ * 已知边界：一 commit 引用多票 id 时同一行变更会计入两票提交集（双算面）；
+ * 实证与标注义务见 tests/delivery-recovery.mjs，反例票 reason 不静默。
+ */
+export async function computeDelivery(deps: MetricsDeps, ticket: any): Promise<DeliveryResult> {
   const base = String(ticket?.base_ref ?? '')
   const worktree = String(ticket?.worktree ?? '')
-  if (base === '' || worktree === '') {
-    return { delivery: null, reason: '工单缺 base_ref/worktree（无泳道或历史票），delivery 维不可算' }
-  }
-  const cwd = join(deps.repo, worktree)
-  try {
-    const numstat = await deps.git(cwd, ['diff', `${base}...HEAD`, '--numstat'])
-    let add = 0
-    let del = 0
-    for (const line of numstat.split('\n')) {
-      const m = /^(\d+|-)\t(\d+|-)\t/.exec(line)
-      if (!m) continue
-      add += m[1] === '-' ? 0 : Number(m[1])
-      del += m[2] === '-' ? 0 : Number(m[2])
+  const id = String(ticket?.id ?? '')
+  let laneFail = ''
+  if (base !== '' && worktree !== '') {
+    try {
+      const cwd = join(deps.repo, worktree)
+      const numstat = await deps.git(cwd, ['diff', `${base}...HEAD`, '--numstat'])
+      const { add, del } = parseNumstatTotal(numstat)
+      const commits = Number((await deps.git(cwd, ['rev-list', '--count', `${base}..HEAD`])).trim())
+      return { delivery: { base, add, del, commits: Number.isFinite(commits) ? commits : 0 }, frozen: false }
+    } catch (err) {
+      laneFail = String(err instanceof Error ? err.message : err)
     }
-    const commits = Number((await deps.git(cwd, ['rev-list', '--count', `${base}..HEAD`])).trim())
-    return { delivery: { base, add, del, commits: Number.isFinite(commits) ? commits : 0 } }
+  } else {
+    laneFail = '工单缺 base_ref/worktree（无泳道或历史/直并票）'
+  }
+  if (id === '') {
+    return { delivery: null, reason: `delivery 维不可算（${laneFail}，且无票 id 可回落主仓）` }
+  }
+  try {
+    const headList = await deps.git(deps.repo, ['log', '--format=%H', '--grep', id])
+    const hashes = headList.split('\n').filter((l) => l.trim() !== '')
+    if (hashes.length === 0) {
+      return { delivery: null, reason: `主仓无引用本票（${id}）的提交（泳道${laneFail === '' ? '不可用' : `：${laneFail}`}），delivery 维不可算`, frozen: false }
+    }
+    const numstat = await deps.git(deps.repo, ['log', '--grep', id, '--numstat', '--format='])
+    const { add, del } = parseNumstatTotal(numstat)
+    return {
+      delivery: { base, add, del, commits: hashes.length },
+      reason: `delivery 为主仓归档口径（引用本票的提交 ${hashes.length} 个；泳道${laneFail}）`,
+      frozen: true,
+    }
   } catch (err) {
-    return { delivery: null, reason: `git 读取失败（${String(err instanceof Error ? err.message : err)}），delivery 维置空` }
+    return { delivery: null, reason: `git 读取失败（泳道：${laneFail}；主仓回落也失败：${String(err instanceof Error ? err.message : err)}），delivery 维置空` }
   }
 }
 
-/** 单票 token 维：复用 agent-usage 通路（八项故障模式随函数带入，契约块 5）。 */
+/** 单票 token 维：复用 agent-usage 通路（八项故障模式随函数带入，契约块 5）。
+ *  t260903-09 KI-017③ 补账缝：泳道会话不存在（已拆）→ 探测项目级 usage 账本
+ *  （SUYOU_USAGE_LEDGER_DIR，引擎侧出仓前向契约）；两处皆无 → null+人话 reason。 */
 export async function computeTokens(
   deps: MetricsDeps, id: string, ticket: any, windows: StageWindow[],
 ): Promise<{ tokens: MetricsCacheRecord['tokens']; reason?: string }> {
   const ref = await resolveAllSessionFiles(deps.repo, id, ticket)
   if (ref.refused === true) return { tokens: null, reason: ref.reason ?? '工单字段越界（拒绝读取会话）' }
-  const agg = await aggregateTicketUsage(ref.paths ?? [], windows)
-  if (!agg.exists) return { tokens: null, reason: agg.reason ?? '无 usage 事件' }
+  let paths = ref.paths ?? []
+  let srcReason = ref.reason
+  if (paths.length === 0) {
+    const led = await resolveLedgerSessionFiles(id)
+    if (led.paths.length > 0) {
+      paths = led.paths
+      srcReason = undefined
+    } else if (led.reason) {
+      srcReason = led.reason
+    }
+  }
+  const agg = await aggregateTicketUsage(paths, windows)
+  if (!agg.exists) return { tokens: null, reason: paths.length === 0 ? (srcReason ?? agg.reason ?? '无 usage 事件') : (agg.reason ?? '无 usage 事件') }
   const by_model: Record<string, number> = {}
   for (const m of agg.models) by_model[`${m.provider}/${m.model}`] = m.input + m.output
   const by_stage: Record<string, { in: number; out: number; cacheRead: number }> = {}
@@ -440,6 +521,9 @@ export interface RecordWithAnchor {
   fromCache: boolean
   /** 惰性生成的记录是否成功落盘（fromCache=true 时恒 true；落盘失败=每次直算兜底）。 */
   persisted: boolean
+  /** 锚点为近似值（旧版缓存记录无锚点，按 rec.computed_at 近似归窗；t260903-09 F3）。
+   *  近似锚点只进响应、绝不回写缓存（防近似值永久化成「闭单时刻」）。 */
+  anchorApproximated?: boolean
 }
 
 async function ticketRecord(
@@ -450,34 +534,54 @@ async function ticketRecord(
   if (id === '') return null
   const humanStages = new Set(stages.filter((s: any) => s?.exit === 'human').map((s: any) => String(s.id)))
   const cached = cacheDir.enabled ? await readTicketCache(cacheDir.dir, id, engineVersion) : null
-  if (cached) {
-    return { rec: cached, createdMs: null, closedMs: null, fromCache: true, persisted: true } // 锚点由主循环统一补（见主循环注释）
+  if (cached && !cached.engineStale) {
+    // 新版记录自带归窗锚点（created_ms/closed_ms，t260903-09 bump）→ 命中路径零
+    // showTicket spawn；旧版记录两键缺省 → null → 主循环按既有路径补锚点（向后兼容）。
+    return {
+      rec: cached.rec,
+      createdMs: cached.rec.created_ms ?? null,
+      closedMs: cached.rec.closed_ms ?? null,
+      fromCache: true,
+      persisted: true,
+    }
   }
-  // 上方 if 已把 cached 收窄成 null；断言还原宽类型供下方 frozen 语义读取
-  const prev = cached as MetricsCacheRecord | null
+  // engineStale（stages 链演化）：时间维必须按现行链重算（stage 键可能改名），
+  // delivery/tokens 两维与 stage 链无关 → 从 prev 降维保留，不因版本失配陪葬
+  // （t260903-09 KI-017②③：蒸发真实路径=此处旧实现整条作废后重算失败写 null）。
+  const prev = cached?.rec ?? null
   const ticket = (await deps.showTicket(id)) ?? row
   const timeline = ticket?.timeline ?? ticket?.meta?.timeline
   const durations = computeDurations(timeline, humanStages, deps.now())
   // frozen 例外（契约块 3）：已固化票重算跳过 delivery 维，只刷新其余维度
   let delivery = prev?.delivery ?? null
+  let deliveryFrozen = prev?.delivery_frozen ?? false
   if (delivery === null && prev?.delivery_frozen !== true) {
-    delivery = (await computeDelivery(deps, ticket)).delivery
+    const d = await computeDelivery(deps, ticket)
+    delivery = d.delivery
+    if (d.frozen === true) deliveryFrozen = true // 主仓归档口径成功 → 冻结
+  }
+  if (delivery !== null && prev !== null && cached?.engineStale === true) {
+    deliveryFrozen = true // 降维保留的存量=冻结快照（归档口径）
   }
   const windows = closeStageWindows(stageWindowsFromTimeline(timeline), durations.closed_ms ?? NaN)
   const t = await computeTokens(deps, id, ticket, windows)
+  // token 现算失败（泳道会话已拆）→ 存量保留；同序 reason 由 stableReasons 只看 rec 状态保证双前门一致
+  const tokens = t.tokens ?? prev?.tokens ?? null
   const nowIso = new Date(deps.now()).toISOString()
   const rec: MetricsCacheRecord = {
     ticket_id: id,
     template,
     durations: { by_stage: durations.by_stage, by_round: durations.by_round, human_wait: durations.human_wait },
     delivery,
-    tokens: t.tokens,
+    tokens,
     open: String(ticket?.status ?? '') !== 'closed',
-    delivery_frozen: prev?.delivery_frozen ?? false,
+    delivery_frozen: deliveryFrozen,
     source_version: SOURCE_VERSION,
     engine_version: engineVersion,
     updated_ts: nowIso,
     computed_at: nowIso,
+    created_ms: durations.created_ms,
+    closed_ms: durations.closed_ms,
   }
   const persisted = cacheDir.enabled ? await writeTicketCache(cacheDir.dir, rec) : false
   return { rec, createdMs: durations.created_ms, closedMs: durations.closed_ms, fromCache: false, persisted }
@@ -497,7 +601,8 @@ function stableReasons(entries: RecordWithAnchor[], cacheDir: { dir: string; ena
       out.push(`${id}: 记录未入缓存（缓存禁用/不可写），每次直算兜底`)
     }
     if (Object.keys(e.rec.durations.by_stage).length === 0) out.push(`${id}: timeline 无 running 条目，stage 时长计 0`)
-    if (e.rec.delivery === null && !e.rec.delivery_frozen) out.push(`${id}: delivery 维不可算（缺 base_ref/worktree 或 git 失败）`)
+    if (e.rec.delivery === null && !e.rec.delivery_frozen) out.push(`${id}: delivery 维不可算（泳道不可用且主仓无引用本票的提交）`)
+    if (e.rec.delivery !== null && e.rec.delivery_frozen) out.push(`${id}: delivery 为主仓归档口径（冻结快照，KI-017②）`)
     if (e.rec.tokens === null) out.push(`${id}: 无 token 数据（无会话文件/无 usage，SKIP）`)
   }
   return out
@@ -565,7 +670,10 @@ export async function buildMetricsResponse(
   const engineVersion = engineVersionOf(stages)
 
   let rows = await deps.listTickets(p.project)
-  if (p.epic === 'none') rows = rows.filter((r: any) => String(r?.epic ?? '') === '')
+  // 去重名单取「未过滤」全量列表（t260903-09 修复）：若在 epic 筛选后取名单，
+  // 「在列表但被筛掉」的票会被宇宙补全二次并入（epic=none 下冒充无代号票）。
+  const listedIds = new Set(rows.map((r: any) => String(r?.id ?? '')))
+  if (p.epic === 'none') rows = rows.filter((r: any) => String(r?.epic ?? '') === '' && (r?.__archived !== true))
   else if (p.epic !== 'all') rows = rows.filter((r: any) => String(r?.epic ?? '') === p.epic)
   rows = rows.filter((r: any) => String(r?.workflow ?? '') === p.template)
 
@@ -576,54 +684,100 @@ export async function buildMetricsResponse(
 
   const cacheDir = resolveMetricsCacheDir(p.project)
 
+  // 宇宙补全（t260903-09 S5，audit 洞）：直并/收口终态票可能已从工单列表消失，
+  // 但度量缓存仍有其存量记录——从缓存目录并入（epic 不入缓存=存量票 epic 未知，
+  // 仅在 all 与对应窗口可见；template 筛选仍尊重，跨模板不混排契约不破）。
+  // W3 红线：只并入度量聚合，绝不回写 ticket list API（dispatch 流不被污染）。
+  const archivedRows = cacheDir.enabled ? await collectArchivedRows(cacheDir.dir, p.template, listedIds) : []
+  const allRows: any[] = archivedRows.length > 0 ? [...rows, ...archivedRows] : rows
+
   if (p.view === 'health') return healthView(deps, rows, p, stageIds, from, to, nowMs, reasons)
 
   /* -- 三数据视图：逐票惰性算/读缓存（t260902-05⑦：有界并发，保序落位，
-      skipped/reason 顺序与原串行一致；锚点补齐也在任务内做，语义不变） -- */
-  const recordEntries = await mapPool<any, RecordWithAnchor | null>(rows, TICKET_CONCURRENCY, async (row) => {
-    const e = await ticketRecord(deps, row, p.template, stages, engineVersion, cacheDir)
-    if (e === null) return null
-    // 锚点统一补齐（缓存命中路径的 rec 不带 created/closed——冻结 schema 无槽位，
-    // 且命中/重算两条路径必须产出同一响应，否则双前门字节级比对红）：优先 list 行
-    // 自带 timeline（stub/测试零成本），否则一次 show 取 timeline。
-    if (e.createdMs === null) {
-      const tl = row?.timeline ?? (await deps.showTicket(String(row?.id ?? '')))?.timeline
-      e.createdMs = timelineCreatedMs(tl)
-      e.closedMs = e.rec.open ? null : timelineClosedMs(tl)
-    }
-    return e
-  })
+      skipped/reason 顺序与原串行一致；锚点补齐也在任务内做，语义不变）。
+      mode=fast（t260903-09 cache-first）：只读缓存聚合，缺票不现算——
+      先吐缓存快照（cache.status='stale'），全量由客户端随后台请求补。 -- */
+  let recordEntries: (RecordWithAnchor | null)[]
+  const fastSkips: string[] = []
+  if (p.mode === 'fast') {
+    recordEntries = await mapPool<any, RecordWithAnchor | null>(allRows, TICKET_CONCURRENCY, async (row) => {
+      const e = await fastCacheRecord(cacheDir, row, engineVersion)
+      if (e === null) fastSkips.push(`${String(row?.id ?? '?')}: fast 无可用缓存（未算过或引擎版本失配），跳过现算`)
+      return e
+    })
+  } else {
+    recordEntries = await mapPool<any, RecordWithAnchor | null>(allRows, TICKET_CONCURRENCY, async (row) => {
+      const e = await ticketRecord(deps, row, p.template, stages, engineVersion, cacheDir)
+      if (e === null) return null
+      // 锚点统一补齐：新版缓存记录自带 created_ms/closed_ms（零 spawn）；旧版记录
+      // 或重算路径缺锚点时，优先 list 行自带 timeline（stub/测试零成本），否则一次
+      // show 取 timeline。命中/重算两条路径产出同一响应，双前门字节级比对不红。
+      if (e.createdMs === null) {
+        const id = String(row?.id ?? '')
+        const tl = row?.timeline ?? (row.__archived === true ? undefined : (await deps.showTicket(id))?.timeline)
+        const realCreated = timelineCreatedMs(tl)
+        if (realCreated !== null) {
+          e.createdMs = realCreated
+          e.closedMs = e.rec.open ? null : timelineClosedMs(tl)
+          // F2 迁移回写：旧版缓存记录命中后补齐了真实锚点 → 落盘升级为带锚点新版，
+          // 下次 fast 直接受益（存量数据逐步收敛，不再永久跳过）。近似锚点不回写。
+          if (e.fromCache && cacheDir.enabled &&
+            (e.rec.created_ms === undefined || (!e.rec.open && e.rec.closed_ms === undefined))) {
+            e.rec.created_ms = e.createdMs
+            if (!e.rec.open && e.closedMs !== null) e.rec.closed_ms = e.closedMs
+            e.persisted = await writeTicketCache(cacheDir.dir, e.rec)
+          }
+        } else if (row.__archived === true) {
+          // F3 存量票近似归窗：列表外票无 timeline 可补，按 rec.computed_at 近似——
+          // 只进内存不回写（防近似值被永久化成真实闭单时刻），reason 显式声明。
+          const approx = isoMs(e.rec.computed_at)
+          if (Number.isFinite(approx)) {
+            e.createdMs = approx
+            if (!e.rec.open && e.closedMs === null) e.closedMs = approx
+            e.anchorApproximated = true
+          }
+        }
+      }
+      return e
+    })
+  }
   const skipped: string[] = []
   for (let i = 0; i < recordEntries.length; i++) {
-    if (recordEntries[i] === null) skipped.push(`${String(rows[i]?.id ?? '?')}: 记录生成失败，跳过`)
+    if (recordEntries[i] === null) skipped.push(`${String(allRows[i]?.id ?? '?')}: 记录生成失败，跳过`)
   }
   const entries = recordEntries.filter((e): e is RecordWithAnchor => e !== null)
 
-  // KPI 分母与 charts 聚合同口径（gen2 成文）：closed 票按闭单时刻、未结票按创建时刻归窗
+  // KPI 单一口径（t260903-09 S2 锚点归窗统一，gen2 成文）：四指标同一 anchor——
+  // closed 票按闭单时刻、未结票按创建时刻归窗。原实现 tickets 按创建归窗、closed
+  // 按闭单归窗，出现「关闭数(10) > 工单数(8)」悖论，此处收口为单一人口。
   const kpis = emptyKpis()
   const kept: MetricsCacheRecord[] = []
   let avgSumMin = 0
+  let approxInWindow = 0
   for (const e of entries) {
     const anchor = e.rec.open ? e.createdMs : (e.closedMs ?? e.createdMs)
-    if (e.createdMs !== null && inWindow(e.createdMs, from, to)) kpis.tickets += 1
-    if (inWindow(anchor, from, to)) {
-      kept.push(e.rec)
-      if (!e.rec.open && anchor !== null) {
-        kpis.closed += 1
-        if (e.createdMs !== null && anchor - e.createdMs > 0) avgSumMin += (anchor - e.createdMs) / 60000
-      }
+    if (anchor === null || !inWindow(anchor, from, to)) continue
+    kpis.tickets += 1
+    kept.push(e.rec)
+    // 近似 notice 计数口径=「通过归窗的近似条目数」（验收 gen2 残留①）：与 KPI
+    // 人口严格一致，响应中途重算导致的边界排除票不再被 notice 多报。
+    if (e.anchorApproximated === true) approxInWindow += 1
+    if (!e.rec.open) {
+      kpis.closed += 1
+      if (e.createdMs !== null && anchor - e.createdMs > 0) avgSumMin += (anchor - e.createdMs) / 60000
     }
   }
   kpis.avg_delivery_min = kpis.closed > 0 ? round2(avgSumMin / kpis.closed) : 0.0
   kpis.tokens_total = kept.reduce((s, r) => s + (r.tokens ? r.tokens.in + r.tokens.out : 0), 0)
 
   const body = buildChartsBody(p.view, kept, stageIds, kpis)
-  // cache.status 契约块 2 字面语义（t260901-20 acceptance P1 打回后回归字面）：
-  // 'computed'=本响应含本次惰性生成（缓存 miss）的记录；'hit'=全部记录由缓存读命中。
+  // cache.status 契约字面语义（t260901-20 acceptance P1 打回后回归字面；t260903-09
+  // bump 增 'stale'）：'computed'=本响应含本次惰性生成（缓存 miss）的记录；'hit'=
+  // 全部记录由缓存读命中；'stale'=fast 模式缓存快照（可能缺票，客户端随后台全量替换）。
   // 双前门字节级一致由此保住：t05/M3 比对基线在两门前**预热缓存**（同请求先跑一次），
   // 两门同刻同缓存状态、status 同为 hit——比较面不削（status 不进剔除清单），契约
   // 字面不偏离。冷缓存下「第一门 computed / 第二门 hit」的天然差异即契约语义本身。
-  const cacheStatus = entries.length > 0 && entries.every((e) => e.fromCache) ? 'hit' : 'computed'
+  const cacheStatus = p.mode === 'fast' ? 'stale' : (entries.length > 0 && entries.every((e) => e.fromCache) ? 'hit' : 'computed')
   const nowIso = new Date(nowMs).toISOString()
   const resp: Record<string, unknown> = {
     kpis,
@@ -631,11 +785,83 @@ export async function buildMetricsResponse(
     generated_at: nowIso,
     cache: { status: cacheStatus, computed_at: nowIso, source_version: SOURCE_VERSION },
   }
-  const respReasons = [...skipped, ...stableReasons(entries, cacheDir)]
-  if (respReasons.length > 0) {
-    ;(resp as any).reason = dedupe(respReasons).slice(0, 20).join('；')
+  const respReasons = [...fastSkips, ...skipped, ...stableReasons(entries, cacheDir)]
+  // 近似归窗计数（F3）：旧版缓存无锚点的票按缓存计算时刻近似归窗，显式计数让用户
+  // 可分辨近似与精确；与宇宙补全 notice 一起排在 reason 首、不受 20 条 cap 截断
+  // （真实项目规模下 reason 常满，notice 沉尾=用户不可见，验收 F3 实锤）。
+  const approxCount = approxInWindow
+  const notices: string[] = []
+  if (archivedRows.length > 0) {
+    notices.push(`度量宇宙补全：${archivedRows.length} 票仅存于度量缓存（工单列表已不可见，直并/收口终态）`)
+  }
+  if (approxCount > 0) {
+    notices.push(`其中 ${approxCount} 票旧版缓存无归窗锚点，按缓存计算时刻近似归窗（全量重算后自动转精确）`)
+  }
+  if (notices.length > 0 || respReasons.length > 0) {
+    const rest = dedupe(respReasons).slice(0, Math.max(0, 20 - notices.length))
+    ;(resp as any).reason = [...notices, ...rest].join('；')
   }
   return { status: 200, body: resp }
+}
+
+/** S5 宇宙补全：缓存目录里「不在工单列表」的票 → 合成聚合行。只读缓存文件，不 spawn、
+ *  不回写任何 API；坏 JSON 跳过（不崩）；存量票 epic 不入缓存=未知（仅 all 可见，none 桶排除），template 尊重。 */
+async function collectArchivedRows(dir: string, template: string, listedIds: Set<string>): Promise<any[]> {
+  let files: string[] = []
+  try {
+    files = (await readdir(dir)).filter((f) => f.endsWith('.json'))
+  } catch {
+    return [] // 缓存目录不存在=冷项目，无补全面
+  }
+  const out: any[] = []
+  for (const f of files) {
+    const id = f.slice(0, -'.json'.length)
+    if (listedIds.has(id)) continue
+    let rec: any
+    try {
+      rec = JSON.parse(await readFile(join(dir, f), 'utf8'))
+    } catch {
+      continue // 坏缓存跳过，不崩不静默混入
+    }
+    if (rec?.source_version !== SOURCE_VERSION) continue
+    if (String(rec?.template ?? '') !== template) continue
+    out.push({
+      id,
+      workflow: String(rec.template),
+      epic: '',
+      status: rec.open === true ? 'running' : 'closed',
+      archived: true, // 派生标记（内存行，不进冻结 schema）：reason 计数 + epic=none 桶排除（存量票 epic 未知，不得冒充无代号）
+      __archived: true,
+    })
+  }
+  return out
+}
+
+/** fast 模式单票记录：只读缓存。engineStale 一律不入（快照宁可缺票不可错数）；
+ *  旧版记录（无锚点）按 rec.computed_at 近似归窗——存量数据不再被 fast 永久跳过
+ *  （t260903-09 F2/F3），近似票在 reason 显式计数，全量门到达后被真实锚点取代。 */
+async function fastCacheRecord(
+  cacheDir: { dir: string; enabled: boolean; reason?: string },
+  row: any, engineVersion: string,
+): Promise<RecordWithAnchor | null> {
+  if (!cacheDir.enabled) return null
+  const id = String(row?.id ?? '')
+  if (id === '') return null
+  const c = await readTicketCache(cacheDir.dir, id, engineVersion)
+  if (!c || c.engineStale) return null
+  let createdMs = c.rec.created_ms ?? null
+  let closedMs = c.rec.closed_ms ?? null
+  let anchorApproximated: boolean | undefined
+  if (createdMs === null && closedMs === null) {
+    const approx = isoMs(c.rec.computed_at)
+    if (Number.isFinite(approx)) {
+      createdMs = approx
+      if (c.rec.open !== true) closedMs = approx
+      anchorApproximated = true
+    }
+  }
+  if (createdMs === null && closedMs === null) return null
+  return { rec: c.rec, createdMs, closedMs, fromCache: true, persisted: true, anchorApproximated }
 }
 
 function timelineCreatedMs(timeline: any): number | null {

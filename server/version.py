@@ -16,7 +16,8 @@ import pathlib
 import re
 
 # 三段整数、不许前导零（semver 核心段）+ 可选 prerelease 后缀（仅认 -rc 与
-# -rc.<N>，N 纯整数无前导零；0.2.0-rc 起仓根 VERSION 进入 rc 预发布期，与 dsh
+# -rc.<N>，N 纯整数无前导零；0.2.0-rc 起仓根 VERSION 进入 rc 预发布期（t260903-13
+# 毕业为 0.2.0 正式），与 dsh
 # 已验证点的 rc 串口径对齐——semver 规范本含 prerelease 段，0.1.0 期的「纯三段」
 # 收窄是实现层取舍，现回归 semver 全集，契约⑧-4「semver + 畸形 fail-closed」不变）。
 _SEMVER_RE = re.compile(
