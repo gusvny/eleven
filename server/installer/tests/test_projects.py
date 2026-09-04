@@ -457,13 +457,383 @@ class ListReport(Base):
         self.assertIn("注册表装载失败", str(cm.exception))
 
 
-class RemovePlaceholder(Base):
-    def test_remove_is_ticket2_placeholder(self):
+class RemoveStub(Base):
+    """remove 侧共用脚手架：条目 fixture + stub client.py（票号级 rows）。"""
+
+    def setUp(self):
+        super().setUp()
+        self.root_a = self.proj_root("root-a")
+        (self.root_a / ".lane" / "t260904-01").mkdir(parents=True)
+        _write_entry(self.reg, "seed-a", "种子甲", self.root_a)
+        # data/：t1=已归档（manifest 在位）、t2=半成品（目录在 manifest 缺）
+        tdir = self.reg / "seed-a" / "data" / "tickets" / "t1"
+        tdir.mkdir(parents=True)
+        (tdir / "archive.json").write_text('{"schema": "v1", "ticket": "t1"}\n',
+                                           encoding="utf-8")
+        (tdir / "stages").mkdir()
+        (tdir / "stages" / "stage_x.json").write_text("{}", encoding="utf-8")
+        (self.reg / "seed-a" / "data" / "tickets" / "t2").mkdir(parents=True)
+        (self.reg / "seed-a" / "credentials.yaml").write_text("version: 1\n",
+                                                              encoding="utf-8")
+        # 第二条目 seed-b：默认现场两个项目（最后条目闸单测里再摘掉）
+        _write_entry(self.reg, "seed-b", "种子乙", self.proj_root("root-b"))
+
+    _stub_seq = 0
+
+    def _stub_rows(self, rows, ok=True, error=None, exit_zero=True, stderr="",
+                   stdout=None):
+        """stub client.py：吐票号级 rows（running/completed 混排可控）。
+        每次调用独立 poc 目录——同测试内多态注入不得互相覆盖。"""
+        RemoveStub._stub_seq += 1
+        poc = self.tmp / ("poc-stub-rm-%d" % RemoveStub._stub_seq)
+        poc.mkdir()
+        # 布桩 poc_dir（方案 R2）：真身 shared.py 复制（装载闸走真语义）+ 假 client.py
+        shutil.copy(SERVER_DIR / "dsh" / "temporal-poc" / "shared.py",
+                    poc / "shared.py")
+        if stdout is None:
+            payload = {"ok": ok, "result": {"tickets": rows}}
+            if error:
+                payload["error"] = error
+            stdout = json.dumps(payload)
+        body = (
+            "import sys\n"
+            "sys.stdout.write(%r)\n"
+            "sys.stderr.write(%r)\n"
+            "sys.exit(%d)\n" % (stdout, stderr, 0 if exit_zero else 1))
+        (poc / "client.py").write_text(body, encoding="utf-8")
+        return SimpleNamespace(poc_dir=str(poc))
+
+    def _args(self, key="seed-a", as_json=True, dry=False, purge_data=False,
+              purge_cred=False, confirm_last=False):
+        return SimpleNamespace(key=key, json=as_json, dry_run=dry,
+                               purge_data=purge_data, purge_credentials=purge_cred,
+                               confirm_last=confirm_last)
+
+    def _cmd(self, paths=None, **kw):
+        out = []
+        rc = projects_mod.cmd_project_remove(paths or self._stub_rows([]),
+                                             self._args(**kw), log=out.append)
+        return rc, out
+
+
+class RemoveLifecycle(RemoveStub):
+    def _shared(self):
+        return projects_mod._load_shared(self.paths.poc_dir)
+
+    def test_default_remove_retires_keeps_data_and_unlists(self):
+        rc, out = self._cmd()
+        self.assertEqual(rc, 0)
+        payload = json.loads("\n".join(out))
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["report"]["data_kept"])
+        self.assertTrue(payload["report"]["credentials_kept"])
+        # 退役在位：project.yaml 消失、retired-<ts> 在位（决策2）
+        entry_dir = self.reg / "seed-a"
+        self.assertFalse((entry_dir / "project.yaml").exists())
+        retired = list(entry_dir.glob("project.yaml.retired-*"))
+        self.assertEqual(len(retired), 1)
+        self.assertEqual(payload["retired_to"], str(retired[0]))
+        # data/credentials 字节不动（验收6）
+        self.assertTrue((entry_dir / "data" / "tickets" / "t1" / "archive.json").exists())
+        self.assertTrue((entry_dir / "credentials.yaml").exists())
+        self.assertEqual(payload["report"]["data_bytes"] > 0, True)
+        # 泳道清单只报不删（验收10）
+        self.assertEqual(payload["report"]["lanes"], ["t260904-01"])
+        self.assertTrue((self.root_a / ".lane" / "t260904-01").exists())
+        # Python 侧装载器：不再列本 key（可逆摘除=装载器隐身）
+        shared = self._shared()
+        projects, quarantined = shared.scan_registry(self.reg)
+        self.assertNotIn("seed-a", [p["key"] for p in projects],
+                         "摘除后装载器不再列本 key（其余条目不受影响）")
+        self.assertIn("seed-b", [p["key"] for p in projects])
+        self.assertEqual(len(quarantined), 0)
+
+    def test_unarchived_closed_yellow_and_purge_gate(self):
+        # prune 现场（C1/R3）：t1 已归档且被 prune（stub 不再返回），t2 目录在
+        # manifest 缺 + stub 返回 COMPLETED t2 → 差集含 t2，黄牌亮、purge 拒
+        paths = self._stub_rows([{"id": "t2", "exec_status": "COMPLETED"}])
+        out = []
+        rc = projects_mod.cmd_project_remove(paths, self._args(dry=True),
+                                             log=out.append)
+        self.assertEqual(rc, 0)
+        self.assertIn("t2", "\n".join(out), "dry-run 黄牌列未归档票号")
         with self.assertRaises(FailClosed) as cm:
-            projects_mod.cmd_project_remove(self.paths, mock.Mock(json=False))
-        self.assertIn("remove", str(cm.exception))
-        self.assertIn("票②", str(cm.exception))
-        rc = cli_main(["--home", str(self.home), "project", "remove", "--key", "seed-a"])
+            projects_mod.cmd_project_remove(paths, self._args(purge_data=True),
+                                            log=lambda *_: None)
+        self.assertIn("t2", str(cm.exception))
+        self.assertIn("未归档", str(cm.exception))
+        self.assertTrue((self.reg / "seed-a" / "data").exists(), "拒 purge 零删除")
+        self.assertTrue((self.reg / "seed-a" / "project.yaml").exists(),
+                        "purge 闸在退役之前拦下，注册表不动")
+
+    def test_manifest_malformed_is_fail_closed_naming_file(self):
+        (self.reg / "seed-a" / "data" / "tickets" / "t2" / "archive.json").write_text(
+            "{not json", encoding="utf-8")
+        paths = self._stub_rows([])
+        with self.assertRaises(FailClosed) as cm:
+            projects_mod.cmd_project_remove(paths, self._args(), log=lambda *_: None)
+        self.assertIn("archive.json", str(cm.exception))
+        # 缺 schema 行同判（畸形态第二形）
+        (self.reg / "seed-a" / "data" / "tickets" / "t2" / "archive.json").write_text(
+            '{"ticket": "t2"}', encoding="utf-8")
+        with self.assertRaises(FailClosed) as cm:
+            projects_mod.cmd_project_remove(paths, self._args(), log=lambda *_: None)
+        self.assertIn("archive.json", str(cm.exception))
+
+    def test_readd_same_key_archive_chain_continuous(self):
+        paths = self._stub_rows([])
+        rc, _ = self._cmd()
+        self.assertEqual(rc, 0)
+        shared = self._shared()
+        # re-add 同 key：目录在、无 project.yaml=新注册旅程（契约①a-1 再接入）
+        add_out = []
+        rc2 = projects_mod.cmd_project_add(
+            paths, SimpleNamespace(key="seed-a", name="种子甲",
+                                   dir=[str(self.root_a)], json=True),
+            log=add_out.append)
+        self.assertEqual(rc2, 0)
+        projects, _q = shared.scan_registry(self.reg)
+        self.assertIn("seed-a", [p["key"] for p in projects], "re-add 同 key 再接入成功")
+        # 归档链不断：data/tickets 子目录原样（t1+t2），credentials 原样
+        self.assertEqual(
+            sorted(c.name for c in (self.reg / "seed-a" / "data" / "tickets").iterdir()),
+            ["t1", "t2"])
+        self.assertTrue((self.reg / "seed-a" / "credentials.yaml").exists())
+
+    def test_running_ticket_rejects_with_ids_and_zero_change(self):
+        before = self.tree()
+        paths = self._stub_rows([{"id": "t9", "exec_status": "RUNNING"},
+                                 {"id": "t8", "exec_status": "COMPLETED"}])
+        with self.assertRaises(FailClosed) as cm:
+            projects_mod.cmd_project_remove(paths, self._args(), log=lambda *_: None)
+        msg = str(cm.exception)
+        self.assertIn("t9", msg, "在飞闸拒摘须报票号（验收5）")
+        self.assertIn("在飞", msg)
+        self.assertEqual(self.tree(), before, "拒摘零现场变更")
+
+    def test_unreachable_and_sdk_missing_fail_closed(self):
+        # remove 语义反转：list 语境=黄牌降级，remove 语境=fail-closed 拒摘无绕过旗
+        before = self.tree()
+        cases = [
+            (self._stub_rows([], ok=False, error="GRPC: unavailable"), "GRPC: unavailable"),
+            (self._stub_rows([], exit_zero=False,
+                             stderr="ModuleNotFoundError: No module named 'temporalio'"),
+             "No module named 'temporalio'"),
+            (self._stub_rows([], exit_zero=False, stderr="gRPC unreachable"),
+             "gRPC unreachable"),
+            (self._stub_rows([], stdout="not json"), "不是合法 JSON"),
+        ]
+        last = None
+        for paths, marker in cases:
+            with self.assertRaises(FailClosed) as cm:
+                projects_mod.cmd_project_remove(paths, self._args(),
+                                                log=lambda *_: None)
+            last = str(cm.exception)
+            self.assertIn("拒", last)
+            self.assertIn(marker, last, "各态下场可辨（KI-039）")
+        self.assertIn("sandbar up", last, "文案含可达性诊断指路（验收7）")
+        self.assertEqual(self.tree(), before)
+
+    def test_timeout_is_fail_closed(self):
+        poc = self.tmp / "poc-stub-slow"
+        poc.mkdir(exist_ok=True)
+        shutil.copy(SERVER_DIR / "dsh" / "temporal-poc" / "shared.py", poc / "shared.py")
+        (poc / "client.py").write_text("import time\ntime.sleep(5)\n", encoding="utf-8")
+        paths = SimpleNamespace(poc_dir=str(poc))
+        with mock.patch.object(projects_mod, "TICKET_QUERY_TIMEOUT_S", 0.3):
+            with self.assertRaises(FailClosed) as cm:
+                projects_mod.cmd_project_remove(paths, self._args(),
+                                                log=lambda *_: None)
+        self.assertIn("超时", str(cm.exception))
+
+    def test_purge_flags_combined_delete_both(self):
+        # t1 已归档、t2 半成品目录无 manifest 且 stub 台面无此票 → 差集空，闸过
+        paths = self._stub_rows([])
+        rc, out = self._cmd(purge_data=True, purge_cred=True)
+        self.assertEqual(rc, 0)
+        payload = json.loads("\n".join(out))
+        self.assertFalse((self.reg / "seed-a" / "data").exists())
+        self.assertFalse((self.reg / "seed-a" / "credentials.yaml").exists())
+        self.assertEqual(payload["purged"], {"data": str(self.reg / "seed-a" / "data"),
+                                             "credentials": str(self.reg / "seed-a" / "credentials.yaml")})
+
+    def test_purge_data_keeps_credentials_and_vice_versa(self):
+        paths = self._stub_rows([])
+        projects_mod.cmd_project_remove(paths, self._args(purge_data=True),
+                                        log=lambda *_: None)
+        self.assertFalse((self.reg / "seed-a" / "data").exists())
+        self.assertTrue((self.reg / "seed-a" / "credentials.yaml").exists(),
+                        "--purge-data 不连带 credentials（双旗独立）")
+
+    def test_purge_credentials_only(self):
+        # seed-b 已在 fixture 注册：seed-a 摘除仅 purge credentials
+        paths = self._stub_rows([])
+        rc, out = self._cmd(purge_cred=True)
+        self.assertEqual(rc, 0)
+        self.assertFalse((self.reg / "seed-a" / "credentials.yaml").exists())
+        self.assertTrue((self.reg / "seed-a" / "data").exists(),
+                        "--purge-credentials 不连带 data（双旗独立）")
+
+    def test_dry_run_full_gates_zero_change(self):
+        before = self.tree()
+        paths = self._stub_rows([{"id": "t9", "exec_status": "RUNNING"}])
+        with self.assertRaises(FailClosed):
+            projects_mod.cmd_project_remove(paths, self._args(dry=True),
+                                            log=lambda *_: None)
+        self.assertEqual(self.tree(), before, "dry-run 也要过闸（在飞闸拦下）")
+        paths2 = self._stub_rows([])
+        out = []
+        rc = projects_mod.cmd_project_remove(
+            paths2, self._args(dry=True, purge_data=True, purge_cred=True),
+            log=out.append)
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.tree(), before, "dry-run 零现场变更（验收8 清单）")
+        payload = json.loads("\n".join(out))
+        self.assertTrue(payload["dry_run"])
+        self.assertEqual(payload["plan"]["purge"]["data"]["path"],
+                         str(self.reg / "seed-a" / "data"))
+        self.assertGreater(payload["plan"]["purge"]["data"]["bytes"], 0, "将删清单含字节")
+        self.assertGreater(payload["plan"]["purge"]["credentials"]["bytes"], 0)
+        self.assertTrue((self.reg / "seed-a" / "project.yaml").exists())
+
+    def test_last_project_gate(self):
+        # 摘掉 seed-b 只剩 seed-a → 无旗拒，带旗摘+零条目警告（验收9）
+        (self.reg / "seed-b" / "project.yaml").unlink()
+        paths = self._stub_rows([])
+        with self.assertRaises(FailClosed) as cm:
+            projects_mod.cmd_project_remove(paths, self._args(), log=lambda *_: None)
+        self.assertIn("--confirm-last", str(cm.exception))
+        self.assertIn("空表", str(cm.exception))
+        out = []
+        rc = projects_mod.cmd_project_remove(self._stub_rows([]),
+                                             self._args(confirm_last=True,
+                                                        as_json=False),
+                                             log=out.append)
+        self.assertEqual(rc, 0)
+        self.assertIn("零条目", "\n".join(out))
+
+    def test_legacy_env_rejected_for_remove(self):
+        legacy = self.tmp / "legacy.yaml"
+        legacy.write_text("projects: []\n", encoding="utf-8")
+        self._setenv("SUYOU_PROJECTS_YAML", str(legacy))
+        before = self.tree()
+        with self.assertRaises(FailClosed) as cm:
+            projects_mod.cmd_project_remove(self._stub_rows([]), self._args(),
+                                            log=lambda *_: None)
+        self.assertIn("SUYOU_PROJECTS_YAML", str(cm.exception))
+        self.assertEqual(self.tree(), before)
+
+    def test_unregistered_and_quarantined_distinguishable(self):
+        with self.assertRaises(FailClosed) as cm:
+            projects_mod.cmd_project_remove(self._stub_rows([]),
+                                            self._args(key="nobody"),
+                                            log=lambda *_: None)
+        self.assertIn("未注册", str(cm.exception))
+        bad = self.reg / "qbad"
+        bad.mkdir()
+        (bad / "project.yaml").write_text("schema: v9\njunk\n", encoding="utf-8")
+        with self.assertRaises(FailClosed) as cm:
+            projects_mod.cmd_project_remove(self._stub_rows([]),
+                                            self._args(key="qbad"),
+                                            log=lambda *_: None)
+        self.assertIn("隔离", str(cm.exception))
+        self.assertIn("project.yaml", str(cm.exception))
+
+    def test_bad_key_shape_rejected_blocks_traversal(self):
+        with self.assertRaises(FailClosed):
+            projects_mod.cmd_project_remove(self._stub_rows([]),
+                                            self._args(key="../escape"),
+                                            log=lambda *_: None)
+
+    def test_retired_collision_is_rejected_not_overwritten(self):
+        class _FakeTime:
+            @staticmethod
+            def strftime(_fmt, _t=None):
+                return "2026-09-04T00:00:00Z"
+
+            @staticmethod
+            def gmtime():
+                return 0
+        with mock.patch.object(projects_mod, "_time", _FakeTime):
+            pre = self.reg / "seed-a" / "project.yaml.retired-2026-09-04T00:00:00Z"
+            pre.write_text("旧退役件\n", encoding="utf-8")
+            before = self.tree()
+            with self.assertRaises(FailClosed) as cm:
+                projects_mod.cmd_project_remove(self._stub_rows([]), self._args(),
+                                                log=lambda *_: None)
+            self.assertIn("退役文件已存在", str(cm.exception))
+            self.assertEqual(self.tree(), before, "碰撞拒收零现场变更")
+            self.assertEqual(pre.read_text(encoding="utf-8"), "旧退役件\n")
+
+    def test_rollback_scene_changed_never_overwrites(self):
+        # R1-4/C2：自检失败 + 并发 add 已重建 project.yaml → 放弃回滚（红），不覆盖
+        paths = self._stub_rows([])
+        shared = projects_mod._load_shared(paths.poc_dir)
+
+        real_scan = shared.scan_registry
+        state = {"n": 0}
+
+        def _racing_scan(reg_root):
+            # 首调=前置装载放行（真语义）；二调=写后自检：模拟并发 add 已重建
+            # 条目后自检再红
+            state["n"] += 1
+            if state["n"] == 1:
+                return real_scan(reg_root)
+            (self.reg / "seed-a" / "project.yaml").write_text(
+                _entry_text("seed-a", "并发重建", self.root_a), encoding="utf-8")
+            raise ValueError("注入自检失败")
+
+        with mock.patch.object(shared, "scan_registry", side_effect=_racing_scan):
+            with self.assertRaises(FailClosed) as cm:
+                projects_mod.cmd_project_remove(paths, self._args(),
+                                                log=lambda *_: None)
+        self.assertIn("现场已变", str(cm.exception))
+        self.assertEqual(
+            (self.reg / "seed-a" / "project.yaml").read_text(encoding="utf-8"),
+            _entry_text("seed-a", "并发重建", self.root_a),
+            "回滚绝不无条件覆盖他人新条目（C2：不断言 rename 抛错，断言放弃回滚+红）")
+
+    def test_rollback_on_postcheck_failure_restores_entry(self):
+        # 自检失败且现场未变 → 回滚改名，条目原样在位（零残留）
+        paths = self._stub_rows([])
+        shared = projects_mod._load_shared(paths.poc_dir)
+        real_scan = shared.scan_registry
+        state = {"n": 0}
+
+        def _failing_postcheck(reg_root):
+            state["n"] += 1
+            if state["n"] == 1:
+                return real_scan(reg_root)
+            raise ValueError("注入自检失败")
+
+        with mock.patch.object(shared, "scan_registry",
+                               side_effect=_failing_postcheck):
+            with self.assertRaises(FailClosed) as cm:
+                projects_mod.cmd_project_remove(paths, self._args(),
+                                                log=lambda *_: None)
+        self.assertIn("已回滚", str(cm.exception))
+        self.assertTrue((self.reg / "seed-a" / "project.yaml").exists())
+        self.assertEqual(list((self.reg / "seed-a").glob("project.yaml.retired-*")), [])
+
+    def test_remove_json_shape_machine_judgeable(self):
+        rc, out = self._cmd()
+        self.assertEqual(rc, 0)
+        payload = json.loads("\n".join(out))
+        for field in ("ok", "action", "project", "retired_to", "purged", "report"):
+            self.assertIn(field, payload)
+        for field in ("lanes", "data_bytes", "credentials_bytes", "data_kept",
+                      "credentials_kept", "closed_unarchived", "warnings"):
+            self.assertIn(field, payload["report"])
+        self.assertEqual(payload["action"], "remove")
+        self.assertEqual(payload["project"]["key"], "seed-a")
+
+
+class RemoveCliWiring(Base):
+    def test_remove_flags_accepted_by_cli_semantic_red(self):
+        # 旗面被 argparse 接受；坏 key 走语义拒收（exit 1 而非用法错 2）
+        rc = cli_main(["--home", "/nonexistent-home-ut", "project", "remove",
+                       "--key", "bad key", "--dry-run", "--purge-data",
+                       "--purge-credentials", "--confirm-last", "--json"])
         self.assertEqual(rc, 1)
 
 

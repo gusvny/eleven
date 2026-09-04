@@ -1,17 +1,24 @@
-"""sandbar project 子命令族：注册表接入面（add/list；remove 只挂点位，属票②）。
+"""sandbar project 子命令族：注册表接入面（add/list/remove）。
 
-立项真源 = notes/epics/project-lifecycle.md 票①（面A 接入 + 面C 报告）：
+立项真源 = notes/epics/project-lifecycle.md 票①（面A 接入 + 面C 报告）+
+票②（面B 摘除，t260904-14）：
 - add：fail-closed 前置校验 → 原子写 <注册表根>/<key>/project.yaml → 接入体检报告
   （黄牌只提示不代写不阻塞，exit 0）。
 - list：注册+隔离条目全列（隔离原因含 <dir>/project.yaml 定位）+ 每 key 票计数
   （子进程查 Temporal，服务不可达/SDK 缺失两态降级可辨且不红——KI-039 教训：
   依赖缺失不得吞成「无数据」，也不得与「不可达」混同）。
-- remove：票②交付，本版恒红占位。
+- remove：可逆摘除（契约①a-1）——模式闸（legacy 拒收）/最后条目确认闸/在飞闸
+  （拒摘报票号；不可达 fail-closed 无绕过旗）/closed 全归档闸（purge 前置，未归档
+  差集=Temporal COMPLETED−fs archive.json 三态判定）→ project.yaml 退役改名
+  （retired-<UTC>，零 schema 改动可逆）→ 摘除报告（.lane/ 泳道只报不删、
+  closed 未归档黄牌、数据字节数账目）；--purge-data/--purge-credentials 显式
+  分离，--dry-run 全闸预演零现场变更。
 
 CLI 契约面（与 integration/t260904-10 三场景共同冻结，改动须场景+ops 手册同步）：
   sandbar project add --key <key> --name <name> --dir <abs> [--dir <abs> ...] [--json]
   sandbar project list [--json]
-  sandbar project remove --key <key> [--json]   （恒红，票②）
+  sandbar project remove --key <key> [--dry-run] [--purge-data]
+                         [--purge-credentials] [--confirm-last] [--json]
 
 装载复用真源 = server/dsh/temporal-poc/shared.py（importlib 按路径装载，不改本体；
 与 TS 侧 server/dsh/suyou-projects.ts 同一注册表、两侧各自最小解析、语义同构）。
@@ -37,6 +44,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import time as _time
 
 from installer.service import FailClosed
 
@@ -416,12 +424,330 @@ def cmd_project_list(paths, args, log=print) -> int:
     return 0
 
 
-# ---------- remove（票②点位） ----------
+# ---------- remove（票②交付：可逆摘除） ----------
+#
+# remove 故障模式取舍（方案 gen2 R1 表，实现落点）：
+#   ticket-list 子进程通道→带（temporalio 依赖隔离在子进程；超时 run 内 kill+wait、
+#     stderr 收割、JSON 解析原样；扩展为票号级 rows——闸/报告都需要票号）；
+#   各态语义反转→带（list 语境=降级黄牌不红；remove 语境=状态变更闸，unreachable/
+#     sdk-missing/ok=false/坏 JSON 一律 fail-closed 拒摘，决策4 无绕过旗）；
+#   子进程终态→三路实情落字（正常=wait 收割、报错=returncode+stderr、超时=run 内
+#     kill+wait；同步调用无取消路——票① L329 自认，不照抄「四路」口号）；
+#   sdk-missing 判定=stderr 字符串启发式→带不改（remove 侧两态同归红拒摘，误分类
+#     不改变行为结局；为分类而分类=引入新漂移面）；
+#   装载闸→带（票①闸 f 原样装载语义，两命令对同一注册表不得有两种装载口径）；
+#   零残留→带+并发补强：回滚改名前 exists 检查 project.yaml——在位即放弃回滚、
+#     报「现场已变，请重跑」（POSIX rename 对文件目标是静默替换，不得依赖其抛错）；
+#   remove 并发立场→单宿主操作面定位（写操作只落安装器 CLI=宿主亲手），不做跨进程
+#     互斥；可立住的保证=回滚路径绝不无条件覆盖他人新条目；
+#   legacy env→带闸（同 add 闸 e：per-key 目录上的退役/purge 对运行时静默无效）。
+
+_REMOVE_RETIRED_PREFIX = "project.yaml.retired-"
+
+
+def _ticket_rows(paths, key):
+    """票号级查询（复用票① _ticket_counts 的子进程通道，扩展返回 rows）。
+    返回 (state, rows_or_detail)：state∈ok|unreachable|sdk-missing；ok 时
+    rows=[{id, exec_status}]，否则 detail=诊断串。终态三路：正常=wait 收割；
+    报错=returncode+stderr 收割；超时=run 内 kill+wait（同步调用无取消路）。"""
+    args_json = json.dumps({"project": key}, ensure_ascii=False)
+    cmd = [sys.executable, str(pathlib.Path(paths.poc_dir) / "client.py"),
+           "ticket-list", args_json]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=TICKET_QUERY_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        return "unreachable", "ticket-list 子进程超时（%.0fs，已终止回收）" % TICKET_QUERY_TIMEOUT_S
+    if proc.returncode != 0:
+        err = (proc.stderr or "").strip()
+        if "No module named" in err or "temporalio" in err:
+            # 启发式带而不改：remove 侧两态同归红拒摘，误分类不改变行为结局。
+            return "sdk-missing", err.splitlines()[-1] if err else "temporalio SDK 缺失"
+        return "unreachable", err.splitlines()[-1] if err else "exit %d" % proc.returncode
+    try:
+        payload = json.loads(proc.stdout)
+    except ValueError:
+        return "unreachable", "ticket-list 输出不是合法 JSON"
+    if not payload.get("ok"):
+        return "unreachable", str(payload.get("error") or "")
+    rows = [{"id": r.get("id"), "exec_status": r.get("exec_status")}
+            for r in (payload.get("result") or {}).get("tickets") or []]
+    return "ok", rows
+
+
+def _archived_ticket_ids(reg_root, key):
+    """fs 侧已归档票号集合，判定锚=archive.json 三态（契约①a-1/①c 关闭语义）：
+    - 在位且可解析（含 schema: v1）→ 已归档；
+    - 目录在/manifest 缺 → 未归档（不在本集合）；
+    - manifest 畸形（不可解析/缺 schema: v1）→ FailClosed 点名文件
+      （不静默归侧、不静默重产——①c 明文「重产即消灭证据」）。"""
+    d = reg_root / key / "data" / "tickets"
+    archived = set()
+    if not d.is_dir():
+        return archived
+    for sub in sorted(d.iterdir()):
+        if not sub.is_dir() or sub.name.startswith("."):
+            continue
+        manifest = sub / "archive.json"
+        if not manifest.is_file():
+            continue  # 缺失态=未归档
+        try:
+            payload = json.loads(manifest.read_text("utf-8"))
+        except (OSError, ValueError) as e:
+            raise FailClosed(
+                "归档 manifest 畸形（fail-closed，不静默归侧、不静默重产）：%s：%s"
+                % (manifest, e))
+        if payload.get("schema") != "v1":
+            raise FailClosed(
+                "归档 manifest 畸形（缺 schema: v1，fail-closed）：%s" % manifest)
+        archived.add(sub.name)
+    return archived
+
+
+def _unarchived_closed_ids(paths, key, reg_root):
+    """未归档差集（契约①a-1）：Temporal COMPLETED 票号集合 − fs 已归档集合。
+    TERMINATED 族不进差集（ticket-list 不上台面，且归档对象=完结工单）。
+    Temporal 各态非 ok 一律 FailClosed（remove 语义反转：不可达=拒摘拒 purge）。"""
+    state, rows = _ticket_rows(paths, key)
+    if state != "ok":
+        raise FailClosed(
+            "在飞闸不可过（Temporal %s：%s）——摘除拒执行、无绕过旗。"
+            "先起 server（sandbar up）后重试；引擎真死透时走手工路径（先读 docs/ops 红线节）。"
+            % (state, rows))
+    archived = _archived_ticket_ids(reg_root, key)
+    return sorted({r["id"] for r in rows if r.get("exec_status") == "COMPLETED"}
+                  - archived), rows
+
+
+def _dir_bytes(path: pathlib.Path) -> int:
+    """目录字节数账目（摘除报告/将删清单用；读不到的项跳过计 0，账目只增不减真源）。"""
+    total = 0
+    if path.is_file():
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
+    if not path.is_dir():
+        return 0
+    for p in path.rglob("*"):
+        try:
+            if p.is_file():
+                total += p.stat().st_size
+        except OSError:
+            pass
+    return total
+
+
+def _lane_dirs(root_dir: pathlib.Path):
+    """项目根 .lane/ 各票泳道清单（只报不删；lane=票的空间）。"""
+    lane = root_dir / ".lane"
+    if not lane.is_dir():
+        return []
+    return sorted(c.name for c in lane.iterdir() if c.is_dir())
+
 
 def cmd_project_remove(paths, args, log=print) -> int:
-    """remove 属票②（project-lifecycle）交付：在飞闸/退役移位/摘除报告/purge 双旗
-    尚未实现，本版恒红占位——不提供半成品摘除路径（fail-closed 纪律）。"""
-    del paths, args, log
-    raise FailClosed(
-        "project remove 属票②交付，本版未实现（在飞闸/退役移位/摘除报告/purge 闸随票②落地）。"
-        "当前摘除请走人工口径并先读 docs/ops 操作手册的红线节（审计真源不蒸发）。")
+    """sandbar project remove --key <key> [--dry-run] [--purge-data]
+    [--purge-credentials] [--confirm-last] [--json]。
+
+    闸序（契约①a-1）：模式闸→装载/key 闸→最后条目闸→在飞闸→closed 全归档闸
+    （purge 前置）→退役移位（os.replace 原子改名）→写后自检→摘除报告。
+    默认不删任何数据；purge 双旗显式分离；--dry-run 全闸预演零现场变更。
+    """
+    shared = _load_shared(paths.poc_dir)
+    as_json = bool(getattr(args, "json", False))
+    as_dry = bool(getattr(args, "dry_run", False))
+    purge_data = bool(getattr(args, "purge_data", False))
+    purge_credentials = bool(getattr(args, "purge_credentials", False))
+    confirm_last = bool(getattr(args, "confirm_last", False))
+
+    # 闸 0（模式闸）：legacy 单文件模式在位 → 拒收（退役/purge 写 per-key 目录
+    # 对运行时静默无效=假成功摘除；与 add 闸 e 同因同构）。
+    if os.environ.get(_LEGACY_ENV):
+        raise FailClosed(
+            "%s 在位（legacy 单文件注册表模式）：remove/purge 写的是 per-key 目录，"
+            "运行时读不到，摘除=假成功，拒绝执行。请移除该 env 后重试" % _LEGACY_ENV)
+
+    # 闸 1（装载/key 闸）：原样走装载器全语义；key 白名单挡 traversal。
+    key = str(getattr(args, "key", "") or "").strip()
+    if not shared.PROJECT_KEY_RE.match(key):
+        raise FailClosed(
+            "key 不合法：%r（白名单 %s）" % (key, shared.PROJECT_KEY_RE.pattern))
+    try:
+        projects, quarantined = shared.load_projects_registry()
+    except ValueError as e:
+        raise FailClosed("注册表装载失败（remove 前置检查）：%s" % e)
+    reg_root = shared.registry_root()
+    project = next((p for p in projects if p["key"] == key), None)
+    if project is None:
+        hit = next((q for q in quarantined if pathlib.Path(q["dir"]).name == key), None)
+        if hit is not None:
+            raise FailClosed(
+                "项目 %s 的注册目录存在但条目被隔离（%s：%s）。请先人工修复或处置该目录，"
+                "remove 不对隔离现场执行摘除" % (key, hit["dir"], hit["error"]))
+        raise FailClosed("项目 %s 未注册（remove 只摘已注册条目；全表见 sandbar project list）" % key)
+
+    # 闸 2（最后条目闸）：摘最后一个注册条目=零条目警告语义 + 显式确认旗（验收9）。
+    if len(projects) == 1 and not confirm_last:
+        raise FailClosed(
+            "%s 是注册表最后一个项目：摘除后装载器对空表抛错（注册表零条目=%s 无项目可服务）。"
+            "确认摘除请加 --confirm-last" % (key, reg_root))
+
+    root_dir = pathlib.Path((project.get("dirs") or [""])[0])
+    target = reg_root / key / "project.yaml"
+
+    # 闸 3（在飞闸）：running 非空=拒摘报票号；各态非 ok=FailClosed（语义反转）。
+    unarchived, rows = _unarchived_closed_ids(paths, key, reg_root)
+    running = sorted(r["id"] for r in rows if r.get("exec_status") == "RUNNING")
+    if running:
+        raise FailClosed(
+            "项目 %s 有 %d 张在飞工单，拒摘（可逆摘除不对在飞票现场动注册表）：%s"
+            % (key, len(running), "、".join(running)))
+
+    credentials = reg_root / key / "credentials.yaml"
+    data_dir = reg_root / key / "data"
+    plan = {
+        "retire": {"from": str(target), "to": None},
+        "purge": {"data": {"path": str(data_dir), "bytes": _dir_bytes(data_dir)} if purge_data else None,
+                  "credentials": {"path": str(credentials), "bytes": _dir_bytes(credentials)} if purge_credentials else None},
+    }
+
+    # 闸 4（closed 全归档闸，purge-data 前置；差集同时喂报告黄牌）。
+    if purge_data and unarchived:
+        raise FailClosed(
+            "--purge-data 前置闸（closed 全归档）未过：%s 有 %d 张完结票未归档，"
+            "删 data/=消灭审计真源。先归档（或核对差集）后重试。未归档票：%s"
+            % (key, len(unarchived), "、".join(unarchived)))
+
+    if as_dry:
+        report = _removal_report(project, root_dir, reg_root, key,
+                                 unarchived, running, purge_data, purge_credentials)
+        if as_json:
+            log(json.dumps({"ok": True, "action": "remove", "dry_run": True,
+                            "project": {"key": key, "name": project.get("name", ""),
+                                        "dirs": list(project.get("dirs") or [])},
+                            "plan": plan, "report": report},
+                           ensure_ascii=False, indent=2))
+            return 0
+        log("[演] dry-run：全闸已过，以下为将执行清单（零现场变更）——")
+        log("      退役改名：%s → <同目录>/%s<UTC>" % (target, _REMOVE_RETIRED_PREFIX))
+        if purge_data:
+            log("      将删 data/：%s（%d 字节）" % (data_dir, plan["purge"]["data"]["bytes"]))
+        if purge_credentials:
+            log("      将删 credentials：%s（%d 字节）" % (credentials, plan["purge"]["credentials"]["bytes"]))
+        if not purge_data and not purge_credentials:
+            log("      data/ 与 credentials 原样保留（无 purge 旗）。")
+        for w in report["warnings"]:
+            log("[黄] %s" % w)
+        log("      closed 未归档：%s" % ("、".join(unarchived) if unarchived else "无"))
+        return 0
+
+    # 退役移位（决策2）：同目录原子改名，不删数据；同前缀退役文件已存在=拒收
+    # 点名人工处置（同秒碰撞/重复摘除现场，不猜后缀）。
+    ts = _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime())
+    retired = target.parent / (_REMOVE_RETIRED_PREFIX + ts)
+    if retired.exists():
+        raise FailClosed(
+            "退役文件已存在：%s（同秒退役/重复摘除现场）。请人工处置后重试，"
+            "remove 不猜后缀覆盖" % retired)
+    if not target.is_file():
+        raise FailClosed(
+            "注册条目不在位（前次摘除已执行或现场被外部改动）：%s——请人工核对，"
+            "remove 不重复摘除" % target)
+    try:
+        os.replace(str(target), str(retired))
+    except OSError as e:
+        raise FailClosed("退役改名失败（注册表零残留，条目原样在位）：%s: %s"
+                         % (type(e).__name__, e))
+
+    # 写后自检：装载不再列本 key、其余条目数与隔离数不变；不过=回滚改名。
+    try:
+        projects2, quarantined2 = shared.scan_registry(reg_root)
+        if any(p["key"] == key for p in projects2):
+            raise ValueError("退役后扫描仍见条目 %s" % key)
+        if len(projects2) != len(projects) - 1 or len(quarantined2) != len(quarantined):
+            raise ValueError("退役后全表现场变化（条目 %d→%d，隔离 %d→%d）"
+                             % (len(projects), len(projects2),
+                                len(quarantined), len(quarantined2)))
+    except ValueError as e:
+        # R1-4 并发补强：回滚前 exists 检查——POSIX rename 对文件目标静默替换，
+        # 在位（并发 add 重建）即放弃回滚，绝不无条件覆盖他人新条目。
+        if not target.exists():
+            try:
+                os.replace(str(retired), str(target))
+            except OSError:
+                pass
+        if target.exists() and pathlib.Path(retired).exists():
+            raise FailClosed(
+                "写后自检未过且现场已变（并发 add 重建了条目），已放弃回滚——请重跑 remove 核对现场：%s" % e)
+        raise FailClosed("写后自检未过，已回滚改名（注册表零残留）：%s" % e)
+
+    # 数据处置：purge 双旗显式分离（闸 4 已过 purge-data）；删除路径形状由
+    # key 白名单（无 / 与 ..）+ reg_root 拼接保证，不收用户直给的删除路径。
+    purged = {"data": None, "credentials": None}
+    if purge_data and data_dir.exists():
+        _rmtree(data_dir)
+        purged["data"] = str(data_dir)
+    if purge_credentials and credentials.is_file():
+        credentials.unlink()
+        purged["credentials"] = str(credentials)
+
+    report = _removal_report(project, root_dir, reg_root, key,
+                             unarchived, running, purge_data, purge_credentials)
+    if as_json:
+        log(json.dumps({"ok": True, "action": "remove", "dry_run": False,
+                        "project": {"key": key, "name": project.get("name", ""),
+                                    "dirs": list(project.get("dirs") or [])},
+                        "retired_to": str(retired),
+                        "purged": purged, "report": report},
+                       ensure_ascii=False, indent=2))
+        return 0
+    log("[绿] 项目已摘除（可逆）：%s（name=%s）" % (key, project.get("name", "")))
+    log("      退役条目：%s（改回文件名即恢复，re-add 同 key 再接入）" % retired)
+    if purged["data"]:
+        log("      已 purge data/：%s" % purged["data"])
+    if purged["credentials"]:
+        log("      已 purge credentials：%s" % purged["credentials"])
+    if not purged["data"] and not purged["credentials"]:
+        # 摘除报告逐项字节数账目（gen2 方案承诺；验收6 的数据处置账目面）
+        log("      data/（归档+metrics）原样保留：%d 字节；credentials.yaml 原样保留：%d 字节"
+            "（默认摘除不删数据）。"
+            % (report["data_bytes"], report["credentials_bytes"]))
+    if report["lanes"]:
+        log("      项目根 .lane/ 泳道残骸（只报不删，指路 teardown/手工清理）：")
+        for name in report["lanes"]:
+            log("        %s/.lane/%s" % (root_dir, name))
+    for w in report["warnings"]:
+        log("[黄] %s" % w)
+    if len(projects) == 1:
+        log("[黄] 注册表已零条目：装载器对空表抛错（%s 无项目可服务），"
+            "请确认这是本意。" % reg_root)
+    return 0
+
+
+def _rmtree(path: pathlib.Path):
+    """purge-data 删除（路径形状已由闸链保证：<registry_root>/<key 白名单>/data）。"""
+    import shutil
+    shutil.rmtree(path)
+
+
+def _removal_report(project, root_dir, reg_root, key, unarchived, running,
+                    purge_data, purge_credentials):
+    """摘除报告（人读与 --json 共用口径）：数据账目/泳道清单（只报不删）/
+    closed 未归档黄牌。"""
+    warnings = []
+    if unarchived:
+        warnings.append("closed 未归档 %d 张（%s）——归档链未闭合，re-add 后建议先补档。"
+                        % (len(unarchived), "、".join(unarchived)))
+    data_dir = reg_root / key / "data"
+    credentials = reg_root / key / "credentials.yaml"
+    return {
+        "lanes": _lane_dirs(root_dir),
+        "data_bytes": _dir_bytes(data_dir),
+        "credentials_bytes": _dir_bytes(credentials),
+        "data_kept": not purge_data,
+        "credentials_kept": not purge_credentials,
+        "closed_unarchived": unarchived,
+        "running_tickets": running,
+        "warnings": warnings,
+    }

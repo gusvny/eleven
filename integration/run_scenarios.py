@@ -374,6 +374,13 @@ SCENARIOS = [
     ("t260904-10-project-list-report",
      "list 报告契约（t260904-10，ro 隔离根）：人读与 --json 同列注册+隔离条目，隔离原因含 <dir>/project.yaml 定位字面，无 project.yaml 的保留目录不列；票计数降级三态——服务不可达（SUYOU_TARGET_HOST 死端口注入）与 SDK 缺失（PYTHONPATH 空壳 temporalio 包注入，KI-039 教训：依赖缺失不得吞成无数据）两态均 exit 0 不红、条目照列、两态输出可辨；正常计数腿在测试台 17233 可达时真跑（不可达有声 SKIP）。全程显式 env 钉死防缺省外溢生产 7233，零 3099 接触。实现落地前红属预期",
      "node integration/t260904-10/sc_project_list_report.mjs", "ro"),
+    # ---- t260904-14 project lifecycle 票②：sandbar project remove（可逆摘除）----
+    ("t260904-14-project-remove-lifecycle",
+     "默认摘除生命周期（t260904-14，桩 poc_dir 全程零真 Temporal，全腿不可 SKIP）：默认（无 purge 旗）可逆摘除——project.yaml 退役移位（project.yaml.retired-* 在位）、data/（归档+metrics）与 credentials.yaml 字节不动、.lane/ 泳道残骸只报不删且报告含票号与数据处置词汇；双侧装载器（Python shared/TS suyou-projects.ts）不再列该项目且其余项目条目字节不动、零隔离；re-add 同 key 成功且 data/tickets 归档链连续；closed 未归档差集黄牌列票号（C1：目录在/manifest 缺=未归档）；--dry-run 注册表根字节级零变更；RUNNING 非空=拒摘报票号且零现场变更。台别=桩 poc_dir（--root 指桩树，假 client.py 经 FIX14_CTRL 注入票号级清单），零 3099/7233 接触。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "node integration/t260904-14/sc_project_remove_lifecycle.mjs", "ro"),
+    ("t260904-14-project-remove-gates",
+     "remove 闸语义面（t260904-14，台别按 C3 表逐腿钉死）：真票腿=隔离台自举 temporalite 起真 running 票→拒摘报票号→cancel 收口→重跑 remove 成功（验收5 全段含 M3 续步；唯一有声 SKIP 豁免腿，依赖缺席打印原因）；其余腿全部桩 poc_dir 不可 SKIP——Temporal 不可达=拒摘含 sandbar up 诊断指路（验收7）、sdk-missing 与不可达两态输出可辨（KI-039）、通道坏 JSON=拒；purge 双旗（差集非空拒列票号[C1 缺失态 manifest 缺=未归档、畸形态红点名 <id>/archive.json]、过闸真删 data/ 不动 credentials、--purge-credentials 独立、双旗组合）、dry-run+purge 旗只出将删清单注册表根字节级零变更（验收8）、最后项目无 --confirm-last 拒/带旗零条目警告+装载器空表抛错可辨（验收9）、legacy env 拒收点名存量 env（模式闸）、key 未注册拒零现场变更、隔离条目同名区分报含 project.yaml 定位。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "node integration/t260904-14/sc_project_remove_gates.mjs", "ro"),
 ]
 
 CMD_TIMEOUT = 900

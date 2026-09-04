@@ -182,6 +182,42 @@ project:
 - **legacy 兼容**：env `SUYOU_PROJECTS_YAML` 指向旧格式单文件时按旧格式装载
   （行为与出仓前一致），优先级高于 per-key 目录模式。
 
+#### ①a-1 摘除 / 再接入 / 数据处置三态（schema v1，随 project-lifecycle 票② t260904-14 落地）
+
+本节定义注册条目的**摘除语义**（工具=`sandbar project remove`，安装器 CLI 写面）。
+摘除=**条目退役，不是删目录**：`<key>/project.yaml` 原子改名（os.replace）为同目录
+`project.yaml.retired-<UTC ISO8601>`，留在 `<key>/` 下——①a 的「无 project.yaml 的
+子目录装载时跳过」现成语义使退役条目即刻对装载器隐身，**零 schema 改动、可逆**
+（改回文件名即恢复条目；再接入=`sandbar project add` 同 key 重跑，`data/tickets/`
+归档链连续不断）。退役文件不参与装载，装载器对同目录多个退役文件无感知。
+
+摘除命令的闸序（引擎与工具不得偏离，任一不过=fail-closed 拒摘、零现场变更）：
+
+1. **模式闸**：legacy 单文件模式（`SUYOU_PROJECTS_YAML` 在位）时**拒收**——退役/purge
+   写的是 per-key 目录，运行时读不到=假成功摘除（与 add 同因同构）。
+2. **在飞闸**：Temporal 按 `ProjectKey` 查 running 票，非空=拒摘并逐条报票号；
+   Temporal 不可达（含 SDK 缺失）=fail-closed 拒摘、**无绕过旗**（要摘先起 server）。
+3. **最后条目闸**：摘最后一个注册条目=零条目警告（点名装载器空表抛错语义，
+   ①a 装载语义）+ 显式确认旗，缺旗拒收。
+4. **closed 全归档闸（purge 前置）**：`--purge-data` 前先算「未归档差集」=
+   Temporal COMPLETED 票号集合 − fs 已归档集合。fs 侧判定锚=**`<id>/archive.json`
+   三态（同 ①c 关闭语义）**：manifest 在位且可解析（含 `schema: v1`）=已归档；
+   缺失=未归档（进差集，黄牌列票号、purge 拒——目录存在≠已归档，半成品归档
+   不得放行 purge）；畸形=fail-closed 红点名 `<id>/archive.json`（不静默归侧、
+   不静默重产）。差集非空=purge 拒并列票号。TERMINATED（清场/撤销）族不进
+   差集（ticket-list 不上台面，且归档对象=完结工单）。
+
+**数据处置三态显式分离**：默认摘除不删任何数据——`data/`（归档+metrics）与
+`credentials.yaml` 字节不动，摘除报告逐项字节数账目；`--purge-data` / 
+`--purge-credentials` 显式旗才删，两旗独立可组合；`--dry-run` 全闸预演不落盘
+（输出将改名/将删清单：路径+字节+票计数）。摘除报告含项目根 `.lane/` 各票
+泳道清单——**只报不删**（lane=票的空间，指路 teardown/手工清理）。审计真源
+不蒸发：任何路径不得静默删归档。
+
+**单根目录口径**（工具面落字）：一项目恰一个根目录，工具恰写一条 `dirs`
+（schema v1 列表形状兼容，多目录输入=语义拒收）；`dirs` 多条=遗留形状：装载
+容忍（首个=主目录语义不变）、工具不产。多 repo 项目=父目录作根。
+
 ### ①b per-key credentials.yaml（随 t260901-21 出仓工单落地）
 
 本节是项目凭据的承载级真源。凭据真源迁入项目目录：
@@ -604,6 +640,7 @@ sandbar 发版 → 项目跟进；禁止跳过探针直接扩区间（关键决�
 | v1.6 | 2026-09-03 | t260903-03 路径契约化落地：新增 ①d——project.yaml 顶层可选 `paths` 节声明项目内路径（`roles_dir` 角色目录相对 spawn cwd 泳道快照解析、`model_routes` 路由表相对主目录解析），引擎 spawn 取角色目录/路由表、prompt 装配 role_doc 改经声明取值；四态判定（回落四类零回归 / 声明值畸形 / 条目文件畸形 / 声明锚点缺失或错位=fail-closed 红点名文件）、锚点 vs 内容边界（per-role 缺失软跳过、表内容损坏继承查表容错）、过渡状态（现行装载器顶层白名单未放开 paths，声明即被 ①a 隔离——①d 以放开工单落地为生效前提）；schema 保 v1（增量可选字段） | ①/①d；agent_activities spawn 两消费点、shared.py prompt 装配与模型路由查表；注册表装载器（TS/Python）待放开工单 |
 | v1.7 | 2026-09-03 | t260903-08 dsh 兼容区间成文：新增 ⑧——dsh 平台兼容区间声明（已验证点列举制，当前唯一点=0.1.1-rc.2，扩点须探针绿后 append）、升版必查项四条转正（touchpoints 汇总节 A3/A4+A5/B1+C1+C2/D1）、兼容矩阵三轴机制（sandbar 版本×dsh 已验证点×项目 schema 版本，append 制）、引擎版本自报口径（`sandbar_version` semver 自 0.1.0 起；历史 `temporal_engine_version` int 原值保留不造映射，畸形 fail-closed）、升版执行序（探针绿→扩区间→发版→项目跟进）；「升级解耦与兼容矩阵」节两轴表述补 v1.7 三轴衔接（IDE 轴=sandbar+dsh 复合）。安装器/探针/VERSION 代码面=sandbar 仓 M2-C 代码票承接（交接单 notes/debts/sandbar-m2-c-installer-handoff.md） | ⑧（新增）；「升级解耦与兼容矩阵」节；消费方=安装器 upgrade/doctor 探针集（代码票待落地） |
 | v1.8 | 2026-09-04 | 真源转正（宿主裁定 260904）：本文件由「suyou 仓 v1.7 只读同源副本」升为契约真源，头部声明改写；suyou 侧同名文件降为历史冻结件（不再演进、不作修改目标）。正文语义零变更；①a 增补节（摘除/再接入、单根目录工具口径）随 project-lifecycle 立项票②落地，届时另行记行 | 文档治理面；消费方指引（upgrade/doctor 以本份为准） |
+| v1.9 | 2026-09-04 | t260904-14 摘除面落地：新增 ①a-1——摘除/再接入/数据处置三态成文（条目退役=project.yaml 原子改名 retired-<UTC ISO8601> 零 schema 改动可逆，再接入=同 key re-add 归档链连续；模式闸[legacy 拒收]/在飞闸[不可达 fail-closed 无绕过旗]/最后条目确认闸/closed 全归档闸[purge 前置：未归档差集=Temporal COMPLETED 票号集合−fs archive.json 三态判定集合，畸形 manifest=fail-closed 点名文件]；purge 双旗显式分离、dry-run 全闸预演、摘除报告只报不删项目根 .lane/ 泳道）；单根目录口径工具面落字（工具恰写一条 dirs，多条=装载容忍/工具不产的遗留形状） | ①/①a；安装器 project remove 子命令、摘除报告消费方（ops 手册/将来 UI 面） |
 
 > 来源立项：sandbar
 

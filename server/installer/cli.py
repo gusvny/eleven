@@ -2,8 +2,8 @@
 
 出口码：0=绿；1=红（FailClosed/VersionError/ContractError，显式报错）；
 2=用法错。管辖面=7233/8233 与工单 worker；3099 只探测只提示（硬规则 1）。
-project 子命令族=add|remove|list（注册表接入面，project-lifecycle 票①；
-remove 属票②只挂点位）。
+project 子命令族=add|remove|list（注册表接入面；add/list=票① t260904-10，
+remove=票② t260904-14 可逆摘除，契约①a-1）。
 """
 
 from __future__ import annotations
@@ -53,8 +53,16 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--dir", action="append", required=True,
                     help="项目根目录（恰给一个：绝对路径、真实存在；单根模型，多给=拒收）")
     pa.add_argument("--json", action="store_true", help="机器口径输出")
-    pr = psub.add_parser("remove", help="摘除项目（票②交付，本版恒红占位）")
+    pr = psub.add_parser("remove", help="摘除项目（可逆：project.yaml 退役改名，默认不删数据）")
     pr.add_argument("--key", required=True, help="要摘除的项目 key")
+    pr.add_argument("--dry-run", action="store_true",
+                    help="全闸预演：输出将改名/将删清单（路径+字节+票计数），零现场变更")
+    pr.add_argument("--purge-data", action="store_true",
+                    help="摘除后删 <key>/data/（前置闸：closed 全归档，未归档=拒并列票号）")
+    pr.add_argument("--purge-credentials", action="store_true",
+                    help="摘除后删 <key>/credentials.yaml（与 --purge-data 独立）")
+    pr.add_argument("--confirm-last", action="store_true",
+                    help="摘最后一个注册项目时必须携带（零条目警告确认）")
     pr.add_argument("--json", action="store_true", help="机器口径输出")
     pl = psub.add_parser("list", help="列注册+隔离条目与票计数（Temporal 不可达降级不红）")
     pl.add_argument("--json", action="store_true", help="机器口径输出")
