@@ -349,6 +349,10 @@ SCENARIOS = [
     ("t260904-07-charter-injection-journey",
      "charter 注入用户旅程（t260904-07，browser 隔离台）：项目行点 + 新建会话不输入任何内容即见 charter 为首条消息（占位符实值化无 {{ 残留——「每个 session 创建时注入我们想要的 prompt」原话验收面）+截图证据落 .suyou/screenshots/（KI-044 UI 票证据自觉）；随后切换相邻 tab 再切回、reload 重进既有会话，charter 特征串出现次数恒定+tab 集合不变（守卫：恢复/切换路径绝不注入，沿 t260831-08 ⑥ 口径）；console 卫生零 error（过滤无凭据环境已知凭据类噪音）。断言上限=注入链 UI 面，agent kick-off 回复链不在断言面（无凭据隔离台已知限制，有凭据环境人工复判）；未上屏且仅凭据类错误=干净 skip 不假红。与 t260904-05 生命周期场景（tab 形态/续号/关闭链）intent 级不同层：本条锚注入内容可感知行为",
      "node integration/t260904-07/sc_session_charter_injection_journey.mjs", "browser"),
+    # ---- t260904-11 charter prompt wire 契约冻结（KI-046 回归网平台一端）----
+    ("t260904-11-charter-prompt-wire-contract",
+     "charter prompt wire 契约冻结（t260904-11，ro 供给只读面，KI-046 回归网）：07 票事故的病根是「客户端发什么形状×平台 zod 门收什么形状」这条跨组件接缝两端从未同场验证——developer 的 ki046 UT（workbench/tests）锚接缝客户端一端（真跑注入函数捕获 prompt 实参），本场景锚平台一端与镜像同步责任，intent 级不同层：①真源锚=平台供给内 dsh-host-apiproxy bundle 的 session.prompt 请求门确实是 content:array(promptContentPart) 分片数组门+text/image 判别联合（锚真实安装工件防镜像循环断言，宽松正则不锚压缩名）；②用户可感知拒收文案真源 invalid payload for ${method} 在文（toast 错误家族来源，平台改文案=漂移信号人审）；③冻结镜像语义（外部调用形状单测规范条款自范本：真 schema 不可导入则仓内冻结镜像+声明同步责任）——修复后分片载荷通过、KI-046 违规裸字符串被拒、缺 text 字段/非法 mode 同拒；平台门任一方向静默漂移本场景红，人审后两处同步。缺平台供给=显式红点名缺什么，不静默 skip（KI-046 闸穿透教训）",
+     "node integration/t260904-11/sc_charter_prompt_wire_contract.mjs", "ro"),
     ("t260904-08-template-face-narrowing",
      "工单模板面收窄契约（宿主令 260904，t260904-08）：真源三表（TEMPLATE_CLASS_NAMES/TEMPLATE_CLASSES/TEMPLATE_DISPLAY_NAMES）恰存 dev-lane、四退役 .py/.yaml 物理退场、v1 幸存面（workflows.py 步1 类+DispatcherScanWorkflow）不过删；用户拒收面——create/ticket-start 传四退役模板任一被拒且报错文案恰列 dev-lane（列全=仅 dev-lane，多列/漏列都算文案失真）、dev-lane 仍过模板闸（推进到下一道必填校验而非「未知模板」）；suggest_next 推荐面收「开新 dev-lane 票 / main 侧直跑验证」两类出路且零退役模板名；client start 类型面收敛 dispatcher-scan（文案锚）。stdlib 段零依赖恒跑；ticket-start CLI 段 venv-half（解释器缺失干净 SKIP 注原因，KI-020③）。与既有模板面守卫无 intent 重复（退役收窄为本票新契约）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "python3 integration/t260904-08/sc_template_face_narrowing.py", "ro"),

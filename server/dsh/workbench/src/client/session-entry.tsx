@@ -53,7 +53,10 @@
  */
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
-import type { ObservableSnapshot, SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ISession, ObservableSnapshot, SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
+// ISession（t260904-11，KI-046 any 面收窄）：sessionOf 的返回类型直接钉平台对外
+// 契约——ISession.prompt 的签名（content: PromptContentPart[], mode, RpcResult 返回）
+// 即平台边界契约，tsc 从此对本文件的 prompt 调用形状负责（裸字符串传参编译期即红）。
 // 「会话」记账层纯函数（t260828-02 项目归属+只列 UI 主动打开；smoke/sessions.mjs 直测）。
 // removeEntry 的显式调用点=tab 关闭钮（剔账不删数据）。借鉴模式取舍：非数组容错/
 // 未知 id 无害/不改入参/坏 JSON 不抛全部沿用（取舍清单见工单实现报告）。
@@ -155,8 +158,9 @@ function writeSeqCounters(map: Record<string, number>): void {
 export interface SessionsFace {
   open(id: string): void
   scope(id: string): any
-  /** 会话域 actx → Session 对象（t260904-07 charter 注入用；可选：运行时面缺失则注入失败就地留痕）。 */
-  sessionOf?(actx: any): any
+  /** 会话域 actx → Session 对象（t260904-07 charter 注入用；可选：运行时面缺失则注入失败就地留痕）。
+   *  返回类型钉平台 ISession（t260904-11 KI-046 any 面收窄：签名由平台 d.ts 校验，不再 any 抹平）。 */
+  sessionOf?(actx: any): ISession
   refresh?(): Promise<unknown>
   /** 关闭会话（可选；运行时现未提供——提供则关闭钮尽力调用，失败仅 warn）。 */
   close?(id: string): void
@@ -276,7 +280,7 @@ function isBlankSession(sessions: SessionsFace, id: string): boolean {
 /**
  * 会话开局 charter 注入（t260904-07）：blank 新会话恰一次注入项目 charter
  * （GET /suyou-workbench/api/session-charter?project=<key> 现读现渲染）→
- * sessions.scope(staged) → sessions.sessionOf(actx) → session.prompt(charter,
+ * sessions.scope(staged) → sessions.sessionOf(actx) → session.prompt([文本分片],
  * 'queue')（平台首条消息正路：blank→engaging，触发一轮 agent 回复=预期
  * kick-off）。借鉴取舍清单（t260831-08 ⑥ 口径，方案 R1 八项逐项声明）：
  *   1. 恢复/切换路径不注入——带：仅 handleNew 单路径调用本函数；
@@ -289,12 +293,15 @@ function isBlankSession(sessions: SessionsFace, id: string): boolean {
  *   7. waitForStaged 超时复用 blank prev——在守卫域内：blank===true 时注入
  *      命中复用会话=预期（工厂语义），非 blank 被守卫挡掉；
  *   8. 注入失败不回滚——本方案定死：就地捕获+行内提示，会话创建与注入解耦。
+ *  勘误（t260904-11，KI-046）：「失败」现含两条路——①throw（fetch/解析/传输层）；
+ *  ②prompt 返回 RpcResult{ok:false}（平台业务失败不 throw）——②原实现漏检，
+ *  错误只经 toast 直达用户、console 零留痕；现统一转①走下方 catch 就地消化。
  * 报错精确纪律（R3，KI-018/025 谎报同族）：全链路 try/catch 就地消化，绝不
  * 冒泡 handleNew 外层 catch（外层文案=「新建会话失败」，而此刻会话已创建）。
  * TOCTOU 复核（R5）：prompt 前一刻用最新快照复核 blank 位，网络往返期间用户
  * 抢先发首条则静默跳过（console.info 留痕——用户已接管对话，提示是噪音）。
  */
-async function injectSessionCharter(sessions: SessionsFace, staged: string, projectKey: string, notify: (text: string, project?: string) => void): Promise<void> {
+export async function injectSessionCharter(sessions: SessionsFace, staged: string, projectKey: string, notify: (text: string, project?: string) => void): Promise<void> {
   if (!isBlankSession(sessions, staged)) return
   try {
     const res = await fetch(`${SESSION_CHARTER_PATH}?project=${encodeURIComponent(projectKey)}`)
@@ -310,7 +317,17 @@ async function injectSessionCharter(sessions: SessionsFace, staged: string, proj
     }
     if (typeof sessions.sessionOf !== 'function') throw new Error('ctx.sessions.sessionOf 未注入（运行时面缺失）')
     const session = sessions.sessionOf(sessions.scope(staged))
-    await session.prompt(charter, 'queue')
+    // 载荷形状（t260904-11，KI-046 根因修复）：平台 wire 契约要求 content 为
+    // PromptContentPart 分片数组（apiproxy sessionPromptRequestSchema zod 判收），
+    // 裸字符串即报 invalid payload for session prompt。且 prompt 的**业务失败不
+    // throw 只返回 RpcResult**（ok:false，同时镜像进 snapshot.promptError）——
+    // 原 R3「就地 catch 兜底」假设失败会 throw，07 票因此静默失效；此处显式
+    // 检查 result.ok，失败转 throw 落入下方 catch 的就地消化路径（R3 语义不变）。
+    const result = await session.prompt([{ type: 'text', text: charter }], 'queue')
+    if (!result?.ok) {
+      const detail = result && !result.ok ? `${result.error.code} ${result.error.message}` : '空结果（未返回 RpcResult）'
+      throw new Error(`charter prompt 被平台拒收：${detail}`)
+    }
   } catch (err) {
     console.error('[workbench] 会话开局 charter 注入失败（会话创建不受影响）：', staged, err)
     notify('会话开局提示注入失败（详情见控制台），会话已正常创建', projectKey)

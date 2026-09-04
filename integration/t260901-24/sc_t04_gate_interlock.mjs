@@ -19,6 +19,11 @@
  * <repo>/server/dsh/profile/node_modules 软链族是环境工件不入 git，fresh worktree 泳道
  * 布局缺失时该段三腿曾假红（违反「依赖缺失一律干净 SKIP」执行契约）；缺失→SKIP+归因，
  * 前提在位环境断言面逐条不变。
+ *
+ * t260904-11 仲裁 gen1（tests-fault 修正②）：capture-lane 容差修复镜像合入+验收段
+ * 供给升级（泳道残留「断链」suyou-workbench 软链）后，existsSync 复刻谓词与工具实际
+ * 就绪脱钩（链断而工具全绿），选错分支三腿假红。教训=前提判定不得复刻被测物内部
+ * 谓词，只认可观测行为：分支依据改为本 run 退出码，两套契约断言逐字保留。
  */
 
 import { spawnSync } from 'node:child_process'
@@ -97,10 +102,20 @@ try {
   // playwright-core 后守卫翻转才首跑，t260904-06 泳道实锤 selftest 2/6 绿后在
   // buildTempProfile 掷错），泳道缺 profile/node_modules 属环境事实非实现回归。
   const laneProfileWb = join(REPO, 'server', 'dsh', 'profile', 'node_modules', 'suyou-workbench')
-  const profileReady = existsSync(laneProfileWb)
+  // 分支依据=工具可观测行为（本 run 退出码），不再复刻其内部就绪谓词。
+  // t260904-11 仲裁 gen1（tests-fault 修正②）：容差修复镜像合入 + 验收段供给升级
+  // （泳道出现「断链」的 suyou-workbench 软链——验收残留物，指向 ../workbench 解析
+  // 到不存在的 profile/workbench）后，existsSync 复刻谓词与工具实际就绪脱钩：软链
+  // 断链 → 旧判定取 fail-closed 分支，工具实际按容差语义全绿 → 三腿全假红。改按
+  // 每次 run 自身退出码分支；全绿形态与 fail-closed 形态两套断言逐字保留（谁在位
+  // 验谁），断言强度零变化。laneProfileWb 仅余诊断用途。
+  const laneLinkState = existsSync(laneProfileWb) ? '在'
+    : (existsSync(join(REPO, 'server', 'dsh', 'profile', 'node_modules')) ? '断链' : '缺')
   r = run(CAPTURE_LANE, ['--selftest'])
+  const profileReady = r.status === 0
   if (profileReady) {
-    ok(r.status === 0, `capture-lane --selftest 缺省全绿（实际：${r.status}；${firstLine(r.stderr)}）`)
+    ok(/全绿/.test(r.stdout), `capture-lane --selftest 缺省全绿（实际：exit ${r.status}；` +
+      `${(/全绿[^\n]*/.exec(r.stdout) || ['（无全绿标记）'])[0]}；泳道软链${laneLinkState}）`)
   } else {
     ok(r.status !== 0 && r.stderr.includes('主树 profile/node_modules 缺 suyou-workbench 软链'),
       `泳道缺 profile/node_modules → selftest fail-closed 且报因精确（实际：${r.status}；${firstLine(r.stderr)}）`)

@@ -3419,7 +3419,7 @@ function isBlankSession(sessions, id) {
 /**
 * 会话开局 charter 注入（t260904-07）：blank 新会话恰一次注入项目 charter
 * （GET /suyou-workbench/api/session-charter?project=<key> 现读现渲染）→
-* sessions.scope(staged) → sessions.sessionOf(actx) → session.prompt(charter,
+* sessions.scope(staged) → sessions.sessionOf(actx) → session.prompt([文本分片],
 * 'queue')（平台首条消息正路：blank→engaging，触发一轮 agent 回复=预期
 * kick-off）。借鉴取舍清单（t260831-08 ⑥ 口径，方案 R1 八项逐项声明）：
 *   1. 恢复/切换路径不注入——带：仅 handleNew 单路径调用本函数；
@@ -3432,6 +3432,9 @@ function isBlankSession(sessions, id) {
 *   7. waitForStaged 超时复用 blank prev——在守卫域内：blank===true 时注入
 *      命中复用会话=预期（工厂语义），非 blank 被守卫挡掉；
 *   8. 注入失败不回滚——本方案定死：就地捕获+行内提示，会话创建与注入解耦。
+*  勘误（t260904-11，KI-046）：「失败」现含两条路——①throw（fetch/解析/传输层）；
+*  ②prompt 返回 RpcResult{ok:false}（平台业务失败不 throw）——②原实现漏检，
+*  错误只经 toast 直达用户、console 零留痕；现统一转①走下方 catch 就地消化。
 * 报错精确纪律（R3，KI-018/025 谎报同族）：全链路 try/catch 就地消化，绝不
 * 冒泡 handleNew 外层 catch（外层文案=「新建会话失败」，而此刻会话已创建）。
 * TOCTOU 复核（R5）：prompt 前一刻用最新快照复核 blank 位，网络往返期间用户
@@ -3456,7 +3459,14 @@ async function injectSessionCharter(sessions, staged, projectKey, notify) {
 			return;
 		}
 		if (typeof sessions.sessionOf !== "function") throw new Error("ctx.sessions.sessionOf 未注入（运行时面缺失）");
-		await sessions.sessionOf(sessions.scope(staged)).prompt(charter, "queue");
+		const result = await sessions.sessionOf(sessions.scope(staged)).prompt([{
+			type: "text",
+			text: charter
+		}], "queue");
+		if (!result?.ok) {
+			const detail = result && !result.ok ? `${result.error.code} ${result.error.message}` : "空结果（未返回 RpcResult）";
+			throw new Error(`charter prompt 被平台拒收：${detail}`);
+		}
 	} catch (err) {
 		console.error("[workbench] 会话开局 charter 注入失败（会话创建不受影响）：", staged, err);
 		notify("会话开局提示注入失败（详情见控制台），会话已正常创建", projectKey);

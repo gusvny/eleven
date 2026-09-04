@@ -154,3 +154,27 @@ docker compose -f server/dsh/docker-compose.test.yml down -v   # 连测试数据
 变红了就说明该断言在快照现实，应重构为 fixture（逻辑）或性质（不变量）。
 例外：合同冻结类集成场景（契约文档守卫、golden 基线）以「钉住真源」为使命，快照
 是其语义本体，不在此列——它们住在 integration/ 场景清单，不在组件单测。
+
+## 外部调用形状单测规范（KI-046，260904）
+
+背景：t260904-07 的 charter 注入把裸字符串传给平台 `session.prompt(content, mode)`，
+平台 wire 契约要求 `PromptContentPart[]` 分片数组 → apiproxy zod 拒收
+`invalid payload for session prompt`，核心功能上线即 100% 失效。能拦住它的类型闸
+被 `any` 类型面抹平、调用形状测试缺失、唯一旅程场景在合并闸干净 SKIP——三层全漏。
+本规范把「第三方调用必须有测试覆盖」从期望落成 developer 侧的机械义务。
+
+**条款**：凡新增**不由本项目控制的进程外接口**调用点（HTTP API、CLI 子进程、
+平台 SDK……dsh 与 Temporal 只是本仓实例），该调用必须在 developer 单测里带
+**mock 形状断言**：捕获实参、对照对端契约校验——对端真 schema / d.ts 可导入则
+直接 import；不可导入则用**仓内冻结镜像**（常量+注释注明真源位置与同步责任）。
+消费外部输入（LLM 产出物、用户输入、文件、网络数据）的畸形输入用例纪律不变，
+与此并行适用。没有这类调用点的项目，条款自然空转。另注意两条平台语义陷阱
+（KI-046 实锤）：①平台 RPC 的**业务失败不 throw 只返回结果对象**（如
+`RpcResult{ok:false}`）——检查返回值，不能只靠 catch；②类型面不收窄，tsc 就不是闸。
+
+**范式**：`server/dsh/workbench/tests/ki046-charter-prompt-shape.mjs`——行为级 mock
+（真加载模块、桩捕获 prompt 实参、对照冻结镜像契约、畸形输入全路径）+ 三方一致锚
+（src 与构建产物调用形状一致，防「改 src 没重建 bundle」）。
+
+**分工口径**：形状断言=mock，归 developer 单测，不归集成；集成侧不写 mock，只在
+仲裁加固定问句「本票新增外部调用吗？形状单测在哪？」——把关不代做。
