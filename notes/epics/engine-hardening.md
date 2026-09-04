@@ -26,8 +26,9 @@
 
 ## 面/票拆解
 
-- **票①（t260904-02，本面全量）**：目标 1–4。写集=引擎（temporal-poc：client/shared/worker + tests）、console 侧 supervisor（temporal-tools/node.ts）、安装器（installer/doctor 面）、`integration/`（bench 库+场景+登记）、KI 册与 epic 本档。**与在飞 t260904-01（workbench 面）写集零重叠，可并行。**
-- 后续面（票①验收后再立，不在本面承诺）：引擎行为场景扩展（worker 生命周期/收口自退/多 console 防重）、裸入口面收敛。
+- **票①（t260904-02，在飞）**：目标 1–4。写集=引擎（temporal-poc：client/shared/worker + tests）、console 侧 supervisor（temporal-tools/node.ts）、安装器（installer/doctor 面）、`integration/`（bench 库+场景+登记）、KI 册与 epic 本档。**与在飞 t260904-01（workbench 面）写集零重叠，可并行。**
+- **票②（t260904-03，宿主令 260904 拍板「索引化」，与票①并行）**：派活上下文索引化——派活头③（dispatch 指令与 dispatch-next 两处）改**恒定知识库规约**（目录=docs/README.md 每篇一句话用途，agent 对照标题/写集按需读；结算 note 列参考 docs 清单作审计），WORKFLOW_CONTEXT/TITLE_CONTEXT_RULES 两表退役（content-pipeline 断链随之消解）；保底两项（CLAUDE.md+岗位说明书）不变。前置=4 篇 frontmatter 补齐（integration 已完成，d63a8bf）。**注意：与票①写集同文件（temporal-poc/shared.py），merge 串行——后并者 rebase 主树消解。**
+- 后续面（验收后按需再立，不在本面承诺）：引擎行为场景扩展（worker 生命周期/收口自退/多 console 防重）、跨项目 docsDir 解析（KI-034 残余②同族）。
 
 ## 验收标准（票①）
 
