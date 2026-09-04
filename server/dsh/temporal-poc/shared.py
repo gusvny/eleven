@@ -834,36 +834,14 @@ def _workspace_clause(ws: Optional[Dict[str, str]], meta: Dict[str, Any]) -> str
     return "工作空间：主树（数据道，不建 worktree 不开隔离目录），小步落盘直接提交。"
 
 
-# M5① 必读上下文清单映射表（宁少勿滥：只放「该 workflow 的工单大概率必读」的文档；
-# 拿不准不进表，宁缺。CLAUDE.md 与岗位说明书是保底两项，不进表）。
-WORKFLOW_CONTEXT: Dict[str, List[str]] = {
-    "content-pipeline": ["pipeline/proposals/README.md", "docs/design/平台架构设计.md"],
-    "dev-lane": ["docs/design/deepseek_harness_and_temporal_based_multi-agent_mechanism.md"],
-}
-
-# 标题/关键词推导（二级，宁少勿滥：只收高置信关键词）。
-TITLE_CONTEXT_RULES: List[Tuple[str, List[str]]] = [
-    (r"工单引擎|工单工作流|temporal|dispatch|派活",
-     ["docs/design/工单工作流台设计.md",
-      "docs/design/deepseek_harness_and_temporal_based_multi-agent_mechanism.md"]),
-    (r"知识库|review|审校", ["docs/design/知识库设计.md"]),
-    (r"掌握", ["docs/design/掌握模型设计.md"]),
-    (r"营造|建城", ["docs/design/营造建造循环设计.md"]),
-]
-
-
-def context_docs(workflow_id: str, title: str) -> List[str]:
-    """按工单 workflow/标题推导相关设计文档（去重保序）。"""
-    out: List[str] = []
-    for p in WORKFLOW_CONTEXT.get(workflow_id, []):
-        if p not in out:
-            out.append(p)
-    for pat, docs in TITLE_CONTEXT_RULES:
-        if re.search(pat, title or "", re.I):
-            for p in docs:
-                if p not in out:
-                    out.append(p)
-    return out
+# ---- 派活上下文索引化（KI-035，t260904-03，宿主令 260904 拍板）----
+# 旧制已退役：按 workflow 映射表+标题关键词推导，把设计文档以「必读、按序先读」
+# 塞进每段派活头——agent 每会话全文读机制主档（与票面相关性无关的重复 token
+# 消耗），且映射与 docs/ 实况手工耦合（260904 迁移即断链，留守 suyou 的项目域
+# 文档仍被指向）。新制=恒定知识库规约：目录=docs/README.md，agent 对照工单
+# 标题/写集判断相关性，相关的读全文、不相关不读；结算 note 列「参考 docs 清单」
+# 作审计。勿再按 workflow/标题推导必读文档（旧表取值与退役全案见 KI-035 行；
+# 零残留由 integration/t260904-03 场景守卫机械把关）。
 
 
 # 段专项条款（M5②：content-pipeline ai-review 段接 knowledge review 闭环）。
@@ -969,7 +947,6 @@ def build_dispatch_prompt(tid: str, meta: Dict[str, Any], template_lane: str,
     wid = str(meta.get("workflow_id") or "")
     title = str(meta.get("title") or "")
     ws = workspace_of(meta, template_lane)
-    ctx_docs = context_docs(wid, title)
     # M10④：按 stage 选 dispatch 实例（旧 role 先归一；分工段选分工实例）
     tool, eff_role, kind = dispatch_instance_for(wid, stage, role)
     # 契约①d（t260903-03）：role_doc/kind_doc 的目录基准经注册条目 paths.roles_dir
@@ -986,12 +963,13 @@ def build_dispatch_prompt(tid: str, meta: Dict[str, Any], template_lane: str,
     header = [
         "【派活指令】工单 %s（%s）当前阶段：%s（%s，角色=%s）"
         % (tid, title, stage, stage_def.get("name", ""), role_show),
-        "1. 必读上下文清单（M5①，按序先读再动手）：",
+        "1. 必读上下文清单（按序先读再动手）：",
         "   ① CLAUDE.md（仓库根，项目交接说明——**只读**，不得修改）",
         "   ② %s（岗位说明书全文：铁律/红线/交接物约定；判断不了记录交回，不硬改）%s"
         % (role_doc, (" + %s（分工卡，同读）" % kind_doc) if kind else ""),
-        "   ③ 推导设计文档（按 workflow/标题，映射表宁少勿滥）：%s"
-        % ("；".join(ctx_docs) if ctx_docs else "无（本工单无推导项，①②足够）"),
+        "   ③ 知识库：docs/ = 定稿知识库，目录=docs/README.md（每篇一句话用途；"
+        "机器索引 docs/index.json 备用）。动手前对照目录与你的标题/写集判断相关"
+        "设计文档，相关的读全文，不相关不读。",
     ]
     items = [
         "工单：admin.py call ticket show {\"id\":\"%s\"} 读工单全文（写集/验收/交接物/挂起项）。" % tid,
@@ -1012,7 +990,8 @@ def build_dispatch_prompt(tid: str, meta: Dict[str, Any], template_lane: str,
         items.append("出口条件：本段完成后推进将进入 awaiting-human（等人工签字），结算时注明等待人工终审。")
     items.append("小步落盘：每项变更一个 commit（message 写清根因/方案），不要攒到最后一次性提交。")
     items.append("结算：admin.py call ticket update {\"id\":\"%s\",\"status\":\"settled\",\"note\":\"<验收输出>\"}，"
-                 "note 附验收结果与遗留问题（dir 类工作空间另附产物清单）。" % tid)
+                 "note 附验收结果与遗留问题（dir 类工作空间另附产物清单），"
+                 "末列参考 docs 清单（读过哪些路径；空则写无）。" % tid)
     lines = header + ["%d. %s" % (i + 2, it) for i, it in enumerate(items)]
     prompt = "\n".join(lines)
     parts = {
@@ -1022,7 +1001,7 @@ def build_dispatch_prompt(tid: str, meta: Dict[str, Any], template_lane: str,
         "dispatch_tool": tool,
         "dispatch_kind": kind,
         "ticket_id": tid,
-        "context": ["CLAUDE.md", role_doc] + ([kind_doc] if kind_doc else []) + ctx_docs,
+        "context": ["CLAUDE.md", role_doc] + ([kind_doc] if kind_doc else []),
         "write_set": ws_list,
         "acceptance": acc,
         "workspace": ws,
@@ -1647,11 +1626,10 @@ def build_stage_prompt(ticket_id: str, meta: Dict[str, Any], stage: Stage,
         "   （取证效率纪律：只读侦察期一次 bash 批量读——多文件/多 grep 合一条调用"
         "（如 for f in A B C; do echo == $f; sed -n '1,50p' $f; done），"
         "禁止逐文件往返烧时；每轮模型往返都是分钟级成本。写改动仍小步分次。）",
+        "   ② 知识库：docs/ = 定稿知识库，目录=docs/README.md（每篇一句话用途；"
+        "机器索引 docs/index.json 备用）。动手前对照目录与你的标题/写集判断相关"
+        "设计文档，相关的读全文，不相关不读。",
     ]
-    ctx = context_docs(str(meta.get("workflow_id") or meta.get("template_id") or ""),
-                       str(meta.get("title") or ""))
-    if ctx:
-        lines.append("   ② 推导设计文档：%s" % "；".join(ctx))
     # M16：正文=原始用户需求（user_request 逐字保留，显式优先；缺省回落 body），
     # 加工后派发规格独立呈现（spec），不再混入正文。
     body = str(meta.get("user_request") or meta.get("body") or "").strip()
@@ -1698,6 +1676,8 @@ def build_stage_prompt(ticket_id: str, meta: Dict[str, Any], stage: Stage,
         " 遗留与风险」（没有内容的小节省略；review 步的意见在这里分条写）。",
         "     读者是不熟悉本工单的人和你自己的下一棒——写清楚而不是写压缩长句。",
         "   - evidence：机器口径原始证据（命令/路径/关键输出），台面默认折叠，不用照顾可读性。",
+        "   结算 note 末列参考 docs 清单（读过哪些路径；空则写无）——"
+        "integration merge 关卡核对文档漂移的观测点。",
         "   结果文件是幂等锚点：已存在则本段视为已完成（重跑安全），所以只在真正完成后写。",
         "%d. 落盘口径：改动写进写集内文件即可，**不要自己 git commit / git add / git worktree，"
         "也不要改 .git 文件、不要用 GIT_DIR 指向自建仓库**（headless 沙箱写不了真 .git——"

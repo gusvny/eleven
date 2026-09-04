@@ -28,6 +28,7 @@
 
 - **票①（t260904-02，在飞）**：目标 1–4。写集=引擎（temporal-poc：client/shared/worker + tests）、console 侧 supervisor（temporal-tools/node.ts）、安装器（installer/doctor 面）、`integration/`（bench 库+场景+登记）、KI 册与 epic 本档。**与在飞 t260904-01（workbench 面）写集零重叠，可并行。**
 - **票②（t260904-03，宿主令 260904 拍板「索引化」，与票①并行）**：派活上下文索引化——派活头③（dispatch 指令与 dispatch-next 两处）改**恒定知识库规约**（目录=docs/README.md 每篇一句话用途，agent 对照标题/写集按需读；结算 note 列参考 docs 清单作审计），WORKFLOW_CONTEXT/TITLE_CONTEXT_RULES 两表退役（content-pipeline 断链随之消解）；保底两项（CLAUDE.md+岗位说明书）不变。前置=4 篇 frontmatter 补齐（integration 已完成，d63a8bf）。**注意：与票①写集同文件（temporal-poc/shared.py），merge 串行——后并者 rebase 主树消解。**
+  - **落地（260904，t260904-03 implement 段）**：两路派活头已换恒定规约（v1 dispatch ③ + dispatch-next ②，文案同源）、两表+context_docs 退役（墓碑注释在位）、结算 note/交付契约两处审计句入位、docs/README.md 去死引用；UT 回归锁 4 例（tests/test_t260904_03_t01_dispatch_header_indexed.py）绿，全量套件失败集与基线逐行一致（存量红=未迁场景薄包装 24 条，KI-038——main 已登记（b896608）、triage 三判清单已落（6484e31）；acceptance 走查曾在泳道隔离视图下补登 KI-036 并改此处引用，merge 轮发现 main 的 KI-036=ui_evidence、本债真号=KI-038，实锤细节已并归 KI-038 行、引用归位）；KI-035 已转 closed（含知识库设计.md §4/§7/§8-M4 漂移登记，修订待人审另票）。
 - 后续面（验收后按需再立，不在本面承诺）：引擎行为场景扩展（worker 生命周期/收口自退/多 console 防重）、跨项目 docsDir 解析（KI-034 残余②同族）。
 
 ## 验收标准（票①）

@@ -24,7 +24,7 @@ updated: 2026-09-04
 
 | 文件 | 内容 |
 |---|---|
-| `design/deepseek_harness_and_temporal_based_multi-agent_mechanism.md` | **引擎机制主档**：DSH+Temporal 多 agent 工单引擎（dev-lane 必读，`WORKFLOW_CONTEXT` 引用） |
+| `design/deepseek_harness_and_temporal_based_multi-agent_mechanism.md` | **引擎机制主档**：DSH+Temporal 多 agent 工单引擎（引擎/插件域工单首读参考） |
 | `design/工单工作流台设计.md` | 工单工作流台设计（多角色协作基础设施） |
 | `design/右栏会话入口与hero定制设计.md` | workbench 右栏会话入口与 hero 定制（附录含【有效】/【已证伪】锚点结论） |
 | `design/metrics-api契约v1.md` | workbench metrics API 契约 |
