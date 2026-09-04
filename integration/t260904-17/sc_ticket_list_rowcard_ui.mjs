@@ -66,7 +66,7 @@ stub.setCtrl({
 
 const pw = await loadPlaywright();
 if (!pw) {
-  record('playwright', 'skip', 'playwright-core 不可用（KI-036 家族）：浏览器走查腿干净 SKIP');
+  record('playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器走查腿干净 SKIP');
   summarize();
 }
 
@@ -76,7 +76,7 @@ try {
   writeProjectEntry(projectsRoot, 'fixa', '夹具甲', [tmpRoot('fix17-ui-fixa-')]);
   bench = await bootConsole(projectsRoot, stub);
 } catch (e) {
-  record('bench/boot', 'skip', `隔离台依赖缺失：${String(e?.message ?? e).slice(0, 200)}`);
+  record('bench/boot', 'env_fail', `隔离台依赖缺失：${String(e?.message ?? e).slice(0, 200)}`);
   summarize();
 }
 teardownOnExit(bench.teardown);
@@ -91,7 +91,7 @@ try {
   browser = await chromium.launch({ channel: 'chrome', headless: true })
     .catch(() => chromium.launch({ headless: true }));
 } catch (e) {
-  record('browser', 'skip', `浏览器可执行档缺失（npx playwright install 可解，KI-036 家族）：${String(e?.message ?? e).split('\n')[0].slice(0, 160)}`);
+  record('browser', 'env_fail', `浏览器可执行档缺失（npx playwright install 可解，KI-036 家族）：${String(e?.message ?? e).split('\n')[0].slice(0, 160)}`);
   summarize();
 }
 try {

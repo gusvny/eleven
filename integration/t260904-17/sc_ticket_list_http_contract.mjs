@@ -85,7 +85,7 @@ try {
   writeProjectEntry(projectsRoot, 'fixa', '夹具甲', [tmpRoot('fix17-api-fixa-')]);
   bench = await bootConsole(projectsRoot, stub);
 } catch (e) {
-  record('bench/boot', 'skip', `隔离台依赖缺失（dsh/profile 依赖）：${String(e?.message ?? e).slice(0, 200)}`);
+  record('bench/boot', 'env_fail', `隔离台依赖缺失（dsh/profile 依赖）：${String(e?.message ?? e).slice(0, 200)}`);
   summarize();
 }
 teardownOnExit(bench.teardown);

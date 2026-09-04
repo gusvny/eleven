@@ -308,7 +308,7 @@ export async function api(base, method, pathname, payload) {
   return { status: r.status, body, text };
 }
 
-/** 执行契约（integration/README.md）：stdout 末行 SUMMARY pass/skip/fail；FAIL>0 才 exit 1。 */
+/** 执行契约（integration/README.md）：stdout 末行 SUMMARY pass/fail/env_fail/na（12 号三态形状）；exit=FAIL>0→1，env_fail>0→2，绿=0。 */
 export function makeResults() {
   const results = [];
   return {
@@ -319,10 +319,11 @@ export function makeResults() {
     },
     summarize() {
       const p = results.filter((r) => r.status === 'pass').length;
-      const s = results.filter((r) => r.status === 'skip').length;
       const f = results.filter((r) => r.status === 'fail').length;
-      console.log(`SUMMARY pass=${p} skip=${s} fail=${f}`);
-      process.exit(f > 0 ? 1 : 0);
+      const e = results.filter((r) => r.status === 'env_fail').length;
+      const na = results.filter((r) => r.status === 'na').length;
+      console.log(`SUMMARY pass=${p} fail=${f} env_fail=${e} na=${na}`);
+      process.exit(f > 0 ? 1 : (e > 0 || (p === 0 && f === 0 && na > 0) ? 2 : 0));
     },
   };
 }

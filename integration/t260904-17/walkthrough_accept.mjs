@@ -78,7 +78,7 @@ const OUT_DIR = path.join(process.cwd(), '.suyou', 'screenshots', 't260904-17');
 
 const pw = await loadPlaywright();
 if (!pw) {
-  record('wt/playwright', 'skip', 'playwright-core 不可用（KI-036 家族）：走查腿干净 SKIP');
+  record('wt/playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：走查腿干净 SKIP');
   summarize();
 }
 
@@ -88,7 +88,7 @@ try {
   writeProjectEntry(projectsRoot, 'fixa', '夹具甲', [tmpRoot('fix17-wt-fixa-')]);
   bench = await bootConsole(projectsRoot, stub);
 } catch (e) {
-  record('wt/boot', 'skip', `隔离台依赖缺失：${String(e?.message ?? e).slice(0, 200)}`);
+  record('wt/boot', 'env_fail', `隔离台依赖缺失：${String(e?.message ?? e).slice(0, 200)}`);
   summarize();
 }
 teardownOnExit(bench.teardown);
@@ -101,7 +101,7 @@ try {
   browser = await chromium.launch({ channel: 'chrome', headless: true })
     .catch(() => chromium.launch({ headless: true }));
 } catch (e) {
-  record('wt/browser', 'skip', `浏览器不可用：${String(e?.message ?? e).split('\n')[0].slice(0, 160)}`);
+  record('wt/browser', 'env_fail', `浏览器不可用：${String(e?.message ?? e).split('\n')[0].slice(0, 160)}`);
   summarize();
 }
 
