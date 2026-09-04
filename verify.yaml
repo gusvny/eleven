@@ -32,12 +32,11 @@ lanes:
         cmd: PY=server/dsh/temporal-poc/.venv/bin/python; [ -x "$PY" ] || PY=python3; PYTHONPYCACHEPREFIX=out/pycache "$PY" -m pytest server/dsh/temporal-poc/tests -q
 integration:
   cmd: python3 integration/run_scenarios.py
-  # t260904-12 乙段 supply 声明【暂撤——F-C 部署次序纪律】：supply 引擎支持已随本票
-  # verify_lane.py 落地（工作树/合并后主仓均认 {cmd,supply}），但宿主机械消费链在合并前
-  # 用主仓旧引擎副本（白名单只认 cmd）——声明先行会整道 fail-closed ran=0。故声明后行：
-  # 本票合并入主仓后，由宿主令直落以下两条（逐字备好，届时直接粘回）：
-  #   supply:
-  #     - need: playwright-core（泳道 ui-check node_modules 软链主树，KI-036）
-  #       cmd: 'MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/dsh/ui-check/node_modules/playwright-core"; [ -d "$SRC" ] || { echo "ENV_FAIL: 主树 playwright-core 缺失：$SRC"; exit 1; }; mkdir -p server/dsh/ui-check/node_modules; DST=server/dsh/ui-check/node_modules/playwright-core; [ -e "$DST" ] || ln -s "$SRC" "$DST"; [ -e "$DST/package.json" ] || { echo "ENV_FAIL: 软链后不可解析：$DST"; exit 1; }'
-  #     - need: temporal CLI（泳道 bin 软链主树 bin/temporal，t260904-14 真票腿）
-  #       cmd: 'MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/dsh/temporal-poc/bin/temporal"; [ -x "$SRC" ] || { echo "ENV_FAIL: 主树 temporal CLI 缺失：$SRC"; exit 1; }; mkdir -p server/dsh/temporal-poc/bin; [ -e server/dsh/temporal-poc/bin/temporal ] || ln -s "$SRC" server/dsh/temporal-poc/bin/temporal; server/dsh/temporal-poc/bin/temporal --version >/dev/null'
+  # t260904-12 乙段 supply（260904 宿主令直落——票面钦定「合并后粘回」，原注释语境留档：
+  # 引擎支持已随票合并，verify_lane 认 {cmd,supply}；合并前声明会撞旧引擎白名单 fail-closed
+  # 的前提已随 f84d414 消除）。
+  supply:
+    - need: playwright-core（泳道 ui-check node_modules 软链主树，KI-036）
+      cmd: 'MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/dsh/ui-check/node_modules/playwright-core"; [ -d "$SRC" ] || { echo "ENV_FAIL: 主树 playwright-core 缺失：$SRC"; exit 1; }; mkdir -p server/dsh/ui-check/node_modules; DST=server/dsh/ui-check/node_modules/playwright-core; [ -e "$DST" ] || ln -s "$SRC" "$DST"; [ -e "$DST/package.json" ] || { echo "ENV_FAIL: 软链后不可解析：$DST"; exit 1; }'
+    - need: temporal CLI（泳道 bin 软链主树 bin/temporal，t260904-14 真票腿）
+      cmd: 'MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/dsh/temporal-poc/bin/temporal"; [ -x "$SRC" ] || { echo "ENV_FAIL: 主树 temporal CLI 缺失：$SRC"; exit 1; }; mkdir -p server/dsh/temporal-poc/bin; [ -e server/dsh/temporal-poc/bin/temporal ] || ln -s "$SRC" server/dsh/temporal-poc/bin/temporal; server/dsh/temporal-poc/bin/temporal --version >/dev/null'
