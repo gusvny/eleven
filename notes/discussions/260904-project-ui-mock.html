@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>项目管理 · UI mock v4（左栏内嵌 + 统一图标族 · project-lifecycle 面D）</title>
+<style>
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,"PingFang SC","Segoe UI",sans-serif; background:#f6f8fa;
+         color:#1f2328; margin:0; padding:20px 24px 48px; }
+  .mock-banner { background:#fff8c5; border:1px solid #d4a72c; color:#7d4e00; border-radius:6px;
+                 padding:8px 12px; font-size:12px; margin-bottom:16px; line-height:1.7; }
+  .stage { display:flex; gap:24px; align-items:flex-start; }
+
+  /* ---- 左栏片段 ---- */
+  .col { width:330px; background:#ffffff; border:1px solid #d0d7de; border-radius:8px;
+         box-shadow:0 1px 3px rgba(31,35,40,.06); overflow:hidden; flex-shrink:0; }
+  .col-title { font-size:12px; color:#57606a; padding:10px 14px 6px; border-bottom:1px solid #e8ebef; }
+  .pgroup { padding:8px 10px 10px; border-bottom:1px solid #e8ebef; }
+  .pg-head { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; padding:2px 4px; }
+  .dot { width:10px; height:10px; border-radius:3px; flex-shrink:0; }
+  .pg-icons { margin-left:auto; display:flex; gap:2px; }
+  .sess-row { display:flex; gap:6px; padding:6px 4px 2px; align-items:center; }
+  .sq { width:22px; height:22px; border:1px solid #d0d7de; border-radius:6px; background:#fff;
+        display:flex; align-items:center; justify-content:center; font-size:13px; cursor:pointer; }
+  .sq.num { font-size:11px; color:#57606a; }
+  .tk { padding:7px 4px 2px; font-size:12.5px; line-height:1.5; }
+  .tk .t2 { color:#57606a; font-size:11.5px; }
+  .tk .tid { color:#0969da; font-weight:600; }
+  .quar { display:flex; align-items:center; gap:8px; padding:9px 14px; font-size:12.5px;
+          color:#cf222e; background:#ffebe9; cursor:pointer; border-bottom:1px solid #e8ebef; }
+  .add-row { display:flex; align-items:center; gap:8px; padding:10px 14px; font-size:13px;
+             color:#57606a; cursor:pointer; }
+  .add-row:hover { background:#f6f8fa; color:#0969da; }
+  .plus { width:22px; height:22px; border:1px dashed #d0d7de; border-radius:6px;
+          display:flex; align-items:center; justify-content:center; font-size:14px; }
+
+  /* ---- 图标族：统一规格 ----
+     viewBox 20×20 · stroke=currentColor · stroke-width 1.6 · 圆帽圆角 · fill none
+     显形 18px，命中区 26×26（内边距），radius 6
+     态：idle #57606a / hover #0969da + bg #f0f6ff / active（当前视图）#0969da */
+  .ic { width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center;
+        border-radius:6px; color:#57606a; cursor:pointer; border:none; background:none; padding:0; }
+  .ic:hover { color:#0969da; background:#f0f6ff; }
+  .ic.active { color:#0969da; }
+  .ic svg { width:18px; height:18px; display:block; }
+
+  /* ---- 弹层 ---- */
+  .overlay { display:none; position:fixed; inset:0; background:rgba(31,35,40,.35);
+             z-index:10; align-items:flex-start; justify-content:center; padding-top:8vh; }
+  .overlay.open { display:flex; }
+  .modal { background:#fff; border:1px solid #d0d7de; border-radius:10px; width:520px; max-width:94vw;
+           box-shadow:0 8px 24px rgba(31,35,40,.18); padding:18px 20px; }
+  .modal h3 { margin:0 0 4px; font-size:15px; display:flex; align-items:baseline; gap:10px; }
+  .modal .sub { font-size:12px; color:#57606a; margin:0 0 14px; }
+  .modal .x { margin-left:auto; cursor:pointer; color:#57606a; font-size:14px; }
+  .field { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  .field label { width:76px; font-size:13px; color:#57606a; text-align:right; flex-shrink:0; }
+  .field input { font:inherit; font-size:13px; flex:1; background:#fff; color:#1f2328;
+                 border:1px solid #d0d7de; border-radius:6px; padding:6px 8px; }
+  .field input:focus { outline:none; border-color:#0969da; box-shadow:0 0 0 3px rgba(9,105,218,.15); }
+  .wb-btn { font:inherit; font-size:13px; border:1px solid #d0d7de; background:#fff; color:#1f2328;
+            border-radius:6px; padding:5px 12px; cursor:pointer; }
+  .wb-btn:hover { background:#f6f8fa; }
+  .wb-btn:disabled { opacity:.45; cursor:not-allowed; }
+  .wb-btn-blue { border-color:#96c8f2; color:#0969da; background:#ddf4ff; }
+  .wb-btn-green { border-color:#7dd9a0; color:#1a7f37; background:#dafbe1; }
+  .wb-btn-danger { border-color:#ff9b9b; color:#cf222e; background:#ffebe9; }
+  ul.plain { list-style:none; padding:0; margin:8px 0; }
+  ul.plain li { padding:2px 0 2px 20px; position:relative; font-size:12.5px; }
+  li.ok::before { content:"✓"; position:absolute; left:1px; color:#1a7f37; font-weight:700; }
+  li.warn::before { content:"⚠"; position:absolute; left:1px; color:#9a6700; }
+  li.bad::before { content:"✗"; position:absolute; left:1px; color:#cf222e; font-weight:700; }
+  li.info::before { content:"ℹ"; position:absolute; left:1px; color:#57606a; }
+  .err-box { background:#ffebe9; border:1px solid #ff9b9b; color:#cf222e; border-radius:6px;
+             padding:7px 10px; font-size:12.5px; margin:8px 0; }
+  .ok-box { background:#dafbe1; border:1px solid #7dd9a0; color:#1a7f37; border-radius:6px;
+            padding:7px 10px; font-size:12.5px; margin:8px 0; }
+  .warn-box { background:#fff8c5; border:1px solid #d4a72c; color:#7d4e00; border-radius:6px;
+              padding:7px 10px; font-size:12.5px; margin:8px 0; }
+  .check { font-size:13px; line-height:2; }
+  .mono { font-family:ui-monospace,Menlo,monospace; font-size:11.5px; }
+  details summary { cursor:pointer; font-size:12px; color:#0969da; }
+  .steps { counter-reset:step; }
+  .step { position:relative; padding-left:28px; margin-bottom:6px; }
+  .step::before { counter-increment:step; content:counter(step); position:absolute; left:0; top:2px;
+      width:19px; height:19px; border-radius:50%; background:#ddf4ff; border:1px solid #96c8f2;
+      color:#0969da; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+  .chip { display:inline-block; font-size:11px; border-radius:10px; padding:1px 8px; margin:1px 4px 1px 0;
+          border:1px solid; white-space:nowrap; }
+  .chip-ok { color:#1a7f37; background:#dafbe1; border-color:#7dd9a0; }
+  .chip-warn { color:#9a6700; background:#fff8c5; border-color:#d4a72c; }
+  .chip-info { color:#57606a; background:#f6f8fa; border-color:#d0d7de; }
+  .info-grid { display:grid; grid-template-columns:76px 1fr; row-gap:7px; font-size:13px; margin-bottom:6px; }
+  .info-grid .k { color:#57606a; text-align:right; padding-right:10px; }
+  .danger-zone { border-top:1px solid #e8ebef; margin-top:14px; padding-top:12px; }
+  .danger-zone .dz-t { font-size:12px; color:#57606a; margin-bottom:8px; }
+  .side-note { font-size:12px; color:#57606a; line-height:1.9; max-width:430px; }
+  .side-note b { color:#1f2328; }
+  .spec { background:#fff; border:1px solid #d0d7de; border-radius:8px; padding:12px 14px;
+          margin-top:14px; }
+  .spec .row { display:flex; align-items:center; gap:14px; padding:6px 0; border-bottom:1px dashed #e8ebef; }
+  .spec .row:last-child { border-bottom:none; }
+  .spec .cell { display:flex; align-items:center; gap:8px; font-size:12.5px; color:#1f2328; }
+  .spec .cell .dim { color:#57606a; font-size:11.5px; }
+</style>
+</head>
+<body>
+
+<div class="mock-banner">📐 <b>设计稿 v5</b>（260904：图标族统一 + 宿主反馈两枚重绘——设置=滑杆[轮辐齿轮像太阳]、路由=带箭头分流[节点连线版会被读成 share]）· 非实现 ·
+project-lifecycle 票③面D 底稿。<b>试：</b>① 组头五枚新图标（悬停变蓝；最后一枚滑杆=项目设置）；
+② 「＋ 接入项目」；③ 红色隔离行。图标族大样在右侧规格卡。</div>
+
+<div class="stage">
+
+  <!-- ============ 左栏片段 ============ -->
+  <div class="col">
+    <div class="col-title">左栏 · 项目组（图标族已统一）</div>
+
+    <div class="pgroup">
+      <div class="pg-head">
+        <span class="dot" style="background:#1f6feb"></span>sandbar
+        <span class="pg-icons">
+          <button class="ic" title="工单列表" aria-label="工单列表"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4.2" y="4.6" width="11.6" height="11.8" rx="2"/><path d="M7.2 4.6V3.4a1.2 1.2 0 0 1 1.2-1.2h3.2a1.2 1.2 0 0 1 1.2 1.2v1.2"/><path d="M7.2 9h5.6M7.2 12.4h3.6"/></svg></button>
+          <button class="ic" title="知识库" aria-label="知识库"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 5.4C8.8 4.2 7 3.8 4.6 4a.8.8 0 0 0-.7.8v9c0 .4.3.8.8.8 2.1-.2 3.9.2 5.3 1.4 1.4-1.2 3.2-1.6 5.3-1.4.5 0 .8-.4.8-.8v-9a.8.8 0 0 0-.7-.8C13 3.8 11.2 4.2 10 5.4z"/><path d="M10 5.4v10.6"/></svg></button>
+          <button class="ic" title="模型路由" aria-label="模型路由"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.2" cy="10" r="1.8"/><path d="M5.8 8.6l5.9-5.9M9.4 2.7h2.3v2.3M5.8 11.4l5.9 5.9M9.4 17.3h2.3v-2.3"/></svg></button>
+          <button class="ic" title="立项单" aria-label="立项单"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6.6" y="3.4" width="10" height="10" rx="1.8"/><path d="M6.6 6.6h-2a1.8 1.8 0 0 0-1.8 1.8v7a1.8 1.8 0 0 0 1.8 1.8h7a1.8 1.8 0 0 0 1.8-1.8v-2"/></svg></button>
+          <button class="ic" title="项目设置" aria-label="项目设置" onclick="openModal('ov-set')"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5.6h8.2M15.4 5.6H17M3 10h1.9M9.1 10h7.9M3 14.4h9.4"/><circle cx="13.3" cy="5.6" r="1.9"/><circle cx="7" cy="10" r="1.9"/><circle cx="14.5" cy="14.4" r="1.9"/></svg></button>
+        </span>
+      </div>
+      <div class="sess-row"><span class="sq" style="border-color:#1f6feb;color:#1f6feb">＋</span><span class="sq num">1</span><span class="sq num">2</span></div>
+      <div class="tk">t260904-03 收尾 · 索引化场景迁移
+        <div class="t2"><span class="tid">t260904-03</span> integration · 2h</div></div>
+    </div>
+
+    <div class="pgroup">
+      <div class="pg-head">
+        <span class="dot" style="background:#8250df"></span>溯游 <span class="mono" style="font-weight:400;color:#57606a">suyou</span>
+        <span class="pg-icons">
+          <button class="ic" title="工单列表"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4.2" y="4.6" width="11.6" height="11.8" rx="2"/><path d="M7.2 4.6V3.4a1.2 1.2 0 0 1 1.2-1.2h3.2a1.2 1.2 0 0 1 1.2 1.2v1.2"/><path d="M7.2 9h5.6M7.2 12.4h3.6"/></svg></button>
+          <button class="ic" title="知识库"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 5.4C8.8 4.2 7 3.8 4.6 4a.8.8 0 0 0-.7.8v9c0 .4.3.8.8.8 2.1-.2 3.9.2 5.3 1.4 1.4-1.2 3.2-1.6 5.3-1.4.5 0 .8-.4.8-.8v-9a.8.8 0 0 0-.7-.8C13 3.8 11.2 4.2 10 5.4z"/><path d="M10 5.4v10.6"/></svg></button>
+          <button class="ic" title="模型路由"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.2" cy="10" r="1.8"/><path d="M5.8 8.6l5.9-5.9M9.4 2.7h2.3v2.3M5.8 11.4l5.9 5.9M9.4 17.3h2.3v-2.3"/></svg></button>
+          <button class="ic" title="立项单"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6.6" y="3.4" width="10" height="10" rx="1.8"/><path d="M6.6 6.6h-2a1.8 1.8 0 0 0-1.8 1.8v7a1.8 1.8 0 0 0 1.8 1.8h7a1.8 1.8 0 0 0 1.8-1.8v-2"/></svg></button>
+          <button class="ic" title="项目设置" onclick="openModal('ov-set')"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5.6h8.2M15.4 5.6H17M3 10h1.9M9.1 10h7.9M3 14.4h9.4"/><circle cx="13.3" cy="5.6" r="1.9"/><circle cx="7" cy="10" r="1.9"/><circle cx="14.5" cy="14.4" r="1.9"/></svg></button>
+        </span>
+      </div>
+      <div class="sess-row"><span class="sq" style="border-color:#8250df;color:#8250df">＋</span></div>
+      <div class="tk" style="color:#57606a">无进行中工单</div>
+    </div>
+
+    <div class="quar" onclick="openModal('ov-quar')">⚠ demo-app · 注册条目被隔离</div>
+    <div class="add-row" onclick="openModal('ov-add')"><span class="plus">＋</span>接入项目</div>
+  </div>
+
+  <!-- ============ 说明 + 图标族规格 ============ -->
+  <div>
+    <div class="side-note">
+      <b>左栏新增仍三处（v3 口径不变）：</b>组头「设置」入口（第五枚图标=滑杆，弹层=只读信息+票计数+体检+danger 区摘除）/
+      「＋ 接入项目」行 / 隔离行。本版变更=<b>组头图标族统一</b>：emoji（📋📖🔀🗂️）→
+      SVG 线性图标五枚（工单/知识库/路由/立项/设置），规格见下卡。
+    </div>
+    <div class="spec">
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px">图标族规格（票③交付，随 UI 设计文档成文）</div>
+      <div style="font-size:11.5px;color:#57606a;margin-bottom:6px">viewBox 20×20 · stroke=currentColor · 线宽 1.6 · 圆帽圆角 · fill none · 显形 18px / 命中区 26×26（radius 6）· 态：idle #57606a / hover #0969da+#f0f6ff / active #0969da（当前视图）</div>
+      <div class="row"><span class="cell"><button class="ic" style="width:34px;height:34px"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4.2" y="4.6" width="11.6" height="11.8" rx="2"/><path d="M7.2 4.6V3.4a1.2 1.2 0 0 1 1.2-1.2h3.2a1.2 1.2 0 0 1 1.2 1.2v1.2"/><path d="M7.2 9h5.6M7.2 12.4h3.6"/></svg></button> 工单列表 <span class="dim">原 📋 · 保留 t260825-05 联动语义</span></span></div>
+      <div class="row"><span class="cell"><button class="ic" style="width:34px;height:34px"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 5.4C8.8 4.2 7 3.8 4.6 4a.8.8 0 0 0-.7.8v9c0 .4.3.8.8.8 2.1-.2 3.9.2 5.3 1.4 1.4-1.2 3.2-1.6 5.3-1.4.5 0 .8-.4.8-.8v-9a.8.8 0 0 0-.7-.8C13 3.8 11.2 4.2 10 5.4z"/><path d="M10 5.4v10.6"/></svg></button> 知识库 <span class="dim">原 📖</span></span></div>
+      <div class="row"><span class="cell"><button class="ic" style="width:34px;height:34px"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.2" cy="10" r="1.8"/><path d="M5.8 8.6l5.9-5.9M9.4 2.7h2.3v2.3M5.8 11.4l5.9 5.9M9.4 17.3h2.3v-2.3"/></svg></button> 模型路由 <span class="dim">原 🔀 · 带箭头分流=路由方向（无箭头节点连线=share，已避开）</span></span></div>
+      <div class="row"><span class="cell"><button class="ic" style="width:34px;height:34px"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6.6" y="3.4" width="10" height="10" rx="1.8"/><path d="M6.6 6.6h-2a1.8 1.8 0 0 0-1.8 1.8v7a1.8 1.8 0 0 0 1.8 1.8h7a1.8 1.8 0 0 0 1.8-1.8v-2"/></svg></button> 立项单 <span class="dim">原 🗂️ · 叠卡=立项+关联票</span></span></div>
+      <div class="row"><span class="cell"><button class="ic" style="width:34px;height:34px;color:#0969da"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5.6h8.2M15.4 5.6H17M3 10h1.9M9.1 10h7.9M3 14.4h9.4"/><circle cx="13.3" cy="5.6" r="1.9"/><circle cx="7" cy="10" r="1.9"/><circle cx="14.5" cy="14.4" r="1.9"/></svg></button> 项目设置 <span class="dim">新增 · 滑杆=设置 · 本立项面D入口（轮辐齿轮像太阳，弃）</span></span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 弹层：项目设置 ============ -->
+<div class="overlay" id="ov-set">
+  <div class="modal">
+    <h3>项目设置 · 溯游 <span class="mono" style="font-weight:400;color:#57606a">suyou</span> <span class="x" onclick="closeAll()">✕</span></h3>
+    <p class="sub">注册表条目 · ~/.sandbar/projects/suyou/project.yaml</p>
+    <div class="info-grid">
+      <span class="k">项目 key</span><span class="mono">suyou</span>
+      <span class="k">显示名</span><span>溯游（冻结侧）</span>
+      <span class="k">根目录</span><span class="mono">/Users/user/Documents/suyou</span>
+      <span class="k">票计数</span><span>在飞 0 · 完结 50 · 已归档 48 <span style="font-size:11px;color:#57606a">（Temporal；不可达时「—」+提示，不红）</span></span>
+      <span class="k">接入体检</span><span>
+        <span class="chip chip-ok">verify.yaml ✓</span>
+        <span class="chip chip-warn">凭据：回落 global</span>
+        <span class="chip chip-info">paths：未声明</span>
+      </span>
+    </div>
+    <div class="danger-zone">
+      <div class="dz-t">危险区——操作走 CLI 单源，与命令行同口径</div>
+      <button class="wb-btn wb-btn-danger" onclick="openModal('ov-remove')">摘除项目…</button>
+      <span style="font-size:12px;color:#57606a">默认可逆：退役注册条目，数据全保留</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 弹层：接入 ============ -->
+<div class="overlay" id="ov-add">
+  <div class="modal">
+    <h3>接入项目 <span class="x" onclick="closeAll()">✕</span></h3>
+    <p class="sub">注册到 ~/.sandbar/projects/&lt;key&gt;/ · 单根模型：多 repo 项目填父目录（票的空间=根下 .lane/）</p>
+    <div class="field"><label>项目 key</label><input class="mono" value="trip-planner"></div>
+    <div class="field"><label>显示名</label><input value="旅行规划"></div>
+    <div class="field"><label>根目录</label><input class="mono" value="/Users/user/Documents/trip-planner"></div>
+    <button class="wb-btn wb-btn-blue" onclick="preAdd()">预检（dry-run，不落盘）</button>
+    <button class="wb-btn wb-btn-green" id="btn-add" disabled>确认接入</button>
+    <div id="add-pre" style="display:none">
+      <ul class="plain">
+        <li class="ok">key 形状合法 / 未注册 / 根目录存在 / 不与既有项目交叉或互为父子</li>
+        <li class="warn">verify.yaml 缺失——首张 dev-lane 票会在 integration 道红（项目自备，不代写）</li>
+        <li class="warn">per-key 凭据不存在——回落平台 global（弃用窗口）；隔离需求：<span class="mono">install -m 0600 …</span></li>
+        <li class="info">paths 未声明——roles/模型路由回落现行约定</li>
+      </ul>
+      <div class="warn-box">黄牌不阻塞（契约三态：缺失=关闭/回落）。确认后左栏即时出现新项目组（含 ⚙）。</div>
+    </div>
+    <details style="margin-top:8px"><summary>拒收示例（错误就地显示，六类）</summary>
+      <ul class="plain">
+        <li class="bad">key 形状非法：Trip_Planner（白名单=小写/数字/连字符）</li>
+        <li class="bad">key 已注册：sandbar（幂等重跑同拒，不覆盖）</li>
+        <li class="bad">根目录不存在：/Users/user/Documents/no-such-dir</li>
+        <li class="bad">根目录与 sandbar 互为父子（报两个 key）</li>
+        <li class="bad">legacy 模式在位：SUYOU_PROJECTS_YAML 已设——先解除再接入</li>
+        <li class="bad">多条根目录=拒收（单根模型，恰写一条）</li>
+      </ul>
+    </details>
+  </div>
+</div>
+
+<!-- ============ 弹层：摘除 ============ -->
+<div class="overlay" id="ov-remove">
+  <div class="modal">
+    <h3>摘除项目 · suyou <span class="x" onclick="closeAll()">✕</span></h3>
+    <p class="sub">默认可逆：只退役注册条目，数据全保留；re-add 同 key 即恢复</p>
+    <div class="steps">
+      <div class="step">
+        <button class="wb-btn wb-btn-blue" onclick="show('rm-gate')">预检（在飞闸）</button>
+        <div id="rm-gate" style="display:none">
+          <div class="ok-box">✓ 无在飞工单（Temporal 按 ProjectKey 查询通过）</div>
+          <details><summary>被闸住的例子</summary>
+            <div class="err-box">拒摘：2 张在飞——t260904-05（implement）、t260904-06（review_plan）；先收口再摘。
+            Temporal 不可达同样拒摘（fail-closed 无绕过旗）：先 <span class="mono">sandbar up</span>。</div>
+          </details>
+        </div>
+      </div>
+      <div class="step"><div class="check">
+        <label><input type="checkbox" onchange="document.getElementById('rm-keyrow').style.display=this.checked?'flex':'none';purgeFlip(this.checked)"> 删数据 <span class="mono">data/</span>（48 票归档+metrics，<b>不可逆</b>，需二次确认）</label><br>
+        <label><input type="checkbox" disabled> 删 <span class="mono">credentials.yaml</span></label>
+        <span style="font-size:12px;color:#57606a">（无 per-key 凭据，无需处理）</span>
+      </div></div>
+      <div class="step">
+        <button class="wb-btn" onclick="show('rm-dry')">摘除清单（dry-run）</button>
+        <div id="rm-dry" style="display:none">
+          <ul class="plain">
+            <li class="info">退役：<span class="mono">project.yaml → project.yaml.retired-20260904T…</span></li>
+            <li class="ok" id="rm-keep">保留：<span class="mono">data/tickets/</span>（48 票 · 12.3 MB）+ <span class="mono">data/metrics/</span></li>
+            <li class="warn">closed 未归档 2 票——仅 Temporal 有史；勾删数据时升级为阻塞闸</li>
+            <li class="info">项目根 <span class="mono">.lane/</span> 无残留泳道（有则只报不删）</li>
+          </ul>
+        </div>
+      </div>
+      <div class="step">
+        <div class="field" id="rm-keyrow" style="display:none"><label style="width:130px">输入 <span class="mono">suyou</span> 确认</label><input class="mono" placeholder="suyou" oninput="document.getElementById('btn-rm').disabled=(this.value!=='suyou')"></div>
+        <button class="wb-btn wb-btn-danger" id="btn-rm" disabled>确认摘除</button>
+        <span style="font-size:12px;color:#57606a">执行 sandbar project remove suyou --json，结果与 CLI 同口径</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 弹层：隔离详情 ============ -->
+<div class="overlay" id="ov-quar">
+  <div class="modal">
+    <h3>隔离条目 · demo-app <span class="x" onclick="closeAll()">✕</span></h3>
+    <p class="sub">装载器 fail-closed 隔离，不影响其余项目装载；按 key 查询会显式报隔离原因</p>
+    <div class="err-box mono">~/.sandbar/projects/demo-app/project.yaml:3: schema 版本不支持：声明 v2，支持集 {v1}</div>
+    <div class="side-note">修复：手工订正该 project.yaml 后自动恢复装载（左栏重新出现项目组）。隔离期间无组头无 ⚙（无装载条目可设置）。</div>
+  </div>
+</div>
+
+<script>
+  function openModal(id){ document.querySelectorAll('.overlay').forEach(o=>o.classList.remove('open'));
+    document.getElementById(id).classList.add('open'); }
+  function closeAll(){ document.querySelectorAll('.overlay').forEach(o=>o.classList.remove('open')); }
+  function show(id){ document.getElementById(id).style.display='block'; }
+  function preAdd(){ show('add-pre'); document.getElementById('btn-add').disabled=false; }
+  function purgeFlip(on){ const li=document.getElementById('rm-keep');
+    if(on){ li.className='bad'; li.innerHTML='将<b>删除</b>：<span class="mono">data/tickets/</span>（48 票 · 12.3 MB）+ <span class="mono">data/metrics/</span>——不可逆'; }
+    else { li.className='ok'; li.innerHTML='保留：<span class="mono">data/tickets/</span>（48 票 · 12.3 MB）+ <span class="mono">data/metrics/</span>'; } }
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeAll(); });
+</script>
+</body>
+</html>
