@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>工单详情 UI 重设计 mock v1 · 260904</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 13px/1.65 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         color: #1f2328; background: #f6f8fa; padding: 24px; }
+  h1 { font-size: 16px; margin-bottom: 4px; }
+  .sub { color: #57606a; font-size: 12px; margin-bottom: 20px; }
+  .frame { background: #fff; border: 1px solid #d0d7de; border-radius: 8px;
+           margin-bottom: 28px; overflow: hidden; box-shadow: 0 1px 3px rgba(31,35,40,.06); }
+  .frame-title { padding: 10px 14px; border-bottom: 1px solid #d0d7de; background: #f6f8fa;
+                 font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .frame-title .tag { font-weight: 400; color: #57606a; font-size: 11px; }
+  .note { position: relative; }
+  .callout { position: absolute; background: #fff8c5; border: 1px solid #d4a72c;
+             border-radius: 6px; padding: 4px 10px; font-size: 11px; color: #4d2d00;
+             max-width: 250px; z-index: 5; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .c1 { top: 6px; right: 12px; }
+  .c2 { bottom: 8px; right: 12px; }
+  .pad { padding: 16px; }
+  /* ===== 工单详情页件 ===== */
+  .tk-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; flex-wrap: wrap; }
+  .tk-id { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: #0969da; font-weight: 600; }
+  .tk-title { font-size: 14px; font-weight: 600; }
+  .chip { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: #f6f8fa;
+          border: 1px solid #d0d7de; color: #57606a; }
+  .rework-banner { margin: 0 16px 12px; padding: 6px 12px; border-radius: 6px; background: #fff8c5;
+                   border: 1px solid #d4a72c; color: #4d2d00; font-size: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;}
+  .loop-chip { background: #fff; border: 1px solid #d4a72c; border-radius: 4px; padding: 0 6px; font-size: 11px; }
+  /* 人话状态卡 */
+  .status-card { margin: 0 16px 14px; border-radius: 8px; border: 1px solid; padding: 12px 14px; }
+  .status-card.red { border-color: #cf222e; background: #fff5f5; }
+  .status-card.blue { border-color: #0969da; background: #f0f6ff; }
+  .sc-head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13.5px; margin-bottom: 4px; }
+  .sc-sum { font-size: 12.5px; color: #24292f; }
+  .sc-next { font-size: 12px; color: #57606a; margin-top: 6px; }
+  .sc-next b { color: #1f2328; }
+  .sc-files { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
+  .sc-file { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #953800;
+             background: #fff; border: 1px dashed #d4a72c; border-radius: 4px; padding: 1px 8px; width: fit-content; }
+  details.raw { margin-top: 8px; font-size: 11.5px; }
+  details.raw summary { cursor: pointer; color: #57606a; user-select: none; }
+  details.raw pre { margin-top: 6px; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+                    padding: 8px 10px; font-size: 11px; color: #57606a; white-space: pre-wrap; }
+  /* 泳道图 */
+  .lane-map { margin: 4px 16px 6px; padding: 18px 10px 30px; overflow-x: auto; background: #fff; }
+  .lm-track { position: relative; height: 118px; min-width: 860px; }
+  .lm-line { position: absolute; top: 42px; left: 20px; right: 20px; border-top: 2px solid #d0d7de; }
+  .lm-line.done { border-color: #4ac26b; }
+  .st { position: absolute; top: 30px; width: 92px; text-align: center; }
+  .st .dot { width: 26px; height: 26px; border-radius: 50%; margin: 0 auto 4px; border: 2px solid #d0d7de;
+             background: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+  .st.done .dot { border-color: #4ac26b; background: #dafbe1; }
+  .st.active .dot { border-color: #0969da; background: #ddf4ff; box-shadow: 0 0 0 4px rgba(9,105,218,.15); }
+  .st.blocked .dot { border-color: #cf222e; background: #ffebe9; }
+  .st.human .dot { border-color: #bf8700; background: #fff8c5; border-style: dashed; }
+  .st .nm { font-size: 11px; font-weight: 600; color: #1f2328; line-height: 1.3; }
+  .st .tm { font-size: 10px; color: #57606a; }
+  .st .gen { position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
+             font-size: 10px; color: #953800; background:#fff8c5; border:1px solid #d4a72c;
+             border-radius: 8px; padding: 0 6px; }
+  /* 并行双道 */
+  .parallel-box { position: absolute; top: 4px; height: 104px; border: 1.5px dashed #8c959f;
+                  border-radius: 10px; background: rgba(140,149,159,.04); }
+  .parallel-box .plabel { position: absolute; top: -9px; left: 10px; background: #fff; padding: 0 6px;
+                          font-size: 10px; color: #57606a; }
+  .sub-lane { position: absolute; font-size: 10px; color: #57606a; }
+  /* 轮次徽章（返工史归横幅+徽章，不画回跳弧） */
+  /* 检查明细 */
+  .checks { margin: 0 16px 16px; }
+  .ck-row { display: flex; align-items: baseline; gap: 8px; padding: 5px 10px; border: 1px solid #d0d7de;
+            border-radius: 6px; margin-bottom: 4px; background: #fff; font-size: 12px; }
+  .ck-row.red { border-color: #cf222e; background: #fff5f5; }
+  .ck-mark { font-weight: 700; width: 16px; }
+  .ck-mark.g { color: #116329; } .ck-mark.r { color: #cf222e; }
+  .ck-name { font-weight: 600; }
+  .ck-detail { color: #57606a; font-size: 11.5px; flex: 1; }
+  /* 对照表 */
+  table.map { border-collapse: collapse; width: 100%; font-size: 12px; }
+  table.map th, table.map td { border: 1px solid #d0d7de; padding: 4px 10px; text-align: left; }
+  table.map th { background: #f6f8fa; }
+  td.eng { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #57606a; }
+  .old-banner { background:#f6f8fa; border:1px solid #d0d7de; border-radius:6px; padding:8px 12px;
+                font-size:12px; color:#57606a; margin-bottom:10px; }
+  .old-banner code { background:#fff; padding:1px 6px; border-radius:4px; border:1px solid #d0d7de;
+                     font-size:11px; color:#953800; }
+</style>
+</head>
+<body>
+
+<h1>工单详情 UI 重设计 · mock v5</h1>
+<div class="sub">KI-019（泳道图失真）＋KI-024/027 同族 ＋ KI-048 观测面 ｜ 260904 v5（宿主令：＋屏⑥ 中列工单列表页整页）｜ 六屏：① 详情总布局 → ② 红灯文案对照 → ③ 泳道图语义 → ④ 通用渲染器 → ⑤ 工单列表＋desc 规范 ｜ 案例取自今晚真实的 t260904-11</div>
+
+<!-- ═══════════ 屏 ① ═══════════ -->
+<div class="frame note">
+  <div class="frame-title">① 工单详情 · 总布局（案例：t260904-11 真实状态）
+    <span class="tag">返工横幅（旧账：详情页看不到「被打回过 N 次」）＋ 人话状态卡 ＋ 泳道图 ＋ 检查明细</span></div>
+  <div class="callout c1">A · 状态卡：人话主文案＋越界文件点名＋下一步安排＋原始日志折叠（修 KI-048 观测面）</div>
+  <div class="callout c2">D · 文件行=链接：点开=文档查看器（notes-ui mock ②）以<b>本票时刻的版本</b>只读打开——改动文件→收口版，背景引用→开票基线版；顶部横幅「🕰 本票时刻 · 只读」，带「跳到当前版」小链</div>
+  <div class="callout c2">B · 真泳道图：并行双道虚线框＋轮次徽章＋人门虚线圈；**不画返工弧**——返工史归顶部横幅与站点 ×N 徽章，图面保持单向流（修 KI-019）</div>
+
+  <div class="tk-head">
+    <span class="tk-id">t260904-11</span>
+    <span class="tk-title">charter 注入缺陷修复：prompt 载荷分片数组＋result.ok 检查</span>
+    <span class="chip">sandbar</span><span class="chip">KI-046 修复</span><span class="chip">developer</span>
+  </div>
+
+  <div class="rework-banner">🔁 本票已返工 <b>2 次</b>（集成验证×1 → 方案×1），验证跑过 <b>3 轮</b>
+    <span class="loop-chip">12:30 集成验证（环境解锁）</span>
+    <span class="loop-chip">21:0X 方案（写集补列）</span>
+    <span style="color:#57606a;font-size:11px;">点击各轮次看该轮证据</span>
+  </div>
+
+  <div class="status-card red">
+    <div class="sc-head">⛔ 合并检查未通过 —— 3 项自检红灯：改动超出本票声明的范围</div>
+    <div class="sc-sum">泳道自检发现 <b>3 个集成场景文件</b>不在工单开票时声明的改动清单里。文件本身是流水线集成段正常产出，只是清单漏报了它们。</div>
+    <div class="sc-files">
+      <span class="sc-file">🔗 integration/t260904-11/sc_charter_prompt_wire_contract.mjs</span>
+      <span class="sc-file">🔗 integration/run_scenarios.py（场景登记行）</span>
+      <span class="sc-file">🔗 integration/t260901-24/sc_t04_gate_interlock.mjs</span>
+      <span class="sc-file" style="color:#8c959f;">🔗 notes/discussions/260904-charter-injection-invalid-payload.md（背景引用）</span>
+    </div>
+    <div class="sc-next">▸ <b>已安排：</b>返工回「方案」步补报改动清单（21:0X 发出）——流水线会自动重新走审读→实现→验证，<b>预计约 1 小时</b>后再次到达合并检查。修复代码本身已三轮验证全绿，不会重做。</div>
+    <details class="raw"><summary>原始引擎日志（调试用）</summary>
+<pre>卡在 合并检查：merge_check 红灯：泳道内 verify_lane code 绿灯: exit=None red=3
+  4 项检查：分支有 commit=绿；工作区干净=绿；泳道自检=红（3 越界）；merge 预演=绿</pre></details>
+  </div>
+
+  <div class="lane-map">
+    <div class="lm-track">
+      <div class="parallel-box" style="left:200px; width:190px;">
+        <span class="plabel">并行 · 双道</span>
+        <span class="sub-lane" style="top:24px; left:14px;">上：实现</span>
+        <span class="sub-lane" style="top:66px; left:14px;">下：集成场景设计</span>
+      </div>
+      <div class="parallel-box" style="left:492px; width:186px;">
+        <span class="plabel">并行 · 双道</span>
+        <span class="sub-lane" style="top:24px; left:14px;">上：仲裁</span>
+        <span class="sub-lane" style="top:66px; left:14px;">下：验收走查</span>
+      </div>
+      <div class="lm-line done" style="right: 278px;"></div>
+      <div class="lm-line" style="left: 600px;"></div>
+
+      <div class="st active" style="left: 8px;"><div class="dot">📋</div><div class="nm">方案<br><span class="tm">第 2 次进入</span></div><div class="gen">返工 21:0X</div></div>
+      <div class="st done" style="left: 104px;"><div class="dot">✓</div><div class="nm">方案审读</div><div class="tm">×2 · 12m</div></div>
+      <div class="st done" style="left: 224px; top: 8px;"><div class="dot">✓</div><div class="nm">实现</div><div class="tm">48m</div></div>
+      <div class="st done" style="left: 224px; top: 66px;"><div class="dot">✓</div><div class="nm">集成场景</div><div class="tm">31m</div></div>
+      <div class="st done" style="left: 400px;"><div class="dot">✓</div><div class="nm">集成验证</div><div class="tm">×3 轮</div></div>
+      <div class="st done" style="left: 508px; top: 8px;"><div class="dot">✓</div><div class="nm">仲裁</div><div class="tm">gen2 · 21m</div></div>
+      <div class="st done" style="left: 508px; top: 66px;"><div class="dot">✓</div><div class="nm">验收走查</div><div class="tm">gen2 · 42m</div></div>
+      <div class="st blocked" style="left: 696px;"><div class="dot">⛔</div><div class="nm">合并检查</div><div class="tm">21:00 红 · 见卡</div></div>
+      <div class="st human" style="left: 790px;"><div class="dot">👤</div><div class="nm">人工审批</div><div class="tm">待到达</div></div>
+    </div>
+  </div>
+
+  <div class="checks">
+    <div style="font-weight:600;font-size:12.5px;margin-bottom:6px;">合并检查 · 4 项明细（引擎结构化数据直译，点行展开原始输出）</div>
+    <div class="ck-row"><span class="ck-mark g">✓</span><span class="ck-name">泳道有产出</span><span class="ck-detail">分支 lane/t260904-11 领先基线 3 提交</span></div>
+    <div class="ck-row"><span class="ck-mark g">✓</span><span class="ck-name">工作区干净</span><span class="ck-detail">无未提交改动</span></div>
+    <div class="ck-row red"><span class="ck-mark r">✗</span><span class="ck-name">泳道自检</span><span class="ck-detail">3 项越界：改动文件不在本票写集（见状态卡文件清单）——已安排返工补报</span></div>
+    <div class="ck-row"><span class="ck-mark g">✓</span><span class="ck-name">合并预演</span><span class="ck-detail">与主干无冲突</span></div>
+  </div>
+</div>
+
+<!-- ═══════════ 屏 ② ═══════════ -->
+<div class="frame note">
+  <div class="frame-title">② 红灯文案 · 现在 vs 改后（人话翻译层）
+    <span class="tag">原则：人话主文案必答三问——出了什么事 / 影响什么 / 接下来谁做什么；原始日志永远折叠可查不删除</span></div>
+  <div class="callout c1">C · 翻译层是表驱动：引擎术语→人话词条表；红灯需带结构化明细（文件清单/票号），UI 不能翻译它没拿到的信息</div>
+  <div class="pad">
+    <div class="old-banner">现在的横幅：<br>
+      <code>卡在 合并检查：merge_check 红灯：泳道内 verify_lane code 绿灯: exit=None red=3</code><br>
+      <span style="font-size:11px;">——三个专业词叠加、"exit=None red=3"对人无意义、看不出是哪三个文件、看不出下一步</span></div>
+    <div class="status-card red" style="margin:0;">
+      <div class="sc-head">⛔ 合并检查未通过 —— 3 项自检红灯：改动超出本票声明的范围</div>
+      <div class="sc-sum">3 个集成场景文件不在开票声明的改动清单里（文件是流水线正常产出，清单漏报）。</div>
+      <div class="sc-next">▸ <b>已安排：</b>返工回方案步补报清单，预计 1 小时后重到此处。修复代码已三轮全绿，不会重做。</div>
+      <details class="raw" open><summary>翻译对照（本例用到的词条）</summary>
+<table class="map" style="margin-top:6px;">
+  <tr><th>引擎原文</th><th>人话</th></tr>
+  <tr><td class="eng">merge_check 红灯</td><td>合并检查未通过</td></tr>
+  <tr><td class="eng">泳道内 verify_lane code 绿灯</td><td>泳道自检（代码面）</td></tr>
+  <tr><td class="eng">exit=None red=3</td><td>3 项检查未通过（附结构化明细：哪些文件/哪条检查）</td></tr>
+  <tr><td class="eng">awaiting-human（人门）</td><td>等你审批（卡片变蓝，附「签什么/签前看什么」）</td></tr>
+  <tr><td class="eng">rework → create_plan</td><td>返工回「方案」步</td></tr>
+  <tr><td class="eng">suggest_next</td><td>下一单建议</td></tr>
+</table></details>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 屏 ③ ═══════════ -->
+<div class="frame note">
+  <div class="frame-title">③ 泳道图语义（KI-019 修复目标）
+    <span class="tag">数据面依赖：引擎事件补「轮次 gen＋并行分支＋因果序」三维度（KI-019 根因是 TimelineEntry 扁平四元组）</span></div>
+  <div class="callout c1">D · 轮次带：同一步多轮不再折叠成 Σ 总时长——逐轮一格，hover 看该轮证据与返工原因</div>
+  <div class="callout c2">E · 人门站与机械站形状区分：虚线圈=人拍板；到站时状态卡变蓝列出「签什么」</div>
+  <div class="pad">
+    <div style="display:flex;gap:14px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:340px;">
+        <div style="font-weight:600;font-size:12.5px;margin-bottom:8px;">集成验证步 · 轮次带（本票真实三轮）</div>
+        <div style="display:flex;gap:4px;margin-bottom:4px;">
+          <div style="flex:1;background:#dafbe1;border:1px solid #4ac26b;border-radius:6px;padding:6px 8px;font-size:11px;">
+            <b>gen0</b> 12:52<br><span style="color:#57606a;">113 过 · 1 败（守卫过时）</span></div>
+          <div style="flex:1;background:#dafbe1;border:1px solid #4ac26b;border-radius:6px;padding:6px 8px;font-size:11px;">
+            <b>gen1</b> 12:33<br><span style="color:#57606a;">112 过 · 1 败 → 触发场景修正</span></div>
+          <div style="flex:1;background:#ddf4ff;border:2px solid #0969da;border-radius:6px;padding:6px 8px;font-size:11px;">
+            <b>gen2</b> 12:58<br><span style="color:#57606a;">113 全过 ✓</span></div>
+        </div>
+        <div style="font-size:11px;color:#57606a;">每格＝一次进入该步；颜色＝该轮结局（绿过/蓝最新/红败）；点击＝该轮场景明细与证据文件</div>
+      </div>
+      <div style="width:300px;">
+        <div style="font-weight:600;font-size:12.5px;margin-bottom:8px;">站点形状语义</div>
+        <div style="display:flex;gap:12px;align-items:center;margin-bottom:8px;">
+          <div class="dot" style="width:24px;height:24px;border-radius:50%;border:2px solid #4ac26b;background:#dafbe1;display:flex;align-items:center;justify-content:center;font-size:11px;">✓</div>
+          <span style="font-size:12px;">机械步完成（自动判定）</span></div>
+        <div style="display:flex;gap:12px;align-items:center;margin-bottom:8px;">
+          <div style="width:24px;height:24px;border-radius:50%;border:2px dashed #bf8700;background:#fff8c5;display:flex;align-items:center;justify-content:center;font-size:11px;">👤</div>
+          <span style="font-size:12px;">人门（虚线圈＝人来拍板，引擎不自动过）</span></div>
+        <div style="display:flex;gap:12px;align-items:center;margin-bottom:8px;">
+          <div style="width:24px;height:24px;border-radius:50%;border:2px solid #cf222e;background:#ffebe9;display:flex;align-items:center;justify-content:center;font-size:11px;">⛔</div>
+          <span style="font-size:12px;">受阻（点开＝人话红灯卡）</span></div>
+        <div style="display:flex;gap:12px;align-items:center;">
+          <div style="width:24px;height:14px;border:1px solid #d4a72c;border-radius:8px;background:#fff8c5;display:flex;align-items:center;justify-content:center;font-size:9px;color:#953800;">×3</div>
+          <span style="font-size:12px;">轮次徽章（返工史归横幅＋徽章，**不画回跳弧**——图面保持单向流）</span></div>
+      </div>
+    </div>
+    <div style="margin-top:12px;padding:8px 12px;background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;font-size:11.5px;color:#57606a;">
+      实现依赖注记：屏①②③全部要求引擎侧先给结构化数据——红灯明细（检查项+文件清单+下一步安排）、事件带 gen/分支维度（KI-019 修复方向）、返工史（次数+每轮原因）。UI 只做翻译与呈现，不猜测。<br>文件历史打开机制（屏① callout D）：版本=git 对象——改动文件取本票收口 commit、背景引用取开票基线（泳道读的冻结副本同源）；入口=票面引用铁律「背景文件必须已提交」的消费端（未提交者**根本不让开票**——260904 宿主令：开票闸校验「已提交且干净」，泳道读 HEAD、脏改版 agent 读不到，脏改拒建并点名文件；横幅降级仅作存量历史票兜底。前门挡优于后门降级，同 fail-closed 哲学）。
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 屏 ④ 通用渲染器 ═══════════ -->
+<div class="frame note">
+  <div class="frame-title">④ 通用渲染器 · 换项目、换 workflow，同一组件
+    <span class="tag">站点标签/顺序/并行/人门全部来自 workflow 拓扑声明——UI 零硬编码，dev-lane 只是第一个消费者</span></div>
+  <div class="callout c1">F · 拓扑数据契约：引擎按模板导出 stage 图（template-as-code 已编码 stages/exits，导出面是前置票的一部分）</div>
+  <div class="callout c2">G · 任意形状：线性链/中段人门/并行分叉汇合——渲染器只认「节点+边+kind」，不认业务词</div>
+  <div class="pad">
+    <div style="display:flex;gap:18px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:330px;">
+        <div style="font-weight:600;font-size:12.5px;margin-bottom:8px;">示例 A · content-pipeline（另一项目，5 步链，中段人门）</div>
+        <div style="position:relative;height:86px;background:#fff;border:1px solid #d0d7de;border-radius:8px;padding:14px 8px 4px;">
+          <div style="position:absolute;top:40px;left:16px;right:16px;border-top:2px solid #4ac26b;"></div>
+          <div style="position:absolute;top:40px;left:70%;right:16px;border-top:2px solid #d0d7de;"></div>
+          <div class="st done" style="left:2px;"><div class="dot" style="width:22px;height:22px;font-size:10px;">✍️</div><div class="nm" style="font-size:10px;">起草</div></div>
+          <div class="st done" style="left:80px;"><div class="dot" style="width:22px;height:22px;font-size:10px;">✓</div><div class="nm" style="font-size:10px;">素材核验</div></div>
+          <div class="st done" style="left:158px;"><div class="dot" style="width:22px;height:22px;font-size:10px;">🔧</div><div class="nm" style="font-size:10px;">机器校验</div></div>
+          <div class="st human" style="left:236px;top:26px;"><div class="dot" style="width:22px;height:22px;font-size:10px;">👤</div><div class="nm" style="font-size:10px;">人工审批</div><div class="tm" style="font-size:9px;">等你签</div></div>
+          <div class="st" style="left:320px;"><div class="dot" style="width:22px;height:22px;font-size:10px;">⏳</div><div class="nm" style="font-size:10px;">发布</div></div>
+        </div>
+      </div>
+      <div style="flex:1;min-width:330px;">
+        <div style="font-weight:600;font-size:12.5px;margin-bottom:8px;">示例 B · infra-fix（带并行分叉的自定义模板）</div>
+        <div style="position:relative;height:86px;background:#fff;border:1px solid #d0d7de;border-radius:8px;padding:14px 8px 4px;">
+          <div style="position:absolute;top:40px;left:16px;right:110px;border-top:2px solid #4ac26b;"></div>
+          <div style="position:absolute;top:40px;right:16px;border-top:2px solid #cf222e;width:80px;"></div>
+          <div class="st done" style="left:2px;"><div class="dot" style="width:22px;height:22px;font-size:10px;">🔍</div><div class="nm" style="font-size:10px;">分诊</div></div>
+          <div class="st done" style="left:70px;top:6px;"><div class="dot" style="width:22px;height:22px;font-size:10px;">✓</div><div class="nm" style="font-size:10px;">热修</div></div>
+          <div class="st done" style="left:70px;top:44px;"><div class="dot" style="width:22px;height:22px;font-size:10px;">✓</div><div class="nm" style="font-size:10px;">派单</div></div>
+          <div class="st blocked" style="left:150px;"><div class="dot" style="width:22px;height:22px;font-size:10px;">⛔</div><div class="nm" style="font-size:10px;">复核</div><div class="tm" style="font-size:9px;">环境红</div></div>
+          <div class="st human" style="left:228px;top:26px;"><div class="dot" style="width:22px;height:22px;font-size:10px;">👤</div><div class="nm" style="font-size:10px;">验收</div></div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;gap:14px;margin-top:14px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:300px;">
+        <div style="font-weight:600;font-size:12px;margin-bottom:6px;">拓扑契约（引擎按模板导出，随 ticket snapshot 给 UI）</div>
+<pre style="background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;padding:8px 10px;font-size:11px;color:#24292f;overflow:auto;">{
+  "template": "content-pipeline",
+  "stages": [
+    {"id":"draft","label":"起草","kind":"agent"},
+    {"id":"verify","label":"素材核验","kind":"mechanical"},
+    {"id":"qc","label":"机器校验","kind":"mechanical"},
+    {"id":"review","label":"人工审批","kind":"human"},
+    {"id":"publish","label":"发布","kind":"mechanical"}
+  ],
+  "flow": [{"seq":["draft","verify","qc"]},
+           {"gate":"review"},
+           {"seq":["publish"]}]
+}</pre>
+      </div>
+      <div style="flex:1;min-width:300px;font-size:12px;color:#24292f;">
+        <div style="font-weight:600;font-size:12px;margin-bottom:6px;">通用性口径</div>
+        · 站点标签来自模板声明——UI 不内置任何业务词表；<br>
+        · kind 三值：agent（🤖 叙述型）/ mechanical（✓ 自动判定）/ human（👤 虚线圈）；<br>
+        · 并行＝flow 里的 parallel 组（fork-join），渲染成双道虚线框，几道都行；<br>
+        · 轮次徽章与返工横幅对任何模板同样成立（引擎事件本就带 stage id）；<br>
+        · 翻译层词条表按模板注册（屏②那张表是 dev-lane 的词条），缺词条回落「原文＋原始日志」——永不显示空白或猜测文案；<br>
+        · 拓扑变了（模板升级）旧票照常渲染——渲染时点快照的拓扑，不追新。
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 屏 ⑤ 左栏工单列表 ＋ desc 规范 ═══════════ -->
+<div class="frame note">
+  <div class="frame-title">⑤ 左栏工单列表 ＋ 工单 desc 说人话规范（260904 v4 宿主修订）
+    <span class="tag">平铺不分组·现配色区分状态 ｜ 状态=小圆点+短名（不占块） ｜ epic 彩条不进题 ｜ 渲染器通用（短名/配色由模板与状态枚举驱动）</span></div>
+  <div class="callout c1">H · 状态只用现有配色呈现：等你=黄调行、受阻=红调行、活跃=常规——不设分组头，一眼扫色即分晓</div>
+  <div class="callout c2">I · desc 三件套：人话标题（动词开头≤20字）＋ epic 彩条 chip（不进标题不进正文）＋ 三行正文（做什么/为什么/怎么算好）</div>
+  <div style="display:flex;height:460px;">
+    <!-- 左：工单列表（v4：平铺无分组，色即状态） -->
+    <div style="width:330px;border-right:1px solid #d0d7de;background:#fff;display:flex;flex-direction:column;">
+      <div style="padding:10px 12px 6px;display:flex;gap:6px;align-items:center;">
+        <span style="font-weight:600;font-size:13px;">工单</span>
+        <span class="chip" style="background:#ddf4ff;border-color:#0969da;color:#0969da;">在飞 4</span>
+        <span class="chip">全部 9</span>
+        <span style="flex:1"></span>
+        <span class="chip">epic ▾</span>
+      </div>
+      <div style="flex:1;overflow:auto;padding:0 8px 8px;font-size:12px;">
+
+        <div style="border:1px solid #d4a72c;border-left:4px solid #d4a72c;background:#fffdf0;border-radius:6px;padding:6px 8px;margin-bottom:5px;display:flex;gap:8px;">
+          <div style="flex:1;">
+            <div><span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#0969da;">t260904-11</span>
+              <span style="font-weight:600;">修好新会话第一句话不上屏</span></div>
+            <div style="color:#57606a;font-size:11px;margin-top:2px;">
+              <span class="chip" style="padding:0 6px;font-size:10px;color:#8250df;border-color:#8250df;">session-entry 修复</span>
+              第 2 次返工后全绿 · 3 分钟前</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:40px;flex-shrink:0;">
+            <div style="width:9px;height:9px;border-radius:50%;background:#d4a72c;"></div>
+            <div style="font-size:10px;color:#4d2d00;">审批</div>
+          </div>
+        </div>
+
+        <div style="border:1px solid #d0d7de;border-left:4px solid #0969da;border-radius:6px;padding:6px 8px;margin-bottom:5px;display:flex;gap:8px;">
+          <div style="flex:1;">
+            <div><span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#0969da;">t260904-12</span>
+              <span style="font-weight:600;">让测试缺环境时老实亮红</span></div>
+            <div style="color:#57606a;font-size:11px;margin-top:2px;">
+              <span class="chip" style="padding:0 6px;font-size:10px;color:#bf8700;border-color:#bf8700;">闸语义改造</span>
+              扩容重铸方案中 · 12 分钟前</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:40px;flex-shrink:0;">
+            <div style="width:9px;height:9px;border-radius:50%;background:#0969da;"></div>
+            <div style="font-size:10px;color:#0969da;">方案</div>
+          </div>
+        </div>
+
+        <div style="border:1px solid #d0d7de;border-left:4px solid #0969da;border-radius:6px;padding:6px 8px;margin-bottom:5px;display:flex;gap:8px;">
+          <div style="flex:1;">
+            <div><span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#0969da;">t260904-15</span>
+              <span style="font-weight:600;">项目可接入也可移出（界面）</span></div>
+            <div style="color:#57606a;font-size:11px;margin-top:2px;">
+              <span class="chip" style="padding:0 6px;font-size:10px;color:#0969da;border-color:#0969da;">项目生命周期</span>
+              实现中 · 25 分钟前</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:40px;flex-shrink:0;">
+            <div style="width:9px;height:9px;border-radius:50%;background:#0969da;"></div>
+            <div style="font-size:10px;color:#0969da;">实现</div>
+          </div>
+        </div>
+
+        <div style="border:1px solid #cf222e;border-left:4px solid #cf222e;background:#fff5f5;border-radius:6px;padding:6px 8px;margin-bottom:6px;display:flex;gap:8px;">
+          <div style="flex:1;">
+            <div><span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#0969da;">t260904-16</span>
+              <span style="font-weight:600;">示例：守卫误报卡住验证</span></div>
+            <div style="color:#57606a;font-size:11px;margin-top:2px;">
+              <span class="chip" style="padding:0 6px;font-size:10px;color:#8250df;border-color:#8250df;">session-entry 修复</span>
+              红灯原因见详情 · 31 分钟前</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:40px;flex-shrink:0;">
+            <div style="width:9px;height:9px;border-radius:50%;background:#cf222e;"></div>
+            <div style="font-size:10px;color:#cf222e;">受阻</div>
+          </div>
+        </div>
+
+        <div style="font-size:10.5px;color:#8c959f;padding:1px 2px 3px;">✓ 收口 · 5（点击展开）</div>
+        <div style="color:#8c959f;font-size:10.5px;line-height:1.7;padding:2px 4px;">
+          08 接入向导 ✓ ｜ 09 校验闸 ✓ ｜ 10 项目增删查 ✓ ｜ 13 图标证据闸 ✓ ｜ 14 移出命令 ✓</div>
+      </div>
+    </div>
+    <!-- 右：desc 规范卡 -->
+    <div style="flex:1;padding:16px 18px;background:#fff;overflow:auto;">
+      <div style="font-weight:600;font-size:13px;margin-bottom:8px;">工单 desc · 说人话规范（新开票即行，存量不动）</div>
+      <div style="border:1px solid #d0d7de;border-radius:8px;padding:12px 14px;margin-bottom:12px;">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+          <span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#0969da;">t260904-12</span>
+          <span style="font-size:14px;font-weight:600;">让测试缺环境时老实亮红</span>
+          <span class="chip" style="color:#bf8700;border-color:#bf8700;">闸语义改造</span>
+        </div>
+        <div style="font-size:12.5px;color:#24292f;">
+          <b>做什么</b>：测试跑不了（缺浏览器、缺凭据）时不再装没看见跳过，而是亮红灯并写明缺什么。<br>
+          <b>为什么</b>：静默跳过让坏交付混过关（07 号事故）；诚实红才能逼环境补齐。<br>
+          <b>怎么算好</b>：全量 105 个场景，缺环境=红且点名缺口；环境齐=绿；零静默跳过。
+        </div>
+        <div style="margin-top:8px;font-size:11px;color:#57606a;border-top:1px dashed #d0d7de;padding-top:6px;">
+          技术细节（契约行号/文件清单/迁移盘点）→ 详情页「改动清单」区，不挤 desc。
+          对照旧题「集成闸无 SKIP 化：三态 ENV_FAIL 判据＋测试环境供给声明制＋存量场景迁移」——信息没丢，挪到了该在的层。
+        </div>
+      </div>
+      <div style="font-size:12px;line-height:1.8;color:#24292f;">
+        <b>规范三条</b>：<br>
+        1. <b>标题</b>=动词开头的一句话人话（≤20 字）——修什么/加什么；不带 epic 代号、不堆技术栈、不写「：」后的第二标题。<br>
+        2. <b>epic=独立字段</b>——UI 显示为彩色 chip（点=按 epic 筛选，列表左色条同色）；不进标题、不进正文。<br>
+        3. <b>正文=三行</b>——做什么/为什么/怎么算好，各一句；写不出一句人话=还没想清楚，回 notes 讨论。
+      </div>
+      <div style="margin-top:10px;padding:8px 12px;background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;font-size:11.5px;color:#57606a;">
+        <b>列表渲染器通用口径（同屏④原则）</b>：行卡只吃通用字段——id／人话题／epic（色+名）／
+        进展行（一句话，由模板事件摘要生成）／状态枚举（引擎通用四态 active·done·waiting·
+        blocked → 现有配色）／阶段短名（拓扑声明带 <code>short</code> 字段，缺省自动截断）。
+        列表不含任何 dev-lane 专属词；换 workflow 换项目，同一列表组件原样渲染。
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════ 屏 ⑥ 中列工单列表页（整页视图） ═══════════ -->
+<div class="frame note">
+  <div class="frame-title">⑥ 工单列表页 · 整页视图（📋 图标的落地页；侧栏⑤是其迷你版）
+    <span class="tag">筛选 chips=过滤非分组 ｜ 行内迷你站道=拓扑点数驱动 ｜ 行卡字段与⑤同一契约</span></div>
+  <div class="callout c1">J · 筛选条：状态 chips 带计数（点击=过滤，不做组头）＋ epic 彩 chip 筛选＋搜索；「等你 1」黄 chip 永远显眼</div>
+  <div class="callout c2">K · 迷你站道：每行一串小点（点数=该模板阶段数，当前点=状态色，已过点=绿）——列表页宽，放得下；侧栏版省略此件</div>
+  <div style="padding:0;">
+    <div style="display:flex;align-items:center;gap:8px;padding:12px 16px 8px;flex-wrap:wrap;">
+      <span style="font-weight:600;font-size:14px;">工单</span><span class="chip">sandbar</span>
+      <span style="flex:1"></span>
+      <span class="chip" style="background:#fffdf0;border-color:#d4a72c;color:#4d2d00;">等你 1</span>
+      <span class="chip" style="background:#fff5f5;border-color:#cf222e;color:#cf222e;">受阻 1</span>
+      <span class="chip" style="background:#ddf4ff;border-color:#0969da;color:#0969da;">在飞 4</span>
+      <span class="chip">收口 5</span>
+      <span class="chip">全部 9</span>
+      <input placeholder="搜 id / 标题…" style="border:1px solid #d0d7de;border-radius:6px;padding:3px 10px;font-size:12px;width:150px;">
+    </div>
+    <div style="display:flex;gap:6px;padding:0 16px 10px;flex-wrap:wrap;">
+      <span style="font-size:11px;color:#57606a;align-self:center;">epic：</span>
+      <span class="chip" style="color:#0969da;border-color:#0969da;">项目生命周期 ·2</span>
+      <span class="chip" style="color:#8250df;border-color:#8250df;">session-entry 修复 ·2</span>
+      <span class="chip" style="color:#bf8700;border-color:#bf8700;">闸语义改造 ·1</span>
+      <span class="chip">doc-lifecycle ·0</span>
+    </div>
+    <div style="padding:0 16px 14px;font-size:12.5px;">
+
+      <div style="border:1px solid #d4a72c;border-left:4px solid #d4a72c;background:#fffdf0;border-radius:8px;padding:9px 12px;margin-bottom:6px;display:flex;gap:10px;align-items:center;">
+        <div style="flex:1;">
+          <div><span style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#0969da;">t260904-11</span>
+            <span style="font-weight:600;font-size:13px;">修好新会话第一句话不上屏</span>
+            <span style="font-size:10px;color:#953800;background:#fff8c5;border:1px solid #d4a72c;border-radius:8px;padding:0 6px;">×2 返工</span></div>
+          <div style="color:#57606a;font-size:11px;margin-top:3px;">
+            <span class="chip" style="padding:0 6px;font-size:10px;color:#8250df;border-color:#8250df;">session-entry 修复</span>
+            第 2 次返工后全绿 · 3 分钟前 · 溯游</div>
+        </div>
+        <div style="display:flex;gap:4px;align-items:center;">
+          <div style="width:8px;height:8px;border-radius:50%;background:#4ac26b;"></div><div style="width:8px;height:8px;border-radius:50%;background:#4ac26b;"></div><div style="width:8px;height:8px;border-radius:50%;background:#4ac26b;"></div><div style="width:8px;height:8px;border-radius:50%;background:#4ac26b;"></div><div style="width:8px;height:8px;border-radius:50%;background:#4ac26b;"></div><div style="width:8px;height:8px;border-radius:50%;background:#4ac26b;"></div><div style="width:8px;height:8px;border-radius:50%;background:#4ac26b;"></div><div style="width:8px;height:8px;border-radius:50%;background:#4ac26b;"></div><div style="width:10px;height:10px;border-radius:50%;background:#d4a72c;box-shadow:0 0 0 3px rgba(212,167,44,.25);"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:2px;width:44px;flex-shrink:0;">
+          <div style="width:9px;height:9px;border-radius:50%;background:#d4a72c;"></div>
+          <div style="font-size:10px;color:#4d2d00;">审批</div>
+        </div>
+        <button class="btn primary" style="font-size:11.5px;">去签字 →</button>
+      </div>
+
+      <div style="border:1px solid #d0d7de;border-left:4px solid #0969da;border-radius:8px;padding:9px 12px;margin-bottom:6px;display:flex;gap:10px;align-items:center;">
+        <div style="flex:1;">
+          <div><span style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#0969da;">t260904-12</span>
+            <span style="font-weight:600;font-size:13px;">让测试缺环境时老实亮红</span></div>
+          <div style="color:#57606a;font-size:11px;margin-top:3px;">
+            <span class="chip" style="padding:0 6px;font-size:10px;color:#bf8700;border-color:#bf8700;">闸语义改造</span>
+            扩容重铸方案中 · 12 分钟前 · 溯游</div>
+        </div>
+        <div style="display:flex;gap:4px;align-items:center;">
+          <div style="width:10px;height:10px;border-radius:50%;background:#0969da;box-shadow:0 0 0 3px rgba(9,105,218,.2);"></div><div style="width:8px;height:8px;border-radius:50%;background:#d0d7de;"></div><div style="width:8px;height:8px;border-radius:50%;background:#d0d7de;"></div><div style="width:8px;height:8px;border-radius:50%;background:#d0d7de;"></div><div style="width:8px;height:8px;border-radius:50%;background:#d0d7de;"></div><div style="width:8px;height:8px;border-radius:50%;background:#d0d7de;"></div><div style="width:8px;height:8px;border-radius:50%;background:#d0d7de;"></div><div style="width:8px;height:8px;border-radius:50%;background:#d0d7de;"></div><div style="width:8px;height:8px;border-radius:50%;background:#d0d7de;"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:2px;width:44px;flex-shrink:0;">
+          <div style="width:9px;height:9px;border-radius:50%;background:#0969da;"></div>
+          <div style="font-size:10px;color:#0969da;">方案</div>
+        </div>
+      </div>
+
+      <div style="border:1px solid #d0d7de;border-left:4px solid #0969da;border-radius:8px;padding:9px 12px;margin-bottom:6px;display:flex;gap:10px;align-items:center;">
+        <div style="flex:1;">
+          <div><span style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#0969da;">t260904-15</span>
+            <span style="font-weight:600;font-size:13px;">项目可接入也可移出（界面）</span></div>
+          <div style="color:#57606a;font-size:11px;margin-top:3px;">
+            <span class="chip" style="padding:0 6px;font-size:10px;color:#0969da;border-color:#0969da;">项目生命周期</span>
+            实现中 · 25 分钟前 · developer</div>
+        </div>
+        <div style="display:flex;gap:4px;align-items:center;">
+          <div style="width:8px;height:8px;border-radius:50%;background:#4ac26b;"></div><div style="width:8px;height:8px;border-radius:50%;background:#4ac26b;"></div><div style="width:10px;height:10px;border-radius:50%;background:#0969da;box-shadow:0 0 0 3px rgba(9,105,218,.2);"></div><div style="width:8px;height:8px;border-radius:50%;background:#d0d7de;"></div><div style="width:8px;height:8px;border-radius:50%;background:#d0d7de;"></div><div style="width:8px;height:8px;border-radius:50%;background:#d0d7de;"></div><div style="width:8px;height:8px;border-radius:50%;background:#d0d7de;"></div><div style="width:8px;height:8px;border-radius:50%;background:#d0d7de;"></div><div style="width:8px;height:8px;border-radius:50%;background:#d0d7de;"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:2px;width:44px;flex-shrink:0;">
+          <div style="width:9px;height:9px;border-radius:50%;background:#0969da;"></div>
+          <div style="font-size:10px;color:#0969da;">实现</div>
+        </div>
+      </div>
+
+      <div style="border:1px solid #cf222e;border-left:4px solid #cf222e;background:#fff5f5;border-radius:8px;padding:9px 12px;margin-bottom:8px;display:flex;gap:10px;align-items:center;">
+        <div style="flex:1;">
+          <div><span style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#0969da;">t260904-16</span>
+            <span style="font-weight:600;font-size:13px;">示例：守卫误报卡住验证</span></div>
+          <div style="color:#57606a;font-size:11px;margin-top:3px;">
+            <span class="chip" style="padding:0 6px;font-size:10px;color:#8250df;border-color:#8250df;">session-entry 修复</span>
+            红灯：守卫断言过时 · 31 分钟前</div>
+        </div>
+        <div style="display:flex;gap:4px;align-items:center;">
+          <div style="width:8px;height:8px;border-radius:50%;background:#4ac26b;"></div><div style="width:8px;height:8px;border-radius:50%;background:#4ac26b;"></div><div style="width:8px;height:8px;border-radius:50%;background:#4ac26b;"></div><div style="width:8px;height:8px;border-radius:50%;background:#4ac26b;"></div><div style="width:8px;height:8px;border-radius:50%;background:#cf222e;"></div><div style="width:8px;height:8px;border-radius:50%;background:#d0d7de;"></div><div style="width:8px;height:8px;border-radius:50%;background:#d0d7de;"></div><div style="width:8px;height:8px;border-radius:50%;background:#d0d7de;"></div><div style="width:8px;height:8px;border-radius:50%;background:#d0d7de;"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:2px;width:44px;flex-shrink:0;">
+          <div style="width:9px;height:9px;border-radius:50%;background:#cf222e;"></div>
+          <div style="font-size:10px;color:#cf222e;">受阻</div>
+        </div>
+        <button class="btn" style="font-size:11.5px;">看原因</button>
+      </div>
+
+      <div style="font-size:10.5px;color:#8c959f;padding:1px 2px 3px;">✓ 收口 · 5（点击展开：08 接入向导 ｜ 09 校验闸 ｜ 10 项目增删查 ｜ 13 图标证据闸 ｜ 14 移出命令）</div>
+    </div>
+    <div style="margin:0 16px 14px;padding:8px 12px;background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;font-size:11.5px;color:#57606a;">
+      <div style="margin-top:8px;padding:8px 12px;background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;font-size:11.5px;color:#57606a;"><b>一套 UI 裁定（260904 宿主令：「只能是一套 UI，否则要为不同 workflow 发明不同显示机制，太复杂」）——工单台只有这一套列表＋详情，dev-lane／doc-sync／巡检／未来任何 flow 共用；表达力不足由拓扑契约补，不开 UI 分叉」。</b> 形状通用承诺：拓扑契约的 shape 必须能表达<b>线性链、并行分叉、人门、循环（cycle）</b>四形——doc-sync（定时扫→机械/正文分流→人门→循环）与 dev-lane 同渲染器：行卡/人门卡/时间线原语共用；站道件按形状条件出现（循环形不画阶段点）；详情页=通用原语拼装＋专有块按能力声明条件渲染（has_lane/has_pending/has_write_set）。不会画循环＝通用是假的。</div>
+    <b>通用口径（同⑤④）</b>：行卡字段同一契约＋迷你站道两点数/当前位全由拓扑与状态枚举驱动（点数=模板阶段数，绿=已过，状态色=当前，灰=未到）；
+      「去签字/看原因」=状态枚举衍生动作位（waiting→签字，blocked→红灯卡），非 dev-lane 专属；筛选 chips=过滤不是分组；排序缺省=最近活动；<b>epic 色=稳定哈希派生</b>（调色板[hash(epic 代号) mod 10]，同码恒同色、加删别的 epic 不漂移、零配置零维护——确定派生优于人工指派，碰撞无害，chip 有名可辨）。
+    </div>
+  </div>
+</div>
+
+<div class="sub" style="margin-top:-8px;">
+  归属：本 mock 服务一张「工单详情观测性」UI 票（KI-019＋KI-048 观测面＋返工横幅旧账＋拓扑通用＋侧栏列表⑤＋列表页⑥＋desc 规范）；引擎侧结构化数据（红灯明细/事件维度/workflow 拓扑导出/epic 字段化）是前置票。3099 不被测试重启纪律照旧。
+</div>
+
+</body>
+</html>

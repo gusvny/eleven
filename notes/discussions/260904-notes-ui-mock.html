@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>notes UI 可见性 mock v1 · 260904</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 13px/1.65 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         color: #1f2328; background: #f6f8fa; padding: 24px; }
+  h1 { font-size: 16px; margin-bottom: 4px; }
+  .sub { color: #57606a; font-size: 12px; margin-bottom: 20px; }
+  .frame { background: #fff; border: 1px solid #d0d7de; border-radius: 8px;
+           margin-bottom: 28px; overflow: hidden; box-shadow: 0 1px 3px rgba(31,35,40,.06); }
+  .frame-title { padding: 10px 14px; border-bottom: 1px solid #d0d7de; background: #f6f8fa;
+                 font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+  .frame-title .tag { font-weight: 400; color: #57606a; font-size: 11px; }
+  .note { position: relative; }
+  .callout { position: absolute; background: #fff8c5; border: 1px solid #d4a72c;
+             border-radius: 6px; padding: 4px 10px; font-size: 11px; color: #4d2d00;
+             max-width: 240px; z-index: 5; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .c1 { top: 8px; right: 12px; }
+  .c2 { top: 8px; left: 12px; }
+  /* ===== 通用 UI 件 ===== */
+  .topbar { display: flex; align-items: center; gap: 10px; padding: 8px 14px;
+            border-bottom: 1px solid #d0d7de; background: #fff; }
+  .avatar { width: 22px; height: 22px; border-radius: 6px; background: #0969da; color: #fff;
+            display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }
+  .crumb { color: #57606a; font-size: 12px; }
+  .badge-draft { display: inline-block; padding: 1px 8px; border-radius: 10px;
+                 background: #fff8c5; border: 1px solid #d4a72c; color: #4d2d00; font-size: 11px; }
+  .badge-final { display: inline-block; padding: 1px 8px; border-radius: 10px;
+                 background: #dafbe1; border: 1px solid #4ac26b; color: #116329; font-size: 11px; }
+  .btn { padding: 3px 10px; border-radius: 6px; border: 1px solid #d0d7de; background: #f6f8fa;
+         font-size: 12px; cursor: pointer; color: #1f2328; }
+  .btn.primary { background: #0969da; border-color: #0969da; color: #fff; }
+  /* ===== 布局 ===== */
+  .cols { display: flex; height: 420px; }
+  .col-mid { flex: 1.6; border-right: 1px solid #d0d7de; }
+  .col-right { flex: 1; background: #fff; display: flex; flex-direction: column; }
+  /* chat */
+  .chat-head { padding: 8px 12px; border-bottom: 1px solid #d0d7de; font-weight: 600; font-size: 12px; }
+  .chat-body { flex: 1; padding: 12px; overflow: auto; background: #fff; }
+  .msg { margin-bottom: 12px; }
+  .msg .who { font-size: 11px; color: #57606a; margin-bottom: 2px; }
+  .msg .bubble { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 8px;
+                 padding: 8px 10px; font-size: 12.5px; }
+  .filecard { margin-top: 6px; border: 1px solid #d0d7de; border-left: 3px solid #0969da;
+              border-radius: 6px; padding: 6px 10px; background: #fff; cursor: pointer; }
+  .filecard:hover { background: #f0f6ff; border-color: #0969da; }
+  .filecard .fname { font-weight: 600; font-size: 12px; color: #0969da; }
+  .filecard .fmeta { font-size: 11px; color: #57606a; }
+  .filecard .fsum { font-size: 11.5px; color: #1f2328; margin-top: 2px; }
+  .path-link { color: #0969da; text-decoration: underline; text-underline-offset: 2px;
+               font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
+  /* viewer drawer（中列覆盖态） */
+  .viewer { display: flex; height: 100%; background: #fff; }
+  .vtree { width: 190px; border-right: 1px solid #d0d7de; background: #f6f8fa;
+           padding: 10px 8px; font-size: 12px; overflow: auto; }
+  .vtree .grp { font-weight: 600; color: #57606a; margin: 8px 0 3px; font-size: 11px; }
+  .vtree .item { padding: 2px 6px; border-radius: 4px; cursor: pointer; white-space: nowrap;
+                 overflow: hidden; text-overflow: ellipsis; }
+  .vtree .item.active { background: #ddf4ff; color: #0969da; }
+  .vtree .item:hover { background: #f0f6ff; }
+  .vmain { flex: 1; display: flex; flex-direction: column; }
+  .vhead { display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+           border-bottom: 1px solid #d0d7de; }
+  .vbody { flex: 1; overflow: auto; padding: 16px 22px; font-size: 13px; }
+  .vbody h2 { font-size: 15px; margin: 14px 0 6px; }
+  .vbody p { margin-bottom: 8px; color: #24292f; }
+  .metachips { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 14px 0; }
+  .chip { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: #f6f8fa;
+          border: 1px solid #d0d7de; color: #57606a; }
+  /* 知识视图 */
+  .tabs { display: flex; gap: 2px; padding: 10px 14px 0; border-bottom: 1px solid #d0d7de; }
+  .tab { padding: 6px 14px; font-size: 12.5px; border: 1px solid transparent; border-bottom: none;
+         border-radius: 6px 6px 0 0; cursor: pointer; color: #57606a; }
+  .tab.active { background: #fff; border-color: #d0d7de; color: #1f2328; font-weight: 600;
+                margin-bottom: -1px; }
+  .kb-body { padding: 14px; overflow: auto; height: calc(100% - 45px); }
+  .kb-group { margin-bottom: 14px; }
+  .kb-group .gt { font-size: 11px; font-weight: 600; color: #57606a; margin-bottom: 4px; }
+  .doc-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px;
+             border: 1px solid #d0d7de; border-radius: 6px; margin-bottom: 4px; background: #fff; }
+  .doc-row:hover { border-color: #0969da; background: #f0f6ff; cursor: pointer; }
+  .doc-row .dn { font-weight: 600; font-size: 12.5px; }
+  .doc-row .dd { color: #57606a; font-size: 11.5px; flex: 1; }
+  .doc-row .vt { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: #57606a; }
+  .legend { margin-top: 6px; font-size: 11px; color: #57606a; }
+</style>
+</head>
+<body>
+
+<h1>notes UI 可见性 · mock v1</h1>
+<div class="sub">doc-lifecycle 面 E ｜ 260904 ｜ 四屏：⓪ 左栏入口与落点 → ① chat 落盘卡片 → ② 点击打开查看器（含 notes 树）→ ③ 书架双页签</div>
+
+<!-- ═══════════ 屏 0：左栏入口与落点 ═══════════ -->
+<div class="frame note">
+  <div class="frame-title">⓪ 左栏组头入口：📖 改名「文档」，落点=双页签页（默认 docs 定稿）
+    <span class="tag">「知识库」一词退役于 UI、保留于引擎术语（=docs 子系统，agent 面）</span></div>
+  <div class="callout c1">F · 图标族既有四枚之一：📖 知识库 → 📖「文档」（覆盖 notes+docs 全家，人的伞面）</div>
+  <div class="callout c2" style="top:auto;bottom:10px;">G · 默认落 docs 定稿页（稳定首页）；notes 页签带活动点「● 24h 内更新 5」——看热闹一键切，看草案走 chat 深链不经书架</div>
+  <div style="display:flex;height:380px;">
+    <div style="width:230px;border-right:1px solid #d0d7de;background:#f6f8fa;padding:10px 8px;font-size:12px;">
+      <div style="font-weight:600;color:#57606a;font-size:11px;margin:2px 0 6px;">项目组 · sandbar</div>
+      <div style="border:1px solid #d0d7de;border-radius:8px;background:#fff;padding:8px;">
+        <div style="display:flex;gap:2px;justify-content:space-between;margin-bottom:8px;">
+          <div style="text-align:center;padding:4px 7px;border-radius:6px;cursor:pointer;" title="工单列表">
+            <div style="font-size:16px;">📋</div><div style="font-size:10px;color:#57606a;">工单</div></div>
+          <div style="text-align:center;padding:4px 7px;border-radius:6px;background:#ddf4ff;cursor:pointer;border:1px solid #0969da;" title="文档（docs 定稿 + notes 工作区）">
+            <div style="font-size:16px;">📖</div><div style="font-size:10px;color:#0969da;font-weight:600;">文档</div></div>
+          <div style="text-align:center;padding:4px 7px;border-radius:6px;cursor:pointer;" title="模型路由">
+            <div style="font-size:16px;">🔀</div><div style="font-size:10px;color:#57606a;">路由</div></div>
+          <div style="text-align:center;padding:4px 7px;border-radius:6px;cursor:pointer;" title="立项单">
+            <div style="font-size:16px;">🗂️</div><div style="font-size:10px;color:#57606a;">立项</div></div>
+          <div style="text-align:center;padding:4px 7px;border-radius:6px;cursor:pointer;" title="项目设置">
+            <div style="font-size:16px;">🎚️</div><div style="font-size:10px;color:#57606a;">设置</div></div>
+        </div>
+        <div style="border-top:1px dashed #d0d7de;padding-top:6px;color:#57606a;">＋ 接入项目</div>
+      </div>
+      <div style="margin-top:8px;color:#bc4c00;font-size:11px;">⚠ isolated-key（红行示例）</div>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;background:#fff;">
+      <div class="tabs">
+        <div class="tab active">📚 docs 定稿</div>
+        <div class="tab">🗂 notes 工作区 <span style="color:#0969da;">● 5</span></div>
+        <span style="flex:1"></span>
+        <span class="legend" style="padding:8px 4px 0;">落点=本页默认 docs 页签</span>
+        <span class="legend" style="padding:8px 4px 0 0;color:#116329;">巡检 · 3 小时前 ✓</span>
+      </div>
+      <div class="kb-body">
+        <div class="kb-group">
+          <div class="gt">design/ · 设计</div>
+          <div class="doc-row"><span class="dn">知识库设计</span><span class="badge-final">定稿</span>
+            <span class="dd">（引擎术语「知识库」=docs 子系统，名字保留在此）</span><span class="vt">verified 09-04 ✓</span></div>
+        </div>
+        <div style="text-align:center;color:#8c959f;font-size:12px;padding:30px 0;">
+          ↓ 页签切到「notes 工作区」= 屏③ 的 notes 树
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 屏 1：chat 里的落盘卡片 ═══════════ -->
+<div class="frame note">
+  <div class="frame-title">① 会话里聊到的、落盘的 —— 路径变链接，落盘变卡片
+    <span class="tag">现状痛点：路径是纯文本，点了没反应；notes 在 UI 上是黑洞</span></div>
+  <div class="callout c1">A · 正文里的仓内路径自动识别成链接（悬停出预览摘要）</div>
+  <div class="callout c2" style="top:auto;bottom:10px;">B · agent 落盘动作生成文件卡片：名称/类型/更新时间/一句话摘要，整卡可点</div>
+  <div class="cols">
+    <div class="col-mid" style="display:flex;align-items:center;justify-content:center;background:
+      repeating-linear-gradient(45deg,#fff,#fff 12px,#f6f8fa 12px,#f6f8fa 24px);color:#8c959f;font-size:12px;">
+      （中列 · 工单/工作区，本屏不展开）
+    </div>
+    <div class="col-right">
+      <div class="chat-head">💬 会话 · sandbar 全局</div>
+      <div class="chat-body">
+        <div class="msg">
+          <div class="who">溯游 · 刚刚</div>
+          <div class="bubble">
+            草案写好了：<span class="path-link">notes/discussions/260904-doc-lifecycle-epic-draft.md</span>，
+            修订 4 已经把你说的每日 refresh 时间戳补进面 B，⚑ 只剩代号和票序两项。
+            <div class="filecard">
+              <div class="fname">📄 260904-doc-lifecycle-epic-draft.md</div>
+              <div class="fmeta">讨论稿 · notes/discussions · 2 分钟前更新 · 180 行</div>
+              <div class="fsum">doc-lifecycle 立项草案：两目录=草稿纸/归档柜，三层沉淀时机，verified 时间戳+每日巡架</div>
+            </div>
+          </div>
+        </div>
+        <div class="msg">
+          <div class="who">宿主</div>
+          <div class="bubble">有些地方我还是看不太懂，能不能出一个说人话的版本</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 屏 2：点开卡片 → 查看器 ═══════════ -->
+<div class="frame note">
+  <div class="frame-title">② 点击卡片/链接 → UI 内查看器（只读）
+    <span class="tag">markdown 渲染 · frontmatter 折叠成元信息 · 「草稿」徽章与 docs「定稿」区分</span></div>
+  <div class="callout c1">C · 逃生口：在编辑器打开 / 复制路径（UI 不做编辑器）</div>
+  <div class="callout c2">D · 左侧 notes 迷你树：按目录分组，当前文件高亮；只读、不进 agent 消费面</div>
+  <div class="cols">
+    <div class="col-mid">
+      <div class="viewer" style="height:100%;">
+        <div class="vtree">
+          <div class="grp">🗂 notes 工作区</div>
+          <div class="grp" style="margin-top:2px;">discussions/</div>
+          <div class="item active">📄 doc-lifecycle-epic-draft</div>
+          <div class="item">📄 write-set-reform</div>
+          <div class="item">📄 charter-injection-…</div>
+          <div class="grp">epics/</div>
+          <div class="item">📘 project-lifecycle</div>
+          <div class="item">📘 engine-hardening</div>
+          <div class="item">📘 session-entry ✓</div>
+          <div class="grp">debts/</div>
+          <div class="item">📋 known-issues（48）</div>
+          <div class="grp">inbox/</div>
+          <div class="item">✏️ 速记 2 条</div>
+        </div>
+        <div class="vmain">
+          <div class="vhead">
+            <span class="badge-draft">草稿 · 讨论中</span>
+            <span class="crumb">notes / discussions / 260904-doc-lifecycle-epic-draft.md</span>
+            <span style="flex:1"></span>
+            <button class="btn">复制路径</button>
+            <button class="btn">在 Cursor 打开</button>
+            <button class="btn primary">收起</button>
+          </div>
+          <div class="metachips">
+            <span class="chip">类型：讨论稿</span><span class="chip">更新：20:58</span>
+            <span class="chip">修订：4</span><span class="chip">⚑ 待拍板：2 项</span>
+          </div>
+          <div class="vbody">
+            <h2>⓪ 说人话版（一分钟读完）</h2>
+            <p><b>两个目录，两种东西。</b>notes 是草稿纸：聊天里聊的、随手落的讨论稿、epic 进度、问题台账——写完就是为了用完就扔，全丢了系统照样跑。docs 是归档柜：只放「确认过是真的」的东西……</p>
+            <p><b>柜子里的东西怎么保证没过期？</b>每篇文档带两个时间戳：<code>updated</code>=内容改过没（人会忘更新，别信它），<code>verified</code>=最近一次核对过「说的和代码现实还对得上」（机器盖的章，不会忘）……</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-right">
+      <div class="chat-head">💬 会话 · sandbar 全局</div>
+      <div class="chat-body">
+        <div class="msg">
+          <div class="who">宿主</div>
+          <div class="bubble">点开看了，说人话版不错。代号就用 doc-lifecycle，票序按推荐①先行。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 屏 3：知识视图双页签 ═══════════ -->
+<div class="frame note">
+  <div class="frame-title">③ 知识视图（📖）扩双页签：docs 定稿 ／ notes 工作区
+    <span class="tag">两记忆模型的 UI 直译；notes 页签只给人看，不改变 agent 红线</span></div>
+  <div class="callout c1">E · docs 行显示 verified 章（信任梯度可视化）；notes 行显示更新时间+修订轮数</div>
+  <div class="cols">
+    <div class="col-mid" style="display:flex;flex-direction:column;">
+      <div class="tabs">
+        <div class="tab active">📚 docs 定稿</div>
+        <div class="tab">🗂 notes 工作区</div>
+        <span style="flex:1"></span>
+        <span class="legend" style="padding:8px 4px 0;">docs=agent context+人 ｜ notes=人的通道（agent 仍不得加载）</span>
+        <span class="legend" style="padding:8px 4px 0 0;color:#116329;">巡检 · 3 小时前 ✓</span>
+      </div>
+      <div class="kb-body">
+        <div class="kb-group">
+          <div class="gt">design/ · 设计</div>
+          <div class="doc-row"><span class="dn">知识库设计</span><span class="badge-final">定稿</span>
+            <span class="dd">知识库四类目录与 review 流程</span><span class="vt">verified 09-04 ✓</span></div>
+          <div class="doc-row"><span class="dn">sandbar项目接入契约 v1.8</span><span class="badge-final">定稿</span>
+            <span class="dd">注册表/装载/校验契约（今日真源转正）</span><span class="vt">verified 09-04 ✓</span></div>
+          <div class="doc-row"><span class="dn">引擎机制主档</span><span class="badge-final">定稿</span>
+            <span class="dd">DSH+Temporal 多 agent 工单引擎</span><span class="vt" style="color:#bc4c00;">stale · covers 有新提交</span></div>
+        </div>
+        <div class="kb-group">
+          <div class="gt">ops/ · 运维</div>
+          <div class="doc-row"><span class="dn">项目生命周期操作手册</span><span class="badge-final">定稿</span>
+            <span class="dd">add/remove/purge 操作面</span><span class="vt">verified 09-04 ✓</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-right">
+      <div class="chat-head">💬 会话 · sandbar 全局</div>
+      <div class="chat-body">
+        <div class="msg">
+          <div class="who">溯游 · 刚刚</div>
+          <div class="bubble">引擎机制主档标记了「陈旧」——它 covers 的 temporal-poc 今天有 5 个收口提交，进复核队列了。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="sub" style="margin-top:-8px;">
+  边界重申：查看器只读 ｜ 写路径仍归编辑器/agent 落盘 ｜ notes 不进知识库插件 agent 消费面（「agent 不得加载 notes」红线不变，UI 可见性是<b>人</b>的通道）。
+</div>
+
+</body>
+</html>
