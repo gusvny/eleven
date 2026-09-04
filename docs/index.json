@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-04T08:54:10+08:00",
+  "generated_at": "2026-09-04T09:02:31+08:00",
   "total": 11,
   "categories": [
     "design",
@@ -30,10 +30,15 @@
       "file": "dsh_seam需求书v1.md",
       "title": "dsh seam 需求书 v1 —— A3 运行时模型覆盖 + A4 headless 会话延续钩子",
       "category": "design",
-      "tags": [],
+      "tags": [
+        "dsh",
+        "上游需求",
+        "headless",
+        "settings"
+      ],
       "status": "active",
-      "updated": "",
-      "has_frontmatter": false
+      "updated": "2026-09-04",
+      "has_frontmatter": true
     },
     {
       "path": "design/metrics-api契约v1.md",
@@ -55,10 +60,11 @@
       "title": "metrics 面板 UI 规划",
       "category": "design",
       "tags": [
-        "metrics"
+        "metrics",
+        "workbench"
       ],
       "status": "active",
-      "updated": "",
+      "updated": "2026-09-04",
       "has_frontmatter": true
     },
     {
@@ -66,10 +72,15 @@
       "file": "sandbar项目接入契约v1.md",
       "title": "sandbar 项目接入契约 v1",
       "category": "design",
-      "tags": [],
+      "tags": [
+        "sandbar",
+        "契约",
+        "接入",
+        "schema版本"
+      ],
       "status": "active",
-      "updated": "",
-      "has_frontmatter": false
+      "updated": "2026-09-03",
+      "has_frontmatter": true
     },
     {
       "path": "design/右栏会话入口与hero定制设计.md",
@@ -104,10 +115,14 @@
       "file": "杂务工单模版设计.md",
       "title": "杂务工单模版（chore-lane）设计",
       "category": "design",
-      "tags": [],
-      "status": "active",
-      "updated": "",
-      "has_frontmatter": false
+      "tags": [
+        "工单模板",
+        "chore-lane",
+        "引擎"
+      ],
+      "status": "draft",
+      "updated": "2026-09-04",
+      "has_frontmatter": true
     },
     {
       "path": "design/知识库设计.md",
@@ -155,12 +170,7 @@
     }
   ],
   "review": {
-    "missing_frontmatter": [
-      "design/dsh_seam需求书v1.md",
-      "design/metrics面板ui规划.md",
-      "design/sandbar项目接入契约v1.md",
-      "design/杂务工单模版设计.md"
-    ],
+    "missing_frontmatter": [],
     "deprecated": [],
     "stale": []
   }

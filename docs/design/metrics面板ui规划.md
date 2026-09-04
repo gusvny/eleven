@@ -1,7 +1,11 @@
 ---
 title: metrics 面板 UI 规划
+category: design
 tags:
   - metrics
+  - workbench
+status: active
+updated: 2026-09-04
 ---
 
 # metrics 面板 UI 规划

@@ -1,3 +1,15 @@
+---
+title: "dsh seam 需求书 v1 —— A3 运行时模型覆盖 + A4 headless 会话延续钩子"
+category: design
+tags:
+  - dsh
+  - 上游需求
+  - headless
+  - settings
+status: active
+updated: 2026-09-04
+---
+
 # dsh seam 需求书 v1 —— A3 运行时模型覆盖 + A4 headless 会话延续钩子
 
 > 供向 dsh（DeepSeek Harness）上游提 issue 或自适配引用的需求书。

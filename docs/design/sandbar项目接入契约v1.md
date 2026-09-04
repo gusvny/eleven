@@ -1,8 +1,3 @@
-<!-- 同源副本声明：本文件是 suyou 仓 docs/design/sandbar项目接入契约v1.md（v1.7，
-     2026-09-03，t260903-08 落地）的**只读同源副本**；真源在 suyou 仓同名路径，
-     本副本不独立演进，内容逐字自 v1.7 真源拷贝（仅本 HTML 注释为 sandbar 仓所加）。
-     消费方：sandbar 安装器 `sandbar upgrade` / `sandbar doctor`（M2-C 代码票
-     t260903-10）；副本漂移 guard 归后续票（交接单 §6）。 -->
 ---
 title: sandbar 项目接入契约 v1
 category: design
@@ -14,6 +9,12 @@ tags:
 status: active
 updated: 2026-09-03
 ---
+
+<!-- 同源副本声明：本文件是 suyou 仓 docs/design/sandbar项目接入契约v1.md（v1.7，
+     2026-09-03，t260903-08 落地）的**只读同源副本**；真源在 suyou 仓同名路径，
+     本副本不独立演进，内容逐字自 v1.7 真源拷贝（仅本 HTML 注释与 frontmatter
+     位置调整为 sandbar 仓所加）。消费方：sandbar 安装器 `sandbar upgrade` /
+     `sandbar doctor`（M2-C 代码票 t260903-10）；副本漂移 guard 归后续票（交接单 §6）。 -->
 
 # sandbar 项目接入契约 v1
 
