@@ -1,0 +1,10 @@
+# sandbar 测试引擎镜像（自造，替代已归档的 temporalio/temporalite）。
+# 内容=官方 temporal CLI linux/arm64 单文件（内嵌 dev server 与 Web UI），版本由
+# 构建脚本 tag 标注，与本仓 bin/temporal 同版（如 1.8.3=Server 1.31.2/UI 2.50.1）。
+# 旗标兼容 temporalite（--namespace/--ip/--port/--ui-port/--db-filename 同名同义），
+# 子命令=start-dev（注意：start 不存在，误用时 cobra 打组帮助会假示旗标表）。
+# 重建：sh server/dsh/build-test-temporal.sh [版本]（经代理/加速站取二进制；二进制
+# 不入 git，仓库只存本配方与脚本）。
+FROM alpine:3.20
+COPY temporal /temporal
+ENTRYPOINT ["/temporal", "server", "start"]
