@@ -1903,6 +1903,203 @@ async def settle_conflict_resolution(args: ConflictSettleArgs) -> ConflictSettle
 
 # ---------- KI-006（t260901-26）：squash 收口核心（纯函数，不经 activity 上下文） ----------
 
+# ---------- t260904-09：settle 时刻收口出仓快照（KI-017 引擎侧欠账收口） ----------
+# merge 落定后、泳道清理前冻结 token+交付快照到项目级账本：
+#   <projects-root>/<key>/data/settle/<票号>.json（与 metrics 缓存同根约定）。
+# 幂等：已存在且载荷一致=跳过；不一致=keep-old 不回写（不可变追加语义，
+#   重开票增量交付不可见=契约增补段已知边界，reason 的 squash_commit 可发现）。
+# 失败软降级：任何异常转 note 拼进 merge warns，绝不阻塞 merge（观测欠账不卡交付，
+#   与 ui_evidence 同款 catch-all→log→不阻塞；其余 ui_evidence 面不带——快照单文件
+#   无产物族，清理由幂等 keep-old 承担）。
+# 命名红线（CLAUDE.md 硬规则⑤）：新 env SANDBAR_SETTLE_SNAPSHOT_DIR 为中性名。
+
+SANDBAR_SETTLE_SNAPSHOT_ENV = "SANDBAR_SETTLE_SNAPSHOT_DIR"
+
+
+def _settle_snapshot_dir(project_key: str) -> Optional[Path]:
+    """快照目录解析（与 metrics.ts resolveSettleDir 同一条根链，两侧注释互指）：
+    SANDBAR_SETTLE_SNAPSHOT_DIR ?? SUYOU_METRICS_DIR ?? SANDBAR_PROJECTS_DIR 链
+    （perkey_projects_root 内含后两段+home 缺省）——env 替换的是**项目根整体**。
+    project_key 为空（Temporal snapshot 查询软降级）→ None，快照跳过并留 note。
+    project_key 过 PROJECT_KEY_RE 白名单防路径穿越（与 ticket_data_dir 同款防呆）。"""
+    if not project_key or not shared.PROJECT_KEY_RE.match(project_key):
+        return None
+    root = os.environ.get(SANDBAR_SETTLE_SNAPSHOT_ENV) or os.environ.get("SUYOU_METRICS_DIR") or ""
+    if root:
+        return Path(root) / project_key / "data" / "settle"
+    return shared.perkey_projects_root() / project_key / "data" / "settle"
+
+
+def _aggregate_lane_usage(wt: Path, ticket_id: str) -> Tuple[Dict[str, Any], str]:
+    """聚合泳道会话 usage（TS agent-usage 通路的 Python 等价，口径逐项对齐）：
+    - 遍历 <wt>/.dsh/sessions/<slug>/<sub>/session.jsonl.zstd，sub==票号或票号- 前缀
+      （同 TS resolveAllSessionFiles）；目录不存在=空集+note，不进入聚合。
+    - 只加总 assistant/message 的 data.usage——assistant/chunk 里同名 usage 是同一份，
+      两处都加会翻倍（TS 侧钉死的红线，本侧同样适用）。
+    - 模型归因：顺序扫描维护当前模型（request/context 的 data.{provider,model}，
+      request/header 的 data.header.config.{provider,model} 兜底），缺失记「?」。
+    - 坏行跳过；单文件解压失败不毁整体加总（原因拼 note）。
+    - 0-usage 有意取舍：快照仍落盘、tokens 全零+tokens_zero 注记（settle 时刻的
+      观测欠账也要固化，与读侧「两处皆无→null」语义相异是有意的）。
+    - by_stage 不带：引擎侧无 workflow timeline 时间窗真源，恒空对象+by_stage_available
+      false 注记（硬造窗口会污染口径）。
+    不带 TS 的防穿越界双保险：本侧路径由自身代码构造（wt 来自 activity 入参，
+    已过 _ws_cwd/_is_worktree_of 防呆），非用户输入，不重复实现。"""
+    zero = {"in": 0, "out": 0, "cacheRead": 0, "by_stage": {},
+            "by_model": {}, "by_stage_available": False}
+    sess = wt / ".dsh" / "sessions"
+    if not sess.is_dir():
+        return dict(zero, tokens_zero=True), "无泳道会话目录: %s" % sess
+    files: List[Path] = []
+    for f in sorted(sess.glob("*/*/session.jsonl.zstd")):
+        sub = f.parent.name
+        if sub == ticket_id or sub.startswith(ticket_id + "-"):
+            files.append(f)
+    if not files:
+        return dict(zero, tokens_zero=True), "无本票会话文件（%s 下无 %s-*/session.jsonl.zstd）" % (sess, ticket_id)
+    total = {"in": 0, "out": 0, "cacheRead": 0}
+    by_model: Dict[str, int] = {}
+    notes: List[str] = []
+    saw_usage = False
+
+    def _num(x: Any) -> int:
+        return int(x) if isinstance(x, (int, float)) and not isinstance(x, bool) else 0
+
+    for f in files:
+        try:
+            p = subprocess.run(["zstd", "-d", "-c", str(f)], capture_output=True,
+                               text=True, timeout=60)
+            if p.returncode != 0:
+                notes.append("%s 解压失败: %s" % (f.name, (p.stderr or "")[-120:]))
+                continue
+            cur = {"provider": "", "model": ""}
+            for raw in (p.stdout or "").split("\n"):
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue  # 坏行跳过（畸形输入/文件尾正在写）
+                t = obj.get("type")
+                d = obj.get("data") or {}
+                if t == "request/context" and "provider" in d:
+                    if isinstance(d.get("provider"), str):
+                        cur["provider"] = d["provider"]
+                    if isinstance(d.get("model"), str):
+                        cur["model"] = d["model"]
+                elif t == "request/header":
+                    c = (d.get("header") or {}).get("config") or {}
+                    if cur["model"] == "" and isinstance(c.get("model"), str):
+                        cur["provider"] = c.get("provider") if isinstance(c.get("provider"), str) else cur["provider"]
+                        cur["model"] = c["model"]
+                elif t == "assistant/message":
+                    u = d.get("usage")
+                    if not isinstance(u, dict):
+                        continue
+                    i, o, cr = _num(u.get("inputTokens")), _num(u.get("outputTokens")), _num(u.get("cacheReadTokens"))
+                    total["in"] += i
+                    total["out"] += o
+                    total["cacheRead"] += cr
+                    key = "%s/%s" % (cur["provider"] or "?", cur["model"] or "?")
+                    by_model[key] = by_model.get(key, 0) + i + o
+                    saw_usage = True
+        except Exception as exc:  # 单文件失败不毁整体加总
+            notes.append("%s 聚合异常: %s" % (f.name, str(exc)[:120]))
+    tokens = {"in": total["in"], "out": total["out"], "cacheRead": total["cacheRead"],
+              "by_stage": {}, "by_model": by_model, "by_stage_available": False,
+              "tokens_zero": not saw_usage}
+    note = "；".join(notes)
+    if not saw_usage:
+        note = (note + "；" if note else "") + "会话无 usage 事件（tokens 记零）"
+    return tokens, note
+
+
+def _squash_snapshot_delivery(repo: Path, commit: str, ticket_id: str) -> Tuple[Dict[str, Any], str]:
+    """squash 真身交付快照。前缀校验唯一真源在本纯函数内（review 条件 5）：
+    merge_commit 的 subject 首行不以票号开头（真·无内容可收，HEAD=他票 squash）
+    → 记零交付 zero_change=true，**不取 numstat**（否则把他票交付记到本票）；
+    Temporal 重试态（HEAD=本票上次收口，squash 提交模板保证首 token=票号）
+    → 正常取 diff <commit>^1 <commit> --numstat。二进制行（-\t-）跳过求和
+    （同 TS parseNumstatTotal）。hash 口径=short（与 _squash_merge 返回值一致）。"""
+    p = _git(["log", "-1", "--format=%s", commit], repo)
+    if p.returncode != 0:
+        return {}, "merge commit %s subject 读取失败: %s" % (commit, (p.stderr or "")[-120:])
+    subject = (p.stdout or "").strip()
+    bp = _git(["rev-parse", "--short", commit + "^1"], repo)
+    base = bp.stdout.strip() if bp.returncode == 0 else ""
+    if not subject.startswith(ticket_id):
+        return ({"base": base, "add": 0, "del": 0, "commits": 0,
+                 "squash_commit": commit, "zero_change": True},
+                "收口零变更（%s 为 main 尾提交、非本票交付，message=%r）" % (commit, subject[:60]))
+    n = _git(["show", "--numstat", "--format=", commit], repo)
+    if n.returncode != 0:
+        return {}, "numstat 读取失败: %s" % ((n.stderr or "")[-120:])
+    add = 0
+    del_ = 0
+    for line in (n.stdout or "").split("\n"):
+        m = re.match(r"^(\d+|-)\t(\d+|-)\t", line)
+        if not m:
+            continue
+        if m.group(1) != "-":
+            add += int(m.group(1))
+        if m.group(2) != "-":
+            del_ += int(m.group(2))
+    return {"base": base, "add": add, "del": del_, "commits": 1,
+            "squash_commit": commit, "zero_change": False}, ""
+
+
+def _freeze_settle_snapshot(repo: Path, wt: Path, ticket_id: str,
+                            project_key: str, squash_commit: str) -> str:
+    """冻结并出仓 settle 快照（绝不抛，返回 note 人话；空串=无事可记）。
+    落盘 tmp+os.replace 原子替换（防双 settle 竞态半文件）。"""
+    try:
+        # 票 id 形状白名单（t260904-09 打回项 W8）：ticket_id 来自外部 meta，裸拼进
+        # 快照文件名会让 `../` 注入上跳目录（integration W8 实证逃出票级 settle
+        # 目录）——与 ticket_data_dir 同款 fail-closed：非法即跳过快照+warn note
+        # （软降级语义内，不阻塞 merge）。
+        if not shared.PROJECT_KEY_RE.match(ticket_id):
+            return "settle 快照跳过（ticket_id 形状非法，防路径穿越）: %r" % ticket_id[:60]
+        d = _settle_snapshot_dir(project_key)
+        if d is None:
+            return "settle 快照跳过（无项目 key 或 key 非法）"
+        delivery, dnote = _squash_snapshot_delivery(repo, squash_commit, ticket_id)
+        tokens, tnote = _aggregate_lane_usage(wt, ticket_id)
+        notes = [x for x in (dnote, tnote) if x]
+        if not delivery:
+            return "settle 快照失败（不阻塞 merge）: " + (dnote or "delivery 不可得")
+        payload = {
+            "schema_version": "v1",
+            "ticket_id": ticket_id,
+            "project_key": project_key,
+            "squash_commit": squash_commit,
+            "settled_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + "Z",
+            "tokens": tokens,
+            "delivery": delivery,
+        }
+        path = d / ("%s.json" % ticket_id)
+        if path.exists():
+            try:
+                old = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                return "settle 快照已存在但不可解析（不可变语义保留旧件，不回写）: %s" % path
+            if (old.get("tokens") == tokens and old.get("delivery") == delivery
+                    and old.get("squash_commit") == squash_commit):
+                return "settle 快照已存在且一致，跳过（幂等）: %s" % path
+            return ("settle 快照已存在且内容不一致（不可变语义保留旧件，不回写；"
+                    "重开票增量交付须删旧件重 settle）: %s" % path)
+        d.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+        note = "settle 快照已落盘: %s" % path
+        if notes:
+            note += "（" + "；".join(notes) + "）"
+        return note
+    except Exception as exc:  # catch-all：观测欠账不卡交付
+        return "settle 快照失败（不阻塞 merge）: %s" % str(exc)[:200]
+
+
 def _merge_started(repo: Path) -> bool:
     """判别主树「合并已开始」：MERGE_MSG 在场 或 index 有 unmerged entries。
 
@@ -1920,7 +2117,7 @@ def _merge_started(repo: Path) -> bool:
 
 
 def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
-                  defer_teardown: bool = False) -> "MergeResult":
+                  defer_teardown: bool = False, project_key: str = "") -> "MergeResult":
     """squash 收口实现（merge() activity 转调此函数，便于脱离 Temporal 单测）。
 
     与旧 merge --no-edit 的故障模式取舍（review gen1 意见 3 逐条确认）：
@@ -2013,6 +2210,13 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
                                      % ((c.stderr or c.stdout or "")[-300:]))
         head = _git(["rev-parse", "--short", "HEAD"], repo)
         merge_commit = head.stdout.strip() if head.returncode == 0 else ""
+    # 2.5) settle 出仓快照（t260904-09，KI-017 引擎侧收口）：commit 落定后、
+    #      泳道清理前（此时 .dsh/sessions 尚在）；失败只 warn 不推翻收口，
+    #      project_key 缺省（""）时函数内部跳过并留 note——向后兼容零破坏。
+    if merge_commit:
+        snap_note = _freeze_settle_snapshot(repo, wt, ticket_id, project_key, merge_commit)
+        if snap_note:
+            warns.append(snap_note)
     # 3) 泳道清理（仅 ok 路径；-D：squash 后 -d 必拒 not fully merged，实测）
     #    M1-3（t260902-02）：defer_teardown=True 时跳过内联清理，交后续
     #    teardown_lane activity（merge→archive→teardown 三段收口）——旧历史
@@ -2042,8 +2246,10 @@ async def merge(args: MergeArgs) -> MergeResult:
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
+    # 项目 key（快照归属目录）：查询失败软降级 "" → _squash_merge 内跳过快照留 note
+    project_key = await _fetch_ticket_project(args.ticket_id)
     res = _squash_merge(_lane_repo_root(wt), wt, args.branch, args.ticket_id,  # 第八枪（t260903-11 终建实雷）：squash 进泳道所属仓
-                        defer_teardown=bool(args.defer_teardown))
+                        defer_teardown=bool(args.defer_teardown), project_key=project_key)
     if res.ok:
         activity.logger.info("[%s] squash 落账：%s（%s）%s", args.ticket_id,
                              args.branch, res.merge_commit,

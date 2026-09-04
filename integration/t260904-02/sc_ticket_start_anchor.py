@@ -231,8 +231,10 @@ def main():
             fail.check(True, "stop 幂等二连不抛")
         except Exception as e:
             fail.check(False, "stop 幂等二连不抛（实得异常：%s）" % e)
-        again = bench.acquire_slot()  # 释放后立即可复抢
-        fail.check(again.index in (sa.index, sb.index), "teardown 后立即可复抢（index=%s）" % again.index)
+        # 钉自己槽复抢（t260904-09 仲裁修正）：跨池并行下他池可能占其它槽，
+        # any-slot 断言（in (sa.index, sb.index)）会误红——契约是「teardown 后本槽可复抢」
+        again = bench.acquire_slot(index=idx_a)
+        fail.check(again.index == idx_a, "teardown 后本槽立即可复抢（index=%s，期望 %s）" % (again.index, idx_a))
         again.stop()
 
         # 崩溃自释：kill -9 temporalite → flock 随进程消亡自释 → 同槽可复抢

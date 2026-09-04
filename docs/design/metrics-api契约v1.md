@@ -358,6 +358,61 @@ UTF-8 字节全量比对）。两时间戳语义是「本次响应生成时刻 /
    defaultDeps，无前门分叉。lane worktree 内查默认项目也指向注册表主目录（非
    worktree 自身 git）——与缓存/数据目录按项目键解析同族语义。
 
+### 增补段（t260904-09，settle 出仓快照收口；schema 冻结不破，本段声明语义增补）
+
+1. **settle 出仓快照（KI-017 引擎侧欠账收口）**：引擎在 merge（squash 收口）落定后、
+   泳道清理前，冻结单票快照出仓到 `<projects-root>/<key>/data/settle/<票号>.json`
+   （与 metrics 缓存同根约定；测试缝 env `SANDBAR_SETTLE_SNAPSHOT_DIR` 替换**项目根
+   整体**，与 `SUYOU_METRICS_DIR ?? SANDBAR_PROJECTS_DIR ?? ~/.sandbar/projects` 同链，
+   读写两侧同一解析语义）。快照内容：`tokens`（in/out/cacheRead、by_model；by_stage
+   恒空对象+`by_stage_available:false`——引擎侧无 workflow timeline 时间窗真源，不硬造）
+   + `delivery`（squash 真身 numstat add/del/commits、base、squash_commit short hash、
+   `zero_change`）+ `schema_version:"v1"` + settled_at。语义：
+   - **本条取代块 3「token 维项目级账本（t260903-09 前向契约）」的出仓格式约定**：
+     原始会话文件（`$SUYOU_USAGE_LEDGER_DIR/<id>/*.jsonl.zstd`）出仓不再实施，改
+     聚合 JSON 快照。`resolveLedgerSessionFiles` 读缝保留为兼容读位（存量外部注入
+     仍可读），读侧优先级在其下，不再新增引用。
+   - **幂等/不可变**：重复 settle 载荷一致=跳过；不一致（重开票等）=keep-old 不回写
+     ——**已知边界：重开票增量交付不可见**（快照 reason 的 squash_commit 可发现；
+     需重算删旧快照文件再 settle）。
+   - **失败软降级**：快照任何失败转 note 拼进 merge 告警链，绝不阻塞 merge（观测
+     欠账不卡交付，与 ui_evidence 同款 catch-all→log→不阻塞语义）。票 id 形状非法
+     （不过 PROJECT_KEY_RE 白名单，含 `../` 路径穿越形态）→ fail-closed 跳过快照
+     +note，不落盘（W8 打回项收口）。
+   - **收口零变更（zero_change）**：squash「未产新提交」分支 HEAD message 非本票
+     前缀（真·无内容可收，HEAD=他票收口）→ delivery 记零且不取 numstat（防他票
+     交付错记本票）；读侧 reason 显式「收口零变更（<hash> 为 main 尾提交，非本票
+     交付）」。
+2. **读侧优先级（工单条 5）**：单票 delivery/tokens 取数序=**settle 快照 > 现算
+   （泳道活口径/会话聚合）> 主仓归档 grep**。快照命中 → 数字=快照值、
+   `delivery_frozen=true`、reason 标「settle 快照（squash <hash>）」。缓存记录
+   `delivery` 对象增补**可选注记键** `squash_commit?: string` 与 `zero_change?: boolean`
+   （仅快照口径写入；旧读方按多余 JSON 键忽略，向后兼容）。
+3. **归档口径收窄（工单条 6；本条取代 t260904-04 增补段 3 的「收窄议后不落」结论
+   与「含多提交」reason 文案）**：无快照存量票归档口径只认 **message 首行以票号
+   开头**的 squash 收口提交，他账（引用性提及、预解/记账等）剔除。当初否决的是
+   **子串启发式**（引用性提及票号不居首即误判；git 对 squash merge 无机械判别）；
+   前缀锚定=消息首 token，squash 收口提交模板（引擎侧 `%s squash 收口…`）保证首
+   token 恒为票号，误判面收敛到「手工伪造 message」。实证锚=t260904-05：grep 命中
+   5 提交、前缀命中 1（真身 455320d 合计 5658；grep 合计 5783 含他账 125）。双算面
+   （一 commit 双票 id）随收窄正面关闭——一 commit 只归唯一前缀票。
+4. **重算触发器（SOURCE_VERSION bump v1→v2）**：口径语义变更（快照优先级+归档收窄）
+   随 source_version 走（本文档版本口径），bump 后全量 per-ticket 缓存整条作废重算
+   （=块 3 成文「缓存整体可弃置重建」，非红线）。已知副作用面：collectArchivedRows
+   记忆行按 source_version 过滤，bump 后旧记忆行缺席（聚合宇宙暂缩，重算入口=既有
+   list/全量门；在-list 票不受影响）。**存量 non-null frozen 记录无重算触发器**的
+   结构面（t260904-04 自愈只覆盖 delivery===null）由本 bump 打通一次；同类未来口径
+   变更须再次 bump，登记为通用纪律。
+5. **donut「有无代码变更票占比」四桶（工单条 7）**：`['有变更', '已收口·零变更',
+   '未交付（在制）', '不可算（数据缺失）']`，逐桶映射：有变更=add+del>0；已收口·
+   零变更=delivery 非空且全零；未交付（在制）=delivery=null 且 open；不可算（数据
+   缺失）=delivery=null 且 closed。四桶互斥且 Σ=票数；零变更已闭票不再与「不可算」
+   混装。**已知边界（继承，不新造静默）**：归档票 open 无外部真源（openUnverified，
+   KI-031 家族），「未交付（在制）」桶可能混入实际已闭的归档票。
+6. **legacy 单文件注册表模式（SUYOU_PROJECTS_YAML）**：该模式只影响 host 侧 metrics
+   缓存落盘（enabled:false）；settle 快照目录解析不受其影响——引擎照常写根链目录，
+   读侧照读（快照与缓存独立性声明）。
+
 ## 相关文档
 
 - [metrics 面板 UI 规划](metrics面板ui规划.md)——四视图逐图定义与面板骨架，§6 为本文示意入口

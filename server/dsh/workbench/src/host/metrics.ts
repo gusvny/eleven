@@ -52,7 +52,12 @@ import {
 
 const execFileP = promisify(execFile)
 
-export const SOURCE_VERSION = 'v1'
+/** v1→v2（t260904-09）：settle 出仓快照语义 + 归档口径收窄（票号前缀）。bump 后
+ *  全量 per-ticket 缓存整条作废重算（契约成文「缓存整体可弃置重建」）——存量
+ *  non-null frozen 记录（如 t260904-05 归档 5783）由此获得唯一重算入口，收窄后
+ *  重算=5658。副作用面：collectArchivedRows 记忆行按 source_version 过滤，
+ *  bump 后旧记忆行缺席（聚合宇宙暂缩，重算入口=既有 list/全量门；在-list 票不受影响）。 */
+export const SOURCE_VERSION = 'v2'
 /** health 视图静默阈值（分钟）：模块常量，env SUYOU_METRICS_SILENT_MIN 仅测试覆盖；可调 UI 参数归 M2c 修约。 */
 export const SILENT_RUNNING_MIN = 30
 /** blocked_reason 榜逐票 show 封顶（成本上限，超出折叠计数+reason；票多项目不炸）。 */
@@ -303,12 +308,70 @@ export interface MetricsCacheRecord {
  * legacy 单文件模式（SUYOU_PROJECTS_YAML）无 per-key 目录定义 → enabled:false+SKIP。
  * 两真源矛盾见文件头碑注。
  */
-export function resolveMetricsCacheDir(projectKey: string): { dir: string; enabled: boolean; reason?: string } {
+export function resolveMetricsCacheDir(projectKey: string): { dir: string; settleDir: string; enabled: boolean; reason?: string } {
+  // settle 出仓快照目录（t260904-09）：根链与引擎 _settle_snapshot_dir 同序互指
+  // （SANDBAR_SETTLE_SNAPSHOT_DIR ?? SUYOU_METRICS_DIR ?? SANDBAR_PROJECTS_DIR ?? home
+  // ——SETTLE env 替换项目根整体，只在链头）——缺 SETTLE 头会造成写读分叉、快照
+  // 永不可见（integration R6 实证，已修）。读取独立于缓存 enabled：legacy 单文件
+  // 注册表模式只影响「host 侧缓存落盘」，引擎照常把快照写进根链目录，读侧照读
+  // （契约增补段成文）。
+  const settleDirOf = () => {
+    const root = process.env.SANDBAR_SETTLE_SNAPSHOT_DIR ?? process.env.SUYOU_METRICS_DIR
+      ?? process.env.SANDBAR_PROJECTS_DIR ?? join(homedir(), '.sandbar', 'projects')
+    return join(root, projectKey, 'data', 'settle')
+  }
   if (process.env.SUYOU_PROJECTS_YAML) {
-    return { dir: '', enabled: false, reason: 'legacy 单文件注册表模式（SUYOU_PROJECTS_YAML）无 per-key 数据目录约定，metrics 缓存禁用（数据现算，不落盘）' }
+    const root = process.env.SUYOU_METRICS_DIR ?? process.env.SANDBAR_PROJECTS_DIR ?? join(homedir(), '.sandbar', 'projects')
+    return { dir: '', settleDir: settleDirOf(), enabled: false, reason: 'legacy 单文件注册表模式（SUYOU_PROJECTS_YAML）无 per-key 数据目录约定，metrics 缓存禁用（数据现算，不落盘）' }
   }
   const root = process.env.SUYOU_METRICS_DIR ?? process.env.SANDBAR_PROJECTS_DIR ?? join(homedir(), '.sandbar', 'projects')
-  return { dir: join(root, projectKey, 'data', 'metrics'), enabled: true }
+  return { dir: join(root, projectKey, 'data', 'metrics'), settleDir: settleDirOf(), enabled: true }
+}
+
+/** settle 出仓快照（t260904-09，KI-017 引擎侧收口）：读 <root>/<key>/data/settle/
+ *  <票号>.json，引擎在 merge 落定后冻结。畸形 JSON / 缺字段 / 数值非有限 → null+
+ *  reason（不抛、不做假 0）。 */
+export interface SettleSnapshot {
+  tokens: NonNullable<MetricsCacheRecord['tokens']>
+  delivery: NonNullable<MetricsCacheRecord['delivery']> & { squash_commit?: string; zero_change?: boolean }
+  squash_commit: string
+}
+
+function finiteNum(x: unknown): x is number {
+  return typeof x === 'number' && Number.isFinite(x)
+}
+
+export async function readSettleSnapshot(settleDir: string, ticketId: string): Promise<{ snap?: SettleSnapshot; reason?: string }> {
+  let raw: string
+  try {
+    raw = await readFile(join(settleDir, `${ticketId}.json`), 'utf8')
+  } catch {
+    return { reason: `无 settle 快照: ${join(settleDir, ticketId + '.json')}` }
+  }
+  let obj: any
+  try {
+    obj = JSON.parse(raw)
+  } catch {
+    return { reason: `settle 快照不可解析（跳过）: ${ticketId}` }
+  }
+  const d = obj?.delivery
+  const t = obj?.tokens
+  if (!d || !t || !finiteNum(d.add) || !finiteNum(d.del) || !finiteNum(d.commits)
+    || !finiteNum(t.in) || !finiteNum(t.out) || !finiteNum(t.cacheRead)) {
+    return { reason: `settle 快照字段缺失/非法（跳过）: ${ticketId}` }
+  }
+  const tokens = {
+    by_stage: (t.by_stage && typeof t.by_stage === 'object') ? t.by_stage : {},
+    by_model: (t.by_model && typeof t.by_model === 'object') ? t.by_model : {},
+    in: t.in, out: t.out, cacheRead: t.cacheRead,
+  }
+  const delivery: SettleSnapshot['delivery'] = { base: String(d.base ?? ''), add: d.add, del: d.del, commits: d.commits }
+  // 引擎侧注记键透传：zero_change=true=「收口零变更」（squash_commit 是 main 尾提交
+  // 非本票交付）；squash_commit 供 reason 点名真身 hash。
+  if (typeof d.squash_commit === 'string' && d.squash_commit !== '') delivery.squash_commit = d.squash_commit
+  if (d.zero_change === true) delivery.zero_change = true
+  if (typeof d.squash_commit !== 'string' && typeof obj.squash_commit === 'string') delivery.squash_commit = obj.squash_commit
+  return { snap: { tokens, delivery, squash_commit: String(delivery.squash_commit ?? obj.squash_commit ?? '') } }
 }
 
 /** stages 链的稳定指纹（FNV-1a 32 位 hex ×2 轮拼 16 位，无 crypto 依赖——
@@ -495,16 +558,32 @@ export async function computeDelivery(deps: MetricsDeps, ticket: any): Promise<D
     return { delivery: null, reason: `delivery 维不可算（${laneFail}，且无票 id 可回落主仓）` }
   }
   try {
-    const headList = await deps.git(deps.repo, ['log', '--format=%H', '--grep', id])
-    const hashes = headList.split('\n').filter((l) => l.trim() !== '')
-    if (hashes.length === 0) {
+    // 归档口径收窄（t260904-09，工单条 6）：只认 message 首行以票号开头的 squash
+    // 收口提交（squash 模板保证首 token=票号），他账剔除——引用性提及（教训引用
+    // 「t260904-05 教训」等）票号不居首，天然被前缀挡掉（取代 t260904-04 增补段 3
+    // 「收窄议后不落」结论：子串启发式误判面在「不居首」，前缀锚定无此面）。
+    // 实证锚=t260904-05：grep 命中 5 提交、前缀命中仅 1（真身 455320d=5658，
+    // grep 合计 5783 含他账 125）。
+    const headList = await deps.git(deps.repo, ['log', '--format=%H %s', '--grep', id])
+    const lines = headList.split('\n').filter((l) => l.trim() !== '')
+    const squashLines = lines.filter((l) => l.slice(41).startsWith(id))
+    if (lines.length === 0) {
       return { delivery: null, reason: `主仓无引用本票（${id}）的提交（泳道${laneFail === '' ? '不可用' : `：${laneFail}`}），delivery 维不可算`, frozen: false }
     }
-    const numstat = await deps.git(deps.repo, ['log', '--grep', id, '--numstat', '--format='])
-    const { add, del } = parseNumstatTotal(numstat)
+    if (squashLines.length === 0) {
+      return { delivery: null, reason: `主仓仅他账引用本票（${id}，${lines.length} 条无票号前缀，已剔），delivery 维不可算（泳道${laneFail}）`, frozen: false }
+    }
+    let add = 0
+    let del = 0
+    for (const line of squashLines) {
+      const numstat = await deps.git(deps.repo, ['show', '--numstat', '--format=', line.slice(0, 40)])
+      const s = parseNumstatTotal(numstat)
+      add += s.add
+      del += s.del
+    }
     return {
-      delivery: { base, add, del, commits: hashes.length },
-      reason: `delivery 为主仓归档口径（引用本票的提交 ${hashes.length} 个；泳道${laneFail}）`,
+      delivery: { base, add, del, commits: squashLines.length },
+      reason: `delivery 为主仓归档口径（票号前缀 squash 提交 ${squashLines.length} 个，grep 命中 ${lines.length} 条已剔他账；泳道${laneFail}）`,
       frozen: true,
     }
   } catch (err) {
@@ -567,7 +646,7 @@ export interface RecordWithAnchor {
 
 async function ticketRecord(
   deps: MetricsDeps, row: any, template: string, stages: any[], engineVersion: string,
-  cacheDir: { dir: string; enabled: boolean; reason?: string },
+  cacheDir: { dir: string; settleDir: string; enabled: boolean; reason?: string },
 ): Promise<RecordWithAnchor | null> {
   const id = String(row?.id ?? '')
   if (id === '') return null
@@ -615,24 +694,35 @@ async function ticketRecord(
   const showFellBackToRow = shown === null || shown === undefined
   const timeline = ticket?.timeline ?? ticket?.meta?.timeline
   const durations = computeDurations(timeline, humanStages, deps.now())
-  // 重算 delivery 门（t260904-04 条1）：只看 delivery===null，不再看 frozen 位——
-  // null+frozen 脏态（命中路径条件 A 放行进来）若保留 frozen 门会跳过 computeDelivery、
-  // 写回仍 null+frozen，下个 TTL 周期白烧 spawn 永不自愈。其余状态零影响：prev.delivery
-  // 非 null 首条件短路跳过（frozen 快照不重算语义不变）；engineStale 降维保留路径不受影响。
+  // settle 出仓快照优先（t260904-09，KI-017 收口）：快照 > 现算（泳道活/会话聚合）
+  // > 归档 grep。快照命中 → delivery/tokens 直取快照值、delivery_frozen=true，
+  // 跳过 computeDelivery/computeTokens（归档 grep 收窄口径只服务无快照存量票）。
+  const snapRef = await readSettleSnapshot(cacheDir.settleDir, id)
   let delivery = prev?.delivery ?? null
   let deliveryFrozen = prev?.delivery_frozen ?? false
-  if (delivery === null) {
-    const d = await computeDelivery(deps, ticket)
-    delivery = d.delivery
-    if (d.frozen === true) deliveryFrozen = true // 主仓归档口径成功 → 冻结
+  let tokens: MetricsCacheRecord['tokens'] = null
+  if (snapRef.snap) {
+    delivery = snapRef.snap.delivery
+    deliveryFrozen = true
+    tokens = snapRef.snap.tokens
+  } else {
+    // 重算 delivery 门（t260904-04 条1）：只看 delivery===null，不再看 frozen 位——
+    // null+frozen 脏态（命中路径条件 A 放行进来）若保留 frozen 门会跳过 computeDelivery、
+    // 写回仍 null+frozen，下个 TTL 周期白烧 spawn 永不自愈。其余状态零影响：prev.delivery
+    // 非 null 首条件短路跳过（frozen 快照不重算语义不变）；engineStale 降维保留路径不受影响。
+    if (delivery === null) {
+      const d = await computeDelivery(deps, ticket)
+      delivery = d.delivery
+      if (d.frozen === true) deliveryFrozen = true // 主仓归档口径成功 → 冻结
+    }
+    if (delivery !== null && prev !== null && cached?.engineStale === true) {
+      deliveryFrozen = true // 降维保留的存量=冻结快照（归档口径）
+    }
+    const windows = closeStageWindows(stageWindowsFromTimeline(timeline), durations.closed_ms ?? NaN)
+    const t = await computeTokens(deps, id, ticket, windows)
+    // token 现算失败（泳道会话已拆）→ 存量保留；同序 reason 由 stableReasons 只看 rec 状态保证双前门一致
+    tokens = t.tokens ?? prev?.tokens ?? null
   }
-  if (delivery !== null && prev !== null && cached?.engineStale === true) {
-    deliveryFrozen = true // 降维保留的存量=冻结快照（归档口径）
-  }
-  const windows = closeStageWindows(stageWindowsFromTimeline(timeline), durations.closed_ms ?? NaN)
-  const t = await computeTokens(deps, id, ticket, windows)
-  // token 现算失败（泳道会话已拆）→ 存量保留；同序 reason 由 stableReasons 只看 rec 状态保证双前门一致
-  const tokens = t.tokens ?? prev?.tokens ?? null
   const nowIso = new Date(deps.now()).toISOString()
   // F1 修复姊妹面：无真锚点（timeline 不可得）时 computed_at 保留基线值（首次计算
   // 时刻），不随重探覆写为 now——否则下一拍纯命中近似归窗 approx=now>to 再次塌缩。
@@ -677,8 +767,16 @@ function stableReasons(entries: RecordWithAnchor[], cacheDir: { dir: string; ena
     }
     if (Object.keys(e.rec.durations.by_stage).length === 0) out.push(`${id}: timeline 无 running 条目，stage 时长计 0`)
     if (e.rec.delivery === null && !e.rec.delivery_frozen) out.push(`${id}: delivery 维不可算（泳道不可用且主仓无引用本票的提交）`)
-    // C5 排序：票 id 后第一句即多提交边界结论（UI 降级条 slice(0,120) 截断不丢关键信息）
-    if (e.rec.delivery !== null && e.rec.delivery_frozen) out.push(`${id}: delivery 为主仓归档口径，含多提交（预解/记账等提交一并计入，行数可能高于 squash 真值；引用提交 ${e.rec.delivery.commits} 个；冻结快照 KI-017②）`)
+    // settle 出仓快照（t260904-09）：squash_commit 注记键在场即快照口径——
+    // zero_change=true 时 squash_commit 是 main 尾提交（非本票交付），文案显式点名防误导
+    if (e.rec.delivery !== null && e.rec.delivery_frozen && (e.rec.delivery as any).squash_commit) {
+      const d = e.rec.delivery as any
+      out.push(d.zero_change === true
+        ? `${id}: delivery=settle 快照·收口零变更（${d.squash_commit} 为 main 尾提交，非本票交付）；token=settle 快照`
+        : `${id}: delivery=settle 快照（squash ${d.squash_commit}，真身口径）；token=settle 快照`)
+    }
+    // 归档口径（收窄后）：只计票号前缀 squash 提交（t260904-09），多提交面随收窄收敛
+    if (e.rec.delivery !== null && e.rec.delivery_frozen && !(e.rec.delivery as any).squash_commit) out.push(`${id}: delivery 为主仓归档口径（票号前缀提交 ${e.rec.delivery.commits} 个，他账已剔；冻结快照 KI-017②）`)
     if (e.rec.tokens === null) out.push(`${id}: 无 token 数据（无会话文件/无 usage，SKIP）`)
   }
   return out
@@ -1010,12 +1108,21 @@ function buildChartsBody(view: string, records: MetricsCacheRecord[], stageIds: 
     const add = withD.reduce((s, r) => s + r.delivery!.add, 0)
     const del = withD.reduce((s, r) => s + r.delivery!.del, 0)
     const commits = withD.reduce((s, r) => s + r.delivery!.commits, 0)
+    // 有无代码变更票占比（t260904-09 工单条 7 四桶拆分，互斥且 Σ=票数）：
+    // 有变更（add+del>0）/ 已收口·零变更（delivery 非空且全零）/ 未交付（在制，
+    // delivery=null 且 open）/ 不可算（数据缺失，delivery=null 且 closed）——
+    // 零变更已闭票不再与「不可算」混装。已知边界：归档票 open 无外部真源
+    // （openUnverified，KI-031 家族），在制桶可能混入实际已闭的归档票，契约增补段成文。
+    const withChange = records.filter((r) => r.delivery !== null && (r.delivery!.add + r.delivery!.del) > 0).length
+    const zeroChange = records.filter((r) => r.delivery !== null && (r.delivery!.add + r.delivery!.del) === 0).length
+    const noDOpen = records.filter((r) => r.delivery === null && r.open).length
+    const noDClosed = records.filter((r) => r.delivery === null && !r.open).length
     return {
       charts: {
         primary: chart('hBar', 'Top 票变更量（行，add+del 分列口径）', top.map((r) => r.ticket_id), [{ name: '行数', data: top.map((r) => r.delivery!.add + r.delivery!.del) }]),
         secondaries: [
           chart('bar', '全窗口变更总量', ['additions', 'deletions', 'commits'], [{ name: '量', data: [add, del, commits] }]),
-          chart('donut', '有无代码变更票占比', ['有变更', '无变更/无数据'], [{ name: '票数', data: [withD.filter((r) => (r.delivery?.add ?? 0) + (r.delivery?.del ?? 0) > 0).length, records.length - withD.filter((r) => (r.delivery?.add ?? 0) + (r.delivery?.del ?? 0) > 0).length] }]),
+          chart('donut', '有无代码变更票占比', ['有变更', '已收口·零变更', '未交付（在制）', '不可算（数据缺失）'], [{ name: '票数', data: [withChange, zeroChange, noDOpen, noDClosed] }]),
         ],
       },
     }

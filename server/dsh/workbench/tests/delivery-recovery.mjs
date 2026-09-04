@@ -33,6 +33,11 @@ async function mkCacheDir(prefix) {
   return { root, dir }
 }
 
+// t260904-09：归档口径收窄为「subject 首行以票号开头」——stub 的 %H 必须 40 位
+// （实现按 idx41 取 subject），常量桩供各用例复用。
+const H = (n) => String(n).repeat(39) + String(n)
+const SQ = (h, id, tail = 'squash 收口（一单一提交，KI-006）') => `${h} ${id} ${tail}`
+
 const savedStub = process.env.SUYOU_METRICS_STUB
 const savedDir = process.env.SUYOU_METRICS_DIR
 const savedLedger = process.env.SUYOU_USAGE_LEDGER_DIR
@@ -64,11 +69,11 @@ const gitDeps = (pairs, repo = '/stub-repo') => ({
 {
   console.log('①b 直并票：字段缺失不再早退，主仓 grep 提交集补账，frozen=true')
   const d = await computeDelivery(gitDeps({
-    '/stub-repo::log --format=%H --grep t09-squash': 'h1\nh2\n',
-    '/stub-repo::log --grep t09-squash --numstat --format=': '500\t120\ta.ts\n50\t30\tb.ts',
+    '/stub-repo::log --format=%H %s --grep t09-squash': `${SQ(H(1), 't09-squash')}\n${H(2)} 教训引用 t09-squash 收口\n`,
+    [`/stub-repo::show --numstat --format= ${H(1)}`]: '500\t120\ta.ts\n50\t30\tb.ts',
   }), { id: 't09-squash' })
   ok('回落口径 add/del', d.delivery.add === 550 && d.delivery.del === 150, JSON.stringify(d))
-  ok('commits=提交集大小', d.delivery.commits === 2)
+  ok('commits=前缀提交集大小（他账 1 条被剔）', d.delivery.commits === 1)
   ok('frozen=true（归档口径）', d.frozen === true)
   ok('reason 显式标注归档口径', String(d.reason ?? '').includes('归档口径'), String(d.reason))
 }
@@ -82,8 +87,8 @@ const gitDeps = (pairs, repo = '/stub-repo') => ({
   // 但回落口径只数引用本票的提交（550 行）。
   const d = await computeDelivery(gitDeps({
     [`${lane}::diff main...HEAD --numstat`]: Promise.reject(new Error('ENOENT: lane gone')),
-    '/stub-repo::log --format=%H --grep t09-ki': 'h1\n',
-    '/stub-repo::log --grep t09-ki --numstat --format=': '500\t120\ta.ts\n50\t30\tb.ts',
+    '/stub-repo::log --format=%H %s --grep t09-ki': SQ(H(3), 't09-ki') + '\n',
+    [`/stub-repo::show --numstat --format= ${H(3)}`]: '500\t120\ta.ts\n50\t30\tb.ts',
   }, repo), { id: 't09-ki', base_ref: 'main', worktree: '.worktrees/t09-ki' })
   ok('回落 add=550（≠ 泳道区间会显示的 80000+）', d.delivery.add === 550, JSON.stringify(d))
   ok('KI-017① 收口：frozen=true + 归档 reason', d.frozen === true && String(d.reason).includes('归档口径'))
@@ -91,26 +96,25 @@ const gitDeps = (pairs, repo = '/stub-repo') => ({
 
 // ---- ④ W4 双算面：一 commit 引用两票 id → 提交集口径两票各计一次（已知行为）
 {
-  console.log('④ W4：一 commit 双票 id 双算（记录为已知行为，reason 不静默）')
+  console.log('④ 前缀收窄（t260904-09）：引用性提及他票 id 的提交不再双算')
   const pairs = {
-    '/stub-repo::log --format=%H --grep t09-mA': 'shared-h\n',
-    '/stub-repo::log --grep t09-mA --numstat --format=': '100\t10\ta.ts',
-    '/stub-repo::log --format=%H --grep t09-mB': 'shared-h\n',
-    '/stub-repo::log --grep t09-mB --numstat --format=': '100\t10\ta.ts',
+    '/stub-repo::log --format=%H %s --grep t09-mA': `${SQ(H(4), 't09-mA')}\n${H(5)} 教训引用 t09-mA 的收口\n`,
+    [`/stub-repo::show --numstat --format= ${H(4)}`]: '100\t10\ta.ts',
+    '/stub-repo::log --format=%H %s --grep t09-mB': `${H(5)} 教训引用 t09-mB 的收口\n`,
   }
   const da = await computeDelivery(gitDeps(pairs), { id: 't09-mA' })
   const db = await computeDelivery(gitDeps(pairs), { id: 't09-mB' })
-  ok('双票各计同一提交（add 均 100，双算面存在）', da.delivery.add === 100 && db.delivery.add === 100)
-  ok('两票 reason 都显式标注提交集口径', String(da.reason).includes('归档口径') && String(db.reason).includes('归档口径'))
-  console.log('    注：双算面=提交集口径已知边界（契约文档已注明），根治需 per-commit 归属归档（引擎侧 KI-017③ 同批）')
+  ok('t09-mA 只计前缀提交（add=100，他账 1 条被剔）', da.delivery.add === 100 && da.delivery.commits === 1, JSON.stringify(da))
+  ok('t09-mB 仅他账引用 → null + reason 点名剔除', db.delivery === null && String(db.reason).includes('他账'), JSON.stringify(db))
+  console.log('    注：前缀收窄正面关闭 W4 双算面（一 commit 只归唯一前缀票）；契约增补段成文')
 }
 
 // ---- ⑤ 畸形 numstat + 双路全失败
 {
   console.log('⑤ 畸形 numstat 忽略不崩；双路全失败 null+人话 reason')
   const d1 = await computeDelivery(gitDeps({
-    '/stub-repo::log --format=%H --grep t09-bad': 'h1\n',
-    '/stub-repo::log --grep t09-bad --numstat --format=': 'abc\tdef\tweird.txt\n-\t-\tbinary.png\n12\t3\tok.ts',
+    '/stub-repo::log --format=%H %s --grep t09-bad': SQ(H(6), 't09-bad') + '\n',
+    [`/stub-repo::show --numstat --format= ${H(6)}`]: 'abc\tdef\tweird.txt\n-\t-\tbinary.png\n12\t3\tok.ts',
   }), { id: 't09-bad' })
   ok('畸形行忽略、二进制行计 0、正常行计入', d1.delivery.add === 12 && d1.delivery.del === 3, JSON.stringify(d1))
   const d2 = await computeDelivery(gitDeps({}), { id: 't09-nothing' })
@@ -223,8 +227,9 @@ const gitDeps = (pairs, repo = '/stub-repo') => ({
     return { deps, gitCalls }
   }
   const grepPairs = (id, numstat = '10\t2\ta.ts') => ({
-    [`/stub-repo::log --format=%H --grep ${id}`]: 'h1\n',
-    [`/stub-repo::log --grep ${id} --numstat --format=`]: numstat,
+    // t260904-09 收窄后格式：%H %s + 前缀命中 + 按提交 show numstat
+    [`/stub-repo::log --format=%H %s --grep ${id}`]: `${H(9)} ${id} squash 收口（一单一提交，KI-006）\n`,
+    [`/stub-repo::show --numstat --format= ${H(9)}`]: numstat,
   })
   const run = (deps, query = { view: 'delivery', window: 'all' }) => buildMetricsResponse(query, deps)
 
@@ -244,7 +249,7 @@ const gitDeps = (pairs, repo = '/stub-repo') => ({
   ok('⑧a 重探成功冻结（主仓归档口径）', recA.delivery_frozen === true)
   ok('⑧a updated_ts 前移（节流锚点刷新）', recA.updated_ts === new Date(NOW).toISOString(), recA.updated_ts)
   ok('⑧a 重探 git cwd=引擎仓', a.gitCalls.every(c => c === '/stub-repo'))
-  ok('⑧a 响应 reason 带多提交边界', String(ra.body.reason ?? '').includes('多提交'), String(ra.body.reason ?? '').slice(0, 200))
+  ok('⑧a 响应 reason 带归档口径标注', String(ra.body.reason ?? '').includes('归档口径'), String(ra.body.reason ?? '').slice(0, 200))
 
   // ⑧b 新鲜 null 记录（TTL 内）：不重探，零 git spawn
   await writeRec('t09-heal-fresh', mkRec('t09-heal-fresh'))
@@ -303,8 +308,8 @@ const gitDeps = (pairs, repo = '/stub-repo') => ({
       gitCalls.push(cwd)
       const key = `${cwd}::${args.join(' ')}`
       const pairs = {
-        '/suyou-root::log --format=%H --grep t09-rp': 'h1\n',
-        '/suyou-root::log --grep t09-rp --numstat --format=': '671\t43\ta.ts',
+        '/suyou-root::log --format=%H %s --grep t09-rp': SQ(H(7), 't09-rp') + '\n',
+        [`/suyou-root::show --numstat --format= ${H(7)}`]: '671\t43\ta.ts',
       }
       if (!(key in pairs)) throw new Error(`stub git 未备：${key}`)
       return pairs[key]
@@ -353,8 +358,8 @@ const gitDeps = (pairs, repo = '/stub-repo') => ({
     },
   })
   const pairs = {
-    '/stub-repo::log --format=%H --grep t09-arch': 'h1\n',
-    '/stub-repo::log --grep t09-arch --numstat --format=': '10\t2\ta.ts',
+    '/stub-repo::log --format=%H %s --grep t09-arch': SQ(H(8), 't09-arch') + '\n',
+    [`/stub-repo::show --numstat --format= ${H(8)}`]: '10\t2\ta.ts',
   }
   // F1：首拍（重探拍）治愈票必须在人口内——近似锚点基线=重算前 computed_at（过去时刻）
   const r1 = await buildMetricsResponse({ view: 'delivery', window: 'all' }, mkDeps(pairs))

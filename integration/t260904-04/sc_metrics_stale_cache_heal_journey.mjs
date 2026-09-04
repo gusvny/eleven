@@ -12,7 +12,7 @@
  *  J0 夹具自检：冷跑落盘缓存（fixture 纪律=让实现自己写缓存，再篡改，不手写内部派生值）。
  *  J1 open 陈旧（条件B）+ delivery=null（条件A 但 TTL 内）→ 全量拍自愈：
  *     time 关闭数=2、与 health 关闭数一致（4vs5 收敛）、t-heal 不再报「不可算」、
- *     归档口径 reason 含「多提交」边界（工单 B5 契约承诺）。
+ *     归档口径 reason=票号前缀+他账剔除（t260904-09 收窄契约，取代旧「多提交」措辞）。
  *  J2 TTL 内再查：响应剔除 generated_at/cache.computed_at 后逐字节稳定（数字不漂）。
  *  J3 条件A隔离（open 一致 + null + 过 TTL）→ 重探自愈。
  *  J4 updated_ts 缺失（NaN）→ 视为过期，不自锁。
@@ -32,9 +32,12 @@ import {
 } from '../t260903-09/lib_integration.mjs'
 
 const { ok, done } = makeChecker()
-// stubDeps git 桩的 deliveries 键 = args.join(' ')（不含 cwd，metrics.ts stubDeps 契约）
-const grepKey = (id) => `log --format=%H --grep ${id}`
-const numstatKey = (id) => `log --grep ${id} --numstat --format=`
+// stubDeps git 桩的 deliveries 键 = args.join(' ')（不含 cwd，metrics.ts stubDeps 契约）。
+// t260904-09 收窄后（契约增补段取代旧「多提交」措辞）：归档口径先取 `%H %s` 再按
+// message 票号前缀过滤，逐前缀提交 `show --numstat` 求和——第二提交=引用性提及
+// （票号不居首），被收窄剔除（fixture 同步钉住收窄行为：交付=50 非 80）。
+const grepKey = (id) => `log --format=%H %s --grep ${id}`
+const showKey = (hash) => `show --numstat --format= ${hash}`
 
 /** 剔除易变字段后的稳定形态（与 golden 同纪律）。 */
 function stripVolatile(body) {
@@ -72,10 +75,11 @@ const stub = {
     ticketRow('t-live', { createdAt: NOW - DAY / 2 }),                        // 在制票（不可算属正常）
   ],
   deliveries: {
-    [grepKey('t-heal')]: 'aaaa1111\nbbbb2222\n',
-    [numstatKey('t-heal')]: '50\t10\tf.ts\n30\t0\tg.ts\n',
-    [grepKey('t-ok')]: 'cccc3333\n',
-    [numstatKey('t-ok')]: '5\t1\th.ts\n',
+    // hash 必须满 40 位：实现按 `行.slice(41)` 取 subject 判票号前缀（%H 全 hash + 空格）
+    [grepKey('t-heal')]: `${'a'.repeat(40)} t-heal squash 收口（一单一提交）\n${'b'.repeat(40)} 讨论档（引用 t-heal 教训）\n`,
+    [showKey('a'.repeat(40))]: '50\t10\tf.ts\n',
+    [grepKey('t-ok')]: `${'c'.repeat(40)} t-ok squash 收口（一单一提交）\n`,
+    [showKey('c'.repeat(40))]: '5\t1\th.ts\n',
   },
 }
 
@@ -98,7 +102,11 @@ try {
     const seg = reasonSegment(dresp.body, 't-heal')
     ok(seg !== '', 'J1 t-heal reason 段在场')
     ok(!seg.includes('不可算'), 'J1 交付维不再报不可算（失败维自愈）', seg)
-    ok(seg.includes('多提交'), 'J1 归档口径 reason 含多提交边界（工单 B5 契约承诺）', seg)
+    // t260904-09 收窄后新契约文案（契约增补段成文，取代旧「多提交」措辞）：
+    // 票号前缀提交数 + 他账剔除计数；fixture 双提交一前缀一引用性提及，交付=50 证明他账未计入
+    ok(seg.includes('归档口径') && seg.includes('前缀') && seg.includes('已剔'),
+      'J1 归档口径 reason=票号前缀+他账剔除（t260904-09 收窄契约）', seg)
+    ok(seg.includes('1 个'), 'J1 前缀提交恰 1（引用性提及他账被收窄剔除，交付=50 非 80）', seg)
 
     /* J2 TTL 内再查：响应逐字节稳定（数字不漂） */
     const again = await callMetrics(deps, { view: 'delivery', window: 'all' })

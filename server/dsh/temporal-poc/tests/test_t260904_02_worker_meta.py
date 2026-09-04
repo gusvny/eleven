@@ -96,6 +96,10 @@ class WorkerWiringTest(unittest.TestCase):
 
     def test_meta_path_modes(self):
         import argparse
+        # 环境隔离（t260904-09 implement 打回轮发现）：本测试由工单泳道内跑时，
+        # supervisor 注入的 SUYOU_WORKER_META 会被「前台=不写」分支读到而误红——
+        # 用例自有 env 语义，先清场再断言（非放宽：随后的专属模式分支自设该 env）。
+        os.environ.pop("SUYOU_WORKER_META", None)
         args = argparse.Namespace(daemon=False, pidfile="/x/worker.pid", logfile="/x/l")
         self.assertEqual(worker.worker_meta_path(args), "")  # 前台=不写
 

@@ -109,7 +109,10 @@ const mkDeps = (stub) => {
   }
   const rDel = await buildMetricsResponse({ view: 'delivery', window: '7d' }, mkDeps(baseStub({ tickets: [good] })))
   const withCode = rDel.body.charts.secondaries.find((c) => c.kind === 'donut' && String(c.title).includes('有无代码变更票占比'))
-  ok('delivery 视图占比 donut 在场', withCode !== undefined && specToDonutInput(withCode).slices.length === 2)
+  // t260904-09 四桶拆分：有变更 / 已收口·零变更 / 未交付（在制）/ 不可算（数据缺失）
+  ok('delivery 视图占比 donut 在场且四桶', withCode !== undefined && specToDonutInput(withCode).slices.length === 4
+    && JSON.stringify(withCode.categories) === JSON.stringify(['有变更', '已收口·零变更', '未交付（在制）', '不可算（数据缺失）']),
+    JSON.stringify(withCode?.categories))
 }
 
 process.env.SUYOU_METRICS_STUB = savedStub
