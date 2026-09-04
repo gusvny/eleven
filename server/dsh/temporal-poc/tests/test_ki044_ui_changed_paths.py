@@ -83,6 +83,22 @@ def ui_items(checks):
     return [c for c in checks if c.get("item", "").startswith("UI 截图证据")]
 
 
+def declare_ui_evidence(wt, g, dirs=("server/dsh/workbench/lib/",),
+                        raw=None):
+    """泳道 verify.yaml 写 ui_evidence 声明并 commit（merge_check 工作区干净闸要求
+    声明已提交；schema: v1 必带——verify_lane 读到 verify.yaml 会整卷结构校验，
+    缺 schema=版本不支持整道红，会污染被测项）。raw 非 None 时原样写入（畸形态用）。"""
+    f = wt / "verify.yaml"
+    if raw is not None:
+        f.write_text(raw, encoding="utf-8")
+    else:
+        lines = ["schema: v1", "ui_evidence:", "  dirs:"]
+        lines += ["    - %s" % d for d in dirs]
+        f.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    g("add", "-A")
+    g("commit", "-m", "lane: ui_evidence 声明")
+
+
 # ---------- 纯函数：match_ui_paths / is_ui_write_set ----------
 
 def test_match_ui_paths_hits():
@@ -195,6 +211,8 @@ def test_ui_changed_paths_activity_hit_and_fail_closed():
     tmp, wt, g = build_lane_repo()
     try:
         lane_commit(wt, g, "server/dsh/workbench/lib/workbench.js", "bundle()\n")
+        # t260904-18 KI-050 声明制：判定口径=泳道 verify.yaml 声明（无声明=零口径不命中）
+        declare_ui_evidence(wt, g)
         res = asyncio.run(agent_activities.ui_changed_paths(UiChangedPathsArgs(
             ticket_id="t-ut", worktree=str(wt), branch="lane", base_ref="main")))
         assert res.ui_paths == ["server/dsh/workbench/lib/workbench.js"]
@@ -217,10 +235,12 @@ def _run_merge_check(wt, write_set):
 
 
 def test_merge_check_ui_gate_red_without_png():
-    """diff 命中 UI + 无 png → 闸红，detail 带 diff 判定与命中路径（gate 记录可检索）。"""
+    """diff 命中 UI + 无 png → 闸红，detail 带 diff 判定与命中路径（gate 记录可检索）。
+    t260904-18 KI-050 声明制：判定口径吃泳道 verify.yaml 声明（fixture 显式声明）。"""
     tmp, wt, g = build_lane_repo()
     try:
         lane_commit(wt, g, "server/dsh/workbench/lib/workbench.js", "bundle()\n")
+        declare_ui_evidence(wt, g)
         (wt / "server" / "admin.py").parent.mkdir(parents=True, exist_ok=True)
         (wt / "server" / "admin.py").write_text(STUB_ADMIN, encoding="utf-8")
         g("add", "-A")
@@ -240,6 +260,7 @@ def test_merge_check_ui_gate_green_with_png():
     tmp, wt, g = build_lane_repo()
     try:
         lane_commit(wt, g, "server/dsh/workbench/lib/workbench.js", "bundle()\n")
+        declare_ui_evidence(wt, g)
         (wt / "server" / "admin.py").parent.mkdir(parents=True, exist_ok=True)
         (wt / "server" / "admin.py").write_text(STUB_ADMIN, encoding="utf-8")
         shots = wt / UI_EVIDENCE_DIR
@@ -261,6 +282,7 @@ def test_merge_check_no_ui_item_for_engine_ticket():
     tmp, wt, g = build_lane_repo()
     try:
         lane_commit(wt, g, "server/dsh/temporal-poc/shared.py", "# engine\n")
+        declare_ui_evidence(wt, g)
         (wt / "server" / "admin.py").parent.mkdir(parents=True, exist_ok=True)
         (wt / "server" / "admin.py").write_text(STUB_ADMIN, encoding="utf-8")
         g("add", "-A")
@@ -269,3 +291,53 @@ def test_merge_check_no_ui_item_for_engine_ticket():
         assert ui_items(res.checks) == [], res.checks
     finally:
         g.rmtree(tmp, ignore_errors=True)
+
+
+# ---------- KI-050 声明制（t260904-18 门③）：merge_check 3.6 声明三态 ----------
+
+def test_merge_check_no_declaration_green_note():
+    """声明缺省 + diff 健康 → 出项 green+可见 note（行为可见非静默，验收③）。"""
+    tmp, wt, g = build_lane_repo()
+    try:
+        lane_commit(wt, g, "server/dsh/workbench/lib/workbench.js", "bundle()\n")
+        # 不写 verify.yaml（声明缺省态）
+        (wt / "server" / "admin.py").parent.mkdir(parents=True, exist_ok=True)
+        (wt / "server" / "admin.py").write_text(STUB_ADMIN, encoding="utf-8")
+        g("add", "-A")
+        g("commit", "-m", "lane: 桩 admin")
+        res = _run_merge_check(wt, [])
+        items = ui_items(res.checks)
+        assert len(items) == 1, res.checks
+        assert items[0]["green"] is True
+        assert "未声明" in items[0]["detail"] and "缺席" in items[0]["detail"]
+    finally:
+        g.rmtree(tmp, ignore_errors=True)
+
+
+def test_merge_check_malformed_declaration_red():
+    """声明畸形（dirs 缺失）→ 红点名（畸形 ≠ 缺省，fail-closed）。"""
+    tmp, wt, g = build_lane_repo()
+    try:
+        lane_commit(wt, g, "server/dsh/temporal-poc/shared.py", "# engine\n")
+        declare_ui_evidence(wt, g, raw="schema: v1\nui_evidence:\n  supply: x\n")
+        (wt / "server" / "admin.py").parent.mkdir(parents=True, exist_ok=True)
+        (wt / "server" / "admin.py").write_text(STUB_ADMIN, encoding="utf-8")
+        g("add", "-A")
+        g("commit", "-m", "lane: 桩 admin")
+        res = _run_merge_check(wt, [])
+        items = ui_items(res.checks)
+        assert len(items) == 1, res.checks
+        assert items[0]["green"] is False
+        assert "dirs" in items[0]["detail"]
+    finally:
+        g.rmtree(tmp, ignore_errors=True)
+
+
+def test_match_ui_paths_prefixes_param():
+    """match_ui_paths 声明参：显式 dirs 生效、空 dirs=零命中、None 回落兼容表。"""
+    assert match_ui_paths(["web/src/a.tsx"], ["web/src/"]) == ["web/src/a.tsx"]
+    assert match_ui_paths(["web/src/a.tsx"], []) == []            # 声明空=闸无口径
+    assert match_ui_paths(["app/src/main.ts"], ["web/src/"]) == []
+    assert match_ui_paths(["app/src/main.ts"]) == ["app/src/main.ts"]  # None 回落（仅兼容）
+    assert is_ui_write_set(["web/src/a.tsx"], ["web/src/"]) is True
+    assert is_ui_write_set(["web/src/a.tsx"], []) is False

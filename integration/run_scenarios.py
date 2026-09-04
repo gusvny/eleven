@@ -365,7 +365,7 @@ SCENARIOS = [
      "模板退役防复活负扫描（宿主令 260904，t260904-08）：写集五面（引擎/tools/integration/两篇指定 docs）对四退役类名+content-pipeline 记号零无豁免活引用——防从历史抄回复活注册、防半截清除（注册删了但 USAGE/示例仍教学可用）；豁免=带退役标注的注释、v1 留存引擎样例（t260904-03 R1 裁定面+shared.py 留存数据表键）、声明保留的 v1 演示面与退役标注面（两 docs/两 README，且场景反向钉标注在位防豁免黑洞）、注册表 intent 文本与 test_t260904_03_t01 历史对照夹具（C1）；扫描器自证红绿（活引用样本红+标注样本豁免+留存键/留存文件规则命中+面完整性哨兵防空面假绿）。与 t260904-03-forced-reading-retired 分工：彼守 KI-035 旧文档映射表零活引用，本守 260904 模板族退役零活引用，对象不同不互替。实现段落地前红属预期，扫描红输出即待清残留清单，arbitrate/merge 期必须绿",
      "python3 integration/t260904-08/sc_template_retire_no_revival.py", "ro"),
     ("t260904-13-ui-diff-judgement",
-     "UI 票判定源=泳道实际 diff×UI 前缀表（t260904-13 KI-044 根治面，灰盒 L2，ro 隔离临时仓）：真 git 仓 merge-base 三点 diff 驱动——粗目录声明（t260904-05 形态：只声明 server/dsh/workbench/ 父目录、实际改会话区 UI 产物）按实际命中（修复面对照：旧声明口径同形态确实漏判，证明修复的票真实存在）；纯引擎 diff 空清单不误伤；声明 UI 但实际无 UI diff 仍为空（按实际不按声明，防 or 实现）；main 侧他人改 UI 不算本票面（t260901-16 三点承诺在 UI 判定面兑现）；混合票只含 UI 前缀路径；脏输入（None/非列表/非字符串/绝对路径/含 ..）不抛按未命中（developer L1 畸形用例随实现重写，本条=持久契约面）；ui_changed_paths activity 接线结构锁（锚 _merge_base_ref 不回落 main 字面、走共享判定辅助、git 失败 err 进 detail fail-closed、进 worker 注册清单）。与 sc_ki044_merge_gate_ui_item（闸输出合同）/sc_ki044_lane_patchgate_wiring（编排接线）intent 不同面；与 developer L1（白盒纯函数、禁真 git）不同层。实现已随本票落地全绿；实现回退或契约破面则红，arbitrate/merge 期必须绿",
+     "UI 票判定源=泳道实际 diff×UI 前缀表（t260904-13 KI-044 根治面，灰盒 L2，ro 隔离临时仓）：真 git 仓 merge-base 三点 diff 驱动——粗目录声明（t260904-05 形态：只声明 server/dsh/workbench/ 父目录、实际改会话区 UI 产物）按实际命中（修复面对照：旧声明口径同形态确实漏判，证明修复的票真实存在）；纯引擎 diff 空清单不误伤；声明 UI 但实际无 UI diff 仍为空（按实际不按声明，防 or 实现）；main 侧他人改 UI 不算本票面（t260901-16 三点承诺在 UI 判定面兑现）；混合票只含 UI 前缀路径；脏输入（None/非列表/非字符串/绝对路径/含 ..）不抛按未命中（developer L1 畸形用例随实现重写，本条=持久契约面）；ui_changed_paths activity 接线结构锁（锚 _merge_base_ref 不回落 main 字面、走共享判定辅助、git 失败 err 进 detail fail-closed、进 worker 注册清单）。与 sc_ki044_merge_gate_ui_item（闸输出合同）/sc_ki044_lane_patchgate_wiring（编排接线）intent 不同面；与 developer L1（白盒纯函数、禁真 git）不同层。t260904-18 增量锁（T18 段，声明制迁移面）：谓词接受显式声明 dirs、None 回落 legacy 表=冻结/重放分支数据源、单参调用形态不碎。实现已随本票落地全绿；实现回退或契约破面则红，arbitrate/merge 期必须绿（T18 段：t260904-18 实现落地前红属预期）",
      "python3 integration/t260904-13/sc_ki044_ui_diff_judgement.py", "ro"),
     ("t260904-13-merge-gate-ui-item",
      "merge_check 3.6 UI 证据闸输出契约（t260904-13 KI-044 闸面，灰盒 L2）：判定源退役声明口径（3.6 段不再吃 is_ui_write_set(args.write_set)——粒度越粗关卡越弱的 t260904-05 直过根因）、换共享判定辅助（两处同源的闸侧兑现）、复用第 3 项已解析泳道基线 wl_base（t260901-18 假阳性教训不回潮）、命中路径落 check detail「按 diff 判定」留痕+capture.mjs 红灯处置指引不丢、git 层故障该项红不静默（KI-046 同族「验证承诺静默蒸发」堵洞面）、MergeCheckArgs.write_set 字段保留（旧实例回放不破 Args 形状）、selfcheck 旧源码锁退役+新判定源/patched 门锁在场（防改码忘改锁的假绿网）。temporalio 泳道不可用→源码契约锁（t05 同族落地形态；t05 锁 diff base 各归各位，本条锁 UI 判定源与闸文案，不同面）。实现已随本票落地全绿；实现回退或契约破面则红，arbitrate/merge 期必须绿",
@@ -415,6 +415,18 @@ SCENARIOS = [
     ("t260904-15-project-ui-settings-isolation",
      "设置弹层信息面+隔离详情+空注册表首接（t260904-15，浏览器捕获，与场景② intent 不同面：守信息面/降级口径/空表面）：设置弹层只读 key/显示名/根目录如实呈现；票计数 Temporal 不可达降级「—」类中性提示不红不谎报（验收11 降级口径）；体检区中性提示不含「无黄牌」谎报（R2b 降档口径）；danger 摘除入口在位；隔离红行点击见原因含 project.yaml 定位+修复指路（验收11）；空注册表 GET /wf/projects 200 空清单不 500、零分组仍渲染接入行且首接走通（验收9 空表面）。实现落地前红属预期；playwright-core 缺失=ENV_FAIL 点名（KI-036 守卫，不假绿）",
      "node integration/t260904-15/sc_project_ui_settings_isolation.mjs", "ro"),
+
+    # ---- t260904-18：三门新契约（refs 建单闸 / files_changed 回执形状 / ui_evidence 声明制）----
+
+    ("t260904-18-refs-gate",
+     "建工单背景文件闸（t260904-18 门①，宿主令「没提交的 note 不让建工单」+知识库设计 §1 工单引用铁律，灰盒 L2/L3）：票面 refs 引用未提交背景文件=建单即拒且报错逐个点名文件——三分类（工作区脏改/暂存未提交=已跟踪≠已提交/不存在）经真 git 夹具仓 HEAD 态驱动；畸形引用（绝对路径/含 ..、非列表字符串=逐字符假护栏形态）拒收点名不静默清洗；拒收路径零 Temporal 接触（校验接线先于 cmd_ticket_start 首个 _connect 的源码序锁；存量票无 refs 不追溯=backlog 口径）；闸回执形状不锚定（布尔/元组/dict/异常皆容错解释）只锚「拒+点名」。与 t260904-02-ticket-start-anchor（project 锚定闸 KI-032）intent 不同面。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio 缺失=ENV_FAIL 点名（入口装配腿），stdlib 闸行为腿照跑",
+     "PY=server/dsh/temporal-poc/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260904-18/sc_t260904_18_refs_gate.py", "ro"),
+    ("t260904-18-ki049-write-set-contract",
+     "files_changed 回执形状×写集刷新缝上契约+机制活性巡检（t260904-18 门②，KI-049 修复面②③④，灰盒 L2）：以真实 agent 回执形状喂解析→刷新链（mock 填满字段掩盖过的缝）——字符串回执（「叙述写了补列、字段没填」姊妹形态）不得在解析层毁形成单字符列表（毁形强转三解析点退役=源码负锁，normalize 拒形 shape=malformed）；畸形与空数组在消费点=可见红 meta.write_set_refresh_fault+告警点名+不调 refresh（写集零污染）且不得再出「写集已随方案定稿刷新」中性行冒充成功（报错必须精确）；None 维持跳过语义（selfcheck 在场锁共存）；no_file_changes 在案豁免；合法非空回执→「授权扩展」日志非零（dead-man 开关：机制全史 0 次生效的死亡形态从此有断言网）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio 缺失=ENV_FAIL 点名（解析缝/消费点行为腿），stdlib 链腿照跑",
+     "PY=server/dsh/temporal-poc/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260904-18/sc_t260904_18_ki049_write_set_contract.py", "ro"),
+    ("t260904-18-ui-evidence-declaration",
+     "ui_evidence 声明制（t260904-18 门③，KI-050，灰盒 L2/L3）：UI 截图证据目录由项目声明（verify.yaml 顶层 ui_evidence）——verify_lane 白名单收该键（未知顶层键 fail-closed 雷 t260903-11 同位不触发）、dirs 畸形=红点名字段（契约②三态总纲：畸形≠缺省）、缺省=merge_check 截图项 green+可见 note「未声明」（行为可见非静默，非 SKIP 非假绿）、有声明+diff 命中=无 png 仍红（闸没松）、diff 故障=红不因缺省豁免（对照腿）、有声明+未命中=不出项（拓扑级缺席）；load_ui_evidence 三态；sandbar 五路径迁入仓根 verify.yaml（迁移等价 rod：声明集合≡legacy 表）；review_gate 接线源码锁（UI_EVIDENCE_DECL_PATCH_ID+meta 预载 ui_evidence_dirs）。与 t260904-13 三场景（判定源/闸输出/接线编排，KI-044 面）intent 不同面：本条守声明制新契约面；与 contract-v11-regression-rods（v1.1 勘误面）不同层。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio 缺失=ENV_FAIL 点名（merge_check 行为腿），verify_lane/声明腿照跑",
+     "PY=server/dsh/temporal-poc/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260904-18/sc_t260904_18_ui_evidence_declaration.py", "ro"),
 ]
 
 CMD_TIMEOUT = 900

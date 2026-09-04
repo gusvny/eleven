@@ -16,6 +16,9 @@
 
 结果文件格式（写进派活指令的交付契约）：
   {"status":"ok|failed","summary":…,"deliverables":[…],"files_changed":[…],"evidence":…}
+  t260904-18 KI-049 门②：files_changed 必须是**非空路径数组**——空数组或写成字符串
+  （会被逐字符迭代成单字符假列表）都会让写集跟随方案刷新当场红灯（meta
+  write_set_refresh_fault），确无文件改动的票走 allow_empty_write_set 建票声明。
 
 worker 代落盘（260824，t260824-01/-02 两连踩后的确定性收口）：headless agent 的
 沙箱写不了真 .git（worktree 的 .git 是指向主库 .git/worktrees/<id> 的 gitfile，
@@ -80,9 +83,13 @@ from shared import (
     TEMPLATE_CLASS_NAMES,
     UI_EVIDENCE_DIR,
     EVIDENCE_DIR,
+    load_ui_evidence,
+    normalize_files_changed,
     UiChangedPathsArgs,
     UiChangedPathsResult,
     UiEvidenceArgs,
+    UiEvidenceDeclArgs,
+    UiEvidenceDeclResult,
     UiEvidenceResult,
     WorkspacePrep,
     WorkspacePrepResult,
@@ -461,12 +468,17 @@ def _read_result(path: Path) -> Optional[StageResult]:
         raw = json.loads(path.read_text("utf-8"))
     except Exception:
         return None
+    # files_changed 保形归一（t260904-18 KI-049 门② R1）：不用 [str(x) for x in …]
+    # 毁形强转——字符串回执会被逐字符迭代成单字符假列表静默绕闸；形状由
+    # normalize_files_changed 定形（absent/ok/malformed），消费点据此可见红。
+    fc, fc_shape = normalize_files_changed(raw.get("files_changed"))
     return StageResult(
         status=str(raw.get("status") or "ok"),
         summary=str(raw.get("summary") or ""),
         report=str(raw.get("report") or ""),
         deliverables=[str(x) for x in (raw.get("deliverables") or [])],
-        files_changed=[str(x) for x in (raw.get("files_changed") or [])],
+        files_changed=fc,
+        files_changed_shape=fc_shape,
         evidence=str(raw.get("evidence") or ""),
     )
 
@@ -876,13 +888,21 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
             return cached
 
     if os.environ.get("SUYOU_AGENT_STUB") == "1":
-        # 自测/演示 stub：自写结果文件即返回（不起 agent 进程，零模型调用）
+        # 自测/演示 stub：自写结果文件即返回（不起 agent 进程，零模型调用）。
+        # t260904-18 条件项 2：stub 支持显式 files_changed（env SUYOU_AGENT_STUB_FILES，
+        # 逗号分隔路径）——缺省仍恒 []（stub 如实「什么都没做」），但缺省回执过
+        # KI-049 门②新闸会常亮 write_set_refresh_fault 注记；需要全链演示/自测
+        # 写集刷新的桩链路显式给清单，闸判定本身不放松。
+        stub_files = [x.strip() for x in
+                      os.environ.get("SUYOU_AGENT_STUB_FILES", "").split(",")
+                      if x.strip()]
         stub = StageResult(
             status="ok",
             summary="[stub] %s 段完成（SUYOU_AGENT_STUB=1，第 %d 次进段）"
                     % (args.stage_id, args.gen),
             report="[stub] 做了什么：无（stub 演示）\n\n怎么验证的：无",
-            deliverables=[], files_changed=[],
+            deliverables=[], files_changed=stub_files,
+            files_changed_shape="ok",  # 恒合法形状；空清单的 emptiness 判定在消费点
             evidence="stub evidence: prompt %d 字" % len(args.prompt))
         rfile.write_text(json.dumps({
             "status": stub.status, "summary": stub.summary, "report": stub.report,
@@ -1485,7 +1505,8 @@ def _merge_base_ref(branch: str, repo: Path) -> Tuple[str, str]:
     return ref, ""
 
 
-def _ui_diff_paths(lane_repo: Path, wl_base: str, branch: str) -> Tuple[List[str], str]:
+def _ui_diff_paths(lane_repo: Path, wl_base: str, branch: str,
+                   prefixes: Any = None) -> Tuple[List[str], str]:
     """UI 票判定的 diff 侧共享谓词（KI-044 根修，t260904-13）：
     `git diff --name-only <wl_base>...branch` 的实际改动路径 × shared.match_ui_paths
     前缀表 → (命中 UI 路径, 错误留痕)。
@@ -1493,6 +1514,11 @@ def _ui_diff_paths(lane_repo: Path, wl_base: str, branch: str) -> Tuple[List[str
     「两处调用同一源」的机制保证：ui_changed_paths activity 与 merge_check 3.6 都走
     本函数——谓词入口只有 match_ui_paths 一处，diff 口径（三点/锚泳道仓/基线来源）
     也只有这里一份，改口径不会两边漂。
+
+    prefixes（t260904-18 KI-050 门③）：UI 口径前缀表=项目声明（泳道根 verify.yaml
+    ui_evidence.dirs，调用方 load_ui_evidence 装载后显式传入）；None 仅限兼容回落
+    （match_ui_paths 同参语义）——两处活调用点（ui_changed_paths / merge_check 3.6）
+    都必须传声明，不许单参新写。
 
     wl_base 由调用方用 _merge_base_ref 求得（merge-base(main, branch) 锚泳道仓，
     t260901-18/t260903-11 同族；不回落字面 main——两点 diff 下泳道落后即误判）。
@@ -1507,7 +1533,7 @@ def _ui_diff_paths(lane_repo: Path, wl_base: str, branch: str) -> Tuple[List[str
             wl_base, branch, p.returncode,
             ((p.stderr or p.stdout or "").strip())[-300:])
     files = [ln.strip() for ln in (p.stdout or "").splitlines() if ln.strip()]
-    return match_ui_paths(files), ""
+    return match_ui_paths(files, prefixes), ""
 
 
 def _parse_conflict_files(merge_tree_output: str) -> List[str]:
@@ -1752,6 +1778,15 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     #     声明口径 ≠ 实际写面）换成**实际 diff 路径**：_ui_diff_paths 与
     #     ui_changed_paths activity 同源（谓词+diff 口径双同源），基线复用第 3 项
     #     已算出的 wl_base（异常未及赋值时 fail-closed 自算并留痕）。
+    #     KI-050 声明制（t260904-18 门③）：UI 口径前缀表=项目声明（泳道根
+    #     verify.yaml ui_evidence.dirs，load_ui_evidence 装载）——本 activity 内
+    #     读盘（activity 侧读盘合法），无声明的项目无此闸。四分支钉死：
+    #       ① 声明在场 + diff 命中：现状红绿判定（命中无 png → 红）；
+    #       ② 声明在场 + diff 未命中：不出项（现状降噪口径不变）；
+    #       ③ 声明缺省 + diff 健康：出项 green+可见 note（「未声明=截图证据项按
+    #          项目声明缺席」——非 SKIP 非假绿，行为可见）；
+    #       ④ 声明畸形 或 diff 故障：红 fail-closed（畸形点名字段；diff 故障是
+    #          机制故障≠「无 UI 面」，声明缺省不吸收机制故障）。
     #     diff 命中 UI 路径（或 diff 本身故障）而无 png → 红；两时点 diff 变化由此
     #     兜住——ui_evidence 段拍完又改 UI，本闸重算必红，红灯交 workflow 转
     #     blocked 等人（人工 rework 以 ui_evidence 为合法 target 补拍），证据必须
@@ -1769,22 +1804,50 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
                          % ("失败 fail-closed" if not base_36 else "取 %s" % base_36[:7]))
             if base_36 and base_err:  # 自算带畸形留痕，不静默
                 base_note = "（wl_base 此处自算，带畸形留痕：%s）" % base_err[-120:]
-        ui_paths, diff_err = _ui_diff_paths(lane_repo, base_36, args.branch)
-        judge = "按 diff 判定（%s...%s）%s：%s" % (
-            (base_36 or "?")[:7], args.branch, base_note,
-            ("命中 %d 个 UI 路径：%s" % (len(ui_paths), "、".join(ui_paths[:8]))) if ui_paths
-            else ("diff 故障 fail-closed：%s" % (diff_err or "基线缺失")))
-        if ui_paths or diff_err or not base_36:
-            shots_dir = wt / UI_EVIDENCE_DIR
-            pngs = sorted(shots_dir.glob("*.png")) if shots_dir.is_dir() else []
-            ui_gate_red = not pngs
+        # 声明读泳道根（wt）——与 verify_lane code 道同口径（path=泳道根），
+        # 不读 lane_repo（主仓根：main 侧声明改动会污染泳道闸判定）
+        decl_mode, decl_dirs, decl_note = load_ui_evidence(wt)
+        if decl_mode == "malformed":
+            # ④a 声明畸形：fail-closed 红点名字段（畸形 ≠ 缺省，契约②三态总纲）
             checks.append({
-                "item": "UI 截图证据（%s）" % UI_EVIDENCE_DIR,
-                "green": not ui_gate_red,
-                "detail": ("%s｜%d 张截图在位：%s" % (judge, len(pngs), "、".join(p.name for p in pngs[:5])))
-                          if pngs else
-                          ("%s｜UI 票缺截图证据：跑 server/dsh/ui-check/capture.mjs "
-                           "--out <worktree>/%s（worker 代跑，只读控制台页面）" % (judge, UI_EVIDENCE_DIR))})
+                "item": "UI 截图证据（ui_evidence 声明）",
+                "green": False,
+                "detail": "ui_evidence 声明畸形 fail-closed：%s（修 verify.yaml 的 "
+                          "ui_evidence.dirs 或删声明走缺省态）" % decl_note})
+        else:
+            ui_paths, diff_err = _ui_diff_paths(lane_repo, base_36, args.branch, decl_dirs)
+            diff_fault = bool(diff_err or not base_36)
+            if decl_mode == "absent" and not diff_fault:
+                # ③ 声明缺省 + diff 健康：green + 可见 note（行为可见非静默）
+                checks.append({
+                    "item": "UI 截图证据（ui_evidence 声明）",
+                    "green": True,
+                    "detail": "ui_evidence 未声明：截图证据项按项目声明缺席"
+                              "（KI-050 声明制；要启用截图闸在 verify.yaml 声明 "
+                              "ui_evidence.dirs）"})
+            elif decl_mode == "absent" and diff_fault:
+                # ④b 声明缺省但 diff 故障：机制故障不吸收，红
+                checks.append({
+                    "item": "UI 截图证据（ui_evidence 声明）",
+                    "green": False,
+                    "detail": "ui_evidence 未声明且 diff 故障 fail-closed：%s" % (diff_err or "基线缺失")})
+            elif ui_paths or diff_fault:
+                # ① 声明在场 + 命中（或在场下 diff 故障）：现状红绿判定
+                judge = "按 diff 判定（%s...%s，口径=%d 声明目录）%s：%s" % (
+                    (base_36 or "?")[:7], args.branch, len(decl_dirs), base_note,
+                    ("命中 %d 个 UI 路径：%s" % (len(ui_paths), "、".join(ui_paths[:8]))) if ui_paths
+                    else ("diff 故障 fail-closed：%s" % (diff_err or "基线缺失")))
+                shots_dir = wt / UI_EVIDENCE_DIR
+                pngs = sorted(shots_dir.glob("*.png")) if shots_dir.is_dir() else []
+                ui_gate_red = not pngs
+                checks.append({
+                    "item": "UI 截图证据（%s）" % UI_EVIDENCE_DIR,
+                    "green": not ui_gate_red,
+                    "detail": ("%s｜%d 张截图在位：%s" % (judge, len(pngs), "、".join(p.name for p in pngs[:5])))
+                              if pngs else
+                              ("%s｜UI 票缺截图证据：跑 server/dsh/ui-check/capture.mjs "
+                               "--out <worktree>/%s（worker 代跑，只读控制台页面）" % (judge, UI_EVIDENCE_DIR))})
+            # ② 声明在场 + 未命中 + diff 健康：不出项（降噪，现状口径不变）
     except Exception as e:
         checks.append({"item": "UI 截图证据", "green": False, "detail": "证据闸异常: %s" % e})
 
@@ -2687,6 +2750,22 @@ def _ui_capture_stub(args: UiEvidenceArgs, shots_dir: Path) -> UiEvidenceResult:
 
 
 @activity.defn
+async def ui_evidence_decl(args: UiEvidenceDeclArgs) -> UiEvidenceDeclResult:
+    """ui_evidence 声明预载（t260904-18 KI-050 门③）：读泳道根 verify.yaml 的
+    ui_evidence 声明，回三态（ok/absent/malformed）交 workflow 落 meta
+    （读盘在 activity、workflow 只读 meta=重放安全）。失败不抛：读不了=
+    absent 态（消费点按「声明缺省」口径兜底——声明读取失败≠项目未声明）。"""
+    wt = Path(args.worktree) if args.worktree else REPO_ROOT
+    if not wt.is_absolute():
+        wt = REPO_ROOT / wt
+    lane_repo = _lane_repo_root(wt)
+    mode, dirs, note = load_ui_evidence(wt)  # 声明读泳道根（verify_lane 同口径）
+    activity.logger.info("[%s] ui_evidence 声明：%s（%d 目录）%s",
+                         args.ticket_id, mode, len(dirs), note)
+    return UiEvidenceDeclResult(mode=mode, dirs=dirs, note=note)
+
+
+@activity.defn
 async def ui_changed_paths(args: UiChangedPathsArgs) -> UiChangedPathsResult:
     """UI 票判定换 diff 源（KI-044 根修，t260904-13）：按泳道分支**实际改动路径**
     判是不是 UI 票——`git diff --name-only <merge-base>...branch` × UI_WRITE_PREFIXES，
@@ -2704,19 +2783,30 @@ async def ui_changed_paths(args: UiChangedPathsArgs) -> UiChangedPathsResult:
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
     lane_repo = _lane_repo_root(wt)
+    # t260904-18 KI-050 门③：判定口径=项目声明（泳道根 verify.yaml ui_evidence.dirs）。
+    # malformed → fail-closed（ui_paths 空 + detail 带错误，调用方按「UI 票待证」处理）；
+    # absent → 口径空（任何 diff 都不命中=非 UI 票，不拍——无声明项目无截图闸，
+    # detail 留痕可见）。
+    decl_mode, decl_dirs, decl_note = load_ui_evidence(wt)  # 声明读泳道根（同上口径）
+    if decl_mode == "malformed":
+        detail = "ui_changed_paths fail-closed：ui_evidence 声明畸形：%s" % decl_note
+        activity.logger.info("[%s] %s", args.ticket_id, detail)
+        return UiChangedPathsResult(ui_paths=[], detail=detail)
+    decl_suffix = "" if decl_mode == "ok" else "；ui_evidence 未声明（截图闸按项目声明缺席）"
     wl_base, wl_err = _merge_base_ref(args.branch, lane_repo)
     if not wl_base:
         detail = "ui_changed_paths fail-closed：merge-base 解析失败：%s" % wl_err
         activity.logger.info("[%s] %s", args.ticket_id, detail)
         return UiChangedPathsResult(ui_paths=[], detail=detail)
-    ui_paths, diff_err = _ui_diff_paths(lane_repo, wl_base, args.branch)
+    ui_paths, diff_err = _ui_diff_paths(lane_repo, wl_base, args.branch, decl_dirs)
     if diff_err:
         detail = "ui_changed_paths fail-closed：%s" % diff_err
         activity.logger.info("[%s] %s", args.ticket_id, detail)
         return UiChangedPathsResult(ui_paths=[], detail=detail)
-    detail = ("按 diff 判定（merge-base %s...%s，锚泳道仓 %s）：命中 %d 个 UI 路径%s"
-              % (wl_base[:7], args.branch, lane_repo.name, len(ui_paths),
-                 ("：%s" % "、".join(ui_paths[:8])) if ui_paths else "（非 UI 票）"))
+    detail = ("按 diff 判定（merge-base %s...%s，锚泳道仓 %s，口径=%d 声明目录）：命中 %d 个 UI 路径%s%s"
+              % (wl_base[:7], args.branch, lane_repo.name, len(decl_dirs), len(ui_paths),
+                 ("：%s" % "、".join(ui_paths[:8])) if ui_paths else "（非 UI 票）",
+                 decl_suffix))
     activity.logger.info("[%s] %s", args.ticket_id, detail)
     return UiChangedPathsResult(ui_paths=ui_paths, detail=detail)
 
@@ -2862,13 +2952,20 @@ async def _run_scenarios(wt: Path, ticket_id: str) -> IntegrationRunResult:
     """薄壳（宿主令 t260902 薄壳化）：声明读取/命令执行/契约解析全在 verify_lane lane=integ
     （单份实现+单份解析器），本函数只下单+把工具 JSON 翻译成 IntegrationRunResult
     （字段口径不变：ran/passed/failed/details[{name,cmd,exit,output_tail}]，arbitrate 无感）。"""
-    admin = Path(__file__).resolve().parents[2] / "admin.py"
+    # 泳道工具链副本优先（t260904-18 code-fault 归因）：integ 道以**泳道为被检对象**，
+    # 装载泳道声明必须用泳道自身工具链——worker 侧（主树）副本落后于泳道时（声明先行
+    # 的票合并前是常态），主树 verify_lane 白名单不认泳道新顶层键 → 整道 fail-closed
+    # ran=0。与 merge_check verify 项（:1723 泳道副本优先、worker 副本仅跨项目无引擎
+    # 布局时回落）同一原则——此前 integ 薄壳漏接该先例=两道机械闸行为不一致。
+    lane_admin = wt / "server" / "admin.py"
+    admin = str(lane_admin if lane_admin.is_file() else
+                Path(__file__).resolve().parents[2] / "admin.py")
     # t260903-09 实雷（宿主首诊命中）：async 活动里禁止阻塞 subprocess.run——
     # 曾把 worker 事件循环冻满整套件时长，查询全体 8s 超时（诊断笔记
     # notes/diag-query-starvation.md）。全 async 化：create_subprocess + wait_for，
     # 超时先杀再报。
     p = await asyncio.create_subprocess_exec(
-        "python3", str(admin), "call", "verify_lane",
+        "python3", admin, "call", "verify_lane",
         json.dumps({"lane": "integ", "path": str(wt)}),
         cwd=str(wt), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
@@ -3050,6 +3147,9 @@ ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     # merge_check 3.6 再算一次定「要不要证据」，两处同源 _ui_diff_paths。漏注册=worker
     # 不认、运行时才暴露，selfcheck 有注册断言（selfcheck_ui_acceptance B 段）。
     ui_changed_paths,
+    # KI-050 声明制（t260904-18 门③）：ui_evidence 声明预载（泳道起跑读泳道根
+    # verify.yaml 落 meta，review_gate patched 分支消费）。漏注册同上=运行时才暴露。
+    ui_evidence_decl,
     # 集成测试机制（t260829-07 后续）：settle_lane=汇合点统一落盘；
     # run_integration_tests=机械测试步（零 LLM）；arbitrate/acceptance_walkthrough
     # 为 integration 专用 agent 步（prompt 由 workflow 组好，走会话复用），

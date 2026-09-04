@@ -90,6 +90,7 @@ TOOL = {
             'title': {'type': 'string'},
             'lane': {'type': 'string', 'description': '工作位置：主树 或 泳道路径（.lane/xxx，旧 .worktrees 兼容）；缺省取模板 lane'},
             'write_set': {'type': 'array', 'items': {'type': 'string'}, 'description': '允许写的路径白名单（glob 口径文字描述即可）'},
+            'refs': {'type': 'array', 'items': {'type': 'string'}, 'description': '票面引用的背景文件清单（仓库相对路径；t260904-18 门①：必须已提交且干净 HEAD 态，未提交/带脏改=拒建并点名文件；缺省不校验）'},
             'allow_empty_write_set': {'type': 'boolean', 'description': 'create 显式声明本票无文件改动（t260901-01）：空写集 + 此声明才放行建票，meta 记 no_file_changes；有文件改动请传 write_set，勿用此声明绕过白名单护栏'},
             'acceptance': {'type': 'array', 'items': {'type': 'string'}, 'description': '实例验收增项（追加到模板首段清单，A5.5）'},
             'deliverables': {'type': 'string', 'description': '交接物格式约定'},
@@ -363,6 +364,9 @@ def _create(a):
         'proposal_id': a.get('proposal_id') or '',
         'book_path': a.get('book_path') or '',
         'write_set': write_set,
+        # 门①背景文件闸（t260904-18）：只透传，校验单点在 client.py ticket-start
+        # （_connect() 之前），薄壳不第二真源。
+        'refs': list(a.get('refs') or []),
         # t260901-01「无文件改动」显式声明：只透传，不代办——校验单点在 client.py
         # （validate_write_set_args：空写集+声明才放行，meta 记 no_file_changes）。
         'allow_empty_write_set': bool(a.get('allow_empty_write_set')),

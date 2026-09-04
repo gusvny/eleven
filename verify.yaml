@@ -40,3 +40,19 @@ integration:
       cmd: 'MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/dsh/ui-check/node_modules/playwright-core"; [ -d "$SRC" ] || { echo "ENV_FAIL: 主树 playwright-core 缺失：$SRC"; exit 1; }; mkdir -p server/dsh/ui-check/node_modules; DST=server/dsh/ui-check/node_modules/playwright-core; [ -e "$DST" ] || ln -s "$SRC" "$DST"; [ -e "$DST/package.json" ] || { echo "ENV_FAIL: 软链后不可解析：$DST"; exit 1; }'
     - need: temporal CLI（泳道 bin 软链主树 bin/temporal，t260904-14 真票腿）
       cmd: 'MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/dsh/temporal-poc/bin/temporal"; [ -x "$SRC" ] || { echo "ENV_FAIL: 主树 temporal CLI 缺失：$SRC"; exit 1; }; mkdir -p server/dsh/temporal-poc/bin; [ -e server/dsh/temporal-poc/bin/temporal ] || ln -s "$SRC" server/dsh/temporal-poc/bin/temporal; server/dsh/temporal-poc/bin/temporal --version >/dev/null'
+
+# t260904-18 KI-050 门③：ui_evidence 声明制——合并闸 UI 截图证据的目录由项目声明。
+# 原 shared.UI_WRITE_PREFIXES 五路径硬编码迁移即数据（活路径一律吃本声明；该常量仅
+# 剩旧票重放/冻结分支兼容回落）。无声明项目=截图证据项 green+可见 note（按声明缺席，
+# 行为可见非静默）；声明畸形=fail-closed 红（verify_lane _validate_cfg / merge_check
+# 3.6 双点）。字段级定义：docs/design/sandbar项目接入契约v1.md ②a。
+ui_evidence:
+  dirs:
+    - server/dsh/workbench/src/client/
+    - server/dsh/workbench/lib/
+    - server/dsh/providers/src/client/
+    - app/src/
+    - app/index.html
+  # supply 保留字段（契约②a v2.0 形状）：本版引擎不消费——声明不构成截图供给保障
+  # （截图供给保障在 integration.supply 侧，见上）。
+  supply: playwright-core

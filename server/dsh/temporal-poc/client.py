@@ -57,6 +57,7 @@ from shared import (
     ticket_data_dir,
     ticket_search_attributes,
     ticket_task_queue,
+    validate_background_refs,
     validate_epic_code,
     validate_write_set_args,
 )
@@ -438,10 +439,23 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         args.get("write_set"), bool(args.get("allow_empty_write_set")))
     if not ok_ws:
         return _err(ws_err)
+    # 门①背景文件闸（t260904-18；知识库设计.md §1 工单引用铁律，260904 宿主令
+    # 「没提交的 note 不让建工单」）：票面引用的背景文件必须已提交且干净（HEAD 态
+    # ——泳道读的是 HEAD 冻结副本，脏改版 agent 读不到）。插在 _connect() 之前：
+    # 拒收路径不依赖 Temporal 可达。refs 缺省=不校验（存量在飞票不追溯）。
+    refs_raw = args.get("refs")
+    refs = [str(x).strip() for x in refs_raw] if isinstance(refs_raw, list) else refs_raw
+    try:
+        ok_refs, refs_err = validate_background_refs(refs, project_root)
+    except Exception as e:  # 校验器自身异常也拒收（fail-closed，不静默放行）
+        return _err("背景文件闸故障（fail-closed）：%s: %s" % (type(e).__name__, e))
+    if not ok_refs:
+        return _err("ticket-start 拒收：%s" % refs_err)
     inp = TicketInput(
         ticket_id=tid, template_id=tpl,
         project=project,
         epic=epic,
+        refs=[str(x).strip() for x in (refs_raw or [])] if isinstance(refs_raw, list) else [],
         title=str(args.get("title") or ""),
         lane=lane,
         workspace=workspace,

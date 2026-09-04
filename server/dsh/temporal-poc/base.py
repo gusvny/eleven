@@ -50,6 +50,7 @@ with workflow.unsafe.imports_passed_through():
         Stage,
         StageResult,
         TicketInput,
+        normalize_files_changed,
         WorkspacePrep,
         WorkspacePrepResult,
         agent_log_for,
@@ -280,17 +281,25 @@ class TicketWorkflowBase:
             start_to_close_timeout=AGENT_TO, heartbeat_timeout=HEARTBEAT_TO,
             retry_policy=RETRY)
         # 按名调用无返回类型注解，dataclass 回包以 dict 形态回来——归一成 StageResult
-        res = raw if isinstance(raw, StageResult) else StageResult(
-            status=str(raw.get("status") or "ok"),
-            summary=str(raw.get("summary") or ""),
-            report=str(raw.get("report") or ""),
-            deliverables=[str(x) for x in (raw.get("deliverables") or [])],
-            files_changed=[str(x) for x in (raw.get("files_changed") or [])],
-            evidence=str(raw.get("evidence") or ""))
+        # files_changed 保形归一（t260904-18 KI-049 门② R1）：形状随回执进 results
+        # 字面（消费点 dev_lane 读 results dict，不读 StageResult 本体）。
+        if isinstance(raw, StageResult):
+            res = raw
+        else:
+            _fc, _fc_shape = normalize_files_changed(raw.get("files_changed"))
+            res = StageResult(
+                status=str(raw.get("status") or "ok"),
+                summary=str(raw.get("summary") or ""),
+                report=str(raw.get("report") or ""),
+                deliverables=[str(x) for x in (raw.get("deliverables") or [])],
+                files_changed=_fc,
+                files_changed_shape=_fc_shape,
+                evidence=str(raw.get("evidence") or ""))
         self.results[st.id] = {
             "status": res.status, "summary": res.summary, "report": res.report,
             "deliverables": list(res.deliverables),
             "files_changed": list(res.files_changed),
+            "files_changed_shape": res.files_changed_shape,
             "evidence": res.evidence, "gen": gen}
         return res
 

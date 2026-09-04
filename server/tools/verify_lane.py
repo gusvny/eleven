@@ -290,9 +290,22 @@ def _parse_verify_yaml(text):
 
 def _validate_cfg(cfg):
     """结构校验：一切残缺/未知键 raise ValueError（畸形态 fail-closed，不静默过滤）。"""
-    unknown = set(cfg) - {'schema', 'lanes', 'integration'}
+    # t260904-18 KI-050 门③：顶层白名单随 ui_evidence 声明键同步（与契约②a
+    # append 同票；不加白名单=项目一声明整道 fail-closed，自家声明挡死自家合并）。
+    unknown = set(cfg) - {'schema', 'lanes', 'integration', 'ui_evidence'}
     if unknown:
         raise ValueError('未知顶层键: %s' % '、'.join(sorted(unknown)))
+    ue = cfg.get('ui_evidence')
+    if ue is not None:
+        # 最小形态校验（三态总纲：畸形=fail-closed；缺省=green+可见 note 由
+        # merge_check 3.6 出项，不在本道）。dirs 须为非空字符串列表；supply 为
+        # 保留字段本版引擎不消费，不做值校验（t260904-12 乙段票面）。
+        if not isinstance(ue, dict):
+            raise ValueError('ui_evidence 结构不合法：须为映射（含 dirs 列表）')
+        dirs = ue.get('dirs')
+        if not isinstance(dirs, list) or not dirs or \
+                any(not isinstance(d, str) or not d.strip() for d in dirs):
+            raise ValueError('ui_evidence.dirs 须为非空字符串列表（UI 截图证据目录声明）')
     lanes = cfg.get('lanes', {})
     if not isinstance(lanes, dict):
         raise ValueError('lanes 结构不合法')

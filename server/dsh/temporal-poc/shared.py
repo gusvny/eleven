@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import pathlib
 import re
+import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -1086,6 +1087,10 @@ class TicketInput:
     proposal_id: str = ""
     book_path: str = ""
     write_set: List[str] = field(default_factory=list)
+    # t260904-18 门①（知识库设计.md §1 工单引用铁律，260904 宿主令）：票面引用的
+    # 背景文件清单（仓库相对路径）——建票入口 validate_background_refs 已校验
+    # 「已提交且干净（HEAD 态）」，此处原样带入作票面记录；缺省空=旧票不追溯。
+    refs: List[str] = field(default_factory=list)
     # t260829-07 写集生命周期：建票显式声明「本票无文件改动」（allow_empty_write_set
     # 才可能置真）——机械复核闸据此跳过「泳道 0 commit」判定。
     no_file_changes: bool = False
@@ -1113,7 +1118,36 @@ class StageResult:
     report: str = ""
     deliverables: List[str] = field(default_factory=list)
     files_changed: List[str] = field(default_factory=list)
+    # t260904-18 KI-049 门②：files_changed 的原始形状（解析层保形，消费点判 emptiness
+    # 政策）。三态：absent=回执无此字段（旧票/旧回执兼容）；ok=list[str]；
+    # malformed=字段在但不是字符串列表（字符串/数字/含非串元素——解析层拒收毁形，
+    # 消费点据此可见红，杜绝「字符串逐字符迭代成单字符假列表」绕过新闸）。
+    # 带默认值：旧 RUNNING 实例重放历史事件无此字段不破回放。
+    files_changed_shape: str = "absent"
     evidence: str = ""
+
+
+def normalize_files_changed(raw: Any):
+    """create_plan 回执 files_changed 保形归一（纯函数，t260904-18 KI-049 门② R1）。
+
+    返回 (files, shape)：shape ∈ "absent" | "ok" | "malformed"。
+      - raw is None → ([], "absent")：回执无字段（旧票回落，消费点按跳过语义）；
+      - raw 是列表且全为字符串 → (strip 去空后清单, "ok")：emptiness（是否空数组）
+        政策留给消费点（design_integration_tests 等段空数组合法）；
+      - 其余（字符串/数字/字典/含非字符串元素的列表）→ ([], "malformed")：
+        **拒收毁形不清洗**——旧实现 `[str(x) for x in raw]` 会把字符串
+        "server/foo.py" 逐字符迭代成单字符假列表，静默绕过闸并污染写集
+        （KI-049 姊妹形态，评审 R1 实锤）。畸形在解析层定形，消费点可见红。
+
+    三个解析点（agent_activities._read_result / base / dev_lane 的 activity 回包
+    归一处）统一走本函数，替换原强转毁形。"""
+    if raw is None:
+        return [], "absent"
+    if not isinstance(raw, list):
+        return [], "malformed"
+    if any(not isinstance(x, str) for x in raw):
+        return [], "malformed"
+    return [x.strip() for x in raw if x.strip()], "ok"
 
 
 @dataclass
@@ -1208,8 +1242,11 @@ class MergeCheckArgs:
 
 # ---- t260828-09：UI 验收机制（截图通道 + 看图审读 + merge_check 证据闸）----
 
-# UI 文件口径（单点维护：膨胀或收窄只改这里）：
-#   控制台 workbench 前端源码/产物、providers 前端源码、app 客户端源码与入口页。
+# UI 文件口径（t260904-18 KI-050 声明制后的**兼容回落数据源**，不再是活路径真源）：
+#   活路径（merge_check 3.6 / ui_changed_paths / review_gate patched 分支）一律吃
+#   项目声明（verify.yaml ui_evidence.dirs，load_ui_evidence 装载）；本常量仅供
+#   prefixes=None 的旧票重放与冻结/未 patch 分支回落（重放确定性必需），膨胀收窄
+#   不再改这里——改 sandbar 的 verify.yaml 声明。物理退役随存量 RUNNING 实例清零。
 UI_WRITE_PREFIXES = (
     "server/dsh/workbench/src/client/",
     "server/dsh/workbench/lib/",
@@ -1230,17 +1267,25 @@ UI_EVIDENCE_DIR = ".suyou/screenshots"
 EVIDENCE_DIR = ".suyou/evidence"
 
 
-def match_ui_paths(paths: Any) -> List[str]:
+def match_ui_paths(paths: Any, prefixes: Any = None) -> List[str]:
     """路径清单 × UI 口径前缀表 → 命中的 UI 路径（保序去重，纯函数，无 IO）。
 
     KI-044 根修（t260904-13）的谓词单点入口：UI 票判定吃**实际 diff 路径**
     （git diff --name-only <merge-base>...branch 的产物 × 本函数），不吃声明写集
     ——声明口径 ≠ 实际写面，粒度越粗关卡越弱（t260904-05 实证：声明整个父目录
-    即绕过）。is_ui_write_set（声明写集判定，KI-044 后仅存 review_gate 机械复核
-    与 dev_lane 旧链尾冻结分支）委托本函数单点维护，前缀表膨胀收窄只改
-    UI_WRITE_PREFIXES 一处。
+    即绕过）。
+
+    KI-050 声明制（t260904-18）：前缀表来源改为**项目声明**（verify.yaml
+    ui_evidence.dirs，load_ui_evidence 装载）——参数 prefixes 显式传声明清单；
+    prefixes=None（缺省）回落模块级 UI_WRITE_PREFIXES，**仅限旧票重放与冻结/
+    未 patch 分支的兼容回落数据源**（注释见该常量处），活路径（merge_check 3.6 /
+    ui_changed_paths / review_gate patched 分支）一律显式传声明——不许新调用点
+    用单参形态新写。
+
     容错：非列表/元组、None、空集 → 空清单；元素两端空白 strip；非字符串元素
     忽略；路径按仓库相对路径前缀比对。"""
+    if prefixes is None:
+        prefixes = UI_WRITE_PREFIXES
     if not paths or not isinstance(paths, (list, tuple)):
         return []
     hits: List[str] = []
@@ -1248,7 +1293,7 @@ def match_ui_paths(paths: Any) -> List[str]:
         if not isinstance(w, str):
             continue
         p = w.strip()
-        for pref in UI_WRITE_PREFIXES:
+        for pref in prefixes:
             if p == pref.rstrip("/") or p.startswith(pref):
                 if p not in hits:
                     hits.append(p)
@@ -1256,14 +1301,145 @@ def match_ui_paths(paths: Any) -> List[str]:
     return hits
 
 
-def is_ui_write_set(write_set: Any) -> bool:
+def is_ui_write_set(write_set: Any, prefixes: Any = None) -> bool:
     """写集命中 UI 口径即 UI 票（纯函数，无 IO）——委托 match_ui_paths 单点维护。
 
     KI-044（t260904-13）后本函数仅存两处合法调用面：review_gate 机械复核
     （dev_lane，声明口径语义）与旧链尾冻结分支（存量实例重放兼容）；UI 票判定
     主通路已换 diff 源（ui_changed_paths activity 与 merge_check 3.6 共用
-    agent_activities._ui_diff_paths），勿在新判定路径再引入本函数。"""
-    return bool(match_ui_paths(write_set))
+    agent_activities._ui_diff_paths），勿在新判定路径再引入本函数。
+    KI-050 声明制（t260904-18）：prefixes 语义同 match_ui_paths——review_gate
+    patched 分支显式传项目声明清单；None 仅限旧分支回落兼容数据源。"""
+    return bool(match_ui_paths(write_set, prefixes))
+
+
+def load_ui_evidence(root: Any):
+    """读项目根 verify.yaml 的 ui_evidence 声明（KI-050 声明制，t260904-18 门③）。
+
+    返回 (dirs, note, mode) 三态（对表 verify_lane._cfg_load 同族口径）：
+      - ("ok", dirs, "")：声明在场且形状合法（ui_evidence 为映射、dirs 为字符串
+        列表；supply 保留字段本版引擎不消费，读时不校验）；
+      - ("absent", [], "…note…")：verify.yaml 缺失或无 ui_evidence 键——按项目
+        声明关闭：截图证据项 green+可见 note（非 SKIP 非假绿），由调用方拼项；
+      - ("malformed", [], "…err…")：声明在场但形状非法（dirs 缺失/非字符串列表）
+        ——fail-closed 红，调用方点名 err（畸形 ≠ 缺省，契约②三态总纲）。
+
+    读盘函数：只在 activity/CLI 侧调用（agent_activities / verify_lane 同族），
+    workflow 内禁调（确定性纪律；workflow 侧走 meta 预载）。解析用 verify.yaml
+    最小子集：本函数只认 `ui_evidence:` 顶层块 + `dirs:` 两空格缩进 `- ` 列表，
+    其余块不碰（verify_lane 是道的装载与结构校验真源，两边白名单同票同步）。
+    root 缺失/不可读按 absent 处理（泳道根无 verify.yaml 是合法声明态）。"""
+    try:
+        base = pathlib.Path(root)
+        text = (base / "verify.yaml").read_text("utf-8")
+    except Exception:
+        return "absent", [], "verify.yaml 不可读（声明缺省态）"
+    lines = text.replace("\t", "  ").splitlines()
+    in_block = False
+    in_dirs = False
+    saw_block = False
+    dirs: List[str] = []
+    saw_dirs = False
+    for raw in lines:
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        if indent == 0:
+            in_block = stripped == "ui_evidence:"
+            in_dirs = False
+            if in_block:
+                saw_block = True
+            if stripped.startswith("ui_evidence:") and stripped != "ui_evidence:":
+                # 行内值（如 `ui_evidence: foo`）= 非映射声明，畸形态
+                return "malformed", [], ("ui_evidence 须为映射（实际行内标量 %r）"
+                                         % stripped.split(":", 1)[1].strip())
+            continue
+        if not in_block:
+            continue
+        if stripped.startswith("dirs:") or stripped == "dirs:":
+            in_dirs = True
+            saw_dirs = True
+            inline = stripped.split(":", 1)[1].strip()
+            if inline:
+                if inline.startswith("[") and inline.endswith("]"):
+                    inner = inline[1:-1].strip()
+                    dirs = [t.strip().strip("\"'") for t in inner.split(",") if t.strip()]
+                    return "ok", dirs, ""
+                return "malformed", [], "ui_evidence.dirs 须为列表（实际 %r）" % inline
+            continue
+        if stripped.startswith("- ") and in_dirs and indent >= 2:
+            item = stripped[2:].strip().strip("\"'")
+            if not item:
+                return "malformed", [], "ui_evidence.dirs 含空条目"
+            dirs.append(item)
+            continue
+        # 块内其它键（supply 等）：本版引擎不消费，跳过；但更深层缩进的孤儿行
+        # （既不在 dirs 列表里又比块头缩进更深且不是键值行）按畸形处理
+        if ":" not in stripped and not stripped.startswith("- "):
+            return "malformed", [], "ui_evidence 块含无法解析的行: %s" % stripped
+        in_dirs = False
+    if not saw_block:
+        # 文件里没有 ui_evidence 键 = 声明缺省态（absent），不是畸形
+        return "absent", [], "verify.yaml 无 ui_evidence 声明（截图证据项按项目声明缺席）"
+    if not saw_dirs:
+        return "malformed", [], "ui_evidence 声明缺 dirs 列表"
+    return "ok", dirs, ""
+
+
+def validate_background_refs(refs: Any, project_root: Any):
+    """建票背景文件闸（t260904-18 门①；知识库设计.md §1 工单引用铁律，
+    260904 宿主令「没提交的 note 不让建工单」）。
+
+    票面引用的背景文件必须**已提交且干净（HEAD 态）**——泳道读的是 HEAD 冻结
+    副本，脏改版 agent 读不到。逐文件两查：
+      ① `git ls-files --error-unmatch`：已跟踪=已提交进 HEAD 祖先（未跟踪/不存在
+         即拒——「未提交」点名）；
+      ② `git status --porcelain -- <file>`：输出必须为空（暂存/未暂存/改类型等
+         任何脏态即拒——「带脏改」点名，git add 暂存新文件 `A ` 态同样被②捕获）。
+
+    返回 (ok, err)：ok=True 放行建票；err 为逐文件点名的拒收文案（报错必须精确
+    ——哪个文件、什么原因）。refs 为 None/空清单 → (True, "")（缺省不校验，
+    存量在飞票不追溯，backlog 行口径）；refs 非列表 → 拒收（字符串会被逐字符
+    迭代成假清单，t260902-10 同族判例）；条目形态过 _valid_write_set_entry
+    （绝对路径/..）→ 拒收。
+
+    查盘函数：只在建票入口（client.py ticket-start，_connect() 之前——拒收路径
+    不依赖 Temporal 可达）调用；workflow 内禁调。git 不可用=拒收（fail-closed，
+    不静默放行）。"""
+    if refs is None or refs == []:
+        return True, ""
+    if not isinstance(refs, list):
+        return False, ("refs 须为路径列表（实际 %s：%r——字符串会被逐字符迭代成假清单）"
+                       % (type(refs).__name__, str(refs)[:80]))
+    bad_shape = [r for r in refs if not _valid_write_set_entry(r)]
+    if bad_shape:
+        return False, ("背景文件引用含非法条目（须为仓库内相对路径，禁绝对路径与 '..'）："
+                       + "、".join(str(b) for b in bad_shape[:8]))
+    problems = []
+    for r in refs:
+        rel = str(r).strip()
+        try:
+            p1 = subprocess.run(
+                ["git", "-C", str(project_root), "ls-files", "--error-unmatch", "--", rel],
+                capture_output=True, text=True, timeout=30)
+            p2 = subprocess.run(
+                ["git", "-C", str(project_root), "status", "--porcelain", "--", rel],
+                capture_output=True, text=True, timeout=30)
+        except Exception as e:
+            return False, "背景文件校验失败（git 不可用，fail-closed）：%s: %s" % (
+                type(e).__name__, e)
+        if p1.returncode != 0:
+            problems.append("%s（未提交：不在 HEAD 跟踪清单——先提交再建票）" % rel)
+            continue
+        dirty = (p2.stdout or "").strip()
+        if p2.returncode != 0 or dirty:
+            problems.append("%s（带未提交改动：%s——先提交再建票）" % (
+                rel, dirty.replace("\n", "；")[:120] if dirty else "status 查询失败"))
+    if problems:
+        return False, ("工单引用的背景文件未过「已提交且干净」闸（KI-049 同源宿主令）："
+                       + "；".join(problems))
+    return True, ""
 
 
 def _valid_write_set_entry(p: Any) -> bool:
@@ -1430,6 +1606,26 @@ class UiChangedPathsResult:
 
     ui_paths: List[str] = field(default_factory=list)  # diff 命中 UI 口径的路径（保序）
     detail: str = ""                          # 判定口径与错误留痕（log / results evidence 消费）
+
+
+@dataclass
+class UiEvidenceDeclArgs:
+    """ui_evidence_decl activity 入参（t260904-18 KI-050 门③：声明预载）。
+
+    泳道起跑时读泳道根 verify.yaml 的 ui_evidence 声明落 meta（读盘在 activity、
+    workflow 只读 meta=重放安全）；review_gate patched 分支据此判 UI 票。"""
+
+    ticket_id: str
+    worktree: str = ""                        # 泳道 worktree 路径（声明读 <worktree>/verify.yaml）
+
+
+@dataclass
+class UiEvidenceDeclResult:
+    """ui_evidence_decl 回执（三态同 load_ui_evidence；失败不抛——消费点按声明缺省兜底）。"""
+
+    mode: str = "absent"                      # ok | absent | malformed
+    dirs: List[str] = field(default_factory=list)  # 声明的截图证据目录（mode=ok 时有意义）
+    note: str = ""                            # 缺省/畸形留痕（log 消费）
 
 
 @dataclass

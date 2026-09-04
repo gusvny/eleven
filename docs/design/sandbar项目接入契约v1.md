@@ -404,9 +404,11 @@ cwd（泳道 worktree）** 解析——保「worktree 内副本 = 工单快照�
 | `lanes.code.checks` | 非空列表 `[{id, cmd, cwd?, timeout?}]`（**列表命令制**，无类型词表） | code 道命令检查：`id`=人读名；`cmd` 经 `/bin/sh -c` 执行，exit 非零=红；`cwd` 相对声明根（缺省 `.`）；`timeout` 秒（缺省 600）。各条并行跑 | 该项关闭（整键可省略；在位而结构不合法=畸形） |
 | `integration.cmd` | 非空字符串（一条命令） | integration 道唯一声明：引擎 `/bin/sh -c`、cwd=声明根执行；红绿判据=退出码 + ②b 三行协议解析；整体超时 env `SUYOU_INTEG_BATCH_TIMEOUT_SEC`（缺省 5400） | integration 段整体缺失 = integration 道 fail-closed（②b：本道无「缺失=关闭」态）；段在位而 `cmd` 缺失或为空 = 畸形 fail-closed |
 | `integration.supply` | 可选列表 `[{need, cmd, cwd?, timeout?}]`（t260904-12 供给声明制，定稿 §7.4） | 集成测试环境供给：`need`=人读缺口名；`cmd`=一条**幂等装配命令**，引擎在 integration.cmd 之前执行（v2.1 起已实现），失败/超时=显式红并点名 need（不静默继续）；`cwd` 相对声明根（缺省 `.`）；`timeout` 秒（缺省 900） | **键缺失 = 零声明合法空**（无供给需求项目不声明；场景内 precheck 兜底失败自然 ENV_FAIL 可见，②b-1） |
+| `ui_evidence` | 可选映射 `{dirs, supply?}`（t260904-18 KI-050 声明制；`dirs`=非空字符串列表，UI 截图证据目录（仓库相对前缀）；`supply`=**保留字段，本版引擎不消费**，声明不构成截图供给保障） | 合并闸 UI 截图证据的目录口径：merge_check 3.6 与 ui_changed_paths 以「实际 diff 路径 × dirs」判 UI 票并查 `.suyou/screenshots/` 截图证据；替代旧引擎侧 `UI_WRITE_PREFIXES` 五路径硬编码（该常量仅剩旧票重放/冻结分支兼容回落，不再是活路径真源） | **键缺失 = 截图证据项按项目声明缺席**：merge_check 3.6 出该项 green+可见 note（非 SKIP 非假绿，行为可见）；`ui_evidence` 在位而形状非法（非映射 / dirs 缺失或非非空字符串列表）= 畸形 fail-closed 红（verify_lane `_validate_cfg` 与 merge_check 3.6 双点拦截；畸形 ≠ 缺省） |
 
 一切未知键（顶层/`lanes`/`lanes.code`/checks 条目级，含旧五类型键式）= 畸形
-fail-closed，不静默过滤。
+fail-closed，不静默过滤。`ui_evidence` 为 t260904-18 增列的合法顶层键（引擎侧
+白名单与 `_validate_cfg` 形态校验同票落地），未知键纪律对它之外的键照旧。
 
 缺失态映射（勘误后口径，防误读）：**verify.yaml 整文件缺失 = ① code 道按项目
 声明关闭（t260901-08 扩展；green 项可见非静默）+ ② integration 道 fail-closed
@@ -659,6 +661,7 @@ sandbar 发版 → 项目跟进；禁止跳过探针直接扩区间（关键决�
 | v2.1 | 2026-09-04 | t260904-12 乙段落地：verify_lane integ 道实现三态解析（ENV_FAIL 行/env_fail 计数入返回形状、绿判据含 env_fail=0、畸形沿 FAIL 惯例）与 supply 装配执行（先于 cmd、失败/超时=红点名 need）；②b-2 env_fail 转「必含」；ticket-lifecycle 场景移册依据=定稿 §7.3「真跑不进闸的（红线禁区/破坏性）不进闸清单」（worker 机械步内恒触发防递归护栏=设计性环境红，闸内不可达 PASS；真实覆盖承接=主库人工清单；第二次口径逆转，依据链见 integration/README 已知限制） | ②a/②b-2；verify_lane integ 道、仓根 verify.yaml、integration 场景清单 |
 | v1.8 | 2026-09-04 | 真源转正（宿主裁定 260904）：本文件由「suyou 仓 v1.7 只读同源副本」升为契约真源，头部声明改写；suyou 侧同名文件降为历史冻结件（不再演进、不作修改目标）。正文语义零变更；①a 增补节（摘除/再接入、单根目录工具口径）随 project-lifecycle 立项票②落地，届时另行记行 | 文档治理面；消费方指引（upgrade/doctor 以本份为准） |
 | v1.9 | 2026-09-04 | t260904-14 摘除面落地：新增 ①a-1——摘除/再接入/数据处置三态成文（条目退役=project.yaml 原子改名 retired-<UTC ISO8601> 零 schema 改动可逆，再接入=同 key re-add 归档链连续；模式闸[legacy 拒收]/在飞闸[不可达 fail-closed 无绕过旗]/最后条目确认闸/closed 全归档闸[purge 前置：未归档差集=Temporal COMPLETED 票号集合−fs archive.json 三态判定集合，畸形 manifest=fail-closed 点名文件]；purge 双旗显式分离、dry-run 全闸预演、摘除报告只报不删项目根 .lane/ 泳道）；单根目录口径工具面落字（工具恰写一条 dirs，多条=装载容忍/工具不产的遗留形状） | ①/①a；安装器 project remove 子命令、摘除报告消费方（ops 手册/将来 UI 面） |
+| v2.2 | 2026-09-04 | t260904-18 三门落地：②a 增列合法顶层键 `ui_evidence`（可选映射 `{dirs, supply?}`；缺失=截图证据项按项目声明缺席 green+可见 note，畸形=fail-closed 红点名字段；supply 保留字段本版引擎不消费）——合并闸 UI 截图证据目录改项目声明，退役引擎侧 `UI_WRITE_PREFIXES` 五路径硬编码活路径身份（仅剩旧票重放/冻结分支兼容回落）；同族：建票口背景文件闸（票面 refs 须已提交且干净 HEAD 态，拒收点名）与 create_plan 回执 files_changed 空数组/畸形可见红（KI-049），属引擎机制面不入本契约字段表 | ②a；verify_lane `_validate_cfg`、merge_check 3.6、ui_changed_paths、仓根 verify.yaml |
 
 > 来源立项：sandbar
 

@@ -112,6 +112,14 @@ ok("is_ui_write_set(args.write_set)" not in src,
    "merge_check 判定不再吃声明写集（KI-044 残留锁）")
 ok("ui-check/capture.mjs" in src and "UI_EVIDENCE_DIR" in src,
    "红灯文案带 capture.mjs 处置指引（源码锁）")
+# KI-050 声明制（t260904-18）：UI 口径=项目声明（泳道根 verify.yaml ui_evidence.dirs）
+ok("load_ui_evidence(wt)" in src and "_ui_diff_paths(lane_repo, base_36, args.branch, decl_dirs)" in src,
+   "merge_check 3.6 判定口径吃项目声明（KI-050 声明制，源码锁）")
+ok("按项目声明" in src and "缺席" in src,
+   "声明缺省=green+可见 note 文案在场（非静默，源码锁）")
+_dls = (POC / "dev_lane.py").read_text("utf-8")
+ok("ui_evidence_dirs" in _dls and "UI_EVIDENCE_DECL_PATCH_ID" in _dls,
+   "dev_lane 声明预载消费 + patched 门在场（重放安全，源码锁）")
 # merge_check 自身可编译导入（register 路径无残缺）
 import agent_activities  # noqa: E402
 ok(hasattr(agent_activities, "prepare_ui_evidence"), "prepare_ui_evidence 已定义")
@@ -120,6 +128,9 @@ ok(agent_activities.prepare_ui_evidence in agent_activities.ALL_AGENT_ACTIVITIES
 ok(hasattr(agent_activities, "ui_changed_paths"), "ui_changed_paths 已定义")
 ok(agent_activities.ui_changed_paths in agent_activities.ALL_AGENT_ACTIVITIES,
    "ui_changed_paths 已进 worker 注册清单（漏注册=worker 不认，KI-044）")
+ok(hasattr(agent_activities, "ui_evidence_decl")
+   and agent_activities.ui_evidence_decl in agent_activities.ALL_AGENT_ACTIVITIES,
+   "ui_evidence_decl 已注册（漏注册=worker 不认，KI-050 声明制）")
 
 # ---------- C. prepare_ui_evidence 桩跑 ----------
 section("C prepare_ui_evidence 桩跑（SUYOU_UI_CAPTURE_STUB=1）")

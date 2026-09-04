@@ -60,6 +60,7 @@ with workflow.unsafe.imports_passed_through():
         suggest_next,
         teardown_lane,
         ui_changed_paths,
+        ui_evidence_decl,
         verify_review_gate,
     )
     from shared import (
@@ -100,6 +101,8 @@ with workflow.unsafe.imports_passed_through():
         UiChangedPathsArgs,
         UiChangedPathsResult,
         UiEvidenceArgs,
+        UiEvidenceDeclArgs,
+        UiEvidenceDeclResult,
         UiEvidenceResult,
         WorkspacePrep,
         WorkspacePrepResult,
@@ -110,6 +113,7 @@ with workflow.unsafe.imports_passed_through():
         integration_route,
         is_ui_write_set,
         lane_workspace_gate_error,
+        normalize_files_changed,
         parse_arbitration_summary,
         parse_review_plan_verdict,
         refresh_write_set,
@@ -149,6 +153,16 @@ UI_DIFF_PATCH_ID = "dev-lane-ui-diff-v1"
 # t260829-07 写集生命周期：方案定稿后写集跟随方案刷新（并集），空初始写集票由此
 # 在方案定稿后获得护栏。同构布尔门：挂起中旧 workflow 重放不走新分支；不 bump PATCH_ID。
 REFRESH_WRITE_SET_PATCH_ID = "dev-lane-refresh-write-set"
+# t260904-18 KI-049 门②：create_plan 回执 files_changed 空/畸形 → 可见红+告警，
+# 写集零污染（不再静默 no-op）。同构布尔门：挂起中旧 workflow 重放（含空回执旧票）
+# 走原刷新路径（命令序列与旧历史一致）；不 bump PATCH_ID。
+WRITE_SET_FAULT_PATCH_ID = "dev-lane-write-set-fault"
+# t260904-18 KI-050 门③：ui_evidence 声明预载——泳道起跑时 activity 读泳道根
+# verify.yaml 的 ui_evidence.dirs 落 meta["ui_evidence_dirs"]（读盘在 activity、
+# workflow 只读 meta=重放安全），review_gate patched 分支按声明判定 UI 票。
+# 同构布尔门：挂起中旧 workflow 重放不执行新 activity（旧历史无对应事件）；
+# 不 bump PATCH_ID。
+UI_EVIDENCE_DECL_PATCH_ID = "dev-lane-ui-evidence-decl"
 # t260829-07 审读判据机械化：integration_review ok 后 verify_review_gate 机械复核
 # （泳道 0 commit / UI 票截图缺失 → 强制打回；git/路径异常 → 跳过不打回）。
 # 同构布尔门：挂起中旧 workflow 重放不走新分支；不 bump PATCH_ID。
@@ -578,6 +592,37 @@ class DevLaneWorkflow:
         # 清单来自 create_plan 回执——已入 workflow 历史，确定性 OK）。
         if workflow.patched(REFRESH_WRITE_SET_PATCH_ID):
             plan_files = (self.results.get("create_plan") or {}).get("files_changed")
+            # t260904-18 KI-049 门②：形状由解析层 normalize_files_changed 定形
+            # （results dict 字面 files_changed_shape 键，条件项 1）。
+            # 三态四分支（emptiness 政策在消费点，形状判定在解析层——R1 拆层定夺）：
+            #   malformed → 可见红+告警，不调 refresh（写集零污染，杜绝字符串回执
+            #              逐字符迭代成单字符假列表静默绕闸/污染写集）；
+            #   absent   → 跳过留痕（旧票兼容，语义不变）；
+            #   ok+空且非 no_file_changes 声明 → 可见红+告警（KI-049：空回执=写集
+            #              刷新静默 no-op 根因，11/15/12 三票各多跑 1-2h 的洞）；
+            #   ok+非空 → 现行刷新+「授权扩展」不变（活性巡检面）。
+            # 可见红机制=meta 顶层 flag + WARNING log（不伪造 blocked/rework 时间线
+            # 状态——工单台 ReworkBanner/状态启发式会被误触发，KI-001 家族）。
+            # 盲区（接受，派发规格两落点等价口径）：判定只在 review_plan 放行后的
+            # 刷新点可达，打回轮次内的空回执当轮不亮，根治挂写集改革讨论档。
+            plan_shape = (self.results.get("create_plan") or {}).get(
+                "files_changed_shape") or "absent"
+            fault = None
+            if plan_shape == "malformed" and workflow.patched(WRITE_SET_FAULT_PATCH_ID):
+                fault = ("files_changed 形状非法（%s，非字符串数组——解析层拒收毁形）"
+                         % plan_shape)
+            elif plan_files == [] and workflow.patched(WRITE_SET_FAULT_PATCH_ID) \
+                    and not bool(self.meta.get("no_file_changes")):
+                fault = "files_changed 为空数组"
+            if fault:
+                self.meta["write_set_refresh_fault"] = {
+                    "stage": "create_plan", "reason": fault,
+                    "ts": self._now_epoch()}
+                self._log("【红灯】写集刷新被拒：create_plan 回执 %s（KI-049：空/畸形"
+                          "回执=写集刷新静默 no-op 根因）——写集保持初始 %d 条零污染；"
+                          "处置：rework 回 create_plan 重交结构化回执"
+                          % (fault, len(self.meta.get("write_set") or [])))
+                return
             if plan_files is None:
                 self._log("写集刷新跳过：create_plan 回执无 files_changed（初始写集保留）")
             else:
@@ -632,17 +677,25 @@ class DevLaneWorkflow:
             step_id, args,
             start_to_close_timeout=AGENT_TO, heartbeat_timeout=HEARTBEAT_TO,
             retry_policy=RETRY)
-        res = raw if isinstance(raw, StageResult) else StageResult(
-            status=str(raw.get("status") or "ok"),
-            summary=str(raw.get("summary") or ""),
-            report=str(raw.get("report") or ""),
-            deliverables=[str(x) for x in (raw.get("deliverables") or [])],
-            files_changed=[str(x) for x in (raw.get("files_changed") or [])],
-            evidence=str(raw.get("evidence") or ""))
+        # files_changed 保形归一（t260904-18 KI-049 门② R1）：形状随回执进 results
+        # 字面（条件项 1：_refresh_write_set_after_plan 读 results dict）。
+        if isinstance(raw, StageResult):
+            res = raw
+        else:
+            _fc, _fc_shape = normalize_files_changed(raw.get("files_changed"))
+            res = StageResult(
+                status=str(raw.get("status") or "ok"),
+                summary=str(raw.get("summary") or ""),
+                report=str(raw.get("report") or ""),
+                deliverables=[str(x) for x in (raw.get("deliverables") or [])],
+                files_changed=_fc,
+                files_changed_shape=_fc_shape,
+                evidence=str(raw.get("evidence") or ""))
         self.results[step_id] = {
             "status": res.status, "summary": res.summary, "report": res.report,
             "deliverables": list(res.deliverables),
             "files_changed": list(res.files_changed),
+            "files_changed_shape": res.files_changed_shape,
             "evidence": res.evidence, "gen": gen}
         # KI-003：stage 转换突变串让路点——results 记账与调用方后续 _finish/_handoff/
         # refresh_write_set 突变簇之间让出事件循环，排队的 snapshot query 不再被
@@ -782,6 +835,30 @@ class DevLaneWorkflow:
             await self._blocked("workspace", "工作空间准备失败：%s" % (res.error or "未知"))
             if self._rework is not None:
                 self._apply_rework("create_plan")  # 目标步由主循环接管
+
+        # t260904-18 KI-050 门③：ui_evidence 声明预载（patched 门；读盘在 activity、
+        # workflow 只读 meta=重放安全）。软失败总则：activity 异常不拦主链——meta 缺键
+        # 由消费点（review_gate patched 分支）按「声明缺省」口径兜底并留痕；
+        # malformed 在 merge_check 3.6 各自装载时 fail-closed 红，这里只留痕。
+        if workflow.patched(UI_EVIDENCE_DECL_PATCH_ID):
+            try:
+                draw = await workflow.execute_activity(
+                    ui_evidence_decl,
+                    UiEvidenceDeclArgs(ticket_id=self.ticket_id,
+                                       worktree=str(self.meta.get("worktree") or "")),
+                    start_to_close_timeout=SHORT, retry_policy=RETRY)
+                d = draw if isinstance(draw, UiEvidenceDeclResult) else UiEvidenceDeclResult(
+                    mode=str(draw.get("mode") or "absent"),
+                    dirs=[str(x) for x in (draw.get("dirs") or [])],
+                    note=str(draw.get("note") or ""))
+                self.meta["ui_evidence_dirs"] = list(d.dirs) if d.mode == "ok" else []
+                self.meta["ui_evidence_decl_mode"] = d.mode
+                self.meta["ui_evidence_decl_note"] = d.note
+                self._log("ui_evidence 声明预载：%s（%d 个目录）%s"
+                          % (d.mode, len(d.dirs), d.note))
+            except Exception as e:
+                self._log("ui_evidence 声明预载失败（不拦主链，消费点按声明缺省兜底）：%s: %s"
+                          % (type(e).__name__, e))
 
         phase = str(self.meta.get("stage") or "create_plan")
         plan_rounds = 0
@@ -992,10 +1069,29 @@ class DevLaneWorkflow:
                                 lane_commits=int(graw.get("lane_commits") or -1),
                                 shots_path_error=str(graw.get("shots_path_error") or ""),
                                 png_count=int(graw.get("png_count") or -1))
+                            # t260904-18 KI-050 门③：UI 判定口径供给——patched 分支吃
+                            # meta 预载声明（ui_evidence_decl activity 读泳道根
+                            # verify.yaml 落 meta，重放安全）；meta 缺键（activity
+                            # 重试耗尽/异常）按「声明缺省」口径兜底（is_ui=False，
+                            # note 留痕「声明读取失败≠项目未声明」——闸缺省语义由
+                            # 项目声明决定，供给故障不改成 UI 票判定漂移）；
+                            # 未 patch（存量实例重放）保留旧调用形态原样。
+                            if workflow.patched(UI_EVIDENCE_DECL_PATCH_ID):
+                                decl_dirs = self.meta.get("ui_evidence_dirs")
+                                if isinstance(decl_dirs, list):
+                                    gate_is_ui = is_ui_write_set(
+                                        list(self.meta.get("write_set") or []), decl_dirs)
+                                else:
+                                    gate_is_ui = False
+                                    self._log("机械复核 UI 判定：ui_evidence 声明未预载"
+                                              "（声明读取失败≠项目未声明，按声明缺省处理）")
+                            else:
+                                gate_is_ui = is_ui_write_set(
+                                    list(self.meta.get("write_set") or []))
                             gate_rework, gate_note = review_gate_verdict(
                                 g.git_error, g.lane_commits, g.shots_path_error, g.png_count,
                                 bool(self.meta.get("no_file_changes")),
-                                is_ui_write_set(list(self.meta.get("write_set") or [])))
+                                gate_is_ui)
                             if gate_note:
                                 self._log(gate_note)
                         except Exception as e:

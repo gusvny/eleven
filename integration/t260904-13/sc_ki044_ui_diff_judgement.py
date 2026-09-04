@@ -149,4 +149,28 @@ check("A1d git 失败 fail-closed 回执（err 进 detail，不静默空）",
 check("A1e 已进 worker 注册清单 ALL_AGENT_ACTIVITIES（漏=运行时才断）",
       "ui_changed_paths" in ag.split("ALL_AGENT_ACTIVITIES", 1)[-1])
 
+# ---- T18 增量（t260904-18 门③声明制迁移面）：谓词吃显式声明 dirs ----
+# ui_evidence 声明制把 UI 口径从模块级 UI_WRITE_PREFIXES 换成项目声明；谓词合同增量：
+# 显式 dirs 参数生效、None 回落 legacy 表（=冻结/重放分支数据源，兼容不碎）、
+# 单参调用形态保持（本文件旧锁与全部既有调用面不破）。契约锚行为不锚参数名（位置传参）。
+import inspect  # noqa: E402
+try:
+    _sig = inspect.signature(shared.match_ui_paths)
+    _takes_dirs = len(_sig.parameters) >= 2
+except (TypeError, ValueError):
+    _takes_dirs = False
+check("T18-1 谓词接受显式声明 dirs 参数（ui_evidence 声明制迁移面）", _takes_dirs)
+if _takes_dirs:
+    try:
+        check("T18-2 显式 dirs 命中（声明目录取代 legacy 表）",
+              shared.match_ui_paths(["web/ui/a.ts"], ["web/ui/"]) == ["web/ui/a.ts"])
+        check("T18-3 显式 dirs 下 legacy 路径不参与（退役=活路径不吃硬编码）",
+              shared.match_ui_paths(["app/src/main.ts"], ["web/ui/"]) == [])
+        check("T18-4 None 回落 legacy 表（冻结/重放分支数据源保留，存量兼容）",
+              shared.match_ui_paths(["app/src/main.ts"], None) == ["app/src/main.ts"])
+        check("T18-5 单参调用形态保持（旧锁/旧调用面不碎）",
+              shared.match_ui_paths(["app/src/main.ts"]) == ["app/src/main.ts"])
+    except Exception as e:
+        check("T18-2..5 声明 dirs 行为", False, "%s: %s" % (type(e).__name__, e))
+
 sys.exit(summary(passed, failed))
