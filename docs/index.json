@@ -1,0 +1,167 @@
+{
+  "generated_at": "2026-09-04T08:54:10+08:00",
+  "total": 11,
+  "categories": [
+    "design",
+    "content",
+    "ops",
+    "reference"
+  ],
+  "docs": [
+    {
+      "path": "design/deepseek_harness_and_temporal_based_multi-agent_mechanism.md",
+      "file": "deepseek_harness_and_temporal_based_multi-agent_mechanism.md",
+      "title": "DeepSeek Harness and Temporal based multi-agent mechanism",
+      "category": "design",
+      "tags": [
+        "角色",
+        "多agent",
+        "协作",
+        "dsh",
+        "基础设施",
+        "temporal"
+      ],
+      "status": "active",
+      "updated": "2026-08-31",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/dsh_seam需求书v1.md",
+      "file": "dsh_seam需求书v1.md",
+      "title": "dsh seam 需求书 v1 —— A3 运行时模型覆盖 + A4 headless 会话延续钩子",
+      "category": "design",
+      "tags": [],
+      "status": "active",
+      "updated": "",
+      "has_frontmatter": false
+    },
+    {
+      "path": "design/metrics-api契约v1.md",
+      "file": "metrics-api契约v1.md",
+      "title": "metrics 口径与 API 契约 v1",
+      "category": "design",
+      "tags": [
+        "metrics",
+        "契约",
+        "API"
+      ],
+      "status": "active",
+      "updated": "2026-09-01",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/metrics面板ui规划.md",
+      "file": "metrics面板ui规划.md",
+      "title": "metrics 面板 UI 规划",
+      "category": "design",
+      "tags": [
+        "metrics"
+      ],
+      "status": "active",
+      "updated": "",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/sandbar项目接入契约v1.md",
+      "file": "sandbar项目接入契约v1.md",
+      "title": "sandbar 项目接入契约 v1",
+      "category": "design",
+      "tags": [],
+      "status": "active",
+      "updated": "",
+      "has_frontmatter": false
+    },
+    {
+      "path": "design/右栏会话入口与hero定制设计.md",
+      "file": "右栏会话入口与hero定制设计.md",
+      "title": "右栏会话入口与 New Session hero 定制",
+      "category": "design",
+      "tags": [
+        "dsh",
+        "工单台",
+        "会话"
+      ],
+      "status": "draft",
+      "updated": "2026-08-29",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/工单工作流台设计.md",
+      "file": "工单工作流台设计.md",
+      "title": "工单工作流台设计 v0.3",
+      "category": "design",
+      "tags": [
+        "工单",
+        "工作流",
+        "协作"
+      ],
+      "status": "superseded",
+      "updated": "2026-08-23",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/杂务工单模版设计.md",
+      "file": "杂务工单模版设计.md",
+      "title": "杂务工单模版（chore-lane）设计",
+      "category": "design",
+      "tags": [],
+      "status": "active",
+      "updated": "",
+      "has_frontmatter": false
+    },
+    {
+      "path": "design/知识库设计.md",
+      "file": "知识库设计.md",
+      "title": "知识库设计",
+      "category": "design",
+      "tags": [
+        "知识库",
+        "文档",
+        "协作",
+        "workflow"
+      ],
+      "status": "active",
+      "updated": "2026-08-21",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/设计文档写作指南.md",
+      "file": "设计文档写作指南.md",
+      "title": "设计文档写作指南",
+      "category": "design",
+      "tags": [
+        "设计文档",
+        "写作规范",
+        "guideline",
+        "文档先行"
+      ],
+      "status": "active",
+      "updated": "2026-08-24",
+      "has_frontmatter": true
+    },
+    {
+      "path": "ops/admin-dsh-应用方案.md",
+      "file": "admin-dsh-应用方案.md",
+      "title": "溯游 admin × DeepSeek Harness（dsh）应用方案",
+      "category": "ops",
+      "tags": [
+        "admin",
+        "dsh",
+        "应用方案"
+      ],
+      "status": "active",
+      "updated": "2026-08-19",
+      "has_frontmatter": true
+    }
+  ],
+  "review": {
+    "missing_frontmatter": [
+      "design/dsh_seam需求书v1.md",
+      "design/metrics面板ui规划.md",
+      "design/sandbar项目接入契约v1.md",
+      "design/杂务工单模版设计.md"
+    ],
+    "deprecated": [],
+    "stale": []
+  }
+}
