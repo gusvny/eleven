@@ -327,3 +327,12 @@ providers / knowledge 现有 smoke 零回归；生产 7233/8233/3099 监听面�
   两增补节/upgrade.py docstring 清理；验收 5-10）。票③（UI 面）待票②
   CLI --json 口径定稿后开工。
 - 归档快照：收尾时补（`EpicCode` 查询工单清单 + 结论固化进本档）。
+- 2026-09-04（修订14）：票② 收口+票③ 开工。t260904-14 merge 人门两签落
+  main（3f99dce：remove 面+契约①a-1 v1.9 增补节）；首签被 main 脏工作区
+  （宿主未提交的契约 v1.8 真源转正编辑）挡 squash 蒸发——处置=v1.8 经确认
+  代提交（26f174c，宿主裁定：本仓契约即真源、suyou 侧降历史冻结）+main 预
+  并泳道（d1c933f，v1.8/v1.9 两行并集）+重签；观测缺口记 KI-048。**票③
+  开工 = t260904-15**（dev-lane / EpicCode=project-lifecycle / 泳道
+  .lane/t260904-15；写集 server/dsh/workbench/+integration/+docs/design/
+  ——UI 面：左栏三处新增+三弹层+图标族 SVG 五枚+写路由薄壳；验收 11-14；
+  mock v5 过稿落档 400a870 作票内背景件）。
