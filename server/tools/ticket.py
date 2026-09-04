@@ -351,6 +351,7 @@ def _create(a):
     write_set = list(a.get('write_set') or [])
     if wid == 'dev-lane' and 'integration/' not in write_set:
         write_set.append('integration/')
+    validate_write_set_no_notes(write_set)
     tpl_acc = list(stage0.get('acceptance') or [])
     extra = [x for x in (a.get('acceptance') or []) if x not in tpl_acc]  # A5.5 实例增项
     out = _poc('ticket-start', {
@@ -496,6 +497,20 @@ def _rework(a):
                           'to_stage': a.get('to_stage') or '',
                           'who': a.get('by') or ''})
     return _poc_ok(out)
+
+
+def validate_write_set_no_notes(write_set):
+    """宿主令 260904 机械闸（建单侧）：工单写集禁含 notes/——票据/知识库账本
+    （KI 册/epic 立项单/决策与讨论档）由 main 侧 integration/宿主直管，工单不写。
+    合并闸 verify_lane 同口径独立拦截（A/M/T/D 全拦），此处建单即拒是前置人话，
+    非唯一防线——纯函数便于场景直接压测（不触 Temporal）。"""
+    for e in write_set or []:
+        e = str(e).strip()
+        if e == 'notes' or e == 'notes/' or e.startswith('notes/'):
+            raise ValueError(
+                'create 参数非法：写集禁含 notes/（%s）——票据/知识库账本由 main 侧'
+                '（integration/宿主）直管，工单不写 notes/（宿主令 260904 机械闸）。'
+                '待落账项（KI/epic/决策档）写进结算 note，由 integration 在 main 落。' % e)
 
 
 def run(args):

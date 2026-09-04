@@ -15,7 +15,8 @@ lanes:
       - server/
       - integration/
       - docs/
-      - notes/
+      # notes/ 已除名（宿主令 260904 机械闸）：票据/知识库账本归 main 侧直管，
+      # 工单不写——建单侧 ticket.py 与合并闸 verify_lane 双点独立拦截。
       - VERSION
       - sandbar
       - verify.yaml

@@ -413,6 +413,16 @@ def _code(a):
                 f = ln.split('	')[-1].strip()
                 if not f:
                     continue
+                # 宿主令 260904 机械闸：dev-lane 工单禁写 notes/（票据/知识库账本归
+                # main 侧直管，t260904-01/03 的 KI 行合并冲突为直接动因）。独立于
+                # 写集判定——声明了 notes/ 也拦（防自授权）；D 同拦（删账=丢账，
+                # 与运行时前缀「D=清退放行」口径不同：notes 是账本不是运行时残留）。
+                if f == 'notes' or f.startswith('notes/'):
+                    items.append({'detail': '越界写（notes/ 禁写，宿主令 260904）：'
+                                  '票据/知识库账由 main 侧（integration/宿主）直管，'
+                                  '工单不得增删改 notes/——%s（%s）。'
+                                  '待落账项写进结算 note，由 integration 在 main 落。' % (f, st)})
+                    continue
                 if f.startswith(RUNTIME_PREFIXES):
                     if st in ('A', 'M', 'T'):
                         # t260903-12 安全事件：运行时前缀以新增/修改出现在 diff

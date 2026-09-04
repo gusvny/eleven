@@ -57,3 +57,6 @@
 - **打回轮收敛复核（acceptance gen0 打回三项全闭合）**：P1 bench 槽根降级探测（受限环境原形态必裸 PermissionError → 现真写+删探针探测，明示降级一行带旋钮指路，锁文件不可建=MissingAsset 可辨）；P2 ensure fetch 后 isDisposed 短路；P3 shared.py PROJECT_KEY_RE 收敛单一定义；打回建议腿补齐=integration/tests/test_bench.py 7/7（含满槽排队 BenchBusy「槽满」真 flock 争用断言）。
 - **面状态**：票①验收通过；后续面（引擎行为场景扩展/裸入口收敛）按本档约定宿主再立。
 - **走查新登记（非阻塞，随后续票处置）**：槽端口为机器全局固定基址而 flock 互斥仅限单一槽根——两个槽根（如降级临时区 vs ~/.sandbar）并行跑同号槽会瞬时 BenchEnvConflict（分类可辨、不对抗语义符合设计；单机同时只跑一个套件/统一槽根即可避免）；降级根落平台共享临时区放大了该撞面，建议后续给降级根掺会话唯一后缀或冲突文案点名「他槽根在跑」。
+
+## 票③：notes/ 写集机械闸（宿主令 260904 直落 main，integration 岗）
+动因：t260904-01/03 两单 lane 侧票据账与 main 直修同区相撞（含一次 KI-038 语义冲突须人工取舍）、notes/epics/ 出现草案直落。落地三执法点：verify_lane 合并闸（A/M/T/D 全拦、独立于写集声明）+ ticket.create 建单即拒（纯函数 validate_write_set_no_notes）+ write_allow 除名；守卫场景 sc_notes_write_gate.py 13 断言入清单（套件 92/92）。副作用收红：lane agent 票据账动作改走结算 note→integration main 落账。

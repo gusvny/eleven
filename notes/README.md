@@ -54,3 +54,7 @@
 
 定期（建议每周）扫一遍本目录：探讨中的要么推进要么明确搁置；
 已有计划的要么立项要么降级；执行中的立项单核对验收进度；open 债务核对有没有票认领。
+
+## notes/ 归属（宿主令 260904 机械闸）
+
+notes/ = 票据/知识库账本（KI 册、epic 立项单、决策与讨论档），**归 main 侧（integration/宿主）直管，dev-lane 工单一律不写**。三执法点：建单侧 ticket.create 写集含 notes/ 创建即拒；合并闸 verify_lane 对 notes/ 的 A/M/T/D 全拦（声明了也拦，删账同拦）；本仓 verify.yaml write_allow 已除名。工单的待落账项（KI 状态推进、epic 落地记录）写进**结算 note**，由 integration 在 main 落账。守卫场景=integration/baselines/sc_notes_write_gate.py（13 断言）。
