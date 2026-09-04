@@ -2968,7 +2968,8 @@ function parseLedger(raw) {
 			project: e.project,
 			cwd: typeof e.cwd === "string" ? e.cwd : "",
 			lastOpenedAt: typeof e.lastOpenedAt === "number" && Number.isFinite(e.lastOpenedAt) ? e.lastOpenedAt : 0,
-			...typeof e.title === "string" ? { title: e.title } : {}
+			...typeof e.title === "string" ? { title: e.title } : {},
+			...typeof e.seq === "number" && Number.isFinite(e.seq) ? { seq: e.seq } : {}
 		});
 	}
 	return out;
@@ -2991,7 +2992,8 @@ function touchEntry(entries, entry, cap = 20) {
 		project: entry.project,
 		cwd: typeof entry.cwd === "string" ? entry.cwd : "",
 		lastOpenedAt: typeof entry.lastOpenedAt === "number" && Number.isFinite(entry.lastOpenedAt) ? entry.lastOpenedAt : Date.now(),
-		...typeof entry.title === "string" ? { title: entry.title } : {}
+		...typeof entry.title === "string" ? { title: entry.title } : {},
+		...typeof entry.seq === "number" && Number.isFinite(entry.seq) ? { seq: entry.seq } : {}
 	};
 	const out = [next, ...(Array.isArray(entries) ? entries : []).filter((e) => e && e.id !== next.id)];
 	return cap > 0 && out.length > cap ? out.slice(0, cap) : out;
@@ -3054,6 +3056,87 @@ function pickSwitchTargets(entries, opts) {
 		active: e.id === current
 	}));
 }
+/**
+* 算项目内会话 tab：账册按 project 精确过滤 → 只留有合法 seq（≥1 有限数）的
+* 条目 → seq 升序（=登记顺序）→ 标题/高亮装配。无上限（拍板 2）；缺 seq 条目
+* 不显示（迁移过渡态——消费方挂载时先走 backfillProjectSeqs 补号，防御纵深）。
+* active = id === current（与顶部行同源；current 全局唯一 → 高亮至多一个，
+* current 为工单会话/未入账会话时全不亮，R6）。
+*/
+function pickProjectTabs(entries, opts) {
+	const project = typeof opts?.project === "string" ? opts.project : "";
+	if (project === "") return [];
+	const byId = opts?.byId ?? {};
+	const current = opts?.current;
+	return (Array.isArray(entries) ? entries : []).filter((e) => e && typeof e.id === "string" && isGlobalSessionId(e.id) && e.project === project).map((e) => ({
+		id: e.id,
+		seq: typeof e.seq === "number" && Number.isFinite(e.seq) && e.seq >= 1 ? Math.floor(e.seq) : 0,
+		title: typeof e.title === "string" && e.title.trim() !== "" ? e.title : labelOf(byId[e.id], e.id),
+		active: e.id === current
+	})).filter((t) => t.seq >= 1).sort((a, b) => a.seq - b.seq);
+}
+/**
+* 存量编号迁移（幂等）：账册里缺 seq 的条目（第 3 面① 之前登记的存量）按
+* 项目内登记顺序（lastOpenedAt 升序——t260831-06 起该键只在登记路径写、单调
+* 递增=登记顺序；并列时按数组位置稳定破平）补号，从「该项目现存最大 seq」之上
+* 续起，保项目内 seq 唯一不变式。无缺号时**原样返回入参引用**（调用方据此免
+* persist——sidebar 挂载 effect 用引用相等判无操作）。返回新数组不改入参。
+*
+* 交错态说明（常态不可达，防御口径）：迁移后新登记条目都带 seq，账册不应再有
+* 缺号条目；若因异常路径（如重开时原号畸形被 touchEntry 剔字段）再现缺号，
+* 本函数从该项目现存最大号之上续——不重号（不变式优先），该条目显示顺序
+* 排在存量之后（lastOpenedAt 最新，语义上即「重新登记」，可接受）。
+*/
+function backfillProjectSeqs(entries) {
+	const list = Array.isArray(entries) ? entries : [];
+	const seqOf = (e) => typeof e?.seq === "number" && Number.isFinite(e.seq) && e.seq >= 1 ? Math.floor(e.seq) : 0;
+	const maxByProject = /* @__PURE__ */ new Map();
+	let hasGap = false;
+	for (const e of list) {
+		if (!e || typeof e.project !== "string" || e.project === "") continue;
+		const s = seqOf(e);
+		if (s > 0) maxByProject.set(e.project, Math.max(maxByProject.get(e.project) ?? 0, s));
+		else hasGap = true;
+	}
+	if (!hasGap) return list;
+	const gaps = list.map((e, i) => ({
+		e,
+		i
+	})).filter(({ e }) => e && seqOf(e) === 0 && typeof e.project === "string" && e.project !== "").sort((a, b) => (a.e.lastOpenedAt ?? 0) - (b.e.lastOpenedAt ?? 0) || a.i - b.i);
+	const assign = /* @__PURE__ */ new Map();
+	for (const { e, i } of gaps) {
+		const next = (maxByProject.get(e.project) ?? 0) + 1;
+		maxByProject.set(e.project, next);
+		assign.set(i, next);
+	}
+	return list.map((e, i) => assign.has(i) ? {
+		...e,
+		seq: assign.get(i)
+	} : e);
+}
+/**
+* 算某项目的下一个可用编号（登记时调用）：max(计数器值, 账册内该项目现存最大
+* seq, 「最近关闭」内该项目最大 seq) + 1（closed 号域为 t260904-01 验收走查
+* BO-1 修复：计数器丢失时已关的最大号不再重发——重发后再从 ↺ 重开原号条目
+* 会撞号，破坏拍板 1 的「稳定身份」）。计数器丢失/落后时以账册与最近关闭
+* 兜底——只可能跳号，不可能重号（编号语义=稳定身份而非稠密序列，跳号无害）。
+* 畸形容错：计数器非有限数/负数按 0 处理；project 非字符串按「无账册条目」
+* 处理；closed 非数组忽略、脏条目（缺 project/seq 非有限数）跳过。
+*/
+function nextProjectSeq(entries, project, counterMax, closed) {
+	let max = typeof counterMax === "number" && Number.isFinite(counterMax) && counterMax > 0 ? Math.floor(counterMax) : 0;
+	if (typeof project === "string" && project !== "") {
+		for (const e of Array.isArray(entries) ? entries : []) {
+			if (!e || e.project !== project) continue;
+			if (typeof e.seq === "number" && Number.isFinite(e.seq) && e.seq > max) max = Math.floor(e.seq);
+		}
+		for (const e of Array.isArray(closed) ? closed : []) {
+			if (!e || e.project !== project) continue;
+			if (typeof e.seq === "number" && Number.isFinite(e.seq) && e.seq > max) max = Math.floor(e.seq);
+		}
+	}
+	return max + 1;
+}
 //#endregion
 //#region src/client/session-ledger-store.ts
 /**
@@ -3083,13 +3166,13 @@ function pickSwitchTargets(entries, opts) {
 */
 const LEDGER_KEY = "suyou-workbench-opened-sessions-v1";
 /** 缓存快照。null = 尚未从 localStorage 惰性读入（非空数组后引用不变）。 */
-let current = null;
-const subscribers = /* @__PURE__ */ new Set();
+let current$1 = null;
+const subscribers$1 = /* @__PURE__ */ new Set();
 /** 登记订阅者，返回注销函数（useSyncExternalStore 的 subscribe 协议）。 */
 function subscribeLedger(fn) {
-	subscribers.add(fn);
+	subscribers$1.add(fn);
 	return () => {
-		subscribers.delete(fn);
+		subscribers$1.delete(fn);
 	};
 }
 /**
@@ -3099,12 +3182,12 @@ function subscribeLedger(fn) {
 * useSyncExternalStore 无限重渲染）。
 */
 function getLedgerSnapshot() {
-	if (current === null) try {
-		current = parseLedger(localStorage.getItem(LEDGER_KEY));
+	if (current$1 === null) try {
+		current$1 = parseLedger(localStorage.getItem(LEDGER_KEY));
 	} catch {
-		current = [];
+		current$1 = [];
 	}
-	return current;
+	return current$1;
 }
 /**
 * 落盘 + 广播（useSessionEntry 的 persist 收口到这）：先写 localStorage
@@ -3118,11 +3201,85 @@ function persistLedger(entries) {
 	try {
 		localStorage.setItem(LEDGER_KEY, serializeLedger(entries));
 	} catch {}
-	current = entries;
-	for (const fn of [...subscribers]) try {
+	current$1 = entries;
+	for (const fn of [...subscribers$1]) try {
 		fn();
 	} catch (err) {
 		console.error("[workbench] 会话账册订阅者通知失败（该订阅者本轮跳过，不影响其它订阅者）：", err);
+	}
+}
+//#endregion
+//#region src/client/closed-ledger-store.ts
+/**
+* suyou-workbench · 「最近关闭」列表模块级共享 store（t260904-01 D1 修复，
+* session-entry 第 3 面①验收走查打回项）。
+*
+* 为什么存在：D1 回归——t260904-01 双实例拆分（顶部行 SessionTopEntry +
+* sidebar 项目行各持一个 useSessionEntry）前，closedList 是 hook 实例各自的
+* useState，单实例时代够用；拆分后项目行（二号实例）handleClose 只写
+* localStorage + 自身 state，顶部行（一号实例）的 ↺ 钮渲染条件
+* `closedRecent.length > 0` 挂在自身挂载时快照上——boot 后首关场景 ↺ 钮
+* 不出现，「打开菜单时刷新」的惰性刷新救不了「钮未渲染」的空态死锁（用户
+* 须刷新页面才能找回恢复入口，验收标准 4「可从恢复路径找回」断裂）。
+*
+* 修复=账册主 store（session-ledger-store.ts）同款模式：状态收敛到本模块
+* 单例，persist 更新单例并通知全部订阅者，两实例各自 useSyncExternalStore
+* 订阅、同一通知周期内重渲染——任意实例关闭/重开，另一实例的 ↺ 钮与菜单
+* 即时可见。同页 storage 事件不触发的口径同主 store 头注（W3C：仅同源其它
+* document），跨实例同步只能走共享状态。
+*
+* IO 容错（对齐 session-ledger-store / 原 readClosedLedger 取舍）：
+* - 【模块顶层零 IO】顶层不碰 localStorage/DOM（smoke node 裸跑先 stub 再
+*   import 的时序约束），全部 IO 收敛在函数体内；不 import react/npm 依赖。
+* - 读：localStorage.getItem 抛异常或坏 JSON → parseLedger 容错空表，不抛不崩。
+* - 写：写失败丢持久化但**仍更新内存单例并通知**（本次会话内各实例一致，
+*   不产生分叉——「写失败丢持久化」语义与主 store 一致）。
+* - 单订阅者回调抛异常被隔离并留痕，不中断其余订阅者（主 store 同款）。
+*
+* cap 10、同 id 重关重提头、超出淘汰最旧——语义沿用 t260831-06 原口径，
+* 本模块只改「状态归属」（实例 state → 共享单例），不改任何业务规则。
+*/
+/** 「最近关闭」列表的 localStorage key（t260831-06 定值，D1 修复起定义随
+* IO 迁入本文件；session-entry.tsx re-export 保持对外符号兼容）。 */
+const CLOSED_LEDGER_KEY = "suyou.workbench.closedSessions";
+/** 缓存快照。null = 尚未从 localStorage 惰性读入。 */
+let current = null;
+const subscribers = /* @__PURE__ */ new Set();
+/** 登记订阅者，返回注销函数（useSyncExternalStore 的 subscribe 协议）。 */
+function subscribeClosed(fn) {
+	subscribers.add(fn);
+	return () => {
+		subscribers.delete(fn);
+	};
+}
+/**
+* 列表快照（useSyncExternalStore 的 getSnapshot）。首次调用惰性读入
+* localStorage（抛异常/坏 JSON → parseLedger 容错空表）；之后缓存引用不变，
+* 保证快照稳定性（不触发无限重渲染）。
+*/
+function getClosedSnapshot() {
+	if (current === null) try {
+		current = parseLedger(localStorage.getItem(CLOSED_LEDGER_KEY));
+	} catch {
+		current = [];
+	}
+	return current;
+}
+/**
+* 落盘 + 广播：先写 localStorage（cap 截断后写，写失败只丢持久化），再更新
+* 内存单例（同样 cap 收敛，防越界增长）并逐订阅者通知——任意实例调用，全部
+* 实例同帧看到（D1 修复核心）。
+*/
+function persistClosed(entries) {
+	const capped = (Array.isArray(entries) ? entries : []).slice(0, 10);
+	try {
+		localStorage.setItem(CLOSED_LEDGER_KEY, serializeLedger(capped));
+	} catch {}
+	current = capped;
+	for (const fn of [...subscribers]) try {
+		fn();
+	} catch (err) {
+		console.error("[workbench] 最近关闭列表订阅者通知失败（该订阅者本轮跳过，不影响其它订阅者）：", err);
 	}
 }
 //#endregion
@@ -3193,6 +3350,18 @@ function persistLedger(entries) {
 * 当前项目过滤——targets 推导不再传 project（账册跨项目混排全量参排），
 * ↺「最近关闭」菜单同口径放开；「+ 新建会话」落点逻辑不变（仍走项目选单
 * /当前视图项目绑工作区）。projectKey 仅余新建落点与 ↺ 恢复的归属兜底两职。
+*
+* 第 3 面①（t260904-01，项目内会话区）：本文件仍是会话动作唯一实现点——
+* handleNew 在登记时分配项目内序号 seq（拍板 1「不回收」：每项目计数器续号，
+* 见 SEQ_COUNTER_KEY），重开/blank 换绑带原号；项目行（project-session-row.tsx）
+* 与顶部行消费同一账册（模块级共享 store）与同一组动作，渲染层各一。行内通知
+* 加归属项目（noticeProject）：项目行只显示自己项目的失败提示，顶部行照常全显。
+*
+* t260904-01 验收走查 D1 修复（gen1）：「最近关闭」列表从本 hook 实例各自的
+* useState 迁入 closed-ledger-store.ts 模块级共享 store——双实例下项目行关闭，
+* 顶部行 ↺ 恢复入口同帧出现（原空态死锁：钮渲染条件挂自身挂载快照，惰性刷新
+* 救不了未渲染的钮）。BO-1 顺修：nextProjectSeq 兜底号域纳入「最近关闭」，
+* 计数器丢失时不再重发已关最大号。
 */
 /**
 * 出厂「⊕ New Session」钮的语义锚（aria-label 全集）：dsh-client-ui-sidebar 的
@@ -3202,25 +3371,34 @@ function persistLedger(entries) {
 * smoke/hero.mjs 对本集合有存在性断言（新增语言字典时提醒补锚）。
 */
 const FACTORY_NEW_LABELS = ["新建会话", "New session"];
-const CLOSED_LEDGER_KEY = "suyou.workbench.closedSessions";
-const CLOSED_LEDGER_CAP = 10;
-/** 读「最近关闭」列表（localStorage → OpenedEntry[]；坏数据 parseLedger 容错）。 */
-function readClosedLedger() {
-	try {
-		return parseLedger(window.localStorage.getItem(CLOSED_LEDGER_KEY));
-	} catch {
-		return [];
-	}
-}
-/** 写回「最近关闭」列表（写失败丢持久化但不抛——同账册 persist 取舍口径）。 */
-function writeClosedLedger(entries) {
-	try {
-		window.localStorage.setItem(CLOSED_LEDGER_KEY, serializeLedger(entries.slice(0, CLOSED_LEDGER_CAP)));
-	} catch {}
-}
 /** 条目移入「最近关闭」（同 id 去重重提头 + cap 截断），返回新列表。 */
 function pushClosedLedger(prev, entry) {
-	return [entry, ...prev.filter((e) => e && e.id !== entry.id)].slice(0, CLOSED_LEDGER_CAP);
+	return [entry, ...prev.filter((e) => e && e.id !== entry.id)].slice(0, 10);
+}
+const SEQ_COUNTER_KEY = "suyou-workbench-project-seq-v1";
+/** 读项目编号计数器（localStorage → {[project]: 最大已用 seq}；坏数据容错为空表）。 */
+function readSeqCounters() {
+	try {
+		const raw = window.localStorage.getItem(SEQ_COUNTER_KEY);
+		if (!raw) return {};
+		const data = JSON.parse(raw);
+		if (typeof data !== "object" || data === null || Array.isArray(data)) return {};
+		const out = {};
+		for (const [k, v] of Object.entries(data)) {
+			if (typeof k !== "string" || k === "") continue;
+			if (typeof v !== "number" || !Number.isFinite(v) || v < 0) continue;
+			out[k] = v;
+		}
+		return out;
+	} catch {
+		return {};
+	}
+}
+/** 写回项目编号计数器（写失败丢持久化但不抛——取舍见上方清单）。 */
+function writeSeqCounters(map) {
+	try {
+		window.localStorage.setItem(SEQ_COUNTER_KEY, JSON.stringify(map));
+	} catch {}
 }
 /**
 * 等 id 进入客户端会话列表。勘误链（t260831-02 gen10 审读订正）：open(id) 对未
@@ -3301,11 +3479,19 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 	*  界面上能看见「为什么没切过去」。下一次动作或 8s 后自动清除（timer 有
 	*  cleanup，见下方 effect，全终态回收）。 */
 	const [entryNotice, setEntryNotice] = (0, react.useState)("");
+	/** 通知归属项目（第 3 面①）：项目行据此只显示自己项目的提示（N 个项目组
+	*  不重复同一条全局噪音）；undefined=无归属信息（顶部行不区分照常全显）。 */
+	const [noticeProject, setNoticeProject] = (0, react.useState)(void 0);
+	/** 通知统一入口：text='' 清空（连带清归属）。 */
+	const notify = (0, react.useCallback)((text, project) => {
+		setEntryNotice(text);
+		setNoticeProject(text === "" ? void 0 : project);
+	}, []);
 	(0, react.useEffect)(() => {
 		if (!entryNotice) return;
-		const t = setTimeout(() => setEntryNotice(""), 8e3);
+		const t = setTimeout(() => notify(""), 8e3);
 		return () => clearTimeout(t);
-	}, [entryNotice]);
+	}, [entryNotice, notify]);
 	/**
 	* 打开一个已入账册的会话（t260831-04 收口：handleOpen/handleNew 共用，
 	* 时序唯一实现）：refresh → waitForListed（轮询 200ms，≤10s）→
@@ -3316,11 +3502,11 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 	* - 成功但 current 未跟上：warn 留痕（激活未生效线索），仍返回 true——
 	*   open 调用本身已生效，下一步激活是平台层时序，不在本插件能强制的面内。
 	*/
-	const openSession = (0, react.useCallback)(async (id) => {
-		setEntryNotice("");
+	const openSession = (0, react.useCallback)(async (id, projectHint) => {
+		notify("", void 0);
 		if (!await waitForListed(sessions, id, 1e4)) {
 			console.warn("[workbench] 打开会话：会话未进客户端列表（wire 同步慢或会话已被磁盘清理；账册条目保留，可稍后重试）：", id);
-			setEntryNotice("会话打开超时：列表同步未完成，条目已保留，可重试");
+			notify("会话打开超时：列表同步未完成，条目已保留，可重试", projectHint);
 			return false;
 		}
 		try {
@@ -3328,7 +3514,7 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 			else sessions.open(id);
 		} catch (err) {
 			console.error("[workbench] 打开会话失败：", id, err);
-			setEntryNotice("会话打开失败（详情见控制台）");
+			notify("会话打开失败（详情见控制台）", projectHint);
 			return false;
 		}
 		await new Promise((r) => setTimeout(r, 250));
@@ -3340,7 +3526,11 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 		}
 		if (cur !== id) console.warn("[workbench] open 已调用但 list.current 未指向目标（激活可能未生效，右栏或仍驻留 hero）：", id, "current=", String(cur));
 		return true;
-	}, [sessions, slotOpen]);
+	}, [
+		sessions,
+		slotOpen,
+		notify
+	]);
 	const handleOpen = (0, react.useCallback)(async (id) => {
 		const entry = ledger.find((e) => e.id === id);
 		if ((() => {
@@ -3368,12 +3558,13 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 					project: entry.project,
 					cwd: entry.cwd,
 					title: entry.title,
+					seq: entry.seq,
 					lastOpenedAt: Date.now()
 				}));
 				return;
 			}
 		}
-		await openSession(id);
+		await openSession(id, entry?.project);
 	}, [
 		openSession,
 		workspaces,
@@ -3387,12 +3578,12 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 		const pd = target?.dir ?? projectDir;
 		if (!pk || creating) return;
 		if (!workspaces) {
-			setEntryNotice("新建会话失败：workspaces 服务不可用");
+			notify("新建会话失败：workspaces 服务不可用", pk);
 			console.error("[workbench] 新建会话失败：ctx.workspaces 未注入（index.tsx inject 列表缺 workspaces）");
 			return;
 		}
 		setCreating(true);
-		setEntryNotice("");
+		notify("", void 0);
 		try {
 			let ws = workspaceForDir(workspaces.list.getSnapshot()?.items ?? [], pd ?? "");
 			if (!ws && pd) ws = await workspaces.create({ path: pd }).then((w) => ({
@@ -3400,11 +3591,11 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 				path: pd
 			})).catch((err) => {
 				console.error("[workbench] 新建会话失败：工作区创建失败：", pd, err);
-				setEntryNotice("新建会话失败：工作区创建失败（详情见控制台）");
+				notify("新建会话失败：工作区创建失败（详情见控制台）", pk);
 			});
 			if (!ws) {
 				console.error("[workbench] 新建会话失败：项目无对应工作区且无法创建：", pk, pd);
-				setEntryNotice("新建会话失败：项目主目录未注册为工作区");
+				notify("新建会话失败：项目主目录未注册为工作区", pk);
 				return;
 			}
 			workspaces.startSession(ws.workspaceId);
@@ -3417,18 +3608,26 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 			})(), 1e4);
 			if (!staged) {
 				console.warn("[workbench] 新建会话：staging 未落定（current 未更新）；工作区已连接，可从列表进入：", ws.workspaceId);
-				setEntryNotice("会话打开超时：列表同步未完成，可重试");
+				notify("会话打开超时：列表同步未完成，可重试", pk);
 				return;
 			}
-			persist(touchEntry(ledger, {
+			const base = backfillProjectSeqs(getLedgerSnapshot());
+			const counters = readSeqCounters();
+			const seq = nextProjectSeq(base, pk, counters[pk], getClosedSnapshot());
+			writeSeqCounters({
+				...counters,
+				[pk]: seq
+			});
+			persist(touchEntry(base, {
 				id: staged,
 				project: pk,
 				cwd: pd ?? "",
-				lastOpenedAt: Date.now()
+				lastOpenedAt: Date.now(),
+				seq
 			}));
 		} catch (err) {
 			console.error("[workbench] 新建会话请求异常：", err);
-			setEntryNotice("新建会话失败：请求异常（详情见控制台）");
+			notify("新建会话失败：请求异常（详情见控制台）", pk);
 		} finally {
 			setCreating(false);
 		}
@@ -3438,25 +3637,22 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 		projectKey,
 		projectDir,
 		creating,
-		ledger,
-		persist
+		persist,
+		notify
 	]);
-	const [closedList, setClosedList] = (0, react.useState)(() => readClosedLedger());
+	const closedList = (0, react.useSyncExternalStore)(subscribeClosed, getClosedSnapshot);
 	return {
 		ledger,
 		targets,
 		creating,
 		entryNotice,
+		noticeProject,
 		handleNew,
 		handleOpen,
 		handleClose: (0, react.useCallback)((id) => {
 			const entry = ledger.find((e) => e.id === id);
 			persist(removeEntry(ledger, id));
-			if (entry) {
-				const next = pushClosedLedger(readClosedLedger(), entry);
-				writeClosedLedger(next);
-				setClosedList(next);
-			}
+			if (entry) persistClosed(pushClosedLedger(getClosedSnapshot(), entry));
 			if (typeof sessions.close === "function") try {
 				sessions.close(id);
 			} catch (err) {
@@ -3470,16 +3666,16 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 		handleReopen: (0, react.useCallback)(async (id) => {
 			const entry = closedList.find((e) => e.id === id);
 			if (!entry) return;
-			writeClosedLedger(closedList.filter((e) => e.id !== id));
-			setClosedList(closedList.filter((e) => e.id !== id));
+			persistClosed(closedList.filter((e) => e.id !== id));
 			persist(touchEntry(ledger, {
 				id: entry.id,
 				project: entry.project || projectKey,
 				cwd: entry.cwd,
 				title: entry.title,
+				seq: entry.seq,
 				lastOpenedAt: Date.now()
 			}));
-			await openSession(entry.id);
+			await openSession(entry.id, entry.project || projectKey);
 		}, [
 			closedList,
 			ledger,
@@ -3488,11 +3684,6 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 			openSession
 		]),
 		closedList,
-		refreshClosedList: (0, react.useCallback)(() => setClosedList((prev) => {
-			const disk = readClosedLedger();
-			const ids = new Set(disk.map((e) => e.id));
-			return [...disk, ...prev.filter((e) => !ids.has(e.id))].slice(0, CLOSED_LEDGER_CAP);
-		}), []),
 		listState
 	};
 }
@@ -3612,7 +3803,7 @@ function SessionTab({ target, editing, draftTitle, onOpen, onClose, onEditStart,
 	});
 }
 function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, projectDir, projects }) {
-	const { ledger, targets, creating, entryNotice, handleNew, handleOpen, handleClose, handleReopen, closedList, refreshClosedList } = useSessionEntry({
+	const { ledger, targets, creating, entryNotice, handleNew, handleOpen, handleClose, handleReopen, closedList } = useSessionEntry({
 		sessions,
 		workspaces,
 		slotOpen,
@@ -3640,7 +3831,6 @@ function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 	const closedRecent = (0, react.useMemo)(() => closedList.filter((e) => e), [closedList]);
 	(0, react.useEffect)(() => {
 		if (!reopenOpen) return;
-		refreshClosedList();
 		const onDocDown = (e) => {
 			if (reopenWrapRef.current && !reopenWrapRef.current.contains(e.target)) setReopenOpen(false);
 		};
@@ -3653,7 +3843,7 @@ function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 			document.removeEventListener("mousedown", onDocDown);
 			document.removeEventListener("keydown", onKey);
 		};
-	}, [reopenOpen, refreshClosedList]);
+	}, [reopenOpen]);
 	const pickerChoices = !projectKey && (projects?.length ?? 0) > 0 ? projects : null;
 	const [projOpen, setProjOpen] = (0, react.useState)(false);
 	const projWrapRef = (0, react.useRef)(null);
@@ -3778,6 +3968,256 @@ function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 				"data-wb-session-notice": "",
 				role: "status",
 				children: entryNotice
+			})
+		]
+	});
+}
+//#endregion
+//#region src/client/project-session-row.tsx
+/**
+* suyou-workbench · 项目内会话区（session-entry 第 3 面①，R1–R6）。
+*
+* 口径真源 notes/epics/session-entry.md（R1–R6 + 拍板 1/2/3）：
+*   - R1 位置：左栏项目组头之下、工单列表之上，一横排；随项目组折叠整体隐藏
+*     （挂载点在 sidebar.tsx 的 !collapsed 分支内，折叠=整组收起同隐）。
+*   - R2 形态：正方形「+」钮 + 正方形数字 tab（编号=项目内登记顺序 seq，关闭
+*     不回收，序列可有洞）；数量不限（无 limit），超宽 flex-wrap 换行不横滚。
+*   - R3 新建：onNew → useSessionEntry 的 handleNew({key,dir}) 工厂同款链
+*     （绑工作区+复用 blank+正确打开），落点=本组项目主目录。
+*   - R4 切换：点 tab → handleOpen 统一链（平台单 current 语义）。
+*   - R5 关闭：关闭钮 → 轻量确认弹层（插件内，不用原生 confirm），文案含编号
+*     与标题、明示「仅关闭入口不删内容」；确认走既有 handleClose（剔入口+入
+*     最近关闭，不删会话数据）；取消不动。
+*   - R6 高亮：active = id === current（与顶部行同源；current 全局唯一 → 至多
+*     一个 tab 高亮；current 为工单/未入账会话时全不亮）。
+*
+* 数据：账册按 project 过滤消费（pickProjectTabs 纯函数，shared/sessions.ts）；
+* 本组件零 IO、零出厂 DOM 接触——动作全部由 sidebar.tsx 的 useSessionEntry
+* 二号实例注入（账册=模块级共享 store，两实例同帧一致）。
+*
+* 确认弹层定位（review C1 修订，与 ↺ 菜单同**模式**不同**环境**）：↺ 菜单挂在
+* .wb-sb-left（无滚动祖先，absolute 自由溢出）；本行挂在 .wb-ticket-list 内
+* （overflow-y:auto 滚动容器——CSS 一轴 auto 另一轴计算为 auto，absolute 弹层
+* 会被裁剪）。故弹层走 position:fixed 脱离滚动容器裁剪 + 视口钳制（左右不出界、
+* 底部放不下向上翻），列表滚动时经 capture scroll 监听跟随锚重摆。点外/Esc
+* 收起（document listener，effect cleanup 全终态回收——正常收起/卸载/换确认
+* 目标三条路径都摘干净）。
+*
+* 语义锚（smoke/project-sessions.mjs 源文本断言面）：data-wb-psess-row（根）、
+* data-wb-psess-new（+ 钮）、data-wb-psess-tab[data-active]（tab）、
+* data-wb-psess-close（tab 关闭钮）、data-wb-psess-confirm（确认弹层）、
+* data-wb-psess-confirm-ok / -confirm-cancel（确认/取消）、
+* data-wb-psess-notice（行内失败提示）。零 CSS 类名匹配纪律（自有 .wb-psess-*
+* 前缀，与出厂类名零交叉）。
+*/
+const PSESS_STYLES = `
+.wb-psess { display:flex; flex-wrap:wrap; align-items:center; gap:4px;
+  padding:4px 8px 4px 20px; border-bottom:1px solid rgba(255,255,255,0.04); }
+.wb-psess-new { box-sizing:border-box; width:24px; height:24px; flex:none;
+  display:flex; align-items:center; justify-content:center; font:inherit;
+  font-size:13px; line-height:1; padding:0; border-radius:4px;
+  border:1px solid rgba(255,255,255,0.25); background:none;
+  color:var(--dsw-alias-label-primary,#e0e0e0); cursor:pointer; }
+.wb-psess-new:hover:not(:disabled) { background:rgba(255,255,255,0.1); }
+.wb-psess-new:disabled { opacity:0.4; cursor:default; }
+.wb-psess-tab { box-sizing:border-box; position:relative; min-width:24px;
+  height:24px; flex:none; display:inline-flex; align-items:center;
+  justify-content:center; padding:0 3px; border-radius:4px;
+  border:1px solid transparent; background:none;
+  color:var(--dsw-alias-label-secondary,#b8b8c8); font:inherit; font-size:11.5px;
+  cursor:pointer; }
+.wb-psess-tab:hover { background:rgba(255,255,255,0.08);
+  color:var(--dsw-alias-label-primary,#e0e0e0); }
+.wb-psess-tab.active { background:rgba(124,58,237,0.25);
+  border-color:rgba(124,58,237,0.55); color:var(--dsw-alias-label-primary,#e0e0e0); }
+.wb-psess-num { line-height:1; font-family:var(--ds-font-family-code,monospace); }
+.wb-psess-close { position:absolute; top:-5px; right:-5px; width:12px; height:12px;
+  display:flex; align-items:center; justify-content:center; padding:0; font:inherit;
+  font-size:9px; line-height:1; border:none; border-radius:3px; background:none;
+  color:#f87171; cursor:pointer; opacity:0; }
+.wb-psess-tab:hover .wb-psess-close, .wb-psess-close:focus-visible { opacity:1; }
+.wb-psess-close:hover { background:rgba(248,113,113,0.18); }
+.wb-psess-notice { flex-basis:100%; font-size:10.5px; color:#f59e0b; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; }
+.wb-psess-confirm { position:fixed; z-index:97; min-width:200px; max-width:280px;
+  padding:8px 10px; border-radius:8px; background:#1e1e24;
+  border:1px solid rgba(255,255,255,0.15); box-shadow:0 8px 24px rgba(0,0,0,0.5);
+  display:flex; flex-direction:column; gap:5px; }
+.wb-psess-confirm-t { font-size:12px; font-weight:600; }
+.wb-psess-confirm-d { font-size:11px; color:#b8b8c8; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; }
+.wb-psess-confirm-m { font-size:10.5px; color:#8c959f; }
+.wb-psess-confirm-btns { display:flex; gap:6px; justify-content:flex-end; }
+.wb-psess-confirm-btns button { font:inherit; font-size:11px; padding:2px 10px;
+  border-radius:4px; cursor:pointer; border:1px solid rgba(255,255,255,0.2);
+  background:none; color:var(--dsw-alias-label-primary,#e0e0e0); }
+.wb-psess-confirm-btns button:hover { background:rgba(255,255,255,0.08); }
+.wb-psess-confirm-btns .wb-psess-confirm-ok { border-color:rgba(248,113,113,0.6);
+  color:#f87171; }
+.wb-psess-confirm-btns .wb-psess-confirm-ok:hover { background:rgba(248,113,113,0.15); }
+`;
+/**
+* 一横排项目会话区：+ 钮 + 数字 tab 行 +（有确认目标时）确认弹层 + 行内提示。
+* 纯展示/交互组件，状态只有 confirmId（哪个 tab 在等确认）。
+*/
+function ProjectSessionRow(props) {
+	const { projectKey, projectName, projectDir, ledger, current, byId, creating, notice, noticeProject, onNew, onOpen, onClose } = props;
+	const tabs = (0, react.useMemo)(() => pickProjectTabs(ledger, {
+		project: projectKey,
+		current,
+		byId
+	}), [
+		ledger,
+		projectKey,
+		current,
+		byId
+	]);
+	const [confirmId, setConfirmId] = (0, react.useState)(null);
+	/** 正在确认的 tab 锚（ref 回调按 confirmId 条件挂到对应 tab 上）。 */
+	const tabRef = (0, react.useRef)(null);
+	const popRef = (0, react.useRef)(null);
+	/** 摆位：锚矩形 → 视口钳制（左右不出界）+ 底部放不下向上翻。 */
+	const place = (0, react.useCallback)(() => {
+		const pop = popRef.current;
+		const anchor = tabRef.current;
+		if (!pop || !anchor) return;
+		const r = anchor.getBoundingClientRect();
+		const w = pop.offsetWidth;
+		const h = pop.offsetHeight;
+		const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+		const below = r.bottom + 4;
+		const top = below + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 4) : below;
+		pop.style.left = `${left}px`;
+		pop.style.top = `${top}px`;
+	}, []);
+	(0, react.useLayoutEffect)(() => {
+		if (confirmId !== null) place();
+	}, [
+		confirmId,
+		place,
+		tabs
+	]);
+	(0, react.useEffect)(() => {
+		if (confirmId === null) return;
+		const onDocDown = (e) => {
+			const t = e.target;
+			if (t && (popRef.current?.contains(t) || tabRef.current?.contains(t))) return;
+			setConfirmId(null);
+		};
+		const onKey = (e) => {
+			if (e.key === "Escape") setConfirmId(null);
+		};
+		document.addEventListener("mousedown", onDocDown);
+		document.addEventListener("keydown", onKey);
+		document.addEventListener("scroll", place, true);
+		return () => {
+			document.removeEventListener("mousedown", onDocDown);
+			document.removeEventListener("keydown", onKey);
+			document.removeEventListener("scroll", place, true);
+		};
+	}, [confirmId, place]);
+	const confirmTab = confirmId === null ? null : tabs.find((t) => t.id === confirmId) ?? null;
+	const showNotice = notice !== "" && (noticeProject === void 0 || noticeProject === projectKey);
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-psess",
+		"data-wb-psess-row": "",
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: PSESS_STYLES }),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				type: "button",
+				className: "wb-psess-new",
+				"data-wb-psess-new": "",
+				disabled: creating,
+				title: `新建 ${projectName} 会话（主目录${projectDir ? `：${projectDir}` : ""}）`,
+				"aria-label": `新建 ${projectName} 会话`,
+				onClick: onNew,
+				children: "+"
+			}),
+			tabs.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				ref: confirmId === t.id ? tabRef : void 0,
+				className: `wb-psess-tab ${t.active ? "active" : ""}`,
+				"data-wb-psess-tab": "",
+				"data-active": t.active,
+				role: "button",
+				tabIndex: 0,
+				title: `${projectName} 会话 ${t.seq}：${t.title}\n${t.id}`,
+				onClick: () => {
+					setConfirmId(null);
+					onOpen(t.id);
+				},
+				onKeyDown: (e) => {
+					if (e.key === "Enter" || e.key === " ") {
+						e.preventDefault();
+						setConfirmId(null);
+						onOpen(t.id);
+					}
+				},
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					className: "wb-psess-num",
+					children: t.seq
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					className: "wb-psess-close",
+					"data-wb-psess-close": "",
+					title: "关闭该会话入口（需确认；不删除会话内容）",
+					"aria-label": `关闭会话入口 ${t.seq}`,
+					onClick: (e) => {
+						e.stopPropagation();
+						setConfirmId(t.id);
+					},
+					children: "×"
+				})]
+			}, t.id)),
+			confirmTab && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-psess-confirm",
+				"data-wb-psess-confirm": "",
+				role: "dialog",
+				"aria-label": "关闭会话入口确认",
+				ref: popRef,
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-psess-confirm-t",
+						children: [
+							"关闭会话 ",
+							confirmTab.seq,
+							"？"
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-psess-confirm-d",
+						title: confirmTab.title,
+						children: confirmTab.title
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-psess-confirm-m",
+						children: "仅关闭入口，不删除会话内容；可从 ↺ 最近关闭找回。"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-psess-confirm-btns",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: "wb-psess-confirm-cancel",
+							"data-wb-psess-confirm-cancel": "",
+							onClick: () => setConfirmId(null),
+							children: "取消"
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: "wb-psess-confirm-ok",
+							"data-wb-psess-confirm-ok": "",
+							onClick: () => {
+								setConfirmId(null);
+								onClose(confirmTab.id);
+							},
+							children: "关闭"
+						})]
+					})
+				]
+			}),
+			showNotice && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				className: "wb-psess-notice",
+				"data-wb-psess-notice": "",
+				role: "status",
+				children: notice
 			})
 		]
 	});
@@ -45128,7 +45568,11 @@ function mountMetricsIntoSettingsRow(root) {
 *       规则=shared/sessions.ts 纯函数；组件本体 client/session-entry.tsx 的
 *       <SessionTopEntry>。t260828-02 的左栏「会话」区块已整块移除（t260831-02），
 *       记账层保留在内部只供本入口）
-*       + 项目组（可折叠，项目名分隔，只列进行中工单，两行式条目：行1=title，行2=彩色工单号 + role·创建时长）。
+*       + 项目组（可折叠，项目名分隔，只列进行中工单，两行式条目：行1=title，行2=彩色工单号 + role·创建时长）；
+*       每组头下、工单列表上另有项目内会话区一横排（session-entry 第 3 面①：
+*       正方形「+」+ 正方形数字 tab，编号=项目内登记顺序关闭不回收，超宽换行；
+*       组件 project-session-row.tsx，动作=本组件 useSessionEntry 二号实例——
+*       顶部行过渡期 260904 混排口径不变，R8 验收后退役）。
 *       项目组头行右对齐四个项目级视图入口图标：📋 工单列表 / 📖 知识库 / 🔀 模型路由 / 🗂️ 立项单
 *       （t260827-01：立项单从「左列可折叠列表区」改为项目级图标，与其他三视图同款；
 *       左列不再显示立项列表，点图标后中列显示立项清单）。
@@ -45362,6 +45806,19 @@ function WorkbenchSidebar(props) {
 	const staleHost = useStaleHost();
 	const [staleDismissed, setStaleDismissed] = (0, react.useState)(false);
 	useHideFactoryNewSession(rootRef, wide);
+	const projectSessions = useSessionEntry({
+		sessions,
+		workspaces,
+		slotOpen,
+		projectKey: viewProject || (projects.length === 1 ? projects[0].key : ""),
+		projectDir: projects.find((p) => p.key === (viewProject || (projects.length === 1 ? projects[0].key : "")))?.primary ?? ""
+	});
+	(0, react.useEffect)(() => {
+		if (!wide) return;
+		const snapshot = getLedgerSnapshot();
+		const backfilled = backfillProjectSeqs(snapshot);
+		if (backfilled !== snapshot) persistLedger(backfilled);
+	}, [wide, projectSessions.ledger]);
 	(0, react.useEffect)(() => {
 		if (!wide) return;
 		const root = rootRef.current;
@@ -45579,7 +46036,27 @@ function WorkbenchSidebar(props) {
 								]
 							})
 						]
-					}), !collapsed[g.project.key] && (g.tickets.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					}), !collapsed[g.project.key] && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectSessionRow, {
+						projectKey: g.project.key,
+						projectName: g.project.name,
+						projectDir: g.project.primary,
+						ledger: projectSessions.ledger,
+						current: projectSessions.listState?.current,
+						byId: projectSessions.listState?.byId,
+						creating: projectSessions.creating,
+						notice: projectSessions.entryNotice,
+						noticeProject: projectSessions.noticeProject,
+						onNew: () => {
+							projectSessions.handleNew({
+								key: g.project.key,
+								dir: g.project.primary
+							});
+						},
+						onOpen: (id) => {
+							projectSessions.handleOpen(id);
+						},
+						onClose: projectSessions.handleClose
+					}), g.tickets.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "wb-group-empty",
 						children: "无进行中工单"
 					}) : g.tickets.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -45606,7 +46083,7 @@ function WorkbenchSidebar(props) {
 								!isOpen(t) && " 前收口"
 							]
 						})]
-					}, t.id)))] }, g.project.key))
+					}, t.id))] })] }, g.project.key))
 				})]
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {

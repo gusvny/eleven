@@ -18,7 +18,11 @@
  *       规则=shared/sessions.ts 纯函数；组件本体 client/session-entry.tsx 的
  *       <SessionTopEntry>。t260828-02 的左栏「会话」区块已整块移除（t260831-02），
  *       记账层保留在内部只供本入口）
- *       + 项目组（可折叠，项目名分隔，只列进行中工单，两行式条目：行1=title，行2=彩色工单号 + role·创建时长）。
+ *       + 项目组（可折叠，项目名分隔，只列进行中工单，两行式条目：行1=title，行2=彩色工单号 + role·创建时长）；
+ *       每组头下、工单列表上另有项目内会话区一横排（session-entry 第 3 面①：
+ *       正方形「+」+ 正方形数字 tab，编号=项目内登记顺序关闭不回收，超宽换行；
+ *       组件 project-session-row.tsx，动作=本组件 useSessionEntry 二号实例——
+ *       顶部行过渡期 260904 混排口径不变，R8 验收后退役）。
  *       项目组头行右对齐四个项目级视图入口图标：📋 工单列表 / 📖 知识库 / 🔀 模型路由 / 🗂️ 立项单
  *       （t260827-01：立项单从「左列可折叠列表区」改为项目级图标，与其他三视图同款；
  *       左列不再显示立项列表，点图标后中列显示立项清单）。
@@ -38,7 +42,14 @@ import type { ComponentType } from 'react'
 import type { ObservableSnapshot, SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 // 顶部会话入口组件与记账层（t260831-02：SessionTopEntry + 出厂钮语义锚；session-entry.tsx
 // 持有 LEDGER_KEY / useSessionEntry hook；本文件留侧栏样式、布局与注入 effect）。
-import { SessionTopEntry, FACTORY_NEW_LABELS } from './session-entry.tsx'
+import { SessionTopEntry, FACTORY_NEW_LABELS, useSessionEntry } from './session-entry.tsx'
+// 项目内会话区（session-entry 第 3 面①，R1–R6）：每项目组头下、工单列表上的
+// 一横排（+ 钮 + 数字 tab + 确认弹层）；动作由本组件的 useSessionEntry 二号
+// 实例注入（账册=模块级共享 store，与顶部行同帧一致）。
+import { ProjectSessionRow } from './project-session-row.tsx'
+// 存量编号迁移（第 3 面① 拍板 1）：账册缺 seq 条目按项目内登记序补号（幂等）。
+import { backfillProjectSeqs } from '../shared/sessions.ts'
+import { getLedgerSnapshot, persistLedger } from './session-ledger-store.ts'
 // host 陈旧全局提醒（t260902-03）：useStaleHost 单例挂本组件；横幅渲染在
 // .wb-sb-right 共享容器（四视图排他渲染之上），所有页签/视图常驻可见。
 import { useStaleHost } from './staleness.ts'
@@ -390,6 +401,30 @@ export function WorkbenchSidebar(props: SidebarProps) {
   // 顶部行原地替换：隐藏出厂「⊕ New Session」钮（语义锚注入，见函数头注）。
   useHideFactoryNewSession(rootRef, wide)
 
+  /* ── 项目内会话区（session-entry 第 3 面①）──
+   * 二号 useSessionEntry 实例：账册是模块级共享 store（t260830-01 为同页多消费
+   * 而建，机制现行），两实例同帧一致；动作（handleNew/handleOpen/handleClose）
+   * 下传各项目组行，新建落点由行级闭包显式传 target（R3：落点=本组项目）。
+   * projectKey 缺省同顶部行（当前视图项目，单项目兜底）——只影响缺省落点与
+   * ↺ 恢复归属兜底，项目行走显式 target 不依赖它。 */
+  const projectSessions = useSessionEntry({
+    sessions,
+    workspaces,
+    slotOpen,
+    projectKey: viewProject || (projects.length === 1 ? projects[0].key : ''),
+    projectDir: projects.find(p => p.key === (viewProject || (projects.length === 1 ? projects[0].key : '')))?.primary ?? '',
+  })
+
+  // 存量编号迁移（第 3 面① 拍板 1，幂等）：账册缺 seq 的旧条目（本面前登记）
+  // 按项目内登记序补号；无缺号时 backfillProjectSeqs 原样返回入参引用，引用
+  // 相等即免 persist（不会循环）。依赖 ledger：异常路径再现缺号条目时自愈。
+  useEffect(() => {
+    if (!wide) return
+    const snapshot = getLedgerSnapshot()
+    const backfilled = backfillProjectSeqs(snapshot)
+    if (backfilled !== snapshot) persistLedger(backfilled)
+  }, [wide, projectSessions.ledger])
+
   // 度量入口首选注入 shell Settings 行（t260902-05① 验收打回修订：footer.action
   // 槽落点=侧栏包 footer，与 shell Settings 不同排）。锚找不到软退化回 footer.action
   // 槽（metrics-entry 内广播 METRICS_SHELL_EVENT 控制槽钮显隐）；卸载/折叠全回收。
@@ -597,22 +632,43 @@ export function WorkbenchSidebar(props: SidebarProps) {
                 </span>
               </div>
               {!collapsed[g.project.key] && (
-                g.tickets.length === 0 ? (
-                  <div className="wb-group-empty">无进行中工单</div>
-                ) : g.tickets.map(t => (
-                  <div
-                    key={t.id}
-                    className={`wb-ticket-row2 ${selectedId === t.id ? 'selected' : ''} ${isOpen(t) ? '' : 'done'}`}
-                    onClick={() => handleTicketClick(t, g.project.key)}
-                  >
-                    {t.title && <div className="wb-ticket-l1" title={t.title}>{t.title}</div>}
-                    <div className="wb-ticket-l2">
-                      <span style={{color: stateColor(t), fontFamily: 'var(--ds-font-family-code, monospace)'}}>{t.id}</span>
-                      {' · '}{isOpen(t) ? (t.role || '—') : '已完成'}{' · '}{ageOf(isOpen(t) ? t.created : (t.close_ts || t.created))}
-                      {!isOpen(t) && ' 前收口'}
+                <>
+                  {/* 项目内会话区（第 3 面① R1）：组头之下、工单列表之上，随组折叠
+                      同隐。+ 落本项目主目录（R3，handleNew 显式 target 工厂同款链）；
+                      tab=项目内登记序号（关闭不回收，R2）；点 tab 切换（R4）；关闭钮
+                      确认弹层后剔入口（R5）；current 高亮唯一（R6）。数据=账册按
+                      project 过滤，工单/磁盘存量/subagent 不进账册口径不变。 */}
+                  <ProjectSessionRow
+                    projectKey={g.project.key}
+                    projectName={g.project.name}
+                    projectDir={g.project.primary}
+                    ledger={projectSessions.ledger}
+                    current={projectSessions.listState?.current}
+                    byId={projectSessions.listState?.byId as Record<string, { displayTitle?: string } | undefined> | undefined}
+                    creating={projectSessions.creating}
+                    notice={projectSessions.entryNotice}
+                    noticeProject={projectSessions.noticeProject}
+                    onNew={() => { void projectSessions.handleNew({ key: g.project.key, dir: g.project.primary }) }}
+                    onOpen={(id) => { void projectSessions.handleOpen(id) }}
+                    onClose={projectSessions.handleClose}
+                  />
+                  {g.tickets.length === 0 ? (
+                    <div className="wb-group-empty">无进行中工单</div>
+                  ) : g.tickets.map(t => (
+                    <div
+                      key={t.id}
+                      className={`wb-ticket-row2 ${selectedId === t.id ? 'selected' : ''} ${isOpen(t) ? '' : 'done'}`}
+                      onClick={() => handleTicketClick(t, g.project.key)}
+                    >
+                      {t.title && <div className="wb-ticket-l1" title={t.title}>{t.title}</div>}
+                      <div className="wb-ticket-l2">
+                        <span style={{color: stateColor(t), fontFamily: 'var(--ds-font-family-code, monospace)'}}>{t.id}</span>
+                        {' · '}{isOpen(t) ? (t.role || '—') : '已完成'}{' · '}{ageOf(isOpen(t) ? t.created : (t.close_ts || t.created))}
+                        {!isOpen(t) && ' 前收口'}
+                      </div>
                     </div>
-                  </div>
-                ))
+                  ))}
+                </>
               )}
             </div>
           ))}

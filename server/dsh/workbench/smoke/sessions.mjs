@@ -270,5 +270,25 @@ section('M chat- 会话入账回归（t260831-04 缺陷①防线）')
   ok(rows2.length === 1 && rows2[0].id === sid, '账册往返后行仍在（持久化不丢入账）')
 }
 
+section('O seq 字段透传（第 3 面①：项目内登记序号，关闭不回收）')
+{
+  // touchEntry 带 seq 入账 + upsert 更新 + 畸形剔字段 + 往返持久化。
+  // 深度口径（补号/续号/不回收链）在 smoke/project-sessions.mjs，此处只守
+  // 记账层透传不回归。
+  const l1 = touchEntry([], { id: 'chat-a', project: 'suyou', lastOpenedAt: 1, seq: 3 })
+  ok(l1.length === 1 && l1[0].seq === 3, 'touchEntry 采纳有限数 seq')
+  const l2 = touchEntry(l1, { id: 'chat-a', project: 'suyou', lastOpenedAt: 2, seq: 4 })
+  ok(l2.length === 1 && l2[0].seq === 4 && l2[0].lastOpenedAt === 2, '同 id upsert 更新 seq')
+  const bad = touchEntry([], { id: 'chat-b', project: 'suyou', seq: Number.NaN })
+  ok(bad.length === 1 && bad[0].seq === undefined, '畸形 seq（NaN）剔字段不崩')
+  const bad2 = parseLedger(JSON.stringify([{ id: 'chat-c', project: 'suyou', lastOpenedAt: 1, seq: 'x' }]))
+  ok(bad2.length === 1 && bad2[0].seq === undefined, 'parseLedger 非数字 seq 剔字段')
+  const back = parseLedger(serializeLedger(l2))
+  ok(back.length === 1 && back[0].seq === 4, 'seq 往返持久化保留')
+  // 顶部行零回归锚：pickSwitchTargets 不消费 seq，条目带 seq 渲染不受影响
+  const top = pickSwitchTargets(l2, {})
+  ok(top.length === 1 && top[0].id === 'chat-a', '顶部行 pickSwitchTargets 对带 seq 条目行为不变')
+}
+
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed === 0 ? 0 : 1)

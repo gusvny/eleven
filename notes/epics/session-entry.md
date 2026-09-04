@@ -104,11 +104,32 @@
 
 - 已落地：t260825-02（侧栏会话区）→ t260831-02（顶部行替换）→ t260831-06
   （tab 三修）→ 260904 直修（全项目混排）。
-- 待开票（第 3 面，建议拆两张）：
-  1. **项目内会话区**（R1–R6：组件 + 记账层按项目过滤消费 + 关闭确认框 +
-     smoke 用例）；
-  2. **项目色贯通 + 顶部行退役**（R7 + R8：左栏项目着色、右栏 chat 项目色
-     标识、小样拍板后实施；验收后移除 SessionTopEntry）。
+- 第 3 面票① **t260904-01（项目内会话区 R1–R6）已实现，待验收**：
+  - 记账层（shared/sessions.ts）：`OpenedEntry` 加可选 `seq`（项目内登记序号，
+    拍板 1「不回收」——关闭留洞、新会话从每项目计数器续号、重开/blank 换绑带
+    原号）；新增纯函数 `pickProjectTabs`（按 project 过滤、seq 升序、无上限、
+    active 唯一）/ `backfillProjectSeqs`（存量幂等迁移）/ `nextProjectSeq`
+    （max(计数器,账册现存最大)+1）；顶部行 `pickSwitchTargets` 口径零变化。
+  - 续号计数器（session-entry.tsx `SEQ_COUNTER_KEY`）：localStorage 单键存
+    {[project]: 最大已用号}，登记时**先写计数器再落账**（中断=跳号不重号），
+    惰性读写（坏 JSON→按丢失处理，账册现存最大号兜底）。
+  - 组件（project-session-row.tsx）：组头下/工单列表上一横排，正方形「+」+
+    正方形数字 tab，超宽 flex-wrap 换行不横滚；关闭钮确认弹层
+    **position:fixed**（挂载环境 .wb-ticket-list 是滚动容器，absolute 会被
+    裁剪——视口钳制+底部上翻+滚动跟随）；确认走既有 handleClose（剔入口+入
+    最近关闭，不删数据）。sidebar.tsx 组内接线（useSessionEntry 二号实例，
+    模块级共享 store 同帧一致）+ 存量补号挂载 effect。
+  - smoke/project-sessions.mjs：编号不回收全链/换行/确认框/高亮/畸形输入 +
+    src 与 lib 双侧源文本断言。
+  - 验收走查 gen0 打回两项已修（gen1）：**D1**「最近关闭」状态迁
+    closed-ledger-store.ts 模块级共享 store（订阅广播，双实例同帧一致）——
+    项目行关闭后顶部行 ↺ 恢复入口即时出现（原实例 useState 快照 + 惰性刷新
+    的空态死锁根因）；**BO-1** nextProjectSeq 兜底号域纳入「最近关闭」——
+    计数器丢失时已关最大号不再重发（关 30 后新建续 31 不撞号），smoke B3
+    组 + S7 组（D1 接线源文本断言）看守。
+- 待开票（第 3 面票②，验收①后另开）：**项目色贯通 + 顶部行退役**（R7 + R8：
+  左栏项目着色、右栏 chat 顶部色带、验收后移除 SessionTopEntry；届时
+  notes/会话tab全项目显示决策.md 补注退役）。
 
 ## 交付文档（落地承诺）
 

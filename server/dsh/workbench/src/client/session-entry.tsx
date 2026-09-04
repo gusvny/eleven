@@ -64,6 +64,18 @@
  * 当前项目过滤——targets 推导不再传 project（账册跨项目混排全量参排），
  * ↺「最近关闭」菜单同口径放开；「+ 新建会话」落点逻辑不变（仍走项目选单
  * /当前视图项目绑工作区）。projectKey 仅余新建落点与 ↺ 恢复的归属兜底两职。
+ *
+ * 第 3 面①（t260904-01，项目内会话区）：本文件仍是会话动作唯一实现点——
+ * handleNew 在登记时分配项目内序号 seq（拍板 1「不回收」：每项目计数器续号，
+ * 见 SEQ_COUNTER_KEY），重开/blank 换绑带原号；项目行（project-session-row.tsx）
+ * 与顶部行消费同一账册（模块级共享 store）与同一组动作，渲染层各一。行内通知
+ * 加归属项目（noticeProject）：项目行只显示自己项目的失败提示，顶部行照常全显。
+ *
+ * t260904-01 验收走查 D1 修复（gen1）：「最近关闭」列表从本 hook 实例各自的
+ * useState 迁入 closed-ledger-store.ts 模块级共享 store——双实例下项目行关闭，
+ * 顶部行 ↺ 恢复入口同帧出现（原空态死锁：钮渲染条件挂自身挂载快照，惰性刷新
+ * 救不了未渲染的钮）。BO-1 顺修：nextProjectSeq 兜底号域纳入「最近关闭」，
+ * 计数器丢失时不再重发已关最大号。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
@@ -76,9 +88,9 @@ import {
   touchEntry,
   removeEntry,
   renameEntry,
-  parseLedger,
-  serializeLedger,
   pickSwitchTargets,
+  backfillProjectSeqs,
+  nextProjectSeq,
 } from '../shared/sessions.ts'
 import type { OpenedEntry } from '../shared/sessions.ts'
 // 账册模块级共享 store：同页跨实例同步。persist 落盘 + 广播收口于此。
@@ -88,8 +100,19 @@ import {
   getLedgerSnapshot,
   persistLedger,
 } from './session-ledger-store.ts'
+// 「最近关闭」列表共享 store（t260904-01 D1 修复）：状态从本 hook 实例各自的
+// useState 迁到模块级单例——双实例（顶部行/项目行）下任一实例关闭，另一实例
+// 的 ↺ 钮与菜单同帧可见（打回根因=实例 state 挂载快照 + 惰性刷新救不了
+// 「钮未渲染」的空态死锁，验收走查 D1）。
+import {
+  CLOSED_LEDGER_KEY,
+  CLOSED_LEDGER_CAP,
+  subscribeClosed,
+  getClosedSnapshot,
+  persistClosed,
+} from './closed-ledger-store.ts'
 
-export { LEDGER_KEY }
+export { LEDGER_KEY, CLOSED_LEDGER_KEY }
 
 /**
  * 出厂「⊕ New Session」钮的语义锚（aria-label 全集）：dsh-client-ui-sidebar 的
@@ -100,33 +123,58 @@ export { LEDGER_KEY }
  */
 export const FACTORY_NEW_LABELS: readonly string[] = ['新建会话', 'New session']
 
-/* ── 「最近关闭」列表（t260831-06）：tab × 之后条目的去处，↺ 菜单的重开数据源。
- * session-ledger-store.ts 不在本单写集、其订阅机制不可复用，故此处走**惰性读写**
- * localStorage（菜单/关闭动作是离散交互，无常驻跨实例同步需求），坏 JSON 由
- * parseLedger 同款容错兜底。cap 10，同 id 重关重提头，超出淘汰最旧。 */
-export const CLOSED_LEDGER_KEY = 'suyou.workbench.closedSessions'
-const CLOSED_LEDGER_CAP = 10
-
-/** 读「最近关闭」列表（localStorage → OpenedEntry[]；坏数据 parseLedger 容错）。 */
-function readClosedLedger(): OpenedEntry[] {
-  try {
-    return parseLedger(window.localStorage.getItem(CLOSED_LEDGER_KEY))
-  } catch {
-    return []
-  }
-}
-
-/** 写回「最近关闭」列表（写失败丢持久化但不抛——同账册 persist 取舍口径）。 */
-function writeClosedLedger(entries: OpenedEntry[]): void {
-  try {
-    window.localStorage.setItem(CLOSED_LEDGER_KEY, serializeLedger(entries.slice(0, CLOSED_LEDGER_CAP)))
-  } catch { /* 写失败：丢持久化，本次会话内 state 仍可见 */ }
-}
-
+/* ── 「最近关闭」列表（t260831-06 建）：tab × 之后条目的去处，↺ 菜单的重开
+ * 数据源。t260904-01 D1 修复：IO 与状态归属迁入 closed-ledger-store.ts 模块级
+ * 共享 store（坏 JSON 容错/写失败丢持久化/cap 10/同 id 重关重提头——取舍清单
+ * 见该文件头注）；本文件只留纯函数 pushClosedLedger。 */
 /** 条目移入「最近关闭」（同 id 去重重提头 + cap 截断），返回新列表。 */
 function pushClosedLedger(prev: OpenedEntry[], entry: OpenedEntry): OpenedEntry[] {
   const out = [entry, ...prev.filter(e => e && e.id !== entry.id)]
   return out.slice(0, CLOSED_LEDGER_CAP)
+}
+
+/* ── 项目内会话编号计数器（第 3 面①，拍板 1「不回收」）──
+ * 形态：localStorage 单键存 {[projectKey]: 该项目历史最大已用 seq}；handleNew
+ * 登记时 nextProjectSeq = max(计数器, 账册内该项目现存最大 seq) + 1，**先写计数器
+ * 再落账**。故障模式取舍（对齐 closed-ledger-store.ts 头注清单，逐项带/不带理由）：
+ *   - 读容错（带）：坏 JSON/非对象/数组/键值畸形 → 该项目按 0 处理，等价计数器
+ *     丢失；nextProjectSeq 以账册现存最大 seq 兜底——只可能跳号，不可能重号
+ *     （编号语义=稳定身份而非稠密序列，拍板 1，跳号无害）。
+ *   - 写容错（带）：写失败丢持久化不抛（同账册 persist 取舍——本次会话内计算
+ *     仍正确，localStorage 不可写的环境本就丢一切持久化）。
+ *   - 原子性（声明不做）：计数器与账册两键非原子；中断窗口=号被跳过、不会重号
+ *     （先写计数器：中断后计数器已前进，重试取新号；账册先写才会重号，故此序）。
+ *   - 跨实例同步（声明不做）：消费点只有 handleNew 登记这一个离散动作，两个
+ *     useSessionEntry 实例的登记尾段都是同步代码（JS 单线程不交错），无同帧
+ *     并发读写需求——不入 session-ledger-store 共享 store（review C3 取舍：
+ *     计数器读→写→persist 在同一同步段完成，同号窗口就此闭合）。
+ * 惰性读写（同 CLOSED_LEDGER 模式），无模块顶层 IO。 */
+export const SEQ_COUNTER_KEY = 'suyou-workbench-project-seq-v1'
+
+/** 读项目编号计数器（localStorage → {[project]: 最大已用 seq}；坏数据容错为空表）。 */
+function readSeqCounters(): Record<string, number> {
+  try {
+    const raw = window.localStorage.getItem(SEQ_COUNTER_KEY)
+    if (!raw) return {}
+    const data: unknown = JSON.parse(raw)
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) return {}
+    const out: Record<string, number> = {}
+    for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
+      if (typeof k !== 'string' || k === '') continue
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) continue
+      out[k] = v
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+/** 写回项目编号计数器（写失败丢持久化但不抛——取舍见上方清单）。 */
+function writeSeqCounters(map: Record<string, number>): void {
+  try {
+    window.localStorage.setItem(SEQ_COUNTER_KEY, JSON.stringify(map))
+  } catch { /* 写失败：丢持久化，本次会话内续号计算仍正确 */ }
 }
 
 /** sessions 服务面（ctx.sessions 的子集；结构类型可测裸对象）。 */
@@ -268,13 +316,22 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
    *  界面上能看见「为什么没切过去」。下一次动作或 8s 后自动清除（timer 有
    *  cleanup，见下方 effect，全终态回收）。 */
   const [entryNotice, setEntryNotice] = useState('')
+  /** 通知归属项目（第 3 面①）：项目行据此只显示自己项目的提示（N 个项目组
+   *  不重复同一条全局噪音）；undefined=无归属信息（顶部行不区分照常全显）。 */
+  const [noticeProject, setNoticeProject] = useState<string | undefined>(undefined)
+
+  /** 通知统一入口：text='' 清空（连带清归属）。 */
+  const notify = useCallback((text: string, project?: string) => {
+    setEntryNotice(text)
+    setNoticeProject(text === '' ? undefined : project)
+  }, [])
 
   // 通知自动清除：8s 后回落，组件卸载/新通知到来前清 timer。
   useEffect(() => {
     if (!entryNotice) return
-    const t = setTimeout(() => setEntryNotice(''), 8000)
+    const t = setTimeout(() => notify(''), 8000)
     return () => clearTimeout(t)
-  }, [entryNotice])
+  }, [entryNotice, notify])
 
   /**
    * 打开一个已入账册的会话（t260831-04 收口：handleOpen/handleNew 共用，
@@ -286,12 +343,12 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
    * - 成功但 current 未跟上：warn 留痕（激活未生效线索），仍返回 true——
    *   open 调用本身已生效，下一步激活是平台层时序，不在本插件能强制的面内。
    */
-  const openSession = useCallback(async (id: string): Promise<boolean> => {
-    setEntryNotice('')
+  const openSession = useCallback(async (id: string, projectHint?: string): Promise<boolean> => {
+    notify('', undefined)
     const listed = await waitForListed(sessions, id, 10000)
     if (!listed) {
       console.warn('[workbench] 打开会话：会话未进客户端列表（wire 同步慢或会话已被磁盘清理；账册条目保留，可稍后重试）：', id)
-      setEntryNotice('会话打开超时：列表同步未完成，条目已保留，可重试')
+      notify('会话打开超时：列表同步未完成，条目已保留，可重试', projectHint)
       return false
     }
     try {
@@ -299,7 +356,7 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
       else sessions.open(id)
     } catch (err) {
       console.error('[workbench] 打开会话失败：', id, err)
-      setEntryNotice('会话打开失败（详情见控制台）')
+      notify('会话打开失败（详情见控制台）', projectHint)
       return false
     }
     // open 生效性自检：留一拍让 select/通知走完，再读 current 比对。
@@ -310,7 +367,7 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
       console.warn('[workbench] open 已调用但 list.current 未指向目标（激活可能未生效，右栏或仍驻留 hero）：', id, 'current=', String(cur))
     }
     return true
-  }, [sessions, slotOpen])
+  }, [sessions, slotOpen, notify])
 
   // 切换（t260831-06：不再 touchEntry 重排——点 tab 停在原地，顺序=登记顺序），
   // 直接走 openSession 统一链。超时不剔账（见 openSession 注释）。
@@ -339,13 +396,15 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
             project: entry.project,
             cwd: entry.cwd,
             title: entry.title,
+            // 原号带回（第 3 面① 拍板 1：换绑=同一逻辑 tab 换会话壳，编号=稳定身份不重排）
+            seq: entry.seq,
             lastOpenedAt: Date.now(),
           }))
         }
         return
       }
     }
-    await openSession(id)
+    await openSession(id, entry?.project)
   }, [openSession, workspaces, sessions, ledger, persist, projectKey])
 
   // 新建（t260831-04 gen2 重写）：不再走宿主端 global-session/open 自铸会话
@@ -361,24 +420,24 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
     const pd = target?.dir ?? projectDir
     if (!pk || creating) return
     if (!workspaces) {
-      setEntryNotice('新建会话失败：workspaces 服务不可用')
+      notify('新建会话失败：workspaces 服务不可用', pk)
       console.error('[workbench] 新建会话失败：ctx.workspaces 未注入（index.tsx inject 列表缺 workspaces）')
       return
     }
     setCreating(true)
-    setEntryNotice('')
+    notify('', undefined)
     try {
       let ws = workspaceForDir(workspaces.list.getSnapshot()?.items ?? [], pd ?? '')
       if (!ws && pd) {
         ws = await workspaces.create({ path: pd }).then(w => ({ ...w, path: pd })).catch((err: unknown) => {
           console.error('[workbench] 新建会话失败：工作区创建失败：', pd, err)
-          setEntryNotice('新建会话失败：工作区创建失败（详情见控制台）')
+          notify('新建会话失败：工作区创建失败（详情见控制台）', pk)
           return undefined
         })
       }
       if (!ws) {
         console.error('[workbench] 新建会话失败：项目无对应工作区且无法创建：', pk, pd)
-        setEntryNotice('新建会话失败：项目主目录未注册为工作区')
+        notify('新建会话失败：项目主目录未注册为工作区', pk)
         return
       }
       workspaces.startSession(ws.workspaceId)
@@ -386,40 +445,57 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
       const staged = await waitForStaged(sessions, prev, 10000)
       if (!staged) {
         console.warn('[workbench] 新建会话：staging 未落定（current 未更新）；工作区已连接，可从列表进入：', ws.workspaceId)
-        setEntryNotice('会话打开超时：列表同步未完成，可重试')
+        notify('会话打开超时：列表同步未完成，可重试', pk)
         return
       }
-      persist(touchEntry(ledger, {
+      // 编号分配（第 3 面①，拍板 1「不回收」）：
+      // - C4 自愈：先纯计算补齐账册缺号存量（backfillProjectSeqs），随本次登记
+      //   一并 persist（挂载 effect 之外的兜底，防两路竞态留缺号条目）；
+      // - 续号：nextProjectSeq = max(计数器, 项目内现存最大 seq) + 1；**先写计数器
+      //   再落账**（中断=跳号不重号，取舍见 SEQ_COUNTER_KEY 头注）；
+      // - C3 并发同号窗口闭合：计数器读→写→persist 在同一同步段（上方 await 已
+      //   结束，JS 单线程下两个 handleNew 尾段不交错）；ledger 取
+      //   getLedgerSnapshot() 最新快照而非闭包值——顶部行/项目行两实例同帧
+      //   各自完成登记时，闭包值会读到旧册。
+      const latest = getLedgerSnapshot()
+      const base = backfillProjectSeqs(latest)
+      const counters = readSeqCounters()
+      // BO-1 修复（验收走查边界观察）：兜底号域纳入「最近关闭」——计数器丢失时
+      // 关掉的最大号（如 30）不再被重发，杜绝「重开撞号破坏稳定身份」。
+      const seq = nextProjectSeq(base, pk, counters[pk], getClosedSnapshot())
+      writeSeqCounters({ ...counters, [pk]: seq })
+      persist(touchEntry(base, {
         id: staged,
         project: pk,
         cwd: pd ?? '',
         lastOpenedAt: Date.now(),
+        seq,
       }))
     } catch (err) {
       console.error('[workbench] 新建会话请求异常：', err)
-      setEntryNotice('新建会话失败：请求异常（详情见控制台）')
+      notify('新建会话失败：请求异常（详情见控制台）', pk)
     } finally {
       setCreating(false)
     }
-  }, [workspaces, sessions, projectKey, projectDir, creating, ledger, persist])
+  }, [workspaces, sessions, projectKey, projectDir, creating, persist, notify])
 
-  /* ── tab 关闭 / 重开（t260831-06）──
+  /* ── tab 关闭 / 重开（t260831-06；t260904-01 D1 修复：closed 状态迁共享 store）──
    * 关闭=removeEntry 剔账册（tab 消失）+ 条目移入「最近关闭」列表 + 尽力调
    * sessions.close?（运行时现无——会话数据不删，仅剔入口，无不可恢复损失，
-   * 故不做确认弹窗）。重开=↺ 菜单 touchEntry 重登（title 随条目带回，头插=
-   * 登记顺序最新）+ openSession 统一链 + 从「最近关闭」移除。 */
-  const [closedList, setClosedList] = useState<OpenedEntry[]>(() => readClosedLedger())
+   * 故不做确认弹窗）。重开=↺ 菜单 touchEntry 重登（title/seq 随条目带回，头插=
+   * 登记顺序最新）+ openSession 统一链 + 从「最近关闭」移除。
+   * D1 修复：closedList 从实例 useState 改 useSyncExternalStore 订阅共享单例
+   * ——二号实例（项目行）关闭后一号实例（顶部行 ↺ 钮）同帧可见，不再依赖
+   * 「打开菜单时刷新」的惰性兜底（空态死锁根因）。 */
+  const closedList = useSyncExternalStore(subscribeClosed, getClosedSnapshot)
 
   const handleClose = useCallback((id: string) => {
     const entry = ledger.find(e => e.id === id)
     persist(removeEntry(ledger, id))
     if (entry) {
-      // push 后立即落盘（t260831-06 验收打回归因：漏这行是双故障——刷新丢「最近
-      // 关闭」列表；且 ↺ effect 从空 localStorage 读回 [] → wrap 自卸载，菜单
-      // 永远打不开，重开必经路径必挂）
-      const next = pushClosedLedger(readClosedLedger(), entry)
-      writeClosedLedger(next)
-      setClosedList(next)
+      // push 后立即 persistClosed（落盘+更新单例+广播——t260831-06 打回的
+      // 「漏写盘」双故障由 store 收口，D1 的「不通知对端」同在此修）
+      persistClosed(pushClosedLedger(getClosedSnapshot(), entry))
     }
     if (typeof sessions.close === 'function') {
       try { sessions.close(id) } catch (err) {
@@ -431,28 +507,21 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
   const handleReopen = useCallback(async (id: string) => {
     const entry = closedList.find(e => e.id === id)
     if (!entry) return
-    writeClosedLedger(closedList.filter(e => e.id !== id))
-    setClosedList(closedList.filter(e => e.id !== id))
+    persistClosed(closedList.filter(e => e.id !== id))
     persist(touchEntry(ledger, {
       id: entry.id,
       project: entry.project || projectKey,
       cwd: entry.cwd,
       title: entry.title,
+      // 原号带回（第 3 面① 拍板 1：重开=找回原 tab 身份，编号不重排；原号
+      // 畸形时 touchEntry 剔字段、由 backfill 兜底重新补号——防御口径）
+      seq: entry.seq,
       lastOpenedAt: Date.now(),
     }))
-    await openSession(entry.id)
+    await openSession(entry.id, entry.project || projectKey)
   }, [closedList, ledger, persist, projectKey, openSession])
 
-  // 从 localStorage 刷新，但与内存态**合并而非裸覆盖**（防同类自毁：若磁盘读回
-  // 空而内存仍有——如写失败丢持久化——不把 ↺ 钮连带菜单整个卸掉；磁盘序优先，
-  // 内存独有的条目追加在后）。
-  const refreshClosedList = useCallback(() => setClosedList(prev => {
-    const disk = readClosedLedger()
-    const ids = new Set(disk.map(e => e.id))
-    return [...disk, ...prev.filter(e => !ids.has(e.id))].slice(0, CLOSED_LEDGER_CAP)
-  }), [])
-
-  return { ledger, targets, creating, entryNotice, handleNew, handleOpen, handleClose, handleReopen, closedList, refreshClosedList, listState }
+  return { ledger, targets, creating, entryNotice, noticeProject, handleNew, handleOpen, handleClose, handleReopen, closedList, listState }
 }
 
 /**
@@ -575,7 +644,7 @@ function SessionTab({ target, editing, draftTitle, onOpen, onClose, onEditStart,
 export function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, projectDir, projects }: SessionEntryOptions) {
   const {
     ledger, targets, creating, entryNotice, handleNew, handleOpen, handleClose, handleReopen,
-    closedList, refreshClosedList,
+    closedList,
   } = useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDir })
   const persist = useCallback((entries: OpenedEntry[]) => persistLedger(entries), [])
 
@@ -595,8 +664,9 @@ export function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, pr
 
   const cancelEdit = useCallback(() => setEditingId(null), [])
 
-  // ↺ 恢复菜单：打开时惰性刷新「最近关闭」列表；点外/Escape 收起（listener 有
-  // cleanup，全终态回收）。
+  // ↺ 恢复菜单：点外/Escape 收起（listener 有 cleanup，全终态回收）。
+  // t260904-01 D1 修复：不再需要「打开时惰性刷新」——closedList 已是共享 store
+  // 订阅（另一实例关闭/重开同帧广播到这里），钮的显隐随之即时正确。
   const [reopenOpen, setReopenOpen] = useState(false)
   const reopenWrapRef = useRef<HTMLDivElement | null>(null)
   // 260904：↺ 菜单同口径放开——不按项目过滤，列出全部最近关闭条目
@@ -607,7 +677,6 @@ export function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, pr
   )
   useEffect(() => {
     if (!reopenOpen) return
-    refreshClosedList()
     const onDocDown = (e: globalThis.MouseEvent) => {
       if (reopenWrapRef.current && !reopenWrapRef.current.contains(e.target as Node)) setReopenOpen(false)
     }
@@ -618,7 +687,7 @@ export function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, pr
       document.removeEventListener('mousedown', onDocDown)
       document.removeEventListener('keydown', onKey)
     }
-  }, [reopenOpen, refreshClosedList])
+  }, [reopenOpen])
 
   // 项目选单（t260903 切换夜）：多项目注册表 + 未选项目时，+ 按钮不再禁用，
   // 点开弹注册表项目选单——选中的项目主目录即新建落点（未注册工作区自动 create，
