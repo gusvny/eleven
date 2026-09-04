@@ -1,0 +1,701 @@
+// multi-tab-coexistence —— t260901-15「工单台多页签共存」集成基线.
+//
+// Intent (black-box, user perspective): the ticket workbench is used with
+// MULTIPLE console tabs open at all times. User-reported defects:
+//   (1) tabs are blind to each other — no hint that another tab is viewing a
+//       ticket;
+//   (2) write ops (推进/签字/...) from one tab silently invalidate the other
+//       tab's stale view;
+//   (3) hidden tabs keep polling at full rate, amplifying query-channel load
+//       (KI-003); plus the reported race: opening ticket "13" detail "jumps
+//       back to 11" when a stale in-flight poll response lands late.
+// This baseline drives a REAL browser against the ISOLATED test console
+// (SUYOU_TEST_CONSOLE, default 127.0.0.1:3199) with TWO+ same-origin pages
+// (real BroadcastChannel + localStorage between them) and stubs the workbench
+// API boundary per page with page.route() — the shipped bundle, React render
+// path and the genuine browser tab-communication primitives are all under
+// test; only /suyou-workbench/api/wf/tickets* carries fixtures (fixture state
+// is SHARED across pages so a write on one tab is observable on another;
+// request counters stay per-page for the hidden-tab attribution). Never
+// touches the production console (3099) nor real tickets.
+//
+// Scenarios:
+//   S0  build-contract (pure node, runs everywhere): shipped twin bundles
+//       (lib/client.js == lib/client.cjs) in sync + multi-tab wiring anchors
+//       present in the shipped bundle. Pre-implement this fails by design —
+//       it is the acceptance gate for the implement stage.
+//   T1  presence mutual visibility: tab A opens ticket detail -> tab B shows
+//       a "another tab is viewing" hint; B opening the same ticket shows the
+//       peer line inside the DRAWER; A closing its drawer clears B's hint
+//       (unsubscribe/TTL), not only on tab close.
+//   T2  write cross-invalidation: tab D clicks 推进 on a ticket tab B is
+//       viewing -> B shows a notice AND silently re-renders the fresh detail
+//       (fixture body marker appears in B's drawer without manual action).
+//       Write-guard: within the recent-remote-write window B's own write
+//       attempt raises a confirm dialog naming the peer write instead of
+//       firing straight through (a SECOND D write re-opens the window so the
+//       assertion is not racy with the slow banner checks above it).
+//   T3  hidden tab stops polling: background tab makes ZERO API requests over
+//       a 33s window (covers 5s list/detail, 5s health+workers, 8s
+//       agent-live and the 30s scan period), and immediately refetches when
+//       visible again. If the browser/emulation cannot produce
+//       document.visibilityState === 'hidden' this scenario SKIPs with the
+//       reason (honest coverage declaration, not a dumb guard).
+//   T4  stale-detail race (点 13 跳 11 regression): ticket A's detail response
+//       is delayed; the user clicks ticket B before it lands; the drawer must
+//       show B and MUST NOT jump back to A when the stale response arrives.
+//   T5  hostile tab traffic: a same-origin page broadcasts malformed messages
+//       on the tab channel (non-JSON, missing fields, unknown type, wrong
+//       field types) and corrupts presence-looking localStorage keys -> no
+//       pageerror, presence keeps working. T5a: a page with BroadcastChannel
+//       disabled falls back to the localStorage/storage-event path and is
+//       still seen by a healthy peer.
+//   T6  tab closed -> peer's viewer-list entry disappears (graceful bye or
+//       heartbeat-TTL expiry, either acceptable; bounded wait).
+//   T7  hygiene: zero pageerror / console.error across every page.
+//
+// Execution contract: stdout last line `SUMMARY pass=<n> skip=<m> fail=<k>`;
+// FAIL>0 -> exit 1; environment-dependent halves SKIP cleanly (exit 0 with
+// reason). Node >= 22.18. Precedent for the two-layer split, stubbing style
+// and infra helpers: lane-parallel-dom.mjs / session-tab-interactions.mjs.
+
+import { readFileSync, existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+
+const REPO = process.cwd()
+const BASE = (process.env.SUYOU_TEST_CONSOLE ?? 'http://127.0.0.1:3199').replace(/\/$/, '')
+const CHANNEL = 'suyou-workbench-tabs' // approved plan's channel name
+const FIDA = 'it15a' // fixture ticket ids (alnum only; never real tickets)
+const FIDB = 'it15b'
+const MARKER_V2 = '[advanced-by-peer-v2]'
+
+const results = [] // { name, status: 'pass'|'fail'|'skip', detail }
+function record(name, status, detail = '') {
+  results.push({ name, status, detail })
+  console.log(`[${status.toUpperCase()}] ${name}${detail ? ` — ${detail}` : ''}`)
+}
+function summarize() {
+  const p = results.filter(r => r.status === 'pass').length
+  const s = results.filter(r => r.status === 'skip').length
+  const f = results.filter(r => r.status === 'fail').length
+  console.log(`SUMMARY pass=${p} skip=${s} fail=${f}`)
+  process.exit(f > 0 ? 1 : 0)
+}
+
+// ---------------------------------------------------------------- S0 build-contract
+
+const LIB_JS = join(REPO, 'server', 'dsh', 'workbench', 'lib', 'client.js')
+const LIB_CJS = join(REPO, 'server', 'dsh', 'workbench', 'lib', 'client.cjs')
+
+function buildContract() {
+  if (!existsSync(LIB_JS) || !existsSync(LIB_CJS)) {
+    record('S0 build-contract', 'fail', 'lib/client.js or lib/client.cjs missing — workbench not built')
+    return
+  }
+  const js = readFileSync(LIB_JS, 'utf8')
+  if (js !== readFileSync(LIB_CJS, 'utf8')) {
+    record('S0 build-contract', 'fail', 'lib/client.js and lib/client.cjs out of sync — rebuild')
+    return
+  }
+  // Multi-tab wiring anchors from the approved plan: cross-tab channel,
+  // presence heartbeat, visibility-gated polling. Absent => feature not in
+  // the shipped bundle => acceptance gate fails loudly (by design pre-implement).
+  const anchors = ['BroadcastChannel', CHANNEL, 'visibilitychange']
+  const missing = anchors.filter(a => !js.includes(a))
+  if (missing.length) {
+    record('S0 build-contract', 'fail', `shipped bundle missing multi-tab anchors: ${missing.join(', ')}`)
+    return
+  }
+  record('S0 build-contract', 'pass', 'twin bundles in sync, multi-tab anchors present')
+}
+
+// ---------------------------------------------------------------- fixtures (shared details, per-page counters)
+
+const WF = {
+  id: 'dev-lane', name: '开发泳道', lane: 'worktree',
+  stages: [
+    { id: 'create_plan', name: '方案', role: 'developer', parts: ['agent'], next: 'review_plan' },
+    { id: 'review_plan', name: '审方案', role: 'integration', parts: ['agent'], next: 'implement' },
+    { id: 'implement', name: '实现', role: 'developer', parts: ['agent'], next: 'merge' },
+    { id: 'merge', name: '合并', role: 'integration', parts: ['human'] },
+  ],
+}
+// settled + awaiting-human => availableOps yields 推进/打回 (a no-input write op).
+const row = (id, title) => ({
+  id, role: 'developer', status: 'settled', title,
+  workflow: 'dev-lane', stage: 'merge', stage_state: 'awaiting-human',
+  handoff_count: 0, pending_count: 0, worktree: '/tmp/fixture', updated: '—', updated_ts: 0,
+})
+const ROW_A = row(FIDA, '多页签共存打桩甲')
+const ROW_B = row(FIDB, '多页签共存打桩乙')
+
+const detailBase = (over) => ({
+  id: FIDA, title: ROW_A.title, workflow_id: 'dev-lane', epic: '',
+  status: 'settled', role: 'developer', lane: 'worktree',
+  stage: 'merge', stage_state: 'awaiting-human', stage_name: '合并',
+  acceptance: [], stage_acceptance: [], checks: {}, results: {}, handoffs: [],
+  pending: [], log: [], body: 'multi-tab fixture body', write_set: [],
+  timeline: [], ...over,
+})
+
+function sharedFixtures() {
+  return {
+    details: {
+      [FIDA]: detailBase({ id: FIDA, title: ROW_A.title }),
+      [FIDB]: detailBase({ id: FIDB, title: ROW_B.title, body: 'multi-tab fixture body B' }),
+    },
+    delays: {}, // ticketId -> ms, for GET detail (stale-response race scenario)
+  }
+}
+
+/** Per-page API-boundary stub. Counts EVERY /suyou-workbench/api/** request in
+ *  that page's own counter (hidden-tab attribution), serves ticket fixtures
+ *  from the SHARED fixture map (so a write on tab D is visible to tab B's
+ *  next fetch), passes everything else through to the real test console. */
+async function attachStub(page, shared, counts) {
+  await page.route('**/suyou-workbench/api/**', async (route) => {
+    const req = route.request()
+    const url = new URL(req.url())
+    counts.total++
+    const m = /^\/suyou-workbench\/api\/wf\/tickets(?:\/([^/]+)(?:\/([^/]+))?)?$/.exec(url.pathname)
+    const body = (b) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(b) })
+    if (!m) {
+      try {
+        const resp = await route.fetch()
+        await route.fulfill({ response: resp })
+      } catch {
+        await route.fulfill({ status: 502, contentType: 'application/json', body: '{"ok":false,"error":"fixture passthrough failed"}' })
+      }
+      return
+    }
+    const [, id, sub] = m
+    if (!id && req.method() === 'GET') {
+      counts.listGet++
+      return body({ ok: true, result: { tickets: [ROW_A, ROW_B], workflows: [WF] } })
+    }
+    if (id && !sub && req.method() === 'GET') {
+      const d = shared.details[id]
+      if (!d) return body({ ok: false, error: 'fixture stub: unknown ticket' })
+      counts.detailGet++
+      const delay = shared.delays[id] ?? 0
+      if (delay > 0) await new Promise(r => setTimeout(r, delay))
+      return body({ ok: true, result: shared.details[id] })
+    }
+    if (id && sub && req.method() === 'POST') {
+      if (!shared.details[id]) return body({ ok: false, error: 'fixture stub: unknown ticket' })
+      counts.write++
+      // The write lands: advance the fixture detail so a peer's silent
+      // refresh has observable fresh data (body marker + updated stamp).
+      const d = shared.details[id]
+      shared.details[id] = {
+        ...d,
+        body: d.body.includes(MARKER_V2) ? d.body : d.body + ' ' + MARKER_V2,
+        updated: '刚刚', updated_ts: Date.now(),
+      }
+      return body({ ok: true, result: shared.details[id] })
+    }
+    return body({ ok: false, error: 'fixture stub: unsupported method/sub-route' })
+  })
+}
+
+// ---------------------------------------------------------------- S1 infra (precedent: lane-parallel-dom.mjs)
+
+function consoleHealthy() {
+  return fetch(`${BASE}/`, { signal: AbortSignal.timeout(5000) })
+    .then(r => r.ok)
+    .catch(() => false)
+}
+
+function mainRepoRoot() {
+  // node_modules never travels with git worktrees; resolve the main checkout
+  // via the gitfile so playwright-core can be found there.
+  try {
+    const common = execFileSync('git', ['rev-parse', '--git-common-dir'],
+      { cwd: REPO, encoding: 'utf8', timeout: 5000 }).trim()
+    if (common) return resolve(REPO, common, '..')
+  } catch { /* not a worktree — cwd is the main checkout */ }
+  return REPO
+}
+
+async function loadPlaywright() {
+  const candidates = ['playwright-core']
+  const main = mainRepoRoot()
+  for (const sub of ['server/dsh/ui-check/node_modules/playwright-core/index.mjs',
+    'server/dsh/workbench/node_modules/playwright-core/index.mjs']) {
+    const p = join(main, sub)
+    if (existsSync(p)) candidates.push(pathToFileURL(p).href)
+  }
+  for (const c of candidates) {
+    try { return await import(c) } catch { /* next candidate */ }
+  }
+  return null
+}
+
+async function launchBrowser(pw) {
+  for (const opts of [{ channel: 'chrome', headless: true }, { headless: true }]) {
+    try { return await pw.chromium.launch(opts) } catch { /* next */ }
+  }
+  return null
+}
+
+async function waitFor(cond, ms) {
+  const t0 = Date.now()
+  while (Date.now() - t0 < ms) {
+    try { if (await cond()) return true } catch { /* keep polling */ }
+    await new Promise(r => setTimeout(r, 250))
+  }
+  try { return await cond() } catch { return false }
+}
+
+async function dismissOverlays(p) {
+  for (let i = 0; i < 5; i++) {
+    const dialog = p.locator('[role="dialog"]').first()
+    if (!(await dialog.count())) return
+    const btn = dialog.locator('button:enabled').first()
+    if (await btn.count()) await btn.click({ timeout: 3000 }).catch(() => {})
+    else await p.keyboard.press('Escape').catch(() => {})
+    await p.waitForTimeout(600)
+  }
+}
+
+/** Open the ticket board via the first project group's 📋 (workbench needs a
+ *  projectKey before it renders the ticket list). Returns false if the
+ *  console cannot render the board (precheck skip). */
+async function openBoard(page) {
+  await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(2500)
+  await dismissOverlays(page)
+  const boardIcon = page.locator('span.wb-view-icon[title="工单列表"]').first()
+  if (!(await waitFor(async () => (await boardIcon.count()) > 0, 10000))) return false
+  await boardIcon.click()
+  return waitFor(async () =>
+    (await page.locator('tr.wb-row', { hasText: FIDA }).count()) > 0 &&
+    (await page.locator('tr.wb-row', { hasText: FIDB }).count()) > 0, 10000)
+}
+
+// ---------------------------------------------------------------- S1 DOM probes (run in page context)
+
+const domViewerHint = `(() => {
+  const text = document.body.innerText || '';
+  if (/另一页签|其它页签|正在查看|正在看/.test(text)) return 'text';
+  if ([...document.querySelectorAll('[title]')].some(e => /正在查看|正在看|另一页签|其它页签/.test(e.getAttribute('title') || ''))) return 'title';
+  if (text.includes('👀')) return 'emoji';
+  return null;
+})()`
+
+const domDrawerViewerHint = `(() => {
+  const el = document.querySelector('.wb-drawer');
+  if (!el) return null;
+  const text = el.innerText || '';
+  return /另一页签|其它页签|正在查看|正在看/.test(text) ? 'drawer-text' : null;
+})()`
+
+const domDrawerId = `(() => {
+  // 实际类名 wb-d2-id（t260826-02 详情抽屉头部工单号 code），wb-drawer-id 是设计期误记；
+  // 两个候选都试，兼容未来改名（先新后旧）。
+  const el = document.querySelector('.wb-drawer .wb-d2-id') || document.querySelector('.wb-d2-id')
+    || document.querySelector('.wb-drawer .wb-drawer-id');
+  return el ? el.textContent : null;
+})()`
+
+const domNotice = `(() => {
+  const text = document.body.innerText || '';
+  return /另一页签|其它页签|刚被|已刷新/.test(text);
+})()`
+
+// Narrow on purpose: corrupting unrelated console keys (theme/prefs) would be
+// collateral damage and unfairly trip the T7 hygiene gate.
+const fnCorruptStorage = `(() => {
+  const bad = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && /presence|heartbeat|workbench-tabs|suyou-tabs/i.test(k)) { localStorage.setItem(k, '{{{corrupted'); bad.push(k); }
+  }
+  return bad;
+})()`
+
+/** Broadcast malformed traffic on the tab channel from a same-origin page. */
+const fnHostileTraffic = `(channel) => {
+  const bc = new BroadcastChannel(channel);
+  bc.postMessage('not-json{{{');
+  bc.postMessage('');
+  bc.postMessage(JSON.stringify({ type: 'presence' }));                       // missing fields
+  bc.postMessage(JSON.stringify({ type: 'write', ticketId: 123, ts: 'x' }));  // wrong field types
+  bc.postMessage(JSON.stringify({ type: 'unknown-echo', foo: 1 }));           // unknown type
+  bc.postMessage(42);
+  bc.close();
+  return 'sent';
+}`
+
+// ---------------------------------------------------------------- S1 scenarios
+
+async function clickRowAdvance(page, id) {
+  const row = page.locator('tr.wb-row', { hasText: id }).first()
+  if (!(await waitFor(async () => (await row.count()) > 0, 8000))) {
+    throw new Error(`row ${id} not rendered`)
+  }
+  await row.locator('button', { hasText: '推进' }).first().click({ timeout: 5000 })
+}
+
+async function openDetail(page, id) {
+  const row = page.locator('tr.wb-row', { hasText: id }).first()
+  if (!(await waitFor(async () => (await row.count()) > 0, 8000))) {
+    throw new Error(`row ${id} not rendered`)
+  }
+  await row.click()
+  const ok = await waitFor(async () => {
+    const t = await page.evaluate(domDrawerId)
+    return t && t.includes(id)
+  }, 8000)
+  if (!ok) throw new Error(`drawer did not open for ${id}`)
+}
+
+async function closeDrawer(page) {
+  await page.locator('.wb-drawer .wb-close, .wb-close').first().click({ timeout: 5000 }).catch(() => {})
+}
+
+async function scenarioPresence(a, b) {
+  // T1a: A opens FIDA detail -> B (list view) must surface a remote-viewer hint.
+  await openDetail(a, FIDA)
+  const hint = await waitFor(async () => (await b.evaluate(domViewerHint)) !== null, 10000)
+  if (!hint) {
+    const sample = JSON.stringify((await b.evaluate('document.body.innerText')).slice(0, 160))
+    return `B showed no viewer hint after A opened detail (body=${sample})`
+  }
+  // T1b: B opens the same ticket -> the DRAWER itself must name the peer
+  // (page-level hint alone would also match the still-mounted list row).
+  await openDetail(b, FIDA)
+  const drawerHint = await waitFor(async () => (await b.evaluate(domDrawerViewerHint)) !== null, 6000)
+  if (!drawerHint) return 'B drawer does not name the peer tab with both tabs viewing'
+  // T1c: A closes its drawer -> B's hint must clear (unsubscribe/TTL), bounded.
+  await closeDrawer(a)
+  const cleared = await waitFor(async () => (await b.evaluate(domViewerHint)) === null, 15000)
+  if (!cleared) return 'B still shows a viewer hint 15s after A closed the drawer'
+  return null
+}
+
+async function scenarioClosedTab(a, b) {
+  await openDetail(a, FIDA)
+  const seen = await waitFor(async () => (await b.evaluate(domViewerHint)) !== null, 10000)
+  if (!seen) return 'precondition failed: B does not see A as viewer'
+  const t0 = Date.now()
+  await a.close()
+  const gone = await waitFor(async () => (await b.evaluate(domViewerHint)) === null, 18000)
+  if (!gone) return `B still lists the closed tab as viewer after ${Date.now() - t0}ms (bye/TTL expected <= ~13s)`
+  return null
+}
+
+async function scenarioWriteCrossInvalidation(b, d) {
+  // T1b 留下的抽屉是全屏 overlay，会挡住本场景的行点击——先关（真实用户也会先关）。
+  await closeDrawer(b)
+  await openDetail(b, FIDB)
+  // 写守门口径（方案拍板「宁提醒不强禁」）：B 正在看 FIDB，D 的写会弹 confirm
+  // （提示「另一页签正在查看」）；实测必须显式 accept，否则 Playwright 默认
+  // dismiss = 写被取消。收集文案断言守门确实点名了对端。
+  const guardMsgs = []
+  for (const p of [b, d]) {
+    p.on('dialog', (dlg) => { guardMsgs.push(dlg.message()); void dlg.accept() })
+  }
+  // D performs the write from its list row; B is viewing the same ticket.
+  await clickRowAdvance(d, FIDB)
+  await page_wait(800) // confirm + POST 落地
+  // awaiting-human 工单先弹既有「审批通过并推进？」confirm，写守门 confirm 在其后——
+  // 断言「本轮任一 dialog 点名了对端」即可，不钉次序。
+  const guardHit = guardMsgs.find(m => /另一页签|其它页签|正在查看/.test(m))
+  if (!guardHit) {
+    return `no dialog names the viewing peer (dialogs: ${JSON.stringify(guardMsgs)})`
+  }
+  const noticed = await waitFor(async () => await b.evaluate(domNotice), 8000)
+  if (!noticed) return 'B got no cross-invalidation notice after D wrote'
+  const refreshed = await waitFor(async () =>
+    (await b.evaluate('document.body.innerText')).includes(MARKER_V2), 8000)
+  if (!refreshed) return `B drawer did not silently refresh to the post-write detail (missing ${MARKER_V2})`
+  // Write guard: B's own write attempt within the recent-remote-write window
+  // must raise a confirm naming the peer write, not fire straight through.
+  // The window from D's write above may already be stale after the slow
+  // banner checks, so D writes AGAIN and B clicks within the fresh window.
+  await clickRowAdvance(d, FIDB)
+  await page_wait(1500) // let the broadcast land on B before B's click
+  await closeDrawer(b)
+  // B 的写同样走页级持久 dialog handler（guardMsgs 统一收集、统一 accept——
+  // 叠加 once handler 会双 accept 报「already handled」）。以消息计数差判断新弹窗。
+  const before = guardMsgs.length
+  await clickRowAdvance(b, FIDB)
+  // B 的写会先弹既有「审批通过并推进？」confirm，写守门 confirm 在其后——
+  // 等 5s 内任一新 dialog 点名对端；同时盯 write 计数（一条 confirm 都没弹
+  // 就直写 = 守门缺失，即刻判负不等超时）。
+  const beforeWrites = b.__st.counts.write
+  const hitPeer = await waitFor(async () => {
+    if (guardMsgs.length > before && guardMsgs.slice(before).some(m => /另一页签|其它页签|正在查看|仍要继续|刚刚/.test(m))) return true
+    if (b.__st.counts.write > beforeWrites) throw new Error('__WRITETHRU__')
+    return false
+  }, 5000)
+  if (hitPeer === false) {
+    if (b.__st.counts.write > beforeWrites) return 'write-guard missing: B wrote straight through with no confirm despite a remote write seconds ago'
+    return 'B produced neither a guard dialog nor a write — click had no effect'
+  }
+  if (hitPeer === '__WRITETHRU__') {
+    return 'write-guard missing: B wrote straight through with no confirm despite a remote write seconds ago'
+  }
+  const landed = await waitFor(async () => b.__st.counts.write >= 1, 5000)
+  if (!landed) return 'guard dialog accepted but the write never landed'
+  return null
+}
+
+function page_wait(ms) { return new Promise(r => setTimeout(r, ms)) }
+
+async function scenarioHiddenStopsPolling(front, hidden, ctx) {
+  // Baseline: the tab polls while visible.
+  await front.bringToFront()
+  const base = hidden.__st.counts.total
+  const sawPoll = await waitFor(async () => hidden.__st.counts.total > base, 8000)
+  if (!sawPoll) return 'precondition failed: tab issued no polls even while visible'
+  // Background it; verify the browser actually reports hidden, trying CDP if not.
+  await hidden.bringToFront()
+  await front.bringToFront()
+  let vs = await hidden.evaluate('document.visibilityState')
+  if (vs !== 'hidden') {
+    try {
+      const cdp = await ctx.newCDPSession(hidden)
+      await cdp.send('Page.setWebLifecycleState', { state: 'hidden' })
+    } catch { /* CDP path unavailable */ }
+    vs = await hidden.evaluate('document.visibilityState')
+  }
+  if (vs !== 'hidden') {
+    record('T3 hidden tab stops polling', 'skip', `browser keeps visibilityState=${vs} for backgrounded pages — cannot cover here`)
+    return '__SKIP__'
+  }
+  const c0 = hidden.__st.counts.total
+  const cList0 = hidden.__st.counts.listGet
+  await page_wait(33000) // > 30s scan period: every timer must fire at least once if unpaused
+  const leak = hidden.__st.counts.total - c0
+  const leakList = hidden.__st.counts.listGet - cList0
+  if (leak !== 0) return `hidden tab issued ${leak} API request(s) in 33s (list polls: ${leakList})`
+  await hidden.bringToFront()
+  const resumed = await waitFor(async () => hidden.__st.counts.total > c0, 5000)
+  if (!resumed) return 'tab made visible again but issued no refetch within 5s'
+  return null
+}
+
+async function scenarioStaleDetailRace(page, shared) {
+  // Reproduce 点 13 跳 11: FIDA's detail response is held; the user clicks
+  // FIDB before it lands; the late stale response must not overwrite the drawer.
+  shared.delays[FIDA] = 1500
+  const rowA = page.locator('tr.wb-row', { hasText: FIDA }).first()
+  await rowA.click()
+  await page_wait(300) // FIDA request in flight, still pending
+  // FIDA 的抽屉此刻已弹出（全屏 overlay 挡住指针），真实世界的第二跳来自
+  // 侧栏点工单（focusId 联动）——与行点击汇入同一 openDetail 入口。这里用
+  // JS 派发点击同一行，过 overlay 驱动同一代码路径（测的是在途竞态，不是遮罩）。
+  await page.evaluate(`(() => {
+    const row = [...document.querySelectorAll('tr.wb-row')].find(r => r.textContent.includes('${FIDB}'))
+    if (!row) throw new Error('row ${FIDB} not found')
+    row.click()
+  })()`)
+  const okB = await waitFor(async () => {
+    const t = await page.evaluate(domDrawerId)
+    return t && t.includes(FIDB)
+  }, 8000)
+  if (!okB) {
+    const idNow = await page.evaluate(domDrawerId)
+    return `drawer did not land on ${FIDB}: ${JSON.stringify(idNow)}`
+  }
+  await page_wait(1800) // stale FIDA response has now landed
+  const idAfter = await page.evaluate(domDrawerId)
+  if (!idAfter || !idAfter.includes(FIDB)) {
+    return `stale in-flight response overwrote the drawer — jumped back to ${JSON.stringify(idAfter)}`
+  }
+  return null
+}
+
+async function scenarioFallbackAndHostile(healthy, d2, ctx) {
+  // T5a: a BroadcastChannel-less page must fall back to the localStorage /
+  // storage-event path and still be seen by a healthy peer.
+  await healthy.bringToFront()
+  const g = await ctx.newPage()
+  await g.addInitScript(() => {
+    Object.defineProperty(window, 'BroadcastChannel', { value: undefined })
+  })
+  await attachStub(g, healthy.__st.shared, { total: 0, listGet: 0, detailGet: 0, write: 0 })
+  const gErr = []
+  g.on('pageerror', e => gErr.push(String(e).slice(0, 200)))
+  try {
+    if (!(await openBoard(g))) return 'fallback tab could not open the ticket board'
+    await openDetail(g, FIDA)
+    const seen = await waitFor(async () => (await healthy.evaluate(domViewerHint)) !== null, 10000)
+    if (!seen) {
+      const keys = await healthy.evaluate('JSON.stringify(Object.keys(localStorage))')
+      return `BC-less page was not seen by the healthy peer (localStorage keys: ${keys})`
+    }
+  } finally {
+    await g.close().catch(() => {})
+  }
+  if (gErr.length) return `BC-less page threw: ${gErr[0]}`
+
+  // T5b: hostile same-origin traffic — malformed channel messages plus
+  // corrupted presence-looking localStorage keys. App must not crash and
+  // presence must keep working afterwards.
+  const e = await ctx.newPage()
+  await e.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' })
+  await e.evaluate(fnHostileTraffic, CHANNEL)
+  const corrupted = await e.evaluate(fnCorruptStorage)
+  await e.close()
+  const before = healthy.__err.length
+  await openDetail(d2, FIDA)
+  const stillWorks = await waitFor(async () => (await healthy.evaluate(domViewerHint)) !== null, 10000)
+  if (!stillWorks) return 'presence broke after hostile channel traffic / storage corruption'
+  if (healthy.__err.length > before) return `pageerror after hostile traffic: ${healthy.__err[before]}`
+  console.log(`  (T5b corrupted localStorage keys: ${corrupted.length})`)
+  return null
+}
+
+// ---------------------------------------------------------------- main browser run
+
+async function runBrowser(pw, browser) {
+  const shared = sharedFixtures()
+  const ctx = await browser.newContext()
+  const pageErrors = [] // global hygiene (T7)
+  const consoleErrors = []
+  const mkPage = async () => {
+    const p = await ctx.newPage()
+    const counts = { total: 0, listGet: 0, detailGet: 0, write: 0 }
+    p.__st = { shared, counts }
+    p.__err = []
+    p.on('pageerror', e => { p.__err.push(String(e).slice(0, 200)); pageErrors.push(String(e).slice(0, 200)) })
+    p.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200)) })
+    await attachStub(p, shared, counts)
+    return p
+  }
+  const failWith = async (name, e) => record(name, 'fail', String(e).slice(0, 180))
+  try {
+    const a = await mkPage()
+    const b = await mkPage()
+    let boardOk = true
+    for (const [nm, p] of [['A', a], ['B', b]]) {
+      if (!(await openBoard(p))) {
+        record('S1 precheck', 'skip', `ticket board did not consume the list stub on ${BASE} (tab ${nm})`)
+        boardOk = false
+        break
+      }
+    }
+    if (!boardOk) return
+    record('S1 precheck', 'pass', 'board rendered both fixture rows on two tabs')
+
+    try {
+      const err = await scenarioPresence(a, b)
+      if (err) record('T1 presence mutual visibility', 'fail', err)
+      else record('T1 presence mutual visibility', 'pass', 'page hint, drawer peer line, clears on drawer close')
+    } catch (e) { await failWith('T1 presence mutual visibility', e) }
+    try {
+      const err = await scenarioClosedTab(a, b)
+      if (err) record('T6 closed tab leaves viewer list', 'fail', err)
+      else record('T6 closed tab leaves viewer list', 'pass', 'viewer entry gone after tab close (bye/TTL)')
+    } catch (e) { await failWith('T6 closed tab leaves viewer list', e) }
+
+    // T2: fresh writer tab D; B reuses its tab.
+    const d = await mkPage()
+    if (!(await openBoard(d))) {
+      record('T2 write cross-invalidation', 'skip', 'writer tab could not open the board')
+    } else {
+      try {
+        const err = await scenarioWriteCrossInvalidation(b, d)
+        if (err) record('T2 write cross-invalidation', 'fail', err)
+        else record('T2 write cross-invalidation', 'pass', 'notice + silent refresh + write-guard confirm')
+      } catch (e) { await failWith('T2 write cross-invalidation', e) }
+    }
+
+    // T3: D stays front, B is backgrounded.
+    try {
+      const err = await scenarioHiddenStopsPolling(d, b, ctx)
+      if (err === '__SKIP__') { /* scenario recorded its own skip */ }
+      else if (err) record('T3 hidden tab stops polling', 'fail', err)
+      else record('T3 hidden tab stops polling', 'pass', 'zero API requests in 33s hidden, refetch on visible')
+    } catch (e) { await failWith('T3 hidden tab stops polling', e) }
+
+    // T4: fresh single tab F (the race is single-tab reproducible).
+    const f = await mkPage()
+    if (!(await openBoard(f))) {
+      record('T4 stale detail cannot overwrite drawer', 'skip', 'race tab could not open the board')
+    } else {
+      try {
+        const err = await scenarioStaleDetailRace(f, shared)
+        if (err) record('T4 stale detail cannot overwrite drawer', 'fail', err)
+        else record('T4 stale detail cannot overwrite drawer', 'pass', 'drawer stayed on second click after stale response landed')
+      } catch (e) { await failWith('T4 stale detail cannot overwrite drawer', e) }
+    }
+
+    // T5: healthy observer H; writer d2 reuses D; hostile pages on demand.
+    const h = await mkPage()
+    if (!(await openBoard(h))) {
+      record('T5 hostile traffic tolerated', 'skip', 'observer tab could not open the board')
+    } else {
+      try {
+        const err = await scenarioFallbackAndHostile(h, d, ctx)
+        if (err) record('T5 hostile traffic tolerated', 'fail', err)
+        else record('T5 hostile traffic tolerated', 'pass', 'BC-less fallback visible to peer; malformed traffic survived')
+      } catch (e) { await failWith('T5 hostile traffic tolerated', e) }
+    }
+
+    if (pageErrors.length === 0 && consoleErrors.length === 0) {
+      record('T7 zero pageerror/console.error', 'pass')
+    } else {
+      record('T7 zero pageerror/console.error', 'fail',
+        `pageerrors=${pageErrors.length} first=${pageErrors[0] ?? ''} consoleErrors=${consoleErrors.length} firstConsole=${consoleErrors[0] ?? ''}`)
+    }
+  } finally {
+    await ctx.close().catch(() => {})
+  }
+}
+
+// ---------------------------------------------------------------- main
+
+async function main() {
+  const [maj, min] = process.versions.node.split('.').map(Number)
+  if (maj < 22 || (maj === 22 && min < 18)) {
+    record('node', 'skip', `node ${process.versions.node} < 22.18`)
+    return summarize()
+  }
+
+  buildContract()
+
+  if (BASE.includes(':3099')) {
+    console.error('refusing to run: SUYOU_TEST_CONSOLE points at the production console (3099)')
+    process.exit(1)
+  }
+
+  const healthy = await consoleHealthy()
+  if (!healthy) {
+    record('S1 precheck', 'skip', `test console unreachable at ${BASE} (docker compose -f server/dsh/docker-compose.test.yml up -d)`)
+    return summarize()
+  }
+  const pw = await loadPlaywright()
+  if (!pw) {
+    record('S1 precheck', 'skip', 'playwright-core not resolvable (browser scenarios skipped)')
+    return summarize()
+  }
+  const browser = await launchBrowser(pw)
+  if (!browser) {
+    record('S1 precheck', 'skip', 'no browser could be launched')
+    return summarize()
+  }
+
+  let exiting = false
+  const shutdown = async (code) => {
+    if (exiting) return
+    exiting = true
+    await browser.close().catch(() => {})
+    process.exit(code)
+  }
+  process.on('SIGINT', () => { void shutdown(130) })
+  process.on('SIGTERM', () => { void shutdown(143) })
+  try {
+    await runBrowser(pw, browser)
+  } finally {
+    if (!exiting) await browser.close().catch(() => {})
+  }
+  summarize()
+}
+
+main().catch(e => { console.error(String(e)); summarize() })

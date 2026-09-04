@@ -135,5 +135,11 @@ integration 岗直修。**P1+P2 共 56 条已迁入并登记**（含 auto-rework
 模型，无人察觉）。已装 PyYAML 6.0.3 修复（spawn-seam 11/11、t09 F 组 11 例解封
 全过）；残留风险=venv 重建即丢，需 requirements 固化（建议并入 engine-hardening）。
 
-**待办**：P3 browser 16 条 + t260902-02 e2e 2 条——前置 engine-hardening 票①(D)
-隔离台 + KI-036 playwright 恢复；retention（Docker 路线）随隔离台落地重估。
+**P3/e2e 落地（260904 第二批，票①(D) 隔离台随 t260904-02 merge e37b715 后）**：
+18 条迁入登记，套件 88/88 全绿（105s）。要点：browser 族真跑通（隔离台 port-0 起 console，
+session-top-entry/ticket-evidence/lightbox/donut/approve-modal/chat-tag 全 PASS）；e2e 两条
+自带守卫（SUYOU_TARGET_HOST 未显式设 → 零连接静默 SKIP，绝不碰生产）；capture-chat-active
+唯一真依赖 playwright 的 C1 全链腿加 KI-036 环境守卫（干净 SKIP，装依赖自动恢复）；
+squash checkout mtime 抖动（lib 比 src 老 2ms）用真重建 tsdown 消解。
+**剩余**：retention（Docker 路线）仍暂缓随隔离台路线重估；KI-036 playwright 安装后
+C1/gate-interlock 两守卫自动收口。KI-038 至此主体完成（89=落地 88 登记 + retention 暂缓）。
