@@ -30,6 +30,9 @@
    全进 Temporal 历史 + admin.log）。断线/恢复由人盯 + 会话上下文承担
    （接受此取舍）。
 3. **先不做独立 role**；改为**会话创建时注入预置 prompt**（本文下节）。
+4. **charter 落点：引擎仓 `server/dsh/session_charter.md` 单一文件**（260904
+   宿主定；原拟项目 notes/ 下放被否——notes/ 是知识库账本，charter 是会话
+   开局声明这类活配置，语义归位到 server/dsh 项目侧声明族）。
 
 ## 注入机制结论（integration 实查，2026-09-04）
 
@@ -46,8 +49,14 @@
 - 注入守卫（防污染，沿 t260831-08 ⑥ 口径）：只在「本项目行 + 新建且
   staged 会话 blank 位=true」时注入**恰好一次**；恢复/切换/非 blank 绝不
   注入。
-- 内容源（拟）：项目主目录 `notes/session-charter.md`（每项目自定，改
-  prompt 不改代码），node.ts 加 GET 渲染端点；文件缺失回落插件内通用模板。
+- 内容源（拍板④，260904 宿主定）：**引擎仓 `server/dsh/session_charter.md`
+  单一文件**（不放 notes/——那是知识库账本；也不放项目仓/机器级目录）。
+  结构=首段通用 charter（占位符 {{project_key}}/{{project_name}}/
+  {{primary_dir}} 端点现填）+ 可选 `## project:<key>` 分段（命中的项目把该段
+  追加在通用部分后，无分段项目只吃通用模板）。node.ts 加 GET
+  /suyou-workbench/api/session-charter?project=<key> 现读现渲染（改文件即
+  生效）；文件缺失回落插件内置默认模板。随 git 版本化——「当前在案授权」
+  栏的变更史即授权档案（代签审计链第一环）。
 - 备选（不推荐）：宿主端仿 ticket-session/open 建 project-session/open——
   自铸会话有「不绑工作区停在 hero」的历史坑（t260831-04 废弃过一次），
   客户端工厂链（workspaces.startSession）+ prompt 注入更稳。
@@ -55,15 +64,21 @@
 ## 落地排期
 
 - 注入票（session-charter）：写集=session-entry.tsx/sidebar.tsx（注入接线）
-  + node.ts（charter GET）+ smoke，与 **t260904-05（票② R7+R8）完全重叠**
-  ——必须在 05 merge 收口后串行开票，防冲突。
+  + node.ts（charter GET）+ server/dsh/session_charter.md + smoke，与
+  **t260904-05（票② R7+R8）完全重叠**——必须在 05 merge 收口后串行开票，
+  防冲突。
 - charter 模板内容**定稿权归宿主**；草稿见附录，宿主改定后随票落
   `<project>/notes/session-charter.md`。
 
-## 附录：charter 模板草稿（待宿主定稿）
+## 附录：charter 模板草稿（落点 server/dsh/session_charter.md；待宿主定稿）
 
 ```markdown
-你是「<项目名>」的项目会话（项目 key=<key>，主目录=<primary>）。
+<!-- 用法：本文件=全部项目的会话开局注入源。首段（本注释后到第一个
+     ## project: 分段前）=通用模板，占位符由端点现填；下方可加
+     ## project:<key> 分段，该段会追加到对应项目会话的通用模板之后。
+     文件缺失/未命中回落插件内置默认模板。 -->
+
+你是「{{project_name}}」的项目会话（项目 key={{project_key}}，主目录={{primary_dir}}）。
 
 职责：
 a) 与人讨论并确定方案，结论落到 notes/ 或 notes/epics/（落账由 main 侧
@@ -73,11 +88,18 @@ b) 检查/解决在跑工单的问题：先定位（环节/文件/数据），�
 c) 带跑跨工单长任务（epic）：拆解→按依赖分步开票→每步验收→再开下一张。
 
 纪律：
-- 开工先读：<primary>/CLAUDE.md、docs/ 索引、notes/epics/ 相关立项单；
+- 开工先读：{{primary_dir}}/CLAUDE.md、docs/ 索引、notes/epics/ 相关立项单；
   之后用工具现查，不凭记忆。
 - 开票/验票/签字一律走引擎工具（留痕）；不直接改 developer 泳道。
 - 代签人工门：仅在授权在案时代签，sign note 必须注明授权出处
   （例：受宿主 2026-09-04 拍板，见 notes/discussions/260904-project-session-charter.md
   或 <立项单>）；无授权出处不得代签。
 - 当前在案授权：（宿主填写；无则写「无」）
+```
+
+（按项目分段示例：）
+
+```markdown
+## project:sandbar
+- 本项目特别注意：suyou 仓只读不回写；console 3099 永不碰。
 ```
