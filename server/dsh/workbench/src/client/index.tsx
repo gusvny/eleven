@@ -93,8 +93,14 @@ import { KnowledgeSection } from '../../../knowledge/src/client/index.tsx'
 import { ProvidersSection } from '../../../providers/src/client/index.tsx'
 import { WorkbenchSidebar } from './sidebar.tsx'
 import { MetricsFooterButton, markFooterSlot } from './metrics-entry.tsx'
-// 立项单 Tier 3（t260826-02）：中列第四视图 + 所属立项徽标（口径单点 ./epics-model.ts）。
+// 立项单 Tier 3（t260904-17 保留）：中列第四视图 + 所属立项徽标（口径单点 ./epics-model.ts）。
 import { EpicBadge, EpicSection } from './epics.tsx'
+// t260904-17 工单列表 v5（mock 屏⑤⑥）：平铺行卡（一套 UI，中列+侧栏共用）+ 纯函数模型层。
+import { TicketRowCard, type CardOp } from './ticket-row-card.tsx'
+import {
+  deriveTicketState, countByState, filterRows, progressLineOf, epicColorOf,
+  STATE4_LABEL, type TicketState4,
+} from './ticket-list-model.ts'
 // t260901-15 多页签共存：在看心跳/写事件广播（tab-presence）+ 不可见页签暂停轮询门。
 import { startTabPresence } from './tab-presence.ts'
 import type { TabPresence, PeerViewer } from './tab-presence.ts'
@@ -140,20 +146,70 @@ const CSS = `
 .wb-btn-danger{border-color:#ff9b9b;color:#cf222e;background:#ffebe9}
 .wb-btn-blue{border-color:#96c8f2;color:#0969da;background:#ddf4ff}
 .wb-btn-green{border-color:#7dd9a0;color:#1a7f37;background:#dafbe1}
-/* 台面表格：一行一工单，表头 sticky（相对 .wb-root 滚动容器），table-layout:fixed 由
- * colgroup 定列宽，任务描述列占剩余宽度、超长省略号+悬停全文。 */
-.wb-table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid #d0d7de;
-  border-radius:8px;background:#ffffff;box-shadow:0 1px 3px rgba(31,35,40,.06);font-size:13px;overflow:hidden}
-.wb-table thead th{position:sticky;top:0;z-index:1;background:#f6f8fa;color:#57606a;font-weight:600;
-  text-align:left;padding:9px 12px;border-bottom:1px solid #d0d7de;font-size:12px;
-  white-space:nowrap}
-.wb-table tbody td{padding:9px 12px;border-bottom:1px solid #e8ebef;vertical-align:middle}
-.wb-table tbody tr{cursor:pointer}
-.wb-table tbody tr:hover{background:#f6f8fa}
-.wb-table tbody tr[data-active=true]{background:#f0f6ff;box-shadow:inset 3px 0 0 #0969da}
-.wb-table tbody tr[data-state=awaiting-human]{background:#f0f6ff;box-shadow:inset 4px 0 0 #1f6feb}
-.wb-table tbody tr[data-state=awaiting-human]:hover{background:#e6f0ff}
-.wb-table tbody tr:last-child td{border-bottom:none}
+/* ---- 工单列表 v5（t260904-17，mock 屏⑤⑥）：平铺行卡 + 筛选 chips ---- */
+/* 状态/epic 筛选 chips：过滤非分组；「等你」chip（data-state=waiting）>0 时黄调强调 */
+.wb-chip-btn{font-size:12px;padding:2px 10px;border-radius:10px;border:1px solid #d0d7de;
+  background:#fff;color:#57606a;cursor:pointer;white-space:nowrap}
+.wb-chip-btn:hover{background:#f6f8fa}
+.wb-chip-btn[data-on=true]{border-color:#0969da;color:#0969da;background:#ddf4ff;font-weight:600}
+.wb-chip-btn[data-state=waiting]{border-color:#d4a72c}
+.wb-chip-btn[data-state=waiting][data-on=false]{background:#fff8c5;color:#7d4e00}
+.wb-chip-epic{border-style:dashed;border-width:1.5px}
+/* 搜索框 */
+.wb-search{font-size:12px;padding:3px 10px;border:1px solid #d0d7de;border-radius:6px;width:180px}
+/* 平铺行卡：左缘 epic 彩条由行内 style 注入（哈希色）；等你=黄调行/受阻=红调行
+ * （底色由行内 style 注入）、活跃=蓝左条强调、收口=灰折叠 */
+.wb-card{display:flex;align-items:center;gap:10px;padding:8px 12px;margin-bottom:6px;
+  border:1px solid #d0d7de;border-left-width:4px;border-radius:8px;background:#fff;
+  cursor:pointer;font-size:13px;flex-wrap:wrap;box-shadow:0 1px 2px rgba(31,35,40,.05)}
+.wb-card:hover{background:#f6f8fa}
+.wb-card[data-active=true]{border-color:#0969da;box-shadow:inset 0 0 0 1px #0969da}
+.wb-card[data-state=done]{opacity:.72}
+.wb-card-l1{display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 320px}
+.wb-card-dot{width:9px;height:9px;flex:none;position:relative}
+.wb-card-dot::before{content:'';position:absolute;inset:0;border-radius:50%;background:#8c959f}
+.wb-card-dot[data-state=waiting]::before{background:#bf8700}
+.wb-card-dot[data-state=blocked]::before{background:#cf222e}
+.wb-card-dot[data-state=active]::before{background:#0969da}
+.wb-card-dot[data-state=done]::before{background:#8c959f}
+.wb-card-state{font-size:11px;font-weight:600;flex:none}
+.wb-card-state[data-state=waiting]{color:#9a6700}
+.wb-card-state[data-state=blocked]{color:#cf222e}
+.wb-card-state[data-state=active]{color:#0969da}
+.wb-card-state[data-state=done]{color:#57606a}
+.wb-card-id{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#0969da;flex:none}
+.wb-card-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.wb-card-epic{font-size:11px;padding:0 8px;border:1px solid;border-radius:10px;flex:none;white-space:nowrap}
+.wb-card-l2{display:flex;align-items:center;gap:8px;color:#57606a;font-size:12px;flex:1 1 260px;min-width:0}
+.wb-card-progress{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wb-card-progress[data-state=blocked]{color:#cf222e}
+.wb-card-progress[data-state=awaiting-human]{color:#9a6700}
+.wb-card-time{flex:none}
+.wb-card-role{flex:none}
+.wb-card-pending{font-size:11px;color:#7d4e00;background:#fff8c5;border:1px solid #d4a72c;
+  border-radius:4px;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* 迷你站道：点数=模板阶段数；绿=已过/状态色=当前/灰=未来（颜色随 data-state 派生） */
+.wb-card-lane{display:inline-flex;gap:4px;align-items:center;flex:none}
+.wb-card-lane-dot{width:8px;height:8px;border-radius:50%;background:#d0d7de;display:inline-block}
+.wb-card-lane-dot[data-visual=done]{background:#2da44e}
+.wb-card-lane-dot[data-visual=current][data-state=waiting]{background:#d4a72c}
+.wb-card-lane-dot[data-visual=current][data-state=blocked]{background:#cf222e}
+.wb-card-lane-dot[data-visual=current][data-state=active]{background:#0969da}
+/* 行卡动作位（右侧）：衍生动作（去签字/看原因）+ 管理动作 */
+.wb-card-ops{display:flex;gap:6px;align-items:center;flex:none;margin-left:auto}
+.wb-card-btn{font-size:12px;padding:2px 10px;border-radius:6px;border:1px solid #d0d7de;
+  background:#fff;color:#1f2328;cursor:pointer;white-space:nowrap}
+.wb-card-btn:disabled{opacity:.5;cursor:default}
+.wb-card-btn-primary{background:#1f6feb;border-color:#1f6feb;color:#fff;font-weight:600}
+.wb-card-btn-blue{border-color:#96c8f2;color:#0969da;background:#ddf4ff}
+.wb-card-btn-danger{border-color:#ff9b9b;color:#cf222e;background:#ffebe9}
+.wb-card-btn-green{border-color:#7dd9a0;color:#1a7f37;background:#dafbe1}
+/* 收口折叠计数行 */
+.wb-done-row{display:block;width:100%;text-align:left;font-size:12px;color:#57606a;
+  background:#f6f8fa;border:1px dashed #d0d7de;border-radius:8px;padding:6px 12px;
+  margin:8px 0 6px;cursor:pointer}
+.wb-done-row:hover{background:#eef1f4}
+/* 旧台面表格样式已随 t260904-17 列表 v5（平铺行卡）退役——行卡/chips 样式族见上。 */
 .wb-dot{width:10px;height:10px;border-radius:50%;display:inline-block;vertical-align:middle;flex:none}
 .wb-dot[data-state=running]{background:#2da44e}
 .wb-dot[data-state=awaiting]{background:#bf8700}
@@ -205,6 +261,8 @@ const CSS = `
    （260824 实测塌陷）；抽屉自己滚，子元素一律不缩。 */
 .wb-drawer>*{flex-shrink:0}
 .wb-drawer-head{display:flex;align-items:baseline;gap:10px;border-bottom:1px solid #d0d7de;padding-bottom:10px}
+.wb-d2-blocked{margin:8px 0;padding:6px 12px;border:1px solid #cf222e;border-radius:6px;
+  background:#ffebe9;color:#cf222e;font-size:12.5px}
 .wb-drawer-id{font-size:12px;color:#57606a;word-break:break-all}
 .wb-close{position:absolute;top:14px;right:16px;font-size:22px;color:#57606a;cursor:pointer;background:none;border:none}
 .wb-close:hover{color:#1f2328}
@@ -768,6 +826,8 @@ interface TicketDetail {
   id: string
   title: string
   workflow_id: string
+  /** 阻塞原因（t260904-17：行卡「看原因」导航锚——ticket show 透传字段）。 */
+  blocked_reason?: string
   /** 所属立项代号（epic-linkage；详情 API 已透出，t260825-04）。 */
   epic?: string
   stage: string | null
@@ -967,89 +1027,6 @@ function operatorOf(): string {
   } catch { return 'op-local' }
 }
 
-/** 行式台面：一行一个工单。点行展开详情抽屉；行内操作按矩阵显隐（stopPropagation 不触发行展开）。
- *  awaiting-human 行带 data-state 强调条（左缘蓝条+微蓝底）且操作列放「去签字→推进」主按钮。 */
-function TicketRowView({ t, wf, active, busy, onOpen, onAdvance, onDispatch, onRework, onUnblock, onClose, onOpenEpic, peerViewers }: {
-  t: TicketRow
-  wf?: Wf
-  active: boolean
-  busy: boolean
-  onOpen: () => void
-  onAdvance: () => void
-  onDispatch: () => void
-  onRework: () => void
-  onUnblock: () => void
-  onClose: () => void
-  /** 所属立项徽标点击（t260826-02）：跳中列立项单详情；缺省=徽标纯展示。 */
-  onOpenEpic?: (code: string) => void
-  /** t260901-15：其它页签正在查看此工单（👀 徽标；空/缺省不渲染）。 */
-  peerViewers?: PeerViewer[]
-}) {
-  const state = ticketState(t)
-  const ops = availableOps(t, wf)
-  const stepText = stageTextOf(t, wf)
-  const stateLabel = t.status === 'closed' ? '已完成' : (STATE_LABEL[state] ?? state)
-  const stop = (fn: () => void) => (ev: MouseEvent) => { ev.stopPropagation(); fn() }
-  return (
-    <tr className="wb-row" data-active={active} data-state={state} onClick={onOpen}
-      title={`${t.id}\n更新 ${t.updated} · 接力 ${t.handoff_count} 棒 · 挂起 ${t.pending_count} 项\n工作区 ${workspaceTextOf(t)}${t.blocked_reason ? '\n阻塞原因: ' + t.blocked_reason : ''}`}>
-      <td className="wb-td-id"><span className="wb-id" title={t.id}>{t.id}</span>
-        {(peerViewers?.length ?? 0) > 0 && (
-          <span title={`另一页签正在查看此工单：${(peerViewers ?? []).map(v => v.who).join('、')}`}> 👀</span>
-        )}
-      </td>
-      <td className="wb-td-role">{t.role || '—'}</td>
-      <td className="wb-td-type"><span className="wb-type-chip" data-empty={!wf}>{wf?.name ?? '未挂模板'}</span></td>
-      <td className="wb-td-state">
-        <span className="wb-dot" data-state={t.status === 'closed' ? 'done' : state} />
-        <span className="wb-state-text" data-state={t.status === 'closed' ? 'done' : state}>{stateLabel}</span>
-        {t.exec_status && t.exec_status !== 'COMPLETED' && t.status !== 'closed' ? (
-          <span style={{fontSize: '10px', color: '#57606a', display: 'block'}}>{t.exec_status}</span>
-        ) : null}
-      </td>
-      <td className="wb-td-step">
-        {stepText}
-        {state === 'running' && t.session_kb && t.session_kb > 0 ? (
-          <span style={{fontSize: '10px', color: '#1a7f37', display: 'block'}}>已读 {t.session_kb}KB</span>
-        ) : null}
-      </td>
-      <td className="wb-td-desc">
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-          {/* 所属立项徽标（t260826-02）：有 epic 显代号可点跳立项详情，无显灰「未归档」；
-              点击 stopPropagation 在 EpicBadge 内部处理（不触发行展开）。 */}
-          <EpicBadge epic={t.epic} onNavigate={onOpenEpic} />
-          <span className="wb-desc" style={{ flex: 1, minWidth: 0 }} title={t.title}>{t.title}</span>
-        </span>
-        {state === 'awaiting-human' && (t.pending?.length ?? 0) > 0 && (
-          <span className="wb-row-pending">审批：{(t.pending ?? []).map(p => p.note).join('；')}</span>
-        )}
-      </td>
-      <td className="wb-td-time">{t.updated}</td>
-      <td className="wb-td-ops" onClick={ev => ev.stopPropagation()}>
-        <span className="wb-row-ops">
-          {ops.includes('advance') && (
-            <button className={'wb-row-btn' + (t.stage_state === 'awaiting-human' ? ' wb-row-btn-primary' : '')}
-              disabled={busy} onClick={stop(onAdvance)}>
-              {t.stage_state === 'awaiting-human' ? '审批→推进' : '推进'}
-            </button>
-          )}
-          {ops.includes('dispatch-next') && (
-            <button className="wb-row-btn" disabled={busy} onClick={stop(onDispatch)}>派下一棒</button>
-          )}
-          {ops.includes('rework') && (
-            <button className="wb-row-btn wb-row-btn-danger" disabled={busy} onClick={stop(onRework)}>打回</button>
-          )}
-          {ops.includes('unblock') && (
-            <button className="wb-row-btn wb-row-btn-blue" disabled={busy} onClick={stop(onUnblock)}>解除阻塞</button>
-          )}
-          {ops.includes('close') && (
-            <button className="wb-row-btn wb-row-btn-green" disabled={busy} onClick={stop(onClose)}>完成</button>
-          )}
-        </span>
-      </td>
-    </tr>
-  )
-}
 
 /* ------------------------------------------------------------- 详情抽屉 */
 
@@ -2638,9 +2615,14 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   const [workflows, setWorkflows] = useState<Wf[]>([])
   const [operator] = useState(operatorOf)
   const [error, setError] = useState('')
-  const [filterStatus, setFilterStatus] = useState('')
-  const [filterWf, setFilterWf] = useState('')
-  const [filterRole, setFilterRole] = useState('')
+  // t260904-17 列表 v5（mock 屏⑤⑥）：筛选 chips=过滤非分组——四态/epic/搜索词。
+  const [filterState4, setFilterState4] = useState<TicketState4 | ''>('')
+  const [filterEpic, setFilterEpic] = useState('')
+  const [q, setQ] = useState('')
+  /** 收口折叠（mock ⑥）：缺省折叠成「✓ 收口 · N」计数行。 */
+  const [showDone, setShowDone] = useState(false)
+  /** 进展行 enrichment（host /tickets/progress 只读）：仅当前可见页逐票拉取（R5 负载预算）。 */
+  const [progressMap, setProgressMap] = useState<Record<string, { state: string; text: string }>>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<TicketDetail | undefined>(undefined)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -3110,20 +3092,19 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     return startVisibleInterval(() => { void reloadScan() }, 30000)
   }, [])
 
-  const roles = useMemo(() => {
-    const s = new Set<string>()
-    for (const t of tickets ?? []) if (t.role) s.add(t.role)
-    return [...s].sort()
+  // t260904-17 列表 v5：过滤/计数/分组全部走纯函数模型层（与行卡同源，单点口径）。
+  const filtered = useMemo(() => filterRows(tickets ?? [], {
+    state: filterState4 || undefined, epic: filterEpic || undefined, q,
+  }), [tickets, filterState4, filterEpic, q])
+  const stateCounts = useMemo(() => countByState(tickets ?? []), [tickets])
+  const epicList = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const t of tickets ?? []) { const e = t.epic || ''; if (e) m.set(e, (m.get(e) ?? 0) + 1) }
+    return [...m.entries()].map(([code, count]) => ({ code, count })).sort((a, b) => b.count - a.count)
   }, [tickets])
 
-  const filtered = useMemo(() => (tickets ?? []).filter(t =>
-    (filterStatus === '' || t.status === filterStatus)
-    && (filterWf === '' || t.workflow === filterWf)
-    && (filterRole === '' || t.role === filterRole)
-  ), [tickets, filterStatus, filterWf, filterRole])
-
-  // 默认按创建时间倒序（从晚到早）；可点击表头切换。
-  const [sortKey, setSortKey] = useState<'created' | 'updated'>('created')
+  // 排序缺省=最近活动（t260904-17，mock ⑥ 通用口径；旧缺省=created 倒序，切键在此声明）。
+  const [sortKey, setSortKey] = useState<'created' | 'updated'>('updated')
   const [sortAsc, setSortAsc] = useState(false)
   const sorted = useMemo(() => [...filtered].sort((a, b) => {
     const va = (sortKey === 'created' ? a.created : a.updated_ts) ?? 0
@@ -3131,10 +3112,38 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     return sortAsc ? va - vb : vb - va
   }), [filtered, sortKey, sortAsc])
 
+  // 收口折叠（mock ⑥）：收口票折成计数行，展开才铺卡；分页只算未收口票。
+  const openList = useMemo(() => sorted.filter(t => deriveTicketState(t.status, t.stage_state) !== 'done'), [sorted])
+  const doneList = useMemo(() => sorted.filter(t => deriveTicketState(t.status, t.stage_state) === 'done'), [sorted])
+
   // 分页（260824 用户拍板⑥）：筛选/排序一变回第 1 页。
-  const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
-  const paged = useMemo(() => sorted.slice((pageNo - 1) * PAGE_SIZE, pageNo * PAGE_SIZE), [sorted, pageNo])
-  useEffect(() => { setPageNo(1) }, [filterStatus, filterWf, filterRole, sortKey, sortAsc])
+  const pageCount = Math.max(1, Math.ceil(openList.length / PAGE_SIZE))
+  const paged = useMemo(() => openList.slice((pageNo - 1) * PAGE_SIZE, pageNo * PAGE_SIZE), [openList, pageNo])
+  useEffect(() => { setPageNo(1) }, [filterState4, filterEpic, q, sortKey, sortAsc])
+
+  // 进展行 enrichment（t260904-17）：只拉当前可见页的非收口票（R5 负载预算=可见页×
+  // 单票一次/轮询周期）；host 契约=?enrich=progress（主列表零 show，show 只在此阶段）。
+  // 失败/缺数据=该票行卡降级只显相对时间，不重试不打错条。
+  useEffect(() => {
+    const ids = paged.filter(t => deriveTicketState(t.status, t.stage_state) !== 'done').map(t => t.id)
+    if (ids.length === 0) return
+    let alive = true
+    apiGet(`${API}/tickets?project=${encodeURIComponent(projectKey ?? '')}`
+      + `&enrich=progress&ids=${encodeURIComponent(ids.join(','))}`)
+      .then((data) => {
+        if (!alive || data?.ok !== true) return
+        const rows = (data.result?.tickets ?? []) as { id: string; progress?: { stage: string; state: string; at?: unknown } }[]
+        const next: Record<string, { state: string; text: string }> = {}
+        for (const r of rows) {
+          if (!r?.progress) continue
+          const line = progressLineOf([r.progress])
+          if (line) next[r.id] = line
+        }
+        setProgressMap(next)
+      })
+      .catch(() => { /* 静默降级 */ })
+    return () => { alive = false }
+  }, [tickets, pageNo, projectKey])
 
   // 短序号（时序可见）：按 created 升序编号 #01、#02…，显示在 id 列（悬停 title 显示完整 id）。
   const selWf = detail ? wfById[detail.workflow_id] : undefined
@@ -3250,19 +3259,29 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 
       {page === 'tickets' && (<>
       <div className="wb-filters">
-        <select className="wb-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-          <option value="">状态：全部</option>
-          {['dispatched', 'settled', 'verified', 'closed', 'rework'].map(s =>
-            <option key={s} value={s}>{s}</option>)}
-        </select>
-        <select className="wb-select" value={filterWf} onChange={e => setFilterWf(e.target.value)}>
-          <option value="">工作流：全部</option>
-          {workflows.map(w => <option key={w.id} value={w.id}>{w.name}（{w.id}）</option>)}
-          <option value="__none__">未挂模板</option>
-        </select>
-        <select className="wb-select" value={filterRole} onChange={e => setFilterRole(e.target.value)}>
-          <option value="">角色：全部</option>
-          {roles.map(r => <option key={r} value={r}>{r}</option>)}
+        {/* 状态 chips=过滤非分组（t260904-17，mock J）：四态+计数；「等你」chip 恒显，>0 强调 */}
+        {(['waiting', 'blocked', 'active', 'done'] as TicketState4[]).map(s => (
+          <button key={s} className="wb-chip-btn" data-state={s} data-on={filterState4 === s}
+            onClick={() => setFilterState4(filterState4 === s ? '' : s)}>
+            {STATE4_LABEL[s]} {stateCounts[s]}
+          </button>
+        ))}
+        <button className="wb-chip-btn" data-on={filterState4 === ''}
+          onClick={() => setFilterState4('')}>全部 {tickets?.length ?? 0}</button>
+        {epicList.length > 0 && <span className="wb-sub">epic：</span>}
+        {epicList.map(e => (
+          <button key={e.code} className="wb-chip-btn wb-chip-epic" data-on={filterEpic === e.code}
+            style={{ borderColor: epicColorOf(e.code), color: epicColorOf(e.code) }}
+            title={`按立项 ${e.code} 过滤`}
+            onClick={() => setFilterEpic(filterEpic === e.code ? '' : e.code)}>
+            {e.code} ·{e.count}
+          </button>
+        ))}
+        <input className="wb-search" type="search" placeholder="搜索 id / 标题…" value={q}
+          onChange={e => setQ(e.target.value)} />
+        <select className="wb-select" value={sortKey} onChange={e => setSortKey(e.target.value as 'created' | 'updated')}>
+          <option value="updated">最近活动 ↓</option>
+          <option value="created">创建时间 ↓</option>
         </select>
         <button className="wb-btn" onClick={() => { void pollOnce() }}>刷 新</button>
         {/* KI-003③（t260903-06）：轮询失败不弹窗——静默重试期间保留上次成功快照，
@@ -3275,66 +3294,65 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
             ⟳ 数据可能滞后（自动重试中）
           </span>
         )}
-        <span className="wb-sub">{filtered.length}/{tickets?.length ?? 0} 张</span>
-        {/* sandbar 驻留输入已迁走（metrics M2a，t260902-01）：收进侧栏下栏 ⚙ settings
-            弹层（UI 规划 §2「settings 收进弹层」）；localStorage key 与语义不变。 */}
+        <span className="wb-sub">{openList.length + doneList.length}/{tickets?.length ?? 0} 张</span>
       </div>
 
-      <table className="wb-table">
-        <colgroup>
-          <col style={{ width: 72 }} />
-          <col style={{ width: 76 }} />
-          <col style={{ width: 132 }} />
-          <col style={{ width: 150 }} />
-          <col style={{ width: 130 }} />
-          <col />
-          <col style={{ width: 104 }} />
-          <col style={{ width: 250 }} />
-        </colgroup>
-        <thead>
-          <tr>
-            <th>id</th>
-            <th>角色</th>
-            <th>类型</th>
-            <th>状态</th>
-            <th>阶段</th>
-            <th>任务描述</th>
-            <th style={{cursor: 'pointer'}} onClick={() => { if (sortKey === 'created') setSortAsc(!sortAsc); else { setSortKey('created'); setSortAsc(false); } }}>
-            创建{sortKey === 'created' ? (sortAsc ? ' ↑' : ' ↓') : ''}
-          </th>
-            <th style={{ textAlign: 'right' }}>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {paged.map(t => (
-            <TicketRowView key={t.id} t={t} wf={wfById[t.workflow]}
-              active={t.id === selectedId} busy={opBusy}
-              peerViewers={peerViewersByTicket.get(t.id)}
-              onOpen={() => { void openDetail(t.id) }}
-              onAdvance={() => { doAdvance(t.id, t.stage_state, t.epic) }}
-              onDispatch={() => { void doOp(t.id, 'dispatch-next', {}, '已生成派活指令') }}
-              onRework={() => { openRework(t.id, t.stage_state === 'awaiting-human') }}
-              onUnblock={() => {
-                if (t.engine === 'template-as-code-v2') {
-                  void doOp(t.id, 'retry-qc', { who: operator }, '已请求重跑（retry_qc）')
-                } else {
-                  void doOp(t.id, 'update', { stage_state: 'awaiting', note: '（工单台）解除阻塞' }, '已解除阻塞')
-                }
-              }}
-              onClose={() => { if (window.confirm('标记为已完成（closed）？')) void doOp(t.id, 'update', { status: 'closed', note: '（工单台）完成' }, '已标记完成') }}
-              onOpenEpic={onOpenEpic} />
-          ))}
-          {paged.length === 0 && (
-            <tr><td colSpan={8} className="wb-empty">没有符合筛选的工单。</td></tr>
-          )}
-        </tbody>
-      </table>
+      {/* 平铺行卡列表（t260904-17，mock ⑥）：状态配色不分组、epic 彩条、迷你站道、衍生动作位 */}
+      {paged.map(t => {
+        const ops = availableOps(t, wfById[t.workflow]) as CardOp[]
+        return (
+          <TicketRowCard key={t.id} t={t} wf={wfById[t.workflow]}
+            progress={progressMap[t.id]}
+            active={t.id === selectedId} busy={opBusy} ops={ops}
+            peerViewers={peerViewersByTicket.get(t.id)}
+            onOpen={(anchor) => {
+              // 衍生动作位=纯导航（R3）：去签字→详情「变更」页签（审批必看 diff 区，本票落点）；
+              // 看原因→详情「进展」页签（问题区/阻塞原因）。零写操作。
+              if (anchor === 'review') setDrawerTab('changes')
+              if (anchor === 'blocked' || anchor === undefined) setDrawerTab('detail')
+              void openDetail(t.id)
+            }}
+            onAdvance={() => { doAdvance(t.id, t.stage_state, t.epic) }}
+            onDispatch={() => { void doOp(t.id, 'dispatch-next', {}, '已生成派活指令') }}
+            onRework={() => { openRework(t.id, t.stage_state === 'awaiting-human') }}
+            onUnblock={() => {
+              if (t.engine === 'template-as-code-v2') {
+                void doOp(t.id, 'retry-qc', { who: operator }, '已请求重跑（retry_qc）')
+              } else {
+                void doOp(t.id, 'update', { stage_state: 'awaiting', note: '（工单台）解除阻塞' }, '已解除阻塞')
+              }
+            }}
+            onClose={() => { if (window.confirm('标记为已完成（closed）？')) void doOp(t.id, 'update', { status: 'closed', note: '（工单台）完成' }, '已标记完成') }}
+            onOpenEpic={onOpenEpic} />
+        )
+      })}
+      {paged.length === 0 && openList.length === 0 && (
+        <div className="wb-empty">没有符合筛选的工单。</div>
+      )}
+
+      {/* 收口折叠计数行（mock ⑥）：数据覆盖面以 /wf/tickets 返回集为准（KI-031 注记：
+          terminate/直并收口票不在列表数据宇宙，计数偏小非折叠逻辑丢票） */}
+      {doneList.length > 0 && (
+        showDone ? (
+          <>
+            <button className="wb-done-row" onClick={() => setShowDone(false)}>▾ 收口 · {doneList.length}（点击折叠）</button>
+            {doneList.map(t => (
+              <TicketRowCard key={t.id} t={t} wf={wfById[t.workflow]} compact={false}
+                active={t.id === selectedId} busy={opBusy} ops={[]}
+                onOpen={() => { setDrawerTab('detail'); void openDetail(t.id) }}
+                onOpenEpic={onOpenEpic} />
+            ))}
+          </>
+        ) : (
+          <button className="wb-done-row" onClick={() => setShowDone(true)}>✓ 收口 · {doneList.length}（点击展开）</button>
+        )
+      )}
 
       {pageCount > 1 && (
         <div className="wb-pager">
           <button className="wb-btn" disabled={pageNo <= 1}
             onClick={() => setPageNo(p => Math.max(1, p - 1))}>上一页</button>
-          <span className="wb-sub">第 {pageNo}/{pageCount} 页 · 共 {sorted.length} 张</span>
+          <span className="wb-sub">第 {pageNo}/{pageCount} 页 · 未收口 {openList.length} 张</span>
           <button className="wb-btn" disabled={pageNo >= pageCount}
             onClick={() => setPageNo(p => Math.min(pageCount, p + 1))}>下一页</button>
         </div>
@@ -3379,6 +3397,11 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                 <UsageSummaryLine detail={detail} wf={selWf} usage={usage} />
               </div>
 
+              {/* 受阻原因横幅（t260904-17）：行卡「看原因」导航的详情落点——
+                  阻塞原文随详情可达，不藏在折叠区 */}
+              {detail.blocked_reason && (
+                <div className="wb-d2-blocked">⛔ 受阻原因：{detail.blocked_reason}</div>
+              )}
               {/* t260901-15 多页签共存：另一页签正在看此工单时提示（心跳驱动，TTL 自动消失）。 */}
               {drawerPeerViewers.length > 0 && (
                 <div style={{ background: '#ddf4ff', border: '1px solid #54aeff', borderRadius: 6,

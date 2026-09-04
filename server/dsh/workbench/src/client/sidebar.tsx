@@ -69,6 +69,8 @@ import { ProjectIcon } from './project-icons.tsx'
 import type { ProjectIconName } from './project-icons.tsx'
 // 项目生命周期四弹层（票③面D：设置/接入/摘除/隔离详情，验收 11-13）。
 import { ProjectAddModal, ProjectRemoveModal, ProjectSettingsModal, QuarantineModal } from './project-modals.tsx'
+// t260904-17 列表 v5：左栏工单条目=行卡迷你版（一套 UI 裁定，与中列同一组件/模型层）。
+import { TicketRowCard } from './ticket-row-card.tsx'
 // metrics M2a（t260902-01）：度量面板。t260902-05 起：入口迁出厂侧栏
 // footer.action 槽（与 dsh settings 同排，用户反馈①），面板中 pane 化挂进
 // .wb-sb-right（反馈②）。槽注册失败软退化回 .wb-sb-foot 兜底钮（console.warn）。
@@ -177,14 +179,6 @@ type RightView = 'board' | 'knowledge' | 'routes' | 'epics'
  * 状态色（用户拍板口径）：红=有问题（blocked/rework）、黄=待审核（awaiting-human/settled）、
  * 蓝=运行中（running）、绿=完成（verified/closed）、灰=等待（awaiting）。
  */
-function stateColor(t: Ticket): string {
-  if (t.stage_state === 'blocked' || t.status === 'rework') return '#ef4444'
-  if (t.stage_state === 'awaiting-human' || t.status === 'settled') return '#f59e0b'
-  if (t.stage_state === 'running') return '#3b82f6'
-  if (t.status === 'verified' || t.status === 'closed') return '#22c55e'
-  return '#9ca3af'
-}
-
 /** 未完成 = 生命周期未收口（dispatched/settled/rework）。项目组里只列这些。 */
 const isOpen = (t: Ticket): boolean => t.status !== 'closed' && t.status !== 'verified'
 
@@ -207,20 +201,6 @@ const inSandbar = (t: Ticket, nowS: number): boolean => {
   if (h <= 0) return false
   const ts = t.close_ts || t.created || 0
   return ts > 0 && nowS - ts < h * 3600
-}
-
-/** 创建时长紧凑格式：45m / 8h / 1d / 1d2h / 1w / 1w3d。 */
-function ageOf(created?: number): string {
-  if (!created) return '—'
-  const s = Math.max(0, Date.now() / 1000 - created)
-  const m = Math.floor(s / 60)
-  const h = Math.floor(s / 3600)
-  const d = Math.floor(s / 86400)
-  const w = Math.floor(d / 7)
-  if (w > 0) return d % 7 ? `${w}w${d % 7}d` : `${w}w`
-  if (d > 0) return h % 24 ? `${d}d${h % 24}h` : `${d}d`
-  if (h > 0) return `${h}h`
-  return `${m}m`
 }
 
 /* ---------------------------------------------------------------- 样式 */
@@ -266,14 +246,16 @@ const CSS = `
 .wb-group-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .wb-group-count { margin-left:auto; font-size:10px; color:var(--dsw-alias-label-secondary,#888); font-weight:400; }
 .wb-group-empty { padding:2px 8px 8px 24px; color:#666; font-size:11px; }
-/* 两行式工单条目：行1=title（单行省略），行2=彩色工单号 + role · 创建时长 */
-.wb-ticket-row2 { padding:5px 10px 5px 20px; cursor:pointer; border-bottom:1px solid rgba(255,255,255,0.04); }
-.wb-ticket-row2:hover { background:rgba(255,255,255,0.06); }
-.wb-ticket-row2.selected { background:rgba(124,58,237,0.18); }
-/* sandbar 驻留的已完成条目：淡一档，一眼区分「还在跑的」和「刚收口的」 */
-.wb-ticket-row2.done { opacity:0.55; }
-.wb-ticket-l1 { font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.wb-ticket-l2 { font-size:11px; color:var(--dsw-alias-label-secondary,#888); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* t260904-17 列表 v5：工单条目=行卡迷你版（TicketRowCard compact）——暗色主题覆写：
+ * 透明底、继承字色、选中紫调高亮；收口（data-state=done）淡一档 */
+.wb-sb .wb-card { background:transparent; border-color:rgba(255,255,255,0.10);
+  box-shadow:none; color:var(--dsw-alias-label-primary,#e0e0e0); margin:0 6px 4px 14px; padding:5px 8px; }
+.wb-sb .wb-card:hover { background:rgba(255,255,255,0.06); }
+.wb-sb .wb-card[data-active=true] { background:rgba(124,58,237,0.18); border-color:rgba(124,58,237,0.5); }
+.wb-sb .wb-card[data-state=done] { opacity:0.55; }
+.wb-sb .wb-card-title { color:inherit; font-weight:400; }
+.wb-sb .wb-card-state { color:inherit; }
+.wb-sb .wb-card-id { color:#7ab8ff; }
 /* 视图入口图标：右对齐放在每个项目组头行内（用户拍板 260823：per-project，不占独立行；
    t260827-01 起四个：工单/知识库/模型/立项单） */
 .wb-view-icons { display:flex; gap:2px; }
@@ -699,18 +681,14 @@ export function WorkbenchSidebar(props: SidebarProps) {
                   {g.tickets.length === 0 ? (
                     <div className="wb-group-empty">无进行中工单</div>
                   ) : g.tickets.map(t => (
-                    <div
-                      key={t.id}
-                      className={`wb-ticket-row2 ${selectedId === t.id ? 'selected' : ''} ${isOpen(t) ? '' : 'done'}`}
-                      onClick={() => handleTicketClick(t, g.project.key)}
-                    >
-                      {t.title && <div className="wb-ticket-l1" title={t.title}>{t.title}</div>}
-                      <div className="wb-ticket-l2">
-                        <span style={{color: stateColor(t), fontFamily: 'var(--ds-font-family-code, monospace)'}}>{t.id}</span>
-                        {' · '}{isOpen(t) ? (t.role || '—') : '已完成'}{' · '}{ageOf(isOpen(t) ? t.created : (t.close_ts || t.created))}
-                        {!isOpen(t) && ' 前收口'}
-                      </div>
-                    </div>
+                    /* t260904-17 列表 v5（mock 屏⑤）：左栏工单条目=行卡迷你版（一套 UI；
+                     * compact 省略站道/管理动作位）。stateColor/ageOf 旧两行式渲染退役，
+                     * 状态短名/配色由四态枚举驱动（与中列同一模型层口径）。 */
+                    <TicketRowCard key={t.id} t={t} compact
+                      active={selectedId === t.id}
+                      updatedTsMs={(isOpen(t) ? t.created : (t.close_ts || t.created)) !== undefined
+                        ? (isOpen(t) ? t.created : (t.close_ts || t.created))! * 1000 : undefined}
+                      onOpen={() => handleTicketClick(t, g.project.key)} />
                   ))}
                 </>
               )}

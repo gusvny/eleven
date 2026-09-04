@@ -21,7 +21,10 @@
  *                                                 在飞闸 fail-closed 文案由 CLI 错误体透传）
  *   GET  /suyou-workbench/api/wf/tickets?project=<key>
  *                                               → ticket list（按 ProjectKey SA 过滤；project 必传、无默认值；
- *                                                 台面行，awaiting-human 工单附 pending 审批理由）+ workflow list（全局模板表）
+ *                                                 台面行；enrich=progress 时附进展行）+ workflow list（全局模板表）
+ *   GET  /suyou-workbench/api/wf/tickets?project=<key>&enrich=progress[&ids=a,b]
+ *                                               → 进展行 enrichment（t260904-17）：主响应零 show；
+ *                                                 enrich 阶段逐票 show 短超时+并发上限+allSettled
  *   GET  /suyou-workbench/api/wf/tickets/<id>   → ticket show（详情全文）
  *   POST /suyou-workbench/api/wf/tickets/<id>/accept|advance|dispatch-next|rework|update
  *                                               → 写操作，走 admin.py call ticket（run-id 审计）
@@ -349,6 +352,68 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     return runAdminCli(cli, ['call', tool, JSON.stringify(args ?? {})])
   }
 
+  // ---- enrichment 预算纪律（t260904-17，方案 R5 三钉）----
+  // 每票 show 的短超时：show 是单点查询，超时即视同失败降级——不继承 runPocCli
+  // 默认 120s 级超时（一次慢 show 拖死整个列表=KI-003/029 查询饿死族加重面）。
+  // 注意：超时只放弃等待，底层 spawn 由 execFile 自身 timeout 兜底回收（有界）。
+  const SHOW_TIMEOUT_MS = 3_000
+  /** enrichment 并发上限：分批跑，不打满 CLI/Temporal 查询面。 */
+  const ENRICH_CONCURRENCY = 4
+
+  /** 单票 show + 短超时：成功/结构化失败/超时都 resolve（失败返回 undefined，不 throw）。 */
+  function showWithTimeout(id: string): Promise<any> {
+    return new Promise((resolveP) => {
+      let settled = false
+      const finish = (v: any) => { if (!settled) { settled = true; clearTimeout(timer); resolveP(v) } }
+      const timer = setTimeout(() => finish(undefined), SHOW_TIMEOUT_MS)
+      callTool('ticket', { op: 'show', id }).then((r) => finish(r)).catch(() => finish(undefined))
+    })
+  }
+
+  /** 有界并发 + allSettled 语义的 map：单项失败/超时不影响其它项与整体 resolve。 */
+  async function mapSettled<T>(items: T[], limit: number, fn: (x: T) => Promise<unknown>): Promise<unknown[]> {
+    const results: unknown[] = new Array(items.length)
+    let next = 0
+    async function worker(): Promise<void> {
+      while (true) {
+        const i = next++
+        if (i >= items.length) return
+        try { results[i] = await fn(items[i]) } catch { results[i] = undefined }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker))
+    return results
+  }
+
+  /** t260904-17 进展行 enrichment：GET <tickets>?project=<key>&enrich=progress[&ids=a,b]——
+   *  逐票 show 取 timeline 末条合法条目挂该行 progress={stage,state,at}（人话派生在
+   *  客户端纯函数层，host 不译不猜）。单票慢/失败=该票缺 progress（行卡降级），整体
+   *  照常返回；畸形 timeline（末条缺 stage/state）向前找最近合法条，全畸形=不挂。 */
+  async function enrichTicketProgress(tickets: any[], idsParam: string | null): Promise<void> {
+    const ids = idsParam !== null
+      ? idsParam.split(',').map(s => s.trim()).filter(Boolean).slice(0, 32)
+      : null
+    const idSet = ids !== null ? new Set(ids) : null
+    // 无 ids=全量 enrich 兜底：同样封顶 32（O1：极端规模长尾不失控，超限票走降级）
+    const targets = tickets.filter((tk: any) =>
+      tk?.status !== 'closed' && (idSet === null || idSet.has(tk.id))).slice(0, 32)
+    const shows = await mapSettled(targets, ENRICH_CONCURRENCY, (tk: any) => showWithTimeout(tk.id))
+    shows.forEach((s, i) => {
+      const tl = (s as any)?.result?.timeline
+      if (!Array.isArray(tl)) return
+      // 末条合法条目：stage/state 都是非空字符串才算（畸形条目跳过——不挂脏 progress）
+      for (let j = tl.length - 1; j >= 0; j--) {
+        const e = tl[j]
+        if (e !== null && typeof e === 'object'
+          && typeof e.stage === 'string' && e.stage !== ''
+          && typeof e.state === 'string' && e.state !== '') {
+          targets[i].progress = { stage: e.stage, state: e.state, at: e.at }
+          break
+        }
+      }
+    })
+  }
+
   /** ticket show 失败的统一分流（KI-025，t260903-06）：判据=body 的 kind 机器字段
    *  （client.py 五出口分级产出 → ticket.py QueryError → tools_registry 并入），
    *  HTTP 裁定收口在 src/host/ticket-error.ts（单测直跑）。kind 缺失/未知一律 500
@@ -377,7 +442,8 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     return JSON.parse(stdout)
   }
 
-  /** 台面：ticket list + workflow list 并行；awaiting-human 工单再 show 取 pending（审批理由显性化）。
+  /** 台面：ticket list + workflow list 并行（F1 更正：主列表不再逐票 show 取 pending——
+   *  审批理由详情抽屉自可见，行卡不放审批理由=mock 口径）。
    *  多项目化（260823）：?project=<key> 必传（projects.yaml 注册表，无默认值）——
    *  工单按 ProjectKey search attribute 过滤（Temporal 侧）；workflow 模板表是全局的，不过滤。 */
   /** 新建工单（epic-linkage Tier 3，t260826-02）：立项单详情页「新建工单」入口的落点——
@@ -473,14 +539,12 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       const tickets = t?.result?.tickets ?? []
       // workflow list 返回 {workflows:[...]}（M1 引擎结构），兼容裸数组。
       const workflows = w?.result?.workflows ?? (Array.isArray(w?.result) ? w.result : [])
-      // 审批理由：awaiting-human 工单（list 不含 pending 内容）并行 show 补上，供行内「审批：…」显示。
-      const pendingOnes = tickets.filter((tk: any) => tk.stage_state === 'awaiting-human' && tk.status !== 'closed')
-      if (pendingOnes.length > 0) {
-        const shows = await Promise.all(pendingOnes.map((tk: any) => callTool('ticket', { op: 'show', id: tk.id })))
-        shows.forEach((s, i) => {
-          const pend = (s?.result?.pending ?? []) as any[]
-          if (pend.length > 0) tickets.find((tk: any) => tk.id === pendingOnes[i].id)!.pending = pend
-        })
+      // t260904-17「主数据先行」（R5/场景 T2）：主响应窗口内零 show——逐票 show 只
+      // 发生在显式 enrich=progress 阶段（旧实现 awaiting-human 逐票 show 阻塞
+      // sendJson，是 KI-003/029 查询饿死族加重面）。enrich 只挂 progress，不产 pending。
+      const url2 = new URL(req.url ?? '/', 'http://x')
+      if (url2.searchParams.get('enrich') === 'progress') {
+        await enrichTicketProgress(tickets, url2.searchParams.get('ids'))
       }
       // 补充运行中工单的 agent 进度（轻量 stat，不解压）
       const running = tickets.filter((tk: any) => tk.stage_state === 'running' && tk.worktree)

@@ -383,6 +383,13 @@ SCENARIOS = [
     ("t260904-10-project-list-report",
      "list 报告契约（t260904-10，ro 隔离根）：人读与 --json 同列注册+隔离条目，隔离原因含 <dir>/project.yaml 定位字面，无 project.yaml 的保留目录不列；票计数降级三态——服务不可达（SUYOU_TARGET_HOST 死端口注入）与 SDK 缺失（PYTHONPATH 空壳 temporalio 包注入，KI-039 教训：依赖缺失不得吞成无数据）两态均 exit 0 不红、条目照列、两态输出可辨；正常计数腿在测试台 17233 可达时真跑（不可达有声 SKIP）。全程显式 env 钉死防缺省外溢生产 7233，零 3099 接触。实现落地前红属预期",
      "node integration/t260904-10/sc_project_list_report.mjs", "ro"),
+    # ---- t260904-17 工单列表 v5 重做（行卡/四态/哈希色/拓扑站道）----
+    ("t260904-17-ticket-list-http-contract",
+     "工单列表 v5 host 契约面（t260904-17，隔离台+FIX17 桩 python3 拦截 admin.py ticket/workflow、零真 Temporal）：主列表快返回且主请求窗口零 show 调用（「主数据先行」契约——现状逐票 show 阻塞 sendJson，扩 N 倍即 KI-003/029 查询饿死加重面）；enrich 形状钉为 GET /wf/tickets?project=<key>&enrich=progress[&ids=…]（方案「实现期择一」的场景侧裁定）——每票 show 短超时（全票延迟 8s 时 enrich 有界返回、无超时实现必红）、并发峰值≤4（轨迹面观测）、单票失败/畸形 timeline=该票缺 progress 整体 200、progress 数据字段零错误文案（KI-018 根除面）；四态推导字段逐行齐备（验收①数据面）；响应 workflows 恰两模板 stages.length 互异（验收③站道点数消费源）；epic 独立字段透传（验收②数据面）；路由壳回归（缺/未知 project=400 点名、PUT=405）。与 workbench UT（四态真值表/哈希色/守卫）intent 不同面；实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；隔离台依赖缺失=干净 SKIP",
+     "node integration/t260904-17/sc_ticket_list_http_contract.mjs", "ro"),
+    ("t260904-17-ticket-list-rowcard-ui",
+     "工单列表 v5 行卡用户可感知面（t260904-17，隔离台浏览器走查=验收①的机械 repeatable 面）：四态一眼可辨（等你1/受阻1/在飞3/收口1 chips 带计数——在飞 3 含未知 stage_state 票=四态缺省分支 UI 交叉验证、收口折叠计数行、行卡 data-ticket-id 可测性契约）；「去签字」=纯导航零写 API（点击后写端点 POST=0——R3 钉死：绑 advance=静默签字必红）；「看原因」达阻塞原因原文；站道点数=模板阶段数（5 段模板 5 点/3 段模板 3 点，计算样式计数）；同 epic 行卡彩条同色非灰、异 epic 异色（验收②可感知面）；搜索=过滤非分组。playwright-core 缺失=干净 SKIP（KI-036 守卫）；实现落地前红属预期，arbitrate/merge 期必须绿",
+     "node integration/t260904-17/sc_ticket_list_rowcard_ui.mjs", "ro"),
     # ---- t260904-14 project lifecycle 票②：sandbar project remove（可逆摘除）----
     ("t260904-14-project-remove-lifecycle",
      "默认摘除生命周期（t260904-14，桩 poc_dir 全程零真 Temporal，全腿不可 SKIP）：默认（无 purge 旗）可逆摘除——project.yaml 退役移位（project.yaml.retired-* 在位）、data/（归档+metrics）与 credentials.yaml 字节不动、.lane/ 泳道残骸只报不删且报告含票号与数据处置词汇；双侧装载器（Python shared/TS suyou-projects.ts）不再列该项目且其余项目条目字节不动、零隔离；re-add 同 key 成功且 data/tickets 归档链连续；closed 未归档差集黄牌列票号（C1：目录在/manifest 缺=未归档）；--dry-run 注册表根字节级零变更；RUNNING 非空=拒摘报票号且零现场变更。台别=桩 poc_dir（--root 指桩树，假 client.py 经 FIX14_CTRL 注入票号级清单），零 3099/7233 接触。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
