@@ -88,11 +88,13 @@ metrics 双前门（HTTP 3099 + metrics-cli.mjs）× 缓存记录原文（~/.san
   open 陈旧自愈、②绝对 worktree 归一、④per-project repo 解析+模板吞票显式
   reason）。写集=workbench src/client + src/host(+node.ts) + lib 产物 + tests +
   integration/；契约 schema 冻结不私改，需 bump 走候选上报。
-- **另立票（待宿主批）：token 出仓快照**——settle 时刻冻结泳道会话 usage 汇总
-  到项目级账本（per-ticket/per-stage/per-model），metrics 侧消费缝
-  （SUYOU_USAGE_LEDGER_DIR）已备。写集在引擎（temporal-poc/agent_activities.py），
-  与合并票不撞；修复后闭单票 token 不再蒸发。历史已丢数据无法追溯，只能自此
-  记账。
+- **另立票（260904 宿主批，扩围后已开 t260904-09）：收口出仓快照**——settle 时刻
+  冻结 token 汇总**+交付 squash 真身**双快照到项目级账本
+  （~/.sandbar/projects/<key>/data/settle/），metrics 读侧优先消费快照、无快照才回落
+  活口径/grep 口径；同票收窄归档口径（只认票号开头的 squash 收口提交，他账剔除）
+  + donut 拆「未交付/不可算」两桶。写集在引擎（temporal-poc）+ workbench host，
+  命名遵守 CLAUDE.md 硬规则⑤（零 suyou 字样）。触发对话：宿主问「不是工单结束时
+  一次性计算然后保存的吗」——现状确为按需现算+可弃缓存，本票即「收口固化」落地。
 
 ## KI 对应
 
