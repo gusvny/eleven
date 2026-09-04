@@ -143,7 +143,7 @@ async function fullChain() {
     // chat 视图成功锚：navigateToChat 成功路径的专属日志行（25s active 断言通过的
     // 唯一出口；断言失败时该视图记失败、无此行——比 grep data-phase 字面量可靠）。
     // gen3 对齐后隔离台路径锚：点「+ 新建会话」+ 种子消息驱动 active（main 版语义）。
-    if (!/锚=隔离台「\+ 新建会话」\+ 种子消息/.test(combined)) return record("C1 capture-lane 全链", "fail", "capture 输出无 chat 成功锚日志（+ 新建会话+种子消息）——active 断言未过");
+    if (!/锚=隔离台(?:项目行)?「\+ (?:新建会话|钮)」\+ 种子消息/.test(combined)) return record("C1 capture-lane 全链", "fail", "capture 输出无 chat 成功锚日志（+ 新建会话+种子消息）——active 断言未过");
     if (/准入模态遮挡/.test(combined)) return record("C1 capture-lane 全链", "fail", "chat 证据被准入模态遮挡（截后断言触发）");
     if (!/健全性断言绿/.test(combined)) return record("C1 capture-lane 全链", "fail", "capture 输出无「健全性断言绿」");
     // 消息上屏锚（t260901-03 验收走查打回修复）：种子消息词必须进会话转录，

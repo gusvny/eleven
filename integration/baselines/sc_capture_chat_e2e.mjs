@@ -228,7 +228,7 @@ if (envReason) {
   }
 
   // gen3 对齐后隔离台路径锚：点「+ 新建会话」+ 种子消息驱动 active（main 版语义）。
-  const anchorOk = both.includes("锚=隔离台「+ 新建会话」+ 种子消息");
+  const anchorOk = /锚=隔离台(?:项目行)?「\+ (?:新建会话|钮)」\+ 种子消息/.test(both);
   const viewFailures = (both.match(/尽力视图失败/g) || []).length;
   const modalBlocked = both.includes("准入模态遮挡");
   record("A4 chat-active-anchor-no-view-failures", anchorOk && viewFailures === 0 && !modalBlocked ? "pass" : "fail",
