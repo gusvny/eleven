@@ -1,7 +1,9 @@
-"""sandbar CLI 参数面：init/up/down/status/doctor/upgrade。
+"""sandbar CLI 参数面：init/up/down/status/doctor/upgrade/project。
 
 出口码：0=绿；1=红（FailClosed/VersionError/ContractError，显式报错）；
 2=用法错。管辖面=7233/8233 与工单 worker；3099 只探测只提示（硬规则 1）。
+project 子命令族=add|remove|list（注册表接入面，project-lifecycle 票①；
+remove 属票②只挂点位）。
 """
 
 from __future__ import annotations
@@ -9,6 +11,7 @@ from __future__ import annotations
 import argparse
 
 from installer import doctor as doctor_mod
+from installer import projects as projects_mod
 from installer import runtime
 from installer import service
 from installer import upgrade as upgrade_mod
@@ -41,6 +44,20 @@ def build_parser() -> argparse.ArgumentParser:
     ug.add_argument("--to", default=None, help="目标 semver（坏 semver/降版本=红）")
     ug.add_argument("--dry-run", action="store_true", help="只读演练（本命令恒为只读）")
     ug.add_argument("--contract", default=None, help="契约副本路径（缺省仓内同源副本）")
+    proj = sub.add_parser("project", help="项目注册表接入面：add 注册 / list 全列 / remove 摘除（票②）")
+    psub = proj.add_subparsers(dest="project_cmd", required=True)
+    pa = psub.add_parser("add", help="注册新项目：fail-closed 校验+原子写+体检报告（黄牌不阻塞）")
+    pa.add_argument("--key", required=True,
+                    help="项目 key（小写字母/数字/中划线，^[a-z0-9][a-z0-9-]{0,40}$）")
+    pa.add_argument("--name", required=True, help="项目显示名（不含 # 与换行）")
+    pa.add_argument("--dir", action="append", required=True,
+                    help="项目根目录（恰给一个：绝对路径、真实存在；单根模型，多给=拒收）")
+    pa.add_argument("--json", action="store_true", help="机器口径输出")
+    pr = psub.add_parser("remove", help="摘除项目（票②交付，本版恒红占位）")
+    pr.add_argument("--key", required=True, help="要摘除的项目 key")
+    pr.add_argument("--json", action="store_true", help="机器口径输出")
+    pl = psub.add_parser("list", help="列注册+隔离条目与票计数（Temporal 不可达降级不红）")
+    pl.add_argument("--json", action="store_true", help="机器口径输出")
     return p
 
 
@@ -64,6 +81,13 @@ def main(argv=None) -> int:
                                          dsh_point=args.dsh_point)
         if args.cmd == "upgrade":
             return cmd_upgrade(paths, args, log)
+        if args.cmd == "project":
+            if args.project_cmd == "add":
+                return projects_mod.cmd_project_add(paths, args, log)
+            if args.project_cmd == "remove":
+                return projects_mod.cmd_project_remove(paths, args, log)
+            if args.project_cmd == "list":
+                return projects_mod.cmd_project_list(paths, args, log)
     except (FailClosed,) as e:
         log("[红] %s" % e)
         return 1

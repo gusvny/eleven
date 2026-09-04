@@ -1,8 +1,8 @@
 # integration/ —— 平台基线集成测试集
 
-工单系统 + 立项单的基线集成测试，是 dev-lane 集成测试机制（t260829-07；机制真源在代码：
-`server/dsh/temporal-poc/shared.py:203` manifest 契约、`agent_activities.py` `_run_manifest`）
-的第一批常驻测试集。测试清单以 `manifest.json` 为准（本文件不再重复罗列）。
+工单系统 + 立项单的基线集成测试，是 dev-lane 集成测试机制（t260829-07）的第一批常驻
+测试集。**测试清单以 `integration/run_scenarios.py` 的 `SCENARIOS` 清单为准**（manifest
+已退役；本文件其余处出现的 manifest 说法是历史残留，正在随票消化——t260904-10）。
 
 ## 怎么跑
 
@@ -10,11 +10,12 @@
 # 跑单条
 node integration/baselines/ticket-validate.mjs
 # 跑全部（与引擎同款执行方式）
-python3 -c "import json;[print(e['cmd']) for e in json.load(open('integration/manifest.json'))]" | sh
+python3 integration/run_scenarios.py
 ```
 
-引擎侧（`run_integration_tests` activity）按 manifest 逐条以 `/bin/sh -c` 执行，cwd=泳道根，
-逐条超时 900s（`SUYOU_INTEG_CMD_TIMEOUT_SEC` 可调），exit 0 计通过。
+引擎侧（`run_integration_tests` activity）→ `_run_scenarios` → `verify_lane lane=integ`
+消费 `run_scenarios.py` 逐条以 `/bin/sh -c` 执行，cwd=仓根，逐条超时 900s
+（`SUYOU_INTEG_CMD_TIMEOUT_SEC` 可调），exit 0 计通过。
 
 ## 执行契约（每条测试一致）
 
