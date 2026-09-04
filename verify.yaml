@@ -1,4 +1,6 @@
 # sandbar 泳道复验声明（schema v1，字段级定义见 docs/design/sandbar项目接入契约v1.md ②a）。
+# 字段级契约面：docs/design/sandbar项目接入契约v1.md ②a~②e（verify 声明道全段——
+# lanes/checks/写集判定/回执语义；头注指向锁定，场景 contract-v11-regression-rods 守卫）。
 # v2 契约：checks 是 lanes.code 下的列表命令制 [{id,cmd,cwd?,timeout?}]，不是顶层键。
 # t260903-11 arbitrate 修正：seed/验收段版本把 checks 写在顶层，引擎按「未知顶层键」
 # 整道 fail-closed（integ 道因此从未跑起来）——本版只动结构，两条 check 命令维持

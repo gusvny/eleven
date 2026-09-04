@@ -1,6 +1,6 @@
 # 集成场景回迁 triage（suyou 89 条 → 三判）
 
-状态：已有计划（engine-hardening 面③候选，KI-038 修复面；宿主令 260904 做 triage）
+状态：**已执行**（260904 宿主令直迁：P1+P2 共 56 条落地 main，P3/e2e 待隔离台；见文末落地记录）
 
 ## 判定标准
 
@@ -107,3 +107,33 @@
 4. 回迁即 triage 复核：每条迁完跑一遍，红的当场重判（适配不了=改判退役并记因）。
 
 > 来源：suyou/integration/run_scenarios.py（89 条，冻结 2026-09-03）；KI-038（notes/debts/known-issues.md）。
+
+## 落地记录（260904，宿主令直迁 main）
+
+宿主裁定不开票（泳道 sandbox 无 venv/playwright、suyou 边界碍事，迁移本体是机械活），
+integration 岗直修。**P1+P2 共 56 条已迁入并登记**（含 auto-rework-trace 转正改判，
+见下），全套件 66 条（存量 10 + 回迁 56）全绿 44s，lint 0 错。
+
+**判定修正**：auto-rework-trace 原判退役（tests/rework-banner-ui 已安家 UI 半），
+实际它同时是 lock-update-integrity 的 EXPECT 数据依赖且引擎常量半互补 → 改判带回。
+计数：带回 P1 46→**47**、退役 15→**14**。
+
+**迁移适配台账**（断言面零弱化，只对齐真源位置/调用形态/环境）：
+1. `t18lib.VerifyLaneCapture` 补拦 async 形态（merge_check 第 3 项 t260903-09 起
+   asyncio.create_subprocess_exec + admin.py 绝对路径）——**该红在 suyou 冻结时就存在**
+   （PASS=6 FAIL=1 同形），suyou/notes/t18-interceptor-repair.patch（0903 23:37 存量
+   残留）佐证当时备了修复未落；本仓修复后 11/11。
+2. `sc_sandbar_dsh_compat` HANDOFF 路径 `notes/debts/` → `notes/` 根（sandbar 实际位置）。
+3. `verify.yaml` 头注补契约 ②a~②e 指向（契约本就要求的声明道兑现，rods C1 守卫）。
+4. `sc_t04_gate_interlock` 加 KI-036 环境守卫：本树+主树 ui-check 均缺 playwright-core
+   → 干净 SKIP（依赖恢复自动生效，断言面不变）。
+5. 兄弟夹具补拷 21 个（`_stub_temporalio`/`t18lib`/`lib/`/`fixture.py`/`t0X_*.py`
+   等——cmd 引用之外的 import/相对调用链）。
+
+**环境发现（生产级，KI-039）**：sandbar 引擎 venv 缺 PyYAML → `model_route_for`
+容错返回 None → **迁仓以来每次 spawn 的模型路由 patch 静默空转**（全部回落默认
+模型，无人察觉）。已装 PyYAML 6.0.3 修复（spawn-seam 11/11、t09 F 组 11 例解封
+全过）；残留风险=venv 重建即丢，需 requirements 固化（建议并入 engine-hardening）。
+
+**待办**：P3 browser 16 条 + t260902-02 e2e 2 条——前置 engine-hardening 票①(D)
+隔离台 + KI-036 playwright 恢复；retention（Docker 路线）随隔离台落地重估。
