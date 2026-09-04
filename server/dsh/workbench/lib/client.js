@@ -4635,6 +4635,748 @@ function startChatProjectTag(opts) {
 	};
 }
 //#endregion
+//#region src/client/project-icons.tsx
+/** 图标语义元数据：title 与 aria-label 恒同值（可辨识纪律，验收 11b）。 */
+const PROJECT_ICON_SPECS = {
+	board: {
+		title: "工单列表",
+		ariaLabel: "工单列表"
+	},
+	knowledge: {
+		title: "知识库",
+		ariaLabel: "知识库"
+	},
+	routes: {
+		title: "模型路由",
+		ariaLabel: "模型路由"
+	},
+	epics: {
+		title: "立项单",
+		ariaLabel: "立项单"
+	},
+	settings: {
+		title: "项目设置",
+		ariaLabel: "项目设置"
+	}
+};
+/** 统一规格常量（单源；显形尺寸由消费方 CSS 定，几何常量在此）。 */
+const PROJECT_ICON_VIEWBOX = "0 0 20 20";
+const PROJECT_ICON_STROKE_WIDTH = 1.6;
+function iconPaths(name) {
+	switch (name) {
+		case "board": return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
+				x: "4.2",
+				y: "4.6",
+				width: "11.6",
+				height: "11.8",
+				rx: "2"
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M7.2 4.6V3.4a1.2 1.2 0 0 1 1.2-1.2h3.2a1.2 1.2 0 0 1 1.2 1.2v1.2" }),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M7.2 9h5.6M7.2 12.4h3.6" })
+		] });
+		case "knowledge": return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M10 5.4C8.8 4.2 7 3.8 4.6 4a.8.8 0 0 0-.7.8v9c0 .4.3.8.8.8 2.1-.2 3.9.2 5.3 1.4 1.4-1.2 3.2-1.6 5.3-1.4.5 0 .8-.4.8-.8v-9a.8.8 0 0 0-.7-.8C13 3.8 11.2 4.2 10 5.4z" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M10 5.4v10.6" })] });
+		case "routes": return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+			cx: "4.2",
+			cy: "10",
+			r: "1.8"
+		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M5.8 8.6l5.9-5.9M9.4 2.7h2.3v2.3M5.8 11.4l5.9 5.9M9.4 17.3h2.3v-2.3" })] });
+		case "epics": return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
+			x: "6.6",
+			y: "3.4",
+			width: "10",
+			height: "10",
+			rx: "1.8"
+		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M6.6 6.6h-2a1.8 1.8 0 0 0-1.8 1.8v7a1.8 1.8 0 0 0 1.8 1.8h7a1.8 1.8 0 0 0 1.8-1.8v-2" })] });
+		case "settings": return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M3 5.6h8.2M15.4 5.6H17M3 10h1.9M9.1 10h7.9M3 14.4h9.4" }),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+				cx: "13.3",
+				cy: "5.6",
+				r: "1.9"
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+				cx: "7",
+				cy: "10",
+				r: "1.9"
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+				cx: "14.5",
+				cy: "14.4",
+				r: "1.9"
+			})
+		] });
+	}
+}
+/** 图标组件：纯 svg（currentColor），容器态样式归消费方。 */
+function ProjectIcon(props) {
+	const spec = PROJECT_ICON_SPECS[props.name];
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("svg", {
+		className: props.className,
+		viewBox: PROJECT_ICON_VIEWBOX,
+		width: "18",
+		height: "18",
+		fill: "none",
+		stroke: "currentColor",
+		strokeWidth: PROJECT_ICON_STROKE_WIDTH,
+		strokeLinecap: "round",
+		strokeLinejoin: "round",
+		role: "img",
+		"aria-label": spec.ariaLabel,
+		children: iconPaths(props.name)
+	});
+}
+//#endregion
+//#region src/client/project-modals.tsx
+/**
+* project-modals.tsx —— 项目生命周期四弹层（project-lifecycle 票③面D，验收 11-13）。
+*
+* 入口（sidebar.tsx 接线）：组头第五枚「项目设置」图标（滑杆）→ ProjectSettingsModal
+* （只读信息 + 票计数 + 体检占位 + danger 区）；danger 区「摘除项目…」→
+* ProjectRemoveModal（四步流）；左栏末尾「＋ 接入项目」行 → ProjectAddModal；
+* 隔离红色行 → QuarantineModal（原因 + <dir>/project.yaml 定位 + 修复指路）。
+*
+* 骨架先例=session-entry 确认弹层（project-session-row.tsx），取舍（create_plan
+* gen1 R1-② 定稿）：在飞禁点带（写按钮 busy disabled，结果驱动关闭——成功才关、
+* 失败停留就地显示）；ESC/遮罩关闭带但**执行中不可关**（防半途弃置假示完成）；
+* 错误就地显示带（验收 12 口径本体）；焦点/aria 基础带。position:fixed 脱离
+* .wb-ticket-list 滚动容器裁剪（session-entry C1 同款理由）。
+*
+* 摘除四步流=显式状态机：gate（在飞闸预检）→ dispose（处置勾选，默认全保留）→
+* dry（摘除清单）→ confirm（purge 勾选后输入 key 二次确认）→ executing → done。
+* 每态迁移由结果驱动；purge 二次确认是弹层职责（路由不重复）。
+*
+* 降级口径：票计数 tickets_state 非 ok → 「—」+提示（不红）；体检 chips 本期降档
+* =「体检数据源未接入」中性提示位（R2b 定稿：CLI list 无体检字段，UI 禁自行实现
+* 体检逻辑——薄壳红线；数据源待宿主/epic 裁定后小票补齐，渲染位已留）。
+*
+* 语义锚（smoke/project-modals.mjs 源文本断言面）：data-wb-pmod-overlay / -close /
+* -settings / -settings-tickets / -settings-health / -remove-danger / -add-row 由
+* sidebar 承担 / data-wb-pmod-add / -add-key / -add-name / -add-dir / -add-pre /
+* -add-submit / -remove-gate / -remove-purge-data / -remove-purge-cred /
+* -remove-dry / -remove-key / -remove-submit / -quarantine-detail。零 CSS 类名
+* 匹配纪律（自有 .wb-pmod-* 前缀，与出厂类名零交叉）。
+*/
+const PMOD_CSS = `
+.wb-pmod-overlay { position:fixed; inset:0; background:rgba(31,35,40,.35); z-index:200;
+  display:flex; align-items:flex-start; justify-content:center; padding-top:8vh; }
+.wb-pmod-panel { background:#fff; color:#1f2328; border:1px solid #d0d7de; border-radius:10px;
+  width:520px; max-width:94vw; max-height:80vh; overflow-y:auto; box-shadow:0 8px 24px rgba(31,35,40,.18);
+  padding:18px 20px; font-size:13px; }
+.wb-pmod-panel h3 { margin:0 0 4px; font-size:15px; display:flex; align-items:baseline; gap:10px; }
+.wb-pmod-sub { color:#57606a; font-size:12px; margin:0 0 14px; }
+.wb-pmod-x { margin-left:auto; cursor:pointer; color:#57606a; background:none; border:none; font-size:14px; }
+.wb-pmod-field { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+.wb-pmod-field label { width:76px; color:#57606a; text-align:right; flex-shrink:0; }
+.wb-pmod-field input { font:inherit; font-size:13px; flex:1; border:1px solid #d0d7de; border-radius:6px; padding:6px 8px; }
+.wb-pmod-mono { font-family:ui-monospace,Menlo,monospace; font-size:11.5px; }
+.wb-pmod-btn { font:inherit; font-size:13px; border:1px solid #d0d7de; background:#fff; color:#1f2328;
+  border-radius:6px; padding:5px 12px; cursor:pointer; }
+.wb-pmod-btn:hover { background:#f6f8fa; }
+.wb-pmod-btn:disabled { opacity:.45; cursor:not-allowed; }
+.wb-pmod-btn-blue { border-color:#96c8f2; color:#0969da; background:#ddf4ff; }
+.wb-pmod-btn-danger { border-color:#ff9b9b; color:#cf222e; background:#ffebe9; }
+.wb-pmod-err { background:#ffebe9; border:1px solid #ff9b9b; color:#cf222e; border-radius:6px;
+  padding:7px 10px; font-size:12.5px; margin:8px 0; white-space:pre-wrap; }
+.wb-pmod-ok { background:#dafbe1; border:1px solid #7dd9a0; color:#1a7f37; border-radius:6px;
+  padding:7px 10px; font-size:12.5px; margin:8px 0; }
+.wb-pmod-warn { background:#fff8c5; border:1px solid #d4a72c; color:#7d4e00; border-radius:6px;
+  padding:7px 10px; font-size:12.5px; margin:8px 0; }
+.wb-pmod-grid { display:grid; grid-template-columns:76px 1fr; row-gap:7px; margin-bottom:6px; }
+.wb-pmod-grid .k { color:#57606a; text-align:right; padding-right:10px; }
+.wb-pmod-chip { display:inline-block; font-size:11px; border-radius:10px; padding:1px 8px; margin:1px 4px 1px 0;
+  border:1px solid #d0d7de; color:#57606a; background:#f6f8fa; white-space:nowrap; }
+.wb-pmod-danger { border-top:1px solid #e8ebef; margin-top:14px; padding-top:12px; }
+.wb-pmod-check { font-size:13px; line-height:2; }
+.wb-pmod-dim { color:#57606a; font-size:12px; }
+`;
+/** 弹层公共壳：遮罩 + ESC 关闭（executing 态不可关——防半途弃置假示完成）。 */
+function ModalShell(props) {
+	const overlayRef = (0, react.useRef)(null);
+	(0, react.useEffect)(() => {
+		if (props.locked) return;
+		const onKey = (e) => {
+			if (e.key === "Escape") props.onClose();
+		};
+		document.addEventListener("keydown", onKey);
+		return () => document.removeEventListener("keydown", onKey);
+	}, [props.locked, props.onClose]);
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		ref: overlayRef,
+		className: "wb-pmod-overlay",
+		"data-wb-pmod-overlay": "",
+		role: "dialog",
+		"aria-label": props.label,
+		onMouseDown: (e) => {
+			if (!props.locked && e.target === overlayRef.current) props.onClose();
+		},
+		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: PMOD_CSS }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: "wb-pmod-panel",
+			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				type: "button",
+				className: "wb-pmod-x",
+				"data-wb-pmod-close": "",
+				"aria-label": "关闭弹层",
+				disabled: props.locked,
+				onClick: props.onClose,
+				children: "✕"
+			}), props.children]
+		})]
+	});
+}
+/** CLI 调用统一封装：返回 JSON；失败把 HTTP 错误体（error+body）合成人话抛出。 */
+async function callProjectApi(url, init) {
+	const res = await fetch(url, init);
+	let payload = null;
+	try {
+		payload = await res.json();
+	} catch {}
+	if (!res.ok || payload?.ok === false) {
+		const detail = payload?.error ?? `HTTP ${res.status}`;
+		const extra = payload?.body?.error ? `\n${payload.body.error}` : "";
+		const err = /* @__PURE__ */ new Error(`${detail}${extra}`);
+		err.payload = payload;
+		throw err;
+	}
+	return payload;
+}
+/**
+* 项目设置弹层（验收 11）：只读信息 [key/显示名/根目录] + 票计数（Temporal 不可达
+* 降级「—」不红）+ 体检占位（R2b 降档）+ danger 区「摘除项目…」（进入摘除四步流）。
+* 本期只读，编辑器=Nongoal（epic 定稿）。
+*/
+function ProjectSettingsModal(props) {
+	const { project, onClose, onRemove } = props;
+	const [detail, setDetail] = (0, react.useState)(null);
+	const [error, setError] = (0, react.useState)("");
+	(0, react.useEffect)(() => {
+		let cancelled = false;
+		(async () => {
+			try {
+				const out = await callProjectApi(`/suyou-workbench/api/wf/projects/detail?key=${encodeURIComponent(project.key)}`);
+				if (!cancelled) setDetail(out?.result ?? null);
+			} catch (err) {
+				if (!cancelled) setError(String(err.message));
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [project.key]);
+	const t = detail?.tickets;
+	const degraded = detail != null && detail.tickets_state !== "ok";
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(ModalShell, {
+		label: `项目设置 · ${project.name}`,
+		onClose,
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", { children: [
+				"项目设置 · ",
+				project.name,
+				" ",
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					className: "wb-pmod-mono wb-pmod-dim",
+					children: project.key
+				})
+			] }),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
+				className: "wb-pmod-sub",
+				children: [
+					"注册表条目 · 只读（本期无编辑器）· ~/.sandbar/projects/",
+					project.key,
+					"/project.yaml"
+				]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-pmod-grid",
+				"data-wb-pmod-settings": "",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "k",
+						children: "项目 key"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-pmod-mono",
+						children: project.key
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "k",
+						children: "显示名"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: project.name }),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "k",
+						children: "根目录"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-pmod-mono",
+						children: project.primary
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "k",
+						children: "票计数"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						"data-wb-pmod-settings-tickets": "",
+						children: detail == null ? error ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							className: "wb-pmod-dim",
+							children: [
+								"—（",
+								error,
+								"）"
+							]
+						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "wb-pmod-dim",
+							children: "读取中…"
+						}) : degraded ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							className: "wb-pmod-dim",
+							children: [
+								"—（",
+								detail.tickets_note || "Temporal 不可达，票计数暂缺",
+								"）"
+							]
+						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
+							"在飞 ",
+							t?.open ?? 0,
+							" · 完结 ",
+							t?.closed ?? 0,
+							" · 已归档 ",
+							t?.archived ?? 0
+						] })
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "k",
+						children: "接入体检"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						"data-wb-pmod-settings-health": "",
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "wb-pmod-chip",
+							children: "体检数据源未接入（待 CLI list 增补，本弹层只读展示）"
+						})
+					})
+				]
+			}),
+			error && detail == null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-pmod-err",
+				children: error
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-pmod-danger",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-pmod-dim",
+						style: { marginBottom: 8 },
+						children: "危险区——操作走 CLI 单源，与命令行同口径"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: "wb-pmod-btn wb-pmod-btn-danger",
+						"data-wb-pmod-remove-danger": "",
+						onClick: onRemove,
+						children: "摘除项目…"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-pmod-dim",
+						style: { marginLeft: 8 },
+						children: "默认可逆：退役注册条目，数据全保留"
+					})
+				]
+			})
+		]
+	});
+}
+/**
+* 接入弹层（验收 12）：表单 + 预检 + 拒收就地显示 + 黄牌不阻塞。
+* 预检口径（arbitrate gen1 F1 定稿：CLI `project add` 无 --dry-run 旗，补旗为跨写集
+* 裁定项）——预检降档为**本地形状检查**（key 白名单/根目录绝对路径/非空，不调 CLI、
+* 零落盘），确认时由 CLI 做深度校验（存在性/交叉/重复/legacy）并就地显示；
+* 本地检查=纯形状白名单，不实现 CLI 校验语义（薄壳红线不破）。
+*/
+function ProjectAddModal(props) {
+	const { onClose, onAdded } = props;
+	const [key, setKey] = (0, react.useState)("");
+	const [name, setName] = (0, react.useState)("");
+	const [dir, setDir] = (0, react.useState)("");
+	const [pre, setPre] = (0, react.useState)(null);
+	const [busy, setBusy] = (0, react.useState)(false);
+	const [error, setError] = (0, react.useState)("");
+	/** 预检（本地形状检查，F1 降档口径）：纯白名单正则/绝对路径/非空，不调 CLI、零落盘。 */
+	const localCheck = () => {
+		const problems = [];
+		if (!/^[a-z0-9][a-z0-9-]*$/.test(key)) problems.push(`key 形状非法：${key || "（空）"}（白名单=小写字母/数字/连字符，不以连字符开头）`);
+		if (!name.trim()) problems.push("显示名不能为空");
+		if (!dir.startsWith("/")) problems.push(`根目录必须是绝对路径：${dir || "（空）"}`);
+		return problems;
+	};
+	const submit = async () => {
+		setBusy(true);
+		setError("");
+		try {
+			await callProjectApi("/suyou-workbench/api/wf/projects/add", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					key,
+					name,
+					dir
+				})
+			});
+			onAdded();
+			onClose();
+		} catch (err) {
+			setError(String(err.message));
+			setPre(null);
+		} finally {
+			setBusy(false);
+		}
+	};
+	/** 预检产物：本地形状问题的提示条（黄牌语义——不阻塞确认，但深度校验仍会拒）。 */
+	const warnings = Array.isArray(pre?.problems) ? pre.problems : [];
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(ModalShell, {
+		label: "接入项目",
+		locked: busy,
+		onClose,
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h3", { children: "接入项目" }),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+				className: "wb-pmod-sub",
+				children: "注册到 ~/.sandbar/projects/<key>/ · 单根模型：多 repo 项目填父目录（票的空间=根下 .lane/）"
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-pmod-field",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "项目 key" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+					className: "wb-pmod-mono",
+					"data-wb-pmod-add-key": "",
+					value: key,
+					onChange: (e) => setKey(e.target.value),
+					placeholder: "小写字母/数字/连字符"
+				})]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-pmod-field",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "显示名" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+					"data-wb-pmod-add-name": "",
+					value: name,
+					onChange: (e) => setName(e.target.value)
+				})]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-pmod-field",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "根目录" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+					className: "wb-pmod-mono",
+					"data-wb-pmod-add-dir": "",
+					value: dir,
+					onChange: (e) => setDir(e.target.value),
+					placeholder: "/absolute/path"
+				})]
+			}),
+			error && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-pmod-err",
+				"data-wb-pmod-add-error": "",
+				children: error
+			}),
+			pre && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				"data-wb-pmod-add-pre": "",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-pmod-ok",
+					children: "本地形状检查通过（未落盘）——确认后由 CLI 做深度校验（存在性/交叉/重复/legacy），拒收原因将就地显示。"
+				}), warnings.map((w, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-pmod-warn",
+					children: [
+						"⚠ ",
+						w,
+						"（形状问题不阻塞确认，但 CLI 深度校验仍会拒收）"
+					]
+				}, i))]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: {
+					display: "flex",
+					gap: 8,
+					marginTop: 10
+				},
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					className: "wb-pmod-btn wb-pmod-btn-blue",
+					"data-wb-pmod-add-precheck": "",
+					disabled: busy || !key || !dir,
+					onClick: () => {
+						const problems = localCheck();
+						setPre({ problems });
+						setError("");
+					},
+					children: "预检（本地形状检查，不落盘）"
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					className: "wb-pmod-btn",
+					"data-wb-pmod-add-submit": "",
+					disabled: busy || !pre,
+					onClick: () => {
+						submit();
+					},
+					children: "确认接入"
+				})]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-pmod-dim",
+				style: { marginTop: 8 },
+				children: "先预检再接入；拒收原因就地显示，无需翻后端日志。"
+			})
+		]
+	});
+}
+/**
+* 摘除弹层（验收 13）四步流：在飞闸预检 → 处置勾选（默认全保留）→ dry-run 清单
+* → purge 二次确认 → 执行（executing 态锁定弹层：ESC/遮罩/✕ 全禁）。
+*/
+function ProjectRemoveModal(props) {
+	const { project, onClose, onRemoved } = props;
+	const [step, setStep] = (0, react.useState)("gate");
+	const [gate, setGate] = (0, react.useState)(null);
+	const [dry, setDry] = (0, react.useState)(null);
+	const [purgeData, setPurgeData] = (0, react.useState)(false);
+	const [purgeCred, setPurgeCred] = (0, react.useState)(false);
+	const [confirmKey, setConfirmKey] = (0, react.useState)("");
+	const [busy, setBusy] = (0, react.useState)(false);
+	const [error, setError] = (0, react.useState)("");
+	const [result, setResult] = (0, react.useState)(null);
+	const callRemove = (0, react.useCallback)(async (dryRun) => {
+		return callProjectApi("/suyou-workbench/api/wf/projects/remove", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				key: project.key,
+				dry_run: dryRun,
+				purge_data: purgeData,
+				purge_credentials: purgeCred,
+				confirm_last: false
+			})
+		});
+	}, [
+		project.key,
+		purgeData,
+		purgeCred
+	]);
+	const precheck = async () => {
+		setBusy(true);
+		setError("");
+		try {
+			const out = await callRemove(true);
+			setGate(out?.result ?? out);
+			setStep("dispose");
+		} catch (err) {
+			setError(String(err.message));
+		} finally {
+			setBusy(false);
+		}
+	};
+	const showDry = async () => {
+		setBusy(true);
+		setError("");
+		try {
+			const out = await callRemove(true);
+			setDry(out?.result ?? out);
+			setStep("confirm");
+		} catch (err) {
+			setError(String(err.message));
+		} finally {
+			setBusy(false);
+		}
+	};
+	const execute = async () => {
+		setBusy(true);
+		setError("");
+		setStep("executing");
+		try {
+			const out = await callRemove(false);
+			setResult(out?.result ?? out);
+			onRemoved();
+		} catch (err) {
+			setError(String(err.message));
+			setStep("confirm");
+		} finally {
+			setBusy(false);
+		}
+	};
+	const purgeNeedsConfirm = purgeData || purgeCred;
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(ModalShell, {
+		label: `摘除项目 · ${project.key}`,
+		locked: busy || step === "executing",
+		onClose,
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", { children: [
+				"摘除项目 · ",
+				project.name,
+				" ",
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					className: "wb-pmod-mono wb-pmod-dim",
+					children: project.key
+				})
+			] }),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+				className: "wb-pmod-sub",
+				children: "默认可逆：只退役注册条目，数据全保留；re-add 同 key 即恢复"
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-pmod-check",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", { children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+							type: "checkbox",
+							"data-wb-pmod-remove-purge-data": "",
+							checked: purgeData,
+							onChange: (e) => setPurgeData(e.target.checked)
+						}),
+						" ",
+						"删数据 data/（归档+metrics，不可逆，需二次确认）"
+					] }),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", { children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+							type: "checkbox",
+							"data-wb-pmod-remove-purge-cred": "",
+							checked: purgeCred,
+							onChange: (e) => setPurgeCred(e.target.checked)
+						}),
+						" ",
+						"删 credentials.yaml"
+					] }),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-pmod-dim",
+						children: "处置默认全保留——不勾任何 purge 即可逆摘除。"
+					})
+				]
+			}),
+			error && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-pmod-err",
+				"data-wb-pmod-remove-error": "",
+				children: error
+			}),
+			step === "gate" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				"data-wb-pmod-remove-gate": "",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					className: "wb-pmod-btn wb-pmod-btn-blue",
+					"data-wb-pmod-remove-precheck": "",
+					disabled: busy,
+					onClick: () => {
+						precheck();
+					},
+					children: "预检（在飞闸）"
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-pmod-dim",
+					style: { marginTop: 6 },
+					children: "在飞工单（Temporal 按 ProjectKey 查询）未收口=拒摘并报票号；Temporal 不可达同样拒摘 （fail-closed 无绕过旗）：先 sandbar up。"
+				})]
+			}),
+			step === "dispose" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				"data-wb-pmod-remove-dry": "",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-pmod-ok",
+					children: "✓ 预检通过：无在飞工单闸阻（在飞闸结果见 CLI dry-run 口径）。"
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					className: "wb-pmod-btn",
+					disabled: busy,
+					onClick: () => {
+						showDry();
+					},
+					children: "摘除清单（dry-run）"
+				})]
+			}),
+			step === "confirm" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				"data-wb-pmod-remove-confirm": "",
+				children: [
+					dry && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", {
+						className: "wb-pmod-dim wb-pmod-mono",
+						style: { whiteSpace: "pre-wrap" },
+						children: JSON.stringify(dry, null, 2)
+					}),
+					purgeNeedsConfirm && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-pmod-field",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+							style: { width: 130 },
+							children: [
+								"输入 ",
+								project.key,
+								" 确认"
+							]
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+							className: "wb-pmod-mono",
+							"data-wb-pmod-remove-key": "",
+							value: confirmKey,
+							onChange: (e) => setConfirmKey(e.target.value),
+							placeholder: project.key
+						})]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: "wb-pmod-btn wb-pmod-btn-danger",
+						"data-wb-pmod-remove-submit": "",
+						disabled: busy || purgeNeedsConfirm && confirmKey !== project.key,
+						onClick: () => {
+							execute();
+						},
+						children: "确认摘除"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: "wb-pmod-dim",
+						style: { marginLeft: 8 },
+						children: [
+							"执行 sandbar project remove ",
+							project.key,
+							" --json，结果与 CLI 同口径"
+						]
+					})
+				]
+			}),
+			step === "executing" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-pmod-warn",
+				children: "执行中…（弹层已锁定）"
+			}),
+			result && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-pmod-ok",
+				"data-wb-pmod-remove-result": "",
+				children: ["摘除完成：", JSON.stringify(result)]
+			})
+		]
+	});
+}
+/** 隔离条目弹层（验收 11）：原因含 <dir>/project.yaml 定位 + 修复指路。 */
+function QuarantineModal(props) {
+	const { entry, onClose } = props;
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(ModalShell, {
+		label: `隔离条目 · ${entry.key}`,
+		onClose,
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", { children: ["隔离条目 · ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				className: "wb-pmod-mono",
+				children: entry.key
+			})] }),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+				className: "wb-pmod-sub",
+				children: "装载器 fail-closed 隔离，不影响其余项目装载；按 key 查询会显式报隔离原因"
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-pmod-err wb-pmod-mono",
+				"data-wb-pmod-quarantine-detail": "",
+				children: entry.error
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-pmod-dim",
+				children: [
+					"定位：",
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: "wb-pmod-mono",
+						children: [entry.dir, "/project.yaml"]
+					}),
+					"。 修复：手工订正该 project.yaml 后自动恢复装载（左栏重新出现项目组）。 隔离期间无组头无项目设置入口（无装载条目可设置）。"
+				]
+			})
+		]
+	});
+}
+//#endregion
 //#region src/client/metrics-model.ts
 /**
 * localStorage 读取（无 window/调用抛错环境 → null，不崩）。node 单测不注入时
@@ -45446,7 +46188,8 @@ function mountMetricsIntoSettingsRow(root) {
 *       subagent 会话不进账册）供项目内会话区消费，规则=shared/sessions.ts。
 *       右栏 chat 项目色带（票② R7）：chat-project-band.ts 装饰器，归属=
 *       listState.current → 账册 project 推导（下方 effect），不在册不渲染。
-*       项目组头行右对齐四个项目级视图入口图标：📋 工单列表 / 📖 知识库 / 🔀 模型路由 / 🗂️ 立项单
+*       项目组头行右对齐五个项目级视图入口图标（票③ 11b 统一 SVG 图标族）：工单列表 /
+*       知识库 / 模型路由 / 立项单 / 项目设置（第五枚=面D 设置弹层入口）
 *       （t260827-01：立项单从「左列可折叠列表区」改为项目级图标，与其他三视图同款；
 *       左列不再显示立项列表，点图标后中列显示立项清单）。
 *       项目组 = server/dsh/projects.yaml 注册表（260823 多项目化：project 是逻辑概念，
@@ -45553,9 +46296,22 @@ const CSS$2 = `
 /* 视图入口图标：右对齐放在每个项目组头行内（用户拍板 260823：per-project，不占独立行；
    t260827-01 起四个：工单/知识库/模型/立项单） */
 .wb-view-icons { display:flex; gap:2px; }
-.wb-view-icon { width:22px; height:22px; display:flex; align-items:center; justify-content:center; border-radius:4px; cursor:pointer; font-size:12px; opacity:0.55; }
+/* 图标族统一（票③ 11b）：命中区 26×26 radius 6，显形 18px（svg 由 ProjectIcon 定）；
+   三态 idle/hover/active 沿用本侧栏既有色板（深色语境；mock 规格卡三态色为浅色
+   语境定稿——图标本体吃 currentColor，几何规格统一是本模块契约）。 */
+.wb-view-icon { width:26px; height:26px; display:flex; align-items:center; justify-content:center; border-radius:6px; cursor:pointer; opacity:0.55; }
 .wb-view-icon:hover { background:rgba(255,255,255,0.1); opacity:1; }
 .wb-view-icon.active { background:rgba(124,58,237,0.25); opacity:1; }
+/* 隔离行（票③验收 11）：红色一行，常驻可辨。 */
+.wb-quar-row { display:flex; align-items:center; gap:8px; padding:7px 10px; font-size:12px;
+  color:#ff8183; background:rgba(255,235,233,.08); cursor:pointer; border-bottom:1px solid rgba(255,255,255,.04); }
+.wb-quar-row:hover { background:rgba(255,235,233,.16); }
+/* 「＋ 接入项目」行（票③面D）：项目组列表末尾，方框＋语言同会话区（.wb-psess-* 方框同款）。 */
+.wb-project-add-row { display:flex; align-items:center; gap:8px; padding:9px 10px; font-size:12px;
+  color:var(--dsw-alias-label-secondary,#888); cursor:pointer; }
+.wb-project-add-row:hover { background:rgba(255,255,255,0.06); color:var(--dsw-alias-label-primary,#e0e0e0); }
+.wb-project-add-plus { width:22px; height:22px; border:1px dashed var(--dsw-alias-border-l1,#555); border-radius:6px;
+  display:flex; align-items:center; justify-content:center; font-size:14px; flex:none; }
 /* 中列：视图容器（四视图自带全套样式，无切换条——视图由左列图标直切） */
 .wb-right-content { flex:1; overflow-y:auto; }
 .wb-placeholder { padding:32px; color:var(--dsw-alias-label-secondary,#888); font-size:13px; line-height:1.8; }
@@ -45628,11 +46384,14 @@ function WorkbenchSidebar(props) {
 	/** 「又点了一次工单」信号：随 focusId 传给 WorkbenchSection，
 	*  同 id 重开（抽屉被 × 关掉后再点同一行）也能触发——focusId 同值时 effect 不 firing。 */
 	const [focusNonce, setFocusNonce] = (0, react.useState)(0);
-	/** 「点 📋 回工单列表」信号：viewProject/rightView 同值时 setState 跳渲染，
+	/** 「点工单列表图标回列表」信号：viewProject/rightView 同值时 setState 跳渲染，
 	*  详情抽屉（WorkbenchSection 内部 state）收不到通知——靠这个单调递增计数传达。 */
 	const [listNonce, setListNonce] = (0, react.useState)(0);
 	const [collapsed, setCollapsed] = (0, react.useState)({});
 	const [loading, setLoading] = (0, react.useState)(true);
+	const [modal, setModal] = (0, react.useState)(null);
+	/** 隔离条目（GET /wf/projects 的 quarantined 面，票③验收 11）：红色行渲染源。 */
+	const [quarantined, setQuarantined] = (0, react.useState)([]);
 	/** 立项单视图定位（t260826-02）：epicCode=当前立项代号；epicNonce=「又点了一次同一立项」
 	*  信号（同 focusNonce 先例——同 code 重进也要触发 EpicSection 重拉）。 */
 	const [epicCode, setEpicCode] = (0, react.useState)("");
@@ -45753,9 +46512,11 @@ function WorkbenchSidebar(props) {
 		let cancelled = false;
 		async function load() {
 			try {
-				const list = (await fetch("/suyou-workbench/api/wf/projects").then((r) => r.json()))?.result?.projects ?? [];
+				const pr = await fetch("/suyou-workbench/api/wf/projects").then((r) => r.json());
+				const list = pr?.result?.projects ?? [];
 				if (cancelled) return;
 				setProjects(list);
+				setQuarantined(Array.isArray(pr?.result?.quarantined) ? pr.result.quarantined : []);
 				publishProjects(list.map((p) => ({
 					key: p.key,
 					dirs: p.dirs
@@ -45838,125 +46599,170 @@ function WorkbenchSidebar(props) {
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: CSS$2 }),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "wb-sb-left",
-				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-ticket-list",
-					children: loading ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						style: {
-							padding: 16,
-							color: "#888"
-						},
-						children: "加载中…"
-					}) : groups.map((g) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "wb-group-head",
-						onClick: () => setCollapsed((c) => ({
-							...c,
-							[g.project.key]: !c[g.project.key]
-						})),
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "wb-group-caret",
-								children: collapsed[g.project.key] ? "▸" : "▾"
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "wb-group-dot",
-								"data-wb-psess-dot": "",
-								style: {
-									display: "inline-block",
-									width: 8,
-									height: 8,
-									borderRadius: 4,
-									flex: "none",
-									background: projectColor(g.project.key)
-								},
-								title: g.project.key
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "wb-group-name",
-								children: g.project.name
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "wb-group-count",
-								children: g.tickets.length || ""
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-								className: "wb-view-icons",
-								onClick: (e) => e.stopPropagation(),
-								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: `wb-view-icon ${rightView === "board" && viewProject === g.project.key ? "active" : ""}`,
-										title: "工单列表",
-										onClick: () => handleViewIcon(g.project.key, "board"),
-										children: "📋"
-									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: `wb-view-icon ${rightView === "knowledge" && viewProject === g.project.key ? "active" : ""}`,
-										title: "知识库",
-										onClick: () => handleViewIcon(g.project.key, "knowledge"),
-										children: "📖"
-									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: `wb-view-icon ${rightView === "routes" && viewProject === g.project.key ? "active" : ""}`,
-										title: "模型路由",
-										onClick: () => handleViewIcon(g.project.key, "routes"),
-										children: "🔀"
-									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: `wb-view-icon ${rightView === "epics" && viewProject === g.project.key ? "active" : ""}`,
-										title: "立项单",
-										onClick: () => handleViewIcon(g.project.key, "epics"),
-										children: "🗂️"
-									})
-								]
-							})
-						]
-					}), !collapsed[g.project.key] && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectSessionRow, {
-						projectKey: g.project.key,
-						projectName: g.project.name,
-						projectDir: g.project.primary,
-						ledger: projectSessions.ledger,
-						current: projectSessions.listState?.current,
-						byId: projectSessions.listState?.byId,
-						creating: projectSessions.creating,
-						notice: projectSessions.entryNotice,
-						noticeProject: projectSessions.noticeProject,
-						onNew: () => {
-							projectSessions.handleNew({
-								key: g.project.key,
-								dir: g.project.primary
-							});
-						},
-						onOpen: (id) => {
-							projectSessions.handleOpen(id);
-						},
-						onClose: projectSessions.handleClose
-					}), g.tickets.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "wb-group-empty",
-						children: "无进行中工单"
-					}) : g.tickets.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: `wb-ticket-row2 ${selectedId === t.id ? "selected" : ""} ${isOpen(t) ? "" : "done"}`,
-						onClick: () => handleTicketClick(t, g.project.key),
-						children: [t.title && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							className: "wb-ticket-l1",
-							title: t.title,
-							children: t.title
-						}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "wb-ticket-l2",
+					children: [
+						loading ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							style: {
+								padding: 16,
+								color: "#888"
+							},
+							children: "加载中…"
+						}) : groups.map((g) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "wb-group-head",
+							onClick: () => setCollapsed((c) => ({
+								...c,
+								[g.project.key]: !c[g.project.key]
+							})),
 							children: [
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									style: {
-										color: stateColor(t),
-										fontFamily: "var(--ds-font-family-code, monospace)"
-									},
-									children: t.id
+									className: "wb-group-caret",
+									children: collapsed[g.project.key] ? "▸" : "▾"
 								}),
-								" · ",
-								isOpen(t) ? t.role || "—" : "已完成",
-								" · ",
-								ageOf(isOpen(t) ? t.created : t.close_ts || t.created),
-								!isOpen(t) && " 前收口"
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "wb-group-dot",
+									"data-wb-psess-dot": "",
+									style: {
+										display: "inline-block",
+										width: 8,
+										height: 8,
+										borderRadius: 4,
+										flex: "none",
+										background: projectColor(g.project.key)
+									},
+									title: g.project.key
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "wb-group-name",
+									children: g.project.name
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "wb-group-count",
+									children: g.tickets.length || ""
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "wb-view-icons",
+									onClick: (e) => e.stopPropagation(),
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: `wb-view-icon ${rightView === "board" && viewProject === g.project.key ? "active" : ""}`,
+											title: "工单列表",
+											"aria-label": "工单列表",
+											onClick: () => handleViewIcon(g.project.key, "board"),
+											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "board" })
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: `wb-view-icon ${rightView === "knowledge" && viewProject === g.project.key ? "active" : ""}`,
+											title: "知识库",
+											"aria-label": "知识库",
+											onClick: () => handleViewIcon(g.project.key, "knowledge"),
+											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "knowledge" })
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: `wb-view-icon ${rightView === "routes" && viewProject === g.project.key ? "active" : ""}`,
+											title: "模型路由",
+											"aria-label": "模型路由",
+											onClick: () => handleViewIcon(g.project.key, "routes"),
+											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "routes" })
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: `wb-view-icon ${rightView === "epics" && viewProject === g.project.key ? "active" : ""}`,
+											title: "立项单",
+											"aria-label": "立项单",
+											onClick: () => handleViewIcon(g.project.key, "epics"),
+											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "epics" })
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "wb-view-icon",
+											"data-wb-project-settings-entry": "",
+											title: "项目设置",
+											"aria-label": "项目设置",
+											onClick: () => {
+												setModal({
+													kind: "settings",
+													project: g.project
+												});
+											},
+											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "settings" })
+										})
+									]
+								})
 							]
-						})]
-					}, t.id))] })] }, g.project.key))
+						}), !collapsed[g.project.key] && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectSessionRow, {
+							projectKey: g.project.key,
+							projectName: g.project.name,
+							projectDir: g.project.primary,
+							ledger: projectSessions.ledger,
+							current: projectSessions.listState?.current,
+							byId: projectSessions.listState?.byId,
+							creating: projectSessions.creating,
+							notice: projectSessions.entryNotice,
+							noticeProject: projectSessions.noticeProject,
+							onNew: () => {
+								projectSessions.handleNew({
+									key: g.project.key,
+									dir: g.project.primary
+								});
+							},
+							onOpen: (id) => {
+								projectSessions.handleOpen(id);
+							},
+							onClose: projectSessions.handleClose
+						}), g.tickets.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "wb-group-empty",
+							children: "无进行中工单"
+						}) : g.tickets.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: `wb-ticket-row2 ${selectedId === t.id ? "selected" : ""} ${isOpen(t) ? "" : "done"}`,
+							onClick: () => handleTicketClick(t, g.project.key),
+							children: [t.title && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "wb-ticket-l1",
+								title: t.title,
+								children: t.title
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "wb-ticket-l2",
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										style: {
+											color: stateColor(t),
+											fontFamily: "var(--ds-font-family-code, monospace)"
+										},
+										children: t.id
+									}),
+									" · ",
+									isOpen(t) ? t.role || "—" : "已完成",
+									" · ",
+									ageOf(isOpen(t) ? t.created : t.close_ts || t.created),
+									!isOpen(t) && " 前收口"
+								]
+							})]
+						}, t.id))] })] }, g.project.key)),
+						quarantined.map((q) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "wb-quar-row",
+							"data-wb-quarantine-row": "",
+							role: "button",
+							"aria-label": `隔离条目 ${q.key}`,
+							onClick: () => setModal({
+								kind: "quarantine",
+								entry: q
+							}),
+							children: [
+								"⚠ ",
+								q.key,
+								" · 注册条目被隔离"
+							]
+						}, q.key)),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "wb-project-add-row",
+							"data-wb-project-add-row": "",
+							role: "button",
+							"aria-label": "接入项目",
+							onClick: () => setModal({ kind: "add" }),
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "wb-project-add-plus",
+								children: "＋"
+							}), "接入项目"]
+						})
+					]
 				})
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -45987,9 +46793,9 @@ function WorkbenchSidebar(props) {
 								children: [
 									"从左侧项目行点图标打开视图：",
 									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
-									"📋 工单列表 · 📖 知识库 · 🔀 模型路由 · 🗂️ 立项单",
+									"工单列表 · 知识库 · 模型路由 · 立项单 · 项目设置",
 									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
-									"（按行项目分流；立项单为跨项目清单，点 🗂️ 后中列显示列表）"
+									"（按行项目分流；立项单为跨项目清单，点立项单图标后中列显示列表）"
 								]
 							}),
 							viewProject && rightView === "board" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Board, {
@@ -46080,6 +46886,31 @@ function WorkbenchSidebar(props) {
 								children: "静默在制阈值（分钟）：随 M2c 系统健康 tab 开放。"
 							})
 						]
+					}),
+					modal?.kind === "settings" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectSettingsModal, {
+						project: modal.project,
+						onClose: () => setModal(null),
+						onRemove: () => setModal({
+							kind: "remove",
+							project: modal.project
+						})
+					}),
+					modal?.kind === "remove" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectRemoveModal, {
+						project: modal.project,
+						onClose: () => setModal(null),
+						onRemoved: () => {
+							setModal(null);
+						}
+					}),
+					modal?.kind === "add" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectAddModal, {
+						onClose: () => setModal(null),
+						onAdded: () => {
+							setModal(null);
+						}
+					}),
+					modal?.kind === "quarantine" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(QuarantineModal, {
+						entry: modal.entry,
+						onClose: () => setModal(null)
 					})
 				]
 			})
@@ -46223,7 +47054,7 @@ function composeSuggestedBody(code, suggestedBody) {
 *
 * 落地口径（方案 gen1 + review gen4 拍板）：
 *   - 不加路由/不加顶层 tab：本视图挂进 sidebar 中列四视图体系（views.epics），
-*     由项目行 🗂️ 图标（t260827-01，空代号=立项清单）/ 工单徽标点击（定位详情）切换进来；
+*     由项目行立项单图标（t260827-01，空代号=立项清单）/ 工单徽标点击（定位详情）切换进来；
 *   - 真源=API 渲染、前端不存状态（立项单关键决策 5）：列表=GET /api/epics，
 *     详情=GET /api/epics/<code> + /api/epics/<code>/tickets（8s 轮询实时汇总）；
 *   - Markdown 渲染复用 knowledge 浏览器半 renderMarkdown（index.tsx 同款 import，
@@ -50718,7 +51549,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 				color: "var(--dsw-alias-label-secondary, #888)",
 				fontSize: 13
 			},
-			children: "从左侧项目行点 📋 图标打开该项目的工单台。"
+			children: "从左侧项目行点工单列表图标打开该项目的工单台。"
 		})
 	});
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {

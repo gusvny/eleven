@@ -21,7 +21,8 @@
  *       subagent 会话不进账册）供项目内会话区消费，规则=shared/sessions.ts。
  *       右栏 chat 项目色带（票② R7）：chat-project-band.ts 装饰器，归属=
  *       listState.current → 账册 project 推导（下方 effect），不在册不渲染。
- *       项目组头行右对齐四个项目级视图入口图标：📋 工单列表 / 📖 知识库 / 🔀 模型路由 / 🗂️ 立项单
+ *       项目组头行右对齐五个项目级视图入口图标（票③ 11b 统一 SVG 图标族）：工单列表 /
+ *       知识库 / 模型路由 / 立项单 / 项目设置（第五枚=面D 设置弹层入口）
  *       （t260827-01：立项单从「左列可折叠列表区」改为项目级图标，与其他三视图同款；
  *       左列不再显示立项列表，点图标后中列显示立项清单）。
  *       项目组 = server/dsh/projects.yaml 注册表（260823 多项目化：project 是逻辑概念，
@@ -63,6 +64,11 @@ import { startChatProjectTagEffect } from './chat-project-tag.ts'
 import { startChatProjectBandEffect, setChatProjectBand } from './chat-project-band.ts'
 // 项目色（票② R7）：确定性色板，同 key 恒同色。
 import { projectColor } from '../shared/project-color.ts'
+// 项目组头图标族（票③验收 11b）：五枚 SVG 线性图标（规格单源见模块头注）。
+import { ProjectIcon } from './project-icons.tsx'
+import type { ProjectIconName } from './project-icons.tsx'
+// 项目生命周期四弹层（票③面D：设置/接入/摘除/隔离详情，验收 11-13）。
+import { ProjectAddModal, ProjectRemoveModal, ProjectSettingsModal, QuarantineModal } from './project-modals.tsx'
 // metrics M2a（t260902-01）：度量面板。t260902-05 起：入口迁出厂侧栏
 // footer.action 槽（与 dsh settings 同排，用户反馈①），面板中 pane 化挂进
 // .wb-sb-right（反馈②）。槽注册失败软退化回 .wb-sb-foot 兜底钮（console.warn）。
@@ -118,7 +124,7 @@ interface Project {
 interface MiddleViews {
   /** 工单台（WorkbenchSection），focusId=要在详情抽屉里打开的工单；
    *  focusNonce=「又点了一次工单」信号（同 id 重开也触发——setState 同值跳渲染，
-   *  只靠 focusId 传达不到）；listNonce=「点 📋 回工单列表」信号（通知关详情抽屉）。
+   *  只靠 focusId 传达不到）；listNonce=「点工单列表图标回列表」信号（通知关详情抽屉）。
    *  onOpenEpic=工单徽标点击（t260826-02）：中列切立项单视图并定位代号。 */
   board: ComponentType<{ focusId?: string; focusNonce?: number; listNonce?: number; projectKey?: string; onOpenEpic?: (code: string) => void }>
   /** 知识库（KnowledgeSection）。 */
@@ -271,9 +277,22 @@ const CSS = `
 /* 视图入口图标：右对齐放在每个项目组头行内（用户拍板 260823：per-project，不占独立行；
    t260827-01 起四个：工单/知识库/模型/立项单） */
 .wb-view-icons { display:flex; gap:2px; }
-.wb-view-icon { width:22px; height:22px; display:flex; align-items:center; justify-content:center; border-radius:4px; cursor:pointer; font-size:12px; opacity:0.55; }
+/* 图标族统一（票③ 11b）：命中区 26×26 radius 6，显形 18px（svg 由 ProjectIcon 定）；
+   三态 idle/hover/active 沿用本侧栏既有色板（深色语境；mock 规格卡三态色为浅色
+   语境定稿——图标本体吃 currentColor，几何规格统一是本模块契约）。 */
+.wb-view-icon { width:26px; height:26px; display:flex; align-items:center; justify-content:center; border-radius:6px; cursor:pointer; opacity:0.55; }
 .wb-view-icon:hover { background:rgba(255,255,255,0.1); opacity:1; }
 .wb-view-icon.active { background:rgba(124,58,237,0.25); opacity:1; }
+/* 隔离行（票③验收 11）：红色一行，常驻可辨。 */
+.wb-quar-row { display:flex; align-items:center; gap:8px; padding:7px 10px; font-size:12px;
+  color:#ff8183; background:rgba(255,235,233,.08); cursor:pointer; border-bottom:1px solid rgba(255,255,255,.04); }
+.wb-quar-row:hover { background:rgba(255,235,233,.16); }
+/* 「＋ 接入项目」行（票③面D）：项目组列表末尾，方框＋语言同会话区（.wb-psess-* 方框同款）。 */
+.wb-project-add-row { display:flex; align-items:center; gap:8px; padding:9px 10px; font-size:12px;
+  color:var(--dsw-alias-label-secondary,#888); cursor:pointer; }
+.wb-project-add-row:hover { background:rgba(255,255,255,0.06); color:var(--dsw-alias-label-primary,#e0e0e0); }
+.wb-project-add-plus { width:22px; height:22px; border:1px dashed var(--dsw-alias-border-l1,#555); border-radius:6px;
+  display:flex; align-items:center; justify-content:center; font-size:14px; flex:none; }
 /* 中列：视图容器（四视图自带全套样式，无切换条——视图由左列图标直切） */
 .wb-right-content { flex:1; overflow-y:auto; }
 .wb-placeholder { padding:32px; color:var(--dsw-alias-label-secondary,#888); font-size:13px; line-height:1.8; }
@@ -348,11 +367,22 @@ export function WorkbenchSidebar(props: SidebarProps) {
   /** 「又点了一次工单」信号：随 focusId 传给 WorkbenchSection，
    *  同 id 重开（抽屉被 × 关掉后再点同一行）也能触发——focusId 同值时 effect 不 firing。 */
   const [focusNonce, setFocusNonce] = useState(0)
-  /** 「点 📋 回工单列表」信号：viewProject/rightView 同值时 setState 跳渲染，
+  /** 「点工单列表图标回列表」信号：viewProject/rightView 同值时 setState 跳渲染，
    *  详情抽屉（WorkbenchSection 内部 state）收不到通知——靠这个单调递增计数传达。 */
   const [listNonce, setListNonce] = useState(0)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(true)
+  // 项目生命周期弹层（票③面D，验收 11-13）：kind 区分四弹层；settings→remove 由
+  // 设置弹层 danger 区切换（同弹层面，非叠层）。
+  const [modal, setModal] = useState<
+    | { kind: 'settings'; project: Project }
+    | { kind: 'remove'; project: Project }
+    | { kind: 'add' }
+    | { kind: 'quarantine'; entry: { key: string; dir: string; error: string } }
+    | null
+  >(null)
+  /** 隔离条目（GET /wf/projects 的 quarantined 面，票③验收 11）：红色行渲染源。 */
+  const [quarantined, setQuarantined] = useState<{ key: string; dir: string; error: string }[]>([])
   /** 立项单视图定位（t260826-02）：epicCode=当前立项代号；epicNonce=「又点了一次同一立项」
    *  信号（同 focusNonce 先例——同 code 重进也要触发 EpicSection 重拉）。 */
   const [epicCode, setEpicCode] = useState('')
@@ -501,6 +531,9 @@ export function WorkbenchSidebar(props: SidebarProps) {
         const list: Project[] = pr?.result?.projects ?? []
         if (cancelled) return
         setProjects(list)
+        // 隔离条目（票③）：装载器 fail-closed 面，红色行呈现；空/全隔离注册表
+        // 不再 500（loadRegistry 改造）——零分组仍渲染「＋ 接入项目」行。
+        setQuarantined(Array.isArray(pr?.result?.quarantined) ? pr.result.quarantined : [])
         // t260903-07：项目集发布给 chat 项目 tag 装饰器（整体一个请求，成功才发，
         // 失败不发——单态保留 last-known-good）。
         publishProjects(list.map(p => ({ key: p.key, dirs: p.dirs })))
@@ -542,11 +575,11 @@ export function WorkbenchSidebar(props: SidebarProps) {
   useEffect(() => startChatProjectTagEffect({ fetchImpl: fetch.bind(globalThis) }), [])
 
   // 点项目行的视图图标：中列切到该项目该视图（stopPropagation 不触发折叠）。
-  // 📋 额外做两件事（t260825-05：开着详情抽屉点 📋 无反应的修复）——
+  // 工单列表图标额外做两件事（t260825-05：开着详情抽屉点它无反应的修复）——
   // ① 清行选中：focusId 回落 undefined，之后点同一工单行还能再开详情；
   // ② bump listNonce：viewProject/rightView 多半已是同值（点工单时已置），
   //    setState 跳渲染，只有 nonce 变化能把「关抽屉回列表」传达到 WorkbenchSection。
-  // 🗂️ 立项单（t260827-01）：点图标=回立项清单（空代号=列表模式），bump epicNonce
+  // 立项单（t260827-01）：点图标=回立项清单（空代号=列表模式），bump epicNonce
   //    保证「看过详情再点图标」与「同项目重复点图标」都能触发 EpicSection 重拉回列表
   //    （epicCode/rightView/viewProject 多半已是同值，setState 跳渲染——同 listNonce 先例）。
   const handleViewIcon = useCallback((projectKey: string, view: RightView) => {
@@ -577,7 +610,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
   const Epics = views.epics
 
   // 进立项单详情视图（工单徽标点击，t260826-02）：中列切 epics 并定位代号。
-  // （t260827-01 起左列不再有立项列表区，清单入口=项目行 🗂️ 图标，走 handleViewIcon。）
+  // （t260827-01 起左列不再有立项列表区，清单入口=项目行立项单图标，走 handleViewIcon。）
   // viewProject 兜底注册表首项——立项单列表/详情本身不需要 project，但详情页「新建工单」
   // 与点关联工单行需要（?project= 必传）；立项单是跨项目语义单元（EpicCode SA 不带项目维度）。
   const openEpic = useCallback((code: string) => {
@@ -620,10 +653,26 @@ export function WorkbenchSidebar(props: SidebarProps) {
                     模型路由=该项目主目录 model-routes.yaml；立项单（t260827-01）=全量立项清单
                     （跨项目语义单元，不按项目过滤，图标只承担「切视图+落点项目」两职）。 */}
                 <span className="wb-view-icons" onClick={e => e.stopPropagation()}>
-                  <span className={`wb-view-icon ${rightView === 'board' && viewProject === g.project.key ? 'active' : ''}`} title="工单列表" onClick={() => handleViewIcon(g.project.key, 'board')}>📋</span>
-                  <span className={`wb-view-icon ${rightView === 'knowledge' && viewProject === g.project.key ? 'active' : ''}`} title="知识库" onClick={() => handleViewIcon(g.project.key, 'knowledge')}>📖</span>
-                  <span className={`wb-view-icon ${rightView === 'routes' && viewProject === g.project.key ? 'active' : ''}`} title="模型路由" onClick={() => handleViewIcon(g.project.key, 'routes')}>🔀</span>
-                  <span className={`wb-view-icon ${rightView === 'epics' && viewProject === g.project.key ? 'active' : ''}`} title="立项单" onClick={() => handleViewIcon(g.project.key, 'epics')}>🗂️</span>
+                  <span
+                    className={`wb-view-icon ${rightView === 'board' && viewProject === g.project.key ? 'active' : ''}`}
+                    title="工单列表" aria-label="工单列表"
+                    onClick={() => handleViewIcon(g.project.key, 'board')}><ProjectIcon name="board" /></span>
+                  <span
+                    className={`wb-view-icon ${rightView === 'knowledge' && viewProject === g.project.key ? 'active' : ''}`}
+                    title="知识库" aria-label="知识库"
+                    onClick={() => handleViewIcon(g.project.key, 'knowledge')}><ProjectIcon name="knowledge" /></span>
+                  <span
+                    className={`wb-view-icon ${rightView === 'routes' && viewProject === g.project.key ? 'active' : ''}`}
+                    title="模型路由" aria-label="模型路由"
+                    onClick={() => handleViewIcon(g.project.key, 'routes')}><ProjectIcon name="routes" /></span>
+                  <span
+                    className={`wb-view-icon ${rightView === 'epics' && viewProject === g.project.key ? 'active' : ''}`}
+                    title="立项单" aria-label="立项单"
+                    onClick={() => handleViewIcon(g.project.key, 'epics')}><ProjectIcon name="epics" /></span>
+                  {/* 第五枚=项目设置（票③面D）：常驻可见，开设置弹层（只读+danger 区摘除）。 */}
+                  <span className="wb-view-icon" data-wb-project-settings-entry=""
+                    title="项目设置" aria-label="项目设置"
+                    onClick={() => { setModal({ kind: 'settings', project: g.project }) }}><ProjectIcon name="settings" /></span>
                 </span>
               </div>
               {!collapsed[g.project.key] && (
@@ -667,6 +716,22 @@ export function WorkbenchSidebar(props: SidebarProps) {
               )}
             </div>
           ))}
+          {/* 隔离行（票③验收 11）：装载器隔离的 key 红色一行，点击看原因与修复指路；
+              隔离期间无组头无项目设置入口（无装载条目可设置）。 */}
+          {quarantined.map(q => (
+            <div key={q.key} className="wb-quar-row" data-wb-quarantine-row=""
+              role="button" aria-label={`隔离条目 ${q.key}`}
+              onClick={() => setModal({ kind: 'quarantine', entry: q })}>
+              ⚠ {q.key} · 注册条目被隔离
+            </div>
+          ))}
+          {/* 「＋ 接入项目」行（票③面D）：项目组列表末尾常驻——空/全隔离注册表
+              也渲染（首个项目接入恰恰发生在空注册表时）。方框＋，语言同会话区。 */}
+          <div className="wb-project-add-row" data-wb-project-add-row=""
+            role="button" aria-label="接入项目"
+            onClick={() => setModal({ kind: 'add' })}>
+            <span className="wb-project-add-plus">＋</span>接入项目
+          </div>
         </div>
       </div>
       {/* 中列：四视图（现成的工单台/知识库/模型/立项单 UI，从 chat 页签迁来；左列图标直切，无 tab 条）。
@@ -686,15 +751,15 @@ export function WorkbenchSidebar(props: SidebarProps) {
           {!viewProject && (
             <div className="wb-placeholder">
               从左侧项目行点图标打开视图：
-              <br />📋 工单列表 · 📖 知识库 · 🔀 模型路由 · 🗂️ 立项单
-              <br />（按行项目分流；立项单为跨项目清单，点 🗂️ 后中列显示列表）
+              <br />工单列表 · 知识库 · 模型路由 · 立项单 · 项目设置
+              <br />（按行项目分流；立项单为跨项目清单，点立项单图标后中列显示列表）
             </div>
           )}
           {viewProject && rightView === 'board' && <Board focusId={selectedId || undefined} focusNonce={focusNonce} listNonce={listNonce} projectKey={viewProject} onOpenEpic={openEpic} />}
           {viewProject && rightView === 'knowledge' && <Knowledge projectKey={viewProject} />}
           {viewProject && rightView === 'routes' && <Routes projectKey={viewProject} />}
           {/* 立项单视图（t260826-02 中列第四视图；t260827-01 起空代号=立项清单，由项目行
-              🗂️ 图标进入，详情由清单行/工单徽标定位）：点关联工单行 → 复用 handleTicketClick
+              立项单图标进入，详情由清单行/工单徽标定位）：点关联工单行 → 复用 handleTicketClick
               链路（中列工单详情抽屉 + 右栏会话）；handleTicketClick 只用 t.id，最小形状安全。 */}
           {viewProject && rightView === 'epics' && (
             <Epics epicCode={epicCode} epicNonce={epicNonce} projectKey={viewProject}
@@ -740,6 +805,29 @@ export function WorkbenchSidebar(props: SidebarProps) {
             </label>
             <div className="m2c">静默在制阈值（分钟）：随 M2c 系统健康 tab 开放。</div>
           </div>
+        )}
+        {/* 项目生命周期四弹层（票③面D）：设置（只读+danger 区）→ 摘除四步流 →
+            接入（预检 dry-run+就地错误）→ 隔离详情。写路径=host 薄壳 spawn 安装器
+            CLI（单源）；成功回调重拉注册表（左栏即时出现新项目组/即时消失被摘组）。 */}
+        {modal?.kind === 'settings' && (
+          <ProjectSettingsModal
+            project={modal.project}
+            onClose={() => setModal(null)}
+            onRemove={() => setModal({ kind: 'remove', project: modal.project })} />
+        )}
+        {modal?.kind === 'remove' && (
+          <ProjectRemoveModal
+            project={modal.project}
+            onClose={() => setModal(null)}
+            onRemoved={() => { setModal(null) }} />
+        )}
+        {modal?.kind === 'add' && (
+          <ProjectAddModal
+            onClose={() => setModal(null)}
+            onAdded={() => { setModal(null) }} />
+        )}
+        {modal?.kind === 'quarantine' && (
+          <QuarantineModal entry={modal.entry} onClose={() => setModal(null)} />
         )}
       </div>
     </div>

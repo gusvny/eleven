@@ -5,8 +5,20 @@
  * v0.3 §5/§9），供本插件的浏览器半（lib/client.js，设置面板「工单台」分区）同源
  * fetch 使用。独立命名，不寄生 suyou-admin-ui 壳：
  *
- *   GET  /suyou-workbench/api/wf/projects       → 项目注册表（server/dsh/projects.yaml，260823 多项目化）：
- *                                                 project 是逻辑概念，1:N 对应目录；返回 key/name/dirs/primary
+ *   GET  /suyou-workbench/api/wf/projects       → 项目注册表（260823 多项目化；t260904-15 起走
+ *                                                 loadRegistry()：projects + quarantined 隔离条目，
+ *                                                 空/全隔离注册表不 500——首接发生在空表时）
+ *   GET  /suyou-workbench/api/wf/projects/detail?key=
+ *                                               → 项目详情票计数（票③面D：spawn 安装器
+ *                                                 `sandbar project list --json` 单点取 Temporal
+ *                                                 计数；CLI 降级 tickets_state 透传由弹层显「—」）
+ *   POST /suyou-workbench/api/wf/projects/add   → 项目接入（票③面D：薄壳 spawn `sandbar project
+ *                                                 add --json`；dry_run:true=422 能力应答——CLI 无
+ *                                                 add --dry-run 旗（F1），预检=弹层本地形状检查）
+ *   POST /suyou-workbench/api/wf/projects/remove
+ *                                               → 项目摘除（票③面D：薄壳 spawn `sandbar project
+ *                                                 remove --json`，dry_run/purge/confirm-last 旗一一对应；
+ *                                                 在飞闸 fail-closed 文案由 CLI 错误体透传）
  *   GET  /suyou-workbench/api/wf/tickets?project=<key>
  *                                               → ticket list（按 ProjectKey SA 过滤；project 必传、无默认值；
  *                                                 台面行，awaiting-human 工单附 pending 审批理由）+ workflow list（全局模板表）
@@ -114,7 +126,10 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
 import { runAdminCli } from '../suyou-tools.ts'
-import { findProject, loadProjects, primaryDir, type ProjectEntry } from '../suyou-projects.ts'
+import { findProject, loadProjects, loadRegistry, primaryDir, type ProjectEntry } from '../suyou-projects.ts'
+// 项目生命周期 CLI 薄壳（票③面D：写路径单源=安装器 CLI，读注册表仍走 TS 装载器；
+// 票据/体检数据=CLI 独有面，spawn 恰是同源——取舍清单见 src/host/project-admin.ts 头注）。
+import { ProjectCliError, runProjectCli } from './src/host/project-admin.ts'
 
 function projectRootsFor(projectKey: unknown): string[] {
   // 跨项目工单（t260903-11/-12）：票所属项目注册目录=实时态/日志读取的合法根。
@@ -1599,19 +1614,141 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     }
   }
 
-  /** 项目注册表（projects.yaml）：侧栏分组数据源。project 是逻辑概念，1:N 对应目录。 */
+  /**
+   * 项目注册表：侧栏分组数据源（260823 多项目化）+ 隔离条目（票③面D，验收 11）。
+   * t260904-15：loadProjects() → loadRegistry()——空/全隔离注册表不再 throw→500
+   * （首个项目接入恰恰发生在空注册表时；隔离条目以红色行呈现，无组头无设置入口），
+   * 响应体补 quarantined[{key,dir,error}]（error 含 <dir>/project.yaml 定位，TS 装载器同源）。
+   */
   async function handleProjects(_req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
-      const projects = loadProjects().map((p: ProjectEntry) => ({
+      const reg = loadRegistry()
+      const projects = reg.projects.map((p: ProjectEntry) => ({
         key: p.key,
         name: p.name,
         dirs: p.dirs,
         primary: primaryDir(p),
       }))
-      sendJson(res, 200, { ok: true, result: { projects } })
+      const quarantined = reg.quarantined.map(q => ({
+        key: q.key ?? q.dir.slice(q.dir.lastIndexOf('/') + 1),
+        dir: q.dir,
+        error: q.error,
+      }))
+      sendJson(res, 200, { ok: true, result: { projects, quarantined } })
     } catch (err) {
       sendJson(res, 500, { ok: false, error: String(err instanceof Error ? err.message : err) })
     }
+  }
+
+  /**
+   * 项目详情（票③面D，设置弹层数据面）：GET detail?key= —— spawn 安装器
+   * `sandbar project list --json` 单点取票计数（tickets{open,closed,archived}）。
+   * 口径（create_plan gen1 R2a 定稿）：决策 8「读不 spawn CLI」指注册表读面
+   * （上方 handleProjects 走 TS 装载器防两份漂移）；票计数属 Temporal 查询=CLI
+   * 独有数据，spawn 恰是同源而非第二份。Temporal 不可达时 CLI 自己降级
+   * （tickets_state/tickets_note），本路由原样透传由弹层显「—」提示（不红）。
+   */
+  async function handleProjectDetail(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (req.method !== 'GET') { sendJson(res, 405, { ok: false, error: '只读路由，仅 GET' }); return }
+    const key = new URL(req.url ?? '/', 'http://x').searchParams.get('key') ?? ''
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(key)) {
+      sendJson(res, 400, { ok: false, error: `项目 key 形状不合法：${JSON.stringify(key.slice(0, 40))}` })
+      return
+    }
+    try {
+      const out = await runProjectCli({ repo, python: config?.python, entryPath: projectCliEntry() }, ['project', 'list', '--json'])
+      const row = Array.isArray(out?.projects) ? out.projects.find((p: any) => p?.key === key) : undefined
+      if (row === undefined) {
+        sendJson(res, 404, { ok: false, error: `项目不存在于注册表：${key}` })
+        return
+      }
+      sendJson(res, 200, {
+        ok: true,
+        result: {
+          key: row.key, name: row.name, dirs: row.dirs,
+          tickets: row.tickets, tickets_state: row.tickets_state, tickets_note: row.tickets_note,
+        },
+      })
+    } catch (err) {
+      if (err instanceof ProjectCliError) {
+        sendJson(res, err.status >= 500 ? 502 : err.status, { ok: false, error: err.message, body: err.body })
+        return
+      }
+      sendJson(res, 500, { ok: false, error: String(err instanceof Error ? err.message : err) })
+    }
+  }
+
+  /**
+   * 项目接入（票③面D，接入弹层写路径）：POST add {key,name,dir} —— 薄壳转
+   * `sandbar project add --json`，含 dry_run 档（预检，不落盘）。校验/闸逻辑零实现
+   * （CLI 单源）；CLI 拒收（非零退出含 stdout JSON 错误体）→ 409 原体透传，弹层就地显示。
+   */
+  async function handleProjectAdd(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // dry_run 口径（arbitrate gen1 F1 定稿）：CLI `project add` 无 --dry-run 旗
+    // （--help 实证；补旗=跨写集改动，裁定项已上浮）——预检=弹层本地形状检查，
+    // 路由收到 dry_run:true 时不 spawn、422 显式应答不支持（零现场变更保证）；
+    // 深度校验（存在性/交叉/重复/legacy）在确认时由 CLI 执行并就地显示。
+    await projectWriteRoute(req, res, 'add', (body, dryRun) => {
+      if (dryRun) return null
+      return ['project', 'add', '--key', String(body?.key ?? ''), '--name', String(body?.name ?? ''), '--dir', String(body?.dir ?? ''), '--json']
+    })
+  }
+
+  /**
+   * 项目摘除（票③面D，摘除弹层四步流写路径）：POST remove {key,purge_data,
+   * purge_credentials,confirm_last,dry_run} —— 薄壳转 `sandbar project remove
+   * --json`，旗标与 CLI 一一对应（在飞闸/purge 前置闸全在 CLI 侧，fail-closed
+   * 文案由 CLI 错误体原样透传）。二次确认（purge 输入 key）是弹层职责，路由不重复。
+   */
+  async function handleProjectRemove(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    await projectWriteRoute(req, res, 'remove', (body, dryRun) => {
+      // F2 修正（arbitrate gen1）：key 是 --key 必选旗，非位置参数（CLI --help 实证）。
+      const args = ['project', 'remove', '--key', String(body?.key ?? ''), '--json']
+      if (dryRun) args.push('--dry-run')
+      if (body?.purge_data) args.push('--purge-data')
+      if (body?.purge_credentials) args.push('--purge-credentials')
+      if (body?.confirm_last) args.push('--confirm-last')
+      return args
+    })
+  }
+
+  /** 写路由共用壳：POST-only + body 校验 + dry-run 旗 + CLI 调用与错误分流。 */
+  async function projectWriteRoute(
+    req: IncomingMessage, res: ServerResponse, action: 'add' | 'remove',
+    buildArgs: (body: any, dryRun: boolean) => string[] | null,
+  ): Promise<void> {
+    if (req.method !== 'POST') { sendJson(res, 405, { ok: false, error: '写路由，仅 POST' }); return }
+    let body: any
+    try { body = await readJsonBody(req) } catch {
+      sendJson(res, 400, { ok: false, error: '请求体必须是合法 JSON（readJsonBody 64KB 封顶）' })
+      return
+    }
+    const dryRun = body?.dry_run === true
+    const argv = buildArgs(body, dryRun)
+    if (argv === null) {
+      // add dry-run 能力应答（F1：CLI 无此旗，预检降档为弹层本地形状检查）。
+      sendJson(res, 422, { ok: false, error: 'CLI 暂不支持 add 预检（project add 无 --dry-run 旗，补旗为跨写集裁定项）；预检=弹层本地形状检查，深度校验在确认时由 CLI 执行', action, dry_run: true })
+      return
+    }
+    try {
+      const out = await runProjectCli({ repo, python: config?.python, entryPath: projectCliEntry() }, argv)
+      sendJson(res, 200, { ok: out?.ok !== false, result: out })
+    } catch (err) {
+      if (err instanceof ProjectCliError) {
+        // 状态语义（project-admin.ts 分流）：拒收（JSON 体或 exit 1 人话）→ 409
+        // 原文/原体透传（弹层就地显示的数据源）；argv 拼装错（exit 2）→ 502；
+        // 输出不可解析/超时/取消 → 502/504/499 精确文案（不裸抛堆栈、不谎报无结果）。
+        const status = err.status === 504 || err.status === 499 ? (err.status === 499 ? 499 : 504) : err.status >= 500 ? 502 : 409
+        sendJson(res, status, { ok: false, error: err.message, body: err.body, action, dry_run: dryRun })
+        return
+      }
+      sendJson(res, 500, { ok: false, error: String(err instanceof Error ? err.message : err) })
+    }
+  }
+
+  /** project CLI 入口（测试缝：repo 根 sandbar；UT 经 config.python='node' + 假脚本注入）。 */
+  function projectCliEntry(): string {
+    return join(repo, 'sandbar')
   }
 
   /** 工作区列表（项目切换器数据源）。 */
@@ -1658,6 +1795,10 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         ws.register({ kind: 'prefix', path: EPICS_PREFIX, handler: handleEpicRoute }),
         ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/workspaces', handler: handleWorkspaceList }),
         ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/projects', handler: handleProjects }),
+        // 票③面D：项目生命周期三路由（detail 票计数读面 / add·remove 写面，薄壳 spawn 安装器 CLI）。
+        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/projects/detail', handler: handleProjectDetail }),
+        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/projects/add', handler: handleProjectAdd }),
+        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/projects/remove', handler: handleProjectRemove }),
         // t260903-07 起客户端无调用方（openTicketSessionFlow 已删），联动入口下线仅客户端面——
         // 路由按 ③ 口径保留（数据留存/回滚面），见 handleTicketSessionOpen 头注。
         ws.register({ kind: 'exact', path: '/suyou-workbench/api/ticket-session/open', handler: handleTicketSessionOpen }),

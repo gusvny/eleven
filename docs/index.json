@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-09-04T23:35:49+08:00",
-  "total": 12,
+  "generated_at": "2026-09-04T23:48:39+08:00",
+  "total": 13,
   "categories": [
     "design",
     "content",
@@ -149,6 +149,21 @@
         "写作规范",
         "guideline",
         "讨论先行"
+      ],
+      "status": "active",
+      "updated": "2026-09-04",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/项目管理UI设计.md",
+      "file": "项目管理UI设计.md",
+      "title": "项目管理 UI 设计（左栏内嵌）",
+      "category": "design",
+      "tags": [
+        "sandbar",
+        "workbench",
+        "项目管理",
+        "UI"
       ],
       "status": "active",
       "updated": "2026-09-04",

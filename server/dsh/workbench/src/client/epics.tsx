@@ -3,7 +3,7 @@
  *
  * 落地口径（方案 gen1 + review gen4 拍板）：
  *   - 不加路由/不加顶层 tab：本视图挂进 sidebar 中列四视图体系（views.epics），
- *     由项目行 🗂️ 图标（t260827-01，空代号=立项清单）/ 工单徽标点击（定位详情）切换进来；
+ *     由项目行立项单图标（t260827-01，空代号=立项清单）/ 工单徽标点击（定位详情）切换进来；
  *   - 真源=API 渲染、前端不存状态（立项单关键决策 5）：列表=GET /api/epics，
  *     详情=GET /api/epics/<code> + /api/epics/<code>/tickets（8s 轮询实时汇总）；
  *   - Markdown 渲染复用 knowledge 浏览器半 renderMarkdown（index.tsx 同款 import，
@@ -167,7 +167,7 @@ interface WfTemplate {
 export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
   /** 侧栏图标/徽标点进来的立项代号；空串=显立项清单。 */
   epicCode?: string
-  /** 「又点了一次」信号：同 code 重进 / 点 🗂️ 图标回清单（空代号）也触发重拉——同 focusNonce 先例。 */
+  /** 「又点了一次」信号：同 code 重进 / 点立项单图标回清单（空代号）也触发重拉——同 focusNonce 先例。 */
   epicNonce?: number
   /** 新建工单落点项目（?project=；空=禁用创建并提示）。 */
   projectKey?: string
@@ -218,7 +218,7 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
   const [saveBusy, setSaveBusy] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
 
-  // 外部点击（项目行 🗂️ 图标/工单徽标）：code+nonce 变化 → 完全同步到内部选中代号——
+  // 外部点击（项目行立项单图标/工单徽标）：code+nonce 变化 → 完全同步到内部选中代号——
   // 空串=外部要求回清单（t260827-01：图标入口以空代号进入；「看过详情再点图标」靠 nonce 触发，
   // 不能只同步非空值，否则详情态永远无法从外部回到列表）。内部「← 返回列表」走 setCode，
   // 不触发改 effect（deps 是 prop），两种导航互不干扰。

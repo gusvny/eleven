@@ -2628,7 +2628,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   focusId?: string
   /** 侧栏「又点了一次工单」信号（t260825-05）：同 id 重开（× 关抽屉后再点同一行）也触发。 */
   focusNonce?: number
-  /** 侧栏「点 📋 回工单列表」信号（t260825-05）：变化时关详情抽屉回列表页。 */
+  /** 侧栏「点工单列表图标回列表」信号（t260825-05）：变化时关详情抽屉回列表页。 */
   listNonce?: number
   projectKey?: string
   /** 所属立项徽标点击（t260826-02）：由侧栏注入，中列切立项单视图并定位代号。 */
@@ -2784,7 +2784,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusId, focusNonce])
 
-  // 侧栏 📋「工单列表」联动（t260825-05）：viewProject/rightView 同值时 setState 跳渲染，
+  // 侧栏「工单列表」图标联动（t260825-05）：viewProject/rightView 同值时 setState 跳渲染，
   // 抽屉开态收不到通知——靠 listNonce 变化关抽屉回列表页（scan 巡检页也一并回 tickets）。
   // 跳过挂载首发：Board 重挂载（如从知识库视图切回）时 listNonce 已非 0，
   // 不能误关 focusId effect 正要打开的详情。
@@ -3163,7 +3163,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     return (
       <div className="wb-root">
         <div style={{ padding: 32, color: 'var(--dsw-alias-label-secondary, #888)', fontSize: 13 }}>
-          从左侧项目行点 📋 图标打开该项目的工单台。
+          从左侧项目行点工单列表图标打开该项目的工单台。
         </div>
       </div>
     )

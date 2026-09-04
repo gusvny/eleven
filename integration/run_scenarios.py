@@ -385,6 +385,16 @@ SCENARIOS = [
     ("t260904-14-project-remove-gates",
      "remove 闸语义面（t260904-14，台别按 C3 表逐腿钉死）：真票腿=隔离台自举 temporalite 起真 running 票→拒摘报票号→cancel 收口→重跑 remove 成功（验收5 全段含 M3 续步；唯一有声 SKIP 豁免腿，依赖缺席打印原因）；其余腿全部桩 poc_dir 不可 SKIP——Temporal 不可达=拒摘含 sandbar up 诊断指路（验收7）、sdk-missing 与不可达两态输出可辨（KI-039）、通道坏 JSON=拒；purge 双旗（差集非空拒列票号[C1 缺失态 manifest 缺=未归档、畸形态红点名 <id>/archive.json]、过闸真删 data/ 不动 credentials、--purge-credentials 独立、双旗组合）、dry-run+purge 旗只出将删清单注册表根字节级零变更（验收8）、最后项目无 --confirm-last 拒/带旗零条目警告+装载器空表抛错可辨（验收9）、legacy env 拒收点名存量 env（模式闸）、key 未注册拒零现场变更、隔离条目同名区分报含 project.yaml 定位。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "node integration/t260904-14/sc_project_remove_gates.mjs", "ro"),
+    # ---- t260904-15 project lifecycle 票③：项目管理 UI 左栏内嵌（host 路由薄壳+三处新增+三弹层）----
+    ("t260904-15-project-ui-host-routes",
+     "host 项目路由薄壳契约（t260904-15，API 面无浏览器，自举隔离台+临时注册表根+Temporal 死端口）：写路由把请求薄壳转 spawn `sandbar project add|remove --json`——六类拒收错误体逐字透传为 4xx 就地显示数据源（key 白名单/已存在/dirs 缺失/相对路径/根交叉/畸形 JSON 体精确文案不裸抛堆栈）、dry-run 透传且注册表根字节级零变更、成功后 GET /wf/projects 即时出现新条目（左栏读回=装载器消费方，验收12）；读面扩展：quarantined 数组含 key+原因含 <dir>/project.yaml 定位（验收11 隔离行数据源）、空注册表 200 空清单不再 500（首接面）；票计数读路由 spawn list --json 单点取数，Temporal 不可达=降级字段非 500（验收11「—」数据源）；remove 在 Temporal 不可达 fail-closed（dry-run 同闸，契约①a-1）文案含 sandbar up 指路（验收7/13）且零现场变更。与 t260904-10/-14（CLI 语义）intent 不同面：本条守路由透传+读面扩展层。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；隔离台依赖缺失=干净 SKIP",
+     "node integration/t260904-15/sc_project_ui_host_routes.mjs", "ro"),
+    ("t260904-15-project-ui-rail-add-remove",
+     "左栏三处就位+图标族换装+接入/摘除旅程（t260904-15，浏览器捕获，mock v5 过稿口径）：组头第五枚「项目设置」svg 图标、「＋ 接入项目」行、隔离 key 红色行（无组头图标）三处在位（验收11）；四视图图标换装 svg 非 emoji、aria-label 齐、点工单列表图标 active 联动保留、侧栏可见文本 emoji 清零（验收11b 渲染面）；接入弹层坏 key 错误就地显示点名原因、合法 key 成功后左栏即时出现新组（验收12）；摘除弹层四步：处置勾选默认全保留、dry-run 清单先行、purge 勾选需输 key 二次确认（错 key 禁确认）、Temporal 不可达 fail-closed 文案就地含 sandbar up 指路（验收13）。与 CLI 场景（t260904-10/-14）intent 不同面：守 UI 呈现与交互旅程。实现落地前红属预期；playwright-core 缺失=干净 SKIP（KI-036 守卫）",
+     "node integration/t260904-15/sc_project_ui_rail_add_remove.mjs", "ro"),
+    ("t260904-15-project-ui-settings-isolation",
+     "设置弹层信息面+隔离详情+空注册表首接（t260904-15，浏览器捕获，与场景② intent 不同面：守信息面/降级口径/空表面）：设置弹层只读 key/显示名/根目录如实呈现；票计数 Temporal 不可达降级「—」类中性提示不红不谎报（验收11 降级口径）；体检区中性提示不含「无黄牌」谎报（R2b 降档口径）；danger 摘除入口在位；隔离红行点击见原因含 project.yaml 定位+修复指路（验收11）；空注册表 GET /wf/projects 200 空清单不 500、零分组仍渲染接入行且首接走通（验收9 空表面）。实现落地前红属预期；playwright-core 缺失=干净 SKIP（KI-036 守卫）",
+     "node integration/t260904-15/sc_project_ui_settings_isolation.mjs", "ro"),
 ]
 
 CMD_TIMEOUT = 900
