@@ -538,6 +538,15 @@ const CSS = `
   padding:10px 14px;font-size:13px;line-height:1.75;color:#1f2328;white-space:pre-wrap;
   word-break:break-word;max-height:320px;overflow-y:auto}
 .wb-d2-body .ttl{font-size:11px;color:#8c959f;margin-bottom:4px;font-weight:600}
+/* 执行规格卡（t260904-06）：钉在正文卡正下方，蓝左边条与正文卡做视觉区分（原始需求=用户说的，
+   spec=开票会话蒸馏的执行规格）；B 形态=默认展开+限高滚动（样张 260904-spec-card-mockup B 卡）。
+   样张已评审拍板进方案（impl 段无需回读样张；样式/文案/结构见下方三条规则）。 */
+.wb-d2-spec{margin-top:10px;border:1px solid #e8ebef;border-left:4px solid #0969da;border-radius:8px;background:#fff;
+  padding:10px 14px;font-size:13px;line-height:1.75;color:#1f2328;white-space:pre-wrap;
+  word-break:break-word;max-height:260px;overflow-y:auto}
+.wb-d2-spec .ttl{font-size:11px;color:#57606a;margin-bottom:4px;font-weight:600;
+  display:flex;align-items:baseline;gap:8px}
+.wb-d2-spec .cnt{font-weight:400;color:#8c959f;font-family:ui-monospace,Menlo,monospace;font-size:10px}
 /* 阶段卡：进展主体 */
 .wb-d2-stages{margin-top:10px;display:flex;flex-direction:column;gap:6px}
 /* 执行主体徽标（t260828-01）：🤖⚙️👤 直接拼接，软降级「—」 */
@@ -782,6 +791,9 @@ interface TicketDetail {
   pending?: { ts: number; note: string }[]
   log?: { ts: number; status?: string; note: string }[]
   body?: string
+  /** 执行规格（t260904-06）：开票会话蒸馏的加工后派发规格，引擎 snapshot 顶层原样透传
+   *  （零后端改动），前端只渲染；空/缺省整卡不渲染（老票兼容）。 */
+  spec?: string
   write_set?: string[]
   deliverables?: string
   created?: number
@@ -3380,6 +3392,14 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                 <div className="wb-d2-body">
                   <div className="ttl">工单正文（原始需求）</div>
                   {detail.body}
+                </div>
+              )}
+              {/* 执行规格卡（t260904-06）：正文卡正下方钉顶区，所有页签可见；spec 空/缺省整卡不渲染
+                  （老票兼容）。B 形态=默认展开+限高 260px 滚动；字数徽标取 .length（UTF-16 码元）。 */}
+              {detail.spec && (
+                <div className="wb-d2-spec" data-v="B">
+                  <div className="ttl">执行规格（spec）<span className="cnt">{detail.spec.length} 字</span></div>
+                  <div className="txt">{detail.spec}</div>
                 </div>
               )}
               <D2Reworks detail={detail} wf={selWf} />

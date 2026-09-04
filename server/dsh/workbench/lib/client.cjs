@@ -47993,6 +47993,15 @@ const CSS = `
   padding:10px 14px;font-size:13px;line-height:1.75;color:#1f2328;white-space:pre-wrap;
   word-break:break-word;max-height:320px;overflow-y:auto}
 .wb-d2-body .ttl{font-size:11px;color:#8c959f;margin-bottom:4px;font-weight:600}
+/* 执行规格卡（t260904-06）：钉在正文卡正下方，蓝左边条与正文卡做视觉区分（原始需求=用户说的，
+   spec=开票会话蒸馏的执行规格）；B 形态=默认展开+限高滚动（样张 260904-spec-card-mockup B 卡）。
+   样张已评审拍板进方案（impl 段无需回读样张；样式/文案/结构见下方三条规则）。 */
+.wb-d2-spec{margin-top:10px;border:1px solid #e8ebef;border-left:4px solid #0969da;border-radius:8px;background:#fff;
+  padding:10px 14px;font-size:13px;line-height:1.75;color:#1f2328;white-space:pre-wrap;
+  word-break:break-word;max-height:260px;overflow-y:auto}
+.wb-d2-spec .ttl{font-size:11px;color:#57606a;margin-bottom:4px;font-weight:600;
+  display:flex;align-items:baseline;gap:8px}
+.wb-d2-spec .cnt{font-weight:400;color:#8c959f;font-family:ui-monospace,Menlo,monospace;font-size:10px}
 /* 阶段卡：进展主体 */
 .wb-d2-stages{margin-top:10px;display:flex;flex-direction:column;gap:6px}
 /* 执行主体徽标（t260828-01）：🤖⚙️👤 直接拼接，软降级「—」 */
@@ -51078,6 +51087,20 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								className: "ttl",
 								children: "工单正文（原始需求）"
 							}), detail.body]
+						}),
+						detail.spec && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "wb-d2-spec",
+							"data-v": "B",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "ttl",
+								children: ["执行规格（spec）", /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "cnt",
+									children: [detail.spec.length, " 字"]
+								})]
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "txt",
+								children: detail.spec
+							})]
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2Reworks, {
 							detail,
