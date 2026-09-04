@@ -6,11 +6,11 @@
 //   打开详情审批区而**零写 API 调用**（R3：advance=行内静默签字，违反「看过再签」）；
 //   「看原因」可达阻塞原因原文。站道点数=模板阶段数在 DOM 可数（验收③渲染面，与场景①
 //   的数据面互补）；同 epic 行卡彩条同色（验收②的用户可感知面，确定性归 UT）。
-//   浏览器走查依赖 playwright-core（KI-036 家族）——缺失=干净 SKIP 注明，非无声跳过；
+//   浏览器走查依赖 playwright-core（KI-036 家族）——缺失=环境红注明（env_fail），非无声跳过；
 //   行卡契约锚 data-ticket-id 属性（本场景钉的可测性契约，t260904-15 data-wb-* 同先例）。
 //
 // high-level steps：
-//   T0 自举隔离台（FIX17 桩票源：两模板六状态票）+ playwright 探测（缺失=SKIP）。
+//   T0 自举隔离台（FIX17 桩票源：两模板六状态票）+ playwright 探测（缺失=环境红）。
 //   T1 导航：开台 → 关出厂 notice → 工单列表 → 选项目夹具甲 → 行卡在场（data-ticket-id）。
 //   T2 四态可辨：等你 1/受阻 1/在飞 3/收口 1 chips 带计数；twait 卡有「去签字」、
 //      tblock 卡有「看原因」、收口折叠计数行在场（未知 stage_state 票计入在飞=四态
@@ -23,8 +23,8 @@
 //   T7 搜索：搜「trun」→ 其余行卡不可见。
 //   T8 红线：端口 ≠ 3099；finally 回收进程树/浏览器/临时目录。
 //
-// 执行契约：stdout 末行 SUMMARY pass/skip/fail；实现落地前红属预期（TDD 信号），
-//   arbitrate/merge 期必须绿；playwright-core 缺失=干净 SKIP（KI-036 守卫）。
+// 执行契约：stdout 末行 SUMMARY pass/fail/env_fail/na；实现落地前红属预期（TDD 信号），
+//   arbitrate/merge 期必须绿；playwright-core 缺失=环境红（env_fail 点名，KI-036 守卫）。
 import {
   tmpRoot, makeRegistryRoot, writeProjectEntry, makeTicketStub,
   bootConsole, teardownOnExit, loadPlaywright, dismissNotice, makeResults,
@@ -66,7 +66,7 @@ stub.setCtrl({
 
 const pw = await loadPlaywright();
 if (!pw) {
-  record('playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器走查腿干净 SKIP');
+  record('playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器走查腿环境红');
   summarize();
 }
 
@@ -87,7 +87,7 @@ const { chromium } = pw;
 let browser;
 try {
   // 浏览器获取沿 capture.mjs 同款取舍：优先系统 Chrome（channel:"chrome"，本机无
-  // ms-playwright 自带浏览器档），退自带 chromium；双缺才 SKIP（KI-036 有声）。
+  // ms-playwright 自带浏览器档），退自带 chromium；双缺才环境红（env_fail 有声，KI-036）。
   browser = await chromium.launch({ channel: 'chrome', headless: true })
     .catch(() => chromium.launch({ headless: true }));
 } catch (e) {

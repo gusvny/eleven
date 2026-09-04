@@ -32,8 +32,8 @@
 //      并发峰值≤4（轨迹面）、全票降级、仍 200。
 //   T7 红线：端口 ≠ 3099/7233；finally 必回收 boot 进程树与临时目录。
 //
-// 执行契约：stdout 末行 SUMMARY pass=<n> skip=<m> fail=<k>；隔离台依赖缺失（dsh 不可用/
-//   profile 依赖缺失）=干净 SKIP（exit 0 注明原因）；实现落地前红属预期（TDD 信号），
+// 执行契约：stdout 末行 SUMMARY pass/fail/env_fail/na（12 号三态形状）；隔离台依赖缺失（dsh 不可用/
+//   profile 依赖缺失）=环境红（env_fail 点名缺什么）；实现落地前红属预期（TDD 信号），
 //   arbitrate/merge 期必须绿。
 import {
   tmpRoot, makeRegistryRoot, writeProjectEntry, makeTicketStub,

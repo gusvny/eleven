@@ -78,7 +78,7 @@ const OUT_DIR = path.join(process.cwd(), '.suyou', 'screenshots', 't260904-17');
 
 const pw = await loadPlaywright();
 if (!pw) {
-  record('wt/playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：走查腿干净 SKIP');
+  record('wt/playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：走查腿环境红');
   summarize();
 }
 

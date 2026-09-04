@@ -228,7 +228,7 @@ async function waitReady(port, timeoutMs, logPath) {
   }
 }
 
-/** 自举隔离台（票源=FIX17 桩；env PATH 前置 shim 目录）。失败抛错由调用方转干净 SKIP。 */
+/** 自举隔离台（票源=FIX17 桩；env PATH 前置 shim 目录）。失败抛错由调用方转环境红（env_fail 点名）。 */
 export async function bootConsole(projectsRoot, stub) {
   const tmpHome = mkdtempSync(path.join(tmpdir(), 'fix17-bench-'));
   const clean = () => { try { rmSync(tmpHome, { recursive: true, force: true }); } catch { /* 留警告 */ } };
@@ -270,7 +270,7 @@ export function teardownOnExit(teardown) {
   for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { teardown(); process.exit(130); });
 }
 
-/** playwright-core 四路探测（t260904-15 同口径）。null=调用方干净 SKIP（KI-036）。 */
+/** playwright-core 四路探测（t260904-15 同口径）。null=调用方转环境红（env_fail 点名，KI-036）。 */
 export async function loadPlaywright() {
   const localPw = new URL('../../server/dsh/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
   const mainPw = path.join(mainRoot(), 'server', 'dsh', 'ui-check', 'node_modules', 'playwright-core', 'index.mjs');
