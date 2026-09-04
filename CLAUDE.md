@@ -15,3 +15,7 @@ notes/debts/sandbar-m2-migration-manifest.md。
 2. 小步 commit；写集白名单内干活。
 3. 文档注释用现代中文。
 4. 本仓只读 ~/Documents/suyou 的历史文档作参考，不回写。
+5. 「suyou」之名退役（宿主令 260904）：新开发的代码、文档、注释、命名一律
+   不再用 suyou 字样——新环境变量、路径、API 前缀、工具与文件名用 sandbar
+   或中性名。存量 suyou 标识（如 SUYOU_* env、/suyou-workbench/ 前缀）是
+   历史欠账，只随专门迁移票处置，不随手改。
