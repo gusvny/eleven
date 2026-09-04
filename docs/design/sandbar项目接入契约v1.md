@@ -7,14 +7,13 @@ tags:
   - 接入
   - schema版本
 status: active
-updated: 2026-09-03
+updated: 2026-09-04
 ---
 
-<!-- 同源副本声明：本文件是 suyou 仓 docs/design/sandbar项目接入契约v1.md（v1.7，
-     2026-09-03，t260903-08 落地）的**只读同源副本**；真源在 suyou 仓同名路径，
-     本副本不独立演进，内容逐字自 v1.7 真源拷贝（仅本 HTML 注释与 frontmatter
-     位置调整为 sandbar 仓所加）。消费方：sandbar 安装器 `sandbar upgrade` /
-     `sandbar doctor`（M2-C 代码票 t260903-10）；副本漂移 guard 归后续票（交接单 §6）。 -->
+<!-- 真源声明（260904 宿主裁定）：本文件即契约真源——sandbar 仓下文档一律以本仓
+     为准。suyou 仓同名路径（v1.7，t260903-08 时期的原件）降为历史冻结件：仅作
+     沉积参考，不再演进，任何流程不得将其当作修改目标。消费方：sandbar 安装器
+     `sandbar upgrade` / `sandbar doctor`（M2-C 代码票 t260903-10）。 -->
 
 # sandbar 项目接入契约 v1
 
@@ -604,6 +603,7 @@ sandbar 发版 → 项目跟进；禁止跳过探针直接扩区间（关键决�
 | v1.5 | 2026-09-03 | t260903-01 声明制对齐：②a 按引擎实现重写为 v2 列表命令制（`checks=[{id,cmd,cwd?,timeout?}]`、`integration.cmd`；v1.1 五类型字段表系文档失真——引擎从未实现，勘误不升 schema 版，裁定随 ②a 入文）；② 缺失态勘误（integration 道 fail-closed，「空转口径」作废）；新增 ②b 输出契约（三行协议+分道返回形状+err 语义+零场景绿关闭惯用法）、②c 手写解析器语法子集=可写域、②d 薄壳执行拓扑=工具单源、②e 复用三级+rule of three | ②/②a/②b/②c/②d/②e；verify_lane code/integ 道 |
 | v1.6 | 2026-09-03 | t260903-03 路径契约化落地：新增 ①d——project.yaml 顶层可选 `paths` 节声明项目内路径（`roles_dir` 角色目录相对 spawn cwd 泳道快照解析、`model_routes` 路由表相对主目录解析），引擎 spawn 取角色目录/路由表、prompt 装配 role_doc 改经声明取值；四态判定（回落四类零回归 / 声明值畸形 / 条目文件畸形 / 声明锚点缺失或错位=fail-closed 红点名文件）、锚点 vs 内容边界（per-role 缺失软跳过、表内容损坏继承查表容错）、过渡状态（现行装载器顶层白名单未放开 paths，声明即被 ①a 隔离——①d 以放开工单落地为生效前提）；schema 保 v1（增量可选字段） | ①/①d；agent_activities spawn 两消费点、shared.py prompt 装配与模型路由查表；注册表装载器（TS/Python）待放开工单 |
 | v1.7 | 2026-09-03 | t260903-08 dsh 兼容区间成文：新增 ⑧——dsh 平台兼容区间声明（已验证点列举制，当前唯一点=0.1.1-rc.2，扩点须探针绿后 append）、升版必查项四条转正（touchpoints 汇总节 A3/A4+A5/B1+C1+C2/D1）、兼容矩阵三轴机制（sandbar 版本×dsh 已验证点×项目 schema 版本，append 制）、引擎版本自报口径（`sandbar_version` semver 自 0.1.0 起；历史 `temporal_engine_version` int 原值保留不造映射，畸形 fail-closed）、升版执行序（探针绿→扩区间→发版→项目跟进）；「升级解耦与兼容矩阵」节两轴表述补 v1.7 三轴衔接（IDE 轴=sandbar+dsh 复合）。安装器/探针/VERSION 代码面=sandbar 仓 M2-C 代码票承接（交接单 notes/debts/sandbar-m2-c-installer-handoff.md） | ⑧（新增）；「升级解耦与兼容矩阵」节；消费方=安装器 upgrade/doctor 探针集（代码票待落地） |
+| v1.8 | 2026-09-04 | 真源转正（宿主裁定 260904）：本文件由「suyou 仓 v1.7 只读同源副本」升为契约真源，头部声明改写；suyou 侧同名文件降为历史冻结件（不再演进、不作修改目标）。正文语义零变更；①a 增补节（摘除/再接入、单根目录工具口径）随 project-lifecycle 立项票②落地，届时另行记行 | 文档治理面；消费方指引（upgrade/doctor 以本份为准） |
 
 > 来源立项：sandbar
 
