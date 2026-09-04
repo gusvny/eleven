@@ -232,3 +232,19 @@ notes/discussions/260904-notes-ui-mock.html。
   =doc-lifecycle、⚑2 票序=①规则先行；草案迁 notes/epics/doc-lifecycle.md
   转正（本文件使命完成，内容以 epic 档为准）。票① 即日开工（main 侧直管：
   规则落字+design-doc-sync 债清偿）。
+
+## 票① 执行记录（main 侧直管，260904 开工）
+
+- **债清偿**：docs/design/右栏会话入口与hero定制设计.md 三条目（原 L64 目标5／
+  L70 Stakeholder／L79 Nongoal）按 t260903-07 定稿口径改写——点工单不再切换
+  右侧 chat、右侧恒单全局会话、语义与数据不变仅联动下线。suyou 侧债文件
+  design-doc-sync-t260903-07.md 冻结不回写，清偿以本记录＋文档本体为准（债亡）。
+- **规则落字**：知识库设计.md 总原则1＋§4 workflow 改「讨论先行＋定稿沉淀」
+  （验证事件触发、agent 零依赖 notes、票内全文引用）；notes/README 毕业规则
+  补三条（触发=验证事件／消费者边界／过程性结论翻篇）；设计文档写作指南.md
+  地位确认（docs 准入标准，不合体退回）；terminology 六词条（沉淀/毕业/
+  临时真源/两记忆/verified/心跳）。
+- **口径取代注记**：立项原文票① 含「verified 元数据豁免条款」——随中央列表制
+  定稿**作废**（文档本体零机器写入，§5.2 无需豁免）；agent 信任梯度规则归
+  票③ 落地时随 index 字段一并入提示词。
+- 待宿主过稿后一并提交（docs/ 定稿面走人审）。

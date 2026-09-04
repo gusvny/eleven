@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-09-04T09:02:31+08:00",
-  "total": 11,
+  "generated_at": "2026-09-04T23:35:49+08:00",
+  "total": 12,
   "categories": [
     "design",
     "content",
@@ -51,7 +51,7 @@
         "API"
       ],
       "status": "active",
-      "updated": "2026-09-01",
+      "updated": "2026-09-04",
       "has_frontmatter": true
     },
     {
@@ -79,7 +79,7 @@
         "schema版本"
       ],
       "status": "active",
-      "updated": "2026-09-03",
+      "updated": "2026-09-04",
       "has_frontmatter": true
     },
     {
@@ -148,10 +148,10 @@
         "设计文档",
         "写作规范",
         "guideline",
-        "文档先行"
+        "讨论先行"
       ],
       "status": "active",
-      "updated": "2026-08-24",
+      "updated": "2026-09-04",
       "has_frontmatter": true
     },
     {
@@ -166,6 +166,21 @@
       ],
       "status": "active",
       "updated": "2026-08-19",
+      "has_frontmatter": true
+    },
+    {
+      "path": "ops/项目生命周期操作手册.md",
+      "file": "项目生命周期操作手册.md",
+      "title": "项目生命周期操作手册（add/list/remove）",
+      "category": "ops",
+      "tags": [
+        "sandbar",
+        "安装器",
+        "项目注册表",
+        "运维"
+      ],
+      "status": "active",
+      "updated": "2026-09-04",
       "has_frontmatter": true
     }
   ],
