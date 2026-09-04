@@ -436,10 +436,11 @@ def _copy_profile(dst_dsh: Path) -> None:
 AGENT_STAGE_IDS = (
     "create_plan", "review_plan", "implement", "integration_review",  # dev-lane（integration_review 仅存量 workflow 重放可达）
     "design_integration_tests",                      # dev-lane 集成测试机制（t260831-02）
-    "propose", "process", "ai-review", "publish",    # content-pipeline
-    "review", "report",                              # proofread（report 兼 regression）
-    "regress",                                       # regression
-    "clean", "rederive",                             # cleanup
+    # 以下四行所属模板已退役（260904 宿主令）：段名仅为存量 workflow 重放兜底保留
+    "propose", "process", "ai-review", "publish",    # content-pipeline（已退役）
+    "review", "report",                              # proofread（已退役；report 兼 regression）
+    "regress",                                       # regression（已退役）
+    "clean", "rederive",                             # cleanup（已退役）
 )
 
 

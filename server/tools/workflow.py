@@ -23,8 +23,8 @@ HERE = Path(__file__).resolve().parent
 DIR = HERE.parent / 'dsh' / 'workflows'
 
 # M10（t260822-m10-role-consolidation）：五角色定稿为前五个；后五个是退役 id——
-# 在跑工单模板快照钉死（role 仍是旧值）且 content-pipeline 人门段（approve/final-review，
-# exit=human 一字不动）仍标 dispatcher，校验须继续放行。
+# 在跑工单模板快照钉死（role 仍是旧值）；content-pipeline 人门段已退役 260904，
+# 其 approve/final-review（exit=human 一字不动）仍标 dispatcher，校验须继续放行（兼容留存）。
 ROLES = ('developer', 'integration', 'ops', 'product-operation', 'artist',  # M10 五角色定稿
          'dispatcher', 'editor', 'proofreader', 'qa', 'analyst')  # 退役 id（兼容在跑单/人门段）
 

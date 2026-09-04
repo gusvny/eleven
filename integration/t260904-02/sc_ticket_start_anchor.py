@@ -28,7 +28,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib_gate import (Fail, cleanup, parse_out_json, port_listening,  # noqa: E402
                       poc_python, read_audit_jsonl, require_bench,
-                      run_poc_client, check_slot_contract)
+                      run_poc_client, check_slot_contract, wait_port_released)
 
 TID_A = "t26090402-anchor-a"
 TID_B = "t26090402-anchor-b"
@@ -220,7 +220,11 @@ def main():
             remain = sorted(os.listdir(s.slot_dir)) if os.path.isdir(s.slot_dir) else []
             fail.check(remain == [os.path.basename(s.lock_path)],
                        "%s 槽目录仅剩 lock 槽锚（实得 %s）" % (label, remain))
-            fail.check(not port_listening(s.frontend_port), "%s frontend 端口已释放" % label)
+            released, held = wait_port_released(s.frontend_port)
+            fail.check(released,
+                       "%s frontend 端口已释放（10s 宽限窗；%s）"
+                       % (label, "已释放" if released else
+                          "仍被占用 pid=%s——teardown 未回收，bench 拆解缺陷需归因" % held))
         fail.check(os.path.isfile(lock_a), "lock 槽锚文件保留（flock 不因 unlink 假独占）")
         try:
             sa.stop()

@@ -8,7 +8,8 @@ DEFAULT_ROLES_DIR 字符串拼接——selfcheck 同款口径，不触 3099）�
 
 电池覆盖 KI-035 退役表全部命中面的对抗输入：标题关键词全家族（掌握/营造/
 知识库·review·审校/工单引擎·temporal·dispatch·派活/全组合）+ 畸形输入
-（空标题/正则元字符）× workflow 面（dev-lane/content-pipeline/proofread/缺失）。
+（空标题/正则元字符）× workflow 面（dev-lane/缺失；260904 宿主令收窄：
+content-pipeline/proofread 已退役，只剩留存样例与构造输入两类豁免引用）。
 """
 from __future__ import annotations
 
@@ -33,7 +34,10 @@ TITLES = [
     "",
     "与任何映射关键词无关的朴素标题",
 ]
-WORKFLOWS = ["dev-lane", "content-pipeline", "proofread", ""]
+# 260904 宿主令：模板面仅存 dev-lane + 缺失键（content-pipeline/proofread 已退役）；
+# 段专项条款样例（content-pipeline/ai-review）不在扫描清单——它测的是留存面
+# （build_dispatch_prompt + STAGE_CLAUSES 数据），见 v1_battery 留存样例。
+WORKFLOWS = ["dev-lane", ""]
 
 # 知识段公开契约形态：块 1 内缩进的「①-④ 序号 + 知识库：」行（接收 agent 可感知的
 # 固定栏目；容忍 ②/③/④ 前缀差异——文案重构不改契约则不红）。

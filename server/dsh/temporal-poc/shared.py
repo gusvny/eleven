@@ -36,7 +36,8 @@ TASK_QUEUE = os.environ.get("SUYOU_TASK_QUEUE") or "suyou-poc"
 # ---- 每工单专属 worker（260824 用户拍板）----
 # 工单 workflow 不上共享队列：每张工单一个 task queue（suyou-ticket-<工单id>）+
 # 一个专属 worker 进程（ticket create 时拉起，workflow 收口后自退，巡检兜底救/收）。
-# 共享队列 suyou-poc 只留不属任何工单的 workflow（dispatcher-scan / content-pipeline）。
+# 共享队列 suyou-poc 只留不属任何工单的 workflow（dispatcher-scan；260904 起
+# content-pipeline 已退役）。
 # 隔离语义：A 工单的旧代码 worker 永远抢不到 B 工单的任务（260824 版本投毒事件教训）。
 TICKET_QUEUE_PREFIX = "suyou-ticket-"
 
@@ -178,6 +179,8 @@ def build_suggest_next_prompt(code: str, epic_markdown: str, tickets_summary: st
 【硬性要求】
 1. 这是只读分析任务：除最后的结果文件外，不创建、不修改任何文件，不做任何 git 写操作。
 2. 建议的工单模板必须来自下方「可用工单模板」清单，原样填 id，不得发明。
+   可用模板面（260904 宿主令收窄）仅 dev-lane：下一单出路只有两类——开新 dev-lane 票，
+   或 main 侧直跑验证（无需开票，用 status=done 表达）。
 3. 结论写入结果文件：%s
    UTF-8 JSON，三态之一：
    {"status":"ok","workflow":"<模板id>","title":"<工单标题，一句话说清做什么>","body":"<工单正文：背景、要做什么、验收要点>","rationale":"<给人类看的一句话理由>","write_set":["<预计改动文件，仓库内相对路径，一条一个>"]}
@@ -844,7 +847,8 @@ def _workspace_clause(ws: Optional[Dict[str, str]], meta: Dict[str, Any]) -> str
 # 零残留由 integration/t260904-03 场景守卫机械把关）。
 
 
-# 段专项条款（M5②：content-pipeline ai-review 段接 knowledge review 闭环）。
+# 段专项条款（M5②：content-pipeline ai-review 段接 knowledge review 闭环；模板已退役 260904）。
+# 本表为留存数据：派活头引擎与 t260904-03 守卫仍在消费。
 STAGE_CLAUSES: Dict[Tuple[str, str], List[str]] = {
     ("content-pipeline", "ai-review"): [
         "审校落盘条款（M5 review 闭环）：逐块意见落 docs/reviews 制式——"
@@ -1013,9 +1017,10 @@ def build_dispatch_prompt(tid: str, meta: Dict[str, Any], template_lane: str,
 
 
 # ========================================================================================
-# M11 v2（t260822-m11-template-as-code）：模版即代码 —— 五模版 workflow 类共享契约
-# （260824 起 code-lane/build-workbench 已删，现存 dev-lane/content-pipeline/proofread/
-# regression/cleanup 五个；历史文档中「六模版」为删前措辞）
+# M11 v2（t260822-m11-template-as-code）：模版即代码 —— workflow 类共享契约
+# （260824 起 code-lane/build-workbench 已删；260904 宿主令 content-pipeline/
+# proofread/regression/cleanup 四模版退役，现仅存 dev-lane；历史文档中「五模版/
+# 六模版」为删前措辞）
 #
 # 真源=代码：各套模版的 stage 链从 yaml 直译进各子类的 STAGES 类属性（Stage 元组），
 # workflows/*.yaml 降为 gen_workflows_doc.py 生成的参考快照（勿手改）。
@@ -1049,7 +1054,7 @@ class Stage:
     next: str = ""                             # 展示/快照用；驱动以 STAGES 序为准
     exit: str = ""                             # 'human' = 人门段（signal+wait_condition）
     fanout: int = 0                            # 审读类扇出声明（保留自 yaml，当前=1）
-    revision_to: str = ""                      # rework 缺省回退目标（content-pipeline 修订回路）
+    revision_to: str = ""                      # rework 缺省回退目标（原 content-pipeline 修订回路，已退役 260904）
     agent: bool = True                         # False = 纯脚本门段（无 agent 活动，只跑 gate）
     gate: Optional[GateSpec] = None            # 尾门：本段产物落定后必须跑绿才推进
     parts: Tuple[str, ...] = ()                # 执行主体组合（PART_KINDS 子集）；空=未声明（UI 软降级「—」）
@@ -1689,12 +1694,9 @@ def build_stage_prompt(ticket_id: str, meta: Dict[str, Any], stage: Stage,
 
 
 # 模板 id → workflow 类名（client.py ticket-start 选类唯一真源；worker 注册列表与此表一致）
+# 260904 宿主令：仅存 dev-lane（content-pipeline/proofread/regression/cleanup 已退役）
 TEMPLATE_CLASS_NAMES: Dict[str, str] = {
     "dev-lane": "DevLaneWorkflow",
-    "content-pipeline": "ContentPipelineTicketWorkflow",
-    "proofread": "ProofreadWorkflow",
-    "regression": "RegressionWorkflow",
-    "cleanup": "CleanupWorkflow",
 }
 
 # ---- 引擎数据出仓归档路径（sandbar M1-3，t260902-02）----
@@ -1948,12 +1950,9 @@ ARCHIVE_EXCLUDED_RULES = (
 
 # 模板 id → 台面展示名（build_suggest_next_prompt 的白名单清单用；host 侧 buildSuggestPrompt
 # 的 name 来自 workflow list op，同一语义——改名两边同步）。dev-lane 名与 DevLaneWorkflow.TEMPLATE_NAME 同源。
+# 260904 宿主令：仅存 dev-lane（content-pipeline/proofread/regression/cleanup 已退役）
 TEMPLATE_DISPLAY_NAMES: Dict[str, str] = {
     "dev-lane": "开发泳道",
-    "content-pipeline": "内容管线",
-    "proofread": "审校",
-    "regression": "回归",
-    "cleanup": "清理",
 }
 
 

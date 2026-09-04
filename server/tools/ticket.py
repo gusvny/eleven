@@ -84,7 +84,7 @@ TOOL = {
             'project': {'type': 'string', 'description': '项目 key（机器级注册表 ~/.sandbar/projects/<key>/project.yaml；create 必传、无默认值；list 可选过滤，不传=全部项目）'},
             'epic': {'type': 'string', 'description': '立项代号（epic-linkage 机制，可选）：notes/epics/<代号>.md 必须存在否则 create 拒收；合法则 workflow 打 EpicCode search attribute，可按 EpicCode 查询捞出。list 可按 epic 过滤（先强校验，不存在的代号明确报错而非空表）'},
             'workflow': {'type': 'string', 'description': '工作流模板 id（create 必填，见 workflow list）'},
-            'proposal_id': {'type': 'string', 'description': '挂提案 id（content-pipeline 用）'},
+            'proposal_id': {'type': 'string', 'description': '挂提案 id（可选；原 content-pipeline 专用，260904 起仅留兼容形态）'},
             'book_path': {'type': 'string', 'description': '内容预览定位：app/public/data/ 下相对路径（如 books/hanshu/jizhuan.json）；工单详情「预览内容」按钮按此读该书，缺省不显示预览'},
             'role': {'type': 'string', 'description': '角色（M10 五角色定稿）：developer/integration/ops/product-operation/artist（缺省取模板首段角色）'},
             'title': {'type': 'string'},

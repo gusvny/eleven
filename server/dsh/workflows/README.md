@@ -2,8 +2,9 @@
 
 **2026-08-22 架构转向（用户两轮纠偏定稿，工单 t260822-m11-template-as-code）**：
 模版真源从本目录 yaml 改为 **每模版一个 workflow 类**（`server/dsh/temporal-poc/`
-下 `base.py` 的 `TicketWorkflowBase` + 五个子类各一文件——260824 起 code-lane /
-build-workbench 已删，本文与旧档中的「六模版」为删除前措辞）。本目录的 `<id>.yaml`
+下 `base.py` 的 `TicketWorkflowBase` + 各子类一文件——260824 起 code-lane /
+build-workbench 已删；**260904 宿主令 content-pipeline / proofread / regression /
+cleanup 四模版退役，现仅存 dev-lane**，本文与旧档中的「六模版/五模版」为删前措辞）。本目录的 `<id>.yaml`
 降为**从类定义生成的人类可读参考快照**——由 `temporal-poc/gen_workflows_doc.py`
 生成，头注「真源=代码，勿手改」，重跑即覆盖；改模版 = 改子类 STAGES + 重跑生成器
 （`.venv/bin/python gen_workflows_doc.py`，`--check` 可验漂移）。
@@ -32,8 +33,8 @@ build-workbench 已删，本文与旧档中的「六模版」为删除前措辞�
   v2 工单结构化报错「已取消」）。有 JSON 的存量工单一律走旧路径。
 - **自动推进**：dispatch-next 与逐项 accept 取消——workflow 过门自动进下一段；
   验收=事后看产物（snapshot 的 results/handoffs）；rework=signal 回目标段重跑
-  （payload 带 target_stage 与返工指令；content-pipeline 修订回路 revision_count≤2
-  超限回 approve 保留）。
+  （payload 带 target_stage 与返工指令；修订回路机制随 content-pipeline 模板于
+  260904 一并退役，机制数据仍留存 shared.py）。
 - **老类已退场（260823）**：老 `TicketWorkflow` 类与 tickets/ JSON 投影目录一并删除
   （存量工单全部 closed，历史查 git）；新工单由 `ticket.py create` 按
   `shared.TEMPLATE_CLASS_NAMES` 映射走模版子类（dev-lane 为 activity 直编排），create 必传 project。
@@ -101,18 +102,18 @@ terminate + 新建工单跑新版：
   从 worker 注册表退役**（届时本节目档可删）。
 - 不要把「多版本长期并存」当成能力建设方向；并存期间的管理成本由改动方承担。
 
-## 4. 五套模版一页索引（真源=类；STAGES 摘要）
+## 4. 模版一页索引（真源=类；STAGES 摘要）
+
+**260904 宿主令：仅存 dev-lane**；content-pipeline / proofread / regression / cleanup
+四模版已退役（类文件与 yaml 快照删除，票收口后独立回归能力由 integration main 侧
+直跑或开 dev-lane 承担；历史 workflow 终态快照零触碰）。
 
 | 模版 id | workflow 类（文件） | 用途 | lane | 脚本门（Stage.gate） | 人门 |
 |---|---|---|---|---|---|
 | dev-lane | `DevLaneWorkflow`（dev_lane.py） | 开发泳道（developer 系唯一流程，260824 起） | worktree | merge_check（程序化四项，activity 内直跑） | merge（合并签字） |
-| content-pipeline | `ContentPipelineTicketWorkflow`（content_pipeline.py） | 内容加工（提案制） | main | machine-qc→`qc_run all`（纯门段）；publish→`verify_lane content auto` | approve（立项）、final-review（终审） |
-| proofread | `ProofreadWorkflow`（proofread.py） | 审读（独立交叉） | main | 无 | 无 |
-| regression | `RegressionWorkflow`（regression.py） | 回归验收（波收口） | main | regress→`verify_lane code` | 无 |
-| cleanup | `CleanupWorkflow`（cleanup.py） | 数据清洗（溯源修复） | main（dir 隔离目录） | 无 | 无 |
 
-> 类名说明：步1 的 `ContentPipelineWorkflow` 类名已被在跑实例占用（workflow type 名进
-> 历史不可改），content-pipeline 的 v2 类用新名 `ContentPipelineTicketWorkflow`。
+> 类名说明（历史注记）：步1 的 `ContentPipelineWorkflow` 类名已被在跑实例占用（workflow type 名进
+> 历史不可改），content-pipeline 的 v2 类曾用新名 `ContentPipelineTicketWorkflow`（260904 随模板退役）。
 > M10 五角色归一：approve/final-review 等旧 dispatcher 段在 v2 类里直写 integration。
 > 260824：code-lane / build-workbench 两模版删除，developer 系统一走 dev-lane
 > （activity 直编排，不走 base.py stage 机；STAGES 仅展示/推导元数据）。
@@ -132,13 +133,9 @@ terminate + 新建工单跑新版：
   → merge_check（程序化：泳道有 commit / 工作区干净 / 泳道内 verify_lane code 绿 /
     merge-tree 预演无冲突——红灯即 blocked）
   → **merge（人门）**：签字通过 → merge activity 真合并进 main + 泳道清理 → closed。
-- **content-pipeline STAGES**（7 段）：propose(加工) → **approve(人门)** → process(加工)
-  → machine-qc(纯脚本门) → ai-review(审校分工，revision_to=process 修订回路≤2)
-  → **final-review(人门)** → publish(发布闸门+门)。
-- **proofread STAGES**（2 段）：review(审校分工，fanout=1) → report(integration 分流)。
-- **regression STAGES**（2 段）：regress(验证分工+门) → report(integration 结论)。
-- **cleanup STAGES**（2 段）：clean → rederive（工作空间=dir 隔离目录
-  /tmp/suyou-ws/<工单id>）。
+
+（content-pipeline / proofread / regression / cleanup 四模版的 STAGES 段链与执行
+主体组合已随 260904 退役删除，历史段链查 git 或 docs/design 设计档。）
 
 各段验收清单（acceptance）以类定义为准，快照 yaml 逐字同构（生成器回读校验）。
 
@@ -149,11 +146,6 @@ terminate + 新建工单跑新版：
   capture-lane 隔离台截图，非 UI 票无此步）→ run_integration_tests⚙️ → arbitrate🤖⚙️
   （三态判定）→ acceptance_walkthrough🤖⚙️（验收走查）→ merge_check⚙️ → merge👤⚙️
   （人签字 + merge 落账 + 泳道清理）。
-- **content-pipeline**：propose🤖 → approve👤 → process🤖 → machine-qc⚙️ → ai-review🤖
-  → final-review👤 → publish🤖⚙️（verify_lane content 尾门）。
-- **proofread**：review🤖 → report🤖。
-- **regression**：regress🤖⚙️（verify_lane code 尾门） → report🤖。
-- **cleanup**：clean🤖 → rederive🤖。
 
 口径：引擎管道件（结果文件轮询/幂等缓存、prepare_human_gate 机械准备、非 worktree
 泳道 no-op 的 settle）不计入；业务产物落账必需的脚本计入。

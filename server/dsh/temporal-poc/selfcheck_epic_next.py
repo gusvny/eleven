@@ -95,12 +95,13 @@ ok(epic_state_key([{"id": "t1"}], "t1") == epic_state_key([{"id": "t1", "closed"
 section("B. build_suggest_next_prompt")
 md = build_suggest_next_prompt(
     code="demo-epic", epic_markdown=EPIC_MD, tickets_summary='[{"id": "t-demo-02"}]',
-    workflows=[{"id": "dev-lane", "name": "开发泳道"}, {"id": "proofread", "name": "审校"}],
+    workflows=[{"id": "dev-lane", "name": "开发泳道"}],  # 260904 起模板面仅 dev-lane
     result_path="/tmp/r.json")
 ok("/tmp/r.json" in md, "含结果文件路径（agent 唯一写点）")
 ok("demo-epic" in md and EPIC_MD in md, "含立项代号与全文")
 ok("t-demo-02" in md, "含工单汇总")
-ok("dev-lane" in md and "proofread" in md, "含模板白名单清单")
+ok("dev-lane" in md and "proofread" not in md, "含模板白名单清单（260904 起仅 dev-lane）")
+ok("开新 dev-lane 票" in md and "main 侧直跑验证" in md, "两类出路措辞在位")
 ok('"status":"ok"' in md and '"status":"done"' in md and '"status":"failed"' in md,
    "三态契约样例齐（与 host buildSuggestPrompt 的两态差异点）")
 

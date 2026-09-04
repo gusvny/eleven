@@ -266,9 +266,11 @@ IDE 升版就多背一份兼容义务，所以 v1 刻意只转正五样，其余
   引擎管道件不计（结果文件轮询/幂等缓存、prepare_human_gate 机械准备、
   非 worktree 泳道空转的 settle）。
 - **动态真源仍是 Temporal history**：parts 只是静态声明（工单台渲染与账面对照用），
-  实际执行以 history 为准；二者不混用。模版现存五个（dev-lane / content-pipeline /
-  proofread / regression / cleanup；260824 删 code-lane、build-workbench，旧档
-  「六模版」为删除前措辞）。
+  实际执行以 history 为准；二者不混用。模版现存一个（**dev-lane**；260824 删
+  code-lane、build-workbench，**260904 宿主令 content-pipeline / proofread /
+  regression / cleanup 四模版退役**——票收口后独立回归能力由 integration main 侧直跑
+  或开 dev-lane 承担；非工单巡检 dispatcher-scan 不属工单模板面，保留。旧档
+  「六模版/五模版」为删除前措辞）。
 - **演进安全**：`Stage` 只加带默认值的元数据字段不触确定性，无需 bump patched id；
   以 `temporal-poc/replay_check.py` 对存量运行中工单做 replay 实测兜底。
 

@@ -187,6 +187,33 @@ def port_listening(port, host="127.0.0.1"):
         s.close()
 
 
+def wait_port_released(port, timeout_s=10.0, interval=0.25, host="127.0.0.1"):
+    """等待槽端口释放（有界宽限窗）。
+
+    为什么需要：stop() 发 SIGTERM 后，服务进程退出与内核回收 listener 存在秒级
+    延迟窗——拆解后**立即**断言「端口已释放」会偶发假红（20260904 t260904-08
+    arbitrate 实测：同场景内槽A 输槽B 赢的时序竞态）。本 helper 让契约更准而非
+    更松：释放仍是硬性断言，只是给了有界窗；超时仍占用则尽力点名占用者 pid
+    （报错必须精确——不说「没释放」就完事，要说谁还占着）。"""
+    import time
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if not port_listening(port, host):
+            return True, None
+        time.sleep(interval)
+    if not port_listening(port, host):
+        return True, None
+    held_pid = None
+    try:
+        import subprocess
+        out = subprocess.run(["lsof", "-ti", "tcp:%d" % port],
+                             capture_output=True, text=True, timeout=10).stdout.split()
+        held_pid = int(out[0]) if out else None
+    except Exception:
+        held_pid = None
+    return False, held_pid
+
+
 def read_rows_compat(path):
     """宽容读兼容矩阵行集合（沿 t260903-10 口径）：顶层 list 即行；顶层 dict 取
     rows/list 类字段。返回 (ok, rows)。"""

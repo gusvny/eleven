@@ -127,7 +127,8 @@ diff /tmp/before.txt /tmp/after.txt && echo "现有工单/引擎/数据零改动
 - 未做 workflow versioning 实验（§5 第 2 条），未压测，未验证 worker 常驻（launchd）与开机自启。
 - 本会话沙箱下 `/bin/ps`、`pkill` 不可用（Operation not permitted），所以 Demo D 一律按自己记下的
   PID 发信号；脚本里没有进程枚举。
-- 残留物：Demo B 故意把 `content-pipeline:p260821-red` 留在 running（UI 里看得见）；
+- 残留物：Demo B 故意把 `content-pipeline:p260821-red` 留在 running（UI 里看得见；
+  260904 宿主令 content-pipeline 模板退役后此为历史残留实例，terminate 即清）；
   schedule `suyou-dispatcher-scan` 跑完是 **paused** 状态。清场：
   `bin/temporal workflow terminate -w content-pipeline:p260821-red --address 127.0.0.1:7233 --reason 清场`、
   `bin/temporal schedule delete --schedule-id suyou-dispatcher-scan --address 127.0.0.1:7233`；
@@ -141,17 +142,23 @@ diff /tmp/before.txt /tmp/after.txt && echo "现有工单/引擎/数据零改动
 `server/dsh/temporal-tools/`（模型可见工具）。七段状态机（§2 的 `workflows.py`）语义原样不动；
 「把 ticket.py 的 stage 推进切到 Temporal + 现有工单 adopt」是**步2（t260821-03）**，不在此步。
 
-### 8.1 client.py —— 五个 CLI 子命令（安全红线）
+### 8.1 client.py —— CLI 子命令（安全红线）
 
-工具面只暴露五个子命令，**绝无 set-stage / force_stage / 改状态入口**：
+工具面**绝无 set-stage / force_stage / 改状态入口**（260904 宿主令后 start 只剩
+dispatcher-scan，signal 已退役——sign/retry_qc 只服务 v1 content-pipeline 人门段，
+模板删后保留子命令名做 fail-closed 退役报错；工单签字走 `ticket op=sign`）：
 
 | 子命令 | 干什么 | 例 |
 |---|---|---|
-| `start` | 启动 workflow（content-pipeline / dispatcher-scan） | `python client.py start '{"type":"content-pipeline","proposal":"p260821-x","scope":"260627"}'` |
-| `query` | 只读 workflow 快照（stage/stage_state/qc_runs/timeline） | `python client.py query '{"workflow_id":"content-pipeline:p260821-x"}'` |
-| `signal` | 发 signal，只认 `sign` / `retry_qc` | `python client.py signal '{"workflow_id":"…","signal":"sign","input":{"who":"用户","gate":"approve","decision":"approve"}}'` |
+| `start` | 启动 workflow（260904 起仅 dispatcher-scan） | `python client.py start '{"type":"dispatcher-scan","id":"dispatcher-scan"}'` |
+| `query` | 只读 workflow 快照（stage/stage_state/qc_runs/timeline） | `python client.py query '{"workflow_id":"t260822-01"}'` |
+| `signal` | **已退役（260904）**：调用一律结构化报错 | — |
 | `schedule-list` | 只读列 Schedule | `python client.py schedule-list` |
 | `cancel` | terminate 一个 workflow（清场/撤销） | `python client.py cancel '{"workflow_id":"…","reason":"清场"}'` |
+
+以上是步1 的五子命令壳；v2 时代另有 ticket / ticket-start / ticket-list / ticket-query /
+ticket-prune / ticket-archive-legacy / running-tickets 等工单面子命令（`client.py` 无参
+运行看 USAGE 全表）。
 
 stdout 一律单行 JSON `{ok, result|error}`，供 node.ts 插件解析。审计=workflow 事件历史本身。
 
@@ -179,11 +186,14 @@ worker 是「肌肉」，服务端是「骨架与记忆」：worker 挂了/换�
 （与 suyou-workbench 同款裸包名软链；profile-headless 有同款软链）。默认 python 取
 `temporal-poc/.venv/bin/python`（temporalio SDK 装在仓库内 venv，不碰系统 python）。
 
-### 8.4 端到端演示（步1）
+### 8.4 端到端演示（步1，260904 起演示面已断——属预期）
 
 `./demo_cli.sh`（输出落 `out/demo-step1-cli.txt`）：start content-pipeline → query 读 stage
 （approve/awaiting-human）→ signal 签 approve → 真 qc_run(260627) 绿灯 → 停在 final-review →
 signal 签 final-review → publish(dry-run) → COMPLETED；另跑 schedule-list + cancel，最后优雅停 worker。
+**260904 宿主令 content-pipeline 模板退役、signal 子命令退役后，demo_happy/demo_fail/
+demo_schedule/demo_cli.sh 等 v1 演示面的 start/signal 调用会被结构化拒收——属预期，
+演示脚本按原样保留作历史参考，不再维护。**
 
 零改动证据：`out/zero-touch-step1.txt`（现有工单 / server/tools/ticket.py / books 零改动）。
 
@@ -238,9 +248,12 @@ cd server/dsh/temporal-poc
   （`_check_human_gate`）；步2 改为 `sign` signal 即门，不再读提案文件（提案联动留 M3）。
 - **常驻进程 +2**：temporal server + worker 都要常驻（§5.3）；工单 adopt 后 mutation
   依赖 worker 在线，worker 挂了 ticket advance/accept/update 会报「Temporal 转发失败」。
-- **dsh 插件**：`suyou-temporal-tools` 仍是步1 的 5 工具（start/query/signal/schedule-list/cancel）；
+- **dsh 插件**：`suyou-temporal-tools` 仍是步1 的 5 工具（start/query/signal/schedule-list/cancel；
+  其中 signal 已于 260904 退役为结构化报错）；
   人门签字当前走 `client.py ticket '{"op":"sign",…}'`，插件加 `ticket_sign` 工具留待后续。
-- **脚本门映射**（`shared.default_gate_for`）：content-pipeline machine-qc→`qc_run all`、
+- **脚本门映射**（`shared.default_gate_for`；260904 宿主令 content-pipeline/proofread/
+  regression/cleanup 模板退役后，下列映射仅 dev-lane 段在活，其余为留存数据）：
+  content-pipeline machine-qc→`qc_run all`、
   publish→`verify_lane content auto`；dev-lane 的 verify 由 merge_check 在泳道内直跑、
   regression regress→`verify_lane code`。cleanup/proofread 无脚本门。
 

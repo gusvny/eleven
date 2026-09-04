@@ -75,8 +75,8 @@ class TicketWorkflowBase:
       STAGES: Tuple[Stage, ...]   —— stage 链（真源=代码）
       PATCH_ID: str               —— 本模版独立 patched id
       TEMPLATE_ID / TEMPLATE_NAME / TEMPLATE_LANE / TEMPLATE_DESC —— 供快照与 yaml 生成
-      TEMPLATE_WORKSPACE_DIR: bool —— cleanup 类模板的 dir 隔离目录约定
-      REVISION_STAGE / REVISION_LIMIT / REVISION_OVERFLOW —— 修订回路（content-pipeline）
+      TEMPLATE_WORKSPACE_DIR: bool —— cleanup 类模板（已退役 260904）的 dir 隔离目录约定
+      REVISION_STAGE / REVISION_LIMIT / REVISION_OVERFLOW —— 修订回路（content-pipeline，已退役 260904）
     """
 
     STAGES: tuple = ()

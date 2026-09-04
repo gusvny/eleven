@@ -2,9 +2,9 @@
 
 安全红线（t260821-02）：工具面**绝无「设置 stage / 改状态」入口**：
 
-    client.py start         启动 workflow（content-pipeline / dispatcher-scan）
+    client.py start         启动 workflow（dispatcher-scan；260904 起 content-pipeline
+                            已退役，工单一律走 ticket-start）
     client.py query         读 workflow 快照（只读，改不了状态）
-    client.py signal        发 signal（只认 sign / retry_qc；force_stage 一律不暴露）
     client.py schedule-list 列 Schedule（只读）
     client.py cancel        停掉 workflow（terminate，清场/撤销用）
     client.py ticket        工单操作（步2 update/sign；v2 见下）
@@ -19,13 +19,10 @@ stdout 一律输出**单行 JSON** `{"ok": true, "result": ...}` 或 `{"ok": fal
 
 用法（每个子命令带一个 JSON 参数，缺省 {}）：
 
-    python client.py start '{"type":"content-pipeline","proposal":"p260821-x","title":"...","scope":"260627"}'
     python client.py start '{"type":"dispatcher-scan","id":"dispatcher-scan"}'
-    python client.py query '{"workflow_id":"content-pipeline:p260821-x"}'
-    python client.py signal '{"workflow_id":"content-pipeline:p260821-x","signal":"sign","input":{"who":"用户","gate":"approve","decision":"approve","note":"立项通过"}}'
-    python client.py signal '{"workflow_id":"content-pipeline:p260821-x","signal":"retry_qc","input":"developer-agent"}'
+    python client.py query '{"workflow_id":"t260822-01"}'
     python client.py schedule-list
-    python client.py cancel '{"workflow_id":"content-pipeline:p260821-x","reason":"清场"}'
+    python client.py cancel '{"workflow_id":"dispatcher-scan","reason":"清场"}'
 """
 
 from __future__ import annotations
@@ -50,15 +47,12 @@ from shared import (
     TARGET_HOST,
     TASK_QUEUE,
     TICKET_QUEUE_PREFIX,
-    PipelineInput,
-    QcRequest,
     ReworkRequest,
     Signature,
     TicketInput,
     check_paths_under_project,
     derive_lane_workspace,
     lookup_project,
-    pipeline_wf_id,
     project_search_attributes,
     ticket_data_dir,
     ticket_search_attributes,
@@ -66,7 +60,7 @@ from shared import (
     validate_epic_code,
     validate_write_set_args,
 )
-from workflows import ContentPipelineWorkflow, DispatcherScanWorkflow
+from workflows import DispatcherScanWorkflow
 from workflows_v2 import TEMPLATE_CLASSES
 
 # ---- M1-3（t260902-02）：Temporal 回归运行态——closed 工单历史主动清理 ----
@@ -80,9 +74,6 @@ from workflows_v2 import TEMPLATE_CLASSES
 # import」纪律）——本文件模块级 SDK 面必须维持 temporalio.client/temporalio.common
 # 最小集，t260901-23 的 _stub_temporalio 桩按此前提覆盖（t260902-02 implement
 # gen0 曾把两行提到顶层破坏该契约，t260901-23 t01/t02 无 SDK 环境即炸，已修）。
-
-# signal 白名单：只认这两个；force_stage（改状态入口）绝不暴露。
-SIGNAL_ALLOWLIST = ("sign", "retry_qc")
 
 # 收口工单的列表回填窗口（秒）：窗口内的 COMPLETED 执行用 result() 取终态快照，
 # 让左栏 sandbar 驻留期有标题/角色（窗口只封顶回填成本，驻留时长是前端配置项）。
@@ -219,41 +210,11 @@ async def _connect() -> Client:
     return await Client.connect(TARGET_HOST, namespace=NAMESPACE)
 
 
-# ---------- 五个子命令 ----------
+# ---------- 四个子命令 ----------
 
 async def cmd_start(args: Dict[str, Any]) -> Dict[str, Any]:
     client = await _connect()
     wf_type = str(args.get("type") or "")
-    if wf_type == "content-pipeline":
-        proposal = str(args.get("proposal") or "")
-        if not proposal:
-            return _err("start content-pipeline 需要 proposal（提案/工单 id）")
-        qc = QcRequest(
-            scope=str(args.get("scope") or "260627"),
-            cmd=args.get("qc_cmd") or None,
-            label=str(args.get("label") or "qc_run"),
-        )
-        inp = PipelineInput(
-            proposal_id=proposal,
-            title=str(args.get("title") or ""),
-            qc=qc,
-        )
-        wf_id = str(args.get("id") or pipeline_wf_id(proposal))
-        sa = project_search_attributes(str(args["project"])) if args.get("project") else None
-        handle = await client.start_workflow(
-            ContentPipelineWorkflow.run, inp, id=wf_id, task_queue=TASK_QUEUE,
-            search_attributes=sa,
-        )
-        return _ok(
-            {
-                "type": wf_type,
-                "workflow_id": handle.id,
-                "run_id": handle.result_run_id,
-                "proposal": proposal,
-                "qc": {"scope": qc.scope, "label": qc.label},
-            }
-        )
-
     if wf_type == "dispatcher-scan":
         wf_id = str(args.get("id") or DISPATCHER_WF_ID)
         sa = project_search_attributes(str(args["project"])) if args.get("project") else None
@@ -265,7 +226,9 @@ async def cmd_start(args: Dict[str, Any]) -> Dict[str, Any]:
             {"type": wf_type, "workflow_id": handle.id, "run_id": handle.result_run_id}
         )
 
-    return _err(f"未知 workflow type={wf_type!r}（可用 content-pipeline / dispatcher-scan）")
+    # 260904 宿主令：content-pipeline 已随模版退役，start 合法面收窄为 dispatcher-scan；
+    # 工单一律走 ticket-start（模板 id→workflow 类）。
+    return _err(f"未知 workflow type={wf_type!r}（可用 dispatcher-scan）")
 
 
 async def cmd_query(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -286,55 +249,14 @@ async def cmd_query(args: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
+# signal 子命令退役（260904 宿主令）：v1 content-pipeline 随模版退役删除后，
+# sign/retry_qc 无可挂靠对象（白名单一并摘除）；但 dsh 插件族旧调用面仍可能 spawn
+# 到这里——保留子命令名做 fail-closed 退役报错，避免误导为「未知子命令」。
 async def cmd_signal(args: Dict[str, Any]) -> Dict[str, Any]:
-    wf_id = str(args.get("workflow_id") or "")
-    name = str(args.get("signal") or "")
-    if not wf_id:
-        return _err("signal 需要 workflow_id")
-    if name not in SIGNAL_ALLOWLIST:
-        return _err(
-            f"signal 只认 {list(SIGNAL_ALLOWLIST)}（收到 {name!r}）。"
-            "force_stage 等改状态入口在工具面不暴露。"
-        )
-    client = await _connect()
-    handle = client.get_workflow_handle(wf_id)
-
-    if name == "sign":
-        raw = args.get("input") or {}
-        if not isinstance(raw, dict):
-            return _err("sign 的 input 需为 JSON 对象 {who,gate,decision,note}")
-        sig = Signature(
-            who=str(raw.get("who") or ""),
-            gate=str(raw.get("gate") or "approve"),
-            decision=str(raw.get("decision") or "approve"),
-            note=str(raw.get("note") or ""),
-        )
-        await handle.signal(ContentPipelineWorkflow.sign, sig)
-        return _ok(
-            {
-                "workflow_id": wf_id,
-                "signal": "sign",
-                "gate": sig.gate,
-                "decision": sig.decision,
-                "who": sig.who,
-                "delivered": True,
-            }
-        )
-
-    # retry_qc：payload 是 who（字符串），也兼容 {"who": "..."} 形态
-    raw = args.get("input")
-    if isinstance(raw, dict):
-        raw = raw.get("who", "")
-    who = str(raw or "")
-    await handle.signal(ContentPipelineWorkflow.retry_qc, who)
-    return _ok(
-        {
-            "workflow_id": wf_id,
-            "signal": "retry_qc",
-            "who": who,
-            "delivered": True,
-        }
-    )
+    del args  # 无参可用
+    return _err("signal 子命令已退役（260904 宿主令）：sign/retry_qc 只服务 v1 "
+                "content-pipeline 人门段，该模板已随模版退役删除；人门签字走 "
+                "ticket op=sign，清场/撤销走 cancel。")
 
 
 async def cmd_schedule_list(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -1033,7 +955,8 @@ async def cmd_ticket_archive_legacy(args: Dict[str, Any],
 async def cmd_running_tickets(args: Dict[str, Any]) -> Dict[str, Any]:
     """轻量 RUNNING 工单清单（260824 A 案：console keepalive 的 ensure 数据源）。
 
-    只跑一条 visibility 查询（六模版类 AND ExecutionStatus=Running），不做
+    只跑一条 visibility 查询（v2 模版类 AND ExecutionStatus=Running；260904 起
+    模板仅 dev-lane），不做
     逐张 snapshot query——keepalive 每 15s 调一次，重了会打满 worker。
     返回 [{id, queue}]：queue 从执行本身取（spawn 侧零常量复制）。
     """
@@ -1065,8 +988,10 @@ COMMANDS = {
 }
 
 USAGE = (
-    "用法：python client.py <start|query|signal|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-prune|ticket-archive-legacy> [argsJSON]\n"
+    "用法：python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-prune|ticket-archive-legacy> [argsJSON]\n"
     "安全红线：工具面只暴露上述子命令，无 set-stage / force_stage / 改状态入口。\n"
+    "signal 子命令已退役（260904 宿主令）：调用一律返回结构化退役报错（sign/retry_qc\n"
+    "  只服务 v1 content-pipeline 人门段，该模板已删）；签字走 ticket op=sign。\n"
     "ticket 子命令（步2）：op=advance|accept|rework|update|dispatch-next|sign|query。\n"
     "  v2 引擎（M11 模版即代码）：advance/accept/dispatch-next 已取消（自动推进），\n"
     "  rework=signal 回目标段重跑，sign=人工审批签字，update=状态维护，query 只读。\n"
