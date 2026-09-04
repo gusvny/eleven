@@ -82,6 +82,9 @@ import {
   getClosedSnapshot,
   persistClosed,
 } from './closed-ledger-store.ts'
+// session-charter 端点路径常量（t260904-07）：与 node.ts 路由注册同源派生
+// （方案 R7 防 KI-042 路径漂移）；被引模块零 node 依赖，浏览器包安全（review C1）。
+import { SESSION_CHARTER_PATH } from '../host/session-charter.ts'
 
 export { LEDGER_KEY, CLOSED_LEDGER_KEY }
 
@@ -152,6 +155,8 @@ function writeSeqCounters(map: Record<string, number>): void {
 export interface SessionsFace {
   open(id: string): void
   scope(id: string): any
+  /** 会话域 actx → Session 对象（t260904-07 charter 注入用；可选：运行时面缺失则注入失败就地留痕）。 */
+  sessionOf?(actx: any): any
   refresh?(): Promise<unknown>
   /** 关闭会话（可选；运行时现未提供——提供则关闭钮尽力调用，失败仅 warn）。 */
   close?(id: string): void
@@ -257,6 +262,59 @@ async function waitForStaged(sessions: SessionsFace, prev: string | null | undef
     cur = read()
   }
   return cur ?? prev ?? null
+}
+
+/** 读会话 blank 位（平台语义：新会话零内容=blank）。快照读失败一律视为非
+ *  blank——注入宁可不发，不误注入到读不出状态的会话上。 */
+function isBlankSession(sessions: SessionsFace, id: string): boolean {
+  try {
+    const byId = (sessions.list.getSnapshot()?.byId ?? {}) as Record<string, { blank?: boolean }>
+    return byId[id]?.blank === true
+  } catch { return false }
+}
+
+/**
+ * 会话开局 charter 注入（t260904-07）：blank 新会话恰一次注入项目 charter
+ * （GET /suyou-workbench/api/session-charter?project=<key> 现读现渲染）→
+ * sessions.scope(staged) → sessions.sessionOf(actx) → session.prompt(charter,
+ * 'queue')（平台首条消息正路：blank→engaging，触发一轮 agent 回复=预期
+ * kick-off）。借鉴取舍清单（t260831-08 ⑥ 口径，方案 R1 八项逐项声明）：
+ *   1. 恢复/切换路径不注入——带：仅 handleNew 单路径调用本函数；
+ *   2. 非 blank 二次注入污染——带：blank 守卫（发过首条即非 blank）；
+ *   3. staged 未落定即注入——带：handleNew 已 waitForStaged+null 提前 return；
+ *   4. 「本项目行」归属——由构造保证（startSession 绑项目工作区+账册同帧
+ *      project=pk），不设运行时守卫（冗余）；
+ *   5. 服务端建会话半——不带：本链路走客户端工厂链，服务端只出只读端点；
+ *   6. 旧 API conversation.send——不带：改 session.prompt('queue')；
+ *   7. waitForStaged 超时复用 blank prev——在守卫域内：blank===true 时注入
+ *      命中复用会话=预期（工厂语义），非 blank 被守卫挡掉；
+ *   8. 注入失败不回滚——本方案定死：就地捕获+行内提示，会话创建与注入解耦。
+ * 报错精确纪律（R3，KI-018/025 谎报同族）：全链路 try/catch 就地消化，绝不
+ * 冒泡 handleNew 外层 catch（外层文案=「新建会话失败」，而此刻会话已创建）。
+ * TOCTOU 复核（R5）：prompt 前一刻用最新快照复核 blank 位，网络往返期间用户
+ * 抢先发首条则静默跳过（console.info 留痕——用户已接管对话，提示是噪音）。
+ */
+async function injectSessionCharter(sessions: SessionsFace, staged: string, projectKey: string, notify: (text: string, project?: string) => void): Promise<void> {
+  if (!isBlankSession(sessions, staged)) return
+  try {
+    const res = await fetch(`${SESSION_CHARTER_PATH}?project=${encodeURIComponent(projectKey)}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const text = await res.text()
+    let body: unknown
+    try { body = JSON.parse(text) } catch { throw new Error(`响应非 JSON：${text.slice(0, 80)}`) }
+    const charter = (body as { charter?: unknown } | null | undefined)?.charter
+    if (typeof charter !== 'string' || charter.trim() === '') throw new Error('charter 字段缺失或非字符串（响应体畸形）')
+    if (!isBlankSession(sessions, staged)) {
+      console.info('[workbench] charter 注入跳过：会话已非 blank（用户已抢先发首条）：', staged)
+      return
+    }
+    if (typeof sessions.sessionOf !== 'function') throw new Error('ctx.sessions.sessionOf 未注入（运行时面缺失）')
+    const session = sessions.sessionOf(sessions.scope(staged))
+    await session.prompt(charter, 'queue')
+  } catch (err) {
+    console.error('[workbench] 会话开局 charter 注入失败（会话创建不受影响）：', staged, err)
+    notify('会话开局提示注入失败（详情见控制台），会话已正常创建', projectKey)
+  }
 }
 
 /**
@@ -433,6 +491,11 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
         lastOpenedAt: Date.now(),
         seq,
       }))
+      // 会话开局 charter 注入（t260904-07）：登记完成后，仅当 staged 是 blank
+      // 新会话时恰一次注入（守卫与失败路径全在 injectSessionCharter 内就地
+      // 消化：blank 判定 + prompt 前 TOCTOU 复核 + 不冒泡外层 catch 不回滚
+      // 创建；handleOpen/自愈换绑等恢复/切换路径不接本注入）。
+      await injectSessionCharter(sessions, staged, pk, notify)
     } catch (err) {
       console.error('[workbench] 新建会话请求异常：', err)
       notify('新建会话失败：请求异常（详情见控制台）', pk)

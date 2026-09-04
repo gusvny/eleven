@@ -333,6 +333,16 @@ SCENARIOS = [
     ("t260904-06-spec-card-dom",
      "工单详情「执行规格（spec）」卡渲染契约（t260904-06，宿主拍板 B 形态，真浏览器 S1-only 无 S0 段）：API 边界桩 fixture、浏览器/console/shipped bundle/React 渲染全真——有 spec 票抽屉正文卡正下方出蓝左条卡（恰 1 个、data-v=B、ttl 含「执行规格（spec）」、徽标=spec.length+「 字」、.txt 全文逐字保真、HTML 特殊字符纯文本零注入、border-left 4px rgb(9,105,218)、pre-wrap）；无 spec 字段老票卡不渲染且正文卡照旧零扰动；超长 spec 限高 260px 滚动收敛不撑爆抽屉、badge 仍计全文；全旅程零 pageerror。与 developer L1 spec-card-ui.mjs 三产物字符串锁 intent 分工：本场景只锁 payload→像素真渲染面（L1 锁不住 JSX 运行时错/落位/徽标算错/换行丢失）；bundle 陈旧时本场景以「卡不在 DOM」正确变红，归因归 merge-checks 闸与 t260903-04 bundle-sync；缺隔离台/playwright 干净 SKIP 注明 KI-036 依赖恢复自动生效；refusing 3099 红线（t260904-06）",
      "node integration/t260904-06/sc_spec_card_dom.mjs", "browser"),
+    # ---- t260904-07 项目会话开局注入 session-charter（charter 文件+GET 端点+blank 恰一次注入）----
+    ("t260904-07-charter-source-contract",
+     "charter 交付契约冻结（t260904-07，ro 静态面）：server/dsh/session_charter.md 与宿主定稿真源（notes/discussions/260904-project-session-charter.md 附录 fenced 模板）逐字同步——该文件是「当前在案授权」授权档案第一环（git 版本化），漂移=授权声明与定稿脱钩，宿主合法定稿变更须两处同步（回真源补口径后自回绿）；结构要素在文（四占位符/两纪律语义锚：notes 落盘攒批+点名修复先告知/当前在案授权节在/sandbar、suyou 两分段）；端点注册路径与客户端请求路径两侧各自可解析到同一路径字面量（直字面量或同源常量两实现形态都过——KI-042 同族「路径漂移→恒 404 静默吞」的对症看守）；内置回落模板在位含占位符（缺文件回落不 5xx 的前提）。与随票 smoke intent 级不同层：smoke 锚实现守卫源锚（L1/L2），本条锚交付物↔宿主定稿真源一致性与跨端接线一致性。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "node integration/t260904-07/sc_session_charter_source_contract.mjs", "ro"),
+    ("t260904-07-charter-endpoint-live",
+     "charter 端点活体契约（t260904-07，ro fetch 级，隔离台 3199 拒 3099）：GET session-charter?project=<key> 部署后可感知契约——命中项目 200+{ok,charter}+key 实值化+零 {{ 残留（统一渲染）+命中分段头在文；未命中项目仍 200 只回通用段+无该 key 分段+{{project_name}} 弱化=key；缺/空串 project=400 形状错误 JSON 不崩不 5xx；404 时源锚复核精确归因（源码已接线未部署=fail，pre-merge=干净 skip 部署后自动生效）。与随票 smoke intent 级不同层：smoke 直测渲染纯函数（内存面），本条锚 HTTP 可达面（真宿主真文件真路由）；「文件缺失回落」「改文件即生效」需对受控文件写操作不在活体腿，回落归 smoke 纯函数直测、现读现渲染列人工走查",
+     "node integration/t260904-07/sc_session_charter_endpoint_live.mjs", "ro"),
+    ("t260904-07-charter-injection-journey",
+     "charter 注入用户旅程（t260904-07，browser 隔离台）：项目行点 + 新建会话不输入任何内容即见 charter 为首条消息（占位符实值化无 {{ 残留——「每个 session 创建时注入我们想要的 prompt」原话验收面）+截图证据落 .suyou/screenshots/（KI-044 UI 票证据自觉）；随后切换相邻 tab 再切回、reload 重进既有会话，charter 特征串出现次数恒定+tab 集合不变（守卫：恢复/切换路径绝不注入，沿 t260831-08 ⑥ 口径）；console 卫生零 error（过滤无凭据环境已知凭据类噪音）。断言上限=注入链 UI 面，agent kick-off 回复链不在断言面（无凭据隔离台已知限制，有凭据环境人工复判）；未上屏且仅凭据类错误=干净 skip 不假红。与 t260904-05 生命周期场景（tab 形态/续号/关闭链）intent 级不同层：本条锚注入内容可感知行为",
+     "node integration/t260904-07/sc_session_charter_injection_journey.mjs", "browser"),
 ]
 
 CMD_TIMEOUT = 900

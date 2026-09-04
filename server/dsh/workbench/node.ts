@@ -136,6 +136,7 @@ import { readAgentLiveTail, resolveSessionFile } from './src/host/agent-live.ts'
 import { aggregateTicketUsage, resolveAllSessionFiles, stageWindowsFromTimeline } from './src/host/agent-usage.ts'
 import { buildMetricsResponse, defaultDeps } from './src/host/metrics.ts'
 import { computeHostFingerprint, type HostFingerprint } from './src/host/build-info.ts'
+import { SESSION_CHARTER_PATH, composeSessionCharter } from './src/host/session-charter.ts'
 import { closeEpic, isEvidenceFileName, listEpics, readEpicMarkdown, resolveEpicsDir, setEpicStatus } from './src/host/epics.ts'
 import {
   dismissPrecache, findRunningJob, pollSuggestJob, precacheExists, readPrecache,
@@ -996,6 +997,53 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
   }
 
   /**
+   * 会话开局 charter 读侧（t260904-07，只读）：GET /suyou-workbench/api/session-charter?project=<key>。
+   * 每次请求现读 <repo>/server/dsh/session_charter.md（改文件即生效，只影响
+   * 之后新建的会话）。渲染纯函数在 src/host/session-charter.ts（smoke 直测）：
+   * 通用模板占位符现填（engine_root=repo，本仓根）+ 命中 ## project:<key>
+   * 分段原文追加（段内占位符统一渲染）。项目名/主目录从注册表现查
+   * （findProject），查不到/注册表异常 → name=key、dir=''，端点仍 200——
+   * 注册表异常不拖垮注入链。文件缺失/读失败/空/渲染结果空 → 回落插件内置
+   * 兜底模板（composeSessionCharter 内收口），恒 200 不 5xx：charter 只是
+   * 新建会话的开局注入源，端点不该挡会话创建。project query 缺失或空串=
+   * 400 形状错误（与路由 404 形状同族，不崩）。
+   */
+  async function handleSessionCharter(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (req.method !== 'GET') {
+      sendJson(res, 405, { ok: false, error: 'session-charter 只支持 GET（只读）' })
+      return
+    }
+    const url = new URL(req.url ?? '/', 'http://x')
+    const project = (url.searchParams.get('project') ?? '').trim()
+    if (project === '') {
+      sendJson(res, 400, { ok: false, error: 'session-charter 缺 project query：' + SESSION_CHARTER_PATH + '?project=<key>' })
+      return
+    }
+    let projectName = project
+    let projectDir = ''
+    try {
+      const p = findProject(project)
+      if (p) {
+        projectName = p.name
+        projectDir = primaryDir(p) || ''
+      }
+    } catch { /* 注册表异常（如条目隔离）→ 兜底 name=key、dir=''，链路不断 */ }
+    let raw = ''
+    try {
+      raw = await readFile(join(repo, 'server', 'dsh', 'session_charter.md'), 'utf8')
+    } catch (err) {
+      ctx.logger.warn('suyou-workbench: session_charter.md 读取失败，回落内置兜底模板：%s', String(err instanceof Error ? err.message : err))
+    }
+    const charter = composeSessionCharter(raw, project, {
+      projectKey: project,
+      projectName,
+      primaryDir: projectDir,
+      engineRoot: repo,
+    })
+    sendJson(res, 200, { ok: true, project, charter, source: raw.trim() !== '' ? 'file' : 'fallback' })
+  }
+
+  /**
    * metrics 读侧聚合（t260901-20，只读，M1a）：GET /suyou-workbench/api/wf/metrics。
    * 聚合唯一实现在 src/host/metrics.ts（与 metrics-cli.mjs CLI 前门同函数同缓存，
    * 契约块 2「同实现同缓存」）；本 handler 只做 query 透传（同名重复参数由
@@ -1602,6 +1650,9 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/workers', handler: handleWorkers }),
         ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/scan-report', handler: handleScanReport }),
         ws.register({ kind: 'exact', path: '/suyou-workbench/api/build-info', handler: handleBuildInfo }),
+        // 会话开局 charter 读侧（t260904-07）：路径同源常量（src/host/session-charter.ts
+        // SESSION_CHARTER_PATH），客户端 fetch URL 与此处注册逐字同源，防 KI-042 漂移。
+        ws.register({ kind: 'exact', path: SESSION_CHARTER_PATH, handler: handleSessionCharter }),
         ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/metrics', handler: handleMetrics }),
         ws.register({ kind: 'exact', path: EPICS_PREFIX, handler: handleEpics }),
         ws.register({ kind: 'prefix', path: EPICS_PREFIX, handler: handleEpicRoute }),

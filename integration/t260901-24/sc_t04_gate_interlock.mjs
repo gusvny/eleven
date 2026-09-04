@@ -14,6 +14,11 @@
  *     该形态改验「拒跑+报因精确、可跑前段计绿不假报」，见 capture-lane selftest 节。
  *
  * 全部子进程干跑（--selftest / 参数错误路径），不 boot 控制台、不开浏览器、不碰 3099。
+ *
+ * t260904-07 仲裁迭代（tests-fault 修正）：capture-lane selftest 段补环境前提卫兵——
+ * <repo>/server/dsh/profile/node_modules 软链族是环境工件不入 git，fresh worktree 泳道
+ * 布局缺失时该段三腿曾假红（违反「依赖缺失一律干净 SKIP」执行契约）；缺失→SKIP+归因，
+ * 前提在位环境断言面逐条不变。
  */
 
 import { spawnSync } from 'node:child_process'
