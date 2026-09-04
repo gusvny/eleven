@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260905-02",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "给引擎行为补上场景看守",
+  "user_request": "做什么：引擎生命周期行为补场景——worker 生命周期（起/退/指纹门）、收口自退（票完 worker 自退不留尾巴）、多 console 防重（两 console 同槽互斥辨析文案）。\n为什么：engine-hardening epic 验收后按需再立项的面，260904 夜间授权放开；这些行为现在只有实现没有看守，回归无感知。\n怎么算好：三类行为各至少一场景（正常路径+一次异常路径）；全绿入登记；不引入新环境依赖（现有台够用）。",
+  "spec": "依据=notes/epics/engine-hardening.md 后续面（引擎行为场景扩展）；范围=integration/ 新场景族+登记；如需测试钩子（worker 自退观测点）动 temporal-poc 最小面。验收：①三类场景绿且入 run_scenarios 登记；②lint 三元组完整；③verify_lane code 绿。",
+  "write_set": ["integration/", "server/dsh/temporal-poc/"],
+  "deliverables": "worker 生命周期/收口自退/多 console 防重三族场景"
+}

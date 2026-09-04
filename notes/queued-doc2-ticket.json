@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260905-01",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "让文档沉淀在工单收口时被问一句",
+  "user_request": "做什么：收口流程加两问——①票收口时问一句「本票产出要不要沉淀成文档」（沉淀触发器：票级一问，agent 预填建议，人不答不阻塞收口）；②收口时反向同步闸（这票改的实现跟既有文档说法矛盾吗？矛盾则登记债条目，债登记纪律进流程）。\n为什么：doc-lifecycle 病根=沉淀无触发器（干完活没人问一句，知识库更新全靠人想起来）；收口是唯一必经点，两问顺路。\n怎么算好：收口流程带出两问且不阻塞；预填建议有内容（agent 从 deliverables 推）；矛盾登记落 known-issues 或 docs 债册；触发器/闸各带防回退场景；面C 写集开放部分不重复建设（交叉引用 260904-write-set-reform）。",
+  "spec": "依据=notes/epics/doc-lifecycle.md §五 票②（面A＋C，引擎票）；范围=dev_lane.py/agent_activities.py acceptance 面两问+shared 常量+integration 防回退场景。注意与 260904-write-set-reform.md 的面C 交叉引用不重复建设。验收：①收口回执含两问记录（不答不阻塞有实证）；②矛盾登记可查；③防回退场景绿；④verify_lane code 绿+merge 预演。",
+  "write_set": ["server/dsh/temporal-poc/", "integration/"],
+  "deliverables": "沉淀触发器（票级一问）+反向同步闸（收口一问+债登记）+防回退场景"
+}
