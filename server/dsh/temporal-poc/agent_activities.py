@@ -80,13 +80,15 @@ from shared import (
     TEMPLATE_CLASS_NAMES,
     UI_EVIDENCE_DIR,
     EVIDENCE_DIR,
+    UiChangedPathsArgs,
+    UiChangedPathsResult,
     UiEvidenceArgs,
     UiEvidenceResult,
     WorkspacePrep,
     WorkspacePrepResult,
     epic_next_precache_path,
     epic_state_key,
-    is_ui_write_set,
+    match_ui_paths,
     model_route_for,
     roles_dir_for_spawn,
     routes_file_for_spawn,
@@ -1483,6 +1485,31 @@ def _merge_base_ref(branch: str, repo: Path) -> Tuple[str, str]:
     return ref, ""
 
 
+def _ui_diff_paths(lane_repo: Path, wl_base: str, branch: str) -> Tuple[List[str], str]:
+    """UI 票判定的 diff 侧共享谓词（KI-044 根修，t260904-13）：
+    `git diff --name-only <wl_base>...branch` 的实际改动路径 × shared.match_ui_paths
+    前缀表 → (命中 UI 路径, 错误留痕)。
+
+    「两处调用同一源」的机制保证：ui_changed_paths activity 与 merge_check 3.6 都走
+    本函数——谓词入口只有 match_ui_paths 一处，diff 口径（三点/锚泳道仓/基线来源）
+    也只有这里一份，改口径不会两边漂。
+
+    wl_base 由调用方用 _merge_base_ref 求得（merge-base(main, branch) 锚泳道仓，
+    t260901-18/t260903-11 同族；不回落字面 main——两点 diff 下泳道落后即误判）。
+    fail-closed：wl_base/branch 缺失或 git diff 失败 → (空清单, 错误文案)，调用方
+    按「UI 票待证」处理，不静默 SKIP。子进程同 _git 族现状：同步 run + 有界
+    timeout（超时 raise 由调用方转红），取消即时性属家族既有债不虚标。"""
+    if not wl_base or not branch:
+        return [], "UI diff 基线缺失（wl_base=%r branch=%r），fail-closed" % (wl_base, branch)
+    p = _git(["diff", "--name-only", "%s...%s" % (wl_base, branch)], lane_repo)
+    if p.returncode != 0:
+        return [], "git diff %s...%s 失败 rc=%s：%s" % (
+            wl_base, branch, p.returncode,
+            ((p.stderr or p.stdout or "").strip())[-300:])
+    files = [ln.strip() for ln in (p.stdout or "").splitlines() if ln.strip()]
+    return match_ui_paths(files), ""
+
+
 def _parse_conflict_files(merge_tree_output: str) -> List[str]:
     """从 `git merge-tree --write-tree` 冲突输出（git≥2.38）解析冲突文件清单（纯函数）。
 
@@ -1567,6 +1594,7 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
         wt = REPO_ROOT / wt
     lane_repo = _lane_repo_root(wt)  # 跨项目（t260903-11 第五枪）：分支/merge-tree 查泳道所属仓
     checks: List[Dict[str, Any]] = []
+    wl_base = ""  # 第 3 项算出的 merge-base 基线（3.6 UI 判定复用；第 3 项异常未及赋值时为空，3.6 fail-closed 自算）
 
     # 0. KI-009（t260901-25）：dirty 红灯前自动补 settle（写集内自愈），前置段。
     # 放在 item 1 之前：自愈补的 commit 让 item 1（泳道有 commit）与 item 2 同读
@@ -1719,25 +1747,44 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
         checks.append({"item": "bundle 新鲜度（%s）" % MERGE_CHECKS_CFG, "green": False,
                        "detail": "扩展检查异常: %s" % e})
 
-    # 3.6 UI 证据闸（t260828-09，纯机械查、无 agent）：write_set 命中 UI 口径
-    #     （shared.is_ui_write_set）而泳道 .suyou/screenshots/ 无 png → 红。
+    # 3.6 UI 证据闸（t260828-09，纯机械查、无 agent）。KI-044 根修（t260904-13）：
+    #     判定源从声明写集（is_ui_write_set——t260904-05 实证粗目录声明即可绕过：
+    #     声明口径 ≠ 实际写面）换成**实际 diff 路径**：_ui_diff_paths 与
+    #     ui_changed_paths activity 同源（谓词+diff 口径双同源），基线复用第 3 项
+    #     已算出的 wl_base（异常未及赋值时 fail-closed 自算并留痕）。
+    #     diff 命中 UI 路径（或 diff 本身故障）而无 png → 红；两时点 diff 变化由此
+    #     兜住——ui_evidence 段拍完又改 UI，本闸重算必红，红灯交 workflow 转
+    #     blocked 等人（人工 rework 以 ui_evidence 为合法 target 补拍），证据必须
+    #     覆盖最终 diff。命中路径写进 detail（gate 记录可检索）。
     #     处置指引直接给命令，integration 或 developer 可自行补跑 capture.mjs。
     #     已知盲区（v1 接受）：只查存在性，不校验截图时间戳/内容——防呆靠
     #     integration_review 的看图钩子（审读 prompt 带截图 mtime 清单）。
     #     同样插在 merge 预演之前（预演须保持 checks 末位，见 3.5 注释）。
     try:
-        ui_gate_red = False
-        if is_ui_write_set(args.write_set):
+        base_36 = wl_base
+        base_note = ""
+        if not base_36:
+            base_36, base_err = _merge_base_ref(args.branch, lane_repo)
+            base_note = ("（wl_base 第 3 项未产出、此处自算%s）"
+                         % ("失败 fail-closed" if not base_36 else "取 %s" % base_36[:7]))
+            if base_36 and base_err:  # 自算带畸形留痕，不静默
+                base_note = "（wl_base 此处自算，带畸形留痕：%s）" % base_err[-120:]
+        ui_paths, diff_err = _ui_diff_paths(lane_repo, base_36, args.branch)
+        judge = "按 diff 判定（%s...%s）%s：%s" % (
+            (base_36 or "?")[:7], args.branch, base_note,
+            ("命中 %d 个 UI 路径：%s" % (len(ui_paths), "、".join(ui_paths[:8]))) if ui_paths
+            else ("diff 故障 fail-closed：%s" % (diff_err or "基线缺失")))
+        if ui_paths or diff_err or not base_36:
             shots_dir = wt / UI_EVIDENCE_DIR
             pngs = sorted(shots_dir.glob("*.png")) if shots_dir.is_dir() else []
             ui_gate_red = not pngs
             checks.append({
                 "item": "UI 截图证据（%s）" % UI_EVIDENCE_DIR,
                 "green": not ui_gate_red,
-                "detail": ("%d 张截图在位：%s" % (len(pngs), "、".join(p.name for p in pngs[:5])))
+                "detail": ("%s｜%d 张截图在位：%s" % (judge, len(pngs), "、".join(p.name for p in pngs[:5])))
                           if pngs else
-                          "UI 票缺截图证据：跑 server/dsh/ui-check/capture.mjs "
-                          "--out <worktree>/%s（worker 代跑，只读控制台页面）" % UI_EVIDENCE_DIR})
+                          ("%s｜UI 票缺截图证据：跑 server/dsh/ui-check/capture.mjs "
+                           "--out <worktree>/%s（worker 代跑，只读控制台页面）" % (judge, UI_EVIDENCE_DIR))})
     except Exception as e:
         checks.append({"item": "UI 截图证据", "green": False, "detail": "证据闸异常: %s" % e})
 
@@ -2640,6 +2687,41 @@ def _ui_capture_stub(args: UiEvidenceArgs, shots_dir: Path) -> UiEvidenceResult:
 
 
 @activity.defn
+async def ui_changed_paths(args: UiChangedPathsArgs) -> UiChangedPathsResult:
+    """UI 票判定换 diff 源（KI-044 根修，t260904-13）：按泳道分支**实际改动路径**
+    判是不是 UI 票——`git diff --name-only <merge-base>...branch` × UI_WRITE_PREFIXES，
+    返回命中的 UI 路径清单。用户拍板口径（260904）：ui_evidence 段调用一次定「拍不拍」，
+    merge_check 3.6 再算一次定「要不要证据」——两处调用同一源（_ui_diff_paths，
+    谓词入口只有 shared.match_ui_paths 一处），两时点 diff 变化由 3.6 fail-closed 兜底。
+
+    基线用 _merge_base_ref（本体复用，故障行为自动全带：rc≠0 fail-closed / 多行
+    畸形取首行留痕 / 空输出判失败 / 不回落 main 字面——t260901-18/t260903-11 同族锚）。
+    fail-closed：merge-base 或 diff 任一失败 → ui_paths 空 + detail 带错误，调用方
+    按「UI 票待证」处理（拍、闸兜底），不静默 SKIP。
+    子进程口径同 _git/_diff_stat 族现状：同步 run + 有界 timeout（超时异常由 Temporal
+    重试语义接），取消即时性属家族既有债，本票不扩大。"""
+    wt = Path(args.worktree) if args.worktree else REPO_ROOT
+    if not wt.is_absolute():
+        wt = REPO_ROOT / wt
+    lane_repo = _lane_repo_root(wt)
+    wl_base, wl_err = _merge_base_ref(args.branch, lane_repo)
+    if not wl_base:
+        detail = "ui_changed_paths fail-closed：merge-base 解析失败：%s" % wl_err
+        activity.logger.info("[%s] %s", args.ticket_id, detail)
+        return UiChangedPathsResult(ui_paths=[], detail=detail)
+    ui_paths, diff_err = _ui_diff_paths(lane_repo, wl_base, args.branch)
+    if diff_err:
+        detail = "ui_changed_paths fail-closed：%s" % diff_err
+        activity.logger.info("[%s] %s", args.ticket_id, detail)
+        return UiChangedPathsResult(ui_paths=[], detail=detail)
+    detail = ("按 diff 判定（merge-base %s...%s，锚泳道仓 %s）：命中 %d 个 UI 路径%s"
+              % (wl_base[:7], args.branch, lane_repo.name, len(ui_paths),
+                 ("：%s" % "、".join(ui_paths[:8])) if ui_paths else "（非 UI 票）"))
+    activity.logger.info("[%s] %s", args.ticket_id, detail)
+    return UiChangedPathsResult(ui_paths=ui_paths, detail=detail)
+
+
+@activity.defn
 async def prepare_ui_evidence(args: UiEvidenceArgs) -> UiEvidenceResult:
     """UI 票截图证据（t260828-09）：worker（无沙箱）代跑 ui-check/capture.mjs，
     截控制台默认页 + chat 态两张图落 <worktree>/.suyou/screenshots/。
@@ -2962,6 +3044,10 @@ ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     prepare_epic_next, suggest_next,
     prepare_ui_evidence,
     verify_review_gate,
+    # KI-044 根修（t260904-13）：UI 票判定换 diff 源——ui_evidence 段算一次定「拍不拍」、
+    # merge_check 3.6 再算一次定「要不要证据」，两处同源 _ui_diff_paths。漏注册=worker
+    # 不认、运行时才暴露，selfcheck 有注册断言（selfcheck_ui_acceptance B 段）。
+    ui_changed_paths,
     # 集成测试机制（t260829-07 后续）：settle_lane=汇合点统一落盘；
     # run_integration_tests=机械测试步（零 LLM）；arbitrate/acceptance_walkthrough
     # 为 integration 专用 agent 步（prompt 由 workflow 组好，走会话复用），

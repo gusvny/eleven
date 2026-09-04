@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""T05 合并闸口径接线锁：merge_check 三处 diff base 各归各位。
+"""T05 合并闸口径接线锁：merge_check 四处 diff base 各归各位。
 
 merge_check 是 Temporal activity（worktree 无 temporalio 环境跑不了整体），
 本用例对其源码做结构断言，锁住 t260901-16 的接线约定：
   第 3 项 verify_lane 的 base 用当前 main 口径（不许再传建票钉死的 args.base_ref）；
   第 3.5 项 bundle_pairs diff 用 main...branch 三点；
   第 1 项「泳道有 commit」保持 base_ref..branch（防快进后误判 0 commit）。
+  （t260904-13 KI-044 增第四处：3.6 UI 证据闸判定走 _ui_diff_paths 的
+  <merge-base>...lane 三点 diff——由 selfcheck_ui_acceptance B 段源码锁与
+  tests/test_ki044_ui_changed_paths.py 装配级用例把守，本文件不重复锁。）
 """
 import re
 import sys

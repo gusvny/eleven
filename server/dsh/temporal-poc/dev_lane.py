@@ -59,6 +59,7 @@ with workflow.unsafe.imports_passed_through():
         settle_lane,
         suggest_next,
         teardown_lane,
+        ui_changed_paths,
         verify_review_gate,
     )
     from shared import (
@@ -96,6 +97,8 @@ with workflow.unsafe.imports_passed_through():
         Stage,
         StageResult,
         TicketInput,
+        UiChangedPathsArgs,
+        UiChangedPathsResult,
         UiEvidenceArgs,
         UiEvidenceResult,
         WorkspacePrep,
@@ -135,6 +138,14 @@ INTEG_LOOP_PATCH_ID = "dev-lane-integration-tests"
 # t260828-09 UI 验收机制：prepare_ui_evidence 新步 + merge_check UI 证据闸 + 看图审读钩子。
 # 同构布尔门：挂起中旧 workflow 重放不走新分支；不 bump PATCH_ID。
 UI_EVIDENCE_PATCH_ID = "dev-lane-ui-evidence"
+# t260904-13 KI-044 根修：UI 票判定换 diff 源——ui_evidence 段改调 ui_changed_paths
+# （实际 diff 路径 × UI 前缀表，与 merge_check 3.6 同源 _ui_diff_paths）。同构布尔门：
+# 挂起中旧 workflow 重放保留 is_ui_write_set 声明口径旧分支（命令序列与旧历史一致），
+# 不 bump PATCH_ID。不复用 UI_EVIDENCE_PATCH_ID：复用会让「已 patch UI 证据、未 patch
+# diff 源」的存量 RUNNING 实例重放时走新 activity 命令，旧历史无对应事件即破；
+# 独立 id 使新旧分支严格对齐既有历史。旧链尾（integration_review 分支）存量独占、
+# 冻结旧口径零改动，见该处。
+UI_DIFF_PATCH_ID = "dev-lane-ui-diff-v1"
 # t260829-07 写集生命周期：方案定稿后写集跟随方案刷新（并集），空初始写集票由此
 # 在方案定稿后获得护栏。同构布尔门：挂起中旧 workflow 重放不走新分支；不 bump PATCH_ID。
 REFRESH_WRITE_SET_PATCH_ID = "dev-lane-refresh-write-set"
@@ -1056,10 +1067,42 @@ class DevLaneWorkflow:
                     lane_commits=int(sraw.get("lane_commits") or -1))
                 self._log("汇合统一落盘：%s（泳道 commit 数 %s）"
                           % (s.note or "干净", s.lane_commits))
-                # UI 证据（UI 票）：落盘后、机械测试前由 worker 代跑隔离台（软失败闸兜底）
+                # UI 证据（UI 票）：落盘后、机械测试前由 worker 代跑隔离台（软失败闸兜底）。
+                # UI 票判定（t260904-13 KI-044）：patched 门内换 diff 源——activity 与
+                # merge_check 3.6 同源；未 patch（挂起中存量实例重放）保留声明口径旧
+                # 分支，命令序列与旧历史严格一致。旧链尾（integration_review 分支）
+                # 冻结旧口径零改动，见该处。
                 ui_ctx = ""
-                if workflow.patched(UI_EVIDENCE_PATCH_ID) and \
-                        is_ui_write_set(list(self.meta.get("write_set") or [])):
+                ui_is_ticket = False
+                ui_judge_note = ""
+                if workflow.patched(UI_EVIDENCE_PATCH_ID):
+                    if workflow.patched(UI_DIFF_PATCH_ID):
+                        try:
+                            craw = await workflow.execute_activity(
+                                ui_changed_paths,
+                                UiChangedPathsArgs(
+                                    ticket_id=self.ticket_id,
+                                    worktree=str(self.meta.get("worktree") or ""),
+                                    branch=str(self.meta.get("branch") or ""),
+                                    base_ref=str(self.meta.get("base_ref") or "")),
+                                start_to_close_timeout=UI_EVIDENCE_TO,
+                                retry_policy=RETRY)
+                            cp = craw if isinstance(craw, UiChangedPathsResult) else UiChangedPathsResult(
+                                ui_paths=[str(x) for x in (craw.get("ui_paths") or [])],
+                                detail=str(craw.get("detail") or ""))
+                            ui_is_ticket = bool(cp.ui_paths)
+                            ui_judge_note = cp.detail or (
+                                "diff 未命中 UI 路径 → 非 UI 票，跳过实拍" if not ui_is_ticket else "")
+                        except Exception as e:
+                            # fail-closed：activity 故障按「UI 票待证」处理（拍，闸兜底）
+                            ui_is_ticket = True
+                            ui_judge_note = ("ui_changed_paths 故障 fail-closed：%s: %s"
+                                             % (type(e).__name__, e))
+                        self._log("UI 票判定（diff 源）：%s" % ui_judge_note)
+                    else:
+                        # 未 patch 分支（存量实例重放）：声明口径判定原样保留
+                        ui_is_ticket = is_ui_write_set(list(self.meta.get("write_set") or []))
+                if workflow.patched(UI_EVIDENCE_PATCH_ID) and ui_is_ticket:
                     try:
                         uiraw = await workflow.execute_activity(
                             prepare_ui_evidence,
@@ -1073,7 +1116,10 @@ class DevLaneWorkflow:
                         self.results["ui_evidence"] = {
                             "status": "ok" if ui.ok else "failed",
                             "summary": ui.detail, "report": "", "deliverables": list(ui.shots),
-                            "files_changed": [], "evidence": ui.detail, "gen": 0}
+                            "files_changed": [],
+                            "evidence": (("【UI 票判定（diff 源）】%s\n" % ui_judge_note)
+                                         if ui_judge_note else "") + ui.detail,
+                            "gen": 0}
                         if ui.ok:
                             ui_ctx = "【UI 截图证据（.suyou/screenshots/，验收必看）】\n" + \
                                 "\n".join("- %s" % ln for ln in (ui.shot_lines or ui.shots))

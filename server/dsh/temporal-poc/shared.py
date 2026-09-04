@@ -1229,21 +1229,40 @@ UI_EVIDENCE_DIR = ".suyou/screenshots"
 EVIDENCE_DIR = ".suyou/evidence"
 
 
-def is_ui_write_set(write_set: Any) -> bool:
-    """写集命中 UI 口径即 UI 票（纯函数，无 IO）。
+def match_ui_paths(paths: Any) -> List[str]:
+    """路径清单 × UI 口径前缀表 → 命中的 UI 路径（保序去重，纯函数，无 IO）。
 
-    容错：元素两端空白 strip；非字符串元素忽略；None/空集 → False。
-    路径按仓库相对路径前缀比对。"""
-    if not write_set:
-        return False
-    for w in write_set:
+    KI-044 根修（t260904-13）的谓词单点入口：UI 票判定吃**实际 diff 路径**
+    （git diff --name-only <merge-base>...branch 的产物 × 本函数），不吃声明写集
+    ——声明口径 ≠ 实际写面，粒度越粗关卡越弱（t260904-05 实证：声明整个父目录
+    即绕过）。is_ui_write_set（声明写集判定，KI-044 后仅存 review_gate 机械复核
+    与 dev_lane 旧链尾冻结分支）委托本函数单点维护，前缀表膨胀收窄只改
+    UI_WRITE_PREFIXES 一处。
+    容错：非列表/元组、None、空集 → 空清单；元素两端空白 strip；非字符串元素
+    忽略；路径按仓库相对路径前缀比对。"""
+    if not paths or not isinstance(paths, (list, tuple)):
+        return []
+    hits: List[str] = []
+    for w in paths:
         if not isinstance(w, str):
             continue
         p = w.strip()
         for pref in UI_WRITE_PREFIXES:
             if p == pref.rstrip("/") or p.startswith(pref):
-                return True
-    return False
+                if p not in hits:
+                    hits.append(p)
+                break
+    return hits
+
+
+def is_ui_write_set(write_set: Any) -> bool:
+    """写集命中 UI 口径即 UI 票（纯函数，无 IO）——委托 match_ui_paths 单点维护。
+
+    KI-044（t260904-13）后本函数仅存两处合法调用面：review_gate 机械复核
+    （dev_lane，声明口径语义）与旧链尾冻结分支（存量实例重放兼容）；UI 票判定
+    主通路已换 diff 源（ui_changed_paths activity 与 merge_check 3.6 共用
+    agent_activities._ui_diff_paths），勿在新判定路径再引入本函数。"""
+    return bool(match_ui_paths(write_set))
 
 
 def _valid_write_set_entry(p: Any) -> bool:
@@ -1392,6 +1411,24 @@ class UiEvidenceResult:
     shot_lines: List[str] = field(default_factory=list)
     detail: str = ""                          # 失败原因 / 成功摘要（给 prompt 与 gate 留痕）
     skipped: bool = False                     # 非 UI 票跳过时置真（兜底语义，正常由 workflow 侧守卫）
+
+
+@dataclass
+class UiChangedPathsArgs:
+    """ui_changed_paths activity 入参（t260904-13 KI-044 根修：UI 票判定换 diff 源）。"""
+
+    ticket_id: str
+    worktree: str = ""                        # 泳道 worktree 路径（diff 锚泳道所属仓，_lane_repo_root）
+    branch: str = ""                          # 泳道分支名
+    base_ref: str = ""                        # 建票基点（留痕/回放兼容；diff 基线走 merge-base，不吃钉死基点）
+
+
+@dataclass
+class UiChangedPathsResult:
+    """ui_changed_paths 回执（git 失败不抛——ui_paths 空即 fail-closed，调用方按「UI 票待证」处理）。"""
+
+    ui_paths: List[str] = field(default_factory=list)  # diff 命中 UI 口径的路径（保序）
+    detail: str = ""                          # 判定口径与错误留痕（log / results evidence 消费）
 
 
 @dataclass

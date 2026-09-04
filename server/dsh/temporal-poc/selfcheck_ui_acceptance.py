@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""UI 验收机制自测（t260828-09）：口径 + 证据闸 + 截图通道桩跑。
+"""UI 验收机制自测（t260828-09；t260904-13 KI-044 扩）：口径 + 证据闸 + 截图通道桩跑。
 
 零 Temporal server / 零模型。覆盖：
-  A. is_ui_write_set 口径：命中各前缀 / 精确文件（app/index.html）/ 未命中 /
-     空集与 None / 畸形输入（None 元素、非字符串、首尾空白）；
-  B. merge_check UI 证据闸（纯机械段，不走 Temporal）：构造 UI 票 write_set +
-     空 screenshots 目录 → 检查项红且文案含处置指引；有 png → 绿。
-     实现方式：import merge_check 所在模块直接调 activity 函数会拉起 Temporal
-     装饰器依赖，故本自测对闸段做**逻辑等价**断言——调 shared.is_ui_write_set
-     判票 + glob png 计数，与 agent_activities.merge_check 3.6 段同一口径；
-     再用源码文本断言锁死闸确实挂在 merge_check 内（防漂移）；
+  A. match_ui_paths / is_ui_write_set 口径：命中各前缀 / 精确文件（app/index.html）/
+     未命中 / 空集与 None / 畸形输入（None 元素、非字符串、首尾空白）。KI-044 后
+     票判定主通路=match_ui_paths × 实际 diff 路径；is_ui_write_set 声明口径仅存
+     review_gate 机械复核与 dev_lane 旧链尾冻结分支（存量实例重放兼容）；
+  B. merge_check UI 证据闸：判定×png 存在性的条件等价 + 源码锁（判定吃 diff 源、
+     不再吃声明写集、红灯文案带处置指引、新 activity 注册清单在位）。真装配级
+     （临时 git 仓真跑 merge_check）在 tests/test_ki044_ui_changed_paths.py；
   C. prepare_ui_evidence 桩跑：SUYOU_UI_CAPTURE_STUB=1 环境下直接调 activity
      函数（activity.defn 装饰过的函数本体可直接调用），断言两张 png 落盘、
      shot_lines 带 mtime；畸形输入：脚本不存在 → ok=False 回执不抛；
@@ -39,6 +38,7 @@ from shared import (  # noqa: E402
     UI_EVIDENCE_DIR,
     UiEvidenceArgs,
     is_ui_write_set,
+    match_ui_paths,
 )
 
 PASS = 0
@@ -77,26 +77,39 @@ ok(not is_ui_write_set([]), "空写集 → False")
 ok(not is_ui_write_set(None), "None → False")
 ok(not is_ui_write_set([None, 123, True]), "非字符串元素全忽略 → False")
 ok(is_ui_write_set(["  app/src/main.ts  "]), "首尾空白 strip 后命中")
+# KI-044（t260904-13）：票判定主通路已换 diff 源——match_ui_paths × 实际 diff 路径
+# （ui_changed_paths activity / merge_check 3.6 同源 agent_activities._ui_diff_paths）；
+# 上面的 is_ui_write_set 声明口径仅存 review_gate 机械复核与旧链尾冻结分支。
+ok(match_ui_paths(["server/dsh/workbench/lib/workbench.js"]) ==
+   ["server/dsh/workbench/lib/workbench.js"], "match_ui_paths 命中（diff 源谓词）")
+ok(match_ui_paths(["server/dsh/workbench/"]) == [],
+   "粗目录声明不命中（t260904-05 绕过形态，正是换 diff 源的根因）")
+ok(match_ui_paths(["  app/src/main.ts ", None, 42]) == ["app/src/main.ts"],
+   "match_ui_paths 容错：strip / 非字符串元素忽略")
+ok(match_ui_paths("app/src/main.ts") == [], "match_ui_paths 非列表输入 → 空清单")
 
-# ---------- B. merge_check UI 证据闸（口径等价断言） ----------
+# ---------- B. merge_check UI 证据闸（判定×png 条件等价 + 源码锁） ----------
 section("B merge_check UI 证据闸")
 with tempfile.TemporaryDirectory() as td:
     wt = Path(td)
     shots = wt / UI_EVIDENCE_DIR
-    # UI 票 + 无截图目录 → 红（等价 merge_check 3.6 段判定逻辑）
-    is_ui = is_ui_write_set(["app/src/main.ts"])
+    # KI-044（t260904-13）：判定源=实际 diff 路径 × match_ui_paths（_ui_diff_paths）。
+    # 此处只做「判定命中 × png 存在性」的闸条件等价；真装配级（临时 git 仓真跑
+    # merge_check：红/绿/纯引擎票不出项）在 tests/test_ki044_ui_changed_paths.py。
+    is_ui = bool(match_ui_paths(["server/dsh/workbench/lib/workbench.js"]))
     pngs = sorted(shots.glob("*.png")) if shots.is_dir() else []
-    ok(is_ui and not pngs, "UI 票 + 空 screenshots → 闸红条件成立")
-    # 落一张 png → 绿
+    ok(is_ui and not pngs, "diff 命中 UI + 空 screenshots → 闸红条件成立")
     shots.mkdir(parents=True)
     (shots / "console-default.png").write_bytes(b"png")
     pngs = sorted(shots.glob("*.png"))
     ok(bool(pngs), "有 png → 闸绿条件成立")
-    # 非 UI 票 → 不出项
-    ok(not is_ui_write_set(["server/dsh/temporal-poc/x.py"]), "非 UI 票 → 闸不出项")
-# 源码文本断言：闸确实挂在 merge_check 内且给处置指引（防后续挪位/删文案漂移）
+    ok(not match_ui_paths(["server/dsh/temporal-poc/x.py"]), "diff 未命中 UI → 闸不出项")
+# 源码文本断言：闸确实挂在 merge_check 内、吃 diff 源、给处置指引（防挪位/删判定漂移）
 src = (POC / "agent_activities.py").read_text("utf-8")
-ok("is_ui_write_set(args.write_set)" in src, "merge_check 内调 is_ui_write_set（源码锁）")
+ok("_ui_diff_paths(" in src and "按 diff 判定" in src,
+   "merge_check UI 闸判定吃 diff 源（KI-044，源码锁）")
+ok("is_ui_write_set(args.write_set)" not in src,
+   "merge_check 判定不再吃声明写集（KI-044 残留锁）")
 ok("ui-check/capture.mjs" in src and "UI_EVIDENCE_DIR" in src,
    "红灯文案带 capture.mjs 处置指引（源码锁）")
 # merge_check 自身可编译导入（register 路径无残缺）
@@ -104,6 +117,9 @@ import agent_activities  # noqa: E402
 ok(hasattr(agent_activities, "prepare_ui_evidence"), "prepare_ui_evidence 已定义")
 ok(agent_activities.prepare_ui_evidence in agent_activities.ALL_AGENT_ACTIVITIES,
    "prepare_ui_evidence 已进 worker 注册清单")
+ok(hasattr(agent_activities, "ui_changed_paths"), "ui_changed_paths 已定义")
+ok(agent_activities.ui_changed_paths in agent_activities.ALL_AGENT_ACTIVITIES,
+   "ui_changed_paths 已进 worker 注册清单（漏注册=worker 不认，KI-044）")
 
 # ---------- C. prepare_ui_evidence 桩跑 ----------
 section("C prepare_ui_evidence 桩跑（SUYOU_UI_CAPTURE_STUB=1）")
@@ -196,8 +212,16 @@ ok(dev_lane.UI_EVIDENCE_TO.total_seconds() >=
    % (dev_lane.UI_EVIDENCE_TO.total_seconds(), agent_activities.UI_CAPTURE_TIMEOUT_SEC))
 ok("write_set=list(self.meta.get(\"write_set\") or [])" in dl,
    "merge_check 调用点传 write_set")
+ok("UI_DIFF_PATCH_ID" in dl and "workflow.patched(UI_DIFF_PATCH_ID)" in dl
+   and "ui_changed_paths" in dl,
+   "UI 票判定走 diff 源（UI_DIFF_PATCH_ID patched 门 + ui_changed_paths，KI-044）")
 ok('is_ui_write_set(list(self.meta.get("write_set") or []))' in dl,
-   "仅 UI 票执行 prepare_ui_evidence")
+   "未 patch 分支保留声明口径判定（存量实例重放兼容）")
+# 旧链尾冻结锁（锚段匹配防假绿：review_gate 传参处的同字面不算数——review 观察 3）
+_tail_at = dl.find("if not workflow.patched(INTEG_LOOP_PATCH_ID):")
+_tail = dl[_tail_at:_tail_at + 1500] if _tail_at >= 0 else ""
+ok('is_ui_write_set(list(self.meta.get("write_set") or []))' in _tail,
+   "旧链尾冻结声明口径判定（存量独占路径零改动）")
 ok('target in ("suggest_next", "ui_evidence")' in dl,
    "ui_evidence 非主链步，rework 拒绝守卫在位")
 ok("审读必看" in dl and "无截图证据=打回" in dl.replace("「", "").replace("」", ""),
