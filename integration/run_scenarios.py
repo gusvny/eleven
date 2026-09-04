@@ -70,7 +70,7 @@ SCENARIOS = [
      "doctor 引擎僵尸探测红绿自证（epic 验收3，fixture 注入档零真扫零端口）：SANDBAR_ZOMBIE_CENSUS 注入异仓引擎形态（cwd 含 server/dsh/temporal-poc 标记且引擎根≠当前，即 260904 headless 指向冻结仓实案）→exit1 红行点名 pid+异仓路径且同仓进程不误报；干净 census→exit0+兼容矩阵恰 5 行含 zombie 语义新行+重复 doctor 幂等；坏 JSON census=显式红不假绿（畸形输入三态）；文案自辨：僵尸面输出带 --live 指引（缺省 sample 档防「跑过=无僵尸」误读）+完成语不写死「四面」（数字随探针数漂移）",
      "python3 integration/t260904-02/sc_doctor_zombie.py", "ro"),
     ("t260904-01-project-sessions-journey",
-     "项目会话区账册状态旅程（t260904-01 面①，灰盒 L3）：多项目用户从顶部行时代旧账册（无 seq）升级——J1 存量迁移各项目独立 1..n+幂等+serialize 往返持久化；J2 编号生命周期兑现拍板 1（关闭不回收余 tab 保号、新会话续号不填空、重开保号带 title、关闭不回退计数器）；J3 项目行（pickProjectTabs 过滤/seq 升序/title 三级兜底/active 唯一/工单不进）与顶部行（pickSwitchTargets 260904 混排 ≤5/current 保底）两消费面同账册交叉共存；J4 跨键不一致对抗（计数器孤高跳号不重发、偏低/丢失按现存最大兜底防撞、账册手改撞号不崩 active 至多一、畸形 seq 剔字段不剔条目后 backfill 重补、LEDGER_CAP 淘汰后计数器不回退）。与随票 smoke（单点纯函数+源文本锚）步骤级共享、intent 级不同：旅程连续状态转移×两消费面交叉×跨键不一致。锚 shared/sessions.ts 公开导出面（方案 D1/D2 定稿：seq 字段/nextProjectSeq max 语义），不锚内部实现；确认框交互/正方形形态/折叠同隐/弹层裁剪为 node 不可测面，人工走查清单见该票结果文件",
+     "项目会话区账册状态旅程（t260904-01 面①，灰盒 L3）：多项目用户从顶部行时代旧账册（无 seq）升级——J1 存量迁移各项目独立 1..n+幂等+serialize 往返持久化；J2 编号生命周期兑现拍板 1（关闭不回收余 tab 保号、新会话续号不填空、blank 换绑保号、关闭不回退计数器；↺ 重开已随票② R8 退役）；J3 项目行（pickProjectTabs 过滤/seq 升序/title 三级兜底/active 唯一/工单不进）——票② R8 顶部行消费面已退役，项目行是账册唯一渲染面；J4 跨键不一致对抗（计数器孤高跳号不重发、偏低/丢失按现存最大兜底防撞、账册手改撞号不崩 active 至多一、畸形 seq 剔字段不剔条目后 backfill 重补、LEDGER_CAP 淘汰后计数器不回退）。与随票 smoke（单点纯函数+源文本锚）步骤级共享、intent 级不同：旅程连续状态转移×两消费面交叉×跨键不一致。锚 shared/sessions.ts 公开导出面（方案 D1/D2 定稿：seq 字段/nextProjectSeq max 语义），不锚内部实现；确认框交互/正方形形态/折叠同隐/弹层裁剪为 node 不可测面，人工走查清单见该票结果文件",
      "node integration/t260904-01/sc_project_sessions_ledger_journey.mjs", "ro"),
 
     # ---- 260904 P3/e2e 回迁（KI-038 收尾）：browser 族 16 条 + t260902-02 e2e 2 条。
@@ -82,12 +82,9 @@ SCENARIOS = [
     ("ticket-evidence-images",
      "(black-box, user perspective): // QA screenshots (.suyou/screenshots/*.png in the lane) ",
      "node integration/baselines/sc_ticket_evidence_images.mjs"),
-    ("session-top-entry",
-     "(black-box, user perspective): // Production defect triad after t260831-02: // 1. MRU li",
-     "node integration/baselines/sc_session_top_entry.mjs"),
-    ("session-tab-interactions",
-     "(black-box, user perspective) — the ticket's three complaints: // 1. Clicking a tab move",
-     "node integration/baselines/sc_session_tab_interactions.mjs", "browser"),
+    # （session-top-entry / session-tab-interactions 两基线随票② R8 顶部行退役
+    #   正当退役，t260904-05：被测面 SessionTopEntry/wb-sessTop 家族已删，无残留
+    #   消费方；替代看守=smoke/hero.mjs 反转断言 + project-sessions.mjs S6。）
     ("capture-lane-preset",
      "capture-lane-preset.mjs —— 隔离台 preset 物化基线（t260901-02）。 // // 断言 server/dsh/ui-check/cap",
      "node integration/baselines/sc_capture_lane_preset.mjs", "browser"),
@@ -125,7 +122,7 @@ SCENARIOS = [
      "注入缝直调真命令逻辑（活文件系统，零 Temporal server 依赖）。",
      "python3 integration/t260902-02/sc_t06_archive_legacy_e2e.py"),
     ("t260903-07-click-no-chat-switch",
-     "点工单不切右侧会话（t260903-07①核心反转）：点工单行后中列详情照常开（.wb-d2-steps 在场）、右栏 chat 零变化——【工单上下文】快照零注入、data-phase 不变、会话顶入口不出现 ticket- 行；多行重复点击零注入零 churn（旧契约「点行→开 ticket- 会话」的显式反转守卫，防联动复活）",
+     "点工单不切右侧会话（t260903-07①核心反转）：点工单行后中列详情照常开（.wb-d2-steps 在场）、右栏 chat 零变化——【工单上下文】快照零注入、data-phase 不变、项目会话区 tab 全集不含 ticket- 行（票② R8 改锚：顶部行已退役，判据改 [data-wb-psess-tab] 全集）；多行重复点击零注入零 churn（旧契约「点行→开 ticket- 会话」的显式反转守卫，防联动复活）",
      "node integration/t260903-07/sc_t01_click_no_chat_switch.mjs", "browser"),
     ("t260903-07-chat-project-tag",
      "全局 chat 用户消息项目 tag 契约（t260903-07②）：引用真实工单 id 的消息行渲染文本=注册项目 key 的 chip（颜色非空）；同项目恒同色、不同项目不同色、页面重载后同色（确定性映射的用户可感知面）；全部 chip 文本 ∈ 注册项目键不造假 key；「归属不了→不渲染」是 env 相关声明行为、不在场景层强断言（L1 DOM 桩已锁，chip 经 ::before 伪元素渲染故断言走 getComputedStyle）",
@@ -309,6 +306,18 @@ SCENARIOS = [
     ("t260903-09-kpi-invariants",
      "度量面板四张 KPI 卡与三视图图人口自洽（需求③）：任意窗口/视图 closed≤tickets 不再悖论、窗前创建窗内关闭票按锚点计入 tickets（人口桩 7d=3/2、30d=4/2、all=5/3）、「有无代码变更票占比」环形图两片之和恰等于卡上票数、tokens_total 跨视图恒等、「人审等待」分类名字面在场（t260903-09）",
      "node integration/t260903-09/sc_metrics_kpi_invariants.mjs", "ro"),
+    ("t260904-05-top-entry-retired-form",
+     "顶部行退役后的入口形态契约（R8+R7 左栏，browser）：lib 产物零退役符号（SessionTopEntry/wb-sessTop/pickSwitchTargets/renameEntry/data-wb-session-*）且含新锚（projband/psess-dot/psess-color）；DOM 中 data-wb-session-{entry,new,row,reopen} 全不在场、无 wb-sessTop 类元素；出厂全局新建钮继续被压制不回显（拍板 1）；组头色点/+钮/根容器 --wb-psess-color 三处同色且 ∈ 确定性色板、刷新恒色（验收 5）；关闭确认弹层文案含「仅关闭入口/不删除」且无「↺/最近关闭」表述（拍板 2）；console 零 error",
+     "node integration/t260904-05/sc_top_entry_retired_form.mjs", "browser"),
+    ("t260904-05-chat-band-affiliation",
+     "右栏 chat 项目色带归属通道（R7 核心新意=用户需求③，browser）：fresh 空账册不渲染色带（不在册声明行为）；项目行 + 新建后 [data-conversation-scroll] 本体带 data-wb-chat-projband=<该项目 key>（属性锚非包裹节点=零 childList 侵入的可感知面）；色带 3px + head 自有 style 在场且色与左栏 --wb-psess-color 同源；点工单行归属不动（t01 同契约：chat 不切换）；刷新后归属恢复（账册持久）；console 零 error",
+     "node integration/t260904-05/sc_chat_band_affiliation.mjs", "browser"),
+    ("t260904-05-session-lifecycle-ui",
+     "项目行会话生命周期 UI 全链（接管随 R8 退役的 session-tab-interactions 用户路径 intent，browser）：+ 新建续号且 active 恰一；关闭确认取消不动/确认才关；序号不回收（关掉的号不填洞，拍板 1）；刷新后整组 tab 持久；关完全部再新建仍续大号（BO-1 closed 号域防撞、计数器不回退）。与 t260904-01 journey（纯函数账册状态机）intent 级不同层：本条=用户操作流×真实 UI 呈现",
+     "node integration/t260904-05/sc_session_lifecycle_ui.mjs", "browser"),
+    ("t260904-05-ledger-adversarial-boot",
+     "账册外部输入三态的真实 boot 对抗（畸形/缺失/旧版，browser；journey J4 的 boot 路径复验，intent=boot 韧性非函数容错）：旧顶部行时代账册（无 seq+title）升级渲染且补号、ticket- 条目永不进 tab；project 字段畸形（非字符串/空串）条目不落任何项目组、色带不渲染、+钮仍可用；账册+计数器双键坏 JSON → 按丢失处理 boot 干净；各 case console 零 error",
+     "node integration/t260904-05/sc_ledger_adversarial_boot.mjs", "browser"),
 ]
 
 CMD_TIMEOUT = 900

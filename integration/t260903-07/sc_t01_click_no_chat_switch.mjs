@@ -79,7 +79,8 @@ async function browserScenarios() {
   const readState = () => page.evaluate(() => ({
     phase: document.querySelector('[data-phase]')?.getAttribute('data-phase') ?? '',
     snapshots: document.body.innerText.split('【工单上下文】').length - 1,
-    ticketInTopEntry: (document.querySelector('[data-wb-session-entry]')?.textContent ?? '').includes('ticket-'),
+    // 票② R8 改锚（t260904-05）：顶部行已退役，判据平移到项目行 tab 全集
+    ticketInTopEntry: Array.from(document.querySelectorAll('[data-wb-psess-tab]')).some(el => (el.textContent ?? '').includes('ticket-')),
   }));
 
   // T2 baseline
@@ -104,7 +105,7 @@ async function browserScenarios() {
     const checks = [
       ['snapshot-unchanged', after.snapshots === before.snapshots, `snapshots ${before.snapshots}→${after.snapshots}`],
       ['phase-unchanged', after.phase === before.phase, `phase ${before.phase || '(none)'}→${after.phase || '(none)'}`],
-      ['no-ticket-entry', !after.ticketInTopEntry, 'top entry shows ticket- row'],
+      ['no-ticket-entry', !after.ticketInTopEntry, 'project session tabs contain ticket- row'],
     ];
     for (const [nm, good, bad] of checks) {
       record(`${label}/${nm}`, good ? 'pass' : 'fail', good ? '' : bad);

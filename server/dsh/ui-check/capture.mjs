@@ -32,7 +32,7 @@
 //   console-epics.png        立项单列表（侧栏「立项单」视图图标 → .wb-ep-root）
 //   console-new-ticket.png   新建工单弹层打开态（只开不提交——「新建后」的只读红线
 //                            降级口径，t260829-07 review 定案；真新建=写操作不豁免）
-//   console-sessions.png     顶部会话入口行（t260831-02：data-wb-session-entry 可见 +
+//   console-sessions.png     项目会话区行（票② R8 改锚 t260904-05：data-wb-psess-row 可见 +
 //                            旧左栏 .wb-sess-* 不在场——本票已按设计删除左栏会话区）
 //   console-refresh.png      刷新回归（reload 后再截，防「刷新回不去」回归）
 //   console-chat.png         chat 态（打开已有会话，data-phase=active）
@@ -288,11 +288,11 @@ async function seedSessions(page, url) {
 }
 
 // chat 态导航：分路径语义（t260901-02 修订）。
-// - 直连路径（无 --allow-seed，只读红线）：只点「打开已有会话」（顶部会话入口
-//   行的 MRU 切换行 [data-wb-session-row]），绝不点「+ 新建会话」（真实创建
+// - 直连路径（无 --allow-seed，只读红线）：只点「打开已有会话」（项目会话区
+//   行的 tab [data-wb-psess-tab]），绝不点「+ 钮」（真实创建
 //   会话=写操作）。无已有会话可开 → 明确报错，不静默降级。
-// - 隔离台路径（--allow-seed 已放行台内造数）：点台上「+ 新建会话」
-//   （[data-wb-session-new]，工厂同款语义：绑工作区+复用 blank+staging 打开）。
+// - 隔离台路径（--allow-seed 已放行台内造数）：点项目行台上「+ 钮」
+//   （[data-wb-psess-new]，工厂同款语义：绑工作区+复用 blank+staging 打开）。
 //   实证（dbg-chat.mjs，t260901-02）：seedSessions 经 global-session/open 自铸的
 //   会话不绑工作区，平台语义「hero ⟺ 当前会话 blank」下点它永远停在 hero——
 //   session-entry.tsx L343 注释自证「自铸会话…永远停在 hero」。preset 缺失根治
@@ -315,11 +315,11 @@ async function navigateToChat(page, allowSeed = false) {
     // 隔离台：先确保有项目（新建按钮无项目时禁用——seedSessions 顺带把项目注册表
     // 拉通，失败会抛人话报错），再点「+ 新建会话」走工厂同款 staging。
     await seedSessions(page, page.url());
-    const newBtn = page.locator("[data-wb-session-new]").first();
+    const newBtn = page.locator("[data-wb-psess-new]").first();
     try {
       await newBtn.waitFor({ state: "visible", timeout: 8000 });
     } catch {
-      throw new Error("隔离台造数后未找到「+ 新建会话」按钮（[data-wb-session-new]）——" +
+      throw new Error("隔离台造数后未找到项目行「+ 钮」（[data-wb-psess-new]）——" +
         "会话入口未挂载或项目未注册，查 seedSessions 与 suyou-workbench 挂载日志。");
     }
     await forceClick(newBtn, 5000);
@@ -331,20 +331,20 @@ async function navigateToChat(page, allowSeed = false) {
     // 台内造数，此为一次真实模型调用（凭据=临时家 .credentials.yaml，源由
     // capture-lane 按 per-key 优先/legacy 回落解析拷入，与生产台同源）。
     await seedChatMessage(page);
-    anchor = "隔离台「+ 新建会话」+ 种子消息（[data-wb-session-new]，真内容驱动 active）";
+    anchor = "隔离台项目行「+ 钮」+ 种子消息（[data-wb-psess-new]，真内容驱动 active）";
   } else {
-    const row = page.locator("[data-wb-session-row]").first();
+    const row = page.locator("[data-wb-psess-tab]").first();
     try {
       await row.waitFor({ state: "visible", timeout: 8000 });
     } catch {
       throw new Error(
-        "顶部入口没有最近会话行（[data-wb-session-row]），且未带 --allow-seed（台内造数门旗，" +
+        "项目行没有可开的会话 tab（[data-wb-psess-tab]），且未带 --allow-seed（台内造数门旗，" +
         "仅隔离台路径可带）。只读红线禁止点「+ 新建会话」造 chat 态；隔离台请由 capture-lane 传 " +
         "--allow-seed（或 env SUYOU_UI_CAPTURE_ALLOW_SEED=1）后重跑。"
       );
     }
     await forceClick(row, 5000);
-    anchor = "顶部会话入口 MRU 行锚（[data-wb-session-row]）";
+    anchor = "项目会话区 tab 锚（[data-wb-psess-tab]）";
   }
   // 等 active；窗口期内若出厂弹「Add an API key」准入模态（隔离台无 key 实测会弹，
   // 遮罩挡会话激活——t260831-02 第 8 轮目视实锤），点「Configure later」让路后继续等。
@@ -640,14 +640,14 @@ async function main() {
       run: (page) => openView(page, "立项单", ".wb-ep-root") },
     { file: "console-new-ticket.png", title: "新建工单弹层打开态",
       run: (page) => openNewTicketModal(page) },
-    { file: "console-sessions.png", title: "顶部会话入口行",
+    { file: "console-sessions.png", title: "项目会话区行（票② R8 改锚）",
       run: async (page) => {
-        const entry = page.locator("[data-wb-session-entry]").first();
+        const entry = page.locator("[data-wb-psess-row]").first();
         await entry.waitFor({ state: "visible", timeout: 8000 });
-        // t260831-02 视图③口径反转：左栏旧会话区类必须不在场（本票已按设计删除）
-        const stale = await page.locator(".wb-sess-row, .wb-sess-head, .wb-sess-title").count();
-        if (stale > 0) throw new Error(`左栏旧会话区残留 ${stale} 个（.wb-sess-* 应已删除）`);
-        return "顶部会话入口（[data-wb-session-entry] 可见；旧 .wb-sess-* 不在场，未点击）";
+        // 票② R8 口径反转：顶部行入口与样式族必须不在场（t260904-05 已退役）
+        const stale = await page.locator(".wb-sessTop, [data-wb-session-entry]").count();
+        if (stale > 0) throw new Error(`顶部会话入口残留 ${stale} 个（票② R8 应已退役）`);
+        return "项目会话区（[data-wb-psess-row] 可见；顶部行不在场，未点击）";
       } },
   ];
 

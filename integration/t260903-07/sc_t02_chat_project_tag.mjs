@@ -105,15 +105,16 @@ async function browserScenarios(fixtureProjects) {
 
   const registeredKeys = fixtureProjects.map(p => p.key);
 
-  // 建会话进可打字态（既有旅程：顶入口 New → active 行 + composer 在场）。
+  // 建会话进可打字态（既有旅程：项目行 + 钮 → composer 在场；票② R8 改锚，
+  // 顶部行 [data-wb-session-new] 已退役）。
   try {
-    const newBtn = page.locator('[data-wb-session-new]').first();
+    const newBtn = page.locator('[data-wb-psess-new]').first();
     if (!(await newBtn.count())) throw new Error('new-session button missing');
     await newBtn.click({ timeout: 3000 });
     let staged = false;
     const t0 = Date.now();
     while (Date.now() - t0 < 20000) {
-      staged = (await page.evaluate(() => document.querySelectorAll('[data-wb-session-row][data-active="true"]').length)) > 0
+      staged = (await page.evaluate(() => document.querySelectorAll('[data-wb-psess-tab][data-active="true"]').length)) > 0
         && (await page.locator('textarea:visible').count()) > 0;
       if (staged) break;
       await page.waitForTimeout(500);

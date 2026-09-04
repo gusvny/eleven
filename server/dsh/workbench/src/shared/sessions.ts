@@ -9,14 +9,14 @@
  * {id, project, cwd, lastOpenedAt}，MRU 排序；磁盘存量、工单会话、subagent
  * 会话一律不进账册，不做置顶/钉选（MRU 自然收敛）。
  *
- * 260904 宿主决策（真源 notes/会话tab全项目显示决策.md）：tab 行显示
- * **不按当前项目过滤**——账册条目跨项目混排全量参排；project 字段保留为
- * 登记归属记录（展示/诊断用），不再参与过滤。
+ * 票② R8（t260904-05）：顶部行及其专属纯函数（切换行推导/MRU 上限/重命名）
+ * 已随顶部行退役删除（全仓无残留符号，smoke 有「不在场」反转断言看守）；
+ * 账册 title 字段与 parseLedger/touchEntry 的 title 采纳保留（blank 换绑
+ * 随条目带回）。
  *
  * 第 3 面①（t260904-01，项目内会话区）：账册零迁移成本复用——条目加可选 seq
- * （项目内登记序号，关闭不回收），新增 pickProjectTabs / backfillProjectSeqs /
- * nextProjectSeq 三个纯函数供项目行消费；顶部行（pickSwitchTargets）口径零变化
- * （260904 过渡态，R8 退役）。
+ * （项目内登记序号，关闭不回收），pickProjectTabs / backfillProjectSeqs /
+ * nextProjectSeq 三个纯函数供项目行消费。票② R8 后项目行是唯一渲染消费面。
  *
  * 完备性：工单台侧栏已顶掉出厂工作区浏览器，UI 上打开项目会话的入口就是
  * 本插件。t260829-06 起 hero 槽位替换落地：hero 紧凑入口复用本层
@@ -25,13 +25,11 @@
  * 发出的首条消息所建会话仍不进账册，属设计文档 §4 明示的共存残留。
  *
  * t260831-06 口径变更（顶行 tab 三修）：
- *   - 「停原地」走规格 #1 的等价分支：打开路径（handleOpen）不再 touchEntry——
- *     lastOpenedAt 只在登记时写（新建/blank 自愈换绑/↺ 恢复三条显式路径，时间
- *     单调递增，排序结果=登记顺序），点 tab 不再重排，「点谁谁置顶」就此消除。
- *     排序实现保留 lastOpenedAt 降序（smoke/hero.mjs 既有断言兼容，该文件不在
- *     本单写集）。
- *   - OpenedEntry 加可选 title：用户对 tab 的自定义命名（重命名入口落账册），
- *     非空时优先于 displayTitle 显示。
+ *   - 打开路径（handleOpen）不再 touchEntry——lastOpenedAt 只在登记时写
+ *     （新建/blank 自愈换绑两条显式路径，时间单调递增=登记顺序），点 tab
+ *     不重排（↺ 恢复路径已随 R8 顶部行退役）。
+ *   - OpenedEntry 加可选 title：用户自定义命名（重命名入口已随 R8 退役；
+ *     字段保留，blank 换绑随条目带回）。
  *
  * 账册存放 = 浏览器 localStorage（sidebar.tsx 负责 IO，本文件纯函数无 IO，
  * smoke/sessions.mjs 直跑，node ≥22.18 原生 type-stripping）。localStorage
@@ -70,26 +68,14 @@ export interface ProjectTab {
   active: boolean
 }
 
-/** 侧栏切换行（渲染就绪）。 */
-export interface SwitchTarget {
-  id: string
-  title: string
-  cwd: string
-  /** 是否当前活跃会话（高亮）。 */
-  active: boolean
-}
-
 /** 标题来源的最小面（SessionSummary 的子集；结构类型，测试可喂裸对象）。 */
 export interface TitleRowLike {
   displayTitle?: string
 }
 
-/** 侧栏切换入口上限（设计：不超过 5 个）。 */
-export const SWITCH_LIMIT = 5
-
 /**
- * 账册存储上限（跨项目共用一册，超出的最旧条目自然淘汰——MRU 收敛，
- * 防无限增长；展示上限仍是 SWITCH_LIMIT，两者独立）。
+ * 账册存储上限（跨项目共用一册，超出的最旧条目自然淘汰——防无限增长，
+ * 账册层全局兜底；项目 tab 数量不设上限，拍板 2）。
  */
 export const LEDGER_CAP = 20
 
@@ -145,8 +131,8 @@ export function serializeLedger(entries: OpenedEntry[]): string {
  * 登记一次打开/新建：同 id upsert（更新 project/cwd/lastOpenedAt，可选带 title）
  * 并插到数组头部（=登记顺序最新），其余条目顺序不变；超出 cap 时淘汰最旧的。
  * ticket- 前缀的工单会话拒绝入账（有自己的常驻入口，不混入）。返回新数组
- * （不改入参）。t260831-06：本函数不再被「点击 tab 打开」路径调用（打开不
- * 重排），只服务新建登记、blank 自愈换绑、↺ 恢复重登三条显式路径。
+ * （不改入参）。只服务新建登记、blank 自愈换绑两条显式路径（↺ 恢复已随
+ * R8 顶部行退役）。
  */
 export function touchEntry(
   entries: OpenedEntry[],
@@ -180,73 +166,6 @@ export function removeEntry(entries: OpenedEntry[], id: string): OpenedEntry[] {
   return (Array.isArray(entries) ? entries : []).filter(e => e && e.id !== id)
 }
 
-/**
- * 重命名一个账册条目（t260831-06 tab 重命名）：同 id 条目更新 title——
- * 入参 trim 后为空串=清除自定义名（恢复默认 displayTitle 显示），非空即采纳；
- * 未知 id 原样返回（不造条目）；返回新数组（不改入参）。纯函数无 IO，落盘
- * 由调用方 persist。
- */
-export function renameEntry(entries: OpenedEntry[], id: string, title: string): OpenedEntry[] {
-  if (!Array.isArray(entries)) return []
-  const t = typeof title === 'string' ? title.trim() : ''
-  return entries.map(e => {
-    if (!e || e.id !== id) return e
-    const next: OpenedEntry = { ...e }
-    if (t === '') delete next.title
-    else next.title = t
-    return next
-  })
-}
-
-/**
- * 算侧栏切换行：账册 → MRU（lastOpenedAt 降序；t260831-06 起打开路径不再更新
- * lastOpenedAt——排序结果=登记顺序，点 tab 停在原地）→ ≤limit → current 保底
- * （通过过滤却被截断时替换最末一名，沿用 t260825-02 语义——当前活跃会话掉出
- * 列表会让「我在哪」不可感知）→ 标题/高亮装配。
- *
- * - 260904 决策（宿主拍板，notes/会话tab全项目显示决策.md）：**不按
- *   当前项目过滤**——账册条目跨项目混排全量参排（旧「project 不匹配即剔除、
- *   空串直接返回空」口径废除；根因=新建落点项目与 tab 行过滤项目两个状态源
- *   不同步，多项目未选/刷新重置下新会话 tab 不可见）；
- * - 标题：条目自定义 title 非空优先（tab 重命名，t260831-06），否则从 byId
- *   （ctx.sessions.list 的 byId）取 displayTitle，再缺失兜底 id（账册有、list 无
- *   = 会话已被磁盘清理的残留条目，照常渲染不崩，点击打开失败时由 UI 层
- *   removeEntry 剔除）；
- * - active = id === current（current 来自 ctx.sessions.list）。
- */
-export function pickSwitchTargets(
-  entries: OpenedEntry[],
-  opts: {
-    current?: string
-    byId?: Record<string, TitleRowLike | undefined>
-    limit?: number
-  },
-): SwitchTarget[] {
-  const limit = opts?.limit ?? SWITCH_LIMIT
-  if (limit <= 0) return []
-  const byId = opts?.byId ?? {}
-  const current = opts?.current
-  const eligible = (Array.isArray(entries) ? entries : [])
-    // 工单会话不进列表（t260828-06 防御纵深）：正常口径 touchEntry 已把 ticket-
-    // 前缀挡在账册外，这里再挡一层；合法条目不受影响（工单会话从来不该在账册里）。
-    .filter(e => e && typeof e.id === 'string' && isGlobalSessionId(e.id))
-    .slice()
-  eligible.sort((a, b) => (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0))
-  // current 保底入选：通过过滤却被截断时，替换最末一名。
-  if (current !== undefined && eligible.length > limit) {
-    const curIdx = eligible.findIndex(e => e.id === current)
-    if (curIdx >= limit) {
-      eligible[limit - 1] = eligible[curIdx]
-    }
-  }
-  return eligible.slice(0, limit).map(e => ({
-    id: e.id,
-    title: typeof e.title === 'string' && e.title.trim() !== '' ? e.title : labelOf(byId[e.id], e.id),
-    cwd: typeof e.cwd === 'string' ? e.cwd : '',
-    active: e.id === current,
-  }))
-}
-
 /* ───────────────── 项目内会话区（第 3 面①，R2/R4/R6 + 拍板 1/2）─────────────────
  * 口径真源 notes/epics/session-entry.md：数据源=本账册按 project 过滤；编号=项目内
  * 登记顺序、关闭不回收（seq 存条目 + 每项目计数器续号，见 session-entry.tsx
@@ -273,7 +192,7 @@ export function pickProjectTabs(
   const byId = opts?.byId ?? {}
   const current = opts?.current
   return (Array.isArray(entries) ? entries : [])
-    // 工单会话不进 tab（防御纵深，同 pickSwitchTargets 口径）
+    // 工单会话不进 tab（防御纵深：touchEntry 已挡一层，这里再挡一层）
     .filter(e => e && typeof e.id === 'string' && isGlobalSessionId(e.id) && e.project === project)
     .map(e => ({
       id: e.id,
@@ -327,7 +246,8 @@ export function backfillProjectSeqs(entries: OpenedEntry[]): OpenedEntry[] {
 }
 
 /**
- * 算某项目的下一个可用编号（登记时调用）：max(计数器值, 账册内该项目现存最大
+ * 算某项目的下一个可用编号（登记时调用；号域含「最近关闭」——closed 数据
+ * 在 ↺ 恢复随顶部行退役后仍保留，仅作防撞号域，BO-1）：max(计数器值, 账册内该项目现存最大
  * seq, 「最近关闭」内该项目最大 seq) + 1（closed 号域为 t260904-01 验收走查
  * BO-1 修复：计数器丢失时已关的最大号不再重发——重发后再从 ↺ 重开原号条目
  * 会撞号，破坏拍板 1 的「稳定身份」）。计数器丢失/落后时以账册与最近关闭

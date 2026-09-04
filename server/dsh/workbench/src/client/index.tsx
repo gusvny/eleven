@@ -64,7 +64,7 @@
  * 开始 chat）——t260831-02 按 UX 契约把 hero 接管**彻底拆除**：不再注册任何
  * conversation.hero.* 槽，出厂落地页（大标题/大输入卡/workspace 选择器）原样回弹，
  * 右栏零定制。会话入口收口到一处：顶部行（deepseek logo 正下方出厂「⊕ New
- * Session」钮的原地替换，session-entry.tsx 的 SessionTopEntry + sidebar.tsx 的
+ * Session」钮的原地替换；该入口行已随票② R8 退役（t260904-05），sidebar.tsx 的
  * 注入锚），见两文件头注。工单会话入口（点工单 handleTicketClick 链路）不受影响。
  */
 

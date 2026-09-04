@@ -21,7 +21,8 @@
  *      - 语义锚纪律：无 [class*= / [class$= 出厂类名匹配选择器；
  *      - 接线在场：sidebar 渲染 ProjectSessionRow + backfill 挂载 effect；
  *        session-entry 登记 seq（nextProjectSeq/backfillProjectSeqs 调用点）；
- *      - 顶部行 260904 过渡口径零接触：pickSwitchTargets 调用不带 project；
+ *      - 票② R7/R8（t260904-05）：项目色（+ 钮/激活 tab/组头色点/右栏色带锚）、
+ *        顶部行退役反转（wb-sessTop 家族不在场）、确认文案无 ↺ 表述；
  *      - lib 产物与 src 同批（锚在 lib/client.js 里同样在场）。
  */
 
@@ -70,9 +71,9 @@ section('A1 pickProjectTabs：按项目过滤 + seq 升序 + 无上限')
   const r = pickProjectTabs(ledger, { project: 'suyou' })
   ok(r.length === 3 && r.map(t => t.id).join(',') === 'a,b,c', '按 project 过滤 + seq 升序（他项目条目不出现）')
   ok(r.every(t => t.project === undefined), 'ProjectTab 只含渲染面字段')
-  // 无上限（拍板 2）：21 条（>SWITCH_LIMIT 5、>LEDGER_CAP 20）全量参排
+  // 无上限（拍板 2）：21 条（>LEDGER_CAP 20）全量参排
   const many = Array.from({ length: 21 }, (_, i) => ent(`s${i}`, { seq: i + 1 }))
-  ok(pickProjectTabs(many, { project: 'suyou' }).length === 21, '数量不限：21 条全量参排（无 SWITCH_LIMIT 截断）')
+  ok(pickProjectTabs(many, { project: 'suyou' }).length === 21, '数量不限：21 条全量参排（tab 无上限）')
   // 畸形：非数组 / project 空串 / project 非字符串
   ok(pickProjectTabs(null, { project: 'suyou' }).length === 0, '账册非数组 → 空列表不抛')
   ok(pickProjectTabs(ledger, {}).length === 0, 'project 缺省 → 空列表')
@@ -280,13 +281,47 @@ section('S5 接线在场（sidebar 渲染 + 存量迁移 effect + 登记分配 s
   ok(entry.includes('writeSeqCounters({ ...counters, [pk]: seq })'), '登记先写计数器再落账（中断=跳号不重号）')
 }
 
-section('S6 顶部行 260904 过渡口径零接触（验收 6）')
+section('S6 顶部行已退役（票② R8 反转断言：顶部行锚不在场）')
 {
   const entry = readFileSync(srcEntry, 'utf8')
-  ok(/pickSwitchTargets\(ledger,\s*\{\s*current/.test(entry), '顶部行 pickSwitchTargets 仍不带 project 过滤（混排口径不动）')
-  ok(entry.includes('data-wb-session-entry='), '顶部行 SessionTopEntry 锚仍在（R8 前不退役）')
+  const sidebar = readFileSync(join(here, '..', 'src', 'client', 'sidebar.tsx'), 'utf8')
+  ok(!entry.includes('wb-sessTop') && !sidebar.includes('wb-sessTop'), '顶部行样式族零残留（src 两文件）')
+  ok(!entry.includes('data-wb-session-entry=') && !sidebar.includes('data-wb-session-entry'), '顶部行锚不在场（源）')
   const lib = readFileSync(libClient, 'utf8')
-  ok(lib.includes('data-wb-session-entry'), 'lib 产物顶部行锚仍在')
+  ok(!lib.includes('data-wb-session-entry') && !lib.includes('wb-sessTop'), 'lib 产物顶部行锚不在场')
+}
+
+section('S8 项目色贯通（票② R7 拍板 5：+ 钮/激活 tab/组头色点）')
+{
+  const row = readFileSync(join(here, '..', 'src', 'client', 'project-session-row.tsx'), 'utf8')
+  const sidebar = readFileSync(join(here, '..', 'src', 'client', 'sidebar.tsx'), 'utf8')
+  ok(row.includes("--wb-psess-color") && row.includes('projectColor(projectKey)'), '+ 钮/激活 tab 项目色：CSS 变量 + projectColor 注入在场')
+  ok(row.includes('--wb-psess-hover') && /hexToRgba\(color, 0\.16\)/.test(row), 'hover/淡底 = 项目色 16% 透明展开')
+  ok(!row.includes('124,58,237'), '旧紫色 rgba(124,58,237,*) 已替换')
+  ok(sidebar.includes('data-wb-psess-dot') && sidebar.includes('projectColor(g.project.key)'), '组头名前项目色点在场（data-wb-psess-dot）')
+  const lib = readFileSync(libClient, 'utf8')
+  ok(lib.includes('--wb-psess-color') && lib.includes('data-wb-psess-dot'), 'lib 产物项目色与色点同步')
+}
+
+section('S9 右栏色带锚（票② R7 拍板 6：data-wb-chat-projband + 平台自声明锚）')
+{
+  const band = readFileSync(join(here, '..', 'src', 'client', 'chat-project-band.ts'), 'utf8')
+  ok(band.includes("'data-wb-chat-projband'") && band.includes('data-wb-chat-projband-style'), '色带自有属性与 head style 锚在场')
+  ok(band.includes("'[data-conversation-scroll]'"), '平台自声明滚动体锚在场（勿用 css-module 类名）')
+  ok(band.includes('isProjectKeyLike'), '畸形 key 生产闸门（isProjectKeyLike 前置）在场')
+  const sidebar = readFileSync(join(here, '..', 'src', 'client', 'sidebar.tsx'), 'utf8')
+  ok(sidebar.includes('startChatProjectBandEffect') && sidebar.includes('setChatProjectBand'), 'sidebar 接线：装饰器挂载 + 归属推导 set 在场')
+  const lib = readFileSync(libClient, 'utf8')
+  ok(lib.includes('data-wb-chat-projband') && lib.includes('data-conversation-scroll'), 'lib 产物色带锚同步')
+}
+
+section('S10 确认文案（票②拍板 2：↺ 表述删除）')
+{
+  const row = readFileSync(join(here, '..', 'src', 'client', 'project-session-row.tsx'), 'utf8')
+  ok(row.includes('仅关闭入口，不删除会话内容'), '确认文案明示「仅关闭入口不删内容」')
+  ok(!row.includes('↺') && !row.includes('最近关闭找回'), '无 ↺/最近关闭找回表述（恢复菜单已退役）')
+  const lib = readFileSync(libClient, 'utf8')
+  ok(!lib.includes('最近关闭找回'), 'lib 产物文案同步')
 }
 
 section('S7 D1 修复接线：closed 状态迁模块级共享 store（跨实例同帧可见）')

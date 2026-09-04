@@ -136,8 +136,9 @@ async function main() {
     catch { browser = await playwright.chromium.launch({ headless: true }) }
     const page = await browser.newPage()
     await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' })
-    // 等 workbench 侧栏挂载（会话入口锚）
-    await page.waitForSelector('[data-wb-session-entry]', { timeout: 30_000 })
+    // 等 workbench 侧栏挂载（项目会话区行锚——顶部行入口锚已随票② R8 退役，
+    // 项目行是 R8 后恒在场的侧栏锚；C1 顺修，t260904-05）
+    await page.waitForSelector('[data-wb-psess-row]', { timeout: 30_000 })
     // 关掉出厂 Internal Testing Notice 弹层（遮横幅），不判失败
     try {
       const cont = await page.$('button:has-text("Continue")')

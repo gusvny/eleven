@@ -42,7 +42,7 @@ console.log("B 新建后 phase:", await phase());
 await p.screenshot({ path: "/tmp/switch-B.png" });
 
 // ③ 切回 A：点 MRU/顶行的会话 A 行
-const rows = p.locator("[data-wb-session-row]");
+const rows = p.locator("[data-wb-psess-tab]");
 console.log("MRU 行数:", await rows.count());
 const rowTexts = await rows.allTextContents().catch(() => []);
 console.log("行文本:", rowTexts.map(t => t.slice(0, 40)));

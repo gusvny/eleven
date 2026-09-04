@@ -1,45 +1,30 @@
 /**
- * suyou-workbench · 顶部会话入口（session-entry t260831-02 第三轮）。
+ * suyou-workbench · 会话动作层唯一样态（session-entry t260831-02 → 票② t260904-05 R8 退役收口）。
  *
- * 本文件是会话入口唯一的逻辑实现点：
+ * R8 顶部行退役后，本文件**不再有任何渲染面**——只保留 useSessionEntry()
+ * 动作层（账册读写 + handleNew/handleOpen/handleClose），供项目行
+ * （project-session-row.tsx）消费；账册/闭账/编号计数器全部复用
+ * src/shared/sessions.ts 纯函数（记账层语义零改动）。随顶部行一并退役
+ * （拍板 2/3/4，notes/epics/session-entry.md 票②拍板）：
+ *   - ↺「最近关闭」恢复菜单（handleReopen）——不迁移；闭账数据保留，
+ *     仅作 nextProjectSeq 防撞号域（BO-1），无 UI 消费面；
+ *   - tab 双击重命名（重命名纯函数随 shared/sessions.ts 一并退役）；
+ *   - 顶部行组件/SessionTab/SESSION_ENTRY_STYLES 与
+ *     顶部行家族 data-wb-* 断言锚（无残留消费方，smoke/hero.mjs 有
+ *     「不在场」反转断言看守）。
  *
- *   - useSessionEntry()：账册（localStorage）读写 + handleNew/handleOpen +
- *     切换行推导，全部复用 src/shared/sessions.ts 纯函数（记账层语义零改动，
- *     t260828-02 口径原样保留）；
  *   - FACTORY_NEW_LABELS：出厂「⊕ New Session」钮的语义锚——aria-label 全集
  *     （dsh-client-ui-sidebar 的 locale 字典只有 zh/en 两份，实查于平台包；
- *     若 dsh 新增语言字典，锚集合在此补）。sidebar.tsx 的注入 effect 用它在
- *     SidebarRoot 直接子 button 上找到出厂钮并整行原地替换（隐藏出厂 + 我们的
- *     入口渲染在侧栏顶部同一视觉位置）；找不到锚时软退化：出厂钮照常显示、
- *     我们的入口仍在侧栏顶部，功能不丢，console.warn 留痕。
- *   - <SessionTopEntry>：紧凑一行入口——「+ 新建会话」+ 最近会话切换（≤5，
- *     会话跨项目混排，260904 起不按项目过滤）。与已退场的 SessionSection（t260825-02 左栏会话区，本票
- *     整块移除）和 HeroSessionEntry（t260829-06 hero 槽版，本票随 hero 接管
- *     拆除退场）消费同一个 useSessionEntry 同一账册，只有渲染层不同。
- *     带 data-wb-* 断言锚（UI 验收 DOM 断言用）：data-wb-session-entry（根）、
- *     data-wb-session-new（新建钮）、data-wb-session-row[data-active]（切换行）、
- *     data-wb-session-close（关闭钮）、data-wb-session-rename（改名输入）、
- *     data-wb-session-reopen（↺ 恢复菜单钮，菜单项 data-wb-session-restore）。
+ *     若 dsh 新增语言字典，锚集合在此补）。sidebar.tsx 的注入 effect 用它
+ *     找到出厂钮并隐藏——**职责=压制全局新建入口**（拍板 1：移除注入=出厂
+ *     全局钮回到左栏顶部，落点=平台当前工作区非项目归属，与「入口长在项目上」
+ *     直接冲突）；找不到锚时软退化：出厂钮照常显示，console.warn 留痕。
  *
- * t260831-06 tab 交互三修（停原地/重命名/关闭）：
- *   - 停原地：handleOpen 不再 touchEntry——lastOpenedAt 只在登记路径写（新建/
- *     blank 自愈换绑/↺ 恢复，时间单调递增=登记顺序），点 tab 不再重排，「点谁
- *     谁置顶」就此消除。排序实现保留 lastOpenedAt 降序（smoke/hero.mjs 既有
- *     断言兼容，该文件不在本单写集）。
- *   - 重命名：tab 双击进行内编辑，落账册 title 字段（renameEntry + persist），
- *     空名=恢复默认显示；localStorage 持久化，刷新后保留。
- *   - 关闭：行尾 ×（hover 才显，不占常驻宽度）→ removeEntry 剔账册 + 条目移入
- *     「最近关闭」列表（localStorage 第二键，惰性读写，cap 10）→ tab 消失；
- *     sessions 服务若有 close API 则尽力调用（现无——会话数据不删，仅剔入口，
- *     无不可恢复损失，故不做确认弹窗，规格「无未发送内容时直接关」）。
- *     重新打开走行尾 ↺ 菜单：touchEntry 重登账册 + openSession 统一链，title
- *     随条目带回（改名→关闭→重开链自定义名不丢）。主账册登记只有新建登记、
- *     blank 自愈换绑、↺ 恢复三条显式路径，无 current 自动登记 effect——关闭
- *     当前活跃会话的终态：tab 消失、current 不变（会话仍在运行），不会复活，
- *     可从 ↺ 菜单找回。
- *   - 竞态取舍：双击会先触发两次 click——onClick 里 editingId 命中即 return，
- *     编辑态不触发 open；Esc 先置 cancelRef 再 blur，onBlur 提交前查该 ref，
- *     取消不落账（每次进编辑前重置）。
+ * 关闭语义（t260831-06 口径沿用）：tab × 确认弹层后 handleClose =
+ * removeEntry 剔账册 + 条目移入「最近关闭」（cap 10）+ 尽力调 sessions.close?；
+ * 会话数据不删，仅剔入口。主账册登记只有新建登记、blank 自愈换绑两条显式路径
+ * （↺ 恢复已随顶部行退役），无 current 自动登记 effect——关闭当前活跃会话的
+ * 终态：tab 消失、current 不变（会话仍在运行），不会复活。
  *
  * 故障模式取舍（t260831-04 gen2 修订；逐项「带/不带」理由见工单方案与实现报告）：
  *   - 新建走 ctx.workspaces.startSession（工厂同款）；workspaces 服务缺失：
@@ -60,35 +45,22 @@
  *   - 工单会话（ticket- 前缀）：isGlobalSessionId 在 touchEntry 里挡在账册外，
  *     顶部入口与账册同函数同口径，天然不混入（smoke/sessions.mjs 有断言）。
  *
- * 260904 宿主决策（notes/会话tab全项目显示决策.md）：tab 行显示不按
- * 当前项目过滤——targets 推导不再传 project（账册跨项目混排全量参排），
- * ↺「最近关闭」菜单同口径放开；「+ 新建会话」落点逻辑不变（仍走项目选单
- * /当前视图项目绑工作区）。projectKey 仅余新建落点与 ↺ 恢复的归属兜底两职。
- *
- * 第 3 面①（t260904-01，项目内会话区）：本文件仍是会话动作唯一实现点——
- * handleNew 在登记时分配项目内序号 seq（拍板 1「不回收」：每项目计数器续号，
- * 见 SEQ_COUNTER_KEY），重开/blank 换绑带原号；项目行（project-session-row.tsx）
- * 与顶部行消费同一账册（模块级共享 store）与同一组动作，渲染层各一。行内通知
- * 加归属项目（noticeProject）：项目行只显示自己项目的失败提示，顶部行照常全显。
- *
- * t260904-01 验收走查 D1 修复（gen1）：「最近关闭」列表从本 hook 实例各自的
- * useState 迁入 closed-ledger-store.ts 模块级共享 store——双实例下项目行关闭，
- * 顶部行 ↺ 恢复入口同帧出现（原空态死锁：钮渲染条件挂自身挂载快照，惰性刷新
- * 救不了未渲染的钮）。BO-1 顺修：nextProjectSeq 兜底号域纳入「最近关闭」，
- * 计数器丢失时不再重发已关最大号。
+ * 第 3 面①（t260904-01，项目内会话区）：handleNew 在登记时分配项目内序号 seq
+ * （拍板 1「不回收」：每项目计数器续号，见 SEQ_COUNTER_KEY），blank 换绑带原号；
+ * 项目行消费同一账册（模块级共享 store）与同一组动作。行内通知带归属项目
+ * （noticeProject）：项目行只显示自己项目的失败提示。BO-1：nextProjectSeq
+ * 兜底号域纳入「最近关闭」，计数器丢失时不再重发已关最大号。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import type { ObservableSnapshot, SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 // 「会话」记账层纯函数（t260828-02 项目归属+只列 UI 主动打开；smoke/sessions.mjs 直测）。
-// t260831-06：removeEntry 的显式调用点=tab 关闭钮（剔账不删数据）；renameEntry=
-// tab 重命名落账。借鉴模式取舍：非数组容错/未知 id 无害/不改入参/坏 JSON 不抛
-// 全部沿用（取舍清单见工单实现报告）。
+// removeEntry 的显式调用点=tab 关闭钮（剔账不删数据）。借鉴模式取舍：非数组容错/
+// 未知 id 无害/不改入参/坏 JSON 不抛全部沿用（取舍清单见工单实现报告）。
+// （重命名/切换行推导纯函数已随 R8 顶部行退役，t260904-05。）
 import {
   touchEntry,
   removeEntry,
-  renameEntry,
-  pickSwitchTargets,
   backfillProjectSeqs,
   nextProjectSeq,
 } from '../shared/sessions.ts'
@@ -100,10 +72,9 @@ import {
   getLedgerSnapshot,
   persistLedger,
 } from './session-ledger-store.ts'
-// 「最近关闭」列表共享 store（t260904-01 D1 修复）：状态从本 hook 实例各自的
-// useState 迁到模块级单例——双实例（顶部行/项目行）下任一实例关闭，另一实例
-// 的 ↺ 钮与菜单同帧可见（打回根因=实例 state 挂载快照 + 惰性刷新救不了
-// 「钮未渲染」的空态死锁，验收走查 D1）。
+// 「最近关闭」列表共享 store：模块级单例（t260904-01 D1 修复）。↺ 恢复菜单已
+// 随 R8 顶部行退役（无 UI 消费面）；closed 数据保留，仅作 nextProjectSeq 防撞
+// 号域（BO-1）参与续号计算——handleNew 读 getClosedSnapshot()。
 import {
   CLOSED_LEDGER_KEY,
   CLOSED_LEDGER_CAP,
@@ -253,9 +224,6 @@ interface SessionEntryOptions {
   projectKey: string
   /** 该项目主目录（注册表 primary；新建落点的工作区按它匹配/创建）。 */
   projectDir?: string
-  /** 注册表项目清单（sidebar 的 /wf/projects）：多项目未选时 + 按钮弹选单选项目新建
-   *  （t260903 切换夜：console 自 sandbar 起、双项目注册表下按钮曾静默禁用）。 */
-  projects?: readonly { key: string; name: string; primary: string }[]
 }
 
 /**
@@ -292,8 +260,7 @@ async function waitForStaged(sessions: SessionsFace, prev: string | null | undef
 }
 
 /**
- * 会话入口共享 hook：账册状态 + 切换行 + 新建/打开动作。
- * <SessionTopEntry> 渲染它的返回值。
+ * 会话入口共享 hook（动作层）：账册状态 + 新建/打开/关闭动作，渲染面=项目行。
  */
 export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDir }: SessionEntryOptions) {
   const list = sessions.list
@@ -306,11 +273,6 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
   const persist = useCallback((entries: OpenedEntry[]) => {
     persistLedger(entries)
   }, [])
-  // 260904：tab 行不按项目过滤——账册全量参排（MRU ≤5、current 保底在纯函数内）。
-  const targets = useMemo(() => pickSwitchTargets(ledger, {
-    current: listState?.current,
-    byId: listState?.byId,
-  }), [ledger, listState])
   const [creating, setCreating] = useState(false)
   /** 行内可见错误/提示（t260831-04）：open 链失败不再只打 console——用户在
    *  界面上能看见「为什么没切过去」。下一次动作或 8s 后自动清除（timer 有
@@ -479,14 +441,11 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
     }
   }, [workspaces, sessions, projectKey, projectDir, creating, persist, notify])
 
-  /* ── tab 关闭 / 重开（t260831-06；t260904-01 D1 修复：closed 状态迁共享 store）──
+  /* ── tab 关闭（t260831-06；t260904-01 D1 修复：closed 状态迁共享 store）──
    * 关闭=removeEntry 剔账册（tab 消失）+ 条目移入「最近关闭」列表 + 尽力调
    * sessions.close?（运行时现无——会话数据不删，仅剔入口，无不可恢复损失，
-   * 故不做确认弹窗）。重开=↺ 菜单 touchEntry 重登（title/seq 随条目带回，头插=
-   * 登记顺序最新）+ openSession 统一链 + 从「最近关闭」移除。
-   * D1 修复：closedList 从实例 useState 改 useSyncExternalStore 订阅共享单例
-   * ——二号实例（项目行）关闭后一号实例（顶部行 ↺ 钮）同帧可见，不再依赖
-   * 「打开菜单时刷新」的惰性兜底（空态死锁根因）。 */
+   * 确认弹窗由项目行承担，R5）。重开（↺）已随 R8 顶部行退役——closed 只出
+   * 不进，数据保留作 BO-1 号域。 */
   const closedList = useSyncExternalStore(subscribeClosed, getClosedSnapshot)
 
   const handleClose = useCallback((id: string) => {
@@ -504,293 +463,8 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
     }
   }, [ledger, persist, sessions])
 
-  const handleReopen = useCallback(async (id: string) => {
-    const entry = closedList.find(e => e.id === id)
-    if (!entry) return
-    persistClosed(closedList.filter(e => e.id !== id))
-    persist(touchEntry(ledger, {
-      id: entry.id,
-      project: entry.project || projectKey,
-      cwd: entry.cwd,
-      title: entry.title,
-      // 原号带回（第 3 面① 拍板 1：重开=找回原 tab 身份，编号不重排；原号
-      // 畸形时 touchEntry 剔字段、由 backfill 兜底重新补号——防御口径）
-      seq: entry.seq,
-      lastOpenedAt: Date.now(),
-    }))
-    await openSession(entry.id, entry.project || projectKey)
-  }, [closedList, ledger, persist, projectKey, openSession])
+  // handleReopen（↺ 恢复）已随 R8 顶部行退役（拍板 2）：closed 只出不进，
+  // 数据保留作 BO-1 号域。persistClosed 仍被 handleClose 使用。
 
-  return { ledger, targets, creating, entryNotice, noticeProject, handleNew, handleOpen, handleClose, handleReopen, closedList, listState }
-}
-
-/**
- * 顶部紧凑一行会话入口（t260831-02 建；t260831-06 tab 三修：div 行 + 双击改名
- * + hover 关闭钮 + ↺ 恢复菜单）。由 sidebar.tsx 挂在 .wb-sb-left 顶部——
- * 视觉位置=deepseek logo 正下方，即出厂「⊕ New Session」行被注入 effect 隐藏后
- * 让出的原位（整行原地替换）。新建落点=当前视图项目；未选时单项目注册表兜底，
- * 多项目未选禁用并提示（不造隐形缺省）。
- * 渲染类名 .wb-sessTop-* 全部 wb- 前缀，与出厂类名零交叉。
- * 本组件新增样式随组件注入 <style>（sidebar.tsx 不在本单写集，故新样式收在本
- * 文件）。
- */
-const SESSION_ENTRY_STYLES = `
-.wb-sessTop-tab { display:inline-flex; align-items:center; gap:2px; min-width:0; }
-.wb-sessTop-close { flex:none; opacity:0; font:inherit; font-size:10px; line-height:1;
-  padding:1px 3px; border:none; border-radius:3px; background:none; color:#f87171;
-  cursor:pointer; }
-.wb-sessTop-tab:hover .wb-sessTop-close, .wb-sessTop-close:focus-visible { opacity:1; }
-.wb-sessTop-close:hover { background:rgba(248,113,113,0.18); }
-.wb-sessTop-rename { font:inherit; font-size:11.5px; width:110px; padding:1px 4px;
-  border-radius:3px; border:1px solid rgba(124,58,237,0.6);
-  background:rgba(0,0,0,0.3); color:var(--dsw-alias-label-primary,#e0e0e0); outline:none; }
-.wb-sessTop-reopen-wrap { position:relative; flex:none; }
-.wb-sessTop-reopen { font:inherit; font-size:11px; padding:1px 5px; border-radius:4px;
-  border:1px solid rgba(255,255,255,0.18); background:none;
-  color:var(--dsw-alias-label-secondary,#b8b8c8); cursor:pointer; }
-.wb-sessTop-reopen:hover { background:rgba(255,255,255,0.08);
-  color:var(--dsw-alias-label-primary,#e0e0e0); }
-.wb-sessTop-menu { position:absolute; top:100%; right:0; margin-top:4px; z-index:30;
-  min-width:150px; max-height:220px; overflow-y:auto; padding:4px; border-radius:6px;
-  background:#1e1e24; border:1px solid rgba(255,255,255,0.15);
-  box-shadow:0 4px 16px rgba(0,0,0,0.5); }
-.wb-sessTop-menu button { display:block; width:100%; text-align:left; font:inherit;
-  font-size:11.5px; padding:4px 8px; border:none; border-radius:4px; background:none;
-  color:var(--dsw-alias-label-primary,#d0d0d8); cursor:pointer; white-space:nowrap;
-  overflow:hidden; text-overflow:ellipsis; }
-.wb-sessTop-menu button:hover { background:rgba(255,255,255,0.08); }
-`
-
-/**
- * tab 行内组件（t260831-06）：div[role=button]（button 嵌 button 非法 HTML，
- * 行内要容纳改名 input 与关闭钮）；data-wb-session-row 锚名保留（smoke/hero.mjs
- * 源文本断言）。单击/Enter/Space=open（编辑态除外）；双击=改名；×=关闭。
- */
-function SessionTab({ target, editing, draftTitle, onOpen, onClose, onEditStart, onDraftChange, onEditDone, onEditCancel }: {
-  target: { id: string; title: string; cwd: string; active: boolean }
-  editing: boolean
-  draftTitle: string
-  onOpen: () => void
-  onClose: () => void
-  onEditStart: () => void
-  onDraftChange: (v: string) => void
-  onEditDone: () => void
-  onEditCancel: () => void
-}) {
-  const cancelRef = useRef(false)
-  const inputRef = useRef<HTMLInputElement | null>(null)
-  useEffect(() => {
-    if (editing) {
-      cancelRef.current = false
-      inputRef.current?.select()
-    }
-  }, [editing])
-  if (editing) {
-    return (
-      <span className="wb-sessTop-tab" data-wb-session-row="" data-active={target.active} data-editing="true">
-        <input
-          ref={inputRef}
-          className="wb-sessTop-rename"
-          data-wb-session-rename=""
-          value={draftTitle}
-          autoFocus
-          onClick={e => e.stopPropagation()}
-          onChange={e => onDraftChange(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              inputRef.current?.blur() // blur 统一走提交路径
-            } else if (e.key === 'Escape') {
-              // 先置取消标记再 blur：onBlur 提交前查该 ref，取消不落账
-              cancelRef.current = true
-              inputRef.current?.blur()
-            }
-          }}
-          onBlur={() => {
-            if (cancelRef.current) { cancelRef.current = false; onEditCancel() }
-            else onEditDone()
-          }}
-        />
-      </span>
-    )
-  }
-  return (
-    <div
-      className="wb-sessTop-row wb-sessTop-tab"
-      data-wb-session-row=""
-      data-active={target.active}
-      role="button"
-      tabIndex={0}
-      title={`${target.title}\n${target.id}${target.cwd ? `\n${target.cwd}` : ''}`}
-      onClick={onOpen}
-      onDoubleClick={onEditStart}
-      onKeyDown={e => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() }
-      }}
-    >
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{target.title}</span>
-      <button
-        type="button"
-        className="wb-sessTop-close"
-        data-wb-session-close=""
-        title="关闭该会话入口（不删除会话内容，可从 ↺ 重新打开）"
-        aria-label={`关闭会话入口 ${target.title}`}
-        onClick={e => { e.stopPropagation(); onClose() }}
-      >×</button>
-    </div>
-  )
-}
-
-export function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, projectDir, projects }: SessionEntryOptions) {
-  const {
-    ledger, targets, creating, entryNotice, handleNew, handleOpen, handleClose, handleReopen,
-    closedList,
-  } = useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDir })
-  const persist = useCallback((entries: OpenedEntry[]) => persistLedger(entries), [])
-
-  // 重命名编辑态：editingId + 草稿；cancelRef 在 SessionTab 内（Esc 时序见该组件注释）。
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [draftTitle, setDraftTitle] = useState('')
-
-  const startEdit = useCallback((t: { id: string; title: string }) => {
-    setEditingId(t.id)
-    setDraftTitle(t.title)
-  }, [])
-
-  const commitEdit = useCallback((id: string) => {
-    persist(renameEntry(ledger, id, draftTitle))
-    setEditingId(null)
-  }, [ledger, draftTitle, persist])
-
-  const cancelEdit = useCallback(() => setEditingId(null), [])
-
-  // ↺ 恢复菜单：点外/Escape 收起（listener 有 cleanup，全终态回收）。
-  // t260904-01 D1 修复：不再需要「打开时惰性刷新」——closedList 已是共享 store
-  // 订阅（另一实例关闭/重开同帧广播到这里），钮的显隐随之即时正确。
-  const [reopenOpen, setReopenOpen] = useState(false)
-  const reopenWrapRef = useRef<HTMLDivElement | null>(null)
-  // 260904：↺ 菜单同口径放开——不按项目过滤，列出全部最近关闭条目
-  // （与 tab 行同一决策面；避免「刚关的 tab 换个项目就找不回」）。
-  const closedRecent = useMemo(
-    () => closedList.filter(e => e),
-    [closedList],
-  )
-  useEffect(() => {
-    if (!reopenOpen) return
-    const onDocDown = (e: globalThis.MouseEvent) => {
-      if (reopenWrapRef.current && !reopenWrapRef.current.contains(e.target as Node)) setReopenOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setReopenOpen(false) }
-    document.addEventListener('mousedown', onDocDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDocDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [reopenOpen])
-
-  // 项目选单（t260903 切换夜）：多项目注册表 + 未选项目时，+ 按钮不再禁用，
-  // 点开弹注册表项目选单——选中的项目主目录即新建落点（未注册工作区自动 create，
-  // 与点票后新建同一链）。点外/Escape 收起（与 ↺ 菜单同模式）。
-  const pickerChoices = !projectKey && (projects?.length ?? 0) > 0 ? projects! : null
-  const [projOpen, setProjOpen] = useState(false)
-  const projWrapRef = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    if (!projOpen) return
-    const onDocDown = (e: globalThis.MouseEvent) => {
-      if (projWrapRef.current && !projWrapRef.current.contains(e.target as Node)) setProjOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setProjOpen(false) }
-    document.addEventListener('mousedown', onDocDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDocDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [projOpen])
-
-  const newDisabled = creating || (!projectKey && !pickerChoices)
-  return (
-    <div className="wb-sessTop" data-wb-session-entry="">
-      <style>{SESSION_ENTRY_STYLES}</style>
-      {/* 行首：新建（紧凑按钮）；其后：会话切换行（≤5，跨项目混排，active 高亮，登记顺序）。
-          多项目未选：+ 变选单触发器（t260903 切换夜，选项目即落点）。 */}
-      <div className="wb-sessTop-reopen-wrap" ref={projWrapRef}>
-        <button
-          type="button"
-          className={`wb-sessTop-new ${newDisabled ? 'disabled' : ''}`}
-          data-wb-session-new=""
-          disabled={newDisabled}
-          title={projectKey ? '新建会话（落在当前项目主目录）' : pickerChoices ? '新建会话（选择项目主目录）' : '先在左侧点选一个项目'}
-          onClick={() => { if (pickerChoices) setProjOpen(v => !v); else handleNew() }}
-        >{creating ? '新建中…' : '+ 新建会话'}</button>
-        {projOpen && pickerChoices && (
-          <div className="wb-sessTop-menu" role="menu" style={{ left: 0, right: 'auto' }}>
-            {pickerChoices.map(p => (
-              <button
-                key={p.key}
-                type="button"
-                role="menuitem"
-                data-wb-session-project-pick=""
-                title={p.primary}
-                onClick={() => { setProjOpen(false); handleNew({ key: p.key, dir: p.primary }) }}
-              >{p.name || p.key}　<span style={{ opacity: 0.55 }}>{p.key}</span></button>
-            ))}
-          </div>
-        )}
-      </div>
-      <div className="wb-sessTop-rows">
-        {targets.length === 0 ? (
-          <span className="wb-sessTop-empty">暂无最近会话</span>
-        ) : targets.map(t => (
-          <SessionTab
-            key={t.id}
-            target={t}
-            editing={editingId === t.id}
-            draftTitle={draftTitle}
-            onOpen={() => { if (editingId === null) handleOpen(t.id) }}
-            onClose={() => { if (editingId === null) handleClose(t.id) }}
-            onEditStart={() => startEdit(t)}
-            onDraftChange={setDraftTitle}
-            onEditDone={() => { if (editingId === t.id) commitEdit(t.id) }}
-            onEditCancel={cancelEdit}
-          />
-        ))}
-      </div>
-      {/* ↺ 恢复菜单（t260831-06）：「最近关闭」非空时显示，重开=重登账册+打开
-          （260904 起不按项目过滤） */}
-      {closedRecent.length > 0 && (
-        <div className="wb-sessTop-reopen-wrap" ref={reopenWrapRef}>
-          <button
-            type="button"
-            className="wb-sessTop-reopen"
-            data-wb-session-reopen=""
-            aria-haspopup="menu"
-            aria-expanded={reopenOpen}
-            title={`重新打开最近关闭的会话入口（${closedRecent.length} 个）`}
-            onClick={() => setReopenOpen(v => !v)}
-          >↺ {closedRecent.length}</button>
-          {reopenOpen && (
-            <div className="wb-sessTop-menu" role="menu">
-              {closedRecent.map(e => (
-                <button
-                  key={e.id}
-                  type="button"
-                  role="menuitem"
-                  data-wb-session-restore=""
-                  title={e.id}
-                  onClick={() => { setReopenOpen(false); handleReopen(e.id) }}
-                >{e.title || e.id}</button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-      {/* 打开/新建失败（超时/throw/服务端报错）的行内可见反馈：不挡入口行布局，
-          出现时独占一行，8s 自动清除（timer 有 cleanup）。 */}
-      {entryNotice !== '' && (
-        <span className="wb-sessTop-notice" data-wb-session-notice="" role="status">{entryNotice}</span>
-      )}
-    </div>
-  )
+  return { ledger, creating, entryNotice, noticeProject, handleNew, handleOpen, handleClose, closedList, listState }
 }

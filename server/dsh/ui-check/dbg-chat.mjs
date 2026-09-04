@@ -82,7 +82,7 @@ await page.evaluate(([k, p2, id, c2]) => {
 await page.reload({ waitUntil: "networkidle", timeout: 30000 }).catch(() => {});
 try { const b = page.locator("button", { hasText: /continue|继续/i }).first();
   await b.waitFor({ state: "visible", timeout: 3000 }); await b.click(); } catch {}
-const nb = page.locator("[data-wb-session-new]").first();
+const nb = page.locator("[data-wb-psess-new]").first();
 await nb.waitFor({ state: "visible", timeout: 8000 });
 console.log("new-btn disabled=", await nb.getAttribute("disabled"), "title=", await nb.getAttribute("title"));
 await nb.click({ timeout: 5000 }).catch(async () => { await nb.evaluate((el) => el.click()); });
@@ -124,15 +124,15 @@ for (let i=0;i<90;i++){ const ph=await page.evaluate(()=>document.querySelector(
 // 追加等 60s 轮询 phase
 for (let i=0;i<60;i++){ const ph=await page.evaluate(()=>document.querySelector("[data-phase]")?.getAttribute("data-phase")||"<none>"); if(ph==="active"){console.log("phase active after",i,"s");break} await page.waitForTimeout(1000);} 
 console.log("all phases:", await page.evaluate(()=>[...document.querySelectorAll("[data-phase]")].map(e=>e.getAttribute("data-phase")).join(",")));
-console.log("notice =", await page.evaluate(() => document.querySelector("[data-wb-session-notice]")?.textContent || "<none>"));
-console.log("current rows:", await page.evaluate(() => [...document.querySelectorAll("[data-wb-session-row]")].map(e => `${e.getAttribute("data-active")}:${e.getAttribute("title")?.split("\n")[0]}`).join(" | ")));
+console.log("notice =", await page.evaluate(() => document.querySelector("[data-wb-psess-notice]")?.textContent || "<none>"));
+console.log("current rows:", await page.evaluate(() => [...document.querySelectorAll("[data-wb-psess-tab]")].map(e => `${e.getAttribute("data-active")}:${e.getAttribute("title")?.split("\n")[0]}`).join(" | ")));
 await page.waitForTimeout(8000);
 const phase = await page.evaluate(() => {
   const el = document.querySelector("[data-phase]");
   return el ? el.getAttribute("data-phase") : "<no data-phase>";
 });
 const cur = await page.evaluate(() => {
-  const els = [...document.querySelectorAll("[data-wb-session-row]")];
+  const els = [...document.querySelectorAll("[data-wb-psess-tab]")];
   return els.map((e) => `${e.getAttribute("data-active")}:${e.getAttribute("title")?.split("\n")[0]}`).join(" | ");
 });
 console.log("data-phase =", phase);

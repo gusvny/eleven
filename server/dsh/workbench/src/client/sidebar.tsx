@@ -5,24 +5,22 @@
  * Shell 传 ownerProps: wide / expandSidebar。
  * wide=false 时只显品牌图标；wide=true 时显完整双列。
  *
- * 左列：顶部会话入口行（t260831-02：出厂「⊕ New Session」行的原地替换——
- *       「+ 新建会话」+ 本项目最近打开的会话切换，≤5 个 MRU、current 高亮。
- *       出厂钮不在任何槽里（sidebar 包只声明 workspaces/settings/footer.action
- *       三槽，实查平台包），按工单口径走「注入+语义锚」：下方 useHideFactoryNewSession
+ * 左列：项目组（可折叠，项目名分隔，只列进行中工单，两行式条目：行1=title，行2=彩色工单号 + role·创建时长）；
+ *       每组头名前带项目色点（票② R7，projectColor 确定性色板）；组头下、工单
+ *       列表上有项目内会话区一横排（session-entry 第 3 面①：正方形「+」+
+ *       正方形数字 tab，编号=项目内登记顺序关闭不回收，超宽换行；+ 钮与激活
+ *       tab 带项目色，票② R7；组件 project-session-row.tsx，动作=本组件
+ *       useSessionEntry 实例）。
+ *       顶部会话入口行已随票② R8 退役（t260904-05：顶部行组件及其
+ *       顶部行样式族全清，src 无残留符号）；出厂「⊕ New Session」钮的隐藏注入**留守**
+ *       （拍板 1：职责=压制全局新建入口，出厂钮不回显——useHideFactoryNewSession
  *       effect 以 aria-label（session-entry.tsx FACTORY_NEW_LABELS，zh/en 全集）
- *       在 SidebarRoot 直接子 button 上定位出厂钮置 display:none（零 CSS 类名
- *       匹配，t260828-06 死因不复犯），MutationObserver 兜防工厂重渲染复活，
- *       卸载/折叠 cleanup 还原；找不到锚=软退化（出厂钮照常、入口仍在，warn 留痕）。
- *       数据=插件记账层（localStorage 账册，只登记 UI 主动打开/新建；磁盘存量/
- *       工单/subagent 会话不进账册），ctx.sessions.list 只取标题与 current；
- *       规则=shared/sessions.ts 纯函数；组件本体 client/session-entry.tsx 的
- *       <SessionTopEntry>。t260828-02 的左栏「会话」区块已整块移除（t260831-02），
- *       记账层保留在内部只供本入口）
- *       + 项目组（可折叠，项目名分隔，只列进行中工单，两行式条目：行1=title，行2=彩色工单号 + role·创建时长）；
- *       每组头下、工单列表上另有项目内会话区一横排（session-entry 第 3 面①：
- *       正方形「+」+ 正方形数字 tab，编号=项目内登记顺序关闭不回收，超宽换行；
- *       组件 project-session-row.tsx，动作=本组件 useSessionEntry 二号实例——
- *       顶部行过渡期 260904 混排口径不变，R8 验收后退役）。
+ *       在 SidebarRoot 直接子 button 上定位出厂钮置 display:none，零 CSS 类名
+ *       匹配，MutationObserver 兜防复活，卸载/折叠 cleanup 还原）。
+ *       记账层（localStorage 账册，只登记 UI 主动打开/新建；磁盘存量/工单/
+ *       subagent 会话不进账册）供项目内会话区消费，规则=shared/sessions.ts。
+ *       右栏 chat 项目色带（票② R7）：chat-project-band.ts 装饰器，归属=
+ *       listState.current → 账册 project 推导（下方 effect），不在册不渲染。
  *       项目组头行右对齐四个项目级视图入口图标：📋 工单列表 / 📖 知识库 / 🔀 模型路由 / 🗂️ 立项单
  *       （t260827-01：立项单从「左列可折叠列表区」改为项目级图标，与其他三视图同款；
  *       左列不再显示立项列表，点图标后中列显示立项清单）。
@@ -40,12 +38,12 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import type { ComponentType } from 'react'
 // 会话列表快照类型（t260828-02 起只取 displayTitle/current 两字段）：ctx.sessions.list 的面。
 import type { ObservableSnapshot, SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
-// 顶部会话入口组件与记账层（t260831-02：SessionTopEntry + 出厂钮语义锚；session-entry.tsx
-// 持有 LEDGER_KEY / useSessionEntry hook；本文件留侧栏样式、布局与注入 effect）。
-import { SessionTopEntry, FACTORY_NEW_LABELS, useSessionEntry } from './session-entry.tsx'
-// 项目内会话区（session-entry 第 3 面①，R1–R6）：每项目组头下、工单列表上的
-// 一横排（+ 钮 + 数字 tab + 确认弹层）；动作由本组件的 useSessionEntry 二号
-// 实例注入（账册=模块级共享 store，与顶部行同帧一致）。
+// 会话动作层与出厂钮语义锚（票② R8 后 session-entry.tsx 只剩动作层，无渲染面；
+// session-entry.tsx 持有 LEDGER_KEY / useSessionEntry hook）。
+import { FACTORY_NEW_LABELS, useSessionEntry } from './session-entry.tsx'
+// 项目内会话区（session-entry 第 3 面①，R1–R7）：每项目组头下、工单列表上的
+// 一横排（+ 钮 + 数字 tab + 确认弹层）；动作由本组件的 useSessionEntry
+// 实例注入（账册=模块级共享 store）。
 import { ProjectSessionRow } from './project-session-row.tsx'
 // 存量编号迁移（第 3 面① 拍板 1）：账册缺 seq 条目按项目内登记序补号（幂等）。
 import { backfillProjectSeqs } from '../shared/sessions.ts'
@@ -60,6 +58,11 @@ import type { SessionsFace } from './session-entry.tsx'
 import { publishProjectEntry, publishProjects } from './project-tag-index.ts'
 // chat 项目 tag 装饰器（t260903-07 工单②）：挂/卸随本组件生命周期（插件在装即挂）。
 import { startChatProjectTagEffect } from './chat-project-tag.ts'
+// chat 项目色带装饰器（票② R7）：锚=平台自声明 [data-conversation-scroll]，
+// 挂/卸随本组件生命周期；归属推导见下方 effect（current→账册 project）。
+import { startChatProjectBandEffect, setChatProjectBand } from './chat-project-band.ts'
+// 项目色（票② R7）：确定性色板，同 key 恒同色。
+import { projectColor } from '../shared/project-color.ts'
 // metrics M2a（t260902-01）：度量面板。t260902-05 起：入口迁出厂侧栏
 // footer.action 槽（与 dsh settings 同排，用户反馈①），面板中 pane 化挂进
 // .wb-sb-right（反馈②）。槽注册失败软退化回 .wb-sb-foot 兜底钮（console.warn）。
@@ -274,46 +277,27 @@ const CSS = `
 /* 中列：视图容器（四视图自带全套样式，无切换条——视图由左列图标直切） */
 .wb-right-content { flex:1; overflow-y:auto; }
 .wb-placeholder { padding:32px; color:var(--dsw-alias-label-secondary,#888); font-size:13px; line-height:1.8; }
-/* ── 顶部会话入口行（t260831-02：出厂「⊕ New Session」行的原地替换——紧凑一行，
- *     新建 + 本项目最近打开的会话切换；数据=插件记账层，工单/subagent/磁盘存量
- *     会话不混入。类名 wb-sessTop-* 全部自有前缀，与出厂类名零交叉） ── */
-.wb-sessTop { flex:none; display:flex; align-items:center; gap:6px; padding:6px 8px;
-  border-bottom:1px solid var(--dsw-alias-border-l1,#333); min-width:0; }
-.wb-sessTop-new { flex:none; font:inherit; font-size:11.5px; cursor:pointer; padding:2px 9px;
-  border-radius:4px; border:1px solid rgba(255,255,255,0.25); color:var(--dsw-alias-label-primary,#e0e0e0);
-  background:none; white-space:nowrap; }
-.wb-sessTop-new:hover { background:rgba(255,255,255,0.1); }
-.wb-sessTop-new.disabled { opacity:0.4; cursor:default; }
-.wb-sessTop-new.disabled:hover { background:none; }
-.wb-sessTop-rows { display:flex; align-items:center; gap:4px; min-width:0; overflow:hidden; }
-.wb-sessTop-empty { font-size:11px; color:#888; white-space:nowrap; }
-.wb-sessTop-row { font:inherit; font-size:11.5px; cursor:pointer; padding:2px 8px; border-radius:4px;
-  border:1px solid transparent; color:var(--dsw-alias-label-secondary,#b8b8c8); background:none;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:120px; }
-.wb-sessTop-row:hover { background:rgba(255,255,255,0.08); color:var(--dsw-alias-label-primary,#e0e0e0); }
-.wb-sessTop-row.active { background:rgba(124,58,237,0.25); color:var(--dsw-alias-label-primary,#e0e0e0); }
-/* 打开/新建失败的行内提示（t260831-04）：失败不再只打 console——在入口行下
-   独占一行显 warn 色小字，8s 自动清除；flex-wrap 让它不挤占切换行。 */
-.wb-sessTop { flex-wrap:wrap; }
-.wb-sessTop-notice { flex-basis:100%; font-size:10.5px; color:#f59e0b; white-space:nowrap;
-  overflow:hidden; text-overflow:ellipsis; }
+
+/* 顶部会话入口行样式已随票② R8 退役（t260904-05，顶部行样式族全清）。 */
 `
 
 /* ---------------------------------------------------------------- 主组件 */
 
 /**
- * 顶部行原地替换的注入面（t260831-02）：出厂「⊕ New Session」钮不在任何槽里
+ * 出厂「⊕ New Session」钮压制注入面（t260831-02 建；票② R8 后职责=压制全局
+ * 新建入口，拍板 1——移除注入=出厂全局钮回显，落点非项目归属）：出厂钮不在任何槽里
  * （实查 dsh-client-ui-sidebar 包只声明 sidebar.workspaces/settings/footer.action
  * 三槽），按工单口径走「注入+语义锚」——
  *   锚：从本插件侧栏根（rootRef）上溯 SidebarRoot（出厂钮是它的直接子 button，
  *   折叠钮在 logoRow 内部非直接子、不会被误伤），取「aria-label 命中
  *   FACTORY_NEW_LABELS」的直接子 button——零 CSS 类名匹配（t260828-06 死因
- *   不复犯）；命中即置 display:none，让出原位给 .wb-sessTop 一行入口。
+ *   不复犯）；命中即置 display:none——职责=压制全局新建入口（票②拍板 1，
+ *   出厂钮不回显；顶部行已退役，无「让位」对象）。
  *   兜防：MutationObserver 盯 SidebarRoot 的 childList/attributes——工厂重渲染
  *   复活新钮（或恢复被隐藏钮的可见性）时重新隐藏。
  *   全终态回收：卸载/折叠 cleanup 断开 Observer 并把碰过的钮 style.display
- *   还原为原值；锚找不到=软退化（出厂钮照常显示、入口仍在侧栏顶部，功能不丢，
- *   console.warn 留痕）。作用面仅此一个出厂元素，右栏出厂元素零接触。
+ *   还原为原值；锚找不到=软退化（出厂钮照常显示，功能不丢，console.warn 留痕）。
+ *   作用面仅此一个出厂元素，右栏出厂元素零接触。
  */
 function useHideFactoryNewSession(rootRef: { current: HTMLElement | null }, wide: boolean): void {
   useEffect(() => {
@@ -402,11 +386,11 @@ export function WorkbenchSidebar(props: SidebarProps) {
   useHideFactoryNewSession(rootRef, wide)
 
   /* ── 项目内会话区（session-entry 第 3 面①）──
-   * 二号 useSessionEntry 实例：账册是模块级共享 store（t260830-01 为同页多消费
-   * 而建，机制现行），两实例同帧一致；动作（handleNew/handleOpen/handleClose）
-   * 下传各项目组行，新建落点由行级闭包显式传 target（R3：落点=本组项目）。
-   * projectKey 缺省同顶部行（当前视图项目，单项目兜底）——只影响缺省落点与
-   * ↺ 恢复归属兜底，项目行走显式 target 不依赖它。 */
+   * useSessionEntry 实例：账册是模块级共享 store（t260830-01 为同页多消费
+   * 而建，机制现行）；动作（handleNew/handleOpen/handleClose）下传各项目组行，
+   * 新建落点由行级闭包显式传 target（R3：落点=本组项目）。
+   * projectKey 缺省（当前视图项目，单项目兜底）只影响缺省新建落点，
+   * 项目行走显式 target 不依赖它。 ↺ 恢复归属兜底已随顶部行退役（拍板 2）。 */
   const projectSessions = useSessionEntry({
     sessions,
     workspaces,
@@ -424,6 +408,24 @@ export function WorkbenchSidebar(props: SidebarProps) {
     const backfilled = backfillProjectSeqs(snapshot)
     if (backfilled !== snapshot) persistLedger(backfilled)
   }, [wide, projectSessions.ledger])
+
+  // chat 项目色带（票② R7）：挂 head 自有 style + body 子树 Observer。
+  // F1 防呆接线：effect 返回 startChatProjectBandEffect 的清理函数本身
+  // （直接返回 handle 会被 useEffect 静默忽略→卸载零回收，t260903-07 F1 实案）。
+  useEffect(() => {
+    if (!wide) return
+    return startChatProjectBandEffect({})
+  }, [wide])
+
+  // 色带归属推导（票② R7）：current → 账册 project（纯查表，不在装饰器内
+  // 推导）。不在册（工单会话/磁盘存量/blank hero/current 为空）→ 传 null=
+  // 摘除属性不渲染——声明行为，不造隐形缺省。
+  useEffect(() => {
+    if (!wide) return
+    const cur = projectSessions.listState?.current
+    const entry = cur ? projectSessions.ledger.find(e => e.id === cur) : undefined
+    setChatProjectBand(entry?.project ?? null)
+  }, [wide, projectSessions.listState?.current, projectSessions.ledger])
 
   // 度量入口首选注入 shell Settings 行（t260902-05① 验收打回修订：footer.action
   // 槽落点=侧栏包 footer，与 shell Settings 不同排）。锚找不到软退化回 footer.action
@@ -599,18 +601,9 @@ export function WorkbenchSidebar(props: SidebarProps) {
   return (
     <div ref={rootRef} className="wb-sb wide">
       <style>{CSS}</style>
-      {/* 左列：顶部会话入口行（t260831-02 出厂 New Session 行原地替换）+ 项目分组（可折叠）+ 插件入口 */}
+      {/* 左列：项目分组（可折叠）+ 插件入口。顶部会话入口行已随票② R8 退役
+          （t260904-05）：入口收口为各组的项目内会话区，出厂全局钮由注入 effect 压制。 */}
       <div className="wb-sb-left">
-        {/* 顶部会话入口：新建落点=当前视图项目；未选时单项目注册表兜底，多项目未选禁用。
-            workspaces/主目录传给入口——新建走 ctx.workspaces.startSession 工厂同款语义（t260831-04）。 */}
-        <SessionTopEntry
-          sessions={sessions}
-          workspaces={workspaces}
-          slotOpen={slotOpen}
-          projects={projects}
-          projectKey={viewProject || (projects.length === 1 ? projects[0].key : '')}
-          projectDir={projects.find(p => p.key === (viewProject || (projects.length === 1 ? projects[0].key : '')))?.primary ?? ''}
-        />
         <div className="wb-ticket-list">
           {loading ? (
             <div style={{padding:16,color:'#888'}}>加载中…</div>
@@ -618,6 +611,8 @@ export function WorkbenchSidebar(props: SidebarProps) {
             <div key={g.project.key}>
               <div className="wb-group-head" onClick={() => setCollapsed(c => ({ ...c, [g.project.key]: !c[g.project.key] }))}>
                 <span className="wb-group-caret">{collapsed[g.project.key] ? '▸' : '▾'}</span>
+                {/* 项目色点（票② R7 拍板 5）：8px 常驻项目色标识，色=projectColor 确定性色板 */}
+                <span className="wb-group-dot" data-wb-psess-dot="" style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 4, flex: 'none', background: projectColor(g.project.key) }} title={g.project.key} />
                 <span className="wb-group-name">{g.project.name}</span>
                 <span className="wb-group-count">{g.tickets.length || ''}</span>
                 {/* 四视图入口 per 项目（用户拍板 260823：每个项目组头行都有，非全局）——

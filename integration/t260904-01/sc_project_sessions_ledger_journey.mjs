@@ -17,7 +17,7 @@
  *
  * 契约依赖（缺任一 = 面①未兑现，S0 红且点名——报错精确说哪个锚缺失）：
  *   - 既有公开面（src/shared/sessions.ts 现导出）：parseLedger / serializeLedger /
- *     touchEntry / removeEntry / pickSwitchTargets / LEDGER_CAP；
+ *     touchEntry / removeEntry / pickProjectTabs / LEDGER_CAP；
  *   - 本票新增公开面：pickProjectTabs / backfillProjectSeqs / nextProjectSeq +
  *     OpenedEntry.seq 字段（tab 数字=seq，渲染编号数据源）。
  *   - 行为契约（本场景真正守护的，函数注释公开承诺）：nextProjectSeq =
@@ -59,10 +59,10 @@ function same(a, b, label) {
 section('S0 契约锚自检（面①导出面兑现）')
 {
   const FUNCS = ['parseLedger', 'serializeLedger', 'touchEntry', 'removeEntry',
-    'pickSwitchTargets', 'pickProjectTabs', 'backfillProjectSeqs', 'nextProjectSeq']
+    'pickProjectTabs', 'backfillProjectSeqs', 'nextProjectSeq']
   const missing = FUNCS.filter(n => typeof S[n] !== 'function')
   ok(missing.length === 0,
-    missing.length === 0 ? '8 个契约函数导出在场'
+    missing.length === 0 ? '7 个契约函数导出在场'
       : `面①导出面未兑现，缺失锚：${missing.join(', ')}（实现未落地或命名偏离方案 D1/D2 定稿）`)
   ok(typeof S.LEDGER_CAP === 'number' && S.LEDGER_CAP >= 1, `LEDGER_CAP 在场（=${S.LEDGER_CAP}）`)
   if (failed > 0) {
@@ -106,8 +106,9 @@ section('J1 存量升级迁移（旧账册 → 稳定编号）')
     '编号持久化：serialize→parse 往返 seq 不丢（刷新/重启后编号仍在）')
 }
 
-/* ── J2 编号生命周期：新建登记 → 关闭不回收 → 新建续号 → 重开保号 ── */
-section('J2 编号生命周期（拍板 1：不回收、续号、重开保号）')
+/* ── J2 编号生命周期：新建登记 → 关闭不回收 → 新建续号（↺ 重开已随 R8 退役，
+ *      稳定身份语义由「blank 换绑保号」同口径看守）── */
+section('J2 编号生命周期（拍板 1：不回收、续号；重开腿已随 R8 退役）')
 {
   let ledger = baseLedger()
 
@@ -126,10 +127,8 @@ section('J2 编号生命周期（拍板 1：不回收、续号、重开保号）
   const n2 = S.nextProjectSeq(closed, 'sandbar')
   ok(n2 === 5, `关闭后新会话续号 5 而非回收 2（实得 ${n2}）`)
 
-  // 重开 2 号（touchEntry 带原 seq 重登——方案 D1「同 title 处理，稳定身份」）
-  ledger = S.touchEntry(closed, ent('chat-c', 'sandbar', 40, { seq: 2, title: '我的命名' }))
-  const again = ledger.find(e => e.id === 'chat-c')
-  ok(again?.seq === 2 && again?.title === '我的命名', '重开保号 2 且 title 不丢（肌肉记忆不乱）')
+  // （↺ 重开腿已随票② R8 顶部行退役，t260904-05。blank 换绑保号语义与
+  //   touchEntry 带原 seq 重登同链，已由 smoke/project-sessions.mjs C1 看守。）
 
   // 关闭不碰计数器：计数器值（client 侧持有，此处直喂）不被关闭动作回退
   ok(S.nextProjectSeq(ledger, 'sandbar', 5) === 6,
@@ -138,8 +137,8 @@ section('J2 编号生命周期（拍板 1：不回收、续号、重开保号）
     '再关 2 号且不带计数器 → 按账册兜底续 5（仍不回收 2）')
 }
 
-/* ── J3 两消费面共存：项目行 × 顶部行同一账册交叉消费 ── */
-section('J3 两消费面共存（项目行过滤口径 × 顶部行 260904 混排口径）')
+/* ── J3 项目行消费面（票② R8 后账册唯一渲染面；顶部行腿已退役）── */
+section('J3 项目行消费面（pickProjectTabs 过滤/升序/兜底/唯一）')
 {
   const ledger = baseLedger()
   const byId = { 'chat-a': { displayTitle: '显示名A' } }   // 其余条目 byId 缺失（磁盘清理残留形态）
@@ -161,17 +160,8 @@ section('J3 两消费面共存（项目行过滤口径 × 顶部行 260904 混�
   ok(S.pickProjectTabs(ledger, { project: 'sandbar', current: 'ticket-t9', byId }).every(t => !t.active),
     'current 是工单会话 → 全不亮')
 
-  // 顶部行（pickSwitchTargets）：260904 口径冻结——跨项目混排 ≤5 + current 保底
-  const top = S.pickSwitchTargets(ledger, { current: 'chat-a', byId })
-  const projs = new Set(top.map(t => ledger.find(e => e.id === t.id)?.project))
-  ok(projs.has('sandbar') && projs.has('suyou'),
-    '顶部行仍跨项目混排（260904 过渡口径，本票不得改动）')
-  ok(top.length <= 5, `顶部行 ≤5（实得 ${top.length}）`)
-  ok(top.filter(t => t.active).length === 1, '顶部行 active 恰一')
-  // current 保底：chat-e（suyou，MRU 第 3）截断到前 2 之外 → 替换最末一名入选
-  const top2 = S.pickSwitchTargets(ledger, { current: 'chat-e', byId, limit: 2 })
-  ok(top2.some(t => t.id === 'chat-e'),
-    '顶部行 current 保底入选语义不变（截断时替换最末一名）')
+  // （顶部行 pickSwitchTargets 腿已随票② R8 退役：被测面删除，
+  //   反转看守在 smoke/hero.mjs / project-sessions.mjs S6。）
 }
 
 /* ── J4 对抗注入：计数器/账册跨键不一致、撞号、畸形 seq、CAP 挤压 ── */

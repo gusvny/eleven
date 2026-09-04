@@ -19,8 +19,8 @@
  * 本组件零 IO、零出厂 DOM 接触——动作全部由 sidebar.tsx 的 useSessionEntry
  * 二号实例注入（账册=模块级共享 store，两实例同帧一致）。
  *
- * 确认弹层定位（review C1 修订，与 ↺ 菜单同**模式**不同**环境**）：↺ 菜单挂在
- * .wb-sb-left（无滚动祖先，absolute 自由溢出）；本行挂在 .wb-ticket-list 内
+ * 确认弹层定位（review C1 修订；旧恢复菜单已随票② R8 退役，定位模式沿革记此）：
+ * 旧恢复菜单挂在 .wb-sb-left（无滚动祖先，absolute 自由溢出）；本行挂在 .wb-ticket-list 内
  * （overflow-y:auto 滚动容器——CSS 一轴 auto 另一轴计算为 auto，absolute 弹层
  * 会被裁剪）。故弹层走 position:fixed 脱离滚动容器裁剪 + 视口钳制（左右不出界、
  * 底部放不下向上翻），列表滚动时经 capture scroll 监听跟随锚重摆。点外/Esc
@@ -36,8 +36,12 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { pickProjectTabs } from '../shared/sessions.ts'
 import type { OpenedEntry, TitleRowLike } from '../shared/sessions.ts'
+// 项目色（票② R7）：确定性色板 + hex→rgba 展开（hover 淡底，避免 color-mix 赌注）。
+import { projectColor } from '../shared/project-color.ts'
+import { hexToRgba } from './chat-project-band.ts'
 
 /** 项目内会话区行 props（动作由 sidebar 的 useSessionEntry 二号实例注入）。 */
 export interface ProjectSessionRowProps {
@@ -77,12 +81,14 @@ export interface ProjectSessionRowProps {
 const PSESS_STYLES = `
 .wb-psess { display:flex; flex-wrap:wrap; align-items:center; gap:4px;
   padding:4px 8px 4px 20px; border-bottom:1px solid rgba(255,255,255,0.04); }
+/* 项目色（票② R7 拍板 5）：色源=--wb-psess-color（根节点 inline 注入，
+ * 值=projectColor(projectKey) 确定性色板）；淡底由 JS 用同色 16% 透明展开。 */
 .wb-psess-new { box-sizing:border-box; width:24px; height:24px; flex:none;
   display:flex; align-items:center; justify-content:center; font:inherit;
   font-size:13px; line-height:1; padding:0; border-radius:4px;
-  border:1px solid rgba(255,255,255,0.25); background:none;
-  color:var(--dsw-alias-label-primary,#e0e0e0); cursor:pointer; }
-.wb-psess-new:hover:not(:disabled) { background:rgba(255,255,255,0.1); }
+  border:1px solid var(--wb-psess-color, rgba(255,255,255,0.25)); background:none;
+  color:var(--wb-psess-color, var(--dsw-alias-label-primary,#e0e0e0)); cursor:pointer; }
+.wb-psess-new:hover:not(:disabled) { background:var(--wb-psess-hover, rgba(255,255,255,0.1)); }
 .wb-psess-new:disabled { opacity:0.4; cursor:default; }
 .wb-psess-tab { box-sizing:border-box; position:relative; min-width:24px;
   height:24px; flex:none; display:inline-flex; align-items:center;
@@ -92,8 +98,9 @@ const PSESS_STYLES = `
   cursor:pointer; }
 .wb-psess-tab:hover { background:rgba(255,255,255,0.08);
   color:var(--dsw-alias-label-primary,#e0e0e0); }
-.wb-psess-tab.active { background:rgba(124,58,237,0.25);
-  border-color:rgba(124,58,237,0.55); color:var(--dsw-alias-label-primary,#e0e0e0); }
+.wb-psess-tab.active { background:var(--wb-psess-hover, rgba(255,255,255,0.10));
+  border-color:var(--wb-psess-color, rgba(255,255,255,0.4));
+  color:var(--wb-psess-color, var(--dsw-alias-label-primary,#e0e0e0)); }
 .wb-psess-num { line-height:1; font-family:var(--ds-font-family-code,monospace); }
 .wb-psess-close { position:absolute; top:-5px; right:-5px; width:12px; height:12px;
   display:flex; align-items:center; justify-content:center; padding:0; font:inherit;
@@ -186,8 +193,16 @@ export function ProjectSessionRow(props: ProjectSessionRowProps) {
   // 行内提示只显示本项目归属的（无归属信息时照常显示，保守不静默）。
   const showNotice = notice !== '' && (noticeProject === undefined || noticeProject === projectKey)
 
+  // 项目色（票② R7）：色值与 16% 透明淡底由根节点 CSS 变量下发（激活 tab /
+  // + 钮边框文字 / hover 底色统一消费；色板=projectColor 确定性，同 key 恒同色）。
+  const color = projectColor(projectKey)
+  const colorVars = {
+    '--wb-psess-color': color,
+    '--wb-psess-hover': hexToRgba(color, 0.16),
+  } as CSSProperties
+
   return (
-    <div className="wb-psess" data-wb-psess-row="">
+    <div className="wb-psess" data-wb-psess-row="" style={colorVars}>
       <style>{PSESS_STYLES}</style>
       <button
         type="button"
@@ -238,7 +253,7 @@ export function ProjectSessionRow(props: ProjectSessionRowProps) {
         >
           <div className="wb-psess-confirm-t">关闭会话 {confirmTab.seq}？</div>
           <div className="wb-psess-confirm-d" title={confirmTab.title}>{confirmTab.title}</div>
-          <div className="wb-psess-confirm-m">仅关闭入口，不删除会话内容；可从 ↺ 最近关闭找回。</div>
+          <div className="wb-psess-confirm-m">仅关闭入口，不删除会话内容。</div>
           <div className="wb-psess-confirm-btns">
             <button
               type="button"

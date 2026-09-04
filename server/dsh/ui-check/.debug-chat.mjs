@@ -93,7 +93,7 @@ await p.evaluate(([key, proj, rows]) => {
 }, ["suyou-workbench-opened-sessions-v1", project, ids]);
 await p.reload({ waitUntil: "networkidle" }).catch(() => {});
 await p.waitForTimeout(2000);
-const rows = p.locator("[data-wb-session-row]");
+const rows = p.locator("[data-wb-psess-tab]");
 console.log("MRU 行数:", await rows.count());
 
 // 点击 + 时序采样

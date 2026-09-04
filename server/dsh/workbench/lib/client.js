@@ -1068,13 +1068,15 @@ function KnowledgeSection({ projectKey }) {
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
 			className: "d-cells",
 			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { style: { width: 40 } }), Array.from({ length: cols }, (_, c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("th", { children: ["列 ", c + 1] }, c))] }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tbody", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "旧" }), Array.from({ length: cols }, (_, c) => {
+				const chg = (oc[c] ?? "") !== (nc[c] ?? "");
 				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
-					className: (oc[c] ?? "") !== (nc[c] ?? "") ? "cell-old-chg" : "",
+					className: chg ? "cell-old-chg" : "",
 					children: oc[c] ?? "—"
 				}, c);
 			})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "新" }), Array.from({ length: cols }, (_, c) => {
+				const chg = (oc[c] ?? "") !== (nc[c] ?? "");
 				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
-					className: (oc[c] ?? "") !== (nc[c] ?? "") ? "cell-new-chg" : "",
+					className: chg ? "cell-new-chg" : "",
 					children: nc[c] ?? "—"
 				}, c);
 			})] })] })]
@@ -2982,8 +2984,8 @@ function serializeLedger(entries) {
 * 登记一次打开/新建：同 id upsert（更新 project/cwd/lastOpenedAt，可选带 title）
 * 并插到数组头部（=登记顺序最新），其余条目顺序不变；超出 cap 时淘汰最旧的。
 * ticket- 前缀的工单会话拒绝入账（有自己的常驻入口，不混入）。返回新数组
-* （不改入参）。t260831-06：本函数不再被「点击 tab 打开」路径调用（打开不
-* 重排），只服务新建登记、blank 自愈换绑、↺ 恢复重登三条显式路径。
+* （不改入参）。只服务新建登记、blank 自愈换绑两条显式路径（↺ 恢复已随
+* R8 顶部行退役）。
 */
 function touchEntry(entries, entry, cap = 20) {
 	if (!isGlobalSessionId(entry?.id) || typeof entry?.project !== "string" || entry.project === "") return Array.isArray(entries) ? entries.slice() : [];
@@ -3004,57 +3006,6 @@ function touchEntry(entries, entry, cap = 20) {
 */
 function removeEntry(entries, id) {
 	return (Array.isArray(entries) ? entries : []).filter((e) => e && e.id !== id);
-}
-/**
-* 重命名一个账册条目（t260831-06 tab 重命名）：同 id 条目更新 title——
-* 入参 trim 后为空串=清除自定义名（恢复默认 displayTitle 显示），非空即采纳；
-* 未知 id 原样返回（不造条目）；返回新数组（不改入参）。纯函数无 IO，落盘
-* 由调用方 persist。
-*/
-function renameEntry(entries, id, title) {
-	if (!Array.isArray(entries)) return [];
-	const t = typeof title === "string" ? title.trim() : "";
-	return entries.map((e) => {
-		if (!e || e.id !== id) return e;
-		const next = { ...e };
-		if (t === "") delete next.title;
-		else next.title = t;
-		return next;
-	});
-}
-/**
-* 算侧栏切换行：账册 → MRU（lastOpenedAt 降序；t260831-06 起打开路径不再更新
-* lastOpenedAt——排序结果=登记顺序，点 tab 停在原地）→ ≤limit → current 保底
-* （通过过滤却被截断时替换最末一名，沿用 t260825-02 语义——当前活跃会话掉出
-* 列表会让「我在哪」不可感知）→ 标题/高亮装配。
-*
-* - 260904 决策（宿主拍板，notes/会话tab全项目显示决策.md）：**不按
-*   当前项目过滤**——账册条目跨项目混排全量参排（旧「project 不匹配即剔除、
-*   空串直接返回空」口径废除；根因=新建落点项目与 tab 行过滤项目两个状态源
-*   不同步，多项目未选/刷新重置下新会话 tab 不可见）；
-* - 标题：条目自定义 title 非空优先（tab 重命名，t260831-06），否则从 byId
-*   （ctx.sessions.list 的 byId）取 displayTitle，再缺失兜底 id（账册有、list 无
-*   = 会话已被磁盘清理的残留条目，照常渲染不崩，点击打开失败时由 UI 层
-*   removeEntry 剔除）；
-* - active = id === current（current 来自 ctx.sessions.list）。
-*/
-function pickSwitchTargets(entries, opts) {
-	const limit = opts?.limit ?? 5;
-	if (limit <= 0) return [];
-	const byId = opts?.byId ?? {};
-	const current = opts?.current;
-	const eligible = (Array.isArray(entries) ? entries : []).filter((e) => e && typeof e.id === "string" && isGlobalSessionId(e.id)).slice();
-	eligible.sort((a, b) => (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0));
-	if (current !== void 0 && eligible.length > limit) {
-		const curIdx = eligible.findIndex((e) => e.id === current);
-		if (curIdx >= limit) eligible[limit - 1] = eligible[curIdx];
-	}
-	return eligible.slice(0, limit).map((e) => ({
-		id: e.id,
-		title: typeof e.title === "string" && e.title.trim() !== "" ? e.title : labelOf(byId[e.id], e.id),
-		cwd: typeof e.cwd === "string" ? e.cwd : "",
-		active: e.id === current
-	}));
 }
 /**
 * 算项目内会话 tab：账册按 project 精确过滤 → 只留有合法 seq（≥1 有限数）的
@@ -3115,7 +3066,8 @@ function backfillProjectSeqs(entries) {
 	} : e);
 }
 /**
-* 算某项目的下一个可用编号（登记时调用）：max(计数器值, 账册内该项目现存最大
+* 算某项目的下一个可用编号（登记时调用；号域含「最近关闭」——closed 数据
+* 在 ↺ 恢复随顶部行退役后仍保留，仅作防撞号域，BO-1）：max(计数器值, 账册内该项目现存最大
 * seq, 「最近关闭」内该项目最大 seq) + 1（closed 号域为 t260904-01 验收走查
 * BO-1 修复：计数器丢失时已关的最大号不再重发——重发后再从 ↺ 重开原号条目
 * 会撞号，破坏拍板 1 的「稳定身份」）。计数器丢失/落后时以账册与最近关闭
@@ -3214,7 +3166,7 @@ function persistLedger(entries) {
 * suyou-workbench · 「最近关闭」列表模块级共享 store（t260904-01 D1 修复，
 * session-entry 第 3 面①验收走查打回项）。
 *
-* 为什么存在：D1 回归——t260904-01 双实例拆分（顶部行 SessionTopEntry +
+* 为什么存在：D1 回归——t260904-01 双实例拆分（当时为顶部行 +
 * sidebar 项目行各持一个 useSessionEntry）前，closedList 是 hook 实例各自的
 * useState，单实例时代够用；拆分后项目行（二号实例）handleClose 只写
 * localStorage + 自身 state，顶部行（一号实例）的 ↺ 钮渲染条件
@@ -3285,47 +3237,32 @@ function persistClosed(entries) {
 //#endregion
 //#region src/client/session-entry.tsx
 /**
-* suyou-workbench · 顶部会话入口（session-entry t260831-02 第三轮）。
+* suyou-workbench · 会话动作层唯一样态（session-entry t260831-02 → 票② t260904-05 R8 退役收口）。
 *
-* 本文件是会话入口唯一的逻辑实现点：
+* R8 顶部行退役后，本文件**不再有任何渲染面**——只保留 useSessionEntry()
+* 动作层（账册读写 + handleNew/handleOpen/handleClose），供项目行
+* （project-session-row.tsx）消费；账册/闭账/编号计数器全部复用
+* src/shared/sessions.ts 纯函数（记账层语义零改动）。随顶部行一并退役
+* （拍板 2/3/4，notes/epics/session-entry.md 票②拍板）：
+*   - ↺「最近关闭」恢复菜单（handleReopen）——不迁移；闭账数据保留，
+*     仅作 nextProjectSeq 防撞号域（BO-1），无 UI 消费面；
+*   - tab 双击重命名（重命名纯函数随 shared/sessions.ts 一并退役）；
+*   - 顶部行组件/SessionTab/SESSION_ENTRY_STYLES 与
+*     顶部行家族 data-wb-* 断言锚（无残留消费方，smoke/hero.mjs 有
+*     「不在场」反转断言看守）。
 *
-*   - useSessionEntry()：账册（localStorage）读写 + handleNew/handleOpen +
-*     切换行推导，全部复用 src/shared/sessions.ts 纯函数（记账层语义零改动，
-*     t260828-02 口径原样保留）；
 *   - FACTORY_NEW_LABELS：出厂「⊕ New Session」钮的语义锚——aria-label 全集
 *     （dsh-client-ui-sidebar 的 locale 字典只有 zh/en 两份，实查于平台包；
-*     若 dsh 新增语言字典，锚集合在此补）。sidebar.tsx 的注入 effect 用它在
-*     SidebarRoot 直接子 button 上找到出厂钮并整行原地替换（隐藏出厂 + 我们的
-*     入口渲染在侧栏顶部同一视觉位置）；找不到锚时软退化：出厂钮照常显示、
-*     我们的入口仍在侧栏顶部，功能不丢，console.warn 留痕。
-*   - <SessionTopEntry>：紧凑一行入口——「+ 新建会话」+ 最近会话切换（≤5，
-*     会话跨项目混排，260904 起不按项目过滤）。与已退场的 SessionSection（t260825-02 左栏会话区，本票
-*     整块移除）和 HeroSessionEntry（t260829-06 hero 槽版，本票随 hero 接管
-*     拆除退场）消费同一个 useSessionEntry 同一账册，只有渲染层不同。
-*     带 data-wb-* 断言锚（UI 验收 DOM 断言用）：data-wb-session-entry（根）、
-*     data-wb-session-new（新建钮）、data-wb-session-row[data-active]（切换行）、
-*     data-wb-session-close（关闭钮）、data-wb-session-rename（改名输入）、
-*     data-wb-session-reopen（↺ 恢复菜单钮，菜单项 data-wb-session-restore）。
+*     若 dsh 新增语言字典，锚集合在此补）。sidebar.tsx 的注入 effect 用它
+*     找到出厂钮并隐藏——**职责=压制全局新建入口**（拍板 1：移除注入=出厂
+*     全局钮回到左栏顶部，落点=平台当前工作区非项目归属，与「入口长在项目上」
+*     直接冲突）；找不到锚时软退化：出厂钮照常显示，console.warn 留痕。
 *
-* t260831-06 tab 交互三修（停原地/重命名/关闭）：
-*   - 停原地：handleOpen 不再 touchEntry——lastOpenedAt 只在登记路径写（新建/
-*     blank 自愈换绑/↺ 恢复，时间单调递增=登记顺序），点 tab 不再重排，「点谁
-*     谁置顶」就此消除。排序实现保留 lastOpenedAt 降序（smoke/hero.mjs 既有
-*     断言兼容，该文件不在本单写集）。
-*   - 重命名：tab 双击进行内编辑，落账册 title 字段（renameEntry + persist），
-*     空名=恢复默认显示；localStorage 持久化，刷新后保留。
-*   - 关闭：行尾 ×（hover 才显，不占常驻宽度）→ removeEntry 剔账册 + 条目移入
-*     「最近关闭」列表（localStorage 第二键，惰性读写，cap 10）→ tab 消失；
-*     sessions 服务若有 close API 则尽力调用（现无——会话数据不删，仅剔入口，
-*     无不可恢复损失，故不做确认弹窗，规格「无未发送内容时直接关」）。
-*     重新打开走行尾 ↺ 菜单：touchEntry 重登账册 + openSession 统一链，title
-*     随条目带回（改名→关闭→重开链自定义名不丢）。主账册登记只有新建登记、
-*     blank 自愈换绑、↺ 恢复三条显式路径，无 current 自动登记 effect——关闭
-*     当前活跃会话的终态：tab 消失、current 不变（会话仍在运行），不会复活，
-*     可从 ↺ 菜单找回。
-*   - 竞态取舍：双击会先触发两次 click——onClick 里 editingId 命中即 return，
-*     编辑态不触发 open；Esc 先置 cancelRef 再 blur，onBlur 提交前查该 ref，
-*     取消不落账（每次进编辑前重置）。
+* 关闭语义（t260831-06 口径沿用）：tab × 确认弹层后 handleClose =
+* removeEntry 剔账册 + 条目移入「最近关闭」（cap 10）+ 尽力调 sessions.close?；
+* 会话数据不删，仅剔入口。主账册登记只有新建登记、blank 自愈换绑两条显式路径
+* （↺ 恢复已随顶部行退役），无 current 自动登记 effect——关闭当前活跃会话的
+* 终态：tab 消失、current 不变（会话仍在运行），不会复活。
 *
 * 故障模式取舍（t260831-04 gen2 修订；逐项「带/不带」理由见工单方案与实现报告）：
 *   - 新建走 ctx.workspaces.startSession（工厂同款）；workspaces 服务缺失：
@@ -3346,22 +3283,11 @@ function persistClosed(entries) {
 *   - 工单会话（ticket- 前缀）：isGlobalSessionId 在 touchEntry 里挡在账册外，
 *     顶部入口与账册同函数同口径，天然不混入（smoke/sessions.mjs 有断言）。
 *
-* 260904 宿主决策（notes/会话tab全项目显示决策.md）：tab 行显示不按
-* 当前项目过滤——targets 推导不再传 project（账册跨项目混排全量参排），
-* ↺「最近关闭」菜单同口径放开；「+ 新建会话」落点逻辑不变（仍走项目选单
-* /当前视图项目绑工作区）。projectKey 仅余新建落点与 ↺ 恢复的归属兜底两职。
-*
-* 第 3 面①（t260904-01，项目内会话区）：本文件仍是会话动作唯一实现点——
-* handleNew 在登记时分配项目内序号 seq（拍板 1「不回收」：每项目计数器续号，
-* 见 SEQ_COUNTER_KEY），重开/blank 换绑带原号；项目行（project-session-row.tsx）
-* 与顶部行消费同一账册（模块级共享 store）与同一组动作，渲染层各一。行内通知
-* 加归属项目（noticeProject）：项目行只显示自己项目的失败提示，顶部行照常全显。
-*
-* t260904-01 验收走查 D1 修复（gen1）：「最近关闭」列表从本 hook 实例各自的
-* useState 迁入 closed-ledger-store.ts 模块级共享 store——双实例下项目行关闭，
-* 顶部行 ↺ 恢复入口同帧出现（原空态死锁：钮渲染条件挂自身挂载快照，惰性刷新
-* 救不了未渲染的钮）。BO-1 顺修：nextProjectSeq 兜底号域纳入「最近关闭」，
-* 计数器丢失时不再重发已关最大号。
+* 第 3 面①（t260904-01，项目内会话区）：handleNew 在登记时分配项目内序号 seq
+* （拍板 1「不回收」：每项目计数器续号，见 SEQ_COUNTER_KEY），blank 换绑带原号；
+* 项目行消费同一账册（模块级共享 store）与同一组动作。行内通知带归属项目
+* （noticeProject）：项目行只显示自己项目的失败提示。BO-1：nextProjectSeq
+* 兜底号域纳入「最近关闭」，计数器丢失时不再重发已关最大号。
 */
 /**
 * 出厂「⊕ New Session」钮的语义锚（aria-label 全集）：dsh-client-ui-sidebar 的
@@ -3460,20 +3386,17 @@ async function waitForStaged(sessions, prev, ms = 1e4) {
 	return cur ?? prev ?? null;
 }
 /**
-* 会话入口共享 hook：账册状态 + 切换行 + 新建/打开动作。
-* <SessionTopEntry> 渲染它的返回值。
+* 会话入口共享 hook（动作层）：账册状态 + 新建/打开/关闭动作，渲染面=项目行。
 */
 function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDir }) {
 	const list = sessions.list;
-	const listState = (0, react.useSyncExternalStore)((0, react.useCallback)((fn) => list.subscribe(fn), [list]), (0, react.useCallback)(() => list.getSnapshot(), [list]));
+	const subscribe = (0, react.useCallback)((fn) => list.subscribe(fn), [list]);
+	const getSnapshot = (0, react.useCallback)(() => list.getSnapshot(), [list]);
+	const listState = (0, react.useSyncExternalStore)(subscribe, getSnapshot);
 	const ledger = (0, react.useSyncExternalStore)(subscribeLedger, getLedgerSnapshot);
 	const persist = (0, react.useCallback)((entries) => {
 		persistLedger(entries);
 	}, []);
-	const targets = (0, react.useMemo)(() => pickSwitchTargets(ledger, {
-		current: listState?.current,
-		byId: listState?.byId
-	}), [ledger, listState]);
 	const [creating, setCreating] = (0, react.useState)(false);
 	/** 行内可见错误/提示（t260831-04）：open 链失败不再只打 console——用户在
 	*  界面上能看见「为什么没切过去」。下一次动作或 8s 后自动清除（timer 有
@@ -3643,7 +3566,6 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 	const closedList = (0, react.useSyncExternalStore)(subscribeClosed, getClosedSnapshot);
 	return {
 		ledger,
-		targets,
 		creating,
 		entryNotice,
 		noticeProject,
@@ -3663,314 +3585,299 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 			persist,
 			sessions
 		]),
-		handleReopen: (0, react.useCallback)(async (id) => {
-			const entry = closedList.find((e) => e.id === id);
-			if (!entry) return;
-			persistClosed(closedList.filter((e) => e.id !== id));
-			persist(touchEntry(ledger, {
-				id: entry.id,
-				project: entry.project || projectKey,
-				cwd: entry.cwd,
-				title: entry.title,
-				seq: entry.seq,
-				lastOpenedAt: Date.now()
-			}));
-			await openSession(entry.id, entry.project || projectKey);
-		}, [
-			closedList,
-			ledger,
-			persist,
-			projectKey,
-			openSession
-		]),
 		closedList,
 		listState
 	};
 }
+//#endregion
+//#region src/shared/project-color.ts
 /**
-* 顶部紧凑一行会话入口（t260831-02 建；t260831-06 tab 三修：div 行 + 双击改名
-* + hover 关闭钮 + ↺ 恢复菜单）。由 sidebar.tsx 挂在 .wb-sb-left 顶部——
-* 视觉位置=deepseek logo 正下方，即出厂「⊕ New Session」行被注入 effect 隐藏后
-* 让出的原位（整行原地替换）。新建落点=当前视图项目；未选时单项目注册表兜底，
-* 多项目未选禁用并提示（不造隐形缺省）。
-* 渲染类名 .wb-sessTop-* 全部 wb- 前缀，与出厂类名零交叉。
-* 本组件新增样式随组件注入 <style>（sidebar.tsx 不在本单写集，故新样式收在本
-* 文件）。
+* suyou-workbench · 项目 key → tag 色 纯函数（t260903-07 工单②：全局 chat 消息
+* 项目 tag 按项目着色，为多项目同屏区分做准备）。
+*
+* 借鉴模式取舍（格式对齐 session-ledger-store.ts 头注，review gen0 R1）：
+* - ✅ 确定性哈希取色（FNV-1a 32bit → 调色板下标）：同 key 恒同色，无配置面也稳定。
+* - ❌ 不带运行时随机/持久化记忆：纯函数无状态，刷新/重启不漂移（验收 R3-a）。
+* - ❌ 不读 projects.yaml 配置：色映射零配置面；未来注册表声明色升级 =
+*   在本模块加「yaml 可选 color 字段优先于哈希值」一层，函数签名不变（见下）。
+* - ✅ 畸形输入兜底（外部输入纪律）：空/非字符串/超长 key → 中性灰，不 throw。
+*
+* 撞色风险（已声明，验收 R3-c 不作通过/失败断言）：10 色板下两项目撞色概率
+* 约 1/10（生日悖论在项目数个位数时更高些）。升级路径一：扩色板；升级路径二
+* （优先）：projects.yaml 增加可选 `color` 字段，registry 声明色覆盖哈希值。
 */
-const SESSION_ENTRY_STYLES = `
-.wb-sessTop-tab { display:inline-flex; align-items:center; gap:2px; min-width:0; }
-.wb-sessTop-close { flex:none; opacity:0; font:inherit; font-size:10px; line-height:1;
-  padding:1px 3px; border:none; border-radius:3px; background:none; color:#f87171;
-  cursor:pointer; }
-.wb-sessTop-tab:hover .wb-sessTop-close, .wb-sessTop-close:focus-visible { opacity:1; }
-.wb-sessTop-close:hover { background:rgba(248,113,113,0.18); }
-.wb-sessTop-rename { font:inherit; font-size:11.5px; width:110px; padding:1px 4px;
-  border-radius:3px; border:1px solid rgba(124,58,237,0.6);
-  background:rgba(0,0,0,0.3); color:var(--dsw-alias-label-primary,#e0e0e0); outline:none; }
-.wb-sessTop-reopen-wrap { position:relative; flex:none; }
-.wb-sessTop-reopen { font:inherit; font-size:11px; padding:1px 5px; border-radius:4px;
-  border:1px solid rgba(255,255,255,0.18); background:none;
-  color:var(--dsw-alias-label-secondary,#b8b8c8); cursor:pointer; }
-.wb-sessTop-reopen:hover { background:rgba(255,255,255,0.08);
-  color:var(--dsw-alias-label-primary,#e0e0e0); }
-.wb-sessTop-menu { position:absolute; top:100%; right:0; margin-top:4px; z-index:30;
-  min-width:150px; max-height:220px; overflow-y:auto; padding:4px; border-radius:6px;
-  background:#1e1e24; border:1px solid rgba(255,255,255,0.15);
-  box-shadow:0 4px 16px rgba(0,0,0,0.5); }
-.wb-sessTop-menu button { display:block; width:100%; text-align:left; font:inherit;
-  font-size:11.5px; padding:4px 8px; border:none; border-radius:4px; background:none;
-  color:var(--dsw-alias-label-primary,#d0d0d8); cursor:pointer; white-space:nowrap;
-  overflow:hidden; text-overflow:ellipsis; }
-.wb-sessTop-menu button:hover { background:rgba(255,255,255,0.08); }
+/** 调色板：10 色。定稿口径（实现期修订，偏离方案 v2「RGB 欧氏 ≥120」并在此声明）：
+*  「两两可辨」按**色相间隔**锁死——10 个色相均匀分布（每 36° 一档，s=0.72/l=0.66 生成），
+*  任意两色 hue 环距 ≥36°（smoke/project-color.mjs 断言 ≥20° 留余量）。理由：tag 色的
+*  「可辨」是感知问题，同亮度饱和色的色相才是主判据；RGB 欧氏距离会把感知上差异明显
+*  的两色（如绿 vs 青）误判为近色，10 色板在 RGB≥120 约束下无解（程序化搜索实证，
+*  只剩荧光/暗色极端解，暗底可读性崩坏）。
+*  亮度带锁定 0.66（GitHub 暗色系 UI 同档），保证暗底可读。 */
+const PROJECT_PALETTE = [
+	"#e76a6a",
+	"#e7b56a",
+	"#cee76a",
+	"#83e76a",
+	"#6ae79c",
+	"#6ae7e7",
+	"#6a9ce7",
+	"#836ae7",
+	"#ce6ae7",
+	"#e76ab5"
+];
+/** 畸形输入/无法归项目的兜底色（中性灰，低饱和一眼「未定色」）。 */
+const FALLBACK_COLOR = "#9ca3af";
+/** key 长度上限（超过按畸形处理；projects.yaml 的 key 都是短标识符）。 */
+const KEY_MAX_LEN = 64;
+/** FNV-1a 32bit 哈希 + murmur3 终混（F2 修复，验收走查 gen0）：
+*  纯 FNV 对短 key 的低 4 位雪崩不足，真实注册表首对项目（suyou/sandbar）即同槽
+*  撞色（两 key FNV 后均 %10===2，实锤见走查报告）——用户点名的第一对就撞，
+*  「撞色风险」从概率声明变现实缺陷。加 murmur3 finalizer 改善低位雪崩；
+*  smoke/project-color.mjs 落「真实注册表键两两不同槽」回归断言看住。 */
+function fnv1a(input) {
+	let h = 2166136261;
+	for (let i = 0; i < input.length; i++) {
+		h ^= input.charCodeAt(i);
+		h = Math.imul(h, 16777619);
+	}
+	h ^= h >>> 16;
+	h = Math.imul(h, 2246822507);
+	h ^= h >>> 13;
+	h = Math.imul(h, 3266489909);
+	h ^= h >>> 16;
+	return h >>> 0;
+}
+/** project key 合法面（宽松白名单：非空、≤64、无控制字符——UI 展示面用它渲染文本）。 */
+function isProjectKeyLike(key) {
+	return typeof key === "string" && key.length > 0 && key.length <= KEY_MAX_LEN && !/[\u0000-\u001f\u007f]/.test(key);
+}
+/**
+* 项目 key → 调色板色。同 key 任意次调用恒同值（纯函数，R3-a 验收对象）。
+* 畸形 key → FALLBACK_COLOR，不 throw。
+*/
+function projectColor(key) {
+	if (!isProjectKeyLike(key)) return FALLBACK_COLOR;
+	return PROJECT_PALETTE[fnv1a(key) % PROJECT_PALETTE.length];
+}
+/**
+* 生成 tag 样式 CSS 规则文本（注入 head 的自有 style 用；机制=属性锚 +
+* CSS ::before/attr()，对 React 托管容器零 childList 侵入——t260903-07 方案 v2 R1）。
+*
+* @param keys 已知项目 key 集合（重复自动去重；畸形 key 跳过不产规则）。
+* @returns 一段完整可注入的 CSS 文本（含基础规则 + 每项目着色规则）。
+*          key 只出现在属性选择器与 content 文本里，含 `"`/`\` 的 key 已在
+*          isProjectKeyLike 之外的这里再拦一层（双保险，防选择器注入）。
+*/
+function projectTagCssRules(keys) {
+	const seen = /* @__PURE__ */ new Set();
+	for (const k of keys) if (isProjectKeyLike(k) && !k.includes("\"") && !k.includes("\\")) seen.add(k);
+	const rules = [[
+		`[data-wb-projtag]::before{`,
+		`content:attr(data-wb-projtag);`,
+		`display:inline-block;`,
+		`font-size:10px;line-height:1;padding:2px 6px;margin-right:6px;`,
+		`border-radius:8px;border:1px solid transparent;`,
+		`vertical-align:1px;`,
+		`font-family:var(--ds-font-family-code,monospace);`,
+		`white-space:nowrap;`,
+		`}`
+	].join("")];
+	for (const k of seen) {
+		const c = projectColor(k);
+		const r = parseInt(c.slice(1, 3), 16);
+		const g = parseInt(c.slice(3, 5), 16);
+		const b = parseInt(c.slice(5, 7), 16);
+		rules.push(`[data-wb-projtag="${k}"]::before{color:${c};border-color:${c}55;background:rgba(${r},${g},${b},0.16)}`);
+	}
+	return rules.join("\n");
+}
+//#endregion
+//#region src/client/chat-project-band.ts
+/**
+* suyou-workbench · 全局 chat 项目色带装饰器（票② R7，t260904-05）。
+*
+* 视觉：右栏 chat 滚动体顶部 border-top 3px 项目色横贯 + 右上角 sticky 零高
+* 角标显项目 key（「色+名」双通道，10px 等宽同色，pointer-events:none）。
+* 分工：色带管 **chat 归属**；chat-project-tag.ts（已上线）管**消息级工单
+* 引用**，两者互不动。
+*
+* 渲染机制（对齐 chat-project-tag.ts 纪律，零 childList 侵入 React 托管容器）：
+* 只给平台渲染的滚动体**设置自有属性** `data-wb-chat-projband="<projectKey>"`，
+* 视觉全在注入 head 的自有 <style> 里（CSS 属性选择器 + ::after attr() 出角标
+* 文本与着色）。插件卸载时 style 元素与全部自有属性摘除，出厂树恢复原样。
+* 平台锚=chat 滚动体自声明属性 `[data-conversation-scroll]`（出处：安装树
+* dsh-client-ui-conversation/lib/client.js 6 处实锤，ConversationRoot 滚动体；
+* 非 css-module 哈希类，勿用类名锚）。
+*
+* 归属判定**不在本模块**：装饰器只吃显式入参 setChatProjectBand(key|null)，
+* 推导在 sidebar.tsx（listState.current → 账册 project 查表）。不在册（工单
+* 会话/磁盘存量/blank hero）→ null=摘属性不渲染——声明行为，不造隐形缺省。
+*
+* ── 故障模式取舍清单（对照 chat-project-tag.ts 头注 9 项范式展开为 10 项，
+*    逐项「带/不带」+理由）──
+* 1. ✅ 锚丢失显式降级（分层）：document 失联（isConnected=false）=永久停手，
+*    断 Observer + warn 一次（同 tag）；**锚 0 命中=瞬态常态**（blank hero /
+*    会话卸载时滚动体不在场，开 chat 后回归）——本轮回调摘全部已设属性即停手，
+*    Observer 保持连接，锚再现时下一轮回调自然重设（C4 修订：不得断 Observer，
+*    否则 hero↔chat 切换后色带永久失明）。0 锚不 warn（常态不噪音）。
+* 2. ✅ 负向排除：**声明不需要**——本模块零自铸 DOM 入 React 树（仅 head 里
+*    一个 style），插件任何节点不可能命中平台自声明属性 [data-conversation-scroll]，
+*    误伤面不存在；此结论即声明（OWN_SUBTREE_MARKER 教训的对照面）。
+* 3. ✅ F1 防呆接线：startChatProjectBandEffect 返回清理函数本身，sidebar 以
+*    `useEffect(() => startChatProjectBandEffect(...), [])` 接线——直接返回
+*    handle 会被 useEffect 静默忽略→卸载零回收（t260903-07 F1 实案）。
+* 4. ✅ 注入防线（attr()-only 免疫）：key 只进属性值与 ::after 的 attr()
+*    content，**不拼进 CSS 选择器**——引号/反斜杠等字符无注入面（比 tag 的
+*    选择器引号双保险更强的免疫设计，差异声明）；生产闸门另设：set 前过
+*    isProjectKeyLike（畸形→按 null 摘除），账册是 localStorage 外部输入。
+* 5. ✅ 多锚语义：命中 N 个=全部设同属性（平台滚动体应唯一，N>1 属异常但齐设
+*    无害）；命中 0 个=见第 1 项。无「首个」偏好。
+* 6. ✅ 畸形 key 生产闸门：见第 4 项 isProjectKeyLike；smoke 另带 localStorage
+*    手改坏 project 用例（畸形输入用例纪律，桩复现不靠真外部源）。
+* 7. ✅ 幂等先查再设：属性同值跳过、style 文本同值跳过、key=null 且无属性时
+*    跳过——React 重渲染/Observer 回调反复触发不抖。
+* 8. ✅ MutationObserver 防重建：body 子树 childList（同 tag/metrics-entry
+*    先例），React 重建滚动体后重设属性；attributes 不盯（自有属性无人动）。
+* 9. ✅ 全终态回收：stop() 幂等四项=断 Observer + 摘 head style + 摘全部已设
+*    自有属性（只摘自己设过的）+ 降级路径 warn 留痕。**无** window/document
+*    级监听、**无**定时器/轮询——band 数据源是账册 store（sidebar 推导后显式
+*    调 set），不需要 tag 的 fetch 索引兜底自取（差异声明）。
+* 10. ❌ body 级 overlay 贴 rect：不带（同 tag 理由——属性锚成本与脆性远低于
+*     逐帧 rect 跟随）。
+*/
+/** 自有属性名（值=project key）。 */
+const PROJBAND_ATTR = "data-wb-chat-projband";
+/** 自有 style 元素选择器（head 内，React 树之外）。 */
+const STYLE_SELECTOR$1 = "style[data-wb-chat-projband-style]";
+/** 平台 chat 滚动体锚（出处见文件头注；平台自声明属性，非 css-module 类名）。 */
+const SCROLL_SELECTOR = "[data-conversation-scroll]";
+/** hex → rgba() 字符串（16% 透明底等用途；避免 color-mix 兼容性赌注）。 */
+function hexToRgba(hex, alpha) {
+	return `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(hex.slice(5, 7), 16)},${alpha})`;
+}
+/** 色带基础样式（注入 head 的自有 style；attr()-only，key 不进选择器）。 */
+const PROJBAND_BASE_CSS = `
+[${PROJBAND_ATTR}] { border-top: 3px solid var(--wb-projband-color, transparent); position: relative; }
+[${PROJBAND_ATTR}]::after {
+  content: attr(${PROJBAND_ATTR});
+  position: sticky; top: 0; float: right; margin-right: 8px; height: 0;
+  display: block; font-size: 10px; line-height: 1.4; white-space: nowrap;
+  font-family: var(--ds-font-family-code, monospace);
+  color: var(--wb-projband-color, transparent);
+  pointer-events: none; opacity: 0.9;
+}
 `;
 /**
-* tab 行内组件（t260831-06）：div[role=button]（button 嵌 button 非法 HTML，
-* 行内要容纳改名 input 与关闭钮）；data-wb-session-row 锚名保留（smoke/hero.mjs
-* 源文本断言）。单击/Enter/Space=open（编辑态除外）；双击=改名；×=关闭。
+* 设/摘色带属性（纯 DOM 逻辑，smoke 用自有桩直测；幂等）。key=null/畸形=
+* 摘除（不在册不渲染，声明行为）。返回本次实际写动的节点数（观测用）。
+* N 个锚全部齐设（多锚语义见头注第 5 项）。
 */
-function SessionTab({ target, editing, draftTitle, onOpen, onClose, onEditStart, onDraftChange, onEditDone, onEditCancel }) {
-	const cancelRef = (0, react.useRef)(false);
-	const inputRef = (0, react.useRef)(null);
-	(0, react.useEffect)(() => {
-		if (editing) {
-			cancelRef.current = false;
-			inputRef.current?.select();
+function applyProjectBand(root, key) {
+	let touched = 0;
+	let els;
+	try {
+		els = Array.from(root.querySelectorAll(SCROLL_SELECTOR));
+	} catch {
+		return 0;
+	}
+	const valid = isProjectKeyLike(key) ? key : null;
+	for (const el of els) {
+		if (typeof el.setAttribute !== "function" || typeof el.getAttribute !== "function") continue;
+		const cur = el.getAttribute(PROJBAND_ATTR);
+		if (valid === null) {
+			if (cur !== null) {
+				el.removeAttribute(PROJBAND_ATTR);
+				touched++;
+			}
+			continue;
 		}
-	}, [editing]);
-	if (editing) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-		className: "wb-sessTop-tab",
-		"data-wb-session-row": "",
-		"data-active": target.active,
-		"data-editing": "true",
-		children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-			ref: inputRef,
-			className: "wb-sessTop-rename",
-			"data-wb-session-rename": "",
-			value: draftTitle,
-			autoFocus: true,
-			onClick: (e) => e.stopPropagation(),
-			onChange: (e) => onDraftChange(e.target.value),
-			onKeyDown: (e) => {
-				if (e.key === "Enter") {
-					e.preventDefault();
-					inputRef.current?.blur();
-				} else if (e.key === "Escape") {
-					cancelRef.current = true;
-					inputRef.current?.blur();
-				}
-			},
-			onBlur: () => {
-				if (cancelRef.current) {
-					cancelRef.current = false;
-					onEditCancel();
-				} else onEditDone();
-			}
-		})
-	});
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "wb-sessTop-row wb-sessTop-tab",
-		"data-wb-session-row": "",
-		"data-active": target.active,
-		role: "button",
-		tabIndex: 0,
-		title: `${target.title}\n${target.id}${target.cwd ? `\n${target.cwd}` : ""}`,
-		onClick: onOpen,
-		onDoubleClick: onEditStart,
-		onKeyDown: (e) => {
-			if (e.key === "Enter" || e.key === " ") {
-				e.preventDefault();
-				onOpen();
-			}
-		},
-		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-			style: {
-				overflow: "hidden",
-				textOverflow: "ellipsis"
-			},
-			children: target.title
-		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-			type: "button",
-			className: "wb-sessTop-close",
-			"data-wb-session-close": "",
-			title: "关闭该会话入口（不删除会话内容，可从 ↺ 重新打开）",
-			"aria-label": `关闭会话入口 ${target.title}`,
-			onClick: (e) => {
-				e.stopPropagation();
-				onClose();
-			},
-			children: "×"
-		})]
-	});
+		if (cur !== valid) {
+			el.setAttribute(PROJBAND_ATTR, valid);
+			if (typeof el.style?.setProperty === "function") el.style.setProperty("--wb-projband-color", projectColor(valid));
+			touched++;
+		}
+	}
+	return touched;
 }
-function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, projectDir, projects }) {
-	const { ledger, targets, creating, entryNotice, handleNew, handleOpen, handleClose, handleReopen, closedList } = useSessionEntry({
-		sessions,
-		workspaces,
-		slotOpen,
-		projectKey,
-		projectDir
+/**
+* useEffect 形态入口（F1 防呆，见头注第 3 项）：返回清理函数本身。
+*/
+function startChatProjectBandEffect(opts = {}) {
+	const h = startChatProjectBand(opts);
+	return () => h.stop();
+}
+/** 当前活跃 handle（模块级单例引用；sidebar 的归属推导 effect 走下面这个
+*  免实例透传入口，不必自己持有 handle——单插件单装饰器，多启后写后者）。 */
+let active = null;
+/**
+* 模块级入口：设/摘色带归属（sidebar 由 listState.current → 账册 project 推导
+* 后调用；key=null=不在册，摘除不渲染——声明行为）。装饰器未启动时静默 no-op
+* （窄模式/未挂载无消费面，不造隐形报错面）。
+*/
+function setChatProjectBand(key) {
+	active?.set(key);
+}
+/**
+* 启动装饰器：head 挂自有 style + body 子树 childList Observer。
+* 返回 handle：set(key|null) 供 sidebar 归属推导调用；stop() 卸载必调。
+*/
+function startChatProjectBand(opts = {}) {
+	const doc = opts.doc ?? (typeof document !== "undefined" ? document : null);
+	if (!doc || doc.documentElement === null) {
+		console.warn("[workbench] chat 项目色带装饰器无 document 可挂，软退化不渲染");
+		return {
+			set() {},
+			stop() {}
+		};
+	}
+	let style = doc.querySelector(STYLE_SELECTOR$1);
+	if (style === null) {
+		style = doc.createElement("style");
+		style.setAttribute("data-wb-chat-projband-style", "");
+		doc.head.appendChild(style);
+	}
+	if (style.textContent !== PROJBAND_BASE_CSS) style.textContent = PROJBAND_BASE_CSS;
+	let current = null;
+	let stopped = false;
+	let warnedDisconnected = false;
+	const scan = () => {
+		if (stopped) return;
+		if (!doc.documentElement.isConnected) {
+			if (!warnedDisconnected) {
+				warnedDisconnected = true;
+				console.warn("[workbench] chat 项目色带装饰器：document 已失联，停手（软退化不渲染）");
+			}
+			observer.disconnect();
+			return;
+		}
+		applyProjectBand(doc, current);
+	};
+	const observer = new MutationObserver(scan);
+	observer.observe(doc.body ?? doc.documentElement, {
+		childList: true,
+		subtree: true
 	});
-	const persist = (0, react.useCallback)((entries) => persistLedger(entries), []);
-	const [editingId, setEditingId] = (0, react.useState)(null);
-	const [draftTitle, setDraftTitle] = (0, react.useState)("");
-	const startEdit = (0, react.useCallback)((t) => {
-		setEditingId(t.id);
-		setDraftTitle(t.title);
-	}, []);
-	const commitEdit = (0, react.useCallback)((id) => {
-		persist(renameEntry(ledger, id, draftTitle));
-		setEditingId(null);
-	}, [
-		ledger,
-		draftTitle,
-		persist
-	]);
-	const cancelEdit = (0, react.useCallback)(() => setEditingId(null), []);
-	const [reopenOpen, setReopenOpen] = (0, react.useState)(false);
-	const reopenWrapRef = (0, react.useRef)(null);
-	const closedRecent = (0, react.useMemo)(() => closedList.filter((e) => e), [closedList]);
-	(0, react.useEffect)(() => {
-		if (!reopenOpen) return;
-		const onDocDown = (e) => {
-			if (reopenWrapRef.current && !reopenWrapRef.current.contains(e.target)) setReopenOpen(false);
-		};
-		const onKey = (e) => {
-			if (e.key === "Escape") setReopenOpen(false);
-		};
-		document.addEventListener("mousedown", onDocDown);
-		document.addEventListener("keydown", onKey);
-		return () => {
-			document.removeEventListener("mousedown", onDocDown);
-			document.removeEventListener("keydown", onKey);
-		};
-	}, [reopenOpen]);
-	const pickerChoices = !projectKey && (projects?.length ?? 0) > 0 ? projects : null;
-	const [projOpen, setProjOpen] = (0, react.useState)(false);
-	const projWrapRef = (0, react.useRef)(null);
-	(0, react.useEffect)(() => {
-		if (!projOpen) return;
-		const onDocDown = (e) => {
-			if (projWrapRef.current && !projWrapRef.current.contains(e.target)) setProjOpen(false);
-		};
-		const onKey = (e) => {
-			if (e.key === "Escape") setProjOpen(false);
-		};
-		document.addEventListener("mousedown", onDocDown);
-		document.addEventListener("keydown", onKey);
-		return () => {
-			document.removeEventListener("mousedown", onDocDown);
-			document.removeEventListener("keydown", onKey);
-		};
-	}, [projOpen]);
-	const newDisabled = creating || !projectKey && !pickerChoices;
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "wb-sessTop",
-		"data-wb-session-entry": "",
-		children: [
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: SESSION_ENTRY_STYLES }),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-sessTop-reopen-wrap",
-				ref: projWrapRef,
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-					type: "button",
-					className: `wb-sessTop-new ${newDisabled ? "disabled" : ""}`,
-					"data-wb-session-new": "",
-					disabled: newDisabled,
-					title: projectKey ? "新建会话（落在当前项目主目录）" : pickerChoices ? "新建会话（选择项目主目录）" : "先在左侧点选一个项目",
-					onClick: () => {
-						if (pickerChoices) setProjOpen((v) => !v);
-						else handleNew();
-					},
-					children: creating ? "新建中…" : "+ 新建会话"
-				}), projOpen && pickerChoices && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					className: "wb-sessTop-menu",
-					role: "menu",
-					style: {
-						left: 0,
-						right: "auto"
-					},
-					children: pickerChoices.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-						type: "button",
-						role: "menuitem",
-						"data-wb-session-project-pick": "",
-						title: p.primary,
-						onClick: () => {
-							setProjOpen(false);
-							handleNew({
-								key: p.key,
-								dir: p.primary
-							});
-						},
-						children: [
-							p.name || p.key,
-							"　",
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								style: { opacity: .55 },
-								children: p.key
-							})
-						]
-					}, p.key))
-				})]
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "wb-sessTop-rows",
-				children: targets.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-					className: "wb-sessTop-empty",
-					children: "暂无最近会话"
-				}) : targets.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SessionTab, {
-					target: t,
-					editing: editingId === t.id,
-					draftTitle,
-					onOpen: () => {
-						if (editingId === null) handleOpen(t.id);
-					},
-					onClose: () => {
-						if (editingId === null) handleClose(t.id);
-					},
-					onEditStart: () => startEdit(t),
-					onDraftChange: setDraftTitle,
-					onEditDone: () => {
-						if (editingId === t.id) commitEdit(t.id);
-					},
-					onEditCancel: cancelEdit
-				}, t.id))
-			}),
-			closedRecent.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-sessTop-reopen-wrap",
-				ref: reopenWrapRef,
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-					type: "button",
-					className: "wb-sessTop-reopen",
-					"data-wb-session-reopen": "",
-					"aria-haspopup": "menu",
-					"aria-expanded": reopenOpen,
-					title: `重新打开最近关闭的会话入口（${closedRecent.length} 个）`,
-					onClick: () => setReopenOpen((v) => !v),
-					children: ["↺ ", closedRecent.length]
-				}), reopenOpen && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					className: "wb-sessTop-menu",
-					role: "menu",
-					children: closedRecent.map((e) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						role: "menuitem",
-						"data-wb-session-restore": "",
-						title: e.id,
-						onClick: () => {
-							setReopenOpen(false);
-							handleReopen(e.id);
-						},
-						children: e.title || e.id
-					}, e.id))
-				})]
-			}),
-			entryNotice !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-				className: "wb-sessTop-notice",
-				"data-wb-session-notice": "",
-				role: "status",
-				children: entryNotice
-			})
-		]
-	});
+	const handle = {
+		set(key) {
+			current = isProjectKeyLike(key) ? key : null;
+			scan();
+		},
+		stop() {
+			if (stopped) return;
+			stopped = true;
+			if (active === handle) active = null;
+			observer.disconnect();
+			style.remove();
+			try {
+				for (const el of Array.from(doc.querySelectorAll(`[${PROJBAND_ATTR}]`))) {
+					el.removeAttribute(PROJBAND_ATTR);
+					if (typeof el.style?.removeProperty === "function") el.style.removeProperty("--wb-projband-color");
+				}
+			} catch {}
+		}
+	};
+	active = handle;
+	return handle;
 }
 //#endregion
 //#region src/client/project-session-row.tsx
@@ -3995,8 +3902,8 @@ function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 * 本组件零 IO、零出厂 DOM 接触——动作全部由 sidebar.tsx 的 useSessionEntry
 * 二号实例注入（账册=模块级共享 store，两实例同帧一致）。
 *
-* 确认弹层定位（review C1 修订，与 ↺ 菜单同**模式**不同**环境**）：↺ 菜单挂在
-* .wb-sb-left（无滚动祖先，absolute 自由溢出）；本行挂在 .wb-ticket-list 内
+* 确认弹层定位（review C1 修订；旧恢复菜单已随票② R8 退役，定位模式沿革记此）：
+* 旧恢复菜单挂在 .wb-sb-left（无滚动祖先，absolute 自由溢出）；本行挂在 .wb-ticket-list 内
 * （overflow-y:auto 滚动容器——CSS 一轴 auto 另一轴计算为 auto，absolute 弹层
 * 会被裁剪）。故弹层走 position:fixed 脱离滚动容器裁剪 + 视口钳制（左右不出界、
 * 底部放不下向上翻），列表滚动时经 capture scroll 监听跟随锚重摆。点外/Esc
@@ -4013,12 +3920,14 @@ function SessionTopEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 const PSESS_STYLES = `
 .wb-psess { display:flex; flex-wrap:wrap; align-items:center; gap:4px;
   padding:4px 8px 4px 20px; border-bottom:1px solid rgba(255,255,255,0.04); }
+/* 项目色（票② R7 拍板 5）：色源=--wb-psess-color（根节点 inline 注入，
+ * 值=projectColor(projectKey) 确定性色板）；淡底由 JS 用同色 16% 透明展开。 */
 .wb-psess-new { box-sizing:border-box; width:24px; height:24px; flex:none;
   display:flex; align-items:center; justify-content:center; font:inherit;
   font-size:13px; line-height:1; padding:0; border-radius:4px;
-  border:1px solid rgba(255,255,255,0.25); background:none;
-  color:var(--dsw-alias-label-primary,#e0e0e0); cursor:pointer; }
-.wb-psess-new:hover:not(:disabled) { background:rgba(255,255,255,0.1); }
+  border:1px solid var(--wb-psess-color, rgba(255,255,255,0.25)); background:none;
+  color:var(--wb-psess-color, var(--dsw-alias-label-primary,#e0e0e0)); cursor:pointer; }
+.wb-psess-new:hover:not(:disabled) { background:var(--wb-psess-hover, rgba(255,255,255,0.1)); }
 .wb-psess-new:disabled { opacity:0.4; cursor:default; }
 .wb-psess-tab { box-sizing:border-box; position:relative; min-width:24px;
   height:24px; flex:none; display:inline-flex; align-items:center;
@@ -4028,8 +3937,9 @@ const PSESS_STYLES = `
   cursor:pointer; }
 .wb-psess-tab:hover { background:rgba(255,255,255,0.08);
   color:var(--dsw-alias-label-primary,#e0e0e0); }
-.wb-psess-tab.active { background:rgba(124,58,237,0.25);
-  border-color:rgba(124,58,237,0.55); color:var(--dsw-alias-label-primary,#e0e0e0); }
+.wb-psess-tab.active { background:var(--wb-psess-hover, rgba(255,255,255,0.10));
+  border-color:var(--wb-psess-color, rgba(255,255,255,0.4));
+  color:var(--wb-psess-color, var(--dsw-alias-label-primary,#e0e0e0)); }
 .wb-psess-num { line-height:1; font-family:var(--ds-font-family-code,monospace); }
 .wb-psess-close { position:absolute; top:-5px; right:-5px; width:12px; height:12px;
   display:flex; align-items:center; justify-content:center; padding:0; font:inherit;
@@ -4118,9 +4028,15 @@ function ProjectSessionRow(props) {
 	}, [confirmId, place]);
 	const confirmTab = confirmId === null ? null : tabs.find((t) => t.id === confirmId) ?? null;
 	const showNotice = notice !== "" && (noticeProject === void 0 || noticeProject === projectKey);
+	const color = projectColor(projectKey);
+	const colorVars = {
+		"--wb-psess-color": color,
+		"--wb-psess-hover": hexToRgba(color, .16)
+	};
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-psess",
 		"data-wb-psess-row": "",
+		style: colorVars,
 		children: [
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: PSESS_STYLES }),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
@@ -4190,7 +4106,7 @@ function ProjectSessionRow(props) {
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "wb-psess-confirm-m",
-						children: "仅关闭入口，不删除会话内容；可从 ↺ 最近关闭找回。"
+						children: "仅关闭入口，不删除会话内容。"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "wb-psess-confirm-btns",
@@ -4459,108 +4375,6 @@ function startProjectIndexFallback(opts) {
 		if (timer !== null) clearTimeout(timer);
 		timer = null;
 	};
-}
-//#endregion
-//#region src/shared/project-color.ts
-/**
-* suyou-workbench · 项目 key → tag 色 纯函数（t260903-07 工单②：全局 chat 消息
-* 项目 tag 按项目着色，为多项目同屏区分做准备）。
-*
-* 借鉴模式取舍（格式对齐 session-ledger-store.ts 头注，review gen0 R1）：
-* - ✅ 确定性哈希取色（FNV-1a 32bit → 调色板下标）：同 key 恒同色，无配置面也稳定。
-* - ❌ 不带运行时随机/持久化记忆：纯函数无状态，刷新/重启不漂移（验收 R3-a）。
-* - ❌ 不读 projects.yaml 配置：色映射零配置面；未来注册表声明色升级 =
-*   在本模块加「yaml 可选 color 字段优先于哈希值」一层，函数签名不变（见下）。
-* - ✅ 畸形输入兜底（外部输入纪律）：空/非字符串/超长 key → 中性灰，不 throw。
-*
-* 撞色风险（已声明，验收 R3-c 不作通过/失败断言）：10 色板下两项目撞色概率
-* 约 1/10（生日悖论在项目数个位数时更高些）。升级路径一：扩色板；升级路径二
-* （优先）：projects.yaml 增加可选 `color` 字段，registry 声明色覆盖哈希值。
-*/
-/** 调色板：10 色。定稿口径（实现期修订，偏离方案 v2「RGB 欧氏 ≥120」并在此声明）：
-*  「两两可辨」按**色相间隔**锁死——10 个色相均匀分布（每 36° 一档，s=0.72/l=0.66 生成），
-*  任意两色 hue 环距 ≥36°（smoke/project-color.mjs 断言 ≥20° 留余量）。理由：tag 色的
-*  「可辨」是感知问题，同亮度饱和色的色相才是主判据；RGB 欧氏距离会把感知上差异明显
-*  的两色（如绿 vs 青）误判为近色，10 色板在 RGB≥120 约束下无解（程序化搜索实证，
-*  只剩荧光/暗色极端解，暗底可读性崩坏）。
-*  亮度带锁定 0.66（GitHub 暗色系 UI 同档），保证暗底可读。 */
-const PROJECT_PALETTE = [
-	"#e76a6a",
-	"#e7b56a",
-	"#cee76a",
-	"#83e76a",
-	"#6ae79c",
-	"#6ae7e7",
-	"#6a9ce7",
-	"#836ae7",
-	"#ce6ae7",
-	"#e76ab5"
-];
-/** 畸形输入/无法归项目的兜底色（中性灰，低饱和一眼「未定色」）。 */
-const FALLBACK_COLOR = "#9ca3af";
-/** key 长度上限（超过按畸形处理；projects.yaml 的 key 都是短标识符）。 */
-const KEY_MAX_LEN = 64;
-/** FNV-1a 32bit 哈希 + murmur3 终混（F2 修复，验收走查 gen0）：
-*  纯 FNV 对短 key 的低 4 位雪崩不足，真实注册表首对项目（suyou/sandbar）即同槽
-*  撞色（两 key FNV 后均 %10===2，实锤见走查报告）——用户点名的第一对就撞，
-*  「撞色风险」从概率声明变现实缺陷。加 murmur3 finalizer 改善低位雪崩；
-*  smoke/project-color.mjs 落「真实注册表键两两不同槽」回归断言看住。 */
-function fnv1a(input) {
-	let h = 2166136261;
-	for (let i = 0; i < input.length; i++) {
-		h ^= input.charCodeAt(i);
-		h = Math.imul(h, 16777619);
-	}
-	h ^= h >>> 16;
-	h = Math.imul(h, 2246822507);
-	h ^= h >>> 13;
-	h = Math.imul(h, 3266489909);
-	h ^= h >>> 16;
-	return h >>> 0;
-}
-/** project key 合法面（宽松白名单：非空、≤64、无控制字符——UI 展示面用它渲染文本）。 */
-function isProjectKeyLike(key) {
-	return typeof key === "string" && key.length > 0 && key.length <= KEY_MAX_LEN && !/[\u0000-\u001f\u007f]/.test(key);
-}
-/**
-* 项目 key → 调色板色。同 key 任意次调用恒同值（纯函数，R3-a 验收对象）。
-* 畸形 key → FALLBACK_COLOR，不 throw。
-*/
-function projectColor(key) {
-	if (!isProjectKeyLike(key)) return FALLBACK_COLOR;
-	return PROJECT_PALETTE[fnv1a(key) % PROJECT_PALETTE.length];
-}
-/**
-* 生成 tag 样式 CSS 规则文本（注入 head 的自有 style 用；机制=属性锚 +
-* CSS ::before/attr()，对 React 托管容器零 childList 侵入——t260903-07 方案 v2 R1）。
-*
-* @param keys 已知项目 key 集合（重复自动去重；畸形 key 跳过不产规则）。
-* @returns 一段完整可注入的 CSS 文本（含基础规则 + 每项目着色规则）。
-*          key 只出现在属性选择器与 content 文本里，含 `"`/`\` 的 key 已在
-*          isProjectKeyLike 之外的这里再拦一层（双保险，防选择器注入）。
-*/
-function projectTagCssRules(keys) {
-	const seen = /* @__PURE__ */ new Set();
-	for (const k of keys) if (isProjectKeyLike(k) && !k.includes("\"") && !k.includes("\\")) seen.add(k);
-	const rules = [[
-		`[data-wb-projtag]::before{`,
-		`content:attr(data-wb-projtag);`,
-		`display:inline-block;`,
-		`font-size:10px;line-height:1;padding:2px 6px;margin-right:6px;`,
-		`border-radius:8px;border:1px solid transparent;`,
-		`vertical-align:1px;`,
-		`font-family:var(--ds-font-family-code,monospace);`,
-		`white-space:nowrap;`,
-		`}`
-	].join("")];
-	for (const k of seen) {
-		const c = projectColor(k);
-		const r = parseInt(c.slice(1, 3), 16);
-		const g = parseInt(c.slice(3, 5), 16);
-		const b = parseInt(c.slice(5, 7), 16);
-		rules.push(`[data-wb-projtag="${k}"]::before{color:${c};border-color:${c}55;background:rgba(${r},${g},${b},0.16)}`);
-	}
-	return rules.join("\n");
 }
 //#endregion
 //#region src/client/chat-project-tag.ts
@@ -6088,7 +5902,7 @@ var Ee = function() {
 		e instanceof t || (e = t.create(e));
 		var i = this, r = i.x, o = i.x + i.width, a = i.y, s = i.y + i.height, l = e.x, u = e.x + e.width, h = e.y, c = e.y + e.height, p = !(o < l || u < r || s < h || c < a);
 		if (n) {
-			var d = Infinity, f = 0, g = Math.abs(o - l), y = Math.abs(u - r), v = Math.abs(s - h), m = Math.abs(c - a), x = Math.min(g, y), _ = Math.min(v, m);
+			var d = 1 / 0, f = 0, g = Math.abs(o - l), y = Math.abs(u - r), v = Math.abs(s - h), m = Math.abs(c - a), x = Math.min(g, y), _ = Math.min(v, m);
 			o < l || u < r ? x > f && (f = x, g < y ? Ce.set(Ne, -g, 0) : Ce.set(Ne, y, 0)) : x < d && (d = x, g < y ? Ce.set(Re, g, 0) : Ce.set(Re, -y, 0)), s < h || c < a ? _ > f && (f = _, v < m ? Ce.set(Ne, 0, -v) : Ce.set(Ne, 0, m)) : x < d && (d = x, v < m ? Ce.set(Re, 0, v) : Ce.set(Re, 0, -m));
 		}
 		return n && Ce.copy(n, p ? Re : Ne), p;
@@ -6712,9 +6526,10 @@ function mn(t, e, n, i, r) {
 }
 function xn(t, e, n, i, r, o) {
 	var a = i + 3 * (e - n) - t, s = 3 * (n - 2 * e + t), l = 3 * (e - t), u = t - r, h = s * s - 3 * a * l, c = s * l - 9 * a * u, p = l * l - 3 * s * u, d = 0;
-	if (gn(h) && gn(c)) if (gn(s)) o[0] = 0;
-	else (M = -l / s) >= 0 && M <= 1 && (o[d++] = M);
-	else {
+	if (gn(h) && gn(c)) {
+		if (gn(s)) o[0] = 0;
+		else (M = -l / s) >= 0 && M <= 1 && (o[d++] = M);
+	} else {
 		var f = c * c - 4 * h * p;
 		if (gn(f)) {
 			var g = c / h, y = -g / 2;
@@ -6748,10 +6563,10 @@ function bn(t, e, n, i, r, o) {
 	o[0] = t, o[1] = a, o[2] = u, o[3] = c, o[4] = c, o[5] = h, o[6] = l, o[7] = i;
 }
 function wn(t, e, n, i, r, o, a, s, l, u, h) {
-	var c, p, d, f, g, y = .005, v = Infinity;
+	var c, p, d, f, g, y = .005, v = 1 / 0;
 	pn[0] = l, pn[1] = u;
 	for (var m = 0; m < 1; m += .05) dn[0] = vn(t, n, r, a, m), dn[1] = vn(e, i, o, s, m), (f = Bt(pn, dn)) < v && (c = m, v = f);
-	v = Infinity;
+	v = 1 / 0;
 	for (var x = 0; x < 32 && !(y < un); x++) p = c - y, d = c + y, dn[0] = vn(t, n, r, a, p), dn[1] = vn(e, i, o, s, p), f = Bt(dn, pn), p >= 0 && f < v ? (c = p, v = f) : (fn[0] = vn(t, n, r, a, d), fn[1] = vn(e, i, o, s, d), g = Bt(fn, pn), d <= 1 && g < v ? (c = d, v = g) : y *= .5);
 	return h && (h[0] = vn(t, n, r, a, c), h[1] = vn(e, i, o, s, c)), sn(v);
 }
@@ -6778,10 +6593,10 @@ function Cn(t, e, n, i, r) {
 	r[0] = t, r[1] = o, r[2] = s, r[3] = s, r[4] = a, r[5] = n;
 }
 function Dn(t, e, n, i, r, o, a, s, l) {
-	var u, h = .005, c = Infinity;
+	var u, h = .005, c = 1 / 0;
 	pn[0] = a, pn[1] = s;
 	for (var p = 0; p < 1; p += .05) dn[0] = Mn(t, n, r, p), dn[1] = Mn(e, i, o, p), (y = Bt(pn, dn)) < c && (u = p, c = y);
-	c = Infinity;
+	c = 1 / 0;
 	for (var d = 0; d < 32 && !(h < un); d++) {
 		var f = u - h, g = u + h;
 		dn[0] = Mn(t, n, r, f), dn[1] = Mn(e, i, o, f);
@@ -9488,7 +9303,7 @@ function fo(t) {
 	t.sort((function(t, e) {
 		return s(t, e, 0) ? -1 : 1;
 	}));
-	for (var e = -Infinity, n = 1, i = 0; i < t.length;) {
+	for (var e = -1 / 0, n = 1, i = 0; i < t.length;) {
 		for (var r = t[i].interval, o = t[i].close, a = 0; a < 2; a++) r[a] <= e && (r[a] = e, o[a] = a ? 1 : 1 - n), e = r[a], n = o[a];
 		r[0] === r[1] && o[0] * o[1] != 1 ? t.splice(i, 1) : i++;
 	}
@@ -10145,7 +9960,7 @@ var Fa = [];
 var Ga = [];
 function Wa(t, e, n, i, r, o, a, s, l, u) {
 	var h = _n, c = vn, p = h(t, n, r, a, Fa);
-	l[0] = Infinity, l[1] = Infinity, u[0] = -Infinity, u[1] = -Infinity;
+	l[0] = 1 / 0, l[1] = 1 / 0, u[0] = -1 / 0, u[1] = -1 / 0;
 	for (var d = 0; d < p; d++) {
 		var f = c(t, n, r, a, Fa[d]);
 		l[0] = ka(f, l[0]), u[0] = La(f, u[0]);
@@ -10486,7 +10301,7 @@ function vs(t, e, n, i, r, o) {
 	var a = (o - e) / (i - e), s = i < e ? 1 : -1;
 	1 !== a && 0 !== a || (s = i < e ? .5 : -.5);
 	var l = a * (n - t) + t;
-	return l === r ? Infinity : l > r ? s : 0;
+	return l === r ? 1 / 0 : l > r ? s : 0;
 }
 var ms = us.CMD;
 var xs = 2 * Math.PI;
@@ -11799,7 +11614,7 @@ function Wu(t, e, n) {
 			var o = function(t, e, n, i) {
 				var r, o, a, s, l = [], u = [], h = [], c = [];
 				if (i) {
-					a = [Infinity, Infinity], s = [-Infinity, -Infinity];
+					a = [1 / 0, 1 / 0], s = [-1 / 0, -1 / 0];
 					for (var p = 0, d = t.length; p < d; p++) Wt(a, a, t[p]), Ht(s, s, t[p]);
 					Wt(a, a, i[0]), Ht(s, s, i[1]);
 				}
@@ -12009,7 +11824,7 @@ var hh = function() {
 		for (l = 0; l < 2; l++) this._origin[l] = i[l].dot(n[0]);
 	}, t.prototype.intersect = function(t, e) {
 		var n = !0, i = !e;
-		return lh.set(Infinity, Infinity), uh.set(0, 0), !this._intersectCheckOneSide(this, t, lh, uh, i, 1) && (n = !1, i) || !this._intersectCheckOneSide(t, this, lh, uh, i, -1) && (n = !1, i) || i || Ce.copy(e, n ? lh : uh), n;
+		return lh.set(1 / 0, 1 / 0), uh.set(0, 0), !this._intersectCheckOneSide(this, t, lh, uh, i, 1) && (n = !1, i) || !this._intersectCheckOneSide(t, this, lh, uh, i, -1) && (n = !1, i) || i || Ce.copy(e, n ? lh : uh), n;
 	}, t.prototype._intersectCheckOneSide = function(t, e, n, i, r, o) {
 		for (var a = !0, s = 0; s < 2; s++) {
 			var l = this._axes[s];
@@ -12070,7 +11885,7 @@ var ph = function(t) {
 		}
 	}, n.prototype.getBoundingRect = function() {
 		if (!this._rect) {
-			for (var t = new Ee(Infinity, Infinity, -Infinity, -Infinity), e = 0; e < this._displayables.length; e++) {
+			for (var t = new Ee(1 / 0, 1 / 0, -1 / 0, -1 / 0), e = 0; e < this._displayables.length; e++) {
 				var n = this._displayables[e], i = n.getBoundingRect().clone();
 				n.needLocalTransform() && i.applyTransform(n.getLocalTransform(ch)), t.union(i);
 			}
@@ -13250,7 +13065,7 @@ var Tp = [[
 ]];
 function Cp(t, e, n, i, r) {
 	var o = 0, a = 0;
-	i ??= Infinity, r ??= Infinity;
+	i ??= 1 / 0, r ??= 1 / 0;
 	var s = 0;
 	e.eachChild((function(l, u) {
 		var h, c, p = l.getBoundingRect(), d = e.childAt(u + 1), f = d && d.getBoundingRect();
@@ -14325,7 +14140,7 @@ function Qd(t, e, n) {
 				null != t && "-" !== t && (X(t) ? a ??= 1 : a = 0);
 			}), n, s, 10) : a = Z(i) ? i : i ? 1 : 0, r || 1 !== a || (r = [], rf((function(t, e) {
 				r[e] = null != t ? t + "" : "";
-			}), n, s, Infinity)), o = r ? r.length : n === jp ? s.length : s[0] ? s[0].length : null;
+			}), n, s, 1 / 0)), o = r ? r.length : n === jp ? s.length : s[0] ? s[0].length : null;
 		} else if (e === Hp) r || (r = function(t) {
 			var e, n = 0;
 			for (; n < t.length && !(e = t[n++]););
@@ -14443,7 +14258,7 @@ var af = function() {
 			return e;
 		}, n = function(t, e, n, i) {
 			for (var r = this._data, o = this._dimSize, a = 0; a < o; a++) {
-				for (var s = i[a], l = null == s[0] ? Infinity : s[0], u = null == s[1] ? -Infinity : s[1], h = e - t, c = n[a], p = 0; p < h; p++) {
+				for (var s = i[a], l = null == s[0] ? 1 / 0 : s[0], u = null == s[1] ? -1 / 0 : s[1], h = e - t, c = n[a], p = 0; p < h; p++) {
 					var d = r[p * o + a];
 					c[t + p] = d, d < l && (l = d), d > u && (u = d);
 				}
@@ -14629,8 +14444,8 @@ var wf = function() {
 		}
 		a === l && s === u || (e = "reset"), (this._dirty || "reset" === e) && (this._dirty = !1, o = this._doReset(i)), this._modBy = l, this._modDataCount = u;
 		var c = t && t.step;
-		if (this._dueEnd = n ? n._outputDueEnd : this._count ? this._count(this.context) : Infinity, this._progress) {
-			var p = this._dueIndex, d = Math.min(null != c ? this._dueIndex + c : Infinity, this._dueEnd);
+		if (this._dueEnd = n ? n._outputDueEnd : this._count ? this._count(this.context) : 1 / 0, this._progress) {
+			var p = this._dueIndex, d = Math.min(null != c ? this._dueIndex + c : 1 / 0, this._dueEnd);
 			if (!i && (o || p < d)) {
 				var f = this._progress;
 				if (H(f)) for (var g = 0; g < f.length; g++) this._doProgress(f[g], p, d, l, u);
@@ -14726,7 +14541,7 @@ var Df = function() {
 var Af = function() {
 	function t(t, e) {
 		var n = "desc" === t;
-		this._resultLT = n ? 1 : -1, e ??= n ? "min" : "max", this._incomparable = "min" === e ? -Infinity : Infinity;
+		this._resultLT = n ? 1 : -1, e ??= n ? "min" : "max", this._incomparable = "min" === e ? -1 / 0 : 1 / 0;
 	}
 	return t.prototype.evaluate = function(t, e) {
 		var n = Z(t) ? t : go(t), i = Z(e) ? e : go(e), r = isNaN(n), o = isNaN(i);
@@ -14900,10 +14715,10 @@ var qf = function() {
 		if (null != r) {
 			if (i[r].type === e) return r;
 		} else r = i.length;
-		return i[r] = { type: e }, n.set(t, r), this._chunks[r] = new Uf[e || "float"](this._rawCount), this._rawExtent[r] = [Infinity, -Infinity], r;
+		return i[r] = { type: e }, n.set(t, r), this._chunks[r] = new Uf[e || "float"](this._rawCount), this._rawExtent[r] = [1 / 0, -1 / 0], r;
 	}, t.prototype.collectOrdinalMeta = function(t, e) {
 		var n = this._chunks[t], i = this._dimensions[t], r = this._rawExtent, o = i.ordinalOffset || 0, a = n.length;
-		0 === o && (r[t] = [Infinity, -Infinity]);
+		0 === o && (r[t] = [1 / 0, -1 / 0]);
 		for (var s = r[t], l = o; l < a; l++) {
 			var u = n[l] = e.parseAndCollect(n[l]);
 			isNaN(u) || (s[0] = Math.min(u, s[0]), s[1] = Math.max(u, s[1]));
@@ -14936,7 +14751,7 @@ var qf = function() {
 			return t.property;
 		})), u = 0; u < a; u++) {
 			var h = o[u];
-			s[u] || (s[u] = [Infinity, -Infinity]), jf(r, u, h.type, e, n);
+			s[u] || (s[u] = [1 / 0, -1 / 0]), jf(r, u, h.type, e, n);
 		}
 		if (i.fillStorage) i.fillStorage(t, e, r, s);
 		else for (var c = [], p = t; p < e; p++) {
@@ -15001,8 +14816,8 @@ var qf = function() {
 	}, t.prototype.indicesOfNearest = function(t, e, n) {
 		var i = this._chunks[t], r = [];
 		if (!i) return r;
-		n ??= Infinity;
-		for (var o = Infinity, a = -1, s = 0, l = 0, u = this.count(); l < u; l++) {
+		n ??= 1 / 0;
+		for (var o = 1 / 0, a = -1, s = 0, l = 0, u = this.count(); l < u; l++) {
 			var h = e - i[this.getRawIndex(l)], c = Math.abs(h);
 			c <= n && ((c < o || c === o && h >= 0 && a < 0) && (o = c, a = h, s = 0), h === a && (r[s++] = l));
 		}
@@ -15072,7 +14887,7 @@ var qf = function() {
 	}, t.prototype.modify = function(t, e) {
 		this._updateDims(this, t, e);
 	}, t.prototype._updateDims = function(t, e, n) {
-		for (var i = t._chunks, r = [], o = e.length, a = t.count(), s = [], l = t._rawExtent, u = 0; u < e.length; u++) l[e[u]] = [Infinity, -Infinity];
+		for (var i = t._chunks, r = [], o = e.length, a = t.count(), s = [], l = t._rawExtent, u = 0; u < e.length; u++) l[e[u]] = [1 / 0, -1 / 0];
 		for (var h = 0; h < a; h++) {
 			for (var c = t.getRawIndex(h), p = 0; p < o; p++) s[p] = i[e[p]][c];
 			s[o] = h;
@@ -15118,9 +14933,12 @@ var qf = function() {
 		}
 		return n._count = l, n._indices = s, n._updateGetRawIdx(), n;
 	}, t.prototype.downSample = function(t, e, n, i) {
-		for (var r = this.clone([t], !0), o = r._chunks, a = [], s = Math.floor(1 / e), l = o[t], u = this.count(), h = r._rawExtent[t] = [Infinity, -Infinity], c = new (Zf(this._rawCount))(Math.ceil(u / s)), p = 0, d = 0; d < u; d += s) {
+		for (var r = this.clone([t], !0), o = r._chunks, a = [], s = Math.floor(1 / e), l = o[t], u = this.count(), h = r._rawExtent[t] = [1 / 0, -1 / 0], c = new (Zf(this._rawCount))(Math.ceil(u / s)), p = 0, d = 0; d < u; d += s) {
 			s > u - d && (s = u - d, a.length = s);
-			for (var f = 0; f < s; f++) a[f] = l[this.getRawIndex(d + f)];
+			for (var f = 0; f < s; f++) {
+				var g = this.getRawIndex(d + f);
+				a[f] = l[g];
+			}
 			var y = n(a), v = this.getRawIndex(Math.min(d + i(a, y) || 0, u - 1));
 			l[v] = y, y < h[0] && (h[0] = y), y > h[1] && (h[1] = y), c[p++] = v;
 		}
@@ -15144,7 +14962,7 @@ var qf = function() {
 			}
 		}
 	}, t.prototype.getDataExtent = function(t) {
-		var e = this._chunks[t], n = [Infinity, -Infinity];
+		var e = this._chunks[t], n = [1 / 0, -1 / 0];
 		if (!e) return n;
 		var i, r = this.count();
 		if (!this._indices) return this._rawExtent[t].slice();
@@ -17148,9 +16966,9 @@ var im = function(t) {
 		this.id;
 	}, n.prototype.getConnectedDataURL = function(t) {
 		if (!this._disposed) {
-			var e = "svg" === t.type, n = this.group, i = Math.min, r = Math.max, o = Infinity;
+			var e = "svg" === t.type, n = this.group, i = Math.min, r = Math.max, o = 1 / 0;
 			if (gm[n]) {
-				var a = o, s = o, l = -Infinity, h = -Infinity, c = [], p = t && t.pixelRatio || this.getDevicePixelRatio();
+				var a = o, s = o, l = -1 / 0, h = -1 / 0, c = [], p = t && t.pixelRatio || this.getDevicePixelRatio();
 				N(fm, (function(o, u) {
 					if (o.group === n) {
 						var p = e ? o.getZr().painter.getSvgDom().innerHTML : o.renderToCanvas(I(t)), d = o.getDom().getBoundingClientRect();
@@ -17333,7 +17151,7 @@ var im = function(t) {
 			if (!t.preventAutoZ) {
 				var n = t.get("z") || 0, i = t.get("zlevel") || 0;
 				e.eachRendered((function(t) {
-					return o(t, n, i, -Infinity), !0;
+					return o(t, n, i, -1 / 0), !0;
 				}));
 			}
 		}
@@ -18727,7 +18545,7 @@ function kx(t, e, n) {
 }
 var Lx = function() {
 	function t(t) {
-		this._setting = t || {}, this._extent = [Infinity, -Infinity];
+		this._setting = t || {}, this._extent = [1 / 0, -1 / 0];
 	}
 	return t.prototype.getSetting = function(t) {
 		return this._setting[t];
@@ -19284,7 +19102,7 @@ var o_ = function(t) {
 		}), n;
 	}, n.prototype.calcNiceExtent = function(t) {
 		var e = this._extent;
-		if (e[0] === e[1] && (e[0] -= Gc, e[1] += Gc), e[1] === -Infinity && e[0] === Infinity) {
+		if (e[0] === e[1] && (e[0] -= Gc, e[1] += Gc), e[1] === -1 / 0 && e[0] === 1 / 0) {
 			var n = /* @__PURE__ */ new Date();
 			e[1] = +new Date(n.getFullYear(), n.getMonth(), n.getDate()), e[0] = e[1] - Gc;
 		}
@@ -19388,7 +19206,7 @@ var __ = function(t) {
 	}, n.prototype.calcNiceTicks = function(t) {
 		t = t || 10;
 		var e = this._extent, n = e[1] - e[0];
-		if (!(n === Infinity || n <= 0)) {
+		if (!(n === 1 / 0 || n <= 0)) {
 			var i = uo(n);
 			for (t / n * i <= .5 && (i *= 10); !isNaN(i) && Math.abs(i) < 1 && Math.abs(i) > 0;) i *= 10;
 			var r = [$r(v_(e[0] / i) * i), $r(y_(e[1] / i) * i)];
@@ -19492,11 +19310,11 @@ function D_(t, e) {
 					min: t,
 					max: e
 				};
-				var s = Infinity;
+				var s = 1 / 0;
 				N(a, (function(t) {
 					s = Math.min(t.offset, s);
 				}));
-				var l = -Infinity;
+				var l = -1 / 0;
 				N(a, (function(t) {
 					l = Math.max(t.offset + t.width, l);
 				})), s = Math.abs(s), l = Math.abs(l);
@@ -19531,7 +19349,7 @@ function k_(t, e) {
 	if (e = e || t.get("type")) switch (e) {
 		case "category": return new Hx({
 			ordinalMeta: t.getOrdinalMeta ? t.getOrdinalMeta() : t.getCategories(),
-			extent: [Infinity, -Infinity]
+			extent: [1 / 0, -1 / 0]
 		});
 		case "time": return new o_({
 			locale: t.ecModel.getLocaleModel(),
@@ -19677,7 +19495,7 @@ var j_ = function(t) {
 	}, n.prototype.getBoundingRect = function(t) {
 		var e = this._rect;
 		if (e && !t) return e;
-		var n = [Infinity, Infinity], i = [-Infinity, -Infinity];
+		var n = [1 / 0, 1 / 0], i = [-1 / 0, -1 / 0];
 		return N(this.geometries, (function(e) {
 			"polygon" === e.type ? Y_(e.exterior, n, i, t) : N(e.points, (function(e) {
 				Y_(e, n, i, t);
@@ -20108,7 +19926,7 @@ var gb = function() {
 				f = 1.3 * y.width, g = 1.3 * y.height, p = Math.max(p, f, 7), d = Math.max(d, g, 7);
 			}
 			var v = p / h, m = d / c;
-			isNaN(v) && (v = Infinity), isNaN(m) && (m = Infinity);
+			isNaN(v) && (v = 1 / 0), isNaN(m) && (m = 1 / 0);
 			var x = Math.max(0, Math.floor(Math.min(v, m))), _ = rb(t.model), b = t.getExtent(), w = _.lastAutoInterval, S = _.lastTickCount;
 			return null != w && null != S && Math.abs(w - x) <= 1 && Math.abs(S - a) <= 1 && w > x && _.axisExtent0 === b[0] && _.axisExtent1 === b[1] ? x = w : (_.lastTickCount = a, _.lastAutoInterval = x, _.axisExtent0 = b[0], _.axisExtent1 = b[1]), x;
 		}(this);
@@ -20172,7 +19990,7 @@ function Ab(t, e, n) {
 	return n.set(Db[0], Db[1]), i;
 }
 function kb(t, e, n) {
-	for (var i, r, o = 0, a = 0, s = 0, l = 0, u = Infinity, h = e.data, c = t.x, p = t.y, d = 0; d < h.length;) {
+	for (var i, r, o = 0, a = 0, s = 0, l = 0, u = 1 / 0, h = e.data, c = t.x, p = t.y, d = 0; d < h.length;) {
 		var f = h[d++];
 		1 === d && (s = o = h[d], l = a = h[d + 1]);
 		var g = u;
@@ -20219,7 +20037,7 @@ function Eb(t, e) {
 				[0, 0]
 			], a = r.candidates || Sb, s = i.getBoundingRect().clone();
 			s.applyTransform(i.getComputedTransform());
-			var l = Infinity, u = r.anchor, h = t.getComputedTransform(), c = h && Me([], h), p = e.get("length2") || 0;
+			var l = 1 / 0, u = r.anchor, h = t.getComputedTransform(), c = h && Me([], h), p = e.get("length2") || 0;
 			u && Ob.copy(u);
 			for (var d = 0; d < a.length; d++) {
 				Mb(a[d], 0, s, Lb, Rb), Ce.scaleAndAdd(Pb, Lb, Rb, p), Pb.transform(c);
@@ -21409,7 +21227,7 @@ var xS = function(t) {
 		function u(t) {
 			if (t.isFinite() && !t.isZero()) if (0 === o.length) (e = new Ee(0, 0, 0, 0)).copy(t), o.push(e);
 			else {
-				for (var e, n = !1, i = Infinity, r = 0, u = 0; u < o.length; ++u) {
+				for (var e, n = !1, i = 1 / 0, r = 0, u = 0; u < o.length; ++u) {
 					var h = o[u];
 					if (h.intersect(t)) {
 						var c = new Ee(0, 0, 0, 0);
@@ -21783,7 +21601,7 @@ var MS = function(t) {
 		sampling: "none",
 		animationEasing: "linear",
 		progressive: 0,
-		hoverLayerThreshold: Infinity,
+		hoverLayerThreshold: 1 / 0,
 		universalTransition: { divideShape: "clone" },
 		triggerLineEvent: !1
 	}, n;
@@ -22221,7 +22039,7 @@ function ZS(t, e) {
 	}
 }
 function jS(t) {
-	for (var e = Infinity, n = Infinity, i = -Infinity, r = -Infinity, o = 0; o < t.length;) {
+	for (var e = 1 / 0, n = 1 / 0, i = -1 / 0, r = -1 / 0, o = 0; o < t.length;) {
 		var a = t[o++], s = t[o++];
 		isNaN(a) || (e = Math.min(a, e), i = Math.max(a, i)), isNaN(s) || (n = Math.min(s, n), r = Math.max(s, r));
 	}
@@ -22724,11 +22542,11 @@ var oM = {
 		return e;
 	},
 	max: function(t) {
-		for (var e = -Infinity, n = 0; n < t.length; n++) t[n] > e && (e = t[n]);
+		for (var e = -1 / 0, n = 0; n < t.length; n++) t[n] > e && (e = t[n]);
 		return isFinite(e) ? e : NaN;
 	},
 	min: function(t) {
-		for (var e = Infinity, n = 0; n < t.length; n++) t[n] < e && (e = t[n]);
+		for (var e = 1 / 0, n = 0; n < t.length; n++) t[n] < e && (e = t[n]);
 		return isFinite(e) ? e : NaN;
 	},
 	nearest: function(t) {
@@ -23897,7 +23715,7 @@ var QM = function(t) {
 	}, n.prototype.getBoundingRect = function() {
 		var t = this._rect;
 		if (!t) {
-			for (var e = this.shape, n = e.points, i = e.size, r = i[0], o = i[1], a = Infinity, s = Infinity, l = -Infinity, u = -Infinity, h = 0; h < n.length;) {
+			for (var e = this.shape, n = e.points, i = e.size, r = i[0], o = i[1], a = 1 / 0, s = 1 / 0, l = -1 / 0, u = -1 / 0, h = 0; h < n.length;) {
 				var c = n[h++], p = n[h++];
 				a = Math.min(c, a), l = Math.max(c, l), s = Math.min(p, s), u = Math.max(p, u);
 			}
@@ -24469,7 +24287,7 @@ var bI = function() {
 			}));
 		}
 		N(this._axesList, (function(t) {
-			if (t.scale.setExtent(Infinity, -Infinity), "category" === t.type) {
+			if (t.scale.setExtent(1 / 0, -1 / 0), "category" === t.type) {
 				var e = t.model.get("categorySortInfo");
 				t.scale.setSortInfo(e);
 			}
@@ -25224,7 +25042,7 @@ var iT = function(t) {
 	}, n.prototype.getInitialData = function(t, e) {
 		return ZM(this, {
 			generateCoord: "indicator_",
-			generateCoordCount: Infinity
+			generateCoordCount: 1 / 0
 		});
 	}, n.prototype.formatTooltip = function(t, e, n) {
 		var i = this.getData(), r = this.coordinateSystem.getIndicatorAxes(), o = this.getData().getName(t), a = "" === o ? this.name : o, s = dg(this, t);
@@ -25431,7 +25249,7 @@ var hT = function() {
 	}, t.prototype.pointToData = function(t) {
 		var e = t[0] - this.cx, n = t[1] - this.cy, i = Math.sqrt(e * e + n * n);
 		e /= i, n /= i;
-		for (var r, o = Math.atan2(-n, e), a = Infinity, s = -1, l = 0; l < this._indicatorAxes.length; l++) {
+		for (var r, o = Math.atan2(-n, e), a = 1 / 0, s = -1, l = 0; l < this._indicatorAxes.length; l++) {
 			var u = this._indicatorAxes[l], h = Math.abs(o - u.angle);
 			h < a && (r = u, s = l, a = h);
 		}
@@ -25448,7 +25266,7 @@ var hT = function() {
 	}, t.prototype.update = function(t, e) {
 		var n = this._indicatorAxes, i = this._model;
 		N(n, (function(t) {
-			t.scale.setExtent(Infinity, -Infinity);
+			t.scale.setExtent(1 / 0, -1 / 0);
 		})), t.eachSeriesByType("radar", (function(e, r) {
 			if ("radar" === e.get("coordinateSystem") && t.getComponent("radar", e.get("radarIndex")) === i) {
 				var o = e.getData();
@@ -25596,7 +25414,7 @@ function xT(t, e, n) {
 function _T(t, e, n, i) {
 	var r = t.target, o = t.zoomLimit, a = t.zoom = t.zoom || 1;
 	if (a *= e, o) {
-		var s = o.min || 0, l = o.max || Infinity;
+		var s = o.min || 0, l = o.max || 1 / 0;
 		a = Math.max(Math.min(l, a), s);
 	}
 	var u = a / t.zoom;
@@ -26724,7 +26542,7 @@ function SC(t) {
 				r[i] = r[i] || [], isNaN(e) || r[i].push(e);
 			}));
 		})), n[0].map(n[0].mapDimension("value"), (function(t, e) {
-			for (var o = "ec-" + n[0].getName(e), a = 0, s = Infinity, l = -Infinity, u = r[o].length, h = 0; h < u; h++) s = Math.min(s, r[o][h]), l = Math.max(l, r[o][h]), a += r[o][h];
+			for (var o = "ec-" + n[0].getName(e), a = 0, s = 1 / 0, l = -1 / 0, u = r[o].length, h = 0; h < u; h++) s = Math.min(s, r[o][h]), l = Math.max(l, r[o][h]), a += r[o][h];
 			return 0 === u ? NaN : "min" === i ? s : "max" === i ? l : "average" === i ? a / u : a;
 		}))), a = 0; a < t.length; a++) t[a].originalData = t[a].getData();
 		for (a = 0; a < t.length; a++) t[a].seriesGroup = t, t[a].needsDrawMap = 0 === a && !t[a].getHostGeoModel(), t[a].setData(o.cloneShallow()), t[a].mainSeries = t[0];
@@ -26917,7 +26735,7 @@ function PC(t, e) {
 			var o = this.projection;
 			if (o) {
 				var a = i[0], s = i[1], l = r[0], u = r[1];
-				i = [Infinity, Infinity], r = [-Infinity, -Infinity];
+				i = [1 / 0, 1 / 0], r = [-1 / 0, -1 / 0];
 				var h = function(t, e, n, a) {
 					for (var s = n - t, l = a - e, u = 0; u <= 100; u++) {
 						var h = u / 100, c = o.project([t + s * h, e + l * h]);
@@ -27076,7 +26894,7 @@ function zC(t, e, n, i) {
 	var r = t.getZoom(), o = t.getCenter(), a = e.zoom, s = t.projectedToPoint ? t.projectedToPoint(o) : t.dataToPoint(o);
 	if (null != e.dx && null != e.dy && (s[0] -= e.dx, s[1] -= e.dy, t.setCenter(EC(t, s), i)), null != a) {
 		if (n) {
-			var l = n.min || 0, u = n.max || Infinity;
+			var l = n.min || 0, u = n.max || 1 / 0;
 			a = Math.max(Math.min(r * a, u), l) / r;
 		}
 		t.scaleX *= a, t.scaleY *= a;
@@ -28432,7 +28250,7 @@ var BD = function(t) {
 			a = l.zoomLimit;
 			var u = l.zoom = l.zoom || 1;
 			if (u *= i, a) {
-				var h = a.min || 0, c = a.max || Infinity;
+				var h = a.min || 0, c = a.max || 1 / 0;
 				u = Math.max(Math.min(c, u), h);
 			}
 			var p = u / l.zoom;
@@ -28586,7 +28404,7 @@ var HD = function() {
 	}, t.dependsOn = function(t, e) {
 		return "color" === e ? !(!t || 0 !== t.indexOf(e)) : t === e;
 	}, t.findPieceIndex = function(t, e, n) {
-		for (var i, r = Infinity, o = 0, a = e.length; o < a; o++) {
+		for (var i, r = 1 / 0, o = 0, a = e.length; o < a; o++) {
 			var s = e[o].value;
 			if (null != s) {
 				if (s === t || X(s) && s === t + "") return o;
@@ -28596,15 +28414,15 @@ var HD = function() {
 		for (o = 0, a = e.length; o < a; o++) {
 			var l = e[o], u = l.interval, h = l.close;
 			if (u) {
-				if (u[0] === -Infinity) {
+				if (u[0] === -1 / 0) {
 					if (tA(h[1], t, u[1])) return o;
-				} else if (u[1] === Infinity) {
+				} else if (u[1] === 1 / 0) {
 					if (tA(h[0], u[0], t)) return o;
 				} else if (tA(h[0], u[0], t) && tA(h[1], t, u[1])) return o;
 				n && c(u[0], o), n && c(u[1], o);
 			}
 		}
-		if (n) return t === Infinity ? e.length - 1 : t === -Infinity ? 0 : i;
+		if (n) return t === 1 / 0 ? e.length - 1 : t === -1 / 0 ? 0 : i;
 		function c(e, n) {
 			var o = Math.abs(e - t);
 			o < r && (r = o, i = n);
@@ -28950,7 +28768,7 @@ function yA(t, e, n, i) {
 			var u = function(t, e, n) {
 				for (var i = 0, r = 0, o = e.length; r < o; r++) i += e[r].getValue();
 				var a, s = t.get("visualDimension");
-				e && e.length ? "value" === s && n ? (a = [e[e.length - 1].getValue(), e[0].getValue()], "asc" === n && a.reverse()) : (a = [Infinity, -Infinity], hA(e, (function(t) {
+				e && e.length ? "value" === s && n ? (a = [e[e.length - 1].getValue(), e[0].getValue()], "asc" === n && a.reverse()) : (a = [1 / 0, -1 / 0], hA(e, (function(t) {
 					var e = t.getValue(s);
 					e < a[0] && (a[0] = e), e > a[1] && (a[1] = e);
 				}))) : a = [NaN, NaN];
@@ -28981,13 +28799,13 @@ function yA(t, e, n, i) {
 				y: d,
 				width: r,
 				height: o
-			}, v = lA(r, o), m = Infinity, x = [];
+			}, v = lA(r, o), m = 1 / 0, x = [];
 			x.area = 0;
 			for (var _ = 0, b = g.length; _ < b;) {
 				var w = g[_];
 				x.push(w), x.area += w.getLayout().area;
 				var S = vA(x, v, e.squareRatio);
-				S <= m ? (_++, m = S) : (x.area -= x.pop().getLayout().area, mA(x, v, y, u, !1), v = lA(y.width, y.height), x.length = x.area = 0, m = Infinity);
+				S <= m ? (_++, m = S) : (x.area -= x.pop().getLayout().area, mA(x, v, y, u, !1), v = lA(y.width, y.height), x.length = x.area = 0, m = 1 / 0);
 			}
 			if (x.length && mA(x, v, y, u, !0), !n) {
 				var M = s.get("childrenVisibleMin");
@@ -28998,9 +28816,9 @@ function yA(t, e, n, i) {
 	}
 }
 function vA(t, e, n) {
-	for (var i = 0, r = Infinity, o = 0, a = void 0, s = t.length; o < s; o++) (a = t[o].getLayout().area) && (a < r && (r = a), a > i && (i = a));
+	for (var i = 0, r = 1 / 0, o = 0, a = void 0, s = t.length; o < s; o++) (a = t[o].getLayout().area) && (a < r && (r = a), a > i && (i = a));
 	var l = t.area * t.area, u = e * e * n;
-	return l ? sA(u * i / l, l / (u * r)) : Infinity;
+	return l ? sA(u * i / l, l / (u * r)) : 1 / 0;
 }
 function mA(t, e, n, i, r) {
 	var o = e === n.width ? 0 : 1, a = 1 - o, s = ["x", "y"], l = ["width", "height"], u = n[s[o]], h = e ? t.area / e : 0;
@@ -29675,7 +29493,7 @@ var hk = Mn;
 var ck = Bt;
 var pk = Math.abs;
 function dk(t, e, n) {
-	for (var i, r = t[0], o = t[1], a = t[2], s = Infinity, l = n * n, u = .1, h = .1; h <= .9; h += .1) sk[0] = hk(r[0], o[0], a[0], h), sk[1] = hk(r[1], o[1], a[1], h), (d = pk(ck(sk, e) - l)) < s && (s = d, i = h);
+	for (var i, r = t[0], o = t[1], a = t[2], s = 1 / 0, l = n * n, u = .1, h = .1; h <= .9; h += .1) sk[0] = hk(r[0], o[0], a[0], h), sk[1] = hk(r[1], o[1], a[1], h), (d = pk(ck(sk, e) - l)) < s && (s = d, i = h);
 	for (var c = 0; c < 32; c++) {
 		var p = i + u;
 		lk[0] = hk(r[0], o[0], a[0], i), lk[1] = hk(r[1], o[1], a[1], i), uk[0] = hk(r[0], o[0], a[0], p), uk[1] = hk(r[1], o[1], a[1], p);
@@ -30982,7 +30800,7 @@ function $k(t, e) {
 	};
 }
 function Jk(t, e) {
-	return Math.min(null != e[1] ? e[1] : Infinity, Math.max(null != e[0] ? e[0] : -Infinity, t));
+	return Math.min(null != e[1] ? e[1] : 1 / 0, Math.max(null != e[0] ? e[0] : -1 / 0, t));
 }
 var Qk = N;
 var tL = Math.min;
@@ -32035,7 +31853,7 @@ function pP(t, e) {
 					})), n;
 				}(t, a);
 				(function(t, e, n, i, r, o) {
-					var a = Infinity;
+					var a = 1 / 0;
 					N(t, (function(t) {
 						var e = t.length, s = 0;
 						N(t, (function(t) {
@@ -32163,7 +31981,7 @@ function MP(t) {
 	t.eachSeriesByType("sankey", (function(t) {
 		var e = t.getGraph(), n = e.nodes, i = e.edges;
 		if (n.length) {
-			var r = Infinity, o = -Infinity;
+			var r = 1 / 0, o = -1 / 0;
 			N(n, (function(t) {
 				var e = t.getLayout().value;
 				e < r && (r = e), e > o && (o = e);
@@ -33016,7 +32834,7 @@ var fO = function(t) {
 	}, n.prototype.getBoundingRect = function() {
 		var t = this._rect;
 		if (!t) {
-			for (var e = this.shape.segs, n = Infinity, i = Infinity, r = -Infinity, o = -Infinity, a = 0; a < e.length;) {
+			for (var e = this.shape.segs, n = 1 / 0, i = 1 / 0, r = -1 / 0, o = -1 / 0, a = 0; a < e.length;) {
 				var s = e[a++], l = e[a++];
 				n = Math.min(s, n), r = Math.max(s, r), i = Math.min(l, i), o = Math.max(l, o);
 			}
@@ -35878,7 +35696,7 @@ var hE = function(t) {
 		var t = this, e = t.getLabelModel(), n = t.scale, i = n.getExtent(), r = n.count();
 		if (i[1] - i[0] < 1) return 0;
 		var o = i[0], a = t.dataToCoord(o + 1) - t.dataToCoord(o), s = Math.abs(a), l = wr(null == o ? "" : o + "", e.getFont(), "center", "top"), u = Math.max(l.height, 7) / s;
-		isNaN(u) && (u = Infinity);
+		isNaN(u) && (u = 1 / 0);
 		var h = Math.max(0, Math.floor(u)), c = uE(t.model), p = c.lastAutoInterval, d = c.lastTickCount;
 		return null != p && null != d && Math.abs(p - h) <= 1 && Math.abs(d - r) <= 1 && p > h ? h = p : (c.lastTickCount = r, c.lastAutoInterval = h), h;
 	}, n;
@@ -35960,7 +35778,7 @@ function dE(t) {
 }
 function fE(t, e) {
 	var n = this, i = n.getAngleAxis(), r = n.getRadiusAxis();
-	if (i.scale.setExtent(Infinity, -Infinity), r.scale.setExtent(Infinity, -Infinity), t.eachSeries((function(t) {
+	if (i.scale.setExtent(1 / 0, -1 / 0), r.scale.setExtent(1 / 0, -1 / 0), t.eachSeries((function(t) {
 		if (t.coordinateSystem === n) {
 			var e = t.getData();
 			N(E_(e, "radius"), (function(t) {
@@ -37556,7 +37374,7 @@ var Dz = function() {
 		if (t === this._dataZoomModel) {
 			var e = this.getTargetSeriesModels();
 			this._dataExtent = function(t, e, n) {
-				var i = [Infinity, -Infinity];
+				var i = [1 / 0, -1 / 0];
 				Tz(n, (function(t) {
 					(function(t, e, n) {
 						e && N(E_(e, n), (function(n) {
@@ -38412,7 +38230,7 @@ var uV = {
 		};
 	},
 	polygon: function(t, e, n, i) {
-		var r = [[Infinity, -Infinity], [Infinity, -Infinity]];
+		var r = [[1 / 0, -1 / 0], [1 / 0, -1 / 0]];
 		return {
 			values: E(n, (function(n) {
 				var o = t ? e.pointToData(n, i) : e.dataToPoint(n, i);
@@ -39490,7 +39308,7 @@ var rB = {
 	},
 	polygon: function(t) {
 		for (var e, n = t.range, i = 0, r = n.length; i < r; i++) {
-			e = e || [[Infinity, -Infinity], [Infinity, -Infinity]];
+			e = e || [[1 / 0, -1 / 0], [1 / 0, -1 / 0]];
 			var o = n[i];
 			o[0] < e[0][0] && (e[0][0] = o[0]), o[0] > e[0][1] && (e[0][1] = o[0]), o[1] < e[1][0] && (e[1][0] = o[1]), o[1] > e[1][1] && (e[1][1] = o[1]);
 		}
@@ -40011,7 +39829,7 @@ var xB = function(t) {
 			if (e = e || t.get("type"), e) switch (e) {
 				case "category": return new Hx({
 					ordinalMeta: t.getCategories(),
-					extent: [Infinity, -Infinity]
+					extent: [1 / 0, -1 / 0]
 				});
 				case "time": return new o_({
 					locale: t.ecModel.getLocaleModel(),
@@ -40158,7 +39976,7 @@ var xB = function(t) {
 	}, n.prototype._toAxisCoord = function(t) {
 		return Bh(t, this._mainGroup.getLocalTransform(), !0);
 	}, n.prototype._findNearestTick = function(t) {
-		var e, n = this.model.getData(), i = Infinity, r = this._axis;
+		var e, n = this.model.getData(), i = 1 / 0, r = this._axis;
 		return n.each(["value"], (function(n, o) {
 			var a = r.dataToCoord(n), s = Math.abs(a - t);
 			s < i && (i = s, e = o);
@@ -40517,7 +40335,7 @@ var YB = function(t, e, n, i) {
 				s = u.valueAxis, l = zB(o, Ax(o, u.valueDataDim), a);
 			}
 			var h = "x" === s.dim ? 0 : 1, c = 1 - h, p = I(i), d = { coord: [] };
-			p.type = null, p.coord = [], p.coord[c] = -Infinity, d.coord[c] = Infinity;
+			p.type = null, p.coord = [], p.coord[c] = -1 / 0, d.coord[c] = 1 / 0;
 			var f = n.get("precision");
 			f >= 0 && Z(l) && (l = +l.toFixed(Math.min(f, 20))), p.coord[h] = d.coord[h] = l, r = [
 				p,
@@ -40679,7 +40497,7 @@ var JB = function(t, e, n, i) {
 	var r = i[0], o = i[1];
 	if (r && o) {
 		var a = OB(t, r), s = OB(t, o), l = a.coord, u = s.coord;
-		l[0] = nt(l[0], -Infinity), l[1] = nt(l[1], -Infinity), u[0] = nt(u[0], Infinity), u[1] = nt(u[1], Infinity);
+		l[0] = nt(l[0], -1 / 0), l[1] = nt(l[1], -1 / 0), u[0] = nt(u[0], 1 / 0), u[1] = nt(u[1], 1 / 0);
 		var h = C([
 			{},
 			a,
@@ -41035,25 +40853,27 @@ var uF = function(t) {
 				return;
 			}
 			var p = n.getSeriesByName(a)[0];
-			if (!l.get(a)) if (p) {
-				var d = p.getData(), f = d.getVisual("legendLineStyle") || {}, g = d.getVisual("legendIcon"), y = d.getVisual("style"), v = this._createItem(p, a, o, r, e, t, f, y, g, u, i);
-				v.on("click", aF(hF, a, null, i, h)).on("mouseover", aF(pF, p.name, null, i, h)).on("mouseout", aF(dF, p.name, null, i, h)), n.ssr && v.eachChild((function(t) {
-					var e = il(t);
-					e.seriesIndex = p.seriesIndex, e.dataIndex = o, e.ssrType = "legend";
-				})), l.set(a, !0);
-			} else n.eachRawSeries((function(s) {
-				if (!l.get(a) && s.legendVisualProvider) {
-					var c = s.legendVisualProvider;
-					if (!c.containName(a)) return;
-					var p = c.indexOfName(a), d = c.getItemVisual(p, "style"), f = c.getItemVisual(p, "legendIcon"), g = jn(d.fill);
-					g && 0 === g[3] && (g[3] = .2, d = D(D({}, d), { fill: ii(g, "rgba") }));
-					var y = this._createItem(s, a, o, r, e, t, {}, d, f, u, i);
-					y.on("click", aF(hF, null, a, i, h)).on("mouseover", aF(pF, null, a, i, h)).on("mouseout", aF(dF, null, a, i, h)), n.ssr && y.eachChild((function(t) {
+			if (!l.get(a)) {
+				if (p) {
+					var d = p.getData(), f = d.getVisual("legendLineStyle") || {}, g = d.getVisual("legendIcon"), y = d.getVisual("style"), v = this._createItem(p, a, o, r, e, t, f, y, g, u, i);
+					v.on("click", aF(hF, a, null, i, h)).on("mouseover", aF(pF, p.name, null, i, h)).on("mouseout", aF(dF, p.name, null, i, h)), n.ssr && v.eachChild((function(t) {
 						var e = il(t);
-						e.seriesIndex = s.seriesIndex, e.dataIndex = o, e.ssrType = "legend";
+						e.seriesIndex = p.seriesIndex, e.dataIndex = o, e.ssrType = "legend";
 					})), l.set(a, !0);
-				}
-			}), this);
+				} else n.eachRawSeries((function(s) {
+					if (!l.get(a) && s.legendVisualProvider) {
+						var c = s.legendVisualProvider;
+						if (!c.containName(a)) return;
+						var p = c.indexOfName(a), d = c.getItemVisual(p, "style"), f = c.getItemVisual(p, "legendIcon"), g = jn(d.fill);
+						g && 0 === g[3] && (g[3] = .2, d = D(D({}, d), { fill: ii(g, "rgba") }));
+						var y = this._createItem(s, a, o, r, e, t, {}, d, f, u, i);
+						y.on("click", aF(hF, null, a, i, h)).on("mouseover", aF(pF, null, a, i, h)).on("mouseout", aF(dF, null, a, i, h)), n.ssr && y.eachChild((function(t) {
+							var e = il(t);
+							e.seriesIndex = s.seriesIndex, e.dataIndex = o, e.ssrType = "legend";
+						})), l.set(a, !0);
+					}
+				}), this);
+			}
 		}), this), r && this._createSelector(r, e, i, o, a);
 	}, n.prototype._createSelector = function(t, e, n, i, r) {
 		var o = this.getSelectorGroup();
@@ -42150,7 +41970,7 @@ var tG = function(t) {
 		], e.layoutMode = {
 			type: "box",
 			ignoreSize: !0
-		}, e.dataBound = [-Infinity, Infinity], e.targetVisuals = {}, e.controllerVisuals = {}, e;
+		}, e.dataBound = [-1 / 0, 1 / 0], e.targetVisuals = {}, e.controllerVisuals = {}, e;
 	}
 	return e(n, t), n.prototype.init = function(t, e, n) {
 		this.mergeDefaultAndTheme(t, n);
@@ -42224,7 +42044,7 @@ var tG = function(t) {
 				}));
 				var u = l.symbolSize;
 				if (null != u) {
-					var h = -Infinity;
+					var h = -1 / 0;
 					qF(u, (function(t) {
 						t > h && (h = t);
 					})), l.symbolSize = jF(u, (function(t) {
@@ -42703,7 +42523,7 @@ var pG = function(t) {
 				r && (i = lG(r, e, n, !0) / 2);
 				return i;
 			}(n, o, r), s = [t - a, t + a], l = lG(t, r, o, !0), u = [lG(s[0], r, o, !0), lG(s[1], r, o, !0)];
-			s[0] < r[0] && (u[0] = -Infinity), s[1] > r[1] && (u[1] = Infinity), e && (u[0] === -Infinity ? this._showIndicator(l, u[1], "< ", a) : u[1] === Infinity ? this._showIndicator(l, u[0], "> ", a) : this._showIndicator(l, l, "≈ ", a));
+			s[0] < r[0] && (u[0] = -1 / 0), s[1] > r[1] && (u[1] = 1 / 0), e && (u[0] === -1 / 0 ? this._showIndicator(l, u[1], "< ", a) : u[1] === 1 / 0 ? this._showIndicator(l, u[0], "> ", a) : this._showIndicator(l, l, "≈ ", a));
 			var h = this._hoverLinkDataIndices, c = [];
 			(e || fG(n)) && (c = this._hoverLinkDataIndices = n.findTargetDataIndices(u));
 			var p = function(t, e) {
@@ -42961,7 +42781,7 @@ var TG = function(t) {
 		else if (null != t.value) e = t.value;
 		else {
 			var n = t.interval || [];
-			e = n[0] === -Infinity && n[1] === Infinity ? 0 : (n[0] + n[1]) / 2;
+			e = n[0] === -1 / 0 && n[1] === 1 / 0 ? 0 : (n[0] + n[1]) / 2;
 		}
 		return e;
 	}, n.prototype.getVisualMeta = function(t) {
@@ -42969,9 +42789,9 @@ var TG = function(t) {
 			var e = [], n = ["", ""], i = this, r = this._pieceList.slice();
 			if (r.length) {
 				var o = r[0].interval[0];
-				o !== -Infinity && r.unshift({ interval: [-Infinity, o] }), (o = r[r.length - 1].interval[1]) !== Infinity && r.push({ interval: [o, Infinity] });
-			} else r.push({ interval: [-Infinity, Infinity] });
-			var a = -Infinity;
+				o !== -1 / 0 && r.unshift({ interval: [-1 / 0, o] }), (o = r[r.length - 1].interval[1]) !== 1 / 0 && r.push({ interval: [o, 1 / 0] });
+			} else r.push({ interval: [-1 / 0, 1 / 0] });
+			var a = -1 / 0;
 			return N(r, (function(t) {
 				var e = t.interval;
 				e && (e[0] > a && s([a, e[0]], "outOfRange"), s(e.slice()), a = e[1]);
@@ -42984,7 +42804,7 @@ var TG = function(t) {
 			var a = i.getRepresentValue({ interval: r });
 			o || (o = i.getValueState(a));
 			var s = t(a, o);
-			r[0] === -Infinity ? n[0] = s : r[1] === Infinity ? n[1] = s : e.push({
+			r[0] === -1 / 0 ? n[0] = s : r[1] === 1 / 0 ? n[1] = s : e.push({
 				value: r[0],
 				color: s
 			}, {
@@ -43014,7 +42834,7 @@ var CG = {
 		r = Math.max(parseInt(r, 10), 1), e.splitNumber = r;
 		for (var o = (i[1] - i[0]) / r; +o.toFixed(n) !== o && n < 5;) n++;
 		e.precision = n, o = +o.toFixed(n), e.minOpen && t.push({
-			interval: [-Infinity, i[0]],
+			interval: [-1 / 0, i[0]],
 			close: [0, 0]
 		});
 		for (var a = 0, s = i[0]; a < r; s += o, a++) {
@@ -43025,7 +42845,7 @@ var CG = {
 			});
 		}
 		e.maxOpen && t.push({
-			interval: [i[1], Infinity],
+			interval: [i[1], 1 / 0],
 			close: [0, 0]
 		}), fo(t), N(t, (function(t, e) {
 			t.index = e, t.text = this.formatValueText(t.interval);
@@ -43056,7 +42876,7 @@ var CG = {
 					1,
 					0,
 					1
-				], l = [-Infinity, Infinity], u = [], h = 0; h < 2; h++) {
+				], l = [-1 / 0, 1 / 0], u = [], h = 0; h < 2; h++) {
 					for (var c = [[
 						"gte",
 						"gt",
@@ -43068,7 +42888,7 @@ var CG = {
 					]][h], p = 0; p < 3 && null == o[h]; p++) o[h] = e[c[p]], a[h] = s[p], u[h] = 2 === p;
 					o[h] ?? (o[h] = l[h]);
 				}
-				u[0] && o[1] === Infinity && (a[0] = 0), u[1] && o[0] === -Infinity && (a[1] = 0), o[0] === o[1] && a[0] && a[1] && (i.value = o[0]);
+				u[0] && o[1] === 1 / 0 && (a[0] = 0), u[1] && o[0] === -1 / 0 && (a[1] = 0), o[0] === o[1] && a[0] && a[1] && (i.value = o[0]);
 			}
 			i.visual = HD.retrieveVisuals(e), t.push(i);
 		}), this), DG(e, t), fo(t), N(t, (function(t) {
@@ -43730,7 +43550,7 @@ function dW(t) {
 	];
 }
 function fW(t, e, n, i) {
-	for (var r = (t.length - 2) / 6, o = Infinity, a = 0, s = t.length, l = s - 2, u = 0; u < r; u++) {
+	for (var r = (t.length - 2) / 6, o = 1 / 0, a = 0, s = t.length, l = s - 2, u = 0; u < r; u++) {
 		for (var h = 6 * u, c = 0, p = 0; p < s; p += 2) {
 			var d = 0 === p ? h : (h + p - 2) % l + 2, f = t[d] - n[0], g = t[d + 1] - n[1], y = e[p] - i[0] - f, v = e[p + 1] - i[1] - g;
 			c += y * y + v * v;
@@ -43781,7 +43601,7 @@ function bW(t, e) {
 		for (var r, o = [], a = 0; a < t.length; a++) {
 			var s = t[a], l = e[a], u = dW(s), h = dW(l);
 			r ??= u[2] < 0 != h[2] < 0;
-			var c = [], p = [], d = 0, f = Infinity, g = [], y = s.length;
+			var c = [], p = [], d = 0, f = 1 / 0, g = [], y = s.length;
 			r && (s = gW(s));
 			for (var v = 6 * fW(s, l, u, h), m = y - 2, x = 0; x < m; x += 2) {
 				var _ = (v + x) % m + 2;
@@ -43849,7 +43669,7 @@ function SW(t, e, n, i, r, o) {
 	return s;
 }
 function MW(t) {
-	var e = Infinity, n = Infinity, i = -Infinity, r = -Infinity;
+	var e = 1 / 0, n = 1 / 0, i = -1 / 0, r = -1 / 0;
 	return E(E(t, (function(t) {
 		var o = t.getBoundingRect(), a = t.getComputedTransform(), s = o.x + o.width / 2 + (a ? a[4] : 0), l = o.y + o.height / 2 + (a ? a[5] : 0);
 		return e = Math.min(s, e), n = Math.min(l, n), i = Math.max(s, i), r = Math.max(l, r), [s, l];
@@ -45555,24 +45375,22 @@ function mountMetricsIntoSettingsRow(root) {
 * Shell 传 ownerProps: wide / expandSidebar。
 * wide=false 时只显品牌图标；wide=true 时显完整双列。
 *
-* 左列：顶部会话入口行（t260831-02：出厂「⊕ New Session」行的原地替换——
-*       「+ 新建会话」+ 本项目最近打开的会话切换，≤5 个 MRU、current 高亮。
-*       出厂钮不在任何槽里（sidebar 包只声明 workspaces/settings/footer.action
-*       三槽，实查平台包），按工单口径走「注入+语义锚」：下方 useHideFactoryNewSession
+* 左列：项目组（可折叠，项目名分隔，只列进行中工单，两行式条目：行1=title，行2=彩色工单号 + role·创建时长）；
+*       每组头名前带项目色点（票② R7，projectColor 确定性色板）；组头下、工单
+*       列表上有项目内会话区一横排（session-entry 第 3 面①：正方形「+」+
+*       正方形数字 tab，编号=项目内登记顺序关闭不回收，超宽换行；+ 钮与激活
+*       tab 带项目色，票② R7；组件 project-session-row.tsx，动作=本组件
+*       useSessionEntry 实例）。
+*       顶部会话入口行已随票② R8 退役（t260904-05：顶部行组件及其
+*       顶部行样式族全清，src 无残留符号）；出厂「⊕ New Session」钮的隐藏注入**留守**
+*       （拍板 1：职责=压制全局新建入口，出厂钮不回显——useHideFactoryNewSession
 *       effect 以 aria-label（session-entry.tsx FACTORY_NEW_LABELS，zh/en 全集）
-*       在 SidebarRoot 直接子 button 上定位出厂钮置 display:none（零 CSS 类名
-*       匹配，t260828-06 死因不复犯），MutationObserver 兜防工厂重渲染复活，
-*       卸载/折叠 cleanup 还原；找不到锚=软退化（出厂钮照常、入口仍在，warn 留痕）。
-*       数据=插件记账层（localStorage 账册，只登记 UI 主动打开/新建；磁盘存量/
-*       工单/subagent 会话不进账册），ctx.sessions.list 只取标题与 current；
-*       规则=shared/sessions.ts 纯函数；组件本体 client/session-entry.tsx 的
-*       <SessionTopEntry>。t260828-02 的左栏「会话」区块已整块移除（t260831-02），
-*       记账层保留在内部只供本入口）
-*       + 项目组（可折叠，项目名分隔，只列进行中工单，两行式条目：行1=title，行2=彩色工单号 + role·创建时长）；
-*       每组头下、工单列表上另有项目内会话区一横排（session-entry 第 3 面①：
-*       正方形「+」+ 正方形数字 tab，编号=项目内登记顺序关闭不回收，超宽换行；
-*       组件 project-session-row.tsx，动作=本组件 useSessionEntry 二号实例——
-*       顶部行过渡期 260904 混排口径不变，R8 验收后退役）。
+*       在 SidebarRoot 直接子 button 上定位出厂钮置 display:none，零 CSS 类名
+*       匹配，MutationObserver 兜防复活，卸载/折叠 cleanup 还原）。
+*       记账层（localStorage 账册，只登记 UI 主动打开/新建；磁盘存量/工单/
+*       subagent 会话不进账册）供项目内会话区消费，规则=shared/sessions.ts。
+*       右栏 chat 项目色带（票② R7）：chat-project-band.ts 装饰器，归属=
+*       listState.current → 账册 project 推导（下方 effect），不在册不渲染。
 *       项目组头行右对齐四个项目级视图入口图标：📋 工单列表 / 📖 知识库 / 🔀 模型路由 / 🗂️ 立项单
 *       （t260827-01：立项单从「左列可折叠列表区」改为项目级图标，与其他三视图同款；
 *       左列不再显示立项列表，点图标后中列显示立项清单）。
@@ -45686,43 +45504,24 @@ const CSS$2 = `
 /* 中列：视图容器（四视图自带全套样式，无切换条——视图由左列图标直切） */
 .wb-right-content { flex:1; overflow-y:auto; }
 .wb-placeholder { padding:32px; color:var(--dsw-alias-label-secondary,#888); font-size:13px; line-height:1.8; }
-/* ── 顶部会话入口行（t260831-02：出厂「⊕ New Session」行的原地替换——紧凑一行，
- *     新建 + 本项目最近打开的会话切换；数据=插件记账层，工单/subagent/磁盘存量
- *     会话不混入。类名 wb-sessTop-* 全部自有前缀，与出厂类名零交叉） ── */
-.wb-sessTop { flex:none; display:flex; align-items:center; gap:6px; padding:6px 8px;
-  border-bottom:1px solid var(--dsw-alias-border-l1,#333); min-width:0; }
-.wb-sessTop-new { flex:none; font:inherit; font-size:11.5px; cursor:pointer; padding:2px 9px;
-  border-radius:4px; border:1px solid rgba(255,255,255,0.25); color:var(--dsw-alias-label-primary,#e0e0e0);
-  background:none; white-space:nowrap; }
-.wb-sessTop-new:hover { background:rgba(255,255,255,0.1); }
-.wb-sessTop-new.disabled { opacity:0.4; cursor:default; }
-.wb-sessTop-new.disabled:hover { background:none; }
-.wb-sessTop-rows { display:flex; align-items:center; gap:4px; min-width:0; overflow:hidden; }
-.wb-sessTop-empty { font-size:11px; color:#888; white-space:nowrap; }
-.wb-sessTop-row { font:inherit; font-size:11.5px; cursor:pointer; padding:2px 8px; border-radius:4px;
-  border:1px solid transparent; color:var(--dsw-alias-label-secondary,#b8b8c8); background:none;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:120px; }
-.wb-sessTop-row:hover { background:rgba(255,255,255,0.08); color:var(--dsw-alias-label-primary,#e0e0e0); }
-.wb-sessTop-row.active { background:rgba(124,58,237,0.25); color:var(--dsw-alias-label-primary,#e0e0e0); }
-/* 打开/新建失败的行内提示（t260831-04）：失败不再只打 console——在入口行下
-   独占一行显 warn 色小字，8s 自动清除；flex-wrap 让它不挤占切换行。 */
-.wb-sessTop { flex-wrap:wrap; }
-.wb-sessTop-notice { flex-basis:100%; font-size:10.5px; color:#f59e0b; white-space:nowrap;
-  overflow:hidden; text-overflow:ellipsis; }
+
+/* 顶部会话入口行样式已随票② R8 退役（t260904-05，顶部行样式族全清）。 */
 `;
 /**
-* 顶部行原地替换的注入面（t260831-02）：出厂「⊕ New Session」钮不在任何槽里
+* 出厂「⊕ New Session」钮压制注入面（t260831-02 建；票② R8 后职责=压制全局
+* 新建入口，拍板 1——移除注入=出厂全局钮回显，落点非项目归属）：出厂钮不在任何槽里
 * （实查 dsh-client-ui-sidebar 包只声明 sidebar.workspaces/settings/footer.action
 * 三槽），按工单口径走「注入+语义锚」——
 *   锚：从本插件侧栏根（rootRef）上溯 SidebarRoot（出厂钮是它的直接子 button，
 *   折叠钮在 logoRow 内部非直接子、不会被误伤），取「aria-label 命中
 *   FACTORY_NEW_LABELS」的直接子 button——零 CSS 类名匹配（t260828-06 死因
-*   不复犯）；命中即置 display:none，让出原位给 .wb-sessTop 一行入口。
+*   不复犯）；命中即置 display:none——职责=压制全局新建入口（票②拍板 1，
+*   出厂钮不回显；顶部行已退役，无「让位」对象）。
 *   兜防：MutationObserver 盯 SidebarRoot 的 childList/attributes——工厂重渲染
 *   复活新钮（或恢复被隐藏钮的可见性）时重新隐藏。
 *   全终态回收：卸载/折叠 cleanup 断开 Observer 并把碰过的钮 style.display
-*   还原为原值；锚找不到=软退化（出厂钮照常显示、入口仍在侧栏顶部，功能不丢，
-*   console.warn 留痕）。作用面仅此一个出厂元素，右栏出厂元素零接触。
+*   还原为原值；锚找不到=软退化（出厂钮照常显示，功能不丢，console.warn 留痕）。
+*   作用面仅此一个出厂元素，右栏出厂元素零接触。
 */
 function useHideFactoryNewSession(rootRef, wide) {
 	(0, react.useEffect)(() => {
@@ -45819,6 +45618,19 @@ function WorkbenchSidebar(props) {
 		const backfilled = backfillProjectSeqs(snapshot);
 		if (backfilled !== snapshot) persistLedger(backfilled);
 	}, [wide, projectSessions.ledger]);
+	(0, react.useEffect)(() => {
+		if (!wide) return;
+		return startChatProjectBandEffect({});
+	}, [wide]);
+	(0, react.useEffect)(() => {
+		if (!wide) return;
+		const cur = projectSessions.listState?.current;
+		setChatProjectBand((cur ? projectSessions.ledger.find((e) => e.id === cur) : void 0)?.project ?? null);
+	}, [
+		wide,
+		projectSessions.listState?.current,
+		projectSessions.ledger
+	]);
 	(0, react.useEffect)(() => {
 		if (!wide) return;
 		const root = rootRef.current;
@@ -45969,16 +45781,9 @@ function WorkbenchSidebar(props) {
 		className: "wb-sb wide",
 		children: [
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: CSS$2 }),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "wb-sb-left",
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(SessionTopEntry, {
-					sessions,
-					workspaces,
-					slotOpen,
-					projects,
-					projectKey: viewProject || (projects.length === 1 ? projects[0].key : ""),
-					projectDir: projects.find((p) => p.key === (viewProject || (projects.length === 1 ? projects[0].key : "")))?.primary ?? ""
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "wb-ticket-list",
 					children: loading ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						style: {
@@ -45996,6 +45801,19 @@ function WorkbenchSidebar(props) {
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 								className: "wb-group-caret",
 								children: collapsed[g.project.key] ? "▸" : "▾"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "wb-group-dot",
+								"data-wb-psess-dot": "",
+								style: {
+									display: "inline-block",
+									width: 8,
+									height: 8,
+									borderRadius: 4,
+									flex: "none",
+									background: projectColor(g.project.key)
+								},
+								title: g.project.key
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 								className: "wb-group-name",
@@ -46084,7 +45902,7 @@ function WorkbenchSidebar(props) {
 							]
 						})]
 					}, t.id))] })] }, g.project.key))
-				})]
+				})
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "wb-sb-right",
@@ -46754,7 +46572,7 @@ function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }) {
 			failOpen(`启动请求异常——${String(err instanceof Error ? err.message : err)}`);
 			return;
 		}
-		const deadline = Date.now() + 10 * 6e4;
+		const deadline = Date.now() + 6e5;
 		stopSuggestPoll();
 		suggestTimer.current = startVisibleInterval(() => {
 			(async () => {
@@ -47742,7 +47560,7 @@ function setViewProject(project) {
 * 开始 chat）——t260831-02 按 UX 契约把 hero 接管**彻底拆除**：不再注册任何
 * conversation.hero.* 槽，出厂落地页（大标题/大输入卡/workspace 选择器）原样回弹，
 * 右栏零定制。会话入口收口到一处：顶部行（deepseek logo 正下方出厂「⊕ New
-* Session」钮的原地替换，session-entry.tsx 的 SessionTopEntry + sidebar.tsx 的
+* Session」钮的原地替换；该入口行已随票② R8 退役（t260904-05），sidebar.tsx 的
 * 注入锚），见两文件头注。工单会话入口（点工单 handleTicketClick 链路）不受影响。
 */
 /** 多项目化（260823）：当前视图的项目 key，WorkbenchSection 挂载/切换时从 prop 设置。
@@ -49160,14 +48978,15 @@ function UsageSummaryLine({ detail, wf, usage }) {
 	}
 	const segs = agentSegmentCount(detail, wf);
 	const names = usageModelNames(usage.models);
+	const title = [
+		`agent 段数 ${segs}`,
+		`in ${usage.total.input} / out ${usage.total.output} / cacheRead ${usage.total.cacheRead}`,
+		names !== "" ? `模型：${names}` : `模型：${usage.models[0]?.model ?? "—"}（单模型不显示模型名）`,
+		`会话文件 ${usage.files} 份（多角色加总）`
+	].join(" · ");
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 		className: "wb-usage",
-		title: [
-			`agent 段数 ${segs}`,
-			`in ${usage.total.input} / out ${usage.total.output} / cacheRead ${usage.total.cacheRead}`,
-			names !== "" ? `模型：${names}` : `模型：${usage.models[0]?.model ?? "—"}（单模型不显示模型名）`,
-			`会话文件 ${usage.files} 份（多角色加总）`
-		].join(" · "),
+		title,
 		children: [
 			"🤖 ",
 			segs,
@@ -49400,13 +49219,15 @@ function DiffBlockBody({ b }) {
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
 			className: "wb-d-cells",
 			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { style: { width: 40 } }), Array.from({ length: cols }, (_, c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("th", { children: ["列 ", c + 1] }, c))] }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tbody", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "旧" }), Array.from({ length: cols }, (_, c) => {
+				const chg = (oc[c] ?? "") !== (nc[c] ?? "");
 				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
-					className: (oc[c] ?? "") !== (nc[c] ?? "") ? "wb-d-cell-old" : "",
+					className: chg ? "wb-d-cell-old" : "",
 					children: oc[c] ?? "—"
 				}, c);
 			})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "新" }), Array.from({ length: cols }, (_, c) => {
+				const chg = (oc[c] ?? "") !== (nc[c] ?? "");
 				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
-					className: (oc[c] ?? "") !== (nc[c] ?? "") ? "wb-d-cell-new" : "",
+					className: chg ? "wb-d-cell-new" : "",
 					children: nc[c] ?? "—"
 				}, c);
 			})] })] })]
@@ -49428,12 +49249,14 @@ function DiffBlockBody({ b }) {
 }
 /** unified diff 文本逐行着色（+绿/-红/@@蓝/头行灰）。 */
 function UnifiedDiffView({ text }) {
+	const lines = text.split("\n");
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 		className: "wb-d-uni",
-		children: text.split("\n").map((l, i) => {
+		children: lines.map((l, i) => {
+			const k = l.startsWith("@@") ? "hunk" : l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : /^(diff |index |--- |\+\+\+ |new file|deleted file)/.test(l) ? "meta" : "ctx";
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "wb-d-line",
-				"data-k": l.startsWith("@@") ? "hunk" : l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : /^(diff |index |--- |\+\+\+ |new file|deleted file)/.test(l) ? "meta" : "ctx",
+				"data-k": k,
 				children: l === "" ? " " : l
 			}, i);
 		})
@@ -49679,6 +49502,7 @@ function ChangesTab({ detail, operator, onMsg }) {
 	};
 	const realFiles = diff.files.filter((f) => !isGenArtifact(f.path));
 	const genFiles = diff.files.filter((f) => isGenArtifact(f.path));
+	const sourceLabel = diff.source === "worktree" ? "泳道 worktree vs base" : diff.source === "merged" ? "已合入 main（merge commit 回放）" : diff.source === "main" ? "主树 write_set + git log" : "无来源";
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 		/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 			className: "wb-section",
@@ -49687,7 +49511,7 @@ function ChangesTab({ detail, operator, onMsg }) {
 					className: "wb-section-title",
 					children: [
 						"变更集（",
-						diff.source === "worktree" ? "泳道 worktree vs base" : diff.source === "merged" ? "已合入 main（merge commit 回放）" : diff.source === "main" ? "主树 write_set + git log" : "无来源",
+						sourceLabel,
 						"）"
 					]
 				}),
