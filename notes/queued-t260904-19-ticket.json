@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260904-19",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "让所有测试用同一个 docker 舞台",
+  "user_request": "做什么：把现在两套测试舞台合成一套。现状=有的场景自搭进程舞台（随机端口的临时控制台＋临时目录），有的场景等 docker 测试台（compose 的 3199 控制台＋17233 引擎）——双轨。本票：自搭舞台的场景全部改走 docker 测试台；compose 支持并行实例（每场景独立 compose 工程名＋端口段分配，互不互撞）；拆台零残留验证；verify.yaml 供给简化为「确保测试台在位」一条。\n为什么：260904 宿主令「既然用 docker 就都用，不要有的用有的不用」——双轨行为不一致、两套维护、供给声明复杂。\n怎么算好：全部需要舞台的场景同一搭台方式（同一 compose 文件）；并行两场景同时跑不互撞（独立工程名验证）；每场景拆台后端口与容器零残留；docker 在位时原 21 个环境红大头转绿（装 docker 是宿主动作，票不依赖它合入——改造先行，装好即绿）。",
+  "spec": "范围=integration/ 场景改造（自搭台族：capture-chat 家族的 bootConsole/lib_fix15 类、ki046 bench 类→改 compose 台）＋server/dsh/docker-compose.test.yml（工程名参数化/端口段分配/健康检查）＋server/dsh/ui-check/capture.mjs 台对接面＋verify.yaml supply。注意：并行安全=compose -p <唯一工程名>＋端口段； teardown 幂等；不动 3099/7233 红线（测试台专用端口）。验收：①同一 compose 双场景并行不互撞；②改造场景在 docker 台全绿；③docker 缺席时=诚实环境红点名（三态语义不变）；④拆台后 docker ps 无残留容器、端口可复用；⑤场景登记与守卫更新。",
+  "write_set": ["integration/", "server/dsh/docker-compose.test.yml", "server/dsh/ui-check/", "verify.yaml"],
+  "deliverables": "统一 docker 测试台＋并行实例机制＋场景改造＋供给简化"
+}
