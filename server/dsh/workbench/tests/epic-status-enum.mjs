@@ -11,10 +11,15 @@
  *   in the note column, malformed input never corrupts a charter file, and the
  *   workbench can filter the list by every enum value.
  *
- * High-level steps (fully offline: tmp fixtures + real-repo read-only assertions):
+ * High-level steps (fully offline: tmp fixtures + real-repo property assertions):
  *   A. Enum source of truth: exactly 4 canonical values (full-width parens);
  *      isEpicStatus accepts precisely those, rejects half-width parens, padded,
  *      substring, empty and look-alike values.
+ *   B. Real-repo invariant (property, not snapshot): every charter under
+ *      notes/epics carries a status in the enum and a parseable note, with no
+ *      free-form residue — the roster follows the directory, no mirror list.
+ *      Roster independence itself is fixture-tested (B2, tmp dir with a count
+ *      deliberately different from the real repo).
  *   B. Real-repo migration: the charters under notes/epics all carry a status
  *      in the enum and a parseable note column; the migrated detail text is
  *      preserved (sandbar pointer, 2026-08-30 delivery date, pending-decision
@@ -151,37 +156,53 @@ try {
     '已立项（执行中）\n',          // newline tail
   ]) ok(!isEpicStatus(bad), `isEpicStatus(${JSON.stringify(bad)}) rejected`)
 
-  /* ------------------------------------------------ B. real-repo migration */
-  // 断言意图=notes/epics 下全部立项单的状态都是合法枚举值。expected 是清单登记处：
-  // 新增立项单时在此加一行（metrics 于 260901 立项，t260901-11 仲裁 7→8）。
-  section('B real-repo migration (charters under notes/epics of the lane root)')
-  // 人口普查锚点：新增立项单须同步此清单（metrics 于 260901 立项，t260901-11 仲裁 7→8）。
-  // 冲突消解取 main 侧精确普查（更新的仲裁决定）；泳道侧「新单合法出现不判败」的
-  // 全覆盖精神由下方逐条 status 词表断言承担（对真实清单全部条目生效）。
+  /* ---------------------------------- B. real-repo invariant + roster independence */
+  // 260904 重构（宿主质疑「真实数据自测」）：本段原为 suyou 时代真数据快照——写死
+  // 9 张 charter 清单+逐张 note 点名，每新增/迁移一张 epic 就红一次，测试在追真数据
+  // 跑。重构为两层，快照镜像删除：
+  //   B1 真数据不变量（性质而非快照）：真实 notes/epics 下每张 status ∈ 枚举、note
+  //      可解析、无自由格式残留——真源增删不红，坏数据才红；
+  //   B2 roster 独立性（fixture）：tmp 目录受控 charter 集（数量刻意与真实仓不同），
+  //      证明 listEpics 跟随目录真源；note 细节保留断言移入 fixture。
+  section('B1 real-repo invariant (property over notes/epics; roster follows truth)')
   const realDir = join(process.cwd(), 'notes', 'epics')
-  // t260901-23 冲突消解（gen1）：merge 带入 main 侧第 9 张立项单 conveyor（其工单
-  // 漏登记此清单），按本清单自述纪律「新增立项单须同步此清单」补一行——8→9。
-  const expected = ['coding-games', 'dsh-generalize', 'epic-linkage', 'metrics', 'observability',
-    'sandbar', 'science-content', 'session-entry', 'conveyor']
   const real = await listEpics(realDir)
-  ok(real.length === expected.length && expected.every(c => real.some(e => e.code === c)),
-    `exactly the ${expected.length} known charters are listed`)
-  const byCode = Object.fromEntries(real.map(e => [e.code, e]))
+  ok(real.length >= 1, 'notes/epics has at least one charter')
   for (const e of real) {
     ok(EPIC_STATUSES.includes(e.status), `${e.code}: status '${e.status}' is a canonical enum value`)
     ok(typeof e.note === 'string', `${e.code}: note column is parsed (string, possibly empty)`)
   }
-  ok(byCode['coding-games'].note.includes('方向待拍板'), 'coding-games: pending-direction detail preserved in note')
-  ok(byCode['science-content'].note.includes('先做哪条线'), 'science-content: pending-line detail preserved in note')
-  ok(byCode['session-entry'].note.includes('第 1 面'), 'session-entry: first-surface detail preserved in note')
-  ok(byCode['dsh-generalize'].note.includes('sandbar'), 'dsh-generalize: sandbar pointer preserved in note')
-  ok(byCode['dsh-generalize'].status === '已归档', 'dsh-generalize: retired 已结项 mapped to 已归档')
-  ok(byCode['epic-linkage'].status === '已完结' && byCode['epic-linkage'].note.includes('2026-08-30'),
-    'epic-linkage: 已完结 with delivery date in note')
-  ok(byCode['sandbar'].status === '已立项（执行中）', 'sandbar: bare 已立项 mapped to 已立项（执行中）')
-  // Free-form residue scan: no migrated status cell may contain parentheses detail anymore.
+  // Free-form residue scan: no status cell may carry parentheses detail outside the enum.
   const residue = real.filter(e => /（.*）/.test(e.status) && !isEpicStatus(e.status))
   ok(residue.length === 0, 'no free-form residue left in any status cell')
+
+  section('B2 roster independence (fixture dir; listEpics follows the dir, no mirror list)')
+  {
+    const fxDir = join(tmp, 'epic-roster-fx')
+    await mkdir(fxDir, { recursive: true })
+    const charter = (code, status, note) =>
+      `# ${code}\n\n| 字段 | 值 |\n| --- | --- |\n| 代号 | \`${code}\` |\n| 状态 | ${status} |\n| 备注 | ${note} |\n`
+    // 数量刻意 ≠ 真实仓（3 张 vs 2 张）：roster 由目录决定，测试不镜像清单
+    await writeFile(join(fxDir, 'alpha.md'), charter('alpha', '已立项（执行中）', '方向待拍板：先做哪条线'), 'utf8')
+    await writeFile(join(fxDir, 'beta.md'), charter('beta', '已完结（2026-09-01）', ''), 'utf8')
+    await writeFile(join(fxDir, 'gamma.md'), charter('gamma', '已归档', 'sandbar 迁移'), 'utf8')
+    let fx = await listEpics(fxDir)
+    ok(fx.length === 3 && fx.every(e => ['alpha', 'beta', 'gamma'].includes(e.code)),
+      'fixture: exactly the 3 written charters listed (roster follows the dir)')
+    const fxBy = Object.fromEntries(fx.map(e => [e.code, e]))
+    ok(fxBy['alpha'].note.includes('方向待拍板'), 'fixture: pending-direction detail preserved in note')
+    ok(fxBy['beta'].status === '已完结（2026-09-01）' && fxBy['beta'].note === '',
+      'fixture: completed status with date parses; empty note stays empty')
+    // 新 charter 出现 → 清单随之变化（无写死镜像可判败）
+    await writeFile(join(fxDir, 'delta.md'), charter('delta', '已立项（执行中）', '第 4 张'), 'utf8')
+    fx = await listEpics(fxDir)
+    ok(fx.length === 4 && fx.some(e => e.code === 'delta'), 'fixture: new charter appears without mirror-list edits')
+    // 非 .md / 非法代号形状不入列（防御面回归）
+    await writeFile(join(fxDir, 'not-a-charter.txt'), 'x', 'utf8')
+    await writeFile(join(fxDir, 'BAD_CODE.md'), 'x', 'utf8')
+    fx = await listEpics(fxDir)
+    ok(fx.length === 4, 'fixture: non-md and bad-code files excluded from roster')
+  }
 
   /* ------------------------------------------------ C. setEpicStatus write contract */
   section('C setEpicStatus write contract (fixture dir, SUYOU_EPICS_DIR isolated)')

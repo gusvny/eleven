@@ -395,7 +395,14 @@ print(json.dumps(verify_lane._parse_verify_yaml(sys.argv[1]), ensure_ascii=False
     try {
       const vy = readFileSync(join(REPO, 'verify.yaml'), 'utf8')
       ok(/schema:\s*v1/.test(vy), 'F8 仓库根 verify.yaml 在位且 schema: v1')
-      ok(/app\/src\//.test(vy) && /app\/smoke\//.test(vy), 'F9 suyou 自身声明保留 app/ 白名单（声明而非硬编码）')
+      // 260904 重构（宿主质疑「真实数据自测」）：原 F9 是 suyou 仓 verify.yaml 的
+      // 快照断言（write_allow 含 app/src/）——sandbar 无 app/，红因是快照错仓。
+      // 换成 sandbar 形态的性质断言：write_allow 按配置声明本仓真源面（server/ 与
+      // integration/ 为引擎与场景真源，稳定不变量），且无 suyou 项目域 app/ 残留回流。
+      const wl = vy.match(/write_allow:\s*\n((?:\s*-\s*\S+\n)+)/)?.[1] || ''
+      ok(/-\s*server\/\s*\n/.test(wl) && /-\s*integration\/\s*\n/.test(wl),
+        'F9 write_allow 声明本仓真源面 server/ 与 integration/（配置驱动，非硬编码）')
+      ok(!/app\//.test(wl), "F9' write_allow 无 suyou 项目域 app/ 残留")
       ok(/integration\/run_scenarios\.py/.test(vy), 'F10 verify.yaml 声明 integration.cmd（v2 列表命令制）')
     } catch (e) { ok(false, 'F8 仓库根 verify.yaml 在位（缺失: ' + e.code + ')') }
     // contract doc carries the field-level schema section
