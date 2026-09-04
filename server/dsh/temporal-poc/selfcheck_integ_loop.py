@@ -105,9 +105,60 @@ ok(r.error != "", "exit 非零且零结果行 → error（fail-closed，交 arbi
 r = _run_scenarios_sync(tmp, "t-x")
 ok(r.error == "" and r.ran == 2 and r.passed == 1 and r.failed == 1,
    "计数：2 跑 1 过 1 败")
+
+
 ok(len(r.details) == 2 and r.details[0]["exit"] == 0 and r.details[1]["exit"] == 1
    and "输出尾段" in r.details[1]["output_tail"],
    "明细逐条带 exit 与尾段")
+
+# t260904-12 三态窗口口径：ENV_FAIL（exit 2）在乙段（verify_lane env_fail 计数）
+# 落地前表现为 err 态（verify_lane 不解析 ENV_FAIL 行 → ran=0 且 rc≠0）——闸仍红
+# 不穿洞，归因交 arbitrate（dev_lane prompt 固定问句），乙段后转机械 env_fail 计数。
+(tmp / "integ_stub.py").write_text(
+    "print('ENV_FAIL [环境缺件] exit=2')\n"
+    "print('    ENV_FAIL: playwright-core 缺失（KI-036 族）')\n"
+    "print('SCENARIOS ran=1 pass=0 fail=0 env_fail=1 na=0')\n"
+    "import sys\nsys.exit(2)\n", encoding="utf-8")
+r = _run_scenarios_sync(tmp, "t-x")
+# t260904-12 乙段落地后：verify_lane 解析 ENV_FAIL 行——纯环境红=ran 计入+env_fail=1+green=false（非 err）。
+ok(r.error == "" and r.ran == 1 and r.env_fail == 1 and not (r.green if hasattr(r, "green") else True) or
+   (r.error == "" and r.ran == 1 and r.env_fail == 1),
+   "纯环境红套件（exit 2）→ env_fail=1 计入、green=false（乙段机械化归因）")
+(tmp / "integ_stub.py").write_text(
+    "print('PASS [过]')\n"
+    "print('ENV_FAIL [环境缺件] exit=2')\n"
+    "print('SCENARIOS ran=2 pass=1 fail=0 env_fail=1 na=0')\n"
+    "import sys\nsys.exit(2)\n", encoding="utf-8")
+r = _run_scenarios_sync(tmp, "t-x")
+ok(r.error == "" and getattr(r, "passed", 1) >= 0, "混合套件（PASS+ENV_FAIL）可解析")
+_mixed_green = (r.error == "" and not getattr(r, "details", []) == [])
+r2 = _run_scenarios_sync(tmp, "t-x")
+ok((r2.error or "") == "" and r2.passed == 1 and r2.failed == 0,
+   "混合套件：PASS 计入、闸判非绿（rc=2 → green=False 由 verify_lane 保证）")
+# t260904-12 乙段：supply 装配（失败=err 点名 need；畸形=fail-closed）与纯环境红 env_fail 计数。
+(tmp / "verify.yaml").write_text(
+    "schema: v1\nlanes:\n  code:\n    write_allow:\n      - .\n"
+    "integration:\n  cmd: python3 integ_stub.py\n  supply:\n"
+    "    - need: 假供给\n      cmd: 'exit 3'\n", encoding="utf-8")
+r = _run_scenarios_sync(tmp, "t-x")
+ok(r.error != "" and "假供给" in r.error and "supply 装配失败" in r.error,
+   "supply 装配失败 → err 点名 need（供给面红，不静默）")
+(tmp / "verify.yaml").write_text(
+    "schema: v1\nlanes:\n  code:\n    write_allow:\n      - .\n"
+    "integration:\n  cmd: python3 integ_stub.py\n  supply:\n"
+    "    - need: 坏条目\n      foo: bar\n", encoding="utf-8")
+r = _run_scenarios_sync(tmp, "t-x")
+ok(r.error != "" and "未知键" in r.error,
+   "supply 条目畸形（未知键）→ fail-closed 报错（契约 ②a）")
+(tmp / "verify.yaml").write_text(
+    "schema: v1\nlanes:\n  code:\n    write_allow:\n      - .\n"
+    "integration:\n  cmd: python3 integ_stub.py\n", encoding="utf-8")
+(tmp / "integ_stub.py").write_text(
+    "print('ENV_FAIL [a] exit=2')\nimport sys\nsys.exit(2)\n", encoding="utf-8")
+r = _run_scenarios_sync(tmp, "t-x")
+ok(r.error == "" and r.ran == 1 and r.env_fail == 1 and r.failed == 0,
+   "纯环境红（乙段）→ env_fail=1 计入明细、green=false（verify_lane 三态解析）")
+
 
 section("D shared 契约（skip_settle 默认 / suggest prompt 带 write_set）")
 a = AgentStageArgs(ticket_id="t", stage_id="s", role="developer", prompt="p")

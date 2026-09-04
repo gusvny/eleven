@@ -71,5 +71,5 @@ if body:
     ok("作废" in body, "tests-fault/code-fault 时走查结果作废有留痕文案")
 
 print("\nt01 结果：pass=%d fail=%d" % (PASS, FAIL))
-print("SUMMARY pass=%d skip=0 fail=%d" % (PASS, FAIL))
+print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (PASS, FAIL))
 sys.exit(0 if FAIL == 0 else 1)

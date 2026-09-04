@@ -21,11 +21,12 @@
 // `git rev-parse --git-common-dir` (lane checkouts carry no node_modules), same
 // precedent as ticket-validate / session-top-entry.
 //
-// SKIP (exit 0, reasons on stdout) when: node too old, playwright unresolvable,
-// Chrome unavailable, or the user's real model credentials (~/.dsh/.credentials.yaml)
-// are absent — the seed message must go through the real model link, and without
-// credentials capture's loud nonzero exit is correct behavior, not a defect.
-// FAIL when the lane run itself fails any assertion above.
+// ENV_FAIL (exit 2, reasons on stdout; 三态契约 §7.3：缺环境绝不 exit 0) when: node
+// too old, playwright unresolvable, Chrome unavailable, or the user's real model
+// credentials (~/.dsh/.credentials.yaml) are absent — the seed message must go
+// through the real model link, and without credentials capture's loud nonzero exit
+// is correct behavior, not a defect. Fail when the lane run itself fails any
+// assertion above.
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -55,9 +56,9 @@ function record(name, status, detail = "") {
 
 const nodeMajor = Number(process.versions.node.split(".")[0]);
 if (nodeMajor < 22) {
-  console.log(`node ${process.versions.node} < 22, SKIP`);
-  console.log("SUMMARY pass=0 skip=1 fail=0");
-  process.exit(0);
+  console.log(`ENV_FAIL: node ${process.versions.node} < 22（本套件要求 node >= 22）`);
+  console.log("SUMMARY pass=0 fail=0 env_fail=1 na=0");
+  process.exit(2);
 }
 
 /** 主树 server/dsh/ui-check（playwright-core + 凭据来源约定所在树）。 */
@@ -179,16 +180,16 @@ async function portRefuses(port) {
 // 「泳道内机械跑」）。本条要 boot 隔离台 + 走真模型种子链路 + capture-lane 只拍
 // 本次重建的 bundle（陈旧 build 拒跑是防证据造假的设计行为；非 UI 票的泳道不重建
 // bundle，此前提天然不满足）；真实覆盖属顶层人工/隔离台跑（integration/README
-// 已知限制口径）。泳道机械跑一律干净 SKIP——不 boot 台、不花模型钱。
+// 已知限制口径）。泳道机械跑一律 ENV_FAIL 退 2——不 boot 台、不花模型钱、绝不放行。
 const NESTED = process.env.SUYOU_TASK_QUEUE || process.env.SUYOU_WATCH_WORKFLOW;
-const skipReason = NESTED
+const envReason = NESTED
   ? "nested inside a lane integration step (SUYOU_TASK_QUEUE/SUYOU_WATCH_WORKFLOW present): recursive guard, top-level runs carry the coverage"
   : await precheck();
-if (skipReason) {
+if (envReason) {
   for (const name of ["A1 lane-exit-0", "A2 seven-views-produced", "A3 chat-differs-from-default",
     "A4 chat-active-anchor-no-view-failures", "A5 distinctness-gate-passed", "A6 console-torn-down",
     "A7 no-bare-typeerror", "A8 seed-message-on-transcript"]) {
-    record(name, "skip", skipReason);
+    record(name, "env_fail", envReason);
   }
 } else {
   const outDir = await mkdtemp(path.join(tmpdir(), "capture-chat-e2e-"));
@@ -265,6 +266,8 @@ if (skipReason) {
 
 const pass = results.filter((r) => r.status === "pass").length;
 const fail = results.filter((r) => r.status === "fail").length;
-const skip = results.filter((r) => r.status === "skip").length;
-console.log(`\nSUMMARY pass=${pass} skip=${skip} fail=${fail}`);
-process.exit(fail > 0 ? 1 : 0);
+const envFail = results.filter((r) => r.status === "env_fail").length;
+const na = results.filter((r) => r.status === "na").length;
+console.log(`\nSUMMARY pass=${pass} fail=${fail} env_fail=${envFail} na=${na}`);
+const allNa = na > 0 && pass + fail + envFail === 0;
+process.exit(fail > 0 || allNa ? 1 : envFail > 0 ? 2 : 0);

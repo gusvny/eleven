@@ -8,7 +8,7 @@
 //   设自有属性，不插入任何包裹节点（零 childList 侵入的用户可感知面）。
 //
 // High-level steps:
-//   T0 卫兵：拒 3099；playwright/隔离台/侧栏夹具缺失=干净 SKIP。
+//   T0 卫兵：拒 3099；playwright/隔离台/侧栏夹具缺失=ENV_FAIL（exit 2）。
 //   T1 初态不在册：fresh 装载（空账册）→ 色带属性不在场。
 //   T2 新建会话→色带出现：点第一个项目组 + → tab 出现 →
 //      [data-conversation-scroll] 上带 data-wb-chat-projband=<该组项目 key>。
@@ -20,8 +20,9 @@
 //   T6 刷新恢复：reload → 色带属性仍在且 key 不变。
 //   T7 console 零 error / pageerror。
 //
-// Execution contract: stdout last line `SUMMARY pass=<n> skip=<m> fail=<k>`;
-// missing deps → clean SKIP (exit 0); FAIL>0 → exit 1. Isolated console
+// Execution contract (t260904-12 三态): stdout last line
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; missing deps → env_fail
+// (exit 2); FAIL>0 或全腿 na → exit 1. Isolated console
 // SUYOU_TEST_CONSOLE (default 127.0.0.1:3199); hard guard: never 3099.
 
 import {
@@ -40,9 +41,9 @@ function hexToRgbString(hex) {
 }
 
 const pw = await loadPlaywright();
-if (!pw) { record('browser/deps', 'skip', 'playwright-core unavailable'); summarize(); }
+if (!pw) { record('browser/deps', 'env_fail', 'playwright-core unavailable'); summarize(); }
 if (!(await consoleHealthy())) {
-  record('console/health', 'skip', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
+  record('console/health', 'env_fail', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
   summarize();
 }
 record('console/health', 'pass', BASE);
@@ -93,10 +94,10 @@ try {
     record('t2/new-tab-appears', 'pass');
   } catch {
     record('t2/new-tab-appears', 'fail', '点 + 后 20s 内项目行未出现新 tab');
-    record('t2/band-appears', 'skip', '前置失败');
+    record('t2/band-appears', 'env_fail', '前置失败（前腿失败连带，环境/夹具面）');
   }
   if (expectKey === null) {
-    record('t2/band-appears', 'skip', `组头「${groupName}」无法映射到 projects API key（映射面变异）`);
+    record('t2/band-appears', 'env_fail', `组头「${groupName}」无法映射到 projects API key（映射面变异）`);
   } else {
     try {
       await page.waitForFunction(
@@ -113,7 +114,7 @@ try {
   // T3 色带形态：3px 项目色横带 + head style + 与左栏同源色
   const t3 = await bandState();
   if (t3.bandCount === 0) {
-    record('t3/band-form', 'skip', '色带未在场（T2 失败连带）');
+    record('t3/band-form', 'env_fail', '色带未在场（T2 失败连带）');
   } else {
     const styleOk = t3.headStyle !== null && t3.headStyle.includes('border-top');
     const widthOk = t3.bandBorderWidth === '3px';
@@ -134,7 +135,7 @@ try {
   // T5 点工单行归属不动（chat 不切换 → 色带保持）
   const ticketRow = await page.$('.wb-ticket-row2');
   if (!ticketRow) {
-    record('t5/ticket-click-band-stays', 'skip', '无工单行 fixture');
+    record('t5/ticket-click-band-stays', 'env_fail', '无工单行 fixture');
   } else {
     const keyBefore = (await bandState()).bandKey;
     await ticketRow.click();
@@ -144,13 +145,13 @@ try {
       `点工单行后 band key ${keyBefore} → ${keyAfter}`);
   }
 
-  // T6 刷新恢复（账册持久 → 归属不丢；映射失败时无期望值可断=skip 不自相矛盾）
+  // T6 刷新恢复（账册持久 → 归属不丢；映射失败时无期望值可断=env_fail 不自相矛盾）
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForSelector('[data-wb-psess-row]', { timeout: 12000 }).catch(() => {});
   await page.waitForTimeout(1500);
   const t6 = await bandState();
   if (expectKey === null) {
-    record('t6/band-restored-reload', 'skip', '组头→key 映射失败（T2 连带），无期望值可断');
+    record('t6/band-restored-reload', 'env_fail', '组头→key 映射失败（T2 连带），无期望值可断');
   } else {
     record('t6/band-restored-reload', t6.bandKey !== null && t6.bandKey === expectKey ? 'pass' : 'fail',
       `reload 后 bandKey=${t6.bandKey}（期望 ${expectKey}）`);
@@ -165,8 +166,8 @@ try {
 summarize();
 
 function t4Judge(scrollBefore, scrollAfter, sameNode, bandCount) {
-  if (scrollAfter === 0) return ['skip', '滚动体不在场（T2 失败连带）'];
-  if (!bandCount) return ['skip', '色带不在场（T2 失败连带，无从判 sameNode）'];
+  if (scrollAfter === 0) return ['env_fail', '滚动体不在场（T2 失败连带）'];
+  if (!bandCount) return ['env_fail', '色带不在场（T2 失败连带，无从判 sameNode）'];
   const ok = sameNode === true && scrollBefore === scrollAfter;
   return ok ? ['pass', 'band 属性=滚动体本体，滚动体数量稳定']
     : ['fail', `sameNode=${sameNode} scrollCount ${scrollBefore}→${scrollAfter}（出现包裹节点即侵入）`];

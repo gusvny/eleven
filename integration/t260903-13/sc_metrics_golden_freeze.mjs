@@ -13,7 +13,8 @@
  * 判定口径（行为级，不钉案例数）：exit 0 + 存在逐案一致行 + 零「不一致/缺失」；
  * 基线案例面随实现窗口枚举自然扩展，不设数量快照锚。
  * 纯本地：SUYOU_METRICS_DIR 走系统临时目录，零端口、零 3099、零网络。
- * Exit contract：末行 SUMMARY pass=N skip=M fail=K；exit 1 iff fail>0。
+ * Exit contract（三态，定稿 §7.3 闸内无 SKIP）：末行 SUMMARY pass=N fail=K
+ * env_fail=E na=W；fail>0 或全 na→exit 1，env_fail>0→exit 2。
  */
 import { spawnSync } from 'node:child_process'
 import { readdirSync } from 'node:fs'
@@ -52,5 +53,5 @@ let leftovers = []
 try { leftovers = readdirSync(testsDir).filter(f => /^stub-.*\.json$/.test(f)) } catch { /* tests 目录缺席由上方 exit 非 0 已红 */ }
 ok(leftovers.length === 0, `tests/ 无 stub 残留${leftovers.length ? '：' + leftovers.join(', ') : ''}`)
 
-console.log(`\nSUMMARY pass=${passed} skip=0 fail=${failed}`)
+console.log(`\nSUMMARY pass=${passed} fail=${failed} env_fail=0 na=0`)
 process.exit(failed > 0 ? 1 : 0)

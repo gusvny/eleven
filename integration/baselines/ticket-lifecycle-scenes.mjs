@@ -25,7 +25,7 @@
  * ticket is mechanically busy in run_integration_tests -- the stub brain alone
  * never emits verdict=, which is itself scene D's round-limit trigger.
  *
- * Safety: same write-guard triad as ticket-validate.mjs (unset target -> SKIP;
+ * Safety: same write-guard triad as ticket-validate.mjs (unset target -> 'env_fail' verdict;
  * explicit production default -> FAIL; otherwise pinned to 17233/suyou-test).
  */
 
@@ -48,13 +48,13 @@ const EPIC_CODE = 'integ-e2e'
 /* ------------------------------------------------------------------ assertions */
 
 export function makeTally() {
-  const t = { pass: 0, fail: 0, skip: 0, failures: [] }
+  const t = { pass: 0, fail: 0, envFail: 0, failures: [] }
   t.ok = (cond, label) => {
     if (cond) { t.pass++; console.log(`  ok ${label}`) } else {
       t.fail++; t.failures.push(label); console.error(`  FAIL ${label}`)
     }
   }
-  t.skipNote = (label) => { t.skip++; console.log(`  SKIP ${label}`) }
+  t.envFailNote = (label) => { t.envFail++; console.log(`  ENV_FAIL ${label}`) }
   t.section = (s) => console.log(`\n== ${s}`)
   return t
 }
@@ -116,7 +116,7 @@ export function findSdkPython(t) {
     const r = run(py, ['-c', 'import temporalio'], { timeoutMs: 30_000 })
     if (r.status === 0) return py
   }
-  t?.skipNote?.('temporalio SDK not importable (no server/dsh/temporal-poc/.venv here or in the main checkout, system python3 lacks it): env halves cannot drive real client.py/worker')
+  t?.envFailNote?.('temporalio SDK not importable (no server/dsh/temporal-poc/.venv here or in the main checkout, system python3 lacks it): env halves cannot drive real client.py/worker')
   return null
 }
 
@@ -128,7 +128,7 @@ export async function ensureTestTemporal(t) {
   if (await portOpen('127.0.0.1', 17233)) return true
   const docker = run('docker', ['--version'], { timeoutMs: 10_000 })
   if (docker.status !== 0) {
-    t?.skipNote?.(`docker CLI unavailable (test Temporal 17233 down and cannot be pulled up): ${docker.stderr.trim().slice(0, 120) || 'command not found'}`)
+    t?.envFailNote?.(`docker CLI unavailable (test Temporal 17233 down and cannot be pulled up): ${docker.stderr.trim().slice(0, 120) || 'command not found'}`)
     return false
   }
   console.log('  test Temporal 17233 down -> docker compose up -d (idempotent) ...')
@@ -137,13 +137,16 @@ export async function ensureTestTemporal(t) {
     if (await portOpen('127.0.0.1', 17233)) return true
     await new Promise(r => setTimeout(r, 2000))
   }
-  t?.skipNote?.('docker compose up ran but test Temporal 17233 never opened: test env unavailable')
+  t?.envFailNote?.('docker compose up ran but test Temporal 17233 never opened: test env unavailable')
   return false
 }
 
 /**
  * Write-guard, tri-state (same contract as ticket-validate.mjs):
- * returns 'run' | 'skip' | 'fail'. Never run with an unclear target.
+ * returns 'run' | 'env_fail' | 'fail'（writeGuard 三值裁决词，是本助手对场景声明的
+ * API，被 sc_ticket_lifecycle P1 正向断言；t260904-12 三态契约对齐：unset target
+ * 的裁决词从旧跳过词改用环境红词 env_fail，三值形状与正向断言面不变）.
+ * Never run with an unclear target.
  */
 export function writeGuard() {
   const target = process.env.SUYOU_TARGET_HOST
@@ -151,7 +154,7 @@ export function writeGuard() {
     console.error(`  FAIL write-guard: SUYOU_TARGET_HOST explicitly points at production default ${PROD_ADDR} -- ticket-creating tests refuse to run (red line: production 7233 is read-only)`)
     return 'fail'
   }
-  if (target === undefined || target === '') return 'skip'
+  if (target === undefined || target === '') return 'env_fail'
   if (target !== TEST_ADDR) {
     console.error(`  FAIL write-guard: SUYOU_TARGET_HOST=${target} is neither the pinned test env ${TEST_ADDR} nor production -- refusing an unclear write target`)
     return 'fail'
@@ -176,14 +179,14 @@ export function targetEnv(extra = {}) {
  * clone main (depth 1) from the local main checkout, symlink the gitignored
  * dependency dirs (node_modules / temporal-poc/.venv) so lane-internal
  * verify_lane can go green, and drop the epic file suggest_next needs.
- * Returns { fixture, dispose } or null (with SKIP notes) when impossible.
+ * Returns { fixture, dispose } or null (with ENV_FAIL notes) when impossible.
  */
 export async function buildFixture(t) {
   const tmp = await mkdtemp(join(tmpdir(), 'integ-e2e-fixture-'))
   const common = run('git', ['-C', REPO, 'rev-parse', '--path-format=absolute', '--git-common-dir'])
   const mainCheckout = common.status === 0 ? dirname(common.stdout.trim()) : ''
   if (!mainCheckout || !existsSync(mainCheckout)) {
-    t?.skipNote?.(`cannot locate the local main checkout (${common.stderr.trim().slice(0, 120)}): fixture clone source unavailable`)
+    t?.envFailNote?.(`cannot locate the local main checkout (${common.stderr.trim().slice(0, 120)}): fixture clone source unavailable`)
     await rm(tmp, { recursive: true, force: true }).catch(() => {})
     return null
   }
@@ -191,7 +194,7 @@ export async function buildFixture(t) {
   const clone = run('git', ['clone', '--branch', 'main', '--single-branch', '--depth', '1',
     mainCheckout, fixture], { timeoutMs: 300_000 })
   if (clone.status !== 0) {
-    t?.skipNote?.(`git clone main failed: ${(clone.stderr || clone.stdout).trim().slice(0, 200)}`)
+    t?.envFailNote?.(`git clone main failed: ${(clone.stderr || clone.stdout).trim().slice(0, 200)}`)
     await rm(tmp, { recursive: true, force: true }).catch(() => {})
     return null
   }

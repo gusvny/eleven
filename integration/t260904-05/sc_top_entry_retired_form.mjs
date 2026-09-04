@@ -11,7 +11,7 @@
 //   P0 产物静态收口（node 侧，无浏览器也跑）：lib/client.js 无 SessionTopEntry/
 //      wb-sessTop/pickSwitchTargets/renameEntry/data-wb-session-*；含
 //      data-wb-chat-projband、data-wb-psess-dot、--wb-psess-color 新锚。
-//   T0 卫兵：拒 3099；playwright/隔离台/侧栏夹具缺失=干净 SKIP。
+//   T0 卫兵：拒 3099；playwright/隔离台/侧栏夹具缺失=ENV_FAIL（exit 2）。
 //   T1 顶部行退役形态：data-wb-session-{entry,new,row,reopen} 全不在 DOM；
 //      无 wb-sessTop* 类名元素。
 //   T2 出厂钮压制：aria-label 恰为出厂 label（新建会话/New session）的元素零可见。
@@ -22,8 +22,9 @@
 //      不含「↺」「最近关闭」；取消不关闭。
 //   T6 console 零 error / pageerror。
 //
-// Execution contract: stdout last line `SUMMARY pass=<n> skip=<m> fail=<k>`;
-// missing deps → clean SKIP (exit 0); FAIL>0 → exit 1. Isolated console
+// Execution contract (t260904-12 三态): stdout last line
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; missing deps → env_fail
+// (exit 2); FAIL>0 或全腿 na → exit 1. Isolated console
 // SUYOU_TEST_CONSOLE (default 127.0.0.1:3199); hard guard: never 3099.
 
 import { readFileSync } from 'node:fs';
@@ -66,9 +67,9 @@ function hexToRgbString(hex) {
 
 // ── 浏览器段 ──
 const pw = await loadPlaywright();
-if (!pw) { record('browser/deps', 'skip', 'playwright-core unavailable'); summarize(); }
+if (!pw) { record('browser/deps', 'env_fail', 'playwright-core unavailable'); summarize(); }
 if (!(await consoleHealthy())) {
-  record('console/health', 'skip', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
+  record('console/health', 'env_fail', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
   summarize();
 }
 record('console/health', 'pass', BASE);
@@ -126,7 +127,7 @@ try {
     };
   });
   if (colors === null) {
-    record('t3/psess-anchors', 'skip', 'psess 色断言锚不全（root/dot/plus 缺一）——实现未落地或夹具变异');
+    record('t3/psess-anchors', 'env_fail', 'psess 色断言锚不全（root/dot/plus 缺一）——实现未落地或夹具变异');
   } else {
     const varRgb = hexToRgbString(colors.varColor);
     const inPalette = PROJECT_PALETTE.includes(colors.varColor);
@@ -146,7 +147,7 @@ try {
     `reload 色点色 ${before || '(none)'} → ${after || '(none)'}`);
 
   // T5 确认弹层文案（拍板 2：无 ↺/最近关闭 表述）。无已有 tab 时主动点 + 造一个
-  // （t260904-05 验收走查 gen0 升级：原「机会性 SKIP」在可造数环境必漏过真实
+  // （t260904-05 验收走查 gen0 升级：原「机会性跳过」在可造数环境必漏过真实
   // 渲染文案断言——文案是拍板 2 的唯一用户可感知面，尽力而为而非放弃）。
   // 造数后新建 tab 不关闭（取消收起），残留条目不影响本场景其余断言（已全部跑完）。
   let closeBtn = await page.$('[data-wb-psess-close]');
@@ -160,11 +161,11 @@ try {
     }
     try {
       await page.waitForSelector('[data-wb-psess-close]', { timeout: 20000 });
-    } catch { /* 造数失败，下方仍走 SKIP */ }
+    } catch { /* 造数失败，下方仍走 env_fail */ }
     closeBtn = await page.$('[data-wb-psess-close]');
   }
   if (!closeBtn) {
-    record('t5/confirm-copy', 'skip', '无已有会话 tab 且造数未成（+ 链路异常，见场景③）');
+    record('t5/confirm-copy', 'env_fail', '无已有会话 tab 且造数未成（+ 链路异常，见场景③）');
   } else {
     await page.evaluate(el => el.click(), closeBtn);
     await page.waitForSelector('[data-wb-psess-confirm]', { timeout: 5000 }).catch(() => {});

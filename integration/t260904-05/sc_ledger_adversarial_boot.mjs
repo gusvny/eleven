@@ -9,7 +9,7 @@
 //   effect+装饰器接线全链在场）复验同一纪律，intent=「boot 韧性」而非「函数容错」。
 //
 // High-level steps:
-//   T0 卫兵：拒 3099；playwright/隔离台缺失=干净 SKIP。
+//   T0 卫兵：拒 3099；playwright/隔离台缺失=ENV_FAIL（exit 2）。
 //   Case A 旧顶部行时代账册升级：seed 无 seq 的合法条目（真实 fixture 项目 key）
 //      + 一条 ticket- 前缀条目 → boot 后合法条目以补号 tab 呈现（num≥1）、
 //      ticket- 条目不进任何 tab、无 pageerror。
@@ -19,8 +19,9 @@
 //      不崩（坏数据按丢失处理）、无 pageerror。
 //   各 Case 独立 fresh context；console error 零容忍。
 //
-// Execution contract: stdout last line `SUMMARY pass=<n> skip=<m> fail=<k>`;
-// missing deps → clean SKIP (exit 0); FAIL>0 → exit 1. Isolated console
+// Execution contract (t260904-12 三态): stdout last line
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; missing deps → env_fail
+// (exit 2); FAIL>0 或全腿 na → exit 1. Isolated console
 // SUYOU_TEST_CONSOLE (default 127.0.0.1:3199); hard guard: never 3099.
 
 import {
@@ -37,9 +38,9 @@ const LEDGER_KEY = 'suyou-workbench-opened-sessions-v1';
 const SEQ_COUNTER_KEY = 'suyou-workbench-project-seq-v1';
 
 const pw = await loadPlaywright();
-if (!pw) { record('browser/deps', 'skip', 'playwright-core unavailable'); summarize(); }
+if (!pw) { record('browser/deps', 'env_fail', 'playwright-core unavailable'); summarize(); }
 if (!(await consoleHealthy())) {
-  record('console/health', 'skip', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
+  record('console/health', 'env_fail', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
   summarize();
 }
 record('console/health', 'pass', BASE);
@@ -47,7 +48,7 @@ record('console/health', 'pass', BASE);
 const projects = await fetchProjects();
 const fixtureKey = projects[0]?.key ?? null;
 if (!fixtureKey) {
-  record('fixture/projects', 'skip', '隔离台无项目 fixture（projects API 空不胜任 boot 注入）');
+  record('fixture/projects', 'env_fail', '隔离台无项目 fixture（projects API 空不胜任 boot 注入）');
   summarize();
 }
 

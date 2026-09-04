@@ -7,11 +7,12 @@
 回收、软依赖降级、追加点安全。被测边界 = 引擎读侧凭据 seam
 （agent_activities._copy_creds 及其合并路径），黑盒断言只落在文件系统可观察行为。
 
-夹具一律真实嵌套格式（version + refs，见本票 plan.md「格式载体」），全 tmp/env 桩，
+夹具一律真实嵌套格式（version + refs，见本票 plan.md），全 tmp/env 桩，
 绝不触真 ~/.sandbar、真 ~/.dsh。依赖 PyYAML 的用例在无 yaml 且无 temporal-poc
-venv 的解释器上干净 SKIP（integration/README.md 执行契约：依赖缺失=skip）。
+venv 的解释器上记 ENV_FAIL（三态契约定稿 §7.3「闸内无 SKIP」：缺依赖=环境红）。
 跑法：PY=server/dsh/temporal-poc/.venv/bin/python; "$PY" integration/t260902-09/it01_creds_merge_blackbox.py
-末行 SUMMARY pass=N skip=N fail=N，fail>0 退出码 1。
+末行 SUMMARY pass=N fail=N env_fail=N na=N；退出码 0=PASS、1=FAIL（产品红，
+含全腿 N/A）、2=ENV_FAIL（环境红）。
 """
 import os
 import subprocess
@@ -163,7 +164,7 @@ def main():
             L.ok(after == before, "E1 目录无 tmp 半成品残留",
                  "%s -> %s" % (before, after))
     else:
-        L.skip1("E1 写回失败资源回收", "euid=0，目录只读挡不住 root")
+        L.env1("E1 写回失败资源回收", "euid=0，目录只读挡不住 root（root 权限面=环境条件）")
     # E2 PyYAML 软依赖缺失 → 合并降级 no-op、不抛错（子进程内模拟 import 失败）
     env = dict(os.environ)
     env[YAML_BLOCKED_ENV] = "1"
@@ -174,8 +175,8 @@ def main():
          "E2 yaml 缺失降级 no-op 不抛错", (r.stdout + r.stderr)[-300:])
 
     if not yaml_ok:
-        L.skip1("F 组合并正路径（11 用例）",
-                "PyYAML 不可用且无 temporal-poc venv（venv=%s）" % fx.VENV_PY)
+        L.env1("F 组合并正路径（11 用例）",
+               "PyYAML 不可用且无 temporal-poc venv（venv=%s）" % fx.VENV_PY)
         return L.finish()
 
     print("== F 合并正路径（演化态 + 追加点安全）==")

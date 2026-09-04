@@ -96,10 +96,10 @@ function main() {
     console.log(`${r.fails.length ? 'RED' : 'GREEN'}  ${r.name}${r.fails.length ? ' —— 缺失: ' + r.fails.join('; ') : ''}`);
   }
   if (process.argv.includes('--selftest')) return selftest(red.length);
-  // 执行契约（integration/README）：末行 SUMMARY，机读区分真 PASS 与 SKIP/红。
+  // 执行契约（integration/README，三态 §7.3）：末行 SUMMARY 四计数，机读区分真 PASS/产品红/环境红。
   const total = CHECKS.length + HANDOFF_CHECKS.length;
   const failed = red.reduce((n, r) => n + r.fails.length, 0);
-  console.log(`\nSUMMARY pass=${total - failed} skip=0 fail=${failed}`);
+  console.log(`\nSUMMARY pass=${total - failed} fail=${failed} env_fail=0 na=0`);
   if (red.length) { console.error(`sc_sandbar_dsh_compat: ${red.length} 组红`); process.exit(1); }
   console.log('sc_sandbar_dsh_compat: all green');
 }

@@ -13,9 +13,9 @@ MISSING_CREDENTIAL。新契约（t260902-09 plan.md，评审 gen1 通过）：
 
 夹具一律真实嵌套格式（version + refs），全 tmp/env 桩（lib/fixture.Sandbox），
 不读真 ~/.sandbar 与 ~/.dsh。跑法（manifest 已登记 venv 回落链；裸 python3 会
-经 ensure_yaml 自动 re-exec 进 venv，仍无 PyYAML 则干净 SKIP）：
+经 ensure_yaml 自动 re-exec 进 venv，仍无 PyYAML 则 ENV_FAIL——三态契约定稿 §7.3）：
   PY=server/dsh/temporal-poc/.venv/bin/python; "$PY" integration/t260902-09/t01_creds_merge.py
-末行 SUMMARY pass=N skip=N fail=N，fail>0 退出码 1。
+末行 SUMMARY pass=N fail=N env_fail=N na=N；退出码 0=PASS、1=FAIL（产品红）、2=ENV_FAIL（环境红）。
 """
 import logging
 import os
@@ -72,7 +72,7 @@ def spawn_dsh(sb):
 def main():
     global yaml
     if not fx.ensure_yaml():
-        L.skip1("合并回归整条", "PyYAML 不可用且无 venv 可 re-exec（合并路径软依赖）")
+        L.env1("合并回归整条", "PyYAML 不可用且无 venv 可 re-exec（合并路径软依赖）")
         return L.finish()
     import yaml  # ensure_yaml 之后必可达（本解释器或 re-exec 进的 venv）
 
@@ -239,7 +239,7 @@ def main():
         text = sb.dst().read_text("utf-8")
         ok(refs_of(text).get("NEW_API_KEY") == "n", "4 空格缩进实测跟随", text)
 
-    # 14. 不可读源 + dst 已存在 → 不抛新错、dst 原样（root 下权限不生效则 SKIP）
+    # 14. 不可读源 + dst 已存在 → 不抛新错、dst 原样（root 下权限不生效则 env_fail：root 权限面=环境条件）
     if os.geteuid() != 0:
         with fx.Sandbox() as sb:
             sb.write_dst(DST_STAGED)
@@ -255,7 +255,7 @@ def main():
             ok(err == "", "不可读源不抛新错", err)
             ok(sb.dst().read_text("utf-8") == before, "不可读源 dst 原样")
     else:
-        L.skip1("不可读源", "当前 euid=0，权限不生效")
+        L.env1("不可读源", "当前 euid=0，权限不生效（root 权限面=环境条件）")
 
     # 15. 无残留 tmp（写回后同目录只应有 .credentials.yaml）
     with fx.Sandbox() as sb:

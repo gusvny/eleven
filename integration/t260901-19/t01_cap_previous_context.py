@@ -125,7 +125,7 @@ def main():
     check("prompt-history-capped",
           "P" * 2000 not in prompt and "P" * body_long in prompt)
 
-    print("SUMMARY pass=%d skip=0 fail=%d" % (passed, failed))
+    print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (passed, failed))
     sys.exit(1 if failed else 0)
 
 

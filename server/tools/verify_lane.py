@@ -325,9 +325,22 @@ def _validate_cfg(cfg):
     if integ:
         if not isinstance(integ, dict):
             raise ValueError('integration 结构不合法')
-        unk = set(integ) - {'cmd'}
+        unk = set(integ) - {'cmd', 'supply'}
         if unk:
-            raise ValueError('integration 未知键: %s（v2：只认 cmd）' % '、'.join(sorted(unk)))
+            raise ValueError('integration 未知键: %s（v2：只认 cmd/supply）' % '、'.join(sorted(unk)))
+        sup = integ.get('supply')
+        if sup is not None:
+            if not isinstance(sup, list) or not sup:
+                raise ValueError('integration.supply 结构不合法（须为非空列表 [{need,cmd,cwd?,timeout?}]）')
+            for e in sup:
+                if not isinstance(e, dict):
+                    raise ValueError('supply 条目结构不合法（须为映射）：%r' % (e,))
+                unk = set(e) - {'need', 'cmd', 'cwd', 'timeout'}
+                if unk:
+                    raise ValueError('supply 条目未知键: %s（支持 need/cmd/cwd/timeout）' % '、'.join(sorted(unk)))
+                if not isinstance(e.get('need'), str) or not e.get('need', '').strip() \
+                        or not isinstance(e.get('cmd'), str) or not e.get('cmd', '').strip():
+                    raise ValueError('supply 条目 need 与 cmd 均须非空字符串：%r' % (e,))
         if not isinstance(integ.get('cmd'), str) or not integ['cmd'].strip():
             raise ValueError('integration.cmd 缺失或不合法（v2：集成道声明=一条命令，'
                              '引擎 /bin/sh -c 执行，exit 非零=红；红绿判据即退出码）')
@@ -491,18 +504,35 @@ def _integ(args):
     if cfg is None:
         return {'lane': 'integ', 'green': False,
                 'err': 'verify.yaml 缺失：integration 道 fail-closed（本道无声明级关闭态，凡调道必判；契约②b）'}
-    cmd = str(((cfg.get('integration') or {}).get('cmd')) or '').strip()
+    integ_cfg = cfg.get('integration') or {}
+    cmd = str(integ_cfg.get('cmd') or '').strip()
     if not cmd:
         return {'lane': 'integ', 'green': False,
                 'err': 'integration.cmd 缺失或为空 = 畸形 fail-closed；要表达「该道无事可做」，'
                        '声明恒成功空命令（如 true）得零场景绿（契约②b）'}
+    # supply 供给声明（t260904-12 乙段，契约 ②a）：逐条幂等装配命令先于 integration.cmd
+    # 执行；失败/超时 = 显式红点名 need，不静默继续（契约「装配失败=红点名 need」）。
+    for e in (integ_cfg.get('supply') or []):
+        need, scmd = str(e.get('need')), str(e.get('cmd'))
+        scwd = root / str(e.get('cwd') or '.')
+        sto = int(e.get('timeout') or 900)
+        try:
+            sp = subprocess.run(['/bin/sh', '-c', scmd], cwd=str(scwd), capture_output=True,
+                                text=True, timeout=sto)
+        except subprocess.TimeoutExpired:
+            return {'lane': 'integ', 'green': False,
+                    'err': 'supply 装配超时（need=%s，>%ds）——供给面红点名，不静默' % (need, sto)}
+        if sp.returncode != 0:
+            return {'lane': 'integ', 'green': False,
+                    'err': 'supply 装配失败（need=%s，exit=%d）：%s——供给面红点名，不静默'
+                           % (need, sp.returncode, ((sp.stdout or '') + (sp.stderr or ''))[-1500:])}
     timeout = int(_os.environ.get('SUYOU_INTEG_BATCH_TIMEOUT_SEC') or 5400)
     try:
         proc = subprocess.run(['/bin/sh', '-c', cmd], cwd=str(root), capture_output=True,
                               text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return {'lane': 'integ', 'green': False, 'err': '场景执行器整体超时（>%ds）' % timeout}
-    ran = passed = failed = 0
+    ran = passed = failed = env_failed = 0
     scen, cur = [], None
     for line in (proc.stdout or '').splitlines():
         line = line.rstrip()
@@ -511,6 +541,19 @@ def _integ(args):
             passed += 1
             cur = None
             scen.append({'name': line[6:-1], 'exit': 0, 'output_tail': ''})
+        elif line.startswith('ENV_FAIL ['):
+            # 三态协议（t260904-12 契约 ②b-1）：环境红行；畸形（缺 exit=2）沿 FAIL 惯例
+            # name=整行、exit=-1 计——畸形输出不静默吞。
+            m = re.match(r'ENV_FAIL \[(.+?)\] exit=(-?\d+)', line)
+            if m and int(m.group(2)) == 2:
+                name, exit_code = m.group(1), 2
+            else:
+                name, exit_code = (line if not m else line, -1)
+            ran += 1
+            env_failed += exit_code == 2
+            failed += exit_code != 2
+            cur = {'name': name, 'exit': exit_code, 'output_tail': ''}
+            scen.append(cur)
         elif line.startswith('FAIL ['):
             m = re.match(r'FAIL \[(.+?)\] exit=(-?\d+)', line)
             name, exit_code = (m.group(1), int(m.group(2))) if m else (line, -1)
@@ -524,8 +567,9 @@ def _integ(args):
         return {'lane': 'integ', 'green': False,
                 'err': '场景执行器未产出结果（exit=%s）：%s'
                        % (proc.returncode, ((proc.stdout or '') + (proc.stderr or ''))[-2000:])}
-    return {'lane': 'integ', 'green': failed == 0 and proc.returncode == 0,
-            'ran': ran, 'pass': passed, 'fail': failed, 'scenarios': scen, 'err': None}
+    return {'lane': 'integ', 'green': failed == 0 and env_failed == 0 and proc.returncode == 0,
+            'ran': ran, 'pass': passed, 'fail': failed, 'env_fail': env_failed,
+            'scenarios': scen, 'err': None}
 
 
 def run(args):

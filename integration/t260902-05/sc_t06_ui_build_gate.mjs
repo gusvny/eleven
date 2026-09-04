@@ -38,9 +38,10 @@ try { js = readFileSync(LIB_JS, 'utf8') } catch {}
 try { cjs = readFileSync(LIB_CJS, 'utf8') } catch {}
 
 if (js === '' || cjs === '') {
-  console.log('  SKIP — lib/client.js 或 client.cjs 不存在（产物未构建）')
-  console.log('SUMMARY pass=0 skip=1 fail=0')
-  process.exit(0)
+  // t260904-12 三态：产物未构建=环境缺件（没验成，原因归环境）→ ENV_FAIL，绝不 exit 0 假绿。
+  console.log('  ENV_FAIL — lib/client.js 或 client.cjs 不存在（产物未构建）')
+  console.log('SUMMARY pass=0 fail=0 env_fail=1 na=0')
+  process.exit(2)
 }
 
 console.log('A. 双产物同字节')
@@ -74,5 +75,5 @@ ok('面板 aria-label「度量面板」在产物中', js.includes('度量面板'
 ok('Esc 关闭处理在产物中', js.includes('Escape'))
 ok('面板状态持久化 key 在产物中', js.includes('suyou-workbench-metrics-panel-v1'))
 
-console.log(`SUMMARY pass=${pass} skip=0 fail=${fail}`)
+console.log(`SUMMARY pass=${pass} fail=${fail} env_fail=0 na=0`)
 process.exit(fail === 0 ? 0 : 1)

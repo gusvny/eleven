@@ -8,7 +8,8 @@
 - make_lane：按契约 ①c 造「带 .suyou/.dsh 的 fixture 泳道」，含排除项诱饵；
 - invoke_*：对 activity 入参 dataclass 名做候选适配（只桥接命名，不碰语义），
   断言全部落在文件系统/CLI 行为上；
-- Ledger：stdout 末行 SUMMARY pass/skip/fail（integration/README.md 执行契约）。
+- Ledger：stdout 末行 SUMMARY pass/fail/env_fail/na（三态契约定稿 §7.3：0=PASS、
+  1=FAIL 含全腿 N/A、2=ENV_FAIL；skip 计数退役，缺依赖计入 env_fail）；
 """
 import dataclasses
 import inspect
@@ -65,8 +66,11 @@ def load_module(name):
 
 # ---------------------------------------------------------------- 执行契约
 class Ledger:
+    """三态账本（定稿 §7.3）：0=PASS、1=FAIL（产品红，含全腿 N/A）、2=ENV_FAIL（环境红）。
+    skip 计数退役——缺依赖的用例计入 env_fail；skip1 保留为 env1 的兼容别名。"""
+
     def __init__(self):
-        self.p = self.s = self.f = 0
+        self.p = self.f = self.e = self.n = 0
 
     def ok(self, cond, label, detail=""):
         if cond:
@@ -76,13 +80,29 @@ class Ledger:
             self.f += 1
             print("  FAIL %s%s" % (label, (" | " + detail) if detail else ""))
 
+    def env1(self, label, reason):
+        """缺依赖/缺环境的用例：计入 env_fail（环境红），绝不 exit 0。"""
+        self.e += 1
+        print("  ENV_FAIL: %s | %s" % (label, reason))
+
+    def na1(self, label, reason):
+        """以系统状态为条件的腿无对象：记 N/A（全腿 N/A 场景红由调用方收口）。"""
+        self.n += 1
+        print("  N/A: %s | %s" % (label, reason))
+
     def skip1(self, label, reason):
-        self.s += 1
-        print("  skip %s | %s" % (label, reason))
+        self.env1(label, reason)
 
     def finish(self):
-        print("SUMMARY pass=%d skip=%d fail=%d" % (self.p, self.s, self.f))
-        return 1 if self.f else 0
+        print("SUMMARY pass=%d fail=%d env_fail=%d na=%d" % (self.p, self.f, self.e, self.n))
+        if self.f:
+            return 1                       # 产品红优先（C7）：环境红不得稀释产品红
+        total = self.p + self.f + self.e + self.n
+        if total > 0 and self.n >= total:  # 全腿 N/A=产品红（C9：修场景不补环境）
+            return 1
+        if self.e:
+            return 2
+        return 0
 
 
 class Sandbox:
@@ -236,7 +256,7 @@ def invoke_teardown(aa, repo, wt, branch, ticket_id):
 def ensure_sdk():
     """保证当前解释器有 temporalio：顶层没有则 re-exec 进 temporal-poc venv。
 
-    返回 (python_executable, error)；error 非空 = 无 SDK 可用，调用方应 SKIP。
+    返回 (python_executable, error)；error 非空 = 无 SDK 可用，调用方应记 ENV_FAIL（环境红）。
     """
     try:
         import temporalio  # noqa: F401
@@ -246,18 +266,27 @@ def ensure_sdk():
     if VENV_PY.is_file():
         if os.environ.get("_T26090202_REEXEC") != "1":
             os.environ["_T26090202_REEXEC"] = "1"
-            os.execv(str(VENV_PY), [str(VENV_PY), os.path.abspath(__file__)] + sys.argv[1:])
+            # 必须重跑原始场景脚本（sys.argv[0]），而非本 fixture 模块文件——
+            # exec 本文件会静默 exit 0（fixture 无 __main__ 逻辑），掩盖环境红。
+            os.execv(str(VENV_PY), [str(VENV_PY), os.path.abspath(sys.argv[0])] + sys.argv[1:])
         return str(VENV_PY), ""
     return None, "temporalio SDK 不可用（顶层 python3 与 %s 均无）" % VENV_PY
 
 
 def test_env_guard():
-    """测试环境红线（integration/README.md）：必须显式指向非生产 Temporal。"""
+    """测试环境红线（integration/README.md）：必须显式指向非生产 Temporal。
+
+    依赖两面拆清（t260904-12 乙段）：本套件**无模型面**（不需要 LLM 凭据），
+    唯一外部依赖是 Temporal 台面——缺台的环境红必须点名「17233 测试台不可达」，
+    不得笼统报「缺凭据」。
+    """
     host = (os.environ.get("SUYOU_TARGET_HOST") or "").strip()
     if not host:
-        return "SUYOU_TARGET_HOST 未显式设置（生产缺省 127.0.0.1:7233 拒绝连）"
+        return ("SUYOU_TARGET_HOST 未显式设置——17233 测试台不可达（缺台=环境红；"
+                "生产缺省 127.0.0.1:7233 拒绝连；本套件无模型面，不需要 LLM 凭据）")
     if host == "127.0.0.1:7233":
-        return "SUYOU_TARGET_HOST=127.0.0.1:7233 是生产缺省，拒绝执行"
+        return ("SUYOU_TARGET_HOST=127.0.0.1:7233 是生产缺省，拒绝执行"
+                "（台面依赖：请指 17233 测试台）")
     return ""
 
 
@@ -268,3 +297,9 @@ def run_client(args, env_extra):
     py = sys.executable
     return subprocess.run([py, str(CLIENT_PY)] + args, cwd=str(REPO),
                           env=env, capture_output=True, text=True, timeout=180)
+
+
+def run_prune(args):
+    """ticket-prune 黑盒调用（t05 专用便捷层）：args dict → 单条 JSON 参数。"""
+    import json
+    return run_client(["ticket-prune", json.dumps(args)], {})

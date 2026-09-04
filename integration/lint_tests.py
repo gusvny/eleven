@@ -142,12 +142,75 @@ def lint_registry():
         for p in str(cmd).split():
             if p.startswith("integration/"):
                 registered.add((REPO / p).resolve())
+    # t260904-12 移册白名单（定稿 §7.3「真跑不进闸」通道；文件在案供主库人工清单，
+    # 不入 SCENARIOS——移册依据链见 README 已知限制 ticket-lifecycle 条）
+    DEREGISTERED = {INTEG / "baselines" / "sc_ticket_lifecycle.mjs"}
     orphans = [str(f.relative_to(REPO)) for f in INTEG.rglob("sc_*")
-               if f.is_file() and f.resolve() not in registered]
+               if f.is_file() and f.resolve() not in registered
+               and f.resolve() not in DEREGISTERED]
     if orphans:
         err("L5 孤儿场景（sc_ 未登记）：%s" % orphans[:6])
     else:
         ok("L5 无孤儿（非 sc_ 文件视为共享代码，不检查）")
+
+
+# L6 三态契约（t260904-12：闸内无 SKIP，定稿 §7.3）——锚真实形态，不锚 [SKIP] 字面
+# （运行时模板串 `[$ {status.toUpperCase()}]` 源码 grep 不到，字面口径恒真化）。
+SKIP_STATE = re.compile(r"""['"`]skip['"`]""")            # mjs/py 里 skip 状态值实参
+SKIP_SUMMARY = re.compile(r"skip=\{|\bskip=%d|skip=\$\{|SUMMARY[^\n]*\bskip=")
+ENV0_COMBO = re.compile(                                   # 缺环境→exit 0 语义组合
+    r"ENV_FAIL[^\n]*\n[^\n]*exit\(0\)|skip[^\n]*\n[^\n]*exit\(0\)", re.I)
+# 注释行与「退役」注记不参与（历史提及合法；行为面由 summarize 形状守卫与守卫场景钉）
+RETIRED = re.compile("退役")
+
+
+def _code_lines(text):
+    for ln in text.splitlines():
+        st = ln.strip()
+        if RETIRED.search(ln) or st.startswith("//") or st.startswith("#") or st.startswith("*"):
+            continue
+        yield ln
+SKIP_WHITELIST = {  # 注释性历史提及白名单（按文件名，记录残留由结算 evidence 核对）
+    "bench.py",        # 变更记录表叙述旧口径
+    "run_scenarios.py",  # docstring 对旧语义的退役注记
+}
+
+
+def lint_three_state():
+    bad_state, bad_sum, bad_combo = [], [], []
+    for f in list(INTEG.rglob("*.mjs")) + list(INTEG.rglob("*.py")):
+        if f.name in SKIP_WHITELIST or f.name == "lint_tests.py":
+            continue
+        text = f.read_text(errors="replace")
+        rel = f.relative_to(REPO)
+        for i, ln in enumerate(_code_lines(text), 1):
+            if SKIP_STATE.search(ln):
+                bad_state.append("%s:%d" % (rel, i))
+            if SKIP_SUMMARY.search(ln):
+                bad_sum.append("%s:%d" % (rel, i))
+        if ENV0_COMBO.search("\n".join(_code_lines(text))):
+            bad_combo.append(str(rel))
+    if bad_state:
+        err("L6 skip 状态值残留（词表只认 pass/fail/env_fail/na）：%s" % bad_state[:8])
+    else:
+        ok("L6 无 skip 状态值残留")
+    if bad_sum:
+        err("L6 SUMMARY 旧形状 skip= 计数残留：%s" % bad_sum[:8])
+    else:
+        ok("L6 SUMMARY 无 skip 计数")
+    if bad_combo:
+        err("L6 「skip→exit 0」语义组合残留（缺环境必须 exit 2）：%s" % bad_combo[:8])
+    else:
+        ok("L6 无 skip→exit0 语义组合")
+    # makeResults/summarize 形状守卫：mjs 里自定义 summarize 必须是三态退出码
+    for f in INTEG.rglob("*.mjs"):
+        text = f.read_text(errors="replace")
+        if "function summarize" in text or "summarize()" in text and "process.exit" in text:
+            if re.search(r"process\.exit\(f > 0 \? 1 : 0\)", text):
+                err("L6 %s summarize 仍旧二态退出码（须 f>0||allNa?1:(e>0?2:0)）" % f.relative_to(REPO))
+                break
+    else:
+        ok("L6 summarize 退出码形状合规")
 
 
 def main():
@@ -155,6 +218,7 @@ def main():
     lint_collect()
     lint_mjs_imports()
     lint_registry()
+    lint_three_state()
     n_e, n_w = len(errors), len(warns)
     print("LINT done: %d error / %d warn" % (n_e, n_w))
     return 1 if n_e else 0

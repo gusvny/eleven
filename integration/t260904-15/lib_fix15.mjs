@@ -7,8 +7,8 @@
 //     单源不双份）、SUYOU_TARGET_HOST=死端口（Temporal 不可达=降级/fail-closed 断言面）、
 //     SUYOU_PROJECTS_YAML 删除（防 legacy 模式外溢）；
 //   - boot 进程四路径回收（正常/报错/超时/信号：kill 进程组 + 关 fd + 删临时目录）；
-//   - playwright-core 三路探测（t260904-05 lib_browser 同口径，缺失=干净 SKIP，KI-036）；
-//   - SUMMARY 执行契约（integration/README.md：末行 pass/skip/fail，FAIL>0 才 exit 1）；
+//   - playwright-core 四路探测（t260904-05 lib_browser 同口径，缺失=ENV_FAIL 点名，KI-036）；
+//   - SUMMARY 执行契约（integration/README.md 三态：末行四计数，FAIL>0→1、ENV_FAIL>0→2）；
 //   - 注册表 fixture（好条目/畸形条目/空根，.migrated 标记防误触真迁移）。
 // 安全红线：零 3099 接触（端口随机，自检断言）；env 逐项显式钉死防缺省外溢生产 7233。
 import { spawn, spawnSync } from 'node:child_process';
@@ -153,7 +153,7 @@ async function waitReady(port, timeoutMs, logPath) {
 
 /**
  * 自举隔离台（bench-shot bootConsole 同款 + 本票 env 注入）。
- * 返回 { port, tmpHome, projectsRoot }；失败抛错由调用方转干净 SKIP。
+ * 返回 { port, tmpHome, projectsRoot }；失败抛错由调用方转 ENV_FAIL（缺环境=环境红，不 exit 0 假绿）。
  */
 export async function bootConsole(projectsRoot) {
   const tmpHome = mkdtempSync(path.join(tmpdir(), 'fix15-bench-'));
@@ -199,7 +199,7 @@ export function teardownOnExit(teardown) {
 
 /** playwright-core 四路探测（env 指定 → 裸包 → 泳道 ui-check 依赖 → 主树已装依赖）。
  * 泳道 ui-check/node_modules gitignored 恒缺；第④路只读借用主树（与 buildProfile 同理，
- * 被测代码仍是泳道 workbench）。null=调用方干净 SKIP（KI-036）。 */
+ * 被测代码仍是泳道 workbench）。null=调用方转 ENV_FAIL 点名（KI-036；环境缺供不假绿）。 */
 export async function loadPlaywright() {
   const localPw = new URL('../../server/dsh/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
   const mainPw = path.join(mainRoot(), 'server', 'dsh', 'ui-check', 'node_modules', 'playwright-core', 'index.mjs');
@@ -211,21 +211,29 @@ export async function loadPlaywright() {
   return null;
 }
 
-/** 执行契约（integration/README.md）：stdout 末行 SUMMARY pass/skip/fail；FAIL>0 才 exit 1。 */
+// 执行契约（integration/README.md，t260904-12 三态化）：stdout 末行
+// SUMMARY pass/fail/env_fail/na 四计数（ran=pass+fail+env_fail 双向净）；
+// exit 码 f>0 或全 N/A→1（产品红），否则 e>0→2（环境红），否则 0。
+// 词表只认 pass/fail/env_fail/na，越界抛错（不静默吞未知状态）。
 export function makeResults() {
   const results = [];
+  const WORDS = new Set(['pass', 'fail', 'env_fail', 'na']);
   return {
     record(name, status, detail = '') {
       const st = status === true ? 'pass' : status === false ? 'fail' : String(status);
+      if (!WORDS.has(st)) throw new Error(`非法状态词：${st}（三态词表 pass/fail/env_fail/na）`);
       results.push({ name, status: st, detail });
       console.log(`[${st.toUpperCase()}] ${name}${detail ? ` — ${detail}` : ''}`);
     },
     summarize() {
       const p = results.filter((r) => r.status === 'pass').length;
-      const s = results.filter((r) => r.status === 'skip').length;
+      const e = results.filter((r) => r.status === 'env_fail').length;
+      const na = results.filter((r) => r.status === 'na').length;
       const f = results.filter((r) => r.status === 'fail').length;
-      console.log(`SUMMARY pass=${p} skip=${s} fail=${f}`);
-      process.exit(f > 0 ? 1 : 0);
+      const ran = p + f + e + na;
+      console.log(`SUMMARY ran=${ran} pass=${p} fail=${f} env_fail=${e} na=${na}`);
+      if (ran === 0 || (f === 0 && na === ran && ran > 0)) process.exit(1);  // 零场景/全 N/A=产品红
+      process.exit(f > 0 ? 1 : e > 0 ? 2 : 0);
     },
   };
 }

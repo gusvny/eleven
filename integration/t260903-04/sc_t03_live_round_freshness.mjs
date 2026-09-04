@@ -17,7 +17,8 @@
  *   F6 降级回归：会话文件缺失 → exists:false + 人话 reason（设计文档降级口径）。
  *
  * 直跑：node integration/t260903-04/sc_t03_live_round_freshness.mjs（node ≥22.18）。
- * zstd 不在 PATH → 干净 SKIP（exit 0，原因上屏）。末行 SUMMARY pass=<n> skip=<m> fail=<k>。
+ * zstd 不在 PATH → ENV_FAIL 环境红退 2（三态 §7.3，原因上屏）。末行 SUMMARY
+ * pass=<n> fail=<k> env_fail=<e> na=<w>。
  */
 
 import { execFile } from 'node:child_process'
@@ -29,12 +30,12 @@ import { readAgentLiveTail } from '../../server/dsh/workbench/src/host/agent-liv
 
 const execFileP = promisify(execFile)
 
-let pass = 0, fail = 0, skip = 0
+let pass = 0, fail = 0, envFail = 0
 function ok(cond, label) {
   if (cond) { pass++; console.log(`  ok ${label}`) }
   else { fail++; console.error(`  FAIL ${label}`) }
 }
-function sk(label) { skip++; console.log(`  SKIP ${label}`) }
+function sk(label) { envFail++; console.log(`  ENV_FAIL: ${label}`) }
 function section(t) { console.log(`\n== ${t} ==`) }
 
 /* fixture：静默窗叙事——派活后 agent 逐轮干活：轮开始→上游重试→读文件→思考流→
@@ -125,7 +126,7 @@ try {
         && by('retry') >= 1,
         `感兴趣行全保（step=2 tool=1 result=1 assistant=1 retry=${by('retry')}）`)
     } else {
-      sk('坏行断言随 zstd 缺失一并 SKIP')
+      sk('坏行断言随 zstd 缺失一并环境红（恢复 zstd 后自动真跑）')
     }
 
     const miss = await readAgentLiveTail(join(tmp, 'nope', 'session.jsonl.zstd'), 30)
@@ -136,5 +137,5 @@ try {
   await rm(tmp, { recursive: true, force: true })
 }
 
-console.log(`\nSUMMARY pass=${pass} skip=${skip} fail=${fail}`)
-process.exit(fail > 0 ? 1 : 0)
+console.log(`\nSUMMARY pass=${pass} fail=${fail} env_fail=${envFail} na=0`)
+process.exit(fail > 0 ? 1 : envFail > 0 ? 2 : 0)

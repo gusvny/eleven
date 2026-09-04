@@ -3,7 +3,7 @@
 
 用户场景：本票实现会随改两把已登记的「精确锁」（方案 v3 步骤 6.5：词表 12→13 键、
 _auto_rework 调用点计数）。历史教训（t260831-08 / integration/README 红线）：
-把精确断言放宽成非空判定或 SKIP 是「让红灯变绿」的捷径。本场景锁**更新后的锁仍是
+把精确断言放宽成非空判定或缺环境放行是「让红灯变绿」的捷径（三态契约 §7.3 禁止）。本场景锁**更新后的锁仍是
 精确匹配**、且新键随改——锁的锁。
 
   A. py 锁（sc_check_auto_rework_trace.py）：EXPECT 恰 13 键含 arb_acc_parallel、
@@ -64,5 +64,5 @@ ok("set(PHASE_MAIN_ROLES) == set(PHASE_MAIN_CHAIN)" in MJS_LOCK,
    "键集合动态比对仍在（未弱化成单向包含）")
 
 print("\nt03 结果：pass=%d fail=%d" % (PASS, FAIL))
-print("SUMMARY pass=%d skip=0 fail=%d" % (PASS, FAIL))
+print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (PASS, FAIL))
 sys.exit(0 if FAIL == 0 else 1)

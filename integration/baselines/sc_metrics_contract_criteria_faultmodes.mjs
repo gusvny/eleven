@@ -17,7 +17,7 @@ const check = (name, ok, detail = '') => {
 const DOC = 'docs/design/metrics-api契约v1.md';
 if (!existsSync(DOC)) {
   console.log(`FAIL 契约文档存在 — ${DOC} 不存在`);
-  console.log(`SUMMARY pass=0 skip=0 fail=1`);
+  console.log(`SUMMARY pass=0 fail=1 env_fail=0 na=0`);
   process.exit(1);
 }
 const doc = readFileSync(DOC, 'utf8');
@@ -69,5 +69,5 @@ check('v1 冻结后变更须开单 bump', /(bump|v1\.x|v2)/.test(doc) && /(开.{
 // ---- 对照小节三处 delta ----
 check('对照小节三处 delta', /(三处|3 处)[^\n]{0,40}delta|delta[^\n]{0,40}(三处|3 处)/.test(doc));
 
-console.log(`SUMMARY pass=${pass} skip=0 fail=${fail}`);
+console.log(`SUMMARY pass=${pass} fail=${fail} env_fail=0 na=0`);
 process.exit(fail > 0 ? 1 : 0);

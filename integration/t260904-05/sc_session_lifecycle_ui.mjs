@@ -9,7 +9,7 @@
 //   项目行），与 t260904-01 journey（纯函数账册状态机）intent 级不同层。
 //
 // High-level steps:
-//   T0 卫兵：拒 3099；playwright/隔离台/侧栏夹具缺失=干净 SKIP。
+//   T0 卫兵：拒 3099；playwright/隔离台/侧栏夹具缺失=ENV_FAIL。
 //   T1 读现状：第一个项目组当前 tab 序号全集 N（相对断言，容忍历史残留）。
 //   T2 新建①：点 + → 出现 num > max(N) 的 tab；active 恰一。
 //   T3 新建②：再点 + → 再出现更大 num。
@@ -21,8 +21,8 @@
 //      （closed 账册参与防撞，计数器不回退）。
 //   T9 console 零 error / pageerror。
 //
-// Execution contract: stdout last line `SUMMARY pass=<n> skip=<m> fail=<k>`;
-// missing deps → clean SKIP (exit 0); FAIL>0 → exit 1. Isolated console
+// Execution contract (t260904-12 three-state): SUMMARY pass= fail= env_fail= na=;
+// missing deps → env_fail (exit 2); FAIL>0 → exit 1; all-na → exit 1. Isolated console
 // SUYOU_TEST_CONSOLE (default 127.0.0.1:3199); hard guard: never 3099.
 
 import {
@@ -34,9 +34,9 @@ refuseProductionConsole();
 const { record, summarize } = makeResults();
 
 const pw = await loadPlaywright();
-if (!pw) { record('browser/deps', 'skip', 'playwright-core unavailable'); summarize(); }
+if (!pw) { record('browser/deps', 'env_fail', 'playwright-core unavailable'); summarize(); }
 if (!(await consoleHealthy())) {
-  record('console/health', 'skip', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
+  record('console/health', 'env_fail', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
   summarize();
 }
 record('console/health', 'pass', BASE);
@@ -135,7 +135,7 @@ try {
   // T4 关闭取消：tab 不动
   const s4 = await readRow();
   if (!(await closeTab(s4.nums.length - 1, false))) {
-    record('t4/close-cancel', 'skip', '无关闭钮可点（无 tab）');
+    record('t4/close-cancel', 'env_fail', '无关闭钮可点（测试台无 tab 夹具）');
   } else {
     const s4b = await readRow();
     record('t4/close-cancel', s4b.ids.length === s4.ids.length ? 'pass' : 'fail',
@@ -147,7 +147,7 @@ try {
   const closedNum = s5.nums[s5.nums.length - 1];
   const survivors = s5.nums.slice(0, -1);
   if (!(await closeTab(s5.nums.length - 1, true))) {
-    record('t5/close-confirm', 'skip', '无关闭钮可点');
+    record('t5/close-confirm', 'env_fail', '无关闭钮可点（测试台无 tab 夹具）');
   } else {
     await page.waitForFunction(
       ([sel, n]) => document.querySelectorAll(`${sel} [data-wb-psess-tab]`).length === n,
@@ -193,7 +193,7 @@ try {
   }
   const cleared = (await readRow()).nums.length === 0;
   if (!cleared) {
-    record('t8/bo1-closed-domain', 'skip', '未能清空该项目 tab（关闭链异常，见 T5）');
+    record('t8/bo1-closed-domain', 'env_fail', '未能清空该项目 tab（关闭链异常，见 T5）');
   } else {
     await page.evaluate(k => localStorage.removeItem(k), 'suyou-workbench-project-seq-v1');
     await page.reload({ waitUntil: 'domcontentloaded' });

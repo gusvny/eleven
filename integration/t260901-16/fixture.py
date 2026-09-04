@@ -98,5 +98,5 @@ def red_details(res):
 
 
 def summary(passed, failed):
-    print("SUMMARY pass=%d skip=0 fail=%d" % (passed, failed))
+    print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (passed, failed))
     return 0 if failed == 0 else 1

@@ -19,7 +19,7 @@ def poc_sys_path():
 
 
 def import_engine():
-    """import agent_activities（需 temporalio SDK，venv 里有）。ImportError 由调用方转 SKIP。"""
+    """import agent_activities（需 temporalio SDK，venv 里有）。ImportError 由调用方转 ENV_FAIL 退 2。"""
     poc_sys_path()
     import agent_activities  # noqa: F401
     return agent_activities

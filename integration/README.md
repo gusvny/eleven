@@ -17,13 +17,25 @@ python3 integration/run_scenarios.py
 消费 `run_scenarios.py` 逐条以 `/bin/sh -c` 执行，cwd=仓根，逐条超时 900s
 （`SUYOU_INTEG_CMD_TIMEOUT_SEC` 可调），exit 0 计通过。
 
-## 执行契约（每条测试一致）
+## 执行契约（每条测试一致，t260904-12 三态化——闸内无 SKIP）
 
-- stdout 末行固定 `SUMMARY pass=<n> skip=<m> fail=<k>`（机读区分真 PASS 与 SKIP——引擎只看
-  exit code，人审/仲裁凭这行分辨）；
-- 依赖缺失一律干净 SKIP（exit 0，原因打 stdout，引擎保留 output_tail 后 4000 字符）；
-  测试环境不可用时先幂等尝试 `docker compose -f server/dsh/docker-compose.test.yml up -d`；
-- FAIL>0 才 exit 1。
+- 场景级状态只有 PASS / FAIL / ENV_FAIL；退出码分家：**0=全过；1=有 FAIL（产品红，
+  含全腿 N/A）；2=有 ENV_FAIL（环境红）**。旧「依赖缺失一律干净 SKIP（exit 0）」（退役）
+  与 `SUMMARY pass/skip/fail` 语义**退役**（定稿=notes/discussions/
+  260904-charter-injection-invalid-payload.md §7.3：没验成且原因归环境≠通过）。
+- 环境缺失（依赖、隔离台、凭据、playwright 等）一律：打印 `ENV_FAIL: <缺什么>` 且
+  exit 2——不假红也不假绿，依赖恢复后自动生效。
+- N/A 仅给以**系统状态**为条件的腿（不以测试环境为条件，如「该 feature flag 未开时
+  该腿无对象」），打印 `N/A: <原因>`；**全腿 N/A 的场景=产品红 exit 1**（无可验对象
+  是场景设计/覆盖问题，修场景而非补环境）。python 侧共享助手=integration/lib_env.py；
+  mjs 侧=t260904-05/lib_browser.mjs makeResults()（状态词表 pass/fail/env_fail/na）。
+- 场景内部 SUMMARY 行格式 `SUMMARY pass=X fail=Y env_fail=Z na=W`（skip 计数退役）；
+  执行器级末行 `SCENARIOS ran=N pass=N fail=N env_fail=N na=N`，汇总与明细**双向净
+  才绿**（执行器自校验，谎报=产品红）。
+- 测试环境不可用时仍可先幂等尝试 `docker compose -f server/dsh/docker-compose.test.yml
+  up -d`（场景内 precheck 自装配保留）；装配不成=ENV_FAIL（exit 2），绝不再 exit 0。
+  闸级统一入口=verify.yaml integration 段供给声明（supply，接入契约 ②a；乙段待
+  宿主扩写集落地），两者并存不互替。
 
 ## 环境前提
 
@@ -37,13 +49,13 @@ temporal CLI（`server/dsh/temporal-poc/bin/temporal` 或 PATH）、测试环境
   8233 Web UI 与一切写命令不碰。
 - **建票类测试永远指向测试环境**：显式 `SUYOU_TARGET_HOST=127.0.0.1:17233` +
   `SUYOU_NAMESPACE=suyou-test`；内置硬断言——该变量未显式设置或精确等于生产缺省
-  `127.0.0.1:7233` 时拒绝执行（宁可 SKIP/FAIL 自家测试，绝不静默连生产）。
+  `127.0.0.1:7233` 时拒绝执行（宁可 FAIL/ENV_FAIL 自家测试，绝不静默连生产）。
 
 ## 已知限制（覆盖诚实声明，非哑 guard）
 
 - retention 条依赖 temporal CLI——`bin/temporal` 是未跟踪本机工件（worktree/新 clone 无），
-  泳道内可能恒 SKIP；CLI 进 PATH 即恢复真实覆盖。
-- ticket-validate 环境半依赖 temporalio SDK（随主 checkout `.venv` 走），worktree 内常 SKIP；
+  泳道内可能恒 ENV_FAIL（exit 2）；CLI 进 PATH 即恢复真实覆盖。
+- ticket-validate 环境半依赖 temporalio SDK（随主 checkout `.venv` 走），worktree 内常 ENV_FAIL（exit 2）；
   纯函数半零依赖恒跑。
 - ticket-empty-writeset-declare（t260901-01）与 ticket-validate 的分工：真实建票的
   **正路径**（空写集+声明 → 建票成功）归 ticket-validate env half，本条不重复；本条守
@@ -51,9 +63,15 @@ temporal CLI（`server/dsh/temporal-poc/bin/temporal` 或 PATH）、测试环境
   与 **负路径**（空写集无声明 → 连接前拒收、双出路文案）。SDK 探测在 worktree 泳道会
   回落到主 checkout `.venv`（经 `git rev-parse --git-common-dir` 解析），比 ticket-validate
   的探测多一档，泳道内 D 段可真实覆盖；E 段仍需显式 `SUYOU_TARGET_HOST`（写护栏不变）。
-- ticket-lifecycle（t260831-04 落地， stub 大脑端到端）已登记 manifest，但**在引擎机械步内
-  恒 SKIP**：`_run_manifest` 继承 worker 环境，条目检测到 `SUYOU_TASK_QUEUE` /
-  `SUYOU_WATCH_WORKFLOW`（工单专属 worker 特征）即判「泳道内机械跑」直接 SKIP——否则会
+- ticket-lifecycle（t260831-04 落地， stub 大脑端到端）：**t260904-12 起移出闸清单（SCENARIOS
+  移册，非 SKIP 非豁免）**——worker 机械步内恒触发嵌套护栏（SUYOU_TASK_QUEUE 特征检测，
+  防无界自递归：净化半必 clone fixture/起 worker/起票，递归面无法否定），属设计性环境红、
+  闸内不可达 PASS；移册依据=定稿 §7.3「真跑不进闸的（红线禁区/破坏性）不进闸清单」+宿主令
+  exit=0 目标；真实覆盖承接=主库人工清单（t260903-09 主库跑生效）。**口径逆转链**（防历史
+  反复无据可查）：t260831-03 曾以死条目为由不登记 → t260831-04 按工单要求翻回登记（见下） →
+  本次三态化后依定稿条款再移册。原文记录保留如下：在引擎机械步内
+  恒 ENV_FAIL（exit 2）：`_run_manifest` 继承 worker 环境，条目检测到 `SUYOU_TASK_QUEUE` /
+  `SUYOU_WATCH_WORKFLOW`（工单专属 worker 特征）即判「泳道内机械跑」报 ENV_FAIL——否则会
   clone fixture、再起 worker、再起 integ-e2e- 票，无界自递归。这是嵌套安全护栏的正确行为，
   不是死条目：真实覆盖在顶层人工跑（两变量皆无时执行五场景）。t260831-03 壳文件曾以
   「避免恒 SKIP 死条目」为由不登记，t260831-04 按工单要求取登记并在此显性记录取舍。
@@ -63,20 +81,20 @@ temporal CLI（`server/dsh/temporal-poc/bin/temporal` 或 PATH）、测试环境
   merge reject 无计数属引擎发现，另开票处理。
 - lane-parallel-dom（t260901-09，泳道图并行分叉 DOM 级双边同亮断言）：S0 build-contract
   纯 node 恒跑；S1 浏览器半依赖测试控制台（`SUYOU_TEST_CONSOLE`，默认 127.0.0.1:3199）+
-  playwright-core + 本机 chromium，缺任一干净 SKIP——与 session-tab-interactions 同款环境
+  playwright-core + 本机 chromium，缺任一 ENV_FAIL（exit 2）——与 session-tab-interactions 同款环境
   取舍。S1 造数用 playwright `page.route()` 在 `/suyou-workbench/api/wf/tickets` API 边界
   打桩 fixture 快照（不进 Temporal、不写真工单）；泳道 worker 环境因 SUYOU_TASK_QUEUE
-  特征机械 SKIP 属既有正确行为，真实覆盖在隔离台环境（3199 台 + 浏览器在场）跑。
+  特征机械 ENV_FAIL 属既有正确行为，真实覆盖在隔离台环境（3199 台 + 浏览器在场）跑。
 - capture-chat-e2e / capture-chat-active（t260901-03）自 t260901-09 起补泳道 worker 递归
   护栏（与 ticket-lifecycle 同款 SUYOU_TASK_QUEUE/SUYOU_WATCH_WORKFLOW 探测）：两条的
   真实覆盖靠 boot 隔离台 + 真模型种子链路 + capture-lane 只拍**本次重建**的 bundle
   （陈旧 build 拒跑是防证据造假的设计行为）——非 UI 票的泳道不重建 bundle，此前提在
-  泳道机械跑环境天然不满足，故一律干净 SKIP（e2e 整 entry 8 场景 skip；active 只 skip
+  泳道机械跑环境天然不满足，故一律 ENV_FAIL（exit 2，不再 exit 0 假绿；e2e 整 entry 8 场景环境红；active 只环境红
   C1 重链，U1-U3/C2 纯函数半照跑）；顶层人工/隔离台跑不受影响，携带真实覆盖。
   t260901-09 前缺口实证：非 UI 票泳道机械跑 2 败均源于 capture-lane 陈旧拒跑（exit 2），
   与本票 diff 无关（失败文件本票零改动，git diff 为空）。
 - capture-chat-e2e（t260901-03）依赖**真模型凭据**（capture-lane 从用户 DSH_HOME 拷
-  `.credentials.yaml`，种子消息走真模型链路）：凭据缺失的机器上整条约定为 SKIP（exit 0，
+  `.credentials.yaml`，种子消息走真模型链路）：凭据缺失的机器上整条 ENV_FAIL（exit 2，
   原因打 stdout），有凭据无网络/模型不可达时才 FAIL——与 capture 的「loud 非零、不静默
   降级」设计同源。每条隔离台 2 次真模型调用，有成本，勿高频机械重跑。
 - capture-redline-gate（t260901-03）全 hermetic（本地 mock 控制台，零 Docker 零真台）；
@@ -85,17 +103,17 @@ temporal CLI（`server/dsh/temporal-poc/bin/temporal` 或 PATH）、测试环境
 - capture-chat-active（t260901-03，developer 自产基线）与 capture-chat-e2e 的分工：
   前者 U1-U3 纯函数防呆任何环境恒跑 + C1 全链与 C2 红线；后者黑盒断言更严
   （7 视图逐张非空白、逐视图零失败、隔离台端口退出后拒连的孤儿进程检查）且
-  真模型凭据缺失时整条约 SKIP。两条 C1 都跑真模型，勿高频机械重跑。
+  真模型凭据缺失时整条约 ENV_FAIL（exit 2）。两条 C1 都跑真模型，勿高频机械重跑。
 - t260901-03 gen3 对齐 main 后，capture-chat-e2e 追加两条验收棒：A4 锚断言按
   main 版隔离台路径（「+ 新建会话」+ 种子消息）判读、chat 截图不得被准入模态
   遮挡；A7 全程不得有裸 TypeError 冒泡（种子链异常必须过报错包装）——对齐前
   的泳道实现曾 run-to-run 违反后者，此条即其回归闸。
 - ui-evidence-failure-retention（t260901-02）依赖 temporalio SDK（import agent_activities
-  直调 activity），SDK 不可用的环境恒 SKIP——与 ticket-validate 的环境半依赖同款取舍；
+  直调 activity），SDK 不可用的环境恒 ENV_FAIL（exit 2）——与 ticket-validate 的环境半依赖同款取舍；
   两条 capture-lane 基线（capture-lane-preset / ui-evidence-failure-retention）均不 boot
   控制台、不装浏览器，3099 全程零接触（后者显式把 SUYOU_CONSOLE_URL 钉死死端口并内置
   红线自检断言）。隔离台端到端实拍（boot 控制台+浏览器出图）是重环境路径，不进 manifest：
-  依赖真机凭据与 `$HOME/.dsh` preset 实体，泛化跑只会恒 SKIP，该口径由
+  依赖真机凭据与 `$HOME/.dsh` preset 实体，泛化跑只会恒 ENV_FAIL，该口径由
   `node server/dsh/ui-check/capture-lane.mjs --selftest` 与 implement 段端到端验收步骤承担。
 
 ## 基线设计红线（审查标准，integration 岗位维护）
@@ -140,7 +158,7 @@ temporal CLI（`server/dsh/temporal-poc/bin/temporal` 或 PATH）、测试环境
 
 本组不再是空壳：`baselines/ticket-lifecycle.mjs`（总入口，内部分场景）+
 `baselines/ticket-lifecycle-scenes.mjs`（脚手架与场景库）。链路全真：Docker 测试 Temporal
-（17233/suyou-test，不可达则幂等 `docker compose up -d`，仍不可用干净 SKIP）+ 每票专属
+（17233/suyou-test，不可达则幂等 `docker compose up -d`，仍不可用 ENV_FAIL exit 2）+ 每票专属
 worker（`SUYOU_TASK_QUEUE`/`SUYOU_WATCH_WORKFLOW`，WATCH 收口自退 + 看门狗 kill）+ 真实
 引擎链（prepare_workspace→create_plan⇄review_plan→implement∥design_integration_tests→
 run_integration_tests→arbitrate→acceptance_walkthrough→merge_check→merge 人门→suggest_next
@@ -200,7 +218,7 @@ fixture detail 全页签共享（D 页签写、B 页签下一次拉取即见新�
 已知限制（诚实声明，非哑 guard）：
 
 - T3 依赖浏览器对后台页签真实报 `visibilityState=hidden`：headless 环境若不报，先尝
-  试 CDP `Page.setWebLifecycleState`，仍不可达则该场景**有声 SKIP**（其余场景照跑）。
+  试 CDP `Page.setWebLifecycleState`，仍不可达则该场景**ENV_FAIL（exit 2）**（其余场景照跑）。
 - 33s 零请求窗口覆盖 5s/5s/8s/30s 全部轮询周期；窗口内任何一次泄漏即 FAIL，不抽样。
 - S1 覆盖的是**测试控制台（3199）所服务的 bundle**：隔离台若未随泳道产物重建，T1–T6
   会对陈旧 bundle 报 FAIL（有声暴露，非静默）；泳道产物正确性由 S0 锚点先行把守。
@@ -224,7 +242,7 @@ host agent-usage）均按具体 state 过滤或只数 running，不受新增 don
 ## 第 7 组（t260901-19）—— token 节流三刀的回归闸（cap 作用域 / arb 尾保 / precache 短路 / cache_probe）
 
 `integration/t260901-19/` 四条，方案=create_plan v3（三轮审读后通过）。纯 python3（stdlib），
-`PY` 回落链见 manifest（t03 需 temporalio SDK，缺失干净 SKIP，真覆盖在有 venv 的顶层环境）。
+`PY` 回落链见 manifest（t03 需 temporalio SDK，缺失 ENV_FAIL exit 2，真覆盖在有 venv 的顶层环境）。
 
 - **t19-cap-previous-context**（t01）：`shared.cap_previous_context` 作用域契约——六类
   「- 上次*」历史行整行（含前缀）截 800+「…（截断）」、「- 打回原因：」行与一切未识别行
@@ -244,9 +262,9 @@ host agent-usage）均按具体 state 过滤或只数 running，不受新增 don
 - **t19-cache-probe**（t04）：`integration/cache_probe.py` 工具契约——zstd 缺失可读报错
   exit(2)、位置参数注入扫描根、空根 exit 0、畸形/半截行跳过且计数、命中率
   cache_read/(input+cache_read) 口径（fixture 900/1000=90.0%）、只读不落盘。
-  fixture 半区依赖系统 zstd，缺失干净 SKIP。
+  fixture 半区依赖系统 zstd，缺失 ENV_FAIL exit 2。
 
-已知限制：t03 泳道机械跑恒 SKIP（temporalio SDK 不在泳道，走 venv 回落链声明），真实覆盖
+已知限制：t03 泳道机械跑恒 ENV_FAIL（exit 2；temporalio SDK 不在泳道，走 venv 回落链声明），真实覆盖
 在带 `.venv` 的顶层/主 checkout 环境跑——与 ui-evidence-failure-retention 同款环境取舍。
 
 ## 第 8 组（t260901-20）—— metrics M1a 读侧聚合（门面/缓存/双前门）
@@ -261,11 +279,11 @@ host agent-usage）均按具体 state 过滤或只数 running，不受新增 don
   同名重复参数、epic 非法字符/超长、project 未知、隔离条目带「隔离」定位）；
   200 信封逐字段对契约块 2（kpis 恒冻结四字段、cache.status 枚举、ChartSpec 形状、
   四枚举 view 全绿）；并发 3 路同请求形状一致。
-- **t02_cache_lifecycle**：缓存目录不可写→200 直算不 5xx（root 下有声 SKIP）；
+- **t02_cache_lifecycle**：缓存目录不可写→200 直算不 5xx（root 下为系统态条件腿，N/A 口径）；
   legacy SUYOU_PROJECTS_YAML 模式缓存禁用零落盘；缓存目录整体 rm 后惰性重建 200；
-  缓存记录 block-3 键集全等 + 二次请求 hit（无票环境有声 SKIP）。
+  缓存记录 block-3 键集全等 + 二次请求 hit（无票环境为系统态条件腿，N/A 口径）。
 - **t03_health_degrade**：view=health 回冻结信封不设视图变体键；本机独立探测
-  7233，不可达时 200+reason 人话必带（可达则该半区有声 SKIP）；health 请求零缓存写入。
+  7233，不可达时 200+reason 人话必带（不可达=ENV_FAIL 口径）；health 请求零缓存写入。
 - **t04_cli_door**：argv 畸形（缺参/坏 JSON/非对象/非法值）exit 2+stderr 人话；
   合法请求 exit 0 出契约信封。
 - **t05_dual_door**：同请求 HTTP vs CLI，剔 generated_at/cache.computed_at 后
@@ -275,7 +293,7 @@ host agent-usage）均按具体 state 过滤或只数 running，不受新增 don
 
 - **数字级正确性不在本集**：泳道无 Temporal，聚合数字（窗口/token/LOC）只能以
   降级形状覆盖；数字对账=developer 单测（方案步 1/2）+ M3 三票人工核对。t02 末段
-  与 t05 在有票环境（Docker 测试台/真票）自动升级为数据级断言，无票时有声 SKIP。
+  与 t05 在有票环境（Docker 测试台/真票）自动升级为数据级断言，无票时为系统态条件腿（N/A 口径）。
 - **双前门一致基线带预热约定（acceptance P1 定稿）**：cache.status 按契约块 2 字面
   语义（惰性生成=computed / 命中=hit，实现 gen1 已回归字面），冷缓存下两门天然
   一 computed 一 hit——那是契约语义本身。双门比对基线在两门前预热缓存（同请求先跑

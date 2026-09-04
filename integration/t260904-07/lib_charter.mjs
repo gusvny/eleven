@@ -19,20 +19,27 @@ export function refuseProductionConsole() {
   }
 }
 
-/** 执行契约（integration/README.md）：stdout 末行 SUMMARY pass/skip/fail；FAIL>0 才 exit 1。 */
+/** 执行契约（t260904-12 三态，同 t260904-05/lib_browser.makeResults 口径）：状态词表只认
+ *  pass / fail / env_fail / na——环境缺失一律 env_fail（绝不 exit 0 假绿）；na 仅给以
+ *  系统状态为条件的腿。退出码：fail>0 或全腿 na → 1（产品红优先）；env_fail>0 → 2；
+ *  全过 → 0。SUMMARY 末行 pass= fail= env_fail= na=。 */
 export function makeResults() {
   const results = [];
+  const OK = new Set(['pass', 'fail', 'env_fail', 'na']);
   return {
     record(name, status, detail = '') {
+      if (!OK.has(status)) throw new Error(`非法状态词 ${status}（词表 pass/fail/env_fail/na）`);
       results.push({ name, status, detail });
       console.log(`[${status.toUpperCase()}] ${name}${detail ? ' — ' + detail : ''}`);
     },
     summarize() {
       const p = results.filter(r => r.status === 'pass').length;
-      const s = results.filter(r => r.status === 'skip').length;
+      const e = results.filter(r => r.status === 'env_fail').length;
+      const n = results.filter(r => r.status === 'na').length;
       const f = results.filter(r => r.status === 'fail').length;
-      console.log(`SUMMARY pass=${p} skip=${s} fail=${f}`);
-      process.exit(f > 0 ? 1 : 0);
+      const allNa = results.length > 0 && n === results.length;
+      console.log(`SUMMARY pass=${p} fail=${f} env_fail=${e} na=${n}`);
+      process.exit(f > 0 || allNa ? 1 : e > 0 ? 2 : 0);
     },
   };
 }

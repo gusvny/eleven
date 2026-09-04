@@ -14,11 +14,13 @@
 // Staging: this suite stages a tiny valid PNG under <laneRoot>/.suyou/evidence/
 // <stageId>/ (archive base of the console booted from this lane) and removes it
 // afterwards. If the console serves a different repo root, staged-file scenarios
-// degrade to SKIP with the reason (mismatch is an environment fact, not a pass).
+// degrade to env_fail with the reason (mismatch is an environment fact, not a
+// pass; t260904-12 三态：环境红 exit 2，绝不 exit 0 假绿).
 // Hard guard: never touches port 3099.
 //
-// Execution contract: stdout last line `SUMMARY pass=<n> skip=<m> fail=<k>`;
-// FAIL>0 → exit 1.
+// Execution contract (t260904-12 三态): stdout last line
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 或全腿 na → exit 1;
+// env_fail>0 → exit 2.
 
 import { mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -32,16 +34,20 @@ const PNG_1x1 = Buffer.from(
   '0000000d4944415478da63fcffff3f030005fe02fea72d1f240000000049454e44ae426082', 'hex');
 
 const results = [];
+const STATUSES = new Set(['pass', 'fail', 'env_fail', 'na']);;
 function record(name, status, detail = '') {
-  results.push({ name, status, detail });
-  console.log(`[${status.toUpperCase()}] ${name}${detail ? ` — ${detail}` : ''}`);
+  if (!STATUSES.has(status)) throw new Error(`非法状态词 ${status}（词表 pass/fail/env_fail/na）`);;
+  results.push({ name, status, detail });;
+  console.log(`[${status.toUpperCase()}] ${name}${detail ? ` — ${detail}` : ''}`);;
 }
 function summarize() {
-  const p = results.filter(r => r.status === 'pass').length;
-  const s = results.filter(r => r.status === 'skip').length;
-  const f = results.filter(r => r.status === 'fail').length;
-  console.log(`SUMMARY pass=${p} skip=${s} fail=${f}`);
-  process.exit(f > 0 ? 1 : 0);
+  const p = results.filter(r => r.status === 'pass').length;;
+  const e = results.filter(r => r.status === 'env_fail').length;;
+  const n = results.filter(r => r.status === 'na').length;;
+  const f = results.filter(r => r.status === 'fail').length;;
+  const allNa = results.length > 0 && n === results.length;;
+  console.log(`SUMMARY pass=${p} fail=${f} env_fail=${e} na=${n}`);;
+  process.exit(f > 0 || allNa ? 1 : e > 0 ? 2 : 0);;
 }
 
 if (BASE.includes(':3099')) {
@@ -85,7 +91,7 @@ async function withStagedEvidence() {
       && !files.includes('notes.txt') && !files.includes('weird name.png')) {
       record('server/list-staged', 'pass', `files=${JSON.stringify(files)}`);
     } else if (shapeOk && files.length === 0) {
-      record('server/list-staged', 'skip', 'list empty although staged — console repo is not this lane root');
+      record('server/list-staged', 'env_fail', 'list empty although staged — console repo is not this lane root');
     } else {
       record('server/list-staged', 'fail', `status=${status} body=${JSON.stringify(body)?.slice(0, 200)}`);
     }
@@ -93,12 +99,12 @@ async function withStagedEvidence() {
 
   // S2: bytes round-trip — exact staged bytes, image/png.
   // 前提门控与 S1 同源：console 根不匹配时暂存文件不可见，roundtrip 必 404——那是
-  // 环境事实（见文件头注「mismatch is an environment fact, not a pass」），按 SKIP
+  // 环境事实（见文件头注「mismatch is an environment fact, not a pass」），按 env_fail
   // 处置不判 FAIL。守卫缺失曾在隔离台锚根漂移时把本腿打成假红
   // （t260904-04 arbitrate gen1 修正；前提成立时断言面一字不减）。
   {
     if (!stagedVisible) {
-      record('server/bytes-roundtrip', 'skip', 'staged file not visible — console repo is not this lane root');
+      record('server/bytes-roundtrip', 'env_fail', 'staged file not visible — console repo is not this lane root');
     } else {
       const { status, type, buf } = await evidenceRequest(STAGE_ID, 'shot-a.png');
       if (status === 200 && type.includes('image/png') && buf.equals(PNG_1x1)) {
@@ -173,7 +179,7 @@ async function uiScenario() {
     if (!c) continue;
     try { pw = await import(c); break; } catch { /* next */ }
   }
-  if (!pw) { record('ui/drawer-images', 'skip', 'playwright-core unavailable'); return; }
+  if (!pw) { record('ui/drawer-images', 'env_fail', 'playwright-core unavailable'); return; }
   let browser;
   try {
     browser = await pw.chromium.launch({ headless: true });
@@ -199,21 +205,21 @@ async function uiScenario() {
     // no drawer/no evidence for the first row is a fixture fact; timeout on an
     // existing evidence-bearing ticket would be a real failure — reported as
     // fail either way unless playwright/console itself is the blocker.
-    record('ui/drawer-images', 'skip', `environment/fixture blocker: ${msg}`);
+    record('ui/drawer-images', 'env_fail', `environment/fixture blocker: ${msg}`);
   }
   try { await browser.close(); } catch { /* noop */ }
 }
 
 const healthy = await consoleHealthy();
 if (!healthy) {
-  record('console/health', 'skip', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
+  record('console/health', 'env_fail', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
   summarize();
 }
 record('console/health', 'pass', BASE);
 try {
   await withStagedEvidence();
 } catch (err) {
-  record('server/staging', 'skip', `staging failed: ${String(err).slice(0, 120)}`);
+  record('server/staging', 'env_fail', `staging failed: ${String(err).slice(0, 120)}`);
   await rm(STAGE_DIR, { recursive: true, force: true }).catch(() => {});
 }
 await faultSurface();

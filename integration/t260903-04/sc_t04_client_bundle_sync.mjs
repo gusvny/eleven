@@ -6,7 +6,7 @@
  * 加载的是仓内产物 lib/client.js（tsdown 构建，node.ts §5/§9）；改了 src/client/
  * 忘跑 `npx -y tsdown@0.22.2 -c tsdown.config.ts` 重建时，源码层测试（tsc/单测/
  * 数据级场景）全绿、真台面却仍是旧行为——KI-024 修复在真台面静默未交付。
- * lane-parallel-dom 的 S1（真渲染）在无浏览器环境恒 SKIP、S0 anchors 断言旧 bundle
+ * lane-parallel-dom 的 S1（真渲染）在无浏览器环境恒环境红退 2、S0 anchors 断言旧 bundle
  * 也有，均分不出 bundle 陈旧；本场景常驻守「用户实际被服务的产物含当前契约特征」。
  *
  * 断言：
@@ -18,7 +18,7 @@
  *   后续票改 src/client/ 时按 t260901-22 模式在本场景追加当票特征词，或票内自断言。
  *
  * 直跑：node integration/t260903-04/sc_t04_client_bundle_sync.mjs（node ≥22.18）。
- * 末行 SUMMARY pass=<n> skip=<m> fail=<k>；fail>0 才 exit 1。
+ * 末行 SUMMARY pass=<n> fail=<k> env_fail=<e> na=<w>（三态 §7.3）；fail>0 或全 na→exit 1。
  */
 
 import { readFile } from 'node:fs/promises'
@@ -54,5 +54,5 @@ section('S2 契约特征：用户被服务的产物含当前源码行为')
     '既有并行渲染 sanity 锚在案（deriveStageStates / wb-d2-par）')
 }
 
-console.log(`\nSUMMARY pass=${pass} skip=0 fail=${fail}`)
+console.log(`\nSUMMARY pass=${pass} fail=${fail} env_fail=0 na=0`)
 process.exit(fail > 0 ? 1 : 0)

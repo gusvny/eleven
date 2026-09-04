@@ -2,8 +2,8 @@
 // 最后项目/legacy/未注册/隔离同名）。
 //
 // intent（用户可感知行为，立项验收5/7/8/9 + gen2 方案 C3 表）：remove 的 fail-closed
-// 闸逐道可辨且语义腿绝不 SKIP——
-//   真票腿（唯一有声 SKIP 豁免，C3 表）：隔离台起真 running 票 → 拒摘报票号 →
+// 闸逐道可辨且语义腿零环境依赖——
+//   真票腿（唯一 env_fail 豁免，C3 表）：隔离台起真 running 票 → 拒摘报票号 →
 //     收口（cancel）→ 重跑 remove 成功（验收5 全段，含 M3 续步）；
 //   Temporal 不可达 → fail-closed 拒摘，文案含可达性诊断指路（先 sandbar up）（验收7）；
 //   sdk-missing 与不可达两态输出可辨（KI-039）；通道坏 JSON=拒摘；
@@ -15,9 +15,9 @@
 //   legacy env（SUYOU_PROJECTS_YAML）在位=拒收点名存量 env（gen1 R4 模式闸）；
 //   key 未注册=拒且零现场变更；隔离条目同名=拒且与未注册区分报（含 project.yaml 定位）。
 //
-// 台别（C3 表逐腿钉死）：真票腿=temporalite 自举真台（依赖缺席=有声 SKIP 并打印原因，
-//   唯一豁免腿）；其余全部腿=桩 poc_dir（--root 指桩树，假 client.py 经 FIX14_CTRL
-//   注入），不可 SKIP——注入缝在桩侧，SKIP=假绿（KI-046）。
+// 台别（C3 表逐腿钉死）：真票腿=temporalite 自举真台（依赖缺席=env_fail（exit 2）
+//   并打印缺什么，唯一豁免腿）；其余全部腿=桩 poc_dir（--root 指桩树，假 client.py 经
+//   FIX14_CTRL 注入），零环境依赖——注入缝在桩侧，环境缺失假绿被三态契约堵死（KI-046）。
 // 安全红线：零 3099 接触；自举台只在随机高端口+临时 db，finally 必杀（资源回收）；
 //   env 逐腿显式钉死防缺省外溢生产 7233。实现段落地前本场景红属预期（TDD 信号），
 //   arbitrate/merge 期必须绿。
@@ -62,12 +62,12 @@ function pyTicket(clientArgs, env) {
 }
 
 // =====================================================================
-// 腿 A（真票腿，唯一 SKIP 豁免）：真台起 running 票 → 拒摘报票号 → cancel → remove 成功
+// 腿 A（真票腿，唯一 env_fail 豁免）：真台起 running 票 → 拒摘报票号 → cancel → remove 成功
 // =====================================================================
 {
   const rig = await provisionRealRig();
   if (!rig.ok) {
-    c.skip('真票腿（验收5 全段）', `${rig.reason}——C3 唯一有声 SKIP 豁免腿（隔离台环境补真跑）`);
+    c.envFail('真票腿（验收5 全段）', `${rig.reason}——C3 唯一 env_fail 豁免腿（隔离台环境补真跑）`);
   } else {
     try {
       const root = newRoot('fix14-gate-real-');
@@ -79,7 +79,7 @@ function pyTicket(clientArgs, env) {
       const st = pyTicket(['ticket-start',
         JSON.stringify({ ticket_id: tid, template_id: 'dev-lane', project: 'rmgate' })], env);
       if (st.code !== 0) {
-        c.skip('真票腿（验收5 全段）',
+        c.envFail('真票腿（验收5 全段）',
           `ticket-start 未成（隔离台参数/锚定口径差异）：${st.out.slice(-200)}`);
       } else {
         const rem1 = runCli(['project', 'remove', '--key', 'rmgate'], env);
@@ -89,7 +89,7 @@ function pyTicket(clientArgs, env) {
         const cc = pyTicket(['cancel',
           JSON.stringify({ workflow_id: tid, reason: 't260904-14 场景收口' })], env);
         if (cc.code !== 0) {
-          c.skip('真票腿收口后半', `cancel 未成：${cc.out.slice(-200)}`);
+          c.envFail('真票腿收口后半', `cancel 未成：${cc.out.slice(-200)}`);
         } else {
           const rem2 = runCli(['project', 'remove', '--key', 'rmgate'], env);
           c.check('收口后 remove 成功（验收5 后半/M3 续步）', rem2.code === 0,
@@ -104,7 +104,7 @@ function pyTicket(clientArgs, env) {
 }
 
 // =====================================================================
-// 腿 B（桩 poc_dir，不可 SKIP）：不可达 / sdk-missing / 坏 JSON 三态 fail-closed
+// 腿 B（桩 poc_dir，零环境依赖腿）：不可达 / sdk-missing / 坏 JSON 三态 fail-closed
 // =====================================================================
 {
   const root = newRoot('fix14-gate-unreach-');
@@ -133,7 +133,7 @@ function pyTicket(clientArgs, env) {
 }
 
 // =====================================================================
-// 腿 C（桩 poc_dir，不可 SKIP）：purge 双旗 + C1 三态 + dry-run 清单
+// 腿 C（桩 poc_dir，零环境依赖腿）：purge 双旗 + C1 三态 + dry-run 清单
 // =====================================================================
 {
   // C1 缺失态：目录在/manifest 缺 → 差集含该票 → purge 拒并列票号、data/ 不动
@@ -223,7 +223,7 @@ function pyTicket(clientArgs, env) {
 }
 
 // =====================================================================
-// 腿 D（桩 poc_dir，不可 SKIP）：最后项目 --confirm-last（验收9）
+// 腿 D（桩 poc_dir，零环境依赖腿）：最后项目 --confirm-last（验收9）
 // =====================================================================
 {
   const root = newRoot('fix14-gate-last-');
@@ -249,7 +249,7 @@ function pyTicket(clientArgs, env) {
 }
 
 // =====================================================================
-// 腿 E（桩 poc_dir，不可 SKIP）：legacy 模式闸 / key 未注册 / 隔离同名
+// 腿 E（桩 poc_dir，零环境依赖腿）：legacy 模式闸 / key 未注册 / 隔离同名
 // =====================================================================
 {
   const root = newRoot('fix14-gate-misc-');

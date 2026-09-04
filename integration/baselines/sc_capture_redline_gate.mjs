@@ -16,7 +16,8 @@
 //
 // Environment: none required from the caller. playwright-core resolves from the main
 // checkout via `git rev-parse --git-common-dir` (same precedent as ticket-validate).
-// SKIP (exit 0) only when playwright/browser unavailable. Everything else must PASS on
+// ENV_FAIL (exit 2) when playwright/browser unavailable (三态契约 §7.3：缺环境绝不 exit 0).
+// Everything else must PASS on
 // a correct implementation; the R2 cwd assertion lands with this ticket's fix, so this
 // suite is expected to FAIL on pre-fix code (that is the acceptance bar).
 
@@ -42,9 +43,9 @@ function record(name, status, detail = "") {
 
 const nodeMajor = Number(process.versions.node.split(".")[0]);
 if (nodeMajor < 22) {
-  console.log(`node ${process.versions.node} < 22, SKIP`);
-  console.log("SUMMARY pass=0 skip=1 fail=0");
-  process.exit(0);
+  console.log(`ENV_FAIL: node ${process.versions.node} < 22（本套件要求 node >= 22）`);
+  console.log("SUMMARY pass=0 fail=0 env_fail=1 na=0");
+  process.exit(2);
 }
 
 function resolveMainUiCheck() {
@@ -159,7 +160,7 @@ async function closedPort() {
 if (!(await browserAvailable())) {
   for (const name of ["R1 no-flag-no-write-redline", "R2 empty-cwd-fast-fail", "R3 seed-api-error-loud",
     "R4 console-unreachable-loud"]) {
-    record(name, "skip", "playwright-core 不可解析或无可用浏览器");
+    record(name, "env_fail", "playwright-core 不可解析或无可用浏览器");
   }
 } else {
   const work = await mkdtemp(path.join(tmpdir(), "capture-redline-"));
@@ -216,6 +217,8 @@ if (!(await browserAvailable())) {
 
 const pass = results.filter((r) => r.status === "pass").length;
 const fail = results.filter((r) => r.status === "fail").length;
-const skip = results.filter((r) => r.status === "skip").length;
-console.log(`\nSUMMARY pass=${pass} skip=${skip} fail=${fail}`);
-process.exit(fail > 0 ? 1 : 0);
+const envFail = results.filter((r) => r.status === "env_fail").length;
+const na = results.filter((r) => r.status === "na").length;
+console.log(`\nSUMMARY pass=${pass} fail=${fail} env_fail=${envFail} na=${na}`);
+const allNa = na > 0 && pass + fail + envFail === 0;
+process.exit(fail > 0 || allNa ? 1 : envFail > 0 ? 2 : 0);

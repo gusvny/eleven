@@ -2,9 +2,9 @@
 //
 // 复用面（integration 岗位纪律：前置/基础步骤代码允许共享，步骤级重复不算重复用例）：
 //   - 隔离台基址与 3099 红线拒绝；
-//   - playwright-core 三路探测加载（同 t260903-07/sc_t01 口径，缺失=干净 SKIP）；
+//   - playwright-core 三路探测加载（同 t260903-07/sc_t01 口径，缺失=ENV_FAIL）；
 //   - 浏览器 fresh context 打开（无账册残留，等价新用户）；
-//   - results/record/summarize 执行契约（stdout 末行 SUMMARY pass/skip/fail）。
+//   - results/record/summarize 执行契约（SUMMARY pass/fail/env_fail/na；退出码 0/1/2）。
 // 安全红线：本目录场景只碰隔离台（默认 127.0.0.1:3199），绝不连生产 3099。
 
 export const BASE = (process.env.SUYOU_TEST_CONSOLE ?? 'http://127.0.0.1:3199').replace(/\/$/, '');
@@ -17,7 +17,7 @@ export function refuseProductionConsole() {
   }
 }
 
-/** playwright-core 三路探测（env 指定 → 裸包 → ui-check 本地依赖）。缺失返回 null=调用方 SKIP。
+/** playwright-core 三路探测（env 指定 → 裸包 → ui-check 本地依赖）。缺失返回 null=调用方记 ENV_FAIL。
  *  第③路 t260904-05 验收走查 gen0 修正：原按 process.cwd() 相对拼路径，泳道开在
  *  主仓 .lane/ 子目录时 ../../ 会指到主仓树（其 ui-check 无 node_modules）——改为
  *  基于本模块 import.meta.url 解析，与泳道布局解耦。 */
@@ -41,7 +41,7 @@ export async function consoleHealthy() {
 /** 项目清单（name→key 映射；健康检查同源接口）。失败返回 []。
  *  响应三态兼容（t260904-05 验收走查 gen0 修正）：workbench API 实测返回
  *  {ok:true,result:{projects:[...]}} 包装；夹具原只解裸数组/{projects} 两态，
- *  map 落空 →「组头无法映射到 key」假 SKIP/FALL 链。 */
+ *  map 落空 →「组头无法映射到 key」假绿/FALL 链。 */
 export async function fetchProjects() {
   try {
     const r = await fetch(`${BASE}/suyou-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
@@ -53,20 +53,27 @@ export async function fetchProjects() {
   } catch { return []; }
 }
 
-/** 执行契约（integration/README.md「执行契约」）：SUMMARY 末行 + FAIL>0 才 exit 1。 */
+/** 执行契约（integration/README.md「执行契约」，t260904-12 三态化）：状态词表只认
+ *  pass / fail / env_fail / na——环境缺失一律 env_fail（绝不 exit 0 假绿）；na 仅给
+ *  以系统状态为条件的腿。退出码：fail>0 或全腿 na → 1（产品红优先，C7/C9）；
+ *  env_fail>0 → 2；全过 → 0。SUMMARY 末行 pass= fail= env_fail= na=（skip= 退役）。 */
 export function makeResults() {
   const results = [];
+  const OK = new Set(['pass', 'fail', 'env_fail', 'na']);
   return {
     record(name, status, detail = '') {
+      if (!OK.has(status)) throw new Error(`非法状态词 ${status}（词表 pass/fail/env_fail/na）`);
       results.push({ name, status, detail });
       console.log(`[${status.toUpperCase()}] ${name}${detail ? ` — ${detail}` : ''}`);
     },
     summarize() {
       const p = results.filter(r => r.status === 'pass').length;
-      const s = results.filter(r => r.status === 'skip').length;
+      const e = results.filter(r => r.status === 'env_fail').length;
+      const n = results.filter(r => r.status === 'na').length;
       const f = results.filter(r => r.status === 'fail').length;
-      console.log(`SUMMARY pass=${p} skip=${s} fail=${f}`);
-      process.exit(f > 0 ? 1 : 0);
+      const allNa = results.length > 0 && n === results.length;
+      console.log(`SUMMARY pass=${p} fail=${f} env_fail=${e} na=${n}`);
+      process.exit(f > 0 || allNa ? 1 : e > 0 ? 2 : 0);
     },
   };
 }
@@ -122,7 +129,7 @@ export async function dismissFirstRunModals(page) {
 }
 
 /**
- * 打开隔离台页面（fresh context=无账册残留；返回 null=环境不可用已记 SKIP）。
+ * 打开隔离台页面（fresh context=无账册残留；返回 null=环境不可用已记 ENV_FAIL）。
  * consoleErrors 数组由调用方传入收集 console error/pageerror（卫生断言用）。
  * 打开后先过首屏模态网（准入模态 mask 会拦截一切点击——场景②实测）。
  */
@@ -144,25 +151,25 @@ export async function openTestPage(pw, { results, tag, consoleErrors, initScript
     page.on('pageerror', e => consoleErrors?.push(String(e)));
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });
     try { await dismissFirstRunModals(page); } catch (e) {
-      results.record(`${tag}/first-run-modals`, 'skip', `首屏模态网未过：${String(e).slice(0, 120)}`);
+      results.record(`${tag}/first-run-modals`, 'env_fail', `首屏模态网未过：${String(e).slice(0, 120)}`);
       try { await browser.close(); } catch { /* noop */ }
       return null;
     }
     return { browser, context, page };
   } catch (err) {
-    results.record(`${tag}/browser`, 'skip', `console/browser unreachable: ${String(err).slice(0, 120)}`);
+    results.record(`${tag}/browser`, 'env_fail', `console/browser unreachable: ${String(err).slice(0, 120)}`);
     try { await browser?.close(); } catch { /* noop */ }
     return null;
   }
 }
 
-/** 侧栏项目会话区在场的夹具前提；不在场=SKIP（环境无 fixture，同 t01 卫兵口径）。 */
+/** 侧栏项目会话区在场的夹具前提；不在场=ENV_FAIL（环境无 fixture，同 t01 卫兵口径）。 */
 export async function waitProjectRowOrSkip(page, results, tag) {
   try {
     await page.waitForSelector('[data-wb-psess-row]', { timeout: 12000 });
     return true;
   } catch {
-    results.record(`${tag}/fixture-psess-row`, 'skip', 'no project session row rendered in test console sidebar');
+    results.record(`${tag}/fixture-psess-row`, 'env_fail', 'no project session row rendered in test console sidebar');
     return false;
   }
 }

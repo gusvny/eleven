@@ -10,7 +10,7 @@
 // --dry-run 全闸预演、注册表根字节级零变更。
 //
 // high-level steps：全程桩 poc_dir（--root 指桩树，假 client.py 票通道经 FIX14_CTRL
-// 可控注入），零真 Temporal（C3 表：本场景全腿不可 SKIP）：
+// 可控注入），零真 Temporal（C3 表：本场景全腿零环境依赖，不涉 env_fail 豁免）：
 //   1. 隔离注册表根（.migrated 预置 + fixture 条目 rmmain/rmkeep/rmjs/rmdry，各带
 //      data/tickets 合法归档 + metrics + credentials.yaml + 项目根 .lane 残骸）；
 //   2. rmmain 默认摘除（人读）：exit 0、退役两态、data/credentials 字节不变、

@@ -4,7 +4,7 @@
 //  - 四段结构 Problem → Requirement → Nongoal → Proposal 齐全且有序
 //  - 契约豁免声明在文档开头
 //  - 文末来源标签 `> 来源立项：metrics`
-// 文档缺失 = FAIL（本测试守交付物存在性，不做依赖 SKIP）
+// 文档缺失 = FAIL（本测试守交付物存在性，不做缺环境放行；三态契约 §7.3 闸内无旧跳过语义）
 
 import { readFileSync, existsSync } from 'node:fs';
 
@@ -55,5 +55,5 @@ if (existsSync(DOC)) {
   check('契约文档内容可检（前置存在）', false, '文档缺失，跳过内容断言');
 }
 
-console.log(`SUMMARY pass=${pass} skip=0 fail=${fail}`);
+console.log(`SUMMARY pass=${pass} fail=${fail} env_fail=0 na=0`);
 process.exit(fail > 0 ? 1 : 0);

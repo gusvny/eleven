@@ -219,5 +219,5 @@ def _relative(e):
 case("env 相对路径视为未设置", "suyou",
      _relative, projects_dir="relproj", chdir=lambda e: e.tmp)
 
-print("SUMMARY pass=%d skip=0 fail=%d" % (PASS, FAIL))
+print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

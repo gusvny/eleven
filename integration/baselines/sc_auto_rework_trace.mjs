@@ -29,7 +29,7 @@
  *      - merge-fail branch no longer stashes self._rework (would double-trace);
  *      - 7 internal call sites + 1 shell delegation = 8 _auto_rework call sites.
  *
- * Env half (SDK + Docker test Temporal + fixture clone required, otherwise clean SKIP):
+ * Env half (SDK + Docker test Temporal + fixture clone required, otherwise ENV_FAIL exit 2):
  *   Scene F: real dev-lane ticket with stub brains -> send external rework signals
  *   against the t260901-04 matrix and assert on the real engine:
  *     F1. rework(target='acceptance') (vocab∩¬STAGES) is accepted: timeline gains
@@ -41,11 +41,11 @@
  *   half (real code exec); forcing a real agent to fail is out of stub-brain scope.
  *
  * Write-guard (this test creates tickets; it refuses an unclear target):
- *   SUYOU_TARGET_HOST unset -> SKIP loudly; == production default 127.0.0.1:7233
+ *   SUYOU_TARGET_HOST unset -> ENV_FAIL loudly; == production default 127.0.0.1:7233
  *   -> FAIL; anything else must equal the pinned test env 127.0.0.1:17233.
  *
  * Nested-run guard: inside a lane's mechanical integration step
- * (SUYOU_TASK_QUEUE/SUYOU_WATCH_WORKFLOW present) the env half SKIPs loudly —
+ * (SUYOU_TASK_QUEUE/SUYOU_WATCH_WORKFLOW present) the env half reports ENV_FAIL loudly —
  * same recursion guard as ticket-lifecycle; the pure half still runs.
  */
 
@@ -61,7 +61,7 @@ import {
 const REPO = process.cwd()
 const DEV_LANE = join(REPO, 'server', 'dsh', 'temporal-poc', 'dev_lane.py')
 
-let pass = 0, fail = 0, skip = 0
+let pass = 0, fail = 0, envFail = 0
 function ok(cond, label) {
   if (cond) { pass++; console.log(`  ok ${label}`) }
   else { fail++; console.error(`  FAIL ${label}`) }
@@ -312,29 +312,30 @@ async function envHalf() {
   section('env: real engine rework-signal matrix (Docker test Temporal + stub brains)')
   const t = makeTally()
   const guard = writeGuard()
-  if (guard === 'skip') { skip++; console.log('  SKIP write-guard: SUYOU_TARGET_HOST not set explicitly -- refusing to create tickets on an unclear target (set SUYOU_TARGET_HOST=127.0.0.1:17233)'); return }
+  if (guard === 'env_fail') { envFail++; console.log('  ENV_FAIL write-guard: SUYOU_TARGET_HOST not set explicitly -- refusing to create tickets on an unclear target (set SUYOU_TARGET_HOST=127.0.0.1:17233)'); return }
   if (guard === 'fail') { fail++; console.error('  FAIL write-guard: SUYOU_TARGET_HOST points at the production default'); return }
   const sdkPython = findSdkPython(t)
-  if (!await ensureTestTemporal(t)) { skip++; console.log('  SKIP env half: Docker test Temporal unavailable'); return }
+  if (!await ensureTestTemporal(t)) { envFail++; console.log('  ENV_FAIL env half: Docker test Temporal unavailable'); return }
   const fixture = await buildFixture(t)
-  if (!fixture) { skip++; console.log('  SKIP env half: fixture clone failed'); return }
+  if (!fixture) { envFail++; console.log('  ENV_FAIL env half: fixture clone failed'); return }
   const api = makeApi(sdkPython, fixture)
   await sceneF(t, api, sdkPython, fixture)
-  pass += t.pass; fail += t.fail; skip += t.skip
-  if (t.skip) console.log(`  (env helpers: ${t.skip} skip note(s) above)`)
+  pass += t.pass; fail += t.fail; envFail += t.envFail
+  if (t.envFail) console.log(`  (env helpers: ${t.envFail} env_fail note(s) above)`)
 }
 
 async function main() {
   console.log('== auto-rework trace contract (t260901-04): banner-visible rework records for machine send-backs')
   const nested = nestedGuard() === 'nested'
   if (nested) {
-    skip++
-    console.log('  SKIP env half: nested inside a lane integration step (SUYOU_TASK_QUEUE/SUYOU_WATCH_WORKFLOW present) -- top-level runs carry the signal-matrix coverage')
+    envFail++
+    console.log('  ENV_FAIL env half: nested inside a lane integration step (SUYOU_TASK_QUEUE/SUYOU_WATCH_WORKFLOW present) -- top-level runs carry the signal-matrix coverage')
   }
   pureHalf()
   if (!nested) await envHalf()
-  console.log(`\nSUMMARY pass=${pass} skip=${skip} fail=${fail}`)
-  process.exit(fail === 0 ? 0 : 1)
+  console.log(`\nSUMMARY pass=${pass} fail=${fail} env_fail=${envFail} na=0`)
+  const allNa = false
+  process.exit(fail > 0 || allNa ? 1 : envFail > 0 ? 2 : 0)
 }
 
 main().catch((e) => { console.error('FATAL', e); process.exit(1) })

@@ -15,7 +15,8 @@
  *
  * 灰盒锚点：锚模块加载契约与外部化清单（config 头注声明的产物形态合同），
  * 不锚 bundle 内部实现。纯读仓+合成样本，零端口、零 3099、零网络。
- * Exit contract：末行 SUMMARY pass=N skip=M fail=K；exit 1 iff fail>0。
+ * Exit contract（三态，定稿 §7.3 闸内无 SKIP）：末行 SUMMARY pass=N fail=K
+ * env_fail=E na=W；fail>0 或全 na→exit 1，env_fail>0→exit 2。
  */
 import { readFileSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -144,5 +145,5 @@ if (existsSync(cjsPath) && existsSync(jsPath)) {
   }
 }
 
-console.log(`\nSUMMARY pass=${passed} skip=0 fail=${failed}`)
+console.log(`\nSUMMARY pass=${passed} fail=${failed} env_fail=0 na=0`)
 process.exit(failed > 0 ? 1 : 0)

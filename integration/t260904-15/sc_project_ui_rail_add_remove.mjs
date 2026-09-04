@@ -13,7 +13,7 @@
 //   CLI 行为只在「结果文案与 CLI 同口径」层面触及。
 //
 // high-level steps：
-//   T0 自举隔离台（好条目 fixa + 畸形 badkey）+ playwright 探测（缺失=干净 SKIP，KI-036）。
+//   T0 自举隔离台（好条目 fixa + 畸形 badkey）+ playwright 探测（缺失=ENV_FAIL，KI-036）。
 //   T1 三处就位断言（设置图标 svg、接入行、隔离红行且无组头图标）。
 //   T2 图标族：四视图图标 aria-label 齐且渲染为 svg；点工单列表图标 active 高亮
 //      （联动语义）；侧栏可见文本 emoji（📋📖🔀🗂️）清零（11b 渲染面）。
@@ -22,8 +22,8 @@
 //      + key 二次确认（错 key 禁确认）→ 确认执行 → fail-closed 文案就地（Temporal 死）。
 //   T5 console 零 error / pageerror。
 //
-// 执行契约：stdout 末行 SUMMARY pass/skip/fail；playwright-core 或隔离台依赖缺失=
-// 干净 SKIP（exit 0 注明 KI-036/依赖原因）；实现落地前红属预期（TDD 信号），
+// 执行契约：stdout 末行 SUMMARY 四计数（三态）；playwright-core 或隔离台依赖缺失=
+// ENV_FAIL（exit 2 点名 KI-036/依赖原因，不假绿）；实现落地前红属预期（TDD 信号），
 // arbitrate/merge 期必须绿。
 import {
   tmpRoot, makeRegistryRoot, writeProjectEntry, writeQuarantinedDir,
@@ -32,9 +32,9 @@ import {
 
 const { record, summarize } = makeResults();
 
-// T0 夹具与依赖卫兵（干净 SKIP 不算红）
+// T0 夹具与依赖卫兵（依赖缺失=ENV_FAIL 环境红，不假绿）
 const pw = await loadPlaywright();
-if (!pw) { record('browser/deps', 'skip', 'playwright-core unavailable (KI-036 守卫)'); summarize(); }
+if (!pw) { record('browser/deps', 'env_fail', 'playwright-core unavailable (KI-036)'); summarize(); }
 
 let bench;
 try {
@@ -43,14 +43,14 @@ try {
   writeQuarantinedDir(projectsRoot, 'badkey');
   bench = await bootConsole(projectsRoot);
 } catch (e) {
-  record('bench/boot', 'skip', `隔离台依赖缺失：${String(e?.message ?? e).slice(0, 200)}`);
+  record('bench/boot', 'env_fail', `隔离台依赖缺失：${String(e?.message ?? e).slice(0, 200)}`);
   summarize();
 }
 // 泳道 client build 陈旧守卫：lib/client.js 缺失/早于 src → 浏览器腿拒跑（防拍旧 UI 假绿，
 // laneBuildRejectReason 同口径）；合并后主树重建 build 自动生效。
 {
   const stale = await clientBuildStalenessReason();
-  if (stale) { record('browser/client-build', 'skip', `泳道 client build 不可用：${stale.slice(0, 160)}`); summarize(); }
+  if (stale) { record('browser/client-build', 'env_fail', `泳道 client build 不可用：${stale.slice(0, 160)}`); summarize(); }
   record('browser/client-build', 'pass', 'lib/client.js 新于 src');
 }
 
@@ -201,8 +201,8 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
 
   // 四步流后段（dispose→dry 清单→purge key 确认→执行）在 Temporal 不可达环境原理性
   // 不可达（在飞闸 fail-closed 无绕过旗，①a-1 闸序）——后段状态机与确认纪律由
-  // smoke/project-modals 覆盖；真台腿随隔离台真 Temporal 供给另补（有声 SKIP，不算红）。
-  record('remove/dispose-dry-purge-legs', 'skip',
+  // smoke/project-modals 覆盖；真台腿随隔离台真 Temporal 供给另补（环境缺供=ENV_FAIL 点名，不假绿）。
+  record('remove/dispose-dry-purge-legs', 'env_fail',
     'Temporal 死端口=在飞闸 fail-closed，后段不可达；smoke 已断言状态机+确认纪律');
 }
 

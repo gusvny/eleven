@@ -8,7 +8,8 @@
 //
 // 与 suyou t260903-06 骨架的差异（落文明示）：骨架里 preset 不合=exit2 拒跑——
 // 那是「场景门」语义；本 selfcheck 是**自检**，buildTempProfile 腿在泳道内缺
-// profile/node_modules 时显式 [SKIP] 并继续跑其余腿（原因必须打印，不静默），
+// profile/node_modules 时显式 [ENV_FAIL]（t260904-12 三态：缺环境=exit 2，
+// 绝不 exit 0 假绿）并继续跑其余腿（原因必须打印，不静默），
 // 合并回主树后（node_modules 在位）自检腿自然全量。
 //
 // 用法：node integration/bench_console.mjs --selfcheck
@@ -23,11 +24,12 @@ const REPO_ROOT = join(HERE, '..')
 const CAPTURE_LANE = join(REPO_ROOT, 'server', 'dsh', 'ui-check', 'capture-lane.mjs')
 
 const hardFails = []
+let envFails = 0
 const check = (ok, msg) => {
   console.log((ok ? 'ok    ' : 'FAIL  ') + msg)
   if (!ok) hardFails.push(msg)
 }
-const skip = (msg) => console.log('[SKIP] ' + msg)
+const envFail = (msg) => { envFails++; console.log('[ENV_FAIL] ' + msg) }
 
 function pickFreePort() {
   return new Promise((res, rej) => {
@@ -65,7 +67,7 @@ async function selfcheck() {
     check(existsSync(dst) && !existsSync(join(tmpHome, 'settings.yaml')),
       '凭据只拷 .credentials.yaml（settings.yaml 不在场——3099 钉死防线）')
   } else {
-    skip(`凭据源不在场（${credSrc}）——拷贝腿跳过（本机无 dsh 凭据不影响骨架自检）`)
+    envFail(`凭据源不在场（${credSrc}）——拷贝腿环境缺件（本机无 dsh 凭据不影响骨架自检）`)
   }
 
   // ② port-0 内核分配 ×2：端口有效且互不等
@@ -85,7 +87,7 @@ async function selfcheck() {
   const dstPreset = await materializePresets(tmpHome, presetSrc)
   check(existsSync(join(dstPreset, 'preset.yml')), 'preset 物化落地实体')
 
-  // ④ buildTempProfile：泳道缺 profile/node_modules 时显式 SKIP（主树合并后自然全量）
+  // ④ buildTempProfile：泳道缺 profile/node_modules 时显式 ENV_FAIL（主树合并后自然全量）
   const laneWb = join(REPO_ROOT, 'server', 'dsh', 'workbench')
   const profileNm = join(REPO_ROOT, 'server', 'dsh', 'profile', 'node_modules')
   if (existsSync(profileNm)) {
@@ -96,7 +98,7 @@ async function selfcheck() {
       check(false, `buildTempProfile 失败：${err?.message ?? err}`)
     }
   } else {
-    skip(`buildTempProfile 腿：泳道 profile/node_modules 不在场（${profileNm}）——` +
+    envFail(`buildTempProfile 腿：泳道 profile/node_modules 不在场（${profileNm}）——` +
       `骨架逻辑在真源 capture-lane.mjs 未动，主树合并后本腿自然全量`)
   }
 
@@ -109,7 +111,11 @@ async function selfcheck() {
     console.log(`SELFCHECK FAIL：${hardFails.length} 项未过（首因：${hardFails[0]}）`)
     process.exit(1)
   }
-  console.log('SELFCHECK PASS（console boot 骨架；SKIP 腿=环境缺件且已显式说明，非静默）')
+  if (envFails > 0) {
+    console.log(`SELFCHECK ENV_FAIL：${envFails} 腿环境缺件未验成（已显式说明，非静默）——t260904-12 三态记环境红`)
+    process.exit(2)
+  }
+  console.log('SELFCHECK PASS（console boot 骨架全腿验成）')
 }
 
 const mode = process.argv[2] || ''

@@ -21,6 +21,13 @@ import sys
 import time
 
 SCENARIOS = [
+    # 移册（t260904-12 乙段，定稿 §7.3「真跑不进闸的（红线禁区/破坏性）不进闸清单」）：
+    # ticket-lifecycle——worker 机械步内恒触发嵌套护栏（SUYOU_TASK_QUEUE 特征检测，
+    # 防无界自递归：净化半必 clone fixture/起 worker/起票），属设计性环境红，闸内不可
+    # 达 PASS；真实覆盖承接=主库人工清单（t260903-09 主库跑生效）。第二次口径逆转
+    # （t260831-03 不登记→t260831-04 登记→本次移册），依据链见 README「已知限制」。
+    # 原 cmd：node integration/baselines/sc_ticket_lifecycle.mjs
+
     ("t260903-10-installer-console-line",
      "3099 红线源码级静态守卫（交接单 §3 C1 全词表）：安装器入口+server/installer 全源对 kill/pkill/重启/spawn/start/launch × 3099/console 上下文零容忍、提示文案（请手动/操作面）白名单豁免区分提示与执行；扫描器自证红绿（干净样本绿+注入 pkill 副本红+含 start 的提示行豁免）；verify.yaml guard-3099-redline 为 2 词行级粗守卫，本场景为全词表+上下文窗细守卫不互替（t260903-10）",
      "python3 integration/t260903-10/sc_sandbar_installer_console_line.py", "ro"),
@@ -87,7 +94,8 @@ SCENARIOS = [
 
     # ---- 260904 P3/e2e 回迁（KI-038 收尾）：browser 族 16 条 + t260902-02 e2e 2 条。
     # 前置已齐：票①(D) 隔离台（bench.py 槽位制）随 t260904-02 落 main；playwright-core
-    # 仍缺（KI-036）——缺环境场景须干净 SKIP 不假红，依赖恢复后自动生效。
+    # 仍缺（KI-036）——缺环境场景按三态契约记 ENV_FAIL（exit 2）不假红也不假绿，
+    # 依赖恢复后自动生效（t260904-12 闸内无 SKIP 化）。
     ("ticket-session-restore",
      "ticket-session 面双半契约（t260831-08 起；browser 半被 t260903-07 反转）：服务端 POST ticket-session/open 保留 find-or-create（session_id=ticket-<id>、created 旗标、重开不重复）与畸形 id/缺 project/未知 project/不存在工单显式 4xx；浏览器半=点工单行中列详情照常开、右栏 chat 零切换（快照零注入、phase 不变、多行点击零 churn）",
      "node integration/baselines/sc_ticket_session_restore.mjs"),
@@ -153,9 +161,6 @@ SCENARIOS = [
     # ---- 260904 场景回迁（KI-038，triage=notes/discussions/260904-integration-scenarios-triage.md）----
     # 自 suyou 冻结仓整族迁回（宿主令直迁）：P1 引擎行为 + P2 ro 面。P3 browser 族与 t260902-02 e2e
     # 两条暂缓（依赖隔离台基建+playwright 恢复，见 triage）；退役 15 条替代者在 triage 文档。
-    ("ticket-lifecycle",
-     "The env half itself follows the triad verdict of the real (saved) env value. const guard",
-     "node integration/baselines/sc_ticket_lifecycle.mjs"),
     ("sandbar-contract-v1",
      "Strategy item must name both policy files with their roles. const strat = extractSection",
      "node integration/baselines/sc_sandbar_contract_v1.mjs", "ro"),
@@ -385,15 +390,30 @@ SCENARIOS = [
     ("t260904-14-project-remove-gates",
      "remove 闸语义面（t260904-14，台别按 C3 表逐腿钉死）：真票腿=隔离台自举 temporalite 起真 running 票→拒摘报票号→cancel 收口→重跑 remove 成功（验收5 全段含 M3 续步；唯一有声 SKIP 豁免腿，依赖缺席打印原因）；其余腿全部桩 poc_dir 不可 SKIP——Temporal 不可达=拒摘含 sandbar up 诊断指路（验收7）、sdk-missing 与不可达两态输出可辨（KI-039）、通道坏 JSON=拒；purge 双旗（差集非空拒列票号[C1 缺失态 manifest 缺=未归档、畸形态红点名 <id>/archive.json]、过闸真删 data/ 不动 credentials、--purge-credentials 独立、双旗组合）、dry-run+purge 旗只出将删清单注册表根字节级零变更（验收8）、最后项目无 --confirm-last 拒/带旗零条目警告+装载器空表抛错可辨（验收9）、legacy env 拒收点名存量 env（模式闸）、key 未注册拒零现场变更、隔离条目同名区分报含 project.yaml 定位。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "node integration/t260904-14/sc_project_remove_gates.mjs", "ro"),
+    ("t260904-12-executor-three-state",
+     "执行器三态退出码与输出契约（t260904-12，定稿 §7.3 闸内无 SKIP）：注入假场景表——全过 exit 0；有 FAIL exit 1；fail=0 且 env_fail>0 exit 2 且 ENV_FAIL [名] exit=2 行+缩进尾段点名缺什么；FAIL 与 ENV_FAIL 并存产品红优先 exit 1（C7）；未定义退出码落 FAIL 不放行不归环境（退出码封闭性）；全腿 N/A 经 lib_env 折算产品红（C9）；SUMMARY 五计数 ran=pass+fail+env_fail 双向净不变式+汇总与明细一致（不谎报）；lib_env 助手契约（env_fail→2、fail_if_all_na→1、部分 N/A 不红）",
+     "python3 integration/t260904-12/sc_executor_three_state.py", "ro"),
+    ("t260904-12-no-skip-guard",
+     "SKIP 语义清零防复辟守卫（t260904-12，KI-036/046 族回归）：integration/ 树（基建白名单：执行器/共享助手/lint 三件外）SKIP 与 skip 状态值零残留（覆盖运行时模板串形态）；README 执行契约段无「干净 SKIP（exit 0）」残留且三态/ENV_FAIL 明文；lint_tests.py 全绿（迁移后树不被误伤）且防回潮规则在位（锚真实形态）",
+     "python3 integration/t260904-12/sc_no_skip_guard.py", "ro"),
+    ("t260904-12-gate-failsafe-envfail",
+     "闸 fail-closed 对 ENV_FAIL 执行器输出（t260904-12 甲段核心承诺，KI-046 反面）：fixture verify.yaml+执行器桩输出 ENV_FAIL 行+SUMMARY env_fail=1+rc2 → verify_lane lane=integ green=false 恒真（ENV_FAIL 不可穿闸）；两态分支断言（同 R4 修法①）——甲段态 err 在场且文案点名 exit=2，乙段态 ran=1+scenarios[].exit=2+缺什么尾段在案；对照组 exit0 PASS 桩=绿（夹具有效性自证）",
+     "python3 integration/t260904-12/sc_gate_failsafe_envfail.py", "ro"),
+    ("t260904-12-gate-supply-ethred",
+     "乙段闸 supply 供给面+ENV_FAIL 行解析契约（②a supply 承诺+②b-2 env_fail 必含）：supply 先于 cmd 执行（标记探针先行序）→绿；supply 失败=红点名 need 不静默；supply 声明畸形（缺 cmd）=fail-closed 红给原因；ENV_FAIL 行畸形沿 FAIL 惯例 fallback（name=整行/exit=-1 仍计入）；env_fail 计数入回执且>0=不绿；对照组 PASS 桩=绿。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260904-12/sc_supply_gate_ethred.py", "ro"),
+    ("t260904-12-deregistry-honest",
+     "ticket-lifecycle 移册合规守卫（定稿「真跑不进闸」通道，非 SKIP 非豁免的诚实缩围）：SCENARIOS 无该条目（在册恒过=SKIP 复辟变体）；README 移册登记三要素（定稿条款引用/主库人工清单承接/t260831-04 逆转依据=C-c 防口径反复）；场景文件仍在树且非空（覆盖蒸发防线：移册≠删除）；文件 env_fail 护栏语义未被静默 neuter（设计性环境红标记在）；契约 v2.1 变更记录含移册依据。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260904-12/sc_deregistry_honest.py", "ro"),
     # ---- t260904-15 project lifecycle 票③：项目管理 UI 左栏内嵌（host 路由薄壳+三处新增+三弹层）----
     ("t260904-15-project-ui-host-routes",
-     "host 项目路由薄壳契约（t260904-15，API 面无浏览器，自举隔离台+临时注册表根+Temporal 死端口）：写路由把请求薄壳转 spawn `sandbar project add|remove --json`——六类拒收错误体逐字透传为 4xx 就地显示数据源（key 白名单/已存在/dirs 缺失/相对路径/根交叉/畸形 JSON 体精确文案不裸抛堆栈）、dry-run 透传且注册表根字节级零变更、成功后 GET /wf/projects 即时出现新条目（左栏读回=装载器消费方，验收12）；读面扩展：quarantined 数组含 key+原因含 <dir>/project.yaml 定位（验收11 隔离行数据源）、空注册表 200 空清单不再 500（首接面）；票计数读路由 spawn list --json 单点取数，Temporal 不可达=降级字段非 500（验收11「—」数据源）；remove 在 Temporal 不可达 fail-closed（dry-run 同闸，契约①a-1）文案含 sandbar up 指路（验收7/13）且零现场变更。与 t260904-10/-14（CLI 语义）intent 不同面：本条守路由透传+读面扩展层。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；隔离台依赖缺失=干净 SKIP",
+     "host 项目路由薄壳契约（t260904-15，API 面无浏览器，自举隔离台+临时注册表根+Temporal 死端口）：写路由把请求薄壳转 spawn `sandbar project add|remove --json`——六类拒收错误体逐字透传为 4xx 就地显示数据源（key 白名单/已存在/dirs 缺失/相对路径/根交叉/畸形 JSON 体精确文案不裸抛堆栈）、dry-run 透传且注册表根字节级零变更、成功后 GET /wf/projects 即时出现新条目（左栏读回=装载器消费方，验收12）；读面扩展：quarantined 数组含 key+原因含 <dir>/project.yaml 定位（验收11 隔离行数据源）、空注册表 200 空清单不再 500（首接面）；票计数读路由 spawn list --json 单点取数，Temporal 不可达=降级字段非 500（验收11「—」数据源）；remove 在 Temporal 不可达 fail-closed（dry-run 同闸，契约①a-1）文案含 sandbar up 指路（验收7/13）且零现场变更。与 t260904-10/-14（CLI 语义）intent 不同面：本条守路由透传+读面扩展层。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；隔离台依赖缺失=ENV_FAIL 点名（KI-036，不假绿）",
      "node integration/t260904-15/sc_project_ui_host_routes.mjs", "ro"),
     ("t260904-15-project-ui-rail-add-remove",
-     "左栏三处就位+图标族换装+接入/摘除旅程（t260904-15，浏览器捕获，mock v5 过稿口径）：组头第五枚「项目设置」svg 图标、「＋ 接入项目」行、隔离 key 红色行（无组头图标）三处在位（验收11）；四视图图标换装 svg 非 emoji、aria-label 齐、点工单列表图标 active 联动保留、侧栏可见文本 emoji 清零（验收11b 渲染面）；接入弹层坏 key 错误就地显示点名原因、合法 key 成功后左栏即时出现新组（验收12）；摘除弹层四步：处置勾选默认全保留、dry-run 清单先行、purge 勾选需输 key 二次确认（错 key 禁确认）、Temporal 不可达 fail-closed 文案就地含 sandbar up 指路（验收13）。与 CLI 场景（t260904-10/-14）intent 不同面：守 UI 呈现与交互旅程。实现落地前红属预期；playwright-core 缺失=干净 SKIP（KI-036 守卫）",
+     "左栏三处就位+图标族换装+接入/摘除旅程（t260904-15，浏览器捕获，mock v5 过稿口径）：组头第五枚「项目设置」svg 图标、「＋ 接入项目」行、隔离 key 红色行（无组头图标）三处在位（验收11）；四视图图标换装 svg 非 emoji、aria-label 齐、点工单列表图标 active 联动保留、侧栏可见文本 emoji 清零（验收11b 渲染面）；接入弹层坏 key 错误就地显示点名原因、合法 key 成功后左栏即时出现新组（验收12）；摘除弹层四步：处置勾选默认全保留、dry-run 清单先行、purge 勾选需输 key 二次确认（错 key 禁确认）、Temporal 不可达 fail-closed 文案就地含 sandbar up 指路（验收13）。与 CLI 场景（t260904-10/-14）intent 不同面：守 UI 呈现与交互旅程。实现落地前红属预期；playwright-core 缺失=ENV_FAIL 点名（KI-036 守卫，不假绿）",
      "node integration/t260904-15/sc_project_ui_rail_add_remove.mjs", "ro"),
     ("t260904-15-project-ui-settings-isolation",
-     "设置弹层信息面+隔离详情+空注册表首接（t260904-15，浏览器捕获，与场景② intent 不同面：守信息面/降级口径/空表面）：设置弹层只读 key/显示名/根目录如实呈现；票计数 Temporal 不可达降级「—」类中性提示不红不谎报（验收11 降级口径）；体检区中性提示不含「无黄牌」谎报（R2b 降档口径）；danger 摘除入口在位；隔离红行点击见原因含 project.yaml 定位+修复指路（验收11）；空注册表 GET /wf/projects 200 空清单不 500、零分组仍渲染接入行且首接走通（验收9 空表面）。实现落地前红属预期；playwright-core 缺失=干净 SKIP（KI-036 守卫）",
+     "设置弹层信息面+隔离详情+空注册表首接（t260904-15，浏览器捕获，与场景② intent 不同面：守信息面/降级口径/空表面）：设置弹层只读 key/显示名/根目录如实呈现；票计数 Temporal 不可达降级「—」类中性提示不红不谎报（验收11 降级口径）；体检区中性提示不含「无黄牌」谎报（R2b 降档口径）；danger 摘除入口在位；隔离红行点击见原因含 project.yaml 定位+修复指路（验收11）；空注册表 GET /wf/projects 200 空清单不 500、零分组仍渲染接入行且首接走通（验收9 空表面）。实现落地前红属预期；playwright-core 缺失=ENV_FAIL 点名（KI-036 守卫，不假绿）",
      "node integration/t260904-15/sc_project_ui_settings_isolation.mjs", "ro"),
 ]
 
@@ -414,11 +434,17 @@ def _run_entry(entry):
 def main() -> int:
     """分池执行（宿主令 t260902 并发分池）：条目可带可选第四元素——
     None/缺省 = "main" 池；"ro"/其他字符串 = 命名池；"exclusive" = 独占（先单独跑）。
-    池间并行、池内严格串行（保顺序与可复现）；输出契约不变（PASS/FAIL 行+缩进尾段+
-    末行汇总），跨池顺序可交错——引擎/工具逐行解析，不在乎顺序。"""
+    池间并行、池内严格串行（保顺序与可复现）；跨池顺序可交错——引擎/工具逐行解析，
+    不在乎顺序。
+
+    三态退出码契约（t260904-12，定稿 §7.3：闸内无 SKIP）：场景 exit 0=PASS /
+    1=FAIL（产品红）／2=ENV_FAIL（环境红，没验成原因归环境）——旧「缺环境干净
+    SKIP（exit 0）」语义退役。汇总行与明细**双向净才绿**：执行器自校验，任一
+    不一致按产品红 exit 1（汇总谎报绝不放行）。全腿 N/A 的场景由场景自身按
+    lib_env.fail_if_all_na 记产品红。"""
     import threading
     from concurrent.futures import ThreadPoolExecutor
-    ran = passed = failed = 0
+    ran = passed = failed = env_failed = 0
     t0 = time.time()
     lock = threading.Lock()
     pools, exclusives = {}, []
@@ -430,16 +456,23 @@ def main() -> int:
             pools.setdefault(opt or "main", []).append(e)
 
     def _drain(entries):
-        nonlocal ran, passed, failed
+        nonlocal ran, passed, failed, env_failed
         for e in entries:
             name, exit_code, tail_out = _run_entry(e)
-            block = (["PASS [%s]" % name] if exit_code == 0
-                     else ["FAIL [%s] exit=%d" % (name, exit_code)]
-                     + ["    " + ln for ln in tail_out.splitlines()[-6:]])
+            # 三态行：0=PASS / 2=ENV_FAIL（环境红，缺什么看缩进尾段）/ 其余=FAIL 产品红。
+            if exit_code == 0:
+                block = ["PASS [%s]" % name]
+            elif exit_code == 2:
+                block = (["ENV_FAIL [%s] exit=2" % name]
+                         + ["    " + ln for ln in tail_out.splitlines()[-6:]])
+            else:
+                block = (["FAIL [%s] exit=%d" % (name, exit_code)]
+                         + ["    " + ln for ln in tail_out.splitlines()[-6:]])
             with lock:
                 ran += 1
                 passed += (exit_code == 0)
-                failed += (exit_code != 0)
+                env_failed += (exit_code == 2)
+                failed += (exit_code not in (0, 2))
                 print("\n".join(block), flush=True)
 
     for e in exclusives:      # 独占项先行，不与任何池重叠
@@ -447,9 +480,20 @@ def main() -> int:
     with ThreadPoolExecutor(max_workers=max(1, len(pools))) as ex:
         for f in [ex.submit(_drain, v) for v in pools.values()]:
             f.result()
-    print("SCENARIOS ran=%d pass=%d fail=%d (%.0fs)" % (ran, passed, failed, time.time() - t0),
-          flush=True)
-    return 0 if failed == 0 else 1
+    # 汇总行五计数（t260904-12 契约 ②b-1）：na=N/A 是腿级状态，已在场景内折算进
+    # pass/fail（全腿 N/A=场景红），执行器级恒 0、占位保形状。ran=pass+fail+env_fail
+    # 为「双向净」不变式，违反即汇总谎报——按产品红退出（自校验；引擎侧新语义断言随乙段落地）。
+    consistent = (ran == passed + failed + env_failed)
+    print("SCENARIOS ran=%d pass=%d fail=%d env_fail=%d na=0 (%.0fs)"
+          % (ran, passed, failed, env_failed, time.time() - t0), flush=True)
+    if not consistent:
+        print("FAIL [__summary__] 汇总与明细不一致（双向净校验红）", flush=True)
+        return 1
+    if failed > 0:            # 产品红优先（C7）：有 FAIL 时环境红不稀释产品红
+        return 1
+    if env_failed > 0:
+        return 2
+    return 0
 
 
 if __name__ == "__main__":

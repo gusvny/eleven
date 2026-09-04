@@ -13,7 +13,7 @@ arbitrate∥acceptance_walkthrough 各边同写 meta["stage"]，后写者赢—�
      重复去重、空列表删键不残留、幂等稳定。
 
 跑法：python3 -B integration/t260903-04/sc_t01_parallel_stages_meta.py
-（纯 stdlib + temporalio 导入桩 _stub_temporalio，零 Temporal/网络依赖；恒跑无 SKIP。）
+（纯 stdlib + temporalio 导入桩 _stub_temporalio，零 Temporal/网络依赖；恒跑无环境腿。）
 """
 import re
 import sys
@@ -135,5 +135,5 @@ if fn is not None:
     fn(meta, ["arbitrate", "acceptance_walkthrough"])
     ok(meta == once, "B7 幂等：同输入重写结果稳定")
 
-print("\nSUMMARY pass=%d skip=0 fail=%d" % (PASS, FAIL))
+print("\nSUMMARY pass=%d fail=%d env_fail=0 na=0" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

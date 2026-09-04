@@ -83,6 +83,6 @@ def build_lane_repo(lane_files, main_files=None):
 
 
 def summary(passed, failed):
-    """套件输出约定（t260901-16 同款）：SUMMARY 行 + exit 码。"""
-    print("SUMMARY pass=%d skip=0 fail=%d" % (passed, failed))
+    """套件输出约定（三态 §7.3）：SUMMARY 四态行 + exit 码（fail>0→1，否则 0）。"""
+    print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (passed, failed))
     return 0 if failed == 0 else 1

@@ -9,7 +9,8 @@
  * （改了 src 忘重建 tsdown）在本层必现形。
  *
  * 直跑：node integration/t260901-22/t02_approve_modal_ui.mjs（node ≥22.18）。
- * 末行 SUMMARY pass=<n> skip=<m> fail=<k>；fail>0 才 exit 1。
+ * 末行 SUMMARY pass=<n> fail=<k> env_fail=<e> na=<w>（三态，闸内无旧跳过语义）；
+ * fail>0 或全 na→exit 1，env_fail>0→exit 2。
  */
 
 import { readFile } from 'node:fs/promises'
@@ -68,5 +69,5 @@ section('E 回归：打回弹层照旧')
 ok(src.includes('reworkId') && src.includes('reworkNote') && src.includes('确认打回'),
   'src：rework 打回弹层（reworkId/reworkNote/确认打回）未被本单破坏')
 
-console.log(`\nSUMMARY pass=${pass} skip=0 fail=${fail}`)
+console.log(`\nSUMMARY pass=${pass} fail=${fail} env_fail=0 na=0`)
 process.exit(fail > 0 ? 1 : 0)

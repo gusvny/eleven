@@ -85,5 +85,5 @@ ok("parse_review_plan_verdict(res.status, res.summary)" in DL,
 ok("review_plan_route(" in DL, "路由走 shared 纯函数（与 integration_route 同风格）")
 
 print("\nt02 结果：pass=%d fail=%d" % (PASS, FAIL))
-print("SUMMARY pass=%d skip=0 fail=%d" % (PASS, FAIL))
+print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (PASS, FAIL))
 sys.exit(0 if FAIL == 0 else 1)

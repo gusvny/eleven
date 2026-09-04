@@ -11,7 +11,8 @@ dev-lane 把 ui_evidence 画在 design_integration_tests 之前，实际执行�
      design_integration_tests（可读断言，不依赖生成器内部）。
 跑法：python3 -B integration/t260901-23/t04_yaml_chain_truth.py
 （优先 venv 解释器——生成器导入 TEMPLATE_CLASSES 需 temporalio；缺 venv 且回落
-解释器也无 temporalio 时 A 段显式 SKIP 带原因、B 段恒真跑，不静默绿。）
+解释器也无 temporalio 时 A 段两项记 ENV_FAIL 带原因（缺 SDK=环境红，三态契约
+定稿 §7.3）、B 段恒真跑，退出码 2，不静默绿。）
 """
 import subprocess
 import sys
@@ -52,16 +53,17 @@ def main():
     print("t04 yaml 快照与代码真源一致")
     py = str(VENV_PY) if VENV_PY.is_file() else sys.executable
 
-    skipped = 0
+    env_failed = 0
     if not _sdk_available(py):
-        # 依赖缺失干净 SKIP（integration/README.md 执行契约）：worktree/沙箱常态
-        # 无 .venv，生成器 --check 两项如实跳过；B 段 yaml 可读断言不依赖 SDK 照跑。
+        # 依赖缺失=环境红（三态契约定稿 §7.3「闸内无 SKIP」）：worktree/沙箱常态
+        # 无 .venv，生成器 --check 两项如实记 ENV_FAIL；B 段 yaml 可读断言不依赖
+        # SDK 照跑。
         # （生成器在模块顶层 import TEMPLATE_CLASSES——workflows_v2→cleanup→temporalio，
-        # 缺 SDK 时 import 必崩，这不是漂移红，是环境缺依赖；docstring 承诺的
-        # 「显式报 skip 原因不静默绿」在这里兑现。合并消解 t260902-02：两侧同语义，
-        # 取泳道侧实现——SUMMARY 的 skip 计数由它承载。）
-        skipped += 2
-        print("  skip 生成器 --check 两项 | temporalio SDK 不可用（%s），"
+        # 缺 SDK 时 import 必崩，这不是漂移红，是环境缺依赖；「显式报环境红不静默
+        # 绿」在这里兑现。合并消解 t260902-02：两侧同语义，SUMMARY 的 env_fail
+        # 计数由它承载。）
+        env_failed += 2
+        print("  ENV_FAIL: 生成器 --check 两项 | temporalio SDK 不可用（%s），"
               "生成器需导入 TEMPLATE_CLASSES；有 SDK 环境重跑即恢复覆盖" % py)
     else:
         # A. 生成器 --check 绿（漂移/回读校验任一红都算失败）
@@ -82,8 +84,10 @@ def main():
         ok(ids.index(b) == ids.index(a) + 1 if a in ids and b in ids else False,
            "%s 紧跟 %s（链=%s）" % (b, a, "→".join(ids)))
 
-    print("t04 结果：pass=%d skip=%d fail=%d" % (PASS, skipped, FAIL))
-    print("SUMMARY pass=%d skip=%d fail=%d" % (PASS, skipped, FAIL))
+    print("t04 结果：pass=%d fail=%d env_fail=%d" % (PASS, FAIL, env_failed))
+    print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (PASS, FAIL, env_failed))
+    if env_failed:  # 环境红优先（B 段已跑，但缺 SDK 未验成 A 段）
+        return 2
     return 1 if FAIL else 0
 
 

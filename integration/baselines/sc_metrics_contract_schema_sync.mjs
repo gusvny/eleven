@@ -18,7 +18,7 @@ const UI = 'docs/design/metrics面板ui规划.md';
 
 if (!existsSync(DOC)) {
   console.log(`FAIL 契约文档存在 — ${DOC} 不存在（implement 段未交付或路径漂移）`);
-  console.log(`SUMMARY pass=0 skip=0 fail=1`);
+  console.log(`SUMMARY pass=0 fail=1 env_fail=0 na=0`);
   process.exit(1);
 }
 const doc = readFileSync(DOC, 'utf8');
@@ -68,5 +68,5 @@ for (const f of ['source_version', 'engine_version', 'updated_ts']) {
 }
 check('固化不可重算例外成文', /delivery_frozen[\s\S]{0,200}(不可重算|跳过\s*delivery|跳过delivery)/.test(doc) || /固化[\s\S]{0,200}不可重算/.test(doc));
 
-console.log(`SUMMARY pass=${pass} skip=0 fail=${fail}`);
+console.log(`SUMMARY pass=${pass} fail=${fail} env_fail=0 na=0`);
 process.exit(fail > 0 ? 1 : 0);

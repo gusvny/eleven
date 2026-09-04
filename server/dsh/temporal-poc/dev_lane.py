@@ -280,6 +280,8 @@ FLOW_BRIEF = {
         "禁止为快照型文档（清单/盘点/迁移计划）造回归 pin——仓库每票必变，此类断言必 rot；"
         "仅当文档被机器消费（声明被解析器读取、字段表被对账）才值得契约守卫。"
         "发现新缺陷在结果文件上报（描述+定位+复现），不直接写已知问题清单——登记由 integration 岗位统一做。"
+        "三态契约（t260904-12，闸内无 SKIP）：场景只有 PASS/FAIL/ENV_FAIL——环境缺失一律 "
+        "ENV_FAIL（exit 2）不写 SKIP（exit 0）；N/A 仅给系统状态条件腿，全腿 N/A=场景红。"
         "落盘后先跑 python3 integration/lint_tests.py（秒级静态检查：语法/import/清单/intent），"
         "红则先修再交结果文件——不要把静态错误拖到套件执行时才暴露。"
         "结果文件 status=failed 仅限你无法产出测试集的极端情况。"),
@@ -291,6 +293,12 @@ FLOW_BRIEF = {
         "测试集修正**（改动随本步落盘），summary 写清改了什么、为什么是测试的问题；"
         "verdict=code-fault 实现问题 → report 写**集成测试报告**（失败场景、复现要点、"
         "期望 vs 实际），打回 developer 修改。除三态外不许发明其它结论。"
+        "归因纪律（t260904-12 三态判据）：先固定问句「环境面还是产品面？」——"
+        "ENV_FAIL（exit 2，缺环境）归 tests-fault 供给面：修复=补测试环境/供给声明"
+        "（乙段 verify.yaml supply），绝不把环境红记成代码问题；FAIL（exit 1）归产品。"
+        "乙段（verify_lane env_fail 计数）落地前环境红以 err/退出码形态出现，按输出尾段"
+        "归因。窗口期（供给声明未落地）UI 票过闸只走 break-glass 人显式签字留痕，"
+        "不许以「环境面」口头豁免放行。"
         "发现新故障模式在结果文件上报（描述+定位+复现），不直接写已知问题清单——登记由 integration 岗位统一做。"
         "打回轮回审查令：若本轮回打中单测（UT）或集成测试文件发生任何变更（含你自己的 tests-fault 迭代），"
         "逐条核对变更是否弱化了断言/收窄了覆盖面——测试改动必须让契约更准而非让红灯变绿，"
@@ -1231,15 +1239,17 @@ class DevLaneWorkflow:
                     ir = rraw if isinstance(rraw, IntegrationRunResult) else IntegrationRunResult(
                         ran=int(rraw.get("ran") or 0), passed=int(rraw.get("passed") or 0),
                         failed=int(rraw.get("failed") or 0),
+                        env_fail=int(rraw.get("env_fail") or 0),
                         details=[dict(d) for d in (rraw.get("details") or [])],
                         error=str(rraw.get("error") or ""))
                 except Exception as e:
                     ir = IntegrationRunResult(error="集成测试 activity 故障：%s: %s"
                                               % (type(e).__name__, e))
+                # t260904-12（F-A 根除）：headline 带环境红维——混合套件不再呈现「全绿」假叙事。
                 self.results["run_integration_tests"] = {
-                    "status": "failed" if (ir.error or ir.failed) else "ok",
-                    "summary": "集成测试：%d 跑 / %d 过 / %d 败%s"
-                               % (ir.ran, ir.passed, ir.failed,
+                    "status": "failed" if (ir.error or ir.failed or ir.env_fail) else "ok",
+                    "summary": "集成测试：%d 跑 / %d 过 / %d 败 / %d 环境红%s"
+                               % (ir.ran, ir.passed, ir.failed, ir.env_fail,
                                   ("｜" + ir.error) if ir.error else ""),
                     "report": "", "deliverables": [], "files_changed": [],
                     "evidence": json.dumps(ir.details, ensure_ascii=False)[:4000], "gen": 0}
@@ -1248,8 +1258,8 @@ class DevLaneWorkflow:
                                                     "过" if d.get("exit") == 0 else "败")
                                                 for d in ir.details))
                 self._handoff("run_integration_tests",
-                              "集成测试 %d 跑 / %d 过 / %d 败%s"
-                              % (ir.ran, ir.passed, ir.failed,
+                              "集成测试 %d 跑 / %d 过 / %d 败 / %d 环境红%s"
+                              % (ir.ran, ir.passed, ir.failed, ir.env_fail,
                                  ("｜" + ir.error) if ir.error else ""))
                 # t260901-19：预算 6000→4000，且尾保（[-4000:]）——details 在 JSON 尾部，
                 # 头部切片会把失败明细挤掉；尾保保住失败明细

@@ -16,9 +16,9 @@
 //      生产 7233）→ exit 0、条目照列、输出捕获；
 //   5. 降级②SDK 缺失：PYTHONPATH 前置空壳 temporalio 包（temporalio.client import 失败）
 //      → exit 0、条目照列、输出与①可辨（两态输出不全等）；
-//   6. 正常计数腿（可选）：探测测试台 17233，可达则 SUYOU_TARGET_HOST=127.0.0.1:17233 +
-//      SUYOU_NAMESPACE=suyou-test 跑 --json，exit 0 且条目在列；不可达则该腿有声 SKIP
-//      （注明原因，不算失败）。
+//   6. 正常计数腿（测试台可达才跑）：探测测试台 17233，可达则 SUYOU_TARGET_HOST=127.0.0.1:17233 +
+//      SUYOU_NAMESPACE=suyou-test 跑 --json，exit 0 且条目在列；不可达=ENV_FAIL
+//      （三态契约：缺测试环境绝不 exit 0 假绿，exit 2 并打印缺什么）。
 //
 // 安全红线：零 3099 接触；对 Temporal 的唯一接触是显式死端口（降级注入）与测试台 17233
 // 的只读探测；绝不以缺省 env 跑 list（防误连生产 7233）。
@@ -32,6 +32,12 @@ import {
 
 const c = makeChecks('t260904-10 project list 报告');
 delete process.env.SUYOU_PROJECTS_YAML;
+
+// 本地镜像计数（lib_fix10 不暴露计数面且不在本票写集）：供 ENV_FAIL 提前收口时
+// 打印四态 SUMMARY（pass/fail/env_fail/na，三态契约 §7.3）
+let passN = 0, failN = 0;
+const rawCheck = c.check.bind(c);
+c.check = (name, cond, detail) => { if (cond) passN += 1; else failN += 1; return rawCheck(name, cond, detail); };
 
 // ---- 1. fixture ----
 const root = tmpRoot('fix10-list-root-');
@@ -103,7 +109,7 @@ c.check('SDK 缺失态条目照列', sdk.out.includes('lista'));
 c.check('两种降级态输出可辨（不可达≠SDK 缺失，不得吞成同文案）', dead.out !== sdk.out,
   '两态输出全等——三态降级语义未落地');
 
-// ---- 6. 正常计数腿（测试台可达才跑；不可达=有声 SKIP，不算失败） ----
+// ---- 6. 正常计数腿（测试台可达才跑；不可达=ENV_FAIL，三态契约绝不假绿） ----
 const reachable = await new Promise((resolve) => {
   const s = createConnection(17233, '127.0.0.1');
   s.setTimeout(800);
@@ -118,7 +124,11 @@ if (reachable) {
   const liveJson = extractJson(live.out);
   c.check('测试台可达：条目照列', liveJson !== null && deepFind(liveJson, 'key', 'lista').length > 0);
 } else {
-  console.log('  [SKIP] 正常计数腿：测试台 17233 不可达（真实覆盖在隔离台环境）');
+  // 环境红（exit 2）：缺测试台不算失败也不算跳过——绝不 exit 0 假绿
+  console.log('  [ENV_FAIL] 正常计数腿：测试台 17233 不可达（真实覆盖在隔离台环境）');
+  console.log(`SUMMARY pass=${passN} fail=${failN} env_fail=1 na=0`);
+  console.log('ENV_FAIL: 测试台 17233 不可达（正常计数腿无测试环境）');
+  process.exit(2);
 }
 
 c.finish();

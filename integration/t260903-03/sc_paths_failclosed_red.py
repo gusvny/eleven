@@ -9,7 +9,8 @@
   F3 声明锚点类型错位（表声明成目录 / 目录声明成文件）→ 红点名解析后路径。
   F4 声明值畸形代表例（未知键 / 绝对路径 / .. 穿越形状）→ 红且报错带键名。
 
-夹具全 tmp，env 注入退出还原。依赖 temporalio SDK（venv）——不可用干净 SKIP。
+夹具全 tmp，env 注入退出还原。依赖 temporalio SDK（venv）——不可用则 ENV_FAIL 环境红退 2
+（三态契约 §7.3，绝不放行）。
 """
 import shutil
 import sys
@@ -37,8 +38,8 @@ def ok(cond, label):
 try:
     fx.import_engine()
 except ImportError as e:
-    print("SKIP temporalio SDK 不可用（%s）" % e)
-    sys.exit(0)
+    print("ENV_FAIL: temporalio SDK 不可用（%s）" % e)
+    sys.exit(2)
 
 
 def ws_dirs(ws):
@@ -117,7 +118,7 @@ def main():
     finally:
         shutil.rmtree(ws, ignore_errors=True)
 
-    print("SC sc_paths_failclosed_red pass=%d fail=%d" % (pass_n, fail_n))
+    print("SC sc_paths_failclosed_red pass=%d fail=%d env_fail=0 na=0" % (pass_n, fail_n))
     return 1 if fail_n else 0
 
 

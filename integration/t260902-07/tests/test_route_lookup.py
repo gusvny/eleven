@@ -20,7 +20,7 @@ import shared  # noqa: E402
 try:
     import agent_activities  # noqa: E402,F401  （_pin_default_model 在此，依赖 temporalio）
     HAS_AA = True
-except ImportError:  # 无 temporalio 的解释器：跳过钉模型用例，其余照跑（不冒充通过）
+except ImportError:  # 无 temporalio 的解释器：钉模型用例记 ENV_FAIL（缺 SDK=环境红），其余照跑
     HAS_AA = False
 
 FAILS = []
@@ -38,8 +38,8 @@ def main():
     try:
         import yaml  # noqa: F401
     except ImportError:
-        print("SKIP 需要 PyYAML：请用 server/dsh/temporal-poc/.venv/bin/python 执行")
-        return 0
+        print("ENV_FAIL: 需要 PyYAML：请用 server/dsh/temporal-poc/.venv/bin/python 执行")
+        return 2
 
     # 1. 查表：新值 + 无回归
     r = shared.model_route_for("integration")
@@ -85,7 +85,7 @@ def main():
 
         # 4. _pin_default_model：整段替换旧 agent-default-model（含注释），其余内容不动
         if not HAS_AA:
-            print("SKIP _pin_default_model 用例：本解释器无 temporalio"
+            print("ENV_FAIL: _pin_default_model 用例：本解释器无 temporalio"
                   "（请用 server/dsh/temporal-poc/.venv/bin/python 复跑）")
         else:
             dst = tmp / "dsh"
@@ -106,6 +106,8 @@ def main():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+    if not HAS_AA:  # 缺 temporalio SDK=环境红（env_fail 优先级高于产品红）
+        return 2
     if FAILS:
         print("\n%d 项失败" % len(FAILS))
         return 1

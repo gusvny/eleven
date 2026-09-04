@@ -4,7 +4,8 @@
 lib_ 前缀文件不登记场景清单（约定胜过推断，lint L5 豁免）。
 
 零第三方依赖：仅 stdlib。temporalio 相关检查由场景自行分态（venv 探测，
-缺失=干净 SKIP 并注明原因，不静默绿——KI-020③ 泳道 venv 缺口是已知环境事实）。
+缺失=打印 ENV_FAIL 并 exit 2（三态契约：缺环境绝不 exit 0 假绿——KI-020③
+泳道 venv 缺口是已知环境事实）。
 
 设计取舍（防误报，见各注释）：
 - 扫描词表只收**无歧义**退役记号：四退役类名 + content-pipeline/content_pipeline。

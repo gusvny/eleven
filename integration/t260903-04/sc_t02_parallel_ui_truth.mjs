@@ -20,7 +20,7 @@
  *   W  场景自身词表防漂移：与 workflows/dev-lane.yaml 的 stage id 序对拍。
  *
  * 直跑：node integration/t260903-04/sc_t02_parallel_ui_truth.mjs（node ≥22.18）。
- * 末行 SUMMARY pass=<n> skip=<m> fail=<k>；fail>0 才 exit 1。
+ * 末行 SUMMARY pass=<n> fail=<k> env_fail=<e> na=<w>（三态 §7.3）；fail>0 或全 na→exit 1。
  */
 
 import { readFileSync } from 'node:fs'
@@ -180,5 +180,5 @@ section('T7 旧票回归：无 meta 无 timeline → 单值指针口径不变')
   ok(r.active.length === 0, '回退路径 active 空（不伪造并行）')
 }
 
-console.log(`\nSUMMARY pass=${pass} skip=0 fail=${fail}`)
+console.log(`\nSUMMARY pass=${pass} fail=${fail} env_fail=0 na=0`)
 process.exit(fail > 0 ? 1 : 0)

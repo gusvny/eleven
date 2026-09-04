@@ -41,7 +41,7 @@ try {
 } catch { /* 未实现则下方 loud 失败 */ }
 if (typeof routeDecision !== 'function' || typeof loadFixtures !== 'function') {
   console.log('  FAIL capture.mjs 未导出 routeDecision/loadFixtures（t260901-24 implement 段应导出）')
-  console.log(`\nSUMMARY pass=0 skip=0 fail=1`)
+  console.log(`\nSUMMARY pass=0 fail=1 env_fail=0 na=0`)
   process.exit(1)
 }
 ok(true, 'routeDecision / loadFixtures 已导出')
@@ -50,7 +50,7 @@ section('fixture 数据准备（随包真 fixture；缺则本测试无法进行�
 let fixtures = null
 try { fixtures = await loadFixtures(FIXTURES) } catch (e) {
   console.log(`  FAIL 随包 fixture 加载失败：${String(e?.message || e).split('\n')[0]}`)
-  console.log(`\nSUMMARY pass=1 skip=0 fail=1`)
+  console.log(`\nSUMMARY pass=1 fail=1 env_fail=0 na=0`)
   process.exit(1)
 }
 ok(fixtures != null, 'loadFixtures(随包目录) 通过')
@@ -110,5 +110,5 @@ function callDecide(method, url) {
   } catch { return null }
 }
 
-console.log(`\nSUMMARY pass=${passed} skip=0 fail=${failed}`)
+console.log(`\nSUMMARY pass=${passed} fail=${failed} env_fail=0 na=0`)
 if (failed > 0) { console.log('FAILURES:\n  - ' + failures.join('\n  - ')); process.exit(1) }

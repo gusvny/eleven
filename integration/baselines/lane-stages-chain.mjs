@@ -3,7 +3,8 @@
  *
  * 直跑：node integration/baselines/lane-stages-chain.mjs（cwd=泳道根，零依赖）。
  *
- * 覆盖（全部文本级断言，不依赖 temporalio；import 级复核无 venv 时干净 SKIP）：
+ * 覆盖（全部文本级断言，不依赖 temporalio；import 级复核缺 venv 时按三态契约报
+ * ENV_FAIL 退 2，不静默放行）：
  *   1. dev_lane.py STAGES 元数据序 = 新链（implement→design_integration_tests→ui_evidence
  *      →run_integration_tests，并行分叉语义在展示序上线性化）；
  *   2. next 指针同步（implement→design_integration_tests→ui_evidence→run_integration_tests）；
@@ -21,7 +22,7 @@ const HERE = fileURLToPath(new URL('.', import.meta.url))
 const REPO = resolve(HERE, '..', '..')
 const SRC = join(REPO, 'server', 'dsh', 'temporal-poc', 'dev_lane.py')
 
-let passed = 0, failed = 0, skipped = 0
+let passed = 0, failed = 0, envFailed = 0, naCount = 0
 function ok(cond, label) {
   if (cond) { passed++; console.log(`  ok ${label}`) }
   else { failed++; console.log(`  FAIL ${label}`) }
@@ -68,8 +69,8 @@ section('acceptance 键对齐附带修复')
   ok(/_finish\("acceptance_walkthrough"[,)]/.test(text), '_finish("acceptance_walkthrough") 在案')
 }
 
-/* ------------------------------------------------------------ 5. import 级复核（SKIP-gated） */
-section('import 级复核：活类 STAGES 与文本一致、parts 枚举合法（需 temporalio，缺失则 SKIP）')
+/* ---------------------------------------------- 5. import 级复核（环境腿，ENV_FAIL-gated） */
+section('import 级复核：活类 STAGES 与文本一致、parts 枚举合法（需 temporalio，缺失则 ENV_FAIL 退 2）')
 {
   const py = `
 import json, sys
@@ -84,7 +85,7 @@ print(json.dumps({"order": [s.id for s in c.STAGES], "parts": {s.id: list(s.part
     try { out = execFileSync(cand, ['-c', py], { encoding: 'utf8' }); used = cand; break }
     catch { /* try next */ }
   }
-  if (!out) { skipped++; console.log('  SKIP 无可用 python+temporalio（worktree 无 .venv 的已知限制）') }
+  if (!out) { envFailed++; console.log('  ENV_FAIL 无可用 python+temporalio（worktree 无 .venv 的已知限制）') }
   else {
     const info = JSON.parse(out)
     ok(JSON.stringify(info.order) === JSON.stringify(EXPECT),
@@ -95,6 +96,7 @@ print(json.dumps({"order": [s.id for s in c.STAGES], "parts": {s.id: list(s.part
   }
 }
 
-console.log(`\n${passed} passed, ${failed} failed, ${skipped} skipped`)
-console.log(`SUMMARY pass=${passed} skip=${skipped} fail=${failed}`)
-process.exit(failed === 0 ? 0 : 1)
+console.log(`\n${passed} passed, ${failed} failed, env_fail=${envFailed}, na=${naCount}`)
+console.log(`SUMMARY pass=${passed} fail=${failed} env_fail=${envFailed} na=${naCount}`)
+const allNa = naCount > 0 && passed + failed + envFailed === 0
+process.exit(failed > 0 || allNa ? 1 : envFailed > 0 ? 2 : 0)

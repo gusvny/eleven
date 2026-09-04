@@ -23,27 +23,31 @@
 // High-level steps:
 //   S1 解析平台供给根（DSH_SUPPLY_ROOT env > /tmp/wb-deps/node_modules >
 //      ~/.dsh/profiles/node_modules；全只读）。缺供给=显式红并点名缺什么
-//      （供给缺失不许静默 skip——KI-046 闸穿透教训）。
+//      （供给缺失=ENV_FAIL 显式环境红，不 exit 0 假绿——KI-046 闸穿透教训，t260904-12 三态化。）
 //   S2 读 dsh-host-apiproxy/lib/index.js 源面，宽松正则锚 W1 两要素（不锚私有
 //      压缩变量名——契约不变的实现重构不得打破本场景）。
 //   S3 锚 W2 拒收文案模板在文。
 //   S4 用供给内 zod 声明冻结镜像（text/image 判别联合 + queue/steer + content
 //      数组，宽严与 W1 原文逐条对照），跑四组 safeParse 判定。
 //
-// Execution contract: stdout last line `SUMMARY pass=<n> skip=<m> fail=<k>`;
+// Execution contract: stdout last line `SUMMARY ran=<n> pass=<n> fail=<k> env_fail=<e> na=0` (t260904-12 three-state);
 // FAIL>0 → exit 1。纯只读（供给文件读取+内存 safeParse），零写入，毫秒级。
 
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-let pass = 0, fail = 0;
+// 三态契约（t260904-12）：pass/fail/env_fail 计数；缺环境=env_fail 显式红不 exit 0。
+let pass = 0, fail = 0, env = 0;
 const check = (name, ok, detail = '') => {
   if (ok) { pass += 1; console.log(`ok    ${name}`); }
   else { fail += 1; console.log(`FAIL  ${name}${detail ? ' — ' + detail : ''}`); }
 };
+const envFail = (name, reason = '') => {
+  env += 1; console.log(`ENV_FAIL [${name}] exit=2${reason ? ' —— ' + reason : ''}`);
+};
 
-// ---- S1 平台供给根解析（缺供给=显式红，不静默 skip）----
+// ---- S1 平台供给根解析（缺供给=ENV_FAIL 环境红，不静默）----
 const candidates = [
   process.env.DSH_SUPPLY_ROOT,
   '/tmp/wb-deps/node_modules',
@@ -52,10 +56,10 @@ const candidates = [
 const supplyRoot = candidates.find((p) => existsSync(join(p, '@deepseek-ai/dsh-host-apiproxy/lib/index.js'))
   && existsSync(join(p, 'zod')));
 if (!supplyRoot) {
-  check('平台供给根可解析（apiproxy + zod 在场）', false,
+  envFail('平台供给根可解析（apiproxy + zod 在场）',
     `依次试过：${candidates.join(' ; ')}——缺 dsh-host-apiproxy 或 zod；按测试供给声明补装备后重跑`);
-  console.log(`SUMMARY pass=${pass} skip=0 fail=${fail}`);
-  process.exit(1);
+  console.log(`SUMMARY ran=${pass+fail+env} pass=${pass} fail=${fail} env_fail=${env} na=0`);
+  process.exit(2);
 }
 check('平台供给根可解析（apiproxy + zod 在场）', true, supplyRoot);
 
@@ -104,5 +108,5 @@ check('W3d 非法 mode（send）= 拒；steer 合法 = 收',
   !attempt([{ type: 'text', text: 'x' }], 'send')
   && attempt([{ type: 'text', text: 'x' }], 'steer'));
 
-console.log(`SUMMARY pass=${pass} skip=0 fail=${fail}`);
-process.exit(fail > 0 ? 1 : 0);
+console.log(`SUMMARY ran=${pass+fail+env} pass=${pass} fail=${fail} env_fail=${env} na=0`);
+process.exit(fail > 0 ? 1 : env > 0 ? 2 : 0);

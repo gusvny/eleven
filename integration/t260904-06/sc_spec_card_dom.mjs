@@ -21,15 +21,16 @@
 //
 // Two layers → 本场景仅 S1（真浏览器渲染级）：needs the ISOLATED test console
 // (SUYOU_TEST_CONSOLE, default 127.0.0.1:3199), playwright-core resolvable, and a
-// launchable chromium. Any missing -> clean SKIP (exit 0, reason on stdout, 注明
+// launchable chromium. Any missing -> ENV_FAIL (exit 2, reason on stdout, 注明
 // KI-036——ui-check 依赖未随迁移恢复，恢复后自动生效). Data is stubbed at the API
 // boundary with page.route(): the browser, console, shipped bundle and React
 // render path are all real; only GET /suyou-workbench/api/wf/tickets[/<id>] is
 // intercepted (fixture snapshots). Never touches production console (3099) nor
 // real tickets.
 //
-// Execution contract: stdout last line `SUMMARY pass=<n> skip=<m> fail=<k>`;
-// FAIL>0 -> exit 1; SKIP -> exit 0 with reason. Precedent: sc_lane_parallel_dom.mjs.
+// Execution contract (t260904-12 三态): stdout last line
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 或全腿 na -> exit 1;
+// env_fail>0 -> exit 2. Precedent: sc_lane_parallel_dom.mjs.
 
 import { existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
@@ -107,16 +108,20 @@ const DETAIL_BY_ID = { [FID_A]: DETAIL_A, [FID_B]: DETAIL_B, [FID_C]: DETAIL_C }
 // ---------------------------------------------------------------- results / helpers
 
 const results = []
+const STATUSES = new Set(['pass', 'fail', 'env_fail', 'na']);
 function record(name, status, detail = '') {
-  results.push({ name, status, detail })
-  console.log(`[${status.toUpperCase()}] ${name}${detail ? ` — ${detail}` : ''}`)
+  if (!STATUSES.has(status)) throw new Error(`非法状态词 ${status}（词表 pass/fail/env_fail/na）`);
+  results.push({ name, status, detail });
+  console.log(`[${status.toUpperCase()}] ${name}${detail ? ` — ${detail}` : ''}`);
 }
 function summarize() {
-  const p = results.filter(r => r.status === 'pass').length
-  const s = results.filter(r => r.status === 'skip').length
-  const f = results.filter(r => r.status === 'fail').length
-  console.log(`SUMMARY pass=${p} skip=${s} fail=${f}`)
-  process.exit(f > 0 ? 1 : 0)
+  const p = results.filter(r => r.status === 'pass').length;
+  const e = results.filter(r => r.status === 'env_fail').length;
+  const n = results.filter(r => r.status === 'na').length;
+  const f = results.filter(r => r.status === 'fail').length;
+  const allNa = results.length > 0 && n === results.length;
+  console.log(`SUMMARY pass=${p} fail=${f} env_fail=${e} na=${n}`);
+  process.exit(f > 0 || allNa ? 1 : e > 0 ? 2 : 0);
 }
 
 function consoleHealthy() {
@@ -301,14 +306,14 @@ async function runBrowser(browser) {
     // 经第一个项目组的 📋 打开工单板（workbench 需先有 projectKey 才渲染列表）。
     const boardIcon = page.locator('span.wb-view-icon[title="工单列表"]').first()
     if (!(await waitFor(async () => (await boardIcon.count()) > 0, 10000))) {
-      record('S1 precheck', 'skip', `no project group 📋 found on ${BASE} (console not provisioned for board view)`)
+      record('S1 precheck', 'env_fail', `no project group 📋 found on ${BASE} (console not provisioned for board view)`)
       return
     }
     await boardIcon.click()
     const rowOk = await waitFor(async () =>
       (await page.locator('tr.wb-row', { hasText: FID_A }).count()) > 0, 10000)
     if (!rowOk) {
-      record('S1 precheck', 'skip', `ticket board did not consume the list stub on ${BASE} (view needs live engine?)`)
+      record('S1 precheck', 'env_fail', `ticket board did not consume the list stub on ${BASE} (view needs live engine?)`)
       return
     }
 
@@ -343,7 +348,7 @@ async function runBrowser(browser) {
 async function main() {
   const [maj, min] = process.versions.node.split('.').map(Number)
   if (maj < 22 || (maj === 22 && min < 18)) {
-    record('node', 'skip', `node ${process.versions.node} < 22.18`)
+    record('node', 'env_fail', `node ${process.versions.node} < 22.18`)
     return summarize()
   }
 
@@ -354,17 +359,17 @@ async function main() {
 
   const healthy = await consoleHealthy()
   if (!healthy) {
-    record('S1 precheck', 'skip', `test console unreachable at ${BASE} (docker compose -f server/dsh/docker-compose.test.yml up -d; KI-036 隔离台/playwright 依赖未恢复则干净 SKIP)`)
+    record('S1 precheck', 'env_fail', `test console unreachable at ${BASE} (docker compose -f server/dsh/docker-compose.test.yml up -d; KI-036 隔离台/playwright 依赖未恢复则 ENV_FAIL)`)
     return summarize()
   }
   const pw = await loadPlaywright()
   if (!pw) {
-    record('S1 precheck', 'skip', 'playwright-core not resolvable (KI-036: ui-check 依赖未恢复；恢复后自动生效)')
+    record('S1 precheck', 'env_fail', 'playwright-core not resolvable (KI-036: ui-check 依赖未恢复；恢复后自动生效)')
     return summarize()
   }
   const browser = await launchBrowser(pw)
   if (!browser) {
-    record('S1 precheck', 'skip', 'no browser could be launched')
+    record('S1 precheck', 'env_fail', 'no browser could be launched')
     return summarize()
   }
 

@@ -15,23 +15,29 @@
 // Server-layer scenarios talk HTTP to the ISOLATED test console
 // (SUYOU_TEST_CONSOLE, default 127.0.0.1:3199; hard guard: never 3099).
 // Browser-layer scenarios use playwright-core against the same console and
-// SKIP cleanly when it is unavailable (see integration/README.md provisioning).
+// record env_fail (exit 2) when it is unavailable (see integration/README.md
+// provisioning; t260904-12 三态契约：缺环境绝不 exit 0 假绿).
 //
-// Execution contract: stdout last line `SUMMARY pass=<n> skip=<m> fail=<k>`;
-// missing deps → clean SKIP (exit 0); FAIL>0 → exit 1.
+// Execution contract (t260904-12 三态): stdout last line
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; missing deps → env_fail
+// (exit 2); FAIL>0 或全腿 na → exit 1.
 
 const BASE = (process.env.SUYOU_TEST_CONSOLE ?? 'http://127.0.0.1:3199').replace(/\/$/, '');
 const results = [];
+const STATUSES = new Set(['pass', 'fail', 'env_fail', 'na']);;
 function record(name, status, detail = '') {
-  results.push({ name, status, detail });
-  console.log(`[${status.toUpperCase()}] ${name}${detail ? ` — ${detail}` : ''}`);
+  if (!STATUSES.has(status)) throw new Error(`非法状态词 ${status}（词表 pass/fail/env_fail/na）`);;
+  results.push({ name, status, detail });;
+  console.log(`[${status.toUpperCase()}] ${name}${detail ? ` — ${detail}` : ''}`);;
 }
 function summarize() {
-  const p = results.filter(r => r.status === 'pass').length;
-  const s = results.filter(r => r.status === 'skip').length;
-  const f = results.filter(r => r.status === 'fail').length;
-  console.log(`SUMMARY pass=${p} skip=${s} fail=${f}`);
-  process.exit(f > 0 ? 1 : 0);
+  const p = results.filter(r => r.status === 'pass').length;;
+  const e = results.filter(r => r.status === 'env_fail').length;;
+  const n = results.filter(r => r.status === 'na').length;;
+  const f = results.filter(r => r.status === 'fail').length;;
+  const allNa = results.length > 0 && n === results.length;;
+  console.log(`SUMMARY pass=${p} fail=${f} env_fail=${e} na=${n}`);;
+  process.exit(f > 0 || allNa ? 1 : e > 0 ? 2 : 0);;
 }
 
 if (BASE.includes(':3099')) {
@@ -77,7 +83,7 @@ async function openSession(ticketId, project) {
 async function serverScenarios() {
   const found = await firstTicket();
   if (!found) {
-    record('server/fixture-ticket', 'skip', 'test console has no tickets; seed one in the test env to enable coverage');
+    record('server/fixture-ticket', 'env_fail', 'test console has no tickets; seed one in the test env to enable coverage');
     return;
   }
   const { project, ticket } = found;
@@ -146,7 +152,7 @@ async function browserScenarios() {
     if (!c) continue;
     try { pw = await import(c); break; } catch { /* next */ }
   }
-  if (!pw) { record('browser/deps', 'skip', 'playwright-core unavailable'); return; }
+  if (!pw) { record('browser/deps', 'env_fail', 'playwright-core unavailable'); return; }
   let browser, context, page;
   try {
     browser = await pw.chromium.launch({ headless: true });
@@ -154,7 +160,7 @@ async function browserScenarios() {
     page = await context.newPage();
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });
   } catch (err) {
-    record('browser/deps', 'skip', `console/browser unreachable: ${String(err).slice(0, 120)}`);
+    record('browser/deps', 'env_fail', `console/browser unreachable: ${String(err).slice(0, 120)}`);
     try { await browser?.close(); } catch { /* noop */ }
     return;
   }
@@ -166,7 +172,7 @@ async function browserScenarios() {
     // rows render at all (sidebar polls every 10s)
     await page.waitForSelector('.wb-ticket-row2', { timeout: 12000 });
   } catch {
-    record('browser/fixture-ticket-row', 'skip', 'no ticket row rendered in test console sidebar');
+    record('browser/fixture-ticket-row', 'env_fail', 'no ticket row rendered in test console sidebar');
     try { await browser.close(); } catch { /* noop */ }
     return;
   }
@@ -179,7 +185,7 @@ async function browserScenarios() {
   // context untouched (no snapshot injection, phase unchanged).
   const rows = await page.$$('.wb-ticket-row2');
   if (rows.length < 1) {
-    record('browser/click-no-session-open', 'skip', 'need >=1 ticket row');
+    record('browser/click-no-session-open', 'env_fail', 'need >=1 ticket row');
   } else {
     try {
       const beforeSnapshots = await contextMsgCount();
@@ -215,7 +221,7 @@ async function browserScenarios() {
       record('browser/repeat-click-zero-injection', 'fail', String(err).slice(0, 140));
     }
   } else {
-    record('browser/repeat-click-zero-injection', 'skip', 'need >=2 ticket rows');
+    record('browser/repeat-click-zero-injection', 'env_fail', 'need >=2 ticket rows');
   }
 
   // S9: console hygiene across all UI scenarios.
@@ -227,7 +233,7 @@ async function browserScenarios() {
 
 const healthy = await consoleHealthy();
 if (!healthy) {
-  record('console/health', 'skip', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
+  record('console/health', 'env_fail', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
   summarize();
 }
 record('console/health', 'pass', BASE);

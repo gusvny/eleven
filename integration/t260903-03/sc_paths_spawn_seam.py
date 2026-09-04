@@ -12,7 +12,7 @@
     （默认模型）。
 
 夹具全 tmp（注册表 env 注入、回落常量进程内替换，退出还原），不写仓内、不碰 3099。
-依赖：temporalio SDK（venv）——不可用则干净 SKIP（exit 0，integration/README 既有口径）。
+依赖：temporalio SDK（venv）——不可用则 ENV_FAIL 环境红退 2（三态契约 §7.3，绝不放行）。
 """
 import shutil
 import sys
@@ -40,8 +40,8 @@ def ok(cond, label):
 try:
     fx.import_engine()
 except ImportError as e:
-    print("SKIP temporalio SDK 不可用（%s）" % e)
-    sys.exit(0)
+    print("ENV_FAIL: temporalio SDK 不可用（%s）" % e)
+    sys.exit(2)
 
 
 def ws_dirs(ws):
@@ -112,7 +112,7 @@ def main():
     finally:
         shutil.rmtree(ws, ignore_errors=True)
 
-    print("SC sc_paths_spawn_seam pass=%d fail=%d" % (pass_n, fail_n))
+    print("SC sc_paths_spawn_seam pass=%d fail=%d env_fail=0 na=0" % (pass_n, fail_n))
     return 1 if fail_n else 0
 
 

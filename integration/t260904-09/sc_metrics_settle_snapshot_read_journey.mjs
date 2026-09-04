@@ -208,7 +208,7 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error('FAIL 场景异常：', e?.stack ?? e)
-  console.log('SUMMARY pass=0 skip=0 fail=1')
+  console.error('ENV_FAIL/FAIL 场景异常：', e?.stack ?? e)
+  console.log('SUMMARY pass=0 fail=1 env_fail=0 na=0')
   process.exit(1)
 })

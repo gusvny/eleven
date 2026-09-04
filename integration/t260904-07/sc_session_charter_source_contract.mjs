@@ -21,8 +21,9 @@
 //      同源常量模块间接命中——两种实现形态都过，契约不变的实现重构不得打破本场景）。
 //   S4 内置回落模板在位且含占位符（宽松形状匹配，不锚私有命名）。
 //
-// Execution contract: stdout last line `SUMMARY pass=<n> skip=<m> fail=<k>`;
-// FAIL>0 → exit 1. 纯只读（双源读取+源码扫描），零写入。
+// Execution contract (三态，定稿 §7.3 闸内无 SKIP): stdout last line
+// `SUMMARY pass=<n> fail=<k> env_fail=<e> na=<w>`; FAIL>0 或全 na → exit 1,
+// ENV_FAIL>0 → exit 2. 纯只读（双源读取+源码扫描），零写入。
 
 import { readFileSync, existsSync } from 'node:fs';
 
@@ -94,5 +95,5 @@ const hasFallback = /(?:DEFAULT|FALLBACK|BUILTIN|INTERNAL)[A-Z_]*\s*(?::\s*strin
 check('内置回落模板在位且含占位符（缺文件/读失败回落不 5xx 的前提）', hasFallback,
   '在 node.ts / src/host/session-charter.ts 找非空模板常量（含 {{project_key}}）');
 
-console.log(`SUMMARY pass=${pass} skip=0 fail=${fail}`);
+console.log(`SUMMARY pass=${pass} fail=${fail} env_fail=0 na=0`);
 process.exit(fail > 0 ? 1 : 0);

@@ -122,8 +122,9 @@ try {
   ok(integRes.ok === true, 'B6 admin.py call 真入口可用（lane=integ）')
   if (integRes.ok) {
     const r = integRes.result
-    ok(JSON.stringify(Object.keys(r).sort()) === JSON.stringify(['err', 'fail', 'green', 'lane', 'pass', 'ran', 'scenarios']),
-      'B7 integ 道返回键集恰为 {lane,green,ran,pass,fail,scenarios,err}（契约 ②b-(b)，非 content 形状）')
+    // t260904-12 乙段：契约 ②b-2 env_fail 转必含 → 键集锚随契约反转（守卫随闸同票，R4 修法①）
+    ok(JSON.stringify(Object.keys(r).sort()) === JSON.stringify(['env_fail', 'err', 'fail', 'green', 'lane', 'pass', 'ran', 'scenarios']),
+      'B7 integ 道返回键集恰为 {lane,green,ran,pass,fail,env_fail,scenarios,err}（契约 ②b-2 v2.1 起必含，非 content 形状）')
     ok(r.green === true && r.ran === 1 && r.pass === 1, 'B8 声明 integration.cmd 真跑：ran=1 pass=1 绿')
   }
 

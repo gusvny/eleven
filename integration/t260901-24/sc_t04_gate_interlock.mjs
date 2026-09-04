@@ -17,7 +17,7 @@
  *
  * t260904-07 仲裁迭代（tests-fault 修正）：capture-lane selftest 段补环境前提卫兵——
  * <repo>/server/dsh/profile/node_modules 软链族是环境工件不入 git，fresh worktree 泳道
- * 布局缺失时该段三腿曾假红（违反「依赖缺失一律干净 SKIP」执行契约）；缺失→SKIP+归因，
+ * 布局缺失时该段三腿曾假红（违反 t260904-12 三态「缺环境=ENV_FAIL，绝不 exit 0」执行契约）；缺失→ENV_FAIL+归因，
  * 前提在位环境断言面逐条不变。
  *
  * t260904-11 仲裁 gen1（tests-fault 修正②）：capture-lane 容差修复镜像合入+验收段
@@ -37,30 +37,30 @@ const REPO = resolve(HERE, '..', '..')
 const CAPTURE = join(REPO, 'server', 'dsh', 'ui-check', 'capture.mjs')
 const CAPTURE_LANE = join(REPO, 'server', 'dsh', 'ui-check', 'capture-lane.mjs')
 
-let passed = 0, failed = 0, skipped = 0
+let passed = 0, failed = 0, envFailed = 0
 const failures = []
 function ok(cond, label) {
   if (cond) { passed++; console.log(`  ok ${label}`) }
   else { failed++; failures.push(label); console.log(`  FAIL ${label}`) }
 }
-function skip(label) {
-  skipped++; console.log(`  SKIP ${label}`)
+function envFail(label) {
+  envFailed++; console.log(`  ENV_FAIL ${label}（环境缺件，没验成——原因归环境，exit 2）`)
 }
 function section(t) { console.log(`\n== ${t}`) }
 
 const tmp = mkdtempSync(join(tmpdir(), 't260901-24-t04-'))
 
 // 260904 回迁守卫（KI-036）：本树与主树 ui-check 均缺 playwright-core（依赖未随迁移
-// 恢复，安装=宿主沙箱外 npm install）→ 干净 SKIP 不假红；依赖恢复后本守卫自动生效，
+// 恢复，安装=宿主沙箱外 npm install）→ ENV_FAIL（exit 2）不假红；依赖恢复后本守卫自动生效，
 // 断言面不变。
 {
   const pwLane = join(REPO, 'server', 'dsh', 'ui-check', 'node_modules', 'playwright-core')
   const pwMain = join(resolve(REPO, '..', '..'), 'server', 'dsh', 'ui-check',
                       'node_modules', 'playwright-core')
   if (!process.env.SUYOU_PLAYWRIGHT_MODULE && !existsSync(pwLane) && !existsSync(pwMain)) {
-    console.log('SKIP（KI-036）：ui-check 缺 playwright-core（本树+主树均无），'
+    console.log('ENV_FAIL（KI-036）：ui-check 缺 playwright-core（本树+主树均无），'
       + '宿主沙箱外安装恢复后本守卫自动生效')
-    process.exit(0)
+    process.exit(2)
   }
 }
 try {
@@ -97,8 +97,8 @@ try {
   // 软链——组临时 profile 要改指泳道 build；gitignored 实体，主树有、worktree 泳道不随迁，
   // KI-036② 泳道依赖软链未随迁移恢复）。取两边语义之强：前提在=跑原三条全绿断言（两边
   // 断言逐字相同）；前提缺=工具按设计 fail-closed，验「拒跑+报因说到点上+不假报全绿」
-  // 而非 SKIP 放过（main 侧 skip 语义被本侧正向断言覆盖；软链补齐自动切回真跑，断言面
-  // 不变）。谜底记录：本场景此前在此泳道一直走 KI-036 SKIP 通路（主树 ui-check 装
+  // 而非旧口径放行放过（旧 skip 语义已退役，被本侧正向断言覆盖；软链补齐自动切回真
+  // 跑，断言面不变）。谜底记录：本场景此前在此泳道一直走旧跳过通路（主树 ui-check 装
   // playwright-core 后守卫翻转才首跑，t260904-06 泳道实锤 selftest 2/6 绿后在
   // buildTempProfile 掷错），泳道缺 profile/node_modules 属环境事实非实现回归。
   const laneProfileWb = join(REPO, 'server', 'dsh', 'profile', 'node_modules', 'suyou-workbench')
@@ -158,5 +158,5 @@ function firstLine(s) {
   return String(s || '').split('\n')[0].slice(0, 140) || '（无输出）'
 }
 
-console.log(`\nSUMMARY pass=${passed} skip=${skipped} fail=${failed}`)
+console.log(`\nSUMMARY pass=${passed} fail=${failed} env_fail=${envFailed}`)
 if (failed > 0) { console.log('FAILURES:\n  - ' + failures.join('\n  - ')); process.exit(1) }

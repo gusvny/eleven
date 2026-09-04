@@ -52,7 +52,7 @@ function deepArray(obj, key) {
 section('随包 fixture 目录存在且文件齐')
 if (!existsSync(FIXTURES)) {
   console.log('  FAIL server/dsh/ui-check/fixtures 不存在（t260901-24 implement 段应落地该目录）')
-  console.log(`\nSUMMARY pass=0 skip=0 fail=1`)
+  console.log(`\nSUMMARY pass=0 fail=1 env_fail=0 na=0`)
   process.exit(1)
 }
 const files = readdirSync(FIXTURES).filter((f) => f.endsWith('.json'))
@@ -135,5 +135,5 @@ async function resolveDerive() {
   return null
 }
 
-console.log(`\nSUMMARY pass=${passed} skip=0 fail=${failed}`)
+console.log(`\nSUMMARY pass=${passed} fail=${failed} env_fail=0 na=0`)
 if (failed > 0) { console.log('FAILURES:\n  - ' + failures.join('\n  - ')); process.exit(1) }

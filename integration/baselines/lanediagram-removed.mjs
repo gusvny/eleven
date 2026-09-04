@@ -24,7 +24,7 @@ const CLIENT_SRC = join(REPO, 'server', 'dsh', 'workbench', 'src', 'client')
 const LIB_JS = join(REPO, 'server', 'dsh', 'workbench', 'lib', 'client.js')
 const LIB_CJS = join(REPO, 'server', 'dsh', 'workbench', 'lib', 'client.cjs')
 
-let passed = 0, failed = 0, skipped = 0
+let passed = 0, failed = 0, envFailed = 0, naCount = 0
 function ok(cond, label) {
   if (cond) { passed++; console.log(`  ok ${label}`) }
   else { failed++; console.log(`  FAIL ${label}`) }
@@ -64,6 +64,7 @@ section('实际渲染路径未被误删')
   ok(/deriveStageStates/.test(idx), 'index.tsx 消费 deriveStageStates')
 }
 
-console.log(`\n${passed} passed, ${failed} failed, ${skipped} skipped`)
-console.log(`SUMMARY pass=${passed} skip=${skipped} fail=${failed}`)
-process.exit(failed === 0 ? 0 : 1)
+console.log(`\n${passed} passed, ${failed} failed, env_fail=${envFailed}, na=${naCount}`)
+console.log(`SUMMARY pass=${passed} fail=${failed} env_fail=${envFailed} na=${naCount}`)
+const allNa = naCount > 0 && passed + failed + envFailed === 0
+process.exit(failed > 0 || allNa ? 1 : envFailed > 0 ? 2 : 0)

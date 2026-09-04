@@ -8,9 +8,9 @@
 //    temporal-poc（runtime.py L54 缝）。桩内放真身 shared.py（复制，注册表根仍走
 //    SANDBAR_PROJECTS_DIR env）+ 假 client.py（票号级 ticket-list 通道替身，行为由
 //    FIX14_CTRL 控制文件驱动：ok/exit/badjson/sdk 四模）。在飞闸语义腿全部走此缝，
-//    不可 SKIP（C3 表）。
-// 2. 真票腿：本库提供 temporalite 自举探测（provisionRealRig），任一依赖缺席=有声
-//    SKIP（唯一豁免腿，C3 表）。
+//    无环境依赖（C3 表）。
+// 2. 真票腿：本库提供 temporalite 自举探测（provisionRealRig），任一依赖缺席=
+//    env_fail（三态契约 §7.3：缺测试环境绝不 exit 0 假绿，exit 2；C3 表唯一豁免腿）。
 import { spawnSync, spawn } from 'node:child_process';
 import {
   mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync,
@@ -175,7 +175,7 @@ export function writeLaneDebris(projectDir, tid) {
   writeFileSync(path.join(projectDir, '.lane', tid, 'note.txt'), 'lane debris fixture\n');
 }
 
-// ---------- 桩 poc_dir（在飞闸语义腿的注入缝，C3 表：不可 SKIP 腿全走这里） ----------
+// ---------- 桩 poc_dir（在飞闸语义腿的注入缝，C3 表：零环境依赖语义腿全走这里） ----------
 
 const CLIENT_SHIM = `# t260904-14 场景桩：client.py ticket-list 通道替身（行为由 FIX14_CTRL 控制文件驱动）
 import json, os, sys
@@ -223,7 +223,7 @@ export function makeStubRoot() {
   };
 }
 
-// ---------- 真票腿自举（C3 唯一有声 SKIP 豁免腿）：依赖齐才跑，缺什么报什么 ----------
+// ---------- 真票腿自举（C3 唯一 env_fail 豁免腿）：依赖齐才跑，缺什么报什么 ----------
 
 function probeTcp(port, host = '127.0.0.1', timeoutMs = 800) {
   return new Promise((resolve) => {
@@ -273,24 +273,31 @@ export async function provisionRealRig() {
   return { ok: false, reason: 'temporal start-dev 20s 未就绪' };
 }
 
-// 断言收集器（沿 lib_fix10 语义）
+// 断言收集器（四态：pass/fail/env_fail/na，三态契约 §7.3——缺环境=env_fail
+// 绝不 exit 0 假绿；exit 码 f>0→1，e>0→2，否则 0）
 export function makeChecks(title) {
   const oks = [];
   const fails = [];
+  const envFails = [];
   return {
     check(name, cond, detail = '') {
       if (cond) { oks.push(name); return; }
       fails.push(name);
       console.log(`  [FAIL] ${name}${detail ? ' — ' + detail : ''}`);
     },
-    skip(name, reason = '') {
-      console.log(`  [SKIP] ${name}${reason ? '：' + reason : ''}`);
+    envFail(name, reason = '') {
+      envFails.push(name);
+      console.log(`  [ENV_FAIL] ${name}${reason ? '：' + reason : ''}`);
     },
     finish() {
-      console.log(`\n${title}: pass=${oks.length} fail=${fails.length}`);
+      console.log(`\n${title}: pass=${oks.length} fail=${fails.length} env_fail=${envFails.length} na=0`);
       if (fails.length > 0) {
         console.log(`RESULT FAIL (${fails.length})`);
         process.exit(1);
+      }
+      if (envFails.length > 0) {
+        console.log(`RESULT ENV_FAIL (${envFails.length})`);
+        process.exit(2);
       }
       console.log('RESULT PASS');
     },

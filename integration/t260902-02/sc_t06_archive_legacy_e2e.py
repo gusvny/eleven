@@ -10,7 +10,7 @@
 
 手法：client.py 公开注入缝（entries/result_of）+ 真文件系统（tmp data 根）直调
 cmd_ticket_archive_legacy——不依赖真 Temporal server，有 SDK 即可跑；running 票
-不收的 live 子用例走真测试环境（未设 → 如实 SKIP）。
+不收的 live 子用例走真测试环境（未设 → 如实 ENV_FAIL，exit 2）。
 
 跑法：python3 integration/t260902-02/t06_archive_legacy_e2e.py（cwd=泳道根）
 """

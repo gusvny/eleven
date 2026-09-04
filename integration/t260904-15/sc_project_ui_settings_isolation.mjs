@@ -11,7 +11,7 @@
 //   隔离详情/空注册表面。
 //
 // high-level steps：
-//   T0 自举隔离台 A（好条目 fixa + 畸形 badkey）+ playwright 探测（缺失=干净 SKIP）。
+//   T0 自举隔离台 A（好条目 fixa + 畸形 badkey）+ playwright 探测（缺失=ENV_FAIL，KI-036）。
 //   T1 设置弹层：只读三行（key/显示名/根目录）；票计数降级「—」类中性词且弹层
 //      不含红 error 文案；体检区中性提示（不含「无黄牌/全部正常」谎报）；danger 在位。
 //   T2 隔离详情：红行点击 → 原因含 project.yaml 定位字面 + 修复指路词汇。
@@ -19,7 +19,7 @@
 //      「＋ 接入项目」行在位；走通首接（fixfirst）→ 新组出现。
 //   T4 console 零 error / pageerror。
 //
-// 执行契约：stdout 末行 SUMMARY pass/skip/fail；依赖缺失=干净 SKIP；实现落地前
+// 执行契约：stdout 末行 SUMMARY 四计数（三态）；依赖缺失=ENV_FAIL 环境红；实现落地前
 // 红属预期（TDD 信号），arbitrate/merge 期必须绿。
 import {
   tmpRoot, makeRegistryRoot, writeProjectEntry, writeQuarantinedDir,
@@ -29,7 +29,7 @@ import {
 const { record, summarize } = makeResults();
 
 const pw = await loadPlaywright();
-if (!pw) { record('browser/deps', 'skip', 'playwright-core unavailable (KI-036 守卫)'); summarize(); }
+if (!pw) { record('browser/deps', 'env_fail', 'playwright-core unavailable (KI-036)'); summarize(); }
 
 const { chromium } = pw;
 const consoleErrors = [];
@@ -67,14 +67,14 @@ try {
   writeQuarantinedDir(regA, 'badkey');
   benchA = await bootConsole(regA);
 } catch (e) {
-  record('bench/boot-A', 'skip', `隔离台依赖缺失：${String(e?.message ?? e).slice(0, 200)}`);
+  record('bench/boot-A', 'env_fail', `隔离台依赖缺失：${String(e?.message ?? e).slice(0, 200)}`);
   summarize();
 }
 // 泳道 client build 陈旧守卫：lib/client.js 缺失/早于 src → 浏览器腿拒跑（防拍旧 UI 假绿，
 // laneBuildRejectReason 同口径）；合并后主树重建 build 自动生效。
 {
   const stale = await clientBuildStalenessReason();
-  if (stale) { record('browser/client-build', 'skip', `泳道 client build 不可用：${stale.slice(0, 160)}`); summarize(); }
+  if (stale) { record('browser/client-build', 'env_fail', `泳道 client build 不可用：${stale.slice(0, 160)}`); summarize(); }
   record('browser/client-build', 'pass', 'lib/client.js 新于 src');
 }
 
@@ -128,7 +128,7 @@ let benchB;
 try {
   benchB = await bootConsole(makeRegistryRoot('fix15-empty-reg-'));
 } catch (e) {
-  record('bench/boot-B', 'skip', `隔离台依赖缺失：${String(e?.message ?? e).slice(0, 200)}`);
+  record('bench/boot-B', 'env_fail', `隔离台依赖缺失：${String(e?.message ?? e).slice(0, 200)}`);
   summarize();
 }
 teardownOnExit(benchB.teardown);

@@ -10,9 +10,9 @@
 // 空态」，本场景管「有数据真渲染」——互补不重复。
 //
 // 对 sc_lane_parallel_dom.mjs 七项故障模式的取舍（create_plan gen1 R1 清单）：
-// 全带——①3199 端口隔离（绝不碰 3099）②环境缺失干净 SKIP ③SUMMARY 末行契约
+// 全带——①3199 端口隔离（绝不碰 3099）②环境缺失=ENV_FAIL（exit 2） ③SUMMARY 末行契约
 // ④pageerror/console.error 卫生断言（加码：畸形 donut 数据不得触发 echarts 抛错）
-// ⑤stub 消费预检（面板确实发出了 metrics 请求，未消费即 skip 不假绿）⑥finally
+// ⑤stub 消费预检（面板确实发出了 metrics 请求，未消费即 env_fail 不假绿）⑥finally
 // 兜底关浏览器 ⑦不碰真票（API 边界全 stub）。七项理由同源：生产台不可占用、
 // 机器差异不假红、全族运行器口径一致、零异常卫生、不假绿、终态回收、零真数据。
 //
@@ -22,14 +22,15 @@
 //      &mode=fast/缓存快照角标）+ 纯逻辑 smoke（specToDonutInput/donutOption）。
 //   S1 browser DOM assertions (real rendering level): needs the ISOLATED test
 //      console (SUYOU_TEST_CONSOLE, default 127.0.0.1:3199), playwright-core,
-//      and a launchable chromium. Any missing -> clean SKIP (exit 0, reason on
+//      and a launchable chromium. Any missing -> ENV_FAIL (exit 2, reason on
 //      stdout). Data stubbed at the API boundary with page.route(): metrics
 //      双门（mode=fast 快照 stale → full 全量）由桩按 query 分流，DOM/React/
 //      echarts 渲染路径全真。Never touches production console (3099) nor real
 //      tickets.
 //
-// Execution contract: stdout last line `SUMMARY pass=<n> skip=<m> fail=<k>`;
-// FAIL>0 -> exit 1; SKIP -> exit 0 with reason. Node >= 22.18.
+// Execution contract (t260904-12 三态): stdout last line
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 或全腿 na -> exit 1;
+// env_fail>0 -> exit 2（环境红：没验成，原因归环境）; all pass -> 0. Node >= 22.18.
 
 import { readFileSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
@@ -40,16 +41,20 @@ const REPO = process.cwd()
 const BASE = (process.env.SUYOU_TEST_CONSOLE ?? 'http://127.0.0.1:3199').replace(/\/$/, '')
 
 const results = []
+const STATUSES = new Set(['pass', 'fail', 'env_fail', 'na']);
 function record(name, status, detail = '') {
-  results.push({ name, status, detail })
-  console.log(`[${status.toUpperCase()}] ${name}${detail ? ` — ${detail}` : ''}`)
+  if (!STATUSES.has(status)) throw new Error(`非法状态词 ${status}（词表 pass/fail/env_fail/na）`);
+  results.push({ name, status, detail });
+  console.log(`[${status.toUpperCase()}] ${name}${detail ? ` — ${detail}` : ''}`);
 }
 function summarize() {
-  const p = results.filter(r => r.status === 'pass').length
-  const s = results.filter(r => r.status === 'skip').length
-  const f = results.filter(r => r.status === 'fail').length
-  console.log(`SUMMARY pass=${p} skip=${s} fail=${f}`)
-  process.exit(f > 0 ? 1 : 0)
+  const p = results.filter(r => r.status === 'pass').length;
+  const e = results.filter(r => r.status === 'env_fail').length;
+  const n = results.filter(r => r.status === 'na').length;
+  const f = results.filter(r => r.status === 'fail').length;
+  const allNa = results.length > 0 && n === results.length;
+  console.log(`SUMMARY pass=${p} fail=${f} env_fail=${e} na=${n}`);
+  process.exit(f > 0 || allNa ? 1 : e > 0 ? 2 : 0);
 }
 
 // ---------------------------------------------------------------- fixtures
@@ -321,12 +326,12 @@ async function runBrowser(pw, browser) {
     // stub 消费预检（R1 取舍⑤）：面板必须真的发出了 metrics 请求（fast+full 两门）。
     const { open } = await openMetricsPanel(page)
     if (!open) {
-      record('S1 precheck', 'skip', `metrics panel did not open on ${BASE} (app shell not provisioned for workbench plugin?)`)
+      record('S1 precheck', 'env_fail', `metrics panel did not open on ${BASE} (app shell not provisioned for workbench plugin?)`)
       return
     }
     const consumed = await waitFor(async () => metricsRequests >= 2, 10000)
     if (!consumed) {
-      record('S1 precheck', 'skip', `metrics stub not consumed (requests=${metricsRequests}) — panel fetch path changed?`)
+      record('S1 precheck', 'env_fail', `metrics stub not consumed (requests=${metricsRequests}) — panel fetch path changed?`)
       return
     }
     record('S1 precheck', 'pass', `metrics stub consumed (${metricsRequests} requests: fast+full double-door)`)
@@ -416,7 +421,7 @@ async function runBrowser(pw, browser) {
 async function main() {
   const [maj, min] = process.versions.node.split('.').map(Number)
   if (maj < 22 || (maj === 22 && min < 18)) {
-    record('node', 'skip', `node ${process.versions.node} < 22.18`)
+    record('node', 'env_fail', `node ${process.versions.node} < 22.18`)
     return summarize()
   }
 
@@ -430,17 +435,17 @@ async function main() {
 
   const healthy = await consoleHealthy()
   if (!healthy) {
-    record('S1 precheck', 'skip', `test console unreachable at ${BASE} (docker compose -f server/dsh/docker-compose.test.yml up -d)`)
+    record('S1 precheck', 'env_fail', `test console unreachable at ${BASE} (docker compose -f server/dsh/docker-compose.test.yml up -d)`)
     return summarize()
   }
   const pw = await loadPlaywright()
   if (!pw) {
-    record('S1 precheck', 'skip', 'playwright-core not resolvable (browser scenarios skipped)')
+    record('S1 precheck', 'env_fail', 'playwright-core not resolvable (browser scenarios not run: env)')
     return summarize()
   }
   const browser = await launchBrowser(pw)
   if (!browser) {
-    record('S1 precheck', 'skip', 'no browser could be launched')
+    record('S1 precheck', 'env_fail', 'no browser could be launched')
     return summarize()
   }
 

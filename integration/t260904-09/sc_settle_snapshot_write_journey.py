@@ -42,7 +42,7 @@ REPO = Path(subprocess.run(["git", "-C", str(HERE), "rev-parse", "--show-topleve
                            capture_output=True, text=True).stdout.strip())
 ENGINE = REPO / "server" / "dsh" / "temporal-poc"
 
-PASS, FAIL, SKIP = 0, 0, 0
+PASS, FAIL, ENV_FAIL_N = 0, 0, 0
 
 
 def ok(cond, label, detail=""):
@@ -56,9 +56,10 @@ def ok(cond, label, detail=""):
 
 
 def done():
-    global PASS, FAIL, SKIP
-    print("SUMMARY pass=%d skip=%d fail=%d" % (PASS, SKIP, FAIL))
-    return 0 if FAIL == 0 else 1
+    """三态退出契约（§7.3）：SUMMARY 四态行；fail>0→1，env_fail>0→2，否则 0。"""
+    global PASS, FAIL, ENV_FAIL_N
+    print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (PASS, FAIL, ENV_FAIL_N))
+    return 1 if FAIL else (2 if ENV_FAIL_N else 0)
 
 
 def sh(args, cwd=None):
@@ -119,11 +120,11 @@ def write_session(wt: Path, ticket_id: str, *, torn: bool = False) -> None:
 
 def main() -> int:
     if shutil.which("zstd") is None:
-        print("SKIP settle-snapshot-write-journey：zstd CLI 不在 PATH（引擎同依赖，环境不备留因）")
-        global SKIP
-        SKIP = 1
-        print("SUMMARY pass=%d skip=%d fail=%d" % (PASS, SKIP, FAIL))
-        return 0
+        # 三态契约：缺环境绝不 exit 0 假绿——ENV_FAIL + exit 2
+        global ENV_FAIL_N
+        ENV_FAIL_N = 1
+        print("ENV_FAIL: zstd CLI 不在 PATH（引擎同依赖，测试环境不备）")
+        return done()
 
     import agent_activities as aa
 

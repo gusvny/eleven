@@ -44,7 +44,7 @@ sys.path.insert(0, str(POC))
 import shared  # noqa: E402
 import agent_activities as aa  # noqa: E402
 
-PASS = FAIL = SKIP = 0
+PASS = FAIL = ENV_FAIL = 0
 
 
 def ok(cond, label):
@@ -113,7 +113,7 @@ def main():
     ok(any("credentials" in r for r in shared.ARCHIVE_EXCLUDED_RULES),
        "排除口径含凭据绝不入档")
 
-    print("SUMMARY pass=%d skip=%d fail=%d" % (PASS, SKIP, FAIL))
+    print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (PASS, ENV_FAIL, FAIL))
     return 0 if FAIL == 0 else 1
 
 

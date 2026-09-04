@@ -5,9 +5,10 @@
 - stub_temporalio：模块级桩，本机无 temporal SDK 也能直测 activity 函数路径；
 - Sandbox：SANDBAR_PROJECTS_DIR / DSH_HOME / HOME 三个 env 全指 mkdtemp，
   绝不触真 ~/.sandbar、真 ~/.dsh、真凭据（测试安全红线）；
-- Ledger：stdout 末行 SUMMARY pass/skip/fail（integration/README.md 执行契约）；
+- Ledger：stdout 末行 SUMMARY pass/fail/env_fail/na（三态契约定稿 §7.3：0=PASS、
+  1=FAIL 含全腿 N/A、2=ENV_FAIL；skip 计数退役，缺依赖的用例计入 env_fail）；
 - ensure_yaml：PyYAML 缺失时优先 re-exec 进 temporal-poc venv（ensure_sdk 同款
-  制式）；仍无则返回 False，调用方对依赖 yaml 的用例干净 SKIP（依赖缺失=skip）；
+  制式）；仍无则返回 False，调用方对依赖 yaml 的用例 env_fail（缺依赖=环境红）；
 - creds_text / insertion_only：真实嵌套格式凭据夹具构造与「仅追加」断言件
   （格式载体见本票 plan.md「格式载体」节：version + refs 嵌套，非扁平）。
 """
@@ -26,7 +27,7 @@ REPO = SUITE.parent.parent
 POC = REPO / "server" / "dsh" / "temporal-poc"
 # venv 回落链（同 manifest PY 链口径）：worktree 常无 .venv，经
 # `git rev-parse --git-common-dir` 解析主 checkout 再找（README 既有定式）；
-# 再无则由调用方干净 SKIP。
+# 再无则由调用方 env_fail（环境红）。
 VENV_PY = POC / ".venv" / "bin" / "python"
 REEXEC_GUARD = "_T26090209_YAML_REEXEC"
 
@@ -81,8 +82,11 @@ def load_agent_activities():
 
 # ---------------------------------------------------------------- 执行契约
 class Ledger:
+    """三态账本（定稿 §7.3）：退出码优先级 fail(1，含全腿 N/A) > env_fail(2) > pass(0)——
+    产品红优先（C7），环境红不稀释产品红。"""
+
     def __init__(self):
-        self.p = self.s = self.f = 0
+        self.p = self.f = self.e = self.n = 0
 
     def ok(self, cond, label, detail=""):
         if cond:
@@ -92,13 +96,26 @@ class Ledger:
             self.f += 1
             print("  FAIL %s%s" % (label, (" | " + str(detail)) if detail else ""))
 
-    def skip1(self, label, reason):
-        self.s += 1
-        print("  skip %s | %s" % (label, reason))
+    def env1(self, label, reason):
+        """缺依赖/缺环境的用例：计入 env_fail（不再有 skip 计数），不 exit 0。"""
+        self.e += 1
+        print("  ENV_FAIL: %s | %s" % (label, reason))
+
+    def na1(self, label, reason):
+        """以系统状态为条件的腿无对象：记 N/A（全腿 N/A 场景红由调用方收口）。"""
+        self.n += 1
+        print("  N/A: %s | %s" % (label, reason))
 
     def finish(self):
-        print("SUMMARY pass=%d skip=%d fail=%d" % (self.p, self.s, self.f))
-        return 1 if self.f else 0
+        print("SUMMARY pass=%d fail=%d env_fail=%d na=%d" % (self.p, self.f, self.e, self.n))
+        if self.f:
+            return 1                       # 产品红优先（C7）：环境红不得稀释产品红
+        total = self.p + self.f + self.e + self.n
+        if total > 0 and self.n >= total:  # 全腿 N/A=产品红（C9：修场景不补环境）
+            return 1
+        if self.e:
+            return 2
+        return 0
 
 
 # ---------------------------------------------------------------- yaml 探测
@@ -113,7 +130,7 @@ def have_yaml():
 def ensure_yaml():
     """保证当前解释器有 PyYAML：没有则 re-exec 进 temporal-poc venv（worktree
     优先，经 git-common-dir 回落主 checkout，同 manifest PY 链口径）后不再返回；
-    两处皆无 → False，调用方对依赖 yaml 的用例干净 SKIP（勿 FAIL）。"""
+    两处皆无 → False，调用方对依赖 yaml 的用例 env_fail（环境红，勿静默绿）。"""
     if have_yaml():
         return True
     fallback = _git_common_dir_venv()

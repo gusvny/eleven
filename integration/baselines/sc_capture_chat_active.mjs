@@ -16,7 +16,7 @@
 //       环境必须明确报错且零写操作（静态断言：报错文案含「--allow-seed」，
 //       直连路径默认不带旗）。
 //
-// 环境：SUYOU_CAPTURE_CHAT_ACTIVE_SKIP_CHAIN=1 跳过 C1（无 dsh/playwright 环境）；
+// 环境：SUYOU_CAPTURE_CHAT_ACTIVE_FORCE_ENV_FAIL=1 使 C1 记 ENV_FAIL 退 2（无 dsh/playwright 环境）；
 //   SUYOU_CAPTURE_MAIN_UI_CHECK 指主树 server/dsh/ui-check（泳道无 node_modules，
 //   playwright-core 从主树加载）；captured 输出目录用 mkdtemp，跑完即删。
 // 硬守卫：本基线拒绝以任何方式指向生产控制台端口 3099（SUYOU_TEST_CONSOLE 若
@@ -101,9 +101,9 @@ async function fullChain() {
   // C1 要 boot 隔离台 + 走真模型种子链路 + capture-lane 只拍本次重建的 bundle（陈旧
   // build 拒跑是防证据造假的设计行为；非 UI 票的泳道不重建 bundle，此前提天然不满足）。
   // _run_manifest 继承 worker 环境（SUYOU_TASK_QUEUE/SUYOU_WATCH_WORKFLOW）——泳道
-  // 机械跑干净 SKIP，真实覆盖属顶层人工/隔离台跑；U1-U3/C2 纯函数半不受影响，照跑。
+  // 机械跑记 ENV_FAIL 退 2（三态契约闸内无放行），真实覆盖属顶层人工/隔离台跑；U1-U3/C2 纯函数半不受影响，照跑。
   if (process.env.SUYOU_TASK_QUEUE || process.env.SUYOU_WATCH_WORKFLOW) {
-    return record("C1 capture-lane 全链", "skip",
+    return record("C1 capture-lane 全链", "env_fail",
       "nested inside a lane integration step (SUYOU_TASK_QUEUE/SUYOU_WATCH_WORKFLOW present): recursive guard, top-level runs carry the coverage");
   }
   // build 前提自愈（t260901-10 arbitrate gen2，收编本票 gen6 的 mtime 归一化——
@@ -177,15 +177,15 @@ async function gateRedLine() {
 let fail = await unitGuards();
 fail += await gateRedLine();
 // 260904 回迁守卫（KI-036）：本树与主树 ui-check 均缺 playwright-core（安装=宿主
-// 沙箱外 npm install）→ C1 全链干净 SKIP 不假红；依赖恢复后自动生效，断言面不变。
+// 沙箱外 npm install）→ C1 全链记 ENV_FAIL 退 2 不假红；依赖恢复后自动生效，断言面不变。
 import { existsSync as _existsSync } from "node:fs";
 const _pwMissing = !_existsSync(path.join(REPO_ROOT, "server", "dsh", "ui-check",
                                          "node_modules", "playwright-core"))
   && !_existsSync(path.join(MAIN_UI_CHECK, "node_modules", "playwright-core"));
-if (process.env.SUYOU_CAPTURE_CHAT_ACTIVE_SKIP_CHAIN === "1") {
-  record("C1 capture-lane 全链", "skip", "SUYOU_CAPTURE_CHAT_ACTIVE_SKIP_CHAIN=1");
+if (process.env.SUYOU_CAPTURE_CHAT_ACTIVE_FORCE_ENV_FAIL === "1") {
+  record("C1 capture-lane 全链", "env_fail", "SUYOU_CAPTURE_CHAT_ACTIVE_FORCE_ENV_FAIL=1");
 } else if (_pwMissing) {
-  record("C1 capture-lane 全链", "skip",
+  record("C1 capture-lane 全链", "env_fail",
     "KI-036：ui-check 缺 playwright-core（本树+主树均无），宿主沙箱外安装后本链自动恢复");
 } else {
   await fullChain();
@@ -193,6 +193,8 @@ if (process.env.SUYOU_CAPTURE_CHAT_ACTIVE_SKIP_CHAIN === "1") {
 }
 
 const pass = results.filter((r) => r.status === "pass").length;
-const skip = results.filter((r) => r.status === "skip").length;
-console.log(`\nSUMMARY pass=${pass} skip=${skip} fail=${fail}`);
-process.exit(fail > 0 ? 1 : 0);
+const envFail = results.filter((r) => r.status === "env_fail").length;
+const na = results.filter((r) => r.status === "na").length;
+console.log(`\nSUMMARY pass=${pass} fail=${fail} env_fail=${envFail} na=${na}`);
+const allNa = na > 0 && pass + fail + envFail === 0;
+process.exit(fail > 0 || allNa ? 1 : envFail > 0 ? 2 : 0);

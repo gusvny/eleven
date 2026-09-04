@@ -165,18 +165,28 @@ export async function commitFile(dir, rel, lineCount, message, prefix = 'line') 
   await gitCommitAll(dir, message)
 }
 
-/* ---------------- 结果口径（全族执行契约：SUMMARY 末行，FAIL>0 exit 1） ---------------- */
+/* ---------------- 结果口径（三态契约，定稿 §7.3「闸内无旧跳过语义」：
+   0=PASS / 1=FAIL 产品红或全 na / 2=ENV_FAIL 环境红；SUMMARY 末行四计数） ---------------- */
 
 export function makeChecker() {
-  let pass = 0, fail = 0
+  let pass = 0, fail = 0, envFail = 0, na = 0
   return {
     ok(cond, label, detail = '') {
       if (cond) { pass++; console.log(`  ok ${label}`) } else { fail++; console.log(`  FAIL ${label}${detail ? ' — ' + detail : ''}`) }
     },
+    /** 环境红：缺被测环境依赖（非产品缺陷）时计入 env_fail，绝不静默放行。 */
+    envFail(label, reason = '') {
+      envFail++; console.log(`  ENV_FAIL ${label}${reason ? ' — ' + reason : ''}`)
+    },
+    /** 系统状态条件腿 N/A（不以测试环境为条件）；全腿 N/A 视同产品红。 */
+    na(label) {
+      na++; console.log(`  N/A ${label}`)
+    },
     done(name) {
-      console.log(`SUMMARY pass=${pass} skip=0 fail=${fail}`)
+      console.log(`SUMMARY pass=${pass} fail=${fail} env_fail=${envFail} na=${na}`)
       if (fail > 0) console.log(`[${name}] 存在失败断言（实现未落地段预期红；落地后应全绿）`)
-      return fail === 0 ? 0 : 1
+      const allNa = na > 0 && pass + fail + envFail === 0
+      return fail > 0 || allNa ? 1 : envFail > 0 ? 2 : 0
     },
   }
 }

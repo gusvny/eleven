@@ -15,8 +15,8 @@
 死端口 127.0.0.1:1，并在执行前硬断言该值不含 3099；候选脚本用临时假 capture.mjs
 （process.exit(3)），零浏览器、零网络、零控制台 boot。
 
-依赖与降级：import agent_activities 需 temporalio SDK——按 integration/README 既有
-口径，SDK 不可用 → 干净 SKIP（exit 0）。跑法（manifest 侧自动选 venv python）：
+依赖与降级：import agent_activities 需 temporalio SDK——三态契约定稿 §7.3：
+SDK 不可用 → ENV_FAIL 环境红（exit 2），绝不静默放行。跑法（manifest 侧自动选 venv python）：
   PY=server/dsh/temporal-poc/.venv/bin/python; [ -x "$PY" ] || PY=python3; \
     "$PY" integration/baselines/ui-evidence-failure-retention.py
 """
@@ -33,7 +33,7 @@ POC = REPO / "server" / "dsh" / "temporal-poc"
 
 pass_n = 0
 fail_n = 0
-skip_n = 0
+env_fail_n = 0
 failures = []
 
 
@@ -48,19 +48,13 @@ def ok(cond, label):
         print("  FAIL %s" % label)
 
 
-def skipped(label):
-    global skip_n
-    skip_n += 1
-    print("  SKIP %s" % label)
-
-
 try:
     import temporalio  # noqa: F401
 except ImportError:
-    print("temporalio SDK unavailable (no server/dsh/temporal-poc/.venv, no system "
-          "temporalio) -- known limitation, see integration/README.md")
-    print("SUMMARY pass=0 skip=1 fail=0")
-    sys.exit(0)
+    print("ENV_FAIL: temporalio SDK unavailable (no server/dsh/temporal-poc/.venv, no "
+          "system temporalio) -- known limitation, see integration/README.md")
+    print("SUMMARY pass=0 fail=0 env_fail=1 na=0")
+    sys.exit(2)
 
 sys.path.insert(0, str(POC))
 import agent_activities  # noqa: E402
@@ -167,7 +161,7 @@ finally:
     agent_activities.REPO_ROOT = saved_repo_root
     clear_env()
 
-print("SUMMARY pass=%d skip=%d fail=%d" % (pass_n, skip_n, fail_n))
+print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (pass_n, fail_n, env_fail_n))
 if fail_n > 0:
     print("failed cases: %s" % " | ".join(failures))
     sys.exit(1)

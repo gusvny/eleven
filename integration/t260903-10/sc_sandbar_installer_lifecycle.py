@@ -13,7 +13,7 @@ temporal 定位，PATH 注入是无效缝）；演练端口=自选空闲端口�
 --server-port/--ui-port，与真 7233/8233 零接触）；幂等观测走 lsof 监听者 +
 stub 自报 pid 双面（不数全机进程表——机器全局断言在真环境自带 start-dev 时必假红）。
 本场景零 ps 依赖（spawn/幂等/down 全程不读 argv 观测面）。所选端口被占 →
-exit 3 环境冲突（不对抗，不 SKIP 掩盖）。
+exit 3 环境冲突（不对抗，不放行掩盖——三态 §7.3 环境红走 ENV_FAIL 退 2）。
 """
 import glob
 import os

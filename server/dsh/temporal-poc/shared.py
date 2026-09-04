@@ -237,6 +237,7 @@ class IntegrationRunResult:
     ran: int = 0
     passed: int = 0
     failed: int = 0
+    env_fail: int = 0            # t260904-12：环境红维（F-A 修复——翻译层不再丢弃）
     details: List[Dict[str, Any]] = field(default_factory=list)  # [{name,cmd,exit,output_tail}]
     error: str = ""
 

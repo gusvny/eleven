@@ -7,30 +7,35 @@
 //   全局场景 ticket-session-restore 的 browser 半已随本票同步反转为同一契约。
 //
 // High-level steps:
-//   T1 卫兵：拒 3099；测试台健康检查；playwright-core 缺失/台不可达=干净 SKIP；
-//      侧栏无工单行=SKIP（环境无 fixture）。
+//   T1 卫兵：拒 3099；测试台健康检查；playwright-core 缺失/台不可达=ENV_FAIL；
+//      侧栏无工单行=ENV_FAIL（环境无 fixture）——t260904-12 三态，绝不 exit 0。
 //   T2 基线快照：data-phase、【工单上下文】消息计数、顶入口 ticket- 行。
 //   T3 点行 1：中列详情开（.wb-d2-steps 在场，t260901-13 同款抽屉锚）；4s 观察窗后
 //      快照计数不变、phase 不变、顶入口无 ticket- 行。
 //   T4 点行 2 → 点回行 1：同样零注入（反复点击零 churn）。
 //   T5 console 零 error / pageerror。
 //
-// Execution contract: stdout last line `SUMMARY pass=<n> skip=<m> fail=<k>`;
-// missing deps → clean SKIP (exit 0); FAIL>0 → exit 1. Isolated console
+// Execution contract (t260904-12 三态): stdout last line
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; missing deps → env_fail
+// (exit 2); FAIL>0 或全腿 na → exit 1. Isolated console
 // SUYOU_TEST_CONSOLE (default 127.0.0.1:3199); hard guard: never 3099.
 
 const BASE = (process.env.SUYOU_TEST_CONSOLE ?? 'http://127.0.0.1:3199').replace(/\/$/, '');
 const results = [];
+const STATUSES = new Set(['pass', 'fail', 'env_fail', 'na']);;
 function record(name, status, detail = '') {
-  results.push({ name, status, detail });
-  console.log(`[${status.toUpperCase()}] ${name}${detail ? ` — ${detail}` : ''}`);
+  if (!STATUSES.has(status)) throw new Error(`非法状态词 ${status}（词表 pass/fail/env_fail/na）`);;
+  results.push({ name, status, detail });;
+  console.log(`[${status.toUpperCase()}] ${name}${detail ? ` — ${detail}` : ''}`);;
 }
 function summarize() {
-  const p = results.filter(r => r.status === 'pass').length;
-  const s = results.filter(r => r.status === 'skip').length;
-  const f = results.filter(r => r.status === 'fail').length;
-  console.log(`SUMMARY pass=${p} skip=${s} fail=${f}`);
-  process.exit(f > 0 ? 1 : 0);
+  const p = results.filter(r => r.status === 'pass').length;;
+  const e = results.filter(r => r.status === 'env_fail').length;;
+  const n = results.filter(r => r.status === 'na').length;;
+  const f = results.filter(r => r.status === 'fail').length;;
+  const allNa = results.length > 0 && n === results.length;;
+  console.log(`SUMMARY pass=${p} fail=${f} env_fail=${e} na=${n}`);;
+  process.exit(f > 0 || allNa ? 1 : e > 0 ? 2 : 0);;
 }
 
 if (BASE.includes(':3099')) {
@@ -52,7 +57,7 @@ async function browserScenarios() {
     if (!c) continue;
     try { pw = await import(c); break; } catch { /* next */ }
   }
-  if (!pw) { record('browser/deps', 'skip', 'playwright-core unavailable'); return; }
+  if (!pw) { record('browser/deps', 'env_fail', 'playwright-core unavailable'); return; }
   let browser, context, page;
   try {
     browser = await pw.chromium.launch({ headless: true });
@@ -60,7 +65,7 @@ async function browserScenarios() {
     page = await context.newPage();
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });
   } catch (err) {
-    record('browser/deps', 'skip', `console/browser unreachable: ${String(err).slice(0, 120)}`);
+    record('browser/deps', 'env_fail', `console/browser unreachable: ${String(err).slice(0, 120)}`);
     try { await browser?.close(); } catch { /* noop */ }
     return;
   }
@@ -71,7 +76,7 @@ async function browserScenarios() {
   try {
     await page.waitForSelector('.wb-ticket-row2', { timeout: 12000 });
   } catch {
-    record('browser/fixture-ticket-row', 'skip', 'no ticket row rendered in test console sidebar');
+    record('browser/fixture-ticket-row', 'env_fail', 'no ticket row rendered in test console sidebar');
     try { await browser.close(); } catch { /* noop */ }
     return;
   }
@@ -121,7 +126,7 @@ async function browserScenarios() {
     await clickRowAndAssertNoSwitch(1, 't4-second-row');
     await clickRowAndAssertNoSwitch(0, 't4-back-first');
   } else {
-    record('t4-repeat-clicks', 'skip', 'need >=2 ticket rows');
+    record('t4-repeat-clicks', 'env_fail', 'need >=2 ticket rows');
   }
 
   // T5 console hygiene
@@ -133,7 +138,7 @@ async function browserScenarios() {
 
 const healthy = await consoleHealthy();
 if (!healthy) {
-  record('console/health', 'skip', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
+  record('console/health', 'env_fail', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
   summarize();
 }
 record('console/health', 'pass', BASE);

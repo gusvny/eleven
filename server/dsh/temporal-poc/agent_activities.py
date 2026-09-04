@@ -2891,10 +2891,12 @@ async def _run_scenarios(wt: Path, ticket_id: str) -> IntegrationRunResult:
     out.ran = int(res.get("ran") or 0)
     out.passed = int(res.get("pass") or 0)
     out.failed = int(res.get("fail") or 0)
+    out.env_fail = int(res.get("env_fail") or 0)   # t260904-12：可缺席读法兼容旧闸
     out.details = [{"name": s.get("name", ""), "cmd": "", "exit": int(s.get("exit") or 0),
                     "output_tail": s.get("output_tail") or ""}
                    for s in (res.get("scenarios") or [])]
-    activity.logger.info("[%s] 场景汇总：ran=%s pass=%s fail=%s", ticket_id, out.ran, out.passed, out.failed)
+    activity.logger.info("[%s] 场景汇总：ran=%s pass=%s fail=%s env_fail=%s",
+                         ticket_id, out.ran, out.passed, out.failed, out.env_fail)
     return out
 
 

@@ -9,7 +9,7 @@
  *   - Every downstream ticket (config-ization, in-place reversal, physical
  *     relocation) depends on the contract doc as its 前置依据; a missing or
  *     partial contract means future config tickets have no spec to implement
- *     fail-closed behavior against (silent-skip becomes the default).
+ *     fail-closed behavior against (silent pass-through becomes the default).
  *   - The five admitted contract items must each carry a schema version and a
  *     three-state closing semantics clause (缺失/畸形/版本不支持), where
  *     malformed input fails closed with a precise error — never silently
@@ -55,7 +55,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-let pass = 0, fail = 0, skip = 0
+let pass = 0, fail = 0, envFail = 0, na = 0
 function ok(cond, label) {
   if (cond) { pass++; console.log(`  ok ${label}`) }
   else { fail++; console.error(`  FAIL ${label}`) }
@@ -287,5 +287,6 @@ try {
   // repo-read-only test: no fixtures, no env mutation, nothing to clean up.
 }
 
-console.log(`\nSUMMARY pass=${pass} skip=${skip} fail=${fail}`)
-process.exit(fail === 0 ? 0 : 1)
+console.log(`\nSUMMARY pass=${pass} fail=${fail} env_fail=${envFail} na=${na}`)
+const allNa = na > 0 && pass + fail + envFail === 0
+process.exit(fail > 0 || allNa ? 1 : envFail > 0 ? 2 : 0)

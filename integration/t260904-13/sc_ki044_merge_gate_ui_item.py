@@ -83,7 +83,7 @@ check("G3b 红灯处置指引保留（capture.mjs 出路仍在台面）",
       "capture.mjs" in sec36)
 
 # ---- G4 diff 故障 fail-closed（红不静默）----
-check("G4 git 层失败 → 该项红并带错误信息（无静默 SKIP 路径）",
+check("G4 git 层失败 → 该项红并带错误信息（无静默绿路径）",
       "err" in sec36 and ("green" in sec36 or "红" in sec36),
       "3.6 段缺 err→红 结构")
 

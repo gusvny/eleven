@@ -15,12 +15,14 @@ intent（用户可感知行为）：工单模板只留 dev-lane——
 
 分态：A/B/D/E 与 C 的 create 半零依赖恒跑（shared/ticket 均 stdlib-only）；
 C 的 ticket-start 半需引擎 venv（client.py 模块顶 import temporalio）——解释器
-缺失=干净 SKIP 并注明（KI-020③ 泳道 venv 缺口是已知环境事实，不静默绿）。
+缺失=打印 `ENV_FAIL: <缺什么>` 并 exit 2（三态契约：缺环境绝不 exit 0 假绿；
+KI-020③ 泳道 venv 缺口是已知环境事实）。
 
 Hermetic：零网络零端口零真 Temporal（ticket-start 拒收发生在 _connect 之前，
 连接顺序见 client.py cmd_ticket_start；create 走 staged 注册表不触真注册表）；
 不触 3099；cwd=仓库根；秒级。
-退出契约：stdout 末行 SUMMARY pass=N skip=M fail=K；exit 1 iff fail>0。
+退出契约（三态 §7.3）：stdout 末行 SUMMARY pass=N fail=K env_fail=E na=0；
+exit 0=PASS；exit 1=FAIL 产品红；exit 2=ENV_FAIL 环境红（缺 venv 等）。
 
 **本场景锚定 260904 退役落地后的契约——t260904-08 implement 段落地前红属预期
 （TDD 信号），arbitrate/merge 期必须绿。**
@@ -35,7 +37,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lib_retire as lib  # noqa: E402
 
-passed, failed, skipped = 0, 0, 0
+passed, failed, env_failed = 0, 0, 0
 
 
 def check(cond, label):
@@ -48,10 +50,11 @@ def check(cond, label):
         print("  FAIL %s" % label)
 
 
-def skip(label, why):
-    global skipped
-    skipped += 1
-    print("  skip %s | %s" % (label, why))
+def env_fail(why):
+    """缺环境（三态契约）：打印 ENV_FAIL 后由调用方 exit 2，绝不计 PASS/FAIL。"""
+    global env_failed
+    env_failed += 1
+    print("  ENV_FAIL %s" % why)
 
 
 def main():
@@ -121,8 +124,10 @@ def main():
 
         py = lib.venv_python()
         if py is None:
-            skip("ticket-start 拒收面（CLI）",
-                 "引擎 venv 解释器缺失（client.py 模块顶 import temporalio；KI-020③）")
+            env_fail("引擎 venv 解释器缺失（client.py 模块顶 import temporalio；KI-020③）")
+            print("SUMMARY pass=%d fail=%d env_fail=%d na=0"
+                  % (passed, failed, env_failed))
+            return 2
         else:
             for tid in lib.RETIRED_TEMPLATE_IDS:
                 rc, out = lib.run_client(py, "ticket-start", {"template_id": tid}, timeout=60)
@@ -159,8 +164,8 @@ def main():
           "USAGE/示例零 content-pipeline 调用教学（防半截清除误导操作面；"
           "带退役标注的说明行归负扫描场景豁免口径管）")
 
-    print("SUMMARY pass=%d skip=%d fail=%d" % (passed, skipped, failed))
-    return 1 if failed else 0
+    print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (passed, failed, env_failed))
+    return 2 if env_failed else (1 if failed else 0)
 
 
 if __name__ == "__main__":

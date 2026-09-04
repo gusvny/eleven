@@ -17,7 +17,8 @@ Safety: real spawn is impossible here — agent_activities._prepare_agent_spawn 
 monkeypatched to a recorder that raises a sentinel, so a buggy short-circuit shows
 up as a recorded spawn attempt, never as a real agent process.
 
-Needs temporalio SDK (prefers server/dsh/temporal-poc/.venv); clean SKIP otherwise.
+Needs temporalio SDK (prefers server/dsh/temporal-poc/.venv); missing -> ENV_FAIL
+exit 2（三态契约定稿 §7.3「闸内无 SKIP」：缺 SDK=环境红）.
 cwd = lane root.
 """
 import asyncio
@@ -33,9 +34,9 @@ sys.path.insert(0, "server/dsh/temporal-poc")
 try:
     import temporalio  # noqa: F401
 except Exception:
-    print("SKIP temporalio SDK unavailable（venv 缺失，真覆盖在有 SDK 的顶层环境跑）")
-    print("SUMMARY pass=0 skip=1 fail=0")
-    sys.exit(0)
+    print("ENV_FAIL: temporalio SDK unavailable（venv 缺失，真覆盖在有 SDK 的顶层环境跑）")
+    print("SUMMARY pass=0 fail=0 env_fail=1 na=0")
+    sys.exit(2)
 
 import shared  # noqa: E402
 import agent_activities as aa  # noqa: E402
@@ -193,7 +194,7 @@ def main():
     check("no-residue", not any(n.startswith(EPIC_BASE) for n in residue),
           str(residue))
 
-    print("SUMMARY pass=%d skip=0 fail=%d" % (passed, failed))
+    print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (passed, failed))
     sys.exit(1 if failed else 0)
 
 

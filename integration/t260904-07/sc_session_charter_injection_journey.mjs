@@ -10,20 +10,23 @@
 //   守卫锚）不同层：本场景锚真实浏览器端到端。
 //
 // High-level steps:
-//   T0 卫兵链：拒 3099 → playwright-core 缺失=SKIP → 隔离台不可达=SKIP → 项目行
-//      未渲染=SKIP → charter 端点 404=源锚复核（已接线未部署=fail，pre-merge=skip）。
+//   T0 卫兵链：拒 3099 → playwright-core 缺失=ENV_FAIL → 隔离台不可达=ENV_FAIL →
+//      项目行未渲染=ENV_FAIL → charter 端点 404=源锚复核（已接线未部署=fail，
+//      pre-merge=na）。
 //   T1 新建注入：点 + → 新 tab 出现 → 会话区出现 charter 特征串（实值化，无 {{ 残留）
 //      → 截图证据（.suyou/screenshots/，KI-044 UI 票证据自觉）。
-//      分级：30s 未上屏且 console 有注入链错误=fail；未上屏且零错误=skip（无凭据
+//      分级：30s 未上屏且 console 有注入链错误=fail；未上屏且零错误=env_fail（无凭据
 //      隔离台 kick-off 链路受限——本场景断言上限=注入链 UI 面，agent 回复链不在
 //      断言面，有凭据环境人工复判）。
 //   T2 切换零注入：切到相邻 tab 再切回 → 「的项目会话」特征串出现次数不变（无第二条
-//      charter）、tab 集合不变（守卫没把切换当新建）。单 tab 环境该腿 SKIP。
+//      charter）、tab 集合不变（守卫没把切换当新建）。单 tab 环境该腿 ENV_FAIL。
 //   T3 恢复零注入：reload → 过模态网 → 点原 tab → 特征串次数仍不变、tab 集合不变。
 //   T4 console 卫生：零 console error / pageerror（过滤无凭据环境已知凭据类噪音）。
 //
-// Execution contract: stdout last line `SUMMARY pass=<n> skip=<m> fail=<k>`;
-// 依赖缺失一律干净 SKIP (exit 0)；FAIL>0 → exit 1。隔离台 SUYOU_TEST_CONSOLE
+// Execution contract (t260904-12 三态): stdout last line
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; 依赖缺失一律 env_fail (exit 2，
+// 含「未上屏且仅凭据类错误」——凭据缺失归环境)；FAIL>0 或全腿 na → exit 1。
+// 隔离台 SUYOU_TEST_CONSOLE
 // （默认 127.0.0.1:3199）；硬守卫：绝不 3099。
 
 import { mkdirSync } from 'node:fs';
@@ -39,9 +42,9 @@ for (const c of [process.env.SUYOU_PLAYWRIGHT_PATH, 'playwright-core', localPw])
   if (!c) continue;
   try { pw = await import(c); break; } catch { /* next */ }
 }
-if (!pw) { record('t0/browser-deps', 'skip', 'playwright-core unavailable'); summarize(); }
+if (!pw) { record('t0/browser-deps', 'env_fail', 'playwright-core unavailable'); summarize(); }
 if (!(await consoleHealthy())) {
-  record('t0/console-health', 'skip', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
+  record('t0/console-health', 'env_fail', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
   summarize();
 }
 
@@ -57,14 +60,14 @@ if (!(await consoleHealthy())) {
         const mod = readFileSync('server/dsh/workbench/src/host/session-charter.ts', 'utf8');
         anchored = node.includes(CHARTER_EP) || (node.includes('session-charter') && mod.includes(CHARTER_EP));
       } catch { /* 按未实现 */ }
-      record('t0/endpoint-live', anchored ? 'fail' : 'skip',
+      record('t0/endpoint-live', anchored ? 'fail' : 'na',
         anchored ? '源码已接线但活体 404——lib 未重建或测试台未载新代码' : 'endpoint not implemented yet (pre-merge)');
       summarize();
     }
     live = r.ok;
-    if (!live) { record('t0/endpoint-live', 'skip', `charter 端点 → ${r.status}，旅程前置不满足`); summarize(); }
+    if (!live) { record('t0/endpoint-live', 'env_fail', `charter 端点 → ${r.status}，旅程前置不满足`); summarize(); }
   } catch (e) {
-    record('t0/endpoint-live', 'skip', `charter 端点不可达：${String(e).slice(0, 100)}`);
+    record('t0/endpoint-live', 'env_fail', `charter 端点不可达：${String(e).slice(0, 100)}`);
     summarize();
   }
   record('t0/endpoint-live', 'pass', 'charter 端点活体可达');
@@ -108,7 +111,7 @@ try {
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });
   await dismissModals(page);
 } catch (e) {
-  record('t0/page-open', 'skip', `browser/page unreachable: ${String(e).slice(0, 120)}`);
+  record('t0/page-open', 'env_fail', `browser/page unreachable: ${String(e).slice(0, 120)}`);
   try { await browser?.close(); } catch { /* noop */ }
   summarize();
 }
@@ -116,7 +119,7 @@ try {
 try {
   await page.waitForSelector('[data-wb-psess-row]', { timeout: 12000 });
 } catch {
-  record('t0/fixture-psess-row', 'skip', 'no project session row rendered in test console sidebar');
+  record('t0/fixture-psess-row', 'env_fail', 'no project session row rendered in test console sidebar');
   try { await browser.close(); } catch { /* noop */ }
   summarize();
 }
@@ -151,7 +154,7 @@ try {
 
 if (!injected) {
   const noise = /api[_ ]?key|credential|unauthorized|401/i.test(injectedErr);
-  record('t1/charter-first-message', noise ? 'skip' : 'fail',
+  record('t1/charter-first-message', noise ? 'env_fail' : 'fail',
     noise ? '30s 未上屏且仅凭据类错误——无凭据隔离台 kick-off 链路受限（有凭据环境人工复判）'
           : `30s 内会话区未出现 charter 特征串${injectedErr ? `；console: ${injectedErr}` : '；console 零错误'}`);
 } else {
@@ -164,13 +167,13 @@ if (!injected) {
     await page.screenshot({ path: '.suyou/screenshots/t260904-07-charter-first-message.png', fullPage: true });
     record('t1/screenshot-evidence', 'pass', '.suyou/screenshots/t260904-07-charter-first-message.png（KI-044 证据自觉）');
   } catch (e) {
-    record('t1/screenshot-evidence', 'skip', `截图失败：${String(e).slice(0, 100)}`);
+    record('t1/screenshot-evidence', 'env_fail', `截图失败：${String(e).slice(0, 100)}`);
   }
 
   // ---- T2 切换零注入 ----
   const tabs = await rowRead();
   if (tabs.length < 2) {
-    record('t2/switch-no-reinject', 'skip', '单 tab 环境无切换面');
+    record('t2/switch-no-reinject', 'env_fail', '单 tab 环境无切换面');
   } else {
     const before = markCount(await chatText());
     const curIdx = 0; // 新建后 active=新 tab（先例语义）；切相邻再切回

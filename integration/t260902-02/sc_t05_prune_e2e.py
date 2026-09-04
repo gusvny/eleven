@@ -11,9 +11,14 @@
 
 e2e 手法：自带临时 worker 造 3 张 closed「票」（workflow type=DevLaneWorkflow、
 专属队列前缀、ProjectKey SA=itestkey，与真票同列表面），data 目录用 tmp fixture。
-**只连显式设置的测试环境**（SUYOU_TARGET_HOST 未设/=生产缺省 7233 → SKIP）。
+**只连显式设置的测试环境**（SUYOU_TARGET_HOST 未设/=生产缺省 7233 → ENV_FAIL）。
+三态契约定稿 §7.3「闸内无 SKIP」：0=PASS、1=FAIL（产品红）、2=ENV_FAIL（环境红）。
 
 跑法：python3 integration/t260902-02/t05_prune_e2e.py（cwd=泳道根）
+
+依赖两面拆清（t260904-12 乙段）：本场景**无模型面**（FakeTicket 不调 LLM，
+ticket-prune 是本地 CLI，不需要任何模型凭据），唯一外部依赖是 Temporal 台面
+——台不可达=环境红，原因文案精确点名「17233 测试台不可达」，不笼统报凭据。
 """
 import asyncio
 import json
@@ -170,12 +175,37 @@ async def scenario():
         await worker.shutdown()
 
 
+def bench_reachable(host, timeout=3.0):
+    """台面预检：TCP 能连上 Temporal 测试台才算供台（连接被拒/超时=不可达）。"""
+    import socket
+    if ":" in host:
+        h, _, p = host.rpartition(":")
+        try:
+            port = int(p)
+        except ValueError:
+            return False
+    else:
+        h, port = host, 7233
+    try:
+        with socket.create_connection((h, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def main():
     if sdk_err:
-        L.skip1("全部用例", sdk_err)
+        L.env1("全部用例", sdk_err)
         return L.finish()
     if guard_err:
-        L.skip1("全部用例", guard_err)
+        L.env1("全部用例", guard_err)
+        return L.finish()
+    # 台面预检（t260904-12 乙段）：显式指台但不可达 → 精确 ENV_FAIL 点名测试台，
+    # 不落进 Client.connect 异常被误记成产品红。本场景无模型面，红只可能来自台。
+    if not bench_reachable(shared.TARGET_HOST):
+        L.env1("全部用例",
+               "17233 测试台不可达（SUYOU_TARGET_HOST=%s 连不通；缺台=环境红，"
+               "本场景无模型面，不需要 LLM 凭据）" % shared.TARGET_HOST)
         return L.finish()
     try:
         asyncio.run(asyncio.wait_for(scenario(), 300))

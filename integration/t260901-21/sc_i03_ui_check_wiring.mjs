@@ -134,5 +134,5 @@ for (const k of Object.keys(saved)) {
   else process.env[k] = saved[k]
 }
 
-console.log(`SUMMARY pass=${pass} skip=0 fail=${fail}`)
+console.log(`SUMMARY pass=${pass} fail=${fail} env_fail=0 na=0`)
 process.exit(fail ? 1 : 0)

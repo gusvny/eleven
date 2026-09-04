@@ -8,10 +8,11 @@
 //   smoke 直测渲染纯函数（内存面），本场景锚 HTTP 可达面（真宿主真文件真路由）。
 //
 // High-level steps:
-//   T0 卫兵：拒 3099；隔离台不可达=干净 SKIP。
+//   T0 卫兵：拒 3099；隔离台不可达=ENV_FAIL（exit 2）。
 //   T1 端点活性判定：GET ?project=<在案 key> 得 404 时做源锚复核——node.ts/模块含
 //      注册路径字面量=「已实现未部署（lib 未重建或测试台未重启）」→ fail（精确归因）；
-//      源锚也不在=「未实现（pre-merge）」→ 干净 skip（merge 部署后自动生效）。
+//      源锚也不在=「未实现（pre-merge）」→ na（系统状态：feature 未在案，该腿无对象；
+//      全腿 na → exit 1 产品红）。
 //   T2 命中腿（在案 key 优先 sandbar，key 动态化不绑数据）：200 + {ok,charter} 形状、
 //      charter 含 key 实值（{{project_key}} 已替换）、零 {{ 占位符残留（统一渲染）、
 //      含命中分段头。
@@ -22,8 +23,9 @@
 //   （「文件缺失回落」「改文件即生效」两腿需对真宿主仓文件做写操作，3099/受控文件
 //   红线下不做活体注入——回落由 smoke 纯函数直测覆盖，现读现渲染列入人工走查。）
 //
-// Execution contract: stdout last line `SUMMARY pass=<n> skip=<m> fail=<k>`;
-// 依赖缺失一律干净 SKIP (exit 0)；FAIL>0 → exit 1。隔离台 SUYOU_TEST_CONSOLE
+// Execution contract (t260904-12 三态): stdout last line
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; 依赖缺失一律 env_fail (exit 2)；
+// FAIL>0 或全腿 na → exit 1。隔离台 SUYOU_TEST_CONSOLE
 // （默认 127.0.0.1:3199）；硬守卫：绝不 3099。
 
 import { readFileSync } from 'node:fs';
@@ -32,20 +34,24 @@ import { BASE, CHARTER_EP, refuseProductionConsole, consoleHealthy, fetchProject
 refuseProductionConsole();
 
 const results = [];
+const STATUSES = new Set(['pass', 'fail', 'env_fail', 'na']);
 const emit = (name, status, detail = '') => {
-  results.push({ status });
+  if (!STATUSES.has(status)) throw new Error(`非法状态词 ${status}（词表 pass/fail/env_fail/na）`);
+  results.push({ name, status, detail });
   console.log(`[${status.toUpperCase()}] ${name}${detail ? ' — ' + detail : ''}`);
 };
 const summarize = () => {
   const p = results.filter(r => r.status === 'pass').length;
-  const s = results.filter(r => r.status === 'skip').length;
+  const e = results.filter(r => r.status === 'env_fail').length;
+  const n = results.filter(r => r.status === 'na').length;
   const f = results.filter(r => r.status === 'fail').length;
-  console.log(`SUMMARY pass=${p} skip=${s} fail=${f}`);
-  process.exit(f > 0 ? 1 : 0);
+  const allNa = results.length > 0 && n === results.length;
+  console.log(`SUMMARY pass=${p} fail=${f} env_fail=${e} na=${n}`);
+  process.exit(f > 0 || allNa ? 1 : e > 0 ? 2 : 0);
 };
 
 if (!(await consoleHealthy())) {
-  emit('console/health', 'skip', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
+  emit('console/health', 'env_fail', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
   summarize();
 }
 emit('console/health', 'pass', BASE);
@@ -56,7 +62,7 @@ const get = (qs = '') => fetch(`${BASE}${CHARTER_EP}${qs}`, { signal: AbortSigna
 const keys = await fetchProjectKeys();
 const hitKey = keys.includes('sandbar') ? 'sandbar' : (keys[0] ?? null);
 if (!hitKey) {
-  emit('t0/project-registry', 'skip', '测试台项目注册表为空，命中腿无 key 可用');
+  emit('t0/project-registry', 'env_fail', '测试台项目注册表为空，命中腿无 key 可用');
   summarize();
 }
 
@@ -70,7 +76,7 @@ if (probe.status === 404) {
     anchored = node.includes(CHARTER_EP) || (node.includes('session-charter') && mod.includes(CHARTER_EP));
   } catch { /* 源读不到按未实现处理 */ }
   if (anchored) emit('t1/endpoint-live', 'fail', '源码已接线但活体 404——lib 未重建或测试台未载新代码');
-  else emit('t1/endpoint-live', 'skip', 'endpoint not implemented yet (pre-merge)；merge 部署后本场景自动生效');
+  else emit('t1/endpoint-live', 'na', 'endpoint not implemented yet (pre-merge)；merge 部署后本场景自动生效');
   summarize();
 }
 if (!probe.ok) {

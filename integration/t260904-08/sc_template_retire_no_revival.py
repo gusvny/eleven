@@ -26,7 +26,9 @@ workflow 类名与 content-pipeline 模板记号在写集五面（引擎 / tools
 （分工 kind/测试词汇/函数名撞词，取舍见 lib_retire 模块注）。
 
 Hermetic：只读扫描 + 临时目录自证样本，零网络零端口；cwd=仓库根；秒级。
-退出契约：stdout 末行 SUMMARY pass=N skip=M fail=K；exit 1 iff fail>0。
+退出契约（三态 §7.3）：stdout 末行 SUMMARY pass=N fail=K env_fail=E na=0；
+exit 0=PASS；exit 1=FAIL 产品红；exit 2=ENV_FAIL 环境红（本场景纯离线扫描，
+无缺环境分态，env_fail 恒 0）。
 
 **退役落地前红属预期（TDD 信号）；扫描红=列出的 file:line 即待清残留清单，
 arbitrate/merge 期必须绿。**
@@ -40,7 +42,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lib_retire as lib  # noqa: E402
 
-passed, failed, skipped = 0, 0, 0
+passed, failed, env_failed = 0, 0, 0
 
 
 def check(cond, label):
@@ -51,12 +53,6 @@ def check(cond, label):
     else:
         failed += 1
         print("  FAIL %s" % label)
-
-
-def skip(label, why):
-    global skipped
-    skipped += 1
-    print("  skip %s | %s" % (label, why))
 
 
 def main():
@@ -128,8 +124,8 @@ def main():
     else:
         check(True, "写集五面零无豁免退役活引用")
 
-    print("SUMMARY pass=%d skip=%d fail=%d" % (passed, skipped, failed))
-    return 1 if failed else 0
+    print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (passed, failed, env_failed))
+    return 2 if env_failed else (1 if failed else 0)
 
 
 if __name__ == "__main__":

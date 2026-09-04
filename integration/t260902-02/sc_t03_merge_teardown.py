@@ -4,7 +4,7 @@
 1) _squash_merge defer_teardown 双语义（git fixture 真跑）：False（缺省=旧历史
    语义）落账后内联拆 worktree+删分支；True 落账后泳道原样保留（交 teardown_lane）。
 2) MergeArgs 旧 payload 缺 defer_teardown 键 → temporalio 反序列化回落默认 False
-   （真 temporalio 实证；环境无 SDK 则该子用例 SKIP——生产仓 venv 恒有）。
+   （真 temporalio 实证；环境无 SDK 则该子用例记 ENV_FAIL——三态契约定稿 §7.3）。
 3) teardown_lane：defer 后的泳道由它拆（幂等重跑 ok）；非法 branch 回执 ok=False
    点名环节（不抛）。
 4) dev_lane.py 接线源码锁：ARCHIVE_PATCH_ID 门 + archive→teardown 顺序 +
@@ -26,6 +26,15 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 POC = REPO / "server" / "dsh" / "temporal-poc"
+
+# —— SDK 面（t260904-12 乙段）：顶层无 temporalio 则 re-exec 进 poc venv（同 t05
+# ensure_sdk 制式），让「MergeArgs 缺字段解码」真 temporalio 腿在本机可跑，
+# 消掉此前恒 ENV_FAIL 的环境红。venv 也没有 SDK 时 _SDK_ERR 非空，腿 4 记
+# ENV_FAIL（环境红），文案精确到两面：无模型面，纯 SDK/工具面缺失。
+sys.path.insert(0, str(HERE / "lib"))
+import fixture as fx  # noqa: E402
+
+_SDK_ERR = fx.ensure_sdk()[1]
 
 try:
     import temporalio  # noqa: F401
@@ -55,7 +64,7 @@ sys.path.insert(0, str(POC))
 from shared import MergeArgs  # noqa: E402
 import agent_activities as aa  # noqa: E402
 
-PASS = FAIL = SKIP = 0
+PASS = FAIL = ENV_FAIL = 0  # 三态契约：0=PASS、1=FAIL（产品红）、2=ENV_FAIL（环境红）
 
 
 def ok(cond, label):
@@ -68,10 +77,11 @@ def ok(cond, label):
         print("FAIL %s" % label)
 
 
-def skip(label):
-    global SKIP
-    SKIP += 1
-    print("SKIP %s" % label)
+def env_fail(label):
+    """缺依赖（环境红）：计入 env_fail，绝不 exit 0。"""
+    global ENV_FAIL
+    ENV_FAIL += 1
+    print("ENV_FAIL: %s" % label)
 
 
 def git(repo, *args):
@@ -141,7 +151,8 @@ def main():
         from temporalio.api.common.v1 import Payload
         from temporalio.converter import DataConverter
     except ImportError:
-        skip("MergeArgs 缺字段解码（环境无 temporalio SDK；生产 venv 恒有）")
+        env_fail("MergeArgs 缺字段解码（temporalio SDK 不可用：%s；本场景无模型面，"
+                 "缺的是 SDK/工具面）" % (_SDK_ERR or "顶层与 poc venv 均无"))
     else:
         pc = DataConverter.default.payload_converter
         old_payload = Payload(metadata={"encoding": b"json/plain"},
@@ -174,7 +185,9 @@ def main():
     ok("await self._blocked(" in src and "归档失败（fail-closed，泳道保留不拆）" in src,
        "归档失败转 blocked、泳道保留（fail-closed 接线）")
 
-    print("SUMMARY pass=%d skip=%d fail=%d" % (PASS, SKIP, FAIL))
+    print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (PASS, FAIL, ENV_FAIL))
+    if ENV_FAIL:
+        return 2
     return 0 if FAIL == 0 else 1
 
 

@@ -11,7 +11,8 @@ Contract under test (integration/cache_probe.py):
   {input:100, cacheRead:900} => 90%, plus 2 broken rows => skip count 2.
 - Read-only: the probe writes nothing (contract stated in its docstring).
 
-cwd = lane root. zstd needed only for the fixture half (clean SKIP otherwise).
+cwd = lane root. zstd needed only for the fixture half (missing -> ENV_FAIL exit 2,
+三态契约定稿 §7.3「闸内无 SKIP」).
 """
 import json
 import os
@@ -23,7 +24,7 @@ import tempfile
 from pathlib import Path
 
 PROBE = Path("integration/cache_probe.py")
-passed, failed, skipped = 0, 0, 0
+passed, failed, env_failed = 0, 0, 0
 
 
 def check(name, cond, detail=""):
@@ -35,10 +36,10 @@ def check(name, cond, detail=""):
         print("FAIL %s %s" % (name, detail))
 
 
-def skip(name, reason):
-    global skipped
-    skipped += 1
-    print("SKIP %s %s" % (name, reason))
+def env_fail(name, reason):
+    global env_failed
+    env_failed += 1
+    print("ENV_FAIL: %s %s" % (name, reason))
 
 
 def run(args, env_path=None):
@@ -52,7 +53,7 @@ def run(args, env_path=None):
 def main():
     if not PROBE.is_file():
         check("probe-exists", False, "integration/cache_probe.py missing")
-        print("SUMMARY pass=%d skip=%d fail=%d" % (passed, skipped, failed))
+        print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (passed, failed, env_failed))
         sys.exit(1)
     check("probe-exists", True)
 
@@ -62,8 +63,8 @@ def main():
     if r.returncode == 2 and "zstd" in (r.stdout + r.stderr):
         check("zstd-missing-exit2", True)
     elif r.returncode == 0:
-        skip("zstd-missing-exit2", "probe exited 0 with PATH stripped — "
-             "zstd-missing branch not exercised (zstd found elsewhere)")
+        env_fail("zstd-missing-exit2", "probe exited 0 with PATH stripped — "
+                 "zstd-missing branch not exercised (zstd found elsewhere)")
     else:
         check("zstd-missing-exit2", False,
               "rc=%d out=%s" % (r.returncode, (r.stdout + r.stderr)[:200]))
@@ -108,13 +109,13 @@ def main():
                          and p.name != "session.jsonl"]
             check("read-only", not leftovers, str(leftovers))
         else:
-            skip("fixture-exit0+hit-rate+skip-counted+read-only",
-                 "zstd binary missing")
+            env_fail("fixture-exit0+hit-rate+skip-counted+read-only",
+                     "zstd binary missing")
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
-    print("SUMMARY pass=%d skip=%d fail=%d" % (passed, skipped, failed))
-    sys.exit(1 if failed else 0)
+    print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (passed, failed, env_failed))
+    sys.exit(2 if env_failed else (1 if failed else 0))
 
 
 if __name__ == "__main__":

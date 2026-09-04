@@ -30,16 +30,16 @@ def fail(msg, code=2):
 
 
 def probe_session(f: Path):
-    """解压一个会话文件，返回 (samples, skipped)。sample=(input,output,cache_read)。"""
+    """解压一个会话文件，返回 (samples, bad_n)。sample=(input,output,cache_read)。"""
     r = subprocess.run(["zstd", "-dc", str(f)], capture_output=True)
     if r.returncode != 0:
         return [], 1
-    samples, skipped = [], 0
+    samples, bad_n = [], 0
     for ln in r.stdout.decode("utf-8", errors="replace").splitlines():
         try:
             obj = json.loads(ln)
         except Exception:
-            skipped += 1
+            bad_n += 1
             continue
         usage = obj.get("usage") if isinstance(obj, dict) else None
         if usage is None and isinstance(obj, dict) and isinstance(obj.get("data"), dict):
@@ -51,11 +51,11 @@ def probe_session(f: Path):
         o = usage.get("outputTokens") or 0
         c = usage.get("cacheReadTokens") or 0
         if not all(isinstance(v, int) for v in (i, o, c)):
-            skipped += 1
+            bad_n += 1
             continue
         if i + o + c > 0:
             samples.append((i, o, c))
-    return samples, skipped
+    return samples, bad_n
 
 
 def main():
@@ -68,26 +68,26 @@ def main():
         print("[cache_probe] %s/.worktrees 下无会话文件" % root)
         return
     print("%-14s %-52s %8s %10s %10s %7s %6s" %
-          ("ticket", "session", "turns", "input", "cacheRead", "hit%", "skip"))
-    grand_i = grand_c = grand_turns = grand_skip = 0
+          ("ticket", "session", "turns", "input", "cacheRead", "hit%", "bad"))
+    grand_i = grand_c = grand_turns = grand_bad = 0
     for f in sessions:
         parts = f.parts
         ticket = parts[parts.index(".worktrees") + 1]
         sess = f.parent.name
-        samples, skipped = probe_session(f)
+        samples, bad_n = probe_session(f)
         ti = sum(s[0] for s in samples)
         tc = sum(s[2] for s in samples)
         hit = (tc * 100.0 / (ti + tc)) if (ti + tc) else 0.0
         grand_i += ti
         grand_c += tc
         grand_turns += len(samples)
-        grand_skip += skipped
+        grand_bad += bad_n
         print("%-14s %-52s %8d %10d %10d %6.1f%% %6d" %
-              (ticket, sess[:52], len(samples), ti, tc, hit, skipped))
+              (ticket, sess[:52], len(samples), ti, tc, hit, bad_n))
     ghit = (grand_c * 100.0 / (grand_i + grand_c)) if (grand_i + grand_c) else 0.0
     print("-" * 110)
     print("合计：turns=%d input=%d cacheRead=%d 命中率=%.1f%%（约节省 %d 非 cached input tokens）"
-          " 畸形行=%d" % (grand_turns, grand_i, grand_c, ghit, grand_c, grand_skip))
+          " 畸形行=%d" % (grand_turns, grand_i, grand_c, ghit, grand_c, grand_bad))
 
 
 if __name__ == "__main__":

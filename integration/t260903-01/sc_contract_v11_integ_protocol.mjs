@@ -116,6 +116,9 @@ try {
   await fx.cleanup()
 
   // ---------- C. summary contradicts the lines ----------
+  // t260904-12 时序注记：本段与 D 段断言的是 **verify_lane 闸行为**（闸解析器改动
+  // 在乙段票）。甲段（执行器三态化）不动闸，故本段保持现行 F2 语义=真；断言反转
+  // 必须与乙段 verify_lane 改动同票落地（R4 拆两截），不得提前改弱/反转。
   section('C. 汇总行与明细矛盾：判据跟随明细行，汇总行不读不校验')
   fx = await makeFixture()
   fx.write("print('PASS [唯一场景]')\nprint('SCENARIOS ran=9 pass=0 fail=9 (0s)')\n")
@@ -130,6 +133,7 @@ try {
   await fx.cleanup()
 
   // ---------- D. summary-only stdout ----------
+  // 同 C 段时序注记：随乙段闸改动一并反转（仅汇总行且 env_fail>0 → 必红）。
   section('D. 仅汇总行无明细：零场景绿（ran=0，引擎不读汇总）')
   fx = await makeFixture()
   fx.write("print('SCENARIOS ran=3 pass=3 fail=0 (0s)')\n")

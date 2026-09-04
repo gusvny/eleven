@@ -39,7 +39,7 @@
 //       a 33s window (covers 5s list/detail, 5s health+workers, 8s
 //       agent-live and the 30s scan period), and immediately refetches when
 //       visible again. If the browser/emulation cannot produce
-//       document.visibilityState === 'hidden' this scenario SKIPs with the
+//       document.visibilityState === 'hidden' this scenario records env_fail (exit 2) with the
 //       reason (honest coverage declaration, not a dumb guard).
 //   T4  stale-detail race (点 13 跳 11 regression): ticket A's detail response
 //       is delayed; the user clicks ticket B before it lands; the drawer must
@@ -54,8 +54,9 @@
 //       heartbeat-TTL expiry, either acceptable; bounded wait).
 //   T7  hygiene: zero pageerror / console.error across every page.
 //
-// Execution contract: stdout last line `SUMMARY pass=<n> skip=<m> fail=<k>`;
-// FAIL>0 -> exit 1; environment-dependent halves SKIP cleanly (exit 0 with
+// Execution contract (t260904-12 三态): stdout last line
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 或全腿 na -> exit 1;
+// environment-dependent halves record env_fail (exit 2) with
 // reason). Node >= 22.18. Precedent for the two-layer split, stubbing style
 // and infra helpers: lane-parallel-dom.mjs / session-tab-interactions.mjs.
 
@@ -71,17 +72,21 @@ const FIDA = 'it15a' // fixture ticket ids (alnum only; never real tickets)
 const FIDB = 'it15b'
 const MARKER_V2 = '[advanced-by-peer-v2]'
 
-const results = [] // { name, status: 'pass'|'fail'|'skip', detail }
+const results = [] // { name, status: 'pass'|'fail'|'env_fail'|'na', detail }
+const STATUSES = new Set(['pass', 'fail', 'env_fail', 'na']);
 function record(name, status, detail = '') {
-  results.push({ name, status, detail })
-  console.log(`[${status.toUpperCase()}] ${name}${detail ? ` — ${detail}` : ''}`)
+  if (!STATUSES.has(status)) throw new Error(`非法状态词 ${status}（词表 pass/fail/env_fail/na）`);
+  results.push({ name, status, detail });
+  console.log(`[${status.toUpperCase()}] ${name}${detail ? ` — ${detail}` : ''}`);
 }
 function summarize() {
-  const p = results.filter(r => r.status === 'pass').length
-  const s = results.filter(r => r.status === 'skip').length
-  const f = results.filter(r => r.status === 'fail').length
-  console.log(`SUMMARY pass=${p} skip=${s} fail=${f}`)
-  process.exit(f > 0 ? 1 : 0)
+  const p = results.filter(r => r.status === 'pass').length;
+  const e = results.filter(r => r.status === 'env_fail').length;
+  const n = results.filter(r => r.status === 'na').length;
+  const f = results.filter(r => r.status === 'fail').length;
+  const allNa = results.length > 0 && n === results.length;
+  console.log(`SUMMARY pass=${p} fail=${f} env_fail=${e} na=${n}`);
+  process.exit(f > 0 || allNa ? 1 : e > 0 ? 2 : 0);
 }
 
 // ---------------------------------------------------------------- S0 build-contract
@@ -262,7 +267,7 @@ async function dismissOverlays(p) {
 
 /** Open the ticket board via the first project group's 📋 (workbench needs a
  *  projectKey before it renders the ticket list). Returns false if the
- *  console cannot render the board (precheck skip). */
+ *  console cannot render the board (precheck env_fail). */
 async function openBoard(page) {
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(2500)
@@ -464,8 +469,8 @@ async function scenarioHiddenStopsPolling(front, hidden, ctx) {
     vs = await hidden.evaluate('document.visibilityState')
   }
   if (vs !== 'hidden') {
-    record('T3 hidden tab stops polling', 'skip', `browser keeps visibilityState=${vs} for backgrounded pages — cannot cover here`)
-    return '__SKIP__'
+    record('T3 hidden tab stops polling', 'env_fail', `browser keeps visibilityState=${vs} for backgrounded pages — cannot cover here`)
+    return '__ENV_FAIL__'
   }
   const c0 = hidden.__st.counts.total
   const cList0 = hidden.__st.counts.listGet
@@ -575,7 +580,7 @@ async function runBrowser(pw, browser) {
     let boardOk = true
     for (const [nm, p] of [['A', a], ['B', b]]) {
       if (!(await openBoard(p))) {
-        record('S1 precheck', 'skip', `ticket board did not consume the list stub on ${BASE} (tab ${nm})`)
+        record('S1 precheck', 'env_fail', `ticket board did not consume the list stub on ${BASE} (tab ${nm})`)
         boardOk = false
         break
       }
@@ -597,7 +602,7 @@ async function runBrowser(pw, browser) {
     // T2: fresh writer tab D; B reuses its tab.
     const d = await mkPage()
     if (!(await openBoard(d))) {
-      record('T2 write cross-invalidation', 'skip', 'writer tab could not open the board')
+      record('T2 write cross-invalidation', 'env_fail', 'writer tab could not open the board')
     } else {
       try {
         const err = await scenarioWriteCrossInvalidation(b, d)
@@ -609,7 +614,7 @@ async function runBrowser(pw, browser) {
     // T3: D stays front, B is backgrounded.
     try {
       const err = await scenarioHiddenStopsPolling(d, b, ctx)
-      if (err === '__SKIP__') { /* scenario recorded its own skip */ }
+      if (err === '__ENV_FAIL__') { /* scenario recorded its own env_fail */ }
       else if (err) record('T3 hidden tab stops polling', 'fail', err)
       else record('T3 hidden tab stops polling', 'pass', 'zero API requests in 33s hidden, refetch on visible')
     } catch (e) { await failWith('T3 hidden tab stops polling', e) }
@@ -617,7 +622,7 @@ async function runBrowser(pw, browser) {
     // T4: fresh single tab F (the race is single-tab reproducible).
     const f = await mkPage()
     if (!(await openBoard(f))) {
-      record('T4 stale detail cannot overwrite drawer', 'skip', 'race tab could not open the board')
+      record('T4 stale detail cannot overwrite drawer', 'env_fail', 'race tab could not open the board')
     } else {
       try {
         const err = await scenarioStaleDetailRace(f, shared)
@@ -629,7 +634,7 @@ async function runBrowser(pw, browser) {
     // T5: healthy observer H; writer d2 reuses D; hostile pages on demand.
     const h = await mkPage()
     if (!(await openBoard(h))) {
-      record('T5 hostile traffic tolerated', 'skip', 'observer tab could not open the board')
+      record('T5 hostile traffic tolerated', 'env_fail', 'observer tab could not open the board')
     } else {
       try {
         const err = await scenarioFallbackAndHostile(h, d, ctx)
@@ -654,7 +659,7 @@ async function runBrowser(pw, browser) {
 async function main() {
   const [maj, min] = process.versions.node.split('.').map(Number)
   if (maj < 22 || (maj === 22 && min < 18)) {
-    record('node', 'skip', `node ${process.versions.node} < 22.18`)
+    record('node', 'env_fail', `node ${process.versions.node} < 22.18`)
     return summarize()
   }
 
@@ -667,17 +672,17 @@ async function main() {
 
   const healthy = await consoleHealthy()
   if (!healthy) {
-    record('S1 precheck', 'skip', `test console unreachable at ${BASE} (docker compose -f server/dsh/docker-compose.test.yml up -d)`)
+    record('S1 precheck', 'env_fail', `test console unreachable at ${BASE} (docker compose -f server/dsh/docker-compose.test.yml up -d)`)
     return summarize()
   }
   const pw = await loadPlaywright()
   if (!pw) {
-    record('S1 precheck', 'skip', 'playwright-core not resolvable (browser scenarios skipped)')
+    record('S1 precheck', 'env_fail', 'playwright-core not resolvable (browser scenarios not run: env)')
     return summarize()
   }
   const browser = await launchBrowser(pw)
   if (!browser) {
-    record('S1 precheck', 'skip', 'no browser could be launched')
+    record('S1 precheck', 'env_fail', 'no browser could be launched')
     return summarize()
   }
 

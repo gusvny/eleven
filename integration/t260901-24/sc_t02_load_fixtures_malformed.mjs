@@ -37,7 +37,7 @@ try {
 } catch { /* 入口守卫应保证 import 无副作用；import 失败也算未实现 */ }
 if (typeof loadFixtures !== 'function') {
   console.log('  FAIL capture.mjs 未导出 loadFixtures（t260901-24 implement 段应导出该纯函数）')
-  console.log(`\nSUMMARY pass=0 skip=0 fail=1`)
+  console.log(`\nSUMMARY pass=0 fail=1 env_fail=0 na=0`)
   process.exit(1)
 }
 ok(true, 'loadFixtures 已导出（基线可黑盒 import，入口守卫生效）')
@@ -144,5 +144,5 @@ function patchJson(dir, name, fn) {
 }
 import { readFileSync as readText } from 'node:fs'
 
-console.log(`\nSUMMARY pass=${passed} skip=0 fail=${failed}`)
+console.log(`\nSUMMARY pass=${passed} fail=${failed} env_fail=0 na=0`)
 if (failed > 0) { console.log('FAILURES:\n  - ' + failures.join('\n  - ')); process.exit(1) }

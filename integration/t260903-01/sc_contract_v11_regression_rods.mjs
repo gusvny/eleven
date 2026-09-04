@@ -8,7 +8,8 @@
  *     即关闭」许诺了引擎不存在的关闭路径；「五项仅在声明在位时跑」「跳过
  *     tsc/smoke/test」是 v2 退役前的失真自述）；
  *   - 契约文档明文 integration 道无关闭态、关闭惯用法=零场景绿（F1 闭环语义）；
- *   - 契约文档明文 SCENARIOS 汇总行为参考性（不读不校验，F2 语义）；
+ *   - 契约文档明文 SCENARIOS 汇总行双向净判据（v1.8 起 F2「参考性不校验」退役——
+ *     t260904-12 三态化反转：谎报=产品红；引擎侧新语义断言随乙段落地，文案锚先行）；
  *   - verify.yaml 头注指向契约 ②a~②e（commit ④ 的落点锁定）。
  *
  * High-level steps (offline, read-only): read three files, assert absence/presence.
@@ -56,8 +57,14 @@ if (contract === null) {
   ok(/零场景绿/.test(contract), 'B1 关闭惯用法=零场景绿 已明文（F1）')
   ok(/关闭惯用法|无声明级关闭态|没有[^。\n]{0,16}关闭态/.test(contract),
     'B2 integration 道无声明级关闭态 已明文（F1，与 code 道缺失=关闭 相区分）')
-  ok(contract.split('\n').some(l => l.includes('汇总') && /不读|不校验|参考性/.test(l)),
-    'B3 SCENARIOS 汇总行=参考性（引擎不读不校验）已明文（F2）')
+  ok(contract.split('\n').some(l => l.includes('SCENARIOS ran=N') && /env_fail=N na=N/.test(l)),
+    'B3 汇总行五计数形状逐字入约（v1.8，t260904-12）')
+  ok(contract.split('\n').some(l => l.includes('双向净') && /谎报|不一致/.test(l)),
+    'B4 汇总与明细双向净判据已明文（F2 参考性语义 v1.8 退役）')
+  ok(contract.split('\n').some(l => /ENV_FAIL \[场景名\] exit=2/.test(l)),
+    'B5 ENV_FAIL 行字符级格式已入约（三态协议）')
+  ok(contract.split('\n').some(l => /全腿 N\/A/.test(l) && /产品红/.test(l)),
+    'B6 全腿 N/A=产品红已明文（N/A 仅系统状态条件腿）')
 }
 
 section('C. verify.yaml 头注指向契约 ②a~②e（commit④ 落点锁定）')

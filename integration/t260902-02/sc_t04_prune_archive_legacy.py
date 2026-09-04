@@ -83,7 +83,7 @@ sys.path.insert(0, str(POC))
 
 import client  # noqa: E402
 
-PASS = FAIL = SKIP = 0
+PASS = FAIL = ENV_FAIL = 0  # 三态契约：0=PASS、1=FAIL（产品红）、2=ENV_FAIL（环境红）
 ROOT = tempfile.mkdtemp(prefix="t04-sb-")
 
 
@@ -235,7 +235,7 @@ def main():
     finally:
         os.environ.pop("SANDBAR_PROJECTS_DIR", None)
 
-    print("SUMMARY pass=%d skip=%d fail=%d" % (PASS, SKIP, FAIL))
+    print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (PASS, FAIL, ENV_FAIL))
     return 0 if FAIL == 0 else 1
 
 

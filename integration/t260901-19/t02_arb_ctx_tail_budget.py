@@ -35,7 +35,7 @@ def main():
     idx = [i for i, ln in enumerate(lines) if "【机械集成测试结果】" in ln]
     check("arb-ctx-located", len(idx) >= 1, "assembly marker not found")
     if not idx:
-        print("SUMMARY pass=%d skip=0 fail=%d" % (passed, failed))
+        print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (passed, failed))
         sys.exit(1)
 
     blocks = ["\n".join(lines[max(0, i - 8):i + 8]) for i in idx]  # 每个装配块
@@ -48,7 +48,7 @@ def main():
     check("json-payload-intact",
           all(("json.dumps" in b or "_arb_json" in b) and "details" in b for b in blocks))
 
-    print("SUMMARY pass=%d skip=0 fail=%d" % (passed, failed))
+    print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (passed, failed))
     sys.exit(1 if failed else 0)
 
 

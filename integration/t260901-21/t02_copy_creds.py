@@ -3,8 +3,9 @@
 覆盖：per-key 拷贝字节等值 / legacy 回落 / null 不拷 / 目标已存在按 refs 叶子
 合并刷新（KI-016，t260902-09 起取代旧「整段不覆盖」契约；同名叶子 dst 值胜出
 的守卫意图保留）/ 不可读文件 fail-closed 报错含源路径 / 拷贝保留源 mode（0600）。
-全 tmp/env 桩，不读真 ~/.sandbar。退出码 0=绿。合并用例依赖 PyYAML
-（temporal-poc venv；manifest 用 venv 回落链跑），缺失时该用例干净 SKIP。
+全 tmp/env 桩，不读真 ~/.sandbar。三态契约定稿 §7.3：0=PASS、1=FAIL（产品红）、
+2=ENV_FAIL（环境红）。合并用例依赖 PyYAML（temporal-poc venv；manifest 用 venv
+回落链跑），缺失时该用例记 ENV_FAIL（缺依赖=环境红）。
 """
 import logging
 import os
@@ -15,7 +16,7 @@ from pathlib import Path
 
 try:
     import yaml
-except ImportError:  # 裸 python3：合并用例 SKIP，拷贝类用例照跑
+except ImportError:  # 裸 python3：合并用例记 ENV_FAIL（环境红），拷贝类用例照跑
     yaml = None
 
 HAVE_YAML = yaml is not None
@@ -44,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "server" / "dsh" / 
 import agent_activities as aa  # noqa: E402
 
 FAILS = []
+ENV_FAILS = []
 CRED = "version: 1\nrefs:\n  DEEPSEEK_API_KEY: sk-test\n"
 # 合并用例夹具（真实嵌套格式，同 ~/.dsh/.credentials.yaml）
 CRED_STAGED = ("version: 1\nrefs:\n"
@@ -58,6 +60,11 @@ def check(name, cond, detail=""):
     print(("PASS " if cond else "FAIL ") + name + ((" | " + str(detail)) if detail and not cond else ""))
     if not cond:
         FAILS.append(name)
+
+
+def env_fail(name, reason):
+    print("ENV_FAIL: %s | %s" % (name, reason))
+    ENV_FAILS.append(name)
 
 
 class Env:
@@ -126,9 +133,9 @@ def main():
     # 4. 目标已存在 → refs 叶子级合并刷新（KI-016，t260902-09 起的新契约，取代
     #    旧「整段不覆盖」）：源新增叶子追加；同名叶子 dst 值胜出（守卫意图保留：
     #    不抹工单中途换 key 现场）；version 等 seam 自管字段不动；源未被改写。
-    #    需 PyYAML（合并路径软依赖，t260902-09 plan.md）；缺失时干净 SKIP。
+    #    需 PyYAML（合并路径软依赖，t260902-09 plan.md）；缺失时记 ENV_FAIL。
     if not HAVE_YAML:
-        print("skip 目标已存在合并刷新（PyYAML 不可用，见 t260902-09 plan.md）")
+        env_fail("目标已存在合并刷新", "PyYAML 不可用（合并路径软依赖，见 t260902-09 plan.md）")
     else:
         with Env() as e:
             pk = e.perkey(content=CRED_SRC_NEW)
@@ -158,7 +165,7 @@ def main():
             finally:
                 os.chmod(pk, 0o644)  # 拆桩：tmp 目录清理需要
     else:
-        print("skip 不可读 fail-closed（当前 euid=0，权限不生效）")
+        env_fail("不可读 fail-closed", "当前 euid=0，权限不生效（root 权限面=环境条件）")
 
     # 6. project_key 空 = legacy 照拷（=M1-2 前行为，R3 口径）
     with Env() as e:
@@ -168,6 +175,9 @@ def main():
         check("空 key 走 legacy 照拷", (e.dst / ".credentials.yaml").read_text() == "legacy-content\n")
 
     print()
+    if ENV_FAILS:  # 环境红优先于产品红（三态契约定稿 §7.3 退出码优先级）
+        print(f"ENV_FAIL: {len(ENV_FAILS)} -> {ENV_FAILS}")
+        return 2
     if FAILS:
         print(f"FAILED: {len(FAILS)} -> {FAILS}")
         return 1

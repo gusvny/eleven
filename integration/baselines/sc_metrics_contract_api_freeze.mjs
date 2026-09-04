@@ -14,7 +14,7 @@ const check = (name, ok, detail = '') => {
 const DOC = 'docs/design/metrics-api契约v1.md';
 if (!existsSync(DOC)) {
   console.log(`FAIL 契约文档存在 — ${DOC} 不存在`);
-  console.log(`SUMMARY pass=0 skip=0 fail=1`);
+  console.log(`SUMMARY pass=0 fail=1 env_fail=0 na=0`);
   process.exit(1);
 }
 const doc = readFileSync(DOC, 'utf8');
@@ -66,5 +66,5 @@ check('CLI 前门同实现同缓存', /CLI[\s\S]{0,120}(同实现|同缓存|字�
 // ---- 健康视图不进缓存 ----
 check('健康 view 直查不进缓存', /health[\s\S]{0,160}不进缓存|健康[\s\S]{0,160}不进缓存/.test(doc));
 
-console.log(`SUMMARY pass=${pass} skip=0 fail=${fail}`);
+console.log(`SUMMARY pass=${pass} fail=${fail} env_fail=0 na=0`);
 process.exit(fail > 0 ? 1 : 0);

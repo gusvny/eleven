@@ -25,8 +25,8 @@
 //      未知 key → 4xx 可辨。
 //   T7 红线：端口 ≠ 3099；finally 必回收 boot 进程树。
 //
-// 执行契约：stdout 末行 SUMMARY pass=<n> skip=<m> fail=<k>；隔离台依赖缺失=dsh 不可用/
-//   buildTempProfile 失败 → 干净 SKIP（exit 0 注明原因）；实现落地前红属预期（TDD 信号），
+// 执行契约：stdout 末行 SUMMARY 四计数（t260904-12 三态）；隔离台依赖缺失=dsh 不可用/
+//   buildTempProfile 失败 → ENV_FAIL（exit 2 点名原因，不假绿）；实现落地前红属预期（TDD 信号），
 //   arbitrate/merge 期必须绿。
 import { readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -60,7 +60,7 @@ try {
   bench = await bootConsole(projectsRoot);
   bench.__projectsRoot = projectsRoot;
 } catch (e) {
-  record('bench/boot', 'skip', `隔离台依赖缺失（dsh/ui-check profile）：${String(e?.message ?? e).slice(0, 200)}`);
+  record('bench/boot', 'env_fail', `隔离台依赖缺失（dsh/ui-check profile）：${String(e?.message ?? e).slice(0, 200)}`);
   summarize();
 }
 teardownOnExit(bench.teardown);

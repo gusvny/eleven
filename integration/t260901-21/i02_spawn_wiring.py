@@ -69,5 +69,5 @@ if fetch:
        "_fetch_ticket_project 异常降级返回空串（软失败，不弄挂 spawn）")
     ok("timeout" in fetch, "_fetch_ticket_project 查询带超时")
 
-print("SUMMARY pass=%d skip=0 fail=%d" % (PASS, FAIL))
+print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)
