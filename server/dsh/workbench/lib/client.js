@@ -4613,9 +4613,9 @@ function loadPanelState(storage = loadStorage()) {
 	const out = { ...DEFAULT_STATE };
 	if (typeof s.view === "string" && VIEW_SET.has(s.view)) out.view = s.view;
 	if (typeof s.window === "string" && WINDOW_SET.has(s.window)) out.window = s.window;
-	if (typeof s.epic === "string" && s.epic.length > 0) out.epic = cleanStr(s.epic);
+	out.template = "dev-lane";
+	out.epic = "all";
 	if (typeof s.project === "string") out.project = cleanStr(s.project);
-	if (typeof s.template === "string" && s.template.length > 0) out.template = cleanStr(s.template);
 	if (s.shape === "bar" || s.shape === "donut") out.shape = s.shape;
 	return out;
 }
@@ -44828,7 +44828,8 @@ function MetricsPanel(props) {
 	const [data, setData] = (0, react.useState)(null);
 	const [loading, setLoading] = (0, react.useState)(true);
 	const [workflows, setWorkflows] = (0, react.useState)([]);
-	const [epicCodes, setEpicCodes] = (0, react.useState)([]);
+	/** 项目注册表（GET /wf/projects）：启用项目下拉（t260904-04，KI-042）。 */
+	const [projects, setProjects] = (0, react.useState)([]);
 	const rootRef = (0, react.useRef)(null);
 	const [nonce, setNonce] = (0, react.useState)(0);
 	(0, react.useEffect)(() => {
@@ -44857,9 +44858,12 @@ function MetricsPanel(props) {
 				if (!ac.signal.aborted) setWorkflows(w?.result?.workflows ?? (Array.isArray(w?.result) ? w.result : []));
 			} catch {}
 			try {
-				const e = await fetch(`${API$1}/epics`, { signal: ac.signal }).then((r) => r.json());
-				const list = e?.result ?? e ?? [];
-				if (!ac.signal.aborted) setEpicCodes(list.map((x) => x?.code).filter((c) => typeof c === "string" && c.length > 0));
+				const p = await fetch(`${API$1}/projects`, { signal: ac.signal }).then((r) => r.json());
+				const list = p?.result?.projects ?? p?.projects ?? [];
+				if (!ac.signal.aborted) setProjects(list.map((x) => ({
+					key: typeof x?.key === "string" ? x.key : "",
+					name: typeof x?.name === "string" ? x.name : void 0
+				})).filter((x) => x.key.length > 0));
 			} catch {}
 		})();
 		return () => {
@@ -44917,7 +44921,7 @@ function MetricsPanel(props) {
 	}, [props.onClose, props.onPickTicket]);
 	const cards = (0, react.useMemo)(() => data ? kpiCards(data.kpis) : [], [data]);
 	const cacheStatus = data?.cache?.status;
-	const cacheTitle = `时长 v1 = handoff 近似（v2 = 08 终态精确）；token 不含 cacheRead、按窗口内票的全生涯 in+out 合计（口径对账见 integration/t260902-05）；饼图 = 全窗口合计占比（单票平均口径待契约 bump）；缓存 ${typeof cacheStatus === "string" ? cacheStatus : "—"} · source_version ${typeof data?.cache?.source_version === "string" ? data.cache.source_version : "—"}${data?.generatedAt ? ` · ${data.generatedAt}` : ""}`;
+	const cacheTitle = `时长 v1 = handoff 近似（v2 = 08 终态精确）；token 不含 cacheRead、按窗口内票的全生涯 in+out 合计（口径对账见 integration/t260902-05）；饼图 = 全窗口合计占比（单票平均口径待契约 bump）；归档口径交付含多提交（预解/记账提交计入，行数可能高于 squash 真值，见契约增补段）；缓存 ${typeof cacheStatus === "string" ? cacheStatus : "—"} · source_version ${typeof data?.cache?.source_version === "string" ? data.cache.source_version : "—"}${data?.generatedAt ? ` · ${data.generatedAt}` : ""}`;
 	const isTime = state.view === "time";
 	const TABS = [
 		{
@@ -44966,47 +44970,19 @@ function MetricsPanel(props) {
 						}, w))
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
-						value: state.epic,
-						title: "立项",
+						value: state.project,
+						title: "项目（多项目注册表筛选；默认=后端缺省项目）",
 						onChange: (e) => setState((s) => ({
 							...s,
-							epic: e.target.value
+							project: e.target.value
 						})),
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-								value: "all",
-								children: "立项：全部"
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-								value: "none",
-								children: "立项：无"
-							}),
-							epicCodes.map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-								value: c,
-								children: c
-							}, c))
-						]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
-						value: "",
-						disabled: true,
-						title: "M2a 后端默认项目（注册表默认）；按项目筛选随契约 bump",
-						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
 							value: "",
 							children: "项目：默认"
-						})
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
-						value: state.template,
-						title: "模板（决定 stage 轴链序）",
-						onChange: (e) => setState((s) => ({
-							...s,
-							template: e.target.value
-						})),
-						children: workflows.map((w) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-							value: String(w?.id),
-							children: String(w?.name ?? w?.id)
-						}, String(w?.id)))
+						}), projects.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+							value: p.key,
+							children: p.name ? `项目：${p.name}（${p.key}）` : `项目：${p.key}`
+						}, p.key))]
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-m-hint",

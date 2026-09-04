@@ -93,7 +93,8 @@ export function MetricsPanel(props: {
   const [data, setData] = useState<MetricsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [workflows, setWorkflows] = useState<unknown[]>([])
-  const [epicCodes, setEpicCodes] = useState<string[]>([])
+  /** 项目注册表（GET /wf/projects）：启用项目下拉（t260904-04，KI-042）。 */
+  const [projects, setProjects] = useState<{ key: string; name?: string }[]>([])
   const rootRef = useRef<HTMLDivElement | null>(null)
   const [nonce, setNonce] = useState(0)
 
@@ -113,7 +114,11 @@ export function MetricsPanel(props: {
   useEffect(() => { rootRef.current?.focus() }, [])
   useEffect(() => () => { props.openerRef?.current?.focus() }, [props.openerRef])
 
-  /* 模板链 + 立项代号：一次取数（取数失败留空——饼形态降级路径已含模板缺失）。 */
+  /* 模板链 + 项目注册表（t260904-04）：workflows 仍取全量后客户端只取 dev-lane 的
+     stages（饼形态模板链需要；选择器已退役、模板恒 dev-lane，不加后端按模板取参
+     的契约面）。立项代号取数死代码已删（原 ${API}/epics 恒 404，KI-042：死路由
+     不留静默吞错的 fetch）。projects 取数失败=降级只剩「项目：默认」（活路由的
+     瞬时失败有意静默，与 epics 死代码整删口径不同；重开面板即重试）。 */
   useEffect(() => {
     const ac = new AbortController()
     ;(async () => {
@@ -122,10 +127,14 @@ export function MetricsPanel(props: {
         if (!ac.signal.aborted) setWorkflows((w?.result?.workflows ?? (Array.isArray(w?.result) ? w.result : [])) as unknown[])
       } catch { /* 静默：模板缺失走饼形态降级 */ }
       try {
-        const e = await fetch(`${API}/epics`, { signal: ac.signal }).then(r => r.json())
-        const list = (e?.result ?? e ?? []) as unknown[]
-        if (!ac.signal.aborted) setEpicCodes(list.map((x: any) => x?.code).filter((c: unknown): c is string => typeof c === 'string' && c.length > 0))
-      } catch { /* 静默：立项筛选退化为 all/none */ }
+        const p = await fetch(`${API}/projects`, { signal: ac.signal }).then(r => r.json())
+        const list = (p?.result?.projects ?? p?.projects ?? []) as unknown[]
+        if (!ac.signal.aborted) {
+          setProjects(list
+            .map((x: any) => ({ key: typeof x?.key === 'string' ? x.key : '', name: typeof x?.name === 'string' ? x.name : undefined }))
+            .filter((x: { key: string }) => x.key.length > 0))
+        }
+      } catch { /* 静默：项目下拉退化为「默认」 */ }
     })()
     return () => { ac.abort() }
   }, [])
@@ -192,7 +201,7 @@ export function MetricsPanel(props: {
 
   const cards = useMemo(() => (data ? kpiCards(data.kpis) : []), [data])
   const cacheStatus = data?.cache?.status
-  const cacheTitle = `时长 v1 = handoff 近似（v2 = 08 终态精确）；token 不含 cacheRead、按窗口内票的全生涯 in+out 合计（口径对账见 integration/t260902-05）；饼图 = 全窗口合计占比（单票平均口径待契约 bump）；缓存 ${typeof cacheStatus === 'string' ? cacheStatus : '—'} · source_version ${typeof data?.cache?.source_version === 'string' ? data.cache.source_version : '—'}${data?.generatedAt ? ` · ${data.generatedAt}` : ''}`
+  const cacheTitle = `时长 v1 = handoff 近似（v2 = 08 终态精确）；token 不含 cacheRead、按窗口内票的全生涯 in+out 合计（口径对账见 integration/t260902-05）；饼图 = 全窗口合计占比（单票平均口径待契约 bump）；归档口径交付含多提交（预解/记账提交计入，行数可能高于 squash 真值，见契约增补段）；缓存 ${typeof cacheStatus === 'string' ? cacheStatus : '—'} · source_version ${typeof data?.cache?.source_version === 'string' ? data.cache.source_version : '—'}${data?.generatedAt ? ` · ${data.generatedAt}` : ''}`
   const isTime = state.view === 'time'
 
   /* 四 tab（t260902-05③）：后端四视图同实现，全部开放。 */
@@ -216,19 +225,13 @@ export function MetricsPanel(props: {
           onChange={e => setState(s => ({ ...s, window: e.target.value }))}>
           {PANEL_WINDOWS.map(w => <option key={w} value={w}>{w}</option>)}
         </select>
-        <select value={state.epic} title="立项"
-          onChange={e => setState(s => ({ ...s, epic: e.target.value }))}>
-          <option value="all">立项：全部</option>
-          <option value="none">立项：无</option>
-          {epicCodes.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <select value="" disabled title="M2a 后端默认项目（注册表默认）；按项目筛选随契约 bump">
+        <select value={state.project} title="项目（多项目注册表筛选；默认=后端缺省项目）"
+          onChange={e => setState(s => ({ ...s, project: e.target.value }))}>
           <option value="">项目：默认</option>
+          {projects.map(p => <option key={p.key} value={p.key}>{p.name ? `项目：${p.name}（${p.key}）` : `项目：${p.key}`}</option>)}
         </select>
-        <select value={state.template} title="模板（决定 stage 轴链序）"
-          onChange={e => setState(s => ({ ...s, template: e.target.value }))}>
-          {(workflows as any[]).map(w => <option key={String(w?.id)} value={String(w?.id)}>{String(w?.name ?? w?.id)}</option>)}
-        </select>
+        {/* 泳道（模板）与立项下拉已退役（t260904-04 宿主令，KI-042）：模板恒 dev-lane、
+            立项恒 all，由 loadPanelState 归一常量透传后端，不渲染选择器。 */}
         <span className="wb-m-hint" title={cacheTitle}>口径ⓘ</span>
         {data?.cache?.status === 'stale' && (
           <span className="wb-m-degrade" title="当前展示的是缓存快照（可能缺最新票），后台全量刷新中，完成后自动替换">缓存快照 · 刷新中</span>

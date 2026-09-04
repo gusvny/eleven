@@ -74,11 +74,13 @@ async function withStagedEvidence() {
   await writeFile(join(STAGE_DIR, 'weird name.png'), PNG_1x1); // space not in whitelist
 
   // S1: list shape — 200 {ok,result:{files}}, png-whitelist entries only, decoys filtered.
+  let stagedVisible = false; // console 是否看到本 lane 暂存目录（根不匹配=环境事实）
   {
     const { status, body } = await evidenceRequest(STAGE_ID);
     const files = body?.result?.files;
     const shapeOk = status === 200 && body?.ok === true && Array.isArray(files);
     const whitelistOk = shapeOk && files.every(f => /^[A-Za-z0-9._-]+\.png$/.test(f));
+    stagedVisible = shapeOk && files.includes('shot-a.png');
     if (shapeOk && whitelistOk && files.includes('shot-a.png')
       && !files.includes('notes.txt') && !files.includes('weird name.png')) {
       record('server/list-staged', 'pass', `files=${JSON.stringify(files)}`);
@@ -90,12 +92,20 @@ async function withStagedEvidence() {
   }
 
   // S2: bytes round-trip — exact staged bytes, image/png.
+  // 前提门控与 S1 同源：console 根不匹配时暂存文件不可见，roundtrip 必 404——那是
+  // 环境事实（见文件头注「mismatch is an environment fact, not a pass」），按 SKIP
+  // 处置不判 FAIL。守卫缺失曾在隔离台锚根漂移时把本腿打成假红
+  // （t260904-04 arbitrate gen1 修正；前提成立时断言面一字不减）。
   {
-    const { status, type, buf } = await evidenceRequest(STAGE_ID, 'shot-a.png');
-    if (status === 200 && type.includes('image/png') && buf.equals(PNG_1x1)) {
-      record('server/bytes-roundtrip', 'pass');
+    if (!stagedVisible) {
+      record('server/bytes-roundtrip', 'skip', 'staged file not visible — console repo is not this lane root');
     } else {
-      record('server/bytes-roundtrip', 'fail', `status=${status} type=${type} bytes=${buf.length}/${PNG_1x1.length}`);
+      const { status, type, buf } = await evidenceRequest(STAGE_ID, 'shot-a.png');
+      if (status === 200 && type.includes('image/png') && buf.equals(PNG_1x1)) {
+        record('server/bytes-roundtrip', 'pass');
+      } else {
+        record('server/bytes-roundtrip', 'fail', `status=${status} type=${type} bytes=${buf.length}/${PNG_1x1.length}`);
+      }
     }
   }
 

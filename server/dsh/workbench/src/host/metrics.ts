@@ -40,10 +40,10 @@ import { execFile } from 'node:child_process'
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import net from 'node:net'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
 import { runAdminCli } from '../../../suyou-tools.ts'
-import { findProject, loadProjects } from '../../../suyou-projects.ts'
+import { findProject, loadProjects, primaryDir } from '../../../suyou-projects.ts'
 import { listEpics, resolveEpicsDir } from './epics.ts'
 import {
   aggregateTicketUsage, resolveAllSessionFiles, resolveLedgerSessionFiles, stageWindowsFromTimeline,
@@ -65,6 +65,17 @@ export const BLOCKED_SHOW_CAP = 20
  * skipped/reason 顺序，双前门字节级一致不受影响（golden 基线锁定）。
  */
 export const TICKET_CONCURRENCY = Math.max(1, Math.min(8, Number.parseInt(process.env.SUYOU_METRICS_CONCURRENCY ?? '', 10) || 4))
+
+/**
+ * KI-040 null 重探节流门（分钟，t260904-04）：缓存记录 delivery===null 时距
+ * updated_ts 超 TTL 才重探（每票每周期最多一轮 showTicket+git，防「真不可算」票
+ * 每请求重复付费）。env SUYOU_METRICS_REPROBE_TTL_MIN：缺省 60；0=每次必探（仅
+ * 测试用）；负值按 0；非法/缺失按缺省。逐调读取（非模块常量）保测试可注入。
+ */
+function reprobeTtlMin(): number {
+  const v = Number.parseInt(process.env.SUYOU_METRICS_REPROBE_TTL_MIN ?? '', 10)
+  return Number.isFinite(v) ? Math.max(0, v) : 60
+}
 
 /**
  * 有界并发 map：结果按入参序落位；任一任务抛错即整体 reject（Promise.all 语义，
@@ -163,6 +174,15 @@ export interface MetricsDeps {
   checkProject: (key: string) => Promise<{ ok: true } | { ok: false; status: number; error: string }>
   /** 默认项目 key（注册表字母序首个，suyou-projects.ts scanRegistry sort 口径）。 */
   defaultProject: () => Promise<string | null>
+  /**
+   * per-project 主目录解析（t260904-04，KI-043①）：project key → 注册表主目录。
+   * 缺省实现（defaultDeps）对任何注册表合法 key（含默认项目）返回 primaryDir(key)，
+   * buildMetricsResponse 据此换根 deps.repo（git/主仓回落/会话解析随之指向项目主
+   * 目录）——双前门（node.ts/metrics-cli.mjs 同吃 defaultDeps）同修，前门零逻辑。
+   * 未知 key/注册表异常返回 null（回退传入 repo；checkProject 4xx 先拦，仅兜底）。
+   * stubDeps 不带 → 既有测试/golden 零破坏；单测可显式注桩。
+   */
+  repoForProject?: (key: string) => string | null
   /** git：cwd 下跑 args，stdout 原文；失败抛错（调用方软降级）。 */
   git: (cwd: string, args: string[]) => Promise<string>
   now: () => number
@@ -241,6 +261,14 @@ export function defaultDeps(repo: string, now: () => number = Date.now): Metrics
         return [...rows].sort((a, b) => (a.key < b.key ? -1 : 1))[0]!.key
       } catch {
         return null
+      }
+    },
+    repoForProject: (key) => {
+      try {
+        const p = findProject(key)
+        return p ? primaryDir(p) : null
+      } catch {
+        return null // 注册表不可读/隔离条目：回退传入 repo（checkProject 4xx 先拦）
       }
     },
     git: async (cwd, args) => (await execFileP('git', args, { cwd, timeout: 30_000, maxBuffer: 16 * 1024 * 1024 })).stdout,
@@ -449,7 +477,10 @@ export async function computeDelivery(deps: MetricsDeps, ticket: any): Promise<D
   let laneFail = ''
   if (base !== '' && worktree !== '') {
     try {
-      const cwd = join(deps.repo, worktree)
+      // t260904-04（KI-041）：KI-032 后 worktree 恒为绝对路径（锚项目根），join
+      // 第二参不重置基址会拼出 /…/sandbar/Users/... 毒路径杀死全部活口径——绝对
+      // 路径直接用；相对路径旧值兜底 join（向后兼容）。
+      const cwd = isAbsolute(worktree) ? worktree : join(deps.repo, worktree)
       const numstat = await deps.git(cwd, ['diff', `${base}...HEAD`, '--numstat'])
       const { add, del } = parseNumstatTotal(numstat)
       const commits = Number((await deps.git(cwd, ['rev-list', '--count', `${base}..HEAD`])).trim())
@@ -524,6 +555,14 @@ export interface RecordWithAnchor {
   /** 锚点为近似值（旧版缓存记录无锚点，按 rec.computed_at 近似归窗；t260903-09 F3）。
    *  近似锚点只进响应、绝不回写缓存（防近似值永久化成「闭单时刻」）。 */
   anchorApproximated?: boolean
+  /** 近似锚点基线（t260904-04 F1 修复）：本请求内重算的记录，取**重算前**存量记录的
+   *  computed_at——归档票无 timeline 可补真锚点，若用重算后的 computed_at（=本次请求
+   *  时刻 > 窗口上界 to）近似归窗，被治愈的票会在首拍被 inWindow 静默丢弃（人口塌缩
+   *  一拍）。锚点基线钉在首次计算时刻，跨多次重探单调不漂。 */
+  anchorApproxBaseMs?: number
+  /** open 标志无外部真源（F2，t260904-04）：show 回退合成行且 open=true——归档票
+   *  收口终态不可达，closed 计数可能低计，进 notices 显式计数（不静默）。 */
+  openUnverified?: boolean
 }
 
 async function ticketRecord(
@@ -535,27 +574,54 @@ async function ticketRecord(
   const humanStages = new Set(stages.filter((s: any) => s?.exit === 'human').map((s: any) => String(s.id)))
   const cached = cacheDir.enabled ? await readTicketCache(cacheDir.dir, id, engineVersion) : null
   if (cached && !cached.engineStale) {
-    // 新版记录自带归窗锚点（created_ms/closed_ms，t260903-09 bump）→ 命中路径零
-    // showTicket spawn；旧版记录两键缺省 → null → 主循环按既有路径补锚点（向后兼容）。
-    return {
-      rec: cached.rec,
-      createdMs: cached.rec.created_ms ?? null,
-      closedMs: cached.rec.closed_ms ?? null,
-      fromCache: true,
-      persisted: true,
+    // 新版记录自带归窗锚点（created_ms/closed_ms，t260903-09 bump）→ 纯命中路径零
+    // showTicket spawn。t260904-04（KI-040）缓存命中不再无条件早退——两类陈旧记录
+    // 放行走下方重算路径（prev=cached.rec 降维保留在位）：
+    //   条件 A（失败维固化，TTL 节流）：delivery===null 且 updated_ts 距今超 TTL
+    //     （SUYOU_METRICS_REPROBE_TTL_MIN，缺省 60 分钟；0=每次必探仅测试）。缺失/
+    //     坏值 updated_ts（isoMs→NaN）视为过期必探——不给脏记录留永久静默。重探
+    //     写回恒刷 updated_ts=「上次尝试时刻」，节流锚点自洽、风暴有界（每票每
+    //     TTL 周期最多一轮 showTicket+git）。
+    //   条件 B（open 陈旧）：rec.open 与 list 行 status 比对不一致 → 刷新。比对
+    //     是零 spawn 纯内存且不受 TTL 门；刷新走既有全量重算路径（closed_ms/
+    //     timeline 从 show 来——不可内存改 flag 了事，否则闭单票归窗锚点退化为
+    //     created_ms 污染 KPI 归窗）。
+    const expectedOpen = String(row?.status ?? '') !== 'closed'
+    const ts = isoMs(cached.rec.updated_ts)
+    const ttlMs = reprobeTtlMin() * 60_000
+    // TTL=0（必探语义）或 updated_ts 缺失/坏值（isoMs→NaN）→ 恒过期必探
+    const expired = ttlMs === 0 || !(Number.isFinite(ts) && deps.now() - ts <= ttlMs)
+    const needsReprobe = cached.rec.delivery === null && expired
+    const openStale = cached.rec.open !== expectedOpen
+    if (!needsReprobe && !openStale) {
+      return {
+        rec: cached.rec,
+        createdMs: cached.rec.created_ms ?? null,
+        closedMs: cached.rec.closed_ms ?? null,
+        fromCache: true,
+        persisted: true,
+      }
     }
   }
   // engineStale（stages 链演化）：时间维必须按现行链重算（stage 键可能改名），
   // delivery/tokens 两维与 stage 链无关 → 从 prev 降维保留，不因版本失配陪葬
   // （t260903-09 KI-017②③：蒸发真实路径=此处旧实现整条作废后重算失败写 null）。
   const prev = cached?.rec ?? null
-  const ticket = (await deps.showTicket(id)) ?? row
+  const shown = await deps.showTicket(id)
+  const ticket = shown ?? row
+  // F2 修复（t260904-04）：show 不可达（返回 null，归档票列表/show 双不可达的结构面）
+  // 时，open 无外部真源——沿用存量 flag（自确认循环不漂白也不误翻），归档票 open=true
+  // 另由主循环标记 openUnverified 进 notices 显式计数（registry 根修=KI-031 家族）。
+  const showFellBackToRow = shown === null || shown === undefined
   const timeline = ticket?.timeline ?? ticket?.meta?.timeline
   const durations = computeDurations(timeline, humanStages, deps.now())
-  // frozen 例外（契约块 3）：已固化票重算跳过 delivery 维，只刷新其余维度
+  // 重算 delivery 门（t260904-04 条1）：只看 delivery===null，不再看 frozen 位——
+  // null+frozen 脏态（命中路径条件 A 放行进来）若保留 frozen 门会跳过 computeDelivery、
+  // 写回仍 null+frozen，下个 TTL 周期白烧 spawn 永不自愈。其余状态零影响：prev.delivery
+  // 非 null 首条件短路跳过（frozen 快照不重算语义不变）；engineStale 降维保留路径不受影响。
   let delivery = prev?.delivery ?? null
   let deliveryFrozen = prev?.delivery_frozen ?? false
-  if (delivery === null && prev?.delivery_frozen !== true) {
+  if (delivery === null) {
     const d = await computeDelivery(deps, ticket)
     delivery = d.delivery
     if (d.frozen === true) deliveryFrozen = true // 主仓归档口径成功 → 冻结
@@ -568,23 +634,32 @@ async function ticketRecord(
   // token 现算失败（泳道会话已拆）→ 存量保留；同序 reason 由 stableReasons 只看 rec 状态保证双前门一致
   const tokens = t.tokens ?? prev?.tokens ?? null
   const nowIso = new Date(deps.now()).toISOString()
+  // F1 修复姊妹面：无真锚点（timeline 不可得）时 computed_at 保留基线值（首次计算
+  // 时刻），不随重探覆写为 now——否则下一拍纯命中近似归窗 approx=now>to 再次塌缩。
+  // updated_ts 仍恒刷（TTL 节流锚点不受影响）；语义细化已落契约增补段 1。
+  const prevComputedMs = isoMs(prev?.computed_at)
+  const anchorBaseIso = Number.isFinite(prevComputedMs) && durations.created_ms === null
+    ? new Date(prevComputedMs).toISOString()
+    : nowIso
   const rec: MetricsCacheRecord = {
     ticket_id: id,
     template,
     durations: { by_stage: durations.by_stage, by_round: durations.by_round, human_wait: durations.human_wait },
     delivery,
     tokens,
-    open: String(ticket?.status ?? '') !== 'closed',
+    open: showFellBackToRow ? (prev?.open ?? String(ticket?.status ?? '') !== 'closed') : String(ticket?.status ?? '') !== 'closed',
     delivery_frozen: deliveryFrozen,
     source_version: SOURCE_VERSION,
     engine_version: engineVersion,
     updated_ts: nowIso,
-    computed_at: nowIso,
+    computed_at: anchorBaseIso,
     created_ms: durations.created_ms,
     closed_ms: durations.closed_ms,
   }
   const persisted = cacheDir.enabled ? await writeTicketCache(cacheDir.dir, rec) : false
-  return { rec, createdMs: durations.created_ms, closedMs: durations.closed_ms, fromCache: false, persisted }
+  // F1 修复：近似锚点基线=重算前存量 computed_at——治愈票首拍归窗用它，不被
+  // 重算时刻（=now>to）挤出人口。
+  return { rec, createdMs: durations.created_ms, closedMs: durations.closed_ms, fromCache: false, persisted, ...(Number.isFinite(prevComputedMs) ? { anchorApproxBaseMs: prevComputedMs } : {}) }
 }
 
 /**
@@ -602,7 +677,8 @@ function stableReasons(entries: RecordWithAnchor[], cacheDir: { dir: string; ena
     }
     if (Object.keys(e.rec.durations.by_stage).length === 0) out.push(`${id}: timeline 无 running 条目，stage 时长计 0`)
     if (e.rec.delivery === null && !e.rec.delivery_frozen) out.push(`${id}: delivery 维不可算（泳道不可用且主仓无引用本票的提交）`)
-    if (e.rec.delivery !== null && e.rec.delivery_frozen) out.push(`${id}: delivery 为主仓归档口径（冻结快照，KI-017②）`)
+    // C5 排序：票 id 后第一句即多提交边界结论（UI 降级条 slice(0,120) 截断不丢关键信息）
+    if (e.rec.delivery !== null && e.rec.delivery_frozen) out.push(`${id}: delivery 为主仓归档口径，含多提交（预解/记账等提交一并计入，行数可能高于 squash 真值；引用提交 ${e.rec.delivery.commits} 个；冻结快照 KI-017②）`)
     if (e.rec.tokens === null) out.push(`${id}: 无 token 数据（无会话文件/无 usage，SKIP）`)
   }
   return out
@@ -655,6 +731,11 @@ export async function buildMetricsResponse(
   }
   const proj = await deps.checkProject(p.project)
   if (!proj.ok) return { status: proj.status, body: bad4xx(proj.error) }
+  // per-project 换根（t260904-04，KI-043①）：本请求局部生效——git/主仓回落/会话
+  // 解析随 deps.repo 指向该项目注册表主目录；admin CLI 通路面（listTickets/showTicket
+  // 等闭包）不触碰（本就按 project 传参分流）。缺省实现含默认项目也换根（语义见
+  // MetricsDeps.repoForProject 注）；未知/异常回退传入 repo，不换根不报错。
+  deps = { ...deps, repo: deps.repoForProject?.(p.project) ?? deps.repo }
   if (p.epic !== 'all' && p.epic !== 'none') {
     const codes = await deps.listEpicCodes()
     if (codes !== null && !codes.includes(p.epic)) {
@@ -675,7 +756,11 @@ export async function buildMetricsResponse(
   const listedIds = new Set(rows.map((r: any) => String(r?.id ?? '')))
   if (p.epic === 'none') rows = rows.filter((r: any) => String(r?.epic ?? '') === '' && (r?.__archived !== true))
   else if (p.epic !== 'all') rows = rows.filter((r: any) => String(r?.epic ?? '') === p.epic)
+  // 模板过滤（t260904-04，KI-043②）：被过滤的票不再静默缩宇宙——计数进 notices，
+  // 用户可在 reason 看到「list 有 N 票因 workflow 为空/不匹配被排除」。
+  const beforeTemplateFilter = rows.length
   rows = rows.filter((r: any) => String(r?.workflow ?? '') === p.template)
+  const templateDropped = beforeTemplateFilter - rows.length
 
   const nowMs = deps.now()
   const span = WINDOWS[p.window] ?? 0
@@ -702,13 +787,17 @@ export async function buildMetricsResponse(
   if (p.mode === 'fast') {
     recordEntries = await mapPool<any, RecordWithAnchor | null>(allRows, TICKET_CONCURRENCY, async (row) => {
       const e = await fastCacheRecord(cacheDir, row, engineVersion)
-      if (e === null) fastSkips.push(`${String(row?.id ?? '?')}: fast 无可用缓存（未算过或引擎版本失配），跳过现算`)
+      if (e === null) { fastSkips.push(`${String(row?.id ?? '?')}: fast 无可用缓存（未算过或引擎版本失配），跳过现算`); return e }
+      if (row.__archived === true && e.rec.open === true) e.openUnverified = true
       return e
     })
   } else {
     recordEntries = await mapPool<any, RecordWithAnchor | null>(allRows, TICKET_CONCURRENCY, async (row) => {
       const e = await ticketRecord(deps, row, p.template, stages, engineVersion, cacheDir)
       if (e === null) return null
+      // F2 显式化（t260904-04）：归档票 open=true 恒无外部真源（列表/show 双不可达），
+      // 命中与重算两拍一致标记 → notices 计数（不静默缩 closed 人口）。
+      if (row.__archived === true && e.rec.open === true) e.openUnverified = true
       // 锚点统一补齐：新版缓存记录自带 created_ms/closed_ms（零 spawn）；旧版记录
       // 或重算路径缺锚点时，优先 list 行自带 timeline（stub/测试零成本），否则一次
       // show 取 timeline。命中/重算两条路径产出同一响应，双前门字节级比对不红。
@@ -730,7 +819,9 @@ export async function buildMetricsResponse(
         } else if (row.__archived === true) {
           // F3 存量票近似归窗：列表外票无 timeline 可补，按 rec.computed_at 近似——
           // 只进内存不回写（防近似值被永久化成真实闭单时刻），reason 显式声明。
-          const approx = isoMs(e.rec.computed_at)
+          // F1 修复（t260904-04）：本请求内重算的记录用重算前存量 computed_at 作基线
+          // （anchorApproxBaseMs），否则 approx=now>to，治愈票首拍被 inWindow 丢弃。
+          const approx = Number.isFinite(e.anchorApproxBaseMs) ? e.anchorApproxBaseMs! : isoMs(e.rec.computed_at)
           if (Number.isFinite(approx)) {
             e.createdMs = approx
             if (!e.rec.open && e.closedMs === null) e.closedMs = approx
@@ -796,6 +887,15 @@ export async function buildMetricsResponse(
   }
   if (approxCount > 0) {
     notices.push(`其中 ${approxCount} 票旧版缓存无归窗锚点，按缓存计算时刻近似归窗（全量重算后自动转精确）`)
+  }
+  if (templateDropped > 0) {
+    notices.push(`${templateDropped} 票模板不匹配（workflow 为空或非 ${p.template}）被过滤出聚合宇宙`)
+  }
+  // F2 显式化（t260904-04）：归档票 open 无外部真源（registry 不暴露收口终态）——
+  // 不静默缩 closed 人口，计数进 notices（registry 根修=KI-031 家族，写集外）。
+  const openUnverifiedCount = entries.filter((e) => e.openUnverified === true).length
+  if (openUnverifiedCount > 0) {
+    notices.push(`${openUnverifiedCount} 张归档票 open 标志无外部真源（工单列表与 show 均不可达），closed 计数可能低计`)
   }
   if (notices.length > 0 || respReasons.length > 0) {
     const rest = dedupe(respReasons).slice(0, Math.max(0, 20 - notices.length))

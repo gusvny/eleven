@@ -76,9 +76,13 @@ export function loadPanelState(storage: unknown = loadStorage()): PanelState {
   const out = { ...DEFAULT_STATE }
   if (typeof s.view === 'string' && VIEW_SET.has(s.view)) out.view = s.view
   if (typeof s.window === 'string' && WINDOW_SET.has(s.window)) out.window = s.window
-  if (typeof s.epic === 'string' && s.epic.length > 0) out.epic = cleanStr(s.epic)
+  // t260904-04（KI-042 宿主令）：泳道（模板）与立项选择器退役，两参数恒归常量
+  // 透传后端（parseMetricsQuery 必收 epic/template，schema 不动）。持久化残留
+  // （旧版存过非 dev-lane 模板/非 all 立项）一律弃用——防旧 localStorage 锁死
+  // 非 dev-lane 模板导致空面板；保存 effect 会把归一值写回覆盖残留。
+  out.template = 'dev-lane'
+  out.epic = 'all'
   if (typeof s.project === 'string') out.project = cleanStr(s.project)
-  if (typeof s.template === 'string' && s.template.length > 0) out.template = cleanStr(s.template)
   if (s.shape === 'bar' || s.shape === 'donut') out.shape = s.shape
   return out
 }

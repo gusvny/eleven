@@ -63,6 +63,20 @@ section('A. 面板状态：默认/持久化/畸形容错')
   ok(!threw, '写配额满不抛')
 }
 
+section('A2. t260904-04 KI-042：选择器退役——template/epic 持久化残留归一')
+{
+  // 旧版 localStorage 存过非 dev-lane 模板 / 非 all 立项 → 读时弃用，防锁死非 dev-lane 模板空面板
+  const r = loadPanelState(memStorage({ [PANEL_STORAGE_KEY]: JSON.stringify({ template: 'chore-lane', epic: 'engine-hardening', project: 'suyou', window: '30d' }) }))
+  ok(r.template === 'dev-lane', '非 dev-lane 模板残留归一 dev-lane')
+  ok(r.epic === 'all', '立项残留归一 all')
+  ok(r.project === 'suyou', 'project 残留保留（项目下拉启用）')
+  ok(r.window === '30d', '其余字段不受归一影响')
+  // 归一值写回覆盖残留（savePanelState 落归一状态）
+  const st = memStorage({ [PANEL_STORAGE_KEY]: JSON.stringify({ template: 'chore-lane' }) })
+  savePanelState(loadPanelState(st), st)
+  ok(st._map.get(PANEL_STORAGE_KEY).includes('"dev-lane"') && !st._map.get(PANEL_STORAGE_KEY).includes('chore-lane'), '归一值写回覆盖残留')
+}
+
 /* ------------------------------------------------------------ B. ChartSpec / 响应解析 */
 
 section('B. isChartSpec / sanitizeMetricsResponse 畸形输入')

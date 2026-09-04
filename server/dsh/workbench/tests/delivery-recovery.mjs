@@ -173,6 +173,206 @@ const gitDeps = (pairs, repo = '/stub-repo') => ({
   delete process.env.SUYOU_USAGE_LEDGER_DIR
 }
 
+// ---- ⑦ t260904-04 KI-041：绝对路径 worktree 直接用（join 毒路径归一）
+{
+  console.log('⑦ KI-041：worktree 绝对路径 → cwd 直接用，不拼毒路径')
+  const absLane = '/abs/lane-t09-ki041'
+  const d = await computeDelivery(gitDeps({
+    [`${absLane}::diff main...HEAD --numstat`]: '10\t2\ta.ts',
+    [`${absLane}::rev-list --count main..HEAD`]: '1\n',
+  }, '/stub-repo'), { id: 't09-ki041', base_ref: 'main', worktree: absLane })
+  ok('绝对路径活口径出数（add=10）', d.delivery?.add === 10, JSON.stringify(d))
+  ok('活口径不冻结', d.frozen === false)
+}
+
+// ---- ⑧ t260904-04 KI-040：缓存命中条件化（null 重探 TTL 门 + open 陈旧刷新）
+{
+  console.log('⑧ KI-040：缓存命中不再固化失败维/open 陈旧')
+  const { root: cacheRoot, dir: cacheDir } = await mkCacheDir('t09-heal-cache-')
+  const stubDir = freshDir('t09-heal-stub-')
+  const curEngine = engineVersionOf(STAGES)
+  const mkRec = (id, overrides = {}) => ({
+    ticket_id: id, template: 'dev-lane',
+    durations: { by_stage: { plan: 1000 }, by_round: { plan: 1000 }, human_wait: 0 },
+    delivery: null, tokens: { by_stage: {}, by_model: {}, in: 1, out: 1, cacheRead: 0 },
+    open: false, delivery_frozen: false,
+    source_version: SOURCE_VERSION, engine_version: curEngine,
+    updated_ts: new Date(NOW).toISOString(), computed_at: new Date(NOW).toISOString(),
+    created_ms: Date.parse('2026-08-30T01:00:00Z'), closed_ms: Date.parse('2026-08-30T04:00:00Z'),
+    ...overrides,
+  })
+  const writeRec = async (id, rec) => {
+    await mkdir(cacheDir, { recursive: true })
+    await writeFile(join(cacheDir, `${id}.json`), JSON.stringify(rec), 'utf8')
+  }
+  const healTicket = (id) => closedTicket(id, baseStub(), {
+    t0: Date.parse('2026-08-30T01:00:00Z'), closedAt: Date.parse('2026-08-30T04:00:00Z'),
+  })
+  /** defaultDeps（stub 缝）+ git 计数桩：gitCalls 记录每次 cwd。 */
+  const mkDeps = (pairs) => {
+    const gitCalls = []
+    const deps = {
+      ...defaultDeps('/stub-repo', () => NOW),
+      git: async (cwd, args) => {
+        gitCalls.push(cwd)
+        const key = `${cwd}::${args.join(' ')}`
+        if (!(key in pairs)) throw new Error(`stub git 未备：${key}`)
+        return pairs[key]
+      },
+    }
+    return { deps, gitCalls }
+  }
+  const grepPairs = (id, numstat = '10\t2\ta.ts') => ({
+    [`/stub-repo::log --format=%H --grep ${id}`]: 'h1\n',
+    [`/stub-repo::log --grep ${id} --numstat --format=`]: numstat,
+  })
+  const run = (deps, query = { view: 'delivery', window: 'all' }) => buildMetricsResponse(query, deps)
+
+  process.env.SUYOU_METRICS_DIR = cacheRoot
+  process.env.SUYOU_METRICS_STUB = writeStub(stubDir, baseStub({
+    tickets: [healTicket('t09-heal-old'), healTicket('t09-heal-fresh'), healTicket('t09-open-stale'), healTicket('t09-nof-ts'), healTicket('t09-null-frozen')],
+  }))
+  delete process.env.SUYOU_USAGE_LEDGER_DIR
+  process.env.SUYOU_METRICS_REPROBE_TTL_MIN = '60'
+
+  // ⑧a 过 TTL null 记录：重探出数 + frozen + updated_ts 前移
+  await writeRec('t09-heal-old', mkRec('t09-heal-old', { updated_ts: new Date(NOW - 2 * 3600e3).toISOString() }))
+  const a = mkDeps(grepPairs('t09-heal-old'))
+  const ra = await run(a.deps)
+  const recA = JSON.parse(await readFile(join(cacheDir, 't09-heal-old.json'), 'utf8'))
+  ok('⑧a 过 TTL null 重探出数（add=10）', recA.delivery?.add === 10, JSON.stringify(recA.delivery))
+  ok('⑧a 重探成功冻结（主仓归档口径）', recA.delivery_frozen === true)
+  ok('⑧a updated_ts 前移（节流锚点刷新）', recA.updated_ts === new Date(NOW).toISOString(), recA.updated_ts)
+  ok('⑧a 重探 git cwd=引擎仓', a.gitCalls.every(c => c === '/stub-repo'))
+  ok('⑧a 响应 reason 带多提交边界', String(ra.body.reason ?? '').includes('多提交'), String(ra.body.reason ?? '').slice(0, 200))
+
+  // ⑧b 新鲜 null 记录（TTL 内）：不重探，零 git spawn
+  await writeRec('t09-heal-fresh', mkRec('t09-heal-fresh'))
+  const b = mkDeps({})
+  await run(b.deps)
+  ok('⑧b TTL 内 null 不重探（零 git spawn）', b.gitCalls.length === 0, JSON.stringify(b.gitCalls))
+  const recB = JSON.parse(await readFile(join(cacheDir, 't09-heal-fresh.json'), 'utf8'))
+  ok('⑧b 记录未被改写（delivery 仍 null）', recB.delivery === null)
+
+  // ⑧c open 陈旧（rec.open=true vs list closed）：不受 TTL 门，刷新 open/closed_ms
+  await writeRec('t09-open-stale', mkRec('t09-open-stale', { open: true, delivery: { base: 'main', add: 5, del: 1, commits: 1 }, delivery_frozen: true, closed_ms: undefined }))
+  const c = mkDeps({})
+  const rc = await run(c.deps)
+  const recC = JSON.parse(await readFile(join(cacheDir, 't09-open-stale.json'), 'utf8'))
+  ok('⑧c open 陈旧触发刷新（open=false）', recC.open === false, JSON.stringify(recC.open))
+  ok('⑧c closed_ms 补齐（归窗锚点从 timeline 来，非内存改 flag）', Number.isFinite(recC.closed_ms), String(recC.closed_ms))
+  ok('⑧c delivery 非 null 不重算（零 git spawn）', c.gitCalls.length === 0, JSON.stringify(c.gitCalls))
+  ok('⑧c 响应 closed 计数含本票（time/health 分叉收敛面）', rc.body.kpis.closed >= 1, JSON.stringify(rc.body.kpis))
+
+  // ⑧d updated_ts 缺失/坏值：视为过期必探（NaN 比较恒 false 的反方向）
+  await writeRec('t09-nof-ts', mkRec('t09-nof-ts', { updated_ts: undefined }))
+  const d = mkDeps(grepPairs('t09-nof-ts'))
+  await run(d.deps)
+  ok('⑧d updated_ts 缺失视为过期 → 重探', d.gitCalls.length === 2, JSON.stringify(d.gitCalls))
+
+  // ⑧e null+frozen 脏态：条件 A 不看 frozen 位，重算门同步丢位 → 自愈
+  await writeRec('t09-null-frozen', mkRec('t09-null-frozen', { delivery_frozen: true, updated_ts: new Date(NOW - 2 * 3600e3).toISOString() }))
+  const e = mkDeps(grepPairs('t09-null-frozen'))
+  await run(e.deps)
+  const recE = JSON.parse(await readFile(join(cacheDir, 't09-null-frozen.json'), 'utf8'))
+  ok('⑧e null+frozen 脏态重探自愈（add=10）', recE.delivery?.add === 10, JSON.stringify(recE.delivery))
+
+  // ⑧f TTL=0：每次必探（仅测试语义）
+  await writeRec('t09-heal-fresh', mkRec('t09-heal-fresh'))
+  process.env.SUYOU_METRICS_REPROBE_TTL_MIN = '0'
+  const f = mkDeps(grepPairs('t09-heal-fresh'))
+  await run(f.deps)
+  ok('⑧f TTL=0 每次必探', f.gitCalls.length === 2, JSON.stringify(f.gitCalls))
+  delete process.env.SUYOU_METRICS_REPROBE_TTL_MIN
+}
+
+// ---- ⑨ t260904-04 KI-043①：per-project repo 解析（repoForProject 换根）
+{
+  console.log('⑨ KI-043①：project=suyou → git cwd 指向项目主目录（双门同吃 defaultDeps）')
+  const { root: cacheRoot } = await mkCacheDir('t09-rp-cache-')
+  const stubDir = freshDir('t09-rp-stub-')
+  process.env.SUYOU_METRICS_DIR = cacheRoot
+  process.env.SUYOU_METRICS_STUB = writeStub(stubDir, baseStub({
+    tickets: [closedTicket('t09-rp', baseStub(), { t0: Date.parse('2026-08-30T01:00:00Z'), closedAt: Date.parse('2026-08-30T04:00:00Z') })],
+  }))
+  delete process.env.SUYOU_USAGE_LEDGER_DIR
+  const gitCalls = []
+  const base = {
+    ...defaultDeps('/sandbar-repo', () => NOW),
+    git: async (cwd, args) => {
+      gitCalls.push(cwd)
+      const key = `${cwd}::${args.join(' ')}`
+      const pairs = {
+        '/suyou-root::log --format=%H --grep t09-rp': 'h1\n',
+        '/suyou-root::log --grep t09-rp --numstat --format=': '671\t43\ta.ts',
+      }
+      if (!(key in pairs)) throw new Error(`stub git 未备：${key}`)
+      return pairs[key]
+    },
+  }
+  // 模拟 defaultDeps 缺省实现（findProject→primaryDir）的注入面
+  const deps = { ...base, repoForProject: (key) => (key === 'suyou' ? '/suyou-root' : null) }
+  const r = await buildMetricsResponse({ view: 'delivery', window: 'all', project: 'suyou' }, deps)
+  ok('⑨ project=suyou git cwd=/suyou-root（换根生效）', gitCalls.length > 0 && gitCalls.every(c => c === '/suyou-root'), JSON.stringify(gitCalls))
+  ok('⑨ suyou 票交付维出数（tickets=1）', r.status === 200 && r.body.kpis.tickets === 1, JSON.stringify(r.body.kpis))
+  // 未知 key：repoForProject 返回 null → 回退传入 repo（checkProject 桩放行）
+  gitCalls.length = 0
+  const deps2 = { ...base, repoForProject: () => null }
+  const r2 = await buildMetricsResponse({ view: 'delivery', window: 'all', project: 'suyou' }, deps2)
+  ok('⑨ repoForProject null 回退传入 repo', gitCalls.every(c => c === '/sandbar-repo') && r2.status === 200, JSON.stringify(gitCalls))
+}
+
+// ---- ⑩ t260904-04 验收打回修复：F1 首拍人口塌缩 + F2 归档票 open 无真源显式化
+{
+  console.log('⑩ F1/F2：归档票重探首拍即在人口；open 无外部真源 → notices 显式计数')
+  const { root: cacheRoot, dir: cacheDir } = await mkCacheDir('t09-f1-cache-')
+  const stubDir = freshDir('t09-f1-stub-')
+  const curEngine = engineVersionOf(STAGES)
+  // 归档票：不在工单列表（stub tickets 空）→ collectArchivedRows 从缓存并入；
+  // showTicket（stubDeps find）恒 null → show 回退合成行（F2 结构面）。
+  const prevRec = {
+    ticket_id: 't09-arch', template: 'dev-lane',
+    durations: { by_stage: { plan: 1000 }, by_round: { plan: 1000 }, human_wait: 0 },
+    delivery: null, tokens: { by_stage: {}, by_model: {}, in: 1, out: 1, cacheRead: 0 },
+    open: true, delivery_frozen: false,
+    source_version: SOURCE_VERSION, engine_version: curEngine,
+    updated_ts: new Date(NOW - 2 * 3600e3).toISOString(), computed_at: new Date(NOW - 2 * 3600e3).toISOString(),
+  }
+  await mkdir(cacheDir, { recursive: true })
+  await writeFile(join(cacheDir, 't09-arch.json'), JSON.stringify(prevRec), 'utf8')
+  process.env.SUYOU_METRICS_DIR = cacheRoot
+  process.env.SUYOU_METRICS_STUB = writeStub(stubDir, baseStub({ tickets: [] }))
+  delete process.env.SUYOU_USAGE_LEDGER_DIR
+  process.env.SUYOU_METRICS_REPROBE_TTL_MIN = '0' // 强制首拍重探（复现 F1 的触发条件）
+  const mkDeps = (pairs) => ({
+    ...defaultDeps('/stub-repo', () => NOW),
+    git: async (cwd, args) => {
+      const key = `${cwd}::${args.join(' ')}`
+      if (!(key in pairs)) throw new Error(`stub git 未备：${key}`)
+      return pairs[key]
+    },
+  })
+  const pairs = {
+    '/stub-repo::log --format=%H --grep t09-arch': 'h1\n',
+    '/stub-repo::log --grep t09-arch --numstat --format=': '10\t2\ta.ts',
+  }
+  // F1：首拍（重探拍）治愈票必须在人口内——近似锚点基线=重算前 computed_at（过去时刻）
+  const r1 = await buildMetricsResponse({ view: 'delivery', window: 'all' }, mkDeps(pairs))
+  ok('⑩F1 首拍人口含治愈票（tickets=1，不塌缩）', r1.body.kpis.tickets === 1, JSON.stringify(r1.body.kpis))
+  ok('⑩F1 open 票按 created 基线归窗（closed=0，未误计闭单）', r1.body.kpis.closed === 0, JSON.stringify(r1.body.kpis))
+  ok('⑩F1 首拍交付维出数（add+del=12）', JSON.stringify(r1.body.charts).includes('"data":[12]'), JSON.stringify(r1.body.charts).slice(0, 200))
+  // F2：归档票 open 无外部真源 → flag 不漂白 + notices 显式计数（重算拍）
+  const recAfter = JSON.parse(await readFile(join(cacheDir, 't09-arch.json'), 'utf8'))
+  ok('⑩F2 open 不被合成行洗白（仍 true，不误翻）', recAfter.open === true, String(recAfter.open))
+  ok('⑩F2 重算拍 notice 显式计数（closed 可能低计）', String(r1.body.reason ?? '').includes('open 标志无外部真源'), String(r1.body.reason ?? '').slice(0, 200))
+  // F2：第二拍（纯命中）notice 仍在（显式化不随拍漂移）
+  process.env.SUYOU_METRICS_REPROBE_TTL_MIN = '60'
+  const r2 = await buildMetricsResponse({ view: 'delivery', window: 'all' }, mkDeps({}))
+  ok('⑩F2 命中拍 notice 仍在', String(r2.body.reason ?? '').includes('open 标志无外部真源'), String(r2.body.reason ?? '').slice(0, 200))
+  ok('⑩F2 命中拍人口仍在（tickets=1）', r2.body.kpis.tickets === 1, JSON.stringify(r2.body.kpis))
+  delete process.env.SUYOU_METRICS_REPROBE_TTL_MIN
+}
+
 process.env.SUYOU_METRICS_STUB = savedStub
 process.env.SUYOU_METRICS_DIR = savedDir
 if (savedLedger === undefined) delete process.env.SUYOU_USAGE_LEDGER_DIR

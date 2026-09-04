@@ -6,7 +6,7 @@ tags:
   - 契约
   - API
 status: active
-updated: 2026-09-01
+updated: 2026-09-04
 ---
 
 # metrics 口径与 API 契约 v1
@@ -304,6 +304,59 @@ UTF-8 字节全量比对）。两时间戳语义是「本次响应生成时刻 /
 本方案逐字段冻结口径与降级 → 解决 Problem 里「并行实现各说各话、对账无据」→
 满足 Requirement 1–7 → 避开 Nongoal（v2/历史反推/健康缓存/视觉样式/引擎行为
 均明确划出）。
+
+### 增补段（t260904-04，KI-040~043 收口；schema 冻结不破，本段声明语义增补）
+
+1. **缓存命中自愈（KI-040）**：per-ticket 缓存命中不再无条件早退。两类陈旧记录
+   放行全量重算路径（存量降维保留机制不变）：
+   - 条件 A（失败维固化 + TTL 节流）：`delivery===null` 且记录 `updated_ts` 距今超
+     TTL（env `SUYOU_METRICS_REPROBE_TTL_MIN`，缺省 60 分钟；0=每次必探仅测试；
+     负值按 0）。`updated_ts` 缺失/坏值视为过期必探（NaN 比较方向已定：向「重探」
+     倾斜，不给脏记录留永久静默）。重探写回恒刷 `updated_ts`=「上次尝试时刻」，
+     节流锚点自洽——真不可算票每票每 TTL 周期最多付费一轮 showTicket+git。
+     `delivery===null && delivery_frozen===true` 脏态同属条件 A（不看 frozen 位，
+     重算门同步只看 `delivery===null`）；该态原不可达，登记防 schema 演化残留。
+   - 条件 B（open 陈旧）：`rec.open` 与工单 list 行 `status` 比对不一致即刷新。
+     比对是零 spawn 纯内存且不受 TTL 门；**刷新走既有全量重算路径**（closed_ms/
+     timeline 从 ticket show 取——不内存改 flag 了事，否则闭单票归窗锚点退化为
+     created_ms 污染 KPI 归窗）。time/delivery/token 视图（closed 派生自 rec.open）
+     与 health 视图（直查 list）的 closed 计数分叉（KI-040 实证 4 vs 5）由此收敛。
+     **computed_at 语义细化 + 归档近似锚点基线（验收 F1 修复，20260904）**：重算无真
+     锚点（timeline 不可得，created_ms=null）时 computed_at 保留基线值（该票首次计算
+     时刻，不随重探覆写为本次时刻）；本请求内重算的归档票 F3 近似归窗用重算前存量
+     computed_at 作基线（响应内存面，不回写缓存）——否则治愈票近似锚点漂到窗口上界
+     之外，首拍被 inWindow 静默丢弃（人口塌缩一拍，真机实证 sandbar 6→1、suyou 50→2）。
+     有真锚点时 computed_at 恒为本次计算时刻；updated_ts 不受影响、恒刷（TTL 节流锚点）。
+     **归档票 open 无外部真源（验收 F2 处置，20260904）**：show 不可达（返回 null）时
+     open 沿用存量 flag 不漂白；归档票 open=true 在 notices 显式计数「closed 计数可能
+     低计」（命中/重算/fast 三拍一致）——收口终态真源缺失是 registry 根修欠账
+     （KI-031 家族，写集外），本票以显式化收口不静默；health 视图人口=工单列表直查
+     为契约成文口径，「time 与 health closed 一致」判据仅在票尚在 list 的世界可测。
+2. **模板过滤 reason 显式化（KI-043②）**：list 行 workflow 为空/不匹配被模板过滤
+   排除的票，计数进响应 reason notices（与宇宙补全 notice 同位，不受 20 条 cap
+   截断），文案=`N 票模板不匹配（workflow 为空或非 <template>）被过滤出聚合宇宙`。
+3. **归档口径多提交边界（KI-040 连带，口径悬停+reason 已注）**：归档口径 reason
+   首句显式「含多提交（预解/记账等提交一并计入，行数可能高于 squash 真值）」。
+   **收窄口径（只认 squash merge commit）议后不落**——git 对 squash merge 无可靠
+   机械判别（无 merge commit 可认，message 启发式误判面大）；根治归引擎侧出仓
+   快照票（KI-017③，另立）。UI 口径ⓘ 悬停同步注明。
+4. **epic/template 面板参数常量化（KI-042 宿主令）**：面板筛选行泳道（模板）与
+   立项选择器退役；客户端 `template` 恒 `dev-lane`、`epic` 恒 `all` 常量透传
+   （parseMetricsQuery 两参必收语义不变，localStorage 残留值读时归一弃用）；
+   `project` 下拉启用（数据源 GET /wf/projects，注册表），`''`=后端缺省项目。
+   请求/响应 schema 零变化。
+5. **立项白名单边界（C3 声明）**：`listEpicCodes` 白名单仍按引擎仓 notes/epics
+   解析（不随 project 换根）。面板立项面已退役（恒 all 不走校验），仅 CLI 前门
+   显式传 `epic=<code>&project=<非引擎仓 key>` 时按引擎仓白名单校验——已知边界，
+   危害休眠，随立项域多项目化（如有）另票收口。
+6. **per-project repo 换根（KI-043①）**：`deps.repo` 语义收紧为「该 project 的
+   注册表主目录」——buildMetricsResponse 在 project 校验通过后按
+   `repoForProject(project)`（defaultDeps 缺省实现=findProject→primaryDir，任何
+   注册表合法 key 含默认项目均换根；未知 key/注册表异常 null 回退传入 repo）
+   本请求局部换根，git/主仓回落/会话解析随之指向项目主目录。admin CLI 通路面
+   不变（按 project 传参分流）。**双前门同修**：node.ts 与 metrics-cli.mjs 同吃
+   defaultDeps，无前门分叉。lane worktree 内查默认项目也指向注册表主目录（非
+   worktree 自身 git）——与缓存/数据目录按项目键解析同族语义。
 
 ## 相关文档
 
