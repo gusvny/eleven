@@ -55,7 +55,9 @@ from shared import (
     ReworkRequest,
     Signature,
     TicketInput,
+    check_paths_under_project,
     derive_lane_workspace,
+    lookup_project,
     pipeline_wf_id,
     project_search_attributes,
     ticket_data_dir,
@@ -461,7 +463,18 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         return _err("ticket-start 需要 ticket_id")
     project = str(args.get("project") or "")
     if not project:
-        return _err("ticket-start 需要 project（projects.yaml 注册表 key，无默认值）")
+        return _err("ticket-start 需要 project（projects.yaml 注册表 key，无默认值）——"
+                    "无 project 即拒收：泳道落仓禁止退化为「由执行 worker 的 REPO_ROOT 决定」"
+                    "的相对路径（t260904-01 首开脑裂形态，宁可拒收不静默降级）")
+    # 硬闸（KI-032，t260904-02）：收 project 即自查机器级注册表锚 project_root，
+    # 与 ticket.py create 同源（单一真源=shared 装载器；SANDBAR_PROJECTS_DIR 等
+    # env 覆盖语义保持）。未锚定（未知 key/条目隔离/注册表空）=创建即拒收——
+    # 裸入口产出的 workspace 必为锚定项目主目录的绝对路径，落仓与执行 worker 解耦。
+    try:
+        proj = lookup_project(project)
+    except ValueError as e:
+        return _err("ticket-start 拒收（project 未锚定，开票走正规入口请先注册项目）：%s" % e)
+    project_root = str(proj["dirs"][0])
     # 立项关联（epic-linkage）：--epic 强校验单点——代号形状白名单 + notes/epics/<代号>.md
     # 必须存在，否则拒收（立项验收标准 2）。空 = 不关联立项（允许）。
     try:
@@ -478,7 +491,15 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
             workspace=args.get("workspace") if isinstance(args.get("workspace"), dict) else None,
             worktree=str(args.get("worktree") or ""),
             branch=str(args.get("branch") or ""),
-            template_workspace_dir=bool(getattr(cls, "TEMPLATE_WORKSPACE_DIR", False)))
+            template_workspace_dir=bool(getattr(cls, "TEMPLATE_WORKSPACE_DIR", False)),
+            project_root=project_root)
+    except ValueError as e:
+        return _err("ticket-start 参数非法：%s" % e)
+    # 硬闸配套（KI-032）：显式给的绝对 workspace/worktree 必须落在注册目录内
+    # （与 ticket.py create 的 _check_paths_under_project 同一判定，防裸入口
+    # 显式塞别项目/别处的路径绕锚）。相对路径不拦（已由 project_root 锚定语义覆盖）。
+    try:
+        check_paths_under_project(proj, workspace, worktree)
     except ValueError as e:
         return _err("ticket-start 参数非法：%s" % e)
     overrides: Dict[str, Any] = {}

@@ -55,14 +55,17 @@ TEMP_PY = str(TEMP_POC / '.venv' / 'bin' / 'python') if (TEMP_POC / '.venv' / 'b
 # 项目注册表（sandbar M1-1 出仓）：真源=机器级 per-key 目录
 # ~/.sandbar/projects/<key>/project.yaml（装载=扫 */project.yaml，与
 # server/dsh/suyou-projects.ts 同一注册表、两边各自最小解析、语义同构）。
+# t260904-02（KI-032 硬闸）：装载逻辑整块上收 temporal-poc/shared.py（单一真源，
+# client.py ticket-start 同源锚 project_root），本文件只留薄壳委托（见下方
+# 「项目注册表（薄壳委托）」节）；下面两个常量保留为兼容别名（值与真源一致）。
 # env 优先级（每次调用现读）：SUYOU_PROJECTS_YAML（legacy 单文件模式，旧格式
 # projects: 列表，行为与 260823 版一致）> SANDBAR_PROJECTS_DIR > ~/.sandbar/projects。
 # 单条目畸形/版本不支持=该项目隔离（fail-closed 可见，不炸其他项目）；目录名必须
 # 过 PROJECT_KEY_RE 白名单，条目 key 必须与目录名全等；迁移判据只认 .migrated 标记。
 # 无标记且根里有内容时分三类现场（修订 v2.1）：纯种子字节子集=崩溃残留→续迁补齐；
 # 与种子零交集=人工注册表→接受；部分相关不可复现=混合现场→fail-closed 抛错。
-PROJECTS_YAML = REPO / 'server' / 'dsh' / 'projects.yaml'   # 一次性迁移源（旧单文件）
-PROJECT_KEY_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,40}$')
+PROJECTS_YAML = REPO / 'server' / 'dsh' / 'projects.yaml'   # 兼容别名（真源=shared.PROJECTS_YAML）
+PROJECT_KEY_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,40}$')   # 兼容别名（真源=shared.PROJECT_KEY_RE）
 
 TOOL = {
     'name': 'ticket',
@@ -109,338 +112,23 @@ TOOL = {
 }
 
 
-# ---------- 项目注册表 ----------
-
-def _registry_root():
-    """per-key 注册表根目录（每次调用现读 env，防「先 import 后设 env」覆盖失效）。"""
-    return Path(os.environ.get('SANDBAR_PROJECTS_DIR') or (Path.home() / '.sandbar' / 'projects'))
-
-
-def _strip_line(raw):
-    """剥行尾注释 + 右空白；整行注释/空行返回 None（跳过）。本注册表值不含 #。"""
-    line = re.sub(r'#.*$', '', raw).rstrip()
-    return line if line.strip() else None
-
-
-def _parse_legacy_file(text, label):
-    """旧格式单文件解析（projects: 列表）——legacy env 模式与迁移源共用，
-    行为与 260823 版 parseProjectsYaml 一致（含 key 重复检查），写坏大声报错。"""
-    projects = []
-    cur = None
-    in_dirs = False
-    saw_root = False
-    for i, raw in enumerate(text.split('\n'), 1):
-        line = _strip_line(raw)
-        if line is None:
-            continue
-        if not raw[:1].isspace() and line != 'projects:' and i > 1:
-            raise ValueError('%s:%d 顶层只认 projects:' % (label, i))
-        if line == 'projects:':
-            if saw_root:
-                raise ValueError('%s:%d projects: 重复' % (label, i))
-            saw_root = True
-            continue
-        if not saw_root:
-            raise ValueError('%s:%d 首行必须是 projects:' % (label, i))
-        m_item = re.match(r'^\s+-\s+(.+)$', line)
-        m_kv = re.match(r'^\s+([a-z]+):\s*(.*)$', line)
-        if m_item:
-            content = m_item.group(1).strip()
-            kv = re.match(r'^([a-z]+):\s*(.*)$', content)
-            if kv:
-                if kv.group(1) != 'key' or not kv.group(2):
-                    raise ValueError('%s:%d 条目首键必须是 key' % (label, i))
-                key = kv.group(2).strip()
-                if not PROJECT_KEY_RE.match(key):
-                    raise ValueError('%s:%d key 不合法: %s' % (label, i, key))
-                cur = {'key': key, 'name': '', 'dirs': []}
-                projects.append(cur)
-                in_dirs = False
-                continue
-            if cur is None or not in_dirs:
-                raise ValueError('%s:%d 列表项出现位置不对: %s' % (label, i, content))
-            if not content.startswith('/'):
-                raise ValueError('%s:%d dirs 必须是绝对路径: %s' % (label, i, content))
-            cur['dirs'].append(content)
-            continue
-        if m_kv and cur is not None:
-            k, v = m_kv.group(1), m_kv.group(2)
-            if k == 'name':
-                cur['name'] = v.strip()
-                in_dirs = False
-                continue
-            if k == 'dirs':
-                if v.strip():
-                    raise ValueError('%s:%d dirs: 后必须换行给列表' % (label, i))
-                in_dirs = True
-                continue
-            raise ValueError('%s:%d 不认的键: %s' % (label, i, k))
-        raise ValueError('%s:%d 解析失败: %s' % (label, i, line.strip()))
-    if not projects:
-        raise ValueError('%s: 没有任何项目条目' % label)
-    for p in projects:
-        if not p['name']:
-            raise ValueError('%s: 项目 %s 缺 name' % (label, p['key']))
-        if not p['dirs']:
-            raise ValueError('%s: 项目 %s 缺 dirs' % (label, p['key']))
-    keys = set(p['key'] for p in projects)
-    if len(keys) != len(projects):
-        raise ValueError('%s: key 重复' % label)
-    return projects
-
-
-def _parse_project_file(text, label):
-    """per-key 单条目解析（project.yaml，契约① schema v1 固定形状）：
-
-        schema: v1            （必带；缺失=畸形；非 v1=版本不支持 fail-closed）
-        project:
-          - key: <key>
-            name: <名>
-            dirs:
-              - /abs/path
-
-    key 白名单校验在此做；key 与目录名全等的核对由装载方做。"""
-    cur = None
-    in_dirs = False
-    saw_project = False
-    in_paths = False   # ①d 放开（t260903 切换夜落地，债 notes/debts/ 对应项销账）：
-    schema = None      # 顶层 paths: 节装载器透传不解析（语义/锚点 fail-closed 归
-    for i, raw in enumerate(text.split('\n'), 1):  # shared.project_paths ①d 读取器）
-        line = _strip_line(raw)
-        if line is None:
-            continue
-        if in_paths:
-            if raw[:1].isspace():
-                continue    # paths 节内行：透传（①d 读取器负责形状与锚点）
-            in_paths = False    # 非缩进行=paths 节结束，落回正常顶层处理
-        if line == 'paths:':
-            in_paths = True
-            continue
-        if not raw[:1].isspace() and line != 'project:' and not line.startswith('schema:') and i > 1:
-            raise ValueError('%s:%d 顶层只认 schema:/project:/paths:' % (label, i))
-        if line == 'project:':
-            if saw_project:
-                raise ValueError('%s:%d project: 重复' % (label, i))
-            saw_project = True
-            continue
-        m_top = re.match(r'^([a-z]+):\s*(.+)$', line)
-        if m_top and not saw_project and not raw[:1].isspace():
-            if m_top.group(1) != 'schema':
-                raise ValueError('%s:%d 顶层只认 schema: 与 project:' % (label, i))
-            schema = m_top.group(2).strip()
-            if schema != 'v1':
-                raise ValueError('%s:%d schema 版本不支持：声明 %s，支持集 {v1}' % (label, i, schema))
-            continue
-        if not saw_project:
-            raise ValueError('%s:%d 顶层只认 schema: 与 project:' % (label, i))
-        m_item = re.match(r'^\s+-\s+(.+)$', line)
-        m_kv = re.match(r'^\s+([a-z]+):\s*(.*)$', line)
-        if m_item:
-            content = m_item.group(1).strip()
-            kv = re.match(r'^([a-z]+):\s*(.*)$', content)
-            if kv:
-                if cur is not None:
-                    raise ValueError('%s:%d 单条目文件出现第二个条目' % (label, i))
-                if kv.group(1) != 'key' or not kv.group(2):
-                    raise ValueError('%s:%d 条目首键必须是 key' % (label, i))
-                key = kv.group(2).strip()
-                if not PROJECT_KEY_RE.match(key):
-                    raise ValueError('%s:%d key 不合法: %s' % (label, i, key))
-                cur = {'key': key, 'name': '', 'dirs': []}
-                in_dirs = False
-                continue
-            if cur is None or not in_dirs:
-                raise ValueError('%s:%d 列表项出现位置不对: %s' % (label, i, content))
-            if not content.startswith('/'):
-                raise ValueError('%s:%d dirs 必须是绝对路径: %s' % (label, i, content))
-            cur['dirs'].append(content)
-            continue
-        if m_kv and cur is not None:
-            k, v = m_kv.group(1), m_kv.group(2)
-            if k == 'name':
-                cur['name'] = v.strip()
-                in_dirs = False
-                continue
-            if k == 'dirs':
-                if v.strip():
-                    raise ValueError('%s:%d dirs: 后必须换行给列表' % (label, i))
-                in_dirs = True
-                continue
-            raise ValueError('%s:%d 不认的键: %s' % (label, i, k))
-        raise ValueError('%s:%d 解析失败: %s' % (label, i, line.strip()))
-    if schema is None:
-        raise ValueError('%s: schema: 缺失（版本是接入前提，不猜）' % label)
-    if cur is None:
-        raise ValueError('%s: 没有任何项目条目' % label)
-    if not cur['name']:
-        raise ValueError('%s: 项目 %s 缺 name' % (label, cur['key']))
-    if not cur['dirs']:
-        raise ValueError('%s: 项目 %s 缺 dirs' % (label, cur['key']))
-    return cur
-
-
-def _serialize_project(p, seed_label):
-    """per-key 条目序列化（迁移用）：严格子集可往返（值不含 # / 换行，迁移时校验）。"""
-    lines = ['# 由 %s 自动迁移（sandbar M1-1），格式=契约① per-key 注册条目，勿手改' % seed_label,
-             'schema: v1', 'project:', '  - key: %s' % p['key'], '    name: %s' % p['name'], '    dirs:']
-    lines += ['      - %s' % d for d in p['dirs']]
-    return '\n'.join(lines) + '\n'
-
-
-def _scan_registry(root):
-    """扫注册表根目录：好条目进 projects，坏条目进 quarantined（fail-closed 可见不炸全表）。"""
-    projects = []
-    quarantined = []
-    for child in sorted(root.iterdir()):
-        if not child.is_dir() or child.name.startswith('.'):
-            continue
-        f = child / 'project.yaml'
-        if not f.is_file():
-            continue  # 无注册条目的目录（如 data/ 保留位）跳过
-        label = str(f)
-        if not PROJECT_KEY_RE.match(child.name):
-            quarantined.append({'dir': str(child),
-                                'error': '%s: 目录名不合法（key 白名单：小写字母/数字/中划线）：%s'
-                                         % (label, child.name)})
-            continue
-        try:
-            p = _parse_project_file(f.read_text('utf-8'), label)
-            if p['key'] != child.name:
-                raise ValueError('%s: key 与目录名不等：%s ≠ %s' % (label, p['key'], child.name))
-            projects.append(p)
-        except ValueError as e:
-            quarantined.append({'dir': str(child), 'error': str(e)})
-    return projects, quarantined
-
-
-def _migrate_registry(root, seed):
-    """一次性迁移：旧单文件 → per-key 目录。tmp+rename 原子入位；.migrated 独占创建。
-    任一步失败抛错（fail-closed）；已入位条目留在现场，下次启动命中半迁移分支显式报出。"""
-    seed_label = str(seed)
-    projects = _parse_legacy_file(seed.read_text('utf-8'), seed_label)
-    for p in projects:
-        for field, value in [('key', p['key']), ('name', p['name'])] + [('dirs', d) for d in p['dirs']]:
-            if '#' in value or '\n' in value:
-                raise ValueError('迁移源 %s：项目 %s 的 %s 含 # 或换行，严格子集无法表示，'
-                                 '拒绝迁移（请人工改源表）' % (seed_label, p['key'], field))
-    root.mkdir(parents=True, exist_ok=True)
-    for p in projects:
-        d = root / p['key']
-        d.mkdir(parents=True, exist_ok=True)
-        content = _serialize_project(p, seed_label)
-        target = d / 'project.yaml'
-        # 幂等：已有同字节条目直接跳过（二次调用零重写；并发双迁亦收敛）
-        if target.is_file() and target.read_text('utf-8') == content:
-            continue
-        tmp = Path(_tmp_name(target))
-        tmp.write_text(content, 'utf-8')
-        os.replace(tmp, target)
-    try:
-        fd = os.open(str(root / '.migrated'), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        with os.fdopen(fd, 'w') as fh:
-            fh.write('source: %s\nmigrated_at: %s\n' % (seed_label, time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())))
-    except FileExistsError:
-        pass  # 并发首启：另一个进程已写标记，内容等价，忽略
-
-
-def _tmp_name(target):
-    """并发安全的临时文件名：进程唯一后缀（确定性 tmp 名会被并发双迁互踩，
-    赢家 rename 后输家撞 FileNotFoundError，t260901-14 集成测试实测）。"""
-    return '%s.tmp.%s.%s' % (target, os.getpid(), time.time_ns())
-
-
-def _expected_entries(projects, seed_label):
-    """迁移期望表：种子每条目 → 迁移会写出的精确文本（续迁判等用）。"""
-    return {p['key']: _serialize_project(p, seed_label) for p in projects}
-
-
-def _resume_migration(root, expected, on_disk_keys):
-    """续迁：只补写种子里缺失的条目（盘上已有的不动，防覆盖人工改动），最后补 .migrated。"""
-    for key, content in expected.items():
-        if key in on_disk_keys:
-            continue
-        d = root / key
-        d.mkdir(parents=True, exist_ok=True)
-        tmp = Path(_tmp_name(d / 'project.yaml'))
-        tmp.write_text(content, 'utf-8')
-        os.replace(tmp, d / 'project.yaml')
-    try:
-        fd = os.open(str(root / '.migrated'), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        with os.fdopen(fd, 'w') as fh:
-            fh.write('source: %s\nmigrated_at: %s\n' % (PROJECTS_YAML, time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())))
-    except FileExistsError:
-        pass  # 并发：另一个进程已写标记，内容等价，忽略
-
-
-def _ensure_migrated(root):
-    """per-key 模式装载前的一致性检查：跳过判据只认 .migrated。无标记且根里有内容时，
-    区分三类现场（修订 v2.1，实现期自测发现——字面「有内容无标记=fail-closed」会把
-    正常手工注册的注册表全部判死）：
-    - 纯人工注册表（盘上 key 与种子零交集，或种子不在时）→ 接受；
-    - 崩溃残留/丢标记（盘上全是种子条目的精确文本子集，无隔离）→ 续迁补齐 + 补标记；
-    - 混合现场（部分相关但不可由种子完全复现）→ fail-closed 抛错，人工处置，不静默跳过。"""
-    if (root / '.migrated').is_file():
-        return
-    projects, quarantined = _scan_registry(root)
-    on_disk = len(projects) + len(quarantined)
-    if on_disk == 0:
-        if not PROJECTS_YAML.is_file():
-            raise ValueError('注册表根目录不存在：%s，且无迁移源 %s（fail-closed，不静默视为空注册表）'
-                             % (root, PROJECTS_YAML))
-        _migrate_registry(root, PROJECTS_YAML)
-        return
-    if not PROJECTS_YAML.is_file():
-        return  # 纯人工注册表：种子不在，无从判定也无从迁移，接受现状
-    try:
-        expected = _expected_entries(
-            _parse_legacy_file(PROJECTS_YAML.read_text('utf-8'), str(PROJECTS_YAML)), str(PROJECTS_YAML))
-    except ValueError as e:
-        raise ValueError('注册表现场无法判定：%s 有 %d 个项目条目但无 .migrated 标记，'
-                         '且迁移源 %s 不可解析（%s）。处置：修复或移除迁移源后重试。拒绝静默跳过。'
-                         % (root, on_disk, PROJECTS_YAML, e))
-    seed_keys = set(expected.keys())
-    on_disk_keys = set([p['key'] for p in projects] + [Path(q['dir']).name for q in quarantined])
-    if not (on_disk_keys & seed_keys):
-        return  # 纯人工注册表（与种子无关），接受现状
-    pure_subset = (not quarantined and all(
-        p['key'] in seed_keys
-        and (root / p['key'] / 'project.yaml').read_text('utf-8') == expected.get(p['key'])
-        for p in projects))
-    if pure_subset:
-        _resume_migration(root, expected, on_disk_keys)
-        return
-    raise ValueError('注册表现场无法判定：%s 有 %d 个项目条目、无 .migrated 标记，'
-                     '且内容与迁移源 %s 部分相关但不能完全复现（混合现场：可能是崩溃残留叠了人工改动）。'
-                     '处置：确认后补写标记、清除该目录重迁，或移除/修复迁移源。拒绝静默跳过。'
-                     % (root, on_disk, PROJECTS_YAML))
+# ---------- 项目注册表（薄壳委托，t260904-02 上收单一真源）----------
+# 装载器真源=server/dsh/temporal-poc/shared.py「项目注册表」节：KI-032 硬闸要求
+# client.py ticket-start 与本文件 create 用同一份装载器锚 project（双份必漂移，
+# t260824 三次事故教训）。本节保留对外函数名与错误文案（逐字不变，wrapper 只转调），
+# 其余调用方（_create/_list 等）零改动。env 语义（SUYOU_PROJECTS_YAML >
+# SANDBAR_PROJECTS_DIR > ~/.sandbar/projects，每次现读）与迁移/隔离/混合现场
+# 判定逻辑全部随真源走，见 shared.py 注释。
 
 
 def _load_registry():
-    """装载注册表全量，返回 (projects, quarantined)。
-    legacy env（SUYOU_PROJECTS_YAML）在位时走旧单文件模式（无隔离概念）。"""
-    legacy = os.environ.get('SUYOU_PROJECTS_YAML')
-    if legacy:
-        return _parse_legacy_file(Path(legacy).read_text('utf-8'), legacy), []
-    root = _registry_root()
-    if not root.is_dir():
-        if not PROJECTS_YAML.is_file():
-            raise ValueError('注册表根目录不存在：%s，且无迁移源 %s（fail-closed，不静默视为空注册表）'
-                             % (root, PROJECTS_YAML))
-        _migrate_registry(root, PROJECTS_YAML)
-    else:
-        _ensure_migrated(root)
-    return _scan_registry(root)
+    """读注册表全量（委托 shared.load_projects_registry，语义同迁前）。"""
+    return _shared().load_projects_registry()
 
 
 def _assert_nonempty(projects, quarantined):
-    """空注册表统一报错（三分支全显式）：无任何条目 / 全部被隔离（列原因）。"""
-    if projects:
-        return
-    if quarantined:
-        reasons = '；'.join('%s（%s）' % (q['dir'], q['error']) for q in quarantined)
-        raise ValueError('注册表没有任何可用项目条目：全部 %d 条被隔离——%s'
-                         % (len(quarantined), reasons))
-    raise ValueError('注册表没有任何项目条目')
+    """空注册表统一报错（委托 shared.assert_registry_nonempty，文案不变）。"""
+    _shared().assert_registry_nonempty(projects, quarantined)
 
 
 def _projects():
@@ -453,18 +141,7 @@ def _projects():
 def _project(key):
     """按 key 查注册表项目；缺失/未知一律 ValueError（无默认值）。返回 {key,name,dirs}。
     key 对应隔离条目时错误文案带目录+原因（fail-closed 可见，不静默当未知）。"""
-    if not key or not PROJECT_KEY_RE.match(key):
-        raise ValueError('project 不合法（注册表 key 白名单：小写字母/数字/中划线），实际 %r' % (key,))
-    projects, quarantined = _load_registry()
-    _assert_nonempty(projects, quarantined)
-    for p in projects:
-        if p['key'] == key:
-            return p
-    for q in quarantined:
-        if Path(q['dir']).name == key:
-            raise ValueError('项目 %s 注册条目已隔离：%s：%s' % (key, q['dir'], q['error']))
-    known = '、'.join(p['key'] for p in projects)
-    raise ValueError('未知项目 %r（已注册：%s）' % (key, known))
+    return _shared().lookup_project(key)
 
 
 # ---------- 共用 ----------
@@ -628,11 +305,9 @@ def _next_seq_v2(prefix):
 
 def _check_paths_under_project(proj, ws, worktree):
     """显式给的绝对路径必须落在该项目注册目录之一（防把别的项目的目录登记进来）；
-    相对路径不拦（执行侧对项目主目录解析）。"""
-    for label, p in (('workspace', (ws or {}).get('path') or ''), ('worktree', worktree or '')):
-        if p.startswith('/') and not any(p == d or p.startswith(d.rstrip('/') + '/') for d in proj['dirs']):
-            raise ValueError('%s 路径 %s 不在项目 %s 的注册目录内（%s）'
-                             % (label, p, proj['key'], '、'.join(proj['dirs'])))
+    相对路径不拦（执行侧对项目主目录解析）。（t260904-02 起委托 shared 同名函数，
+    client.py ticket-start 硬闸共用同一判定。）"""
+    _shared().check_paths_under_project(proj, ws, worktree)
 
 
 # ---------- 操作 ----------

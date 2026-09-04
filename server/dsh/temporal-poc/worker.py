@@ -16,6 +16,9 @@ workflow 的状态与历史都在服务端不丢——这正是要验证的模�
     #   WATCH 模式下 worker 周期查自己 workflow 的状态，收口（非 RUNNING）即优雅自退。
     #   console 子进程模式另置 SUYOU_WATCH_PPID=1：宿主被 SIGKILL 时 ppid 变 1 即自退，
     #   不留无主 worker（--daemon 手动拉起时不置此变量，保持常驻）。
+    # 归属指纹（KI-033，t260904-02）：SUYOU_WORKER_META=<路径>（supervisor 指路）时
+    #   起跑即写 meta JSON（repo_root/pid）；daemon 模式写 <pidfile>.meta。ensure 侧
+    #   据此识别异仓 worker 伺服同票（告警+拒接）。
 
 优雅停：
     kill -TERM $(cat data/worker.pid)      # SIGTERM / Ctrl-C（SIGINT）同理
@@ -38,11 +41,30 @@ from temporalio.worker import Worker
 
 from activities import ALL_ACTIVITIES
 from agent_activities import ALL_AGENT_ACTIVITIES
-from shared import NAMESPACE, POC_DIR, TARGET_HOST, TASK_QUEUE
+from shared import NAMESPACE, POC_DIR, REPO_ROOT, TARGET_HOST, TASK_QUEUE
+from shared import write_worker_meta
 from workflows import ALL_WORKFLOWS
 from workflows_v2 import ALL_WORKFLOWS_V2
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
+
+def worker_meta_path(args: argparse.Namespace) -> str:
+    """归属指纹 meta 落点（KI-033，t260904-02）。
+
+    - 工单专属模式（console supervisor 以子进程拉起）：读 env SUYOU_WORKER_META
+      （supervisor spawn 时指路，约定 = <dataDir>/worker-<tid>.meta，与 pidfile 同目录）；
+    - daemon 模式（--daemon 常驻）：<pidfile>.meta（worker 自己知道 pidfile 路径）；
+    - 前台调试模式：不落 meta（无注册方，写了也没人读）。
+
+    pidfile 本体语义不动（纯数字 pid），meta 是旁车文件——ensure 侧按
+    「pid 活着 + meta 异仓」判异仓（告警+拒接，不杀别人进程）。"""
+    env_path = os.environ.get("SUYOU_WORKER_META") or ""
+    if env_path:
+        return env_path
+    if args.daemon:
+        return args.pidfile + ".meta"
+    return ""
 
 
 def parse_args() -> argparse.Namespace:
@@ -76,8 +98,18 @@ def daemonize(pidfile: str, logfile: str) -> bool:
     return False
 
 
-async def run_worker() -> None:
+async def run_worker(args: argparse.Namespace) -> None:
     logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
+    # 归属指纹自报（KI-033）：起跑早写（Client.connect 前）——确保 worker 一活起来
+    # ensure 侧就能读到归属；best-effort，写失败不阻断启动（ensure 对缺失态有
+    # unknown 兼容处理）。优雅停时 main() 里 best-effort 清理。
+    meta_path = worker_meta_path(args)
+    if meta_path:
+        payload = write_worker_meta(meta_path, repo_root=str(REPO_ROOT), pid=os.getpid())
+        logging.info("worker 归属指纹：repo_root=%s pid=%d meta=%s",
+                     payload.get("repo_root"), payload.get("pid"), meta_path)
+    else:
+        logging.info("worker 归属指纹：前台模式不落 meta（repo_root=%s）", REPO_ROOT)
     client = await Client.connect(TARGET_HOST, namespace=NAMESPACE)
     # 260823：老 TicketWorkflow 已随 tickets/ 投影目录退场（全部工单 closed）。
     # workflow 清单=步1 两类（兼容）+ 六模版子类；activity 清单=通用活动 + agent 段活动。
@@ -150,10 +182,19 @@ def main() -> None:
         is_parent = daemonize(args.pidfile, args.logfile)
         if is_parent:
             return
+    meta_path = worker_meta_path(args)
     try:
-        asyncio.run(run_worker())
+        asyncio.run(run_worker(args))
     except KeyboardInterrupt:
         pass
+    finally:
+        # 优雅停收尾：清自己的 meta（stale meta 由 ensure 侧按「pid 死」判定，
+        # 但主动清更干净）。best-effort——清不掉不掩盖退出码。
+        if meta_path:
+            try:
+                pathlib.Path(meta_path).unlink()
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":

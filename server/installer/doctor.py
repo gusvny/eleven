@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import os
+
 from installer import matrix as matrix_mod
 from installer import upgrade as upgrade_mod
 
@@ -29,6 +31,16 @@ def cmd_doctor(paths, log=print, live: bool = False, matrix_path=None,
             % (dsh_point, "、".join(points)))
 
     results = runner.run_all(live=live)
+    # 第五面（t260904-02，KI-033 防再犯）：异仓引擎进程（僵尸）探测。真源=
+    # installer/zombies.py（写集内自持，不动 server/probes/）。输入档与四面探针
+    # 同构：SANDBAR_ZOMBIE_CENSUS 注入 > --live 真扫 > 缺省内嵌干净样本（绿行
+    # 文案自辨档位，防「跑过 doctor 绿」被误读为「无僵尸」——review C2）。
+    from probes import ProbeResult  # server/ 已在 sys.path（入口脚本注入）
+    from installer import zombies as zombies_mod
+    z_ok, z_detail = zombies_mod.probe(
+        live=live, engine_root=paths.root,
+        census_path=os.environ.get("SANDBAR_ZOMBIE_CENSUS") or None)
+    results.append(ProbeResult(zombies_mod.NAME, z_ok, z_detail))
     for r in results:
         log(r.line())
     greens = [r for r in results if r.ok]
@@ -51,5 +63,6 @@ def cmd_doctor(paths, log=print, live: bool = False, matrix_path=None,
         log("[红] %d/%d 探针红——红面不落矩阵（契约⑧-3：空格=未验证）"
             % (len(results) - len(greens), len(results)))
         return 1
-    log("doctor 完成：四面全绿，矩阵落 %s" % mpath)
+    # 面数动态计数（review C2）：探针数已扩到 5，写死「四面」会撒谎。
+    log("doctor 完成：%d/%d 面全绿，矩阵落 %s" % (len(greens), len(results), mpath))
     return 0

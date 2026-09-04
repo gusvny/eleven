@@ -38,3 +38,21 @@
 4. 隔离台场景在**两路并发**下各跑各的 temporalite：零端口冲突、零数据串台、断言互不干扰；teardown 后槽位/db/临时家全清。
 5. 场景断言**不出现**对生产 7233/8233 的任何连接尝试（含 UI/metrics 端口探测负向断言）。
 6. KI-032/KI-033 在册子中转 closed（附票号）；epic 本档面状态更新。
+
+## 票① 交付记录（t260904-02，implement 段）
+
+- **验收 1（KI-032）**：注册表装载器上收 temporal-poc/shared.py（单一真源，ticket.py:112-467 整块改薄壳委托，错误文案逐字保留）；client.py ticket-start 硬闸——lookup_project 锚 project_root → derive_lane_workspace → check_paths_under_project 双查（workspace+worktree）；缺 project/未知 key/路径越界三态各自可辨拒收。
+- **验收 2（KI-033）**：worker.py 起跑早写归属指纹 meta（{version,pid,repo_root,ts}，connect 前；SUYOU_WORKER_META 指路 / daemon=<pidfile>.meta；优雅退 best-effort 清）；node.ts `ensureTicketWorkersOnce(deps)→{decisions}`（对外契约，依赖可注入）——同仓 held-same / 异仓 held-foreign（warn{repoRoot,pid,tid}+拒接不杀）/ 畸形 held-unknown（reason 含 meta 路径+state 不哑巴）；apply 闭包真跑注入真件。
+- **验收 3**：installer/zombies.py（探针名 probe-engine-zombies；census 注入 `{"processes":[…]}`/live lsof/缺省内嵌样本三档；家族判定=git 归属，主树+兄弟 worktree 不误报——实现期真机实扫 336 进程 0 假红）；doctor.py 拼装第五面，尾行面数动态计数。
+- **验收 4/5**：integration/bench.py 槽位制（端口 1910N/1920N/1930N 三显式、槽专属 db+namespace、flock fd 移交 temporalite=崩溃自释）+ bench_console.mjs 薄壳（复用 ui-check/capture-lane.mjs 真源）+ python 审计钩子（socket.connect 对 7233/8233 先记后抛=阻断）。
+- **场景证据**：`python3 integration/run_scenarios.py` → **13/13 绿（95s）**（新增 3：ticket-start-anchor / worker-fingerprint-gate / doctor-zombie）；生产 7233/8233 监听面前后 lsof 对照零扰动。
+- **槽位全清口径（C7）**：teardown 后槽目录仅剩空 lock 文件=**槽锚**（unlink 会让旧 flock inode 与新建文件失去互斥=假独占风险）；「全清」指 db/wal/shm/日志/临时产物，lock 锚保留。
+- **存量联动**：t260903-10 doctor-compat 场景 EXPECTED_PROBES 4→5 + run_scenarios 该条 intent 措辞同步（dispatch 授权的唯一存量触碰）；temporal-tools 改动上线后宿主择机重启 supervisor 生效（不自动重启 console）。
+- **遗留**：泳道缺 bin/temporal 与 .venv 由 gitfile 主树回退兜住（KI-020③ 邻接绷带，根治归 dispatcher）；23 个 t260901-XX 测试包装器指向迁仓未带的 integration 目录=既有 latent red（非本票引入，处置另立票）。
+
+## 票① 验收记录（t260904-02 acceptance gen1，260904）
+
+- **六条验收全过**：①payload 绝对锚定+三态拒收（场景①走查实证）；②ensure 真执行三态 decisions+异仓 warn 三要素（场景②）；③doctor 注入红绿+矩阵 5 行+文案自辨（场景③）；④双槽并发隔离+teardown 全清；⑤审计钩子零记录含拦截自证腿+三端口显式，生产 7233/8233/3099 监听者走查前后 PID 零扰动；⑥KI-032/033 本轮转 closed（附票号）。
+- **打回轮收敛复核（acceptance gen0 打回三项全闭合）**：P1 bench 槽根降级探测（受限环境原形态必裸 PermissionError → 现真写+删探针探测，明示降级一行带旋钮指路，锁文件不可建=MissingAsset 可辨）；P2 ensure fetch 后 isDisposed 短路；P3 shared.py PROJECT_KEY_RE 收敛单一定义；打回建议腿补齐=integration/tests/test_bench.py 7/7（含满槽排队 BenchBusy「槽满」真 flock 争用断言）。
+- **面状态**：票①验收通过；后续面（引擎行为场景扩展/裸入口收敛）按本档约定宿主再立。
+- **走查新登记（非阻塞，随后续票处置）**：槽端口为机器全局固定基址而 flock 互斥仅限单一槽根——两个槽根（如降级临时区 vs ~/.sandbar）并行跑同号槽会瞬时 BenchEnvConflict（分类可辨、不对抗语义符合设计；单机同时只跑一个套件/统一槽根即可避免）；降级根落平台共享临时区放大了该撞面，建议后续给降级根掺会话唯一后缀或冲突文案点名「他槽根在跑」。

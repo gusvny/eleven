@@ -24,7 +24,7 @@
  */
 
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
-import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, mkdirSync, openSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs'
 import net from 'node:net'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -239,6 +239,200 @@ function readPid(pidfile: string): number | null {
   }
 }
 
+// ---- worker 归属指纹（KI-033，t260904-02）----
+// worker.py 起跑自写 meta JSON（SUYOU_WORKER_META 指路 / daemon 模式 <pidfile>.meta），
+// 内容 {version, pid, repo_root, ts}（repo_root=realpath）。ensure 据此识别
+// 异仓 worker 伺服同票。指纹=repo_root 路径而非 git HEAD——同仓先后 commit 不该
+// 误判异仓（supervisor 与 worker 常是先后从同一棵树起的）。本节模块级 + export
+// （契约=design_integration_tests 场景对齐真源）：readWorkerMeta/judgeTicketWorkerMeta/
+// ensureTicketWorkersOnce——集成场景直接真调，断言落真执行路径行为输出（review C1）。
+
+/** worker meta JSON 形状（写入方=worker.py shared.write_worker_meta）。 */
+export interface WorkerMeta {
+  version?: number
+  pid?: number
+  repo_root?: string
+  ts?: number
+}
+
+/** 读 meta 结果：state 四态与 python 侧 shared.read_worker_meta_state 对齐。 */
+export interface WorkerMetaRead {
+  meta: WorkerMeta | null
+  state: 'ok' | 'missing' | 'malformed' | 'read_error'
+  detail: string
+}
+
+/** 读+校验 meta（对外契约形态）：可读且形状符 → meta；缺/坏/读失败 → null。 */
+export function readWorkerMeta(path: string): WorkerMeta | null {
+  return readWorkerMetaDetailed(path).meta
+}
+
+/** 读 meta 全量四态（内部用：unknown 留痕要 state/detail，review C3）。 */
+export function readWorkerMetaDetailed(path: string): WorkerMetaRead {
+  let raw: string
+  try {
+    raw = readFileSync(path, 'utf8')
+  } catch (err: any) {
+    if (err?.code === 'ENOENT') return { meta: null, state: 'missing', detail: `文件不存在：${path}` }
+    return { meta: null, state: 'read_error', detail: `${err?.code ?? ''} ${err?.message ?? err}`.trim() }
+  }
+  let data: any
+  try {
+    data = JSON.parse(raw)
+  } catch (err: any) {
+    return { meta: null, state: 'malformed', detail: `JSON 不可解析：${err?.message ?? err}` }
+  }
+  if (typeof data !== 'object' || data === null
+    || typeof data.repo_root !== 'string' || !data.repo_root
+    || !Number.isInteger(data.pid)) {
+    return { meta: null, state: 'malformed', detail: '形状不符（需 version/pid:int/repo_root:str）' }
+  }
+  return { meta: data, state: 'ok', detail: '' }
+}
+
+/** 判定在册工单 worker 归属：'same'（本仓，照旧跳过不重复拉）/'foreign'（异仓，
+ * 告警+拒接——不杀别人进程，只不重复拉自己的；杀进程归人）/'unknown'（meta 缺失/
+ * 畸形/读失败——兼容期按旧行为跳过，但 info 留痕可定位）。ownRepoRoot 应传
+ * realpath 规范化后的本仓根。meta=null（缺/坏）直接 unknown。 */
+export function judgeTicketWorkerMeta(
+  meta: WorkerMeta | null, ownRepoRoot: string): 'same' | 'foreign' | 'unknown' {
+  const root = meta?.repo_root
+  if (!root) return 'unknown'
+  if (root === ownRepoRoot) return 'same'
+  // 字串不等再试 realpath 归一（比对双方口径一致，符号链接差异不产生假异仓）；
+  // 对方路径已不可解析=确实不是本树，判 foreign（它伺服的就是别处的代码）。
+  try {
+    if (realpathSync(root) === ownRepoRoot) return 'same'
+  } catch { /* 不可解析 → foreign */ }
+  return 'foreign'
+}
+
+/** ensureTicketWorkersOnce 单轮决策（对外契约形态，可断言的行为记录面）。 */
+export interface TicketWorkerDecision {
+  tid: string
+  action: 'spawned' | 'held-same' | 'held-foreign' | 'held-unknown'
+  /** action=held-foreign 时必带：异仓根/pid/tid（告警记录的最小闭环）。 */
+  warn?: { repoRoot: string; pid: number; tid: string }
+  /** action=held-unknown 时必带：meta 路径/失败原因（兼容跳过不哑巴，review C3）。 */
+  reason?: string
+}
+
+/** 单轮 ensure 的可注入依赖：running=在册 RUNNING 工单清单（fetch 归调用方）；
+ * spawn 可注入（缺省=不拉起只记录——真拉起出口在 apply 闭包侧注入）。 */
+export interface EnsureTicketWorkersOnceDeps {
+  dataDir: string
+  repoRoot: string
+  running: { id: string; queue: string }[]
+  spawn?: (tid: string, queue: string) => { pid: number } | void
+}
+
+/** 一轮工单 worker 归属判定 + 补拉决策（纯决策面，不做日志/网络）：
+ * 在册 worker 带指纹 → held-same/held-foreign/held-unknown 三态；无活 worker →
+ * spawned（spawn 出口由 deps.spawn 提供）。清 stale pidfile 后再抢注。 */
+export async function ensureTicketWorkersOnce(
+  deps: EnsureTicketWorkersOnceDeps): Promise<{ decisions: TicketWorkerDecision[] }> {
+  const decisions: TicketWorkerDecision[] = []
+  for (const r of deps.running) {
+    const pf = join(deps.dataDir, `worker-${r.id}.pid`)
+    const mf = join(deps.dataDir, `worker-${r.id}.meta`)
+    const existing = readPid(pf)
+    if (existing !== null && isPidAlive(existing)) {               // 别的 console/手动 worker 在册
+      const read = readWorkerMetaDetailed(mf)
+      const verdict = judgeTicketWorkerMeta(read.meta, deps.repoRoot)
+      if (verdict === 'foreign') {
+        decisions.push({
+          tid: r.id, action: 'held-foreign',
+          warn: { repoRoot: String(read.meta?.repo_root ?? '?'), pid: read.meta?.pid ?? existing, tid: r.id },
+        })
+        continue
+      }
+      if (verdict === 'unknown') {
+        decisions.push({
+          tid: r.id, action: 'held-unknown',
+          reason: `meta=${mf} state=${read.state}：${read.detail}（pidfile=${pf} pid=${existing}）`,
+        })
+        continue
+      }
+      decisions.push({ tid: r.id, action: 'held-same' })           // 本仓在册，照旧
+      continue
+    }
+    try { unlinkSync(pf) } catch { /* 无 pidfile */ }              // 清 stale 再抢注
+    if (deps.spawn) {
+      deps.spawn(r.id, r.queue)
+      decisions.push({ tid: r.id, action: 'spawned' })
+    } else {
+      decisions.push({
+        tid: r.id, action: 'held-unknown',
+        reason: `worker 缺位且未提供 spawn 出口（pidfile=${pf}）——独立调用仅判定不拉起`,
+      })
+    }
+  }
+  return { decisions }
+}
+
+/** ensureTicketWorkers 的可注入依赖（apply 闭包真跑时全为真件）。 */
+export interface EnsureTicketWorkersDeps {
+  /** spawn `python client.py <子命令> <argsJSON>` 的真出口（场景可桩）。 */
+  cli: (subcommand: string, args: unknown) => Promise<any>
+  /** 工单 worker pidfile/meta 所在目录（<dataDir>/worker-<tid>.pid/.meta）。 */
+  dataDir: string
+  /** 本引擎仓根（realpath；指纹比对基准）。 */
+  repoRoot: string
+  /** 日志缝：warn=异仓告警，info=unknown 兼容跳过留痕。 */
+  log: { info: (...a: unknown[]) => void; warn: (...a: unknown[]) => void }
+  /** 本进程已持有的工单 worker 表（tid → ChildProcess）。 */
+  ticketChildren: Map<string, ChildProcess>
+  /** 本进程的工单 worker spawn 出口（场景可记录调用）。 */
+  spawnTicketWorker: (tid: string, queue: string) => void
+  /** supervisor 是否已 dispose。 */
+  isDisposed: () => boolean
+  /** temporal server 在线探测（ensure 前置条件）。 */
+  serverAlive: () => Promise<boolean>
+}
+
+/** 一轮工单 ensure：server 在线才做；RUNNING 工单缺活 worker 的补拉；
+ * 在册 worker 带归属指纹时按 same/foreign/unknown 三态处置（KI-033）。
+ * 判定主体=ensureTicketWorkersOnce（真执行路径），本函数只做 fetch/日志/真 spawn。
+ * 工单已收口但 worker 还活着的：不主动杀——worker 自己的 watch 30s 内优雅自退
+ * （在跑 activity 做完再走），比 host 侧 SIGTERM 更干净。 */
+export async function ensureTicketWorkers(deps: EnsureTicketWorkersDeps): Promise<void> {
+  if (await deps.isDisposed() || !(await deps.serverAlive())) return
+  let list: any
+  try {
+    list = await deps.cli('running-tickets', {})
+  } catch (err: any) {
+    deps.log.warn('suyou-temporal-tools supervisor: running-tickets 查询失败（下轮再试）：%s', err?.message ?? err)
+    return
+  }
+  const runningAll: { id: string; queue: string }[] = list?.result?.running ?? []
+  if (await deps.isDisposed()) return  // fetch 窗口内 dispose：立即短路不再拉起（acceptance P2）
+  const running = runningAll.filter(r => !deps.ticketChildren.has(r.id))  // 本进程已持有的不管
+  const { decisions } = await ensureTicketWorkersOnce({
+    dataDir: deps.dataDir, repoRoot: deps.repoRoot, running,
+    spawn: (tid, queue) => { deps.spawnTicketWorker(tid, queue); return { pid: -1 } },
+  })
+  for (const d of decisions) {
+    if (await deps.isDisposed()) return
+    const pf = join(deps.dataDir, `worker-${d.tid}.pid`)
+    const mf = join(deps.dataDir, `worker-${d.tid}.meta`)
+    if (d.action === 'held-foreign' && d.warn) {
+      // 异仓 worker 伺服同票（260904 t260904-01 首开脑裂形态）：告警+拒接。
+      // 绝不 kill 别人进程——杀进程归人（doctor --live 可扫异仓进程辅助清点）。
+      deps.log.warn(
+        'suyou-temporal-tools supervisor: [KI-033] 异仓 worker 伺服同票，拒接（不杀别人进程）：' +
+        'tid=%s pid=%d 其引擎仓=%s 本仓=%s meta=%s —— 处置：人工清点该 worker 归属' +
+        '（sandbar doctor --live 扫异仓引擎进程），确认后手动停它或迁移注册',
+        d.tid, d.warn.pid, d.warn.repoRoot, deps.repoRoot, mf)
+    } else if (d.action === 'held-unknown') {
+      // meta 缺失/畸形/读失败三态都在 reason 里（review C3：兼容跳过不许哑巴）。
+      // 行为不劣于现状（老版 worker 无 meta 照样跳过），但留痕可查。
+      deps.log.info(
+        'suyou-temporal-tools supervisor: 工单 worker %s 在册但无归属指纹——按兼容期处理不重复拉起；%s' +
+        '（旧版 worker 请升级或清场）', d.tid, d.reason ?? `pidfile=${pf}`)
+    }
+  }
+}
+
 export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) | void {
   const repo = config?.repo ?? process.env.SUYOU_REPO ?? DEFAULT_REPO
   const python = config?.python ?? join(pocDir(repo), '.venv', 'bin', 'python')
@@ -448,6 +642,7 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
           SUYOU_TASK_QUEUE: queue,   // queue 名取自 running-tickets（执行本身），零常量复制
           SUYOU_WATCH_WORKFLOW: tid, // workflow 收口自退
           SUYOU_WATCH_PPID: '1',     // 宿主 SIGKILL → ppid=1 自退
+          SUYOU_WORKER_META: join(dataDir, `worker-${tid}.meta`), // 归属指纹自报（KI-033，ensure 据此判异仓）
         },
         stdio: ['ignore', fd, fd],
       })
@@ -472,6 +667,12 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
       ticketChildren.delete(tid)
       // 只清自己写的 pidfile（内容=child.pid 才删，防误删别人新注册的）。
       if (readPid(pf) === child.pid) try { unlinkSync(pf) } catch { /* 已清 */ }
+      // meta 旁车同理：worker 优雅停自清；这里兜底只清自己 child 的（内容=pid 才删）。
+      const mf = join(dataDir, `worker-${tid}.meta`)
+      try {
+        const meta = readWorkerMeta(mf)
+        if (meta?.pid === child.pid) unlinkSync(mf)
+      } catch { /* 已清 */ }
       if (code !== 0 && sig === null) {
         log.warn('suyou-temporal-tools supervisor: 工单 worker %s 异常退出 code=%s', tid, code)
       } else {
@@ -481,28 +682,17 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
     log.info('suyou-temporal-tools supervisor: 已 spawn 工单 worker（tid=%s pid=%d queue=%s）', tid, child.pid, queue)
   }
 
-  /** 一轮工单 ensure：server 在线才做；RUNNING 工单缺活 worker 的补拉。 */
-  async function ensureTicketWorkers(): Promise<void> {
-    if (disposed || !(await serverAlive())) return
-    let list: any
-    try {
-      list = await cli('running-tickets', {})
-    } catch (err: any) {
-      log.warn('suyou-temporal-tools supervisor: running-tickets 查询失败（下轮再试）：%s', err?.message ?? err)
-      return
-    }
-    const running: { id: string; queue: string }[] = list?.result?.running ?? []
-    for (const r of running) {
-      if (disposed) return
-      if (ticketChildren.has(r.id)) continue                    // 本进程已持有
-      const pf = join(dataDir, `worker-${r.id}.pid`)
-      const existing = readPid(pf)
-      if (existing !== null && isPidAlive(existing)) continue   // 别的 console/手动 worker 在册
-      try { unlinkSync(pf) } catch { /* 无 pidfile */ }          // 清 stale 再抢注
-      spawnTicketWorker(r.id, r.queue)
-    }
-    // 工单已收口但 worker 还活着的：不主动杀——worker 自己的 watch 30s 内优雅自退
-    // （在跑 activity 做完再走），比 host 侧 SIGTERM 更干净。
+  // 工单 ensure 走模块级可注入实现（KI-033 三态判定；review C1：真执行路径可测），
+  // 本闭包注入真件。isDisposed 读闭包态而非快照——dispose 后的轮次立即短路。
+  const ticketEnsureDeps: EnsureTicketWorkersDeps = {
+    cli,
+    dataDir,
+    repoRoot: realpathSync(repo),
+    log,
+    ticketChildren,
+    spawnTicketWorker,
+    isDisposed: () => disposed,
+    serverAlive,
   }
 
   /** 一轮守护：server 没了就重启，server 在线但 worker 没了就重启 worker。 */
@@ -573,8 +763,8 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
   const timer = setInterval(() => { void ensureOnce() }, keepaliveMs)
 
   // 工单 worker ensure（A 案）：独立节奏（15s），server 在线才干活。
-  const ticketTimer = setInterval(() => { void ensureTicketWorkers() }, ticketEnsureMs)
-  void ensureTicketWorkers()
+  const ticketTimer = setInterval(() => { void ensureTicketWorkers(ticketEnsureDeps) }, ticketEnsureMs)
+  void ensureTicketWorkers(ticketEnsureDeps)
 
   log.info('suyou-temporal-tools supervisor: 已启动（port=%d，keepalive=%dms，ticketEnsure=%dms，serverLog=%s）',
     port, keepaliveMs, ticketEnsureMs, serverLog)

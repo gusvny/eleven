@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib_installer import (REPO, Fail, cleanup, find_installer_entry, make_temp_home,  # noqa: E402
                            run_cli, require_installer_entry)
 
-EXPECTED_PROBES = 4  # 契约四面：home 布局 / session 格式 / runner 装配 / settings resolve
+EXPECTED_PROBES = 5  # 五面：home 布局 / session 格式 / runner 装配 / settings resolve + probe-engine-zombies（t260904-02 落第五面，census 缺省档绿）
 
 
 def matrix_path(home):
