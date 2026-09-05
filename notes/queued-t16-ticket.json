@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260905-04",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "把新会话开头的项目背景大段收起来",
+  "user_request": "做什么：新会话注入的项目背景（charter）不再整段刷屏，收成一条可展开的小条——「📋 已注入项目背景 · 点击展开」；点开见全文；恢复会话不重复注入（t3 ×1 守卫不动）。\n为什么：背景是给模型看的不是给人看的；整段上屏傻且淹没真正的第一句话（260904 宿主反馈「有点傻」，11 号修好注入后的另一面）。\n怎么算好：新会话开头只见小条；journey 断言随 UI 行为更新（t1 从「特征串可见」改为「小条在场+默认折叠+展开可见」——折叠态文本仍在 DOM 则旧断言兼容，设计段定）；未来任何上下文注入（项目简介、文档引用）走同一折叠件——机制在引擎（消息元数据 kind=charter），面在渲染（通用折叠件）。",
+  "spec": "依据=notes/backlog.md t260904-16 草稿（宿主 260904 排队定稿）＋mock v5 会话视图；实现方向=消息元数据 kind=charter（node.ts 注入路径打标）+渲染器折叠件（通用面）。范围=server/dsh/workbench/＋integration/（t1/t3 journey 断言随迁）。验收：①新会话小条在场且默认折叠；②点开见全文（占位符实值化）；③恢复/切换路径不重复注入（t3 ×1）；④journey 断言更新且绿；⑤verify_lane code 绿+merge 预演。",
+  "write_set": ["server/dsh/workbench/", "integration/"],
+  "deliverables": "kind=charter 元数据+通用折叠件+journey 断言随迁"
+}
