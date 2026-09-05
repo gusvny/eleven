@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260905-05",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "修多页签静默交互死亡（T2/T5）——统一舞台逼出的产品缺陷",
+  "user_request": "做什么：workbench 控制台多页签共存的两个真红——T5 hostile traffic 下行点击真发出但抽屉不开（DOM click force 实证、console/pageerror 零异常=静默死亡）；T2 跨页写失效（D 页写链不触发，dialogs:[]）。为什么：docker 舞台统一（19 号）把 21 个环境红转成真断言后首次现形；三轮取证（force 实验/跨环境对照/同 build 变量隔离）坐实=pre-existing 产品缺陷在 workbench client 本身（T1 presence 基础链 PASS 排除通道），非台改造回归。怎么算好：T2/T5 转绿且 T1 族不回归；根因写透（多页签 write 消息处理/presence 链何处断）；force 取证守卫保留。",
+  "spec": "依据=t260904-19 仲裁 gen12/gen13/gen14 取证链（复现=node integration/baselines/sc_multi_tab_coexistence.mjs 任意台）＋19 号豁免签字（方案b 单列豁免+诚实红守卫保留，落地即开本票=该承诺兑现）。范围=server/dsh/workbench/（client 修）+integration/（断言不弱化，仅随修调锚）。红线=不改 19 号已落资产语义；验收=T2/T5 全绿+族内零回归+守卫在册。",
+  "write_set": ["server/dsh/workbench/", "integration/"],
+  "deliverables": "多页签 write 链修复+守卫保持+根因报告"
+}
