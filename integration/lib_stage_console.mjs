@@ -12,6 +12,11 @@
 //      拿自己的树，npm i/apt 每台只付一次，泳道间零对抗）。
 // 起台失败（docker 缺席/镜像缺席/起台不健康）=诚实环境红：打印 CLI 的 STAGE_ 行
 // 后 process.exit(2)——三态语义不变，绝不假绿。
+// 供给预算纪律（t260905-07 仲裁）：起台预算必须严格低于套件执行器的单场景杀帽
+// （现役 900s）——预算≥杀帽时「供给不了」永远以执行器 SIGKILL（exit -9）收场，
+// 场景自己的 ENV_FAIL（exit 2+STAGE_ 名点）永无落地机会，归因信息全灭。默认 600s
+// 留 300s 给场景真腿；首建特慢的环境用 SANDBAR_STAGE_ENSURE_TIMEOUT 调高（同时把
+// 执行器帽调到预算之上）。
 // 共享台生命周期=常驻基建（同 verify.yaml supply 的 sandbar-test-integ 例外口径）：
 // 场景退出**不拆台**；拆台归供给面/人工（down --project stage-console-<树哈希>）。
 import { spawnSync } from 'node:child_process';
@@ -55,18 +60,19 @@ export async function ensureStageConsole({ services = 'full', project = TREE_PRO
     spawnSync('python3', [CLI, 'down', '--project', project],
       { encoding: 'utf8', env, timeout: 180000 });
   }
-  // 供给预算必须压在场景执行器帽（900s）之下：供给拿不下=诚实 env_fail（exit 2
-  // 点名），绝不占满执行器超时被无声 -9（t260905-02 仲裁实锤：ensure 重建期被
-  // 执行器杀，stdout 空、归因信息全丢）。健康复用路径不受影响（秒级返回）。
-  const ENSURE_TIMEOUT_MS = 480000;
+  // 供给预算：默认 600s（严格低于现役执行器 900s 单场景杀帽，见文件头纪律段；
+  // t260905-02 仲裁实锤：ensure 重建期被执行器杀=stdout 空、归因全灭——预算压帽
+  // 之下，供给拿不下=诚实 env_fail exit 2 点名）。首建特慢的环境用
+  // SANDBAR_STAGE_ENSURE_TIMEOUT 调高（执行器帽须同步在其上）；健康复用秒级返回。
+  const ensureBudget = Number(process.env.SANDBAR_STAGE_ENSURE_TIMEOUT || 600);
   const p = spawnSync('python3', [CLI, 'ensure', '--project', project, '--keep',
     '--repo-dir', WANT_REPO,
-    '--services', services, '--timeout', '420'],
-  { encoding: 'utf8', env, timeout: ENSURE_TIMEOUT_MS });
+    '--services', services, '--timeout', String(ensureBudget)],
+  { encoding: 'utf8', env, timeout: ensureBudget * 1000 + 60_000 });
   if (p.error || p.status !== 0) {
     const named = String(p.stderr ?? '').split('\n').filter((l) => l.startsWith('STAGE_')).at(-1);
     const why = p.error
-      ? `ensure 超时/不可执行（${ENSURE_TIMEOUT_MS / 1000}s 供给帽，${p.error.code ?? p.error.name ?? p.error}）`
+      ? `ensure 超时/不可执行（${ensureBudget}s 供给帽，${p.error.code ?? p.error.name ?? p.error}）`
       : `rc=${p.status} ${String(p.stderr ?? '').slice(0, 200)}`;
     // 报错精确性：STAGE_ 行后附 CLI stderr 尾（compose 诊断面），不做只留结论丢证据。
     console.error(`[ENV_FAIL] stage-console — ${named ?? why}\n${String(p.stderr ?? '').slice(-600)}`);

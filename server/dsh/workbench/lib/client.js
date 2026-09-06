@@ -4287,58 +4287,140 @@ function startVisibleInterval(fn, ms) {
 }
 //#endregion
 //#region src/client/stale-check.ts
-/** 分类 build-info 响应（status + 原始文本）。不抛错——任何畸形输入都落 {stale:false}。 */
-function classifyBuildInfoResponse(status, bodyText) {
-	if (status < 200 || status >= 300) return { stale: false };
+function parseHandshakeBody(status, bodyText) {
+	if (status < 200 || status >= 300) return {
+		statusOk: false,
+		parseOk: false,
+		stale: null,
+		error: null,
+		bootFingerprint: null,
+		diskFingerprint: null
+	};
+	const empty = {
+		statusOk: true,
+		parseOk: false,
+		stale: null,
+		error: null,
+		bootFingerprint: null,
+		diskFingerprint: null
+	};
 	let parsed;
 	try {
 		parsed = JSON.parse(bodyText);
 	} catch {
-		return { stale: false };
+		return empty;
 	}
-	if (typeof parsed !== "object" || parsed === null) return { stale: false };
+	if (typeof parsed !== "object" || parsed === null) return empty;
 	const result = parsed.result;
-	if (typeof result !== "object" || result === null) return { stale: false };
+	if (typeof result !== "object" || result === null) return empty;
 	const r = result;
-	if (typeof r.error === "string") return {
-		stale: false,
-		error: r.error
+	return {
+		statusOk: true,
+		parseOk: true,
+		stale: typeof r.stale === "boolean" ? r.stale : null,
+		error: typeof r.error === "string" ? r.error : null,
+		bootFingerprint: typeof r.bootFingerprint === "string" && r.bootFingerprint !== "" ? r.bootFingerprint : null,
+		diskFingerprint: typeof r.diskFingerprint === "string" && r.diskFingerprint !== "" ? r.diskFingerprint : null
 	};
-	return { stale: r.stale === true };
+}
+/**
+* 三元组握手判定（injected + status + 原始文本）。injected=bundle 下载时刻注入的
+* 盘上指纹（null=缺失：L2 阶梯/注入失败/纯刷新页面外的旧码），任何畸形输入都不抛。
+* 矩阵逐格语义见文件头注 M1-M7；单测真值表（tests/stale-handshake.mjs）逐格对应。
+*/
+function classifyHandshake(injected, status, bodyText) {
+	const b = parseHandshakeBody(status, bodyText);
+	if (!b.statusOk) return { banner: status === 405 || status === 404 ? "restart" : null };
+	if (b.error !== null) return {
+		banner: null,
+		error: b.error
+	};
+	if (!b.parseOk) return { banner: null };
+	if (b.stale === true) return { banner: "restart" };
+	if (b.stale === null || b.bootFingerprint === null) return { banner: "restart" };
+	if (injected !== null && b.diskFingerprint !== null && injected !== b.diskFingerprint) return { banner: "reload" };
+	return { banner: null };
 }
 //#endregion
 //#region src/client/staleness.ts
 /**
-* staleness.ts —— host 陈旧全局提醒 hook（t260902-03，一日三咬根治）。
+* staleness.ts —— 插件陈旧全局提醒 hook（t260902-03 立；t260905-07 KI-052 握手矩阵接线）。
 *
 * 运行时看守：30s 可见性门轮询 /suyou-workbench/api/build-info（页签不可见零请求，
-* 复用 startVisibleInterval），磁盘 host 半与 console 进程启动指纹不一致 → 全局
-* 横幅提示「重启 console 生效」。挂点单例在 sidebar 层（.wb-sb-right 共享容器），
-* 四视图排他渲染也不影响，横幅常驻。
+* 复用 startVisibleInterval），判定走 classifyHandshake 三元组矩阵（boot/disk/injected，
+* 见 ./stale-check.ts）：
+*   - restart 支：服务端旧（boot≠disk / build-info 端点 405/404 内存无 / 缺 boot 指纹）
+*     → 「有更新，重启控制台生效」；
+*   - reload 支：服务端一致但浏览器旧（injected≠disk，跨重启存活页面）→
+*     「有更新，刷新页面生效」——重启对此支无效，文案与消除动作一一对应。
 *
-* 回收纪律（终态全回收）：
+* injected 的取得（L1 机制，写集内实现）：dsh 核心供给链在写集外、无法在 bundle
+* 响应里注入指纹，改用 **sessionStorage 注入代理**——本模块首次加载（=bundle
+* 下载完成时刻）即拉一次 build-info，把当下 disk 指纹写进 sessionStorage（页面
+* 维度，跨刷新存活）；轮询时读它当 injected。语义核对：
+*   - 新开页/刷新后：init 覆写 injected=当下 disk → 恒 M5（消除动作「刷新」可达，
+*     不会刷新后横幅不消）；
+*   - 页面存活跨合并/跨重启（不刷新）：sessionStorage 保留旧盘态 → injected≠disk
+*     → M4 reload（正是 gen1 打回①点名的序列）。
+* 异常（隐私模式禁用 sessionStorage 等）→ injected 恒 null，M4 自动失效退回 L2
+* 行为（仅服务端判定），不误报。
+*
+* 挂点单例在 sidebar 层（.wb-sb-right 共享容器），四视图排他渲染也不影响，横幅常驻。
+*
+* 回收纪律（终态全回收，gen1 打回②c 全带）：
 *   - useEffect cleanup 必调 startVisibleInterval 返回的停表函数（幂等）；
 *   - inflight fetch 在组件卸载后回包不得 setState——mounted 标志显式挡（React 18
 *     下无害，按纪律仍显式处理）。
 *
-* 异常取舍（R2 清单对 visibility-poll 模式 4 的声明偏离）：轮询 fn 内自吞
-* 网络/解析类运行错误（分类落 {stale:false}），不向上抛——看守自身不得成为新
-* 报错源；编程错（非 Error 对象等）不在自吞边界内。分类纯函数在 ./stale-check.ts。
+* 异常取舍（沿 t260902-03 口径）：轮询 fn 内自吞网络/解析类运行错误（矩阵落
+* 不显），不向上抛——看守自身不得成为新报错源；编程错（非 Error 对象等）不在
+* 自吞边界内。分类纯函数在 ./stale-check.ts，文案常量在 ./banner-text.ts（场景
+* 断言锚同源，KI-051 纪律）。
 */
 const BUILD_INFO_URL = "../suyou-workbench/api/build-info";
 const POLL_MS = 3e4;
-function useStaleHost() {
-	const [stale, setStale] = (0, react.useState)(false);
+/** sessionStorage 键（注入代理；页面维度，跨刷新存活、关页即清）。 */
+const INJECTED_KEY = "wb.build.fingerprint.atload";
+/** 读注入代理（异常→null：隐私模式等降级为 L2，不误报）。 */
+function readInjected() {
+	try {
+		return window.sessionStorage.getItem(INJECTED_KEY);
+	} catch {
+		return null;
+	}
+}
+/** 写注入代理（bundle 下载时刻的盘态快照）。 */
+function writeInjected(fp) {
+	try {
+		window.sessionStorage.setItem(INJECTED_KEY, fp);
+	} catch {}
+}
+/** 拉一次 build-info 并取 disk 指纹（init 用；网络/解析错自吞返 null）。 */
+async function fetchDiskFingerprint() {
+	try {
+		const res = await fetch(BUILD_INFO_URL, { cache: "no-store" });
+		if (res.status < 200 || res.status >= 300) return null;
+		const fp = (await res.json().catch(() => null))?.result?.diskFingerprint;
+		return typeof fp === "string" && fp !== "" ? fp : null;
+	} catch {
+		return null;
+	}
+}
+function useStaleBanner() {
+	const [banner, setBanner] = (0, react.useState)(null);
 	const mountedRef = (0, react.useRef)(true);
 	(0, react.useEffect)(() => {
 		mountedRef.current = true;
+		fetchDiskFingerprint().then((fp) => {
+			if (fp !== null) writeInjected(fp);
+		});
 		const check = async () => {
 			try {
 				const res = await fetch(BUILD_INFO_URL, { cache: "no-store" });
-				const verdict = classifyBuildInfoResponse(res.status, await res.text());
-				if (mountedRef.current) setStale(verdict.stale);
+				const verdict = classifyHandshake(readInjected(), res.status, await res.text());
+				if (mountedRef.current) setBanner(verdict.banner);
 			} catch {
-				if (mountedRef.current) setStale(false);
+				if (mountedRef.current) setBanner(null);
 			}
 		};
 		const stop = startVisibleInterval(() => {
@@ -4349,7 +4431,7 @@ function useStaleHost() {
 			stop();
 		};
 	}, []);
-	return stale;
+	return banner;
 }
 //#endregion
 //#region src/client/project-tag-index.ts
@@ -5949,6 +6031,165 @@ function relativeTime(ts, nowMs = Date.now()) {
 	if (diff < 864e5) return `${Math.floor(diff / 36e5)} 小时前`;
 	return `${Math.floor(diff / 864e5)} 天前`;
 }
+/** 首句展示截断上限（字符）：超过即截断加省略号——行卡单行放不下长句。 */
+const FIRST_SENTENCE_MAX = 48;
+/**
+* 正文 → 首句话（t260903-10 裸编号现场根治：老票无标题显示首句，不裸编号）。
+* 口径：取正文第一个非空行，在第一个句读符（。！？!?；）处截断；无句读取整行；
+* 超长截断加「…」。markdown 标记（#/-/>/空白）剥头。畸形输入（非字符串/空白/
+* 全是标记）→ null（调用方回退展示选择函数）。host 侧 enrichment（node.ts）与
+* 详情头部共用本函数（ticket show 的 body 同源裁剪——两条通道一个口径）。
+*/
+function firstSentenceOf(body) {
+	if (typeof body !== "string") return null;
+	const lines = body.split(/\r?\n/);
+	let line = "";
+	for (const raw of lines) {
+		const t = raw.replace(/^[#>\-*\s]+/, "").trim();
+		if (t !== "") {
+			line = t;
+			break;
+		}
+	}
+	if (line === "") return null;
+	const m = line.match(/^[^。！？!?；]+[。！？!?；]?/);
+	let sentence = m !== null ? m[0] : line;
+	if ([...sentence].length > FIRST_SENTENCE_MAX) sentence = [...sentence].slice(0, FIRST_SENTENCE_MAX).join("") + "…";
+	return sentence;
+}
+/** 行卡/详情头部标题展示选择（gen2 打回②收窄口径）：title → title_or_first
+*  （host enrichment 派生字段，仅 title 为空的票下发）→ 回退工单号（裸编号是
+*  最后兜底——enrichment 失败/老数据缺字段时，宁显编号不显「（无标题）」）。 */
+function ticketDisplayTitle(t) {
+	const title = typeof t.title === "string" ? t.title.trim() : "";
+	if (title !== "") return title;
+	const first = typeof t.title_or_first === "string" ? t.title_or_first.trim() : "";
+	if (first !== "") return first;
+	return t.id;
+}
+/**
+* ticket show 详情 → 快照要点（阶段时间线/最近交接/门与签字记录/工作流快照要点）。
+* 畸形输入纪律（消费外部快照=不可信输入，单测必带畸形用例）：
+*   - 非对象/全空 → 各字段空形状，不抛；
+*   - timeline 按 at 升序排序后裁尾 20 条（KI-019 呈现口径钉死：乱序到达被归位；
+*     缺 at/畸形 at 条目沉底并带 untime 标注——排序失真面显性化，不静默混排）；
+*   - handoffs 取尾部 5 条（最近交接）；gate_runs + signatures 合并为记录表
+*     （按 at 降序=最近在前；条目畸形逐条跳过）。
+*/
+function snapshotDigest(detail) {
+	const empty = {
+		workflow: {
+			id: "",
+			stage: "",
+			stageState: "",
+			status: "",
+			revisions: null,
+			worktree: ""
+		},
+		timeline: [],
+		handoffs: [],
+		gates: []
+	};
+	if (detail === null || typeof detail !== "object") return empty;
+	const d = detail;
+	const str = (v) => typeof v === "string" ? v : "";
+	const workflow = {
+		id: str(d.id),
+		stage: str(d.stage),
+		stageState: str(d.stage_state),
+		status: str(d.status),
+		revisions: typeof d.revision_count === "number" && Number.isFinite(d.revision_count) ? d.revision_count : null,
+		worktree: str(d.worktree)
+	};
+	const rawTl = Array.isArray(d.timeline) ? d.timeline : [];
+	const timed = [];
+	const untimed = [];
+	for (const e of rawTl) {
+		if (e === null || typeof e !== "object") continue;
+		const o = e;
+		const stage = str(o.stage);
+		const state = str(o.state);
+		if (stage === "" && state === "") continue;
+		const at = o.at;
+		const ms = typeof at === "number" && Number.isFinite(at) ? at : typeof at === "string" && at.trim() !== "" && Number.isFinite(Number(at)) ? Number(at) : null;
+		if (ms === null) untimed.push({
+			stage,
+			state,
+			at: null,
+			untime: true
+		});
+		else timed.push({
+			stage,
+			state,
+			at: String(at),
+			ms
+		});
+	}
+	timed.sort((a, b) => a.ms - b.ms);
+	const timeline = [...timed.slice(-20).map((e) => ({
+		stage: e.stage,
+		state: e.state,
+		at: e.at,
+		untime: false
+	})), ...untimed];
+	const rawHo = Array.isArray(d.handoffs) ? d.handoffs : [];
+	const handoffs = [];
+	for (let i = rawHo.length - 1; i >= 0 && handoffs.length < 5; i--) {
+		const o = rawHo[i];
+		if (o === null || typeof o !== "object") continue;
+		const h = o;
+		handoffs.push({
+			from: str(h.from),
+			to: str(h.to),
+			at: typeof h.at === "string" ? h.at : null
+		});
+	}
+	const gates = [];
+	const gateMs = (v) => {
+		const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+		return Number.isFinite(n) ? n : NaN;
+	};
+	const rawGateRuns = Array.isArray(d.gate_runs) ? d.gate_runs : [];
+	for (const g of rawGateRuns) {
+		if (g === null || typeof g !== "object") continue;
+		const o = g;
+		gates.push({
+			kind: "gate",
+			stage: str(o.stage),
+			who: str(o.kind) || "script",
+			decision: str(o.status) || str(o.result),
+			note: str(o.note),
+			at: typeof o.at === "string" ? o.at : null
+		});
+	}
+	const sigs = d.signatures;
+	if (sigs !== null && typeof sigs === "object") for (const [stage, v] of Object.entries(sigs)) {
+		if (v === null || typeof v !== "object") continue;
+		const o = v;
+		gates.push({
+			kind: "signature",
+			stage,
+			who: str(o.who),
+			decision: str(o.decision),
+			note: str(o.note),
+			at: typeof o.at === "string" ? o.at : null
+		});
+	}
+	gates.sort((a, b) => {
+		const am = gateMs(a.at);
+		const bm = gateMs(b.at);
+		if (Number.isNaN(am) && Number.isNaN(bm)) return 0;
+		if (Number.isNaN(am)) return 1;
+		if (Number.isNaN(bm)) return -1;
+		return bm - am;
+	});
+	return {
+		workflow,
+		timeline,
+		handoffs,
+		gates
+	};
+}
 //#endregion
 //#region src/client/ticket-row-card.tsx
 /** 悬停 title：id＋阶段语境（C2 消费点：阶段短名拓扑驱动）＋阻塞原因。 */
@@ -6006,7 +6247,9 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-card-title",
-						children: t.title || "（无标题）"
+						"data-wb-row-title": ticketDisplayTitle(t),
+						"data-title-src": t.title?.trim() ? "title" : t.title_or_first ? "first" : "id",
+						children: ticketDisplayTitle(t)
 					}),
 					t.epic && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-card-epic",
@@ -47127,7 +47370,7 @@ function WorkbenchSidebar(props) {
 	}, [metricsOpen]);
 	const [sandbar, setSandbar] = (0, react.useState)(sandbarHours);
 	const rootRef = (0, react.useRef)(null);
-	const staleHost = useStaleHost();
+	const staleBanner = useStaleBanner();
 	const [staleDismissed, setStaleDismissed] = (0, react.useState)(false);
 	useHideFactoryNewSession(rootRef, wide);
 	const projectSessions = useSessionEntry({
@@ -47465,15 +47708,18 @@ function WorkbenchSidebar(props) {
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "wb-sb-right",
 				children: [
-					staleHost && !staleDismissed && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					staleBanner && !staleDismissed && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "wb-stale-banner",
+						"data-stale-kind": staleBanner,
 						role: "alert",
 						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 							className: "wb-stale-msg",
 							children: [
-								"⚠️ 控制台代码已更新，请",
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: "重启 console" }),
-								"后刷新页面生效（当前页面仍在跑旧代码，度量/diff 可能异常）。"
+								"⚠️ ",
+								staleBanner === "restart" ? "有更新，重启控制台生效" : "有更新，刷新页面生效",
+								"（",
+								staleBanner === "restart" ? "当前控制台进程仍在跑旧代码" : "当前页面仍在跑旧代码",
+								"，度量/diff 可能异常）。"
 							]
 						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 							className: "wb-stale-dismiss",
@@ -49675,6 +49921,17 @@ const CSS = `
 .wb-d2-deep>details>summary::before{content:'▸ '}
 .wb-d2-deep>details[open]>summary::before{content:'▾ '}
 .wb-d2-deep>details>div{padding:0 12px 10px}
+/* ── 快照要点（t260905-07：阶段时间线/最近交接/门与签字记录/工作流快照，ticket show 直读） ── */
+.wb-dsnap-block{margin:6px 0}
+.wb-dsnap-block>h4{margin:0 0 4px;font-size:11px;color:#57606a;font-weight:600}
+.wb-dsnap-row{display:flex;gap:8px;font-size:12px;line-height:1.7;flex-wrap:wrap}
+.wb-dsnap-row .st{color:#57606a;min-width:88px}
+.wb-dsnap-row .at{color:#8c959f;font-size:11px}
+.wb-dsnap-row[data-untime=true] .at{color:#cf222e}
+.wb-dsnap-chip{display:inline-block;padding:0 6px;border-radius:10px;font-size:11px;margin-right:4px}
+.wb-dsnap-chip[data-kind=gate]{background:#f6f8fa;color:#57606a;border:1px solid #d0d7de}
+.wb-dsnap-chip[data-kind=signature]{background:#ddf4ff;color:#0969da;border:1px solid #54aeff}
+.wb-dsnap-empty{font-size:12px;color:#8c959f}
 /* 变更 tab：文件头 +/− 行数；构建产物（lib/ bundle）折叠组 */
 .wb-d-stats{font-size:11px;margin-left:auto;white-space:nowrap}
 .wb-d-stats .add{color:#1a7f37}
@@ -49766,6 +50023,19 @@ function PartsBadges({ parts }) {
 function fmtTs(ts) {
 	if (!ts) return "—";
 	return (/* @__PURE__ */ new Date(ts * 1e3)).toLocaleString("zh-CN", { hour12: false });
+}
+/** 快照要点的时间显示（t260905-07）：引擎快照时间字段可能是秒级数值、毫秒数值、
+*  数字串或人话时间串（老票/引擎版本差）——数字按量级判别（<1e11 秒 / ≥1e11 毫秒，
+*  toMillis 同款口径），非数字原样显示，null → ''。畸形（NaN/负数）原样透传不猜
+*  （时间失真面显性化，与 untime 标注同纪律）。 */
+function fmtSnapshotTs(v) {
+	if (v === null) return "";
+	const n = Number(v);
+	if (v !== "" && Number.isFinite(n) && n > 0) {
+		const ms = n < 1e11 ? n * 1e3 : n;
+		return new Date(ms).toLocaleString("zh-CN", { hour12: false });
+	}
+	return v;
 }
 /** 基本信息网格条目：键（灰）值（黑），超长省略悬停全文。 */
 function MetaItem({ k, children, title }) {
@@ -50478,6 +50748,142 @@ function StageUsageInline({ stageId, usage }) {
 		className: "wb-stage-usage",
 		title: stageUsageTitle(s),
 		children: [usageSum(s), multi]
+	});
+}
+/** 快照要点（t260905-07）：ticket show snapshot 直读的四块观测（阶段时间线/最近
+*  交接/门与签字记录/工作流快照要点），纯裁剪零派生语义（snapshotDigest 纯函数层
+*  承担畸形防御与 KI-019 呈现口径——排序归位+缺 at 沉底标注）。时间线只显尾 20 条
+*  （行卡场景无此诉求，详情下钻要「最近的来龙去脉」），交接尾 5 条，门与签字合并
+*  记录表按时间降序。各块带 data-block 锚（3199 隔离台场景断言用）。 */
+function D2SnapshotDigest({ detail }) {
+	const digest = (0, react.useMemo)(() => snapshotDigest(detail), [detail]);
+	const { workflow } = digest;
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
+		className: "wb-d2-snapshot",
+		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "快照要点（时间线 · 最近交接 · 门与签字 · 工作流快照）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-dsnap-block",
+				"data-wb-digest": "workflow",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h4", { children: "工作流快照要点" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-dsnap-row",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "st",
+							children: "工作流"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: workflow.id || "—" }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "st",
+							children: "当前段"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [workflow.stage || "—", workflow.stageState ? ` · ${STATE_LABEL[workflow.stageState] ?? workflow.stageState}` : ""] }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "st",
+							children: "状态"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: workflow.status || "—" }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "st",
+							children: "修订"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: workflow.revisions === null ? "—" : `${workflow.revisions} 轮` }),
+						workflow.worktree && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "st",
+							children: "工作区"
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							"data-wb-digest-worktree": true,
+							children: workflow.worktree
+						})] })
+					]
+				})]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-dsnap-block",
+				"data-wb-digest": "timeline",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h4", { children: [
+					"阶段时间线（最近 ",
+					digest.timeline.length,
+					" 条，按时间正序）"
+				] }), digest.timeline.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-dsnap-empty",
+					children: "无时间线条目"
+				}) : digest.timeline.map((e, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-dsnap-row",
+					"data-untime": e.untime,
+					"data-wb-tl-at": e.at ?? "",
+					"data-wb-tl-stage": e.stage,
+					"data-wb-tl-state": e.state,
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "st",
+							children: e.stage || "—"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: STATE_LABEL[e.state] ?? e.state }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "at",
+							children: e.untime ? "时间缺失" : fmtSnapshotTs(e.at)
+						})
+					]
+				}, `${e.stage}-${i}`))]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-dsnap-block",
+				"data-wb-digest": "handoffs",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h4", { children: [
+					"最近交接（",
+					digest.handoffs.length,
+					" 条）"
+				] }), digest.handoffs.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-dsnap-empty",
+					children: "无交接记录"
+				}) : digest.handoffs.map((h, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-dsnap-row",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
+						h.from || "—",
+						" → ",
+						h.to || "—"
+					] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "at",
+						children: h.at === null ? "" : fmtSnapshotTs(h.at)
+					})]
+				}, i))]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-dsnap-block",
+				"data-wb-digest": "signatures",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h4", { children: [
+					"门与签字记录（",
+					digest.gates.length,
+					" 条，最近在前）"
+				] }), digest.gates.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-dsnap-empty",
+					children: "无门/签字记录"
+				}) : digest.gates.map((g, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-dsnap-row",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "wb-dsnap-chip",
+							"data-kind": g.kind,
+							children: g.kind === "signature" ? "签字" : "门"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "st",
+							children: g.stage || "—"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
+							g.who || "—",
+							" · ",
+							g.decision || "—"
+						] }),
+						g.note && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: g.note }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "at",
+							children: g.at === null ? "" : fmtSnapshotTs(g.at)
+						})
+					]
+				}, `${g.kind}-${g.stage}-${i}`))]
+			})
+		] })]
 	});
 }
 /** 进展主体：一步一张卡（状态图标 + 该步产出摘要一句话 + 可展开 evidence/产物）。 */
@@ -51686,6 +52092,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 	const [showDone, setShowDone] = (0, react.useState)(false);
 	/** 进展行 enrichment（host /tickets/progress 只读）：仅当前可见页逐票拉取（R5 负载预算）。 */
 	const [progressMap, setProgressMap] = (0, react.useState)({});
+	const [titleFirstMap, setTitleFirstMap] = (0, react.useState)({});
 	const [selectedId, setSelectedId] = (0, react.useState)(null);
 	const [detail, setDetail] = (0, react.useState)(void 0);
 	const [detailLoading, setDetailLoading] = (0, react.useState)(false);
@@ -52129,11 +52536,14 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 			if (!alive || data?.ok !== true) return;
 			const rows = data.result?.tickets ?? [];
 			const next = {};
+			const firsts = {};
 			for (const r of rows) {
+				if (r?.title_or_first) firsts[r.id] = r.title_or_first;
 				if (!r?.progress) continue;
 				const line = progressLineOf([r.progress]);
 				if (line) next[r.id] = line;
 			}
+			setTitleFirstMap(firsts);
 			setProgressMap(next);
 		}).catch(() => {});
 		return () => {
@@ -52380,7 +52790,10 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 				paged.map((t) => {
 					const ops = availableOps(t, wfById[t.workflow]);
 					return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
-						t,
+						t: {
+							...t,
+							title_or_first: t.title_or_first ?? titleFirstMap[t.id]
+						},
 						wf: wfById[t.workflow],
 						progress: progressMap[t.id],
 						active: t.id === selectedId,
@@ -52430,7 +52843,10 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 						"（点击折叠）"
 					]
 				}), doneList.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
-					t,
+					t: {
+						...t,
+						title_or_first: t.title_or_first ?? titleFirstMap[t.id]
+					},
 					wf: wfById[t.workflow],
 					compact: false,
 					active: t.id === selectedId,
@@ -52540,7 +52956,8 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 							children: [
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 									className: "wb-title",
-									children: detail.title
+									"data-title-src": detail.title?.trim() ? "title" : "first-or-id",
+									children: detail.title?.trim() || firstSentenceOf(detail.body) || detail.id
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", {
 									className: "wb-d2-id",
@@ -52757,252 +53174,259 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 							wf: selWf,
 							onMsg: setOpMsg
 						}),
-						drawerTab === "detail" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2Stages, {
-							detail,
-							wf: selWf,
-							usage,
-							durs: stageDurs.durs,
-							nowMs: stageDurs.nowMs
-						}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "wb-d2-deep",
-							children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "基本信息（工作区 · 分支 · 写集 · 时间）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "wb-meta-grid",
-									children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-											k: "工单",
-											children: detail.id
+						drawerTab === "detail" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2Stages, {
+								detail,
+								wf: selWf,
+								usage,
+								durs: stageDurs.durs,
+								nowMs: stageDurs.nowMs
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "wb-d2-deep",
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2SnapshotDigest, { detail })
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "wb-d2-deep",
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "基本信息（工作区 · 分支 · 写集 · 时间）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "wb-meta-grid",
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
+												k: "工单",
+												children: detail.id
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
+												k: "工作流",
+												children: selWf?.name ?? "未挂模板"
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(MetaItem, {
+												k: "状态",
+												children: [detail.status, detail.status !== "closed" && detail.stage_state ? ` · ${STATE_LABEL[detail.stage_state] ?? detail.stage_state}` : ""]
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
+												k: "当前阶段",
+												children: detail.stage_name || detail.stage || "—"
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
+												k: "角色",
+												children: detail.role || "—"
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
+												k: "工作区",
+												title: detailWs.path || void 0,
+												children: detailWs.type === "main" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+													className: "wb-type-chip",
+													"data-empty": true,
+													children: "主树"
+												}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+														className: "wb-chip",
+														children: detailWs.type === "worktree" ? "泳道" : "目录"
+													}),
+													" ",
+													detailWs.label
+												] })
+											}),
+											detail.branch && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
+												k: "分支",
+												children: detail.branch
+											}),
+											detail.base_ref && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
+												k: "base",
+												title: detail.base_ref,
+												children: detail.base_ref.slice(0, 12)
+											}),
+											detail.proposal_id && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
+												k: "提案",
+												children: detail.proposal_id
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
+												k: "创建",
+												children: fmtTs(detail.created)
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
+												k: "更新",
+												children: fmtTs(detail.updated)
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(MetaItem, {
+												k: "修订",
+												children: [detail.revision_count ?? 0, " 轮"]
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(MetaItem, {
+												k: "接力",
+												children: [detail.handoffs?.length ?? 0, " 棒"]
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(MetaItem, {
+												k: "挂起",
+												children: [detail.pending?.length ?? 0, " 项"]
+											})
+										]
+									}), detail.write_set && detail.write_set.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "wb-meta-row",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "wb-meta-k",
+											children: "写集"
+										}), detail.write_set.map((w) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "wb-chip",
+											children: w
+										}, w))]
+									})] })] }),
+									detail.workflow_input ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "入参（workflow 启动参数快照）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: "wb-md",
+										style: { fontSize: "12px" },
+										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("table", {
+											style: {
+												width: "100%",
+												borderCollapse: "collapse"
+											},
+											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tbody", { children: Object.entries(detail.workflow_input).map(([k, v]) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+												style: {
+													color: "#57606a",
+													padding: "2px 8px",
+													whiteSpace: "nowrap",
+													verticalAlign: "top"
+												},
+												children: k
+											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+												style: {
+													padding: "2px 8px",
+													wordBreak: "break-word"
+												},
+												children: Array.isArray(v) ? v.join(", ") : String(v ?? "—")
+											})] }, k)) })
+										})
+									}) })] }) : null,
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("summary", { children: [
+										"验收清单（当前阶段",
+										detail.stage ? ` ${detail.stage}` : "",
+										"）"
+									] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [
+										instItems.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "wb-empty",
+											children: "当前阶段无验收清单。"
 										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-											k: "工作流",
-											children: selWf?.name ?? "未挂模板"
+										instItems.map((item) => {
+											const c = curChecks.find((x) => x.item === item);
+											const done = c?.done ?? false;
+											return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+												className: "wb-check",
+												children: [
+													/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+														className: "wb-check-line",
+														children: [
+															/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+																type: "checkbox",
+																checked: done,
+																disabled: opBusy || detail.status === "closed" || detail.stage_state === "running" && detail.status === "dispatched",
+																onChange: () => {
+																	doAccept(item, !done);
+																}
+															}),
+															/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+																className: "wb-check-item",
+																"data-done": done,
+																children: item
+															}),
+															c?.by && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+																className: "wb-check-by",
+																children: ["by ", c.by]
+															}),
+															c?.agent && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+																className: "wb-check-by",
+																children: ["分片 ", c.agent]
+															})
+														]
+													}),
+													c?.evidence && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("pre", {
+														className: "wb-evidence",
+														children: ["证据：", c.evidence]
+													}),
+													!done && detail.status === "settled" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+														className: "wb-ev-input",
+														placeholder: "证据（脚本输出原文/产物路径；可选）",
+														value: evInput[item] ?? "",
+														onChange: (e) => setEvInput((v) => ({
+															...v,
+															[item]: e.target.value
+														}))
+													})
+												]
+											}, item);
 										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(MetaItem, {
-											k: "状态",
-											children: [detail.status, detail.status !== "closed" && detail.stage_state ? ` · ${STATE_LABEL[detail.stage_state] ?? detail.stage_state}` : ""]
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-											k: "当前阶段",
-											children: detail.stage_name || detail.stage || "—"
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-											k: "角色",
-											children: detail.role || "—"
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-											k: "工作区",
-											title: detailWs.path || void 0,
-											children: detailWs.type === "main" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-												className: "wb-type-chip",
-												"data-empty": true,
-												children: "主树"
-											}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+										detail.pending && detail.pending.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "wb-sub-sec",
+											children: "挂起项（审批理由 / 遗留问题）"
+										}), detail.pending.map((p, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "wb-pending",
+											children: [
 												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-													className: "wb-chip",
-													children: detailWs.type === "worktree" ? "泳道" : "目录"
+													className: "wb-log-time",
+													children: fmtTs(p.ts)
 												}),
 												" ",
-												detailWs.label
-											] })
-										}),
-										detail.branch && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-											k: "分支",
-											children: detail.branch
-										}),
-										detail.base_ref && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-											k: "base",
-											title: detail.base_ref,
-											children: detail.base_ref.slice(0, 12)
-										}),
-										detail.proposal_id && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-											k: "提案",
-											children: detail.proposal_id
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-											k: "创建",
-											children: fmtTs(detail.created)
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-											k: "更新",
-											children: fmtTs(detail.updated)
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(MetaItem, {
-											k: "修订",
-											children: [detail.revision_count ?? 0, " 轮"]
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(MetaItem, {
-											k: "接力",
-											children: [detail.handoffs?.length ?? 0, " 棒"]
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(MetaItem, {
-											k: "挂起",
-											children: [detail.pending?.length ?? 0, " 项"]
-										})
-									]
-								}), detail.write_set && detail.write_set.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "wb-meta-row",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "wb-meta-k",
-										children: "写集"
-									}), detail.write_set.map((w) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "wb-chip",
-										children: w
-									}, w))]
-								})] })] }),
-								detail.workflow_input ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "入参（workflow 启动参数快照）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									className: "wb-md",
-									style: { fontSize: "12px" },
-									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("table", {
-										style: {
-											width: "100%",
-											borderCollapse: "collapse"
-										},
-										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tbody", { children: Object.entries(detail.workflow_input).map(([k, v]) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
-											style: {
-												color: "#57606a",
-												padding: "2px 8px",
-												whiteSpace: "nowrap",
-												verticalAlign: "top"
-											},
-											children: k
-										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
-											style: {
-												padding: "2px 8px",
-												wordBreak: "break-word"
-											},
-											children: Array.isArray(v) ? v.join(", ") : String(v ?? "—")
-										})] }, k)) })
-									})
-								}) })] }) : null,
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("summary", { children: [
-									"验收清单（当前阶段",
-									detail.stage ? ` ${detail.stage}` : "",
-									"）"
-								] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [
-									instItems.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-										className: "wb-empty",
-										children: "当前阶段无验收清单。"
-									}),
-									instItems.map((item) => {
-										const c = curChecks.find((x) => x.item === item);
-										const done = c?.done ?? false;
-										return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-											className: "wb-check",
-											children: [
-												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-													className: "wb-check-line",
-													children: [
-														/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-															type: "checkbox",
-															checked: done,
-															disabled: opBusy || detail.status === "closed" || detail.stage_state === "running" && detail.status === "dispatched",
-															onChange: () => {
-																doAccept(item, !done);
-															}
-														}),
-														/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-															className: "wb-check-item",
-															"data-done": done,
-															children: item
-														}),
-														c?.by && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-															className: "wb-check-by",
-															children: ["by ", c.by]
-														}),
-														c?.agent && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-															className: "wb-check-by",
-															children: ["分片 ", c.agent]
-														})
-													]
-												}),
-												c?.evidence && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("pre", {
-													className: "wb-evidence",
-													children: ["证据：", c.evidence]
-												}),
-												!done && detail.status === "settled" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-													className: "wb-ev-input",
-													placeholder: "证据（脚本输出原文/产物路径；可选）",
-													value: evInput[item] ?? "",
-													onChange: (e) => setEvInput((v) => ({
-														...v,
-														[item]: e.target.value
-													}))
-												})
+												p.note
 											]
-										}, item);
-									}),
-									detail.pending && detail.pending.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-										className: "wb-sub-sec",
-										children: "挂起项（审批理由 / 遗留问题）"
-									}), detail.pending.map((p, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "wb-pending",
+										}, i))] })
+									] })] }),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "流水 log（状态/阶段流转历史）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: [...detail.log ?? []].reverse().map((l, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "wb-log",
 										children: [
 											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 												className: "wb-log-time",
-												children: fmtTs(p.ts)
+												children: fmtTs(l.ts)
 											}),
-											" ",
-											p.note
-										]
-									}, i))] })
-								] })] }),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "流水 log（状态/阶段流转历史）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: [...detail.log ?? []].reverse().map((l, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "wb-log",
-									children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "wb-log-time",
-											children: fmtTs(l.ts)
-										}),
-										l.status && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "wb-badge",
-											"data-kind": "status",
-											children: l.status
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "wb-log-note",
-											children: l.note
-										})
-									]
-								}, i)) })] }),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "接力时间线（handoff · 每棒带产物）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [detail.deliverables && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "wb-meta-row",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "wb-meta-k",
-										children: "交接物"
-									}), detail.deliverables]
-								}), detail.handoffs && detail.handoffs.length > 0 ? [...detail.handoffs].reverse().map((h, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "wb-hl",
-									children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [
-											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-												className: "wb-hl-stage",
-												children: [
-													"[",
-													h.stage,
-													"]"
-												]
+											l.status && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-badge",
+												"data-kind": "status",
+												children: l.status
 											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-												className: "wb-log-time",
-												children: [" ", fmtTs(h.ts)]
-											}),
-											h.agent_id && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-												className: "wb-check-by",
-												children: [" · ", h.agent_id]
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-log-note",
+												children: l.note
 											})
-										] }),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: h.summary || "（无摘要）" }),
-										h.artifacts && h.artifacts.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: h.artifacts.map((a, j) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "wb-chip",
-											children: a
-										}, j)) })
-									]
-								}, i)) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									className: "wb-empty",
-									children: "暂无交接记录。"
-								})] })] })
-							]
-						})] })
+										]
+									}, i)) })] }),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "接力时间线（handoff · 每棒带产物）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [detail.deliverables && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "wb-meta-row",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "wb-meta-k",
+											children: "交接物"
+										}), detail.deliverables]
+									}), detail.handoffs && detail.handoffs.length > 0 ? [...detail.handoffs].reverse().map((h, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "wb-hl",
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [
+												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+													className: "wb-hl-stage",
+													children: [
+														"[",
+														h.stage,
+														"]"
+													]
+												}),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+													className: "wb-log-time",
+													children: [" ", fmtTs(h.ts)]
+												}),
+												h.agent_id && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+													className: "wb-check-by",
+													children: [" · ", h.agent_id]
+												})
+											] }),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: h.summary || "（无摘要）" }),
+											h.artifacts && h.artifacts.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: h.artifacts.map((a, j) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-chip",
+												children: a
+											}, j)) })
+										]
+									}, i)) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: "wb-empty",
+										children: "暂无交接记录。"
+									})] })] })
+								]
+							})
+						] })
 					] })
 				]
 			}),

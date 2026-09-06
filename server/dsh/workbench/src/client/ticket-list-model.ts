@@ -255,3 +255,189 @@ export function relativeTime(ts?: number | null, nowMs: number = Date.now()): st
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
   return `${Math.floor(diff / 86_400_000)} 天前`
 }
+
+/* ------------------------------------------------------------- 首句标题（t260905-07） */
+
+/** 首句展示截断上限（字符）：超过即截断加省略号——行卡单行放不下长句。 */
+const FIRST_SENTENCE_MAX = 48
+
+/**
+ * 正文 → 首句话（t260903-10 裸编号现场根治：老票无标题显示首句，不裸编号）。
+ * 口径：取正文第一个非空行，在第一个句读符（。！？!?；）处截断；无句读取整行；
+ * 超长截断加「…」。markdown 标记（#/-/>/空白）剥头。畸形输入（非字符串/空白/
+ * 全是标记）→ null（调用方回退展示选择函数）。host 侧 enrichment（node.ts）与
+ * 详情头部共用本函数（ticket show 的 body 同源裁剪——两条通道一个口径）。
+ */
+export function firstSentenceOf(body?: unknown): string | null {
+  if (typeof body !== 'string') return null
+  const lines = body.split(/\r?\n/)
+  let line = ''
+  for (const raw of lines) {
+    const t = raw.replace(/^[#>\-*\s]+/, '').trim()
+    if (t !== '') { line = t; break }
+  }
+  if (line === '') return null
+  const m = line.match(/^[^。！？!?；]+[。！？!?；]?/)
+  let sentence = m !== null ? m[0] : line
+  if ([...sentence].length > FIRST_SENTENCE_MAX) {
+    sentence = [...sentence].slice(0, FIRST_SENTENCE_MAX).join('') + '…'
+  }
+  return sentence
+}
+
+/** 行卡/详情头部标题展示选择（gen2 打回②收窄口径）：title → title_or_first
+ *  （host enrichment 派生字段，仅 title 为空的票下发）→ 回退工单号（裸编号是
+ *  最后兜底——enrichment 失败/老数据缺字段时，宁显编号不显「（无标题）」）。 */
+export function ticketDisplayTitle(t: { id: string; title?: string; title_or_first?: string }): string {
+  const title = typeof t.title === 'string' ? t.title.trim() : ''
+  if (title !== '') return title
+  const first = typeof t.title_or_first === 'string' ? t.title_or_first.trim() : ''
+  if (first !== '') return first
+  return t.id
+}
+
+/* ------------------------------------------------------------- 快照要点（t260905-07） */
+
+/** 快照要点：阶段时间线条目（排序后）。 */
+export interface DigestTimelineEntry {
+  stage: string
+  state: string
+  at: string | null
+  /** KI-019 呈现口径：at 缺失/畸形条目沉底并标注（数据模型缺轮次维度的失真面显性化）。 */
+  untime: boolean
+}
+
+/** 快照要点：交接条目。 */
+export interface DigestHandoff {
+  from: string
+  to: string
+  at: string | null
+}
+
+/** 快照要点：门运行/签字记录条目。 */
+export interface DigestGate {
+  kind: 'gate' | 'signature'
+  stage: string
+  who: string
+  decision: string
+  note: string
+  at: string | null
+}
+
+/** 快照要点聚合（纯裁剪，零派生语义——数据全部来自 ticket show 直读）。 */
+export interface SnapshotDigest {
+  workflow: { id: string; stage: string; stageState: string; status: string; revisions: number | null; worktree: string }
+  timeline: DigestTimelineEntry[]
+  handoffs: DigestHandoff[]
+  gates: DigestGate[]
+}
+
+/**
+ * ticket show 详情 → 快照要点（阶段时间线/最近交接/门与签字记录/工作流快照要点）。
+ * 畸形输入纪律（消费外部快照=不可信输入，单测必带畸形用例）：
+ *   - 非对象/全空 → 各字段空形状，不抛；
+ *   - timeline 按 at 升序排序后裁尾 20 条（KI-019 呈现口径钉死：乱序到达被归位；
+ *     缺 at/畸形 at 条目沉底并带 untime 标注——排序失真面显性化，不静默混排）；
+ *   - handoffs 取尾部 5 条（最近交接）；gate_runs + signatures 合并为记录表
+ *     （按 at 降序=最近在前；条目畸形逐条跳过）。
+ */
+export function snapshotDigest(detail: unknown): SnapshotDigest {
+  const empty: SnapshotDigest = {
+    workflow: { id: '', stage: '', stageState: '', status: '', revisions: null, worktree: '' },
+    timeline: [],
+    handoffs: [],
+    gates: [],
+  }
+  if (detail === null || typeof detail !== 'object') return empty
+  const d = detail as Record<string, unknown>
+  const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+
+  const workflow = {
+    id: str(d.id),
+    stage: str(d.stage),
+    stageState: str(d.stage_state),
+    status: str(d.status),
+    revisions: typeof d.revision_count === 'number' && Number.isFinite(d.revision_count) ? d.revision_count : null,
+    worktree: str(d.worktree),
+  }
+
+  // 阶段时间线：合法条目 → {stage,state,at}；at 合法（可转数值）参与排序，否则沉底。
+  const rawTl = Array.isArray(d.timeline) ? d.timeline : []
+  const timed: { stage: string; state: string; at: string; ms: number }[] = []
+  const untimed: DigestTimelineEntry[] = []
+  for (const e of rawTl) {
+    if (e === null || typeof e !== 'object') continue
+    const o = e as Record<string, unknown>
+    const stage = str(o.stage)
+    const state = str(o.state)
+    if (stage === '' && state === '') continue
+    const at = o.at
+    const ms = typeof at === 'number' && Number.isFinite(at) ? at
+      : typeof at === 'string' && at.trim() !== '' && Number.isFinite(Number(at)) ? Number(at) : null
+    if (ms === null) {
+      untimed.push({ stage, state, at: null, untime: true })
+    } else {
+      timed.push({ stage, state, at: String(at), ms })
+    }
+  }
+  timed.sort((a, b) => a.ms - b.ms)
+  const timeline: DigestTimelineEntry[] = [
+    ...timed.slice(-20).map(e => ({ stage: e.stage, state: e.state, at: e.at, untime: false })),
+    ...untimed,
+  ]
+
+  // 最近交接：尾部 5 条；条目畸形（非对象）跳过。
+  const rawHo = Array.isArray(d.handoffs) ? d.handoffs : []
+  const handoffs: DigestHandoff[] = []
+  for (let i = rawHo.length - 1; i >= 0 && handoffs.length < 5; i--) {
+    const o = rawHo[i]
+    if (o === null || typeof o !== 'object') continue
+    const h = o as Record<string, unknown>
+    handoffs.push({ from: str(h.from), to: str(h.to), at: typeof h.at === 'string' ? h.at : null })
+  }
+
+  // 门与签字记录：gate_runs（程序化门）+ signatures（人门签字）合并，at 降序最近在前。
+  const gates: DigestGate[] = []
+  const gateMs = (v: unknown): number => {
+    const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN
+    return Number.isFinite(n) ? n : NaN
+  }
+  const rawGateRuns = Array.isArray(d.gate_runs) ? d.gate_runs : []
+  for (const g of rawGateRuns) {
+    if (g === null || typeof g !== 'object') continue
+    const o = g as Record<string, unknown>
+    gates.push({
+      kind: 'gate',
+      stage: str(o.stage),
+      who: str(o.kind) || 'script',
+      decision: str(o.status) || str(o.result),
+      note: str(o.note),
+      at: typeof o.at === 'string' ? o.at : null,
+    })
+  }
+  const sigs = d.signatures
+  if (sigs !== null && typeof sigs === 'object') {
+    for (const [stage, v] of Object.entries(sigs as Record<string, unknown>)) {
+      if (v === null || typeof v !== 'object') continue
+      const o = v as Record<string, unknown>
+      gates.push({
+        kind: 'signature',
+        stage,
+        who: str(o.who),
+        decision: str(o.decision),
+        note: str(o.note),
+        at: typeof o.at === 'string' ? o.at : null,
+      })
+    }
+  }
+  gates.sort((a, b) => {
+    const am = gateMs(a.at)
+    const bm = gateMs(b.at)
+    if (Number.isNaN(am) && Number.isNaN(bm)) return 0
+    if (Number.isNaN(am)) return 1
+    if (Number.isNaN(bm)) return -1
+    return bm - am
+  })
+
+  return { workflow, timeline, handoffs, gates }
+}

@@ -49,9 +49,11 @@ import { ProjectSessionRow } from './project-session-row.tsx'
 // 存量编号迁移（第 3 面① 拍板 1）：账册缺 seq 条目按项目内登记序补号（幂等）。
 import { backfillProjectSeqs } from '../shared/sessions.ts'
 import { getLedgerSnapshot, persistLedger } from './session-ledger-store.ts'
-// host 陈旧全局提醒（t260902-03）：useStaleHost 单例挂本组件；横幅渲染在
-// .wb-sb-right 共享容器（四视图排他渲染之上），所有页签/视图常驻可见。
-import { useStaleHost } from './staleness.ts'
+// 插件陈旧全局提醒（t260902-03 立；t260905-07 KI-052 握手矩阵接线）：useStaleBanner
+// 单例挂本组件；横幅渲染在 .wb-sb-right 共享容器，文案常量同源消费（banner-text.ts，
+// 场景断言锚 KI-051 纪律）。
+import { useStaleBanner } from './staleness.ts'
+import { STALE_BANNER_TEXT, STALE_RELOAD_TEXT } from './banner-text.ts'
 import { startVisibleInterval } from './visibility-poll.ts'
 import type { SessionsFace } from './session-entry.tsx'
 // 项目索引单态（t260903-07 工单②）：load() 成功分支向 chat 项目 tag 装饰器发布
@@ -393,8 +395,9 @@ export function WorkbenchSidebar(props: SidebarProps) {
   }, [metricsOpen])
   const [sandbar, setSandbar] = useState(sandbarHours)
   const rootRef = useRef<HTMLDivElement>(null)
-  // host 陈旧看守（t260902-03）：磁盘 host 半与进程启动指纹不一致 → stale，渲染全局横幅。
-  const staleHost = useStaleHost()
+  // 插件陈旧看守（t260902-03 立；t260905-07 KI-052 握手矩阵接线）：classifyHandshake
+  // 三元组判定 → restart（服务端旧）/reload（浏览器旧，跨重启存活页面）两支横幅。
+  const staleBanner = useStaleBanner()
   const [staleDismissed, setStaleDismissed] = useState(false)
   // 顶部行原地替换：隐藏出厂「⊕ New Session」钮（语义锚注入，见函数头注）。
   useHideFactoryNewSession(rootRef, wide)
@@ -725,12 +728,15 @@ export function WorkbenchSidebar(props: SidebarProps) {
       {/* 中列：四视图（现成的工单台/知识库/模型/立项单 UI，从 chat 页签迁来；左列图标直切，无 tab 条）。
           未选项目显占位——不自动选第一个项目（project 无默认值，用户拍板 260823）。 */}
       <div className="wb-sb-right">
-        {/* host 陈旧全局提醒（t260902-03）：挂中列共享容器（四视图排他渲染之上），
-            所有页签/视图常驻可见；「知道了」仅本页签消音（会话级，不持久化）。 */}
-        {staleHost && !staleDismissed && (
-          <div className="wb-stale-banner" role="alert">
+        {/* 插件陈旧全局提醒（t260905-07 KI-052）：挂中列共享容器（四视图排他渲染
+            之上），所有页签/视图常驻可见；「知道了」仅本页签消音（会话级，不持久化）。
+            文案两支与消除动作一一对应：restart=重启控制台（服务端旧），reload=刷新
+            页面（浏览器旧——重启无效，跨重启存活页面的正确动作）。 */}
+        {staleBanner && !staleDismissed && (
+          <div className="wb-stale-banner" data-stale-kind={staleBanner} role="alert">
             <span className="wb-stale-msg">
-              ⚠️ 控制台代码已更新，请<strong>重启 console</strong>后刷新页面生效（当前页面仍在跑旧代码，度量/diff 可能异常）。
+              ⚠️ {staleBanner === 'restart' ? STALE_BANNER_TEXT : STALE_RELOAD_TEXT}
+              （{staleBanner === 'restart' ? '当前控制台进程仍在跑旧代码' : '当前页面仍在跑旧代码'}，度量/diff 可能异常）。
             </span>
             <button className="wb-stale-dismiss" title="本页签暂时隐藏" onClick={() => setStaleDismissed(true)}>知道了</button>
           </div>

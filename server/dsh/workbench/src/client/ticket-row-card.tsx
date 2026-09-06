@@ -14,13 +14,15 @@
 import type { MouseEvent } from 'react'
 import {
   deriveTicketState, STATE4_LABEL, epicColorOf, stageShortOf, relativeTime,
-  laneDots, toMillis, type WfLike,
+  laneDots, toMillis, ticketDisplayTitle, type WfLike,
 } from './ticket-list-model.ts'
 
 /** 行卡消费的工单最小字段面（对齐 index.tsx TicketRow，多字段不关心）。 */
 export interface CardTicket {
   id: string
   title?: string
+  /** 无标题票的首句派生（t260905-07）：host enrichment 下发，仅 title 空的票带。 */
+  title_or_first?: string
   epic?: string
   status: string
   stage: string | null
@@ -107,7 +109,12 @@ export function TicketRowCard({
         {(peerViewers?.length ?? 0) > 0 && (
           <span title={`另一页签正在查看：${(peerViewers ?? []).map(v => v.who).join('、')}`}>👀</span>
         )}
-        <span className="wb-card-title">{t.title || '（无标题）'}</span>
+        {/* 标题展示选择（t260905-07）：title → title_or_first（无标题票首句，t260903-10
+            现场）→ 工单号（enrichment 失败的最后兜底，宁显编号不显「（无标题）」） */}
+        <span className="wb-card-title" data-wb-row-title={ticketDisplayTitle(t)}
+          data-title-src={t.title?.trim() ? 'title' : t.title_or_first ? 'first' : 'id'}>
+          {ticketDisplayTitle(t)}
+        </span>
         {/* epic 独立字段：彩 chip，点击=按 epic 筛（stopPropagation 不触发行卡导航） */}
         {t.epic && (
           <span className="wb-card-epic" style={{ borderColor: epicColor, color: epicColor }}

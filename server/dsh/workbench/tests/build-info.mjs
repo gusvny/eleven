@@ -1,17 +1,16 @@
 /**
- * integration/t260902-03/build-info.mjs —— t260902-03「host 陈旧全局提醒」自测。
+ * tests/build-info.mjs —— 插件陈旧看守自测（t260902-03 立；t260905-07 KI-052 随方案演进）。
  *
- * 落点说明：本工单写集不含 workbench smoke/，按 integration/<工单id>/ 目录惯例
- * 落本文件（integration/ 在写集内）。
- *
- * 直跑：node integration/t260902-03/build-info.mjs
+ * 直跑：node server/dsh/workbench/tests/build-info.mjs
  * （node ≥22.18 原生 type-stripping，直接 import .ts）。
  * 覆盖：
- *   A. computeHostFingerprint（src/host/build-info.ts 纯函数）：
- *      同输入同 hash；文件内容变→hash 变；单文件缺失→missing 不抛；全缺失→error 不抛。
+ *   A. computeHostFingerprint / collectSourceFiles（src/host/build-info.ts）：
+ *      同输入同 hash；文件内容变→hash 变；单文件缺失→missing 不抛；全缺失→error 不抛；
+ *      t260905-07：动态扫描收编新增文件（漏列修复钉住）；vendor/ 与 *.d.ts 不入清单。
  *   B. /suyou-workbench/api/build-info 路由（node.ts apply + mock webServer）：
  *      fresh→stale:false；磁盘文件变→stale:true；同进程二次 apply 不重置 boot 指纹（R3）；
  *      带 error 响应→stale:false+error（R4）；非 GET→405；畸形查询串无害。
+ *      t260905-07 同构断言：boot 与 disk 同清单同函数——同输入下两侧 hash 必相等。
  *   C. classifyBuildInfoResponse（src/client/stale-check.ts 纯函数，不 import react）：
  *      JSON 解析失败 / 5xx / 缺 stale 字段 / stale 非布尔 / 带 error → 均 {stale:false} 不抛（R5）。
  * 全程用 tmp fixture root，不真改仓库 host 文件、不碰 3099、不重启任何 console。
@@ -20,7 +19,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { computeHostFingerprint, HOST_SOURCE_FILES } from './../src/host/build-info.ts'
+import { collectSourceFiles, computeHostFingerprint } from './../src/host/build-info.ts'
 import { classifyBuildInfoResponse } from './../src/client/stale-check.ts'
 import { apply } from './../node.ts'
 
@@ -31,36 +30,66 @@ function ok(cond, name) {
   else { failed += 1; console.error(`FAIL ${name}`) }
 }
 
+/** fixture 的固定文件面（映射真实扫描面：入口 + host 半 + client 半）。 */
+const FIXTURE_FILES = [
+  'server/dsh/workbench/node.ts',
+  'server/dsh/workbench/src/host/a.ts',
+  'server/dsh/workbench/src/host/b.ts',
+  'server/dsh/workbench/src/client/a.tsx',
+]
+
+/** 在 fixture root 下落固定文件面（全部同内容即可，指纹按内容聚合）。 */
+async function layFixture(root, content, drop) {
+  for (const rel of FIXTURE_FILES) {
+    if (drop !== undefined && rel === drop) continue
+    const p = join(root, rel)
+    await mkdir(join(p, '..'), { recursive: true })
+    await writeFile(p, content)
+  }
+}
+
 const tmp = await mkdtemp(join(tmpdir(), 'wb-build-info-'))
 try {
-  /** 在 fixture root 下落一份 host 来源文件（全部同内容即可，指纹按内容聚合）。 */
-  async function layFixture(root, content, drop) {
-    for (const rel of HOST_SOURCE_FILES) {
-      if (drop !== undefined && rel === drop) continue
-      const p = join(root, rel)
-      await mkdir(join(p, '..'), { recursive: true })
-      await writeFile(p, content)
-    }
-  }
-
   // ── A. 纯函数 ────────────────────────────────────────────────
   {
     await layFixture(tmp, 'v1')
+    const list = collectSourceFiles(tmp)
+    ok(list.length === FIXTURE_FILES.length && list[0] === FIXTURE_FILES[0],
+      'A: 动态扫描=入口首位+全部落盘来源（排序固化）')
+
     const a = await computeHostFingerprint(tmp)
     const b = await computeHostFingerprint(tmp)
     ok(a.hash !== undefined && a.hash === b.hash, 'A: 同输入同 hash（稳定）')
-    ok(a.files === HOST_SOURCE_FILES.length && a.missing.length === 0, 'A: 全文件参与、无 missing')
+    ok(a.files === FIXTURE_FILES.length && a.missing.length === 0, 'A: 全文件参与、无 missing')
 
     await layFixture(tmp, 'v2')
     const c = await computeHostFingerprint(tmp)
     ok(c.hash !== a.hash, 'A: 文件内容变 → hash 变（陈旧可判）')
 
-    // 单文件缺失：独立 fixture root，少落一个 metrics.ts
+    // t260905-07 漏列修复钉住：新增来源文件落盘 → 自动入清单（hash 变、files+1）
+    await writeFile(join(tmp, 'server/dsh/workbench/src/host/c-new.ts'), 'new')
+    const d2 = await computeHostFingerprint(tmp)
+    ok(d2.hash !== undefined && d2.files === FIXTURE_FILES.length + 1 && d2.hash !== c.hash,
+      'A: 新增文件自动入清单（动态扫描，漏列故障不再复发）')
+
+    // 排除面：vendor/ 与 *.d.ts 不入清单
+    await mkdir(join(tmp, 'server/dsh/workbench/src/client/vendor'), { recursive: true })
+    await writeFile(join(tmp, 'server/dsh/workbench/src/client/vendor/x.ts'), 'v')
+    await writeFile(join(tmp, 'server/dsh/workbench/node-shims.d.ts'), 'd')
+    const d3 = await computeHostFingerprint(tmp)
+    ok(d3.files === FIXTURE_FILES.length + 1 && d3.hash === d2.hash,
+      'A: vendor/ 与 *.d.ts 不参与指纹（排除面钉住）')
+
+    // 单文件缺失（语义随动态扫描更新，t260905-07）：盘上没有的文件不进清单
+    // （missing 恒空——清单即盘上实况），「清单项读不到」改用同名目录占位复现
+    // （EISDIR）：missing 记录、不抛错、其余文件仍聚合。
     const repoMissing = join(tmp, 'repo-a-missing')
-    await layFixture(repoMissing, 'v2', 'server/dsh/workbench/src/host/metrics.ts')
+    await layFixture(repoMissing, 'v2')
+    await rm(join(repoMissing, 'server/dsh/workbench/src/host/a.ts'))
+    await mkdir(join(repoMissing, 'server/dsh/workbench/src/host/a.ts'))
     const d = await computeHostFingerprint(repoMissing)
-    ok(d.hash !== undefined && d.missing.length === 1 && d.missing[0].endsWith('metrics.ts'),
-      'A: 单文件缺失 → missing 记录、不抛错、其余文件仍聚合')
+    ok(d.hash !== undefined && d.missing.length === 1 && d.missing[0].endsWith('a.ts'),
+      'A: 清单项不可读 → missing 记录、不抛错、其余文件仍聚合')
 
     const empty = await mkdtemp(join(tmpdir(), 'wb-build-info-empty-'))
     const e = await computeHostFingerprint(empty)
@@ -106,6 +135,9 @@ try {
     ok(fresh.status === 200 && fresh.body.result.stale === false, 'B: 磁盘=boot → stale:false')
     ok(typeof fresh.body.result.diskFingerprint === 'string' && fresh.body.result.missing.length === 0,
       'B: 响应带 diskFingerprint 与 missing')
+    // t260905-07 同构断言：boot 与 disk 同清单同函数，fresh 态两侧必相等
+    ok(fresh.body.result.bootFingerprint === fresh.body.result.diskFingerprint,
+      'B: 同构性——boot==disk（fresh），两侧同清单同函数')
 
     // 磁盘文件变（模拟合并落账）→ stale:true
     await layFixture(repo, 'landed')

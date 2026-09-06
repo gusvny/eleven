@@ -154,6 +154,9 @@ import { readAgentLiveTail, resolveSessionFile } from './src/host/agent-live.ts'
 import { aggregateTicketUsage, resolveAllSessionFiles, stageWindowsFromTimeline } from './src/host/agent-usage.ts'
 import { buildMetricsResponse, defaultDeps } from './src/host/metrics.ts'
 import { computeHostFingerprint, type HostFingerprint } from './src/host/build-info.ts'
+// 首句派生纯函数（t260905-07）：client 半纯函数层无 react 依赖，node 侧直用同源
+// ——列表 enrichment（title_or_first）与详情头部两条通道一个口径。
+import { deriveTitleOrFirst } from './src/host/enrich.ts'
 import { SESSION_CHARTER_PATH, composeSessionCharter } from './src/host/session-charter.ts'
 import { closeEpic, isEvidenceFileName, listEpics, readEpicMarkdown, resolveEpicsDir, setEpicStatus } from './src/host/epics.ts'
 import {
@@ -399,7 +402,15 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       tk?.status !== 'closed' && (idSet === null || idSet.has(tk.id))).slice(0, 32)
     const shows = await mapSettled(targets, ENRICH_CONCURRENCY, (tk: any) => showWithTimeout(tk.id))
     shows.forEach((s, i) => {
-      const tl = (s as any)?.result?.timeline
+      const r = (s as any)?.result ?? null
+      // 首句派生（t260905-07，t260903-10 裸编号现场）：口径收口在 deriveTitleOrFirst
+      // （src/host/enrich.ts，单测直跑）——title 非空跳过裁剪、show 失败/无 body
+      // 字段缺省（行卡回退裸编号，降级自然）。
+      if (targets[i] !== undefined && targets[i] !== null) {
+        const first = deriveTitleOrFirst(targets[i], r)
+        if (first !== undefined) targets[i].title_or_first = first
+      }
+      const tl = r?.timeline
       if (!Array.isArray(tl)) return
       // 末条合法条目：stage/state 都是非空字符串才算（畸形条目跳过——不挂脏 progress）
       for (let j = tl.length - 1; j >= 0; j--) {

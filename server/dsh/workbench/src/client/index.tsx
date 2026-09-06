@@ -99,7 +99,8 @@ import { EpicBadge, EpicSection } from './epics.tsx'
 import { TicketRowCard, type CardOp } from './ticket-row-card.tsx'
 import {
   deriveTicketState, countByState, filterRows, progressLineOf, epicColorOf,
-  STATE4_LABEL, type TicketState4,
+  STATE4_LABEL, firstSentenceOf, snapshotDigest, type SnapshotDigest,
+  type TicketState4,
 } from './ticket-list-model.ts'
 // t260901-15 多页签共存：在看心跳/写事件广播（tab-presence）+ 不可见页签暂停轮询门。
 import { startTabPresence } from './tab-presence.ts'
@@ -643,6 +644,17 @@ const CSS = `
 .wb-d2-deep>details>summary::before{content:'▸ '}
 .wb-d2-deep>details[open]>summary::before{content:'▾ '}
 .wb-d2-deep>details>div{padding:0 12px 10px}
+/* ── 快照要点（t260905-07：阶段时间线/最近交接/门与签字记录/工作流快照，ticket show 直读） ── */
+.wb-dsnap-block{margin:6px 0}
+.wb-dsnap-block>h4{margin:0 0 4px;font-size:11px;color:#57606a;font-weight:600}
+.wb-dsnap-row{display:flex;gap:8px;font-size:12px;line-height:1.7;flex-wrap:wrap}
+.wb-dsnap-row .st{color:#57606a;min-width:88px}
+.wb-dsnap-row .at{color:#8c959f;font-size:11px}
+.wb-dsnap-row[data-untime=true] .at{color:#cf222e}
+.wb-dsnap-chip{display:inline-block;padding:0 6px;border-radius:10px;font-size:11px;margin-right:4px}
+.wb-dsnap-chip[data-kind=gate]{background:#f6f8fa;color:#57606a;border:1px solid #d0d7de}
+.wb-dsnap-chip[data-kind=signature]{background:#ddf4ff;color:#0969da;border:1px solid #54aeff}
+.wb-dsnap-empty{font-size:12px;color:#8c959f}
 /* 变更 tab：文件头 +/− 行数；构建产物（lib/ bundle）折叠组 */
 .wb-d-stats{font-size:11px;margin-left:auto;white-space:nowrap}
 .wb-d-stats .add{color:#1a7f37}
@@ -727,6 +739,9 @@ interface TicketRow {
   role: string
   status: string
   title: string
+  /** 无标题票的首句派生（t260905-07）：host enrichment 从 show body 裁剪下发，
+   *  仅 title 为空的票带；缺省=行卡回退裸编号（enrichment 失败降级自然）。 */
+  title_or_first?: string
   workflow: string
   proposal_id?: string
   /** 所属立项代号（epic-linkage；无 epic 的工单为 ''/缺省 → 徽标显「未归档」）。 */
@@ -1040,6 +1055,22 @@ function PartsBadges({ parts }: { parts?: string[] }) {
 function fmtTs(ts?: number): string {
   if (!ts) return '—'
   return new Date(ts * 1000).toLocaleString('zh-CN', { hour12: false })
+}
+
+/** 快照要点的时间显示（t260905-07）：引擎快照时间字段可能是秒级数值、毫秒数值、
+ *  数字串或人话时间串（老票/引擎版本差）——数字按量级判别（<1e11 秒 / ≥1e11 毫秒，
+ *  toMillis 同款口径），非数字原样显示，null → ''。畸形（NaN/负数）原样透传不猜
+ *  （时间失真面显性化，与 untime 标注同纪律）。 */
+function fmtSnapshotTs(v: string | null): string {
+  if (v === null) return ''
+  const n = Number(v)
+  if (v !== '' && Number.isFinite(n) && n > 0) {
+    // 量级判别（toMillis 同款口径）：<1e11 视为秒、≥1e11 视为毫秒——引擎老票秒级
+    // 与 fixture/引擎新面毫秒级两域在可预见时间无重叠。
+    const ms = n < 1e11 ? n * 1000 : n
+    return new Date(ms).toLocaleString('zh-CN', { hour12: false })
+  }
+  return v
 }
 
 /* ------------------------------------------------- M14 详情五分组（层次化 section） */
@@ -1673,6 +1704,71 @@ function StageUsageInline({ stageId, usage }: { stageId: string; usage: AgentUsa
     <span className="wb-stage-usage" title={stageUsageTitle(s)}>
       {usageSum(s)}{multi}
     </span>
+  )
+}
+
+/** 快照要点（t260905-07）：ticket show snapshot 直读的四块观测（阶段时间线/最近
+ *  交接/门与签字记录/工作流快照要点），纯裁剪零派生语义（snapshotDigest 纯函数层
+ *  承担畸形防御与 KI-019 呈现口径——排序归位+缺 at 沉底标注）。时间线只显尾 20 条
+ *  （行卡场景无此诉求，详情下钻要「最近的来龙去脉」），交接尾 5 条，门与签字合并
+ *  记录表按时间降序。各块带 data-block 锚（3199 隔离台场景断言用）。 */
+function D2SnapshotDigest({ detail }: { detail: TicketDetail }) {
+  const digest = useMemo(() => snapshotDigest(detail), [detail])
+  const { workflow } = digest
+  return (
+    <details className="wb-d2-snapshot">
+      <summary>快照要点（时间线 · 最近交接 · 门与签字 · 工作流快照）</summary>
+      <div>
+        <div className="wb-dsnap-block" data-wb-digest="workflow">
+          <h4>工作流快照要点</h4>
+          <div className="wb-dsnap-row">
+            <span className="st">工作流</span><span>{workflow.id || '—'}</span>
+            <span className="st">当前段</span><span>{workflow.stage || '—'}{workflow.stageState ? ` · ${STATE_LABEL[workflow.stageState] ?? workflow.stageState}` : ''}</span>
+            <span className="st">状态</span><span>{workflow.status || '—'}</span>
+            <span className="st">修订</span><span>{workflow.revisions === null ? '—' : `${workflow.revisions} 轮`}</span>
+            {workflow.worktree && <><span className="st">工作区</span><span data-wb-digest-worktree>{workflow.worktree}</span></>}
+          </div>
+        </div>
+        <div className="wb-dsnap-block" data-wb-digest="timeline">
+          <h4>阶段时间线（最近 {digest.timeline.length} 条，按时间正序）</h4>
+          {digest.timeline.length === 0
+            ? <div className="wb-dsnap-empty">无时间线条目</div>
+            : digest.timeline.map((e, i) => (
+              <div className="wb-dsnap-row" key={`${e.stage}-${i}`} data-untime={e.untime}
+                data-wb-tl-at={e.at ?? ''} data-wb-tl-stage={e.stage} data-wb-tl-state={e.state}>
+                <span className="st">{e.stage || '—'}</span>
+                <span>{STATE_LABEL[e.state] ?? e.state}</span>
+                <span className="at">{e.untime ? "时间缺失" : fmtSnapshotTs(e.at)}</span>
+              </div>
+            ))}
+        </div>
+        <div className="wb-dsnap-block" data-wb-digest="handoffs">
+          <h4>最近交接（{digest.handoffs.length} 条）</h4>
+          {digest.handoffs.length === 0
+            ? <div className="wb-dsnap-empty">无交接记录</div>
+            : digest.handoffs.map((h, i) => (
+              <div className="wb-dsnap-row" key={i}>
+                <span>{h.from || '—'} → {h.to || '—'}</span>
+                <span className="at">{h.at === null ? "" : fmtSnapshotTs(h.at)}</span>
+              </div>
+            ))}
+        </div>
+        <div className="wb-dsnap-block" data-wb-digest="signatures">
+          <h4>门与签字记录（{digest.gates.length} 条，最近在前）</h4>
+          {digest.gates.length === 0
+            ? <div className="wb-dsnap-empty">无门/签字记录</div>
+            : digest.gates.map((g, i) => (
+              <div className="wb-dsnap-row" key={`${g.kind}-${g.stage}-${i}`}>
+                <span className="wb-dsnap-chip" data-kind={g.kind}>{g.kind === 'signature' ? '签字' : '门'}</span>
+                <span className="st">{g.stage || '—'}</span>
+                <span>{g.who || '—'} · {g.decision || '—'}</span>
+                {g.note && <span>{g.note}</span>}
+                <span className="at">{g.at === null ? "" : fmtSnapshotTs(g.at)}</span>
+              </div>
+            ))}
+        </div>
+      </div>
+    </details>
   )
 }
 
@@ -2623,6 +2719,8 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   const [showDone, setShowDone] = useState(false)
   /** 进展行 enrichment（host /tickets/progress 只读）：仅当前可见页逐票拉取（R5 负载预算）。 */
   const [progressMap, setProgressMap] = useState<Record<string, { state: string; text: string }>>({})
+  // 无标题票首句映射（t260905-07）：enrichment 通道 title_or_first 的行级缓存。
+  const [titleFirstMap, setTitleFirstMap] = useState<Record<string, string>>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<TicketDetail | undefined>(undefined)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -3132,13 +3230,17 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       + `&enrich=progress&ids=${encodeURIComponent(ids.join(','))}`)
       .then((data) => {
         if (!alive || data?.ok !== true) return
-        const rows = (data.result?.tickets ?? []) as { id: string; progress?: { stage: string; state: string; at?: unknown } }[]
+        const rows = (data.result?.tickets ?? []) as { id: string; progress?: { stage: string; state: string; at?: unknown }; title_or_first?: string }[]
         const next: Record<string, { state: string; text: string }> = {}
+        const firsts: Record<string, string> = {}
         for (const r of rows) {
+          // 无标题票首句（t260905-07）：enrichment 顺带下发，行卡展示选择函数消费
+          if (r?.title_or_first) firsts[r.id] = r.title_or_first
           if (!r?.progress) continue
           const line = progressLineOf([r.progress])
           if (line) next[r.id] = line
         }
+        setTitleFirstMap(firsts)
         setProgressMap(next)
       })
       .catch(() => { /* 静默降级 */ })
@@ -3301,7 +3403,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       {paged.map(t => {
         const ops = availableOps(t, wfById[t.workflow]) as CardOp[]
         return (
-          <TicketRowCard key={t.id} t={t} wf={wfById[t.workflow]}
+          <TicketRowCard key={t.id} t={{ ...t, title_or_first: t.title_or_first ?? titleFirstMap[t.id] }} wf={wfById[t.workflow]}
             progress={progressMap[t.id]}
             active={t.id === selectedId} busy={opBusy} ops={ops}
             peerViewers={peerViewersByTicket.get(t.id)}
@@ -3337,7 +3439,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
           <>
             <button className="wb-done-row" onClick={() => setShowDone(false)}>▾ 收口 · {doneList.length}（点击折叠）</button>
             {doneList.map(t => (
-              <TicketRowCard key={t.id} t={t} wf={wfById[t.workflow]} compact={false}
+              <TicketRowCard key={t.id} t={{ ...t, title_or_first: t.title_or_first ?? titleFirstMap[t.id] }} wf={wfById[t.workflow]} compact={false}
                 active={t.id === selectedId} busy={opBusy} ops={[]}
                 onOpen={() => { setDrawerTab('detail'); void openDetail(t.id) }}
                 onOpenEpic={onOpenEpic} />
@@ -3384,7 +3486,12 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
           {!detailLoading && detail !== undefined && detail.id === selectedId && (
             <>
               <div className="wb-drawer-head">
-                <span className="wb-title">{detail.title}</span>
+                {/* 无标题票首句兜底（t260905-07）：详情通道从 show body 直接裁（列表
+                    通道走 enrichment title_or_first，两通道同口径 firstSentenceOf）；
+                    body 也空 → 回退工单号，宁显编号不显空白。 */}
+                <span className="wb-title" data-title-src={detail.title?.trim() ? 'title' : 'first-or-id'}>
+                  {detail.title?.trim() || firstSentenceOf(detail.body) || detail.id}
+                </span>
                 <code className="wb-d2-id">{detail.id}</code>
                 <span className="wb-badge" data-kind="status">{detail.status}</span>
                 {detail.status !== 'closed' && (
@@ -3517,6 +3624,12 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
               {/* 详情页 v2.1：正文已上移到头部（所有页签可见）；本页签=进展阶段卡 + 深查折叠。
                   旧 M14 五 section 内容全保留在深查区，一项不丢。 */}
               <D2Stages detail={detail} wf={selWf} usage={usage} durs={stageDurs.durs} nowMs={stageDurs.nowMs} />
+
+              {/* 快照要点（t260905-07）：ticket show 直读四块观测（时间线/交接/门与签字/
+                  工作流快照），收口成折叠块放深查区首位——下钻即见来龙去脉 */}
+              <div className="wb-d2-deep">
+                <D2SnapshotDigest detail={detail} />
+              </div>
 
               <div className="wb-d2-deep">
                 <details>

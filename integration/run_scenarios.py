@@ -399,6 +399,13 @@ SCENARIOS = [
     ("t260904-17-ticket-list-rowcard-ui",
      "工单列表 v5 行卡用户可感知面（t260904-17，隔离台浏览器走查=验收①的机械 repeatable 面）：四态一眼可辨（等你1/受阻1/在飞3/收口1 chips 带计数——在飞 3 含未知 stage_state 票=四态缺省分支 UI 交叉验证、收口折叠计数行、行卡 data-ticket-id 可测性契约）；「去签字」=纯导航零写 API（点击后写端点 POST=0——R3 钉死：绑 advance=静默签字必红）；「看原因」达阻塞原因原文；站道点数=模板阶段数（5 段模板 5 点/3 段模板 3 点，计算样式计数）；同 epic 行卡彩条同色非灰、异 epic 异色（验收②可感知面）；搜索=过滤非分组。playwright-core 缺失=干净 SKIP（KI-036 守卫）；实现落地前红属预期，arbitrate/merge 期必须绿",
      "node integration/t260904-17/sc_ticket_list_rowcard_ui.mjs", "ro"),
+    # ---- t260905-07 工单详情下钻面板＋插件 staleness 横幅（KI-052 根治）----
+    ("t260905-07-ticket-detail-panel",
+     "工单详情下钻面板用户可感知面（t260905-07，隔离台浏览器真点=验收①②）：行点击开详情抽屉且四观测区块在场（data-wb-digest=timeline/handoffs/signatures/workflow——本场景钉的可测性契约，data-wb-* 先例）；乱序 timeline（KI-019 触及面）按 at 升序归位渲染（data-wb-tl-at 升序）+缺 at 条目沉底带时间缺失标注（呈现口径钉死，不声称修复 KI-019 数据模型）；最近交接/门与签字/工作流要点（workflow_id+worktree）内容可达；无标题老票（t260903-10 现场）列表行显正文首句不裸编号（data-wb-row-title=首句截断：含首句不含第二句）、有题票标题原文不动；enrich=progress 通道 title_or_first 字段值=正文首句（零新路由零新请求；主请求窗口零 show 由 17 号契约场景看守不重复）；行导航零写 API（写端点请求=0，「没看过就签了」危害同 17 号 R3）。playwright-core/隔离台依赖缺失=ENV_FAIL（exit 2，KI-036 家族，不写 SKIP）；实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "node integration/t260905-07/sc_ticket_detail_panel.mjs", "ro"),
+    ("t260905-07-stale-handshake-banner",
+     "插件 staleness 握手横幅注入实验（t260905-07，fixture 真拷贝隔离台=验收③+KI-052 根治面，gen2 判定矩阵五分支双向断言）：M5 新鲜态（boot==disk==注入）等满一个 30s 轮询窗横幅不在场；M1 盘新内存旧（改 fixture node.ts→新开页注入新指纹≠boot）「重启控制台生效」横幅在场且刷新文案不在场（文案与消除动作绑定）；M2 看守自身内存旧（拦截 build-info 应答 405=KI-052 立案现场，旧看守 405 静默）重启横幅在场；M4 跨重启存活页面（同端口重起台 boot==disk 一致而同页注入=旧盘态）出「刷新页面生效」支且重启文案不在场（重启对该态无效=gen1 打回①序列，场景时序必须同页跨重启）、刷新后横幅消失（消除动作可达）；M5 复验（盘码未动+重起台→新开页→不在场=重启不制造假横幅）；文案断言锚=源码常量 banner-text.ts（KI-051 锚纪律，缺失=FAIL 点名不回退字面量蒙混）。fixture 真拷贝 server/dsh、临时端口、临时 DSH_HOME 退出即删、零 3099/7233 接触；playwright-core/preset 源缺失=ENV_FAIL（exit 2）；实现落地前红属预期，arbitrate/merge 期必须绿",
+     "node integration/t260905-07/sc_stale_handshake_banner.mjs", "ro"),
     # ---- t260904-14 project lifecycle 票②：sandbar project remove（可逆摘除）----
     ("t260904-14-project-remove-lifecycle",
      "默认摘除生命周期（t260904-14，桩 poc_dir 全程零真 Temporal，全腿不可 SKIP）：默认（无 purge 旗）可逆摘除——project.yaml 退役移位（project.yaml.retired-* 在位）、data/（归档+metrics）与 credentials.yaml 字节不动、.lane/ 泳道残骸只报不删且报告含票号与数据处置词汇；双侧装载器（Python shared/TS suyou-projects.ts）不再列该项目且其余项目条目字节不动、零隔离；re-add 同 key 成功且 data/tickets 归档链连续；closed 未归档差集黄牌列票号（C1：目录在/manifest 缺=未归档）；--dry-run 注册表根字节级零变更；RUNNING 非空=拒摘报票号且零现场变更。台别=桩 poc_dir（--root 指桩树，假 client.py 经 FIX14_CTRL 注入票号级清单），零 3099/7233 接触。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
