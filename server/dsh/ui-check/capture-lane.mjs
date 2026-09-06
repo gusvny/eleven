@@ -258,7 +258,7 @@ export async function main() {
     }
     const project = `capture-lane-${process.pid}`;
     const timeoutSec = Number(process.env.SUYOU_CAPTURE_STAGE_TIMEOUT_SEC || 600);
-    const up = spawnSync(process.execPath, [stageCli, "up", "--project", project,
+    const up = spawnSync("python3", [stageCli, "up", "--project", project,
       "--services", "full", "--timeout", String(timeoutSec)],
       { encoding: "utf8", timeout: timeoutSec * 1000 + 15000 });
     if (up.status !== 0) {
@@ -285,7 +285,7 @@ export async function main() {
     tornDown = true;
     if (ownStageProject) {
       try {
-        spawnSync(process.execPath,
+        spawnSync("python3",
           [path.join(REPO_ROOT, "integration", "stage_docker.py"), "down", "--project", ownStageProject],
           { encoding: "utf8", timeout: 180000 });
         console.log(`[capture-lane] 自起舞台 ${ownStageProject} 已拆`);
