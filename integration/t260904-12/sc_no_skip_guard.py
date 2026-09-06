@@ -50,7 +50,7 @@ ALLOW = [
     re.compile(r"skipped AND counted|skip count 2"),                    # cache_probe 被测产品行为描述
     re.compile(r"无凭据"),                                              # metrics 契约产品域软降级语义（宿主裁定不属闸语义）
     re.compile(r"不再有 skip|skip 计数"),                                # 退役注记变体
-    re.compile(r"\bskips\b|\bskipping\b"),                            # skip_slow 产品特性的动词谓语（非状态词）
+    re.compile(r"(?<![A-Za-z0-9])skips(?:ing)?(?![A-Za-z0-9])"),       # skip_slow 产品特性的动词谓语（非状态词）；边界用字母数字负向断言而非 \b——snake_case 里 _skips_ 的 \b 失效，会把「滑档」谓语（test_external_band_lock_skips_band）误判成状态词（t260904-19 gen10 实锤）
     re.compile(r"SKIP→exit 0→闸计过"),                                  # 本票守卫场景对穿透机制的历史引用
     re.compile(r"SKIP_DIRS"),                                           # 目录排除表常量名（非测试状态词）
     re.compile(r"skipTest"),                                            # unittest 内建 API（环境前提不可测时跳过单用例），非三态状态词

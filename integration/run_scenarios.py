@@ -80,11 +80,14 @@ SCENARIOS = [
      "面板持久化残留不锁死面板旅程（t260904-04 A1 验收，灰盒 L3）：持有旧 localStorage 残留（template=other-lane/epic=代号，两选择器均已退役）的用户重开面板——loadPanelState 读时归一（template→dev-lane、epic→all、非退役字段保留）→ 归一查询串过 /metrics 前门 200；对照组证明失败模式真实：未归一残留 template 直打门 400 且 {error,reason} 双人话（旧世界残留=永久 400 空面板）。与 developer L1（归一函数含畸形输入）intent 不同面：本场景守残留→查询串→门的旅程与对照红面",
      "node integration/t260904-04/sc_panel_residue_journey.mjs", "ro"),
     ("t260904-02-ticket-start-anchor",
-     "裸入口开票硬闸+隔离台并发隔离端到端（真 temporalite 槽位台，epic 验收1/4/5，KI-032 修复回归）：裸 client.py ticket-start 带 project→Temporal 内 payload workspace.path 绝对路径且锚注册项目主目录/.lane/（worktree 同锚，落仓与执行 worker 解耦）；缺 project/未知 key=创建即拒收且两红因文案互辨；双槽并发开票时间重叠互不见对方工单（ticket-list 双向+跨槽 describe not_found）；审计钩子证被测子进程零连生产 7233/8233（含自证拦截腿）+temporalite 三端口显式断言（UI 默认=--port+1000 暗雷）+SUYOU_TARGET_HOST 指生产构造即拒（红绿自证）；teardown 槽 db/日志全清、lock 槽锚保留、stop 幂等二连、kill -9 后 flock 崩溃自释同槽可复抢",
+     "裸入口开票硬闸+隔离台并发隔离端到端（t260904-19 起 docker 测试台双实例，epic 验收1/4/5，KI-032 修复回归）：裸 client.py ticket-start 带 project→Temporal 内 payload workspace.path 绝对路径且锚注册项目主目录/.lane/（worktree 同锚，落仓与执行 worker 解耦）；缺 project/未知 key=创建即拒收且两红因文案互辨；双槽并发开票时间重叠互不见对方工单（ticket-list 双向+跨槽 describe not_found）；审计钩子证被测子进程零连生产 7233/8233（含自证拦截腿）+双台端口面核验（互异/不在禁区 3099/3199/7233/8233/17233/18233）+SUYOU_TARGET_HOST 指生产构造即拒（红绿自证）；teardown 零残留（down 后 docker ps 无本工程容器）、端口释放、down 幂等二连、同工程名立即 re-up（t260904-19 docker 台语义，容器由 daemon 持有无锁可崩，取舍见 stage_docker 头注）；docker 缺席/镜像缺席=ENV_FAIL exit 2 点名",
      "python3 integration/t260904-02/sc_ticket_start_anchor.py", "exclusive"),
     ("t260904-02-worker-fingerprint-gate",
-     "worker 归属指纹 ensure 闸真执行路径（epic 验收2，KI-033 修复回归；断言落公开行为输出非源级 grep——契约不变的实现重构不得打破本场景）：隔离台内真 worker 自报 meta（pid/repo_root/ts，起跑早写）；node.ts 对外契约 export readWorkerMeta/judgeTicketWorkerMeta 三态真值（same/foreign/unknown）+ensureTicketWorkersOnce 依赖注入真调——同仓照旧不重复拉、异仓拒接不 spawn+告警记录含对方仓根/pid/tid 可断言（绝不 kill 别人进程，杀进程归人）、畸形 meta 兼容跳过+reason 可辨不哑巴；TERM 后 worker 退出且自报 meta 清理（资源回收）",
+     "worker 归属指纹 ensure 闸真执行路径（epic 验收2，KI-033 修复回归；断言落公开行为输出非源级 grep——契约不变的实现重构不得打破本场景；t260904-19 起 temporal 台=docker 测试台单实例）：隔离台内真 worker 自报 meta（pid/repo_root/ts，起跑早写）；node.ts 对外契约 export readWorkerMeta/judgeTicketWorkerMeta 三态真值（same/foreign/unknown）+ensureTicketWorkersOnce 依赖注入真调——同仓照旧不重复拉、异仓拒接不 spawn+告警记录含对方仓根/pid/tid 可断言（绝不 kill 别人进程，杀进程归人）、畸形 meta 兼容跳过+reason 可辨不哑巴；TERM 后 worker 退出且自报 meta 清理（资源回收）",
      "python3 integration/t260904-02/sc_worker_fingerprint_gate.py", "exclusive"),
+    ("t260904-19-stage-docker",
+     "docker 测试舞台 L1（t260904-19：全仓唯一搭台方式回归锚，假 docker shim 真跑编排面零 docker 依赖）：档位 flock 原子预留（并发双起各得独立档=验收①回归锚、外部持锁滑档、锁释放复抢=崩溃自释语义）；禁区端口面（生产 3099/7233/8233+缺省台 3199/17233/18233）与内核临时区间构造性排除；畸形输入全电池（project 白名单/端口旋钮非数字越界禁区被占/目录缺失/半指定）逐条点名检查项零副作用；诚实环境红三态（docker 缺席=ENV_FAIL exit 2 点名、镜像缺席点名 build-test-temporal.sh、compose 半途死就地 down 清场零残留）；ensure 幂等（健康复用/半残拆重起）；up→down 零残留+端口释放+幂等二连；bench.py 守卫回归（槽位制退役后保留面）",
+     "python3 integration/tests/test_stage_docker.py", "ro"),
     ("t260904-02-doctor-zombie",
      "doctor 引擎僵尸探测红绿自证（epic 验收3，fixture 注入档零真扫零端口）：SANDBAR_ZOMBIE_CENSUS 注入异仓引擎形态（cwd 含 server/dsh/temporal-poc 标记且引擎根≠当前，即 260904 headless 指向冻结仓实案）→exit1 红行点名 pid+异仓路径且同仓进程不误报；干净 census→exit0+兼容矩阵恰 5 行含 zombie 语义新行+重复 doctor 幂等；坏 JSON census=显式红不假绿（畸形输入三态）；文案自辨：僵尸面输出带 --live 指引（缺省 sample 档防「跑过=无僵尸」误读）+完成语不写死「四面」（数字随探针数漂移）",
      "python3 integration/t260904-02/sc_doctor_zombie.py", "ro"),
@@ -414,13 +417,13 @@ SCENARIOS = [
      "python3 integration/t260904-12/sc_deregistry_honest.py", "ro"),
     # ---- t260904-15 project lifecycle 票③：项目管理 UI 左栏内嵌（host 路由薄壳+三处新增+三弹层）----
     ("t260904-15-project-ui-host-routes",
-     "host 项目路由薄壳契约（t260904-15，API 面无浏览器，自举隔离台+临时注册表根+Temporal 死端口）：写路由把请求薄壳转 spawn `sandbar project add|remove --json`——六类拒收错误体逐字透传为 4xx 就地显示数据源（key 白名单/已存在/dirs 缺失/相对路径/根交叉/畸形 JSON 体精确文案不裸抛堆栈）、dry-run 透传且注册表根字节级零变更、成功后 GET /wf/projects 即时出现新条目（左栏读回=装载器消费方，验收12）；读面扩展：quarantined 数组含 key+原因含 <dir>/project.yaml 定位（验收11 隔离行数据源）、空注册表 200 空清单不再 500（首接面）；票计数读路由 spawn list --json 单点取数，Temporal 不可达=降级字段非 500（验收11「—」数据源）；remove 在 Temporal 不可达 fail-closed（dry-run 同闸，契约①a-1）文案含 sandbar up 指路（验收7/13）且零现场变更。与 t260904-10/-14（CLI 语义）intent 不同面：本条守路由透传+读面扩展层。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；隔离台依赖缺失=ENV_FAIL 点名（KI-036，不假绿）",
+     "host 项目路由薄壳契约（t260904-15，API 面无浏览器；t260904-19 起台=docker 测试台 dsh-only 实例，fixtures 根挂 /fixtures、容器内引擎地址钉死不可达回环口=降级断言面）：写路由把请求薄壳转 spawn `sandbar project add|remove --json`——六类拒收错误体逐字透传为 4xx 就地显示数据源（key 白名单/已存在/dirs 缺失/相对路径/根交叉/畸形 JSON 体精确文案不裸抛堆栈）、dry-run 透传且注册表根字节级零变更、成功后 GET /wf/projects 即时出现新条目（左栏读回=装载器消费方，验收12）；读面扩展：quarantined 数组含 key+原因含 <dir>/project.yaml 定位（验收11 隔离行数据源）、空注册表 200 空清单不再 500（首接面）；票计数读路由 spawn list --json 单点取数，Temporal 不可达=降级字段非 500（验收11「—」数据源）；remove 在 Temporal 不可达 fail-closed（dry-run 同闸，契约①a-1）文案含 sandbar up 指路（验收7/13）且零现场变更。与 t260904-10/-14（CLI 语义）intent 不同面：本条守路由透传+读面扩展层。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；隔离台依赖缺失=ENV_FAIL 点名（KI-036，不假绿）",
      "node integration/t260904-15/sc_project_ui_host_routes.mjs", "ro"),
     ("t260904-15-project-ui-rail-add-remove",
-     "左栏三处就位+图标族换装+接入/摘除旅程（t260904-15，浏览器捕获，mock v5 过稿口径）：组头第五枚「项目设置」svg 图标、「＋ 接入项目」行、隔离 key 红色行（无组头图标）三处在位（验收11）；四视图图标换装 svg 非 emoji、aria-label 齐、点工单列表图标 active 联动保留、侧栏可见文本 emoji 清零（验收11b 渲染面）；接入弹层坏 key 错误就地显示点名原因、合法 key 成功后左栏即时出现新组（验收12）；摘除弹层四步：处置勾选默认全保留、dry-run 清单先行、purge 勾选需输 key 二次确认（错 key 禁确认）、Temporal 不可达 fail-closed 文案就地含 sandbar up 指路（验收13）。与 CLI 场景（t260904-10/-14）intent 不同面：守 UI 呈现与交互旅程。实现落地前红属预期；playwright-core 缺失=ENV_FAIL 点名（KI-036 守卫，不假绿）",
+     "左栏三处就位+图标族换装+接入/摘除旅程（t260904-15，浏览器捕获，mock v5 过稿口径；t260904-19 起 docker 测试台）：组头第五枚「项目设置」svg 图标、「＋ 接入项目」行、隔离 key 红色行（无组头图标）三处在位（验收11）；四视图图标换装 svg 非 emoji、aria-label 齐、点工单列表图标 active 联动保留、侧栏可见文本 emoji 清零（验收11b 渲染面）；接入弹层坏 key 错误就地显示点名原因、合法 key 成功后左栏即时出现新组（验收12）；摘除弹层四步：处置勾选默认全保留、dry-run 清单先行、purge 勾选需输 key 二次确认（错 key 禁确认）、Temporal 不可达 fail-closed 文案就地含 sandbar up 指路（验收13）。与 CLI 场景（t260904-10/-14）intent 不同面：守 UI 呈现与交互旅程。实现落地前红属预期；playwright-core 缺失=ENV_FAIL 点名（KI-036 守卫，不假绿）",
      "node integration/t260904-15/sc_project_ui_rail_add_remove.mjs", "ro"),
     ("t260904-15-project-ui-settings-isolation",
-     "设置弹层信息面+隔离详情+空注册表首接（t260904-15，浏览器捕获，与场景② intent 不同面：守信息面/降级口径/空表面）：设置弹层只读 key/显示名/根目录如实呈现；票计数 Temporal 不可达降级「—」类中性提示不红不谎报（验收11 降级口径）；体检区中性提示不含「无黄牌」谎报（R2b 降档口径）；danger 摘除入口在位；隔离红行点击见原因含 project.yaml 定位+修复指路（验收11）；空注册表 GET /wf/projects 200 空清单不 500、零分组仍渲染接入行且首接走通（验收9 空表面）。实现落地前红属预期；playwright-core 缺失=ENV_FAIL 点名（KI-036 守卫，不假绿）",
+     "设置弹层信息面+隔离详情+空注册表首接（t260904-15，浏览器捕获，与场景② intent 不同面：守信息面/降级口径/空表面；t260904-19 起 docker 测试台双实例）：设置弹层只读 key/显示名/根目录如实呈现；票计数 Temporal 不可达降级「—」类中性提示不红不谎报（验收11 降级口径）；体检区中性提示不含「无黄牌」谎报（R2b 降档口径）；danger 摘除入口在位；隔离红行点击见原因含 project.yaml 定位+修复指路（验收11）；空注册表 GET /wf/projects 200 空清单不 500、零分组仍渲染接入行且首接走通（验收9 空表面）。实现落地前红属预期；playwright-core 缺失=ENV_FAIL 点名（KI-036 守卫，不假绿）",
      "node integration/t260904-15/sc_project_ui_settings_isolation.mjs", "ro"),
 
     # ---- t260904-18：三门新契约（refs 建单闸 / files_changed 回执形状 / ui_evidence 声明制）----
@@ -434,6 +437,12 @@ SCENARIOS = [
     ("t260904-18-ui-evidence-declaration",
      "ui_evidence 声明制（t260904-18 门③，KI-050，灰盒 L2/L3）：UI 截图证据目录由项目声明（verify.yaml 顶层 ui_evidence）——verify_lane 白名单收该键（未知顶层键 fail-closed 雷 t260903-11 同位不触发）、dirs 畸形=红点名字段（契约②三态总纲：畸形≠缺省）、缺省=merge_check 截图项 green+可见 note「未声明」（行为可见非静默，非 SKIP 非假绿）、有声明+diff 命中=无 png 仍红（闸没松）、diff 故障=红不因缺省豁免（对照腿）、有声明+未命中=不出项（拓扑级缺席）；load_ui_evidence 三态；sandbar 五路径迁入仓根 verify.yaml（迁移等价 rod：声明集合≡legacy 表）；review_gate 接线源码锁（UI_EVIDENCE_DECL_PATCH_ID+meta 预载 ui_evidence_dirs）。与 t260904-13 三场景（判定源/闸输出/接线编排，KI-044 面）intent 不同面：本条守声明制新契约面；与 contract-v11-regression-rods（v1.1 勘误面）不同层。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio 缺失=ENV_FAIL 点名（merge_check 行为腿），verify_lane/声明腿照跑",
      "PY=server/dsh/temporal-poc/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260904-18/sc_t260904_18_ui_evidence_declaration.py", "ro"),
+    ("t260904-19-stage-docker-cli-contract",
+     "docker 测试台唯一搭台入口的 CLI 对外契约缝（t260904-19，灰盒 L2）：up 产出场景可直接消费的 JSON（project/temporal 非空、127.0.0.1:<int> 形）、down 幂等二连且拆台后端口立即可复用（验收④）、docker 缺席=exit 2+ENV_FAIL 点名 docker（验收③三态）与 test-temporal 镜像缺席=exit 2 点名 build-test-temporal.sh 两文案可辨、畸形工程名非零拒收且输出点名 project 且零残留；生产端口 {3099,7233,8233} 绝不返回（3099 红线=CLAUDE.md 硬规则1）；bind 探测器占用/空闲两态自证防恒真。断言只锚 CLI 进程级公开行为（退出码/stdout JSON/docker ps 公开观测面/socket 可连性），契约不变的实现重构不得打破。与前层分工：helper 内部机制（档位锁/分配原子性/畸形全电池）归 developer L1 test_stage_docker.py，本场景守真进程消费缝（KI-049 同族：mock 单测覆盖不到缝契约）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260904-19/sc_stage_docker_cli_contract.py"),
+    ("t260904-19-stage-docker-parallel-zero-residue",
+     "双场景并行不互撞+拆台零残留端到端（t260904-19，灰盒 L3，工单验收①④；槽位制退役后并发隔离语义的用户级承接面）：两个 up 进程真同时发车（各自 compose 工程名，temporal-only 档）双台健康、JSON 端口互异、双双 ∉ 生产端口 {3099,7233,8233}；docker ps -a 按 com.docker.compose.project label（compose 公开语义）过滤 A/B 容器集互不相交且 temporal-only 恰 1 容器；拆 A 后 A 端口立即可 bind 且 B 台 TCP 复测仍活（down 爆炸半径恰一个工程）；full 档 console+temporal 双端口真活（helper exit 2=其判环境红不诬产品）；三工程终态零残留、全部用过端口立即 bind 成功（验收④收口）。与 developer L1（档位锁/分配原子性单测）intent 不同层：本条守进程级真并发系统行为，mock 与先后错开都替代不了该形态。资源口径：有意制造并发双台+一次 full 台（dsh 容器首装联网分钟级），登记 exclusive 独占执行防与兄弟场景的台互相污染判定面。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260904-19/sc_stage_docker_parallel_zero_residue.py", "exclusive"),
 ]
 
 CMD_TIMEOUT = 900

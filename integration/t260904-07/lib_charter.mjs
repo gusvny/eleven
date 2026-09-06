@@ -1,12 +1,13 @@
+import { ensureStageConsole } from '../lib_stage_console.mjs';
 // lib_charter.mjs —— t260904-07 场景族共享夹具（非 sc_ 前缀=共享代码，不登记 SCENARIOS）。
 //
 // 口径对齐 t260904-05/lib_browser.mjs（隔离台基址/3099 红线/SUMMARY 执行契约），此处
 // 自足精简实现：本票场景只用到 fetch 级卫兵（browser 旅程场景同样自足，避免跨票目录
 // import 耦合——已收口票的 lib 可能随退役清理，同 t260831-08 顶部行基线退役先例）。
 //
-// 安全红线：本目录场景只碰隔离台（默认 127.0.0.1:3199），绝不连生产 3099。
+// 安全红线：本目录场景只碰隔离台（lib_stage_console 供给，绝不连生产 3099）。
 
-export const BASE = (process.env.SUYOU_TEST_CONSOLE ?? 'http://127.0.0.1:3199').replace(/\/$/, '');
+export const BASE = (await ensureStageConsole()).base;
 
 /** 本票端点路径（与被测契约同一字面值；场景侧独立声明，防被测源漂移时场景跟着哑）。 */
 export const CHARTER_EP = '/suyou-workbench/api/session-charter';

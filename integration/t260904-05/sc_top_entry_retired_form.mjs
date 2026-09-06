@@ -25,8 +25,9 @@
 // Execution contract (t260904-12 三态): stdout last line
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; missing deps → env_fail
 // (exit 2); FAIL>0 或全腿 na → exit 1. Isolated console
-// SUYOU_TEST_CONSOLE (default 127.0.0.1:3199); hard guard: never 3099.
+// SUYOU_TEST_CONSOLE (default: lib_stage_console 共享台); hard guard: never 3099.
 
+import { STAGE_SEED_ROW_SEL } from '../lib_stage_console.mjs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -112,7 +113,7 @@ try {
 
   // T3 项目色三处同源（色点 / + 钮 / 根容器 CSS 变量 ∈ 确定性色板）
   const colors = await page.evaluate(() => {
-    const root = document.querySelector('[data-wb-psess-row]');
+    const root = document.querySelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])');
     const dot = document.querySelector('[data-wb-psess-dot]');
     const plus = document.querySelector('[data-wb-psess-new]');
     if (!root || !dot || !plus) return null;

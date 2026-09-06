@@ -22,10 +22,11 @@
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 或全腿 na → exit 1;
 // env_fail>0 → exit 2.
 
+import { ensureStageConsole } from '../lib_stage_console.mjs';
 import { mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 
-const BASE = (process.env.SUYOU_TEST_CONSOLE ?? 'http://127.0.0.1:3199').replace(/\/$/, '');
+const BASE = (await ensureStageConsole()).base;
 const LANE = process.cwd();
 const STAGE_ID = 't26083108evtest'; // must satisfy TICKET_ID_RE (alnum, no / no .)
 const STAGE_DIR = join(LANE, '.suyou', 'evidence', STAGE_ID);
@@ -182,7 +183,7 @@ async function uiScenario() {
   if (!pw) { record('ui/drawer-images', 'env_fail', 'playwright-core unavailable'); return; }
   let browser;
   try {
-    browser = await pw.chromium.launch({ headless: true });
+    browser = await pw.chromium.launch({ channel: 'chrome', headless: true }).catch(() => pw.chromium.launch({ headless: true }));
     const page = await (await browser.newContext()).newPage();
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });
     await page.waitForSelector('.wb-ticket-row2', { timeout: 12000 });

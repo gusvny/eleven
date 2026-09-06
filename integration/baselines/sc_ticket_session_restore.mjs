@@ -1,3 +1,4 @@
+import { ensureStageConsole } from '../lib_stage_console.mjs';
 // Integration tests for the ticket-session surface (t260831-08 origin;
 // browser half reversed by t260903-07 — chat 精简，单全局会话).
 //
@@ -22,7 +23,7 @@
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; missing deps → env_fail
 // (exit 2); FAIL>0 或全腿 na → exit 1.
 
-const BASE = (process.env.SUYOU_TEST_CONSOLE ?? 'http://127.0.0.1:3199').replace(/\/$/, '');
+const BASE = (await ensureStageConsole()).base;
 const results = [];
 const STATUSES = new Set(['pass', 'fail', 'env_fail', 'na']);;
 function record(name, status, detail = '') {
@@ -155,7 +156,7 @@ async function browserScenarios() {
   if (!pw) { record('browser/deps', 'env_fail', 'playwright-core unavailable'); return; }
   let browser, context, page;
   try {
-    browser = await pw.chromium.launch({ headless: true });
+    browser = await pw.chromium.launch({ channel: 'chrome', headless: true }).catch(() => pw.chromium.launch({ headless: true }));
     context = await browser.newContext();
     page = await context.newPage();
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });

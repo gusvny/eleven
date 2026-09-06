@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 // bench_console.mjs —— 隔离台 console boot 骨架薄壳（t260904-02，review C6）。
+// 【t260904-19 退役注记】自搭进程舞台退役后，本壳只剩「boot 骨架自检」价值：
+// 闸内/场景一律走 integration/stage_docker.py（docker 台单点入口）；本壳不再被
+// 任何场景消费，保留仅供 boot 机制自检（buildTempProfile 仍服务 --boot-local
+// 人工通路）。勿在闸内引用。
 //
 // 复用真源 server/dsh/ui-check/capture-lane.mjs（buildTempProfile /
 // materializePresets / presetMaterializeRejectReason），不复制逻辑（双份必漂移）。

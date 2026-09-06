@@ -1,3 +1,5 @@
+import { STAGE_SEED_ROW_SEL } from '../lib_stage_console.mjs';
+import { ensureStageConsole } from '../lib_stage_console.mjs';
 // lib_browser.mjs —— t260904-05 场景族共享夹具（非 sc_ 前缀=共享代码，不登记 SCENARIOS）。
 //
 // 复用面（integration 岗位纪律：前置/基础步骤代码允许共享，步骤级重复不算重复用例）：
@@ -5,9 +7,9 @@
 //   - playwright-core 三路探测加载（同 t260903-07/sc_t01 口径，缺失=ENV_FAIL）；
 //   - 浏览器 fresh context 打开（无账册残留，等价新用户）；
 //   - results/record/summarize 执行契约（SUMMARY pass/fail/env_fail/na；退出码 0/1/2）。
-// 安全红线：本目录场景只碰隔离台（默认 127.0.0.1:3199），绝不连生产 3099。
+// 安全红线：本目录场景只碰隔离台（默认 lib_stage_console 供给（共享台/显式 SUYOU_TEST_CONSOLE）），绝不连生产 3099。
 
-export const BASE = (process.env.SUYOU_TEST_CONSOLE ?? 'http://127.0.0.1:3199').replace(/\/$/, '');
+export const BASE = (await ensureStageConsole()).base;
 
 /** 生产控制台红线：命中 3099 直接拒跑（宁可自家测试不跑）。 */
 export function refuseProductionConsole() {
@@ -166,7 +168,7 @@ export async function openTestPage(pw, { results, tag, consoleErrors, initScript
 /** 侧栏项目会话区在场的夹具前提；不在场=ENV_FAIL（环境无 fixture，同 t01 卫兵口径）。 */
 export async function waitProjectRowOrSkip(page, results, tag) {
   try {
-    await page.waitForSelector('[data-wb-psess-row]', { timeout: 12000 });
+    await page.waitForSelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])', { timeout: 12000 });
     return true;
   } catch {
     results.record(`${tag}/fixture-psess-row`, 'env_fail', 'no project session row rendered in test console sidebar');

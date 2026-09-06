@@ -23,8 +23,9 @@
 // Execution contract (t260904-12 三态): stdout last line
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; missing deps → env_fail
 // (exit 2); FAIL>0 或全腿 na → exit 1. Isolated console
-// SUYOU_TEST_CONSOLE (default 127.0.0.1:3199); hard guard: never 3099.
+// SUYOU_TEST_CONSOLE (default: lib_stage_console 共享台); hard guard: never 3099.
 
+import { STAGE_SEED_ROW_SEL } from '../lib_stage_console.mjs';
 import {
   BASE, refuseProductionConsole, loadPlaywright, consoleHealthy,
   fetchProjects, makeResults, openTestPage, waitProjectRowOrSkip,
@@ -64,7 +65,7 @@ const bandState = () => page.evaluate(() => {
     headStyle: document.querySelector('style[data-wb-chat-projband-style]')?.textContent ?? null,
     bandBorderWidth: bandEl ? getComputedStyle(bandEl).borderTopWidth : null,
     bandBorderColor: bandEl ? getComputedStyle(bandEl).borderTopColor : null,
-    rowVarColor: getComputedStyle(document.querySelector('[data-wb-psess-row]') ?? document.body)
+    rowVarColor: getComputedStyle(document.querySelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])') ?? document.body)
       .getPropertyValue('--wb-psess-color').trim(),
   };
 });
@@ -147,7 +148,7 @@ try {
 
   // T6 刷新恢复（账册持久 → 归属不丢；映射失败时无期望值可断=env_fail 不自相矛盾）
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('[data-wb-psess-row]', { timeout: 12000 }).catch(() => {});
+  await page.waitForSelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])', { timeout: 12000 }).catch(() => {});
   await page.waitForTimeout(1500);
   const t6 = await bandState();
   if (expectKey === null) {

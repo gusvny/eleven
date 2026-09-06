@@ -23,8 +23,9 @@
 //
 // Execution contract (t260904-12 three-state): SUMMARY pass= fail= env_fail= na=;
 // missing deps → env_fail (exit 2); FAIL>0 → exit 1; all-na → exit 1. Isolated console
-// SUYOU_TEST_CONSOLE (default 127.0.0.1:3199); hard guard: never 3099.
+// SUYOU_TEST_CONSOLE (default lib_stage_console 供给（共享台/显式 SUYOU_TEST_CONSOLE）); hard guard: never 3099.
 
+import { STAGE_SEED_ROW_SEL } from '../lib_stage_console.mjs';
 import {
   BASE, refuseProductionConsole, loadPlaywright, consoleHealthy,
   makeResults, openTestPage, waitProjectRowOrSkip, dismissFirstRunModals,
@@ -47,7 +48,7 @@ if (!opened) summarize();
 const { browser, page } = opened;
 
 // 第一个项目行的局部查询（夹具=第一组；全操作限定该行内，多组互不干扰）
-const rowSel = '[data-wb-psess-row]';
+const rowSel = '[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])';
 const readRow = () => page.evaluate((sel) => {
   const row = document.querySelector(sel);
   const tabs = [...(row?.querySelectorAll('[data-wb-psess-tab]') ?? [])];

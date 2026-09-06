@@ -22,7 +22,8 @@ node.ts 对外契约（本场景守护，缺 export=红并点名——C1 附条�
         warn?: { repoRoot, pid, tid }, reason?: str }
       action ∈ 'spawned' | 'held-same' | 'held-foreign' | 'held-unknown'
 
-红线：全程只连槽位 temporalite；不 touch 3099/生产 7233/8233。
+红线：全程只连 docker 舞台 temporal（t260904-19 起替代槽位 temporalite，见
+stage_docker.py 头注取舍表）；不 touch 3099/生产 7233/8233。
 """
 import json
 import os
@@ -33,7 +34,9 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib_gate import (NODE_TS, Fail, cleanup, parse_out_json, poc_python,  # noqa: E402
-                      port_listening, require_bench, check_slot_contract)
+                      port_listening, require_bench, require_stage, stage_down)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # integration/（stage_docker 所在）
+import stage_docker  # noqa: E402
 
 TID = "t26090402-gate"
 WORKER_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
@@ -147,17 +150,20 @@ def main():
     worker = None
     try:
         # ---------- ① 槽位台 + 真 worker（自报 meta，起跑早写） ----------
-        slot = bench.acquire_slot()
-        check_slot_contract(fail, slot, "槽")
-        slot.start_temporalite()
-        fail.check(port_listening(slot.frontend_port), "槽 frontend %d 探活" % slot.frontend_port)
+        _, stage = require_stage(fail, "t26090402-gate-%d" % os.getpid(),
+                                 "stage-gate-%d" % os.getpid())
+        _STATE["project"] = stage["project"]
+        _STATE["queue"] = "bench-gate-%d" % os.getpid()
+        fe = stage["ports"]["temporal"]
+        fail.check(stage.get("sa_registered") is True, "舞台 namespace/SA 注册完成")
+        fail.check(port_listening(fe), "舞台 temporal %d 探活" % fe)
         meta_path = os.path.join(tmp, "worker-%s.meta" % TID)
         wenv = dict(os.environ)
         wenv.update({
-            "SUYOU_TASK_QUEUE": "bench-gate-%d" % slot.index,
+            "SUYOU_TASK_QUEUE": _STATE["queue"],
             "SUYOU_WATCH_WORKFLOW": "t260904-02-gate-none",  # 不存在的 workflow：watch 查询失败不退出
-            "SUYOU_TARGET_HOST": "127.0.0.1:%d" % slot.frontend_port,
-            "SUYOU_NAMESPACE": slot.namespace,
+            "SUYOU_TARGET_HOST": "127.0.0.1:%d" % fe,
+            "SUYOU_NAMESPACE": stage["namespace"],
             "SUYOU_WORKER_META": meta_path,
         })
         worker = subprocess.Popen([py, os.path.abspath(WORKER_PY)], env=wenv,
@@ -169,7 +175,7 @@ def main():
             fail.bail("worker 未自报 meta——指纹链路未交付，后续断言无从谈起", 1)
         _STATE["pid"] = worker.pid
         _STATE["own_root"] = str(meta.get("repo_root") or "")
-        _STATE["queue"] = "bench-gate-%d" % slot.index
+        # queue 名已在起台时定（原槽位 index 命名随槽位制退役）
         fail.check(int(meta.get("pid", -1)) == worker.pid,
                    "meta.pid 与真进程一致（meta=%r worker.pid=%s）" % (meta.get("pid"), worker.pid))
         fail.check(os.path.isabs(_STATE["own_root"]) and bool(_STATE["own_root"]),
@@ -242,7 +248,7 @@ def main():
                 pass
         if slot is not None:
             try:
-                slot.stop()
+                stage_down(stage_docker, _STATE.get("project", ""))
             except Exception:
                 pass
         cleanup(tmp)

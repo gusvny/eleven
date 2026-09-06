@@ -20,7 +20,7 @@
 // bundle_pairs 闸与 t260903-04 client-bundle-sync 负责，不在此重复。
 //
 // Two layers → 本场景仅 S1（真浏览器渲染级）：needs the ISOLATED test console
-// (SUYOU_TEST_CONSOLE, default 127.0.0.1:3199), playwright-core resolvable, and a
+// (SUYOU_TEST_CONSOLE, default: lib_stage_console shared stage), playwright-core resolvable, and a
 // launchable chromium. Any missing -> ENV_FAIL (exit 2, reason on stdout, 注明
 // KI-036——ui-check 依赖未随迁移恢复，恢复后自动生效). Data is stubbed at the API
 // boundary with page.route(): the browser, console, shipped bundle and React
@@ -32,13 +32,14 @@
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 或全腿 na -> exit 1;
 // env_fail>0 -> exit 2. Precedent: sc_lane_parallel_dom.mjs.
 
+import { ensureStageConsole } from '../lib_stage_console.mjs';
 import { existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const REPO = process.cwd()
-const BASE = (process.env.SUYOU_TEST_CONSOLE ?? 'http://127.0.0.1:3199').replace(/\/$/, '')
+const BASE = (await ensureStageConsole()).base;
 
 // fixture 票 id（纯字母数字，永不与真票相撞）
 const FID_A = 't26090406a' // 有 spec：多行 + HTML 特殊字符（转义/换行/徽标面）

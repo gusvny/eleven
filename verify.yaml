@@ -32,20 +32,26 @@ lanes:
         cmd: PY=server/dsh/temporal-poc/.venv/bin/python; [ -x "$PY" ] || PY=python3; PYTHONPYCACHEPREFIX=out/pycache "$PY" -m pytest server/dsh/temporal-poc/tests -q
 integration:
   cmd: python3 integration/run_scenarios.py
-  # t260904-12 乙段 supply（260904 宿主令直落——票面钦定「合并后粘回」，原注释语境留档：
-  # 引擎支持已随票合并，verify_lane 认 {cmd,supply}；合并前声明会撞旧引擎白名单 fail-closed
-  # 的前提已随 f84d414 消除）。
+  # supply 简化为一条「确保测试台在位」（t260904-19，宿主令「既然用 docker 就都用」）：
+  # 一切需要舞台的场景同一搭台方式（integration/stage_docker.py 单点入口 + 同一
+  # compose 文件），supply 只做三件事——docker 在场、测试镜像在场、共享供给台
+  # （sandbar-test-integ）健康。docker 缺席/镜像缺席/起台不健康=supply 红=环境红
+  # 点名（三态语义不变，exit 2），不假绿不静默降级。
+  # 生命周期边界（防混读）：本条起的共享台是 **常驻基建例外**——ensure 幂等（健康
+  # 复用/半残拆重起/--keep 不拆在跑台），闸后有意常驻不拆；验收口径「拆台零残留」
+  # 的适用对象是 **场景台**（每场景独立工程名，场景结束即拆，容器/端口零残留）。
   supply:
+    # 单行分号串接（接入契约 ②a：引擎解析器无块标量语法，多行 cmd=fail-closed——
+    # t260904-19 gen1 实锤①归因）。每段失败即 echo ENV_FAIL 点名+exit 1=环境红。
+    - need: docker 测试台在位（t260904-19：docker 在场+测试镜像在场+共享供给台健康）
+      cmd: 'export SANDBAR_STAGE_LOCK_DIR="${SANDBAR_STAGE_LOCK_DIR:-/tmp/sandbar-test-stages}"; docker info >/dev/null 2>&1 || { echo "ENV_FAIL: docker 不可用（docker info 失败）——测试台一律走 docker，启动 Docker/OrbStack 后重试"; exit 1; }; docker image inspect test-temporal:cli-1.8.3 >/dev/null 2>&1 || { echo "ENV_FAIL: 测试镜像缺席 test-temporal:cli-1.8.3（本机自建无 registry）——先跑 sh server/dsh/build-test-temporal.sh"; exit 1; }; MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/dsh/temporal-poc/bin/temporal"; [ -x "$SRC" ] || { echo "ENV_FAIL: 主树 temporal CLI 缺失：$SRC（供给台 namespace/SA 注册需要）"; exit 1; }; mkdir -p server/dsh/temporal-poc/bin; [ -e server/dsh/temporal-poc/bin/temporal ] || ln -s "$SRC" server/dsh/temporal-poc/bin/temporal; python3 integration/stage_docker.py ensure --project sandbar-test-integ --keep --services full || { echo "ENV_FAIL: 共享供给台起台失败（见上 STAGE_ 行）"; exit 1; }'
+    # playwright-core 条保留（gen1 实锤②归因：方案 v2 C10 定稿「browser 族仍在消费」；
+    # 泳道 ui-check node_modules 实况不存在，KI-036② LANE_DEP_SYMLINKS 引擎面未落地
+    # 前，删此条=browser 族 16+ 条环境红回潮顶撞宿主令）。工单「供给简化为一条」
+    # 语义=**台**供给一条；浏览器依赖供给是另一维度，并列保留。
     - need: playwright-core（泳道 ui-check node_modules 软链主树，KI-036）
       cmd: 'MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/dsh/ui-check/node_modules/playwright-core"; [ -d "$SRC" ] || { echo "ENV_FAIL: 主树 playwright-core 缺失：$SRC"; exit 1; }; mkdir -p server/dsh/ui-check/node_modules; DST=server/dsh/ui-check/node_modules/playwright-core; [ -e "$DST" ] || ln -s "$SRC" "$DST"; [ -e "$DST/package.json" ] || { echo "ENV_FAIL: 软链后不可解析：$DST"; exit 1; }'
-    - need: temporal CLI（泳道 bin 软链主树 bin/temporal，t260904-14 真票腿）
-      cmd: 'MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/dsh/temporal-poc/bin/temporal"; [ -x "$SRC" ] || { echo "ENV_FAIL: 主树 temporal CLI 缺失：$SRC"; exit 1; }; mkdir -p server/dsh/temporal-poc/bin; [ -e server/dsh/temporal-poc/bin/temporal ] || ln -s "$SRC" server/dsh/temporal-poc/bin/temporal; server/dsh/temporal-poc/bin/temporal --version >/dev/null'
 
-# t260904-18 KI-050 门③：ui_evidence 声明制——合并闸 UI 截图证据的目录由项目声明。
-# 原 shared.UI_WRITE_PREFIXES 五路径硬编码迁移即数据（活路径一律吃本声明；该常量仅
-# 剩旧票重放/冻结分支兼容回落）。无声明项目=截图证据项 green+可见 note（按声明缺席，
-# 行为可见非静默）；声明畸形=fail-closed 红（verify_lane _validate_cfg / merge_check
-# 3.6 双点）。字段级定义：docs/design/sandbar项目接入契约v1.md ②a。
 ui_evidence:
   dirs:
     - server/dsh/workbench/src/client/

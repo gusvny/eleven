@@ -1,5 +1,7 @@
 // 一次性调试（t260901-02 implement）：隔离台 boot → 造数 → 点会话行 → dump 状态。
 // 落 /tmp，不入仓库交付面。用法：node dbg-chat.mjs
+// t260904-19 注：本件是生产调试件（非场景资产），不经 docker 测试台——自搭 boot
+// 面随票退役后仍保留原样供人工调试；勿在闸内/场景内引用（闸内一律走 docker 台）。
 import { spawn } from "node:child_process";
 import { closeSync, copyFileSync, existsSync, openSync, mkdirSync } from "node:fs";
 import {

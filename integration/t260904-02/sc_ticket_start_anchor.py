@@ -7,39 +7,43 @@ intent（守护的用户可感知行为）：
   workspace.path 为绝对路径且锚 <注册项目主目录>/.lane/（worktree 同锚）——
   落仓不再由执行 worker 的 REPO_ROOT 决定（KI-032 修复回归）；
 - 缺 project / 未知 project key = 创建即拒收，两条红因文案互辨（不静默相对路径）；
-- 双槽隔离台两路并发开票（时间重叠）：ticket-list 互不见对方工单、跨槽 describe
+- 双 docker 舞台两路并发开票（时间重叠）：ticket-list 互不见对方工单、跨台 describe
   not_found —— 零数据串台（宿主红线①）；
 - 被测子进程零连生产 7233/8233（审计钩子先记后抛=连接被阻断；含自证拦截腿证明
-  钩子活着）+ temporalite 三端口（frontend/UI/metrics）显式起动断言（UI 默认
-  =--port+1000 暗雷面）——绝不影响生产 temporal（宿主红线②）；
-- teardown：槽 db/日志全清、lock 文件保留（槽锚）、端口释放、stop 幂等二连、
-  kill -9 后 flock 崩溃自释可复抢（资源回收对抗面）。
+  钩子活着）+ 舞台端口面显式核验（端口互异、不在禁区面）——绝不影响生产
+  temporal（宿主红线②）；
+- teardown：down 零残留（docker ps 无本工程容器）、端口释放、down 幂等二连、
+  同工程名可立即 re-up（资源可复用——t260904-19 起 docker 台语义，替代原
+  槽位制 flock 复抢/kill-9 崩溃腿：容器由 daemon 持有，无锁可崩，取舍见
+  stage_docker.py 头注对照表）。
 
-bench 契约面见 lib_gate.py 头注（require_bench 为对齐真源；缺失=exit2 MISSING）。
-红线：本场景自身绝不 connect 生产端口（探活只打槽端口）；不 touch 3099。
+t260904-19：temporal 引擎台从 bench.py 槽位制迁移到 docker 测试台
+（integration/stage_docker.py 单点入口，lib_gate.require_stage 直译三态）。
+红线：本场景自身绝不 connect 生产端口（探活只打舞台端口）；不 touch 3099。
 """
 import json
 import os
 import sys
 import tempfile
 import threading
-import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # integration/（stage_docker 所在）
 from lib_gate import (Fail, cleanup, parse_out_json, port_listening,  # noqa: E402
-                      poc_python, read_audit_jsonl, require_bench,
-                      run_poc_client, check_slot_contract, wait_port_released)
+                      poc_python, read_audit_jsonl, require_bench, require_stage,
+                      run_poc_client, stage_down, wait_port_released)
+import stage_docker  # noqa: E402
 
 TID_A = "t26090402-anchor-a"
 TID_B = "t26090402-anchor-b"
 PROBE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "probe_wf_input.py")
 
 
-def slot_env(bench, slot, registry_dir, audit_env):
-    """被测 client 子进程 env：连槽 fe/槽 namespace/槽注册表/审计钩子。"""
+def stage_env(state, registry_dir, audit_env):
+    """被测 client 子进程 env：连舞台 temporal/舞台 namespace/注册表/审计钩子。"""
     env = dict(os.environ)
-    env["SUYOU_TARGET_HOST"] = "127.0.0.1:%d" % slot.frontend_port
-    env["SUYOU_NAMESPACE"] = slot.namespace
+    env["SUYOU_TARGET_HOST"] = "127.0.0.1:%d" % state["ports"]["temporal"]
+    env["SUYOU_NAMESPACE"] = state["namespace"]
     env["SANDBAR_PROJECTS_DIR"] = registry_dir
     if audit_env:
         env.update(audit_env)
@@ -59,7 +63,7 @@ def main():
     bench = require_bench(fail)
     py = poc_python(bench)
     tmp = tempfile.mkdtemp(prefix="t26090402-anchor-")
-    sa = sb = None
+    stage_a = stage_b = None
     try:
         # ---------- ① 库自证：生产守卫红绿（fail-closed 面） ----------
         guard_hit = {}
@@ -75,51 +79,46 @@ def main():
             fail.check(guard_hit[port].startswith("拒"),
                        "生产守卫拒 127.0.0.1:%d（实得：%s）" % (port, guard_hit[port]))
         try:
-            bench.assert_not_production("127.0.0.1:19101")
-            slot_ok = True
+            bench.assert_not_production("127.0.0.1:21001")
+            ok_base = True
         except Exception as e:
-            slot_ok = False
-            fail.check(False, "槽端口基址须过生产守卫（实得异常：%s）" % e)
-        if slot_ok:
-            fail.check(True, "生产守卫放行槽端口基址（fail-closed 不误伤隔离台）")
+            ok_base = False
+            fail.check(False, "舞台端口基址须过生产守卫（实得异常：%s）" % e)
+        if ok_base:
+            fail.check(True, "生产守卫放行舞台端口基址（fail-closed 不误伤隔离台）")
 
-        # ---------- ② 抢双槽 + 起 temporalite ----------
-        sa = bench.acquire_slot()
-        sb = bench.acquire_slot()
-        for s, label in ((sa, "槽A"), (sb, "槽B")):
-            check_slot_contract(fail, s, label)
-        fail.check(sa.index != sb.index, "双槽下标互异（实得 %s/%s）" % (sa.index, sb.index))
-        for s in (sa, sb):
-            s.start_temporalite()
-        for s, label in ((sa, "槽A"), (sb, "槽B")):
-            for attr, name in (("frontend_port", "frontend"), ("ui_port", "UI"),
-                               ("metrics_port", "metrics")):
-                p = getattr(s, attr)
+        # ---------- ② 起双 docker 舞台（独立工程名+独立 namespace，真并发隔离面） ----------
+        tag = "%d" % os.getpid()
+        _, sa = require_stage(fail, "t26090402-a-%s" % tag, "stage-a-%s" % tag)
+        _, sb = require_stage(fail, "t26090402-b-%s" % tag, "stage-b-%s" % tag)
+        stage_a, stage_b = sa, sb
+        pa, pb = sa["ports"], sb["ports"]
+        fail.check(sa["project"] != sb["project"], "双台工程名互异（%s / %s）"
+                   % (sa["project"], sb["project"]))
+        fail.check(set(pa.values()).isdisjoint(set(pb.values())),
+                   "双台端口零交集（A=%s B=%s）" % (pa, pb))
+        fail.check(sa["namespace"] != sb["namespace"], "双台 namespace 互异")
+        for label, ports in (("台A", pa), ("台B", pb)):
+            for name, p in ports.items():
+                fail.check(p not in stage_docker.FORBIDDEN_PORTS,
+                           "%s %s 端口 %d 不在禁区面（3099/3199/7233/8233/17233/18233）"
+                           % (label, name, p))
                 fail.check(port_listening(p), "%s %s 端口 %d 探活" % (label, name, p))
             for pp in bench.PROD_PORTS:
-                fail.check((getattr(s, "frontend_port"), getattr(s, "ui_port"),
-                            getattr(s, "metrics_port")).count(pp) == 0,
-                           "%s 三端口不含生产端口 %d" % (label, pp))
+                fail.check(pp not in ports.values(),
+                           "%s 端口面不含生产端口 %d" % (label, pp))
 
-        # ---------- ③ temporalite 三端口显式起动断言（UI 暗雷面） ----------
-        for s, label in ((sa, "槽A"), (sb, "槽B")):
-            argv_txt = " ".join(str(x) for x in (s.argv or []))
-            fail.check(("--port %d" % s.frontend_port) in argv_txt
-                       and ("--ui-port %d" % s.ui_port) in argv_txt
-                       and ("--metrics-port %d" % s.metrics_port) in argv_txt,
-                       "%s temporalite 三端口全部显式（实得 argv：%s）" % (label, argv_txt[:160]))
-
-        # ---------- ④ fixture 注册表（每槽独立项目主目录） ----------
+        # ---------- ③ fixture 注册表（每台独立项目主目录） ----------
         proj_a = os.path.join(tmp, "proj-a"); proj_b = os.path.join(tmp, "proj-b")
         os.makedirs(proj_a, exist_ok=True); os.makedirs(proj_b, exist_ok=True)
         reg_a = bench.write_registry(os.path.join(tmp, "reg-a"), "bench-anchor-a", proj_a)
         reg_b = bench.write_registry(os.path.join(tmp, "reg-b"), "bench-anchor-b", proj_b)
 
-        # ---------- ⑤ 审计钩子 + 两路并发开票（时间重叠） ----------
+        # ---------- ④ 审计钩子 + 两路并发开票（时间重叠） ----------
         audit_env_a, log_a = bench.audit_hook_env(os.path.join(tmp, "audit-a"))
         audit_env_b, log_b = bench.audit_hook_env(os.path.join(tmp, "audit-b"))
-        env_a = slot_env(bench, sa, reg_a, audit_env_a)
-        env_b = slot_env(bench, sb, reg_b, audit_env_b)
+        env_a = stage_env(sa, reg_a, audit_env_a)
+        env_b = stage_env(sb, reg_b, audit_env_b)
         barrier = threading.Barrier(2)
         out = {}
         th = [threading.Thread(target=open_ticket_thread,
@@ -137,12 +136,12 @@ def main():
                        "并发开票 %s 成功（rc=%s ok=%s out=%s）"
                        % (tid, rc, j.get("ok"), stdout.strip()[:120]))
 
-        # ---------- ⑥ payload 锚定断言（KI-032 修复回归主断言） ----------
+        # ---------- ⑤ payload 锚定断言（KI-032 修复回归主断言） ----------
         import subprocess
-        for tid, slot, proj, env, label in ((TID_A, sa, proj_a, env_a, "槽A"),
-                                            (TID_B, sb, proj_b, env_b, "槽B")):
-            p = subprocess.run([py, PROBE, "127.0.0.1:%d" % slot.frontend_port,
-                                slot.namespace, tid],
+        for tid, state, proj, env, label in ((TID_A, sa, proj_a, env_a, "台A"),
+                                             (TID_B, sb, proj_b, env_b, "台B")):
+            p = subprocess.run([py, PROBE, "127.0.0.1:%d" % state["ports"]["temporal"],
+                                state["namespace"], tid],
                                capture_output=True, text=True, timeout=60)
             r = parse_out_json(p.stdout)
             fail.check(r.get("found") is True,
@@ -159,7 +158,7 @@ def main():
             fail.check(wtree.startswith(lane_root),
                        "%s worktree 同锚项目主目录 .lane/（实得 %r）" % (label, wtree))
 
-        # ---------- ⑦ 负向：缺 project / 未知 key 拒收且红因互辨 ----------
+        # ---------- ⑥ 负向：缺 project / 未知 key 拒收且红因互辨 ----------
         rc_u, out_u = run_poc_client(py, "ticket-start", {
             "ticket_id": "t26090402-anchor-u", "template_id": "dev-lane",
             "project": "bench-nope", "title": "未知 key 腿", "write_set": ["docs/"]}, env_a)
@@ -177,25 +176,25 @@ def main():
         fail.check(out_m.strip() != out_u.strip(),
                    "两红因文案互辨（缺 project ≠ 未知 key，非同一句拒收）")
 
-        # ---------- ⑧ 隔离断言：双槽互不见对方工单 ----------
+        # ---------- ⑦ 隔离断言：双台互不见对方工单 ----------
         _, list_a = run_poc_client(py, "ticket-list", {}, env_a)
         _, list_b = run_poc_client(py, "ticket-list", {}, env_b)
         fail.check(TID_A in list_a and TID_B not in list_a,
-                   "槽A ticket-list 只见本槽工单（A in=%s B in=%s）"
+                   "台A ticket-list 只见本台工单（A in=%s B in=%s）"
                    % (TID_A in list_a, TID_B in list_a))
         fail.check(TID_B in list_b and TID_A not in list_b,
-                   "槽B ticket-list 只见本槽工单（B in=%s A in=%s）"
+                   "台B ticket-list 只见本台工单（B in=%s A in=%s）"
                    % (TID_B in list_b, TID_A in list_b))
-        p = subprocess.run([py, PROBE, "127.0.0.1:%d" % sb.frontend_port,
-                            sb.namespace, TID_A],
+        p = subprocess.run([py, PROBE, "127.0.0.1:%d" % sb["ports"]["temporal"],
+                            sb["namespace"], TID_A],
                            capture_output=True, text=True, timeout=60)
         cross = parse_out_json(p.stdout)
         fail.check(cross.get("found") is False,
-                   "槽B 上 describe 槽A 工单=not found（零数据串台，reason=%s）"
+                   "台B 上 describe 台A 工单=not found（零数据串台，reason=%s）"
                    % cross.get("reason"))
 
-        # ---------- ⑨ 审计断言：零连生产 + 自证拦截腿 ----------
-        for log_path, label in ((log_a, "槽A腿"), (log_b, "槽B腿")):
+        # ---------- ⑧ 审计断言：零连生产 + 自证拦截腿 ----------
+        for log_path, label in ((log_a, "台A腿"), (log_b, "台B腿")):
             hits = read_audit_jsonl(log_path)
             fail.check(not hits,
                        "%s 被测子进程零生产连接尝试（审计记录 %d 条：%s）"
@@ -211,55 +210,34 @@ def main():
                    "审计钩子自证：故意连 7233 被阻断（rc=%s）且留记录（%d 条）——钩子活着，"
                    "上两条「零记录」才是真证据" % (p.returncode, len(self_hits)))
 
-        # ---------- ⑩ teardown：全清/幂等/复抢/崩溃自释 ----------
-        idx_a, lock_a = sa.index, sa.lock_path
-        for s in (sa, sb):
-            s.stop()
-        for s, label in ((sa, "槽A"), (sb, "槽B")):
-            fail.check(not os.path.exists(s.db_path), "%s 槽 db 已清" % label)
-            remain = sorted(os.listdir(s.slot_dir)) if os.path.isdir(s.slot_dir) else []
-            fail.check(remain == [os.path.basename(s.lock_path)],
-                       "%s 槽目录仅剩 lock 槽锚（实得 %s）" % (label, remain))
-            released, held = wait_port_released(s.frontend_port)
-            fail.check(released,
-                       "%s frontend 端口已释放（10s 宽限窗；%s）"
-                       % (label, "已释放" if released else
-                          "仍被占用 pid=%s——teardown 未回收，bench 拆解缺陷需归因" % held))
-        fail.check(os.path.isfile(lock_a), "lock 槽锚文件保留（flock 不因 unlink 假独占）")
+        # ---------- ⑨ teardown：零残留/幂等/可复用（docker 台语义） ----------
+        proj_a_name, ns_a = sa["project"], sa["namespace"]
+        d = stage_down(stage_docker, proj_a_name)
+        fail.check(d.get("residue") == [],
+                   "台A down 后零残留容器（实得 %s）" % (d.get("residue"),))
+        released, held = wait_port_released(pa["temporal"])
+        fail.check(released,
+                   "台A temporal 端口已释放（10s 宽限窗；%s）"
+                   % ("已释放" if released else
+                      "仍被占用 pid=%s——拆台未回收需归因" % held))
         try:
-            sa.stop()
-            fail.check(True, "stop 幂等二连不抛")
+            stage_down(stage_docker, proj_a_name)
+            fail.check(True, "down 幂等二连不抛")
         except Exception as e:
-            fail.check(False, "stop 幂等二连不抛（实得异常：%s）" % e)
-        # 钉自己槽复抢（t260904-09 仲裁修正）：跨池并行下他池可能占其它槽，
-        # any-slot 断言（in (sa.index, sb.index)）会误红——契约是「teardown 后本槽可复抢」
-        again = bench.acquire_slot(index=idx_a)
-        fail.check(again.index == idx_a, "teardown 后本槽立即可复抢（index=%s，期望 %s）" % (again.index, idx_a))
-        again.stop()
-
-        # 崩溃自释：kill -9 temporalite → flock 随进程消亡自释 → 同槽可复抢
-        sc = bench.acquire_slot(index=idx_a)
-        sc.start_temporalite()
-        pid = sc.temporalite_pid
-        fail.check(isinstance(pid, int) and pid > 0, "崩溃腿：槽持有 pid 可观测（%r）" % (pid,))
-        if isinstance(pid, int) and pid > 0:
-            import signal
-            os.kill(pid, signal.SIGKILL)
-            time.sleep(1.0)
-            try:
-                sc2 = bench.acquire_slot(index=idx_a, deadline_s=5)
-                sc2.stop()
-                fail.check(True, "kill -9 后 flock 崩溃自释、同槽立即可复抢")
-            except Exception as e:
-                fail.check(False, "kill -9 后同槽复抢失败（锁未自释？%s）" % e)
-        else:
-            sc.stop()
+            fail.check(False, "down 幂等二连不抛（实得异常：%s）" % e)
+        # 同工程名+同 namespace 立即可 re-up（替代槽位制 flock 复抢/kill-9 腿：
+        # docker 台无锁可崩——容器由 daemon 持有，取舍见 stage_docker 头注对照表）
+        _, sa2 = require_stage(fail, proj_a_name, ns_a)
+        fail.check(sa2["ports"]["temporal"] not in pb.values(),
+                   "re-up 同工程名复用成功且端口不串在跑台B（实得 %s）" % sa2["ports"])
+        stage_a = sa2  # finally 统一拆
     finally:
-        for s in {id(x): x for x in (sa, sb) if x is not None}.values():
-            try:
-                s.stop()
-            except Exception:
-                pass
+        for state in (stage_a, stage_b):
+            if state is not None:
+                try:
+                    stage_docker.do_down(state["project"])
+                except Exception:
+                    pass
         cleanup(tmp)
     fail.finish()
 

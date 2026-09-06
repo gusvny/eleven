@@ -25,10 +25,11 @@
 // 执行契约：stdout 末行 SUMMARY 四计数（三态）；playwright-core 或隔离台依赖缺失=
 // ENV_FAIL（exit 2 点名 KI-036/依赖原因，不假绿）；实现落地前红属预期（TDD 信号），
 // arbitrate/merge 期必须绿。
+import { mkdirSync } from 'node:fs';
+import path from 'node:path';
 import {
-  tmpRoot, makeRegistryRoot, writeProjectEntry, writeQuarantinedDir,
-  bootConsole, teardownOnExit, clientBuildStalenessReason, dismissNotice, loadPlaywright, makeResults,
-} from './lib_fix15.mjs';
+  tmpRoot, makeFixtures, writeProjectEntry, writeQuarantinedDir,
+  bootConsole, teardownOnExit, clientBuildStalenessReason, dismissNotice, loadPlaywright, makeResults, dismissShellNotice } from './lib_fix15.mjs';
 
 const { record, summarize } = makeResults();
 
@@ -38,10 +39,11 @@ if (!pw) { record('browser/deps', 'env_fail', 'playwright-core unavailable (KI-0
 
 let bench;
 try {
-  const projectsRoot = makeRegistryRoot('fix15-ui-reg-');
-  writeProjectEntry(projectsRoot, 'fixa', '夹具甲', [tmpRoot('fix15-ui-fixa-')]);
-  writeQuarantinedDir(projectsRoot, 'badkey');
-  bench = await bootConsole(projectsRoot);
+  const fx = makeFixtures('fix15-ui-reg-');
+  writeProjectEntry(fx.reg, 'fixa', '夹具甲', [path.join(fx.root, 'proj-fixa')]);
+  writeQuarantinedDir(fx.reg, 'badkey');
+  bench = await bootConsole(fx.root);
+  bench.__fixtures = fx;
 } catch (e) {
   record('bench/boot', 'env_fail', `隔离台依赖缺失：${String(e?.message ?? e).slice(0, 200)}`);
   summarize();
@@ -71,6 +73,7 @@ const consoleErrors = [];
 page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
 page.on('pageerror', (e) => consoleErrors.push(String(e)));
 await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
+  await dismissShellNotice(page);
 await page.waitForTimeout(1500); // 左栏首拉
 await dismissNotice(page); // 出厂 notice 会劫持焦点/指针（fill 打不进受控输入），先关
 
@@ -135,13 +138,23 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
   const keyInput = dlg.locator('input').first();
   await keyInput.fill('Fix_B');
   const rootInput = dlg.locator('input').nth(2);
-  await rootInput.fill(tmpRoot('fix15-ui-add-'));
+  {
+    // 容器内 CLI 验目录存在（add 不代建）——预建在 fixtures 根下（容器内外同读写）
+    mkdirSync(path.join(bench.__fixtures.root, 'proj-ui-add'), { recursive: true });
+  }
+  await rootInput.fill(bench.toStage(path.join(bench.__fixtures.root, 'proj-ui-add'))); // 容器路径：CLI 在容器里验目录
   const pre = dlg.getByText(/预检|dry-run|dry run/i).first();
   if (await pre.isVisible().catch(() => false)) await forceClick(pre);
   await page.waitForTimeout(1200);
-  const errShown = (await dlg.innerText().catch(() => '')).length > 0
-    && /key|不合法|白名单|拒/.test(await dlg.innerText().catch(() => ''));
-  record('add/badkey-inline-error', opened && errShown, '错误就地显示且点名 key');
+  // 坏 key 预检（本地形状检查）的就地显示=**预检黄牌区** [data-wb-pmod-add-pre]
+  // （project-modals.tsx：预检 onClick=setPre({problems}) 且 setError('')——problems
+  // 以「⚠ key 形状非法：…」黄牌行渲染；[data-wb-pmod-add-error] 只承载提交失败的
+  // 服务端错误，锚它会永远扑空。gen10 归因修正：产品语义对齐，非断言放松——仍要求
+  // 节点在场且文本点名 key；上一版锚 error 节点与全文匹配「拒」字（恒真假绿）均废）。
+  const preNode = dlg.locator('[data-wb-pmod-add-pre]');
+  const errShown = await preNode.isVisible().catch(() => false)
+    && /key/i.test(await preNode.innerText().catch(() => ''));
+  record('add/badkey-inline-error', opened && errShown, '坏 key 预检黄牌就地显示且点名 key（pre 区锚）');
 
   // 合法 key 成功 → 左栏出现新组（表单三输入齐填：key/显示名/根目录——缺显示名 CLI 必拒）
   await keyInput.fill('fixc');

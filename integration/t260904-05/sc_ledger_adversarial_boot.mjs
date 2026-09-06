@@ -22,8 +22,9 @@
 // Execution contract (t260904-12 三态): stdout last line
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; missing deps → env_fail
 // (exit 2); FAIL>0 或全腿 na → exit 1. Isolated console
-// SUYOU_TEST_CONSOLE (default 127.0.0.1:3199); hard guard: never 3099.
+// SUYOU_TEST_CONSOLE (default: lib_stage_console 共享台); hard guard: never 3099.
 
+import { STAGE_SEED_ROW_SEL } from '../lib_stage_console.mjs';
 import {
   BASE, refuseProductionConsole, loadPlaywright, consoleHealthy,
   fetchProjects, makeResults,
@@ -70,7 +71,7 @@ async function bootCase(seed) {
     page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()); });
     page.on('pageerror', e => consoleErrors.push(String(e)));
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await page.waitForSelector('[data-wb-psess-row]', { timeout: 15000 }).catch(() => {});
+    await page.waitForSelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])', { timeout: 15000 }).catch(() => {});
     await page.waitForTimeout(1200); // backfill/装饰器首扫窗
     const state = await page.evaluate(() => ({
       tabIds: [...document.querySelectorAll('[data-wb-psess-tab]')]

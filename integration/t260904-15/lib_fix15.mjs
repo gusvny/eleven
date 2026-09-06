@@ -1,12 +1,12 @@
 // lib_fix15.mjs —— t260904-15 场景族共享夹具（非 sc_ 前缀=共享代码，不登记 SCENARIOS）。
 //
 // 复用面（integration 纪律：前置/基础步骤代码允许共享，步骤级重复不算重复用例）：
-//   - 隔离台自举（t260904-06 bench-shot.mjs bootConsole 同款：临时 DSH_HOME +
-//     buildTempProfile + 随机高端口 + 等待就绪），并注入本票钉死 env——
-//     SANDBAR_PROJECTS_DIR=临时注册表根（host 装载器与其 spawn 的 sandbar CLI 同根，
-//     单源不双份）、SUYOU_TARGET_HOST=死端口（Temporal 不可达=降级/fail-closed 断言面）、
-//     SUYOU_PROJECTS_YAML 删除（防 legacy 模式外溢）；
-//   - boot 进程四路径回收（正常/报错/超时/信号：kill 进程组 + 关 fd + 删临时目录）；
+//   - 隔离台自举（t260904-19 起=docker 测试台，integration/stage_docker.py 单点入口；
+//     自搭进程 boot 随票退役）：dsh-only 舞台（容器内 SUYOU_TARGET_HOST 钉死
+//     127.0.0.1:1=Temporal 不可达的降级/fail-closed 断言面）、fixtures 根挂 /fixtures
+//     （容器内外同读写，注册表 fixture 单源）、预组 profile 经 buildStageProfile
+//     容器内路径物化（测泳道 workbench 源码，克缝始终不变）；
+//   - 拆台=stage_docker down（零残留核验在 CLI 内建）；
 //   - playwright-core 四路探测（t260904-05 lib_browser 同口径，缺失=ENV_FAIL 点名，KI-036）；
 //   - SUMMARY 执行契约（integration/README.md 三态：末行四计数，FAIL>0→1、ENV_FAIL>0→2）；
 //   - 注册表 fixture（好条目/畸形条目/空根，.migrated 标记防误触真迁移）。
@@ -24,7 +24,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const SANDBAR = path.join(REPO_ROOT, 'sandbar');
-const DEAD_TEMPORAL = '127.0.0.1:17233'; // 死端口：本票 UI/路由面的降级与 fail-closed 断言锚
+const DEAD_TEMPORAL = '127.0.0.1:1'; // 死端口：宿主侧 CLI 降级断言锚。原 17233 是缺省测试台端口，
+// t260904-19 起有 supply 常驻台=恒可达，锚会静默失效——换 127.0.0.1:1（lib_fix10 先例）
 
 export function tmpRoot(prefix) {
   return mkdtempSync(path.join(tmpdir(), prefix));
@@ -46,6 +47,17 @@ export function makeRegistryRoot(prefix) {
   const root = tmpRoot(prefix);
   writeFileSync(path.join(root, '.migrated'), 'source: fix15 fixture\n');
   return root;
+}
+
+/** docker 台 fixtures 根（t260904-19）：root 挂容器 /fixtures（rw），reg=注册表根
+ *  在容器内的路径 /fixtures/reg。场景的一切 fixture 目录建在 root 下（容器内外同读写），
+ *  API payload 里的目录一律经 toStage() 换成容器路径。 */
+export function makeFixtures(prefix) {
+  const root = tmpRoot(prefix);
+  const reg = path.join(root, 'reg');
+  mkdirSync(reg, { recursive: true });
+  writeFileSync(path.join(reg, '.migrated'), 'source: fix15 fixture (docker stage)\n');
+  return { root, reg, toStage: (p) => '/fixtures/' + path.relative(root, p) };
 }
 
 /** 好条目 fixture（形状=t260904-14 writeProjectEntry 同款最小 YAML 子集）。 */
@@ -74,7 +86,8 @@ export function writeQuarantinedDir(root, key) {
   return d;
 }
 
-/** 隔离台 boot env：本票断言面钉死（读面=临时注册表根；Temporal=死端口）。 */
+/** 宿主侧 CLI 子进程 env（t260904-19 起控制台在容器里，本 env 只管场景自己 spawn
+ *  的 sandbar CLI 降级腿：Temporal=死端口锚）。 */
 export function benchEnv(tmpHome, projectsRoot) {
   const env = { ...process.env, DSH_HOME: tmpHome, SANDBAR_PROJECTS_DIR: projectsRoot };
   delete env.SUYOU_PROJECTS_YAML;
@@ -106,29 +119,14 @@ export function mainRoot() {
  * 在泳道布局下必拒跑，arbitrate gen0 测试资产变更审查有记）。
  */
 async function buildProfile(tmpHome, laneWorkbenchDir) {
-  const laneProfile = path.join(REPO_ROOT, 'server', 'dsh', 'profile');
-  const mainProfileNm = path.join(mainRoot(), 'server', 'dsh', 'profile', 'node_modules');
-  const profDir = path.join(tmpHome, 'profiles', 'suyou');
-  await mkdir(profDir, { recursive: true });
-  for (const f of ['cordis.yml', 'cordis.patch.yml', 'package.json']) {
-    const src = path.join(laneProfile, f);
-    if (existsSync(src)) await copyFile(src, path.join(profDir, f));
-  }
-  const tsTools = path.join(laneProfile, 'suyou-tools.ts');
-  if (existsSync(tsTools)) await symlink(tsTools, path.join(profDir, 'suyou-tools.ts'));
-  const nm = path.join(profDir, 'node_modules');
-  await mkdir(nm, { recursive: true });
-  if (!existsSync(mainProfileNm)) throw new Error(`主树插件依赖缺失：${mainProfileNm} 不存在（env FIX15_MAIN_ROOT 可指主树根）`);
-  let overridden = false;
-  for (const name of readdirSync(mainProfileNm)) {
-    const dest = name === 'suyou-workbench' ? laneWorkbenchDir
-      : (() => { try { return realpathSync(path.join(mainProfileNm, name)); } catch { return null; } })();
-    if (!dest) continue;
-    await symlink(dest, path.join(nm, name));
-    if (name === 'suyou-workbench') overridden = true;
-  }
-  if (!overridden) throw new Error(`主树 profile/node_modules 缺 suyou-workbench：${mainProfileNm}`);
-  return profDir;
+  // t260904-19：容器内路径物化（stage_docker.mjs 单点实现）；其余插件软链容器
+  // /usr/local/lib/node_modules（dsh 全局树），缺失由健康探针/启动自愈兜底。
+  const stage = await import(pathToFileURL(path.join(REPO_ROOT, 'integration', 'stage_docker.mjs')).href);
+  return stage.buildStageProfile({
+    repoProfileDir: path.join(REPO_ROOT, 'server', 'dsh', 'profile'),
+    laneWorkbenchDir: laneWorkbenchDir ?? '/repo/server/dsh/workbench',
+    tmpHome,
+  });
 }
 
 /** 浏览器腿守卫：泳道 client build（lib/client.js）缺失或陈旧 → 拒跑（防拍旧 UI 假绿，
@@ -138,57 +136,54 @@ export async function clientBuildStalenessReason() {
   return mod.laneBuildRejectReason(path.join(REPO_ROOT, 'server', 'dsh', 'workbench'));
 }
 
-async function waitReady(port, timeoutMs, logPath) {
-  const url = `http://127.0.0.1:${port}/suyou-workbench/api/wf/projects`;
-  const t0 = Date.now();
-  for (;;) {
-    try {
-      const r = await fetch(url, { signal: AbortSignal.timeout(2000) });
-      if (r.ok) return;
-    } catch { /* 未就绪，续等 */ }
-    if (Date.now() - t0 > timeoutMs) throw new Error(`隔离台就绪超时（${Math.round(timeoutMs / 1000)}s）：log=${logPath}`);
-    await new Promise((r) => setTimeout(r, 500));
-  }
-}
-
 /**
  * 自举隔离台（bench-shot bootConsole 同款 + 本票 env 注入）。
  * 返回 { port, tmpHome, projectsRoot }；失败抛错由调用方转 ENV_FAIL（缺环境=环境红，不 exit 0 假绿）。
  */
-export async function bootConsole(projectsRoot) {
+export async function bootConsole(fixturesRoot) {
+  // t260904-19：docker 舞台（dsh-only：容器内引擎地址钉死不可达回环口=降级断言面）。
+  // fixturesRoot 挂容器 /fixtures（rw），注册表根=<fixturesRoot>/reg（容器内 /fixtures/reg）。
+  // 返回 { base, teardown, reg, toStage, project }；失败抛错由调用方转 ENV_FAIL
+  // （docker 缺席/镜像缺席/起台不健康=CLI 三态文案点名，环境红不 exit 0 假绿）。
+  const stage = await import(pathToFileURL(path.join(REPO_ROOT, 'integration', 'stage_docker.mjs')).href);
   const tmpHome = mkdtempSync(path.join(tmpdir(), 'fix15-bench-'));
   const clean = () => { try { rmSync(tmpHome, { recursive: true, force: true }); } catch { /* 留警告 */ } };
   try {
-    const cred = [
-      path.join(process.env.HOME || '', '.sandbar', 'projects', 'suyou', 'credentials.yaml'),
-      path.join(process.env.DSH_HOME || '', '.credentials.yaml'),
-      path.join(process.env.HOME || '', '.dsh', '.credentials.yaml'),
-    ].find((p) => existsSync(p));
-    if (cred) await copyFile(cred, path.join(tmpHome, '.credentials.yaml')).catch(() => {});
     await buildProfile(tmpHome, path.join(REPO_ROOT, 'server', 'dsh', 'workbench'));
-    const port = await freePort();
-    if (port === 3099) throw new Error('freePort 撞 3099（概率≈0，命中即拒跑）');
-    const patchFile = path.join(tmpHome, 'port.patch.yml');
-    writeFileSync(patchFile, `- id: webserver\n  config:\n    host: 127.0.0.1\n    port: ${port}\n`);
-    const logFd = openSync(path.join(tmpHome, 'console.log'), 'a');
-    const proc = spawn('dsh', ['--profile', 'suyou', '--patch', patchFile,
-      '--port', String(port), '--host', '127.0.0.1', '--no-open'], {
-      cwd: REPO_ROOT, detached: true, stdio: ['ignore', logFd, logFd],
-      env: benchEnv(tmpHome, projectsRoot),
+    const project = `fix15-${path.basename(fixturesRoot).toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24)}-${process.pid}`;
+    const st = stage.stageUp({
+      project,
+      services: 'dsh',
+      fixturesDir: fixturesRoot,
+      profileDir: path.join(tmpHome, 'profiles', 'suyou'),
+      projectsDir: '/fixtures/reg',
+      timeoutSec: Number(process.env.FIX15_STAGE_TIMEOUT_SEC ?? 600),
     });
-    await waitReady(port, 45000, path.join(tmpHome, 'console.log'));
     return {
-      port, tmpHome, projectsRoot, proc, logFd, clean,
-      base: `http://127.0.0.1:${port}`,
+      project: st.project,
+      base: `http://127.0.0.1:${st.ports.console}`,
+      reg: '/fixtures/reg',
+      toStage: (p) => '/fixtures/' + path.relative(fixturesRoot, p),
+      tmpHome, clean,
       teardown() {
-        if (proc.pid && proc.exitCode === null && proc.signalCode === null) {
-          try { process.kill(-proc.pid, 'SIGTERM'); } catch { try { proc.kill('SIGKILL'); } catch { /* 已退 */ } }
-        }
-        try { closeSync(logFd); } catch { /* 已关 */ }
+        try { stage.stageDown(st.project); } catch (e) { console.error(`[fix15] stage down：${e.message}`); }
         clean();
       },
     };
   } catch (e) { clean(); throw e; }
+}
+
+/** dsh 壳层首启对话框 dismissal（gen4 实锤：容器台每次新 DSH_HOME 首启都弹
+ *  「Internal Testing Notice」，其遮罩全屏拦截指针——真实用户点 Continue 后即可用，
+ *  场景旅程前如实 dismiss=模拟真人首启动作，非绕过）。幂等：无对话框即跳过。 */
+export async function dismissShellNotice(page) {
+  try {
+    const btn = page.locator('[class*=jLrgrW] button, [role=dialog] button')
+      .filter({ hasText: /^Continue$/ }).first();
+    await btn.click({ timeout: 3000 });
+    await page.waitForTimeout(400);
+    console.log('[fix15] 壳层首启通知已 dismiss（Continue）');
+  } catch { /* 无首启对话框=正常路径 */ }
 }
 
 /** 进程级兜底：exit/信号时回收（调用方把 bootConsole 返回的 teardown 挂进来）。 */

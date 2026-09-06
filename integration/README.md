@@ -32,16 +32,25 @@ python3 integration/run_scenarios.py
 - 场景内部 SUMMARY 行格式 `SUMMARY pass=X fail=Y env_fail=Z na=W`（skip 计数退役）；
   执行器级末行 `SCENARIOS ran=N pass=N fail=N env_fail=N na=N`，汇总与明细**双向净
   才绿**（执行器自校验，谎报=产品红）。
-- 测试环境不可用时仍可先幂等尝试 `docker compose -f server/dsh/docker-compose.test.yml
-  up -d`（场景内 precheck 自装配保留）；装配不成=ENV_FAIL（exit 2），绝不再 exit 0。
-  闸级统一入口=verify.yaml integration 段供给声明（supply，接入契约 ②a；乙段待
-  宿主扩写集落地），两者并存不互替。
+- 舞台纪律（t260904-19 定稿：自搭进程舞台退役，双轨并一轨）：一切需要舞台的场景
+  经 **integration/stage_docker.py** 单点搭台（同一 compose 文件
+  server/dsh/docker-compose.test.yml；每场景独立 compose 工程名+端口档，flock 原子
+  预留、禁区端口排除、teardown 零残留核验，故障模式取舍表见其头注）。docker 缺席/
+  测试镜像缺席/起台不健康=ENV_FAIL（exit 2，文案点名缺什么），不假绿不静默回落
+  自搭台（capture-lane 的 --boot-local 是 docker 缺席宿主的人工显式通路，闸内不用）。
+  闸级统一入口=verify.yaml integration 段供给声明（supply，接入契约 ②a）——
+  t260904-19 起简化为「确保测试台在位」一条：docker 在场+测试镜像在场+共享供给台
+  （sandbar-test-integ）健康；该共享台是常驻基建例外（ensure 幂等、闸后不拆），
+  「拆台零残留」口径适用对象是场景台。
 
 ## 环境前提
 
 Node >=22.18（type-stripping 直跑，全部测试）；其余按条目按需探测：
-python3（stdlib）、temporalio SDK（优先 `server/dsh/temporal-poc/.venv/bin/python`）、
-temporal CLI（`server/dsh/temporal-poc/bin/temporal` 或 PATH）、测试环境 17233/3199。
+python3（stdlib）、docker + 测试镜像 `test-temporal:cli-1.8.3`（舞台场景，
+t260904-19 起必需；重建=`sh server/dsh/build-test-temporal.sh`）、temporalio SDK
+（优先 `server/dsh/temporal-poc/.venv/bin/python`）、temporal CLI
+（`server/dsh/temporal-poc/bin/temporal` 或 PATH，供给台 SA 注册与 temporal-only
+消费面需要）、playwright-core（browser 族，KI-036 三路探测缺失=ENV_FAIL）。
 
 ## 安全红线（测试自己先遵守）
 

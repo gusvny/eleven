@@ -43,12 +43,14 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..", "..", "..");
 
 function parseArgs(argv) {
-  const args = { lane: null, out: null, selftest: false };
+  const args = { lane: null, out: null, selftest: false, stageJson: null, bootLocal: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--lane") args.lane = argv[++i] ?? "";
     else if (a === "--out") args.out = argv[++i] ?? "";
     else if (a === "--selftest") args.selftest = true;
+    else if (a === "--stage-json") args.stageJson = argv[++i] ?? "";
+    else if (a === "--boot-local") args.bootLocal = true;
     else throw new Error(`未知参数：${a}`);
   }
   return args;
@@ -221,6 +223,57 @@ export async function main() {
   const reject = laneBuildRejectReason(laneWb);
   if (reject) { console.error(`[capture-lane] 拒跑：${reject}`); process.exit(2); }
 
+  // ── 台来源（t260904-19：默认 docker 测试台；自搭 boot 降级为显式 --boot-local）──
+  // 三态纪律：docker/镜像缺席=ENV_FAIL 点名退出 2，绝不静默回落自搭台；
+  // --stage-json=消费外部舞台（生命周期归调用方，本脚本绝不拆）；--boot-local=显式降级。
+  let port = null;
+  let ownStageProject = null;   // 本脚本自起的台才负责拆
+  const fetchAlive = async (p) => {
+    try { const r = await fetch(`http://127.0.0.1:${p}/`, { signal: AbortSignal.timeout(3000) }); return r.status < 500; }
+    catch { return false; }
+  };
+  if (args.stageJson) {
+    let st = null;
+    try {
+      st = JSON.parse(readFileSync(args.stageJson, "utf8"));
+    } catch (e) {
+      console.error(`[capture-lane] ENV_FAIL: stage JSON 不可读/畸形（${args.stageJson}：${e.message}）——不回落自搭台`);
+      process.exit(2);
+    }
+    port = st?.ports?.console;
+    if (!Number.isInteger(port) || port <= 0) {
+      console.error(`[capture-lane] ENV_FAIL: stage JSON 缺 ports.console（project=${st?.project ?? "?"}）——不回落自搭台`);
+      process.exit(2);
+    }
+    if (!(await fetchAlive(port))) {
+      console.error(`[capture-lane] ENV_FAIL: 外部舞台已死（console 127.0.0.1:${port} 不可达）——不回落自搭台、不拆外部台（生命周期归调用方）`);
+      process.exit(2);
+    }
+    console.log(`[capture-lane] 使用外部舞台 ${st.project}：127.0.0.1:${port}（拆台归调用方）`);
+  } else if (!args.bootLocal) {
+    const stageCli = path.join(REPO_ROOT, "integration", "stage_docker.py");
+    if (!existsSync(stageCli)) {
+      console.error(`[capture-lane] ENV_FAIL: stage_docker CLI 不存在（${stageCli}）——本树非全仓布局？`);
+      process.exit(2);
+    }
+    const project = `capture-lane-${process.pid}`;
+    const timeoutSec = Number(process.env.SUYOU_CAPTURE_STAGE_TIMEOUT_SEC || 600);
+    const up = spawnSync(process.execPath, [stageCli, "up", "--project", project,
+      "--services", "full", "--timeout", String(timeoutSec)],
+      { encoding: "utf8", timeout: timeoutSec * 1000 + 15000 });
+    if (up.status !== 0) {
+      const named = String(up.stderr ?? "").split("\n").filter((l) => l.startsWith("STAGE_")).at(-1);
+      console.error(`[capture-lane] ENV_FAIL: docker 测试台起台失败——${named ?? `rc=${up.status} ${String(up.stderr ?? "").slice(0, 200)}`}`);
+      process.exit(2);
+    }
+    const st = JSON.parse(String(up.stdout).trim().split("\n").at(-1));
+    port = st.ports.console;
+    ownStageProject = st.project;
+    console.log(`[capture-lane] docker 舞台就绪 ${st.project}：127.0.0.1:${port}（本脚本负责拆台）`);
+  } else {
+    console.log("[capture-lane] 降级说明：--boot-local 显式走自搭进程台（docker 缺席宿主的人工通路；闸内一律走 docker 舞台）");
+  }
+
   const consoleCmd = (process.env.SUYOU_CONSOLE_CMD || "dsh --profile suyou").split(" ");
   const bootTimeoutMs = Number(process.env.SUYOU_CAPTURE_LANE_BOOT_MS || 45000);
   let tmpHome = null;
@@ -230,6 +283,14 @@ export async function main() {
   const teardown = () => {
     if (tornDown) return;
     tornDown = true;
+    if (ownStageProject) {
+      try {
+        spawnSync(process.execPath,
+          [path.join(REPO_ROOT, "integration", "stage_docker.py"), "down", "--project", ownStageProject],
+          { encoding: "utf8", timeout: 180000 });
+        console.log(`[capture-lane] 自起舞台 ${ownStageProject} 已拆`);
+      } catch { console.error(`[capture-lane] 自起舞台 ${ownStageProject} 拆台失败（down 幂等可重试）`); }
+    }
     if (proc && proc.pid && proc.exitCode === null && proc.signalCode === null) {
       try { process.kill(-proc.pid, "SIGTERM"); } catch { try { proc.kill("SIGKILL"); } catch {} }
     }
@@ -243,6 +304,8 @@ export async function main() {
   }
 
   try {
+    if (port === null) {
+    // ── 自搭 boot（--boot-local 降级通路；docker 台模式跳过整段）──
     tmpHome = await mkdtemp(path.join(tmpdir(), "suyou-capture-lane-"));
     // 凭据从用户 DSH_HOME 拷入（截图不需要模型凭据，缺了不致命）。
     // **不拷 settings.yaml**：用户设置可能把 webserver 端口钉死（实测钉 3099，覆盖
@@ -270,7 +333,7 @@ export async function main() {
     const presetReject = presetMaterializeRejectReason(presetSrc);
     if (presetReject) { console.error(`[capture-lane] 拒跑：${presetReject}`); process.exit(2); }
     await materializePresets(tmpHome, presetSrc);
-    const port = await pickFreePort();
+    port = await pickFreePort();
     logFd = openSync(path.join(tmpHome, "console.log"), "a");
     // 端口覆盖层：profile cordis.patch.yml 把 webserver 钉死 3099（CLI --port 盖不过
     // profile config）——用 --patch 覆盖层改指临时端口，杜绝碰生产 3099（红线）。
@@ -301,6 +364,10 @@ export async function main() {
       });
     await waitReady(port, bootTimeoutMs, path.join(tmpHome, "console.log"));
     console.log(`[capture-lane] 隔离台就绪：127.0.0.1:${port}（DSH_HOME=${tmpHome}）`);
+    } else {
+      console.log(`[capture-lane] docker 台模式：preset 物化/凭据拷贝不适用（DSH_HOME 在容器卷内）；` +
+        `chat 种子如需用户 preset 请用 --boot-local 人工通路`);
+    }
     await mkdir(args.out, { recursive: true });
     // 状态注入 opt-in（t260901-24）：env SUYOU_CAPTURE_FIXTURES=1（bench 级开关，
     // 本脚本只认这一个名字）才向 capture.mjs 追加 --fixtures；缺省不传=7 视图口径

@@ -10,20 +10,18 @@
 - 一切状态写临时目录/槽位目录；spawn 的进程收尾 TERM→KILL 兜底；
 - 依赖未就位=exit 2 MISSING（环境缺失，可辨于被测红）；端口被外来者占=exit 3。
 
-bench 契约面（integration/bench.py 须提供；implement 段 D 块对齐，本文件为对齐真源）：
-  PROD_PORTS                        # 生产端口集合（含 7233/8233）
+bench 契约面（integration/bench.py 须提供；t260904-19 随槽位制退役收敛，本文件为对齐真源）：
+  PROD_PORTS                        # 生产端口集合（7233/8233）
   class ProductionGuardError(Exception)
   assert_not_production(host)       # host 指生产（端口/字面址）→ raise ProductionGuardError
-  class BenchBusy(Exception)        # 满槽排队超 deadline（文案含「槽满」可辨）
-  acquire_slot(index=None, deadline_s=None) -> Slot   # flock 抢槽；崩溃自释
-  Slot 属性面：index / frontend_port / ui_port / metrics_port / namespace /
-              db_path / slot_dir / lock_path / argv / temporalite_pid / stopped
-  Slot 行为面：start_temporalite() / stop()（幂等；TERM 进程组→KILL 兜底→端口
-              释放核验→删 db/日志，lock 文件保留=槽锚）
   poc_python() -> str               # 引擎 venv 解释器（含主树 gitfile 回退）
   audit_hook_env(dir) -> (env片段, log_path)  # sitecustomize 审计钩子：被测子进程
                                     # 对 PROD_PORTS 的 socket.connect 先记 jsonl 后抛
   write_registry(dir, key, project_dir) -> registry_dir  # fixture 注册表（含 key→dirs）
+
+temporal 引擎台（原槽位制）由 integration/stage_docker.py 供给：本文件提供
+require_stage(fail, project, namespace) 帮手——up temporal-only 台，docker 缺席/
+镜像缺席/起台不健康=exit 2 环境红（三态语义），StageError 直译。
 """
 import json
 import os
@@ -39,13 +37,9 @@ NODE_TS = os.path.join(REPO, "server", "dsh", "temporal-tools", "node.ts")
 MISSING_EXIT = 2       # 依赖/设施未就位（环境缺失，非被测红）
 ENV_CONFLICT_EXIT = 3  # 所选端口被外来者占（不对抗）
 
-# bench 契约面最小成员清单（缺一即视为未交付/契约漂移）
+# bench 契约面最小成员清单（缺一即视为未交付/契约漂移；t260904-19 收敛后）
 BENCH_CONTRACT = ("PROD_PORTS", "ProductionGuardError", "assert_not_production",
-                  "BenchBusy", "acquire_slot", "audit_hook_env",
-                  "write_registry", "poc_python")
-SLOT_CONTRACT = ("index", "frontend_port", "ui_port", "metrics_port", "namespace",
-                 "db_path", "slot_dir", "lock_path", "argv", "temporalite_pid",
-                 "stopped", "start_temporalite", "stop")
+                  "audit_hook_env", "write_registry", "poc_python")
 
 
 class Fail:
@@ -130,10 +124,37 @@ def require_bench(fail):
     return b
 
 
-def check_slot_contract(fail, slot, label):
-    """槽对象契约面核对（契约漂移=红并点名缺失成员，防静默半交付）。"""
-    miss = [n for n in SLOT_CONTRACT if not hasattr(slot, n)]
-    fail.check(not miss, "%s Slot 契约面完整（缺：%s）" % (label, miss or "∅"))
+def require_stage(fail, project, namespace):
+    """起 temporal-only docker 舞台（stage_docker 单点入口）。
+
+    退出码直译：env（docker 缺席/镜像缺席/不健康/端口段耗尽）→ exit 2 环境红；
+    conflict → exit 3；usage → 场景代码 bug 按 1 红处理（不该发生，发生了就是场景错）。
+    sa_registered=False（temporal CLI 不可得，KI-020③ 同源）→ exit 2 点名——
+    本族场景的 ticket-start 带 project 需要 ProjectKey SA，没注册=后续腿全跑不真。"""
+    sys.path.insert(0, os.path.join(REPO, "integration"))
+    import stage_docker  # noqa: E402
+    try:
+        state = stage_docker.do_up_public(project, ["temporal"],
+                                          {"namespace": namespace},
+                                          stage_docker.DEFAULT_TIMEOUT)
+    except stage_docker.StageError as e:
+        fail.bail("docker 舞台 up 失败（%s）：%s" % (e.kind, e),
+                  stage_docker.EXIT_ENV if e.kind == "env"
+                  else stage_docker.EXIT_CONFLICT if e.kind == "conflict" else 1)
+    if not state.get("sa_registered"):
+        try:
+            stage_docker.do_down(project)
+        except Exception:
+            pass
+        fail.bail("docker 舞台 namespace/SA 未注册（temporal CLI 不可得？%s）——"
+                  "ticket 场景需要 ProjectKey SA，环境缺供 exit 2" % state.get("sa_note"),
+                  MISSING_EXIT)
+    return stage_docker, state
+
+
+def stage_down(stage_mod, project):
+    """拆台（幂等）；返回 down 结果 JSON（residue 面供场景断言零残留）。"""
+    return stage_mod.do_down(project)
 
 
 def poc_python(bench):

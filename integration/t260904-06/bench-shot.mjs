@@ -5,7 +5,8 @@
  * 为什么不是 capture-lane 一键：capture-lane 的 fixture 目录钉死主树 ui-check/fixtures
  * （bench 级开关只认 =1，目录不可指），本票需要「带 spec 的 fixture 票」才能拍进
  * spec 卡，故按 KI-036 记录的 t260904-01 先例自写 bench-shot：
- *   复用主树 ui-check 的已测导出件（capture-lane.buildTempProfile / capture.routeDecision），
+ *   t260904-19 起台=docker 舞台（integration/stage_docker.py，自搭进程 boot 退役）；
+ *   仍复用主树 ui-check 的已测导出件（capture.routeDecision 等），
  *   boot 临时 DSH_HOME 隔离台（临时端口，不碰 3099），playwright 层注入 fixture 票，
  *   DOM 断言 + 前后截图落 .suyou/screenshots/。
  *
@@ -124,45 +125,46 @@ async function waitReady(port, timeoutMs, logPath) {
   throw new Error(`隔离台 ${timeoutMs}ms 未就绪（${url}）\nconsole.log 尾部：\n${tail}`);
 }
 async function bootConsole(mainRoot, laneWb, onProc) {
-  const { buildTempProfile } = await import(pathToFileURL(path.join(mainRoot, "server", "dsh", "ui-check", "capture-lane.mjs")).href);
+  // t260904-19：docker 舞台（自搭进程 boot 退役）。repoDir 挂哪个树，/repo/server/dsh/workbench
+  // 就是谁——before 变体挂主树（测主 workbench），after 变体挂泳道（测泳道 build）；
+  // profile 经 buildStageProfile 容器内路径物化（suyou-workbench→/repo/... 随 repoDir 切换）。
+  const stage = await import(pathToFileURL(path.join(REPO_ROOT, "integration", "stage_docker.mjs")).href);
   const tmpHome = mkdtempSync(path.join(tmpdir(), "suyou-bench-shot-"));
   const clean = () => { if (tmpHome) { try { rmSync(tmpHome, { recursive: true, force: true }); } catch { /* 留警告 */ } } };
   try {
-    const cred = [
-      path.join(process.env.HOME || "", ".sandbar", "projects", "suyou", "credentials.yaml"),
-      path.join(process.env.DSH_HOME || "", ".credentials.yaml"),
-      path.join(process.env.HOME || "", ".dsh", ".credentials.yaml"),
-    ].find((p) => existsSync(p));
-    if (cred) await copyFile(cred, path.join(tmpHome, ".credentials.yaml")).catch(() => {});
-    await buildTempProfile(tmpHome, laneWb);
-    const port = await pickFreePort();
-    const patchFile = path.join(tmpHome, "port.patch.yml");
-    writeFileSync(patchFile, `- id: webserver\n  config:\n    host: 127.0.0.1\n    port: ${port}\n`, "utf8");
-    const logFd = openSync(path.join(tmpHome, "console.log"), "a");
-    const proc = spawn("dsh", ["--profile", "suyou", "--patch", patchFile,
-      "--port", String(port), "--host", "127.0.0.1", "--no-open"], {
-      cwd: mainRoot, detached: true, stdio: ["ignore", logFd, logFd],
-      env: { ...process.env, DSH_HOME: tmpHome, SUYOU_TARGET_HOST: "127.0.0.1:17233" },
+    const profileDir = stage.buildStageProfile({
+      repoProfileDir: path.join(REPO_ROOT, "server", "dsh", "profile"),
+      laneWorkbenchDir: "/repo/server/dsh/workbench",
+      tmpHome,
     });
-    onProc(proc, logFd, clean);
-    await waitReady(port, 45000, path.join(tmpHome, "console.log"));
-    return { port, tmpHome };
+    const variant = path.resolve(laneWb).startsWith(path.resolve(mainRoot) + path.sep) ? "main" : "lane";
+    const st = stage.stageUp({
+      project: `bench-shot-${variant}-${process.pid}`,
+      services: "dsh",
+      repoDir: mainRoot,       // before/after 的被测树（REPO 挂载）
+      profileDir,
+      timeoutSec: Number(process.env.BENCH_SHOT_STAGE_TIMEOUT_SEC ?? 600),
+    });
+    onProc(null, null, null, st.project);
+    return { port: st.ports.console, tmpHome };
   } catch (e) { clean(); throw e; }
 }
 function makeTeardown() {
-  let proc = null, logFd = null, clean = null, done = false;
-  const inject = (p, fd, cl) => { proc = p; logFd = fd; clean = cl; };
-  const teardown = () => {
-    if (done) return; done = true;
-    if (proc?.pid && proc.exitCode === null && proc.signalCode === null) {
-      try { process.kill(-proc.pid, "SIGTERM"); } catch { try { proc.kill("SIGKILL"); } catch { /* 已退 */ } }
-    }
-    if (logFd !== null) { try { closeSync(logFd); } catch { /* 已关 */ } }
-    if (clean) clean();
+  // t260904-19：回收对象=自起 docker 舞台。回收原语=spawnSync 调 stage_docker down
+  // （同步：exit/信号钩子里都可靠；down 幂等，CLI 内含零残留核验）。
+  let project = null, done = false;
+  const down = () => {
+    if (!project) return;
+    const r = spawnSync(process.execPath,
+      [path.join(REPO_ROOT, "integration", "stage_docker.py"), "down", "--project", project],
+      { encoding: "utf8", timeout: 180000 });
+    if (r.status === 0) console.log(`[bench-shot] 舞台 ${project} 已拆`);
+    else console.error(`[bench-shot] 舞台 ${project} 拆台异常（down 幂等可重试）：${String(r.stderr ?? "").slice(0, 160)}`);
   };
-  process.on("exit", teardown);
+  const teardown = () => { if (done) return; done = true; down(); };
+  process.on("exit", () => { if (!done) { done = true; down(); } });
   for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { teardown(); process.exit(130); });
-  return { teardown, inject };
+  return { teardown, inject: (_p, _fd, _cl, proj) => { project = proj ?? project; } };
 }
 
 // ---- 页面助手（capture.mjs 同款语义锚，本文件内联拷贝：原函数未导出）----

@@ -28,12 +28,11 @@
 // 执行契约：stdout 末行 SUMMARY 四计数（t260904-12 三态）；隔离台依赖缺失=dsh 不可用/
 //   buildTempProfile 失败 → ENV_FAIL（exit 2 点名原因，不假绿）；实现落地前红属预期（TDD 信号），
 //   arbitrate/merge 期必须绿。
-import { readdirSync, statSync } from 'node:fs';
+import { readdirSync, statSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import {
-  REPO_ROOT, tmpRoot, makeRegistryRoot, writeProjectEntry, writeQuarantinedDir,
-  bootConsole, teardownOnExit, api, makeResults,
-} from './lib_fix15.mjs';
+  REPO_ROOT, tmpRoot, makeFixtures, writeProjectEntry, writeQuarantinedDir,
+  bootConsole, teardownOnExit, api, makeResults, dismissShellNotice } from './lib_fix15.mjs';
 
 const { record, summarize } = makeResults();
 
@@ -53,14 +52,14 @@ function treeSnapshot(dir) {
 
 let bench;
 try {
-  const projectsRoot = makeRegistryRoot('fix15-api-reg-');
-  const fixaDir = tmpRoot('fix15-api-fixa-');
-  writeProjectEntry(projectsRoot, 'fixa', '夹具甲', [fixaDir]);
-  writeQuarantinedDir(projectsRoot, 'badkey');
-  bench = await bootConsole(projectsRoot);
-  bench.__projectsRoot = projectsRoot;
+  const fx = makeFixtures('fix15-api-');
+  writeProjectEntry(fx.reg, 'fixa', '夹具甲', [path.join(fx.root, 'proj-fixa')]);
+  writeQuarantinedDir(fx.reg, 'badkey');
+  bench = await bootConsole(fx.root);
+  bench.__fixtures = fx;
+  bench.__projectsRoot = fx.reg;
 } catch (e) {
-  record('bench/boot', 'env_fail', `隔离台依赖缺失（dsh/ui-check profile）：${String(e?.message ?? e).slice(0, 200)}`);
+  record('bench/boot', 'env_fail', `隔离台依赖缺失（docker 测试台）：${String(e?.message ?? e).slice(0, 200)}`);
   summarize();
 }
 teardownOnExit(bench.teardown);
@@ -81,7 +80,7 @@ const errText = (r) => (typeof r.body === 'string' ? r.body : JSON.stringify(r.b
   record('read/projects', r.status === 200 && projects.some((p) => p.key === 'fixa') ? 'pass' : 'fail',
     `status=${r.status} keys=${projects.map((p) => p.key).join(',')}`);
   const qb = Array.isArray(q) ? q.find((x) => x.key === 'badkey') : null;
-  record('read/quarantined', !!qb && String(qb.error ?? '').includes(path.join(root, 'badkey', 'project.yaml')),
+  record('read/quarantined', !!qb && String(qb.error ?? '').includes(path.join(bench.reg, 'badkey', 'project.yaml')),
     `quarantined=${JSON.stringify(q)?.slice(0, 200)}`);
 }
 
@@ -90,8 +89,9 @@ const errText = (r) => (typeof r.body === 'string' ? r.body : JSON.stringify(r.b
 // 应答且不 spawn CLI，注册表零现场变更保证不变）
 {
   const before = treeSnapshot(root);
-  const newDir = tmpRoot('fix15-api-new-');
-  const r = await api(B, 'POST', `${API}/add`, { key: 'fixb', name: '夹具乙', dir: newDir, dry_run: true });
+  const newDir = path.join(bench.__fixtures.root, 'proj-new-dry');
+  mkdirSync(newDir, { recursive: true }); // 容器内 CLI 验目录存在（add 不代建）
+  const r = await api(B, 'POST', `${API}/add`, { key: 'fixb', name: '夹具乙', dir: bench.toStage(newDir), dry_run: true });
   const after = treeSnapshot(root);
   const txt = errText(r);
   record('add/dry-run', r.status === 422 && txt.includes('本地形状检查') && JSON.stringify(before) === JSON.stringify(after),
@@ -100,7 +100,9 @@ const errText = (r) => (typeof r.body === 'string' ? r.body : JSON.stringify(r.b
 
 // T3 拒收透传（4xx + 文案点名原因）
 {
-  const dupDir = tmpRoot('fix15-api-dup-');
+  const dupSrc = path.join(bench.__fixtures.root, 'proj-dup');
+  mkdirSync(dupSrc, { recursive: true });
+  const dupDir = bench.toStage(dupSrc);
   const projDirOfFixa = (await (async () => {
     const r = await api(B, 'GET', API);
     const p = okBody(r)?.projects?.find((x) => x.key === 'fixa');
@@ -129,8 +131,9 @@ const errText = (r) => (typeof r.body === 'string' ? r.body : JSON.stringify(r.b
 
 // T4 add 成功 → 读面即时出现
 {
-  const newDir = tmpRoot('fix15-api-ok-');
-  const r = await api(B, 'POST', `${API}/add`, { key: 'fixb', name: '夹具乙', dir: newDir, dry_run: false });
+  const newDir = path.join(bench.__fixtures.root, 'proj-new-ok');
+  mkdirSync(newDir, { recursive: true }); // 容器内 CLI 验目录存在（add 不代建）
+  const r = await api(B, 'POST', `${API}/add`, { key: 'fixb', name: '夹具乙', dir: bench.toStage(newDir), dry_run: false });
   const rr = await api(B, 'GET', API);
   const listed = okBody(rr)?.projects?.some((p) => p.key === 'fixb');
   record('add/success-then-read', r.status >= 200 && r.status < 300 && listed,

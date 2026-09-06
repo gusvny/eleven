@@ -32,13 +32,14 @@
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 或全腿 na -> exit 1;
 // env_fail>0 -> exit 2（环境红：没验成，原因归环境）; all pass -> 0. Node >= 22.18.
 
+import { ensureStageConsole } from '../lib_stage_console.mjs';
 import { readFileSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const REPO = process.cwd()
-const BASE = (process.env.SUYOU_TEST_CONSOLE ?? 'http://127.0.0.1:3199').replace(/\/$/, '')
+const BASE = (await ensureStageConsole()).base;
 
 const results = []
 const STATUSES = new Set(['pass', 'fail', 'env_fail', 'na']);

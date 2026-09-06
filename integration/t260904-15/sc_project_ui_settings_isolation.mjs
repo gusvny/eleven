@@ -21,10 +21,11 @@
 //
 // 执行契约：stdout 末行 SUMMARY 四计数（三态）；依赖缺失=ENV_FAIL 环境红；实现落地前
 // 红属预期（TDD 信号），arbitrate/merge 期必须绿。
+import { mkdirSync } from 'node:fs';
+import path from 'node:path';
 import {
-  tmpRoot, makeRegistryRoot, writeProjectEntry, writeQuarantinedDir,
-  bootConsole, teardownOnExit, clientBuildStalenessReason, api, dismissNotice, loadPlaywright, makeResults,
-} from './lib_fix15.mjs';
+  tmpRoot, makeFixtures, writeProjectEntry, writeQuarantinedDir,
+  bootConsole, teardownOnExit, clientBuildStalenessReason, api, dismissNotice, loadPlaywright, makeResults, dismissShellNotice } from './lib_fix15.mjs';
 
 const { record, summarize } = makeResults();
 
@@ -51,6 +52,7 @@ const newPage = async (bench) => {
   page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
   page.on('pageerror', (e) => consoleErrors.push(String(e)));
   await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
+  await dismissShellNotice(page);
   await page.waitForTimeout(1500);
   return { browser, page };
 };
@@ -62,10 +64,12 @@ const dialogOf = (page) => page.locator('[data-wb-pmod-overlay]').last();
 // ---- 台 A：设置弹层面 + 隔离详情 ----
 let benchA;
 try {
-  const regA = makeRegistryRoot('fix15-set-reg-');
-  writeProjectEntry(regA, 'fixa', '夹具甲', [tmpRoot('fix15-set-fixa-')]);
+  const fxA = makeFixtures('fix15-set-reg-');
+  const regA = fxA.reg;
+  writeProjectEntry(regA, 'fixa', '夹具甲', [path.join(fxA.root, 'proj-fixa')]);
   writeQuarantinedDir(regA, 'badkey');
-  benchA = await bootConsole(regA);
+  benchA = await bootConsole(fxA.root);
+  benchA.__fixtures = fxA;
 } catch (e) {
   record('bench/boot-A', 'env_fail', `隔离台依赖缺失：${String(e?.message ?? e).slice(0, 200)}`);
   summarize();
@@ -126,7 +130,9 @@ benchA.teardown();
 // ---- 台 B：空注册表 ----
 let benchB;
 try {
-  benchB = await bootConsole(makeRegistryRoot('fix15-empty-reg-'));
+  const fxB = makeFixtures('fix15-empty-reg-');
+  benchB = await bootConsole(fxB.root);
+  benchB.__fixtures = fxB;
 } catch (e) {
   record('bench/boot-B', 'env_fail', `隔离台依赖缺失：${String(e?.message ?? e).slice(0, 200)}`);
   summarize();
@@ -154,7 +160,8 @@ record('bench/boot-B', 'pass', benchB.base);
   if (await inputs.count() >= 2) {
     await inputs.first().fill('fixfirst');
     if (await inputs.count() >= 3) await inputs.nth(1).fill('首接项目'); // 显示名：缺它 CLI 必拒
-    await inputs.nth(2).fill(tmpRoot('fix15-empty-proj-'));
+    mkdirSync(path.join(benchB.__fixtures.root, 'proj-first'), { recursive: true }); // 容器内 CLI 验目录存在
+    await inputs.nth(2).fill(benchB.toStage(path.join(benchB.__fixtures.root, 'proj-first'))); // 容器路径
     // 驱动链=语义锚：预检（本地形状检查，置 pre 门）→ 确认接入（未预检恒禁点）
     await forceClick(dlg.locator('[data-wb-pmod-add-precheck]'));
     await pb.waitForTimeout(400);

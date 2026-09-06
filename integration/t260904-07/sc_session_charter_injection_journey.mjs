@@ -29,6 +29,7 @@
 // 隔离台 SUYOU_TEST_CONSOLE
 // （默认 127.0.0.1:3199）；硬守卫：绝不 3099。
 
+import { STAGE_SEED_ROW_SEL } from '../lib_stage_console.mjs';
 import { mkdirSync } from 'node:fs';
 import { BASE, CHARTER_EP, refuseProductionConsole, makeResults, consoleHealthy } from './lib_charter.mjs';
 
@@ -117,7 +118,7 @@ try {
 }
 
 try {
-  await page.waitForSelector('[data-wb-psess-row]', { timeout: 12000 });
+  await page.waitForSelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])', { timeout: 12000 });
 } catch {
   record('t0/fixture-psess-row', 'env_fail', 'no project session row rendered in test console sidebar');
   try { await browser.close(); } catch { /* noop */ }
@@ -133,7 +134,7 @@ const safeClick = async (sel) => {
   try { await loc.click({ timeout: 3000 }); } catch { await loc.evaluate(el => el.click()); }
 };
 const rowRead = () => page.evaluate(() => {
-  const row = document.querySelector('[data-wb-psess-row]');
+  const row = document.querySelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])');
   return [...(row?.querySelectorAll('[data-wb-psess-tab]') ?? [])].map(t => (t.title ?? '').split('\n').pop() ?? '');
 });
 const chatText = () => page.evaluate(() => document.querySelector('[data-conversation-scroll]')?.textContent ?? '');
@@ -191,7 +192,7 @@ if (!injected) {
   const tabsSnap = await rowRead();
   await page.reload({ waitUntil: 'domcontentloaded' });
   await dismissModals(page);
-  await page.waitForSelector('[data-wb-psess-row]', { timeout: 12000 });
+  await page.waitForSelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])', { timeout: 12000 });
   await page.evaluate(() => document.querySelectorAll('[data-wb-psess-row] [data-wb-psess-tab]')[0]?.click());
   await page.waitForTimeout(1500);
   const afterReload = markCount(await chatText());

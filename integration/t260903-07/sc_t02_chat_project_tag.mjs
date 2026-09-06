@@ -1,3 +1,4 @@
+import { ensureStageConsole } from '../lib_stage_console.mjs';
 // Integration scenario t260903-07 ② — global chat project tag coloring contract.
 //
 // Intent (black-box, user perspective):
@@ -18,9 +19,9 @@
 // Execution contract (t260904-12 三态): stdout last line
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; missing deps → env_fail
 // (exit 2); FAIL>0 或全腿 na → exit 1. Isolated console
-// SUYOU_TEST_CONSOLE (default 127.0.0.1:3199); hard guard: never 3099.
+// SUYOU_TEST_CONSOLE (default: lib_stage_console 共享台); hard guard: never 3099.
 
-const BASE = (process.env.SUYOU_TEST_CONSOLE ?? 'http://127.0.0.1:3199').replace(/\/$/, '');
+const BASE = (await ensureStageConsole()).base;
 const results = [];
 const STATUSES = new Set(['pass', 'fail', 'env_fail', 'na']);;
 function record(name, status, detail = '') {
@@ -95,7 +96,7 @@ async function browserScenarios(fixtureProjects) {
   if (!pw) { record('browser/deps', 'env_fail', 'playwright-core unavailable'); return; }
   let browser, context, page;
   try {
-    browser = await pw.chromium.launch({ headless: true });
+    browser = await pw.chromium.launch({ channel: 'chrome', headless: true }).catch(() => pw.chromium.launch({ headless: true }));
     context = await browser.newContext();
     page = await context.newPage();
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });
