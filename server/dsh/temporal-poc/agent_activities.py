@@ -3060,6 +3060,199 @@ async def arbitrate(args: AgentStageArgs) -> StageResult:
         _reap_agent_proc(proc, args.ticket_id, "arbitrate")
 
 
+# ---- doc-lifecycle 票②（t260905-01）：收口两问——沉淀触发器+反向同步闸 ----
+# 轻路载体：结果文件新增 doc_sediment / doc_conflicts 字段（_read_result 丢弃未知键的
+# 既有行为不动，无 KI-012 爆面），下面三个纯函数读取→校验→登记→拼装回 StageResult
+# 既有六字段（report 人读/evidence 机器口径/deliverables 债册路径），零 workflow 改动。
+# 纪律：答与不答都不阻塞（res.status 一律不改，未答也是一条留痕）；failed 轮同样
+# 拼装登记（走查打回轮发现的文档矛盾同样是真实债条目，跨轮重复由登记去重键挡）。
+# 债登记转正纪律：人审签字前由 merge 执行人转正进 notes/debts/known-issues.md 或
+# docs 债册——回执小节尾句把这句话带给人审（.suyou/ 随 teardown_lane 销毁，
+# 回执必须携带条目本体全量而非只有路径）。
+
+DOC_GATE_DIRNAME = ".suyou/doc-gate"
+PENDING_DOC_SYNC_NAME = "pending-doc-sync.jsonl"
+DOC_GATE_TRANSFER_NOTE = (
+    "债条目转正：人审签字前，由 merge 执行人将上述条目登记进 "
+    "notes/debts/known-issues.md（或 docs 债册）；未转正不得视为已闭环。")
+
+
+def parse_doc_gate(raw: Any) -> Dict[str, Any]:
+    """结果文件原始 dict → 两问判读（零 IO 全容错；畸形=留痕降级不抛）。
+
+    返回键（C1 修订：absent 按问拆，回执分别留痕两问各自的已答/未答）：
+      sediment            = {want: bool, target: str, reason: str} 或 None（未答/畸形）
+      sediment_absent     = bool（键不在场）
+      sediment_malformed  = str（畸形原因；合格时为空）
+      conflicts / conflicts_absent / conflicts_malformed 同构；
+      conflicts           = [{doc, claim, actual}]（只含三要素齐全的条目）
+    """
+    out: Dict[str, Any] = {
+        "sediment": None, "sediment_absent": True, "sediment_malformed": "",
+        "conflicts": [], "conflicts_absent": True, "conflicts_malformed": "",
+    }
+    if not isinstance(raw, dict):
+        return out
+    # ①沉淀一问
+    if "doc_sediment" in raw:
+        out["sediment_absent"] = False
+        s = raw["doc_sediment"]
+        if not isinstance(s, dict):
+            out["sediment_malformed"] = "doc_sediment 不是对象（%s）" % type(s).__name__
+        elif not isinstance(s.get("want"), bool):
+            out["sediment_malformed"] = "doc_sediment.want 缺失或非布尔"
+        else:
+            out["sediment"] = {
+                "want": s["want"],
+                "target": str(s.get("target") or "")[:300],
+                "reason": str(s.get("reason") or "")[:600],
+            }
+    # ②反向同步闸
+    if "doc_conflicts" in raw:
+        out["conflicts_absent"] = False
+        c = raw["doc_conflicts"]
+        if not isinstance(c, list):
+            out["conflicts_malformed"] = "doc_conflicts 不是列表（%s）" % type(c).__name__
+        else:
+            bad = []
+            for item in c[:50]:  # 超长截断：清单封顶 50 条，防畸形巨表
+                if not isinstance(item, dict):
+                    bad.append("非对象条目")
+                    continue
+                doc, claim, actual = item.get("doc"), item.get("claim"), item.get("actual")
+                if not (isinstance(doc, str) and doc.strip()
+                        and isinstance(claim, str) and claim.strip()
+                        and isinstance(actual, str) and actual.strip()):
+                    bad.append("缺 doc/claim/actual 或非非空字符串")
+                    continue
+                out["conflicts"].append({
+                    "doc": doc.strip()[:300],
+                    "claim": claim.strip()[:600],
+                    "actual": actual.strip()[:600],
+                })
+            if len(c) > 50:
+                bad.append("超过 50 条已截断")
+            if bad:
+                out["conflicts_malformed"] = "%d 条畸形（%s）" % (len(bad), "; ".join(bad[:3]))
+    return out
+
+
+def register_pending_doc_sync(cwd: Path, ticket_id: str,
+                              conflicts: List[Dict[str, str]]) -> Dict[str, Any]:
+    """矛盾条目登记进泳道债册 pending-doc-sync.jsonl（append-only，路径可注入）。
+
+    幂等：去重键=ticket+doc+claim+actual（键含 actual——actual 演进=新条目，
+    latest-wins 且旧条目不删，审计友好）；去重扫描容忍既有畸形行（torn write
+    跳行不抛）。写失败降级返回 registered=0+error，不抛（不阻塞验收收口）。"""
+    info: Dict[str, Any] = {"registered": 0, "path": "", "error": ""}
+    if not conflicts:
+        return info
+    gate_dir = Path(cwd) / DOC_GATE_DIRNAME
+    f = gate_dir / PENDING_DOC_SYNC_NAME
+    info["path"] = str(f)
+    try:
+        seen = set()
+        if f.is_file():
+            for line in f.read_text("utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except Exception:
+                    continue  # torn write 畸形行：跳过不抛
+                if isinstance(row, dict):
+                    seen.add((str(row.get("ticket") or ""), str(row.get("doc") or ""),
+                              str(row.get("claim") or ""), str(row.get("actual") or "")))
+        gate_dir.mkdir(parents=True, exist_ok=True)
+        new_rows = []
+        for c in conflicts:
+            key = (ticket_id, c["doc"], c["claim"], c["actual"])
+            if key in seen:
+                continue
+            seen.add(key)
+            new_rows.append(json.dumps({
+                "ticket": ticket_id, "doc": c["doc"], "claim": c["claim"],
+                "actual": c["actual"], "registered_at": int(time.time()),
+            }, ensure_ascii=False))
+        if new_rows:
+            with open(f, "a", encoding="utf-8") as fh:
+                fh.write("\n".join(new_rows) + "\n")
+        info["registered"] = len(new_rows)
+    except OSError as e:
+        info["error"] = str(e)[:200]
+    return info
+
+
+def _doc_gate_report_section(pg: Dict[str, Any], reg: Dict[str, Any]) -> str:
+    """两问判读+登记结果 → 回执「收口两问」小节 markdown（人读，条目本体全量）。"""
+    lines = ["## 收口两问（沉淀触发器+反向同步闸）"]
+    # ①沉淀一问（未答/畸形都留痕——验收①「不答不阻塞有实证」的记录形态）
+    if pg["sediment"] is not None:
+        s = pg["sediment"]
+        if s["want"]:
+            lines.append("- 沉淀一问：建议沉淀 → target=%s；理由=%s" % (s["target"], s["reason"]))
+        else:
+            lines.append("- 沉淀一问：显式无可沉淀（%s）" % (s["reason"] or "未给理由"))
+    elif pg["sediment_malformed"]:
+        lines.append("- 沉淀一问：未答（字段形态不合格按未答留痕：%s；不阻塞收口）"
+                     % pg["sediment_malformed"])
+    else:
+        lines.append("- 沉淀一问：未答（留痕；不阻塞收口）")
+    # ②反向同步闸
+    if pg["conflicts"]:
+        lines.append("- 反向同步闸：发现 %d 条 docs 矛盾（条目本体如下）" % len(pg["conflicts"]))
+        for i, c in enumerate(pg["conflicts"], 1):
+            lines.append("  - 债条目 %d：doc=%s；被推翻主张=%s；实现现实=%s"
+                         % (i, c["doc"], c["claim"], c["actual"]))
+        if reg.get("registered"):
+            lines.append("  - 已登记 %d 条（跨轮去重后）→ %s" % (reg["registered"], reg["path"]))
+        elif reg.get("error"):
+            lines.append("  - 债册登记失败（%s）——以上方条目本体为准，请人审手工登记"
+                         % reg["error"])
+    elif pg["conflicts_malformed"]:
+        lines.append("- 反向同步闸：字段形态不合格按未答留痕（%s；不阻塞收口）"
+                     % pg["conflicts_malformed"])
+    elif pg["conflicts_absent"]:
+        lines.append("- 反向同步闸：未答（留痕；不阻塞收口）")
+    else:
+        lines.append("- 反向同步闸：核对完成，未发现 docs 矛盾")
+    if pg["conflicts"]:
+        lines.append("- %s" % DOC_GATE_TRANSFER_NOTE)
+    return "\n".join(lines)
+
+
+def apply_doc_gate(res: StageResult, rfile: Path, cwd: Path, ticket_id: str) -> StageResult:
+    """读结果文件两问字段 → 判读 → 登记 → 拼装进 res（轻路回执，status 不改）。
+
+    幂等：activity Temporal 重试整段重执行时 res 是 _read_result 新产物（原始
+    report 未被上次拼装污染），登记去重键挡跨次重复。全程防御：本函数任何异常
+    都不得阻断验收收口（两问是伴生增量，不是裁决面）。"""
+    try:
+        try:
+            raw = json.loads(Path(rfile).read_text("utf-8"))
+        except Exception:
+            raw = {}
+        pg = parse_doc_gate(raw if isinstance(raw, dict) else {})
+        reg = register_pending_doc_sync(cwd, ticket_id, pg["conflicts"])
+        res.report = (res.report + "\n\n" + _doc_gate_report_section(pg, reg)).strip()
+        ev = ("doc_gate: sediment=%s; conflicts=%s; registered=%d" % (
+            "absent" if pg["sediment_absent"] else
+            ("malformed(%s)" % pg["sediment_malformed"]) if pg["sediment"] is None else "ok",
+            "absent" if pg["conflicts_absent"] else
+            ("malformed(%s)" % pg["conflicts_malformed"]) if not pg["conflicts"] else
+            "ok(%d)" % len(pg["conflicts"]),
+            reg.get("registered") or 0))
+        if reg.get("path") and (reg.get("registered") or pg["conflicts"]):
+            ev += "; file=%s" % reg["path"]
+        res.evidence = (res.evidence + "\n[doc-gate] " + ev).strip()
+        if reg.get("registered") and reg.get("path") and reg["path"] not in res.deliverables:
+            res.deliverables.append(reg["path"])
+    except Exception as e:  # 兜底：任何意外都不阻断收口，只留痕
+        res.evidence = (res.evidence + "\n[doc-gate] 判读异常软降级：%s" % str(e)[:200]).strip()
+    return res
+
+
 @activity.defn
 async def acceptance_walkthrough(args: AgentStageArgs) -> StageResult:
     """验收走查步（t260829-07 后续）：测试通过后 integration 以用户视角走查新功能、
@@ -3111,6 +3304,9 @@ async def acceptance_walkthrough(args: AgentStageArgs) -> StageResult:
             if rfile.is_file():
                 res = _read_result(rfile)
                 if res is not None:
+                    # doc-lifecycle 票②：收口两问判读+登记+回执拼装（ok/failed 轮都拼，
+                    # 打回轮发现的矛盾同样是债条目；status 一律不改——不阻塞收口）
+                    apply_doc_gate(res, rfile, cwd, args.ticket_id)
                     _patch_result_prompt(rfile, args.prompt)
                     # KI-009：返回前 reap——走查报告不落账（.suyou 口径内），但迟写
                     # 的意外工作区脏不能留给 merge_check 与活进程赛跑

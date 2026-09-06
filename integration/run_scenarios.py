@@ -443,6 +443,12 @@ SCENARIOS = [
     ("t260904-19-stage-docker-parallel-zero-residue",
      "双场景并行不互撞+拆台零残留端到端（t260904-19，灰盒 L3，工单验收①④；槽位制退役后并发隔离语义的用户级承接面）：两个 up 进程真同时发车（各自 compose 工程名，temporal-only 档）双台健康、JSON 端口互异、双双 ∉ 生产端口 {3099,7233,8233}；docker ps -a 按 com.docker.compose.project label（compose 公开语义）过滤 A/B 容器集互不相交且 temporal-only 恰 1 容器；拆 A 后 A 端口立即可 bind 且 B 台 TCP 复测仍活（down 爆炸半径恰一个工程）；full 档 console+temporal 双端口真活（helper exit 2=其判环境红不诬产品）；三工程终态零残留、全部用过端口立即 bind 成功（验收④收口）。与 developer L1（档位锁/分配原子性单测）intent 不同层：本条守进程级真并发系统行为，mock 与先后错开都替代不了该形态。资源口径：有意制造并发双台+一次 full 台（dsh 容器首装联网分钟级），登记 exclusive 独占执行防与兄弟场景的台互相污染判定面。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "python3 integration/t260904-19/sc_stage_docker_parallel_zero_residue.py", "exclusive"),
+
+    # ---- t260905-01：收口两问（沉淀触发器+反向同步闸，doc-lifecycle 票②）----
+
+    ("t260905-01-doc-gate-questions",
+     "收口两问防回退守卫（t260905-01，灰盒 L2/L3）：触发器/闸各带防回退——源码锁半（处处可跑）：STAGE_ACCEPTANCE_EXTRA[acceptance_walkthrough] 两问文案在位（沉淀+从 deliverables 推预填建议+矛盾反向同步+转正纪律句=债登记纪律进流程的流程落点）、agent_activities 判读纯函数三件套（parse_doc_gate/register_pending_doc_sync/apply_doc_gate）定义与 acceptance 返回路径调用位在场（触发器被整段拆除=红，防「实现与单测共谋删除」回退）、pending-doc-sync.jsonl 债册常量、dev_lane STAGES 走查块两问验收项；行为半（temporalio 面）：parse 正常两态/显式无可沉淀≠未答/两问缺席各自可辨（per-question absent）/畸形软降级不抛，register 登记→条目本体可查（验收②）/同键幂等去重/actual 演进=新条目（append-only latest-wins）/torn 行容忍/写失败降级不抛，apply 回执拼装两问小节+矛盾条目本体全量+转正句（验收①②拼装面）/未答也是一条记录（不答不阻塞有实证）/文件级畸形软降级（KI-012 面不新增爆面）/failed 轮不抛不翻 status（不阻塞双态保持）。切块器自证红绿先行（干净/注入/缺席三样本）。与 developer L1 纯函数白盒不同层：本条另守源码锁与回执契约面。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio 缺失=ENV_FAIL 点名（行为腿），stdlib 源码锁腿照跑",
+     "PY=server/dsh/temporal-poc/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260905-01/sc_doc_gate_questions.py", "ro"),
 ]
 
 CMD_TIMEOUT = 900

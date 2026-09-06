@@ -413,9 +413,14 @@ class DevLaneWorkflow:
         Stage(id="acceptance_walkthrough", name="验收走查", role="integration", next="merge_check",
               desc="测试通过后 integration 以用户视角走查新功能、写验收报告（供人审门查阅）；"
                    "走查实证由 worker 前置产出（capture-lane 隔离台实拍 + DOM 断言）；"
-                   "走查发现代码问题 → 打回 implement（上限 %d 轮）" % MAX_ACCEPTANCE_ROUNDS,
+                   "走查发现代码问题 → 打回 implement（上限 %d 轮）；"
+                   "收口两问（沉淀一问+反向同步闸）随走查顺路带出——不答不阻塞（doc-lifecycle 票②，"
+                   "文案=shared.STAGE_ACCEPTANCE_EXTRA，登记=agent_activities.apply_doc_gate）"
+                   % MAX_ACCEPTANCE_ROUNDS,
               parts=("agent", "script"),
-              acceptance=("验收报告落结果文件（逐场景结论）",)),
+              acceptance=("验收报告落结果文件（逐场景结论）",
+                          "沉淀一问有预填建议或显式无可沉淀（未答留痕不阻塞）",
+                          "矛盾核对结论落回执（有矛盾则债条目已登记 pending-doc-sync）")),
         Stage(id="merge_check", name="合并检查", role="integration", next="merge", agent=False,
               desc="程序化检查（无 agent）：泳道有 commit、工作区干净、泳道内 verify_lane 绿、merge-tree 无冲突；"
                    "仅预演冲突红 → 自动打回 implement 消解（上限 %d 轮），其它红灯 blocked 等人" % MAX_CONFLICT_ROUNDS,

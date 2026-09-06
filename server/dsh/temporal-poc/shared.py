@@ -1791,6 +1791,18 @@ STAGE_ACCEPTANCE_EXTRA: Dict[str, Tuple[str, ...]] = {
         "若本票涉及 UI/泳道图渲染，验收报告必含『并行期 UI 呈现』检查项：并行分叉期"
         "步骤条双边同亮（两步同帧 data-s=running 且各带 ∥ 标记）+ 状态行报"
         "『并行分叉中』，以隔离台实拍/DOM 断言输出为证；不涉及 UI 则标注『不适用』并说明",
+        # doc-lifecycle 票②（t260905-01）：收口两问——沉淀触发器+反向同步闸。答与不答
+        # 都不阻塞验收，但必须写进结果文件 doc_sediment / doc_conflicts 字段留痕
+        # （引擎侧 apply_doc_gate 判读登记；未答也是一条记录，矛盾条目登记债册）。
+        "收口两问（答与不答都不阻塞验收，但必须留痕）：①沉淀一问——盘点本票 "
+        "deliverables，判断是否留下值得沉淀进 docs/ 的事实；有则预填建议"
+        "（target=建议文档路径/分类，reason=理由，从改动清单与验收结论推导），"
+        "确无可沉淀则显式写 want=false 并说明；②反向同步闸——对照本票实现，核对 "
+        "docs/ 既有文档关键主张是否被推翻；有矛盾逐条列 doc/claim/actual 三要素，"
+        "只报你实际读过的文档，禁止凭印象。两问结论写进结果文件 doc_sediment / "
+        "doc_conflicts 字段；矛盾条目由引擎登记债册（pending-doc-sync），"
+        "人审签字前由 merge 执行人转正进 notes/debts/known-issues.md 或 docs 债册，"
+        "未转正不得视为已闭环",
     ),
 }
 
