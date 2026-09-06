@@ -13,9 +13,12 @@
 //      注册路径字面量=「已实现未部署（lib 未重建或测试台未重启）」→ fail（精确归因）；
 //      源锚也不在=「未实现（pre-merge）」→ na（系统状态：feature 未在案，该腿无对象；
 //      全腿 na → exit 1 产品红）。
-//   T2 命中腿（在案 key 优先 sandbar，key 动态化不绑数据）：200 + {ok,charter} 形状、
-//      charter 含 key 实值（{{project_key}} 已替换）、零 {{ 占位符残留（统一渲染）、
-//      含命中分段头。
+//   T2 命中腿（key 动态化不绑数据；t260905-04 仲裁修正：「命中分段」前提=key 在
+//      session_charter.md 有专属分段，注册表在案≠有分段——实测泳道台注册表只有
+//      seedws/suyou 时 seedws 无分段=假红）：命中腿优先取「注册表∩有分段」的 key
+//      （sandbar 优先），无交集时 shape 腿仍跑 keys[0]、分段追加腿=na 并点名台数据
+//      前提（非产品红）。200 + {ok,charter} 形状、charter 含 key 实值
+//      （{{project_key}} 已替换）、零 {{ 占位符残留（统一渲染）、含命中分段头。
 //   T3 未命中腿（不存在的 key）：200 + charter 非空（只回通用段）+ 不含该 key 的
 //      分段头 + {{project_name}} 弱化=key 实值仍在文。
 //   T4 缺 project → 400 且响应体可 JSON 解析（形状错误，不崩不 5xx）。
@@ -58,9 +61,18 @@ emit('console/health', 'pass', BASE);
 
 const get = (qs = '') => fetch(`${BASE}${CHARTER_EP}${qs}`, { signal: AbortSignal.timeout(8000) });
 
-// ---- T0.5 在案 key（命中腿动态化，不绑注册表数据）----
+// ---- T0.5 在案 key（命中腿动态化，不绑注册表数据；t260905-04 仲裁修正见头注 T2：
+//      「命中分段」前提=key 在 session_charter.md 有专属分段，注册表在案≠有分段）----
 const keys = await fetchProjectKeys();
-const hitKey = keys.includes('sandbar') ? 'sandbar' : (keys[0] ?? null);
+const sectionKeys = (() => {
+  try {
+    const body = readFileSync('server/dsh/session_charter.md', 'utf8');
+    return [...body.matchAll(/^## project:(\S+)/gm)].map(m => m[1]);
+  } catch { return []; }
+})();
+const keyed = keys.filter(k => sectionKeys.includes(k));
+const hitKey = keys.includes('sandbar') && sectionKeys.includes('sandbar') ? 'sandbar'
+  : (keyed[0] ?? keys[0] ?? null);
 if (!hitKey) {
   emit('t0/project-registry', 'env_fail', '测试台项目注册表为空，命中腿无 key 可用');
   summarize();
@@ -94,7 +106,11 @@ emit('t2/charter-is-string', hitCharter !== null ? 'pass' : 'fail', 'charter 字
 if (hitCharter !== null) {
   emit('t2/key-materialized', hitCharter.includes(hitKey) ? 'pass' : 'fail', `charter 未含 ${hitKey} 实值（{{project_key}} 未替换？）`);
   emit('t2/no-placeholder-residue', hitCharter.includes('{{') ? 'fail' : 'pass', 'charter 残留 {{ 占位符（统一渲染未覆盖）');
-  emit('t2/section-appended', hitCharter.includes(`## project:${hitKey}`) ? 'pass' : 'fail', '命中分段头未出现在注入文本');
+  if (hitKey !== null && sectionKeys.includes(hitKey)) {
+    emit('t2/section-appended', hitCharter.includes(`## project:${hitKey}`) ? 'pass' : 'fail', '命中分段头未出现在注入文本');
+  } else {
+    emit('t2/section-appended', 'na', `注册表在案 key 均无 charter 专属分段（文件在案分段=${sectionKeys.join('/') || '无'}；注册表=${keys.join('/') || '空'}）——分段追加腿无对象，台数据前提非产品红`);
+  }
 }
 
 // ---- T3 未命中腿：通用段兜底 + name 弱化 ----

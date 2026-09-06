@@ -62,6 +62,8 @@ import { startChatProjectTagEffect } from './chat-project-tag.ts'
 // chat 项目色带装饰器（票② R7）：锚=平台自声明 [data-conversation-scroll]，
 // 挂/卸随本组件生命周期；归属推导见下方 effect（current→账册 project）。
 import { startChatProjectBandEffect, setChatProjectBand } from './chat-project-band.ts'
+// 上下文折叠件（t260905-04）：带 CHARTER_MARKER 的注入消息收成可展开小条。
+import { startContextFoldEffect } from './context-fold.ts'
 // 项目色（票② R7）：确定性色板，同 key 恒同色。
 import { projectColor } from '../shared/project-color.ts'
 // 项目组头图标族（票③验收 11b）：五枚 SVG 线性图标（规格单源见模块头注）。
@@ -427,6 +429,14 @@ export function WorkbenchSidebar(props: SidebarProps) {
   useEffect(() => {
     if (!wide) return
     return startChatProjectBandEffect({})
+  }, [wide])
+
+  // 上下文折叠件（t260905-04）：把带 CHARTER_MARKER 的注入消息收成可展开小条。
+  // 与色带同为「chat 滚动体装饰器」，接线同位对齐（同 hook 体内相邻 effect，
+  // 生命周期同源、卸载同路径——方案 review C5 定稿）。F1 防呆接线同款。
+  useEffect(() => {
+    if (!wide) return
+    return startContextFoldEffect()
   }, [wide])
 
   // 色带归属推导（票② R7）：current → 账册 project（纯查表，不在装饰器内

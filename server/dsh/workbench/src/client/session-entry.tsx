@@ -87,7 +87,7 @@ import {
 } from './closed-ledger-store.ts'
 // session-charter 端点路径常量（t260904-07）：与 node.ts 路由注册同源派生
 // （方案 R7 防 KI-042 路径漂移）；被引模块零 node 依赖，浏览器包安全（review C1）。
-import { SESSION_CHARTER_PATH } from '../host/session-charter.ts'
+import { SESSION_CHARTER_PATH, CHARTER_MARKER } from '../host/session-charter.ts'
 
 export { LEDGER_KEY, CLOSED_LEDGER_KEY }
 
@@ -323,7 +323,10 @@ export async function injectSessionCharter(sessions: SessionsFace, staged: strin
     // throw 只返回 RpcResult**（ok:false，同时镜像进 snapshot.promptError）——
     // 原 R3「就地 catch 兜底」假设失败会 throw，07 票因此静默失效；此处显式
     // 检查 result.ok，失败转 throw 落入下方 catch 的就地消化路径（R3 语义不变）。
-    const result = await session.prompt([{ type: 'text', text: charter }], 'queue')
+    // 注入文本首行拼机读标记（t260905-04）：渲染端 context-fold 折叠件据此把
+    // 本条消息收成「已注入项目背景」小条（标记常量与端点同源，R7 防漂移）；
+    // 畸形 charter 已在上方守卫挡掉，标记拼装只对已验证的字符串生效。
+    const result = await session.prompt([{ type: 'text', text: `${CHARTER_MARKER}\n${charter}` }], 'queue')
     if (!result?.ok) {
       const detail = result && !result.ok ? `${result.error.code} ${result.error.message}` : '空结果（未返回 RpcResult）'
       throw new Error(`charter prompt 被平台拒收：${detail}`)

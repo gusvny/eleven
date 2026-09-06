@@ -1119,7 +1119,10 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       primaryDir: projectDir,
       engineRoot: repo,
     })
-    sendJson(res, 200, { ok: true, project, charter, source: raw.trim() !== '' ? 'file' : 'fallback' })
+    // kind 字段（t260905-04）：端点响应声明注入物类型=charter（机制在引擎打标
+    // 的引擎半；文本首行标记由客户端 injectSessionCharter 拼装，标记常量同源
+    // 在 src/host/session-charter.ts CHARTER_MARKER）。
+    sendJson(res, 200, { ok: true, project, charter, kind: 'charter', source: raw.trim() !== '' ? 'file' : 'fallback' })
   }
 
   /**

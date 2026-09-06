@@ -20,6 +20,11 @@
 //   S3 端点注册路径与客户端请求路径可各自解析到同一路径字面量（直接字面量，或经
 //      同源常量模块间接命中——两种实现形态都过，契约不变的实现重构不得打破本场景）。
 //   S4 内置回落模板在位且含占位符（宽松形状匹配，不锚私有命名）。
+//   S5 打标同源锚（t260905-04）：charter 机读标记（<!-- workbench:kind:charter -->）
+//      在宿主侧 session-charter.ts 同源定义、客户端 session-entry.tsx 经常量引用、
+//      node.ts 端点响应体含 kind:'charter' 字段——marker 字面量两处漂移=折叠件失明
+//      （静默退化回整段刷屏，用户验收①无声失效），同 KI-042 族「漂移→静默吞」
+//      的对症看守。pre-implement 红属预期（TDD 信号）。
 //
 // Execution contract (三态，定稿 §7.3 闸内无 SKIP): stdout last line
 // `SUMMARY pass=<n> fail=<k> env_fail=<e> na=<w>`; FAIL>0 或全 na → exit 1,
@@ -94,6 +99,19 @@ const hasFallback = /(?:DEFAULT|FALLBACK|BUILTIN|INTERNAL)[A-Z_]*\s*(?::\s*strin
   && fallbackHay.includes('{{project_key}}');
 check('内置回落模板在位且含占位符（缺文件/读失败回落不 5xx 的前提）', hasFallback,
   '在 node.ts / src/host/session-charter.ts 找非空模板常量（含 {{project_key}}）');
+
+// ---- S5 打标同源锚（t260905-04；marker 漂移=折叠件失明静默退化，KI-042 同族看守）----
+const MARK = '<!-- workbench:kind:charter -->';
+const hostHasMark = hostModSrc !== null
+  && (hostModSrc.includes(MARK) || /CHARTER_MARKER\s*(?::\s*string)?\s*=/.test(hostModSrc));
+check('charter 机读标记在宿主侧同源定义（session-charter.ts 字面量或 CHARTER_MARKER 常量）',
+  hostHasMark, `${WB}/src/host/session-charter.ts 无 ${MARK} 字面量亦无 CHARTER_MARKER 常量`);
+check('客户端经同源常量引用标记（session-entry.tsx 引 CHARTER_MARKER，不重写字面量）',
+  hostHasMark && clientSrc !== null && clientSrc.includes('CHARTER_MARKER'),
+  '客户端重写字面量=两处漂移面（R7 同源纪律）；marker 漂移=渲染器不识别=折叠件失明');
+check('端点响应体含 kind=charter 打标字段（node.ts）',
+  nodeSrc !== null && /kind:\s*'charter'/.test(nodeSrc),
+  'node.ts session-charter 端点响应无 kind 字段——消息失去身份锚，折叠件无从归属');
 
 console.log(`SUMMARY pass=${pass} fail=${fail} env_fail=0 na=0`);
 process.exit(fail > 0 ? 1 : 0);

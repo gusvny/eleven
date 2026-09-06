@@ -3249,6 +3249,16 @@ function persistClosed(entries) {
 */
 /** 会话开局 charter 端点路径（node.ts 注册与客户端 fetch 共用常量）。 */
 const SESSION_CHARTER_PATH = "/suyou-workbench/api/session-charter";
+/**
+* 上下文注入机读标记（t260905-04）：引擎侧给注入文本打的「消息元数据 kind=charter」
+* 落地载体。平台 wire 契约 PromptContentPart 无 metadata 字段（仓内冻结镜像
+* server/dsh/workbench/tests/ki046-charter-prompt-shape.mjs WIRE_CONTRACT 实锤），
+* 故标记拼在注入文本首行（HTML 注释样式的行，模型读无害；展开态随全文可见属
+* 已定降级——折叠态随内容区整体隐藏，「新会话开头只见小条」不受影响）。渲染端
+* （src/client/context-fold.ts）认本常量为折叠触发器，同源派生防两端漂移（R7 先例）；
+* 未来任何上下文注入（项目简介、文档引用）带同一标记即走同一折叠件。
+*/
+const CHARTER_MARKER = "<!-- workbench:kind:charter -->";
 //#endregion
 //#region src/client/session-entry.tsx
 /**
@@ -3454,7 +3464,7 @@ async function injectSessionCharter(sessions, staged, projectKey, notify) {
 		if (typeof sessions.sessionOf !== "function") throw new Error("ctx.sessions.sessionOf 未注入（运行时面缺失）");
 		const result = await sessions.sessionOf(sessions.scope(staged)).prompt([{
 			type: "text",
-			text: charter
+			text: `${CHARTER_MARKER}\n${charter}`
 		}], "queue");
 		if (!result?.ok) {
 			const detail = result && !result.ok ? `${result.error.code} ${result.error.message}` : "空结果（未返回 RpcResult）";
@@ -3829,7 +3839,7 @@ const PROJBAND_ATTR = "data-wb-chat-projband";
 /** 自有 style 元素选择器（head 内，React 树之外）。 */
 const STYLE_SELECTOR$1 = "style[data-wb-chat-projband-style]";
 /** 平台 chat 滚动体锚（出处见文件头注；平台自声明属性，非 css-module 类名）。 */
-const SCROLL_SELECTOR = "[data-conversation-scroll]";
+const SCROLL_SELECTOR$1 = "[data-conversation-scroll]";
 /** hex → rgba() 字符串（16% 透明底等用途；避免 color-mix 兼容性赌注）。 */
 function hexToRgba(hex, alpha) {
 	return `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(hex.slice(5, 7), 16)},${alpha})`;
@@ -3855,7 +3865,7 @@ function applyProjectBand(root, key) {
 	let touched = 0;
 	let els;
 	try {
-		els = Array.from(root.querySelectorAll(SCROLL_SELECTOR));
+		els = Array.from(root.querySelectorAll(SCROLL_SELECTOR$1));
 	} catch {
 		return 0;
 	}
@@ -4343,7 +4353,7 @@ function useStaleHost() {
 }
 //#endregion
 //#region src/client/project-tag-index.ts
-const state = {
+const state$1 = {
 	projectDirs: /* @__PURE__ */ new Map(),
 	projectByTicket: /* @__PURE__ */ new Map(),
 	/** 被外部（侧栏）发布过至少一次 → decorator 兜底自取停止。 */
@@ -4353,8 +4363,8 @@ const state = {
 };
 /** 归一化工单 id 引用（字符串白名单：t\\d{6}-\\d{2} 口径由调用方先行过滤）。 */
 function addTicketsOfProject(key, ticketIds) {
-	for (const [tid, k] of Array.from(state.projectByTicket)) if (k === key) state.projectByTicket.delete(tid);
-	for (const tid of ticketIds) if (typeof tid === "string" && tid !== "") state.projectByTicket.set(tid, key);
+	for (const [tid, k] of Array.from(state$1.projectByTicket)) if (k === key) state$1.projectByTicket.delete(tid);
+	for (const tid of ticketIds) if (typeof tid === "string" && tid !== "") state$1.projectByTicket.set(tid, key);
 }
 /**
 * 发布项目注册表（/wf/projects 整体一个请求，成功才调；失败不发）。
@@ -4362,13 +4372,13 @@ function addTicketsOfProject(key, ticketIds) {
 */
 function publishProjects(entries) {
 	if (!Array.isArray(entries)) return;
-	state.externallyPublished = true;
-	state.projectDirs.clear();
+	state$1.externallyPublished = true;
+	state$1.projectDirs.clear();
 	for (const e of entries) {
 		const key = e?.key;
 		const dirs = e?.dirs;
 		if (typeof key !== "string" || key === "" || !Array.isArray(dirs)) continue;
-		state.projectDirs.set(key, dirs.filter((d) => typeof d === "string" && d !== ""));
+		state$1.projectDirs.set(key, dirs.filter((d) => typeof d === "string" && d !== ""));
 	}
 }
 /**
@@ -4379,9 +4389,9 @@ function publishProjectEntry(projectKey, ticketIds) {
 	if (typeof projectKey !== "string" || projectKey === "") return;
 	if (!Array.isArray(ticketIds)) return;
 	const clean = ticketIds.filter((t) => typeof t === "string" && /^t\d{6}-\d{2}$/.test(t));
-	if (clean.length === 0 && [...state.projectByTicket.values()].includes(projectKey)) {
-		if (!state.warnedEmpty.has(projectKey)) {
-			state.warnedEmpty.add(projectKey);
+	if (clean.length === 0 && [...state$1.projectByTicket.values()].includes(projectKey)) {
+		if (!state$1.warnedEmpty.has(projectKey)) {
+			state$1.warnedEmpty.add(projectKey);
 			console.warn("[workbench] 项目 %s 工单列表为空（可能拉取失败或真清零）：tag 映射保留 last-known-good", projectKey);
 		}
 		return;
@@ -4391,9 +4401,9 @@ function publishProjectEntry(projectKey, ticketIds) {
 /** 只读快照（复制 Map 引用不计成本：装饰器每次扫描只读一次）。 */
 function readProjectTagIndex() {
 	return {
-		projectDirs: new Map(state.projectDirs),
-		projectByTicket: new Map(state.projectByTicket),
-		hasData: state.projectDirs.size > 0 || state.projectByTicket.size > 0
+		projectDirs: new Map(state$1.projectDirs),
+		projectByTicket: new Map(state$1.projectByTicket),
+		hasData: state$1.projectDirs.size > 0 || state$1.projectByTicket.size > 0
 	};
 }
 /**
@@ -4411,7 +4421,7 @@ function startProjectIndexFallback(opts) {
 	let warned = false;
 	let attempts = 0;
 	async function tryOnce() {
-		if (stopped || state.externallyPublished || readProjectTagIndex().hasData) return;
+		if (stopped || state$1.externallyPublished || readProjectTagIndex().hasData) return;
 		attempts++;
 		try {
 			const list = (await fetchImpl("/suyou-workbench/api/wf/projects").then((r) => r.json()))?.result?.projects ?? [];
@@ -4438,7 +4448,7 @@ function startProjectIndexFallback(opts) {
 	}
 	function schedule() {
 		if (stopped) return;
-		if (state.externallyPublished || readProjectTagIndex().hasData) return;
+		if (state$1.externallyPublished || readProjectTagIndex().hasData) return;
 		if (attempts >= maxAttempts) {
 			console.warn("[workbench] chat 项目 tag 索引兜底拉取达上限，停止重试（映射缺失 → tag 不渲染）");
 			return;
@@ -4626,6 +4636,267 @@ function startChatProjectTag(opts) {
 			for (const row of Array.from(doc.querySelectorAll(`[${PROJTAG_ATTR}]`))) row.removeAttribute(PROJTAG_ATTR);
 		}
 	};
+}
+//#endregion
+//#region src/client/context-fold.ts
+/**
+* suyou-workbench · 上下文折叠件（t260905-04）——通用「渲染面」装饰器。
+*
+* 职责：把带引擎打标（首行 CHARTER_MARKER，同源常量在 ../host/session-charter.ts）
+* 的上下文注入消息在 chat 会话区收成一条可展开小条（「📋 已注入项目背景 · 点击
+* 展开」），点开见全文（占位符已实值化）。未来任何上下文注入（项目简介、文档
+* 引用）带同一标记即走本折叠件——机制在引擎（打标），面在渲染（本模块）。
+*
+* 平台消息气泡锚（方案步 1 取证结论）：隔离台 DOM 探针在本实现环境不可用
+* （stage_docker ensure 容器只读挂载 ENV_FAIL，见工单 evidence），故锚算法取
+* 「内容推导式」而非「结构属性式」——不依赖平台气泡类名/属性（非 css-module
+* 哈希类不赌、也无处可实查）：在 [data-conversation-scroll] 内找 textContent
+* 以 marker 开头的最深元素（markerHost），再沿「唯一元素子链」上爬到父层有
+* 兄弟（=同级还有其他消息）或父层即滚动体的那一层为气泡。降级口径：爬到滚动体
+* 本体（=会话仅此一条消息、无兄弟可分层）则**跳过折叠**——宁可整段照旧，绝不
+* 把整个滚动体藏掉；marker 消失后由孤儿清扫恢复原状。平台气泡结构一旦可实查，
+* 可在 findCharterBubble 里补结构锚短路（属性锚成本与脆性 tradeoff 同 band 第 10 项）。
+*
+* ── 故障模式取舍清单（对照 chat-project-band.ts 头注 10 项范式逐项，t260905-04
+*    review C1 打回定稿；「照搬」字样禁用，逐项「带/不带+理由」）──
+* 1. ✅ 锚丢失显式降级：滚动体 0 命中=hero/卸载瞬态，Observer 不断、不 warn
+*    （同 band）；差异声明：滚动体在场但扫不到 marker=常态（会话无注入物），
+*    同样不 warn 不断 Observer。
+* 2. ⚠️ 负向排除**收窄声明**（非 band 原样）：本模块需在滚动体内自铸一个小条
+*    元素（insertBefore 到气泡父容器，带 CHIP_ATTR 自有属性锚）——这是对 band
+*    「零自铸 DOM」的真实扩面。气泡内部子树零触碰（内容隐藏纯靠气泡自身 attr
+*    +CSS）。**孤儿小条专项（review 条件 A）**：React commit 只清自己 fiber 记
+*    录的节点，外部插入的兄弟不随气泡被清理——会话切换/内容清空后旧小条可残留
+*    为幽灵。对策：小条与气泡的配对记入注册表，每轮回调校验「气泡仍连接 且
+*    classifyContextFold(气泡文本) 仍真」，失效即摘小条+摘气泡属性——幽灵小条
+*    不过夜（无注入物会话开头绝不出现「已注入项目背景」）。
+* 3. ✅ F1 防呆接线：startContextFoldEffect 返回清理函数本身，sidebar 以
+*    useEffect(() => startContextFoldEffect(), []) 接线（t260903-07 F1 实案不复犯）。
+* 4. ✅ 注入防线（attr-only 加码）：marker/文案只进属性值与 textContent，**不进
+*    CSS 选择器**——本模块 CSS 全静态字面量，零插值。
+* 5. ✅ 多锚语义收紧：单会话注入物恰一条（t3 ×1 守卫），命中 N>1=console.warn
+*    一次（疑似误打标信号，与 band「齐设无害」不同，差异声明）；仍全部处理。
+* 6. ✅ 畸形输入生产闸门：classifyContextFold 对非字符串/空串容错为 false；
+*    只认 trimStart 后以 marker 开头（中段提及 marker 的普通消息不误触发）。
+* 7. ✅ 幂等先查再设：属性值/小条存在性/style 文本同值跳过——React 重渲染与
+*    Observer 回调反复触发不抖。
+* 8. ✅ MutationObserver 防重建：滚动体祖先链 childList+subtree；**characterData
+*    不盯**——marker 到场必经 childList 变更，盯 characterData 会让 agent 流式
+*    逐 token 输出每帧触发全文扫描（性能不值，方案 review C1-② 定稿）。回调内
+*    只对新增节点子树扫描（增量），接线时对既有 DOM 跑一次全树兜底（覆盖先于
+*    接线已渲染的历史会话）。removedNodes 不盯——孤儿由第 2 项配对校验兜住。
+* 9. ✅ 全终态回收五项（band 第 9 项是四项，本模块多一项，非照抄）：断 Observer
+*    + 摘 head style + 摘全部自设属性与自铸小条（只摘自己设过/铸过的）+ **解绑
+*    document click 委托（band 明文无监听面，本模块新增件）** + 降级路径 warn
+*    留痕。点击委托防重入=引用计数单例：重复 start 不叠绑（监听器只绑一次），
+*    引用归零才真拆——React StrictMode 双挂（挂→清→挂）与多消费方两安全。
+* 10. ❌ body 级 overlay 贴 rect：不带（同 band 同 tag 理由——属性锚成本与脆性
+*     远低于逐帧 rect 跟随；本模块无逐帧跟随诉求）。
+*
+* 折叠态语义（方案 D2 裁定）：折叠=气泡 display:none（文本仍在 DOM，textContent
+* 可读——journey t2/t3 特征串 ×1 计数零改动兼容）；展开=去折叠态。marker 行展开
+* 态随全文可见（C2 定死「接受+声明」，改 DOM 摘行=childList 入气泡、与 React
+* 重渲染打架，不做）。
+*/
+/** 折叠态自有属性（气泡上；值='folded'|'open'）。 */
+const FOLD_ATTR = "data-wb-context-fold";
+/** 小条自有属性锚。 */
+const CHIP_ATTR = "data-wb-context-fold-chip";
+/** 自有 style 元素选择器（head 内，React 树之外）。 */
+const FOLD_STYLE_SELECTOR = "style[data-wb-context-fold-style]";
+/** 平台 chat 滚动体锚（同 chat-project-band；平台自声明属性）。 */
+const SCROLL_SELECTOR = "[data-conversation-scroll]";
+/** 小条文案（折叠态/展开态）。 */
+const CHIP_LABEL_FOLDED = "📋 已注入项目背景 · 点击展开";
+const CHIP_LABEL_OPEN = "📋 已注入项目背景 · 点击收起";
+/** 折叠件基础样式（全静态字面量，零插值——取舍第 4 项）。 */
+const FOLD_BASE_CSS = `
+[data-wb-context-fold="folded"] { display: none !important; }
+[${CHIP_ATTR}] { cursor: pointer; opacity: 0.85; font-size: 12px; }
+`;
+/**
+* 折叠判定（纯函数，smoke 直测）：文本 trimStart 后以 CHARTER_MARKER 开头=是。
+* 非字符串/空串/中段提及 marker → false（取舍第 6 项）。
+*/
+function classifyContextFold(text) {
+	return typeof text === "string" && text.trimStart().startsWith("<!-- workbench:kind:charter -->");
+}
+/**
+* 元素子节点集合数组化。真 DOM 的 el.children 是 HTMLCollection（live 集合，
+* 无 .some/.map 等数组方法）——必须 Array.from 落成真数组再集合操作；
+* 直接 `as El[]` 断言会在浏览器运行期炸（arbitrate round1 code-fault 根因，
+* KI 候选「桩集合语义分裂」的修复点）。Array.from 对桩数组/HTMLCollection/
+* NodeList 三形态一律成立，遍历期瞬时快照也消除了 live 集合遍历中 DOM 被改
+* 的失稳面。
+*/
+function elementChildren(el) {
+	return Array.from(el.children ?? []);
+}
+/**
+* 在滚动体内定位注入物气泡（纯函数面，可测）：
+* ① 收集全部以 marker 开头的元素，取最深者为 markerHost（无→null）；
+* ② 沿唯一元素子链上爬：父层只有这一个元素子且父层≠滚动体 → 上移；
+*    停在「父层有兄弟（=同级还有其他消息）或父层=滚动体」的那层=气泡。
+* ③ 气泡=滚动体本身（无兄弟可分层）→ null（降级：宁不折，不藏整个滚动体）。
+*/
+function findCharterBubble(scroll) {
+	const all = scroll.querySelectorAll("*") ?? [];
+	let host = null;
+	let hostDepth = -1;
+	const depthOf = (el) => {
+		let d = 0;
+		let cur = el;
+		while (cur && cur !== scroll) {
+			cur = cur.parentElement;
+			d++;
+		}
+		return d;
+	};
+	for (const el of all) if (classifyContextFold(el.textContent) && !elementChildren(el).some((c) => classifyContextFold(c.textContent))) {
+		const d = depthOf(el);
+		if (d > hostDepth) {
+			host = el;
+			hostDepth = d;
+		}
+	}
+	if (!host) return null;
+	let bubble = host;
+	while (bubble.parentElement && bubble.parentElement !== scroll && elementChildren(bubble.parentElement).length === 1) bubble = bubble.parentElement;
+	if (bubble === scroll || bubble.parentElement === scroll) return bubble === scroll ? null : bubble;
+	return bubble;
+}
+let state = null;
+let refCount = 0;
+/** 摘一个配对（小条+气泡属性）。 */
+function unpair(st, chip, bubble) {
+	try {
+		chip.remove();
+	} catch {}
+	try {
+		bubble.removeAttribute(FOLD_ATTR);
+	} catch {}
+	st.pairs.delete(chip);
+}
+/**
+* 对单个滚动体施折叠（幂等）：孤儿清扫 → 定位气泡 → 打折叠态+铸小条。
+* 返回处理结果：'none'=无 marker（常态）| 'folded'=新折/保持 | 'degraded'=爬到滚动体跳过。
+*/
+function applyContextFold(scroll, doc) {
+	const st = state;
+	if (!st) return "none";
+	for (const [chip, bubble] of [...st.pairs]) if (chip.isConnected === false || bubble.isConnected === false || !classifyContextFold(bubble.textContent)) unpair(st, chip, bubble);
+	const bubble = findCharterBubble(scroll);
+	if (!bubble) return "none";
+	if ([...st.pairs.entries()].find(([, b]) => b === bubble)) return "folded";
+	const marked = (scroll.querySelectorAll(`[data-wb-context-fold]`) ?? []).length;
+	if (marked > 0 && !st.warnedMulti) {
+		st.warnedMulti = true;
+		console.warn("[workbench] context-fold：单滚动体命中多条注入物（预期恰一条，疑似误打标）：", marked);
+	}
+	bubble.setAttribute(FOLD_ATTR, "folded");
+	const chip = doc.createElement("button");
+	chip.setAttribute(CHIP_ATTR, "");
+	chip.textContent = CHIP_LABEL_FOLDED;
+	try {
+		bubble.parentElement?.insertBefore(chip, bubble);
+	} catch (err) {
+		bubble.removeAttribute(FOLD_ATTR);
+		console.warn("[workbench] context-fold：小条插入失败，本条不折叠：", err instanceof Error ? err.message : err);
+		return "degraded";
+	}
+	st.pairs.set(chip, bubble);
+	return "folded";
+}
+/** 扫全部滚动体（增量回调与全树兜底共用入口）。 */
+function scanAll(doc) {
+	const scrolls = doc.querySelectorAll(SCROLL_SELECTOR) ?? [];
+	if (scrolls.length === 0) return;
+	for (const scroll of scrolls) applyContextFold(scroll, doc);
+}
+/** 小条点击（document 级委托，取舍第 9 项；展开/收起同点切换）。 */
+function onChipClick(ev) {
+	const st = state;
+	if (!st) return;
+	const target = ev.target;
+	if (!target || typeof target.closest !== "function") return;
+	const chip = target.closest(`[${CHIP_ATTR}]`);
+	if (!chip) return;
+	const bubble = st.pairs.get(chip);
+	if (!bubble) return;
+	const folded = bubble.getAttribute(FOLD_ATTR) === "folded";
+	bubble.setAttribute(FOLD_ATTR, folded ? "open" : "folded");
+	chip.textContent = folded ? CHIP_LABEL_OPEN : CHIP_LABEL_FOLDED;
+}
+/**
+* 启动折叠件（引用计数单例）：head 注入 style + Observer（document 子树
+* childList）+ document click 委托；接线时先全树兜底扫一次。二次调用不叠绑
+* （监听器只绑一次），返回值=清理函数（引用归零才真拆，取舍第 9 项）。
+*/
+function startContextFold(opts = {}) {
+	const doc = opts.doc ?? (typeof document !== "undefined" ? document : null);
+	if (!doc) {
+		console.warn("[workbench] context-fold：无 document 可挂，软退化不折叠");
+		return () => {};
+	}
+	refCount++;
+	if (!state) {
+		const st = {
+			observer: null,
+			doc,
+			pairs: /* @__PURE__ */ new Map(),
+			warnedMulti: false
+		};
+		state = st;
+		if (!doc.querySelector("style[data-wb-context-fold-style]")) {
+			const style = doc.createElement("style");
+			style.setAttribute("data-wb-context-fold-style", "");
+			style.textContent = FOLD_BASE_CSS;
+			doc.head.appendChild(style);
+		}
+		scanAll(doc);
+		const observer = new MutationObserver((muts) => {
+			let interesting = false;
+			for (const m of muts) {
+				for (const n of m.addedNodes) if (n.nodeType === 1 || typeof n.textContent === "string" && n.textContent.includes("<!-- workbench:kind:charter -->")) {
+					interesting = true;
+					break;
+				}
+				if (interesting) break;
+			}
+			if (!interesting) return;
+			scanAll(st.doc);
+		});
+		observer.observe(doc.documentElement ?? doc, {
+			childList: true,
+			subtree: true
+		});
+		st.observer = observer;
+		doc.addEventListener("click", onChipClick);
+	}
+	let stopped = false;
+	return () => {
+		if (stopped) return;
+		stopped = true;
+		refCount--;
+		if (refCount > 0 || !state) return;
+		const st = state;
+		try {
+			st.observer?.disconnect();
+		} catch {}
+		try {
+			st.doc?.removeEventListener("click", onChipClick);
+		} catch {}
+		for (const [chip, bubble] of [...st.pairs]) unpair(st, chip, bubble);
+		try {
+			const style = st.doc?.querySelector(FOLD_STYLE_SELECTOR);
+			if (style) st.doc?.head.removeChild(style);
+		} catch {}
+		state = null;
+	};
+}
+/** sidebar 接线入口（F1：返回清理函数本身，取舍第 3 项）。 */
+function startContextFoldEffect() {
+	return startContextFold();
 }
 //#endregion
 //#region src/client/project-icons.tsx
@@ -46747,6 +47018,10 @@ function WorkbenchSidebar(props) {
 	(0, react.useEffect)(() => {
 		if (!wide) return;
 		return startChatProjectBandEffect({});
+	}, [wide]);
+	(0, react.useEffect)(() => {
+		if (!wide) return;
+		return startContextFoldEffect();
 	}, [wide]);
 	(0, react.useEffect)(() => {
 		if (!wide) return;

@@ -22,6 +22,17 @@
 /** 会话开局 charter 端点路径（node.ts 注册与客户端 fetch 共用常量）。 */
 export const SESSION_CHARTER_PATH = '/suyou-workbench/api/session-charter'
 
+/**
+ * 上下文注入机读标记（t260905-04）：引擎侧给注入文本打的「消息元数据 kind=charter」
+ * 落地载体。平台 wire 契约 PromptContentPart 无 metadata 字段（仓内冻结镜像
+ * server/dsh/workbench/tests/ki046-charter-prompt-shape.mjs WIRE_CONTRACT 实锤），
+ * 故标记拼在注入文本首行（HTML 注释样式的行，模型读无害；展开态随全文可见属
+ * 已定降级——折叠态随内容区整体隐藏，「新会话开头只见小条」不受影响）。渲染端
+ * （src/client/context-fold.ts）认本常量为折叠触发器，同源派生防两端漂移（R7 先例）；
+ * 未来任何上下文注入（项目简介、文档引用）带同一标记即走同一折叠件。
+ */
+export const CHARTER_MARKER = '<!-- workbench:kind:charter -->'
+
 /** 渲染变量（全部替换为字符串；undefined/null 容错为空串）。 */
 export interface CharterVars {
   projectKey: string

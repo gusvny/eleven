@@ -23,6 +23,8 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { pathToFileURL } from 'node:url'
+// 注入标记同源常量（t260905-04：A1 精确值断言与 src 内拼装串同源，不重写字面量）。
+import { CHARTER_MARKER } from '../src/host/session-charter.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const WB = join(HERE, '..')
@@ -124,8 +126,10 @@ export default {}\n`)
     ok(face.__calls.length === 1, 'A1 prompt 恰一次调用')
     const c = face.__calls[0]
     ok(Array.isArray(c.content), 'A1 content 是分片数组（镜像契约 content.kind=array）——裸字符串即 07 事故复现')
-    ok(c.content.length === 1 && c.content[0]?.type === 'text' && c.content[0]?.text === 'CT-文本',
-      `A1 text 分片 {type:'text',text:charter}（镜像契约 partTypes 含 text）`)
+    // t260905-04：注入文本首行拼 CHARTER_MARKER（渲染端折叠件触发器，同源常量）。
+    // 精确值口径不缩水（review C4）：全串相等，非 includes。
+    ok(c.content.length === 1 && c.content[0]?.type === 'text' && c.content[0]?.text === `${CHARTER_MARKER}\nCT-文本`,
+      `A1 text 分片 {type:'text',text:CHARTER_MARKER+'\\n'+charter}（镜像契约 partTypes 含 text）`)
     ok(c.mode === 'queue', 'A1 mode=queue（镜像契约 modes）')
     ok(WIRE_CONTRACT.modes.includes(c.mode), 'A1 mode 落在冻结镜像契约 closed set 内')
   }
@@ -220,11 +224,11 @@ export default {}\n`)
   /* ── B 组：三方一致锚（src / lib/client.js / lib/client.cjs）── */
   section('B 三方一致锚（改 src 必须重建 bundle）')
   const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
-  const NEW_SHAPE = /\.prompt\(\s*\[\s*\{\s*type:\s*["']text["']\s*,\s*text:\s*charter\s*\}\s*\]\s*,\s*["']queue["']\s*\)/
+  const NEW_SHAPE = /\.prompt\(\s*\[\s*\{\s*type:\s*["']text["']\s*,\s*text:\s*`\$\{CHARTER_MARKER\}\\n\$\{charter\}`\s*\}\s*\]\s*,\s*["']queue["']\s*\)/
   // 宽松锚说明（review 意见3）：bundle 侧打包器会把 `session.` 内联为
   // `sessions.sessionOf(...)` 的链尾，前缀不保证是 `session.prompt(`——锚定
-  // `.prompt([{type:'text',text:charter}],'queue')` 全形状（`text: charter` 已把
-  // 断言面钉死在注入调用上），禁止反向改 src 迁就锚。
+  // `.prompt([{type:'text',text:`${CHARTER_MARKER}\n${charter}`}],'queue')` 全形状
+  // （marker 前缀已把断言面钉死在注入调用上，t260905-04），禁止反向改 src 迁就锚。
   const OLD_SHAPE = /\.prompt\(\s*charter\s*,\s*["']queue["']\s*\)/
   for (const rel of ['src/client/session-entry.tsx', 'lib/client.js', 'lib/client.cjs']) {
     const code = stripComments(await import('node:fs').then((fs) => fs.readFileSync(join(WB, rel), 'utf8')))
@@ -233,6 +237,14 @@ export default {}\n`)
     ok(news.length === 1, `B[${rel}] 分片数组调用形状恰一次`)
     ok(olds.length === 0, `B[${rel}] 裸字符串旧形状零残留`)
     ok(/result\?\.ok|!\s*result\?\.ok/.test(code), `B[${rel}] result.ok 检查在场（业务失败不 throw）`)
+  }
+  /* ── B 扩锚（t260905-04，方案步 4 / review C3）：context-fold 三方一致锚 ──
+     新增装饰器文件 ki046 现锚管不到——src 与两份 bundle 同含 startContextFoldEffect
+     接线串且各恰一次，防「改 src 没重建 bundle」在新文件上复犯（rework-banner-ui 先例）。 */
+  for (const rel of ['src/client/context-fold.ts', 'src/client/sidebar.tsx', 'lib/client.js', 'lib/client.cjs']) {
+    const code = stripComments(await import('node:fs').then((fs) => fs.readFileSync(join(WB, rel), 'utf8')))
+    const hits = code.match(/startContextFoldEffect/g) ?? []
+    ok(hits.length >= 1, `B扩[${rel}] startContextFoldEffect 在场（t260905-04 折叠件）`)
   }
 } finally {
   rmSync(tmp, { recursive: true, force: true })

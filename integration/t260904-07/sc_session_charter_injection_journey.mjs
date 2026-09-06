@@ -1,8 +1,9 @@
 // Integration scenario t260904-07 ③ — charter 注入用户旅程（browser，隔离台）。
 //
 // Intent (gray-box, user perspective):
-//   用户在项目行点 + 新建会话后，不输入任何内容即应看到会话以 charter 为首条消息
-//   开局（占位符已实值化、命中分段在文，t260904-07 拍板④/注入机制结论）——这是
+//   用户在项目行点 + 新建会话后，不输入任何内容即应看到 charter 收成「已注入项目
+//   背景」可展开小条（t260905-04：新会话开头只见小条、默认折叠、点开见全文；
+//   占位符已实值化、命中分段在文，t260904-07 拍板④/注入机制结论不变）——这是
 //   「每个 session 创建时注入我们想要的 prompt」的原话验收面；随后切换 tab、刷新
 //   重进既有会话，都不得再注入第二条（守卫：恢复/切换路径绝不注入，沿
 //   t260831-08 ⑥ 口径）。与 t260904-05 生命周期场景（tab 形态/续号/关闭链）intent
@@ -13,14 +14,21 @@
 //   T0 卫兵链：拒 3099 → playwright-core 缺失=ENV_FAIL → 隔离台不可达=ENV_FAIL →
 //      项目行未渲染=ENV_FAIL → charter 端点 404=源锚复核（已接线未部署=fail，
 //      pre-merge=na）。
-//   T1 新建注入：点 + → 新 tab 出现 → 会话区出现 charter 特征串（实值化，无 {{ 残留）
-//      → 截图证据（.suyou/screenshots/，KI-044 UI 票证据自觉）。
+//   T1 新建注入：点 + → 新 tab 出现 → 会话区出现 charter 特征串（实值化，无 {{ 残留；
+//      折叠态文本仍在 DOM=D2 口径，textContent 计数断言兼容不动）→ 折叠小条在场
+//      （「已注入项目背景」文案）→ 默认折叠（打标消息视觉隐藏）→ 点击小条展开见
+//      全文 → 截图证据（.suyou/screenshots/，KI-044 UI 票证据自觉）。折叠面断言
+//      pre-implement 红属预期（TDD 信号，t260905-04）。
 //      分级：30s 未上屏且 console 有注入链错误=fail；未上屏且零错误=env_fail（无凭据
 //      隔离台 kick-off 链路受限——本场景断言上限=注入链 UI 面，agent 回复链不在
 //      断言面，有凭据环境人工复判）。
 //   T2 切换零注入：切到相邻 tab 再切回 → 「的项目会话」特征串出现次数不变（无第二条
-//      charter）、tab 集合不变（守卫没把切换当新建）。单 tab 环境该腿 ENV_FAIL。
-//   T3 恢复零注入：reload → 过模态网 → 点原 tab → 特征串次数仍不变、tab 集合不变。
+//      charter）、tab 集合不变（守卫没把切换当新建）；切换目标会话的小条在场性必须
+//      与该会话是否含 charter 一致——无 charter 会话不留幽灵小条（t260905-04 review
+//      条件 A③：React 不移除外部节点，锚定失效须摘除）。单 tab 环境该腿 ENV_FAIL。
+//   T3 恢复零注入：reload → 过模态网 → 点原 tab → 特征串次数仍不变、tab 集合不变、
+//      小条恢复在场且在场性与特征串一致（折叠件重启全树兜底扫描兑现——恢复路径
+//      折叠面不丢）。
 //   T4 console 卫生：零 console error / pageerror（过滤无凭据环境已知凭据类噪音）。
 //
 // Execution contract (t260904-12 三态): stdout last line
@@ -141,6 +149,26 @@ const chatText = () => page.evaluate(() => document.querySelector('[data-convers
 const CHARTER_MARK = '的项目会话'; // 真源模板首句「你是「{{project_name}}」的项目会话」实值化后的稳定特征
 const markCount = (t) => t.split(CHARTER_MARK).length - 1;
 
+// ---- t260905-04 折叠面锚（灰盒：锚方案定稿的小条自有属性与打标容器属性 +
+// 小条文案「已注入项目背景」，不锚内部实现——契约不变的实现重构不得打破本场景）----
+const CHIP_SEL = '[data-wb-context-fold-chip]';
+const FOLD_SEL = '[data-wb-context-fold]';
+const chipRead = () => page.evaluate(({ CHIP_SEL, FOLD_SEL }) => {
+  const chip = document.querySelector(CHIP_SEL);
+  const fold = document.querySelector(FOLD_SEL);
+  const hidden = (el) => {
+    if (!el) return false;
+    const cs = getComputedStyle(el);
+    return el.clientHeight === 0 || cs.display === 'none' || cs.visibility === 'hidden';
+  };
+  return {
+    chipPresent: !!chip,
+    chipText: (chip?.textContent ?? '').trim(),
+    foldPresent: !!fold,
+    foldHidden: hidden(fold),
+  };
+}, { CHIP_SEL, FOLD_SEL });
+
 // ---- T1 新建注入：charter 为首条消息 ----
 const tabsBefore = await rowRead();
 await safeClick('[data-wb-psess-row] [data-wb-psess-new]');
@@ -171,6 +199,22 @@ if (!injected) {
     record('t1/screenshot-evidence', 'env_fail', `截图失败：${String(e).slice(0, 100)}`);
   }
 
+  // ---- t1 折叠面：小条在场 + 默认折叠 + 展开见全文（t260905-04 验收①②）----
+  const chip = await chipRead();
+  record('t1/context-chip-present', chip.chipPresent && chip.chipText.includes('已注入项目背景') ? 'pass'
+    : 'fail', chip.chipPresent ? `小条在场，文案「${chip.chipText.slice(0, 40)}」` : '折叠小条不在场（整段仍直接刷屏，或折叠件未部署——pre-implement 红属预期）');
+  record('t1/context-default-collapsed', chip.foldPresent && chip.foldHidden ? 'pass'
+    : 'fail', `打标容器${chip.foldPresent ? (chip.foldHidden ? '默认折叠（视觉隐藏）' : '在场但未折叠——整段仍可见') : '不在场'}`);
+  if (chip.chipPresent) {
+    await safeClick(CHIP_SEL);
+    await page.waitForTimeout(600);
+    const expanded = await chipRead();
+    record('t1/context-expand-shows-full', !expanded.foldHidden ? 'pass'
+      : 'fail', expanded.foldHidden ? '点击小条后打标内容仍视觉隐藏（展开交互未生效）' : '点击小条后全文可见（特征串在文与占位符实值化已由上两条断言覆盖）');
+  } else {
+    record('t1/context-expand-shows-full', 'fail', '小条不在场，展开交互无从验证');
+  }
+
   // ---- T2 切换零注入 ----
   const tabs = await rowRead();
   if (tabs.length < 2) {
@@ -180,6 +224,12 @@ if (!injected) {
     const curIdx = 0; // 新建后 active=新 tab（先例语义）；切相邻再切回
     await page.evaluate((i) => document.querySelectorAll('[data-wb-psess-row] [data-wb-psess-tab]')[i].click(), (curIdx + 1) % tabs.length);
     await page.waitForTimeout(1200);
+    // 幽灵小条守卫（t260905-04 review 条件 A③）：切换目标会话的小条在场性必须
+    // 与该会话是否含 charter 一致——外部插入的兄弟节点 React 不清，锚定失效须摘除。
+    const ghost = await chipRead();
+    const ghostMark = markCount(await chatText());
+    record('t2/context-chip-no-ghost', ghost.chipPresent === (ghostMark > 0) ? 'pass'
+      : 'fail', `切换目标会话特征串 ×${ghostMark} 而小条${ghost.chipPresent ? '在场' : '不在场'}——${ghostMark > 0 ? '含 charter 应有小条' : '无 charter 会话不得残留幽灵小条'}`);
     await page.evaluate((i) => document.querySelectorAll('[data-wb-psess-row] [data-wb-psess-tab]')[i].click(), curIdx);
     await page.waitForTimeout(1200);
     const after = markCount(await chatText());
@@ -199,6 +249,10 @@ if (!injected) {
   const tabsReloaded = await rowRead();
   record('t3/restore-no-reinject', (afterReload === 1 && tabsReloaded.length === tabsSnap.length) ? 'pass'
     : 'fail', `恢复后特征串 ×${afterReload}（应仍 ×1=无第二条注入），tab ×${tabsReloaded.length}（应 ×${tabsSnap.length}）`);
+  // 折叠面恢复（t260905-04）：reload 后折叠件重启，全树兜底扫描应恢复小条与折叠态
+  const chipReloaded = await chipRead();
+  record('t3/context-chip-restored', chipReloaded.chipPresent === (afterReload > 0) ? 'pass'
+    : 'fail', `恢复后特征串 ×${afterReload} 而小条${chipReloaded.chipPresent ? '在场' : '不在场'}——折叠面应随会话恢复（含 charter=小条在场），不丢不幽灵`);
 }
 
 // ---- T4 console 卫生（过滤无凭据环境已知凭据类噪音）----
