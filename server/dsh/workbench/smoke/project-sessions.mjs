@@ -263,6 +263,19 @@ section('S3 方块 tab 与高亮锚（R2/R6）')
   ok(lib.includes('data-wb-psess-tab'), 'lib 产物 tab 锚在场')
 }
 
+section('S3b 空态可发现入口（t260906-01：账册空=带字「＋ 新建会话」，有 tab=小方块）')
+{
+  const row = readFileSync(srcRow, 'utf8')
+  ok(row.includes('wb-psess-new-labeled'), 'src 空态带字变体类在场')
+  ok(row.includes('＋ 新建会话'), 'src 空态按钮带文字「＋ 新建会话」在场')
+  ok(row.includes('tabs.length === 0'), 'src 空态判定=账册 tab 为空')
+  ok(row.includes('data-empty='), 'src 空态 data-empty 锚在场')
+  // 同锚纪律：空态/有 tab 共用 data-wb-psess-new（动作链不变）
+  ok((row.match(/data-wb-psess-new=/g) || []).length === 1, 'data-wb-psess-new 锚恰一处（两态同钮）')
+  const lib = readFileSync(libClient, 'utf8')
+  ok(lib.includes('＋ 新建会话') && lib.includes('wb-psess-new-labeled'), 'lib 产物空态带字在场（同批重建证据）')
+}
+
 section('S4 语义锚纪律（零出厂类名匹配）')
 {
   const row = readFileSync(srcRow, 'utf8')

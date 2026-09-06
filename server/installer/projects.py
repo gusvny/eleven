@@ -3,7 +3,9 @@
 立项真源 = notes/epics/project-lifecycle.md 票①（面A 接入 + 面C 报告）+
 票②（面B 摘除，t260904-14）：
 - add：fail-closed 前置校验 → 原子写 <注册表根>/<key>/project.yaml → 接入体检报告
-  （黄牌只提示不代写不阻塞，exit 0）。
+  （黄牌只提示不代写不阻塞，exit 0）。t260906-01 容器式代建：根目录不存在=
+  闸序全过后 mkdir 代建（含父目录）并落容器最小脚手架（scaffold.py，只对本次
+  代建的新根落；已存在目录零覆盖；全程零 git，报告提示容器未含 git 仓库）。
 - list：注册+隔离条目全列（隔离原因含 <dir>/project.yaml 定位）+ 每 key 票计数
   （子进程查 Temporal，服务不可达/SDK 缺失两态降级可辨且不红——KI-039 教训：
   依赖缺失不得吞成「无数据」，也不得与「不可达」混同）。
@@ -46,6 +48,8 @@ import subprocess
 import sys
 import time as _time
 
+from installer import runtime as _runtime
+from installer import scaffold as scaffold_mod
 from installer.service import FailClosed
 
 # 票计数子进程超时（秒）。超时路径由 subprocess.run 兜底（kill+wait，四路终态之一）。
@@ -106,8 +110,8 @@ def validate_add_inputs(key: str, name: str, root_dirs):
     if not os.path.isabs(root):
         raise FailClosed("根目录必须是绝对路径：%r（相对路径随 cwd 漂移，拒绝）" % root)
     p = pathlib.Path(root)
-    if not p.is_dir():
-        raise FailClosed("根目录不存在或不是目录：%s（add 不代建项目目录）" % root)
+    # t260906-01 代建：根目录不存在不再拒收——交由 cmd_project_add 闸序全过后代建
+    # （mkdir parents，含父目录）并落容器脚手架；这里只把路径带回去。
     return key, name, p
 
 
@@ -202,6 +206,38 @@ def cmd_project_add(paths, args, log=print) -> int:
     # 契约①b 旅程：目录可先在（预布置 credentials.yaml 等），缺则建（幂等）。
     key_dir.mkdir(parents=True, exist_ok=True)
 
+    # t260906-01 代建+容器脚手架：闸序（装载/重名/交叉）全过后，根目录不存在=
+    # 代建（mkdir parents，含父目录）并落容器最小脚手架（只对本次代建的新根落，
+    # 已存在目录零覆盖）。脚手架先于条目写入：失败=红+全量回滚（含新建根），
+    # 不留半成品容器。全程零 git（容器式定稿，容器无 git 仓库见报告提示）。
+    created_root = not root.is_dir()
+    if created_root:
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            if created_dir:
+                try:
+                    key_dir.rmdir()  # 仅空目录可删（零残留口径）
+                except OSError:
+                    pass
+            raise FailClosed("根目录代建失败：%s: %s" % (root, e))
+    scaffold = {"created": [], "skipped": []}
+    # JSON 口径下脚手架过程行静默（不污染机器输出）；账目走 JSON scaffold 字段。
+    scaffold_log = (lambda *a, **k: None) if as_json else log
+    if created_root:
+        try:
+            engine_root = getattr(paths, "root", None) or _runtime.repo_root()
+            scaffold = scaffold_mod.scaffold_container(
+                root, engine_root=pathlib.Path(engine_root), log=scaffold_log)
+        except FailClosed:
+            scaffold_mod.rollback_scaffold(root, scaffold, created_root=True)
+            if created_dir:
+                try:
+                    key_dir.rmdir()  # 仅空目录可删（零残留口径）
+                except OSError:
+                    pass
+            raise
+
     # 并发同 key TOCTOU 闸：排他认领 project.yaml（O_CREAT|O_EXCL），输家重装载确认后
     # 报幂等拒收——不静默覆盖；认领空文件即条目终点（tmp+rename 原子替换）。
     claim_fd = None
@@ -211,10 +247,13 @@ def cmd_project_add(paths, args, log=print) -> int:
         try:
             projects2, quarantined2 = shared.load_projects_registry()
         except ValueError as e:
+            _rollback_add(root, scaffold, created_root)
             raise FailClosed("注册表装载失败：%s" % e)
         if any(p["key"] == key for p in projects2) or \
                 any(pathlib.Path(q["dir"]).name == key for q in quarantined2):
+            _rollback_add(root, scaffold, created_root)
             raise FailClosed("项目 %s 已注册（并发 add 后写方）：add 幂等，已注册即拒收" % key)
+        _rollback_add(root, scaffold, created_root)
         raise FailClosed(
             "注册条目已存在但装载不可见：%s（并发写入现场）。请人工处置后重试，add 不覆盖"
             % target)
@@ -228,7 +267,8 @@ def cmd_project_add(paths, args, log=print) -> int:
         tmp.write_text(content, "utf-8")
         os.replace(tmp, target)
     except OSError as e:
-        _rollback_after_write_failure(tmp, key_dir, target, created_dir)
+        _rollback_after_write_failure(tmp, key_dir, target, created_dir,
+                                      root, scaffold, created_root)
         raise FailClosed("条目写入失败，已回滚（注册表零残留）：%s: %s"
                          % (type(e).__name__, e))
 
@@ -242,22 +282,37 @@ def cmd_project_add(paths, args, log=print) -> int:
             raise ValueError("写后出现隔离条目（%d → %d）"
                              % (len(quarantined), len(quarantined3)))
     except ValueError as e:
-        _rollback_after_write_failure(tmp, key_dir, target, created_dir)
+        _rollback_after_write_failure(tmp, key_dir, target, created_dir,
+                                      root, scaffold, created_root)
         raise FailClosed("写后自检未过，已回滚（注册表零残留）：%s" % e)
 
     warnings, credentials_state = _health_report(shared, key)
+    if created_root:
+        warnings.append({
+            "code": "container-no-git",
+            "message": "容器未含 git 仓库（容器式定稿：add 不做任何 git 操作）——"
+                       "开工单前需先建/clone repo（多 repo 支持与工单泳道挂靠改造"
+                       "另行立项=票B）。",
+        })
     if as_json:
         log(json.dumps({
             "ok": True, "action": "add",
             "project": {"key": key, "name": name, "dirs": [str(root)]},
             "entry": str(target),
+            "root_created": created_root,
+            "scaffold": scaffold,
             "credentials": credentials_state,
             "warnings": warnings,
         }, ensure_ascii=False, indent=2))
         return 0
     log("[绿] 项目已注册：%s（name=%s）" % (key, name))
     log("      注册条目：%s" % target)
-    log("      根目录：%s" % root)
+    log("      根目录：%s%s" % (root, "（本次代建，含父目录）" if created_root else ""))
+    if created_root:
+        log("      生成物清单：\n        - %s\n        - %s"
+            % ("\n        - ".join(scaffold.get("created", [])) or "（无）",
+               ("（已存在跳过）" + "、".join(scaffold.get("skipped", [])))
+               if scaffold.get("skipped") else "（零覆盖：无跳过项）"))
     if credentials_state == "present":
         log("[绿] 体检·credentials：per-key credentials.yaml 在位（无需回落）。")
     for w in warnings:
@@ -266,11 +321,18 @@ def cmd_project_add(paths, args, log=print) -> int:
     return 0
 
 
-def _rollback_after_write_failure(tmp, key_dir, target, created_dir):
+def _rollback_add(root, scaffold, created_root):
+    """拒收路径的容器回滚：本票代建的根+脚手架产物一并清（零残留；仅本票新建，
+    不碰他人数据）。"""
+    scaffold_mod.rollback_scaffold(root, scaffold, created_root)
+
+
+def _rollback_after_write_failure(tmp, key_dir, target, created_dir,
+                                  root=None, scaffold=None, created_root=False):
     """写失败/自检失败的清理链：tmp 必清；条目文件可删——它要么是零字节认领、要么是
     本票刚写入的内容（认领经 O_EXCL 独占赢来，无并发写者，非他人数据）；目录仅当
-    「本票创建且已空」才删——防误删预布置了 credentials 的目录（契约①b 旅程）。
-    拒收零残留口径（C2）。"""
+    「本票创建且已空」才删——防误删预布置了 credentials 的目录（契约①b 旅程）；
+    本票代建的容器（根+脚手架）一并清（t260906-01）。拒收零残留口径（C2）。"""
     try:
         if tmp.is_file():
             tmp.unlink()
@@ -286,6 +348,8 @@ def _rollback_after_write_failure(tmp, key_dir, target, created_dir):
             key_dir.rmdir()  # 仅空目录可删；非空（预布置/并发）原样保留
         except OSError:
             pass
+    if root is not None and scaffold is not None and created_root:
+        scaffold_mod.rollback_scaffold(root, scaffold, created_root=True)
 
 
 def _health_report(shared, key):

@@ -2968,6 +2968,11 @@ const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
   border:1px solid color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 55%,var(--dsw-alias-bg-primary,#fff)); background:none;
   color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-label-primary,#1f2328)); cursor:pointer; }
 .wb-psess-new:hover:not(:disabled) { background:var(--wb-psess-hover, rgba(255,255,255,0.1)); }
+/* 空态可发现性（t260906-01）：账册为空时 24px 无字小方块不可认出——换带文字
+ * 「＋ 新建会话」按钮（auto 宽 + padding）；有 tab 后回落小方块形态。同锚
+ * data-wb-psess-new 不变。 */
+.wb-psess-new.wb-psess-new-labeled { width:auto; height:22px; padding:0 8px;
+  gap:4px; font-size:11.5px; }
 .wb-psess-new:disabled { opacity:0.4; cursor:default; }
 .wb-psess-tab { box-sizing:border-box; position:relative; min-width:24px;
   height:24px; flex:none; display:inline-flex; align-items:center;
@@ -3080,13 +3085,14 @@ function ProjectSessionRow(props) {
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: PSESS_STYLES }),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 				type: "button",
-				className: "wb-psess-new",
+				className: tabs.length === 0 ? "wb-psess-new wb-psess-new-labeled" : "wb-psess-new",
 				"data-wb-psess-new": "",
+				"data-empty": tabs.length === 0,
 				disabled: creating,
 				title: `新建 ${projectName} 会话（主目录${projectDir ? `：${projectDir}` : ""}）`,
 				"aria-label": `新建 ${projectName} 会话`,
 				onClick: onNew,
-				children: "+"
+				children: tabs.length === 0 ? "＋ 新建会话" : "+"
 			}),
 			tabs.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				ref: confirmId === t.id ? tabRef : void 0,
@@ -4465,7 +4471,7 @@ function ProjectAddModal(props) {
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h3", { children: "接入项目" }),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
 				className: "wb-pmod-sub",
-				children: "注册到 ~/.sandbar/projects/<key>/ · 单根模型：多 repo 项目填父目录（票的空间=根下 .lane/）"
+				children: "注册到 ~/.sandbar/projects/<key>/ · 单根模型：多 repo 项目填父目录（票的空间=根下 .lane/） · 根目录不存在会自动创建（含父目录）并生成容器脚手架（全程零 git：容器未含仓库，开工单前需建/clone repo）"
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "wb-pmod-field",
@@ -4504,7 +4510,7 @@ function ProjectAddModal(props) {
 				"data-wb-pmod-add-pre": "",
 				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "wb-pmod-ok",
-					children: "本地形状检查通过（未落盘）——确认后由 CLI 做深度校验（存在性/交叉/重复/legacy），拒收原因将就地显示。"
+					children: "本地形状检查通过（未落盘）——确认后由 CLI 做深度校验（交叉/重复/legacy；根目录不存在将自动创建并生成容器脚手架），拒收原因将就地显示。"
 				}), warnings.map((w, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-pmod-warn",
 					children: [

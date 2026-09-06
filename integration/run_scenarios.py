@@ -387,7 +387,7 @@ SCENARIOS = [
      "add 产出条目的双侧装载一致性（t260904-10，ro 隔离根）：真跑 `sandbar project add` 后 Python shared.load_projects_registry 与 TS suyou-projects.ts.loadRegistry 从同一隔离根（SANDBAR_PROJECTS_DIR 临时目录）装载出同一条目（key/name/dirs 全等）、零隔离；首装载×seed 自动播种真路径（tracked 种子 suyou 在案+.migrated 落盘）且 add 后种子条目字节不动（决策7 不动账）；体检报告三词汇（verify.yaml/credentials/paths）在文且 credentials 先布置/裸目录两态输出可辨——排他性锚 project.yaml 文件而非条目目录（契约①b：目录与 per-key credentials 可先于 add 布置，O_EXCL 架在目录 mkdir 上=此腿红契约对）；写入零 .tmp. 残留；--json 机器可判。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "node integration/t260904-10/sc_project_add_dual_loader.mjs", "ro"),
     ("t260904-10-project-add-rejections",
-     "add 拒收面全枚举 CLI 真跑（t260904-10，ro 隔离根）：key 白名单（大写/下划线/首字符中划线/42 字符拒，41 字符上界收）；根目录形态（缺参/相对路径/不存在/是文件非目录）；多目录输入语义化拒收（epic 验收2 独立拒收路径：旗标面须能表达多目录输入，且文案点名「单根模型/多目录」——裸 argparse 用法错不算语义拒收）；已注册幂等同判（两次出口码+输出全等）；隔离条目同名拒收；根交叉与互为父子嵌套（父目录/子目录/恰等三向，文案报两个 key）；SUYOU_PROJECTS_YAML legacy 拒收指路（文案点名存量 env）；name 三态（空/含 #/含换行拒且文案点名 name，首尾空白 trim 后收并读回验证）；每拒收腿注册表根字节级零残留（快照比对+.tmp. 泄漏检查）；并发同 key 双 add 恰一成一拒且赢家条目 name/dirs 自洽不混写（TOCTOU 闸）；remove 点位稳定钉（输出点名 remove、无裸 traceback、注册表不动——票①骨架恒红/票②真实现两期皆存活）。实现落地前红属预期",
+     "add 拒收面全枚举 CLI 真跑（t260904-10，ro 隔离根）：key 白名单（大写/下划线/首字符中划线/42 字符拒，41 字符上界收）；根目录形态（缺参/相对路径/是文件非目录——「不存在」腿已随 t260906-01 容器代建翻转为成功旅程，移册 t260906-01-add-creates-container/-faultlines 承接）；多目录输入语义化拒收（epic 验收2 独立拒收路径：旗标面须能表达多目录输入，且文案点名「单根模型/多目录」——裸 argparse 用法错不算语义拒收）；已注册幂等同判（两次出口码+输出全等）；隔离条目同名拒收；根交叉与互为父子嵌套（父目录/子目录/恰等三向，文案报两个 key）；SUYOU_PROJECTS_YAML legacy 拒收指路（文案点名存量 env）；name 三态（空/含 #/含换行拒且文案点名 name，首尾空白 trim 后收并读回验证）；每拒收腿注册表根字节级零残留（快照比对+.tmp. 泄漏检查）；并发同 key 双 add 恰一成一拒且赢家条目 name/dirs 自洽不混写（TOCTOU 闸）；remove 点位稳定钉（输出点名 remove、无裸 traceback、注册表不动——票①骨架恒红/票②真实现两期皆存活）。实现落地前红属预期",
      "node integration/t260904-10/sc_project_add_rejections.mjs", "ro"),
     ("t260904-10-project-list-report",
      "list 报告契约（t260904-10，ro 隔离根）：人读与 --json 同列注册+隔离条目，隔离原因含 <dir>/project.yaml 定位字面，无 project.yaml 的保留目录不列；票计数降级三态——服务不可达（SUYOU_TARGET_HOST 死端口注入）与 SDK 缺失（PYTHONPATH 空壳 temporalio 包注入，KI-039 教训：依赖缺失不得吞成无数据）两态均 exit 0 不红、条目照列、两态输出可辨；正常计数腿在测试台 17233 可达时真跑（不可达有声 SKIP）。全程显式 env 钉死防缺省外溢生产 7233，零 3099 接触。实现落地前红属预期",
@@ -445,6 +445,21 @@ SCENARIOS = [
     ("t260904-15-project-ui-settings-isolation",
      "设置弹层信息面+隔离详情+空注册表首接（t260904-15，浏览器捕获，与场景② intent 不同面：守信息面/降级口径/空表面；t260904-19 起 docker 测试台双实例）：设置弹层只读 key/显示名/根目录如实呈现；票计数 Temporal 不可达降级「—」类中性提示不红不谎报（验收11 降级口径）；体检区中性提示不含「无黄牌」谎报（R2b 降档口径）；danger 摘除入口在位；隔离红行点击见原因含 project.yaml 定位+修复指路（验收11）；空注册表 GET /wf/projects 200 空清单不 500、零分组仍渲染接入行且首接走通（验收9 空表面）。实现落地前红属预期；playwright-core 缺失=ENV_FAIL 点名（KI-036 守卫，不假绿）",
      "node integration/t260904-15/sc_project_ui_settings_isolation.mjs", "ro"),
+
+    # ---- t260906-01：新项目从零接入（容器式：目录代建+容器脚手架+空项目入口+路由引导）----
+
+    ("t260906-01-add-creates-container",
+     "新目录容器代建一步接入旅程（t260906-01，ro 隔离注册表根+假 git PATH 桩）：根目录不存在（含父目录链）`sandbar project add --json` 一次成功=root_created+目录代建+容器脚手架全清单（CLAUDE.md 骨架、notes/epics|discussions/.gitkeep、docs/.gitkeep、server/dsh/model-routes.yaml）逐项在盘、scaffold.created 机械可判且 skipped 空、模板表与引擎仓真源 sha256 逐字节一致（同源模板不造两份）、CLAUDE.md 与 JSON warnings（container-no-git）含「容器未含 git 仓库」提示、注册条目落盘 key/dirs 可读回；文本形态报告含「生成物清单」「本次代建，含父目录」；全程零 git 调用（PATH 注入记录型 git 桩=调用日志空+项目树无 .git）。与 t260904-10-add-rejections（拒收面）intent 不同面：本条守代建成功旅程。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "node integration/t260906-01/sc_add_creates_container.mjs", "ro"),
+    ("t260906-01-add-scaffold-faultlines",
+     "容器脚手架故障面对抗（t260906-01，ro 隔离根+--root 桩树注入源表三态）：已存在目录接入=项目根树快照逐字节一致（零新增零覆盖，自带自定义 model-routes.yaml 与 marker 不动、scaffold.created 空、root_created=false）；源表缺失与畸形（缺 default:/roles: 结构锚）两态=fail-closed 红+点名源路径+注册表与新建根零残留（回滚含整根与父链移除，绝不吞成空拷贝）；代建×防呆闸交互=新根为已注册根的「尚不存在」祖先仍被闸 d 拒（拒后祖先不被代建=闸序在 mkdir 之前的锚、注册表快照不变）。F1 并发同根异 key TOCTOU 为已登记预存洞（本票不修），不入闸防并发假红。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "node integration/t260906-01/sc_add_scaffold_faultlines.mjs", "ro"),
+    ("t260906-01-routes-uninitialized-init",
+     "路由无表引导态+一键初始化（t260906-01，API 面无浏览器，mock webServer 手法同 ui smoke E 段、进程内 apply 零 3099 接触）：无表项目路由视图=uninitialized+template_source 引导态非 error（红错退役——运行时本就回落默认模型，无表≠故障）；畸形表=解析失败红错不降级为引导态（三态：畸形 fail-closed）；POST /suyou-admin/api/routes/init 对无表项目=建父目录+原子写引擎真源表（写入与引擎表逐字节一致、无 tmp 泄漏）、对已有表=拒收零覆盖（放用户自有表再 init 断言内容不被冲掉）、init 后 GET 视图出表（uninitialized 消失、default 可解析）。wire 口径=project 走 ?project= 查询参（与同族 GET 一致）。与 t260904-15-host-routes（workbench 薄壳透传面）intent 不同面：本条守 ui 路由视图自身契约。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "node integration/t260906-01/sc_routes_uninitialized_init.mjs", "ro"),
+    ("t260906-01-session-entry-empty-labeled",
+     "空项目会话入口可发现+弹层代建口径（t260906-01，workbench 客户端 src+lib 双锚灰盒，同 project-sessions.mjs S3 守卫手法）：账册空=「＋ 新建会话」带字按钮锚（wb-psess-new-labeled 变体+tabs.length===0 条件分支）在 src 在场、lib/client.js 同批在场（lib 锚=bundle 重建看守，KI-052 客户端半从盘现读——盘上 bundle 旧=改了也看不见）；data-wb-psess-new 数据锚与 24px 方块样式保留（有 tab 恢复现行形态、既有 smoke 旧断言不回归）；接入弹层预检口径退役「存在性」措辞、改「自动创建」。真 DOM 呈现归合并闸 ui_evidence 截图证据面（KI-036/044 家族），不重复 browser 腿。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "node integration/t260906-01/sc_session_entry_empty_labeled.mjs", "ro"),
 
     # ---- t260904-18：三门新契约（refs 建单闸 / files_changed 回执形状 / ui_evidence 声明制）----
 

@@ -228,7 +228,7 @@ export function ProjectAddModal(props: { onClose: () => void; onAdded: () => voi
   return (
     <ModalShell label="接入项目" locked={busy} onClose={onClose}>
       <h3>接入项目</h3>
-      <p className="wb-pmod-sub">注册到 ~/.sandbar/projects/&lt;key&gt;/ · 单根模型：多 repo 项目填父目录（票的空间=根下 .lane/）</p>
+      <p className="wb-pmod-sub">注册到 ~/.sandbar/projects/&lt;key&gt;/ · 单根模型：多 repo 项目填父目录（票的空间=根下 .lane/） · 根目录不存在会自动创建（含父目录）并生成容器脚手架（全程零 git：容器未含仓库，开工单前需建/clone repo）</p>
       <div className="wb-pmod-field"><label>项目 key</label>
         <input className="wb-pmod-mono" data-wb-pmod-add-key="" value={key} onChange={e => setKey(e.target.value)} placeholder="小写字母/数字/连字符" /></div>
       <div className="wb-pmod-field"><label>显示名</label>
@@ -238,7 +238,7 @@ export function ProjectAddModal(props: { onClose: () => void; onAdded: () => voi
       {error && <div className="wb-pmod-err" data-wb-pmod-add-error="">{error}</div>}
       {pre && (
         <div data-wb-pmod-add-pre="">
-          <div className="wb-pmod-ok">本地形状检查通过（未落盘）——确认后由 CLI 做深度校验（存在性/交叉/重复/legacy），拒收原因将就地显示。</div>
+          <div className="wb-pmod-ok">本地形状检查通过（未落盘）——确认后由 CLI 做深度校验（交叉/重复/legacy；根目录不存在将自动创建并生成容器脚手架），拒收原因将就地显示。</div>
           {warnings.map((w, i) => (
             <div key={i} className="wb-pmod-warn">⚠ {w}（形状问题不阻塞确认，但 CLI 深度校验仍会拒收）</div>
           ))}

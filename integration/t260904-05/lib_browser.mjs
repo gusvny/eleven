@@ -11,6 +11,28 @@ import { ensureStageConsole } from '../lib_stage_console.mjs';
 
 export const BASE = (await ensureStageConsole()).base;
 
+// 台身份探针（t260906-01 仲裁实锤故障面的机械归因缝）：台服务的 client bundle 与
+// 本仓 lib/client.js 逐字节比对，PROVENANCE 行只记录不断言（不改任何场景的腿/计数）。
+// 背景：共享常驻台绑定创建泳道的 /repo 且 ensure 健康复用（t260906-01 机械跑实录=
+// 台上是别泳道 t260905-09 的构建），且泳道台缺 node_modules 时 /repo 回落挂主树
+// （stage_docker 供给语义）——浏览器面测的树与本泳道交付物可以不同源，此前归因
+// 只能靠 docker inspect 法证。本行让每次机械跑自带「台 serves 谁」的一手证据。
+{
+  const localLib = new URL('../../server/dsh/workbench/lib/client.js', import.meta.url).pathname;
+  try {
+    const r = await fetch(`${BASE}/suyou-workbench/lib/client.js`, { signal: AbortSignal.timeout(5000) });
+    if (r.ok) {
+      const [served, local] = await Promise.all([r.text(), import('node:fs').then((fs) => fs.readFileSync(localLib, 'utf8'))]);
+      console.log(`CONSOLE_PROVENANCE base=${BASE} bundle=${served === local ? 'matches-repo' : 'FOREIGN/STALE'}`);
+    } else {
+      // lib 直连路径不在（如台按 SPA 供面）：回退指纹 shell 入口 asset 名（构建内容哈希，可跨跑对比）
+      const html = await fetch(`${BASE}/`, { signal: AbortSignal.timeout(5000) }).then((x) => x.text()).catch(() => '');
+      const asset = (html.match(/\/assets\/index-[^"]+\.js/) ?? ['(未找到)'])[0];
+      console.log(`CONSOLE_PROVENANCE base=${BASE} lib-path=HTTP ${r.status} shell_asset=${asset}（bundle 比对不可用，用 asset 名跨跑比对）`);
+    }
+  } catch { console.log(`CONSOLE_PROVENANCE base=${BASE} bundle=unknown (探针失败，不阻塞)`); }
+}
+
 /** 生产控制台红线：命中 3099 直接拒跑（宁可自家测试不跑）。 */
 export function refuseProductionConsole() {
   if (BASE.includes(':3099')) {

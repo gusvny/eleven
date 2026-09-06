@@ -11,7 +11,8 @@
  *      默认 kimi-coding/k3、integration=zai/glm-5.2、product-operation 分工=zai/glm-5.2、
  *      8 个 dispatch 实例（5 默认 + 3 分工）、只读口径——防 gen.py/路由表漂移。
  *   E. /suyou-admin/api/routes 路由（node.ts apply + mock webServer/req/res）：
- *      临时 repo 布局 → 200 路由表+实例；路由表缺失 → 200 {ok:false,error}（不抛错）。
+ *      临时 repo 布局 → 200 路由表+实例；路由表缺失 → 200 ok+uninitialized 引导态
+ *      （t260906-01）；POST /routes/init 从引擎默认表生成（已存在拒收、建父目录）。
  */
 
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -122,15 +123,15 @@ section('D buildRoutesView 对真源钉当前值（防路由表漂移）')
 {
   const view = await buildRoutesView(REPO)
   ok(view.error === undefined, '真源视图组装无 error')
-  ok(view.default?.provider === 'kimi-coding' && view.default?.model === 'k3' && view.default?.via === 'default',
-    'default = kimi-coding/k3（对齐 settings.yaml 生效值）')
+  ok(view.default?.provider === 'zai' && view.default?.model === 'glm-5.3-flash' && view.default?.via === 'default',
+    'default = zai/glm-5.3-flash（260902 配额急救修正后的表值）')
   ok(view.roles.length === 3, '三角色齐全')
   ok(view.roles.map(r => r.role).join(',') === 'integration,developer,product-operation',
     '角色顺序 = ROLES 常量顺序')
   const dev = view.roles.find(r => r.role === 'developer')
-  ok(dev?.effective?.provider === 'kimi-coding' && dev?.effective?.via === 'roles.developer', 'developer 生成家 kimi')
+  ok(dev?.effective?.provider === 'zai' && dev?.effective?.via === 'roles.developer', 'developer 落角色条目 zai')
   const integ = view.roles.find(r => r.role === 'integration')
-  ok(integ?.effective?.provider === 'zai' && integ?.effective?.via === 'roles.integration', 'integration 审校家 zai')
+  ok(integ?.effective?.provider === 'zai-coding-cn' && integ?.effective?.via === 'roles.integration', 'integration = zai-coding-cn（第二账号）')
   const po = view.roles.find(r => r.role === 'product-operation')
   ok(po?.tasks.length === 3, 'product-operation 三个分工')
   ok(po?.tasks.map(t => t.kind).join(',') === 'proofread,qa,analyst', '分工序 = KINDS 常量序')
@@ -164,17 +165,27 @@ section('E /suyou-admin/api/routes 路由（mock webServer）')
     const route = routes.find(x => x.kind === 'exact' && x.path === '/suyou-admin/api/routes')
     ok(route !== undefined, 'routes exact 路由已挂')
 
+    // 注册表夹具（SUYOU_PROJECTS_YAML legacy 单文件模式，loadRegistry 每次现读 env）：
+    // projOf 需要已注册项目；三个 key 各指一个主目录（有表 / 无表 / 深层无父目录）。
+    // 先 import 后设 env 依赖此口径。
+    const fixtureReg = join(tmp, 'projects.yaml')
+    await writeFile(fixtureReg,
+      `projects:\n  - key: demo\n    name: Demo\n    dirs:\n      - ${repo}`
+      + `\n  - key: empty\n    name: Empty\n    dirs:\n      - ${join(tmp, 'repo-empty')}`
+      + `\n  - key: deep\n    name: Deep\n    dirs:\n      - ${join(tmp, 'repo-empty2')}\n`, 'utf8')
+    process.env.SUYOU_PROJECTS_YAML = fixtureReg
+
     const res = {
       status: 0, body: null,
       writeHead(s) { this.status = s },
       end(b) { this.body = b ? JSON.parse(b) : null },
     }
-    await route.handler({ url: '/suyou-admin/api/routes', method: 'GET' }, res)
+    await route.handler({ url: '/suyou-admin/api/routes?project=demo', method: 'GET' }, res)
     ok(res.status === 200 && res.body.ok === true, 'GET 200')
     ok(res.body.result.roles.length === 3, '路由表 3 角色')
-    ok(res.body.result.default.provider === 'kimi-coding', 'default 透传')
+    ok(res.body.result.default.provider === 'zai', 'default 透传')
 
-    // 路由表缺失 → 200 {ok:false, error}（不抛错，UI 显示原因）
+    // 路由表缺失 → 200 ok + uninitialized 引导态（不抛错不红）
     const routes2 = []
     const ws2 = { register: (r) => { routes2.push(r); return () => {} } }
     const ctx2 = {
@@ -183,6 +194,7 @@ section('E /suyou-admin/api/routes 路由（mock webServer）')
       get: (k) => (k === 'webServer' ? ws2 : undefined),
       on: () => () => {},
     }
+    await mkdir(join(tmp, 'repo-empty', 'server', 'dsh'), { recursive: true })
     apply(ctx2, { repo: join(tmp, 'repo-empty') })
     const route2 = routes2.find(x => x.kind === 'exact' && x.path === '/suyou-admin/api/routes')
     const res2 = {
@@ -190,10 +202,42 @@ section('E /suyou-admin/api/routes 路由（mock webServer）')
       writeHead(s) { this.status = s },
       end(b) { this.body = b ? JSON.parse(b) : null },
     }
-    await route2.handler({ url: '/suyou-admin/api/routes', method: 'GET' }, res2)
-    ok(res2.status === 200 && res2.body.ok === false && (res2.body.error ?? '').includes('路由表不存在'),
-      '路由表缺失 → 200 + error（不抛错）')
+    await route2.handler({ url: '/suyou-admin/api/routes?project=empty', method: 'GET' }, res2)
+    // t260906-01：表缺失=未初始化引导态（非错误）——uninitialized:true + 模板来源
+    ok(res2.status === 200 && res2.body.ok === true
+      && res2.body.result.uninitialized === true
+      && typeof res2.body.result.template_source === 'string'
+      && res2.body.result.template_source.includes('model-routes.yaml'),
+      '路由表缺失 → 200 ok + uninitialized 引导态（不抛错不红）')
+
+    // t260906-01 init 端点：无表 → 从引擎默认表生成；已有表 → 拒收（零覆盖）
+    const initRoute = routes2.find(x => x.kind === 'exact' && x.path === '/suyou-admin/api/routes/init')
+    ok(initRoute !== undefined, 'routes/init exact 路由已挂')
+    const res3 = { status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } }
+    await initRoute.handler({ url: '/suyou-admin/api/routes/init?project=empty', method: 'POST' }, res3)
+    ok(res3.status === 200 && res3.body.ok === true && res3.body.result.routes_file.includes('model-routes.yaml'),
+      'init POST（无表）→ 200 ok，默认表已生成')
+    const initedText = await readFile(join(tmp, 'repo-empty', 'server', 'dsh', 'model-routes.yaml'), 'utf8')
+    const engineText = await readFile(join(REPO, 'server', 'dsh', 'model-routes.yaml'), 'utf8')
+    ok(initedText === engineText, '生成的表=引擎仓真源逐字节一致（同源模板）')
+    const res4 = { status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } }
+    await initRoute.handler({ url: '/suyou-admin/api/routes/init?project=empty', method: 'POST' }, res4)
+    ok(res4.status === 200 && res4.body.ok === false && (res4.body.error ?? '').includes('已存在'),
+      'init 对已存在表 → 200 ok:false（零覆盖拒收）')
+    // 深层父目录：init 建父目录（repo-empty2 完全无 server/dsh 层级）
+    const res5 = { status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } }
+    const req5 = { url: '/suyou-admin/api/routes/init?project=deep', method: 'POST', [Symbol.asyncIterator]: async function* () { yield Buffer.from('{}', 'utf8') } }
+    apply(ctx2, { repo: join(tmp, 'repo-empty2') })
+    const initRoute2 = routes2.filter(x => x.path === '/suyou-admin/api/routes/init').pop()
+    await initRoute2.handler(req5, res5)
+    ok(res5.status === 200 && res5.body.ok === true
+      && (await readFile(join(tmp, 'repo-empty2', 'server', 'dsh', 'model-routes.yaml'), 'utf8')) === engineText,
+      'init 对深层缺失父目录 → mkdir 递归后生成')
+    const res6 = { status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } }
+    await initRoute2.handler({ url: '/suyou-admin/api/routes/init?project=deep', method: 'GET' }, res6)
+    ok(res6.status === 405, 'init GET → 405')
   } finally {
+    delete process.env.SUYOU_PROJECTS_YAML
     await rm(tmp, { recursive: true, force: true })
   }
 }
@@ -334,11 +378,16 @@ section('H POST /suyou-admin/api/routes/save（mock webServer + 临时 repo）')
     const route = routes.find(x => x.kind === 'exact' && x.path === '/suyou-admin/api/routes/save')
     ok(route !== undefined, 'save exact 路由已挂')
 
+    // 注册表夹具（同 E 段口径）：projOf 需要已注册项目，主目录=临时 repo。
+    const fixtureReg = join(tmp, 'projects.yaml')
+    await writeFile(fixtureReg, `projects:\n  - key: demo\n    name: Demo\n    dirs:\n      - ${repo}\n`, 'utf8')
+    process.env.SUYOU_PROJECTS_YAML = fixtureReg
+
     const res = () => ({ status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } })
     const call = async (body) => {
       const r = res()
       const req = {
-        url: '/suyou-admin/api/routes/save',
+        url: '/suyou-admin/api/routes/save?project=demo',
         method: 'POST',
         [Symbol.asyncIterator]: async function* () { yield Buffer.from(JSON.stringify(body ?? {}), 'utf8') },
       }
@@ -384,6 +433,8 @@ section('H POST /suyou-admin/api/routes/save（mock webServer + 临时 repo）')
     const r4 = await call({})
     ok(r4.status === 400, '缺 table → 400')
   } finally {
+    delete process.env.SUYOU_PROJECTS_YAML
+
     await rm(tmp, { recursive: true, force: true })
   }
 }

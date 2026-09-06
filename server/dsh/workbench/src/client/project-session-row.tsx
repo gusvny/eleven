@@ -90,6 +90,11 @@ const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
   border:1px solid color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 55%,var(--dsw-alias-bg-primary,#fff)); background:none;
   color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-label-primary,#1f2328)); cursor:pointer; }
 .wb-psess-new:hover:not(:disabled) { background:var(--wb-psess-hover, rgba(255,255,255,0.1)); }
+/* 空态可发现性（t260906-01）：账册为空时 24px 无字小方块不可认出——换带文字
+ * 「＋ 新建会话」按钮（auto 宽 + padding）；有 tab 后回落小方块形态。同锚
+ * data-wb-psess-new 不变。 */
+.wb-psess-new.wb-psess-new-labeled { width:auto; height:22px; padding:0 8px;
+  gap:4px; font-size:11.5px; }
 .wb-psess-new:disabled { opacity:0.4; cursor:default; }
 .wb-psess-tab { box-sizing:border-box; position:relative; min-width:24px;
   height:24px; flex:none; display:inline-flex; align-items:center;
@@ -207,13 +212,14 @@ export function ProjectSessionRow(props: ProjectSessionRowProps) {
       <style>{PSESS_STYLES}</style>
       <button
         type="button"
-        className="wb-psess-new"
+        className={tabs.length === 0 ? 'wb-psess-new wb-psess-new-labeled' : 'wb-psess-new'}
         data-wb-psess-new=""
+        data-empty={tabs.length === 0}
         disabled={creating}
         title={`新建 ${projectName} 会话（主目录${projectDir ? `：${projectDir}` : ''}）`}
         aria-label={`新建 ${projectName} 会话`}
         onClick={onNew}
-      >+</button>
+      >{tabs.length === 0 ? '＋ 新建会话' : '+'}</button>
       {tabs.map(t => (
         <div
           key={t.id}

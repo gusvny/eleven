@@ -23,7 +23,8 @@ SERVER_DIR = pathlib.Path(__file__).resolve().parents[2]
 REPO_ROOT = SERVER_DIR.parents[0]
 sys.path.insert(0, str(SERVER_DIR))
 
-from installer import projects as projects_mod  # noqa: E402
+from installer import projects as projects_mod
+from installer import scaffold as scaffold_mod
 from installer.cli import main as cli_main  # noqa: E402
 from installer.runtime import InstallPaths  # noqa: E402
 from installer.service import FailClosed  # noqa: E402
@@ -218,11 +219,120 @@ class AddRejections(Base):
         self._reject("new-key", "两\n行", root, "name", "含换行")
 
     def test_root_gate(self):
-        self._reject("new-key", "n", str(self.tmp / "nope"), "不存在")
+        # t260906-01 代建：根目录不存在=代建成功（不再拒收），闸收窄为「相对路径拒 /
+        # 已存在但非目录拒（代建 mkdir 失败）」。
         self._reject("new-key", "n", "relative/path", "绝对路径")
         plain = self.tmp / "plain.txt"
         plain.write_text("x", encoding="utf-8")
-        self._reject("new-key", "n", plain, "不是目录")
+        self._reject("new-key", "n", plain, "代建失败")
+
+    def test_root_autocreate_with_parents_and_scaffold_manifest(self):
+        """t260906-01 代建：根目录（含父目录）不存在 → mkdir 代建 + 容器脚手架，
+        报告（文本）列生成物与「容器无 git」提示，全程零 git。"""
+        root = self.tmp / "deep" / "nested" / "fresh-root"  # 父目录也不存在
+        out = []
+        rc = projects_mod.cmd_project_add(
+            self.paths, self.add_args("fresh", "新芽", [str(root)]), log=out.append)
+        self.assertEqual(rc, 0)
+        self.assertTrue((root / "CLAUDE.md").is_file())
+        for d in ("notes/epics", "notes/discussions", "docs"):
+            self.assertTrue((root / d / ".gitkeep").is_file(), d)
+        engine_table = (REPO_ROOT / "server" / "dsh"
+                        / "model-routes.yaml").read_bytes()
+        self.assertEqual((root / "server" / "dsh" / "model-routes.yaml").read_bytes(),
+                         engine_table, "路由表=引擎仓真源逐字节拷贝")
+        # 全程无 git：目录树无 .git 产物
+        self.assertNotIn(".git", [p.name for p in root.rglob("*")])
+        text = "\n".join(out)
+        self.assertIn("本次代建", text)
+        self.assertIn("生成物清单", text)
+        self.assertIn("容器未含 git 仓库", text)
+        self.assertIn("clone repo", text)
+
+    def test_root_autocreate_json_manifest_machine_judgeable(self):
+        root = self.tmp / "fresh-json"
+        out = []
+        projects_mod.cmd_project_add(
+            self.paths, self.add_args("freshj", "新芽乙", [str(root)], as_json=True),
+            log=out.append)
+        payload = json.loads("\n".join(out))
+        self.assertTrue(payload["root_created"])
+        created = payload["scaffold"]["created"]
+        for expect in ("CLAUDE.md", "notes/epics/.gitkeep",
+                       "notes/discussions/.gitkeep", "docs/.gitkeep",
+                       "server/dsh/model-routes.yaml"):
+            self.assertIn(expect, created)
+        self.assertEqual(payload["scaffold"]["skipped"], [])
+        self.assertTrue(any(w["code"] == "container-no-git" for w in payload["warnings"]))
+
+    def test_existing_root_zero_overwrite(self):
+        """接入已存在目录：零覆盖零新增（脚手架不落），行为与代建前逐字节一致。"""
+        root = self.proj_root("existing")
+        (root / "user-file.txt").write_text("用户数据", encoding="utf-8")
+
+        def snap():
+            return sorted((str(p.relative_to(root)),
+                           p.read_bytes() if p.is_file() else b"<dir>")
+                          for p in root.rglob("*"))
+        before = snap()
+        out = []
+        rc = projects_mod.cmd_project_add(
+            self.paths, self.add_args("exist", "存量", [str(root)]), log=out.append)
+        self.assertEqual(rc, 0)
+        self.assertEqual(before, snap(), "已存在目录接入零新增文件")
+        self.assertNotIn("本次代建", "\n".join(out))
+
+    def test_scaffold_skips_existing_targets_zero_overwrite(self):
+        """防御性零覆盖：根里已有同名目标（罕见现场），跳过记账不覆盖。"""
+        root = self.proj_root("pre-scaffold")
+        (root / "docs").mkdir(parents=True)
+        (root / "docs" / ".gitkeep").write_text("keep", encoding="utf-8")
+        projects_mod.cmd_project_add(
+            self.paths, self.add_args("presc", "预置", [str(root)]),
+            log=lambda *_: None)
+        self.assertEqual((root / "docs" / ".gitkeep").read_text(encoding="utf-8"),
+                         "keep")
+
+    def test_scaffold_source_table_missing_fail_closed_and_rollback(self):
+        """R2 缺失态：引擎源表不可读 → 红 + 全量回滚（注册表与容器零残留）。"""
+        root = self.tmp / "fresh-missing-src"
+        before = self.tree()
+        orig = scaffold_mod.TEMPLATE_ROUTES_REL
+        scaffold_mod.TEMPLATE_ROUTES_REL = pathlib.Path("no") / "such" / "table.yaml"
+        try:
+            with self.assertRaises(FailClosed) as cm:
+                projects_mod.cmd_project_add(
+                    self.paths, self.add_args("nosrc", "缺源", [str(root)]),
+                    log=lambda *_: None)
+        finally:
+            scaffold_mod.TEMPLATE_ROUTES_REL = orig
+        self.assertIn("脚手架源表", str(cm.exception))
+        self.assertEqual(before, self.tree(), "回滚后注册表零残留")
+        self.assertFalse(root.exists(), "代建根已回滚移除")
+
+    def test_scaffold_source_table_malformed_fail_closed_and_rollback(self):
+        """R2 畸形态：引擎源表烂内容 → 红 + 全量回滚，不落空拷贝（桩：paths.root
+        指向临时目录、源表相对路径桩进同目录）。"""
+        root = self.tmp / "fresh-bad-src"
+        (self.tmp / "stub-engine").mkdir()
+        (self.tmp / "stub-engine" / "bad-table.yaml").write_text(
+            "not a routes table at all\n", encoding="utf-8")
+        before = self.tree()
+        orig = scaffold_mod.TEMPLATE_ROUTES_REL
+        real_root = self.paths.root
+        scaffold_mod.TEMPLATE_ROUTES_REL = pathlib.Path("bad-table.yaml")
+        self.paths.root = self.tmp / "stub-engine"
+        try:
+            with self.assertRaises(FailClosed) as cm:
+                projects_mod.cmd_project_add(
+                    self.paths, self.add_args("badsrc", "烂源", [str(root)]),
+                    log=lambda *_: None)
+        finally:
+            scaffold_mod.TEMPLATE_ROUTES_REL = orig
+            self.paths.root = real_root
+        self.assertIn("畸形", str(cm.exception))
+        self.assertEqual(before, self.tree())
+        self.assertFalse(root.exists())
 
     def test_multi_root_semantic_reject(self):
         # 单根模型（决策6）：多目录输入=语义拒收（FailClosed），非 argparse 用法错

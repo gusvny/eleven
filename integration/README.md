@@ -42,6 +42,11 @@ python3 integration/run_scenarios.py
   t260904-19 起简化为「确保测试台在位」一条：docker 在场+测试镜像在场+共享供给台
   （sandbar-test-integ）健康；该共享台是常驻基建例外（ensure 幂等、闸后不拆），
   「拆台零残留」口径适用对象是场景台。
+  t260906-01 仲裁起，浏览器族测试控制台默认供给=**泳道限定台**
+  `stage-console-<泳道仓指纹>`（lib_stage_console 自动 ensure/复用，注册表种子随台
+  自愈）：每泳道各一台、注册表与 /repo 绑定只归本泳道——根除跨泳道共享台陈旧态
+  （别泳道构建上红绿失真实录见 t260906-01 仲裁报告）；`SUYOU_TEST_CONSOLE` 显式
+  指台仍优先。旧 stage-console-shared 若仍在跑属历史遗留，归供给面清理。
 
 ## 环境前提
 
@@ -89,7 +94,8 @@ t260904-19 起必需；重建=`sh server/dsh/build-test-temporal.sh`）、tempor
   存在的同类上限（stub 仲裁 summary 缺 `verdict=`，3 次格式纠正轮 → blocked）并复活收口。
   merge reject 无计数属引擎发现，另开票处理。
 - lane-parallel-dom（t260901-09，泳道图并行分叉 DOM 级双边同亮断言）：S0 build-contract
-  纯 node 恒跑；S1 浏览器半依赖测试控制台（`SUYOU_TEST_CONSOLE`，默认 127.0.0.1:3199）+
+  纯 node 恒跑；S1 浏览器半依赖测试控制台（`SUYOU_TEST_CONSOLE` 显式指台；缺省
+  泳道限定台自动 ensure，见舞台纪律段）+
   playwright-core + 本机 chromium，缺任一 ENV_FAIL（exit 2）——与 session-tab-interactions 同款环境
   取舍。S1 造数用 playwright `page.route()` 在 `/suyou-workbench/api/wf/tickets` API 边界
   打桩 fixture 快照（不进 Temporal、不写真工单）；泳道 worker 环境因 SUYOU_TASK_QUEUE

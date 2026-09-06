@@ -19,9 +19,10 @@
  *   D. saveRoutesTable —— 读真源 → 校验 → 补丁 → 备份到 /tmp → 写回 model-routes.yaml。
  */
 
-import { copyFile, readFile, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /* ------------------------------------------------------------ 显示名常量（直接维护） */
 
@@ -166,8 +167,15 @@ export interface RoutesView {
   default: RouteEntry | null
   roles: RoleRoute[]
   warnings: string[]
-  /** 非空=视图组装失败（路由表缺失/解析失败等），UI 显示 error 不渲染空表。 */
+  /** 非空=视图组装失败（解析失败/读取故障等），UI 显示 error 不渲染空表。
+   *  注意：表「缺失」不再是 error——那是未初始化态（uninitialized）。 */
   error?: string
+  /** t260906-01 无表引导态：项目主目录无 model-routes.yaml（缺失=声明的本意，
+   *  运行时回落 profile 默认模型，不炸）→ true，UI 渲染「未初始化」引导卡片 +
+   *  「生成默认表」动作，替代旧红错。解析失败仍走 error（畸形=fail-closed）。 */
+  uninitialized?: boolean
+  /** 引导态动作的模板来源（引擎仓真源表路径；与 installer 脚手架同源不造两份）。 */
+  template_source?: string
 }
 
 function entryOf(e: Record<string, unknown> | null): { provider: string | null; model: string | null } | null {
@@ -176,6 +184,52 @@ function entryOf(e: Record<string, unknown> | null): { provider: string | null; 
     provider: typeof e['provider'] === 'string' ? e['provider'] : null,
     model: typeof e['model'] === 'string' ? e['model'] : null,
   }
+}
+
+/** 引擎仓路由默认表（模板真源）：本文件在 server/dsh/ui/src/host/ 下，
+ *  上三级即 server/dsh/。与 installer/scaffold.py 的 TEMPLATE_ROUTES_REL
+ *  同一份文件（同源不造两份）。 */
+export function engineRoutesTemplatePath(): string {
+  return fileURLToPath(new URL('../../../model-routes.yaml', import.meta.url))
+}
+
+/**
+ * 生成默认表（init，t260906-01）：项目主目录无表时，从引擎仓真源表拷贝初始化。
+ * 语义（review R3 定稿）：目标表已存在=拒收（零覆盖 fail-closed，不覆盖现场）；
+ * 父目录不存在=mkdir 递归建（「引导即初始化」）；写入原子（tmp+rename）；
+ * 模板缺失/不可读=红，零落盘。返回 {ok} 或 {ok:false,error}（不抛）。
+ */
+export async function initRoutesTable(repo: string): Promise<{ ok: boolean; routes_file?: string; error?: string }> {
+  const routesFile = join(repo, 'server', 'dsh', 'model-routes.yaml')
+  let exists = true
+  try {
+    await readFile(routesFile, 'utf8')
+  } catch (err: any) {
+    if (err?.code === 'ENOENT') exists = false
+    else return { ok: false, error: `目标表不可读（${routesFile}）: ${String(err?.message ?? err)}` }
+  }
+  if (exists) return { ok: false, error: `路由表已存在: ${routesFile}（零覆盖：init 不覆盖现场，如需重建请人工处置）` }
+  const template = engineRoutesTemplatePath()
+  let text: string
+  try {
+    text = await readFile(template, 'utf8')
+  } catch (err: any) {
+    return { ok: false, error: `模板表不可读（${template}）: ${String(err?.message ?? err)}——零落盘` }
+  }
+  try {
+    parseRoutesYaml(text, 'model-routes.yaml(模板)') // 畸形模板 fail-closed，不落盘
+  } catch (err) {
+    return { ok: false, error: `模板表畸形: ${err instanceof Error ? err.message : String(err)}——零落盘` }
+  }
+  try {
+    await mkdir(dirname(routesFile), { recursive: true })
+    const tmp = routesFile + '.init-tmp'
+    await writeFile(tmp, text, 'utf8')
+    await rename(tmp, routesFile)
+  } catch (err: any) {
+    return { ok: false, error: `默认表写入失败: ${String(err?.message ?? err)}` }
+  }
+  return { ok: true, routes_file: routesFile }
 }
 
 /** 组装视图：读 model-routes.yaml（真源），查表补齐 effective。 */
@@ -193,7 +247,9 @@ export async function buildRoutesView(repo: string): Promise<RoutesView> {
     text = await readFile(routesFile, 'utf8')
   } catch (err: any) {
     if (err?.code === 'ENOENT') {
-      view.error = `路由表不存在: ${routesFile}（运行时查表落空，agent 用 profile 默认模型）`
+      // t260906-01：表缺失=未初始化（非错误）——引导态 + 生成默认表动作
+      view.uninitialized = true
+      view.template_source = engineRoutesTemplatePath()
     } else {
       view.error = `路由表读取失败: ${String(err?.message ?? err)}`
     }

@@ -1,15 +1,18 @@
-// lib_stage_console.mjs —— 等台族统一控制台供给（t260904-19）。
+// lib_stage_console.mjs —— 等台族统一控制台供给（t260904-19；t260906-01 仲裁改泳道限定台）。
 //
 // 唯一搭台纪律（integration/README.md 舞台纪律段）落地点：旧 compose 缺省固定口
 // 3199 已不供给，本族场景经本助手拿控制台地址：
 //   1. env SUYOU_TEST_CONSOLE 显式指台（人工通路，兼容既有用法）；
-//   2. 否则消费/自起常驻台，工程名按被测树派生：stage-console-<树哈希8位>
-//      （t260905-05 仲裁改。原全局单名 stage-console-shared 是「先到先得挂树」：
-//      先起泳道 ensure 把它的树挂上 /repo，后续泳道健康复用=全在测别人家的
-//      client（本票六小时浏览器腿全跑在 t260905-04 树上=错树假红/假绿）；并发
-//      泳道各自 up 还在同一工程名上互踩（容器名冲突 compose rc=1 / 挂载源来回
-//      翻、容器被对家 kill 137 实录）。按树派生后每棵被测树一台常驻台：确定性
-//      拿自己的树，npm i/apt 每台只付一次，泳道间零对抗）。
+//   2. 否则消费/自起常驻台，工程名按被测树（=泳道）派生：stage-console-<树哈希8位>。
+//      演进脉络（t260906-01 仲裁 gen3 泳道限定 与 t260905-05 树哈希 两边同义合并）：
+//      原全局单名 stage-console-shared 是「先到先得挂树」：先起泳道 ensure 把它的树
+//      挂上 /repo，后续泳道健康复用=全在测别人家的 client（本票六小时浏览器腿全跑在
+//      t260905-04 树上=错树假红/假绿）；并发泳道各自 up 还在同一工程名上互踩（容器名
+//      冲突 compose rc=1 / 挂载源来回翻、容器被对家 kill 137 实录）。按树派生后每泳道
+//      （worktree/主树）各得一台：bindings 与注册表种子只归本泳道写，根除「共享台绑定
+//      创建泳道 /repo + ensure 健康复用永不换血」的跨泳道陈旧态（t260906-01 机械跑
+//      实录：浏览器面在别泳道台上红绿失真 + 瞬态败）；确定性拿自己的树，npm i/apt
+//      每台只付一次，泳道间零对抗。
 // 起台失败（docker 缺席/镜像缺席/起台不健康）=诚实环境红：打印 CLI 的 STAGE_ 行
 // 后 process.exit(2)——三态语义不变，绝不假绿。
 // 供给预算纪律（t260905-07 仲裁）：起台预算必须严格低于套件执行器的单场景杀帽
@@ -17,7 +20,7 @@
 // 场景自己的 ENV_FAIL（exit 2+STAGE_ 名点）永无落地机会，归因信息全灭。默认 600s
 // 留 300s 给场景真腿；首建特慢的环境用 SANDBAR_STAGE_ENSURE_TIMEOUT 调高（同时把
 // 执行器帽调到预算之上）。
-// 共享台生命周期=常驻基建（同 verify.yaml supply 的 sandbar-test-integ 例外口径）：
+// 常驻台生命周期=常驻基建（同 verify.yaml supply 的 sandbar-test-integ 例外口径）：
 // 场景退出**不拆台**；拆台归供给面/人工（down --project stage-console-<树哈希>）。
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -30,6 +33,7 @@ const CLI = path.join(HERE, 'stage_docker.py');
 // 被测树=执行本助手的树（integration/ 的上一级；对齐 stage_docker.py 的
 // REPO=__file__.parent.parent——从目录出发只上跳一级，多跳一级=泳道父目录，
 // t260905-05 仲裁实锤：错挂 .lane 目录导致 compose admin.log 挂载点 EROFS）。
+// 即 t260906-01 仲裁 gen3 的「泳道指纹」：同树=同泳道恒同名复用，异树恒异名零对抗。
 const WANT_REPO = path.resolve(HERE, '..');
 // 每棵被测树一个常驻台工程名（路径哈希前 8 位；同树恒同名=复用，异树恒异名=零对抗）。
 const TREE_PROJECT = `stage-console-${createHash('sha256').update(WANT_REPO).digest('hex').slice(0, 8)}`;
@@ -80,7 +84,7 @@ export async function ensureStageConsole({ services = 'full', project = TREE_PRO
   }
   const st = JSON.parse(String(p.stdout).trim().split('\n').at(-1));
   const SEED = { key: 'seedws', name: 'SeedWs' };
-  // 容器侧夹具项目 seeding（gen6 拍板案 b）：共享台缺省注册表的 suyou 条目指向
+  // 容器侧夹具项目 seeding（gen6 拍板案 b）：缺省注册表的 suyou 条目指向
   // 宿主绝对路径，容器内不可见 → 会话/工作区创建诚实拒收（WorkspaceCreateError
   // 实录）。seed 项目=容器侧可写目录，add 幂等（已存在=409 容忍）。
   const dir = `/tmp/seed-${SEED.key}`;
@@ -97,7 +101,7 @@ export async function ensureStageConsole({ services = 'full', project = TREE_PRO
     base: `http://127.0.0.1:${st.ports.console}`,
     project: st.project,
     seed: SEED,
-    teardown: () => { /* 共享常驻台：场景退出不拆（供给面/人工 down） */ },
+    teardown: () => { /* 泳道常驻台：场景退出不拆（供给面/人工 down） */ },
   };
 }
 
