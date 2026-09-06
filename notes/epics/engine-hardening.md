@@ -68,3 +68,10 @@
 根治面：①build_stage_prompt 增加 host_ruling 注入（meta 字段，sign/rework 通道写）；
 ②或 blocked 态开放 sign(gate=arbitrate) 裁决专用；③过渡约定写进角色 prompt（判读等待时先看
 HOST_RULING.md）。
+
+### 写集粒度目录级→文件级（并发开票的结构性前提，260906 宿主挑战立案）
+现状：write_set 按目录声明，所有票都含 integration/（场景=验收资产）→ 串行纪律保守过头
+（目录重叠但文件不相交的票也被排成串行，宿主 260906「为什么不并发开票」直指）。
+根治面：①写集支持文件级条目（目录=前缀语义保留）；②或 integration/ 按票子目录＋共享
+清单点；③合并闸已有 merge-tree 预演+三轮自动消解当安全网——粒度细化后并发开票成为
+默认，冲突轮盘退化为兜底。过渡=先试「引擎侧票×workbench 侧票」双轨实验（doc②×multitab）。
