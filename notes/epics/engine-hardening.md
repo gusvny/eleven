@@ -60,3 +60,11 @@
 
 ## 票③：notes/ 写集机械闸（宿主令 260904 直落 main，integration 岗）
 动因：t260904-01/03 两单 lane 侧票据账与 main 直修同区相撞（含一次 KI-038 语义冲突须人工取舍）、notes/epics/ 出现草案直落。落地三执法点：verify_lane 合并闸（A/M/T/D 全拦、独立于写集声明）+ ticket.create 建单即拒（纯函数 validate_write_set_no_notes）+ write_allow 除名；守卫场景 sc_notes_write_gate.py 13 断言入清单（套件 92/92）。副作用收红：lane agent 票据账动作改走结算 note→integration main 落账。
+
+### 引擎加固·人工判读注入通道（KI-053，260906 现场=19 号仲裁超限）
+现状：blocked 转人工判读后，人工意见无正规注入通道——rework 备注只流 create_plan/implement
+（arbitrate/acceptance 只吃机械测试结果 JSON），sign 拒收非人门段，retry_qc 无载荷。
+本夜过渡=泳道 .suyou/HOST_RULING.md 自描述文件＋retry_qc（仲裁席续会话时读协调区可见）。
+根治面：①build_stage_prompt 增加 host_ruling 注入（meta 字段，sign/rework 通道写）；
+②或 blocked 态开放 sign(gate=arbitrate) 裁决专用；③过渡约定写进角色 prompt（判读等待时先看
+HOST_RULING.md）。
