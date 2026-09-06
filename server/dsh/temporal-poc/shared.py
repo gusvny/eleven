@@ -489,6 +489,10 @@ TICKET_STAGE_STATES = ("running", "awaiting", "awaiting-human", "blocked")
 
 # 报告落盘目录（env 覆盖供自测用临时目录；缺省 POC out/scan，运行产物，gitignore 不入库）。
 SCAN_DIR = pathlib.Path(os.environ.get("SUYOU_SCAN_DIR") or (OUT_DIR / "scan"))
+# 巡检票落账目录（inspection 票①，t260905-03；env 覆盖供自测用临时目录；
+# 缺省 out/inspection，运行产物不入库）。新变量名按宿主令 260904 用 sandbar 前缀
+#（存量 SUYOU_* 是历史欠账，只随专门迁移票处置，新造一律不用）。
+INSPECTION_DIR = pathlib.Path(os.environ.get("SANDBAR_INSPECTION_DIR") or (OUT_DIR / "inspection"))
 # 「疑似卡死」停留时长阈值（小时）。env 可调；activity 读取，不进 workflow 体。
 SCAN_STUCK_HOURS = float(os.environ.get("SUYOU_SCAN_STUCK_HOURS") or 48)
 # 建议动作三档（report 排序按此序：最紧急在前）。

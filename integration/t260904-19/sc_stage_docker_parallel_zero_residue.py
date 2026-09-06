@@ -134,9 +134,17 @@ def main():
             print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (PASSED, FAILED, ENV_FAILED))
             sys.exit(2)
         for (proc, (out, err)), name in zip(zip(procs, outs), ("A", "B")):
-            ok = proc.returncode == 0
-            check(ok, "并发 up %s 双绿（rc=%s %s）" % (name, proc.returncode, err.strip()[-160:]))
-            states.append(json.loads(out.strip().splitlines()[-1]) if ok else None)
+            if proc.returncode == 2:
+                # helper exit2=其判环境红（本文件头注既定契约「不诬产品」）：daemon 级
+                # 拒绝（如网络地址池耗尽）归环境（t260904-12 三态归类），场景 exit 2
+                # 而非 1；rc=0/1 口径不变（1 仍产品红）。arbitrate t260905-03 gen2 实证
+                # 'all predefined address pools have been fully subnetted' 曾被误记产品红。
+                envfail("并发 up %s 环境红（helper exit2：%s）" % (name, err.strip()[-160:]))
+                states.append(None)
+            else:
+                ok = proc.returncode == 0
+                check(ok, "并发 up %s 双绿（rc=%s %s）" % (name, proc.returncode, err.strip()[-160:]))
+                states.append(json.loads(out.strip().splitlines()[-1]) if ok else None)
 
         if all(states):
             a, b = states
@@ -161,6 +169,9 @@ def main():
                 stf = json.loads(pf_out.stdout.strip().splitlines()[-1])
                 check(sd.port_open(stf["ports"]["console"]) and sd.port_open(stf["ports"]["temporal"]),
                       "full 台 console+temporal 双端口真活")
+            elif pf_out.returncode == 2:
+                envfail("full 台环境红（helper exit2：%s）"
+                        % (pf_out.stderr.strip()[-160:] or "环境缺件"))
             else:
                 if pf_out.returncode == 2:
                     envfail("full 台起台环境红（helper rc=2 自判环境缺件，不诬产品：%s）"

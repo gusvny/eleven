@@ -450,6 +450,19 @@ SCENARIOS = [
      "双场景并行不互撞+拆台零残留端到端（t260904-19，灰盒 L3，工单验收①④；槽位制退役后并发隔离语义的用户级承接面）：两个 up 进程真同时发车（各自 compose 工程名，temporal-only 档）双台健康、JSON 端口互异、双双 ∉ 生产端口 {3099,7233,8233}；docker ps -a 按 com.docker.compose.project label（compose 公开语义）过滤 A/B 容器集互不相交且 temporal-only 恰 1 容器；拆 A 后 A 端口立即可 bind 且 B 台 TCP 复测仍活（down 爆炸半径恰一个工程）；full 档 console+temporal 双端口真活（helper exit 2=其判环境红不诬产品）；三工程终态零残留、全部用过端口立即 bind 成功（验收④收口）。与 developer L1（档位锁/分配原子性单测）intent 不同层：本条守进程级真并发系统行为，mock 与先后错开都替代不了该形态。资源口径：有意制造并发双台+一次 full 台（dsh 容器首装联网分钟级），登记 exclusive 独占执行防与兄弟场景的台互相污染判定面。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "python3 integration/t260904-19/sc_stage_docker_parallel_zero_residue.py", "exclusive"),
 
+    # ---- t260905-03 inspection 票①（定时质检骨架+测试面扫描）----
+    ("t260905-03-ki051-anchor-replay",
+     "KI-051 守卫锚×生产方措辞漂移静态回放必抓（t260905-03 验收②主证据=KI-051 事故回归用例，灰盒 L2）：真形态夹具（生产方在位——模板拼接旧字面搜不到，即 KI-051 实录 capture.mjs L342 形态——+守卫断言旧字面）扫描必报 high 且证据双点名守卫与生产方；健康对照（字面在场）零误报 high；无法确证（生产方在位但措辞无近亲）降级 med 提示交人审，不判绿不静默；空壳守卫不崩。纯 stdlib 夹具零 env 依赖零真仓接触——环境红永远捂不住本断言面（KI-051 被 env_fail 捂数日的教训内建）。与 developer L1（扫描纯函数真值表）不同层；与 t260904-08 模板退役负扫描不同面（彼守退役类名零活引用，本守在役守卫锚×生产方措辞在场性）。扫描器 CLI 与 findings 形状为本票场景侧裁定（integration/t260905-03/lib_inspection.py 头注）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260905-03/sc_inspection_ki051_anchor_replay.py", "ro"),
+    ("t260905-03-scan-contract",
+     "测试面扫描器对外契约（t260905-03，灰盒 L2 固定夹具）：findings[{id,severity,scan,evidence,suggestion}] 五键齐/severity∈{high,med,low}/id 唯一/证据非空；重复场景检测阈值两边界——intent 近逐字重复对必报 med（不混 high 混淆严重度）、不同守护面条目不误报；过时断言（引用资产缺席/已挪、行号越界）必报且证据点名缺什么（报错精确）；干净树=ok:true+findings==[]（全绿期零发现心跳的数据面，非静默）；红线判定化——扫描全程被扫树逐字节校验和不变（巡检绝不直接改码）；二进制乱码被扫输入不崩仍结构化回执。纯 stdlib 夹具零 env 依赖。与 t260905-03-ki051-anchor-replay intent 分工：彼守 KI-051 事故四面，本条守扫描器横向契约（步骤共享 lib 夹具构造器，intent 不同面不互替）；与 developer L1 不同层。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260905-03/sc_inspection_scan_contract.py", "ro"),
+    ("t260905-03-decl-gate",
+     "声明门——触发面尊重 inspection.yaml（t260905-03 验收③行为级证据，灰盒 L2/L3）：畸形声明拒绝且理由指向声明本身（报错精确：声明错不得报成连不上——KI-051 环境红捂真红的反向教训）；启用实例声明未接线 kind 拒绝并点名该 kind 与已接线清单（fail-closed 不静默不触发，M2 口径）；enabled=false 占位实例与未知实例拒绝并点名；enabled 实例放行回执带票号（改声明改行为的放行半边）；同期重复触发回执仍指同一张票（每期一票机械保证=scan_schedule 照搬取舍① overlap=SKIP 的用户级承接）。三态分级：拒绝腿=交付触发面离线校验（--decl-path，纯标准库零网络）闸内即验；放行腿缺 temporalio/共享台=ENV_FAIL 点名（不假红不假绿）。与 developer L1（decl 解析真值表）不同层：本条锁触发面的门行为；与 t260905-03-period-journey 不同面（彼守链路质量，本守谁能跑/谁被拒）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260905-03/sc_inspection_decl_gate.py"),
+    ("t260905-03-period-journey",
+     "手动一期全链用户旅程（t260905-03 验收①主证据，灰盒 L3 真台真票，exclusive）：temp decl 双实例启用+--decl-path/--repo-root 注入夹具（真仓是干净的，不种漂移测不到发现落面；真树零写入红线不破）——种漂移实例：trigger→开票→发现清单落票面（high 带证据+suggested_fix_tickets 逐条 source_inspection=本巡检票号=修复票溯源面）→人门两拍（未签字观察窗内不终态=假门现形即红；运维通道 sign 后收口且发现留存票面=发现/处置审计链不断）；干净实例：零发现心跳票照开照收（全绿期=心跳证明）；两实例票号互异（实例维度不串票）。人门绑定浅：只锚公开 sign 面与终态可见，不锚 snapshot 内部门名。temporalio/共享台缺席=ENV_FAIL 点名（KI-036 家族口径）。登记 exclusive：往共享台写真票，防与兄弟场景互染判定面。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260905-03/sc_inspection_period_journey.py", "exclusive"),
     # ---- t260905-02：引擎行为场景看守（worker 生命周期/收口自退/多 console 防重；epic 后续面）----
 
     ("t260905-02-worker-lifecycle",

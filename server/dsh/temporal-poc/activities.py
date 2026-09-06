@@ -27,6 +27,7 @@ from temporalio.client import Client
 
 from shared import (
     ADMIN_PY,
+    INSPECTION_DIR,
     NAMESPACE,
     REPO_ROOT,
     SCAN_DIR,
@@ -350,6 +351,47 @@ async def write_scan_report(report: ScanReport) -> Dict[str, Any]:
             "items": len(report.items)}
 
 
+# ========================================================================================
+# inspection 票①（t260905-03）：测试面扫描 + 巡检票落账（薄壳——纯函数在
+# inspection_scan.py / inspection_flow.py；业务拒绝返回 ok=False 交 workflow 决策，
+# 只有真·基础设施故障才抛，让 Temporal 重试）。
+# ========================================================================================
+
+@activity.defn
+async def run_inspection_scan(args: Dict[str, Any]) -> Dict[str, Any]:
+    """测试面扫描：仓库根（缺省 REPO_ROOT）+ 场景清单路径（可选）→ findings。
+    延迟导入：防 activities↔inspection_flow 模块环（同 agent_activities 先例）。"""
+    from inspection_scan import ScanError, run_test_face_scan
+
+    root = Path(args.get("repo_root") or REPO_ROOT)
+    sp = args.get("scenarios_path")
+    try:
+        result = run_test_face_scan(root, Path(sp) if sp else None)
+        activity.logger.info(
+            "测试面扫描完成：%d 条发现（high=%s/med=%s/low=%s）heartbeat=%s",
+            result["summary"].get("high", 0) + result["summary"].get("med", 0)
+            + result["summary"].get("low", 0),
+            result["summary"].get("high", 0), result["summary"].get("med", 0),
+            result["summary"].get("low", 0), result["heartbeat"])
+        return {"ok": True, "result": result}
+    except ScanError as e:
+        return {"ok": False, "error": str(e)}
+
+
+@activity.defn
+async def write_inspection_report(face: Dict[str, Any]) -> Dict[str, Any]:
+    """巡检票落账 out/inspection/<票号>.json（同票重跑覆盖单文件）；收口时再写一次终态。"""
+    from inspection_flow import write_inspection_report_impl
+
+    try:
+        result = await asyncio.to_thread(
+            write_inspection_report_impl, face, INSPECTION_DIR)
+        activity.logger.info("巡检票落账 %s", result.get("path"))
+        return {"ok": True, "result": result}
+    except (OSError, ValueError) as e:
+        return {"ok": False, "error": "巡检票落账失败：%s" % e}
+
+
 ALL_ACTIVITIES = [
     admin_call,
     script_gate,
@@ -362,4 +404,6 @@ ALL_ACTIVITIES = [
     scan_tickets_report,
     reconcile_ticket_workers,
     write_scan_report,
+    run_inspection_scan,
+    write_inspection_report,
 ]

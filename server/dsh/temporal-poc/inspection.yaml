@@ -1,0 +1,42 @@
+# sandbar 巡检声明（inspection epic 票①，t260905-03）——机制在引擎，面在项目声明。
+# 引擎只出通用调度器与开票机制（inspection_trigger.py / InspectionPeriodicWorkflow），
+# 「怎么定时、跑哪个 workflow」全部由本文件声明：改声明即改行为，不改引擎码。
+# 解析真源=inspection_decl.py，只认其头注声明的 YAML 子集；子集外形态一律
+# fail-closed 报错点名（不静默降级、不猜）。
+#
+# 字段说明：
+#   schema    声明格式版本（现只认 v1）
+#   instances 巡检实例表（每实例=一个扫描面的调度位；每期一票按实例独立开票）
+#   id        实例标识（小写 slug，作票号组成段）
+#   face      扫描面（test=测试面 / doc=文档面……自由标量，票面展示用）
+#   enabled   是否启用（false=占位不调度不触发——声明驱动开关，行为级验收点）
+#   schedule  定时法声明：kind=cron（已接线）| every-n-tickets / race-first（未接线，只可
+#             以注释示例存在——启用实例声明未接线 kind=解析显式报错并点名已接线清单）
+#   workflow  本实例跑的 workflow 类型名（引擎侧已接线巡检 workflow 白名单校验）
+#   template  巡检票模板标识（票面展示用）
+schema: v1
+instances:
+  - id: test-face
+    face: test
+    enabled: true
+    schedule:
+      kind: cron
+      cron: 0 9 * * 1
+    workflow: InspectionPeriodicWorkflow
+    template: inspection-lite
+  - id: doc-face
+    face: doc
+    enabled: false
+    schedule:
+      kind: cron
+      cron: 0 10 * * 1
+    workflow: InspectionPeriodicWorkflow
+    template: inspection-lite
+# ---- 未接线 kind 示例（禁入启用实例；接线票落地后迁移为正式声明）----
+#   schedule:
+#     kind: every-n-tickets   # 每并 N 张票触发（票计数源未接线，启用=显式报错）
+#     n: 20
+#   schedule:
+#     kind: race-first        # cron 与每 N 张票多条件先到者
+#     cron: 0 9 * * 1
+#     n: 20

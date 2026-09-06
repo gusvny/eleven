@@ -28,6 +28,7 @@ with workflow.unsafe.imports_passed_through():
         ticket_scan,
         write_scan_report,
     )
+    from inspection_flow import InspectionPeriodicWorkflow  # noqa: F401——注册进 ALL_WORKFLOWS
     from shared import (
         HUMAN_GATES,
         STAGES,
@@ -257,4 +258,4 @@ class DispatcherScanWorkflow:
         }
 
 
-ALL_WORKFLOWS = [ContentPipelineWorkflow, DispatcherScanWorkflow]
+ALL_WORKFLOWS = [ContentPipelineWorkflow, DispatcherScanWorkflow, InspectionPeriodicWorkflow]
