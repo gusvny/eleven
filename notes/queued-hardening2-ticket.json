@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260905-10",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "本夜三事故的引擎免疫面（判读注入通道/会话撕裂检疫/落盘身份依赖）",
+  "user_request": "做什么：260906 白天三次事故的根治——①KI-053 人工判读注入通道：rework 备注只进 create_plan/implement，arbitrate/acceptance 只吃机械结果，人工意见无正规入口（本夜靠 HOST_RULING.md+implement 转达两招过渡）——build_stage_prompt 增加宿主裁决注入面（blocked 态可注入，事件历史留痕）；②会话撕裂检疫增强：_quarantine_torn_sessions 只测 zstd 帧，帧好内撕裂（torn JSONL record）漏网=05 号两次卡死——检疫解压逐行试析，坏档隔离同路径；③落盘身份依赖守卫：泳道 settle 依赖宿主 ~/.gitconfig（本夜神秘消失致三轨 FAILED）——prepare_workspace 起 check+fail-fast 红字（身份缺失=开工前点名，不是落盘时才炸）＋LANE_DEP_SYMLINKS 补 server/dsh/temporal-poc/.venv（12 号 verify 回落链的同源盲区）。\n为什么：三事故全是同一族——引擎对宿主环境的隐性依赖在事故时刻才现形；每次都吃掉小时级抢救。怎么算好：三面各有场景看守（注入通道端到端/坏会话进检疫/身份缺失起check 红）。",
+  "spec": "依据=KI-053（notes/epics/engine-hardening.md）＋260906 三事故现场（05 号 agent_arbitrate_gen1.log 撕裂实录/worker-02·03·05 settle 身份崩/19 号闸 venv 手补）。范围=server/dsh/temporal-poc/＋integration/（场景族 t260905-10）。验收：①blocked 态宿主裁决注入→arbitrate 下轮 prompt 可见（端到端场景）；②帧好内撕裂会话被检疫隔离+同 id 新建走得通；③~/.gitconfig 缺失时 prepare_workspace 红字点名（夹具模拟）；④LANE_DEP_SYMLINKS 含 venv（泳道自动软链场景）；⑤verify_lane code 绿+merge 预演。",
+  "write_set": ["server/dsh/temporal-poc/", "integration/"],
+  "deliverables": "三面免疫守卫+场景族"
+}
