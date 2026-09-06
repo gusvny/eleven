@@ -15,10 +15,11 @@
 //      全腿 na → exit 1 产品红）。
 //   T2 命中腿（key 动态化不绑数据；t260905-04 仲裁修正：「命中分段」前提=key 在
 //      session_charter.md 有专属分段，注册表在案≠有分段——实测泳道台注册表只有
-//      seedws/suyou 时 seedws 无分段=假红）：命中腿优先取「注册表∩有分段」的 key
-//      （sandbar 优先），无交集时 shape 腿仍跑 keys[0]、分段追加腿=na 并点名台数据
-//      前提（非产品红）。200 + {ok,charter} 形状、charter 含 key 实值
-//      （{{project_key}} 已替换）、零 {{ 占位符残留（统一渲染）、含命中分段头。
+//      seedws/suyou 时 seedws 无分段=假红；t260905-02 仲裁修正续：分段前提从
+//      真源解析 project:<key>、注册表 key 真源无分段时该腿 na=系统状态条件腿，
+//      另钉无分段在案 key 的通用段兜底面，两态都看守）：
+//      200 + {ok,charter} 形状、charter 含 key 实值（{{project_key}} 已替换）、
+//      零 {{ 占位符残留（统一渲染）、有分段者含命中分段头。
 //   T3 未命中腿（不存在的 key）：200 + charter 非空（只回通用段）+ 不含该 key 的
 //      分段头 + {{project_name}} 弱化=key 实值仍在文。
 //   T4 缺 project → 400 且响应体可 JSON 解析（形状错误，不崩不 5xx）。
@@ -63,16 +64,20 @@ const get = (qs = '') => fetch(`${BASE}${CHARTER_EP}${qs}`, { signal: AbortSigna
 
 // ---- T0.5 在案 key（命中腿动态化，不绑注册表数据；t260905-04 仲裁修正见头注 T2：
 //      「命中分段」前提=key 在 session_charter.md 有专属分段，注册表在案≠有分段）----
+// 「命中分段在文」契约只对 charter 真源里有专属分段（## project:<key>）的项目
+// 成立；注册表在案但真源无分段的项目走通用段（不编造分段）。故 hitKey 优先取
+// 「在案且有分段」的 key（sandbar 优先）；真源读不到/无分段在案 key 时分段腿按
+// na 折算（系统状态条件腿，前提缺对象非产品红），无分段面另以 unsectionedKey 单独钉住。
 const keys = await fetchProjectKeys();
-const sectionKeys = (() => {
-  try {
-    const body = readFileSync('server/dsh/session_charter.md', 'utf8');
-    return [...body.matchAll(/^## project:(\S+)/gm)].map(m => m[1]);
-  } catch { return []; }
-})();
-const keyed = keys.filter(k => sectionKeys.includes(k));
-const hitKey = keys.includes('sandbar') && sectionKeys.includes('sandbar') ? 'sandbar'
-  : (keyed[0] ?? keys[0] ?? null);
+let sectionedKeys = [];
+try {
+  const src = readFileSync('server/dsh/session_charter.md', 'utf8');
+  sectionedKeys = [...src.matchAll(/^## project:(\S+)\s*$/gm)].map(m => m[1]);
+} catch { /* 真源读不到：分段腿按 na 折算 */ }
+const hitKey = keys.includes('sandbar') && sectionedKeys.includes('sandbar') ? 'sandbar'
+  : (keys.find(k => sectionedKeys.includes(k)) ?? keys[0] ?? null);
+const hitKeyHasSection = hitKey !== null && sectionedKeys.includes(hitKey);
+const unsectionedKey = keys.find(k => !sectionedKeys.includes(k)) ?? null;
 if (!hitKey) {
   emit('t0/project-registry', 'env_fail', '测试台项目注册表为空，命中腿无 key 可用');
   summarize();
@@ -106,11 +111,21 @@ emit('t2/charter-is-string', hitCharter !== null ? 'pass' : 'fail', 'charter 字
 if (hitCharter !== null) {
   emit('t2/key-materialized', hitCharter.includes(hitKey) ? 'pass' : 'fail', `charter 未含 ${hitKey} 实值（{{project_key}} 未替换？）`);
   emit('t2/no-placeholder-residue', hitCharter.includes('{{') ? 'fail' : 'pass', 'charter 残留 {{ 占位符（统一渲染未覆盖）');
-  if (hitKey !== null && sectionKeys.includes(hitKey)) {
-    emit('t2/section-appended', hitCharter.includes(`## project:${hitKey}`) ? 'pass' : 'fail', '命中分段头未出现在注入文本');
+  if (hitKeyHasSection) {
+    emit('t2/section-appended', hitCharter.includes(`## project:${hitKey}`) ? 'pass' : 'fail', `命中分段头未出现在注入文本（真源有 project:${hitKey} 分段）`);
   } else {
-    emit('t2/section-appended', 'na', `注册表在案 key 均无 charter 专属分段（文件在案分段=${sectionKeys.join('/') || '无'}；注册表=${keys.join('/') || '空'}）——分段追加腿无对象，台数据前提非产品红`);
+    emit('t2/section-appended', 'na', `注册表 key 在 charter 真源无专属分段（真源分段键=[${sectionedKeys.join(', ') || '无'}]）——分段在文腿无对象，系统状态条件腿`);
   }
+}
+// 无分段在案项目：通用段兜底、不编造分段（注册表在案≠真源有分段，两态分别钉住）
+if (unsectionedKey) {
+  const r2 = await get(`?project=${encodeURIComponent(unsectionedKey)}`);
+  let g = null;
+  try { g = await r2.json(); } catch { /* 判 fail */ }
+  const gc = typeof g?.charter === 'string' ? g.charter : null;
+  emit('t2/unsectioned-generic-fallback',
+    (r2.ok && gc !== null && gc.includes(unsectionedKey) && !gc.includes(`## project:${unsectionedKey}`)) ? 'pass' : 'fail',
+    `无分段在案 key=${unsectionedKey} 应 200+通用段+key 实值化+不编造分段（实得 http=${r2.status} charter=${gc === null ? '非字符串' : gc.length + '字'}）`);
 }
 
 // ---- T3 未命中腿：通用段兜底 + name 弱化 ----

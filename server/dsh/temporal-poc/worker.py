@@ -14,6 +14,7 @@ workflow 的状态与历史都在服务端不丢——这正是要验证的模�
     #   SUYOU_TASK_QUEUE=suyou-ticket-<工单id> SUYOU_WATCH_WORKFLOW=<工单id> \
     #     .venv/bin/python worker.py --daemon --pidfile data/worker-<工单id>.pid --logfile data/worker-<工单id>.log
     #   WATCH 模式下 worker 周期查自己 workflow 的状态，收口（非 RUNNING）即优雅自退。
+    #   轮询间隔 env SANDBAR_WATCH_INTERVAL_SEC 可调（缺省 30s；畸形值回落缺省，下限钳 1s）。
     #   console 子进程模式另置 SUYOU_WATCH_PPID=1：宿主被 SIGKILL 时 ppid 变 1 即自退，
     #   不留无主 worker（--daemon 手动拉起时不置此变量，保持常驻）。
     # 归属指纹（KI-033，t260904-02）：SUYOU_WORKER_META=<路径>（supervisor 指路）时
@@ -47,6 +48,29 @@ from workflows import ALL_WORKFLOWS
 from workflows_v2 import ALL_WORKFLOWS_V2
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
+WATCH_INTERVAL_DEFAULT_SEC = 30.0  # 生产缺省：30s 一轮（收口感知延迟上限≈一轮）
+WATCH_INTERVAL_MIN_SEC = 1.0       # 下限钳制：防 0/负值忙转打爆 describe
+
+
+def watch_interval_sec(raw: "str | None" = None) -> float:
+    """watch 轮询间隔（秒）。env SANDBAR_WATCH_INTERVAL_SEC 可调（集成场景提速用，
+    生效前提=SUYOU_WATCH_WORKFLOW 在置——watch 任务本身只在工单专属模式创建）。
+    新 env 按宿主令 260904 用 sandbar 前缀（不扩 SUYOU_* 存量欠账）。
+    消费外部输入，畸形态全容错：未置/空白/非数值/NaN/Inf/<=0 一律回落缺省；
+    有效但低于下限 → 钳到下限（不忙转）。"""
+    if raw is None:
+        raw = os.environ.get("SANDBAR_WATCH_INTERVAL_SEC") or ""
+    raw = str(raw).strip()
+    if not raw:
+        return WATCH_INTERVAL_DEFAULT_SEC
+    try:
+        val = float(raw)
+    except ValueError:
+        return WATCH_INTERVAL_DEFAULT_SEC
+    if val != val or val in (float("inf"), float("-inf")) or val <= 0:
+        return WATCH_INTERVAL_DEFAULT_SEC
+    return max(val, WATCH_INTERVAL_MIN_SEC)
 
 
 def worker_meta_path(args: argparse.Namespace) -> str:
@@ -137,11 +161,12 @@ async def run_worker(args: argparse.Namespace) -> None:
     # 收养、ppid 变 1，据此自退，不留无主 worker（85222 版本投毒教训）。
     watch_wf = os.environ.get("SUYOU_WATCH_WORKFLOW") or ""
     watch_ppid = os.environ.get("SUYOU_WATCH_PPID") == "1"
+    watch_interval = watch_interval_sec()
     watch_task: "asyncio.Task | None" = None
 
     async def _watch() -> None:
         while not stop.is_set():
-            await asyncio.sleep(30)
+            await asyncio.sleep(watch_interval)
             if watch_ppid and os.getppid() == 1:
                 logging.info("watch：宿主 console 已退出（ppid=1 被收养），专属 worker 自退")
                 stop.set()

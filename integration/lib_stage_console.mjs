@@ -55,14 +55,21 @@ export async function ensureStageConsole({ services = 'full', project = TREE_PRO
     spawnSync('python3', [CLI, 'down', '--project', project],
       { encoding: 'utf8', env, timeout: 180000 });
   }
+  // 供给预算必须压在场景执行器帽（900s）之下：供给拿不下=诚实 env_fail（exit 2
+  // 点名），绝不占满执行器超时被无声 -9（t260905-02 仲裁实锤：ensure 重建期被
+  // 执行器杀，stdout 空、归因信息全丢）。健康复用路径不受影响（秒级返回）。
+  const ENSURE_TIMEOUT_MS = 480000;
   const p = spawnSync('python3', [CLI, 'ensure', '--project', project, '--keep',
     '--repo-dir', WANT_REPO,
-    '--services', services, '--timeout', '900'],
-  { encoding: 'utf8', env, timeout: 960000 });
-  if (p.status !== 0) {
+    '--services', services, '--timeout', '420'],
+  { encoding: 'utf8', env, timeout: ENSURE_TIMEOUT_MS });
+  if (p.error || p.status !== 0) {
     const named = String(p.stderr ?? '').split('\n').filter((l) => l.startsWith('STAGE_')).at(-1);
+    const why = p.error
+      ? `ensure 超时/不可执行（${ENSURE_TIMEOUT_MS / 1000}s 供给帽，${p.error.code ?? p.error.name ?? p.error}）`
+      : `rc=${p.status} ${String(p.stderr ?? '').slice(0, 200)}`;
     // 报错精确性：STAGE_ 行后附 CLI stderr 尾（compose 诊断面），不做只留结论丢证据。
-    console.error(`[ENV_FAIL] stage-console — ${named ?? `rc=${p.status}`}\n${String(p.stderr ?? '').slice(-600)}`);
+    console.error(`[ENV_FAIL] stage-console — ${named ?? why}\n${String(p.stderr ?? '').slice(-600)}`);
     process.exit(2);
   }
   const st = JSON.parse(String(p.stdout).trim().split('\n').at(-1));
