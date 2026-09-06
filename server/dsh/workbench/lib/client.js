@@ -52880,6 +52880,9 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 			}),
 			approveBox !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "wb-modal",
+				role: "dialog",
+				"aria-modal": "true",
+				"aria-label": "审批通过并推进",
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-modal-box",
 					children: [
@@ -52945,6 +52948,9 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 			}),
 			reworkId !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "wb-modal",
+				role: "dialog",
+				"aria-modal": "true",
+				"aria-label": "打回",
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-modal-box",
 					children: [
@@ -52999,6 +53005,9 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 			}),
 			promptBox !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "wb-modal",
+				role: "dialog",
+				"aria-modal": "true",
+				"aria-label": "派活指令",
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-modal-box",
 					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -53037,6 +53046,9 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 			}),
 			preview !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "wb-modal",
+				role: "dialog",
+				"aria-modal": "true",
+				"aria-label": "内容预览",
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-modal-box wb-preview-box",
 					children: [

@@ -3659,8 +3659,10 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
         </div>
       )}
 
+      {/* t260905-05：四类 wb-modal 补 role="dialog"/aria-modal/aria-label——a11y 语义 +
+          集成场景可测性（[role=dialog] 消费面此前恒空）。纯属性零视觉差异。 */}
       {approveBox !== null && (
-        <div className="wb-modal">
+        <div className="wb-modal" role="dialog" aria-modal="true" aria-label="审批通过并推进">
           <div className="wb-modal-box">
             <div className="wb-modal-title">审批通过并推进 — {approveBox.id}</div>
             <div className="wb-modal-body">
@@ -3684,7 +3686,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       )}
 
       {reworkId !== null && (
-        <div className="wb-modal">
+        <div className="wb-modal" role="dialog" aria-modal="true" aria-label="打回">
           <div className="wb-modal-box">
             <div className="wb-modal-title">{reworkHuman ? '打回（走 Temporal sign，decision=reject）' : '打回'} — {reworkId}</div>
             <div className="wb-modal-body">
@@ -3704,7 +3706,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       )}
 
       {promptBox !== null && (
-        <div className="wb-modal">
+        <div className="wb-modal" role="dialog" aria-modal="true" aria-label="派活指令">
           <div className="wb-modal-box">
             <div className="wb-modal-title">派活指令（dispatch-next · {promptBox.role}@{promptBox.stage}）</div>
             <div className="wb-modal-body">
@@ -3721,7 +3723,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       )}
 
       {preview !== undefined && (
-        <div className="wb-modal">
+        <div className="wb-modal" role="dialog" aria-modal="true" aria-label="内容预览">
           <div className="wb-modal-box wb-preview-box">
             <div className="wb-modal-title">
               内容预览 · {preview.meta.主题 || '後漢書'}{preview.meta.期次 ? `（${preview.meta.期次}）` : ''}

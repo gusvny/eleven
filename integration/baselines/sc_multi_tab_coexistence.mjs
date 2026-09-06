@@ -276,9 +276,10 @@ async function openBoard(page) {
   const boardIcon = page.locator('span.wb-view-icon[title="工单列表"]').first()
   if (!(await waitFor(async () => (await boardIcon.count()) > 0, 10000))) return false
   await boardIcon.click()
+  // t260905-05 换锚：行卡契约（boardCard，见上）替代已退役的 tr.wb-row。
   return waitFor(async () =>
-    (await page.locator('tr.wb-row', { hasText: FIDA }).count()) > 0 &&
-    (await page.locator('tr.wb-row', { hasText: FIDB }).count()) > 0, 10000)
+    (await boardCard(page, FIDA).count()) > 0 &&
+    (await boardCard(page, FIDB).count()) > 0, 10000)
 }
 
 // ---------------------------------------------------------------- S1 DOM probes (run in page context)
@@ -337,24 +338,48 @@ const fnHostileTraffic = `(channel) => {
 
 // ---------------------------------------------------------------- S1 scenarios
 
+// 行卡锚契约（t260904-17 钉死）：中列全尺寸卡与左栏迷你卡共用 data-ticket-id，
+// 用组件自声明 data-compact 消歧——板面=false、左栏=true（裸 locator 会撞车，
+// 先例 integration/t260904-17/sc_ticket_list_rowcard_ui.mjs boardCard）。
+// t260905-05 再锚定：原锚 tr.wb-row 已随 t260904-17 平铺行卡退役（现行 bundle
+// 零匹配，S1 precheck 曾因此恒 env_fail）；断言语义零弱化，仅换锚 + 补 M9
+// 审批弹层跳（见 completeApproveModal）。
+const boardCard = (page, id) => page.locator(`[data-ticket-id="${id}"][data-compact="false"]`)
+
+/** M9 审批弹层补步（t260901-22 拍板的写链第二跳）：awaiting-human 票点「推进」
+ *  开 .wb-modal 审批层，须点「确认通过并推进」才落写（写守门 native confirm 在其
+ *  后的 doOp 内，页级 dialog handler 统一 accept）。返回 true=弹层已确认。
+ *  判负口径（review C3，不静默跳过）：弹层在场但确认钮缺失 → throw 点名断言；
+ *  点击后既无 native confirm 也无写落地 → 由调用方的 guardMsgs/write 计数断言判负。 */
+async function completeApproveModal(page) {
+  if (!(await waitFor(async () => (await page.locator('.wb-modal').count()) > 0, 5000))) return false
+  const confirmBtn = page.locator('.wb-modal button', { hasText: '确认通过并推进' }).first()
+  if (!(await confirmBtn.count())) {
+    throw new Error('审批弹层在场但「确认通过并推进」按钮缺失（审批流改版？断言不得静默跳过）')
+  }
+  await confirmBtn.click({ timeout: 5000 })
+  return true
+}
+
 async function clickRowAdvance(page, id) {
-  const row = page.locator('tr.wb-row', { hasText: id }).first()
-  if (!(await waitFor(async () => (await row.count()) > 0, 8000))) {
+  const card = boardCard(page, id)
+  if (!(await waitFor(async () => (await card.count()) > 0, 8000))) {
     throw new Error(`row ${id} not rendered`)
   }
-  await row.locator('button', { hasText: '推进' }).first().click({ timeout: 5000 })
+  await card.locator('button', { hasText: '推进' }).first().click({ timeout: 5000 })
+  await completeApproveModal(page)
 }
 
 async function openDetail(page, id, { force = false } = {}) {
-  const row = page.locator('tr.wb-row', { hasText: id }).first()
-  if (!(await waitFor(async () => (await row.count()) > 0, 8000))) {
+  const card = boardCard(page, id)
+  if (!(await waitFor(async () => (await card.count()) > 0, 8000))) {
     throw new Error(`row ${id} not rendered`)
   }
   // force=只放宽点击到达手段（跳过 actionability 的 stable 等待），行为断言不变
   // （抽屉必须真开）。T5b 专用：hostile 流量后 presence 轮询高频重渲染会让 boundingBox
   // 持续抖动、stable 永不满足=工具伪红（行在场、console 零 error、真实用户点得动）；
   // 行的正常可点性已由 T4（非 force 路径）单独验证。若 force 后抽屉仍不开=产品红如实落。
-  await row.click(force ? { force: true, timeout: 8000 } : undefined)
+  await card.click(force ? { force: true, timeout: 8000 } : undefined)
   const ok = await waitFor(async () => {
     const t = await page.evaluate(domDrawerId)
     return t && t.includes(id)
@@ -500,14 +525,15 @@ async function scenarioStaleDetailRace(page, shared) {
   // Reproduce 点 13 跳 11: FIDA's detail response is held; the user clicks
   // FIDB before it lands; the late stale response must not overwrite the drawer.
   shared.delays[FIDA] = 1500
-  const rowA = page.locator('tr.wb-row', { hasText: FIDA }).first()
+  const rowA = boardCard(page, FIDA)
   await rowA.click()
   await page_wait(300) // FIDA request in flight, still pending
   // FIDA 的抽屉此刻已弹出（全屏 overlay 挡住指针），真实世界的第二跳来自
   // 侧栏点工单（focusId 联动）——与行点击汇入同一 openDetail 入口。这里用
-  // JS 派发点击同一行，过 overlay 驱动同一代码路径（测的是在途竞态，不是遮罩）。
+  // JS 派发点击同一行卡，过 overlay 驱动同一代码路径（测的是在途竞态，不是遮罩）。
   await page.evaluate(`(() => {
-    const row = [...document.querySelectorAll('tr.wb-row')].find(r => r.textContent.includes('${FIDB}'))
+    const row = [...document.querySelectorAll('[data-ticket-id]')].find(r =>
+      r.getAttribute('data-ticket-id') === '${FIDB}' && r.getAttribute('data-compact') === 'false')
     if (!row) throw new Error('row ${FIDB} not found')
     row.click()
   })()`)
