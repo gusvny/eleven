@@ -25,7 +25,7 @@
 //   + 关日志 fd + 删临时目录（DSH_HOME+软链）。process exit 钩子兜底（tornDown 防
 //   重复拆）。
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync,
   realpathSync, rmSync, statSync,
