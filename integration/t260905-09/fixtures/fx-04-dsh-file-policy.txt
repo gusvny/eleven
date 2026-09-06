@@ -1,0 +1,6 @@
+Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace.
+
+%%%
+取证来源（t260905-09）：宿主平台自启上下文的文件沙箱策略独立段首行（260906 宿主
+实报会话实文转写；「Current DSH file policy:」恒定前缀，冒号后值随会话策略变，
+故锚=前缀口径）。锚真源 id=dsh-file-policy 的固定样本。

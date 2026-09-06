@@ -4638,6 +4638,61 @@ function startChatProjectTag(opts) {
 	};
 }
 //#endregion
+//#region src/client/platform-context-anchors.ts
+/**
+* 平台自启上下文锚清单（新增锚须带出处注 + fixtures 样本 + 场景同步）。
+* 出处口径：宿主 260906 实报（notes/queued-fold-platform-context-ticket.json）
+* + 真控制台新会话实文取证（本模块只收平台生成措辞，逐条见 note）。
+*/
+const PLATFORM_CONTEXT_ANCHORS = [
+	{
+		id: "runtime-context-snapshot",
+		match: "exact",
+		text: "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.",
+		note: "平台运行时上下文快照的首句（宿主每轮注入的 wrapper 恒定措辞，跨项目恒定）。"
+	},
+	{
+		id: "runtime-context-preamble",
+		match: "exact",
+		text: "The following workspace instructions may be relevant to your work.",
+		note: "平台 workspace instructions 块的开场句（宿主恒定措辞，紧随 runtime context 快照之后）。"
+	},
+	{
+		id: "dsh-file-policy",
+		match: "first-line",
+		text: "Current DSH file policy:",
+		note: "平台文件沙箱策略行（宿主恒定措辞，独立段）。"
+	},
+	{
+		id: "instructions-from",
+		match: "first-line",
+		text: "Instructions from: ",
+		note: "平台注入工作区指令文件的 wrapper 行（恒为「Instructions from: <路径>」形态）；命中即整条消息按注入物折叠。"
+	},
+	{
+		id: "claude-md-heading",
+		match: "first-line",
+		text: "# sandbar — ",
+		note: "CLAUDE.md 头行（项目侧内容锚，工单点名；项目更名/头行改版=场景红人审，非静默）。唯一的项目侧锚，平台侧 wrapper 措辞锚齐备后可审删。"
+	}
+];
+/**
+* 平台上下文折叠判定（纯函数，smoke 直测）：
+* - 容错口径与 classifyContextFold 同款：非字符串/空串 → false；
+* - exact 锚：trimStart 后以锚文本开头；
+* - first-line 锚：首个非空行以锚文本开头（允许锚行前有空白）；
+* - 中段提及锚字样 → false（误折面声明见头注）。
+*/
+function classifyPlatformContext(text) {
+	if (typeof text !== "string") return false;
+	const trimmed = text.trimStart();
+	if (trimmed === "") return false;
+	for (const anchor of PLATFORM_CONTEXT_ANCHORS) if (anchor.match === "exact") {
+		if (trimmed.startsWith(anchor.text)) return true;
+	} else if ((trimmed.split("\n", 1)[0] ?? "").startsWith(anchor.text)) return true;
+	return false;
+}
+//#endregion
 //#region src/client/context-fold.ts
 /**
 * suyou-workbench · 上下文折叠件（t260905-04）——通用「渲染面」装饰器。
@@ -4646,6 +4701,18 @@ function startChatProjectTag(opts) {
 * 的上下文注入消息在 chat 会话区收成一条可展开小条（「📋 已注入项目背景 · 点击
 * 展开」），点开见全文（占位符已实值化）。未来任何上下文注入（项目简介、文档
 * 引用）带同一标记即走本折叠件——机制在引擎（打标），面在渲染（本模块）。
+*
+* t260905-09 扩面：折叠判定从「仅 CHARTER_MARKER」扩为「marker ∨ 平台自启上下文
+* 内容锚」（锚真源=同目录 platform-context-anchors.ts：runtime context 快照句/
+* workspace instructions 开场句/Instructions from 行/CLAUDE.md 头行等；锚纪律、
+* 误折面声明与漂移看守在彼处头注）。真控制台新会话=平台自启上下文 N 条 + 工单台
+* 注入 1 条叠加（宿主 260906 实报「只折叠了开头一小部分」病根：16 号只折了自家
+* 注入），施折面同步改聚合语义：同一滚动体内全部候选气泡（按**气泡元素身份**
+* 去重——多锚命中同一消息只计一次）全部收折、共享**恰一个小条**；计数文案仅
+* N>1 叠加态出现，N=1 保持现行文案逐字不变（与 16 号 journey T1 在场断言、smoke
+* C 文案等值断言零回归的最小 diff 前提）。平台消息不含 CHARTER_MARKER，两路
+* 触发器互不依赖；「marker 消息恒恰一条」假设只对工单台注入成立，warn 语义随之
+* 收窄（取舍第 5 项）。
 *
 * 平台消息气泡锚（方案步 1 取证结论）：隔离台 DOM 探针在本实现环境不可用
 * （stage_docker ensure 容器只读挂载 ENV_FAIL，见工单 evidence），故锚算法取
@@ -4660,24 +4727,30 @@ function startChatProjectTag(opts) {
 * ── 故障模式取舍清单（对照 chat-project-band.ts 头注 10 项范式逐项，t260905-04
 *    review C1 打回定稿；「照搬」字样禁用，逐项「带/不带+理由」）──
 * 1. ✅ 锚丢失显式降级：滚动体 0 命中=hero/卸载瞬态，Observer 不断、不 warn
-*    （同 band）；差异声明：滚动体在场但扫不到 marker=常态（会话无注入物），
-*    同样不 warn 不断 Observer。
+*    （同 band）；差异声明：滚动体在场但扫不到候选（marker 或平台锚，t260905-09
+*    扩面）=常态（会话无注入物），同样不 warn 不断 Observer。
 * 2. ⚠️ 负向排除**收窄声明**（非 band 原样）：本模块需在滚动体内自铸一个小条
 *    元素（insertBefore 到气泡父容器，带 CHIP_ATTR 自有属性锚）——这是对 band
 *    「零自铸 DOM」的真实扩面。气泡内部子树零触碰（内容隐藏纯靠气泡自身 attr
 *    +CSS）。**孤儿小条专项（review 条件 A）**：React commit 只清自己 fiber 记
 *    录的节点，外部插入的兄弟不随气泡被清理——会话切换/内容清空后旧小条可残留
-*    为幽灵。对策：小条与气泡的配对记入注册表，每轮回调校验「气泡仍连接 且
-*    classifyContextFold(气泡文本) 仍真」，失效即摘小条+摘气泡属性——幽灵小条
-*    不过夜（无注入物会话开头绝不出现「已注入项目背景」）。
+*    为幽灵。对策：小条与**候选气泡集合**的配对记入注册表（t260905-09 从
+*    1:1 配对扩为 1:N 聚合——一个小条对应同滚动体全部候选气泡），每轮回调
+*    逐气泡校验「气泡仍连接 且 候选判定(气泡文本) 仍真」，失效即摘该气泡
+*    属性并移出集合，集合空/小条脱树即摘小条——幽灵小条不过夜（无注入物
+*    会话开头绝不出现「已注入项目背景」）。
 * 3. ✅ F1 防呆接线：startContextFoldEffect 返回清理函数本身，sidebar 以
 *    useEffect(() => startContextFoldEffect(), []) 接线（t260903-07 F1 实案不复犯）。
 * 4. ✅ 注入防线（attr-only 加码）：marker/文案只进属性值与 textContent，**不进
 *    CSS 选择器**——本模块 CSS 全静态字面量，零插值。
-* 5. ✅ 多锚语义收紧：单会话注入物恰一条（t3 ×1 守卫），命中 N>1=console.warn
-*    一次（疑似误打标信号，与 band「齐设无害」不同，差异声明）；仍全部处理。
-* 6. ✅ 畸形输入生产闸门：classifyContextFold 对非字符串/空串容错为 false；
-*    只认 trimStart 后以 marker 开头（中段提及 marker 的普通消息不误触发）。
+* 5. ⚠️ 多锚语义（t260905-09 收窄改写）：**工单台 charter 注入物**仍恒恰一条
+*    （t3 ×1 守卫），marker 命中 N>1=console.warn 一次（疑似误打标信号）；
+*    **平台自启上下文**叠加 N 条属真控制台常态（宿主 260906 实报），不 warn、
+*    全部聚折到同一条小条（气泡元素身份去重，多锚同一消息只计一次）。
+* 6. ✅ 畸形输入生产闸门：classifyContextFold 与 classifyPlatformContext 对
+*    非字符串/空串容错为 false；只认首行/前缀口径（中段提及 marker 或锚字样
+*    的普通消息不误触发）；前缀命中的固有误折面（用户粘贴以锚行开头）=设计内
+*    限制，声明见 platform-context-anchors.ts 头注。
 * 7. ✅ 幂等先查再设：属性值/小条存在性/style 文本同值跳过——React 重渲染与
 *    Observer 回调反复触发不抖。
 * 8. ✅ MutationObserver 防重建：滚动体祖先链 childList+subtree；**characterData
@@ -4685,8 +4758,12 @@ function startChatProjectTag(opts) {
 *    逐 token 输出每帧触发全文扫描（性能不值，方案 review C1-② 定稿）。回调内
 *    只对新增节点子树扫描（增量），接线时对既有 DOM 跑一次全树兜底（覆盖先于
 *    接线已渲染的历史会话）。removedNodes 不盯——孤儿由第 2 项配对校验兜住。
+*    增量守门文本节点分支：判定式 t260905-09 起对齐扩面口径（marker ∨ 平台锚，
+*    同一谓词常量消费）；现实语义上消息到达恒为元素节点（文本分支纯兜底），
+*    两路触发器共用谓词保证未来锚变更不再需要分叉改两处。
 * 9. ✅ 全终态回收五项（band 第 9 项是四项，本模块多一项，非照抄）：断 Observer
-*    + 摘 head style + 摘全部自设属性与自铸小条（只摘自己设过/铸过的）+ **解绑
+*    + 摘 head style + 摘全部自设属性与自铸小条（只摘自己设过/铸过的；回收
+*    遍历 t260905-09 起按聚合注册表 chip→气泡集合展开，逐气泡摘属性）+ **解绑
 *    document click 委托（band 明文无监听面，本模块新增件）** + 降级路径 warn
 *    留痕。点击委托防重入=引用计数单例：重复 start 不叠绑（监听器只绑一次），
 *    引用归零才真拆——React StrictMode 双挂（挂→清→挂）与多消费方两安全。
@@ -4706,9 +4783,18 @@ const CHIP_ATTR = "data-wb-context-fold-chip";
 const FOLD_STYLE_SELECTOR = "style[data-wb-context-fold-style]";
 /** 平台 chat 滚动体锚（同 chat-project-band；平台自声明属性）。 */
 const SCROLL_SELECTOR = "[data-conversation-scroll]";
-/** 小条文案（折叠态/展开态）。 */
+/** 小条文案（折叠态/展开态；N=1 单注入物形态，与 16 号文案逐字一致）。 */
 const CHIP_LABEL_FOLDED = "📋 已注入项目背景 · 点击展开";
 const CHIP_LABEL_OPEN = "📋 已注入项目背景 · 点击收起";
+/**
+* 小条文案生成（纯函数，t260905-09 聚合语义）：N=1 保持现行文案逐字不变
+* （零回归最小 diff）；N>1 叠加态在文案中显式带气泡计数。
+*/
+function chipLabelFor(count, folded) {
+	if (count <= 1) return folded ? CHIP_LABEL_FOLDED : CHIP_LABEL_OPEN;
+	const n = Math.max(1, Math.trunc(count));
+	return folded ? `📋 已注入项目背景 · ${n} 条 · 点击展开` : `📋 已注入项目背景 · ${n} 条 · 点击收起`;
+}
 /** 折叠件基础样式（全静态字面量，零插值——取舍第 4 项）。 */
 const FOLD_BASE_CSS = `
 [data-wb-context-fold="folded"] { display: none !important; }
@@ -4722,6 +4808,14 @@ function classifyContextFold(text) {
 	return typeof text === "string" && text.trimStart().startsWith("<!-- workbench:kind:charter -->");
 }
 /**
+* 折叠候选判定（t260905-09 扩面，纯函数）：工单台 marker 路径 ∨ 平台自启上下文
+* 锚路径（platform-context-anchors.ts）。两路互不依赖；畸形输入两条路径各自容错
+* 为 false。Observer 增量守门的文本节点分支与施折定位共用本谓词（头注取舍第 8 项）。
+*/
+function isFoldCandidate(text) {
+	return classifyContextFold(text) || classifyPlatformContext(text);
+}
+/**
 * 元素子节点集合数组化。真 DOM 的 el.children 是 HTMLCollection（live 集合，
 * 无 .some/.map 等数组方法）——必须 Array.from 落成真数组再集合操作；
 * 直接 `as El[]` 断言会在浏览器运行期炸（arbitrate round1 code-fault 根因，
@@ -4733,78 +4827,112 @@ function elementChildren(el) {
 	return Array.from(el.children ?? []);
 }
 /**
-* 在滚动体内定位注入物气泡（纯函数面，可测）：
-* ① 收集全部以 marker 开头的元素，取最深者为 markerHost（无→null）；
+* 在滚动体内收集折叠候选气泡（纯函数面，可测；t260905-09 从「单 marker 气泡」
+* 扩为「全部候选聚合」，算法口径）：
+* ① 单遍扫描收集候选宿主（marker 或平台锚开头、且无子元素命中的独立元素）；
 * ② 沿唯一元素子链上爬：父层只有这一个元素子且父层≠滚动体 → 上移；
-*    停在「父层有兄弟（=同级还有其他消息）或父层=滚动体」的那层=气泡。
-* ③ 气泡=滚动体本身（无兄弟可分层）→ null（降级：宁不折，不藏整个滚动体）。
+*    停在「父层有兄弟（=同级还有其他消息）或父层=滚动体」的那层=气泡；
+* ③ 气泡=滚动体本身（无兄弟可分层）→ 该宿主丢弃（降级：宁不折，不藏整个
+*    滚动体）；同气泡多宿主按元素身份去重（取舍第 2 项）。
 */
-function findCharterBubble(scroll) {
-	const all = scroll.querySelectorAll("*") ?? [];
-	let host = null;
-	let hostDepth = -1;
-	const depthOf = (el) => {
-		let d = 0;
-		let cur = el;
-		while (cur && cur !== scroll) {
-			cur = cur.parentElement;
-			d++;
-		}
-		return d;
-	};
-	for (const el of all) if (classifyContextFold(el.textContent) && !elementChildren(el).some((c) => classifyContextFold(c.textContent))) {
-		const d = depthOf(el);
-		if (d > hostDepth) {
-			host = el;
-			hostDepth = d;
-		}
-	}
-	if (!host) return null;
+/** 气泡爬升（纯函数面）：从候选宿主沿唯一元素子链上爬到气泡层（头注算法①②）。 */
+function bubbleOfHost(host, scroll) {
 	let bubble = host;
 	while (bubble.parentElement && bubble.parentElement !== scroll && elementChildren(bubble.parentElement).length === 1) bubble = bubble.parentElement;
-	if (bubble === scroll || bubble.parentElement === scroll) return bubble === scroll ? null : bubble;
+	if (bubble === scroll) return null;
 	return bubble;
+}
+/**
+* 在滚动体内收集全部折叠候选气泡（纯函数面，可测，t260905-09 聚合语义）：
+* ① 单遍扫描收集候选宿主元素（「自身命中候选判定且无子元素命中」的最深层独立
+*    元素——**按宿主元素身份天然去重**：多锚命中同一消息只产生一个宿主）；
+* ② 每个宿主沿唯一子链上爬到气泡层（bubbleOfHost）；
+* ③ 按气泡元素身份去重（同气泡多宿主只留一个）；
+* ④ 爬到滚动体本体的宿主丢弃（降级：宁不折，不藏整个滚动体，逐气泡降级不影响
+*    其余候选）。
+* 同时返回 marker 宿主计数（多锚 warn 语义只用工单台注入物计数，取舍第 5 项）。
+*/
+function collectFoldCandidates(scroll) {
+	const all = scroll.querySelectorAll("*") ?? [];
+	const seenBubbles = /* @__PURE__ */ new Set();
+	const bubbles = [];
+	let charterHosts = 0;
+	for (const el of all) {
+		if (!isFoldCandidate(el.textContent)) continue;
+		if (elementChildren(el).some((c) => isFoldCandidate(c.textContent))) continue;
+		if (classifyContextFold(el.textContent)) charterHosts++;
+		const bubble = bubbleOfHost(el, scroll);
+		if (!bubble || seenBubbles.has(bubble)) continue;
+		seenBubbles.add(bubble);
+		bubbles.push(bubble);
+	}
+	return {
+		bubbles,
+		charterHosts
+	};
 }
 let state = null;
 let refCount = 0;
-/** 摘一个配对（小条+气泡属性）。 */
-function unpair(st, chip, bubble) {
+/** 摘一个配对（小条+集合内全部气泡属性；逐节点容错幂等）。 */
+function unpair(st, chip, bubbles) {
 	try {
 		chip.remove();
 	} catch {}
-	try {
+	for (const bubble of bubbles) try {
 		bubble.removeAttribute(FOLD_ATTR);
 	} catch {}
 	st.pairs.delete(chip);
 }
 /**
-* 对单个滚动体施折叠（幂等）：孤儿清扫 → 定位气泡 → 打折叠态+铸小条。
-* 返回处理结果：'none'=无 marker（常态）| 'folded'=新折/保持 | 'degraded'=爬到滚动体跳过。
+* 对单个滚动体施折叠（幂等，t260905-09 聚合语义）：
+* 孤儿清扫 → 收集全部候选气泡 → 已配对者保持、未配对者打折叠态并并入共享小条。
+* 返回处理结果：'none'=无候选（常态）| 'folded'=折/保持 | 'degraded'=小条铸入失败
+* （逐气泡回滚，宁整段照旧不留半态）。
 */
 function applyContextFold(scroll, doc) {
 	const st = state;
 	if (!st) return "none";
-	for (const [chip, bubble] of [...st.pairs]) if (chip.isConnected === false || bubble.isConnected === false || !classifyContextFold(bubble.textContent)) unpair(st, chip, bubble);
-	const bubble = findCharterBubble(scroll);
-	if (!bubble) return "none";
-	if ([...st.pairs.entries()].find(([, b]) => b === bubble)) return "folded";
-	const marked = (scroll.querySelectorAll(`[data-wb-context-fold]`) ?? []).length;
-	if (marked > 0 && !st.warnedMulti) {
+	for (const [chip, bubbles] of [...st.pairs]) {
+		for (const bubble of [...bubbles]) if (bubble.isConnected === false || !isFoldCandidate(bubble.textContent)) {
+			try {
+				bubble.removeAttribute(FOLD_ATTR);
+			} catch {}
+			bubbles.delete(bubble);
+		}
+		if (chip.isConnected === false || bubbles.size === 0) unpair(st, chip, bubbles);
+	}
+	const { bubbles: candidates, charterHosts } = collectFoldCandidates(scroll);
+	if (candidates.length === 0) return "none";
+	if (charterHosts > 1 && !st.warnedMulti) {
 		st.warnedMulti = true;
-		console.warn("[workbench] context-fold：单滚动体命中多条注入物（预期恰一条，疑似误打标）：", marked);
+		console.warn("[workbench] context-fold：单滚动体命中多条 charter 注入物（预期恰一条，疑似误打标）：", charterHosts);
 	}
-	bubble.setAttribute(FOLD_ATTR, "folded");
-	const chip = doc.createElement("button");
-	chip.setAttribute(CHIP_ATTR, "");
-	chip.textContent = CHIP_LABEL_FOLDED;
-	try {
-		bubble.parentElement?.insertBefore(chip, bubble);
-	} catch (err) {
-		bubble.removeAttribute(FOLD_ATTR);
-		console.warn("[workbench] context-fold：小条插入失败，本条不折叠：", err instanceof Error ? err.message : err);
-		return "degraded";
+	const existing = [...st.pairs.entries()].find(([, bs]) => candidates.some((c) => bs.has(c)));
+	let chip = existing?.[0] ?? null;
+	const chipBubbles = existing?.[1] ?? null;
+	for (const bubble of candidates) {
+		if (chipBubbles?.has(bubble)) continue;
+		bubble.setAttribute(FOLD_ATTR, "folded");
+		if (!chip) {
+			chip = doc.createElement("button");
+			chip.setAttribute(CHIP_ATTR, "");
+			try {
+				bubble.parentElement?.insertBefore(chip, bubble);
+			} catch (err) {
+				bubble.removeAttribute(FOLD_ATTR);
+				console.warn("[workbench] context-fold：小条插入失败，本条不折叠：", err instanceof Error ? err.message : err);
+				return "degraded";
+			}
+			st.pairs.set(chip, /* @__PURE__ */ new Set());
+		}
+		st.pairs.get(chip).add(bubble);
 	}
-	st.pairs.set(chip, bubble);
+	const finalChip = chip;
+	const finalBubbles = st.pairs.get(finalChip);
+	if (finalBubbles && finalBubbles.size > 0) {
+		const folded = [...finalBubbles].every((b) => b.getAttribute(FOLD_ATTR) === "folded");
+		finalChip.textContent = chipLabelFor(finalBubbles.size, folded);
+	}
 	return "folded";
 }
 /** 扫全部滚动体（增量回调与全树兜底共用入口）。 */
@@ -4813,7 +4941,7 @@ function scanAll(doc) {
 	if (scrolls.length === 0) return;
 	for (const scroll of scrolls) applyContextFold(scroll, doc);
 }
-/** 小条点击（document 级委托，取舍第 9 项；展开/收起同点切换）。 */
+/** 小条点击（document 级委托，取舍第 9 项；t260905-09 聚合：整组开/收同点切换）。 */
 function onChipClick(ev) {
 	const st = state;
 	if (!st) return;
@@ -4821,11 +4949,11 @@ function onChipClick(ev) {
 	if (!target || typeof target.closest !== "function") return;
 	const chip = target.closest(`[${CHIP_ATTR}]`);
 	if (!chip) return;
-	const bubble = st.pairs.get(chip);
-	if (!bubble) return;
-	const folded = bubble.getAttribute(FOLD_ATTR) === "folded";
-	bubble.setAttribute(FOLD_ATTR, folded ? "open" : "folded");
-	chip.textContent = folded ? CHIP_LABEL_OPEN : CHIP_LABEL_FOLDED;
+	const bubbles = st.pairs.get(chip);
+	if (!bubbles || bubbles.size === 0) return;
+	const folded = [...bubbles].every((b) => b.getAttribute(FOLD_ATTR) === "folded");
+	for (const bubble of bubbles) bubble.setAttribute(FOLD_ATTR, folded ? "open" : "folded");
+	chip.textContent = chipLabelFor(bubbles.size, !folded);
 }
 /**
 * 启动折叠件（引用计数单例）：head 注入 style + Observer（document 子树
@@ -4857,7 +4985,7 @@ function startContextFold(opts = {}) {
 		const observer = new MutationObserver((muts) => {
 			let interesting = false;
 			for (const m of muts) {
-				for (const n of m.addedNodes) if (n.nodeType === 1 || typeof n.textContent === "string" && n.textContent.includes("<!-- workbench:kind:charter -->")) {
+				for (const n of m.addedNodes) if (n.nodeType === 1 || typeof n.textContent === "string" && isFoldCandidate(n.textContent)) {
 					interesting = true;
 					break;
 				}
@@ -4886,7 +5014,7 @@ function startContextFold(opts = {}) {
 		try {
 			st.doc?.removeEventListener("click", onChipClick);
 		} catch {}
-		for (const [chip, bubble] of [...st.pairs]) unpair(st, chip, bubble);
+		for (const [chip, bubbles] of [...st.pairs]) unpair(st, chip, bubbles);
 		try {
 			const style = st.doc?.querySelector(FOLD_STYLE_SELECTOR);
 			if (style) st.doc?.head.removeChild(style);

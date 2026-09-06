@@ -1,0 +1,8 @@
+The following workspace instructions may be relevant to your work. Use them as guidance when applicable.
+
+More instructions would appear here in a real platform context message.
+
+%%%
+取证来源（t260905-09）：宿主平台自启上下文的工作区指令 wrapper 开头行（260906
+宿主实报会话实文转写，跨项目恒定措辞）。追随行为占位文本（真实内容随项目变，
+不影响首行锚）。

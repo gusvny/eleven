@@ -21,6 +21,14 @@
  *   F. 引用计数单例（取舍第 9 项）：双 start 只绑一次 click、先归零才真拆；
  *      StrictMode 序列（start→stop→start）第二段仍活。
  *   G. 点击委托：点小条切折叠态+文案切换；非小条点击不动。
+ *   H. children=HTMLCollection 语义回归（arbitrate round1 code-fault 根因）。
+ *   I. 平台锚聚合（t260905-09）：平台上下文 N 条 + charter 注入 1 条叠进同一
+ *      滚动体 → 全部收折、恰一个小条、N=1 文案逐字不变、N>1 计数文案；多锚
+ *      命中同一消息按气泡元素身份去重；负向：普通消息零误折。
+ *   J. 聚合组开收：点小条整组开/收、计数文案随态切换。
+ *   K. 聚合孤儿清扫：混合集合中部分气泡失效（改写/移除）→ 逐气泡摘属性、
+ *      全失效才摘小条。
+ *   L. warn 收窄：charter 注入物 >1 才 warn；平台叠加 N 条不 warn。
  */
 
 import {
@@ -29,12 +37,16 @@ import {
   FOLD_STYLE_SELECTOR,
   CHIP_LABEL_FOLDED,
   CHIP_LABEL_OPEN,
+  chipLabelFor,
   classifyContextFold,
+  isFoldCandidate,
+  collectFoldCandidates,
   findCharterBubble,
   applyContextFold,
   startContextFold,
 } from '../src/client/context-fold.ts'
 import { CHARTER_MARKER } from '../src/host/session-charter.ts'
+import { PLATFORM_CONTEXT_ANCHORS } from '../src/client/platform-context-anchors.ts'
 
 let passed = 0
 let failed = 0
@@ -334,6 +346,154 @@ section('H children=HTMLCollection 语义回归（arbitrate round1 code-fault �
   applyContextFold(scroll, doc) // 重复回调（原崩溃路径：elementChildren().some）
   ok(scroll.querySelectorAll(`[${CHIP_ATTR}]`).length === 1, '重复回调不再 TypeError（回归锚）')
   stop()
+}
+
+/* ── t260905-09 聚合语义段（I–L）── */
+
+/** 平台自启上下文固定样本（锚真源原文派生，与 integration fixtures 同口径）。 */
+const RTX = PLATFORM_CONTEXT_ANCHORS[0].text
+const WSI = PLATFORM_CONTEXT_ANCHORS[1].text
+const INSTR = PLATFORM_CONTEXT_ANCHORS[3].text + '~/proj/CLAUDE.md'
+
+/** 标准叠台 DOM：scroll > list > [bubbleRtx, bubbleWsi, bubbleCharter, bubbleReply]。 */
+function stackedScrollDoc() {
+  const scroll = el('div')
+  const list = el('div')
+  const b1 = el('div'); b1.append(el('p', `${RTX}\nCurrent DSH file policy: workspace-write.`))
+  const b2 = el('div'); b2.append(el('p', `${WSI}\n（指令块正文）`))
+  const b3 = el('div'); b3.append(el('p', `${CHARTER_MARKER}\n你是「sandbar」的项目会话……`))
+  const b4 = el('div'); b4.append(el('p', `${INSTR}\n# sandbar — 多项目工单引擎`))
+  const reply = el('div', '普通回复')
+  list.append(b1, b2, b3, b4, reply)
+  scroll.append(list)
+  const doc = docOf(scroll)
+  return { doc, scroll, list, bubbles: [b1, b2, b3, b4], reply }
+}
+
+section('I 平台锚聚合：叠台 N+1 全折 + 恰一小条 + 去重 + 负向')
+{
+  { const { doc, scroll, bubbles } = stackedScrollDoc()
+    const stop = startContextFold({ doc })
+    ok(bubbles.every(b => b.getAttribute(FOLD_ATTR) === 'folded'), '平台 3 条 + charter 1 条全部收折')
+    const chips = scroll.querySelectorAll(`[${CHIP_ATTR}]`)
+    ok(chips.length === 1, '叠台恰一个小条（聚合不裂条）')
+    ok(chips[0].textContent === chipLabelFor(4, true) && chips[0].textContent.includes('4 条'),
+      'N>1 计数文案（4 条 · 点击展开）')
+    const again = applyContextFold(scroll, doc)
+    ok(again === 'folded' && scroll.querySelectorAll(`[${CHIP_ATTR}]`).length === 1, '叠台重复回调幂等')
+    stop()
+  }
+  { // 多锚命中同一消息：Instructions from 行 + CLAUDE.md 头行同处一条气泡=去重为 1
+    const scroll = el('div'); const list = el('div')
+    const b = el('div'); b.append(el('p', `${INSTR}\n# sandbar — 多项目工单引擎\n正文`))
+    const reply = el('div', 'r'); list.append(b, reply); scroll.append(list)
+    const doc = docOf(scroll)
+    const { bubbles } = collectFoldCandidates(scroll)
+    ok(bubbles.length === 1 && bubbles[0] === b, '多锚同一消息：collectFoldCandidates 按气泡身份去重为 1')
+    const stop = startContextFold({ doc })
+    ok(b.getAttribute(FOLD_ATTR) === 'folded', '多锚同一消息只折一次')
+    const chips = scroll.querySelectorAll(`[${CHIP_ATTR}]`)
+    ok(chips.length === 1 && chips[0].textContent === CHIP_LABEL_FOLDED,
+      '单注入物（N=1）：文案与现行逐字一致不带计数')
+    stop()
+  }
+  { // 负向：普通用户消息绝不折（含中段提及锚字样/CLAUDE.md 字样）
+    const scroll = el('div'); const list = el('div')
+    const u1 = el('div'); u1.append(el('p', '帮我看看 CLAUDE.md 的硬规则第一条'))
+    const u2 = el('div'); u2.append(el('p', `上文提过「${RTX}」这句，什么意思？`))
+    const u3 = el('div'); u3.append(el('p', 'Current DSH file policy 是在哪定义的？'))
+    list.append(u1, u2, u3); scroll.append(list)
+    const doc = docOf(scroll)
+    const stop = startContextFold({ doc })
+    ok([u1, u2, u3].every(b => b.getAttribute(FOLD_ATTR) === null), '普通消息（含中段提及锚字样）零误折')
+    ok(scroll.querySelectorAll(`[${CHIP_ATTR}]`).length === 0, '普通消息会话无小条')
+    stop()
+  }
+  { // 独苗降级：scroll > wrap > 单条平台消息（唯一子链爬到滚动体直接子层=wrap，可折）
+    const scroll = el('div'); const wrap = el('div'); wrap.append(el('div', `${RTX}\n快照正文`)); scroll.append(wrap)
+    const doc = docOf(scroll)
+    const stop = startContextFold({ doc })
+    ok(applyContextFold(scroll, doc) === 'folded' && wrap.getAttribute(FOLD_ATTR) === 'folded',
+      '平台锚路径独苗链正常折叠')
+    stop()
+  }
+}
+
+section('J 聚合组开收：整组切换 + 计数文案随态')
+{
+  const { doc, scroll, bubbles } = stackedScrollDoc()
+  const stop = startContextFold({ doc })
+  const chip = scroll.querySelectorAll(`[${CHIP_ATTR}]`)[0]
+  const click = doc._listeners.click[0]
+  click({ target: chip })
+  ok(bubbles.every(b => b.getAttribute(FOLD_ATTR) === 'open'), '点小条：整组展开')
+  ok(chip.textContent === chipLabelFor(4, false) && chip.textContent.includes('点击收起'), '展开态计数文案')
+  click({ target: chip })
+  ok(bubbles.every(b => b.getAttribute(FOLD_ATTR) === 'folded'), '再点：整组收起')
+  ok(chip.textContent === chipLabelFor(4, true), '收起态计数文案还原')
+  stop()
+}
+
+section('K 聚合孤儿清扫：逐气泡失效、全失效才摘条')
+{
+  { // 部分失效（文本改写去锚）：失效者摘属性+出集合，小条保留且计数降档
+    const { doc, scroll, bubbles, list } = stackedScrollDoc()
+    const stop = startContextFold({ doc })
+    bubbles[0].querySelectorAll('*')[0]._text = '这条被改写成普通文本' // 清 b1 的 p 文本
+    applyContextFold(scroll, doc)
+    ok(bubbles[0].getAttribute(FOLD_ATTR) === null, '失效气泡：折叠属性摘除')
+    ok(bubbles.slice(1).every(b => b.getAttribute(FOLD_ATTR) === 'folded'), '有效气泡保持折叠')
+    const chips = scroll.querySelectorAll(`[${CHIP_ATTR}]`)
+    ok(chips.length === 1 && chips[0].textContent.includes('3 条'), '小条保留且计数降档（4→3 条）')
+    ok(list.children.length === 6, '小条仍在 list 内（4 消息+小条+回复=6，未漂移）')
+    stop()
+  }
+  { // 全部失效（React 清掉自己记录的消息节点，外部小条不被清）：小条摘除（幽灵不过夜）
+    const { doc, scroll, bubbles, list } = stackedScrollDoc()
+    const stop = startContextFold({ doc })
+    for (const b of bubbles) b.remove()
+    applyContextFold(scroll, doc)
+    ok(scroll.querySelectorAll(`[${CHIP_ATTR}]`).length === 0, '候选气泡全失效：小条摘除不过夜')
+    ok(list.children.length === 1, 'list 只剩普通回复（无幽灵节点）')
+    stop()
+  }
+}
+
+section('L warn 收窄：charter >1 才 warn，平台叠加不 warn')
+{
+  const origWarn = console.warn
+  let warned = ''
+  console.warn = (...a) => { warned += a.join(' ') }
+  try {
+    { // 平台 3 条 + charter 1 条：不 warn
+      const { doc } = stackedScrollDoc()
+      const stop = startContextFold({ doc })
+      console.warn = origWarn
+      ok(warned === '', '平台叠加 N 条不 warn（真控制台常态）')
+      stop()
+    }
+    warned = ''
+    console.warn = (...a) => { warned += a.join(' ') }
+    { // charter 2 条：warn 一次
+      const scroll = el('div'); const list = el('div')
+      const m1 = el('div'); m1.append(el('p', `${CHARTER_MARKER}\nx`))
+      const m2 = el('div'); m2.append(el('p', `${CHARTER_MARKER}\ny`))
+      const reply = el('div', 'r'); list.append(m1, m2, reply); scroll.append(list)
+      const doc = docOf(scroll)
+      const stop = startContextFold({ doc })
+      console.warn = origWarn
+      ok(warned.includes('charter 注入物'), 'charter 注入物 >1：warn 一次（疑似误打标）')
+      stop()
+    }
+  } finally {
+    console.warn = origWarn
+  }
+  { // isFoldCandidate 与 classifyContextFold 口径冒烟（谓词常量消费面）
+    ok(isFoldCandidate(`${CHARTER_MARKER}\nx`) === true, 'isFoldCandidate：marker 路径命中')
+    ok(isFoldCandidate(`${RTX}\n快照`) === true, 'isFoldCandidate：平台锚路径命中')
+    ok(isFoldCandidate('普通消息') === false && isFoldCandidate('') === false && isFoldCandidate(null) === false,
+      'isFoldCandidate：普通/畸形输入 false')
+  }
 }
 
 console.log(`\ncontext-fold smoke: passed=${passed} failed=${failed}`)

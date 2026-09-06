@@ -1,0 +1,9 @@
+Current runtime context. This snapshot supersedes earlier runtime-context snapshots.
+
+File policy: workspace-write. Any available operation enforced by the file sandbox may
+modify files under the session workspace.
+
+%%%
+取证来源（t260905-09）：宿主平台自启上下文首条消息开头行，260906 宿主实报会话
+实文转写（「Current runtime context.」开头句 + 追随句跨项目恒定）。漂移看守：
+sc_platform_context_anchor_contract 逐字冻结，平台改措辞=场景红→人审同步。

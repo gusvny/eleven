@@ -467,6 +467,14 @@ SCENARIOS = [
     ("t260905-01-doc-gate-questions",
      "收口两问防回退守卫（t260905-01，灰盒 L2/L3）：触发器/闸各带防回退——源码锁半（处处可跑）：STAGE_ACCEPTANCE_EXTRA[acceptance_walkthrough] 两问文案在位（沉淀+从 deliverables 推预填建议+矛盾反向同步+转正纪律句=债登记纪律进流程的流程落点）、agent_activities 判读纯函数三件套（parse_doc_gate/register_pending_doc_sync/apply_doc_gate）定义与 acceptance 返回路径调用位在场（触发器被整段拆除=红，防「实现与单测共谋删除」回退）、pending-doc-sync.jsonl 债册常量、dev_lane STAGES 走查块两问验收项；行为半（temporalio 面）：parse 正常两态/显式无可沉淀≠未答/两问缺席各自可辨（per-question absent）/畸形软降级不抛，register 登记→条目本体可查（验收②）/同键幂等去重/actual 演进=新条目（append-only latest-wins）/torn 行容忍/写失败降级不抛，apply 回执拼装两问小节+矛盾条目本体全量+转正句（验收①②拼装面）/未答也是一条记录（不答不阻塞有实证）/文件级畸形软降级（KI-012 面不新增爆面）/failed 轮不抛不翻 status（不阻塞双态保持）。切块器自证红绿先行（干净/注入/缺席三样本）。与 developer L1 纯函数白盒不同层：本条另守源码锁与回执契约面。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio 缺失=ENV_FAIL 点名（行为腿），stdlib 源码锁腿照跑",
      "PY=server/dsh/temporal-poc/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260905-01/sc_doc_gate_questions.py", "ro"),
+
+    # ---- t260905-09：平台自启上下文收进折叠件（16 号只折了自己的注入，宿主 260906 实报）----
+    ("t260905-09-platform-anchor-contract",
+     "平台内容锚交付契约冻结（t260905-09，ro 静态面，KI-042 同族防漂移）：平台自启上下文折叠靠「渲染面对平台恒定文本的内容锚」（注入源在宿主二进制，仓内无字符串可对），锚真源模块（platform-context-anchors.ts）↔取证夹具（fixtures 首行=锚固定样本+%%% 尾注取证来源）逐字同步——改锚不回夹具/夹具漂移无人知=折叠件对过时文本匹配静默失明；负向样本排除在真源层在文（中段提及普通消息文本不进锚清单=误折防线）；前缀粘贴声明腿（粘贴首行恰为在册锚=设计内不可分辨限制有夹具背书，平台 wire 契约 PromptContentPart 无 metadata 字段）；折叠件对锚模块的引用在文（锚定了空气=平台上下文永不折）。与 t260904-07-charter-source-contract intent 级不同层：那条冻结 charter marker 两端同源，本条冻结平台锚↔取证样本↔接线三点。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "node integration/t260905-09/sc_platform_context_anchor_contract.mjs", "ro"),
+    ("t260905-09-platform-context-fold-stacked",
+     "平台上下文叠台折叠用户旅程（t260905-09，browser 隔离台 3199 拒 3099，工单「怎么算好」原话可执行化）：夹具把平台启动上下文消息×N+工单台 charter 注入×1 叠进同一会话——16 号验收台只测自己注入腿、台面无平台叠加=假绿（宿主实报「还是显示了一堆，只折叠了开头一小部分」）。主断言=恰一个小条（不是 charter 一条+平台又一条，「同一折叠件」原话）+全部候选正文收折（含同气泡双锚去重样本）+点小条整组开/收；负向=中段提及普通消息全程可见零误折（普通用户消息绝不折）；孤儿守卫=夹具气泡移除后小条随摘无幽灵、reload 不复活；console 卫生=零 pageerror（外来节点×React 重渲染崩溃在此现形，证据上报归因不静默）。归因三态：锚真源不在=fail（TDD 信号）、源在而 served bundle 无锚样本=na（未重建/未部署，merge 期自动生效）、行为不符=fail 精确点名。charter 注入腿本身由 t260904-07 journey 守（intent 级不重复，此处只当前置卫兵）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "node integration/t260905-09/sc_platform_context_fold_stacked.mjs", "browser"),
 ]
 
 CMD_TIMEOUT = 900

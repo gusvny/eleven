@@ -103,6 +103,12 @@ def main():
     try:
         # ---- ① up JSON 形状 ----
         p = cli("up", "--project", PROJ, "--services", "temporal")
+        if p.returncode == 2:
+            # helper rc=2=其自判环境红（t260904-12 判据：环境缺件归环境，不诬产品；
+            # arbitrate 实锤=daemon 地址池耗尽「all predefined address pools have
+            # been fully subnetted」）。rc 其余非零仍=产品 FAIL，断言强度不减。
+            envfail("up 环境红（helper rc=2 自判环境缺件：%s）" % p.stderr[-180:])
+            finish()
         check(p.returncode == 0, "up 成功（rc=%s %s）" % (p.returncode, p.stderr[-200:]))
         st = json.loads(p.stdout.strip().splitlines()[-1]) if p.returncode == 0 else {}
         check(bool(st.get("project")), "JSON project 非空（%r）" % st.get("project"))

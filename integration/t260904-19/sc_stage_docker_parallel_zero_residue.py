@@ -123,6 +123,16 @@ def main():
         outs = [p.communicate() for p in procs]
 
         states = []
+        # helper rc=2=其自判环境红（t260904-12 判据：环境缺件归环境，不诬产品；
+        # arbitrate 实锤=daemon 地址池耗尽「all predefined address pools have been
+        # fully subnetted」）。rc 其余非零仍=产品 FAIL，断言强度不减。
+        if any(proc.returncode == 2 for proc in procs):
+            detail = "; ".join(
+                "%s rc=%s %s" % (name, proc.returncode, (err or "").strip()[-110:])
+                for (proc, (out, err)), name in zip(zip(procs, outs), ("A", "B")))
+            envfail("并发 up 环境红（helper rc=2 自判环境缺件）：%s" % detail[:240])
+            print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (PASSED, FAILED, ENV_FAILED))
+            sys.exit(2)
         for (proc, (out, err)), name in zip(zip(procs, outs), ("A", "B")):
             ok = proc.returncode == 0
             check(ok, "并发 up %s 双绿（rc=%s %s）" % (name, proc.returncode, err.strip()[-160:]))
@@ -152,6 +162,11 @@ def main():
                 check(sd.port_open(stf["ports"]["console"]) and sd.port_open(stf["ports"]["temporal"]),
                       "full 台 console+temporal 双端口真活")
             else:
+                if pf_out.returncode == 2:
+                    envfail("full 台起台环境红（helper rc=2 自判环境缺件，不诬产品：%s）"
+                            % pf_out.stderr.strip()[-180:])
+                    print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (PASSED, FAILED, ENV_FAILED))
+                    sys.exit(2)
                 check(False, "full 台起台（rc=%s %s）" % (pf_out.returncode, pf_out.stderr.strip()[-160:]))
 
             # 拆 A：A 端口立即可 bind、B 台仍活（爆炸半径恰一个工程）
