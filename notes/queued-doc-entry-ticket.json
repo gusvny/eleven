@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260905-06",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "工单台加「文档」入口：docs 目录人读视图",
+  "user_request": "做什么：工单台（workbench 设置面板/工作区）加「文档」入口，点开=docs/ 定稿知识库的人读视图（目录+按篇正文，markdown 渲染），notes/ 的观察窗一并可切；「知识库」旧提法从此退役（界面层不再出现）。\n为什么：宿主 260904 UI 线排队明示（17 列表页→16 charter 折叠→本票）；知识库只在 docs/README.md 有机器索引，人没有入口——查设计定稿要翻文件树，不该。\n怎么算好：入口在列表页信息架构里位置自然（17 的栅格语言）；点开目录→点篇→正文（代码块等宽渲染）；移动窄栏可用；场景=入口在场+目录加载+正文渲染+旧「知识库」字样清零（UI 层 grep）。",
+  "spec": "依据=docs/README.md 目录结构+notes/epics 与 notes/debts 的组织现状＋17 号列表页栅格语言（540f9c6）。范围=server/dsh/workbench/＋integration/（新场景族 t260905-06）。实现方向=node.ts 只读静态服务（docs/notes 目录树+按篇内容 API）+客户端懒加载视图；不引入新依赖（markdown 轻渲染自写或极小）。验收：①入口在场且键盘可达；②目录→篇→正文链路真渲染（任选两篇断言标题在场）；③「知识库」字样 UI 层清零；④verify_lane code 绿+merge 预演。",
+  "write_set": ["server/dsh/workbench/", "integration/"],
+  "deliverables": "文档入口视图+只读 API+场景族"
+}

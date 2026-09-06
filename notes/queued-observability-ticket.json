@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260905-07",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "工单详情可观测＋插件 staleness 横幅（KI-052 根治）",
+  "user_request": "做什么：①工单列表点行=详情面板（阶段时间线/最近交接/门与签字记录/工作流快照要点），老票无标题的显示首句话不裸编号（t260903-10 现场）；②插件 staleness 横幅：盘上 bundle 与进程内存模块版本不一致时界面提示「有更新，重启控制台生效」（KI-052 根治——405 那次就是盘新内存旧没人提示）。\n为什么：宿主 260905 在 3099 实点接入弹层吃 405 后直问「这确定测过」——真控制台点击全链是红线面盲区（KI-052 已立案），根治面=版本错窗可见化；工单详情是宿主看进度的主入口，现在只有列表没有下钻。\n怎么算好：详情面板数据=snapshot query 直读（零新状态面）；staleness=插件握手带上构建指纹，客户端比对提示；两条都有场景看守（3199 隔离台真点）。",
+  "spec": "依据=KI-052（notes/debts/known-issues.md）＋17 号列表页（540f9c6）行交互语言＋t260903-10 裸编号现场。范围=server/dsh/workbench/＋integration/（场景族 t260905-07）。验收：①行点击详情开合、时间线/签字记录渲染（fixture 断言）；②无标题票显示首句；③staleness 注入实验（盘指纹≠内存指纹→横幅在场；一致→不在场）；④verify_lane code 绿+merge 预演。",
+  "write_set": ["server/dsh/workbench/", "integration/"],
+  "deliverables": "详情面板+staleness 横幅+场景族"
+}
