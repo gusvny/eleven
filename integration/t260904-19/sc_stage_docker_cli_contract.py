@@ -25,6 +25,7 @@ import json
 import os
 import socket
 import subprocess
+import re
 import sys
 import time
 
@@ -36,6 +37,23 @@ import stage_docker as sd  # noqa: E402
 CLI = os.path.join(REPO, "integration", "stage_docker.py")
 PROJ = "t26090419-contract"
 PROD_PORTS = {3099, 7233, 8233}
+
+# daemon 资源类失败特征（t260905-06 仲裁 tests-fault 迭代）：docker daemon 侧资源
+# 耗尽/不可达属环境缺件（t260904-12 归因纪律：环境红记成产品红=假红——实锤：宿主
+# 残留网络耗尽地址池，本场景起台腿被记 FAIL exit 1）。特征窄列三类，不吞任意失败。
+DAEMON_ENV_PAT = re.compile(
+    r"address pools have been fully subnetted"
+    r"|no space left on device"
+    r"|Cannot connect to the Docker daemon", re.I)
+
+
+def env_guard(err):
+    """cli up stderr 命中 daemon 资源类失败 → 记 env_fail 并 exit 2（点名特征）。"""
+    if err and DAEMON_ENV_PAT.search(err):
+        envfail("docker daemon 资源类失败（%s…）：CLI 契约腿没验成——归环境供给，清残留容器/网络后自动生效"
+                % " ".join((err or "").strip().split())[:150])
+        finish()  # finish 内按 failed/env_failed 分家退出码
+    return False
 
 passed = failed = env_failed = 0
 
@@ -103,6 +121,7 @@ def main():
     try:
         # ---- ① up JSON 形状 ----
         p = cli("up", "--project", PROJ, "--services", "temporal")
+        env_guard(p.stderr)
         if p.returncode == 2:
             # helper rc=2=其自判环境红（t260904-12 判据：环境缺件归环境，不诬产品；
             # arbitrate 实锤=daemon 地址池耗尽「all predefined address pools have

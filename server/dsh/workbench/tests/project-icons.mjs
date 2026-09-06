@@ -31,10 +31,10 @@ const index = read('server/dsh/workbench/src/client/index.tsx')
 const epics = read('server/dsh/workbench/src/client/epics.tsx')
 
 section('A 图标模块：五枚 specs + 规格单源')
-for (const name of ['board', 'knowledge', 'routes', 'epics', 'settings']) {
+for (const name of ['board', 'docs', 'routes', 'epics', 'settings']) {
   ok(icons.includes(`${name}: { title:`), `spec ${name} 在案`)
 }
-for (const title of ['工单列表', '知识库', '模型路由', '立项单', '项目设置']) {
+for (const title of ['工单列表', '文档', '模型路由', '立项单', '项目设置']) {
   ok(icons.includes(`'${title}'`), `title/aria「${title}」齐备`)
 }
 ok(icons.includes("PROJECT_ICON_VIEWBOX = '0 0 20 20'"), 'viewBox 20×20 单源')
@@ -46,15 +46,17 @@ ok(icons.includes('滑杆') && icons.includes('带箭头分流'), '修订11 两�
 
 section('B sidebar 渲染点：五枚换装 + 语义保留')
 ok(sidebar.includes("<ProjectIcon name=\"board\" />"), '工单列表换装')
-ok(sidebar.includes("<ProjectIcon name=\"knowledge\" />"), '知识库换装')
+ok(sidebar.includes("<ProjectIcon name=\"docs\" />"), '文档换装（t260905-06 旧提法退役）')
 ok(sidebar.includes("<ProjectIcon name=\"routes\" />"), '模型路由换装')
 ok(sidebar.includes("<ProjectIcon name=\"epics\" />"), '立项单换装')
 ok(sidebar.includes("<ProjectIcon name=\"settings\" />"), '第五枚设置入口')
 ok(sidebar.includes('data-wb-project-settings-entry=""'), '设置入口语义锚')
-ok((sidebar.match(/handleViewIcon\(g\.project\.key, '(board|knowledge|routes|epics)'\)/g) ?? []).length === 4,
-  '四视图 onClick 语义零回归')
-ok((sidebar.match(/className=\{`wb-view-icon \$\{rightView === '(board|knowledge|routes|epics)' && viewProject === g\.project\.key \? 'active' : ''\}`\}/g) ?? []).length === 4,
-  '四视图 active 态零回归')
+ok((sidebar.match(/onClick=\{\(\) => handleViewIcon\(g\.project\.key, '(board|docs|routes|epics)'\)\}/g) ?? []).length === 4,
+  '四视图 onClick 语义零回归（onKeyDown 键位行不混入计数）')
+ok(!sidebar.includes('knowledge'), 't260905-06：knowledge 提法清零（图标键）')
+ok((sidebar.match(/className=\{`wb-view-icon \$\{rightView === '(board|routes|epics)' && viewProject === g\.project\.key \? 'active' : ''\}`\}/g) ?? []).length === 3,
+  'per-project 三视图 active 态零回归')
+ok(sidebar.includes("rightView === 'docs' ? 'active' : ''"), '文档视图 active=全仓单例（不判 viewProject，t260905-06 C1）')
 ok(sidebar.includes("width:26px; height:26px") && sidebar.includes('border-radius:6px'), '命中区 26×26 radius 6')
 
 section('C emoji 清零（三文件）+ 白名单豁免')

@@ -575,1112 +575,6 @@ function stageDurationTitle(d, nowMs) {
 	return parts.join(" · ");
 }
 //#endregion
-//#region ../knowledge/src/client/index.tsx
-/**
-* suyou-knowledge —— docs 知识库 · 浏览器半（主视图页签版）。
-*
-* 槽位契约：向会话视图环 `conversation.view` 注册一个页签（id 'knowledge'，
-* 标签「知识库」，与 chat/trajectory/workbench 平级，order 30 排最后），用户在主
-* 会话视图顶部页签切换即见。配套注册 `conversationViews.register`（target
-* 'knowledge'）：本视图数据来自 /suyou-knowledge/api/* 而非会话事件，builder 为
-* 空实现（empty/replace/apply 均返回 null），仅为满足引擎的 per-session view 契约。
-*
-* 功能（工单 t260821-09 → t260821-10 M2/M3）：
-*   ① 列表按分类（design/content/ops/reference）/标签/状态过滤；
-*   ② 关键词检索（标题 + frontmatter tags）；
-*   ③ 读全文（点条目中栏内嵌 list→doc 两态切换）：markdown render（HTML，非 raw；表格/代码块
-*      高亮+复制/链接/列表），可切 raw 查看原文；头部「← 返回」按钮回到列表，筛选条件不丢；
-*   ④ review（提示缺 frontmatter / status=deprecated / updated 过旧，三组清单）；
-*   ⑤ block 级 diff 审阅（t260821-14）：细粒度 block（标题/段落/列表项/表格行/
-*      代码块…），主视图=渲染后 markdown（未变渲染新文本/新增绿底/删除红底/
-*      修改上下红绿，表格行单元格级对齐），raw 行级 ops 为可切换次要视图（只留
-*      变更行）；逐块 approve/reject/注释按稳定 block_key 持久化——进入 diff
-*      自动回填最近一轮，「保存 review」显式落盘（含整篇结论），保存后生成
-*      可贴工单的 rework 指令；内容变了 key 失效的旧意见标「已过期」不回填。
-*
-* 数据通道：同源 fetch 打宿主半（../node.ts）挂在 dsh webServer 上的
-* /suyou-knowledge/api/*；写操作只有 review/save（宿主半落 docs/reviews/ +
-* server/admin.log 审计）。
-*/
-const CSS$5 = `
-.kb-root{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
-  background:#f6f8fa;color:#1f2328;min-height:100%;box-sizing:border-box;padding:20px 24px 32px;
-  display:flex;flex-direction:column;gap:14px;height:100%;overflow-y:auto;font-size:13px;line-height:1.55}
-.kb-head{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid #d0d7de;padding-bottom:12px;flex-wrap:wrap}
-.kb-title{font-size:20px;font-weight:600;color:#1f2328}
-.kb-sub{font-size:12px;color:#57606a}
-.kb-spacer{flex:1}
-.kb-err{background:#ffebe9;border:1px solid #ff9b9b;color:#cf222e;border-radius:6px;
-  padding:8px 12px;font-size:12px;white-space:pre-wrap}
-.kb-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.kb-select{font:inherit;font-size:13px;background:#ffffff;color:#1f2328;border:1px solid #d0d7de;
-  border-radius:6px;padding:5px 10px}
-.kb-select:focus{outline:none;border-color:#0969da;box-shadow:0 0 0 3px rgba(9,105,218,.15)}
-.kb-input{font:inherit;font-size:13px;background:#ffffff;color:#1f2328;border:1px solid #d0d7de;
-  border-radius:6px;padding:5px 10px;min-width:220px}
-.kb-input:focus{outline:none;border-color:#0969da;box-shadow:0 0 0 3px rgba(9,105,218,.15)}
-.kb-btn{font:inherit;font-size:13px;padding:5px 16px;border-radius:6px;cursor:pointer;
-  border:1px solid #d0d7de;background:#ffffff;color:#1f2328;transition:background .12s}
-.kb-btn:hover{background:#f6f8fa}
-.kb-btn:disabled{opacity:.5;cursor:default}
-.kb-btn-blue{border-color:#96c8f2;color:#0969da;background:#ddf4ff}
-.kb-btn-active{border-color:#0969da;color:#ffffff;background:#0969da}
-.kb-table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;border:1px solid #d0d7de;
-  border-radius:8px;background:#ffffff;box-shadow:0 1px 3px rgba(31,35,40,.06);font-size:13px;overflow:hidden}
-.kb-table thead th{position:sticky;top:0;z-index:1;background:#f6f8fa;color:#57606a;font-weight:600;
-  text-align:left;padding:9px 12px;border-bottom:1px solid #d0d7de;font-size:12px;white-space:nowrap}
-.kb-table tbody td{padding:9px 12px;border-bottom:1px solid #e8ebef;vertical-align:middle}
-.kb-table tbody tr{cursor:pointer}
-.kb-table tbody tr:hover{background:#f6f8fa}
-.kb-table tbody tr:last-child td{border-bottom:none}
-.kb-cat{font-size:12px;color:#57606a;background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;
-  padding:1px 8px;white-space:nowrap}
-.kb-cat[data-cat=design]{background:#ddf4ff;color:#0550ae;border-color:#96c8f2}
-.kb-cat[data-cat=content]{background:#dafbe1;color:#116329;border-color:#7dd9a0}
-.kb-cat[data-cat=ops]{background:#fff8c5;color:#7d4e00;border-color:#eac54f}
-.kb-cat[data-cat=reference]{background:#fbefff;color:#6f42c1;border-color:#d3b9f0}
-.kb-tag{font-size:11px;color:#57606a;background:#f6f8fa;border:1px solid #e8ebef;border-radius:6px;
-  padding:1px 6px;margin-right:4px}
-.kb-title-cell{font-weight:600;color:#0969da}
-.kb-path{color:#8c959f;font-size:11px}
-.kb-status{font-size:11px;border-radius:6px;padding:1px 8px;font-weight:500}
-.kb-status[data-status=active]{background:#dafbe1;color:#116329}
-.kb-status[data-status=draft]{background:#fff8c5;color:#7d4e00}
-.kb-status[data-status=deprecated]{background:#ffebe9;color:#cf222e}
-.kb-empty{font-size:12px;color:#57606a;padding:12px 0}
-.kb-back-btn{font:inherit;font-size:13px;padding:3px 12px;border-radius:6px;cursor:pointer;
-  border:1px solid #d0d7de;background:#ffffff;color:#1f2328;transition:background .12s}
-.kb-back-btn:hover{background:#f6f8fa}
-.kb-body{font-size:13px;line-height:1.9;color:#1f2328;white-space:pre-wrap;word-break:break-word;
-  border:1px solid #e8ebef;border-radius:8px;padding:14px 16px;background:#fbfcfd;margin:0;overflow:auto}
-.kb-review-box{border:1px solid #d0d7de;border-radius:8px;background:#ffffff;padding:12px 14px;display:flex;
-  flex-direction:column;gap:8px}
-.kb-review-title{font-size:14px;font-weight:600;color:#1f2328;border-bottom:1px solid #e8ebef;padding-bottom:6px}
-.kb-review-item{color:#0969da;cursor:pointer}
-.kb-review-item:hover{text-decoration:underline}
-.kb-review-empty{color:#57606a;font-size:12px}
-.kb-warn{font-size:12px;color:#bf8700;background:#fff8c5;border:1px solid #eac54f;border-radius:6px;padding:5px 10px}
-/* markdown render */
-.kb-md{font-size:13.5px;line-height:1.7;color:#1f2328;word-break:break-word}
-.kb-md h1,.kb-md h2,.kb-md h3,.kb-md h4,.kb-md h5,.kb-md h6{margin:18px 0 8px;font-weight:600;line-height:1.3}
-.kb-md h1{font-size:22px;border-bottom:1px solid #d8dee4;padding-bottom:6px}
-.kb-md h2{font-size:18px;border-bottom:1px solid #d8dee4;padding-bottom:4px}
-.kb-md h3{font-size:15px}
-.kb-md h4,.kb-md h5,.kb-md h6{font-size:14px}
-.kb-md p{margin:6px 0}
-.kb-md a{color:#0969da;text-decoration:none}
-.kb-md a:hover{text-decoration:underline}
-.kb-md ul,.kb-md ol{margin:6px 0;padding-left:22px}
-.kb-md li{margin:2px 0}
-.kb-md blockquote{margin:8px 0;padding:2px 12px;border-left:4px solid #d0d7de;color:#57606a;background:#f6f8fa}
-.kb-md code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;
-  background:#eff1f3;border-radius:4px;padding:1px 5px}
-.kb-md table{border-collapse:collapse;margin:10px 0;max-width:100%;display:block;overflow-x:auto}
-.kb-md table th,.kb-md table td{border:1px solid #d0d7de;padding:6px 12px;text-align:left}
-.kb-md table th{background:#f6f8fa;font-weight:600}
-.kb-md hr{border:none;border-top:1px solid #d8dee4;margin:14px 0}
-.kb-md img{max-width:100%}
-.md-code{position:relative;margin:10px 0;border:1px solid #d0d7de;border-radius:8px;background:#f6f8fa;overflow:hidden}
-.md-code pre{margin:0;padding:12px 14px;overflow-x:auto}
-.md-code pre code{background:none;padding:0;font-size:12px;line-height:1.6;color:#1f2328}
-.md-cl{position:absolute;top:6px;right:60px;font-size:11px;color:#57606a;background:#eaeef2;
-  border-radius:4px;padding:0 8px;line-height:18px}
-.md-copy{position:absolute;top:6px;right:8px;font-size:11px;padding:1px 10px;line-height:18px;cursor:pointer;
-  border:1px solid #d0d7de;background:#ffffff;color:#57606a;border-radius:4px}
-.md-copy:hover{background:#eaeef2;color:#1f2328}
-.tok-c{color:#6e7781;font-style:italic}
-.tok-s{color:#0a3069}
-.tok-k{color:#cf222e;font-weight:600}
-.tok-n{color:#0550ae}
-.tok-v{color:#953800}
-/* block diff review */
-.kb-diff-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.kb-diff-sum{font-size:12px;color:#57606a;display:flex;gap:14px;flex-wrap:wrap}
-.d-block{border:1px solid #d0d7de;border-radius:8px;background:#ffffff;overflow:hidden}
-.d-head{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#f6f8fa;border-bottom:1px solid #e8ebef;flex-wrap:wrap}
-.d-head-t{font-weight:600;font-size:13px;color:#1f2328}
-.d-badge{font-size:11px;border-radius:6px;padding:1px 8px;font-weight:600;white-space:nowrap}
-.d-badge[data-s=added]{background:#dafbe1;color:#116329}
-.d-badge[data-s=removed]{background:#ffebe9;color:#cf222e}
-.d-badge[data-s=modified]{background:#fff8c5;color:#7d4e00}
-.d-badge[data-s=unchanged]{background:#f6f8fa;color:#57606a}
-.d-ops{padding:6px 0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.6}
-.d-line{padding:1px 12px;white-space:pre-wrap;word-break:break-all}
-.d-ctx{color:#1f2328}
-.d-add{background:#dafbe1;color:#116329}
-.d-del{background:#ffebe9;color:#cf222e}
-.d-mod{background:#fff8c5}
-.d-mod .d-del{background:none;text-decoration:line-through;color:#7d4e00}
-.d-mod .d-add{background:none;color:#116329;font-weight:600}
-.d-actions{display:flex;gap:8px;align-items:center;padding:8px 12px;border-top:1px solid #e8ebef;flex-wrap:wrap}
-.d-btn{font-size:12px;padding:2px 12px;border-radius:6px;cursor:pointer;border:1px solid #d0d7de;background:#fff;color:#1f2328}
-.d-btn:hover{background:#f6f8fa}
-.d-btn-ap{border-color:#7dd9a0;color:#116329}
-.d-btn-ap.on{background:#116329;color:#fff}
-.d-btn-rj{border-color:#ff9b9b;color:#cf222e}
-.d-btn-rj.on{background:#cf222e;color:#fff}
-.d-cmt{width:100%;min-height:52px;font:inherit;font-size:12px;border:1px solid #d0d7de;border-radius:6px;padding:6px 10px}
-.d-expand{font-size:11px;color:#0969da;cursor:pointer;background:none;border:none}
-/* 渲染态 diff 主视图 */
-.d-md{padding:8px 14px;font-size:13px}
-.d-md-add{background:#f0fff4;border-left:4px solid #2da44e}
-.d-md-del{background:#fff5f5;border-left:4px solid #cf222e}
-.d-md-old{background:#fff5f5;border-left:4px solid #ff9b9b}
-.d-md-new{background:#f0fff4;border-left:4px solid #7dd9a0}
-.d-md-tag{font-size:11px;font-weight:600;color:#57606a;letter-spacing:1px}
-.d-md-old .d-md-tag{color:#cf222e}
-.d-md-new .d-md-tag{color:#116329}
-.d-md-half{border-bottom:1px dashed #e8ebef}
-.d-type{font-size:11px;color:#8c959f;border:1px solid #e8ebef;border-radius:6px;padding:0 6px;white-space:nowrap}
-/* 表格行单元格级对齐 */
-.d-cells{border-collapse:collapse;margin:8px 12px;font-size:12px;max-width:calc(100% - 24px);display:block;overflow-x:auto}
-.d-cells th,.d-cells td{border:1px solid #d0d7de;padding:4px 10px;text-align:left;white-space:pre-wrap;word-break:break-word}
-.d-cells th{background:#f6f8fa;color:#57606a;font-weight:600}
-.cell-old-chg{background:#ffebe9;color:#cf222e;text-decoration:line-through}
-.cell-new-chg{background:#dafbe1;color:#116329;font-weight:600}
-/* review 持久化 */
-.d-conclude{font:inherit;font-size:12px;border:1px solid #d0d7de;border-radius:6px;padding:3px 8px;background:#fff}
-.kb-rework{border:1px solid #d0d7de;border-radius:8px;background:#fbfcfd;padding:10px 14px;display:flex;flex-direction:column;gap:8px}
-.kb-rework pre{margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;
-  line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:320px;overflow:auto}
-.kb-expired{border:1px dashed #d0d7de;border-radius:8px;padding:8px 12px;color:#57606a;font-size:12px}
-.kb-expired-item{padding:4px 0;border-bottom:1px solid #f0f2f5}
-.kb-expired-item:last-child{border-bottom:none}
-.d-badge[data-s=expired]{background:#f6f8fa;color:#8c959f;border:1px dashed #d0d7de}
-`;
-const CSS_TAG_ID$2 = "suyou-knowledge/KnowledgeSection.css";
-if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(CSS_TAG_ID$2) + "]") === null) {
-	const tag = document.createElement("style");
-	tag.dataset.plugin = "suyou-knowledge";
-	tag.dataset.pluginCss = CSS_TAG_ID$2;
-	tag.textContent = CSS$5;
-	document.head.appendChild(tag);
-}
-const API$3 = "/suyou-knowledge/api";
-/** 多项目化（260823）：当前视图的项目 key，KnowledgeSection 挂载/切换时从 prop 设置。
-*  中列同一时刻只挂一个视图，模块单态安全。空串=不拼参（host 会 400，UI 先显占位）。 */
-let viewProject$1 = "";
-/** 统一拼 ?project=（host 六条路由全部必传）。 */
-function withProject$1(path) {
-	if (!viewProject$1) return path;
-	return path + (path.includes("?") ? "&" : "?") + "project=" + encodeURIComponent(viewProject$1);
-}
-async function apiGet$2(path) {
-	return (await fetch(withProject$1(path))).json();
-}
-async function apiPost$2(path, body) {
-	return (await fetch(withProject$1(path), {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify(body)
-	})).json();
-}
-/** 去掉正文前 YAML frontmatter 块（读全文展示用，正文保持原样）。 */
-function stripFrontmatter(md) {
-	if (!md.startsWith("---\n")) return md;
-	const lines = md.split("\n");
-	for (let i = 1; i < lines.length; i++) if (lines[i].trim() === "---") return lines.slice(i + 1).join("\n").replace(/^\n+/, "");
-	return md;
-}
-const TYPE_LABEL$1 = {
-	frontmatter: "frontmatter",
-	heading: "标题",
-	paragraph: "段落",
-	"list-item": "列表项",
-	"table-head": "表头",
-	"table-row": "表格行",
-	code: "代码块",
-	quote: "引用",
-	image: "图片",
-	hr: "分隔线"
-};
-const STATUS_LABEL$1 = {
-	added: "新增",
-	removed: "删除",
-	modified: "修改",
-	unchanged: "未变"
-};
-const CONCLUDE_LABEL$1 = {
-	approved: "approved（通过）",
-	"changes-requested": "changes-requested（要求修改）",
-	"in-progress": "in-progress（审阅中）"
-};
-/** 生成可贴进工单的 rework 指令（驳回块清单+注释+文档路径+base）。 */
-function buildReworkMd(path, diff, conclude, blocks, runId) {
-	const rejected = blocks.filter((b) => b.decision === "reject");
-	const lines = [
-		"## rework 指令（知识库 review）",
-		"",
-		`- 文档：docs/${path}`,
-		`- base：${diff.base}`,
-		`- 整篇结论：${conclude}`,
-		`- review run-id：${runId}`,
-		""
-	];
-	if (rejected.length === 0) lines.push("无驳回块。");
-	else {
-		lines.push(`### 驳回块清单（${rejected.length}）`, "");
-		rejected.forEach((b, i) => {
-			lines.push(`${i + 1}. [${TYPE_LABEL$1[b.type] ?? b.type} / ${STATUS_LABEL$1[b.status] ?? b.status}] ${b.summary}`);
-			if (b.comment !== void 0 && b.comment !== "") lines.push(`   - 注释：${b.comment}`);
-			lines.push(`   - block_key：\`${b.block_key}\``);
-		});
-	}
-	return lines.join("\n");
-}
-function KnowledgeSection({ projectKey }) {
-	const [data, setData] = (0, react.useState)(void 0);
-	const [error, setError] = (0, react.useState)("");
-	const [filterCat, setFilterCat] = (0, react.useState)("");
-	const [filterTag, setFilterTag] = (0, react.useState)("");
-	const [filterStatus, setFilterStatus] = (0, react.useState)("");
-	const [kw, setKw] = (0, react.useState)("");
-	const [showReview, setShowReview] = (0, react.useState)(false);
-	const [doc, setDoc] = (0, react.useState)(void 0);
-	const [docLoading, setDocLoading] = (0, react.useState)(false);
-	const [view, setView] = (0, react.useState)("render");
-	const [diff, setDiff] = (0, react.useState)(void 0);
-	const [diffLoading, setDiffLoading] = (0, react.useState)(false);
-	const [diffBase, setDiffBase] = (0, react.useState)("HEAD");
-	const [reviews, setReviews] = (0, react.useState)({});
-	const [expanded, setExpanded] = (0, react.useState)({});
-	const [rawOps, setRawOps] = (0, react.useState)({});
-	const [reviewInfo, setReviewInfo] = (0, react.useState)(void 0);
-	const [expired, setExpired] = (0, react.useState)([]);
-	const [conclude, setConclude] = (0, react.useState)("in-progress");
-	const [saveState, setSaveState] = (0, react.useState)({});
-	const [reworkMd, setReworkMd] = (0, react.useState)(void 0);
-	async function reload() {
-		try {
-			const r = await apiGet$2(`${API$3}/index`);
-			if (r?.ok !== true) throw new Error(r?.error ?? "知识库索引加载失败");
-			setData(r.result);
-			setError("");
-		} catch (err) {
-			setError(String(err instanceof Error ? err.message : err));
-		}
-	}
-	async function openDoc(path, title) {
-		setDocLoading(true);
-		setDoc({
-			path,
-			title,
-			content: ""
-		});
-		setView("render");
-		setDiff(void 0);
-		setReviews({});
-		try {
-			const r = await apiGet$2(`${API$3}/doc?path=${encodeURIComponent(path)}`);
-			if (r?.ok !== true) throw new Error(r?.error ?? "文档读取失败");
-			setDoc({
-				path,
-				title,
-				content: stripFrontmatter(String(r.result?.content ?? ""))
-			});
-		} catch (err) {
-			setDoc({
-				path,
-				title,
-				content: `（读取失败：${String(err instanceof Error ? err.message : err)}）`
-			});
-		} finally {
-			setDocLoading(false);
-		}
-	}
-	async function refresh() {
-		setError("");
-		try {
-			const r = await apiGet$2(`${API$3}/refresh`);
-			if (r?.ok !== true) throw new Error(r?.error ?? "索引重建失败");
-			setData(r.result);
-		} catch (err) {
-			setError(String(err instanceof Error ? err.message : err));
-		}
-	}
-	async function loadDiff() {
-		if (!doc) return;
-		setDiffLoading(true);
-		setReviews({});
-		setExpired([]);
-		setReworkMd(void 0);
-		setSaveState({});
-		try {
-			const r = await apiGet$2(`${API$3}/diff?path=${encodeURIComponent(doc.path)}&base=${encodeURIComponent(diffBase)}`);
-			if (r?.ok !== true) throw new Error(r?.error ?? "diff 读取失败");
-			const d = r.result;
-			setDiff(d);
-			try {
-				const rv = await apiGet$2(`${API$3}/review?path=${encodeURIComponent(doc.path)}`);
-				if (rv?.ok === true) {
-					const file = rv.result;
-					const latest = file.rounds.length > 0 ? file.rounds[file.rounds.length - 1] : void 0;
-					setReviewInfo({
-						rounds: file.rounds.length,
-						latest
-					});
-					if (latest !== void 0) {
-						setConclude(latest.conclude);
-						const currentKeys = new Set(d.blocks.map((b) => b.key));
-						const backfill = {};
-						const stale = [];
-						for (const eb of latest.blocks) if (currentKeys.has(eb.block_key)) backfill[eb.block_key] = {
-							decision: eb.decision,
-							comment: eb.comment
-						};
-						else stale.push(eb);
-						setReviews(backfill);
-						setExpired(stale);
-					}
-				}
-			} catch {}
-		} catch (err) {
-			setDiff(void 0);
-			setError(`block diff 失败：${String(err instanceof Error ? err.message : err)}`);
-		} finally {
-			setDiffLoading(false);
-		}
-	}
-	/** 保存 review（显式落盘一轮），成功后生成 rework 指令。 */
-	async function saveReview() {
-		if (!doc || !diff) return;
-		setSaveState({ saving: true });
-		setReworkMd(void 0);
-		try {
-			const blocks = diff.blocks.filter((b) => b.status !== "unchanged").map((b) => ({
-				block_key: b.key,
-				summary: b.summary,
-				type: b.type,
-				status: b.status,
-				decision: reviews[b.key]?.decision,
-				comment: reviews[b.key]?.comment
-			}));
-			const r = await apiPost$2(`${API$3}/review/save`, {
-				path: doc.path,
-				base: diff.base,
-				conclude,
-				reviewer: "user",
-				blocks
-			});
-			if (r?.ok !== true) throw new Error(r?.error ?? "保存失败");
-			setSaveState({ runId: String(r.run_id ?? "") });
-			setReviewInfo((prev) => ({
-				rounds: (prev?.rounds ?? 0) + 1,
-				latest: r.result?.round
-			}));
-			setReworkMd(buildReworkMd(doc.path, diff, conclude, blocks, String(r.run_id ?? "")));
-		} catch (err) {
-			setSaveState({ error: String(err instanceof Error ? err.message : err) });
-		}
-	}
-	(0, react.useEffect)(() => {
-		viewProject$1 = projectKey ?? "";
-		setData(void 0);
-		setDoc(void 0);
-		setDiff(void 0);
-		setReviewInfo(void 0);
-		if (viewProject$1) reload();
-	}, [projectKey]);
-	(0, react.useEffect)(() => {
-		reload();
-	}, []);
-	function onDocClick(e) {
-		const btn = e.target.closest(".md-copy");
-		if (!btn) return;
-		const code = btn.getAttribute("data-code") ?? "";
-		try {
-			navigator.clipboard?.writeText(decodeURIComponent(code));
-		} catch {}
-	}
-	const allTags = (0, react.useMemo)(() => {
-		const s = /* @__PURE__ */ new Set();
-		for (const d of data?.docs ?? []) for (const t of d.tags) s.add(t);
-		return [...s].sort();
-	}, [data]);
-	const filtered = (0, react.useMemo)(() => {
-		const q = kw.trim().toLowerCase();
-		return (data?.docs ?? []).filter((d) => {
-			if (filterCat !== "" && d.category !== filterCat) return false;
-			if (filterTag !== "" && !d.tags.includes(filterTag)) return false;
-			if (filterStatus !== "" && d.status !== filterStatus) return false;
-			if (q !== "") {
-				if (!(d.title + " " + d.tags.join(" ")).toLowerCase().includes(q)) return false;
-			}
-			return true;
-		}).sort((a, b) => a.category.localeCompare(b.category) || a.path.localeCompare(b.path));
-	}, [
-		data,
-		filterCat,
-		filterTag,
-		filterStatus,
-		kw
-	]);
-	const review = data?.review;
-	function setReview(key, patch) {
-		setReviews((prev) => ({
-			...prev,
-			[key]: {
-				...prev[key],
-				...patch
-			}
-		}));
-	}
-	/** raw 行级次要视图：只留变更行（ctx 噪音去掉）。 */
-	function renderOps(ops) {
-		const changed = ops.filter((op) => op.k !== "ctx");
-		if (changed.length === 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: "d-line d-ctx",
-			children: "（行级无差异：仅块级别/格式变化）"
-		});
-		return changed.map((op, i) => {
-			if (op.k === "add") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "d-line d-add",
-				children: ["+ ", op.b ?? ""]
-			}, i);
-			if (op.k === "del") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "d-line d-del",
-				children: ["- ", op.a ?? ""]
-			}, i);
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "d-line d-mod",
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "d-del",
-					children: ["- ", op.a ?? ""]
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "d-add",
-					children: ["+ ", op.b ?? ""]
-				})]
-			}, i);
-		});
-	}
-	/** 表格行修改：单元格级对齐（同列对比，变格高亮）。 */
-	function renderCellDiff(oldLine, newLine) {
-		const oc = splitCells(oldLine);
-		const nc = splitCells(newLine);
-		const cols = Math.max(oc.length, nc.length);
-		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
-			className: "d-cells",
-			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { style: { width: 40 } }), Array.from({ length: cols }, (_, c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("th", { children: ["列 ", c + 1] }, c))] }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tbody", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "旧" }), Array.from({ length: cols }, (_, c) => {
-				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
-					className: (oc[c] ?? "") !== (nc[c] ?? "") ? "cell-old-chg" : "",
-					children: oc[c] ?? "—"
-				}, c);
-			})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "新" }), Array.from({ length: cols }, (_, c) => {
-				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
-					className: (oc[c] ?? "") !== (nc[c] ?? "") ? "cell-new-chg" : "",
-					children: nc[c] ?? "—"
-				}, c);
-			})] })] })]
-		});
-	}
-	/** 渲染态 diff 主视图：未变渲染新文本；新增绿底；删除红底；修改上下红/绿。 */
-	function renderBlockBody(b) {
-		if (b.status === "unchanged") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: "d-md kb-md",
-			dangerouslySetInnerHTML: { __html: renderMarkdown(b.newText ?? "") }
-		});
-		if (b.status === "added") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: "d-md d-md-add kb-md",
-			dangerouslySetInnerHTML: { __html: renderMarkdown(b.newText ?? "") }
-		});
-		if (b.status === "removed") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: "d-md d-md-del kb-md",
-			dangerouslySetInnerHTML: { __html: renderMarkdown(b.oldText ?? "") }
-		});
-		if (b.type === "table-row") return renderCellDiff(b.oldText ?? "", b.newText ?? "");
-		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-			className: "d-md d-md-old d-md-half kb-md",
-			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "d-md-tag",
-				children: "旧"
-			}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { dangerouslySetInnerHTML: { __html: renderMarkdown(b.oldText ?? "") } })]
-		}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-			className: "d-md d-md-new kb-md",
-			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "d-md-tag",
-				children: "新"
-			}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { dangerouslySetInnerHTML: { __html: renderMarkdown(b.newText ?? "") } })]
-		})] });
-	}
-	const diffSummary = diff !== void 0 ? {
-		added: diff.blocks.filter((b) => b.status === "added").length,
-		removed: diff.blocks.filter((b) => b.status === "removed").length,
-		modified: diff.blocks.filter((b) => b.status === "modified").length,
-		unchanged: diff.blocks.filter((b) => b.status === "unchanged").length,
-		approved: Object.values(reviews).filter((r) => r.decision === "approve").length,
-		rejected: Object.values(reviews).filter((r) => r.decision === "reject").length
-	} : void 0;
-	if (!projectKey) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-		className: "kb-root",
-		children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			style: {
-				padding: 32,
-				color: "var(--dsw-alias-label-secondary, #888)",
-				fontSize: 13
-			},
-			children: "从左侧项目行点 📖 图标打开该项目的知识库。"
-		})
-	});
-	if (data?.empty) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "kb-root",
-		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-			className: "kb-head",
-			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-				className: "kb-title",
-				children: "知 识 库"
-			}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-				className: "kb-sub",
-				children: ["项目 ", projectKey]
-			})]
-		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			style: {
-				padding: 32,
-				color: "var(--dsw-alias-label-secondary, #888)",
-				fontSize: 13
-			},
-			children: data.reason ?? "该项目还没有 docs 知识库。"
-		})]
-	});
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-		className: "kb-root",
-		children: doc === void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "kb-head",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "kb-title",
-						children: "知 识 库"
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-						className: "kb-sub",
-						children: [
-							"docs 四分类 · 共 ",
-							data?.total ?? "…",
-							" 篇 · 索引 ",
-							data?.generated_at ?? "…"
-						]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "kb-spacer" }),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-						className: "kb-btn",
-						onClick: () => {
-							setShowReview((v) => !v);
-						},
-						children: [showReview ? "收起 review" : "review", review && review.missing_frontmatter.length + review.deprecated.length + review.stale.length > 0 ? `（${review.missing_frontmatter.length + review.deprecated.length + review.stale.length}）` : ""]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						className: "kb-btn kb-btn-blue",
-						onClick: () => {
-							refresh();
-						},
-						children: "重建索引"
-					})
-				]
-			}),
-			error !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "kb-err",
-				children: [
-					error,
-					"\n",
-					"（知识库 API 未挂载？headless profile 无 webServer。）"
-				]
-			}),
-			showReview && review !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "kb-review-box",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "kb-review-title",
-						children: "review（frontmatter 完整性 / 时效性）"
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-						className: "kb-sub",
-						children: [
-							"缺 frontmatter（",
-							review.missing_frontmatter.length,
-							"）："
-						]
-					}), review.missing_frontmatter.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "kb-review-empty",
-						children: "无"
-					}) : review.missing_frontmatter.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "kb-review-item",
-						onClick: () => {
-							openDoc(p, p);
-						},
-						children: p
-					}, p))] }),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-						className: "kb-sub",
-						children: [
-							"status=deprecated（",
-							review.deprecated.length,
-							"）："
-						]
-					}), review.deprecated.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "kb-review-empty",
-						children: "无"
-					}) : review.deprecated.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "kb-review-item",
-						onClick: () => {
-							openDoc(p, p);
-						},
-						children: p
-					}, p))] }),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-						className: "kb-sub",
-						children: [
-							"updated 过旧（",
-							">",
-							"180 天，",
-							review.stale.length,
-							"）："
-						]
-					}), review.stale.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "kb-review-empty",
-						children: "无"
-					}) : review.stale.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "kb-review-item",
-						onClick: () => {
-							openDoc(p, p);
-						},
-						children: p
-					}, p))] })
-				]
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "kb-filters",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
-						className: "kb-select",
-						value: filterCat,
-						onChange: (e) => setFilterCat(e.target.value),
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-							value: "",
-							children: "分类：全部"
-						}), (data?.categories ?? []).map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-							value: c,
-							children: c
-						}, c))]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
-						className: "kb-select",
-						value: filterTag,
-						onChange: (e) => setFilterTag(e.target.value),
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-							value: "",
-							children: "标签：全部"
-						}), allTags.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-							value: t,
-							children: t
-						}, t))]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
-						className: "kb-select",
-						value: filterStatus,
-						onChange: (e) => setFilterStatus(e.target.value),
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-							value: "",
-							children: "状态：全部"
-						}), [
-							"active",
-							"draft",
-							"deprecated"
-						].map((s) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-							value: s,
-							children: s
-						}, s))]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-						className: "kb-input",
-						placeholder: "检索标题 / 标签…",
-						value: kw,
-						onChange: (e) => setKw(e.target.value)
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-						className: "kb-sub",
-						children: [
-							filtered.length,
-							"/",
-							data?.total ?? 0,
-							" 篇"
-						]
-					})
-				]
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
-				className: "kb-table",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("colgroup", { children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("col", { style: { width: 240 } }),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("col", { style: { width: 84 } }),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("col", {}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("col", { style: { width: 96 } }),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("col", { style: { width: 104 } })
-					] }),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "标题" }),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "分类" }),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "标签" }),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "状态" }),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "更新时间" })
-					] }) }),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tbody", { children: [filtered.map((d) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", {
-						onClick: () => {
-							openDoc(d.path, d.title);
-						},
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("td", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "kb-title-cell",
-								children: d.title
-							}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-								className: "kb-path",
-								children: ["　", d.path]
-							})] }),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "kb-cat",
-								"data-cat": d.category,
-								children: d.category
-							}) }),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: d.tags.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "kb-tag",
-								children: t
-							}, t)) }),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "kb-status",
-								"data-status": d.status,
-								children: d.status
-							}) }),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: d.updated })
-						]
-					}, d.path)), filtered.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tr", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
-						colSpan: 5,
-						className: "kb-empty",
-						children: "没有符合筛选的文档。"
-					}) })] })
-				]
-			})
-		] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "kb-head",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						className: "kb-back-btn",
-						onClick: () => setDoc(void 0),
-						children: "← 返回"
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "kb-title",
-						children: doc.title
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "kb-path",
-						children: doc.path
-					})
-				]
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "kb-filters",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						className: view === "render" ? "kb-btn kb-btn-active" : "kb-btn",
-						onClick: () => setView("render"),
-						children: "渲染"
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						className: view === "raw" ? "kb-btn kb-btn-active" : "kb-btn",
-						onClick: () => setView("raw"),
-						children: "raw"
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						className: view === "diff" ? "kb-btn kb-btn-active" : "kb-btn",
-						onClick: () => {
-							setView("diff");
-							loadDiff();
-						},
-						children: "diff 审阅"
-					}),
-					view === "diff" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "kb-sub",
-							children: "base"
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-							className: "kb-input",
-							style: { minWidth: 120 },
-							value: diffBase,
-							onChange: (e) => setDiffBase(e.target.value)
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							className: "kb-btn",
-							onClick: () => {
-								loadDiff();
-							},
-							children: "拉取 diff"
-						})
-					] })
-				]
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				onClick: onDocClick,
-				children: [
-					docLoading && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "kb-empty",
-						children: "读取全文…"
-					}),
-					!docLoading && view === "render" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "kb-md",
-						dangerouslySetInnerHTML: { __html: renderMarkdown(doc.content) }
-					}),
-					!docLoading && view === "raw" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", {
-						className: "kb-body",
-						children: doc.content
-					}),
-					!docLoading && view === "diff" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						style: {
-							display: "flex",
-							flexDirection: "column",
-							gap: 10
-						},
-						children: [
-							diffLoading && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "kb-empty",
-								children: "计算 block diff…"
-							}),
-							!diffLoading && diff === void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "kb-empty",
-								children: "diff 不可用（文档尚未进入 git，或 base 无此文件）。"
-							}),
-							!diffLoading && diff !== void 0 && diffSummary !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "kb-diff-sum",
-									children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: ["base：", diff.base] }),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											style: { color: diff.changed ? "#bf8700" : "#57606a" },
-											children: diff.changed ? "有改动" : "无改动"
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: ["新增 ", diffSummary.added] }),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: ["删除 ", diffSummary.removed] }),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: ["修改 ", diffSummary.modified] }),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: ["未变 ", diffSummary.unchanged] }),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-											style: { color: "#116329" },
-											children: ["已通过 ", diffSummary.approved]
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-											style: { color: "#cf222e" },
-											children: ["已驳回 ", diffSummary.rejected]
-										}),
-										reviewInfo !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
-											"已存 review ",
-											reviewInfo.rounds,
-											" 轮",
-											reviewInfo.latest !== void 0 && `（最近：${reviewInfo.latest.reviewer} · ${reviewInfo.latest.conclude}）`
-										] })
-									]
-								}),
-								!diff.hasBase && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "kb-warn",
-									children: [
-										"base（",
-										diff.base,
-										"）下无此文件，整篇按新增处理。"
-									]
-								}),
-								expired.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "kb-expired",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										style: {
-											fontWeight: 600,
-											marginBottom: 4
-										},
-										children: [
-											"已过期意见（",
-											expired.length,
-											"）——块内容已变，key 失效，不回填："
-										]
-									}), expired.map((eb, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "kb-expired-item",
-										children: [
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-												className: "d-badge",
-												"data-s": "expired",
-												children: "已过期"
-											}),
-											" ",
-											"[",
-											TYPE_LABEL$1[eb.type] ?? eb.type,
-											"] ",
-											eb.summary,
-											eb.decision !== void 0 && ` · ${eb.decision === "approve" ? "曾通过" : "曾驳回"}`,
-											eb.comment !== void 0 && eb.comment !== "" && ` · 注释：${eb.comment}`
-										]
-									}, i))]
-								}),
-								diff.blocks.map((b) => {
-									const key = b.key;
-									const rv = reviews[key] ?? {};
-									const isUnchanged = b.status === "unchanged";
-									const open = isUnchanged ? expanded[key] ?? false : true;
-									const showRaw = rawOps[key] ?? false;
-									return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "d-block",
-										children: [
-											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-												className: "d-head",
-												children: [
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-														className: "d-badge",
-														"data-s": b.status,
-														children: STATUS_LABEL$1[b.status]
-													}),
-													/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-														className: "d-type",
-														children: [TYPE_LABEL$1[b.type] ?? b.type, b.type === "heading" ? ` H${b.level}` : ""]
-													}),
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-														className: "d-head-t",
-														children: b.summary
-													}),
-													isUnchanged && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-														className: "d-expand",
-														onClick: () => setExpanded((prev) => ({
-															...prev,
-															[key]: !(prev[key] ?? false)
-														})),
-														children: open ? "收起" : "展开"
-													}),
-													!isUnchanged && b.ops !== void 0 && b.ops.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-														className: "d-expand",
-														onClick: () => setRawOps((prev) => ({
-															...prev,
-															[key]: !showRaw
-														})),
-														children: showRaw ? "看渲染" : "看行级"
-													})
-												]
-											}),
-											open && (showRaw && b.ops !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-												className: "d-ops",
-												children: renderOps(b.ops)
-											}) : renderBlockBody(b)),
-											!isUnchanged && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-												className: "d-actions",
-												children: [
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-														className: "d-btn d-btn-ap" + (rv.decision === "approve" ? " on" : ""),
-														onClick: () => setReview(key, { decision: rv.decision === "approve" ? void 0 : "approve" }),
-														children: "通过"
-													}),
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-														className: "d-btn d-btn-rj" + (rv.decision === "reject" ? " on" : ""),
-														onClick: () => setReview(key, { decision: rv.decision === "reject" ? void 0 : "reject" }),
-														children: "驳回"
-													}),
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-														className: "d-btn",
-														onClick: () => setReview(key, { open: !(rv.open ?? false) }),
-														children: "注释"
-													}),
-													rv.comment !== void 0 && rv.comment !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-														className: "kb-sub",
-														children: [
-															"已注：",
-															rv.comment.slice(0, 40),
-															rv.comment.length > 40 ? "…" : ""
-														]
-													}),
-													(rv.open ?? false) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
-														className: "d-cmt",
-														placeholder: "写审阅注释…",
-														value: rv.comment ?? "",
-														onChange: (e) => setReview(key, { comment: e.target.value })
-													})
-												]
-											})
-										]
-									}, key);
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "d-actions",
-									style: {
-										border: "1px solid #d0d7de",
-										borderRadius: 8,
-										background: "#fff"
-									},
-									children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "kb-sub",
-											children: "整篇结论："
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
-											className: "d-conclude",
-											value: conclude,
-											onChange: (e) => setConclude(e.target.value),
-											children: [
-												"in-progress",
-												"approved",
-												"changes-requested"
-											].map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-												value: c,
-												children: CONCLUDE_LABEL$1[c]
-											}, c))
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-											className: "kb-btn kb-btn-blue",
-											disabled: saveState.saving === true,
-											onClick: () => {
-												saveReview();
-											},
-											children: saveState.saving === true ? "保存中…" : "保存 review"
-										}),
-										saveState.runId !== void 0 && saveState.runId !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-											className: "kb-sub",
-											style: { color: "#116329" },
-											children: [
-												"已保存（run-id ",
-												saveState.runId,
-												"）"
-											]
-										}),
-										saveState.error !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-											className: "kb-sub",
-											style: { color: "#cf222e" },
-											children: ["保存失败：", saveState.error]
-										})
-									]
-								}),
-								reworkMd !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "kb-rework",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										style: {
-											display: "flex",
-											alignItems: "center",
-											gap: 10
-										},
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											style: { fontWeight: 600 },
-											children: "rework 指令（可贴进工单派返工活）"
-										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-											className: "d-btn",
-											onClick: () => {
-												try {
-													navigator.clipboard?.writeText(reworkMd);
-												} catch {}
-											},
-											children: "复制"
-										})]
-									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", { children: reworkMd })]
-								})
-							] })
-						]
-					})
-				]
-			})
-		] })
-	});
-}
-//#endregion
 //#region ../providers/src/host/routes-edit.ts
 /** 视图 → 编辑草稿（null 条目 → 空串，UI 显示为「继承 default」）。 */
 function draftFromView(view) {
@@ -1864,7 +758,7 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	tag.textContent = CSS$4;
 	document.head.appendChild(tag);
 }
-const API$2 = "/suyou-providers/api";
+const API$3 = "/suyou-providers/api";
 /** 多项目化（260823）：路由表两条 URL（/suyou-admin/api/routes*，按项目主目录解析
 *  model-routes.yaml）统一拼 ?project=；provider 管理（/suyou-providers/api/*）是
 *  dsh 全局设施，不分流。
@@ -1973,7 +867,7 @@ function ProvidersSection({ projectKey }) {
 	const [curRe, setCurRe] = (0, react.useState)("");
 	async function reload() {
 		try {
-			const d = await apiGet$1(`${API$2}/state`);
+			const d = await apiGet$1(`${API$3}/state`);
 			if (d?.ok !== true) throw new Error(d?.error ?? "加载失败");
 			setData(d.result);
 			setError("");
@@ -2017,7 +911,7 @@ function ProvidersSection({ projectKey }) {
 	}
 	async function submitAdd() {
 		const models = fModels.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
-		if (await post(`${API$2}/add-provider`, {
+		if (await post(`${API$3}/add-provider`, {
 			id: fId,
 			displayName: fDisplay,
 			api: fApi,
@@ -2045,7 +939,7 @@ function ProvidersSection({ projectKey }) {
 	}
 	async function submitSetCurrent() {
 		if (!curId) return;
-		if (await post(`${API$2}/set-current`, {
+		if (await post(`${API$3}/set-current`, {
 			provider: curId,
 			model: curModel,
 			reasoningEffort: curRe
@@ -2053,7 +947,7 @@ function ProvidersSection({ projectKey }) {
 	}
 	async function saveNote(p) {
 		const note = noteDraft[p.id] ?? p.note;
-		await post(`${API$2}/update-note`, {
+		await post(`${API$3}/update-note`, {
 			id: p.id,
 			note
 		}, `已保存「${p.id}」计费说明`);
@@ -2062,7 +956,7 @@ function ProvidersSection({ projectKey }) {
 		setBusy(true);
 		setMsg("");
 		try {
-			const r = await apiPost$1(`${API$2}/reorder`, { order });
+			const r = await apiPost$1(`${API$3}/reorder`, { order });
 			if (r?.ok !== true) {
 				setMsg(`失败：${r?.error ?? "未知错误"}`);
 				return;
@@ -2410,7 +1304,7 @@ function ProvidersSection({ projectKey }) {
 									className: "syp-btn syp-btn-danger",
 									disabled: busy,
 									onClick: () => {
-										if (window.confirm(`删除 provider「${p.id}」（从 llm-pi-ai.providers 移除）？`)) post(`${API$2}/delete-provider`, { id: p.id }, `已删除「${p.id}」`);
+										if (window.confirm(`删除 provider「${p.id}」（从 llm-pi-ai.providers 移除）？`)) post(`${API$3}/delete-provider`, { id: p.id }, `已删除「${p.id}」`);
 									},
 									children: "删除"
 								})
@@ -5116,9 +4010,9 @@ const PROJECT_ICON_SPECS = {
 		title: "工单列表",
 		ariaLabel: "工单列表"
 	},
-	knowledge: {
-		title: "知识库",
-		ariaLabel: "知识库"
+	docs: {
+		title: "文档",
+		ariaLabel: "文档"
 	},
 	routes: {
 		title: "模型路由",
@@ -5149,7 +4043,7 @@ function iconPaths(name) {
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M7.2 4.6V3.4a1.2 1.2 0 0 1 1.2-1.2h3.2a1.2 1.2 0 0 1 1.2 1.2v1.2" }),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M7.2 9h5.6M7.2 12.4h3.6" })
 		] });
-		case "knowledge": return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M10 5.4C8.8 4.2 7 3.8 4.6 4a.8.8 0 0 0-.7.8v9c0 .4.3.8.8.8 2.1-.2 3.9.2 5.3 1.4 1.4-1.2 3.2-1.6 5.3-1.4.5 0 .8-.4.8-.8v-9a.8.8 0 0 0-.7-.8C13 3.8 11.2 4.2 10 5.4z" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M10 5.4v10.6" })] });
+		case "docs": return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M10 5.4C8.8 4.2 7 3.8 4.6 4a.8.8 0 0 0-.7.8v9c0 .4.3.8.8.8 2.1-.2 3.9.2 5.3 1.4 1.4-1.2 3.2-1.6 5.3-1.4.5 0 .8-.4.8-.8v-9a.8.8 0 0 0-.7-.8C13 3.8 11.2 4.2 10 5.4z" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M10 5.4v10.6" })] });
 		case "routes": return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
 			cx: "4.2",
 			cy: "10",
@@ -46550,7 +45444,7 @@ function renderSpec(opts) {
 *
 * 纯逻辑全在 metrics-model.ts（node 直测）；本文件只渲染与交互时序。
 */
-const API$1 = "/suyou-workbench/api/wf";
+const API$2 = "/suyou-workbench/api/wf";
 const CSS$3 = `
 .wb-m{position:absolute;inset:0;background:#f6f8fa;z-index:95;display:flex;flex-direction:column;font-size:13px;color:#1f2328}
 .wb-m-head{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#ffffff;border-bottom:1px solid #d0d7de;flex-wrap:wrap}
@@ -46647,11 +45541,11 @@ function MetricsPanel(props) {
 		const ac = new AbortController();
 		(async () => {
 			try {
-				const w = await fetch(`${API$1}/workflows`, { signal: ac.signal }).then((r) => r.json());
+				const w = await fetch(`${API$2}/workflows`, { signal: ac.signal }).then((r) => r.json());
 				if (!ac.signal.aborted) setWorkflows(w?.result?.workflows ?? (Array.isArray(w?.result) ? w.result : []));
 			} catch {}
 			try {
-				const p = await fetch(`${API$1}/projects`, { signal: ac.signal }).then((r) => r.json());
+				const p = await fetch(`${API$2}/projects`, { signal: ac.signal }).then((r) => r.json());
 				const list = p?.result?.projects ?? p?.projects ?? [];
 				if (!ac.signal.aborted) setProjects(list.map((x) => ({
 					key: typeof x?.key === "string" ? x.key : "",
@@ -46671,14 +45565,14 @@ function MetricsPanel(props) {
 		setRefreshing(true);
 		(async () => {
 			try {
-				const fast = await fetch(`${API$1}/metrics?${metricsQuery}&mode=fast`, { signal: ac.signal }).then((r) => r.json());
+				const fast = await fetch(`${API$2}/metrics?${metricsQuery}&mode=fast`, { signal: ac.signal }).then((r) => r.json());
 				if (!ac.signal.aborted) {
 					setData(sanitizeMetricsResponse(fast));
 					setLoading(false);
 				}
 			} catch {}
 			try {
-				const body = await (await fetch(`${API$1}/metrics?${metricsQuery}`, { signal: ac.signal })).json();
+				const body = await (await fetch(`${API$2}/metrics?${metricsQuery}`, { signal: ac.signal })).json();
 				if (!ac.signal.aborted) setData(sanitizeMetricsResponse(body));
 			} catch (err) {
 				if (!ac.signal.aborted) {
@@ -47161,13 +46055,15 @@ function mountMetricsIntoSettingsRow(root) {
 *       右栏 chat 项目色带（票② R7）：chat-project-band.ts 装饰器，归属=
 *       listState.current → 账册 project 推导（下方 effect），不在册不渲染。
 *       项目组头行右对齐五个项目级视图入口图标（票③ 11b 统一 SVG 图标族）：工单列表 /
-*       知识库 / 模型路由 / 立项单 / 项目设置（第五枚=面D 设置弹层入口）
+*       文档 / 模型路由 / 立项单 / 项目设置（第五枚=面D 设置弹层入口）
+*       （t260905-06：旧提法退役，原位换「文档」入口——仓根 docs/ 定稿库人读
+*       视图 + notes/ 观察窗，全仓单例不按项目分流）
 *       （t260827-01：立项单从「左列可折叠列表区」改为项目级图标，与其他三视图同款；
 *       左列不再显示立项列表，点图标后中列显示立项清单）。
 *       项目组 = server/dsh/projects.yaml 注册表（260823 多项目化：project 是逻辑概念，
 *       1:N 对应目录）；每组工单按 ?project=<key> 单独拉取（Temporal ProjectKey SA 过滤）。
 * 中列：四视图由 index.tsx 注入（views prop）——工单台 WorkbenchSection（本插件）、
-*       知识库 KnowledgeSection（knowledge 插件）、模型 ProvidersSection（providers 插件）、
+*       文档 DocsSection（本插件，t260905-06）、模型 ProvidersSection（providers 插件）、
 *       立项单 EpicSection（本插件，t260826-02；空代号=立项清单，带代号=详情）。
 *       260823 起它们不再占 chat 顶部页签。t260903-07 起：点工单只在中列开详情抽屉，
 *       右栏 chat 恒为单全局会话不再切换（每工单会话联动下线，数据留存）。
@@ -47248,7 +46144,7 @@ const CSS$2 = `
 .wb-sb .wb-card-state { color:inherit; }
 .wb-sb .wb-card-id { color:#7ab8ff; }
 /* 视图入口图标：右对齐放在每个项目组头行内（用户拍板 260823：per-project，不占独立行；
-   t260827-01 起四个：工单/知识库/模型/立项单） */
+   t260827-01 起四个：工单/文档/模型/立项单；t260905-06 旧提法退役换文档） */
 .wb-view-icons { display:flex; gap:2px; }
 /* 图标族统一（票③ 11b）：命中区 26×26 radius 6，显形 18px（svg 由 ProjectIcon 定）；
    三态 idle/hover/active 沿用本侧栏既有色板（深色语境；mock 规格卡三态色为浅色
@@ -47531,7 +46427,7 @@ function WorkbenchSidebar(props) {
 		}));
 	}, [projects, ticketsByProject]);
 	const Board = views.board;
-	const Knowledge = views.knowledge;
+	const Docs = views.docs;
 	const Routes = views.routes;
 	const Epics = views.epics;
 	const openEpic = (0, react.useCallback)((code) => {
@@ -47610,11 +46506,16 @@ function WorkbenchSidebar(props) {
 											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "board" })
 										}),
 										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: `wb-view-icon ${rightView === "knowledge" && viewProject === g.project.key ? "active" : ""}`,
-											title: "知识库",
-											"aria-label": "知识库",
-											onClick: () => handleViewIcon(g.project.key, "knowledge"),
-											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "knowledge" })
+											className: `wb-view-icon ${rightView === "docs" ? "active" : ""}`,
+											role: "button",
+											tabIndex: 0,
+											title: "文档",
+											"aria-label": "文档",
+											onKeyDown: (e) => {
+												if (e.key === "Enter" || e.key === " ") handleViewIcon(g.project.key, "docs");
+											},
+											onClick: () => handleViewIcon(g.project.key, "docs"),
+											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "docs" })
 										}),
 										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 											className: `wb-view-icon ${rightView === "routes" && viewProject === g.project.key ? "active" : ""}`,
@@ -47736,7 +46637,7 @@ function WorkbenchSidebar(props) {
 								children: [
 									"从左侧项目行点图标打开视图：",
 									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
-									"工单列表 · 知识库 · 模型路由 · 立项单 · 项目设置",
+									"工单列表 · 文档 · 模型路由 · 立项单 · 项目设置",
 									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
 									"（按行项目分流；立项单为跨项目清单，点立项单图标后中列显示列表）"
 								]
@@ -47748,7 +46649,7 @@ function WorkbenchSidebar(props) {
 								projectKey: viewProject,
 								onOpenEpic: openEpic
 							}),
-							viewProject && rightView === "knowledge" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Knowledge, { projectKey: viewProject }),
+							rightView === "docs" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Docs, {}),
 							viewProject && rightView === "routes" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Routes, { projectKey: viewProject }),
 							viewProject && rightView === "epics" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Epics, {
 								epicCode,
@@ -48920,6 +47821,260 @@ function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }) {
 	});
 }
 //#endregion
+//#region src/client/docs.tsx
+/**
+* docs.tsx —— 工单台「文档」视图（t260905-06）：docs/ 定稿库人读视图 + notes/ 观察窗。
+*
+* 语义（C1 写死）：全仓单例——docs/ 定稿库属仓不属项目，组件签名不收 projectKey；
+* 侧栏任一项目组头的「文档」图标都开同一个仓根库。数据源=宿主半
+* GET /suyou-workbench/api/wf/docs/tree|doc（见 node.ts handleDocsTree/handleDocsDoc）。
+*
+* 渲染（R1 取舍清单 1）：markdown 复用 knowledge 插件 renderMarkdown（转义先行/
+* 危险 URL 拒绝/高亮 guard 全量随 import 带入，一个不拆），经 dangerouslySetInnerHTML
+* 落容器（index.tsx 同款先例）；代码块等宽只作用于本视图容器（.wb-doc-body），
+* 零出厂元素 CSS 压制（t260829-06 纪律）。
+*
+* 资源终态（R1 取舍清单 4）：scope 切换/组件卸载时 AbortController.abort 收口
+* in-flight fetch（正常/报错/取消三路径都落定）；目录/正文请求分离，正文懒加载
+* （点目录项才取，同 MetricsPanel open 才挂载的懒加载精神）。
+*
+* 窄栏（R2③）：<=720px 单栏流——选中篇时目录收起、显「← 目录」返回钮；
+* 无横向溢出断言由集成场景锚 .wb-doc-root 容器（V1②口径）。
+*/
+const API$1 = "/suyou-workbench/api/wf/docs";
+const DOCS_STYLE = `
+/* 窄可用=容器级响应（@container）：中列被压缩/窄设备都走单栏流，不依赖视口媒体查询
+ * （壳在窄视口会卸载本插件槽——视口级断点对「移动窄栏」不可达，探针实证见场景②）。 */
+.wb-doc-root { container-type: inline-size; height:100%; min-height:0; }
+.wb-doc-frame { display:flex; gap:0; height:100%; min-height:0; }
+.wb-doc-toc { width:280px; flex:none; overflow-y:auto; padding:10px; border-right:1px solid #2a2f3a; }
+.wb-doc-main { flex:1; overflow-y:auto; padding:16px 22px; min-width:0; }
+.wb-doc-scope-row { display:flex; gap:6px; margin-bottom:10px; }
+.wb-doc-scope-btn { border:1px solid #3a404c; background:transparent; color:#c9d1d9;
+  padding:4px 12px; border-radius:6px; cursor:pointer; font-size:13px; }
+.wb-doc-scope-btn.active { background:#1f6feb; border-color:#1f6feb; color:#fff; }
+.wb-doc-group-head { font-size:12px; color:#8b949e; margin:12px 0 4px; text-transform:none; }
+.wb-doc-item { display:block; width:100%; text-align:left; border:0; background:transparent;
+  color:#c9d1d9; padding:5px 8px; border-radius:6px; cursor:pointer; font-size:13px;
+  line-height:1.5; overflow-wrap:anywhere; }
+.wb-doc-item:hover { background:rgba(255,255,255,0.08); }
+.wb-doc-item.active { background:#1f6feb; color:#fff; }
+.wb-doc-skip-note { font-size:12px; color:#d29922; margin-top:14px; line-height:1.6; }
+.wb-doc-title { font-size:18px; margin:0 0 4px; }
+.wb-doc-meta { font-size:12px; color:#8b949e; margin-bottom:14px; }
+.wb-doc-empty { color:#8b949e; padding:20px 4px; line-height:1.7; }
+.wb-doc-back { display:none; border:1px solid #3a404c; background:transparent; color:#c9d1d9;
+  padding:4px 12px; border-radius:6px; cursor:pointer; margin-bottom:10px; }
+.wb-doc-body { line-height:1.75; overflow-wrap:anywhere; color:#e6edf3; font-size:14px; }
+.wb-doc-body h1, .wb-doc-body h2, .wb-doc-body h3 { line-height:1.4; }
+.wb-doc-body pre { background:#161b22; border:1px solid #2a2f3a; border-radius:8px;
+  padding:10px 12px; overflow-x:auto; }
+/* 代码块自持样式（t260905-06 验收 A 附带项）：renderMarkdown 产出的 .md-code/.md-copy/
+ * .tok-* 出厂样式由 knowledge 插件全局 CSS 注入供给——本视图自带一份（深色适配），
+ * knowledge 退役另票时本视图不随之破相。复制行为委托见下方 onDocCopy。 */
+.wb-doc-body .md-code { position:relative; margin:10px 0; border:1px solid #2a2f3a;
+  border-radius:8px; background:#161b22; overflow:hidden; }
+.wb-doc-body .md-code pre { margin:0; border:0; border-radius:0; }
+.wb-doc-body .md-cl { position:absolute; top:6px; right:60px; font-size:11px; color:#8b949e;
+  background:#21262d; border-radius:4px; padding:0 8px; line-height:18px; }
+.wb-doc-body .md-copy { position:absolute; top:6px; right:8px; font-size:11px; padding:1px 10px;
+  line-height:18px; cursor:pointer; border:1px solid #3a404c; background:#21262d;
+  color:#c9d1d9; border-radius:4px; }
+.wb-doc-body .md-copy:hover { background:#30363d; color:#fff; }
+.wb-doc-body .tok-c { color:#8b949e; font-style:italic; }
+.wb-doc-body .tok-s { color:#a5d6ff; }
+.wb-doc-body .tok-k { color:#ff7b72; font-weight:600; }
+.wb-doc-body .tok-n { color:#79c0ff; }
+.wb-doc-body .tok-v { color:#ffa657; }
+.wb-doc-body pre code, .wb-doc-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.wb-doc-body table { border-collapse:collapse; }
+.wb-doc-body th, .wb-doc-body td { border:1px solid #2a2f3a; padding:4px 8px; }
+@container (max-width: 720px) {
+  .wb-doc-frame { flex-direction:column; }
+  .wb-doc-toc { width:100%; border-right:0; }
+  .wb-doc-main { padding:12px; }
+  .wb-doc-frame.has-doc .wb-doc-toc { display:none; }
+  .wb-doc-frame.has-doc .wb-doc-back { display:inline-block; }
+}
+`;
+/** 复制按钮委托（验收走查打回项 A）：renderMarkdown 产出的 .md-copy 出厂无行为——
+* 行为委托原本只在已不被工单台挂载的 KnowledgeSection 里，本视图自带同款（点按钮
+* 写 data-code 解码原文进剪贴板；剪贴板 API 不可用静默=出厂同款取舍）。 */
+function onDocCopy(e) {
+	const btn = e.target.closest(".md-copy");
+	if (!btn) return;
+	const code = btn.getAttribute("data-code") ?? "";
+	try {
+		navigator.clipboard?.writeText(decodeURIComponent(code));
+	} catch {}
+}
+function DocsSection(_props) {
+	const [scope, setScope] = (0, react.useState)("docs");
+	const [tree, setTree] = (0, react.useState)(null);
+	const [treeErr, setTreeErr] = (0, react.useState)("");
+	const [selected, setSelected] = (0, react.useState)("");
+	const [doc, setDoc] = (0, react.useState)(null);
+	(0, react.useEffect)(() => {
+		const ac = new AbortController();
+		setTree(null);
+		setTreeErr("");
+		fetch(`${API$1}/tree?scope=${scope}`, { signal: ac.signal }).then((r) => r.json()).then((j) => {
+			setTree(j?.result ?? {
+				empty: true,
+				reason: "响应缺 result",
+				groups: [],
+				skipped: []
+			});
+		}).catch((err) => {
+			if (!ac.signal.aborted) setTreeErr(String(err?.message ?? err));
+		});
+		return () => ac.abort();
+	}, [scope]);
+	(0, react.useEffect)(() => {
+		if (!selected) {
+			setDoc(null);
+			return;
+		}
+		const ac = new AbortController();
+		setDoc(null);
+		fetch(`${API$1}/doc?scope=${scope}&path=${encodeURIComponent(selected)}`, { signal: ac.signal }).then((r) => r.json()).then((j) => {
+			setDoc(j?.result ?? {
+				empty: true,
+				reason: "响应缺 result"
+			});
+		}).catch((err) => {
+			if (!ac.signal.aborted) setDoc({
+				empty: true,
+				reason: String(err?.message ?? err)
+			});
+		});
+		return () => ac.abort();
+	}, [scope, selected]);
+	const groups = tree?.groups ?? [];
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-doc-root",
+		"data-wb-docs-root": "",
+		"data-wb-docs-scope": scope,
+		"data-wb-docs-selected": selected,
+		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: DOCS_STYLE }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: `wb-doc-frame ${selected ? "has-doc" : ""}`,
+			"data-wb-docs-frame": "",
+			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("nav", {
+				className: "wb-doc-toc",
+				"data-wb-docs-toc": "",
+				"aria-label": "文档目录",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-doc-scope-row",
+						role: "tablist",
+						"aria-label": "文档范围",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							className: `wb-doc-scope-btn ${scope === "docs" ? "active" : ""}`,
+							role: "tab",
+							"aria-selected": scope === "docs",
+							"data-wb-docs-scope-docs": "",
+							onClick: () => {
+								setSelected("");
+								setScope("docs");
+							},
+							children: "定稿库"
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							className: `wb-doc-scope-btn ${scope === "notes" ? "active" : ""}`,
+							role: "tab",
+							"aria-selected": scope === "notes",
+							"data-wb-docs-scope-notes": "",
+							onClick: () => {
+								setSelected("");
+								setScope("notes");
+							},
+							children: "notes 观察窗"
+						})]
+					}),
+					treeErr && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-doc-empty",
+						children: ["目录加载失败：", treeErr]
+					}),
+					!treeErr && !tree && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-doc-empty",
+						children: "加载中…"
+					}),
+					tree?.empty && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-doc-empty",
+						children: ["目录为空：", tree.reason]
+					}),
+					groups.map((g) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-doc-group-head",
+						children: g.label
+					}), g.files.map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: `wb-doc-item ${selected === f.rel ? "active" : ""}`,
+						"data-wb-doc-item": f.rel,
+						onClick: () => setSelected(f.rel),
+						children: f.title
+					}, f.rel))] }, g.dir)),
+					tree && tree.skipped.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-doc-skip-note",
+						"data-wb-docs-skipped": "",
+						children: [
+							"未入视图 ",
+							tree.skipped.length,
+							" 个文件（",
+							tree.skipped.map((s) => `${s.path}：${s.reason}`).join("；"),
+							"）"
+						]
+					})
+				]
+			}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("main", {
+				className: "wb-doc-main",
+				"data-wb-docs-main": "",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "wb-doc-back",
+						"data-wb-docs-back": "",
+						onClick: () => setSelected(""),
+						children: "← 目录"
+					}),
+					!selected && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-doc-empty",
+						children: "从左侧目录选一篇查看正文。"
+					}),
+					selected && !doc && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-doc-empty",
+						children: "加载中…"
+					}),
+					selected && doc?.empty && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-doc-empty",
+						children: doc.reason
+					}),
+					selected && doc && !doc.empty && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("article", {
+						"data-wb-doc-article": "",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h1", {
+								className: "wb-doc-title",
+								"data-wb-doc-title": "",
+								children: doc.title
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "wb-doc-meta",
+								children: [
+									doc.meta?.status,
+									doc.meta?.updated,
+									doc.meta?.category
+								].filter(Boolean).join(" · ")
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "wb-doc-body",
+								"data-wb-doc-body": "",
+								onClick: onDocCopy,
+								dangerouslySetInnerHTML: { __html: renderMarkdown(doc.body ?? "") }
+							})
+						]
+					})
+				]
+			})]
+		})]
+	});
+}
+//#endregion
 //#region src/client/tab-presence.ts
 /**
 * tab-presence.ts —— 工单台多页签共存：在看心跳 + 写事件广播（t260901-15）。
@@ -49326,11 +48481,12 @@ function setViewProject(project) {
 /**
 * suyou-workbench —— 工单工作流台 · 浏览器半（侧栏工单中心版）。
 *
-* 260823 改版（用户拍板）：chat 顶部页签只留 chat/trajectory——工单台/知识库/模型
+* 260823 改版（用户拍板）：chat 顶部页签只留 chat/trajectory——工单台/文档/模型
 * 三个视图从 conversation.view 环摘除，改由侧栏接管组件的中栏承载：
 * 本插件注册 sidebar.workspaces（priority=-10 抢占 shell 默认浏览器），
-* WorkbenchSidebar 左列=项目分组+进行中工单+插件入口，中列=三视图
-* （WorkbenchSection 本文件 / KnowledgeSection 从 knowledge 插件 import /
+* WorkbenchSidebar 左列=项目分组+进行中工单+插件入口，中列=四视图
+* （WorkbenchSection 本文件 / DocsSection 本插件 ./docs.tsx（t260905-06 起，
+* 顶替 knowledge 插件视图——旧提法退役，界面层不再出现） /
 * ProvidersSection 从 providers 插件 import）。t260903-07 起：点工单只开中列
 * 详情抽屉，右栏 chat 恒为单全局会话不再切换（每工单会话联动下线，数据留存——
 * 见 sidebar.tsx 头注与 notes/debts/design-doc-sync-t260903-07.md）。
@@ -53677,7 +52833,7 @@ function apply(ctx) {
 		workspaces: ctx.workspaces,
 		views: {
 			board: WorkbenchSection,
-			knowledge: KnowledgeSection,
+			docs: DocsSection,
 			routes: ProvidersSection,
 			epics: EpicSection
 		},

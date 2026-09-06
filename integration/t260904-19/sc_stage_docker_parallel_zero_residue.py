@@ -25,6 +25,7 @@ SANDBAR_STAGE_LOCK_DIR——生产=所有调用方共享缺省锁根，flock 档
 """
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -37,6 +38,25 @@ import stage_docker as sd  # noqa: E402
 
 PROD_PORTS = {3099, 7233, 8233}
 PASSED = FAILED = ENV_FAILED = 0
+
+# daemon 资源类失败特征（t260905-06 仲裁 tests-fault 迭代）：docker daemon 侧资源
+# 耗尽/不可达属环境缺件（t260904-12 归因纪律：环境红记成产品红=假红，误导仲裁——
+# 实锤：宿主 28 条残留网络耗尽地址池，本场景双 up 被记 FAIL exit 1）。特征窄列
+# 三类，不吞任意 up 失败——产品缺陷导致的 up 失败仍走 FAIL 断言面。
+DAEMON_ENV_PAT = re.compile(
+    r"address pools have been fully subnetted"
+    r"|no space left on device"
+    r"|Cannot connect to the Docker daemon", re.I)
+
+
+def env_guard(err):
+    """up stderr 命中 daemon 资源类失败 → 记 env_fail 并 exit 2（点名特征）。"""
+    if err and DAEMON_ENV_PAT.search(err):
+        envfail("docker daemon 资源类失败（%s…）：并发/零残留/爆炸半径腿没验成——归环境供给，清残留容器/网络后自动生效"
+                % " ".join((err or "").strip().split())[:150])
+        print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (PASSED, FAILED, ENV_FAILED))
+        sys.exit(2)
+    return False
 
 
 def check(cond, label):
@@ -134,6 +154,7 @@ def main():
             print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (PASSED, FAILED, ENV_FAILED))
             sys.exit(2)
         for (proc, (out, err)), name in zip(zip(procs, outs), ("A", "B")):
+            env_guard(err)
             if proc.returncode == 2:
                 # helper exit2=其判环境红（本文件头注既定契约「不诬产品」）：daemon 级
                 # 拒绝（如网络地址池耗尽）归环境（t260904-12 三态归类），场景 exit 2

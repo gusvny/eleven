@@ -104,7 +104,10 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
 
 // T2 图标族换装 + 联动语义 + 图例清零
 {
-  const labels = ['工单列表', '知识库', '模型路由', '立项单'];
+  // t260905-06 仲裁同步：「知识库」提法退役（宿主令+本票验收③），原位换「文档」
+  // （t260905-06）。本清单随产品契约演进更新——「文档」图标在位=新口径，同时守护
+  // 旧「知识库」不回流（与 wording_retired 场景互补：这里守 DOM 呈现面，那边守源码）。
+  const labels = ['工单列表', '文档', '模型路由', '立项单'];
   let allSvg = true;
   for (const lb of labels) {
     const ic = sidebar.locator(`[title="${lb}"], [aria-label="${lb}"]`).first();
@@ -112,7 +115,9 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
       && (await ic.evaluate((el) => !!el.querySelector('svg') || el.tagName.toLowerCase() === 'svg').catch(() => false));
     if (!ok) { allSvg = false; record(`icons/${lb}`, 'fail', '缺失或非 svg 渲染'); }
   }
-  if (allSvg) record('icons/four-views-svg', 'pass');
+  if (allSvg) record('icons/four-views-svg', 'pass', '含 t260905-06「文档」替代「知识库」');
+  const retired = await sidebar.locator('[title="知识库"], [aria-label="知识库"]').count();
+  record('icons/knowledge-retired', retired === 0, `旧「知识库」图标计数=${retired}（应为 0，宿主令退役）`);
   const board = sidebar.locator('[title="工单列表"], [aria-label="工单列表"]').first();
   await forceClick(board);
   await page.waitForTimeout(300);

@@ -1,11 +1,12 @@
 /**
  * suyou-workbench —— 工单工作流台 · 浏览器半（侧栏工单中心版）。
  *
- * 260823 改版（用户拍板）：chat 顶部页签只留 chat/trajectory——工单台/知识库/模型
+ * 260823 改版（用户拍板）：chat 顶部页签只留 chat/trajectory——工单台/文档/模型
  * 三个视图从 conversation.view 环摘除，改由侧栏接管组件的中栏承载：
  * 本插件注册 sidebar.workspaces（priority=-10 抢占 shell 默认浏览器），
- * WorkbenchSidebar 左列=项目分组+进行中工单+插件入口，中列=三视图
- * （WorkbenchSection 本文件 / KnowledgeSection 从 knowledge 插件 import /
+ * WorkbenchSidebar 左列=项目分组+进行中工单+插件入口，中列=四视图
+ * （WorkbenchSection 本文件 / DocsSection 本插件 ./docs.tsx（t260905-06 起，
+ * 顶替 knowledge 插件视图——旧提法退役，界面层不再出现） /
  * ProvidersSection 从 providers 插件 import）。t260903-07 起：点工单只开中列
  * 详情抽屉，右栏 chat 恒为单全局会话不再切换（每工单会话联动下线，数据留存——
  * 见 sidebar.tsx 头注与 notes/debts/design-doc-sync-t260903-07.md）。
@@ -89,12 +90,13 @@ import type { D2Visual } from './lane-states.ts'
 // 轮/五级收口链/单位换算口径见模块头注）。
 import { deriveStageDurations, fmtDur as fmtDurMs, humanWaitTotalMs, stageDurationTitle, stageTotalMs } from './lane-durations.ts'
 import type { StageDuration } from './lane-durations.ts'
-import { KnowledgeSection } from '../../../knowledge/src/client/index.tsx'
 import { ProvidersSection } from '../../../providers/src/client/index.tsx'
 import { WorkbenchSidebar } from './sidebar.tsx'
 import { MetricsFooterButton, markFooterSlot } from './metrics-entry.tsx'
 // 立项单 Tier 3（t260904-17 保留）：中列第四视图 + 所属立项徽标（口径单点 ./epics-model.ts）。
 import { EpicBadge, EpicSection } from './epics.tsx'
+// 「文档」视图（t260905-06）：docs/ 定稿库人读视图 + notes/ 观察窗（全仓单例）。
+import { DocsSection } from './docs.tsx'
 // t260904-17 工单列表 v5（mock 屏⑤⑥）：平铺行卡（一套 UI，中列+侧栏共用）+ 纯函数模型层。
 import { TicketRowCard, type CardOp } from './ticket-row-card.tsx'
 import {
@@ -2866,7 +2868,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 
   // 侧栏「工单列表」图标联动（t260825-05）：viewProject/rightView 同值时 setState 跳渲染，
   // 抽屉开态收不到通知——靠 listNonce 变化关抽屉回列表页（scan 巡检页也一并回 tickets）。
-  // 跳过挂载首发：Board 重挂载（如从知识库视图切回）时 listNonce 已非 0，
+  // 跳过挂载首发：Board 重挂载（如从文档视图切回）时 listNonce 已非 0，
   // 不能误关 focusId effect 正要打开的详情。
   const listNonceRef = useRef(listNonce)
   useEffect(() => {
@@ -3874,7 +3876,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
  */
 
 export function apply(ctx: ClientContext): void {
-  // 接管侧栏：左列=顶部会话入口行+项目分组+进行中工单，中列=工单台/知识库/模型/立项单视图。
+  // 接管侧栏：左列=顶部会话入口行+项目分组+进行中工单，中列=工单台/文档/模型/立项单视图。
   // single 槽「lowest renders」——默认 WorkspaceBrowser 无 priority（=0），我们挂 -10 抢占；
   // 同优先级注册会 throw。chat 顶部页签不再注册（260823 用户拍板移出）。
   // t260831-02：不再注册任何 conversation.hero.* 槽——出厂落地页原样（右栏零定制）。
@@ -3886,7 +3888,7 @@ export function apply(ctx: ClientContext): void {
   }, (props: any) => <WorkbenchSidebar
     sessions={ctx.sessions}
     workspaces={ctx.workspaces as any}
-    views={{ board: WorkbenchSection, knowledge: KnowledgeSection, routes: ProvidersSection, epics: EpicSection }}
+    views={{ board: WorkbenchSection, docs: DocsSection, routes: ProvidersSection, epics: EpicSection }}
     {...props} />))
 
   // 度量入口进出厂 footer.action 槽（t260902-05①）：与 dsh settings 齿轮同排。

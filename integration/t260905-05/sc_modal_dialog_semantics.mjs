@@ -30,7 +30,7 @@
 // 台面：共享隔离台（lib_stage_console 供给，绝不触 3099 生产台）+ 每页 API 桩
 // （/suyou-workbench/api/wf/tickets* 供夹具、写操作只落桩内计数，零真写；其余
 // 路由透传真台）。执行契约（t260904-12 三态）：SUMMARY 末行 + 退出码 0/1/2，
-// 闸内无 SKIP；本场景无 N/A 腿（夹具恒提供 awaiting-human 票，弹层必可达）。
+// （三态=闸内无 SKIP 的现行定稿，旧 SKIP 语义退役）；本场景无 N/A 腿（夹具恒提供 awaiting-human 票，弹层必可达）。
 
 import {
   BASE,

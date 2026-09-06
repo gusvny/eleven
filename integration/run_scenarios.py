@@ -488,6 +488,17 @@ SCENARIOS = [
      "收口两问防回退守卫（t260905-01，灰盒 L2/L3）：触发器/闸各带防回退——源码锁半（处处可跑）：STAGE_ACCEPTANCE_EXTRA[acceptance_walkthrough] 两问文案在位（沉淀+从 deliverables 推预填建议+矛盾反向同步+转正纪律句=债登记纪律进流程的流程落点）、agent_activities 判读纯函数三件套（parse_doc_gate/register_pending_doc_sync/apply_doc_gate）定义与 acceptance 返回路径调用位在场（触发器被整段拆除=红，防「实现与单测共谋删除」回退）、pending-doc-sync.jsonl 债册常量、dev_lane STAGES 走查块两问验收项；行为半（temporalio 面）：parse 正常两态/显式无可沉淀≠未答/两问缺席各自可辨（per-question absent）/畸形软降级不抛，register 登记→条目本体可查（验收②）/同键幂等去重/actual 演进=新条目（append-only latest-wins）/torn 行容忍/写失败降级不抛，apply 回执拼装两问小节+矛盾条目本体全量+转正句（验收①②拼装面）/未答也是一条记录（不答不阻塞有实证）/文件级畸形软降级（KI-012 面不新增爆面）/failed 轮不抛不翻 status（不阻塞双态保持）。切块器自证红绿先行（干净/注入/缺席三样本）。与 developer L1 纯函数白盒不同层：本条另守源码锁与回执契约面。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio 缺失=ENV_FAIL 点名（行为腿），stdlib 源码锁腿照跑",
      "PY=server/dsh/temporal-poc/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260905-01/sc_doc_gate_questions.py", "ro"),
 
+    # ---- t260905-06 工单台「文档」入口（docs/notes 人读视图，「知识库」提法退役）----
+    ("t260905-06-doc-entry-present",
+     "「文档」入口在场且键盘可达（t260905-06，隔离台浏览器走查=工单验收①）：左列项目组头图标枚原位（17 号栅格语言）存在 aria-label/title=「文档」图标、aria-label=「知识库」旧入口不在场（提法退役的入口面，字样清零由场景③专守）；图标可键盘聚焦+Enter 触发中列切视图（用户可感知面=发起 GET /api/wf/docs/tree?scope=docs 且 200 目录加载）+图标进入 active 排他高亮态。复用 lib_fix17 隔离台（临时注册表根+夹具项目；真库 docs/notes=泳道仓根 committed 内容，服务端 DEFAULT_REPO 直读，不向仓根写夹具防污染）。playwright-core 缺失=env_fail 点名（KI-036 家族，闸内无 SKIP）；实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "node integration/t260905-06/sc_doc_entry_present.mjs", "ro"),
+    ("t260905-06-doc-read-through",
+     "目录→篇→正文真渲染+notes 观察窗+移动窄栏（t260905-06，隔离台浏览器走查=工单验收②⑤与「移动窄栏可用」）：API 契约面（真库）——tree?scope=docs 200 含锚篇目（README.md/terminology.md）且 skipped 拒收可见性字段在场（人读视图完整性可判定）、scope=notes 200 含 notes/README 与 epics/ 篇目、doc?scope=docs&path=terminology.md 200 含「项目术语表」、穿路径（../package.json）fail-closed 非 200 或 empty+reason 且不外泄内容；UI 链路——目录出真库篇目→点篇正文真渲染（「项目术语表」「测试环境隔离指南」标题文本在场）+围栏代码块 computed font-family 含 mono（代码块等宽）；notes 页签切换后 notes 篇目在场；窄栏腿=review V1①基线对照口径、容器级落地（壳在窄视口卸载本插件槽=视口级断点不可达，探针实证；宽栏量全局溢出基线→文档视图容器压 360px 触发 @container 单栏流→返回钮往返+再开篇可达→断言不新增全局溢出）。断言锚=真库 committed 稳定篇目（真库即夹具：天然覆盖 frontmatter/中文路径/嵌套形状，零夹具写入）。playwright-core 缺失=env_fail（KI-036 家族）；实现落地前红属预期，arbitrate/merge 期必须绿",
+     "node integration/t260905-06/sc_doc_read_through.mjs", "ro"),
+    ("t260905-06-docs-wording-retired",
+     "UI 层「知识库」字样清零（t260905-06，静态 grep=工单验收③）：workbench 界面层源码 src/**+构建产物 lib/**（随仓提交、隔离台实际加载面）grep「知识库」全词 0 命中（注释含，命中=用户可见旧提法=产品红）；断言面缺席（目录不在）=env_fail（构建管线异常非产品红）；对照面自证——同一 grep 通道在写集外 knowledge 插件目录命中>0，防「grep 挂了恒 0」假绿。node.ts 宿主半与 knowledge 插件自身不在界面层断言面（写集外存量欠账另账）。实现落地前红属预期（现源码含字样，TDD 信号），arbitrate/merge 期必须绿",
+     "node integration/t260905-06/sc_docs_wording_retired.mjs", "ro"),
+
     # ---- t260905-09：平台自启上下文收进折叠件（16 号只折了自己的注入，宿主 260906 实报）----
     ("t260905-09-platform-anchor-contract",
      "平台内容锚交付契约冻结（t260905-09，ro 静态面，KI-042 同族防漂移）：平台自启上下文折叠靠「渲染面对平台恒定文本的内容锚」（注入源在宿主二进制，仓内无字符串可对），锚真源模块（platform-context-anchors.ts）↔取证夹具（fixtures 首行=锚固定样本+%%% 尾注取证来源）逐字同步——改锚不回夹具/夹具漂移无人知=折叠件对过时文本匹配静默失明；负向样本排除在真源层在文（中段提及普通消息文本不进锚清单=误折防线）；前缀粘贴声明腿（粘贴首行恰为在册锚=设计内不可分辨限制有夹具背书，平台 wire 契约 PromptContentPart 无 metadata 字段）；折叠件对锚模块的引用在文（锚定了空气=平台上下文永不折）。与 t260904-07-charter-source-contract intent 级不同层：那条冻结 charter marker 两端同源，本条冻结平台锚↔取证样本↔接线三点。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",

@@ -2,7 +2,7 @@
  * project-icons.tsx —— 左栏项目组头图标族（project-lifecycle 票③，验收 11b）。
  *
  * 宿主令 260904「四个 icon 太小、不统一，顺便做一套」：emoji（📋📖🔀🗂️）→
- * SVG 线性图标五枚（工单列表/知识库/模型路由/立项单/项目设置）。第五枚=项目
+ * SVG 线性图标五枚（工单列表/文档/模型路由/立项单/项目设置）。第五枚=项目
  * 设置入口（面D：设置弹层，含摘除 danger 区）。
  *
  * 统一规格（mock v5 规格卡逐字）：
@@ -24,12 +24,12 @@
 import type { ReactElement } from 'react'
 
 /** 图标名（消费方 switch 用，五枚全集）。 */
-export type ProjectIconName = 'board' | 'knowledge' | 'routes' | 'epics' | 'settings'
+export type ProjectIconName = 'board' | 'docs' | 'routes' | 'epics' | 'settings'
 
 /** 图标语义元数据：title 与 aria-label 恒同值（可辨识纪律，验收 11b）。 */
 export const PROJECT_ICON_SPECS: Record<ProjectIconName, { title: string; ariaLabel: string }> = {
   board: { title: '工单列表', ariaLabel: '工单列表' },
-  knowledge: { title: '知识库', ariaLabel: '知识库' },
+  docs: { title: '文档', ariaLabel: '文档' },
   routes: { title: '模型路由', ariaLabel: '模型路由' },
   epics: { title: '立项单', ariaLabel: '立项单' },
   settings: { title: '项目设置', ariaLabel: '项目设置' },
@@ -50,8 +50,8 @@ function iconPaths(name: ProjectIconName): ReactElement {
           <path d="M7.2 9h5.6M7.2 12.4h3.6" />
         </>
       )
-    // 知识库（原 📖）
-    case 'knowledge':
+    // 文档（t260905-06 旧提法退役，📖 书本形制沿用）
+    case 'docs':
       return (
         <>
           <path d="M10 5.4C8.8 4.2 7 3.8 4.6 4a.8.8 0 0 0-.7.8v9c0 .4.3.8.8.8 2.1-.2 3.9.2 5.3 1.4 1.4-1.2 3.2-1.6 5.3-1.4.5 0 .8-.4.8-.8v-9a.8.8 0 0 0-.7-.8C13 3.8 11.2 4.2 10 5.4z" />

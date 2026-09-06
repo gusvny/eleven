@@ -22,13 +22,15 @@
  *       右栏 chat 项目色带（票② R7）：chat-project-band.ts 装饰器，归属=
  *       listState.current → 账册 project 推导（下方 effect），不在册不渲染。
  *       项目组头行右对齐五个项目级视图入口图标（票③ 11b 统一 SVG 图标族）：工单列表 /
- *       知识库 / 模型路由 / 立项单 / 项目设置（第五枚=面D 设置弹层入口）
+ *       文档 / 模型路由 / 立项单 / 项目设置（第五枚=面D 设置弹层入口）
+ *       （t260905-06：旧提法退役，原位换「文档」入口——仓根 docs/ 定稿库人读
+ *       视图 + notes/ 观察窗，全仓单例不按项目分流）
  *       （t260827-01：立项单从「左列可折叠列表区」改为项目级图标，与其他三视图同款；
  *       左列不再显示立项列表，点图标后中列显示立项清单）。
  *       项目组 = server/dsh/projects.yaml 注册表（260823 多项目化：project 是逻辑概念，
  *       1:N 对应目录）；每组工单按 ?project=<key> 单独拉取（Temporal ProjectKey SA 过滤）。
  * 中列：四视图由 index.tsx 注入（views prop）——工单台 WorkbenchSection（本插件）、
- *       知识库 KnowledgeSection（knowledge 插件）、模型 ProvidersSection（providers 插件）、
+ *       文档 DocsSection（本插件，t260905-06）、模型 ProvidersSection（providers 插件）、
  *       立项单 EpicSection（本插件，t260826-02；空代号=立项清单，带代号=详情）。
  *       260823 起它们不再占 chat 顶部页签。t260903-07 起：点工单只在中列开详情抽屉，
  *       右栏 chat 恒为单全局会话不再切换（每工单会话联动下线，数据留存）。
@@ -122,7 +124,7 @@ interface Project {
   key: string
   name: string
   dirs: string[]
-  /** 主目录（dirs 首个）：知识库/模型路由/会话 cwd 兜底都走它。 */
+  /** 主目录（dirs 首个）：模型路由/会话 cwd 兜底都走它（t260905-06 起「文档」视图=仓根 docs/，不走它）。 */
   primary: string
 }
 
@@ -133,8 +135,8 @@ interface MiddleViews {
    *  只靠 focusId 传达不到）；listNonce=「点工单列表图标回列表」信号（通知关详情抽屉）。
    *  onOpenEpic=工单徽标点击（t260826-02）：中列切立项单视图并定位代号。 */
   board: ComponentType<{ focusId?: string; focusNonce?: number; listNonce?: number; projectKey?: string; onOpenEpic?: (code: string) => void }>
-  /** 知识库（KnowledgeSection）。 */
-  knowledge: ComponentType<{ projectKey?: string }>
+  /** 文档视图（t260905-06）：全仓单例——docs/ 定稿库属仓不属项目，不收 projectKey。 */
+  docs: ComponentType<Record<string, never>>
   /** 模型/路由（ProvidersSection）。 */
   routes: ComponentType<{ projectKey?: string }>
   /** 立项单（EpicSection，t260826-02）：epicCode/epicNonce=定位信号（同 code 重进靠 nonce，
@@ -175,7 +177,7 @@ interface SidebarProps {
   views: MiddleViews
 }
 
-type RightView = 'board' | 'knowledge' | 'routes' | 'epics'
+type RightView = 'board' | 'docs' | 'routes' | 'epics'
 
 /* ---------------------------------------------------------------- 口径 */
 
@@ -261,7 +263,7 @@ const CSS = `
 .wb-sb .wb-card-state { color:inherit; }
 .wb-sb .wb-card-id { color:#7ab8ff; }
 /* 视图入口图标：右对齐放在每个项目组头行内（用户拍板 260823：per-project，不占独立行；
-   t260827-01 起四个：工单/知识库/模型/立项单） */
+   t260827-01 起四个：工单/文档/模型/立项单；t260905-06 旧提法退役换文档） */
 .wb-view-icons { display:flex; gap:2px; }
 /* 图标族统一（票③ 11b）：命中区 26×26 radius 6，显形 18px（svg 由 ProjectIcon 定）；
    三态 idle/hover/active 沿用本侧栏既有色板（深色语境；mock 规格卡三态色为浅色
@@ -600,7 +602,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
   }, [projects, ticketsByProject])
 
   const Board = views.board
-  const Knowledge = views.knowledge
+  const Docs = views.docs
   const Routes = views.routes
   const Epics = views.epics
 
@@ -643,19 +645,23 @@ export function WorkbenchSidebar(props: SidebarProps) {
                 <span className="wb-group-dot" data-wb-psess-dot="" style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 4, flex: 'none', background: projectColor(g.project.key) }} title={g.project.key} />
                 <span className="wb-group-name">{g.project.name}</span>
                 <span className="wb-group-count">{g.tickets.length || ''}</span>
-                {/* 四视图入口 per 项目（用户拍板 260823：每个项目组头行都有，非全局）——
-                    按行项目分流：工单列表=该项目 ProjectKey 过滤、知识库=该项目主目录 docs、
-                    模型路由=该项目主目录 model-routes.yaml；立项单（t260827-01）=全量立项清单
-                    （跨项目语义单元，不按项目过滤，图标只承担「切视图+落点项目」两职）。 */}
+                {/* 视图入口 per 项目（用户拍板 260823：每个项目组头行都有，非全局）——
+                    按行项目分流：工单列表=该项目 ProjectKey 过滤、模型路由=该项目主目录
+                    model-routes.yaml；立项单（t260827-01）=全量立项清单（跨项目语义单元，
+                    不按项目过滤）；文档（t260905-06）=仓根 docs/ 定稿库（全仓单例，
+                    不按项目分流——点任一组图标开同一库，active 高亮只判 rightView）。 */}
                 <span className="wb-view-icons" onClick={e => e.stopPropagation()}>
                   <span
                     className={`wb-view-icon ${rightView === 'board' && viewProject === g.project.key ? 'active' : ''}`}
                     title="工单列表" aria-label="工单列表"
                     onClick={() => handleViewIcon(g.project.key, 'board')}><ProjectIcon name="board" /></span>
+                  {/* 键盘可达（t260905-06 验收①）：span 非原生可聚焦——role+tabIndex+Enter 键位补齐。 */}
                   <span
-                    className={`wb-view-icon ${rightView === 'knowledge' && viewProject === g.project.key ? 'active' : ''}`}
-                    title="知识库" aria-label="知识库"
-                    onClick={() => handleViewIcon(g.project.key, 'knowledge')}><ProjectIcon name="knowledge" /></span>
+                    className={`wb-view-icon ${rightView === 'docs' ? 'active' : ''}`}
+                    role="button" tabIndex={0}
+                    title="文档" aria-label="文档"
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleViewIcon(g.project.key, 'docs') }}
+                    onClick={() => handleViewIcon(g.project.key, 'docs')}><ProjectIcon name="docs" /></span>
                   <span
                     className={`wb-view-icon ${rightView === 'routes' && viewProject === g.project.key ? 'active' : ''}`}
                     title="模型路由" aria-label="模型路由"
@@ -725,7 +731,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
           </div>
         </div>
       </div>
-      {/* 中列：四视图（现成的工单台/知识库/模型/立项单 UI，从 chat 页签迁来；左列图标直切，无 tab 条）。
+      {/* 中列：四视图（现成的工单台/文档/模型/立项单 UI，从 chat 页签迁来；左列图标直切，无 tab 条）。
           未选项目显占位——不自动选第一个项目（project 无默认值，用户拍板 260823）。 */}
       <div className="wb-sb-right">
         {/* 插件陈旧全局提醒（t260905-07 KI-052）：挂中列共享容器（四视图排他渲染
@@ -745,12 +751,13 @@ export function WorkbenchSidebar(props: SidebarProps) {
           {!viewProject && (
             <div className="wb-placeholder">
               从左侧项目行点图标打开视图：
-              <br />工单列表 · 知识库 · 模型路由 · 立项单 · 项目设置
+              <br />工单列表 · 文档 · 模型路由 · 立项单 · 项目设置
               <br />（按行项目分流；立项单为跨项目清单，点立项单图标后中列显示列表）
             </div>
           )}
           {viewProject && rightView === 'board' && <Board focusId={selectedId || undefined} focusNonce={focusNonce} listNonce={listNonce} projectKey={viewProject} onOpenEpic={openEpic} />}
-          {viewProject && rightView === 'knowledge' && <Knowledge projectKey={viewProject} />}
+          {/* 文档视图（t260905-06）：全仓单例，不要求已选项目（与 per-project 视图判定显式分叉）。 */}
+          {rightView === 'docs' && <Docs />}
           {viewProject && rightView === 'routes' && <Routes projectKey={viewProject} />}
           {/* 立项单视图（t260826-02 中列第四视图；t260827-01 起空代号=立项清单，由项目行
               立项单图标进入，详情由清单行/工单徽标定位）：点关联工单行 → 复用 handleTicketClick

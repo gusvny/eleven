@@ -29,6 +29,14 @@
  *   POST /suyou-workbench/api/wf/tickets/<id>/accept|advance|dispatch-next|rework|update
  *                                               → 写操作，走 admin.py call ticket（run-id 审计）
  *   GET  /suyou-workbench/api/wf/workflows      → workflow list（模板链，泳道图用）
+ *   GET  /suyou-workbench/api/wf/docs/tree?scope=docs|notes
+ *                                               → 「文档」视图目录树（t260905-06，全仓单例）：
+ *                                                 仓根 docs/ 定稿库或 notes/ 观察窗下 .md 动态
+ *                                                 分组（title 自 frontmatter）；白名单拒收文件进
+ *                                                 skipped（可见性）；目录缺席 {empty,reason} 降级
+ *   GET  /suyou-workbench/api/wf/docs/doc?scope=docs&path=design/xx.md
+ *                                               → 「文档」视图按篇正文（原文+frontmatter 元数据；
+ *                                                 白名单/穿路径/大小上限逐检查精确报错；只读）
  *   GET  /suyou-workbench/api/wf/book?path=books/hanshu/jizhuan.json&limit=5
  *                                               → 内容预览（审批前过目）：只读 app/public/data/<path>，
  *                                                 返回 meta + 前 limit 章（标题+段落）；path 白名单防穿路径
@@ -133,6 +141,10 @@ import { findProject, loadProjects, loadRegistry, primaryDir, type ProjectEntry 
 // 项目生命周期 CLI 薄壳（票③面D：写路径单源=安装器 CLI，读注册表仍走 TS 装载器；
 // 票据/体检数据=CLI 独有面，spawn 恰是同源——取舍清单见 src/host/project-admin.ts 头注）。
 import { ProjectCliError, runProjectCli } from './src/host/project-admin.ts'
+// 「文档」视图宿主半（t260905-06）：仓根 docs/ 定稿库 + notes/ 观察窗只读枚举/读取。
+// 降级/白名单/句柄终态口径见该模块头注（R1 取舍清单 2）。
+import { listDocs, readDoc } from './src/host/docs.ts'
+import { isDocsScope } from './src/shared/docs-model.ts'
 
 function projectRootsFor(projectKey: unknown): string[] {
   // 跨项目工单（t260903-11/-12）：票所属项目注册目录=实时态/日志读取的合法根。
@@ -618,6 +630,49 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         return
       }
       sendJson(res, 500, { ok: false, error: String(err?.message ?? err) })
+    }
+  }
+
+  /** 「文档」视图（t260905-06）：仓根 docs/ 定稿库 + notes/ 观察窗，scope 必传二选一。
+   *  全仓单例语义（不按项目分流——docs/ 定稿库属仓不属项目）；只读，无写路径。 */
+  async function handleDocsTree(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const url = new URL(_req.url ?? '/', 'http://x')
+    const scope = url.searchParams.get('scope')
+    if (!isDocsScope(scope)) {
+      sendJson(res, 400, { ok: false, error: `scope 必传且只能是 docs|notes（收到: ${String(scope)}）` })
+      return
+    }
+    try {
+      sendJson(res, 200, { ok: true, result: await listDocs(join(repo, scope), scope) })
+    } catch (err: any) {
+      sendJson(res, 500, { ok: false, error: `docs 目录枚举失败: ${String(err?.message ?? err)}` })
+    }
+  }
+
+  /** 「文档」视图按篇正文（t260905-06）：scope+path 必传；path 白名单/穿路径/大小上限
+   *  每步失败的 reason 点名该检查（精确报错纪律，R1 取舍清单 2）。 */
+  async function handleDocsDoc(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const url = new URL(_req.url ?? '/', 'http://x')
+    const scope = url.searchParams.get('scope')
+    const rel = url.searchParams.get('path') ?? ''
+    if (!isDocsScope(scope)) {
+      sendJson(res, 400, { ok: false, error: `scope 必传且只能是 docs|notes（收到: ${String(scope)}）` })
+      return
+    }
+    if (rel === '') {
+      sendJson(res, 400, { ok: false, error: 'path 必传（scope 下相对路径，.md 结尾）' })
+      return
+    }
+    try {
+      const r = await readDoc(join(repo, scope), rel)
+      if (r.empty) {
+        // 降级走 200 + {empty,reason}（人话可见，同 book/scan-report 风格——路径问题不是服务器错）
+        sendJson(res, 200, { ok: true, result: r })
+        return
+      }
+      sendJson(res, 200, { ok: true, result: r })
+    } catch (err: any) {
+      sendJson(res, 500, { ok: false, error: `docs 篇章读取失败: ${String(err?.message ?? err)}` })
     }
   }
 
@@ -1861,6 +1916,9 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         ws.register({ kind: 'prefix', path: TICKETS_PREFIX, handler: handleTicketRoute }),
         ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/workflows', handler: handleWorkflows }),
         ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/book', handler: handleBook }),
+        // 「文档」视图两路由（t260905-06）：目录树 + 按篇正文（仓根 docs/notes，全仓单例）。
+        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/docs/tree', handler: handleDocsTree }),
+        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/docs/doc', handler: handleDocsDoc }),
         ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/temporal-health', handler: handleTemporalHealth }),
         ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/workers', handler: handleWorkers }),
         ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/scan-report', handler: handleScanReport }),
