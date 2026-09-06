@@ -399,6 +399,13 @@ SCENARIOS = [
     ("t260904-17-ticket-list-rowcard-ui",
      "工单列表 v5 行卡用户可感知面（t260904-17，隔离台浏览器走查=验收①的机械 repeatable 面）：四态一眼可辨（等你1/受阻1/在飞3/收口1 chips 带计数——在飞 3 含未知 stage_state 票=四态缺省分支 UI 交叉验证、收口折叠计数行、行卡 data-ticket-id 可测性契约）；「去签字」=纯导航零写 API（点击后写端点 POST=0——R3 钉死：绑 advance=静默签字必红）；「看原因」达阻塞原因原文；站道点数=模板阶段数（5 段模板 5 点/3 段模板 3 点，计算样式计数）；同 epic 行卡彩条同色非灰、异 epic 异色（验收②可感知面）；搜索=过滤非分组。playwright-core 缺失=干净 SKIP（KI-036 守卫）；实现落地前红属预期，arbitrate/merge 期必须绿",
      "node integration/t260904-17/sc_ticket_list_rowcard_ui.mjs", "ro"),
+    # ---- t260905-08 工单台深浅双模式＋对比度看守（宿主令 260906 22:1X 五条裁定）----
+    ("t260905-08-wb-contrast-guard",
+     "工单台全台面对比度看守（t260905-08，隔离台浏览器走查=KI-052「场景绿真台盲区」回归用例）：全文档可见文字元素实算 WCAG 对比度（computed color vs 沿祖先链合成到不透明的有效底色；色解析收 rgb()/rgba() 与 color(srgb …)——后者= color-mix 派生色的 computed 形态，epic chip/muted/meta 全在此列），在平台浅档/深档令牌注入与零注入（fallback-only）三腿下正文级均须 ≥4.5（收口卡按「至少可分辨」3.0 卡——终态降权 opacity:.72 为 17 号既有设计意图，红线不动）；未知 computed 色形态=fail-closed 点名该腿红，绝不静默计入达标（gen0 验收探针实锤旧解析只认 rgb 曾静默漏检 73% 表面，「绿≠全台面真查」KI-052 同构在看守自身复发的根治）；epic 色板 10 档经 fnv1a 槽位确定性挑码全播入（防采样盲区）；详情面（受阻横幅）/侧栏/metrics 文字面入扫（宿主裁定④全台面，不可达=na 条件腿）；变异腿故意注入低对比正文色断言看守必咬（变异测试守测试本身，改造前经侧栏 alias 消费面咬合）。病灶本质=改造前主区写死浅色自洽、三腿全绿（KI-052 同构，如实预期）；两档令牌代表值来源=裁定④「模拟两档令牌」授权，真值待宿主确认；playwright-core/隔离台依赖缺失=env_fail（exit 2）不写 SKIP（三态契约，KI-046 第三层）；arbitrate/merge 期必须绿",
+     "node integration/t260905-08/sc_wb_contrast_guard.mjs", "ro"),
+    ("t260905-08-hex-clean",
+     "工单台写死色清零静态断言（t260905-08，宿主令裁定②「#fff8c5/#ffebe9 等 hex 现场清零（grep 断言）」机械化）：server/dsh/workbench/src/client/ 全目录 .ts/.tsx/.css 样式消费位零裸 hex，颜色一律经 token 声明位（自定义属性定义值/var() fallback）供出；allowlist 三类零特例——EPIC_PALETTE+兜底灰按值级豁免（确定性哈希色，17 号断言守着）、metrics-charts.ts 整文件（echarts 数据编码色，非文本对比度语义）、token 声明位行级判定（var() 跨行写法不在保证面）；零外部依赖 CI 恒真跑（无 env_fail 路径）；实现落地前红属预期（TDD 信号，存量 ~351 处），arbitrate/merge 期必须绿",
+     "node integration/t260905-08/sc_hex_clean.mjs", "ro"),
     # ---- t260905-07 工单详情下钻面板＋插件 staleness 横幅（KI-052 根治）----
     ("t260905-07-ticket-detail-panel",
      "工单详情下钻面板用户可感知面（t260905-07，隔离台浏览器真点=验收①②）：行点击开详情抽屉且四观测区块在场（data-wb-digest=timeline/handoffs/signatures/workflow——本场景钉的可测性契约，data-wb-* 先例）；乱序 timeline（KI-019 触及面）按 at 升序归位渲染（data-wb-tl-at 升序）+缺 at 条目沉底带时间缺失标注（呈现口径钉死，不声称修复 KI-019 数据模型）；最近交接/门与签字/工作流要点（workflow_id+worktree）内容可达；无标题老票（t260903-10 现场）列表行显正文首句不裸编号（data-wb-row-title=首句截断：含首句不含第二句）、有题票标题原文不动；enrich=progress 通道 title_or_first 字段值=正文首句（零新路由零新请求；主请求窗口零 show 由 17 号契约场景看守不重复）；行导航零写 API（写端点请求=0，「没看过就签了」危害同 17 号 R3）。playwright-core/隔离台依赖缺失=ENV_FAIL（exit 2，KI-036 家族，不写 SKIP）；实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",

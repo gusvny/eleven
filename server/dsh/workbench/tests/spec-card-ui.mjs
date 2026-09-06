@@ -5,7 +5,7 @@
  *   详情抽屉此前只渲染「工单正文（原始需求）」，引擎 snapshot 顶层一直透传的
  *   spec（开票会话蒸馏的加工后派发规格）在 UI 上不可见。本票在前端补
  *   spec?: string 字段 + 正文卡正下方渲染 spec 卡（宿主样张评审拍板 B 形态：
- *   默认展开 + max-height:260px 限高滚动 + 等宽字数徽标 + 蓝左边条 #0969da）。
+ *   默认展开 + max-height:260px 限高滚动 + 等宽字数徽标 + 蓝左边条 accent 令牌，fallback=#0969da）。
  *   本测试锁「前端可见面」契约，防两类经典失效：
  *     - 改了 src 忘重建 lib bundle（三产物同源锁，rework-banner-ui.mjs 同族）；
  *     - 守卫/样式被静默弱化（空 spec 渲空卡、限高滚动退撑爆、徽标退化）。
@@ -68,7 +68,8 @@ for (const [name, art] of [['src', src], ['lib/client.js', libJs], ['lib/client.
     const css = rule[0]
     ok(css.includes('max-height:260px'), `${name}: 限高 260px（B 形态拍板值）`)
     ok(css.includes('overflow-y:auto'), `${name}: 限高滚动 overflow-y:auto`)
-    ok(css.includes('border-left:4px solid #0969da'), `${name}: 蓝左边条 #0969da（与正文卡视觉区分）`)
+    // t260905-08：写死色退役——蓝左边条改 accent 令牌（fallback 仍 #0969da，视觉语义不变）
+    ok(css.includes('border-left:4px solid var(--dsw-derive-accent,#0969da)'), `${name}: 蓝左边条 accent 令牌（fallback=#0969da，与正文卡视觉区分）`)
     ok(css.includes('white-space:pre-wrap'), `${name}: pre-wrap（多行规格原文样保留）`)
     ok(css.includes('word-break:break-word'), `${name}: break-word（长行不横向撑爆）`)
   }

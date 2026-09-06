@@ -42,6 +42,7 @@ import type { OpenedEntry, TitleRowLike } from '../shared/sessions.ts'
 // 项目色（票② R7）：确定性色板 + hex→rgba 展开（hover 淡底，避免 color-mix 赌注）。
 import { projectColor } from '../shared/project-color.ts'
 import { hexToRgba } from './chat-project-band.ts'
+import { DERIVE_TOKENS_CSS } from './theme';
 
 /** 项目内会话区行 props（动作由 sidebar 的 useSessionEntry 二号实例注入）。 */
 export interface ProjectSessionRowProps {
@@ -78,7 +79,7 @@ export interface ProjectSessionRowProps {
  * 撑开，拍板验收口径「正方形小块」以单数字位为基准形态）。关闭钮 hover 才显
  * （absolute 右上角，不占常驻宽度）。换行：行容器 flex-wrap:wrap，无
  * overflow-x（不横滚，拍板 2）。 */
-const PSESS_STYLES = `
+const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
 .wb-psess { display:flex; flex-wrap:wrap; align-items:center; gap:4px;
   padding:4px 8px 4px 20px; border-bottom:1px solid rgba(255,255,255,0.04); }
 /* 项目色（票② R7 拍板 5）：色源=--wb-psess-color（根节点 inline 注入，
@@ -86,45 +87,45 @@ const PSESS_STYLES = `
 .wb-psess-new { box-sizing:border-box; width:24px; height:24px; flex:none;
   display:flex; align-items:center; justify-content:center; font:inherit;
   font-size:13px; line-height:1; padding:0; border-radius:4px;
-  border:1px solid var(--wb-psess-color, rgba(255,255,255,0.25)); background:none;
-  color:var(--wb-psess-color, var(--dsw-alias-label-primary,#e0e0e0)); cursor:pointer; }
+  border:1px solid color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 55%,var(--dsw-alias-bg-primary,#fff)); background:none;
+  color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-label-primary,#1f2328)); cursor:pointer; }
 .wb-psess-new:hover:not(:disabled) { background:var(--wb-psess-hover, rgba(255,255,255,0.1)); }
 .wb-psess-new:disabled { opacity:0.4; cursor:default; }
 .wb-psess-tab { box-sizing:border-box; position:relative; min-width:24px;
   height:24px; flex:none; display:inline-flex; align-items:center;
   justify-content:center; padding:0 3px; border-radius:4px;
   border:1px solid transparent; background:none;
-  color:var(--dsw-alias-label-secondary,#b8b8c8); font:inherit; font-size:11.5px;
+  color:var(--dsw-derive-muted,#57606a); font:inherit; font-size:11.5px;
   cursor:pointer; }
-.wb-psess-tab:hover { background:rgba(255,255,255,0.08);
-  color:var(--dsw-alias-label-primary,#e0e0e0); }
-.wb-psess-tab.active { background:var(--wb-psess-hover, rgba(255,255,255,0.10));
-  border-color:var(--wb-psess-color, rgba(255,255,255,0.4));
-  color:var(--wb-psess-color, var(--dsw-alias-label-primary,#e0e0e0)); }
+.wb-psess-tab:hover { background:color-mix(in srgb,var(--dsw-alias-label-primary,#1f2328) 8%,transparent);
+  color:var(--dsw-alias-label-primary,#1f2328); }
+.wb-psess-tab.active { background:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 14%,transparent);
+  border-color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-bg-primary,#fff));
+  color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-label-primary,#1f2328)); }
 .wb-psess-num { line-height:1; font-family:var(--ds-font-family-code,monospace); }
 .wb-psess-close { position:absolute; top:-5px; right:-5px; width:12px; height:12px;
   display:flex; align-items:center; justify-content:center; padding:0; font:inherit;
   font-size:9px; line-height:1; border:none; border-radius:3px; background:none;
-  color:#f87171; cursor:pointer; opacity:0; }
+  color:var(--dsw-derive-danger,#cf222e); cursor:pointer; opacity:0; }
 .wb-psess-tab:hover .wb-psess-close, .wb-psess-close:focus-visible { opacity:1; }
 .wb-psess-close:hover { background:rgba(248,113,113,0.18); }
-.wb-psess-notice { flex-basis:100%; font-size:10.5px; color:#f59e0b; white-space:nowrap;
+.wb-psess-notice { flex-basis:100%; font-size:10.5px; color:var(--dsw-derive-warn,#f59e0b); white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis; }
 .wb-psess-confirm { position:fixed; z-index:97; min-width:200px; max-width:280px;
-  padding:8px 10px; border-radius:8px; background:#1e1e24;
+  padding:8px 10px; border-radius:8px; background:var(--dsw-derive-dark-bg,#1e1e24);
   border:1px solid rgba(255,255,255,0.15); box-shadow:0 8px 24px rgba(0,0,0,0.5);
   display:flex; flex-direction:column; gap:5px; }
 .wb-psess-confirm-t { font-size:12px; font-weight:600; }
-.wb-psess-confirm-d { font-size:11px; color:#b8b8c8; white-space:nowrap;
+.wb-psess-confirm-d { font-size:11px; color:var(--dsw-derive-dark-muted,#b8b8c8); white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis; }
-.wb-psess-confirm-m { font-size:10.5px; color:#8c959f; }
+.wb-psess-confirm-m { font-size:10.5px; color:var(--dsw-derive-muted,#8c959f); }
 .wb-psess-confirm-btns { display:flex; gap:6px; justify-content:flex-end; }
 .wb-psess-confirm-btns button { font:inherit; font-size:11px; padding:2px 10px;
   border-radius:4px; cursor:pointer; border:1px solid rgba(255,255,255,0.2);
-  background:none; color:var(--dsw-alias-label-primary,#e0e0e0); }
+  background:none; color:var(--dsw-alias-label-primary,#1f2328); }
 .wb-psess-confirm-btns button:hover { background:rgba(255,255,255,0.08); }
 .wb-psess-confirm-btns .wb-psess-confirm-ok { border-color:rgba(248,113,113,0.6);
-  color:#f87171; }
+  color:var(--dsw-derive-dark-red,#f87171); }
 .wb-psess-confirm-btns .wb-psess-confirm-ok:hover { background:rgba(248,113,113,0.15); }
 `
 

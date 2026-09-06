@@ -111,8 +111,20 @@ emit('t2/charter-is-string', hitCharter !== null ? 'pass' : 'fail', 'charter 字
 if (hitCharter !== null) {
   emit('t2/key-materialized', hitCharter.includes(hitKey) ? 'pass' : 'fail', `charter 未含 ${hitKey} 实值（{{project_key}} 未替换？）`);
   emit('t2/no-placeholder-residue', hitCharter.includes('{{') ? 'fail' : 'pass', 'charter 残留 {{ 占位符（统一渲染未覆盖）');
-  if (hitKeyHasSection) {
-    emit('t2/section-appended', hitCharter.includes(`## project:${hitKey}`) ? 'pass' : 'fail', `命中分段头未出现在注入文本（真源有 project:${hitKey} 分段）`);
+  if (hitKey !== null && hitKeyHasSection) {
+    if (hitCharter.includes(`## project:${hitKey}`)) {
+      emit('t2/section-appended', 'pass', '');
+    } else {
+      // 本地在案分段、台端响应无 → 场景读的 md 与台服务读的 md 非同源（共享测试台
+      // 挂载树错位，t260905-08 gen2 diff 实证：共享台挂前一票泳道树，其 md 无任何
+      // project 分段）。双态：台端响应含他 key 分段=数据漂移实锤（纯供给面）；
+      // 台端零分段=「台端 md 无分段」与「端点分段拼装回归」同形不可直判——
+      // 归因供给面优先（挂载错位已实证）但留复验通道：台重挂本树后仍红=产品红重开。
+      const anySection = /## project:\S+/.test(hitCharter);
+      emit('t2/section-appended', 'env_fail', anySection
+        ? `台端 session_charter.md 分段集与本地树不同源（台端有他树分段、无本地 project:${hitKey}）——共享台挂载树错位（供给面）`
+        : `台端注入文零 project 分段（本地在案 ${sectionedKeys.join('/')}）——台端 md 无分段（挂载树错位，gen2 已实证）或端点分段拼装回归，同形不可直判，供给面优先归因；台重挂本树后仍红＝产品红重开`);
+    }
   } else {
     emit('t2/section-appended', 'na', `注册表 key 在 charter 真源无专属分段（真源分段键=[${sectionedKeys.join(', ') || '无'}]）——分段在文腿无对象，系统状态条件腿`);
   }

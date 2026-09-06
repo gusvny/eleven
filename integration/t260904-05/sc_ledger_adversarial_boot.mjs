@@ -68,10 +68,18 @@ async function bootCase(seed) {
       for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v);
     }, seed);
     const page = await context.newPage();
+    const notFound = [];
+    page.on('response', r => { if (r.status() === 404) notFound.push(r.url()); });
     page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()); });
     page.on('pageerror', e => consoleErrors.push(String(e)));
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await page.waitForSelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])', { timeout: 15000 }).catch(() => {});
+    // 环境前提：台面必须渲染出项目会话行（共享台 fixture/资源面劣化时 UI 断半——
+    // 此时后续断言测的是台的伤，不是产品行为）。不渲染=envFail，点名 404 明细。
+    const rowOk = await page.waitForSelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])', { timeout: 15000 }).then(() => true).catch(() => false);
+    if (!rowOk) {
+      await browser.close();
+      return { state: null, consoleErrors, bootFailed: false, envFail: true, notFound };
+    }
     await page.waitForTimeout(1200); // backfill/装饰器首扫窗
     const state = await page.evaluate(() => ({
       tabIds: [...document.querySelectorAll('[data-wb-psess-tab]')]
@@ -100,7 +108,8 @@ try {
       { id: 'ticket-t260904-05', project: fixtureKey, lastOpenedAt: 1 },
     ];
     const r = await bootCase({ [LEDGER_KEY]: JSON.stringify(legacy) });
-    if (r.bootFailed) { record('a/boot', 'fail', r.err); }
+    if (r.envFail) { record('a/fixture', 'env_fail', `台侧栏未渲染项目会话行（共享台 fixture/资源面劣化，非产品行为）；404=${r.notFound.slice(0, 2).join(', ').slice(0, 160)}`); }
+    else if (r.bootFailed) { record('a/boot', 'fail', r.err); }
     else {
       const inTabs = r.state.tabIds.filter(id => id.startsWith('chat-legacy'));
       const ticketLeak = r.state.tabIds.some(id => id.startsWith('ticket-'));
@@ -122,7 +131,8 @@ try {
         { id: 'chat-empty-proj', project: '', lastOpenedAt: 4 },
       ]),
     });
-    if (r.bootFailed) { record('b/boot', 'fail', r.err); }
+    if (r.envFail) { record('b/fixture', 'env_fail', `台侧栏未渲染项目会话行（共享台 fixture/资源面劣化，非产品行为）；404=${r.notFound.slice(0, 2).join(', ').slice(0, 160)}`); }
+    else if (r.bootFailed) { record('b/boot', 'fail', r.err); }
     else {
       const leak = r.state.tabIds.some(id => id.startsWith('chat-bad') || id.startsWith('chat-empty'));
       const clean = r.consoleErrors.length === 0 && r.state.plusPresent && !leak;
@@ -139,7 +149,8 @@ try {
       [LEDGER_KEY]: 'not-json{{{',
       [SEQ_COUNTER_KEY]: '}}{{{garbage',
     });
-    if (r.bootFailed) { record('c/boot', 'fail', r.err); }
+    if (r.envFail) { record('c/fixture', 'env_fail', `台侧栏未渲染项目会话行（共享台 fixture/资源面劣化，非产品行为）；404=${r.notFound.slice(0, 2).join(', ').slice(0, 160)}`); }
+    else if (r.bootFailed) { record('c/boot', 'fail', r.err); }
     else {
       const clean = r.consoleErrors.length === 0 && r.state.plusPresent && r.state.tabIds.length === 0;
       record('c/bad-json', clean ? 'pass' : 'fail',

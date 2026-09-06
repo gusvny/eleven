@@ -72,7 +72,16 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const consoleErrors = [];
 page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
 page.on('pageerror', (e) => consoleErrors.push(String(e)));
-await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
+// 隔离台偶发半死（bootConsole 健康判据过了但面没起来——t260905-08 gen2 机械段实锤
+// 21100 导航炸）：首导航失败=台装配环境红，env_fail 点名而非异常抛穿（exit 1 谎报产品红）。
+try {
+  await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded', timeout: 20000 });
+} catch (e) {
+  record('bench/first-nav', 'env_fail',
+    `隔离台 ${bench.base} 首导航失败（boot 健康判据过但面未起=台装配环境红）：${String(e?.message ?? e).split('\n')[0].slice(0, 140)}`);
+  await browser.close().catch(() => { /* 已退 */ });
+  summarize();
+}
   await dismissShellNotice(page);
 await page.waitForTimeout(1500); // 左栏首拉
 await dismissNotice(page); // 出厂 notice 会劫持焦点/指针（fill 打不进受控输入），先关

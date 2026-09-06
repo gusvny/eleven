@@ -85,6 +85,7 @@ import { TicketRowCard } from './ticket-row-card.tsx'
 // handleTicketClick 开详情抽屉。
 import { MetricsPanel } from './metrics.tsx'
 import { METRICS_STATE_EVENT, METRICS_TOGGLE_EVENT, footerSlotOk, mountMetricsIntoSettingsRow, shellActiveNow, subscribeShellActive } from './metrics-entry.tsx'
+import { DERIVE_TOKENS_CSS } from './theme';
 
 /* ---------------------------------------------------------------- 类型 */
 
@@ -211,8 +212,8 @@ const inSandbar = (t: Ticket, nowS: number): boolean => {
 
 /* ---------------------------------------------------------------- 样式 */
 
-const CSS = `
-.wb-sb { display:flex; flex-direction:column; height:100%; background:var(--dsw-specific-sidebar-fill, #1a1a2e); color:var(--dsw-alias-label-primary,#e0e0e0); font-size:12px; }
+const CSS = `${DERIVE_TOKENS_CSS}
+.wb-sb { display:flex; flex-direction:column; height:100%; /* t260905-08：底改自适应 alias（平台 fill 层级高于 :root 注入无法跟随看守档位，可读性收敛到 alias 对）；装饰性 fill 见 --dsw-specific-sidebar-fill 保留在 group-head */ background:var(--dsw-alias-bg-primary,#fff); color:var(--dsw-derive-fg,#1f2328); font-size:12px; }
 /* 轨条态：仅图标 */
 .wb-sb.rail { width:48px; align-items:center; padding-top:12px; }
 .wb-sb.rail .wb-sb-icon { width:28px; height:28px; border-radius:6px; background:var(--dsw-alias-brand-primary,#7c3aed); display:flex; align-items:center; justify-content:center; font-size:14px; cursor:pointer; }
@@ -222,46 +223,47 @@ const CSS = `
 .wb-sb-left { flex:1 1 0; min-width:180px; display:flex; flex-direction:column; border-right:1px solid var(--dsw-alias-border-l1,#333); }
 /* position:relative —— 工单详情抽屉（index.tsx .wb-drawer，absolute）的定位祖先，
    让抽屉铺满中列而不是全窗（260824 用户拍板：详情显在中列）。 */
-.wb-sb-right { flex:4 1 0; display:flex; flex-direction:column; overflow:hidden; min-width:200px; background:var(--dsw-alias-bg-primary,#0f0f1a); position:relative; }
+.wb-sb-right { flex:4 1 0; display:flex; flex-direction:column; overflow:hidden; min-width:200px; background:var(--dsw-alias-bg-primary,#fff); position:relative; }
 /* host 陈旧全局提醒（t260902-03）：中列共享容器顶部横幅，flex:none 不挤占四视图与
    下栏；琥珀底一眼可辨，与 running 绿/blocked 红色板错开。 */
 .wb-stale-banner { flex:none; display:flex; align-items:center; gap:10px; padding:8px 12px;
-  background:#7a4a06; color:#ffe9c4; border-bottom:1px solid #b8860b; font-size:12px; }
+  background:var(--dsw-derive-dark-warn-bg,#7a4a06); color:var(--dsw-derive-dark-warn-fg,#ffe9c4); border-bottom:1px solid var(--dsw-derive-warn,#b8860b); font-size:12px; }
 .wb-stale-banner .wb-stale-msg { flex:1; line-height:1.5; }
-.wb-stale-banner .wb-stale-msg strong { color:#ffd166; }
-.wb-stale-banner .wb-stale-dismiss { flex:none; border:1px solid #b8860b; background:transparent;
-  color:#ffe9c4; border-radius:6px; padding:2px 10px; font:inherit; font-size:12px; cursor:pointer; }
+.wb-stale-banner .wb-stale-msg strong { color:var(--dsw-derive-dark-amber,#ffd166); }
+.wb-stale-banner .wb-stale-dismiss { flex:none; border:1px solid var(--dsw-derive-warn,#b8860b); background:transparent;
+  color:var(--dsw-derive-dark-warn-fg,#ffe9c4); border-radius:6px; padding:2px 10px; font:inherit; font-size:12px; cursor:pointer; }
 .wb-stale-banner .wb-stale-dismiss:hover { background:rgba(255,255,255,0.12); }
 /* metrics M2a（t260902-01）下栏：中列底部固定高度条（UI 规划 §2——左「📊 度量」、
    右 ⚙ settings；高度恒定，内容收进 ⚙ 弹层）。 */
 .wb-sb-foot{display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;border-top:1px solid var(--dsw-alias-border-l1,#333);flex:none;font-size:12px}
-.wb-sb-foot-btn{display:inline-flex;align-items:center;gap:5px;border:none;background:none;color:var(--dsw-alias-label-primary,#e0e0e0);cursor:pointer;font:inherit;padding:4px 8px;border-radius:6px}
+.wb-sb-foot-btn{display:inline-flex;align-items:center;gap:5px;border:none;background:none;color:var(--dsw-alias-label-primary,#1f2328);cursor:pointer;font:inherit;padding:4px 8px;border-radius:6px}
 .wb-sb-foot-btn:hover{background:rgba(255,255,255,.08)}
-.wb-sb-foot-btn[data-on=true]{color:#7ee787}
+.wb-sb-foot-btn[data-on=true]{color:var(--dsw-derive-accent,#0969da)}
 .wb-sb-foot-sp{flex:1}
-.wb-sb-setpop{position:absolute;right:8px;bottom:40px;z-index:96;background:var(--dsw-alias-bg-primary,#0f0f1a);border:1px solid var(--dsw-alias-border-l1,#333);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:240px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.wb-sb-setpop{position:absolute;right:8px;bottom:40px;z-index:96;background:var(--dsw-alias-bg-primary,#fff);border:1px solid var(--dsw-alias-border-l1,#333);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:240px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
 .wb-sb-setpop .row{display:flex;align-items:center;gap:6px;font-size:12px}
 .wb-sb-setpop input[type=number]{width:64px;font:inherit;font-size:12px;background:transparent;color:inherit;border:1px solid var(--dsw-alias-border-l1,#333);border-radius:4px;padding:2px 6px}
 .wb-sb-setpop .t{font-size:12px;font-weight:600}
-.wb-sb-setpop .m2c{font-size:11px;color:#8c959f}
+.wb-sb-setpop .m2c{font-size:11px;color:var(--dsw-derive-muted,#8c959f)}
 /* 项目组 */
 .wb-ticket-list { flex:1; overflow-y:auto; }
-.wb-group-head { display:flex; align-items:center; gap:5px; padding:7px 8px 5px; cursor:pointer; font-weight:600; position:sticky; top:0; background:var(--dsw-specific-sidebar-fill,#1a1a2e); z-index:1; }
+.wb-group-head { display:flex; align-items:center; gap:5px; padding:7px 8px 5px; cursor:pointer; font-weight:600; position:sticky; top:0; background:var(--dsw-alias-bg-primary,#fff); z-index:1; }
 .wb-group-head:hover { background:rgba(255,255,255,0.05); }
-.wb-group-caret { font-size:9px; color:var(--dsw-alias-label-secondary,#888); width:10px; }
+.wb-group-caret { font-size:9px; color:var(--dsw-derive-muted,#57606a); width:10px; }
 .wb-group-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.wb-group-count { margin-left:auto; font-size:10px; color:var(--dsw-alias-label-secondary,#888); font-weight:400; }
-.wb-group-empty { padding:2px 8px 8px 24px; color:#666; font-size:11px; }
+.wb-group-count { margin-left:auto; font-size:10px; color:var(--dsw-derive-muted,#57606a); font-weight:400; }
+.wb-group-empty { padding:2px 8px 8px 24px; color:var(--dsw-derive-fg,#666); font-size:11px; }
 /* t260904-17 列表 v5：工单条目=行卡迷你版（TicketRowCard compact）——暗色主题覆写：
  * 透明底、继承字色、选中紫调高亮；收口（data-state=done）淡一档 */
-.wb-sb .wb-card { background:transparent; border-color:rgba(255,255,255,0.10);
-  box-shadow:none; color:var(--dsw-alias-label-primary,#e0e0e0); margin:0 6px 4px 14px; padding:5px 8px; }
-.wb-sb .wb-card:hover { background:rgba(255,255,255,0.06); }
-.wb-sb .wb-card[data-active=true] { background:rgba(124,58,237,0.18); border-color:rgba(124,58,237,0.5); }
-.wb-sb .wb-card[data-state=done] { opacity:0.55; }
+.wb-sb .wb-card { background:transparent; border-color:var(--dsw-derive-border,#d0d7de);
+  box-shadow:none; color:var(--dsw-derive-fg,#1f2328); margin:0 6px 4px 14px; padding:5px 8px; }
+.wb-sb .wb-card:hover { background:var(--dsw-derive-surface,#f6f8fa); }
+.wb-sb .wb-card[data-active=true] { background:color-mix(in srgb,var(--dsw-derive-active,#7c3aed) 18%,var(--dsw-alias-bg-primary,#fff)); border-color:color-mix(in srgb,var(--dsw-derive-active,#7c3aed) 50%,var(--dsw-alias-bg-primary,#fff)); }
+.wb-sb .wb-card[data-state=done] { opacity:0.72; } /* 对齐板面 .72：0.55 时次级字混底后 <3:1（看守实测） */
 .wb-sb .wb-card-title { color:inherit; font-weight:400; }
 .wb-sb .wb-card-state { color:inherit; }
-.wb-sb .wb-card-id { color:#7ab8ff; }
+/* t260905-08：原深档固定蓝字——平台浅档下失读（宿主实报同病），归主规则令牌 */
+.wb-sb .wb-card-id { color:var(--dsw-derive-accent,#0969da); }
 /* 视图入口图标：右对齐放在每个项目组头行内（用户拍板 260823：per-project，不占独立行；
    t260827-01 起四个：工单/文档/模型/立项单；t260905-06 旧提法退役换文档） */
 .wb-view-icons { display:flex; gap:2px; }
@@ -273,17 +275,17 @@ const CSS = `
 .wb-view-icon.active { background:rgba(124,58,237,0.25); opacity:1; }
 /* 隔离行（票③验收 11）：红色一行，常驻可辨。 */
 .wb-quar-row { display:flex; align-items:center; gap:8px; padding:7px 10px; font-size:12px;
-  color:#ff8183; background:rgba(255,235,233,.08); cursor:pointer; border-bottom:1px solid rgba(255,255,255,.04); }
+  color:var(--dsw-derive-danger-border,#ff8183); background:rgba(255,235,233,.08); cursor:pointer; border-bottom:1px solid rgba(255,255,255,.04); }
 .wb-quar-row:hover { background:rgba(255,235,233,.16); }
 /* 「＋ 接入项目」行（票③面D）：项目组列表末尾，方框＋语言同会话区（.wb-psess-* 方框同款）。 */
 .wb-project-add-row { display:flex; align-items:center; gap:8px; padding:9px 10px; font-size:12px;
-  color:var(--dsw-alias-label-secondary,#888); cursor:pointer; }
-.wb-project-add-row:hover { background:rgba(255,255,255,0.06); color:var(--dsw-alias-label-primary,#e0e0e0); }
+  color:var(--dsw-derive-muted,#57606a); cursor:pointer; }
+.wb-project-add-row:hover { background:rgba(255,255,255,0.06); color:var(--dsw-alias-label-primary,#1f2328); }
 .wb-project-add-plus { width:22px; height:22px; border:1px dashed var(--dsw-alias-border-l1,#555); border-radius:6px;
   display:flex; align-items:center; justify-content:center; font-size:14px; flex:none; }
 /* 中列：视图容器（四视图自带全套样式，无切换条——视图由左列图标直切） */
 .wb-right-content { flex:1; overflow-y:auto; }
-.wb-placeholder { padding:32px; color:var(--dsw-alias-label-secondary,#888); font-size:13px; line-height:1.8; }
+.wb-placeholder { padding:32px; color:var(--dsw-derive-muted,#57606a); font-size:13px; line-height:1.8; }
 
 /* 顶部会话入口行样式已随票② R8 退役（t260904-05，顶部行样式族全清）。 */
 `
@@ -636,7 +638,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
       <div className="wb-sb-left">
         <div className="wb-ticket-list">
           {loading ? (
-            <div style={{padding:16,color:'#888'}}>加载中…</div>
+            <div style={{padding:16,color:'var(--dsw-derive-fg,#888)'}}>加载中…</div>
           ) : groups.map(g => (
             <div key={g.project.key}>
               <div className="wb-group-head" onClick={() => setCollapsed(c => ({ ...c, [g.project.key]: !c[g.project.key] }))}>

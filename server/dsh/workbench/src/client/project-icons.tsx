@@ -9,7 +9,7 @@
  *   viewBox 20×20 · stroke=currentColor · stroke-width 1.6 · 圆帽圆角 · fill none
  *   显形 18px · 命中区 26×26（radius 6，由消费方 CSS 承担）
  *   三态（idle/hover/active）由消费方容器类承担（sidebar .wb-view-icon 既有三态）；
- *   path 语义与配色卡（idle #57606a / hover #0969da+#f0f6ff / active #0969da）为
+ *   path 语义与配色卡（idle var(--dsw-derive-muted,#57606a) / hover var(--dsw-derive-accent,#0969da)+var(--dsw-derive-accent-bg,#f0f6ff) / active var(--dsw-derive-accent,#0969da)）为
  *   mock 浅色语境定稿，侧栏深色语境沿用其既有三态色板——图标本体只吃
  *   currentColor，几何规格统一是本模块的契约。
  *

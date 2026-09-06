@@ -12,6 +12,7 @@
  */
 
 import type { MouseEvent } from 'react'
+import { epicChipColor } from './theme'
 import {
   deriveTicketState, STATE4_LABEL, epicColorOf, stageShortOf, relativeTime,
   laneDots, toMillis, ticketDisplayTitle, type WfLike,
@@ -90,12 +91,16 @@ export function TicketRowCard({
     ev.stopPropagation()
     if (!busy) fn?.()
   }
-  const rowTone = state4 === 'waiting' ? '#fff8c5' : state4 === 'blocked' ? '#ffebe9' : undefined
+  // t260905-08：状态行底色不再行内写死——CSS 按 data-state 接管
+  // （.wb-card[data-state=waiting/blocked]，主题令牌派生，深浅两档自适应；
+  //   原 rowTone 行内浅色写死=深色主题浅字撞浅底根因，宿主 260906 实报）。
+  // 彩条 borderLeftColor 保留 epicColor 原色（装饰不承载文字；17 号 T6/walkthrough
+  // 断言直读此值，R8 已核平）。
   return (
     <div
       className="wb-card" data-ticket-id={t.id}
       data-state={state4} data-active={active} data-compact={compact}
-      style={{ borderLeftColor: epicColor, background: rowTone }}
+      style={{ borderLeftColor: epicColor }}
       title={cardTitle(t, wf)}
       onClick={() => onOpen()}
       role="button"
@@ -117,7 +122,8 @@ export function TicketRowCard({
         </span>
         {/* epic 独立字段：彩 chip，点击=按 epic 筛（stopPropagation 不触发行卡导航） */}
         {t.epic && (
-          <span className="wb-card-epic" style={{ borderColor: epicColor, color: epicColor }}
+          <span className="wb-card-epic"
+            style={{ borderColor: epicColor, ['--epic-c' as string]: epicColor, color: epicChipColor() }}
             title={`所属立项：${t.epic}`}
             onClick={(ev) => { ev.stopPropagation(); onOpenEpic?.(t.epic ?? '') }}>
             {t.epic}

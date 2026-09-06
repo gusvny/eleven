@@ -321,6 +321,16 @@ def compose_env(project, services, ports, opts):
     if not admin_log.exists():
         admin_log.touch()
     env["SANDBAR_TEST_ADMIN_LOG"] = str(admin_log)
+    # 容器端挂载点预创建（t260905-08 泳道实锤）：compose 对 /repo 与 /repo-nm 两处单文件
+    # bind admin.log，而 /repo 挂 :ro——被挂树若无 server/admin.log，docker 建挂载点
+    # =EROFS 起台炸（主树常在跑有此文件故 /repo-nm 侧从未露，泳道 worktree 作 /repo 即现形）。
+    # *.log 是 gitignored 运行时物，touch 空文件不触交付面。
+    for tree in (opts.get("repo_dir") or str(REPO), opts.get("nm_repo_dir") or default_repo_dir()):
+        server_dir = pathlib.Path(tree) / "server"
+        if server_dir.is_dir():
+            shadow = server_dir / "admin.log"
+            if not shadow.exists():
+                shadow.touch()
     # 凭据物化（gen4）：容器台缺凭据=壳层准入遮罩全屏拦截指针（自搭台对照实锤）。
     # 源：env SANDBAR_TEST_CREDENTIALS > ~/.sandbar/projects/suyou > <repo>/.dsh > 主树 .dsh。
     cred_env = os.environ.get("SANDBAR_TEST_CREDENTIALS")

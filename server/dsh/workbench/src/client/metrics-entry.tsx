@@ -149,7 +149,7 @@ export function mountMetricsIntoSettingsRow(root: HTMLElement): () => void {
     btn.addEventListener('click', () => { document.dispatchEvent(new CustomEvent(METRICS_TOGGLE_EVENT)) })
     const reflect = (e: Event) => {
       const open = Boolean((e as CustomEvent<{ open?: boolean }>).detail?.open)
-      if (btn) { btn.style.opacity = open ? '1' : '.75'; btn.style.color = open ? '#7ee787' : 'inherit' }
+      if (btn) { btn.style.opacity = open ? '1' : '.75'; btn.style.color = open ? 'var(--dsw-derive-accent,#0969da)' : 'inherit' }
     }
     ;(btn as ShellBtn)._wbReflect = reflect
     document.addEventListener(METRICS_STATE_EVENT, reflect)

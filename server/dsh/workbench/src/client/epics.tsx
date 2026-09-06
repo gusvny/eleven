@@ -30,6 +30,7 @@ import {
 import type { EpicMeta, EpicNextSuggestion, EpicStatus, EpicTicketsResult } from './epics-model.ts'
 import { EPIC_NOTE_INPUT_MAX, EPIC_STATUS_OPTIONS, isEpicStatusValue } from './epics-model.ts'
 import { startVisibleInterval } from './visibility-poll.ts'
+import { DERIVE_TOKENS_CSS } from './theme';
 
 /** 详情响应的「下一步建议」投影（host epic-next.ts EpicNextHint 互指；全 string 宿主已收口）。 */
 interface EpicNextHint {
@@ -47,82 +48,82 @@ type EpicListRow = EpicMeta & { nextHintCached?: boolean }
 
 /* ---------------------------------------------------------------- 样式（wb-ep-* 独立前缀） */
 
-const CSS = `
+const CSS = `${DERIVE_TOKENS_CSS}
 .wb-ep-root{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
-  background:#f6f8fa;color:#1f2328;min-height:100%;box-sizing:border-box;padding:20px 24px 32px;
+  background:var(--dsw-derive-surface,#f6f8fa);color:var(--dsw-derive-fg,#1f2328);min-height:100%;box-sizing:border-box;padding:20px 24px 32px;
   display:flex;flex-direction:column;gap:14px;height:100%;overflow-y:auto;font-size:13px;line-height:1.55}
-.wb-ep-head{display:flex;align-items:baseline;gap:10px;border-bottom:1px solid #d0d7de;padding-bottom:10px;flex-wrap:wrap}
-.wb-ep-title{font-size:18px;font-weight:600;color:#1f2328}
-.wb-ep-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:#0969da;
-  background:#ddf4ff;border:1px solid #96c8f2;border-radius:6px;padding:1px 8px}
-.wb-ep-sub{font-size:12px;color:#57606a}
+.wb-ep-head{display:flex;align-items:baseline;gap:10px;border-bottom:1px solid var(--dsw-derive-border,#d0d7de);padding-bottom:10px;flex-wrap:wrap}
+.wb-ep-title{font-size:18px;font-weight:600;color:var(--dsw-derive-fg,#1f2328)}
+.wb-ep-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--dsw-derive-accent,#0969da);
+  background:var(--dsw-derive-accent-bg,#ddf4ff);border:1px solid var(--dsw-derive-accent-border,#96c8f2);border-radius:6px;padding:1px 8px}
+.wb-ep-sub{font-size:12px;color:var(--dsw-derive-muted,#57606a)}
 .wb-ep-btn{font:inherit;font-size:13px;padding:4px 14px;border-radius:6px;cursor:pointer;
-  border:1px solid #d0d7de;background:#ffffff;color:#1f2328}
-.wb-ep-btn:hover{background:#f6f8fa}
+  border:1px solid var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-canvas,#ffffff);color:var(--dsw-derive-fg,#1f2328)}
+.wb-ep-btn:hover{background:var(--dsw-derive-surface,#f6f8fa)}
 .wb-ep-btn:disabled{opacity:.5;cursor:default}
-.wb-ep-btn-green{border-color:#7dd9a0;color:#1a7f37;background:#dafbe1}
+.wb-ep-btn-green{border-color:var(--dsw-derive-success-border,#7dd9a0);color:var(--dsw-derive-success,#1a7f37);background:var(--dsw-derive-success-bg,#dafbe1)}
 .wb-ep-cols{display:flex;gap:14px;align-items:flex-start;min-height:0}
-.wb-ep-md{flex:55 1 0;min-width:0;border:1px solid #d0d7de;border-radius:8px;background:#ffffff;
+.wb-ep-md{flex:55 1 0;min-width:0;border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;background:var(--dsw-derive-canvas,#ffffff);
   padding:12px 16px;overflow-x:auto}
 .wb-ep-side{flex:45 1 0;min-width:240px;display:flex;flex-direction:column;gap:10px}
-.wb-ep-panel{border:1px solid #d0d7de;border-radius:8px;background:#ffffff;padding:10px 12px;
+.wb-ep-panel{border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;background:var(--dsw-derive-canvas,#ffffff);padding:10px 12px;
   display:flex;flex-direction:column;gap:8px}
-.wb-ep-panel-title{font-size:13px;font-weight:600;color:#1f2328}
+.wb-ep-panel-title{font-size:13px;font-weight:600;color:var(--dsw-derive-fg,#1f2328)}
 .wb-ep-chips{display:flex;gap:8px;flex-wrap:wrap}
 .wb-ep-bucket{font-size:12px;border-radius:6px;padding:1px 8px;font-weight:600;white-space:nowrap;
-  background:#f6f8fa;border:1px solid #d0d7de;color:#57606a}
-.wb-ep-bucket[data-b=进行中]{background:#ddf4ff;border-color:#96c8f2;color:#0550ae}
-.wb-ep-bucket[data-b=已完成]{background:#dafbe1;border-color:#7dd9a0;color:#116329}
-.wb-ep-bucket[data-b=已终止]{background:#ffebe9;border-color:#ff9b9b;color:#cf222e}
-.wb-ep-ticket{padding:6px 8px;border:1px solid #e8ebef;border-radius:6px;cursor:pointer;background:#ffffff}
-.wb-ep-ticket:hover{background:#f6f8fa;border-color:#96c8f2}
+  background:var(--dsw-derive-surface,#f6f8fa);border:1px solid var(--dsw-derive-border,#d0d7de);color:var(--dsw-derive-muted,#57606a)}
+.wb-ep-bucket[data-b=进行中]{background:var(--dsw-derive-accent-bg,#ddf4ff);border-color:var(--dsw-derive-accent-border,#96c8f2);color:var(--dsw-derive-accent-deep,#0550ae)}
+.wb-ep-bucket[data-b=已完成]{background:var(--dsw-derive-success-bg,#dafbe1);border-color:var(--dsw-derive-success-border,#7dd9a0);color:var(--dsw-derive-success-deep,#116329)}
+.wb-ep-bucket[data-b=已终止]{background:var(--dsw-derive-danger-bg,#ffebe9);border-color:var(--dsw-derive-danger-border,#ff9b9b);color:var(--dsw-derive-danger,#cf222e)}
+.wb-ep-ticket{padding:6px 8px;border:1px solid var(--dsw-derive-surface-2,#e8ebef);border-radius:6px;cursor:pointer;background:var(--dsw-derive-canvas,#ffffff)}
+.wb-ep-ticket:hover{background:var(--dsw-derive-surface,#f6f8fa);border-color:var(--dsw-derive-accent-border,#96c8f2)}
 .wb-ep-ticket .l1{display:flex;align-items:baseline;gap:8px;font-size:12px}
-.wb-ep-ticket .l1 .id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#0969da;font-weight:600;flex:none}
-.wb-ep-ticket .l1 .ti{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1f2328}
-.wb-ep-ticket .l2{font-size:11px;color:#8c959f;margin-top:2px}
-.wb-ep-degraded{font-size:12px;color:#7d4e00;background:#fff8c5;border:1px solid #eac54f;
+.wb-ep-ticket .l1 .id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--dsw-derive-accent,#0969da);font-weight:600;flex:none}
+.wb-ep-ticket .l1 .ti{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-derive-fg,#1f2328)}
+.wb-ep-ticket .l2{font-size:11px;color:var(--dsw-derive-muted,#8c959f);margin-top:2px}
+.wb-ep-degraded{font-size:12px;color:var(--dsw-derive-warn-deep,#7d4e00);background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-border,#eac54f);
   border-radius:6px;padding:6px 10px;white-space:pre-wrap;word-break:break-word}
-.wb-ep-empty{font-size:12px;color:#57606a;padding:8px 0}
-.wb-ep-err{background:#ffebe9;border:1px solid #ff9b9b;color:#cf222e;border-radius:6px;
+.wb-ep-empty{font-size:12px;color:var(--dsw-derive-muted,#57606a);padding:8px 0}
+.wb-ep-err{background:var(--dsw-derive-danger-bg,#ffebe9);border:1px solid var(--dsw-derive-danger-border,#ff9b9b);color:var(--dsw-derive-danger,#cf222e);border-radius:6px;
   padding:8px 12px;font-size:12px;white-space:pre-wrap}
-.wb-ep-msgok{font-size:12px;color:#116329;background:#dafbe1;border:1px solid #7dd9a0;
+.wb-ep-msgok{font-size:12px;color:var(--dsw-derive-success-deep,#116329);background:var(--dsw-derive-success-bg,#dafbe1);border:1px solid var(--dsw-derive-success-border,#7dd9a0);
   border-radius:6px;padding:6px 10px}
 /* 建议结项卡片（t260828-08）：绿色横条 + 说明 + 确认结项按钮 */
 .wb-ep-done-card{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
-  border:1px solid #7dd9a0;background:#dafbe1;border-radius:6px;padding:8px 12px}
-.wb-ep-done-title{font-size:12px;font-weight:600;color:#116329}
+  border:1px solid var(--dsw-derive-success-border,#7dd9a0);background:var(--dsw-derive-success-bg,#dafbe1);border-radius:6px;padding:8px 12px}
+.wb-ep-done-title{font-size:12px;font-weight:600;color:var(--dsw-derive-success-deep,#116329)}
 .wb-ep-hint-badge{display:inline-block;margin-left:8px;font-size:10px;border-radius:6px;
-  padding:0 6px;color:#116329;background:#dafbe1;border:1px solid #a6e0b1}
-.wb-ep-done-reason{font-size:12px;color:#116329;flex:1;min-width:200px}
+  padding:0 6px;color:var(--dsw-derive-success-deep,#116329);background:var(--dsw-derive-success-bg,#dafbe1);border:1px solid var(--dsw-derive-success-border,#a6e0b1)}
+.wb-ep-done-reason{font-size:12px;color:var(--dsw-derive-success-deep,#116329);flex:1;min-width:200px}
 /* 立项清单表（未选代号时的落列表） */
-.wb-ep-table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid #d0d7de;
-  border-radius:8px;background:#ffffff;font-size:13px;overflow:hidden}
-.wb-ep-table th{background:#f6f8fa;color:#57606a;font-weight:600;text-align:left;padding:8px 12px;
-  border-bottom:1px solid #d0d7de;font-size:12px;white-space:nowrap}
-.wb-ep-table td{padding:8px 12px;border-bottom:1px solid #e8ebef;vertical-align:middle}
+.wb-ep-table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--dsw-derive-border,#d0d7de);
+  border-radius:8px;background:var(--dsw-derive-canvas,#ffffff);font-size:13px;overflow:hidden}
+.wb-ep-table th{background:var(--dsw-derive-surface,#f6f8fa);color:var(--dsw-derive-muted,#57606a);font-weight:600;text-align:left;padding:8px 12px;
+  border-bottom:1px solid var(--dsw-derive-border,#d0d7de);font-size:12px;white-space:nowrap}
+.wb-ep-table td{padding:8px 12px;border-bottom:1px solid var(--dsw-derive-surface-2,#e8ebef);vertical-align:middle}
 .wb-ep-table tbody tr{cursor:pointer}
-.wb-ep-table tbody tr:hover{background:#f6f8fa}
+.wb-ep-table tbody tr:hover{background:var(--dsw-derive-surface,#f6f8fa)}
 .wb-ep-table tbody tr:last-child td{border-bottom:none}
 /* 新建工单弹层（制式照 index.tsx wb-modal） */
 .wb-ep-modal{position:fixed;inset:0;background:rgba(31,35,40,.5);z-index:99;display:flex;align-items:center;
   justify-content:center;padding:24px}
-.wb-ep-modal-box{background:#ffffff;border:1px solid #d0d7de;border-radius:10px;
+.wb-ep-modal-box{background:var(--dsw-derive-canvas,#ffffff);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:10px;
   box-shadow:0 8px 32px rgba(31,35,40,.2);max-width:640px;width:100%;max-height:86vh;
   display:flex;flex-direction:column;gap:10px;padding:18px 20px}
-.wb-ep-modal-title{font-size:15px;font-weight:600;color:#1f2328}
-.wb-ep-field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#57606a}
-.wb-ep-input{font:inherit;font-size:13px;color:#1f2328;background:#ffffff;border:1px solid #d0d7de;
+.wb-ep-modal-title{font-size:15px;font-weight:600;color:var(--dsw-derive-fg,#1f2328)}
+.wb-ep-field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dsw-derive-muted,#57606a)}
+.wb-ep-input{font:inherit;font-size:13px;color:var(--dsw-derive-fg,#1f2328);background:var(--dsw-derive-canvas,#ffffff);border:1px solid var(--dsw-derive-border,#d0d7de);
   border-radius:6px;padding:6px 10px;box-sizing:border-box;width:100%}
-.wb-ep-input:focus{outline:none;border-color:#0969da;box-shadow:0 0 0 3px rgba(9,105,218,.15)}
-.wb-ep-readonly{font-size:13px;color:#1f2328;background:#f6f8fa;border:1px solid #e8ebef;
+.wb-ep-input:focus{outline:none;border-color:var(--dsw-derive-accent,#0969da);box-shadow:0 0 0 3px rgba(9,105,218,.15)}
+.wb-ep-readonly{font-size:13px;color:var(--dsw-derive-fg,#1f2328);background:var(--dsw-derive-surface,#f6f8fa);border:1px solid var(--dsw-derive-surface-2,#e8ebef);
   border-radius:6px;padding:6px 10px}
 .wb-ep-ops{display:flex;gap:8px;align-items:center}
 /* 所属立项徽标（wb-epic-chip：列表行/详情头部复用；灰=未归档，蓝=有归属可点） */
 .wb-epic-chip{display:inline-block;font-size:11px;border-radius:6px;padding:1px 7px;flex:none;
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap;vertical-align:1px}
-.wb-epic-chip[data-archived=true]{color:#8c959f;background:#f6f8fa;border:1px solid #e8ebef;font-family:inherit}
-.wb-epic-chip[data-archived=false]{color:#0550ae;background:#ddf4ff;border:1px solid #96c8f2;cursor:pointer}
-.wb-epic-chip[data-archived=false]:hover{background:#bfe3ff;border-color:#0969da}
+.wb-epic-chip[data-archived=true]{color:var(--dsw-derive-muted,#8c959f);background:var(--dsw-derive-surface,#f6f8fa);border:1px solid var(--dsw-derive-surface-2,#e8ebef);font-family:inherit}
+.wb-epic-chip[data-archived=false]{color:var(--dsw-derive-accent-deep,#0550ae);background:var(--dsw-derive-accent-bg,#ddf4ff);border:1px solid var(--dsw-derive-accent-border,#96c8f2);cursor:pointer}
+.wb-epic-chip[data-archived=false]:hover{background:var(--dsw-derive-accent-border,#bfe3ff);border-color:var(--dsw-derive-accent,#0969da)}
 `
 
 /* ---------------------------------------------------------------- 数据通道 */
@@ -754,7 +755,7 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
                 onChange={e => setCreateAllowEmpty(e.target.checked)} />
               <span>
                 本票无文件改动（allow_empty_write_set）——勾选后建票放行，meta 记 no_file_changes；
-                <strong style={{ color: '#9a6700' }}>仅限确无文件改动的票，有改动请填写集</strong>
+                <strong style={{ color: 'var(--dsw-derive-warn,#9a6700)' }}>仅限确无文件改动的票，有改动请填写集</strong>
               </span>
             </label>
             {createMsg !== '' && <div className="wb-ep-err">{createMsg}</div>}

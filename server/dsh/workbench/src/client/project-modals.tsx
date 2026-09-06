@@ -31,41 +31,42 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { ProjectEntryLike } from './project-modals-types.ts'
+import { DERIVE_TOKENS_CSS } from './theme';
 
 /* ---------------------------------------------------------------- 样式 */
 
-const PMOD_CSS = `
+const PMOD_CSS = `${DERIVE_TOKENS_CSS}
 .wb-pmod-overlay { position:fixed; inset:0; background:rgba(31,35,40,.35); z-index:200;
   display:flex; align-items:flex-start; justify-content:center; padding-top:8vh; }
-.wb-pmod-panel { background:#fff; color:#1f2328; border:1px solid #d0d7de; border-radius:10px;
+.wb-pmod-panel { background:var(--dsw-derive-canvas,#fff); color:var(--dsw-derive-fg,#1f2328); border:1px solid var(--dsw-derive-border,#d0d7de); border-radius:10px;
   width:520px; max-width:94vw; max-height:80vh; overflow-y:auto; box-shadow:0 8px 24px rgba(31,35,40,.18);
   padding:18px 20px; font-size:13px; }
 .wb-pmod-panel h3 { margin:0 0 4px; font-size:15px; display:flex; align-items:baseline; gap:10px; }
-.wb-pmod-sub { color:#57606a; font-size:12px; margin:0 0 14px; }
-.wb-pmod-x { margin-left:auto; cursor:pointer; color:#57606a; background:none; border:none; font-size:14px; }
+.wb-pmod-sub { color:var(--dsw-derive-muted,#57606a); font-size:12px; margin:0 0 14px; }
+.wb-pmod-x { margin-left:auto; cursor:pointer; color:var(--dsw-derive-muted,#57606a); background:none; border:none; font-size:14px; }
 .wb-pmod-field { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
-.wb-pmod-field label { width:76px; color:#57606a; text-align:right; flex-shrink:0; }
-.wb-pmod-field input { font:inherit; font-size:13px; flex:1; border:1px solid #d0d7de; border-radius:6px; padding:6px 8px; }
+.wb-pmod-field label { width:76px; color:var(--dsw-derive-muted,#57606a); text-align:right; flex-shrink:0; }
+.wb-pmod-field input { font:inherit; font-size:13px; flex:1; border:1px solid var(--dsw-derive-border,#d0d7de); border-radius:6px; padding:6px 8px; }
 .wb-pmod-mono { font-family:ui-monospace,Menlo,monospace; font-size:11.5px; }
-.wb-pmod-btn { font:inherit; font-size:13px; border:1px solid #d0d7de; background:#fff; color:#1f2328;
+.wb-pmod-btn { font:inherit; font-size:13px; border:1px solid var(--dsw-derive-border,#d0d7de); background:var(--dsw-derive-canvas,#fff); color:var(--dsw-derive-fg,#1f2328);
   border-radius:6px; padding:5px 12px; cursor:pointer; }
-.wb-pmod-btn:hover { background:#f6f8fa; }
+.wb-pmod-btn:hover { background:var(--dsw-derive-surface,#f6f8fa); }
 .wb-pmod-btn:disabled { opacity:.45; cursor:not-allowed; }
-.wb-pmod-btn-blue { border-color:#96c8f2; color:#0969da; background:#ddf4ff; }
-.wb-pmod-btn-danger { border-color:#ff9b9b; color:#cf222e; background:#ffebe9; }
-.wb-pmod-err { background:#ffebe9; border:1px solid #ff9b9b; color:#cf222e; border-radius:6px;
+.wb-pmod-btn-blue { border-color:var(--dsw-derive-accent-border,#96c8f2); color:var(--dsw-derive-accent,#0969da); background:var(--dsw-derive-accent-bg,#ddf4ff); }
+.wb-pmod-btn-danger { border-color:var(--dsw-derive-danger-border,#ff9b9b); color:var(--dsw-derive-danger,#cf222e); background:var(--dsw-derive-danger-bg,#ffebe9); }
+.wb-pmod-err { background:var(--dsw-derive-danger-bg,#ffebe9); border:1px solid var(--dsw-derive-danger-border,#ff9b9b); color:var(--dsw-derive-danger,#cf222e); border-radius:6px;
   padding:7px 10px; font-size:12.5px; margin:8px 0; white-space:pre-wrap; }
-.wb-pmod-ok { background:#dafbe1; border:1px solid #7dd9a0; color:#1a7f37; border-radius:6px;
+.wb-pmod-ok { background:var(--dsw-derive-success-bg,#dafbe1); border:1px solid var(--dsw-derive-success-border,#7dd9a0); color:var(--dsw-derive-success,#1a7f37); border-radius:6px;
   padding:7px 10px; font-size:12.5px; margin:8px 0; }
-.wb-pmod-warn { background:#fff8c5; border:1px solid #d4a72c; color:#7d4e00; border-radius:6px;
+.wb-pmod-warn { background:var(--dsw-derive-warn-bg,#fff8c5); border:1px solid var(--dsw-derive-warn-border,#d4a72c); color:var(--dsw-derive-warn-deep,#7d4e00); border-radius:6px;
   padding:7px 10px; font-size:12.5px; margin:8px 0; }
 .wb-pmod-grid { display:grid; grid-template-columns:76px 1fr; row-gap:7px; margin-bottom:6px; }
-.wb-pmod-grid .k { color:#57606a; text-align:right; padding-right:10px; }
+.wb-pmod-grid .k { color:var(--dsw-derive-muted,#57606a); text-align:right; padding-right:10px; }
 .wb-pmod-chip { display:inline-block; font-size:11px; border-radius:10px; padding:1px 8px; margin:1px 4px 1px 0;
-  border:1px solid #d0d7de; color:#57606a; background:#f6f8fa; white-space:nowrap; }
-.wb-pmod-danger { border-top:1px solid #e8ebef; margin-top:14px; padding-top:12px; }
+  border:1px solid var(--dsw-derive-border,#d0d7de); color:var(--dsw-derive-muted,#57606a); background:var(--dsw-derive-surface,#f6f8fa); white-space:nowrap; }
+.wb-pmod-danger { border-top:1px solid var(--dsw-derive-surface-2,#e8ebef); margin-top:14px; padding-top:12px; }
 .wb-pmod-check { font-size:13px; line-height:2; }
-.wb-pmod-dim { color:#57606a; font-size:12px; }
+.wb-pmod-dim { color:var(--dsw-derive-muted,#57606a); font-size:12px; }
 `
 
 /* ---------------------------------------------------------------- 公共壳 */
