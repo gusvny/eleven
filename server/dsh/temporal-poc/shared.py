@@ -1164,6 +1164,17 @@ class ReworkRequest:
 
 
 @dataclass
+class HostRulingRequest:
+    """host_ruling signal 载荷（KI-053，t260905-10 面①）：宿主人工意见的正规注入
+    通道，任何状态可发（含 blocked）。who/note 均必填非空——空/纯空白由 workflow
+    侧拒收进 refused；note 超 HOST_RULING_NOTE_INPUT_LIMIT 同拒（intake 闸，
+    不让超大载荷进 Temporal 事件历史）。"""
+
+    who: str
+    note: str
+
+
+@dataclass
 class AgentStageArgs:
     """agent 段 activity 入参（activity 名=stage 名；实现通用，按 stage 派活）。"""
 
@@ -1863,6 +1874,19 @@ def cap_previous_context(text: Any) -> str:
     return "\n".join(out)
 
 
+# ---- KI-053（t260905-10 面①）宿主裁决注入面常量 ----
+# prompt 只消费末 N 条（旧→新排序，最新贴着「现在」）；note 超 LIMIT 截断加
+# _CAP_TRUNC_MARK 标记（不静默切断——review R2 取舍①：agent 不得误以为读到完整
+# 指令）；被截全文与掉出 prompt 的旧裁决兜底在 meta['host_rulings']（ticket query
+# snapshot 可读）+ 注入留痕事件历史（R2 取舍②）；prompt 预算硬上界
+# ≈5×(1200+行头~80)+小节框架 ≈6.6KB，不随裁决数线性膨胀（R2 取舍③）。
+HOST_RULING_PROMPT_MAX = 5
+HOST_RULING_NOTE_LIMIT = 1200
+# 裁决 note 的 intake 上限（dev_lane signal 入参闸，review D2）：超限拒收进 refused
+# （文案点名），不进 Temporal 事件历史——与 cap_previous_context 的 HARD_LIMIT 同值族。
+HOST_RULING_NOTE_INPUT_LIMIT = 20000
+
+
 def build_stage_prompt(ticket_id: str, meta: Dict[str, Any], stage: Stage,
                        handoffs: List[Dict[str, Any]], result_file: str,
                        gen: int, previous_context: str = "") -> str:
@@ -1902,21 +1926,38 @@ def build_stage_prompt(ticket_id: str, meta: Dict[str, Any], stage: Stage,
     acceptance_items = list(stage.acceptance) + list(STAGE_ACCEPTANCE_EXTRA.get(stage.id) or ())
     if acceptance_items:
         lines.append("4. 本段验收清单（结算自检用）：%s" % "；".join(acceptance_items))
+    sec = 5
+    # KI-053（t260905-10 面①）：宿主裁决注入面——人工意见的正规通道（blocked 态可
+    # 注入，注入留痕事件历史）。arbitrate/acceptance 等机械段 prompt 同样消费，
+    # 人工意见不再只能借 create_plan/implement 的 rework 备注转达。无裁决时本节
+    # 不出现，后续段号维持既有 5/6/7 排布（零回归）。
+    rulings = [r for r in (meta.get("host_rulings") or []) if isinstance(r, dict)]
+    if rulings:
+        lines.append("%d. 宿主裁决注入（人工意见正规通道，按此校准执行方向；旧→新排序，"
+                     "末尾最新；完整清单与被截全文见工单 meta.host_rulings）：" % sec)
+        sec += 1
+        for r in rulings[-HOST_RULING_PROMPT_MAX:]:
+            note = str(r.get("note") or "")
+            if len(note) > HOST_RULING_NOTE_LIMIT:
+                note = note[:HOST_RULING_NOTE_LIMIT] + _CAP_TRUNC_MARK
+            lines.append("   - [%s %s] %s" % (str(r.get("ts") or "?"),
+                                              str(r.get("who") or "?"), note))
     prev = [h for h in (handoffs or []) if isinstance(h, dict)]
     if prev:
-        lines.append("5. 前段交接（倒序，最近在前；正文=前段报告，含怎么验证的/遗留风险）：")
+        lines.append("%d. 前段交接（倒序，最近在前；正文=前段报告，含怎么验证的/遗留风险）：" % sec)
+        sec += 1
         for h in reversed(prev[-3:]):
             body = str(h.get("report") or "") or str(h.get("summary") or "")
             lines.append("   - [%s] %s" % (h.get("stage", "?"), body[:1200]))
     # 阶段重跑上下文继承：调用方只在本段重跑时才传非空 previous_context，
     # 非空即注入（不拿 gen 当守卫——dev_lane 的 gen 是 0 基，gen>1 会漏掉第一次打回）
-    n = 6
+    n = sec
     prev_ctx_text = cap_previous_context(previous_context)
     if prev_ctx_text:
-        lines.append("6. 上次运行上下文（阶段重跑上下文继承：同 role 再次调用时 prompt 注入上次产出+打回原因）：")
+        lines.append("%d. 上次运行上下文（阶段重跑上下文继承：同 role 再次调用时 prompt 注入上次产出+打回原因）：" % n)
         for ln in prev_ctx_text.splitlines():
             lines.append("   " + ln)
-        n = 7
+        n += 1
     lines.append("%d. 工作目录：%s（%s）——已由 workflow 第一个 activity（prepare_workspace）创建/复用，"
                  "**直接进入干活，勿自行 git worktree add / mkdir**；一切读写在此空间内；"
                  % (n, ws["path"], ws["type"]))

@@ -47,6 +47,7 @@ from shared import (
     TARGET_HOST,
     TASK_QUEUE,
     TICKET_QUEUE_PREFIX,
+    HostRulingRequest,
     ReworkRequest,
     Signature,
     TicketInput,
@@ -353,6 +354,18 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
         return _ok({"ticket_id": tid, "signal": "rework",
                     "target_stage": req.target_stage, "delivered": True})
 
+    if op == "ruling":
+        # KI-053（t260905-10 面①）：宿主裁决注入——人工意见正规通道，任何状态可发
+        # （含 blocked）。发完裁决不自动唤醒 blocked：重跑仍发 retry_qc，下一段
+        # prompt 即见裁决（build_stage_prompt 注入面）。
+        note = str(args.get("note") or "")
+        if not note.strip():
+            return _err("ruling 需要 note（裁决内容，非空）")
+        req = HostRulingRequest(who=str(args.get("who") or "op-local"), note=note)
+        await handle.signal("host_ruling", req)
+        return _ok({"ticket_id": tid, "signal": "host_ruling", "who": req.who,
+                    "delivered": True})
+
     if op in ("advance", "accept", "dispatch-next"):
         return _err("v2 引擎（模版即代码）已取消 %s：workflow 过门自动推进，"
                     "验收=事后看产物（query 快照的 results/handoffs）；"
@@ -367,7 +380,8 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
                                    args.get("book_path")])
         return _ok(r)
 
-    return _err("未知工单操作 %r（可用：rework=打回 / update=更新 / sign=签字 / query=查询）" % op)
+    return _err("未知工单操作 %r（可用：rework=打回 / ruling=宿主裁决注入 / "
+                "update=更新 / sign=签字 / query=查询）" % op)
 
 
 # ---------- M11 v2：ticket-start / ticket-list / ticket-query ----------
@@ -1006,9 +1020,11 @@ USAGE = (
     "安全红线：工具面只暴露上述子命令，无 set-stage / force_stage / 改状态入口。\n"
     "signal 子命令已退役（260904 宿主令）：调用一律返回结构化退役报错（sign/retry_qc\n"
     "  只服务 v1 content-pipeline 人门段，该模板已删）；签字走 ticket op=sign。\n"
-    "ticket 子命令（步2）：op=advance|accept|rework|update|dispatch-next|sign|query。\n"
+    "ticket 子命令（步2）：op=rework|ruling|update|sign|query。\n"
     "  v2 引擎（M11 模版即代码）：advance/accept/dispatch-next 已取消（自动推进），\n"
-    "  rework=signal 回目标段重跑，sign=人工审批签字，update=状态维护，query 只读。\n"
+    "  rework=signal 回目标段重跑，ruling=宿主裁决注入（人工意见正规通道，任何状态\n"
+    "  可发，blocked 态注入后配 retry_qc 重跑下段即见），sign=人工审批签字，\n"
+    "  update=状态维护，query 只读。\n"
     "ticket-start 创建 v2 工单（模板 id→workflow 类）；ticket-list/ticket-query=工单台数据源。\n"
     "ticket-prune 清理 closed 且已归档工单的 workflow 历史（Temporal 回归运行态，M1-3；\n"
     "  默认 --dry-run 零删除，--execute 真删；未归档/legacy 未确认双拒删，fail-closed）。\n"

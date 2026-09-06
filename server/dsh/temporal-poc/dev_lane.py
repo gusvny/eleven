@@ -82,6 +82,8 @@ with workflow.unsafe.imports_passed_through():
         ConflictSettleResult,
         EpicNextPrepArgs,
         GateResult,
+        HOST_RULING_NOTE_INPUT_LIMIT,
+        HostRulingRequest,
         HumanGatePrep,
         IntegrationRunArgs,
         IntegrationRunResult,
@@ -1506,6 +1508,14 @@ class DevLaneWorkflow:
                         await self._blocked("arbitrate",
                                             "仲裁结论 %d 次缺 verdict= 标记（契约：summary 含 "
                                             "verdict=pass|tests-fault|code-fault）" % arb_format_rounds)
+                        # 重跑本步（t260905-10 修复）：唤醒即单边重置——arb_res 作废、
+                        # arb_done 回 False，主循环 arb_acc_parallel 会真重跑 arbitrate
+                        # 边（prompt 重建：host_ruling 注入的裁决此轮可见）。不重置则
+                        # join 吃 memoized 陈旧 arb_res 立即再 blocked、arbitrate 永不
+                        # 重 spawn——retry_qc「重跑本步」失效，正是 260906 19 号闸
+                        # 「仲裁超限」抢救卡死的引擎侧形态。走查结果留内存不重跑。
+                        arb_done = False
+                        arb_res = None
                         continue
                     # 格式纠正只重跑 arbitrate 边（走查成本高且与格式无关，结果留内存）；
                     # 该边 settle=True：纠正前可能有测试集改动需落盘。
@@ -1930,6 +1940,33 @@ class DevLaneWorkflow:
             {"at": self._now_iso(), "stage": str(self.meta.get("stage") or ""),
              "state": "retry-requested",
              "reason": "%s 请求重跑（第 %d 次）" % (who, self._retry_token)})
+
+    @workflow.signal
+    def host_ruling(self, req: HostRulingRequest) -> None:
+        """宿主裁决注入（KI-053，t260905-10 面①）：人工意见的正规通道，任何状态
+        可发（含 blocked）。合法裁决 append 进 meta['host_rulings']（build_stage_prompt
+        的注入消费面）+ _log 留痕事件历史；不自动唤醒 blocked——宿主发完裁决再发
+        retry_qc，下一段 prompt 即见。拒收三态（都进 refused，snapshot 可观测）：
+        who/note 空·纯空白、note 超 HOST_RULING_NOTE_INPUT_LIMIT（intake 闸，不让
+        超大载荷进 Temporal 事件历史）。"""
+        who = str(req.who or "").strip()
+        note = str(req.note or "").strip()
+        if not who or not note:
+            self.refused.append({"who": who, "want": "host_ruling",
+                                 "why": "who/note 均必填非空（空/纯空白拒收）"})
+            return
+        if len(note) > HOST_RULING_NOTE_INPUT_LIMIT:
+            self.refused.append({"who": who, "want": "host_ruling",
+                                 "why": "note 超限（%d > %d 字符），不进事件历史——"
+                                        "拆条后重发" % (len(note), HOST_RULING_NOTE_INPUT_LIMIT)})
+            return
+        self.meta.setdefault("host_rulings", []).append(
+            {"ts": self._now_iso(), "who": who, "note": note})
+        # _log 留痕只进 note 头部（300 字截断+标记）——全文真源在 meta['host_rulings']，
+        # 日志不双份扛大载荷（与 intake 闸同一族取舍）。
+        log_note = note if len(note) <= 300 else note[:300] + "…（截断，全文见 host_rulings）"
+        self._log("宿主裁决注入（%s）：%s" % (who, log_note))
+        self._touch()
 
     # ---------- update：状态维护（与 base.py 同名同载荷，client.py 通吃） ----------
     @workflow.update

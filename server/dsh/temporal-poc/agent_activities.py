@@ -116,26 +116,67 @@ def _src_dsh_home() -> Path:
     return Path.home() / ".dsh"
 
 
+def _session_jsonl_torn(path: Path) -> bool:
+    """会话档逐行试析（t260905-10 面②）：`zstd -dc` 流式解压读（不载全量），逐行
+    json.loads——任一行非合法 JSON（含解压中途炸：尾行必被截断成非法 JSON）=
+    帧好内撕裂，True；全部行合法（含空档、无尾换行的完整行）=健康，False。
+    空白行跳过不判（防误隔离——反向事故比漏检更常态化；合法 JSONL 不含裸空行，
+    跳过只放宽不收紧）。"""
+    proc = subprocess.Popen(["zstd", "-dc", str(path)],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    out = proc.stdout
+    try:
+        for raw in out:  # type: ignore[union-attr]
+            line = raw.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            try:
+                json.loads(line)
+            except ValueError:
+                return True
+        return False
+    finally:
+        # 全终态回收：正常读尽/中途撕裂/读侧异常各路径都关 fd、杀残留 zstd、wait 收尸
+        if out is not None:
+            out.close()
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+
+
+def _quarantine_session_file(local_dsh: Path, f: Path, reason: str) -> None:
+    """坏会话档挪 <cwd>/.suyou/quarantine/ 留档（挪不删），reason 进告警文案。
+    挪不动静默留着——同 id create 会再撞，但插件侧兜底已不致死（既有口径不变）。"""
+    qdir = local_dsh.parent / ".suyou" / "quarantine"
+    try:
+        qdir.mkdir(parents=True, exist_ok=True)
+        dst = qdir / ("torn-%s-%s" % (f.parent.name, f.name))
+        shutil.move(str(f), str(dst))
+        activity.logger.warning("[sessions] 撕裂会话文件已隔离（%s）：%s", reason, dst)
+    except OSError:
+        pass
+
+
 def _quarantine_torn_sessions(local_dsh: Path) -> None:
     """spawn 前检疫撕裂的会话文件（t260829-06 两次实测：agent 被杀于写入中会留
     zstd 撕裂帧，resume 与同 id create 都撞 corrupt 死，整步卡死）。坏文件挪
     <cwd>/.suyou/quarantine/ 留档，让「同 id 新建」回落走得通（上下文丢但流程活）。
-    zstd -t 只测帧完整性，不解压不看内容。"""
+
+    两层检疫（t260905-10 面②）：
+    1. `zstd -t` 测帧完整性——帧裂即隔离（t260829-06 旧口径）；
+    2. 帧好再逐行试析（_session_jsonl_torn）——**帧好 ≠ 内容好**：JSONL record
+       被截断（t260906-05 两次卡死同型）zstd -t 测不出，解压后撞 json 解析死。
+       坏档走同一条隔离路径（_quarantine_session_file），只换 reason 文案。"""
     sessions = local_dsh / "sessions"
     if not sessions.is_dir():
         return
     for f in sessions.rglob("session.jsonl.zstd"):
         r = subprocess.run(["zstd", "-t", str(f)], capture_output=True)
         if r.returncode == 0:
+            if _session_jsonl_torn(f):
+                _quarantine_session_file(local_dsh, f, "torn-jsonl")
             continue
-        qdir = local_dsh.parent / ".suyou" / "quarantine"
-        try:
-            qdir.mkdir(parents=True, exist_ok=True)
-            dst = qdir / ("torn-%s-%s" % (f.parent.name, f.name))
-            shutil.move(str(f), str(dst))
-            activity.logger.warning("[sessions] 撕裂会话文件已隔离：%s", dst)
-        except OSError:
-            pass  # 挪不动就留着——同 id create 会再撞，但插件侧兜底已不致死
+        _quarantine_session_file(local_dsh, f, "torn-frame")
 
 
 # 项目 key 白名单（sandbar M1-2 凭据出仓）：与 server/dsh/suyou-projects.ts 的
@@ -1336,11 +1377,42 @@ def _is_worktree_of(p: Path, repo: Optional[Path] = None) -> bool:
     return False
 
 
+def _check_git_identity(repo: Path) -> Optional[str]:
+    """落盘身份守卫（t260905-10 面③）：泳道 settle 的 commit 发生在泳道 worktree
+    （_settle_worktree_lane `git -C 泳道 commit`），git 身份真源=宿主 ~/.gitconfig
+    （260906 该文件消失致 worker-02/03/05 三轨 settle 全 FAILED——隐性依赖事故时刻
+    才现形）。探针锚=**归属仓根**：`git -C 仓根 config` 覆盖 system/global/repo 三层
+    ——repo 级 config 与全局身份对未来的泳道 worktree 同源生效（worktree 共享主仓
+    config），且 created 路径泳道尚未建目录时仓根探针依然可用（docker 台实测：
+    -C 不存在的泳道会因目录缺失误报身份缺失）。返回 None=身份在位；否则红字文案
+    （点名缺哪项+处置）。"""
+    missing: List[str] = []
+    for key in ("user.name", "user.email"):
+        try:
+            r = subprocess.run(["git", "-C", str(repo), "config", key],
+                               capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return ("git 身份探针执行失败（%s: %s）——开工前点名：连 git 都起不来，"
+                    "泳道 settle 代落盘 commit 必炸，先修环境再 retry_qc。" % (type(e).__name__, e))
+        if r.returncode != 0 or not (r.stdout or "").strip():
+            missing.append(key)
+    if not missing:
+        return None
+    return ("git 身份缺失（%s）——开工前点名，不落盘才炸：泳道 settle 代落盘 commit 依赖 "
+            "git 身份（真源=宿主 ~/.gitconfig，260906 曾因该文件消失致三轨 settle 全 FAILED）。"
+            "处置：补宿主 ~/.gitconfig 的 user.name/user.email，或在本仓 "
+            "`git config user.name <名> && git config user.email <邮箱>` 补 repo 级身份"
+            "（worktree 与主仓共享 config），然后 retry_qc 重跑本步。" % "、".join(missing))
+
+
 # 泳道依赖目录 bootstrap 清单（t260824-12 merge_check 实测踩中）：worktree 不继承
 # gitignored 环境目录，verify_lane「依赖在位」（app/node_modules/.bin/tsc）必红。
-# 只列泳道内确定性需要的；temporal-poc/.venv 不在列——工单 worker 恒由主仓拉起，
-# 泳道内没有消费方（260825 拍板）。
-LANE_DEP_SYMLINKS = ("app/node_modules",)
+# t260905-10 追加 server/dsh/temporal-poc/.venv：verify_lane/replay_check 的解释器
+# 回落链第一候选就是泳道内 POC/.venv/bin/python（replay_check._candidate_pythons），
+# 260906 19 号闸实测泳道内确实消费（手补软链才绿）——260825「泳道无消费方」拍板
+# 被实测推翻作废。既有行为保留：主仓对应目录不存在（全新克隆）时 _ensure_lane_deps
+# 跳过不报错，红字由 verify_lane「依赖在位」给。
+LANE_DEP_SYMLINKS = ("app/node_modules", "server/dsh/temporal-poc/.venv")
 
 
 def _ensure_lane_deps(lane_path: Path) -> str:
@@ -1376,6 +1448,9 @@ async def prepare_workspace(prep: WorkspacePrep) -> WorkspacePrepResult:
       [基点=base_ref]（created）；失败回执 failed（**不抛**——workflow 转 blocked 交人判读）。
     - worktree 建/复用后跑 _ensure_lane_deps：把主仓 gitignored 依赖目录软链进泳道，
       否则 verify_lane「依赖在位」必红（t260824-12 merge_check 实测踩中）。
+    - worktree 分支开工前跑 _check_git_identity（t260905-10 面③）：git 身份缺失
+      即 failed 红字点名——身份缺失=开工前点名，不是落盘 settle 才炸；
+      dir/main 型工作区无 commit，不查。
     """
     ws = prep.workspace
     if not (isinstance(ws, dict) and ws.get("type") in WORKSPACE_TYPES and ws.get("path")):
@@ -1394,6 +1469,15 @@ async def prepare_workspace(prep: WorkspacePrep) -> WorkspacePrepResult:
                                        path=str(p), error="mkdir -p %s 失败: %s" % (p, e))
         return WorkspacePrepResult(ok=True, kind="dir", action="ensured", path=str(p))
     # worktree 泳道
+    # 落盘身份守卫（t260905-10 面③）：created/reused 两路开工前都查——身份可能在
+    # 复用间隔里消失；缺失即 failed 回执（workflow 转 blocked 交人，与 worktree add
+    # 失败同路径）。探针锚=归属仓根 repo（created 路径泳道目录尚未建，-C 泳道会误报；
+    # 仓根的 repo 级/全局/系统三层与未来泳道 worktree 同源）。dir/main 型工作区无
+    # commit，不查（C4 口径）。
+    ident_err = _check_git_identity(repo)
+    if ident_err:
+        return WorkspacePrepResult(ok=False, kind="worktree", action="failed",
+                                   path=str(p), error=ident_err)
     if _is_worktree_of(p, repo):
         return WorkspacePrepResult(ok=True, kind="worktree",
                                    action="reused" + _ensure_lane_deps(p), path=str(p))

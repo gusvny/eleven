@@ -528,6 +528,18 @@ SCENARIOS = [
     ("t260905-09-platform-context-fold-stacked",
      "平台上下文叠台折叠用户旅程（t260905-09，browser 隔离台 3199 拒 3099，工单「怎么算好」原话可执行化）：夹具把平台启动上下文消息×N+工单台 charter 注入×1 叠进同一会话——16 号验收台只测自己注入腿、台面无平台叠加=假绿（宿主实报「还是显示了一堆，只折叠了开头一小部分」）。主断言=恰一个小条（不是 charter 一条+平台又一条，「同一折叠件」原话）+全部候选正文收折（含同气泡双锚去重样本）+点小条整组开/收；负向=中段提及普通消息全程可见零误折（普通用户消息绝不折）；孤儿守卫=夹具气泡移除后小条随摘无幽灵、reload 不复活；console 卫生=零 pageerror（外来节点×React 重渲染崩溃在此现形，证据上报归因不静默）。归因三态：锚真源不在=fail（TDD 信号）、源在而 served bundle 无锚样本=na（未重建/未部署，merge 期自动生效）、行为不符=fail 精确点名。charter 注入腿本身由 t260904-07 journey 守（intent 级不重复，此处只当前置卫兵）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "node integration/t260905-09/sc_platform_context_fold_stacked.mjs", "browser"),
+
+    # ---- t260905-10：三事故引擎免疫面（判读注入通道/会话撕裂检疫/落盘身份依赖）----
+
+    ("t260905-10-host-ruling-injection",
+     "blocked 态宿主裁决注入→arbitrate 下轮 prompt 可见（KI-053 端到端，灰盒 L3，docker 舞台+真工单专属 worker）：SUYOU_AGENT_CMD recorder 桩（spawn 单点全口径覆盖，含 arbitrate 直 spawn 面）把引擎递来的 prompt 原样落账本=mock 端点收到的 messages 等价观测面；桩回执恒缺 verdict= 标记→三次格式纠正 blocked(arbitrate)（引擎既有契约路径）；blocked 态 client op=ruling 注入（只入账不唤醒）+retry_qc 唤醒→arbitrate gen+1 轮 prompt 含裁决文本与裁决人、注入前各轮不带（对照）；全文兜底 meta.host_rulings 与事件历史 log 留痕经 query 可查（{ts,who,note} 形状、ts 留痕）；拒收两态=超大 note intake 闸拒收进 refused 不入账（不进 Temporal 事件历史）+纯空白 note 绕过 client 直发信号层拒收（钉 workflow 侧契约非仅 client 包装）；多条裁决累积全可见且旧→新排序（最新贴着现在）；被测子进程零连生产（审计钩子）。断言面=recorder 账本/快照，不锚 prompt 小节标题文案（实现副本）。实现段落地前红属预期（host_ruling 信号缺席=点名红），arbitrate/merge 期必须绿；与 developer L1（build_stage_prompt 纯函数单测）intent 不同面：本条守 signal→meta→prompt 全链真 Temporal 编排行为",
+     "python3 integration/t260905-10/sc_host_ruling_injection.py", "exclusive"),
+    ("t260905-10-torn-session-quarantine",
+     "帧好内撕裂会话检疫隔离+同 id 新建走得通（t260905-10 面②，05 号 260906 两次卡死同型，灰盒 L3）：zstd 帧完整但 JSONL record 中截断→spawn 前检疫挪隔离区留档；好帧内非 JSON 行同判；健康对照组=多行合法 JSONL×多帧拼接（真实形态）不检疫（防「见档就隔离」反向事故）且同批健康会话不连坐；同 id 原路径重写合法档再检疫不动（恢复旅程）；挪不动（隔离路径不可建）不抛坏档留原位（既有兜底）；空文件/二进制既有 zstd -t 路径回归；裸空行容忍不判撕裂（合法 JSONL 容忍面，防误隔离）。断言面=文件系统结果，零网络零 docker。实现段落地前红属预期（逐行试析缺席=好帧内撕裂不挪=红），arbitrate/merge 期必须绿；与 developer L1（单函数腿）intent 不同面：本条守会话档族整批判定与恢复旅程",
+     "python3 integration/t260905-10/sc_torn_session_quarantine.py", "ro"),
+    ("t260905-10-lane-identity-guard",
+     "泳道落盘身份依赖守卫（t260905-10 面③，260906 宿主 ~/.gitconfig 消失三轨 settle 全 FAILED，灰盒 L3）：git 身份全缺→prepare_workspace 开工前 ok=False/failed 红字点名 user.name/user.email（半缺腿钉死点名精确性，探针 GIT_CONFIG_NOSYSTEM+GLOBAL 夹具防系统级假红）；身份在位复用不受扰；repo 级 config 补救放行（探针锚泳道 worktree=共享主仓 config）；dir 型工作区无 commit 不查；created 路径缺失失败且泳道不落半成品（fail-fast 在 worktree add 之前）；LANE_DEP_SYMLINKS 含 temporal-poc/.venv：泳道自动软链解析到主仓、幂等不重复（260825「泳道无消费方」拍板被 260906 19 号闸实测推翻的陪伴断言）；点名断言解析「git 身份缺失（…）」括注为集合（处置句恒提两键名，子串断言吹不了精确性）。实现段落地前红属预期（守卫缺席=缺失腿照旧放行=红），arbitrate/merge 期必须绿；与 developer L1 intent 不同面：本条守 prepare_workspace 两分支×身份矩阵×deps 软链的回执契约",
+     "python3 integration/t260905-10/sc_lane_identity_guard.py", "ro"),
 ]
 
 CMD_TIMEOUT = 900
