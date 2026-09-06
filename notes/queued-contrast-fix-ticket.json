@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260905-08",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "工单列表状态色对比度修复（深色主题下字看不见）",
+  "user_request": "做什么：17 号列表页的行卡状态色（waiting=#fff8c5 / blocked=#ffebe9）是写死的浅色底，文字颜色却跟主题 token 走——深色主题下浅字撞浅底，看不清（宿主 260906 21:5X 实报「文字和背景色相同或接近」）。修成主题自适应：状态色调用 color-mix/半透明叠主题底色，深浅主题都成立；epic 徽标色同查。\n为什么：在场断言≠可读——场景只点了 DOM 在场没查对比度，17 号的场景族全绿但人眼不可用。这是测试面盲区实锤（同族=KI-052 真控制台盲区）。\n怎么算好：深浅两主题下所有行卡文字对比度达标（WCAG AA 4.5:1 或至少可分辨断言）；新增对比度看守场景（computed style 实算 color vs background，双主题跑）；既有 17 号场景零回归。",
+  "spec": "依据=宿主 260906 实报＋ticket-row-card.tsx L91/L96/L113 写死色现场。范围=server/dsh/workbench/src/client/（行卡+状态色系统）＋integration/（新场景族 t260905-08：双主题对比度断言）。验收：①深色主题下 waiting/blocked 行卡字清晰（对比度断言数值化）；②浅色主题零回归；③对比度看守场景进族并绿；④verify_lane code 绿+merge 预演。红线：不改 17 号信息架构与锚点（只动色与派生）。",
+  "write_set": ["server/dsh/workbench/", "integration/"],
+  "deliverables": "主题自适应状态色+双主题对比度看守场景"
+}
