@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260908-02",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "t260907-12 收尾：TicketInput.workspace 载荷形状补 repo_worktrees（list）——混合形态工单启动解码 TypeError",
+  "user_request": "做什么：dengzhufpv 实案（被取消的 t260907-13，宿主 260908 晨转报）：混合形态（根仓+子仓）开票时 derive 产出 workspace 含 repo_worktrees（list[dict]），而 shared.py TicketInput.workspace 声明 Optional[Dict[str,str]]（约 L1487），workflow 启动 dataclass 解码 TypeError 实锤（worker-t260907-13.log：Failed converting field workspace）。修法=①payload 形状升级：workspace 类型放宽或 repo_worktrees 提为 TicketInput 独立字段（dataclass + Temporal payload 编解码两侧同步，优先独立字段——形状显式）；②derive/build_repo_worktrees 对接；③单测=混合形态开票→payload 编解码往返→workflow 启动成功；④既有单仓/纯容器形态回归零变化。\n来源=dengzhufpv T2 阻塞（他们 blocked 收工等这张）。\n优先级=高（外部项目停摆等它）。",
+  "spec": "范围=server/dsh/temporal-poc/（shared/client）＋integration/（混合形态启动场景）。验收：①混合形态夹具开票启动成功（复现 t260907-13 场景）；②单仓/纯容器场景零回归；③dengzhufpv 侧重开 t260907-13 同票面成功（宿主配合腿）。",
+  "write_set": ["server/dsh/temporal-poc/", "integration/"],
+  "deliverables": "payload 形状收尾＋混合形态启动场景＋dengzhufpv 解堵"
+}
