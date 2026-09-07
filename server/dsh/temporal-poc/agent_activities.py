@@ -2,7 +2,7 @@
 
 架构转向②：一个 stage 一个 activity——
   - agent 段：activity 名=stage 名（develop/process/review/regress…），实现通用
-    `_run_agent_stage_impl`：spawn headless agent 进程（`dsh --profile suyou-headless
+    `_run_agent_stage_impl`：spawn headless agent 进程（`dsh --profile sandbar-headless
     "<派活指令>"`，工作目录=工单工作空间），轮询工作空间结果文件 + activity.heartbeat()。
     **幂等**：结果文件（.suyou/stage_<段>_gen<N>.json）已存在则直接读文件返回——
     Temporal 活动重试/ worker 重启后重跑安全；rework 重跑靠 gen+1 换新文件（真重跑）。
@@ -28,7 +28,7 @@ worker 代落盘（260824，t260824-01/-02 两连踩后的确定性收口）：h
 工作区改动收成一个 commit），merge_check 查的是代落盘后的真状态。
 
 自测/演示：`SUYOU_AGENT_STUB=1` 时 activity 自写结果文件即返回（不起 agent 进程）。
-派活命令可用 `SUYOU_AGENT_CMD` 覆盖（shlex 切分，缺省 `dsh --profile suyou-headless`）。
+派活命令可用 `SUYOU_AGENT_CMD` 覆盖（shlex 切分，缺省 `dsh --profile sandbar-headless`）。
 """
 
 from __future__ import annotations
@@ -103,7 +103,7 @@ from shared import (
 
 POLL_SEC = 5
 INTEG_CMD_TIMEOUT_SEC = int(os.environ.get("SUYOU_INTEG_CMD_TIMEOUT_SEC") or 900)
-DSH_CMD = shlex.split(os.environ.get("SUYOU_AGENT_CMD") or "dsh --profile suyou-headless")
+DSH_CMD = shlex.split(os.environ.get("SUYOU_AGENT_CMD") or "dsh --profile sandbar-headless")
 
 
 def _src_dsh_home() -> Path:
@@ -469,14 +469,14 @@ def _pin_default_model(dst_dsh: Path, route: Dict[str, str]) -> None:
 
 
 def _copy_profile(dst_dsh: Path) -> None:
-    """把 suyou-headless profile 软链拷进工作空间本地 .dsh（沙箱隔离）。"""
-    src = _src_dsh_home() / "profiles" / "suyou-headless"
+    """把 sandbar-headless profile 软链拷进工作空间本地 .dsh（沙箱隔离）。"""
+    src = _src_dsh_home() / "profiles" / "sandbar-headless"
     if not src.exists():
         return  # 无 profile 可拷——headless 用 dsh 内置兜底
     dst = dst_dsh / "profiles"
     dst.mkdir(parents=True, exist_ok=True)
-    if not (dst / "suyou-headless").exists():
-        shutil.copytree(str(src), str(dst / "suyou-headless"), symlinks=True)
+    if not (dst / "sandbar-headless").exists():
+        shutil.copytree(str(src), str(dst / "sandbar-headless"), symlinks=True)
 
 # 全部 agent 段的 stage id（activity 名=stage 名；纯门段 machine-qc 与
 # 人门段 approve/final-review/merge 不在此列）。
