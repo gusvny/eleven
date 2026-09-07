@@ -48663,7 +48663,7 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-card[data-state=waiting]{background:var(--dsw-derive-warn-bg,#fff8c5)}
 .wb-card[data-state=blocked]{background:var(--dsw-derive-danger-bg,#ffebe9)}
 .wb-card[data-active=true]{border-color:var(--dsw-derive-accent,#0969da);box-shadow:inset 0 0 0 1px var(--dsw-derive-accent,#0969da)}
-.wb-card[data-state=done]{opacity:.72}
+.wb-card[data-state=done]{color:var(--dsw-derive-muted,#57606a)}
 .wb-card-l1{display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 320px}
 .wb-card-dot{width:9px;height:9px;flex:none;position:relative}
 .wb-card-dot::before{content:'';position:absolute;inset:0;border-radius:50%;background:var(--dsw-derive-muted,#8c959f)}
