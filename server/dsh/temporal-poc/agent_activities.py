@@ -96,6 +96,8 @@ from shared import (
     epic_state_key,
     match_ui_paths,
     model_route_for,
+    rebase_write_set,
+    build_repo_worktrees,
     roles_dir_for_spawn,
     routes_file_for_spawn,
 )
@@ -564,7 +566,7 @@ def _session_kb(cwd: Path) -> int:
 FAKE_GIT_DIRS = (".git-local", ".git-obj-tmp", ".git-tmp", ".git-alt")
 
 
-def _gitdir_is_real(cwd: Path) -> bool:
+def _gitdir_is_real(cwd: Path, repo: Optional[Path] = None) -> bool:
     """worktree 的 gitdir 是否指向主库 .git 之下（真身校验）。
 
     t260824-03 教训：.git gitfile 在泳道目录内、沙箱可写，agent 可以把它改写指向
@@ -577,22 +579,57 @@ def _gitdir_is_real(cwd: Path) -> bool:
         gd = Path(p.stdout.strip()).resolve()
         # 跨项目（t260903-10）：worktree 的真 gitdir 在其所属项目仓 .git 下，
         # 按路径约定自锚定，不恒锚引擎仓（否则跨项目泳道恒误判被"修复"写坏）。
-        return gd.is_relative_to((_lane_repo_root(cwd) / ".git").resolve())
+        return gd.is_relative_to(((repo if repo is not None else _lane_repo_root(cwd)) / ".git").resolve())
     except Exception:
         return False
 
 
-def _restore_gitfile(cwd: Path, ticket_id: str, stage_id: str, gen: int) -> Optional[str]:
+def _registered_gitdir(repo: Path, cwd: Path) -> Optional[Path]:
+    """在 repo 的注册 worktree 表里找反向指针指回 cwd/.git 的注册 gitdir（票B）。
+
+    多仓泳道的树名与仓 basename 无对应关系（注册名可能带去重后缀），不能按
+    `cwd.name` 猜——逐个读 `.git/worktrees/*/gitdir` 反查，指回即真身。找不到
+    返回 None（由调用方出「无法自动修复」）。"""
+    reg_root = repo / ".git" / "worktrees"
+    if not reg_root.is_dir():
+        return None
+    want = (cwd / ".git").resolve()
+    for reg in sorted(reg_root.iterdir()):
+        gd_file = reg / "gitdir"
+        if not gd_file.is_file():
+            continue
+        try:
+            back = Path(gd_file.read_text("utf-8").strip())
+            # 注册 gitdir 文件记的是 <worktree>/.git
+            if back.resolve() == want:
+                return reg
+        except Exception:
+            continue
+    return None
+
+
+def _restore_gitfile(cwd: Path, ticket_id: str, stage_id: str, gen: int,
+                     repo: Optional[Path] = None) -> Optional[str]:
     """gitfile 被改写（指向主库之外）时修复：隔离假仓库 + 重写 gitfile 指向真注册
     gitdir。返回人读说明；gitfile 没问题返回 None；修不了抛异常（交 Temporal 重试/
-    workflow 转 blocked）。"""
+    workflow 转 blocked）。
+    repo（票B t260907-06）：树所属仓根；None=旧口径自算 _lane_repo_root(cwd)
+    （单仓路径零变化）。多仓下真 gitdir 在子仓 .git/worktrees/ 下，必须传子仓根，
+    且注册名经 _registered_gitdir 反查（不按 cwd.name 猜）。"""
     p = _git(["rev-parse", "--absolute-git-dir"], cwd)
     fake = Path(p.stdout.strip()).resolve() if p.returncode == 0 else None
-    real = _lane_repo_root(cwd) / ".git" / "worktrees" / cwd.name
-    if not (real / "HEAD").is_file():
-        raise RuntimeError(
-            "settle: gitfile 被改写（指向 %s）且真 gitdir %s 不存在，无法自动修复——人工处置"
-            % (fake, real))
+    if repo is None:
+        real = _lane_repo_root(cwd) / ".git" / "worktrees" / cwd.name
+        if not (real / "HEAD").is_file():
+            raise RuntimeError(
+                "settle: gitfile 被改写（指向 %s）且真 gitdir %s 不存在，无法自动修复——人工处置"
+                % (fake, real))
+    else:
+        real = _registered_gitdir(repo, cwd)
+        if real is None or not (real / "HEAD").is_file():
+            raise RuntimeError(
+                "settle: gitfile 被改写（指向 %s）且仓 %s 的注册表里找不到反向指回本树"
+                "（%s）的 gitdir，无法自动修复——人工处置" % (fake, repo, cwd))
     # 真 gitdir 的反向指针校验（gitdir 文件应指回 cwd/.git），对不上说明注册已乱
     back = (real / "gitdir").read_text("utf-8").strip() if (real / "gitdir").is_file() else ""
     if back and Path(back).resolve() != (cwd / ".git").resolve():
@@ -733,7 +770,8 @@ def _reap_agent_proc(proc: subprocess.Popen, ticket_id: str = "", stage_id: str 
     return note
 
 
-def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int) -> str:
+def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
+                          repo: Optional[Path] = None) -> str:
     """worktree 泳道代落盘（确定性，不依赖 agent 自觉）：agent 交付结果文件后调用。
 
     背景：headless agent 的沙箱写不了真 .git（worktree 的 .git 是指向主库
@@ -753,7 +791,8 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int) ->
     分支。合并进行中的代落盘唯一收口=settle_conflict_resolution（含标记
     残留校验），本函数直接跳过。正常 implement 轮无 MERGE_HEAD，行为不变。
     """
-    if not _is_worktree_of(cwd, _lane_repo_root(cwd)):  # 跨项目同锚（t260903-10）
+    if not _is_worktree_of(cwd, repo if repo is not None else _lane_repo_root(cwd)):
+        # 票B（t260907-06）：repo 给定=多仓树，归属按其子仓判；None=旧单仓自算锚
         return ""
     p = _git(["rev-parse", "--verify", "MERGE_HEAD"], cwd)
     if p.returncode == 0:
@@ -763,8 +802,8 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int) ->
     notes: List[str] = []
     # 0) gitfile 真身校验：被 agent 改写指向假仓库（t260824-03 手法）则先修复，
     #    否则后续 status/commit 全落进假仓库，按目录名的隔离也会落空
-    if not _gitdir_is_real(cwd):
-        fixed = _restore_gitfile(cwd, ticket_id, stage_id, gen)
+    if not _gitdir_is_real(cwd, repo):
+        fixed = _restore_gitfile(cwd, ticket_id, stage_id, gen, repo)
         if fixed:
             notes.append(fixed)
     # 1) 假 git 仓库隔离
@@ -1361,6 +1400,48 @@ def _lane_repo_root(cwd: Path) -> Path:
     return REPO_ROOT
 
 
+# ---- 票B（t260907-06）：多仓泳道作用域清单（结算/合并/检查逐树化的单一入口） ----
+
+# 多仓泳道清单（prepare_workspace 落盘；meta.repo_worktrees=唯一真源，此文件是
+# 其落盘镜像，供下游 activity 机械读取）。路径相对：tree 相对 lane 根、repo 相对
+# 项目根（=lane 根的父父目录），泳道搬移不失效。
+MULTI_MANIFEST_REL = ".suyou/repo_worktrees.json"
+
+
+def _lane_scopes(wt: Path, branch: str = "", base_ref: str = "",
+                 write_set: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """泳道作用域清单：单仓=1 个（各字段即旧单锚行为，逐字节回归面）；多仓=每仓
+    一个（清单损坏=RuntimeError 交 Temporal 重试/人工，不静默回落单仓锚——回落
+    意味着结算/合并打错仓）。字段：name/tree/repo/branch/base_ref/write_set，
+    其中 write_set 已按仓重基（树根相对子集；单仓原样透传）。"""
+    mf = wt / MULTI_MANIFEST_REL
+    if not mf.is_file():
+        return [{"name": "", "tree": wt, "repo": _lane_repo_root(wt), "repo_rel": "",
+                 "branch": branch or ("lane/" + wt.name), "base_ref": base_ref,
+                 "write_set": list(write_set or [])}]
+    try:
+        entries = json.loads(mf.read_text("utf-8"))
+    except Exception as e:
+        raise RuntimeError("多仓泳道清单损坏（%s: %s）——人工处置，不静默回落单仓锚" % (mf, e))
+    if not isinstance(entries, list) or not entries:
+        raise RuntimeError("多仓泳道清单为空或非列表（%s）——人工处置" % mf)
+    project_root = wt.parent.parent
+    scopes: List[Dict[str, Any]] = []
+    for e in entries:
+        if not (isinstance(e, dict) and e.get("repo") and e.get("branch")):
+            raise RuntimeError("多仓泳道清单条目畸形（%r in %s）——人工处置" % (e, mf))
+        scopes.append({
+            "name": str(e.get("name") or e["repo"]),
+            "tree": wt / e["repo"],
+            "repo": project_root / e["repo"],
+            "branch": str(e["branch"]),
+            "repo_rel": str(e["repo"]),
+            "base_ref": str(e.get("base_ref") or ""),
+            "write_set": rebase_write_set(write_set, str(e["repo"])),
+        })
+    return scopes
+
+
 def _is_worktree_of(p: Path, repo: Optional[Path] = None) -> bool:
     """p 是否**该仓库**（缺省 REPO_ROOT）的已注册 worktree：`git -C repo worktree list --porcelain`
     里必须有 `worktree <p>` 条目（按绝对路径比对）。
@@ -1445,6 +1526,90 @@ def _ensure_lane_deps(lane_path: Path) -> str:
     return "+deps:%s" % ",".join(linked) if linked else ""
 
 
+def _prepare_multirepo_lane(lane_root: Path, entries: Any,
+                            prep: WorkspacePrep) -> WorkspacePrepResult:
+    """多仓泳道逐仓创建/复用（票B t260907-06）。失败语义与单仓同族（借来实现
+    取舍清单，方案 v2 表 A）：
+      - 目录在但非本仓 worktree → 该仓 failed 点名，不回滚不删除（人工处置）；
+      - 逐仓身份探针（_check_git_identity），任一仓缺失=整体 failed 红字点名仓；
+      - 任一仓失败=整体 failed 回执（不抛，workflow 转 blocked）；已成功树
+        **不回滚**（与单仓同语义，留人判读）；
+      - 全部成功后落清单 <lane>/.suyou/repo_worktrees.json（下游 _lane_scopes
+        的机械真源；幂等：重试走复用，清单重写同形状）。
+    base_ref：逐仓各自记录建树时的仓 HEAD（单仓 base_ref 语义=主树 HEAD，多仓
+    下不适用——每仓基线独立，记 HEAD 才能供 merge_check 第 1 项判「有本票产出」）。
+    deps 软链不外链（方案 v2 表 A「不带」行）；_ensure_lane_deps 仅单仓。"""
+    if not isinstance(entries, list) or not entries:
+        return WorkspacePrepResult(ok=False, kind="worktree", action="failed",
+                                   path=str(lane_root),
+                                   error="repo_worktrees 形状非法（须非空列表）: %r" % (entries,))
+    project_root = lane_root.parent.parent
+    notes: List[str] = []
+    errors: List[str] = []
+    created_n = 0
+    for e in entries:
+        if not (isinstance(e, dict) and isinstance(e.get("repo"), str) and e["repo"]
+                and isinstance(e.get("branch"), str) and e["branch"]):
+            return WorkspacePrepResult(ok=False, kind="worktree", action="failed",
+                                       path=str(lane_root),
+                                       error="repo_worktrees 条目形状非法: %r" % (e,))
+        repo = project_root / e["repo"]
+        tree = lane_root / e["repo"]
+        if not (repo / ".git").exists():
+            errors.append("[%s] 归属仓 %s 不存在（建票后被删/挪？人工处置，不代建仓）"
+                          % (e["repo"], repo))
+            continue
+        ident_err = _check_git_identity(repo)
+        if ident_err:
+            errors.append("[%s] %s" % (e["repo"], ident_err))
+            continue
+        if _is_worktree_of(tree, repo):
+            notes.append("[%s] reused" % e["repo"])
+            continue
+        if tree.exists():
+            errors.append("[%s] 树目录已存在但非仓 %s 的已注册 worktree？请人工处置"
+                          "（不回滚不删除）" % (e["repo"], repo))
+            continue
+        cmd = ["git", "-C", str(repo), "worktree", "add", "-b", e["branch"], str(tree)]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        except Exception as ex:
+            errors.append("[%s] git worktree add 异常: %s" % (e["repo"], ex))
+            continue
+        if proc.returncode != 0:
+            errors.append("[%s] git worktree add -b %s 失败:\n%s"
+                          % (e["repo"], e["branch"],
+                             (proc.stderr or proc.stdout or "").strip()[-400:]))
+            continue
+        created_n += 1
+        notes.append("[%s] created（分支 %s）" % (e["repo"], e["branch"]))
+    if errors:
+        return WorkspacePrepResult(
+            ok=False, kind="worktree", action="failed", path=str(lane_root),
+            error="多仓泳道准备未全绿（已成功树不回滚，留人判读）：\n" + "\n".join(errors))
+    # 全绿：落清单（幂等重写）。base_ref=逐仓建树时 HEAD（复用路也刷新读取）。
+    manifest = []
+    for e in entries:
+        repo = project_root / e["repo"]
+        rc = _git(["rev-parse", "HEAD"], repo)
+        manifest.append({"repo": e["repo"], "name": str(e.get("name") or e["repo"]),
+                         "branch": e["branch"],
+                         "base_ref": rc.stdout.strip() if rc.returncode == 0 else ""})
+    mf_dir = lane_root / ".suyou"
+    try:
+        mf_dir.mkdir(parents=True, exist_ok=True)
+        (mf_dir / "repo_worktrees.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=1), "utf-8")
+    except Exception as ex:
+        return WorkspacePrepResult(ok=False, kind="worktree", action="failed",
+                                   path=str(lane_root),
+                                   error="多仓泳道清单落盘失败（%s）: %s" % (MULTI_MANIFEST_REL, ex))
+    action = "created" if created_n else "reused"
+    activity.logger.info("[%s] prepare 多仓泳道：%s（%s）", prep.ticket_id, action,
+                         "；".join(notes))
+    return WorkspacePrepResult(ok=True, kind="worktree", action=action, path=str(lane_root))
+
+
 @activity.defn
 async def prepare_workspace(prep: WorkspacePrep) -> WorkspacePrepResult:
     """工作区创建/复用（M16：workflow 第一个 activity，agent 不再自己 git worktree add / mkdir）。
@@ -1475,6 +1640,24 @@ async def prepare_workspace(prep: WorkspacePrep) -> WorkspacePrepResult:
             return WorkspacePrepResult(ok=False, kind="dir", action="failed",
                                        path=str(p), error="mkdir -p %s 失败: %s" % (p, e))
         return WorkspacePrepResult(ok=True, kind="dir", action="ensured", path=str(p))
+    # 票B（t260907-06）多仓泳道：workspace.repo_worktrees 在场即多仓票——走逐仓
+    # 创建/复用分支（meta.repo_worktrees=唯一真源，本函数校验盘面一致，不重推导）。
+    # 通道形态（夹具/直调）：prep.write_set+prep.project_root 在场且项目根无 .git
+    # → 由写集归属推导明细（推导逻辑=shared.build_repo_worktrees 单点，与建票链
+    # 同源）；单仓项目（项目根=仓根）不进此分支，旧路径零回归。
+    rws = ws.get("repo_worktrees")
+    if not (isinstance(rws, list) and rws) and prep.write_set and prep.project_root:
+        _pr = Path(prep.project_root)
+        if not (_pr / ".git").exists():
+            try:
+                rws = build_repo_worktrees(_pr, prep.write_set, p.name)
+            except ValueError as e:
+                return WorkspacePrepResult(ok=False, kind="worktree", action="failed",
+                                           path=str(p), error="多仓泳道推导拒收：%s" % e)
+        else:
+            rws = None  # 单仓项目：通道字段忽略，走旧单仓路径（回归面）
+    if isinstance(rws, list) and rws:
+        return _prepare_multirepo_lane(p, rws, prep)
     # worktree 泳道
     # 落盘身份守卫（t260905-10 面③）：created/reused 两路开工前都查——身份可能在
     # 复用间隔里消失；缺失即 failed 回执（workflow 转 blocked 交人，与 worktree add
@@ -1689,27 +1872,19 @@ def _parse_bundle_pairs(text: str) -> List[tuple]:
     return [(p["src"], p["out"]) for p in pairs if p["src"] and p["out"]]
 
 
-@activity.defn
-async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
-    """合并前的程序化检查（260824 dev-lane，无 agent——结论全来自 git/脚本，不信口述）。
+async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
+                                 lane_root: Path, multi: bool) -> Dict[str, Any]:
+    """单作用域 merge_check 核心（票B t260907-06 从 merge_check 抽出，逐树复用）。
 
-    四项全绿才放行到人审 merge：
-      1. 泳道分支有 commit（base_ref..branch 非空）——t260824-01 漏的就是这项
-         （agent 全程未 commit，旧 verify 门跑主树 diff 为空，全绿假闭环）；
-      2. 工作区干净（git status --porcelain 为空）——不许带未提交改动收口；
-         KI-009（t260901-25）：判红前先做写集内自愈（见下方 0 号前置段），
-         agent 迟写文件 worker 没赶上落盘的，在这里补一刀 settle 再复查。
-      3. 泳道内 verify_lane code 绿——跑**泳道副本**的 admin.py（lane 代码+lane 工具），
-         不跑主树（主树没泳道改动，跑了等于没测）；
-      4. merge-tree 预演无冲突（不落地，只判冲突）。
-    另有项目级扩展检查（3.5 节）：读泳道内 server/dsh/merge-checks.yaml，
-    无文件=无扩展——检查策略跟项目仓库走，换项目自动不适用。
-    红灯不抛：回执交 workflow 转 blocked 等 retry_qc / rework 判读。
-    """
-    wt = Path(args.worktree) if args.worktree else REPO_ROOT
-    if not wt.is_absolute():
-        wt = REPO_ROOT / wt
-    lane_repo = _lane_repo_root(wt)  # 跨项目（t260903-11 第五枪）：分支/merge-tree 查泳道所属仓
+    单仓（multi=False，单作用域）行为与旧单锚实现逐字节一致（回归面）；多仓差异
+    仅三处：①sc["write_set"] 已按仓重基（树根相对子集）——白名单门/KI-009 自愈
+    判据逐仓精判；②ui_evidence 声明读 lane 根（lane_root），命中判定用剥仓前缀
+    的声明子集（_scope_dirs）；③settle 自愈带 repo 锚（gitfile 三件套参数化）。
+    附条件 1（review gen1）落地口径=选 (b)：逐树 verify_lane path=树，lane 根的
+    项目声明 verify.yaml 工具读不到 → 项目声明的 checks 扩展检查在多仓票逐树落入
+    工具自带「按项目声明关闭」可见缺失态（非静默，verify_lane 有关闭注记）；写集
+    精判不受影响（工单 write_set 优先于 write_allow）。登记为本票限制。
+    返回 {checks, rehearsal_green, conflict_files, merge_tree_excerpt}。"""
     checks: List[Dict[str, Any]] = []
     wl_base = ""  # 第 3 项算出的 merge-base 基线（3.6 UI 判定复用；第 3 项异常未及赋值时为空，3.6 fail-closed 自算）
 
@@ -1726,19 +1901,19 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     # 每次调用最多自愈一次：自愈后仍脏就如实出红，不内部循环。
     auto_settle_note = ""
     try:
-        p = _git(["status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, wt)
+        p = _git(["status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, sc["tree"])
         dirty_z = p.stdout if p.returncode == 0 else ""
         dirty_files = _dirty_files_from_status_z(dirty_z)
         if p.returncode != 0:
             auto_settle_note = "status 失败: %s" % (p.stderr or "")[-200:]
         elif dirty_files:
-            mh = _git(["rev-parse", "--verify", "MERGE_HEAD"], wt)
+            mh = _git(["rev-parse", "--verify", "MERGE_HEAD"], sc["tree"])
             if mh.returncode == 0:
                 auto_settle_note = "合并进行中（MERGE_HEAD 在场），不自愈"
-            elif _dirty_within_write_set(dirty_files, args.write_set):
+            elif _dirty_within_write_set(dirty_files, sc["write_set"]):
                 try:
                     note = _settle_worktree_lane(
-                        wt, args.ticket_id, "merge_check", 0)
+                        sc["tree"], args.ticket_id, "merge_check", 0)
                     auto_settle_note = "[auto-settle] %s" % (note or "settle 返回空（见后续复查）")
                 except Exception as e:
                     auto_settle_note = ("[auto-settle] settle 异常（转红不抛）: %s: %s"
@@ -1753,9 +1928,9 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
 
     # 1. 泳道有 commit
     try:
-        p = _git(["log", "--oneline", "%s..%s" % (args.base_ref, args.branch)], lane_repo)
+        p = _git(["log", "--oneline", "%s..%s" % (sc["base_ref"], sc["branch"])], sc["repo"])
         n = len([ln for ln in p.stdout.splitlines() if ln.strip()]) if p.returncode == 0 else 0
-        checks.append({"item": "泳道分支有 commit（%s..%s）" % (args.base_ref[:7], args.branch),
+        checks.append({"item": "泳道分支有 commit（%s..%s）" % (sc["base_ref"][:7], sc["branch"]),
                        "green": p.returncode == 0 and n > 0,
                        "detail": ("%d 个 commit" % n) if n else
                                  (p.stderr or p.stdout or "0 个 commit").strip()[-300:]})
@@ -1768,7 +1943,7 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     #    解析问题），自愈后复查的脏清单也走同一解析（_dirty_files_from_status_z）；
     #    自愈发生时 detail 带 [auto-settle] 标记，账面可见不静默。
     try:
-        p = _git(["status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, wt)
+        p = _git(["status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, sc["tree"])
         if p.returncode == 0:
             dirty = _dirty_files_from_status_z(p.stdout)
             clean = not dirty
@@ -1787,7 +1962,7 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     try:
         # t260901-18（KI-010）× t260901-16 合并解：白名单 diff 的 base 用
         # merge-base(main, branch)（_merge_base_ref，fail-closed）。
-        # 根因（t260901-18）：传钉死的 args.base_ref 时，他泳道并进的 main 文件在
+        # 根因（t260901-18）：传钉死的 sc["base_ref"] 时，他泳道并进的 main 文件在
         # 泳道 merge main 后出现在 diff 里、又不在本单 write_set → 误判越界。
         # 两层防线的分工：verify_lane 侧（t260901-16）_diff_names 已改三点
         # base...HEAD（字面 main 也安全）；merge_check 侧再显式给 merge-base sha
@@ -1801,25 +1976,25 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
         # write_allow 粗判据仅兜手动/未带写集调用——07/08 越界事故在粗判据下漏网）。
         # 第 1 项 commit 检查仍用钉死 base_ref（语义=泳道有本票产出，防快进误判
         # 0 commit），两项 base 口径分工不同。
-        wl_base, wl_err = _merge_base_ref(args.branch, lane_repo)  # 第六枪（t260903-11 二建实雷）：merge-base 也要锚泳道仓
+        wl_base, wl_err = _merge_base_ref(sc["branch"], sc["repo"])  # 第六枪（t260903-11 二建实雷）：merge-base 也要锚泳道仓
         if not wl_base:
             # fail-closed：红 item 是 merge_check 正常通道，activity 不抛。verify_lane
             # 本轮不跑（tsc/smoke 一并缓，红已定 blocked，重试时恢复）；merge-base
             # 失败时第 4 项 merge-tree main 几乎必然同红，零新增阻塞面。
-            checks.append({"item": "写集白名单基线（merge-base main × %s）" % args.branch,
+            checks.append({"item": "写集白名单基线（merge-base main × %s）" % sc["branch"],
                            "green": False, "detail": wl_err})
         else:
             if wl_err:  # 多行畸形输出：取首行继续，留痕可检索
                 activity.logger.info("[%s] %s", args.ticket_id, wl_err)
-            lane_admin = wt / "server" / "admin.py"
+            lane_admin = sc["tree"] / "server" / "admin.py"
             admin_bin = str(lane_admin if lane_admin.is_file() else
                              Path(__file__).resolve().parents[2] / "admin.py")  # 第七枪：跨项目无引擎布局
             vp = await asyncio.create_subprocess_exec(  # t260903-09 同雷 async 化（最长 15min 冻结）
                 "python3", admin_bin, "call", "verify_lane",
-                json.dumps({"lane": "code", "path": str(wt),
+                json.dumps({"lane": "code", "path": str(sc["tree"]),
                             "base": wl_base, "require_base": True,
-                            "write_set": list(args.write_set)}),
-                cwd=str(wt), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                            "write_set": list(sc["write_set"])}),
+                cwd=str(sc["tree"]), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             try:
                 vo_b, ve_b = await asyncio.wait_for(vp.communicate(), timeout=900)
                 v_stdout, v_stderr = vo_b.decode("utf-8", "replace"), ve_b.decode("utf-8", "replace")
@@ -1827,6 +2002,16 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
                 res = payload.get("result") or {}
                 green = bool(payload.get("ok")) and bool(res.get("green")) and vp.returncode == 0
                 detail = "exit=%s red=%s" % (res.get("exit_code"), res.get("red_count"))
+                # 红项点名带进 detail（票B G2 契约：写集外注入须在 merge_check 回执
+                # 可检索到文件名；单仓同样受益，纯增量不加严）
+                _red_lines = []
+                for _chk in (res.get("checks") or []):
+                    if _chk.get("level") != "red":
+                        continue
+                    for _it in (_chk.get("items") or []):
+                        _red_lines.append(str((_it or {}).get("detail") if isinstance(_it, dict) else _it))
+                if _red_lines:
+                    detail += "；%s" % "；".join(_red_lines[:6])
             except asyncio.TimeoutError:
                 vp.kill(); await vp.wait()
                 green, detail = False, "verify_lane 超时（>900s）"
@@ -1843,14 +2028,14 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     #     src/client 改了没重建 lib，合并=假上线）。保持插在 merge 预演之前——
     #     预演必须是 checks 末位（conflict 归类认 checks[:-1] 为「非冲突项」）。
     try:
-        cfg = wt / MERGE_CHECKS_CFG
+        cfg = sc["tree"] / MERGE_CHECKS_CFG
         if cfg.is_file():
             pairs = _parse_bundle_pairs(cfg.read_text("utf-8"))
             if pairs:
                 # 同第 3 项白名单口径：三点 main...branch 只看泳道带来的改动，
                 # main 侧他人改的 src 不误触发 bundle 新鲜度红（t260901-16）。
-                p = _git(["diff", "--name-only", "main...%s" % args.branch],
-                         lane_repo)  # 同族锚补：3.5 bundle 新鲜度 diff 锚泳道仓
+                p = _git(["diff", "--name-only", "main...%s" % sc["branch"]],
+                         sc["repo"])  # 同族锚补：3.5 bundle 新鲜度 diff 锚泳道仓
                 changed = p.stdout.split() if p.returncode == 0 else []
                 for src, out in pairs:
                     if not any(f.startswith(src) for f in changed):
@@ -1890,14 +2075,14 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
         base_36 = wl_base
         base_note = ""
         if not base_36:
-            base_36, base_err = _merge_base_ref(args.branch, lane_repo)
+            base_36, base_err = _merge_base_ref(sc["branch"], sc["repo"])
             base_note = ("（wl_base 第 3 项未产出、此处自算%s）"
                          % ("失败 fail-closed" if not base_36 else "取 %s" % base_36[:7]))
             if base_36 and base_err:  # 自算带畸形留痕，不静默
                 base_note = "（wl_base 此处自算，带畸形留痕：%s）" % base_err[-120:]
-        # 声明读泳道根（wt）——与 verify_lane code 道同口径（path=泳道根），
-        # 不读 lane_repo（主仓根：main 侧声明改动会污染泳道闸判定）
-        decl_mode, decl_dirs, decl_note = load_ui_evidence(wt)
+        # 声明读泳道根（sc["tree"]）——与 verify_lane code 道同口径（path=泳道根），
+        # 不读 sc["repo"]（主仓根：main 侧声明改动会污染泳道闸判定）
+        decl_mode, decl_dirs, decl_note = load_ui_evidence(lane_root)
         if decl_mode == "malformed":
             # ④a 声明畸形：fail-closed 红点名字段（畸形 ≠ 缺省，契约②三态总纲）
             checks.append({
@@ -1906,7 +2091,7 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
                 "detail": "ui_evidence 声明畸形 fail-closed：%s（修 verify.yaml 的 "
                           "ui_evidence.dirs 或删声明走缺省态）" % decl_note})
         else:
-            ui_paths, diff_err = _ui_diff_paths(lane_repo, base_36, args.branch, decl_dirs)
+            ui_paths, diff_err = _ui_diff_paths(sc["repo"], base_36, sc["branch"], _scope_dirs(decl_dirs, sc))
             diff_fault = bool(diff_err or not base_36)
             if decl_mode == "absent" and not diff_fault:
                 # ③ 声明缺省 + diff 健康：green + 可见 note（行为可见非静默）
@@ -1925,10 +2110,10 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
             elif ui_paths or diff_fault:
                 # ① 声明在场 + 命中（或在场下 diff 故障）：现状红绿判定
                 judge = "按 diff 判定（%s...%s，口径=%d 声明目录）%s：%s" % (
-                    (base_36 or "?")[:7], args.branch, len(decl_dirs), base_note,
+                    (base_36 or "?")[:7], sc["branch"], len(decl_dirs), base_note,
                     ("命中 %d 个 UI 路径：%s" % (len(ui_paths), "、".join(ui_paths[:8]))) if ui_paths
                     else ("diff 故障 fail-closed：%s" % (diff_err or "基线缺失")))
-                shots_dir = wt / UI_EVIDENCE_DIR
+                shots_dir = lane_root / UI_EVIDENCE_DIR
                 pngs = sorted(shots_dir.glob("*.png")) if shots_dir.is_dir() else []
                 ui_gate_red = not pngs
                 checks.append({
@@ -1950,20 +2135,68 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     merge_tree_excerpt = ""
     rehearsal_green = False
     try:
-        p = _git(["merge-tree", "--write-tree", "main", args.branch], lane_repo)
+        p = _git(["merge-tree", "--write-tree", "main", sc["branch"]], sc["repo"])
         rehearsal_green = p.returncode == 0
         if not rehearsal_green:
             out = (p.stdout or "") + ("\n" + p.stderr if p.stderr else "")
             conflict_files = _parse_conflict_files(out)
             merge_tree_excerpt = out.strip()[:1500]
-        checks.append({"item": "%s（merge-tree main × %s）" % (MERGE_REHEARSAL_ITEM, args.branch),
+        checks.append({"item": "%s（merge-tree main × %s）" % (MERGE_REHEARSAL_ITEM, sc["branch"]),
                        "green": rehearsal_green,
                        "detail": "无冲突" if rehearsal_green else
                                  ("冲突文件：%s" % "、".join(conflict_files) if conflict_files
                                   else (p.stdout or p.stderr or "有冲突").strip()[-300:])})
     except Exception as e:
         checks.append({"item": MERGE_REHEARSAL_ITEM, "green": False, "detail": "merge-tree 异常: %s" % e})
+    return {"checks": checks, "rehearsal_green": rehearsal_green,
+            "conflict_files": conflict_files,
+            "merge_tree_excerpt": merge_tree_excerpt}
 
+
+def _scope_dirs(dirs: List[str], sc: Dict[str, Any]) -> List[str]:
+    """声明目录（lane 根相对）→ 树根相对子集（多仓 UI 命中判定的基线对齐单点）。"""
+    return rebase_write_set(dirs, str(sc.get("repo_rel") or "")) if sc.get("repo_rel") else list(dirs or [])
+
+
+@activity.defn
+async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
+    """合并前的程序化检查（260824 dev-lane，无 agent——结论全来自 git/脚本，不信口述）。
+
+    四项全绿才放行到人审 merge：
+      1. 泳道分支有 commit（base_ref..branch 非空）——t260824-01 漏的就是这项
+         （agent 全程未 commit，旧 verify 门跑主树 diff 为空，全绿假闭环）；
+      2. 工作区干净（git status --porcelain 为空）——不许带未提交改动收口；
+         KI-009（t260901-25）：判红前先做写集内自愈（见下方 0 号前置段），
+         agent 迟写文件 worker 没赶上落盘的，在这里补一刀 settle 再复查。
+      3. 泳道内 verify_lane code 绿——跑**泳道副本**的 admin.py（lane 代码+lane 工具），
+         不跑主树（主树没泳道改动，跑了等于没测）；
+      4. merge-tree 预演无冲突（不落地，只判冲突）。
+    另有项目级扩展检查（3.5 节）：读泳道内 server/dsh/merge-checks.yaml，
+    无文件=无扩展——检查策略跟项目仓库走，换项目自动不适用。
+    红灯不抛：回执交 workflow 转 blocked 等 retry_qc / rework 判读。
+    """
+    # 票B（t260907-06）：作用域清单驱动——单仓=1 作用域（下方逻辑与旧单锚实现
+    # 一致）；多仓=逐树跑核心，item 名加树前缀，跨树聚合红绿与冲突清单。
+    wt = Path(args.worktree) if args.worktree else REPO_ROOT
+    if not wt.is_absolute():
+        wt = REPO_ROOT / wt
+    scopes = _lane_scopes(wt, args.branch, args.base_ref, args.write_set)
+    multi = len(scopes) > 1
+    checks: List[Dict[str, Any]] = []
+    rehearsal_green = True
+    conflict_files: List[str] = []
+    merge_tree_excerpt = ""
+    for sc in scopes:
+        core = await _merge_check_one_scope(args, sc, wt, multi)
+        sc_checks = core["checks"]
+        if multi:  # 树前缀（多仓可见性：每项红绿点名哪棵树）
+            for c in sc_checks:
+                c["item"] = "[%s] %s" % (sc["name"], c["item"])
+        checks.extend(sc_checks)
+        rehearsal_green = rehearsal_green and bool(core["rehearsal_green"])
+        conflict_files.extend(core["conflict_files"])
+        if core["merge_tree_excerpt"]:
+            merge_tree_excerpt = (merge_tree_excerpt + "\n" + core["merge_tree_excerpt"]).strip()
     green = all(c["green"] for c in checks)
     # t260826-01 冲突自动消解回路：红灯细分两类——
     #   conflict=True：仅 merge 预演项红且解析到非空冲突文件清单 → workflow 自动
@@ -1972,7 +2205,8 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     #   conflict=False：其它三项（无 commit/工作区脏/verify_lane 红）任一项红，
     #     或预演红但解析为空 → 维持 blocked 等人。基础问题先交人，不带病消解。
     other_red = any(not c["green"] for c in checks[:-1])
-    conflict = (not green) and (not other_red) and (not rehearsal_green) and bool(conflict_files)
+    conflict = ((not green) and (not other_red) and (not rehearsal_green)
+                and bool(conflict_files) and not multi)  # 多仓：消解回路单仓设计，红灯 blocked 交人（票B 限制）
     activity.logger.info("[%s] merge_check %s：%s%s", args.ticket_id,
                          "绿灯" if green else "红灯",
                          "；".join("%s=%s" % (c["item"], "绿" if c["green"] else "红") for c in checks),
@@ -2449,15 +2683,36 @@ async def merge(args: MergeArgs) -> MergeResult:
         wt = REPO_ROOT / wt
     # 项目 key（快照归属目录）：查询失败软降级 "" → _squash_merge 内跳过快照留 note
     project_key = await _fetch_ticket_project(args.ticket_id)
-    res = _squash_merge(_lane_repo_root(wt), wt, args.branch, args.ticket_id,  # 第八枪（t260903-11 终建实雷）：squash 进泳道所属仓
-                        defer_teardown=bool(args.defer_teardown), project_key=project_key)
-    if res.ok:
-        activity.logger.info("[%s] squash 落账：%s（%s）%s", args.ticket_id,
-                             args.branch, res.merge_commit,
-                             ("；清理告警：" + res.error) if res.error else "")
-    else:
-        activity.logger.warning("[%s] squash 失败：%s", args.ticket_id, res.error)
-    return res
+    # 票B（t260907-06）：单仓=1 作用域（走旧单锚路径，行为不变）；多仓=逐树 squash
+    # 进各自子仓（_squash_merge a–e 故障取舍逐树保住；重入安全——已收口树走其
+    # 「暂存区无可收内容」幂等分支回填，不重复落账；失败树不拆不删等重验）。
+    results = []
+    for sc in _lane_scopes(wt, args.branch, base_ref="", write_set=None):
+        res = _squash_merge(sc["repo"], sc["tree"], sc["branch"], args.ticket_id,
+                            defer_teardown=bool(args.defer_teardown), project_key=project_key)
+        if sc["name"]:  # 多仓：error/merge_commit 前缀树名（docstring e 逐树点名）
+            if res.error:
+                res.error = "[%s] %s" % (sc["name"], res.error)
+            if res.merge_commit:
+                res.merge_commit = "%s=%s" % (sc["name"], res.merge_commit)
+        results.append(res)
+        if res.ok:
+            activity.logger.info("[%s%s] squash 落账：%s（%s）%s", args.ticket_id,
+                                 "/%s" % sc["name"] if sc["name"] else "",
+                                 sc["branch"], res.merge_commit,
+                                 ("；清理告警：" + res.error) if res.error else "")
+        else:
+            activity.logger.warning("[%s%s] squash 失败：%s", args.ticket_id,
+                                    "/%s" % sc["name"] if sc["name"] else "", res.error)
+    if len(results) == 1:
+        return results[0]
+    ok = all(r.ok for r in results)
+    first_bad = next((r for r in results if not r.ok), None)
+    merged = "；".join(r.merge_commit for r in results if r.merge_commit)
+    errs = "\n".join(r.error for r in results if r.error)
+    return MergeResult(ok=ok,
+                       action=("merged" if ok else (first_bad.action if first_bad else "failed")),
+                       merge_commit=merged, error=errs)
 
 
 # ---------- dev-lane：完结工单数据出仓归档 + 泳道拆除（sandbar M1-3，t260902-02） ----------
@@ -2884,16 +3139,29 @@ async def ui_changed_paths(args: UiChangedPathsArgs) -> UiChangedPathsResult:
         activity.logger.info("[%s] %s", args.ticket_id, detail)
         return UiChangedPathsResult(ui_paths=[], detail=detail)
     decl_suffix = "" if decl_mode == "ok" else "；ui_evidence 未声明（截图闸按项目声明缺席）"
-    wl_base, wl_err = _merge_base_ref(args.branch, lane_repo)
-    if not wl_base:
-        detail = "ui_changed_paths fail-closed：merge-base 解析失败：%s" % wl_err
-        activity.logger.info("[%s] %s", args.ticket_id, detail)
-        return UiChangedPathsResult(ui_paths=[], detail=detail)
-    ui_paths, diff_err = _ui_diff_paths(lane_repo, wl_base, args.branch, decl_dirs)
-    if diff_err:
-        detail = "ui_changed_paths fail-closed：%s" % diff_err
-        activity.logger.info("[%s] %s", args.ticket_id, detail)
-        return UiChangedPathsResult(ui_paths=[], detail=detail)
+    # 票B（t260907-06）：单仓=旧单锚一路（行为不变）；多仓=逐树 diff、命中路径加回
+    # 仓前缀成项目根相对后再并集（与声明 dirs 基线同锚，match_ui_paths 单点不变）。
+    # 任一树 diff/基线故障 → fail-closed 空（调用方按「UI 票待证」处理，同族语义）。
+    scopes = _lane_scopes(wt, args.branch, base_ref="", write_set=None)
+    ui_paths: List[str] = []
+    for sc in scopes:
+        wl_base, wl_err = _merge_base_ref(sc["branch"], sc["repo"])
+        if not wl_base:
+            detail = "ui_changed_paths fail-closed：merge-base 解析失败（%s）：%s" % (
+                sc["name"] or "lane", wl_err)
+            activity.logger.info("[%s] %s", args.ticket_id, detail)
+            return UiChangedPathsResult(ui_paths=[], detail=detail)
+        sc_dirs = _scope_dirs(decl_dirs, sc)
+        sc_paths, diff_err = _ui_diff_paths(sc["repo"], wl_base, sc["branch"], sc_dirs)
+        if diff_err:
+            detail = "ui_changed_paths fail-closed：%s" % diff_err
+            activity.logger.info("[%s] %s", args.ticket_id, detail)
+            return UiChangedPathsResult(ui_paths=[], detail=detail)
+        for pth in sc_paths:
+            prefixed = ("%s/%s" % (sc["repo_rel"], pth)) if sc["repo_rel"] else pth
+            if prefixed not in ui_paths:
+                ui_paths.append(prefixed)
+    lane_repo = scopes[0]["repo"]
     detail = ("按 diff 判定（merge-base %s...%s，锚泳道仓 %s，口径=%d 声明目录）：命中 %d 个 UI 路径%s%s"
               % (wl_base[:7], args.branch, lane_repo.name, len(decl_dirs), len(ui_paths),
                  ("：%s" % "、".join(ui_paths[:8])) if ui_paths else "（非 UI 票）",
@@ -3023,17 +3291,26 @@ async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
-    wt_repo = _lane_repo_root(wt)  # 跨项目：按约定锚项目仓（t260903-10 二次实雷——漏此点曾致死票）
-    if not _is_worktree_of(wt, wt_repo):
-        raise RuntimeError(
-            "settle_lane: worktree %r（解析为 %s）不是其归属仓（%s）的已注册 worktree，"
-            "拒绝回退主树代落盘（静默回退=该落盘的泳道什么都不落还报干净，t260901-16 实锤）"
-            % (args.worktree, wt, wt_repo))
-    cwd = wt
-    note = _settle_worktree_lane(cwd, args.ticket_id, args.stage_id, args.gen)
-    rc = _git(["rev-list", "--count", "HEAD"], cwd)
-    commits = int(rc.stdout.strip() or -1) if rc.returncode == 0 else -1
-    return SettleLaneResult(note=note, lane_commits=commits)
+    # 票B（t260907-06）：单仓=1 作用域（行为不变）；多仓=逐树校验归属+逐树代落盘。
+    # 每树都拒绝回退主树（静默回退=该落盘的泳道什么都不落还报干净，t260901-16 实锤）。
+    scopes = _lane_scopes(wt, write_set=None)
+    notes: List[str] = []
+    commits = -1
+    for sc in scopes:
+        if not _is_worktree_of(sc["tree"], sc["repo"]):
+            raise RuntimeError(
+                "settle_lane: worktree %r（解析为 %s）不是其归属仓（%s）的已注册 worktree，"
+                "拒绝回退主树代落盘（静默回退=该落盘的泳道什么都不落还报干净，t260901-16 实锤）"
+                % (args.worktree, sc["tree"], sc["repo"]))
+        sc_note = _settle_worktree_lane(sc["tree"], args.ticket_id, args.stage_id,
+                                        args.gen, repo=sc["repo"])
+        if sc["name"]:
+            sc_note = "[%s] %s" % (sc["name"], sc_note or "settle 返回空")
+        notes.append(sc_note)
+        rc = _git(["rev-list", "--count", "HEAD"], sc["tree"])
+        sc_commits = int(rc.stdout.strip() or -1) if rc.returncode == 0 else -1
+        commits = sc_commits if commits < 0 else min(commits, sc_commits)
+    return SettleLaneResult(note="\n".join(n for n in notes if n), lane_commits=commits)
 
 
 BATCH_TIMEOUT_SEC = int(os.environ.get("SUYOU_INTEG_BATCH_TIMEOUT_SEC") or 5400)

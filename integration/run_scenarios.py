@@ -540,6 +540,18 @@ SCENARIOS = [
     ("t260905-10-lane-identity-guard",
      "泳道落盘身份依赖守卫（t260905-10 面③，260906 宿主 ~/.gitconfig 消失三轨 settle 全 FAILED，灰盒 L3）：git 身份全缺→prepare_workspace 开工前 ok=False/failed 红字点名 user.name/user.email（半缺腿钉死点名精确性，探针 GIT_CONFIG_NOSYSTEM+GLOBAL 夹具防系统级假红）；身份在位复用不受扰；repo 级 config 补救放行（探针锚泳道 worktree=共享主仓 config）；dir 型工作区无 commit 不查；created 路径缺失失败且泳道不落半成品（fail-fast 在 worktree add 之前）；LANE_DEP_SYMLINKS 含 temporal-poc/.venv：泳道自动软链解析到主仓、幂等不重复（260825「泳道无消费方」拍板被 260906 19 号闸实测推翻的陪伴断言）；点名断言解析「git 身份缺失（…）」括注为集合（处置句恒提两键名，子串断言吹不了精确性）。实现段落地前红属预期（守卫缺席=缺失腿照旧放行=红），arbitrate/merge 期必须绿；与 developer L1 intent 不同面：本条守 prepare_workspace 两分支×身份矩阵×deps 软链的回执契约",
      "python3 integration/t260905-10/sc_lane_identity_guard.py", "ro"),
+
+    # ---- t260907-06：多 repo 项目泳道挂子仓（票B：一票多 worktree 同居一 lane）----
+
+    ("t260907-06-multirepo-journey",
+     "多仓票全链旅程（t260907-06 验收①前半+复用幂等，灰盒 L2/L3，用户手册多 repo 模型=项目父目录作根、多树同居一 lane）：写集路径落两子仓→每仓各得路径子集（最近 .git 祖先归属，不串仓不丢路径）、单仓口径透传；lane 容器（<项目根>/.lane/<泳道>，普通目录不入仓）下每仓一棵树且=所属子仓已注册 worktree（git worktree list 绝对路径可验）、基线文件随仓；分支命名 lane/<泳道>-<仓相对路径压平> 逐仓独立；prepare 二次两树 reused（树内标记文件幸存=未重建、分支引用不漂=转移接力 M4 面）；settle 各归其仓（两树改动各落各自树分支、落账不含他仓文件=错仓落账红线）。单仓零回归不另起用例——存量 integration 场景族即单仓回归面（intent 相同不重复造）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio 缺失=ENV_FAIL 点名（prepare/settle 行为腿），stdlib 归属契约腿照跑",
+     "PY=server/dsh/temporal-poc/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260907-06/sc_t260907_06_multirepo_journey.py", "ro"),
+    ("t260907-06-multirepo-merge-gate",
+     "合并闸逐树判定+merge 逐仓收口+重入幂等（t260907-06 验收①后半，灰盒 L2/L3）：白名单门重基两向——合法分仓改动整体绿（重基漏剥前缀=假红）、树内写集外注入整体红且 detail 点名（重基不放空=假绿防线）；merge 逐仓收口两仓 main 各恰多一个 squash 提交（一单一提交逐仓独立）、内容各归所属仓（错仓落账红线）；重入幂等（Temporal 重试面）——一仓冲突整体 failed、已成功仓已落账、冲突仓不落账，解堵重试后已成功仓提交数不变（不重复落账）、失败仓补齐（不漏账）、整体 ok。与场景①旅程/场景③拒收面 intent 分界；白名单工具语义另有专测族，本条只守多仓重基后调用侧组装两向行为。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio 缺失=ENV_FAIL 点名（本场全靠真链路无 stdlib 替代腿）",
+     "PY=server/dsh/temporal-poc/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260907-06/sc_t260907_06_multirepo_merge_gate.py", "ro"),
+    ("t260907-06-multirepo-failclosed",
+     "多仓 fail-closed 注入面（t260907-06，灰盒 L2/L3，畸形/边界/异常路径）：路径逃逸项目根（../）拒收点名不给静默归仓；集合外嵌套仓（仓中仓）路径创建即拒收且红字点名嵌套仓（不静默归外层仓=错仓落账前奏）；合法路径对照腿不误伤（拒收不扩大化）；删仓后 prepare→failed 回执点名缺失仓、树原样幸存不静默重建（meta.repo_worktrees 唯一真源一致性校验面，真源漂移=交人不是自愈）；树位置被来历不明普通目录占位→failed 不覆盖不删除（与现行单仓「目录已在但非本仓 worktree→人工处置」同语义逐树保住，防覆盖 agent 工作现场）。写集条目畸形形态属建票写集契约既有面（存量已守，intent 重复不另起）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio 缺失=ENV_FAIL 点名（prepare 异常路径腿），stdlib 拒收腿照跑",
+     "PY=server/dsh/temporal-poc/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260907-06/sc_t260907_06_multirepo_failclosed.py", "ro"),
     ("t260907-07-epic-anchor-two-projects",
      "立项目录锚项目感知×env 自测语义（t260907-07，GAP-B 修复回归，验收①②校验面）：双项目夹具（engine/external 桶同名 gap-b+各自异名，tmp per-key 注册表）下 resolve_epics_dir×validate_epic_code 各取各的项目主目录 notes/epics——同名各自通过（改造前 external 误报「立项代号不存在」的面）、异名自桶通过、异名跨桶拒绝且文案带该项目实际查询目录（诊断信息，不误指引擎仓）；未知项目 key fail-closed 不静默兜底；SUYOU_EPICS_DIR 自测语义不变（两项目同指 env 目录优先于项目锚）、env 空串回落项目锚、env 指不存在目录报错「目录为空或不存在」可辨不崩。shared stdlib 直驱秒级零 docker；实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；与 developer L1（畸形输入细目单测）intent 不同面",
      "python3 integration/t260907-07/sc_epic_anchor_two_projects.py", "ro"),

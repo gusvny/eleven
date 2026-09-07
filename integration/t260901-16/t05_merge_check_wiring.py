@@ -19,19 +19,22 @@ from fixture import REPO, summary
 
 fails = []
 src = (REPO / "server" / "dsh" / "temporal-poc" / "agent_activities.py").read_text("utf-8")
-m = re.search(r"async def merge_check\(.*?\n(?=@activity\.defn|\Z)", src, re.S)
-if not m:
-    fails.append("找不到 merge_check 函数体")
+# t260907-06 票B 逐树重构：四门语义锚迁入 _merge_check_one_scope（merge_check 只剩
+# 作用域循环+聚合）——本锁的定位范围随之覆盖两函数并集（锁语义不锁实现位置）。
+_m1 = re.search(r"async def merge_check\(.*?\n(?=@activity\.defn|\Z)", src, re.S)
+_m2 = re.search(r"async def _merge_check_one_scope\(.*?\n\n\ndef _scope_dirs", src, re.S)
+if not (_m1 or _m2):
+    fails.append("找不到 merge_check/核心函数体")
 else:
-    body = m.group(0)
-    # 第 1 项：泳道有 commit，仍用 base_ref..branch
-    if not re.search(r'"%s\.\.%s" % \(args\.base_ref, args\.branch\)', body):
+    body = (_m1.group(0) if _m1 else "") + "\n" + (_m2.group(0) if _m2 else "")
+    # 第 1 项：泳道有 commit，仍用 base_ref..branch（args 单仓 / sc 多仓 core 同义）
+    if not re.search(r'"%s\.\.%s" % \((args\.base_ref|sc\["base_ref"\]), (args\.branch|sc\["branch"\])\)', body):
         fails.append("第1项「泳道有 commit」应保持 base_ref..branch（快进防误判）")
     # 第 3 项：verify_lane 的 base 不再是 args.base_ref
     vm = re.search(r'"base":\s*([^,\n]+),\s*"require_base"', body)
     if not vm:
         fails.append("找不到 verify_lane 调用的 base 参数")
-    elif "args.base_ref" in vm.group(1):
+    elif "args.base_ref" in vm.group(1) or 'sc["base_ref"]' in vm.group(1):
         fails.append("第3项 verify_lane base 仍传 args.base_ref（假阳性根因未修）")
     elif not re.search(r'["\']main["\']|diff_base|wl_base', vm.group(1)):
         # wl_base = t260901-18 侧解法（merge-base(main, branch) sha，_merge_base_ref
@@ -45,8 +48,8 @@ else:
     if "写集白名单基线" not in body:
         fails.append("第3项缺 merge-base 失败红 item（fail-closed）")
     # 第 3.5 项：bundle_pairs 用 main...branch 三点
-    if not re.search(r'git",\s*"diff",\s*"--name-only",\s*["\']main\.\.\.%s["\']\s*%\s*args\.branch', body):
-        if not re.search(r"main\.\.\.%s['\"]\s*%\s*args\.branch", body):
+    if not re.search(r'git",\s*"diff",\s*"--name-only",\s*["\']main\.\.\.%s["\']\s*%\s*(args\.branch|sc\[.branch.\])', body):
+        if not re.search(r"main\.\.\.%s['\"]\s*%\s*(args\.branch|sc\[.branch.\])", body):
             fails.append("第3.5项 bundle_pairs diff 应为 main...%s 三点口径")
 
 for f in fails:

@@ -114,7 +114,8 @@ try:
         # b1) settle_lane 现在按 REPO_ROOT 锚定相对路径：落盘收到正确 cwd（monkeypatch 拦截）
         captured = {}
 
-        def _fake_settle(cwd, ticket_id, stage_id, gen):
+        # t260907-06 票B：settle_lane 逐树化，settle 收 repo 锚（单仓=None 语义不变）
+        def _fake_settle(cwd, ticket_id, stage_id, gen, repo=None):
             captured["cwd"] = Path(cwd)
             return "captured"
 

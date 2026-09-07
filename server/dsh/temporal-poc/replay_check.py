@@ -46,6 +46,14 @@ def _candidate_pythons() -> list:
     elif ".lane" in parts:
         main = Path(*parts[: parts.index(".lane")])
         cands.append(main / "server" / "dsh" / "temporal-poc" / ".venv" / "bin" / "python")
+        # 票B（t260907-06）多仓泳道：POC 副本可能在 <proj>/.lane/<id>/<repo>/ 下的
+        # 某个子仓树里——逐子目录探测 .venv（主仓候选不变，单仓路径零回归）。
+        lane_container = Path(*parts[: parts.index(".lane") + 2])
+        if lane_container.is_dir():
+            for child in sorted(lane_container.iterdir()):
+                if child.is_dir() and child.name != "__pycache__":
+                    cands.append(child / "server" / "dsh" / "temporal-poc"
+                                 / ".venv" / "bin" / "python")
     return cands
 
 

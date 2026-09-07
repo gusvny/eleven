@@ -57,7 +57,10 @@ def main():
     ok("def _reap_agent_proc" in text, "_reap_agent_proc 已在真源定义")
 
     print("== merge_check 自愈段（①写集内自愈） ==")
-    mc = fn_body(text, "async def merge_check")
+    # t260907-06 票B 逐树重构：自愈段语义锚迁入 _merge_check_one_scope——
+    # 并集定位（锁语义不锁实现位置）。
+    mc = (fn_body(text, "async def merge_check") + "\n"
+          + fn_body(text, "async def _merge_check_one_scope"))
     ok(bool(mc), "merge_check 函数体可定位")
     if mc:
         auto_idx = mc.find("[auto-settle]")

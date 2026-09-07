@@ -433,7 +433,11 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
             worktree=str(args.get("worktree") or ""),
             branch=str(args.get("branch") or ""),
             template_workspace_dir=bool(getattr(cls, "TEMPLATE_WORKSPACE_DIR", False)),
-            project_root=project_root)
+            project_root=project_root,
+            # 票B（t260907-06）：多 repo 项目（父目录作根）由写集归属推导多仓泳道；
+            # 单仓项目（项目根=仓根）在 derive 内静默忽略，旧路径零回归。
+            repo_write_set=(args.get("write_set")
+                            if isinstance(args.get("write_set"), list) else None))
     except ValueError as e:
         return _err("ticket-start 参数非法：%s" % e)
     # 硬闸配套（KI-032）：显式给的绝对 workspace/worktree 必须落在注册目录内

@@ -50,10 +50,13 @@ def check(name, cond, detail=""):
 
 def gate36_section(src):
     """提取 merge_check 函数体 3.6 段（# 3.6 注释锚 → 下一个顶格编号注释锚）。"""
-    m = re.search(r"async def merge_check\(.*?\n(?=@activity\.defn|\Z)", src, re.S)
-    if not m:
+    # t260907-06 票B 逐树重构：3.6 语义锚迁入 _merge_check_one_scope——提取范围
+    # 覆盖两函数并集（锁语义不锁实现位置）。
+    m1 = re.search(r"async def merge_check\(.*?\n(?=@activity\.defn|\Z)", src, re.S)
+    m2 = re.search(r"async def _merge_check_one_scope\(.*?\n\n\ndef _scope_dirs", src, re.S)
+    if not (m1 or m2):
         return ""
-    body = m.group(0)
+    body = (m1.group(0) if m1 else "") + "\n" + (m2.group(0) if m2 else "")
     g = re.search(r"# 3\.6 UI 证据闸.*?(?=\n    # 4\. |\n    # 4\.5 |\Z)", body, re.S)
     return g.group(0) if g else ""
 

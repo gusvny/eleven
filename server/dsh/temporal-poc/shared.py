@@ -753,12 +753,151 @@ def default_lane_paths(ticket_id: str) -> Tuple[str, str]:
     return ".lane/" + wname, "lane/" + wname
 
 
+# ---------- 票B（t260907-06）：多 repo 项目（父目录作根、repos 为子目录）仓锚推导 ----------
+#
+# 目录模型真源=docs/design/sandbar项目接入契约v1.md §①a：多 repo 项目=父目录作项目
+# 目录、各 repo 为子目录。一票涉多仓时（由写集路径归属推导），泳道=<项目根>/.lane/<id>/
+# 普通目录容器，其下每仓一棵树 <lane>/<仓相对项目根路径>；单仓项目（项目根=仓根）
+# 不走本节任何函数的激活路径——行为零变化（回归面）。
+
+# refname 安全段清洗族（与 default_lane_paths alias 同一口径）：refname 非法字符
+# （空格/~/^/:/?/*/[/\ 等）统一压成 '-'，防 worktree add -b 直接 fail-closed
+# （review gen1 附条件 2）。
+REFNAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def sanitize_branch_segment(seg: str) -> str:
+    """仓目录名/路径段 → refname 安全段。清洗后为空兜底 'repo'（防全非法名字段）。"""
+    s = REFNAME_UNSAFE_RE.sub("-", str(seg)).strip("-")
+    return s or "repo"
+
+
+def flatten_branch_suffix(repo_rel: str) -> str:
+    """仓相对项目根路径 → 分支名后缀段（'/'→'-' 再过 refname 清洗）。
+
+    唯一性由仓路径唯一性构造保证（同 basename 形态不碰撞；嵌套仓本身
+    fail-closed，见 repos_under 不递归）。"""
+    return sanitize_branch_segment(str(repo_rel).replace("/", "-"))
+
+
+def repos_under(project_root) -> List[pathlib.Path]:
+    """项目根下可作泳道挂靠的 git 仓清单（本节唯一扫描真源）。
+
+    - 项目根本身含 .git（目录或 gitfile）→ [项目根]（单仓项目：调用方走旧
+      单仓路径，本清单仅作判定用）；
+    - 否则扫**一层**子目录（含 .git 目录或 .git 文件=worktree 形态仓）。
+    不递归：嵌套仓 fail-closed——resolve_repos_for_paths 的归属候选限定本集合，
+    集合外嵌套仓内的写集路径创建即拒收，不静默归上层仓（跨仓误结算比拒收更糟）。"""
+    root = pathlib.Path(project_root)
+    if (root / ".git").exists():
+        return [root]
+    repos: List[pathlib.Path] = []
+    if root.is_dir():
+        for child in sorted(root.iterdir()):
+            if child.is_dir() and (child / ".git").exists():
+                repos.append(child)
+    return repos
+
+
+def _repo_rel(repo: pathlib.Path, rels) -> str:
+    for r, rel in rels:
+        if r == repo:
+            return rel
+    return ""
+
+
+def resolve_repos_for_paths(project_root, paths) -> Dict[str, List[str]]:
+    """写集路径 → 所属仓归属（票B 仓锚推导单一真源）。
+
+    返回 {仓绝对路径字符串: [写集条目…]}；任一条目非法 → ValueError（创建即拒收，
+    把「跑 1.5 小时后才暴露」提前到创建瞬间）。口径：
+      - 条目必须是项目根相对 posix 路径（非绝对、无 .. 逃逸）；
+      - 归属=repos_under 集合内**最长前缀**仓；集合外（含嵌套仓内）→ ValueError；
+      - 空仓集合 → ValueError（父目录作根的项目一个仓都没有，开不了工单）。"""
+    root = pathlib.Path(project_root).resolve()
+    repos = repos_under(root)
+    if not repos:
+        raise ValueError("项目根 %s 下未发现任何 git 仓（多 repo 项目=父目录作根，"
+                         "需先建/clone 子仓再开票；引擎不代建仓）" % root)
+    # 仓 → 项目根相对 posix 前缀（长前缀优先，保归属最内层已登记仓）
+    rels = sorted(((r, r.relative_to(root).as_posix()) for r in repos),
+                  key=lambda x: len(x[1]), reverse=True)
+    owner_set = {str(r) for r in repos}
+    out: Dict[str, List[str]] = {}
+    for raw in paths:
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError("写集条目非法（非字符串或空白）: %r" % (raw,))
+        entry = raw.strip()
+        pp = pathlib.PurePosixPath(entry)
+        if pp.is_absolute() or ".." in pp.parts:
+            raise ValueError("写集条目必须为项目根相对路径且不得逃逸项目根: %r" % raw)
+        owner = None
+        for repo, rel in rels:
+            if entry == rel or entry.startswith(rel + "/"):
+                owner = repo
+                break
+        if owner is None:
+            raise ValueError("写集条目 %r 不落在项目根 %s 下任何 git 仓内"
+                             "（嵌套仓 fail-closed：嵌套仓内文件不可开票）" % (entry, root))
+        # 嵌套仓判定：归属路径的中途目录若自带 .git 且不在仓集合内 → 该条目实属
+        # 集合外嵌套仓，拒收（不静默归外层仓=错仓落账前奏；t260907-06 场景③ F2）。
+        cursor = owner
+        for part in entry[len(_repo_rel(owner, rels)):].split("/"):
+            cursor = cursor / part
+            if part and (cursor / ".git").exists() and str(cursor.resolve()) not in owner_set:
+                raise ValueError(
+                    "写集条目 %r 落在集合外嵌套仓 %s 内（嵌套仓 fail-closed："
+                    "嵌套仓语义属另票，不静默归外层仓 %s）" % (entry, cursor, owner))
+        out.setdefault(str(owner.resolve()), []).append(entry)
+    return out
+
+
+def rebase_write_set(write_set, repo_rel: str) -> List[str]:
+    """项目根相对写集 → 树根相对子集（多仓逐树白名单判据的重基单点）。
+
+    repo_rel=""（单仓）原样透传（回归面：单仓判据逐字节不变）；非空时剥仓前缀，
+    不属本仓的条目不进子集。条目恰等于仓目录名本身时不产出（写集语义是仓内
+    文件路径，创建校验已挡目录条目，这里兜畸形不炸）。"""
+    ws = list(write_set or [])
+    if not repo_rel:
+        return ws
+    prefix = repo_rel + "/"
+    return [p[len(prefix):] for p in ws
+            if isinstance(p, str) and p.startswith(prefix)]
+
+
+def build_repo_worktrees(project_root, write_set, lane_dir_name: str) -> List[Dict[str, str]]:
+    """由写集归属推导多仓泳道明细（meta.repo_worktrees 形状唯一构造点）。
+
+    返回 [{"repo": 仓相对项目根路径, "name": refname 安全段, "branch": 泳道分支}]；
+    树路径 = repo（同名构造，两边零漂移）。分支名 = lane/<泳道目录名>-<压平段>。
+    任一输入非法 → ValueError 透传（resolve_repos_for_paths 的 fail-closed 口径）。"""
+    if not write_set or not isinstance(write_set, list):
+        raise ValueError("多仓泳道推导需要非空写集（write_set 为归属推导唯一输入）")
+    root = pathlib.Path(project_root).resolve()  # macOS /var→/private/var 同源化
+    base = sanitize_branch_segment(lane_dir_name)
+    entries: List[Dict[str, str]] = []
+    seen_branch = set()
+    for repo_abs, _paths in resolve_repos_for_paths(project_root, write_set).items():
+        repo_rel = pathlib.Path(repo_abs).relative_to(root).as_posix()
+        name = flatten_branch_suffix(repo_rel)
+        branch = "lane/%s-%s" % (base, name)
+        if branch in seen_branch:
+            raise ValueError("多仓分支名碰撞: %s（压平清洗后仍同名的仓路径需人工改名）" % branch)
+        seen_branch.add(branch)
+        entries.append({"repo": repo_rel, "name": name, "branch": branch})
+    if not entries:
+        raise ValueError("多仓泳道推导产出空仓集合（写集 %r）" % (write_set,))
+    return entries
+
+
 def derive_lane_workspace(
         ticket_id: str, template_lane: str, lane: str = "",
         workspace: Optional[Dict[str, str]] = None,
         worktree: str = "", branch: str = "",
         template_workspace_dir: bool = False,
         project_root: str = "",
+        repo_write_set: Optional[List[str]] = None,
 ) -> Tuple[str, Optional[Dict[str, str]], str, str]:
     """lane / workspace / worktree / branch 的推导与校验（创建链路单一真源）。
 
@@ -801,6 +940,24 @@ def derive_lane_workspace(
                 "workspace.path（%s）与 worktree（%s）不一致——两字段必须同指一个泳道，"
                 "否则 merge_check/merge 与 prepare_workspace 各跑各的（t260824-11 教训）"
                 % (ws["path"], worktree))
+        # 票B（t260907-06）多仓推导：仅在**真多仓形态**激活——lane=worktree、
+        # project_root 给定、无显式 workspace/worktree 组合、项目根无 .git（父目录
+        # 作根）且其下扫得到子仓。任一条件不满足（含单仓项目=根含 .git、legacy
+        # 根无仓布局、dir 道、显式组合）→ repo_write_set 静默忽略，旧路径零回归
+        #（t260904-02 注册锚回归面）。真多仓下推导失败（逃逸/嵌套/不在仓内）→
+        # ValueError 创建即拒收（fail-closed，不给静默归仓）。
+        if (repo_write_set and lane == LANE_WORKTREE and project_root
+                and ws is None and not worktree):
+            _root = pathlib.Path(project_root)
+            if not (_root / ".git").exists() and repos_under(_root):
+                _lane_rel, _b = default_lane_paths(ticket_id)
+                _lane_dir = _lane_rel.rsplit("/", 1)[-1]
+                _entries = build_repo_worktrees(_root, repo_write_set, _lane_dir)
+                ws = {"type": LANE_WORKTREE,
+                      "path": project_root.rstrip("/") + "/" + _lane_rel,
+                      "repo_worktrees": _entries}
+                worktree = str(ws["path"])
+                branch = "lane/" + _lane_dir  # meta 兼容占位；真实分支逐仓在 repo_worktrees
         if ws is not None:
             worktree = worktree or ws["path"]
         elif worktree:
@@ -841,6 +998,23 @@ def lane_workspace_gate_error(meta: Dict[str, Any]) -> str:
                 % (ws["path"], wt))
     if not str(meta.get("branch") or ""):
         return "lane=worktree 但 branch 字段为空——泳道分支缺失，拒跑"
+    # 票B 多仓泳道：workspace.repo_worktrees 在场即多仓票——逐仓校验形状
+    # （repo/name/branch 非空字符串、branch 唯一、树路径=repo 同名构造）。
+    rw = ws.get("repo_worktrees")
+    if rw is not None:
+        if not isinstance(rw, list) or not rw:
+            return ("workspace.repo_worktrees 形状非法（须非空列表，实际 %r）——多仓泳道"
+                    "明细缺失，拒跑（t260907-06 票B：meta.repo_worktrees=唯一真源）" % (rw,))
+        seen = set()
+        for e in rw:
+            if not (isinstance(e, dict) and isinstance(e.get("repo"), str) and e["repo"]
+                    and isinstance(e.get("name"), str) and e["name"]
+                    and isinstance(e.get("branch"), str) and e["branch"]):
+                return ("workspace.repo_worktrees 条目形状非法（须 {repo,name,branch} 非空字符串，"
+                        "实际 %r）——拒跑" % (e,))
+            if e["branch"] in seen:
+                return ("workspace.repo_worktrees 分支名碰撞: %s——拒跑" % e["branch"])
+            seen.add(e["branch"])
     return ""
 
 
@@ -1267,6 +1441,12 @@ class WorkspacePrep:
     workspace: Optional[Dict[str, str]] = None  # {type: worktree|dir, path} | None（主树=None）
     branch: str = ""                            # worktree 泳道的新分支名（create 已登记）
     base_ref: str = ""                          # 基点（create 时主树 HEAD；空=缺省 HEAD）
+    # 票B（t260907-06）多仓通道：write_set+project_root 在场且项目根无 .git（父目录
+    # 作根的多 repo 项目）→ prepare 由写集归属推导 repo_worktrees（meta 唯一真源在
+    # 建票链 derive_lane_workspace；prepare 按真源推导物校验盘面）。字段带默认值=
+    # 存量 RUNNING 实例重放缺键回落，不破回放。单仓项目两字段被忽略（零回归）。
+    write_set: List[str] = field(default_factory=list)
+    project_root: str = ""
 
 
 @dataclass
