@@ -540,6 +540,18 @@ SCENARIOS = [
     ("t260905-10-lane-identity-guard",
      "泳道落盘身份依赖守卫（t260905-10 面③，260906 宿主 ~/.gitconfig 消失三轨 settle 全 FAILED，灰盒 L3）：git 身份全缺→prepare_workspace 开工前 ok=False/failed 红字点名 user.name/user.email（半缺腿钉死点名精确性，探针 GIT_CONFIG_NOSYSTEM+GLOBAL 夹具防系统级假红）；身份在位复用不受扰；repo 级 config 补救放行（探针锚泳道 worktree=共享主仓 config）；dir 型工作区无 commit 不查；created 路径缺失失败且泳道不落半成品（fail-fast 在 worktree add 之前）；LANE_DEP_SYMLINKS 含 temporal-poc/.venv：泳道自动软链解析到主仓、幂等不重复（260825「泳道无消费方」拍板被 260906 19 号闸实测推翻的陪伴断言）；点名断言解析「git 身份缺失（…）」括注为集合（处置句恒提两键名，子串断言吹不了精确性）。实现段落地前红属预期（守卫缺席=缺失腿照旧放行=红），arbitrate/merge 期必须绿；与 developer L1 intent 不同面：本条守 prepare_workspace 两分支×身份矩阵×deps 软链的回执契约",
      "python3 integration/t260905-10/sc_lane_identity_guard.py", "ro"),
+    ("t260907-07-epic-anchor-two-projects",
+     "立项目录锚项目感知×env 自测语义（t260907-07，GAP-B 修复回归，验收①②校验面）：双项目夹具（engine/external 桶同名 gap-b+各自异名，tmp per-key 注册表）下 resolve_epics_dir×validate_epic_code 各取各的项目主目录 notes/epics——同名各自通过（改造前 external 误报「立项代号不存在」的面）、异名自桶通过、异名跨桶拒绝且文案带该项目实际查询目录（诊断信息，不误指引擎仓）；未知项目 key fail-closed 不静默兜底；SUYOU_EPICS_DIR 自测语义不变（两项目同指 env 目录优先于项目锚）、env 空串回落项目锚、env 指不存在目录报错「目录为空或不存在」可辨不崩。shared stdlib 直驱秒级零 docker；实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；与 developer L1（畸形输入细目单测）intent 不同面",
+     "python3 integration/t260907-07/sc_epic_anchor_two_projects.py", "ro"),
+    ("t260907-07-epic-anchor-same-source",
+     "UI×CLI 立项目录同源同规（t260907-07 验收③）：同一 per-key 注册表夹具下 Py resolve_epics_dir(key) 与 TS resolveEpicsDir(primaryDir(findProject(key))) 两项目各自全等且等于各自主目录 notes/epics（非引擎仓锚）、不串桶；SUYOU_EPICS_DIR 覆盖两侧同款（Py==TS==env 目录）。同规口径边界：断言经同一注册源+同一拼装规则同源，不覆盖「工单台起在非项目注册主目录」部署形态（repo=config.repo 时 UI 仍锚其 repo——方案 C4）。node type-stripping 直跑+python3 子进程，子进程不可得=ENV_FAIL exit 2；实现落地前红属预期，arbitrate/merge 期必须绿",
+     "node integration/t260907-07/sc_epic_anchor_same_source.mjs", "ro"),
+    ("t260907-07-epic-cli-ticket-start",
+     "开票入口 epic 校验项目感知用户路径（t260907-07 验收①②端到端，docker 测试台单实例）：外部项目 ticket-start 关联其主目录立项单成功（同名 gap-b+异名各自通过）、engine 桶行为不变（同名+异名照常）；负路径连接前拒收零 Temporal 依赖真跑——epic 确缺文案带该项目实际目录、跨桶异名不误指 engine 目录、未知 project 硬闸拒收（KI-032 面回归）。被测 env 显式清 SUYOU_EPICS_DIR 防宿主泄漏改判锚，显式 SUYOU_TARGET_HOST 指台（绝不连生产红线）；docker/镜像/SDK/隔离台库缺席=ENV_FAIL exit 2；实现落地前红属预期，arbitrate/merge 期必须绿",
+     "python3 integration/t260907-07/sc_epic_cli_ticket_start.py", "exclusive"),
+    ("t260907-07-epic-next-prepare-project",
+     "立项预跑读档案项目感知接线（t260907-07 同票接线面=merge 收口预跑不再对外部项目静默跳过）：prepare_epic_next 带 project 读到该项目主目录立项全文（exists+全文匹配+state_key 可算）；不串桶（engine 异名对 external 档案缺失）；project 空=引擎锚兜底（真仓只读缺档软失败）且 env SUYOU_EPICS_DIR 优先于兜底命中（自测语义）；档案缺失/代号形状非法 exists=False 防穿。_epic_ticket_rows 桩替 workflow 边界（selfcheck E 先例）；temporalio SDK 缺席=ENV_FAIL exit 2；实现落地前红属预期，arbitrate/merge 期必须绿；与 selfcheck E 段（env 夹具单点自测）intent 不同面",
+     "python3 integration/t260907-07/sc_epic_next_prepare_project.py", "ro"),
 
     # ---- t260907-01：移仓收尾（旧仓路径清扫）——验收口径回归锚 ----
 

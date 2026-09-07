@@ -58,6 +58,7 @@ from shared import (
     ticket_data_dir,
     ticket_search_attributes,
     ticket_task_queue,
+    resolve_epics_dir,
     validate_background_refs,
     validate_epic_code,
     validate_write_set_args,
@@ -412,10 +413,13 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
     except ValueError as e:
         return _err("ticket-start 拒收（project 未锚定，开票走正规入口请先注册项目）：%s" % e)
     project_root = str(proj["dirs"][0])
-    # 立项关联（epic-linkage）：--epic 强校验单点——代号形状白名单 + notes/epics/<代号>.md
-    # 必须存在，否则拒收（立项验收标准 2）。空 = 不关联立项（允许）。
+    # 立项关联（epic-linkage）：--epic 强校验单点——代号形状白名单 + 立项档案存在。
+    # 项目感知（t260907-07）：校验目录走 resolve_epics_dir(project)——锚项目注册
+    # 条目主目录 notes/epics（与工单台 UI resolveEpicsDir 同源同规）；env
+    # SUYOU_EPICS_DIR 现读优先=自测语义保留；按 key 单点解析的取舍（多一次注册表
+    # 装载，开票一次性操作无害）见工单方案 C6。空 = 不关联立项（允许）。
     try:
-        epic = validate_epic_code(str(args.get("epic") or ""))
+        epic = validate_epic_code(str(args.get("epic") or ""), resolve_epics_dir(project))
     except ValueError as e:
         return _err(str(e))
     # 泳道参数推导+校验单点（t260824-04/-10/-11 三次事故）：lane=worktree 的

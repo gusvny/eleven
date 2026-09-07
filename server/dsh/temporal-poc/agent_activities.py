@@ -52,7 +52,6 @@ from temporalio import activity
 import shared
 from shared import (
     REPO_ROOT,
-    EPICS_DIR,
     EPIC_CODE_RE,
     EPIC_SA_NAME,
     STAGE_DISPATCH_KIND,
@@ -1076,8 +1075,16 @@ async def prepare_epic_next(args: EpicNextPrepArgs) -> EpicNextPrepResult:
         activity.logger.warning("[prepare_epic_next] 代号形状非法：%r", code)
         return EpicNextPrepResult(exists=False)
     markdown = ""
-    path = EPICS_DIR / (code + ".md")
-    if path.is_file():
+    # 项目感知（t260907-07）：档案目录走 resolve_epics_dir(args.project)——env 现读
+    # 优先→项目主目录 notes/epics→空 project 引擎锚兜底（生产不可达，仅夹具/在飞
+    # 工单兼容；resolve 抛 ValueError 视同档案不可读，软失败总则兜住不阻塞 merge）。
+    try:
+        epics_dir = shared.resolve_epics_dir(getattr(args, "project", ""))
+        path = epics_dir / (code + ".md")
+    except ValueError as e:
+        activity.logger.warning("[prepare_epic_next] 项目 %r 锚定失败：%s", getattr(args, "project", ""), str(e)[:200])
+        path = None
+    if path is not None and path.is_file():
         try:
             markdown = path.read_text("utf-8")
         except Exception as e:

@@ -720,7 +720,10 @@ class DevLaneWorkflow:
         try:
             prep = await workflow.execute_activity(
                 prepare_epic_next,
-                EpicNextPrepArgs(ticket_id=self.ticket_id, epic=epic),
+                # project 感知（t260907-07）：prepare 读立项档案锚项目主目录
+                # （meta 随 TicketInput.project 携带，t260904-02 起入口必传非空）。
+                EpicNextPrepArgs(ticket_id=self.ticket_id, epic=epic,
+                                 project=str(self.meta.get("project") or "")),
                 start_to_close_timeout=SHORT, retry_policy=SUGGEST_RETRY)
             if not prep.exists:
                 self._log("预跑跳过：立项单 %s 档案不可读（merge 照常收口）" % epic)

@@ -69,17 +69,55 @@ def project_search_attributes(project: str):
 #   bin/temporal operator search-attribute create --name EpicCode --type Keyword
 # 测试环境（docker-compose.test.yml temporalite）启动后同样 operator create 一次。
 EPIC_SA_NAME = "EpicCode"
-# 立项档案目录（env SUYOU_EPICS_DIR 可覆盖——自测指向临时目录，仿 SUYOU_WORKFLOWS_DIR 先例）。
+# legacy 常量：import 时固化 env（「先设 env 后 import」语义），运行路径一律走
+# resolve_epics_dir（t260907-07 立项单校验项目感知化）。接线后剩余消费面：
+#   1. validate_epic_code 默认参数路径（唯一生产消费=server/tools/ticket.py:422
+#      list --epic 过滤，写集外遗留——对 external 项目仍按引擎锚拒收）；
+#   2. 自测/夹具经 env SUYOU_EPICS_DIR 覆盖（自测语义，与 resolve_epics_dir 的
+#      env 现读同键）。
+# prepare_epic_next（agent_activities）已迁 resolve_epics_dir，不再消费本常量。
 EPICS_DIR = pathlib.Path(os.environ.get("SUYOU_EPICS_DIR") or (REPO_ROOT / "notes" / "epics"))
 # 代号形状白名单：沿用 PROJECT_KEY_RE 字符集，同时防 ../../ 路径穿越。
 EPIC_CODE_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
 
 
-def validate_epic_code(code: str) -> str:
-    """ticket-start --epic 强校验（单点，client.py 调用；ticket.py 只透传不双份实现）。
+def resolve_epics_dir(project_key):
+    """立项档案目录解析单点（t260907-07：CLI 校验锚点=项目注册条目主目录，与
+    工单台 UI resolveEpicsDir 同源同规——同一注册表、同一拼装规则 <主目录>/notes/epics）。
 
-    空串放行（允许无 epic 工单）→ 返回 ""。形状非法 / 立项档案不存在 → ValueError。
-    返回归一后的代号（原样；白名单已约束形状）。
+    三级解析（仿 registry_root 的「每次调用现读 env」先例；照搬取舍逐项：
+    ①env 空串→回落项目锚，带；②env 先 import 后设→现读即生效，带（本票主旨）；
+    ③env 指向不存在目录→不预检，由调用侧报错文案兜住，带；④legacy env 互压
+    （registry 侧 SUYOU_PROJECTS_YAML＞SANDBAR_PROJECTS_DIR）→不带（epic 目录无
+    legacy 单文件模式，引入反增歧义）；⑤隔离条目/空表抛错语义→经 lookup_project
+    复用天然继承）：
+      1. env SUYOU_EPICS_DIR 非空 → 现读即用（自测语义不变）；
+      2. 否则 lookup_project(project_key)['dirs'][0] / notes/epics（未知 key/
+         隔离条目 ValueError fail-closed，不静默退引擎仓——契约④三态总纲）；
+      3. project_key 空/None → 兜底 REPO_ROOT/notes/epics（引擎锚；生产不可达
+         路径——ticket-start 入口拦空 project，仅夹具/在飞工单兼容用，不构成
+         语义承诺）。
+    """
+    env_dir = os.environ.get("SUYOU_EPICS_DIR") or ""
+    if env_dir.strip():
+        return pathlib.Path(env_dir)
+    key = str(project_key or "").strip()
+    if not key:
+        return EPICS_DIR
+    proj = lookup_project(key)
+    return pathlib.Path(str(proj["dirs"][0])) / "notes" / "epics"
+
+
+def validate_epic_code(code: str, epics_dir=None) -> str:
+    """ticket-start --epic 强校验（校验单点，client.py 调用；ticket.py 只透传不
+    双份实现）。注意：校验单点≠目录锚点单点——目录解析统一走 resolve_epics_dir。
+
+    epics_dir 缺省 None = legacy EPICS_DIR（引擎锚，ticket.py list --epic 遗留
+    路径）；调用方应显式传 resolve_epics_dir(project) 做项目感知校验。
+
+    空串放行（允许无 epic 工单）→ 返回 ""。形状非法 / 立项档案不存在 → ValueError
+    （文案带实际查询目录——项目锚下即项目主目录 notes/epics，GAP-B 类问题的
+    关键诊断信息）。返回归一后的代号（原样；白名单已约束形状）。
     """
     code = str(code or "").strip()
     if not code:
@@ -87,9 +125,10 @@ def validate_epic_code(code: str) -> str:
     if not EPIC_CODE_RE.match(code):
         raise ValueError(
             "立项代号形状非法：%r（要求 %s，小写字母/数字/连字符）" % (code, EPIC_CODE_RE.pattern))
-    path = EPICS_DIR / (code + ".md")
+    base = pathlib.Path(epics_dir) if epics_dir is not None else EPICS_DIR
+    path = base / (code + ".md")
     if not path.is_file():
-        existing = sorted(p.stem for p in EPICS_DIR.glob("*.md")) if EPICS_DIR.is_dir() else []
+        existing = sorted(p.stem for p in base.glob("*.md")) if base.is_dir() else []
         raise ValueError(
             "立项代号不存在：%r（%s 无此档案）。现有代号：%s"
             % (code, path, "、".join(existing) if existing else "（目录为空或不存在）"))
@@ -138,10 +177,13 @@ def epic_state_key(rows: List[Dict[str, Any]], current_ticket_id: str = "") -> s
 
 @dataclass
 class EpicNextPrepArgs:
-    """prepare_epic_next activity 入参：立项代号 + 触发工单（state_key 强制 closed 口径用）。"""
+    """prepare_epic_next activity 入参：立项代号 + 触发工单（state_key 强制 closed 口径用）。
+    project（t260907-07）：项目 key，prepare 读立项档案按 resolve_epics_dir(project)
+    锚项目主目录；缺省空串=引擎锚兜底（在飞工单旧载荷兼容，dataclass 默认值解码）。"""
 
     ticket_id: str
     epic: str
+    project: str = ""
 
 
 @dataclass

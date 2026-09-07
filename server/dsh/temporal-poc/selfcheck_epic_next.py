@@ -225,8 +225,12 @@ agent_activities.REPO_ROOT = _orig_root
 section("E. prepare_epic_next（fixture + monkeypatch 查询）")
 _epics = _P(_tf.mkdtemp(prefix="suyou-selfcheck-en-epics-"))
 (_epics / "demo-epic.md").write_text(EPIC_MD, "utf-8")
-_orig_epics = agent_activities.EPICS_DIR
-agent_activities.EPICS_DIR = _epics  # prepare 读的是 agent_activities 命名空间的绑定
+# t260907-07：prepare 改走 shared.resolve_epics_dir（env SUYOU_EPICS_DIR 现读优先），
+# 夹具改 env 注入（与 ：16 docstring「SUYOU_EPICS_DIR 临时 fixture」对齐）；不再
+# monkeypatch agent_activities.EPICS_DIR（该绑定已无消费点）。空 project 在 env
+# 判定之后才兜底引擎锚，故夹具对下面全部构造（均不传 project）生效。
+_orig_epics_env = os.environ.get("SUYOU_EPICS_DIR")
+os.environ["SUYOU_EPICS_DIR"] = str(_epics)
 _orig_rows = agent_activities._epic_ticket_rows
 
 
@@ -255,7 +259,10 @@ prep2 = asyncio.run(prepare_epic_next(EpicNextPrepArgs(ticket_id="t", epic="miss
 ok(prep2.exists is False, "档案不存在 → exists=False（workflow 侧留痕跳过）")
 prep3 = asyncio.run(prepare_epic_next(EpicNextPrepArgs(ticket_id="t", epic="../etc")))
 ok(prep3.exists is False, "代号形状非法 → exists=False（防穿）")
-agent_activities.EPICS_DIR = _orig_epics
+if _orig_epics_env is None:
+    del os.environ["SUYOU_EPICS_DIR"]
+else:
+    os.environ["SUYOU_EPICS_DIR"] = _orig_epics_env
 
 # ---------------------------------------------------------------- F. suggest_next stub
 section("F. suggest_next stub 路径（SUYOU_SUGGEST_STUB，零模型/零 spawn）")
