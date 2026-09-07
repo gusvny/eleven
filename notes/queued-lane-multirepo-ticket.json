@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260907-06",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "多repo项目泳道挂子仓（scaffold 票B 兑现）：一票多 worktree 同居一 lane",
+  "user_request": "做什么：兑现设计债（scaffold.py 三处注释「多 repo 支持与工单泳道挂靠改造另行立项=票B」＋用户手册多 repo 模型：项目=父目录作根、repos 为子目录、一票涉多 repo 时多棵树同居一 lane）。现状=_lane_repo_root 把项目根当唯一 git 仓（.lane 父目录），子仓项目的 worktree add/复用/结算全断。改造：①泳道仓锚从「项目根=唯一仓」改为「写集/票面路径→所属子仓」推导（一票多仓=lane 内多棵树，结算各自对仓）；②prepare_workspace/结算/_is_worktree_of 全链跟着走；③单仓项目行为零变化（回归面）。\n来源=dengzhufpv 项目（宿主 260907 实测受阻，项目侧 gap 报告 GAP-A）。\n怎么算好：夹具=假多仓项目（父目录+两个子 git 仓）开票→泳道开进正确子仓→改动结算回正确仓；单仓项目场景族零回归。",
+  "spec": "范围=server/dsh/temporal-poc/（agent_activities/shared）＋integration/（多仓夹具场景族）。验收：①多仓夹具票开票→write_set 路径落两子仓→lane 两树并存→结算各自落正确仓；②单仓场景族零回归；③用户手册多 repo 章节与实现一致（文档核对腿）。红线：不代用户建仓/搬码（那是项目侧用户行为）。",
+  "write_set": ["server/dsh/temporal-poc/", "integration/"],
+  "deliverables": "多仓泳道能力＋夹具场景族（票B 兑现）"
+}

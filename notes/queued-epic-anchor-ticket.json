@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260907-07",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "立项单校验项目感知化（CLI×工单台锚点一致）",
+  "user_request": "做什么：修复 epic-linkage 双锚点分裂——CLI ticket-start 的 epic 存在性校验查引擎仓 notes/epics/（shared.py EPICS_DIR 锚 REPO_ROOT，env 覆盖注明自测用），工单台 UI（node.ts resolveEpicsDir）查项目主目录 notes/epics/。项目按设计把立项单放自己根下时 CLI 拒收「立项代号不存在」。改造：CLI 校验锚点=项目注册条目主目录（与 UI 同源同规：env 覆盖保留自测语义，运行路径一律项目感知）。\n来源=dengzhufpv 项目 gap 报告 GAP-B（宿主 260907 转来）。\n怎么算好：夹具=两项目（引擎项目+外部项目）各放同名/异名立项单，CLI 开票校验取各自项目的；env 覆盖行为不变（自测用途）；既有场景零回归。",
+  "spec": "范围=server/dsh/temporal-poc/（client/shared）＋integration/（双项目夹具场景）。验收：①外部项目立项单在其自己根下→CLI 开票关联成功；②引擎项目行为不变；③UI 与 CLI 读到同一份（同源断言）。",
+  "write_set": ["server/dsh/temporal-poc/", "integration/"],
+  "deliverables": "epic 锚点项目感知＋双项目夹具场景"
+}
