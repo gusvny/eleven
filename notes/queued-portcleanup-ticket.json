@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260907-01",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "移仓收尾：smoke/调试件硬编码旧仓路径清扫（移仓验收工单）",
+  "user_request": "做什么：宿主已物理移走 /Users/user/Documents/suyou 完成迁移终极验收。清扫仍指向旧路径的 smoke/调试文件：①server/dsh/ui-check/.debug-chat.mjs（REPO_ROOT/LANE/cwd 三处硬编码）；②server/dsh/workbench/smoke/agent-live.mjs、sessions.mjs、projects.mjs（旧仓路径/注释指向）；③server/dsh/workbench/tests/capture-stale-banner.mjs 默认 SUYOU_CONSOLE_CMD 口径确认（profile suyou 软链已指向 sandbar，确认无需改或改为 sandbar）。原则：改路径为本仓相对推导（REPO_ROOT 自 script 位置），不引入新环境变量；SUYOU_* env 名是历史债不动名只清指向。\n为什么：移仓后这些文件按旧路径必炸，留着=下次用的人踩雷。\n怎么算好：三文件路径全为本仓相对推导；grep 全仓（排除 node_modules/.lane）无 /Users/user/Documents/suyou 字面量（docs/notes 历史文档除外）；smoke 双文件 node --check 过。",
+  "spec": "依据=移仓审计（integration 260907）＋宿主移仓动作已发生。范围=server/dsh/ui-check/.debug-chat.mjs＋server/dsh/workbench/smoke/*.mjs＋server/dsh/workbench/tests/capture-stale-banner.mjs。验收：①grep 断言零旧路径字面量（历史文档豁免）；②node --check 三文件过；③本票自身走完七段=移仓后首张全链工单（兼做引擎健康实证）。",
+  "write_set": ["server/dsh/ui-check/", "server/dsh/workbench/smoke/", "server/dsh/workbench/tests/"],
+  "deliverables": "旧路径清扫＋移仓后首张全链工单实证"
+}
