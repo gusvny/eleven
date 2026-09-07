@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260907-04",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "命名清理①：SUYOU_* 环境变量→SANDBAR_*＋队列 suyou-poc→sandbar（引擎面，兼容别名过渡）",
+  "user_request": "做什么：宿主令（t260907-02 泳道 HOST_NOTE v3/v6 命名表）的引擎面执行——①全部 SUYOU_* 环境变量改名 SANDBAR_*（SUYOU_AGENT_CMD/SUYOU_TASK_QUEUE/SUYOU_CAPTURE_*/SUYOU_PLAYWRIGHT_MODULE 等全量清单先 grep 落册）：代码引用全换，过渡期读侧兼容（先读 SANDBAR_* 再回落 SUYOU_*，留一版过渡注释与退役期限）；②任务队列 suyou-poc→sandbar：shared.py TASK_QUEUE 缺省换新名，worker 注册双队列过渡（新+旧同时 poll，老 workflow 自然流干后撤旧——撤旧条件写注释）；③泳道协调目录 .suyou/→.sandbar/：引擎创建侧换新名，读侧对旧名做回落（既有在飞泳道不炸）。\n为什么：宿主令「名字的清理要搞干净」（260907）；引擎面先行=与插件面（另一张票）面不相交可并行。\n怎么算好：全仓 grep 零新引用（SUYOU_ 字面量只允许出现在兼容回落行与历史文档）；场景族复跑绿；双队列过渡在案。",
+  "spec": "范围=server/dsh/temporal-poc/＋integration/（引用面）＋server/tools/。红线：不动插件目录（另一票面）；不动目录名（第三票面）。验收：①grep 断言（新名全量+旧名只在兼容行/历史文档）；②queue 双注册可证（worker 日志两队列）；③全套场景复跑绿。",
+  "write_set": ["server/dsh/temporal-poc/", "integration/", "server/tools/"],
+  "deliverables": "env/队列/泳道目录三处引擎面改名＋兼容过渡"
+}

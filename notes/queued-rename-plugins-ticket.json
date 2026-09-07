@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260907-05",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "命名清理②：插件包 suyou-*→sandbar-*＋路由前缀 /suyou-workbench/→/sandbar-workbench/（插件面）",
+  "user_request": "做什么：宿主令命名表的插件面执行——①11 个插件目录内 package.json 的 name 字段 suyou-*→sandbar-*（suyou-workbench/suyou-admin-ui/suyou-knowledge/suyou-providers/suyou-temporal-tools 等）；②路由前缀 /suyou-workbench/→/sandbar-workbench/（node.ts 61 处＋客户端引用＋场景/capture 脚本引用同票改）；③profile 软链农场重指（node_modules/suyou-workbench→../../workbench 换 sandbar-workbench 同名链，两 profile 都改）；④suyou-tools.ts 文件名与内部标识随票（→sandbar-tools.ts，profile 引用同步）。\n为什么：宿主令 260907；与引擎面票（t260907-04）面不相交可并行。\n怎么算好：控制台重启后插件按新名装载、工单台面板/路由全通；旧前缀 410/301 策略明确（建议直接换不留旧，控制台属宿主重启边界由宿主配合一次）。",
+  "spec": "范围=server/dsh/workbench/＋其余插件目录＋server/dsh/profile*/＋integration/（引用面）。红线：不动 SUYOU_* env（t260907-04 面）；不动目录结构（第三票面）。验收：①grep 零 suyou-workbench 前缀残留（历史文档除外）；②插件自检/工单台场景族绿；③profile 农场新链在位。",
+  "write_set": ["server/dsh/workbench/", "server/dsh/suyou-admin-ui/", "server/dsh/suyou-knowledge/", "server/dsh/suyou-providers/", "server/dsh/suyou-temporal-tools/", "server/dsh/profile/", "server/dsh/profile-headless/", "integration/"],
+  "deliverables": "插件包名/路由前缀/农场链/tools 文件名四处插件面改名"
+}
