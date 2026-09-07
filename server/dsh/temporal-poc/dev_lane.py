@@ -1416,6 +1416,14 @@ class DevLaneWorkflow:
                     phase = "acceptance"
                     continue
                 if route.startswith("blocked:"):
+                    # KI-061（260908）：超限 blocked 唤醒死锁修复——照格式纠正分支同款
+                    # 单边重置：作废 memoized 仲裁结论，retry_qc 唤醒后真重跑 arbitrate
+                    # 边（prompt 重建含 host_ruling 注入的宿主终裁，此轮可见）；走查
+                    # 结果留内存不重跑（成本高且结论稳定，同格式分支取舍）。不重置则
+                    # 唤醒后 join 吃 memoized arb_res 立即再 blocked、arbitrate 永不
+                    # 重 spawn——宿主裁定无可达消费点（t260907-10 卡闸实锤）。
+                    arb_done = False
+                    arb_res = None
                     await self._blocked("arbitrate", route.split(":", 1)[1])
                     continue
                 if verdict == "tests-fault":
@@ -1577,6 +1585,14 @@ class DevLaneWorkflow:
                     phase = "acceptance"
                     continue
                 if route.startswith("blocked:"):
+                    # KI-061（260908）：超限 blocked 唤醒死锁修复——照格式纠正分支同款
+                    # 单边重置：作废 memoized 仲裁结论，retry_qc 唤醒后真重跑 arbitrate
+                    # 边（prompt 重建含 host_ruling 注入的宿主终裁，此轮可见）；走查
+                    # 结果留内存不重跑（成本高且结论稳定，同格式分支取舍）。不重置则
+                    # 唤醒后 join 吃 memoized arb_res 立即再 blocked、arbitrate 永不
+                    # 重 spawn——宿主裁定无可达消费点（t260907-10 卡闸实锤）。
+                    arb_done = False
+                    arb_res = None
                     await self._blocked("arbitrate", route.split(":", 1)[1])
                     continue
                 # 非 pass：本轮并行走查结果作废（回路收敛后 run_integration_tests 入口
