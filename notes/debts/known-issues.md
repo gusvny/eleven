@@ -590,3 +590,8 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 现象：t260907-05 插件改名落 main 后宿主首次重启 console 即崩（loader 解析 sandbar-* 全 ERR_MODULE_NOT_FOUND）——profile 农场软链是机器层状态不入 git（README 制式：新 checkout/改名后重建），merge 与重启之间无人执行重建。
 - 把关教训：改名/新增插件/挂载变更类票，落地交接必须含「机器层生效步骤」（农场重建制式/重启顺序）；lane 自身验证用 lane 本地农场（隔离台绿）≠机器农场在位（真机红）——台面绿真机红第五次。
 - 处置：integration 侧 merge 交接清单加「机器层生效步骤」必答项（立即可行，随本次开始执行）；自动化（落地钩子自动重建农场）挂 t260907-10 目录重构后评估。
+
+## KI-059 会话日志撕裂→resume 必炸（260907 晚两连，t260907-11 双角色同坑）
+- 现象：lane agent 进程被杀时会话 jsonl.zstd 半写撕裂；dsh-headless-resume 读坏帧 rc=1，连「回落新建同 id 会话」也崩在同文件——workflow 进 blocked 等人工隔离。
+- 已两连：developer 与 integration 角色同一次 kill 事件先后中招；手工处置=隔离坏文件到 /tmp/corrupt-sessions + retry_qc。
+- 根治方向（dsh 平台侧，非本仓）：resume 读侧对末帧撕裂容错（截断续跑）＋回落新建不得再读坏文件。排队不紧急，随小改进批次。
