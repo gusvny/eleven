@@ -575,6 +575,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 现象：create_plan rework 轮 agent 连续交空 files_changed（01/03 两票各 2-3 轮被 KI-049 拒），根因=rework 重跑的 prompt 不含回执 schema 提醒（首轮 prompt 有，rework prompt 组装丢了这段）。
 - 影响：每票多耗 1-2 小时（打回-重跑-再拒循环）。
 - 处置：小改进票（build_stage_prompt 对 rework gen>0 的 create_plan 补回执格式段），排队不紧急；本日两票已靠 rework note 手工带指令解套。
+- 260907 补记（dengzhufpv 侧 t260907-09 同坑二次实锤，宿主转报）：语义混淆面确认——agent 把文件填 deliverables（自由文本）而非 files_changed（契约字段），以为交差。修法定向：①rework 轮 prompt 补回执格式段；②KI-049 红灯文案自带字段分工教学（拒收即教）；③派活契约补两字段分工句。**明确不采纳**「写集刷新吃 deliverables」——散文字段入授权白名单=污染写集闸（KI-049 单一真源原则）。
 
 ## KI-057 工单台 host 全家静态锚引擎仓（宿主 16:48 实报，dengzhufpv 侧排查＋integration 复核实锤）
 - 症状：外部项目（dengzhufpv）工单变更 tab 空（API 实测 source: none，"worktree 越出仓库根"——防穿越闸误伤跨项目泳道）。
