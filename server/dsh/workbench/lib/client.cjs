@@ -2374,9 +2374,7 @@ async function injectSessionCharter(sessions, staged, projectKey, notify) {
 */
 function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDir }) {
 	const list = sessions.list;
-	const subscribe = (0, react.useCallback)((fn) => list.subscribe(fn), [list]);
-	const getSnapshot = (0, react.useCallback)(() => list.getSnapshot(), [list]);
-	const listState = (0, react.useSyncExternalStore)(subscribe, getSnapshot);
+	const listState = (0, react.useSyncExternalStore)((0, react.useCallback)((fn) => list.subscribe(fn), [list]), (0, react.useCallback)(() => list.getSnapshot(), [list]));
 	const ledger = (0, react.useSyncExternalStore)(subscribeLedger, getLedgerSnapshot);
 	const persist = (0, react.useCallback)((entries) => {
 		persistLedger(entries);
@@ -2920,6 +2918,13 @@ const DERIVE_TOKENS_CSS = `:root{
 --dsw-derive-dark-accent:#7ab8ff;
 --dsw-derive-dark-warn-bg:#7a4a06;
 --dsw-derive-dark-warn-fg:#ffe9c4;
+/* 暗面板面位扩展（t260907-08）：docs 视图代码块（pre/.md-code/.md-cl/.md-copy）需要
+ * 与 dark-bg 成对的边框/浮起面/悬停面三个面位——值取 GitHub Dark 系（与改造前
+ * docs.tsx 写死值同源），搭配固定不翻转。登记理由：docs.tsx 令牌化时按消费点驱动
+ * 盘点，既有 9 个 dark 令牌覆盖不了「面板内边框/浮起 chip」语义，缺才增（方案 §3）。 */
+--dsw-derive-dark-border:#2a2f3a;
+--dsw-derive-dark-surface:#21262d;
+--dsw-derive-dark-surface-2:#30363d;
 }`;
 //#endregion
 //#region src/client/project-session-row.tsx
@@ -2975,7 +2980,7 @@ const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
  * data-wb-psess-new 不变。 */
 .wb-psess-new.wb-psess-new-labeled { width:auto; height:22px; padding:0 8px;
   gap:4px; font-size:11.5px; }
-.wb-psess-new:disabled { opacity:0.4; cursor:default; }
+.wb-psess-new:disabled { cursor:default; color:var(--dsw-derive-muted,#57606a); background:var(--dsw-derive-surface,#f6f8fa); }
 .wb-psess-tab { box-sizing:border-box; position:relative; min-width:24px;
   height:24px; flex:none; display:inline-flex; align-items:center;
   justify-content:center; padding:0 3px; border-radius:4px;
@@ -3076,14 +3081,13 @@ function ProjectSessionRow(props) {
 	const confirmTab = confirmId === null ? null : tabs.find((t) => t.id === confirmId) ?? null;
 	const showNotice = notice !== "" && (noticeProject === void 0 || noticeProject === projectKey);
 	const color = projectColor(projectKey);
-	const colorVars = {
-		"--wb-psess-color": color,
-		"--wb-psess-hover": hexToRgba(color, .16)
-	};
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-psess",
 		"data-wb-psess-row": "",
-		style: colorVars,
+		style: {
+			"--wb-psess-color": color,
+			"--wb-psess-hover": hexToRgba(color, .16)
+		},
 		children: [
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: PSESS_STYLES }),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
@@ -4207,7 +4211,7 @@ const PMOD_CSS = `${DERIVE_TOKENS_CSS}
 .wb-pmod-btn { font:inherit; font-size:13px; border:1px solid var(--dsw-derive-border,#d0d7de); background:var(--dsw-derive-canvas,#fff); color:var(--dsw-derive-fg,#1f2328);
   border-radius:6px; padding:5px 12px; cursor:pointer; }
 .wb-pmod-btn:hover { background:var(--dsw-derive-surface,#f6f8fa); }
-.wb-pmod-btn:disabled { opacity:.45; cursor:not-allowed; }
+.wb-pmod-btn:disabled { cursor:not-allowed; color:var(--dsw-derive-muted,#57606a); background:var(--dsw-derive-surface,#f6f8fa); }
 .wb-pmod-btn-blue { border-color:var(--dsw-derive-accent-border,#96c8f2); color:var(--dsw-derive-accent,#0969da); background:var(--dsw-derive-accent-bg,#ddf4ff); }
 .wb-pmod-btn-danger { border-color:var(--dsw-derive-danger-border,#ff9b9b); color:var(--dsw-derive-danger,#cf222e); background:var(--dsw-derive-danger-bg,#ffebe9); }
 .wb-pmod-err { background:var(--dsw-derive-danger-bg,#ffebe9); border:1px solid var(--dsw-derive-danger-border,#ff9b9b); color:var(--dsw-derive-danger,#cf222e); border-radius:6px;
@@ -6658,7 +6662,7 @@ var Ee = function() {
 		e instanceof t || (e = t.create(e));
 		var i = this, r = i.x, o = i.x + i.width, a = i.y, s = i.y + i.height, l = e.x, u = e.x + e.width, h = e.y, c = e.y + e.height, p = !(o < l || u < r || s < h || c < a);
 		if (n) {
-			var d = 1 / 0, f = 0, g = Math.abs(o - l), y = Math.abs(u - r), v = Math.abs(s - h), m = Math.abs(c - a), x = Math.min(g, y), _ = Math.min(v, m);
+			var d = Infinity, f = 0, g = Math.abs(o - l), y = Math.abs(u - r), v = Math.abs(s - h), m = Math.abs(c - a), x = Math.min(g, y), _ = Math.min(v, m);
 			o < l || u < r ? x > f && (f = x, g < y ? Ce.set(Ne, -g, 0) : Ce.set(Ne, y, 0)) : x < d && (d = x, g < y ? Ce.set(Re, g, 0) : Ce.set(Re, -y, 0)), s < h || c < a ? _ > f && (f = _, v < m ? Ce.set(Ne, 0, -v) : Ce.set(Ne, 0, m)) : x < d && (d = x, v < m ? Ce.set(Re, 0, v) : Ce.set(Re, 0, -m));
 		}
 		return n && Ce.copy(n, p ? Re : Ne), p;
@@ -7282,10 +7286,9 @@ function mn(t, e, n, i, r) {
 }
 function xn(t, e, n, i, r, o) {
 	var a = i + 3 * (e - n) - t, s = 3 * (n - 2 * e + t), l = 3 * (e - t), u = t - r, h = s * s - 3 * a * l, c = s * l - 9 * a * u, p = l * l - 3 * s * u, d = 0;
-	if (gn(h) && gn(c)) {
-		if (gn(s)) o[0] = 0;
-		else (M = -l / s) >= 0 && M <= 1 && (o[d++] = M);
-	} else {
+	if (gn(h) && gn(c)) if (gn(s)) o[0] = 0;
+	else (M = -l / s) >= 0 && M <= 1 && (o[d++] = M);
+	else {
 		var f = c * c - 4 * h * p;
 		if (gn(f)) {
 			var g = c / h, y = -g / 2;
@@ -7319,10 +7322,10 @@ function bn(t, e, n, i, r, o) {
 	o[0] = t, o[1] = a, o[2] = u, o[3] = c, o[4] = c, o[5] = h, o[6] = l, o[7] = i;
 }
 function wn(t, e, n, i, r, o, a, s, l, u, h) {
-	var c, p, d, f, g, y = .005, v = 1 / 0;
+	var c, p, d, f, g, y = .005, v = Infinity;
 	pn[0] = l, pn[1] = u;
 	for (var m = 0; m < 1; m += .05) dn[0] = vn(t, n, r, a, m), dn[1] = vn(e, i, o, s, m), (f = Bt(pn, dn)) < v && (c = m, v = f);
-	v = 1 / 0;
+	v = Infinity;
 	for (var x = 0; x < 32 && !(y < un); x++) p = c - y, d = c + y, dn[0] = vn(t, n, r, a, p), dn[1] = vn(e, i, o, s, p), f = Bt(dn, pn), p >= 0 && f < v ? (c = p, v = f) : (fn[0] = vn(t, n, r, a, d), fn[1] = vn(e, i, o, s, d), g = Bt(fn, pn), d <= 1 && g < v ? (c = d, v = g) : y *= .5);
 	return h && (h[0] = vn(t, n, r, a, c), h[1] = vn(e, i, o, s, c)), sn(v);
 }
@@ -7349,10 +7352,10 @@ function Cn(t, e, n, i, r) {
 	r[0] = t, r[1] = o, r[2] = s, r[3] = s, r[4] = a, r[5] = n;
 }
 function Dn(t, e, n, i, r, o, a, s, l) {
-	var u, h = .005, c = 1 / 0;
+	var u, h = .005, c = Infinity;
 	pn[0] = a, pn[1] = s;
 	for (var p = 0; p < 1; p += .05) dn[0] = Mn(t, n, r, p), dn[1] = Mn(e, i, o, p), (y = Bt(pn, dn)) < c && (u = p, c = y);
-	c = 1 / 0;
+	c = Infinity;
 	for (var d = 0; d < 32 && !(h < un); d++) {
 		var f = u - h, g = u + h;
 		dn[0] = Mn(t, n, r, f), dn[1] = Mn(e, i, o, f);
@@ -10059,7 +10062,7 @@ function fo(t) {
 	t.sort((function(t, e) {
 		return s(t, e, 0) ? -1 : 1;
 	}));
-	for (var e = -1 / 0, n = 1, i = 0; i < t.length;) {
+	for (var e = -Infinity, n = 1, i = 0; i < t.length;) {
 		for (var r = t[i].interval, o = t[i].close, a = 0; a < 2; a++) r[a] <= e && (r[a] = e, o[a] = a ? 1 : 1 - n), e = r[a], n = o[a];
 		r[0] === r[1] && o[0] * o[1] != 1 ? t.splice(i, 1) : i++;
 	}
@@ -10716,7 +10719,7 @@ var Fa = [];
 var Ga = [];
 function Wa(t, e, n, i, r, o, a, s, l, u) {
 	var h = _n, c = vn, p = h(t, n, r, a, Fa);
-	l[0] = 1 / 0, l[1] = 1 / 0, u[0] = -1 / 0, u[1] = -1 / 0;
+	l[0] = Infinity, l[1] = Infinity, u[0] = -Infinity, u[1] = -Infinity;
 	for (var d = 0; d < p; d++) {
 		var f = c(t, n, r, a, Fa[d]);
 		l[0] = ka(f, l[0]), u[0] = La(f, u[0]);
@@ -11057,7 +11060,7 @@ function vs(t, e, n, i, r, o) {
 	var a = (o - e) / (i - e), s = i < e ? 1 : -1;
 	1 !== a && 0 !== a || (s = i < e ? .5 : -.5);
 	var l = a * (n - t) + t;
-	return l === r ? 1 / 0 : l > r ? s : 0;
+	return l === r ? Infinity : l > r ? s : 0;
 }
 var ms = us.CMD;
 var xs = 2 * Math.PI;
@@ -12370,7 +12373,7 @@ function Wu(t, e, n) {
 			var o = function(t, e, n, i) {
 				var r, o, a, s, l = [], u = [], h = [], c = [];
 				if (i) {
-					a = [1 / 0, 1 / 0], s = [-1 / 0, -1 / 0];
+					a = [Infinity, Infinity], s = [-Infinity, -Infinity];
 					for (var p = 0, d = t.length; p < d; p++) Wt(a, a, t[p]), Ht(s, s, t[p]);
 					Wt(a, a, i[0]), Ht(s, s, i[1]);
 				}
@@ -12580,7 +12583,7 @@ var hh = function() {
 		for (l = 0; l < 2; l++) this._origin[l] = i[l].dot(n[0]);
 	}, t.prototype.intersect = function(t, e) {
 		var n = !0, i = !e;
-		return lh.set(1 / 0, 1 / 0), uh.set(0, 0), !this._intersectCheckOneSide(this, t, lh, uh, i, 1) && (n = !1, i) || !this._intersectCheckOneSide(t, this, lh, uh, i, -1) && (n = !1, i) || i || Ce.copy(e, n ? lh : uh), n;
+		return lh.set(Infinity, Infinity), uh.set(0, 0), !this._intersectCheckOneSide(this, t, lh, uh, i, 1) && (n = !1, i) || !this._intersectCheckOneSide(t, this, lh, uh, i, -1) && (n = !1, i) || i || Ce.copy(e, n ? lh : uh), n;
 	}, t.prototype._intersectCheckOneSide = function(t, e, n, i, r, o) {
 		for (var a = !0, s = 0; s < 2; s++) {
 			var l = this._axes[s];
@@ -12641,7 +12644,7 @@ var ph = function(t) {
 		}
 	}, n.prototype.getBoundingRect = function() {
 		if (!this._rect) {
-			for (var t = new Ee(1 / 0, 1 / 0, -1 / 0, -1 / 0), e = 0; e < this._displayables.length; e++) {
+			for (var t = new Ee(Infinity, Infinity, -Infinity, -Infinity), e = 0; e < this._displayables.length; e++) {
 				var n = this._displayables[e], i = n.getBoundingRect().clone();
 				n.needLocalTransform() && i.applyTransform(n.getLocalTransform(ch)), t.union(i);
 			}
@@ -13821,7 +13824,7 @@ var Tp = [[
 ]];
 function Cp(t, e, n, i, r) {
 	var o = 0, a = 0;
-	i ??= 1 / 0, r ??= 1 / 0;
+	i ??= Infinity, r ??= Infinity;
 	var s = 0;
 	e.eachChild((function(l, u) {
 		var h, c, p = l.getBoundingRect(), d = e.childAt(u + 1), f = d && d.getBoundingRect();
@@ -14896,7 +14899,7 @@ function Qd(t, e, n) {
 				null != t && "-" !== t && (X(t) ? a ??= 1 : a = 0);
 			}), n, s, 10) : a = Z(i) ? i : i ? 1 : 0, r || 1 !== a || (r = [], rf((function(t, e) {
 				r[e] = null != t ? t + "" : "";
-			}), n, s, 1 / 0)), o = r ? r.length : n === jp ? s.length : s[0] ? s[0].length : null;
+			}), n, s, Infinity)), o = r ? r.length : n === jp ? s.length : s[0] ? s[0].length : null;
 		} else if (e === Hp) r || (r = function(t) {
 			var e, n = 0;
 			for (; n < t.length && !(e = t[n++]););
@@ -15014,7 +15017,7 @@ var af = function() {
 			return e;
 		}, n = function(t, e, n, i) {
 			for (var r = this._data, o = this._dimSize, a = 0; a < o; a++) {
-				for (var s = i[a], l = null == s[0] ? 1 / 0 : s[0], u = null == s[1] ? -1 / 0 : s[1], h = e - t, c = n[a], p = 0; p < h; p++) {
+				for (var s = i[a], l = null == s[0] ? Infinity : s[0], u = null == s[1] ? -Infinity : s[1], h = e - t, c = n[a], p = 0; p < h; p++) {
 					var d = r[p * o + a];
 					c[t + p] = d, d < l && (l = d), d > u && (u = d);
 				}
@@ -15200,8 +15203,8 @@ var wf = function() {
 		}
 		a === l && s === u || (e = "reset"), (this._dirty || "reset" === e) && (this._dirty = !1, o = this._doReset(i)), this._modBy = l, this._modDataCount = u;
 		var c = t && t.step;
-		if (this._dueEnd = n ? n._outputDueEnd : this._count ? this._count(this.context) : 1 / 0, this._progress) {
-			var p = this._dueIndex, d = Math.min(null != c ? this._dueIndex + c : 1 / 0, this._dueEnd);
+		if (this._dueEnd = n ? n._outputDueEnd : this._count ? this._count(this.context) : Infinity, this._progress) {
+			var p = this._dueIndex, d = Math.min(null != c ? this._dueIndex + c : Infinity, this._dueEnd);
 			if (!i && (o || p < d)) {
 				var f = this._progress;
 				if (H(f)) for (var g = 0; g < f.length; g++) this._doProgress(f[g], p, d, l, u);
@@ -15297,7 +15300,7 @@ var Df = function() {
 var Af = function() {
 	function t(t, e) {
 		var n = "desc" === t;
-		this._resultLT = n ? 1 : -1, e ??= n ? "min" : "max", this._incomparable = "min" === e ? -1 / 0 : 1 / 0;
+		this._resultLT = n ? 1 : -1, e ??= n ? "min" : "max", this._incomparable = "min" === e ? -Infinity : Infinity;
 	}
 	return t.prototype.evaluate = function(t, e) {
 		var n = Z(t) ? t : go(t), i = Z(e) ? e : go(e), r = isNaN(n), o = isNaN(i);
@@ -15471,10 +15474,10 @@ var qf = function() {
 		if (null != r) {
 			if (i[r].type === e) return r;
 		} else r = i.length;
-		return i[r] = { type: e }, n.set(t, r), this._chunks[r] = new Uf[e || "float"](this._rawCount), this._rawExtent[r] = [1 / 0, -1 / 0], r;
+		return i[r] = { type: e }, n.set(t, r), this._chunks[r] = new Uf[e || "float"](this._rawCount), this._rawExtent[r] = [Infinity, -Infinity], r;
 	}, t.prototype.collectOrdinalMeta = function(t, e) {
 		var n = this._chunks[t], i = this._dimensions[t], r = this._rawExtent, o = i.ordinalOffset || 0, a = n.length;
-		0 === o && (r[t] = [1 / 0, -1 / 0]);
+		0 === o && (r[t] = [Infinity, -Infinity]);
 		for (var s = r[t], l = o; l < a; l++) {
 			var u = n[l] = e.parseAndCollect(n[l]);
 			isNaN(u) || (s[0] = Math.min(u, s[0]), s[1] = Math.max(u, s[1]));
@@ -15507,7 +15510,7 @@ var qf = function() {
 			return t.property;
 		})), u = 0; u < a; u++) {
 			var h = o[u];
-			s[u] || (s[u] = [1 / 0, -1 / 0]), jf(r, u, h.type, e, n);
+			s[u] || (s[u] = [Infinity, -Infinity]), jf(r, u, h.type, e, n);
 		}
 		if (i.fillStorage) i.fillStorage(t, e, r, s);
 		else for (var c = [], p = t; p < e; p++) {
@@ -15572,8 +15575,8 @@ var qf = function() {
 	}, t.prototype.indicesOfNearest = function(t, e, n) {
 		var i = this._chunks[t], r = [];
 		if (!i) return r;
-		n ??= 1 / 0;
-		for (var o = 1 / 0, a = -1, s = 0, l = 0, u = this.count(); l < u; l++) {
+		n ??= Infinity;
+		for (var o = Infinity, a = -1, s = 0, l = 0, u = this.count(); l < u; l++) {
 			var h = e - i[this.getRawIndex(l)], c = Math.abs(h);
 			c <= n && ((c < o || c === o && h >= 0 && a < 0) && (o = c, a = h, s = 0), h === a && (r[s++] = l));
 		}
@@ -15643,7 +15646,7 @@ var qf = function() {
 	}, t.prototype.modify = function(t, e) {
 		this._updateDims(this, t, e);
 	}, t.prototype._updateDims = function(t, e, n) {
-		for (var i = t._chunks, r = [], o = e.length, a = t.count(), s = [], l = t._rawExtent, u = 0; u < e.length; u++) l[e[u]] = [1 / 0, -1 / 0];
+		for (var i = t._chunks, r = [], o = e.length, a = t.count(), s = [], l = t._rawExtent, u = 0; u < e.length; u++) l[e[u]] = [Infinity, -Infinity];
 		for (var h = 0; h < a; h++) {
 			for (var c = t.getRawIndex(h), p = 0; p < o; p++) s[p] = i[e[p]][c];
 			s[o] = h;
@@ -15689,12 +15692,9 @@ var qf = function() {
 		}
 		return n._count = l, n._indices = s, n._updateGetRawIdx(), n;
 	}, t.prototype.downSample = function(t, e, n, i) {
-		for (var r = this.clone([t], !0), o = r._chunks, a = [], s = Math.floor(1 / e), l = o[t], u = this.count(), h = r._rawExtent[t] = [1 / 0, -1 / 0], c = new (Zf(this._rawCount))(Math.ceil(u / s)), p = 0, d = 0; d < u; d += s) {
+		for (var r = this.clone([t], !0), o = r._chunks, a = [], s = Math.floor(1 / e), l = o[t], u = this.count(), h = r._rawExtent[t] = [Infinity, -Infinity], c = new (Zf(this._rawCount))(Math.ceil(u / s)), p = 0, d = 0; d < u; d += s) {
 			s > u - d && (s = u - d, a.length = s);
-			for (var f = 0; f < s; f++) {
-				var g = this.getRawIndex(d + f);
-				a[f] = l[g];
-			}
+			for (var f = 0; f < s; f++) a[f] = l[this.getRawIndex(d + f)];
 			var y = n(a), v = this.getRawIndex(Math.min(d + i(a, y) || 0, u - 1));
 			l[v] = y, y < h[0] && (h[0] = y), y > h[1] && (h[1] = y), c[p++] = v;
 		}
@@ -15718,7 +15718,7 @@ var qf = function() {
 			}
 		}
 	}, t.prototype.getDataExtent = function(t) {
-		var e = this._chunks[t], n = [1 / 0, -1 / 0];
+		var e = this._chunks[t], n = [Infinity, -Infinity];
 		if (!e) return n;
 		var i, r = this.count();
 		if (!this._indices) return this._rawExtent[t].slice();
@@ -17722,9 +17722,9 @@ var im = function(t) {
 		this.id;
 	}, n.prototype.getConnectedDataURL = function(t) {
 		if (!this._disposed) {
-			var e = "svg" === t.type, n = this.group, i = Math.min, r = Math.max, o = 1 / 0;
+			var e = "svg" === t.type, n = this.group, i = Math.min, r = Math.max, o = Infinity;
 			if (gm[n]) {
-				var a = o, s = o, l = -1 / 0, h = -1 / 0, c = [], p = t && t.pixelRatio || this.getDevicePixelRatio();
+				var a = o, s = o, l = -Infinity, h = -Infinity, c = [], p = t && t.pixelRatio || this.getDevicePixelRatio();
 				N(fm, (function(o, u) {
 					if (o.group === n) {
 						var p = e ? o.getZr().painter.getSvgDom().innerHTML : o.renderToCanvas(I(t)), d = o.getDom().getBoundingClientRect();
@@ -17907,7 +17907,7 @@ var im = function(t) {
 			if (!t.preventAutoZ) {
 				var n = t.get("z") || 0, i = t.get("zlevel") || 0;
 				e.eachRendered((function(t) {
-					return o(t, n, i, -1 / 0), !0;
+					return o(t, n, i, -Infinity), !0;
 				}));
 			}
 		}
@@ -19301,7 +19301,7 @@ function kx(t, e, n) {
 }
 var Lx = function() {
 	function t(t) {
-		this._setting = t || {}, this._extent = [1 / 0, -1 / 0];
+		this._setting = t || {}, this._extent = [Infinity, -Infinity];
 	}
 	return t.prototype.getSetting = function(t) {
 		return this._setting[t];
@@ -19858,7 +19858,7 @@ var o_ = function(t) {
 		}), n;
 	}, n.prototype.calcNiceExtent = function(t) {
 		var e = this._extent;
-		if (e[0] === e[1] && (e[0] -= Gc, e[1] += Gc), e[1] === -1 / 0 && e[0] === 1 / 0) {
+		if (e[0] === e[1] && (e[0] -= Gc, e[1] += Gc), e[1] === -Infinity && e[0] === Infinity) {
 			var n = /* @__PURE__ */ new Date();
 			e[1] = +new Date(n.getFullYear(), n.getMonth(), n.getDate()), e[0] = e[1] - Gc;
 		}
@@ -19962,7 +19962,7 @@ var __ = function(t) {
 	}, n.prototype.calcNiceTicks = function(t) {
 		t = t || 10;
 		var e = this._extent, n = e[1] - e[0];
-		if (!(n === 1 / 0 || n <= 0)) {
+		if (!(n === Infinity || n <= 0)) {
 			var i = uo(n);
 			for (t / n * i <= .5 && (i *= 10); !isNaN(i) && Math.abs(i) < 1 && Math.abs(i) > 0;) i *= 10;
 			var r = [$r(v_(e[0] / i) * i), $r(y_(e[1] / i) * i)];
@@ -20066,11 +20066,11 @@ function D_(t, e) {
 					min: t,
 					max: e
 				};
-				var s = 1 / 0;
+				var s = Infinity;
 				N(a, (function(t) {
 					s = Math.min(t.offset, s);
 				}));
-				var l = -1 / 0;
+				var l = -Infinity;
 				N(a, (function(t) {
 					l = Math.max(t.offset + t.width, l);
 				})), s = Math.abs(s), l = Math.abs(l);
@@ -20105,7 +20105,7 @@ function k_(t, e) {
 	if (e = e || t.get("type")) switch (e) {
 		case "category": return new Hx({
 			ordinalMeta: t.getOrdinalMeta ? t.getOrdinalMeta() : t.getCategories(),
-			extent: [1 / 0, -1 / 0]
+			extent: [Infinity, -Infinity]
 		});
 		case "time": return new o_({
 			locale: t.ecModel.getLocaleModel(),
@@ -20251,7 +20251,7 @@ var j_ = function(t) {
 	}, n.prototype.getBoundingRect = function(t) {
 		var e = this._rect;
 		if (e && !t) return e;
-		var n = [1 / 0, 1 / 0], i = [-1 / 0, -1 / 0];
+		var n = [Infinity, Infinity], i = [-Infinity, -Infinity];
 		return N(this.geometries, (function(e) {
 			"polygon" === e.type ? Y_(e.exterior, n, i, t) : N(e.points, (function(e) {
 				Y_(e, n, i, t);
@@ -20682,7 +20682,7 @@ var gb = function() {
 				f = 1.3 * y.width, g = 1.3 * y.height, p = Math.max(p, f, 7), d = Math.max(d, g, 7);
 			}
 			var v = p / h, m = d / c;
-			isNaN(v) && (v = 1 / 0), isNaN(m) && (m = 1 / 0);
+			isNaN(v) && (v = Infinity), isNaN(m) && (m = Infinity);
 			var x = Math.max(0, Math.floor(Math.min(v, m))), _ = rb(t.model), b = t.getExtent(), w = _.lastAutoInterval, S = _.lastTickCount;
 			return null != w && null != S && Math.abs(w - x) <= 1 && Math.abs(S - a) <= 1 && w > x && _.axisExtent0 === b[0] && _.axisExtent1 === b[1] ? x = w : (_.lastTickCount = a, _.lastAutoInterval = x, _.axisExtent0 = b[0], _.axisExtent1 = b[1]), x;
 		}(this);
@@ -20746,7 +20746,7 @@ function Ab(t, e, n) {
 	return n.set(Db[0], Db[1]), i;
 }
 function kb(t, e, n) {
-	for (var i, r, o = 0, a = 0, s = 0, l = 0, u = 1 / 0, h = e.data, c = t.x, p = t.y, d = 0; d < h.length;) {
+	for (var i, r, o = 0, a = 0, s = 0, l = 0, u = Infinity, h = e.data, c = t.x, p = t.y, d = 0; d < h.length;) {
 		var f = h[d++];
 		1 === d && (s = o = h[d], l = a = h[d + 1]);
 		var g = u;
@@ -20793,7 +20793,7 @@ function Eb(t, e) {
 				[0, 0]
 			], a = r.candidates || Sb, s = i.getBoundingRect().clone();
 			s.applyTransform(i.getComputedTransform());
-			var l = 1 / 0, u = r.anchor, h = t.getComputedTransform(), c = h && Me([], h), p = e.get("length2") || 0;
+			var l = Infinity, u = r.anchor, h = t.getComputedTransform(), c = h && Me([], h), p = e.get("length2") || 0;
 			u && Ob.copy(u);
 			for (var d = 0; d < a.length; d++) {
 				Mb(a[d], 0, s, Lb, Rb), Ce.scaleAndAdd(Pb, Lb, Rb, p), Pb.transform(c);
@@ -21983,7 +21983,7 @@ var xS = function(t) {
 		function u(t) {
 			if (t.isFinite() && !t.isZero()) if (0 === o.length) (e = new Ee(0, 0, 0, 0)).copy(t), o.push(e);
 			else {
-				for (var e, n = !1, i = 1 / 0, r = 0, u = 0; u < o.length; ++u) {
+				for (var e, n = !1, i = Infinity, r = 0, u = 0; u < o.length; ++u) {
 					var h = o[u];
 					if (h.intersect(t)) {
 						var c = new Ee(0, 0, 0, 0);
@@ -22357,7 +22357,7 @@ var MS = function(t) {
 		sampling: "none",
 		animationEasing: "linear",
 		progressive: 0,
-		hoverLayerThreshold: 1 / 0,
+		hoverLayerThreshold: Infinity,
 		universalTransition: { divideShape: "clone" },
 		triggerLineEvent: !1
 	}, n;
@@ -22795,7 +22795,7 @@ function ZS(t, e) {
 	}
 }
 function jS(t) {
-	for (var e = 1 / 0, n = 1 / 0, i = -1 / 0, r = -1 / 0, o = 0; o < t.length;) {
+	for (var e = Infinity, n = Infinity, i = -Infinity, r = -Infinity, o = 0; o < t.length;) {
 		var a = t[o++], s = t[o++];
 		isNaN(a) || (e = Math.min(a, e), i = Math.max(a, i)), isNaN(s) || (n = Math.min(s, n), r = Math.max(s, r));
 	}
@@ -23298,11 +23298,11 @@ var oM = {
 		return e;
 	},
 	max: function(t) {
-		for (var e = -1 / 0, n = 0; n < t.length; n++) t[n] > e && (e = t[n]);
+		for (var e = -Infinity, n = 0; n < t.length; n++) t[n] > e && (e = t[n]);
 		return isFinite(e) ? e : NaN;
 	},
 	min: function(t) {
-		for (var e = 1 / 0, n = 0; n < t.length; n++) t[n] < e && (e = t[n]);
+		for (var e = Infinity, n = 0; n < t.length; n++) t[n] < e && (e = t[n]);
 		return isFinite(e) ? e : NaN;
 	},
 	nearest: function(t) {
@@ -24471,7 +24471,7 @@ var QM = function(t) {
 	}, n.prototype.getBoundingRect = function() {
 		var t = this._rect;
 		if (!t) {
-			for (var e = this.shape, n = e.points, i = e.size, r = i[0], o = i[1], a = 1 / 0, s = 1 / 0, l = -1 / 0, u = -1 / 0, h = 0; h < n.length;) {
+			for (var e = this.shape, n = e.points, i = e.size, r = i[0], o = i[1], a = Infinity, s = Infinity, l = -Infinity, u = -Infinity, h = 0; h < n.length;) {
 				var c = n[h++], p = n[h++];
 				a = Math.min(c, a), l = Math.max(c, l), s = Math.min(p, s), u = Math.max(p, u);
 			}
@@ -25043,7 +25043,7 @@ var bI = function() {
 			}));
 		}
 		N(this._axesList, (function(t) {
-			if (t.scale.setExtent(1 / 0, -1 / 0), "category" === t.type) {
+			if (t.scale.setExtent(Infinity, -Infinity), "category" === t.type) {
 				var e = t.model.get("categorySortInfo");
 				t.scale.setSortInfo(e);
 			}
@@ -25798,7 +25798,7 @@ var iT = function(t) {
 	}, n.prototype.getInitialData = function(t, e) {
 		return ZM(this, {
 			generateCoord: "indicator_",
-			generateCoordCount: 1 / 0
+			generateCoordCount: Infinity
 		});
 	}, n.prototype.formatTooltip = function(t, e, n) {
 		var i = this.getData(), r = this.coordinateSystem.getIndicatorAxes(), o = this.getData().getName(t), a = "" === o ? this.name : o, s = dg(this, t);
@@ -26005,7 +26005,7 @@ var hT = function() {
 	}, t.prototype.pointToData = function(t) {
 		var e = t[0] - this.cx, n = t[1] - this.cy, i = Math.sqrt(e * e + n * n);
 		e /= i, n /= i;
-		for (var r, o = Math.atan2(-n, e), a = 1 / 0, s = -1, l = 0; l < this._indicatorAxes.length; l++) {
+		for (var r, o = Math.atan2(-n, e), a = Infinity, s = -1, l = 0; l < this._indicatorAxes.length; l++) {
 			var u = this._indicatorAxes[l], h = Math.abs(o - u.angle);
 			h < a && (r = u, s = l, a = h);
 		}
@@ -26022,7 +26022,7 @@ var hT = function() {
 	}, t.prototype.update = function(t, e) {
 		var n = this._indicatorAxes, i = this._model;
 		N(n, (function(t) {
-			t.scale.setExtent(1 / 0, -1 / 0);
+			t.scale.setExtent(Infinity, -Infinity);
 		})), t.eachSeriesByType("radar", (function(e, r) {
 			if ("radar" === e.get("coordinateSystem") && t.getComponent("radar", e.get("radarIndex")) === i) {
 				var o = e.getData();
@@ -26170,7 +26170,7 @@ function xT(t, e, n) {
 function _T(t, e, n, i) {
 	var r = t.target, o = t.zoomLimit, a = t.zoom = t.zoom || 1;
 	if (a *= e, o) {
-		var s = o.min || 0, l = o.max || 1 / 0;
+		var s = o.min || 0, l = o.max || Infinity;
 		a = Math.max(Math.min(l, a), s);
 	}
 	var u = a / t.zoom;
@@ -27298,7 +27298,7 @@ function SC(t) {
 				r[i] = r[i] || [], isNaN(e) || r[i].push(e);
 			}));
 		})), n[0].map(n[0].mapDimension("value"), (function(t, e) {
-			for (var o = "ec-" + n[0].getName(e), a = 0, s = 1 / 0, l = -1 / 0, u = r[o].length, h = 0; h < u; h++) s = Math.min(s, r[o][h]), l = Math.max(l, r[o][h]), a += r[o][h];
+			for (var o = "ec-" + n[0].getName(e), a = 0, s = Infinity, l = -Infinity, u = r[o].length, h = 0; h < u; h++) s = Math.min(s, r[o][h]), l = Math.max(l, r[o][h]), a += r[o][h];
 			return 0 === u ? NaN : "min" === i ? s : "max" === i ? l : "average" === i ? a / u : a;
 		}))), a = 0; a < t.length; a++) t[a].originalData = t[a].getData();
 		for (a = 0; a < t.length; a++) t[a].seriesGroup = t, t[a].needsDrawMap = 0 === a && !t[a].getHostGeoModel(), t[a].setData(o.cloneShallow()), t[a].mainSeries = t[0];
@@ -27491,7 +27491,7 @@ function PC(t, e) {
 			var o = this.projection;
 			if (o) {
 				var a = i[0], s = i[1], l = r[0], u = r[1];
-				i = [1 / 0, 1 / 0], r = [-1 / 0, -1 / 0];
+				i = [Infinity, Infinity], r = [-Infinity, -Infinity];
 				var h = function(t, e, n, a) {
 					for (var s = n - t, l = a - e, u = 0; u <= 100; u++) {
 						var h = u / 100, c = o.project([t + s * h, e + l * h]);
@@ -27650,7 +27650,7 @@ function zC(t, e, n, i) {
 	var r = t.getZoom(), o = t.getCenter(), a = e.zoom, s = t.projectedToPoint ? t.projectedToPoint(o) : t.dataToPoint(o);
 	if (null != e.dx && null != e.dy && (s[0] -= e.dx, s[1] -= e.dy, t.setCenter(EC(t, s), i)), null != a) {
 		if (n) {
-			var l = n.min || 0, u = n.max || 1 / 0;
+			var l = n.min || 0, u = n.max || Infinity;
 			a = Math.max(Math.min(r * a, u), l) / r;
 		}
 		t.scaleX *= a, t.scaleY *= a;
@@ -29006,7 +29006,7 @@ var BD = function(t) {
 			a = l.zoomLimit;
 			var u = l.zoom = l.zoom || 1;
 			if (u *= i, a) {
-				var h = a.min || 0, c = a.max || 1 / 0;
+				var h = a.min || 0, c = a.max || Infinity;
 				u = Math.max(Math.min(c, u), h);
 			}
 			var p = u / l.zoom;
@@ -29160,7 +29160,7 @@ var HD = function() {
 	}, t.dependsOn = function(t, e) {
 		return "color" === e ? !(!t || 0 !== t.indexOf(e)) : t === e;
 	}, t.findPieceIndex = function(t, e, n) {
-		for (var i, r = 1 / 0, o = 0, a = e.length; o < a; o++) {
+		for (var i, r = Infinity, o = 0, a = e.length; o < a; o++) {
 			var s = e[o].value;
 			if (null != s) {
 				if (s === t || X(s) && s === t + "") return o;
@@ -29170,15 +29170,15 @@ var HD = function() {
 		for (o = 0, a = e.length; o < a; o++) {
 			var l = e[o], u = l.interval, h = l.close;
 			if (u) {
-				if (u[0] === -1 / 0) {
+				if (u[0] === -Infinity) {
 					if (tA(h[1], t, u[1])) return o;
-				} else if (u[1] === 1 / 0) {
+				} else if (u[1] === Infinity) {
 					if (tA(h[0], u[0], t)) return o;
 				} else if (tA(h[0], u[0], t) && tA(h[1], t, u[1])) return o;
 				n && c(u[0], o), n && c(u[1], o);
 			}
 		}
-		if (n) return t === 1 / 0 ? e.length - 1 : t === -1 / 0 ? 0 : i;
+		if (n) return t === Infinity ? e.length - 1 : t === -Infinity ? 0 : i;
 		function c(e, n) {
 			var o = Math.abs(e - t);
 			o < r && (r = o, i = n);
@@ -29524,7 +29524,7 @@ function yA(t, e, n, i) {
 			var u = function(t, e, n) {
 				for (var i = 0, r = 0, o = e.length; r < o; r++) i += e[r].getValue();
 				var a, s = t.get("visualDimension");
-				e && e.length ? "value" === s && n ? (a = [e[e.length - 1].getValue(), e[0].getValue()], "asc" === n && a.reverse()) : (a = [1 / 0, -1 / 0], hA(e, (function(t) {
+				e && e.length ? "value" === s && n ? (a = [e[e.length - 1].getValue(), e[0].getValue()], "asc" === n && a.reverse()) : (a = [Infinity, -Infinity], hA(e, (function(t) {
 					var e = t.getValue(s);
 					e < a[0] && (a[0] = e), e > a[1] && (a[1] = e);
 				}))) : a = [NaN, NaN];
@@ -29555,13 +29555,13 @@ function yA(t, e, n, i) {
 				y: d,
 				width: r,
 				height: o
-			}, v = lA(r, o), m = 1 / 0, x = [];
+			}, v = lA(r, o), m = Infinity, x = [];
 			x.area = 0;
 			for (var _ = 0, b = g.length; _ < b;) {
 				var w = g[_];
 				x.push(w), x.area += w.getLayout().area;
 				var S = vA(x, v, e.squareRatio);
-				S <= m ? (_++, m = S) : (x.area -= x.pop().getLayout().area, mA(x, v, y, u, !1), v = lA(y.width, y.height), x.length = x.area = 0, m = 1 / 0);
+				S <= m ? (_++, m = S) : (x.area -= x.pop().getLayout().area, mA(x, v, y, u, !1), v = lA(y.width, y.height), x.length = x.area = 0, m = Infinity);
 			}
 			if (x.length && mA(x, v, y, u, !0), !n) {
 				var M = s.get("childrenVisibleMin");
@@ -29572,9 +29572,9 @@ function yA(t, e, n, i) {
 	}
 }
 function vA(t, e, n) {
-	for (var i = 0, r = 1 / 0, o = 0, a = void 0, s = t.length; o < s; o++) (a = t[o].getLayout().area) && (a < r && (r = a), a > i && (i = a));
+	for (var i = 0, r = Infinity, o = 0, a = void 0, s = t.length; o < s; o++) (a = t[o].getLayout().area) && (a < r && (r = a), a > i && (i = a));
 	var l = t.area * t.area, u = e * e * n;
-	return l ? sA(u * i / l, l / (u * r)) : 1 / 0;
+	return l ? sA(u * i / l, l / (u * r)) : Infinity;
 }
 function mA(t, e, n, i, r) {
 	var o = e === n.width ? 0 : 1, a = 1 - o, s = ["x", "y"], l = ["width", "height"], u = n[s[o]], h = e ? t.area / e : 0;
@@ -30249,7 +30249,7 @@ var hk = Mn;
 var ck = Bt;
 var pk = Math.abs;
 function dk(t, e, n) {
-	for (var i, r = t[0], o = t[1], a = t[2], s = 1 / 0, l = n * n, u = .1, h = .1; h <= .9; h += .1) sk[0] = hk(r[0], o[0], a[0], h), sk[1] = hk(r[1], o[1], a[1], h), (d = pk(ck(sk, e) - l)) < s && (s = d, i = h);
+	for (var i, r = t[0], o = t[1], a = t[2], s = Infinity, l = n * n, u = .1, h = .1; h <= .9; h += .1) sk[0] = hk(r[0], o[0], a[0], h), sk[1] = hk(r[1], o[1], a[1], h), (d = pk(ck(sk, e) - l)) < s && (s = d, i = h);
 	for (var c = 0; c < 32; c++) {
 		var p = i + u;
 		lk[0] = hk(r[0], o[0], a[0], i), lk[1] = hk(r[1], o[1], a[1], i), uk[0] = hk(r[0], o[0], a[0], p), uk[1] = hk(r[1], o[1], a[1], p);
@@ -31556,7 +31556,7 @@ function $k(t, e) {
 	};
 }
 function Jk(t, e) {
-	return Math.min(null != e[1] ? e[1] : 1 / 0, Math.max(null != e[0] ? e[0] : -1 / 0, t));
+	return Math.min(null != e[1] ? e[1] : Infinity, Math.max(null != e[0] ? e[0] : -Infinity, t));
 }
 var Qk = N;
 var tL = Math.min;
@@ -32609,7 +32609,7 @@ function pP(t, e) {
 					})), n;
 				}(t, a);
 				(function(t, e, n, i, r, o) {
-					var a = 1 / 0;
+					var a = Infinity;
 					N(t, (function(t) {
 						var e = t.length, s = 0;
 						N(t, (function(t) {
@@ -32737,7 +32737,7 @@ function MP(t) {
 	t.eachSeriesByType("sankey", (function(t) {
 		var e = t.getGraph(), n = e.nodes, i = e.edges;
 		if (n.length) {
-			var r = 1 / 0, o = -1 / 0;
+			var r = Infinity, o = -Infinity;
 			N(n, (function(t) {
 				var e = t.getLayout().value;
 				e < r && (r = e), e > o && (o = e);
@@ -33590,7 +33590,7 @@ var fO = function(t) {
 	}, n.prototype.getBoundingRect = function() {
 		var t = this._rect;
 		if (!t) {
-			for (var e = this.shape.segs, n = 1 / 0, i = 1 / 0, r = -1 / 0, o = -1 / 0, a = 0; a < e.length;) {
+			for (var e = this.shape.segs, n = Infinity, i = Infinity, r = -Infinity, o = -Infinity, a = 0; a < e.length;) {
 				var s = e[a++], l = e[a++];
 				n = Math.min(s, n), r = Math.max(s, r), i = Math.min(l, i), o = Math.max(l, o);
 			}
@@ -36452,7 +36452,7 @@ var hE = function(t) {
 		var t = this, e = t.getLabelModel(), n = t.scale, i = n.getExtent(), r = n.count();
 		if (i[1] - i[0] < 1) return 0;
 		var o = i[0], a = t.dataToCoord(o + 1) - t.dataToCoord(o), s = Math.abs(a), l = wr(null == o ? "" : o + "", e.getFont(), "center", "top"), u = Math.max(l.height, 7) / s;
-		isNaN(u) && (u = 1 / 0);
+		isNaN(u) && (u = Infinity);
 		var h = Math.max(0, Math.floor(u)), c = uE(t.model), p = c.lastAutoInterval, d = c.lastTickCount;
 		return null != p && null != d && Math.abs(p - h) <= 1 && Math.abs(d - r) <= 1 && p > h ? h = p : (c.lastTickCount = r, c.lastAutoInterval = h), h;
 	}, n;
@@ -36534,7 +36534,7 @@ function dE(t) {
 }
 function fE(t, e) {
 	var n = this, i = n.getAngleAxis(), r = n.getRadiusAxis();
-	if (i.scale.setExtent(1 / 0, -1 / 0), r.scale.setExtent(1 / 0, -1 / 0), t.eachSeries((function(t) {
+	if (i.scale.setExtent(Infinity, -Infinity), r.scale.setExtent(Infinity, -Infinity), t.eachSeries((function(t) {
 		if (t.coordinateSystem === n) {
 			var e = t.getData();
 			N(E_(e, "radius"), (function(t) {
@@ -38130,7 +38130,7 @@ var Dz = function() {
 		if (t === this._dataZoomModel) {
 			var e = this.getTargetSeriesModels();
 			this._dataExtent = function(t, e, n) {
-				var i = [1 / 0, -1 / 0];
+				var i = [Infinity, -Infinity];
 				Tz(n, (function(t) {
 					(function(t, e, n) {
 						e && N(E_(e, n), (function(n) {
@@ -38986,7 +38986,7 @@ var uV = {
 		};
 	},
 	polygon: function(t, e, n, i) {
-		var r = [[1 / 0, -1 / 0], [1 / 0, -1 / 0]];
+		var r = [[Infinity, -Infinity], [Infinity, -Infinity]];
 		return {
 			values: E(n, (function(n) {
 				var o = t ? e.pointToData(n, i) : e.dataToPoint(n, i);
@@ -40064,7 +40064,7 @@ var rB = {
 	},
 	polygon: function(t) {
 		for (var e, n = t.range, i = 0, r = n.length; i < r; i++) {
-			e = e || [[1 / 0, -1 / 0], [1 / 0, -1 / 0]];
+			e = e || [[Infinity, -Infinity], [Infinity, -Infinity]];
 			var o = n[i];
 			o[0] < e[0][0] && (e[0][0] = o[0]), o[0] > e[0][1] && (e[0][1] = o[0]), o[1] < e[1][0] && (e[1][0] = o[1]), o[1] > e[1][1] && (e[1][1] = o[1]);
 		}
@@ -40585,7 +40585,7 @@ var xB = function(t) {
 			if (e = e || t.get("type"), e) switch (e) {
 				case "category": return new Hx({
 					ordinalMeta: t.getCategories(),
-					extent: [1 / 0, -1 / 0]
+					extent: [Infinity, -Infinity]
 				});
 				case "time": return new o_({
 					locale: t.ecModel.getLocaleModel(),
@@ -40732,7 +40732,7 @@ var xB = function(t) {
 	}, n.prototype._toAxisCoord = function(t) {
 		return Bh(t, this._mainGroup.getLocalTransform(), !0);
 	}, n.prototype._findNearestTick = function(t) {
-		var e, n = this.model.getData(), i = 1 / 0, r = this._axis;
+		var e, n = this.model.getData(), i = Infinity, r = this._axis;
 		return n.each(["value"], (function(n, o) {
 			var a = r.dataToCoord(n), s = Math.abs(a - t);
 			s < i && (i = s, e = o);
@@ -41091,7 +41091,7 @@ var YB = function(t, e, n, i) {
 				s = u.valueAxis, l = zB(o, Ax(o, u.valueDataDim), a);
 			}
 			var h = "x" === s.dim ? 0 : 1, c = 1 - h, p = I(i), d = { coord: [] };
-			p.type = null, p.coord = [], p.coord[c] = -1 / 0, d.coord[c] = 1 / 0;
+			p.type = null, p.coord = [], p.coord[c] = -Infinity, d.coord[c] = Infinity;
 			var f = n.get("precision");
 			f >= 0 && Z(l) && (l = +l.toFixed(Math.min(f, 20))), p.coord[h] = d.coord[h] = l, r = [
 				p,
@@ -41253,7 +41253,7 @@ var JB = function(t, e, n, i) {
 	var r = i[0], o = i[1];
 	if (r && o) {
 		var a = OB(t, r), s = OB(t, o), l = a.coord, u = s.coord;
-		l[0] = nt(l[0], -1 / 0), l[1] = nt(l[1], -1 / 0), u[0] = nt(u[0], 1 / 0), u[1] = nt(u[1], 1 / 0);
+		l[0] = nt(l[0], -Infinity), l[1] = nt(l[1], -Infinity), u[0] = nt(u[0], Infinity), u[1] = nt(u[1], Infinity);
 		var h = C([
 			{},
 			a,
@@ -41609,27 +41609,25 @@ var uF = function(t) {
 				return;
 			}
 			var p = n.getSeriesByName(a)[0];
-			if (!l.get(a)) {
-				if (p) {
-					var d = p.getData(), f = d.getVisual("legendLineStyle") || {}, g = d.getVisual("legendIcon"), y = d.getVisual("style"), v = this._createItem(p, a, o, r, e, t, f, y, g, u, i);
-					v.on("click", aF(hF, a, null, i, h)).on("mouseover", aF(pF, p.name, null, i, h)).on("mouseout", aF(dF, p.name, null, i, h)), n.ssr && v.eachChild((function(t) {
+			if (!l.get(a)) if (p) {
+				var d = p.getData(), f = d.getVisual("legendLineStyle") || {}, g = d.getVisual("legendIcon"), y = d.getVisual("style"), v = this._createItem(p, a, o, r, e, t, f, y, g, u, i);
+				v.on("click", aF(hF, a, null, i, h)).on("mouseover", aF(pF, p.name, null, i, h)).on("mouseout", aF(dF, p.name, null, i, h)), n.ssr && v.eachChild((function(t) {
+					var e = il(t);
+					e.seriesIndex = p.seriesIndex, e.dataIndex = o, e.ssrType = "legend";
+				})), l.set(a, !0);
+			} else n.eachRawSeries((function(s) {
+				if (!l.get(a) && s.legendVisualProvider) {
+					var c = s.legendVisualProvider;
+					if (!c.containName(a)) return;
+					var p = c.indexOfName(a), d = c.getItemVisual(p, "style"), f = c.getItemVisual(p, "legendIcon"), g = jn(d.fill);
+					g && 0 === g[3] && (g[3] = .2, d = D(D({}, d), { fill: ii(g, "rgba") }));
+					var y = this._createItem(s, a, o, r, e, t, {}, d, f, u, i);
+					y.on("click", aF(hF, null, a, i, h)).on("mouseover", aF(pF, null, a, i, h)).on("mouseout", aF(dF, null, a, i, h)), n.ssr && y.eachChild((function(t) {
 						var e = il(t);
-						e.seriesIndex = p.seriesIndex, e.dataIndex = o, e.ssrType = "legend";
+						e.seriesIndex = s.seriesIndex, e.dataIndex = o, e.ssrType = "legend";
 					})), l.set(a, !0);
-				} else n.eachRawSeries((function(s) {
-					if (!l.get(a) && s.legendVisualProvider) {
-						var c = s.legendVisualProvider;
-						if (!c.containName(a)) return;
-						var p = c.indexOfName(a), d = c.getItemVisual(p, "style"), f = c.getItemVisual(p, "legendIcon"), g = jn(d.fill);
-						g && 0 === g[3] && (g[3] = .2, d = D(D({}, d), { fill: ii(g, "rgba") }));
-						var y = this._createItem(s, a, o, r, e, t, {}, d, f, u, i);
-						y.on("click", aF(hF, null, a, i, h)).on("mouseover", aF(pF, null, a, i, h)).on("mouseout", aF(dF, null, a, i, h)), n.ssr && y.eachChild((function(t) {
-							var e = il(t);
-							e.seriesIndex = s.seriesIndex, e.dataIndex = o, e.ssrType = "legend";
-						})), l.set(a, !0);
-					}
-				}), this);
-			}
+				}
+			}), this);
 		}), this), r && this._createSelector(r, e, i, o, a);
 	}, n.prototype._createSelector = function(t, e, n, i, r) {
 		var o = this.getSelectorGroup();
@@ -42726,7 +42724,7 @@ var tG = function(t) {
 		], e.layoutMode = {
 			type: "box",
 			ignoreSize: !0
-		}, e.dataBound = [-1 / 0, 1 / 0], e.targetVisuals = {}, e.controllerVisuals = {}, e;
+		}, e.dataBound = [-Infinity, Infinity], e.targetVisuals = {}, e.controllerVisuals = {}, e;
 	}
 	return e(n, t), n.prototype.init = function(t, e, n) {
 		this.mergeDefaultAndTheme(t, n);
@@ -42800,7 +42798,7 @@ var tG = function(t) {
 				}));
 				var u = l.symbolSize;
 				if (null != u) {
-					var h = -1 / 0;
+					var h = -Infinity;
 					qF(u, (function(t) {
 						t > h && (h = t);
 					})), l.symbolSize = jF(u, (function(t) {
@@ -43279,7 +43277,7 @@ var pG = function(t) {
 				r && (i = lG(r, e, n, !0) / 2);
 				return i;
 			}(n, o, r), s = [t - a, t + a], l = lG(t, r, o, !0), u = [lG(s[0], r, o, !0), lG(s[1], r, o, !0)];
-			s[0] < r[0] && (u[0] = -1 / 0), s[1] > r[1] && (u[1] = 1 / 0), e && (u[0] === -1 / 0 ? this._showIndicator(l, u[1], "< ", a) : u[1] === 1 / 0 ? this._showIndicator(l, u[0], "> ", a) : this._showIndicator(l, l, "≈ ", a));
+			s[0] < r[0] && (u[0] = -Infinity), s[1] > r[1] && (u[1] = Infinity), e && (u[0] === -Infinity ? this._showIndicator(l, u[1], "< ", a) : u[1] === Infinity ? this._showIndicator(l, u[0], "> ", a) : this._showIndicator(l, l, "≈ ", a));
 			var h = this._hoverLinkDataIndices, c = [];
 			(e || fG(n)) && (c = this._hoverLinkDataIndices = n.findTargetDataIndices(u));
 			var p = function(t, e) {
@@ -43537,7 +43535,7 @@ var TG = function(t) {
 		else if (null != t.value) e = t.value;
 		else {
 			var n = t.interval || [];
-			e = n[0] === -1 / 0 && n[1] === 1 / 0 ? 0 : (n[0] + n[1]) / 2;
+			e = n[0] === -Infinity && n[1] === Infinity ? 0 : (n[0] + n[1]) / 2;
 		}
 		return e;
 	}, n.prototype.getVisualMeta = function(t) {
@@ -43545,9 +43543,9 @@ var TG = function(t) {
 			var e = [], n = ["", ""], i = this, r = this._pieceList.slice();
 			if (r.length) {
 				var o = r[0].interval[0];
-				o !== -1 / 0 && r.unshift({ interval: [-1 / 0, o] }), (o = r[r.length - 1].interval[1]) !== 1 / 0 && r.push({ interval: [o, 1 / 0] });
-			} else r.push({ interval: [-1 / 0, 1 / 0] });
-			var a = -1 / 0;
+				o !== -Infinity && r.unshift({ interval: [-Infinity, o] }), (o = r[r.length - 1].interval[1]) !== Infinity && r.push({ interval: [o, Infinity] });
+			} else r.push({ interval: [-Infinity, Infinity] });
+			var a = -Infinity;
 			return N(r, (function(t) {
 				var e = t.interval;
 				e && (e[0] > a && s([a, e[0]], "outOfRange"), s(e.slice()), a = e[1]);
@@ -43560,7 +43558,7 @@ var TG = function(t) {
 			var a = i.getRepresentValue({ interval: r });
 			o || (o = i.getValueState(a));
 			var s = t(a, o);
-			r[0] === -1 / 0 ? n[0] = s : r[1] === 1 / 0 ? n[1] = s : e.push({
+			r[0] === -Infinity ? n[0] = s : r[1] === Infinity ? n[1] = s : e.push({
 				value: r[0],
 				color: s
 			}, {
@@ -43590,7 +43588,7 @@ var CG = {
 		r = Math.max(parseInt(r, 10), 1), e.splitNumber = r;
 		for (var o = (i[1] - i[0]) / r; +o.toFixed(n) !== o && n < 5;) n++;
 		e.precision = n, o = +o.toFixed(n), e.minOpen && t.push({
-			interval: [-1 / 0, i[0]],
+			interval: [-Infinity, i[0]],
 			close: [0, 0]
 		});
 		for (var a = 0, s = i[0]; a < r; s += o, a++) {
@@ -43601,7 +43599,7 @@ var CG = {
 			});
 		}
 		e.maxOpen && t.push({
-			interval: [i[1], 1 / 0],
+			interval: [i[1], Infinity],
 			close: [0, 0]
 		}), fo(t), N(t, (function(t, e) {
 			t.index = e, t.text = this.formatValueText(t.interval);
@@ -43632,7 +43630,7 @@ var CG = {
 					1,
 					0,
 					1
-				], l = [-1 / 0, 1 / 0], u = [], h = 0; h < 2; h++) {
+				], l = [-Infinity, Infinity], u = [], h = 0; h < 2; h++) {
 					for (var c = [[
 						"gte",
 						"gt",
@@ -43644,7 +43642,7 @@ var CG = {
 					]][h], p = 0; p < 3 && null == o[h]; p++) o[h] = e[c[p]], a[h] = s[p], u[h] = 2 === p;
 					o[h] ?? (o[h] = l[h]);
 				}
-				u[0] && o[1] === 1 / 0 && (a[0] = 0), u[1] && o[0] === -1 / 0 && (a[1] = 0), o[0] === o[1] && a[0] && a[1] && (i.value = o[0]);
+				u[0] && o[1] === Infinity && (a[0] = 0), u[1] && o[0] === -Infinity && (a[1] = 0), o[0] === o[1] && a[0] && a[1] && (i.value = o[0]);
 			}
 			i.visual = HD.retrieveVisuals(e), t.push(i);
 		}), this), DG(e, t), fo(t), N(t, (function(t) {
@@ -44306,7 +44304,7 @@ function dW(t) {
 	];
 }
 function fW(t, e, n, i) {
-	for (var r = (t.length - 2) / 6, o = 1 / 0, a = 0, s = t.length, l = s - 2, u = 0; u < r; u++) {
+	for (var r = (t.length - 2) / 6, o = Infinity, a = 0, s = t.length, l = s - 2, u = 0; u < r; u++) {
 		for (var h = 6 * u, c = 0, p = 0; p < s; p += 2) {
 			var d = 0 === p ? h : (h + p - 2) % l + 2, f = t[d] - n[0], g = t[d + 1] - n[1], y = e[p] - i[0] - f, v = e[p + 1] - i[1] - g;
 			c += y * y + v * v;
@@ -44357,7 +44355,7 @@ function bW(t, e) {
 		for (var r, o = [], a = 0; a < t.length; a++) {
 			var s = t[a], l = e[a], u = dW(s), h = dW(l);
 			r ??= u[2] < 0 != h[2] < 0;
-			var c = [], p = [], d = 0, f = 1 / 0, g = [], y = s.length;
+			var c = [], p = [], d = 0, f = Infinity, g = [], y = s.length;
 			r && (s = gW(s));
 			for (var v = 6 * fW(s, l, u, h), m = y - 2, x = 0; x < m; x += 2) {
 				var _ = (v + x) % m + 2;
@@ -44425,7 +44423,7 @@ function SW(t, e, n, i, r, o) {
 	return s;
 }
 function MW(t) {
-	var e = 1 / 0, n = 1 / 0, i = -1 / 0, r = -1 / 0;
+	var e = Infinity, n = Infinity, i = -Infinity, r = -Infinity;
 	return E(E(t, (function(t) {
 		var o = t.getBoundingRect(), a = t.getComputedTransform(), s = o.x + o.width / 2 + (a ? a[4] : 0), l = o.y + o.height / 2 + (a ? a[5] : 0);
 		return e = Math.min(s, e), n = Math.min(l, n), i = Math.max(s, i), r = Math.max(l, r), [s, l];
@@ -46996,7 +46994,9 @@ const CSS$1 = `${DERIVE_TOKENS_CSS}
 .wb-ep-btn{font:inherit;font-size:13px;padding:4px 14px;border-radius:6px;cursor:pointer;
   border:1px solid var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-canvas,#ffffff);color:var(--dsw-derive-fg,#1f2328)}
 .wb-ep-btn:hover{background:var(--dsw-derive-surface,#f6f8fa)}
-.wb-ep-btn:disabled{opacity:.5;cursor:default}
+/* 禁用态（t260907-08）：弃 opacity 降权（四象限 new-light 格实锤 3.16<4.5），
+ * 改灰字＋浅底的令牌化禁用态——对比度全档达标且保留「不可点」affordance。 */
+.wb-ep-btn:disabled{cursor:default;color:var(--dsw-derive-muted,#57606a);background:var(--dsw-derive-surface,#f6f8fa)}
 .wb-ep-btn-green{border-color:var(--dsw-derive-success-border,#7dd9a0);color:var(--dsw-derive-success,#1a7f37);background:var(--dsw-derive-success-bg,#dafbe1)}
 .wb-ep-cols{display:flex;gap:14px;align-items:flex-start;min-height:0}
 .wb-ep-md{flex:55 1 0;min-width:0;border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;background:var(--dsw-derive-canvas,#ffffff);
@@ -47372,7 +47372,7 @@ function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }) {
 			failOpen(`启动请求异常——${String(err instanceof Error ? err.message : err)}`);
 			return;
 		}
-		const deadline = Date.now() + 6e5;
+		const deadline = Date.now() + 10 * 6e4;
 		stopSuggestPoll();
 		suggestTimer.current = startVisibleInterval(() => {
 			(async () => {
@@ -47912,53 +47912,59 @@ function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }) {
 * 无横向溢出断言由集成场景锚 .wb-doc-root 容器（V1②口径）。
 */
 const API$1 = "/sandbar-workbench/api/wf/docs";
-const DOCS_STYLE = `
+const DOCS_STYLE = `${DERIVE_TOKENS_CSS}
 /* 窄可用=容器级响应（@container）：中列被压缩/窄设备都走单栏流，不依赖视口媒体查询
  * （壳在窄视口会卸载本插件槽——视口级断点对「移动窄栏」不可达，探针实证见场景②）。 */
+/* 主题（t260907-08，KI-055）：本视图样式全量令牌化（theme.ts 派生令牌体系）——
+ * t260905-06 按当时深色语境写死的调色板在浅色档不可读（宿主 260907 实报症状①）。
+ * 普通面走 --dsw-derive-*（深浅两档随平台令牌翻转）；代码块/pre/.md-code/.md-cl/
+ * .md-copy 与 tok-* 语法高亮属「自备深底的固定暗面板」，走 --dsw-derive-dark-*
+ * 家族（前后景成对、不随平台翻转——翻转反而破坏与固定底的对偶，theme.ts 头注同款纪律）。 */
 .wb-doc-root { container-type: inline-size; height:100%; min-height:0; }
 .wb-doc-frame { display:flex; gap:0; height:100%; min-height:0; }
-.wb-doc-toc { width:280px; flex:none; overflow-y:auto; padding:10px; border-right:1px solid #2a2f3a; }
+.wb-doc-toc { width:280px; flex:none; overflow-y:auto; padding:10px; border-right:1px solid var(--dsw-derive-border,#d0d7de); }
 .wb-doc-main { flex:1; overflow-y:auto; padding:16px 22px; min-width:0; }
 .wb-doc-scope-row { display:flex; gap:6px; margin-bottom:10px; }
-.wb-doc-scope-btn { border:1px solid #3a404c; background:transparent; color:#c9d1d9;
+.wb-doc-scope-btn { border:1px solid var(--dsw-derive-border,#d0d7de); background:transparent; color:var(--dsw-derive-fg,#1f2328);
   padding:4px 12px; border-radius:6px; cursor:pointer; font-size:13px; }
-.wb-doc-scope-btn.active { background:#1f6feb; border-color:#1f6feb; color:#fff; }
-.wb-doc-group-head { font-size:12px; color:#8b949e; margin:12px 0 4px; text-transform:none; }
+.wb-doc-scope-btn.active { background:var(--dsw-derive-accent-solid,#1f6feb); border-color:var(--dsw-derive-accent-solid,#1f6feb); color:var(--dsw-derive-on-solid,#fff); }
+.wb-doc-group-head { font-size:12px; color:var(--dsw-derive-muted,#57606a); margin:12px 0 4px; text-transform:none; }
 .wb-doc-item { display:block; width:100%; text-align:left; border:0; background:transparent;
-  color:#c9d1d9; padding:5px 8px; border-radius:6px; cursor:pointer; font-size:13px;
+  color:var(--dsw-derive-fg,#1f2328); padding:5px 8px; border-radius:6px; cursor:pointer; font-size:13px;
   line-height:1.5; overflow-wrap:anywhere; }
-.wb-doc-item:hover { background:rgba(255,255,255,0.08); }
-.wb-doc-item.active { background:#1f6feb; color:#fff; }
-.wb-doc-skip-note { font-size:12px; color:#d29922; margin-top:14px; line-height:1.6; }
+.wb-doc-item:hover { background:var(--dsw-derive-surface,#f6f8fa); }
+.wb-doc-item.active { background:var(--dsw-derive-accent-solid,#1f6feb); color:var(--dsw-derive-on-solid,#fff); }
+.wb-doc-skip-note { font-size:12px; color:var(--dsw-derive-warn,#9a6700); margin-top:14px; line-height:1.6; }
 .wb-doc-title { font-size:18px; margin:0 0 4px; }
-.wb-doc-meta { font-size:12px; color:#8b949e; margin-bottom:14px; }
-.wb-doc-empty { color:#8b949e; padding:20px 4px; line-height:1.7; }
-.wb-doc-back { display:none; border:1px solid #3a404c; background:transparent; color:#c9d1d9;
+.wb-doc-meta { font-size:12px; color:var(--dsw-derive-muted,#57606a); margin-bottom:14px; }
+.wb-doc-empty { color:var(--dsw-derive-muted,#57606a); padding:20px 4px; line-height:1.7; }
+.wb-doc-back { display:none; border:1px solid var(--dsw-derive-border,#d0d7de); background:transparent; color:var(--dsw-derive-fg,#1f2328);
   padding:4px 12px; border-radius:6px; cursor:pointer; margin-bottom:10px; }
-.wb-doc-body { line-height:1.75; overflow-wrap:anywhere; color:#e6edf3; font-size:14px; }
+.wb-doc-body { line-height:1.75; overflow-wrap:anywhere; color:var(--dsw-derive-fg,#1f2328); font-size:14px; }
 .wb-doc-body h1, .wb-doc-body h2, .wb-doc-body h3 { line-height:1.4; }
-.wb-doc-body pre { background:#161b22; border:1px solid #2a2f3a; border-radius:8px;
+.wb-doc-body pre { background:var(--dsw-derive-dark-bg,#1e1e24); border:1px solid var(--dsw-derive-dark-border,#2a2f3a); border-radius:8px;
   padding:10px 12px; overflow-x:auto; }
 /* 代码块自持样式（t260905-06 验收 A 附带项）：renderMarkdown 产出的 .md-code/.md-copy/
- * .tok-* 出厂样式由 knowledge 插件全局 CSS 注入供给——本视图自带一份（深色适配），
- * knowledge 退役另票时本视图不随之破相。复制行为委托见下方 onDocCopy。 */
-.wb-doc-body .md-code { position:relative; margin:10px 0; border:1px solid #2a2f3a;
-  border-radius:8px; background:#161b22; overflow:hidden; }
+ * .tok-* 出厂样式由 knowledge 插件全局 CSS 注入供给——本视图自带一份（固定暗面板，
+ * 色值经 --dsw-derive-dark-* 家族供出），knowledge 退役另票时本视图不随之破相。
+ * 复制行为委托见下方 onDocCopy。 */
+.wb-doc-body .md-code { position:relative; margin:10px 0; border:1px solid var(--dsw-derive-dark-border,#2a2f3a);
+  border-radius:8px; background:var(--dsw-derive-dark-bg,#1e1e24); overflow:hidden; }
 .wb-doc-body .md-code pre { margin:0; border:0; border-radius:0; }
-.wb-doc-body .md-cl { position:absolute; top:6px; right:60px; font-size:11px; color:#8b949e;
-  background:#21262d; border-radius:4px; padding:0 8px; line-height:18px; }
+.wb-doc-body .md-cl { position:absolute; top:6px; right:60px; font-size:11px; color:var(--dsw-derive-dark-muted,#b8b8c8);
+  background:var(--dsw-derive-dark-surface,#21262d); border-radius:4px; padding:0 8px; line-height:18px; }
 .wb-doc-body .md-copy { position:absolute; top:6px; right:8px; font-size:11px; padding:1px 10px;
-  line-height:18px; cursor:pointer; border:1px solid #3a404c; background:#21262d;
-  color:#c9d1d9; border-radius:4px; }
-.wb-doc-body .md-copy:hover { background:#30363d; color:#fff; }
-.wb-doc-body .tok-c { color:#8b949e; font-style:italic; }
-.wb-doc-body .tok-s { color:#a5d6ff; }
-.wb-doc-body .tok-k { color:#ff7b72; font-weight:600; }
-.wb-doc-body .tok-n { color:#79c0ff; }
-.wb-doc-body .tok-v { color:#ffa657; }
+  line-height:18px; cursor:pointer; border:1px solid var(--dsw-derive-dark-border,#2a2f3a); background:var(--dsw-derive-dark-surface,#21262d);
+  color:var(--dsw-derive-dark-fg,#f0f3f6); border-radius:4px; }
+.wb-doc-body .md-copy:hover { background:var(--dsw-derive-dark-surface-2,#30363d); color:var(--dsw-derive-on-solid,#fff); }
+.wb-doc-body .tok-c { color:var(--dsw-derive-dark-muted,#b8b8c8); font-style:italic; }
+.wb-doc-body .tok-s { color:var(--dsw-derive-dark-accent,#7ab8ff); }
+.wb-doc-body .tok-k { color:var(--dsw-derive-dark-red,#f87171); font-weight:600; }
+.wb-doc-body .tok-n { color:var(--dsw-derive-dark-accent,#7ab8ff); }
+.wb-doc-body .tok-v { color:var(--dsw-derive-dark-amber,#ffd166); }
 .wb-doc-body pre code, .wb-doc-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .wb-doc-body table { border-collapse:collapse; }
-.wb-doc-body th, .wb-doc-body td { border:1px solid #2a2f3a; padding:4px 8px; }
+.wb-doc-body th, .wb-doc-body td { border:1px solid var(--dsw-derive-border,#d0d7de); padding:4px 8px; }
 @container (max-width: 720px) {
   .wb-doc-frame { flex-direction:column; }
   .wb-doc-toc { width:100%; border-right:0; }
@@ -48646,7 +48652,7 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-btn{font:inherit;font-size:13px;padding:5px 16px;border-radius:6px;cursor:pointer;
   border:1px solid var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-canvas,#ffffff);color:var(--dsw-derive-fg,#1f2328);transition:background .12s}
 .wb-btn:hover{background:var(--dsw-derive-surface,#f6f8fa)}
-.wb-btn:disabled{opacity:.5;cursor:default}
+.wb-btn:disabled{cursor:default;color:var(--dsw-derive-muted,#57606a);background:var(--dsw-derive-surface,#f6f8fa)}
 .wb-btn-danger{border-color:var(--dsw-derive-danger-border,#ff9b9b);color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger-bg,#ffebe9)}
 .wb-btn-blue{border-color:var(--dsw-derive-accent-border,#96c8f2);color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff)}
 .wb-btn-green{border-color:var(--dsw-derive-success-border,#7dd9a0);color:var(--dsw-derive-success,#1a7f37);background:var(--dsw-derive-success-bg,#dafbe1)}
@@ -48707,7 +48713,7 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-card-ops{display:flex;gap:6px;align-items:center;flex:none;margin-left:auto}
 .wb-card-btn{font-size:12px;padding:2px 10px;border-radius:6px;border:1px solid var(--dsw-derive-border,#d0d7de);
   background:var(--dsw-derive-canvas,#fff);color:var(--dsw-derive-fg,#1f2328);cursor:pointer;white-space:nowrap}
-.wb-card-btn:disabled{opacity:.5;cursor:default}
+.wb-card-btn:disabled{cursor:default;color:var(--dsw-derive-muted,#57606a);background:var(--dsw-derive-surface,#f6f8fa)}
 .wb-card-btn-primary{background:var(--dsw-derive-accent-solid,#1f6feb);border-color:var(--dsw-derive-accent-solid,#1f6feb);color:var(--dsw-derive-on-solid,#fff);font-weight:600}
 .wb-card-btn-blue{border-color:var(--dsw-derive-accent-border,#96c8f2);color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff)}
 .wb-card-btn-danger{border-color:var(--dsw-derive-danger-border,#ff9b9b);color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger-bg,#ffebe9)}
@@ -48746,7 +48752,7 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-row-btn{font:inherit;font-size:12px;padding:3px 10px;border-radius:6px;cursor:pointer;
   border:1px solid var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-canvas,#ffffff);color:var(--dsw-derive-fg,#1f2328);white-space:nowrap;transition:background .12s}
 .wb-row-btn:hover{background:var(--dsw-derive-surface,#f6f8fa)}
-.wb-row-btn:disabled{opacity:.45;cursor:default}
+.wb-row-btn:disabled{cursor:default;color:var(--dsw-derive-muted,#57606a);background:var(--dsw-derive-surface,#f6f8fa)}
 .wb-row-btn-primary{border-color:var(--dsw-derive-accent-solid,#1f6feb);background:var(--dsw-derive-accent-solid,#1f6feb);color:var(--dsw-derive-on-solid,#fff);font-weight:600}
 .wb-row-btn-primary:hover{background:var(--dsw-derive-accent,#0857b6)}
 .wb-row-btn-danger{border-color:var(--dsw-derive-danger-border,#ff9b9b);color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger-bg,#ffebe9)}
@@ -48931,6 +48937,21 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-md code{background:var(--dsw-derive-surface-2,#eff1f3);border-radius:4px;padding:0 4px;font-size:12px}
 .wb-md pre{background:var(--dsw-derive-surface,#f6f8fa);border-radius:6px;padding:8px 10px;overflow-x:auto;margin:4px 0}
 .wb-md pre code{background:none;padding:0}
+/* knowledge 出厂件收编（t260907-08）：knowledge 全局 CSS 的 .md-code/.md-cl/.md-copy/
+ * .tok-* 固定浅档色不随平台翻——四象限 new-dark 格实锤 epics 详情围栏代码块
+ * fg 写死浅档字色 on 派生深底 1.08:1（宿主症状②同族）。knowledge 全局 CSS 与 .wb-md
+ * 同特异性且后注入会压过平级规则，故此处全部升一级特异性收编：底=派生 surface（随档翻），
+ * 字=派生 fg，语法高亮映到派生语义令牌（fallback=knowledge 原浅档值，浅档视觉不变）。 */
+.wb-md .md-code{background:var(--dsw-derive-surface,#f6f8fa);border-color:var(--dsw-derive-border,#d0d7de)}
+.wb-md .md-code pre code{color:var(--dsw-derive-fg,#1f2328)}
+.wb-md .md-cl{color:var(--dsw-derive-muted,#57606a);background:var(--dsw-derive-surface-2,#eaeef2)}
+.wb-md .md-copy{border-color:var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-canvas,#ffffff);color:var(--dsw-derive-muted,#57606a)}
+.wb-md .md-copy:hover{background:var(--dsw-derive-surface-2,#eaeef2);color:var(--dsw-derive-fg,#1f2328)}
+.wb-md .tok-c{color:var(--dsw-derive-muted,#6e7781)}
+.wb-md .tok-s{color:var(--dsw-derive-accent,#0969da)}
+.wb-md .tok-k{color:var(--dsw-derive-danger,#cf222e)}
+.wb-md .tok-n{color:var(--dsw-derive-accent-deep,#0550ae)}
+.wb-md .tok-v{color:var(--dsw-derive-warn-deep,#7d4e00)}
 .wb-md blockquote{margin:4px 0;padding:2px 10px;border-left:3px solid var(--dsw-derive-border,#d0d7de);color:var(--dsw-derive-muted,#57606a)}
 .wb-md table{border-collapse:collapse;margin:4px 0}
 .wb-md table th,.wb-md table td{border:1px solid var(--dsw-derive-border,#d0d7de);padding:3px 10px;text-align:left;font-size:12px}
@@ -49151,17 +49172,18 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-d2-deep>details>summary::before{content:'▸ '}
 .wb-d2-deep>details[open]>summary::before{content:'▾ '}
 .wb-d2-deep>details>div{padding:0 12px 10px}
-/* ── 快照要点（t260905-07：阶段时间线/最近交接/门与签字记录/工作流快照，ticket show 直读） ── */
+/* ── 快照要点（t260905-07：阶段时间线/最近交接/门与签字记录/工作流快照，ticket show 直读） ──
+   （t260907-08：本段是 t260905-08 令牌化 sweep 的漏网点——写死浅档色在深色档不可读，全量归位派生令牌） */
 .wb-dsnap-block{margin:6px 0}
-.wb-dsnap-block>h4{margin:0 0 4px;font-size:11px;color:#57606a;font-weight:600}
+.wb-dsnap-block>h4{margin:0 0 4px;font-size:11px;color:var(--dsw-derive-muted,#57606a);font-weight:600}
 .wb-dsnap-row{display:flex;gap:8px;font-size:12px;line-height:1.7;flex-wrap:wrap}
-.wb-dsnap-row .st{color:#57606a;min-width:88px}
-.wb-dsnap-row .at{color:#8c959f;font-size:11px}
-.wb-dsnap-row[data-untime=true] .at{color:#cf222e}
+.wb-dsnap-row .st{color:var(--dsw-derive-muted,#57606a);min-width:88px}
+.wb-dsnap-row .at{color:var(--dsw-derive-muted,#8c959f);font-size:11px}
+.wb-dsnap-row[data-untime=true] .at{color:var(--dsw-derive-danger,#cf222e)}
 .wb-dsnap-chip{display:inline-block;padding:0 6px;border-radius:10px;font-size:11px;margin-right:4px}
-.wb-dsnap-chip[data-kind=gate]{background:#f6f8fa;color:#57606a;border:1px solid #d0d7de}
-.wb-dsnap-chip[data-kind=signature]{background:#ddf4ff;color:#0969da;border:1px solid #54aeff}
-.wb-dsnap-empty{font-size:12px;color:#8c959f}
+.wb-dsnap-chip[data-kind=gate]{background:var(--dsw-derive-surface,#f6f8fa);color:var(--dsw-derive-muted,#57606a);border:1px solid var(--dsw-derive-border,#d0d7de)}
+.wb-dsnap-chip[data-kind=signature]{background:var(--dsw-derive-accent-bg,#ddf4ff);color:var(--dsw-derive-accent,#0969da);border:1px solid var(--dsw-derive-accent-border,#96c8f2)}
+.wb-dsnap-empty{font-size:12px;color:var(--dsw-derive-muted,#8c959f)}
 /* 变更 tab：文件头 +/− 行数；构建产物（lib/ bundle）折叠组 */
 .wb-d-stats{font-size:11px;margin-left:auto;white-space:nowrap}
 .wb-d-stats .add{color:var(--dsw-derive-success,#1a7f37)}
@@ -49950,15 +49972,14 @@ function UsageSummaryLine({ detail, wf, usage }) {
 	}
 	const segs = agentSegmentCount(detail, wf);
 	const names = usageModelNames(usage.models);
-	const title = [
-		`agent 段数 ${segs}`,
-		`in ${usage.total.input} / out ${usage.total.output} / cacheRead ${usage.total.cacheRead}`,
-		names !== "" ? `模型：${names}` : `模型：${usage.models[0]?.model ?? "—"}（单模型不显示模型名）`,
-		`会话文件 ${usage.files} 份（多角色加总）`
-	].join(" · ");
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 		className: "wb-usage",
-		title,
+		title: [
+			`agent 段数 ${segs}`,
+			`in ${usage.total.input} / out ${usage.total.output} / cacheRead ${usage.total.cacheRead}`,
+			names !== "" ? `模型：${names}` : `模型：${usage.models[0]?.model ?? "—"}（单模型不显示模型名）`,
+			`会话文件 ${usage.files} 份（多角色加总）`
+		].join(" · "),
 		children: [
 			"🤖 ",
 			segs,
@@ -50327,15 +50348,13 @@ function DiffBlockBody({ b }) {
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
 			className: "wb-d-cells",
 			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { style: { width: 40 } }), Array.from({ length: cols }, (_, c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("th", { children: ["列 ", c + 1] }, c))] }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tbody", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "旧" }), Array.from({ length: cols }, (_, c) => {
-				const chg = (oc[c] ?? "") !== (nc[c] ?? "");
 				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
-					className: chg ? "wb-d-cell-old" : "",
+					className: (oc[c] ?? "") !== (nc[c] ?? "") ? "wb-d-cell-old" : "",
 					children: oc[c] ?? "—"
 				}, c);
 			})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "新" }), Array.from({ length: cols }, (_, c) => {
-				const chg = (oc[c] ?? "") !== (nc[c] ?? "");
 				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
-					className: chg ? "wb-d-cell-new" : "",
+					className: (oc[c] ?? "") !== (nc[c] ?? "") ? "wb-d-cell-new" : "",
 					children: nc[c] ?? "—"
 				}, c);
 			})] })] })]
@@ -50357,14 +50376,12 @@ function DiffBlockBody({ b }) {
 }
 /** unified diff 文本逐行着色（+绿/-红/@@蓝/头行灰）。 */
 function UnifiedDiffView({ text }) {
-	const lines = text.split("\n");
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 		className: "wb-d-uni",
-		children: lines.map((l, i) => {
-			const k = l.startsWith("@@") ? "hunk" : l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : /^(diff |index |--- |\+\+\+ |new file|deleted file)/.test(l) ? "meta" : "ctx";
+		children: text.split("\n").map((l, i) => {
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "wb-d-line",
-				"data-k": k,
+				"data-k": l.startsWith("@@") ? "hunk" : l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : /^(diff |index |--- |\+\+\+ |new file|deleted file)/.test(l) ? "meta" : "ctx",
 				children: l === "" ? " " : l
 			}, i);
 		})
@@ -50610,7 +50627,6 @@ function ChangesTab({ detail, operator, onMsg }) {
 	};
 	const realFiles = diff.files.filter((f) => !isGenArtifact(f.path));
 	const genFiles = diff.files.filter((f) => isGenArtifact(f.path));
-	const sourceLabel = diff.source === "worktree" ? "泳道 worktree vs base" : diff.source === "merged" ? "已合入 main（merge commit 回放）" : diff.source === "main" ? "主树 write_set + git log" : "无来源";
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 		/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 			className: "wb-section",
@@ -50619,7 +50635,7 @@ function ChangesTab({ detail, operator, onMsg }) {
 					className: "wb-section-title",
 					children: [
 						"变更集（",
-						sourceLabel,
+						diff.source === "worktree" ? "泳道 worktree vs base" : diff.source === "merged" ? "已合入 main（merge commit 回放）" : diff.source === "main" ? "主树 write_set + git log" : "无来源",
 						"）"
 					]
 				}),

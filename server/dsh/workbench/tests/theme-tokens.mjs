@@ -10,10 +10,18 @@ const STR = (s) => String(s);
 let pass = 0, fail = 0;
 const ok = (name, fn) => { try { fn(); pass++; } catch (e) { fail++; console.log(`FAIL ${name}: ${e.message}`); } };
 
+// 合法 fallback 形态两式（t260907-08 钉死）：
+//   扁平式 var(--x, #hex) —— 常规令牌；
+//   平台契约式 var(--a, var(--b, #hex)) —— 仅限 bgPrimary 双兜底（t260907-03 评审门
+//   正名的旧平台 0.1.1-rc.2 兼容：宿主平台无 bg-primary 名时落 bg-base；UT 此前只认
+//   扁平式，双兜底入账时漏更=存量红，本票随四象限验收一并修正）。嵌套只认这一名，
+//   不放开任意嵌套（防无 fallback 的 var 链混入）。
 const VAR_RE = /^var\(--[a-z0-9-]+,\s*#[0-9a-fA-F]{3,8}\)$/;
+const VAR_NESTED_RE = /^var\(--[a-z0-9-]+,\s*var\(--[a-z0-9-]+,\s*#[0-9a-fA-F]{3,8}\)\)$/;
+const hasFallback = (v) => VAR_RE.test(STR(v)) || VAR_NESTED_RE.test(STR(v));
 
 ok('ALIAS 每个 var() 带 fallback', () => {
-  for (const [k, v] of Object.entries(ALIAS)) assert.match(STR(v), VAR_RE, `${k}=${v}`);
+  for (const [k, v] of Object.entries(ALIAS)) assert.ok(hasFallback(v), `${k}=${v}`);
 });
 ok('TOKEN 每个 var() 带 fallback', () => {
   for (const [k, v] of Object.entries(TOKEN)) assert.match(STR(v), VAR_RE, `${k}=${v}`);
@@ -50,10 +58,14 @@ ok('派生定义逐条语法：名字=值；值内每个 var( 带逗号 fallback
     }
   }
 });
-ok('固定暗面板恰 9 个且为裸 hex（自备深底不随平台翻转）', () => {
+ok('固定暗面板恰 12 个且为裸 hex（自备深底不随平台翻转；12=核心 9＋t260907-08 面位扩展 3）', () => {
+  // 名字精确点名：家族成员是登记制（theme.ts 头注），UT 同步钉名防顺手混入非成对面。
+  const EXPECT = ['bg', 'fg', 'muted', 'green', 'red', 'amber', 'accent', 'warn-bg', 'warn-fg',
+    'border', 'surface', 'surface-2'];
   const dark = defs.filter(d => d.startsWith('--dsw-derive-dark-'));
-  assert.strictEqual(dark.length, 9, dark.join(' | '));
-  for (const d of dark) assert.match(d, /^--dsw-derive-dark-[a-z-]+:#[0-9a-f]{6}$/);
+  const names = dark.map(d => d.slice('--dsw-derive-dark-'.length).split(':')[0]).sort();
+  assert.deepStrictEqual(names, [...EXPECT].sort(), dark.join(' | '));
+  for (const d of dark) assert.match(d, /^--dsw-derive-dark-[a-z0-9-]+:#[0-9a-f]{6}$/);
 });
 ok('DERIVE_TOKENS_CSS 与 TOKEN 名字对齐（TSX 行内引用的令牌都在 CSS 定义）', () => {
   for (const v of Object.values(TOKEN)) {

@@ -60,7 +60,9 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-ep-btn{font:inherit;font-size:13px;padding:4px 14px;border-radius:6px;cursor:pointer;
   border:1px solid var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-canvas,#ffffff);color:var(--dsw-derive-fg,#1f2328)}
 .wb-ep-btn:hover{background:var(--dsw-derive-surface,#f6f8fa)}
-.wb-ep-btn:disabled{opacity:.5;cursor:default}
+/* 禁用态（t260907-08）：弃 opacity 降权（四象限 new-light 格实锤 3.16<4.5），
+ * 改灰字＋浅底的令牌化禁用态——对比度全档达标且保留「不可点」affordance。 */
+.wb-ep-btn:disabled{cursor:default;color:var(--dsw-derive-muted,#57606a);background:var(--dsw-derive-surface,#f6f8fa)}
 .wb-ep-btn-green{border-color:var(--dsw-derive-success-border,#7dd9a0);color:var(--dsw-derive-success,#1a7f37);background:var(--dsw-derive-success-bg,#dafbe1)}
 .wb-ep-cols{display:flex;gap:14px;align-items:flex-start;min-height:0}
 .wb-ep-md{flex:55 1 0;min-width:0;border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;background:var(--dsw-derive-canvas,#ffffff);

@@ -51,7 +51,7 @@ const PMOD_CSS = `${DERIVE_TOKENS_CSS}
 .wb-pmod-btn { font:inherit; font-size:13px; border:1px solid var(--dsw-derive-border,#d0d7de); background:var(--dsw-derive-canvas,#fff); color:var(--dsw-derive-fg,#1f2328);
   border-radius:6px; padding:5px 12px; cursor:pointer; }
 .wb-pmod-btn:hover { background:var(--dsw-derive-surface,#f6f8fa); }
-.wb-pmod-btn:disabled { opacity:.45; cursor:not-allowed; }
+.wb-pmod-btn:disabled { cursor:not-allowed; color:var(--dsw-derive-muted,#57606a); background:var(--dsw-derive-surface,#f6f8fa); }
 .wb-pmod-btn-blue { border-color:var(--dsw-derive-accent-border,#96c8f2); color:var(--dsw-derive-accent,#0969da); background:var(--dsw-derive-accent-bg,#ddf4ff); }
 .wb-pmod-btn-danger { border-color:var(--dsw-derive-danger-border,#ff9b9b); color:var(--dsw-derive-danger,#cf222e); background:var(--dsw-derive-danger-bg,#ffebe9); }
 .wb-pmod-err { background:var(--dsw-derive-danger-bg,#ffebe9); border:1px solid var(--dsw-derive-danger-border,#ff9b9b); color:var(--dsw-derive-danger,#cf222e); border-radius:6px;

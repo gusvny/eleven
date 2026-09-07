@@ -145,7 +145,7 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-btn{font:inherit;font-size:13px;padding:5px 16px;border-radius:6px;cursor:pointer;
   border:1px solid var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-canvas,#ffffff);color:var(--dsw-derive-fg,#1f2328);transition:background .12s}
 .wb-btn:hover{background:var(--dsw-derive-surface,#f6f8fa)}
-.wb-btn:disabled{opacity:.5;cursor:default}
+.wb-btn:disabled{cursor:default;color:var(--dsw-derive-muted,#57606a);background:var(--dsw-derive-surface,#f6f8fa)}
 .wb-btn-danger{border-color:var(--dsw-derive-danger-border,#ff9b9b);color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger-bg,#ffebe9)}
 .wb-btn-blue{border-color:var(--dsw-derive-accent-border,#96c8f2);color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff)}
 .wb-btn-green{border-color:var(--dsw-derive-success-border,#7dd9a0);color:var(--dsw-derive-success,#1a7f37);background:var(--dsw-derive-success-bg,#dafbe1)}
@@ -206,7 +206,7 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-card-ops{display:flex;gap:6px;align-items:center;flex:none;margin-left:auto}
 .wb-card-btn{font-size:12px;padding:2px 10px;border-radius:6px;border:1px solid var(--dsw-derive-border,#d0d7de);
   background:var(--dsw-derive-canvas,#fff);color:var(--dsw-derive-fg,#1f2328);cursor:pointer;white-space:nowrap}
-.wb-card-btn:disabled{opacity:.5;cursor:default}
+.wb-card-btn:disabled{cursor:default;color:var(--dsw-derive-muted,#57606a);background:var(--dsw-derive-surface,#f6f8fa)}
 .wb-card-btn-primary{background:var(--dsw-derive-accent-solid,#1f6feb);border-color:var(--dsw-derive-accent-solid,#1f6feb);color:var(--dsw-derive-on-solid,#fff);font-weight:600}
 .wb-card-btn-blue{border-color:var(--dsw-derive-accent-border,#96c8f2);color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff)}
 .wb-card-btn-danger{border-color:var(--dsw-derive-danger-border,#ff9b9b);color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger-bg,#ffebe9)}
@@ -245,7 +245,7 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-row-btn{font:inherit;font-size:12px;padding:3px 10px;border-radius:6px;cursor:pointer;
   border:1px solid var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-canvas,#ffffff);color:var(--dsw-derive-fg,#1f2328);white-space:nowrap;transition:background .12s}
 .wb-row-btn:hover{background:var(--dsw-derive-surface,#f6f8fa)}
-.wb-row-btn:disabled{opacity:.45;cursor:default}
+.wb-row-btn:disabled{cursor:default;color:var(--dsw-derive-muted,#57606a);background:var(--dsw-derive-surface,#f6f8fa)}
 .wb-row-btn-primary{border-color:var(--dsw-derive-accent-solid,#1f6feb);background:var(--dsw-derive-accent-solid,#1f6feb);color:var(--dsw-derive-on-solid,#fff);font-weight:600}
 .wb-row-btn-primary:hover{background:var(--dsw-derive-accent,#0857b6)}
 .wb-row-btn-danger{border-color:var(--dsw-derive-danger-border,#ff9b9b);color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger-bg,#ffebe9)}
@@ -430,6 +430,21 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-md code{background:var(--dsw-derive-surface-2,#eff1f3);border-radius:4px;padding:0 4px;font-size:12px}
 .wb-md pre{background:var(--dsw-derive-surface,#f6f8fa);border-radius:6px;padding:8px 10px;overflow-x:auto;margin:4px 0}
 .wb-md pre code{background:none;padding:0}
+/* knowledge 出厂件收编（t260907-08）：knowledge 全局 CSS 的 .md-code/.md-cl/.md-copy/
+ * .tok-* 固定浅档色不随平台翻——四象限 new-dark 格实锤 epics 详情围栏代码块
+ * fg 写死浅档字色 on 派生深底 1.08:1（宿主症状②同族）。knowledge 全局 CSS 与 .wb-md
+ * 同特异性且后注入会压过平级规则，故此处全部升一级特异性收编：底=派生 surface（随档翻），
+ * 字=派生 fg，语法高亮映到派生语义令牌（fallback=knowledge 原浅档值，浅档视觉不变）。 */
+.wb-md .md-code{background:var(--dsw-derive-surface,#f6f8fa);border-color:var(--dsw-derive-border,#d0d7de)}
+.wb-md .md-code pre code{color:var(--dsw-derive-fg,#1f2328)}
+.wb-md .md-cl{color:var(--dsw-derive-muted,#57606a);background:var(--dsw-derive-surface-2,#eaeef2)}
+.wb-md .md-copy{border-color:var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-canvas,#ffffff);color:var(--dsw-derive-muted,#57606a)}
+.wb-md .md-copy:hover{background:var(--dsw-derive-surface-2,#eaeef2);color:var(--dsw-derive-fg,#1f2328)}
+.wb-md .tok-c{color:var(--dsw-derive-muted,#6e7781)}
+.wb-md .tok-s{color:var(--dsw-derive-accent,#0969da)}
+.wb-md .tok-k{color:var(--dsw-derive-danger,#cf222e)}
+.wb-md .tok-n{color:var(--dsw-derive-accent-deep,#0550ae)}
+.wb-md .tok-v{color:var(--dsw-derive-warn-deep,#7d4e00)}
 .wb-md blockquote{margin:4px 0;padding:2px 10px;border-left:3px solid var(--dsw-derive-border,#d0d7de);color:var(--dsw-derive-muted,#57606a)}
 .wb-md table{border-collapse:collapse;margin:4px 0}
 .wb-md table th,.wb-md table td{border:1px solid var(--dsw-derive-border,#d0d7de);padding:3px 10px;text-align:left;font-size:12px}
@@ -650,17 +665,18 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-d2-deep>details>summary::before{content:'▸ '}
 .wb-d2-deep>details[open]>summary::before{content:'▾ '}
 .wb-d2-deep>details>div{padding:0 12px 10px}
-/* ── 快照要点（t260905-07：阶段时间线/最近交接/门与签字记录/工作流快照，ticket show 直读） ── */
+/* ── 快照要点（t260905-07：阶段时间线/最近交接/门与签字记录/工作流快照，ticket show 直读） ──
+   （t260907-08：本段是 t260905-08 令牌化 sweep 的漏网点——写死浅档色在深色档不可读，全量归位派生令牌） */
 .wb-dsnap-block{margin:6px 0}
-.wb-dsnap-block>h4{margin:0 0 4px;font-size:11px;color:#57606a;font-weight:600}
+.wb-dsnap-block>h4{margin:0 0 4px;font-size:11px;color:var(--dsw-derive-muted,#57606a);font-weight:600}
 .wb-dsnap-row{display:flex;gap:8px;font-size:12px;line-height:1.7;flex-wrap:wrap}
-.wb-dsnap-row .st{color:#57606a;min-width:88px}
-.wb-dsnap-row .at{color:#8c959f;font-size:11px}
-.wb-dsnap-row[data-untime=true] .at{color:#cf222e}
+.wb-dsnap-row .st{color:var(--dsw-derive-muted,#57606a);min-width:88px}
+.wb-dsnap-row .at{color:var(--dsw-derive-muted,#8c959f);font-size:11px}
+.wb-dsnap-row[data-untime=true] .at{color:var(--dsw-derive-danger,#cf222e)}
 .wb-dsnap-chip{display:inline-block;padding:0 6px;border-radius:10px;font-size:11px;margin-right:4px}
-.wb-dsnap-chip[data-kind=gate]{background:#f6f8fa;color:#57606a;border:1px solid #d0d7de}
-.wb-dsnap-chip[data-kind=signature]{background:#ddf4ff;color:#0969da;border:1px solid #54aeff}
-.wb-dsnap-empty{font-size:12px;color:#8c959f}
+.wb-dsnap-chip[data-kind=gate]{background:var(--dsw-derive-surface,#f6f8fa);color:var(--dsw-derive-muted,#57606a);border:1px solid var(--dsw-derive-border,#d0d7de)}
+.wb-dsnap-chip[data-kind=signature]{background:var(--dsw-derive-accent-bg,#ddf4ff);color:var(--dsw-derive-accent,#0969da);border:1px solid var(--dsw-derive-accent-border,#96c8f2)}
+.wb-dsnap-empty{font-size:12px;color:var(--dsw-derive-muted,#8c959f)}
 /* 变更 tab：文件头 +/− 行数；构建产物（lib/ bundle）折叠组 */
 .wb-d-stats{font-size:11px;margin-left:auto;white-space:nowrap}
 .wb-d-stats .add{color:var(--dsw-derive-success,#1a7f37)}

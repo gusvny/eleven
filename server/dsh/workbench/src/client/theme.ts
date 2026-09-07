@@ -122,4 +122,11 @@ export const DERIVE_TOKENS_CSS = `:root{
 --dsw-derive-dark-accent:#7ab8ff;
 --dsw-derive-dark-warn-bg:#7a4a06;
 --dsw-derive-dark-warn-fg:#ffe9c4;
+/* 暗面板面位扩展（t260907-08）：docs 视图代码块（pre/.md-code/.md-cl/.md-copy）需要
+ * 与 dark-bg 成对的边框/浮起面/悬停面三个面位——值取 GitHub Dark 系（与改造前
+ * docs.tsx 写死值同源），搭配固定不翻转。登记理由：docs.tsx 令牌化时按消费点驱动
+ * 盘点，既有 9 个 dark 令牌覆盖不了「面板内边框/浮起 chip」语义，缺才增（方案 §3）。 */
+--dsw-derive-dark-border:#2a2f3a;
+--dsw-derive-dark-surface:#21262d;
+--dsw-derive-dark-surface-2:#30363d;
 }`

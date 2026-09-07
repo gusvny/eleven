@@ -19,6 +19,7 @@
  */
 import { useEffect, useState } from 'react'
 import { renderMarkdown } from '../../../knowledge/src/client/markdown.ts'
+import { DERIVE_TOKENS_CSS } from './theme'
 import type { DocTreeGroup, DocsScope } from '../shared/docs-model.ts'
 
 const API = '/sandbar-workbench/api/wf/docs'
@@ -38,53 +39,59 @@ interface DocResult {
   body?: string
 }
 
-const DOCS_STYLE = `
+const DOCS_STYLE = `${DERIVE_TOKENS_CSS}
 /* 窄可用=容器级响应（@container）：中列被压缩/窄设备都走单栏流，不依赖视口媒体查询
  * （壳在窄视口会卸载本插件槽——视口级断点对「移动窄栏」不可达，探针实证见场景②）。 */
+/* 主题（t260907-08，KI-055）：本视图样式全量令牌化（theme.ts 派生令牌体系）——
+ * t260905-06 按当时深色语境写死的调色板在浅色档不可读（宿主 260907 实报症状①）。
+ * 普通面走 --dsw-derive-*（深浅两档随平台令牌翻转）；代码块/pre/.md-code/.md-cl/
+ * .md-copy 与 tok-* 语法高亮属「自备深底的固定暗面板」，走 --dsw-derive-dark-*
+ * 家族（前后景成对、不随平台翻转——翻转反而破坏与固定底的对偶，theme.ts 头注同款纪律）。 */
 .wb-doc-root { container-type: inline-size; height:100%; min-height:0; }
 .wb-doc-frame { display:flex; gap:0; height:100%; min-height:0; }
-.wb-doc-toc { width:280px; flex:none; overflow-y:auto; padding:10px; border-right:1px solid #2a2f3a; }
+.wb-doc-toc { width:280px; flex:none; overflow-y:auto; padding:10px; border-right:1px solid var(--dsw-derive-border,#d0d7de); }
 .wb-doc-main { flex:1; overflow-y:auto; padding:16px 22px; min-width:0; }
 .wb-doc-scope-row { display:flex; gap:6px; margin-bottom:10px; }
-.wb-doc-scope-btn { border:1px solid #3a404c; background:transparent; color:#c9d1d9;
+.wb-doc-scope-btn { border:1px solid var(--dsw-derive-border,#d0d7de); background:transparent; color:var(--dsw-derive-fg,#1f2328);
   padding:4px 12px; border-radius:6px; cursor:pointer; font-size:13px; }
-.wb-doc-scope-btn.active { background:#1f6feb; border-color:#1f6feb; color:#fff; }
-.wb-doc-group-head { font-size:12px; color:#8b949e; margin:12px 0 4px; text-transform:none; }
+.wb-doc-scope-btn.active { background:var(--dsw-derive-accent-solid,#1f6feb); border-color:var(--dsw-derive-accent-solid,#1f6feb); color:var(--dsw-derive-on-solid,#fff); }
+.wb-doc-group-head { font-size:12px; color:var(--dsw-derive-muted,#57606a); margin:12px 0 4px; text-transform:none; }
 .wb-doc-item { display:block; width:100%; text-align:left; border:0; background:transparent;
-  color:#c9d1d9; padding:5px 8px; border-radius:6px; cursor:pointer; font-size:13px;
+  color:var(--dsw-derive-fg,#1f2328); padding:5px 8px; border-radius:6px; cursor:pointer; font-size:13px;
   line-height:1.5; overflow-wrap:anywhere; }
-.wb-doc-item:hover { background:rgba(255,255,255,0.08); }
-.wb-doc-item.active { background:#1f6feb; color:#fff; }
-.wb-doc-skip-note { font-size:12px; color:#d29922; margin-top:14px; line-height:1.6; }
+.wb-doc-item:hover { background:var(--dsw-derive-surface,#f6f8fa); }
+.wb-doc-item.active { background:var(--dsw-derive-accent-solid,#1f6feb); color:var(--dsw-derive-on-solid,#fff); }
+.wb-doc-skip-note { font-size:12px; color:var(--dsw-derive-warn,#9a6700); margin-top:14px; line-height:1.6; }
 .wb-doc-title { font-size:18px; margin:0 0 4px; }
-.wb-doc-meta { font-size:12px; color:#8b949e; margin-bottom:14px; }
-.wb-doc-empty { color:#8b949e; padding:20px 4px; line-height:1.7; }
-.wb-doc-back { display:none; border:1px solid #3a404c; background:transparent; color:#c9d1d9;
+.wb-doc-meta { font-size:12px; color:var(--dsw-derive-muted,#57606a); margin-bottom:14px; }
+.wb-doc-empty { color:var(--dsw-derive-muted,#57606a); padding:20px 4px; line-height:1.7; }
+.wb-doc-back { display:none; border:1px solid var(--dsw-derive-border,#d0d7de); background:transparent; color:var(--dsw-derive-fg,#1f2328);
   padding:4px 12px; border-radius:6px; cursor:pointer; margin-bottom:10px; }
-.wb-doc-body { line-height:1.75; overflow-wrap:anywhere; color:#e6edf3; font-size:14px; }
+.wb-doc-body { line-height:1.75; overflow-wrap:anywhere; color:var(--dsw-derive-fg,#1f2328); font-size:14px; }
 .wb-doc-body h1, .wb-doc-body h2, .wb-doc-body h3 { line-height:1.4; }
-.wb-doc-body pre { background:#161b22; border:1px solid #2a2f3a; border-radius:8px;
+.wb-doc-body pre { background:var(--dsw-derive-dark-bg,#1e1e24); border:1px solid var(--dsw-derive-dark-border,#2a2f3a); border-radius:8px;
   padding:10px 12px; overflow-x:auto; }
 /* 代码块自持样式（t260905-06 验收 A 附带项）：renderMarkdown 产出的 .md-code/.md-copy/
- * .tok-* 出厂样式由 knowledge 插件全局 CSS 注入供给——本视图自带一份（深色适配），
- * knowledge 退役另票时本视图不随之破相。复制行为委托见下方 onDocCopy。 */
-.wb-doc-body .md-code { position:relative; margin:10px 0; border:1px solid #2a2f3a;
-  border-radius:8px; background:#161b22; overflow:hidden; }
+ * .tok-* 出厂样式由 knowledge 插件全局 CSS 注入供给——本视图自带一份（固定暗面板，
+ * 色值经 --dsw-derive-dark-* 家族供出），knowledge 退役另票时本视图不随之破相。
+ * 复制行为委托见下方 onDocCopy。 */
+.wb-doc-body .md-code { position:relative; margin:10px 0; border:1px solid var(--dsw-derive-dark-border,#2a2f3a);
+  border-radius:8px; background:var(--dsw-derive-dark-bg,#1e1e24); overflow:hidden; }
 .wb-doc-body .md-code pre { margin:0; border:0; border-radius:0; }
-.wb-doc-body .md-cl { position:absolute; top:6px; right:60px; font-size:11px; color:#8b949e;
-  background:#21262d; border-radius:4px; padding:0 8px; line-height:18px; }
+.wb-doc-body .md-cl { position:absolute; top:6px; right:60px; font-size:11px; color:var(--dsw-derive-dark-muted,#b8b8c8);
+  background:var(--dsw-derive-dark-surface,#21262d); border-radius:4px; padding:0 8px; line-height:18px; }
 .wb-doc-body .md-copy { position:absolute; top:6px; right:8px; font-size:11px; padding:1px 10px;
-  line-height:18px; cursor:pointer; border:1px solid #3a404c; background:#21262d;
-  color:#c9d1d9; border-radius:4px; }
-.wb-doc-body .md-copy:hover { background:#30363d; color:#fff; }
-.wb-doc-body .tok-c { color:#8b949e; font-style:italic; }
-.wb-doc-body .tok-s { color:#a5d6ff; }
-.wb-doc-body .tok-k { color:#ff7b72; font-weight:600; }
-.wb-doc-body .tok-n { color:#79c0ff; }
-.wb-doc-body .tok-v { color:#ffa657; }
+  line-height:18px; cursor:pointer; border:1px solid var(--dsw-derive-dark-border,#2a2f3a); background:var(--dsw-derive-dark-surface,#21262d);
+  color:var(--dsw-derive-dark-fg,#f0f3f6); border-radius:4px; }
+.wb-doc-body .md-copy:hover { background:var(--dsw-derive-dark-surface-2,#30363d); color:var(--dsw-derive-on-solid,#fff); }
+.wb-doc-body .tok-c { color:var(--dsw-derive-dark-muted,#b8b8c8); font-style:italic; }
+.wb-doc-body .tok-s { color:var(--dsw-derive-dark-accent,#7ab8ff); }
+.wb-doc-body .tok-k { color:var(--dsw-derive-dark-red,#f87171); font-weight:600; }
+.wb-doc-body .tok-n { color:var(--dsw-derive-dark-accent,#7ab8ff); }
+.wb-doc-body .tok-v { color:var(--dsw-derive-dark-amber,#ffd166); }
 .wb-doc-body pre code, .wb-doc-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .wb-doc-body table { border-collapse:collapse; }
-.wb-doc-body th, .wb-doc-body td { border:1px solid #2a2f3a; padding:4px 8px; }
+.wb-doc-body th, .wb-doc-body td { border:1px solid var(--dsw-derive-border,#d0d7de); padding:4px 8px; }
 @container (max-width: 720px) {
   .wb-doc-frame { flex-direction:column; }
   .wb-doc-toc { width:100%; border-right:0; }

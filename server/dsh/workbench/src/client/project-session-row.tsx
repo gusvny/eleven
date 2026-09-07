@@ -95,7 +95,7 @@ const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
  * data-wb-psess-new 不变。 */
 .wb-psess-new.wb-psess-new-labeled { width:auto; height:22px; padding:0 8px;
   gap:4px; font-size:11.5px; }
-.wb-psess-new:disabled { opacity:0.4; cursor:default; }
+.wb-psess-new:disabled { cursor:default; color:var(--dsw-derive-muted,#57606a); background:var(--dsw-derive-surface,#f6f8fa); }
 .wb-psess-tab { box-sizing:border-box; position:relative; min-width:24px;
   height:24px; flex:none; display:inline-flex; align-items:center;
   justify-content:center; padding:0 3px; border-radius:4px;
