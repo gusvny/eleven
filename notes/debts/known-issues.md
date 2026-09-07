@@ -575,3 +575,8 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 现象：create_plan rework 轮 agent 连续交空 files_changed（01/03 两票各 2-3 轮被 KI-049 拒），根因=rework 重跑的 prompt 不含回执 schema 提醒（首轮 prompt 有，rework prompt 组装丢了这段）。
 - 影响：每票多耗 1-2 小时（打回-重跑-再拒循环）。
 - 处置：小改进票（build_stage_prompt 对 rework gen>0 的 create_plan 补回执格式段），排队不紧急；本日两票已靠 rework note 手工带指令解套。
+
+## KI-057 工单台 host 全家静态锚引擎仓（宿主 16:48 实报，dengzhufpv 侧排查＋integration 复核实锤）
+- 症状：外部项目（dengzhufpv）工单变更 tab 空（API 实测 source: none，"worktree 越出仓库根"——防穿越闸误伤跨项目泳道）。
+- 全族六处（node.ts/changes.ts）：diff 仓锚（changes.ts:451）、审批意见锚（node.ts:357）、epics 目录锚（node.ts:359，t260907-07 只修 CLI 侧）、证据目录锚（node.ts:266）、引擎 CLI 路径锚（node.ts:459）、病根 repo 本尊（node.ts:352 不按 ?project= 解析）。
+- 修法=请求层按项目键解主目录（注册表已有），逐面穿参；验收含 dengzhufpv 实票对照。
