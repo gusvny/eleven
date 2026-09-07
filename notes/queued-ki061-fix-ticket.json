@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260908-01",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "KI-061 修复：仲裁超限 blocked 唤醒重跑（在飞 workflow 重放兼容＋自检）",
+  "user_request": "做什么：宿主 260908 晨批准（①引擎小修票走正规泳道，手动合并选项作废）。背景=t260907-10 卡「测试集迭代 6 轮超限转人工」blocked 态：retry_qc 唤醒后引擎吃 memoized 仲裁结论立即再 blocked，宿主裁定（host_ruling）无可达消费点。凌晨热修（044c692 单边重置＋55f5a8c workflow.patched 守卫）已上 main 但**实测未生效**（02:12 唤醒仍 settle→blocked 无 arbitrate 重 spawn）——本票要查清未生效根因（patched() 对在飞 workflow 的首评语义？重置放错分支？phase 分发路径不对？）并修对：①超限 blocked 唤醒后真重跑 arbitrate 边，prompt 含 host_ruling 注入；②在飞 workflow 重放兼容（workflow task 不 failing，凌晨裸改曾致 99809 worker 重放炸）；③selfcheck/单测覆盖「超限→blocked→retry_qc→重跑→ruling 消费」全链；④修好后 t260907-10 复活自走（retry→仲裁重问→宿主 260908 终裁生效→过闸）。\n红线：不动 t260907-10 的 lane 分支与 workflow 数据；修复只进引擎代码＋测试。",
+  "spec": "范围=server/dsh/temporal-poc/（dev_lane.py＋tests）＋integration/（若需场景）。验收：①单测/selfcheck 全链绿；②隔离台复现卡死→修复→复活演示；③t260907-10 实票 retry 后 arbitrate 真 respawn（gen15+ 出现）且宿主终裁进 prompt。",
+  "write_set": ["server/dsh/temporal-poc/", "integration/"],
+  "deliverables": "超限唤醒修复＋重放兼容＋全链测试＋t260907-10 解套实证"
+}
