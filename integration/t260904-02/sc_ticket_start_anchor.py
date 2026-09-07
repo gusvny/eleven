@@ -42,8 +42,8 @@ PROBE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "probe_wf_input
 def stage_env(state, registry_dir, audit_env):
     """被测 client 子进程 env：连舞台 temporal/舞台 namespace/注册表/审计钩子。"""
     env = dict(os.environ)
-    env["SUYOU_TARGET_HOST"] = "127.0.0.1:%d" % state["ports"]["temporal"]
-    env["SUYOU_NAMESPACE"] = state["namespace"]
+    env["SANDBAR_TARGET_HOST"] = "127.0.0.1:%d" % state["ports"]["temporal"]
+    env["SANDBAR_NAMESPACE"] = state["namespace"]
     env["SANDBAR_PROJECTS_DIR"] = registry_dir
     if audit_env:
         env.update(audit_env)
@@ -201,7 +201,7 @@ def main():
                        % (label, len(hits), json.dumps(hits, ensure_ascii=False)[:120]))
         self_env = dict(os.environ)
         self_env.update(audit_env_a)
-        self_env["SUYOU_AUDIT_SELFTEST"] = "1"
+        self_env["SANDBAR_AUDIT_SELFTEST"] = "1"
         p = subprocess.run([py, "-c",
                             "import socket; socket.create_connection(('127.0.0.1', 7233), timeout=2)"],
                            env=self_env, capture_output=True, text=True, timeout=30)

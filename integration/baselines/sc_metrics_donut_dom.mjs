@@ -21,7 +21,7 @@
 //      donut 渲染锚点在产物中（donutOption/specToDonutInput/case 'donut'/
 //      &mode=fast/缓存快照角标）+ 纯逻辑 smoke（specToDonutInput/donutOption）。
 //   S1 browser DOM assertions (real rendering level): needs the ISOLATED test
-//      console (SUYOU_TEST_CONSOLE, default 127.0.0.1:3199), playwright-core,
+//      console (SANDBAR_TEST_CONSOLE, default 127.0.0.1:3199), playwright-core,
 //      and a launchable chromium. Any missing -> ENV_FAIL (exit 2, reason on
 //      stdout). Data stubbed at the API boundary with page.route(): metrics
 //      双门（mode=fast 快照 stale → full 全量）由桩按 query 分流，DOM/React/
@@ -430,7 +430,7 @@ async function main() {
   if (s0ok) await dataSourceSmoke()
 
   if (BASE.includes(':3099')) {
-    console.error('refusing to run: SUYOU_TEST_CONSOLE points at the production console (3099)')
+    console.error('refusing to run: SANDBAR_TEST_CONSOLE points at the production console (3099)')
     process.exit(1)
   }
 

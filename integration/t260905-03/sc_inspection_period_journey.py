@@ -186,7 +186,7 @@ def main() -> int:
     # 未注册，抢活即打回 not-registered）永不在私有队列上，竞态消除（arbitrate 实证：
     # 共队列时同套件两腿一成一败=非确定）。
     private_queue = "suyou-insp-journey-%05d" % _STAMP
-    os.environ["SUYOU_TASK_QUEUE"] = private_queue   # lib 子进程（trigger/sign）经 os.environ 继承
+    os.environ["SANDBAR_TASK_QUEUE"] = private_queue   # lib 子进程（trigger/sign）经 os.environ 继承
     workdir = tempfile.mkdtemp(prefix="sandbar-insp-journey-")
     with open(os.path.join(workdir, "two.yaml"), "w", encoding="utf-8") as f:
         f.write(TWO_INSTANCE_DECL)

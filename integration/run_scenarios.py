@@ -22,7 +22,7 @@ import time
 
 SCENARIOS = [
     # 移册（t260904-12 乙段，定稿 §7.3「真跑不进闸的（红线禁区/破坏性）不进闸清单」）：
-    # ticket-lifecycle——worker 机械步内恒触发嵌套护栏（SUYOU_TASK_QUEUE 特征检测，
+    # ticket-lifecycle——worker 机械步内恒触发嵌套护栏（SANDBAR_TASK_QUEUE 特征检测，
     # 防无界自递归：净化半必 clone fixture/起 worker/起票），属设计性环境红，闸内不可
     # 达 PASS；真实覆盖承接=主库人工清单（t260903-09 主库跑生效）。第二次口径逆转
     # （t260831-03 不登记→t260831-04 登记→本次移册），依据链见 README「已知限制」。
@@ -65,7 +65,7 @@ SCENARIOS = [
      "恒定知识行×派活契约组合完整性（t260904-03，用户旅程=被打回重派的 agent 收到的完整指令仍自洽）：注入 previous_context 后 v2 顶层编号整体后移一位且合法（1 起/无重号/严格递增；条件节缺席跳号=既有占位契约，全节在位形态 1..N 连续——注入/交接/朴素三态实得序列直接钉在断言标签里）、知识段恰一行且缩进块 1 内；前段交接多行 report+多行 user_request+spec 共存不扰动；v1 段专项条款（content-pipeline/ai-review）/分工实例/写集在否——均不扰动知识段文本（与朴素基线逐字节同）。防插错列表位破坏编号/分支双写/条款吞噬/重派路径漏新行；实现段落地前红属预期",
      "python3 integration/t260904-03/sc_dispatch_composition_integrity.py", "ro"),
     ("t260904-03-forced-reading-retired",
-     "KI-035 修复反向守护（t260904-03 验收 E 机械化，merge 关卡可跑）：server/**/*.py（引擎代码面）+活文档 docs/README.md 对 WORKFLOW_CONTEXT/TITLE_CONTEXT_RULES/context_docs 零活引用残留——防旧映射表从旧代码/旧文档抄回（照搬带回旧债的静态守护）；notes/ 历史审计行、.suyou/ 段快照、temporal-poc/tests L1 负断言源码豁免（断言面≠消费面，写明防误判）；扫描器自证红绿。实现段落地前红属预期",
+     "KI-035 修复反向守护（t260904-03 验收 E 机械化，merge 关卡可跑）：server/**/*.py（引擎代码面）+活文档 docs/README.md 对 WORKFLOW_CONTEXT/TITLE_CONTEXT_RULES/context_docs 零活引用残留——防旧映射表从旧代码/旧文档抄回（照搬带回旧债的静态守护）；notes/ 历史审计行、.suyou/ 段快照、temporal-poc/tests L1 负断言源码豁免（断言面≠消费面，写明防误判）；扫描器自证红绿。实现段落地前红属预期",  # naming-compat
      "python3 integration/t260904-03/sc_forced_reading_stays_retired.py", "ro"),
     ("t260904-04-stale-cache-heal-journey",
      "度量陈旧缓存自愈用户旅程（t260904-04 KI-040，灰盒 L3）：持有算于 merge 前/闭单前的陈旧缓存（delivery=null、open=true）的用户重开度量面板——全量拍交付维出数（主仓归档口径，reason 含多提交边界=工单 B5 契约承诺）、time 与 health 两视图关闭数收敛（4vs5 分叉）、TTL 节流下数字不漂（剔除易变字段逐字节一致）、updated_ts 过期/缺失（NaN）/TTL=0 三态都自愈不自锁、自愈后 fast 第一拍快照即正确。与 workbench/tests/delivery-recovery（L1 记录内部机制/零 spawn）与 t260903-09-kpi-invariants（新鲜数据人口自洽）intent 不同面：本场景守两拍旅程与跨视图一致的响应契约。实现已随本票落地，全绿；若实现回退则 J1~J6 红、J0 夹具自检仍绿（修复面真实性的对照）",
@@ -80,7 +80,7 @@ SCENARIOS = [
      "面板持久化残留不锁死面板旅程（t260904-04 A1 验收，灰盒 L3）：持有旧 localStorage 残留（template=other-lane/epic=代号，两选择器均已退役）的用户重开面板——loadPanelState 读时归一（template→dev-lane、epic→all、非退役字段保留）→ 归一查询串过 /metrics 前门 200；对照组证明失败模式真实：未归一残留 template 直打门 400 且 {error,reason} 双人话（旧世界残留=永久 400 空面板）。与 developer L1（归一函数含畸形输入）intent 不同面：本场景守残留→查询串→门的旅程与对照红面",
      "node integration/t260904-04/sc_panel_residue_journey.mjs", "ro"),
     ("t260904-02-ticket-start-anchor",
-     "裸入口开票硬闸+隔离台并发隔离端到端（t260904-19 起 docker 测试台双实例，epic 验收1/4/5，KI-032 修复回归）：裸 client.py ticket-start 带 project→Temporal 内 payload workspace.path 绝对路径且锚注册项目主目录/.lane/（worktree 同锚，落仓与执行 worker 解耦）；缺 project/未知 key=创建即拒收且两红因文案互辨；双槽并发开票时间重叠互不见对方工单（ticket-list 双向+跨槽 describe not_found）；审计钩子证被测子进程零连生产 7233/8233（含自证拦截腿）+双台端口面核验（互异/不在禁区 3099/3199/7233/8233/17233/18233）+SUYOU_TARGET_HOST 指生产构造即拒（红绿自证）；teardown 零残留（down 后 docker ps 无本工程容器）、端口释放、down 幂等二连、同工程名立即 re-up（t260904-19 docker 台语义，容器由 daemon 持有无锁可崩，取舍见 stage_docker 头注）；docker 缺席/镜像缺席=ENV_FAIL exit 2 点名",
+     "裸入口开票硬闸+隔离台并发隔离端到端（t260904-19 起 docker 测试台双实例，epic 验收1/4/5，KI-032 修复回归）：裸 client.py ticket-start 带 project→Temporal 内 payload workspace.path 绝对路径且锚注册项目主目录/.lane/（worktree 同锚，落仓与执行 worker 解耦）；缺 project/未知 key=创建即拒收且两红因文案互辨；双槽并发开票时间重叠互不见对方工单（ticket-list 双向+跨槽 describe not_found）；审计钩子证被测子进程零连生产 7233/8233（含自证拦截腿）+双台端口面核验（互异/不在禁区 3099/3199/7233/8233/17233/18233）+SANDBAR_TARGET_HOST 指生产构造即拒（红绿自证）；teardown 零残留（down 后 docker ps 无本工程容器）、端口释放、down 幂等二连、同工程名立即 re-up（t260904-19 docker 台语义，容器由 daemon 持有无锁可崩，取舍见 stage_docker 头注）；docker 缺席/镜像缺席=ENV_FAIL exit 2 点名",
      "python3 integration/t260904-02/sc_ticket_start_anchor.py", "exclusive"),
     ("t260904-02-worker-fingerprint-gate",
      "worker 归属指纹 ensure 闸真执行路径（epic 验收2，KI-033 修复回归；断言落公开行为输出非源级 grep——契约不变的实现重构不得打破本场景；t260904-19 起 temporal 台=docker 测试台单实例）：隔离台内真 worker 自报 meta（pid/repo_root/ts，起跑早写）；node.ts 对外契约 export readWorkerMeta/judgeTicketWorkerMeta 三态真值（same/foreign/unknown）+ensureTicketWorkersOnce 依赖注入真调——同仓照旧不重复拉、异仓拒接不 spawn+告警记录含对方仓根/pid/tid 可断言（绝不 kill 别人进程，杀进程归人）、畸形 meta 兼容跳过+reason 可辨不哑巴；TERM 后 worker 退出且自报 meta 清理（资源回收）",
@@ -103,7 +103,7 @@ SCENARIOS = [
      "ticket-session 面双半契约（t260831-08 起；browser 半被 t260903-07 反转）：服务端 POST ticket-session/open 保留 find-or-create（session_id=ticket-<id>、created 旗标、重开不重复）与畸形 id/缺 project/未知 project/不存在工单显式 4xx；浏览器半=点工单行中列详情照常开、右栏 chat 零切换（快照零注入、phase 不变、多行点击零 churn）",
      "node integration/baselines/sc_ticket_session_restore.mjs"),
     ("ticket-evidence-images",
-     "(black-box, user perspective): // QA screenshots (.suyou/screenshots/*.png in the lane) ",
+     "(black-box, user perspective): // QA screenshots (.suyou/screenshots/*.png in the lane) ",  # naming-compat
      "node integration/baselines/sc_ticket_evidence_images.mjs"),
     # （session-top-entry / session-tab-interactions 两基线随票② R8 顶部行退役
     #   正当退役，t260904-05：被测面 SessionTopEntry/wb-sessTop 家族已删，无残留
@@ -361,7 +361,7 @@ SCENARIOS = [
      "charter 端点活体契约（t260904-07，ro fetch 级，隔离台 3199 拒 3099）：GET session-charter?project=<key> 部署后可感知契约——命中项目 200+{ok,charter}+key 实值化+零 {{ 残留（统一渲染）+命中分段头在文；未命中项目仍 200 只回通用段+无该 key 分段+{{project_name}} 弱化=key；缺/空串 project=400 形状错误 JSON 不崩不 5xx；404 时源锚复核精确归因（源码已接线未部署=fail，pre-merge=干净 skip 部署后自动生效）。t260905-04 仲裁修正命中腿前提：命中 key 取「注册表∩session_charter.md 有专属分段」的 key（sandbar 优先），注册表在案≠有分段（泳道台 seedws 无分段假红实证），无交集时分段腿=na 点名台数据前提非产品红。与随票 smoke intent 级不同层：smoke 直测渲染纯函数（内存面），本条锚 HTTP 可达面（真宿主真文件真路由）；「文件缺失回落」「改文件即生效」需对受控文件写操作不在活体腿，回落归 smoke 纯函数直测、现读现渲染列人工走查",
      "node integration/t260904-07/sc_session_charter_endpoint_live.mjs", "ro"),
     ("t260904-07-charter-injection-journey",
-     "charter 注入用户旅程（t260904-07，browser 隔离台）：项目行点 + 新建会话不输入任何内容即见 charter 为首条消息（占位符实值化无 {{ 残留——「每个 session 创建时注入我们想要的 prompt」原话验收面）+截图证据落 .suyou/screenshots/（KI-044 UI 票证据自觉）；随后切换相邻 tab 再切回、reload 重进既有会话，charter 特征串出现次数恒定+tab 集合不变（守卫：恢复/切换路径绝不注入，沿 t260831-08 ⑥ 口径）；console 卫生零 error（过滤无凭据环境已知凭据类噪音）。断言上限=注入链 UI 面，agent kick-off 回复链不在断言面（无凭据隔离台已知限制，有凭据环境人工复判）；未上屏且仅凭据类错误=干净 skip 不假红。与 t260904-05 生命周期场景（tab 形态/续号/关闭链）intent 级不同层：本条锚注入内容可感知行为。t260905-04 随迁折叠面：t1 新会话开头只见「已注入项目背景」小条+默认折叠+点击展开见全文（特征串计数断言因折叠态文本仍在 DOM 零改动兼容）；t2 切换目标会话小条在场性↔含 charter 一致（无 charter 会话不留幽灵小条——React 不移除外部节点，锚定失效须摘除）；t3 恢复路径折叠面随会话恢复不丢。折叠面断言 pre-implement 红属预期（TDD 信号）",
+     "charter 注入用户旅程（t260904-07，browser 隔离台）：项目行点 + 新建会话不输入任何内容即见 charter 为首条消息（占位符实值化无 {{ 残留——「每个 session 创建时注入我们想要的 prompt」原话验收面）+截图证据落 .suyou/screenshots/（KI-044 UI 票证据自觉）；随后切换相邻 tab 再切回、reload 重进既有会话，charter 特征串出现次数恒定+tab 集合不变（守卫：恢复/切换路径绝不注入，沿 t260831-08 ⑥ 口径）；console 卫生零 error（过滤无凭据环境已知凭据类噪音）。断言上限=注入链 UI 面，agent kick-off 回复链不在断言面（无凭据隔离台已知限制，有凭据环境人工复判）；未上屏且仅凭据类错误=干净 skip 不假红。与 t260904-05 生命周期场景（tab 形态/续号/关闭链）intent 级不同层：本条锚注入内容可感知行为。t260905-04 随迁折叠面：t1 新会话开头只见「已注入项目背景」小条+默认折叠+点击展开见全文（特征串计数断言因折叠态文本仍在 DOM 零改动兼容）；t2 切换目标会话小条在场性↔含 charter 一致（无 charter 会话不留幽灵小条——React 不移除外部节点，锚定失效须摘除）；t3 恢复路径折叠面随会话恢复不丢。折叠面断言 pre-implement 红属预期（TDD 信号）",  # naming-compat
      "node integration/t260904-07/sc_session_charter_injection_journey.mjs", "browser"),
     # ---- t260904-11 charter prompt wire 契约冻结（KI-046 回归网平台一端）----
     ("t260904-11-charter-prompt-wire-contract",
@@ -387,10 +387,10 @@ SCENARIOS = [
      "add 产出条目的双侧装载一致性（t260904-10，ro 隔离根）：真跑 `sandbar project add` 后 Python shared.load_projects_registry 与 TS suyou-projects.ts.loadRegistry 从同一隔离根（SANDBAR_PROJECTS_DIR 临时目录）装载出同一条目（key/name/dirs 全等）、零隔离；首装载×seed 自动播种真路径（tracked 种子 suyou 在案+.migrated 落盘）且 add 后种子条目字节不动（决策7 不动账）；体检报告三词汇（verify.yaml/credentials/paths）在文且 credentials 先布置/裸目录两态输出可辨——排他性锚 project.yaml 文件而非条目目录（契约①b：目录与 per-key credentials 可先于 add 布置，O_EXCL 架在目录 mkdir 上=此腿红契约对）；写入零 .tmp. 残留；--json 机器可判。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "node integration/t260904-10/sc_project_add_dual_loader.mjs", "ro"),
     ("t260904-10-project-add-rejections",
-     "add 拒收面全枚举 CLI 真跑（t260904-10，ro 隔离根）：key 白名单（大写/下划线/首字符中划线/42 字符拒，41 字符上界收）；根目录形态（缺参/相对路径/是文件非目录——「不存在」腿已随 t260906-01 容器代建翻转为成功旅程，移册 t260906-01-add-creates-container/-faultlines 承接）；多目录输入语义化拒收（epic 验收2 独立拒收路径：旗标面须能表达多目录输入，且文案点名「单根模型/多目录」——裸 argparse 用法错不算语义拒收）；已注册幂等同判（两次出口码+输出全等）；隔离条目同名拒收；根交叉与互为父子嵌套（父目录/子目录/恰等三向，文案报两个 key）；SUYOU_PROJECTS_YAML legacy 拒收指路（文案点名存量 env）；name 三态（空/含 #/含换行拒且文案点名 name，首尾空白 trim 后收并读回验证）；每拒收腿注册表根字节级零残留（快照比对+.tmp. 泄漏检查）；并发同 key 双 add 恰一成一拒且赢家条目 name/dirs 自洽不混写（TOCTOU 闸）；remove 点位稳定钉（输出点名 remove、无裸 traceback、注册表不动——票①骨架恒红/票②真实现两期皆存活）。实现落地前红属预期",
+     "add 拒收面全枚举 CLI 真跑（t260904-10，ro 隔离根）：key 白名单（大写/下划线/首字符中划线/42 字符拒，41 字符上界收）；根目录形态（缺参/相对路径/是文件非目录——「不存在」腿已随 t260906-01 容器代建翻转为成功旅程，移册 t260906-01-add-creates-container/-faultlines 承接）；多目录输入语义化拒收（epic 验收2 独立拒收路径：旗标面须能表达多目录输入，且文案点名「单根模型/多目录」——裸 argparse 用法错不算语义拒收）；已注册幂等同判（两次出口码+输出全等）；隔离条目同名拒收；根交叉与互为父子嵌套（父目录/子目录/恰等三向，文案报两个 key）；SANDBAR_PROJECTS_YAML legacy 拒收指路（文案点名存量 env）；name 三态（空/含 #/含换行拒且文案点名 name，首尾空白 trim 后收并读回验证）；每拒收腿注册表根字节级零残留（快照比对+.tmp. 泄漏检查）；并发同 key 双 add 恰一成一拒且赢家条目 name/dirs 自洽不混写（TOCTOU 闸）；remove 点位稳定钉（输出点名 remove、无裸 traceback、注册表不动——票①骨架恒红/票②真实现两期皆存活）。实现落地前红属预期",
      "node integration/t260904-10/sc_project_add_rejections.mjs", "ro"),
     ("t260904-10-project-list-report",
-     "list 报告契约（t260904-10，ro 隔离根）：人读与 --json 同列注册+隔离条目，隔离原因含 <dir>/project.yaml 定位字面，无 project.yaml 的保留目录不列；票计数降级三态——服务不可达（SUYOU_TARGET_HOST 死端口注入）与 SDK 缺失（PYTHONPATH 空壳 temporalio 包注入，KI-039 教训：依赖缺失不得吞成无数据）两态均 exit 0 不红、条目照列、两态输出可辨；正常计数腿在测试台 17233 可达时真跑（不可达有声 SKIP）。全程显式 env 钉死防缺省外溢生产 7233，零 3099 接触。实现落地前红属预期",
+     "list 报告契约（t260904-10，ro 隔离根）：人读与 --json 同列注册+隔离条目，隔离原因含 <dir>/project.yaml 定位字面，无 project.yaml 的保留目录不列；票计数降级三态——服务不可达（SANDBAR_TARGET_HOST 死端口注入）与 SDK 缺失（PYTHONPATH 空壳 temporalio 包注入，KI-039 教训：依赖缺失不得吞成无数据）两态均 exit 0 不红、条目照列、两态输出可辨；正常计数腿在测试台 17233 可达时真跑（不可达有声 SKIP）。全程显式 env 钉死防缺省外溢生产 7233，零 3099 接触。实现落地前红属预期",
      "node integration/t260904-10/sc_project_list_report.mjs", "ro"),
     # ---- t260904-17 工单列表 v5 重做（行卡/四态/哈希色/拓扑站道）----
     ("t260904-17-ticket-list-http-contract",
@@ -499,10 +499,10 @@ SCENARIOS = [
     # ---- t260905-02：引擎行为场景看守（worker 生命周期/收口自退/多 console 防重；epic 后续面）----
 
     ("t260905-02-worker-lifecycle",
-     "工单专属 worker 进程生命周期（t260905-02 行为①，灰盒 L3，docker 舞台）：起=归属 meta（SUYOU_WORKER_META 指路）限期落盘可解析且形状可辨（pid=真 pid、repo_root=realpath 引擎仓、ts 可解析、version 非空——KI-033 契约数据源面）；退=SIGTERM 限期优雅退出（退出码 0 非崩溃形态）+meta 自清+TERM 二连幂等不炸；异常输入=meta 指向不可写路径（父路径是文件）写失败不阻断启动（best-effort 契约）、起跑痕迹在文（stderr 归属指纹行）、路径上不冒出 meta、TERM 后照常干净退。与 t260904-02-worker-fingerprint-gate 分工：彼=ensure 消费侧三态判定（同仓/异仓/未知），本条=worker 进程侧自身生命周期（TERM 后 meta 被清一面两处观测不互替）；与 t260905-02-ticket-worker-watch-exit 分工：彼=watch 联动自退（自己走），本条=外部信号停（被叫走）。被测子进程零连生产（审计钩子+自证腿）；日志锚兼容正则锚语义（KI-051）",
+     "工单专属 worker 进程生命周期（t260905-02 行为①，灰盒 L3，docker 舞台）：起=归属 meta（SANDBAR_WORKER_META 指路）限期落盘可解析且形状可辨（pid=真 pid、repo_root=realpath 引擎仓、ts 可解析、version 非空——KI-033 契约数据源面）；退=SIGTERM 限期优雅退出（退出码 0 非崩溃形态）+meta 自清+TERM 二连幂等不炸；异常输入=meta 指向不可写路径（父路径是文件）写失败不阻断启动（best-effort 契约）、起跑痕迹在文（stderr 归属指纹行）、路径上不冒出 meta、TERM 后照常干净退。与 t260904-02-worker-fingerprint-gate 分工：彼=ensure 消费侧三态判定（同仓/异仓/未知），本条=worker 进程侧自身生命周期（TERM 后 meta 被清一面两处观测不互替）；与 t260905-02-ticket-worker-watch-exit 分工：彼=watch 联动自退（自己走），本条=外部信号停（被叫走）。被测子进程零连生产（审计钩子+自证腿）；日志锚兼容正则锚语义（KI-051）",
      "python3 integration/t260905-02/sc_worker_lifecycle.py", "exclusive"),
     ("t260905-02-ticket-worker-watch-exit",
-     "收口自退不留尾巴（t260905-02 行为②，灰盒 L3，docker 舞台+真工单）：票收口（workflow 非 RUNNING 终态）→ watch 中的专属 worker 限期自退（退出码 0、收口语义日志在文、meta 自清）——工单收口后不留常驻 worker（260824 A 案：专属 worker 生命周期跟工单走）；孤儿收养自退=宿主死（worker 被收养 ppid=1）→ 自退不留无主 worker（85222 版本投毒教训；收养目标 ppid 随环境为系统状态条件腿，收养不到时按 N/A 折算）；查询失败不误退=watch 指向不存在 workflow → worker 持续存活 ≥ 两轮 watch 周期且留下「查询失败下一轮再试」痕迹（宁可多守一轮，不许票没守到人先走）。watch 生效前提两 env 同置（SUYOU_WATCH_WORKFLOW 置时 watch 循环才存在，ppid 守护在循环体内）；watch 间隔旋钮 SANDBAR_WATCH_INTERVAL_SEC 仅为提速，断言上限按 30s 慢档给。与 t260904-02-worker-fingerprint-gate（ensure 消费侧）与 t260905-02-worker-lifecycle（外部信号停）intent 不同面",
+     "收口自退不留尾巴（t260905-02 行为②，灰盒 L3，docker 舞台+真工单）：票收口（workflow 非 RUNNING 终态）→ watch 中的专属 worker 限期自退（退出码 0、收口语义日志在文、meta 自清）——工单收口后不留常驻 worker（260824 A 案：专属 worker 生命周期跟工单走）；孤儿收养自退=宿主死（worker 被收养 ppid=1）→ 自退不留无主 worker（85222 版本投毒教训；收养目标 ppid 随环境为系统状态条件腿，收养不到时按 N/A 折算）；查询失败不误退=watch 指向不存在 workflow → worker 持续存活 ≥ 两轮 watch 周期且留下「查询失败下一轮再试」痕迹（宁可多守一轮，不许票没守到人先走）。watch 生效前提两 env 同置（SANDBAR_WATCH_WORKFLOW 置时 watch 循环才存在，ppid 守护在循环体内）；watch 间隔旋钮 SANDBAR_WATCH_INTERVAL_SEC 仅为提速，断言上限按 30s 慢档给。与 t260904-02-worker-fingerprint-gate（ensure 消费侧）与 t260905-02-worker-lifecycle（外部信号停）intent 不同面",
      "python3 integration/t260905-02/sc_ticket_worker_watch_exit.py", "exclusive"),
     ("t260905-02-console-duplicate-guard",
      "多 console 同槽防重与辨析文案（t260905-02 行为③，灰盒 L2/L3，docker 舞台+node 直跑 node.ts）：server 单例=同槽已有监听者第二 console 静默认领（不重复 spawn 不报错）；worker 单例=daemon pidfile 在册双 console 均不重复拉起且 dispose 不动在册他人 worker（资源归属）；工单 worker pidfile 抢注互斥=同 tid pidfile 位被占（'wx' 确定性必败注入：目录占位，非时序竞态）→ 辨析文案在文且点名 tid（「已被别的实例抢先注册，停掉重复 spawn」语义）、重复 child 当场 SIGTERM 回收（日志 fd 持有者归零观测）、无成功 spawn 文案（不两开花）；dispose 收口=幂等二连不抛、定时器清空（node 自然退出=事件循环空，挂死=超时红）。与 t260904-02-worker-fingerprint-gate 分工：彼=ensureTicketWorkersOnce 纯决策面三态（spawn 可注入），本条=apply 全真路径双 console 防重（纯决策面不含 'wx' 互斥分支，替代不了）。被测 python 子进程零连生产（apply 内部 cli/ensure 的 TARGET_HOST 由子进程 env 钉舞台；审计钩子+自证腿）",
@@ -536,7 +536,7 @@ SCENARIOS = [
     # ---- t260905-10：三事故引擎免疫面（判读注入通道/会话撕裂检疫/落盘身份依赖）----
 
     ("t260905-10-host-ruling-injection",
-     "blocked 态宿主裁决注入→arbitrate 下轮 prompt 可见（KI-053 端到端，灰盒 L3，docker 舞台+真工单专属 worker）：SUYOU_AGENT_CMD recorder 桩（spawn 单点全口径覆盖，含 arbitrate 直 spawn 面）把引擎递来的 prompt 原样落账本=mock 端点收到的 messages 等价观测面；桩回执恒缺 verdict= 标记→三次格式纠正 blocked(arbitrate)（引擎既有契约路径）；blocked 态 client op=ruling 注入（只入账不唤醒）+retry_qc 唤醒→arbitrate gen+1 轮 prompt 含裁决文本与裁决人、注入前各轮不带（对照）；全文兜底 meta.host_rulings 与事件历史 log 留痕经 query 可查（{ts,who,note} 形状、ts 留痕）；拒收两态=超大 note intake 闸拒收进 refused 不入账（不进 Temporal 事件历史）+纯空白 note 绕过 client 直发信号层拒收（钉 workflow 侧契约非仅 client 包装）；多条裁决累积全可见且旧→新排序（最新贴着现在）；被测子进程零连生产（审计钩子）。断言面=recorder 账本/快照，不锚 prompt 小节标题文案（实现副本）。实现段落地前红属预期（host_ruling 信号缺席=点名红），arbitrate/merge 期必须绿；与 developer L1（build_stage_prompt 纯函数单测）intent 不同面：本条守 signal→meta→prompt 全链真 Temporal 编排行为",
+     "blocked 态宿主裁决注入→arbitrate 下轮 prompt 可见（KI-053 端到端，灰盒 L3，docker 舞台+真工单专属 worker）：SANDBAR_AGENT_CMD recorder 桩（spawn 单点全口径覆盖，含 arbitrate 直 spawn 面）把引擎递来的 prompt 原样落账本=mock 端点收到的 messages 等价观测面；桩回执恒缺 verdict= 标记→三次格式纠正 blocked(arbitrate)（引擎既有契约路径）；blocked 态 client op=ruling 注入（只入账不唤醒）+retry_qc 唤醒→arbitrate gen+1 轮 prompt 含裁决文本与裁决人、注入前各轮不带（对照）；全文兜底 meta.host_rulings 与事件历史 log 留痕经 query 可查（{ts,who,note} 形状、ts 留痕）；拒收两态=超大 note intake 闸拒收进 refused 不入账（不进 Temporal 事件历史）+纯空白 note 绕过 client 直发信号层拒收（钉 workflow 侧契约非仅 client 包装）；多条裁决累积全可见且旧→新排序（最新贴着现在）；被测子进程零连生产（审计钩子）。断言面=recorder 账本/快照，不锚 prompt 小节标题文案（实现副本）。实现段落地前红属预期（host_ruling 信号缺席=点名红），arbitrate/merge 期必须绿；与 developer L1（build_stage_prompt 纯函数单测）intent 不同面：本条守 signal→meta→prompt 全链真 Temporal 编排行为",
      "python3 integration/t260905-10/sc_host_ruling_injection.py", "exclusive"),
     ("t260905-10-torn-session-quarantine",
      "帧好内撕裂会话检疫隔离+同 id 新建走得通（t260905-10 面②，05 号 260906 两次卡死同型，灰盒 L3）：zstd 帧完整但 JSONL record 中截断→spawn 前检疫挪隔离区留档；好帧内非 JSON 行同判；健康对照组=多行合法 JSONL×多帧拼接（真实形态）不检疫（防「见档就隔离」反向事故）且同批健康会话不连坐；同 id 原路径重写合法档再检疫不动（恢复旅程）；挪不动（隔离路径不可建）不抛坏档留原位（既有兜底）；空文件/二进制既有 zstd -t 路径回归；裸空行容忍不判撕裂（合法 JSONL 容忍面，防误隔离）。断言面=文件系统结果，零网络零 docker。实现段落地前红属预期（逐行试析缺席=好帧内撕裂不挪=红），arbitrate/merge 期必须绿；与 developer L1（单函数腿）intent 不同面：本条守会话档族整批判定与恢复旅程",
@@ -544,6 +544,24 @@ SCENARIOS = [
     ("t260905-10-lane-identity-guard",
      "泳道落盘身份依赖守卫（t260905-10 面③，260906 宿主 ~/.gitconfig 消失三轨 settle 全 FAILED，灰盒 L3）：git 身份全缺→prepare_workspace 开工前 ok=False/failed 红字点名 user.name/user.email（半缺腿钉死点名精确性，探针 GIT_CONFIG_NOSYSTEM+GLOBAL 夹具防系统级假红）；身份在位复用不受扰；repo 级 config 补救放行（探针锚泳道 worktree=共享主仓 config）；dir 型工作区无 commit 不查；created 路径缺失失败且泳道不落半成品（fail-fast 在 worktree add 之前）；LANE_DEP_SYMLINKS 含 temporal-poc/.venv：泳道自动软链解析到主仓、幂等不重复（260825「泳道无消费方」拍板被 260906 19 号闸实测推翻的陪伴断言）；点名断言解析「git 身份缺失（…）」括注为集合（处置句恒提两键名，子串断言吹不了精确性）。实现段落地前红属预期（守卫缺席=缺失腿照旧放行=红），arbitrate/merge 期必须绿；与 developer L1 intent 不同面：本条守 prepare_workspace 两分支×身份矩阵×deps 软链的回执契约",
      "python3 integration/t260905-10/sc_lane_identity_guard.py", "ro"),
+    ("t260907-04-naming-grep-assert",
+     "命名清理① grep 断言守卫（t260907-04 验收①，宿主令「名字的清理要搞干净」）：写集（temporal-poc+server/tools+integration）内 suyou 旧字面量只许在已声明兼容面——LEGACY 标识行 / naming-compat 显式标记行（目录回落/镜像/场景 fixture 造旧目录）/ README 退役账行 / L1 负断言源码与守卫自身（断言面≠消费面）/ 插件面文件名引用（出界不动册，另一票面）；并断言 README 退役账 ≥7 行在册（防撤了半截，退役必连守卫带账一起动，锚退役语义不锚措辞——KI-051 写作纪律）；扫描器自证红绿。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260907-04/sc_naming_grep_assert.py", "ro"),
+    ("t260907-04-env-compat-bridge",
+     "SUYOU_*/SANDBAR_* 环境变量过渡契约（t260907-04 正文①，灰盒 L3 锚 env 契约不锚实现）：仅旧名环境引擎解析到值（存量脚本/文档/用户 shell 不炸）、仅新名生效、冲突新名优先、新名空串回落旧名（falsy 语义不静默改义=畸形输入腿）、apply_env_compat 桥幂等（import 时序外的显式重跑通路两次调用不改写环境）。与 developer L1（shim 单函数 UT）intent 不同面：本条守子进程级引擎解析行为（import 时序即被测面）。实现段落地前腿 2/3/5 红属预期，arbitrate/merge 期必须绿",
+     "python3 integration/t260907-04/sc_env_compat_bridge.py", "ro"),
+    ("t260907-04-lane-dot-dir-sticky",
+     "泳道目录 .suyou/→.sandbar/ 过渡契约（t260907-04 正文③「既有在飞泳道不炸」）：纯 .suyou 在飞泳道恒旧名且不造新名目录（粘滞+读侧回落）、全新 base 落 .sandbar（创建侧换新名）、两名并存恒新名（镜像目录不参与解析）、R-1 全链钉=新 base 首写后镜像造出 .suyou 解析仍新名（防权威目录中途翻转、非镜像产物静默缺损——t260907-04 review 实锤缺陷 R-1 的回归钉）、十次解析稳定无隐状态漂移。与 developer L1（resolve 函数 UT）intent 不同面：本条守跨进程解析语义与翻转注入。实现段落地前红属预期，arbitrate/merge 期必须绿",  # naming-compat
+     "python3 integration/t260907-04/sc_lane_dot_dir_sticky.py", "ro"),
+    ("t260907-04-dispatcher-lock-fallback",
+     "总管单例锁改名过渡（t260907-04 server/tools 引用面）：接管写锁/他人持新锁只读不派不续写/过期接管三态 + 旧锁（suyou-dispatcher.lock）TTL 内视为 held（防新旧 dispatcher 实例并行双派——过渡回落半边）+ 旧锁过期接管写新锁且旧锁只读不写不删（只回落不续命）。锁路径常量动态发现替换 temp 副本——不碰真 /tmp 锁（真 dispatcher 可能在跑，写它=干扰生产面）。实现段落地前腿 4/5 红属预期（旧锁回落未落地），arbitrate/merge 期必须绿",  # naming-compat
+     "python3 integration/t260907-04/sc_dispatcher_lock_fallback.py", "ro"),
+    ("t260907-04-queue-dual-registration",
+     "worker 双队列过渡注册可证（t260907-04 验收②「worker 日志两队列」）：缺省启动同 poll 新队列 sandbar+旧队列 suyou-poc（老 workflow 自然流干的正面证据）；工单专属 worker 新名列表 env 同 tid 双前缀（sandbar-ticket-*+suyou-ticket-*）同 poll（在飞旧工单专属 worker 死后重启不搁浅——review gen0 缺口1 正面回归）；仅旧名单值 env 服务旧前缀队列（旧世界重启路径读侧兼容落队列面）。docker 舞台 stage_docker 单点（docker 缺席/镜像缺席/起台不健康=ENV_FAIL 点名缺什么），SDK 走 poc venv。实现段落地前三腿红属预期，arbitrate/merge 期必须绿",  # naming-compat
+     "python3 integration/t260907-04/sc_queue_dual_registration.py"),
+    ("t260907-04-schedule-legacy-retire",
+     "dispatcher-scan schedule 服务端持久标识改名退役（t260907-04）：Temporal schedule 改 ID 旧对象不会自己消失——种子旧 ID 在台→跑引擎创建走廊（仓内唯一在树创建点 demo_schedule.demo_schedule）后新 ID 在旧 ID 亡（防新旧双份调度——review gen0 缺口2）→再跑一次幂等（旧 ID 仍亡、不炸）。docker 舞台 stage_docker 单点，缺台/缺 SDK=ENV_FAIL。实现段落地前腿 2/3 红属预期（删旧未接线），arbitrate/merge 期必须绿",
+     "python3 integration/t260907-04/sc_schedule_legacy_retire.py"),
     ("t260907-05-naming-residue-fulltext",
      "命名迁移②收口：旧命名 token 全量残留清点（t260907-05 验收①独立机器重演，灰盒 L3）：七 token（六插件包名 suyou 前缀族＋tools 文件名旧形）在 server/+integration/ 全后缀零残留（无 include 白名单——方案 v1 白名单漏 tsx/py/cjs 的教训收编为本条设计依据；豁免列名仅历史验收记录 t260903-12/acceptance-walkthrough-gen0.md 与本票守卫场景族自身——针脚字面量写在断言里非产品面，活文档不豁免）；docs/ 命中封口在已声明遗留票清单内（工单工作流台设计/知识库设计/docs README/build_index.py——本票不改 docs 但清单外新命中=替换面外溢即红）；正名在位（六插件 package.json name 全 sandbar-*、五份 lock 双处 name 同步）；不动面原样在位（/suyou-admin/ 前缀、suyou-projects.ts、dsh-profile-suyou 包名——机械替换「顺手多改」的对抗腿，doc-guard G6 先例钉现状语义，后续票落地随其语义同步改）。与 sc_profile_farm_sandbar_links intent 不同面：本条守文本面收口，彼条守装载链结构一致性。Hermetic 纯文件读秒级；实现段落地前红属预期，arbitrate/merge 期必须绿",
      "python3 integration/t260907-05/sc_naming_residue_fulltext.py", "ro"),

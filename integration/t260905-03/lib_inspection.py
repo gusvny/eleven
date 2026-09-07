@@ -148,17 +148,17 @@ class StageWorker:
     注册，谁先领活谁打回（历史事件 WF_TASK_FAIL/ACT_FAIL「not registered」铁证，
     同套件两腿一成一败=非确定竞态）——故必须**私有队列**：queue 由调用方给定，
     trigger 子进程与 worker 同队列（activities 跟随 workflow 启动队列），生产
-    worker 永不沾手。同时剥离 supervisor 缠绕变量（SUYOU_WORKER_META 指向主仓
-    data 目录会跨仓写指纹；SUYOU_WATCH_* 会让 worker 收口自退/被宿主生命周期绑走）。
+    worker 永不沾手。同时剥离 supervisor 缠绕变量（SANDBAR_WORKER_META 指向主仓
+    data 目录会跨仓写指纹；SANDBAR_WATCH_* 会让 worker 收口自退/被宿主生命周期绑走）。
     用法：
 
         with lib.StageWorker("suyou-insp-journey-12345") as w:
-            ...  # 触发/轮询/签字（trigger 子进程须继承同一 SUYOU_TASK_QUEUE）
+            ...  # 触发/轮询/签字（trigger 子进程须继承同一 SANDBAR_TASK_QUEUE）
         # __exit__ 必回收：TERM→等→KILL（资源生命周期纪律）
     """
 
     READY_MARK = "worker 起来了"   # worker.py 就绪日志行
-    ENTANGLED = ("SUYOU_WORKER_META", "SUYOU_WATCH_WORKFLOW", "SUYOU_WATCH_PPID")
+    ENTANGLED = ("SANDBAR_WORKER_META", "SANDBAR_WATCH_WORKFLOW", "SANDBAR_WATCH_PPID")
 
     def __init__(self, queue: str, ready_timeout: float = 30.0):
         self.queue = queue
@@ -179,7 +179,7 @@ class StageWorker:
         fd, self.log_path = tempfile.mkstemp(prefix="sandbar-insp-worker-", suffix=".log")
         os.close(fd)
         env = dict(os.environ)
-        env["SUYOU_TASK_QUEUE"] = self.queue
+        env["SANDBAR_TASK_QUEUE"] = self.queue
         for k in self.ENTANGLED:
             env.pop(k, None)
         self._log = open(self.log_path, "a", encoding="utf-8")

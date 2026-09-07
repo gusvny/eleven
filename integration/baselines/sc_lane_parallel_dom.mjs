@@ -21,7 +21,7 @@
 //      sync + parallel render anchors present + deriveStageStates smoke-run
 //      against a parallel fixture (data source on disk and wired).
 //   S1 browser DOM assertions (real rendering level): needs the ISOLATED test
-//      console (SUYOU_TEST_CONSOLE, default 127.0.0.1:3199), playwright-core
+//      console (SANDBAR_TEST_CONSOLE, default 127.0.0.1:3199), playwright-core
 //      resolvable, and a launchable chromium. Any missing -> ENV_FAIL (exit 2)
 //      with the reason on stdout). Data is stubbed at the API boundary with
 //      page.route(): the browser, console, shipped bundle and React render
@@ -496,7 +496,7 @@ async function main() {
   if (s0ok) await dataSourceSmoke()
 
   if (BASE.includes(':3099')) {
-    console.error('refusing to run: SUYOU_TEST_CONSOLE points at the production console (3099)')
+    console.error('refusing to run: SANDBAR_TEST_CONSOLE points at the production console (3099)')
     process.exit(1)
   }
 

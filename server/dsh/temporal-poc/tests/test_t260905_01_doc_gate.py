@@ -95,8 +95,8 @@ def test_parse_non_dict_input():
 
 def test_register_appends_and_dedups(tmp_path):
     r1 = register_pending_doc_sync(tmp_path, "t1", [CONFLICT])
-    assert r1["registered"] == 1 and r1["path"] == str(tmp_path / ".suyou/doc-gate" / PENDING_DOC_SYNC_NAME)
-    rows = [json.loads(x) for x in (tmp_path / ".suyou/doc-gate" / PENDING_DOC_SYNC_NAME)
+    assert r1["registered"] == 1 and r1["path"] == str(tmp_path / ".sandbar/doc-gate" / PENDING_DOC_SYNC_NAME)
+    rows = [json.loads(x) for x in (tmp_path / ".sandbar/doc-gate" / PENDING_DOC_SYNC_NAME)
             .read_text().splitlines()]
     assert rows[0]["ticket"] == "t1" and rows[0]["doc"] == CONFLICT["doc"]
     assert "registered_at" in rows[0]
@@ -112,12 +112,12 @@ def test_register_key_includes_actual_r5(tmp_path):
     evolved = dict(CONFLICT, actual="现实变了")
     r = register_pending_doc_sync(d, "t1", [evolved])
     assert r["registered"] == 1
-    lines = (d / ".suyou/doc-gate" / PENDING_DOC_SYNC_NAME).read_text().splitlines()
+    lines = (d / ".sandbar/doc-gate" / PENDING_DOC_SYNC_NAME).read_text().splitlines()
     assert len(lines) == 2
 
 
 def test_register_tolerates_torn_lines(tmp_path):
-    f = tmp_path / ".suyou/doc-gate" / PENDING_DOC_SYNC_NAME
+    f = tmp_path / ".sandbar/doc-gate" / PENDING_DOC_SYNC_NAME
     f.parent.mkdir(parents=True)
     good = json.dumps({"ticket": "t1", **CONFLICT}, ensure_ascii=False)
     f.write_text('{"ticket": "t1", "doc": "半截\n' + good + "\n垃圾行\n\n")
@@ -128,7 +128,7 @@ def test_register_tolerates_torn_lines(tmp_path):
 
 def test_register_write_failure_degrades(tmp_path, monkeypatch):
     """写失败降级不抛（权限面）：目录替换为文件让 mkdir 必败。"""
-    (tmp_path / ".suyou").write_text("占位，mkdir 会撞")
+    (tmp_path / ".sandbar").write_text("占位，mkdir 会撞")
     r = register_pending_doc_sync(tmp_path, "t1", [CONFLICT])
     assert r["registered"] == 0 and r["error"]
 

@@ -3,12 +3,12 @@
 """t260905-02 场景①：工单专属 worker 进程生命周期——起/退/异常输入（工单正文行为 1）。
 
 intent（守护的用户可感知行为）：
-- 起：worker 起跑自报归属 meta（SUYOU_WORKER_META 指路，JSON {version,pid,repo_root,ts}）
+- 起：worker 起跑自报归属 meta（SANDBAR_WORKER_META 指路，JSON {version,pid,repo_root,ts}）
   限期可读且形状可辨——pid=真 pid、repo_root=realpath(引擎仓)、ts 可解析（KI-033
   契约的数据源面）；
 - 退：SIGTERM → 限期优雅退出（退出码 0，非崩溃形态）、meta 自清（资源回收）、
   TERM 二连幂等不炸；
-- 异常输入：SUYOU_WORKER_META 指向不可写路径（父路径是文件）→ 写失败不阻断
+- 异常输入：SANDBAR_WORKER_META 指向不可写路径（父路径是文件）→ 写失败不阻断
   启动（shared.write_worker_meta best-effort 契约：写失败不阻断 worker 启动）、
   起跑痕迹可查（stderr 归属指纹行在文）、路径上不冒出 meta，TERM 后照常干净退。
 
@@ -41,7 +41,7 @@ from lib_t26090502 import (KNOB, KNOB_FAST, child_env, close_logf,  # noqa: E402
                            pid_alive, spawn_worker, wait_exit, wait_marker)
 
 TAG = "lc-%d" % os.getpid()
-QUEUE = "suyou-ticket-t26090502-lc"
+QUEUE = "suyou-ticket-t26090502-lc"  # naming-compat
 
 
 def main():
@@ -67,7 +67,7 @@ def main():
 
         # ---------- ② 起腿：meta 限期可读 + 形状可辨 ----------
         env1 = child_env(host, state["namespace"], audit_env,
-                         {"SUYOU_TASK_QUEUE": QUEUE, "SUYOU_WORKER_META": meta,
+                         {"SANDBAR_TASK_QUEUE": QUEUE, "SANDBAR_WORKER_META": meta,
                           KNOB: KNOB_FAST})
         w1 = spawn_worker(py, log1, env1)
         workers.append(w1)
@@ -124,7 +124,7 @@ def main():
         bad_meta = os.path.join(blocker, "worker-lc.meta")  # 父是文件→mkdir/open 必败
         log2 = os.path.join(tmp, "worker-lc-badmeta.log")
         env2 = child_env(host, state["namespace"], audit_env,
-                         {"SUYOU_TASK_QUEUE": QUEUE, "SUYOU_WORKER_META": bad_meta,
+                         {"SANDBAR_TASK_QUEUE": QUEUE, "SANDBAR_WORKER_META": bad_meta,
                           KNOB: KNOB_FAST})
         w2 = spawn_worker(py, log2, env2)
         workers.append(w2)
@@ -148,7 +148,7 @@ def main():
                    % (len(hits), json.dumps(hits, ensure_ascii=False)[:120]))
         self_env = dict(os.environ)
         self_env.update(audit_env)
-        self_env["SUYOU_AUDIT_SELFTEST"] = "1"
+        self_env["SANDBAR_AUDIT_SELFTEST"] = "1"
         import subprocess
         p = subprocess.run([py, "-c",
                             "import socket; socket.create_connection(('127.0.0.1', 7233), timeout=2)"],

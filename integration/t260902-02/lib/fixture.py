@@ -5,7 +5,7 @@
 - temporalio 模块级桩：agent_activities 顶层 `from temporalio import activity`，
   本机顶层 python3 无 SDK 时也能直测纯函数/activity（同 t260901-21 制式）；
 - Sandbox：SANDBAR_PROJECTS_DIR/HOME 指向 mkdtemp，绝不触真 ~/.sandbar；
-- make_lane：按契约 ①c 造「带 .suyou/.dsh 的 fixture 泳道」，含排除项诱饵；
+- make_lane：按契约 ①c 造「带 .suyou/.dsh 的 fixture 泳道」，含排除项诱饵；  # naming-compat
 - invoke_*：对 activity 入参 dataclass 名做候选适配（只桥接命名，不碰语义），
   断言全部落在文件系统/CLI 行为上；
 - Ledger：stdout 末行 SUMMARY pass/fail/env_fail/na（三态契约定稿 §7.3：0=PASS、
@@ -146,13 +146,13 @@ class Sandbox:
 
 def make_lane(sb, lane_name="lane1", with_sessions=True, with_shots=True,
               bad_stage=False, no_stage=False):
-    """造 fixture 泳道（结构对齐本仓真实泳道：.suyou/ + .dsh/）。
+    """造 fixture 泳道（结构对齐本仓真实泳道：.suyou/ + .dsh/）。  # naming-compat
 
     排除项诱饵（agent_*.log / model_patch_*.yml / resume_patch_*.yml /
     .dsh/.credentials.yaml）照放——契约要求它们绝不入档，测试据此断言。
     """
     lane = sb.tmp / lane_name
-    su = lane / ".suyou"
+    su = lane / ".suyou"  # naming-compat
     su.mkdir(parents=True)
     if not no_stage:
         (su / "stage_create_plan_gen0.json").write_text(
@@ -280,12 +280,12 @@ def test_env_guard():
     唯一外部依赖是 Temporal 台面——缺台的环境红必须点名「17233 测试台不可达」，
     不得笼统报「缺凭据」。
     """
-    host = (os.environ.get("SUYOU_TARGET_HOST") or "").strip()
+    host = (os.environ.get("SANDBAR_TARGET_HOST") or "").strip()
     if not host:
-        return ("SUYOU_TARGET_HOST 未显式设置——17233 测试台不可达（缺台=环境红；"
+        return ("SANDBAR_TARGET_HOST 未显式设置——17233 测试台不可达（缺台=环境红；"
                 "生产缺省 127.0.0.1:7233 拒绝连；本套件无模型面，不需要 LLM 凭据）")
     if host == "127.0.0.1:7233":
-        return ("SUYOU_TARGET_HOST=127.0.0.1:7233 是生产缺省，拒绝执行"
+        return ("SANDBAR_TARGET_HOST=127.0.0.1:7233 是生产缺省，拒绝执行"
                 "（台面依赖：请指 17233 测试台）")
     return ""
 

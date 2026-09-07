@@ -45,6 +45,8 @@ from shared import (
     NAMESPACE,
     PROJECT_SA_NAME,
     TARGET_HOST,
+    LEGACY_TASK_QUEUE,
+    LEGACY_TICKET_QUEUE_PREFIX,
     TASK_QUEUE,
     TICKET_QUEUE_PREFIX,
     HostRulingRequest,
@@ -499,7 +501,7 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
     )
     client = await _connect()
     try:
-        # 每工单专属队列（260824）：workflow 只被 suyou-ticket-<tid> 上的专属 worker 执行，
+        # 每工单专属队列（260824）：workflow 只被专属队列（LEGACY 旧前缀 suyou-ticket-<tid>）上的 worker 执行，  # naming-compat
         # 共享池 worker 抢不到——版本错开的 worker 不再交叉投毒。专属 worker 由 ticket.py 拉起。
         handle = await client.start_workflow(
             cls.run, inp, id=tid, task_queue=ticket_task_queue(tid),
@@ -683,7 +685,7 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
     epic 此处只校形状（EPIC_CODE_RE 白名单）；代号存在性强校验在 ticket.py _list
     （validate_epic_code 单点）——不存在的代号走 ticket.py 通道会明确报错而非空表。
     只收生产 task queue 上的执行（自测专属 queue 的滞留实例不查不列——查它们会等超时）。
-    260824 起工单走每工单专属队列（suyou-ticket-<id>），过滤器放行共享队列 + 专属前缀。"""
+    260824 起工单走每工单专属队列（LEGACY 旧前缀 <id> 形态），过滤器放行共享队列 + 新旧专属前缀。  # naming-compat"""
     project = str(args.get("project") or "")
     if project and not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,40}", project):
         return _err("project 形状不合法（注册表 key 白名单：小写字母/数字/中划线）")
@@ -716,7 +718,8 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
     for tid in order:
         wf = runs[tid]
         q = str(getattr(wf, "task_queue", "") or "")
-        if q != TASK_QUEUE and not q.startswith(TICKET_QUEUE_PREFIX):
+        if q not in (TASK_QUEUE, LEGACY_TASK_QUEUE) and not (
+                q.startswith(TICKET_QUEUE_PREFIX) or q.startswith(LEGACY_TICKET_QUEUE_PREFIX)):
             continue
         exec_status = wf.status.name if wf.status is not None else ""
         if exec_status == "TERMINATED":
@@ -838,7 +841,8 @@ async def _closed_ticket_entries(args: Dict[str, Any]) -> "List[Dict[str, Any]]"
                               for c in TEMPLATE_CLASSES.values())
     async for wf in client.list_workflows('(%s) AND ExecutionStatus="Completed"' % type_filter):
         q = str(getattr(wf, "task_queue", "") or "")
-        if q != TASK_QUEUE and not q.startswith(TICKET_QUEUE_PREFIX):
+        if q not in (TASK_QUEUE, LEGACY_TASK_QUEUE) and not (
+                q.startswith(TICKET_QUEUE_PREFIX) or q.startswith(LEGACY_TICKET_QUEUE_PREFIX)):
             continue
         try:
             sa_project = str(wf.typed_search_attributes.get(
@@ -1002,7 +1006,8 @@ async def cmd_running_tickets(args: Dict[str, Any]) -> Dict[str, Any]:
     running: List[Dict[str, str]] = []
     async for wf in client.list_workflows('(%s) AND ExecutionStatus="Running"' % type_filter):
         q = str(getattr(wf, "task_queue", "") or "")
-        if q != TASK_QUEUE and not q.startswith(TICKET_QUEUE_PREFIX):
+        if q not in (TASK_QUEUE, LEGACY_TASK_QUEUE) and not (
+                q.startswith(TICKET_QUEUE_PREFIX) or q.startswith(LEGACY_TICKET_QUEUE_PREFIX)):
             continue  # 自测专属 queue 的滞留实例不收
         running.append({"id": wf.id, "queue": q})
     return _ok({"count": len(running), "running": running})

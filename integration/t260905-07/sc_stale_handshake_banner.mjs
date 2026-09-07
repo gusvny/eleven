@@ -112,7 +112,7 @@ const waitBannerText = async (page, needle, timeout) => {
   }
 };
 
-const OUT_DIR = join(process.cwd(), '.suyou', 'screenshots', 't260905-07');
+const OUT_DIR = join(process.cwd(), '.suyou', 'screenshots', 't260905-07');  // naming-compat
 
 try {
   // T1 M5 新鲜态：boot==disk==注入 → 不在场

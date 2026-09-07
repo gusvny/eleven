@@ -55,7 +55,7 @@ ST = Stage(id="implement", name="实现", role="developer",
            acceptance=("改动落在写集内",))
 META = {"title": "自测工单", "workspace": None}      # workspace 空 → 走 /tmp 隔离目录兜底
 HANDOFFS = [{"stage": "review_plan", "summary": "方案审读通过"}]
-RFILE = "/tmp/suyou-selfcheck/stage_implement_gen9.json"
+RFILE = "/tmp/sandbar-selfcheck/stage_implement_gen9.json"
 REWORK_NOTE = "【方案审读打回（第 1 轮）】review comments：\n1. 输入必须检查"
 
 
@@ -132,7 +132,7 @@ import json as _json  # noqa: E402
 import tempfile as _tf  # noqa: E402
 from pathlib import Path as _P  # noqa: E402
 from agent_activities import _read_result  # noqa: E402
-_d = _P(_tf.mkdtemp(prefix="suyou-selfcheck-sr-"))
+_d = _P(_tf.mkdtemp(prefix="sandbar-selfcheck-sr-"))
 _new = _d / "new.json"
 _new.write_text(_json.dumps({"status": "ok", "summary": "s", "report": "## 做了什么\nx",
                              "evidence": "e"}), "utf-8")

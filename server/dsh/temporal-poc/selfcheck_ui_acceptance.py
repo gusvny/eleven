@@ -9,7 +9,7 @@
   B. merge_check UI 证据闸：判定×png 存在性的条件等价 + 源码锁（判定吃 diff 源、
      不再吃声明写集、红灯文案带处置指引、新 activity 注册清单在位）。真装配级
      （临时 git 仓真跑 merge_check）在 tests/test_ki044_ui_changed_paths.py；
-  C. prepare_ui_evidence 桩跑：SUYOU_UI_CAPTURE_STUB=1 环境下直接调 activity
+  C. prepare_ui_evidence 桩跑：SANDBAR_UI_CAPTURE_STUB=1 环境下直接调 activity
      函数（activity.defn 装饰过的函数本体可直接调用），断言两张 png 落盘、
      shot_lines 带 mtime；畸形输入：脚本不存在 → ok=False 回执不抛；
   D. capture.mjs --selftest 干跑（子进程，不起浏览器）；--bogus / 缺 --out
@@ -133,30 +133,30 @@ ok(hasattr(agent_activities, "ui_evidence_decl")
    "ui_evidence_decl 已注册（漏注册=worker 不认，KI-050 声明制）")
 
 # ---------- C. prepare_ui_evidence 桩跑 ----------
-section("C prepare_ui_evidence 桩跑（SUYOU_UI_CAPTURE_STUB=1）")
+section("C prepare_ui_evidence 桩跑（SANDBAR_UI_CAPTURE_STUB=1）")
 with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as ed:
     wt = Path(td)
-    os.environ["SUYOU_UI_CAPTURE_STUB"] = "1"
-    os.environ["SUYOU_EVIDENCE_DIR"] = ed  # 归档指向临时目录（t260829-02），不污染真主树
+    os.environ["SANDBAR_UI_CAPTURE_STUB"] = "1"
+    os.environ["SANDBAR_EVIDENCE_DIR"] = ed  # 归档指向临时目录（t260829-02），不污染真主树
     try:
         res = asyncio.run(agent_activities.prepare_ui_evidence(
             UiEvidenceArgs(ticket_id="t-selftest", worktree=str(wt))))
     finally:
-        os.environ.pop("SUYOU_UI_CAPTURE_STUB", None)
-        os.environ.pop("SUYOU_EVIDENCE_DIR", None)
+        os.environ.pop("SANDBAR_UI_CAPTURE_STUB", None)
+        os.environ.pop("SANDBAR_EVIDENCE_DIR", None)
     ok(res.ok and len(res.shots) == 2, "桩跑 ok 且两张截图（%s）" % res.shots)
     ok((wt / UI_EVIDENCE_DIR / "console-default.png").is_file() and
        (wt / UI_EVIDENCE_DIR / "console-chat.png").is_file(), "png 落盘 <worktree>/%s" % UI_EVIDENCE_DIR)
     ok(len(res.shot_lines) == 2 and all("（" in ln for ln in res.shot_lines),
        "shot_lines 带 mtime：%s" % res.shot_lines)
     # 幂等：再跑一遍覆盖写不炸
-    os.environ["SUYOU_UI_CAPTURE_STUB"] = "1"
-    os.environ["SUYOU_EVIDENCE_DIR"] = ed
+    os.environ["SANDBAR_UI_CAPTURE_STUB"] = "1"
+    os.environ["SANDBAR_EVIDENCE_DIR"] = ed
     try:
         res2 = asyncio.run(agent_activities.prepare_ui_evidence(
             UiEvidenceArgs(ticket_id="t-selftest", worktree=str(wt))))
     finally:
-        os.environ.pop("SUYOU_UI_CAPTURE_STUB", None)
+        os.environ.pop("SANDBAR_UI_CAPTURE_STUB", None)
     ok(res2.ok, "桩跑幂等重入 ok")
 
 # 畸形输入：capture.mjs 不存在（主树路径 patch 到空临时目录模拟）→ ok=False 回执不抛
@@ -240,17 +240,17 @@ ok("审读必看" in dl and "无截图证据=打回" in dl.replace("「", "").re
 ok("【UI 截图证据缺失】" in dl, "截图失败也注入缺失提示（审读按打回处理）")
 
 # ---------- F. 证据归档口径（t260829-02） ----------
-section("F 证据归档（泳道 screenshots → 主树 .suyou/evidence/<ticket>）")
+section("F 证据归档（泳道 screenshots → 主树 .sandbar/evidence/<ticket>）")
 with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as ed:
     wt = Path(td)
-    os.environ["SUYOU_UI_CAPTURE_STUB"] = "1"
-    os.environ["SUYOU_EVIDENCE_DIR"] = ed  # 归档基目录指向临时目录（防污染真主树）
+    os.environ["SANDBAR_UI_CAPTURE_STUB"] = "1"
+    os.environ["SANDBAR_EVIDENCE_DIR"] = ed  # 归档基目录指向临时目录（防污染真主树）
     try:
         res = asyncio.run(agent_activities.prepare_ui_evidence(
             UiEvidenceArgs(ticket_id="t-selftest", worktree=str(wt))))
     finally:
-        os.environ.pop("SUYOU_UI_CAPTURE_STUB", None)
-        os.environ.pop("SUYOU_EVIDENCE_DIR", None)
+        os.environ.pop("SANDBAR_UI_CAPTURE_STUB", None)
+        os.environ.pop("SANDBAR_EVIDENCE_DIR", None)
     ev = Path(ed) / "t-selftest"
     ok(res.ok, "桩跑 ok")
     for n in res.shots:
@@ -260,28 +260,28 @@ with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as ed:
            "归档 %s 与泳道截图同字节" % n)
     ok("已归档" in (res.detail or ""), "detail 带归档留痕：%s" % (res.detail or "")[-60:])
     # 归档重入覆盖不炸（copy2 语义）
-    os.environ["SUYOU_UI_CAPTURE_STUB"] = "1"
-    os.environ["SUYOU_EVIDENCE_DIR"] = ed
+    os.environ["SANDBAR_UI_CAPTURE_STUB"] = "1"
+    os.environ["SANDBAR_EVIDENCE_DIR"] = ed
     try:
         res2 = asyncio.run(agent_activities.prepare_ui_evidence(
             UiEvidenceArgs(ticket_id="t-selftest", worktree=str(wt))))
     finally:
-        os.environ.pop("SUYOU_UI_CAPTURE_STUB", None)
-        os.environ.pop("SUYOU_EVIDENCE_DIR", None)
+        os.environ.pop("SANDBAR_UI_CAPTURE_STUB", None)
+        os.environ.pop("SANDBAR_EVIDENCE_DIR", None)
     ok(res2.ok, "归档幂等重入 ok")
     # 畸形：归档目标路径被普通文件占位（mkdir 失败）→ ok 仍 True（软失败不翻），detail 带失败说明
     import shutil as _shutil
     blocked = Path(ed) / "t-selftest"
     _shutil.rmtree(blocked)           # 拆掉目录
     blocked.write_text("占用")        # 同名普通文件占位 → dst.mkdir 抛 OSError
-    os.environ["SUYOU_UI_CAPTURE_STUB"] = "1"
-    os.environ["SUYOU_EVIDENCE_DIR"] = ed
+    os.environ["SANDBAR_UI_CAPTURE_STUB"] = "1"
+    os.environ["SANDBAR_EVIDENCE_DIR"] = ed
     try:
         res3 = asyncio.run(agent_activities.prepare_ui_evidence(
             UiEvidenceArgs(ticket_id="t-selftest", worktree=str(wt))))
     finally:
-        os.environ.pop("SUYOU_UI_CAPTURE_STUB", None)
-        os.environ.pop("SUYOU_EVIDENCE_DIR", None)
+        os.environ.pop("SANDBAR_UI_CAPTURE_STUB", None)
+        os.environ.pop("SANDBAR_EVIDENCE_DIR", None)
         blocked.unlink()
     ok(res3.ok and "归档失败" in (res3.detail or ""), "归档失败 → ok 不翻 + detail 留痕")
 # 源码锁：脚本固定主树（capture 主树化，t260829-01 软失败根因）

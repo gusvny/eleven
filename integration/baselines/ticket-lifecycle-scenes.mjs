@@ -2,15 +2,15 @@
  * Scene library for the ticket-lifecycle E2E baseline (group 5).
  *
  * What is real here (per the ticket contract): the Docker test Temporal (17233 /
- * namespace suyou-test), a real per-ticket worker (worker.py on the dedicated
+ * namespace suyou-test), a real per-ticket worker (worker.py on the dedicated  // naming-compat
  * task queue with WATCH self-exit), the real engine chain (prepare_workspace ->
  * create_plan <-> review_plan -> implement || design_integration_tests ->
  * run_integration_tests -> arbitrate -> acceptance_walkthrough -> merge_check ->
  * merge [human gate] -> suggest_next inline -> status=closed), real settle/merge/
  * lane cleanup and real human signals via client.py.
  *
- * What is stubbed: only the agent brains (SUYOU_AGENT_STUB=1 stages self-complete,
- * SUYOU_SUGGEST_STUB=ok, zero model calls).
+ * What is stubbed: only the agent brains (SANDBAR_AGENT_STUB=1 stages self-complete,
+ * SANDBAR_SUGGEST_STUB=ok, zero model calls).
  *
  * Isolation (merge activity lands on the worker-side REPO_ROOT current branch and
  * ignores base_ref, agent_activities.py merge()): every scene runs against a
@@ -21,12 +21,12 @@
  *
  * Determinism lever: agent activities return the cached lane result file when it
  * already exists (agent_activities.py idempotent-cache path). Scenes pre-seed
- * `.suyou/stage_arbitrate_gen<N>.json` (summary with verdict=pass) while the
+ * `.suyou/stage_arbitrate_gen<N>.json` (summary with verdict=pass) while the  // naming-compat
  * ticket is mechanically busy in run_integration_tests -- the stub brain alone
  * never emits verdict=, which is itself scene D's round-limit trigger.
  *
  * Safety: same write-guard triad as ticket-validate.mjs (unset target -> 'env_fail' verdict;
- * explicit production default -> FAIL; otherwise pinned to 17233/suyou-test).
+ * explicit production default -> FAIL; otherwise pinned to 17233/suyou-test).  // naming-compat
  */
 
 import { spawn, spawnSync } from 'node:child_process'
@@ -42,7 +42,7 @@ const POC = join(REPO, 'server', 'dsh', 'temporal-poc')
 const COMPOSE = join(REPO, 'server', 'dsh', 'docker-compose.test.yml')
 export const PROD_ADDR = '127.0.0.1:7233'
 export const TEST_ADDR = '127.0.0.1:17233'
-export const TEST_NS = 'suyou-test'
+export const TEST_NS = 'suyou-test'  // naming-compat
 const EPIC_CODE = 'integ-e2e'
 
 /* ------------------------------------------------------------------ assertions */
@@ -149,14 +149,14 @@ export async function ensureTestTemporal(t) {
  * Never run with an unclear target.
  */
 export function writeGuard() {
-  const target = process.env.SUYOU_TARGET_HOST
+  const target = process.env.SANDBAR_TARGET_HOST
   if (target === PROD_ADDR) {
-    console.error(`  FAIL write-guard: SUYOU_TARGET_HOST explicitly points at production default ${PROD_ADDR} -- ticket-creating tests refuse to run (red line: production 7233 is read-only)`)
+    console.error(`  FAIL write-guard: SANDBAR_TARGET_HOST explicitly points at production default ${PROD_ADDR} -- ticket-creating tests refuse to run (red line: production 7233 is read-only)`)
     return 'fail'
   }
   if (target === undefined || target === '') return 'env_fail'
   if (target !== TEST_ADDR) {
-    console.error(`  FAIL write-guard: SUYOU_TARGET_HOST=${target} is neither the pinned test env ${TEST_ADDR} nor production -- refusing an unclear write target`)
+    console.error(`  FAIL write-guard: SANDBAR_TARGET_HOST=${target} is neither the pinned test env ${TEST_ADDR} nor production -- refusing an unclear write target`)
     return 'fail'
   }
   return 'run'
@@ -166,8 +166,8 @@ export function writeGuard() {
 export function targetEnv(extra = {}) {
   return {
     ...process.env,
-    SUYOU_TARGET_HOST: TEST_ADDR,
-    SUYOU_NAMESPACE: TEST_NS,
+    SANDBAR_TARGET_HOST: TEST_ADDR,
+    SANDBAR_NAMESPACE: TEST_NS,
     ...extra,
   }
 }
@@ -191,8 +191,10 @@ export async function buildFixture(t) {
     return null
   }
   const fixture = join(tmp, 'fixture')
-  const clone = run('git', ['clone', '--branch', 'main', '--single-branch', '--depth', '1',
-    mainCheckout, fixture], { timeoutMs: 300_000 })
+  // fixture 跟随被测代码（当前检出 HEAD），不钉 main——引擎契约演进期钉 main 会造
+  // 新旧 split-brain（t260907-04 实证：lane client 按新队列名起 workflow × fixture
+  // worker 是旧引擎认旧 env = workflow 搁浅）。合并后 lane==main，行为不变。
+  const clone = run('git', ['clone', '--depth', '1', REPO, fixture], { timeoutMs: 300_000 })
   if (clone.status !== 0) {
     t?.envFailNote?.(`git clone main failed: ${(clone.stderr || clone.stdout).trim().slice(0, 200)}`)
     await rm(tmp, { recursive: true, force: true }).catch(() => {})
@@ -200,6 +202,25 @@ export async function buildFixture(t) {
   }
   run('git', ['-C', fixture, 'config', 'user.email', 'e2e@suyou.test'])
   run('git', ['-C', fixture, 'config', 'user.name', 'integ-e2e'])
+  // 项目注册表夹具化（t260907-04 收尾）：机器级 ~/.sandbar/projects 的 key 'suyou'
+  // 是已退役 suyou 仓的自动迁移残留（dirs 指向不存在的 ~/Documents/suyou），lane
+  // 派生在死项目根上必炸（假象=prepare_workspace 报 git 身份缺失）。场景把注册表
+  // 钉进 fixture（SANDBAR_PROJECTS_DIR=fixture/.e2e-projects）：key 不变（引擎须
+  // 照常服务存量 key），dirs 指向 fixture 自身，整链密闭不触机器态。
+  const projectsDir = join(fixture, '.e2e-projects', 'suyou')
+  await mkdir(projectsDir, { recursive: true })
+  // .migrated 标记：fixture 表与迁移源（fixture 内克隆来的 projects.yaml 种子）key
+  // 相交但内容不同，会被一致性检查判「混合现场」fail-closed——fixture 表是自洽
+  // 人工注册表，补标记走「已迁移」跳过判据。
+  await writeFile(join(fixture, '.e2e-projects', '.migrated'), 'fixture-local hermetic registry (t260907-04)\n')
+  await writeFile(join(projectsDir, 'project.yaml'),
+    `# fixture-local registry (t260907-04): hermetic project entry, dirs -> fixture itself\n`
+    + 'schema: v1\n'
+    + 'project:\n'
+    + '  - key: suyou\n'
+    + '    name: integ-e2e-fixture\n'
+    + '    dirs:\n'
+    + `      - ${fixture}\n`)
   // Dependency symlinks: prepare_workspace links gitignored dirs from the worker's
   // REPO_ROOT (the fixture) into the lane; give the fixture something to link.
   for (const [link, target] of [
@@ -223,7 +244,8 @@ export async function buildFixture(t) {
 
 function client(sdkPython, op, args, extraEnv = {}) {
   const env = targetEnv()
-  if (extraEnv.epicsDir) env.SUYOU_EPICS_DIR = extraEnv.epicsDir
+  if (extraEnv.epicsDir) env.SANDBAR_EPICS_DIR = extraEnv.epicsDir
+  if (extraEnv.projectsDir) env.SANDBAR_PROJECTS_DIR = extraEnv.projectsDir
   const r = run(sdkPython, [join(POC, 'client.py'), op, JSON.stringify(args)],
     { env, timeoutMs: extraEnv.timeoutMs ?? 120_000 })
   let body = null
@@ -233,7 +255,7 @@ function client(sdkPython, op, args, extraEnv = {}) {
 
 export function makeApi(sdkPython, fixture) {
   const epicsDir = join(fixture, 'notes', 'epics')
-  const env = { epicsDir }
+  const env = { epicsDir, projectsDir: join(fixture, '.e2e-projects') }
   return {
     async start(ticketId, writeSet) {
       return client(sdkPython, 'ticket-start', {
@@ -262,11 +284,12 @@ export function makeApi(sdkPython, fixture) {
 export function startStubWorker(fixture, sdkPython, ticketId) {
   const child = spawn(sdkPython, [join(fixture, 'server', 'dsh', 'temporal-poc', 'worker.py')], {
     env: targetEnv({
-      SUYOU_TASK_QUEUE: `suyou-ticket-${ticketId}`,
-      SUYOU_WATCH_WORKFLOW: ticketId,
-      SUYOU_AGENT_STUB: '1',
-      SUYOU_SUGGEST_STUB: 'ok',
-      SUYOU_UI_CAPTURE_STUB: '1',
+      SANDBAR_TASK_QUEUES: `sandbar-ticket-${ticketId},suyou-ticket-${ticketId}`,  // naming-compat（新旧双前缀 CSV=ticket_worker.spawn 同款契约，t260907-04）
+      SANDBAR_PROJECTS_DIR: join(fixture, '.e2e-projects'),  // 项目注册表夹具化（t260907-04：机器种子 key suyou 指向已退役仓）
+      SANDBAR_WATCH_WORKFLOW: ticketId,
+      SANDBAR_AGENT_STUB: '1',
+      SANDBAR_SUGGEST_STUB: 'ok',
+      SANDBAR_UI_CAPTURE_STUB: '1',
     }),
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -310,7 +333,7 @@ export function lanePath(fixture, snap) {
  * run_integration_tests: the idempotent cache then returns it deterministically.
  */
 export async function seedArbitratePass(lane) {
-  const dir = join(lane, '.suyou')
+  const dir = join(lane, '.suyou')  // naming-compat
   let maxGen = -1
   if (existsSync(dir)) {
     for (const f of await readdir(dir)) {
@@ -373,7 +396,7 @@ export async function sceneA(t, api, sdkPython, fixture) {
   let lane = ''
   try {
     const probeName = `e2e-probe-${tid}.txt`
-    const r = api.start(tid, [`integration/${probeName}`])
+    const r = await api.start(tid,[`integration/${probeName}`])
     t.ok(r.body?.ok === true, `ticket-start ok (${r.body?.ok ? tid : (r.body?.error || r.stderr).slice(0, 120)})`)
     if (r.body?.ok !== true) return
     const gate = await driveToMergeGate(t, api, sdkPython, fixture, tid)
@@ -406,8 +429,8 @@ export async function sceneA(t, api, sdkPython, fixture) {
     t.ok(!existsSync(lane), 'lane worktree removed after merge (fixture cleanup)')
     const br = run('git', ['-C', fixture, 'branch', '--list', fin.meta?.branch || 'lane/*'])
     t.ok(!br.stdout.trim(), 'lane branch deleted after merge')
-    t.ok(existsSync(join(fixture, '.suyou', 'epic-next', EPIC_CODE, 'pre.json')),
-      'suggest_next pre-ran: fixture .suyou/epic-next/<code>/pre.json exists')
+    t.ok(existsSync(join(fixture, '.suyou', 'epic-next', EPIC_CODE, 'pre.json')),  // naming-compat
+      'suggest_next pre-ran: fixture .suyou/epic-next/<code>/pre.json exists')  // naming-compat
   } finally {
     await cleanupTicket(t, api, worker, tid)
   }
@@ -419,7 +442,7 @@ export async function sceneB(t, api, sdkPython, fixture) {
   const worker = startStubWorker(fixture, sdkPython, tid)
   try {
     const note = 'E2E reject 意见：探针自测不足，请补充'
-    const r = api.start(tid, ['integration/README.md'])
+    const r = await api.start(tid,['integration/README.md'])
     t.ok(r.body?.ok === true, `ticket-start ok (${r.body?.ok ? tid : (r.body?.error || '').slice(0, 120)})`)
     if (r.body?.ok !== true) return
     const gate = await driveToMergeGate(t, api, sdkPython, fixture, tid)
@@ -441,7 +464,7 @@ export async function sceneB(t, api, sdkPython, fixture) {
       'back at merge gate after redo', SCENE_DEADLINE_MS, t)
     if (!back) return
     // prev_ctx assertion: read the lane result file directly (snapshot results carry no prompt)
-    const impl1 = join(lanePath(fixture, back), '.suyou', 'stage_implement_gen1.json')
+    const impl1 = join(lanePath(fixture, back), '.suyou', 'stage_implement_gen1.json')  // naming-compat
     let prompt = ''
     try { prompt = JSON.parse(await readFile(impl1, 'utf8')).prompt || '' } catch { /* below */ }
     t.ok(prompt.includes(`人在 merge 打回：${note}`), 'redo prompt injects the reject note (prev_ctx via lane result file)')
@@ -458,7 +481,7 @@ export async function sceneC(t, api, sdkPython, fixture) {
   const tid = `integ-e2e-c-${Date.now().toString(36)}`
   const worker = startStubWorker(fixture, sdkPython, tid)
   try {
-    const r = api.start(tid, ['integration/manifest.json'])
+    const r = await api.start(tid,['integration/manifest.json'])
     t.ok(r.body?.ok === true, `ticket-start ok (${r.body?.ok ? tid : (r.body?.error || '').slice(0, 120)})`)
     if (r.body?.ok !== true) return
     // malformed #1: sign while the ticket is NOT awaiting-human (still running create_plan)
@@ -493,7 +516,7 @@ export async function sceneC(t, api, sdkPython, fixture) {
     const back = await waitFor(api, tid, (x) => x?.stage === 'merge' && x?.stage_state === 'awaiting-human',
       'back at merge gate after rework loop', SCENE_DEADLINE_MS, t)
     if (!back) return
-    const acc1 = join(lanePath(fixture, back), '.suyou', 'stage_acceptance_walkthrough_gen1.json')
+    const acc1 = join(lanePath(fixture, back), '.suyou', 'stage_acceptance_walkthrough_gen1.json')  // naming-compat
     let prompt = ''
     try { prompt = JSON.parse(await readFile(acc1, 'utf8')).prompt || '' } catch { /* below */ }
     t.ok(prompt.includes(note), 'rework prompt inherits the note (context inheritance, lane result file)')
@@ -515,7 +538,7 @@ export async function sceneD(t, api, sdkPython, fixture) {
   let lane = ''
   try {
     const probeName = `e2e-probe-${tid}.txt`
-    const r = api.start(tid, [`integration/${probeName}`])
+    const r = await api.start(tid,[`integration/${probeName}`])
     t.ok(r.body?.ok === true, `ticket-start ok (${r.body?.ok ? tid : (r.body?.error || '').slice(0, 120)})`)
     if (r.body?.ok !== true) return
     // Deviation note (ticket body D asked for "round limit via repeated merge rejects";
@@ -563,7 +586,7 @@ export async function sceneE(t, api, sdkPython, fixture) {
   try {
     const probeName = `e2e-probe-${tid}.txt`
     const initialWs = [`integration/${probeName}`, 'integration/README.md']
-    const r = api.start(tid, initialWs)
+    const r = await api.start(tid,initialWs)
     t.ok(r.body?.ok === true, `ticket-start ok (${r.body?.ok ? tid : (r.body?.error || '').slice(0, 120)})`)
     if (r.body?.ok !== true) return
     const ready = await waitFor(api, tid, (x) => !!x?.meta?.workspace_prep?.ok, 'workspace ready', 120_000, t)

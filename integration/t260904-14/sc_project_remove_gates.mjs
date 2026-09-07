@@ -12,7 +12,7 @@
 //   dry-run 含 purge 旗=只出将删清单、注册表根字节级零变更（验收8）；
 //   摘最后一个项目：无 --confirm-last=拒，带旗=零条目警告在文、装载器空表抛错语义可辨
 //     （验收9）；
-//   legacy env（SUYOU_PROJECTS_YAML）在位=拒收点名存量 env（gen1 R4 模式闸）；
+//   legacy env（SANDBAR_PROJECTS_YAML）在位=拒收点名存量 env（gen1 R4 模式闸）；
 //   key 未注册=拒且零现场变更；隔离条目同名=拒且与未注册区分报（含 project.yaml 定位）。
 //
 // 台别（C3 表逐腿钉死）：真票腿=temporalite 自举真台（依赖缺席=env_fail（exit 2）
@@ -31,7 +31,7 @@ import {
 } from './lib_fix14.mjs';
 
 const c = makeChecks('t260904-14 project remove 闸语义');
-delete process.env.SUYOU_PROJECTS_YAML;
+delete process.env.SANDBAR_PROJECTS_YAML;
 
 const stub = makeStubRoot();
 const retiredOf = (root, key) => {
@@ -54,7 +54,7 @@ const mkEntry = (root, key, ids) => {
   return projDir;
 };
 
-// client.py 直呼（真通道，仅真票腿用；cwd=仓根，消费 SUYOU_TARGET_HOST/NAMESPACE env）
+// client.py 直呼（真通道，仅真票腿用；cwd=仓根，消费 SANDBAR_TARGET_HOST/NAMESPACE env）
 function pyTicket(clientArgs, env) {
   const r = spawnSync('python3', ['server/dsh/temporal-poc/client.py', ...clientArgs],
     { cwd: REPO_ROOT, env, encoding: 'utf8', timeout: 60000 });
@@ -73,7 +73,7 @@ function pyTicket(clientArgs, env) {
       const root = newRoot('fix14-gate-real-');
       mkEntry(root, 'rmgate', []);
       const env = sbEnv(root, {
-        SUYOU_TARGET_HOST: rig.target, SUYOU_NAMESPACE: rig.namespace,
+        SANDBAR_TARGET_HOST: rig.target, SANDBAR_NAMESPACE: rig.namespace,
       });
       const tid = 't260904-14-gate';
       const st = pyTicket(['ticket-start',
@@ -257,10 +257,10 @@ function pyTicket(clientArgs, env) {
   mkEntry(root, 'rmleg', []);
   const legacyFile = path.join(tmpRoot('fix14-legacy-'), 'projects.yaml');
   writeFileSync(legacyFile, 'projects: []\n');
-  const leg = stub.remove(root, 'rmleg', [], { SUYOU_PROJECTS_YAML: legacyFile });
+  const leg = stub.remove(root, 'rmleg', [], { SANDBAR_PROJECTS_YAML: legacyFile });
   c.check('legacy env 在位=拒收（模式闸，R4）', leg.code === 1,
     `exit=${leg.code}\n${leg.out.slice(-400)}`);
-  c.check('拒收点名存量 env SUYOU_PROJECTS_YAML', leg.out.includes('SUYOU_PROJECTS_YAML'),
+  c.check('拒收点名存量 env SANDBAR_PROJECTS_YAML', leg.out.includes('SANDBAR_PROJECTS_YAML'),
     leg.out.slice(-400));
   c.check('legacy 拒收零现场变更', existsSync(path.join(root, 'rmleg', 'project.yaml')));
 

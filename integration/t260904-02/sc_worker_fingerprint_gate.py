@@ -160,11 +160,11 @@ def main():
         meta_path = os.path.join(tmp, "worker-%s.meta" % TID)
         wenv = dict(os.environ)
         wenv.update({
-            "SUYOU_TASK_QUEUE": _STATE["queue"],
-            "SUYOU_WATCH_WORKFLOW": "t260904-02-gate-none",  # 不存在的 workflow：watch 查询失败不退出
-            "SUYOU_TARGET_HOST": "127.0.0.1:%d" % fe,
-            "SUYOU_NAMESPACE": stage["namespace"],
-            "SUYOU_WORKER_META": meta_path,
+            "SANDBAR_TASK_QUEUE": _STATE["queue"],
+            "SANDBAR_WATCH_WORKFLOW": "t260904-02-gate-none",  # 不存在的 workflow：watch 查询失败不退出
+            "SANDBAR_TARGET_HOST": "127.0.0.1:%d" % fe,
+            "SANDBAR_NAMESPACE": stage["namespace"],
+            "SANDBAR_WORKER_META": meta_path,
         })
         worker = subprocess.Popen([py, os.path.abspath(WORKER_PY)], env=wenv,
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)

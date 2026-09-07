@@ -13,9 +13,9 @@
      + done/failed 不受影响 + ticket.py allow_empty_write_set 源码锁；
   D. _consume_suggest_result：ok 写缓存 / 幻觉模板 id 拒收不落缓存 / done 落缓存 /
      failed 不落缓存 / 非法 JSON 不落缓存 / 空 state_key 不落缓存 / 缓存内容 schema；
-  E. prepare_epic_next（monkeypatch _epic_ticket_rows + SUYOU_EPICS_DIR 临时 fixture）：
+  E. prepare_epic_next（monkeypatch _epic_ticket_rows + SANDBAR_EPICS_DIR 临时 fixture）：
      档案读入 / exists=False 降级 / 代号形状非法降级 / state_key 强制当前票 closed；
-  F. suggest_next stub 路径（SUYOU_SUGGEST_STUB）：ok/done/invalid 三变体判读与缓存。
+  F. suggest_next stub 路径（SANDBAR_SUGGEST_STUB）：ok/done/invalid 三变体判读与缓存。
 
 退出码 0=全绿；非 0=有红灯（stderr 打明细）。
 """
@@ -75,8 +75,8 @@ def _args(tmp: str, epic: str = "demo-epic", state_key: str = EXPECT_STATE_KEY) 
     return AgentStageArgs(
         ticket_id="t-demo-02", stage_id="suggest_next", role="integration",
         prompt="p", workspace={"type": "dir", "path": tmp},
-        result_file="%s/.suyou/stage_suggest_next_gen0.json" % tmp,
-        log_file="%s/.suyou/agent_suggest_next_gen0.log" % tmp,
+        result_file="%s/.suyou/stage_suggest_next_gen0.json" % tmp,  # naming-compat
+        log_file="%s/.suyou/agent_suggest_next_gen0.log" % tmp,  # naming-compat
         gen=0, epic=epic, state_key=state_key)
 
 
@@ -170,7 +170,7 @@ ok("validate_write_set_args(" in _poc_src and "allow_empty_write_set" in _poc_sr
 
 # ---------------------------------------------------------------- D. 判读 + 缓存
 section("D. _consume_suggest_result 判读与缓存")
-_d = _P(_tf.mkdtemp(prefix="suyou-selfcheck-en-"))
+_d = _P(_tf.mkdtemp(prefix="sandbar-selfcheck-en-"))
 shared.REPO_ROOT  # noqa: B018  （确保模块已载）
 _orig_root = agent_activities.REPO_ROOT
 agent_activities.REPO_ROOT = _d  # 缓存写入重定向到临时目录
@@ -223,7 +223,7 @@ agent_activities.REPO_ROOT = _orig_root
 
 # ---------------------------------------------------------------- E. prepare_epic_next
 section("E. prepare_epic_next（fixture + monkeypatch 查询）")
-_epics = _P(_tf.mkdtemp(prefix="suyou-selfcheck-en-epics-"))
+_epics = _P(_tf.mkdtemp(prefix="sandbar-selfcheck-en-epics-"))
 (_epics / "demo-epic.md").write_text(EPIC_MD, "utf-8")
 # t260907-07：prepare 改走 shared.resolve_epics_dir（env SUYOU_EPICS_DIR 现读优先），
 # 夹具改 env 注入（与 ：16 docstring「SUYOU_EPICS_DIR 临时 fixture」对齐）；不再
@@ -265,16 +265,16 @@ else:
     os.environ["SUYOU_EPICS_DIR"] = _orig_epics_env
 
 # ---------------------------------------------------------------- F. suggest_next stub
-section("F. suggest_next stub 路径（SUYOU_SUGGEST_STUB，零模型/零 spawn）")
+section("F. suggest_next stub 路径（SANDBAR_SUGGEST_STUB，零模型/零 spawn）")
 for mode, expect in (("ok", "ok"), ("done", "ok"), ("failed", "failed"),
                      ("invalid", "failed")):
-    d = _P(_tf.mkdtemp(prefix="suyou-selfcheck-en-stub-"))
-    os.environ["SUYOU_SUGGEST_STUB"] = mode
+    d = _P(_tf.mkdtemp(prefix="sandbar-selfcheck-en-stub-"))
+    os.environ["SANDBAR_SUGGEST_STUB"] = mode
     agent_activities.REPO_ROOT = d
     try:
         res = asyncio.run(suggest_next(_args(str(d))))
     finally:
-        os.environ.pop("SUYOU_SUGGEST_STUB", None)
+        os.environ.pop("SANDBAR_SUGGEST_STUB", None)
         agent_activities.REPO_ROOT = _orig_root
     ok(res.status == expect, "stub %s → %s（实测 %s）" % (mode, expect, res.status))
     if mode in ("ok", "done"):

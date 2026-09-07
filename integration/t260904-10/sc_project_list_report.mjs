@@ -12,12 +12,12 @@
 //   2. 人读 list：exit 0、含 lista/listb、隔离行含 qbad2 与 <root>/qbad2/project.yaml 字面、
 //      不含 datadirc；
 //   3. --json list：可解析、同列同构（深度按 key 字段收集）、隔离原因含同款定位字面；
-//   4. 降级①服务不可达：SUYOU_TARGET_HOST=127.0.0.1:1（死端口，显式 env 钉死防缺省外溢
+//   4. 降级①服务不可达：SANDBAR_TARGET_HOST=127.0.0.1:1（死端口，显式 env 钉死防缺省外溢
 //      生产 7233）→ exit 0、条目照列、输出捕获；
 //   5. 降级②SDK 缺失：PYTHONPATH 前置空壳 temporalio 包（temporalio.client import 失败）
 //      → exit 0、条目照列、输出与①可辨（两态输出不全等）；
-//   6. 正常计数腿（测试台可达才跑）：探测测试台 17233，可达则 SUYOU_TARGET_HOST=127.0.0.1:17233 +
-//      SUYOU_NAMESPACE=suyou-test 跑 --json，exit 0 且条目在列；不可达=ENV_FAIL
+//   6. 正常计数腿（测试台可达才跑）：探测测试台 17233，可达则 SANDBAR_TARGET_HOST=127.0.0.1:17233 +
+//      SANDBAR_NAMESPACE=suyou-test 跑 --json，exit 0 且条目在列；不可达=ENV_FAIL  // naming-compat
 //      （三态契约：缺测试环境绝不 exit 0 假绿，exit 2 并打印缺什么）。
 //
 // 安全红线：零 3099 接触；对 Temporal 的唯一接触是显式死端口（降级注入）与测试台 17233
@@ -31,7 +31,7 @@ import {
 } from './lib_fix10.mjs';
 
 const c = makeChecks('t260904-10 project list 报告');
-delete process.env.SUYOU_PROJECTS_YAML;
+delete process.env.SANDBAR_PROJECTS_YAML;
 
 // 本地镜像计数（lib_fix10 不暴露计数面且不在本票写集）：供 ENV_FAIL 提前收口时
 // 打印四态 SUMMARY（pass/fail/env_fail/na，三态契约 §7.3）
@@ -86,7 +86,7 @@ c.check('--json 隔离原因含 project.yaml 定位字面',
 c.check('--json 不含 datadirc', json !== null && !JSON.stringify(json).includes('datadirc'));
 
 // ---- 4. 降级①：服务不可达（死端口注入，显式 env 防缺省外溢生产） ----
-const envDead = sbEnv(root, { SUYOU_TARGET_HOST: '127.0.0.1:1', SUYOU_NAMESPACE: 'suyou-test' });
+const envDead = sbEnv(root, { SANDBAR_TARGET_HOST: '127.0.0.1:1', SANDBAR_NAMESPACE: 'suyou-test' });  // naming-compat
 const dead = runCli(['project', 'list'], envDead);
 c.check('Temporal 不可达时 list 仍 exit 0（降级不红）', dead.code === 0,
   `exit=${dead.code}\n${dead.out.slice(-400)}`);
@@ -99,7 +99,7 @@ writeFileSync(path.join(shim, 'temporalio', '__init__.py'), '');
 // 故意不建 temporalio/client.py → `from temporalio.client import Client` = ImportError 族
 const basePy = (process.env.PYTHONPATH || '').trim();
 const envSdk = sbEnv(root, {
-  SUYOU_TARGET_HOST: '127.0.0.1:1', SUYOU_NAMESPACE: 'suyou-test',
+  SANDBAR_TARGET_HOST: '127.0.0.1:1', SANDBAR_NAMESPACE: 'suyou-test',  // naming-compat
   PYTHONPATH: basePy ? `${shim}${path.delimiter}${basePy}` : shim,
 });
 const sdk = runCli(['project', 'list'], envSdk);
@@ -119,7 +119,7 @@ const reachable = await new Promise((resolve) => {
 });
 if (reachable) {
   const live = runCli(['project', 'list', '--json'],
-    sbEnv(root, { SUYOU_TARGET_HOST: TEST_TARGET, SUYOU_NAMESPACE: 'suyou-test' }));
+    sbEnv(root, { SANDBAR_TARGET_HOST: TEST_TARGET, SANDBAR_NAMESPACE: 'suyou-test' }));  // naming-compat
   c.check('测试台可达：list --json exit 0', live.code === 0, `exit=${live.code}`);
   const liveJson = extractJson(live.out);
   c.check('测试台可达：条目照列', liveJson !== null && deepFind(liveJson, 'key', 'lista').length > 0);

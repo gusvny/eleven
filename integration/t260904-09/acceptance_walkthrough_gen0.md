@@ -32,7 +32,7 @@
 - **R2 归档收窄 + R3 口径变更可达性**：真 git fixture 仓只认票号前缀提交（12 非 62）、reason 标归档口径；v1 宽口径存量缓存被 SOURCE_VERSION bump 治愈（宽口径不永续，05 锚同构）✅。
 - **R4 donut 四桶**：有变更 / 已收口·零变更 / 未交付（在制）/ 不可算（数据缺失）互斥且 Σ=票数，零变更闭票不落「不可算」✅。**R5 畸形快照**：坏 JSON 不炸面板、留人话 reason、不当真源 ✅。
 - **生产真值锚实证**（本仓真 git 史，只读）：`t260904-05` 相关提交 5 条，前缀命中**唯一** 455320d=**5658** 行；他账 4 条=33（立项收尾）+1（KI-044 登记）+83（讨论档）+8（编号修正）=**125** 行；宽口径合计=**5783**。与工单派发规格数字逐字吻合——归档收窄语义（message 首行票号前缀）在真实生产史上成立 ✅。
-- **红线核查**：新命名零 suyou（`SANDBAR_SETTLE_SNAPSHOT_DIR` 中性）；`SUYOU_USAGE_LEDGER_DIR` 零新增引用；console（3099）零触碰（diff 无相关文件）；契约增补段 6 条已落 `docs/design/metrics-api契约v1.md`（schema 冻结不破）✅。
+- **红线核查**：新命名零 suyou（`SANDBAR_SETTLE_SNAPSHOT_DIR` 中性）；`SANDBAR_USAGE_LEDGER_DIR` 零新增引用；console（3099）零触碰（diff 无相关文件）；契约增补段 6 条已落 `docs/design/metrics-api契约v1.md`（schema 冻结不破）✅。
 
 ### 发现 1：票号路径防穿缺失（W8，代码问题）
 
@@ -43,10 +43,10 @@
 
 ### 发现 2：测试缝读写两侧分叉（R6，代码问题）
 
-- **复现**：读旅程 R1（快照放 `SUYOU_METRICS_DIR` 根链，stub harness 注入）→ 读侧消费=绿；R6（同一形状快照放 `SANDBAR_SETTLE_SNAPSHOT_DIR` 根链）→ `top=undefined`，快照对读侧不可见=红。两断言唯一差异是根链 env。
-- **根因**：`metrics.ts` `resolveMetricsCacheDir` 根链 = `SUYOU_METRICS_DIR ?? SANDBAR_PROJECTS_DIR ?? ~/.sandbar/projects`，**缺 `SANDBAR_SETTLE_SNAPSHOT_DIR` 环**；引擎写侧 `_settle_snapshot_dir` 根链第一环恰是它。契约增补段 1 成文「测试缝 env SANDBAR_SETTLE_SNAPSHOT_DIR 替换项目根整体，与 SUYOU_METRICS_DIR ?? SANDBAR_PROJECTS_DIR ?? ~/.sandbar/projects 同链，**读写两侧同一解析语义**」——实现未兑现成文语义；`metrics.ts` 内注释「与缓存同一条根链（引擎 _settle_snapshot_dir 两侧同序互指）」与事实不符（注释精确性问题，一并修）。
+- **复现**：读旅程 R1（快照放 `SANDBAR_METRICS_DIR` 根链，stub harness 注入）→ 读侧消费=绿；R6（同一形状快照放 `SANDBAR_SETTLE_SNAPSHOT_DIR` 根链）→ `top=undefined`，快照对读侧不可见=红。两断言唯一差异是根链 env。
+- **根因**：`metrics.ts` `resolveMetricsCacheDir` 根链 = `SANDBAR_METRICS_DIR ?? SANDBAR_PROJECTS_DIR ?? ~/.sandbar/projects`，**缺 `SANDBAR_SETTLE_SNAPSHOT_DIR` 环**；引擎写侧 `_settle_snapshot_dir` 根链第一环恰是它。契约增补段 1 成文「测试缝 env SANDBAR_SETTLE_SNAPSHOT_DIR 替换项目根整体，与 SANDBAR_METRICS_DIR ?? SANDBAR_PROJECTS_DIR ?? ~/.sandbar/projects 同链，**读写两侧同一解析语义**」——实现未兑现成文语义；`metrics.ts` 内注释「与缓存同一条根链（引擎 _settle_snapshot_dir 两侧同序互指）」与事实不符（注释精确性问题，一并修）。
 - **影响面**：缝生效环境（测试/隔离台/任何按缝部署）里引擎把快照写进读侧永不读的目录——**静默 split-brain**，面板无提示回落归档口径，数字与账本不一致且用户无感知。全 env 未设的生产现状两侧同落 `~/.sandbar/projects`，暂无用户可见错误——但工单核心承诺「读侧优先消费」恰以该缝为测试面，缝失效=本票验收面缺角。
-- **修法方向（供 developer 参考，不代改）**：读侧 `resolveMetricsCacheDir` 根链补第一环（`process.env.SANDBAR_SETTLE_SNAPSHOT_DIR ?? SUYOU_METRICS_DIR ?? …`），两侧同序；developer L1 补一条读侧消费该 env 的断言（现 L1 只测 SUYOU_METRICS_DIR 链，缝漏网）。
+- **修法方向（供 developer 参考，不代改）**：读侧 `resolveMetricsCacheDir` 根链补第一环（`process.env.SANDBAR_SETTLE_SNAPSHOT_DIR ?? SANDBAR_METRICS_DIR ?? …`），两侧同序；developer L1 补一条读侧消费该 env 的断言（现 L1 只测 SANDBAR_METRICS_DIR 链，缝漏网）。
 
 ### 测试资产变更审查（对照 implement 段改动，逐处核实意图）
 
@@ -66,7 +66,7 @@
 
 1. **两发现的修复责任**：归 developer（打回）；仲裁若另判 tests-fault 与本报告冲突处，以本报告的实证复现路径为准可当场重放。
 2. **机械口径 4 败的剩余 2 败**：注入上下文列表截断，只能确认 2 败归属本票双旅程（均已独立复现）；另 2 败明细未见，不排除与本票无关的既有红，请以 run_integration_tests 台账全量清单核对归属。
-3. **`SUYOU_METRICS_DIR` 引用面扩大（迁移票欠账注记，非本票违规）**：该 env 是 TS 侧既有根链（HEAD~1 已在 metrics.ts），本票 Python 侧新增引用是为写读同根一致的兼容读；发现 2 修复后它成为两侧链中段一环，未来专门迁移票退役该 env 时须两侧同批摘除（建议登记 KI 或入迁移票清单）。
+3. **`SANDBAR_METRICS_DIR` 引用面扩大（迁移票欠账注记，非本票违规）**：该 env 是 TS 侧既有根链（HEAD~1 已在 metrics.ts），本票 Python 侧新增引用是为写读同根一致的兼容读；发现 2 修复后它成为两侧链中段一环，未来专门迁移票退役该 env 时须两侧同批摘除（建议登记 KI 或入迁移票清单）。
 4. **temporal-poc L1 pytest 本环境不可独立复跑**（系统 python3 无 pytest 模块，环境限制非代码问题）：其覆盖面（目录 env 链/聚合口径/幂等 keep-old/软降级/接线兼容）已由本走查 L3 旅程 W1–W7 断言独立覆盖；L1 独立绿以 developer 自报与后续可跑环境为准。
 5. **真实闭单票的生产端到端**：快照语义自本票部署后首个 settle 才开始产生存量，「真实闭单票面板=快照值」的生产实证待部署后首票自然达成（当前由 W1 写+R1 读的跨组件链路覆盖）；重开票增量交付不可见为契约成文已知边界（快照 reason 的 squash_commit 可发现）。
 

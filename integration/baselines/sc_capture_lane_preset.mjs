@@ -3,7 +3,7 @@
 // 断言 server/dsh/ui-check/capture-lane.mjs 的 presetMaterializeRejectReason /
 // materializePresets 三态：缺失源拒跑、畸形源拒跑（空目录/缺关键文件）、完整源
 // 实体复制落地（非软链）。全用临时桩目录 + env 覆盖路径（main() 侧
-// SUYOU_CAPTURE_PRESET_SOURCE 解耦性由此函数直测覆盖），不 boot 控制台、不碰
+// SANDBAR_CAPTURE_PRESET_SOURCE 解耦性由此函数直测覆盖），不 boot 控制台、不碰
 // 网络、不碰 3099。跑法：node integration/baselines/capture-lane-preset.mjs
 
 import { mkdtemp, mkdir, writeFile, rm, symlink, stat } from "node:fs/promises";
@@ -41,7 +41,7 @@ try {
   // ③ 完整源 → 实体复制落地，非软链（roster 只扫实体）
   const home = path.join(tmp, "fake-dsh-home");
   const dst = await materializePresets(home, stub);
-  assert(dst === path.join(home, ".agent-presets", "suyou-integration"),
+  assert(dst === path.join(home, ".agent-presets", "suyou-integration"),  // naming-compat
     `物化落点异常：${dst}`);
   for (const f of ["preset.yml", "agent.cordis.yml"]) {
     const p = path.join(dst, f);

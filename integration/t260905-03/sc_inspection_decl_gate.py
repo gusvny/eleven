@@ -130,7 +130,7 @@ def main() -> int:
         # 未合并前生产 worker 不认识它（抢活即打回 not-registered），私有队列消除竞态、
         # 也不给共享台留毒票；trigger 子进程经 os.environ 继承同一队列。
         private_queue = "suyou-insp-decl-%05d" % os.getpid()
-        os.environ["SUYOU_TASK_QUEUE"] = private_queue
+        os.environ["SANDBAR_TASK_QUEUE"] = private_queue
         with lib.StageWorker(private_queue):
             proc, parsed = lib.run_trigger(["trigger", "--instance", "test-face",
                                             "--decl-path", normal])

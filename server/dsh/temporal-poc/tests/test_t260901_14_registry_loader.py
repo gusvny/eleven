@@ -35,13 +35,13 @@ class RegistryLoaderLegacyIntent(unittest.TestCase):
         legacy = os.path.join(tmp, "projects.yaml")
         with open(legacy, "w", encoding="utf-8") as f:
             f.write("projects:\n  - key: legacy\n    name: 旧档\n    dirs:\n      - /tmp/legacy\n")
-        os.environ["SUYOU_PROJECTS_YAML"] = legacy
+        os.environ["SANDBAR_PROJECTS_YAML"] = legacy
         try:
             projects, quarantined = shared.load_projects_registry()
             self.assertEqual(projects[0]["key"], "legacy")
             self.assertEqual(quarantined, [])
         finally:
-            del os.environ["SUYOU_PROJECTS_YAML"]
+            del os.environ["SANDBAR_PROJECTS_YAML"]
 
     def test_per_key_scan_and_quarantine(self):
         import tempfile

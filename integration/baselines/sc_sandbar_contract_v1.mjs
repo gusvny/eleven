@@ -46,9 +46,9 @@
  * intended pre-implementation state; run_integration_tests is the judging
  * stage.
  *
- * Reference: .suyou/stage_create_plan_gen1.json (approved plan v2);
- * review history in .suyou/stage_review_plan_gen0.json (round 1: three-state
- * closing semantics mandated) and .suyou/stage_review_plan_gen1.json
+ * Reference: .suyou/stage_create_plan_gen1.json (approved plan v2);  // naming-compat
+ * review history in .suyou/stage_review_plan_gen0.json (round 1: three-state  // naming-compat
+ * closing semantics mandated) and .suyou/stage_review_plan_gen1.json  // naming-compat
  * (round 2: approved).
  */
 
@@ -184,7 +184,7 @@ try {
   if (contract != null) {
     ok(/稳定|契约面/.test(contract), 'stable contract surface named')
     ok(/内部实现/.test(contract), 'internal-implementation surface named')
-    for (const kw of ['模版', '插件', '.suyou']) {
+    for (const kw of ['模版', '插件', '.suyou']) {  // naming-compat
       ok(contract.includes(kw), `internal-surface example named: ${kw}`)
     }
     ok(/随时会变|随时可能变|不保证稳定/.test(contract), 'internal surfaces marked as unstable')

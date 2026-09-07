@@ -2,7 +2,7 @@
 """t260901-19 T3: suggest_next precache short-circuit (activity-level, plan v3).
 
 Contract under test:
-- Order inside suggest_next: rfile idempotency -> SUYOU_SUGGEST_STUB -> precache
+- Order inside suggest_next: rfile idempotency -> SANDBAR_SUGGEST_STUB -> precache
   short-circuit -> spawn.
 - Short-circuit fires only when args.epic/args.state_key are set, pre.json exists
   AND its state_key matches, and the cached suggestion re-passes the FULL existing
@@ -111,14 +111,14 @@ def run_case(suggestion=None, *, ep="a", sk="sk1", pre_sk=None, pre_epic=None,
             rf.write_text(json.dumps(rfile_payload, ensure_ascii=False), "utf-8")
         aa._prepare_agent_spawn = guard
         if stub is not None:
-            os.environ["SUYOU_SUGGEST_STUB"] = stub
+            os.environ["SANDBAR_SUGGEST_STUB"] = stub
         try:
             res = asyncio.run(aa.suggest_next(args))
         except _SpawnAttempted:
             return None, True
         finally:
             aa._prepare_agent_spawn = real_spawn
-            os.environ.pop("SUYOU_SUGGEST_STUB", None)
+            os.environ.pop("SANDBAR_SUGGEST_STUB", None)
         return res, attempted["hit"]
     finally:
         shutil.rmtree(ws, ignore_errors=True)
@@ -188,8 +188,8 @@ def main():
     _, spawned = run_case(ep="l")
     check("cold-path-spawns", spawned)
 
-    # m) hygiene: no test residue under <repoRoot>/.suyou/epic-next/
-    base = REPO / ".suyou" / "epic-next"
+    # m) hygiene: no test residue under <repoRoot>/.suyou/epic-next/  # naming-compat
+    base = REPO / ".suyou" / "epic-next"  # naming-compat
     residue = [p.name for p in base.iterdir()] if base.is_dir() else []
     check("no-residue", not any(n.startswith(EPIC_BASE) for n in residue),
           str(residue))

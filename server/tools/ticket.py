@@ -58,7 +58,7 @@ TEMP_PY = str(TEMP_POC / '.venv' / 'bin' / 'python') if (TEMP_POC / '.venv' / 'b
 # t260904-02（KI-032 硬闸）：装载逻辑整块上收 temporal-poc/shared.py（单一真源，
 # client.py ticket-start 同源锚 project_root），本文件只留薄壳委托（见下方
 # 「项目注册表（薄壳委托）」节）；下面两个常量保留为兼容别名（值与真源一致）。
-# env 优先级（每次调用现读）：SUYOU_PROJECTS_YAML（legacy 单文件模式，旧格式
+# env 优先级（每次调用现读）：SANDBAR_PROJECTS_YAML（legacy 单文件模式，旧格式
 # projects: 列表，行为与 260823 版一致）> SANDBAR_PROJECTS_DIR > ~/.sandbar/projects。
 # 单条目畸形/版本不支持=该项目隔离（fail-closed 可见，不炸其他项目）；目录名必须
 # 过 PROJECT_KEY_RE 白名单，条目 key 必须与目录名全等；迁移判据只认 .migrated 标记。
@@ -104,7 +104,7 @@ TOOL = {
             'to_stage': {'type': 'string', 'description': 'rework 打回目标 stage（缺省回上一段）'},
             'worktree': {'type': 'string', 'description': 'create 显式登记泳道路径（缺省 dev-lane 自动 .lane/<id>）'},
             'branch': {'type': 'string', 'description': 'create 显式登记分支名（缺省 lane/<id>）'},
-            'workspace': {'type': 'object', 'description': 'create 显式登记工作空间 {type: worktree|dir, path}（缺省按模板推导：lane=worktree→泳道，模板带 workspace:dir→/tmp/suyou-ws/<id> 隔离目录）'},
+            'workspace': {'type': 'object', 'description': 'create 显式登记工作空间 {type: worktree|dir, path}（缺省按模板推导：lane=worktree→泳道，模板带 workspace:dir→/tmp/sandbar-ws/<id> 隔离目录（老 base 粘滞））'},
             'by': {'type': 'string', 'description': 'rework 操作人（身份注入）'},
         },
         'required': ['op'],
@@ -117,7 +117,7 @@ TOOL = {
 # 装载器真源=server/dsh/temporal-poc/shared.py「项目注册表」节：KI-032 硬闸要求
 # client.py ticket-start 与本文件 create 用同一份装载器锚 project（双份必漂移，
 # t260824 三次事故教训）。本节保留对外函数名与错误文案（逐字不变，wrapper 只转调），
-# 其余调用方（_create/_list 等）零改动。env 语义（SUYOU_PROJECTS_YAML >
+# 其余调用方（_create/_list 等）零改动。env 语义（SANDBAR_PROJECTS_YAML >
 # SANDBAR_PROJECTS_DIR > ~/.sandbar/projects，每次现读）与迁移/隔离/混合现场
 # 判定逻辑全部随真源走，见 shared.py 注释。
 

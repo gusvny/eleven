@@ -147,7 +147,7 @@ def main():
     # 重试延迟注入归零（模块级常量=配置面）：t260903-06 退避升级后测试提速，生产默认不动。
     client_mod.QUERY_RETRY_BASE_DELAY = 0.0
     client_mod.QUERY_RETRY_JITTER = 0.0
-    q = client_mod.TASK_QUEUE if hasattr(client_mod, "TASK_QUEUE") else "suyou-tickets"
+    q = client_mod.TASK_QUEUE if hasattr(client_mod, "TASK_QUEUE") else "suyou-tickets"  # naming-compat
     # SA 键用与 client 同源的 for_keyword 构造再 str 化——键必须与 FakeSAKeys.get
     # (str(key)) 的查找键一致（t260901-23 修正：原硬编码 "PROJECT"/"EPIC" 与桩
     # 产物永不匹配，属于 fixture 自身不一致，SA 直取分支测不到）。

@@ -264,7 +264,7 @@ try {
       }
     }
 
-    if (process.env.T08_SHOT) await page.screenshot({ path: '.suyou/screenshots/t08-' + leg + '.png', fullPage: true }).catch(() => {});
+    if (process.env.T08_SHOT) await page.screenshot({ path: '.suyou/screenshots/t08-' + leg + '.png', fullPage: true }).catch(() => {});  // naming-compat
     await page.waitForTimeout(600); // 渲染静置：waitFor visible 后 React 仍有 commit 尾巴，立即扫描会漏板面（实测竞态）
     let scan = await page.evaluate(SCAN_FN);
     if ((scan.regions.card || 0) === 0) {

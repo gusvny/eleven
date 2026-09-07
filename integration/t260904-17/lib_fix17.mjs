@@ -6,7 +6,7 @@
 //     python3 走 PATH 解析（sandbar-tools.ts runAdminCli execFileP）——给隔离台进程注入
 //     shim `python3`（仅拦截 admin.py 的 ticket/workflow call，其余透传真解释器），
 //     行为经 FIX17_CTRL（JSON）驱动、调用轨迹落 FIX17_TRACE（JSONL，时序/并发断言面）。
-//     全程零真 Temporal 接触（SUYOU_TARGET_HOST 钉死端口），零 3099 接触。
+//     全程零真 Temporal 接触（SANDBAR_TARGET_HOST 钉死端口），零 3099 接触。
 //   - 隔离台自举（临时 DSH_HOME + 自物化 profile + 随机高端口 + 就绪等待）与四路径回收。
 //   - playwright-core 探测 / 出厂 notice 关闭 / SUMMARY 执行契约（t260904-15 同口径）。
 import { spawn, spawnSync } from 'node:child_process';
@@ -168,9 +168,9 @@ function require$read(p) { try { return readFileSync(p, 'utf8'); } catch { retur
 
 function benchEnv(tmpHome, projectsRoot, stub) {
   const env = { ...process.env, DSH_HOME: tmpHome, SANDBAR_PROJECTS_DIR: projectsRoot };
-  delete env.SUYOU_PROJECTS_YAML;
-  env.SUYOU_TARGET_HOST = DEAD_TEMPORAL;
-  delete env.SUYOU_NAMESPACE;
+  delete env.SANDBAR_PROJECTS_YAML;
+  env.SANDBAR_TARGET_HOST = DEAD_TEMPORAL;
+  delete env.SANDBAR_NAMESPACE;
   env.FIX17_CTRL = stub.ctrlPath;
   env.FIX17_TRACE = stub.tracePath;
   env.PATH = `${stub.dir}${path.delimiter === ':' ? ':' : ':'}${process.env.PATH || ''}`;
@@ -274,7 +274,7 @@ export function teardownOnExit(teardown) {
 export async function loadPlaywright() {
   const localPw = new URL('../../server/dsh/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
   const mainPw = path.join(mainRoot(), 'server', 'dsh', 'ui-check', 'node_modules', 'playwright-core', 'index.mjs');
-  for (const c of [process.env.SUYOU_PLAYWRIGHT_PATH, 'playwright-core', localPw,
+  for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core', localPw,
     existsSync(mainPw) ? pathToFileURL(mainPw).href : null]) {
     if (!c) continue;
     try { return await import(c); } catch { /* next */ }

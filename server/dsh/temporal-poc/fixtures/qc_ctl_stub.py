@@ -1,4 +1,4 @@
-"""控制文件门 fixture：读环境变量 SUYOU_GATE_CTL 指向的文件——内容含 "green" 则印绿灯
+"""控制文件门 fixture：读环境变量 SANDBAR_GATE_CTL 指向的文件——内容含 "green" 则印绿灯
 JSON（同 qc_run 契约），否则印红灯。自测用：先在控制文件写 red 演示「脚本门红→blocked」，
 再改写 green + retry_qc signal 演示「重跑放行」，判绿代码一字不改。
 """
@@ -6,7 +6,7 @@ import json
 import os
 import sys
 
-ctl = os.environ.get("SUYOU_GATE_CTL") or ""
+ctl = os.environ.get("SANDBAR_GATE_CTL") or ""
 green = False
 try:
     with open(ctl, "r", encoding="utf-8") as f:

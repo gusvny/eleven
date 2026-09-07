@@ -35,7 +35,7 @@ import {
 } from './lib_fix14.mjs';
 
 const c = makeChecks('t260904-14 project remove 生命周期（桩 poc_dir）');
-delete process.env.SUYOU_PROJECTS_YAML;
+delete process.env.SANDBAR_PROJECTS_YAML;
 
 // ---- 1. fixture：隔离注册表根 + 桩 poc_dir ----
 const root = tmpRoot('fix14-lc-root-');

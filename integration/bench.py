@@ -29,9 +29,9 @@ sitecustomize.py 注入被测子进程 PYTHONPATH：sys.addaudithook 监 socket.
 docker 台的容器内出网由 compose 网络拓扑约束（stage_docker 头注取舍表）。
 
 环境缝（泳道缺资产时的回退，KI-020③ 邻接绷带）：
-  SUYOU_TEMPORAL_BIN   temporal 二进制（缺省：<repo>/server/dsh/temporal-poc/bin/temporal，
+  SANDBAR_TEMPORAL_BIN   temporal 二进制（缺省：<repo>/server/dsh/temporal-poc/bin/temporal，
                         泳道缺失时读 .git gitfile 回退主树同位）
-  SUYOU_POC_PYTHON     带 temporalio 的解释器（缺省：<repo>/…/.venv/bin/python，同样回退主树）
+  SANDBAR_POC_PYTHON     带 temporalio 的解释器（缺省：<repo>/…/.venv/bin/python，同样回退主树）
 """
 from __future__ import annotations
 
@@ -152,13 +152,13 @@ def _resolve_asset(env_key, lane_path: pathlib.Path, what: str) -> pathlib.Path:
 
 
 def resolve_temporal_bin() -> pathlib.Path:
-    return _resolve_asset("SUYOU_TEMPORAL_BIN",
+    return _resolve_asset("SANDBAR_TEMPORAL_BIN",
                           REPO / "server" / "dsh" / "temporal-poc" / "bin" / "temporal",
                           "temporal 二进制")
 
 
 def resolve_poc_python() -> pathlib.Path:
-    return _resolve_asset("SUYOU_POC_PYTHON",
+    return _resolve_asset("SANDBAR_POC_PYTHON",
                           REPO / "server" / "dsh" / "temporal-poc" / ".venv" / "bin" / "python",
                           "带 temporalio 的 venv 解释器")
 

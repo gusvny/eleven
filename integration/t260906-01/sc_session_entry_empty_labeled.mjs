@@ -20,7 +20,7 @@ import { makeChecks } from '../t260904-14/lib_fix14.mjs';
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const REPO_ROOT = path.resolve(HERE, '..', '..');
 const c = makeChecks('t260906-01 空项目会话入口可发现');
-delete process.env.SUYOU_PROJECTS_YAML;
+delete process.env.SANDBAR_PROJECTS_YAML;
 
 const WB = path.join(REPO_ROOT, 'server', 'dsh', 'workbench');
 const srcRow = path.join(WB, 'src', 'client', 'project-session-row.tsx');

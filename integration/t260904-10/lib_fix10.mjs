@@ -25,7 +25,7 @@ export function tmpRoot(prefix) {
 //   python3 sandbar project remove --key <key> [--json]
 export function sbEnv(root, extra = {}) {
   const env = { ...process.env, SANDBAR_PROJECTS_DIR: root };
-  delete env.SUYOU_PROJECTS_YAML; // legacy env 只在 legacy 腿显式注入，绝不 ambient 泄漏
+  delete env.SANDBAR_PROJECTS_YAML; // legacy env 只在 legacy 腿显式注入，绝不 ambient 泄漏
   return Object.assign(env, extra); // extra 在清理之后注入（legacy 腿靠它）
 }
 

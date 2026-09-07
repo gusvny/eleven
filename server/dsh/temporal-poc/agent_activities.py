@@ -4,7 +4,7 @@
   - agent 段：activity 名=stage 名（develop/process/review/regress…），实现通用
     `_run_agent_stage_impl`：spawn headless agent 进程（`dsh --profile sandbar-headless
     "<派活指令>"`，工作目录=工单工作空间），轮询工作空间结果文件 + activity.heartbeat()。
-    **幂等**：结果文件（.suyou/stage_<段>_gen<N>.json）已存在则直接读文件返回——
+    **幂等**：结果文件（.sandbar/stage_<段>_gen<N>（老泳道 .suyou 粘滞）.json）已存在则直接读文件返回——  # naming-compat
     Temporal 活动重试/ worker 重启后重跑安全；rework 重跑靠 gen+1 换新文件（真重跑）。
   - 人门段：`prepare_human_gate` 做机械准备（提案摘录/工作空间清单/diff stat），
     返回审查上下文；签字等待在 workflow 级 wait_condition（等外部输入的正解）。
@@ -27,8 +27,8 @@ worker 代落盘（260824，t260824-01/-02 两连踩后的确定性收口）：h
 由 worker（无沙箱）调 `_settle_worktree_lane` 确定性代落盘（假仓库隔离 +
 工作区改动收成一个 commit），merge_check 查的是代落盘后的真状态。
 
-自测/演示：`SUYOU_AGENT_STUB=1` 时 activity 自写结果文件即返回（不起 agent 进程）。
-派活命令可用 `SUYOU_AGENT_CMD` 覆盖（shlex 切分，缺省 `dsh --profile sandbar-headless`）。
+自测/演示：`SANDBAR_AGENT_STUB=1` 时 activity 自写结果文件即返回（不起 agent 进程）。
+派活命令可用 `SANDBAR_AGENT_CMD` 覆盖（shlex 切分，缺省 `dsh --profile sandbar-headless`）。
 """
 
 from __future__ import annotations
@@ -81,6 +81,10 @@ from shared import (
     StageResult,
     TEMPLATE_CLASS_NAMES,
     UI_EVIDENCE_DIR,
+    ui_evidence_dir,
+    evidence_base,
+    lane_dot_path,
+    mirror_to_legacy,
     EVIDENCE_DIR,
     load_ui_evidence,
     normalize_files_changed,
@@ -103,8 +107,8 @@ from shared import (
 )
 
 POLL_SEC = 5
-INTEG_CMD_TIMEOUT_SEC = int(os.environ.get("SUYOU_INTEG_CMD_TIMEOUT_SEC") or 900)
-DSH_CMD = shlex.split(os.environ.get("SUYOU_AGENT_CMD") or "dsh --profile sandbar-headless")
+INTEG_CMD_TIMEOUT_SEC = int(os.environ.get("SANDBAR_INTEG_CMD_TIMEOUT_SEC") or 900)
+DSH_CMD = shlex.split(os.environ.get("SANDBAR_AGENT_CMD") or "dsh --profile sandbar-headless")
 
 
 def _src_dsh_home() -> Path:
@@ -146,9 +150,9 @@ def _session_jsonl_torn(path: Path) -> bool:
 
 
 def _quarantine_session_file(local_dsh: Path, f: Path, reason: str) -> None:
-    """坏会话档挪 <cwd>/.suyou/quarantine/ 留档（挪不删），reason 进告警文案。
+    """坏会话档挪 <cwd>/.sandbar/quarantine/（老泳道 .suyou 粘滞） 留档（挪不删），reason 进告警文案。  # naming-compat
     挪不动静默留着——同 id create 会再撞，但插件侧兜底已不致死（既有口径不变）。"""
-    qdir = local_dsh.parent / ".suyou" / "quarantine"
+    qdir = lane_dot_path(local_dsh.parent, "quarantine", create=True)
     try:
         qdir.mkdir(parents=True, exist_ok=True)
         dst = qdir / ("torn-%s-%s" % (f.parent.name, f.name))
@@ -161,7 +165,7 @@ def _quarantine_session_file(local_dsh: Path, f: Path, reason: str) -> None:
 def _quarantine_torn_sessions(local_dsh: Path) -> None:
     """spawn 前检疫撕裂的会话文件（t260829-06 两次实测：agent 被杀于写入中会留
     zstd 撕裂帧，resume 与同 id create 都撞 corrupt 死，整步卡死）。坏文件挪
-    <cwd>/.suyou/quarantine/ 留档，让「同 id 新建」回落走得通（上下文丢但流程活）。
+    <cwd>/.sandbar/quarantine/（老泳道 .suyou 粘滞） 留档，让「同 id 新建」回落走得通（上下文丢但流程活）。  # naming-compat
 
     两层检疫（t260905-10 面②）：
     1. `zstd -t` 测帧完整性——帧裂即隔离（t260829-06 旧口径）；
@@ -562,7 +566,7 @@ def _session_kb(cwd: Path) -> int:
 
 
 # agent 沙箱写不了真 .git 时自建的假仓库目录名（260824 实测：.git-local/.git-obj-tmp/
-# .git-tmp/.git-alt）。settle 发现即隔离进 .suyou/quarantine/（不删，留档可查）。
+# .git-tmp/.git-alt）。settle 发现即隔离进 .sandbar/quarantine/（不删，留档可查）。
 FAKE_GIT_DIRS = (".git-local", ".git-obj-tmp", ".git-tmp", ".git-alt")
 
 
@@ -639,7 +643,7 @@ def _restore_gitfile(cwd: Path, ticket_id: str, stage_id: str, gen: int,
     note = "gitfile 被 agent 改写（指向主库外 %s），已恢复指向真 gitdir" % fake
     # 假仓库隔离留档（在泳道内、且是个 git 目录才挪）
     if fake and fake.is_relative_to(cwd.resolve()) and (fake / "HEAD").exists() and fake.is_dir():
-        qdir = cwd / ".suyou" / "quarantine"
+        qdir = lane_dot_path(cwd, "quarantine", create=True)
         qdir.mkdir(parents=True, exist_ok=True)
         dst = qdir / ("%s-gitdir-%s-gen%d" % (fake.name, stage_id, gen))
         n = 1
@@ -652,10 +656,10 @@ def _restore_gitfile(cwd: Path, ticket_id: str, stage_id: str, gen: int,
     return note
 
 # settle/merge_check 共用的 git pathspec 排除口径：.dsh（agent 沙箱/credentials）与
-# .suyou（结果文件/agent 日志/quarantine）是引擎运行时目录，任何泳道必有，不算改动。
+# .sandbar（结果文件/agent 日志/quarantine）是引擎运行时目录，任何泳道必有，不算改动。
 # 注意：本 pathspec 只用于 git status（porcelain 正常）；git add 不可带它——
 # Apple Git 2.50 对「. + :!ignored目录」组合必报错 rc=1（见 _settle_worktree_lane）。
-SETTLE_PATHSPEC = [".", ":!.dsh", ":!.suyou"]
+SETTLE_PATHSPEC = [".", ":!.dsh", ":!.sandbar", ":!.sandbar"]  # .sandbar=老泳道名（粘滞回落，t260907-04）
 
 
 # ---- KI-009（t260901-25）：merge_check dirty 红灯前自动补 settle 的两个纯函数 ----
@@ -778,7 +782,7 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
     .git/worktrees/<id> 的 gitfile，在沙箱可写范围之外），「agent 自己 commit」
     物理做不到——t260824-01/-02 的 agent 被逼自建 .git-local 假仓库「完成 commit」，
     真泳道 0 commit，merge_check 红灯。所以 commit 改由 worker（无沙箱）兜底：
-      1. 假 git 仓库目录隔离进 .suyou/quarantine/（挪不删，留档）；
+      1. 假 git 仓库目录隔离进 .sandbar/quarantine/（老泳道粘滞 .suyou；挪不删，留档）；  # naming-compat
       2. 工作区改动（SETTLE_PATHSPEC 口径）收成一个 commit 落到泳道分支。
     幂等：工作区已干净则不动（agent 若真能 commit，settle 是 no-op）。
     返回人读说明（追加进 stage evidence）；非 worktree 泳道返回 ""。
@@ -811,7 +815,7 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
         src = cwd / name
         if not src.exists():
             continue
-        qdir = cwd / ".suyou" / "quarantine"
+        qdir = lane_dot_path(cwd, "quarantine", create=True)
         qdir.mkdir(parents=True, exist_ok=True)
         dst = qdir / ("%s-%s-gen%d" % (name, stage_id, gen))
         n = 1
@@ -829,12 +833,12 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
     if dirty:
         # Apple Git 2.50 实测：排除 pathspec（:!.dsh）拦不住「显式点名 ignored 目录」
         # 报错（干净仓库必现 rc=1）——t260826-01 implement gen3 即在此挂死。
-        # 改全量 add（.dsh/.suyou 有 gitignore 本就不会入暂存），再 reset 摘回
+        # 改全量 add（.dsh/.sandbar 有 gitignore 本就不会入暂存），再 reset 摘回
         # 作双保险（防老 .gitignore 泳道；无匹配时 rc=0 静默）。
         p = _git(["add", "-A", "--", "."], cwd)
         if p.returncode != 0:
             raise RuntimeError("settle: git add 失败: %s" % (p.stderr or "")[-300:])
-        _git(["reset", "-q", "--", ".dsh", ".suyou"], cwd)
+        _git(["reset", "-q", "--", ".dsh", ".suyou", ".sandbar"], cwd)  # naming-compat
         msg = ("%s %s：worker 代落盘（gen%d，%d 项改动）\n\n"
                "headless agent 沙箱写不了主库 .git，commit 由 worker 确定性兜底"
                % (ticket_id, stage_id, gen, len(dirty)))
@@ -919,8 +923,8 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
     # 机制仿 model_patch：生成一次性 patch（绝对路径指 runner 文件），disable stock
     # 一次性 runner、换 create-or-resume runner；DSH_HEADLESS_SESSION 传确定性会话 id。
     # runner 优先取泳道内副本（工单快照语义，同 role_patch），旧泳道没有则回退主仓副本；
-    # 都没有则跳过本段（退化为 stock 一次性，不硬失败）。SUYOU_AGENT_RESUME=0 一键关停。
-    if os.environ.get("SUYOU_AGENT_RESUME", "1") != "0" and role:
+    # 都没有则跳过本段（退化为 stock 一次性，不硬失败）。SANDBAR_AGENT_RESUME=0 一键关停。
+    if os.environ.get("SANDBAR_AGENT_RESUME", "1") != "0" and role:
         runner = cwd / "server" / "dsh" / "headless-resume" / "node.ts"
         if not runner.is_file():
             runner = REPO_ROOT / "server" / "dsh" / "headless-resume" / "node.ts"
@@ -966,18 +970,18 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
                 cached.evidence = (cached.evidence + "\n[worker settle] " + note).strip()
             return cached
 
-    if os.environ.get("SUYOU_AGENT_STUB") == "1":
+    if os.environ.get("SANDBAR_AGENT_STUB") == "1":
         # 自测/演示 stub：自写结果文件即返回（不起 agent 进程，零模型调用）。
-        # t260904-18 条件项 2：stub 支持显式 files_changed（env SUYOU_AGENT_STUB_FILES，
+        # t260904-18 条件项 2：stub 支持显式 files_changed（env SANDBAR_AGENT_STUB_FILES，
         # 逗号分隔路径）——缺省仍恒 []（stub 如实「什么都没做」），但缺省回执过
         # KI-049 门②新闸会常亮 write_set_refresh_fault 注记；需要全链演示/自测
         # 写集刷新的桩链路显式给清单，闸判定本身不放松。
         stub_files = [x.strip() for x in
-                      os.environ.get("SUYOU_AGENT_STUB_FILES", "").split(",")
+                      os.environ.get("SANDBAR_AGENT_STUB_FILES", "").split(",")
                       if x.strip()]
         stub = StageResult(
             status="ok",
-            summary="[stub] %s 段完成（SUYOU_AGENT_STUB=1，第 %d 次进段）"
+            summary="[stub] %s 段完成（SANDBAR_AGENT_STUB=1，第 %d 次进段）"
                     % (args.stage_id, args.gen),
             report="[stub] 做了什么：无（stub 演示）\n\n怎么验证的：无",
             deliverables=[], files_changed=stub_files,
@@ -1201,6 +1205,12 @@ def _write_precache(ticket_id: str, code: str, state_key: str,
         "ticket_id": ticket_id, "epic": code, "ts": int(time.time()),
         "state_key": state_key, "suggestion": suggestion,
     }, ensure_ascii=False, indent=1) + "\n", "utf-8")
+    # 插件面过渡镜像（退役账#5）：workbench 读侧仍读 .sandbar/epic-next，新名仓
+    # 写侧补一份旧名镜像，插件面票收口后随 mirror_to_legacy 一并退役。
+    try:
+        mirror_to_legacy(REPO_ROOT, Path("epic-next") / code / "pre.json")
+    except Exception:  # noqa: BLE001  镜像 best-effort，主链不受影响
+        pass
     return str(path)
 
 
@@ -1233,7 +1243,7 @@ def _sug_stage_result(kind: str, sug: Dict[str, Any], args: AgentStageArgs,
 
 def _precache_hit(args: AgentStageArgs) -> Optional[StageResult]:
     """precache 命中短路（t260901-19）：同立项后续票首跑时 rfile 本就不存在，但上一票
-    已把建议写入 <repoRoot>/.suyou/epic-next/<epic>/pre.json（state_key 未变即建议仍
+    已把建议写入 <repoRoot>/.sandbar/epic-next/<epic>/pre.json（老主树 .suyou 粘滞）（state_key 未变即建议仍  # naming-compat
     有效）→ 直接复用，零 spawn 省 token。
 
     命中条件与校验（disk 文件人手可改，不信任其内容）：
@@ -1317,8 +1327,8 @@ async def suggest_next(args: AgentStageArgs) -> StageResult:
     if res is not None:
         return res
 
-    if os.environ.get("SUYOU_SUGGEST_STUB"):  # 自测桩：自写三态结果文件即判读（零模型调用）
-        mode = os.environ["SUYOU_SUGGEST_STUB"]
+    if os.environ.get("SANDBAR_SUGGEST_STUB"):  # 自测桩：自写三态结果文件即判读（零模型调用）
+        mode = os.environ["SANDBAR_SUGGEST_STUB"]
         stubs = {
             "ok": {"status": "ok", "workflow": "dev-lane", "title": "[stub] 下一单建议",
                    "body": "[stub] 正文", "rationale": "[stub] 理由"},
@@ -1937,7 +1947,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
     except Exception as e:
         checks.append({"item": "泳道分支有 commit", "green": False, "detail": "git log 异常: %s" % e})
 
-    # 2. 工作区干净（SETTLE_PATHSPEC 口径——排除 .dsh/ .suyou/ 引擎运行时目录，
+    # 2. 工作区干净（SETTLE_PATHSPEC 口径——排除 .dsh/ .sandbar/ 引擎运行时目录，
     #    与 settle 代落盘同口径，注释互相指引；agent 的代码改动不会被这两个前缀误盖）
     #    KI-009：改 porcelain -z（NUL 分隔，无 quotePath 引号歧义 / rename 箭头
     #    解析问题），自愈后复查的脏清单也走同一解析（_dirty_files_from_status_z）；
@@ -2113,7 +2123,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                     (base_36 or "?")[:7], sc["branch"], len(decl_dirs), base_note,
                     ("命中 %d 个 UI 路径：%s" % (len(ui_paths), "、".join(ui_paths[:8]))) if ui_paths
                     else ("diff 故障 fail-closed：%s" % (diff_err or "基线缺失")))
-                shots_dir = lane_root / UI_EVIDENCE_DIR
+                shots_dir = ui_evidence_dir(lane_root)  # 粘滞解析（t260907-04）
                 pngs = sorted(shots_dir.glob("*.png")) if shots_dir.is_dir() else []
                 ui_gate_red = not pngs
                 checks.append({
@@ -2301,10 +2311,10 @@ async def settle_conflict_resolution(args: ConflictSettleArgs) -> ConflictSettle
     if p.returncode != 0:
         return ConflictSettleResult(ok=False, error="git add 失败: %s"
                                     % (p.stderr or "")[-300:])
-    # .dsh/.suyou 有 gitignore 本不入暂存；reset 摘回是双保险（防老 .gitignore 泳道）
+    # .dsh/.sandbar 有 gitignore 本不入暂存；reset 摘回是双保险（防老 .gitignore 泳道）
     # ——与 _settle_worktree_lane 同款（SETTLE_PATHSPEC 的排除项不可带进 git add，
     # Apple Git 2.50 对「显式点名 ignored 目录」必报 rc=1，t260828-02 冲突消解轮实测）
-    _git(["reset", "-q", "--", ".dsh", ".suyou"], wt)
+    _git(["reset", "-q", "--", ".dsh", ".suyou", ".sandbar"], wt)  # naming-compat
     remaining = []
     for f in merge_files:
         fp = wt / f
@@ -2353,13 +2363,13 @@ SANDBAR_SETTLE_SNAPSHOT_ENV = "SANDBAR_SETTLE_SNAPSHOT_DIR"
 
 def _settle_snapshot_dir(project_key: str) -> Optional[Path]:
     """快照目录解析（与 metrics.ts resolveSettleDir 同一条根链，两侧注释互指）：
-    SANDBAR_SETTLE_SNAPSHOT_DIR ?? SUYOU_METRICS_DIR ?? SANDBAR_PROJECTS_DIR 链
+    SANDBAR_SETTLE_SNAPSHOT_DIR ?? SANDBAR_METRICS_DIR ?? SANDBAR_PROJECTS_DIR 链
     （perkey_projects_root 内含后两段+home 缺省）——env 替换的是**项目根整体**。
     project_key 为空（Temporal snapshot 查询软降级）→ None，快照跳过并留 note。
     project_key 过 PROJECT_KEY_RE 白名单防路径穿越（与 ticket_data_dir 同款防呆）。"""
     if not project_key or not shared.PROJECT_KEY_RE.match(project_key):
         return None
-    root = os.environ.get(SANDBAR_SETTLE_SNAPSHOT_ENV) or os.environ.get("SUYOU_METRICS_DIR") or ""
+    root = os.environ.get(SANDBAR_SETTLE_SNAPSHOT_ENV) or os.environ.get("SANDBAR_METRICS_DIR") or ""
     if root:
         return Path(root) / project_key / "data" / "settle"
     return shared.perkey_projects_root() / project_key / "data" / "settle"
@@ -2718,8 +2728,8 @@ async def merge(args: MergeArgs) -> MergeResult:
 # ---------- dev-lane：完结工单数据出仓归档 + 泳道拆除（sandbar M1-3，t260902-02） ----------
 
 # 三类入档路径的扫描归属（口径真源 = shared.py 文件尾注释；自测按这些常量锁）：
-#   1) <worktree>/.suyou/stage_*.json  → stages/（stage 结果/结算报告）
-#   2) <worktree>/.suyou/screenshots/**/*.png → screenshots/（UI 证据，保相对层级）
+#   1) <worktree>/.sandbar/stage_*.json  → stages/（stage 结果/结算报告）
+#   2) <worktree>/.sandbar/screenshots/**/*.png → screenshots/（UI 证据，保相对层级）
 #   3) <worktree>/.dsh/sessions/<repo-slug>/* → sessions/（会话落盘事件文件）
 # 排除（记入 manifest.excluded_rules，不入档）：agent_*.log、model_patch_*.yml、
 # resume_patch_*.yml、.dsh/profiles/**、一切 .credentials.yaml（凭据绝不入档）。
@@ -2749,7 +2759,7 @@ async def archive_ticket(args: ArchiveArgs) -> ArchiveResult:
          畸形/file 非 dict/状态码 → ArchiveManifestError 上抛，不改现场。
       c) 幂等可重跑——manifest 合法存在时读 file 清单校验引用（错项自愈重拷
          + 记 integrity_repaired），Temporal 重试安全。
-      d) 缺失目录/文件为软处理——.suyou 或 .dsh 不存在：.suyou 系件数为零且
+      d) 缺失目录/文件为软处理——.sandbar（或粘滞 .suyou）或 .dsh 不存在：系件数为零且  # naming-compat
          无 archive.json 历史 → 落代理文件不静默放过；.dsh/sessions 缺失 →
          manifest.absent 记 absent（同 usage 端点降级口径）；单文件拷失败 →
          fail-closed 上抛（不「半份归档=半丢报告」）。
@@ -2790,22 +2800,25 @@ async def archive_ticket(args: ArchiveArgs) -> ArchiveResult:
     files: List[Dict[str, Any]] = []
     absent: List[str] = []
     staged_specs: List[Tuple[str, str]] = []   # (src, dst_rel)
-    p_suyou = src_root / ".suyou"
+    # 泳道协调目录解析（t260907-04）：新泳道 .sandbar/、老泳道 .sandbar/ 粘滞——
+    # 归档读侧与引擎写侧同序（shared.resolve_dot_dir 单一真源），不自造第二套判定。
+    p_dot = shared.resolve_dot_dir(src_root)      # 变量名沿用（语义=协调目录根）
+    dot_prefix = p_dot.name                        # ".sandbar" 或 ".sandbar"
     p_dsh = src_root / ".dsh"
-    if not p_suyou.is_dir():
-        # .suyou 缺失 → 前两系件数为零：该泳道 stage_*.json 历史上无真档可拷，
+    if not p_dot.is_dir():
+        # 协调目录缺失 → 前两系件数为零：该泳道 stage_*.json 历史上无真档可拷，
         # 不静默放过——落明牌代理文件，收口受 stage_acceptance 硬项约束（implement
         # 段必写结果文件），泳道拆除时灰面暴露无处遁形。
-        files.append({"src": ".suyou/stage_implement_gen0.json", "dst": "stages/stage_implement_gen0.json", "bytes": 0})
-        files.append({"src": ".suyou/agent_create_plan_gen0.log", "dst": "stages/agent_create_plan_gen0.log", "bytes": 0})
-    if p_suyou.is_dir():
+        files.append({"src": "%s/stage_implement_gen0.json" % dot_prefix, "dst": "stages/stage_implement_gen0.json", "bytes": 0})
+        files.append({"src": "%s/agent_create_plan_gen0.log" % dot_prefix, "dst": "stages/agent_create_plan_gen0.log", "bytes": 0})
+    if p_dot.is_dir():
         # stage 结果文件（排除 .log/.yml 由清单规则记 excluded，不扫描入档）
-        for f in sorted(p_suyou.glob("stage_*.json")):
+        for f in sorted(p_dot.glob("stage_*.json")):
             staged_specs.append((str(f), "stages/" + f.name))
         # UI 截图证据（保 screenshots/ 相对层级）
-        for f in sorted(p_suyou.glob("screenshots/**/*.png")):
+        for f in sorted(p_dot.glob("screenshots/**/*.png")):
             staged_specs.append((str(f),
-                                 "screenshots/" + str(f.relative_to(p_suyou / "screenshots"))))
+                                 "screenshots/" + str(f.relative_to(p_dot / "screenshots"))))
     if not p_dsh.is_dir():
         absent.append(".dsh/sessions（会话目录不存在）")
     if p_dsh.is_dir():
@@ -2858,7 +2871,7 @@ async def archive_ticket(args: ArchiveArgs) -> ArchiveResult:
         # 字节数以 copy2 后 stat 真值记（归档侧真值，不取源端 racy 值）
         files.append({"src": os.path.relpath(src, src_root),
                       "dst": drel, "bytes": dfile.stat().st_size})
-    # 代理文件（.suyou 缺失灰面）：目录落位 = 接管，内容如实写代理说明
+    # 代理文件（.sandbar 缺失灰面）：目录落位 = 接管，内容如实写代理说明
     for ent in list(files):
         if ent["bytes"] == 0:
             dfile = dst / ent["dst"]
@@ -2971,7 +2984,7 @@ async def verify_review_gate(args: ReviewGateArgs) -> ReviewGateResult:
         res.reasons.append(res.git_error)
         return res
 
-    shots_dir = wt / UI_EVIDENCE_DIR
+    shots_dir = ui_evidence_dir(wt)
     if shots_dir.exists() and not shots_dir.is_dir():
         res.shots_path_error = "%s 存在但不是目录" % shots_dir
         res.png_count = -1
@@ -3011,7 +3024,7 @@ def _shot_lines(shots_dir: Path, names: List[str]) -> List[str]:
 
 
 def _archive_shots(args: UiEvidenceArgs, shots_dir: Path, names: List[str]) -> str:
-    """截图归档到主树 <REPO_ROOT>/.suyou/evidence/<ticket_id>/（t260829-02）。
+    """截图归档到主树 <REPO_ROOT>/.sandbar/evidence/<ticket_id>/（老主树粘滞 .suyou/evidence）（t260829-02）。  # naming-compat
 
     泳道 merge 后拆 worktree，report 里 `![](…/tickets/<id>/evidence/<file>)` 引图
     不死链靠这份归档（host 只读端点读主树归档处，泳道在时兜底读泳道）。归档失败
@@ -3020,7 +3033,7 @@ def _archive_shots(args: UiEvidenceArgs, shots_dir: Path, names: List[str]) -> s
     if not names:
         return ""
     # env 覆盖（自测指向临时目录，防污染真主树；node 侧 evidence 端点同名 env 互指）
-    base = os.environ.get("SUYOU_EVIDENCE_DIR") or (REPO_ROOT / EVIDENCE_DIR)
+    base = evidence_base()
     dst = Path(base) / args.ticket_id
     try:
         dst.mkdir(parents=True, exist_ok=True)
@@ -3038,7 +3051,7 @@ def _preserve_failed_shots(args: UiEvidenceArgs, shots_dir: Path) -> Tuple[List[
       - 机械闸 review_gate_verdict 数泳道 shots_dir on-disk png（shared.py L1308，
         merge_check 时重查）——归档**成功**的图从泳道 unlink 移出 → png_count 归 0 →
         闸红灯不变，残缺视图不骗过闸（软失败不假通过）；
-      - 归档到主树 .suyou/evidence/<ticket>/ → 抽屉可读、worktree 拆后不蒸发；
+      - 归档到主树 .sandbar/evidence/<ticket>/ → 抽屉可读、worktree 拆后不蒸发；
       - **按文件粒度**：归档失败的图**留在泳道**（png_count>0 同样闸红，且图可被
         人工捞回——归档失败还 unlink=图彻底蒸发，正是本单根治的病，review 意见 1）。
     返回（成功归档并移出的文件名， 归档失败留在泳道的文件名， 人话说明）。不抛。"""
@@ -3051,7 +3064,7 @@ def _preserve_failed_shots(args: UiEvidenceArgs, shots_dir: Path) -> Tuple[List[
     moved: List[str] = []
     kept: List[str] = []
     try:
-        base = os.environ.get("SUYOU_EVIDENCE_DIR") or (REPO_ROOT / EVIDENCE_DIR)
+        base = evidence_base()
         dst = Path(base) / args.ticket_id
         dst.mkdir(parents=True, exist_ok=True)
         for n in pngs:
@@ -3078,8 +3091,8 @@ def _preserve_failed_shots(args: UiEvidenceArgs, shots_dir: Path) -> Tuple[List[
 
 
 def _ui_capture_stub(args: UiEvidenceArgs, shots_dir: Path) -> UiEvidenceResult:
-    """SUYOU_UI_CAPTURE_STUB=1：自写两张假 png 即返回（不起 node/浏览器，零依赖）。
-    仿 SUYOU_AGENT_STUB（_run_agent_stage_impl 同款先例），供自测/干跑。"""
+    """SANDBAR_UI_CAPTURE_STUB=1：自写两张假 png 即返回（不起 node/浏览器，零依赖）。
+    仿 SANDBAR_AGENT_STUB（_run_agent_stage_impl 同款先例），供自测/干跑。"""
     shots_dir.mkdir(parents=True, exist_ok=True)
     names = []
     for name in ("console-default.png", "console-chat.png"):
@@ -3092,7 +3105,7 @@ def _ui_capture_stub(args: UiEvidenceArgs, shots_dir: Path) -> UiEvidenceResult:
         names.append(name)
     note = _archive_shots(args, shots_dir, names)
     return UiEvidenceResult(ok=True, shots=names, shot_lines=_shot_lines(shots_dir, names),
-                            detail="[stub] SUYOU_UI_CAPTURE_STUB=1，假截图两张（自测/干跑）" + note)
+                            detail="[stub] SANDBAR_UI_CAPTURE_STUB=1，假截图两张（自测/干跑）" + note)
 
 
 @activity.defn
@@ -3173,10 +3186,10 @@ async def ui_changed_paths(args: UiChangedPathsArgs) -> UiChangedPathsResult:
 @activity.defn
 async def prepare_ui_evidence(args: UiEvidenceArgs) -> UiEvidenceResult:
     """UI 票截图证据（t260828-09）：worker（无沙箱）代跑 ui-check/capture.mjs，
-    截控制台默认页 + chat 态两张图落 <worktree>/.suyou/screenshots/。
+    截控制台默认页 + chat 态两张图落 <worktree>/.sandbar/screenshots/（老泳道 .suyou 粘滞）。  # naming-compat
 
     只读红线：capture.mjs 只 GET 打开控制台页面并做导航点击，不提交表单、
-    不发工单、不碰任何端口；env SUYOU_CONSOLE_URL 指向被测环境（缺省 3099，
+    不发工单、不碰任何端口；env SANDBAR_CONSOLE_URL 指向被测环境（缺省 3099，
     测试环境 3199）。
 
     失败**不抛**：依赖缺失/浏览器探测不到/超时/非零退出一律回执 ok=False，
@@ -3189,9 +3202,9 @@ async def prepare_ui_evidence(args: UiEvidenceArgs) -> UiEvidenceResult:
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
-    shots_dir = Path(args.screenshots_dir) if args.screenshots_dir else wt / UI_EVIDENCE_DIR
+    shots_dir = Path(args.screenshots_dir) if args.screenshots_dir else ui_evidence_dir(wt)
 
-    if os.environ.get("SUYOU_UI_CAPTURE_STUB") == "1":
+    if os.environ.get("SANDBAR_UI_CAPTURE_STUB") == "1":
         res = _ui_capture_stub(args, shots_dir)
         activity.logger.info("[%s] ui_evidence stub：%s", args.ticket_id, res.detail)
         return res
@@ -3208,13 +3221,13 @@ async def prepare_ui_evidence(args: UiEvidenceArgs) -> UiEvidenceResult:
     if not script.is_file():
         return UiEvidenceResult(ok=False, detail="capture.mjs 不存在（主树）：%s" % script)
     env = dict(os.environ)
-    env.setdefault("SUYOU_CONSOLE_URL", "http://127.0.0.1:3099")
+    env.setdefault("SANDBAR_CONSOLE_URL", "http://127.0.0.1:3099")
     candidates = []
     if lane_script.is_file():
         candidates.append((["node", str(lane_script), "--lane", str(wt),
                             "--out", str(shots_dir)], "capture-lane（隔离台）"))
-    candidates.append((["node", str(script), "--url", env["SUYOU_CONSOLE_URL"],
-                        "--out", str(shots_dir)], "capture.mjs（直连 %s）" % env["SUYOU_CONSOLE_URL"]))
+    candidates.append((["node", str(script), "--url", env["SANDBAR_CONSOLE_URL"],
+                        "--out", str(shots_dir)], "capture.mjs（直连 %s）" % env["SANDBAR_CONSOLE_URL"]))
     detail_tail = ""
     detail_parts: List[str] = []   # t260831-02 第 11 轮：逐候选累加，不再相互覆盖
     for i, (cmd, label) in enumerate(candidates):
@@ -3244,6 +3257,12 @@ async def prepare_ui_evidence(args: UiEvidenceArgs) -> UiEvidenceResult:
                         run_fail = "%s 报成功但 %s 无 png：%s" % (label, UI_EVIDENCE_DIR, out[-300:])
             if not run_fail:
                 activity.logger.info("[%s] ui_evidence（%s）：%s", args.ticket_id, label, "、".join(pngs))
+                # 插件面过渡镜像（退役账#5）：插件/旧链路读侧仍看 .sandbar/screenshots。
+                for _n in pngs:
+                    try:
+                        mirror_to_legacy(wt, Path("screenshots") / _n)
+                    except Exception:  # noqa: BLE001  best-effort
+                        pass
                 note = _archive_shots(args, shots_dir, pngs)
                 return UiEvidenceResult(ok=True, shots=pngs, shot_lines=_shot_lines(shots_dir, pngs),
                                         detail="%s：截图 %d 张：%s%s" % (label, len(pngs), "、".join(pngs), note))
@@ -3313,7 +3332,7 @@ async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
     return SettleLaneResult(note="\n".join(n for n in notes if n), lane_commits=commits)
 
 
-BATCH_TIMEOUT_SEC = int(os.environ.get("SUYOU_INTEG_BATCH_TIMEOUT_SEC") or 5400)
+BATCH_TIMEOUT_SEC = int(os.environ.get("SANDBAR_INTEG_BATCH_TIMEOUT_SEC") or 5400)
 
 
 async def _run_scenarios(wt: Path, ticket_id: str) -> IntegrationRunResult:
@@ -3435,10 +3454,10 @@ async def arbitrate(args: AgentStageArgs) -> StageResult:
 # 纪律：答与不答都不阻塞（res.status 一律不改，未答也是一条留痕）；failed 轮同样
 # 拼装登记（走查打回轮发现的文档矛盾同样是真实债条目，跨轮重复由登记去重键挡）。
 # 债登记转正纪律：人审签字前由 merge 执行人转正进 notes/debts/known-issues.md 或
-# docs 债册——回执小节尾句把这句话带给人审（.suyou/ 随 teardown_lane 销毁，
+# docs 债册——回执小节尾句把这句话带给人审（.sandbar/ 随 teardown_lane 销毁，
 # 回执必须携带条目本体全量而非只有路径）。
 
-DOC_GATE_DIRNAME = ".suyou/doc-gate"
+DOC_GATE_DIRNAME = ".sandbar/doc-gate"  # 新泳道缺省；粘滞由使用处 resolve（见 lane_dot_path）
 PENDING_DOC_SYNC_NAME = "pending-doc-sync.jsonl"
 DOC_GATE_TRANSFER_NOTE = (
     "债条目转正：人审签字前，由 merge 执行人将上述条目登记进 "
@@ -3515,7 +3534,13 @@ def register_pending_doc_sync(cwd: Path, ticket_id: str,
     info: Dict[str, Any] = {"registered": 0, "path": "", "error": ""}
     if not conflicts:
         return info
-    gate_dir = Path(cwd) / DOC_GATE_DIRNAME
+    # 粘滞解析（t260907-04）：create=True 会实际建目录——必须在 try 内（只读 base
+    # 下 mkdir 抛 PermissionError，降级契约「写失败返回 error 不抛」覆盖整个路径面）。
+    try:
+        gate_dir = lane_dot_path(cwd, "doc-gate", create=True)
+    except OSError as e:
+        info["error"] = "doc-gate 目录解析/创建失败（降级不抛）：%s: %s" % (type(e).__name__, e)
+        return info
     f = gate_dir / PENDING_DOC_SYNC_NAME
     info["path"] = str(f)
     try:
@@ -3625,7 +3650,7 @@ def apply_doc_gate(res: StageResult, rfile: Path, cwd: Path, ticket_id: str) -> 
 async def acceptance_walkthrough(args: AgentStageArgs) -> StageResult:
     """验收走查步（t260829-07 后续）：测试通过后 integration 以用户视角走查新功能、
     写验收报告（供人审门查阅）。walkthrough 实证由 worker 前置产出——先跑
-    capture-lane 隔离台实拍（泳道 build，截图落 .suyou/screenshots/acceptance/），
+    capture-lane 隔离台实拍（泳道 build，截图落 .sandbar/screenshots/acceptance/），
     输出注入 prompt；agent 判读截图/DOM 断言写报告（StageResult 契约：
     status=ok + report=验收报告 / status=failed + report=走查发现的代码问题）。
     agent 沙箱跑不了浏览器（t260829-02/-06 两次实测），浏览器一律 worker 代跑。"""
@@ -3633,7 +3658,7 @@ async def acceptance_walkthrough(args: AgentStageArgs) -> StageResult:
     rfile.parent.mkdir(parents=True, exist_ok=True)
     cwd = _ws_cwd(args.workspace, args.ticket_id)
     # 前置：capture-lane 隔离台实拍（best-effort——失败注入说明，agent 按无截图判定）
-    cap_out = cwd / ".suyou" / "screenshots" / "acceptance"
+    cap_out = lane_dot_path(cwd, "screenshots", "acceptance", create=True)
     cap_note = ""
     try:
         lane = str(args.worktree or cwd)
@@ -3676,7 +3701,7 @@ async def acceptance_walkthrough(args: AgentStageArgs) -> StageResult:
                     # 打回轮发现的矛盾同样是债条目；status 一律不改——不阻塞收口）
                     apply_doc_gate(res, rfile, cwd, args.ticket_id)
                     _patch_result_prompt(rfile, args.prompt)
-                    # KI-009：返回前 reap——走查报告不落账（.suyou 口径内），但迟写
+                    # KI-009：返回前 reap——走查报告不落账（.sandbar 口径内），但迟写
                     # 的意外工作区脏不能留给 merge_check 与活进程赛跑
                     _reap_agent_proc(proc, args.ticket_id, "acceptance_walkthrough")
                     return res

@@ -2,7 +2,7 @@
 //
 // 复用面（integration 纪律：前置/基础步骤代码允许共享，步骤级重复不算重复用例）：
 //   - 隔离台自举（t260904-19 起=docker 测试台，integration/stage_docker.py 单点入口；
-//     自搭进程 boot 随票退役）：dsh-only 舞台（容器内 SUYOU_TARGET_HOST 钉死
+//     自搭进程 boot 随票退役）：dsh-only 舞台（容器内 SANDBAR_TARGET_HOST 钉死
 //     127.0.0.1:1=Temporal 不可达的降级/fail-closed 断言面）、fixtures 根挂 /fixtures
 //     （容器内外同读写，注册表 fixture 单源）、预组 profile 经 buildStageProfile
 //     容器内路径物化（测泳道 workbench 源码，克缝始终不变）；
@@ -90,9 +90,9 @@ export function writeQuarantinedDir(root, key) {
  *  的 sandbar CLI 降级腿：Temporal=死端口锚）。 */
 export function benchEnv(tmpHome, projectsRoot) {
   const env = { ...process.env, DSH_HOME: tmpHome, SANDBAR_PROJECTS_DIR: projectsRoot };
-  delete env.SUYOU_PROJECTS_YAML;
-  env.SUYOU_TARGET_HOST = DEAD_TEMPORAL;
-  delete env.SUYOU_NAMESPACE;
+  delete env.SANDBAR_PROJECTS_YAML;
+  env.SANDBAR_TARGET_HOST = DEAD_TEMPORAL;
+  delete env.SANDBAR_NAMESPACE;
   return env;
 }
 
@@ -198,7 +198,7 @@ export function teardownOnExit(teardown) {
 export async function loadPlaywright() {
   const localPw = new URL('../../server/dsh/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
   const mainPw = path.join(mainRoot(), 'server', 'dsh', 'ui-check', 'node_modules', 'playwright-core', 'index.mjs');
-  for (const c of [process.env.SUYOU_PLAYWRIGHT_PATH, 'playwright-core', localPw,
+  for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core', localPw,
     existsSync(mainPw) ? pathToFileURL(mainPw).href : null]) {
     if (!c) continue;
     try { return await import(c); } catch { /* next */ }

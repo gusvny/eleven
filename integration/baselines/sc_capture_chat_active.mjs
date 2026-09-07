@@ -16,10 +16,10 @@
 //       环境必须明确报错且零写操作（静态断言：报错文案含「--allow-seed」，
 //       直连路径默认不带旗）。
 //
-// 环境：SUYOU_CAPTURE_CHAT_ACTIVE_FORCE_ENV_FAIL=1 使 C1 记 ENV_FAIL 退 2（无 dsh/playwright 环境）；
-//   SUYOU_CAPTURE_MAIN_UI_CHECK 指主树 server/dsh/ui-check（泳道无 node_modules，
+// 环境：SANDBAR_CAPTURE_CHAT_ACTIVE_FORCE_ENV_FAIL=1 使 C1 记 ENV_FAIL 退 2（无 dsh/playwright 环境）；
+//   SANDBAR_CAPTURE_MAIN_UI_CHECK 指主树 server/dsh/ui-check（泳道无 node_modules，
 //   playwright-core 从主树加载）；captured 输出目录用 mkdtemp，跑完即删。
-// 硬守卫：本基线拒绝以任何方式指向生产控制台端口 3099（SUYOU_TEST_CONSOLE 若
+// 硬守卫：本基线拒绝以任何方式指向生产控制台端口 3099（SANDBAR_TEST_CONSOLE 若
 //   含 3099 直接退出）；C1 的隔离台端口由 capture-lane 自己挑空闲端口。
 
 import { spawn } from "node:child_process";
@@ -44,8 +44,8 @@ function record(name, status, detail = "") {
 }
 
 // 3099 硬守卫（照抄 session-top-entry 口径）。
-if ((process.env.SUYOU_TEST_CONSOLE ?? "").includes(":3099")) {
-  console.error("refusing to run: SUYOU_TEST_CONSOLE points at the production console (3099)");
+if ((process.env.SANDBAR_TEST_CONSOLE ?? "").includes(":3099")) {
+  console.error("refusing to run: SANDBAR_TEST_CONSOLE points at the production console (3099)");
   process.exit(1);
 }
 
@@ -100,11 +100,11 @@ async function fullChain() {
   // 泳道 worker 机械跑护栏（t260901-09 arbitrate 补，与 ticket-lifecycle.mjs 同款）：
   // C1 要 boot 隔离台 + 走真模型种子链路 + capture-lane 只拍本次重建的 bundle（陈旧
   // build 拒跑是防证据造假的设计行为；非 UI 票的泳道不重建 bundle，此前提天然不满足）。
-  // _run_manifest 继承 worker 环境（SUYOU_TASK_QUEUE/SUYOU_WATCH_WORKFLOW）——泳道
+  // _run_manifest 继承 worker 环境（SANDBAR_TASK_QUEUE/SANDBAR_WATCH_WORKFLOW）——泳道
   // 机械跑记 ENV_FAIL 退 2（三态契约闸内无放行），真实覆盖属顶层人工/隔离台跑；U1-U3/C2 纯函数半不受影响，照跑。
-  if (process.env.SUYOU_TASK_QUEUE || process.env.SUYOU_WATCH_WORKFLOW) {
+  if (process.env.SANDBAR_TASK_QUEUE || process.env.SANDBAR_WATCH_WORKFLOW) {
     return record("C1 capture-lane 全链", "env_fail",
-      "nested inside a lane integration step (SUYOU_TASK_QUEUE/SUYOU_WATCH_WORKFLOW present): recursive guard, top-level runs carry the coverage");
+      "nested inside a lane integration step (SANDBAR_TASK_QUEUE/SANDBAR_WATCH_WORKFLOW present): recursive guard, top-level runs carry the coverage");
   }
   // build 前提自愈（t260901-10 arbitrate gen2，收编本票 gen6 的 mtime 归一化——
   // 字节幂等重建 + 同一性护栏，比刷时间戳更强且不弱化防造假守卫语义）：
@@ -123,9 +123,9 @@ async function fullChain() {
           // 凭据拷贝源：capture-lane 从 $DSH_HOME 拷 .credentials.yaml——运行环境
           // 的 DSH_HOME 可能指 worktree 内空目录，指向用户真 home 才有真凭据。
           DSH_HOME: process.env.HOME ? path.join(process.env.HOME, ".dsh") : process.env.DSH_HOME,
-          SUYOU_CAPTURE_MAIN_UI_CHECK: process.env.SUYOU_CAPTURE_MAIN_UI_CHECK || MAIN_UI_CHECK,
+          SANDBAR_CAPTURE_MAIN_UI_CHECK: process.env.SANDBAR_CAPTURE_MAIN_UI_CHECK || MAIN_UI_CHECK,
           // 种子消息等 active 的窗口放宽（真模型链路延迟，CI 上更稳）。
-          SUYOU_UI_CAPTURE_SEED_ACTIVE_MS: process.env.SUYOU_UI_CAPTURE_SEED_ACTIVE_MS || "90000",
+          SANDBAR_UI_CAPTURE_SEED_ACTIVE_MS: process.env.SANDBAR_UI_CAPTURE_SEED_ACTIVE_MS || "90000",
         },
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -166,7 +166,7 @@ async function gateRedLine() {
   // 而 capture.mjs 的 url 缺省指向 3099 时要求不带旗也能安全报错。
   if (!/--allow-seed/.test(capSrc)) { fail++; record("C2 门旗存在性", "fail", "capture.mjs 无 --allow-seed 门旗"); }
   else record("C2 门旗存在性", "pass", "--allow-seed 文案在案");
-  if (!/SUYOU_UI_CAPTURE_ALLOW_SEED/.test(capSrc)) { fail++; record("C2 env 门旗", "fail", "无 SUYOU_UI_CAPTURE_ALLOW_SEED"); }
+  if (!/SANDBAR_UI_CAPTURE_ALLOW_SEED/.test(capSrc)) { fail++; record("C2 env 门旗", "fail", "无 SANDBAR_UI_CAPTURE_ALLOW_SEED"); }
   else record("C2 env 门旗", "pass", "env 门旗在案");
   // 缺旗报错交人：navigateToChat 的 throw 文案必须含门旗指引。
   if (!/未带 --allow-seed/.test(capSrc)) { fail++; record("C2 缺旗报错文案", "fail", "navigateToChat 缺旗报错文案缺失"); }
@@ -182,8 +182,8 @@ import { existsSync as _existsSync } from "node:fs";
 const _pwMissing = !_existsSync(path.join(REPO_ROOT, "server", "dsh", "ui-check",
                                          "node_modules", "playwright-core"))
   && !_existsSync(path.join(MAIN_UI_CHECK, "node_modules", "playwright-core"));
-if (process.env.SUYOU_CAPTURE_CHAT_ACTIVE_FORCE_ENV_FAIL === "1") {
-  record("C1 capture-lane 全链", "env_fail", "SUYOU_CAPTURE_CHAT_ACTIVE_FORCE_ENV_FAIL=1");
+if (process.env.SANDBAR_CAPTURE_CHAT_ACTIVE_FORCE_ENV_FAIL === "1") {
+  record("C1 capture-lane 全链", "env_fail", "SANDBAR_CAPTURE_CHAT_ACTIVE_FORCE_ENV_FAIL=1");
 } else if (_pwMissing) {
   record("C1 capture-lane 全链", "env_fail",
     "KI-036：ui-check 缺 playwright-core（本树+主树均无），宿主沙箱外安装后本链自动恢复");

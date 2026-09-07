@@ -27,8 +27,8 @@ from pathlib import Path
 POC = Path(__file__).resolve().parent
 
 # ---- 0) 临时目录（必须先于 shared import 设 env）----
-TMP = Path(tempfile.mkdtemp(prefix="suyou-selfcheck-m6-"))
-os.environ["SUYOU_SCAN_DIR"] = str(TMP / "scan")
+TMP = Path(tempfile.mkdtemp(prefix="sandbar-selfcheck-m6-"))
+os.environ["SANDBAR_SCAN_DIR"] = str(TMP / "scan")
 
 from temporalio.testing import ActivityEnvironment  # noqa: E402
 
@@ -196,7 +196,7 @@ async def _async_checks() -> ScanReport:
     path = Path(written["path"])
     expect_name = time.strftime("%Y-%m-%d", time.localtime()) + ".json"
     ok(path.name == expect_name and path.parent == TMP / "scan",
-       "落盘 <日期>.json 于 SUYOU_SCAN_DIR")
+       "落盘 <日期>.json 于 SANDBAR_SCAN_DIR")
     ok(path.exists() and written["bytes"] > 0, "文件非空")
     data = json.loads(path.read_text("utf-8"))
     ok(data["red_line"] == SCAN_RED_LINE, "红线声明落进报告")

@@ -24,7 +24,7 @@
  * three states with skip_slow=true — checks NEVER execute there; the integ lane has
  * no L2 fixture today. This journey is the system-level user path across both lanes.
  *
- * Reference: .suyou/stage_review_plan_gen2.json (approved plan ②a~②e);
+ * Reference: .suyou/stage_review_plan_gen2.json (approved plan ②a~②e);  // naming-compat
  * contract doc docs/design/sandbar项目接入契约v1.md ②.
  */
 

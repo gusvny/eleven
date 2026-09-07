@@ -38,7 +38,7 @@ def _mk_registry(root, key, name, dirs, bad=False):
 
 
 class _Env:
-    """env 覆盖上下文（SANDBAR_PROJECTS_DIR / SUYOU_PROJECTS_YAML）。"""
+    """env 覆盖上下文（SANDBAR_PROJECTS_DIR / SANDBAR_PROJECTS_YAML）。"""
 
     def __init__(self, **kv):
         self.kv = kv
@@ -119,7 +119,7 @@ class LoaderTest(unittest.TestCase):
         legacy = os.path.join(self.tmp, "projects.yaml")
         with open(legacy, "w", encoding="utf-8") as f:
             f.write("projects:\n  - key: legacy-one\n    name: 旧档\n    dirs:\n      - /tmp/legacy\n")
-        with _Env(SUYOU_PROJECTS_YAML=legacy):
+        with _Env(SANDBAR_PROJECTS_YAML=legacy):
             projects, quarantined = shared.load_projects_registry()
         self.assertEqual(projects[0]["key"], "legacy-one")
         self.assertEqual(quarantined, [])

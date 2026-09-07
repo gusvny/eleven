@@ -12,7 +12,7 @@
   C. 仲裁非 pass 时并行走查结果作废必须留痕可解释——契约：分支内有「作废」timeline 文案。
 
 跑法：python3 -B integration/t260903-02/sc_fork_contract.py（纯源码断言，零依赖零网络）。
-契约基线 = 方案 v3（.suyou/stage_create_plan_gen2.json，review_plan gen2 通过）。
+契约基线 = 方案 v3（.suyou/stage_create_plan_gen2.json，review_plan gen2 通过）。  # naming-compat
 注意：本场景断言实现后状态——实现段完成前运行会红，集成道在 implement 之后跑才有效。
 """
 import re

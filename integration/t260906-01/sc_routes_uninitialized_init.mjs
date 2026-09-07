@@ -23,7 +23,7 @@ import { tmpRoot, makeChecks, writeProjectEntry } from '../t260904-14/lib_fix14.
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const REPO_ROOT = path.resolve(HERE, '..', '..');
 const c = makeChecks('t260906-01 路由无表引导态+一键初始化');
-delete process.env.SUYOU_PROJECTS_YAML;
+delete process.env.SANDBAR_PROJECTS_YAML;
 
 const ENGINE_TABLE = path.join(REPO_ROOT, 'server', 'dsh', 'model-routes.yaml');
 const { buildRoutesView } = await import(

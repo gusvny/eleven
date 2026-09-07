@@ -4,7 +4,7 @@
  *
  * 接缝口径（灰盒：锚定公开面，不绑实现内部）：
  * - API 前门 = buildMetricsResponse(query, deps)（CLI/HTTP 同款直调面）；
- * - 数据缝 = SUYOU_METRICS_STUB/SUYOU_METRICS_DIR env + defaultDeps（与 workbench
+ * - 数据缝 = SANDBAR_METRICS_STUB/SANDBAR_METRICS_DIR env + defaultDeps（与 workbench
  *   tests 同款），或手组 MetricsDeps（真 git 场景用）；
  * - 缓存 fixture = 先跑一次实现自己落盘缓存，再对缓存文件做复制/篡改/删除——
  *   不手写 engine_version 等内部派生值，实现演进零耦合；
@@ -67,18 +67,18 @@ export async function withStub(stubObj, fn) {
   const stubPath = join(tmp, 'stub.json')
   const cacheRoot = join(tmp, 'cache')
   await writeFile(stubPath, JSON.stringify(stubObj), 'utf8')
-  const saved = { STUB: process.env.SUYOU_METRICS_STUB, DIR: process.env.SUYOU_METRICS_DIR }
-  process.env.SUYOU_METRICS_STUB = stubPath
-  process.env.SUYOU_METRICS_DIR = cacheRoot
+  const saved = { STUB: process.env.SANDBAR_METRICS_STUB, DIR: process.env.SANDBAR_METRICS_DIR }
+  process.env.SANDBAR_METRICS_STUB = stubPath
+  process.env.SANDBAR_METRICS_DIR = cacheRoot
   try {
     const m = await loadMetrics()
     const deps = m.defaultDeps('/stub-repo', () => NOW)
     return await fn({ deps, cacheRoot, tmp })
   } finally {
-    if (saved.STUB === undefined) delete process.env.SUYOU_METRICS_STUB
-    else process.env.SUYOU_METRICS_STUB = saved.STUB
-    if (saved.DIR === undefined) delete process.env.SUYOU_METRICS_DIR
-    else process.env.SUYOU_METRICS_DIR = saved.DIR
+    if (saved.STUB === undefined) delete process.env.SANDBAR_METRICS_STUB
+    else process.env.SANDBAR_METRICS_STUB = saved.STUB
+    if (saved.DIR === undefined) delete process.env.SANDBAR_METRICS_DIR
+    else process.env.SANDBAR_METRICS_DIR = saved.DIR
     await rmRf(tmp)
   }
 }

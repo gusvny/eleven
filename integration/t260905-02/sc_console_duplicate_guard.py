@@ -157,8 +157,8 @@ def main():
             e["OP"] = op
             e["WAIT_MS"] = str(wait_ms)
             e["CFG"] = json.dumps(cfg)
-            e["SUYOU_TARGET_HOST"] = host          # apply 内部 cli/ensure 子进程只连舞台
-            e["SUYOU_NAMESPACE"] = state["namespace"]
+            e["SANDBAR_TARGET_HOST"] = host          # apply 内部 cli/ensure 子进程只连舞台
+            e["SANDBAR_NAMESPACE"] = state["namespace"]
             e["SANDBAR_PROJECTS_DIR"] = reg
             e.update(audit_env or {})
             return e
@@ -259,7 +259,7 @@ def main():
                    % (len(hits), json.dumps(hits, ensure_ascii=False)[:120]))
         self_env = dict(os.environ)
         self_env.update(audit_env)
-        self_env["SUYOU_AUDIT_SELFTEST"] = "1"
+        self_env["SANDBAR_AUDIT_SELFTEST"] = "1"
         p = subprocess.run([py, "-c",
                             "import socket; socket.create_connection(('127.0.0.1', 7233), timeout=2)"],
                            env=self_env, capture_output=True, text=True, timeout=30)

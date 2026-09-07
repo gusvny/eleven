@@ -306,7 +306,7 @@ def compose_env(project, services, ports, opts):
     env = dict(os.environ)
     env["SANDBAR_TEST_TEMPORAL_NAME"] = "%s-temporal" % project
     env["SANDBAR_TEST_DSH_NAME"] = "%s-dsh" % project
-    env["SANDBAR_TEST_NAMESPACE"] = opts.get("namespace") or "suyou-test"
+    env["SANDBAR_TEST_NAMESPACE"] = opts.get("namespace") or "suyou-test"  # naming-compat
     env["SANDBAR_TEST_TEMPORAL_PORT"] = str(ports["temporal"])
     env["SANDBAR_TEST_TEMPORAL_UI_PORT"] = str(ports["ui"])
     env["SANDBAR_TEST_CONSOLE_PORT"] = str(ports["console"])
@@ -347,12 +347,12 @@ def compose_env(project, services, ports, opts):
         shutil.copyfile(cred_src, cred_dst)
         os.chmod(cred_dst, 0o600)  # dsh credentials-local fail-closed：644=拒启（gen4 实锤）
         env["SANDBAR_TEST_CREDENTIALS"] = str(cred_dst)
-    # agent preset 物化（gen6：会话创建依赖 suyou-integration preset；源=宿主
+    # agent preset 物化（gen6：会话创建依赖 suyou-integration preset；源=宿主  # naming-compat
     # ~/.dsh/.agent-presets/<项目> 或仓内 .dsh 同位）。缺失=空目录（preset 缺失
     # 诚实呈现），不阻塞起台。
     presets_dir = pathlib.Path(tempfile.gettempdir()) / ("sandbar-agent-presets-%s" % project)
     presets_dir.mkdir(parents=True, exist_ok=True)
-    preset_name = "suyou-integration"
+    preset_name = "suyou-integration"  # naming-compat
     for base in filter(None, [os.path.expanduser("~/.dsh/.agent-presets"),
                               str(REPO / ".dsh" / ".agent-presets"),
                               "/Users/user/Documents/sandbar/.dsh/.agent-presets"]):
@@ -532,7 +532,7 @@ def register_namespace(ns, addr, timeout=30):
     依赖 SA 的场景（ticket-start 带 project）会在客户端大声报错（不静默）。"""
     cli = resolve_temporal_cli()
     if not cli or not pathlib.Path(cli).exists():
-        return False, "temporal CLI 不可得（%s 缺失，env SUYOU_TEMPORAL_BIN 可指路）——SA/保留期未注册" % cli
+        return False, "temporal CLI 不可得（%s 缺失，env SANDBAR_TEMPORAL_BIN 可指路）——SA/保留期未注册" % cli
     last_err = ""
 
     def cli_ok(args, tolerate):

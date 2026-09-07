@@ -61,7 +61,7 @@ const launchBrowser = async () => {
 // ---- T0 卫兵链 ----
 const localPw = new URL('../../server/dsh/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
 let pw = null;
-for (const c of [process.env.SUYOU_PLAYWRIGHT_PATH, 'playwright-core', localPw]) {
+for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core', localPw]) {
   if (!c) continue;
   try { pw = await import(c); break; } catch { /* next */ }
 }
@@ -166,14 +166,14 @@ try {
   // 折叠件对平台上下文的可见效果；16 号前的「改前」即未折叠刷屏墙，宿主 260906 实报在案）
   try {
     const { mkdirSync } = await import('node:fs');
-    mkdirSync('.suyou/screenshots', { recursive: true });
-    await page.screenshot({ path: '.suyou/screenshots/t260905-09-stacked-folded.png', fullPage: true });
+    mkdirSync('.suyou/screenshots', { recursive: true });  // naming-compat
+    await page.screenshot({ path: '.suyou/screenshots/t260905-09-stacked-folded.png', fullPage: true });  // naming-compat
     await clickChip(page);
     await page.waitForTimeout(300);
-    await page.screenshot({ path: '.suyou/screenshots/t260905-09-stacked-open.png', fullPage: true });
+    await page.screenshot({ path: '.suyou/screenshots/t260905-09-stacked-open.png', fullPage: true });  // naming-compat
     await clickChip(page); // 回到收折态，不污染后续腿
     await page.waitForTimeout(300);
-    record('t2/screenshot-evidence', 'pass', '.suyou/screenshots/t260905-09-stacked-{folded,open}.png（折叠态/展开态对比）');
+    record('t2/screenshot-evidence', 'pass', '.suyou/screenshots/t260905-09-stacked-{folded,open}.png（折叠态/展开态对比）');  // naming-compat
   } catch (e) {
     record('t2/screenshot-evidence', 'env_fail', `截图失败：${String(e).slice(0, 100)}`);
   }

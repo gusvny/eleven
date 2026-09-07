@@ -2,7 +2,7 @@
 //
 // 唯一搭台纪律（integration/README.md 舞台纪律段）落地点：旧 compose 缺省固定口
 // 3199 已不供给，本族场景经本助手拿控制台地址：
-//   1. env SUYOU_TEST_CONSOLE 显式指台（人工通路，兼容既有用法）；
+//   1. env SANDBAR_TEST_CONSOLE 显式指台（人工通路，兼容既有用法）；
 //   2. 否则消费/自起常驻台，工程名按被测树（=泳道）派生：stage-console-<树哈希8位>。
 //      演进脉络（t260906-01 仲裁 gen3 泳道限定 与 t260905-05 树哈希 两边同义合并）：
 //      原全局单名 stage-console-shared 是「先到先得挂树」：先起泳道 ensure 把它的树
@@ -49,8 +49,8 @@ function repoMountSource(project, env) {
 }
 
 export async function ensureStageConsole({ services = 'full', project = TREE_PROJECT } = {}) {
-  if (process.env.SUYOU_TEST_CONSOLE) {
-    return { base: process.env.SUYOU_TEST_CONSOLE.replace(/\/$/, ''), project: '(external)', teardown: () => {} };
+  if (process.env.SANDBAR_TEST_CONSOLE) {
+    return { base: process.env.SANDBAR_TEST_CONSOLE.replace(/\/$/, ''), project: '(external)', teardown: () => {} };
   }
   const env = {
     ...process.env,

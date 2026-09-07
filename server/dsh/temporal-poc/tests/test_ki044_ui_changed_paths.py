@@ -267,7 +267,7 @@ def test_merge_check_ui_gate_green_with_png():
         shots.mkdir(parents=True)
         (shots / "console-default.png").write_bytes(b"png")
         g("add", "-A")
-        g("commit", "-m", "lane: 桩 admin（.suyou/ 不进结算口径，仅占位证据目录）")
+        g("commit", "-m", "lane: 桩 admin（协调目录不进结算口径，仅占位证据目录）")
         res = _run_merge_check(wt, ["server/dsh/workbench/"])
         items = ui_items(res.checks)
         assert len(items) == 1, res.checks

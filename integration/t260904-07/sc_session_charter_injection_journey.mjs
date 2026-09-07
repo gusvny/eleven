@@ -17,7 +17,7 @@
 //   T1 新建注入：点 + → 新 tab 出现 → 会话区出现 charter 特征串（实值化，无 {{ 残留；
 //      折叠态文本仍在 DOM=D2 口径，textContent 计数断言兼容不动）→ 折叠小条在场
 //      （「已注入项目背景」文案）→ 默认折叠（打标消息视觉隐藏）→ 点击小条展开见
-//      全文 → 截图证据（.suyou/screenshots/，KI-044 UI 票证据自觉）。折叠面断言
+//      全文 → 截图证据（.suyou/screenshots/，KI-044 UI 票证据自觉）。折叠面断言  // naming-compat
 //      pre-implement 红属预期（TDD 信号，t260905-04）。
 //      分级：30s 未上屏且 console 有注入链错误=fail；未上屏且零错误=env_fail（无凭据
 //      隔离台 kick-off 链路受限——本场景断言上限=注入链 UI 面，agent 回复链不在
@@ -34,7 +34,7 @@
 // Execution contract (t260904-12 三态): stdout last line
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; 依赖缺失一律 env_fail (exit 2，
 // 含「未上屏且仅凭据类错误」——凭据缺失归环境)；FAIL>0 或全腿 na → exit 1。
-// 隔离台 SUYOU_TEST_CONSOLE
+// 隔离台 SANDBAR_TEST_CONSOLE
 // （默认 127.0.0.1:3199）；硬守卫：绝不 3099。
 
 import { STAGE_SEED_ROW_SEL } from '../lib_stage_console.mjs';
@@ -47,7 +47,7 @@ const { record, summarize } = makeResults();
 // ---- T0 卫兵链 ----
 const localPw = new URL('../../server/dsh/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
 let pw = null;
-for (const c of [process.env.SUYOU_PLAYWRIGHT_PATH, 'playwright-core', localPw]) {
+for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core', localPw]) {
   if (!c) continue;
   try { pw = await import(c); break; } catch { /* next */ }
 }
@@ -192,9 +192,9 @@ if (!injected) {
   record('t1/charter-first-message', residue ? 'fail' : 'pass',
     residue ? 'charter 上屏但残留 {{project_ 占位符（统一渲染未生效）' : `charter 已上屏（特征串 ×${markCount(txt)}）`);
   try {
-    mkdirSync('.suyou/screenshots', { recursive: true });
-    await page.screenshot({ path: '.suyou/screenshots/t260904-07-charter-first-message.png', fullPage: true });
-    record('t1/screenshot-evidence', 'pass', '.suyou/screenshots/t260904-07-charter-first-message.png（KI-044 证据自觉）');
+    mkdirSync('.suyou/screenshots', { recursive: true });  // naming-compat
+    await page.screenshot({ path: '.suyou/screenshots/t260904-07-charter-first-message.png', fullPage: true });  // naming-compat
+    record('t1/screenshot-evidence', 'pass', '.suyou/screenshots/t260904-07-charter-first-message.png（KI-044 证据自觉）');  // naming-compat
   } catch (e) {
     record('t1/screenshot-evidence', 'env_fail', `截图失败：${String(e).slice(0, 100)}`);
   }

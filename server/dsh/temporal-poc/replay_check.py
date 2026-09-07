@@ -7,11 +7,11 @@
 
 只读：只调 list_workflows / fetch_history（与工单台 ticket-query 同级只读路径），
 不写任何信号、不启 worker、不碰 3099/8233。连接参数沿用 shared.py 环境变量口径
-（SUYOU_TARGET_HOST / SUYOU_NAMESPACE），可用 --host/--ns 覆盖（如 Docker 隔离环境
-127.0.0.1:17233 / suyou-test）。
+（SANDBAR_TARGET_HOST / SANDBAR_NAMESPACE），可用 --host/--ns 覆盖（如 Docker 隔离环境
+127.0.0.1:17233 / sandbar-test）。
 
 解释器自探测（泳道 worktree 内无 .venv）：直接跑 import temporalio 失败时，按
-$SUYOU_POC_PYTHON → 本目录 .venv → 主库 temporal-poc/.venv（worktree 场景）顺序
+$SANDBAR_POC_PYTHON → 本目录 .venv → 主库 temporal-poc/.venv（worktree 场景）顺序
 找候选解释器 re-exec 自己，换机器不断。
 
 用法（temporal-poc 目录）：
@@ -35,7 +35,7 @@ POC = Path(__file__).resolve().parent
 
 def _candidate_pythons() -> list:
     cands = []
-    env = os.environ.get("SUYOU_POC_PYTHON")
+    env = os.environ.get("SANDBAR_POC_PYTHON")
     if env:
         cands.append(Path(env))
     cands.append(POC / ".venv" / "bin" / "python")

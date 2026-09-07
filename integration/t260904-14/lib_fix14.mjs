@@ -34,9 +34,9 @@ export function tmpRoot(prefix) {
 // 注册表根隔离（env 契约）+ legacy env 只在 legacy 腿显式注入（沿 lib_fix10 语义）
 export function sbEnv(root, extra = {}) {
   const env = { ...process.env, SANDBAR_PROJECTS_DIR: root };
-  delete env.SUYOU_PROJECTS_YAML;
-  delete env.SUYOU_TARGET_HOST;   // 票计数通道 env 只逐腿显式注入，防 ambient 外溢生产 7233
-  delete env.SUYOU_NAMESPACE;
+  delete env.SANDBAR_PROJECTS_YAML;
+  delete env.SANDBAR_TARGET_HOST;   // 票计数通道 env 只逐腿显式注入，防 ambient 外溢生产 7233
+  delete env.SANDBAR_NAMESPACE;
   return Object.assign(env, extra);
 }
 
@@ -254,7 +254,7 @@ export async function provisionRealRig() {
   const bin = process.env.SANDBAR_TEST_TEMPORAL_BIN || 'temporal';
   const ver = spawnSync(bin, ['--version'], { encoding: 'utf8' });
   if (ver.status !== 0) return { ok: false, reason: `temporal 二进制不可用（${bin}）` };
-  // 依赖③：自举 start-dev（dev server；namespace 用 default，SUYOU_NAMESPACE 同步钉）
+  // 依赖③：自举 start-dev（dev server；namespace 用 default，SANDBAR_NAMESPACE 同步钉）
   const port = await freePort();
   const db = path.join(tmpRoot('fix14-rig-'), 'dev.db');
   const child = spawn(bin, [

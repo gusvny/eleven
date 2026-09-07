@@ -86,7 +86,7 @@ def _run_scenarios_sync(wt, tid):  # t260903-09 后 _run_scenarios async 化，s
     return _a.run(_run_scenarios(wt, tid))
 from agent_activities import _run_scenarios, settle_lane  # noqa: E402
 
-tmp = Path(tempfile.mkdtemp(prefix="suyou-integ-scenarios-"))
+tmp = Path(tempfile.mkdtemp(prefix="sandbar-integ-scenarios-"))
 ok(_run_scenarios_sync(tmp, "t-x").error != "", "verify.yaml 缺失 → error（fail-closed）")
 (tmp / "verify.yaml").write_text(
     "schema: v1\nlanes:\n  code:\n    write_allow:\n      - .\n"
@@ -170,7 +170,7 @@ ok('"write_set":["<预计改动文件' in p, "suggest prompt 契约含 write_set
 section("D2 settle_lane 真泳道直测（主仓库真 worktree 夹具，用后即清）")
 import agent_activities  # noqa: E402
 from shared import REPO_ROOT  # noqa: E402
-_wt = Path(tempfile.mkdtemp(prefix="suyou-settle-lane-wt-"))
+_wt = Path(tempfile.mkdtemp(prefix="sandbar-settle-lane-wt-"))
 # 泳道/沙箱内跑不了 git worktree add（写不了主仓 .git）——与集成场景同款：夹具
 # 建不出来就响亮 SKIP，不算红灯（host 机直跑仍全量覆盖）。
 _gw = subprocess.run(["git", "-C", str(REPO_ROOT), "worktree", "add", str(_wt),
@@ -261,7 +261,7 @@ ok(review_plan_route("???", 0).startswith("blocked:"), "未知 verdict → block
 section("G 并行分叉会话互斥（t260903-02 ②：同 role 双 stage 的会话 id 必须不同）")
 from agent_activities import _prepare_agent_spawn  # noqa: E402
 
-_gtmp = Path(tempfile.mkdtemp(prefix="suyou-session-key-"))
+_gtmp = Path(tempfile.mkdtemp(prefix="sandbar-session-key-"))
 _grepo = _gtmp / "repo"
 (_grepo / "server" / "dsh" / "roles").mkdir(parents=True)
 (_grepo / "server" / "dsh" / "headless-resume").mkdir(parents=True)

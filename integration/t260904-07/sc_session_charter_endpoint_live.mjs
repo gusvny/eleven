@@ -29,7 +29,7 @@
 //
 // Execution contract (t260904-12 三态): stdout last line
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; 依赖缺失一律 env_fail (exit 2)；
-// FAIL>0 或全腿 na → exit 1。隔离台 SUYOU_TEST_CONSOLE
+// FAIL>0 或全腿 na → exit 1。隔离台 SANDBAR_TEST_CONSOLE
 // （默认 127.0.0.1:3199）；硬守卫：绝不 3099。
 
 import { readFileSync } from 'node:fs';

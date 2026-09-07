@@ -36,7 +36,7 @@ python 侧 `.venv`（系统 python 3.9.6）+ **temporalio 1.18.2**。
 | `shared.py` | 配置与数据契约（七段 STAGES、人门集合、workflow id 约定、dataclass 载荷） |
 | `workflows.py` | **状态机本体**：`ContentPipelineWorkflow`（七段）+ `DispatcherScanWorkflow`（巡检） |
 | `activities.py` | 有副作用的动作：`machine_qc`（跑真 qc_run）/`ticket_scan`（只读 list）/加工·审校·发布占位 |
-| `worker.py` | worker（注册 workflow+activity 到 task queue `suyou-poc`） |
+| `worker.py` | worker（注册 workflow+activity 到 task queue `sandbar`，LEGACY `suyou-poc` 双 poll 过渡） |
 | `fixtures/qc_red_stub.py` | 红灯 fixture：印一份与 qc_run **同契约**的 green=false JSON（见 §4） |
 | `demo_happy.py` / `demo_fail.py` / `demo_schedule.py` / `demo_durability.sh` | 四个 demo |
 | `demo.sh` | 一键全跑 + 存档 |
@@ -129,9 +129,9 @@ diff /tmp/before.txt /tmp/after.txt && echo "现有工单/引擎/数据零改动
   PID 发信号；脚本里没有进程枚举。
 - 残留物：Demo B 故意把 `content-pipeline:p260821-red` 留在 running（UI 里看得见；
   260904 宿主令 content-pipeline 模板退役后此为历史残留实例，terminate 即清）；
-  schedule `suyou-dispatcher-scan` 跑完是 **paused** 状态。清场：
+  schedule（LEGACY 旧 id `suyou-dispatcher-scan`，现 `sandbar-dispatcher-scan`）跑完是 **paused** 状态。清场：
   `bin/temporal workflow terminate -w content-pipeline:p260821-red --address 127.0.0.1:7233 --reason 清场`、
-  `bin/temporal schedule delete --schedule-id suyou-dispatcher-scan --address 127.0.0.1:7233`；
+  `bin/temporal schedule delete --schedule-id sandbar-dispatcher-scan --address 127.0.0.1:7233`（LEGACY 旧 id 由 scan_schedule 幂等删旧退役）；
   彻底重置=停 server 后删 `data/`。
 
 ---
@@ -271,7 +271,7 @@ cd server/dsh/temporal-poc
   验收勾选率（只数 item 在当前验收清单里的勾选，孤儿 check 不计）、脚本门最近一次
   红绿灯（Temporal snapshot.gate_runs 只读 query；不可达回退工单 log「脚本门」记录）、
   pending 数、**建议动作三档**：
-  - 疑似卡死：停留 ≥ 阈值（默认 48h，`SUYOU_SCAN_STUCK_HOURS` 可调）；
+  - 疑似卡死：停留 ≥ 阈值（默认 48h，`SANDBAR_SCAN_STUCK_HOURS` 可调）；
   - 待补：验收未勾齐 / 脚本门最近一次红；
   - 可签：人门待人签字，或 settled 且验收齐、门绿——材料齐备，人可签/推进。
 - 确定性规约：读工单（admin list/show）、查脚本门、写文件全在 activity
@@ -299,15 +299,34 @@ cd server/dsh/temporal-poc
 .venv/bin/python scan_schedule.py trigger                     # 立即手动触发一轮
 ```
 
-260822 已恢复 `suyou-dispatcher-scan`：45min/轮、overlap=SKIP、note 落 schedule state，
+260822 已恢复 dispatcher scan（LEGACY 旧 id `suyou-dispatcher-scan`，t260907-04 起 `sandbar-dispatcher-scan`）：45min/轮、overlap=SKIP、note 落 schedule state，
 num_actions 2→3 证据见 `out/demo-M6-scan-expand.txt`。
-**注意**：schedule 触发的巡检由 suyou-poc 队列上的 worker 执行——本泳道合并进主树后，
+**注意**：schedule 触发的巡检由共享队列（LEGACY 旧队列 `suyou-poc`，现 `sandbar`）上的 worker 执行——本泳道合并进主树后，
 需重启主 worker（`kill -TERM $(cat data/worker.pid)`，supervisor keepalive 自动拉起新代码）
 才开始产出 v2 报告；在此之前定时轮仍走旧分支（只统计，无害）。
 
 ### 10.4 闭环验证（巡检→报告→可签建议）
 
-`verify_m6.py`：专属 queue（`SUYOU_TASK_QUEUE=suyou-m6-verify`）起新代码 worker，
+`verify_m6.py`：专属 queue（`SANDBAR_TASK_QUEUE=suyou-m6-verify`）起新代码 worker，
 跑一条 DispatcherScanWorkflow 并等结果，断言真实工单地形（t260820-hanshu-l0 人门→可签 /
 t260821-11 settled 验收 0/5→待补）。留档 `out/demo-M6-scan-expand.txt`。
 sign 动作不在验证脚本里——红线：签字只能人。
+
+
+## 退役账（t260907-04 命名清理①：7 条过渡兼容，撤任何一条前先对表）
+
+t260907-04 把 SUYOU_* env、suyou-poc 队列、.suyou/ 协调目录改成 sandbar 名。以下 7 条  # naming-compat
+兼容路径逐条带退役条件，防「撤了半截」：
+
+| # | 项（suyou 旧名面） | 退役条件 |
+|---|---|---|
+| 1 | 共享旧队列（退役账#1） `suyou-poc` 双 poll（shared.LEGACY_TASK_QUEUE） | 旧队列连续一个发布周期零任务且在飞 workflow 无旧队列起动 |
+| 2 | ticket 旧前缀（退役账#2） `suyou-ticket-*` 双前缀 poll（shared.LEGACY_TICKET_QUEUE_PREFIX） | 旧前缀队列一发布周期零任务且在飞 workflow 无旧前缀 |
+| 3 | schedule 幂等删旧行（退役账#3）（scan_schedule.retire_legacy_schedule，旧 id `suyou-dispatcher-scan`） | 删旧行保留一个发布周期（防旧代码引擎并存重建），超期整段删 |  # naming-compat
+| 4 | dispatcher 旧锁回落（退役账#4）（server/tools/dispatcher_loop.py LEGACY_LOCK，旧锁 `suyou-dispatcher.lock` 只读） | 巡检观测旧锁零命中连续一个周期 |
+| 5 | 目录镜像双写（退役账#5）（shared.mirror_to_legacy，旧名 `.suyou/` 只写不读） | 插件面票（workbench 旧名清理）收口 |  # naming-compat
+| 6 | env 双向桥（退役账#6）（shared.apply_env_compat，SUYOU_*↔SANDBAR_*） | 插件面票收口后降单向前向，再一版整函数删除 |
+| 7 | WS_DIR_BASE 旧 base 粘滞（退役账#7）（LEGACY base `/tmp/suyou-ws`） | 旧 base 存量工单目录清零 |
+
+另有目录粘滞回落（resolve_dot_dir 规则 2，老泳道 `.suyou/` 整生命周期旧名）不占上表：  # naming-compat
+退役条件 = 旧名泳道存量清零，随规则 2 分支一并删除。

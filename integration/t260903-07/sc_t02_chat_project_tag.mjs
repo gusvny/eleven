@@ -19,7 +19,7 @@ import { ensureStageConsole } from '../lib_stage_console.mjs';
 // Execution contract (t260904-12 三态): stdout last line
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; missing deps → env_fail
 // (exit 2); FAIL>0 或全腿 na → exit 1. Isolated console
-// SUYOU_TEST_CONSOLE (default: lib_stage_console 共享台); hard guard: never 3099.
+// SANDBAR_TEST_CONSOLE (default: lib_stage_console 共享台); hard guard: never 3099.
 
 const BASE = (await ensureStageConsole()).base;
 const results = [];
@@ -40,7 +40,7 @@ function summarize() {
 }
 
 if (BASE.includes(':3099')) {
-  console.error('refusing to run: SUYOU_TEST_CONSOLE points at the production console (3099)');
+  console.error('refusing to run: SANDBAR_TEST_CONSOLE points at the production console (3099)');
   process.exit(1);
 }
 
@@ -88,7 +88,7 @@ const CHIP_PROBE = `(marker) => {
 
 async function browserScenarios(fixtureProjects) {
   let pw = null;
-  for (const c of [process.env.SUYOU_PLAYWRIGHT_PATH, 'playwright-core',
+  for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core',
     new URL('../../server/dsh/ui-check/node_modules/playwright-core/index.mjs', `file://${process.cwd()}/`).href]) {
     if (!c) continue;
     try { pw = await import(c); break; } catch { /* next */ }

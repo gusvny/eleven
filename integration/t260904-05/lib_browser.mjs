@@ -8,7 +8,7 @@ import { ensureStageConsole } from '../lib_stage_console.mjs';
 //     缺失=ENV_FAIL）；
 //   - 浏览器 fresh context 打开（无账册残留，等价新用户）；
 //   - results/record/summarize 执行契约（SUMMARY pass/fail/env_fail/na；退出码 0/1/2）。
-// 安全红线：本目录场景只碰隔离台（默认 lib_stage_console 供给（共享台/显式 SUYOU_TEST_CONSOLE）），绝不连生产 3099。
+// 安全红线：本目录场景只碰隔离台（默认 lib_stage_console 供给（共享台/显式 SANDBAR_TEST_CONSOLE）），绝不连生产 3099。
 
 export const BASE = (await ensureStageConsole()).base;
 
@@ -37,7 +37,7 @@ export const BASE = (await ensureStageConsole()).base;
 /** 生产控制台红线：命中 3099 直接拒跑（宁可自家测试不跑）。 */
 export function refuseProductionConsole() {
   if (BASE.includes(':3099')) {
-    console.error('refusing to run: SUYOU_TEST_CONSOLE points at the production console (3099)');
+    console.error('refusing to run: SANDBAR_TEST_CONSOLE points at the production console (3099)');
     process.exit(1);
   }
 }
@@ -63,7 +63,7 @@ export async function loadPlaywright() {
       if ((await import('node:fs')).existsSync(p)) mainPw = (await import('node:url')).pathToFileURL(p).href;
     }
   } catch { /* 第④路可选：解析失败静默降级为三路 */ }
-  for (const c of [process.env.SUYOU_PLAYWRIGHT_PATH, 'playwright-core', localPw, mainPw]) {
+  for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core', localPw, mainPw]) {  // naming-compat（t260907-04 改名；旧名由 env 双向桥兼容）
     if (!c) continue;
     try { return await import(c); } catch { /* next */ }
   }

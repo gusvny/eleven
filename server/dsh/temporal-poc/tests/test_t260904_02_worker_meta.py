@@ -4,7 +4,7 @@
   四态（ok/missing/malformed/read_error）、畸形形状；
 - worker.py 接线（源级钉点，沿 test_t260901_21_i02 spawn_wiring 惯例——接线面
   改名/挪位即红，逻辑面由上面纯函数 UT 覆盖）：
-  - ticket 模式读 SUYOU_WORKER_META；daemon 模式写 <pidfile>.meta；前台不写；
+  - ticket 模式读 SANDBAR_WORKER_META；daemon 模式写 <pidfile>.meta；前台不写；
   - 起跑早写（Client.connect 前）+ 优雅退 best-effort 清理。
 """
 
@@ -97,20 +97,20 @@ class WorkerWiringTest(unittest.TestCase):
     def test_meta_path_modes(self):
         import argparse
         # 环境隔离（t260904-09 implement 打回轮发现）：本测试由工单泳道内跑时，
-        # supervisor 注入的 SUYOU_WORKER_META 会被「前台=不写」分支读到而误红——
+        # supervisor 注入的 SANDBAR_WORKER_META 会被「前台=不写」分支读到而误红——
         # 用例自有 env 语义，先清场再断言（非放宽：随后的专属模式分支自设该 env）。
-        os.environ.pop("SUYOU_WORKER_META", None)
+        os.environ.pop("SANDBAR_WORKER_META", None)
         args = argparse.Namespace(daemon=False, pidfile="/x/worker.pid", logfile="/x/l")
         self.assertEqual(worker.worker_meta_path(args), "")  # 前台=不写
 
         args.daemon = True
         self.assertEqual(worker.worker_meta_path(args), "/x/worker.pid.meta")  # daemon 旁车
 
-        os.environ["SUYOU_WORKER_META"] = "/y/worker-t9.meta"
+        os.environ["SANDBAR_WORKER_META"] = "/y/worker-t9.meta"
         try:
             self.assertEqual(worker.worker_meta_path(args), "/y/worker-t9.meta")  # ticket 模式 env 指路
         finally:
-            del os.environ["SUYOU_WORKER_META"]
+            del os.environ["SANDBAR_WORKER_META"]
 
     def test_source_wiring_anchors(self):
         # 起跑早写（run_worker 内、真调用 Client.connect( 之前；用带括号形态锚，
@@ -126,7 +126,7 @@ class WorkerWiringTest(unittest.TestCase):
         self.assertIn("finally:", main_body)
         self.assertIn("unlink", main_body)
         # ticket 模式 env 名钉住（node.ts spawn 侧同名字符串互指）
-        self.assertIn("SUYOU_WORKER_META", WORKER_SRC)
+        self.assertIn("SANDBAR_WORKER_META", WORKER_SRC)
 
 
 if __name__ == "__main__":

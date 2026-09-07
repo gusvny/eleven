@@ -124,10 +124,18 @@ if aa is not None:
 
     if callable(register):
         tmp = Path(tempfile.mkdtemp(prefix="t260905-01-reg-"))
+        def _pending(base):
+            # 引擎按 resolve_dot_dir 粘滞语义落 doc-gate 台账：新 base 在新名目录，
+            # 既有旧名泳道在旧名目录——过渡期读侧同序双探（t260907-04 目录过渡）
+            for name in (".sandbar", ".suyou"):  # naming-compat
+                p = base / name / "doc-gate" / "pending-doc-sync.jsonl"
+                if p.is_file():
+                    return p
+            return base / ".sandbar" / "doc-gate" / "pending-doc-sync.jsonl"
         try:
             conf = [{"doc": "docs/a.md", "claim": "主张 X", "actual": "现实 Y"}]
             r1 = register(tmp, "t1", conf)
-            jf = tmp / ".suyou" / "doc-gate" / "pending-doc-sync.jsonl"
+            jf = _pending(tmp)
             check("B5 登记→jsonl 条目本体可查（验收②）",
                   jf.is_file() and "docs/a.md" in jf.read_text(encoding="utf-8")
                   and "主张 X" in jf.read_text(encoding="utf-8"))

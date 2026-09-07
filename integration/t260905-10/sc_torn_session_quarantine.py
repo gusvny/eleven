@@ -62,7 +62,8 @@ def main() -> int:
     try:
         dsh = work / "dshhome"
         dsh.mkdir(parents=True)
-        quarantine = work / ".suyou" / "quarantine"
+        # 新 base 首写落 .sandbar（resolve_dot_dir 规则3；老名泳道粘滞走 resolve 同序判定）
+        quarantine = work / ".sandbar" / "quarantine"
 
         # ---- L1 核心：好帧内 JSONL record 中截断（05 号同型）→ 隔离 ----
         torn = build_session(
@@ -121,13 +122,13 @@ def main() -> int:
         f.check(rebuilt.exists(), "L6 同 id 新建合法档存活（恢复旅程走得通）")
 
         # ---- L7 挪不动：隔离路径不可建 → 不抛、坏档留原位 ----
-        # 注意隔离根=<dsh 父>/.suyou/quarantine；L1 起本 work 的 .suyou 已是真目录，
-        # 换个新父目录造「.suyou 是文件」的夹具（developer 段修正：原稿在旧父上
+        # 注意隔离根=<dsh 父>/.sandbar/quarantine（老泳道粘滞则 .suyou）；  # naming-compat
+        # 换个新父目录造「.sandbar 是文件」的夹具（原稿在旧父上  # naming-compat
         # write_text 会撞 IsADirectoryError，夹具自炸）。
         work2 = tmp_dir("sc-t26090510-quar-l7-")
         dsh2 = work2 / "dshhome"
         dsh2.mkdir(parents=True)
-        (work2 / ".suyou").write_text("not a dir", encoding="utf-8")
+        (work2 / ".sandbar").write_text("not a dir", encoding="utf-8")
         stuck = build_session(
             dsh2, "sess-stuck",
             frames=[line({"i": 1})], torn_tail=b'{"i":2,"cut')

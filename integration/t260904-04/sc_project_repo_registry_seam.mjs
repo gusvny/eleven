@@ -21,7 +21,7 @@
  * yaml 解析→主目录）。双门 stub 一致性由 L1 覆盖（stub 模式换根恒 no-op=已声明语义）。
  *
  * 预期状态：实现段（t260904-04 第 4 步）已随本工作区落地——全绿；若回退实现则全红
- * （repoForProject 不存在）。legacy 单文件注册表模式（SUYOU_PROJECTS_YAML）下换根行为方案未裁决，不锚。
+ * （repoForProject 不存在）。legacy 单文件注册表模式（SANDBAR_PROJECTS_YAML）下换根行为方案未裁决，不锚。
  * Run: node integration/t260904-04/sc_project_repo_registry_seam.mjs（cwd=仓库根）
  */
 import { mkdir, writeFile } from 'node:fs/promises'

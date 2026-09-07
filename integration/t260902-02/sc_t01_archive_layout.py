@@ -6,7 +6,7 @@
 env 可覆盖），stage 报告**字节级**可回读——「完结工单 stage 报告随泳道拆除丢失」
 根治的正面证据。manifest 形状、入档/排除口径按契约 v1 ①c（方案附录 B）。
 
-黑盒手法：fixture 泳道（.suyou/.dsh 全真结构，含排除项诱饵）直调 archive_ticket
+黑盒手法：fixture 泳道（.suyou/.dsh 全真结构，含排除项诱饵）直调 archive_ticket  # naming-compat
 activity；断言全在文件系统上。零 Temporal 依赖。
 
 跑法：python3 integration/t260902-02/t01_archive_layout.py（cwd=泳道根）
@@ -69,11 +69,11 @@ def main():
         L.ok(mm.get("sentinel") == "s3nt1nel-01", "meta 快照原样入 manifest（sentinel 回声）")
 
         # —— 字节级回读：归档副本与泳道原件逐字节一致 ——
-        src = lane / ".suyou" / "stage_create_plan_gen0.json"
+        src = lane / ".suyou" / "stage_create_plan_gen0.json"  # naming-compat
         dst = adir / "stages" / "stage_create_plan_gen0.json"
         L.ok(dst.is_file() and dst.read_bytes() == src.read_bytes(),
              "stage 报告归档副本与原件字节一致")
-        sshot_src = lane / ".suyou" / "screenshots" / "shot-1.png"
+        sshot_src = lane / ".suyou" / "screenshots" / "shot-1.png"  # naming-compat
         sshot_dst = adir / "screenshots" / "shot-1.png"
         L.ok(sshot_dst.is_file() and sshot_dst.read_bytes() == sshot_src.read_bytes(),
              "UI 截图归档副本与原件字节一致")

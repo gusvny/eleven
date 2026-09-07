@@ -275,7 +275,7 @@ FLOW_BRIEF = {
         "相关 smoke/自测跑绿，证据写进 evidence。"
         "本票改动以 UT 交付行为断言（落项目声明的测试目录），verify code 道跑绿。"
         "UI 票（写集命中 UI 口径）交付证据须含改动前后截图"
-        "（.suyou/screenshots/，ui-check/capture.mjs 产出）或说明为何无视觉差异。"),
+        "（.sandbar/screenshots/，ui-check/capture.mjs 产出）或说明为何无视觉差异。"),
     "design_integration_tests": (
         # t260902-12：用例设计依据第三项=组件对外契约与行为规格（草案修订四「方案」为旧口径残留，以修订二为准）
         "你是 integration，负责从**用户使用场景**出发为本次工单设计集成测试集（灰盒视角："
@@ -398,9 +398,9 @@ class DevLaneWorkflow:
         # 由 merge_check 证据闸兜底）。
         Stage(id="ui_evidence", name="UI截图证据", role="developer", next="run_integration_tests",
               desc="UI 票实现落盘后 worker 代跑 ui-check/capture-lane.mjs 隔离台，截控制台"
-                   "各视图落 .suyou/screenshots/（软失败不拦主链，闸兜底）",
+                   "各视图落 .sandbar/screenshots/（软失败不拦主链，闸兜底）",
               parts=("script",),
-              acceptance=("UI 票 .suyou/screenshots/ 有截图（merge_check 证据闸机械查）",)),
+              acceptance=("UI 票 .sandbar/screenshots/ 有截图（merge_check 证据闸机械查）",)),
         Stage(id="run_integration_tests", name="跑集成测试", role="integration", next="arbitrate", agent=False,
               desc="程序化（无 agent）：跑项目声明场景执行器 integration/run_scenarios.py（cwd=泳道），"
                    "结果 JSON 交仲裁判定；前置检查泳道落盘（0 commit = 实现未落盘 → blocked）",
@@ -442,7 +442,7 @@ class DevLaneWorkflow:
                    "「下一单建议」并落缓存（软失败不阻塞 merge 收口）；立项已无事可做时"
                    "给出可结项结论，工单台「继续执行」秒回 + 「确认结项」动作",
               parts=("agent",),
-              acceptance=("建议落缓存 .suyou/epic-next/<代号>/pre.json（或软失败留痕）",)),
+              acceptance=("建议落缓存 .sandbar/epic-next/<代号>/pre.json（或软失败留痕）",)),
     )
 
     def __init__(self) -> None:
@@ -1035,7 +1035,7 @@ class DevLaneWorkflow:
                                 "summary": ui.detail, "report": "", "deliverables": list(ui.shots),
                                 "files_changed": [], "evidence": ui.detail, "gen": 0}
                             if ui.ok:
-                                ui_ctx = "【UI 截图证据（.suyou/screenshots/，审读必看）】\n" + \
+                                ui_ctx = "【UI 截图证据（.sandbar/screenshots/，审读必看）】\n" + \
                                     "\n".join("- %s" % ln for ln in (ui.shot_lines or ui.shots))
                             else:
                                 ui_ctx = "【UI 截图证据缺失】%s（审读按「无截图证据=打回」处理）" % ui.detail
@@ -1235,7 +1235,7 @@ class DevLaneWorkflow:
                                          if ui_judge_note else "") + ui.detail,
                             "gen": 0}
                         if ui.ok:
-                            ui_ctx = "【UI 截图证据（.suyou/screenshots/，验收必看）】\n" + \
+                            ui_ctx = "【UI 截图证据（.sandbar/screenshots/，验收必看）】\n" + \
                                 "\n".join("- %s" % ln for ln in (ui.shot_lines or ui.shots))
                         else:
                             ui_ctx = "【UI 截图证据缺失】%s（验收按「无截图证据」如实记录）" % ui.detail
@@ -1378,7 +1378,7 @@ class DevLaneWorkflow:
                 # t260903-02 ②：走查边与仲裁吃同一份测试结果（用户走查视角独立，
                 # 不预设测试全过），UI 走查实证一并注入。
                 acc_ctx = ("【机械集成测试结果】\n%s\n" % _arb_json[-4000:]) + \
-                    (("【UI 截图/走查实证（.suyou/screenshots/）】\n%s\n" % ui_ctx)
+                    (("【UI 截图/走查实证（.sandbar/screenshots/）】\n%s\n" % ui_ctx)
                      if ui_ctx else "")
                 if workflow.patched(ARB_ACC_PARALLEL_PATCH_ID):
                     # 提速②：仲裁 ∥ 验收走查并行分叉（无数据依赖，省一段串行）
@@ -1607,7 +1607,7 @@ class DevLaneWorkflow:
 
             # 3.4) 验收走查（integration 以用户视角走查 → 验收报告，供人审门查阅）
             if phase == "acceptance":
-                acc_ctx = (("【UI 截图/走查实证（.suyou/screenshots/）】\n%s\n" % ui_ctx) if ui_ctx else "")
+                acc_ctx = (("【UI 截图/走查实证（.sandbar/screenshots/）】\n%s\n" % ui_ctx) if ui_ctx else "")
                 try:
                     res = await self._run_agent_step("acceptance_walkthrough", acc_ctx)
                 except Exception as e:

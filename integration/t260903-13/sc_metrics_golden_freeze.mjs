@@ -12,7 +12,7 @@
  *
  * 判定口径（行为级，不钉案例数）：exit 0 + 存在逐案一致行 + 零「不一致/缺失」；
  * 基线案例面随实现窗口枚举自然扩展，不设数量快照锚。
- * 纯本地：SUYOU_METRICS_DIR 走系统临时目录，零端口、零 3099、零网络。
+ * 纯本地：SANDBAR_METRICS_DIR 走系统临时目录，零端口、零 3099、零网络。
  * Exit contract（三态，定稿 §7.3 闸内无 SKIP）：末行 SUMMARY pass=N fail=K
  * env_fail=E na=W；fail>0 或全 na→exit 1，env_fail>0→exit 2。
  */

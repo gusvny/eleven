@@ -20,7 +20,7 @@
 // bundle_pairs 闸与 t260903-04 client-bundle-sync 负责，不在此重复。
 //
 // Two layers → 本场景仅 S1（真浏览器渲染级）：needs the ISOLATED test console
-// (SUYOU_TEST_CONSOLE, default: lib_stage_console shared stage), playwright-core resolvable, and a
+// (SANDBAR_TEST_CONSOLE, default: lib_stage_console shared stage), playwright-core resolvable, and a
 // launchable chromium. Any missing -> ENV_FAIL (exit 2, reason on stdout, 注明
 // KI-036——ui-check 依赖未随迁移恢复，恢复后自动生效). Data is stubbed at the API
 // boundary with page.route(): the browser, console, shipped bundle and React
@@ -354,7 +354,7 @@ async function main() {
   }
 
   if (BASE.includes(':3099')) {
-    console.error('refusing to run: SUYOU_TEST_CONSOLE points at the production console (3099)')
+    console.error('refusing to run: SANDBAR_TEST_CONSOLE points at the production console (3099)')
     process.exit(1)
   }
 

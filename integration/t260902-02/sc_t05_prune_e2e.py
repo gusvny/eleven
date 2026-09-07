@@ -11,7 +11,7 @@
 
 e2e 手法：自带临时 worker 造 3 张 closed「票」（workflow type=DevLaneWorkflow、
 专属队列前缀、ProjectKey SA=itestkey，与真票同列表面），data 目录用 tmp fixture。
-**只连显式设置的测试环境**（SUYOU_TARGET_HOST 未设/=生产缺省 7233 → ENV_FAIL）。
+**只连显式设置的测试环境**（SANDBAR_TARGET_HOST 未设/=生产缺省 7233 → ENV_FAIL）。
 三态契约定稿 §7.3「闸内无 SKIP」：0=PASS、1=FAIL（产品红）、2=ENV_FAIL（环境红）。
 
 跑法：python3 integration/t260902-02/t05_prune_e2e.py（cwd=泳道根）
@@ -68,7 +68,7 @@ def write_manifest(sb, ticket, legacy):
     if legacy:
         m["reason"] = "归档前泳道已拆除，stage 报告不可恢复（存量工单诚实过账）"
     else:
-        m["files"] = [{"src": ".suyou/stage_merge_gen0.json",
+        m["files"] = [{"src": ".suyou/stage_merge_gen0.json",  # naming-compat
                        "dst": "stages/stage_merge_gen0.json", "bytes": 13}]
         (d / "stages").mkdir(exist_ok=True)
         (d / "stages" / "stage_merge_gen0.json").write_text('{"status":"ok"}', "utf-8")
@@ -204,7 +204,7 @@ def main():
     # 不落进 Client.connect 异常被误记成产品红。本场景无模型面，红只可能来自台。
     if not bench_reachable(shared.TARGET_HOST):
         L.env1("全部用例",
-               "17233 测试台不可达（SUYOU_TARGET_HOST=%s 连不通；缺台=环境红，"
+               "17233 测试台不可达（SANDBAR_TARGET_HOST=%s 连不通；缺台=环境红，"
                "本场景无模型面，不需要 LLM 凭据）" % shared.TARGET_HOST)
         return L.finish()
     try:

@@ -15,7 +15,7 @@ python3 integration/run_scenarios.py
 
 引擎侧（`run_integration_tests` activity）→ `_run_scenarios` → `verify_lane lane=integ`
 消费 `run_scenarios.py` 逐条以 `/bin/sh -c` 执行，cwd=仓根，逐条超时 900s
-（`SUYOU_INTEG_CMD_TIMEOUT_SEC` 可调），exit 0 计通过。
+（`SANDBAR_INTEG_CMD_TIMEOUT_SEC` 可调），exit 0 计通过。
 
 ## 执行契约（每条测试一致，t260904-12 三态化——闸内无 SKIP）
 
@@ -45,7 +45,7 @@ python3 integration/run_scenarios.py
   t260906-01 仲裁起，浏览器族测试控制台默认供给=**泳道限定台**
   `stage-console-<泳道仓指纹>`（lib_stage_console 自动 ensure/复用，注册表种子随台
   自愈）：每泳道各一台、注册表与 /repo 绑定只归本泳道——根除跨泳道共享台陈旧态
-  （别泳道构建上红绿失真实录见 t260906-01 仲裁报告）；`SUYOU_TEST_CONSOLE` 显式
+  （别泳道构建上红绿失真实录见 t260906-01 仲裁报告）；`SANDBAR_TEST_CONSOLE` 显式
   指台仍优先。旧 stage-console-shared 若仍在跑属历史遗留，归供给面清理。
 
 ## 环境前提
@@ -61,8 +61,8 @@ t260904-19 起必需；重建=`sh server/dsh/build-test-temporal.sh`）、tempor
 
 - `localhost:3099`（生产控制台）不碰；生产 Temporal 只读（仅 `operator namespace describe`），
   8233 Web UI 与一切写命令不碰。
-- **建票类测试永远指向测试环境**：显式 `SUYOU_TARGET_HOST=127.0.0.1:17233` +
-  `SUYOU_NAMESPACE=suyou-test`；内置硬断言——该变量未显式设置或精确等于生产缺省
+- **建票类测试永远指向测试环境**：显式 `SANDBAR_TARGET_HOST=127.0.0.1:17233` +
+  `SANDBAR_NAMESPACE=suyou-test`；内置硬断言——该变量未显式设置或精确等于生产缺省  # naming-compat
   `127.0.0.1:7233` 时拒绝执行（宁可 FAIL/ENV_FAIL 自家测试，绝不静默连生产）。
 
 ## 已知限制（覆盖诚实声明，非哑 guard）
@@ -76,16 +76,16 @@ t260904-19 起必需；重建=`sh server/dsh/build-test-temporal.sh`）、tempor
   **桥路四层**（工具 schema/payload、host 透传、弹层纯函数、预跑建议 write_set 透传）
   与 **负路径**（空写集无声明 → 连接前拒收、双出路文案）。SDK 探测在 worktree 泳道会
   回落到主 checkout `.venv`（经 `git rev-parse --git-common-dir` 解析），比 ticket-validate
-  的探测多一档，泳道内 D 段可真实覆盖；E 段仍需显式 `SUYOU_TARGET_HOST`（写护栏不变）。
+  的探测多一档，泳道内 D 段可真实覆盖；E 段仍需显式 `SANDBAR_TARGET_HOST`（写护栏不变）。
 - ticket-lifecycle（t260831-04 落地， stub 大脑端到端）：**t260904-12 起移出闸清单（SCENARIOS
-  移册，非 SKIP 非豁免）**——worker 机械步内恒触发嵌套护栏（SUYOU_TASK_QUEUE 特征检测，
+  移册，非 SKIP 非豁免）**——worker 机械步内恒触发嵌套护栏（SANDBAR_TASK_QUEUE 特征检测，
   防无界自递归：净化半必 clone fixture/起 worker/起票，递归面无法否定），属设计性环境红、
   闸内不可达 PASS；移册依据=定稿 §7.3「真跑不进闸的（红线禁区/破坏性）不进闸清单」+宿主令
   exit=0 目标；真实覆盖承接=主库人工清单（t260903-09 主库跑生效）。**口径逆转链**（防历史
   反复无据可查）：t260831-03 曾以死条目为由不登记 → t260831-04 按工单要求翻回登记（见下） →
   本次三态化后依定稿条款再移册。原文记录保留如下：在引擎机械步内
-  恒 ENV_FAIL（exit 2）：`_run_manifest` 继承 worker 环境，条目检测到 `SUYOU_TASK_QUEUE` /
-  `SUYOU_WATCH_WORKFLOW`（工单专属 worker 特征）即判「泳道内机械跑」报 ENV_FAIL——否则会
+  恒 ENV_FAIL（exit 2）：`_run_manifest` 继承 worker 环境，条目检测到 `SANDBAR_TASK_QUEUE` /
+  `SANDBAR_WATCH_WORKFLOW`（工单专属 worker 特征）即判「泳道内机械跑」报 ENV_FAIL——否则会
   clone fixture、再起 worker、再起 integ-e2e- 票，无界自递归。这是嵌套安全护栏的正确行为，
   不是死条目：真实覆盖在顶层人工跑（两变量皆无时执行五场景）。t260831-03 壳文件曾以
   「避免恒 SKIP 死条目」为由不登记，t260831-04 按工单要求取登记并在此显性记录取舍。
@@ -94,14 +94,14 @@ t260904-19 起必需；重建=`sh server/dsh/build-test-temporal.sh`）、tempor
   存在的同类上限（stub 仲裁 summary 缺 `verdict=`，3 次格式纠正轮 → blocked）并复活收口。
   merge reject 无计数属引擎发现，另开票处理。
 - lane-parallel-dom（t260901-09，泳道图并行分叉 DOM 级双边同亮断言）：S0 build-contract
-  纯 node 恒跑；S1 浏览器半依赖测试控制台（`SUYOU_TEST_CONSOLE` 显式指台；缺省
+  纯 node 恒跑；S1 浏览器半依赖测试控制台（`SANDBAR_TEST_CONSOLE` 显式指台；缺省
   泳道限定台自动 ensure，见舞台纪律段）+
   playwright-core + 本机 chromium，缺任一 ENV_FAIL（exit 2）——与 session-tab-interactions 同款环境
   取舍。S1 造数用 playwright `page.route()` 在 `/sandbar-workbench/api/wf/tickets` API 边界
-  打桩 fixture 快照（不进 Temporal、不写真工单）；泳道 worker 环境因 SUYOU_TASK_QUEUE
+  打桩 fixture 快照（不进 Temporal、不写真工单）；泳道 worker 环境因 SANDBAR_TASK_QUEUE
   特征机械 ENV_FAIL 属既有正确行为，真实覆盖在隔离台环境（3199 台 + 浏览器在场）跑。
 - capture-chat-e2e / capture-chat-active（t260901-03）自 t260901-09 起补泳道 worker 递归
-  护栏（与 ticket-lifecycle 同款 SUYOU_TASK_QUEUE/SUYOU_WATCH_WORKFLOW 探测）：两条的
+  护栏（与 ticket-lifecycle 同款 SANDBAR_TASK_QUEUE/SANDBAR_WATCH_WORKFLOW 探测）：两条的
   真实覆盖靠 boot 隔离台 + 真模型种子链路 + capture-lane 只拍**本次重建**的 bundle
   （陈旧 build 拒跑是防证据造假的设计行为）——非 UI 票的泳道不重建 bundle，此前提在
   泳道机械跑环境天然不满足，故一律 ENV_FAIL（exit 2，不再 exit 0 假绿；e2e 整 entry 8 场景环境红；active 只环境红
@@ -126,7 +126,7 @@ t260904-19 起必需；重建=`sh server/dsh/build-test-temporal.sh`）、tempor
 - ui-evidence-failure-retention（t260901-02）依赖 temporalio SDK（import agent_activities
   直调 activity），SDK 不可用的环境恒 ENV_FAIL（exit 2）——与 ticket-validate 的环境半依赖同款取舍；
   两条 capture-lane 基线（capture-lane-preset / ui-evidence-failure-retention）均不 boot
-  控制台、不装浏览器，3099 全程零接触（后者显式把 SUYOU_CONSOLE_URL 钉死死端口并内置
+  控制台、不装浏览器，3099 全程零接触（后者显式把 SANDBAR_CONSOLE_URL 钉死死端口并内置
   红线自检断言）。隔离台端到端实拍（boot 控制台+浏览器出图）是重环境路径，不进 manifest：
   依赖真机凭据与 `$HOME/.dsh` preset 实体，泛化跑只会恒 ENV_FAIL，该口径由
   `node server/dsh/ui-check/capture-lane.mjs --selftest` 与 implement 段端到端验收步骤承担。
@@ -162,7 +162,7 @@ t260904-19 起必需；重建=`sh server/dsh/build-test-temporal.sh`）、tempor
 
 1. 新建 `integration/baselines/<name>.mjs`（Node >=22.18 直跑，头部注释写清 intent 与
    high-level steps，代码与注释用英文）；环境依赖按上文执行契约做 precheck，桩用
-   `SUYOU_EPIC_NEXT_STUB` / `SUYOU_AGENT_STUB` / `SUYOU_SUGGEST_STUB`（零真模型）；
+   `SANDBAR_EPIC_NEXT_STUB` / `SANDBAR_AGENT_STUB` / `SANDBAR_SUGGEST_STUB`（零真模型）；
    会写 Temporal 的测试必须过「安全红线」写护栏。
 2. `manifest.json` 追加 `{"name": "<name>", "cmd": "node integration/baselines/<name>.mjs"}`。
    注：逐条 cmd 是引擎消费契约的硬性字段（shared.py:203，缺 cmd 的条目直接判败），
@@ -173,11 +173,11 @@ t260904-19 起必需；重建=`sh server/dsh/build-test-temporal.sh`）、tempor
 
 本组不再是空壳：`baselines/ticket-lifecycle.mjs`（总入口，内部分场景）+
 `baselines/ticket-lifecycle-scenes.mjs`（脚手架与场景库）。链路全真：Docker 测试 Temporal
-（17233/suyou-test，不可达则幂等 `docker compose up -d`，仍不可用 ENV_FAIL exit 2）+ 每票专属
-worker（`SUYOU_TASK_QUEUE`/`SUYOU_WATCH_WORKFLOW`，WATCH 收口自退 + 看门狗 kill）+ 真实
+（17233/suyou-test，不可达则幂等 `docker compose up -d`，仍不可用 ENV_FAIL exit 2）+ 每票专属  # naming-compat
+worker（`SANDBAR_TASK_QUEUE`/`SANDBAR_WATCH_WORKFLOW`，WATCH 收口自退 + 看门狗 kill）+ 真实
 引擎链（prepare_workspace→create_plan⇄review_plan→implement∥design_integration_tests→
 run_integration_tests→arbitrate→acceptance_walkthrough→merge_check→merge 人门→suggest_next
-→closed）。桩的只有 agent 大脑：worker 置 `SUYOU_AGENT_STUB=1` + `SUYOU_SUGGEST_STUB=ok`。
+→closed）。桩的只有 agent 大脑：worker 置 `SANDBAR_AGENT_STUB=1` + `SANDBAR_SUGGEST_STUB=ok`。
 
 隔离要点（引擎 merge 落账目标是 worker 侧 REPO_ROOT 当前分支、无视 base_ref）：
 每轮运行先 `git clone --branch main --single-branch` 本地主库到临时 fixture 仓，worker 从
@@ -187,7 +187,7 @@ fixture 内的 temporal-poc 启动（REPO_ROOT=fixture）——泳道 worktree�
 
 确定性机制：stub 大脑的 arbitrate summary 天然缺 `verdict=`（3 次格式轮即 blocked，场景 D
 的上限来源）；场景 A/B/C/E 在票机械跑 run_integration_tests 期间向泳道预置
-`.suyou/stage_arbitrate_gen<N>.json`（summary 含 verdict=pass），走引擎结果文件幂等缓存
+`.suyou/stage_arbitrate_gen<N>.json`（summary 含 verdict=pass），走引擎结果文件幂等缓存  # naming-compat
 确定性放行。gen 取「泳道已有文件最大 N+1」，不静态推算。
 
 ## verify-lane-config（t260901-08）—— verify 道配置驱动回归闸
@@ -272,7 +272,7 @@ host agent-usage）均按具体 state 过滤或只数 running，不受新增 don
   次序 rfile→stub→短路→spawn、ok/done 双形态命中零 spawn 且 evidence 带 `precache-hit`、
   state_key 不匹配/缓存损坏/缺字段/模板幻觉/failed 形态/空 epic 一律落回 spawn、stub 通道
   最优先、rfile 幂等回归、测试卫生（合成 epic code `t-itest19-*` + teardown，仓库
-  `.suyou/epic-next/` 无残留）。spawn 面用 monkeypatch 哨兵封死——实现有洞时表现为
+  `.suyou/epic-next/` 无残留）。spawn 面用 monkeypatch 哨兵封死——实现有洞时表现为  # naming-compat
   「记录到 spawn 尝试」，绝不会真拉起 agent 进程。
 - **t19-cache-probe**（t04）：`integration/cache_probe.py` 工具契约——zstd 缺失可读报错
   exit(2)、位置参数注入扫描根、空根 exit 0、畸形/半截行跳过且计数、命中率
@@ -286,7 +286,7 @@ host agent-usage）均按具体 state 过滤或只数 running，不受新增 don
 
 `integration/t260901-20/` 五用例 + 聚合入口，manifest 单条目
 `t260901-20-metrics-m1a` → `t06_all.mjs`（与 t14 同款聚合执行形制）。全 hermetic
-（mkdtemp fixture + env 钩子 SUYOU_METRICS_DIR/SANDBAR_PROJECTS_DIR/SUYOU_EPICS_DIR，
+（mkdtemp fixture + env 钩子 SANDBAR_METRICS_DIR/SANDBAR_PROJECTS_DIR/SANDBAR_EPICS_DIR，
 零 Docker 零真台零 3099），泳道机械跑可执行。黑盒面：HTTP 进程内 handler
 （t260901-14/t06 同款 mock harness，type-stripping import node.ts）+ CLI 子进程。
 
@@ -295,7 +295,7 @@ host agent-usage）均按具体 state 过滤或只数 running，不受新增 don
   200 信封逐字段对契约块 2（kpis 恒冻结四字段、cache.status 枚举、ChartSpec 形状、
   四枚举 view 全绿）；并发 3 路同请求形状一致。
 - **t02_cache_lifecycle**：缓存目录不可写→200 直算不 5xx（root 下为系统态条件腿，N/A 口径）；
-  legacy SUYOU_PROJECTS_YAML 模式缓存禁用零落盘；缓存目录整体 rm 后惰性重建 200；
+  legacy SANDBAR_PROJECTS_YAML 模式缓存禁用零落盘；缓存目录整体 rm 后惰性重建 200；
   缓存记录 block-3 键集全等 + 二次请求 hit（无票环境为系统态条件腿，N/A 口径）。
 - **t03_health_degrade**：view=health 回冻结信封不设视图变体键；本机独立探测
   7233，不可达时 200+reason 人话必带（不可达=ENV_FAIL 口径）；health 请求零缓存写入。
@@ -317,7 +317,7 @@ host agent-usage）均按具体 state 过滤或只数 running，不受新增 don
 - **双前门一致基线在降级数据上锁定形状一致性**：真实数字双门一致由 M3 基线按同
   口径复验；本集保证的是比较面机制（剔两时钟字段后字节全量）先行在案。
 - **单元层五用例（implement 补齐，t01_params_cache / t02_aggregate / t03_views_e2e /
-  t04_cli / t05_dual_door，走 SUYOU_METRICS_STUB 缝全离线秒级）**：聚合口径数字级
+  t04_cli / t05_dual_door，走 SANDBAR_METRICS_STUB 缝全离线秒级）**：聚合口径数字级
   锁（窗口切分/末窗封口/human_wait/by_round、chunk 镜像不翻倍/cacheRead 单列/
   模型归因/多角色加总、numstat 分列 binary 行、git 失败软降级）、缓存语义（坏 JSON
   作废/engine_version 失配重算/frozen 跳 delivery/legacy 禁用/不可写直算）、

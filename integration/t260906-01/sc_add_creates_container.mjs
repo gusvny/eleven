@@ -20,7 +20,7 @@ import {
 } from '../t260904-14/lib_fix14.mjs';
 
 const c = makeChecks('t260906-01 新目录容器代建一步接入');
-delete process.env.SUYOU_PROJECTS_YAML;
+delete process.env.SANDBAR_PROJECTS_YAML;
 
 const ENGINE_TABLE = path.join(REPO_ROOT, 'server', 'dsh', 'model-routes.yaml');
 const sha16 = (p) => createHash('sha256').update(readFileSync(p)).digest('hex').slice(0, 32);

@@ -3,7 +3,7 @@
 
 用户可感知契约（黑盒，从 prepare_ui_evidence 公共入口进，不碰内部函数）：
   capture 两候选全败时，已拍 PNG 不再随失败蒸发：
-    C1 归档成功路径：泳道 screenshots 里的 png 归档到主树 .suyou/evidence/<ticket>/
+    C1 归档成功路径：泳道 screenshots 里的 png 归档到主树 .suyou/evidence/<ticket>/  # naming-compat
        （同字节），并从泳道移出（机械闸 review_gate_verdict 数泳道 on-disk png，
        移出后 png_count 归 0 维持红灯——残缺视图不假通过）；回执 ok=False、
        shots 列出移出清单、detail 带人话标注。
@@ -11,7 +11,7 @@
        泳道**（闸红 + 可人工捞回——归档失败还 unlink = 图彻底蒸发，正是本单根治
        的病）；detail 带归档失败说明；ok 仍 False。
 
-安全红线（测试自己先遵守）：不碰 3099——本测试显式把 SUYOU_CONSOLE_URL 钉死在
+安全红线（测试自己先遵守）：不碰 3099——本测试显式把 SANDBAR_CONSOLE_URL 钉死在
 死端口 127.0.0.1:1，并在执行前硬断言该值不含 3099；候选脚本用临时假 capture.mjs
 （process.exit(3)），零浏览器、零网络、零控制台 boot。
 
@@ -73,12 +73,12 @@ DEAD_URL = "http://127.0.0.1:1"
 def make_env(ed):
     """显式钉死候选环境：单直连候选（假 capture.mjs 秒退 3）+ 死端口 + 临时归档目录。"""
     assert "3099" not in DEAD_URL, "红线自检：测试绝不指向 3099"
-    os.environ["SUYOU_CONSOLE_URL"] = DEAD_URL
-    os.environ["SUYOU_EVIDENCE_DIR"] = str(ed)
+    os.environ["SANDBAR_CONSOLE_URL"] = DEAD_URL
+    os.environ["SANDBAR_EVIDENCE_DIR"] = str(ed)
 
 
 def clear_env():
-    for k in ("SUYOU_CONSOLE_URL", "SUYOU_EVIDENCE_DIR"):
+    for k in ("SANDBAR_CONSOLE_URL", "SANDBAR_EVIDENCE_DIR"):
         os.environ.pop(k, None)
 
 

@@ -15,7 +15,7 @@ export const CHARTER_EP = '/sandbar-workbench/api/session-charter';
 /** 生产控制台红线：命中 3099 直接拒跑（宁可自家测试不跑）。 */
 export function refuseProductionConsole() {
   if (BASE.includes(':3099')) {
-    console.error('refusing to run: SUYOU_TEST_CONSOLE points at the production console (3099)');
+    console.error('refusing to run: SANDBAR_TEST_CONSOLE points at the production console (3099)');
     process.exit(1);
   }
 }

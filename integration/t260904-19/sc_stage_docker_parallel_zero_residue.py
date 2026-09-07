@@ -174,10 +174,10 @@ def main():
             check(PROD_PORTS.isdisjoint(set(a["ports"].values()) | set(b["ports"].values())),
                   "双台端口 ∉ 生产端口")
             # namespace 口径：缺省（未显式 --namespace）两台同用契约缺省名（C5 保现值
-            # suyou-test）——隔离由「引擎互异」（端口互异=独立 temporal 进程/数据面）
+            # suyou-test）——隔离由「引擎互异」（端口互异=独立 temporal 进程/数据面）  # naming-compat
             # 承担，不由 namespace 名承担；显式 namespace 互异断言归显式传参场景（族B）。
-            check(a["namespace"] == b["namespace"] == "suyou-test",
-                  "双台缺省 namespace=契约缺省值 suyou-test（隔离由引擎互异承担）")
+            check(a["namespace"] == b["namespace"] == "suyou-test",  # naming-compat
+                  "双台缺省 namespace=契约缺省值 suyou-test（隔离由引擎互异承担）")  # naming-compat
             ca, cb = containers_of(a["project"]), containers_of(b["project"])
             check(len(ca) == 1 and len(cb) == 1, "temporal-only 各恰 1 容器（%s / %s）" % (ca, cb))
             check(not (set(ca) & set(cb)), "容器集互不相交（label 过滤面）")

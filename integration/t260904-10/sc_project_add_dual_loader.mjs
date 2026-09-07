@@ -33,7 +33,7 @@ import {
 } from './lib_fix10.mjs';
 
 const c = makeChecks('t260904-10 project add 双侧装载');
-delete process.env.SUYOU_PROJECTS_YAML;
+delete process.env.SANDBAR_PROJECTS_YAML;
 
 // ---- 1. 全新隔离根：Python 侧首装载触发自动播种（真装载语义，不预判不绕过） ----
 const root = tmpRoot('fix10-dual-');

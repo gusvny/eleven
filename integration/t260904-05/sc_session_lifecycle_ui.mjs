@@ -23,7 +23,7 @@
 //
 // Execution contract (t260904-12 three-state): SUMMARY pass= fail= env_fail= na=;
 // missing deps → env_fail (exit 2); FAIL>0 → exit 1; all-na → exit 1. Isolated console
-// SUYOU_TEST_CONSOLE (default lib_stage_console 供给（共享台/显式 SUYOU_TEST_CONSOLE）); hard guard: never 3099.
+// SANDBAR_TEST_CONSOLE (default lib_stage_console 供给（共享台/显式 SANDBAR_TEST_CONSOLE）); hard guard: never 3099.
 
 import { STAGE_SEED_ROW_SEL } from '../lib_stage_console.mjs';
 import {

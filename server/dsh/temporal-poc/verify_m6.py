@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """M6 闭环验证（t260821-m6-scan-expand）：一张真实工单走「巡检→报告→可签建议」。
 
-前置（专属 task queue 隔离验证，不干扰 suyou-poc 上的真实 worker）：
-    SUYOU_TASK_QUEUE=suyou-m6-verify .venv/bin/python worker.py --daemon \
+前置（专属 task queue 隔离验证，不干扰共享队列上的真实 worker（LEGACY 旧队列隔离验证））：
+    SANDBAR_TASK_QUEUE=sandbar-m6-verify .venv/bin/python worker.py --daemon \
         --pidfile data/worker-m6.pid --logfile data/worker-m6.log
 
 跑法：
-    SUYOU_TASK_QUEUE=suyou-m6-verify .venv/bin/python verify_m6.py
+    SANDBAR_TASK_QUEUE=sandbar-m6-verify .venv/bin/python verify_m6.py
 
 断言（写死当下真实工单地形，环境变了就要改）：
   - 巡检 workflow 完成，返回 pending_decision ≥ 1 且报告文件落盘；

@@ -13,7 +13,7 @@
 //      「不存在」腿已随 t260906-01 容器代建翻转为成功旅程（移册 t260906-01 场景承接）；
 //   4. 已注册重跑同判：两次输出与出口码全等；隔离同名 qbad 拒收；
 //   5. 根交叉与互为父子：新根=既有根父目录 / 子目录 / 恰等——均拒且报两个 key；
-//   6. legacy：SUYOU_PROJECTS_YAML 在位 → 拒收指路（文案含 env 名），per-key 根与 legacy 文件不动；
+//   6. legacy：SANDBAR_PROJECTS_YAML 在位 → 拒收指路（文案含 env 名），per-key 根与 legacy 文件不动；
 //   7. name：空/含 #/含换行拒（文案点名 name）；首尾空白 trim 后收（读回验证=Padded Name）；
 //   8. 并发同 key 双 add（不同 name/dir）：恰一成一拒，注册表恰一条目且 name/dirs 自洽不混写；
 //   9. remove 点位稳定钉：输出点名 remove、无裸 traceback、注册表不动（票①骨架恒红 /
@@ -30,7 +30,7 @@ import {
 } from './lib_fix10.mjs';
 
 const c = makeChecks('t260904-10 project add 拒收面');
-delete process.env.SUYOU_PROJECTS_YAML;
+delete process.env.SANDBAR_PROJECTS_YAML;
 
 // ---- 1. fixture：隔离根 + 手写条目 + 隔离条目 ----
 const root = tmpRoot('fix10-rej-root-');
@@ -180,9 +180,9 @@ for (const [label, key] of [
     + path.join(fixtureArea, 'legacyone-dir') + '\n';
   writeFileSync(legacyFile, legacyBody);
   const d = tmpRoot('fix10-legacy-dir-');
-  const r = add('zfixlegacy', 'L', [d], { SUYOU_PROJECTS_YAML: legacyFile });
+  const r = add('zfixlegacy', 'L', [d], { SANDBAR_PROJECTS_YAML: legacyFile });
   c.check('legacy 模式拒收', r.code !== 0, `exit=${r.code}`);
-  c.check('legacy 文案点名存量 env', r.out.includes('SUYOU_PROJECTS_YAML'), r.out.slice(-300));
+  c.check('legacy 文案点名存量 env', r.out.includes('SANDBAR_PROJECTS_YAML'), r.out.slice(-300));
   c.check('legacy 语义拒收 exit=1', r.code === 1, `exit=${r.code}`);
   checkClean('legacy');
   c.check('legacy 源文件字节不动',

@@ -21,7 +21,7 @@ import {
 } from '../t260904-14/lib_fix14.mjs';
 
 const c = makeChecks('t260906-01 容器脚手架故障面');
-delete process.env.SUYOU_PROJECTS_YAML;
+delete process.env.SANDBAR_PROJECTS_YAML;
 
 const add = (root, key, name, dir, extra = []) => runCli(
   ['project', 'add', '--key', key, '--name', name, '--dir', dir, ...extra],

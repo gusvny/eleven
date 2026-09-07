@@ -7,7 +7,12 @@
 保留步1 的 ContentPipelineWorkflow / DispatcherScanWorkflow 与 demo 数据契约（向后兼容）。
 
 路径可被环境变量覆盖（自测用临时目录）：
-  SUYOU_WORKFLOWS_DIR  模板目录（缺省 <repo>/server/dsh/workflows）
+  SANDBAR_WORKFLOWS_DIR  模板目录（缺省 <repo>/server/dsh/workflows）
+
+命名清理（t260907-04，宿主令 260907）：SUYOU_* env → SANDBAR_*、共享队列
+suyou-poc → sandbar、泳道协调目录（老名→.sandbar/）。过渡期兼容见  # naming-compat
+apply_env_compat / LEGACY_* 常量与 resolve_dot_dir；全量退役账收口在本目录
+README「退役账」表（7 条，逐条可观测），撤任何一条前先对表。
 """
 
 from __future__ import annotations
@@ -15,37 +20,102 @@ from __future__ import annotations
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
+
+
+# ---- env 命名过渡（t260907-04）------------------------------------------------
+# 语义：SANDBAR_* 为新名真源；双向桥保证过渡期旧调用方（插件面旧代码读 SUYOU_*）
+# 与新代码（读 SANDBAR_*）互见。双侧同名冲突 → 新名优先，旧名被新名覆盖。
+# 触发时机：import shared 时一次性遍历＋本函数可重复显式调用（幂等）。已知限制：
+# import 之后才 setenv 的路径（含 UT 的 monkeypatch）不自动过桥——UT 须在 import
+# 前注入，或显式重跑 apply_env_compat(env)。ticket_worker spawn 注入直接走新名
+# env，不依赖桥。
+# 退役（退役账#6）：插件面票（workbench 旧名清理）收口后，桥降级为单向
+# （只 SUYOU_*→SANDBAR_*，不再回写旧名），再一版整函数删除。
+LEGACY_ENV_PREFIX = "SUYOU_"
+ENV_PREFIX = "SANDBAR_"
+
+
+def apply_env_compat(environ: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """SUYOU_*↔SANDBAR_* 双向桥（幂等）。返回桥后 env 快照（测试观测用）。"""
+    env = os.environ if environ is None else environ
+    # 旧→新：旧名单侧出现则补新名（新名已存在且非空时不覆盖——新名优先；
+    # 新名为空串视为缺失回落旧名，与现行 `or` 缺省链的 falsy 语义一致）
+    for key, value in list(env.items()):
+        if key.startswith(LEGACY_ENV_PREFIX):
+            new_key = ENV_PREFIX + key[len(LEGACY_ENV_PREFIX):]
+            if not env.get(new_key):
+                env[new_key] = value
+    # 新→旧：新名回写旧名（冲突时新名赢——旧名被新名覆盖；插件面旧代码过渡期读到的
+    # 恒为新名的镜像，两侧不漂移）
+    for key in [k for k in env if k.startswith(ENV_PREFIX)]:
+        env[LEGACY_ENV_PREFIX + key[len(ENV_PREFIX):]] = env[key]
+    return dict(env)
+
+
+apply_env_compat()
 
 # ---- 路径 ----
 POC_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = POC_DIR.parents[2]          # server/dsh/temporal-poc -> 仓库根
 ADMIN_PY = REPO_ROOT / "server" / "admin.py"
-WORKFLOWS_DIR = pathlib.Path(os.environ.get("SUYOU_WORKFLOWS_DIR") or (REPO_ROOT / "server" / "dsh" / "workflows"))
+WORKFLOWS_DIR = pathlib.Path(os.environ.get("SANDBAR_WORKFLOWS_DIR") or (REPO_ROOT / "server" / "dsh" / "workflows"))
 OUT_DIR = POC_DIR / "out"
 
 # ---- Temporal 接入点 ----
 # 可被环境变量覆盖（测试环境走 Docker 独立 Temporal，见 docs/testing-guide.md）：
-#   SUYOU_TARGET_HOST    Temporal gRPC 地址（缺省生产 127.0.0.1:7233）
-#   SUYOU_NAMESPACE      Temporal namespace（缺省 default）
-TARGET_HOST = os.environ.get("SUYOU_TARGET_HOST") or "127.0.0.1:7233"
-NAMESPACE = os.environ.get("SUYOU_NAMESPACE") or "default"
-TASK_QUEUE = os.environ.get("SUYOU_TASK_QUEUE") or "suyou-poc"
+#   SANDBAR_TARGET_HOST    Temporal gRPC 地址（缺省生产 127.0.0.1:7233）
+#   SANDBAR_NAMESPACE      Temporal namespace（缺省 default）
+TARGET_HOST = os.environ.get("SANDBAR_TARGET_HOST") or "127.0.0.1:7233"
+NAMESPACE = os.environ.get("SANDBAR_NAMESPACE") or "default"
+# 共享队列（t260907-04 改名）：缺省新名 sandbar；SANDBAR_TASK_QUEUE 覆盖（单值，
+# 兼容读桥桥出的旧 SANDBAR_TASK_QUEUE）。SANDBAR_TASK_QUEUES（CSV）= 专属 worker
+# 的多队列模式（ticket_worker spawn 注入「新 ticket 队列,旧 ticket 队列」双 poll）。
+TASK_QUEUE = os.environ.get("SANDBAR_TASK_QUEUE") or "sandbar"
+# 退役账#1：旧共享队列过渡双 poll——新代码 worker 同时 poll LEGACY 旧队列（suyou-poc），让以旧队列
+# 启动的在飞 workflow 自然流干；撤旧条件 = 旧队列连续一个发布周期零任务且在飞
+# 起动的在飞 workflow 流干（观测面：worker 日志双队列行 + temporal
+# workflow list），满足后删本常量与 worker 双注册分支。
+LEGACY_TASK_QUEUE = "suyou-poc"
+TASK_QUEUES_ENV = "SANDBAR_TASK_QUEUES"
+
+
+def configured_task_queues() -> List[str]:
+    """本 worker 应 poll 的队列清单。多队列模式（SANDBAR_TASK_QUEUES CSV）优先；
+    缺省 = 新共享队列 + 旧共享队列（退役账#1 过渡双 poll）。"""
+    csv = os.environ.get(TASK_QUEUES_ENV)
+    if csv:
+        queues = [q.strip() for q in csv.split(",") if q.strip()]
+        if queues:
+            return queues
+    return [TASK_QUEUE, LEGACY_TASK_QUEUE]
 
 # ---- 每工单专属 worker（260824 用户拍板）----
-# 工单 workflow 不上共享队列：每张工单一个 task queue（suyou-ticket-<工单id>）+
+# 工单 workflow 不上共享队列：每张工单一个 task queue（sandbar-ticket-<工单id>）+
 # 一个专属 worker 进程（ticket create 时拉起，workflow 收口后自退，巡检兜底救/收）。
-# 共享队列 suyou-poc 只留不属任何工单的 workflow（dispatcher-scan；260904 起
+# 共享队列 sandbar 只留不属任何工单的 workflow（dispatcher-scan；260904 起
 # content-pipeline 已退役）。
 # 隔离语义：A 工单的旧代码 worker 永远抢不到 B 工单的任务（260824 版本投毒事件教训）。
-TICKET_QUEUE_PREFIX = "suyou-ticket-"
+TICKET_QUEUE_PREFIX = "sandbar-ticket-"
+# 退役账#2：旧 ticket 队列前缀——在飞工单的 workflow task queue 在 start 时定死为
+# 旧前缀 <id> 队列；其专属 worker 重启后必须同 tid 双前缀 poll，否则旧 workflow
+# 永不推进（搁浅）。撤旧条件 = 观测旧前缀队列连续一个发布周期零任务且在飞
+# 清单无旧前缀起动的 workflow，随后删本常量、双前缀 poll 与 client 过滤回落。
+LEGACY_TICKET_QUEUE_PREFIX = "suyou-ticket-"
 
 
 def ticket_task_queue(ticket_id: str) -> str:
-    """工单专属 task queue 名（workflow 启动与专属 worker 轮询用同一个，两边不漂移）。"""
+    """工单专属 task queue 名（新工单恒新前缀；workflow 启动与专属 worker 两边一致）。"""
     return TICKET_QUEUE_PREFIX + ticket_id
+
+
+def ticket_task_queues(ticket_id: str) -> List[str]:
+    """专属 worker 双 poll 清单：新前缀在前（新任务优先被新语义 worker 领）＋旧前缀
+    （在飞 workflow 流干用）。共享同一 registry。"""
+    return [TICKET_QUEUE_PREFIX + ticket_id, LEGACY_TICKET_QUEUE_PREFIX + ticket_id]
 
 # ---- 多项目化（260823）：工单 workflow 按项目区分，同一个 Temporal 后端 ----
 # ProjectKey = Keyword search attribute，值 = 机器级 per-key 注册表 key
@@ -146,7 +216,7 @@ def ticket_search_attributes(project: str, epic: str = ""):
 
 
 # ---- 立项下一单预跑（t260828-08）：merge 签字通过后预跑 integration 建议并落缓存 ----
-# 缓存真源 = <repoRoot>/.suyou/epic-next/<code>/pre.json；读侧 = workbench
+# 缓存真源 = <repoRoot>/.sandbar/epic-next/<code>/pre.json；读侧 = workbench
 # src/host/epic-next.ts readPrecache（互指同步：改一边必须同步另一边）。
 # 与同根 <jobId> 形状的 job 目录共存安全：job 目录清理（epic-next.ts cleanupOldJobs）
 # 只删「<code>-<base36时间戳>-<6hex>」形状的目录，<code>/ 子目录不在其列。
@@ -156,8 +226,11 @@ def ticket_search_attributes(project: str, epic: str = ""):
 # 永不命中，t260828-08 review 第 2 条）。
 
 def epic_next_precache_path(repo_root, code: str) -> pathlib.Path:
-    """预跑缓存文件绝对路径（写侧 agent_activities / 读侧 host epic-next.ts 同口径）。"""
-    p = pathlib.Path(repo_root) / ".suyou" / "epic-next" / code
+    """预跑缓存文件绝对路径（写侧 agent_activities / 读侧 host epic-next.ts 同口径）。
+    目录面走 resolve_dot_dir（新名 .sandbar/ 优先、LEGACY 老仓老名粘滞）——老仓粘滞
+    旧名时插件面读侧（仍读老名 epic-next 路径）天然不断供；新名仓由写侧镜像补旧名
+    （mirror_to_legacy，退役账#5），插件面过渡期同样不断供。"""
+    p = lane_dot_path(repo_root, "epic-next", code)
     if not p.is_absolute():
         p = REPO_ROOT / p
     return p / "pre.json"
@@ -217,7 +290,7 @@ def build_suggest_next_prompt(code: str, epic_markdown: str, tickets_summary: st
     workflows 清单即防幻觉白名单（suggest_next 与 host readPrecache 双侧校验）。
     """
     wf_lines = "\n".join("- %s：%s" % (w.get("id", ""), w.get("name", "")) for w in workflows)
-    return """【任务】你是溯游（suyou）项目的 integration 角色。本立项的一张关联工单刚通过人审即将合并，请在合并落账前预判：这个立项下一步最应该开的一张工单是什么（或者是否已经无事可做）。
+    return """【任务】你是 sandbar 项目的 integration 角色。本立项的一张关联工单刚通过人审即将合并，请在合并落账前预判：这个立项下一步最应该开的一张工单是什么（或者是否已经无事可做）。
 
 【硬性要求】
 1. 这是只读分析任务：除最后的结果文件外，不创建、不修改任何文件，不做任何 git 写操作。
@@ -381,7 +454,11 @@ def wf_id(ticket_id: str) -> str:
 
 
 DISPATCHER_WF_ID = "dispatcher-scan"
-SCHEDULE_ID = "suyou-dispatcher-scan"
+SCHEDULE_ID = "sandbar-dispatcher-scan"
+# 退役账#3：旧 schedule ID（服务端持久标识）。scan_schedule 的 create/ensure 路径
+# 建新 ID 前幂等 delete 旧 ID（句柄不存在不炸），日志留痕；本删旧行保留一个发布
+# 周期（防旧代码引擎并存时重建旧 schedule 造成双调度），超期整段删除。
+LEGACY_SCHEDULE_ID = "suyou-dispatcher-scan"
 
 # ---- demo 用的工单 id 前缀（清场脚本只认这个前缀，绝不碰其它工单）----
 DEMO_PREFIX = "t260821-demo-"
@@ -530,13 +607,13 @@ TICKET_STAGE_STATES = ("running", "awaiting", "awaiting-human", "blocked")
 # ========================================================================================
 
 # 报告落盘目录（env 覆盖供自测用临时目录；缺省 POC out/scan，运行产物，gitignore 不入库）。
-SCAN_DIR = pathlib.Path(os.environ.get("SUYOU_SCAN_DIR") or (OUT_DIR / "scan"))
+SCAN_DIR = pathlib.Path(os.environ.get("SANDBAR_SCAN_DIR") or (OUT_DIR / "scan"))
 # 巡检票落账目录（inspection 票①，t260905-03；env 覆盖供自测用临时目录；
 # 缺省 out/inspection，运行产物不入库）。新变量名按宿主令 260904 用 sandbar 前缀
 #（存量 SUYOU_* 是历史欠账，只随专门迁移票处置，新造一律不用）。
 INSPECTION_DIR = pathlib.Path(os.environ.get("SANDBAR_INSPECTION_DIR") or (OUT_DIR / "inspection"))
 # 「疑似卡死」停留时长阈值（小时）。env 可调；activity 读取，不进 workflow 体。
-SCAN_STUCK_HOURS = float(os.environ.get("SUYOU_SCAN_STUCK_HOURS") or 48)
+SCAN_STUCK_HOURS = float(os.environ.get("SANDBAR_SCAN_STUCK_HOURS") or 48)
 # 建议动作三档（report 排序按此序：最紧急在前）。
 SCAN_SUGGESTIONS = ("疑似卡死", "待补", "可签")
 # 报告红线声明（落进每份报告，台面展示同款）。
@@ -698,9 +775,79 @@ def scan_summary(items: List[ScanTicketItem]) -> Dict[str, int]:
 # 全部函数只依赖入参与本模块常量（纯函数，可在 workflow sandbox 里确定性执行）。
 # ========================================================================================
 
-# dir 类工作空间根：非开发工单（cleanup/运营类）的隔离目录约定 /tmp/suyou-ws/<工单id>。
-# （M11 v2：env SUYOU_WS_DIR_BASE 可覆盖——自测指向临时目录，真 /tmp 零污染。）
-WS_DIR_BASE = os.environ.get("SUYOU_WS_DIR_BASE") or "/tmp/suyou-ws"
+# dir 类工作空间根：非开发工单（cleanup/运营类）的隔离目录约定 /tmp/sandbar-ws/<工单id>。
+# （M11 v2：env SANDBAR_WS_DIR_BASE 可覆盖——自测指向临时目录，真 /tmp 零污染。）
+# 退役账#7：旧 base 粘滞——既有 dir 工单的目录在 LEGACY base（/tmp/suyou-ws）/<id>，ws 路径解析
+# 时旧 base 下已存在该工单目录则沿用旧路径（在飞不炸）；退役条件 = LEGACY base
+# 存量工单目录清零（观测：ls 旧 base 为空）后删 LEGACY_WS_DIR_BASE 与粘滞分支。
+WS_DIR_BASE = os.environ.get("SANDBAR_WS_DIR_BASE") or "/tmp/sandbar-ws"
+LEGACY_WS_DIR_BASE = "/tmp/suyou-ws"
+
+
+def ws_dir_path(ticket_id: str) -> str:
+    """dir 类工单工作空间路径（新 base 缺省；旧 base 下已存在同 id 目录→粘滞沿用）。"""
+    legacy = pathlib.Path(LEGACY_WS_DIR_BASE) / ticket_id
+    if legacy.is_dir():
+        return str(legacy)
+    return WS_DIR_BASE + "/" + ticket_id
+
+
+# ---- 泳道协调目录命名过渡（t260907-04）：.sandbar/ → .sandbar/ --------------------
+# 解析优先级（三条，次序不可动）：
+#   1. base/.sandbar 存在 → 新名（此 base 的 .sandbar/ 若存在仅是插件面镜像，
+#      只写不读——镜像目录对解析不可见，防粘滞判定被自身产物自反翻转，R-1）；
+#   2. elif base/.sandbar 存在 → 旧名（老泳道粘滞：整生命周期读写都钉旧名，
+#      绝不同 base 混用两名，交接/归档零劈叉）；
+#   3. else → 新名（create=True 时首写建 .sandbar/，插件面镜像由 mirror 帮手补）。
+# 带外建 .sandbar（人工/工具误建）会按规则 1 翻转为新名——单次翻转后权威仍唯一，
+# 视为显式迁改名，不是 bug。
+# 退役：粘滞分支（规则 2）退役条件 = .sandbar/ 泳道存量清零（README 退役账外独立
+# 观测）；镜像帮手退役条件 = 插件面票（workbench 旧名清理）收口（退役账#5）。两者解耦。
+DOT_DIR_NEW = ".sandbar"
+DOT_DIR_OLD = ".suyou"  # naming-compat
+MIRROR_RELPATHS = ("screenshots", "epic-next")   # 插件面真实读点，仅此两类镜像
+
+
+def resolve_dot_dir(base, create: bool = False) -> pathlib.Path:
+    """按三条优先级解析 base 下的泳道协调目录（.sandbar/ 新名优先、DOT_DIR_OLD 粘滞回落）。"""
+    b = pathlib.Path(base)
+    new = b / DOT_DIR_NEW
+    old = b / DOT_DIR_OLD
+    if new.exists():
+        return new                       # 规则 1：新名权威；旧名仅镜像（只写不读）
+    if old.exists():
+        return old                       # 规则 2：老泳道粘滞
+    if create:                           # 规则 3：创建侧恒新名
+        new.mkdir(parents=True, exist_ok=True)
+    return new
+
+
+def lane_dot_path(base, *parts, create: bool = False) -> pathlib.Path:
+    """解析后的协调目录下的相对路径（引擎写点/读点统一入口）。"""
+    return resolve_dot_dir(base, create=create).joinpath(*parts)
+
+
+def mirror_to_legacy(base, rel: pathlib.Path) -> bool:
+    """插件面过渡镜像：把 base 新名协调目录内的 rel 文件复制到 DOT_DIR_OLD 目录同相对路径。
+    仅当解析结果为新名（老泳道本就在旧名，无需镜像）且 rel 顶级目录在
+    MIRROR_RELPATHS 白名单内才镜像；best-effort，失败不影响主链。
+    退役（退役账#5）：插件面票收口后删本函数与全部调用点。"""
+    b = pathlib.Path(base)
+    if resolve_dot_dir(b) != b / DOT_DIR_NEW:
+        return False
+    parts = pathlib.Path(rel).parts
+    if not parts or parts[0] not in MIRROR_RELPATHS:
+        return False
+    try:
+        src = b / DOT_DIR_NEW / rel
+        if src.is_file():
+            dst = b / DOT_DIR_OLD / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            return True
+    except OSError:
+        return False
+    return False
 
 WORKSPACE_TYPES = ("worktree", "dir")
 
@@ -968,7 +1115,7 @@ def derive_lane_workspace(
         if not branch:
             branch = "lane/" + ws["path"].rstrip("/").rsplit("/", 1)[-1]
     elif ws is None and template_workspace_dir:
-        ws = {"type": "dir", "path": WS_DIR_BASE + "/" + ticket_id}
+        ws = {"type": "dir", "path": ws_dir_path(ticket_id)}
     if project_root and ws is not None and not ws["path"].startswith("/"):
         ws = {"type": ws["type"], "path": project_root.rstrip("/") + "/" + ws["path"]}
         if worktree and not worktree.startswith("/"):
@@ -1062,7 +1209,7 @@ def _workspace_clause(ws: Optional[Dict[str, str]], meta: Dict[str, Any]) -> str
 # ---- 派活上下文索引化（KI-035，t260904-03，宿主令 260904 拍板）----
 # 旧制已退役：按 workflow 映射表+标题关键词推导，把设计文档以「必读、按序先读」
 # 塞进每段派活头——agent 每会话全文读机制主档（与票面相关性无关的重复 token
-# 消耗），且映射与 docs/ 实况手工耦合（260904 迁移即断链，留守 suyou 的项目域
+# 消耗），且映射与 docs/ 实况手工耦合（260904 迁移即断链，留守 sandbar 的项目域
 # 文档仍被指向）。新制=恒定知识库规约：目录=docs/README.md，agent 对照工单
 # 标题/写集判断相关性，相关的读全文、不相关不读；结算 note 列「参考 docs 清单」
 # 作审计。勿再按 workflow/标题推导必读文档（旧表取值与退役全案见 KI-035 行；
@@ -1109,7 +1256,7 @@ KIND_MODELS: Dict[str, str] = {"proofread": "zai/glm-5.2", "qa": "zai/glm-5.2", 
 # （不覆盖，agent 用 profile 默认模型）。表=server/dsh/model-routes.yaml（工单台
 # 「模型」页签可视化编辑，下一次 spawn 即生效——无生成步骤）。契约①d（v1.6）：
 # 表路径可由项目注册条目 paths.model_routes 声明（见 routes_file_for_spawn），
-# 未声明回落本常量——suyou 不声明 paths，逐字节零回归。
+# 未声明回落本常量——sandbar 不声明 paths，逐字节零回归。
 
 MODEL_ROUTES_REL = "server/dsh/model-routes.yaml"
 MODEL_ROUTES_FILE = REPO_ROOT / MODEL_ROUTES_REL
@@ -1493,15 +1640,31 @@ UI_WRITE_PREFIXES = (
 )
 
 
-# 截图证据目录（相对泳道 worktree 根；capture.mjs --out 与 merge_check 闸同口径）
-UI_EVIDENCE_DIR = ".suyou/screenshots"
+# 截图证据目录（t260907-04 起新泳道缺省 .sandbar/screenshots；老泳道由
+# ui_evidence_dir() 粘滞解析回 .sandbar/screenshots——capture.mjs --out 与 merge_check
+# 闸都走帮手同一解析，不各自判目录名）。本常量仅作文案缺省展示与 fixture 用。
+UI_EVIDENCE_DIR = DOT_DIR_NEW + "/screenshots"
+
+
+def ui_evidence_dir(worktree) -> pathlib.Path:
+    """泳道截图目录（粘滞解析：resolve_dot_dir(worktree)/screenshots）。"""
+    return lane_dot_path(worktree, "screenshots")
 
 # 截图证据归档目录（相对主树 REPO_ROOT；prepare_ui_evidence 成功后把泳道截图
-# 拷进来：<REPO_ROOT>/.suyou/evidence/<ticket_id>/。泳道 merge 后拆树，report 里
-# 引图不死链靠这份归档；host 只读端点 node.ts evidence 路由同口径读它——
-# node 侧 SUYOU_EVIDENCE_DIR env 覆盖（=归档基目录本体，自测指向临时目录）与
+# 拷进来：<REPO_ROOT>/.sandbar/evidence/<ticket_id>/（老主树 .sandbar/ 粘滞）。泳道
+# merge 后拆树，report 里引图不死链靠这份归档；host 只读端点 node.ts evidence
+# 路由同口径读它——node 侧 SANDBAR_EVIDENCE_DIR env 覆盖（=归档基目录本体，自测
+# 指向临时目录；旧 SUYOU_ 名由 apply_env_compat 双向桥兼容）与
 # agent_activities._archive_shots 同名 env 互指，改一边同步另一边）
-EVIDENCE_DIR = ".suyou/evidence"
+EVIDENCE_DIR = DOT_DIR_NEW + "/evidence"
+
+
+def evidence_base(repo_root=None) -> pathlib.Path:
+    """主树归档基目录（env 覆盖优先；否则主树协调目录粘滞解析 /evidence）。"""
+    env = os.environ.get("SANDBAR_EVIDENCE_DIR")
+    if env:
+        return pathlib.Path(env)
+    return lane_dot_path(repo_root or REPO_ROOT, "evidence")
 
 
 def match_ui_paths(paths: Any, prefixes: Any = None) -> List[str]:
@@ -1810,8 +1973,8 @@ class UiEvidenceArgs:
     """prepare_ui_evidence activity 入参（t260828-09：worker 代跑 ui-check/capture.mjs 截图）。"""
 
     ticket_id: str
-    worktree: str = ""                        # 泳道 worktree 路径（截图落 <worktree>/.suyou/screenshots/）
-    screenshots_dir: str = ""                 # 缺省 <worktree>/.suyou/screenshots
+    worktree: str = ""                        # 泳道 worktree 路径（截图落 <worktree>/.sandbar/screenshots/）
+    screenshots_dir: str = ""                 # 缺省 <worktree>/.sandbar/screenshots
 
 
 @dataclass
@@ -1954,7 +2117,7 @@ class ArchiveArgs:
     """archive_ticket activity 入参（M1-3，t260902-02：完结工单数据出仓归档）。
 
     归档真源出仓到 per-key 数据目录（契约 v1.4 ①c），根治「完结工单 stage 报告
-    随泳道拆除丢失」。worktree 为空 = 主树道工单——.suyou/ 换 REPO_ROOT/.suyou 根
+    随泳道拆除丢失」。worktree 为空 = 主树道工单——协调目录取主树根（resolve_dot_dir 粘滞解析）
     归档（代理文件属灰面，归档即清扫，不静默放过）。meta 快照由 workflow 侧传入
     （workflow 不查盘纪律）；文件清单与拷贝由 activity 按 ARCHIVE_INCLUDE_* 口径现扫。"""
 
@@ -1994,30 +2157,33 @@ class MergeResult:
 # ---- 结果文件/日志路径（纯函数；activity 与 prompt 组装共用同一真源，防漂移）----
 
 def stage_workspace(inp_ws: Optional[Dict[str, str]], ticket_id: str) -> Optional[Dict[str, str]]:
-    """agent 段工作目录：工单登记的 workspace 优先；无 → /tmp/suyou-ws/<工单id> 隔离目录
+    """agent 段工作目录：工单登记的 workspace 优先；无 → /tmp/sandbar-ws/<工单id> 隔离目录（LEGACY 老 base 粘滞）
     （主树道工单的 agent 也在仓库根干活，但结果文件/日志一律落隔离目录，主树零污染）。"""
     if isinstance(inp_ws, dict) and inp_ws.get("type") in WORKSPACE_TYPES and inp_ws.get("path"):
         return {"type": str(inp_ws["type"]), "path": str(inp_ws["path"])}
-    return {"type": "dir", "path": WS_DIR_BASE + "/" + ticket_id}
+    return {"type": "dir", "path": ws_dir_path(ticket_id)}
 
 
 def result_file_for(ticket_id: str, stage_id: str, gen: int,
                     ws: Optional[Dict[str, str]]) -> str:
-    """本段第 gen 次进入的结果文件绝对路径（幂等锚点；rework 重跑 gen+1 换新文件）。"""
-    base = (ws or {}).get("path") or (WS_DIR_BASE + "/" + ticket_id)
+    """本段第 gen 次进入的结果文件绝对路径（幂等锚点；rework 重跑 gen+1 换新文件）。
+    目录面走 resolve_dot_dir（写点：老泳道粘滞旧名，新泳道落 .sandbar/，不混用）。"""
+    base = (ws or {}).get("path") or ws_dir_path(ticket_id)
     p = pathlib.Path(base)
     if not p.is_absolute():
         p = REPO_ROOT / p
-    return "%s/.suyou/stage_%s_gen%d.json" % (str(p), stage_id, gen)
+    return str(lane_dot_path(p, "stage_%s_gen%d.json" % (stage_id, gen)))
 
 
-def agent_log_for(ticket_id: str, stage_id: str, gen: int,
-                  ws: Optional[Dict[str, str]]) -> str:
-    base = (ws or {}).get("path") or (WS_DIR_BASE + "/" + ticket_id)
+def agent_log_for(ticket_id: str, stage_id: str,
+                  gen: int, ws: Optional[Dict[str, str]]) -> str:
+    """agent 运行日志路径（写点：同 result_file_for 的粘滞口径，不许盲 sed 成新名——
+    老泳道日志写进新名目录会绕过粘滞，交接/归档双侧失踪）。"""
+    base = (ws or {}).get("path") or ws_dir_path(ticket_id)
     p = pathlib.Path(base)
     if not p.is_absolute():
         p = REPO_ROOT / p
-    return "%s/.suyou/agent_%s_gen%d.log" % (str(p), stage_id, gen)
+    return str(lane_dot_path(p, "agent_%s_gen%d.log" % (stage_id, gen)))
 
 
 # stage 级验收增项（t260901-09）：常驻检查项挂在 prompt 组装真源（build_stage_prompt），
@@ -2253,7 +2419,7 @@ def ticket_data_dir(project_key: str, ticket_id: str) -> pathlib.Path:
 # 路由表两处项目内路径由项目在注册条目顶层可选 paths 节声明（相对项目根），引擎
 # 经本读取器取值。契约真源 = docs/design/sandbar项目接入契约v1.md ①d（v1.6）：
 #   回落四类（无 paths 节 / 节内缺键 / 条目文件不存在 / project key 空 or 不过
-#     白名单）→ 未声明，消费点回落现行约定（suyou 零改动零回归）；
+#     白名单）→ 未声明，消费点回落现行约定（sandbar 零改动零回归）；
 #   声明值畸形 / 条目文件顶层形状不可解析 / 声明锚点缺失或类型错位 → fail-closed
 #     红（ProjectPathsError），点名条目文件或解析后路径——三态总纲：文件烂不得
 #     按「缺失」静默回落（review R1 裁定）；
@@ -2444,14 +2610,14 @@ def roles_rel_for_prompt(project_key: str) -> str:
 
 
 # 归档文件清单口径（契约 v1.4 ①c 附录；activity 扫描与将来消费侧共用同一真源）：
-#   入档 = .suyou/stage_*.json（stage 结果/结算报告）、.suyou/screenshots/**/*.png
+#   入档 = .sandbar/stage_*.json（stage 结果/结算报告）、.sandbar/screenshots/**/*.png
 #   （UI 证据，保相对层级）、.dsh/sessions/<repo-slug>/*（会话落盘事件文件）
 #   排除（记入 manifest.excluded_rules，不入档）= agent_*.log（worker spawn 运行时
 #   日志）、model_patch_*.yml / resume_patch_*.yml（引擎内部续接物）、.dsh/profiles/**
 #   与一切 .credentials.yaml（凭据绝不入档）。会话目录缺失 = 软处理（manifest 记
 #   absent），同 usage 端点「历史工单无会话文件」的既有降级口径。
-ARCHIVE_INCLUDE_STAGE_GLOB = ".suyou/stage_*.json"
-ARCHIVE_INCLUDE_SHOTS_GLOB = ".suyou/screenshots/**/*.png"
+ARCHIVE_INCLUDE_STAGE_GLOB = DOT_DIR_NEW + "/stage_*.json"
+ARCHIVE_INCLUDE_SHOTS_GLOB = DOT_DIR_NEW + "/screenshots/**/*.png"
 ARCHIVE_INCLUDE_SESSIONS_DIR = ".dsh/sessions"
 ARCHIVE_EXCLUDED_RULES = (
     "agent_*.log（worker spawn 运行时日志）",
@@ -2484,7 +2650,7 @@ import time as _time                                # noqa: E402
 # 一次性迁移源（旧单文件）。真源=机器级 per-key 目录
 # ~/.sandbar/projects/<key>/project.yaml（装载=扫 */project.yaml，与
 # server/dsh/suyou-projects.ts 同一注册表、两边各自最小解析、语义同构）。
-# env 优先级（每次调用现读）：SUYOU_PROJECTS_YAML（legacy 单文件模式，旧格式
+# env 优先级（每次调用现读）：SANDBAR_PROJECTS_YAML（legacy 单文件模式，旧格式
 # projects: 列表，行为与 260823 版一致）> SANDBAR_PROJECTS_DIR > ~/.sandbar/projects。
 # 单条目畸形/版本不支持=该项目隔离（fail-closed 可见，不炸其他项目）；目录名必须
 # 过 PROJECT_KEY_RE 白名单（定义见上=M1-2 真源，勿再复制，acceptance P3 收敛），
@@ -2798,8 +2964,8 @@ def ensure_registry_migrated(root):
 
 def load_projects_registry():
     """装载注册表全量，返回 (projects, quarantined)。
-    legacy env（SUYOU_PROJECTS_YAML）在位时走旧单文件模式（无隔离概念）。"""
-    legacy = os.environ.get('SUYOU_PROJECTS_YAML')
+    legacy env（SANDBAR_PROJECTS_YAML）在位时走旧单文件模式（无隔离概念）。"""
+    legacy = os.environ.get('SANDBAR_PROJECTS_YAML')
     if legacy:
         return parse_legacy_registry_file(pathlib.Path(legacy).read_text('utf-8'), legacy), []
     root = registry_root()

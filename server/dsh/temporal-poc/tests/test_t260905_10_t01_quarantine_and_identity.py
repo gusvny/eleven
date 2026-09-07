@@ -71,7 +71,7 @@ def _lines_payload(objs, partial_tail: bytes = b"", raw_lines: list = ()) -> byt
 
 
 def _quarantine_dir(dsh: Path) -> Path:
-    return dsh.parent / ".suyou" / "quarantine"
+    return dsh.parent / ".sandbar" / "quarantine"
 
 
 # ---------- 面②：帧好内撕裂（核心回归腿，t260906-05 同型） ----------

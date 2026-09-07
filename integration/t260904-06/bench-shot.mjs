@@ -8,12 +8,12 @@
  *   t260904-19 起台=docker 舞台（integration/stage_docker.py，自搭进程 boot 退役）；
  *   仍复用主树 ui-check 的已测导出件（capture.routeDecision 等），
  *   boot 临时 DSH_HOME 隔离台（临时端口，不碰 3099），playwright 层注入 fixture 票，
- *   DOM 断言 + 前后截图落 .suyou/screenshots/。
+ *   DOM 断言 + 前后截图落 .suyou/screenshots/。  // naming-compat
  *
  * 只读红线：只 GET + 语义锚点击（开抽屉），不提交表单、不发工单、不碰任何进程端口；
  * boot 进程四条路径（正常/报错/超时/信号）全回收（kill 进程组 + 关 fd + 删临时目录）。
  *
- * 用法：node bench-shot.mjs --lane <泳道root> --main <主树root> --out <泳道.suyou/screenshots>
+ * 用法：node bench-shot.mjs --lane <泳道root> --main <主树root> --out <泳道.suyou/screenshots>  // naming-compat
  */
 
 import { spawn } from "node:child_process";
@@ -287,7 +287,7 @@ async function main() {
   console.log(`[bench-shot] spec 原文长度=${fixtures.spec.length}` +
     `${existsSync(path.join(args.main, "notes", "discussions", "260904-spec-card-mockup.html")) ? "（样张 B 卡抽取）" : "（fallback 桩）"}`);
   routeDecisionMod = await import(pathToFileURL(path.join(args.main, "server", "dsh", "ui-check", "capture.mjs")).href);
-  const pwPath = process.env.SUYOU_PLAYWRIGHT_MODULE
+  const pwPath = process.env.SANDBAR_PLAYWRIGHT_MODULE
     ?? path.join(args.main, "server", "dsh", "ui-check", "node_modules", "playwright-core");
   // CJS 包经 ESM import 时导出在 default 下（capture.mjs loadPlaywright 同款口径）
   const pwMod = await import(pathToFileURL(path.join(pwPath, "index.js")).href);

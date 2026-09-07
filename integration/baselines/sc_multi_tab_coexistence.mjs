@@ -10,7 +10,7 @@
 //       (KI-003); plus the reported race: opening ticket "13" detail "jumps
 //       back to 11" when a stale in-flight poll response lands late.
 // This baseline drives a REAL browser against the ISOLATED test console
-// (SUYOU_TEST_CONSOLE, default 127.0.0.1:3199) with TWO+ same-origin pages
+// (SANDBAR_TEST_CONSOLE, default 127.0.0.1:3199) with TWO+ same-origin pages
 // (real BroadcastChannel + localStorage between them) and stubs the workbench
 // API boundary per page with page.route() — the shipped bundle, React render
 // path and the genuine browser tab-communication primitives are all under
@@ -424,7 +424,7 @@ async function scenarioClosedTab(a, b) {
 
 // T2/T5 失败文案的定性标签：本两腿经 t260904-19 三轮仲裁定性为 workbench 多页签
 // write-invalidation 链的既有产品缺陷（环境无关对照+force 取证实证，非本票回归），
-// 豁免申请已交宿主签字（.suyou/stage_arbitrate_gen14.json）。标签随 FAIL 行输出，
+// 豁免申请已交宿主签字（.suyou/stage_arbitrate_gen14.json）。标签随 FAIL 行输出，  // naming-compat
 // 防「红=正常」习惯化淹掉该面的真回归：若修复后本腿转绿，标签自然消失。
 const PRE_EXISTING_TAG = '（t260904-19 仲裁定性：既有产品缺陷 pre-existing，豁免申请 gen14 待宿主签字；workbench 专项票修复后转绿）'
 const tagPreExisting = () => PRE_EXISTING_TAG
@@ -706,7 +706,7 @@ async function main() {
   buildContract()
 
   if (BASE.includes(':3099')) {
-    console.error('refusing to run: SUYOU_TEST_CONSOLE points at the production console (3099)')
+    console.error('refusing to run: SANDBAR_TEST_CONSOLE points at the production console (3099)')
     process.exit(1)
   }
 

@@ -18,7 +18,7 @@ gen0 两个打回缺陷均已正确修复，独立复验全绿；未发现新的
 2. 三个防回归关键点核查：①白名单**尾锚定**（`re.match` 只锚开头，若正则无 `$` 则 `t09/../evil` 前缀匹配仍可穿——实测正则带 `$` 且字符集排除 `.`/`/`，穿越面关死）；②两侧根链**严格同序**（引擎 `perkey_projects_root`=SANDBAR_PROJECTS_DIR??home，与 TS 新链末两环一致；空串语义差异为 shared.py 成文的既有有意差异，非本票引入）；③`settleDirOf` 改为无参闭包后，legacy 分支与非 legacy 分支**都**走新链，无残留旧调用（旧 `settleDirOf(root)` 调用点已全部替换）。
 3. 独立实跑全部回归面（不复用机械结果）：写旅程 16/16、读旅程 17/17、workbench L1 四件套（t260904_09 26/26、delivery-recovery 50/50、donut-render-dispatch 23/23、terminate-universe 9/9）全绿。
 4. 测试资产变更审查（见下节）。
-5. 红线复查：rework 新增行 5 处 suyou 字样全为存量 legacy env 兼容引用（`SUYOU_WORKER_META` 测试清场 ×2、`SUYOU_METRICS_DIR` 根链中段 ×2、`SUYOU_PROJECTS_YAML` 存量 reason 文案 ×1）——零新造 suyou 命名；console（3099）零触碰；契约 schema 未破（增补段内补句，无字段变更）。
+5. 红线复查：rework 新增行 5 处 suyou 字样全为存量 legacy env 兼容引用（`SANDBAR_WORKER_META` 测试清场 ×2、`SANDBAR_METRICS_DIR` 根链中段 ×2、`SANDBAR_PROJECTS_YAML` 存量 reason 文案 ×1）——零新造 suyou 命名；console（3099）零触碰；契约 schema 未破（增补段内补句，无字段变更）。
 
 ## 怎么验证的（逐场景结论）
 
@@ -34,7 +34,7 @@ gen0 两个打回缺陷均已正确修复，独立复验全绿；未发现新的
 
 - `test_t260904_09_settle_snapshot.py` +6 行：新增 W8 fail-closed 用例（note 点名形状非法+断言零文件残留），加严。
 - `t260904_09_settle_snapshot.mjs` +12 行：新增 R6 回归 4 断言（链头生效/缓存目录不受染/替代根无快照不可见/有快照读出），加严且正好钉住打回面。
-- `test_t260904_02_worker_meta.py` +4 行：**跨票测试改动，逐行核过**——仅在用例开头 `os.environ.pop("SUYOU_WORKER_META")` 清场（泳道内 supervisor 注入导致「前台=不写」分支误红的环境依赖缺陷）；随后 daemon/ticket 两分支断言逐字未动、ticket 分支自设该 env 且 finally 清理，**断言零放宽**。定性=环境隔离修复，正当。
+- `test_t260904_02_worker_meta.py` +4 行：**跨票测试改动，逐行核过**——仅在用例开头 `os.environ.pop("SANDBAR_WORKER_META")` 清场（泳道内 supervisor 注入导致「前台=不写」分支误红的环境依赖缺陷）；随后 daemon/ticket 两分支断言逐字未动、ticket 分支自设该 env 且 finally 清理，**断言零放宽**。定性=环境隔离修复，正当。
 - 契约增补段「失败软降级」条补防呆语义一句：与实现一致（fail-closed 跳过+note 不阻塞），文档零漂移。
 
 ### UI 呈现检查项：不适用
@@ -45,7 +45,7 @@ rework 改动全部在引擎（agent_activities.py）、host 数据层（metrics
 
 1. **非阻塞小疵（hardening nit，不构成打回）**：Python `re.match` 的 `$` 在尾随换行前也匹配——ticket_id 形如 `"t260904-09\n"` 可过白名单，产出文件名带字面换行的快照（仍落 settle 目录**内**，无穿越可能，字符集无 `.`/`/`）。后续随手票改 `re.fullmatch` 更严，不急。
 2. **白名单fail-closed 的形状取舍**：票 id 现被钉在 `^[a-z0-9][a-z0-9-]{0,40}$`（与 PROJECT_KEY_RE 共用）。未来若出现带下划线/大写/更长的合法票号形状，会被跳过快照（软降级+note 可发现，不卡交付）——契约增补段已成文该语义，属已知边界非缺陷。
-3. **SUYOU_METRICS_DIR 迁移欠账（承 gen0 注记）**：该存量 env 现为两侧根链中段一环（TS+Python），专门迁移票退役时须两侧同批摘除。
+3. **SANDBAR_METRICS_DIR 迁移欠账（承 gen0 注记）**：该存量 env 现为两侧根链中段一环（TS+Python），专门迁移票退役时须两侧同批摘除。
 4. **生产端到端首票**：快照语义自部署后首个真实 settle 起产生存量，「真实闭单票面板=快照值」的生产实证待自然达成（当前由 W1 写+R1 读跨组件链路覆盖）。
 
 ## 参考 docs（本段读过）

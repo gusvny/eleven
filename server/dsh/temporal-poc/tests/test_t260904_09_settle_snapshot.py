@@ -79,7 +79,7 @@ def _env(tmp_path, **kw):
 
 @pytest.fixture
 def clean_env(monkeypatch):
-    for k in ("SANDBAR_SETTLE_SNAPSHOT_DIR", "SUYOU_METRICS_DIR", "SANDBAR_PROJECTS_DIR"):
+    for k in ("SANDBAR_SETTLE_SNAPSHOT_DIR", "SANDBAR_METRICS_DIR", "SANDBAR_PROJECTS_DIR"):
         monkeypatch.delenv(k, raising=False)
     yield monkeypatch
 
@@ -91,9 +91,9 @@ def test_snapshot_dir_env_chain(tmp_path, clean_env):
     # env 替换项目根整体
     clean_env.setenv("SANDBAR_SETTLE_SNAPSHOT_DIR", "/tmp/snap-x")
     assert aa._settle_snapshot_dir(KEY) == Path("/tmp/snap-x") / KEY / "data" / "settle"
-    # 次选 SUYOU_METRICS_DIR
+    # 次选 SANDBAR_METRICS_DIR
     clean_env.delenv("SANDBAR_SETTLE_SNAPSHOT_DIR")
-    clean_env.setenv("SUYOU_METRICS_DIR", "/tmp/m-x")
+    clean_env.setenv("SANDBAR_METRICS_DIR", "/tmp/m-x")
     assert aa._settle_snapshot_dir(KEY) == Path("/tmp/m-x") / KEY / "data" / "settle"
     # 空 key / 非法 key → None（快照跳过）
     assert aa._settle_snapshot_dir("") is None

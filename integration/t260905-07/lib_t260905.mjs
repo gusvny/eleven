@@ -101,11 +101,11 @@ export async function makeFixtureConsole() {
   const userDsh = [process.env.DSH_HOME, join(process.env.HOME || '', '.dsh')]
     .filter(Boolean).find((d) => existsSync(join(d, '.credentials.yaml')))
   if (userDsh) copyFileSync(join(userDsh, '.credentials.yaml'), join(tmpHome, '.credentials.yaml'))
-  const presetSrc = process.env.SUYOU_CAPTURE_PRESET_SOURCE
-    || join(process.env.HOME || '', '.dsh', '.agent-presets', 'suyou-integration')
+  const presetSrc = process.env.SANDBAR_CAPTURE_PRESET_SOURCE
+    || join(process.env.HOME || '', '.dsh', '.agent-presets', 'suyou-integration')  // naming-compat
   const presetReject = captureLane.presetMaterializeRejectReason(presetSrc)
   if (presetReject) {
-    const e = new Error(`preset 物化拒绝：${presetReject}（env SUYOU_CAPTURE_PRESET_SOURCE 可指 preset 源）`)
+    const e = new Error(`preset 物化拒绝：${presetReject}（env SANDBAR_CAPTURE_PRESET_SOURCE 可指 preset 源）`)
     e.envFail = true
     throw e
   }
@@ -127,7 +127,7 @@ export async function makeFixtureConsole() {
       env: {
         ...process.env,
         DSH_HOME: tmpHome,
-        SUYOU_TARGET_HOST: process.env.SANDBAR_T07_TARGET_HOST || '127.0.0.1:17233',
+        SANDBAR_TARGET_HOST: process.env.SANDBAR_T07_TARGET_HOST || '127.0.0.1:17233',
       },
       detached: true,
       stdio: ['ignore', logFd, logFd],

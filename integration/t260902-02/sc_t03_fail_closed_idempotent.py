@@ -60,7 +60,7 @@ def main():
         lane3 = fx.make_lane(sb, lane_name="lane-bad", bad_stage=True)
         res3 = fx.invoke_archive(aa, ticket_id="t-integ-bad", project_key=KEY,
                                  worktree=lane3, meta={"stage": "merge"})
-        bad_src = lane3 / ".suyou" / "stage_implement_gen0.json"
+        bad_src = lane3 / ".suyou" / "stage_implement_gen0.json"  # naming-compat
         bad_dst = sb.archive_dir(KEY, "t-integ-bad") / "stages" / "stage_implement_gen0.json"
         L.ok(bad_dst.is_file() and bad_dst.read_bytes() == bad_src.read_bytes(),
              "坏 JSON 结果文件按字节归档（不解析内容、不失败）")

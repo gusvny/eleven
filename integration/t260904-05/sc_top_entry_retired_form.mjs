@@ -27,7 +27,7 @@
 // Execution contract (t260904-12 三态): stdout last line
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; missing deps → env_fail
 // (exit 2); FAIL>0 或全腿 na → exit 1. Isolated console
-// SUYOU_TEST_CONSOLE (default: lib_stage_console 共享台); hard guard: never 3099.
+// SANDBAR_TEST_CONSOLE (default: lib_stage_console 共享台); hard guard: never 3099.
 
 import { STAGE_SEED_ROW_SEL } from '../lib_stage_console.mjs';
 import { readFileSync } from 'node:fs';

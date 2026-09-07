@@ -41,11 +41,11 @@
  *   half (real code exec); forcing a real agent to fail is out of stub-brain scope.
  *
  * Write-guard (this test creates tickets; it refuses an unclear target):
- *   SUYOU_TARGET_HOST unset -> ENV_FAIL loudly; == production default 127.0.0.1:7233
+ *   SANDBAR_TARGET_HOST unset -> ENV_FAIL loudly; == production default 127.0.0.1:7233
  *   -> FAIL; anything else must equal the pinned test env 127.0.0.1:17233.
  *
  * Nested-run guard: inside a lane's mechanical integration step
- * (SUYOU_TASK_QUEUE/SUYOU_WATCH_WORKFLOW present) the env half reports ENV_FAIL loudly —
+ * (SANDBAR_TASK_QUEUE/SANDBAR_WATCH_WORKFLOW present) the env half reports ENV_FAIL loudly —
  * same recursion guard as ticket-lifecycle; the pure half still runs.
  */
 
@@ -70,7 +70,7 @@ function section(t) { console.log(`\n== ${t}`) }
 
 /** The nested-run guard: any dedicated-worker env marker means "inside a lane". */
 function nestedGuard(env = process.env) {
-  return (env.SUYOU_TASK_QUEUE || env.SUYOU_WATCH_WORKFLOW) ? 'nested' : 'top'
+  return (env.SANDBAR_TASK_QUEUE || env.SANDBAR_WATCH_WORKFLOW) ? 'nested' : 'top'
 }
 
 /* ------------------------------------------------------------------ pure A */
@@ -312,8 +312,8 @@ async function envHalf() {
   section('env: real engine rework-signal matrix (Docker test Temporal + stub brains)')
   const t = makeTally()
   const guard = writeGuard()
-  if (guard === 'env_fail') { envFail++; console.log('  ENV_FAIL write-guard: SUYOU_TARGET_HOST not set explicitly -- refusing to create tickets on an unclear target (set SUYOU_TARGET_HOST=127.0.0.1:17233)'); return }
-  if (guard === 'fail') { fail++; console.error('  FAIL write-guard: SUYOU_TARGET_HOST points at the production default'); return }
+  if (guard === 'env_fail') { envFail++; console.log('  ENV_FAIL write-guard: SANDBAR_TARGET_HOST not set explicitly -- refusing to create tickets on an unclear target (set SANDBAR_TARGET_HOST=127.0.0.1:17233)'); return }
+  if (guard === 'fail') { fail++; console.error('  FAIL write-guard: SANDBAR_TARGET_HOST points at the production default'); return }
   const sdkPython = findSdkPython(t)
   if (!await ensureTestTemporal(t)) { envFail++; console.log('  ENV_FAIL env half: Docker test Temporal unavailable'); return }
   const fixture = await buildFixture(t)
@@ -329,7 +329,7 @@ async function main() {
   const nested = nestedGuard() === 'nested'
   if (nested) {
     envFail++
-    console.log('  ENV_FAIL env half: nested inside a lane integration step (SUYOU_TASK_QUEUE/SUYOU_WATCH_WORKFLOW present) -- top-level runs carry the signal-matrix coverage')
+    console.log('  ENV_FAIL env half: nested inside a lane integration step (SANDBAR_TASK_QUEUE/SANDBAR_WATCH_WORKFLOW present) -- top-level runs carry the signal-matrix coverage')
   }
   pureHalf()
   if (!nested) await envHalf()

@@ -16,7 +16,7 @@
  *  J2 TTL 内再查：响应剔除 generated_at/cache.computed_at 后逐字节稳定（数字不漂）。
  *  J3 条件A隔离（open 一致 + null + 过 TTL）→ 重探自愈。
  *  J4 updated_ts 缺失（NaN）→ 视为过期，不自锁。
- *  J5 SUYOU_METRICS_REPROBE_TTL_MIN=0 → 每请求必探仍自愈。
+ *  J5 SANDBAR_METRICS_REPROBE_TTL_MIN=0 → 每请求必探仍自愈。
  *  J6 重开面板第一拍 fast：自愈后的快照关闭数即正确、status='stale'（cache-first 字面）。
  *
  * 与既有资产 intent 区别：t260903-09-kpi-invariants 守新鲜数据的人口自洽；
@@ -83,7 +83,7 @@ const stub = {
   },
 }
 
-const savedTtl = process.env.SUYOU_METRICS_REPROBE_TTL_MIN
+const savedTtl = process.env.SANDBAR_METRICS_REPROBE_TTL_MIN
 try {
   await withStub(stub, async ({ deps, cacheRoot }) => {
     /* J0 夹具自检：冷跑全量，实现自己落盘缓存 */
@@ -123,11 +123,11 @@ try {
     ok(healed3.body?.kpis?.closed === 2, 'J4 updated_ts 缺失视为过期，存量脏记录不自锁', `got ${JSON.stringify(healed3.body?.kpis)}`)
 
     /* J5 TTL=0 → 每请求必探 */
-    process.env.SUYOU_METRICS_REPROBE_TTL_MIN = '0'
+    process.env.SANDBAR_METRICS_REPROBE_TTL_MIN = '0'
     await poison(cacheRoot, 't-heal', { open: false, oldTs: false, dropTs: false })
     const healed4 = await callMetrics(deps, { view: 'time', window: 'all' })
     ok(healed4.body?.kpis?.closed === 2, 'J5 TTL=0 每请求必探仍自愈', `got ${JSON.stringify(healed4.body?.kpis)}`)
-    delete process.env.SUYOU_METRICS_REPROBE_TTL_MIN
+    delete process.env.SANDBAR_METRICS_REPROBE_TTL_MIN
 
     /* J6 重开面板第一拍 fast：自愈后的快照即正确 */
     const fast = await callMetrics(deps, { view: 'time', window: 'all', mode: 'fast' })
@@ -135,7 +135,7 @@ try {
     ok(fast.body?.kpis?.closed === 2, 'J6 自愈后 fast 快照关闭数=2（第一拍即正确）', `got ${JSON.stringify(fast.body?.kpis)}`)
   })
 } finally {
-  if (savedTtl === undefined) delete process.env.SUYOU_METRICS_REPROBE_TTL_MIN
-  else process.env.SUYOU_METRICS_REPROBE_TTL_MIN = savedTtl
+  if (savedTtl === undefined) delete process.env.SANDBAR_METRICS_REPROBE_TTL_MIN
+  else process.env.SANDBAR_METRICS_REPROBE_TTL_MIN = savedTtl
 }
 process.exit(done('t260904-04-stale-cache-heal-journey'))

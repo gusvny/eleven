@@ -14,7 +14,7 @@ import { ensureStageConsole } from '../lib_stage_console.mjs';
 //     unchanged, repeated clicks across rows stay zero-injection.
 //
 // Server-layer scenarios talk HTTP to the ISOLATED test console
-// (SUYOU_TEST_CONSOLE, default 127.0.0.1:3199; hard guard: never 3099).
+// (SANDBAR_TEST_CONSOLE, default 127.0.0.1:3199; hard guard: never 3099).
 // Browser-layer scenarios use playwright-core against the same console and
 // record env_fail (exit 2) when it is unavailable (see integration/README.md
 // provisioning; t260904-12 三态契约：缺环境绝不 exit 0 假绿).
@@ -42,7 +42,7 @@ function summarize() {
 }
 
 if (BASE.includes(':3099')) {
-  console.error('refusing to run: SUYOU_TEST_CONSOLE points at the production console (3099)');
+  console.error('refusing to run: SANDBAR_TEST_CONSOLE points at the production console (3099)');
   process.exit(1);
 }
 
@@ -148,7 +148,7 @@ async function serverScenarios() {
 
 async function browserScenarios() {
   let pw = null;
-  for (const c of [process.env.SUYOU_PLAYWRIGHT_PATH, 'playwright-core',
+  for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core',
     new URL('../../server/dsh/ui-check/node_modules/playwright-core/index.mjs', `file://${process.cwd()}/`).href]) {
     if (!c) continue;
     try { pw = await import(c); break; } catch { /* next */ }

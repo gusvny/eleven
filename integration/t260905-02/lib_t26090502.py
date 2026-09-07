@@ -31,8 +31,8 @@ KNOB_FAST = "2"
 def child_env(stage_host, namespace, audit_env, extra=None):
     """被测 worker 子进程 env：连舞台 temporal/舞台 namespace/审计钩子护体。"""
     env = dict(os.environ)
-    env["SUYOU_TARGET_HOST"] = stage_host
-    env["SUYOU_NAMESPACE"] = namespace
+    env["SANDBAR_TARGET_HOST"] = stage_host
+    env["SANDBAR_NAMESPACE"] = namespace
     if audit_env:
         env.update(audit_env)
     env.update(extra or {})

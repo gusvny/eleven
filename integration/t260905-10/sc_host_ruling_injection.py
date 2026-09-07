@@ -9,7 +9,7 @@ intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：
 （meta.host_rulings）经 query 可查。
 
 驱动机制（review D1 要求写明；本场景是三篇里唯一真起 workflow 的）：
-- 模型边界桩：SUYOU_AGENT_CMD 指向 recorder 桩（spawn 命令单点 _prepare_agent_spawn
+- 模型边界桩：SANDBAR_AGENT_CMD 指向 recorder 桩（spawn 命令单点 _prepare_agent_spawn
   的 cmd=list(DSH_CMD)，_run_agent_stage_impl 与 arbitrate 全口径生效）。recorder
   把引擎递来的 prompt 原样落 JSONL 账本（=mock 端点收到的 messages 的等价观测面，
   用户可感知产物），再按交付契约把结果文件写回（status=ok、summary 恒无 verdict=
@@ -60,7 +60,7 @@ BIG_NOTE = "超限压力测试" * 3400  # 20400 字>intake 闸（20000）：refu
 #  ——闸语义只要「超限」即可，不必逼近进程参数上限）
 
 RECORDER = r"""
-# 引擎 spawn 命令桩（SUYOU_AGENT_CMD 指向本脚本）：argv=[py, recorder, ...flags, <prompt>]
+# 引擎 spawn 命令桩（SANDBAR_AGENT_CMD 指向本脚本）：argv=[py, recorder, ...flags, <prompt>]
 # ——引擎按 dsh CLI 组装命令（--patch 等 flag 在前），prompt 恒为末位 argv。
 # 职责：①prompt 原样落账本（JSONL，供场景断言）；②按交付契约把结果文件写回
 # （status=ok，summary 恒不带 verdict= 标记 → arbitrate 三次格式纠正后 blocked）。
@@ -85,8 +85,8 @@ if m:
 
 def stage_env(state, registry_dir, audit_env=None):
     env = dict(os.environ)
-    env["SUYOU_TARGET_HOST"] = "127.0.0.1:%d" % state["ports"]["temporal"]
-    env["SUYOU_NAMESPACE"] = state["namespace"]
+    env["SANDBAR_TARGET_HOST"] = "127.0.0.1:%d" % state["ports"]["temporal"]
+    env["SANDBAR_NAMESPACE"] = state["namespace"]
     env["SANDBAR_PROJECTS_DIR"] = registry_dir
     if audit_env:
         env.update(audit_env)
@@ -114,10 +114,10 @@ def spawn_worker(py, tid, env, log_path, recorder_path, recorder_log):
     """工单专属 worker（前台跑，watch 收口自退；不走 --daemon——双叉会让日志与
     进程脱离场景管控）。返回 Popen。"""
     wenv = dict(env)
-    wenv["SUYOU_TASK_QUEUE"] = "suyou-ticket-%s" % tid
-    wenv["SUYOU_WATCH_WORKFLOW"] = tid
+    wenv["SANDBAR_TASK_QUEUE"] = "suyou-ticket-%s" % tid  # naming-compat
+    wenv["SANDBAR_WATCH_WORKFLOW"] = tid
     wenv["SANDBAR_WATCH_INTERVAL_SEC"] = "2"
-    wenv["SUYOU_AGENT_CMD"] = "%s %s" % (py, recorder_path)
+    wenv["SANDBAR_AGENT_CMD"] = "%s %s" % (py, recorder_path)
     wenv["RECORDER_LOG"] = recorder_log
     logf = open(log_path, "ab")
     return subprocess.Popen([py, os.path.join(REPO, "server", "dsh", "temporal-poc",

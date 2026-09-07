@@ -4,7 +4,7 @@
 fixture 泳道（tmp）：三系入档（stage_*.json 含坏 JSON 原样 / screenshots 保层级 /
 .dsh/sessions 含 slug 子目录）+ 排除面（agent_*.log / model_patch / resume_patch /
 .credentials.yaml 不入档）+ 幂等重跑 + 损坏 manifest 拒重产 + 引用缺失拒重产 +
-.suyou 缺失灰面代理文件 + .dsh 缺失记 absent + legacy 诚实过账 + 只读目标 fail-closed。
+.suyou 缺失灰面代理文件 + .dsh 缺失记 absent + legacy 诚实过账 + 只读目标 fail-closed。  # naming-compat
 
 temporalio 桩（只挡模块级依赖）；activity 为 async，asyncio.run 直跑 .fn。
 跑法：python3 integration/t260902-02/t02_archive_ticket.py（cwd=泳道根）
@@ -63,16 +63,16 @@ def ok(cond, label):
 def make_lane(with_suyou=True, with_dsh=True):
     lane = Path(tempfile.mkdtemp(prefix="t02-lane-"))
     if with_suyou:
-        (lane / ".suyou" / "screenshots" / "sub").mkdir(parents=True)
-        (lane / ".suyou" / "stage_create_plan_gen0.json").write_text(
+        (lane / ".suyou" / "screenshots" / "sub").mkdir(parents=True)  # naming-compat
+        (lane / ".suyou" / "stage_create_plan_gen0.json").write_text(  # naming-compat
             '{"status":"ok"}', encoding="utf-8")
-        (lane / ".suyou" / "stage_implement_gen0.json").write_text(
+        (lane / ".suyou" / "stage_implement_gen0.json").write_text(  # naming-compat
             "{not valid json", encoding="utf-8")   # 坏 JSON 原样入档
-        (lane / ".suyou" / "screenshots" / "a.png").write_bytes(b"\x89PNG fake-a")
-        (lane / ".suyou" / "screenshots" / "sub" / "b.png").write_bytes(b"\x89PNG fake-b")
-        (lane / ".suyou" / "agent_create_plan_gen0.log").write_text("spawn log", encoding="utf-8")
-        (lane / ".suyou" / "model_patch_create_plan_gen0.yml").write_text("x: 1", encoding="utf-8")
-        (lane / ".suyou" / "resume_patch_create_plan_gen0.yml").write_text("y: 2", encoding="utf-8")
+        (lane / ".suyou" / "screenshots" / "a.png").write_bytes(b"\x89PNG fake-a")  # naming-compat
+        (lane / ".suyou" / "screenshots" / "sub" / "b.png").write_bytes(b"\x89PNG fake-b")  # naming-compat
+        (lane / ".suyou" / "agent_create_plan_gen0.log").write_text("spawn log", encoding="utf-8")  # naming-compat
+        (lane / ".suyou" / "model_patch_create_plan_gen0.yml").write_text("x: 1", encoding="utf-8")  # naming-compat
+        (lane / ".suyou" / "resume_patch_create_plan_gen0.yml").write_text("y: 2", encoding="utf-8")  # naming-compat
     if with_dsh:
         (lane / ".dsh" / "sessions" / "repo--slug--").mkdir(parents=True)
         (lane / ".dsh" / "sessions" / "repo--slug--" / "sess1.zst").write_bytes(b"zstd-bytes")
@@ -154,7 +154,7 @@ def main():
         ok(res4.ok and (dst / "stages" / "stage_create_plan_gen0.json").read_text() == '{"status":"ok"}',
            "引用存在但内容被改 → 重拷自愈回真值")
 
-        # ---- case 5：.suyou 缺失灰面 → 代理文件 + .dsh 缺失 → absent ----
+        # ---- case 5：.suyou 缺失灰面 → 代理文件 + .dsh 缺失 → absent ----  # naming-compat
         lane2 = make_lane(with_suyou=False, with_dsh=False)
         res5 = run_archive(lane2, tid="t02-gray")
         dst5 = Path(res5.archive_path)

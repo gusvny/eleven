@@ -3,8 +3,8 @@
  *
  * Intent:
  *   Lock the CURRENT dev-lane engine chain end to end: real Docker test Temporal
- *   (17233 / suyou-test) + real per-ticket worker + real settle / merge / lane
- *   cleanup / human gates. The only stubs are the agent brains (SUYOU_AGENT_STUB=1
+ *   (17233 / suyou-test) + real per-ticket worker + real settle / merge / lane  // naming-compat
+ *   cleanup / human gates. The only stubs are the agent brains (SANDBAR_AGENT_STUB=1
  *   stages self-complete, zero model calls). Terminal status is `closed` (the
  *   legacy `settled` name is gone), the only human gate is merge (exit=human), and
  *   implement || design_integration_tests really forks in parallel.
@@ -21,10 +21,10 @@
  *      extension) + integration/ exemption in the real settle.
  *
  * Two run modes, decided by env:
- *   - Top-level (human/maintenance run): neither SUYOU_TASK_QUEUE nor
- *     SUYOU_WATCH_WORKFLOW is set -> scenes execute.
+ *   - Top-level (human/maintenance run): neither SANDBAR_TASK_QUEUE nor
+ *     SANDBAR_WATCH_WORKFLOW is set -> scenes execute.
  *   - Inside a lane's mechanical integration step: the worker env carries
- *     SUYOU_TASK_QUEUE / SUYOU_WATCH_WORKFLOW, and _run_manifest inherits it -> the
+ *     SANDBAR_TASK_QUEUE / SANDBAR_WATCH_WORKFLOW, and _run_manifest inherits it -> the
  *     nested guard records ENV_FAIL loudly (exit 2) instead of recursing (each nested run would clone a
  *     fixture, start a worker and spawn integ-e2e- tickets: unbounded recursion).
  *     Consequence, on record: this manifest entry always records env_fail inside the engine's
@@ -38,7 +38,7 @@
  *     scenes A-E, each with its own worker lifecycle (WATCH self-exit + owner kill).
  *
  * Write-guard (this test creates tickets; it refuses an unclear target):
- *   SUYOU_TARGET_HOST unset -> ENV_FAIL loudly (exit 2); == production default 127.0.0.1:7233
+ *   SANDBAR_TARGET_HOST unset -> ENV_FAIL loudly (exit 2); == production default 127.0.0.1:7233
  *   -> FAIL; anything else must equal the pinned test env 127.0.0.1:17233.
  */
 
@@ -52,7 +52,7 @@ const tally = makeTally()
 
 /** The nested-run guard: any dedicated-worker env marker means "inside a lane". */
 export function nestedGuard(env = process.env) {
-  return (env.SUYOU_TASK_QUEUE || env.SUYOU_WATCH_WORKFLOW) ? 'nested' : 'top'
+  return (env.SANDBAR_TASK_QUEUE || env.SANDBAR_TASK_QUEUES || env.SANDBAR_WATCH_WORKFLOW) ? 'nested' : 'top'
 }
 
 /** Fold the shared tally's counters (env_fail notes from env-chain helpers) into the module totals. */
@@ -72,7 +72,7 @@ async function main() {
   /* ---- pure half 1: nested guard (must come first; recursion breaks the budget) */
   if (nestedGuard() === 'nested') {
     envFail++
-    console.log('  ENV_FAIL nested inside a lane integration step (SUYOU_TASK_QUEUE/SUYOU_WATCH_WORKFLOW present): recursive guard, top-level runs carry the coverage')
+    console.log('  ENV_FAIL nested inside a lane integration step (SANDBAR_TASK_QUEUE/SANDBAR_WATCH_WORKFLOW present): recursive guard, top-level runs carry the coverage')
     foldTally()
   console.log(`\nSUMMARY pass=${pass} fail=${fail} env_fail=${envFail}`)
     process.exit(2)
@@ -82,16 +82,16 @@ async function main() {
   {
     const t = makeTally()
     t.section('P1 write-guard triad (simulated targets, env restored after)')
-    const saved = process.env.SUYOU_TARGET_HOST
+    const saved = process.env.SANDBAR_TARGET_HOST
     const withEnv = async (v, fn) => {
-      if (v === undefined) delete process.env.SUYOU_TARGET_HOST
-      else process.env.SUYOU_TARGET_HOST = v
+      if (v === undefined) delete process.env.SANDBAR_TARGET_HOST
+      else process.env.SANDBAR_TARGET_HOST = v
       try { return await fn() } finally {
-        if (saved === undefined) delete process.env.SUYOU_TARGET_HOST
-        else process.env.SUYOU_TARGET_HOST = saved
+        if (saved === undefined) delete process.env.SANDBAR_TARGET_HOST
+        else process.env.SANDBAR_TARGET_HOST = saved
       }
     }
-    t.ok(await withEnv(undefined, writeGuard) === 'env_fail', 'unset SUYOU_TARGET_HOST -> env_fail (client.py would default to production)')
+    t.ok(await withEnv(undefined, writeGuard) === 'env_fail', 'unset SANDBAR_TARGET_HOST -> env_fail (client.py would default to production)')
     t.ok(await withEnv('127.0.0.1:7233', writeGuard) === 'fail', 'explicit production default -> fail (red line)')
     t.ok(await withEnv('127.0.0.1:9999', writeGuard) === 'fail', 'unclear target -> fail')
     t.ok(await withEnv('127.0.0.1:17233', writeGuard) === 'run', 'pinned test env -> run')
@@ -105,7 +105,7 @@ async function main() {
     }
     if (guard === 'env_fail') {
       envFail++
-      console.log('  ENV_FAIL write-guard: SUYOU_TARGET_HOST not set explicitly -- refusing to create tickets on an unclear target (set SUYOU_TARGET_HOST=127.0.0.1:17233)')
+      console.log('  ENV_FAIL write-guard: SANDBAR_TARGET_HOST not set explicitly -- refusing to create tickets on an unclear target (set SANDBAR_TARGET_HOST=127.0.0.1:17233)')
       foldTally()
   console.log(`\nSUMMARY pass=${pass} fail=${fail} env_fail=${envFail}`)
       process.exit(2)

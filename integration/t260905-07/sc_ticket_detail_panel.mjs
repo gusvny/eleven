@@ -143,7 +143,7 @@ try {
   summarize();
 }
 
-const OUT_DIR = join(process.cwd(), '.suyou', 'screenshots', 't260905-07');
+const OUT_DIR = join(process.cwd(), '.suyou', 'screenshots', 't260905-07');  // naming-compat
 const writeApis = [];
 
 try {

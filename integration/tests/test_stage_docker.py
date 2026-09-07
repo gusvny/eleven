@@ -95,7 +95,7 @@ def main():
             pathlib.Path(STATE, "last-up.json").write_text(json.dumps(
                 {"project": proj, "services": services, "ports": ports,
                  "env": {k: v for k, v in os.environ.items() if k.startswith("SANDBAR_TEST_")
-                         or k in ("SUYOU_TARGET_HOST", "SANDBAR_PROJECTS_DIR")}}))
+                         or k in ("SANDBAR_TARGET_HOST", "SANDBAR_PROJECTS_DIR")}}))
             log = open(pathlib.Path(STATE, "up.log"), "a")
             subprocess.Popen([sys.executable, __file__, "--hold", json.dumps(ports)],
                              stdout=log, stderr=log, start_new_session=True,
@@ -157,7 +157,7 @@ class StageCLIBase(unittest.TestCase):
         self._saved_env = {}
         for k in ("FAKE_DOCKER_STATE", "SANDBAR_STAGE_LOCK_DIR", "PATH",
                   "SANDBAR_TEST_CONSOLE_PORT", "SANDBAR_TEST_TEMPORAL_PORT",
-                  "SANDBAR_TEST_TEMPORAL_UI_PORT", "SUYOU_TEMPORAL_BIN"):
+                  "SANDBAR_TEST_TEMPORAL_UI_PORT", "SANDBAR_TEMPORAL_BIN"):
             self._saved_env[k] = os.environ.get(k)
 
     def tearDown(self):
@@ -177,7 +177,7 @@ class StageCLIBase(unittest.TestCase):
         e["PATH"] = self.bin + os.pathsep + e["PATH"]
         # L1 固定「CLI 不可得」路径：env 指路不存在文件 → resolve 抛 MissingAsset → cli=None
         # （不然主树回退真 CLI 会去连假台，sa_note 落「namespace create 失败」分支）
-        e["SUYOU_TEMPORAL_BIN"] = "/nonexistent-stage-l1/temporal"
+        e["SANDBAR_TEMPORAL_BIN"] = "/nonexistent-stage-l1/temporal"
         e.update({k: str(v) for k, v in extra.items()})
         return e
 
@@ -234,7 +234,7 @@ class UpDownTest(StageCLIBase):
         up = self.last_up()
         self.assertEqual(up["services"], ["dsh"])
         self.assertEqual(up["env"]["SANDBAR_TEST_TARGET_HOST"], "127.0.0.1:1",
-                         "dsh-only 台容器内引擎地址=容器内死端口（compose 映射 SUYOU_TARGET_HOST）")
+                         "dsh-only 台容器内引擎地址=容器内死端口（compose 映射 SANDBAR_TARGET_HOST）")
         self.cli("down", "--project", "utd")
 
     def test_concurrent_double_up_distinct_bands(self):

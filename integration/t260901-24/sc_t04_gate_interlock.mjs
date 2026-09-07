@@ -4,12 +4,12 @@
  * 直跑：node integration/t260901-24/t04-gate-interlock.mjs（cwd=泳道根）。
  *
  * 黑盒契约（第 2 稿方案 R2/联锁 + review C1）：
- *   - 注入是显式 opt-in：capture.mjs 带 `--fixtures`（或 env SUYOU_UI_CAPTURE_FIXTURES=1）
+ *   - 注入是显式 opt-in：capture.mjs 带 `--fixtures`（或 env SANDBAR_UI_CAPTURE_FIXTURES=1）
  *     而无 allow-seed 通路 → 退出码 2 + 人话拒因（提门旗），直连真生产台绝不允许注假票；
  *   - allow-seed 通路 + fixtures → 参数层放行（--selftest 干跑，不起浏览器）；
  *   - 缺省（无任何 fixture 通路）→ 行为通路无关：缺省与 env 置空的 selftest 视图数
  *     一致且非零（视图数字面不锚——capture 工具合法加视图随票演进，t260907-05 gen4 起）；
- *   - capture-lane.mjs --selftest 带/不带 SUYOU_CAPTURE_FIXTURES=1 均全绿
+ *   - capture-lane.mjs --selftest 带/不带 SANDBAR_CAPTURE_FIXTURES=1 均全绿
  *     （opt-in 只影响真拍传参，不影响自测）。前提守卫：泳道 worktree 缺 gitignored
  *     的 profile/node_modules 时（环境事实），selftest 按设计 fail-closed——
  *     该形态改验「拒跑+报因精确、可跑前段计绿不假报」，见 capture-lane selftest 节。
@@ -58,7 +58,7 @@ const tmp = mkdtempSync(join(tmpdir(), 't260901-24-t04-'))
   const pwLane = join(REPO, 'server', 'dsh', 'ui-check', 'node_modules', 'playwright-core')
   const pwMain = join(resolve(REPO, '..', '..'), 'server', 'dsh', 'ui-check',
                       'node_modules', 'playwright-core')
-  if (!process.env.SUYOU_PLAYWRIGHT_MODULE && !existsSync(pwLane) && !existsSync(pwMain)) {
+  if (!process.env.SANDBAR_PLAYWRIGHT_MODULE && !existsSync(pwLane) && !existsSync(pwMain)) {
     console.log('ENV_FAIL（KI-036）：ui-check 缺 playwright-core（本树+主树均无），'
       + '宿主沙箱外安装恢复后本守卫自动生效')
     process.exit(2)
@@ -72,7 +72,7 @@ try {
   ok(/allow-seed|门旗|fixtures/i.test(r.stderr), `拒因人话提门旗（实际：${firstLine(r.stderr)}）`)
 
   r = run(CAPTURE, ['--url', 'http://127.0.0.1:9', '--out', join(tmp, 'o2'), '--fixtures', 'x'], {
-    SUYOU_UI_CAPTURE_ALLOW_SEED: '', SUYOU_UI_CAPTURE_FIXTURES: '1',
+    SANDBAR_UI_CAPTURE_ALLOW_SEED: '', SANDBAR_UI_CAPTURE_FIXTURES: '1',
   })
   ok(r.status === 2, `env 通路（UI_CAPTURE_FIXTURES=1 无 allow-seed）拒跑退出 2（实际：${r.status}）`)
 
@@ -81,7 +81,7 @@ try {
     '--fixtures', join(tmp, 'fx'), '--allow-seed', '--selftest'])
   ok(r.status === 0, `--allow-seed + --fixtures + --selftest 退出 0（实际：${r.status}；stderr：${firstLine(r.stderr)}）`)
   r = run(CAPTURE, ['--url', 'http://127.0.0.1:9', '--out', join(tmp, 'o4'),
-    '--fixtures', join(tmp, 'fx'), '--selftest'], { SUYOU_UI_CAPTURE_ALLOW_SEED: '1' })
+    '--fixtures', join(tmp, 'fx'), '--selftest'], { SANDBAR_UI_CAPTURE_ALLOW_SEED: '1' })
   ok(r.status === 0, `env allow-seed 通路 + --fixtures 放行（实际：${r.status}）`)
 
   section('缺省回归：无任何 fixture 通路 → 视图口径通路无关（视图数不随 fixtures 通路改变）')
@@ -95,12 +95,12 @@ try {
   ok(viewsDefault !== undefined && Number(viewsDefault) > 0,
     `缺省 selftest 报告非零视图数（实际：${viewsDefault ?? '未找到'}）`)
   r = run(CAPTURE, ['--url', 'http://127.0.0.1:9', '--out', join(tmp, 'o6'), '--selftest'],
-    { SUYOU_UI_CAPTURE_FIXTURES: '' })
+    { SANDBAR_UI_CAPTURE_FIXTURES: '' })
   const viewsEmptyEnv = (r.stdout.match(/视图数=(\d+)/) || [])[1]
   ok(viewsEmptyEnv === viewsDefault,
     `env 显式置空 → 视图数与缺省一致（env 空串=关闭语义；实际：${viewsEmptyEnv ?? '未找到'} vs ${viewsDefault ?? '未找到'}）`)
 
-  section('capture-lane selftest：带/不带 SUYOU_CAPTURE_FIXTURES 均全绿')
+  section('capture-lane selftest：带/不带 SANDBAR_CAPTURE_FIXTURES 均全绿')
   // 前提守卫（合并版：t260904-04 arbitrate gen3 双模断言 × t260904-06 arbitrate KI-036②
   // 守卫，两边守的是同一条硬前提=<repo>/server/dsh/profile/node_modules/sandbar-workbench
   // 软链——组临时 profile 要改指泳道 build；gitignored 实体，主树有、worktree 泳道不随迁，
@@ -129,9 +129,9 @@ try {
     ok(r.status !== 0 && r.stderr.includes('主树 profile/node_modules 缺 sandbar-workbench 软链'),
       `泳道缺 profile/node_modules → selftest fail-closed 且报因精确（实际：${r.status}；${firstLine(r.stderr)}）`)
   }
-  r = run(CAPTURE_LANE, ['--selftest'], { SUYOU_CAPTURE_FIXTURES: '1' })
+  r = run(CAPTURE_LANE, ['--selftest'], { SANDBAR_CAPTURE_FIXTURES: '1' })
   if (profileReady) {
-    ok(r.status === 0, `capture-lane --selftest 带 SUYOU_CAPTURE_FIXTURES=1 全绿（实际：${r.status}）`)
+    ok(r.status === 0, `capture-lane --selftest 带 SANDBAR_CAPTURE_FIXTURES=1 全绿（实际：${r.status}）`)
   } else {
     ok(r.status !== 0, `泳道缺 profile/node_modules → fixtures=1 通路同样 fail-closed 拒跑（实际：${r.status}）`)
   }
@@ -151,13 +151,13 @@ function run(script, args, extraEnv = {}) {
     cwd: REPO,
     encoding: 'utf8',
     env: { ...process.env,
-      SUYOU_UI_CAPTURE_ALLOW_SEED: '', SUYOU_UI_CAPTURE_FIXTURES: '',
-      SUYOU_CAPTURE_FIXTURES: '',
+      SANDBAR_UI_CAPTURE_ALLOW_SEED: '', SANDBAR_UI_CAPTURE_FIXTURES: '',
+      SANDBAR_CAPTURE_FIXTURES: '',
       // 本树 ui-check 缺 playwright-core 时镜像 capture-lane 的回退：主树 ui-check
       // （worktree 布局 <main>/.worktrees/<id> 与引擎泳道布局同构）。环境已设则不覆盖。
-      ...(!process.env.SUYOU_PLAYWRIGHT_MODULE && !existsSync(join(REPO, 'server', 'dsh', 'ui-check',
+      ...(!process.env.SANDBAR_PLAYWRIGHT_MODULE && !existsSync(join(REPO, 'server', 'dsh', 'ui-check',
         'node_modules', 'playwright-core'))
-        ? { SUYOU_PLAYWRIGHT_MODULE: join(resolve(REPO, '..', '..'), 'server', 'dsh', 'ui-check',
+        ? { SANDBAR_PLAYWRIGHT_MODULE: join(resolve(REPO, '..', '..'), 'server', 'dsh', 'ui-check',
             'node_modules', 'playwright-core') }
         : {}),
       ...extraEnv },

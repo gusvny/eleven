@@ -49,7 +49,7 @@ if (nodeMajor < 22) {
 }
 
 function resolveMainUiCheck() {
-  const env = process.env.SUYOU_CAPTURE_MAIN_UI_CHECK;
+  const env = process.env.SANDBAR_CAPTURE_MAIN_UI_CHECK;
   if (env && existsSync(path.join(env, "node_modules", "playwright-core", "index.mjs"))) return env;
   try {
     const common = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: LANE_ROOT, encoding: "utf8" }).trim();
@@ -63,7 +63,7 @@ function resolveMainUiCheck() {
 
 async function loadPlaywright(mainUiCheck) {
   const candidates = [];
-  if (process.env.SUYOU_PLAYWRIGHT_PATH) candidates.push(process.env.SUYOU_PLAYWRIGHT_PATH);
+  if (process.env.SANDBAR_PLAYWRIGHT_PATH) candidates.push(process.env.SANDBAR_PLAYWRIGHT_PATH);
   if (mainUiCheck) candidates.push(path.join(mainUiCheck, "node_modules", "playwright-core", "index.mjs"));
   candidates.push("playwright-core");
   for (const c of candidates) {
@@ -127,8 +127,8 @@ async function runCapture({ url, allowSeed, outDir }) {
       env: {
         ...process.env,
         // 门旗只经 argv 传；env 旗在 R1 必须缺席，显式删除防环境污染
-        SUYOU_UI_CAPTURE_ALLOW_SEED: allowSeed ? "1" : "",
-        SUYOU_PLAYWRIGHT_MODULE: mainUiCheck ? path.join(mainUiCheck, "node_modules", "playwright-core") : process.env.SUYOU_PLAYWRIGHT_MODULE || "",
+        SANDBAR_UI_CAPTURE_ALLOW_SEED: allowSeed ? "1" : "",
+        SANDBAR_PLAYWRIGHT_MODULE: mainUiCheck ? path.join(mainUiCheck, "node_modules", "playwright-core") : process.env.SANDBAR_PLAYWRIGHT_MODULE || "",
       },
     });
     let stdout = "", stderr = "";

@@ -18,7 +18,7 @@ intent 分工（防 intent 级重复）：
 - t260904-02-worker-fingerprint-gate＝ensure 消费侧三态判定；本条＝worker 与
   被守 workflow 的生命周期联动（worker 自己决定走）；
 - t260905-02-worker-lifecycle＝外部信号主动停；本条＝自退三态（收口/收养/
-  查询失败不退）。watch 生效前提：SUYOU_WATCH_WORKFLOW 置时 watch 循环才
+  查询失败不退）。watch 生效前提：SANDBAR_WATCH_WORKFLOW 置时 watch 循环才
   存在（ppid 守护在循环体内），收养腿两 env 同置。
 
 三态契约：docker 台缺席=ENV_FAIL exit 2；被测子进程零连生产（审计钩子+自证
@@ -125,9 +125,9 @@ def main():
         meta_a = os.path.join(tmp, "worker-a.meta")
         log_a = os.path.join(tmp, "worker-a.log")
         w_a = spawn_worker(py, log_a, child_env(host, state["namespace"], audit_env, {
-            "SUYOU_TASK_QUEUE": queue or "suyou-ticket-%s" % TID,
-            "SUYOU_WATCH_WORKFLOW": TID,
-            "SUYOU_WORKER_META": meta_a, KNOB: KNOB_FAST}))
+            "SANDBAR_TASK_QUEUE": queue or "suyou-ticket-%s" % TID,  # naming-compat
+            "SANDBAR_WATCH_WORKFLOW": TID,
+            "SANDBAR_WORKER_META": meta_a, KNOB: KNOB_FAST}))
         procs.append(w_a)
         fail.check(wait_marker(log_a, r"worker 起来了", 40),
                    "watch worker 就绪（起来了标记；watch=%s）" % TID)
@@ -145,9 +145,9 @@ def main():
         meta_b = os.path.join(tmp, "worker-b.meta")
         log_b = os.path.join(tmp, "worker-b.log")
         env_b = child_env(host, state["namespace"], audit_env, {
-            "SUYOU_TASK_QUEUE": "suyou-ticket-%s" % TID,
-            "SUYOU_WATCH_WORKFLOW": missing_wf, "SUYOU_WATCH_PPID": "1",
-            "SUYOU_WORKER_META": meta_b, KNOB: KNOB_FAST})
+            "SANDBAR_TASK_QUEUE": "suyou-ticket-%s" % TID,  # naming-compat
+            "SANDBAR_WATCH_WORKFLOW": missing_wf, "SANDBAR_WATCH_PPID": "1",
+            "SANDBAR_WORKER_META": meta_b, KNOB: KNOB_FAST})
         mid = spawn_via_shortlived_parent(py, env_b, log_b)
         try:
             mout, _ = mid.communicate(timeout=20)
@@ -193,9 +193,9 @@ def main():
         meta_c = os.path.join(tmp, "worker-c.meta")
         log_c = os.path.join(tmp, "worker-c.log")
         w_c = spawn_worker(py, log_c, child_env(host, state["namespace"], audit_env, {
-            "SUYOU_TASK_QUEUE": "suyou-ticket-%s" % TID,
-            "SUYOU_WATCH_WORKFLOW": missing_wf2,
-            "SUYOU_WORKER_META": meta_c, KNOB: KNOB_FAST}))
+            "SANDBAR_TASK_QUEUE": "suyou-ticket-%s" % TID,  # naming-compat
+            "SANDBAR_WATCH_WORKFLOW": missing_wf2,
+            "SANDBAR_WORKER_META": meta_c, KNOB: KNOB_FAST}))
         procs.append(w_c)
         fail.check(wait_marker(log_c, r"worker 起来了", 40),
                    "watch worker 就绪（watch 指向不存在 workflow）")
@@ -219,7 +219,7 @@ def main():
                    % (len(hits), json.dumps(hits, ensure_ascii=False)[:120]))
         self_env = dict(os.environ)
         self_env.update(audit_env)
-        self_env["SUYOU_AUDIT_SELFTEST"] = "1"
+        self_env["SANDBAR_AUDIT_SELFTEST"] = "1"
         p = subprocess.run([py, "-c",
                             "import socket; socket.create_connection(('127.0.0.1', 7233), timeout=2)"],
                            env=self_env, capture_output=True, text=True, timeout=30)

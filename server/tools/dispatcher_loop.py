@@ -3,7 +3,7 @@
 """dispatcher_loop —— 总管单例巡检（260820 用户要求：dispatcher 应被定时调度起来检查+派发，且 singleton）。
 
 职责：
-1. 单例锁：锁文件 /tmp/suyou-dispatcher.lock（JSON {session, ts}，TTL 600s）。
+1. 单例锁：锁文件 /tmp/sandbar-dispatcher.lock（JSON {session, ts}，TTL 600s；旧 /tmp/sandbar-dispatcher.lock 只读回落，退役账#4）。
    - 持有锁（或锁过期可接管）→ 续期，返回 lock_held=true，继续巡检；
    - 被他人持有且未过期 → lock_held=false，只读不派（防多个 dispatcher 会话同时派活撞车）。
 2. 巡检产出待办清单（不在此派发——派发是 dsh dispatcher 会话的 dispatch_<role> 动作）：
@@ -21,7 +21,11 @@ import os
 import time
 from pathlib import Path
 
-LOCK = Path("/tmp/suyou-dispatcher.lock")
+# 锁文件改名（t260907-04）：新锁 /tmp/sandbar-dispatcher.lock 为权威；旧锁只读
+# 回落——新锁无而旧锁 TTL 内 → 视为 held（防旧实例并行双派）。旧锁不写不删。
+# 退役账#4：巡检观测旧锁零命中连续一个周期后，删 LEGACY_LOCK 与回落分支。
+LOCK = Path("/tmp/sandbar-dispatcher.lock")
+LEGACY_LOCK = Path("/tmp/suyou-dispatcher.lock")
 TTL = 600  # 秒：锁超时视为失活，可接管
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
@@ -39,11 +43,16 @@ def run(args):
     session = (args.get("session") or os.environ.get("DSH_SESSION_ID") or "unknown").strip()
     now = int(time.time())
     lock_held = True
-    # 单例锁
+    # 单例锁（新锁权威；旧锁只读回落，TTL 内视为他人持有）
     try:
         cur = json.loads(LOCK.read_text(encoding="utf-8"))
     except Exception:
         cur = None
+    if not cur:
+        try:
+            cur = json.loads(LEGACY_LOCK.read_text(encoding="utf-8"))
+        except Exception:
+            cur = None
     if cur and cur.get("session") != session and now - int(cur.get("ts", 0)) < TTL:
         lock_held = False  # 他人持有且未过期
     if lock_held:
@@ -79,7 +88,7 @@ def run(args):
 
 TOOL = {
     "name": "dispatcher_loop",
-    "description": "总管单例巡检：带 /tmp/suyou-dispatcher.lock 单例锁（TTL 600s），列出待派/待验收/待审批工单，供 dispatcher 定时派发与推进。lock_held=false 时只读不派。",
+    "description": "总管单例巡检：带 /tmp/sandbar-dispatcher.lock 单例锁（旧锁只读回落）（TTL 600s），列出待派/待验收/待审批工单，供 dispatcher 定时派发与推进。lock_held=false 时只读不派。",
     "parameters": {
         "type": "object",
         "properties": {

@@ -44,7 +44,7 @@ const SEVEN_VIEWS = [
   "console-new-ticket.png", "console-sessions.png", "console-chat.png",
   "console-refresh.png",
 ];
-const RUN_TIMEOUT_MS = Number(process.env.SUYOU_CAPTURE_E2E_TIMEOUT_MS || 600000); // engine budget 900s/entry
+const RUN_TIMEOUT_MS = Number(process.env.SANDBAR_CAPTURE_E2E_TIMEOUT_MS || 600000); // engine budget 900s/entry
 
 const results = [];
 function record(name, status, detail = "") {
@@ -63,7 +63,7 @@ if (nodeMajor < 22) {
 
 /** 主树 server/dsh/ui-check（playwright-core + 凭据来源约定所在树）。 */
 function resolveMainUiCheck() {
-  const env = process.env.SUYOU_CAPTURE_MAIN_UI_CHECK;
+  const env = process.env.SANDBAR_CAPTURE_MAIN_UI_CHECK;
   if (env && existsSync(path.join(env, "node_modules", "playwright-core", "index.mjs"))) return env;
   try {
     const common = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: LANE_ROOT, encoding: "utf8" }).trim();
@@ -78,7 +78,7 @@ function resolveMainUiCheck() {
 
 async function loadPlaywright(mainUiCheck) {
   const candidates = [];
-  if (process.env.SUYOU_PLAYWRIGHT_PATH) candidates.push(process.env.SUYOU_PLAYWRIGHT_PATH);
+  if (process.env.SANDBAR_PLAYWRIGHT_PATH) candidates.push(process.env.SANDBAR_PLAYWRIGHT_PATH);
   if (mainUiCheck) candidates.push(path.join(mainUiCheck, "node_modules", "playwright-core", "index.mjs"));
   candidates.push("playwright-core");
   for (const c of candidates) {
@@ -91,7 +91,7 @@ const mainUiCheck = resolveMainUiCheck();
 const playwright = await loadPlaywright(mainUiCheck);
 
 async function precheck() {
-  if (!playwright) return "playwright-core 不可解析（缺 SUYOU_CAPTURE_MAIN_UI_CHECK / 主树 node_modules）";
+  if (!playwright) return "playwright-core 不可解析（缺 SANDBAR_CAPTURE_MAIN_UI_CHECK / 主树 node_modules）";
   let browser = null;
   try { browser = await playwright.chromium.launch({ channel: "chrome", headless: true }); }
   catch { try { browser = await playwright.chromium.launch({ headless: true }); } catch { /* unavailable */ } }
@@ -149,7 +149,7 @@ async function runCaptureLane(outDir) {
     const child = spawn(process.execPath, [CAPTURE_LANE, "--lane", LANE_ROOT, "--out", outDir], {
       cwd: LANE_ROOT,
       detached: true, // 独立进程组：超时能整组杀（含控制台 spawn 的子进程）
-      env: { ...process.env, SUYOU_CAPTURE_MAIN_UI_CHECK: mainUiCheck || "" },
+      env: { ...process.env, SANDBAR_CAPTURE_MAIN_UI_CHECK: mainUiCheck || "" },
     });
     let stdout = "", stderr = "";
     child.stdout.on("data", (d) => { stdout += d; });
@@ -176,14 +176,14 @@ async function portRefuses(port) {
 // ---------- scenario ----------
 
 // 泳道 worker 机械跑护栏（t260901-09 arbitrate 补，与 ticket-lifecycle.mjs 同款）：
-// _run_manifest 继承 worker 环境（SUYOU_TASK_QUEUE/SUYOU_WATCH_WORKFLOW 在场即
+// _run_manifest 继承 worker 环境（SANDBAR_TASK_QUEUE/SANDBAR_WATCH_WORKFLOW 在场即
 // 「泳道内机械跑」）。本条要 boot 隔离台 + 走真模型种子链路 + capture-lane 只拍
 // 本次重建的 bundle（陈旧 build 拒跑是防证据造假的设计行为；非 UI 票的泳道不重建
 // bundle，此前提天然不满足）；真实覆盖属顶层人工/隔离台跑（integration/README
 // 已知限制口径）。泳道机械跑一律 ENV_FAIL 退 2——不 boot 台、不花模型钱、绝不放行。
-const NESTED = process.env.SUYOU_TASK_QUEUE || process.env.SUYOU_WATCH_WORKFLOW;
+const NESTED = process.env.SANDBAR_TASK_QUEUE || process.env.SANDBAR_WATCH_WORKFLOW;
 const envReason = NESTED
-  ? "nested inside a lane integration step (SUYOU_TASK_QUEUE/SUYOU_WATCH_WORKFLOW present): recursive guard, top-level runs carry the coverage"
+  ? "nested inside a lane integration step (SANDBAR_TASK_QUEUE/SANDBAR_WATCH_WORKFLOW present): recursive guard, top-level runs carry the coverage"
   : await precheck();
 if (envReason) {
   for (const name of ["A1 lane-exit-0", "A2 seven-views-produced", "A3 chat-differs-from-default",

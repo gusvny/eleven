@@ -39,8 +39,8 @@ SURVIVOR_CLASS_NAMES = ("ContentPipelineWorkflow", "DispatcherScanWorkflow")  # 
 SCAN_TOKENS = ("content-pipeline", "content_pipeline", "ContentPipelineTicketWorkflow",
                "ProofreadWorkflow", "RegressionWorkflow", "CleanupWorkflow")
 
-# 扫描面（写集五面中与模板可用面相关的部分；.suyou/notes 历史快照不入面）
-SKIP_DIRS = {".venv", "__pycache__", ".dsh", ".suyou", "out", "bin", "node_modules"}
+# 扫描面（写集五面中与模板可用面相关的部分；.suyou/notes 历史快照不入面）  # naming-compat
+SKIP_DIRS = {".venv", "__pycache__", ".dsh", ".suyou", "out", "bin", "node_modules"}  # naming-compat
 DOC_TWO = (
     "docs/design/工单工作流台设计.md",
     "docs/design/deepseek_harness_and_temporal_based_multi-agent_mechanism.md",

@@ -32,7 +32,7 @@
      settle_conflict_resolution 落盘（合并提交唯一收口、内容无标记残留）；
      无 MERGE_HEAD 的正常 implement 轮代落盘行为不变。
 
-退出码 0=全绿；非 0=有红灯（stderr 打明细）。SUYOU_CR_KEEP=1 保留 tmp 目录供排查。
+退出码 0=全绿；非 0=有红灯（stderr 打明细）。SANDBAR_CR_KEEP=1 保留 tmp 目录供排查。
 """
 
 from __future__ import annotations
@@ -308,8 +308,8 @@ def main() -> int:
     args = ap.parse_args()
 
     env = ActivityEnvironment()
-    tmp = Path(tempfile.mkdtemp(prefix="suyou-selfcheck-cr-"))
-    keep = os.environ.get("SUYOU_CR_KEEP") == "1"
+    tmp = Path(tempfile.mkdtemp(prefix="sandbar-selfcheck-cr-"))
+    keep = os.environ.get("SANDBAR_CR_KEEP") == "1"
     print("tmp=%s%s" % (tmp, "（保留）" if keep else ""))
 
     # ---------- A. _parse_conflict_files 纯逻辑 ----------

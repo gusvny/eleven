@@ -29,7 +29,7 @@ lane=code（代码道，泳道）——**全配置驱动（t260901-08，契约�
       不进差集、不判越界；t260901-14 假阳性修正，base 建议传当前 main tip）。
       判据优先级=调用方 write_set
      （工单精判，空列表=零写集，任何改动即红）> verify.yaml write_allow（粗判据）；
-     .suyou/ .dsh/ 引擎运行时目录一律不判（与 merge_check SETTLE_PATHSPEC 同口径）。
+     协调目录（.sandbar/ 老 .suyou/）与 .dsh/ 引擎运行时目录一律不判（与 merge_check SETTLE_PATHSPEC 同口径）。  # naming-compat
      require_base=true（合并闸口径）且 base 为空/未传 → fail-closed 红「base_ref 未登记」；
      手动调用未传 base → 跳过但 green 项 note 可见（要验就显式传 base）。
   2. checks 列表命令制（契约②a，t260903-01 对齐）：每条 {id, cmd, cwd?, timeout?}
@@ -75,7 +75,7 @@ TOOL = {
 
 # 引擎运行时目录：白名单 diff 一律不判（与 agent_activities.SETTLE_PATHSPEC 同口径——
 # worker 代落盘结果文件等不属工单写集，判进来会把合并闸变成永久红）。
-RUNTIME_PREFIXES = ('.suyou/', '.dsh/')
+RUNTIME_PREFIXES = ('.sandbar/', '.suyou/', '.dsh/')  # .suyou=老泳道名粘滞回落（LEGACY 兼容，t260907-04）
 
 # v2：checks 为列表命令制（无专属类型词表）——每条 {id, cmd, cwd?, timeout?}。
 
@@ -420,7 +420,7 @@ def _code(a):
     elif base:
         items = []
         # name-status（非 name-only）：增/改/删分开判——删除敏感路径=正确清退
-        # 不红（t260903-12 实雷：amend 致 merge-base 漂移后清除 .suyou 的 D
+        # 不红（t260903-12 实雷：amend 致 merge-base 漂移后清除 .sandbar 的 D
         # 被误红成「入库」）；新增/修改敏感路径才是泄漏。
         rc, out = _sh(['git', '-c', 'core.quotepath=false', 'diff',
                        '--name-status', base + '...HEAD'], root, crop=None)
@@ -539,7 +539,7 @@ def _integ(args):
             return {'lane': 'integ', 'green': False,
                     'err': 'supply 装配失败（need=%s，exit=%d）：%s——供给面红点名，不静默'
                            % (need, sp.returncode, ((sp.stdout or '') + (sp.stderr or ''))[-1500:])}
-    timeout = int(_os.environ.get('SUYOU_INTEG_BATCH_TIMEOUT_SEC') or 5400)
+    timeout = int(_os.environ.get('SANDBAR_INTEG_BATCH_TIMEOUT_SEC') or 5400)
     try:
         proc = subprocess.run(['/bin/sh', '-c', cmd], cwd=str(root), capture_output=True,
                               text=True, timeout=timeout)

@@ -16,7 +16,7 @@
 //      code; key contract covers Esc/ArrowLeft/ArrowRight; img src stays a
 //      relative same-origin endpoint (no data:, no absolute URL).
 //   S1 browser DOM assertions (real rendering level): needs the ISOLATED test
-//      console (SUYOU_TEST_CONSOLE, default 127.0.0.1:3199), playwright-core
+//      console (SANDBAR_TEST_CONSOLE, default 127.0.0.1:3199), playwright-core
 //      resolvable, and a launchable chromium. Any missing -> ENV_FAIL (exit 2)
 //      with the reason on stdout). Data is stubbed at the API boundary with
 //      page.route(): list/detail/evidence-list/evidence-image all intercepted
@@ -557,7 +557,7 @@ async function main() {
   if (results.some(r => r.status === 'fail')) return summarize()
 
   if (BASE.includes(':3099')) {
-    console.error('refusing to run: SUYOU_TEST_CONSOLE points at the production console (3099)')
+    console.error('refusing to run: SANDBAR_TEST_CONSOLE points at the production console (3099)')
     process.exit(1)
   }
   const healthy = await consoleHealthy()

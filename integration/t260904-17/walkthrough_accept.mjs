@@ -74,7 +74,7 @@ stub.setCtrl({
   }])),
 });
 
-const OUT_DIR = path.join(process.cwd(), '.suyou', 'screenshots', 't260904-17');
+const OUT_DIR = path.join(process.cwd(), '.suyou', 'screenshots', 't260904-17');  // naming-compat
 
 const pw = await loadPlaywright();
 if (!pw) {

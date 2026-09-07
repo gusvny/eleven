@@ -58,6 +58,15 @@ def lint_syntax():
                 err("L1 语法 %s: %s" % (f.relative_to(REPO), (p.stderr or "").splitlines()[-1][:120]))
             else:
                 n_mjs += 1
+    # integration/**/*.mjs 语法（t260907-04 arbitrate 实锤：机械清扫把 python 式
+    # `# naming-compat` 追加进 mjs→SyntaxError 只能在套件执行时才炸，秒级 lint
+    # 本应兜住——L1 原先只查 workbench/tests 的 mjs 是盲区）
+    for f in INTEG.rglob("*.mjs"):
+        p = subprocess.run(["node", "--check", str(f)], capture_output=True, text=True)
+        if p.returncode != 0:
+            err("L1 语法 %s: %s" % (f.relative_to(REPO), (p.stderr or "").splitlines()[-1][:120]))
+        else:
+            n_mjs += 1
     ok("L1 语法：py %d / mjs %d 通过" % (n_py, n_mjs))
 
 

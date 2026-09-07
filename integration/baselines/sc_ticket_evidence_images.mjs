@@ -1,17 +1,17 @@
 // Integration tests for ticket t260831-08 (defect ②) — screenshot evidence visible in ticket drawer.
 //
 // Intent (black-box, user perspective):
-//   QA screenshots (.suyou/screenshots/*.png in the lane) must be visible in the
+//   QA screenshots (.suyou/screenshots/*.png in the lane) must be visible in the  // naming-compat
 //   ticket detail drawer. The user-visible contract after the fix:
 //     - GET /sandbar-workbench/api/wf/tickets/<id>/evidence lists the png files
-//       (archive .suyou/evidence/<id>/ takes precedence, then lane screenshots);
+//       (archive .suyou/evidence/<id>/ takes precedence, then lane screenshots);  // naming-compat
 //       no evidence → empty list, no error (drawer simply hides the section).
 //     - GET .../evidence/<file> serves the exact bytes as image/png.
 //     - Path traversal / illegal filenames / illegal ticket ids are rejected
 //       with explicit 4xx errors, never served.
 //     - (UI) the drawer renders an <img src=".../evidence/<file>"> per file.
 //
-// Staging: this suite stages a tiny valid PNG under <laneRoot>/.suyou/evidence/
+// Staging: this suite stages a tiny valid PNG under <laneRoot>/.suyou/evidence/  // naming-compat
 // <stageId>/ (archive base of the console booted from this lane) and removes it
 // afterwards. If the console serves a different repo root, staged-file scenarios
 // degrade to env_fail with the reason (mismatch is an environment fact, not a
@@ -29,7 +29,7 @@ import { join } from 'node:path'
 const BASE = (await ensureStageConsole()).base;
 const LANE = process.cwd();
 const STAGE_ID = 't26083108evtest'; // must satisfy TICKET_ID_RE (alnum, no / no .)
-const STAGE_DIR = join(LANE, '.suyou', 'evidence', STAGE_ID);
+const STAGE_DIR = join(LANE, '.suyou', 'evidence', STAGE_ID);  // naming-compat
 const PNG_1x1 = Buffer.from(
   '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489' +
   '0000000d4944415478da63fcffff3f030005fe02fea72d1f240000000049454e44ae426082', 'hex');
@@ -52,7 +52,7 @@ function summarize() {
 }
 
 if (BASE.includes(':3099')) {
-  console.error('refusing to run: SUYOU_TEST_CONSOLE points at the production console (3099)');
+  console.error('refusing to run: SANDBAR_TEST_CONSOLE points at the production console (3099)');
   process.exit(1);
 }
 
@@ -175,7 +175,7 @@ async function faultSurface() {
 
 async function uiScenario() {
   let pw = null;
-  for (const c of [process.env.SUYOU_PLAYWRIGHT_PATH, 'playwright-core',
+  for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core',
     new URL('../../server/dsh/ui-check/node_modules/playwright-core/index.mjs', `file://${process.cwd()}/`).href]) {
     if (!c) continue;
     try { pw = await import(c); break; } catch { /* next */ }
