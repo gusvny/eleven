@@ -15,8 +15,10 @@
 //   T1 顶部行退役形态：data-wb-session-{entry,new,row,reopen} 全不在 DOM；
 //      无 wb-sessTop* 类名元素。
 //   T2 出厂钮压制：aria-label 恰为出厂 label（新建会话/New session）的元素零可见。
-//   T3 项目色三处同源：组头色点色 == + 钮边框色 == 根容器 CSS 变量
-//      --wb-psess-color（∈ project-color 确定性色板）。
+//   T3 项目色三处同源（t260907-03 重基线，判定依据见 T3 断言处注释）：三处视觉色
+//      同出自根容器 CSS 变量 --wb-psess-color（∈ project-color 确定性色板）——
+//      色点=纯色板值；+ 钮边框/文字=色板值经锁定派生公式（55%/45% color-mix 混
+//      平台令牌链）的 computed 期望值（页面内同作用域探针实算，精确比对）。
 //   T4 刷新恒色：reload 后色点色不变。
 //   T5 确认弹层文案（有机会断言：已有 tab 才点）：含「仅关闭入口」「不删除」，
 //      不含「↺」「最近关闭」；取消不关闭。
@@ -111,13 +113,30 @@ try {
   record('t2/factory-new-suppressed', factoryVisible === 0 ? 'pass' : 'fail',
     factoryVisible === 0 ? '' : `出厂新建钮可见 ${factoryVisible} 个（应被压制）`);
 
-  // T3 项目色三处同源（色点 / + 钮 / 根容器 CSS 变量 ∈ 确定性色板）
+  // T3 项目色三处同源（t260907-03 腿②重基线——判定结论：原逐位相等断言不成立，
+  // 重基线为「同源派生」语义，不回退）。
+  // 判定依据：+ 钮边框/文字自 t260905-08 收口（029a15f）起为 color-mix(55%/45%
+  // 项目色混平台令牌链) 的对比度自适应派生（55% 纯色在深底下边框对比不足），
+  // 非回归而是设计演进；「三同色」的用户可感知意图=同一项目三处视觉色同源
+  // （都从 --wb-psess-color 派生）、同项目恒定、刷新不变（T4 守），而非 computed
+  // 逐位相等。重基线不弱化：色点仍必须=纯色板值；+ 钮两通道改为与页面内同令牌
+  // 作用域探针（同挂 root 子树，与被测元素同祖先链——作用域差异会失真）的
+  // computed 期望值精确比对——55%/45% 派生比与兜底链
+  // var(--dsw-alias-bg-primary, var(--dsw-alias-bg-base, #fff)) 自此为**锁定契约**，
+  // 源串改比例/换色源/改链即本场景红（变更走正规门，不由热修顺手改）。
   const colors = await page.evaluate(() => {
     const root = document.querySelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])');
     const dot = document.querySelector('[data-wb-psess-dot]');
     const plus = document.querySelector('[data-wb-psess-new]');
     if (!root || !dot || !plus) return null;
     const cs = el => getComputedStyle(el);
+    // 重基线探针：与 PSESS_STYLES 源串同链同比（锁定契约），挂 root 子树取同作用域
+    const probe = document.createElement('span');
+    probe.style.borderTop = '1px solid color-mix(in srgb, var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 55%, var(--dsw-alias-bg-primary, var(--dsw-alias-bg-base, #fff)))';
+    probe.style.color = 'color-mix(in srgb, var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%, var(--dsw-alias-label-primary,#1f2328))';
+    root.appendChild(probe);
+    const expect = { border: cs(probe).borderTopColor, text: cs(probe).color };
+    probe.remove();
     return {
       varColor: cs(root).getPropertyValue('--wb-psess-color').trim(),
       // 色点视觉通道=background（8px 纯色块无文字，color 是继承噪音——t260904-05
@@ -125,6 +144,8 @@ try {
       dotColor: cs(dot).backgroundColor,
       plusBorder: cs(plus).borderTopColor,
       plusColorText: cs(plus).color,
+      expectBorder: expect.border,
+      expectText: expect.text,
     };
   });
   if (colors === null) {
@@ -132,11 +153,16 @@ try {
   } else {
     const varRgb = hexToRgbString(colors.varColor);
     const inPalette = PROJECT_PALETTE.includes(colors.varColor);
-    const same = varRgb !== null && varRgb === colors.dotColor && varRgb === colors.plusBorder;
-    record('t3/three-spot-same-color', same && inPalette ? 'pass' : 'fail',
-      same && inPalette ? '' : `var=${colors.varColor}(palette=${inPalette}) dotBg=${colors.dotColor} plusBorder=${colors.plusBorder}`);
-    record('t3/plus-text-color', colors.plusColorText === colors.dotColor ? 'pass' : 'fail',
-      `plusText=${colors.plusColorText} dot=${colors.dotColor}`);
+    // 色点腿（原语义保留）：色点 background == var == 确定性色板值（纯色，不放宽）
+    const dotSame = varRgb !== null && varRgb === colors.dotColor;
+    record('t3/dot-is-palette-value', dotSame && inPalette ? 'pass' : 'fail',
+      dotSame && inPalette ? '' : `var=${colors.varColor}(palette=${inPalette}) dotBg=${colors.dotColor}`);
+    // + 钮边框腿（重基线）：== 同色板值经锁定派生公式（55% 混）的 computed 期望值
+    record('t3/plus-border-derived-same-source', colors.plusBorder === colors.expectBorder ? 'pass' : 'fail',
+      colors.plusBorder === colors.expectBorder ? '' : `plusBorder=${colors.plusBorder} expected(55% mix of ${colors.varColor})=${colors.expectBorder}`);
+    // + 钮文字腿（重基线）：== 45% 混平台前景的 computed 期望值
+    record('t3/plus-text-derived-same-source', colors.plusColorText === colors.expectText ? 'pass' : 'fail',
+      colors.plusColorText === colors.expectText ? '' : `plusText=${colors.plusColorText} expected(45% mix)=${colors.expectText}`);
   }
 
   // T4 刷新恒色（验收 5：刷新不变；读色点 background 通道，同 t3 口径）

@@ -18,9 +18,18 @@
 // computed-value time → 属性 unset（不走 fallback），JS 层无从防御；
 // 看守场景按 computed 值断言，unset 落继承链仍会被对比度断言网住。
 
-/** 平台 alias 消费词汇（仓内既有 5 个；定义侧在平台壳，不在本仓）。 */
+/**
+ * 平台 alias 消费词汇（6 个；定义侧在平台壳，不在本仓）。
+ *
+ * bgBase 收录依据（t260907-03 补评审门正名）：宿主平台 0.1.1-rc.2 的平台壳**没有**
+ * `--dsw-alias-bg-primary` 名、只有 `--dsw-alias-bg-base`；bgPrimary 的兜底链
+ * `var(--dsw-alias-bg-primary, var(--dsw-alias-bg-base, #fff))` = 兼容旧版平台——
+ * 属**平台版本契约扩容**（多认一个旧平台令牌名）。原由热修 17b673f 顺手改入未走
+ * 评审，本票过门收录入账。
+ */
 export const ALIAS = {
   bgPrimary: 'var(--dsw-alias-bg-primary, var(--dsw-alias-bg-base, #fff))',
+  bgBase: 'var(--dsw-alias-bg-base, #fff)',
   border: 'var(--dsw-alias-border-l, #d0d7de)',
   brand: 'var(--dsw-alias-brand-primary, #0969da)',
   labelPrimary: 'var(--dsw-alias-label-primary, #1f2328)',

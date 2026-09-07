@@ -85,8 +85,16 @@ console.log(`[PASS] hex-clean/allowlist-parse — EPIC_PALETTE 值级豁免 ${pa
 console.log(`[PASS] hex-clean/scan-breadth — 扫描 ${scanned} 个源文件（client 全目录 .ts/.tsx/.css；豁免文件=${[...FILE_ALLOW].join(',')}）`);
 if (violations.length > 0) {
   console.log(`[FAIL] hex-clean/no-raw-hex — 样式消费位裸 hex 残留 ${violations.length} 处（写死色退役未完成，宿主裁定②）：`);
+  // 每文件聚合计数先行（t260907-03：明细有 slice(0,40) 显示截断，曾把 44 处的分布
+  // 看成 40 处误导归因——聚合行永远全量，截断只发生在明细层）
+  const byFile = {};
+  for (const v of violations) {
+    const f = v.replace(/^server\/dsh\/workbench\/src\/client\//, '').split(':')[0];
+    byFile[f] = (byFile[f] || 0) + 1;
+  }
+  for (const [f, n] of Object.entries(byFile).sort((a, b) => b[1] - a[1])) console.log(`  聚合 ${f} = ${n} 处`);
   for (const v of violations.slice(0, 40)) console.log('  ' + v);
-  if (violations.length > 40) console.log(`  …其余 ${violations.length - 40} 处略`);
+  if (violations.length > 40) console.log(`  …其余 ${violations.length - 40} 处略（分布以聚合行为准）`);
   console.log('SUMMARY pass=2 fail=1 env_fail=0 na=0');
   process.exit(1);
 }

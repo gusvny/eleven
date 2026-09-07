@@ -4,7 +4,8 @@ import { ensureStageConsole } from '../lib_stage_console.mjs';
 //
 // 复用面（integration 岗位纪律：前置/基础步骤代码允许共享，步骤级重复不算重复用例）：
 //   - 隔离台基址与 3099 红线拒绝；
-//   - playwright-core 三路探测加载（同 t260903-07/sc_t01 口径，缺失=ENV_FAIL）；
+//   - playwright-core 四路探测加载（第④路主仓安装位=t260907-03 对齐 lib_fix17 口径，
+//     缺失=ENV_FAIL）；
 //   - 浏览器 fresh context 打开（无账册残留，等价新用户）；
 //   - results/record/summarize 执行契约（SUMMARY pass/fail/env_fail/na；退出码 0/1/2）。
 // 安全红线：本目录场景只碰隔离台（默认 lib_stage_console 供给（共享台/显式 SUYOU_TEST_CONSOLE）），绝不连生产 3099。
@@ -41,13 +42,28 @@ export function refuseProductionConsole() {
   }
 }
 
-/** playwright-core 三路探测（env 指定 → 裸包 → ui-check 本地依赖）。缺失返回 null=调用方记 ENV_FAIL。
+/** playwright-core 四路探测（t260907-03 对齐 lib_fix17 同口径；env 指定 → 裸包 →
+ *  ui-check 本地依赖 → 主仓安装位）。缺失返回 null=调用方记 ENV_FAIL。
  *  第③路 t260904-05 验收走查 gen0 修正：原按 process.cwd() 相对拼路径，泳道开在
  *  主仓 .lane/ 子目录时 ../../ 会指到主仓树（其 ui-check 无 node_modules）——改为
- *  基于本模块 import.meta.url 解析，与泳道布局解耦。 */
+ *  基于本模块 import.meta.url 解析，与泳道布局解耦。
+ *  第④路 t260907-03 增（KI-036 家族 env_fail 根因修正）：泳道是干净 worktree，
+ *  第③路在泳道布局必死（ui-check 无 node_modules）——经 git common-dir 解析主树根
+ *  只读借用主仓安装位（与 lib_fix17 mainRoot() 同语义，只读不写）。 */
 export async function loadPlaywright() {
   const localPw = new URL('../../server/dsh/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
-  for (const c of [process.env.SUYOU_PLAYWRIGHT_PATH, 'playwright-core', localPw]) {
+  let mainPw = null;
+  try {
+    const { spawnSync } = await import('node:child_process');
+    const repoRoot = new URL('../..', import.meta.url).pathname;
+    const r = spawnSync('git', ['-C', repoRoot, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' });
+    const dir = (r.stdout || '').trim();
+    if (r.status === 0 && dir) {
+      const p = `${dir.replace(/\/$/, '')}/../server/dsh/ui-check/node_modules/playwright-core/index.mjs`;
+      if ((await import('node:fs')).existsSync(p)) mainPw = (await import('node:url')).pathToFileURL(p).href;
+    }
+  } catch { /* 第④路可选：解析失败静默降级为三路 */ }
+  for (const c of [process.env.SUYOU_PLAYWRIGHT_PATH, 'playwright-core', localPw, mainPw]) {
     if (!c) continue;
     try { return await import(c); } catch { /* next */ }
   }

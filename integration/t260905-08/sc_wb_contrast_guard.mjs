@@ -4,8 +4,10 @@
 //   「在场断言≠可读」（17 号场景族全绿但深色主题下人眼不可用，宿主实报）——本场景对
 //   工单台全部可达文字表面实算 WCAG 对比度（computed color vs 沿祖先链合成到不透明的
 //   有效底色），在平台浅档令牌/深档令牌/零注入（fallback-only）三档下都必须达标：
-//   正文级 4.5:1（WCAG AA）；收口（done）行卡文字按「至少可分辨」3.0:1 卡（终态降权
-//   opacity:.72 是 17 号既有设计意图，红线不动信息架构，豁免理由在此）。epic 色板
+//   正文级 4.5:1（WCAG AA）；收口（done）行卡文字按「至少可分辨」3.0:1 卡（终态
+//   降权设计意图，红线不动信息架构，豁免理由在此；口径已随 96c699c 热修正——板面
+//   done 卡降权由整行 opacity:.72 改 muted 静音色（深底可读），侧栏 done 卡仍
+//   opacity:.72，两处同按 3.0 卡）。epic 色板
 //   10 档全播入（fnv1a 槽位确定性挑码，防「只测种子色」采样盲区）。变异腿故意注入
 //   低对比正文色断言看守必咬（变异测试守测试本身；改造前经侧栏 alias 消费面咬合）。
 //   病灶本质声明：改造前主区写死浅色自洽、注入无效，三腿全绿=KI-052 同构（场景绿
@@ -14,7 +16,10 @@
 // high-level steps：
 //   T0 自举隔离台（FIX17 桩：10 档 epic 挑码×四态轮换＋无 epic 票）＋ playwright 探测
 //      （缺失=env_fail 有声红，三态契约「闸内无 SKIP」，KI-036/KI-046 口径）。
-//   T1 四腿遍历 light/dark/fallback-only：每腿 goto→:root 注入两档令牌（addStyleTag）→
+//   T1 腿遍历 light/dark/fallback-only/legacy（t260907-03 增旧平台腿：knockout
+//   bg-primary 模拟 0.1.1-rc.2 无此名，bg-base=可辨识代表值，断言 --dsw-derive-canvas
+//   精确等值——兜底链接住旧平台令牌名的契约看守）：每腿 goto→:root 注入令牌
+//   （addStyleTag）→
 //   开板后忠实注入（壳层在 BODY 级祖先声明 label 覆盖值=真实换档作用域，:root 翻不动；
 //   探针实锤「底翻了字没翻」裂脑态——忠实注入=自 .wb-card 向上找最高 label≠:root 值
 //   祖先，inline+important 打整套令牌，保证被测态=令牌组真实生效态）
@@ -228,8 +233,8 @@ const FAITHFUL_FN = (vars) => {
 try {
   const page = await browser.newPage();
 
-  // T1 四腿：light / dark / fallback-only（零注入）
-  for (const leg of ['light', 'dark', 'fallback']) {
+  // T1 腿：light / dark / fallback-only（零注入）/ legacy（旧平台 bg-base 兜底链，t260907-03）
+  for (const leg of ['light', 'dark', 'fallback', 'legacy']) {
     await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
     const set = TOKEN_SETS[leg];
     if (set) await page.addStyleTag({ content: cssVarsBlock(set) });
@@ -238,6 +243,25 @@ try {
     if (set) {
       const fp = await page.evaluate(FAITHFUL_FN, set).catch(() => ({ patched: false }));
       await page.waitForTimeout(300); // inline patch 生效静置（探针同参）
+      // legacy 腿核心断言（C5 精确等值）：knockout 生效且兜底链接住时，
+      // --dsw-derive-canvas（纯 var 链）的 computed 值必须精确等于 bg-base 代表值
+      // #f5f8fa——链被拆/名被删 → 落 #fff；knockout 失效（平台 bg-primary 现值穿透）
+      // → 落平台现值。都不是 #f5f8fa，fail-closed 点名红，绝不静默计绿。
+      if (leg === 'legacy') {
+        const canvas = await page.evaluate(() => {
+          const host = document.querySelector('.wb-root') || document.body;
+          const probe = document.createElement('span');
+          probe.textContent = 'legacy-canvas-probe';
+          host.appendChild(probe);
+          const v = getComputedStyle(probe).getPropertyValue('--dsw-derive-canvas').trim();
+          probe.remove();
+          return v;
+        }).catch(() => '');
+        record('contrast/legacy-canvas-eq-bg-base', canvas === '#f5f8fa',
+          canvas === '#f5f8fa'
+            ? '兜底链接住旧平台 bg-base（canvas 精确=#f5f8fa，bg-primary knockout 生效）'
+            : `兜底链未接住旧平台令牌：--dsw-derive-canvas=${canvas || '(unreadable)'} ≠ #f5f8fa`);
+      }
     }
 
     if (process.env.T08_SHOT) await page.screenshot({ path: '.suyou/screenshots/t08-' + leg + '.png', fullPage: true }).catch(() => {});

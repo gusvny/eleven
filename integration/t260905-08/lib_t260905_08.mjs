@@ -77,6 +77,26 @@ export const TOKEN_SETS = {
     '--dsw-alias-brand-primary': '#0969da',
     '--dsw-specific-sidebar-fill': '#f9fafb',
   },
+  // 旧平台腿（t260907-03 腿①，17b673f 热修 commit message「看守场景补旧平台令牌集
+  // 随后立案」的立案兑现）：宿主平台 0.1.1-rc.2 无 bg-primary 名、只有 bg-base。
+  // 模拟「名不存在」用 knockout——`initial` 对 custom property 是 guaranteed-invalid
+  // 态，var() 链在该作用域走下一级 fallback；测试台平台壳自带 bg-primary（且在
+  // BODY 级祖先声明，:root 注入穿不透），故浏览器腿必须经 FAITHFUL_FN 把含
+  // knockout 的整套令牌打到壳层声明点才造得出真缺席态。bg-base 注入可辨识代表值
+  // #f5f8fa（近白平台底，字符串级可辨）：兜底链没接住（链被拆/名被删/值改错）时
+  // canvas 落回 #fff 或平台 bg-primary 现值，都不是 #f5f8fa——精确等值断言可辨。
+  // 选值约束（gen0 实测边界）：+ 钮文字=45% 项目色混平台前景，其 AA 线在 canvas
+  // ≈#f3f6f8（更深的旧平台底会破 4.5，#eef3f8 实测 4.46）——该脆弱面如实交接宿主
+  // 确认 0.1.1-rc.2 bg-base 真值，不为本腿绿而虚报深底档可用。
+  legacy: {
+    '--dsw-alias-bg-primary': 'initial',
+    '--dsw-alias-bg-base': '#f5f8fa',
+    '--dsw-alias-label-primary': '#1f2328',
+    '--dsw-alias-label-secondary': '#57606a',
+    '--dsw-alias-border-l': '#d0d7de',
+    '--dsw-alias-brand-primary': '#0969da',
+    '--dsw-specific-sidebar-fill': '#f9fafb',
+  },
 };
 
 // !important：平台壳可能以元素内联/后置样式注入同名令牌（实测隔离台

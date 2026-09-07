@@ -28,6 +28,9 @@ for (const dm of m[1].replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/(--dsw-derive-[
 // ---- 平台两档 alias 代表值（模拟；来源与风险见头注）----
 const LIGHT = { '--dsw-alias-bg-primary': '#ffffff', '--dsw-alias-border-l': '#d0d7de', '--dsw-alias-brand-primary': '#0969da', '--dsw-alias-label-primary': '#1f2328', '--dsw-alias-label-secondary': '#57606a' };
 const DARK = { '--dsw-alias-bg-primary': '#16181d', '--dsw-alias-border-l': '#30363d', '--dsw-alias-brand-primary': '#4493f8', '--dsw-alias-label-primary': '#e6e6e9', '--dsw-alias-label-secondary': '#9ea2ad' };
+// 旧平台档（t260907-03 腿①）：0.1.1-rc.2 无 bg-primary 名（'initial'=knockout 哨兵，
+// 解析器视同「名不存在」走下一级 fallback）、只有 bg-base=可辨识代表值 #f5f8fa（近白平台底，选值约束见 lib_t260905_08 头注）。
+const LEGACY = { '--dsw-alias-bg-primary': 'initial', '--dsw-alias-bg-base': '#f5f8fa', '--dsw-alias-border-l': '#d0d7de', '--dsw-alias-brand-primary': '#0969da', '--dsw-alias-label-primary': '#1f2328', '--dsw-alias-label-secondary': '#57606a' };
 
 const HEX = (s) => /^#[0-9a-fA-F]{6}$/.test(s) || /^#[0-9a-fA-F]{3}$/.test(s);
 const norm = (h) => { h = h.slice(1); if (h.length === 3) h = [...h].map(c => c + c).join(''); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); };
@@ -37,7 +40,8 @@ function resolve(value, pal, memo) {
   value = value.trim();
   if (HEX(value)) return norm(value);
   const vm = value.match(/^var\(\s*(--[a-z0-9-]+)\s*,\s*([\s\S]+)\)$/);
-  if (vm) return pal[vm[1]] !== undefined ? norm(pal[vm[1]]) : resolve(vm[2], pal, memo);
+  // 'initial' 哨兵=该名 knockout（guaranteed-invalid），同「名不存在」→ 走 fallback 链
+  if (vm) return pal[vm[1]] !== undefined && pal[vm[1]] !== 'initial' ? norm(pal[vm[1]]) : resolve(vm[2], pal, memo);
   if (value.startsWith('--')) { // 裸令牌引用（定义间引用）
     if (memo[value] === undefined) memo[value] = resolve(defs[value], pal, memo);
     return memo[value];
@@ -91,6 +95,32 @@ check('警告 warn × 画布', 'warn', 'canvas');
 check('警告 warn × 警告底', 'warn', 'warn-bg');
 check('警告深 warn-deep × 警告底', 'warn-deep', 'warn-bg');
 check('警告深 warn-deep × 画布', 'warn-deep', 'canvas');
+
+// ---- 旧平台档（t260907-03 腿①，LEGACY）：验「兜底链接得住旧平台 bg-base」----
+// ① 精确等值（核心，对应浏览器腿 contrast/legacy-canvas-eq-bg-base）：
+//    --dsw-derive-canvas（纯 var 链）在 bg-primary knockout 下必须精确解析到
+//    bg-base 代表值 #f5f8fa——链被拆/名被删 → 落 #fff；值写错 → 别的色，都可辨。
+{
+  const memo = {};
+  const got = fmt(resolve('--dsw-derive-canvas', LEGACY, memo));
+  const ok = got === '#f5f8fa';
+  report.push(`  legacy canvas 精确等值: got=${got} 期望=#f5f8fa${ok ? '' : ' ❌（兜底链未接住旧平台令牌名）'}`);
+  if (ok) pass++; else fail++;
+}
+// ② 画布锚定的关键文字对在 legacy 档仍须 AA（knockout 后 canvas/surface 系全部
+//    偏移到 bg-base 代表值，正文/次级/强调对的可读性不可因换档塌陷）；
+//    状态底/accent 混色对的账本由 light/dark 腿全量承担，legacy 只加链关键面。
+for (const [n, f, b] of [['legacy 正文 fg × 画布', 'fg', 'canvas'], ['legacy 次级 muted × 画布', 'muted', 'canvas'],
+  ['legacy 正文 fg × 次级表面', 'fg', 'surface'], ['legacy 正文 fg × 次级表面2', 'fg', 'surface-2'],
+  ['legacy 强调 accent × 画布', 'accent', 'canvas']]) {
+  const memo1 = {}, memo2 = {};
+  const fg = resolve(defs['--dsw-derive-' + f], LEGACY, memo1);
+  const bg = resolve(defs['--dsw-derive-' + b], LEGACY, memo2);
+  const r = ratio(fg, bg);
+  const ok = r >= 4.5;
+  report.push(`  ${n}: legacy=${r.toFixed(2)}${ok ? '' : ' ❌'} (${fmt(fg)} on ${fmt(bg)})`);
+  if (ok) pass++; else fail++;
+}
 
 // epic chip：EPIC_PALETTE 全 10 档 × 兜底灰，chip 文字=45% epic 混平台前景（与 theme.ts epicChipColor 同源同步），两档断言
 const modelSrc = readFileSync(join(here, '../../server/dsh/workbench/src/client/ticket-list-model.ts'), 'utf8');
