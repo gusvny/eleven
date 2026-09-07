@@ -581,3 +581,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 症状：外部项目（dengzhufpv）工单变更 tab 空（API 实测 source: none，"worktree 越出仓库根"——防穿越闸误伤跨项目泳道）。
 - 全族六处（node.ts/changes.ts）：diff 仓锚（changes.ts:451）、审批意见锚（node.ts:357）、epics 目录锚（node.ts:359，t260907-07 只修 CLI 侧）、证据目录锚（node.ts:266）、引擎 CLI 路径锚（node.ts:459）、病根 repo 本尊（node.ts:352 不按 ?project= 解析）。
 - 修法=请求层按项目键解主目录（注册表已有），逐面穿参；验收含 dengzhufpv 实票对照。
+
+## KI-057 补记（260907 晚）：文档面第七锚＋全族清单方法本身失灵
+- 宿主实报：文档按钮跨项目串亮＋文档树只显 sandbar——handleDocsTree/Doc 端点 join(repo,scope) 静态锚=第七锚。上午六锚清单漏数=**手工枚举法结构性失灵**（数锚永远数不全）。
+- 根治：t260907-11 验收升级为「跨项目隔离不变量」场景族（双项目夹具×每视图两断言：数据源对+切换重置），测不变量不测实例。
