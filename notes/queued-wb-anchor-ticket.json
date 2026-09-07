@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260907-11",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "工单台 host 项目感知化（KI-057）：六处静态锚按 ?project= 解析项目根",
+  "user_request": "做什么：宿主实报（dengzhufpv 变更 tab 空）＋全族排查（KI-057 六处静态锚引擎仓）。修法=①请求层按项目键解析主目录（项目注册表已有 key→主目录映射，session-charter 端点先例已带 ?project=）；②六面穿参：diff 仓锚（changes.ts computeTicketDiff）、审批意见锚（reviewsAnchor）、epics 目录锚（resolveEpicsDir 调用点）、证据目录锚、引擎 CLI 路径、repo 本尊；③防穿越闸保留（安全语义不变），跨项目泳道按项目根判界。\n验收腿：dengzhufpv 实票对照（变更 tab 可见 fpv 仓 diff、epics tab 可见其立项单、审批意见落其仓）；sandbar 自身票零回归。\n注意：与 t260907-10（目录重构）同文件面并行，落地消解轮按其新路径 rebase。",
+  "spec": "范围=server/dsh/workbench/（node.ts＋host/*）＋integration/（跨项目对照场景）。红线：防穿越闸语义不弱化；旧 env 覆盖链保留。验收：①dengzhufpv 实票三面（diff/epics/审批）对照绿；②sandbar 票零回归；③六处锚清单逐项销号进交接。",
+  "write_set": ["server/dsh/workbench/", "integration/"],
+  "deliverables": "工单台六面项目感知＋跨项目对照场景族"
+}
