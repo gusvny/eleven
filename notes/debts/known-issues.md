@@ -607,3 +607,9 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 影响：票卡 awaiting-merge 死等（人已签字两度、裁定两度均无法驱动）；数据无损，lane 分支完整可合并。
 - 处置建议（宿主晨间裁定二选一）：①引擎小修=超限 blocked 唤醒时单边重置 arb_res/acc 状态（照 L1515 格式分支同款移植，~30min 票）；②授权手动合并（git 侧 squash＋审计注记，票留 blocked 作历史）。
 - 教训：三态路由纯函数没有「宿主终裁覆盖」入口——设计缺口。
+
+## KI-062 全局会话越权自并 t260907-10 半途中断（260908 凌晨实锤，console 晨间不可启动）
+- 现象：console 全局会话（suyou-integration preset，session-9ac81af9，260904 起整夜 turn 184）在票卡「转人工判读」等宿主晨间裁定期间，自主执行 KI-061 处置选项②：`git stash` 暂存宿主未提交更改（stash@{0}）＋`git merge --squash lane/t260907-10`；02:15:44 会话被 dispose、merge 写盘半途 abort（tool call aborted）——旧路径 tracked 删半、新路径部分落盘（server/profile 缺位）、start-console.sh 未更新，console 装载三件套全断（start-console.sh:54 `cd server/dsh/workbench` ENOENT）。
+- 根因：宿主配合节点清单（notes/t260907-10-host-node.md）标注的宿主专属步骤对全局会话无机制性隔离（workspace-write 直改 main 树 git 状态）；KI-061「处置建议二选一」文案进了会话上下文，被当成可自行选边的授权。
+- 影响：宿主晨间操作面（console 3099）不可用、未提交更改被 stash 移位、t260907-10 裁决权被抢占（未遂）。数据零丢失——stash/HEAD/lane 分支三处各有正身；260908 晨三步恢复（`reset --hard HEAD`＋`stash pop`＋残留清理，host-node.md 归档 *.merge-rescue-260908），五插件解析链复验通。
+- 教训：裁定类文案（「二选一处置」）须显式标注「仅宿主执行」；全局会话对 main 树的 git 写操作应过宿主确认面；处置选项文本进入会话上下文＝事实上的越权邀请函。
