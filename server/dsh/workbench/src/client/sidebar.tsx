@@ -213,7 +213,7 @@ const inSandbar = (t: Ticket, nowS: number): boolean => {
 /* ---------------------------------------------------------------- 样式 */
 
 const CSS = `${DERIVE_TOKENS_CSS}
-.wb-sb { display:flex; flex-direction:column; height:100%; /* t260905-08：底改自适应 alias（平台 fill 层级高于 :root 注入无法跟随看守档位，可读性收敛到 alias 对）；装饰性 fill 见 --dsw-specific-sidebar-fill 保留在 group-head */ background:var(--dsw-alias-bg-primary,#fff); color:var(--dsw-derive-fg,#1f2328); font-size:12px; }
+.wb-sb { display:flex; flex-direction:column; height:100%; /* t260905-08：底改自适应 alias（平台 fill 层级高于 :root 注入无法跟随看守档位，可读性收敛到 alias 对）；装饰性 fill 见 --dsw-specific-sidebar-fill 保留在 group-head */ background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); color:var(--dsw-derive-fg,#1f2328); font-size:12px; }
 /* 轨条态：仅图标 */
 .wb-sb.rail { width:48px; align-items:center; padding-top:12px; }
 .wb-sb.rail .wb-sb-icon { width:28px; height:28px; border-radius:6px; background:var(--dsw-alias-brand-primary,#7c3aed); display:flex; align-items:center; justify-content:center; font-size:14px; cursor:pointer; }
@@ -223,7 +223,7 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-sb-left { flex:1 1 0; min-width:180px; display:flex; flex-direction:column; border-right:1px solid var(--dsw-alias-border-l1,#333); }
 /* position:relative —— 工单详情抽屉（index.tsx .wb-drawer，absolute）的定位祖先，
    让抽屉铺满中列而不是全窗（260824 用户拍板：详情显在中列）。 */
-.wb-sb-right { flex:4 1 0; display:flex; flex-direction:column; overflow:hidden; min-width:200px; background:var(--dsw-alias-bg-primary,#fff); position:relative; }
+.wb-sb-right { flex:4 1 0; display:flex; flex-direction:column; overflow:hidden; min-width:200px; background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); position:relative; }
 /* host 陈旧全局提醒（t260902-03）：中列共享容器顶部横幅，flex:none 不挤占四视图与
    下栏；琥珀底一眼可辨，与 running 绿/blocked 红色板错开。 */
 .wb-stale-banner { flex:none; display:flex; align-items:center; gap:10px; padding:8px 12px;
@@ -240,14 +240,14 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-sb-foot-btn:hover{background:rgba(255,255,255,.08)}
 .wb-sb-foot-btn[data-on=true]{color:var(--dsw-derive-accent,#0969da)}
 .wb-sb-foot-sp{flex:1}
-.wb-sb-setpop{position:absolute;right:8px;bottom:40px;z-index:96;background:var(--dsw-alias-bg-primary,#fff);border:1px solid var(--dsw-alias-border-l1,#333);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:240px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.wb-sb-setpop{position:absolute;right:8px;bottom:40px;z-index:96;background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff));border:1px solid var(--dsw-alias-border-l1,#333);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:240px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
 .wb-sb-setpop .row{display:flex;align-items:center;gap:6px;font-size:12px}
 .wb-sb-setpop input[type=number]{width:64px;font:inherit;font-size:12px;background:transparent;color:inherit;border:1px solid var(--dsw-alias-border-l1,#333);border-radius:4px;padding:2px 6px}
 .wb-sb-setpop .t{font-size:12px;font-weight:600}
 .wb-sb-setpop .m2c{font-size:11px;color:var(--dsw-derive-muted,#8c959f)}
 /* 项目组 */
 .wb-ticket-list { flex:1; overflow-y:auto; }
-.wb-group-head { display:flex; align-items:center; gap:5px; padding:7px 8px 5px; cursor:pointer; font-weight:600; position:sticky; top:0; background:var(--dsw-alias-bg-primary,#fff); z-index:1; }
+.wb-group-head { display:flex; align-items:center; gap:5px; padding:7px 8px 5px; cursor:pointer; font-weight:600; position:sticky; top:0; background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); z-index:1; }
 .wb-group-head:hover { background:rgba(255,255,255,0.05); }
 .wb-group-caret { font-size:9px; color:var(--dsw-derive-muted,#57606a); width:10px; }
 .wb-group-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -258,7 +258,7 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-sb .wb-card { background:transparent; border-color:var(--dsw-derive-border,#d0d7de);
   box-shadow:none; color:var(--dsw-derive-fg,#1f2328); margin:0 6px 4px 14px; padding:5px 8px; }
 .wb-sb .wb-card:hover { background:var(--dsw-derive-surface,#f6f8fa); }
-.wb-sb .wb-card[data-active=true] { background:color-mix(in srgb,var(--dsw-derive-active,#7c3aed) 18%,var(--dsw-alias-bg-primary,#fff)); border-color:color-mix(in srgb,var(--dsw-derive-active,#7c3aed) 50%,var(--dsw-alias-bg-primary,#fff)); }
+.wb-sb .wb-card[data-active=true] { background:color-mix(in srgb,var(--dsw-derive-active,#7c3aed) 18%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff))); border-color:color-mix(in srgb,var(--dsw-derive-active,#7c3aed) 50%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff))); }
 .wb-sb .wb-card[data-state=done] { opacity:0.72; } /* 对齐板面 .72：0.55 时次级字混底后 <3:1（看守实测） */
 .wb-sb .wb-card-title { color:inherit; font-weight:400; }
 .wb-sb .wb-card-state { color:inherit; }

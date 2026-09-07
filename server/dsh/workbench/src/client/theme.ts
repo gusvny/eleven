@@ -20,7 +20,7 @@
 
 /** 平台 alias 消费词汇（仓内既有 5 个；定义侧在平台壳，不在本仓）。 */
 export const ALIAS = {
-  bgPrimary: 'var(--dsw-alias-bg-primary, #fff)',
+  bgPrimary: 'var(--dsw-alias-bg-primary, var(--dsw-alias-bg-base, #fff))',
   border: 'var(--dsw-alias-border-l, #d0d7de)',
   brand: 'var(--dsw-alias-brand-primary, #0969da)',
   labelPrimary: 'var(--dsw-alias-label-primary, #1f2328)',
@@ -78,31 +78,31 @@ export function epicChipMuted(): string {
 export const DERIVE_TOKENS_CSS = `:root{
 /* 文字系：45% 语义基色 × 55% 平台前景——浅档基色微加深（对比度↑），深档自动提亮 */
 --dsw-derive-fg:var(--dsw-alias-label-primary,#1f2328);
---dsw-derive-muted:color-mix(in srgb,var(--dsw-alias-label-primary,#1f2328) 72%,var(--dsw-alias-bg-primary,#fff));
+--dsw-derive-muted:color-mix(in srgb,var(--dsw-alias-label-primary,#1f2328) 72%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-border:var(--dsw-alias-border-l,#d0d7de);
---dsw-derive-canvas:var(--dsw-alias-bg-primary,#fff);
---dsw-derive-surface:color-mix(in srgb,var(--dsw-alias-border-l,#d0d7de) 13%,var(--dsw-alias-bg-primary,#fff));
---dsw-derive-surface-2:color-mix(in srgb,var(--dsw-alias-border-l,#d0d7de) 26%,var(--dsw-alias-bg-primary,#fff));
+--dsw-derive-canvas:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff));
+--dsw-derive-surface:color-mix(in srgb,var(--dsw-alias-border-l,#d0d7de) 13%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
+--dsw-derive-surface-2:color-mix(in srgb,var(--dsw-alias-border-l,#d0d7de) 26%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-accent:color-mix(in srgb,#0969da 45%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-accent-solid:#1f6feb;
 --dsw-derive-on-solid:#ffffff;
 --dsw-derive-active:#7c3aed;
 --dsw-derive-accent-deep:color-mix(in srgb,#0550ae 45%,var(--dsw-alias-label-primary,#1f2328));
---dsw-derive-accent-bg:color-mix(in srgb,#0969da 12%,var(--dsw-alias-bg-primary,#fff));
---dsw-derive-accent-border:color-mix(in srgb,#0969da 42%,var(--dsw-alias-bg-primary,#fff));
+--dsw-derive-accent-bg:color-mix(in srgb,#0969da 12%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
+--dsw-derive-accent-border:color-mix(in srgb,#0969da 42%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-danger:color-mix(in srgb,#cf222e 45%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-danger-solid:#d1242f;
---dsw-derive-danger-bg:color-mix(in srgb,#cf222e 12%,var(--dsw-alias-bg-primary,#fff));
---dsw-derive-danger-border:color-mix(in srgb,#cf222e 40%,var(--dsw-alias-bg-primary,#fff));
+--dsw-derive-danger-bg:color-mix(in srgb,#cf222e 12%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
+--dsw-derive-danger-border:color-mix(in srgb,#cf222e 40%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-success:color-mix(in srgb,#1a7f37 45%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-success-deep:color-mix(in srgb,#116329 45%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-success-solid:#2da44e;
---dsw-derive-success-bg:color-mix(in srgb,#1a7f37 12%,var(--dsw-alias-bg-primary,#fff));
---dsw-derive-success-border:color-mix(in srgb,#1a7f37 42%,var(--dsw-alias-bg-primary,#fff));
+--dsw-derive-success-bg:color-mix(in srgb,#1a7f37 12%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
+--dsw-derive-success-border:color-mix(in srgb,#1a7f37 42%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-warn:color-mix(in srgb,#9a6700 45%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-warn-deep:color-mix(in srgb,#7d4e00 45%,var(--dsw-alias-label-primary,#1f2328));
---dsw-derive-warn-bg:color-mix(in srgb,#eac54f 16%,var(--dsw-alias-bg-primary,#fff));
---dsw-derive-warn-border:color-mix(in srgb,#d4a72c 45%,var(--dsw-alias-bg-primary,#fff));
+--dsw-derive-warn-bg:color-mix(in srgb,#eac54f 16%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
+--dsw-derive-warn-border:color-mix(in srgb,#d4a72c 45%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 /* 固定暗面板：自备深底的表面（终端/代码块），前后景固定搭配不随平台翻转 */
 --dsw-derive-dark-bg:#1e1e24;
 --dsw-derive-dark-fg:#f0f3f6;

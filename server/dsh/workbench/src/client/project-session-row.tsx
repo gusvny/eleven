@@ -87,7 +87,7 @@ const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
 .wb-psess-new { box-sizing:border-box; width:24px; height:24px; flex:none;
   display:flex; align-items:center; justify-content:center; font:inherit;
   font-size:13px; line-height:1; padding:0; border-radius:4px;
-  border:1px solid color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 55%,var(--dsw-alias-bg-primary,#fff)); background:none;
+  border:1px solid color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 55%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff))); background:none;
   color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-label-primary,#1f2328)); cursor:pointer; }
 .wb-psess-new:hover:not(:disabled) { background:var(--wb-psess-hover, rgba(255,255,255,0.1)); }
 /* 空态可发现性（t260906-01）：账册为空时 24px 无字小方块不可认出——换带文字
@@ -105,7 +105,7 @@ const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
 .wb-psess-tab:hover { background:color-mix(in srgb,var(--dsw-alias-label-primary,#1f2328) 8%,transparent);
   color:var(--dsw-alias-label-primary,#1f2328); }
 .wb-psess-tab.active { background:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 14%,transparent);
-  border-color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-bg-primary,#fff));
+  border-color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
   color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-label-primary,#1f2328)); }
 .wb-psess-num { line-height:1; font-family:var(--ds-font-family-code,monospace); }
 .wb-psess-close { position:absolute; top:-5px; right:-5px; width:12px; height:12px;
