@@ -2,7 +2,7 @@
  * metrics.ts —— metrics M1a（t260901-20）读侧聚合唯一实现（只读真源，永不回写）。
  *
  * 双前门共用本模块（契约块 2 L158「同实现同缓存」+ 立项关键决策 3「一个实现
- * 两扇前门」）：HTTP 前门 = node.ts 的 exact 路由 /suyou-workbench/api/wf/metrics；
+ * 两扇前门」）：HTTP 前门 = node.ts 的 exact 路由 /sandbar-workbench/api/wf/metrics；
  * CLI 前门 = metrics-cli.mjs（argv JSON 收口后直调 buildMetricsResponse）。
  * 数据契约唯一真源 = docs/design/metrics-api契约v1.md（v1 冻结版），字段增删须
  * 开新工单 bump（块 6），本文件不得私改 schema。
@@ -42,7 +42,7 @@ import net from 'node:net'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
-import { runAdminCli } from '../../../suyou-tools.ts'
+import { runAdminCli } from '../../../sandbar-tools.ts'
 import { findProject, loadProjects, primaryDir } from '../../../suyou-projects.ts'
 import { listEpics, resolveEpicsDir } from './epics.ts'
 import {

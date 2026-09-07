@@ -36,7 +36,7 @@ const nm = path.join(profDir, "node_modules");
 await mkdir(nm, { recursive: true });
 const repoNm = path.join(repoProfile, "node_modules");
 for (const name of readdirSync(repoNm)) {
-  const dest = name === "suyou-workbench" ? path.join(LANE, "server", "dsh", "workbench")
+  const dest = name === "sandbar-workbench" ? path.join(LANE, "server", "dsh", "workbench")
     : (() => { try { return realpathSync(path.join(repoNm, name)); } catch { return null; } })();
   if (dest) await symlink(dest, path.join(nm, name));
 }
@@ -78,12 +78,12 @@ console.log("phase(初始):", await p.evaluate(() => document.querySelector("[da
 
 // 种子：global-session/open ×2 + 账册
 const base = `http://127.0.0.1:${port}`;
-const pr = await fetch(`${base}/suyou-workbench/api/wf/projects`).then(r => r.json());
+const pr = await fetch(`${base}/sandbar-workbench/api/wf/projects`).then(r => r.json());
 const project = pr?.result?.projects?.find(x => x && typeof x.key === "string")?.key;
 console.log("project:", project);
 const ids = [];
 for (let i = 0; i < 2; i++) {
-  const d = await fetch(`${base}/suyou-workbench/api/global-session/open`, {
+  const d = await fetch(`${base}/sandbar-workbench/api/global-session/open`, {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ project }) }).then(r => r.json());
   console.log("open", i, "→", JSON.stringify(d).slice(0, 160));
@@ -92,7 +92,7 @@ for (let i = 0; i < 2; i++) {
 await p.evaluate(([key, proj, rows]) => {
   localStorage.setItem(key, JSON.stringify(rows.map(([id, cwd], i) => ({
     id, project: proj, cwd, lastOpenedAt: Date.now() - i * 1000 }))));
-}, ["suyou-workbench-opened-sessions-v1", project, ids]);
+}, ["sandbar-workbench-opened-sessions-v1", project, ids]);
 await p.reload({ waitUntil: "networkidle" }).catch(() => {});
 await p.waitForTimeout(2000);
 const rows = p.locator("[data-wb-psess-tab]");

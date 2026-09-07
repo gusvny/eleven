@@ -110,7 +110,7 @@ section('C composeSessionCharter 组装与回落')
 
 section('D 源文本断言（接线锚 + R7 路径同源）')
 {
-  ok(SESSION_CHARTER_PATH === '/suyou-workbench/api/session-charter', '常量值正确（注册与 fetch 共用同源）')
+  ok(SESSION_CHARTER_PATH === '/sandbar-workbench/api/session-charter', '常量值正确（注册与 fetch 共用同源）')
   const nodeTs = readFileSync(nodeTsPath, 'utf8')
   ok(nodeTs.includes(`path: SESSION_CHARTER_PATH, handler: handleSessionCharter`), 'node.ts 路由注册用同源常量（R7/KI-042 防漂移）')
   ok(nodeTs.includes("readFile(join(repo, 'server', 'dsh', 'session_charter.md'), 'utf8')"), '端点每次请求现读 charter 文件')

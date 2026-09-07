@@ -1,5 +1,5 @@
 /**
- * suyou-workbench · 侧栏接管 —— 双列布局（项目分组+工单 | 四视图）
+ * sandbar-workbench · 侧栏接管 —— 双列布局（项目分组+工单 | 四视图）
  *
  * 注册到 sidebar.workspaces 槽（single，priority=-10 抢占 shell 默认浏览器——lowest renders）。
  * Shell 传 ownerProps: wide / expandSidebar。
@@ -191,7 +191,7 @@ const isOpen = (t: Ticket): boolean => t.status !== 'closed' && t.status !== 've
 
 /* ---- sandbar（沙洲）：已完成工单在左栏的驻留时长（小时），默认 24。
  *  配置项落在 localStorage（工单台「设置」区的输入框写它），侧栏每次轮询渲染时现读。 */
-const SANDBAR_KEY = 'suyou-workbench-sandbar-v1'
+const SANDBAR_KEY = 'sandbar-workbench-sandbar-v1'
 const SANDBAR_DEFAULT_H = 24
 export function sandbarHours(): number {
   const v = Number(localStorage.getItem(SANDBAR_KEY))
@@ -526,7 +526,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
     let cancelled = false
     async function load() {
       try {
-        const pr = await fetch('/suyou-workbench/api/wf/projects').then(r => r.json())
+        const pr = await fetch('/sandbar-workbench/api/wf/projects').then(r => r.json())
         const list: Project[] = pr?.result?.projects ?? []
         if (cancelled) return
         setProjects(list)
@@ -538,7 +538,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
         publishProjects(list.map(p => ({ key: p.key, dirs: p.dirs })))
         const entries = await Promise.all(list.map(async (p) => {
           try {
-            const tr = await fetch(`/suyou-workbench/api/wf/tickets?project=${encodeURIComponent(p.key)}`).then(r => r.json())
+            const tr = await fetch(`/sandbar-workbench/api/wf/tickets?project=${encodeURIComponent(p.key)}`).then(r => r.json())
             const tickets = (tr?.result?.tickets ?? []) as Ticket[]
             // t260903-07：逐项目成功分支才发布工单→项目映射（catch 分支不发，见上方 import 注释）。
             publishProjectEntry(p.key, tickets.map(t => t.id))

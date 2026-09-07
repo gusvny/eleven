@@ -8,7 +8,7 @@
  *
  * 黑盒手法：真实 host（node.ts apply + mock webServer）+ 临时 repo 里塞一个
  * 桩 `.venv/bin/python` 顶替 temporal-poc client.py——它把收到的 sign 信号 payload
- * 原文落盘。测试从 HTTP POST /suyou-workbench/api/wf/tickets/<id>/sign 打入，
+ * 原文落盘。测试从 HTTP POST /sandbar-workbench/api/wf/tickets/<id>/sign 打入，
  * 断言桩落盘的信号 input.note 与请求体逐字节一致（模式同 smoke/epics.mjs C 组）。
  *
  * 直跑：node integration/t260901-22/t01_sign_note_passthrough.mjs（node ≥22.18）。
@@ -71,8 +71,8 @@ printf '%s\\n' '{"ok": true, "result": {"stub": "poc-cli", "note_echoed": true}}
   }
   const { apply } = await import('./../node.ts')
   apply(ctx, { repo: stubRepo })
-  const ticketPrefix = routes.find(r => r.kind === 'prefix' && r.path === '/suyou-workbench/api/wf/tickets')
-  ok(ticketPrefix !== undefined, 'host 路由已挂（/suyou-workbench/api/wf/tickets prefix）')
+  const ticketPrefix = routes.find(r => r.kind === 'prefix' && r.path === '/sandbar-workbench/api/wf/tickets')
+  ok(ticketPrefix !== undefined, 'host 路由已挂（/sandbar-workbench/api/wf/tickets prefix）')
 
   const mockRes = () => ({
     status: 0, body: null,
@@ -100,7 +100,7 @@ printf '%s\\n' '{"ok": true, "result": {"stub": "poc-cli", "note_echoed": true}}
     try { return (await readFile(record, 'utf8')).trim().split('\n').filter(Boolean).length }
     catch { return 0 }
   }
-  const URL = '/suyou-workbench/api/wf/tickets/t260901-22/sign'
+  const URL = '/sandbar-workbench/api/wf/tickets/t260901-22/sign'
 
   /* ---- A. approve + 自由备注：逐字节进 sign 信号 ---- */
   section('A approve：备注随 sign 进历史（用户主路径）')

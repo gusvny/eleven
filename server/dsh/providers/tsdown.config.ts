@@ -1,4 +1,4 @@
-// suyou-providers UI 插件构建：产物形态对齐 dsh 客户端模块契约
+// sandbar-providers UI 插件构建：产物形态对齐 dsh 客户端模块契约
 // （window.__ModuleLoader__.load({id, factory}) 惰性 CJS 工厂，react 与
 // @deepseek-ai/* 全部外部化走平台模块表）。
 // 构建（在 server/dsh/providers/ 下；suyou 仓库无 npm 依赖，tsdown 从外部供给）：
@@ -6,11 +6,11 @@
 // 产物 lib/client.js 已随仓库提交；只有改了 src/client/ 才需要重建。
 
 // closure-factory 外衣——与 dsh 共享 clientBundle 预设的产物形态一致。
-const CLOSURE_PRELUDE = 'window.__ModuleLoader__.load({ id: "suyou-providers", factory: (require) => {'
+const CLOSURE_PRELUDE = 'window.__ModuleLoader__.load({ id: "sandbar-providers", factory: (require) => {'
 const CLOSURE_POSTLUDE = 'return module.exports; } });'
 
 export default {
-  name: 'suyou-providers/client',
+  name: 'sandbar-providers/client',
   entry: { client: 'src/client/index.tsx' },
   outDir: 'lib',
   format: 'cjs',

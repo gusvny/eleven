@@ -105,8 +105,8 @@ function makeHarness(repo) {
   apply(ctx, { repo })
   const find = (kind, path) => routes.find(r => r.kind === kind && r.path === path)
   return {
-    exactEpics: find('exact', '/suyou-workbench/api/epics'),
-    prefixEpics: find('prefix', '/suyou-workbench/api/epics'),
+    exactEpics: find('exact', '/sandbar-workbench/api/epics'),
+    prefixEpics: find('prefix', '/sandbar-workbench/api/epics'),
   }
 }
 const mockRes = () => ({
@@ -306,7 +306,7 @@ try {
   const h = makeHarness(repoD)
   ok(h.prefixEpics !== undefined, 'epics prefix route mounted')
 
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/integ-st-alpha/status', 'POST',
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/status', 'POST',
     { status: '已归档', note: '路由写入' })
   ok(r.status === 200 && r.body.ok === true && r.body.result?.code === 'integ-st-alpha'
     && r.body.result?.status === '已归档' && r.body.result?.note === '路由写入',
@@ -314,29 +314,29 @@ try {
   ok(parseEpicMeta(await read('integ-st-alpha')).status === '已归档',
     'POST /status: rewrite persisted on disk')
 
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/integ-st-alpha/status', 'GET')
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/status', 'GET')
   ok(r.status === 405, 'GET /status -> 405 (write action is POST-only)')
   // Rejected-call batch: none of these may modify the charter (snapshot before/after).
   const snapD = parseEpicMeta(await read('integ-st-alpha'))
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/integ-st-alpha/status', 'POST',
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/status', 'POST',
     undefined, '{"status": "已完结", broken')
   ok(r.status === 400 && r.body.ok === false, 'malformed JSON body -> 400')
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/integ-st-alpha/status', 'POST', { note: '只有备注' })
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/status', 'POST', { note: '只有备注' })
   ok(r.status === 400, 'missing status field -> 400')
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/integ-st-alpha/status', 'POST', { status: '半角(执行中)' })
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/status', 'POST', { status: '半角(执行中)' })
   ok(r.status === 422 && String(r.body.error).includes('已立项（执行中）'),
     'invalid enum -> 422 with legal-value hint')
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/integ-st-alpha/status', 'POST', { status: '已完结', note: 'a|b' })
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/status', 'POST', { status: '已完结', note: 'a|b' })
   ok(r.status === 422, 'note with pipe -> 422')
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/integ-st-alpha/status', 'POST', { status: '已完结', note: 42 })
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/status', 'POST', { status: '已完结', note: 42 })
   ok(r.status === 400, 'non-string note -> 400')
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/integ-st-alpha/status', 'POST', { status: '已完结', note: null })
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/status', 'POST', { status: '已完结', note: null })
   const afterNull = parseEpicMeta(await read('integ-st-alpha'))
   ok(r.status === 200 && afterNull.status === '已完结' && afterNull.note === '路由写入',
     'note:null -> status applied, note column untouched (null == omitted)')
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/no-such-epic/status', 'POST', { status: '已完结' })
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/no-such-epic/status', 'POST', { status: '已完结' })
   ok(r.status === 404, 'unknown code -> 404')
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/integ-st-alpha/bogus-op')
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/bogus-op')
   ok(r.status === 404 && String(r.body.error).includes('/status'),
     'unknown subpath -> 404 message lists /status')
   const afterRejects = parseEpicMeta(await read('integ-st-alpha'))

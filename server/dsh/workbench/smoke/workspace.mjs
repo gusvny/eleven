@@ -1,5 +1,5 @@
 /**
- * smoke/workspace.mjs —— suyou-workbench M14「工作区」展示纯函数冒烟。
+ * smoke/workspace.mjs —— sandbar-workbench M14「工作区」展示纯函数冒烟。
  *
  * 直跑：node smoke/workspace.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
  * 覆盖 workspaceInfoOf / workspaceTextOf（src/shared/workspace.ts）：

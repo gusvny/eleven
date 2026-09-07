@@ -11,9 +11,9 @@
   round 可带扩展键 ticket/stage（审校出自哪张工单哪一段，TS 侧读写原样透传）。
 
 用途：content-pipeline 的 ai-review 段（proofreader agent）把逐块审校意见落盘——
-落盘后知识库 UI（GET /suyou-knowledge/api/review）按 block_key 自动回填显示；
+落盘后知识库 UI（GET /sandbar-knowledge/api/review）按 block_key 自动回填显示；
 rework 子命令生成**可一键复制的返工指令**（直接贴进 ticket rework note / 派活 prompt）。
-block_key 取知识库 diff API（/suyou-knowledge/api/diff）返回的块键才能在 UI 回填到块；
+block_key 取知识库 diff API（/sandbar-knowledge/api/diff）返回的块键才能在 UI 回填到块；
 整篇级意见用 doc: 前缀自由锚点（如 doc:whole、doc:结构），不回填块但进 rounds 存档。
 
 CLI（stdout 单行 JSON，{"ok":true,"result":...} / {"ok":false,"error":...}，同 admin 工具契约）：

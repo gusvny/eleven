@@ -112,8 +112,8 @@ export function mainRoot() {
 
 /**
  * 自物化临时 profile（capture-lane.buildTempProfile 的泳道自适应版，克缝始终=测泳道代码）：
- * cordis 配置/suyou-tools.ts 取本仓 profile 目录（committed）；插件 node_modules 逐项
- * realpath 自主树（读主树已装依赖，其余插件不受测），唯 suyou-workbench 改指泳道
+ * cordis 配置/sandbar-tools.ts 取本仓 profile 目录（committed）；插件 node_modules 逐项
+ * realpath 自主树（读主树已装依赖，其余插件不受测），唯 sandbar-workbench 改指泳道
  * workbench 源目录（插件宿主入口=node.ts TS 直跑，宿主面测的就是泳道源码）。
  * 不依赖泳道 server/dsh/profile/node_modules（gitignored，泳道恒缺——原 buildTempProfile
  * 在泳道布局下必拒跑，arbitrate gen0 测试资产变更审查有记）。

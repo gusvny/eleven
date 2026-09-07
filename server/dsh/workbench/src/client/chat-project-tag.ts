@@ -1,5 +1,5 @@
 /**
- * suyou-workbench · 全局 chat 消息项目 tag 装饰器（t260903-07 工单②）。
+ * sandbar-workbench · 全局 chat 消息项目 tag 装饰器（t260903-07 工单②）。
  *
  * 渲染机制（方案 v2 R1 换轨后的定稿，验收硬约束）：
  *   **零 childList 侵入 React 托管容器**——只给平台渲染的用户消息行**设置自有属性**

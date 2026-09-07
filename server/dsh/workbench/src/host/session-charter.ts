@@ -1,5 +1,5 @@
 /**
- * suyou-workbench · session-charter 渲染纯函数（t260904-07）。
+ * sandbar-workbench · session-charter 渲染纯函数（t260904-07）。
  *
  * 职责：把 `server/dsh/session_charter.md`（会话开局注入源，改完即生效）
  * 渲染成单项目的注入文本：
@@ -20,7 +20,7 @@
  */
 
 /** 会话开局 charter 端点路径（node.ts 注册与客户端 fetch 共用常量）。 */
-export const SESSION_CHARTER_PATH = '/suyou-workbench/api/session-charter'
+export const SESSION_CHARTER_PATH = '/sandbar-workbench/api/session-charter'
 
 /**
  * 上下文注入机读标记（t260905-04）：引擎侧给注入文本打的「消息元数据 kind=charter」

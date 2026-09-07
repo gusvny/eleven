@@ -14,7 +14,7 @@
 // (real BroadcastChannel + localStorage between them) and stubs the workbench
 // API boundary per page with page.route() — the shipped bundle, React render
 // path and the genuine browser tab-communication primitives are all under
-// test; only /suyou-workbench/api/wf/tickets* carries fixtures (fixture state
+// test; only /sandbar-workbench/api/wf/tickets* carries fixtures (fixture state
 // is SHARED across pages so a write on one tab is observable on another;
 // request counters stay per-page for the hidden-tab attribution). Never
 // touches the production console (3099) nor real tickets.
@@ -68,7 +68,7 @@ import { pathToFileURL } from 'node:url'
 
 const REPO = process.cwd()
 const BASE = (await ensureStageConsole()).base;
-const CHANNEL = 'suyou-workbench-tabs' // approved plan's channel name
+const CHANNEL = 'sandbar-workbench-tabs' // approved plan's channel name
 const FIDA = 'it15a' // fixture ticket ids (alnum only; never real tickets)
 const FIDB = 'it15b'
 const MARKER_V2 = '[advanced-by-peer-v2]'
@@ -156,16 +156,16 @@ function sharedFixtures() {
   }
 }
 
-/** Per-page API-boundary stub. Counts EVERY /suyou-workbench/api/** request in
+/** Per-page API-boundary stub. Counts EVERY /sandbar-workbench/api/** request in
  *  that page's own counter (hidden-tab attribution), serves ticket fixtures
  *  from the SHARED fixture map (so a write on tab D is visible to tab B's
  *  next fetch), passes everything else through to the real test console. */
 async function attachStub(page, shared, counts) {
-  await page.route('**/suyou-workbench/api/**', async (route) => {
+  await page.route('**/sandbar-workbench/api/**', async (route) => {
     const req = route.request()
     const url = new URL(req.url())
     counts.total++
-    const m = /^\/suyou-workbench\/api\/wf\/tickets(?:\/([^/]+)(?:\/([^/]+))?)?$/.exec(url.pathname)
+    const m = /^\/sandbar-workbench\/api\/wf\/tickets(?:\/([^/]+)(?:\/([^/]+))?)?$/.exec(url.pathname)
     const body = (b) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(b) })
     if (!m) {
       try {

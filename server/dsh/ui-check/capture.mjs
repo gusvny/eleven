@@ -189,18 +189,18 @@ export function routeDecision(method, url, fixtures) {
     fulfill: { status: 200, contentType: "application/json", body: JSON.stringify(fixtures[name]) },
     fixture: name,
   });
-  if (p === "/suyou-workbench/api/wf/tickets") return fulfill("tickets-list");
-  let m = p.match(/^\/suyou-workbench\/api\/wf\/tickets\/([^/]+)$/);
+  if (p === "/sandbar-workbench/api/wf/tickets") return fulfill("tickets-list");
+  let m = p.match(/^\/sandbar-workbench\/api\/wf\/tickets\/([^/]+)$/);
   if (m) {
     const key = `ticket-show-${decodeURIComponent(m[1])}`;
     return fixtures[key] ? wrapResult(key) : { passthrough: true };
   }
-  m = p.match(/^\/suyou-workbench\/api\/wf\/tickets\/([^/]+)\/diff$/);
+  m = p.match(/^\/sandbar-workbench\/api\/wf\/tickets\/([^/]+)\/diff$/);
   if (m) {
     const key = `ticket-diff-${decodeURIComponent(m[1])}`;
     return fixtures[key] ? wrapResult(key) : { passthrough: true };
   }
-  if (p === "/suyou-workbench/api/wf/workflows") return fulfill("workflows");
+  if (p === "/sandbar-workbench/api/wf/workflows") return fulfill("workflows");
   return { passthrough: true };
 }
 
@@ -228,7 +228,7 @@ async function launchBrowser(playwright) {
 // 的 DSH_HOME 是临时的，台内造数不违红线——所以门旗由隔离台路径显式传入
 //（capture-lane 传 --allow-seed 或设该 env；直连路径永远不带旗标，行为退回
 // 旧的「明确报错交人」）。造两个会话，MRU 来回视图（两会话切换）才有素材。
-const LEDGER_KEY = "suyou-workbench-opened-sessions-v1";
+const LEDGER_KEY = "sandbar-workbench-opened-sessions-v1";
 
 /** 种子消息防呆（畸形输入用例的锚，t260901-03）：空/超长/控制字符 → 人话拒因，否则 null。
  *  seedChatMessage 的实际消息词可 env 覆盖，本函数供调用前防呆与基线单测。 */
@@ -254,13 +254,13 @@ export { LEDGER_KEY };
 async function seedSessions(page, url) {
   const base = url.replace(/\/$/, "");
   // ① 项目注册表：取第一个项目 key（新建落点；隔离台通常单项目）
-  const pr = await fetch(`${base}/suyou-workbench/api/wf/projects`).then((r) => r.json());
+  const pr = await fetch(`${base}/sandbar-workbench/api/wf/projects`).then((r) => r.json());
   const project = pr?.result?.projects?.find((p) => p && typeof p.key === "string")?.key;
   if (!project) throw new Error("台内造数失败：/api/wf/projects 无可用项目 key");
   // ② 建两个真实会话（host 端落盘，id 真实可 open）
   const ids = [];
   for (let i = 0; i < 2; i++) {
-    const d = await fetch(`${base}/suyou-workbench/api/global-session/open`, {
+    const d = await fetch(`${base}/sandbar-workbench/api/global-session/open`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ project }),
@@ -320,7 +320,7 @@ async function navigateToChat(page, allowSeed = false) {
       await newBtn.waitFor({ state: "visible", timeout: 8000 });
     } catch {
       throw new Error("隔离台造数后未找到项目行「+ 钮」（[data-wb-psess-new]）——" +
-        "会话入口未挂载或项目未注册，查 seedSessions 与 suyou-workbench 挂载日志。");
+        "会话入口未挂载或项目未注册，查 seedSessions 与 sandbar-workbench 挂载日志。");
     }
     await forceClick(newBtn, 5000);
     // 遮罩先让路再写值（t260901-03 Step ①）：准入模态的 mask 拦 pointer/focus，
@@ -649,6 +649,13 @@ async function main() {
         if (stale > 0) throw new Error(`顶部会话入口残留 ${stale} 个（票② R8 应已退役）`);
         return "项目会话区（[data-wb-psess-row] 可见；顶部行不在场，未点击）";
       } },
+    // t260907-05 命名迁移验收面：插件按新包名经农场新链装载的视图证据——
+    // 文档=workbench 插件 DocsSection；模型路由=providers 插件（独立包，
+    // 能渲染=农场 sandbar-providers 链解析通了）。
+    { file: "console-docs.png", title: "文档视图（workbench 插件 DocsSection）",
+      run: (page) => openView(page, "文档", ".wb-doc-root") },
+    { file: "console-providers.png", title: "模型路由视图（providers 插件经农场新链装载证明）",
+      run: (page) => openView(page, "模型路由", ".syp-root") },
   ];
 
   // fixture 态专属视图（t260901-24）：仅注入模式追加进 VIEWS；缺省清单逐字节不变
@@ -841,6 +848,21 @@ async function main() {
       failures.push(`刷新回归：${e.message}`);
       console.error(`[capture] 视图失败（尽力视图，不阻断）：刷新回归——${e.message}`);
     }
+    // 深浅外观证明（t260907-05 验收面③）：主题跟随 prefers-color-scheme
+    // （theme.ts 口径），emulateMedia 切换后各拍工单列表一张——改名后的
+    // 装载链在两种外观下都成立；拍完恢复仿真（防污染 chat 态）。
+    for (const scheme of ["dark", "light"]) {
+      try {
+        await page.emulateMedia({ colorScheme: scheme });
+        const anchor = await openView(page, "工单列表");
+        await shoot(`console-board-${scheme}.png`);
+        console.log(`[capture]   锚=${anchor}（${scheme} 外观）`);
+      } catch (e) {
+        failures.push(`外观 ${scheme}：${e.message}`);
+        console.error(`[capture] 视图失败（尽力视图，不阻断）：外观 ${scheme}——${e.message}`);
+      }
+    }
+    await page.emulateMedia(null).catch(() => {});
     // chat 态（打开已有会话）
     try {
       const anchor = await navigateToChat(page, args.allowSeed || process.env.SUYOU_UI_CAPTURE_ALLOW_SEED === "1");

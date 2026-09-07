@@ -66,7 +66,7 @@ teardownOnExit(bench.teardown);
 record('bench/boot', 'pass', bench.base);
 
 const B = bench.base;
-const API = '/suyou-workbench/api/wf/projects';
+const API = '/sandbar-workbench/api/wf/projects';
 const root = bench.__projectsRoot;
 const okBody = (r) => (r.body && typeof r.body === 'object' ? (r.body.result ?? r.body) : r.body);
 const errText = (r) => (typeof r.body === 'string' ? r.body : JSON.stringify(r.body?.error ?? r.body));

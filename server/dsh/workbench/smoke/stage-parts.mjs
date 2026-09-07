@@ -5,7 +5,7 @@
  * 覆盖：
  *   A. src/shared/parts.ts 纯函数：组合拼接（agent+script→🤖⚙️、human+script→👤⚙️）、
  *      undefined/空数组 →「—」软降级、未知枚举值 → ❓ 兜底且悬停行点名、不抛错。
- *   B. /suyou-workbench/api/wf/workflows 路由端到端（真实仓库 repo，无 stub）：
+ *   B. /sandbar-workbench/api/wf/workflows 路由端到端（真实仓库 repo，无 stub）：
  *      五模版全部 stage 带非空 parts 透出（链路：STAGES→yaml→workflow.py
  *      _brief→路由），且 stage 链/parts 与 Python 侧 STAGES 代码真源逐条比对
  *      （独立基线，不与路由同源；加 stage 不会假红）。
@@ -72,7 +72,7 @@ try {
       on: () => () => {},
     }
     apply(ctx, { repo: REPO })
-    const route = routes.find(r => r.kind === 'exact' && r.path === '/suyou-workbench/api/wf/workflows')
+    const route = routes.find(r => r.kind === 'exact' && r.path === '/sandbar-workbench/api/wf/workflows')
     ok(route !== undefined, 'workflows exact 路由已挂')
 
     const res = {
@@ -80,7 +80,7 @@ try {
       writeHead(s) { this.status = s },
       end(b) { this.body = b ? JSON.parse(b) : null },
     }
-    const req = { url: '/suyou-workbench/api/wf/workflows', method: 'GET', async *[Symbol.asyncIterator]() {} }
+    const req = { url: '/sandbar-workbench/api/wf/workflows', method: 'GET', async *[Symbol.asyncIterator]() {} }
     await route.handler(req, res)
     ok(res.status === 200 && res.body.ok === true, 'GET 200')
     const wfs = res.body.result

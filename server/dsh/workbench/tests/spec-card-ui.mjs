@@ -92,7 +92,7 @@ for (const [p, name] of backendFiles) {
 }
 const nodeTs = readFileSync(NODE_TS, 'utf8')
 ok(!/spec/i.test(nodeTs), 'node.ts: 无任何 spec 相关新路由/分支（/spec/i 零命中）')
-ok(nodeTs.includes('/suyou-workbench/api/wf/tickets/<id>') || /wf\/tickets\/\$/.test(nodeTs),
+ok(nodeTs.includes('/sandbar-workbench/api/wf/tickets/<id>') || /wf\/tickets\/\$/.test(nodeTs),
   'node.ts: 详情仍走既有 GET /wf/tickets/<id>（整包透传，无旁路）')
 
 // ---- E. 畸形输入守卫：徽标取值在守卫内；超长走限高滚动 ----

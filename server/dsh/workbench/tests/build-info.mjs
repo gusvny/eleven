@@ -7,7 +7,7 @@
  *   A. computeHostFingerprint / collectSourceFiles（src/host/build-info.ts）：
  *      同输入同 hash；文件内容变→hash 变；单文件缺失→missing 不抛；全缺失→error 不抛；
  *      t260905-07：动态扫描收编新增文件（漏列修复钉住）；vendor/ 与 *.d.ts 不入清单。
- *   B. /suyou-workbench/api/build-info 路由（node.ts apply + mock webServer）：
+ *   B. /sandbar-workbench/api/build-info 路由（node.ts apply + mock webServer）：
  *      fresh→stale:false；磁盘文件变→stale:true；同进程二次 apply 不重置 boot 指纹（R3）；
  *      带 error 响应→stale:false+error（R4）；非 GET→405；畸形查询串无害。
  *      t260905-07 同构断言：boot 与 disk 同清单同函数——同输入下两侧 hash 必相等。
@@ -110,7 +110,7 @@ try {
       on: () => () => {},
     }
     apply(ctx, { repo })
-    const route = routes.find(r => r.kind === 'exact' && r.path === '/suyou-workbench/api/build-info')
+    const route = routes.find(r => r.kind === 'exact' && r.path === '/sandbar-workbench/api/build-info')
     ok(route !== undefined, 'B: build-info exact 路由已挂')
 
     const mockRes = () => ({
@@ -128,7 +128,7 @@ try {
     // 等 boot 指纹固化（apply 内 fire-and-forget）
     let fresh = null
     for (let i = 0; i < 50; i++) {
-      fresh = await call('/suyou-workbench/api/build-info')
+      fresh = await call('/sandbar-workbench/api/build-info')
       if (fresh.body?.result?.bootFingerprint !== undefined) break
       await new Promise(r => setTimeout(r, 20))
     }
@@ -141,18 +141,18 @@ try {
 
     // 磁盘文件变（模拟合并落账）→ stale:true
     await layFixture(repo, 'landed')
-    const stale = await call('/suyou-workbench/api/build-info')
+    const stale = await call('/sandbar-workbench/api/build-info')
     ok(stale.status === 200 && stale.body.result.stale === true, 'B: 磁盘变 → stale:true（一日三咬可提醒）')
 
     // R3：同进程二次 apply（宿主重放）不重置 boot 指纹
     apply(ctx, { repo })
-    const afterReplay = await call('/suyou-workbench/api/build-info')
+    const afterReplay = await call('/sandbar-workbench/api/build-info')
     ok(afterReplay.body.result.stale === true && afterReplay.body.result.bootFingerprint === fresh.body.result.bootFingerprint,
       'B: 二次 apply 不重置 boot 指纹（stale 仍真）')
 
     // 恢复磁盘=boot → stale 回假（看守双向，不误报）
     await layFixture(repo, 'boot')
-    const back = await call('/suyou-workbench/api/build-info')
+    const back = await call('/sandbar-workbench/api/build-info')
     ok(back.body.result.stale === false, 'B: 磁盘还原 → stale:false（不误报）')
 
     // R4：全缺失 → stale:false + error
@@ -161,16 +161,16 @@ try {
     const routes2 = []
     const ws2 = { register: (r) => { routes2.push(r); return () => {} } }
     apply({ effect: (fn) => { fn() }, logger: { info() {}, warn() {} }, get: (k) => (k === 'webServer' ? ws2 : undefined), on: () => () => {} }, { repo: repoEmpty })
-    const route2 = routes2.find(r => r.kind === 'exact' && r.path === '/suyou-workbench/api/build-info')
+    const route2 = routes2.find(r => r.kind === 'exact' && r.path === '/sandbar-workbench/api/build-info')
     const res2 = mockRes()
-    await route2.handler(mockReq('/suyou-workbench/api/build-info'), res2)
+    await route2.handler(mockReq('/sandbar-workbench/api/build-info'), res2)
     ok(res2.status === 200 && res2.body.result.stale === false && typeof res2.body.result.error === 'string',
       'B: 指纹全缺 → stale:false + error（无法判定=不误报）')
 
     // 非 GET → 405；畸形查询串无害
-    const r405 = await call('/suyou-workbench/api/build-info', 'POST')
+    const r405 = await call('/sandbar-workbench/api/build-info', 'POST')
     ok(r405.status === 405, 'B: POST → 405（只读看守）')
-    const rQuery = await call('/suyou-workbench/api/build-info?%broken&&x=1')
+    const rQuery = await call('/sandbar-workbench/api/build-info?%broken&&x=1')
     ok(rQuery.status === 200, 'B: 畸形查询串无害（200）')
   }
 

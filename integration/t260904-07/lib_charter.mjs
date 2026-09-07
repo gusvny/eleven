@@ -10,7 +10,7 @@ import { ensureStageConsole } from '../lib_stage_console.mjs';
 export const BASE = (await ensureStageConsole()).base;
 
 /** 本票端点路径（与被测契约同一字面值；场景侧独立声明，防被测源漂移时场景跟着哑）。 */
-export const CHARTER_EP = '/suyou-workbench/api/session-charter';
+export const CHARTER_EP = '/sandbar-workbench/api/session-charter';
 
 /** 生产控制台红线：命中 3099 直接拒跑（宁可自家测试不跑）。 */
 export function refuseProductionConsole() {
@@ -48,7 +48,7 @@ export function makeResults() {
 /** 隔离台健康检查（workbench API 可达=测试台活着；与 t260904-05 口径同源接口）。 */
 export async function consoleHealthy() {
   try {
-    const r = await fetch(`${BASE}/suyou-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
+    const r = await fetch(`${BASE}/sandbar-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
     return r.ok;
   } catch { return false; }
 }
@@ -56,7 +56,7 @@ export async function consoleHealthy() {
 /** 项目清单（key 列表；响应三态兼容：裸数组 / {projects} / {result:{projects}} 包装）。 */
 export async function fetchProjectKeys() {
   try {
-    const r = await fetch(`${BASE}/suyou-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
+    const r = await fetch(`${BASE}/sandbar-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
     if (!r.ok) return [];
     const data = await r.json();
     const list = Array.isArray(data) ? data : (data?.result?.projects ?? data?.projects ?? []);

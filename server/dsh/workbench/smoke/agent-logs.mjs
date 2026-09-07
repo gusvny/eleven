@@ -1,5 +1,5 @@
 /**
- * smoke/agent-logs.mjs —— suyou-workbench M12「Agent 日志」的宿主半冒烟。
+ * smoke/agent-logs.mjs —— sandbar-workbench M12「Agent 日志」的宿主半冒烟。
  *
  * 直跑：node smoke/agent-logs.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
  * 覆盖：
@@ -9,7 +9,7 @@
  *   B. listAgentLogs（临时目录）：不存在/空目录 → exists=false + reason；agent_*.log 与
  *      stage_*.json 按 (stage, gen) 排序；log 取尾部内容、result 解析 JSON；坏 JSON →
  *      parseError；junk 文件不入；超大文件截断标记。
- *   C. /suyou-workbench/api/wf/tickets/<id>/agent-logs 路由（node.ts apply + mock
+ *   C. /sandbar-workbench/api/wf/tickets/<id>/agent-logs 路由（node.ts apply + mock
  *      webServer/req/res + stub admin.py）：坏 id → 400（不到文件层）；真工单 →
  *      200 + 泳道 .suyou 文件列表与内容；无 .suyou 目录 → 200 + reason 降级（不抛错）。
  */
@@ -93,7 +93,7 @@ try {
   }
 
   /* ------------------------------------------------------------ C. 路由 */
-  section('C /suyou-workbench/api/wf/tickets/<id>/agent-logs 路由')
+  section('C /sandbar-workbench/api/wf/tickets/<id>/agent-logs 路由')
   {
     const repo = join(tmp, 'repo-route')
     await mkdir(join(repo, 'server'), { recursive: true })
@@ -123,7 +123,7 @@ sys.exit(1)
       on: () => () => {},
     }
     apply(ctx, { repo })
-    const prefix = routes.find(r => r.kind === 'prefix' && r.path === '/suyou-workbench/api/wf/tickets')
+    const prefix = routes.find(r => r.kind === 'prefix' && r.path === '/sandbar-workbench/api/wf/tickets')
     ok(prefix !== undefined, 'tickets prefix 路由已挂')
 
     const mockRes = () => ({
@@ -138,7 +138,7 @@ sys.exit(1)
       return res
     }
 
-    const pre = '/suyou-workbench/api/wf/tickets'
+    const pre = '/sandbar-workbench/api/wf/tickets'
     // 坏 id → 400（在 spawn admin.py 之前就拒，防穿）
     let r = await call(`${pre}/${encodeURIComponent('..%2F..%2Fetc')}/agent-logs`)
     ok(r.status === 400, '坏 id → 400（防穿，不到文件层）')
@@ -160,7 +160,7 @@ sys.exit(1)
       on: () => () => {},
     }
     apply(ctx2, { repo: join(tmp, 'repo-route2') })
-    const prefix2 = routes2.find(r => r.kind === 'prefix' && r.path === '/suyou-workbench/api/wf/tickets')
+    const prefix2 = routes2.find(r => r.kind === 'prefix' && r.path === '/sandbar-workbench/api/wf/tickets')
     const stub2 = `import json, sys
 if len(sys.argv) >= 4 and sys.argv[1] == 'call' and sys.argv[2] == 'ticket':
     args = json.loads(sys.argv[3])

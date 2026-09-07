@@ -35,8 +35,8 @@ const { record, summarize } = makeResults();
 
 // 账册/计数器存储键（迁移测试的必然绑定：测的就是这几个键里的数据格式；
 // 键名换版时本场景红=迁移测试该跟着换版的正确红）
-const LEDGER_KEY = 'suyou-workbench-opened-sessions-v1';
-const SEQ_COUNTER_KEY = 'suyou-workbench-project-seq-v1';
+const LEDGER_KEY = 'sandbar-workbench-opened-sessions-v1';
+const SEQ_COUNTER_KEY = 'sandbar-workbench-project-seq-v1';
 
 const pw = await loadPlaywright();
 if (!pw) { record('browser/deps', 'env_fail', 'playwright-core unavailable'); summarize(); }

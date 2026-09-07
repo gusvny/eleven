@@ -1,7 +1,7 @@
 /**
- * suyou-admin-ui —— 溯游管理台的 dsh UI 插件（宿主半 / node）。
+ * sandbar-admin-ui —— 溯游管理台的 dsh UI 插件（宿主半 / node）。
  *
- * 职责：在 dsh 自己的 webServer 上挂管理台 API，供浏览器半与 suyou-providers
+ * 职责：在 dsh 自己的 webServer 上挂管理台 API，供浏览器半与 sandbar-providers
  * 「模型」页签（lib/client.js）同源 fetch 使用：
  *
  *   GET  /suyou-admin/api/tools   → admin.py tools 的工具表 + 需确认名单
@@ -21,7 +21,7 @@
  *   POST /suyou-admin/api/routes  → M13 保存：{project, table}（default/roles 的
  *                                   provider|model，schema 锁死可编辑槽位）→
  *                                   外科补丁写 <项目主目录> 的 model-routes.yaml（写前备份
- *                                   /tmp；保存即生效——运行时查表）。由 suyou-providers
+ *                                   /tmp；保存即生效——运行时查表）。由 sandbar-providers
  *                                   「模型」页签「路由表」分区调用。
  *
  * M13（t260822-m13-model-routes-edit）：浏览器半不再注册 settings.section
@@ -29,7 +29,7 @@
  * providers「模型」页签消费，POST 承担保存。
  *
  * 每次调用仍经 runAdminCli spawn admin.py——run-id 审计单一真源保持在
- * python server/admin.log（与模型通道 suyou-tools 一致）。
+ * python server/admin.log（与模型通道 sandbar-tools 一致）。
  *
  * headless profile 没有 webServer 服务：apply 静默待命（internal/service 事件
  * 等不到就什么都不挂），不报错不阻塞。
@@ -43,11 +43,11 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
-import { runAdminCli } from '../suyou-tools.ts'
+import { runAdminCli } from '../sandbar-tools.ts'
 import { findProject, primaryDir } from '../suyou-projects.ts'
 import { buildRoutesView, initRoutesTable, saveRoutesTable } from './src/host/routes.ts'
 
-export const name = 'suyou-admin-ui'
+export const name = 'sandbar-admin-ui'
 // webServer 只存在于 web profile；headless 下本插件待机即可，故不走 inject 硬依赖。
 export const inject: string[] = []
 
@@ -277,8 +277,8 @@ export function apply(ctx: Context, config?: SuyouAdminUiConfig): void {
         ws.register({ kind: 'exact', path: '/suyou-admin/api/routes/save', handler: handleRoutesSave }),
       ]
       return () => { for (const dispose of disposers) dispose() }
-    }, 'suyou-admin-ui: admin api routes')
-    ctx.logger.info('suyou-admin-ui: 管理台 API 已挂载 /suyou-admin/api/*（repo=%s，面板确认名单=%s）',
+    }, 'sandbar-admin-ui: admin api routes')
+    ctx.logger.info('sandbar-admin-ui: 管理台 API 已挂载 /suyou-admin/api/*（repo=%s，面板确认名单=%s）',
       repo, [...needsApproval].join(',') || '空')
   }
 

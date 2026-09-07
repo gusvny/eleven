@@ -27,7 +27,7 @@
  *
  * Known engine bug (recorded here, to be fixed in a separate ticket -- engine files
  * are outside this ticket's write set):
- *   POST /suyou-workbench/api/epics/<code>/next-hint/dismiss always returns 405.
+ *   POST /sandbar-workbench/api/epics/<code>/next-hint/dismiss always returns 405.
  *   Root cause: the GET-only 405 branch (node.ts:1034) sits BEFORE the dismiss branch
  *   (node.ts:1063), contradicting the comment at node.ts:1062 ("must branch before
  *   the GET-only 405"). The frontend [dismiss] button (src/client/epics.tsx:258, POST)
@@ -81,9 +81,9 @@ function makeHarness(repo) {
   apply(ctx, { repo })
   const find = (kind, path) => routes.find(r => r.kind === kind && r.path === path)
   return {
-    exactEpics: find('exact', '/suyou-workbench/api/epics'),
-    prefixEpics: find('prefix', '/suyou-workbench/api/epics'),
-    exactTickets: find('exact', '/suyou-workbench/api/wf/tickets'),
+    exactEpics: find('exact', '/sandbar-workbench/api/epics'),
+    prefixEpics: find('prefix', '/sandbar-workbench/api/epics'),
+    exactTickets: find('exact', '/sandbar-workbench/api/wf/tickets'),
   }
 }
 const mockRes = () => ({
@@ -143,32 +143,32 @@ try {
   process.env.SUYOU_EPICS_DIR = epicsDir
   const h = makeHarness(repoB)
   ok(h.prefixEpics !== undefined && h.exactEpics !== undefined, 'epics exact+prefix routes mounted')
-  let r = await call(h.prefixEpics, '/suyou-workbench/api/epics/demo-epic')
+  let r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/demo-epic')
   ok(r.status === 200 && r.body.result.markdown.includes('## 目标')
     && r.body.result.path === 'notes/epics/demo-epic.md', 'GET detail -> 200 markdown+path')
-  r = await call(h.exactEpics, '/suyou-workbench/api/epics')
+  r = await call(h.exactEpics, '/sandbar-workbench/api/epics')
   ok(r.status === 200 && r.body.result.count === 2, 'GET list route -> 200 count')
   for (const bad of ['Demo-epic', 'a b', 'x'.repeat(42)]) {
-    r = await call(h.prefixEpics, `/suyou-workbench/api/epics/${encodeURIComponent(bad)}`)
+    r = await call(h.prefixEpics, `/sandbar-workbench/api/epics/${encodeURIComponent(bad)}`)
     ok(r.status === 400, `invalid shape '${bad.slice(0, 12)}' -> 400`)
   }
   // '..' is normalized away by URL parsing; traversal shapes hit the route encoded
   // (same surface a real attacker would use)
   for (const enc of ['%2e%2e', '..%2f..%2fetc', '%2e%2e%2f%2e%2e%2fpasswd', 'a%2Fb']) {
-    r = await call(h.prefixEpics, `/suyou-workbench/api/epics/${enc}`)
+    r = await call(h.prefixEpics, `/sandbar-workbench/api/epics/${enc}`)
     ok(r.status >= 400 && r.status < 500, `traversal shape '${enc}' -> rejected with 4xx`)
   }
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/no-such-epic')
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/no-such-epic')
   ok(r.status === 404 && String(r.body.error).includes('不存在') && String(r.body.error).includes('demo-epic'),
     'non-existent -> 404 human message listing existing codes')
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/demo-epic', 'POST')
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/demo-epic', 'POST')
   ok(r.status === 405, 'POST detail -> 405 (read-only contract)')
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/demo-epic/bogus-op')
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/demo-epic/bogus-op')
   ok(r.status === 404, 'unknown subpath -> 404 human message')
 
   /* ------------------------------------------------------------ C. /tickets + degraded paths */
   section('C /tickets aggregation (buckets / row fields) + two degraded paths')
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/demo-epic/tickets')
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/demo-epic/tickets')
   ok(r.status === 200 && r.body.ok === true && r.body.result.count === 2, 'GET /tickets -> 2 tickets')
   ok(r.body.result.buckets.closed === 1 && r.body.result.buckets.dispatched === 1, 'bucketed by status')
   const row = r.body.result.tickets.find(t => t.id === 't260831-02')
@@ -179,7 +179,7 @@ try {
   await writeFile(join(repoC, 'server', 'admin.py'),
     "import sys\nsys.stderr.write('temporal unreachable: connection refused'); sys.exit(2)\n", 'utf8')
   const hC = makeHarness(repoC)
-  r = await call(hC.prefixEpics, '/suyou-workbench/api/epics/demo-epic/tickets')
+  r = await call(hC.prefixEpics, '/sandbar-workbench/api/epics/demo-epic/tickets')
   ok(r.status === 200 && r.body.result?.degraded === true
     && String(r.body.result.reason).includes('connection refused'),
     'admin.py crash (non-JSON) -> 200 degraded, reason carries underlying error')
@@ -189,16 +189,16 @@ if sys.argv[2] == 'ticket' and json.loads(sys.argv[3]).get('op') == 'list':
     print(json.dumps({"ok": False, "error": "ticket-list failed: temporal unreachable: connection refused"})); sys.exit(1)
 print(json.dumps({"ok": False, "error": "stub unsupported"})); sys.exit(1)
 `, 'utf8')
-  r = await call(hC.prefixEpics, '/suyou-workbench/api/epics/demo-epic/tickets')
+  r = await call(hC.prefixEpics, '/sandbar-workbench/api/epics/demo-epic/tickets')
   ok(r.status === 200 && r.body.result?.degraded === true
     && String(r.body.result.reason).includes('connection refused'),
     'ok:false -> 200 degraded, reason passthrough of underlying error')
 
   /* ------------------------------------------------------------ D. close (rewrite + backup + 422) */
   section('D close: status-row rewrite + /tmp backup + 422 (new vs smoke)')
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/demo-epic/close', 'GET')
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/demo-epic/close', 'GET')
   ok(r.status === 405, 'GET close -> 405 (human-confirmed POST-only action)')
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/demo-epic/close', 'POST')
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/demo-epic/close', 'POST')
   ok(r.status === 200 && r.body.result?.status === '已完结', 'POST close -> status row rewritten to 已完结')
   const after = await readFile(join(epicsDir, 'demo-epic.md'), 'utf8')
   ok(after.includes('| 状态 | 已完结 |') && !after.includes('已立项（执行中）'), 'close persisted: status row actually rewritten on disk')
@@ -206,9 +206,9 @@ print(json.dumps({"ok": False, "error": "stub unsupported"})); sys.exit(1)
   const backups = existsSync(backupDir) ? await readdir(backupDir) : []
   ok(backups.some(f => f.startsWith('demo-epic-')), 'close backed up to /tmp/epic-close-backup before writing')
   await writeFile(join(epicsDir, 'no-status.md'), '# 立项单：no-status\n\nno status row here.\n', 'utf8')
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/no-status/close', 'POST')
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/no-status/close', 'POST')
   ok(r.status === 422 && String(r.body.error).includes('状态'), 'missing status row -> 422 (no vague success)')
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/no-such-epic/close', 'POST')
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/no-such-epic/close', 'POST')
   ok(r.status === 404, 'close on non-existent code -> 404')
 
   /* ------------------------------------------------------------ E. next-hint cache + dismiss */
@@ -231,7 +231,7 @@ print(json.dumps({"ok": False, "error": "stub unsupported"})); sys.exit(1)
   ok(hint?.status === 'ok' && hint.title === 'next ticket', 'valid cache -> hint hit (state_key aligned)')
   ok(await readPrecacheHint(cacheDir, 'demo-epic', 'stale-key', wfIds) === null, 'stale state_key -> miss (stale suggestion never shows)')
   // Detail route carries nextHint (full route + stub admin.py queries)
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/demo-epic')
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/demo-epic')
   ok(r.status === 200 && r.body.result?.nextHint?.title === 'next ticket', 'GET detail -> nextHint projection hit')
   // Dismiss: function-level contract (route-level probe below; see known engine bug note)
   ok(await dismissPrecache(cacheDir, 'demo-epic').then(r => r.ok === true), 'dismissPrecache -> cache deleted')
@@ -243,7 +243,7 @@ print(json.dumps({"ok": False, "error": "stub unsupported"})); sys.exit(1)
   const drBad = await dismissPrecache(cacheDir, 'BAD')
   ok(drBad.ok === false && drBad.status === 400, 'dismiss invalid code -> 400 (never deletes the wrong file)')
   // Route-level probe for the known engine bug (see file header); not counted as FAIL.
-  r = await call(h.prefixEpics, '/suyou-workbench/api/epics/demo-epic/next-hint/dismiss', 'POST')
+  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/demo-epic/next-hint/dismiss', 'POST')
   if (r.status === 200) {
     ok(true, 'POST dismiss route -> 200 (engine bug fixed; route-level contract restored)')
   } else {

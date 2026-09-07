@@ -1,5 +1,5 @@
 /**
- * smoke/changes.mjs —— suyou-workbench M9 PR 式审批台的宿主半冒烟。
+ * smoke/changes.mjs —— sandbar-workbench M9 PR 式审批台的宿主半冒烟。
  *
  * 直跑：node smoke/changes.mjs（node ≥22.18 原生 type-stripping，直接 import .ts，
  * 无需编译）。覆盖：
@@ -9,7 +9,7 @@
  *      主树道：write_set+base..HEAD 给变更集；无 base/write_set→「无变更记录」。
  *   B. review 端点（node.ts apply + mock webServer/req/res，临时目录）：
  *      GET 空→POST 存→GET 读回；坏 id 400（防穿）；坏 conclude 400；
- *      admin.log 审计留痕（actor=suyou-workbench + run-id）。
+ *      admin.log 审计留痕（actor=sandbar-workbench + run-id）。
  */
 
 import { execFileSync } from 'node:child_process'
@@ -195,7 +195,7 @@ try {
       on: () => () => {},
     }
     apply(ctx, { repo })
-    const prefix = routes.find(r => r.kind === 'prefix' && r.path === '/suyou-workbench/api/wf/tickets')
+    const prefix = routes.find(r => r.kind === 'prefix' && r.path === '/sandbar-workbench/api/wf/tickets')
     ok(prefix !== undefined, 'tickets prefix 路由已挂')
 
     const mockRes = () => ({
@@ -213,7 +213,7 @@ try {
       return res
     }
 
-    const pre = '/suyou-workbench/api/wf/tickets'
+    const pre = '/sandbar-workbench/api/wf/tickets'
     // GET review 空
     let r = await call(`${pre}/t-smoke-1/review`)
     ok(r.status === 200 && r.body.ok === true && r.body.result.rounds.length === 0, 'GET review 空 rounds（非错误）')
@@ -256,7 +256,7 @@ try {
     // 审计留痕
     const log = await readFile(join(repo, 'server/admin.log'), 'utf8')
     const recs = log.trim().split('\n').map(l => JSON.parse(l))
-    ok(recs.some(x => x.actor === 'suyou-workbench' && x.name === 'review.save' && x.ok === true), 'admin.log 有 review.save 成功审计')
+    ok(recs.some(x => x.actor === 'sandbar-workbench' && x.name === 'review.save' && x.ok === true), 'admin.log 有 review.save 成功审计')
     ok(recs.some(x => x.ok === false), 'admin.log 有失败审计（坏输入也留痕）')
     ok(recs.every(x => typeof x.run_id === 'string' && x.run_id !== ''), '审计全带 run-id')
   }

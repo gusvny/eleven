@@ -80,7 +80,7 @@ function collectPaths(node, out) {
   return out;
 }
 
-const treeDocs = await getJson('/suyou-workbench/api/wf/docs/tree?scope=docs');
+const treeDocs = await getJson('/sandbar-workbench/api/wf/docs/tree?scope=docs');
 if (treeDocs.status !== 200 || !treeDocs.body) {
   record('api/tree-docs', 'fail', `GET tree?scope=docs → ${treeDocs.status}（目录加载契约未兑现；实现落地前红属预期）`);
 } else {
@@ -90,7 +90,7 @@ if (treeDocs.status !== 200 || !treeDocs.body) {
   record('api/tree-docs-anchors', hasReadme && hasTerm, `docs 树锚篇目 README.md=${hasReadme} terminology.md=${hasTerm}（共 ${paths.length} 篇）`);
   record('api/tree-skipped-field', Array.isArray(treeDocs.body?.result?.skipped), `skipped 字段=${Array.isArray(treeDocs.body?.result?.skipped) ? `array(${treeDocs.body.result.skipped.length})` : '缺席'}（拒收可见性契约；{ok,result} 包装风格）`);
 }
-const treeNotes = await getJson('/suyou-workbench/api/wf/docs/tree?scope=notes');
+const treeNotes = await getJson('/sandbar-workbench/api/wf/docs/tree?scope=notes');
 if (treeNotes.status !== 200 || !treeNotes.body) {
   record('api/tree-notes', 'fail', `GET tree?scope=notes → ${treeNotes.status}`);
 } else {
@@ -98,10 +98,10 @@ if (treeNotes.status !== 200 || !treeNotes.body) {
   record('api/tree-notes-anchors', npaths.some((p) => p.endsWith('README.md')) && npaths.some((p) => p.includes('epics/')),
     `notes 树锚：README.md=${npaths.some((p) => p.endsWith('README.md'))} epics/ 篇目=${npaths.some((p) => p.includes('epics/'))}（共 ${npaths.length} 篇）`);
 }
-const docTerm = await getJson(`/suyou-workbench/api/wf/docs/doc?scope=docs&path=${encodeURIComponent('terminology.md')}`);
+const docTerm = await getJson(`/sandbar-workbench/api/wf/docs/doc?scope=docs&path=${encodeURIComponent('terminology.md')}`);
 record('api/doc-term-readme', docTerm.status === 200 && JSON.stringify(docTerm.body ?? '').includes('项目术语表'),
   `doc terminology.md → ${docTerm.status}，含「项目术语表」=${JSON.stringify(docTerm.body ?? '').includes('项目术语表')}`);
-const docEscape = await getJson('/suyou-workbench/api/wf/docs/doc?scope=docs&path=..%2Fpackage.json');
+const docEscape = await getJson('/sandbar-workbench/api/wf/docs/doc?scope=docs&path=..%2Fpackage.json');
 const escBody = JSON.stringify(docEscape.body ?? {});
 record('api/doc-path-traversal-failclosed', (docEscape.status !== 200 || docEscape.body?.result?.empty === true) && !escBody.includes('"type"') && !escBody.includes('"private"'),
   `穿路径 ../package.json → ${docEscape.status} result.empty=${docEscape.body?.result?.empty}（fail-closed；文件内容泄漏=${escBody.includes('"private"')}`);

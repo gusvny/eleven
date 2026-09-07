@@ -8,7 +8,7 @@
  *      sortBucketKeys（进行中→已完成→已终止→未知字典序）；sortEpicTickets（进行中前、
  *      已收口后、各按 id 降序；空数组/缺字段容错）；epicBadgeOf 三态（有代号/空串/undefined
  *      → 未归档 code=null）；epicCreateNote（含代号 + 禁手输提示）。
- *   B. POST /suyou-workbench/api/wf/tickets（node.ts handleTickets method 分支 +
+ *   B. POST /sandbar-workbench/api/wf/tickets（node.ts handleTickets method 分支 +
  *      handleTicketCreate，stub admin.py + mock webServer/req/res 同 smoke/epics.mjs C 段制式）：
  *      缺 project/缺 workflow/缺 title → 400；合法 body → admin.py 收到 op=create 且
  *      epic/project/workflow/title/body 原样透传（stub 落 last-call.json 取证）→ 200 带新 id；
@@ -96,7 +96,7 @@ try {
   }
 
   /* ------------------------------------------------------------ B. POST /wf/tickets 新建路由 */
-  section('B POST /suyou-workbench/api/wf/tickets（handleTicketCreate）')
+  section('B POST /sandbar-workbench/api/wf/tickets（handleTicketCreate）')
   {
     // 公共 mock 件（smoke/epics.mjs C 段同款制式；POST 带 body 时 yield 一个 chunk）
     const mockRes = () => ({
@@ -121,7 +121,7 @@ try {
       }
       apply(ctx, { repo })
       return {
-        exactTickets: routes.find(r => r.kind === 'exact' && r.path === '/suyou-workbench/api/wf/tickets'),
+        exactTickets: routes.find(r => r.kind === 'exact' && r.path === '/sandbar-workbench/api/wf/tickets'),
       }
     }
     const call = async (handler, url, method = 'GET', payload) => {
@@ -163,15 +163,15 @@ sys.exit(1)
     await writeStub(repoA, 'ok')
     const s1 = setup(repoA)
     ok(s1.exactTickets !== undefined, 'exact /wf/tickets 路由已挂')
-    let r = await call(s1.exactTickets, '/suyou-workbench/api/wf/tickets', 'POST', { workflow: 'dev-lane', title: 'x' })
+    let r = await call(s1.exactTickets, '/sandbar-workbench/api/wf/tickets', 'POST', { workflow: 'dev-lane', title: 'x' })
     ok(r.status === 400 && r.body.error.includes('project'), 'POST 缺 project → 400')
-    r = await call(s1.exactTickets, '/suyou-workbench/api/wf/tickets?project=bogus-project', 'POST', { workflow: 'dev-lane', title: 'x' })
+    r = await call(s1.exactTickets, '/sandbar-workbench/api/wf/tickets?project=bogus-project', 'POST', { workflow: 'dev-lane', title: 'x' })
     ok(r.status === 400, 'POST 未知 project → 400（注册表白名单）')
-    r = await call(s1.exactTickets, '/suyou-workbench/api/wf/tickets?project=suyou', 'POST', { title: 'x' })
+    r = await call(s1.exactTickets, '/sandbar-workbench/api/wf/tickets?project=suyou', 'POST', { title: 'x' })
     ok(r.status === 400 && r.body.error.includes('workflow'), 'POST 缺 workflow → 400 人话')
-    r = await call(s1.exactTickets, '/suyou-workbench/api/wf/tickets?project=suyou', 'POST', { workflow: 'dev-lane', title: '  ' })
+    r = await call(s1.exactTickets, '/sandbar-workbench/api/wf/tickets?project=suyou', 'POST', { workflow: 'dev-lane', title: '  ' })
     ok(r.status === 400 && r.body.error.includes('title'), 'POST 纯空白 title → 400 人话')
-    r = await call(s1.exactTickets, '/suyou-workbench/api/wf/tickets?project=suyou', 'POST', 'not-json')
+    r = await call(s1.exactTickets, '/sandbar-workbench/api/wf/tickets?project=suyou', 'POST', 'not-json')
     // 'not-json' 会被 JSON.stringify 包成合法 JSON 字符串，改用非法 body 需裸发——此处断言合法 JSON 但缺字段也 400
     ok(r.status === 400, 'POST 合法 JSON 但缺 workflow → 400')
 
@@ -179,7 +179,7 @@ sys.exit(1)
     const repoB = join(tmp, 'repo-b')
     await writeStub(repoB, 'ok')
     const s2 = setup(repoB)
-    r = await call(s2.exactTickets, '/suyou-workbench/api/wf/tickets?project=suyou', 'POST', {
+    r = await call(s2.exactTickets, '/sandbar-workbench/api/wf/tickets?project=suyou', 'POST', {
       workflow: 'dev-lane', title: '测试单', body: '所属立项：demo-epic\n正文', epic: 'demo-epic',
     })
     ok(r.status === 200 && r.body.ok === true && r.body.result.id === 't260826-99',
@@ -194,7 +194,7 @@ sys.exit(1)
     const repoC = join(tmp, 'repo-c')
     await writeStub(repoC, 'fail')
     const s3 = setup(repoC)
-    r = await call(s3.exactTickets, '/suyou-workbench/api/wf/tickets?project=suyou', 'POST', {
+    r = await call(s3.exactTickets, '/sandbar-workbench/api/wf/tickets?project=suyou', 'POST', {
       workflow: 'dev-lane', title: 'x', epic: 'no-such',
     })
     ok(r.status === 200 && r.body.ok === false && r.body.error.includes('立项代号不存在'),
@@ -202,16 +202,16 @@ sys.exit(1)
     const repoD = join(tmp, 'repo-d')
     await writeStub(repoD, 'crash')
     const s4 = setup(repoD)
-    r = await call(s4.exactTickets, '/suyou-workbench/api/wf/tickets?project=suyou', 'POST', {
+    r = await call(s4.exactTickets, '/sandbar-workbench/api/wf/tickets?project=suyou', 'POST', {
       workflow: 'dev-lane', title: 'x',
     })
     ok(r.status === 502 && String(r.body.error).includes('connection refused'),
       'admin.py 崩（非 JSON）→ 502 含底层 error 原文')
 
     /* --- B4 method 分支：PUT → 405；GET 列表回归 --- */
-    r = await call(s2.exactTickets, '/suyou-workbench/api/wf/tickets?project=suyou', 'PUT', {})
+    r = await call(s2.exactTickets, '/sandbar-workbench/api/wf/tickets?project=suyou', 'PUT', {})
     ok(r.status === 405, 'PUT → 405')
-    r = await call(s2.exactTickets, '/suyou-workbench/api/wf/tickets?project=suyou')
+    r = await call(s2.exactTickets, '/sandbar-workbench/api/wf/tickets?project=suyou')
     ok(r.status === 200 && r.body.ok === true && Array.isArray(r.body.result.tickets),
       'GET 列表回归不受影响')
   }

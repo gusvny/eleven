@@ -1,5 +1,5 @@
 /**
- * suyou-workbench · 全局 chat 项目色带装饰器（票② R7，t260904-05）。
+ * sandbar-workbench · 全局 chat 项目色带装饰器（票② R7，t260904-05）。
  *
  * 视觉：右栏 chat 滚动体顶部 border-top 3px 项目色横贯 + 右上角 sticky 零高
  * 角标显项目 key（「色+名」双通道，10px 等宽同色，pointer-events:none）。

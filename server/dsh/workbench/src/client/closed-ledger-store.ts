@@ -1,5 +1,5 @@
 /**
- * suyou-workbench · 「最近关闭」列表模块级共享 store（t260904-01 D1 修复，
+ * sandbar-workbench · 「最近关闭」列表模块级共享 store（t260904-01 D1 修复，
  * session-entry 第 3 面①验收走查打回项）。
  *
  * 为什么存在：D1 回归——t260904-01 双实例拆分（当时为顶部行 +

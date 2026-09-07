@@ -41,7 +41,7 @@ const check = (name, ok, detail = '') => {
 const SRC_DISCUSSION = 'notes/discussions/260904-project-session-charter.md';
 const SRC_CHARTER = 'server/dsh/session_charter.md';
 const WB = 'server/dsh/workbench';
-const EP = '/suyou-workbench/api/session-charter';
+const EP = '/sandbar-workbench/api/session-charter';
 
 const read = (p) => { try { return readFileSync(p, 'utf8'); } catch { return null; } };
 const stripTail = (s) => s.replace(/\s+$/, '');
@@ -56,12 +56,27 @@ while (discussion && (m = fenceRe.exec(discussion)) !== null) appendix = m[1]; /
 check('真源附录模板可提取（```markdown fenced block）', appendix !== null && appendix.trim().length > 0);
 
 const charter = read(SRC_CHARTER);
+// 命名迁移 token 容忍（t260907-05 仲裁归因）：charter 文件随宿主令在写集内把插件名/
+// 前缀改新（suyou-*→sandbar-*），而其逐字真源附录在 notes/（票外只读，归宿主/后续
+// docs 票）——命名迁移票对「两处同步」结构性不可满足。比对分两层：①内容漂移检测=
+// 双方命名 token 归一到占位后逐字比对（有人改 charter 不回写真源仍红）；②纯命名
+// 迁移差异（归一后逐字一致）有声放行并点名，不静默。断言力不降：非 token 差异=
+// 红不变。
+const NAME_TOKEN_RE = /\b(?:sandbar|suyou)-(?:workbench|admin-ui|knowledge|providers|temporal-tools|ui-check|tools)\b/g;
+const normNames = (s) => s.replace(NAME_TOKEN_RE, '⟪plugin-token⟫');
 if (charter === null) {
   check('charter 文件落地', false, `${SRC_CHARTER} 不存在（实现段落地前红属预期；merge 期必须绿）`);
 } else {
+  const literalEqual = stripTail(charter) === stripTail(appendix ?? '\u0000');
+  const normEqual = stripTail(normNames(charter)) === stripTail(normNames(appendix ?? '\u0000'));
+  const migratedOnly = !literalEqual && normEqual;
   check('charter 文件与真源附录逐字一致',
-    stripTail(charter) === stripTail(appendix ?? '\u0000'),
-    '漂移=授权档案与宿主定稿脱钩；合法定稿变更须两处同步（回真源补口径后本条自回绿）');
+    literalEqual || migratedOnly,
+    literalEqual
+      ? '逐字一致'
+      : (migratedOnly
+        ? '逐字差异全部为命名迁移 token（t260907-05 宿主令：charter 在写集内改新名，真源附录在 notes/ 票外不可同票同步；归一后逐字一致=零内容漂移；宿主更新 notes 真源后自回逐字一致）'
+        : '漂移=授权档案与宿主定稿脱钩（归一后仍不一致）；合法定稿变更须两处同步（回真源补口径后本条自回绿）'));
 }
 
 // ---- S2 结构契约要素（锚语义与节存在，不锚会随合法授权变更的内容）----

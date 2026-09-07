@@ -1,7 +1,7 @@
 /**
- * suyou-temporal-tools —— Temporal 编排工具面的 dsh 插件（模型可见工具，宿主半/node）。
+ * sandbar-temporal-tools —— Temporal 编排工具面的 dsh 插件（模型可见工具，宿主半/node）。
  *
- * 机制（对照 suyou-tools.ts 的 spawn-python 薄壳制式）：
+ * 机制（对照 sandbar-tools.ts 的 spawn-python 薄壳制式）：
  *   ① 每个 dsh 工具 = spawn `<repo>/server/dsh/temporal-poc/.venv/bin/python
  *     <repo>/server/dsh/temporal-poc/client.py <子命令> <argsJSON>`，
  *     stdout 单行 JSON `{ok, result|error}` 原样成为工具返回；
@@ -33,7 +33,7 @@ import type { Context } from '@deepseek-ai/cordis'
 
 const execFileP = promisify(execFile)
 
-export const name = 'suyou-temporal-tools'
+export const name = 'sandbar-temporal-tools'
 export const inject = ['tools']
 
 /** 本文件固定落在 <repo>/server/dsh/temporal-tools/ 下，上三级即仓库根。 */
@@ -401,7 +401,7 @@ export async function ensureTicketWorkers(deps: EnsureTicketWorkersDeps): Promis
   try {
     list = await deps.cli('running-tickets', {})
   } catch (err: any) {
-    deps.log.warn('suyou-temporal-tools supervisor: running-tickets 查询失败（下轮再试）：%s', err?.message ?? err)
+    deps.log.warn('sandbar-temporal-tools supervisor: running-tickets 查询失败（下轮再试）：%s', err?.message ?? err)
     return
   }
   const runningAll: { id: string; queue: string }[] = list?.result?.running ?? []
@@ -419,7 +419,7 @@ export async function ensureTicketWorkers(deps: EnsureTicketWorkersDeps): Promis
       // 异仓 worker 伺服同票（260904 t260904-01 首开脑裂形态）：告警+拒接。
       // 绝不 kill 别人进程——杀进程归人（doctor --live 可扫异仓进程辅助清点）。
       deps.log.warn(
-        'suyou-temporal-tools supervisor: [KI-033] 异仓 worker 伺服同票，拒接（不杀别人进程）：' +
+        'sandbar-temporal-tools supervisor: [KI-033] 异仓 worker 伺服同票，拒接（不杀别人进程）：' +
         'tid=%s pid=%d 其引擎仓=%s 本仓=%s meta=%s —— 处置：人工清点该 worker 归属' +
         '（sandbar doctor --live 扫异仓引擎进程），确认后手动停它或迁移注册',
         d.tid, d.warn.pid, d.warn.repoRoot, deps.repoRoot, mf)
@@ -427,7 +427,7 @@ export async function ensureTicketWorkers(deps: EnsureTicketWorkersDeps): Promis
       // meta 缺失/畸形/读失败三态都在 reason 里（review C3：兼容跳过不许哑巴）。
       // 行为不劣于现状（老版 worker 无 meta 照样跳过），但留痕可查。
       deps.log.info(
-        'suyou-temporal-tools supervisor: 工单 worker %s 在册但无归属指纹——按兼容期处理不重复拉起；%s' +
+        'sandbar-temporal-tools supervisor: 工单 worker %s 在册但无归属指纹——按兼容期处理不重复拉起；%s' +
         '（旧版 worker 请升级或清场）', d.tid, d.reason ?? `pidfile=${pf}`)
     }
   }
@@ -481,7 +481,7 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
   }
 
   ctx.logger.info(
-    'suyou-temporal-tools: 已注册 %d 个 Temporal 工具（repo=%s，client=%s）。' +
+    'sandbar-temporal-tools: 已注册 %d 个 Temporal 工具（repo=%s，client=%s）。' +
     '工具面只有 start/query/signal/schedule-list/cancel/ticket_sign，无 set-stage / force_stage。',
     TOOLS.length, repo, clientPy,
   )
@@ -534,9 +534,9 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
     if (pid !== null && isPidAlive(pid)) {
       try {
         process.kill(pid, 'SIGTERM') // worker.py 接 SIGTERM → 优雅停（做完在跑 activity）
-        log.info('suyou-temporal-tools supervisor: 已向 worker pid=%d 发 SIGTERM', pid)
+        log.info('sandbar-temporal-tools supervisor: 已向 worker pid=%d 发 SIGTERM', pid)
       } catch (err: any) {
-        log.warn('suyou-temporal-tools supervisor: 停 worker pid=%d 失败：%s', pid, err?.message ?? err)
+        log.warn('sandbar-temporal-tools supervisor: 停 worker pid=%d 失败：%s', pid, err?.message ?? err)
       }
     }
   }
@@ -545,7 +545,7 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
     if (serverChild && serverChild.exitCode === null) {
       const child = serverChild
       child.kill('SIGTERM')
-      log.info('suyou-temporal-tools supervisor: 已向 server pid=%d 发 SIGTERM', child.pid)
+      log.info('sandbar-temporal-tools supervisor: 已向 server pid=%d 发 SIGTERM', child.pid)
       setTimeout(() => {
         if (child.exitCode === null) {
           try { child.kill('SIGKILL') } catch { /* 已退 */ }
@@ -570,19 +570,19 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
       closeSync(fd)
       serverChild = child
       child.once('error', (err) => {
-        log.error('suyou-temporal-tools supervisor: spawn server 失败：%s', err?.message ?? err)
+        log.error('sandbar-temporal-tools supervisor: spawn server 失败：%s', err?.message ?? err)
         if (serverChild === child) serverChild = null
       })
       child.once('exit', (code, signal) => {
         if (serverChild === child) serverChild = null
         if (!disposed) {
-          log.warn('suyou-temporal-tools supervisor: server 退出（code=%s signal=%s），keepalive 将重启', code, signal)
+          log.warn('sandbar-temporal-tools supervisor: server 退出（code=%s signal=%s），keepalive 将重启', code, signal)
         }
       })
-      log.info('suyou-temporal-tools supervisor: 已 spawn temporal server（pid=%d，port=%d）', child.pid, port)
+      log.info('sandbar-temporal-tools supervisor: 已 spawn temporal server（pid=%d，port=%d）', child.pid, port)
       return true
     } catch (err: any) {
-      log.error('suyou-temporal-tools supervisor: spawn server 异常：%s', err?.message ?? err)
+      log.error('sandbar-temporal-tools supervisor: spawn server 异常：%s', err?.message ?? err)
       return false
     }
   }
@@ -597,16 +597,16 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
         stdio: 'ignore',
       })
       child.once('error', (err) => {
-        log.error('suyou-temporal-tools supervisor: spawn worker 失败：%s', err?.message ?? err)
+        log.error('sandbar-temporal-tools supervisor: spawn worker 失败：%s', err?.message ?? err)
       })
       child.once('exit', (code) => {
-        if (code !== 0) log.warn('suyou-temporal-tools supervisor: worker daemonize 父进程退出 code=%s', code)
+        if (code !== 0) log.warn('sandbar-temporal-tools supervisor: worker daemonize 父进程退出 code=%s', code)
       })
       workerSpawned = true
-      log.info('suyou-temporal-tools supervisor: 已 spawn worker（--daemon，pidfile=%s）', pidfile)
+      log.info('sandbar-temporal-tools supervisor: 已 spawn worker（--daemon，pidfile=%s）', pidfile)
       return true
     } catch (err: any) {
-      log.error('suyou-temporal-tools supervisor: spawn worker 异常：%s', err?.message ?? err)
+      log.error('sandbar-temporal-tools supervisor: spawn worker 异常：%s', err?.message ?? err)
       return false
     }
   }
@@ -630,7 +630,7 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
       mkdirSync(dataDir, { recursive: true })
       fd = openSync(lf, 'a')
     } catch (err: any) {
-      log.warn('suyou-temporal-tools supervisor: 开工单 worker 日志失败（%s）：%s', tid, err?.message ?? err)
+      log.warn('sandbar-temporal-tools supervisor: 开工单 worker 日志失败（%s）：%s', tid, err?.message ?? err)
       return
     }
     let child: ChildProcess
@@ -648,17 +648,17 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
       })
     } catch (err: any) {
       closeSync(fd)
-      log.error('suyou-temporal-tools supervisor: spawn 工单 worker %s 异常：%s', tid, err?.message ?? err)
+      log.error('sandbar-temporal-tools supervisor: spawn 工单 worker %s 异常：%s', tid, err?.message ?? err)
       return
     }
     closeSync(fd)
     child.once('error', (err) => {
-      log.error('suyou-temporal-tools supervisor: 工单 worker %s spawn 失败：%s', tid, err?.message ?? err)
+      log.error('sandbar-temporal-tools supervisor: 工单 worker %s spawn 失败：%s', tid, err?.message ?? err)
     })
     try {
       writeFileSync(pf, String(child.pid), { flag: 'wx' })
     } catch {
-      log.info('suyou-temporal-tools supervisor: 工单 worker %s 已被别的实例抢先注册，停掉重复 spawn', tid)
+      log.info('sandbar-temporal-tools supervisor: 工单 worker %s 已被别的实例抢先注册，停掉重复 spawn', tid)
       try { child.kill('SIGTERM') } catch { /* 已退 */ }
       return
     }
@@ -674,12 +674,12 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
         if (meta?.pid === child.pid) unlinkSync(mf)
       } catch { /* 已清 */ }
       if (code !== 0 && sig === null) {
-        log.warn('suyou-temporal-tools supervisor: 工单 worker %s 异常退出 code=%s', tid, code)
+        log.warn('sandbar-temporal-tools supervisor: 工单 worker %s 异常退出 code=%s', tid, code)
       } else {
-        log.info('suyou-temporal-tools supervisor: 工单 worker %s 已退出（%s）', tid, sig ?? `code=${code}`)
+        log.info('sandbar-temporal-tools supervisor: 工单 worker %s 已退出（%s）', tid, sig ?? `code=${code}`)
       }
     })
-    log.info('suyou-temporal-tools supervisor: 已 spawn 工单 worker（tid=%s pid=%d queue=%s）', tid, child.pid, queue)
+    log.info('sandbar-temporal-tools supervisor: 已 spawn 工单 worker（tid=%s pid=%d queue=%s）', tid, child.pid, queue)
   }
 
   // 工单 ensure 走模块级可注入实现（KI-033 三态判定；review C1：真执行路径可测），
@@ -718,10 +718,10 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
         }
         if (ok) {
           serverFailures = 0
-          log.info('suyou-temporal-tools supervisor: temporal server 已就绪（port=%d）', port)
+          log.info('sandbar-temporal-tools supervisor: temporal server 已就绪（port=%d）', port)
         } else {
           serverFailures += 1
-          log.error('suyou-temporal-tools supervisor: temporal server %d 秒内未就绪（连续失败 %d 次）',
+          log.error('sandbar-temporal-tools supervisor: temporal server %d 秒内未就绪（连续失败 %d 次）',
             SERVER_START_TIMEOUT / 1000, serverFailures)
           return
         }
@@ -743,21 +743,21 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
             workerFailures = 0
           } else {
             workerFailures += 1
-            log.warn('suyou-temporal-tools supervisor: worker 起后 %d 秒内未存活（连续失败 %d 次）', 5, workerFailures)
+            log.warn('sandbar-temporal-tools supervisor: worker 起后 %d 秒内未存活（连续失败 %d 次）', 5, workerFailures)
           }
         }
       } else {
         workerFailures = 0
       }
     } catch (err: any) {
-      log.error('suyou-temporal-tools supervisor: 守护轮异常：%s', err?.message ?? err)
+      log.error('sandbar-temporal-tools supervisor: 守护轮异常：%s', err?.message ?? err)
     } finally {
       ensuring = false
     }
   }
 
   // boot：启动即确保 server+worker 在线（端口探测保单例）。
-  ensureOnce().catch((err) => log.error('suyou-temporal-tools supervisor: boot 失败：%s', err?.message ?? err))
+  ensureOnce().catch((err) => log.error('sandbar-temporal-tools supervisor: boot 失败：%s', err?.message ?? err))
 
   // keepalive：周期探测，崩了自动重启。
   const timer = setInterval(() => { void ensureOnce() }, keepaliveMs)
@@ -766,7 +766,7 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
   const ticketTimer = setInterval(() => { void ensureTicketWorkers(ticketEnsureDeps) }, ticketEnsureMs)
   void ensureTicketWorkers(ticketEnsureDeps)
 
-  log.info('suyou-temporal-tools supervisor: 已启动（port=%d，keepalive=%dms，ticketEnsure=%dms，serverLog=%s）',
+  log.info('sandbar-temporal-tools supervisor: 已启动（port=%d，keepalive=%dms，ticketEnsure=%dms，serverLog=%s）',
     port, keepaliveMs, ticketEnsureMs, serverLog)
 
   // dispose：只停「本会话 spawn 的」server/worker/工单 worker——不碰别人（手动/其它会话）已起的实例。
@@ -777,12 +777,12 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
     for (const [tid, child] of ticketChildren) {
       try {
         child.kill('SIGTERM') // 优雅停：在跑 activity 做完再走（worker.py 契约）
-        log.info('suyou-temporal-tools supervisor: 已向工单 worker %s pid=%d 发 SIGTERM', tid, child.pid)
+        log.info('sandbar-temporal-tools supervisor: 已向工单 worker %s pid=%d 发 SIGTERM', tid, child.pid)
       } catch { /* 已退 */ }
     }
     ticketChildren.clear()
     if (workerSpawned) stopWorker()
     stopServer()
-    log.info('suyou-temporal-tools supervisor: 已停（keepalive 停止；本会话 spawn 的 server/worker/工单 worker 已发 SIGTERM）')
+    log.info('sandbar-temporal-tools supervisor: 已停（keepalive 停止；本会话 spawn 的 server/worker/工单 worker 已发 SIGTERM）')
   }
 }

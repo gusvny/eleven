@@ -29,7 +29,7 @@ import {
 import { donut, renderSpec, type ChartHandle } from './metrics-charts.ts'
 import { DERIVE_TOKENS_CSS } from './theme';
 
-const API = '/suyou-workbench/api/wf'
+const API = '/sandbar-workbench/api/wf'
 
 const CSS = `${DERIVE_TOKENS_CSS}
 .wb-m{position:absolute;inset:0;background:var(--dsw-derive-surface,#f6f8fa);z-index:95;display:flex;flex-direction:column;font-size:13px;color:var(--dsw-derive-fg,#1f2328)}

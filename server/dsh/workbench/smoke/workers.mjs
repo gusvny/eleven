@@ -1,5 +1,5 @@
 /**
- * smoke/workers.mjs —— /suyou-workbench/api/wf/workers（一工单一 worker 清单）宿主半冒烟。
+ * smoke/workers.mjs —— /sandbar-workbench/api/wf/workers（一工单一 worker 清单）宿主半冒烟。
  *
  * 直跑：node smoke/workers.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
  * 覆盖（node.ts apply + mock webServer/req/res，临时 repo 布局）：
@@ -34,7 +34,7 @@ function routeOf(repo) {
     on: () => () => {},
   }
   apply(ctx, { repo })
-  return routes.find(x => x.kind === 'exact' && x.path === '/suyou-workbench/api/wf/workers')
+  return routes.find(x => x.kind === 'exact' && x.path === '/sandbar-workbench/api/wf/workers')
 }
 function mockRes() {
   return {
@@ -52,7 +52,7 @@ try {
     const route = routeOf(join(tmp, 'repo-nodata'))
     ok(route !== undefined, 'workers exact 路由已挂')
     const res = mockRes()
-    await route.handler({ url: '/suyou-workbench/api/wf/workers', method: 'GET' }, res)
+    await route.handler({ url: '/sandbar-workbench/api/wf/workers', method: 'GET' }, res)
     ok(res.status === 200 && res.body.ok === true, 'GET 200')
     ok(res.body.result.count === 0 && res.body.result.count_alive === 0
       && Array.isArray(res.body.result.workers), '空清单（count/count_alive=0，不抛错）')
@@ -71,7 +71,7 @@ try {
 
     const route = routeOf(repo)
     const res = mockRes()
-    await route.handler({ url: '/suyou-workbench/api/wf/workers', method: 'GET' }, res)
+    await route.handler({ url: '/sandbar-workbench/api/wf/workers', method: 'GET' }, res)
     ok(res.status === 200 && res.body.ok === true, 'GET 200')
     const r = res.body.result
     ok(r.count === 2, '只收 worker*.pid（other.txt 不入）')

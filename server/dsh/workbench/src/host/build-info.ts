@@ -6,7 +6,7 @@
  * 回放 / metrics 路由一日三咬，均因 3099 未重启）。浏览器端无从感知 → 度量报错、
  * squash 票 diff 消失。本模块提供「启动指纹 vs 磁盘指纹」比对的数据侧：
  * node.ts apply 时固化 bootHash（仅首次解析，Promise 单例，后续 apply 重放不覆盖
- * ——R3 不变量），/suyou-workbench/api/build-info 现算磁盘指纹返回 stale。
+ * ——R3 不变量），/sandbar-workbench/api/build-info 现算磁盘指纹返回 stale。
  * KI-052 补刀：看守自身也会内存旧（405 现场=进程启动早于看守代码落盘）——根治面
  * 在客户端握手（src/client/stale-check.ts classifyHandshake 三元组判定矩阵），
  * 本模块为其供同一份清单、同一个指纹函数（同构性由「同一函数」保证，不靠两份

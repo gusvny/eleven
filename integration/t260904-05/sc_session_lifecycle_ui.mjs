@@ -196,7 +196,7 @@ try {
   if (!cleared) {
     record('t8/bo1-closed-domain', 'env_fail', '未能清空该项目 tab（关闭链异常，见 T5）');
   } else {
-    await page.evaluate(k => localStorage.removeItem(k), 'suyou-workbench-project-seq-v1');
+    await page.evaluate(k => localStorage.removeItem(k), 'sandbar-workbench-project-seq-v1');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForSelector(rowSel, { timeout: 12000 }).catch(() => {});
     await page.waitForTimeout(800);

@@ -96,15 +96,15 @@ record('bench/boot', 'pass', B);
 record('redline/ports', bench.port !== 3099 && bench.port !== 7233,
   `port=${bench.port}（禁 3099 用户操作面/7233 真源面）`);
 
-const LIST = (q = '') => `/suyou-workbench/api/wf/tickets?project=fixa${q}`;
+const LIST = (q = '') => `/sandbar-workbench/api/wf/tickets?project=fixa${q}`;
 const errText = (r) => (typeof r.body === 'string' ? r.body : JSON.stringify(r.body?.error ?? r.body));
 
 // ---- T1 路由壳回归（S2 重写不得破壳） ----
 {
-  const r1 = await api(B, 'GET', '/suyou-workbench/api/wf/tickets');
+  const r1 = await api(B, 'GET', '/sandbar-workbench/api/wf/tickets');
   record('shell/missing-project-400', r1.status === 400 && /project/i.test(errText(r1)),
     `status=${r1.status} err=${errText(r1).slice(0, 120)}`);
-  const r2 = await api(B, 'GET', '/suyou-workbench/api/wf/tickets?project=nosuch');
+  const r2 = await api(B, 'GET', '/sandbar-workbench/api/wf/tickets?project=nosuch');
   record('shell/unknown-project-400', r2.status === 400,
     `status=${r2.status} err=${errText(r2).slice(0, 120)}`);
   const r3 = await api(B, 'PUT', LIST());

@@ -1,5 +1,5 @@
 /**
- * suyou-workbench · 项目 key → tag 色 纯函数（t260903-07 工单②：全局 chat 消息
+ * sandbar-workbench · 项目 key → tag 色 纯函数（t260903-07 工单②：全局 chat 消息
  * 项目 tag 按项目着色，为多项目同屏区分做准备）。
  *
  * 借鉴模式取舍（格式对齐 session-ledger-store.ts 头注，review gen0 R1）：

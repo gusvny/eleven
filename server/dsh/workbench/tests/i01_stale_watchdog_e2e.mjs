@@ -3,7 +3,7 @@
  *
  * User story: after a host-half change lands on disk (merge), the running console process
  * keeps executing old code ("一日三咬"). The watchdog must detect this at runtime: the
- * /suyou-workbench/api/build-info endpoint compares the boot-time fingerprint of the host
+ * /sandbar-workbench/api/build-info endpoint compares the boot-time fingerprint of the host
  * source files (node.ts + src/host/*.ts) against the current on-disk content and reports
  * stale=true, so every view can show the "restart console" banner.
  *
@@ -20,7 +20,7 @@
  *   T6 concurrent polls      -> 5 parallel requests, all 200, identical verdict/fingerprint.
  *
  * Contract pinned by this baseline (implementation must conform, house envelope style):
- *   - exact route GET /suyou-workbench/api/build-info registered on the webServer.
+ *   - exact route GET /sandbar-workbench/api/build-info registered on the webServer.
  *   - 200 envelope: { ok: true, result: { stale: boolean, bootFingerprint?: string,
  *                     diskFingerprint: string, missing: string[], error?: string } }.
  *
@@ -57,7 +57,7 @@ try {
   process.exit(1)
 }
 
-const PATH = '/suyou-workbench/api/build-info'
+const PATH = '/sandbar-workbench/api/build-info'
 
 /** Capture registered routes on a mock webServer, the agent-live.mjs shape. */
 function makeCtx() {

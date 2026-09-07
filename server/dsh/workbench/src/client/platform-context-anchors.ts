@@ -1,5 +1,5 @@
 /**
- * suyou-workbench · 平台自启上下文内容锚真源（t260905-09）。
+ * sandbar-workbench · 平台自启上下文内容锚真源（t260905-09）。
  *
  * 职责：给「dsh 平台在新会话开头自启注入的上下文」（runtime context 快照、
  * workspace instructions 块、CLAUDE.md 内容等）提供渲染面折叠判定锚——

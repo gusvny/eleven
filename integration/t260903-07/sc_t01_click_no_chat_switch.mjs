@@ -46,7 +46,7 @@ if (BASE.includes(':3099')) {
 
 async function consoleHealthy() {
   try {
-    const r = await fetch(`${BASE}/suyou-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
+    const r = await fetch(`${BASE}/sandbar-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
     return r.ok;
   } catch { return false; }
 }

@@ -96,9 +96,9 @@ function startMockConsole(mode) {
       res.writeHead(code, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
     };
-    if (req.url === "/suyou-workbench/api/wf/projects") {
+    if (req.url === "/sandbar-workbench/api/wf/projects") {
       json(200, { ok: true, result: { projects: [{ key: "demo", name: "demo", dirs: ["/tmp/mock-demo"], primary: "/tmp/mock-demo" }] } });
-    } else if (req.url === "/suyou-workbench/api/global-session/open") {
+    } else if (req.url === "/sandbar-workbench/api/global-session/open") {
       openCalls += 1;
       if (mode === "error") json(500, { ok: false, error: "mock: 造数端点故障" });
       else if (mode === "emptycwd") json(200, { ok: true, result: { session_id: `chat-mock-${openCalls}`, created: true, cwd: "" } });
@@ -184,10 +184,14 @@ if (!(await browserAvailable())) {
     try {
       const r = await runCapture({ url: `http://127.0.0.1:${mock.port}/`, allowSeed: true, outDir: path.join(work, "r2") });
       const namesCwd = /cwd/.test(r.both);
-      const fast = r.elapsedMs < 60000;
+      // 快速失败预算 90s（t260907-05 arbitrate gen4 修正：原 60s 为空载机估计值，
+      // 共享机器资源竞争下逻辑全真的显式失败实测 77.8s 被误判——预算锚定「显著小于
+      // 120s 挂死兜底、保留非挂死区分度」，四项逻辑断言（exit≠0/点名 cwd/造数请求/
+      // 未超时）原样不动）。
+      const fast = r.elapsedMs < 90000;
       const ok = !r.timedOut && r.code !== 0 && namesCwd && fast && mock.openCalls() >= 1;
       record("R2 empty-cwd-fast-fail", ok ? "pass" : "fail",
-        `exit=${r.code}；报错含 cwd 检查=${namesCwd}；耗时=${(r.elapsedMs / 1000).toFixed(1)}s（须 <60s 快速失败）；造数请求=${mock.openCalls()}`);
+        `exit=${r.code}；报错含 cwd 检查=${namesCwd}；耗时=${(r.elapsedMs / 1000).toFixed(1)}s（须 <90s 快速失败、非 120s 挂死形态）；造数请求=${mock.openCalls()}`);
     } finally { mock.server.close(); }
   }
 

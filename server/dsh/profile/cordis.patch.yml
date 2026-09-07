@@ -10,57 +10,57 @@
 # API key 不落任何文件：Web 设置页填入后写入 $DSH_HOME/.credentials.yaml，
 # 或设 DEEPSEEK_API_KEY 环境变量（dsh 凭据 seam；详见 server/dsh/README.md）。
 
-# 管理台 UI 插件（server/dsh/ui/，包名 suyou-admin-ui）：设置面板「溯游」分区
+# 管理台 UI 插件（server/dsh/ui/，包名 sandbar-admin-ui）：设置面板「溯游」分区
 # （工具直调/审计流水/模型路由）。426a4c1（t260821-04 插件瘦身）曾卸载；M12
 # （t260822-m12-4）把「模型路由」页签 + /suyou-admin/api/routes 做进本插件，
 # 260822 重新挂载——不挂则宿主半 404、client 半不进 graph，M12 功能不可见。
-# 以裸包名挂载：经 profile/node_modules/suyou-admin-ui 软链（→ ../../ui）解析，
+# 以裸包名挂载：经 profile/node_modules/sandbar-admin-ui 软链（→ ../../ui）解析，
 # profile-headless 下有同款软链（headless 无 webServer，宿主半待机不挂路由）。
 - insert:
-    - id: suyou-admin-ui
-      name: 'suyou-admin-ui'
+    - id: sandbar-admin-ui
+      name: 'sandbar-admin-ui'
 
-# 工单工作流台插件（server/dsh/workbench/，包名 suyou-workbench，工单工作流台设计 v0.3 M2）：
-# 独立命名不寄生 admin 壳；宿主半在 dsh webServer 上挂 /suyou-workbench/api/wf/*（调
+# 工单工作流台插件（server/dsh/workbench/，包名 sandbar-workbench，工单工作流台设计 v0.3 M2）：
+# 独立命名不寄生 admin 壳；宿主半在 dsh webServer 上挂 /sandbar-workbench/api/wf/*（调
 # ticket/workflow M1 引擎，写操作 run-id 审计在 server/admin.log），浏览器半往
 # settings.section 槽注册「工单台」分区（三区：台面/详情/操作）。
-# 以裸包名挂载：经 profile/node_modules/suyou-workbench 软链（→ ../workbench）解析，
+# 以裸包名挂载：经 profile/node_modules/sandbar-workbench 软链（→ ../workbench）解析，
 # profile-headless 下有同款软链（headless 无 webServer，宿主半待机不挂路由）。
 - insert:
-    - id: suyou-workbench
-      name: 'suyou-workbench'
+    - id: sandbar-workbench
+      name: 'sandbar-workbench'
 
-# docs 知识库插件（server/dsh/knowledge/，包名 suyou-knowledge，t260821-09 步4）：
-# 宿主半在 dsh webServer 上挂 /suyou-knowledge/api/*（index/doc/refresh，纯只读文件 +
+# docs 知识库插件（server/dsh/knowledge/，包名 sandbar-knowledge，t260821-09 步4）：
+# 宿主半在 dsh webServer 上挂 /sandbar-knowledge/api/*（index/doc/refresh，纯只读文件 +
 # 按 mtime 缓存 docs/index.json），浏览器半往 conversation.view 槽注册「知识库」页签
 # （列表按分类/标签/状态过滤、关键词检索、读全文、review）。headless 无 webServer 待机。
-# 以裸包名挂载：经 profile/node_modules/suyou-knowledge 软链（→ ../knowledge）解析，
+# 以裸包名挂载：经 profile/node_modules/sandbar-knowledge 软链（→ ../knowledge）解析，
 # profile-headless 下有同款软链。
 - insert:
-    - id: suyou-knowledge
-      name: 'suyou-knowledge'
+    - id: sandbar-knowledge
+      name: 'sandbar-knowledge'
 
-# Temporal 编排工具面插件（server/dsh/temporal-tools/，包名 suyou-temporal-tools，t260821-02 步1）：
+# Temporal 编排工具面插件（server/dsh/temporal-tools/，包名 sandbar-temporal-tools，t260821-02 步1）：
 # 模型可见工具 = start/query/signal/schedule-list/cancel（spawn temporal-poc/.venv/bin/python
 # client.py）。安全红线：无 set-stage/force_stage/改状态工具（POC 证明点①）。
-# 以裸包名挂载：经 profile/node_modules/suyou-temporal-tools 软链（→ ../temporal-tools）解析，
+# 以裸包名挂载：经 profile/node_modules/sandbar-temporal-tools 软链（→ ../temporal-tools）解析，
 # profile-headless 下有同款软链（headless 组合同样可用这套模型工具）。
 - insert:
-    - id: suyou-temporal-tools
-      name: 'suyou-temporal-tools'
+    - id: sandbar-temporal-tools
+      name: 'sandbar-temporal-tools'
 
-# LLM provider 管理与优先级插件（server/dsh/providers/，包名 suyou-providers，t260821-08）：
+# LLM provider 管理与优先级插件（server/dsh/providers/，包名 sandbar-providers，t260821-08）：
 # 设置面板「模型」分区 = 列 4 provider（deepseek-official/kimi-coding/zai/scnet）+ 上下移/拖拽排序
 # + 计费说明可编辑 + 「设为当前」写 agent-default-model + 「添加 provider」表单写 llm-pi-ai.providers
 # + scnet 预置（模型 id 留用户填）。安全红线：写 settings.yaml 走 dsh 设置 seam——llm-pi-ai 的
 # assertServiceable 在持久化前 dry-run 解析整段 providers，坏 provider 拒绝不落盘（deepseek-official
 # 教训根治）；deepseek-official 由 dsh-llm-deepseek 拥有，只读列出、绝不写进 llm-pi-ai.providers。
 # 优先级/计费说明存 server/dsh/providers/state.json（独立 json，不进 settings.yaml）。
-# 以裸包名挂载：经 profile/node_modules/suyou-providers 软链（→ ../providers）解析，
+# 以裸包名挂载：经 profile/node_modules/sandbar-providers 软链（→ ../providers）解析，
 # profile-headless 下有同款软链（headless 无 webServer，宿主半待机不挂路由）。
 - insert:
-    - id: suyou-providers
-      name: 'suyou-providers'
+    - id: sandbar-providers
+      name: 'sandbar-providers'
 
 # 模型显式钉在 dsh 出厂 deepseek-official 路由（与 dsh-base 默认一致，写出仅为显式）。
 # key 走凭据 seam，这里与任何配置文件中都不出现字面 key。

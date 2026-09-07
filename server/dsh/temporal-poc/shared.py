@@ -1075,7 +1075,7 @@ STAGE_CLAUSES: Dict[Tuple[str, str], List[str]] = {
     ("content-pipeline", "ai-review"): [
         "审校落盘条款（M5 review 闭环）：逐块意见落 docs/reviews 制式——"
         "python3 server/dsh/knowledge/review_store.py save '<json>'"
-        "（block_key 取知识库 /suyou-knowledge/api/diff 的块键；整篇意见用 doc: 前缀自由锚点）；"
+        "（block_key 取知识库 /sandbar-knowledge/api/diff 的块键；整篇意见用 doc: 前缀自由锚点）；"
         "报告附 python3 server/dsh/knowledge/review_store.py rework <path> 生成的"
         "一键复制返工指令（可直接贴进 ticket rework note）。",
     ],

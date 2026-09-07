@@ -146,7 +146,7 @@ export async function materializePresets(tmpHome, srcDir) {
 }
 
 /** 组临时 profile：复制 cordis 配置；node_modules 逐项 realpath 后软链，
- * 仅 suyou-workbench 改指泳道 workbench 目录（泳道 lib/client.js 生效，其余插件不动）。 */
+ * 仅 sandbar-workbench 改指泳道 workbench 目录（泳道 lib/client.js 生效，其余插件不动）。 */
 export async function buildTempProfile(tmpHome, laneWorkbenchDir) {
   const repoProfile = path.join(REPO_ROOT, "server", "dsh", "profile");
   const profDir = path.join(tmpHome, "profiles", "suyou");
@@ -155,23 +155,23 @@ export async function buildTempProfile(tmpHome, laneWorkbenchDir) {
     const src = path.join(repoProfile, f);
     if (existsSync(src)) await copyFileP(src, path.join(profDir, f));
   }
-  const tsTools = path.join(repoProfile, "suyou-tools.ts");
-  if (existsSync(tsTools)) await symlink(tsTools, path.join(profDir, "suyou-tools.ts"));
+  const tsTools = path.join(repoProfile, "sandbar-tools.ts");
+  if (existsSync(tsTools)) await symlink(tsTools, path.join(profDir, "sandbar-tools.ts"));
   const repoNm = path.join(repoProfile, "node_modules");
   const nm = path.join(profDir, "node_modules");
   await mkdir(nm, { recursive: true });
   let overridden = false;
   if (existsSync(repoNm)) {
     for (const name of readdirSync(repoNm)) {
-      const dest = name === "suyou-workbench" ? laneWorkbenchDir
+      const dest = name === "sandbar-workbench" ? laneWorkbenchDir
         : (() => { try { return realpathSync(path.join(repoNm, name)); } catch { return null; } })();
       if (!dest) continue;
       await symlink(dest, path.join(nm, name));
-      if (name === "suyou-workbench") overridden = true;
+      if (name === "sandbar-workbench") overridden = true;
     }
   }
   if (!overridden) {
-    throw new Error(`主树 profile/node_modules 缺 suyou-workbench 软链，无法改指泳道 build（查 ${repoNm}）`);
+    throw new Error(`主树 profile/node_modules 缺 sandbar-workbench 软链，无法改指泳道 build（查 ${repoNm}）`);
   }
   // headless profile 也软链一份（同构 docker-compose 测试控制台；截图台不 spawn，兜底）
   const profHeadless = path.join(tmpHome, "profiles", "suyou-headless");
@@ -438,14 +438,14 @@ async function selftest() {
     const p = await pickFreePort();
     if (!(p > 0 && p < 65536)) throw new Error(`端口异常：${p}`);
     console.log(`[capture-lane] selftest 2/6 绿：空闲端口挑选（${p}）`);
-    // 3. 临时 profile 组装（真跑一次，检查 suyou-workbench 软链指到假泳道）
+    // 3. 临时 profile 组装（真跑一次，检查 sandbar-workbench 软链指到假泳道）
     const fakeLaneWb = path.join(tmp, "fakelane", "workbench");
     await mkdir(path.join(fakeLaneWb, "lib"), { recursive: true });
     await (await import("node:fs/promises")).writeFile(path.join(fakeLaneWb, "lib", "client.js"), "x");
     const profDir = await buildTempProfile(tmp, fakeLaneWb);
-    const real = realpathSync(path.join(profDir, "node_modules", "suyou-workbench"));
+    const real = realpathSync(path.join(profDir, "node_modules", "sandbar-workbench"));
     const want = realpathSync(fakeLaneWb);
-    if (real !== want) throw new Error(`suyou-workbench 软链未指向泳道：${real}（期望 ${want}）`);
+    if (real !== want) throw new Error(`sandbar-workbench 软链未指向泳道：${real}（期望 ${want}）`);
     console.log("[capture-lane] selftest 3/6 绿：临时 profile 组装（workbench 软链指向泳道）");
     // 4. preset 物化三态（t260901-02）：真源实体落地 / 畸形源拒跑 / 缺失源拒跑。
     //    全部用临时桩目录，不依赖真源在（CI/新机器可跑）；env 覆盖路径不在此测
@@ -507,16 +507,16 @@ async function selftest() {
     // 6/6（t260901-24）：routeDecision 只拦 GET（R3）+ query 不参与匹配（C3）+
     // contentType 恒 application/json（R4）。
     const realFx2 = await cap.loadFixtures(path.join(HERE, "fixtures"));
-    const hit = cap.routeDecision("GET", "http://127.0.0.1:3199/suyou-workbench/api/wf/tickets?project=demo", realFx2);
+    const hit = cap.routeDecision("GET", "http://127.0.0.1:3199/sandbar-workbench/api/wf/tickets?project=demo", realFx2);
     if (!hit.fulfill || hit.fixture !== "tickets-list") throw new Error("带查询串的 GET /tickets 应命中 tickets-list（C3）");
     if (hit.fulfill.contentType !== "application/json") throw new Error("fulfill contentType 恒 application/json（R4）");
-    const show = cap.routeDecision("GET", "http://x/suyou-workbench/api/wf/tickets/T-FIX-A", realFx2);
+    const show = cap.routeDecision("GET", "http://x/sandbar-workbench/api/wf/tickets/T-FIX-A", realFx2);
     if (!show.fulfill || show.fixture !== "ticket-show-T-FIX-A") throw new Error("GET show T-FIX-A 应命中");
     for (const op of ["accept", "advance", "dispatch-next", "rework", "update"]) {
-      const d = cap.routeDecision("POST", `http://x/suyou-workbench/api/wf/tickets/T-FIX-A/${op}`, realFx2);
+      const d = cap.routeDecision("POST", `http://x/sandbar-workbench/api/wf/tickets/T-FIX-A/${op}`, realFx2);
       if (!d.passthrough) throw new Error(`POST ${op} 必须放行（R3 写端点不可被 fulfill 吞）`);
     }
-    const proj = cap.routeDecision("GET", "http://x/suyou-workbench/api/wf/projects", realFx2);
+    const proj = cap.routeDecision("GET", "http://x/sandbar-workbench/api/wf/projects", realFx2);
     if (!proj.passthrough) throw new Error("projects 端点应放行走真数据");
     console.log("[capture-lane] selftest 6/6 绿：routeDecision（GET 命中/查询串不影响/POST 恒放行/contentType 硬条款）");
     console.log("[capture-lane] selftest 全绿（未 boot 控制台/浏览器）");

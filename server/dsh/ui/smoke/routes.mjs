@@ -1,5 +1,5 @@
 /**
- * smoke/routes.mjs —— suyou-admin-ui M12「模型路由」的宿主半冒烟。
+ * smoke/routes.mjs —— sandbar-admin-ui M12「模型路由」的宿主半冒烟。
  *
  * 直跑：node smoke/routes.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
  * 覆盖：

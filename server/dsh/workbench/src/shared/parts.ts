@@ -1,5 +1,5 @@
 /**
- * suyou-workbench · 阶段链「执行主体」徽标纯函数（observability 立项 t260828-01）。
+ * sandbar-workbench · 阶段链「执行主体」徽标纯函数（observability 立项 t260828-01）。
  *
  * 数据源：模版 STAGES 的 parts 静态声明（agent🤖/script⚙️/human👤，可组合），
  * 经 server/dsh/workflows/*.yaml → workflow.py _brief → /api/wf/workflows 透传到前端。

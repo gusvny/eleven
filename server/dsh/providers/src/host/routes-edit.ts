@@ -1,19 +1,19 @@
 /**
- * routes-edit.ts —— suyou-providers「路由表」分区的纯函数（M13，t260822-m13-model-routes-edit）。
+ * routes-edit.ts —— sandbar-providers「路由表」分区的纯函数（M13，t260822-m13-model-routes-edit）。
  *
  * 浏览器半（src/client/index.tsx 的 RoutesTableSection）与冒烟（smoke/routes-save.mjs）
  * 共用的视图→草稿→保存载荷变换。无 DOM/无 node 依赖，可被 node 冒烟直测：
  *
- *   draftFromView  —— /suyou-admin/api/routes 视图（suyou-admin-ui RoutesView 子集）
+ *   draftFromView  —— /suyou-admin/api/routes 视图（sandbar-admin-ui RoutesView 子集）
  *                     → 编辑草稿（provider/model 一律字符串，''=不设）
  *   draftToPayload —— 草稿 → POST /suyou-admin/api/routes/save 的 {table} 载荷
  *                     （显式带 ''=清空该键 → 宿主删键，查表向上落兜底）
  *
- * 载荷 schema 与宿主侧（suyou-admin-ui routes.ts RouteTableEdits）逐字对齐：
+ * 载荷 schema 与宿主侧（sandbar-admin-ui routes.ts RouteTableEdits）逐字对齐：
  * default/roles.<三角色>[/tasks.<三分工>] 的 provider|model，其余键宿主拒绝。
  */
 
-/** /suyou-admin/api/routes 视图（RoutesView 子集，见 suyou-admin-ui routes.ts）。 */
+/** /suyou-admin/api/routes 视图（RoutesView 子集，见 sandbar-admin-ui routes.ts）。 */
 export interface RouteEff { provider: string; model: string; via: string }
 export interface RouteEntryDisp { provider: string | null; model: string | null }
 export interface RouteRoleView {
@@ -43,7 +43,7 @@ export interface RouteDraft {
   }>
 }
 
-/** 保存载荷（suyou-admin-ui routes.ts RouteTableEdits 口径）：显式带 '' 表示「清空该键」。 */
+/** 保存载荷（sandbar-admin-ui routes.ts RouteTableEdits 口径）：显式带 '' 表示「清空该键」。 */
 export interface RouteTablePayload {
   default?: { provider?: string; model?: string }
   roles?: Record<string, {

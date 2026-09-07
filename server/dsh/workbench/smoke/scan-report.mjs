@@ -1,12 +1,12 @@
 /**
- * smoke/scan-report.mjs —— suyou-workbench M6「巡检报告」区的宿主半冒烟。
+ * smoke/scan-report.mjs —— sandbar-workbench M6「巡检报告」区的宿主半冒烟。
  *
  * 直跑：node smoke/scan-report.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
  * 覆盖：
  *   A. readLatestScanReport（src/host/scan-report.ts，临时目录）：
  *      目录不存在→reason；空目录→暂无报告；多日期取文件名序最新；非报告文件不入
  *      候选（白名单 YYYY-MM-DD.json）；最新文件坏 JSON→解析失败 reason。
- *   B. /suyou-workbench/api/wf/scan-report 路由（node.ts apply + mock webServer/req/res）：
+ *   B. /sandbar-workbench/api/wf/scan-report 路由（node.ts apply + mock webServer/req/res）：
  *      有报告→200+report 逐字段；无报告→200+reason 降级（不抛错）。
  */
 
@@ -74,7 +74,7 @@ try {
     '最新文件坏 JSON → 解析失败 reason（不抛错）')
 
   /* ------------------------------------------------------------ B. 路由 */
-  section('B /suyou-workbench/api/wf/scan-report 路由（mock webServer）')
+  section('B /sandbar-workbench/api/wf/scan-report 路由（mock webServer）')
   {
     // 清掉坏文件，留 2026-08-22 作为最新
     const { unlink } = await import('node:fs/promises')
@@ -95,7 +95,7 @@ try {
       on: () => () => {},
     }
     apply(ctx, { repo })
-    const route = routes.find(x => x.kind === 'exact' && x.path === '/suyou-workbench/api/wf/scan-report')
+    const route = routes.find(x => x.kind === 'exact' && x.path === '/sandbar-workbench/api/wf/scan-report')
     ok(route !== undefined, 'scan-report exact 路由已挂')
 
     const res = {
@@ -103,7 +103,7 @@ try {
       writeHead(s) { this.status = s },
       end(b) { this.body = b ? JSON.parse(b) : null },
     }
-    await route.handler({ url: '/suyou-workbench/api/wf/scan-report', method: 'GET' }, res)
+    await route.handler({ url: '/sandbar-workbench/api/wf/scan-report', method: 'GET' }, res)
     ok(res.status === 200 && res.body.ok === true, 'GET 200')
     ok(res.body.result.file === '2026-08-22.json', '命中最新报告文件')
     ok(res.body.result.report.items[0].ticket_id === 't-smoke-scan', '报告内容透传')
@@ -123,8 +123,8 @@ try {
       on: () => () => {},
     }
     apply(ctx2, { repo: join(tmp, 'repo-empty') })
-    const route2 = routes2.find(x => x.kind === 'exact' && x.path === '/suyou-workbench/api/wf/scan-report')
-    await route2.handler({ url: '/suyou-workbench/api/wf/scan-report', method: 'GET' }, res2)
+    const route2 = routes2.find(x => x.kind === 'exact' && x.path === '/sandbar-workbench/api/wf/scan-report')
+    await route2.handler({ url: '/sandbar-workbench/api/wf/scan-report', method: 'GET' }, res2)
     ok(res2.status === 200 && res2.body.ok === true && res2.body.result.report === null
       && res2.body.result.reason !== '', '无报告 → 200 + reason 降级（不抛错）')
   }

@@ -192,14 +192,14 @@ sys.exit(0)
   const routes = []
   const ws = { register: (r) => { routes.push(r); return () => {} } }
   apply({ effect: (fn) => fn(), logger: { info() {}, warn() {} }, get: (k) => (k === 'webServer' ? ws : undefined), on: () => () => {} }, { repo: tmp })
-  const ticketsRoute = routes.find(r => r.kind === 'exact' && r.path === '/suyou-workbench/api/wf/tickets')
+  const ticketsRoute = routes.find(r => r.kind === 'exact' && r.path === '/sandbar-workbench/api/wf/tickets')
   if (!ticketsRoute) {
     fail++
     console.error('  FAIL /wf/tickets route not mounted (harness broke?)')
   } else {
     const call = async (bodyObj) => {
       const res = { status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } }
-      const req = { url: '/suyou-workbench/api/wf/tickets?project=suyou', method: 'POST', async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(bodyObj)) } }
+      const req = { url: '/sandbar-workbench/api/wf/tickets?project=suyou', method: 'POST', async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(bodyObj)) } }
       await ticketsRoute.handler(req, res)
       return res
     }

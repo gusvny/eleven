@@ -77,22 +77,22 @@ const D = (stub) => {
   ok('旧枚举不丢', ['7d', '30d', 'all'].every((w) => PANEL_WINDOWS.includes(w)))
 
   const mem = {
-    getItem: (k) => (k === 'suyou-workbench-metrics-panel-v1' ? JSON.stringify({ window: '3d', view: 'time' }) : null),
+    getItem: (k) => (k === 'sandbar-workbench-metrics-panel-v1' ? JSON.stringify({ window: '3d', view: 'time' }) : null),
     setItem: () => {},
   }
   ok('存值 window=3d 被接受（不被当毒化丢）', loadPanelState(mem).window === '3d')
   const mem1d = {
-    getItem: (k) => (k === 'suyou-workbench-metrics-panel-v1' ? JSON.stringify({ window: '1d' }) : null),
+    getItem: (k) => (k === 'sandbar-workbench-metrics-panel-v1' ? JSON.stringify({ window: '1d' }) : null),
     setItem: () => {},
   }
   ok('存值 window=1d 被接受', loadPanelState(mem1d).window === '1d')
   const memBad = {
-    getItem: (k) => (k === 'suyou-workbench-metrics-panel-v1' ? JSON.stringify({ window: '2d' }) : null),
+    getItem: (k) => (k === 'sandbar-workbench-metrics-panel-v1' ? JSON.stringify({ window: '2d' }) : null),
     setItem: () => {},
   }
   ok('非法窗口 2d 回默认 7d', loadPanelState(memBad).window === '7d')
   const memOld = {
-    getItem: (k) => (k === 'suyou-workbench-metrics-panel-v1' ? JSON.stringify({ window: '30d' }) : null),
+    getItem: (k) => (k === 'sandbar-workbench-metrics-panel-v1' ? JSON.stringify({ window: '30d' }) : null),
     setItem: () => {},
   }
   ok('升级用户旧存值 30d 不回归', loadPanelState(memOld).window === '30d')

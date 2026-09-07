@@ -24,7 +24,7 @@
 // launchable chromium. Any missing -> ENV_FAIL (exit 2, reason on stdout, 注明
 // KI-036——ui-check 依赖未随迁移恢复，恢复后自动生效). Data is stubbed at the API
 // boundary with page.route(): the browser, console, shipped bundle and React
-// render path are all real; only GET /suyou-workbench/api/wf/tickets[/<id>] is
+// render path are all real; only GET /sandbar-workbench/api/wf/tickets[/<id>] is
 // intercepted (fixture snapshots). Never touches production console (3099) nor
 // real tickets.
 //
@@ -290,14 +290,14 @@ async function runBrowser(browser) {
     // API 边界桩：list/detail 带 fixture；子路由与未知 id 答 ok:false——fixture id
     // 永不触达 Temporal/真控制台。glob 尾必须 **：单 * 不跨 /，拦不到 tickets/<id>
     // （sc_lane_parallel_dom P1-P4 实测教训）。
-    await page.route('**/suyou-workbench/api/wf/tickets**', (route) => {
+    await page.route('**/sandbar-workbench/api/wf/tickets**', (route) => {
       const url = new URL(route.request().url())
       const path = url.pathname.replace(/\/+$/, '')
       const body = (b) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(b) })
-      if (path === '/suyou-workbench/api/wf/tickets') {
+      if (path === '/sandbar-workbench/api/wf/tickets') {
         return body({ ok: true, result: { tickets: ROWS }, workflows: [WF] })
       }
-      const m = /^\/suyou-workbench\/api\/wf\/tickets\/([^/]+)$/.exec(path)
+      const m = /^\/sandbar-workbench\/api\/wf\/tickets\/([^/]+)$/.exec(path)
       if (m && DETAIL_BY_ID[decodeURIComponent(m[1])]) {
         return body({ ok: true, result: DETAIL_BY_ID[decodeURIComponent(m[1])] })
       }

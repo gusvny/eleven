@@ -46,18 +46,18 @@ if (BASE.includes(':3099')) {
 
 async function consoleHealthy() {
   try {
-    const r = await fetch(`${BASE}/suyou-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
+    const r = await fetch(`${BASE}/sandbar-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
     return r.ok;
   } catch { return false; }
 }
 
 async function fixture() {
-  const pr = await (await fetch(`${BASE}/suyou-workbench/api/wf/projects`)).json();
+  const pr = await (await fetch(`${BASE}/sandbar-workbench/api/wf/projects`)).json();
   const projects = pr?.result?.projects ?? [];
   const withTickets = [];
   for (const p of projects) {
     try {
-      const tr = await (await fetch(`${BASE}/suyou-workbench/api/wf/tickets?project=${encodeURIComponent(p.key)}`)).json();
+      const tr = await (await fetch(`${BASE}/sandbar-workbench/api/wf/tickets?project=${encodeURIComponent(p.key)}`)).json();
       const list = tr?.result?.tickets ?? [];
       if (list.length > 0) withTickets.push({ key: p.key, ticket: list[0] });
     } catch { /* next */ }

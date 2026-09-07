@@ -1,7 +1,7 @@
 /**
  * staleness.ts —— 插件陈旧全局提醒 hook（t260902-03 立；t260905-07 KI-052 握手矩阵接线）。
  *
- * 运行时看守：30s 可见性门轮询 /suyou-workbench/api/build-info（页签不可见零请求，
+ * 运行时看守：30s 可见性门轮询 /sandbar-workbench/api/build-info（页签不可见零请求，
  * 复用 startVisibleInterval），判定走 classifyHandshake 三元组矩阵（boot/disk/injected，
  * 见 ./stale-check.ts）：
  *   - restart 支：服务端旧（boot≠disk / build-info 端点 405/404 内存无 / 缺 boot 指纹）
@@ -37,7 +37,7 @@ import { useEffect, useRef, useState } from 'react'
 import { startVisibleInterval } from './visibility-poll.ts'
 import { classifyHandshake } from './stale-check.ts'
 
-const BUILD_INFO_URL = '../suyou-workbench/api/build-info'
+const BUILD_INFO_URL = '../sandbar-workbench/api/build-info'
 const POLL_MS = 30_000
 /** sessionStorage 键（注入代理；页面维度，跨刷新存活、关页即清）。 */
 const INJECTED_KEY = 'wb.build.fingerprint.atload'

@@ -3,12 +3,12 @@
  * sc_workbench_bundle_loads.mjs —— t260903-13：重建产物在 dsh 客户端模块契约下可加载。
  *
  * 用户故事：dsh 控制台经 window.__ModuleLoader__.load({id, factory}) 惰性加载
- * suyou-workbench/client（产物形态合同=tsdown.config.ts 头注 closure-factory 外衣：
+ * sandbar-workbench/client（产物形态合同=tsdown.config.ts 头注 closure-factory 外衣：
  * react 与 @deepseek-ai/* 外部化走平台模块表）。tsdown 重建若破坏外衣形状、
  * 泄漏非外部化 bare require、或 client.cjs/client.js 半新不同体，用户可感形态
  * =台面模块加载失败。本场景在 vm 沙箱按契约真实加载产物，断言：
  *   1) lib/client.cjs 与 lib/client.js 同体（exports ./client 指向 client.js）；
- *   2) 外衣头尾字样在（id=suyou-workbench 的 load 头 + return module.exports 尾）；
+ *   2) 外衣头尾字样在（id=sandbar-workbench 的 load 头 + return module.exports 尾）；
  *   3) 工厂可执行、返回非空 exports、bare require 全部落在声明外部化面内；
  *   4) 加载器自证红绿：合法合成样本绿 / 外部依赖泄漏红 / 外衣破损红 /
  *      load 未被调用红——自证不过则真产物的绿不可信。
@@ -135,12 +135,12 @@ if (existsSync(cjsPath) && existsSync(jsPath)) {
   const js = readFileSync(jsPath)
   ok(cjs.equals(js), 'client.cjs 与 client.js 同体（防 onSuccess 复制缺失的半新产物）')
   const code = js.toString('utf8')
-  ok(code.startsWith('window.__ModuleLoader__.load({ id: "suyou-workbench", factory:'), '外衣头（id=suyou-workbench 的 load）')
+  ok(code.startsWith('window.__ModuleLoader__.load({ id: "sandbar-workbench", factory:'), '外衣头（id=sandbar-workbench 的 load）')
   ok(code.trimEnd().endsWith('return module.exports; } });'), '外衣尾（return module.exports）')
   const res = tryLoadBundle(code)
   ok(!res.fail, `vm 沙箱按契约加载成功${res.fail ? '：' + res.fail : ''}`)
   if (!res.fail) {
-    ok(res.id === 'suyou-workbench', 'load id=suyou-workbench')
+    ok(res.id === 'sandbar-workbench', 'load id=sandbar-workbench')
     ok(res.exports != null, 'factory 返回非空 exports')
   }
 }

@@ -25,7 +25,7 @@
 //      resolvable, and a launchable chromium. Any missing -> ENV_FAIL (exit 2)
 //      with the reason on stdout). Data is stubbed at the API boundary with
 //      page.route(): the browser, console, shipped bundle and React render
-//      path are all real; only GET /suyou-workbench/api/wf/tickets[/<id>] is
+//      path are all real; only GET /sandbar-workbench/api/wf/tickets[/<id>] is
 //      intercepted (fixture snapshots, same shape lane-parallel-states.mjs F4
 //      consumes). Never touches production console (3099) nor real tickets.
 //
@@ -386,15 +386,15 @@ async function runBrowser(pw, browser) {
     // 漏到真控制台，P1-P4 在隔离台必红。
     let currentDetail = DETAIL_PARALLEL
     let listMalformed = false
-    await page.route('**/suyou-workbench/api/wf/tickets**', (route) => {
+    await page.route('**/sandbar-workbench/api/wf/tickets**', (route) => {
       const url = new URL(route.request().url())
       const path = url.pathname.replace(/\/+$/, '')
       const body = (b) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(b) })
-      if (path === '/suyou-workbench/api/wf/tickets') {
+      if (path === '/sandbar-workbench/api/wf/tickets') {
         if (listMalformed) return route.fulfill({ contentType: 'application/json', body: '{' })
         return body({ ok: true, result: { tickets: [ROW] }, workflows: [WF] })
       }
-      const m = /^\/suyou-workbench\/api\/wf\/tickets\/([^/]+)$/.exec(path)
+      const m = /^\/sandbar-workbench\/api\/wf\/tickets\/([^/]+)$/.exec(path)
       if (m && decodeURIComponent(m[1]) === FID) return body({ ok: true, result: currentDetail })
       return body({ ok: false, error: 'fixture stub: unknown ticket or sub-route' })
     })

@@ -72,7 +72,7 @@ async function waitReady(port, timeoutMs, logPath) {
 
 /**
  * fixture 注入台：拷贝 server/dsh → 临时 repo（跳过 node_modules）→ buildTempProfile
- * 把 suyou-workbench 指向 fixture 拷贝（boot/盘指纹都算 fixture 文件，真拷贝=控制台
+ * 把 sandbar-workbench 指向 fixture 拷贝（boot/盘指纹都算 fixture 文件，真拷贝=控制台
  * 行为全真，只有「落账」这一步由脚本触发）→ start/restart（同端口）/teardown。
  * 同端口 restart 是「跨重启存活页面」序列（M4）的唯一实现方式：页面不重载，
  * 注入值保持下载时刻盘态，与重启后的 boot 形成 gen2 判定矩阵 M4 格。
@@ -87,11 +87,14 @@ export async function makeFixtureConsole() {
   })
   const fixtureWb = join(fixtureRepo, 'server', 'dsh', 'workbench')
 
-  // capture-lane 从主树解析（其 REPO_ROOT 随文件位置解析——泳道 profile/node_modules
-  // 缺 suyou-workbench 软链，主树 profile 才有全量插件软链；mainRoot=git common dir，
-  // FIX17_MAIN_ROOT 可覆盖，lib_fix17 同款手法。场景① bootConsole 已验证主树路径可用）。
+  // capture-lane 必须与被测代码同树解析（t260907-05 仲裁归因）：物化器以插件名声明
+  // fixture profile（patch id/node_modules 链），被测 bundle 以同一插件名注册模块——
+  // 跨树错窗（主树旧版物化器写旧名 × 泳道新 bundle 注册新名）= dsh 加载器
+  // 「loaded without registering …」客户端半挂载失败，横幅不出（M5「不在场」腿
+  // 被环境错配捂成假绿，KI-051/046 同族）。泳道 profile/node_modules 五链在位后
+  // （t260907-05 步5），本树 capture-lane 即可物化全量 temp profile——不再依赖主树。
   const captureLane = await import(pathToFileURL(join(
-    mainRoot(), 'server', 'dsh', 'ui-check', 'capture-lane.mjs',
+    REPO_ROOT, 'server', 'dsh', 'ui-check', 'capture-lane.mjs',
   )).href)
   await captureLane.buildTempProfile(tmpHome, fixtureWb)
 

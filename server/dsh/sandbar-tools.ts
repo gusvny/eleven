@@ -1,5 +1,5 @@
 /**
- * suyou-tools —— 溯游 admin 工具面的 dsh 插件（路线 C：混合薄壳）。
+ * sandbar-tools —— 溯游 admin 工具面的 dsh 插件（路线 C：混合薄壳）。
  *
  * 机制（对照 docs/ops/admin-dsh-应用方案.md §3-C / §4）：
  *   ① 启动时 spawn `python3 <repo>/server/admin.py tools`，拿到工具注册表的
@@ -16,7 +16,7 @@
  * 不碰 preview 不稳定面（不启用 dsh-tool-cordis 动态插件）。
  *
  * repo 解析顺序：config.repo → SUYOU_REPO 环境变量 → 按本文件位置推导
- * （<repo>/server/dsh/suyou-tools.ts 上两级）。无任何机器绝对路径写死。
+ * （<repo>/server/dsh/sandbar-tools.ts 上两级）。无任何机器绝对路径写死。
  */
 
 import { execFile } from 'node:child_process'
@@ -27,7 +27,7 @@ import type { Context } from '@deepseek-ai/cordis'
 
 const execFileP = promisify(execFile)
 
-export const name = 'suyou-tools'
+export const name = 'sandbar-tools'
 export const inject = ['tools']
 
 /** 本文件固定落在 <repo>/server/dsh/ 下，上两级即仓库根。 */
@@ -43,7 +43,7 @@ export interface AdminCliOptions {
 /**
  * 共享出口：spawn `python3 <repo>/server/admin.py <args>`，stdout 解析为 JSON 返回。
  * admin.py call 在工具失败时 exit 1 但 stdout 仍是结构化 JSON——捞回来走正常路径。
- * suyou-tools（模型可见工具面）与 suyou-admin-ui（浏览器面板 API）共用此函数，
+ * sandbar-tools（模型可见工具面）与 sandbar-admin-ui（浏览器面板 API）共用此函数，
  * run-id 审计单一真源始终在 python server/admin.log。
  */
 export async function runAdminCli(opts: AdminCliOptions, args: string[], signal?: AbortSignal): Promise<any> {
@@ -64,12 +64,12 @@ export async function runAdminCli(opts: AdminCliOptions, args: string[], signal?
       } catch { /* 落下面统一报错 */ }
     }
     const detail = (err?.stderr ?? err?.message ?? String(err)).slice(0, 500)
-    throw new Error(`suyou admin cli: 调用 ${python} ${adminPy} 失败: ${detail}`)
+    throw new Error(`sandbar admin cli: 调用 ${python} ${adminPy} 失败: ${detail}`)
   }
 }
 
 /** 插件配置（cordis.patch.yml 里 config: 字段；全部可缺省）。 */
-interface SuyouToolsConfig {
+interface SandbarToolsConfig {
   /** 溯游仓库根（含 server/admin.py 的那级）。缺省按本文件位置推导。 */
   repo?: string
   /** python 解释器，默认 python3。 */
@@ -90,7 +90,7 @@ interface PyToolEntry {
   }
 }
 
-export async function apply(ctx: Context, config?: SuyouToolsConfig) {
+export async function apply(ctx: Context, config?: SandbarToolsConfig) {
   const repo = config?.repo ?? process.env.SUYOU_REPO ?? DEFAULT_REPO
   const python = config?.python ?? 'python3'
   const timeoutMs = config?.timeoutMs ?? 300_000
@@ -109,7 +109,7 @@ export async function apply(ctx: Context, config?: SuyouToolsConfig) {
     if (!Array.isArray(tools)) throw new Error('admin.py tools 输出不是数组')
   } catch (err) {
     ctx.logger.error(
-      'suyou-tools: 启动取工具表失败，未注册任何 suyou 工具（repo=%s）：%s',
+      'sandbar-tools: 启动取工具表失败，未注册任何 sandbar 工具（repo=%s）：%s',
       repo, String(err))
     return
   }
@@ -141,7 +141,7 @@ export async function apply(ctx: Context, config?: SuyouToolsConfig) {
       },
     } as any)
   }
-  ctx.logger.info('suyou-tools: 已注册 %d 个溯游 admin 工具（repo=%s，审批名单=%s）',
+  ctx.logger.info('sandbar-tools: 已注册 %d 个溯游 admin 工具（repo=%s，审批名单=%s）',
     tools.length, repo, [...needsApproval].join(',') || '空')
 
   // ③ 两阶段提交 v1：破坏性工具转人工审批（approval seam；无应答者 fail-closed 拒绝）。

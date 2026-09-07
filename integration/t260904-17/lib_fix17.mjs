@@ -3,7 +3,7 @@
 // 复用面（integration 纪律：前置/基础步骤代码允许共享；boot 骨架自 t260904-15 lib_fix15
 // 同款改造，差异=本票需要可桩的票数据源）：
 //   - 票数据源桩缝：host 链路 python3 → <repo>/server/admin.py call ticket|workflow 的
-//     python3 走 PATH 解析（suyou-tools.ts runAdminCli execFileP）——给隔离台进程注入
+//     python3 走 PATH 解析（sandbar-tools.ts runAdminCli execFileP）——给隔离台进程注入
 //     shim `python3`（仅拦截 admin.py 的 ticket/workflow call，其余透传真解释器），
 //     行为经 FIX17_CTRL（JSON）驱动、调用轨迹落 FIX17_TRACE（JSONL，时序/并发断言面）。
 //     全程零真 Temporal 接触（SUYOU_TARGET_HOST 钉死端口），零 3099 接触。
@@ -198,25 +198,25 @@ async function buildProfile(tmpHome, laneWorkbenchDir) {
     const src = path.join(laneProfile, f);
     if (existsSync(src)) await copyFile(src, path.join(profDir, f));
   }
-  const tsTools = path.join(laneProfile, 'suyou-tools.ts');
-  if (existsSync(tsTools)) await symlink(tsTools, path.join(profDir, 'suyou-tools.ts'));
+  const tsTools = path.join(laneProfile, 'sandbar-tools.ts');
+  if (existsSync(tsTools)) await symlink(tsTools, path.join(profDir, 'sandbar-tools.ts'));
   const nm = path.join(profDir, 'node_modules');
   await mkdir(nm, { recursive: true });
   if (!existsSync(mainProfileNm)) throw new Error(`主树插件依赖缺失：${mainProfileNm} 不存在（env FIX17_MAIN_ROOT 可指主树根）`);
   let overridden = false;
   for (const name of readdirSync(mainProfileNm)) {
-    const dest = name === 'suyou-workbench' ? laneWorkbenchDir
+    const dest = name === 'sandbar-workbench' ? laneWorkbenchDir
       : (() => { try { return realpathSync(path.join(mainProfileNm, name)); } catch { return null; } })();
     if (!dest) continue;
     await symlink(dest, path.join(nm, name));
-    if (name === 'suyou-workbench') overridden = true;
+    if (name === 'sandbar-workbench') overridden = true;
   }
-  if (!overridden) throw new Error(`主树 profile/node_modules 缺 suyou-workbench：${mainProfileNm}`);
+  if (!overridden) throw new Error(`主树 profile/node_modules 缺 sandbar-workbench：${mainProfileNm}`);
   return profDir;
 }
 
 async function waitReady(port, timeoutMs, logPath) {
-  const url = `http://127.0.0.1:${port}/suyou-workbench/api/wf/projects`;
+  const url = `http://127.0.0.1:${port}/sandbar-workbench/api/wf/projects`;
   const t0 = Date.now();
   for (;;) {
     try {

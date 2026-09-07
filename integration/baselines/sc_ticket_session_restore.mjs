@@ -48,7 +48,7 @@ if (BASE.includes(':3099')) {
 
 async function consoleHealthy() {
   try {
-    const r = await fetch(`${BASE}/suyou-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
+    const r = await fetch(`${BASE}/sandbar-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
     return r.ok;
   } catch { return false; }
 }
@@ -57,11 +57,11 @@ async function consoleHealthy() {
 // t260903-07：路由保留为回滚面（客户端已无调用方），以下服务端契约继续成立。
 
 async function firstTicket() {
-  const pr = await (await fetch(`${BASE}/suyou-workbench/api/wf/projects`)).json();
+  const pr = await (await fetch(`${BASE}/sandbar-workbench/api/wf/projects`)).json();
   const projects = pr?.result?.projects ?? [];
   for (const p of projects) {
     try {
-      const tr = await (await fetch(`${BASE}/suyou-workbench/api/wf/tickets?project=${encodeURIComponent(p.key)}`)).json();
+      const tr = await (await fetch(`${BASE}/sandbar-workbench/api/wf/tickets?project=${encodeURIComponent(p.key)}`)).json();
       const list = tr?.result?.tickets ?? [];
       if (list.length > 0) return { project: p.key, ticket: list[0] };
     } catch { /* next project */ }
@@ -70,7 +70,7 @@ async function firstTicket() {
 }
 
 async function openSession(ticketId, project) {
-  const r = await fetch(`${BASE}/suyou-workbench/api/ticket-session/open`, {
+  const r = await fetch(`${BASE}/sandbar-workbench/api/ticket-session/open`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(ticketId === undefined ? { project } : { ticket_id: ticketId, project }),

@@ -143,7 +143,7 @@ if (typeof evidenceImgSrc !== 'function') {
 
 section('C evidenceImgSrc 契约')
 {
-  ok(evidenceImgSrc('t1', 'a.png') === '/suyou-workbench/api/wf/tickets/t1/evidence/a.png', '相对路径端点契约（safeUrl 放行）')
+  ok(evidenceImgSrc('t1', 'a.png') === '/sandbar-workbench/api/wf/tickets/t1/evidence/a.png', '相对路径端点契约（safeUrl 放行）')
   ok(!evidenceImgSrc('t1', 'a.png').startsWith('data:'), '不走 data: 内联（取舍清单 #4：防穿收口 host）')
 }
 

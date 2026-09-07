@@ -42,10 +42,10 @@ function makeHarness(repo) {
   apply(ctx, { repo, python: process.execPath })
   const find = (path) => routes.find(r => r.path === path)
   return {
-    projects: find('/suyou-workbench/api/wf/projects'),
-    detail: find('/suyou-workbench/api/wf/projects/detail'),
-    add: find('/suyou-workbench/api/wf/projects/add'),
-    remove: find('/suyou-workbench/api/wf/projects/remove'),
+    projects: find('/sandbar-workbench/api/wf/projects'),
+    detail: find('/sandbar-workbench/api/wf/projects/detail'),
+    add: find('/sandbar-workbench/api/wf/projects/add'),
+    remove: find('/sandbar-workbench/api/wf/projects/remove'),
   }
 }
 const mockRes = () => ({
@@ -114,7 +114,7 @@ try {
     const repo = join(tmp, 'repo')
     writeFakeCli(repo, LIST_JSON)
     const h = makeHarness(repo)
-    const r = await call(h.projects, '/suyou-workbench/api/wf/projects')
+    const r = await call(h.projects, '/sandbar-workbench/api/wf/projects')
     ok(r.status === 200 && r.body.ok === true, '200 装载成功')
     ok(r.body.result.projects.length === 1 && r.body.result.projects[0].key === 'alpha', '好条目装载')
     const q = r.body.result.quarantined
@@ -134,7 +134,7 @@ try {
     const repo = join(tmp, 'repo')
     writeFakeCli(repo, LIST_JSON)
     const h = makeHarness(repo)
-    const r = await call(h.projects, '/suyou-workbench/api/wf/projects')
+    const r = await call(h.projects, '/sandbar-workbench/api/wf/projects')
     ok(r.status === 200, '空注册表 → 200（loadRegistry 改造，零分组仍可接首项目）')
     ok(r.body.result.projects.length === 0 && r.body.result.quarantined.length === 0, '双侧空数组')
     rmSync(tmp, { recursive: true, force: true })
@@ -150,41 +150,41 @@ try {
   section('C GET detail：票计数/降级透传 + 400/404/405')
   {
     process.env.PROJECT_FAKE_MODE = 'list'
-    let r = await call(h.detail, '/suyou-workbench/api/wf/projects/detail?key=alpha')
+    let r = await call(h.detail, '/sandbar-workbench/api/wf/projects/detail?key=alpha')
     ok(r.status === 200 && r.body?.result?.key === 'alpha', `detail → 200（got ${r.status} ${JSON.stringify(r.body).slice(0,120)}）`)
     ok(r.body.result.tickets.open === 1 && r.body.result.tickets.archived === 2 && r.body.result.tickets_state === 'ok', '票计数透传')
-    r = await call(h.detail, '/suyou-workbench/api/wf/projects/detail?key=beta')
+    r = await call(h.detail, '/sandbar-workbench/api/wf/projects/detail?key=beta')
     ok(r.status === 200 && r.body.result.tickets_state !== 'ok' && String(r.body.result.tickets_note).includes('connection refused'),
       '降级态原样透传（弹层显「—」不红的源）')
-    r = await call(h.detail, '/suyou-workbench/api/wf/projects/detail?key=ALPHA')
+    r = await call(h.detail, '/sandbar-workbench/api/wf/projects/detail?key=ALPHA')
     ok(r.status === 400, 'key 形状不合法 → 400')
-    r = await call(h.detail, '/suyou-workbench/api/wf/projects/detail?key=ghost')
+    r = await call(h.detail, '/sandbar-workbench/api/wf/projects/detail?key=ghost')
     ok(r.status === 404 && String(r.body.error).includes('ghost'), 'list 无此 key → 404 人话')
-    r = await call(h.detail, '/suyou-workbench/api/wf/projects/detail?key=alpha', 'POST')
+    r = await call(h.detail, '/sandbar-workbench/api/wf/projects/detail?key=alpha', 'POST')
     ok(r.status === 405, 'POST detail → 405（只读契约）')
     delete process.env.PROJECT_FAKE_MODE
   }
 
   section('D POST add：args 透传 / 拒收 409 / GET 405 / 坏 body 400')
   {
-    let r = await call(h.add, '/suyou-workbench/api/wf/projects/add', 'POST',
+    let r = await call(h.add, '/sandbar-workbench/api/wf/projects/add', 'POST',
       { key: 'trip', name: '旅行', dir: '/tmp/trip', dry_run: true })
     ok(r.status === 422, 'add dry_run → 422 能力应答（F1：CLI 无 --dry-run 旗，不 spawn）')
     ok(String(r.body.error).includes('本地形状检查'), '422 文案指路弹层本地预检')
-    r = await call(h.add, '/suyou-workbench/api/wf/projects/add', 'POST',
+    r = await call(h.add, '/sandbar-workbench/api/wf/projects/add', 'POST',
       { key: 'trip', name: '旅行', dir: '/tmp/trip' })
     ok(r.status === 200 && r.body.result.argv.join(' ') === 'project add --key trip --name 旅行 --dir /tmp/trip --json',
       'args 与真 CLI 契约一致（A0 锚：无 --dry-run）')
     process.env.PROJECT_FAKE_MODE = 'reject-text'
-    r = await call(h.add, '/suyou-workbench/api/wf/projects/add', 'POST',
+    r = await call(h.add, '/sandbar-workbench/api/wf/projects/add', 'POST',
       { key: 'trip', name: '旅行', dir: '/tmp/trip' })
     ok(r.status === 409 && String(r.body.error).includes('[红] key 不合法'), 'CLI 拒收（人话）→ 409 原文透传（F3：非 502）')
     process.env.PROJECT_FAKE_MODE = 'fail-json'
-    r = await call(h.add, '/suyou-workbench/api/wf/projects/add', 'POST',
+    r = await call(h.add, '/sandbar-workbench/api/wf/projects/add', 'POST',
       { key: 'trip', name: '旅行', dir: '/tmp/trip' })
     ok(r.status === 409 && String(r.body.error).includes('根目录不存在'), 'CLI 拒收（JSON 体）→ 409 错误体透传（就地显示源）')
     delete process.env.PROJECT_FAKE_MODE
-    r = await call(h.add, '/suyou-workbench/api/wf/projects/add', 'GET')
+    r = await call(h.add, '/sandbar-workbench/api/wf/projects/add', 'GET')
     ok(r.status === 405, 'GET 写路由 → 405')
     const res = mockRes()
     const req = { url: '/x', method: 'POST', async *[Symbol.asyncIterator]() { yield Buffer.from('not json') } }
@@ -194,12 +194,12 @@ try {
 
   section('E POST remove：purge/confirm 旗一一对应')
   {
-    let r = await call(h.remove, '/suyou-workbench/api/wf/projects/remove', 'POST',
+    let r = await call(h.remove, '/sandbar-workbench/api/wf/projects/remove', 'POST',
       { key: 'alpha', dry_run: true, purge_data: true, purge_credentials: true, confirm_last: true })
     ok(r.status === 200, 'remove dry-run → 200')
     ok(r.body.result.argv.join(' ') === 'project remove --key alpha --json --dry-run --purge-data --purge-credentials --confirm-last',
       '旗标与 CLI 一一对应（F2：--key 必选旗；在飞闸/purge 前置闸全在 CLI 侧）')
-    r = await call(h.remove, '/suyou-workbench/api/wf/projects/remove', 'POST', { key: 'alpha' })
+    r = await call(h.remove, '/sandbar-workbench/api/wf/projects/remove', 'POST', { key: 'alpha' })
     ok(r.body.result.argv.join(' ') === 'project remove --key alpha --json', '默认全保留（零旗=可逆摘除）')
     rmSync(tmp, { recursive: true, force: true })
   }

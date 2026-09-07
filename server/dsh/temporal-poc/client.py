@@ -1,4 +1,4 @@
-"""Temporal client CLI —— dsh 插件 `suyou-temporal-tools` spawn 的入口。
+"""Temporal client CLI —— dsh 插件 `sandbar-temporal-tools` spawn 的入口。
 
 安全红线（t260821-02）：工具面**绝无「设置 stage / 改状态」入口**：
 

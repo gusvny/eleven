@@ -1,5 +1,5 @@
 /**
- * suyou-workbench · 侧栏「会话」区记账层纯函数（session-entry t260828-02，
+ * sandbar-workbench · 侧栏「会话」区记账层纯函数（session-entry t260828-02，
  * 口径调整：项目归属 + 只列 UI 主动打开的会话）。
  *
  * 口径（设计真源 docs/design/右栏会话入口与hero定制设计.md §2/§4/附录）：

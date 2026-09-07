@@ -231,7 +231,7 @@ sys.exit(1)
       on: () => () => {},
     }
     apply(ctx, { repo })
-    const prefix = routes.find(r => r.kind === 'prefix' && r.path === '/suyou-workbench/api/wf/tickets')
+    const prefix = routes.find(r => r.kind === 'prefix' && r.path === '/sandbar-workbench/api/wf/tickets')
     const mockRes = () => ({
       status: 0, body: null,
       writeHead(s) { this.status = s },
@@ -243,7 +243,7 @@ sys.exit(1)
       await prefix.handler(mockReq(url), res)
       return res
     }
-    const pre = '/suyou-workbench/api/wf/tickets'
+    const pre = '/sandbar-workbench/api/wf/tickets'
 
     let r = await call(`${pre}/${encodeURIComponent('..%2F..%2Fetc')}/agent-usage`)
     ok(r.status === 400, '坏 id（../ 逃逸）→ 400（防穿）')

@@ -60,7 +60,7 @@ export function makeResults() {
 /** 隔离台健康检查（workbench API 可达=测试台活着；同 lib_charter 口径）。 */
 export async function consoleHealthy(base) {
   try {
-    const r = await fetch(`${base}/suyou-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
+    const r = await fetch(`${base}/sandbar-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
     return r.ok;
   } catch { return false; }
 }

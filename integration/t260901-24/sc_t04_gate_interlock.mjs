@@ -7,7 +7,8 @@
  *   - 注入是显式 opt-in：capture.mjs 带 `--fixtures`（或 env SUYOU_UI_CAPTURE_FIXTURES=1）
  *     而无 allow-seed 通路 → 退出码 2 + 人话拒因（提门旗），直连真生产台绝不允许注假票；
  *   - allow-seed 通路 + fixtures → 参数层放行（--selftest 干跑，不起浏览器）；
- *   - 缺省（无任何 fixture 通路）→ 行为与现 7 视图口径逐字节一致（selftest 视图数不变）；
+ *   - 缺省（无任何 fixture 通路）→ 行为通路无关：缺省与 env 置空的 selftest 视图数
+ *     一致且非零（视图数字面不锚——capture 工具合法加视图随票演进，t260907-05 gen4 起）；
  *   - capture-lane.mjs --selftest 带/不带 SUYOU_CAPTURE_FIXTURES=1 均全绿
  *     （opt-in 只影响真拍传参，不影响自测）。前提守卫：泳道 worktree 缺 gitignored
  *     的 profile/node_modules 时（环境事实），selftest 按设计 fail-closed——
@@ -21,7 +22,7 @@
  * 前提在位环境断言面逐条不变。
  *
  * t260904-11 仲裁 gen1（tests-fault 修正②）：capture-lane 容差修复镜像合入+验收段
- * 供给升级（泳道残留「断链」suyou-workbench 软链）后，existsSync 复刻谓词与工具实际
+ * 供给升级（泳道残留「断链」sandbar-workbench 软链）后，existsSync 复刻谓词与工具实际
  * 就绪脱钩（链断而工具全绿），选错分支三腿假红。教训=前提判定不得复刻被测物内部
  * 谓词，只认可观测行为：分支依据改为本 run 退出码，两套契约断言逐字保留。
  */
@@ -83,17 +84,25 @@ try {
     '--fixtures', join(tmp, 'fx'), '--selftest'], { SUYOU_UI_CAPTURE_ALLOW_SEED: '1' })
   ok(r.status === 0, `env allow-seed 通路 + --fixtures 放行（实际：${r.status}）`)
 
-  section('缺省回归：无任何 fixture 通路 → 7 视图口径不变')
+  section('缺省回归：无任何 fixture 通路 → 视图口径通路无关（视图数不随 fixtures 通路改变）')
+  // t260907-05 arbitrate gen4 修正：原断言钉死「视图数=7」属快照型锚（capture 工具
+  // 合法加视图即 rot——gen4 扩 docs/providers 视图后 7→9 假红）。守卫本意（本场景
+  // docstring）=通路无关性：缺省与 env 置空的 selftest 行为一致、视图清单非空。
+  // 视图数字面不锚（随工具演进）；两次运行相等 + 非零承载契约。
   r = run(CAPTURE, ['--url', 'http://127.0.0.1:9', '--out', join(tmp, 'o5'), '--selftest'])
   ok(r.status === 0, `缺省 selftest 退出 0（实际：${r.status}）`)
-  ok(/视图数=7\b/.test(r.stdout), `缺省视图数=7 不变（实际：${(r.stdout.match(/视图数=\d+/) || ['未找到'])[0]}）`)
+  const viewsDefault = (r.stdout.match(/视图数=(\d+)/) || [])[1]
+  ok(viewsDefault !== undefined && Number(viewsDefault) > 0,
+    `缺省 selftest 报告非零视图数（实际：${viewsDefault ?? '未找到'}）`)
   r = run(CAPTURE, ['--url', 'http://127.0.0.1:9', '--out', join(tmp, 'o6'), '--selftest'],
     { SUYOU_UI_CAPTURE_FIXTURES: '' })
-  ok(/视图数=7\b/.test(r.stdout), 'env 显式置空 → 仍 7 视图（env 空串=关闭语义）')
+  const viewsEmptyEnv = (r.stdout.match(/视图数=(\d+)/) || [])[1]
+  ok(viewsEmptyEnv === viewsDefault,
+    `env 显式置空 → 视图数与缺省一致（env 空串=关闭语义；实际：${viewsEmptyEnv ?? '未找到'} vs ${viewsDefault ?? '未找到'}）`)
 
   section('capture-lane selftest：带/不带 SUYOU_CAPTURE_FIXTURES 均全绿')
   // 前提守卫（合并版：t260904-04 arbitrate gen3 双模断言 × t260904-06 arbitrate KI-036②
-  // 守卫，两边守的是同一条硬前提=<repo>/server/dsh/profile/node_modules/suyou-workbench
+  // 守卫，两边守的是同一条硬前提=<repo>/server/dsh/profile/node_modules/sandbar-workbench
   // 软链——组临时 profile 要改指泳道 build；gitignored 实体，主树有、worktree 泳道不随迁，
   // KI-036② 泳道依赖软链未随迁移恢复）。取两边语义之强：前提在=跑原三条全绿断言（两边
   // 断言逐字相同）；前提缺=工具按设计 fail-closed，验「拒跑+报因说到点上+不假报全绿」
@@ -101,10 +110,10 @@ try {
   // 跑，断言面不变）。谜底记录：本场景此前在此泳道一直走旧跳过通路（主树 ui-check 装
   // playwright-core 后守卫翻转才首跑，t260904-06 泳道实锤 selftest 2/6 绿后在
   // buildTempProfile 掷错），泳道缺 profile/node_modules 属环境事实非实现回归。
-  const laneProfileWb = join(REPO, 'server', 'dsh', 'profile', 'node_modules', 'suyou-workbench')
+  const laneProfileWb = join(REPO, 'server', 'dsh', 'profile', 'node_modules', 'sandbar-workbench')
   // 分支依据=工具可观测行为（本 run 退出码），不再复刻其内部就绪谓词。
   // t260904-11 仲裁 gen1（tests-fault 修正②）：容差修复镜像合入 + 验收段供给升级
-  // （泳道出现「断链」的 suyou-workbench 软链——验收残留物，指向 ../workbench 解析
+  // （泳道出现「断链」的 sandbar-workbench 软链——验收残留物，指向 ../workbench 解析
   // 到不存在的 profile/workbench）后，existsSync 复刻谓词与工具实际就绪脱钩：软链
   // 断链 → 旧判定取 fail-closed 分支，工具实际按容差语义全绿 → 三腿全假红。改按
   // 每次 run 自身退出码分支；全绿形态与 fail-closed 形态两套断言逐字保留（谁在位
@@ -117,7 +126,7 @@ try {
     ok(/全绿/.test(r.stdout), `capture-lane --selftest 缺省全绿（实际：exit ${r.status}；` +
       `${(/全绿[^\n]*/.exec(r.stdout) || ['（无全绿标记）'])[0]}；泳道软链${laneLinkState}）`)
   } else {
-    ok(r.status !== 0 && r.stderr.includes('主树 profile/node_modules 缺 suyou-workbench 软链'),
+    ok(r.status !== 0 && r.stderr.includes('主树 profile/node_modules 缺 sandbar-workbench 软链'),
       `泳道缺 profile/node_modules → selftest fail-closed 且报因精确（实际：${r.status}；${firstLine(r.stderr)}）`)
   }
   r = run(CAPTURE_LANE, ['--selftest'], { SUYOU_CAPTURE_FIXTURES: '1' })

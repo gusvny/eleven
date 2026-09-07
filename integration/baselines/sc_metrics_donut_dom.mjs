@@ -270,7 +270,7 @@ const domSubPainted = (title) => `(() => {
 })()`
 
 async function openMetricsPanel(page) {
-  await page.evaluate(() => localStorage.removeItem('suyou-workbench-metrics-panel-v1')).catch(() => {})
+  await page.evaluate(() => localStorage.removeItem('sandbar-workbench-metrics-panel-v1')).catch(() => {})
   // 入口=侧栏中列底「📊 度量」钮或 shell 覆盖层钮；面板挂 METRICS_TOGGLE_EVENT 总线——
   // 直接派发同一事件（入口钮 click 的下游就是它），DOM 渲染路径全真。
   const toggled = await page.evaluate(() => {
@@ -303,9 +303,9 @@ async function runBrowser(pw, browser) {
     // 路由先于 goto：shell 装载即轮询 /wf/tickets，晚装桩会把台面 502 误记进 D6
     // API-boundary stub: catch-all 先注册（后注册者优先），隔离台未接 Temporal 的
     // 面板外轮询端点回 200 空响应——不消音会把环境 502 误记成面板卫生故障（D6）。
-    await page.route('**/suyou-workbench/api/**', (route) =>
+    await page.route('**/sandbar-workbench/api/**', (route) =>
       route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'scenario catch-all stub' }) }))
-    await page.route('**/suyou-workbench/api/wf/metrics**', (route) => {
+    await page.route('**/sandbar-workbench/api/wf/metrics**', (route) => {
       const url = new URL(route.request().url())
       metricsRequests += 1
       const view = url.searchParams.get('view') ?? 'time'
@@ -313,11 +313,11 @@ async function runBrowser(pw, browser) {
       const body = malformedMode ? MALFORMED_BODY : (mode === 'fast' ? staleBody(view) : VIEW_BODY[view])
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
     })
-    await page.route('**/suyou-workbench/api/wf/workflows**', (route) =>
+    await page.route('**/sandbar-workbench/api/wf/workflows**', (route) =>
       route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { workflows: [WF] } }) }))
-    await page.route('**/suyou-workbench/api/wf/epics**', (route) =>
+    await page.route('**/sandbar-workbench/api/wf/epics**', (route) =>
       route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: [] }) }))
-    await page.route('**/suyou-workbench/api/wf/tickets**', (route) =>
+    await page.route('**/sandbar-workbench/api/wf/tickets**', (route) =>
       route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, result: { tickets: [] }, workflows: [WF] }) }))
 
     await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })

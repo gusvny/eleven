@@ -2,7 +2,7 @@
  * epics-model.ts —— 工单台「立项单」UI 的纯函数层（epic-linkage Tier 3，t260826-02）。
  *
  * 口径单点（真源=API 渲染，前端不存状态——立项单关键决策 5）：
- *   - 立项单列表/详情数据来自 GET /suyou-workbench/api/epics*（host epics.ts，t260825-04）；
+ *   - 立项单列表/详情数据来自 GET /sandbar-workbench/api/epics*（host epics.ts，t260825-04）；
  *   - 本模块只承载 UI 侧可单测的判定逻辑：状态分桶、排序、徽标文案、新建工单注入文案；
  *   - smoke/epic-ui.mjs 直测（node ≥22.18 type-stripping，跨目录 import .ts 同
  *     smoke/sessions.mjs 先例）。写集约束：只能落 src/client/ 内（不放 src/shared/）。

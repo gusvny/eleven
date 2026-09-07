@@ -1,5 +1,5 @@
 /**
- * 巡检报告读取（M6，t260821-m6-scan-expand）—— suyou-workbench 宿主半。
+ * 巡检报告读取（M6，t260821-m6-scan-expand）—— sandbar-workbench 宿主半。
  *
  * 只读 `server/dsh/temporal-poc/out/scan/` 下**文件名序最新**的一份 `<YYYY-MM-DD>.json`
  * （DispatcherScanWorkflow 每轮巡检落盘，同日重跑覆盖当日文件）。

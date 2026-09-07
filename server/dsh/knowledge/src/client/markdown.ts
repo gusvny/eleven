@@ -1,5 +1,5 @@
 /**
- * markdown.ts — 无依赖的轻量 Markdown 渲染器（供 suyou-knowledge 知识库插件用）。
+ * markdown.ts — 无依赖的轻量 Markdown 渲染器（供 sandbar-knowledge 知识库插件用）。
  *
  * 支持（docs 知识库设计 §5.1）：
  *   - 标题（#~######）、表格（GFM）、围栏代码块（带语法高亮 + 复制按钮）、

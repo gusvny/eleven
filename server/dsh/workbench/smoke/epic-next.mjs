@@ -190,7 +190,7 @@ roles:
   }
 
   /* ------------------------------------------------------------ B. 路由 */
-  section('B /suyou-workbench/api/epics/<code>/suggest-next 路由')
+  section('B /sandbar-workbench/api/epics/<code>/suggest-next 路由')
   {
     const mockRes = () => ({
       status: 0, body: null,
@@ -211,7 +211,7 @@ roles:
         on: () => () => {},
       }
       apply(ctx, { repo })
-      return routes.find(r => r.kind === 'prefix' && r.path === '/suyou-workbench/api/epics')
+      return routes.find(r => r.kind === 'prefix' && r.path === '/sandbar-workbench/api/epics')
     }
     const call = async (handler, url, method = 'GET') => {
       const res = mockRes()
@@ -239,13 +239,13 @@ roles:
     const hB = setup(repoB)
     ok(hB !== undefined, 'epics prefix 路由已挂')
 
-    let r = await call(hB, '/suyou-workbench/api/epics/demo-epic/suggest-next', 'POST')
+    let r = await call(hB, '/sandbar-workbench/api/epics/demo-epic/suggest-next', 'POST')
     ok(r.status === 200 && r.body.ok === true && typeof r.body.result.job_id === 'string'
       && r.body.result.state === 'running' && r.body.result.reused === false,
       'POST 启动 → 200 job_id + running')
     const jobId = r.body.result.job_id
 
-    r = await call(hB, `/suyou-workbench/api/epics/demo-epic/suggest-next/${jobId}`)
+    r = await call(hB, `/sandbar-workbench/api/epics/demo-epic/suggest-next/${jobId}`)
     ok(r.status === 200 && r.body.result.state === 'done'
       && r.body.result.suggestion?.workflow === 'dev-lane'
       && typeof r.body.result.suggestion?.title === 'string',
@@ -260,20 +260,20 @@ roles:
       && promptMd.includes('t260827-01') && promptMd.includes('result.json'),
       'prompt.md 落盘：立项全文/模板清单/工单汇总/结果路径齐备（可审计）')
 
-    r = await call(hB, '/suyou-workbench/api/epics/demo-epic/suggest-next', 'POST')
+    r = await call(hB, '/sandbar-workbench/api/epics/demo-epic/suggest-next', 'POST')
     ok(r.status === 200 && r.body.result.job_id !== jobId && r.body.result.reused === false,
       '已完成的 code 再 POST → 起新 job（复用只限进行中）')
     const jobIdB = r.body.result.job_id
 
     // STUB job 要轮询过才算 done（registry 里状态翻转只在 poll 发生）——
     // 不轮询就继续 POST 会命中「进行中复用」，这是特性不是 bug。
-    r = await call(hB, `/suyou-workbench/api/epics/demo-epic/suggest-next/${jobIdB}`)
+    r = await call(hB, `/sandbar-workbench/api/epics/demo-epic/suggest-next/${jobIdB}`)
     ok(r.body.result.state === 'done', 'STUB job 轮询后状态翻转为 done')
 
     // 再连开 4 个 job（每个都轮询到 done；含上面共 6 个）→ 目录保留 ≤5 份
     for (let i = 0; i < 4; i++) {
-      const p = await call(hB, '/suyou-workbench/api/epics/demo-epic/suggest-next', 'POST')
-      await call(hB, `/suyou-workbench/api/epics/demo-epic/suggest-next/${p.body.result.job_id}`)
+      const p = await call(hB, '/sandbar-workbench/api/epics/demo-epic/suggest-next', 'POST')
+      await call(hB, `/sandbar-workbench/api/epics/demo-epic/suggest-next/${p.body.result.job_id}`)
     }
     const shape = /^demo-epic-[0-9a-z]+-[0-9a-f]{6}$/
     const dirs = (await readdir(process.env.SUYOU_EPIC_NEXT_DIR, { withFileTypes: true }))
@@ -287,17 +287,17 @@ roles:
     const payload = JSON.stringify({ status: 'ok', workflow: 'regression', title: 'fake 建议标题', body: 'b', rationale: 'r' })
     process.env.SUYOU_AGENT_CMD = `${process.execPath} ${fakeScript} '${payload}'`
 
-    r = await call(hB, '/suyou-workbench/api/epics/demo-epic-2/suggest-next', 'POST')
+    r = await call(hB, '/sandbar-workbench/api/epics/demo-epic-2/suggest-next', 'POST')
     ok(r.status === 200 && r.body.result.state === 'running', '假 agent：POST → running（真 spawn）')
     const jobId2 = r.body.result.job_id
-    r = await call(hB, '/suyou-workbench/api/epics/demo-epic-2/suggest-next', 'POST')
+    r = await call(hB, '/sandbar-workbench/api/epics/demo-epic-2/suggest-next', 'POST')
     ok(r.status === 200 && r.body.result.job_id === jobId2 && r.body.result.reused === true,
       '进行中重复 POST → 复用同一 job（不重复起 agent）')
 
     let final = null
     for (let i = 0; i < 20; i++) {
       await sleep(300)
-      const p = await call(hB, `/suyou-workbench/api/epics/demo-epic-2/suggest-next/${jobId2}`)
+      const p = await call(hB, `/sandbar-workbench/api/epics/demo-epic-2/suggest-next/${jobId2}`)
       if (p.body?.result?.state !== 'running') { final = p; break }
     }
     ok(final !== null && final.status === 200 && final.body.result.state === 'done'
@@ -308,12 +308,12 @@ roles:
     /* --- B3 假 agent 写不合规结果 → failed --- */
     const badPayload = JSON.stringify({ status: 'ok', workflow: 'made-up-template', title: 'x' })
     process.env.SUYOU_AGENT_CMD = `${process.execPath} ${fakeScript} '${badPayload}'`
-    r = await call(hB, '/suyou-workbench/api/epics/demo-epic/suggest-next', 'POST')
+    r = await call(hB, '/sandbar-workbench/api/epics/demo-epic/suggest-next', 'POST')
     const jobId3 = r.body.result.job_id
     let final3 = null
     for (let i = 0; i < 20; i++) {
       await sleep(300)
-      const p = await call(hB, `/suyou-workbench/api/epics/demo-epic/suggest-next/${jobId3}`)
+      const p = await call(hB, `/sandbar-workbench/api/epics/demo-epic/suggest-next/${jobId3}`)
       if (p.body?.result?.state !== 'running') { final3 = p; break }
     }
     ok(final3 !== null && final3.body.result.state === 'failed'
@@ -323,27 +323,27 @@ roles:
     /* --- B4 错误路径 --- */
     delete process.env.SUYOU_AGENT_CMD
     process.env.SUYOU_EPIC_NEXT_STUB = '1'
-    r = await call(hB, '/suyou-workbench/api/epics/Bad-Code/suggest-next', 'POST')
+    r = await call(hB, '/sandbar-workbench/api/epics/Bad-Code/suggest-next', 'POST')
     ok(r.status === 400, 'POST 坏形状 code → 400')
-    r = await call(hB, '/suyou-workbench/api/epics/no-such-epic/suggest-next', 'POST')
+    r = await call(hB, '/sandbar-workbench/api/epics/no-such-epic/suggest-next', 'POST')
     ok(r.status === 404, 'POST 不存在 code → 404')
-    r = await call(hB, '/suyou-workbench/api/epics/demo-epic/suggest-next/j00000000')
+    r = await call(hB, '/sandbar-workbench/api/epics/demo-epic/suggest-next/j00000000')
     ok(r.status === 404, '未知 jobId → 404 人话')
-    r = await call(hB, `/suyou-workbench/api/epics/demo-epic-2/suggest-next/${jobId}`)
+    r = await call(hB, `/sandbar-workbench/api/epics/demo-epic-2/suggest-next/${jobId}`)
     ok(r.status === 404, 'jobId 与 code 不匹配 → 404（防跨立项串读）')
-    r = await call(hB, '/suyou-workbench/api/epics/demo-epic/suggest-next/not!valid')
+    r = await call(hB, '/sandbar-workbench/api/epics/demo-epic/suggest-next/not!valid')
     ok(r.status === 400, 'jobId 形状非法 → 400')
-    r = await call(hB, '/suyou-workbench/api/epics/demo-epic/suggest-next', 'GET')
+    r = await call(hB, '/sandbar-workbench/api/epics/demo-epic/suggest-next', 'GET')
     ok(r.status === 405, 'GET 启动路径 → 405')
-    r = await call(hB, `/suyou-workbench/api/epics/demo-epic/suggest-next/${jobId}`, 'PUT')
+    r = await call(hB, `/sandbar-workbench/api/epics/demo-epic/suggest-next/${jobId}`, 'PUT')
     ok(r.status === 405, 'PUT 轮询路径 → 405')
-    r = await call(hB, '/suyou-workbench/api/epics/demo-epic/bogus-op', 'POST')
+    r = await call(hB, '/sandbar-workbench/api/epics/demo-epic/bogus-op', 'POST')
     ok(r.status === 405, '既有未知子路径 POST → 405 回归不变')
 
     /* --- B5 workflow list 失败 → 502 可重试 --- */
     const repoC = await mkRepo('repo-c', ADMIN_STUB_NO_WF)
     const hC = setup(repoC)
-    r = await call(hC, '/suyou-workbench/api/epics/demo-epic/suggest-next', 'POST')
+    r = await call(hC, '/sandbar-workbench/api/epics/demo-epic/suggest-next', 'POST')
     ok(r.status === 502 && String(r.body.error).includes('模板清单查询失败'),
       '模板清单拿不到 → 502 人话（不放行无校验的建议）')
 
@@ -390,12 +390,12 @@ roles:
       // B7a 复刻 260828 事故现场：写非法 JSON（\- 转义）后自退 → poll 立即 fail-fast
       const badJsonPayload = '{"status":"ok","workflow":"dev-lane","title":"bad\\-dash","body":"b"}'
       process.env.SUYOU_AGENT_CMD = `${process.execPath} ${fakeScript} '${badJsonPayload}'`
-      r = await call(hB, '/suyou-workbench/api/epics/demo-epic-2/suggest-next', 'POST')
+      r = await call(hB, '/sandbar-workbench/api/epics/demo-epic-2/suggest-next', 'POST')
       const jobId4 = r.body.result.job_id
       let final4 = null
       for (let i = 0; i < 25; i++) {
         await sleep(200)
-        const p = await call(hB, `/suyou-workbench/api/epics/demo-epic-2/suggest-next/${jobId4}`)
+        const p = await call(hB, `/sandbar-workbench/api/epics/demo-epic-2/suggest-next/${jobId4}`)
         if (p.body?.result?.state !== 'running') { final4 = p; break }
       }
       ok(final4 !== null && final4.body.result.state === 'failed'
@@ -409,12 +409,12 @@ roles:
       await writeFile(lingerScript, FAKE_AGENT_LINGER, 'utf8')
       const okPayload = JSON.stringify({ status: 'ok', workflow: 'regression', title: 'linger 建议', body: 'b', rationale: 'r' })
       process.env.SUYOU_AGENT_CMD = `${process.execPath} ${lingerScript} '${okPayload}'`
-      r = await call(hB, '/suyou-workbench/api/epics/demo-epic/suggest-next', 'POST')
+      r = await call(hB, '/sandbar-workbench/api/epics/demo-epic/suggest-next', 'POST')
       const jobId5 = r.body.result.job_id
       let final5 = null
       for (let i = 0; i < 25; i++) {
         await sleep(200)
-        const p = await call(hB, `/suyou-workbench/api/epics/demo-epic/suggest-next/${jobId5}`)
+        const p = await call(hB, `/sandbar-workbench/api/epics/demo-epic/suggest-next/${jobId5}`)
         if (p.body?.result?.state !== 'running') { final5 = p; break }
       }
       ok(final5 !== null && final5.body.result.state === 'done'

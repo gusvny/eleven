@@ -151,7 +151,7 @@ try {
   mkdirSync(OUT_DIR, { recursive: true });
   page.on('request', (req) => {
     const m = req.method();
-    if (m !== 'GET' && req.url().includes('/suyou-workbench/api/')) writeApis.push(`${m} ${req.url()}`);
+    if (m !== 'GET' && req.url().includes('/sandbar-workbench/api/')) writeApis.push(`${m} ${req.url()}`);
   });
 
   // T1 导航
@@ -180,7 +180,7 @@ try {
   {
     let ok = false, got = '', detail = '';
     try {
-      const res = await fetch(`${bench.base}/suyou-workbench/api/wf/tickets?project=proj-a&enrich=progress`);
+      const res = await fetch(`${bench.base}/sandbar-workbench/api/wf/tickets?project=proj-a&enrich=progress`);
       const j = await res.json();
       const rows = (j?.result?.tickets ?? j?.tickets ?? []);
       const r = rows.find((x) => x?.id === 't260903-10');

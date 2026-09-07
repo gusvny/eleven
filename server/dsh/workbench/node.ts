@@ -1,67 +1,67 @@
 /**
- * suyou-workbench —— 工单工作流台的 dsh UI 插件（宿主半 / node）。
+ * sandbar-workbench —— 工单工作流台的 dsh UI 插件（宿主半 / node）。
  *
- * 职责：在 dsh 自己的 webServer 上挂 /suyou-workbench/api/wf/*（工单工作流台设计
+ * 职责：在 dsh 自己的 webServer 上挂 /sandbar-workbench/api/wf/*（工单工作流台设计
  * v0.3 §5/§9），供本插件的浏览器半（lib/client.js，设置面板「工单台」分区）同源
- * fetch 使用。独立命名，不寄生 suyou-admin-ui 壳：
+ * fetch 使用。独立命名，不寄生 sandbar-admin-ui 壳：
  *
- *   GET  /suyou-workbench/api/wf/projects       → 项目注册表（260823 多项目化；t260904-15 起走
+ *   GET  /sandbar-workbench/api/wf/projects       → 项目注册表（260823 多项目化；t260904-15 起走
  *                                                 loadRegistry()：projects + quarantined 隔离条目，
  *                                                 空/全隔离注册表不 500——首接发生在空表时）
- *   GET  /suyou-workbench/api/wf/projects/detail?key=
+ *   GET  /sandbar-workbench/api/wf/projects/detail?key=
  *                                               → 项目详情票计数（票③面D：spawn 安装器
  *                                                 `sandbar project list --json` 单点取 Temporal
  *                                                 计数；CLI 降级 tickets_state 透传由弹层显「—」）
- *   POST /suyou-workbench/api/wf/projects/add   → 项目接入（票③面D：薄壳 spawn `sandbar project
+ *   POST /sandbar-workbench/api/wf/projects/add   → 项目接入（票③面D：薄壳 spawn `sandbar project
  *                                                 add --json`；dry_run:true=422 能力应答——CLI 无
  *                                                 add --dry-run 旗（F1），预检=弹层本地形状检查）
- *   POST /suyou-workbench/api/wf/projects/remove
+ *   POST /sandbar-workbench/api/wf/projects/remove
  *                                               → 项目摘除（票③面D：薄壳 spawn `sandbar project
  *                                                 remove --json`，dry_run/purge/confirm-last 旗一一对应；
  *                                                 在飞闸 fail-closed 文案由 CLI 错误体透传）
- *   GET  /suyou-workbench/api/wf/tickets?project=<key>
+ *   GET  /sandbar-workbench/api/wf/tickets?project=<key>
  *                                               → ticket list（按 ProjectKey SA 过滤；project 必传、无默认值；
  *                                                 台面行；enrich=progress 时附进展行）+ workflow list（全局模板表）
- *   GET  /suyou-workbench/api/wf/tickets?project=<key>&enrich=progress[&ids=a,b]
+ *   GET  /sandbar-workbench/api/wf/tickets?project=<key>&enrich=progress[&ids=a,b]
  *                                               → 进展行 enrichment（t260904-17）：主响应零 show；
  *                                                 enrich 阶段逐票 show 短超时+并发上限+allSettled
- *   GET  /suyou-workbench/api/wf/tickets/<id>   → ticket show（详情全文）
- *   POST /suyou-workbench/api/wf/tickets/<id>/accept|advance|dispatch-next|rework|update
+ *   GET  /sandbar-workbench/api/wf/tickets/<id>   → ticket show（详情全文）
+ *   POST /sandbar-workbench/api/wf/tickets/<id>/accept|advance|dispatch-next|rework|update
  *                                               → 写操作，走 admin.py call ticket（run-id 审计）
- *   GET  /suyou-workbench/api/wf/workflows      → workflow list（模板链，泳道图用）
- *   GET  /suyou-workbench/api/wf/docs/tree?scope=docs|notes
+ *   GET  /sandbar-workbench/api/wf/workflows      → workflow list（模板链，泳道图用）
+ *   GET  /sandbar-workbench/api/wf/docs/tree?scope=docs|notes
  *                                               → 「文档」视图目录树（t260905-06，全仓单例）：
  *                                                 仓根 docs/ 定稿库或 notes/ 观察窗下 .md 动态
  *                                                 分组（title 自 frontmatter）；白名单拒收文件进
  *                                                 skipped（可见性）；目录缺席 {empty,reason} 降级
- *   GET  /suyou-workbench/api/wf/docs/doc?scope=docs&path=design/xx.md
+ *   GET  /sandbar-workbench/api/wf/docs/doc?scope=docs&path=design/xx.md
  *                                               → 「文档」视图按篇正文（原文+frontmatter 元数据；
  *                                                 白名单/穿路径/大小上限逐检查精确报错；只读）
- *   GET  /suyou-workbench/api/wf/book?path=books/hanshu/jizhuan.json&limit=5
+ *   GET  /sandbar-workbench/api/wf/book?path=books/hanshu/jizhuan.json&limit=5
  *                                               → 内容预览（审批前过目）：只读 app/public/data/<path>，
  *                                                 返回 meta + 前 limit 章（标题+段落）；path 白名单防穿路径
- *   GET  /suyou-workbench/api/wf/temporal-health → Temporal 健康（只读，t260821-06）：真实探测
+ *   GET  /sandbar-workbench/api/wf/temporal-health → Temporal 健康（只读，t260821-06）：真实探测
  *                                                 127.0.0.1:7233 端口是否监听（=server 在线）+ worker
  *                                                 pidfile pid 是否存活（=worker 在线），不写死结果
- *   GET  /suyou-workbench/api/wf/workers        → worker 清单（260824 每工单专属 worker）：
+ *   GET  /sandbar-workbench/api/wf/workers        → worker 清单（260824 每工单专属 worker）：
  *                                                 扫 data/worker*.pid 逐个探测存活（共享 suyou-poc +
  *                                                 专属 suyou-ticket-<id>），状态条「N workers」数据源
- *   GET  /suyou-workbench/api/wf/scan-report    → 巡检报告（只读，M6 t260821-m6-scan-expand）：
+ *   GET  /sandbar-workbench/api/wf/scan-report    → 巡检报告（只读，M6 t260821-m6-scan-expand）：
  *                                                 读 temporal-poc/out/scan/ 文件名序最新的
  *                                                 <YYYY-MM-DD>.json（DispatcherScanWorkflow 落盘）；
  *                                                 无报告走 reason 人话降级，不抛错
- *   POST /suyou-workbench/api/global-session/open {project}
+ *   POST /sandbar-workbench/api/global-session/open {project}
  *                                               → 新建全局会话（session-entry t260825-02，侧栏「会话」区
  *                                                 新建按钮）：仿工单会话开/找，但 id 不带 ticket- 前缀、
  *                                                 不注入工单上下文、always-create（全局会话每次新建一个；
  *                                                 cwd=该项目注册表主目录）
- *   GET  /suyou-workbench/api/wf/tickets/<id>/agent-logs
+ *   GET  /sandbar-workbench/api/wf/tickets/<id>/agent-logs
  *                                               → 工单 agent 日志（只读，M12 t260822-m12）：
  *                                                 定泳道/隔离目录 .suyou/，列 agent_<stage>_gen<n>.log
  *                                                 （子 agent stdout/stderr 流）+ stage_<stage>_gen<n>.json
  *                                                 （段结算结果），带尾部内容/解析结果；无目录走
  *                                                 reason 人话降级，不抛错
- *   GET  /suyou-workbench/api/wf/tickets/<id>/agent-live?n=30
+ *   GET  /sandbar-workbench/api/wf/tickets/<id>/agent-live?n=30
  *                                               → agent 实时动态（只读，t260825-03）：泳道
  *                                                 .dsh/sessions/<cwd-slug>/<工单id>-<角色>/
  *                                                 session.jsonl.zstd 整解（zstd -dc，多帧拼接
@@ -71,43 +71,43 @@
  *
  * 立项单只读 API（epic-linkage Tier 2，t260825-04；真源=notes/epics/*.md + Temporal
  * 查询，UI 不存状态——立项单关键决策 5；代号存在性=文件存在性强校验——决策 2）：
- *   GET  /suyou-workbench/api/epics            → 列 notes/epics/*.md：代号（文件名主名）/
+ *   GET  /sandbar-workbench/api/epics            → 列 notes/epics/*.md：代号（文件名主名）/
  *                                                 标题（首个 # 行）/状态（字段表格「状态」行）/
  *                                                 立项日期；目录不存在/无文件 → 空数组不报错
- *   GET  /suyou-workbench/api/epics/<code>     → 单份立项单 Markdown 全文；代号形状白名单
+ *   GET  /sandbar-workbench/api/epics/<code>     → 单份立项单 Markdown 全文；代号形状白名单
  *                                                 （shared.EPIC_CODE_RE 同款）+ 路径防穿双保险，
  *                                                 非法 400 / 不存在 404 人话
- *   GET  /suyou-workbench/api/epics/<code>/tickets
+ *   GET  /sandbar-workbench/api/epics/<code>/tickets
  *                                               → 该立项全部工单实时状态聚合（复用 ticket list
  *                                                 --epic 通路）：按 status 分桶计数 + 工单行
  *                                                 （id/title/status/stage/stage_state）；Temporal
  *                                                 不可达 → {degraded:true, reason} 降级不 502
- *   POST /suyou-workbench/api/epics/<code>/suggest-next
+ *   POST /sandbar-workbench/api/epics/<code>/suggest-next
  *                                               → 「继续执行」建议 job 启动（t260827-02）：spawn 一次性
  *                                                 headless integration agent 分析立项现状，产出下一步
  *                                                 工单建议（模板/标题/正文）；同 code 进行中 job 复用
  *                                                 不重复起。agent 只产建议，不直接创建工单
- *   GET  /suyou-workbench/api/epics/<code>/suggest-next/<jobId>
+ *   GET  /sandbar-workbench/api/epics/<code>/suggest-next/<jobId>
  *                                               → 建议 job 轮询：{state:running|done|failed,
  *                                                 suggestion?|reason?}；宿主重启丢注册表 → 404
  *                                                 （前端重新点击即可）
  *   归档快照 POST /epics/<code>/archive 本工单不做（无调用方，留给归档动作真正发生时的工单）。
  *
  * PR 式审批台（M9，t260821-m9-pr-approval）：
- *   GET  /suyou-workbench/api/wf/tickets/<id>/diff
+ *   GET  /sandbar-workbench/api/wf/tickets/<id>/diff
  *                                               → 工单变更集（只读）：泳道道=worktree 工作树 vs base_ref
  *                                                 文件级 diff（文档=渲染态 block diff 复用 knowledge
  *                                                 blocks.ts / 代码=unified diff / 数据=前后值对账）；
  *                                                 主树道=write_set+git log，给不出显「无变更记录」。
- *   GET  /suyou-workbench/api/wf/tickets/<id>/review
+ *   GET  /sandbar-workbench/api/wf/tickets/<id>/review
  *                                               → 读审批意见（server/dsh/reviews/<工单id>.json，无则空 rounds）
- *   POST /suyou-workbench/api/wf/tickets/<id>/review {base, conclude, blocks[], reviewer?}
+ *   POST /sandbar-workbench/api/wf/tickets/<id>/review {base, conclude, blocks[], reviewer?}
  *                                               → 追加一轮审批意见落盘（工单 id 白名单防穿路径、
  *                                                 admin.log 同形 JSONL 审计+run-id；块 key 含内容哈希，
  *                                                 内容变→旧意见客户端标「已过期」，支持多轮迭代）
  *
  * 数据源=server/tools/ticket.py（M1 已落地）：读写统一走 runAdminCli spawn
- * admin.py（读列也走，不直读 json）——与模型通道 suyou-tools 共用同一函数，
+ * admin.py（读列也走，不直读 json）——与模型通道 sandbar-tools 共用同一函数，
  * run-id 审计唯一数据源始终在 python server/admin.log（面板写操作不另开审计通道）。
  * M11 v2（t260822-m11 模版即代码）+ 260823 多项目化：**工单状态只在 Temporal
  * workflow**（旧 tickets/ JSON 投影目录已删）——ticket.py 薄壳内部全走 client.py
@@ -136,7 +136,7 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
-import { runAdminCli } from '../suyou-tools.ts'
+import { runAdminCli } from '../sandbar-tools.ts'
 import { findProject, loadProjects, loadRegistry, primaryDir, type ProjectEntry } from '../suyou-projects.ts'
 // 项目生命周期 CLI 薄壳（票③面D：写路径单源=安装器 CLI，读注册表仍走 TS 装载器；
 // 票据/体检数据=CLI 独有面，spawn 恰是同源——取舍清单见 src/host/project-admin.ts 头注）。
@@ -183,7 +183,7 @@ import {
 
 const execFileP = promisify(execFile)
 
-export const name = 'suyou-workbench'
+export const name = 'sandbar-workbench'
 // webServer 只存在于 web profile；headless 下本插件待机即可，故不走 inject 硬依赖。
 export const inject: string[] = []
 
@@ -213,9 +213,9 @@ interface SuyouWorkbenchConfig {
 
 /** 详情路由前缀（prefix kind 挂在它下面；注册 path 不带尾斜杠——
  * webserver 的 prefix 匹配按 `${prefix}/` 判定，带尾斜杠会拼出双斜杠永不命中）。 */
-const TICKETS_PREFIX = '/suyou-workbench/api/wf/tickets'
+const TICKETS_PREFIX = '/sandbar-workbench/api/wf/tickets'
 /** 立项单路由前缀（epic-linkage Tier 2）：exact 挂列表，prefix 挂 <code>[ /tickets]。 */
-const EPICS_PREFIX = '/suyou-workbench/api/epics'
+const EPICS_PREFIX = '/sandbar-workbench/api/epics'
 /** POST 操作白名单（admin.py 引擎的 op 子集 + sign=审批签字走 Temporal signal；
  *  M11 v2 加 retry-qc=blocked 重跑走 Temporal retry_qc signal）。
  *  create 不进此表：它没有工单 id，落 exact 路由 /wf/tickets 的 POST 分支
@@ -689,7 +689,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
 
   /** Temporal 健康（只读）：server=7233 端口监听，worker=pidfile pid 存活，真实探测。
    *  worker pidfile 缺省 <repo>/server/dsh/temporal-poc/data/worker.pid（worker.py --daemon 自写，
-   *  与 suyou-temporal-tools supervisor 的 pidfile 同一真相源）。 */
+   *  与 sandbar-temporal-tools supervisor 的 pidfile 同一真相源）。 */
   async function handleTemporalHealth(_req: IncomingMessage, res: ServerResponse): Promise<void> {
     const workerPidfile = join(repo, 'server', 'dsh', 'temporal-poc', 'data', 'worker.pid')
     const serverOnline = await probePort(TEMPORAL_HOST, TEMPORAL_PORT, PORT_PROBE_TIMEOUT_MS)
@@ -856,7 +856,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       const saved = await appendReviewRound(reviewsAnchor, id, round)
       const summary = `${id} 第 ${saved.rounds.length} 轮 conclude=${conclude} 块 ${blocks.length}`
       await audit(runId, 'review.save', { ticket: id, base, conclude, blocks: blocks.length }, true, summary)
-      ctx.logger.info('suyou-workbench: review.save %s（run-id %s）', summary, runId)
+      ctx.logger.info('sandbar-workbench: review.save %s（run-id %s）', summary, runId)
       sendJson(res, 200, { ok: true, run_id: runId, result: { ticket: id, rounds: saved.rounds.length, round } })
     } catch (err: any) {
       await audit(runId, 'review.save', { ticket: id }, false, String(err?.message ?? err))
@@ -870,13 +870,13 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
    */
   async function audit(runId: string, name: string, args: unknown, ok: boolean, summary: string): Promise<void> {
     const rec = JSON.stringify({
-      run_id: runId, ts: Math.floor(Date.now() / 1000), actor: 'suyou-workbench',
+      run_id: runId, ts: Math.floor(Date.now() / 1000), actor: 'sandbar-workbench',
       name, args, ok, summary: summary.length > 800 ? summary.slice(0, 800) + '…' : summary,
     })
     try {
       await appendFile(join(repo, 'server', 'admin.log'), rec + '\n', 'utf8')
     } catch (err: any) {
-      ctx.logger.warn('suyou-workbench: admin.log 审计写入失败（不影响主流程）：%s', String(err?.message ?? err))
+      ctx.logger.warn('sandbar-workbench: admin.log 审计写入失败（不影响主流程）：%s', String(err?.message ?? err))
     }
   }
 
@@ -1092,7 +1092,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       }
       return
     }
-    sendJson(res, 404, { ok: false, error: '路径不合法：/suyou-workbench/api/wf/tickets/<id>[/op | /evidence/<file>]' })
+    sendJson(res, 404, { ok: false, error: '路径不合法：/sandbar-workbench/api/wf/tickets/<id>[/op | /evidence/<file>]' })
   }
 
   /** 巡检报告（M6，只读）：最新一份 out/scan/<YYYY-MM-DD>.json；无报告走 reason 降级。 */
@@ -1106,7 +1106,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
   }
 
   /**
-   * host 陈旧看守读侧（t260902-03，只读）：GET /suyou-workbench/api/build-info。
+   * host 陈旧看守读侧（t260902-03，只读）：GET /sandbar-workbench/api/build-info。
    * 现算磁盘指纹与启动指纹比对，stale=true 即「磁盘 host 半已更新、console 进程
    * 还在跑旧码」，客户端据此渲染全局「重启 console 生效」横幅。指纹全缺（部署
    * 形态异常）→ stale:false + error 人话，客户端见 error 有意降级不显横幅
@@ -1142,7 +1142,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
   }
 
   /**
-   * 会话开局 charter 读侧（t260904-07，只读）：GET /suyou-workbench/api/session-charter?project=<key>。
+   * 会话开局 charter 读侧（t260904-07，只读）：GET /sandbar-workbench/api/session-charter?project=<key>。
    * 每次请求现读 <repo>/server/dsh/session_charter.md（改文件即生效，只影响
    * 之后新建的会话）。渲染纯函数在 src/host/session-charter.ts（smoke 直测）：
    * 通用模板占位符现填（engine_root=repo，本仓根）+ 命中 ## project:<key>
@@ -1177,7 +1177,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     try {
       raw = await readFile(join(repo, 'server', 'dsh', 'session_charter.md'), 'utf8')
     } catch (err) {
-      ctx.logger.warn('suyou-workbench: session_charter.md 读取失败，回落内置兜底模板：%s', String(err instanceof Error ? err.message : err))
+      ctx.logger.warn('sandbar-workbench: session_charter.md 读取失败，回落内置兜底模板：%s', String(err instanceof Error ? err.message : err))
     }
     const charter = composeSessionCharter(raw, project, {
       projectKey: project,
@@ -1192,7 +1192,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
   }
 
   /**
-   * metrics 读侧聚合（t260901-20，只读，M1a）：GET /suyou-workbench/api/wf/metrics。
+   * metrics 读侧聚合（t260901-20，只读，M1a）：GET /sandbar-workbench/api/wf/metrics。
    * 聚合唯一实现在 src/host/metrics.ts（与 metrics-cli.mjs CLI 前门同函数同缓存，
    * 契约块 2「同实现同缓存」）；本 handler 只做 query 透传（同名重复参数由
    * parseMetricsQuery 防穿）与 sendJson 回包，4xx {error,reason} / 200 响应形状
@@ -1507,7 +1507,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       await handleEpicTickets(res, parts[0])
       return
     }
-    sendJson(res, 404, { ok: false, error: '路径不合法：/suyou-workbench/api/epics/<代号>[/tickets | /suggest-next[/<jobId>] | /next-hint/dismiss | /close | /status]' })
+    sendJson(res, 404, { ok: false, error: '路径不合法：/sandbar-workbench/api/epics/<代号>[/tickets | /suggest-next[/<jobId>] | /next-hint/dismiss | /close | /status]' })
   }
 
   /** 工单 agent 日志（M12，只读）：show 工单 → 定 .suyou 目录 → 列 agent_*.log / stage_*.json。
@@ -1682,7 +1682,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       const abs = resolve(primary, wsPath)
       const inProject = proj.dirs.some(d => abs === d || abs.startsWith(d.replace(/\/+$/, '') + sep))
       if (inProject && existsSync(abs)) cwd = abs
-      else ctx.logger.warn('suyou-workbench: 工单 %s 的工作区 %s 不在项目 %s 注册目录内或不存在，会话落主目录', ticketId, wsPath, proj.key)
+      else ctx.logger.warn('sandbar-workbench: 工单 %s 的工作区 %s 不在项目 %s 注册目录内或不存在，会话落主目录', ticketId, wsPath, proj.key)
     }
     try {
       sessions.create(sessionId, { meta: { cwd } })
@@ -1740,7 +1740,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     const sessionId = `chat-${ts}-${randomUUID().replace(/-/g, '').slice(0, 4)}`
     try {
       sessions.create(sessionId, { meta: { cwd } })
-      ctx.logger.info('suyou-workbench: 新建全局会话 %s（项目 %s，cwd %s）', sessionId, proj.key, cwd)
+      ctx.logger.info('sandbar-workbench: 新建全局会话 %s（项目 %s，cwd %s）', sessionId, proj.key, cwd)
       sendJson(res, 200, { ok: true, result: { session_id: sessionId, created: true, cwd } })
     } catch (err: any) {
       sendJson(res, 500, { ok: false, error: String(err?.message ?? err) })
@@ -1912,37 +1912,37 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
   const attach = (ws: any): void => {
     ctx.effect(() => {
       const disposers = [
-        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/tickets', handler: handleTickets }),
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/tickets', handler: handleTickets }),
         ws.register({ kind: 'prefix', path: TICKETS_PREFIX, handler: handleTicketRoute }),
-        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/workflows', handler: handleWorkflows }),
-        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/book', handler: handleBook }),
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/workflows', handler: handleWorkflows }),
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/book', handler: handleBook }),
         // 「文档」视图两路由（t260905-06）：目录树 + 按篇正文（仓根 docs/notes，全仓单例）。
-        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/docs/tree', handler: handleDocsTree }),
-        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/docs/doc', handler: handleDocsDoc }),
-        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/temporal-health', handler: handleTemporalHealth }),
-        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/workers', handler: handleWorkers }),
-        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/scan-report', handler: handleScanReport }),
-        ws.register({ kind: 'exact', path: '/suyou-workbench/api/build-info', handler: handleBuildInfo }),
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/docs/tree', handler: handleDocsTree }),
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/docs/doc', handler: handleDocsDoc }),
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/temporal-health', handler: handleTemporalHealth }),
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/workers', handler: handleWorkers }),
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/scan-report', handler: handleScanReport }),
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/build-info', handler: handleBuildInfo }),
         // 会话开局 charter 读侧（t260904-07）：路径同源常量（src/host/session-charter.ts
         // SESSION_CHARTER_PATH），客户端 fetch URL 与此处注册逐字同源，防 KI-042 漂移。
         ws.register({ kind: 'exact', path: SESSION_CHARTER_PATH, handler: handleSessionCharter }),
-        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/metrics', handler: handleMetrics }),
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/metrics', handler: handleMetrics }),
         ws.register({ kind: 'exact', path: EPICS_PREFIX, handler: handleEpics }),
         ws.register({ kind: 'prefix', path: EPICS_PREFIX, handler: handleEpicRoute }),
-        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/workspaces', handler: handleWorkspaceList }),
-        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/projects', handler: handleProjects }),
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/workspaces', handler: handleWorkspaceList }),
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/projects', handler: handleProjects }),
         // 票③面D：项目生命周期三路由（detail 票计数读面 / add·remove 写面，薄壳 spawn 安装器 CLI）。
-        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/projects/detail', handler: handleProjectDetail }),
-        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/projects/add', handler: handleProjectAdd }),
-        ws.register({ kind: 'exact', path: '/suyou-workbench/api/wf/projects/remove', handler: handleProjectRemove }),
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/projects/detail', handler: handleProjectDetail }),
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/projects/add', handler: handleProjectAdd }),
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/projects/remove', handler: handleProjectRemove }),
         // t260903-07 起客户端无调用方（openTicketSessionFlow 已删），联动入口下线仅客户端面——
         // 路由按 ③ 口径保留（数据留存/回滚面），见 handleTicketSessionOpen 头注。
-        ws.register({ kind: 'exact', path: '/suyou-workbench/api/ticket-session/open', handler: handleTicketSessionOpen }),
-        ws.register({ kind: 'exact', path: '/suyou-workbench/api/global-session/open', handler: handleGlobalSessionOpen }),
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/ticket-session/open', handler: handleTicketSessionOpen }),
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/global-session/open', handler: handleGlobalSessionOpen }),
       ]
       return () => { for (const dispose of disposers) dispose() }
-    }, 'suyou-workbench: wf api routes')
-    ctx.logger.info('suyou-workbench: 工单工作流台 API 已挂载 /suyou-workbench/api/wf/*（repo=%s）', repo)
+    }, 'sandbar-workbench: wf api routes')
+    ctx.logger.info('sandbar-workbench: 工单工作流台 API 已挂载 /sandbar-workbench/api/wf/*（repo=%s）', repo)
   }
 
   // webServer 可能先已提供（直接取），也可能后到（等 internal/service 事件）；

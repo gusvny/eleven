@@ -1,7 +1,7 @@
-# suyou-workbench —— 工单工作流台插件（dsh UI 插件）
+# sandbar-workbench —— 工单工作流台插件（dsh UI 插件）
 
 > 本目录是 dsh 管理台的工单工作流台插件：宿主半（`node.ts`）在 dsh webServer 上挂
-> `/suyou-workbench/api/*`；浏览器半（`src/client/`，构建产物 `lib/client.js`）
+> `/sandbar-workbench/api/*`；浏览器半（`src/client/`，构建产物 `lib/client.js`）
 > 通过 dsh 插件槽机制接管界面。设计真源：
 > `docs/design/工单工作流台设计.md`、`docs/design/右栏会话入口与hero定制设计.md`。
 
@@ -42,7 +42,7 @@ dsh 单槽（`kind:'single'`）按 **priority 最低者渲染**（lowest renders
 **口径**（真源 `docs/design/右栏会话入口与hero定制设计.md` §2/§4/附录）：
 会话分两类——工单会话（`ticket-<工单id>`，点工单 find-or-create，有自己常驻入口）
 与项目会话（用户 UI 主动打开，跟项目走）。本插件只管后者，列表=**插件自建账册**
-（`localStorage['suyou-workbench-opened-sessions-v1']`，MRU ≤5、当前高亮），
+（`localStorage['sandbar-workbench-opened-sessions-v1']`，MRU ≤5、当前高亮），
 只登记用户经本插件 UI 主动打开/新建的会话；磁盘存量、工单、subagent 会话一律不进。
 `ctx.sessions.list` 只取 `displayTitle`（行标签）与 `current`（高亮），不做列表数据源。
 
@@ -62,7 +62,7 @@ variant 类 `<哈希>_hero`）整体 display:none，方向上不可收敛。t260
 三槽注册与 `<style>` 注入全部拆除；t260829-06 修订设计口径并重进为纯槽位替换。
 `smoke/hero.mjs` 的 C 段静态断言持续看住「压制面残留为零」。
 
-**新建链路**：`POST /suyou-workbench/api/global-session/open {project}`
+**新建链路**：`POST /sandbar-workbench/api/global-session/open {project}`
 → 宿主端 always-create（不带工单前缀、不注入工单上下文），会话落当前项目主目录
 → `session_id` 立即入账册 → `sessions.refresh()` → `waitForScope`（list 流同步有
 延迟，轮询 ≤8s）→ `sessions.open(sid)`。任一步失败：console.error 留痕不静默；

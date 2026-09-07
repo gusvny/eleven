@@ -91,7 +91,7 @@ export async function ensureStageConsole({ services = 'full', project = TREE_PRO
   try {
     spawnSync('docker', ['exec', `${st.project}-dsh`, 'mkdir', '-p', dir],
       { env, timeout: 30000 });
-    await fetch(`http://127.0.0.1:${st.ports.console}/suyou-workbench/api/wf/projects/add`, {
+    await fetch(`http://127.0.0.1:${st.ports.console}/sandbar-workbench/api/wf/projects/add`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ key: SEED.key, name: SEED.name, dir, dry_run: false }),

@@ -1,5 +1,5 @@
 /**
- * smoke/ledger-sync.mjs —— suyou-workbench 会话账册同页双实例同步冒烟（t260830-01）。
+ * smoke/ledger-sync.mjs —— sandbar-workbench 会话账册同页双实例同步冒烟（t260830-01）。
  *
  * 直跑：node smoke/ledger-sync.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
  * node 无 DOM，先 stub globalThis.localStorage 再 import store 模块——可行前提是
@@ -113,7 +113,7 @@ console.log('C. 畸形输入容错（桩复现，不放宽）')
 }
 
 console.log('D. LEDGER_KEY 口径')
-ok(LEDGER_KEY === 'suyou-workbench-opened-sessions-v1', 'LEDGER_KEY 值不变（账册 key 口径回归）')
+ok(LEDGER_KEY === 'sandbar-workbench-opened-sessions-v1', 'LEDGER_KEY 值不变（账册 key 口径回归）')
 
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)

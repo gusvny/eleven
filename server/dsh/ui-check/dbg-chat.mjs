@@ -70,9 +70,9 @@ await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "networkidle", timeout
 try { const b = page.locator("button", { hasText: /continue|继续/i }).first();
   await b.waitFor({ state: "visible", timeout: 4000 }); await b.click(); } catch {}
 // 造数
-const pr = await (await fetch(`http://127.0.0.1:${port}/suyou-workbench/api/wf/projects`)).json();
+const pr = await (await fetch(`http://127.0.0.1:${port}/sandbar-workbench/api/wf/projects`)).json();
 const project = pr?.result?.projects?.[0]?.key;
-const d = await (await fetch(`http://127.0.0.1:${port}/suyou-workbench/api/global-session/open`, {
+const d = await (await fetch(`http://127.0.0.1:${port}/sandbar-workbench/api/global-session/open`, {
   method: "POST", headers: { "content-type": "application/json" },
   body: JSON.stringify({ project }),
 })).json();
@@ -80,7 +80,7 @@ console.log("open =>", JSON.stringify(d).slice(0, 400));
 const sid = d.result.session_id, cwd = d.result.cwd;
 await page.evaluate(([k, p2, id, c2]) => {
   localStorage.setItem(k, JSON.stringify([{ id, project: p2, cwd: c2, lastOpenedAt: Date.now() }]));
-}, ["suyou-workbench-opened-sessions-v1", project, sid, cwd]);
+}, ["sandbar-workbench-opened-sessions-v1", project, sid, cwd]);
 await page.reload({ waitUntil: "networkidle", timeout: 30000 }).catch(() => {});
 try { const b = page.locator("button", { hasText: /continue|继续/i }).first();
   await b.waitFor({ state: "visible", timeout: 3000 }); await b.click(); } catch {}

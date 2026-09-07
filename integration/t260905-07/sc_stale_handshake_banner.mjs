@@ -132,7 +132,7 @@ try {
 
   // T3 M2 看守自身内存旧（注入实验 (iii)）：build-info 405（KI-052 主现场：内存无此路由）
   const page3 = await browser.newPage();
-  await page3.route('**/suyou-workbench/api/build-info', (route) => route.fulfill({
+  await page3.route('**/sandbar-workbench/api/build-info', (route) => route.fulfill({
     status: 405, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'build-info 只支持 GET（只读看守）' }),
   }));
   await page3.goto(`${fixture.base}/`, { waitUntil: 'domcontentloaded' });
@@ -142,7 +142,7 @@ try {
   record('sb/m2-405-ki052-banner', m2 && m2Text.includes(BANNER),
     `405 注入后横幅在场=「${m2Text.slice(0, 40)}」（旧看守 405 静默=立案现场，根治判据）`);
   await page3.screenshot({ path: join(OUT_DIR, 'stale-m2-405.png') }).catch(() => {});
-  await page3.unroute('**/suyou-workbench/api/build-info');
+  await page3.unroute('**/sandbar-workbench/api/build-info');
   await page3.close();
 
   // T4 M4 跨重启存活页面（gen1 打回①序列）：同端口重起台（boot 收编已改盘）→ page1 同页轮询

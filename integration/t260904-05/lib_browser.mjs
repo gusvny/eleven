@@ -21,7 +21,7 @@ export const BASE = (await ensureStageConsole()).base;
 {
   const localLib = new URL('../../server/dsh/workbench/lib/client.js', import.meta.url).pathname;
   try {
-    const r = await fetch(`${BASE}/suyou-workbench/lib/client.js`, { signal: AbortSignal.timeout(5000) });
+    const r = await fetch(`${BASE}/sandbar-workbench/lib/client.js`, { signal: AbortSignal.timeout(5000) });
     if (r.ok) {
       const [served, local] = await Promise.all([r.text(), import('node:fs').then((fs) => fs.readFileSync(localLib, 'utf8'))]);
       console.log(`CONSOLE_PROVENANCE base=${BASE} bundle=${served === local ? 'matches-repo' : 'FOREIGN/STALE'}`);
@@ -73,7 +73,7 @@ export async function loadPlaywright() {
 /** 隔离台健康检查（workbench API 可达）。 */
 export async function consoleHealthy() {
   try {
-    const r = await fetch(`${BASE}/suyou-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
+    const r = await fetch(`${BASE}/sandbar-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
     return r.ok;
   } catch { return false; }
 }
@@ -84,7 +84,7 @@ export async function consoleHealthy() {
  *  map 落空 →「组头无法映射到 key」假绿/FALL 链。 */
 export async function fetchProjects() {
   try {
-    const r = await fetch(`${BASE}/suyou-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
+    const r = await fetch(`${BASE}/sandbar-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
     if (!r.ok) return [];
     const data = await r.json();
     const list = Array.isArray(data) ? data

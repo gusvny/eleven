@@ -128,8 +128,8 @@ const CSS = `${DERIVE_TOKENS_CSS}
 
 /* ---------------------------------------------------------------- 数据通道 */
 
-const EPICS_API = '/suyou-workbench/api/epics'
-const WF_API = '/suyou-workbench/api/wf'
+const EPICS_API = '/sandbar-workbench/api/epics'
+const WF_API = '/sandbar-workbench/api/wf'
 
 async function getJson(path: string): Promise<any> {
   const res = await fetch(path)

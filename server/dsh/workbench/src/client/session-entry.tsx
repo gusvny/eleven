@@ -1,5 +1,5 @@
 /**
- * suyou-workbench · 会话动作层唯一样态（session-entry t260831-02 → 票② t260904-05 R8 退役收口）。
+ * sandbar-workbench · 会话动作层唯一样态（session-entry t260831-02 → 票② t260904-05 R8 退役收口）。
  *
  * R8 顶部行退役后，本文件**不再有任何渲染面**——只保留 useSessionEntry()
  * 动作层（账册读写 + handleNew/handleOpen/handleClose），供项目行
@@ -126,7 +126,7 @@ function pushClosedLedger(prev: OpenedEntry[], entry: OpenedEntry): OpenedEntry[
  *     并发读写需求——不入 session-ledger-store 共享 store（review C3 取舍：
  *     计数器读→写→persist 在同一同步段完成，同号窗口就此闭合）。
  * 惰性读写（同 CLOSED_LEDGER 模式），无模块顶层 IO。 */
-export const SEQ_COUNTER_KEY = 'suyou-workbench-project-seq-v1'
+export const SEQ_COUNTER_KEY = 'sandbar-workbench-project-seq-v1'
 
 /** 读项目编号计数器（localStorage → {[project]: 最大已用 seq}；坏数据容错为空表）。 */
 function readSeqCounters(): Record<string, number> {
@@ -279,7 +279,7 @@ function isBlankSession(sessions: SessionsFace, id: string): boolean {
 
 /**
  * 会话开局 charter 注入（t260904-07）：blank 新会话恰一次注入项目 charter
- * （GET /suyou-workbench/api/session-charter?project=<key> 现读现渲染）→
+ * （GET /sandbar-workbench/api/session-charter?project=<key> 现读现渲染）→
  * sessions.scope(staged) → sessions.sessionOf(actx) → session.prompt([文本分片],
  * 'queue')（平台首条消息正路：blank→engaging，触发一轮 agent 回复=预期
  * kick-off）。借鉴取舍清单（t260831-08 ⑥ 口径，方案 R1 八项逐项声明）：

@@ -1,31 +1,31 @@
 /**
- * suyou-knowledge —— docs 知识库的 dsh UI 插件（宿主半 / node）。
+ * sandbar-knowledge —— docs 知识库的 dsh UI 插件（宿主半 / node）。
  *
- * 职责：在 dsh 自己的 webServer 上挂 /suyou-knowledge/api/*，供本插件的浏览器半
+ * 职责：在 dsh 自己的 webServer 上挂 /sandbar-knowledge/api/*，供本插件的浏览器半
  * （lib/client.js，主会话视图「知识库」页签）同源 fetch 使用：
  *
- *   GET /suyou-knowledge/api/index?project=<key>
+ *   GET /sandbar-knowledge/api/index?project=<key>
  *                                     → <项目主目录>/docs/index.json（结构化索引 + review，
  *                                        标题/分类/标签/状态/更新时间/路径）；
  *                                        项目无 docs/index.json → {empty:true, reason} 人话降级
- *   GET /suyou-knowledge/api/doc?project=<key>&path=design/平台架构设计.md
+ *   GET /sandbar-knowledge/api/doc?project=<key>&path=design/平台架构设计.md
  *                                     → 直读 <项目主目录>/docs/<path> 的全文（纯只读，
  *                                        path 白名单 design|content|ops|reference/*.md，
  *                                        防穿路径）
- *   GET /suyou-knowledge/api/refresh?project=<key>
+ *   GET /sandbar-knowledge/api/refresh?project=<key>
  *                                     → 重建 index（spawn python3 <主目录>/docs/scripts/build_index.py；
  *                                        项目无该脚本 → 人话降级不可用）
- *   GET /suyou-knowledge/api/diff?project=<key>&path=design/xx.md[&base=HEAD]
+ *   GET /sandbar-knowledge/api/diff?project=<key>&path=design/xx.md[&base=HEAD]
  *                                     → 该文档相对 base（git ref）的 block 级 diff：
  *                                        细粒度切块（标题/段落/列表项/表格行/代码块…，
  *                                        类型+相似度对齐），逐块 added/removed/modified/
  *                                        unchanged + 稳定 block key + 行级 ops（仅修改块），
  *                                        供浏览器半渲染态逐块 approve/reject/注释（M3）。
  *
- *   GET /suyou-knowledge/api/review?project=<key>&path=design/xx.md
+ *   GET /sandbar-knowledge/api/review?project=<key>&path=design/xx.md
  *                                     → 读已存 review（<主目录>/docs/reviews/<path,/→__>.json，
  *                                        无则空 rounds）
- *   POST /suyou-knowledge/api/review/save {project, path, base, conclude, blocks[], reviewer?}
+ *   POST /sandbar-knowledge/api/review/save {project, path, base, conclude, blocks[], reviewer?}
  *                                     → 追加一轮 review 落盘（path 白名单同源校验），
  *                                        写 server/admin.log 同款 JSONL 审计 + 回 run-id。
  *
@@ -53,7 +53,7 @@ import {
 
 const execFileP = promisify(execFile)
 
-export const name = 'suyou-knowledge'
+export const name = 'sandbar-knowledge'
 // webServer 只存在于 web profile；headless 下本插件待机即可。
 export const inject: string[] = []
 
@@ -340,7 +340,7 @@ export function apply(ctx: Context, config?: SuyouKnowledgeConfig): void {
       const saved = await appendReviewRound(docsDir, p, round)
       const summary = `${proj.key}:${p} 第 ${saved.rounds.length} 轮 conclude=${conclude} 块 ${blocks.length}`
       await audit(runId, 'review.save', { project: proj.key, path: p, base, conclude, blocks: blocks.length }, true, summary)
-      ctx.logger.info('suyou-knowledge: review.save %s（run-id %s）', summary, runId)
+      ctx.logger.info('sandbar-knowledge: review.save %s（run-id %s）', summary, runId)
       sendJson(res, 200, { ok: true, run_id: runId, result: { path: p, rounds: saved.rounds.length, round } })
     } catch (err: any) {
       await audit(runId, 'review.save', { project: proj.key, path: p }, false, String(err?.message ?? err))
@@ -356,13 +356,13 @@ export function apply(ctx: Context, config?: SuyouKnowledgeConfig): void {
    */
   async function audit(runId: string, name: string, args: unknown, ok: boolean, summary: string): Promise<void> {
     const rec = JSON.stringify({
-      run_id: runId, ts: Math.floor(Date.now() / 1000), actor: 'suyou-knowledge',
+      run_id: runId, ts: Math.floor(Date.now() / 1000), actor: 'sandbar-knowledge',
       name, args, ok, summary: summary.length > 800 ? summary.slice(0, 800) + '…' : summary,
     })
     try {
       await appendFile(join(repo, 'server', 'admin.log'), rec + '\n', 'utf8')
     } catch (err: any) {
-      ctx.logger.warn('suyou-knowledge: admin.log 审计写入失败（不影响主流程）：%s', String(err?.message ?? err))
+      ctx.logger.warn('sandbar-knowledge: admin.log 审计写入失败（不影响主流程）：%s', String(err?.message ?? err))
     }
   }
 
@@ -370,16 +370,16 @@ export function apply(ctx: Context, config?: SuyouKnowledgeConfig): void {
   const attach = (ws: any): void => {
     ctx.effect(() => {
       const disposers = [
-        ws.register({ kind: 'exact', path: '/suyou-knowledge/api/index', handler: handleIndex }),
-        ws.register({ kind: 'exact', path: '/suyou-knowledge/api/doc', handler: handleDoc }),
-        ws.register({ kind: 'exact', path: '/suyou-knowledge/api/refresh', handler: handleRefresh }),
-        ws.register({ kind: 'exact', path: '/suyou-knowledge/api/diff', handler: handleDiff }),
-        ws.register({ kind: 'exact', path: '/suyou-knowledge/api/review', handler: handleReviewGet }),
-        ws.register({ kind: 'exact', path: '/suyou-knowledge/api/review/save', handler: handleReviewSave }),
+        ws.register({ kind: 'exact', path: '/sandbar-knowledge/api/index', handler: handleIndex }),
+        ws.register({ kind: 'exact', path: '/sandbar-knowledge/api/doc', handler: handleDoc }),
+        ws.register({ kind: 'exact', path: '/sandbar-knowledge/api/refresh', handler: handleRefresh }),
+        ws.register({ kind: 'exact', path: '/sandbar-knowledge/api/diff', handler: handleDiff }),
+        ws.register({ kind: 'exact', path: '/sandbar-knowledge/api/review', handler: handleReviewGet }),
+        ws.register({ kind: 'exact', path: '/sandbar-knowledge/api/review/save', handler: handleReviewSave }),
       ]
       return () => { for (const dispose of disposers) dispose() }
-    }, 'suyou-knowledge: api routes')
-    ctx.logger.info('suyou-knowledge: docs 知识库 API 已挂载 /suyou-knowledge/api/*（project 必传，注册表=projects.yaml）')
+    }, 'sandbar-knowledge: api routes')
+    ctx.logger.info('sandbar-knowledge: docs 知识库 API 已挂载 /sandbar-knowledge/api/*（project 必传，注册表=projects.yaml）')
   }
 
   const existing = ctx.get('webServer')

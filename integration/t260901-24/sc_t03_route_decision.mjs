@@ -57,12 +57,12 @@ ok(fixtures != null, 'loadFixtures(随包目录) 通过')
 
 const BASE = 'http://127.0.0.1:41001'
 const GET_HIT = [
-  ['/suyou-workbench/api/wf/tickets', 'tickets list'],
-  ['/suyou-workbench/api/wf/tickets?project=suyou', 'tickets list 带查询串（C3）'],
-  ['/suyou-workbench/api/wf/tickets/T-FIX-A', 'ticket show'],
-  ['/suyou-workbench/api/wf/tickets/T-FIX-A/diff', 'ticket diff'],
-  ['/suyou-workbench/api/wf/workflows', 'workflows'],
-  ['/suyou-workbench/api/wf/workflows?project=suyou', 'workflows 带查询串'],
+  ['/sandbar-workbench/api/wf/tickets', 'tickets list'],
+  ['/sandbar-workbench/api/wf/tickets?project=suyou', 'tickets list 带查询串（C3）'],
+  ['/sandbar-workbench/api/wf/tickets/T-FIX-A', 'ticket show'],
+  ['/sandbar-workbench/api/wf/tickets/T-FIX-A/diff', 'ticket diff'],
+  ['/sandbar-workbench/api/wf/workflows', 'workflows'],
+  ['/sandbar-workbench/api/wf/workflows?project=suyou', 'workflows 带查询串'],
 ]
 section('GET 命中 → fulfill 且 content-type 恒 application/json（R4/C3）')
 for (const [p, label] of GET_HIT) {
@@ -78,25 +78,25 @@ for (const [p, label] of GET_HIT) {
 section('POST 写端点 → 一律放行（只读红线，写操作绝不被假数据吞）')
 const POSTS = ['accept', 'advance', 'dispatch-next', 'rework', 'update', 'review']
 for (const op of POSTS) {
-  const d = callDecide('POST', `${BASE}/suyou-workbench/api/wf/tickets/T-FIX-A/${op}`)
+  const d = callDecide('POST', `${BASE}/sandbar-workbench/api/wf/tickets/T-FIX-A/${op}`)
   ok(!!d?.passthrough, `POST tickets/${op} → passthrough`)
 }
 
 section('其余 GET 端点 → 放行走真响应')
-for (const p of ['/suyou-workbench/api/wf/projects', '/suyou-workbench/api/wf/temporal-health',
-  '/suyou-workbench/api/wf/book?path=x', '/suyou-workbench/api/wf/tickets/T-FIX-A/agent-logs',
-  '/suyou-workbench/api/wf/no-such-endpoint']) {
+for (const p of ['/sandbar-workbench/api/wf/projects', '/sandbar-workbench/api/wf/temporal-health',
+  '/sandbar-workbench/api/wf/book?path=x', '/sandbar-workbench/api/wf/tickets/T-FIX-A/agent-logs',
+  '/sandbar-workbench/api/wf/no-such-endpoint']) {
   const d = callDecide('GET', BASE + p)
-  ok(!!d?.passthrough, `GET ${p.replace('/suyou-workbench/api/wf', '…wf')} → passthrough`)
+  ok(!!d?.passthrough, `GET ${p.replace('/sandbar-workbench/api/wf', '…wf')} → passthrough`)
 }
 
 section('方法变体边界')
-ok(!!callDecide('HEAD', BASE + '/suyou-workbench/api/wf/tickets')?.passthrough,
+ok(!!callDecide('HEAD', BASE + '/sandbar-workbench/api/wf/tickets')?.passthrough,
   'HEAD /tickets → passthrough（只放 GET）')
-ok(!!callDecide('PUT', BASE + '/suyou-workbench/api/wf/tickets/T-FIX-A')?.passthrough,
+ok(!!callDecide('PUT', BASE + '/sandbar-workbench/api/wf/tickets/T-FIX-A')?.passthrough,
   'PUT /tickets/<id> → passthrough')
 // 路径相近但非 wf 端点不误吞
-ok(!!callDecide('GET', BASE + '/suyou-workbench/other/tickets')?.passthrough,
+ok(!!callDecide('GET', BASE + '/sandbar-workbench/other/tickets')?.passthrough,
   '非 wf 前缀路径 → passthrough')
 
 function callDecide(method, url) {

@@ -1,5 +1,5 @@
 /**
- * suyou-workbench —— 工单工作流台 · 浏览器半（侧栏工单中心版）。
+ * sandbar-workbench —— 工单工作流台 · 浏览器半（侧栏工单中心版）。
  *
  * 260823 改版（用户拍板）：chat 顶部页签只留 chat/trajectory——工单台/文档/模型
  * 三个视图从 conversation.view 环摘除，改由侧栏接管组件的中栏承载：
@@ -10,7 +10,7 @@
  * ProvidersSection 从 providers 插件 import）。t260903-07 起：点工单只开中列
  * 详情抽屉，右栏 chat 恒为单全局会话不再切换（每工单会话联动下线，数据留存——
  * 见 sidebar.tsx 头注与 notes/debts/design-doc-sync-t260903-07.md）。
- * 数据来自 /suyou-workbench/api/wf/* 而非会话事件。
+ * 数据来自 /sandbar-workbench/api/wf/* 而非会话事件。
  *
  * 页面三区（工单工作流台设计 v0.3 §5/§10）：
  *   ① 台面区：工单卡片网格（id | 工作流 | 阶段进度条 | 当前角色 | 状态色板
@@ -22,7 +22,7 @@
  *     「审批→推进」走 Temporal sign）/ dispatch-next（生成可复制 prompt）/ 打回 / 解除阻塞 / 完成。
  *
  * 数据通道：同源 fetch 打宿主半（../node.ts）挂在 dsh webServer 上的
- * /suyou-workbench/api/wf/*；写操作走 admin.py call ticket（run-id 审计
+ * /sandbar-workbench/api/wf/*；写操作走 admin.py call ticket（run-id 审计
  * 在 server/admin.log，与模型通道同一真源）。
  *
  * M9 PR 式审批台（t260821-m9-pr-approval）：详情抽屉加「变更」页签——
@@ -34,12 +34,12 @@
  * reject 意见即返工指令一键复制/一键填入打回理由。
  *
  * M6 巡检报告区（t260821-m6-scan-expand）：台面表格下方加「巡检报告」区——
- * 读 /suyou-workbench/api/wf/scan-report（最新 out/scan/<日期>.json）渲染
+ * 读 /sandbar-workbench/api/wf/scan-report（最新 out/scan/<日期>.json）渲染
  * 待决工单检查表（停留/验收勾选率/脚本门灯/pending/建议三档色 chip），点行
  * 开详情抽屉；无报告走 reason 人话降级。红线显性化：报告 red_line 常驻区底。
  *
  * M12 agent 日志（t260822-m12）：详情抽屉加「Agent 日志」页签——读
- * /suyou-workbench/api/wf/tickets/<id>/agent-logs 列泳道 .suyou/ 的
+ * /sandbar-workbench/api/wf/tickets/<id>/agent-logs 列泳道 .suyou/ 的
  * agent_<stage>_gen<n>.log（子 agent stdout/stderr 流，诊断失败现场）
  * + stage_<stage>_gen<n>.json（段结算结果：status/summary/deliverables），
  * 点文件展开；无目录走 reason 人话降级。
@@ -119,7 +119,7 @@ import {
   type PollOutcome,
 } from './poll-health.ts'
 
-export const name = 'suyou-workbench/client'
+export const name = 'sandbar-workbench/client'
 // workspaces（t260831-04）：顶部会话入口新建走 ctx.workspaces.startSession。
 export const inject = ['slots', 'sessions', 'workspaces']
 // t260903-07：原 openTicketSessionFlow re-export（t260831-08）随流程体一并删除——
@@ -690,11 +690,11 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-al-attempt .wb-al-body{border-top:1px solid var(--dsw-derive-surface-2,#eef1f4)}
 `
 
-const CSS_TAG_ID = 'suyou-workbench/WorkbenchSection.css'
+const CSS_TAG_ID = 'sandbar-workbench/WorkbenchSection.css'
 if (typeof document !== 'undefined'
   && document.querySelector('style[data-plugin-css=' + JSON.stringify(CSS_TAG_ID) + ']') === null) {
   const tag = document.createElement('style')
-  tag.dataset.plugin = 'suyou-workbench'
+  tag.dataset.plugin = 'sandbar-workbench'
   tag.dataset.pluginCss = CSS_TAG_ID
   tag.textContent = CSS
   document.head.appendChild(tag)
@@ -702,7 +702,7 @@ if (typeof document !== 'undefined'
 
 /* -------------------------------------------------------------- 数据通道 */
 
-const API = '/suyou-workbench/api/wf'
+const API = '/sandbar-workbench/api/wf'
 
 interface CallResult {
   ok: boolean
@@ -1038,7 +1038,7 @@ function shortSlug(worktree: string): string {
 }
 
 /** 操作者标识（本机管理台无登录）：LS 持久，首访生成 op-<随机>；accept 的 by 用它，审计落账。 */
-const OPERATOR_KEY = 'suyou-workbench-operator-v1'
+const OPERATOR_KEY = 'sandbar-workbench-operator-v1'
 function operatorOf(): string {
   try {
     const old = localStorage.getItem(OPERATOR_KEY)
@@ -1366,7 +1366,7 @@ const LIVE_TYPE_LABEL: Record<string, string> = {
  * 不带 data: 支持）。encodeURI 级防呆：id/文件名含怪字符时 encodeURIComponent。
  */
 export function evidenceImgSrc(ticketId: string, file: string): string {
-  return `/suyou-workbench/api/wf/tickets/${encodeURIComponent(ticketId)}/evidence/${encodeURIComponent(file)}`
+  return `/sandbar-workbench/api/wf/tickets/${encodeURIComponent(ticketId)}/evidence/${encodeURIComponent(file)}`
 }
 
 /** 灯箱键盘键位契约（t260901-13，导出供 smoke 对齐键位，防 handler 与测试漂移）。 */
@@ -1465,7 +1465,7 @@ function EvidenceImages({ ticketId }: { ticketId: string }) {
     setFiles(null)
     setBroken({})
     setOpen(null)
-    fetch(`/suyou-workbench/api/wf/tickets/${encodeURIComponent(ticketId)}/evidence`)
+    fetch(`/sandbar-workbench/api/wf/tickets/${encodeURIComponent(ticketId)}/evidence`)
       .then(r => r.json())
       .then((d) => {
         if (!cancelled) setFiles(Array.isArray(d?.result?.files) ? (d.result.files as string[]) : [])
@@ -3875,7 +3875,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 
 /**
  * Workbench 视图的 per-session snapshot builder（引擎契约空实现）。
- * 工单台数据来自 /suyou-workbench/api/wf/*（宿主半 API），不消费会话事件流；
+ * 工单台数据来自 /sandbar-workbench/api/wf/*（宿主半 API），不消费会话事件流；
  * create 返回的 builder 仅需满足 ConversationViewBuilder 形状（empty/replace/apply）。
  * target 与 conversation.view 槽条目 id（'workbench'）一致，与 chat/trajectory 同机制。
  */

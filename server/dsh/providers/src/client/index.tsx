@@ -1,11 +1,11 @@
 /**
- * suyou-providers —— LLM provider 管理与优先级 · 浏览器半（会话主视图「模型」页签版）。
+ * sandbar-providers —— LLM provider 管理与优先级 · 浏览器半（会话主视图「模型」页签版）。
  *
  * 槽位契约（t260821-11 ①：从 settings 分区迁来，制式照抄 workbench）：向会话视图环
- * `conversation.view` 注册一个页签（id 'suyou-providers'，标签「模型」，order 15，
+ * `conversation.view` 注册一个页签（id 'sandbar-providers'，标签「模型」，order 15，
  * 与 chat(0)/trajectory(10)/工单台(20) 平级），用户在主会话视图顶部页签切换即见。
- * 配套注册 `conversationViews.register`（target 'suyou-providers'）：本视图数据来自
- * /suyou-providers/api/* 而非会话事件，builder 为空实现，仅为满足 per-session 契约。
+ * 配套注册 `conversationViews.register`（target 'sandbar-providers'）：本视图数据来自
+ * /sandbar-providers/api/* 而非会话事件，builder 为空实现，仅为满足 per-session 契约。
  *
  * 功能（t260821-08 B 版 + t260821-11 ②③ + M13 路由表）：
  *   ① 列出 provider（deepseek-official/kimi-coding/zai/scnet…）+ 上下移/拖拽排序；
@@ -18,10 +18,10 @@
  *   ⑥ 「路由表」分区（M13，t260822-m13-model-routes-edit）：展示 model-routes.yaml
  *      真源路由表（default/五角色/分工 tasks）+ provider 下拉/模型下拉编辑（换 provider
  *      即刷新该家已注册模型清单，260828）+
- *      保存（POST /suyou-admin/api/routes/save，宿主在 suyou-admin-ui 插件，写前备份
+ *      保存（POST /suyou-admin/api/routes/save，宿主在 sandbar-admin-ui 插件，写前备份
  *      /tmp；保存即生效——运行时查表，下一个工单 agent spawn 用新表）。
- * 所有写操作走宿主半（../node.ts）挂在 dsh webServer 上的 /suyou-providers/api/*；
- * 路由表读写走 suyou-admin-ui 的 /suyou-admin/api/routes（同源，M13① 保留的 API）。
+ * 所有写操作走宿主半（../node.ts）挂在 dsh webServer 上的 /sandbar-providers/api/*；
+ * 路由表读写走 sandbar-admin-ui 的 /suyou-admin/api/routes（同源，M13① 保留的 API）。
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -30,7 +30,7 @@ import type { ClientContext, ConversationViewDefinition } from '@deepseek-ai/dsh
 // 带进 tsc 检查环境；纯类型副作用，构建时被剥离，不进 bundle。
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 
-export const name = 'suyou-providers/client'
+export const name = 'sandbar-providers/client'
 export const inject = ['slots', 'conversationViews']
 
 /* ---------------------------------------------------------------- 样式 */
@@ -122,11 +122,11 @@ const CSS = `
   margin:0;white-space:pre-wrap;line-height:1.6}
 `
 
-const CSS_TAG_ID = 'suyou-providers/ProvidersSection.css'
+const CSS_TAG_ID = 'sandbar-providers/ProvidersSection.css'
 if (typeof document !== 'undefined'
   && document.querySelector('style[data-plugin-css=' + JSON.stringify(CSS_TAG_ID) + ']') === null) {
   const tag = document.createElement('style')
-  tag.dataset.plugin = 'suyou-providers'
+  tag.dataset.plugin = 'sandbar-providers'
   tag.dataset.pluginCss = CSS_TAG_ID
   tag.textContent = CSS
   document.head.appendChild(tag)
@@ -134,7 +134,7 @@ if (typeof document !== 'undefined'
 
 /* -------------------------------------------------------------- 数据通道 */
 
-const API = '/suyou-providers/api'
+const API = '/sandbar-providers/api'
 
 interface ProviderRow {
   id: string
@@ -161,7 +161,7 @@ interface StateData {
 }
 
 /** 多项目化（260823）：路由表两条 URL（/suyou-admin/api/routes*，按项目主目录解析
- *  model-routes.yaml）统一拼 ?project=；provider 管理（/suyou-providers/api/*）是
+ *  model-routes.yaml）统一拼 ?project=；provider 管理（/sandbar-providers/api/*）是
  *  dsh 全局设施，不分流。
  *  260826 修：project 从模块级持有量改为纯函数入参——旧写法靠 ProvidersSection 的
  *  effect 落值，但 React 挂载时子组件 effect 先于父组件执行，RoutesTableSection
@@ -797,9 +797,9 @@ function RoutesTableSection({ providers, projectKey }: { providers: ProviderRow[
 
 /**
  * 260823 起「模型」UI 不再占 chat 顶部页签——移到工单台侧栏中栏，
- * 由 suyou-workbench 的侧栏直接 import ProvidersSection 渲染（用户拍板：chat 页签只留 chat/trajectory）。
+ * 由 sandbar-workbench 的侧栏直接 import ProvidersSection 渲染（用户拍板：chat 页签只留 chat/trajectory）。
  * apply 保留为空操作（宿主装载契约要求导出）。
  */
 export function apply(_ctx: ClientContext): void {
-  /* 无注册：视图经 suyou-workbench 侧栏中栏承载 */
+  /* 无注册：视图经 sandbar-workbench 侧栏中栏承载 */
 }

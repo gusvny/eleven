@@ -3,7 +3,7 @@
 // Intent (black-box, user perspective):
 //   QA screenshots (.suyou/screenshots/*.png in the lane) must be visible in the
 //   ticket detail drawer. The user-visible contract after the fix:
-//     - GET /suyou-workbench/api/wf/tickets/<id>/evidence lists the png files
+//     - GET /sandbar-workbench/api/wf/tickets/<id>/evidence lists the png files
 //       (archive .suyou/evidence/<id>/ takes precedence, then lane screenshots);
 //       no evidence → empty list, no error (drawer simply hides the section).
 //     - GET .../evidence/<file> serves the exact bytes as image/png.
@@ -57,7 +57,7 @@ if (BASE.includes(':3099')) {
 }
 
 async function evidenceRequest(id, file = '') {
-  const url = `${BASE}/suyou-workbench/api/wf/tickets/${encodeURIComponent(id)}/evidence${file ? '/' + file : ''}`;
+  const url = `${BASE}/sandbar-workbench/api/wf/tickets/${encodeURIComponent(id)}/evidence${file ? '/' + file : ''}`;
   const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
   const type = r.headers.get('content-type') ?? '';
   const buf = Buffer.from(await r.arrayBuffer());
@@ -68,7 +68,7 @@ async function evidenceRequest(id, file = '') {
 
 async function consoleHealthy() {
   try {
-    const r = await fetch(`${BASE}/suyou-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
+    const r = await fetch(`${BASE}/sandbar-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
     return r.ok;
   } catch { return false; }
 }

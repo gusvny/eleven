@@ -3,7 +3,7 @@
  *
  * 语义（C1 写死）：全仓单例——docs/ 定稿库属仓不属项目，组件签名不收 projectKey；
  * 侧栏任一项目组头的「文档」图标都开同一个仓根库。数据源=宿主半
- * GET /suyou-workbench/api/wf/docs/tree|doc（见 node.ts handleDocsTree/handleDocsDoc）。
+ * GET /sandbar-workbench/api/wf/docs/tree|doc（见 node.ts handleDocsTree/handleDocsDoc）。
  *
  * 渲染（R1 取舍清单 1）：markdown 复用 knowledge 插件 renderMarkdown（转义先行/
  * 危险 URL 拒绝/高亮 guard 全量随 import 带入，一个不拆），经 dangerouslySetInnerHTML
@@ -21,7 +21,7 @@ import { useEffect, useState } from 'react'
 import { renderMarkdown } from '../../../knowledge/src/client/markdown.ts'
 import type { DocTreeGroup, DocsScope } from '../shared/docs-model.ts'
 
-const API = '/suyou-workbench/api/wf/docs'
+const API = '/sandbar-workbench/api/wf/docs'
 
 interface TreeResult {
   empty: boolean

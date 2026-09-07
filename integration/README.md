@@ -97,7 +97,7 @@ t260904-19 起必需；重建=`sh server/dsh/build-test-temporal.sh`）、tempor
   纯 node 恒跑；S1 浏览器半依赖测试控制台（`SUYOU_TEST_CONSOLE` 显式指台；缺省
   泳道限定台自动 ensure，见舞台纪律段）+
   playwright-core + 本机 chromium，缺任一 ENV_FAIL（exit 2）——与 session-tab-interactions 同款环境
-  取舍。S1 造数用 playwright `page.route()` 在 `/suyou-workbench/api/wf/tickets` API 边界
+  取舍。S1 造数用 playwright `page.route()` 在 `/sandbar-workbench/api/wf/tickets` API 边界
   打桩 fixture 快照（不进 Temporal、不写真工单）；泳道 worker 环境因 SUYOU_TASK_QUEUE
   特征机械 ENV_FAIL 属既有正确行为，真实覆盖在隔离台环境（3199 台 + 浏览器在场）跑。
 - capture-chat-e2e / capture-chat-active（t260901-03）自 t260901-09 起补泳道 worker 递归
@@ -226,7 +226,7 @@ write_set 而 verify_lane 丢了分支会静默退化回粗判据）；verify.ya
 （lib 双产物同步 + 多页签接线锚点在产物内；implement 前按设计恒红——验收棒）；
 S1 真浏览器双（多）页签场景（T1 互见/T2 写交叉失效+写守门 confirm/T3 隐藏零轮询/
 T4 过期在途响应不得覆盖抽屉/T5 恶意页签流量与 BC 缺席兜底/T6 关页签 viewer 摘除/
-T7 零 pageerror），数据在 `/suyou-workbench/api/wf/tickets*` 边界 page.route() 打桩，
+T7 零 pageerror），数据在 `/sandbar-workbench/api/wf/tickets*` 边界 page.route() 打桩，
 fixture detail 全页签共享（D 页签写、B 页签下一次拉取即见新数据），请求计数器按页签
 归属（T3 归属断言的前提）。不建票、不 boot 控制台、3099 零接触，泳道机械跑无递归风险。
 

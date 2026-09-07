@@ -1,5 +1,5 @@
 /**
- * suyou-workbench · 项目内会话区（session-entry 第 3 面①，R1–R6）。
+ * sandbar-workbench · 项目内会话区（session-entry 第 3 面①，R1–R6）。
  *
  * 口径真源 notes/epics/session-entry.md（R1–R6 + 拍板 1/2/3）：
  *   - R1 位置：左栏项目组头之下、工单列表之上，一横排；随项目组折叠整体隐藏

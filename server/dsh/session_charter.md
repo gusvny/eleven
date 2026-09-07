@@ -1,6 +1,6 @@
 <!-- session_charter.md —— 全部项目的会话开局注入源（workbench node.ts 读取）。
      · 首段（本注释到第一个 ## project: 分段之间）=通用模板；占位符由
-       GET /suyou-workbench/api/session-charter?project=<key> 现填：
+       GET /sandbar-workbench/api/session-charter?project=<key> 现填：
        {{project_key}}/{{project_name}}/{{primary_dir}}/{{engine_root}}
      · 可选分段 ## project:<key>：该段追加到对应项目注入文本末尾。
      · 改完即生效（端点现读）；只影响之后新建的会话。 -->

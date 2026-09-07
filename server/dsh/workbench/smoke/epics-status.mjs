@@ -204,13 +204,13 @@ sys.exit(0)
       on: () => () => {},
     }
     apply(ctx, { repo: repoD })
-    const prefix = routes.find((r) => r.kind === 'prefix' && r.path === '/suyou-workbench/api/epics')
+    const prefix = routes.find((r) => r.kind === 'prefix' && r.path === '/sandbar-workbench/api/epics')
     const call = async (url, method = 'GET', body) => {
       const res = mockRes()
       await prefix.handler(mockReq(url, method, body), res)
       return res
     }
-    const B = '/suyou-workbench/api/epics'
+    const B = '/sandbar-workbench/api/epics'
 
     let r = await call(`${B}/zz-route/status`, 'POST', JSON.stringify({ status: '已立项（执行中）' }))
     ok(r.status === 200 && r.body.ok === true && r.body.result.status === '已立项（执行中）'

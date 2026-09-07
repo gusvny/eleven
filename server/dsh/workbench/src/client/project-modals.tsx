@@ -138,7 +138,7 @@ export function ProjectSettingsModal(props: {
     let cancelled = false
     ;(async () => {
       try {
-        const out = await callProjectApi(`/suyou-workbench/api/wf/projects/detail?key=${encodeURIComponent(project.key)}`)
+        const out = await callProjectApi(`/sandbar-workbench/api/wf/projects/detail?key=${encodeURIComponent(project.key)}`)
         if (!cancelled) setDetail(out?.result ?? null)
       } catch (err) {
         if (!cancelled) setError(String((err as Error).message))
@@ -209,7 +209,7 @@ export function ProjectAddModal(props: { onClose: () => void; onAdded: () => voi
     setBusy(true)
     setError('')
     try {
-      await callProjectApi('/suyou-workbench/api/wf/projects/add', {
+      await callProjectApi('/sandbar-workbench/api/wf/projects/add', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ key, name, dir }),
@@ -280,7 +280,7 @@ export function ProjectRemoveModal(props: { project: ProjectEntryLike; onClose: 
   const [result, setResult] = useState<any>(null)
 
   const callRemove = useCallback(async (dryRun: boolean): Promise<any> => {
-    return callProjectApi('/suyou-workbench/api/wf/projects/remove', {
+    return callProjectApi('/sandbar-workbench/api/wf/projects/remove', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({

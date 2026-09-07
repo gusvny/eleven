@@ -1,5 +1,5 @@
 /**
- * smoke/diff.mjs —— suyou-knowledge block diff / review 持久化 / 端点行为冒烟。
+ * smoke/diff.mjs —— sandbar-knowledge block diff / review 持久化 / 端点行为冒烟。
  *
  * 直跑：node smoke/diff.mjs（node ≥22.18 原生 type-stripping，直接 import .ts，
  * 无需编译）。覆盖：
@@ -199,9 +199,9 @@ section('C 端点行为（mock webServer + 临时 git 仓库）')
     const registry = join(tmp, 'projects.yaml')
     await writeFile(registry, `projects:\n  - key: smoketest\n    name: 冒烟\n    dirs:\n      - ${tmpReal}\n`, 'utf8')
     process.env.SUYOU_PROJECTS_YAML = registry
-    ok(routes.has('/suyou-knowledge/api/diff'), '路由 /diff 已挂')
-    ok(routes.has('/suyou-knowledge/api/review'), '路由 /review 已挂')
-    ok(routes.has('/suyou-knowledge/api/review/save'), '路由 /review/save 已挂')
+    ok(routes.has('/sandbar-knowledge/api/diff'), '路由 /diff 已挂')
+    ok(routes.has('/sandbar-knowledge/api/review'), '路由 /review 已挂')
+    ok(routes.has('/sandbar-knowledge/api/review/save'), '路由 /review/save 已挂')
 
     const mockRes = () => ({
       status: 0, body: null,
@@ -219,7 +219,7 @@ section('C 端点行为（mock webServer + 临时 git 仓库）')
     }
 
     // /diff：未改文档 → changed=false 且全部未变（基线 bug 验收）
-    let r = await call('/suyou-knowledge/api/diff', '/suyou-knowledge/api/diff?project=smoketest&path=design/x.md&base=HEAD')
+    let r = await call('/sandbar-knowledge/api/diff', '/sandbar-knowledge/api/diff?project=smoketest&path=design/x.md&base=HEAD')
     ok(r.status === 200 && r.body.ok === true, 'GET /diff 200')
     ok(r.body.result.hasBase === true, 'hasBase=true（base 取到了）')
     ok(r.body.result.changed === false, '未改文档 changed=false')
@@ -227,29 +227,29 @@ section('C 端点行为（mock webServer + 临时 git 仓库）')
 
     // 改一段 → changed=true
     await writeFile(docPath, DOC1.replace('第一段正文，讲一件事。', '第一段正文，讲一件更大的事。'), 'utf8')
-    r = await call('/suyou-knowledge/api/diff', '/suyou-knowledge/api/diff?project=smoketest&path=design/x.md&base=HEAD')
+    r = await call('/sandbar-knowledge/api/diff', '/sandbar-knowledge/api/diff?project=smoketest&path=design/x.md&base=HEAD')
     ok(r.body.result.changed === true, '改动后 changed=true')
     ok(r.body.result.blocks.filter(b => b.status === 'modified').length === 1, '单块修改')
 
     // 边界：path 穿路径 / base 坏字符 / base 坏 ref / 文档不存在
-    r = await call('/suyou-knowledge/api/diff', '/suyou-knowledge/api/diff?project=smoketest&path=../CLAUDE.md&base=HEAD')
+    r = await call('/sandbar-knowledge/api/diff', '/sandbar-knowledge/api/diff?project=smoketest&path=../CLAUDE.md&base=HEAD')
     ok(r.status === 404, 'path 越白名单 → 404')
-    r = await call('/suyou-knowledge/api/diff', `/suyou-knowledge/api/diff?project=smoketest&path=design/x.md&base=${encodeURIComponent('HEAD; rm -rf')}`)
+    r = await call('/sandbar-knowledge/api/diff', `/sandbar-knowledge/api/diff?project=smoketest&path=design/x.md&base=${encodeURIComponent('HEAD; rm -rf')}`)
     ok(r.status === 400, 'base 坏字符 → 400')
-    r = await call('/suyou-knowledge/api/diff', '/suyou-knowledge/api/diff?project=smoketest&path=design/x.md&base=deadbeef')
+    r = await call('/sandbar-knowledge/api/diff', '/sandbar-knowledge/api/diff?project=smoketest&path=design/x.md&base=deadbeef')
     ok(r.status === 400, 'base 坏 ref → 400')
-    r = await call('/suyou-knowledge/api/diff', '/suyou-knowledge/api/diff?project=smoketest&path=design/none.md&base=HEAD')
+    r = await call('/sandbar-knowledge/api/diff', '/sandbar-knowledge/api/diff?project=smoketest&path=design/none.md&base=HEAD')
     ok(r.status === 404, '文档不存在 → 404')
     // base 下无此文件（工作区有）→ hasBase=false 全新增
     await writeFile(join(docsDir, 'design', 'new.md'), '# 新文档\n\n内容。\n', 'utf8')
-    r = await call('/suyou-knowledge/api/diff', '/suyou-knowledge/api/diff?project=smoketest&path=design/new.md&base=HEAD')
+    r = await call('/sandbar-knowledge/api/diff', '/sandbar-knowledge/api/diff?project=smoketest&path=design/new.md&base=HEAD')
     ok(r.status === 200 && r.body.result.hasBase === false, 'base 下无文件 hasBase=false')
     ok(r.body.result.blocks.every(b => b.status === 'added'), '整篇按新增处理')
 
     // /review：空 → 存 → 读回
-    r = await call('/suyou-knowledge/api/review', '/suyou-knowledge/api/review?project=smoketest&path=design/x.md')
+    r = await call('/sandbar-knowledge/api/review', '/sandbar-knowledge/api/review?project=smoketest&path=design/x.md')
     ok(r.status === 200 && r.body.result.rounds.length === 0, 'GET /review 空 rounds')
-    r = await call('/suyou-knowledge/api/review/save', '/suyou-knowledge/api/review/save?project=smoketest', 'POST', {
+    r = await call('/sandbar-knowledge/api/review/save', '/sandbar-knowledge/api/review/save?project=smoketest', 'POST', {
       path: 'design/x.md', base: 'HEAD', conclude: 'changes-requested',
       blocks: [{ block_key: 'paragraph:xyz', summary: '第一段', type: 'paragraph', status: 'modified', decision: 'reject', comment: '重写' }],
     })
@@ -257,22 +257,22 @@ section('C 端点行为（mock webServer + 临时 git 仓库）')
     const saved = JSON.parse(await readFile(join(docsDir, 'reviews', 'design__x.md.json'), 'utf8'))
     ok(saved.rounds.length === 1 && saved.rounds[0].conclude === 'changes-requested', '落盘 docs/reviews/design__x.md.json')
     ok(saved.rounds[0].reviewer === 'user', 'reviewer 缺省 user')
-    r = await call('/suyou-knowledge/api/review', '/suyou-knowledge/api/review?project=smoketest&path=design/x.md')
+    r = await call('/sandbar-knowledge/api/review', '/sandbar-knowledge/api/review?project=smoketest&path=design/x.md')
     ok(r.body.result.rounds.length === 1 && r.body.result.rounds[0].blocks[0].comment === '重写', 'GET /review 读回')
 
     // 审计：admin.log 留痕（run-id 对账）
     const log = await readFile(join(tmp, 'server', 'admin.log'), 'utf8')
     const recs = log.trim().split('\n').map(l => JSON.parse(l))
-    ok(recs.some(rec => rec.name === 'review.save' && rec.ok === true && rec.actor === 'suyou-knowledge'), 'admin.log 审计留痕')
+    ok(recs.some(rec => rec.name === 'review.save' && rec.ok === true && rec.actor === 'sandbar-knowledge'), 'admin.log 审计留痕')
 
     // 边界：坏 path / 坏 conclude / GET 打 save / 坏 JSON
-    r = await call('/suyou-knowledge/api/review/save', '/suyou-knowledge/api/review/save?project=smoketest', 'POST', { path: '../x.md', base: 'HEAD', conclude: 'approved', blocks: [] })
+    r = await call('/sandbar-knowledge/api/review/save', '/sandbar-knowledge/api/review/save?project=smoketest', 'POST', { path: '../x.md', base: 'HEAD', conclude: 'approved', blocks: [] })
     ok(r.status === 404, 'save 坏 path → 404')
-    r = await call('/suyou-knowledge/api/review/save', '/suyou-knowledge/api/review/save?project=smoketest', 'POST', { path: 'design/x.md', base: 'HEAD', conclude: 'whatever', blocks: [] })
+    r = await call('/sandbar-knowledge/api/review/save', '/sandbar-knowledge/api/review/save?project=smoketest', 'POST', { path: 'design/x.md', base: 'HEAD', conclude: 'whatever', blocks: [] })
     ok(r.status === 400, 'save 坏 conclude → 400')
-    r = await call('/suyou-knowledge/api/review/save', '/suyou-knowledge/api/review/save', 'GET')
+    r = await call('/sandbar-knowledge/api/review/save', '/sandbar-knowledge/api/review/save', 'GET')
     ok(r.status === 405, 'GET 打 save → 405')
-    r = await call('/suyou-knowledge/api/review', '/suyou-knowledge/api/review?project=smoketest&path=../etc/passwd')
+    r = await call('/sandbar-knowledge/api/review', '/sandbar-knowledge/api/review?project=smoketest&path=../etc/passwd')
     ok(r.status === 404, 'review 坏 path → 404')
   } finally {
     await rm(tmp, { recursive: true, force: true })

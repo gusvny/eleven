@@ -1,5 +1,5 @@
 /**
- * suyou-providers —— 添加 provider 前 dry-run 校验演示（t260821-08 安全红线）。
+ * sandbar-providers —— 添加 provider 前 dry-run 校验演示（t260821-08 安全红线）。
  *
  * 证明：写 settings.yaml 之前，能拒绝「不可解析」的 provider，绝不复现
  * 「deepseek-official 误塞 llm-pi-ai 导致整段失败」的坑。

@@ -1,7 +1,7 @@
-window.__ModuleLoader__.load({ id: "suyou-admin-ui", factory: (require) => { var module = { exports: {} }; var exports = module.exports;
+window.__ModuleLoader__.load({ id: "sandbar-admin-ui", factory: (require) => { var module = { exports: {} }; var exports = module.exports;
 Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 //#region src/client/index.tsx
-const name = "suyou-admin-ui/client";
+const name = "sandbar-admin-ui/client";
 const inject = [];
 function apply(_ctx) {}
 //#endregion

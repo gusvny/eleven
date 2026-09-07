@@ -97,7 +97,7 @@ python 侧 `.venv`（系统 python 3.9.6）+ **temporalio 1.18.2**。
 3. **常驻进程 +1（或 +2）**：temporal server + worker 都要常驻（本机 launchd；dev server 用 SQLite，
    将来上服务器要 Postgres）。现在的 ticket.py 是「无常驻进程、文件即真相」，这条是取舍不是优劣。
 4. **依赖口径**：`temporalio` 不是 stdlib，与 `server/` 现在的「纯 stdlib」口径冲突（需用户点头）。
-5. **UI 与工具面**：`suyou-workbench` 要改读 Temporal（或让 activity 把状态**投影**回
+5. **UI 与工具面**：`sandbar-workbench` 要改读 Temporal（或让 activity 把状态**投影**回
    `tickets/*.json` 当只读视图，UI 不改——迁移期建议走投影，双写只读不双主）。
 6. **工具面必须只暴露 signal/query**：给 agent 的 dsh 工具只能有
    `pipeline_status`(query) / `pipeline_sign`(签字，身份注入) / `pipeline_retry_qc` / `pipeline_start`；
@@ -180,10 +180,10 @@ worker 是「肌肉」，服务端是「骨架与记忆」：worker 挂了/换�
 |---|---|---|---|
 | temporal dev server | `./run_server.sh` | 常驻；SQLite 落盘 `data/temporal.db`（gitignore） | workflow 状态/历史都在它这；不删 data/ 不丢 |
 | worker | `worker.py [--daemon]` | 常驻；`kill -TERM` 优雅停 | 可随时换/重启；停机期间 workflow 仍 RUNNING，重启自动续 |
-| dsh 插件 `suyou-temporal-tools` | profile `cordis.patch.yml` 的 `- insert` 行 | 随 dsh 进程加载；每次工具调用 spawn `client.py` | 无状态；server/worker 不在线时工具调用结构化报错 |
+| dsh 插件 `sandbar-temporal-tools` | profile `cordis.patch.yml` 的 `- insert` 行 | 随 dsh 进程加载；每次工具调用 spawn `client.py` | 无状态；server/worker 不在线时工具调用结构化报错 |
 
-插件加载：`server/dsh/profile/node_modules/suyou-temporal-tools → ../../temporal-tools`
-（与 suyou-workbench 同款裸包名软链；profile-headless 有同款软链）。默认 python 取
+插件加载：`server/dsh/profile/node_modules/sandbar-temporal-tools → ../../temporal-tools`
+（与 sandbar-workbench 同款裸包名软链；profile-headless 有同款软链）。默认 python 取
 `temporal-poc/.venv/bin/python`（temporalio SDK 装在仓库内 venv，不碰系统 python）。
 
 ### 8.4 端到端演示（步1，260904 起演示面已断——属预期）
@@ -248,7 +248,7 @@ cd server/dsh/temporal-poc
   （`_check_human_gate`）；步2 改为 `sign` signal 即门，不再读提案文件（提案联动留 M3）。
 - **常驻进程 +2**：temporal server + worker 都要常驻（§5.3）；工单 adopt 后 mutation
   依赖 worker 在线，worker 挂了 ticket advance/accept/update 会报「Temporal 转发失败」。
-- **dsh 插件**：`suyou-temporal-tools` 仍是步1 的 5 工具（start/query/signal/schedule-list/cancel；
+- **dsh 插件**：`sandbar-temporal-tools` 仍是步1 的 5 工具（start/query/signal/schedule-list/cancel；
   其中 signal 已于 260904 退役为结构化报错）；
   人门签字当前走 `client.py ticket '{"op":"sign",…}'`，插件加 `ticket_sign` 工具留待后续。
 - **脚本门映射**（`shared.default_gate_for`；260904 宿主令 content-pipeline/proofread/
@@ -286,8 +286,8 @@ cd server/dsh/temporal-poc
 - **入 git 与否的判断：不入**（`out/scan/` 已 gitignore）——报告是每 45min 刷新的
   运行产物，入库只会制造 git status 噪音；留档=文件本身 + 演示/结算 note 引用路径。
   out/ 下静态 demo 留档仍入库，两类分开。
-- 工单台：suyou-workbench 台面表格下方「巡检报告」区（只读 API
-  `GET /suyou-workbench/api/wf/scan-report` 取文件名序最新报告；无报告 reason 降级）。
+- 工单台：sandbar-workbench 台面表格下方「巡检报告」区（只读 API
+  `GET /sandbar-workbench/api/wf/scan-report` 取文件名序最新报告；无报告 reason 降级）。
   **node.ts 新端点需重启 3099 控制台生效；lib/client.js 刷新页面即生效。**
 
 ### 10.3 schedule 治理（scan_schedule.py，运维通道，不进模型工具面）

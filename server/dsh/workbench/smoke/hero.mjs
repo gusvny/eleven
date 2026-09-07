@@ -1,5 +1,5 @@
 /**
- * smoke/hero.mjs —— suyou-workbench hero 零接管 + 顶部行退役冒烟
+ * smoke/hero.mjs —— sandbar-workbench hero 零接管 + 顶部行退役冒烟
  * （t260831-02 建；票② R8 t260904-05 顶部行退役收口重写）。
  *
  * 直跑：node smoke/hero.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。

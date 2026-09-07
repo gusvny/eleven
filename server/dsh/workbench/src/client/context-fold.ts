@@ -1,5 +1,5 @@
 /**
- * suyou-workbench · 上下文折叠件（t260905-04）——通用「渲染面」装饰器。
+ * sandbar-workbench · 上下文折叠件（t260905-04）——通用「渲染面」装饰器。
  *
  * 职责：把带引擎打标（首行 CHARTER_MARKER，同源常量在 ../host/session-charter.ts）
  * 的上下文注入消息在 chat 会话区收成一条可展开小条（「📋 已注入项目背景 · 点击

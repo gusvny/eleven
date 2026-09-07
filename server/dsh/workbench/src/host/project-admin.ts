@@ -4,7 +4,7 @@
  * add/remove/list 全部落安装器 CLI `sandbar project … --json`，行为与命令行同源）。
  *
  * 借鉴先例与故障模式取舍（create_plan gen1 R1-① 评审定稿，实现照单落）：
- *   借 runAdminCli（server/dsh/suyou-tools.ts）的**模式**，不借函数——它硬编码
+ *   借 runAdminCli（server/dsh/sandbar-tools.ts）的**模式**，不借函数——它硬编码
  *   spawn `python3 <repo>/server/admin.py`，而 project 命令族真实入口=仓根
  *   `sandbar` 薄壳（installer.cli.main；admin.py 内零 project 接线，实核）。
  *   逐项取舍：

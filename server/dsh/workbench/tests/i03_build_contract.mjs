@@ -49,7 +49,7 @@ for (const rel of ['server/dsh/workbench/lib/client.cjs', 'server/dsh/workbench/
     continue
   }
   ok(src.includes('重启控制台生效'), `${rel} contains banner copy 「重启控制台生效」（t260905-07 文案常量同源）`)
-  ok(src.includes('suyou-workbench/api/build-info'), `${rel} contains build-info poll path`)
+  ok(src.includes('sandbar-workbench/api/build-info'), `${rel} contains build-info poll path`)
 }
 
 section('2. banner mounted in sidebar shared shell, above the four-view container')

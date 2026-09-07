@@ -1,5 +1,5 @@
 /**
- * suyou-workbench · 会话账册模块级共享 store（t260830-01）。
+ * sandbar-workbench · 会话账册模块级共享 store（t260830-01）。
  *
  * 为什么存在：侧栏 <SessionSection> 与 hero <HeroSessionEntry> 挂在同一个
  * document 里，各自调用 useSessionEntry 时账册曾是实例各自的 useState——
@@ -27,7 +27,7 @@ import type { OpenedEntry } from '../shared/sessions.ts'
  * 会话记账层账册的 localStorage key（t260828-02 定值，t260830-01 起定义
  * 移入本文件；session-entry.tsx re-export 保持对外符号兼容）。
  */
-export const LEDGER_KEY = 'suyou-workbench-opened-sessions-v1'
+export const LEDGER_KEY = 'sandbar-workbench-opened-sessions-v1'
 
 /** 缓存快照。null = 尚未从 localStorage 惰性读入（非空数组后引用不变）。 */
 let current: OpenedEntry[] | null = null

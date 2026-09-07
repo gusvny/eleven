@@ -1,10 +1,10 @@
-window.__ModuleLoader__.load({ id: "suyou-knowledge", factory: (require) => { var module = { exports: {} }; var exports = module.exports;
+window.__ModuleLoader__.load({ id: "sandbar-knowledge", factory: (require) => { var module = { exports: {} }; var exports = module.exports;
 Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 let react = require("react");
 let react_jsx_runtime = require("react/jsx-runtime");
 //#region src/client/markdown.ts
 /**
-* markdown.ts — 无依赖的轻量 Markdown 渲染器（供 suyou-knowledge 知识库插件用）。
+* markdown.ts — 无依赖的轻量 Markdown 渲染器（供 sandbar-knowledge 知识库插件用）。
 *
 * 支持（docs 知识库设计 §5.1）：
 *   - 标题（#~######）、表格（GFM）、围栏代码块（带语法高亮 + 复制按钮）、
@@ -218,12 +218,12 @@ function splitCells(line) {
 //#endregion
 //#region src/client/index.tsx
 /**
-* suyou-knowledge —— docs 知识库 · 浏览器半（主视图页签版）。
+* sandbar-knowledge —— docs 知识库 · 浏览器半（主视图页签版）。
 *
 * 槽位契约：向会话视图环 `conversation.view` 注册一个页签（id 'knowledge'，
 * 标签「知识库」，与 chat/trajectory/workbench 平级，order 30 排最后），用户在主
 * 会话视图顶部页签切换即见。配套注册 `conversationViews.register`（target
-* 'knowledge'）：本视图数据来自 /suyou-knowledge/api/* 而非会话事件，builder 为
+* 'knowledge'）：本视图数据来自 /sandbar-knowledge/api/* 而非会话事件，builder 为
 * 空实现（empty/replace/apply 均返回 null），仅为满足引擎的 per-session view 契约。
 *
 * 功能（工单 t260821-09 → t260821-10 M2/M3）：
@@ -240,10 +240,10 @@ function splitCells(line) {
 *      可贴工单的 rework 指令；内容变了 key 失效的旧意见标「已过期」不回填。
 *
 * 数据通道：同源 fetch 打宿主半（../node.ts）挂在 dsh webServer 上的
-* /suyou-knowledge/api/*；写操作只有 review/save（宿主半落 docs/reviews/ +
+* /sandbar-knowledge/api/*；写操作只有 review/save（宿主半落 docs/reviews/ +
 * server/admin.log 审计）。
 */
-const name = "suyou-knowledge/client";
+const name = "sandbar-knowledge/client";
 const inject = ["slots", "conversationViews"];
 const CSS = `
 .kb-root{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
@@ -391,15 +391,15 @@ const CSS = `
 .kb-expired-item:last-child{border-bottom:none}
 .d-badge[data-s=expired]{background:#f6f8fa;color:#8c959f;border:1px dashed #d0d7de}
 `;
-const CSS_TAG_ID = "suyou-knowledge/KnowledgeSection.css";
+const CSS_TAG_ID = "sandbar-knowledge/KnowledgeSection.css";
 if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(CSS_TAG_ID) + "]") === null) {
 	const tag = document.createElement("style");
-	tag.dataset.plugin = "suyou-knowledge";
+	tag.dataset.plugin = "sandbar-knowledge";
 	tag.dataset.pluginCss = CSS_TAG_ID;
 	tag.textContent = CSS;
 	document.head.appendChild(tag);
 }
-const API = "/suyou-knowledge/api";
+const API = "/sandbar-knowledge/api";
 /** 多项目化（260823）：当前视图的项目 key，KnowledgeSection 挂载/切换时从 prop 设置。
 *  中列同一时刻只挂一个视图，模块单态安全。空串=不拼参（host 会 400，UI 先显占位）。 */
 let viewProject = "";
@@ -1325,7 +1325,7 @@ function KnowledgeSection({ projectKey }) {
 }
 /**
 * 260823 起知识库 UI 不再占 chat 顶部页签——移到工单台侧栏中栏，
-* 由 suyou-workbench 的侧栏直接 import KnowledgeSection 渲染（用户拍板：chat 页签只留 chat/trajectory）。
+* 由 sandbar-workbench 的侧栏直接 import KnowledgeSection 渲染（用户拍板：chat 页签只留 chat/trajectory）。
 * apply 保留为空操作（宿主装载契约要求导出）。
 */
 function apply(_ctx) {}

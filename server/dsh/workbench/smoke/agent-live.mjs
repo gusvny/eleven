@@ -9,7 +9,7 @@
  *   B. resolveSessionFile：泳道工单 → <wsRoot>/.dsh/sessions/<slug>/<id>-<role>/
  *      session.jsonl.zstd 命中；role 不匹配时前缀扫描兜底取 mtime 最新；worktree='..'
  *      越界 → refused（防穿）；无 sessions 目录/无本工单会话 → reason 人话。
- *   C. readAgentLiveTail + /suyou-workbench/api/wf/tickets/<id>/agent-live 路由
+ *   C. readAgentLiveTail + /sandbar-workbench/api/wf/tickets/<id>/agent-live 路由
  *      （node.ts apply + mock webServer/req/res + stub admin.py）：真 zstd 压 fixture
  *      （zstd 不在 PATH 则跳过 C 段并说明）；坏 id → 400；逃逸 worktree 工单 → 400；
  *      正常工单 → 200 + 尾部 N 条事件摘要（assistant 截断/工具调用名+目标路径）；
@@ -158,7 +158,7 @@ sys.exit(1)
       on: () => () => {},
     }
     apply(ctx, { repo })
-    const prefix = routes.find(r => r.kind === 'prefix' && r.path === '/suyou-workbench/api/wf/tickets')
+    const prefix = routes.find(r => r.kind === 'prefix' && r.path === '/sandbar-workbench/api/wf/tickets')
     ok(prefix !== undefined, 'tickets prefix 路由已挂')
 
     const mockRes = () => ({
@@ -173,7 +173,7 @@ sys.exit(1)
       return res
     }
 
-    const pre = '/suyou-workbench/api/wf/tickets'
+    const pre = '/sandbar-workbench/api/wf/tickets'
     let r = await call(`${pre}/${encodeURIComponent('..%2F..%2Fetc')}/agent-live`)
     ok(r.status === 400, '坏 id（../ 逃逸）→ 400（防穿，不到文件层）')
 
@@ -248,7 +248,7 @@ sys.exit(1)
       end(b) { this.body = b ? JSON.parse(b) : null },
     })
     const mockReq2 = (url, method = 'GET') => ({ url, method, async *[Symbol.asyncIterator]() {} })
-    const pre2 = '/suyou-workbench/api/wf/tickets'
+    const pre2 = '/sandbar-workbench/api/wf/tickets'
     const routes2 = []
     const ws2 = { register: (r) => { routes2.push(r); return () => {} } }
     const ctx2 = {
@@ -258,7 +258,7 @@ sys.exit(1)
       on: () => () => {},
     }
     apply(ctx2, { repo })
-    const prefix2 = routes2.find(r => r.kind === 'prefix' && r.path === '/suyou-workbench/api/wf/tickets')
+    const prefix2 = routes2.find(r => r.kind === 'prefix' && r.path === '/sandbar-workbench/api/wf/tickets')
     const res2 = mockRes2()
     await prefix2.handler(mockReq2(`${pre2}/t-smoke-2/agent-live`), res2)
     ok(res2.status === 200 && res2.body.ok === true

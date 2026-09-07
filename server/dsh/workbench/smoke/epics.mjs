@@ -90,7 +90,7 @@ try {
   }
 
   /* ------------------------------------------------------------ C. 路由 */
-  section('C /suyou-workbench/api/epics* 路由')
+  section('C /sandbar-workbench/api/epics* 路由')
   {
     // 公共 mock 件（agent-logs.mjs 同款制式）
     const mockRes = () => ({
@@ -110,10 +110,10 @@ try {
       }
       apply(ctx, { repo })
       return {
-        exactEpics: routes.find(r => r.kind === 'exact' && r.path === '/suyou-workbench/api/epics'),
-        prefixEpics: routes.find(r => r.kind === 'prefix' && r.path === '/suyou-workbench/api/epics'),
-        exactTickets: routes.find(r => r.kind === 'exact' && r.path === '/suyou-workbench/api/wf/tickets'),
-        prefixTickets: routes.find(r => r.kind === 'prefix' && r.path === '/suyou-workbench/api/wf/tickets'),
+        exactEpics: routes.find(r => r.kind === 'exact' && r.path === '/sandbar-workbench/api/epics'),
+        prefixEpics: routes.find(r => r.kind === 'prefix' && r.path === '/sandbar-workbench/api/epics'),
+        exactTickets: routes.find(r => r.kind === 'exact' && r.path === '/sandbar-workbench/api/wf/tickets'),
+        prefixTickets: routes.find(r => r.kind === 'prefix' && r.path === '/sandbar-workbench/api/wf/tickets'),
       }
     }
     const call = async (handler, url, method = 'GET') => {
@@ -155,12 +155,12 @@ sys.exit(1)
     process.env.SUYOU_EPICS_DIR = join(tmp, 'epics-a')
     const r1 = setup(repoC)
     ok(r1.exactEpics !== undefined && r1.prefixEpics !== undefined, 'epics exact+prefix 路由已挂')
-    let r = await call(r1.exactEpics, '/suyou-workbench/api/epics')
+    let r = await call(r1.exactEpics, '/sandbar-workbench/api/epics')
     ok(r.status === 200 && r.body.ok === true && r.body.result.count === 2
       && r.body.result.epics[0].code === 'aaa', 'GET /epics → 2 条（env 指向临时目录）')
     process.env.SUYOU_EPICS_DIR = join(tmp, 'epics-empty')
     const r1b = setup(repoC)
-    r = await call(r1b.exactEpics, '/suyou-workbench/api/epics')
+    r = await call(r1b.exactEpics, '/sandbar-workbench/api/epics')
     ok(r.status === 200 && r.body.result.count === 0 && Array.isArray(r.body.result.epics),
       'GET /epics 空目录（env 指向）→ 200 空数组不报错')
     delete process.env.SUYOU_EPICS_DIR
@@ -169,29 +169,29 @@ sys.exit(1)
     await writeFile(join(repoD, 'notes', 'epics', 'demo-epic.md'), EPIC_MD, 'utf8')
     await writeStub(repoD, { listPayload: {} })
     const r1c = setup(repoD)
-    r = await call(r1c.exactEpics, '/suyou-workbench/api/epics')
+    r = await call(r1c.exactEpics, '/sandbar-workbench/api/epics')
     ok(r.status === 200 && r.body.result.count === 1 && r.body.result.epics[0].code === 'demo-epic',
       '缺省 <repo>/notes/epics 目录解析正确')
 
     /* --- C2 详情路由：200 / 400 / 防穿 4xx / 404 / 405 --- */
-    r = await call(r1c.prefixEpics, '/suyou-workbench/api/epics/demo-epic')
+    r = await call(r1c.prefixEpics, '/sandbar-workbench/api/epics/demo-epic')
     ok(r.status === 200 && r.body.result.markdown.includes('## 目标')
       && r.body.result.path === 'notes/epics/demo-epic.md', 'GET /epics/<code> → 全文+path')
-    r = await call(r1c.prefixEpics, '/suyou-workbench/api/epics/Demo-Epic')
+    r = await call(r1c.prefixEpics, '/sandbar-workbench/api/epics/Demo-Epic')
     ok(r.status === 400, '大写代号 → 400')
-    r = await call(r1c.prefixEpics, '/suyou-workbench/api/epics/..%2f..%2fetc')
+    r = await call(r1c.prefixEpics, '/sandbar-workbench/api/epics/..%2f..%2fetc')
     ok(r.status >= 400 && r.status < 500, '..%2f..%2fetc 穿路径 → 4xx')
-    r = await call(r1c.prefixEpics, '/suyou-workbench/api/epics/%2e%2e%2f%2e%2e%2fpasswd')
+    r = await call(r1c.prefixEpics, '/sandbar-workbench/api/epics/%2e%2e%2f%2e%2e%2fpasswd')
     ok(r.status >= 400 && r.status < 500, '%2e%2e 编码穿路径 → 4xx')
-    r = await call(r1c.prefixEpics, '/suyou-workbench/api/epics/no-such-epic')
+    r = await call(r1c.prefixEpics, '/sandbar-workbench/api/epics/no-such-epic')
     ok(r.status === 404 && r.body.error.includes('不存在'), '不存在代号 → 404 人话')
-    r = await call(r1c.prefixEpics, '/suyou-workbench/api/epics/demo-epic', 'POST')
+    r = await call(r1c.prefixEpics, '/sandbar-workbench/api/epics/demo-epic', 'POST')
     ok(r.status === 405, 'POST 详情 → 405（只读）')
-    r = await call(r1c.prefixEpics, '/suyou-workbench/api/epics/demo-epic/bogus-op')
+    r = await call(r1c.prefixEpics, '/sandbar-workbench/api/epics/demo-epic/bogus-op')
     ok(r.status === 404, '未知子路径 → 404 人话')
 
     /* --- C3 /tickets 聚合：分桶 + 行字段 --- */
-    r = await call(r1c.prefixEpics, '/suyou-workbench/api/epics/demo-epic/tickets')
+    r = await call(r1c.prefixEpics, '/sandbar-workbench/api/epics/demo-epic/tickets')
     ok(r.status === 200 && r.body.ok === true && r.body.result.count === 2, 'GET /tickets → 2 张工单')
     ok(r.body.result.buckets.closed === 1 && r.body.result.buckets.dispatched === 1,
       '按 status 分桶计数（closed=1, dispatched=1）')
@@ -199,9 +199,9 @@ sys.exit(1)
     ok(row !== undefined && row.title === 'workbench 立项单 API 路由' && row.status === 'dispatched'
       && row.stage === 'implement' && row.stage_state === 'running',
       '工单行字段齐（id/title/status/stage/stage_state）')
-    r = await call(r1c.prefixEpics, '/suyou-workbench/api/epics/no-such-epic/tickets')
+    r = await call(r1c.prefixEpics, '/sandbar-workbench/api/epics/no-such-epic/tickets')
     ok(r.status === 404, '/tickets 不存在代号 → 404（前置拦，不到引擎）')
-    r = await call(r1c.prefixEpics, '/suyou-workbench/api/epics/BAD/tickets')
+    r = await call(r1c.prefixEpics, '/sandbar-workbench/api/epics/BAD/tickets')
     ok(r.status === 400, '/tickets 形状非法 → 400')
 
     /* --- C4 /tickets 降级：ok:false 与 spawn 崩两条路，都 → 200 degraded 不 502 --- */
@@ -210,7 +210,7 @@ sys.exit(1)
     await writeFile(join(repoE, 'notes', 'epics', 'demo-epic.md'), EPIC_MD, 'utf8')
     await writeStub(repoE, { listPayload: {}, listFails: true })   // ticket list 分支直崩（stderr+exit 2，非 JSON）
     const r1d = setup(repoE)
-    r = await call(r1d.prefixEpics, '/suyou-workbench/api/epics/demo-epic/tickets')
+    r = await call(r1d.prefixEpics, '/sandbar-workbench/api/epics/demo-epic/tickets')
     ok(r.status === 200 && r.body.ok === true && r.body.result.degraded === true
       && String(r.body.result.reason).includes('connection refused'),
       'admin.py 崩（非 JSON）→ 200 degraded，reason 含底层 error 原文')
@@ -223,7 +223,7 @@ if sys.argv[2] == 'ticket' and args.get('op') == 'list':
 print(json.dumps({"ok": False, "error": "stub unsupported"}))
 sys.exit(1)
 `, 'utf8')
-    r = await call(r1d.prefixEpics, '/suyou-workbench/api/epics/demo-epic/tickets')
+    r = await call(r1d.prefixEpics, '/sandbar-workbench/api/epics/demo-epic/tickets')
     ok(r.status === 200 && r.body.result.degraded === true
       && String(r.body.result.reason).includes('connection refused'),
       'admin.py 回 ok:false → 200 degraded，reason 透传底层 error 原文')
@@ -234,10 +234,10 @@ sys.exit(1)
       listPayload: { id: 't260825-04', title: '本工单', epic: 'epic-linkage', stage_state: 'running' },
     })
     const r1e = setup(repoF)
-    r = await call(r1e.exactTickets, '/suyou-workbench/api/wf/tickets?project=suyou')
+    r = await call(r1e.exactTickets, '/sandbar-workbench/api/wf/tickets?project=suyou')
     ok(r.status === 200 && r.body.result.tickets[0].epic === 'epic-linkage',
       '工单列表行带 epic 字段（有 epic 显示代号）')
-    r = await call(r1e.prefixTickets, '/suyou-workbench/api/wf/tickets/t260825-04')
+    r = await call(r1e.prefixTickets, '/sandbar-workbench/api/wf/tickets/t260825-04')
     ok(r.status === 200 && r.body.result.epic === 'epic-linkage', '工单详情带 epic 字段')
   }
 } finally {

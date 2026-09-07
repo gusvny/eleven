@@ -8,11 +8,11 @@
 // 产物 lib/client.js 已随仓库提交；只有改了 src/client/ 才需要重建。
 
 // closure-factory 外衣——与 dsh 共享 clientBundle 预设的产物形态一致。
-const CLOSURE_PRELUDE = 'window.__ModuleLoader__.load({ id: "suyou-admin-ui", factory: (require) => {'
+const CLOSURE_PRELUDE = 'window.__ModuleLoader__.load({ id: "sandbar-admin-ui", factory: (require) => {'
 const CLOSURE_POSTLUDE = 'return module.exports; } });'
 
 export default {
-  name: 'suyou-admin-ui/client',
+  name: 'sandbar-admin-ui/client',
   entry: { client: 'src/client/index.tsx' },
   outDir: 'lib',
   format: 'cjs',

@@ -142,7 +142,7 @@ record('bench/boot-B', 'pass', benchB.base);
 
 // T3 空注册表：200 空清单 + 接入行在位 + 首接走通
 {
-  const r = await fetch(`${benchB.base}/suyou-workbench/api/wf/projects`, { signal: AbortSignal.timeout(5000) });
+  const r = await fetch(`${benchB.base}/sandbar-workbench/api/wf/projects`, { signal: AbortSignal.timeout(5000) });
   const body = await r.json().catch(() => null);
   const projects = body?.result?.projects ?? body?.projects ?? [];
   record('empty/api-200-empty', r.status === 200 && Array.isArray(projects) && projects.length === 0,

@@ -28,7 +28,7 @@
 // 实现段落地前「产品红」形态属预期（S0 build-contract 先例）；arbitrate/merge 期必须绿。
 //
 // 台面：共享隔离台（lib_stage_console 供给，绝不触 3099 生产台）+ 每页 API 桩
-// （/suyou-workbench/api/wf/tickets* 供夹具、写操作只落桩内计数，零真写；其余
+// （/sandbar-workbench/api/wf/tickets* 供夹具、写操作只落桩内计数，零真写；其余
 // 路由透传真台）。执行契约（t260904-12 三态）：SUMMARY 末行 + 退出码 0/1/2，
 // （三态=闸内无跳过态的现行定稿，旧跳过语义退役）；本场景无 N/A 腿（夹具恒提供 awaiting-human 票，弹层必可达）。
 
@@ -50,9 +50,9 @@ const FID = 'it05c' // 夹具票 id（alnum；绝不真票）
 const LIB_JS = join(REPO, 'server', 'dsh', 'workbench', 'lib', 'client.js')
 // L4 探测资产=页面实际执行的 workbench 插件客户端（t260905-05 implement 实锤：
 // dsh 壳层聚合包 dsh-client-modules/client.js 不含 workbench 弹层代码（wb-modal=0），
-// 弹层真源是按 rev 懒加载的 /plugins/suyou-workbench/client.js——探错资产会把
+// 弹层真源是按 rev 懒加载的 /plugins/sandbar-workbench/client.js——探错资产会把
 // 全新台面也误判成供给滞后）。
-const SERVED_CLIENT = '/plugins/suyou-workbench/client.js'
+const SERVED_CLIENT = '/plugins/sandbar-workbench/client.js'
 
 const results = makeResults()
 
@@ -139,10 +139,10 @@ const detail = {
 /** 页级 API 桩（夹具形态同 sc_multi_tab_coexistence 基线，共享前置步骤）：列表/详情
  *  供夹具；POST /tickets/:id/:op 记写数并回 ok（写只落桩内，零真写）；其余透传真台。 */
 async function attachStub(page, counts) {
-  await page.route('**/suyou-workbench/api/**', async (route) => {
+  await page.route('**/sandbar-workbench/api/**', async (route) => {
     const req = route.request()
     const url = new URL(req.url())
-    const m = /^\/suyou-workbench\/api\/wf\/tickets(?:\/([^/]+)(?:\/([^/]+)))?$/.exec(url.pathname)
+    const m = /^\/sandbar-workbench\/api\/wf\/tickets(?:\/([^/]+)(?:\/([^/]+)))?$/.exec(url.pathname)
     const body = (b) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(b) })
     if (!m) {
       try {

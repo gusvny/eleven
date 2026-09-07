@@ -53,7 +53,7 @@ SCENARIOS = [
      "bundle 新鲜度护栏配置与仓实况对齐（t260903-12）：server/dsh/merge-checks.yaml 在场（缺失=护栏未启用红）、形状可解析（引擎遇坏行 fail-closed）、恰含声明对 workbench src/client/→lib/、每对 src/out 前缀为仓内真实目录——路径写错时 3.5 节「src 前缀无改动→降噪」令护栏静默失效（t260827-02 假上线教训的复燃形态），本场景独立守护该对齐，与引擎解析逻辑不互替",
      "python3 integration/t260903-12/sc_merge_checks_pairs.py"),
     ("t260903-13-workbench-bundle-loads",
-     "重建产物在 dsh 客户端模块契约下可加载（t260903-13）：lib/client.cjs 与 client.js 同体（exports ./client 指向 client.js，防 onSuccess 复制缺失的半新产物）、closure 外衣头尾完整（window.__ModuleLoader__.load({id:\"suyou-workbench\", factory}) 头 + return module.exports 尾）、vm 沙箱按契约真实加载——工厂可执行、返回非空 exports、bare require 全部落在声明外部化面（react、@deepseek-ai/*）内，越界泄漏=台面加载失败的用户可感形态；加载器先自证红绿（合法样本绿/泄漏红/外衣破损红/未挂载红）再量真产物。锚产物形态合同不锚 bundle 内部实现，tsdown 重建不改契约则本场景不因实现重构而红",
+     "重建产物在 dsh 客户端模块契约下可加载（t260903-13）：lib/client.cjs 与 client.js 同体（exports ./client 指向 client.js，防 onSuccess 复制缺失的半新产物）、closure 外衣头尾完整（window.__ModuleLoader__.load({id:\"sandbar-workbench\", factory}) 头 + return module.exports 尾）、vm 沙箱按契约真实加载——工厂可执行、返回非空 exports、bare require 全部落在声明外部化面（react、@deepseek-ai/*）内，越界泄漏=台面加载失败的用户可感形态；加载器先自证红绿（合法样本绿/泄漏红/外衣破损红/未挂载红）再量真产物。锚产物形态合同不锚 bundle 内部实现，tsdown 重建不改契约则本场景不因实现重构而红",
      "node integration/t260903-13/sc_workbench_bundle_loads.mjs", "ro"),
     ("t260903-13-metrics-golden-freeze",
      "度量响应形状对串行基线冻结（t260903-13）：tests/golden_serial/ 基线（t260903-09 修复产物，剔除 generated_at/cache.computed_at）与当前 src/host/metrics.ts 实现逐字节一致；golden.mjs 被 run_tests 执行器 HELPERS 排除、此前全仓无自动跑点（t260903-13 review 实锤的孤儿入口，票面点名「基线一并过」却无执行点），本场景补上唯一自动比对点并机械守护两条纪律：比对后 golden_serial/ 零 git 脏（--record 重录换绿在此现形）、tests/ 无 stub 运行时残留；判定行为级不钉案例数（基线面随窗口枚举自然扩展）",
@@ -222,7 +222,7 @@ SCENARIOS = [
      "F1 缺目录 let r = await tryLoad(join(tmp, 'no-such-dir')) ok(r.threw !== undefined, 'F1 缺目录",
      "node integration/t260901-24/sc_t02_load_fixtures_malformed.mjs"),
     ("t260901-24-route-decision",
-     "路径相近但非 wf 端点不误吞 ok(!!callDecide('GET', BASE + '/suyou-workbench/other/tickets')?.passthr",
+     "路径相近但非 wf 端点不误吞 ok(!!callDecide('GET', BASE + '/sandbar-workbench/other/tickets')?.passthr",
      "node integration/t260901-24/sc_t03_route_decision.mjs"),
     ("t260901-24-gate-interlock",
      "本树 ui-check 缺 playwright-core 时镜像 capture-lane 的回退：主树 ui-check // （worktree 布局 <main>/.w",
@@ -540,6 +540,15 @@ SCENARIOS = [
     ("t260905-10-lane-identity-guard",
      "泳道落盘身份依赖守卫（t260905-10 面③，260906 宿主 ~/.gitconfig 消失三轨 settle 全 FAILED，灰盒 L3）：git 身份全缺→prepare_workspace 开工前 ok=False/failed 红字点名 user.name/user.email（半缺腿钉死点名精确性，探针 GIT_CONFIG_NOSYSTEM+GLOBAL 夹具防系统级假红）；身份在位复用不受扰；repo 级 config 补救放行（探针锚泳道 worktree=共享主仓 config）；dir 型工作区无 commit 不查；created 路径缺失失败且泳道不落半成品（fail-fast 在 worktree add 之前）；LANE_DEP_SYMLINKS 含 temporal-poc/.venv：泳道自动软链解析到主仓、幂等不重复（260825「泳道无消费方」拍板被 260906 19 号闸实测推翻的陪伴断言）；点名断言解析「git 身份缺失（…）」括注为集合（处置句恒提两键名，子串断言吹不了精确性）。实现段落地前红属预期（守卫缺席=缺失腿照旧放行=红），arbitrate/merge 期必须绿；与 developer L1 intent 不同面：本条守 prepare_workspace 两分支×身份矩阵×deps 软链的回执契约",
      "python3 integration/t260905-10/sc_lane_identity_guard.py", "ro"),
+    ("t260907-05-naming-residue-fulltext",
+     "命名迁移②收口：旧命名 token 全量残留清点（t260907-05 验收①独立机器重演，灰盒 L3）：七 token（六插件包名 suyou 前缀族＋tools 文件名旧形）在 server/+integration/ 全后缀零残留（无 include 白名单——方案 v1 白名单漏 tsx/py/cjs 的教训收编为本条设计依据；豁免列名仅历史验收记录 t260903-12/acceptance-walkthrough-gen0.md 与本票守卫场景族自身——针脚字面量写在断言里非产品面，活文档不豁免）；docs/ 命中封口在已声明遗留票清单内（工单工作流台设计/知识库设计/docs README/build_index.py——本票不改 docs 但清单外新命中=替换面外溢即红）；正名在位（六插件 package.json name 全 sandbar-*、五份 lock 双处 name 同步）；不动面原样在位（/suyou-admin/ 前缀、suyou-projects.ts、dsh-profile-suyou 包名——机械替换「顺手多改」的对抗腿，doc-guard G6 先例钉现状语义，后续票落地随其语义同步改）。与 sc_profile_farm_sandbar_links intent 不同面：本条守文本面收口，彼条守装载链结构一致性。Hermetic 纯文件读秒级；实现段落地前红属预期，arbitrate/merge 期必须绿",
+     "python3 integration/t260907-05/sc_naming_residue_fulltext.py", "ro"),
+    ("t260907-05-profile-farm-sandbar-links",
+     "profile 软链农场重指一致性（t260907-05 验收③＋正文③④，灰盒 L3）：装载链每环同指新名——cordis.patch.yml id/name（装载声明）==node_modules 裸包名解析锚（软链名）==插件 package.json name（包真源），任一环留旧名=宿主重启边界上插件消失/重复/import 炸给用户看；tools 文件名旧形→新形四环同步（真身在位+内部注册名+两 profile 软链 realpath 命中+三处 import）；两 profile 农场五链（sandbar-{admin-ui,workbench,knowledge,providers,temporal-tools}）realpath 指对实际目录、旧 suyou-* 链零残留；headless/cordis.patch.yml 必须仍是指向 profile 真身的软链（被换独立文件=两 profile 声明可静默漂移，「两 profile 都改」机制保障被掏空）。对抗面=链指错层/拼写差一字/漏 headless/漏删旧链/mv 漏改 import——逐环独立断言不信任单点自检。与 developer L1（单插件行为）与 sc_naming_residue_fulltext（文本收口）intent 不同面：本条守软链结构三方一致。Hermetic 纯文件系统读秒级；实现段落地前（农场未建/软链未重建）红属预期，arbitrate/merge 期必须绿",
+     "python3 integration/t260907-05/sc_profile_farm_sandbar_links.py", "ro"),
+    ("t260907-05-route-renamed-serves",
+     "工单台路由前缀迁移契约（t260907-05 正文②＋「怎么算好：工单台面板/路由全通」的机器化，灰盒 L3）：黑盒 import workbench/node.ts＋mock ctx（webServer.register 收集）自起 127.0.0.1 ephemeral server 按 exact/prefix 语义分发——新前缀真 handler 应答（/sandbar-workbench/api/wf/temporal-health→200，零引擎 spawn，生产 Temporal 只读红线允许面）；旧前缀死透（旧前缀通配→404，非 301/308/410/200——「直接换不留旧」策略的机器化）；注册面收口（全部路由注册 path 零旧前缀残留、全新前缀，含 src/host 常量挂载的 session-charter 路由——KI-042 同源防漂移面）；bundle 双产物（lib/client.js+cjs）含新前缀零旧前缀（src 改了产物没重建=浏览器半仍打旧名）。3099 全程零接触；不 fetch 新 tickets（spawn 真 admin CLI 面，业务旅程归既有场景族与隔离台）。与 t260903-13/sc_workbench_bundle_loads（bundle 可加载）intent 不同面：加载成功≠名字改对。实现段已迁 node.ts/import/主文件——T1~T5 应绿，bundle 未随票重建则 T5 红（该红正是本条存在意义）",
+     "node integration/t260907-05/sc_workbench_route_renamed_serves.mjs", "ro"),
 
     # ---- t260907-06：多 repo 项目泳道挂子仓（票B：一票多 worktree 同居一 lane）----
 

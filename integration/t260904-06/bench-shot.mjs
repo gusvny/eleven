@@ -127,7 +127,7 @@ async function waitReady(port, timeoutMs, logPath) {
 async function bootConsole(mainRoot, laneWb, onProc) {
   // t260904-19：docker 舞台（自搭进程 boot 退役）。repoDir 挂哪个树，/repo/server/dsh/workbench
   // 就是谁——before 变体挂主树（测主 workbench），after 变体挂泳道（测泳道 build）；
-  // profile 经 buildStageProfile 容器内路径物化（suyou-workbench→/repo/... 随 repoDir 切换）。
+  // profile 经 buildStageProfile 容器内路径物化（sandbar-workbench→/repo/... 随 repoDir 切换）。
   const stage = await import(pathToFileURL(path.join(REPO_ROOT, "integration", "stage_docker.mjs")).href);
   const tmpHome = mkdtempSync(path.join(tmpdir(), "suyou-bench-shot-"));
   const clean = () => { if (tmpHome) { try { rmSync(tmpHome, { recursive: true, force: true }); } catch { /* 留警告 */ } } };

@@ -7,7 +7,7 @@
  * 不可见页签暂停轮询，由 visibility-poll.ts 的可见性门收口）。
  *
  * 机制（两通道，可独立失效，都不静默）：
- *   1. 主通道 BroadcastChannel('suyou-workbench-tabs')：presence 3s 心跳
+ *   1. 主通道 BroadcastChannel('sandbar-workbench-tabs')：presence 3s 心跳
  *      （含当前查看的工单 id，关抽屉/隐藏页签置 null）+ write 写事件 + bye。
  *   2. 兜底通道 localStorage：心跳逐页签写 key（storage 事件跨 document 送达），
  *      write 事件写共享 key；BroadcastChannel 不可用（老内核/被禁）时自动走它，
@@ -41,7 +41,7 @@ const LEN_WHO = 64
 const LEN_TICKET = 128
 const LEN_OP = 32
 
-const CHANNEL = 'suyou-workbench-tabs'
+const CHANNEL = 'sandbar-workbench-tabs'
 const LS_HEARTBEAT_PREFIX = 'suyou-wb-tab-'
 const LS_WRITE_KEY = 'suyou-wb-tabwrite'
 const PROTO_V = 1

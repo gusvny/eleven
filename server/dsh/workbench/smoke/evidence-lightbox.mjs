@@ -87,7 +87,7 @@ section('A2 evidenceNav：畸形输入不抛、兜底安全下标')
 
 section('B evidenceImgSrc 契约回归')
 {
-  ok(evidenceImgSrc('t1', 'a.png') === '/suyou-workbench/api/wf/tickets/t1/evidence/a.png', '相对路径端点契约')
+  ok(evidenceImgSrc('t1', 'a.png') === '/sandbar-workbench/api/wf/tickets/t1/evidence/a.png', '相对路径端点契约')
   ok(!evidenceImgSrc('t1', 'a.png').startsWith('data:'), '不走 data: 内联（防穿收口 host）')
 }
 

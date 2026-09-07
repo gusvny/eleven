@@ -1,5 +1,5 @@
 /**
- * smoke/routes-save.mjs —— suyou-providers「路由表」分区（M13）冒烟。
+ * smoke/routes-save.mjs —— sandbar-providers「路由表」分区（M13）冒烟。
  *
  * 直跑：node smoke/routes-save.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
  * 覆盖（浏览器半 RoutesTableSection 的纯函数在 src/host/routes-edit.ts，冒烟直测同一代码）：
@@ -7,7 +7,7 @@
  *      → applyRouteEdits 对真源文本 → changed 应为空（载荷即现状，无扰动）。
  *   B. 编辑语义：改 developer.model / 清空 ops.model → 补丁命中对应键路径，
  *      重解析后值生效；清空后查表向上落 default。
- *   C. 跨插件保存链路：suyou-admin-ui 宿主 POST /suyou-admin/api/routes/save
+ *   C. 跨插件保存链路：sandbar-admin-ui 宿主 POST /suyou-admin/api/routes/save
  *      （mock webServer）接收「路由表」分区会发的载荷 → 写 model-routes.yaml
  *      （临时 repo）+ 备份 /tmp + 响应 regenerate 提示；保存后 buildRoutesView 查表生效。
  *   D. 非法载荷拒绝：未登记角色 → 200 {ok:false}（宿主 schema 兜底，不写文件）。

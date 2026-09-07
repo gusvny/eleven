@@ -103,8 +103,8 @@ function makeHarness(repoDir) {
     on: () => () => {},
   }, { repo: repoDir })
   return {
-    prefixEpics: routes.find(r => r.kind === 'prefix' && r.path === '/suyou-workbench/api/epics'),
-    exactTickets: routes.find(r => r.kind === 'exact' && r.path === '/suyou-workbench/api/wf/tickets'),
+    prefixEpics: routes.find(r => r.kind === 'prefix' && r.path === '/sandbar-workbench/api/epics'),
+    exactTickets: routes.find(r => r.kind === 'exact' && r.path === '/sandbar-workbench/api/wf/tickets'),
   }
 }
 const mockRes = () => ({
@@ -178,14 +178,14 @@ try {
     write_set: ['integration/manifest.json'],
   })
   ok(await precacheExists(cacheDir, 'demo-epic') === true, 'precache landed -> list badge lit (precacheExists)')
-  let r = await call(prefixEpics, '/suyou-workbench/api/epics/demo-epic')
+  let r = await call(prefixEpics, '/sandbar-workbench/api/epics/demo-epic')
   ok(r.status === 200 && r.body.result?.nextHint?.status === 'ok'
     && String(r.body.result.nextHint.title).includes('next ticket'),
     'GET detail -> nextHint hit (state_key aligned + template whitelist passed)')
 
   /* ------------------------------------------------ L3 successful prefilled creation -> cache deleted */
   section('L3 prefilled ticket created -> cache invalidated (node.ts:306 dismiss on ok)')
-  r = await call(exactTickets, '/suyou-workbench/api/wf/tickets?project=suyou', 'POST', {
+  r = await call(exactTickets, '/sandbar-workbench/api/wf/tickets?project=suyou', 'POST', {
     workflow: 'dev-lane', title: 'prefilled creation (integration baseline)',
     body: 'prefilled body', epic: 'demo-epic', write_set: ['integration/manifest.json'],
   })
@@ -201,7 +201,7 @@ try {
   await writeStub(repoF, { createOk: false })
   const { exactTickets: ft } = makeHarness(repoF)
   await writePrecache(repoF, 'demo-epic', rows, { workflow: 'dev-lane', title: 't', body: '', rationale: '' })
-  r = await call(ft, '/suyou-workbench/api/wf/tickets?project=suyou', 'POST', {
+  r = await call(ft, '/sandbar-workbench/api/wf/tickets?project=suyou', 'POST', {
     workflow: 'dev-lane', title: 'should fail', epic: 'demo-epic',
   })
   ok(r.status === 200 && r.body.ok === false, 'failed creation -> 200 structured ok:false passthrough')

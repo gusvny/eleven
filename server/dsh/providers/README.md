@@ -1,4 +1,4 @@
-# suyou-providers —— LLM provider 管理与优先级（B 版）
+# sandbar-providers —— LLM provider 管理与优先级（B 版）
 
 t260821-08。手动排序 + 一键切换，**不做自动 failover**（用户拍板）。
 
@@ -23,7 +23,7 @@ t260821-08。手动排序 + 一键切换，**不做自动 failover**（用户拍
 
 ```
 server/dsh/providers/
-  node.ts              宿主半：/suyou-providers/api/* 路由 + settings 读写
+  node.ts              宿主半：/sandbar-providers/api/* 路由 + settings 读写
   src/client/index.tsx 浏览器半：设置面板「模型」分区
   lib/client.js        tsdown 产物（改 src 后重建）
   state.json           优先级 + 计费说明（独立 json 持久化）
@@ -36,5 +36,5 @@ cd server/dsh/providers
 npx -y tsdown@0.22.2 -c tsdown.config.ts   # 产物 lib/client.js
 ```
 
-挂载：`server/dsh/profile/node_modules/suyou-providers -> ../../providers`（headless 同款软链），
-并在 `server/dsh/profile/cordis.patch.yml` 的插件列表插入 `suyou-providers`。
+挂载：`server/dsh/profile/node_modules/sandbar-providers -> ../../providers`（headless 同款软链），
+并在 `server/dsh/profile/cordis.patch.yml` 的插件列表插入 `sandbar-providers`。

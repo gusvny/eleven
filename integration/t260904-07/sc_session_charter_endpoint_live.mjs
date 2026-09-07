@@ -1,7 +1,7 @@
 // Integration scenario t260904-07 ② — session-charter 端点活体契约（ro，fetch 级）。
 //
 // Intent (gray-box, user perspective):
-//   GET /suyou-workbench/api/session-charter?project=<key> 的部署后可感知契约：
+//   GET /sandbar-workbench/api/session-charter?project=<key> 的部署后可感知契约：
 //   命中项目拿到「占位符已实值化 + 命中分段已追加」的 charter 文本（用户在新会话里
 //   读到的就是这份）；未命中项目仍 200 只吃通用段（新项目开箱即用）；畸形 query
 //   （缺/空串）=400 形状错误 JSON 而非 5xx/崩溃。与随票 smoke intent 级不同层：

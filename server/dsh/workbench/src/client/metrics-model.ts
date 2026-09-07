@@ -37,7 +37,7 @@ export function saveStorage(storage: unknown, key: string, value: string): void 
   try { (storage as StorageLike | null)?.setItem?.(key, value) } catch { /* 满配额/禁写：丢弃不崩 */ }
 }
 
-/** 面板状态（tab/筛选/形态），存 localStorage suyou-workbench-metrics-panel-v1。 */
+/** 面板状态（tab/筛选/形态），存 localStorage sandbar-workbench-metrics-panel-v1。 */
 export interface PanelState {
   view: string
   window: string
@@ -47,7 +47,7 @@ export interface PanelState {
   shape: 'bar' | 'donut'
 }
 
-export const PANEL_STORAGE_KEY = 'suyou-workbench-metrics-panel-v1'
+export const PANEL_STORAGE_KEY = 'sandbar-workbench-metrics-panel-v1'
 // t260902-05⑤：时间窗扩 1d/3d（后端 WINDOWS 同步，授权=工单正文）
 export const PANEL_WINDOWS = ['1d', '3d', '7d', '30d', 'all'] as const
 export const PANEL_VIEWS = ['time', 'delivery', 'token', 'health'] as const

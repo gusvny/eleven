@@ -129,10 +129,10 @@ services:
         fi
         mkdir -p "$$DSH_HOME/profiles/$$SANDBAR_TEST_PROFILE"
         # profile 装配=拷贝+软链混合（gen2 EROFS 修复）：
-        # - 顶层文件/目录（cordis*.yml/suyou-tools.ts/package.json）拷进 dsh-home 卷
+        # - 顶层文件/目录（cordis*.yml/sandbar-tools.ts/package.json）拷进 dsh-home 卷
         #   （rw）——prepareProfile 的 cordis.yml 合成写落卷内，不写穿 :ro 的 /repo；
         #   每次容器启动重拷=随仓更新，无需重建台。GNU cp -r 保顶层软链（预组 profile
-        #   的 suyou-tools.ts 软链目标是容器内绝对路径，保形即有效）。
+        #   的 sandbar-tools.ts 软链目标是容器内绝对路径，保形即有效）。
         # - node_modules 保持软链（不拷：主树插件依赖树大，拷贝分钟级；且 dsh 启动
         #   自愈农场写的是 profiles/node_modules 兄弟位，不经 profile 源内）。
         cd "$$SANDBAR_TEST_PROFILE_SRC"
@@ -153,11 +153,11 @@ services:
         if [ -d "$$SRC_NM" ]; then
           for f in "$$SRC_NM"/*; do
             b="$${f##*/}"
-            [ "$$b" = "suyou-workbench" ] && continue
+            [ "$$b" = "sandbar-workbench" ] && continue
             [ -e "$$NM/$$b" ] || ln -sfn "$$f" "$$NM/$$b"
           done
         fi
-        [ -d /repo/server/dsh/workbench ] && ln -sfn /repo/server/dsh/workbench "$$NM/suyou-workbench"
+        [ -d /repo/server/dsh/workbench ] && ln -sfn /repo/server/dsh/workbench "$$NM/sandbar-workbench"
         # 绑定面（gen4 定稿）：dsh CLI 的 --host 0.0.0.0 旗标有防 RCE 守卫，但
         # config 层（--patch 覆盖）允许 0.0.0.0——patch 直接钉 host+port 3199 直绑，
         # 无需任何转发代理（gen2 的 node 转发器方案拆除：代理链路是容器台与自搭台

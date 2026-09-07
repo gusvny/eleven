@@ -1,5 +1,5 @@
 /**
- * smoke/sessions.mjs —— suyou-workbench 会话记账层纯函数冒烟（t260828-02 建，
+ * smoke/sessions.mjs —— sandbar-workbench 会话记账层纯函数冒烟（t260828-02 建，
  * 口径：项目归属 + 只列 UI 主动打开的会话；t260831-02 起消费方=顶部会话入口行，
  * 左栏「会话」区块已移除——记账层语义零改动，本文件口径不变照常全绿）。
  *

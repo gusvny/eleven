@@ -136,7 +136,7 @@ function navSemantics(client) {
 
 function srcContract(client) {
   const s = client.evidenceImgSrc(FID, 'shot 1.png')
-  const ok = s === `/suyou-workbench/api/wf/tickets/${FID}/evidence/shot%201.png`
+  const ok = s === `/sandbar-workbench/api/wf/tickets/${FID}/evidence/shot%201.png`
     && !s.startsWith('data:') && !s.startsWith('http')
   record('S0 imgsrc-contract', ok ? 'pass' : 'fail', ok ? s : `bad src: ${s}`)
   return ok
@@ -321,7 +321,7 @@ async function reopenDrawer(page) {
 
 async function L1_clickOpens(page) {
   const lb = await openLightbox(page, 1) // 直接点第 2 张：计数应为 2 / 3
-  if (lb.src !== `/suyou-workbench/api/wf/tickets/${FID}/evidence/lb-b.png`) {
+  if (lb.src !== `/sandbar-workbench/api/wf/tickets/${FID}/evidence/lb-b.png`) {
     return `opened img src mismatch: ${lb.src}`
   }
   if (lb.counter !== '2 / 3') return `counter wrong: ${JSON.stringify(lb.counter)}`
@@ -461,20 +461,20 @@ async function runBrowser(pw, browser) {
 
     // API 边界打桩：列表/详情/证据列表/证据图全拦（fixture id 专用）。
     // glob 尾必须是 **：单 * 不跨 /，拦不到 tickets/<id>/evidence 子路径。
-    await page.route('**/suyou-workbench/api/wf/tickets**', (route) => {
+    await page.route('**/sandbar-workbench/api/wf/tickets**', (route) => {
       const path = new URL(route.request().url()).pathname.replace(/\/+$/, '')
       const body = (b) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(b) })
-      if (path === '/suyou-workbench/api/wf/tickets') {
+      if (path === '/sandbar-workbench/api/wf/tickets') {
         return body({ ok: true, result: { tickets: [ROW] }, workflows: [WF] })
       }
-      const mDet = /^\/suyou-workbench\/api\/wf\/tickets\/([^/]+)$/.exec(path)
+      const mDet = /^\/sandbar-workbench\/api\/wf\/tickets\/([^/]+)$/.exec(path)
       if (mDet && decodeURIComponent(mDet[1]) === FID) return body({ ok: true, result: detailBase({}) })
-      const mEv = /^\/suyou-workbench\/api\/wf\/tickets\/([^/]+)\/evidence$/.exec(path)
+      const mEv = /^\/sandbar-workbench\/api\/wf\/tickets\/([^/]+)\/evidence$/.exec(path)
       if (mEv && decodeURIComponent(mEv[1]) === FID) {
         if (evidenceMalformed) return body({ ok: true, result: { files: 'not-an-array' } })
         return body({ ok: true, result: { files: evidenceFiles } })
       }
-      const mImg = /^\/suyou-workbench\/api\/wf\/tickets\/([^/]+)\/evidence\/(.+)$/.exec(path)
+      const mImg = /^\/sandbar-workbench\/api\/wf\/tickets\/([^/]+)\/evidence\/(.+)$/.exec(path)
       if (mImg && decodeURIComponent(mImg[1]) === FID) {
         const f = decodeURIComponent(mImg[2])
         if (breakImage === f) return route.fulfill({ status: 404, contentType: 'text/plain', body: 'fixture: broken image' })

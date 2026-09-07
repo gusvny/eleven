@@ -1,17 +1,17 @@
 /**
- * suyou-providers —— LLM provider 管理与优先级（B 版：手动排序+一键切换）· 宿主半 / node。
+ * sandbar-providers —— LLM provider 管理与优先级（B 版：手动排序+一键切换）· 宿主半 / node。
  *
- * 职责：在 dsh 自己的 webServer 上挂 /suyou-providers/api/*，供本插件浏览器半
+ * 职责：在 dsh 自己的 webServer 上挂 /sandbar-providers/api/*，供本插件浏览器半
  * （lib/client.js，设置面板「模型」分区）同源 fetch 使用：
  *
- *   GET  /suyou-providers/api/state             → 当前快照：4 provider 列表（优先级序）、
+ *   GET  /sandbar-providers/api/state             → 当前快照：4 provider 列表（优先级序）、
  *                                                 当前 agent-default-model、协议白名单、scnet 预置
- *   POST /suyou-providers/api/add-provider      → 「添加 provider」：baseURL/协议/模型 id 列表/key 环境变量
+ *   POST /sandbar-providers/api/add-provider      → 「添加 provider」：baseURL/协议/模型 id 列表/key 环境变量
  *                                                 写 settings.yaml 的 llm-pi-ai.providers
- *   POST /suyou-providers/api/set-current       → 「设为当前」：写 agent-default-model（provider+model+reasoningEffort?）
- *   POST /suyou-providers/api/update-note       → 某 provider 的计费档说明（用户可编辑）
- *   POST /suyou-providers/api/reorder           → 优先级顺序持久化（上下移/拖拽）
- *   POST /suyou-providers/api/delete-provider   → 从 llm-pi-ai.providers 删除一个已声明 route
+ *   POST /sandbar-providers/api/set-current       → 「设为当前」：写 agent-default-model（provider+model+reasoningEffort?）
+ *   POST /sandbar-providers/api/update-note       → 某 provider 的计费档说明（用户可编辑）
+ *   POST /sandbar-providers/api/reorder           → 优先级顺序持久化（上下移/拖拽）
+ *   POST /sandbar-providers/api/delete-provider   → 从 llm-pi-ai.providers 删除一个已声明 route
  *
  * 安全红线（t260821-08 明令，deepseek-official 教训）：写入 settings.yaml 的 provider
  * **必须先 dry-run 校验「合法可解析」**。本插件不直接改 settings.yaml 文本，而是走
@@ -37,7 +37,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 
-export const name = 'suyou-providers'
+export const name = 'sandbar-providers'
 // webServer 只存在于 web profile；headless 下本插件待机即可，故不走 inject 硬依赖。
 export const inject: string[] = []
 
@@ -459,16 +459,16 @@ export function apply(ctx: Context): void {
   const attach = (ws: any): void => {
     ctx.effect(() => {
       const disposers = [
-        ws.register({ kind: 'exact', path: '/suyou-providers/api/state', handler: handleState }),
-        ws.register({ kind: 'exact', path: '/suyou-providers/api/add-provider', handler: handleAdd }),
-        ws.register({ kind: 'exact', path: '/suyou-providers/api/set-current', handler: handleSetCurrent }),
-        ws.register({ kind: 'exact', path: '/suyou-providers/api/update-note', handler: handleNote }),
-        ws.register({ kind: 'exact', path: '/suyou-providers/api/reorder', handler: handleReorder }),
-        ws.register({ kind: 'exact', path: '/suyou-providers/api/delete-provider', handler: handleDelete }),
+        ws.register({ kind: 'exact', path: '/sandbar-providers/api/state', handler: handleState }),
+        ws.register({ kind: 'exact', path: '/sandbar-providers/api/add-provider', handler: handleAdd }),
+        ws.register({ kind: 'exact', path: '/sandbar-providers/api/set-current', handler: handleSetCurrent }),
+        ws.register({ kind: 'exact', path: '/sandbar-providers/api/update-note', handler: handleNote }),
+        ws.register({ kind: 'exact', path: '/sandbar-providers/api/reorder', handler: handleReorder }),
+        ws.register({ kind: 'exact', path: '/sandbar-providers/api/delete-provider', handler: handleDelete }),
       ]
       return () => { for (const dispose of disposers) dispose() }
-    }, 'suyou-providers: provider api routes')
-    ctx.logger.info('suyou-providers: provider 管理 API 已挂载 /suyou-providers/api/*')
+    }, 'sandbar-providers: provider api routes')
+    ctx.logger.info('sandbar-providers: provider 管理 API 已挂载 /sandbar-providers/api/*')
   }
 
   // webServer 可能先已提供（直接取），也可能后到（等 internal/service 事件）；

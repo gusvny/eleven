@@ -1,5 +1,5 @@
 /**
- * suyou-workbench · 中列当前项目 key 的模块单态（session-entry t260828-06 从
+ * sandbar-workbench · 中列当前项目 key 的模块单态（session-entry t260828-06 从
  * src/client/index.tsx 迁出为共享模块）。
  *
  * 为什么共享：hero 接管组件（client/hero.tsx → HeroSessionEntry）挂在

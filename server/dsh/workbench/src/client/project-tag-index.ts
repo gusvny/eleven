@@ -1,5 +1,5 @@
 /**
- * suyou-workbench · chat 项目 tag 数据索引单态（t260903-07 工单②）。
+ * sandbar-workbench · chat 项目 tag 数据索引单态（t260903-07 工单②）。
  *
  * Owner 落明（方案 v3 N2 修正后的规格句）：
  * - 谁写：WorkbenchSidebar.load()（10s 轮询）成功分支调用 publishProjects /
@@ -139,14 +139,14 @@ export function startProjectIndexFallback(opts: FallbackOptions): () => void {
     if (stopped || state.externallyPublished || readProjectTagIndex().hasData) return
     attempts++
     try {
-      const pr = await fetchImpl('/suyou-workbench/api/wf/projects').then(r => r.json())
+      const pr = await fetchImpl('/sandbar-workbench/api/wf/projects').then(r => r.json())
       const list: ProjectIndexEntry[] = pr?.result?.projects ?? []
       if (!Array.isArray(list) || list.length === 0) throw new Error('projects 列表为空/畸形')
       publishProjects(list.map(p => ({ key: p.key, dirs: Array.isArray(p?.dirs) ? p.dirs : [] })))
       for (const p of list) {
         if (typeof p?.key !== 'string') continue
         try {
-          const tr = await fetchImpl(`/suyou-workbench/api/wf/tickets?project=${encodeURIComponent(p.key)}`).then(r => r.json())
+          const tr = await fetchImpl(`/sandbar-workbench/api/wf/tickets?project=${encodeURIComponent(p.key)}`).then(r => r.json())
           const tickets = tr?.result?.tickets
           const ids = Array.isArray(tickets) ? tickets.map((t: { id?: unknown }) => t?.id).filter((x): x is string => typeof x === 'string') : []
           publishProjectEntry(p.key, ids)
