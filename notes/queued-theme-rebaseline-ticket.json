@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260907-03",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "主题热修重基线：bg-base 进 08 号词汇表＋05 号色点断言复核（热修越门被看守网住的正名）",
+  "user_request": "做什么：integration 260907 两次热修（17b673f bg-base 兜底链、96c699c 收口行去透明度改静音色）直接落 main 未走评审，看守网当场红三处——本票走正规门把契约对齐：①t260905-08-hex-clean 场景的 alias 词汇表收录 --dsw-alias-bg-base（理由入注释：宿主平台 0.1.1-rc.2 无 bg-primary 名，兜底链兼容旧版平台=平台版本契约扩容）；②t260904-05 色点断言复核：实测色值漂移（#83e76a 族 vs color-mix 派生值分离）——判定「三同色」意图在新令牌解析下是否仍成立，成立=重基线期望值并注明依据，不成立=回退热修改走正规实现；③两场景复跑绿。\n为什么：看守红=机制自证工作正常；但重基线/词汇表变更必须过评审门，不能由热修顺手改（本票=补门）。\n怎么算好：两场景绿＋变更说明落场景注释＋merge 预演零冲突。",
+  "spec": "依据=260907 移仓验收套件红账（FAIL t260905-08-hex-clean / t260904-05-top-entry-retired-form / t260904-05-ledger-adversarial-boot 三处中前两处归热修，ledger 腿随验）＋integration 热修提交 17b673f/96c699c。范围=integration/（场景）＋如需 server/dsh/workbench/src/client/theme.ts（复核腿）。验收：①hex-clean 绿且词汇表注释含平台版本依据；②色点断言绿且判定结论（重基线或回退）写进交接；③不弱化任何既有断言（收窄=评审可见）。",
+  "write_set": ["integration/", "server/dsh/workbench/src/client/theme.ts"],
+  "deliverables": "看守契约与热修对齐（重基线或回退，结论留痕）"
+}
