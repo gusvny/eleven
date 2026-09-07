@@ -618,3 +618,4 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 现象：t260907-12 场景全部函数级直调（resolve/derive/prepare 各自绿），但 ticket-start→TicketInput 解码链一次没走——混合形态真开票即 TypeError（workspace Dict[str,str] 撞 repo_worktrees list）。
 - 病根：隔离台 e2e 场景贵（分钟级）所以场景面偏科函数级；无「动输入契约必带全链场景」的闸规则。
 - 机制补丁（已落）：dev-lane 验收段第四问＋integration persona「整车点火」纪律。修复票=t260908-02。
+- 260908 晨层错修正（宿主点破）：KI-063 补丁首版误入两层共享面（dev-lane.yaml 通用模板＋server/dsh/roles 默认回落人格）——TicketInput 契约是引擎私货，不得污染多项目通用面。两处已撤。正解=sandbar 项目专属声明面：注册表声明 paths.roles_dir 指向引擎仓专属人格目录（项目级 overlay，他项目不受染），随小票落地；「实报即全族」一条是真通用，保留在模板与人格不动。
