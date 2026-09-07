@@ -1481,8 +1481,8 @@ function EvidenceImages({ ticketId }: { ticketId: string }) {
     setFiles(null)
     setBroken({})
     setOpen(null)
-    fetch(`/sandbar-workbench/api/wf/tickets/${encodeURIComponent(ticketId)}/evidence`)
-      .then(r => r.json())
+    // KI-057（t260907-11）：走 apiGet——withProject 统一拼 ?project=，证据列表按项目根枚举。
+    apiGet(`/sandbar-workbench/api/wf/tickets/${encodeURIComponent(ticketId)}/evidence`)
       .then((d) => {
         if (!cancelled) setFiles(Array.isArray(d?.result?.files) ? (d.result.files as string[]) : [])
       })

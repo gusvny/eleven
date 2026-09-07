@@ -559,7 +559,12 @@ async function cleanupOldJobs(root: string, code: string): Promise<void> {
 }
 
 export interface StartSuggestInput {
+  /** 引擎仓锚（保留，KI-057 t260907-11 评审裁定）：spawnAgent 的 roles/model-routes 读取——
+   *  引擎侧声明属引擎语义，不随项目走。 */
   repo: string
+  /** 项目主目录锚（t260907-11 KI-057）：job 目录根 resolveEpicNextDir 用它——作业簿记
+   *  是项目泳道产物，epic 代号跨项目无唯一约束，锚引擎仓会撞码串项目。缺省回 repo。 */
+  root?: string
   code: string
   epicTitle: string
   epicMarkdown: string
@@ -579,7 +584,9 @@ export interface StartSuggestInput {
 export async function startSuggestJob(input: StartSuggestInput): Promise<EpicNextJob> {
   const existing = findRunningJob(input.code)
   if (existing) return existing
-  const root = resolveEpicNextDir(input.repo)
+  // KI-057 env 闸：项目锚直拼 <root>/.suyou/epic-next（SUYOU_EPIC_NEXT_DIR 属引擎仓
+  // 域，不透出）；缺省（无 root）走原 resolveEpicNextDir（env 优先，行为不变）。
+  const root = input.root !== undefined ? join(input.root, '.suyou', 'epic-next') : resolveEpicNextDir(input.repo)
   const jobId = `${input.code}-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`
   const dir = join(root, jobId)
   await mkdir(dir, { recursive: true })

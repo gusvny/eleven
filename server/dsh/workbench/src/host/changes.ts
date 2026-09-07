@@ -77,6 +77,9 @@ export interface TicketForDiff {
   worktree?: string
   base_ref?: string
   write_set?: string[]
+  /** 票所属项目 key（t260907-11 KI-057）：本函数不消费它——「判界用哪个仓根」由调用方
+   *  解析（project-anchor）后作为 repo 参数传入；字段收进来只为票面形状自描述。 */
+  project?: string
 }
 
 /* ---------------------------------------------------------------- 常量（输出封顶） */

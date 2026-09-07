@@ -49701,7 +49701,7 @@ function EvidenceImages({ ticketId }) {
 		setFiles(null);
 		setBroken({});
 		setOpen(null);
-		fetch(`/sandbar-workbench/api/wf/tickets/${encodeURIComponent(ticketId)}/evidence`).then((r) => r.json()).then((d) => {
+		apiGet(`/sandbar-workbench/api/wf/tickets/${encodeURIComponent(ticketId)}/evidence`).then((d) => {
 			if (!cancelled) setFiles(Array.isArray(d?.result?.files) ? d.result.files : []);
 		}).catch(() => {
 			if (!cancelled) setFiles([]);

@@ -138,6 +138,9 @@ import { promisify } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
 import { runAdminCli } from '../sandbar-tools.ts'
 import { findProject, loadProjects, loadRegistry, primaryDir, type ProjectEntry } from '../suyou-projects.ts'
+// 项目锚解析器（t260907-11 KI-057）：请求层按 ?project= 解析项目根，六处静态锚穿参的
+// 单一收口（取舍清单/env 覆盖闸/显式报错口径见该模块头注）。
+import { anchorEnv, anchorEpicsDir, resolveProjectAnchor, resolvedMark, type ProjectAnchor } from './src/host/project-anchor.ts'
 // 项目生命周期 CLI 薄壳（票③面D：写路径单源=安装器 CLI，读注册表仍走 TS 装载器；
 // 票据/体检数据=CLI 独有面，spawn 恰是同源——取舍清单见 src/host/project-admin.ts 头注）。
 import { ProjectCliError, runProjectCli } from './src/host/project-admin.ts'
@@ -170,7 +173,7 @@ import { computeHostFingerprint, type HostFingerprint } from './src/host/build-i
 // ——列表 enrichment（title_or_first）与详情头部两条通道一个口径。
 import { deriveTitleOrFirst } from './src/host/enrich.ts'
 import { SESSION_CHARTER_PATH, composeSessionCharter } from './src/host/session-charter.ts'
-import { closeEpic, isEvidenceFileName, listEpics, readEpicMarkdown, resolveEpicsDir, setEpicStatus } from './src/host/epics.ts'
+import { closeEpic, isEvidenceFileName, listEpics, readEpicMarkdown, setEpicStatus } from './src/host/epics.ts'
 import {
   dismissPrecache, findRunningJob, pollSuggestJob, precacheExists, readPrecache,
   readPrecacheHint, resolvePrecacheDir, startEpicNextJanitor, startSuggestJob, stateKeyFromRows,
@@ -260,10 +263,18 @@ export function ticketContext(input: any): string {
  * （泳道目录可能被手塞怪名文件，不进列表即不渲染）；目录不存在→该候选空（软降级
  * 不报错，枚举语义没有 404，files=[] 即人话）。symlink 防线不带：截图目录内容来自
  * 自家 QA agent 工具产物，非外部输入，与既有取图端点同洞（不单侧加防线造伪安全）。
+ *
+ * t260907-11 KI-057 穿参：repo 参数=判界用项目根（默认仓锚传引擎仓、项目锚传项目主
+ * 目录，containment 闸随锚走、语义不变）；envBase=SUYOU_EVIDENCE_DIR 覆盖值——缺省
+ * 参数=读 env（旧调用点/默认锚行为不变），项目锚显式传 null（env 属引擎仓域，不透出）。
  */
-export async function listEvidenceFiles(id: string, repo: string): Promise<string[]> {
+export async function listEvidenceFiles(
+  id: string,
+  repo: string,
+  envBase: string | null = process.env.SUYOU_EVIDENCE_DIR ?? null,
+): Promise<string[]> {
   if (!TICKET_ID_RE.test(id) || /[./]/.test(id)) return []
-  const base = process.env.SUYOU_EVIDENCE_DIR ?? join(repo, '.suyou', 'evidence')
+  const base = envBase ?? join(repo, '.suyou', 'evidence')
   const roots = [resolve(base), resolve(repo, '.worktrees')]
   const dirs = [
     resolve(roots[0], id),
@@ -349,14 +360,29 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 }
 
 export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
+  // repo 语义（KI-057 改判后）：默认仓/回落值——boot 指纹、docs 视图、项目注册表、
+  // runProjectCli、runPocCli 等引擎语义面仍锚它；项目工单路由逐请求经 anchorOf 解析
+  // 项目主目录，不再直接消费本值。
   const repo = config?.repo ?? process.env.SUYOU_REPO ?? DEFAULT_REPO
+  const logger: { warn?: (...a: unknown[]) => void } | undefined = (ctx as any)?.logger
   // host 陈旧看守（t260902-03）：boot 指纹只在首次 apply 固化（见模块级注释的不变量）。
   void resolveBootFingerprint(repo)
   const cli = { repo, python: config?.python, timeoutMs: config?.timeoutMs }
-  /** 审批意见落盘锚点：reviewsAnchor=<repo>/server/dsh，loadReview 再拼 reviews/<工单id>.json。 */
-  const reviewsAnchor = join(repo, 'server', 'dsh')
-  /** 立项单目录：SUYOU_EPICS_DIR env 优先（shared.py EPICS_DIR 同款先例），缺省 <repo>/notes/epics。 */
-  const epicsDir = resolveEpicsDir(repo)
+
+  /** 逐请求项目锚解析（t260907-11 KI-057）：?project= 缺省回落默认仓；未知 key 400/
+   *  隔离与装载异常 502、解析来源与回落原因落 host log（取舍口径见 project-anchor.ts）。 */
+  function anchorOf(url: URL): ProjectAnchor {
+    const a = resolveProjectAnchor(url.searchParams.get('project'), repo)
+    if (!a.ok) logger?.warn?.(`[project-anchor] ?project= 解析失败（${a.status}）：${a.error}`)
+    return a
+  }
+  /** 锚守卫：失败按状态码回 JSON 并返 null，调用方 `const a = ...; if (a === null) return`。 */
+  function anchorGuard(res: ServerResponse, a: ProjectAnchor): Extract<ProjectAnchor, { ok: true }> | null {
+    if (a.ok) return a
+    sendJson(res, a.status, { ok: false, error: a.error })
+    return null
+  }
+  type OkAnchor = Extract<ProjectAnchor, { ok: true }>
 
   // t260829-07 epic-next 泄漏修复：宿主侧 janitor 定时扫 JOBS 补 poll（前端停 poll
   // 后 running job 的 agent 进程不再无人回收）。unref，不拖宿主退出。
@@ -454,7 +480,15 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     })
   }
 
-  /** 调 temporal-poc client.py（Temporal TicketWorkflow：sign 审批签字走这里）。 */
+  /**
+   * 调 temporal-poc client.py（Temporal TicketWorkflow：sign 审批签字走这里）。
+   * KI-057（t260907-11）经评审裁定**保留引擎仓锚、不随项目走**：调用点仅 sign/retry-qc
+   * 两个引擎语义操作（审批人工门 / blocked 重跑 signal），client.py 是引擎代码、
+   * Temporal 是引擎命名空间，dengzhufpv 的票同样跑在 sandbar 引擎的 Temporal 上；
+   * 按项目解析会把今天能用的跨项目签署打断成 502（外部项目无引擎 clone）。若宿主
+   * 真实意图是「外部项目各带引擎克隆、独立 Temporal」，那是整套引擎拓扑（worker/
+   * namespace/端口）专门票，不随本票做。cwd 同保留引擎仓：两操作只带 id，无文件相对行为。
+   */
   async function runPocCli(_cli: { repo: string }, args: string[]): Promise<any> {
     const poc = join(repo, 'server', 'dsh', 'temporal-poc')
     const python = join(poc, '.venv', 'bin', 'python')
@@ -518,7 +552,11 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       // best-effort：删失败不影响建票结果。
       if (r?.ok === true && epic) {
         try {
-          await dismissPrecache(resolvePrecacheDir(repo), epic)
+          // KI-057：缓存目录随票所属项目根走（跨项目撞码不互串；key 已过白名单，
+          // 解析异常兜底回落默认仓——缓存失效是 best-effort，不该阻断建票响应）。
+          const pa = resolveProjectAnchor(projectKey, repo)
+          const root = pa.ok ? pa.root : repo
+          await dismissPrecache(resolvePrecacheDir(root), epic)
         } catch { /* 缓存删除失败不阻塞建票 */ }
       }
       sendJson(res, 200, r)
@@ -764,8 +802,13 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
 
   /* ------------------------------------------------ M9 PR 式审批台：diff + review */
 
-  /** 变更集（只读）：worktree/base_ref/write_set 读工单 JSON 字段，计算在 src/host/changes.ts。 */
-  async function handleTicketDiff(res: ServerResponse, id: string): Promise<void> {
+  /**
+   * 变更集（只读）：worktree/base_ref/write_set 读工单 JSON 字段，计算在 src/host/changes.ts。
+   * KI-057（t260907-11）：判界仓根按锚走——?project= 显式 > 票面 t.project（权威，:1527
+   * 先例）> 缺省回落默认仓；防穿越闸在 changes.ts 内按传入根判界（语义不变）。
+   * 响应带 resolved 来源标记（报错精确：键解析失败 400/502 点名项目键，不冒充穿越）。
+   */
+  async function handleTicketDiff(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> {
     if (!TICKET_ID_RE.test(id)) {
       sendJson(res, 400, { ok: false, error: '工单 id 不合法' })
       return
@@ -777,23 +820,37 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         return
       }
       const t = s.result as TicketForDiff
-      const result = await computeTicketDiff(repo, {
-        id, worktree: t.worktree, base_ref: t.base_ref, write_set: t.write_set,
+      const url = new URL(req.url ?? '/', 'http://x')
+      const queryKey = url.searchParams.get('project')
+      // 键序：query 显式 > 票面 t.project（字符串才认，畸形类型视同缺省）> 默认仓。
+      const a = resolveProjectAnchor(
+        queryKey !== null && queryKey !== '' ? queryKey : (typeof t.project === 'string' ? t.project : ''),
+        repo)
+      const anchor = anchorGuard(res, a)
+      if (anchor === null) return
+      const result = await computeTicketDiff(anchor.root, {
+        id, worktree: t.worktree, base_ref: t.base_ref, write_set: t.write_set, project: t.project,
       })
-      sendJson(res, 200, { ok: true, result })
+      sendJson(res, 200, { ok: true, result, resolved: resolvedMark(anchor) })
     } catch (err) {
       sendJson(res, 502, { ok: false, error: String(err instanceof Error ? err.message : err) })
     }
   }
 
-  /** 读审批意见：server/dsh/reviews/<工单id>.json（复用 knowledge review-store 的读改写与文件形制）。 */
-  async function handleTicketReviewGet(res: ServerResponse, id: string): Promise<void> {
+  /**
+   * 读审批意见：reviews/<工单id>.json（复用 knowledge review-store 的读改写与文件形制）。
+   * KI-057：落盘锚 reviewsAnchor=<项目根>/server/dsh 按 ?project= 解析（缺省=默认仓，行为不变）。
+   */
+  async function handleTicketReviewGet(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> {
     if (!TICKET_ID_RE.test(id)) {
       sendJson(res, 400, { ok: false, error: '工单 id 不合法' })
       return
     }
+    const anchor = anchorGuard(res, anchorOf(new URL(req.url ?? '/', 'http://x')))
+    if (anchor === null) return
     try {
-      sendJson(res, 200, { ok: true, result: await loadReview(reviewsAnchor, id) })
+      const reviewsAnchor = join(anchor.root, 'server', 'dsh')
+      sendJson(res, 200, { ok: true, result: await loadReview(reviewsAnchor, id), resolved: resolvedMark(anchor) })
     } catch (err: any) {
       sendJson(res, 500, { ok: false, error: String(err?.message ?? err) })
     }
@@ -852,8 +909,14 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     const reviewer = typeof body?.reviewer === 'string' && body.reviewer.trim() !== ''
       ? body.reviewer.trim().slice(0, 40) : 'user'
     const round: ReviewRound = { base, ts: Math.floor(Date.now() / 1000), reviewer, conclude, blocks }
+    // KI-057：落盘锚按 ?project= 解析（校验失败=run-id 审计留痕后显式报错，不静默回落）。
+    const anchor = anchorGuard(res, anchorOf(new URL(req.url ?? '/', 'http://x')))
+    if (anchor === null) {
+      await audit(runId, 'review.save', { ticket: id }, false, '项目锚解析失败')
+      return
+    }
     try {
-      const saved = await appendReviewRound(reviewsAnchor, id, round)
+      const saved = await appendReviewRound(join(anchor.root, 'server', 'dsh'), id, round)
       const summary = `${id} 第 ${saved.rounds.length} 轮 conclude=${conclude} 块 ${blocks.length}`
       await audit(runId, 'review.save', { ticket: id, base, conclude, blocks: blocks.length }, true, summary)
       ctx.logger.info('sandbar-workbench: review.save %s（run-id %s）', summary, runId)
@@ -887,8 +950,9 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
    * merge 拆树后自然落空，归档处兜底）。防穿三层：TICKET_ID_RE 白名单 + 文件名白名单
    * （^[A-Za-z0-9._-]+$ 且 .png 结尾）+ resolve 落点断言。归档基目录 SUYOU_EVIDENCE_DIR
    * env 可覆盖（python 侧 _archive_shots 同名 env 互指，自测指向临时目录）。
+   * KI-057：候选根随 ?project= 项目主目录走（env 仅默认仓锚透出，取舍见 project-anchor.ts）。
    */
-  async function handleTicketEvidence(res: ServerResponse, id: string, file: string): Promise<void> {
+  async function handleTicketEvidence(req: IncomingMessage, res: ServerResponse, id: string, file: string): Promise<void> {
     if (!TICKET_ID_RE.test(id) || /[./]/.test(id)) {
       sendJson(res, 400, { ok: false, error: `工单 id 不合法：'${id.slice(0, 40)}'` })
       return
@@ -897,11 +961,14 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       sendJson(res, 400, { ok: false, error: `证据文件名不合法：'${file.slice(0, 60)}'（要求 ^[A-Za-z0-9._-]+$ 且 .png 结尾）` })
       return
     }
-    const base = process.env.SUYOU_EVIDENCE_DIR ?? join(repo, '.suyou', 'evidence')
+    const anchor = anchorGuard(res, anchorOf(new URL(req.url ?? '/', 'http://x')))
+    if (anchor === null) return
+    const root = anchor.root
+    const base = anchorEnv(anchor, 'SUYOU_EVIDENCE_DIR') ?? join(root, '.suyou', 'evidence')
     const candidates = [
       resolve(base, id, file),
-      resolve(repo, '.lane', id, '.suyou', 'screenshots', file),
-      resolve(repo, '.worktrees', id, '.suyou', 'screenshots', file),
+      resolve(root, '.lane', id, '.suyou', 'screenshots', file),
+      resolve(root, '.worktrees', id, '.suyou', 'screenshots', file),
     ]
     for (const abs of candidates) {
       const root = resolve(abs, '..', '..')
@@ -925,13 +992,17 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
    * 数据源=listEvidenceFiles（归档+泳道两候选枚举，防穿/降级口径见其注释）。
    * 空列表=200 files:[]（枚举语义无 404；「证据不存在」的人话由取图端点承担）。
    */
-  async function handleTicketEvidenceList(res: ServerResponse, id: string): Promise<void> {
+  async function handleTicketEvidenceList(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> {
     if (!TICKET_ID_RE.test(id) || /[./]/.test(id)) {
       sendJson(res, 400, { ok: false, error: `工单 id 不合法：'${id.slice(0, 40)}'` })
       return
     }
+    const anchor = anchorGuard(res, anchorOf(new URL(req.url ?? '/', 'http://x')))
+    if (anchor === null) return
     try {
-      sendJson(res, 200, { ok: true, result: { files: await listEvidenceFiles(id, repo) } })
+      // 项目锚显式传 envBase=null（env 仅默认仓锚生效，红线口径）；默认锚走缺省读 env。
+      const envBase = anchor.source === 'default' ? undefined : null
+      sendJson(res, 200, { ok: true, result: { files: await listEvidenceFiles(id, anchor.root, envBase) } })
     } catch (err) {
       sendJson(res, 500, { ok: false, error: `证据列表读取失败：${String(err instanceof Error ? err.message : err)}` })
     }
@@ -980,7 +1051,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         sendJson(res, 405, { ok: false, error: 'evidence 只支持 GET（只读图片）' })
         return
       }
-      await handleTicketEvidence(res, parts[0], parts[2])
+      await handleTicketEvidence(req, res, parts[0], parts[2])
       return
     }
     if (parts.length === 2) {
@@ -988,12 +1059,12 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       // t260831-08：evidence 列表只读 GET（详情抽屉「截图证据」区数据源；
       // 带文件段的取图在同前缀 3 段路由，见上方 handleTicketEvidence）。
       if (op === 'evidence' && req.method === 'GET') {
-        await handleTicketEvidenceList(res, id)
+        await handleTicketEvidenceList(req, res, id)
         return
       }
       // M9：diff / review 是只读 GET；review 的 POST 是审批意见落盘（不走 admin.py）。
       if (op === 'diff' && req.method === 'GET') {
-        await handleTicketDiff(res, id)
+        await handleTicketDiff(req, res, id)
         return
       }
       // M12：agent-logs 只读 GET（工单 agent 日志，见 handleAgentLogs）。
@@ -1013,7 +1084,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       }
       if (op === 'review') {
         if (req.method === 'GET') {
-          await handleTicketReviewGet(res, id)
+          await handleTicketReviewGet(req, res, id)
           return
         }
         if (req.method === 'POST') {
@@ -1217,22 +1288,27 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
 
   /* ---------------------------------- 立项单只读 API（epic-linkage Tier 2） */
 
-  /** 立项单列表：列 notes/epics/*.md（目录不存在/无文件 → 空数组不报错）。 */
+  /**
+   * 立项单列表：列 notes/epics/*.md（目录不存在/无文件 → 空数组不报错）。
+   * KI-057：epics 目录与预跑缓存目录随 ?project= 项目根走（env 闸见 project-anchor.ts）。
+   */
   async function handleEpics(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (req.method !== 'GET') {
       sendJson(res, 405, { ok: false, error: '立项单列表只支持 GET' })
       return
     }
+    const anchor = anchorGuard(res, anchorOf(new URL(req.url ?? '/', 'http://x')))
+    if (anchor === null) return
     try {
-      const epics = await listEpics(epicsDir)
+      const epics = await listEpics(anchorEpicsDir(anchor))
       // t260829-02：轻量带上「下一步已备」缓存命中标记（只 stat pre.json 存在性，
       // 不逐个算 state_key；准态由详情响应 nextHint 承担），前端列表行直接消费。
-      const cacheDir = resolvePrecacheDir(repo)
+      const cacheDir = resolvePrecacheDir(anchor.root)
       const withHint = await Promise.all(epics.map(async (e) => ({
         ...e,
         nextHintCached: await precacheExists(cacheDir, e.code),
       })))
-      sendJson(res, 200, { ok: true, result: { count: withHint.length, epics: withHint } })
+      sendJson(res, 200, { ok: true, result: { count: withHint.length, epics: withHint }, resolved: resolvedMark(anchor) })
     } catch (err) {
       sendJson(res, 500, { ok: false, error: String(err instanceof Error ? err.message : err) })
     }
@@ -1242,8 +1318,8 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
    *  前置与详情路由同口径：形状 400 / 不存在 404（拦住后 ticket.py 侧强校验不会再以
    *  引擎错误冒出）；其后 callTool 抛错或回 ok:false 一律降级 {degraded:true, reason}
    *  （reason 透传底层 error 原文，不吞成空泛「不可用」），不 502。 */
-  async function handleEpicTickets(res: ServerResponse, code: string): Promise<void> {
-    const chk = await readEpicMarkdown(epicsDir, code)
+  async function handleEpicTickets(res: ServerResponse, code: string, anchor: OkAnchor): Promise<void> {
+    const chk = await readEpicMarkdown(anchorEpicsDir(anchor), code)
     if (!chk.ok) {
       sendJson(res, chk.status, { ok: false, error: chk.error })
       return
@@ -1278,8 +1354,8 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
    *  job 直接复用（不重复 spawn agent）；模板清单（验证建议合法性的白名单基准）
    *  拿不到 → 502 可重试（不放行无校验的建议）；工单状态汇总失败降级为说明文字
    *  内联进 prompt（不阻塞建议链路）。 */
-  async function handleSuggestNextStart(res: ServerResponse, code: string): Promise<void> {
-    const chk = await readEpicMarkdown(epicsDir, code)
+  async function handleSuggestNextStart(res: ServerResponse, code: string, anchor: OkAnchor): Promise<void> {
+    const chk = await readEpicMarkdown(anchorEpicsDir(anchor), code)
     if (!chk.ok) {
       sendJson(res, chk.status, { ok: false, error: chk.error })
       return
@@ -1326,7 +1402,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     // 坏缓存 readPrecache 一律当未命中 → 落回下方原冷起路径。
     if (ticketRows.length > 0) {
       const cached = await readPrecache(
-        resolvePrecacheDir(repo), code,
+        resolvePrecacheDir(anchor.root), code,
         stateKeyFromRows(ticketRows, ''), workflows.map((w) => w.id))
       if (cached) {
         sendJson(res, 200, { ok: true, result: { state: 'done', suggestion: cached, cached: true } })
@@ -1335,7 +1411,9 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     }
     try {
       const job: EpicNextJob = await startSuggestJob({
-        repo, code, epicTitle: chk.title, epicMarkdown: chk.markdown, ticketsSummary, workflows,
+        // KI-057：repo=引擎仓锚（roles/model-routes=引擎侧声明，保留）；root=项目根
+        // （job 目录/预跑缓存随项目走，epic-next.ts 消费）。
+        repo, root: anchor.root, code, epicTitle: chk.title, epicMarkdown: chk.markdown, ticketsSummary, workflows,
       })
       sendJson(res, 200, { ok: true, result: { job_id: job.jobId, state: job.state, reused: false } })
     } catch (err) {
@@ -1363,7 +1441,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
   /** 立项详情的「下一步建议」准态（t260829-02）：工单集合现算 state_key（本票已
    *  closed 口径，currentTicketId 传 '' 与 suggest-next 缓存命中路径同款）+
    *  readPrecacheHint 全量校验。任一查询失败 → null（详情不被建议链路拖垮）。 */
-  async function epicNextHintFor(code: string): Promise<unknown> {
+  async function epicNextHintFor(code: string, anchor: OkAnchor): Promise<unknown> {
     try {
       const [w, t] = await Promise.all([
         callTool('workflow', { op: 'list' }),
@@ -1376,7 +1454,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         id: String(x?.id ?? ''), closed: String(x?.status ?? '') === 'closed',
       }))
       return await readPrecacheHint(
-        resolvePrecacheDir(repo), code, stateKeyFromRows(rows, ''), workflowIds)
+        resolvePrecacheDir(anchor.root), code, stateKeyFromRows(rows, ''), workflowIds)
     } catch {
       return null
     }
@@ -1394,13 +1472,16 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       return
     }
     const parts = rest.split('/').filter(Boolean)
+    // KI-057：项目锚在分支前解析（?project= 缺省回落默认仓；未知/隔离显式 400/502）。
+    const anchor = anchorGuard(res, anchorOf(url))
+    if (anchor === null) return
     // suggest-next 两支（t260827-02）须在下面的 GET-only 405 之前分支。
     if (parts.length === 2 && parts[1] === 'suggest-next') {
       if (req.method !== 'POST') {
         sendJson(res, 405, { ok: false, error: 'suggest-next 启动只支持 POST' })
         return
       }
-      await handleSuggestNextStart(res, parts[0])
+      await handleSuggestNextStart(res, parts[0], anchor)
       return
     }
     if (parts.length === 3 && parts[1] === 'suggest-next') {
@@ -1419,7 +1500,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         sendJson(res, 405, { ok: false, error: '结项动作只支持 POST（人审确认语义）' })
         return
       }
-      const r = await closeEpic(epicsDir, parts[0])
+      const r = await closeEpic(anchorEpicsDir(anchor), parts[0])
       if (!r.ok) {
         sendJson(res, r.status, { ok: false, error: r.error })
         return
@@ -1447,7 +1528,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         sendJson(res, 400, { ok: false, error: '请求体必须是 {"status": "<四值枚举>", "note"?: <单行字符串>}，status 必填字符串' })
         return
       }
-      const r = await setEpicStatus(epicsDir, parts[0], body.status, body.note)
+      const r = await setEpicStatus(anchorEpicsDir(anchor), parts[0], body.status, body.note)
       if (!r.ok) {
         sendJson(res, r.status, { ok: false, error: r.error })
         return
@@ -1455,19 +1536,41 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       sendJson(res, 200, { ok: true, result: { code: r.code, status: r.status, note: r.note } })
       return
     }
+    // [忽略] 动作（t260829-02）：POST /epics/<code>/next-hint/dismiss——删预跑缓存
+    // pre.json（幂等；删除前备份 /tmp）。与 suggest-next/close/status 同理须在下方
+    // GET-only 405 之前分支（t260907-11 顺手修复：分支原被卡在 405 闸之后，POST
+    // dismiss 恒 405，前端 [忽略建议] 按钮全灭；tests/epics-api.mjs 已备修复后断言）。
+    if (parts.length === 3 && parts[1] === 'next-hint' && parts[2] === 'dismiss') {
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { ok: false, error: '忽略建议只支持 POST（写动作语义）' })
+        return
+      }
+      const chk = await readEpicMarkdown(anchorEpicsDir(anchor), parts[0])
+      if (!chk.ok) {
+        sendJson(res, chk.status, { ok: false, error: chk.error })
+        return
+      }
+      const dr = await dismissPrecache(resolvePrecacheDir(anchor.root), parts[0])
+      if (!dr.ok) {
+        sendJson(res, dr.status, { ok: false, error: dr.error })
+        return
+      }
+      sendJson(res, 200, { ok: true, result: { code: dr.code, dismissed: true } })
+      return
+    }
     if (req.method !== 'GET') {
       sendJson(res, 405, { ok: false, error: '立项单路由只支持 GET（只读）' })
       return
     }
     if (parts.length === 1) {
-      const r = await readEpicMarkdown(epicsDir, parts[0])
+      const r = await readEpicMarkdown(anchorEpicsDir(anchor), parts[0])
       if (!r.ok) {
         sendJson(res, r.status, { ok: false, error: r.error })
         return
       }
       // t260829-02：详情准态「下一步建议」——state_key 现算 + readPrecacheHint 全量
       // 校验（命中才带 nextHint；工单/模板清单查询失败一律静默 null，不拖垮详情）。
-      const nextHint = await epicNextHintFor(parts[0])
+      const nextHint = await epicNextHintFor(parts[0], anchor)
       sendJson(res, 200, {
         ok: true,
         result: {
@@ -1483,28 +1586,8 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       })
       return
     }
-    // [忽略] 动作（t260829-02）：POST /epics/<code>/next-hint/dismiss——删预跑缓存
-    // pre.json（幂等；删除前备份 /tmp）。须在 GET-only 405 之前分支。
-    if (parts.length === 3 && parts[1] === 'next-hint' && parts[2] === 'dismiss') {
-      if (req.method !== 'POST') {
-        sendJson(res, 405, { ok: false, error: '忽略建议只支持 POST（写动作语义）' })
-        return
-      }
-      const chk = await readEpicMarkdown(epicsDir, parts[0])
-      if (!chk.ok) {
-        sendJson(res, chk.status, { ok: false, error: chk.error })
-        return
-      }
-      const dr = await dismissPrecache(resolvePrecacheDir(repo), parts[0])
-      if (!dr.ok) {
-        sendJson(res, dr.status, { ok: false, error: dr.error })
-        return
-      }
-      sendJson(res, 200, { ok: true, result: { code: dr.code, dismissed: true } })
-      return
-    }
     if (parts.length === 2 && parts[1] === 'tickets') {
-      await handleEpicTickets(res, parts[0])
+      await handleEpicTickets(res, parts[0], anchor)
       return
     }
     sendJson(res, 404, { ok: false, error: '路径不合法：/sandbar-workbench/api/epics/<代号>[/tickets | /suggest-next[/<jobId>] | /next-hint/dismiss | /close | /status]' })

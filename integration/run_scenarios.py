@@ -607,6 +607,18 @@ SCENARIOS = [
     ("t260907-01-smoke-lane-green",
      "移仓后 smoke 资产面泳道直跑全绿（工单验收③执行面锚，KI-038「脚本在场环境红」习惯化防线）：从泳道 worktree 直跑三支零依赖纯函数冒烟（projects/sessions/agent-live，cwd=workbench）各 exit 0 且 passed>0 failed=0（agent-live 的 C/D 段在 zstd 缺席时自降级、退出码语义不变）。守的是「下次任何人直跑必须绿」的环境合同，与 smoke 自身 L1 函数断言不同层不重复；零端口零 3099 零网络",
      "node integration/t260907-01/sc_smoke_suite_lane_green.mjs", "ro"),
+
+    # ---- t260907-11：工单台 host 项目感知化（KI-057 六锚穿参）——跨项目对照场景族 ----
+
+    ("t260907-11-wb-anchor-faces",
+     "跨项目三面取数对照＋撞码不互串＋防穿越闸随项目根判界（t260907-11，KI-057 宿主实报「dengzhufpv 变更 tab 空」的 fixture 化=验收腿①）：fpv 视图 epics 列表/详情读 fpv 仓、审批 POST 落 fpv 仓 server/dsh/reviews/ 且 sandbar 视图同 id 读空（写读两面均按项目键）、precache nextHintCached 与 dismiss 随项目根（同代号 demo-x 两项目缓存互不牵连=撞码面，epic 代号无跨项目唯一约束已实核）；diff 判界面=fpv 根内泳道可见（实报反面）而同一 worktree 换 sandbar 锚仍拒「越出」＋根外路径仍拒（红线：闸语义不弱化、判界基准随项目走）。进程内 apply+mock req/res（零端口零 Temporal 零 3099/7233），SANDBAR_PROJECTS_DIR 临时注册表（.migrated 跳种子迁移）；git 缺席=ENV_FAIL exit 2 点名；实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。与 developer L1（resolver/纯函数真值表）与 smoke/changes.mjs（单仓单项目）intent 不同面：本条锁双项目对照组装行为",
+     "node integration/t260907-11/sc_wb_anchor_cross_project_faces.mjs"),
+    ("t260907-11-wb-anchor-keys",
+     "项目键解析契约面：零回归＋报错精确＋隔离语义＋env 收窄（t260907-11，KI-057，验收腿②的 fixture 化）：无参回落默认仓且响应带 resolved 来源标记（方案承诺）；?project=<sandbar key> 注册表路径解析根与无参回落根逐字节一致（生产 UI 恒带 ?project=，钉住注册表条目不漂移=零回归闸）；未知 key 显式 400 且 error 点名项目键不伪装「越出仓库根」（报错必须精确）；隔离条目显式 502 透传注册表文案（不回落=不违隔离语义）；SUYOU_EPICS_DIR 仅无参回落生效、per-project 不被 env 串味（红线「旧 env 覆盖链保留」×方案收窄声明双兑现）。进程内驱动零端口零 Temporal；实现落地前红属预期。与 developer L1（resolver 四边角单测）intent 不同层：本条锁路由组装后的响应契约；票面 t.project 与 query 优先级需引擎 ticket show，归 S5 实票不重复",
+     "node integration/t260907-11/sc_wb_anchor_key_resolution.mjs"),
+    ("t260907-11-wb-anchor-evidence",
+     "证据目录锚项目化＋env 收窄（t260907-11，KI-057 第四面，含取图端点同族核销）：fpv 视图证据列表=归档 .suyou/evidence＋泳道 .worktrees 两候选三件、取图端点按 ?project= 读 fpv 根字节一致、sandbar 视图同 id 列表空/取图 404（不串项目）；SUYOU_EVIDENCE_DIR 仅无参回落生效、per-project 不被串（红线 env 链保留×收窄声明）。进程内驱动零端口零 Temporal；证据防穿（文件名白名单/TICKET_ID_RE containment）归既有覆盖不重复；实现落地前红属预期，arbitrate/merge 期必须绿",
+     "node integration/t260907-11/sc_wb_anchor_evidence_family.mjs"),
 ]
 
 CMD_TIMEOUT = 900

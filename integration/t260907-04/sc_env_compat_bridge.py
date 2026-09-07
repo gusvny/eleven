@@ -60,6 +60,14 @@ def env_of(**kv):
 
 
 def main():
+    # 父环境净化（t260907-11 仲裁实锤修复）：lib_naming.tp_eval 的 env_extra 是
+    # **叠加**语义（dict(os.environ) | env_extra），env_of 返回的「已剥离家族变量
+    # 的完整环境」被叠加后，父环境的 SUYOU_*/SANDBAR_* 原样漏进子进程——闸内泳道
+    # 上下文导出 SANDBAR_TASK_QUEUE=sandbar-ticket-<泳道>（t260907-04 过闸时引擎
+    # 尚未导出该名，故当时绿、更名后翻红），「仅旧名/仅新名/桥幂等」腿的前提
+    # 被污染。在本进程入口先自净，叠加即从净环境出发，env_of 语义才成立。
+    for k in [k for k in os.environ if k.startswith(("SUYOU_", "SANDBAR_"))]:
+        del os.environ[k]
     r = lib_naming.Rec()
 
     print("== 腿1 仅旧名环境 → 引擎解析到旧名值（在飞环境不炸）")
