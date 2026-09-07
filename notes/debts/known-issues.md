@@ -570,3 +570,8 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 症状①：浅色模式下「文档」页文字不可读——docs.tsx 硬编码 25 处深色调色板（#c9d1d9/#8b949e/#3a404c 等），t260905-06 落地时按深色写死，t260905-08 全台令牌化漏网，hex 看守未网住（豁免或扫描面缺口待查）。
 - 症状②：深色模式下工单台部分子面仍是浅色（具体面待 sweep 排查）。
 - 病根纪律：主题验收只跑了「测试台平台（新版 token 集）×双外观」，从未跑「旧版平台 token 集」矩阵——与 KI-052 版本错位同族。修法=t260907-08 sweep：docs.tsx 令牌化＋全子面排查＋**双平台版本×双外观四象限**验收矩阵（t260907-03 重基线落地后执行，同文件错峰）。
+
+## KI-056 rework 轮回执格式无提醒（260907 写集 saga 教训，非阻塞）
+- 现象：create_plan rework 轮 agent 连续交空 files_changed（01/03 两票各 2-3 轮被 KI-049 拒），根因=rework 重跑的 prompt 不含回执 schema 提醒（首轮 prompt 有，rework prompt 组装丢了这段）。
+- 影响：每票多耗 1-2 小时（打回-重跑-再拒循环）。
+- 处置：小改进票（build_stage_prompt 对 rework gen>0 的 create_plan 补回执格式段），排队不紧急；本日两票已靠 rework note 手工带指令解套。
