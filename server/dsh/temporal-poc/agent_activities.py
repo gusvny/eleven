@@ -102,6 +102,7 @@ from shared import (
     model_route_for,
     rebase_write_set,
     build_repo_worktrees,
+    is_multi_repo_layout,
     roles_dir_for_spawn,
     routes_file_for_spawn,
 )
@@ -1438,10 +1439,18 @@ def _lane_scopes(wt: Path, branch: str = "", base_ref: str = "",
     project_root = wt.parent.parent
     scopes: List[Dict[str, Any]] = []
     for e in entries:
-        if not (isinstance(e, dict) and e.get("repo") and e.get("branch")):
-            raise RuntimeError("多仓泳道清单条目畸形（%r in %s）——人工处置" % (e, mf))
+        # t260907-12：repo 允许空串=根仓树（tree=泳道容器、repo=项目根本身）；
+        # branch 缺失/非串仍拒收（fail-closed 不弱化，文案点名真缺失字段）。
+        if not isinstance(e, dict):
+            raise RuntimeError("多仓泳道清单条目须为对象（%r in %s）——人工处置" % (e, mf))
+        if not isinstance(e.get("repo"), str):
+            raise RuntimeError("多仓泳道清单条目 repo 字段缺失或非字符串（%r in %s）"
+                               "——人工处置" % (e, mf))
+        if not (isinstance(e.get("branch"), str) and e["branch"]):
+            raise RuntimeError("多仓泳道清单条目 branch 字段缺失或为空（%r in %s）"
+                               "——人工处置" % (e, mf))
         scopes.append({
-            "name": str(e.get("name") or e["repo"]),
+            "name": str(e.get("name") or e["repo"] or "root"),
             "tree": wt / e["repo"],
             "repo": project_root / e["repo"],
             "branch": str(e["branch"]),
@@ -1558,11 +1567,14 @@ def _prepare_multirepo_lane(lane_root: Path, entries: Any,
     errors: List[str] = []
     created_n = 0
     for e in entries:
-        if not (isinstance(e, dict) and isinstance(e.get("repo"), str) and e["repo"]
+        # t260907-12：repo 允许空串=根仓树（repo=项目根本身、tree=泳道容器本身，
+        # Path/"" 同式零特判）；name/branch 须非空字符串，缺失照旧拒收。
+        if not (isinstance(e, dict) and isinstance(e.get("repo"), str)
+                and isinstance(e.get("name"), str) and e["name"]
                 and isinstance(e.get("branch"), str) and e["branch"]):
             return WorkspacePrepResult(ok=False, kind="worktree", action="failed",
                                        path=str(lane_root),
-                                       error="repo_worktrees 条目形状非法: %r" % (e,))
+                                       error="repo_worktrees 条目形状非法（须 {repo(允许空串=根仓树),name,branch} 且 name/branch 非空）: %r" % (e,))
         repo = project_root / e["repo"]
         tree = lane_root / e["repo"]
         if not (repo / ".git").exists():
@@ -1652,13 +1664,15 @@ async def prepare_workspace(prep: WorkspacePrep) -> WorkspacePrepResult:
         return WorkspacePrepResult(ok=True, kind="dir", action="ensured", path=str(p))
     # 票B（t260907-06）多仓泳道：workspace.repo_worktrees 在场即多仓票——走逐仓
     # 创建/复用分支（meta.repo_worktrees=唯一真源，本函数校验盘面一致，不重推导）。
-    # 通道形态（夹具/直调）：prep.write_set+prep.project_root 在场且项目根无 .git
-    # → 由写集归属推导明细（推导逻辑=shared.build_repo_worktrees 单点，与建票链
-    # 同源）；单仓项目（项目根=仓根）不进此分支，旧路径零回归。
+    # 通道形态（夹具/直调）：prep.write_set+prep.project_root 在场且项目根为
+    # 真多仓形态（is_multi_repo_layout 单点谓词，与建票链同源；t260907-12 起根
+    # =仓+子仓并存的混合形态同样激活）→ 由写集归属推导明细（推导逻辑=
+    # shared.build_repo_worktrees 单点，与建票链同源）；单仓项目（项目根=仓根且
+    # 无子仓）不进此分支，旧路径零回归。
     rws = ws.get("repo_worktrees")
     if not (isinstance(rws, list) and rws) and prep.write_set and prep.project_root:
         _pr = Path(prep.project_root)
-        if not (_pr / ".git").exists():
+        if is_multi_repo_layout(_pr):
             try:
                 rws = build_repo_worktrees(_pr, prep.write_set, p.name)
             except ValueError as e:

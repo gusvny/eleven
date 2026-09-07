@@ -247,3 +247,116 @@ def test_gate_error_repo_worktrees_shapes():
     # 无 repo_worktrees 的单仓票不受影响
     plain = dict(meta, workspace=base_ws)
     assert shared.lane_workspace_gate_error(plain) == ""
+
+
+# ---------- t260907-12：根亦 git 仓的混合形态（根仓 + 子仓并存） ----------
+
+@pytest.fixture
+def mixedrepo():
+    """混合夹具（dengzhufpv 形态）：项目根=git 仓（知识库仓）+ repos/* 两子仓并存。"""
+    root = _init_repo(Path(tempfile.mkdtemp(prefix="t260907-12-ut-")))
+    (root / "docs").mkdir()
+    (root / "docs" / "kb.md").write_text("kb\n", encoding="utf-8")
+    _git("add", "-A", cwd=root)
+    _git("commit", "-m", "root: docs/kb.md", cwd=root)
+    a = _init_repo(root / "repo_a")
+    (a / "src").mkdir()
+    (a / "src" / "a.py").write_text("a\n", encoding="utf-8")
+    _git("add", "-A", cwd=a)
+    _git("commit", "-m", "repo_a: src/a.py", cwd=a)
+    b = _init_repo(root / "repo_b")
+    return root, a, b
+
+
+def test_repos_under_mixed_root_plus_children(mixedrepo):
+    root, a, b = mixedrepo
+    got = shared.repos_under(root)
+    assert got[0] == root  # 根仓在前
+    assert sorted(map(str, got[1:])) == sorted([str(a), str(b)])
+
+
+def test_repos_under_root_without_children_unchanged(mixedrepo):
+    root, a, _ = mixedrepo
+    single = Path(tempfile.mkdtemp(prefix="t260907-12-ut-single-"))
+    _init_repo(single)
+    (single / "x").mkdir()
+    assert shared.repos_under(single) == [single]  # 根无子仓 → 恒 [根]（零变化）
+
+
+def test_is_multi_repo_layout_three_states(mixedrepo):
+    root, a, _ = mixedrepo
+    assert shared.is_multi_repo_layout(root) is True          # 混合形态
+    single = Path(tempfile.mkdtemp(prefix="t260907-12-ut-single2-"))
+    _init_repo(single)
+    assert shared.is_multi_repo_layout(single) is False       # 单仓=零变化
+    empty = Path(tempfile.mkdtemp(prefix="t260907-12-ut-empty2-"))
+    assert shared.is_multi_repo_layout(empty) is False        # 无仓
+    # 票B 原形态：根无 .git、单子仓 → True
+    legacy = Path(tempfile.mkdtemp(prefix="t260907-12-ut-legacy-"))
+    _init_repo(legacy / "only")
+    assert shared.is_multi_repo_layout(legacy) is True
+
+
+def test_resolve_mixed_root_and_children_paths(mixedrepo):
+    root, a, b = mixedrepo
+    m = shared.resolve_repos_for_paths(root, ["docs/kb.md", "repo_a/src/a.py"])
+    assert m[str(root.resolve())] == ["docs/kb.md"]           # 根路径归根仓
+    assert m[str(a.resolve())] == ["repo_a/src/a.py"]   # 子仓路径归子仓
+
+
+def test_resolve_mixed_unowned_and_nested_rejected(mixedrepo):
+    root, a, _ = mixedrepo
+    _init_repo(root / "repo_a" / "nested")  # 子仓内的仓中仓
+    with pytest.raises(ValueError, match="嵌套"):
+        shared.resolve_repos_for_paths(root, ["repo_a/nested/n.txt"])
+    # 无主路径（不在任何仓内——根仓与子仓之外不存在，逃逸/绝对路径仍拒）
+    with pytest.raises(ValueError):
+        shared.resolve_repos_for_paths(root, ["/abs/x"])
+    with pytest.raises(ValueError, match="逃逸"):
+        shared.resolve_repos_for_paths(root, ["../x"])
+
+
+def test_build_repo_worktrees_mixed_root_named_root(mixedrepo):
+    root, _, _ = mixedrepo
+    entries = shared.build_repo_worktrees(str(root), ["docs/kb.md", "repo_a/src/a.py"],
+                                          "t260907-12")
+    assert entries[0]["repo"] == ""                           # 根树（排序：根仓 rel 短→resolve 迭代序）
+    assert entries[0]["name"] == "root"
+    assert entries[0]["branch"] == "lane/t260907-12-root"
+    assert any(e["repo"] == "repo_a" for e in entries)
+
+
+def test_derive_mixed_activates_and_single_repo_ignores(mixedrepo):
+    root, a, _ = mixedrepo
+    lane_rel, _ = shared.default_lane_paths("t260907-12-ut")
+    lane, ws, worktree, branch = shared.derive_lane_workspace(
+        "t260907-12-ut", "worktree", project_root=str(root),
+        repo_write_set=["docs/kb.md", "repo_a/src/a.py"])
+    repos = {e["repo"] for e in ws["repo_worktrees"]}
+    assert repos == {"", "repo_a"}                      # 多树含根树
+    assert shared.lane_workspace_gate_error(
+        {"lane": "worktree", "workspace": ws, "worktree": worktree, "branch": branch}) == ""
+    # 单仓（根 .git 无子仓）→ 不激活，旧路径零变化
+    single = Path(tempfile.mkdtemp(prefix="t260907-12-ut-single3-"))
+    _init_repo(single)
+    _, ws2, _, _ = shared.derive_lane_workspace(
+        "t260907-12-ut", "worktree", project_root=str(single),
+        repo_write_set=["x.py"])
+    assert "repo_worktrees" not in ws2
+
+
+def test_gate_error_accepts_root_repo_entry(mixedrepo):
+    root, _, _ = mixedrepo
+    base_ws = {"type": "worktree", "path": "/p/.lane/t1"}
+    good = dict(base_ws, repo_worktrees=[
+        {"repo": "", "name": "root", "branch": "lane/t1-root"},
+        {"repo": "repo_a", "name": "repos-repo_a", "branch": "lane/t1-repos-repo_a"}])
+    meta = {"lane": "worktree", "workspace": good, "worktree": "/p/.lane/t1",
+            "branch": "lane/t1"}
+    assert shared.lane_workspace_gate_error(meta) == ""
+    # 真畸形照旧拒：repo 非串 / branch 缺失 / branch 空（文案点名字段）
+    for bad in ({"repo": 0, "name": "r", "branch": "lane/x"},
+                {"repo": "", "name": "root"},
+                {"repo": "", "name": "root", "branch": ""}):
+        m = dict(meta, workspace=dict(base_ws, repo_worktrees=[bad]))
+        assert shared.lane_workspace_gate_error(m) != ""

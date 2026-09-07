@@ -124,6 +124,11 @@ def run_case(suggestion=None, *, ep="a", sk="sk1", pre_sk=None, pre_epic=None,
         shutil.rmtree(ws, ignore_errors=True)
         shutil.rmtree(shared.epic_next_precache_path(REPO, code).parent,
                       ignore_errors=True)
+        # mirror_to_legacy 会把新名预跑缓存镜像到旧名 .suyou/epic-next/（naming-compat 镜像面；退役账#5
+        # 过渡面），镜像出的旧名副本不同步清 → no-residue 假红（t260907-12 顺修）：
+        # 旧名同 rel 一并清理（best-effort，与镜像同口径）。
+        shutil.rmtree(REPO / shared.DOT_DIR_OLD / "epic-next" / code,
+                      ignore_errors=True)
 
 
 OK_SUG = {"status": "ok", "workflow": "dev-lane", "title": "T1", "body": "b",
