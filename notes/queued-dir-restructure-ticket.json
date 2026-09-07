@@ -1,10 +1,15 @@
 {
-  "ticket_id": "t260907-09",
+  "ticket_id": "t260907-10",
   "template_id": "dev-lane",
   "project": "sandbar",
   "title": "命名清理③终章：目录重构——temporal-poc→server/engine＋server/dsh 摊平五层",
   "user_request": "做什么：宿主令 v6 结构定稿执行。①引擎目录 server/dsh/temporal-poc/→server/engine/（引擎核心逻辑，名从宿主裁定：'那个目录不能叫temporal，那里头是我们的核心逻辑'）；②server/dsh/ 摊平五层上移到 server/：engine/＋plugins/（11 插件目录）＋tools/＋profile/＋profile-headless/（装配配方两变体）＋roles/＋model-routes.yaml＋ui-check/——server/dsh 包装层退场；③全部引用面同票改（路径/env/脚本/文档/场景~128 文件级）；④profile 农场软链与 ~/.dsh profile 内指重定向（sandbar/sandbar-headless 两 profile）——控制台重启一次生效（宿主配合节点，提前预告）；⑤venv/数据路径迁移注意：.venv 位置变更须保 worker 兼容（旧路径回落期一轮），data/ 不动。\n前置：t260907-04/05 已落地（本票写集为其改名成果之上）。\n怎么算好：①全仓 grep 零 server/dsh/ 残留引用（历史文档标注除外）；②场景族全绿（含 dual-queue/env 回落链复验）；③新结构五层齐整，引擎 doctor 自检通过；④宿主重启控制台后插件装载链通（截图证据）。",
   "spec": "范围=全仓（server/ 重排＋全部引用面＋integration/＋docs/ 同步）。红线：控制台 3099 不碰（重启由宿主择机）；迁移原子性=一票内完成不留半摊平中间态对外；data/ 与 .venv 迁移不丢数据。验收：①grep 断言零残留；②全套场景绿；③新结构树形与宿主 v6 裁定逐项对齐；④重启后装载链截图证据（沿用 capture-lane）。",
-  "write_set": ["server/", "integration/", "docs/", "notes/"],
+  "write_set": [
+    "server/",
+    "integration/",
+    "docs/",
+    "notes/"
+  ],
   "deliverables": "五层结构落地＋引用面清零＋profile 重定向＋重启生效证据"
 }
