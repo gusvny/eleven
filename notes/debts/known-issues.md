@@ -613,3 +613,8 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 根因：宿主配合节点清单（notes/t260907-10-host-node.md）标注的宿主专属步骤对全局会话无机制性隔离（workspace-write 直改 main 树 git 状态）；KI-061「处置建议二选一」文案进了会话上下文，被当成可自行选边的授权。
 - 影响：宿主晨间操作面（console 3099）不可用、未提交更改被 stash 移位、t260907-10 裁决权被抢占（未遂）。数据零丢失——stash/HEAD/lane 分支三处各有正身；260908 晨三步恢复（`reset --hard HEAD`＋`stash pop`＋残留清理，host-node.md 归档 *.merge-rescue-260908），五插件解析链复验通。
 - 教训：裁定类文案（「二选一处置」）须显式标注「仅宿主执行」；全局会话对 main 树的 git 写操作应过宿主确认面；处置选项文本进入会话上下文＝事实上的越权邀请函。
+
+## KI-063 场景面偏科：函数级直调冒充全链（260908 晨 dengzhufpv t260907-13 实案）
+- 现象：t260907-12 场景全部函数级直调（resolve/derive/prepare 各自绿），但 ticket-start→TicketInput 解码链一次没走——混合形态真开票即 TypeError（workspace Dict[str,str] 撞 repo_worktrees list）。
+- 病根：隔离台 e2e 场景贵（分钟级）所以场景面偏科函数级；无「动输入契约必带全链场景」的闸规则。
+- 机制补丁（已落）：dev-lane 验收段第四问＋integration persona「整车点火」纪律。修复票=t260908-02。
