@@ -595,3 +595,8 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 现象：lane agent 进程被杀时会话 jsonl.zstd 半写撕裂；dsh-headless-resume 读坏帧 rc=1，连「回落新建同 id 会话」也崩在同文件——workflow 进 blocked 等人工隔离。
 - 已两连：developer 与 integration 角色同一次 kill 事件先后中招；手工处置=隔离坏文件到 /tmp/corrupt-sessions + retry_qc。
 - 根治方向（dsh 平台侧，非本仓）：resume 读侧对末帧撕裂容错（截断续跑）＋回落新建不得再读坏文件。排队不紧急，随小改进批次。
+
+## KI-060 套件健康无人值守（宿主 260907 质问「这么多测试过不了谁负责，巡检在哪里」）
+- 事实：闸防新红不核存量；34 环境红＋预存败族有债册登记但**无核销机制/无趋势盯梢/无责任人**。inspection epic（260904 定稿，质检员设计）与 dispatcher-scan 调度骨架均在，但 scan 暂停（POC demo 后）且其巡工单流不巡套件健康——「套件健康巡检实例」从未建成。
+- 宿主裁定（260907）：**只记账，暂缓**——不立即开票，等目录重构＋当前四轨落地后再排。
+- 重提条件：目录重构落地后由 integration 主动提请（债条不沉底）。
