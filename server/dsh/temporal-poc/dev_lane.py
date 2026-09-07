@@ -155,6 +155,7 @@ UI_DIFF_PATCH_ID = "dev-lane-ui-diff-v1"
 # t260829-07 写集生命周期：方案定稿后写集跟随方案刷新（并集），空初始写集票由此
 # 在方案定稿后获得护栏。同构布尔门：挂起中旧 workflow 重放不走新分支；不 bump PATCH_ID。
 REFRESH_WRITE_SET_PATCH_ID = "dev-lane-refresh-write-set"
+KI061_WAKE_RESET_PATCH_ID = "dev-lane-ki061-wake-reset"
 # t260904-18 KI-049 门②：create_plan 回执 files_changed 空/畸形 → 可见红+告警，
 # 写集零污染（不再静默 no-op）。同构布尔门：挂起中旧 workflow 重放（含空回执旧票）
 # 走原刷新路径（命令序列与旧历史一致）；不 bump PATCH_ID。
@@ -1422,8 +1423,9 @@ class DevLaneWorkflow:
                     # 结果留内存不重跑（成本高且结论稳定，同格式分支取舍）。不重置则
                     # 唤醒后 join 吃 memoized arb_res 立即再 blocked、arbitrate 永不
                     # 重 spawn——宿主裁定无可达消费点（t260907-10 卡闸实锤）。
-                    arb_done = False
-                    arb_res = None
+                    if workflow.patched(KI061_WAKE_RESET_PATCH_ID):
+                        arb_done = False
+                        arb_res = None
                     await self._blocked("arbitrate", route.split(":", 1)[1])
                     continue
                 if verdict == "tests-fault":
@@ -1591,8 +1593,9 @@ class DevLaneWorkflow:
                     # 结果留内存不重跑（成本高且结论稳定，同格式分支取舍）。不重置则
                     # 唤醒后 join 吃 memoized arb_res 立即再 blocked、arbitrate 永不
                     # 重 spawn——宿主裁定无可达消费点（t260907-10 卡闸实锤）。
-                    arb_done = False
-                    arb_res = None
+                    if workflow.patched(KI061_WAKE_RESET_PATCH_ID):
+                        arb_done = False
+                        arb_res = None
                     await self._blocked("arbitrate", route.split(":", 1)[1])
                     continue
                 # 非 pass：本轮并行走查结果作废（回路收敛后 run_integration_tests 入口
