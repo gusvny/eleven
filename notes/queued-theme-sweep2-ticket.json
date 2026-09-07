@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260907-08",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "主题面 sweep②：docs 页令牌化＋全子面排查＋双平台×双外观四象限验收（KI-055）",
+  "user_request": "做什么：宿主 260907 实报两症状——①浅色模式「文档」页字不可读（docs.tsx 25 处深色调色板硬编码：#c9d1d9/#8b949e/#3a404c 等，t260905-06 按当时深色写死，08 号令牌化漏网）；②深色模式工单台部分子面仍浅色（逐面排查：详情面板/弹层/new-ticket/epics 视图等）。修法=①docs.tsx 全量令牌化（theme.ts TOKEN 体系）；②全客户端子面 sweep（grep 硬编码色＋真渲染断言）；③验收升级为**四象限矩阵**：平台 token 集（新版有 bg-primary × 旧版 0.1.1-rc.2 只有 bg-base）×外观（深/浅）——每象限对比度断言，不再只测测试台平台；④hex 看守扫描面补 docs.tsx 类缺口（查 08 号为何没网住：豁免清单还是扫描范围）。\n为什么=KI-055：主题家族第三次「台面绿×真机红」，根因是验收矩阵缺平台版本维度。\n排序=t260907-03（重基线）落地后执行——同文件错峰，本票面先挂起。",
+  "spec": "范围=server/dsh/workbench/src/client/＋integration/（四象限场景）。验收：①四象限全绿（旧平台 token 集夹具=注入 bg-base-only 的 CSS 环境）；②docs.tsx 零硬编码色（token 定义除外）；③宿主真机复查两症状消失（验收走查腿留截图证据）。",
+  "write_set": ["server/dsh/workbench/src/client/", "server/dsh/workbench/lib/", "integration/"],
+  "deliverables": "docs 页令牌化＋子面 sweep＋四象限验收矩阵（KI-055 闭环）"
+}
