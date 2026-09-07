@@ -39,9 +39,9 @@ try {
   /* ------------------------------------------------------------ A. projectDirKey */
   section('A projectDirKey（cwd-slug 规则与 dsh 侧一致）')
   {
-    // 真实目录名对拍（260825 本泳道实测）：/Users/user/Documents/suyou/.worktrees/t260825-03
-    const real = projectDirKey('/Users/user/Documents/suyou/.worktrees/t260825-03')
-    ok(real === '--Users-user-Documents-suyou-.worktrees-t260825-03--', `真实泳道 cwd → ${real}`)
+    // 真实目录名对拍（260907 本泳道实测：.lane/<ticket> 布局）：/Users/user/Documents/sandbar/.lane/t260907-01
+    const real = projectDirKey('/Users/user/Documents/sandbar/.lane/t260907-01')
+    ok(real === '--Users-user-Documents-sandbar-.lane-t260907-01--', `真实泳道 cwd → ${real}`)
     ok(projectDirKey('/a//b\\\\c:d') === '--a-b-c-d--', '分隔符 / \\ : 连续串坍缩成一个 -')
     ok(projectDirKey('/tmp/a~b') === '--tmp-a~007Eb--', '~ → ~XXXX 转义')
     ok(projectDirKey('/') === '--root--', '全分隔符 → root')

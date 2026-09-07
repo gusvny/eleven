@@ -5,12 +5,14 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { chromium } from "./node_modules/playwright-core/index.mjs";
 
-const REPO_ROOT = "/Users/user/Documents/suyou";
-const LANE = path.resolve(process.argv[2] || "/Users/user/Documents/suyou/.worktrees/t260831-02");
+// 本仓相对推导：本文件在 <repo>/server/dsh/ui-check/，上跳三级=仓/泳道根
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const LANE = path.resolve(process.argv[2] || REPO_ROOT);
 const laneWb = path.join(LANE, "server", "dsh", "workbench");
 
 async function pickFreePort() {
@@ -48,7 +50,7 @@ const logPath = path.join(tmpHome, "console.log");
 const logFd = openSync(logPath, "a");
 const proc = spawn("/opt/homebrew/bin/dsh", ["--profile", "suyou", "--patch", portPatch,
   "--port", String(port), "--host", "127.0.0.1", "--no-open"], {
-  cwd: "/Users/user/Documents/suyou",
+  cwd: REPO_ROOT,
   env: { ...process.env, DSH_HOME: tmpHome,
          DEEPSEEK_API_KEY: "sk-capture-lane-dummy" },
   detached: true, stdio: ["ignore", logFd, logFd],

@@ -540,6 +540,15 @@ SCENARIOS = [
     ("t260905-10-lane-identity-guard",
      "泳道落盘身份依赖守卫（t260905-10 面③，260906 宿主 ~/.gitconfig 消失三轨 settle 全 FAILED，灰盒 L3）：git 身份全缺→prepare_workspace 开工前 ok=False/failed 红字点名 user.name/user.email（半缺腿钉死点名精确性，探针 GIT_CONFIG_NOSYSTEM+GLOBAL 夹具防系统级假红）；身份在位复用不受扰；repo 级 config 补救放行（探针锚泳道 worktree=共享主仓 config）；dir 型工作区无 commit 不查；created 路径缺失失败且泳道不落半成品（fail-fast 在 worktree add 之前）；LANE_DEP_SYMLINKS 含 temporal-poc/.venv：泳道自动软链解析到主仓、幂等不重复（260825「泳道无消费方」拍板被 260906 19 号闸实测推翻的陪伴断言）；点名断言解析「git 身份缺失（…）」括注为集合（处置句恒提两键名，子串断言吹不了精确性）。实现段落地前红属预期（守卫缺席=缺失腿照旧放行=红），arbitrate/merge 期必须绿；与 developer L1 intent 不同面：本条守 prepare_workspace 两分支×身份矩阵×deps 软链的回执契约",
      "python3 integration/t260905-10/sc_lane_identity_guard.py", "ro"),
+
+    # ---- t260907-01：移仓收尾（旧仓路径清扫）——验收口径回归锚 ----
+
+    ("t260907-01-path-hygiene",
+     "移仓收尾路径卫生守卫（工单验收①②，KI 移仓炸路径族沉淀回归）：宿主已物理移走旧仓，任何仍按旧仓绝对路径（/Users/user/Documents/ 下的 suyou 目录）解析的代码一用即炸且多为静默炸——代码域零旧仓字面量（排 node_modules/.git/.suyou/.lane/docs/notes；三个另开票残留文件显式豁免降 warn，清单外新病灶即红）＋清扫面五文件 node --check 语法健康（boot 类文件不直跑：chrome/dsh/凭据重依赖，不涉 3099 红线）。灰盒锚验收合同不锚内部推导写法；needle 串接构造自引用免疫。与 developer L1（各 smoke 自身函数断言）intent 不同面：本条守全仓卫生合同",
+     "node integration/t260907-01/sc_migration_path_hygiene.mjs", "ro"),
+    ("t260907-01-smoke-lane-green",
+     "移仓后 smoke 资产面泳道直跑全绿（工单验收③执行面锚，KI-038「脚本在场环境红」习惯化防线）：从泳道 worktree 直跑三支零依赖纯函数冒烟（projects/sessions/agent-live，cwd=workbench）各 exit 0 且 passed>0 failed=0（agent-live 的 C/D 段在 zstd 缺席时自降级、退出码语义不变）。守的是「下次任何人直跑必须绿」的环境合同，与 smoke 自身 L1 函数断言不同层不重复；零端口零 3099 零网络",
+     "node integration/t260907-01/sc_smoke_suite_lane_green.mjs", "ro"),
 ]
 
 CMD_TIMEOUT = 900

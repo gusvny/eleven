@@ -136,7 +136,7 @@ section('M chat- 会话入账回归（t260831-04 缺陷①防线）')
   // 「touchEntry 入账 → pickProjectTabs 项目行 tab 渲染」全链——任何一环把它
   // 挡在 tab 外（门错杀/过滤错杀）都在这里红。生产注册表现状=单项目 suyou。
   const sid = 'chat-20260831-120000-abcd'
-  const ledger = touchEntry([], { id: sid, project: 'suyou', cwd: '/Users/user/Documents/suyou', lastOpenedAt: 1, seq: 1 })
+  const ledger = touchEntry([], { id: sid, project: 'suyou', cwd: '/Users/user/Documents/sandbar', lastOpenedAt: 1, seq: 1 })
   ok(ledger.length === 1 && ledger[0].id === sid, 'chat- 会话入账不被 isGlobalSessionId 门错杀')
   const rows = pickProjectTabs(ledger, { project: 'suyou' })
   ok(rows.length >= 1 && rows[0].id === sid, '账册有货 → 项目行 tab 数 ≥1（缺陷①回归锚）')
