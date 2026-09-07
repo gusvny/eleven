@@ -601,3 +601,9 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 事实：闸防新红不核存量；34 环境红＋预存败族有债册登记但**无核销机制/无趋势盯梢/无责任人**。inspection epic（260904 定稿，质检员设计）与 dispatcher-scan 调度骨架均在，但 scan 暂停（POC demo 后）且其巡工单流不巡套件健康——「套件健康巡检实例」从未建成。
 - 宿主裁定（260907）：**只记账，暂缓**——不立即开票，等目录重构＋当前四轨落地后再排。
 - 重提条件：目录重构落地后由 integration 主动提请（债条不沉底）。
+
+## KI-061 仲裁超限 blocked 的唤醒死锁（260908 凌晨 t260907-10 实锤）
+- 现象：integration_route 纯函数下 tests-fault+轮数超限=恒 blocked；retry_qc 唤醒后走查/arbitrate 不真重跑（22:58 后零新 gen，memoized 结论复用），host_ruling 注入无可达消费点——L1515 已修的「格式纠正单边重置」同族病在超限分支缺位。
+- 影响：票卡 awaiting-merge 死等（人已签字两度、裁定两度均无法驱动）；数据无损，lane 分支完整可合并。
+- 处置建议（宿主晨间裁定二选一）：①引擎小修=超限 blocked 唤醒时单边重置 arb_res/acc 状态（照 L1515 格式分支同款移植，~30min 票）；②授权手动合并（git 侧 squash＋审计注记，票留 blocked 作历史）。
+- 教训：三态路由纯函数没有「宿主终裁覆盖」入口——设计缺口。
