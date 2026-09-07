@@ -1,0 +1,10 @@
+{
+  "ticket_id": "t260907-12",
+  "template_id": "dev-lane",
+  "project": "sandbar",
+  "title": "多仓泳道放宽：根亦 git 仓的项目支持子仓挂靠（repos_under 短路条件退位，归属仍按最长前缀）",
+  "user_request": "做什么：dengzhufpv 实撞（T2 已取消票，宿主转报）：项目根=知识库 git 仓（宿主决策：知识库要 git）＋子仓 repos/* 并存的结构下，票B 激活条件写死「根含 .git→单仓」，子仓永远挂不上。修法=①repos_under 短路退位：根含 .git 时返回 [根]+一层子仓集合（根无子仓=行为零变化）；②归属判定不动（resolve_repos_for_paths 最长前缀已支持多仓：根路径归根仓、子仓路径归子仓、一票双命中=多树 lane 含根树——正是票B 设计本义）；③嵌套仓 fail-closed 与无主路径拒收语义原样；④根仓 .gitignore 需忽略子仓目录=项目契约文档 advisory 项（不引擎强制）。\n回归面：sandbar 自身（根仓无子仓）全场景零变化；票B 既有场景族（t260907-06 的 37 断言）不退化；新增场景=根仓+子仓混合夹具（dengzhufpv 形态）：根仓路径票/子仓路径票/双命中票三态。\n来源：dengzhufpv 项目侧三方案对照（A 顺引擎/A 逆宿主知识库决策；B 本票=最小且合设计本义；C 违其硬规则）。integration 亲验 repos_under 短路行在案。",
+  "spec": "范围=server/dsh/temporal-poc/（shared/agent_activities）＋integration/（混合夹具三态场景）。红线：fail-closed 语义不弱化；单仓项目零行为变化。验收：①混合夹具三态票全绿；②t260907-06 既有场景族零退化；③dengzhufpv T2 形态复跑（宿主侧配合）。",
+  "write_set": ["server/dsh/temporal-poc/", "integration/"],
+  "deliverables": "根仓+子仓混合项目支持＋三态夹具场景"
+}
