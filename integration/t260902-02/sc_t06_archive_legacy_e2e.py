@@ -30,10 +30,13 @@ guard_err = fx.test_env_guard()
 SDK_OK = False
 client_mod = None
 try:
-    from temporalio import workflow  # noqa: E402
     from temporalio.client import Client  # noqa: E402
     from temporalio.worker import Worker  # noqa: E402
 
+    # 假票类住独立模块（lib/fake_ticket.py）：workflow 沙箱只复导入定义类所在的
+    # 那个模块；留在本文件里沙箱会整文件重跑 __main__，模块级的 shared/fixture
+    # 加载（pathlib.Path.resolve/subprocess 在沙箱禁用）会在校验时炸
+    from fake_ticket import FakeTicket  # noqa: E402
     shared = fx.load_module("shared")  # noqa: E402
     client_mod = fx.load_module("client")
     SDK_OK = True
@@ -47,20 +50,7 @@ META = {"project": KEY, "status": "closed", "stage": "done", "title": "integ-t06
 
 
 if SDK_OK:
-
-    @workflow.defn(name="DevLaneWorkflow")
-    class FakeTicket:
-        def __init__(self):
-            self._stop = False
-
-        @workflow.run
-        async def run(self, mode: str) -> dict:
-            if mode == "hang":
-                try:
-                    await workflow.wait_condition(lambda: self._stop, timeout=600)
-                except Exception:
-                    pass
-            return {"meta": META, "status": "ok"}
+    _PAYLOAD = {"meta": META, "status": "ok"}
 
 
 async def _result_ok(tid):
@@ -107,11 +97,12 @@ async def _live_scenario():
     client = await asyncio.wait_for(Client.connect(shared.TARGET_HOST, namespace=shared.NAMESPACE), 20)
     tq = shared.TICKET_QUEUE_PREFIX + "integt06"
     worker = Worker(client, task_queue=tq, workflows=[FakeTicket])
-    await worker.start()
+    wt = asyncio.create_task(worker.run())  # 1.18 API：run() 常驻，shutdown() 收场
     try:
         await asyncio.wait_for(client.start_workflow(
-            FakeTicket.run, "hang", id=T_RUN, task_queue=tq,
-            typed_search_attributes=shared.project_search_attributes(KEY)), 20)
+            FakeTicket.run, {"mode": "hang", "payload": dict(_PAYLOAD)},
+            id=T_RUN, task_queue=tq,
+            search_attributes=shared.project_search_attributes(KEY)), 20)
         with fx.Sandbox() as sb:
             res = await client_mod.cmd_ticket_archive_legacy({"project": KEY})
             data = res.get("result") or {}
@@ -135,6 +126,7 @@ async def _live_scenario():
         except Exception:
             pass
         await worker.shutdown()
+        await asyncio.wait_for(wt, 20)
 
 
 T_RUN = "t-integ-legrun1"  # running → 不进 COMPLETED 过账面
