@@ -216,9 +216,18 @@ if (!injected) {
   }
 
   // ---- T2 切换零注入 ----
-  const tabs = await rowRead();
+  let tabs = await rowRead();
   if (tabs.length < 2) {
-    record('t2/switch-no-reinject', 'env_fail', '单 tab 环境无切换面');
+    // 切换面自供给：+ 入口在场即可经同一用户路径再建一个会话（夹具事实不该直接
+    // env_fail——原实现把「第二 tab 缺失」当环境缺供，260908 修：自造切换面再断言）。
+    await safeClick('[data-wb-psess-row] [data-wb-psess-new]');
+    for (let i = 0; i < 12 && tabs.length < 2; i++) {
+      await page.waitForTimeout(500);
+      tabs = await rowRead();
+    }
+  }
+  if (tabs.length < 2) {
+    record('t2/switch-no-reinject', 'env_fail', '自建第二个会话后仍单 tab——切换面真缺供');
   } else {
     const before = markCount(await chatText());
     const curIdx = 0; // 新建后 active=新 tab（先例语义）；切相邻再切回

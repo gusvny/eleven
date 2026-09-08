@@ -505,6 +505,20 @@ async function scenarioHiddenStopsPolling(front, hidden, ctx) {
     } catch { /* CDP path unavailable */ }
     vs = await hidden.evaluate('document.visibilityState')
   }
+  let emulated = false;
+  if (vs !== 'hidden') {
+    // 无头 Chrome 对后台 tab 恒报 visible（bringToFront 轮换 + CDP
+    // Page.setWebLifecycleState 均不生效，260908 实锤）——退属性级仿真：覆写
+    // document.visibilityState 并派发 visibilitychange。驱动的仍是 app 的同一
+    // 份监听同一份契约（visibility-poll.ts 按 visibilityState+事件门控轮询），
+    // 断言面（33s 零请求+恢复可见即重拉）一字不松。
+    await hidden.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    emulated = true;
+    vs = 'hidden';
+  }
   if (vs !== 'hidden') {
     record('T3 hidden tab stops polling', 'env_fail', `browser keeps visibilityState=${vs} for backgrounded pages — cannot cover here`)
     return '__ENV_FAIL__'
@@ -516,6 +530,13 @@ async function scenarioHiddenStopsPolling(front, hidden, ctx) {
   const leakList = hidden.__st.counts.listGet - cList0
   if (leak !== 0) return `hidden tab issued ${leak} API request(s) in 33s (list polls: ${leakList})`
   await hidden.bringToFront()
+  if (emulated) {
+    // 恢复可见：仿真态翻回 visible 并派发事件（真 OCCLUSION 环境此步=天然发生）。
+    await hidden.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+  }
   const resumed = await waitFor(async () => hidden.__st.counts.total > c0, 5000)
   if (!resumed) return 'tab made visible again but issued no refetch within 5s'
   return null
