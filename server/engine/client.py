@@ -886,10 +886,15 @@ async def cmd_ticket_prune(args: Dict[str, Any], entries: "Optional[List[Dict[st
         from temporalio.api.common.v1 import WorkflowExecution
         from temporalio.api.workflowservice.v1 import DeleteWorkflowExecutionRequest
         c = await _connect()
+        # 显式带 run_id 删：不带 run_id 时 dev 服务器的删除要等 visibility 异步
+        # 收敛才从 describe 消失（实测 >60s，带 run_id ~5s）；先 describe 取当前
+        # run 再删，删除确认的时延不依赖服务器的可见性清扫节奏
+        desc = await c.get_workflow_handle(wf_id).describe()
         await c.workflow_service.delete_workflow_execution(
             DeleteWorkflowExecutionRequest(
                 namespace=NAMESPACE,
-                workflow_execution=WorkflowExecution(workflow_id=wf_id)))
+                workflow_execution=WorkflowExecution(workflow_id=wf_id,
+                                                     run_id=desc.run_id)))
 
     if deleter is None:
         deleter = _sdk_deleter
