@@ -80,6 +80,21 @@ def wait_marker(log_path, pattern, timeout_s, interval=0.25):
     return bool(rx.search(stderr_text(log_path)))
 
 
+def wait_marker_count(log_path, pattern, n, timeout_s, interval=0.5, stop_fn=None):
+    """等语义标记出现 ≥n 次（兼容正则），返回实得次数（不断言，交场景判定）。
+    stop_fn 真时提前收（被测进程死亡等终态——防陪跑白等满窗，死因交场景点名）。
+    260908 慢场景解剖：按实际轮次判替代按 30s 慢档固定窗等。"""
+    rx = re.compile(pattern)
+    deadline = time.time() + timeout_s
+    cnt = 0
+    while time.time() < deadline:
+        cnt = len(rx.findall(stderr_text(log_path)))
+        if cnt >= n or (stop_fn is not None and stop_fn()):
+            return cnt
+        time.sleep(interval)
+    return cnt
+
+
 def wait_exit(proc, timeout_s, interval=0.25):
     """等进程退出。返回 True=已退出。"""
     deadline = time.time() + timeout_s

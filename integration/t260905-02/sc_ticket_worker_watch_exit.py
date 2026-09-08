@@ -22,8 +22,9 @@ intent 分工（防 intent 级重复）：
   存在（ppid 守护在循环体内），收养腿两 env 同置。
 
 三态契约：docker 台缺席=ENV_FAIL exit 2；被测子进程零连生产（审计钩子+自证
-腿）；watch 间隔旋钮 SANDBAR_WATCH_INTERVAL_SEC 仅为提速（未实现实现面时自
-然回落 30s 慢档，断言上限按慢档给）；日志锚兼容正则锚语义（KI-051）。
+腿）；watch 间隔旋钮 SANDBAR_WATCH_INTERVAL_SEC 提速（「≥两轮」按日志实际
+轮次判：旋钮生效 ~4s 收工、失效自然回落 30s 慢档 90s 窗内同判——语义不弱化）；
+日志锚兼容正则锚语义（KI-051）。
 """
 import json
 import os
@@ -42,7 +43,7 @@ from lib_gate import (Fail, cleanup, parse_out_json, poc_python,  # noqa: E402
 import stage_docker  # noqa: E402
 from lib_t26090502 import (KNOB, KNOB_FAST, child_env, close_logf,  # noqa: E402
                            pid_alive, ppid_of, spawn_via_shortlived_parent,
-                           spawn_worker, wait_exit, wait_marker)
+                           spawn_worker, wait_exit, wait_marker, wait_marker_count)
 
 TAG = "watch-%d" % os.getpid()
 PROJ_KEY = "t26090502-watch"
@@ -199,11 +200,16 @@ def main():
         procs.append(w_c)
         fail.check(wait_marker(log_c, r"worker 起来了", 40),
                    "watch worker 就绪（watch 指向不存在 workflow）")
-        time.sleep(8)
-        fail.check(pid_alive(w_c.pid), "查询失败后 8s 存活（第一轮后不误退）")
-        time.sleep(62)
-        fail.check(pid_alive(w_c.pid),
-                   "查询失败后 70s 仍存活（≥两轮 watch 周期，含 30s 慢档）")
+        # 「≥两轮 watch 周期」按实际轮次判（260908 慢场景解剖）：第二条「状态失败
+        # （下一轮再试）」warning 在案=已完整走过两轮失败查询，随后仍存活即契约达成。
+        # 旋钮（KNOB_FAST=2）生效 ~4s 收工；旋钮失效自然回落 30s 慢档、90s 窗内同判
+        # ——语义不弱化（旧写法 sleep(8)+sleep(62)=70s 固定按慢档等，每跑白等 ~65s）。
+        rounds_seen = wait_marker_count(log_c, r"状态失败", 2, 90,
+                                        stop_fn=lambda: not pid_alive(w_c.pid))
+        time.sleep(2)   # 第二轮落定后的裕量窗（误退若发生必在此现形）
+        fail.check(rounds_seen >= 2 and pid_alive(w_c.pid),
+                   "查询失败不误退：两轮失败查询在案（实得 %d 轮）且仍存活——按实际"
+                   "轮次判，旋钮失效自然回落慢档，语义不弱化" % rounds_seen)
         fail.check(wait_marker(log_c, r"状态失败", 1) and wait_marker(log_c, r"再试", 1),
                    "查询失败痕迹在文（失败+下一轮再试语义锚）——证明确实在查、失败不退")
         fail.check(os.path.exists(meta_c), "存活期间 meta 在册（归属可辨）")
