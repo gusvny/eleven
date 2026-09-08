@@ -1,0 +1,111 @@
+# ════════════════════════════════════════════════════════════════════════
+# 溯游·声明式模型路由表（M8 起；gen.py 退役后改为运行时消费）
+#
+# 【这张表管什么】工单 agent（headless dsh 进程）用哪个模型。
+#   接线方式 = 运行时查表：agent activity 每次 spawn 前读本表，查
+#   (role, kind) → provider/model，钉进泳道本地 settings.yaml 的 agent-default-model
+#   用户层（settings 用户层 > cordis patch 层，只发 patch 会被 GUI 默认段盖掉）。
+#   改表后下一个 spawn 的 agent 即生效——无生成步骤、无重启。
+#   本表不管：GUI 主会话模型（由 profile agent-default-model 决定）。
+#
+# 【改表治理——红线】
+#   1. 改路由 = 改本表，必须走工单 + 人审（防幻觉五层之「红线必人审」）；本表入 git。
+#      也可在工单台「模型」页签编辑（保存直接改写本文件，写前备份 /tmp）。
+#   2. 模型 ref 不许发明：只用下方「可用 ref 核实清单」里实证存在的 provider/model；
+#      清单外的先在清单区加注释标「待用户配」，配好 key 验证后才许进生效条目。
+#
+# 【查表规则】（temporal-poc/shared.py model_route_for 实现）
+#   (role, task_kind) → roles.<role>.tasks.<task_kind> → roles.<role> → default。
+#   表缺失/角色无条目/条目缺 provider 或 model → 落 default；default 也缺 → 不生成
+#   patch（agent 继承 profile 默认模型）。
+#
+# 【分工与 stage 的对应】（哪段派哪个分工的模型）
+#   server/dsh/temporal-poc/shared.py 的 STAGE_DISPATCH_KIND：
+#   (content-pipeline, ai-review)→proofread；(proofread, review)→proofread；
+#   (regression, regress)→qa。无映射的段用 role 级条目。
+#
+# 【可用 ref 核实清单】（260821 实证来源，勿凭记忆写模型名）
+#   deepseek-official —— dsh-llm-deepseek 出厂适配器拥有（key 走 DEEPSEEK_API_KEY 凭据 seam）：
+#     deepseek-v4-flash / deepseek-v4-pro
+#     （dsh-llm-deepseek/lib/index.js DEFAULT_MODELS；profile/cordis.patch.yml 现钉 deepseek-v4-flash）
+#   kimi-coding —— pi-ai catalog（anthropic-messages，api.kimi.com/coding，KIMI_API_KEY）：
+#     k3 / k3-256k / kimi-for-coding / kimi-for-coding-highspeed
+#     （pi-ai/dist/providers/data/kimi-coding.json；settings.yaml 当前默认=k3，实测健康）
+#   zai —— pi-ai catalog（openai-completions，api.z.ai/api/coding/paas/v4，ZAI_API_KEY）：
+#     glm-4.5-air / glm-4.7 / glm-5-turbo / glm-5.1 / glm-5.2 / glm-5v-turbo
+#     glm-5.3 —— catalog 外新模型，260827 直连实测上线；经 ~/.dsh/settings.yaml 的
+#       zai.models 手配注册（settings models 是替换语义，catalog 五个+手配两个全列；dsh 隔离探针实测通过）
+#     glm-5.3-flash —— 同上路径注册（260828 zai 新上线；reasoning 模型，maxTokens
+#       上限实测 131072，contextWindow 按同族 5.3 写 1M 未实测）
+#     （pi-ai/dist/providers/data/zai.json；settings.yaml 备注 260820 实测 HTTP 200/2.3s）
+#   zai-coding-cn —— settings.yaml 手配第二 z.ai 账号（openai-completions，与 zai 同
+#     baseURL api.z.ai/api/coding/paas/v4，key 走 ZAI_CODING_CN_API_KEY）：
+#     glm-5.3 / glm-5.3-flash / glm-5.2（settings models 手配三个，非 catalog 全量）
+#     （260902 第二账号 GUI + curl 双实证 glm-5.3-flash 回包；glm-5.3-flash reasoning，
+#     maxTokens 131072 同族。用途：与第一账号 zai 错开账号、分摊配额。）
+#   scnet —— settings.yaml 手配网关（openai-completions，api.scnet.cn/api/llm/v1，SCNET_API_KEY）：
+#     GLM-5.2 / GLM-5 / GLM-5.1 / MiniMax-M3 / MiniMax-M2.7 / MiniMax-M2.5 /
+#     Kimi-K3 / Kimi-K2.5 / Kimi-K2.7-Code / Kimi-K2.6 / Qwen3.8-Max /
+#     DeepSeek-V4-Flash-0731 / DeepSeek-V4-Pro / DeepSeek-V4-Flash
+#     （备用网关：与 zai/kimi-coding 同模型族时可作 failover 手工切换；是否已配 key 待用户确认）
+#
+# 【点状配置迁移映射】（M8 之前散落各处 → 本表条目）
+#   ① profile/cordis.patch.yml 的 agent-default-model 钉 deepseek-official/deepseek-v4-flash
+#     （出厂默认的显式写出；实际生效被 $DSH_HOME/settings.yaml 的 UI 选择覆盖为
+#     kimi-coding/k3——settings 备注：deepseek-official 当日流卡死）→ 本表 default 行
+#     对齐现网生效值 kimi-coding/k3；主会话模型仍由 agent-default-model 决定，不迁。
+#   ② dispatch_* 实例此前 config 无 agentOptions（子 agent 隐式继承主会话默认模型）
+#     → roles 段逐角色显式声明，烘焙进实例 config。
+#   ③ 防幻觉五层之「异模型交叉（生成/审校不同家）」此前只是文档约定 → 落成表。
+#
+# 【M10 异模型交叉新口径】角色归一后交叉不改弱，改按分工键承载：
+#     生成家 = kimi-coding（developer/ops/artist 与 product-operation 默认实例=加工分工），
+#     审校家 = zai（integration + product-operation 的 proofread/qa/analyst 分工实例——
+#     审读/验证/出数一律与生成不同家）。
+#   【260902 配额急救修正】k3 周额度见底且停售（bigmodel key 未激活、scnet 超限均弃），
+#     integration（最大消耗户）切 zai-coding-cn/glm-5.3-flash（第二 z.ai 账号）。切换后
+#     生成与审校同为 zai 系 glm-5.3-flash、仅异账号——M10 异模型交叉口径让位于配额急救，
+#     交叉不再成立；k3 恢复供应后可由人审拍板改回。工单 t260902-07。
+#
+# 【格式约束】本表只用 YAML 最小子集：`key: value` 标量 + `key:` 开映射，缩进 2 空格，
+#   值一律裸 token（不带引号不带空格）。gen.py 内置 30 行 stdlib 解析器（无 PyYAML 依赖），
+#   同时保持合法 YAML——任何标准 YAML 解析器也能读（temporal worker 复用时可直接 PyYAML）。
+# ════════════════════════════════════════════════════════════════════════
+
+# 兜底：角色无条目时落这里。对齐现网 agent-default-model 生效值（settings.yaml）。
+# （260826 failover→scnet 已回滚：事后查明 kimi-coding/zai 配额一直健康，全灭的是
+# scnet；当日 429 根因是路由 patch 被 settings 用户层盖掉、agent 实际全跑 scnet，
+# 修复见 agent_activities._pin_default_model。）
+default:
+  provider: zai
+  model: glm-5.3-flash
+
+roles:
+  # ── 生成家（kimi-coding/k3）：写代码/内容/资产的角色 ──
+  developer:         # 代码与修复（写 app/管线/server）
+    provider: zai
+    model: glm-5.3-flash
+  ops:               # 站点运维 site operation（构建/热更/参数层）
+    provider: kimi-coding
+    model: k3
+  artist:            # 项目美工（视觉资产）
+    provider: kimi-coding
+    model: k3
+  # ── 审校家（260902 起 integration=zai-coding-cn/glm-5.3-flash 第二账号，见头部 M10 修正）──
+  integration:       # 全局把关：审查/巡检/验收审批/机械收口/持有 dispatch_*
+    provider: kimi-coding
+    model: k3
+  # ── product-operation：默认实例=加工分工（生成家）；tasks 段=审校/验证/出数分工（审校家）──
+  product-operation:
+    provider: zai # 默认实例 dispatch_product_operation = 加工分工（editor.md 分工卡）
+    model: glm-5.3-flash
+    tasks:
+      proofread:            # dispatch_product_operation_proofread = 审校分工（proofreader.md 分工卡）
+        provider: zai
+        model: glm-5.2
+      qa:                   # dispatch_product_operation_qa = 验证分工（qa.md 分工卡）
+        provider: zai
+        model: glm-5.3
+      analyst:              # dispatch_product_operation_analyst = 出数分工（analyst.md 分工卡）
+        provider: zai
+        model: glm-5.2
