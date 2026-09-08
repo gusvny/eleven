@@ -619,6 +619,12 @@ SCENARIOS = [
     ("t260907-11-wb-anchor-evidence",
      "证据目录锚项目化＋env 收窄（t260907-11，KI-057 第四面，含取图端点同族核销）：fpv 视图证据列表=归档 .suyou/evidence＋泳道 .worktrees 两候选三件、取图端点按 ?project= 读 fpv 根字节一致、sandbar 视图同 id 列表空/取图 404（不串项目）；SUYOU_EVIDENCE_DIR 仅无参回落生效、per-project 不被串（红线 env 链保留×收窄声明）。进程内驱动零端口零 Temporal；证据防穿（文件名白名单/TICKET_ID_RE containment）归既有覆盖不重复；实现落地前红属预期，arbitrate/merge 期必须绿",
      "node integration/t260907-11/sc_wb_anchor_evidence_family.mjs"),
+    ("t260908-01-ki061-wake-revive",
+     "仲裁超限 blocked 两相复活旅程（t260908-01，KI-061 验收①②的用户可感知面，真 docker 台双 worker 切换）：相一 SANDBAR_TEST_DISABLE_KI061=1（create_plan v2 S3 契约开关=模拟修复前 worker）＋tests-fault 桩驱动 6 轮超限 blocked→宿主注入裁决（host_ruling）→retry_qc 唤醒→断言吃 memoized 仲裁结论立即再 blocked 且 arbitrate 零 respawn（t260907-10 02:12 症状留证）；相二换修复 worker 再唤醒→断言 arbitrate 真 respawn（账本新 spawn、gen 递增）、prompt 含宿主终裁（host_rulings 注入消费面）、verdict=pass 后票离开 arbitrate blocked。与 t260905-10 sc_host_ruling_injection（KI-053 格式纠正路径、单 worker、畸形 ruling 拒收）intent 不同面；与 developer selfcheck（L2 time-skipping 两相闸）不同层不互替；实票复活归宿主发 retry（红线），本条隔离台等价复刻。断言面=stub 账本（agent 实收 prompt）/snapshot，不锚 prompt 文案；docker/舞台缺件=ENV_FAIL exit 2；merge_check 及其后不在范围。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260908-01/sc_ki061_overlimit_wake_revive.py", "exclusive"),
+    ("t260908-01-ki061-replay-compat",
+     "在飞 workflow 重放兼容契约（t260908-01，KI-061 验收②机械面，044c692 裸改重放炸 99809 的同族回归闸，真 docker 台）：先制造修复前形态在飞 history（DISABLE=1 worker 6 轮超限 blocked＋retry_qc 唤醒一次 settle→再 blocked＝t260907-10 现形态），replay_check 只读回放两腿——腿一 pre-fix 形态 history（含唤醒穿越点 patched 求值）用修复后代码回放 ok=true（命令序列零分歧）；腿二修复 worker 复活（arbitrate respawn、KI-061 marker 入 history）后再回放 ok=true（marker notify 先行→同位 True 的消费路径确定性）。与场景①分工：彼锁 live 复活旅程、本条锁重放确定性；与 developer selfcheck（L2 环境内两相）不同层。replay_check 零写（list/fetch only）；docker/舞台缺件=ENV_FAIL exit 2。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260908-01/sc_ki061_inflight_replay_compat.py", "exclusive"),
 ]
 
 CMD_TIMEOUT = 900

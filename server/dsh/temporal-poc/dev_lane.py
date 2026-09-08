@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
@@ -156,6 +157,10 @@ UI_DIFF_PATCH_ID = "dev-lane-ui-diff-v1"
 # 在方案定稿后获得护栏。同构布尔门：挂起中旧 workflow 重放不走新分支；不 bump PATCH_ID。
 REFRESH_WRITE_SET_PATCH_ID = "dev-lane-refresh-write-set"
 KI061_WAKE_RESET_PATCH_ID = "dev-lane-ki061-wake-reset"
+# KI-061 测试开关（test-only，260908 票 review 附条件②）：默认关=修复启用；置 "1" 时
+# 跳过超限唤醒重置守卫（selfcheck 两相闸相一用它复刻 044c692+55f5a8c 的卡死行为）。
+# worker 进程 import 时读定、进程内不变——重放安全由守卫 False 零 command 性质兜底。
+SANDBAR_TEST_DISABLE_KI061 = os.environ.get("SANDBAR_TEST_DISABLE_KI061") == "1"
 # t260904-18 KI-049 门②：create_plan 回执 files_changed 空/畸形 → 可见红+告警，
 # 写集零污染（不再静默 no-op）。同构布尔门：挂起中旧 workflow 重放（含空回执旧票）
 # 走原刷新路径（命令序列与旧历史一致）；不 bump PATCH_ID。
@@ -454,6 +459,10 @@ class DevLaneWorkflow:
         self._sigs: Dict[str, Signature] = {}
         self._rework: Optional[ReworkRequest] = None
         self._retry_token: int = 0
+        # KI-061：仲裁超限 blocked 的进入序号（每进入 +1，跨串行/并行分支共用）——
+        # 唤醒重置守卫的 patch id 后缀取此值，保证同一 id 全实例只在唤醒穿越处求值一次
+        #（SDK memo 首评固化：重放期 False 会被永久记住，id 复用=live 唤醒吃到毒化值）。
+        self._arb_over_limit_seq: int = 0
         self._gens: Dict[str, int] = {}                   # activity 名 → 进入次数
         self.gate_runs: List[Dict[str, Any]] = []
         self.refused: List[Dict[str, Any]] = []
@@ -654,6 +663,27 @@ class DevLaneWorkflow:
         await workflow.wait_condition(
             lambda: self._retry_token > token or self._rework is not None)
         # 醒来由主循环看 self._rework / 重跑本步
+
+    async def _blocked_over_limit(self, why: str) -> bool:
+        """仲裁超限 blocked 唤醒重置守卫（KI-061，260908 票）。走完 _blocked 等待后返回
+        True=调用方应作废 memoized 仲裁结论（arb_done/arb_res 重置）真重跑 arbitrate 边。
+
+        为什么是「每进入唯一 patch id」而不是固定 id：SDK workflow_patch 把 patched()
+        首评结果按实例 memo 固化（_patches_memoized 不清理）——在飞 workflow 的重放会
+        穿越历史唤醒点，固定 id 首评落在重放期（is_replaying=True、无 marker）得 False
+        并永久固化，追平后 live 唤醒吃的仍是 memoized False——这正是 044c692+55f5a8c
+        热修对 t260907-10 实测未生效的机械成因。改为每次进入超限 blocked 递增计数器、
+        守卫 id 带 `#序号` 后缀：历史唤醒点的各 id 在重放期首评 False 且零 command
+        （与旧命令序列一致，重放不炸）；live 唤醒点 id 从未被求值过 → 首评 True、写
+        marker、重置生效；未来重放经 NotifyHasPatch 命中 notified → 同位复现 True，
+        确定性保持。rework 唤醒由主循环顶统一处理，这里短路返回 False（不求值 patched，
+        两侧重放均一致）。"""
+        self._arb_over_limit_seq += 1
+        n = self._arb_over_limit_seq
+        await self._blocked("arbitrate", why)
+        if self._rework is not None or SANDBAR_TEST_DISABLE_KI061:
+            return False
+        return workflow.patched("%s#%d" % (KI061_WAKE_RESET_PATCH_ID, n))
 
     # ---------- agent 步 ----------
     async def _run_agent_step(self, step_id: str, previous_context: str = "",
@@ -1417,16 +1447,14 @@ class DevLaneWorkflow:
                     phase = "acceptance"
                     continue
                 if route.startswith("blocked:"):
-                    # KI-061（260908）：超限 blocked 唤醒死锁修复——照格式纠正分支同款
-                    # 单边重置：作废 memoized 仲裁结论，retry_qc 唤醒后真重跑 arbitrate
-                    # 边（prompt 重建含 host_ruling 注入的宿主终裁，此轮可见）；走查
-                    # 结果留内存不重跑（成本高且结论稳定，同格式分支取舍）。不重置则
-                    # 唤醒后 join 吃 memoized arb_res 立即再 blocked、arbitrate 永不
-                    # 重 spawn——宿主裁定无可达消费点（t260907-10 卡闸实锤）。
-                    if workflow.patched(KI061_WAKE_RESET_PATCH_ID):
+                    # KI-061（260908）：超限 blocked 唤醒死锁修复——真重跑本步。守卫
+                    # 机制（每进入唯一 patch id 对抗 SDK memo 首评固化）与重放稳定性
+                    # 论证见 _blocked_over_limit；不重置则唤醒后吃 memoized 仲裁结论
+                    # 立即再 blocked、arbitrate 永不重 spawn——宿主裁定无可达消费点
+                    #（t260907-10 卡闸实锤，044c692+55f5a8c 固定 id 热修实测未生效）。
+                    if await self._blocked_over_limit(route.split(":", 1)[1]):
                         arb_done = False
                         arb_res = None
-                    await self._blocked("arbitrate", route.split(":", 1)[1])
                     continue
                 if verdict == "tests-fault":
                     tests_rounds += 1
@@ -1587,16 +1615,14 @@ class DevLaneWorkflow:
                     phase = "acceptance"
                     continue
                 if route.startswith("blocked:"):
-                    # KI-061（260908）：超限 blocked 唤醒死锁修复——照格式纠正分支同款
-                    # 单边重置：作废 memoized 仲裁结论，retry_qc 唤醒后真重跑 arbitrate
-                    # 边（prompt 重建含 host_ruling 注入的宿主终裁，此轮可见）；走查
-                    # 结果留内存不重跑（成本高且结论稳定，同格式分支取舍）。不重置则
-                    # 唤醒后 join 吃 memoized arb_res 立即再 blocked、arbitrate 永不
-                    # 重 spawn——宿主裁定无可达消费点（t260907-10 卡闸实锤）。
-                    if workflow.patched(KI061_WAKE_RESET_PATCH_ID):
+                    # KI-061（260908）：超限 blocked 唤醒死锁修复——真重跑本步。守卫
+                    # 机制（每进入唯一 patch id 对抗 SDK memo 首评固化）与重放稳定性
+                    # 论证见 _blocked_over_limit；不重置则唤醒后吃 memoized 仲裁结论
+                    # 立即再 blocked、arbitrate 永不重 spawn——宿主裁定无可达消费点
+                    #（t260907-10 卡闸实锤，044c692+55f5a8c 固定 id 热修实测未生效）。
+                    if await self._blocked_over_limit(route.split(":", 1)[1]):
                         arb_done = False
                         arb_res = None
-                    await self._blocked("arbitrate", route.split(":", 1)[1])
                     continue
                 # 非 pass：本轮并行走查结果作废（回路收敛后 run_integration_tests 入口
                 # 单点重置会重走查）——留痕可检索，不静默丢弃。

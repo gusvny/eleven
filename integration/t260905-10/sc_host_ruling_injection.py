@@ -114,7 +114,11 @@ def spawn_worker(py, tid, env, log_path, recorder_path, recorder_log):
     """工单专属 worker（前台跑，watch 收口自退；不走 --daemon——双叉会让日志与
     进程脱离场景管控）。返回 Popen。"""
     wenv = dict(env)
-    wenv["SANDBAR_TASK_QUEUE"] = "suyou-ticket-%s" % tid  # naming-compat
+    # 队列契约对齐 ticket_worker.spawn（t260907-04 退役账#2；t260908-01 仲裁段核销）：
+    # 新票 workflow 起在 sandbar-ticket-<tid>（shared.ticket_task_queue 新前缀），专属
+    # worker 必须新旧双前缀 CSV poll——旧单值 SANDBAR_TASK_QUEUE 只 poll 旧前缀，新票
+    # 零认领卡 create_plan（docker 台空出后由 ENV_FAIL 转真 FAIL 暴露的存量伤）。
+    wenv["SANDBAR_TASK_QUEUES"] = "sandbar-ticket-%s,suyou-ticket-%s" % (tid, tid)  # naming-compat
     wenv["SANDBAR_WATCH_WORKFLOW"] = tid
     wenv["SANDBAR_WATCH_INTERVAL_SEC"] = "2"
     wenv["SANDBAR_AGENT_CMD"] = "%s %s" % (py, recorder_path)
