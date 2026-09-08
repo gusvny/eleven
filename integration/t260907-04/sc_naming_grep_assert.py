@@ -34,14 +34,17 @@ sys.path.insert(0, INTEG)
 import lib_naming  # noqa: E402
 
 OLD_RE = re.compile(
-    r"SANDBAR_[A-Za-z0-9_]+|suyou-poc|suyou-ticket|suyou-dispatcher|\.suyou"
+    r"SUYOU_[A-Za-z0-9_]+|suyou-poc|suyou-ticket|suyou-dispatcher|\.suyou"
     r"|suyou-ws|suyou-selfcheck|suyou-integ|suyou-settle|suyou-session|suyou-test")
 PLUGIN_REF_RE = re.compile(
     r"project-registry\.ts|suyou-temporal-tools|suyou-knowledge|suyou-workbench")
 
 SCAN_ROOTS = ("server/engine", "server/tools", "integration")
 SKIP_DIRS = {".venv", "node_modules", "__pycache__", "bin", ".git", ".dsh",
-             ".suyou", ".sandbar"}
+             ".suyou", ".sandbar",
+             "data"}  # server/engine/data/=运行时态（导出档案/日志/pidfile/快照），
+                       # 历史数据里的旧队列名/schedule id 是事实记录非代码面，
+                       # 与 .suyou/.sandbar 同类豁免（260908 终切后 652 命中主源）
 TEXT_EXT = {".py", ".md", ".mjs", ".sh", ".yaml", ".yml", ".json", ".ts", ".txt"}
 
 MERGE_DEBT_FILES = frozenset((
@@ -129,14 +132,14 @@ def main():
     r.check(n_retire >= 7, "退役账行数=%d（须 ≥7）" % n_retire)
 
     print("== C 扫描器自证红绿")
-    r.check(scan_text('TASK_QUEUE = os.environ.get("SANDBAR_TASK_QUEUE")'),
+    r.check(scan_text('TASK_QUEUE = os.environ.get("SUYOU_TASK_QUEUE")'),
             "合成旧名样本被识别（红）")
     r.check(not scan_text("锚语义不锚字面（KI-051 写作纪律）"), "干净样本不误报（绿）")
     r.check(allowed("x.py", 'LEGACY_TASK_QUEUE = "suyou-poc"  # 退役条件注释'),
             "LEGACY 兼容行豁免")
     r.check(allowed("integration/x.py", 'mkdir(base / ".suyou")  # naming-compat fixture'),
             "naming-compat fixture 行豁免")
-    r.check(not allowed("x.py", 'os.environ["SANDBAR_AGENT_CMD"]'),
+    r.check(not allowed("x.py", 'os.environ["SUYOU_AGENT_CMD"]'),
             "无标记旧名读点不豁免")
 
     r.finish()

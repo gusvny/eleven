@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""sc_schedule_legacy_retire.py — dispatcher-scan schedule 改名退役契约（t260907-04）。
+"""sc_schedule_legacy_retire.py — dispatcher-scan schedule 单名契约（t260907-04，终切翻面）。
 
-intent（用户可感知契约：服务端持久标识改名不留双份）：
-  Temporal schedule 是服务端持久对象，代码翻新 ID（suyou-dispatcher-scan →
-  sandbar-dispatcher-scan）后**旧 ID 不会自己消失**——引擎建新 ID 的路径必须幂等
-  删旧 ID，否则新旧双份调度（review gen0 缺口2）。腿：
-  1. 种子旧世界：舞台上先存在旧 ID schedule（fixture=部署前现况）；
-  2. 跑引擎创建走廊 → 新 ID 在、旧 ID 亡；
-  3. 再跑一次 → 幂等（旧 ID 仍亡、新 ID 仍在、不炸）。
+intent（用户可感知契约，260908 终切后语义——空库重建窗口零兼容负担）：
+  Temporal schedule 是服务端持久对象。终切撤掉了「引擎走廊幂等删旧 schedule id」
+  的退役面（dc5f8cc）——引擎只建/幂等维护**新名单 ID（sandbar-dispatcher-scan）**，
+  旧 ID 的清理是运维操作（人工/专门工具），引擎走廊绝不隐式删用户数据。腿：
+  1. 首次跑创建走廊 → 台上恰 sandbar-dispatcher-scan 一个（不种旧 ID）；
+  2. 再跑一次 → 幂等（仍恰新 ID 一个、不炸）；
+  3. 负向守卫：人工种下旧 ID（模拟遗留残留）→ 走廊照跑 → 旧 ID **原样在**
+     （引擎不碰=退役面撤的契约边界，隐式删即红）、新 ID 照在。
   创建走廊=仓内唯一在树创建点 demo_schedule.demo_schedule(client)（scan_schedule
   只有 describe/pause/resume/trigger 运维面，无 create）。
 舞台：stage_docker 单点；SDK 走 poc venv；缺=ENV_FAIL。
-**implement 落地前腿 2/3 红属预期（删旧未接线），arbitrate/merge 期必须全绿。**
+**本场景自过渡退役契约翻面（260908 撤退役面）；腿1 红=种了旧 ID，腿3 红=引擎隐式删旧。**
 """
 from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -91,9 +93,11 @@ asyncio.run(main())
 
 def env_for(host, ns):
     e = {k: v for k, v in os.environ.items()
-         if not (k.startswith("SANDBAR_") or k.startswith("SANDBAR_"))}
-    e["TARGET_HOST"] = host
-    e["NAMESPACE"] = ns
+         if not (k.startswith("SANDBAR_") or k.startswith("SUYOU_"))}
+    # 必须走 SANDBAR_ 前缀名：shared.py 只认这两个名字；裸 TARGET_HOST 键是
+    # 无效赋值，子进程会静默落到缺省生产 127.0.0.1:7233/default（260908 实锤踩过）
+    e["SANDBAR_TARGET_HOST"] = host
+    e["SANDBAR_NAMESPACE"] = ns
     return e
 
 
@@ -111,15 +115,20 @@ def main():
         return
 
     try:
-        print("== 腿1 种子旧世界（旧 ID schedule 在台）")
-        obj, rc, out, err = lib_naming.tp_json(SEED, env_extra=env_for(host, ns))
-        if obj is None or not obj.get("seeded"):
-            r.env_fail("种子失败（舞台/SDK 面）：%s" % (err or out)[-200:])
+        print("== 腿1 首次创建走廊 → 恰 sandbar-dispatcher-scan 一个（不种旧 ID）")
+        # 走廊 demo_schedule 会 trigger 巡检工作流并等它跑完（scan_handle.result()），
+        # 空台没有 worker 时这一步永远阻塞——三条腿共用一台随场景生死的短命 worker
+        # 接住巡检（activity 是只读票列表，空台即空清单）。
+        wp = None
+        py = lib_naming.poc_python()
+        if py is None:
+            r.env_fail("poc venv/SDK 缺失，worker 起不来")
             r.finish()
             return
-        r.check(True, "旧 ID schedule 已种下")
-
-        print("== 腿2 引擎创建走廊 → 新 ID 在、旧 ID 亡（幂等删旧）")
+        wp = subprocess.Popen([py, "worker.py"], cwd=lib_naming.TP,
+                              env=env_for(host, ns),
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              text=True)
         obj, rc, out, err = lib_naming.tp_json(CREATE_VIA_ENGINE, env_extra=env_for(host, ns),
                                                timeout=180)
         if obj is None:
@@ -130,10 +139,10 @@ def main():
             if got is None:
                 r.env_fail("schedule 清点失败：%s" % e2[-160:])
             else:
-                r.check("sandbar-dispatcher-scan" in got and "suyou-dispatcher-scan" not in got,
-                        "新 ID 在且旧 ID 亡（ids=%s）" % got)
+                r.check(got == ["sandbar-dispatcher-scan"],
+                        "新 ID 独苗、无旧 ID（ids=%s）" % got)
 
-        print("== 腿3 再跑一次 → 幂等（旧 ID 仍亡、不炸）")
+        print("== 腿2 再跑一次 → 幂等（仍恰新 ID 一个、不炸）")
         obj, rc, out, err = lib_naming.tp_json(CREATE_VIA_ENGINE, env_extra=env_for(host, ns),
                                                timeout=180)
         if obj is None:
@@ -144,9 +153,30 @@ def main():
             if got is None:
                 r.env_fail("二次清点失败：%s" % e2[-160:])
             else:
-                r.check("sandbar-dispatcher-scan" in got and "suyou-dispatcher-scan" not in got,
+                r.check(got == ["sandbar-dispatcher-scan"],
                         "幂等重跑后仍是新 ID 唯一（ids=%s）" % got)
+
+        print("== 腿3 负向守卫：人工种旧 ID → 引擎走廊不隐式删（退役面撤的契约边界）")
+        obj, rc, out, err = lib_naming.tp_json(SEED, env_extra=env_for(host, ns))
+        if obj is None or not obj.get("seeded"):
+            r.env_fail("种旧 ID 失败（舞台/SDK 面）：%s" % (err or out)[-200:])
+        else:
+            obj, rc, out, err = lib_naming.tp_json(CREATE_VIA_ENGINE,
+                                                   env_extra=env_for(host, ns), timeout=180)
+            ids, _, _, e2 = lib_naming.tp_json(LIST_IDS, env_extra=env_for(host, ns))
+            got = (ids or {}).get("ids") if ids else None
+            if got is None:
+                r.env_fail("三次清点失败：%s" % e2[-160:])
+            else:
+                r.check(sorted(got) == ["sandbar-dispatcher-scan", "suyou-dispatcher-scan"],
+                        "旧 ID 原样在（引擎不碰）+新 ID 照在（ids=%s）" % got)
     finally:
+        if wp is not None:
+            wp.terminate()
+            try:
+                wp.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                wp.kill()
         lib_naming.stage_down(PROJECT)
 
     r.finish()

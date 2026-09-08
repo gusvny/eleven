@@ -42,7 +42,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 # 七个旧 token：六个插件包名 + suyou-tools（文件名/内部标识）。全字面扫描，
 # 不带 --include 白名单——ts/tsx/js/cjs/mjs/py/md/yml/json 一律过目。
 TOKENS = [
-    "suyou-workbench", "sandbar-admin-ui", "suyou-knowledge",
+    "suyou-workbench", "suyou-admin-ui", "suyou-knowledge",
     "suyou-providers", "suyou-temporal-tools", "suyou-ui-check", "suyou-tools",
 ]
 # server/integration 范围内的历史材料豁免（列名制——活文档不豁免）。
