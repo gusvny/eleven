@@ -623,3 +623,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 ## KI-064 dev-lane.yaml 生成物漂移（260908 仲裁上报，integration 自记——f67a456 遗留）
 - f67a456（260907 方法论入机制）手改 dev-lane.yaml 未回 dev_lane.py 生成源——yaml 是生成物，手改必漂移（今晨 KI-063 首版入 yaml 又撤，同文件二连踩）。
 - 处置：方法论第三问（实报全族）应改走 dev_lane.py 源码常量（STAGE_ACCEPTANCE_EXTRA 或同源），随专门票；在此之前 yaml 手改段为活漂移，merge 有风险面。
+
+## KI-060 复查清单（宿主 260908 排定：检查什么/为何慢/怎么加快——方案宿主定，integration 只备料）
+- 备料③（仲裁 agent 参与度）：现状归因全量走 agent（20min/轮，昨晚同账抄 14 遍＋上头忘交卷＋诚实报 tests-fault 变死锁）。候选方向=机械基线签名比对打底（败场⊆存量→自动放行），agent 只接基线外新败；三病同根（速度/KI-061/agent 依赖）。
+- 备料①（155 场景逐条盘点）与备料②（耗时分布测量）待做——结论先报宿主再动。
