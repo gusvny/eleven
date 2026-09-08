@@ -30,7 +30,7 @@
    全进 Temporal 历史 + admin.log）。断线/恢复由人盯 + 会话上下文承担
    （接受此取舍）。
 3. **先不做独立 role**；改为**会话创建时注入预置 prompt**（本文下节）。
-4. **charter 落点：引擎仓 `server/dsh/session_charter.md` 单一文件**（260904
+4. **charter 落点：引擎仓 `server/session_charter.md` 单一文件**（260904
    宿主定；原拟项目 notes/ 下放被否——notes/ 是知识库账本，charter 是会话
    开局声明这类活配置，语义归位到 server/dsh 项目侧声明族）。
 
@@ -49,7 +49,7 @@
 - 注入守卫（防污染，沿 t260831-08 ⑥ 口径）：只在「本项目行 + 新建且
   staged 会话 blank 位=true」时注入**恰好一次**；恢复/切换/非 blank 绝不
   注入。
-- 内容源（拍板④，260904 宿主定）：**引擎仓 `server/dsh/session_charter.md`
+- 内容源（拍板④，260904 宿主定）：**引擎仓 `server/session_charter.md`
   单一文件**（不放 notes/——那是知识库账本；也不放项目仓/机器级目录）。
   结构=首段通用 charter（占位符 {{project_key}}/{{project_name}}/
   {{primary_dir}} 端点现填）+ 可选 `## project:<key>` 分段（命中的项目把该段
@@ -64,13 +64,13 @@
 ## 落地排期
 
 - 注入票（session-charter）：写集=session-entry.tsx/sidebar.tsx（注入接线）
-  + node.ts（charter GET）+ server/dsh/session_charter.md + smoke，与
+  + node.ts（charter GET）+ server/session_charter.md + smoke，与
   **t260904-05（票② R7+R8）完全重叠**——必须在 05 merge 收口后串行开票，
   防冲突。
 - charter 模板内容**定稿权归宿主**；草稿见附录，宿主改定后随注入票落
-  `server/dsh/session_charter.md`。
+  `server/session_charter.md`。
 
-## 附录：charter 模板草稿（落点 server/dsh/session_charter.md；待宿主定稿）
+## 附录：charter 模板草稿（落点 server/session_charter.md；待宿主定稿）
 
 > 260904 宿主补两条纪律并入草稿：①notes 落盘攒批（确认才提交，不逐段提交）；
 > ②点名修复可进 lane，但动手前先告知。
@@ -78,7 +78,7 @@
 ```markdown
 <!-- session_charter.md —— 全部项目的会话开局注入源（workbench node.ts 读取）。
      · 首段（本注释到第一个 ## project: 分段之间）=通用模板；占位符由
-       GET /suyou-workbench/api/session-charter?project=<key> 现填：
+       GET /sandbar-workbench/api/session-charter?project=<key> 现填：
        {{project_key}}/{{project_name}}/{{primary_dir}}/{{engine_root}}
      · 可选分段 ## project:<key>：该段追加到对应项目注入文本末尾。
      · 改完即生效（端点现读）；只影响之后新建的会话。 -->
@@ -102,8 +102,8 @@
 - 一句话报到：在跑几张、立项几个、我在听。
 
 ## 引擎操作面（已验证命令；引擎真源仓={{engine_root}}）
-  PY={{engine_root}}/server/dsh/temporal-poc/.venv/bin/python
-  CLI={{engine_root}}/server/dsh/temporal-poc/client.py
+  PY={{engine_root}}/server/engine/.venv/bin/python
+  CLI={{engine_root}}/server/engine/client.py
 - 看板：$PY $CLI ticket-list '{"project":"{{project_key}}"}'
 - 单票详情：$PY $CLI ticket-query '{"ticket_id":"tXXXXXX-XX"}'
 - 开票：$PY $CLI ticket-start '{"template_id":"dev-lane","project":
