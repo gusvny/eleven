@@ -41,8 +41,11 @@ export function sbEnv(root, extra = {}) {
 }
 
 // CLI 真跑。args 里调用方自行放 '--root'（全局旗标必须在子命令前——argparse 语义）。
+// 解释器必须用带 temporalio 的那支（enginePy：venv 优先）——installer 内部用
+// sys.executable 起票号通道（projects.py L404/518），系统 python3 无 SDK 时
+// CLI 腿会假报 sdk-missing（260908 实锤）。
 export function runCli(args, env) {
-  const r = spawnSync('python3', [SANDBAR, ...args], {
+  const r = spawnSync(enginePy() || 'python3', [SANDBAR, ...args], {
     cwd: REPO_ROOT, env, encoding: 'utf8', timeout: 120000,
   });
   const code = r.status === null ? -1 : r.status;
@@ -245,26 +248,63 @@ export function freePort() {
   });
 }
 
+/** 引擎解释器解析：优先仓内 venv（temporalio 真源），回落 PATH python3。
+ *  返回可执行路径或 null（两路都缺 SDK）。真票腿与 client.py 直呼必须用同一个。 */
+export function enginePy() {
+  const candidates = [
+    path.join(POC_REAL, '.venv', 'bin', 'python'),
+    'python3',
+  ];
+  for (const c of candidates) {
+    const r = spawnSync(c, ['-c', 'import temporalio'], { encoding: 'utf8' });
+    if (r.status === 0) return c;
+  }
+  return null;
+}
+
 // 返回 { ok, reason?, target?, namespace?, child? }——调用方负责 finally 里 kill child。
 export async function provisionRealRig() {
-  // 依赖①：CLI 子进程同款解释器可 import temporalio（remove 的票通道用 sys.executable）
-  const imp = spawnSync('python3', ['-c', 'import temporalio'], { encoding: 'utf8' });
-  if (imp.status !== 0) return { ok: false, reason: 'python3 缺 temporalio SDK' };
-  // 依赖②：temporal 二进制（env 显式指路 或 PATH）
-  const bin = process.env.SANDBAR_TEST_TEMPORAL_BIN || 'temporal';
-  const ver = spawnSync(bin, ['--version'], { encoding: 'utf8' });
-  if (ver.status !== 0) return { ok: false, reason: `temporal 二进制不可用（${bin}）` };
+  // 依赖①：解释器可 import temporalio——优先引擎 venv（仓内真源），回落 python3
+  // （260908 修：此前只探 python3，宿主系统解释器无 SDK 时真票腿恒 env_fail）。
+  const py = enginePy();
+  if (!py) return { ok: false, reason: '无可用 temporalio SDK（引擎 venv 与 python3 均缺）' };
+  // 依赖②：temporal 二进制（env 显式指路 > 仓内 bin/（引擎同款 dev server 真源）
+  // > PATH）——260908 修：此前只探 PATH，仓内自带二进制被漏探，真票腿恒 env_fail。
+  const bin = process.env.SANDBAR_TEST_TEMPORAL_BIN
+    || [path.join(POC_REAL, 'bin', 'temporal'), 'temporal']
+      .find((c) => spawnSync(c, ['--version'], { encoding: 'utf8' }).status === 0);
+  if (!bin) return { ok: false, reason: 'temporal 二进制不可用（env SANDBAR_TEST_TEMPORAL_BIN 可指路）' };
   // 依赖③：自举 start-dev（dev server；namespace 用 default，SANDBAR_NAMESPACE 同步钉）
   const port = await freePort();
   const db = path.join(tmpRoot('fix14-rig-'), 'dev.db');
   const child = spawn(bin, [
     'server', 'start-dev', '--ip', '127.0.0.1', '--port', String(port),
-    '--db', db, '--log-level', 'error',
+    '--db-filename', db, '--log-level', 'error',
   ], { stdio: 'ignore' });
   const deadline = Date.now() + 20000;
   while (Date.now() < deadline) {
     if (await probeTcp(port, '127.0.0.1', 500)) {
-      return { ok: true, target: `127.0.0.1:${port}`, namespace: 'default', child };
+      // 依赖④：default namespace 注册 ProjectKey/EpicCode SA——fresh start-dev 不带 SA，
+      // 在飞闸按 ProjectKey 过滤查询会报 invalid search attribute 而假红（260908 实锤）。
+      // 幂等（容忍 already exist）；注册不上=env_fail 不硬跑。
+      const target = `127.0.0.1:${port}`;
+      let saErr = '';
+      for (const name of ['ProjectKey', 'EpicCode']) {
+        const p = spawnSync(bin, ['operator', 'search-attribute', 'create',
+          '--namespace', 'default', '--name', name, '--type', 'Keyword',
+          '--address', target], { encoding: 'utf8', timeout: 15000 });
+        const low = ((p.stdout || '') + (p.stderr || '')).toLowerCase();
+        if (p.status !== 0 && !low.includes('already exist') &&
+            !low.includes('already defined') && !low.includes('already registered')) {
+          saErr = ((p.stderr || '') + (p.stdout || '')).trim().split('\n').filter(Boolean).pop() || 'rc 非零无输出';
+          break;
+        }
+      }
+      if (saErr) {
+        child.kill('SIGTERM');
+        return { ok: false, reason: `SA 注册失败（default ns）：${saErr}` };
+      }
+      return { ok: true, target, namespace: 'default', child };
     }
     if (child.exitCode !== null) return { ok: false, reason: 'temporal start-dev 秒退' };
     await new Promise((r) => setTimeout(r, 400));

@@ -21,13 +21,14 @@
 // 安全红线：零 3099 接触；自举台只在随机高端口+临时 db，finally 必杀（资源回收）；
 //   env 逐腿显式钉死防缺省外溢生产 7233。实现段落地前本场景红属预期（TDD 信号），
 //   arbitrate/merge 期必须绿。
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
 import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   tmpRoot, sbEnv, runCli, pyLookupRaw, makeChecks,
   writeProjectEntry, writeArchive, treeSnapshot, subtreeUnchanged,
-  makeStubRoot, provisionRealRig, REPO_ROOT,
+  makeStubRoot, provisionRealRig, REPO_ROOT, enginePy, extractJson,
 } from './lib_fix14.mjs';
 
 const c = makeChecks('t260904-14 project remove 闸语义');
@@ -54,9 +55,12 @@ const mkEntry = (root, key, ids) => {
   return projDir;
 };
 
-// client.py 直呼（真通道，仅真票腿用；cwd=仓根，消费 SANDBAR_TARGET_HOST/NAMESPACE env）
+// client.py 直呼（真通道，仅真票腿用；cwd=仓根，消费 SANDBAR_TARGET_HOST/NAMESPACE env）。
+// 解释器与 provisionRealRig 的依赖①同款解析（enginePy）——系统 python3 无 SDK 时
+// 直呼必炸，260908 前此腿恒 env_fail。
 function pyTicket(clientArgs, env) {
-  const r = spawnSync('python3', ['server/engine/client.py', ...clientArgs],
+  const py = enginePy() || 'python3';
+  const r = spawnSync(py, ['server/engine/client.py', ...clientArgs],
     { cwd: REPO_ROOT, env, encoding: 'utf8', timeout: 60000 });
   return { code: r.status === null ? -1 : r.status, out: (r.stdout || '') + (r.stderr || '') };
 }
@@ -71,24 +75,48 @@ function pyTicket(clientArgs, env) {
   } else {
     try {
       const root = newRoot('fix14-gate-real-');
+      mkEntry(root, 'keeper', []); // 防撞「最后项目闸」（闸序：最后条目闸在在飞闸之前，单条目注册表永远先撞闸2）
       mkEntry(root, 'rmgate', []);
       const env = sbEnv(root, {
         SANDBAR_TARGET_HOST: rig.target, SANDBAR_NAMESPACE: rig.namespace,
       });
       const tid = 't260904-14-gate';
       const st = pyTicket(['ticket-start',
-        JSON.stringify({ ticket_id: tid, template_id: 'dev-lane', project: 'rmgate' })], env);
-      if (st.code !== 0) {
+        JSON.stringify({ ticket_id: tid, template_id: 'dev-lane', project: 'rmgate',
+          allow_empty_write_set: true })], env);
+      // client.py 错误面=exit 0 + ok:false JSON（不抛不非零）——必须解析 ok 位，
+      // 只看 exit code 会把「开票被拒」漏成「票已起飞」（260908 实锤：写集空闸
+      // 拒收后 remove 一路绿灯，在飞闸形同虚设）。
+      const stBody = extractJson(st.out);
+      if (st.code !== 0 || !stBody || stBody.ok !== true) {
         c.envFail('真票腿（验收5 全段）',
           `ticket-start 未成（隔离台参数/锚定口径差异）：${st.out.slice(-200)}`);
       } else {
+        // 占位 worker：让在飞票的 query 快速失败（见 fixture_holder_fake.py 头注），
+        // 闸3 才能在 20s 子进程预算内拿到票号。场景 finally 必杀。
+        const py = enginePy() || 'python3';
+        const holder = spawn(py,
+          [path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixture_holder_worker.py'),
+            rig.target, rig.namespace, tid],
+          { env, stdio: 'ignore' });
+        // 就绪门：等占位 worker 真把 workflow 领走再发 remove——否则 query 落在
+        // 「workflow 已建但还没 worker 领」的窗口照旧空等超时（ race 窗口 ~1s）。
+        for (let i = 0; i < 30; i++) {
+          const probe = pyTicket(['ticket-list', JSON.stringify({ project: 'rmgate' })], env);
+          const body = extractJson(probe.out);
+          const row = body?.result?.tickets?.find((t) => t.id === tid);
+          if (row && row.exec_status === 'RUNNING') break;
+          await new Promise((r) => setTimeout(r, 500));
+        }
+        try {
         const rem1 = runCli(['project', 'remove', '--key', 'rmgate'], env);
         c.check('真票在飞=拒摘 exit 1（验收5 前半）', rem1.code === 1,
           `exit=${rem1.code}\n${rem1.out.slice(-400)}`);
         c.check('拒摘报票号', rem1.out.includes(tid), rem1.out.slice(-400));
         const cc = pyTicket(['cancel',
           JSON.stringify({ workflow_id: tid, reason: 't260904-14 场景收口' })], env);
-        if (cc.code !== 0) {
+        const ccBody = extractJson(cc.out);
+        if (cc.code !== 0 || !ccBody || ccBody.ok !== true) {
           c.envFail('真票腿收口后半', `cancel 未成：${cc.out.slice(-200)}`);
         } else {
           const rem2 = runCli(['project', 'remove', '--key', 'rmgate'], env);
@@ -96,9 +124,10 @@ function pyTicket(clientArgs, env) {
             `exit=${rem2.code}\n${rem2.out.slice(-400)}`);
           c.check('收口后退役在位', Boolean(retiredOf(root, 'rmgate')));
         }
+        } finally { holder.kill('SIGTERM'); }
       }
     } finally {
-      rig.child.kill('TERM'); // 资源回收：自举台必杀（资源生命周期纪律）
+      rig.child.kill('SIGTERM'); // 资源回收：自举台必杀（资源生命周期纪律；Node 信号名须带 SIG 前缀）
     }
   }
 }
