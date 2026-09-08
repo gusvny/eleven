@@ -65,31 +65,27 @@ async function fixture() {
   return withTickets;
 }
 
-// 在页面上找含 marker 文本的最深元素，向上 ≤8 层祖先（含自身）读 ::before 伪元素
-// 的 content/color；content 是带引号字符串才算 chip。返回 [{text,color}]。
-const CHIP_PROBE = `(marker) => {
-  const all = [...document.querySelectorAll('body *')];
-  const deepest = all.filter(el =>
-    (el.textContent || '').includes(marker)
-    && ![...el.children].some(c => (c.textContent || '').includes(marker)));
-  const chips = [];
-  for (const start of deepest) {
-    let el = start;
-    for (let i = 0; el && i < 8; i++, el = el.parentElement) {
-      const st = getComputedStyle(el, '::before');
-      const c = st.content || '';
-      if (c.length >= 2 && ((c.startsWith('"') && c.endsWith('"')) || (c.startsWith("'") && c.endsWith("'")))) {
-        chips.push({ text: c.slice(1, -1), color: st.color });
-      }
-    }
+// 在平台 user 行（data-chat-anchor-key + flow-kind=user，chat-project-tag.ts 公开
+// 锚）里找含 marker 的行，直读其 data-wb-projtag 属性与 ::before 渲染色。
+// 注意必须是真函数不能是字符串（playwright 把字符串当表达式求值——返回函数
+// 本体不可序列化=undefined，chipsFor 拿到 undefined 必炸；260908 实锤）。
+// 不用「文本最深元素向上爬 N 层」旧探法：平台 markdown 渲染嵌套可深至 15 层，
+// 8 层爬升必扑空（260908 实锤）。
+const CHIP_PROBE = (marker) => {
+  const rows = [...document.querySelectorAll('[data-chat-anchor-key][data-chat-flow-kind="user"]')];
+  const out = [];
+  for (const row of rows) {
+    if (!(row.textContent || '').includes(marker)) continue;
+    const pt = row.getAttribute('data-wb-projtag');
+    if (pt) out.push({ text: pt, color: getComputedStyle(row, '::before').color });
   }
-  return chips;
-}`;
+  return out;
+};
 
 async function browserScenarios(fixtureProjects) {
   let pw = null;
   for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core',
-    new URL('../../server/ui-check/node_modules/playwright-core/index.mjs', `file://${process.cwd()}/`).href]) {
+    new URL('../../server/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href]) {
     if (!c) continue;
     try { pw = await import(c); break; } catch { /* next */ }
   }
@@ -100,6 +96,12 @@ async function browserScenarios(fixtureProjects) {
     context = await browser.newContext();
     page = await context.newPage();
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    // 出厂 notice（Continue 遮罩）会拦截新会话按钮点击——先关再断言（lib_browser 同款）。
+    try {
+      const nb = page.locator('button', { hasText: /continue|继续/i }).first();
+      await nb.click({ timeout: 4000 });
+      await nb.waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
+    } catch { /* 无 notice=常态 */ }
   } catch (err) {
     record('browser/deps', 'env_fail', `console/browser unreachable: ${String(err).slice(0, 120)}`);
     try { await browser?.close(); } catch { /* noop */ }
@@ -114,8 +116,18 @@ async function browserScenarios(fixtureProjects) {
   // 建会话进可打字态（既有旅程：项目行 + 钮 → composer 在场；票② R8 改锚，
   // 顶部行 [data-wb-session-new] 已退役）。
   try {
+    // 新会话按钮的到场等 20s：冷启动台（profile 首备/插件首载）侧栏行会上得慢，
+    // 立即 count 必扑空（260908 重建台实锤）；到点仍无=真缺供，归 env_fail。
     const newBtn = page.locator('[data-wb-psess-new]').first();
-    if (!(await newBtn.count())) throw new Error('new-session button missing');
+    let btnUp = false;
+    {
+      const t0 = Date.now();
+      while (Date.now() - t0 < 20000) {
+        if (await newBtn.count()) { btnUp = true; break; }
+        await page.waitForTimeout(500);
+      }
+    }
+    if (!btnUp) throw new Error('new-session button missing');
     await newBtn.click({ timeout: 3000 });
     let staged = false;
     const t0 = Date.now();
@@ -146,7 +158,7 @@ async function browserScenarios(fixtureProjects) {
     return page.evaluate(CHIP_PROBE, marker);
   }
 
-  async function pollChips(marker, timeout = 10000) {
+  async function pollChips(marker, timeout = 30000) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeout) {
       const chips = await chipsFor(marker);
@@ -217,15 +229,20 @@ async function browserScenarios(fixtureProjects) {
     record('t3/different-key-different-color', 'env_fail', 'fixture has <2 projects with tickets');
   }
 
-  // T4 重载确定性：重载后同项目 chip 颜色不变（会话/消息随账册恢复时才有断言面）
+  // T4 重载确定性：重载后同项目 chip 颜色不变（会话/消息随账册恢复时才有断言面）。
+  // 轮询 ≤30s：chip 依赖 tag 索引（侧栏 10s 轮询/装饰器兜底自取重灌），重载后
+  // 固定 3s  sleep 在慢台上必扑空（260908 实锤：索引未回灌时 chips=[]）。
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(3000);
-  {
+  let hit4 = null;
+  for (let i = 0; i < 40 && !hit4; i++) {
+    await page.waitForTimeout(750);
     const chips = await chipsFor(markerA);
-    const hit = chips.find(c => c.text === tag0.key);
-    if (hit && colorA) {
-      record('t4/reload-determinism', hit.color === colorA ? 'pass' : 'fail',
-        hit.color === colorA ? `stable after reload ${colorA}` : `${colorA} → ${hit.color}`);
+    hit4 = chips.find(c => c.text === tag0.key) ?? null;
+  }
+  {
+    if (hit4 && colorA) {
+      record('t4/reload-determinism', hit4.color === colorA ? 'pass' : 'fail',
+        hit4.color === colorA ? `stable after reload ${colorA}` : `${colorA} → ${hit4.color}`);
     } else {
       record('t4/reload-determinism', 'env_fail', 'marker row not present after reload (session not restored) — env');
     }
