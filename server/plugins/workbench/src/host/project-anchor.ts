@@ -27,7 +27,7 @@
  */
 
 import { join } from 'node:path'
-import { findProject, primaryDir, type ProjectEntry } from '../../../suyou-projects.ts'
+import { findProject, primaryDir, type ProjectEntry } from '../../../../suyou-projects.ts'
 
 export type ProjectAnchor =
   | { ok: true; root: string; source: 'project' | 'default'; key: string | null }
