@@ -627,3 +627,10 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 ## KI-060 复查清单（宿主 260908 排定：检查什么/为何慢/怎么加快——方案宿主定，integration 只备料）
 - 备料③（仲裁 agent 参与度）：现状归因全量走 agent（20min/轮，昨晚同账抄 14 遍＋上头忘交卷＋诚实报 tests-fault 变死锁）。候选方向=机械基线签名比对打底（败场⊆存量→自动放行），agent 只接基线外新败；三病同根（速度/KI-061/agent 依赖）。
 - 备料①（155 场景逐条盘点）与备料②（耗时分布测量）待做——结论先报宿主再动。
+
+## KI-065 t260907-10 落账窗口三连事故（机器层步骤删 untracked＋checkout 二次清场＋WAL 伴生删除致 history 不可读）
+- 现象（260908 午间时序）：①12:08 global session 代签后 merge 活动开跑，`.venv/ bin/ data/`（皆 gitignore 的 untracked）被整目录删除——凶手非 global session（会话日志全天无主树 mv/rm，仅 lane 内软链实验），最大嫌疑=merge 侧机器层生效步骤的「清旧路径」把 untracked 一并清了（KI-059 起机器层生效为必答项，但无 untracked 保护）；②宿主侧 12:46 于旧物理位重建 `.venv/bin` 后，13:38 squash checkout 建 `server/dsh/temporal-poc → ../engine` 软链时旧目录再次被强制清空（二次踩同一坑）；③`temporal.db` 的 WAL/SHM 伴生文件同删，temporal server（进程未死、句柄幽灵态）GetHistory RPC 结构性损坏（h2/timeout），terminate 亦不可达。
+- 影响：temporal 事件史不可再读（导出仅得 visibility 台账 638 执行＋97 票快照，事件明细失）；工单台/worker 断链两轮；t260907-10 workflow 留 RUNNING 僵尸态（专属 worker 已收口，作历史）。
+- 处置（260908 午后宿主裁定收口）：git 侧 squash 落账（536d5fc）＋四根文件 A1 复位（035a99e）＋engine/ 新家重建 venv/bin＋农场软链重指＋~/.dsh 重定向；票务基础数据双存档（server/engine/data/exports/ 与 ~/Documents/sandbar-data-recovery-260908/）。
+- 教训：机器层生效步骤必须 untracked 白名单化（.venv/bin/data 先 mv 后清，或只动 tracked）；checkout 建软链前旧目录若含 untracked 应报错而非清场；temporal 数据卷的 WAL/SHM 应与主库同列保护清单；「不能重启的幽灵态 server」要第一时间导出（本次 12:54 导出在删除后仍得骨架，侥幸）。
+- 遗留：t260908-02 在飞执行依赖旧 venv 内存态的 worker，收口后随 console 重启统一换新路径 worker；temporal server 空库重建（宿主已裁定「历史票基础数据够用」）择 t260908-02 收口后执行；旧名链 ~/.dsh/profiles/suyou{,-headless} 处置随宿主裁定。
