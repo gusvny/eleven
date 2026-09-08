@@ -33,7 +33,7 @@
 //     配色 ≥2 个有票项目）：票号 t<yymmdd>-<NN> 形（chat tag 引用白名单只认此形），
 //     ticket list 是纯 Temporal 读，建票从宿主侧 engine venv 打**本台** temporal
 //     （SA=ProjectKey 即被容器内 list 读到）；旧短号 integfix1/2 逐台清场；
-//   - 每票证据 PNG 落 <被测树>/.suyou/evidence/<票号>/（/repo 只读挂载下宿主仓根
+//   - 每票证据 PNG 落 <被测树>/.suyou/evidence/<票号>/（/repo 只读挂载下宿主仓根  // naming-compat：归档路径是存量约定
 //     直写即容器可见；抽屉证据腿的数据源）。
 //   全链幂等（按票号 id 清点，缺几张补几张）；种票失败不阻塞供给
 //   ——各场景 fixture 腿自行 env_fail 点名（三态语义不变，绝不假绿）。
@@ -177,7 +177,7 @@ async function seedFixtures(st, fixturesHost) {
     ...process.env,
     SANDBAR_PROJECTS_YAML: legacyYaml,
     SANDBAR_TARGET_HOST: `127.0.0.1:${st.ports.temporal}`,
-    SANDBAR_NAMESPACE: st.namespace || 'suyou-test',
+    SANDBAR_NAMESPACE: st.namespace || 'suyou-test',  // naming-compat：ns 存量名随台
   };
   const runTool = (argsJson) => spawnSync(py, ['-c',
     'import sys, json; sys.path.insert(0, "server/tools"); import ticket;'
@@ -242,10 +242,10 @@ async function seedFixtures(st, fixturesHost) {
     throw new Error(`夹具票收口失败：${(drainOut.stderr || '').slice(-200)}`);
   }
   // ③ 证据图（抽屉证据腿数据源；幂等=文件在就不再写）。证据路由按票号文件
-  //    直读（.suyou/evidence/<票号>/），与 workflow 是否有 worker 无关。
+  //    直读（.suyou/evidence/<票号>/），与 workflow 是否有 worker 无关。  // naming-compat：归档路径是存量约定
   //    每张夹具票都给：行序不保证，点错行=该票无证据→抽屉图腿超时。
   //    落两处：仓根（默认锚/no-project API 面）+ 各夹具项目根（KI-057 之后抽屉
-  //    的 apiGet 统一带 ?project=，证据枚举按项目锚=<项目根>/.suyou/evidence——
+  //    的 apiGet 统一带 ?project=，证据枚举按项目锚=<项目根>/.suyou/evidence——  // naming-compat：归档路径是存量约定
   //    只落仓根时项目面带全空，抽屉证据段整体不渲染，260908 重建台实锤）。
   for (const sp of seedProjects) {
     for (const fid of sp.ids) {
