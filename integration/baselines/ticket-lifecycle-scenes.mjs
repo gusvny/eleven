@@ -644,15 +644,28 @@ print(json.dumps({"merged": merged, "added": added, "dropped": dropped}))`], { t
  * cancel failures surface as scene failures (no silent namespace pollution).
  */
 export async function cleanupTicket(t, api, worker, tid) {
+  // 先探终态；探不到（查询超时——blocked 重试风暴期 query 会被饿到超时，260909
+  // 实锤）绝不跳过 cancel：旧实现 query 一抛异常就整体跳过，cancel 永远发不出去，
+  // worker 只能等 90s deadline 被强杀。
+  let closed = false
   try {
     const q = api.query(tid)
-    const status = q.body?.result?.status
-    if (status === 'RUNNING') {
+    closed = q.body?.result?.status === 'closed'
+  } catch { /* 查询失败按未终态处理：cancel 是尽力收口，不制造假红 */ }
+  if (!closed) {
+    try {
       const c = api.cancel(tid)
-      // client.py cancel keys on workflow_id (= ticket id for dev-lane tickets)
-      if (c.body?.ok !== true) t.ok(false, `cancel ${tid} failed: ${(c.body?.error || c.stderr).slice(0, 120)}`)
+      // client.py cancel keys on workflow_id (= ticket id for dev-lane tickets)；
+      // 已终态/已不在册的 benign 报错不算失败。
+      const errTxt = String((c && (c.body?.error || c.stderr)) || '')
+      const benign = /not[ -]?found|不存在|already completed|已收口|已终态|closed/i.test(errTxt)
+      if (c.body?.ok !== true && !benign) {
+        t.ok(false, `cancel ${tid} failed: ${errTxt.slice(0, 120)}`)
+      }
+    } catch (e) {
+      t.ok(false, `cancel ${tid} threw: ${String(e).slice(0, 120)}`)
     }
-  } catch { /* query failed: workflow likely already gone */ }
+  }
   if (worker) {
     const deadline = Date.now() + 90_000 // WATCH self-exit for closed/cancelled
     while (!worker.done && Date.now() < deadline) await sleep(1000)
