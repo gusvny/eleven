@@ -220,9 +220,18 @@ if (!injected) {
   if (tabs.length < 2) {
     // 切换面自供给：+ 入口在场即可经同一用户路径再建一个会话（夹具事实不该直接
     // env_fail——原实现把「第二 tab 缺失」当环境缺供，260908 修：自造切换面再断言）。
-    await safeClick('[data-wb-psess-row] [data-wb-psess-new]');
-    for (let i = 0; i < 12 && tabs.length < 2; i++) {
-      await page.waitForTimeout(500);
+    // 轮询 24s 且失效率新点击：会话创建走 agent preset kick-off 链，冷台下首建
+    // 可 >6s（260909 实锤：12×500ms 轮询窗口内创建未完成即误报缺供）；创建中 +
+    // 钮 disabled，重点击须等钮回弹。点击锚必须与 rowRead 同row（SeedWs 行）——
+    // 全局 first-match 点到 seedq 行时第二 tab 落在 seedq 行，rowRead 只读 SeedWs
+    // 行恒单 tab=假缺供（260909 实锤）。
+    const SELF_PROV_SEL = '[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"]) [data-wb-psess-new]';
+    for (let i = 0; i < 24 && tabs.length < 2; i++) {
+      const btn = page.locator(SELF_PROV_SEL).first();
+      if (i === 0 || ((await btn.isEnabled().catch(() => false)) && i % 4 === 0)) {
+        await safeClick(SELF_PROV_SEL);
+      }
+      await page.waitForTimeout(1000);
       tabs = await rowRead();
     }
   }

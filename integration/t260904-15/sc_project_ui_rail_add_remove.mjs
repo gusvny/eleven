@@ -290,15 +290,17 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
         // 260908 双跑实锤：result 恒空而 retired 文件恒在位）。② 路必须同时
         // 确认错误面不在场，防把失败闪断误当成功。
         await forceClick(rmDlg.locator('[data-wb-pmod-remove-submit]'));
-        let okTxt = '', modalGone = false, errVisible = false;
-        for (let i = 0; i < 20 && !/摘除完成/.test(okTxt) && !modalGone; i++) {
+        let okTxt = '', modalGone = false, errTxt = '';
+        for (let i = 0; i < 20 && !/摘除完成/.test(okTxt) && !modalGone && !errTxt; i++) {
           await page2.waitForTimeout(500);
           modalGone = (await rmDlg.count()) === 0;
-          errVisible = await rmDlg.locator('[data-wb-pmod-remove-error]').isVisible().catch(() => false);
-          if (!modalGone) okTxt = await rmDlg.locator('[data-wb-pmod-remove-result]').innerText().catch(() => '');
+          if (!modalGone) {
+            errTxt = await rmDlg.locator('[data-wb-pmod-remove-error]').innerText().catch(() => '');
+            okTxt = await rmDlg.locator('[data-wb-pmod-remove-result]').innerText().catch(() => '');
+          }
         }
-        record('remove-real/execute-ok', /摘除完成/.test(okTxt) || (modalGone && !errVisible),
-          `result=${okTxt.slice(0, 120)} modalGone=${modalGone} err=${errVisible}`);
+        record('remove-real/execute-ok', /摘除完成/.test(okTxt) || (modalGone && !errTxt),
+          `result=${okTxt.slice(0, 120)} modalGone=${modalGone} err=${errTxt.slice(0, 200)}`);
         // 现场核验：注册表根（宿主侧挂载）退役文件在位 = 可逆摘除真落地。
         const retired = readdirSync(path.join(fx2.reg, 'rmb'))
           .some((n) => n.startsWith('project.yaml.retired-'));
