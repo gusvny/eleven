@@ -54,7 +54,7 @@ async function consoleHealthy() {
 async function browserScenarios() {
   let pw = null;
   for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core',
-    new URL('../../server/ui-check/node_modules/playwright-core/index.mjs', `file://${process.cwd()}/`).href]) {
+    new URL('../../server/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href]) {
     if (!c) continue;
     try { pw = await import(c); break; } catch { /* next */ }
   }
@@ -65,6 +65,12 @@ async function browserScenarios() {
     context = await browser.newContext();   // fresh profile: no ledger, chat at hero
     page = await context.newPage();
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    // 出厂 notice（Continue 遮罩）会拦截行卡点击——先关再断言（lib_browser 同款）。
+    try {
+      const nb = page.locator('button', { hasText: /continue|继续/i }).first();
+      await nb.click({ timeout: 4000 });
+      await nb.waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
+    } catch { /* 无 notice=常态 */ }
   } catch (err) {
     record('browser/deps', 'env_fail', `console/browser unreachable: ${String(err).slice(0, 120)}`);
     try { await browser?.close(); } catch { /* noop */ }
@@ -75,7 +81,7 @@ async function browserScenarios() {
   page.on('pageerror', e => consoleErrors.push(String(e)));
 
   try {
-    await page.waitForSelector('.wb-ticket-row2', { timeout: 12000 });
+    await page.waitForSelector('.wb-card[data-ticket-id]', { timeout: 12000 });
   } catch {
     record('browser/fixture-ticket-row', 'env_fail', 'no ticket row rendered in test console sidebar');
     try { await browser.close(); } catch { /* noop */ }
@@ -94,7 +100,7 @@ async function browserScenarios() {
   record('t2/baseline', 'pass', `phase=${before.phase || '(none)'} snapshots=${before.snapshots}`);
 
   const clickRowAndAssertNoSwitch = async (idx, label) => {
-    await page.evaluate((i) => { const el = document.querySelectorAll('.wb-ticket-row2')[i]; el && el.click(); }, idx);
+    await page.evaluate((i) => { const el = document.querySelectorAll('.wb-card[data-ticket-id]')[i]; el && el.click(); }, idx);
     // 中列详情照常开（既有行为回归面；抽屉锚与 t260901-13 同款）。
     let drawerOpened = true;
     try {
@@ -122,7 +128,7 @@ async function browserScenarios() {
   await clickRowAndAssertNoSwitch(0, 't3-single-click');
 
   // T4 repeat clicks across rows
-  const rowCount = await page.evaluate(() => document.querySelectorAll('.wb-ticket-row2').length);
+  const rowCount = await page.evaluate(() => document.querySelectorAll('.wb-card[data-ticket-id]').length);
   if (rowCount >= 2) {
     await clickRowAndAssertNoSwitch(1, 't4-second-row');
     await clickRowAndAssertNoSwitch(0, 't4-back-first');

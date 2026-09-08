@@ -149,7 +149,7 @@ async function serverScenarios() {
 async function browserScenarios() {
   let pw = null;
   for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core',
-    new URL('../../server/ui-check/node_modules/playwright-core/index.mjs', `file://${process.cwd()}/`).href]) {
+    new URL('../../server/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href]) {
     if (!c) continue;
     try { pw = await import(c); break; } catch { /* next */ }
   }
@@ -160,6 +160,12 @@ async function browserScenarios() {
     context = await browser.newContext();
     page = await context.newPage();
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    // 出厂 notice（Continue 遮罩）会拦截行卡点击——先关再断言（lib_browser 同款）。
+    try {
+      const nb = page.locator('button', { hasText: /continue|继续/i }).first();
+      await nb.click({ timeout: 4000 });
+      await nb.waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
+    } catch { /* 无 notice=常态 */ }
   } catch (err) {
     record('browser/deps', 'env_fail', `console/browser unreachable: ${String(err).slice(0, 120)}`);
     try { await browser?.close(); } catch { /* noop */ }
@@ -171,7 +177,7 @@ async function browserScenarios() {
 
   try {
     // rows render at all (sidebar polls every 10s)
-    await page.waitForSelector('.wb-ticket-row2', { timeout: 12000 });
+    await page.waitForSelector('.wb-card[data-ticket-id]', { timeout: 12000 });
   } catch {
     record('browser/fixture-ticket-row', 'env_fail', 'no ticket row rendered in test console sidebar');
     try { await browser.close(); } catch { /* noop */ }
@@ -184,7 +190,7 @@ async function browserScenarios() {
 
   // S7 (reversed contract, t260903-07): click row A → middle detail opens, right chat
   // context untouched (no snapshot injection, phase unchanged).
-  const rows = await page.$$('.wb-ticket-row2');
+  const rows = await page.$$('.wb-card[data-ticket-id]');
   if (rows.length < 1) {
     record('browser/click-no-session-open', 'env_fail', 'need >=1 ticket row');
   } else {
@@ -211,9 +217,9 @@ async function browserScenarios() {
   if (rows.length >= 2) {
     try {
       const before = await contextMsgCount();
-      await page.evaluate(() => { const el = document.querySelectorAll('.wb-ticket-row2')[1]; el && el.click(); });
+      await page.evaluate(() => { const el = document.querySelectorAll('.wb-card[data-ticket-id]')[1]; el && el.click(); });
       await page.waitForTimeout(3000);
-      await page.evaluate(() => { const el = document.querySelectorAll('.wb-ticket-row2')[0]; el && el.click(); });
+      await page.evaluate(() => { const el = document.querySelectorAll('.wb-card[data-ticket-id]')[0]; el && el.click(); });
       await page.waitForTimeout(4000);
       const after = await contextMsgCount();
       if (after === before) record('browser/repeat-click-zero-injection', 'pass', `snapshot count stable=${after}`);
