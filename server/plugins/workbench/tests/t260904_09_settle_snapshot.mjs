@@ -48,7 +48,7 @@ function openTicket(id, stub, opts = {}) {
 }
 
 const saved = {}
-for (const k of ['SUYOU_METRICS_DIR', 'SUYOU_METRICS_STUB', 'SUYOU_USAGE_LEDGER_DIR']) { saved[k] = process.env[k]; delete process.env[k] }
+for (const k of ['SANDBAR_METRICS_DIR', 'SANDBAR_METRICS_STUB', 'SANDBAR_USAGE_LEDGER_DIR']) { saved[k] = process.env[k]; delete process.env[k] }
 const restore = () => { for (const k of Object.keys(saved)) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k] } }
 
 // ---- ① readSettleSnapshot 三态
@@ -76,7 +76,7 @@ const restore = () => { for (const k of Object.keys(saved)) { if (saved[k] === u
   const r4 = await readSettleSnapshot(dir, 't09-absent')
   ok2(!r4.snap && String(r4.reason).includes('无 settle 快照'), '无文件 → null+人话 reason')
   // resolveSettleDir 与缓存同根链
-  process.env.SUYOU_METRICS_DIR = root
+  process.env.SANDBAR_METRICS_DIR = root
   ok2(resolveMetricsCacheDir('demo').settleDir === join(root, 'demo', 'data', 'settle'), 'settleDir 与缓存同根链', resolveMetricsCacheDir('demo').settleDir)
   // integration R6 回归：SETTLE env 在链头（替换项目根整体），写读同序不分叉
   const alt = freshDir('t09-snap-alt-')
@@ -90,7 +90,7 @@ const restore = () => { for (const k of Object.keys(saved)) { if (saved[k] === u
   const rAlt2 = await readSettleSnapshot(resolveMetricsCacheDir('demo').settleDir, 't09-s1')
   ok2(rAlt2.snap && rAlt2.snap.tokens.in === 100, '替代根下有快照 → 读出（R6 修复面）')
   delete process.env.SANDBAR_SETTLE_SNAPSHOT_DIR
-  delete process.env.SUYOU_METRICS_DIR
+  delete process.env.SANDBAR_METRICS_DIR
 }
 
 // ---- ②③ ticketRecord 快照优先级 + zero_change reason
@@ -105,8 +105,8 @@ async function runScenario({ ticket, cacheRec, snapshot }) {
     await mkdir(settleDir, { recursive: true })
     await writeFile(join(settleDir, ticket.id + '.json'), JSON.stringify(snapshot))
   }
-  process.env.SUYOU_METRICS_DIR = root
-  process.env.SUYOU_METRICS_STUB = writeStub(stubDir, baseStub({ tickets: [ticket] }))
+  process.env.SANDBAR_METRICS_DIR = root
+  process.env.SANDBAR_METRICS_STUB = writeStub(stubDir, baseStub({ tickets: [ticket] }))
   const deps = defaultDeps('/stub-repo', () => NOW)
   const r = await buildMetricsResponse({ view: 'time', window: 'all' }, deps)
   const rec = JSON.parse(await readFile(join(cacheDir, ticket.id + '.json'), 'utf8'))
@@ -157,8 +157,8 @@ async function runScenario({ ticket, cacheRec, snapshot }) {
     updated_ts: new Date(NOW).toISOString(), computed_at: new Date(NOW).toISOString(),
   }
   await writeFile(join(cacheDir, 't09-p3.json'), JSON.stringify(stale))
-  process.env.SUYOU_METRICS_DIR = root
-  process.env.SUYOU_METRICS_STUB = writeStub(stubDir, baseStub({
+  process.env.SANDBAR_METRICS_DIR = root
+  process.env.SANDBAR_METRICS_STUB = writeStub(stubDir, baseStub({
     tickets: [closedTicket('t09-p3', baseStub(), { t0: Date.parse('2026-08-30T01:00:00Z'), closedAt: Date.parse('2026-08-30T04:00:00Z') })],
   }))
   const deps = defaultDeps('/stub-repo', () => NOW)
@@ -224,8 +224,8 @@ async function runScenario({ ticket, cacheRec, snapshot }) {
     mk('t09-d4', null, false),                                                             // 不可算
   ]
   for (const r of recs) await writeFile(join(cacheDir, r.ticket_id + '.json'), JSON.stringify(r))
-  process.env.SUYOU_METRICS_DIR = root
-  process.env.SUYOU_METRICS_STUB = writeStub(stubDir, baseStub({ tickets: [
+  process.env.SANDBAR_METRICS_DIR = root
+  process.env.SANDBAR_METRICS_STUB = writeStub(stubDir, baseStub({ tickets: [
     closedTicket('t09-d1', baseStub(), { t0: Date.parse('2026-08-30T01:00:00Z'), closedAt: Date.parse('2026-08-30T04:00:00Z') }),
     closedTicket('t09-d2', baseStub(), { t0: Date.parse('2026-08-30T01:00:00Z'), closedAt: Date.parse('2026-08-30T04:00:00Z') }),
     openTicket('t09-d3', baseStub(), { t0: Date.parse('2026-08-30T01:00:00Z') }),

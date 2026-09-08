@@ -32,8 +32,10 @@ import { parseLedger, serializeLedger } from '../shared/sessions.ts'
 import type { OpenedEntry } from '../shared/sessions.ts'
 
 /** 「最近关闭」列表的 localStorage key（t260831-06 定值，D1 修复起定义随
- * IO 迁入本文件；session-entry.tsx re-export 保持对外符号兼容）。 */
-export const CLOSED_LEDGER_KEY = 'suyou.workbench.closedSessions'
+ * IO 迁入本文件；session-entry.tsx re-export 保持对外符号兼容；260908 终切
+ * 改 sandbar 前缀，旧 key 读入时一次性迁移——KI-058 状态层清单规则）。 */
+export const CLOSED_LEDGER_KEY = 'sandbar.workbench.closedSessions'
+const LEGACY_CLOSED_LEDGER_KEY = 'suyou.workbench.closedSessions'
 
 /** 列表上限（沿用 t260831-06：cap 10，防无限增长）。 */
 export const CLOSED_LEDGER_CAP = 10
@@ -57,7 +59,17 @@ export function subscribeClosed(fn: () => void): () => void {
 export function getClosedSnapshot(): OpenedEntry[] {
   if (current === null) {
     try {
-      current = parseLedger(localStorage.getItem(CLOSED_LEDGER_KEY))
+      let raw = localStorage.getItem(CLOSED_LEDGER_KEY)
+      if (raw === null) {
+        // 一次性迁移：旧 key 数据搬新 key 后删旧（KI-058：localStorage 改名不迁移=入口隐形）
+        const legacy = localStorage.getItem(LEGACY_CLOSED_LEDGER_KEY)
+        if (legacy !== null) {
+          localStorage.setItem(CLOSED_LEDGER_KEY, legacy)
+          localStorage.removeItem(LEGACY_CLOSED_LEDGER_KEY)
+          raw = legacy
+        }
+      }
+      current = parseLedger(raw)
     } catch {
       current = []
     }

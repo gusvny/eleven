@@ -44,8 +44,8 @@
  *                                                 127.0.0.1:7233 端口是否监听（=server 在线）+ worker
  *                                                 pidfile pid 是否存活（=worker 在线），不写死结果
  *   GET  /sandbar-workbench/api/wf/workers        → worker 清单（260824 每工单专属 worker）：
- *                                                 扫 data/worker*.pid 逐个探测存活（共享 suyou-poc +
- *                                                 专属 suyou-ticket-<id>），状态条「N workers」数据源
+ *                                                 扫 data/worker*.pid 逐个探测存活（共享 sandbar +
+ *                                                 专属 sandbar-ticket-<id>），状态条「N workers」数据源
  *   GET  /sandbar-workbench/api/wf/scan-report    → 巡检报告（只读，M6 t260821-m6-scan-expand）：
  *                                                 读 engine/out/scan/ 文件名序最新的
  *                                                 <YYYY-MM-DD>.json（DispatcherScanWorkflow 落盘）；
@@ -122,7 +122,7 @@
  * headless profile 没有 webServer 服务：apply 静默待命（internal/service 事件
  * 等不到就什么都不挂），不报错不阻塞。
  *
- * repo 解析顺序：config.repo → SUYOU_REPO → 按本文件位置推导
+ * repo 解析顺序：config.repo → SANDBAR_REPO → 按本文件位置推导
  * （<repo>/server/plugins/workbench/node.ts 上三级）。无任何机器绝对路径写死。
  */
 
@@ -137,7 +137,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
 import { runAdminCli } from '../../sandbar-tools.ts'
-import { findProject, loadProjects, loadRegistry, primaryDir, type ProjectEntry } from '../../suyou-projects.ts'
+import { findProject, loadProjects, loadRegistry, primaryDir, type ProjectEntry } from '../../project-registry.ts'
 // 项目锚解析器（t260907-11 KI-057）：请求层按 ?project= 解析项目根，六处静态锚穿参的
 // 单一收口（取舍清单/env 覆盖闸/显式报错口径见该模块头注）。
 import { anchorEnv, anchorEpicsDir, resolveProjectAnchor, resolvedMark, type ProjectAnchor } from './src/host/project-anchor.ts'
@@ -164,7 +164,7 @@ function projectRootsFor(projectKey: unknown): string[] {
 import { computeTicketDiff, type TicketForDiff } from './src/host/changes.ts'
 import { ticketShowHttpVerdict } from './src/host/ticket-error.ts'
 import { readLatestScanReport } from './src/host/scan-report.ts'
-import { listAgentLogs, resolveSuyouBaseDir, _sessionKbFast } from './src/host/agent-logs.ts'
+import { listAgentLogs, resolveAgentBaseDir, _sessionKbFast } from './src/host/agent-logs.ts'
 import { readAgentLiveTail, resolveSessionFile } from './src/host/agent-live.ts'
 import { aggregateTicketUsage, resolveAllSessionFiles, stageWindowsFromTimeline } from './src/host/agent-usage.ts'
 import { buildMetricsResponse, defaultDeps } from './src/host/metrics.ts'
@@ -256,7 +256,7 @@ export function ticketContext(input: any): string {
 /**
  * 工单截图证据文件列表（t260831-08）：GET /wf/tickets/<id>/evidence 的数据源。
  * 读序与既有取图端点（handleTicketEvidence，t260829-02）一致：①主树归档
- * <base>/<id>/（base=SUYOU_EVIDENCE_DIR env 或 <repo>/.suyou/evidence）；②泳道
+ * <base>/<id>/（base=SANDBAR_EVIDENCE_DIR env 或 <repo>/.suyou/evidence）；②泳道
  * <repo>/.worktrees/<id>/.suyou/screenshots/。取舍清单（t260831-08 方案 gen1
  * #1b/#1c/#1d）：目录级 containment（resolve 后 startsWith 各自数据根——词法纵深
  * 防御，配合 TICKET_ID_RE 不含 / 和 . 双保险）；枚举结果逐名过 isEvidenceFileName
@@ -265,13 +265,13 @@ export function ticketContext(input: any): string {
  * 自家 QA agent 工具产物，非外部输入，与既有取图端点同洞（不单侧加防线造伪安全）。
  *
  * t260907-11 KI-057 穿参：repo 参数=判界用项目根（默认仓锚传引擎仓、项目锚传项目主
- * 目录，containment 闸随锚走、语义不变）；envBase=SUYOU_EVIDENCE_DIR 覆盖值——缺省
+ * 目录，containment 闸随锚走、语义不变）；envBase=SANDBAR_EVIDENCE_DIR 覆盖值——缺省
  * 参数=读 env（旧调用点/默认锚行为不变），项目锚显式传 null（env 属引擎仓域，不透出）。
  */
 export async function listEvidenceFiles(
   id: string,
   repo: string,
-  envBase: string | null = process.env.SUYOU_EVIDENCE_DIR ?? null,
+  envBase: string | null = process.env.SANDBAR_EVIDENCE_DIR ?? null,
 ): Promise<string[]> {
   if (!TICKET_ID_RE.test(id) || /[./]/.test(id)) return []
   const base = envBase ?? join(repo, '.suyou', 'evidence')
@@ -363,7 +363,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
   // repo 语义（KI-057 改判后）：默认仓/回落值——boot 指纹、docs 视图、项目注册表、
   // runProjectCli、runPocCli 等引擎语义面仍锚它；项目工单路由逐请求经 anchorOf 解析
   // 项目主目录，不再直接消费本值。
-  const repo = config?.repo ?? process.env.SUYOU_REPO ?? DEFAULT_REPO
+  const repo = config?.repo ?? process.env.SANDBAR_REPO ?? DEFAULT_REPO
   const logger: { warn?: (...a: unknown[]) => void } | undefined = (ctx as any)?.logger
   // host 陈旧看守（t260902-03）：boot 指纹只在首次 apply 固化（见模块级注释的不变量）。
   void resolveBootFingerprint(repo)
@@ -948,7 +948,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
    * 读序：①主树归档 <repo>/.suyou/evidence/<id>/<file>（泳道拆树后 report 引图不死链）；
    * ②泳道在时 <repo>/.worktrees/<id>/.suyou/screenshots/<file>（命名约定 lane/t<id>，
    * merge 拆树后自然落空，归档处兜底）。防穿三层：TICKET_ID_RE 白名单 + 文件名白名单
-   * （^[A-Za-z0-9._-]+$ 且 .png 结尾）+ resolve 落点断言。归档基目录 SUYOU_EVIDENCE_DIR
+   * （^[A-Za-z0-9._-]+$ 且 .png 结尾）+ resolve 落点断言。归档基目录 SANDBAR_EVIDENCE_DIR
    * env 可覆盖（python 侧 _archive_shots 同名 env 互指，自测指向临时目录）。
    * KI-057：候选根随 ?project= 项目主目录走（env 仅默认仓锚透出，取舍见 project-anchor.ts）。
    */
@@ -964,7 +964,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     const anchor = anchorGuard(res, anchorOf(new URL(req.url ?? '/', 'http://x')))
     if (anchor === null) return
     const root = anchor.root
-    const base = anchorEnv(anchor, 'SUYOU_EVIDENCE_DIR') ?? join(root, '.suyou', 'evidence')
+    const base = anchorEnv(anchor, 'SANDBAR_EVIDENCE_DIR') ?? join(root, '.suyou', 'evidence')
     const candidates = [
       resolve(base, id, file),
       resolve(root, '.lane', id, '.suyou', 'screenshots', file),
@@ -1607,7 +1607,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         return
       }
       const t = s.result ?? {}
-      const { base, reason } = resolveSuyouBaseDir(repo, id, t, projectRootsFor(t.project))
+      const { base, reason } = resolveAgentBaseDir(repo, id, t, projectRootsFor(t.project))
       const result = await listAgentLogs(base)
       if (reason !== undefined && result.reason === undefined) result.reason = reason
       sendJson(res, 200, { ok: true, result })

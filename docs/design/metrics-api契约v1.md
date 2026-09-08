@@ -233,7 +233,7 @@ UTF-8 字节全量比对）。两时间戳语义是「本次响应生成时刻 /
   tests/delivery-recovery.mjs④，根治需 per-commit 归属归档（引擎侧 KI-017③ 同批）。
 - **token 维项目级账本（t260903-09 前向契约，KI-017③）**：泳道 `.dsh/sessions`
   随泳道拆除陪葬，usage 出仓归档（merge 时刻冻结快照）落项目级账本
-  `$SUYOU_USAGE_LEDGER_DIR/<工单id>/*.jsonl.zstd`（与 session.jsonl.zstd 同构，
+  `$SANDBAR_USAGE_LEDGER_DIR/<工单id>/*.jsonl.zstd`（与 session.jsonl.zstd 同构，
   引擎侧 agent_activities.py 落盘，本票只留探测缝）；两处皆无 → tokens=null +
   人话 reason，不做静默 0。
 
@@ -310,7 +310,7 @@ UTF-8 字节全量比对）。两时间戳语义是「本次响应生成时刻 /
 1. **缓存命中自愈（KI-040）**：per-ticket 缓存命中不再无条件早退。两类陈旧记录
    放行全量重算路径（存量降维保留机制不变）：
    - 条件 A（失败维固化 + TTL 节流）：`delivery===null` 且记录 `updated_ts` 距今超
-     TTL（env `SUYOU_METRICS_REPROBE_TTL_MIN`，缺省 60 分钟；0=每次必探仅测试；
+     TTL（env `SANDBAR_METRICS_REPROBE_TTL_MIN`，缺省 60 分钟；0=每次必探仅测试；
      负值按 0）。`updated_ts` 缺失/坏值视为过期必探（NaN 比较方向已定：向「重探」
      倾斜，不给脏记录留永久静默）。重探写回恒刷 `updated_ts`=「上次尝试时刻」，
      节流锚点自洽——真不可算票每票每 TTL 周期最多付费一轮 showTicket+git。
@@ -363,13 +363,13 @@ UTF-8 字节全量比对）。两时间戳语义是「本次响应生成时刻 /
 1. **settle 出仓快照（KI-017 引擎侧欠账收口）**：引擎在 merge（squash 收口）落定后、
    泳道清理前，冻结单票快照出仓到 `<projects-root>/<key>/data/settle/<票号>.json`
    （与 metrics 缓存同根约定；测试缝 env `SANDBAR_SETTLE_SNAPSHOT_DIR` 替换**项目根
-   整体**，与 `SUYOU_METRICS_DIR ?? SANDBAR_PROJECTS_DIR ?? ~/.sandbar/projects` 同链，
+   整体**，与 `SANDBAR_METRICS_DIR ?? SANDBAR_PROJECTS_DIR ?? ~/.sandbar/projects` 同链，
    读写两侧同一解析语义）。快照内容：`tokens`（in/out/cacheRead、by_model；by_stage
    恒空对象+`by_stage_available:false`——引擎侧无 workflow timeline 时间窗真源，不硬造）
    + `delivery`（squash 真身 numstat add/del/commits、base、squash_commit short hash、
    `zero_change`）+ `schema_version:"v1"` + settled_at。语义：
    - **本条取代块 3「token 维项目级账本（t260903-09 前向契约）」的出仓格式约定**：
-     原始会话文件（`$SUYOU_USAGE_LEDGER_DIR/<id>/*.jsonl.zstd`）出仓不再实施，改
+     原始会话文件（`$SANDBAR_USAGE_LEDGER_DIR/<id>/*.jsonl.zstd`）出仓不再实施，改
      聚合 JSON 快照。`resolveLedgerSessionFiles` 读缝保留为兼容读位（存量外部注入
      仍可读），读侧优先级在其下，不再新增引用。
    - **幂等/不可变**：重复 settle 载荷一致=跳过；不一致（重开票等）=keep-old 不回写
@@ -409,7 +409,7 @@ UTF-8 字节全量比对）。两时间戳语义是「本次响应生成时刻 /
    缺失）=delivery=null 且 closed。四桶互斥且 Σ=票数；零变更已闭票不再与「不可算」
    混装。**已知边界（继承，不新造静默）**：归档票 open 无外部真源（openUnverified，
    KI-031 家族），「未交付（在制）」桶可能混入实际已闭的归档票。
-6. **legacy 单文件注册表模式（SUYOU_PROJECTS_YAML）**：该模式只影响 host 侧 metrics
+6. **legacy 单文件注册表模式（SANDBAR_PROJECTS_YAML）**：该模式只影响 host 侧 metrics
    缓存落盘（enabled:false）；settle 快照目录解析不受其影响——引擎照常写根链目录，
    读侧照读（快照与缓存独立性声明）。
 

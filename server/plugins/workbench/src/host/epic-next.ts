@@ -2,18 +2,18 @@
  * epic-next.ts —— 立项单「继续执行」按钮的宿主半（t260827-02，epic-linkage 延伸）。
  *
  * 链路：POST /api/epics/<code>/suggest-next 启动一个异步建议 job —— spawn 一次性
- * headless integration agent（dsh --profile suyou-headless --patch roles/integration.yml），
+ * headless integration agent（dsh --profile sandbar-headless --patch roles/integration.yml），
  * agent 只读分析并把建议写进 <jobDir>/result.json；前端轮询
  * GET /api/epics/<code>/suggest-next/<jobId> 拿结果，预填进既有「新建工单」弹层，
  * 人类确认后才走 POST /wf/tickets 真正创建——agent 永远不直接开工单。
  *
  * 与 python 侧真源互指（改一边必须同步另一边）：
  *   - spawn 口径复刻 server/engine/agent_activities.py：DSH_HOME=jobDir/.dsh
- *     + 拷 suyou-headless profile / .credentials.yaml / settings.yaml；模型路由读
+ *     + 拷 sandbar-headless profile / .credentials.yaml / settings.yaml；模型路由读
  *     model-routes.yaml 钉 agent-default-model（一次性 patch + settings 用户层双写，
- *     260826 事故教训：只发 patch 会被 settings 用户层盖掉）；SUYOU_AGENT_CMD env
- *     覆盖（shlex 白空切分）；SUYOU_EPIC_NEXT_STUB=1|ok/invalid_json/never_write
- *     自测桩（仿 SUYOU_AGENT_STUB）。
+ *     260826 事故教训：只发 patch 会被 settings 用户层盖掉）；SANDBAR_AGENT_CMD env
+ *     覆盖（shlex 白空切分）；SANDBAR_EPIC_NEXT_STUB=1|ok/invalid_json/never_write
+ *     自测桩（仿 SANDBAR_AGENT_STUB）。
  *   - 进程生命周期同样复刻 agent_activities.py 的 finally-terminate 口径（那边是
  *     「轮询到结果文件即 terminate」，见该文件 agent activity 的 finally 块）：本模块
  *     所有终态（done/校验失败/非法 JSON/超时）统一 reapAgentProc 回收 agent 进程——
@@ -53,9 +53,9 @@ const { randomUUID, createHash } = nodeCrypto as unknown as {
 
 /** job 总时限默认值：超过即杀进程置 failed（integration 实跑一般 1~5 分钟，10 分钟封顶）。 */
 export const JOB_TIMEOUT_MS = 10 * 60_000
-/** job 总时限（env SUYOU_EPIC_NEXT_TIMEOUT_MS 可覆盖，自测用；非正数回退默认值）。 */
+/** job 总时限（env SANDBAR_EPIC_NEXT_TIMEOUT_MS 可覆盖，自测用；非正数回退默认值）。 */
 export function jobTimeoutMs(): number {
-  const v = Number(process.env.SUYOU_EPIC_NEXT_TIMEOUT_MS)
+  const v = Number(process.env.SANDBAR_EPIC_NEXT_TIMEOUT_MS)
   return Number.isFinite(v) && v > 0 ? v : JOB_TIMEOUT_MS
 }
 /** 时限人话（<60s 写秒，避免「等待超过 0 分钟」）。 */
@@ -246,9 +246,9 @@ export interface EpicNextJob {
 /** 内存 job 注册表：dsh webServer 长驻进程内有效；重启即丢（前端 404 后重新点击即可，不存盘）。 */
 const JOBS = new Map<string, EpicNextJob>()
 
-/** job 根目录：env SUYOU_EPIC_NEXT_DIR 优先（自测指向临时目录），缺省 <repo>/.suyou/epic-next（gitignored）。 */
+/** job 根目录：env SANDBAR_EPIC_NEXT_DIR 优先（自测指向临时目录），缺省 <repo>/.suyou/epic-next（gitignored）。 */
 export function resolveEpicNextDir(repo: string): string {
-  return process.env.SUYOU_EPIC_NEXT_DIR ?? join(repo, '.suyou', 'epic-next')
+  return process.env.SANDBAR_EPIC_NEXT_DIR ?? join(repo, '.suyou', 'epic-next')
 }
 
 /* ---------------------------------------------------------------- 纯函数（smoke 直测） */
@@ -404,7 +404,7 @@ export function findRunningJob(code: string): EpicNextJob | null {
   return null
 }
 
-/** SUYOU_AGENT_CMD 切分（迷你 shlex：白空分词，单/双引号成对剥除——payload 等带空格参数靠引号保真）。 */
+/** SANDBAR_AGENT_CMD 切分（迷你 shlex：白空分词，单/双引号成对剥除——payload 等带空格参数靠引号保真）。 */
 function splitCmd(s: string): string[] {
   const out: string[] = []
   let cur = ''
@@ -470,7 +470,7 @@ async function spawnAgent(repo: string, job: EpicNextJob, prompt: string): Promi
   await copyIfExists(join(userDsh, 'settings.yaml'), join(dshHome, 'settings.yaml'))
   await copyIfExists(join(userDsh, 'profiles', 'suyou-headless'), join(dshHome, 'profiles', 'suyou-headless'))
 
-  const cmd = splitCmd(process.env.SUYOU_AGENT_CMD || 'dsh --profile suyou-headless')
+  const cmd = splitCmd(process.env.SANDBAR_AGENT_CMD || 'dsh --profile suyou-headless')
   const args = cmd.slice(1)
   const rolePatch = join(repo, 'server', 'roles', 'integration.yml')
   if (existsSync(rolePatch)) args.push('--patch', rolePatch)
@@ -574,17 +574,17 @@ export interface StartSuggestInput {
 
 /**
  * 启动建议 job（调用方已做过 code 校验与 findRunningJob 复用判断；这里再兜底一次复用）。
- * SUYOU_EPIC_NEXT_STUB 自测桩变体（不真起 agent）：
+ * SANDBAR_EPIC_NEXT_STUB 自测桩变体（不真起 agent）：
  *   1|ok          → 直接写一份合规 result.json（模板取清单第一个；清单为空写 failed）；
  *   invalid_json  → 写一份非法 JSON（复刻 LLM 典型非法转义 \- 现场），走 fail-fast 降级路径；
- *   never_write   → 不写文件，陪 SUYOU_EPIC_NEXT_TIMEOUT_MS 覆盖走超时降级路径。
+ *   never_write   → 不写文件，陪 SANDBAR_EPIC_NEXT_TIMEOUT_MS 覆盖走超时降级路径。
  * stub 模式统一挂一个哑长驻进程到 job.proc（unref，不拖宿主退出）：与真实路径在进程
  * 生命周期上等价，终态回收行为可被 smoke 断言。轮询路径与真实路径完全一致。
  */
 export async function startSuggestJob(input: StartSuggestInput): Promise<EpicNextJob> {
   const existing = findRunningJob(input.code)
   if (existing) return existing
-  // KI-057 env 闸：项目锚直拼 <root>/.suyou/epic-next（SUYOU_EPIC_NEXT_DIR 属引擎仓
+  // KI-057 env 闸：项目锚直拼 <root>/.suyou/epic-next（SANDBAR_EPIC_NEXT_DIR 属引擎仓
   // 域，不透出）；缺省（无 root）走原 resolveEpicNextDir（env 优先，行为不变）。
   const root = input.root !== undefined ? join(input.root, '.suyou', 'epic-next') : resolveEpicNextDir(input.repo)
   const jobId = `${input.code}-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`
@@ -610,7 +610,7 @@ export async function startSuggestJob(input: StartSuggestInput): Promise<EpicNex
     workflowIds: input.workflows.map(w => w.id),
   }
   JOBS.set(jobId, job)
-  const stubMode = process.env.SUYOU_EPIC_NEXT_STUB
+  const stubMode = process.env.SANDBAR_EPIC_NEXT_STUB
   if (stubMode) {
     if (stubMode === 'invalid_json') {
       // 复刻 260828 事故现场：内容形状合规但混了 LLM 非法转义 \-（JSON 只认 \" \\ \n 等少数）。

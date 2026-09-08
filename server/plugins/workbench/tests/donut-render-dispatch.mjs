@@ -22,13 +22,13 @@ import { donutOption, specToDonutInput, isHumanSliceName } from './../src/client
 
 const { buildMetricsResponse, defaultDeps } = await import(new URL('./../src/host/metrics.ts', import.meta.url).pathname)
 
-process.env.SUYOU_METRICS_STUB = ''
-const savedStub = process.env.SUYOU_METRICS_STUB
-const savedDir = process.env.SUYOU_METRICS_DIR
+process.env.SANDBAR_METRICS_STUB = ''
+const savedStub = process.env.SANDBAR_METRICS_STUB
+const savedDir = process.env.SANDBAR_METRICS_DIR
 
 const mkDeps = (stub) => {
-  process.env.SUYOU_METRICS_STUB = writeStub(freshDir('t09-donut-stub-'), stub)
-  process.env.SUYOU_METRICS_DIR = freshDir('t09-donut-cache-')
+  process.env.SANDBAR_METRICS_STUB = writeStub(freshDir('t09-donut-stub-'), stub)
+  process.env.SANDBAR_METRICS_DIR = freshDir('t09-donut-cache-')
   return defaultDeps('/stub-repo', () => NOW)
 }
 
@@ -91,7 +91,7 @@ const mkDeps = (stub) => {
 
   // 另两张投诉 donut：模型份额 / 有无代码变更票占比（分派面从 default 收编）。
   // token 数据经项目级账本缝供给（泳道会话不存在的真实形态）——顺带全链路验证
-  // SUYOU_USAGE_LEDGER_DIR 回落进 buildMetricsResponse。
+  // SANDBAR_USAGE_LEDGER_DIR 回落进 buildMetricsResponse。
   const ledger = freshDir('t09-donut-ledger-')
   mkdirSync(join(ledger, 't09-donut-good'), { recursive: true })
   const sessDir = freshDir('t09-donut-sess-')
@@ -101,11 +101,11 @@ const mkDeps = (stub) => {
   } else {
     copyFileSync(join(sessDir, '.dsh', 'sessions', 'slug0', 't09-donut-good-developer', 'session.jsonl.zstd'),
       join(ledger, 't09-donut-good', 'session.jsonl.zstd'))
-    process.env.SUYOU_USAGE_LEDGER_DIR = ledger
+    process.env.SANDBAR_USAGE_LEDGER_DIR = ledger
     const rTok = await buildMetricsResponse({ view: 'token', window: '7d' }, mkDeps(baseStub({ tickets: [good] })))
     const model = rTok.body.charts.secondaries.find((c) => c.kind === 'donut' && String(c.title).includes('模型份额'))
     ok('token 视图模型份额 donut 在场（账本缝供数）', model !== undefined && specToDonutInput(model).slices.length > 0, JSON.stringify(model))
-    process.env.SUYOU_USAGE_LEDGER_DIR = ''
+    process.env.SANDBAR_USAGE_LEDGER_DIR = ''
   }
   const rDel = await buildMetricsResponse({ view: 'delivery', window: '7d' }, mkDeps(baseStub({ tickets: [good] })))
   const withCode = rDel.body.charts.secondaries.find((c) => c.kind === 'donut' && String(c.title).includes('有无代码变更票占比'))
@@ -115,6 +115,6 @@ const mkDeps = (stub) => {
     JSON.stringify(withCode?.categories))
 }
 
-process.env.SUYOU_METRICS_STUB = savedStub
-process.env.SUYOU_METRICS_DIR = savedDir
+process.env.SANDBAR_METRICS_STUB = savedStub
+process.env.SANDBAR_METRICS_DIR = savedDir
 process.exit(summary('donut-render-dispatch') ? 0 : 1)

@@ -4,7 +4,7 @@
  *
  * 用法：node smoke/review_store.mjs   （在 server/plugins/knowledge/ 下跑；或任意 cwd）
  *
- * 做法：mkdtemp 临时假仓库（docs/ + server/），SUYOU_REPO 指过去，spawn python3
+ * 做法：mkdtemp 临时假仓库（docs/ + server/），SANDBAR_REPO 指过去，spawn python3
  * review_store.py 各子命令，断言落盘格式与 node 侧 review-store.ts 同制式：
  *   docs/reviews/<path,/→__>.json  { path, rounds:[{base,ts,reviewer,conclude,blocks[]}] }
  * 全程不碰真 docs/。退出码 0=全绿。
@@ -29,7 +29,7 @@ function check(name, cond, detail = '') {
 function run(args) {
   try {
     const out = execFileSync('python3', [CLI, ...args], {
-      env: { ...process.env, SUYOU_REPO: REPO }, encoding: 'utf8',
+      env: { ...process.env, SANDBAR_REPO: REPO }, encoding: 'utf8',
     })
     return JSON.parse(out)
   } catch (e) {

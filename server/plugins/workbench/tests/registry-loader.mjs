@@ -15,14 +15,14 @@
  *   8. 空注册表三分支：根空→迁移 / 全隔离→抛错列原因 / 有标记零条目→抛错
  *   9. 迁移：逐条出仓 + .migrated、幂等零重写、源写坏→抛错、含 # 值拒绝迁移、序列化可往返
  *   9b. 无标记三类现场（修订 v2.1）：崩溃残留→续迁补齐、人工注册表→接受、混合现场→fail-closed
- *  10. legacy env（SUYOU_PROJECTS_YAML）旧单文件模式回归
+ *  10. legacy env（SANDBAR_PROJECTS_YAML）旧单文件模式回归
  */
 
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const m = await import('../../../suyou-projects.ts')
+const m = await import('../../../project-registry.ts')
 const { loadRegistry, loadProjects, findProject, parseProjectYaml, migrateRegistry, PROJECT_KEY_RE } = m
 
 let passed = 0
@@ -42,7 +42,7 @@ function throws(fn, label, needle = '') {
 function section(t) { console.log(`\n== ${t}`) }
 
 // 每个场景独立 temp 根；legacy env 一律清掉，防外部串扰
-delete process.env.SUYOU_PROJECTS_YAML
+delete process.env.SANDBAR_PROJECTS_YAML
 function freshRoot() {
   const root = mkdtempSync(join(tmpdir(), 'sandbar-reg-'))
   process.env.SANDBAR_PROJECTS_DIR = root
@@ -264,12 +264,12 @@ section('9b 无标记三类现场（修订 v2.1）：续迁 / 人工注册表 / 
   rmSync(tmp, { recursive: true, force: true })
 }
 
-section('10 legacy env（SUYOU_PROJECTS_YAML）旧单文件模式回归')
+section('10 legacy env（SANDBAR_PROJECTS_YAML）旧单文件模式回归')
 {
   const tmp = mkdtempSync(join(tmpdir(), 'sandbar-legacy-'))
   const legacy = join(tmp, 'projects.yaml')
   writeFileSync(legacy, `projects:\n  - key: smoketest\n    name: 冒烟\n    dirs:\n      - ${tmp}\n`, 'utf8')
-  process.env.SUYOU_PROJECTS_YAML = legacy
+  process.env.SANDBAR_PROJECTS_YAML = legacy
   delete process.env.SANDBAR_PROJECTS_DIR
   const reg = loadRegistry()
   ok(reg.projects.length === 1 && reg.projects[0].key === 'smoketest' && reg.projects[0].dirs[0] === tmp, '旧格式单文件解析不变')
@@ -277,7 +277,7 @@ section('10 legacy env（SUYOU_PROJECTS_YAML）旧单文件模式回归')
   ok(findProject('smoketest')?.name === '冒烟', 'legacy 模式 findProject 正常')
   writeFileSync(legacy, `- key: x\n`, 'utf8')  // 写坏（缺 projects: 根）
   throws(() => loadProjects(), 'legacy 文件写坏 → 抛错', 'projects:')
-  delete process.env.SUYOU_PROJECTS_YAML
+  delete process.env.SANDBAR_PROJECTS_YAML
 }
 
 // 清理所有 temp 目录

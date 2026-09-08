@@ -43,22 +43,22 @@ print(json.dumps({'ok': r.get('ok'), 'error': r.get('error', ''),
 const fx = makeEpicFixture()
 try {
   // 验收①：external epic 在自己根下 → 开票关联成功
-  const r1 = JSON.parse(runPython(DRIVER('external', 'gap-b'), { ...fx.env, SUYOU_EPICS_DIR: '' }).trim())
+  const r1 = JSON.parse(runPython(DRIVER('external', 'gap-b'), { ...fx.env, SANDBAR_EPICS_DIR: '' }).trim())
   ok(r1.ok === true, '①external 项目 gap-b 开票校验通过', JSON.stringify(r1))
   ok(r1.epic === 'gap-b' && r1.project === 'external', '①TicketInput 落参 epic/project', JSON.stringify(r1))
 
   // 验收②：engine 桶异名照常关联（引擎项目行为不变）
-  const r2 = JSON.parse(runPython(DRIVER('engine', 'engine-only'), { ...fx.env, SUYOU_EPICS_DIR: '' }).trim())
+  const r2 = JSON.parse(runPython(DRIVER('engine', 'engine-only'), { ...fx.env, SANDBAR_EPICS_DIR: '' }).trim())
   ok(r2.ok === true && r2.epic === 'engine-only', '②engine 桶异名开票通过', JSON.stringify(r2))
 
   // 不串桶：engine-only 对 external 仍拒收，报错带实际查询目录
-  const r3 = JSON.parse(runPython(DRIVER('external', 'engine-only'), { ...fx.env, SUYOU_EPICS_DIR: '' }).trim())
+  const r3 = JSON.parse(runPython(DRIVER('external', 'engine-only'), { ...fx.env, SANDBAR_EPICS_DIR: '' }).trim())
   ok(r3.ok === false && r3.error.includes(fx.external.epicsDir),
      '不串桶：external 读 engine 异名拒收且文案带 external 桶', JSON.stringify(r3))
 
   // 对照红面：env 指空目录（模拟「锚别处」世界）→ 同 epic 拒收，证明校验确走锚点
   const r4 = JSON.parse(runPython(DRIVER('external', 'gap-b'),
-    { ...fx.env, SUYOU_EPICS_DIR: join(fx.root, 'empty-epics') }).trim())
+    { ...fx.env, SANDBAR_EPICS_DIR: join(fx.root, 'empty-epics') }).trim())
   ok(r4.ok === false, '对照：env 锚空目录 → 同 epic 拒收（校验确走锚点）', JSON.stringify(r4))
 
   done('t260907-07 CLI 开票项目感知断言')

@@ -9,7 +9,7 @@
  *      未知 key→400 / 隔离条目 throw→502 / 注册表装载异常→502 / primaryDir 空串→502 /
  *      畸形 key 类型（数字/对象）→视同缺省。
  *   B. 真注册表 fixture（SANDBAR_PROJECTS_DIR temp）：sandbar/fpv 双条目解析＋坏条目隔离回落。
- *   C. env 覆盖闸红线：SUYOU_EPICS_DIR / SUYOU_EVIDENCE_DIR / SUYOU_EPIC_NEXT_DIR
+ *   C. env 覆盖闸红线：SANDBAR_EPICS_DIR / SANDBAR_EVIDENCE_DIR / SANDBAR_EPIC_NEXT_DIR
  *      仅默认仓锚生效，项目锚恒 root 拼接（防串味）。
  *   D. computeTicketDiff 按项目根判界（防穿越闸语义不弱化）：项目根内泳道放行
  *      （KI-057 实报修复点）/ ../ 穿越仍拒 / 根外绝对路径仍拒 / 同 worktree 在引擎
@@ -63,7 +63,7 @@ const B_ROOT = '/tmp-wb-fpv-repo'
 {
   const reg = mkdtempSync(join(tmpdir(), 'wb-anchor-reg-'))
   process.env.SANDBAR_PROJECTS_DIR = reg
-  delete process.env.SUYOU_PROJECTS_YAML
+  delete process.env.SANDBAR_PROJECTS_YAML
   const entry = (key, dir) =>
     `# 注释\nschema: v1\n\nproject:\n  - key: ${key}\n    name: ${key}名\n    dirs:\n      - ${dir}\n`
   mkdirSync(join(reg, 'sandbar'), { recursive: true })
@@ -86,20 +86,20 @@ const B_ROOT = '/tmp-wb-fpv-repo'
 
 section('C env 覆盖闸（红线：旧 env 链保留，仅默认仓锚生效）')
 {
-  process.env.SUYOU_EPICS_DIR = '/env/epics'
-  process.env.SUYOU_EVIDENCE_DIR = '/env/evidence'
-  process.env.SUYOU_EPIC_NEXT_DIR = '/env/epic-next'
+  process.env.SANDBAR_EPICS_DIR = '/env/epics'
+  process.env.SANDBAR_EVIDENCE_DIR = '/env/evidence'
+  process.env.SANDBAR_EPIC_NEXT_DIR = '/env/epic-next'
   const def = resolveProjectAnchor('', FALLBACK, FIND_OK)
-  ok(anchorEpicsDir(def) === '/env/epics', '默认锚：SUYOU_EPICS_DIR 生效（旧链保留）')
-  ok(anchorEvidenceBase(def) === '/env/evidence', '默认锚：SUYOU_EVIDENCE_DIR 生效')
-  ok(anchorEpicNextDir(def) === '/env/epic-next', '默认锚：SUYOU_EPIC_NEXT_DIR 生效')
+  ok(anchorEpicsDir(def) === '/env/epics', '默认锚：SANDBAR_EPICS_DIR 生效（旧链保留）')
+  ok(anchorEvidenceBase(def) === '/env/evidence', '默认锚：SANDBAR_EVIDENCE_DIR 生效')
+  ok(anchorEpicNextDir(def) === '/env/epic-next', '默认锚：SANDBAR_EPIC_NEXT_DIR 生效')
   const proj = resolveProjectAnchor('fpv', FALLBACK, FIND_OK)
   ok(anchorEpicsDir(proj) === '/fpv/primary/notes/epics', '项目锚：epics 目录随项目根，env 不透出')
   ok(anchorEvidenceBase(proj) === '/fpv/primary/.suyou/evidence', '项目锚：证据基目录随项目根')
   ok(anchorEpicNextDir(proj) === '/fpv/primary/.suyou/epic-next', '项目锚：作业根随项目根')
-  delete process.env.SUYOU_EPICS_DIR
-  delete process.env.SUYOU_EVIDENCE_DIR
-  delete process.env.SUYOU_EPIC_NEXT_DIR
+  delete process.env.SANDBAR_EPICS_DIR
+  delete process.env.SANDBAR_EVIDENCE_DIR
+  delete process.env.SANDBAR_EPIC_NEXT_DIR
   ok(anchorEvidenceBase(def) === join(FALLBACK, '.suyou', 'evidence'), '默认锚：env 缺省回 <repo>/.suyou/evidence（行为不变）')
 }
 
@@ -146,12 +146,12 @@ section('E listEvidenceFiles 项目根＋env 闸')
   writeFileSync(join(fpvRepo, '.suyou', 'evidence', id, 'archived.png'), 'png', 'utf8')
   mkdirSync(join(fpvRepo, '.worktrees', id, '.suyou', 'screenshots'), { recursive: true })
   writeFileSync(join(fpvRepo, '.worktrees', id, '.suyou', 'screenshots', 'live.png'), 'png', 'utf8')
-  process.env.SUYOU_EVIDENCE_DIR = '/env-evidence-does-not-exist'
+  process.env.SANDBAR_EVIDENCE_DIR = '/env-evidence-does-not-exist'
   const rProj = await listEvidenceFiles(id, fpvRepo, null)
   ok(rProj.includes('archived.png') && rProj.includes('live.png'), '项目锚：归档+泳道双候选随项目根')
   const rDef = await listEvidenceFiles(id, FALLBACK)
   ok(rDef.length === 0, '默认锚：吃 env（指向不存在目录 → 空列表，旧行为）')
-  delete process.env.SUYOU_EVIDENCE_DIR
+  delete process.env.SANDBAR_EVIDENCE_DIR
   const rBad = await listEvidenceFiles('../evil', fpvRepo, null)
   ok(Array.isArray(rBad) && rBad.length === 0, '穿越 id → 空列表（防穿不弱化）')
 }

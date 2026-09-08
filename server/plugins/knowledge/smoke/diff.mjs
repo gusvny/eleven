@@ -195,10 +195,10 @@ section('C 端点行为（mock webServer + 临时 git 仓库）')
     }
     apply(ctx, { repo: tmpReal })
     // 多项目化（260823）后宿主路由必传 project 且经注册表解析主目录——
-    // 临时注册表（SUYOU_PROJECTS_YAML）指向本临时 repo，与 providers/routes-save 同款。
+    // 临时注册表（SANDBAR_PROJECTS_YAML）指向本临时 repo，与 providers/routes-save 同款。
     const registry = join(tmp, 'projects.yaml')
     await writeFile(registry, `projects:\n  - key: smoketest\n    name: 冒烟\n    dirs:\n      - ${tmpReal}\n`, 'utf8')
-    process.env.SUYOU_PROJECTS_YAML = registry
+    process.env.SANDBAR_PROJECTS_YAML = registry
     ok(routes.has('/sandbar-knowledge/api/diff'), '路由 /diff 已挂')
     ok(routes.has('/sandbar-knowledge/api/review'), '路由 /review 已挂')
     ok(routes.has('/sandbar-knowledge/api/review/save'), '路由 /review/save 已挂')

@@ -12,7 +12,7 @@ intent（用户可感知契约）：宿主令「名字的清理要搞干净」�
   - 含 LEGACY 标识的行（兼容表/常量/回落分支，方案约定标识）；
   - 含 naming-compat 显式标记的行（目录读侧回落/镜像/场景 fixture 造旧目录行）；
   - engine/README.md 退役账行（含「退役」字样）；
-  - 出界不动册：插件面文件名引用（suyou-projects.ts / suyou-temporal-tools /
+  - 出界不动册：插件面文件名引用（project-registry.ts / suyou-temporal-tools /
     suyou-knowledge / suyou-workbench）——另一票面。
 守卫另断言 README 退役账在册（≥7 行 suyou×退役，防「撤了半截」——退役时必须
 连守卫带账一起动，锚退役语义不锚措辞）。
@@ -34,10 +34,10 @@ sys.path.insert(0, INTEG)
 import lib_naming  # noqa: E402
 
 OLD_RE = re.compile(
-    r"SUYOU_[A-Za-z0-9_]+|suyou-poc|suyou-ticket|suyou-dispatcher|\.suyou"
+    r"SANDBAR_[A-Za-z0-9_]+|suyou-poc|suyou-ticket|suyou-dispatcher|\.suyou"
     r"|suyou-ws|suyou-selfcheck|suyou-integ|suyou-settle|suyou-session|suyou-test")
 PLUGIN_REF_RE = re.compile(
-    r"suyou-projects\.ts|suyou-temporal-tools|suyou-knowledge|suyou-workbench")
+    r"project-registry\.ts|suyou-temporal-tools|suyou-knowledge|suyou-workbench")
 
 SCAN_ROOTS = ("server/engine", "server/tools", "integration")
 SKIP_DIRS = {".venv", "node_modules", "__pycache__", "bin", ".git", ".dsh",
@@ -46,7 +46,7 @@ TEXT_EXT = {".py", ".md", ".mjs", ".sh", ".yaml", ".yml", ".json", ".ts", ".txt"
 
 MERGE_DEBT_FILES = frozenset((
     # main 树并入（t260907-04 merge 轮）仍在用旧名的引擎/清单面：t260907-06 多仓
-    # manifest 写 .suyou/repo_worktrees.json、t260907-07 epic 锚钉 SUYOU_EPICS_DIR
+    # manifest 写 .suyou/repo_worktrees.json、t260907-07 epic 锚钉 SANDBAR_EPICS_DIR
     # 语义（其场景/UT 为契约锚）。属跨票旧名债，登记不豁免监督（C 腿自证仍在）。
     "server/engine/agent_activities.py",
     "server/engine/shared.py",
@@ -129,14 +129,14 @@ def main():
     r.check(n_retire >= 7, "退役账行数=%d（须 ≥7）" % n_retire)
 
     print("== C 扫描器自证红绿")
-    r.check(scan_text('TASK_QUEUE = os.environ.get("SUYOU_TASK_QUEUE")'),
+    r.check(scan_text('TASK_QUEUE = os.environ.get("SANDBAR_TASK_QUEUE")'),
             "合成旧名样本被识别（红）")
     r.check(not scan_text("锚语义不锚字面（KI-051 写作纪律）"), "干净样本不误报（绿）")
     r.check(allowed("x.py", 'LEGACY_TASK_QUEUE = "suyou-poc"  # 退役条件注释'),
             "LEGACY 兼容行豁免")
     r.check(allowed("integration/x.py", 'mkdir(base / ".suyou")  # naming-compat fixture'),
             "naming-compat fixture 行豁免")
-    r.check(not allowed("x.py", 'os.environ["SUYOU_AGENT_CMD"]'),
+    r.check(not allowed("x.py", 'os.environ["SANDBAR_AGENT_CMD"]'),
             "无标记旧名读点不豁免")
 
     r.finish()

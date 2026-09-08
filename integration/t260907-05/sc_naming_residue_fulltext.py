@@ -5,7 +5,7 @@ intent（守护的用户可感知契约 / 工单验收①的独立机器重演�
 - 宿主令 260907 命名表插件面落地后，全仓受控面不再以「suyou-*」指称插件与工单台——
   读者在代码、脚本、场景、锁文件里看到的插件名只有 sandbar-* 一种真源；旧名残留
   =文档/脚本指向一个已死的名字（用户按残留走必 404），且意味着替换有漏网面。
-- 不动面守卫：非本票面的既有标识（/suyou-admin/ 前缀、suyou-projects.ts、
+- 不动面守卫：非本票面的既有标识（/sandbar-admin/ 前缀、project-registry.ts、
   dsh-profile-suyou 包名）必须原样在位——机械替换最常见的对抗事故是「顺手多改」，
   把后续票的面提前污染。按 doc-guard G6 先例钉现状语义：后续票落地时随其语义同步改本腿。
 - docs/ 定稿库已知漂移清单封口：本票不改 docs/（写集外），但 docs 命中必须 ⊆ 已声明
@@ -25,7 +25,7 @@ high-level steps：
   2. docs/ 扫描同 token 集，命中文件 ⊆ 已声明遗留票清单；
   3. 正名在位：六个插件 package.json name 全部 sandbar-*；五份 package-lock.json
      顶层与 packages[""] 两处 name 同步；
-  4. 不动面原样在位：/suyou-admin/ 仍在 ui/node.ts、suyou-projects.ts 文件在、
+  4. 不动面原样在位：/sandbar-admin/ 仍在 ui/node.ts、project-registry.ts 文件在、
      两 profile 包名仍 dsh-profile-suyou*。
 
 Hermetic：纯文件读，零端口零网络零 spawn，不碰 3099。cwd=仓库根；秒级。
@@ -42,7 +42,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 # 七个旧 token：六个插件包名 + suyou-tools（文件名/内部标识）。全字面扫描，
 # 不带 --include 白名单——ts/tsx/js/cjs/mjs/py/md/yml/json 一律过目。
 TOKENS = [
-    "suyou-workbench", "suyou-admin-ui", "suyou-knowledge",
+    "suyou-workbench", "sandbar-admin-ui", "suyou-knowledge",
     "suyou-providers", "suyou-temporal-tools", "suyou-ui-check", "suyou-tools",
 ]
 # server/integration 范围内的历史材料豁免（列名制——活文档不豁免）。
@@ -165,11 +165,11 @@ def main():
     try:
         with open(ui_node, "r", encoding="utf-8") as f:
             ui_text = f.read()
-        check("/suyou-admin/" in ui_text, "/suyou-admin/ 前缀仍在 ui/node.ts（非本票面）")
+        check("/sandbar-admin/" in ui_text, "/sandbar-admin/ 前缀仍在 ui/node.ts（非本票面）")
     except OSError:
         check(False, "ui/node.ts 可读")
-    check(os.path.isfile(os.path.join(REPO, "server", "suyou-projects.ts")),
-          "server/suyou-projects.ts 仍在（非本票面）")
+    check(os.path.isfile(os.path.join(REPO, "server", "project-registry.ts")),
+          "server/project-registry.ts 仍在（非本票面）")
     for prof in ("profile", "profile-headless"):
         pj = os.path.join(REPO, "server", prof, "package.json")
         try:

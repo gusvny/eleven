@@ -15,7 +15,7 @@
  *
  * 运行环境：Node >= 22.18（type-stripping 直跑 TS import，同 integration 执行
  * 契约）；直连三真源（admin.py spawn / git / ~/.dsh 会话文件），不依赖 console
- * 或 3099 在线，泳道/Docker 隔离环境可独立出数。测试缝 SUYOU_METRICS_STUB
+ * 或 3099 在线，泳道/Docker 隔离环境可独立出数。测试缝 SANDBAR_METRICS_STUB
  * 见 metrics.ts 文件头。
  */
 
@@ -39,7 +39,7 @@ if (params === null || typeof params !== 'object' || Array.isArray(params)) {
 }
 
 // 本文件固定落在 <repo>/server/plugins/workbench/ 下，上三级即仓库根（无机器绝对路径写死）
-const repo = process.env.SUYOU_REPO ?? new URL('../../..', import.meta.url).pathname.replace(/\/+$/, '')
+const repo = process.env.SANDBAR_REPO ?? new URL('../../..', import.meta.url).pathname.replace(/\/+$/, '')
 const deps = defaultDeps(repo)
 
 try {

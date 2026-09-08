@@ -102,7 +102,7 @@ export async function makeFixtureConsole() {
     .filter(Boolean).find((d) => existsSync(join(d, '.credentials.yaml')))
   if (userDsh) copyFileSync(join(userDsh, '.credentials.yaml'), join(tmpHome, '.credentials.yaml'))
   const presetSrc = process.env.SANDBAR_CAPTURE_PRESET_SOURCE
-    || join(process.env.HOME || '', '.dsh', '.agent-presets', 'suyou-integration')  // naming-compat
+    || join(process.env.HOME || '', '.dsh', '.agent-presets', 'sandbar-integration')  // naming-compat
   const presetReject = captureLane.presetMaterializeRejectReason(presetSrc)
   if (presetReject) {
     const e = new Error(`preset 物化拒绝：${presetReject}（env SANDBAR_CAPTURE_PRESET_SOURCE 可指 preset 源）`)

@@ -7,7 +7,7 @@
  * --compare：同 stub 重跑，与 golden_serial 逐字节比对（剔除同两字段）。
  *
  * stub 由本脚本以「now 相对时间」动态生成（保证窗口归窗跨日可复现），
- * SUYOU_METRICS_DIR 指到本目录 tmp/（缓存写进工作区，不碰 ~/.sandbar）。
+ * SANDBAR_METRICS_DIR 指到本目录 tmp/（缓存写进工作区，不碰 ~/.sandbar）。
  * 直跑：node golden.mjs --record
  */
 import { mkdir, writeFile, readFile, rm } from 'node:fs/promises'
@@ -60,10 +60,10 @@ const stubPath = join0(HERE, `stub-${MODE === '--record' ? 'record' : 'compare'}
 function join0(a, b) { return a + b }
 await writeFile(stubPath, JSON.stringify(stub))
 
-process.env.SUYOU_METRICS_STUB = stubPath
+process.env.SANDBAR_METRICS_STUB = stubPath
 // 缓存写系统临时目录（验收 F5）：不再落工作区 tmp-cache/（运行时产物不入库）
 const tmpCache = join(tmpdir(), 'suyou-golden-cache')
-process.env.SUYOU_METRICS_DIR = tmpCache
+process.env.SANDBAR_METRICS_DIR = tmpCache
 await rm(tmpCache, { recursive: true, force: true })
 await mkdir(tmpCache, { recursive: true })
 

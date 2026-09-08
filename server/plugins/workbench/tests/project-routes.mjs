@@ -73,9 +73,9 @@ if (mode === 'reject-text') { console.log('[红] key 不合法：Fix_B'); proces
 
 const savedEnv = {
   SANDBAR_PROJECTS_DIR: process.env.SANDBAR_PROJECTS_DIR,
-  SUYOU_PROJECTS_YAML: process.env.SUYOU_PROJECTS_YAML,
+  SANDBAR_PROJECTS_YAML: process.env.SANDBAR_PROJECTS_YAML,
 }
-delete process.env.SUYOU_PROJECTS_YAML
+delete process.env.SANDBAR_PROJECTS_YAML
 
 const LIST_JSON = JSON.stringify({
   ok: true, action: 'list', mode: 'per-key',
@@ -206,8 +206,8 @@ try {
 } finally {
   if (savedEnv.SANDBAR_PROJECTS_DIR === undefined) delete process.env.SANDBAR_PROJECTS_DIR
   else process.env.SANDBAR_PROJECTS_DIR = savedEnv.SANDBAR_PROJECTS_DIR
-  if (savedEnv.SUYOU_PROJECTS_YAML === undefined) delete process.env.SUYOU_PROJECTS_YAML
-  else process.env.SUYOU_PROJECTS_YAML = savedEnv.SUYOU_PROJECTS_YAML
+  if (savedEnv.SANDBAR_PROJECTS_YAML === undefined) delete process.env.SANDBAR_PROJECTS_YAML
+  else process.env.SANDBAR_PROJECTS_YAML = savedEnv.SANDBAR_PROJECTS_YAML
 }
 
 console.log(`\nPROJECT_ROUTES_TESTS pass=${pass} fail=${fail}`)

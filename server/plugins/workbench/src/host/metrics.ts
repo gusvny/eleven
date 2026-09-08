@@ -16,7 +16,7 @@
  *   拆了/字段缺失/直并票=主仓归档口径（票 id grep 提交集，frozen=true），
  *   reason 显式标注口径，两口径不静默混用；git 双路失败 → null+reason。
  * - token 维：复用 aggregateTicketUsage（块 5 八项故障模式随函数全量带入）；
- *   泳道会话陪葬后回落项目级 usage 账本（SUYOU_USAGE_LEDGER_DIR 前向契约），
+ *   泳道会话陪葬后回落项目级 usage 账本（SANDBAR_USAGE_LEDGER_DIR 前向契约），
  *   缓存存量降维保留（engine_version 失配不再整条作废）。
  * - 纳票/归窗口径（契约真空，gen2 成文、已上报用户裁决）：closed 票归窗时刻=
  *   闭单终态时刻，未结票=创建时刻；KPI 分母与 charts 聚合同一口径、跨视图一致。
@@ -28,10 +28,10 @@
  * 【碑注——两真源矛盾】契约块 3 L189 写「~/.sandbar/data/<project>/」，与
  * sandbar 契约 ①a（sandbar项目接入契约v1.md L170-171）的 projects/<key>/data/
  * 矛盾；本实现取 ①a（工单正文明示「经 t260901-14 的路径约定解析」），契约
- * 修订候选已上报用户，谁也不代改冻结文档。env SUYOU_METRICS_DIR 仅测试覆盖。
- * legacy SUYOU_PROJECTS_YAML 单文件模式下 per-key 目录无定义 → 缓存禁用+SKIP。
+ * 修订候选已上报用户，谁也不代改冻结文档。env SANDBAR_METRICS_DIR 仅测试覆盖。
+ * legacy SANDBAR_PROJECTS_YAML 单文件模式下 per-key 目录无定义 → 缓存禁用+SKIP。
  *
- * 测试缝（同 SUYOU_EPIC_NEXT_STUB 先例）：env SUYOU_METRICS_STUB 指向 stub JSON
+ * 测试缝（同 SANDBAR_EPIC_NEXT_STUB 先例）：env SANDBAR_METRICS_STUB 指向 stub JSON
  * {tickets, workflows, shows, deliveries}，deps 全离线零 admin.py/git 真源，
  * 供 CLI 双前门基线与泳道测试用；未设时走真通路。
  */
@@ -43,7 +43,7 @@ import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
 import { runAdminCli } from '../../../../sandbar-tools.ts'
-import { findProject, loadProjects, primaryDir } from '../../../../suyou-projects.ts'
+import { findProject, loadProjects, primaryDir } from '../../../../project-registry.ts'
 import { listEpics, resolveEpicsDir } from './epics.ts'
 import {
   aggregateTicketUsage, resolveAllSessionFiles, resolveLedgerSessionFiles, stageWindowsFromTimeline,
@@ -58,27 +58,27 @@ const execFileP = promisify(execFile)
  *  重算=5658。副作用面：collectArchivedRows 记忆行按 source_version 过滤，
  *  bump 后旧记忆行缺席（聚合宇宙暂缩，重算入口=既有 list/全量门；在-list 票不受影响）。 */
 export const SOURCE_VERSION = 'v2'
-/** health 视图静默阈值（分钟）：模块常量，env SUYOU_METRICS_SILENT_MIN 仅测试覆盖；可调 UI 参数归 M2c 修约。 */
+/** health 视图静默阈值（分钟）：模块常量，env SANDBAR_METRICS_SILENT_MIN 仅测试覆盖；可调 UI 参数归 M2c 修约。 */
 export const SILENT_RUNNING_MIN = 30
 /** blocked_reason 榜逐票 show 封顶（成本上限，超出折叠计数+reason；票多项目不炸）。 */
 export const BLOCKED_SHOW_CAP = 20
 
 /**
  * 逐票记录生成的并发度（t260902-05⑦冷启动：串行逐票 spawn admin.py+git+zstd
- * 解压是打开慢的根因）。env SUYOU_METRICS_CONCURRENCY 仅测试覆盖；上限 8 防
+ * 解压是打开慢的根因）。env SANDBAR_METRICS_CONCURRENCY 仅测试覆盖；上限 8 防
  * 失配值把 admin.py 打成风暴。结果按入参序落位（out[idx]），与串行逐票同一
  * skipped/reason 顺序，双前门字节级一致不受影响（golden 基线锁定）。
  */
-export const TICKET_CONCURRENCY = Math.max(1, Math.min(8, Number.parseInt(process.env.SUYOU_METRICS_CONCURRENCY ?? '', 10) || 4))
+export const TICKET_CONCURRENCY = Math.max(1, Math.min(8, Number.parseInt(process.env.SANDBAR_METRICS_CONCURRENCY ?? '', 10) || 4))
 
 /**
  * KI-040 null 重探节流门（分钟，t260904-04）：缓存记录 delivery===null 时距
  * updated_ts 超 TTL 才重探（每票每周期最多一轮 showTicket+git，防「真不可算」票
- * 每请求重复付费）。env SUYOU_METRICS_REPROBE_TTL_MIN：缺省 60；0=每次必探（仅
+ * 每请求重复付费）。env SANDBAR_METRICS_REPROBE_TTL_MIN：缺省 60；0=每次必探（仅
  * 测试用）；负值按 0；非法/缺失按缺省。逐调读取（非模块常量）保测试可注入。
  */
 function reprobeTtlMin(): number {
-  const v = Number.parseInt(process.env.SUYOU_METRICS_REPROBE_TTL_MIN ?? '', 10)
+  const v = Number.parseInt(process.env.SANDBAR_METRICS_REPROBE_TTL_MIN ?? '', 10)
   return Number.isFinite(v) ? Math.max(0, v) : 60
 }
 
@@ -177,7 +177,7 @@ export interface MetricsDeps {
   listEpicCodes: () => Promise<string[] | null>
   /** project 校验：ok=放行；否则给出 4xx 人话（findProject 三态：未知/隔离/注册表坏）。 */
   checkProject: (key: string) => Promise<{ ok: true } | { ok: false; status: number; error: string }>
-  /** 默认项目 key（注册表字母序首个，suyou-projects.ts scanRegistry sort 口径）。 */
+  /** 默认项目 key（注册表字母序首个，project-registry.ts scanRegistry sort 口径）。 */
   defaultProject: () => Promise<string | null>
   /**
    * per-project 主目录解析（t260904-04，KI-043①）：project key → 注册表主目录。
@@ -193,7 +193,7 @@ export interface MetricsDeps {
   now: () => number
 }
 
-/** SUYOU_METRICS_STUB 测试缝：读 stub JSON 构造全离线 deps。 */
+/** SANDBAR_METRICS_STUB 测试缝：读 stub JSON 构造全离线 deps。 */
 function stubDeps(repo: string, stubPath: string, now: () => number): MetricsDeps {
   // 同步读不行（顶层 async 约束），惰性缓存首调加载
   let stub: any = null
@@ -223,7 +223,7 @@ function stubDeps(repo: string, stubPath: string, now: () => number): MetricsDep
 /** 缺省 deps：admin.py spawn + git + 注册表/立项单真源。 */
 export function defaultDeps(repo: string, now: () => number = Date.now): MetricsDeps {
   const cli = { repo }
-  const stub = process.env.SUYOU_METRICS_STUB
+  const stub = process.env.SANDBAR_METRICS_STUB
   if (stub) return stubDeps(repo, stub, now)
   return {
     repo,
@@ -304,27 +304,27 @@ export interface MetricsCacheRecord {
 
 /**
  * per-ticket 缓存目录：~/.sandbar/projects/<key>/data/metrics/（t260901-14 路径
- * 约定；env SANDBAR_PROJECTS_DIR 现读，SUYOU_METRICS_DIR 测试覆盖）。
- * legacy 单文件模式（SUYOU_PROJECTS_YAML）无 per-key 目录定义 → enabled:false+SKIP。
+ * 约定；env SANDBAR_PROJECTS_DIR 现读，SANDBAR_METRICS_DIR 测试覆盖）。
+ * legacy 单文件模式（SANDBAR_PROJECTS_YAML）无 per-key 目录定义 → enabled:false+SKIP。
  * 两真源矛盾见文件头碑注。
  */
 export function resolveMetricsCacheDir(projectKey: string): { dir: string; settleDir: string; enabled: boolean; reason?: string } {
   // settle 出仓快照目录（t260904-09）：根链与引擎 _settle_snapshot_dir 同序互指
-  // （SANDBAR_SETTLE_SNAPSHOT_DIR ?? SUYOU_METRICS_DIR ?? SANDBAR_PROJECTS_DIR ?? home
+  // （SANDBAR_SETTLE_SNAPSHOT_DIR ?? SANDBAR_METRICS_DIR ?? SANDBAR_PROJECTS_DIR ?? home
   // ——SETTLE env 替换项目根整体，只在链头）——缺 SETTLE 头会造成写读分叉、快照
   // 永不可见（integration R6 实证，已修）。读取独立于缓存 enabled：legacy 单文件
   // 注册表模式只影响「host 侧缓存落盘」，引擎照常把快照写进根链目录，读侧照读
   // （契约增补段成文）。
   const settleDirOf = () => {
-    const root = process.env.SANDBAR_SETTLE_SNAPSHOT_DIR ?? process.env.SUYOU_METRICS_DIR
+    const root = process.env.SANDBAR_SETTLE_SNAPSHOT_DIR ?? process.env.SANDBAR_METRICS_DIR
       ?? process.env.SANDBAR_PROJECTS_DIR ?? join(homedir(), '.sandbar', 'projects')
     return join(root, projectKey, 'data', 'settle')
   }
-  if (process.env.SUYOU_PROJECTS_YAML) {
-    const root = process.env.SUYOU_METRICS_DIR ?? process.env.SANDBAR_PROJECTS_DIR ?? join(homedir(), '.sandbar', 'projects')
-    return { dir: '', settleDir: settleDirOf(), enabled: false, reason: 'legacy 单文件注册表模式（SUYOU_PROJECTS_YAML）无 per-key 数据目录约定，metrics 缓存禁用（数据现算，不落盘）' }
+  if (process.env.SANDBAR_PROJECTS_YAML) {
+    const root = process.env.SANDBAR_METRICS_DIR ?? process.env.SANDBAR_PROJECTS_DIR ?? join(homedir(), '.sandbar', 'projects')
+    return { dir: '', settleDir: settleDirOf(), enabled: false, reason: 'legacy 单文件注册表模式（SANDBAR_PROJECTS_YAML）无 per-key 数据目录约定，metrics 缓存禁用（数据现算，不落盘）' }
   }
-  const root = process.env.SUYOU_METRICS_DIR ?? process.env.SANDBAR_PROJECTS_DIR ?? join(homedir(), '.sandbar', 'projects')
+  const root = process.env.SANDBAR_METRICS_DIR ?? process.env.SANDBAR_PROJECTS_DIR ?? join(homedir(), '.sandbar', 'projects')
   return { dir: join(root, projectKey, 'data', 'metrics'), settleDir: settleDirOf(), enabled: true }
 }
 
@@ -593,7 +593,7 @@ export async function computeDelivery(deps: MetricsDeps, ticket: any): Promise<D
 
 /** 单票 token 维：复用 agent-usage 通路（八项故障模式随函数带入，契约块 5）。
  *  t260903-09 KI-017③ 补账缝：泳道会话不存在（已拆）→ 探测项目级 usage 账本
- *  （SUYOU_USAGE_LEDGER_DIR，引擎侧出仓前向契约）；两处皆无 → null+人话 reason。 */
+ *  （SANDBAR_USAGE_LEDGER_DIR，引擎侧出仓前向契约）；两处皆无 → null+人话 reason。 */
 export async function computeTokens(
   deps: MetricsDeps, id: string, ticket: any, windows: StageWindow[],
 ): Promise<{ tokens: MetricsCacheRecord['tokens']; reason?: string }> {
@@ -657,7 +657,7 @@ async function ticketRecord(
     // showTicket spawn。t260904-04（KI-040）缓存命中不再无条件早退——两类陈旧记录
     // 放行走下方重算路径（prev=cached.rec 降维保留在位）：
     //   条件 A（失败维固化，TTL 节流）：delivery===null 且 updated_ts 距今超 TTL
-    //     （SUYOU_METRICS_REPROBE_TTL_MIN，缺省 60 分钟；0=每次必探仅测试）。缺失/
+    //     （SANDBAR_METRICS_REPROBE_TTL_MIN，缺省 60 分钟；0=每次必探仅测试）。缺失/
     //     坏值 updated_ts（isoMs→NaN）视为过期必探——不给脏记录留永久静默。重探
     //     写回恒刷 updated_ts=「上次尝试时刻」，节流锚点自洽、风暴有界（每票每
     //     TTL 周期最多一轮 showTicket+git）。
@@ -1191,7 +1191,7 @@ async function healthView(
   if (!online) {
     reasons.push('Temporal server 127.0.0.1:7233 未监听（server 离线），票流数据降级为空')
   }
-  const silentMin = Number.parseInt(process.env.SUYOU_METRICS_SILENT_MIN ?? '', 10) || SILENT_RUNNING_MIN
+  const silentMin = Number.parseInt(process.env.SANDBAR_METRICS_SILENT_MIN ?? '', 10) || SILENT_RUNNING_MIN
   const kpis = base.kpis as ReturnType<typeof emptyKpis>
   const running = rows.filter((r) => String(r?.stage_state ?? '') === 'running')
   const blocked = rows.filter((r) => String(r?.stage_state ?? '') === 'blocked')

@@ -4,7 +4,7 @@
 //   A. 无表项目路由视图=「未初始化」引导态（uninitialized+template_source），红错退役——
 //      运行时本就回落默认模型，无表≠故障；
 //   B. 畸形表（不可解析）= 仍走解析失败红错（三态：畸形 fail-closed，不降级为引导态）；
-//   C. POST /suyou-admin/api/routes/init 对无表项目=建父目录 + 原子写引擎真源表
+//   C. POST /sandbar-admin/api/routes/init 对无表项目=建父目录 + 原子写引擎真源表
 //      （写入后与引擎仓表逐字节一致——同源模板不造两份）；
 //   D. init 对已有表=拒收零覆盖（放一张用户自有表再 init，断言内容不被覆盖）；
 //   E. init 后 GET 视图=出表（uninitialized 消失、default 可解析）。
@@ -64,8 +64,8 @@ async function call(handler, url, method = 'GET') {
   return res
 }
 
-const projUrl = (key) => '/suyou-admin/api/routes?project=' + encodeURIComponent(key)
-const initUrl = (key) => '/suyou-admin/api/routes/init?project=' + encodeURIComponent(key)
+const projUrl = (key) => '/sandbar-admin/api/routes?project=' + encodeURIComponent(key)
+const initUrl = (key) => '/sandbar-admin/api/routes/init?project=' + encodeURIComponent(key)
 
 // ---- A：无表=引导态非红错（视图半 + API 半双面；repo 连 server/ 都没有）----
 const emptyRepo = await mktempRepo('t260906-noroutes-')
@@ -80,7 +80,7 @@ writeProjectEntry(regRoot, 'rtk', 'RT', [emptyRepo]) // 已注册项目、主目
     JSON.stringify(v.template_source))
 
   const find = mountRoutes(emptyRepo)
-  const r = await call(find('/suyou-admin/api/routes').handler, projUrl('rtk'))
+  const r = await call(find('/sandbar-admin/api/routes').handler, projUrl('rtk'))
   c.check('API 无表=200 ok:true + uninitialized 透传（不再 ok:false 红错）',
     r.status === 200 && r.body.ok === true && r.body.result?.uninitialized === true,
     JSON.stringify(r.body).slice(0, 300))
@@ -89,8 +89,8 @@ writeProjectEntry(regRoot, 'rtk', 'RT', [emptyRepo]) // 已注册项目、主目
 // ---- C + E：init 一键建表（父目录缺失代建+同源模板字节一致+无 tmp 泄漏）→ 视图出表 ----
 {
   const find = mountRoutes(emptyRepo)
-  const init = find('/suyou-admin/api/routes/init')
-  c.check('init 端点已挂（POST /suyou-admin/api/routes/init）', init !== undefined)
+  const init = find('/sandbar-admin/api/routes/init')
+  c.check('init 端点已挂（POST /sandbar-admin/api/routes/init）', init !== undefined)
 
   // 未注册项目=拒收（write 端点 fail-closed，不认裸路径）
   const rBad = await call(init.handler, initUrl('nosuchk'), 'POST')
@@ -110,7 +110,7 @@ writeProjectEntry(regRoot, 'rtk', 'RT', [emptyRepo]) // 已注册项目、主目
   c.check('无 .tmp 写泄漏（原子写口径）',
     !existsSync(target + '.tmp') && !existsSync(target + '.scaffold-tmp'), 'tmp leak')
 
-  const r2 = await call(find('/suyou-admin/api/routes').handler, projUrl('rtk'))
+  const r2 = await call(find('/sandbar-admin/api/routes').handler, projUrl('rtk'))
   c.check('init 后视图出表（uninitialized 消失、default 可解析）',
     r2.status === 200 && r2.body.ok === true && r2.body.result?.uninitialized === undefined
       && r2.body.result?.default !== null,
@@ -127,7 +127,7 @@ writeProjectEntry(regRoot, 'rtk', 'RT', [emptyRepo]) // 已注册项目、主目
   writeFileSync(p, own) // 用户自有表（故意非引擎表内容）
 
   const find = mountRoutes(repo2)
-  const r = await call(find('/suyou-admin/api/routes/init').handler, initUrl('hask'), 'POST')
+  const r = await call(find('/sandbar-admin/api/routes/init').handler, initUrl('hask'), 'POST')
   c.check('init 对已有表=拒收（ok:false）', r.body?.ok === false, JSON.stringify(r.body).slice(0, 300))
   c.check('已有表内容零覆盖（不被引擎表冲掉）', readFileSync(p, 'utf8') === own, 'table overwritten')
 

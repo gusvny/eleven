@@ -42,8 +42,8 @@ const LEN_TICKET = 128
 const LEN_OP = 32
 
 const CHANNEL = 'sandbar-workbench-tabs'
-const LS_HEARTBEAT_PREFIX = 'suyou-wb-tab-'
-const LS_WRITE_KEY = 'suyou-wb-tabwrite'
+const LS_HEARTBEAT_PREFIX = 'sandbar-wb-tab-'
+const LS_WRITE_KEY = 'sandbar-wb-tabwrite'
 const PROTO_V = 1
 
 /** 同页签在看者（viewersOf 返回项；ageMs=距今多久的心跳）。 */

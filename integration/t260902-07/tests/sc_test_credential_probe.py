@@ -6,7 +6,7 @@
   两者皆无时进程内自起 mock（lib_model_mock）作燃料面，机制断言不因凭据缺失环境红
 - 已注入 → 向 api.z.ai/api/coding/paas/v4 发 glm-5.3-flash 最小请求，断言 HTTP 200
 - **mock 燃料面（t260904-12 乙段 gen4 #4）**：SANDBAR_MOCK_LLM_URL 指向本进程
-  mock 端点（integration/lib_model_mock.py，中性前缀 env，非 SUYOU_ 新名）时，
+  mock 端点（integration/lib_model_mock.py，中性前缀 env，非 SANDBAR_ 新名）时，
   探针同一断言面（HTTP 200 + chat.completion 形状）打 mock 而非真模型——
   凭据缺失不再环境红；并带**畸形输入腿**：mock 注入坏 JSON 回执，探针必须
   显式判红（不静默当过）。真模型腿与 mock 腿互斥不混跑：有真 key 仍打真端点。
@@ -21,7 +21,7 @@ from pathlib import Path
 
 HOME_DSH = Path(os.path.expanduser("~")) / ".dsh" / "settings.yaml"
 BASE_URL = "https://api.z.ai/api/coding/paas/v4/chat/completions"
-MOCK_URL_ENV = "SANDBAR_MOCK_LLM_URL"      # 中性前缀 mock 端点注入（禁 SUYOU_ 新名）
+MOCK_URL_ENV = "SANDBAR_MOCK_LLM_URL"      # 中性前缀 mock 端点注入（禁 SANDBAR_ 新名）
 MODEL = "glm-5.3-flash"
 
 

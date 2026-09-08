@@ -46,7 +46,7 @@ for (const [key, dir] of [['sandbar', engineRepo], ['fpv', fpvRepo]]) {
 await mkdir(join(reg, 'broken'), { recursive: true })
 await writeFile(join(reg, 'broken', 'project.yaml'), 'dirs:\n  - 不是绝对路径\n', 'utf8')
 process.env.SANDBAR_PROJECTS_DIR = reg
-delete process.env.SUYOU_PROJECTS_YAML
+delete process.env.SANDBAR_PROJECTS_YAML
 
 const routes = []
 const ws = { register: (r) => { routes.push(r); return () => {} } }

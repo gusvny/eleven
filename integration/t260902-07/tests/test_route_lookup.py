@@ -2,7 +2,7 @@
 """t260902-07 集成测试 ②：查表函数与钉模型机制的动态行为（需 PyYAML）。
 
 校验对象：server/engine/shared.py
-- model_route_for("integration") 返回 zai-coding-cn/glm-5.3-flash，其余角色无回归
+- model_route_for("integration") 返回 kimi-coding/k3（260907 宿主改表），其余角色无回归
 - 畸形/缺失输入三态：表 YAML 非法 → 返回 None（不抛异常、不落 patch）；
   角色无条目 → 落 default；条目缺字段 → 落 default
 - _pin_default_model：钉用户层、整段替换旧 agent-default-model（含段内注释），
@@ -41,9 +41,9 @@ def main():
         print("ENV_FAIL: 需要 PyYAML：请用 server/engine/.venv/bin/python 执行")
         return 2
 
-    # 1. 查表：新值 + 无回归
+    # 1. 查表：新值 + 无回归（260907 宿主改表：integration→kimi-coding/k3）
     r = shared.model_route_for("integration")
-    check(r == {"provider": "zai-coding-cn", "model": "glm-5.3-flash"},
+    check(r == {"provider": "kimi-coding", "model": "k3"},
           "model_route_for(integration) = %r" % r)
     expect = {"default": ("zai", "glm-5.3-flash"), "developer": ("zai", "glm-5.3-flash"),
               "ops": ("kimi-coding", "k3"), "artist": ("kimi-coding", "k3"),
@@ -55,8 +55,8 @@ def main():
 
     # 2. 分工键不串：integration 无 tasks 段，proofread 分工仍落 role 级
     r = shared.model_route_for("integration", "proofread")
-    check(r == {"provider": "zai-coding-cn", "model": "glm-5.3-flash"},
-          "integration+proofread 分工落 role 级新值（实得 %r）" % r)
+    check(r == {"provider": "kimi-coding", "model": "k3"},
+          "integration+proofread 分工落 role 级（260907 宿主改表；实得 %r）" % r)
 
     # 3. 畸形输入：表 YAML 非法 → 优雅返回 None
     tmp = Path(tempfile.mkdtemp(prefix="t260902-07-itest-"))

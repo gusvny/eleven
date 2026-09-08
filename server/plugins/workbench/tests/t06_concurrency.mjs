@@ -34,15 +34,15 @@ const mkTicket = (id, daysAgo, closedAfterHours) => ({
 })
 
 const tmp = await mkdtemp(join(tmpdir(), 'wb-conc-'))
-process.env.SUYOU_METRICS_DIR = join(tmp, 'cache')
-await mkdir(process.env.SUYOU_METRICS_DIR, { recursive: true })
+process.env.SANDBAR_METRICS_DIR = join(tmp, 'cache')
+await mkdir(process.env.SANDBAR_METRICS_DIR, { recursive: true })
 
 async function withConcurrency(n, fn) {
-  const prev = process.env.SUYOU_METRICS_CONCURRENCY
-  process.env.SUYOU_METRICS_CONCURRENCY = String(n)
+  const prev = process.env.SANDBAR_METRICS_CONCURRENCY
+  process.env.SANDBAR_METRICS_CONCURRENCY = String(n)
   try { return await fn() } finally {
-    if (prev === undefined) delete process.env.SUYOU_METRICS_CONCURRENCY
-    else process.env.SUYOU_METRICS_CONCURRENCY = prev
+    if (prev === undefined) delete process.env.SANDBAR_METRICS_CONCURRENCY
+    else process.env.SANDBAR_METRICS_CONCURRENCY = prev
   }
 }
 
@@ -58,22 +58,22 @@ const runAll = async (deps) => {
     }
   return out
 }
-const stubDeps = (repo) => defaultDeps(repo) // SUYOU_METRICS_STUB 由 withStub 注入
+const stubDeps = (repo) => defaultDeps(repo) // SANDBAR_METRICS_STUB 由 withStub 注入
 
 async function withStub(stub, fn) {
   const p = join(tmp, `stub-${Math.random().toString(36).slice(2)}.json`)
   await writeFile(p, JSON.stringify(stub))
-  process.env.SUYOU_METRICS_STUB = p
+  process.env.SANDBAR_METRICS_STUB = p
   // t260903-09：宇宙补全（list ∪ 缓存存量）后，各子测试必须用独立缓存目录——
   // 共享目录会把先前子测试的缓存票当 archived 并进当前聚合，污染断言面。
-  const prevDir = process.env.SUYOU_METRICS_DIR
+  const prevDir = process.env.SANDBAR_METRICS_DIR
   const cacheRoot = join(tmp, `cache-${Math.random().toString(36).slice(2)}`)
   await mkdir(cacheRoot, { recursive: true })
-  process.env.SUYOU_METRICS_DIR = cacheRoot
+  process.env.SANDBAR_METRICS_DIR = cacheRoot
   try { return await fn() } finally {
-    delete process.env.SUYOU_METRICS_STUB
-    if (prevDir === undefined) delete process.env.SUYOU_METRICS_DIR
-    else process.env.SUYOU_METRICS_DIR = prevDir
+    delete process.env.SANDBAR_METRICS_STUB
+    if (prevDir === undefined) delete process.env.SANDBAR_METRICS_DIR
+    else process.env.SANDBAR_METRICS_DIR = prevDir
   }
 }
 

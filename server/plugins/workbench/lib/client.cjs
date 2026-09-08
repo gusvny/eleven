@@ -659,10 +659,10 @@ function draftToPayload(d) {
 *   ⑥ 「路由表」分区（M13，t260822-m13-model-routes-edit）：展示 model-routes.yaml
 *      真源路由表（default/五角色/分工 tasks）+ provider 下拉/模型下拉编辑（换 provider
 *      即刷新该家已注册模型清单，260828）+
-*      保存（POST /suyou-admin/api/routes/save，宿主在 sandbar-admin-ui 插件，写前备份
+*      保存（POST /sandbar-admin/api/routes/save，宿主在 sandbar-admin-ui 插件，写前备份
 *      /tmp；保存即生效——运行时查表，下一个工单 agent spawn 用新表）。
 * 所有写操作走宿主半（../node.ts）挂在 dsh webServer 上的 /sandbar-providers/api/*；
-* 路由表读写走 sandbar-admin-ui 的 /suyou-admin/api/routes（同源，M13① 保留的 API）。
+* 路由表读写走 sandbar-admin-ui 的 /sandbar-admin/api/routes（同源，M13① 保留的 API）。
 */
 const CSS$4 = `
 .syp-root{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
@@ -759,7 +759,7 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 const API$3 = "/sandbar-providers/api";
-/** 多项目化（260823）：路由表两条 URL（/suyou-admin/api/routes*，按项目主目录解析
+/** 多项目化（260823）：路由表两条 URL（/sandbar-admin/api/routes*，按项目主目录解析
 *  model-routes.yaml）统一拼 ?project=；provider 管理（/sandbar-providers/api/*）是
 *  dsh 全局设施，不分流。
 *  260826 修：project 从模块级持有量改为纯函数入参——旧写法靠 ProvidersSection 的
@@ -1386,7 +1386,7 @@ function RoutesTableSection({ providers, projectKey }) {
 	async function load() {
 		setError("");
 		try {
-			const data = await apiGet$1(routesUrl("/suyou-admin/api/routes", projectKey ?? ""));
+			const data = await apiGet$1(routesUrl("/sandbar-admin/api/routes", projectKey ?? ""));
 			if (data?.ok !== true) throw new Error(data?.error ?? "模型路由读取失败");
 			const v = data.result;
 			setView(v);
@@ -1439,7 +1439,7 @@ function RoutesTableSection({ providers, projectKey }) {
 		setMsg("");
 		setSaved(false);
 		try {
-			const r = await apiPost$1(routesUrl("/suyou-admin/api/routes/save", projectKey ?? ""), { table: draftToPayload(draft) });
+			const r = await apiPost$1(routesUrl("/sandbar-admin/api/routes/save", projectKey ?? ""), { table: draftToPayload(draft) });
 			if (r?.ok !== true) {
 				setMsg(`保存失败：${r?.error ?? "未知错误"}`);
 				return;
@@ -1474,7 +1474,7 @@ function RoutesTableSection({ providers, projectKey }) {
 			children: [
 				error,
 				"\n",
-				"（/suyou-admin/api/routes 返回错误——按上面文案排查：缺参/未知项目=调用问题；表缺失/解析失败=该项目主目录的 model-routes.yaml 问题。）"
+				"（/sandbar-admin/api/routes 返回错误——按上面文案排查：缺参/未知项目=调用问题；表缺失/解析失败=该项目主目录的 model-routes.yaml 问题。）"
 			]
 		})]
 	});
@@ -2077,8 +2077,10 @@ function persistLedger(entries) {
 * 本模块只改「状态归属」（实例 state → 共享单例），不改任何业务规则。
 */
 /** 「最近关闭」列表的 localStorage key（t260831-06 定值，D1 修复起定义随
-* IO 迁入本文件；session-entry.tsx re-export 保持对外符号兼容）。 */
-const CLOSED_LEDGER_KEY = "suyou.workbench.closedSessions";
+* IO 迁入本文件；session-entry.tsx re-export 保持对外符号兼容；260908 终切
+* 改 sandbar 前缀，旧 key 读入时一次性迁移——KI-058 状态层清单规则）。 */
+const CLOSED_LEDGER_KEY = "sandbar.workbench.closedSessions";
+const LEGACY_CLOSED_LEDGER_KEY = "suyou.workbench.closedSessions";
 /** 缓存快照。null = 尚未从 localStorage 惰性读入。 */
 let current = null;
 const subscribers = /* @__PURE__ */ new Set();
@@ -2096,7 +2098,16 @@ function subscribeClosed(fn) {
 */
 function getClosedSnapshot() {
 	if (current === null) try {
-		current = parseLedger(localStorage.getItem(CLOSED_LEDGER_KEY));
+		let raw = localStorage.getItem(CLOSED_LEDGER_KEY);
+		if (raw === null) {
+			const legacy = localStorage.getItem(LEGACY_CLOSED_LEDGER_KEY);
+			if (legacy !== null) {
+				localStorage.setItem(CLOSED_LEDGER_KEY, legacy);
+				localStorage.removeItem(LEGACY_CLOSED_LEDGER_KEY);
+				raw = legacy;
+			}
+		}
+		current = parseLedger(raw);
 	} catch {
 		current = [];
 	}
@@ -48190,8 +48201,8 @@ const LEN_WHO = 64;
 const LEN_TICKET = 128;
 const LEN_OP = 32;
 const CHANNEL = "sandbar-workbench-tabs";
-const LS_HEARTBEAT_PREFIX = "suyou-wb-tab-";
-const LS_WRITE_KEY = "suyou-wb-tabwrite";
+const LS_HEARTBEAT_PREFIX = "sandbar-wb-tab-";
+const LS_WRITE_KEY = "sandbar-wb-tabwrite";
 const PROTO_V = 1;
 let clock = () => Date.now();
 function str(v, max) {

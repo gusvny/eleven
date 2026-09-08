@@ -23,16 +23,16 @@ node capture-lane.mjs --lane <泳道worktree> --out <dir>
 
 | 变量 | 缺省 | 说明 |
 |---|---|---|
-| `SUYOU_CONSOLE_URL` | `http://127.0.0.1:3099` | 控制台地址（测试环境 3199） |
-| `SUYOU_UI_CAPTURE_TIMEOUT_MS` | `60000` | 单页面超时（activity 侧另有 120s 进程兜底） |
-| `SUYOU_UI_CAPTURE_CHAT_ACTIVE_MS` | 带旗 90000 / 直连 25000 | 等 `data-phase=active` 的窗口（隔离台种子消息走真模型，往返有延迟） |
-| `SUYOU_UI_CAPTURE_TRANSCRIPT_MS` | `30000` | 种子消息发出后等**消息上屏**（进会话转录）的窗口，独立于 active 预算（active 翻转快于转录渲染） |
-| `SUYOU_UI_CAPTURE_SEED_PROMPT` | `（截图台造数）请只回复两个字：收到` | 种子消息词（--allow-seed 路径） |
-| `SUYOU_UI_CAPTURE_ALLOW_SEED` | 不设 | 台内造数门旗 env（等价 `--allow-seed`） |
-| `SUYOU_PLAYWRIGHT_MODULE` | 不设 | 泳道无 node_modules 时指主树 playwright-core 包目录（selftest 与实拍共用） |
-| `SUYOU_CAPTURE_PRESET_SOURCE` | `$HOME/.dsh/.agent-presets/suyou-integration` | 隔离台 preset 物化源（单测/基线桩覆盖用） |
-| `SUYOU_CAPTURE_FIXTURES` | 不设 | **capture-lane 专用**（bench 级开关）：`=1` 时向 capture.mjs 追加 `--fixtures`，开启状态注入 |
-| `SUYOU_UI_CAPTURE_FIXTURES` | 不设 | **capture.mjs 直跑专用**（capture 级开关）：`=1` 等价 `--fixtures`。两个 env 名不通用，见下节 |
+| `SANDBAR_CONSOLE_URL` | `http://127.0.0.1:3099` | 控制台地址（测试环境 3199） |
+| `SANDBAR_UI_CAPTURE_TIMEOUT_MS` | `60000` | 单页面超时（activity 侧另有 120s 进程兜底） |
+| `SANDBAR_UI_CAPTURE_CHAT_ACTIVE_MS` | 带旗 90000 / 直连 25000 | 等 `data-phase=active` 的窗口（隔离台种子消息走真模型，往返有延迟） |
+| `SANDBAR_UI_CAPTURE_TRANSCRIPT_MS` | `30000` | 种子消息发出后等**消息上屏**（进会话转录）的窗口，独立于 active 预算（active 翻转快于转录渲染） |
+| `SANDBAR_UI_CAPTURE_SEED_PROMPT` | `（截图台造数）请只回复两个字：收到` | 种子消息词（--allow-seed 路径） |
+| `SANDBAR_UI_CAPTURE_ALLOW_SEED` | 不设 | 台内造数门旗 env（等价 `--allow-seed`） |
+| `SANDBAR_PLAYWRIGHT_MODULE` | 不设 | 泳道无 node_modules 时指主树 playwright-core 包目录（selftest 与实拍共用） |
+| `SANDBAR_CAPTURE_PRESET_SOURCE` | `$HOME/.dsh/.agent-presets/sandbar-integration` | 隔离台 preset 物化源（单测/基线桩覆盖用） |
+| `SANDBAR_CAPTURE_FIXTURES` | 不设 | **capture-lane 专用**（bench 级开关）：`=1` 时向 capture.mjs 追加 `--fixtures`，开启状态注入 |
+| `SANDBAR_UI_CAPTURE_FIXTURES` | 不设 | **capture.mjs 直跑专用**（capture 级开关）：`=1` 等价 `--fixtures`。两个 env 名不通用，见下节 |
 
 ## 状态注入（fixture 票，t260901-24）
 
@@ -43,7 +43,7 @@ Playwright `page.route` 拦截 wf **读**端点回 `fixtures/*.json`（不改 wo
 
 ```bash
 # 隔离台路径（推荐）：bench 级 opt-in
-SUYOU_CAPTURE_FIXTURES=1 node capture-lane.mjs --lane <worktree> --out <dir>
+SANDBAR_CAPTURE_FIXTURES=1 node capture-lane.mjs --lane <worktree> --out <dir>
 #   → 产出 9 张图（7 标准视图 + console-approval.png + console-lane-parallel.png）
 #     + fixture-manifest.json（URL→fixture 拦截映射）
 
@@ -57,12 +57,12 @@ node capture.mjs --url http://127.0.0.1:<port>/ --out <dir> --allow-seed --fixtu
   逐字节不变，agent_activities 两处调用方（ui_evidence 段 / acceptance 走查）的
   证据永不含虚构票。真 Temporal 在线时隔离台会出现真票，默认注入会把真伪票混进
   同一批 PNG（PNG 无法自标真伪）——所以注入必须是显式动作。
-- **双 env 名不通用（错配=静默不注入）**：`SUYOU_CAPTURE_FIXTURES` 只被
-  capture-lane 读（bench 级）；`SUYOU_UI_CAPTURE_FIXTURES` 只被 capture.mjs 直跑读
+- **双 env 名不通用（错配=静默不注入）**：`SANDBAR_CAPTURE_FIXTURES` 只被
+  capture-lane 读（bench 级）；`SANDBAR_UI_CAPTURE_FIXTURES` 只被 capture.mjs 直跑读
   （capture 级）。capture-lane spawn 时会把后者从子进程 env 剥掉——台内注入单一
   开关来源，误设 capture 级 env 名不会在台内形成第二开关。错设名字的行为是
   「明确不注入（照常 7 视图）」，不会报错。
-- **联锁**：注入通路必须与 `--allow-seed`（或 `SUYOU_UI_CAPTURE_ALLOW_SEED=1`）
+- **联锁**：注入通路必须与 `--allow-seed`（或 `SANDBAR_UI_CAPTURE_ALLOW_SEED=1`）
   同现——直连真生产台注入假票=污染真数据，违反即退出 2 人话拒跑。
 - **只拦 GET**：`/wf/tickets`（list/show/diff）与 `/wf/workflows` 命中才 fulfill；
   POST accept/advance/dispatch-next/rework/update 恒放行；projects 等其余端点放行
@@ -95,7 +95,7 @@ approve/签字/打回提交。
 ## 台内造数门旗（--allow-seed，t260901-02 根治 + t260901-03 收口）
 
 隔离台（capture-lane）下 MRU 账册必为空，chat 态视图开不出来。带 `--allow-seed`
-（或 env `SUYOU_UI_CAPTURE_ALLOW_SEED=1`）时允许台内造数：经隔离台自己的 API 建
+（或 env `SANDBAR_UI_CAPTURE_ALLOW_SEED=1`）时允许台内造数：经隔离台自己的 API 建
 两个会话 + 写本插件 localStorage 账册，chat 视图走**点台上「+ 新建会话」**（工厂
 同款：绑工作区+staging）+ 发一条种子消息驱动 `data-phase=active`——平台语义
 「空内容会话恒 hero」（composerPhase blank ⟺ 无可见会话内容），只有真消息才翻
@@ -122,7 +122,7 @@ loud 失败（chat 证据被遮挡不算数）。
 
 ## 隔离台 preset 物化（t260901-02）
 
-capture-lane.mjs boot 隔离台时把 `suyou-integration` agent preset **实体复制**进临时
+capture-lane.mjs boot 隔离台时把 `sandbar-integration` agent preset **实体复制**进临时
 DSH_HOME——控制台默认 preset 缺失会导致建会话报 agent-preset-not-found，chat 态
 造不出、UI 票截图恒失败（t260901-01 三轮人工补证据的根因）。要点：
 
@@ -153,7 +153,7 @@ DSH_HOME——控制台默认 preset 缺失会导致建会话报 agent-preset-no
 ## 流水线接线
 
 - `dev_lane` implement 落盘后：UI 票（`shared.is_ui_write_set` 命中）自动执行
-  `prepare_ui_evidence`（worker 代跑本脚本，`SUYOU_UI_CAPTURE_STUB=1` 可桩跑）；
+  `prepare_ui_evidence`（worker 代跑本脚本，`SANDBAR_UI_CAPTURE_STUB=1` 可桩跑）；
 - `integration_review` prompt 注入截图清单（含 mtime），审读按「无截图证据=打回」；
 - `merge_check`：UI 票且 `.suyou/screenshots/` 无 png → 红灯 + 处置指引。
 
@@ -162,4 +162,4 @@ DSH_HOME——控制台默认 preset 缺失会导致建会话报 agent-preset-no
 浏览器优先系统 Chrome（`channel:"chrome"`），探测不到退 playwright 自带 chromium；
 两者都不可用 → 非零退出 + 明确报错，不静默降级。chat 态锚找不到 → 该视图失败
 写进 stderr 与退出码，另一张图仍保留。隔离台 preset 源（$HOME/.dsh/.agent-presets/
-suyou-integration）缺失/畸形 → capture-lane 拒跑指路，不自造假 preset 造假证据。
+sandbar-integration）缺失/畸形 → capture-lane 拒跑指路，不自造假 preset 造假证据。

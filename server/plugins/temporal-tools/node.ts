@@ -18,7 +18,7 @@
  *
  * 只用 dsh 稳定面：apply(ctx) + ctx.tools.register；不碰 preview 不稳定面。
  *
- * repo 解析顺序：config.repo → SUYOU_REPO → 按本文件位置推导
+ * repo 解析顺序：config.repo → SANDBAR_REPO → 按本文件位置推导
  * （<repo>/server/plugins/temporal-tools/node.ts 上三级）。python 默认取
  * engine 目录内的 .venv/bin/python（temporalio SDK 装在仓库内 venv，不碰系统 python）。
  */
@@ -248,7 +248,7 @@ function readPid(pidfile: string): number | null {
 }
 
 // ---- worker 归属指纹（KI-033，t260904-02）----
-// worker.py 起跑自写 meta JSON（SUYOU_WORKER_META 指路 / daemon 模式 <pidfile>.meta），
+// worker.py 起跑自写 meta JSON（SANDBAR_WORKER_META 指路 / daemon 模式 <pidfile>.meta），
 // 内容 {version, pid, repo_root, ts}（repo_root=realpath）。ensure 据此识别
 // 异仓 worker 伺服同票。指纹=repo_root 路径而非 git HEAD——同仓先后 commit 不该
 // 误判异仓（supervisor 与 worker 常是先后从同一棵树起的）。本节模块级 + export
@@ -442,7 +442,7 @@ export async function ensureTicketWorkers(deps: EnsureTicketWorkersDeps): Promis
 }
 
 export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) | void {
-  const repo = config?.repo ?? process.env.SUYOU_REPO ?? DEFAULT_REPO
+  const repo = config?.repo ?? process.env.SANDBAR_REPO ?? DEFAULT_REPO
   const python = config?.python ?? join(pocDir(repo), '.venv', 'bin', 'python')
   const timeoutMs = config?.timeoutMs ?? 120_000
   const clientPy = join(pocDir(repo), 'client.py')
@@ -624,7 +624,7 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
   // 每 ticketEnsureMs 查一次 running-tickets（轻量 visibility 查询，无 snapshot），
   // 缺 worker 的以**本进程子进程**拉起（不 daemonize——ppid=本 console，进程树即归属）。
   // dispose 时 SIGTERM 全部本进程 spawn 的工单 worker；console 被 SIGKILL 时
-  // worker 靠 SUYOU_WATCH_PPID=1 自守（ppid 变 1 即优雅自退，见 worker.py）。
+  // worker 靠 SANDBAR_WATCH_PPID=1 自守（ppid 变 1 即优雅自退，见 worker.py）。
   // 多 console：pidfile wx 独占写定归属，撞车即杀自己 spawn 的重复进程；
   // 拥有者退出 → 其 worker 被带走/自退 → 存活 console 下一轮 ensure 补拉接管。
   const ticketChildren = new Map<string, ChildProcess>()
@@ -647,10 +647,10 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
         cwd: poc,
         env: {
           ...process.env,
-          SUYOU_TASK_QUEUE: queue,   // queue 名取自 running-tickets（执行本身），零常量复制
-          SUYOU_WATCH_WORKFLOW: tid, // workflow 收口自退
-          SUYOU_WATCH_PPID: '1',     // 宿主 SIGKILL → ppid=1 自退
-          SUYOU_WORKER_META: join(dataDir, `worker-${tid}.meta`), // 归属指纹自报（KI-033，ensure 据此判异仓）
+          SANDBAR_TASK_QUEUE: queue,   // queue 名取自 running-tickets（执行本身），零常量复制
+          SANDBAR_WATCH_WORKFLOW: tid, // workflow 收口自退
+          SANDBAR_WATCH_PPID: '1',     // 宿主 SIGKILL → ppid=1 自退
+          SANDBAR_WORKER_META: join(dataDir, `worker-${tid}.meta`), // 归属指纹自报（KI-033，ensure 据此判异仓）
         },
         stdio: ['ignore', fd, fd],
       })

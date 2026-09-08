@@ -13,7 +13,7 @@ high-level steps：
      plugins 五插件（cordis 农场实挂：ui/workbench/knowledge/providers/temporal-tools）各
      package.json；profile／profile-headless 装配配方两变体（headless 的 patch 仍为软链）；
      roles 三 persona；model-routes.yaml；ui-check；tools 四件；平移件（sandbar-tools.ts、
-     suyou-projects.ts 只平移不改名〔review gen0 B1 裁定〕、headless-resume、workflows）。
+     project-registry.ts 只平移不改名〔review gen0 B1 裁定〕、headless-resume、workflows）。
   B. server/dsh 目录不存在（包装层退场）。
   C. 全仓旧路径零残留（连写 server/dsh／temporal-poc＋段式杂糅两型），全后缀扫描
      （沿 t260907-05 取舍清单「带」项：无 include 白名单），豁免逐处归类（列名制）：
@@ -151,7 +151,7 @@ def main():
     for rel in ("server/model-routes.yaml", "server/ui-check", "server/tools/ticket.py",
                 "server/tools/workflow.py", "server/tools/verify_lane.py",
                 "server/tools/dispatcher_loop.py", "server/sandbar-tools.ts",
-                "server/suyou-projects.ts", "server/headless-resume/node.ts",
+                "server/project-registry.ts", "server/headless-resume/node.ts",
                 "server/workflows/dev-lane.yaml"):
         r.check(has(rel, rel == "server/ui-check"), "A 平移件/声明 %s" % rel)
 

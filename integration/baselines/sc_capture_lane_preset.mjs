@@ -41,7 +41,7 @@ try {
   // ③ 完整源 → 实体复制落地，非软链（roster 只扫实体）
   const home = path.join(tmp, "fake-dsh-home");
   const dst = await materializePresets(home, stub);
-  assert(dst === path.join(home, ".agent-presets", "suyou-integration"),  // naming-compat
+  assert(dst === path.join(home, ".agent-presets", "sandbar-integration"),  // naming-compat
     `物化落点异常：${dst}`);
   for (const f of ["preset.yml", "agent.cordis.yml"]) {
     const p = path.join(dst, f);

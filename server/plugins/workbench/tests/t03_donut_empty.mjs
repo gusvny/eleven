@@ -24,12 +24,12 @@ import { readFileSync } from 'node:fs'
 import { buildTimeDonut } from './../src/client/metrics-model.ts'
 
 const m = await loadMetrics()
-const savedStub = process.env.SUYOU_METRICS_STUB
-const savedDir = process.env.SUYOU_METRICS_DIR
+const savedStub = process.env.SANDBAR_METRICS_STUB
+const savedDir = process.env.SANDBAR_METRICS_DIR
 
 const D = (stub) => {
-  process.env.SUYOU_METRICS_STUB = writeStub(freshDir('t05-t03-stub-'), stub)
-  process.env.SUYOU_METRICS_DIR = freshDir('t05-t03-cache-')
+  process.env.SANDBAR_METRICS_STUB = writeStub(freshDir('t05-t03-stub-'), stub)
+  process.env.SANDBAR_METRICS_DIR = freshDir('t05-t03-cache-')
   return m.defaultDeps('/stub-repo', () => NOW)
 }
 

@@ -17,7 +17,7 @@
  *  E defaultProject() 取注册表字母序首 key（换根入口的 key 来源面）。
  *
  * 与 developer L1 intent 区别：L1 用注入桩（手造回调）测 buildMetricsResponse 的换根
- * 行为与双门 stub 一致性；本场景补桩够不到的真 suyou-projects 注册表装载缝（env→
+ * 行为与双门 stub 一致性；本场景补桩够不到的真 project-registry 注册表装载缝（env→
  * yaml 解析→主目录）。双门 stub 一致性由 L1 覆盖（stub 模式换根恒 no-op=已声明语义）。
  *
  * 预期状态：实现段（t260904-04 第 4 步）已随本工作区落地——全绿；若回退实现则全红

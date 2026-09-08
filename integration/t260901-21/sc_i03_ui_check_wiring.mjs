@@ -112,7 +112,7 @@ ok(mod.resolveCredentialsSource('Suyou') === lg, 'A8 大写 key 拒 per-key')
   if (s !== undefined) process.env.SANDBAR_PROJECTS_DIR = s
 }
 
-// 白名单同款导出在位（与 suyou-projects.ts 同款口径的锚点）
+// 白名单同款导出在位（与 project-registry.ts 同款口径的锚点）
 ok(mod.PROJECT_KEY_RE instanceof RegExp && !mod.PROJECT_KEY_RE.test('Suyou') && mod.PROJECT_KEY_RE.test('a-b-1'),
    'A11 PROJECT_KEY_RE 导出且口径正确')
 

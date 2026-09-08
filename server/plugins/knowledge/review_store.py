@@ -27,7 +27,7 @@ CLI（stdout 单行 JSON，{"ok":true,"result":...} / {"ok":false,"error":...}�
   rework '<path>' [ticket]           → 取最后一轮 conclude=changes-requested 的 reject 块，
                                        生成一键复制返工指令文本（result.instruction）
 
-环境变量 SUYOU_REPO 覆盖仓库根（自测用临时目录，绝不碰真 docs/）；缺省按本文件位置推导
+环境变量 SANDBAR_REPO 覆盖仓库根（自测用临时目录，绝不碰真 docs/）；缺省按本文件位置推导
 （<repo>/server/plugins/knowledge/review_store.py 上三级）。
 
 内容 KU 审校（接口预留说明，本工单不打通）：
@@ -48,7 +48,7 @@ import uuid
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = Path(os.environ.get('SUYOU_REPO') or HERE.parents[2]).resolve()
+REPO = Path(os.environ.get('SANDBAR_REPO') or HERE.parents[2]).resolve()
 DOCS = REPO / 'docs'
 REVIEWS = DOCS / 'reviews'
 ADMIN_LOG = REPO / 'server' / 'admin.log'

@@ -22,7 +22,7 @@ POC = os.path.join(REPO, "server", "engine")
 WORKER_PY = os.path.join(POC, "worker.py")
 
 # watch 间隔旋钮（t260905-02 实现面交付：缺省 30s、下限钳制；新命名按宿主令
-# 260904 用中性名，不扩 SUYOU_* 存量欠账）。旋钮未落地时 worker 自然走 30s
+# 260904 用中性名，不扩 SANDBAR_* 存量欠账）。旋钮未落地时 worker 自然走 30s
 # 慢档——场景断言上限一律按慢档给，快慢档都绿，实现只影响快慢不影响判定。
 KNOB = "SANDBAR_WATCH_INTERVAL_SEC"
 KNOB_FAST = "2"

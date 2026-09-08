@@ -18,12 +18,12 @@ const { buildMetricsResponse, defaultDeps, engineVersionOf, SOURCE_VERSION } = a
 const { writeFile, mkdir } = await import('node:fs/promises')
 const { join } = await import('node:path')
 
-const savedStub = process.env.SUYOU_METRICS_STUB
-const savedDir = process.env.SUYOU_METRICS_DIR
+const savedStub = process.env.SANDBAR_METRICS_STUB
+const savedDir = process.env.SANDBAR_METRICS_DIR
 
-// 缓存目录布局（契约路径约定）：<SUYOU_METRICS_DIR>/<project>/data/metrics/
+// 缓存目录布局（契约路径约定）：<SANDBAR_METRICS_DIR>/<project>/data/metrics/
 async function mkCacheDir(prefix) {
-  // env 语义 = 根（SUYOU_METRICS_DIR），实现内部再拼 <project>/data/metrics/
+  // env 语义 = 根（SANDBAR_METRICS_DIR），实现内部再拼 <project>/data/metrics/
   const root = freshDir(prefix)
   const dir = join(root, 'demo', 'data', 'metrics')
   const { mkdir } = await import('node:fs/promises')
@@ -61,8 +61,8 @@ function archivedRec(id, opts = {}) {
   const frozenRows = Object.freeze([Object.freeze({ ...live })])
   const snapshot = JSON.stringify(frozenRows)
   const stub = baseStub({ tickets: frozenRows })
-  process.env.SUYOU_METRICS_DIR = cacheRoot
-  process.env.SUYOU_METRICS_STUB = writeStub(freshDir('t09-term-stub-'), stub)
+  process.env.SANDBAR_METRICS_DIR = cacheRoot
+  process.env.SANDBAR_METRICS_STUB = writeStub(freshDir('t09-term-stub-'), stub)
   const deps = defaultDeps('/stub-repo', () => NOW)
 
   const r = await buildMetricsResponse({ view: 'delivery', window: '7d' }, deps)
@@ -83,14 +83,14 @@ function archivedRec(id, opts = {}) {
 
 {
   console.log('B. 冷项目（无缓存目录）：宇宙补全空转不崩')
-  process.env.SUYOU_METRICS_DIR = freshDir('t09-term-cold-')
-  process.env.SUYOU_METRICS_STUB = writeStub(freshDir('t09-term-stub2-'), baseStub({ tickets: [] }))
+  process.env.SANDBAR_METRICS_DIR = freshDir('t09-term-cold-')
+  process.env.SANDBAR_METRICS_STUB = writeStub(freshDir('t09-term-stub2-'), baseStub({ tickets: [] }))
   const deps = defaultDeps('/stub-repo', () => NOW)
   const r = await buildMetricsResponse({ view: 'time', window: '7d' }, deps)
   ok('200 空态', r.status === 200 && r.body.kpis.tickets === 0)
   ok('无 reason 混入', r.body.reason === undefined)
 }
 
-process.env.SUYOU_METRICS_STUB = savedStub
-process.env.SUYOU_METRICS_DIR = savedDir
+process.env.SANDBAR_METRICS_STUB = savedStub
+process.env.SANDBAR_METRICS_DIR = savedDir
 process.exit(summary('terminate-universe') ? 0 : 1)

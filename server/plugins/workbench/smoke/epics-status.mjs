@@ -17,7 +17,7 @@
  *      isEpicStatusValue、EPIC_STATUS_OPTIONS 与 host EPIC_STATUSES 一致性断言；
  *   F. 存量迁移断言：真目录 notes/epics 七单状态全部 ∈ EPIC_STATUSES、备注列存在、
  *      关键映射抽查（dsh-generalize=已归档+备注含 sandbar；sandbar=已立项（执行中））。
- * 全部桩/fixture 复现（SUYOU_EPICS_DIR 指向临时目录；fixture 代号带 zz- 前缀防 /tmp
+ * 全部桩/fixture 复现（SANDBAR_EPICS_DIR 指向临时目录；fixture 代号带 zz- 前缀防 /tmp
  * 备份串档），不靠真外部源。
  */
 
@@ -55,7 +55,7 @@ const FIX_MD = (status, noteRow = '') => `# 立项单：zz-fix
 `
 
 const tmp = await mkdtemp(join(tmpdir(), 'wb-epic-status-'))
-const savedEnv = process.env.SUYOU_EPICS_DIR
+const savedEnv = process.env.SANDBAR_EPICS_DIR
 try {
   /* ------------------------------------------------------------ A. 枚举常量 + 备注列解析 */
   section('A EPIC_STATUSES 枚举 + parseEpicMeta 备注列')
@@ -305,8 +305,8 @@ sys.exit(0)
       'readEpicMarkdown 详情链路带 note（science-content 抽查）')
   }
 } finally {
-  if (savedEnv === undefined) delete process.env.SUYOU_EPICS_DIR
-  else process.env.SUYOU_EPICS_DIR = savedEnv
+  if (savedEnv === undefined) delete process.env.SANDBAR_EPICS_DIR
+  else process.env.SANDBAR_EPICS_DIR = savedEnv
   await rm(tmp, { recursive: true, force: true })
 }
 

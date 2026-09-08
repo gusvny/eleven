@@ -9,7 +9,7 @@
  *   B. readEpicMarkdown：合法 → 全文+元信息；形状非法（大写/含点/超长）→ 400；
  *      resolve 防穿双保险断言（路径必落在 epicsDir 内）；不存在 → 404 附现有代号清单。
  *   C. 路由（node.ts apply + mock webServer/req/res + stub admin.py）：
- *      GET /api/epics（env SUYOU_EPICS_DIR 指向临时目录/空目录/缺省 <repo>/notes/epics）；
+ *      GET /api/epics（env SANDBAR_EPICS_DIR 指向临时目录/空目录/缺省 <repo>/notes/epics）；
  *      GET /api/epics/<code>（200 全文 / 400 形状 / 4xx 防穿 ..%2f 类 / 404 不存在）；
  *      GET /api/epics/<code>/tickets（status 分桶 + 工单行字段；admin.py 回 ok:false 与
  *      直接崩非 JSON 两条降级路径都 → 200 {degraded:true, reason 含底层 error 原文}，不 502）；
@@ -44,7 +44,7 @@ const EPIC_MD = `# 立项单：demo-epic
 `
 
 const tmp = await mkdtemp(join(tmpdir(), 'wb-epics-'))
-const savedEnv = process.env.SUYOU_EPICS_DIR
+const savedEnv = process.env.SANDBAR_EPICS_DIR
 try {
   /* ------------------------------------------------------------ A. 纯函数：解析与列表 */
   section('A parseEpicMeta / listEpics')
@@ -152,18 +152,18 @@ sys.exit(1)
     /* --- C1 列表路由：env 指向 / 空目录 / 缺省 <repo>/notes/epics --- */
     const repoC = join(tmp, 'repo-c')
     await writeStub(repoC, { listPayload: {} })
-    process.env.SUYOU_EPICS_DIR = join(tmp, 'epics-a')
+    process.env.SANDBAR_EPICS_DIR = join(tmp, 'epics-a')
     const r1 = setup(repoC)
     ok(r1.exactEpics !== undefined && r1.prefixEpics !== undefined, 'epics exact+prefix 路由已挂')
     let r = await call(r1.exactEpics, '/sandbar-workbench/api/epics')
     ok(r.status === 200 && r.body.ok === true && r.body.result.count === 2
       && r.body.result.epics[0].code === 'aaa', 'GET /epics → 2 条（env 指向临时目录）')
-    process.env.SUYOU_EPICS_DIR = join(tmp, 'epics-empty')
+    process.env.SANDBAR_EPICS_DIR = join(tmp, 'epics-empty')
     const r1b = setup(repoC)
     r = await call(r1b.exactEpics, '/sandbar-workbench/api/epics')
     ok(r.status === 200 && r.body.result.count === 0 && Array.isArray(r.body.result.epics),
       'GET /epics 空目录（env 指向）→ 200 空数组不报错')
-    delete process.env.SUYOU_EPICS_DIR
+    delete process.env.SANDBAR_EPICS_DIR
     const repoD = join(tmp, 'repo-d')
     await mkdir(join(repoD, 'notes', 'epics'), { recursive: true })
     await writeFile(join(repoD, 'notes', 'epics', 'demo-epic.md'), EPIC_MD, 'utf8')
@@ -241,8 +241,8 @@ sys.exit(1)
     ok(r.status === 200 && r.body.result.epic === 'epic-linkage', '工单详情带 epic 字段')
   }
 } finally {
-  if (savedEnv === undefined) delete process.env.SUYOU_EPICS_DIR
-  else process.env.SUYOU_EPICS_DIR = savedEnv
+  if (savedEnv === undefined) delete process.env.SANDBAR_EPICS_DIR
+  else process.env.SANDBAR_EPICS_DIR = savedEnv
   await rm(tmp, { recursive: true, force: true })
 }
 

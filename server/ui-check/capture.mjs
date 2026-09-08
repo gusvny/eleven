@@ -8,21 +8,21 @@
 //   不发工单、不碰任何进程端口。「新建工单弹层」视图只点开弹层、绝不点提交。
 //
 // 用法：
-//   node capture.mjs --url <console> --out <dir>     # 截图（缺省 url 见 SUYOU_CONSOLE_URL）
+//   node capture.mjs --url <console> --out <dir>     # 截图（缺省 url 见 SANDBAR_CONSOLE_URL）
 //   node capture.mjs --selftest                      # 干跑：不起浏览器，校验参数/目录可写
 //   node capture.mjs --allow-seed ...                # 仅隔离台：允许台内造数（建会话+写账册）；
 //                                                    # 直连/生产路径绝不能带此旗
 //   node capture.mjs --fixtures <dir> ...            # 状态注入（t260901-24）：拦截 wf 读端点回
 //                                                    # fixture 票，让实拍到达审批抽屉/泳道并行态；
 //                                                    # 仅隔离台路径（--allow-seed 同现）可用，且显式
-//                                                    # opt-in（capture-lane 缺省不传，见其 SUYOU_CAPTURE_FIXTURES）
+//                                                    # opt-in（capture-lane 缺省不传，见其 SANDBAR_CAPTURE_FIXTURES）
 //
 // 环境变量：
-//   SUYOU_CONSOLE_URL        控制台地址，缺省 http://127.0.0.1:3099（测试环境 3199）
-//   SUYOU_UI_CAPTURE_TIMEOUT_MS  整体超时，缺省 60000（activity 侧另有 120s 兜底）
-//   SUYOU_UI_CAPTURE_ALLOW_SEED=1  与 --allow-seed 等价（env 通路，t260831-02 同款）
-//   SUYOU_UI_CAPTURE_FIXTURES=1    与 --fixtures 等价（env 通路）；注意 capture-lane 只认
-//                                  自己的 SUYOU_CAPTURE_FIXTURES（bench 级开关），两者名字
+//   SANDBAR_CONSOLE_URL        控制台地址，缺省 http://127.0.0.1:3099（测试环境 3199）
+//   SANDBAR_UI_CAPTURE_TIMEOUT_MS  整体超时，缺省 60000（activity 侧另有 120s 兜底）
+//   SANDBAR_UI_CAPTURE_ALLOW_SEED=1  与 --allow-seed 等价（env 通路，t260831-02 同款）
+//   SANDBAR_UI_CAPTURE_FIXTURES=1    与 --fixtures 等价（env 通路）；注意 capture-lane 只认
+//                                  自己的 SANDBAR_CAPTURE_FIXTURES（bench 级开关），两者名字
 //                                  不通用——错设本台 env 名=不注入（无告警，行为=7 视图），
 //                                  正确做法是经 capture-lane 的 env 或直跑本脚本带 --fixtures。
 //
@@ -70,7 +70,7 @@ function parseArgs(argv) {
  * 根因：隔离台全新空家（Temporal 不在线）→ wf tickets 恒空 → ui_evidence 只能拍
  * 7 张「渲染正常级」。方案：浏览器层 page.route 拦截 wf 读端点回 fixture JSON
  * （不改 workbench/node.ts、不碰 Temporal）。三条硬纪律：
- *   ① opt-in 门旗（R2）：--fixtures 旗或 env SUYOU_UI_CAPTURE_FIXTURES=1 双通路等价
+ *   ① opt-in 门旗（R2）：--fixtures 旗或 env SANDBAR_UI_CAPTURE_FIXTURES=1 双通路等价
  *      （t260831-02 门旗同款），且必须与 --allow-seed 同现（联锁）——直连真生产台
  *      带注入=把假票注进真台，绝不允许。缺省（两通路都不开）= 7 视图口径逐字节不变。
  *   ② 只拦 GET（R3）：POST accept/advance/dispatch-next/rework/update 恒 passthrough。
@@ -221,7 +221,7 @@ async function launchBrowser(playwright) {
 // 「台内造数」：经隔离台自己的 API 建会话（global-session/open，无工单前缀）+
 // page.evaluate 写本插件账册（LEDGER_KEY，仅浏览器本地，不碰服务端数据）。
 // ⚠️ Bench-gate（红线）：种子**只在 --allow-seed（或 env
-// SUYOU_UI_CAPTURE_ALLOW_SEED=1）显式放行时**才可能执行——capture 每次
+// SANDBAR_UI_CAPTURE_ALLOW_SEED=1）显式放行时**才可能执行——capture 每次
 // browser.newContext() 都是全新上下文，localStorage 必为空，MRU 行任何环境
 // 都不存在；不设门控的话，agent_activities 的直连兜底路径（--url 指向生产
 // 3099）会往生产控制台真实 POST 建会话，绕开只读红线。capture-lane 隔离台
@@ -340,7 +340,7 @@ async function navigateToChat(page, allowSeed = false) {
       throw new Error(
         "项目行没有可开的会话 tab（[data-wb-psess-tab]），且未带 --allow-seed（台内造数门旗，" +
         "仅隔离台路径可带）。只读红线禁止点「+ 新建会话」造 chat 态；隔离台请由 capture-lane 传 " +
-        "--allow-seed（或 env SUYOU_UI_CAPTURE_ALLOW_SEED=1）后重跑。"
+        "--allow-seed（或 env SANDBAR_UI_CAPTURE_ALLOW_SEED=1）后重跑。"
       );
     }
     await forceClick(row, 5000);
@@ -349,7 +349,7 @@ async function navigateToChat(page, allowSeed = false) {
   // 等 active；窗口期内若出厂弹「Add an API key」准入模态（隔离台无 key 实测会弹，
   // 遮罩挡会话激活——t260831-02 第 8 轮目视实锤），点「Configure later」让路后继续等。
   // 隔离台带种子消息：模型往返有延迟，预算放宽（env 可调，缺省 90s）。
-  const activeBudgetMs = Number(process.env.SUYOU_UI_CAPTURE_CHAT_ACTIVE_MS || (allowSeed ? 90000 : 25000));
+  const activeBudgetMs = Number(process.env.SANDBAR_UI_CAPTURE_CHAT_ACTIVE_MS || (allowSeed ? 90000 : 25000));
   const deadline = Date.now() + activeBudgetMs;
   let active = false;
   while (Date.now() < deadline) {
@@ -376,9 +376,9 @@ async function navigateToChat(page, allowSeed = false) {
 }
 
 /** 种子消息词唯一出口（seedChatMessage 发送与 waitForSeedOnTranscript 校验同源，
- * env SUYOU_UI_CAPTURE_SEED_PROMPT 覆盖时两侧一致）。 */
+ * env SANDBAR_UI_CAPTURE_SEED_PROMPT 覆盖时两侧一致）。 */
 function seedPromptText() {
-  return process.env.SUYOU_UI_CAPTURE_SEED_PROMPT || "（截图台造数）请只回复两个字：收到";
+  return process.env.SANDBAR_UI_CAPTURE_SEED_PROMPT || "（截图台造数）请只回复两个字：收到";
 }
 
 /** 隔离台种子消息（t260901-02 根因 #2）：平台语义「空内容会话恒 hero」（composerPhase
@@ -388,7 +388,7 @@ function seedPromptText() {
  *   ① textarea 上用 prototype native setter 写 value + dispatch bubbling input
  *      （React 受控组件 onChange 生效，playwright fill 同理但受 mask 干扰更稳的是直评）；
  *   ② DOM 直点 send 按钮（aria-label="Send message"）。
- * 消息词可 env SUYOU_UI_CAPTURE_SEED_PROMPT 覆盖；发送即一次真实模型往返。 */
+ * 消息词可 env SANDBAR_UI_CAPTURE_SEED_PROMPT 覆盖；发送即一次真实模型往返。 */
 async function seedChatMessage(page) {
   const promptText = seedPromptText();
   const badPrompt = validateSeedText(promptText);
@@ -434,10 +434,10 @@ async function seedChatMessage(page) {
 /** 用户消息上屏等待（t260901-03 验收走查打回修复）：active 相位翻转为触发点，天然
  * 快于转录渲染——慢模型日截图可能只有「Deep diving…」占位而无用户消息气泡，chat
  * 证据不合格。发完种子消息后等会话转录（document.body.innerText）含消息词，预算
- * env SUYOU_UI_CAPTURE_TRANSCRIPT_MS 可调（缺省 30s，独立于 CH_ACTIVE_MS 预算），
+ * env SANDBAR_UI_CAPTURE_TRANSCRIPT_MS 可调（缺省 30s，独立于 CH_ACTIVE_MS 预算），
  * 超时 loud 报错不静默出图。 */
 async function waitForSeedOnTranscript(page, promptText) {
-  const budgetMs = Number(process.env.SUYOU_UI_CAPTURE_TRANSCRIPT_MS || 30000);
+  const budgetMs = Number(process.env.SANDBAR_UI_CAPTURE_TRANSCRIPT_MS || 30000);
   const deadline = Date.now() + budgetMs;
   while (Date.now() < deadline) {
     const onScreen = await page.evaluate((txt) =>
@@ -579,13 +579,13 @@ async function assertDistinct(shots) {
 }
 
 // playwright 加载：优先本目录 node_modules；泳道 checkout 不装依赖（t260829-02
-// 先例）时退 SUYOU_PLAYWRIGHT_MODULE 指主树 playwright-core 包目录。selftest 与
+// 先例）时退 SANDBAR_PLAYWRIGHT_MODULE 指主树 playwright-core 包目录。selftest 与
 // 实拍共用（t260901-03：此前 selftest 不走路径兜底，泳道里 selftest 必红）。
 async function loadPlaywright() {
   try {
     return await import("playwright-core");
   } catch (e) {
-    const alt = process.env.SUYOU_PLAYWRIGHT_MODULE;
+    const alt = process.env.SANDBAR_PLAYWRIGHT_MODULE;
     if (alt) {
       try {
         const { pathToFileURL } = await import("node:url");
@@ -595,7 +595,7 @@ async function loadPlaywright() {
         throw new Error(`playwright-core 加载失败（${alt}）：${e2.message}`);
       }
     }
-    throw new Error(`playwright-core 未安装：${e.message}（先在 server/ui-check/ 下 npm install，或由 capture-lane 传 SUYOU_PLAYWRIGHT_MODULE）`);
+    throw new Error(`playwright-core 未安装：${e.message}（先在 server/ui-check/ 下 npm install，或由 capture-lane 传 SANDBAR_PLAYWRIGHT_MODULE）`);
   }
 }
 
@@ -608,8 +608,8 @@ async function main() {
     console.error("用法：node capture.mjs --url <console> --out <dir> [--selftest]");
     process.exit(2);
   }
-  const url = args.url || process.env.SUYOU_CONSOLE_URL || "http://127.0.0.1:3099";
-  const timeoutMs = Number(process.env.SUYOU_UI_CAPTURE_TIMEOUT_MS || 60000);
+  const url = args.url || process.env.SANDBAR_CONSOLE_URL || "http://127.0.0.1:3099";
+  const timeoutMs = Number(process.env.SANDBAR_UI_CAPTURE_TIMEOUT_MS || 60000);
   if (!args.out) {
     console.error("[capture] 缺 --out <dir>（截图输出目录）");
     process.exit(2);
@@ -621,14 +621,14 @@ async function main() {
   await mkdir(args.out, { recursive: true });
 
   // ── 状态注入门旗与联锁（t260901-24 R1①/R2）──
-  // 双通路归一：--fixtures 旗 / env SUYOU_UI_CAPTURE_FIXTURES=1 等价（与 --allow-seed
+  // 双通路归一：--fixtures 旗 / env SANDBAR_UI_CAPTURE_FIXTURES=1 等价（与 --allow-seed
   // 的旗/env 双通路同款）。联锁：fixtureMode 必须与 allowSeed（旗/env 归一）同现——
   // 注入仅隔离台路径合法，直连真生产台带注入=把假票注进真台，退出 2 人话拒跑。
-  const allowSeed = args.allowSeed || process.env.SUYOU_UI_CAPTURE_ALLOW_SEED === "1";
+  const allowSeed = args.allowSeed || process.env.SANDBAR_UI_CAPTURE_ALLOW_SEED === "1";
   // 裸 --fixtures（旗后不带目录值 → 空串）按「用缺省 ui-check/fixtures 包」处理，
   // 不静默关闸——真拍实测空串曾 falsy 掉整个注入（t260901-24）。
   const fixtureFlag = args.fixtures === null ? null : (args.fixtures || "@default");
-  const fixtureMode = fixtureFlag !== null || process.env.SUYOU_UI_CAPTURE_FIXTURES === "1";
+  const fixtureMode = fixtureFlag !== null || process.env.SANDBAR_UI_CAPTURE_FIXTURES === "1";
   const fixtureManifest = [];
   const isFixtureView = (file) => file === "console-approval.png" || file === "console-lane-parallel.png";
 
@@ -731,8 +731,8 @@ async function main() {
   // ── 联锁拒跑 + fixture 素材加载（真跑路径；selftest 干跑已在上方分支退出，
   // t04 合同：干跑不经 fixture 目录在位性，参数层放行语义）──
   if (fixtureMode && !allowSeed) {
-    console.error("[capture] 拒跑：状态注入（--fixtures / SUYOU_UI_CAPTURE_FIXTURES=1）仅隔离台路径可用" +
-      "（须与 --allow-seed 或 SUYOU_UI_CAPTURE_ALLOW_SEED=1 同现）。直连真控制台注入假票=污染真数据，绝不允许。");
+    console.error("[capture] 拒跑：状态注入（--fixtures / SANDBAR_UI_CAPTURE_FIXTURES=1）仅隔离台路径可用" +
+      "（须与 --allow-seed 或 SANDBAR_UI_CAPTURE_ALLOW_SEED=1 同现）。直连真控制台注入假票=污染真数据，绝不允许。");
     process.exit(2);
   }
   let fixtures = null;
@@ -865,7 +865,7 @@ async function main() {
     await page.emulateMedia(null).catch(() => {});
     // chat 态（打开已有会话）
     try {
-      const anchor = await navigateToChat(page, args.allowSeed || process.env.SUYOU_UI_CAPTURE_ALLOW_SEED === "1");
+      const anchor = await navigateToChat(page, args.allowSeed || process.env.SANDBAR_UI_CAPTURE_ALLOW_SEED === "1");
       await page.waitForLoadState("networkidle").catch(() => {});
       // 截后断言（t260901-03 Step ① 双保险）：截图时刻 DOM 必须零 dialog——
       // 有模态在场 = chat 证据被遮挡，按失败记，不静默出图。

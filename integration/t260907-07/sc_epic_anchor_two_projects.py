@@ -5,7 +5,7 @@
 intent（用户可感知行为，验收①②的校验面+工单正文 env 口径）：项目把立项单放自己
 主目录 notes/epics/ 时，CLI 开票校验（validate_epic_code×resolve_epics_dir）取
 **该项目**的立项单——外部项目不再误报「立项代号不存在」、引擎桶项目行为不变；
-env SUYOU_EPICS_DIR 覆盖保持「自测指向」语义（两项目同指 env 目录、优先于项目锚、
+env SANDBAR_EPICS_DIR 覆盖保持「自测指向」语义（两项目同指 env 目录、优先于项目锚、
 空串回落项目锚）；未知项目 key fail-closed（不静默退引擎仓）；env 指不存在目录
 报错可辨不崩（文案含「目录为空或不存在」）。
 
@@ -103,7 +103,7 @@ def main():
         os.makedirs(env_dir)
         with open(os.path.join(env_dir, "env-only.md"), "w") as f:
             f.write("# env-only\n")
-        os.environ["SUYOU_EPICS_DIR"] = env_dir
+        os.environ["SANDBAR_EPICS_DIR"] = env_dir
         try:
             check(resolve(eng_name) == pathlib.Path(env_dir)
                   and resolve(ext_name) == pathlib.Path(env_dir),
@@ -111,18 +111,18 @@ def main():
             check(shared.validate_epic_code("env-only", resolve(eng_name)) == "env-only",
                   "E2 env 桶档案经项目锚校验通过（env 现读生效）")
         finally:
-            os.environ.pop("SUYOU_EPICS_DIR", None)
+            os.environ.pop("SANDBAR_EPICS_DIR", None)
 
         # ---- F env 空串：回落项目锚（不落空路径） ----
-        os.environ["SUYOU_EPICS_DIR"] = ""
+        os.environ["SANDBAR_EPICS_DIR"] = ""
         try:
             check(resolve(eng_name) == pathlib.Path(eng_epics),
                   "F env 空串回落项目锚（不取空串当目录）")
         finally:
-            os.environ.pop("SUYOU_EPICS_DIR", None)
+            os.environ.pop("SANDBAR_EPICS_DIR", None)
 
         # ---- G env 指不存在目录：报错可辨不崩 ----
-        os.environ["SUYOU_EPICS_DIR"] = os.path.join(env_root, "not-exist")
+        os.environ["SANDBAR_EPICS_DIR"] = os.path.join(env_root, "not-exist")
         try:
             shared.validate_epic_code("gap-b", resolve(eng_name))
             g_ok, g_msg = False, "未拒收"
@@ -130,7 +130,7 @@ def main():
             g_msg = str(e)
             g_ok = "目录为空或不存在" in g_msg
         finally:
-            os.environ.pop("SUYOU_EPICS_DIR", None)
+            os.environ.pop("SANDBAR_EPICS_DIR", None)
         check(g_ok, "G env 指不存在目录：报错含「目录为空或不存在」", g_msg)
 
     print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (passed, failed, env_failed), flush=True)

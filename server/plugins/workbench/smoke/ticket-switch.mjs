@@ -80,7 +80,7 @@ writeFileSync(join(ARCHIVE, T1, 'evil.txt'), 'x')            // 非 png → 不�
 writeFileSync(join(ARCHIVE, T1, 'we ird.png'), 'x')          // 形状白名单外（含空格）→ 不入
 writeFileSync(join(REPO, '.worktrees', T1, '.suyou', 'screenshots', 'c.png'), 'x')
 writeFileSync(join(REPO, '.worktrees', T1, '.suyou', 'screenshots', 'nope.jpeg'), 'x')
-process.env.SUYOU_EVIDENCE_DIR = ARCHIVE
+process.env.SANDBAR_EVIDENCE_DIR = ARCHIVE
 
 section('B listEvidenceFiles：读序=归档→泳道，白名单过滤，去重排序')
 {
@@ -100,7 +100,7 @@ section('B2 软降级与防穿')
   ok((await listEvidenceFiles('', REPO)).length === 0, '空 id 被拒 → []')
   ok((await listEvidenceFiles('x'.repeat(200), REPO)).length === 0, '超长 id（RE 上限外）被拒 → []')
 }
-process.env.SUYOU_EVIDENCE_DIR = join(TMP_ROOT, 'does-not-exist')
+process.env.SANDBAR_EVIDENCE_DIR = join(TMP_ROOT, 'does-not-exist')
 section('B3 归档基目录不存在（env 指空处）仍走泳道候选')
 {
   const files = await listEvidenceFiles(T1, REPO)

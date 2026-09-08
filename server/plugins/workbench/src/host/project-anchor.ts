@@ -8,17 +8,17 @@
  * 供 node.ts 各路由逐请求取锚。
  *
  * 取舍清单（create_plan gen1 R1-① 评审定稿体例，实现照单落）：
- * - key 缺省/空白：回落 fallback（config.repo→SUYOU_REPO→DEFAULT_REPO 全链不变），
+ * - key 缺省/空白：回落 fallback（config.repo→SANDBAR_REPO→DEFAULT_REPO 全链不变），
  *   source='default'——兼容 viewProject 为空与老调用，sandbar 自身票行为不变。
- * - key 已注册：root=primaryDir(findProject(key))（suyou-projects.ts dirs[0]），
+ * - key 已注册：root=primaryDir(findProject(key))（project-registry.ts dirs[0]），
  *   source='project'。primaryDir 空串=注册条目残缺 → 显式 502（不回落：回落=
  *   数据串仓，比报错糟）。
  * - key 真未注册/形状非法：显式 400（同 tickets 路由白名单先例）——不静默回落，
  *   否则 diff 面闸会回「越出仓库根」，把根因（键解析失败）错引成穿越。
  * - 隔离条目 / 注册表装载失败：findProject throw → 显式 502 透传原文（不吞、
  *   不降级；隔离项目回落默认仓=读 sandbar 数据，违背隔离语义）。
- * - env 覆盖链红线（工单规格「旧 env 覆盖链保留」）：SUYOU_EPICS_DIR /
- *   SUYOU_EVIDENCE_DIR / SUYOU_EPIC_NEXT_DIR 三族**仅 source='default' 时生效**
+ * - env 覆盖链红线（工单规格「旧 env 覆盖链保留」）：SANDBAR_EPICS_DIR /
+ *   SANDBAR_EVIDENCE_DIR / SANDBAR_EPIC_NEXT_DIR 三族**仅 source='default' 时生效**
  *   （anchorEpicsDir / anchorEvidenceBase / anchorEpicNextDir 内收口）——项目根
  *   路径不走 env（env 指向引擎仓，per-project 时会串味）；默认仓路径 env 行为
  *   与既有完全一致（测试桩不受影响）。
@@ -27,7 +27,7 @@
  */
 
 import { join } from 'node:path'
-import { findProject, primaryDir, type ProjectEntry } from '../../../../suyou-projects.ts'
+import { findProject, primaryDir, type ProjectEntry } from '../../../../project-registry.ts'
 
 export type ProjectAnchor =
   | { ok: true; root: string; source: 'project' | 'default'; key: string | null }
@@ -76,16 +76,16 @@ export function anchorEnv(a: Extract<ProjectAnchor, { ok: true }>, name: string)
   return typeof v === 'string' && v !== '' ? v : null
 }
 
-/** 立项单目录：默认仓锚=SUYOU_EPICS_DIR 优先（epics.ts resolveEpicsDir 同款先例）；项目锚=<项目根>/notes/epics。 */
+/** 立项单目录：默认仓锚=SANDBAR_EPICS_DIR 优先（epics.ts resolveEpicsDir 同款先例）；项目锚=<项目根>/notes/epics。 */
 export function anchorEpicsDir(a: Extract<ProjectAnchor, { ok: true }>): string {
-  return anchorEnv(a, 'SUYOU_EPICS_DIR') ?? join(a.root, 'notes', 'epics')
+  return anchorEnv(a, 'SANDBAR_EPICS_DIR') ?? join(a.root, 'notes', 'epics')
 }
-/** 证据归档基目录：默认仓锚=SUYOU_EVIDENCE_DIR 优先（node.ts 既有先例）；项目锚=<项目根>/.suyou/evidence。 */
+/** 证据归档基目录：默认仓锚=SANDBAR_EVIDENCE_DIR 优先（node.ts 既有先例）；项目锚=<项目根>/.suyou/evidence。 */
 export function anchorEvidenceBase(a: Extract<ProjectAnchor, { ok: true }>): string {
-  return anchorEnv(a, 'SUYOU_EVIDENCE_DIR') ?? join(a.root, '.suyou', 'evidence')
+  return anchorEnv(a, 'SANDBAR_EVIDENCE_DIR') ?? join(a.root, '.suyou', 'evidence')
 }
 
-/** epic-next 作业根目录：默认仓锚=SUYOU_EPIC_NEXT_DIR 优先（epic-next.ts resolveEpicNextDir 同款）；项目锚=<项目根>/.suyou/epic-next。 */
+/** epic-next 作业根目录：默认仓锚=SANDBAR_EPIC_NEXT_DIR 优先（epic-next.ts resolveEpicNextDir 同款）；项目锚=<项目根>/.suyou/epic-next。 */
 export function anchorEpicNextDir(a: Extract<ProjectAnchor, { ok: true }>): string {
-  return anchorEnv(a, 'SUYOU_EPIC_NEXT_DIR') ?? join(a.root, '.suyou', 'epic-next')
+  return anchorEnv(a, 'SANDBAR_EPIC_NEXT_DIR') ?? join(a.root, '.suyou', 'epic-next')
 }

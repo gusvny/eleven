@@ -30,9 +30,9 @@
  *      half, which already creates a declared empty-write-set ticket; not duplicated.)
  *
  * Write-guard (this test refuses to touch production):
- *   SUYOU_TARGET_HOST unset            -> skip section E loudly (client.py would
+ *   SANDBAR_TARGET_HOST unset            -> skip section E loudly (client.py would
  *                                         default to production 127.0.0.1:7233).
- *   SUYOU_TARGET_HOST == 127.0.0.1:7233 -> FAIL this test itself.
+ *   SANDBAR_TARGET_HOST == 127.0.0.1:7233 -> FAIL this test itself.
  *   Section E is rejected pre-connect, so no Temporal instance needs to be up.
  *
  * Contract source: approved plan of t260901-01 (create_plan gen1, reviewed gen1).
@@ -185,8 +185,8 @@ print(json.dumps({"ok": True, "result": {"workflows": [{"id": "dev-lane", "name"
 sys.exit(0)
 `, 'utf8')
 
-  process.env.SUYOU_PROJECTS_YAML = join(tmp, 'server', 'projects.yaml')
-  process.env.SUYOU_EPICS_DIR = join(tmp, 'notes', 'epics')
+  process.env.SANDBAR_PROJECTS_YAML = join(tmp, 'server', 'projects.yaml')
+  process.env.SANDBAR_EPICS_DIR = join(tmp, 'notes', 'epics')
   process.env.STUB_REC = recFile
   const { apply } = await import(pathToFileURL(join(REPO, 'server', 'plugins', 'workbench', 'node.ts')).href)
   const routes = []
@@ -272,12 +272,12 @@ print('DDONE ' + json.dumps(out))
 /* ------------------------------------------------------------ E. env half: negative path (guarded) */
 section('E real client.py: empty write set WITHOUT declaration is rejected pre-connect (write-guarded)')
 {
-  const target = process.env.SUYOU_TARGET_HOST
+  const target = process.env.SANDBAR_TARGET_HOST
   if (target === PROD_ADDR) {
     fail++
-    console.error(`  FAIL write-guard: SUYOU_TARGET_HOST explicitly points at production default ${PROD_ADDR} -- refusing to run (red line: production is read-only)`)
+    console.error(`  FAIL write-guard: SANDBAR_TARGET_HOST explicitly points at production default ${PROD_ADDR} -- refusing to run (red line: production is read-only)`)
   } else if (target === undefined) {
-    skipped(`write-guard refused to run: SUYOU_TARGET_HOST not set explicitly (client.py would default to production ${PROD_ADDR}); set it to the test env address to enable`)
+    skipped(`write-guard refused to run: SANDBAR_TARGET_HOST not set explicitly (client.py would default to production ${PROD_ADDR}); set it to the test env address to enable`)
   } else {
     const py = probeSdkPython()
     if (!py) {
@@ -288,7 +288,7 @@ section('E real client.py: empty write set WITHOUT declaration is rejected pre-c
           ticket_id: `integ-ws-neg-${Date.now().toString(36)}`, template_id: 'dev-lane',
           project: 'suyou', title: 'should never be created (no write set, no declaration)',
         })],
-        { encoding: 'utf8', timeout: 120_000, env: { ...process.env, SUYOU_NAMESPACE: 'suyou-test' } })
+        { encoding: 'utf8', timeout: 120_000, env: { ...process.env, SANDBAR_NAMESPACE: 'suyou-test' } })
       let res = null
       try { res = JSON.parse(r.stdout ?? '') } catch { /* parse failure falls through */ }
       ok(res?.ok === false && String(res?.error ?? '').includes('写集为空'),

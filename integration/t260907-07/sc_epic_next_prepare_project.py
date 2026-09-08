@@ -5,7 +5,7 @@
 intent（用户可感知行为）：merge 收口的立项下一单预跑（prepare_epic_next）不再对外部
 项目静默跳过——带 project 时读到**该项目主目录**的立项全文（exists=True+全文匹配）；
 不串桶（engine 异名对 external 档案缺失 exists=False）；project 空=引擎锚兜底（在飞
-工单旧载荷兼容，真仓只读可验）且 env SUYOU_EPICS_DIR 优先于兜底命中（自测语义）；
+工单旧载荷兼容，真仓只读可验）且 env SANDBAR_EPICS_DIR 优先于兜底命中（自测语义）；
 档案缺失/代号形状非法 exists=False 软失败不炸（防穿回归）。
 
 与 selfcheck E 段（env 夹具单点自测）intent 不同面：本场景守 activity 入口×项目感知
@@ -81,7 +81,7 @@ def main():
     os.makedirs(env_dir)
     with open(os.path.join(env_dir, "env-only.md"), "w") as f:
         f.write(ENV_MD)
-    saved_env = os.environ.get("SUYOU_EPICS_DIR")
+    saved_env = os.environ.get("SANDBAR_EPICS_DIR")
     try:
         with fx.RegistryEnv() as reg:
             ext = fx.make_project(reg.root, "external")
@@ -104,12 +104,12 @@ def main():
             check(r.exists is False, "B engine 异名对 external 档案缺失 exists=False（不串桶）")
 
             # ---- C project 空：引擎锚兜底（真仓只读，缺档 exists=False 不炸） ----
-            os.environ.pop("SUYOU_EPICS_DIR", None)
+            os.environ.pop("SANDBAR_EPICS_DIR", None)
             r = prep("", "absent-code-no-such")
             check(r.exists is False, "C project 空=引擎锚兜底可达且缺档软失败（只读）")
 
             # ---- D env 优先于兜底：project 空 + env 夹具 → env 桶命中 ----
-            os.environ["SUYOU_EPICS_DIR"] = env_dir
+            os.environ["SANDBAR_EPICS_DIR"] = env_dir
             r = prep("", "env-only")
             check(r.exists and r.epic_markdown == ENV_MD,
                   "D project 空 + env 覆盖：env 桶命中（优先于引擎锚兜底）")
@@ -122,9 +122,9 @@ def main():
     finally:
         agent_activities._epic_ticket_rows = orig_rows
         if saved_env is None:
-            os.environ.pop("SUYOU_EPICS_DIR", None)
+            os.environ.pop("SANDBAR_EPICS_DIR", None)
         else:
-            os.environ["SUYOU_EPICS_DIR"] = saved_env
+            os.environ["SANDBAR_EPICS_DIR"] = saved_env
 
     print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (passed, failed, env_failed), flush=True)
     return 1 if failed else 0

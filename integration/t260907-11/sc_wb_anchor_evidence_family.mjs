@@ -1,6 +1,6 @@
 /**
  * sc_wb_anchor_evidence_family.mjs —— t260907-11 场景③（KI-057）：
- * 证据目录锚项目化——证据列表/取图按项目根取数，SUYOU_EVIDENCE_DIR 仅回落默认仓生效。
+ * 证据目录锚项目化——证据列表/取图按项目根取数，SANDBAR_EVIDENCE_DIR 仅回落默认仓生效。
  *
  * intent（用户可感知面）：宿主在 fpv 视图打开工单详情的「截图证据」区——列表列出
  * fpv 仓 .suyou/evidence 与 .worktrees 泳道两候选的截图，取图端点按 ?project= 从
@@ -48,14 +48,14 @@ try {
     j.ok(rMiss.status === 404, `sandbar 视图取图 → 404 不串项目（实得 ${rMiss.status}）`)
   }
 
-  // ── 腿C env 收窄：SUYOU_EVIDENCE_DIR 仅无参回落生效，per-project 不被串 ──
-  await fx.withEnv({ SUYOU_EVIDENCE_DIR: null }, async () => {
+  // ── 腿C env 收窄：SANDBAR_EVIDENCE_DIR 仅无参回落生效，per-project 不被串 ──
+  await fx.withEnv({ SANDBAR_EVIDENCE_DIR: null }, async () => {
     const envEv = join(fx.root, 'env-evidence')
     await mkdir(join(envEv, TID), { recursive: true })
     await writeFile(join(envEv, TID, 'env-shot.png'), 'png-bytes-env', 'utf8')
-    await fx.withEnv({ SUYOU_EVIDENCE_DIR: envEv }, async () => {
+    await fx.withEnv({ SANDBAR_EVIDENCE_DIR: envEv }, async () => {
       const rNo = await call(TICKETS_PREFIX, `${TICKETS_PREFIX}/${TID}/evidence`)
-      j.ok((rNo.body?.result?.files ?? []).includes('env-shot.png'), '无参回落：SUYOU_EVIDENCE_DIR 覆盖生效（旧 env 链保留）')
+      j.ok((rNo.body?.result?.files ?? []).includes('env-shot.png'), '无参回落：SANDBAR_EVIDENCE_DIR 覆盖生效（旧 env 链保留）')
       const rFpv = await call(TICKETS_PREFIX, `${TICKETS_PREFIX}/${TID}/evidence?project=fpv`)
       const files = rFpv.body?.result?.files ?? []
       j.ok(files.includes('shot-a.png') && !files.includes('env-shot.png'), 'per-project 证据不被 env 串味')

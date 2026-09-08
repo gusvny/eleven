@@ -74,9 +74,9 @@ for (const entry of ['ok.py', '/abs', '../up', 'C:/x', 'a\\b', '', 'x.py']) {
 /* ---------------- C. 泄漏回归：连续 5 次 STUB suggest job 全终态 ---------------- */
 console.log('C. epic-next 连续 5 次 suggest job（stub/failed 混合）无残留进程')
 const tmpRepo = await mkdtemp(path.join(tmpdir(), 'wb-write-lifecycle-'))
-process.env.SUYOU_EPIC_NEXT_DIR = path.join(tmpRepo, '.suyou', 'epic-next')
-process.env.SUYOU_EPIC_NEXT_STUB = 'ok'
-process.env.SUYOU_EPIC_NEXT_TIMEOUT_MS = '2000'
+process.env.SANDBAR_EPIC_NEXT_DIR = path.join(tmpRepo, '.suyou', 'epic-next')
+process.env.SANDBAR_EPIC_NEXT_STUB = 'ok'
+process.env.SANDBAR_EPIC_NEXT_TIMEOUT_MS = '2000'
 const { startSuggestJob, pollSuggestJob, resolveEpicNextDir } = await import('../src/host/epic-next.ts')
 const stubProcPids = []
 let leaked = 0
@@ -84,8 +84,8 @@ const variants = ['ok', 'invalid_json', 'never_write', 'ok', 'invalid_json']
 const epicMd = `# e-smoke\n\n测试立项\n`
 for (let i = 0; i < 5; i++) {
   const v = variants[i]
-  // SUYOU_EPIC_NEXT_STUB 的值即变体（1=ok 同义）：ok/invalid_json/never_write 混合
-  process.env.SUYOU_EPIC_NEXT_STUB = v
+  // SANDBAR_EPIC_NEXT_STUB 的值即变体（1=ok 同义）：ok/invalid_json/never_write 混合
+  process.env.SANDBAR_EPIC_NEXT_STUB = v
   const job = await startSuggestJob({
     repo: tmpRepo, code: `e-smoke-${i}`, epicTitle: 'E', epicMarkdown: epicMd,
     ticketsSummary: 'none', workflows: WF,

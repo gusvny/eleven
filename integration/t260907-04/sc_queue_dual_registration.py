@@ -8,7 +8,7 @@ intent（用户可感知契约：改名不弃旧，老 workflow 自然流干）�
   2. 工单专属 worker（新名列表 env SANDBAR_TASK_QUEUES）：同 tid 双前缀队列
      （sandbar-ticket-* + suyou-ticket-*）同 poll——在飞旧工单专属 worker 死后
      重启不搁浅（review gen0 缺口1 的正面回归）；
-  3. 仅旧名单值 env（SUYOU_TASK_QUEUE=suyou-ticket-<在飞id>）：旧世界重启路径
+  3. 仅旧名单值 env（SANDBAR_TASK_QUEUE=suyou-ticket-<在飞id>）：旧世界重启路径
      仍可服务（读侧兼容落到队列面）。
 
 舞台：stage_docker 单点搭台（docker 缺席/镜像缺席/起台不健康=ENV_FAIL exit 2，
@@ -33,7 +33,7 @@ PROJECT = "t26090704-queue"
 
 def clean_env(**kv):
     e = {k: v for k, v in os.environ.items()
-         if not (k.startswith("SUYOU_") or k.startswith("SANDBAR_"))}
+         if not (k.startswith("SANDBAR_") or k.startswith("SANDBAR_"))}
     e.update(kv)
     return e
 
@@ -95,7 +95,7 @@ def main():
     print("== 腿3 仅旧名单值 env（在飞旧工单重启路径）→ 服务旧前缀队列")
     out, rc = boot_worker({
         "TARGET_HOST": host, "NAMESPACE": ns,
-        "SUYOU_TASK_QUEUE": "suyou-ticket-t26090704old"})
+        "SANDBAR_TASK_QUEUE": "suyou-ticket-t26090704old"})
     r.check("suyou-ticket-t26090704old" in out,
             "旧名单值 env 下 worker poll 旧前缀队列（%s）"
             % ("suyou-ticket-t26090704old" in out))

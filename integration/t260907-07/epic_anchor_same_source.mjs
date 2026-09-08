@@ -11,7 +11,7 @@
  * Run: node integration/t260907-07/epic_anchor_same_source.mjs（cwd=仓库根）
  */
 import { resolveEpicsDir } from '../../server/plugins/workbench/src/host/epics.ts'
-import { findProject, primaryDir } from '../../server/suyou-projects.ts'
+import { findProject, primaryDir } from '../../server/project-registry.ts'
 import { makeEpicFixture, runPython } from './epic_fixture.mjs'
 
 const { ok, done } = (await import('../t260903-09/lib_integration.mjs')).makeChecker()
@@ -20,14 +20,14 @@ const fx = makeEpicFixture()
 try {
   // 同一注册表喂两边：TS 走进程 env（每次调用现读），Py 走子进程 env。
   process.env.SANDBAR_PROJECTS_DIR = fx.regRoot
-  delete process.env.SUYOU_EPICS_DIR
+  delete process.env.SANDBAR_EPICS_DIR
   const pyCode = `
 import sys, json
 sys.path.insert(0, ${JSON.stringify(new URL('../../server/engine', import.meta.url).pathname)})
 import shared
 print(json.dumps({k: str(shared.resolve_epics_dir(k)) for k in ('engine', 'external')}))
 `
-  const py = JSON.parse(runPython(pyCode, { ...fx.env, SUYOU_EPICS_DIR: '' }).trim())
+  const py = JSON.parse(runPython(pyCode, { ...fx.env, SANDBAR_EPICS_DIR: '' }).trim())
 
   for (const p of [fx.engine, fx.external]) {
     const tsDir = resolveEpicsDir(primaryDir(findProject(p.key)))

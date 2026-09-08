@@ -19,12 +19,12 @@ const { buildMetricsResponse, defaultDeps, engineVersionOf, SOURCE_VERSION } = a
 const { writeFile, mkdir } = await import('node:fs/promises')
 const { join } = await import('node:path')
 
-const savedStub = process.env.SUYOU_METRICS_STUB
-const savedDir = process.env.SUYOU_METRICS_DIR
+const savedStub = process.env.SANDBAR_METRICS_STUB
+const savedDir = process.env.SANDBAR_METRICS_DIR
 
-// 缓存目录布局（契约路径约定）：<SUYOU_METRICS_DIR>/<project>/data/metrics/
+// 缓存目录布局（契约路径约定）：<SANDBAR_METRICS_DIR>/<project>/data/metrics/
 async function mkCacheDir(prefix) {
-  // env 语义 = 根（SUYOU_METRICS_DIR），实现内部再拼 <project>/data/metrics/
+  // env 语义 = 根（SANDBAR_METRICS_DIR），实现内部再拼 <project>/data/metrics/
   const root = freshDir(prefix)
   const dir = join(root, 'demo', 'data', 'metrics')
   const { mkdir } = await import('node:fs/promises')
@@ -48,23 +48,23 @@ function recFor(id, t0, closedAt, extra = {}) {
 }
 
 const mkDeps = (stub, cacheRoot) => {
-  // env 先行：defaultDeps 在调用时读缝（SUYOU_METRICS_STUB），晚设就走真通路
-  process.env.SUYOU_METRICS_STUB = writeStub(freshDir('t09-fast-stub-'), stub)
-  process.env.SUYOU_METRICS_DIR = cacheRoot
+  // env 先行：defaultDeps 在调用时读缝（SANDBAR_METRICS_STUB），晚设就走真通路
+  process.env.SANDBAR_METRICS_STUB = writeStub(freshDir('t09-fast-stub-'), stub)
+  process.env.SANDBAR_METRICS_DIR = cacheRoot
   const deps = defaultDeps('/stub-repo', () => NOW)
   let spawnCount = 0
   const rawShow = deps.showTicket.bind(deps)
   deps.showTicket = async (id) => { spawnCount += 1; return rawShow(id) }
   deps.showTicketCount = () => spawnCount
-  return { deps, stubPath: process.env.SUYOU_METRICS_STUB, cacheRoot }
+  return { deps, stubPath: process.env.SANDBAR_METRICS_STUB, cacheRoot }
 }
 
 const withEnv = async (cacheRoot, stubPath, fn) => {
-  process.env.SUYOU_METRICS_DIR = cacheRoot
-  process.env.SUYOU_METRICS_STUB = stubPath
+  process.env.SANDBAR_METRICS_DIR = cacheRoot
+  process.env.SANDBAR_METRICS_STUB = stubPath
   try { return await fn() } finally {
-    delete process.env.SUYOU_METRICS_STUB
-    delete process.env.SUYOU_METRICS_DIR
+    delete process.env.SANDBAR_METRICS_STUB
+    delete process.env.SANDBAR_METRICS_DIR
   }
 }
 
@@ -166,6 +166,6 @@ const withEnv = async (cacheRoot, stubPath, fn) => {
   })
 }
 
-process.env.SUYOU_METRICS_STUB = savedStub
-process.env.SUYOU_METRICS_DIR = savedDir
+process.env.SANDBAR_METRICS_STUB = savedStub
+process.env.SANDBAR_METRICS_DIR = savedDir
 process.exit(summary('metrics-fast-path') ? 0 : 1)

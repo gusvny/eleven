@@ -181,7 +181,7 @@ project:
   无标记且根里有内容时分三类：盘上条目全是迁移源条目的精确字节子集 = 崩溃
   残留，续迁补齐并补标记；与迁移源零交集 = 人工注册表，接受；部分相关但不可
   复现 = 混合现场，fail-closed 抛错人工处置。不得静默跳过。
-- **legacy 兼容**：env `SUYOU_PROJECTS_YAML` 指向旧格式单文件时按旧格式装载
+- **legacy 兼容**：env `SANDBAR_PROJECTS_YAML` 指向旧格式单文件时按旧格式装载
   （行为与出仓前一致），优先级高于 per-key 目录模式。
 
 #### ①a-1 摘除 / 再接入 / 数据处置三态（schema v1，随 project-lifecycle 票② t260904-14 落地）
@@ -195,7 +195,7 @@ project:
 
 摘除命令的闸序（引擎与工具不得偏离，任一不过=fail-closed 拒摘、零现场变更）：
 
-1. **模式闸**：legacy 单文件模式（`SUYOU_PROJECTS_YAML` 在位）时**拒收**——退役/purge
+1. **模式闸**：legacy 单文件模式（`SANDBAR_PROJECTS_YAML` 在位）时**拒收**——退役/purge
    写的是 per-key 目录，运行时读不到=假成功摘除（与 add 同因同构）。
 2. **在飞闸**：Temporal 按 `ProjectKey` 查 running 票，非空=拒摘并逐条报票号；
    Temporal 不可达（含 SDK 缺失）=fail-closed 拒摘、**无绕过旗**（要摘先起 server）。
@@ -357,7 +357,7 @@ cwd（泳道 worktree）** 解析——保「worktree 内副本 = 工单快照�
 内容；若需表内容 fail-closed，另立工单升语义。
 
 **过渡状态**：现行注册表装载器（`server/tools/ticket.py` 条目解析顶层白名单
-只认 `schema:` 与 `project:`；`server/suyou-projects.ts` 同构）对顶层
+只认 `schema:` 与 `project:`；`server/project-registry.ts` 同构）对顶层
 `paths:` 节按「顶层只认两键」拒收——放开工单落地前，任何项目声明 paths 即被
 ①a 单条目隔离（fail-closed 可见，不静默）。**本节语义以装载器放开工单落地为
 生效前提**；suyou 不声明 paths，不受影响。引擎侧消费点（spawn 取角色目录与
@@ -402,7 +402,7 @@ cwd（泳道 worktree）** 解析——保「worktree 内副本 = 工单快照�
 | `schema` | 裸 token，支持集 {v1} | 语法版本声明 | 畸形（版本是接入前提，不猜） |
 | `lanes.code.write_allow` | 非空前缀/路径列表（块列表或行内 `[...]`） | code 道写集白名单粗判据；合并闸传工单 write_set 时按工单精判，此处兜手动调用。`.suyou/`、`.dsh/` 引擎运行时目录一律不判 | 畸形（声明 code 道即须声明写集边界，不猜） |
 | `lanes.code.checks` | 非空列表 `[{id, cmd, cwd?, timeout?}]`（**列表命令制**，无类型词表） | code 道命令检查：`id`=人读名；`cmd` 经 `/bin/sh -c` 执行，exit 非零=红；`cwd` 相对声明根（缺省 `.`）；`timeout` 秒（缺省 600）。各条并行跑 | 该项关闭（整键可省略；在位而结构不合法=畸形） |
-| `integration.cmd` | 非空字符串（一条命令） | integration 道唯一声明：引擎 `/bin/sh -c`、cwd=声明根执行；红绿判据=退出码 + ②b 三行协议解析；整体超时 env `SUYOU_INTEG_BATCH_TIMEOUT_SEC`（缺省 5400） | integration 段整体缺失 = integration 道 fail-closed（②b：本道无「缺失=关闭」态）；段在位而 `cmd` 缺失或为空 = 畸形 fail-closed |
+| `integration.cmd` | 非空字符串（一条命令） | integration 道唯一声明：引擎 `/bin/sh -c`、cwd=声明根执行；红绿判据=退出码 + ②b 三行协议解析；整体超时 env `SANDBAR_INTEG_BATCH_TIMEOUT_SEC`（缺省 5400） | integration 段整体缺失 = integration 道 fail-closed（②b：本道无「缺失=关闭」态）；段在位而 `cmd` 缺失或为空 = 畸形 fail-closed |
 | `integration.supply` | 可选列表 `[{need, cmd, cwd?, timeout?}]`（t260904-12 供给声明制，定稿 §7.4） | 集成测试环境供给：`need`=人读缺口名；`cmd`=一条**幂等装配命令**，引擎在 integration.cmd 之前执行（v2.1 起已实现），失败/超时=显式红并点名 need（不静默继续）；`cwd` 相对声明根（缺省 `.`）；`timeout` 秒（缺省 900） | **键缺失 = 零声明合法空**（无供给需求项目不声明；场景内 precheck 兜底失败自然 ENV_FAIL 可见，②b-1） |
 | `ui_evidence` | 可选映射 `{dirs, supply?}`（t260904-18 KI-050 声明制；`dirs`=非空字符串列表，UI 截图证据目录（仓库相对前缀）；`supply`=**保留字段，本版引擎不消费**，声明不构成截图供给保障） | 合并闸 UI 截图证据的目录口径：merge_check 3.6 与 ui_changed_paths 以「实际 diff 路径 × dirs」判 UI 票并查 `.suyou/screenshots/` 截图证据；替代旧引擎侧 `UI_WRITE_PREFIXES` 五路径硬编码（该常量仅剩旧票重放/冻结分支兼容回落，不再是活路径真源） | **键缺失 = 截图证据项按项目声明缺席**：merge_check 3.6 出该项 green+可见 note（非 SKIP 非假绿，行为可见）；`ui_evidence` 在位而形状非法（非映射 / dirs 缺失或非非空字符串列表）= 畸形 fail-closed 红（verify_lane `_validate_cfg` 与 merge_check 3.6 双点拦截；畸形 ≠ 缺省） |
 

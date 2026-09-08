@@ -7,10 +7,10 @@
  *      结构）；非法行/缩进/键重复/带引号值 → RoutesParseError 带行号（不静默丢）。
  *   B. effectiveRoute：查表链路 tasks.<kind> → roles.<role> → default；条目缺
  *      provider/model → 告警并向上落；全落空 → null。
- *   D. buildRoutesView 对真源（model-routes.yaml + suyou-integration preset）钉当前值：
+ *   D. buildRoutesView 对真源（model-routes.yaml + sandbar-integration preset）钉当前值：
  *      默认 kimi-coding/k3、integration=zai/glm-5.2、product-operation 分工=zai/glm-5.2、
  *      8 个 dispatch 实例（5 默认 + 3 分工）、只读口径——防 gen.py/路由表漂移。
- *   E. /suyou-admin/api/routes 路由（node.ts apply + mock webServer/req/res）：
+ *   E. /sandbar-admin/api/routes 路由（node.ts apply + mock webServer/req/res）：
  *      临时 repo 布局 → 200 路由表+实例；路由表缺失 → 200 ok+uninitialized 引导态
  *      （t260906-01）；POST /routes/init 从引擎默认表生成（已存在拒收、建父目录）。
  */
@@ -145,7 +145,7 @@ section('D buildRoutesView 对真源钉当前值（防路由表漂移）')
 
 /* ------------------------------------------------------------ E. 路由 */
 
-section('E /suyou-admin/api/routes 路由（mock webServer）')
+section('E /sandbar-admin/api/routes 路由（mock webServer）')
 {
   const tmp = await mkdtemp(join(tmpdir(), 'syadm-routes-'))
   try {
@@ -162,10 +162,10 @@ section('E /suyou-admin/api/routes 路由（mock webServer）')
       on: () => () => {},
     }
     apply(ctx, { repo })
-    const route = routes.find(x => x.kind === 'exact' && x.path === '/suyou-admin/api/routes')
+    const route = routes.find(x => x.kind === 'exact' && x.path === '/sandbar-admin/api/routes')
     ok(route !== undefined, 'routes exact 路由已挂')
 
-    // 注册表夹具（SUYOU_PROJECTS_YAML legacy 单文件模式，loadRegistry 每次现读 env）：
+    // 注册表夹具（SANDBAR_PROJECTS_YAML legacy 单文件模式，loadRegistry 每次现读 env）：
     // projOf 需要已注册项目；三个 key 各指一个主目录（有表 / 无表 / 深层无父目录）。
     // 先 import 后设 env 依赖此口径。
     const fixtureReg = join(tmp, 'projects.yaml')
@@ -173,14 +173,14 @@ section('E /suyou-admin/api/routes 路由（mock webServer）')
       `projects:\n  - key: demo\n    name: Demo\n    dirs:\n      - ${repo}`
       + `\n  - key: empty\n    name: Empty\n    dirs:\n      - ${join(tmp, 'repo-empty')}`
       + `\n  - key: deep\n    name: Deep\n    dirs:\n      - ${join(tmp, 'repo-empty2')}\n`, 'utf8')
-    process.env.SUYOU_PROJECTS_YAML = fixtureReg
+    process.env.SANDBAR_PROJECTS_YAML = fixtureReg
 
     const res = {
       status: 0, body: null,
       writeHead(s) { this.status = s },
       end(b) { this.body = b ? JSON.parse(b) : null },
     }
-    await route.handler({ url: '/suyou-admin/api/routes?project=demo', method: 'GET' }, res)
+    await route.handler({ url: '/sandbar-admin/api/routes?project=demo', method: 'GET' }, res)
     ok(res.status === 200 && res.body.ok === true, 'GET 200')
     ok(res.body.result.roles.length === 3, '路由表 3 角色')
     ok(res.body.result.default.provider === 'zai', 'default 透传')
@@ -196,13 +196,13 @@ section('E /suyou-admin/api/routes 路由（mock webServer）')
     }
     await mkdir(join(tmp, 'repo-empty', 'server'), { recursive: true })
     apply(ctx2, { repo: join(tmp, 'repo-empty') })
-    const route2 = routes2.find(x => x.kind === 'exact' && x.path === '/suyou-admin/api/routes')
+    const route2 = routes2.find(x => x.kind === 'exact' && x.path === '/sandbar-admin/api/routes')
     const res2 = {
       status: 0, body: null,
       writeHead(s) { this.status = s },
       end(b) { this.body = b ? JSON.parse(b) : null },
     }
-    await route2.handler({ url: '/suyou-admin/api/routes?project=empty', method: 'GET' }, res2)
+    await route2.handler({ url: '/sandbar-admin/api/routes?project=empty', method: 'GET' }, res2)
     // t260906-01：表缺失=未初始化引导态（非错误）——uninitialized:true + 模板来源
     ok(res2.status === 200 && res2.body.ok === true
       && res2.body.result.uninitialized === true
@@ -211,33 +211,33 @@ section('E /suyou-admin/api/routes 路由（mock webServer）')
       '路由表缺失 → 200 ok + uninitialized 引导态（不抛错不红）')
 
     // t260906-01 init 端点：无表 → 从引擎默认表生成；已有表 → 拒收（零覆盖）
-    const initRoute = routes2.find(x => x.kind === 'exact' && x.path === '/suyou-admin/api/routes/init')
+    const initRoute = routes2.find(x => x.kind === 'exact' && x.path === '/sandbar-admin/api/routes/init')
     ok(initRoute !== undefined, 'routes/init exact 路由已挂')
     const res3 = { status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } }
-    await initRoute.handler({ url: '/suyou-admin/api/routes/init?project=empty', method: 'POST' }, res3)
+    await initRoute.handler({ url: '/sandbar-admin/api/routes/init?project=empty', method: 'POST' }, res3)
     ok(res3.status === 200 && res3.body.ok === true && res3.body.result.routes_file.includes('model-routes.yaml'),
       'init POST（无表）→ 200 ok，默认表已生成')
     const initedText = await readFile(join(tmp, 'repo-empty', 'server', 'model-routes.yaml'), 'utf8')
     const engineText = await readFile(join(REPO, 'server', 'model-routes.yaml'), 'utf8')
     ok(initedText === engineText, '生成的表=引擎仓真源逐字节一致（同源模板）')
     const res4 = { status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } }
-    await initRoute.handler({ url: '/suyou-admin/api/routes/init?project=empty', method: 'POST' }, res4)
+    await initRoute.handler({ url: '/sandbar-admin/api/routes/init?project=empty', method: 'POST' }, res4)
     ok(res4.status === 200 && res4.body.ok === false && (res4.body.error ?? '').includes('已存在'),
       'init 对已存在表 → 200 ok:false（零覆盖拒收）')
     // 深层父目录：init 建父目录（repo-empty2 完全无 server 层级）
     const res5 = { status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } }
-    const req5 = { url: '/suyou-admin/api/routes/init?project=deep', method: 'POST', [Symbol.asyncIterator]: async function* () { yield Buffer.from('{}', 'utf8') } }
+    const req5 = { url: '/sandbar-admin/api/routes/init?project=deep', method: 'POST', [Symbol.asyncIterator]: async function* () { yield Buffer.from('{}', 'utf8') } }
     apply(ctx2, { repo: join(tmp, 'repo-empty2') })
-    const initRoute2 = routes2.filter(x => x.path === '/suyou-admin/api/routes/init').pop()
+    const initRoute2 = routes2.filter(x => x.path === '/sandbar-admin/api/routes/init').pop()
     await initRoute2.handler(req5, res5)
     ok(res5.status === 200 && res5.body.ok === true
       && (await readFile(join(tmp, 'repo-empty2', 'server', 'model-routes.yaml'), 'utf8')) === engineText,
       'init 对深层缺失父目录 → mkdir 递归后生成')
     const res6 = { status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } }
-    await initRoute2.handler({ url: '/suyou-admin/api/routes/init?project=deep', method: 'GET' }, res6)
+    await initRoute2.handler({ url: '/sandbar-admin/api/routes/init?project=deep', method: 'GET' }, res6)
     ok(res6.status === 405, 'init GET → 405')
   } finally {
-    delete process.env.SUYOU_PROJECTS_YAML
+    delete process.env.SANDBAR_PROJECTS_YAML
     await rm(tmp, { recursive: true, force: true })
   }
 }
@@ -357,7 +357,7 @@ roles:
 
 /* ------------------------------------------------------------ H. 保存端点（M13） */
 
-section('H POST /suyou-admin/api/routes/save（mock webServer + 临时 repo）')
+section('H POST /sandbar-admin/api/routes/save（mock webServer + 临时 repo）')
 {
   const tmp = await mkdtemp(join(tmpdir(), 'syadm-routes-save-'))
   try {
@@ -375,19 +375,19 @@ section('H POST /suyou-admin/api/routes/save（mock webServer + 临时 repo）')
       on: () => () => {},
     }
     apply(ctx, { repo })
-    const route = routes.find(x => x.kind === 'exact' && x.path === '/suyou-admin/api/routes/save')
+    const route = routes.find(x => x.kind === 'exact' && x.path === '/sandbar-admin/api/routes/save')
     ok(route !== undefined, 'save exact 路由已挂')
 
     // 注册表夹具（同 E 段口径）：projOf 需要已注册项目，主目录=临时 repo。
     const fixtureReg = join(tmp, 'projects.yaml')
     await writeFile(fixtureReg, `projects:\n  - key: demo\n    name: Demo\n    dirs:\n      - ${repo}\n`, 'utf8')
-    process.env.SUYOU_PROJECTS_YAML = fixtureReg
+    process.env.SANDBAR_PROJECTS_YAML = fixtureReg
 
     const res = () => ({ status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } })
     const call = async (body) => {
       const r = res()
       const req = {
-        url: '/suyou-admin/api/routes/save?project=demo',
+        url: '/sandbar-admin/api/routes/save?project=demo',
         method: 'POST',
         [Symbol.asyncIterator]: async function* () { yield Buffer.from(JSON.stringify(body ?? {}), 'utf8') },
       }
@@ -433,7 +433,7 @@ section('H POST /suyou-admin/api/routes/save（mock webServer + 临时 repo）')
     const r4 = await call({})
     ok(r4.status === 400, '缺 table → 400')
   } finally {
-    delete process.env.SUYOU_PROJECTS_YAML
+    delete process.env.SANDBAR_PROJECTS_YAML
 
     await rm(tmp, { recursive: true, force: true })
   }

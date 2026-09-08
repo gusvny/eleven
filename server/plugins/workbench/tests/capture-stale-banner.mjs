@@ -37,10 +37,9 @@ function pickFreePort() {
   })
 }
 
-// SUYOU_CONSOLE_CMD 名是历史欠账不动（工单原则）；默认 'dsh --profile suyou' 实测
-// 仍通：~/.dsh/profiles/suyou 软链已指向 sandbar 仓 server/profile（260907 复核）。
-const consoleCmd = (process.env.SUYOU_CONSOLE_CMD || 'dsh --profile suyou').split(' ')
-const tmpHome = mkdtempSync(join(tmpdir(), 'suyou-stale-banner-'))
+// 默认 'dsh --profile sandbar'（260908 终切：旧名链已删，正身链指向 server/profile）。
+const consoleCmd = (process.env.SANDBAR_CONSOLE_CMD || 'dsh --profile sandbar').split(' ')
+const tmpHome = mkdtempSync(join(tmpdir(), 'sandbar-stale-banner-'))
 /** fixture repo：泳道 workbench 的真拷贝（src/lib/node.ts），boot 指纹算它。 */
 const fixtureRepo = join(tmpHome, 'repo')
 let proc = null, logFd = null, tornDown = false
@@ -68,20 +67,20 @@ async function waitReady(port, timeoutMs, logPath) {
 }
 
 // playwright 加载：候选=本泳道 ui-check/node_modules（泳道 checkout 常不装，KI-036②）
-// → SUYOU_PLAYWRIGHT_MODULE 指主树 playwright-core 包目录（既有 env，capture-lane
+// → SANDBAR_PLAYWRIGHT_MODULE 指主树 playwright-core 包目录（既有 env，capture-lane
 // 已会传，非本票新增）。镜像 capture.mjs loadPlaywright 先例（t260901-03）。
 async function loadPlaywright() {
   const candidates = [
     join(LANE, 'server', 'ui-check', 'node_modules', 'playwright-core'),
   ]
-  if (process.env.SUYOU_PLAYWRIGHT_MODULE) candidates.push(process.env.SUYOU_PLAYWRIGHT_MODULE)
+  if (process.env.SANDBAR_PLAYWRIGHT_MODULE) candidates.push(process.env.SANDBAR_PLAYWRIGHT_MODULE)
   for (const dir of candidates) {
     if (!existsSync(join(dir, 'index.js'))) continue
     const mod = await import(pathToFileURL(join(dir, 'index.js')).href)
     return mod.default ?? mod // CJS 包经 ESM import 时导出在 default 下
   }
   throw new Error('playwright-core 未找到：先在 server/ui-check/ 下 npm install，'
-    + '或设 SUYOU_PLAYWRIGHT_MODULE 指向主树的 playwright-core 包目录')
+    + '或设 SANDBAR_PLAYWRIGHT_MODULE 指向主树的 playwright-core 包目录')
 }
 
 async function main() {
@@ -103,8 +102,8 @@ async function main() {
     copyFileSync(join(userDsh, '.credentials.yaml'), join(tmpHome, '.credentials.yaml'))
   }
   await buildTempProfile(tmpHome, fixtureWb)
-  const presetSrc = process.env.SUYOU_CAPTURE_PRESET_SOURCE
-    || join(process.env.HOME || '', '.dsh', '.agent-presets', 'suyou-integration')
+  const presetSrc = process.env.SANDBAR_CAPTURE_PRESET_SOURCE
+    || join(process.env.HOME || '', '.dsh', '.agent-presets', 'sandbar-integration')
   const presetReject = presetMaterializeRejectReason(presetSrc)
   if (presetReject) { console.error(`[capture-stale-banner] 拒跑：${presetReject}`); process.exit(2) }
   await materializePresets(tmpHome, presetSrc)
@@ -120,12 +119,12 @@ async function main() {
     env: {
       ...process.env,
       DSH_HOME: tmpHome,
-      SUYOU_TARGET_HOST: process.env.SUYOU_CAPTURE_TARGET_HOST
-        || process.env.SUYOU_TARGET_HOST || '127.0.0.1:17233',
+      SANDBAR_TARGET_HOST: process.env.SANDBAR_CAPTURE_TARGET_HOST
+        || process.env.SANDBAR_TARGET_HOST || '127.0.0.1:17233',
     },
     detached: true, stdio: ['ignore', logFd, logFd],
   })
-  await waitReady(port, Number(process.env.SUYOU_STALE_BOOT_MS || 90000), join(tmpHome, 'console.log'))
+  await waitReady(port, Number(process.env.SANDBAR_STALE_BOOT_MS || 90000), join(tmpHome, 'console.log'))
   console.log(`[capture-stale-banner] 隔离台就绪：127.0.0.1:${port}`)
   await new Promise(r => setTimeout(r, 1500))
   try {

@@ -2,7 +2,7 @@
  * smoke/projects.mjs —— 项目注册表解析器纯函数冒烟。
  *
  * 直跑：node smoke/projects.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * 覆盖 suyou-projects.ts parseProjectsYaml：
+ * 覆盖 project-registry.ts parseProjectsYaml：
  *   A. 标准单项目（含注释/空行）→ key/name/dirs 解析正确。
  *   B. 多项目 + 多目录（1:N）→ 顺序与归属正确。
  *   C. 写坏的形状一律抛错：缺 projects: 根 / dirs 相对路径 / 缺 name / 缺 dirs / key 重复 /
@@ -10,7 +10,7 @@
  *   D. PROJECT_KEY_RE 边界。
  */
 
-import { parseProjectsYaml, PROJECT_KEY_RE } from '../../../suyou-projects.ts'
+import { parseProjectsYaml, PROJECT_KEY_RE } from '../../../project-registry.ts'
 
 let passed = 0
 let failed = 0

@@ -34,8 +34,8 @@ if (cred && !perkeyIsHit("suyou", cred)) {
 }
 if (cred) await copyFileP(cred, path.join(tmpHome, ".credentials.yaml")).catch(() => {});
 await buildTempProfile(tmpHome, laneWb);
-const psrc = process.env.SUYOU_CAPTURE_PRESET_SOURCE
-  || path.join(process.env.HOME || "", ".dsh", ".agent-presets", "suyou-integration");
+const psrc = process.env.SANDBAR_CAPTURE_PRESET_SOURCE
+  || path.join(process.env.HOME || "", ".dsh", ".agent-presets", "sandbar-integration");
 if (presetMaterializeRejectReason(psrc)) throw new Error("preset 源缺失");
 await materializePresets(tmpHome, psrc);
 const logFd = openSync(path.join(tmpHome, "console.log"), "a");

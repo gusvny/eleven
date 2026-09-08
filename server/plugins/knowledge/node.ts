@@ -44,7 +44,7 @@ import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
-import { findProject, primaryDir, type ProjectEntry } from '../../suyou-projects.ts'
+import { findProject, primaryDir, type ProjectEntry } from '../../project-registry.ts'
 import { diffBlocks } from './src/shared/blocks.ts'
 import {
   CONCLUDES, appendReviewRound, loadReview,
@@ -99,13 +99,13 @@ async function readJsonBody(req: IncomingMessage): Promise<any> {
 }
 
 export function apply(ctx: Context, config?: SuyouKnowledgeConfig): void {
-  const repo = config?.repo ?? process.env.SUYOU_REPO ?? DEFAULT_REPO
+  const repo = config?.repo ?? process.env.SANDBAR_REPO ?? DEFAULT_REPO
   const python = config?.python ?? 'python3'
   const timeoutMs = config?.timeoutMs ?? 30_000
 
   /**
    * project 解析（全部路由共用）：?project=<key> 或 body.project，必传、无默认值。
-   * 缺/形状不合法/未注册 → 回 400 并返回 null。注册表每请求现读（suyou-projects.ts）。
+   * 缺/形状不合法/未注册 → 回 400 并返回 null。注册表每请求现读（project-registry.ts）。
    */
   function projOf(req: IncomingMessage, res: ServerResponse, body?: any): ProjectEntry | null {
     const url = new URL(req.url ?? '/', 'http://x')

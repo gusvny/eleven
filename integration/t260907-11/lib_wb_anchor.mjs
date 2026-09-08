@@ -6,7 +6,7 @@
  * 各放一份（撞码面）。驱动=smoke/changes.mjs 先例：apply(ctx,{repo})+mock webServer
  * 收路由+mock req/res 直调 handler——零端口零 Temporal 零 3099/7233 接触。
  *
- * 注册表 env 每次调用现读（suyou-projects.ts registryRoot），进程内改 env 即刻生效；
+ * 注册表 env 每次调用现读（project-registry.ts registryRoot），进程内改 env 即刻生效；
  * withEnv 负责保存/恢复，场景退出必还原。
  *
  * 三态退出码（t260904-12 契约，「闸内无 SKIP」）：全过 exit 0；有 FAIL exit 1；

@@ -20,7 +20,7 @@ import { execFile } from 'node:child_process'
 import { readdir, stat } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
-import { resolveSuyouBaseDir, _describeAction, _parseArgs } from './agent-logs.ts'
+import { resolveAgentBaseDir, _describeAction, _parseArgs } from './agent-logs.ts'
 
 const execFileP = promisify(execFile)
 
@@ -77,8 +77,8 @@ function isWithin(root: string, target: string): boolean {
 }
 
 /**
- * 按工单定会话文件（只读，防穿仿 resolveSuyouBaseDir）：
- *  1. resolveSuyouBaseDir 定工作空间根（泳道必须在 repo 内；越界 → refused）；
+ * 按工单定会话文件（只读，防穿仿 resolveAgentBaseDir）：
+ *  1. resolveAgentBaseDir 定工作空间根（泳道必须在 repo 内；越界 → refused）；
  *  2. sessRoot = <wsRoot>/.dsh/sessions，遍历其下 slug 目录，收集目录名以
  *     `<工单id>-` 开头（或恰等于工单 id）的会话目录里的 session.jsonl.zstd；
  *  3. ticket.role 非空时优先精确匹配 `<工单id>-<角色>`，否则取 mtime 最新
@@ -91,7 +91,7 @@ export async function resolveSessionFile(
   ticket: { worktree?: string; workspace?: { type?: string; path?: string } | null; role?: string } | null,
   extraRoots: readonly string[] = [],
 ): Promise<SessionFileRef> {
-  const { base, reason } = resolveSuyouBaseDir(repo, ticketId, ticket, extraRoots)
+  const { base, reason } = resolveAgentBaseDir(repo, ticketId, ticket, extraRoots)
   if (base === '') {
     return { refused: true, reason: reason ?? '工单工作区定位失败（拒绝读取）' }
   }

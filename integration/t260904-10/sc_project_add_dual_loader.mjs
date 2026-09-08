@@ -2,7 +2,7 @@
 //
 // intent（用户可感知行为）：宿主用 `sandbar project add` 接入一个项目后，该条目立即被
 // 两侧装载器一致消费——Python（shared.load_projects_registry，工单锚定闸的数据源）
-// 与 TS（suyou-projects.ts loadRegistry，workbench API 消费方）装载出同一条目
+// 与 TS（project-registry.ts loadRegistry，workbench API 消费方）装载出同一条目
 // （key/name/dirs 全等）、零隔离；既有条目（tracked 迁移种子产出的 suyou）字节不动
 // （决策7 现状不动账）；写入零 tmp 残留；体检报告三词汇（verify.yaml/credentials/paths）
 // 在文且不阻塞。
@@ -85,7 +85,7 @@ c.check('既有条目集合不变（新增恰两条 fixture）',
 
 // ---- 6. TS 侧同构装载（同一隔离根） ----
 process.env.SANDBAR_PROJECTS_DIR = root; // TS registryRoot() 每调用现读 env（模块头注契约）
-const ts = await import(pathToFileURL(path.join(REPO_ROOT, 'server', 'suyou-projects.ts')).href);
+const ts = await import(pathToFileURL(path.join(REPO_ROOT, 'server', 'project-registry.ts')).href);
 const reg = ts.loadRegistry();
 const tsKeys = reg.projects.map((p) => p.key);
 c.check('TS 侧装载出全部新条目',

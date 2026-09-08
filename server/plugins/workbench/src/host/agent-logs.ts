@@ -10,9 +10,9 @@
  *                                files_changed, evidence}，幂等锚点）。
  *
  * 本模块做两件事（纯函数/只读，可被 smoke 直测）：
- *   A. resolveSuyouBaseDir —— 从工单字段（worktree / workspace）定 agent 日志目录：
+ *   A. resolveAgentBaseDir —— 从工单字段（worktree / workspace）定 agent 日志目录：
  *      泳道工单 → <repo>/<worktree>/.suyou（路径必须在 repo 内，防穿）；
- *      主树道工单（无泳道）→ /tmp/suyou-ws/<id>/.suyou（agent 隔离目录，M4 契约）。
+ *      主树道工单（无泳道）→ /tmp/sandbar-ws/<id>/.sandbar（agent 隔离目录，M4 契约；260908 终切前旧形态见引擎 ws_dir_path）。
  *   B. listAgentLogs —— 列目录内 agent_*.log / stage_*.json（按 (stage, gen) 序），
  *      逐文件带尺寸/时间 + 内容（log 取尾部、result 解析 JSON；封顶防大文件拖垮面板）。
  *      目录不存在/无文件 → exists=false + 人话 reason（降级不抛错）。
@@ -83,7 +83,7 @@ function isWithin(root: string, target: string): boolean {
  *  - workspace.type=dir 且 path 是 /tmp/suyou-ws/ 前缀（agent 隔离目录，M4）→ path/.suyou；
  *  - 全无 → /tmp/suyou-ws/<id>/.suyou 兜底（主树道 v2 工单的默认隔离目录），附 reason 说明。
  */
-export function resolveSuyouBaseDir(
+export function resolveAgentBaseDir(
   repo: string,
   ticketId: string,
   ticket: { worktree?: string; workspace?: { type?: string; path?: string } | null } | null,

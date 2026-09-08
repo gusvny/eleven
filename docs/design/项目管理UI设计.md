@@ -81,7 +81,7 @@ sandbar 的项目注册表（`~/.sandbar/projects/<key>/project.yaml`，契约 �
 
 ### spawn 薄壳故障模式口径（runProjectCli，取舍真源=create_plan gen1 R1-①）
 
-repo 锚定=node.ts `config?.repo ?? SUYOU_REPO ?? DEFAULT_REPO` 同源传入（cwd=repo、entry=`<repo>/sandbar`，
+repo 锚定=node.ts `config?.repo ?? SANDBAR_REPO ?? DEFAULT_REPO` 同源传入（cwd=repo、entry=`<repo>/sandbar`，
 防异仓执行错注册表）；超时 30s（非 admin CLI 的 300s），文案点名「CLI 执行超时」；四终态全回收——正常=解析
 stdout，超时=SIGTERM+await exit 转 504，取消=AbortSignal 转 499（均不留僵尸，UT 断言用时）；stdout 畸形/
 超 16MB=转 502 精确文案不裸抛堆栈。**非零退出按 exit 码分流**（arbitrate gen1 F3 定稿）：

@@ -91,7 +91,7 @@ asyncio.run(main())
 
 def env_for(host, ns):
     e = {k: v for k, v in os.environ.items()
-         if not (k.startswith("SUYOU_") or k.startswith("SANDBAR_"))}
+         if not (k.startswith("SANDBAR_") or k.startswith("SANDBAR_"))}
     e["TARGET_HOST"] = host
     e["NAMESPACE"] = ns
     return e

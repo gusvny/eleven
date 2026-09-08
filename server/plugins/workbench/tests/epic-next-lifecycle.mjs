@@ -20,7 +20,7 @@
  *       assertions (no leaked dummy agent processes).
  *
  * What "stub-driven" means: the suggest job normally spawns a real LLM agent (slow,
- * non-deterministic, costly). Setting SUYOU_EPIC_NEXT_STUB makes startSuggestJob skip
+ * non-deterministic, costly). Setting SANDBAR_EPIC_NEXT_STUB makes startSuggestJob skip
  * the agent spawn and write a canned result.json instead (variants: ok / invalid_json
  * / never_write), while keeping the polling, validation, and process-reaping paths
  * identical to production — so the whole lifecycle is exercised deterministically
@@ -34,7 +34,7 @@
  * badge-off on successful prefilled creation, dismiss idempotency + backup.
  *
  * Note: the precache dir is <repo>/.suyou/epic-next by design (resolvePrecacheDir
- * ignores env; SUYOU_EPIC_NEXT_DIR only isolates job dirs).
+ * ignores env; SANDBAR_EPIC_NEXT_DIR only isolates job dirs).
  */
 
 import { spawnSync } from 'node:child_process'
@@ -60,11 +60,11 @@ const repo = join(tmp, 'repo')
 const epicsDir = join(repo, 'notes', 'epics')
 const jobsDir = join(tmp, 'jobs')
 const savedEnv = {
-  SUYOU_EPIC_NEXT_DIR: process.env.SUYOU_EPIC_NEXT_DIR,
-  SUYOU_EPIC_NEXT_STUB: process.env.SUYOU_EPIC_NEXT_STUB,
-  SUYOU_EPIC_NEXT_TIMEOUT_MS: process.env.SUYOU_EPIC_NEXT_TIMEOUT_MS,
-  SUYOU_EPICS_DIR: process.env.SUYOU_EPICS_DIR,
-  SUYOU_PROJECTS_YAML: process.env.SUYOU_PROJECTS_YAML,
+  SANDBAR_EPIC_NEXT_DIR: process.env.SANDBAR_EPIC_NEXT_DIR,
+  SANDBAR_EPIC_NEXT_STUB: process.env.SANDBAR_EPIC_NEXT_STUB,
+  SANDBAR_EPIC_NEXT_TIMEOUT_MS: process.env.SANDBAR_EPIC_NEXT_TIMEOUT_MS,
+  SANDBAR_EPICS_DIR: process.env.SANDBAR_EPICS_DIR,
+  SANDBAR_PROJECTS_YAML: process.env.SANDBAR_PROJECTS_YAML,
 }
 const stubPids = []
 const alive = (pid) => { try { process.kill(pid, 0); return true } catch { return false } }
@@ -149,17 +149,17 @@ try {
   // Project registry (POST /wf/tickets ?project= whitelist) pointed at tmp
   await writeFile(join(tmp, 'projects.yaml'),
     `projects:\n  - key: suyou\n    name: 溯游\n    dirs:\n      - ${repo}\n`, 'utf8')
-  process.env.SUYOU_EPICS_DIR = epicsDir
-  process.env.SUYOU_EPIC_NEXT_DIR = jobsDir
-  process.env.SUYOU_PROJECTS_YAML = join(tmp, 'projects.yaml')
-  process.env.SUYOU_EPIC_NEXT_TIMEOUT_MS = '5000'
+  process.env.SANDBAR_EPICS_DIR = epicsDir
+  process.env.SANDBAR_EPIC_NEXT_DIR = jobsDir
+  process.env.SANDBAR_PROJECTS_YAML = join(tmp, 'projects.yaml')
+  process.env.SANDBAR_EPIC_NEXT_TIMEOUT_MS = '5000'
   const { exactTickets, prefixEpics } = makeHarness(repo)
   const cacheDir = join(repo, '.suyou', 'epic-next')
   const rows = [{ id: 't260831-90', closed: true }]
 
   /* ------------------------------------------------ L1 suggest produces (STUB=ok) */
-  section('L1 suggest produces (SUYOU_EPIC_NEXT_STUB=ok)')
-  process.env.SUYOU_EPIC_NEXT_STUB = 'ok'
+  section('L1 suggest produces (SANDBAR_EPIC_NEXT_STUB=ok)')
+  process.env.SANDBAR_EPIC_NEXT_STUB = 'ok'
   const job = await startSuggestJob({
     repo, code: 'demo-epic', epicTitle: 'demo-epic',
     epicMarkdown: await readFile(join(epicsDir, 'demo-epic.md'), 'utf8'),
@@ -217,7 +217,7 @@ try {
 
   /* ------------------------------------------------ V stub variants + process reaping (smoke B6) */
   section('V stub variant degradation + full-terminal-state process reaping (smoke B6a/B6b discipline)')
-  process.env.SUYOU_EPIC_NEXT_STUB = 'invalid_json'
+  process.env.SANDBAR_EPIC_NEXT_STUB = 'invalid_json'
   const jBad = await startSuggestJob({
     repo, code: 'demo-epic', epicTitle: 'demo-epic', epicMarkdown: 'md',
     ticketsSummary: '-', workflows: [{ id: 'dev-lane', name: 'dev' }],
@@ -229,8 +229,8 @@ try {
   ok(jBad.proc?.killed === true || !alive(jBad.proc?.pid ?? 0),
     'invalid_json variant: dummy process reaped (killed/not alive, smoke B6a assertion)')
 
-  process.env.SUYOU_EPIC_NEXT_STUB = 'never_write'
-  process.env.SUYOU_EPIC_NEXT_TIMEOUT_MS = '300'
+  process.env.SANDBAR_EPIC_NEXT_STUB = 'never_write'
+  process.env.SANDBAR_EPIC_NEXT_TIMEOUT_MS = '300'
   const jStall = await startSuggestJob({
     repo, code: 'demo-epic', epicTitle: 'demo-epic', epicMarkdown: 'md',
     ticketsSummary: '-', workflows: [{ id: 'dev-lane', name: 'dev' }],

@@ -76,7 +76,7 @@ function section(t) { console.log(`\n== ${t}`) }
 const CANONICAL = ['已立项（待开工单）', '已立项（执行中）', '已完结', '已归档']
 
 const tmp = await mkdtemp(join(tmpdir(), 'integ-epic-status-'))
-const savedEnv = { SUYOU_EPICS_DIR: process.env.SUYOU_EPICS_DIR }
+const savedEnv = { SANDBAR_EPICS_DIR: process.env.SANDBAR_EPICS_DIR }
 
 /** Newest backup file for <code> under the shared backup dir (null if none). */
 async function newestBackup(code) {
@@ -205,13 +205,13 @@ try {
   }
 
   /* ------------------------------------------------ C. setEpicStatus write contract */
-  section('C setEpicStatus write contract (fixture dir, SUYOU_EPICS_DIR isolated)')
+  section('C setEpicStatus write contract (fixture dir, SANDBAR_EPICS_DIR isolated)')
   const epicsDir = join(tmp, 'notes', 'epics')
   await mkdir(epicsDir, { recursive: true })
   await writeFile(join(epicsDir, 'integ-st-alpha.md'), FIXTURE_MD('已立项（执行中）', '原始备注'), 'utf8')
   await writeFile(join(epicsDir, 'integ-st-no-note.md'), FIXTURE_MD('已立项（待开工单）', ''), 'utf8')
   await writeFile(join(epicsDir, 'integ-st-no-status.md'), '# 立项单：integ-st-no-status\n\nno table.\n', 'utf8')
-  process.env.SUYOU_EPICS_DIR = epicsDir
+  process.env.SANDBAR_EPICS_DIR = epicsDir
   const read = (code) => readFile(join(epicsDir, code + '.md'), 'utf8')
 
   // validateEpicNote unit surface (same口径 consumed by endpoint + smoke)
@@ -382,8 +382,8 @@ try {
   ok(noNoteMeta.note === '', 'parseEpicMeta: missing note row -> empty string, no throw')
 } finally {
   // Full-terminal-state cleanup: restore env, remove tmp fixtures.
-  if (savedEnv.SUYOU_EPICS_DIR === undefined) delete process.env.SUYOU_EPICS_DIR
-  else process.env.SUYOU_EPICS_DIR = savedEnv.SUYOU_EPICS_DIR
+  if (savedEnv.SANDBAR_EPICS_DIR === undefined) delete process.env.SANDBAR_EPICS_DIR
+  else process.env.SANDBAR_EPICS_DIR = savedEnv.SANDBAR_EPICS_DIR
   await rm(tmp, { recursive: true, force: true }).catch(() => {})
 }
 

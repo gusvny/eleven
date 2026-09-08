@@ -81,7 +81,7 @@ dsh 白捡的能力（我们自写 loop 没有的）：≤8 轮硬上限 → dsh
 
 ### 路线 C：混合（推荐）
 
-写一个 dsh 插件包 `dsh-suyou-admin`：
+写一个 dsh 插件包 `dsh-sandbar-admin`：
 
 - 启动时跑 `python3 server/admin.py tools` 拿到全部工具的 DeepSeek schema dump，**逐字映射注册为 dsh 裸 JSON Schema 工具**（dsh 明确支持：「直接注册的原始 JSON Schema 工具自行负责输入校验」，`docs/cookbook/adding-a-tool.zh.md`）；
 - 每个工具的 `execute` = `spawn('python3', ['server/admin.py', 'call', name, JSON.stringify(args)])`，解析 stdout 的 `{ok, result|error, run_id}` 原样返回——**run-id 审计单一真源仍在 python `admin.log`**，run_id 随返回值进 dsh 会话日志，双层互查；
@@ -107,14 +107,14 @@ dsh 白捡的能力（我们自写 loop 没有的）：≤8 轮硬上限 → dsh
 2. **新建插件**（本方案唯一新增的 suyou 侧产物，建议落 `server-plugin/`，不动现有任何文件）：
    ```
    server-plugin/
-     suyou-admin.ts        # 插件本体（下述骨架）
+     sandbar-admin.ts        # 插件本体（下述骨架）
      cordis.yml            # --patch 覆盖层
    ```
    `cordis.yml`：
    ```yaml
    - insert:
-       - id: suyou-admin
-         name: '/Users/user/Documents/suyou/server-plugin/suyou-admin.ts'
+       - id: sandbar-admin
+         name: '/Users/user/Documents/suyou/server-plugin/sandbar-admin.ts'
    ```
    启动：`npx @deepseek-ai/dsh@0.1.0-rc.7 web --patch server-plugin/cordis.yml`
 
@@ -129,7 +129,7 @@ dsh 白捡的能力（我们自写 loop 没有的）：≤8 轮硬上限 → dsh
    // 破坏性工具名单：命中即转人工审批（§12.2-③ 两阶段提交 v1）
    const NEEDS_APPROVAL = new Set(['params_set'])
 
-   export const name = 'suyou-admin'
+   export const name = 'sandbar-admin'
    export const inject = ['tools']
 
    async function py(args: string[]) {

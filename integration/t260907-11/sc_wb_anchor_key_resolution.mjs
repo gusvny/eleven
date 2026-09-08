@@ -8,7 +8,7 @@
  * 逐字节一致（生产 UI 恒带 ?project=，此断言钉住注册表条目不漂移）；②报错精确——
  * 未知 key 的 error 点名项目键，不把键解析失败伪装成「越出仓库根」；③隔离条目
  * 显式 502 透传注册表文案（不回落默认仓=不违隔离语义）；④env 红线——
- * SUYOU_EPICS_DIR 仅在回落默认仓时生效，per-project 读取不被 env 串味。
+ * SANDBAR_EPICS_DIR 仅在回落默认仓时生效，per-project 读取不被 env 串味。
  * 与 developer L1（resolver 四边角单测）分层：本条锁路由组装后的响应契约
  * （状态码/error 文案/resolved 来源标记）；票面 t.project 与 query 的优先级需
  * 引擎 ticket show，归 S5 实票验收，本条不重复。
@@ -59,15 +59,15 @@ try {
     j.ok(typeof r.body?.error === 'string' && r.body.error.includes('badproj'), 'error 透传注册表隔离文案（点名条目）')
   }
 
-  // ── 腿E env 收窄：SUYOU_EPICS_DIR 仅回落默认仓生效，不串 per-project ──
-  await fx.withEnv({ SUYOU_EPICS_DIR: null }, async () => {
+  // ── 腿E env 收窄：SANDBAR_EPICS_DIR 仅回落默认仓生效，不串 per-project ──
+  await fx.withEnv({ SANDBAR_EPICS_DIR: null }, async () => {
     const envEpics = join(fx.root, 'env-epics')
     await mkdir(envEpics, { recursive: true })
     await writeFile(join(envEpics, `${EPIC_CODE}.md`), '# 立项单：env 覆盖侧演示立项\n', 'utf8')
-    await fx.withEnv({ SUYOU_EPICS_DIR: envEpics }, async () => {
+    await fx.withEnv({ SANDBAR_EPICS_DIR: envEpics }, async () => {
       const rNo = await call(EPICS_PREFIX, EPICS_PREFIX)
       const tNo = rNo.body?.result?.epics?.find((e) => e.code === EPIC_CODE)
-      j.ok(tNo?.title === 'env 覆盖侧演示立项', '无参回落：SUYOU_EPICS_DIR 覆盖生效（旧 env 链保留）')
+      j.ok(tNo?.title === 'env 覆盖侧演示立项', '无参回落：SANDBAR_EPICS_DIR 覆盖生效（旧 env 链保留）')
       const rFpv = await call(EPICS_PREFIX, `${EPICS_PREFIX}?project=fpv`)
       const tFpv = rFpv.body?.result?.epics?.find((e) => e.code === EPIC_CODE)
       j.ok(tFpv?.title === 'fpv 侧演示立项', `per-project 不被 env 串味（实得 ${JSON.stringify(tFpv?.title)}）`)

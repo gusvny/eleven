@@ -10,10 +10,10 @@
  *      validateSuggestion（合规放行 / status!=ok 透传 reason / 幻觉模板 id 拒收 /
  *      空 title 拒收 / 非对象拒收）。
  *   B. 路由（node.ts apply + mock webServer/req/res + stub admin.py，同 epics.mjs 制式）：
- *      B1 STUB 模式（SUYOU_EPIC_NEXT_STUB=1）全链路：POST 启动 → job_id+running；
+ *      B1 STUB 模式（SANDBAR_EPIC_NEXT_STUB=1）全链路：POST 启动 → job_id+running；
  *      轮询 → done 且建议形状合规；prompt.md 落盘且含立项全文/模板清单/工单汇总；
  *      同 code 已完成后再 POST → 新 job_id；连开 6 个 job 后目录保留 ≤5 份。
- *      B2 假 agent 真 spawn（SUYOU_AGENT_CMD=node <fixture>）：POST → running；
+ *      B2 假 agent 真 spawn（SANDBAR_AGENT_CMD=node <fixture>）：POST → running；
  *      进行中重复 POST → 复用同一 job_id；轮询到 done 拿到假 agent 写的建议。
  *      B3 假 agent 写不合规结果（幻觉模板 id）→ 轮询 → failed + 人话 reason。
  *      B4 错误路径：坏形状 code 400 / 不存在 code 404 / 未知 jobId 404 /
@@ -24,7 +24,7 @@
  *      B6a invalid_json：文件在但 JSON 非法（复刻 LLM 非法转义 \- 现场）→ 第 1 轮
  *      仍 running（记录文件指纹）→ 第 2 轮 fail-fast failed：reason 明说
  *      「不是合法 JSON」+ parse 摘要、不说「未产出」、哑进程被回收；
- *      B6b never_write + SUYOU_EPIC_NEXT_TIMEOUT_MS=500：无文件不误判 → 超时
+ *      B6b never_write + SANDBAR_EPIC_NEXT_TIMEOUT_MS=500：无文件不误判 → 超时
  *      failed「已终止」、哑进程被回收。
  *      B7 真 spawn 进程生命周期（t260828-03）：B7a 假 agent 写非法 JSON 后自退 →
  *      poll 立即 fail-fast（进程已退出，不等两轮稳定性）；B7b 假 agent 写合规结果后
@@ -120,7 +120,7 @@ setTimeout(() => {}, 600000)
 `
 
 const tmp = await mkdtemp(join(tmpdir(), 'wb-epic-next-'))
-const ENV_KEYS = ['SUYOU_EPIC_NEXT_DIR', 'SUYOU_EPIC_NEXT_STUB', 'SUYOU_EPIC_NEXT_TIMEOUT_MS', 'SUYOU_AGENT_CMD', 'DSH_HOME']
+const ENV_KEYS = ['SANDBAR_EPIC_NEXT_DIR', 'SANDBAR_EPIC_NEXT_STUB', 'SANDBAR_EPIC_NEXT_TIMEOUT_MS', 'SANDBAR_AGENT_CMD', 'DSH_HOME']
 const savedEnv = Object.fromEntries(ENV_KEYS.map(k => [k, process.env[k]]))
 try {
   /* ------------------------------------------------------------ A. 纯函数 */
@@ -229,12 +229,12 @@ roles:
       return repo
     }
 
-    process.env.SUYOU_EPIC_NEXT_DIR = join(tmp, 'jobs')
+    process.env.SANDBAR_EPIC_NEXT_DIR = join(tmp, 'jobs')
     process.env.DSH_HOME = join(tmp, 'dsh-home')  // 空目录：profile/creds/settings 拷贝全部 no-op
     await mkdir(process.env.DSH_HOME, { recursive: true })
 
     /* --- B1 STUB 模式全链路 --- */
-    process.env.SUYOU_EPIC_NEXT_STUB = '1'
+    process.env.SANDBAR_EPIC_NEXT_STUB = '1'
     const repoB = await mkRepo('repo-b', ADMIN_STUB, ['demo-epic', 'demo-epic-2'])
     const hB = setup(repoB)
     ok(hB !== undefined, 'epics prefix 路由已挂')
@@ -255,7 +255,7 @@ roles:
     const doneJob = await pollSuggestJob(jobId)
     ok(doneJob?.proc?.killed === true, 'STUB done 终态回收 agent 进程（proc.killed）')
 
-    const promptMd = await readFile(join(process.env.SUYOU_EPIC_NEXT_DIR, jobId, 'prompt.md'), 'utf8')
+    const promptMd = await readFile(join(process.env.SANDBAR_EPIC_NEXT_DIR, jobId, 'prompt.md'), 'utf8')
     ok(promptMd.includes('做个示范。') && promptMd.includes('dev-lane：开发泳道')
       && promptMd.includes('t260827-01') && promptMd.includes('result.json'),
       'prompt.md 落盘：立项全文/模板清单/工单汇总/结果路径齐备（可审计）')
@@ -276,16 +276,16 @@ roles:
       await call(hB, `/sandbar-workbench/api/epics/demo-epic/suggest-next/${p.body.result.job_id}`)
     }
     const shape = /^demo-epic-[0-9a-z]+-[0-9a-f]{6}$/
-    const dirs = (await readdir(process.env.SUYOU_EPIC_NEXT_DIR, { withFileTypes: true }))
+    const dirs = (await readdir(process.env.SANDBAR_EPIC_NEXT_DIR, { withFileTypes: true }))
       .filter(e => e.isDirectory() && shape.test(e.name))
     ok(dirs.length === 5, `job 目录每 code 保留 5 份（实际 ${dirs.length}；demo-epic-2 的不误清）`)
 
     /* --- B2 假 agent 真 spawn：running 复用 + 轮询到 done --- */
-    delete process.env.SUYOU_EPIC_NEXT_STUB
+    delete process.env.SANDBAR_EPIC_NEXT_STUB
     const fakeScript = join(tmp, 'fake-agent.mjs')
     await writeFile(fakeScript, FAKE_AGENT, 'utf8')
     const payload = JSON.stringify({ status: 'ok', workflow: 'regression', title: 'fake 建议标题', body: 'b', rationale: 'r' })
-    process.env.SUYOU_AGENT_CMD = `${process.execPath} ${fakeScript} '${payload}'`
+    process.env.SANDBAR_AGENT_CMD = `${process.execPath} ${fakeScript} '${payload}'`
 
     r = await call(hB, '/sandbar-workbench/api/epics/demo-epic-2/suggest-next', 'POST')
     ok(r.status === 200 && r.body.result.state === 'running', '假 agent：POST → running（真 spawn）')
@@ -307,7 +307,7 @@ roles:
 
     /* --- B3 假 agent 写不合规结果 → failed --- */
     const badPayload = JSON.stringify({ status: 'ok', workflow: 'made-up-template', title: 'x' })
-    process.env.SUYOU_AGENT_CMD = `${process.execPath} ${fakeScript} '${badPayload}'`
+    process.env.SANDBAR_AGENT_CMD = `${process.execPath} ${fakeScript} '${badPayload}'`
     r = await call(hB, '/sandbar-workbench/api/epics/demo-epic/suggest-next', 'POST')
     const jobId3 = r.body.result.job_id
     let final3 = null
@@ -321,8 +321,8 @@ roles:
       '幻觉模板 id → failed + 人话 reason（validateSuggestion 闸生效）')
 
     /* --- B4 错误路径 --- */
-    delete process.env.SUYOU_AGENT_CMD
-    process.env.SUYOU_EPIC_NEXT_STUB = '1'
+    delete process.env.SANDBAR_AGENT_CMD
+    process.env.SANDBAR_EPIC_NEXT_STUB = '1'
     r = await call(hB, '/sandbar-workbench/api/epics/Bad-Code/suggest-next', 'POST')
     ok(r.status === 400, 'POST 坏形状 code → 400')
     r = await call(hB, '/sandbar-workbench/api/epics/no-such-epic/suggest-next', 'POST')
@@ -355,8 +355,8 @@ roles:
     }
     {
       // B6a invalid_json：文件在但 JSON 非法 → 两轮 poll 内 fail-fast（不等 10 分钟超时）
-      delete process.env.SUYOU_AGENT_CMD
-      process.env.SUYOU_EPIC_NEXT_STUB = 'invalid_json'
+      delete process.env.SANDBAR_AGENT_CMD
+      process.env.SANDBAR_EPIC_NEXT_STUB = 'invalid_json'
       const j1 = await startSuggestJob(directInput)
       const p1 = await pollSuggestJob(j1.jobId)
       ok(p1?.state === 'running',
@@ -370,8 +370,8 @@ roles:
     }
     {
       // B6b never_write：文件始终不产出 → 不 fail-fast 误判，超时兜底 + 回收
-      process.env.SUYOU_EPIC_NEXT_STUB = 'never_write'
-      process.env.SUYOU_EPIC_NEXT_TIMEOUT_MS = '500'
+      process.env.SANDBAR_EPIC_NEXT_STUB = 'never_write'
+      process.env.SANDBAR_EPIC_NEXT_TIMEOUT_MS = '500'
       const j2 = await startSuggestJob(directInput)
       const q1 = await pollSuggestJob(j2.jobId)
       ok(q1?.state === 'running', 'never_write 无文件：仍 running（不误判为非法 JSON）')
@@ -380,16 +380,16 @@ roles:
       ok(q2?.state === 'failed' && String(q2.reason).includes('已终止'),
         'never_write 超时 → failed「已终止」（时限 env 覆盖生效）')
       ok(q2?.proc?.killed === true, 'never_write 超时终态回收哑进程')
-      delete process.env.SUYOU_EPIC_NEXT_TIMEOUT_MS
+      delete process.env.SANDBAR_EPIC_NEXT_TIMEOUT_MS
     }
 
     /* --- B7 真 spawn 进程生命周期（t260828-03） --- */
     section('B7 真 spawn：invalid-JSON 自退 fail-fast / 合规结果长挂回收')
-    delete process.env.SUYOU_EPIC_NEXT_STUB
+    delete process.env.SANDBAR_EPIC_NEXT_STUB
     {
       // B7a 复刻 260828 事故现场：写非法 JSON（\- 转义）后自退 → poll 立即 fail-fast
       const badJsonPayload = '{"status":"ok","workflow":"dev-lane","title":"bad\\-dash","body":"b"}'
-      process.env.SUYOU_AGENT_CMD = `${process.execPath} ${fakeScript} '${badJsonPayload}'`
+      process.env.SANDBAR_AGENT_CMD = `${process.execPath} ${fakeScript} '${badJsonPayload}'`
       r = await call(hB, '/sandbar-workbench/api/epics/demo-epic-2/suggest-next', 'POST')
       const jobId4 = r.body.result.job_id
       let final4 = null
@@ -408,7 +408,7 @@ roles:
       const lingerScript = join(tmp, 'fake-agent-linger.mjs')
       await writeFile(lingerScript, FAKE_AGENT_LINGER, 'utf8')
       const okPayload = JSON.stringify({ status: 'ok', workflow: 'regression', title: 'linger 建议', body: 'b', rationale: 'r' })
-      process.env.SUYOU_AGENT_CMD = `${process.execPath} ${lingerScript} '${okPayload}'`
+      process.env.SANDBAR_AGENT_CMD = `${process.execPath} ${lingerScript} '${okPayload}'`
       r = await call(hB, '/sandbar-workbench/api/epics/demo-epic/suggest-next', 'POST')
       const jobId5 = r.body.result.job_id
       let final5 = null
@@ -423,7 +423,7 @@ roles:
       const lingerJob = await pollSuggestJob(jobId5)
       ok(lingerJob?.proc?.killed === true || lingerJob?.proc?.exitCode !== null,
         'done 终态回收长挂 agent 进程（进程泄露修复，对齐 agent_activities.py finally-terminate）')
-      delete process.env.SUYOU_AGENT_CMD
+      delete process.env.SANDBAR_AGENT_CMD
     }
   }
 

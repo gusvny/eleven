@@ -11,7 +11,7 @@
  * 与 python 侧真源互指（改一边必须同步另一边）：
  *   - EPIC_CODE_RE 复刻 server/engine/shared.py 的 EPIC_CODE_RE
  *     （形状白名单：小写字母/数字/连字符——字符集本身即防穿，'..'、'/' 全在表外）；
- *   - SUYOU_EPICS_DIR env 覆盖先例同 shared.py 的 EPICS_DIR（自测/验收临时指向
+ *   - SANDBAR_EPICS_DIR env 覆盖先例同 shared.py 的 EPICS_DIR（自测/验收临时指向
  *     空目录或 fixture 目录）。
  */
 
@@ -73,9 +73,9 @@ export type EpicReadResult =
   | ({ ok: true; markdown: string } & EpicMeta)
   | { ok: false; status: number; error: string }
 
-/** 立项单目录：env SUYOU_EPICS_DIR 优先（shared.py EPICS_DIR 同款先例），缺省 <repo>/notes/epics。 */
+/** 立项单目录：env SANDBAR_EPICS_DIR 优先（shared.py EPICS_DIR 同款先例），缺省 <repo>/notes/epics。 */
 export function resolveEpicsDir(repo: string): string {
-  return process.env.SUYOU_EPICS_DIR ?? join(repo, 'notes', 'epics')
+  return process.env.SANDBAR_EPICS_DIR ?? join(repo, 'notes', 'epics')
 }
 
 /** 从立项单 Markdown 解析标题/状态/备注/立项日期（容错：缺字段给 ''，不拒收）。 */
@@ -124,7 +124,7 @@ export async function listEpics(epicsDir: string): Promise<EpicMeta[]> {
 
 /**
  * 读单份立项单 Markdown 全文（只读纯函数）。
- * 防穿双保险（仿 agent-logs.ts resolveSuyouBaseDir 先例）：①EPIC_CODE_RE 形状白名单
+ * 防穿双保险（仿 agent-logs.ts resolveAgentBaseDir 先例）：①EPIC_CODE_RE 形状白名单
  * （'..'、'/' 本就在字符集外）；②resolve 后断言落在 epicsDir 内。非法 400 / 不存在 404，
  * 人话 error 并附现有代号清单（同 shared.py validate_epic_code 的纠错风格）。
  */

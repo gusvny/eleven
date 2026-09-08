@@ -5,7 +5,7 @@
  * intent（用户可感知）：同一立项单、工单台列得出、CLI 开票也认——同一注册表真源
  * +同一拼装规则 <主目录>/notes/epics。断言：双项目夹具下
  * Py resolve_epics_dir(key) === TS resolveEpicsDir(primaryDir(findProject(key)))
- * 且各指各自主目录（非引擎仓锚）；SUYOU_EPICS_DIR 覆盖两侧同款（同指 env 目录）。
+ * 且各指各自主目录（非引擎仓锚）；SANDBAR_EPICS_DIR 覆盖两侧同款（同指 env 目录）。
  * 口径边界（方案 C4）：断言的是「同规」——不覆盖「工单台起在非项目注册主目录」
  * 部署形态（工单台 repo=config.repo 时 UI 仍锚其 repo）。
  *
@@ -18,7 +18,7 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { resolveEpicsDir } from '../../server/plugins/workbench/src/host/epics.ts'
-import { findProject, primaryDir } from '../../server/suyou-projects.ts'
+import { findProject, primaryDir } from '../../server/project-registry.ts'
 import { makeEpicFixture, runPython } from './epic_fixture.mjs'
 
 const { ok, envFail, done } = (await import('../t260903-09/lib_integration.mjs')).makeChecker()
@@ -34,7 +34,7 @@ import shared
 print(json.dumps({k: str(shared.resolve_epics_dir(k)) for k in ('engine', 'external')}))
 `
   try {
-    return JSON.parse(runPython(code, { SANDBAR_PROJECTS_DIR: regRoot, SUYOU_EPICS_DIR: '', ...extraEnv }).trim())
+    return JSON.parse(runPython(code, { SANDBAR_PROJECTS_DIR: regRoot, SANDBAR_EPICS_DIR: '', ...extraEnv }).trim())
   } catch (e) {
     envFail('Py resolve_epics_dir 子进程', String(e).slice(0, 200))
     return null
@@ -44,7 +44,7 @@ print(json.dumps({k: str(shared.resolve_epics_dir(k)) for k in ('engine', 'exter
 const fx = makeEpicFixture()
 try {
   process.env.SANDBAR_PROJECTS_DIR = fx.regRoot
-  delete process.env.SUYOU_EPICS_DIR
+  delete process.env.SANDBAR_EPICS_DIR
 
   const py = pyResolveDirs(fx.regRoot)
   if (py) {
@@ -58,13 +58,13 @@ try {
        'D 不串桶：engine 锚 ≠ external 桶')
   }
 
-  // env 覆盖两侧同款（自测语义）：SUYOU_EPICS_DIR 在场 → Py/TS 同指 env 目录
+  // env 覆盖两侧同款（自测语义）：SANDBAR_EPICS_DIR 在场 → Py/TS 同指 env 目录
   const envRoot = await mkdtemp(join(tmpdir(), 't26090707-same-src-env-'))
   const envDir = join(envRoot, 'notes', 'epics')
   await mkdir(envDir, { recursive: true })
   await writeFile(join(envDir, 'env-only.md'), '# env-only\n', 'utf8')
-  process.env.SUYOU_EPICS_DIR = envDir
-  const pyEnv = pyResolveDirs(fx.regRoot, { SUYOU_EPICS_DIR: envDir })
+  process.env.SANDBAR_EPICS_DIR = envDir
+  const pyEnv = pyResolveDirs(fx.regRoot, { SANDBAR_EPICS_DIR: envDir })
   if (pyEnv) {
     for (const p of [fx.engine, fx.external]) {
       const tsDir = resolveEpicsDir(primaryDir(findProject(p.key)))
@@ -73,7 +73,7 @@ try {
     }
   }
 } finally {
-  delete process.env.SUYOU_EPICS_DIR
+  delete process.env.SANDBAR_EPICS_DIR
   fx.teardown()
 }
 process.exit(done('t260907-07-epic-anchor-same-source'))

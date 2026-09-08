@@ -2,7 +2,7 @@
  * lib.mjs —— t260901-20 metrics M1a 测试集公共件（fixture / 桩 / 断言助手）。
  *
  * 全部 fixture 落 mkdtemp 临时目录，零真实 ~/.sandbar / admin.py / git 触碰：
- * 数据真源走 SUYOU_METRICS_STUB 缝（metrics.ts 文件头），缓存走 SUYOU_METRICS_DIR。
+ * 数据真源走 SANDBAR_METRICS_STUB 缝（metrics.ts 文件头），缓存走 SANDBAR_METRICS_DIR。
  * zstd fixture 用系统 zstd 命令现场压缩（缺命令由调用方 SKIP）。
  */
 import { execFileSync } from 'node:child_process'

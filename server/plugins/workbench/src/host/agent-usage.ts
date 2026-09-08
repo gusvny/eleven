@@ -26,7 +26,7 @@
 import { readdir, stat } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import { SessionError, decompressSession } from './agent-live.ts'
-import { resolveSuyouBaseDir } from './agent-logs.ts'
+import { resolveAgentBaseDir } from './agent-logs.ts'
 
 interface Sum { input: number; output: number; cacheRead: number }
 
@@ -110,7 +110,7 @@ export async function resolveAllSessionFiles(
   ticket: { worktree?: string; workspace?: { type?: string; path?: string } | null; role?: string } | null,
   extraRoots: readonly string[] = [],
 ): Promise<{ paths?: string[]; wsRoot?: string; reason?: string; refused?: boolean }> {
-  const { base, reason } = resolveSuyouBaseDir(repo, ticketId, ticket, extraRoots)
+  const { base, reason } = resolveAgentBaseDir(repo, ticketId, ticket, extraRoots)
   if (base === '') {
     return { refused: true, reason: reason ?? '工单工作区定位失败（拒绝读取）' }
   }
@@ -221,14 +221,14 @@ async function aggregateOneFile(path: string, windows: StageWindow[], out: Agent
  * 泳道拆除后 `.dsh/sessions` 陪葬，token 维唯一存活希望=引擎侧在 merge 时刻把
  * usage 出仓到项目级账本（agent_activities.py，本票写集外——登记
  * notes/debts/known-issues.md KI-017③）。本函数只做探测：
- *   约定路径 = $SUYOU_USAGE_LEDGER_DIR/<工单id>/*.jsonl.zstd（格式与
+ *   约定路径 = $SANDBAR_USAGE_LEDGER_DIR/<工单id>/*.jsonl.zstd（格式与
  *   session.jsonl.zstd 同构，复用同一聚合通路；env 亦为测试缝）。
  * 未配置/无目录/无文件 → paths=[] + 人话 reason（不静默，不做假 0）。
  */
 export async function resolveLedgerSessionFiles(ticketId: string): Promise<{ paths: string[]; reason?: string }> {
-  const root = process.env.SUYOU_USAGE_LEDGER_DIR ?? ''
+  const root = process.env.SANDBAR_USAGE_LEDGER_DIR ?? ''
   if (root === '') {
-    return { paths: [], reason: '泳道会话不存在，且项目级 usage 账本未配置（SUYOU_USAGE_LEDGER_DIR 未设；KI-017③ 引擎侧出仓待落地）' }
+    return { paths: [], reason: '泳道会话不存在，且项目级 usage 账本未配置（SANDBAR_USAGE_LEDGER_DIR 未设；KI-017③ 引擎侧出仓待落地）' }
   }
   const dir = join(root, ticketId)
   let entries: string[] = []

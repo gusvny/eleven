@@ -47,7 +47,7 @@ updated: 2026-09-07
 1. npm 包**不做**（宿主裁定 260907）。
 2. 首发支持＝**mac 优先**（fresh-home 验收场景先做 mac 腿），Linux 跟进，Windows 后进（WSL2/NTFS 边角记录在案不承诺）。
 3. 密钥＝**用户的不进包**：任何安装/分发产物不生成、不搬运、不打印用户密钥。
-4. 存量 `SUYOU_*` env 与 `/suyou-workbench/` 前缀迁移＝**发布前置债**（见 Proposal §发布前置债），随专门迁移票处置。
+4. 存量 `SANDBAR_*` env 与 `/suyou-workbench/` 前缀迁移＝**发布前置债**（见 Proposal §发布前置债），随专门迁移票处置。
 5. console（3099）永属用户操作面：任何安装路径**只探测只提示**，不得 spawn/start/kill/重启 3099（CLAUDE.md 硬规则 1；既有安装器同纪律）。
 6. 新命名一律用 sandbar 或中性名，不新增 suyou 字样命名（CLAUDE.md 硬规则 5）。
 7. 误连生产 fail-closed：worker 不带引擎地址前缀会缺省连**生产** 7233/default（testing-guide 明文警告「等同碰 3099 级别的事故」），分发形态的每一处引擎地址缺省值都不得指向生产面。
@@ -102,7 +102,7 @@ updated: 2026-09-07
 | 2 | **venv**：以 requirements 固化文件驱动创建，装后体检 | 无 venv → 创建＋装依赖 | venv 在但依赖指纹与 requirements 不匹配 → 打印差异与重建命令，**不静默重建**（重建即丢，KI-039） | 半残 venv（python 坏/导入失败）→ 红＋给重建指令，不静默覆盖 |
 | 3 | **家目录接线**：profiles/settings 等接线文件 | 缺才写 | 已有文件内容不同 → 打印差异路径，只提示，不覆盖 | 已有文件半截/格式坏 → 红＋指路（烂配置静默退默认＝KI-030 级事故） |
 | 4 | **git 身份与密钥面** | user.name/user.email 缺 → 打印一行 `git config` 指引 | 身份已有 → 跳过 | 密钥面损坏 → 显式红。**脚本永不生成/搬运/打印密钥**（前置限制 3） |
-| 5 | **.env 模板**：落 `.env`（权限 600，不进 git），**显式钉引擎地址与 namespace 缺省值，绝不缺省指向生产 7233/default**（前置限制 7；键名按 §目标命名表以 `SANDBAR_*` 为终名、`SUYOU_*` 作过渡期兼容别名） | 缺 → 写模板（每行注释说人话） | 已有 .env → 只补缺失键，已有值不覆盖 | .env 内容损坏 → 红字点名坏行＋修法 |
+| 5 | **.env 模板**：落 `.env`（权限 600，不进 git），**显式钉引擎地址与 namespace 缺省值，绝不缺省指向生产 7233/default**（前置限制 7；键名按 §目标命名表以 `SANDBAR_*` 为终名、`SANDBAR_*` 作过渡期兼容别名） | 缺 → 写模板（每行注释说人话） | 已有 .env → 只补缺失键，已有值不覆盖 | .env 内容损坏 → 红字点名坏行＋修法 |
 | 6 | **收尾自检三探**（每探绿一行/红一行带修法）：① venv 关键依赖可导入；② console 探针——TCP connect 3099 判在位，**只探不起**；③ 引擎探针——连 .env 钉的引擎地址与 namespace | — | — | 任一探红 → 整体退出非零，红行即排障入口 |
 | 7 | **打印下一步人话清单**：装完后打印「接下来做什么」（`./sandbar init` → `./sandbar up` → 打开控制台 3099 → 读哪篇 docs） | — | — | — |
 
@@ -222,7 +222,7 @@ install.sh / entrypoint
 | `server/sandbar/` | `server/` | 脱离宿主壳姓氏；注意 `~/.dsh/profiles/` 外部软链同步改指＋控制台重启边界 |
 | 插件包 `sandbar-*` | `suyou-*`（含 `/suyou-workbench/` 路由前缀 61 处，前后两半同票动） | |
 | 队列 `sandbar` | `suyou-poc` | worker 双队列过渡 |
-| `SANDBAR_*` env（过渡期兼容别名 `SUYOU_*`） | `SUYOU_*` | 泳道 `.suyou/` → `.sandbar/` 同批 |
+| `SANDBAR_*` env（过渡期兼容别名 `SANDBAR_*`） | `SANDBAR_*` | 泳道 `.suyou/` → `.sandbar/` 同批 |
 | roles persona `{{project}}` 参数化 | 写死「溯游项目」措辞 | v5 改判：去名不换名 |
 
 **迁移顺序**：env → 包名/路由 → 队列 → engine 目录（128 文件路径面）→ server 目录（最后）。全部完成于分发 v1 发布前；**每步独立票独立闸**，验收＝对应场景族复跑绿。

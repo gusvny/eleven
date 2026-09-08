@@ -82,16 +82,16 @@ curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3199/
 
 Temporal SDK 工具（`engine/.venv`）不装进容器；在本机用仓库内 venv 跑，
 用环境变量指向测试实例——`server/engine/shared.py` 支持
-`SUYOU_TARGET_HOST` / `SUYOU_NAMESPACE` 覆盖（缺省仍是生产 7233/default）。
+`SANDBAR_TARGET_HOST` / `SANDBAR_NAMESPACE` 覆盖（缺省仍是生产 7233/default）。
 
 ```bash
 # 测试 worker：连测试 Temporal（17233 / suyou-test）
-SUYOU_TARGET_HOST=127.0.0.1:17233 SUYOU_NAMESPACE=suyou-test \
+SANDBAR_TARGET_HOST=127.0.0.1:17233 SANDBAR_NAMESPACE=suyou-test \
   server/engine/.venv/bin/python server/engine/worker.py --daemon
 
 ```
 
-> ⚠️ **注意**：worker 一定带 `SUYOU_TARGET_HOST=127.0.0.1:17233` 前缀，否则默认连生产
+> ⚠️ **注意**：worker 一定带 `SANDBAR_TARGET_HOST=127.0.0.1:17233` 前缀，否则默认连生产
 > `127.0.0.1:7233`（namespace default）——往生产 Temporal 写测试状态，等同碰 3099 级别的事故。
 
 ### 每工单专属 worker（260824 起）
@@ -113,7 +113,7 @@ Temporal 上，与生产零交集。
 server/engine/bin/temporal server start-dev --ip 127.0.0.1 --port 17233 \
   --ui-port 18233 --db-filename /tmp/suyou-test.db \
   --search-attribute ProjectKey=Keyword --search-attribute EpicCode=Keyword
-# namespace 用 default 即可（SUYOU_NAMESPACE 缺省），测完 pkill 掉、删 db 文件
+# namespace 用 default 即可（SANDBAR_NAMESPACE 缺省），测完 pkill 掉、删 db 文件
 ```
 
 > 来源立项：epic-linkage（决策缘由见 notes/epics/epic-linkage.md）

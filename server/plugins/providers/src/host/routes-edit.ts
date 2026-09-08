@@ -4,16 +4,16 @@
  * 浏览器半（src/client/index.tsx 的 RoutesTableSection）与冒烟（smoke/routes-save.mjs）
  * 共用的视图→草稿→保存载荷变换。无 DOM/无 node 依赖，可被 node 冒烟直测：
  *
- *   draftFromView  —— /suyou-admin/api/routes 视图（sandbar-admin-ui RoutesView 子集）
+ *   draftFromView  —— /sandbar-admin/api/routes 视图（sandbar-admin-ui RoutesView 子集）
  *                     → 编辑草稿（provider/model 一律字符串，''=不设）
- *   draftToPayload —— 草稿 → POST /suyou-admin/api/routes/save 的 {table} 载荷
+ *   draftToPayload —— 草稿 → POST /sandbar-admin/api/routes/save 的 {table} 载荷
  *                     （显式带 ''=清空该键 → 宿主删键，查表向上落兜底）
  *
  * 载荷 schema 与宿主侧（sandbar-admin-ui routes.ts RouteTableEdits）逐字对齐：
  * default/roles.<三角色>[/tasks.<三分工>] 的 provider|model，其余键宿主拒绝。
  */
 
-/** /suyou-admin/api/routes 视图（RoutesView 子集，见 sandbar-admin-ui routes.ts）。 */
+/** /sandbar-admin/api/routes 视图（RoutesView 子集，见 sandbar-admin-ui routes.ts）。 */
 export interface RouteEff { provider: string; model: string; via: string }
 export interface RouteEntryDisp { provider: string | null; model: string | null }
 export interface RouteRoleView {

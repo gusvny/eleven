@@ -12,7 +12,7 @@
 
 # 管理台 UI 插件（server/plugins/ui/，包名 sandbar-admin-ui）：设置面板「溯游」分区
 # （工具直调/审计流水/模型路由）。426a4c1（t260821-04 插件瘦身）曾卸载；M12
-# （t260822-m12-4）把「模型路由」页签 + /suyou-admin/api/routes 做进本插件，
+# （t260822-m12-4）把「模型路由」页签 + /sandbar-admin/api/routes 做进本插件，
 # 260822 重新挂载——不挂则宿主半 404、client 半不进 graph，M12 功能不可见。
 # 以裸包名挂载：经 profile/node_modules/sandbar-admin-ui 软链（→ ../../plugins/ui）解析，
 # profile-headless 下有同款软链（headless 无 webServer，宿主半待机不挂路由）。
@@ -78,20 +78,20 @@
 
 # 多角色 preset 库（260820 基建③④；M10 五角色定稿 260822；721b3dc 起 gen.py/presets/ 退役，
 # 角色真源=server/roles/<角色>.yml cordis patch 直接维护，供 headless spawn --patch 用）。
-# GUI 控制台主会话 preset = suyou-integration：出厂 standard 组合 + integration persona，
-# 手工落 $DSH_HOME/.agent-presets/suyou-integration/（roster 每次调用现扫该目录，免重启；
+# GUI 控制台主会话 preset = sandbar-integration：出厂 standard 组合 + integration persona，
+# 手工落 $DSH_HOME/.agent-presets/sandbar-integration/（roster 每次调用现扫该目录，免重启；
 # 260824 曾随 gen.py 退役被清空、settings.yaml 仍指已删的 suyou-dispatcher → chat 起不了
 # 新会话，后按「standard 现役版 + roles/integration.yml persona」重建）。
 # roster 接线实证（rc.8）：此处曾配的 roots 会被 profile-boot overlay 钉死覆盖为出厂
 # 目录——用户 preset 唯一入口是 $DSH_HOME/.agent-presets/（实体复制，软链不被扫描）。
-# 这里只留默认 preset 指向 suyou-integration（M10：dispatcher 退役，本控制台的主要会话
+# 这里只留默认 preset 指向 sandbar-integration（M10：dispatcher 退役，本控制台的主要会话
 # 即全局把关；UI 选择器里手动选过的值存进 $DSH_HOME/settings.yaml，优先级高于此处——
-# settings.yaml 的 agent-presets.default 需同步改指 suyou-integration，仓库外，人改）。
+# settings.yaml 的 agent-presets.default 需同步改指 sandbar-integration，仓库外，人改）。
 # 注：headless 组合无 roster 行（dsh-headless 不带 agent-presets），本行在那边空转无害；
 # headless 一次性任务的角色注入仍走 prompt（roles/*.yml patch）。
 - id: agent-presets
   config:
-    default: suyou-integration
+    default: sandbar-integration
 
 # web 端口挪到 3099：本机 3080 常被其他 dsh 实例占用（EADDRINUSE）。
 - id: webserver

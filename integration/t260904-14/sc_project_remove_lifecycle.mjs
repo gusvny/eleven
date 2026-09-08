@@ -3,7 +3,7 @@
 // intent（用户可感知行为，立项验收6/10 + gen2 方案）：宿主 `sandbar project remove
 // --key <k>` 默认（无 purge 旗）= 可逆摘除——project.yaml 退役移位（原文件不在、
 // project.yaml.retired-* 在位）、data/（归档+metrics）与 credentials.yaml 字节不动、
-// 两侧装载器（Python shared / TS suyou-projects.ts）不再列该项目且其余项目装载不变；
+// 两侧装载器（Python shared / TS project-registry.ts）不再列该项目且其余项目装载不变；
 // re-add 同 key 成功且 data/tickets/ 归档链不断；摘除报告含 .lane/ 泳道清单（只报不删）
 // 与 closed 未归档差集黄牌（列票号）；被 prune 清掉历史的已归档票（Temporal list 消失、
 // fs 归档在）不得假阴成未归档；在飞闸对 RUNNING 非空=拒摘报票号且零现场变更；
@@ -98,7 +98,7 @@ c.check('rmkeep 条目字节不动（其余项目装载不变）',
   readFileSync(path.join(root, 'rmkeep', 'project.yaml'), 'utf8') === beforeKeep);
 process.env.SANDBAR_PROJECTS_DIR = root; // TS registryRoot() 每调用现读 env（票①场景同款）
 const ts = await import(
-  pathToFileURL(path.join(REPO_ROOT, 'server', 'suyou-projects.ts')).href);
+  pathToFileURL(path.join(REPO_ROOT, 'server', 'project-registry.ts')).href);
 const reg = ts.loadRegistry();
 const tsKeys = reg.projects.map((p) => p.key);
 c.check('TS 装载不再列 rmmain', !tsKeys.includes('rmmain'), `实际=${JSON.stringify(tsKeys)}`);

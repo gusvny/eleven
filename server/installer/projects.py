@@ -23,7 +23,7 @@ CLI 契约面（与 integration/t260904-10 三场景共同冻结，改动须场�
                          [--purge-credentials] [--confirm-last] [--json]
 
 装载复用真源 = server/engine/shared.py（importlib 按路径装载，不改本体；
-与 TS 侧 server/suyou-projects.ts 同一注册表、两侧各自最小解析、语义同构）。
+与 TS 侧 server/project-registry.ts 同一注册表、两侧各自最小解析、语义同构）。
 本模块 stdlib-only（installer 惯例；temporalio 依赖隔离在票计数子进程里）。
 
 add 写入故障模式取舍（方案 R2 表，实现落点）：
@@ -55,7 +55,7 @@ from installer.service import FailClosed
 # 票计数子进程超时（秒）。超时路径由 subprocess.run 兜底（kill+wait，四路终态之一）。
 TICKET_QUERY_TIMEOUT_S = 20.0
 
-_LEGACY_ENV = "SUYOU_PROJECTS_YAML"   # 存量标识，只引用不新增（CLAUDE.md 硬规则5）
+_LEGACY_ENV = "SANDBAR_PROJECTS_YAML"   # 存量标识，只引用不新增（CLAUDE.md 硬规则5）
 
 
 def _load_shared(poc_dir):

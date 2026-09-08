@@ -3,9 +3,9 @@
  *
  * 直跑：node smoke/agent-logs.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
  * 覆盖：
- *   A. resolveSuyouBaseDir（src/host/agent-logs.ts）：泳道工单 → <repo>/<worktree>/.suyou
- *      （防穿：越界 worktree → reason 拒绝）；workspace.dir 的 /tmp/suyou-ws/ 隔离目录；
- *      无泳道 → /tmp/suyou-ws/<id>/.suyou 兜底 + reason。
+ *   A. resolveAgentBaseDir（src/host/agent-logs.ts）：泳道工单 → <repo>/<worktree>/.suyou
+ *      （防穿：越界 worktree → reason 拒绝）；workspace.dir 的 /tmp/sandbar-ws/ 隔离目录；
+ *      无泳道 → /tmp/sandbar-ws/<id>/.suyou 兜底 + reason。
  *   B. listAgentLogs（临时目录）：不存在/空目录 → exists=false + reason；agent_*.log 与
  *      stage_*.json 按 (stage, gen) 排序；log 取尾部内容、result 解析 JSON；坏 JSON →
  *      parseError；junk 文件不入；超大文件截断标记。
@@ -17,7 +17,7 @@
 import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { listAgentLogs, resolveSuyouBaseDir, _sessionKbFast } from '../src/host/agent-logs.ts'
+import { listAgentLogs, resolveAgentBaseDir, _sessionKbFast } from '../src/host/agent-logs.ts'
 import { apply } from '../node.ts'
 
 let passed = 0
@@ -30,22 +30,22 @@ function section(t) { console.log(`\n== ${t}`) }
 
 const tmp = await mkdtemp(join(tmpdir(), 'wb-al-'))
 try {
-  /* ------------------------------------------------------------ A. resolveSuyouBaseDir */
-  section('A resolveSuyouBaseDir 定目录')
+  /* ------------------------------------------------------------ A. resolveAgentBaseDir */
+  section('A resolveAgentBaseDir 定目录')
   {
     const repo = join(tmp, 'repo')
-    const r1 = resolveSuyouBaseDir(repo, 't-x', { worktree: '.worktrees/wt' })
+    const r1 = resolveAgentBaseDir(repo, 't-x', { worktree: '.worktrees/wt' })
     ok(r1.base === join(repo, '.worktrees/wt', '.suyou') && r1.reason === undefined, '泳道 worktree → <repo>/<worktree>/.suyou')
-    const r2 = resolveSuyouBaseDir(repo, 't-x', { worktree: '..' })
+    const r2 = resolveAgentBaseDir(repo, 't-x', { worktree: '..' })
     ok(r2.base === '' && (r2.reason ?? '').includes('越界'), 'worktree 越界 → 拒绝（防穿）')
-    const r3 = resolveSuyouBaseDir(repo, 't-x', { worktree: '', workspace: { type: 'dir', path: '/tmp/suyou-ws/t-x' } })
-    ok(r3.base === '/tmp/suyou-ws/t-x/.suyou', 'workspace.dir /tmp/suyou-ws/ 隔离目录')
-    const r4 = resolveSuyouBaseDir(repo, 't-x', { workspace: { type: 'dir', path: '/etc/passwd' } })
-    ok(r4.base === join('/tmp/suyou-ws', 't-x', '.suyou') && r4.reason !== undefined,
-      '非 /tmp/suyou-ws 的 dir → 兜底隔离目录 + reason')
-    const r5 = resolveSuyouBaseDir(repo, 't-x', null)
-    ok(r5.base === join('/tmp/suyou-ws', 't-x', '.suyou') && (r5.reason ?? '').includes('主树道'),
-      '无泳道/无 workspace → 主树道兜底 /tmp/suyou-ws/<id>/.suyou')
+    const r3 = resolveAgentBaseDir(repo, 't-x', { worktree: '', workspace: { type: 'dir', path: '/tmp/sandbar-ws/t-x' } })
+    ok(r3.base === '/tmp/sandbar-ws/t-x/.suyou', 'workspace.dir /tmp/sandbar-ws/ 隔离目录')
+    const r4 = resolveAgentBaseDir(repo, 't-x', { workspace: { type: 'dir', path: '/etc/passwd' } })
+    ok(r4.base === join('/tmp/sandbar-ws', 't-x', '.suyou') && r4.reason !== undefined,
+      '非 /tmp/sandbar-ws 的 dir → 兜底隔离目录 + reason')
+    const r5 = resolveAgentBaseDir(repo, 't-x', null)
+    ok(r5.base === join('/tmp/sandbar-ws', 't-x', '.suyou') && (r5.reason ?? '').includes('主树道'),
+      '无泳道/无 workspace → 主树道兜底 /tmp/sandbar-ws/<id>/.suyou')
   }
 
   /* ------------------------------------------------------------ B. listAgentLogs */
@@ -213,10 +213,10 @@ process.exit(failed === 0 ? 0 : 1)
 
 // t260903-11 跨项目守卫放宽：extraRoots=票项目注册目录，命中放行、双失守拒
 {
-  const rOk = resolveSuyouBaseDir(repo, 't-x11', { worktree: '/otherproj/.lane/t-x11' }, ['/otherproj'])
+  const rOk = resolveAgentBaseDir(repo, 't-x11', { worktree: '/otherproj/.lane/t-x11' }, ['/otherproj'])
   ok(rOk.base === '/otherproj/.lane/t-x11/.suyou' && rOk.reason === undefined, 'extraRoots 命中 → 放行（跨项目票）')
-  const rNo = resolveSuyouBaseDir(repo, 't-x11', { worktree: '/otherproj/.lane/t-x11' })
+  const rNo = resolveAgentBaseDir(repo, 't-x11', { worktree: '/otherproj/.lane/t-x11' })
   ok(rNo.base === '' && (rNo.reason ?? '').includes('越界'), 'extraRoots 缺省 → 仍拒（旧行为）')
-  const rEvil = resolveSuyouBaseDir(repo, 't-x11', { worktree: '/etc' }, ['/otherproj'])
+  const rEvil = resolveAgentBaseDir(repo, 't-x11', { worktree: '/etc' }, ['/otherproj'])
   ok(rEvil.base === '' && (rEvil.reason ?? '').includes('越界'), 'extraRoots 外路径 → 仍拒（防穿越硬项）')
 }

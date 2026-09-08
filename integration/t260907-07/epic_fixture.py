@@ -4,7 +4,7 @@
 
 per-key 注册表条目（<root>/<key>/project.yaml，契约①a schema v1 固定形状）+
 各项目主目录 notes/epics/ 立项单落盘 + env 现场守卫（SANDBAR_PROJECTS_DIR 指临时根、
-SUYOU_PROJECTS_YAML 必清——legacy 模式优先级会压过 per-key 模式）。
+SANDBAR_PROJECTS_YAML 必清——legacy 模式优先级会压过 per-key 模式）。
 
 夹具卫生（方案 C3）：两项目桶均注册临时目录，绝不往真仓 worktree 根落任何文件；
 退出时 env 逐键还原（原值在位→还原，原值缺失→删键）。
@@ -22,7 +22,7 @@ PROJECT_YAML = (
     "      - %s\n"
 )
 
-GUARD_KEYS = ("SANDBAR_PROJECTS_DIR", "SUYOU_PROJECTS_YAML", "SUYOU_EPICS_DIR")
+GUARD_KEYS = ("SANDBAR_PROJECTS_DIR", "SANDBAR_PROJECTS_YAML", "SANDBAR_EPICS_DIR")
 
 
 def make_project(root, key, name=None):
@@ -44,8 +44,8 @@ def write_epic(pdir, code, body=None):
 class RegistryEnv(object):
     """把 SANDBAR_PROJECTS_DIR 指向临时注册表根（with 语法）；守卫键进出逐键还原。
 
-    SUYOU_PROJECTS_YAML 一律摘除（legacy 单文件模式优先级最高，在位会让 per-key
-    夹具整个不可见）；SUYOU_EPICS_DIR 摘除给场景一块干净底板（env 语义腿自行显式设）。
+    SANDBAR_PROJECTS_YAML 一律摘除（legacy 单文件模式优先级最高，在位会让 per-key
+    夹具整个不可见）；SANDBAR_EPICS_DIR 摘除给场景一块干净底板（env 语义腿自行显式设）。
     """
 
     def __init__(self):

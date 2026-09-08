@@ -15,12 +15,12 @@ import {
 
 const { buildMetricsResponse, defaultDeps } = await import(new URL('./../src/host/metrics.ts', import.meta.url).pathname)
 
-const savedStub = process.env.SUYOU_METRICS_STUB
-const savedDir = process.env.SUYOU_METRICS_DIR
+const savedStub = process.env.SANDBAR_METRICS_STUB
+const savedDir = process.env.SANDBAR_METRICS_DIR
 
 const mkDeps = (stub) => {
-  process.env.SUYOU_METRICS_STUB = writeStub(freshDir('t09-kpi-stub-'), stub)
-  process.env.SUYOU_METRICS_DIR = freshDir('t09-kpi-cache-')
+  process.env.SANDBAR_METRICS_STUB = writeStub(freshDir('t09-kpi-stub-'), stub)
+  process.env.SANDBAR_METRICS_DIR = freshDir('t09-kpi-cache-')
   return defaultDeps('/stub-repo', () => NOW)
 }
 
@@ -83,6 +83,6 @@ const BEFORE_W = Date.parse('2026-08-20T00:00:00Z') // 窗前创建
   ok('工单数 title 含「闭单时刻」锚点语义', t.includes('闭单时刻'), t)
 }
 
-process.env.SUYOU_METRICS_STUB = savedStub
-process.env.SUYOU_METRICS_DIR = savedDir
+process.env.SANDBAR_METRICS_STUB = savedStub
+process.env.SANDBAR_METRICS_DIR = savedDir
 process.exit(summary('kpi-anchor-unified') ? 0 : 1)

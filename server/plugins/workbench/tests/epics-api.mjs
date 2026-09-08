@@ -66,7 +66,7 @@ const EPIC_MD = `# 立项单：demo-epic
 `
 
 const tmp = await mkdtemp(join(tmpdir(), 'integ-epics-api-'))
-const savedEnv = { SUYOU_EPICS_DIR: process.env.SUYOU_EPICS_DIR, SUYOU_EPIC_NEXT_DIR: process.env.SUYOU_EPIC_NEXT_DIR }
+const savedEnv = { SANDBAR_EPICS_DIR: process.env.SANDBAR_EPICS_DIR, SANDBAR_EPIC_NEXT_DIR: process.env.SANDBAR_EPIC_NEXT_DIR }
 
 /** Mock webServer/req/res harness (same pattern as workbench smoke tests). */
 function makeHarness(repo) {
@@ -140,7 +140,7 @@ try {
   section('B detail route + anti-traversal (shapes / encoding / 404 / 405 / unknown subpath)')
   const repoB = join(tmp, 'repo-b')
   await writeStub(repoB)
-  process.env.SUYOU_EPICS_DIR = epicsDir
+  process.env.SANDBAR_EPICS_DIR = epicsDir
   const h = makeHarness(repoB)
   ok(h.prefixEpics !== undefined && h.exactEpics !== undefined, 'epics exact+prefix routes mounted')
   let r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/demo-epic')
@@ -214,7 +214,7 @@ print(json.dumps({"ok": False, "error": "stub unsupported"})); sys.exit(1)
   /* ------------------------------------------------------------ E. next-hint cache + dismiss */
   section('E next-hint: bad-JSON cache treated as miss / dismiss delete+backup+idempotent (new vs smoke)')
   // The precache dir is keyed to the repo by design: resolvePrecacheDir does NOT read
-  // env (env SUYOU_EPIC_NEXT_DIR only isolates job dirs). Tests follow the real source.
+  // env (env SANDBAR_EPIC_NEXT_DIR only isolates job dirs). Tests follow the real source.
   const cacheDir = join(repoB, '.suyou', 'epic-next')
   const rows = [{ id: 't260831-01', closed: true }, { id: 't260831-02', closed: false }]
   const stateKey = stateKeyFromRows(rows, '')
@@ -251,10 +251,10 @@ print(json.dumps({"ok": False, "error": "stub unsupported"})); sys.exit(1)
   }
 } finally {
   // Full-terminal-state cleanup: restore env, remove tmp fixtures
-  if (savedEnv.SUYOU_EPICS_DIR === undefined) delete process.env.SUYOU_EPICS_DIR
-  else process.env.SUYOU_EPICS_DIR = savedEnv.SUYOU_EPICS_DIR
-  if (savedEnv.SUYOU_EPIC_NEXT_DIR === undefined) delete process.env.SUYOU_EPIC_NEXT_DIR
-  else process.env.SUYOU_EPIC_NEXT_DIR = savedEnv.SUYOU_EPIC_NEXT_DIR
+  if (savedEnv.SANDBAR_EPICS_DIR === undefined) delete process.env.SANDBAR_EPICS_DIR
+  else process.env.SANDBAR_EPICS_DIR = savedEnv.SANDBAR_EPICS_DIR
+  if (savedEnv.SANDBAR_EPIC_NEXT_DIR === undefined) delete process.env.SANDBAR_EPIC_NEXT_DIR
+  else process.env.SANDBAR_EPIC_NEXT_DIR = savedEnv.SANDBAR_EPIC_NEXT_DIR
   await rm(tmp, { recursive: true, force: true }).catch(() => {})
 }
 

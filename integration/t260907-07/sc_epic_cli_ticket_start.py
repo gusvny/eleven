@@ -9,8 +9,8 @@ intent（用户可感知行为）：外部项目 ticket-start 关联**其自己�
 
 负路径腿零 Temporal 依赖可真跑（校验单点在 connect 之前——client.py:418 在
 _connect 之前的既定闸序）；正路径腿经 docker 测试台（t260904-19 单点搭台纪律，
-复用 t260904-02/lib_gate）：被测 env 显式清 SUYOU_EPICS_DIR（防宿主 env 泄漏
-改判锚点），显式 SUYOU_TARGET_HOST 指台（建票类测试绝不连生产，README 红线）。
+复用 t260904-02/lib_gate）：被测 env 显式清 SANDBAR_EPICS_DIR（防宿主 env 泄漏
+改判锚点），显式 SANDBAR_TARGET_HOST 指台（建票类测试绝不连生产，README 红线）。
 
 Run: python3 integration/t260907-07/sc_epic_cli_ticket_start.py（cwd=仓库根）
 三态：末行 SUMMARY 四计数；exit 0/1/2（docker/镜像/SDK/隔离台库缺席=ENV_FAIL exit 2）。
@@ -49,14 +49,14 @@ def client_env(reg, stage=None):
     """被测 client 子进程 env：注册表指夹具；epics/legacy env 必清（防宿主泄漏改判锚）。"""
     env = dict(os.environ)
     env["SANDBAR_PROJECTS_DIR"] = reg
-    env.pop("SUYOU_EPICS_DIR", None)
-    env.pop("SUYOU_PROJECTS_YAML", None)
+    env.pop("SANDBAR_EPICS_DIR", None)
+    env.pop("SANDBAR_PROJECTS_YAML", None)
     if stage:
-        env["SUYOU_TARGET_HOST"] = "127.0.0.1:%d" % stage["ports"]["temporal"]
-        env["SUYOU_NAMESPACE"] = stage["namespace"]
+        env["SANDBAR_TARGET_HOST"] = "127.0.0.1:%d" % stage["ports"]["temporal"]
+        env["SANDBAR_NAMESPACE"] = stage["namespace"]
     else:
-        env.pop("SUYOU_TARGET_HOST", None)
-        env.pop("SUYOU_NAMESPACE", None)
+        env.pop("SANDBAR_TARGET_HOST", None)
+        env.pop("SANDBAR_NAMESPACE", None)
     return env
 
 

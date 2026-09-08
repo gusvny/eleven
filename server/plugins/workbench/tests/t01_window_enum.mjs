@@ -21,12 +21,12 @@ import {
 import { PANEL_WINDOWS, loadPanelState, metricsQueryString } from './../src/client/metrics-model.ts'
 
 const m = await loadMetrics()
-const savedStub = process.env.SUYOU_METRICS_STUB
-const savedDir = process.env.SUYOU_METRICS_DIR
+const savedStub = process.env.SANDBAR_METRICS_STUB
+const savedDir = process.env.SANDBAR_METRICS_DIR
 
 const D = (stub) => {
-  process.env.SUYOU_METRICS_STUB = writeStub(freshDir('t05-t01-stub-'), stub)
-  process.env.SUYOU_METRICS_DIR = freshDir('t05-t01-cache-')
+  process.env.SANDBAR_METRICS_STUB = writeStub(freshDir('t05-t01-stub-'), stub)
+  process.env.SANDBAR_METRICS_DIR = freshDir('t05-t01-cache-')
   return m.defaultDeps('/stub-repo', () => NOW)
 }
 
@@ -99,7 +99,7 @@ const D = (stub) => {
   ok('查询串带 window=1d', metricsQueryString({ view: 'time', window: '1d', epic: 'all', project: '', template: 'dev-lane', shape: 'bar' }).includes('window=1d'))
 }
 
-if (typeof savedStub === 'undefined') delete process.env.SUYOU_METRICS_STUB; else process.env.SUYOU_METRICS_STUB = savedStub
-if (typeof savedDir === 'undefined') delete process.env.SUYOU_METRICS_DIR; else process.env.SUYOU_METRICS_DIR = savedDir
+if (typeof savedStub === 'undefined') delete process.env.SANDBAR_METRICS_STUB; else process.env.SANDBAR_METRICS_STUB = savedStub
+if (typeof savedDir === 'undefined') delete process.env.SANDBAR_METRICS_DIR; else process.env.SANDBAR_METRICS_DIR = savedDir
 const passAll = summary('t01_window_enum')
 process.exit(passAll ? 0 : 1)

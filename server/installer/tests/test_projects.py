@@ -62,7 +62,7 @@ class Base(unittest.TestCase):
         self.paths = InstallPaths(root=str(REPO_ROOT), home=str(self.home))
         self._env = {}
         self._setenv("SANDBAR_PROJECTS_DIR", str(self.reg))
-        self._setenv("SUYOU_PROJECTS_YAML", None)
+        self._setenv("SANDBAR_PROJECTS_YAML", None)
         self._setenv("SANDBAR_HOME", str(self.home))
 
     def tearDown(self):
@@ -373,8 +373,8 @@ class AddRejections(Base):
         legacy = self.tmp / "legacy.yaml"
         legacy.write_text("projects:\n  - key: seed-a\n    name: 种子甲\n    dirs:\n"
                           "      - %s\n" % self.root_a, encoding="utf-8")
-        self._setenv("SUYOU_PROJECTS_YAML", str(legacy))
-        self._reject("new-key", "n", self.proj_root("r-legacy"), "SUYOU_PROJECTS_YAML")
+        self._setenv("SANDBAR_PROJECTS_YAML", str(legacy))
+        self._reject("new-key", "n", self.proj_root("r-legacy"), "SANDBAR_PROJECTS_YAML")
 
     def test_preexisting_dir_without_entry_accepted(self):
         # 目录在而无条目（①b 预布置旅程）：add 照常成功——排他锚是 project.yaml 文件
@@ -537,7 +537,7 @@ class ListReport(Base):
         legacy = self.tmp / "legacy.yaml"
         legacy.write_text("projects:\n  - key: seed-a\n    name: 种子甲\n    dirs:\n"
                           "      - %s\n" % self.proj_root("root-a"), encoding="utf-8")
-        self._setenv("SUYOU_PROJECTS_YAML", str(legacy))
+        self._setenv("SANDBAR_PROJECTS_YAML", str(legacy))
         lines = []
         with mock.patch.object(projects_mod, "_ticket_counts",
                                return_value={"state": "ok", "open": 0, "closed": 0,
@@ -824,12 +824,12 @@ class RemoveLifecycle(RemoveStub):
     def test_legacy_env_rejected_for_remove(self):
         legacy = self.tmp / "legacy.yaml"
         legacy.write_text("projects: []\n", encoding="utf-8")
-        self._setenv("SUYOU_PROJECTS_YAML", str(legacy))
+        self._setenv("SANDBAR_PROJECTS_YAML", str(legacy))
         before = self.tree()
         with self.assertRaises(FailClosed) as cm:
             projects_mod.cmd_project_remove(self._stub_rows([]), self._args(),
                                             log=lambda *_: None)
-        self.assertIn("SUYOU_PROJECTS_YAML", str(cm.exception))
+        self.assertIn("SANDBAR_PROJECTS_YAML", str(cm.exception))
         self.assertEqual(self.tree(), before)
 
     def test_unregistered_and_quarantined_distinguishable(self):
@@ -964,8 +964,8 @@ class CliWiring(Base):
         src = (SERVER_DIR / "installer" / "projects.py").read_text("utf-8")
         for i, line in enumerate(src.split("\n"), 1):
             if "suyou" in line.lower():
-                self.assertTrue("SUYOU_PROJECTS_YAML" in line
-                                or "suyou-projects.ts" in line,
+                self.assertTrue("SANDBAR_PROJECTS_YAML" in line
+                                or "project-registry.ts" in line,
                                 "projects.py:%d 出现未申报的 suyou 标识" % i)
 
 

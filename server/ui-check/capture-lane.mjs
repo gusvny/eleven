@@ -15,7 +15,7 @@
 //   - build 陈旧（lib/client.js mtime 早于 src/client|src/host 最新 mtime）→ 拒跑。
 //     拍陈旧 build 的截图=证据造假，宁可没证据。mtime 误报（checkout 刷新 mtime）
 //     是安全侧失败：人工重跑即可。
-//   - 隔离台 preset 源缺失/畸形（t260901-02）：$HOME/.dsh/.agent-presets/suyou-integration
+//   - 隔离台 preset 源缺失/畸形（t260901-02）：$HOME/.dsh/.agent-presets/sandbar-integration
 //     不存在或缺 preset.yml/agent.cordis.yml → 拒跑（chat 态建会话必须该 preset，
 //     仓库外人工工件；不自造假 preset 造假证据）。
 //
@@ -40,7 +40,7 @@ import process from "node:process";
 import { perkeyIsHit, resolveCredentialsSource } from "./creds-source.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(HERE, "..", "..", "..");
+const REPO_ROOT = path.resolve(HERE, "..", "..");  // server/ui-check → 仓根（t260907-10 摊平后两层）
 
 function parseArgs(argv) {
   const args = { lane: null, out: null, selftest: false, stageJson: null, bootLocal: false };
@@ -112,15 +112,15 @@ export function laneBuildRejectReason(laneWbDir) {
 
 /** 隔离台 preset 物化拒因（t260901-02，镜像 laneBuildRejectReason 的拒跑模式：
  * 人话拒因 + 纯函数可单测 + 安全侧失败——缺源=拒跑指路，不自造假 preset 造假证据）。
- * 返回 null=可物化，否则为人话拒因。源=仓库外实体 $HOME/.dsh/.agent-presets/suyou-integration/
+ * 返回 null=可物化，否则为人话拒因。源=仓库外实体 $HOME/.dsh/.agent-presets/sandbar-integration/
  * （cordis.patch.yml：用户 preset 唯一入口、软链不被扫描；agent.cordis.yml 是 dsh 出厂
  * standard 组合现役版原样拷贝 + persona 内联，仓库内无真源，不现拼）。 */
 export function presetMaterializeRejectReason(srcDir) {
   if (!existsSync(srcDir)) {
     return `隔离台 preset 源缺失：${srcDir} 不存在。chat 态建会话需控制台默认 preset ` +
-      `suyou-integration（仓库外人工工件）。按 server/profile/cordis.patch.yml 的 ` +
+      `sandbar-integration（仓库外人工工件）。按 server/profile/cordis.patch.yml 的 ` +
       `agent-presets 注释在主 checkout 用户家重建该实体目录（preset.yml + agent.cordis.yml，` +
-      `实体复制，软链不被扫描），或用 SUYOU_CAPTURE_PRESET_SOURCE 指向替代源。`;
+      `实体复制，软链不被扫描），或用 SANDBAR_CAPTURE_PRESET_SOURCE 指向替代源。`;
   }
   for (const f of ["preset.yml", "agent.cordis.yml"]) {
     const p = path.join(srcDir, f);
@@ -133,7 +133,7 @@ export function presetMaterializeRejectReason(srcDir) {
  * roster 只扫 $DSH_HOME/.agent-presets/ 实体目录，软链不被扫描（cordis.patch.yml 实证）。
  * 复制后自校验关键文件落地为实体——校验不过即抛（boot 前拒跑）。 */
 export async function materializePresets(tmpHome, srcDir) {
-  const dstDir = path.join(tmpHome, ".agent-presets", "suyou-integration");
+  const dstDir = path.join(tmpHome, ".agent-presets", "sandbar-integration");
   await mkdir(path.dirname(dstDir), { recursive: true });
   await cp(srcDir, dstDir, { recursive: true });
   for (const f of ["preset.yml", "agent.cordis.yml"]) {
@@ -149,7 +149,7 @@ export async function materializePresets(tmpHome, srcDir) {
  * 仅 sandbar-workbench 改指泳道 workbench 目录（泳道 lib/client.js 生效，其余插件不动）。 */
 export async function buildTempProfile(tmpHome, laneWorkbenchDir) {
   const repoProfile = path.join(REPO_ROOT, "server", "profile");
-  const profDir = path.join(tmpHome, "profiles", "suyou");
+  const profDir = path.join(tmpHome, "profiles", "sandbar");
   await mkdir(profDir, { recursive: true });
   for (const f of ["cordis.yml", "cordis.patch.yml", "package.json"]) {
     const src = path.join(repoProfile, f);
@@ -257,7 +257,7 @@ export async function main() {
       process.exit(2);
     }
     const project = `capture-lane-${process.pid}`;
-    const timeoutSec = Number(process.env.SUYOU_CAPTURE_STAGE_TIMEOUT_SEC || 600);
+    const timeoutSec = Number(process.env.SANDBAR_CAPTURE_STAGE_TIMEOUT_SEC || 600);
     const up = spawnSync("python3", [stageCli, "up", "--project", project,
       "--services", "full", "--timeout", String(timeoutSec)],
       { encoding: "utf8", timeout: timeoutSec * 1000 + 15000 });
@@ -274,8 +274,8 @@ export async function main() {
     console.log("[capture-lane] 降级说明：--boot-local 显式走自搭进程台（docker 缺席宿主的人工通路；闸内一律走 docker 舞台）");
   }
 
-  const consoleCmd = (process.env.SUYOU_CONSOLE_CMD || "dsh --profile suyou").split(" ");
-  const bootTimeoutMs = Number(process.env.SUYOU_CAPTURE_LANE_BOOT_MS || 45000);
+  const consoleCmd = (process.env.SANDBAR_CONSOLE_CMD || "dsh --profile suyou").split(" ");
+  const bootTimeoutMs = Number(process.env.SANDBAR_CAPTURE_LANE_BOOT_MS || 45000);
   let tmpHome = null;
   let proc = null;
   let logFd = null;
@@ -327,9 +327,9 @@ export async function main() {
     await buildTempProfile(tmpHome, laneWb);
     // preset 物化（t260901-02）：源=仓库外实体，**不随 env DSH_HOME**（空 DSH_HOME
     // 干净环境模拟时 env 只当隔离台目标；凭据源同因，见上方拷凭据注释）。
-    // env SUYOU_CAPTURE_PRESET_SOURCE 仅作单测/基线桩覆盖。
-    const presetSrc = process.env.SUYOU_CAPTURE_PRESET_SOURCE
-      || path.join(process.env.HOME || "", ".dsh", ".agent-presets", "suyou-integration");
+    // env SANDBAR_CAPTURE_PRESET_SOURCE 仅作单测/基线桩覆盖。
+    const presetSrc = process.env.SANDBAR_CAPTURE_PRESET_SOURCE
+      || path.join(process.env.HOME || "", ".dsh", ".agent-presets", "sandbar-integration");
     const presetReject = presetMaterializeRejectReason(presetSrc);
     if (presetReject) { console.error(`[capture-lane] 拒跑：${presetReject}`); process.exit(2); }
     await materializePresets(tmpHome, presetSrc);
@@ -351,8 +351,8 @@ export async function main() {
           ...process.env,
           DSH_HOME: tmpHome,
           // 控制台插件 wf API 指向的外部 Temporal（只读展示）；截图台不依赖它在线
-          SUYOU_TARGET_HOST: process.env.SUYOU_CAPTURE_TARGET_HOST
-            || process.env.SUYOU_TARGET_HOST || "127.0.0.1:17233",
+          SANDBAR_TARGET_HOST: process.env.SANDBAR_CAPTURE_TARGET_HOST
+            || process.env.SANDBAR_TARGET_HOST || "127.0.0.1:17233",
           // 凭据来源：capture-lane 已把用户真 .credentials.yaml 拷进临时 DSH_HOME
           // （见上方 copyFile 循环），控制台从这里读到真 key——准入与模型调用全通。
           // ⚠️ 不要在此处 env 硬设 DEEPSEEK_API_KEY 假值：env 优先级高于
@@ -369,21 +369,21 @@ export async function main() {
         `chat 种子如需用户 preset 请用 --boot-local 人工通路`);
     }
     await mkdir(args.out, { recursive: true });
-    // 状态注入 opt-in（t260901-24）：env SUYOU_CAPTURE_FIXTURES=1（bench 级开关，
+    // 状态注入 opt-in（t260901-24）：env SANDBAR_CAPTURE_FIXTURES=1（bench 级开关，
     // 本脚本只认这一个名字）才向 capture.mjs 追加 --fixtures；缺省不传=7 视图口径
     // 逐字节不变，agent_activities 两处调用方的 ui_evidence 证据永不含虚构票。
-    // C1 防错配：子进程 env 剥掉 SUYOU_UI_CAPTURE_FIXTURES（那是 capture.mjs 直跑
+    // C1 防错配：子进程 env 剥掉 SANDBAR_UI_CAPTURE_FIXTURES（那是 capture.mjs 直跑
     // 通路专用名），保证台内注入单一开关来源——误设 capture 级 env 名也不会在台内
     // 形成第二开关（两 env 名作用域/优先级详见 ui-check/README.md）。
-    const fixtureOptIn = process.env.SUYOU_CAPTURE_FIXTURES === "1";
-    if (fixtureOptIn) console.log("[capture-lane] 状态注入已 opt-in（SUYOU_CAPTURE_FIXTURES=1）：本次截图含 fixture 注入态视图，证据以 fixture-manifest.json 为准");
+    const fixtureOptIn = process.env.SANDBAR_CAPTURE_FIXTURES === "1";
+    if (fixtureOptIn) console.log("[capture-lane] 状态注入已 opt-in（SANDBAR_CAPTURE_FIXTURES=1）：本次截图含 fixture 注入态视图，证据以 fixture-manifest.json 为准");
     const capArgs = [path.join(HERE, "capture.mjs"),
       "--url", `http://127.0.0.1:${port}/`, "--out", args.out, "--allow-seed"];
     // 旗必须带目录值：capture.mjs 把裸 --fixtures 的缺省值解析成 ""（falsy），
     // 静默不注入——台内显式传本目录 fixtures/ 包（t260901-24 真拍实测发现）。
     if (fixtureOptIn) capArgs.push("--fixtures", path.join(HERE, "fixtures"));
     const capEnv = { ...process.env };
-    delete capEnv.SUYOU_UI_CAPTURE_FIXTURES;
+    delete capEnv.SANDBAR_UI_CAPTURE_FIXTURES;
     const cap = spawn(process.execPath, capArgs, {
       cwd: lane,
       env: {
@@ -391,12 +391,12 @@ export async function main() {
         // 台内造数门旗（t260831-02）：隔离台 DSH_HOME 是临时的，capture.mjs 的
         // seedSessions（建真实会话 + 写本插件 localStorage 账册）只在本路径放行；
         // 直连生产路径不带旗，行为=明确报错交人（只读红线）。
-        SUYOU_UI_CAPTURE_ALLOW_SEED: "1",
+        SANDBAR_UI_CAPTURE_ALLOW_SEED: "1",
         // 泳道不装 node_modules（t260829-02 先例）：playwright-core 从「主树」
-        // ui-check 加载。泳道运行时主树 ≠ 本脚本所在树，用 SUYOU_CAPTURE_MAIN_UI_CHECK
+        // ui-check 加载。泳道运行时主树 ≠ 本脚本所在树，用 SANDBAR_CAPTURE_MAIN_UI_CHECK
         // 覆盖（指主树 server/ui-check 目录）；缺省=本脚本所在树（主树直跑场景）。
-        SUYOU_PLAYWRIGHT_MODULE: path.join(
-          process.env.SUYOU_CAPTURE_MAIN_UI_CHECK
+        SANDBAR_PLAYWRIGHT_MODULE: path.join(
+          process.env.SANDBAR_CAPTURE_MAIN_UI_CHECK
           || path.join(REPO_ROOT, "server", "ui-check"),
           "node_modules", "playwright-core"),
       },
@@ -449,7 +449,7 @@ async function selftest() {
     console.log("[capture-lane] selftest 3/6 绿：临时 profile 组装（workbench 软链指向泳道）");
     // 4. preset 物化三态（t260901-02）：真源实体落地 / 畸形源拒跑 / 缺失源拒跑。
     //    全部用临时桩目录，不依赖真源在（CI/新机器可跑）；env 覆盖路径不在此测
-    //    （materializePresets 直接收参，main() 的 SUYOU_CAPTURE_PRESET_SOURCE 由基线测）。
+    //    （materializePresets 直接收参，main() 的 SANDBAR_CAPTURE_PRESET_SOURCE 由基线测）。
     const presetSrcStub = path.join(tmp, "preset-src");
     await mkdir(presetSrcStub, { recursive: true });
     const rMiss = presetMaterializeRejectReason(path.join(tmp, "no-such-preset"));
@@ -461,7 +461,7 @@ async function selftest() {
     const rOk = presetMaterializeRejectReason(presetSrcStub);
     if (rOk) throw new Error(`完整桩源不应拒跑：${rOk}`);
     const matDst = await materializePresets(tmp, presetSrcStub);
-    if (matDst !== path.join(tmp, ".agent-presets", "suyou-integration")) {
+    if (matDst !== path.join(tmp, ".agent-presets", "sandbar-integration")) {
       throw new Error(`物化落点异常：${matDst}`);
     }
     for (const f of ["preset.yml", "agent.cordis.yml"]) {

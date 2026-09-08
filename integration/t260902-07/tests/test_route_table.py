@@ -2,7 +2,7 @@
 """t260902-07 集成测试 ①：路由表静态校验（stdlib，无 PyYAML 依赖）。
 
 校验对象：server/model-routes.yaml
-- integration 路由 = zai-coding-cn / glm-5.3-flash
+- integration 路由 = kimi-coding / k3（260907 宿主改表）
 - 其余角色无回归（default/developer=zai/glm-5.3-flash；ops/artist=kimi-coding/k3）
 - YAML 最小子集格式自检（无 tab、值裸 token 无引号、缩进 2 空格）
 - 头部「可用 ref 核实清单」含 zai-coding-cn 条目（模型 ref 不许发明的红线）
@@ -69,10 +69,10 @@ def main():
     roles = table.get("roles", {})
 
     integ = roles.get("integration", {})
-    check(integ.get("provider") == "zai-coding-cn",
-          "roles.integration.provider == zai-coding-cn（实得 %r）" % integ.get("provider"))
-    check(integ.get("model") == "glm-5.3-flash",
-          "roles.integration.model == glm-5.3-flash（实得 %r）" % integ.get("model"))
+    check(integ.get("provider") == "kimi-coding",
+          "roles.integration.provider == kimi-coding（260907 宿主改表；实得 %r）" % integ.get("provider"))
+    check(integ.get("model") == "k3",
+          "roles.integration.model == k3（260907 宿主改表；实得 %r）" % integ.get("model"))
 
     expect = {
         "default": ("zai", "glm-5.3-flash"),

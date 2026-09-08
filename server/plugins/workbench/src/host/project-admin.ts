@@ -8,7 +8,7 @@
  *   spawn `python3 <repo>/server/admin.py`，而 project 命令族真实入口=仓根
  *   `sandbar` 薄壳（installer.cli.main；admin.py 内零 project 接线，实核）。
  *   逐项取舍：
- *   - repo 锚定：**带**。repo 由 node.ts `config?.repo ?? SUYOU_REPO ?? DEFAULT_REPO`
+ *   - repo 锚定：**带**。repo 由 node.ts `config?.repo ?? SANDBAR_REPO ?? DEFAULT_REPO`
  *     同源解析传入（node.ts:319），spawn cwd=repo、entry=<repo>/sandbar——防异仓
  *     执行错注册表（KI-032/033 错仓=脑裂）。
  *   - 超时：**不带原值**。runAdminCli 默认 300s（UI 照抄=宿主转圈五分钟）；本壳

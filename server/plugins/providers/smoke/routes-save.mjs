@@ -7,7 +7,7 @@
  *      → applyRouteEdits 对真源文本 → changed 应为空（载荷即现状，无扰动）。
  *   B. 编辑语义：改 developer.model / 清空 ops.model → 补丁命中对应键路径，
  *      重解析后值生效；清空后查表向上落 default。
- *   C. 跨插件保存链路：sandbar-admin-ui 宿主 POST /suyou-admin/api/routes/save
+ *   C. 跨插件保存链路：sandbar-admin-ui 宿主 POST /sandbar-admin/api/routes/save
  *      （mock webServer）接收「路由表」分区会发的载荷 → 写 model-routes.yaml
  *      （临时 repo）+ 备份 /tmp + 响应 regenerate 提示；保存后 buildRoutesView 查表生效。
  *   D. 非法载荷拒绝：未登记角色 → 200 {ok:false}（宿主 schema 兜底，不写文件）。
@@ -91,10 +91,10 @@ section('C 保存链路：providers 载荷 → ui 宿主 POST → 写表+备份+
     await copyFile(join(REPO, 'server', 'model-routes.yaml'), join(repo, 'server', 'model-routes.yaml'))
     // 多项目化（260823）：宿主 routes 路由的 repo 解析走 projects.yaml 注册表
     // （projOf→primaryDir），apply 的 repo 入参不再管这两条路由——smoke 经
-    // SUYOU_PROJECTS_YAML 写临时注册表指向临时 repo，否则保存会误写真表。
+    // SANDBAR_PROJECTS_YAML 写临时注册表指向临时 repo，否则保存会误写真表。
     const registry = join(tmp, 'projects.yaml')
     await writeFile(registry, `projects:\n  - key: smoketest\n    name: 冒烟\n    dirs:\n      - ${repo}\n`, 'utf8')
-    process.env.SUYOU_PROJECTS_YAML = registry
+    process.env.SANDBAR_PROJECTS_YAML = registry
 
     const routes = []
     const ws = { register: (r) => { routes.push(r); return () => {} } }
@@ -105,8 +105,8 @@ section('C 保存链路：providers 载荷 → ui 宿主 POST → 写表+备份+
       on: () => () => {},
     }
     apply(ctx, { repo })
-    const saveRoute = routes.find(x => x.kind === 'exact' && x.path === '/suyou-admin/api/routes/save')
-    const getRoute = routes.find(x => x.kind === 'exact' && x.path === '/suyou-admin/api/routes')
+    const saveRoute = routes.find(x => x.kind === 'exact' && x.path === '/sandbar-admin/api/routes/save')
+    const getRoute = routes.find(x => x.kind === 'exact' && x.path === '/sandbar-admin/api/routes')
     ok(saveRoute !== undefined && getRoute !== undefined, 'ui 宿主 routes GET+save 路由都在')
 
     // 模拟「路由表」分区：真源视图 → 草稿 → 改 developer 模型 → 载荷
@@ -117,7 +117,7 @@ section('C 保存链路：providers 载荷 → ui 宿主 POST → 写表+备份+
 
     const res = () => ({ status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } })
     const req = (body) => ({
-      url: '/suyou-admin/api/routes/save?project=smoketest', method: 'POST',
+      url: '/sandbar-admin/api/routes/save?project=smoketest', method: 'POST',
       [Symbol.asyncIterator]: async function* () { yield Buffer.from(JSON.stringify(body), 'utf8') },
     })
     const r1 = res()
@@ -151,7 +151,7 @@ section('D 非法载荷拒绝（宿主 schema 兜底，不写文件）')
     // 注册表覆盖按段重建（C 段的临时注册表随 tmp 删除了，env 现读需指活文件）
     const registry = join(tmp, 'projects.yaml')
     await writeFile(registry, `projects:\n  - key: smoketest\n    name: 冒烟\n    dirs:\n      - ${repo}\n`, 'utf8')
-    process.env.SUYOU_PROJECTS_YAML = registry
+    process.env.SANDBAR_PROJECTS_YAML = registry
     const routes = []
     const ws = { register: (r) => { routes.push(r); return () => {} } }
     const ctx = {
@@ -161,10 +161,10 @@ section('D 非法载荷拒绝（宿主 schema 兜底，不写文件）')
       on: () => () => {},
     }
     apply(ctx, { repo })
-    const saveRoute = routes.find(x => x.kind === 'exact' && x.path === '/suyou-admin/api/routes/save')
+    const saveRoute = routes.find(x => x.kind === 'exact' && x.path === '/sandbar-admin/api/routes/save')
     const res = () => ({ status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } })
     const req = (body) => ({
-      url: '/suyou-admin/api/routes/save?project=smoketest', method: 'POST',
+      url: '/sandbar-admin/api/routes/save?project=smoketest', method: 'POST',
       [Symbol.asyncIterator]: async function* () { yield Buffer.from(JSON.stringify(body), 'utf8') },
     })
     const r = res()

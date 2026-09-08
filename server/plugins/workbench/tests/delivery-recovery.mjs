@@ -11,7 +11,7 @@
  *  ④ W4 双算面：一 commit 引用两票 id 时提交集口径双算（记录为已知行为，
  *     reason 不静默）；
  *  ⑤ 畸形 numstat（非数字/二进制'-'行）不计入不崩；token 泳道会话陪葬→
- *     prev.tokens 存量保留；账本缝（SUYOU_USAGE_LEDGER_DIR）探测。
+ *     prev.tokens 存量保留；账本缝（SANDBAR_USAGE_LEDGER_DIR）探测。
  *
  * Run: node server/plugins/workbench/tests/delivery-recovery.mjs  (cwd = repo root)
  */
@@ -24,9 +24,9 @@ import { join } from 'node:path'
 
 const { buildMetricsResponse, defaultDeps, engineVersionOf, SOURCE_VERSION } = await import(new URL('./../src/host/metrics.ts', import.meta.url).pathname)
 
-/** 缓存目录布局（契约路径约定）：<SUYOU_METRICS_DIR>/<project>/data/metrics/。 */
+/** 缓存目录布局（契约路径约定）：<SANDBAR_METRICS_DIR>/<project>/data/metrics/。 */
 async function mkCacheDir(prefix) {
-  // env 语义 = 根（SUYOU_METRICS_DIR），实现内部再拼 <project>/data/metrics/
+  // env 语义 = 根（SANDBAR_METRICS_DIR），实现内部再拼 <project>/data/metrics/
   const root = freshDir(prefix)
   const dir = join(root, 'demo', 'data', 'metrics')
   await mkdir(dir, { recursive: true })
@@ -38,9 +38,9 @@ async function mkCacheDir(prefix) {
 const H = (n) => String(n).repeat(39) + String(n)
 const SQ = (h, id, tail = 'squash 收口（一单一提交，KI-006）') => `${h} ${id} ${tail}`
 
-const savedStub = process.env.SUYOU_METRICS_STUB
-const savedDir = process.env.SUYOU_METRICS_DIR
-const savedLedger = process.env.SUYOU_USAGE_LEDGER_DIR
+const savedStub = process.env.SANDBAR_METRICS_STUB
+const savedDir = process.env.SANDBAR_METRICS_DIR
+const savedLedger = process.env.SANDBAR_USAGE_LEDGER_DIR
 
 const gitDeps = (pairs, repo = '/stub-repo') => ({
   repo,
@@ -140,12 +140,12 @@ const gitDeps = (pairs, repo = '/stub-repo') => ({
   await mkdir(cacheDir, { recursive: true })
   await writeFile(join(cacheDir, 't09-stale.json'), JSON.stringify(prevRec), 'utf8')
   // 现行 stages 链与 stub 同源 → engineVersionOf(STAGES) ≠ oldEngine → engineStale
-  process.env.SUYOU_METRICS_DIR = cacheRoot
-  process.env.SUYOU_METRICS_STUB = writeStub(stubDir, baseStub({
+  process.env.SANDBAR_METRICS_DIR = cacheRoot
+  process.env.SANDBAR_METRICS_STUB = writeStub(stubDir, baseStub({
     tickets: [closedTicket('t09-stale', baseStub(), { t0: Date.parse('2026-08-30T01:00:00Z'), closedAt: Date.parse('2026-08-30T04:00:00Z') })],
   }))
   // 泳道会话已拆（stub repo 无 .dsh/sessions）+ 无账本 → token 现算失败 → 存量保留
-  delete process.env.SUYOU_USAGE_LEDGER_DIR
+  delete process.env.SANDBAR_USAGE_LEDGER_DIR
   const deps = defaultDeps('/stub-repo', () => NOW)
   const r = await buildMetricsResponse({ view: 'time', window: '7d' }, deps)
   ok('200', r.status === 200, JSON.stringify(r.body).slice(0, 300))
@@ -159,22 +159,22 @@ const gitDeps = (pairs, repo = '/stub-repo') => ({
   ok('落盘 rec：锚点已入缓存（created_ms/closed_ms）', Number.isFinite(after.created_ms) && Number.isFinite(after.closed_ms))
 }
 
-// ---- 账本缝：SUYOU_USAGE_LEDGER_DIR 探测
+// ---- 账本缝：SANDBAR_USAGE_LEDGER_DIR 探测
 {
   console.log('⑥ 项目级 usage 账本缝：未配置显式 reason、配置后可聚合（前向契约）')
   const { resolveLedgerSessionFiles } = await import(new URL('./../src/host/agent-usage.ts', import.meta.url).pathname)
-  delete process.env.SUYOU_USAGE_LEDGER_DIR
+  delete process.env.SANDBAR_USAGE_LEDGER_DIR
   const r1 = await resolveLedgerSessionFiles('t09-led')
   ok('未配置：paths 空 + reason 提 KI-017③', r1.paths.length === 0 && String(r1.reason).includes('KI-017③'), String(r1.reason))
   const ledger = freshDir('t09-ledger-')
   await mkdir(join(ledger, 't09-led'), { recursive: true })
   await writeFile(join(ledger, 't09-led', 's.jsonl.zstd'), 'not-zstd-but-probed', 'utf8')
-  process.env.SUYOU_USAGE_LEDGER_DIR = ledger
+  process.env.SANDBAR_USAGE_LEDGER_DIR = ledger
   const r2 = await resolveLedgerSessionFiles('t09-led')
   ok('配置后：探测到文件（聚合通路复用同参）', r2.paths.length === 1 && r2.reason === undefined, JSON.stringify(r2))
   const r3 = await resolveLedgerSessionFiles('t09-absent')
   ok('账本无本票目录：人话 reason', r3.paths.length === 0 && String(r3.reason).includes('无本票目录'))
-  delete process.env.SUYOU_USAGE_LEDGER_DIR
+  delete process.env.SANDBAR_USAGE_LEDGER_DIR
 }
 
 // ---- ⑦ t260904-04 KI-041：绝对路径 worktree 直接用（join 毒路径归一）
@@ -233,12 +233,12 @@ const gitDeps = (pairs, repo = '/stub-repo') => ({
   })
   const run = (deps, query = { view: 'delivery', window: 'all' }) => buildMetricsResponse(query, deps)
 
-  process.env.SUYOU_METRICS_DIR = cacheRoot
-  process.env.SUYOU_METRICS_STUB = writeStub(stubDir, baseStub({
+  process.env.SANDBAR_METRICS_DIR = cacheRoot
+  process.env.SANDBAR_METRICS_STUB = writeStub(stubDir, baseStub({
     tickets: [healTicket('t09-heal-old'), healTicket('t09-heal-fresh'), healTicket('t09-open-stale'), healTicket('t09-nof-ts'), healTicket('t09-null-frozen')],
   }))
-  delete process.env.SUYOU_USAGE_LEDGER_DIR
-  process.env.SUYOU_METRICS_REPROBE_TTL_MIN = '60'
+  delete process.env.SANDBAR_USAGE_LEDGER_DIR
+  process.env.SANDBAR_METRICS_REPROBE_TTL_MIN = '60'
 
   // ⑧a 过 TTL null 记录：重探出数 + frozen + updated_ts 前移
   await writeRec('t09-heal-old', mkRec('t09-heal-old', { updated_ts: new Date(NOW - 2 * 3600e3).toISOString() }))
@@ -284,11 +284,11 @@ const gitDeps = (pairs, repo = '/stub-repo') => ({
 
   // ⑧f TTL=0：每次必探（仅测试语义）
   await writeRec('t09-heal-fresh', mkRec('t09-heal-fresh'))
-  process.env.SUYOU_METRICS_REPROBE_TTL_MIN = '0'
+  process.env.SANDBAR_METRICS_REPROBE_TTL_MIN = '0'
   const f = mkDeps(grepPairs('t09-heal-fresh'))
   await run(f.deps)
   ok('⑧f TTL=0 每次必探', f.gitCalls.length === 2, JSON.stringify(f.gitCalls))
-  delete process.env.SUYOU_METRICS_REPROBE_TTL_MIN
+  delete process.env.SANDBAR_METRICS_REPROBE_TTL_MIN
 }
 
 // ---- ⑨ t260904-04 KI-043①：per-project repo 解析（repoForProject 换根）
@@ -296,11 +296,11 @@ const gitDeps = (pairs, repo = '/stub-repo') => ({
   console.log('⑨ KI-043①：project=suyou → git cwd 指向项目主目录（双门同吃 defaultDeps）')
   const { root: cacheRoot } = await mkCacheDir('t09-rp-cache-')
   const stubDir = freshDir('t09-rp-stub-')
-  process.env.SUYOU_METRICS_DIR = cacheRoot
-  process.env.SUYOU_METRICS_STUB = writeStub(stubDir, baseStub({
+  process.env.SANDBAR_METRICS_DIR = cacheRoot
+  process.env.SANDBAR_METRICS_STUB = writeStub(stubDir, baseStub({
     tickets: [closedTicket('t09-rp', baseStub(), { t0: Date.parse('2026-08-30T01:00:00Z'), closedAt: Date.parse('2026-08-30T04:00:00Z') })],
   }))
-  delete process.env.SUYOU_USAGE_LEDGER_DIR
+  delete process.env.SANDBAR_USAGE_LEDGER_DIR
   const gitCalls = []
   const base = {
     ...defaultDeps('/sandbar-repo', () => NOW),
@@ -345,10 +345,10 @@ const gitDeps = (pairs, repo = '/stub-repo') => ({
   }
   await mkdir(cacheDir, { recursive: true })
   await writeFile(join(cacheDir, 't09-arch.json'), JSON.stringify(prevRec), 'utf8')
-  process.env.SUYOU_METRICS_DIR = cacheRoot
-  process.env.SUYOU_METRICS_STUB = writeStub(stubDir, baseStub({ tickets: [] }))
-  delete process.env.SUYOU_USAGE_LEDGER_DIR
-  process.env.SUYOU_METRICS_REPROBE_TTL_MIN = '0' // 强制首拍重探（复现 F1 的触发条件）
+  process.env.SANDBAR_METRICS_DIR = cacheRoot
+  process.env.SANDBAR_METRICS_STUB = writeStub(stubDir, baseStub({ tickets: [] }))
+  delete process.env.SANDBAR_USAGE_LEDGER_DIR
+  process.env.SANDBAR_METRICS_REPROBE_TTL_MIN = '0' // 强制首拍重探（复现 F1 的触发条件）
   const mkDeps = (pairs) => ({
     ...defaultDeps('/stub-repo', () => NOW),
     git: async (cwd, args) => {
@@ -371,15 +371,15 @@ const gitDeps = (pairs, repo = '/stub-repo') => ({
   ok('⑩F2 open 不被合成行洗白（仍 true，不误翻）', recAfter.open === true, String(recAfter.open))
   ok('⑩F2 重算拍 notice 显式计数（closed 可能低计）', String(r1.body.reason ?? '').includes('open 标志无外部真源'), String(r1.body.reason ?? '').slice(0, 200))
   // F2：第二拍（纯命中）notice 仍在（显式化不随拍漂移）
-  process.env.SUYOU_METRICS_REPROBE_TTL_MIN = '60'
+  process.env.SANDBAR_METRICS_REPROBE_TTL_MIN = '60'
   const r2 = await buildMetricsResponse({ view: 'delivery', window: 'all' }, mkDeps({}))
   ok('⑩F2 命中拍 notice 仍在', String(r2.body.reason ?? '').includes('open 标志无外部真源'), String(r2.body.reason ?? '').slice(0, 200))
   ok('⑩F2 命中拍人口仍在（tickets=1）', r2.body.kpis.tickets === 1, JSON.stringify(r2.body.kpis))
-  delete process.env.SUYOU_METRICS_REPROBE_TTL_MIN
+  delete process.env.SANDBAR_METRICS_REPROBE_TTL_MIN
 }
 
-process.env.SUYOU_METRICS_STUB = savedStub
-process.env.SUYOU_METRICS_DIR = savedDir
-if (savedLedger === undefined) delete process.env.SUYOU_USAGE_LEDGER_DIR
-else process.env.SUYOU_USAGE_LEDGER_DIR = savedLedger
+process.env.SANDBAR_METRICS_STUB = savedStub
+process.env.SANDBAR_METRICS_DIR = savedDir
+if (savedLedger === undefined) delete process.env.SANDBAR_USAGE_LEDGER_DIR
+else process.env.SANDBAR_USAGE_LEDGER_DIR = savedLedger
 process.exit(summary('delivery-recovery') ? 0 : 1)
