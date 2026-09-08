@@ -30,7 +30,8 @@ else
 fi
 
 if [ "${1:-}" = "--all" ]; then
-  TPIDS=$(pgrep -f 'temporal server start-dev|temporal-poc/worker.py' || true)
+  # t260907-10：双分支收尸——迁移窗口内旧路径在跑 worker 也要停得住；摘除票删旧分支
+  TPIDS=$(pgrep -f 'temporal server start-dev|engine/worker.py|temporal-poc/worker.py' || true)
   if [ -n "$TPIDS" ]; then
     echo "▶ 停 temporal server/worker：$TPIDS"
     kill $TPIDS 2>/dev/null || true
@@ -39,6 +40,6 @@ if [ "${1:-}" = "--all" ]; then
     echo "○ temporal 本就没在跑"
   fi
 else
-  LEFT=$(pgrep -fl 'temporal server start-dev|temporal-poc/worker.py' || true)
+  LEFT=$(pgrep -fl 'temporal server start-dev|engine/worker.py|temporal-poc/worker.py' || true)
   [ -n "$LEFT" ] && echo "○ temporal 仍在跑（不动它；要一起停：./stop-console.sh --all）"
 fi

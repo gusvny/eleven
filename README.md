@@ -12,10 +12,10 @@ semver 从 v0.1.0 起（首版=搬迁快照）。依赖 dsh 发行包（@deepsee
 
 | suyou 路径 | 本仓 | 说明 |
 | --- | --- | --- |
-| server/dsh/temporal-poc/ | 同路径 | 引擎本体（base/dev_lane/六模版类/worker/client） |
-| server/dsh/workbench/ 等 10 个插件目录 | 同路径 | dsh 插件（workbench/knowledge/providers/ui/ui-check/temporal-tools/headless-resume/profile×2/workflows） |
+| server/engine/ | v6 现路径 | 引擎本体（base/dev_lane/六模版类/worker/client） |
+| server/plugins/{ui,workbench,knowledge,providers,temporal-tools} | v6 现路径 | dsh 插件五件（cordis 农场实挂）；profile×2/roles/ui-check/headless-resume/workflows 摊平在 server/ 直下 |
 | server/tools/{verify_lane,ticket,workflow,dispatcher_loop}.py | 同路径 | 引擎工具（admin call 消费面） |
-| server/dsh/{projects.yaml,suyou-projects.ts,suyou-tools.ts} | 同路径 | 注册表迁移种子+装载器+工具桥插件（改名/改造=M2-C） |
+| server/{projects.yaml,suyou-projects.ts,sandbar-tools.ts} | v6 现路径 | 注册表迁移种子+装载器+工具桥插件（改名/改造=M2-C） |
 
 留 suyou 侧：roles/、model-routes.yaml、merge-checks.yaml（项目侧声明，契约①d/③）、
 serve.py/admin.py 等 suyou 业务服务端。逐文件判定真源=suyoU 仓
@@ -23,8 +23,9 @@ notes/debts/sandbar-m2-migration-manifest.md。
 
 ## 目录名注记
 
-`temporal-poc` 等旧名保留（改名涉及 dsh 插件发现/软链/引擎路径引用，须随
-M2-C 安装器连引用重建一起做，不在搬迁步单独动——宿主 20260903 裁定）。
+引擎旧目录名与包装层均已退役（宿主令 v6，t260907-10 落地）：引擎住 server/engine/，
+插件住 server/plugins/，装配配方/角色声明/路由表摊平在 server/ 直下。venv 旧路径
+回落期一轮后摘除（摘除票收口，KI-057 登记）。
 
 ## 下一步
 

@@ -4,7 +4,7 @@
 #
 # 拓扑（切换后）：
 #   - 本仓=引擎开发地+运行地（边开发边用）；supervisor（temporal-tools 插件）
-#     按本文件位置推导 repo=sandbar，拉起本仓 temporal-poc 的 server/worker，
+#     按本文件位置推导 repo=sandbar，拉起本仓 engine 的 server/worker，
 #     数据卷=本仓 data/temporal.db（2026-09-03 自 suyou 迁入全史 68MB）
 #   - suyou=纯项目仓：app/pipeline/docs+策略件（roles/verify/merge-checks/场景），
 #     其票在本引擎上跑（registry 定位仓根，泳道开在项目仓）
@@ -15,9 +15,9 @@
 #   ./start-console.sh -- 其他 dsh web 参数
 #
 # 说明：
-#   - profile 经 ~/.dsh/profiles/sandbar 软链 → server/dsh/profile（插件软链解析，跨 dsh 安装）
-#   - 插件：suyou-tools（admin 工具）/ suyou-admin-ui / suyou-workbench（工单台）
-#     / suyou-knowledge / suyou-temporal-tools / suyou-providers（包名历史沿用）
+#   - profile 经 ~/.dsh/profiles/sandbar 软链 → server/profile（插件软链解析，跨 dsh 安装）
+#   - 插件：sandbar-tools（admin 工具）/ sandbar-admin-ui / sandbar-workbench（工单台）
+#     / sandbar-knowledge / sandbar-temporal-tools / sandbar-providers
 #   - headless（无人值守重活）用：dsh run --profile sandbar-headless "任务"（软链待建则先用 suyou-headless）
 set -euo pipefail
 
@@ -50,8 +50,8 @@ fi
 # 工单台插件自动构建：src/client/ 改了就重建 lib/client.js
 # 构建器优先用插件本地 node_modules/.bin/tsdown；本地缺失才退 npx（走网络现装，慢）。
 # （2026-09-03 注：本仓 workbench 尚未装 devDep，src 变更后首次构建会走 npx；
-#   引擎开发常态化后建议 cd server/dsh/workbench && pnpm install 装本地构建器。）
-WORKBENCH_DIR="$(cd "$(dirname "$0")/server/dsh/workbench" && pwd)"
+#   引擎开发常态化后建议 cd server/plugins/workbench && pnpm install 装本地构建器。）
+WORKBENCH_DIR="$(cd "$(dirname "$0")/server/plugins/workbench" && pwd)"
 if [ -f "$WORKBENCH_DIR/src/client/index.tsx" ] && \
    [ "$WORKBENCH_DIR/src/client/index.tsx" -nt "$WORKBENCH_DIR/lib/client.js" ]; then
   echo "🔧 工单台插件源码有更新，自动重建 lib/client.js …"

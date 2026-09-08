@@ -29,7 +29,7 @@ lanes:
         cmd: sh -c '! { grep -rn "pkill\|kill -9" bin/ server/ --include="*.sh" --include="*.py" 2>/dev/null; grep -n "pkill\|kill -9" sandbar 2>/dev/null; } | grep -v "^Binary" | grep 3099'
       # t260904-12 乙段：test 道（t260902-10 场景消费面）——venv 回落链，pytest 缺即红（fail-closed）。
       - id: test
-        cmd: PY=server/dsh/temporal-poc/.venv/bin/python; [ -x "$PY" ] || PY=python3; PYTHONPYCACHEPREFIX=out/pycache "$PY" -m pytest server/dsh/temporal-poc/tests -q
+        cmd: PY=server/engine/.venv/bin/python; [ -x "$PY" ] || PY=server/dsh/temporal-poc/.venv/bin/python; [ -x "$PY" ] || PY=python3; PYTHONPYCACHEPREFIX=out/pycache "$PY" -m pytest server/engine/tests -q  # engine-venv-compat（t260907-10：新路径优先、旧路径一轮回落，摘除票删旧腿）
 integration:
   cmd: python3 integration/run_scenarios.py
   # supply 简化为一条「确保测试台在位」（t260904-19，宿主令「既然用 docker 就都用」）：
@@ -44,19 +44,19 @@ integration:
     # 单行分号串接（接入契约 ②a：引擎解析器无块标量语法，多行 cmd=fail-closed——
     # t260904-19 gen1 实锤①归因）。每段失败即 echo ENV_FAIL 点名+exit 1=环境红。
     - need: docker 测试台在位（t260904-19：docker 在场+测试镜像在场+共享供给台健康）
-      cmd: 'export SANDBAR_STAGE_LOCK_DIR="${SANDBAR_STAGE_LOCK_DIR:-/tmp/sandbar-test-stages}"; docker info >/dev/null 2>&1 || { echo "ENV_FAIL: docker 不可用（docker info 失败）——测试台一律走 docker，启动 Docker/OrbStack 后重试"; exit 1; }; docker image inspect test-temporal:cli-1.8.3 >/dev/null 2>&1 || { echo "ENV_FAIL: 测试镜像缺席 test-temporal:cli-1.8.3（本机自建无 registry）——先跑 sh server/dsh/build-test-temporal.sh"; exit 1; }; MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/dsh/temporal-poc/bin/temporal"; [ -x "$SRC" ] || { echo "ENV_FAIL: 主树 temporal CLI 缺失：$SRC（供给台 namespace/SA 注册需要）"; exit 1; }; mkdir -p server/dsh/temporal-poc/bin; [ -e server/dsh/temporal-poc/bin/temporal ] || ln -s "$SRC" server/dsh/temporal-poc/bin/temporal; python3 integration/stage_docker.py ensure --project sandbar-test-integ --keep --services full || { echo "ENV_FAIL: 共享供给台起台失败（见上 STAGE_ 行）"; exit 1; }'
+      cmd: 'export SANDBAR_STAGE_LOCK_DIR="${SANDBAR_STAGE_LOCK_DIR:-/tmp/sandbar-test-stages}"; docker info >/dev/null 2>&1 || { echo "ENV_FAIL: docker 不可用（docker info 失败）——测试台一律走 docker，启动 Docker/OrbStack 后重试"; exit 1; }; docker image inspect test-temporal:cli-1.8.3 >/dev/null 2>&1 || { echo "ENV_FAIL: 测试镜像缺席 test-temporal:cli-1.8.3（本机自建无 registry）——先跑 sh server/build-test-temporal.sh"; exit 1; }; MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/engine/bin/temporal"; [ -x "$SRC" ] || SRC="$MAIN/server/dsh/temporal-poc/bin/temporal"; [ -x "$SRC" ] || { echo "ENV_FAIL: 主树 temporal CLI 缺失：$SRC（供给台 namespace/SA 注册需要）"; exit 1; }; mkdir -p server/engine/bin; [ -e server/engine/bin/temporal ] || ln -s "$SRC" server/engine/bin/temporal; python3 integration/stage_docker.py ensure --project sandbar-test-integ --keep --services full || { echo "ENV_FAIL: 共享供给台起台失败（见上 STAGE_ 行）"; exit 1; }'  # engine-venv-compat（t260907-10 主树迁移窗口回落；摘除票删旧腿）
     # playwright-core 条保留（gen1 实锤②归因：方案 v2 C10 定稿「browser 族仍在消费」；
     # 泳道 ui-check node_modules 实况不存在，KI-036② LANE_DEP_SYMLINKS 引擎面未落地
     # 前，删此条=browser 族 16+ 条环境红回潮顶撞宿主令）。工单「供给简化为一条」
     # 语义=**台**供给一条；浏览器依赖供给是另一维度，并列保留。
     - need: playwright-core（泳道 ui-check node_modules 软链主树，KI-036）
-      cmd: 'MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/dsh/ui-check/node_modules/playwright-core"; [ -d "$SRC" ] || { echo "ENV_FAIL: 主树 playwright-core 缺失：$SRC"; exit 1; }; mkdir -p server/dsh/ui-check/node_modules; DST=server/dsh/ui-check/node_modules/playwright-core; [ -e "$DST" ] || ln -s "$SRC" "$DST"; [ -e "$DST/package.json" ] || { echo "ENV_FAIL: 软链后不可解析：$DST"; exit 1; }'
+      cmd: 'MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/ui-check/node_modules/playwright-core"; [ -d "$SRC" ] || SRC="$MAIN/server/dsh/ui-check/node_modules/playwright-core"; [ -d "$SRC" ] || { echo "ENV_FAIL: 主树 playwright-core 缺失：$SRC"; exit 1; }; mkdir -p server/ui-check/node_modules; DST=server/ui-check/node_modules/playwright-core; [ -e "$DST" ] || ln -s "$SRC" "$DST"; [ -e "$DST/package.json" ] || { echo "ENV_FAIL: 软链后不可解析：$DST"; exit 1; }'  # engine-venv-compat（t260907-10 主树迁移窗口回落；摘除票删旧腿）
 
 ui_evidence:
   dirs:
-    - server/dsh/workbench/src/client/
-    - server/dsh/workbench/lib/
-    - server/dsh/providers/src/client/
+    - server/plugins/workbench/src/client/
+    - server/plugins/workbench/lib/
+    - server/plugins/providers/src/client/
     - app/src/
     - app/index.html
   # supply 保留字段（契约②a v2.0 形状）：本版引擎不消费——声明不构成截图供给保障
