@@ -56,7 +56,7 @@ const mkEntry = (root, key, ids) => {
 
 // client.py 直呼（真通道，仅真票腿用；cwd=仓根，消费 SANDBAR_TARGET_HOST/NAMESPACE env）
 function pyTicket(clientArgs, env) {
-  const r = spawnSync('python3', ['server/dsh/temporal-poc/client.py', ...clientArgs],
+  const r = spawnSync('python3', ['server/engine/client.py', ...clientArgs],
     { cwd: REPO_ROOT, env, encoding: 'utf8', timeout: 60000 });
   return { code: r.status === null ? -1 : r.status, out: (r.stdout || '') + (r.stderr || '') };
 }

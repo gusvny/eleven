@@ -73,7 +73,7 @@ const FALLBACK_SPEC = "执行规格（fallback 固定串）：" + "样张不可�
 // ---- fixture 票（浏览器层注入，不落任何真数据）----
 function buildFixtures(mainRoot) {
   const spec = extractSpec(mainRoot) ?? FALLBACK_SPEC;
-  const fxDir = path.join(mainRoot, "server", "dsh", "ui-check", "fixtures");
+  const fxDir = path.join(mainRoot, "server", "ui-check", "fixtures");
   const list = JSON.parse(readFileSync(path.join(fxDir, "tickets-list.json"), "utf8"));
   const baseShow = JSON.parse(readFileSync(path.join(fxDir, "ticket-show-T-FIX-A.json"), "utf8"));
   const mkRow = (id, title) => ({
@@ -125,7 +125,7 @@ async function waitReady(port, timeoutMs, logPath) {
   throw new Error(`隔离台 ${timeoutMs}ms 未就绪（${url}）\nconsole.log 尾部：\n${tail}`);
 }
 async function bootConsole(mainRoot, laneWb, onProc) {
-  // t260904-19：docker 舞台（自搭进程 boot 退役）。repoDir 挂哪个树，/repo/server/dsh/workbench
+  // t260904-19：docker 舞台（自搭进程 boot 退役）。repoDir 挂哪个树，/repo/server/plugins/workbench
   // 就是谁——before 变体挂主树（测主 workbench），after 变体挂泳道（测泳道 build）；
   // profile 经 buildStageProfile 容器内路径物化（sandbar-workbench→/repo/... 随 repoDir 切换）。
   const stage = await import(pathToFileURL(path.join(REPO_ROOT, "integration", "stage_docker.mjs")).href);
@@ -133,8 +133,8 @@ async function bootConsole(mainRoot, laneWb, onProc) {
   const clean = () => { if (tmpHome) { try { rmSync(tmpHome, { recursive: true, force: true }); } catch { /* 留警告 */ } } };
   try {
     const profileDir = stage.buildStageProfile({
-      repoProfileDir: path.join(REPO_ROOT, "server", "dsh", "profile"),
-      laneWorkbenchDir: "/repo/server/dsh/workbench",
+      repoProfileDir: path.join(REPO_ROOT, "server", "profile"),
+      laneWorkbenchDir: "/repo/server/plugins/workbench",
       tmpHome,
     });
     const variant = path.resolve(laneWb).startsWith(path.resolve(mainRoot) + path.sep) ? "main" : "lane";
@@ -278,17 +278,17 @@ let routeDecisionMod = null;
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const laneWb = existsSync(path.join(args.lane, "server", "dsh", "workbench"))
-    ? path.join(args.lane, "server", "dsh", "workbench") : path.join(args.lane, "workbench");
-  const mainWb = path.join(args.main, "server", "dsh", "workbench");
+  const laneWb = existsSync(path.join(args.lane, "server", "plugins", "workbench"))
+    ? path.join(args.lane, "server", "plugins", "workbench") : path.join(args.lane, "workbench");
+  const mainWb = path.join(args.main, "server", "plugins", "workbench");
   const outDir = args.out;
   await mkdir(outDir, { recursive: true });
   const fixtures = buildFixtures(args.main);
   console.log(`[bench-shot] spec 原文长度=${fixtures.spec.length}` +
     `${existsSync(path.join(args.main, "notes", "discussions", "260904-spec-card-mockup.html")) ? "（样张 B 卡抽取）" : "（fallback 桩）"}`);
-  routeDecisionMod = await import(pathToFileURL(path.join(args.main, "server", "dsh", "ui-check", "capture.mjs")).href);
+  routeDecisionMod = await import(pathToFileURL(path.join(args.main, "server", "ui-check", "capture.mjs")).href);
   const pwPath = process.env.SANDBAR_PLAYWRIGHT_MODULE
-    ?? path.join(args.main, "server", "dsh", "ui-check", "node_modules", "playwright-core");
+    ?? path.join(args.main, "server", "ui-check", "node_modules", "playwright-core");
   // CJS 包经 ESM import 时导出在 default 下（capture.mjs loadPlaywright 同款口径）
   const pwMod = await import(pathToFileURL(path.join(pwPath, "index.js")).href);
   const { chromium } = pwMod.default ?? pwMod;

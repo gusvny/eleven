@@ -51,7 +51,7 @@ class InstallPaths:
         env_home = os.environ.get("SANDBAR_HOME")
         self.home = pathlib.Path(home) if home is not None else \
             pathlib.Path(env_home) if env_home else pathlib.Path.home() / ".sandbar"
-        self.poc_dir = self.root / "server" / "dsh" / "temporal-poc"
+        self.poc_dir = self.root / "server" / "engine"
         self.run_dir = self.home / "run"
         self.server_pidfile = self.run_dir / "server.pid"
         self.worker_pidfile = self.run_dir / "worker.pid"
@@ -76,7 +76,16 @@ class InstallPaths:
 
     @property
     def venv_python(self) -> pathlib.Path:
-        return self._venv_python or (self.poc_dir / ".venv" / "bin" / "python")
+        if self._venv_python is not None:
+            return self._venv_python
+        # 回落链（t260907-10）：新路径优先，旧 server/dsh/temporal-poc 路径一轮兼容；
+        # 两缺返回新路径让报错指向真源（fail-closed 点名缺失，见 service.py 探针）。
+        import os as _os
+        for rel in (("server", "engine"), ("server", "dsh", "temporal-poc")):
+            cand = self.root.joinpath(*rel) / ".venv" / "bin" / "python"
+            if cand.is_file() and _os.access(str(cand), _os.X_OK):
+                return cand  # 断链软链/不可执行视同缺位（sc_engine_venv_compat leg4/5）
+        return self.root / "server" / "engine" / ".venv" / "bin" / "python"
 
 
 # ---------- pidfile 读写（§2-#2/#7） ----------

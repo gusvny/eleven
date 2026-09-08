@@ -14,7 +14,7 @@ MISSING_CREDENTIAL。新契约（t260902-09 plan.md，评审 gen1 通过）：
 夹具一律真实嵌套格式（version + refs），全 tmp/env 桩（lib/fixture.Sandbox），
 不读真 ~/.sandbar 与 ~/.dsh。跑法（manifest 已登记 venv 回落链；裸 python3 会
 经 ensure_yaml 自动 re-exec 进 venv，仍无 PyYAML 则 ENV_FAIL——三态契约定稿 §7.3）：
-  PY=server/dsh/temporal-poc/.venv/bin/python; "$PY" integration/t260902-09/t01_creds_merge.py
+  PY=server/engine/.venv/bin/python; "$PY" integration/t260902-09/t01_creds_merge.py
 末行 SUMMARY pass=N fail=N env_fail=N na=N；退出码 0=PASS、1=FAIL（产品红）、2=ENV_FAIL（环境红）。
 """
 import logging

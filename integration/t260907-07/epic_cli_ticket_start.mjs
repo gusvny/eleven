@@ -17,7 +17,7 @@ const { ok, done } = (await import('../t260903-09/lib_integration.mjs')).makeChe
 
 const DRIVER = (project, epic) => `
 import sys, json, asyncio
-sys.path.insert(0, ${JSON.stringify(new URL('../../server/dsh/temporal-poc', import.meta.url).pathname)})
+sys.path.insert(0, ${JSON.stringify(new URL('../../server/engine', import.meta.url).pathname)})
 import client
 
 class _FakeStub:

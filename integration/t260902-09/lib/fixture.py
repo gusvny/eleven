@@ -7,7 +7,7 @@
   绝不触真 ~/.sandbar、真 ~/.dsh、真凭据（测试安全红线）；
 - Ledger：stdout 末行 SUMMARY pass/fail/env_fail/na（三态契约定稿 §7.3：0=PASS、
   1=FAIL 含全腿 N/A、2=ENV_FAIL；skip 计数退役，缺依赖的用例计入 env_fail）；
-- ensure_yaml：PyYAML 缺失时优先 re-exec 进 temporal-poc venv（ensure_sdk 同款
+- ensure_yaml：PyYAML 缺失时优先 re-exec 进 engine venv（ensure_sdk 同款
   制式）；仍无则返回 False，调用方对依赖 yaml 的用例 env_fail（缺依赖=环境红）；
 - creds_text / insertion_only：真实嵌套格式凭据夹具构造与「仅追加」断言件
   （格式载体见本票 plan.md「格式载体」节：version + refs 嵌套，非扁平）。
@@ -24,7 +24,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 SUITE = HERE.parent
 REPO = SUITE.parent.parent
-POC = REPO / "server" / "dsh" / "temporal-poc"
+POC = REPO / "server" / "engine"
 # venv 回落链（同 manifest PY 链口径）：worktree 常无 .venv，经
 # `git rev-parse --git-common-dir` 解析主 checkout 再找（README 既有定式）；
 # 再无则由调用方 env_fail（环境红）。
@@ -33,7 +33,7 @@ REEXEC_GUARD = "_T26090209_YAML_REEXEC"
 
 
 def _git_common_dir_venv():
-    """主 checkout 的 temporal-poc venv python（worktree 场景）；解析失败 → None。"""
+    """主 checkout 的 engine venv python（worktree 场景）；解析失败 → None。"""
     try:
         r = subprocess.run(["git", "rev-parse", "--git-common-dir"],
                            cwd=str(REPO), capture_output=True, text=True, timeout=5)
@@ -44,7 +44,7 @@ def _git_common_dir_venv():
     d = Path(r.stdout.strip())
     if not d.is_absolute():
         d = (REPO / d).resolve()
-    return d.parent / "server" / "dsh" / "temporal-poc" / ".venv" / "bin" / "python"
+    return d.parent / "server" / "engine" / ".venv" / "bin" / "python"
 
 
 # ---------------------------------------------------------------- 模块桩
@@ -128,7 +128,7 @@ def have_yaml():
 
 
 def ensure_yaml():
-    """保证当前解释器有 PyYAML：没有则 re-exec 进 temporal-poc venv（worktree
+    """保证当前解释器有 PyYAML：没有则 re-exec 进 engine venv（worktree
     优先，经 git-common-dir 回落主 checkout，同 manifest PY 链口径）后不再返回；
     两处皆无 → False，调用方对依赖 yaml 的用例 env_fail（环境红，勿静默绿）。"""
     if have_yaml():

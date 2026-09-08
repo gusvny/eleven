@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const REPO = resolve(HERE, '..', '..')
-const README = join(REPO, 'server', 'dsh', 'workflows', 'README.md')
+const README = join(REPO, 'server', 'workflows', 'README.md')
 
 let passed = 0, failed = 0, envFailed = 0, naCount = 0
 function ok(cond, label) {

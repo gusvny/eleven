@@ -98,7 +98,7 @@ c.check('rmkeep 条目字节不动（其余项目装载不变）',
   readFileSync(path.join(root, 'rmkeep', 'project.yaml'), 'utf8') === beforeKeep);
 process.env.SANDBAR_PROJECTS_DIR = root; // TS registryRoot() 每调用现读 env（票①场景同款）
 const ts = await import(
-  pathToFileURL(path.join(REPO_ROOT, 'server', 'dsh', 'suyou-projects.ts')).href);
+  pathToFileURL(path.join(REPO_ROOT, 'server', 'suyou-projects.ts')).href);
 const reg = ts.loadRegistry();
 const tsKeys = reg.projects.map((p) => p.key);
 c.check('TS 装载不再列 rmmain', !tsKeys.includes('rmmain'), `实际=${JSON.stringify(tsKeys)}`);

@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]          # …/integration/t260907-06/lib.py → 仓库根
-POC = REPO / "server" / "dsh" / "temporal-poc"
+POC = REPO / "server" / "engine"
 
 passed = 0
 failed = 0

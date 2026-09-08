@@ -45,7 +45,7 @@ refuseProductionConsole();
 const { record, summarize } = makeResults();
 
 // ---- T0 卫兵链 ----
-const localPw = new URL('../../server/dsh/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
+const localPw = new URL('../../server/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
 let pw = null;
 for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core', localPw]) {
   if (!c) continue;
@@ -65,8 +65,8 @@ if (!(await consoleHealthy())) {
     if (r.status === 404) {
       const { readFileSync } = await import('node:fs');
       try {
-        const node = readFileSync('server/dsh/workbench/node.ts', 'utf8');
-        const mod = readFileSync('server/dsh/workbench/src/host/session-charter.ts', 'utf8');
+        const node = readFileSync('server/plugins/workbench/node.ts', 'utf8');
+        const mod = readFileSync('server/plugins/workbench/src/host/session-charter.ts', 'utf8');
         anchored = node.includes(CHARTER_EP) || (node.includes('session-charter') && mod.includes(CHARTER_EP));
       } catch { /* 按未实现 */ }
       record('t0/endpoint-live', anchored ? 'fail' : 'na',

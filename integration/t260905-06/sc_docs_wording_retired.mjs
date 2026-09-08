@@ -5,12 +5,12 @@
 //   随仓提交、隔离台实际加载面）grep 子串 0 命中（代码行命中=用户可见旧提法=产品红；
 //   bundle 内注释行不渲染到界面=观测不红，豁免口径见 T2——t260905-06 gen3 场景维护
 //   对齐声明与实现，零断言改动）。
-//   服务端宿主半（node.ts）不在界面层，知识库插件自身目录（server/dsh/knowledge/）
+//   服务端宿主半（node.ts）不在界面层，知识库插件自身目录（server/plugins/knowledge/）
 //   属写集外存量欠账（KI 已记），均不在本断言面。
 //   实现落地前红属预期（TDD 信号：现源码含「知识库」字样），arbitrate/merge 期必须绿。
 //
 // high-level steps：
-//   T1 界定断言面：server/dsh/workbench/src/**（源码）+ server/dsh/workbench/lib/**
+//   T1 界定断言面：server/plugins/workbench/src/**（源码）+ server/plugins/workbench/lib/**
 //      （构建产物）。目录缺席=环境红（构建管线异常非产品红）。
 //   T2 逐文件 grep「知识库」→ 计数必须 0；命中则逐条列出文件:行（可定位）。
 //   T3 对照面（自证 grep 通道有效）：同一 grep 在写集外 knowledge 插件目录命中>0
@@ -26,8 +26,8 @@ const { record, summarize } = makeResults();
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const FACES = [
-  ['src', path.join(REPO, 'server/dsh/workbench/src')],
-  ['lib', path.join(REPO, 'server/dsh/workbench/lib')],
+  ['src', path.join(REPO, 'server/plugins/workbench/src')],
+  ['lib', path.join(REPO, 'server/plugins/workbench/lib')],
 ];
 
 function* walk(dir) {
@@ -69,7 +69,7 @@ record('ui/knowledge-word-zero', hits.length === 0,
   hits.length === 0 ? `「知识库」0 命中（扫 ${scanned} 文件）` : `「知识库」${hits.length} 命中（界面层退役未达成，实现落地前红属预期）：\n${hits.slice(0, 20).join('\n')}`);
 
 // T3 对照面自证（grep 通道有效性；knowledge 插件=写集外存量，命中属预期）
-const probeDir = path.join(REPO, 'server/dsh/knowledge');
+const probeDir = path.join(REPO, 'server/plugins/knowledge');
 if (!existsSync(probeDir)) {
   record('probe/knowledge-dir', 'env_fail', `对照面缺席：${probeDir} 不存在`);
 } else {

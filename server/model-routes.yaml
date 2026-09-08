@@ -14,13 +14,13 @@
 #   2. 模型 ref 不许发明：只用下方「可用 ref 核实清单」里实证存在的 provider/model；
 #      清单外的先在清单区加注释标「待用户配」，配好 key 验证后才许进生效条目。
 #
-# 【查表规则】（temporal-poc/shared.py model_route_for 实现）
+# 【查表规则】（engine/shared.py model_route_for 实现）
 #   (role, task_kind) → roles.<role>.tasks.<task_kind> → roles.<role> → default。
 #   表缺失/角色无条目/条目缺 provider 或 model → 落 default；default 也缺 → 不生成
 #   patch（agent 继承 profile 默认模型）。
 #
 # 【分工与 stage 的对应】（哪段派哪个分工的模型）
-#   server/dsh/temporal-poc/shared.py 的 STAGE_DISPATCH_KIND：
+#   server/engine/shared.py 的 STAGE_DISPATCH_KIND：
 #   (content-pipeline, ai-review)→proofread；(proofread, review)→proofread；
 #   (regression, regress)→qa。无映射的段用 role 级条目。
 #

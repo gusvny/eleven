@@ -142,7 +142,7 @@ def main():
         except ValueError as e:
             ok("宿主令 260904" in str(e) and "结算 note" in str(e),
                "写集 %s 建单即拒且人话指路（%s…）" % (ws, str(e)[:60]))
-    for ws in ([], ["server/"], ["integration/", "server/dsh/"], None):
+    for ws in ([], ["server/"], ["integration/", "server/"], None):
         try:
             ticket.validate_write_set_no_notes(ws)
             ok(True, "写集 %s 正常放行" % ws)

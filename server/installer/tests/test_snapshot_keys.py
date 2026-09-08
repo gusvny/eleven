@@ -1,6 +1,6 @@
 """快照键结构测试：sandbar_version 键落位 + legacy temporal_engine_version 原样。
 
-快照组装点在 temporal-poc 引擎代码里（base.py / dev_lane.py），依赖 temporalio，
+快照组装点在 engine 引擎代码里（base.py / dev_lane.py），依赖 temporalio，
 系统 python3 无该依赖——故用 AST 结构断言（对源码静态验证，行为面由
 version.py 行为单测补齐），不 import 引擎模块。
 """
@@ -11,7 +11,7 @@ import ast
 import pathlib
 import unittest
 
-POC = pathlib.Path(__file__).resolve().parents[3] / "server" / "dsh" / "temporal-poc"
+POC = pathlib.Path(__file__).resolve().parents[3] / "server" / "engine"
 
 
 def _snapshot_dicts(path: pathlib.Path):

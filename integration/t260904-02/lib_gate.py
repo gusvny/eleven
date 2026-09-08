@@ -31,8 +31,8 @@ import sys
 import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-POC = os.path.join(REPO, "server", "dsh", "temporal-poc")
-NODE_TS = os.path.join(REPO, "server", "dsh", "temporal-tools", "node.ts")
+POC = os.path.join(REPO, "server", "engine")
+NODE_TS = os.path.join(REPO, "server", "plugins", "temporal-tools", "node.ts")
 
 MISSING_EXIT = 2       # 依赖/设施未就位（环境缺失，非被测红）
 ENV_CONFLICT_EXIT = 3  # 所选端口被外来者占（不对抗）

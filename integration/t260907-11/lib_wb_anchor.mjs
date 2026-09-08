@@ -18,7 +18,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { apply } from '../../server/dsh/workbench/node.ts'
+import { apply } from '../../server/plugins/workbench/node.ts'
 
 export const EPIC_CODE = 'demo-x'
 export const EPICS_PREFIX = '/sandbar-workbench/api/epics'

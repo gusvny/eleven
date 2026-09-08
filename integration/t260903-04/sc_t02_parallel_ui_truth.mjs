@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '..', '..')
-const { deriveStageStates } = await import(resolve(REPO, 'server/dsh/workbench/src/client/lane-states.ts'))
+const { deriveStageStates } = await import(resolve(REPO, 'server/plugins/workbench/src/client/lane-states.ts'))
 
 let pass = 0, fail = 0
 function ok(cond, label) {
@@ -44,7 +44,7 @@ const ORDER = ['create_plan', 'review_plan', 'implement', 'design_integration_te
   'ui_evidence', 'run_integration_tests', 'arbitrate', 'acceptance_walkthrough',
   'merge_check', 'merge', 'suggest_next']
 {
-  const yaml = readFileSync(resolve(REPO, 'server/dsh/workflows/dev-lane.yaml'), 'utf8')
+  const yaml = readFileSync(resolve(REPO, 'server/workflows/dev-lane.yaml'), 'utf8')
   const ids = [...yaml.matchAll(/^\s*- id:\s*(\S+)\s*$/gm)].map(m => m[1])
   ok(JSON.stringify(ids) === JSON.stringify(ORDER),
     `场景 ORDER 与 yaml stage 序一致（${ids.length} 步）`)

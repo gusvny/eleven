@@ -59,7 +59,7 @@ const launchBrowser = async () => {
 };
 
 // ---- T0 卫兵链 ----
-const localPw = new URL('../../server/dsh/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
+const localPw = new URL('../../server/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
 let pw = null;
 for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core', localPw]) {
   if (!c) continue;

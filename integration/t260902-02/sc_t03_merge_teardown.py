@@ -25,7 +25,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
-POC = REPO / "server" / "dsh" / "temporal-poc"
+POC = REPO / "server" / "engine"
 
 # —— SDK 面（t260904-12 乙段）：顶层无 temporalio 则 re-exec 进 poc venv（同 t05
 # ensure_sdk 制式），让「MergeArgs 缺字段解码」真 temporalio 腿在本机可跑，

@@ -56,8 +56,8 @@ function summarize() {
 
 // ---------------------------------------------------------------- S0 build-contract
 
-const LIB_JS = join(REPO, 'server', 'dsh', 'workbench', 'lib', 'client.js')
-const LIB_CJS = join(REPO, 'server', 'dsh', 'workbench', 'lib', 'client.cjs')
+const LIB_JS = join(REPO, 'server', 'plugins', 'workbench', 'lib', 'client.js')
+const LIB_CJS = join(REPO, 'server', 'plugins', 'workbench', 'lib', 'client.cjs')
 
 /** 经构建产物装载真代码（契约与 smoke/ticket-switch.mjs loadClientBundle 一致）。 */
 function loadClientBundle() {
@@ -202,8 +202,8 @@ function mainRepoRoot() {
 async function loadPlaywright() {
   const candidates = ['playwright-core']
   const main = mainRepoRoot()
-  for (const sub of ['server/dsh/ui-check/node_modules/playwright-core/index.mjs',
-    'server/dsh/workbench/node_modules/playwright-core/index.mjs']) {
+  for (const sub of ['server/ui-check/node_modules/playwright-core/index.mjs',
+    'server/plugins/workbench/node_modules/playwright-core/index.mjs']) {
     const p = join(main, sub)
     if (existsSync(p)) candidates.push(pathToFileURL(p).href)
   }
@@ -562,7 +562,7 @@ async function main() {
   }
   const healthy = await consoleHealthy()
   if (!healthy) {
-    record('S1 precheck', 'env_fail', `test console unreachable at ${BASE} (docker compose -f server/dsh/docker-compose.test.yml up -d)`)
+    record('S1 precheck', 'env_fail', `test console unreachable at ${BASE} (docker compose -f server/docker-compose.test.yml up -d)`)
     return summarize()
   }
   const pw = await loadPlaywright()

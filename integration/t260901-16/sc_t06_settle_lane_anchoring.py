@@ -3,7 +3,7 @@
 
 用户视角：并行分叉票的唯一落盘机会是汇合点 settle_lane——workflow 传的
 worktree 是相对路径（如 ".worktrees/t260901-16"，相对主仓根）。修前它按
-worker 进程 cwd（server/dsh/temporal-poc）解析，匹配不上已注册 worktree 后
+worker 进程 cwd（server/engine）解析，匹配不上已注册 worktree 后
 **静默回退主树**：主树本来就干净 → 「无需代落盘」假绿，泳道产物全漏落盘
 （第一轮集成测试 2 哨兵红实锤）。修正后：
   a. 相对路径按模块 REPO_ROOT 锚定（同 verify_review_gate / run_integration_tests）；
@@ -88,7 +88,7 @@ try:
     sys.modules["temporalio"] = _mod
     sys.modules["temporalio.activity"] = _act
 
-    sys.path.insert(0, str(SRC_ROOT / "server" / "dsh" / "temporal-poc"))
+    sys.path.insert(0, str(SRC_ROOT / "server" / "engine"))
     sys.path.insert(0, str(SRC_ROOT / "server"))
     sys.path.insert(0, str(SRC_ROOT / "server" / "tools"))
     import agent_activities as aa  # noqa: E402
@@ -105,9 +105,9 @@ try:
         if not aa._is_worktree_of(MINI_ROOT / REL):
             fails.append("%s/%s 应是已注册 worktree（夹具失效）" % (MINI_ROOT, REL))
 
-        # a2) 旧缺陷复现：相对路径按 worker 进程 cwd（server/dsh/temporal-poc）解析
+        # a2) 旧缺陷复现：相对路径按 worker 进程 cwd（server/engine）解析
         #     → 匹配不上已注册 worktree（证明防的是真 bug，不是臆造场景）
-        worker_cwd = SRC_ROOT / "server" / "dsh" / "temporal-poc"
+        worker_cwd = SRC_ROOT / "server" / "engine"
         if aa._is_worktree_of((worker_cwd / REL)):
             fails.append("worker cwd 视角解析相对路径不应匹配 worktree（旧缺陷场景未复现）")
 
@@ -145,7 +145,7 @@ try:
             fails.append("raise 信息应写明拒绝回退主树：%s" % raised[:120])
 
         # b3) 源码结构锁：锚定口径与拒绝回退在源里（防回归被顺手改掉）
-        src = (SRC_ROOT / "server" / "dsh" / "temporal-poc" / "agent_activities.py").read_text("utf-8")
+        src = (SRC_ROOT / "server" / "engine" / "agent_activities.py").read_text("utf-8")
         body = src[src.index("async def settle_lane"):src.index("def _run_scenarios")]
         if "if not wt.is_absolute():" not in body or "REPO_ROOT / wt" not in body:
             fails.append("settle_lane 缺相对路径 REPO_ROOT 锚定")

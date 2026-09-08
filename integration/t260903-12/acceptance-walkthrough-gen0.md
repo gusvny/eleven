@@ -37,7 +37,7 @@
 | tests/capture-stale-banner.mjs | 拉起隔离台 `dsh --profile suyou`（临时端口/临时 HOME，不碰 3099）子进程 exit=1→fetch 连接拒绝；suyou profile 插件族（suyou-providers 等）在 sandbar 无从物化，profile/node_modules 现仅 suyou-workbench 软链（implement 环境级补的一层） | 不消费 lib；本票零改动；main 侧 node_modules 全缺，红得更早 |
 | tests/epic-status-enum.mjs | B 段普查 `notes/epics` 真目录并断言 9 张 suyou 立项单（coding-games 等）→sandbar notes/ 仅搬迁交接文档，listEpics=0→byCode['coding-games'] TypeError | `git ls-tree main notes/` 同样无 epics/→main 必红；造数=伪造 suyou 产品数据（红线） |
 | smoke/epics-status.mjs | F 段同一 notes/epics 存量迁移断言（≥7 张、逐张状态/备注）→实得 0，7 断言红 | 同上；本票零改动 |
-| smoke/stage-parts.mjs | B 段 route.handler→node.ts `callTool('workflow')`→`runAdminCli`→**admin.py call**；sandbar 无 server/admin.py（实证：ls 无、~/Documents/suyou/server/admin.py 有）→handler 抛错，GET 非 200 | handler 链实读 node.ts:331/529-535；五模版 yaml 在 sandbar 全在（server/dsh/workflows/），非模版缺 |
+| smoke/stage-parts.mjs | B 段 route.handler→node.ts `callTool('workflow')`→`runAdminCli`→**admin.py call**；sandbar 无 server/admin.py（实证：ls 无、~/Documents/suyou/server/admin.py 有）→handler 抛错，GET 非 200 | handler 链实读 node.ts:331/529-535；五模版 yaml 在 sandbar 全在（server/workflows/），非模版缺 |
 | tests/verify-lane-config.mjs | F9 断言仓根 verify.yaml 声明 app/src/+app/smoke/ 白名单——suyou 仓形状（suyou 有 app/）；sandbar 无 app/ 目录，verify.yaml 天然不含 | 断言注释自述「declares this repo's own shape」但锚死 suyou 形状，缺 per-repo 感知；verify.yaml 本票未动 |
 
 共性根因：**suyou 血统测试假设 suyou 仓资产在场**（notes/epics 产品数据、admin.py 运行时、profile 插件族、verify.yaml 形状），sandbar 搬迁未带这些资产 → 在 sandbar 泳道内结构性必红；且 verify.yaml 自动跑点不含 JS UT/smoke（developer 自我迭代建议已提），故能存活至今。**建议按 KI 登记**（登记权在 integration 岗位，本报告即上报件）：模式=「血统测试的仓资产假设」，触发条件=任一 suyou 血统 JS 用例在 sandbar 泳道执行；什么样的改动会踩=任何让 JS UT 进自动跑点的入轨动作会立刻引爆 5 红。

@@ -29,7 +29,7 @@ import sys
 
 from lib_ki044 import REPO, summary
 
-dl = (REPO / "server" / "dsh" / "temporal-poc" / "dev_lane.py").read_text("utf-8")
+dl = (REPO / "server" / "engine" / "dev_lane.py").read_text("utf-8")
 
 passed = failed = 0
 

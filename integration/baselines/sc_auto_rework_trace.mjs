@@ -59,7 +59,7 @@ import {
 } from './ticket-lifecycle-scenes.mjs'
 
 const REPO = process.cwd()
-const DEV_LANE = join(REPO, 'server', 'dsh', 'temporal-poc', 'dev_lane.py')
+const DEV_LANE = join(REPO, 'server', 'engine', 'dev_lane.py')
 
 let pass = 0, fail = 0, envFail = 0
 function ok(cond, label) {

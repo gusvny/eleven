@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const themeSrc = readFileSync(join(here, '../../server/dsh/workbench/src/client/theme.ts'), 'utf8');
+const themeSrc = readFileSync(join(here, '../../server/plugins/workbench/src/client/theme.ts'), 'utf8');
 const m = themeSrc.match(/export const DERIVE_TOKENS_CSS = `([\s\S]*?)`/);
 if (!m) { console.log('SUMMARY pass=0 fail=1 (DERIVE_TOKENS_CSS 解析失败)'); process.exit(1); }
 
@@ -123,7 +123,7 @@ for (const [n, f, b] of [['legacy 正文 fg × 画布', 'fg', 'canvas'], ['legac
 }
 
 // epic chip：EPIC_PALETTE 全 10 档 × 兜底灰，chip 文字=45% epic 混平台前景（与 theme.ts epicChipColor 同源同步），两档断言
-const modelSrc = readFileSync(join(here, '../../server/dsh/workbench/src/client/ticket-list-model.ts'), 'utf8');
+const modelSrc = readFileSync(join(here, '../../server/plugins/workbench/src/client/ticket-list-model.ts'), 'utf8');
 const palMatch = modelSrc.match(/EPIC_PALETTE[^=]*=\s*\[([\s\S]*?)\]/);
 const epicColors = [...palMatch[1].matchAll(/#[0-9a-fA-F]{6}/g)].map(x => x[0]);
 epicColors.push('#9ca3af');

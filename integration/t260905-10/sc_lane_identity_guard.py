@@ -11,7 +11,7 @@ intent（守护的用户可感知行为，灰盒 L3，260906 worker-02·03·05 s
   worktree，天然覆盖 worktree 共享主仓 config 的补救承诺）；
 - dir 型工作区无 commit → 不查身份，缺环境也放行（ensured）；
 - created 路径缺失 → 失败且泳道不落半成品（fail-fast 在 worktree add 之前）；
-- LANE_DEP_SYMLINKS 含 server/dsh/temporal-poc/.venv：泳道自动软链在位、解析到
+- LANE_DEP_SYMLINKS 含 server/engine/.venv：泳道自动软链在位、解析到
   主仓、幂等不重复链（260825「泳道无消费方」拍板被 260906 19 号闸实测推翻，
   260824-12 依赖盲区闭合的陪伴断言）。
 
@@ -38,7 +38,7 @@ from lib_lane import (EXIT_ENV, Fail, ensure_poc_python, env_guard,  # noqa: E40
 
 ensure_poc_python()
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "server/dsh/temporal-poc"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "server/engine"))
 import agent_activities  # noqa: E402
 from shared import WorkspacePrep  # noqa: E402
 
@@ -167,22 +167,22 @@ def main() -> int:
         f.check(not is_registered_worktree(repoB, laneB),
                 "F 泳道未落半成品（worktree 未注册=fail-fast 在 add 之前）")
 
-        # ---- G deps 软链：LANE_DEP_SYMLINKS 含 temporal-poc/.venv，幂等 ----
-        venv_src = repoA / "server" / "dsh" / "temporal-poc" / ".venv"
+        # ---- G deps 软链：LANE_DEP_SYMLINKS 含 engine/.venv，幂等 ----
+        venv_src = repoA / "server" / "engine" / ".venv"
         (venv_src / "bin").mkdir(parents=True, exist_ok=True)
         (venv_src / "bin" / "python").write_text("#!/bin/sh\n", encoding="utf-8")
         # 依赖目录链在真实仓库是 tracked 目录（随 checkout 出现在泳道）；fixture 仓
         # 只有 README，泳道内没有目录链 → symlink ENOENT。补链=还原真实形态。
-        (laneA / "server" / "dsh" / "temporal-poc").mkdir(parents=True, exist_ok=True)
+        (laneA / "server" / "engine").mkdir(parents=True, exist_ok=True)
         (laneA / "app").mkdir(parents=True, exist_ok=True)
-        link = laneA / "server" / "dsh" / "temporal-poc" / ".venv"
+        link = laneA / "server" / "engine" / ".venv"
         saved_root = agent_activities.REPO_ROOT
         try:
             agent_activities.REPO_ROOT = repoA
             with env_guard(**both):
                 r7 = prep(laneA)
-            f.check(r7 is not None and "+deps:server/dsh/temporal-poc/.venv" in (r7.action or ""),
-                    "G prepare_workspace 回执含 deps:temporal-poc/.venv（泳道自动软链）")
+            f.check(r7 is not None and "+deps:server/engine/.venv" in (r7.action or ""),
+                    "G prepare_workspace 回执含 deps:engine/.venv（泳道自动软链）")
             f.check(link.is_symlink() and (link / "bin" / "python").exists(),
                     "G 软链在位且解析到主仓（marker 经链可读）")
             with env_guard(**both):

@@ -115,7 +115,7 @@ export function mainRoot() {
  * cordis 配置/sandbar-tools.ts 取本仓 profile 目录（committed）；插件 node_modules 逐项
  * realpath 自主树（读主树已装依赖，其余插件不受测），唯 sandbar-workbench 改指泳道
  * workbench 源目录（插件宿主入口=node.ts TS 直跑，宿主面测的就是泳道源码）。
- * 不依赖泳道 server/dsh/profile/node_modules（gitignored，泳道恒缺——原 buildTempProfile
+ * 不依赖泳道 server/profile/node_modules（gitignored，泳道恒缺——原 buildTempProfile
  * 在泳道布局下必拒跑，arbitrate gen0 测试资产变更审查有记）。
  */
 async function buildProfile(tmpHome, laneWorkbenchDir) {
@@ -123,8 +123,8 @@ async function buildProfile(tmpHome, laneWorkbenchDir) {
   // /usr/local/lib/node_modules（dsh 全局树），缺失由健康探针/启动自愈兜底。
   const stage = await import(pathToFileURL(path.join(REPO_ROOT, 'integration', 'stage_docker.mjs')).href);
   return stage.buildStageProfile({
-    repoProfileDir: path.join(REPO_ROOT, 'server', 'dsh', 'profile'),
-    laneWorkbenchDir: laneWorkbenchDir ?? '/repo/server/dsh/workbench',
+    repoProfileDir: path.join(REPO_ROOT, 'server', 'profile'),
+    laneWorkbenchDir: laneWorkbenchDir ?? '/repo/server/plugins/workbench',
     tmpHome,
   });
 }
@@ -132,8 +132,8 @@ async function buildProfile(tmpHome, laneWorkbenchDir) {
 /** 浏览器腿守卫：泳道 client build（lib/client.js）缺失或陈旧 → 拒跑（防拍旧 UI 假绿，
  * capture-lane.laneBuildRejectReason 同口径）。返回 null=可跑，否则人话拒因。 */
 export async function clientBuildStalenessReason() {
-  const mod = await import(pathToFileURL(path.join(REPO_ROOT, 'server', 'dsh', 'ui-check', 'capture-lane.mjs')).href);
-  return mod.laneBuildRejectReason(path.join(REPO_ROOT, 'server', 'dsh', 'workbench'));
+  const mod = await import(pathToFileURL(path.join(REPO_ROOT, 'server', 'ui-check', 'capture-lane.mjs')).href);
+  return mod.laneBuildRejectReason(path.join(REPO_ROOT, 'server', 'plugins', 'workbench'));
 }
 
 /**
@@ -149,7 +149,7 @@ export async function bootConsole(fixturesRoot) {
   const tmpHome = mkdtempSync(path.join(tmpdir(), 'fix15-bench-'));
   const clean = () => { try { rmSync(tmpHome, { recursive: true, force: true }); } catch { /* 留警告 */ } };
   try {
-    await buildProfile(tmpHome, path.join(REPO_ROOT, 'server', 'dsh', 'workbench'));
+    await buildProfile(tmpHome, path.join(REPO_ROOT, 'server', 'plugins', 'workbench'));
     const project = `fix15-${path.basename(fixturesRoot).toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24)}-${process.pid}`;
     const st = stage.stageUp({
       project,
@@ -196,8 +196,8 @@ export function teardownOnExit(teardown) {
  * 泳道 ui-check/node_modules gitignored 恒缺；第④路只读借用主树（与 buildProfile 同理，
  * 被测代码仍是泳道 workbench）。null=调用方转 ENV_FAIL 点名（KI-036；环境缺供不假绿）。 */
 export async function loadPlaywright() {
-  const localPw = new URL('../../server/dsh/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
-  const mainPw = path.join(mainRoot(), 'server', 'dsh', 'ui-check', 'node_modules', 'playwright-core', 'index.mjs');
+  const localPw = new URL('../../server/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
+  const mainPw = path.join(mainRoot(), 'server', 'ui-check', 'node_modules', 'playwright-core', 'index.mjs');
   for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core', localPw,
     existsSync(mainPw) ? pathToFileURL(mainPw).href : null]) {
     if (!c) continue;

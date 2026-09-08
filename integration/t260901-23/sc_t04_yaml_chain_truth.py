@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """t260901-23 集成测试 t04：yaml 快照与 workflow 代码真源一致（t260901-05 漂移债收口）。
 
-用户场景：工单台泳道图（源=server/dsh/workflows/*.yaml，经 server/tools/workflow.py
+用户场景：工单台泳道图（源=server/workflows/*.yaml，经 server/tools/workflow.py
 只读消费）展示的阶段链，就是用户对「工单怎么跑」的心智模型。yaml 与模版类 STAGES
 代码漂移时，用户看到的链序与 workflow 实际执行顺序不一致（t260901-05 实证：
 dev-lane 把 ui_evidence 画在 design_integration_tests 之前，实际执行相反）。
@@ -20,10 +20,10 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
-POC = REPO / "server" / "dsh" / "temporal-poc"
+POC = REPO / "server" / "engine"
 GEN = POC / "gen_workflows_doc.py"
 VENV_PY = POC / ".venv" / "bin" / "python"
-YAML = REPO / "server" / "dsh" / "workflows" / "dev-lane.yaml"
+YAML = REPO / "server" / "workflows" / "dev-lane.yaml"
 
 PASS = 0
 FAIL = 0

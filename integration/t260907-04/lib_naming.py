@@ -3,7 +3,7 @@
 """t260907-04 共享助手（命名清理①场景族；不带 sc_ 前缀=共享代码，不登记 SCENARIOS）。
 
 提供：三态计数收口（lib_env 之上包一层，fail 优先 env_fail——产品红不被环境红
-稀释，run_scenarios C7 同序）、temporal-poc 子进程求值（引擎 import 时序在子进程
+稀释，run_scenarios C7 同序）、engine 子进程求值（引擎 import 时序在子进程
 内现做，shim/解析语义本身就是被测行为）、docker 舞台单点入口转发（stage_docker
 CLI 子进程式调用，退出码三态透传）。
 """
@@ -15,7 +15,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 INTEG = os.path.dirname(HERE)
 REPO = os.path.dirname(INTEG)
-TP = os.path.join(REPO, "server", "dsh", "temporal-poc")
+TP = os.path.join(REPO, "server", "engine")
 STAGE_DOCKER = os.path.join(INTEG, "stage_docker.py")
 
 import lib_env  # noqa: E402
@@ -52,9 +52,11 @@ class Rec(object):
 
 def poc_python():
     """temporalio SDK 优先走 poc venv；两缺=环境红（KI-020③ 族，返回 None）。"""
-    venv = os.path.join(TP, ".venv", "bin", "python")
-    if os.path.exists(venv):
-        return venv
+    # 回落链（t260907-10）：新路径 server/engine 优先，旧 server/dsh/temporal-poc 一轮兼容
+    for tp in (os.path.join(REPO, "server", "engine"), TP):
+        venv = os.path.join(tp, ".venv", "bin", "python")
+        if os.path.exists(venv):
+            return venv
     try:
         import temporalio  # noqa: F401
         return sys.executable
@@ -62,15 +64,22 @@ def poc_python():
         return None
 
 
-def tp_eval(snippet, env_extra=None, args=None, timeout=120):
-    """temporal-poc 目录内子进程求值 snippet（sys.path 已指向 TP）。
-    返回 (rc, stdout, stderr)；SDK 缺失返回 None（调用方按环境红处理）。"""
+def tp_eval(snippet, env_extra=None, args=None, timeout=120, env_replace=False):
+    """engine 目录内子进程求值 snippet（sys.path 已指向 TP）。
+    返回 (rc, stdout, stderr)；SDK 缺失返回 None（调用方按环境红处理）。
+    env_replace=True 时 env_extra 为**完整**子进程环境（不做 overlay）——
+    调用方已做父环境净化的场景必须用它，否则剥离键会被 os.environ 放回
+    （t260907-10 arbitrate 实证：runner 注入的 SANDBAR_TASK_QUEUE 泳道值
+    经 overlay 复活，净化失效）。缺省 False 保持既有 overlay 语义。"""
     py = poc_python()
     if py is None:
         return None
-    env = dict(os.environ)
-    if env_extra:
-        env.update(env_extra)
+    if env_replace and env_extra is not None:
+        env = dict(env_extra)
+    else:
+        env = dict(os.environ)
+        if env_extra:
+            env.update(env_extra)
     code = "import sys; sys.path.insert(0, %r)\n%s" % (TP, snippet)
     try:
         p = subprocess.run([py, "-c", code] + list(args or []), env=env, cwd=TP,
@@ -80,9 +89,10 @@ def tp_eval(snippet, env_extra=None, args=None, timeout=120):
     return (p.returncode, p.stdout, p.stderr)
 
 
-def tp_json(snippet, env_extra=None, args=None, timeout=120):
+def tp_json(snippet, env_extra=None, args=None, timeout=120, env_replace=False):
     """tp_eval 且 stdout 末行 JSON；返回 (obj|None, rc, stdout, stderr)。"""
-    r = tp_eval(snippet, env_extra=env_extra, args=args, timeout=timeout)
+    r = tp_eval(snippet, env_extra=env_extra, args=args, timeout=timeout,
+                env_replace=env_replace)
     if r is None:
         return None, -1, "", "poc venv/SDK 缺失"
     rc, out, err = r

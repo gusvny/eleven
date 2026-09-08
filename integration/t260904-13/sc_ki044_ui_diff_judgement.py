@@ -4,7 +4,7 @@
 
 intent（守护的用户可感知行为/合同）：
 - UI 票判定按**泳道分支实际 diff 路径**定，不按工单写集**声明条目**定（KI-044：
-  t260904-05 声明整个 server/dsh/workbench/ 父目录、实际改会话区 UI → 旧声明口径
+  t260904-05 声明整个 server/plugins/workbench/ 父目录、实际改会话区 UI → 旧声明口径
   前缀不命中 → 判「非 UI 票」→ 合并闸无截图项全绿直过。声明口径 ≠ 实际写面）；
 - 三点口径：只看 merge-base(main,lane)...lane 泳道带来的改动，main 侧他人改 UI
   不算本票 UI 面（t260901-16 白名单基线承诺在 UI 判定面的兑现）；
@@ -20,7 +20,7 @@ intent（守护的用户可感知行为/合同）：
 与相邻场景 intent 分界：sc_ki044_merge_gate_ui_item 守 merge_check 3.6 闸输出契约
 （出不出项/红绿/文案），sc_ki044_lane_patchgate_wiring 守 dev_lane 编排接线与部署
 兼容结构；本场景守「判定源本身」的谓词契约与 activity 回执合同。与 developer L1
-（temporal-poc/tests/test_ki044_ui_changed_paths.py 纯函数白盒）intent 不同面：
+（engine/tests/test_ki044_ui_changed_paths.py 纯函数白盒）intent 不同面：
 本场景用真 git 仓 merge-base 三点 diff 驱动（L1 禁真 git），锚定稿口径承诺不锚内部实现。
 
 实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
@@ -30,21 +30,21 @@ import sys
 
 from lib_ki044 import REPO, build_lane_repo, summary
 
-sys.path.insert(0, str(REPO / "server" / "dsh" / "temporal-poc"))
+sys.path.insert(0, str(REPO / "server" / "engine"))
 import shared  # noqa: E402  纯标准库依赖面，系统 python3 可 import
 
-AG = REPO / "server" / "dsh" / "temporal-poc" / "agent_activities.py"
+AG = REPO / "server" / "engine" / "agent_activities.py"
 
 # 泳道本票改动（t260904-05 实证形态：实际改会话区 UI 产物+顺手改引擎）
 LANE_FILES = {
-    "server/dsh/workbench/lib/workbench.js": "// rebuilt bundle\n",
-    "server/dsh/temporal-poc/shared.py": "# engine tweak\n",
+    "server/plugins/workbench/lib/workbench.js": "// rebuilt bundle\n",
+    "server/engine/shared.py": "# engine tweak\n",
 }
 # main 侧他人改动（泳道之外 UI 面）
 MAIN_FILES = {
-    "server/dsh/workbench/src/client/App.tsx": "// others' ui change\n",
+    "server/plugins/workbench/src/client/App.tsx": "// others' ui change\n",
 }
-UI_PROD = "server/dsh/workbench/lib/workbench.js"
+UI_PROD = "server/plugins/workbench/lib/workbench.js"
 
 passed = failed = 0
 
@@ -69,10 +69,10 @@ tmp, mb, diff_paths = build_lane_repo(LANE_FILES, MAIN_FILES)
 try:
     check("J0a 三点 diff 只含泳道改动（夹具自证）",
           UI_PROD in diff_paths
-          and "server/dsh/workbench/src/client/App.tsx" not in diff_paths,
+          and "server/plugins/workbench/src/client/App.tsx" not in diff_paths,
           "diff=%s" % diff_paths)
     check("J0b 修复面对照：旧声明口径对 t260904-05 形态漏判（粗目录声明不命中）",
-          shared.is_ui_write_set(["server/dsh/workbench/"]) is False)
+          shared.is_ui_write_set(["server/plugins/workbench/"]) is False)
     check("J0c 被测承诺面在场（shared.match_ui_paths）",
           hasattr(shared, "match_ui_paths"),
           "实现未落地（落地前红属预期）")
@@ -81,7 +81,7 @@ try:
     check("J1 实际 diff 的 UI 路径命中（UI 产物在列、引擎文件不在）",
           got is not None and got == [UI_PROD], "got=%r" % (got,))
     # ---- J2 纯引擎票不误伤 ----
-    _, _, engine_diff = build_lane_repo({"server/dsh/temporal-poc/dev_lane.py": "x\n"})
+    _, _, engine_diff = build_lane_repo({"server/engine/dev_lane.py": "x\n"})
     try:
         got2 = match_ui(engine_diff)
         check("J2 纯引擎 diff → 空清单（不出截图项面）",
@@ -89,7 +89,7 @@ try:
     finally:
         shutil.rmtree(engine_diff[0], ignore_errors=True)
     # ---- J3 声明 UI 但实际无 UI diff：按实际不按声明 ----
-    _, _, no_ui_diff = build_lane_repo({"server/dsh/temporal-poc/shared.py": "y\n"})
+    _, _, no_ui_diff = build_lane_repo({"server/engine/shared.py": "y\n"})
     try:
         check("J3a 对照声明口径：app/src/main.tsx 声明确实命中旧谓词（两口径真实分叉）",
               shared.is_ui_write_set(["app/src/main.tsx"]) is True)
@@ -106,8 +106,8 @@ try:
           "got=%r" % (got4,))
     # ---- J5 混合票只含 UI 路径 ----
     check("J5 混合票命中只含 UI 前缀路径（引擎文件被过滤）",
-          got is not None and all(p.startswith(("server/dsh/workbench/",
-                                                "server/dsh/providers/src/client/",
+          got is not None and all(p.startswith(("server/plugins/workbench/",
+                                                "server/plugins/providers/src/client/",
                                                 "app/src/", "app/index.html"))
                                   for p in got),
           "got=%r" % (got,))
@@ -120,7 +120,7 @@ for label, dirty in [
     ("非列表标量", 42),
     ("含非字符串元素", [None, 123, UI_PROD]),
     ("绝对路径", ["/etc/passwd"]),
-    ("含 ..", ["server/../server/dsh/workbench/lib/workbench.js"]),
+    ("含 ..", ["server/../server/plugins/workbench/lib/workbench.js"]),
     ("空串元素", [""]),
 ]:
     try:

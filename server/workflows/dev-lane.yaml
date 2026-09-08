@@ -1,0 +1,124 @@
+# ⚠️ 真源=代码，勿手改 —— M11 v2 模版即代码（t260822-m11）。
+# 本文件由 server/engine/gen_workflows_doc.py 从 dev_lane.py 的
+# DevLaneWorkflow.STAGES 生成；改模版=改类定义并重跑生成器（重跑即覆盖手改）。
+id: dev-lane
+name: "开发泳道"
+lane: worktree
+description: "开发泳道（developer 系唯一流程）：prepare_workspace→create_plan⇄review_plan→implement∥design_integration_tests→汇合（ui_evidence/UI 票）→run_integration_tests→arbitrate→acceptance_walkthrough→merge_check（程序化）→merge（人审）"
+stages:
+  - id: create_plan
+    role: developer
+    name: "做方案"
+    desc: "读需求出实现方案：改动文件清单、步骤、验收口径；不动代码"
+    next: review_plan
+    parts:
+      - agent
+    acceptance:
+      - "方案落结果文件（改动清单+步骤+验收口径）"
+  - id: review_plan
+    role: integration
+    name: "审方案"
+    desc: "审读方案写 review comments：通过 ok / 打回 failed+修改意见"
+    next: implement
+    parts:
+      - agent
+    acceptance:
+      - "review comments 落结果文件"
+      - "通过/打回结论明确"
+  - id: implement
+    role: developer
+    name: "实现"
+    desc: "按方案开发：写集白名单内；commit 由 worker 代落盘（agent 沙箱写不了真 .git）；与 design_integration_tests 并行分叉，两边齐活后汇合统一落盘"
+    next: design_integration_tests
+    parts:
+      - agent
+      - script
+    acceptance:
+      - "写集白名单内"
+      - "改动落写集文件（worker 代落盘 commit）"
+      - "相关 smoke/自测全绿"
+  - id: design_integration_tests
+    role: integration
+    name: "设计集成测试"
+    desc: "按方案评估测试需求：从用户场景出发设计/迭代集成测试集（仓库 integration/ 目录，并登记进场景清单），覆盖并发与边界故障面；与 implement 并行，测试集不向 developer 引导"
+    next: ui_evidence
+    parts:
+      - agent
+    acceptance:
+      - "测试集落 integration/ 目录（并登记进场景清单）"
+      - "场景覆盖与故障面清单落结果文件"
+  - id: ui_evidence
+    role: developer
+    name: "UI截图证据"
+    desc: "UI 票实现落盘后 worker 代跑 ui-check/capture-lane.mjs 隔离台，截控制台各视图落 .sandbar/screenshots/（软失败不拦主链，闸兜底）"
+    next: run_integration_tests
+    parts:
+      - script
+    acceptance:
+      - "UI 票 .sandbar/screenshots/ 有截图（merge_check 证据闸机械查）"
+  - id: run_integration_tests
+    role: integration
+    name: "跑集成测试"
+    desc: "程序化（无 agent）：跑项目声明场景执行器 integration/run_scenarios.py（cwd=泳道），结果 JSON 交仲裁判定；前置检查泳道落盘（0 commit = 实现未落盘 → blocked）"
+    next: arbitrate
+    parts:
+      - script
+    # 纯脚本门段（agent=False：无 agent 活动，只跑门）
+    acceptance:
+      - "场景执行器跑完全部场景并产出结果"
+  - id: arbitrate
+    role: integration
+    name: "仲裁"
+    desc: "读机械测试结果三态判定：pass 通过 / tests-fault 测试集问题（自行迭代后重跑，上限 5 轮）/ code-fault 代码问题（集成测试报告打回 implement，上限 5 轮）"
+    next: acceptance_walkthrough
+    parts:
+      - agent
+      - script
+    acceptance:
+      - "三态 verdict 明确（pass/tests-fault/code-fault）"
+      - "code-fault 附集成测试报告"
+  - id: acceptance_walkthrough
+    role: integration
+    name: "验收走查"
+    desc: "测试通过后 integration 以用户视角走查新功能、写验收报告（供人审门查阅）；走查实证由 worker 前置产出（capture-lane 隔离台实拍 + DOM 断言）；走查发现代码问题 → 打回 implement（上限 2 轮）；收口两问（沉淀一问+反向同步闸）随走查顺路带出——不答不阻塞（doc-lifecycle 票②，文案=shared.STAGE_ACCEPTANCE_EXTRA，登记=agent_activities.apply_doc_gate）"
+    next: merge_check
+    parts:
+      - agent
+      - script
+    acceptance:
+      - "验收报告落结果文件（逐场景结论）"
+      - "沉淀一问有预填建议或显式无可沉淀（未答留痕不阻塞）"
+      - "矛盾核对结论落回执（有矛盾则债条目已登记 pending-doc-sync）"
+  - id: merge_check
+    role: integration
+    name: "合并检查"
+    desc: "程序化检查（无 agent）：泳道有 commit、工作区干净、泳道内 verify_lane 绿、merge-tree 无冲突；仅预演冲突红 → 自动打回 implement 消解（上限 3 轮），其它红灯 blocked 等人"
+    next: merge
+    parts:
+      - script
+    # 纯脚本门段（agent=False：无 agent 活动，只跑门）
+    acceptance:
+      - "泳道分支有 commit"
+      - "工作区干净（无未提交改动）"
+      - "泳道内 verify_lane code 绿灯"
+      - "merge 预演无冲突（冲突则自动消解 3 轮内收敛）"
+  - id: merge
+    role: integration
+    name: "合并（人审）"
+    desc: "人审签字后执行 merge：合 main + 泳道清理（拆 worktree、删分支）；合并失败（如签字期间他道先进 main 冲突）自动打回 merge_check 重验"
+    exit: human
+    next: suggest_next
+    parts:
+      - human
+      - script
+    acceptance:
+      - "人审签字"
+      - "merge 落账 + 泳道清理"
+  - id: suggest_next
+    role: integration
+    name: "预跑下一单"
+    desc: "关联立项的工单签字通过后、merge 落账前，复用 integration 会话预跑「下一单建议」并落缓存（软失败不阻塞 merge 收口）；立项已无事可做时给出可结项结论，工单台「继续执行」秒回 + 「确认结项」动作"
+    parts:
+      - agent
+    acceptance:
+      - "建议落缓存 .sandbar/epic-next/<代号>/pre.json（或软失败留痕）"

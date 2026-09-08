@@ -9,7 +9,7 @@
 //   D. init 对已有表=拒收零覆盖（放一张用户自有表再 init，断言内容不被覆盖）；
 //   E. init 后 GET 视图=出表（uninitialized 消失、default 可解析）。
 //
-// 台别：API 面（mock webServer 手法同 server/dsh/ui/smoke/routes.mjs E 段，无浏览器，
+// 台别：API 面（mock webServer 手法同 server/plugins/ui/smoke/routes.mjs E 段，无浏览器，
 // 进程内 apply 不起监听、零 3099 接触）；wire 口径=project 走 ?project= 查询参
 // （与同族 GET /api/routes 一致）。实现落地前本场景红属预期（TDD 信号），
 // arbitrate/merge 期必须绿。
@@ -25,11 +25,11 @@ const REPO_ROOT = path.resolve(HERE, '..', '..');
 const c = makeChecks('t260906-01 路由无表引导态+一键初始化');
 delete process.env.SANDBAR_PROJECTS_YAML;
 
-const ENGINE_TABLE = path.join(REPO_ROOT, 'server', 'dsh', 'model-routes.yaml');
+const ENGINE_TABLE = path.join(REPO_ROOT, 'server', 'model-routes.yaml');
 const { buildRoutesView } = await import(
-  pathToFileURL(path.join(REPO_ROOT, 'server', 'dsh', 'ui', 'src', 'host', 'routes.ts')).href);
+  pathToFileURL(path.join(REPO_ROOT, 'server', 'plugins', 'ui', 'src', 'host', 'routes.ts')).href);
 const { apply } = await import(
-  pathToFileURL(path.join(REPO_ROOT, 'server', 'dsh', 'ui', 'node.ts')).href);
+  pathToFileURL(path.join(REPO_ROOT, 'server', 'plugins', 'ui', 'node.ts')).href);
 
 const mktempRepo = async (prefix) => await mkdtemp(path.join(tmpdir(), prefix));
 
@@ -67,7 +67,7 @@ async function call(handler, url, method = 'GET') {
 const projUrl = (key) => '/suyou-admin/api/routes?project=' + encodeURIComponent(key)
 const initUrl = (key) => '/suyou-admin/api/routes/init?project=' + encodeURIComponent(key)
 
-// ---- A：无表=引导态非红错（视图半 + API 半双面；repo 连 server/dsh/ 都没有）----
+// ---- A：无表=引导态非红错（视图半 + API 半双面；repo 连 server/ 都没有）----
 const emptyRepo = await mktempRepo('t260906-noroutes-')
 writeProjectEntry(regRoot, 'rtk', 'RT', [emptyRepo]) // 已注册项目、主目录无表（引导态旅程主体）
 {
@@ -102,8 +102,8 @@ writeProjectEntry(regRoot, 'rtk', 'RT', [emptyRepo]) // 已注册项目、主目
   c.check('init 成功 ok:true + routes_file 回执',
     r.status === 200 && r.body.ok === true && typeof r.body.result?.routes_file === 'string',
     JSON.stringify(r.body).slice(0, 300))
-  const target = path.join(emptyRepo, 'server', 'dsh', 'model-routes.yaml')
-  c.check('表已落盘（父目录 server/dsh/ 由 init 代建）', existsSync(target), target)
+  const target = path.join(emptyRepo, 'server', 'model-routes.yaml')
+  c.check('表已落盘（父目录 server/ 由 init 代建）', existsSync(target), target)
   c.check('写入与引擎仓真源逐字节一致（同源模板）',
     existsSync(target) && readFileSync(target).equals(readFileSync(ENGINE_TABLE)),
     'init copy != engine source')
@@ -120,9 +120,9 @@ writeProjectEntry(regRoot, 'rtk', 'RT', [emptyRepo]) // 已注册项目、主目
 // ---- D + B：init 对已有表=拒收零覆盖；畸形表=解析失败红错不降级 ----
 {
   const repo2 = await mktempRepo('t260906-hastable-')
-  mkdirSync(path.join(repo2, 'server', 'dsh'), { recursive: true })
+  mkdirSync(path.join(repo2, 'server'), { recursive: true })
   writeProjectEntry(regRoot, 'hask', 'Hask', [repo2]) // 已注册、主目录自带自有表
-  const p = path.join(repo2, 'server', 'dsh', 'model-routes.yaml')
+  const p = path.join(repo2, 'server', 'model-routes.yaml')
   const own = '# my own table\ndefault:\n  provider: mine\n  model: m1\n'
   writeFileSync(p, own) // 用户自有表（故意非引擎表内容）
 

@@ -66,8 +66,8 @@ export async function consoleHealthy(base) {
 }
 
 /** 本票实现真源面（源锚复核用：pre-implement/未部署 精确归因的依据）。 */
-export const ANCHORS_MODULE = 'server/dsh/workbench/src/client/platform-context-anchors.ts';
-export const FOLD_MODULE = 'server/dsh/workbench/src/client/context-fold.ts';
+export const ANCHORS_MODULE = 'server/plugins/workbench/src/client/platform-context-anchors.ts';
+export const FOLD_MODULE = 'server/plugins/workbench/src/client/context-fold.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FX_DIR = join(HERE, 'fixtures');

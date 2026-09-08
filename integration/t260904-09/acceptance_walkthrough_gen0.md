@@ -9,8 +9,8 @@
 
 | # | 发现 | 归因文件 | 断言源 |
 |---|------|----------|--------|
-| 1 | 票号路径防穿缺失：注入 `../` 的票 id，快照落 settle 目录之外（W8 红） | `server/dsh/temporal-poc/agent_activities.py`（`_freeze_settle_snapshot` 路径拼接） | 场景 W8 + 快照路径契约 `<settle>/<票>.json` |
-| 2 | 测试缝读写两侧分叉：`SANDBAR_SETTLE_SNAPSHOT_DIR` 只被引擎写侧消费，TS 读侧根链无此环（R6 红） | `server/dsh/workbench/src/host/metrics.ts`（`resolveMetricsCacheDir`） | 契约增补段 1「读写两侧同一解析语义」+ 场景 R6 |
+| 1 | 票号路径防穿缺失：注入 `../` 的票 id，快照落 settle 目录之外（W8 红） | `server/engine/agent_activities.py`（`_freeze_settle_snapshot` 路径拼接） | 场景 W8 + 快照路径契约 `<settle>/<票>.json` |
+| 2 | 测试缝读写两侧分叉：`SANDBAR_SETTLE_SNAPSHOT_DIR` 只被引擎写侧消费，TS 读侧根链无此环（R6 红） | `server/plugins/workbench/src/host/metrics.ts`（`resolveMetricsCacheDir`） | 契约增补段 1「读写两侧同一解析语义」+ 场景 R6 |
 
 ## 做了什么
 
@@ -67,7 +67,7 @@
 1. **两发现的修复责任**：归 developer（打回）；仲裁若另判 tests-fault 与本报告冲突处，以本报告的实证复现路径为准可当场重放。
 2. **机械口径 4 败的剩余 2 败**：注入上下文列表截断，只能确认 2 败归属本票双旅程（均已独立复现）；另 2 败明细未见，不排除与本票无关的既有红，请以 run_integration_tests 台账全量清单核对归属。
 3. **`SANDBAR_METRICS_DIR` 引用面扩大（迁移票欠账注记，非本票违规）**：该 env 是 TS 侧既有根链（HEAD~1 已在 metrics.ts），本票 Python 侧新增引用是为写读同根一致的兼容读；发现 2 修复后它成为两侧链中段一环，未来专门迁移票退役该 env 时须两侧同批摘除（建议登记 KI 或入迁移票清单）。
-4. **temporal-poc L1 pytest 本环境不可独立复跑**（系统 python3 无 pytest 模块，环境限制非代码问题）：其覆盖面（目录 env 链/聚合口径/幂等 keep-old/软降级/接线兼容）已由本走查 L3 旅程 W1–W7 断言独立覆盖；L1 独立绿以 developer 自报与后续可跑环境为准。
+4. **engine L1 pytest 本环境不可独立复跑**（系统 python3 无 pytest 模块，环境限制非代码问题）：其覆盖面（目录 env 链/聚合口径/幂等 keep-old/软降级/接线兼容）已由本走查 L3 旅程 W1–W7 断言独立覆盖；L1 独立绿以 developer 自报与后续可跑环境为准。
 5. **真实闭单票的生产端到端**：快照语义自本票部署后首个 settle 才开始产生存量，「真实闭单票面板=快照值」的生产实证待部署后首票自然达成（当前由 W1 写+R1 读的跨组件链路覆盖）；重开票增量交付不可见为契约成文已知边界（快照 reason 的 squash_commit 可发现）。
 
 ## 参考 docs（本段读过）

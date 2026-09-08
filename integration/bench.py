@@ -29,7 +29,7 @@ sitecustomize.py 注入被测子进程 PYTHONPATH：sys.addaudithook 监 socket.
 docker 台的容器内出网由 compose 网络拓扑约束（stage_docker 头注取舍表）。
 
 环境缝（泳道缺资产时的回退，KI-020③ 邻接绷带）：
-  SANDBAR_TEMPORAL_BIN   temporal 二进制（缺省：<repo>/server/dsh/temporal-poc/bin/temporal，
+  SANDBAR_TEMPORAL_BIN   temporal 二进制（缺省：<repo>/server/engine/bin/temporal，
                         泳道缺失时读 .git gitfile 回退主树同位）
   SANDBAR_POC_PYTHON     带 temporalio 的解释器（缺省：<repo>/…/.venv/bin/python，同样回退主树）
 """
@@ -153,13 +153,13 @@ def _resolve_asset(env_key, lane_path: pathlib.Path, what: str) -> pathlib.Path:
 
 def resolve_temporal_bin() -> pathlib.Path:
     return _resolve_asset("SANDBAR_TEMPORAL_BIN",
-                          REPO / "server" / "dsh" / "temporal-poc" / "bin" / "temporal",
+                          REPO / "server" / "engine" / "bin" / "temporal",
                           "temporal 二进制")
 
 
 def resolve_poc_python() -> pathlib.Path:
     return _resolve_asset("SANDBAR_POC_PYTHON",
-                          REPO / "server" / "dsh" / "temporal-poc" / ".venv" / "bin" / "python",
+                          REPO / "server" / "engine" / ".venv" / "bin" / "python",
                           "带 temporalio 的 venv 解释器")
 
 
@@ -234,7 +234,7 @@ _REGISTRY_KEY_RE = None  # 延迟取 shared 的真源正则（见 write_registry
 
 
 def write_registry(dirpath, key, project_dir):
-    """造 fixture 项目注册表（形状=server/dsh/temporal-poc shared.load_projects_registry
+    """造 fixture 项目注册表（形状=server/engine shared.load_projects_registry
     的 per-key 目录档）。返回注册表根目录（SANDBAR_PROJECTS_DIR 直用）。"""
     import re
     d = pathlib.Path(dirpath)

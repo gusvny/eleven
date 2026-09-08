@@ -31,9 +31,9 @@ const add = (root, key, name, dir, extra = []) => runCli(
 {
   const regRoot = tmpRoot('t260906-reg3-');
   const projRoot = path.join(tmpRoot('t260906-area3-'), 'exists');
-  mkdirSync(path.join(projRoot, 'server', 'dsh'), { recursive: true });
+  mkdirSync(path.join(projRoot, 'server'), { recursive: true });
   writeFileSync(path.join(projRoot, 'marker.txt'), 'own data\n');
-  writeFileSync(path.join(projRoot, 'server', 'dsh', 'model-routes.yaml'), 'custom: table\n');
+  writeFileSync(path.join(projRoot, 'server', 'model-routes.yaml'), 'custom: table\n');
 
   const before = treeSnapshot(projRoot);
   const r = runCli(['project', 'add', '--key', 'existk', '--name', 'Exist', '--dir', projRoot, '--json'],
@@ -48,12 +48,12 @@ const add = (root, key, name, dir, extra = []) => runCli(
     j?.scaffold?.created !== undefined && j.scaffold.created.length === 0,
     JSON.stringify(j?.scaffold));
   c.check('root_created=false', j?.root_created === false, JSON.stringify(j?.root_created));
-  c.check('自带自定义表内容原样', readFileSync(path.join(projRoot, 'server', 'dsh', 'model-routes.yaml'), 'utf8') === 'custom: table\n');
+  c.check('自带自定义表内容原样', readFileSync(path.join(projRoot, 'server', 'model-routes.yaml'), 'utf8') === 'custom: table\n');
 }
 
 // ---- B/C：源表缺失/畸形=红+点名源路径+零残留（--root 桩树注入）----
 {
-  // B 源表缺失：桩树无 server/dsh/model-routes.yaml
+  // B 源表缺失：桩树无 server/model-routes.yaml
   const stubMiss = makeStubRoot();
   const regRoot1 = tmpRoot('t260906-reg4-');
   mkdirSync(regRoot1, { recursive: true });
@@ -70,8 +70,8 @@ const add = (root, key, name, dir, extra = []) => runCli(
 
   // C 源表畸形：桩树有表但缺 roles: 结构锚
   const stubBad = makeStubRoot();
-  mkdirSync(path.join(stubBad.stubRoot, 'server', 'dsh'), { recursive: true });
-  writeFileSync(path.join(stubBad.stubRoot, 'server', 'dsh', 'model-routes.yaml'),
+  mkdirSync(path.join(stubBad.stubRoot, 'server'), { recursive: true });
+  writeFileSync(path.join(stubBad.stubRoot, 'server', 'model-routes.yaml'),
     '# 畸形桩：两节结构锚均不在场\nalpha: 1\nbeta: 2\n'); // 注意注释本身不得含结构锚字样（字节级锚检查）
   const regRoot2 = tmpRoot('t260906-reg5-');
   mkdirSync(regRoot2, { recursive: true });

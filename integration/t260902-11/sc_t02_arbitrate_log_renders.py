@@ -14,7 +14,7 @@ import logging
 import sys
 from pathlib import Path
 
-TARGET = Path(__file__).resolve().parents[2] / "server/dsh/temporal-poc/agent_activities.py"
+TARGET = Path(__file__).resolve().parents[2] / "server/engine/agent_activities.py"
 
 
 def find_arbitrate_call():

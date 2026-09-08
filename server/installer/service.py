@@ -47,14 +47,14 @@ def check_server_tooling(paths: InstallPaths) -> None:
     if not (tb.is_file() and (tb.stat().st_mode & 0o111) != 0):
         raise ToolingMissing(
             "temporal CLI 缺失：%s（运行期工件不入 git：跑 "
-            "server/dsh/temporal-poc/setup.sh 获取）" % tb)
+            "server/engine/setup.sh 获取）" % tb)
 
 
 def check_worker_tooling(paths: InstallPaths) -> None:
     """worker 段前置：venv python 与 worker.py 在位。"""
     missing = []
     if not paths.venv_python.is_file():
-        missing.append("%s（worker venv：跑 server/dsh/temporal-poc/setup.sh）"
+        missing.append("%s（worker venv：跑 server/engine/setup.sh）"
                        % paths.venv_python)
     if not (paths.poc_dir / "worker.py").is_file():
         missing.append("%s（worker 入口缺失，仓不完整）" % (paths.poc_dir / "worker.py"))

@@ -1,7 +1,7 @@
 // sc_stale_handshake_banner.mjs — t260905-07 场景②：插件 staleness 握手横幅注入实验（KI-052 根治面）。
 //
 // intent（灰盒，用户可感知行为；工单验收③ + gen2 判定矩阵 M1-M7 + gen1 打回①序列全覆盖）：
-//   「盘上 bundle×进程内存模块」版本错窗可见化——fixture 真拷贝 server/dsh（boot/盘指纹
+//   「盘上 bundle×进程内存模块」版本错窗可见化——fixture 真拷贝 server（boot/盘指纹
 //   都算 fixture 文件，capture-stale-banner.mjs 先例：控制台行为全真，只有「落账」由脚本
 //   触发），五分支双向断言（在场方向×3 + 不在场方向×2）：
 //     M5 新鲜态：boot==disk==注入 → 横幅不在场（等满一个 30s 轮询窗才判「不在场」）。

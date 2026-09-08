@@ -19,7 +19,7 @@ export {
   bootConsole, teardownOnExit, loadPlaywright, dismissNotice, makeResults,
 };
 
-// fnv1a —— 逐字节复制自 server/dsh/workbench/src/shared/project-color.ts（gen2 方案
+// fnv1a —— 逐字节复制自 server/plugins/workbench/src/shared/project-color.ts（gen2 方案
 // R4/C3 钉死：场景内复制实现以换「无 TS loader 依赖」；漂移责任=两侧头注对齐，后改方
 // 同步）。仅用于确定性挑码凑满 EPIC_PALETTE 10 槽（守护面用，不生产真值）。
 export function fnv1a(input) {

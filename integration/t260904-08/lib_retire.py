@@ -24,8 +24,8 @@ import subprocess
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-POC = REPO / "server" / "dsh" / "temporal-poc"
-WORKFLOWS_DIR = REPO / "server" / "dsh" / "workflows"
+POC = REPO / "server" / "engine"
+WORKFLOWS_DIR = REPO / "server" / "workflows"
 TOOLS_DIR = REPO / "server" / "tools"
 INTEG_DIR = REPO / "integration"
 
@@ -49,16 +49,16 @@ DOC_TWO = (
 # 整文件豁免（每条都有声明依据，见 sc_template_retire_no_revival docstring）
 ALLOW_FILES = {
     # v1 向后兼容演示面（gen1 方案声明保留；dispatcher-scan 同文件共存）
-    "server/dsh/temporal-poc/workflows.py",
-    "server/dsh/temporal-poc/demo_happy.py",
-    "server/dsh/temporal-poc/demo_fail.py",
-    "server/dsh/temporal-poc/demo_schedule.py",
-    "server/dsh/temporal-poc/demo.sh",
-    "server/dsh/temporal-poc/demo_cli.sh",
-    "server/dsh/temporal-poc/demo_durability.sh",
+    "server/engine/workflows.py",
+    "server/engine/demo_happy.py",
+    "server/engine/demo_fail.py",
+    "server/engine/demo_schedule.py",
+    "server/engine/demo.sh",
+    "server/engine/demo_cli.sh",
+    "server/engine/demo_durability.sh",
     # 退役标注面（README/docs；场景另验标注在位，防豁免黑洞）
-    "server/dsh/temporal-poc/README.md",
-    "server/dsh/workflows/README.md",
+    "server/engine/README.md",
+    "server/workflows/README.md",
     "docs/design/工单工作流台设计.md",
     "docs/design/deepseek_harness_and_temporal_based_multi-agent_mechanism.md",
     # v1 留存引擎样例（gen0 评审 R1 裁定：测 build_dispatch_prompt+STAGE_CLAUSES
@@ -69,7 +69,7 @@ ALLOW_FILES = {
     # 场景注册表 intent 文本（描述退役事实本身）
     "integration/run_scenarios.py",
     # 历史对照夹具（gen0 评审 C1：KI-035 新制下 workflow_id 不选路，纯构造输入）
-    "server/dsh/temporal-poc/tests/test_t260904_03_t01_dispatch_header_indexed.py",
+    "server/engine/tests/test_t260904_03_t01_dispatch_header_indexed.py",
 }
 
 
@@ -89,7 +89,7 @@ def allow(rel: str, line: str) -> bool:
     # ——命中即豁免；未命中**不提前返回**，继续落到通用标记规则
     # （shared.py 自己的退役注释/真源表头注也靠标记豁免——20260904 实测教训：
     #  分支提前 return 会把带标记的行误判为违规）
-    if rel == "server/dsh/temporal-poc/shared.py":
+    if rel == "server/engine/shared.py":
         if ('("content-pipeline"' in line or '("regression"' in line
                 or '("proofread"' in line or "content-pipeline:" in line):
             return True
@@ -160,12 +160,12 @@ def venv_python():
         p = REPO / p
     p = p.resolve()
     root = p.parent if p.name == ".git" else p
-    alt = root / "server" / "dsh" / "temporal-poc" / ".venv" / "bin" / "python"
+    alt = root / "server" / "engine" / ".venv" / "bin" / "python"
     return str(alt) if alt.is_file() else None
 
 
 def load_shared():
-    """加载 temporal-poc/shared.py（纯 stdlib 模块，独立可载；ticket._shared 同款
+    """加载 engine/shared.py（纯 stdlib 模块，独立可载；ticket._shared 同款
     spec_from_file_location 手法——py3.9 dataclasses 需注册 sys.modules）。"""
     import importlib.util
     spec = importlib.util.spec_from_file_location("_retire_shared", str(POC / "shared.py"))

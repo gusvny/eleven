@@ -43,7 +43,7 @@ export function runCli(args, env) {
 export function pyRegistry(root, extraEnv = {}) {
   const code = [
     "import sys,json",
-    "sys.path.insert(0,'server/dsh/temporal-poc')",
+    "sys.path.insert(0,'server/engine')",
     "import shared",
     "p,q=shared.load_projects_registry()",
     "print(json.dumps({'projects':p,'quarantined':q}))",

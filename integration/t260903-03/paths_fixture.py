@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-POC = REPO / "server" / "dsh" / "temporal-poc"
+POC = REPO / "server" / "engine"
 DOC_CONTRACT = REPO / "docs" / "design" / "sandbar项目接入契约v1.md"
 ROLE = "reviewer"
 
@@ -71,7 +71,7 @@ def mk_ws():
 
 def mk_legacy_roles(ws, role=ROLE):
     """现行约定位置放角色 preset（回落态/对抗对照用）。"""
-    d = ws / "server" / "dsh" / "roles"
+    d = ws / "server" / "roles"
     d.mkdir(parents=True, exist_ok=True)
     f = d / (role + ".yml")
     f.write_text("persona: legacy-roles-marker\n", encoding="utf-8")

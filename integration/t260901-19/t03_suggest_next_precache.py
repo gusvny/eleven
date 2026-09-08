@@ -17,7 +17,7 @@ Safety: real spawn is impossible here — agent_activities._prepare_agent_spawn 
 monkeypatched to a recorder that raises a sentinel, so a buggy short-circuit shows
 up as a recorded spawn attempt, never as a real agent process.
 
-Needs temporalio SDK (prefers server/dsh/temporal-poc/.venv); missing -> ENV_FAIL
+Needs temporalio SDK (prefers server/engine/.venv); missing -> ENV_FAIL
 exit 2（三态契约定稿 §7.3「闸内无 SKIP」：缺 SDK=环境红）.
 cwd = lane root.
 """
@@ -29,7 +29,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, "server/dsh/temporal-poc")
+sys.path.insert(0, "server/engine")
 
 try:
     import temporalio  # noqa: F401
@@ -125,9 +125,8 @@ def run_case(suggestion=None, *, ep="a", sk="sk1", pre_sk=None, pre_epic=None,
         shutil.rmtree(shared.epic_next_precache_path(REPO, code).parent,
                       ignore_errors=True)
         # mirror_to_legacy 会把新名预跑缓存镜像到旧名 .suyou/epic-next/（naming-compat 镜像面；退役账#5
-        # 过渡面），镜像出的旧名副本不同步清 → no-residue 假红（t260907-12 顺修；t260907-11
-        # 泳道侧独立复现同一根因并同款修复——泳道根有运行时 .sandbar/ 时 resolve_dot_dir
-        # 走新名触发镜像，本清理责任在脚本：双名同清）。
+        # 过渡面），镜像出的旧名副本不同步清 → no-residue 假红（t260907-12 顺修；t260907-10
+        # 泳道侧独立复现同一根因并同款修复——引擎写侧镜像补旧名副本，清理必须双侧同清）。
         # 旧名同 rel 一并清理（best-effort，与镜像同口径；路径用 shared.DOT_DIR_OLD 常量）。
         shutil.rmtree(REPO / shared.DOT_DIR_OLD / "epic-next" / code,
                       ignore_errors=True)

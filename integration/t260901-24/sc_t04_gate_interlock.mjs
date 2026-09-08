@@ -17,7 +17,7 @@
  * 全部子进程干跑（--selftest / 参数错误路径），不 boot 控制台、不开浏览器、不碰 3099。
  *
  * t260904-07 仲裁迭代（tests-fault 修正）：capture-lane selftest 段补环境前提卫兵——
- * <repo>/server/dsh/profile/node_modules 软链族是环境工件不入 git，fresh worktree 泳道
+ * <repo>/server/profile/node_modules 软链族是环境工件不入 git，fresh worktree 泳道
  * 布局缺失时该段三腿曾假红（违反 t260904-12 三态「缺环境=ENV_FAIL，绝不 exit 0」执行契约）；缺失→ENV_FAIL+归因，
  * 前提在位环境断言面逐条不变。
  *
@@ -35,8 +35,8 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const REPO = resolve(HERE, '..', '..')
-const CAPTURE = join(REPO, 'server', 'dsh', 'ui-check', 'capture.mjs')
-const CAPTURE_LANE = join(REPO, 'server', 'dsh', 'ui-check', 'capture-lane.mjs')
+const CAPTURE = join(REPO, 'server', 'ui-check', 'capture.mjs')
+const CAPTURE_LANE = join(REPO, 'server', 'ui-check', 'capture-lane.mjs')
 
 let passed = 0, failed = 0, envFailed = 0
 const failures = []
@@ -55,8 +55,8 @@ const tmp = mkdtempSync(join(tmpdir(), 't260901-24-t04-'))
 // 恢复，安装=宿主沙箱外 npm install）→ ENV_FAIL（exit 2）不假红；依赖恢复后本守卫自动生效，
 // 断言面不变。
 {
-  const pwLane = join(REPO, 'server', 'dsh', 'ui-check', 'node_modules', 'playwright-core')
-  const pwMain = join(resolve(REPO, '..', '..'), 'server', 'dsh', 'ui-check',
+  const pwLane = join(REPO, 'server', 'ui-check', 'node_modules', 'playwright-core')
+  const pwMain = join(resolve(REPO, '..', '..'), 'server', 'ui-check',
                       'node_modules', 'playwright-core')
   if (!process.env.SANDBAR_PLAYWRIGHT_MODULE && !existsSync(pwLane) && !existsSync(pwMain)) {
     console.log('ENV_FAIL（KI-036）：ui-check 缺 playwright-core（本树+主树均无），'
@@ -102,7 +102,7 @@ try {
 
   section('capture-lane selftest：带/不带 SANDBAR_CAPTURE_FIXTURES 均全绿')
   // 前提守卫（合并版：t260904-04 arbitrate gen3 双模断言 × t260904-06 arbitrate KI-036②
-  // 守卫，两边守的是同一条硬前提=<repo>/server/dsh/profile/node_modules/sandbar-workbench
+  // 守卫，两边守的是同一条硬前提=<repo>/server/profile/node_modules/sandbar-workbench
   // 软链——组临时 profile 要改指泳道 build；gitignored 实体，主树有、worktree 泳道不随迁，
   // KI-036② 泳道依赖软链未随迁移恢复）。取两边语义之强：前提在=跑原三条全绿断言（两边
   // 断言逐字相同）；前提缺=工具按设计 fail-closed，验「拒跑+报因说到点上+不假报全绿」
@@ -110,7 +110,7 @@ try {
   // 跑，断言面不变）。谜底记录：本场景此前在此泳道一直走旧跳过通路（主树 ui-check 装
   // playwright-core 后守卫翻转才首跑，t260904-06 泳道实锤 selftest 2/6 绿后在
   // buildTempProfile 掷错），泳道缺 profile/node_modules 属环境事实非实现回归。
-  const laneProfileWb = join(REPO, 'server', 'dsh', 'profile', 'node_modules', 'sandbar-workbench')
+  const laneProfileWb = join(REPO, 'server', 'profile', 'node_modules', 'sandbar-workbench')
   // 分支依据=工具可观测行为（本 run 退出码），不再复刻其内部就绪谓词。
   // t260904-11 仲裁 gen1（tests-fault 修正②）：容差修复镜像合入 + 验收段供给升级
   // （泳道出现「断链」的 sandbar-workbench 软链——验收残留物，指向 ../workbench 解析
@@ -119,7 +119,7 @@ try {
   // 每次 run 自身退出码分支；全绿形态与 fail-closed 形态两套断言逐字保留（谁在位
   // 验谁），断言强度零变化。laneProfileWb 仅余诊断用途。
   const laneLinkState = existsSync(laneProfileWb) ? '在'
-    : (existsSync(join(REPO, 'server', 'dsh', 'profile', 'node_modules')) ? '断链' : '缺')
+    : (existsSync(join(REPO, 'server', 'profile', 'node_modules')) ? '断链' : '缺')
   r = run(CAPTURE_LANE, ['--selftest'])
   const profileReady = r.status === 0
   if (profileReady) {
@@ -155,9 +155,9 @@ function run(script, args, extraEnv = {}) {
       SANDBAR_CAPTURE_FIXTURES: '',
       // 本树 ui-check 缺 playwright-core 时镜像 capture-lane 的回退：主树 ui-check
       // （worktree 布局 <main>/.worktrees/<id> 与引擎泳道布局同构）。环境已设则不覆盖。
-      ...(!process.env.SANDBAR_PLAYWRIGHT_MODULE && !existsSync(join(REPO, 'server', 'dsh', 'ui-check',
+      ...(!process.env.SANDBAR_PLAYWRIGHT_MODULE && !existsSync(join(REPO, 'server', 'ui-check',
         'node_modules', 'playwright-core'))
-        ? { SANDBAR_PLAYWRIGHT_MODULE: join(resolve(REPO, '..', '..'), 'server', 'dsh', 'ui-check',
+        ? { SANDBAR_PLAYWRIGHT_MODULE: join(resolve(REPO, '..', '..'), 'server', 'ui-check',
             'node_modules', 'playwright-core') }
         : {}),
       ...extraEnv },

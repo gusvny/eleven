@@ -3,7 +3,7 @@
 """sc_naming_grep_assert.py — 命名清理① grep 断言守卫（t260907-04 验收①）。
 
 intent（用户可感知契约）：宿主令「名字的清理要搞干净」——写集内
-（server/dsh/temporal-poc + server/tools + integration）旧 suyou 字面量只允许
+（server/engine + server/tools + integration）旧 suyou 字面量只允许
 出现在**已声明的兼容回落/退役账面**，其余位置零容忍。防旧名从注释/文案/新代码
 抄回来（KI-051「守卫锚×改名脱钩」同族的反向守护：这里字面量本身就是被测对象）。
 
@@ -11,7 +11,7 @@ intent（用户可感知契约）：宿主令「名字的清理要搞干净」�
   - 本守卫自身 / L1 负断言源码 tests/test_t260907_04_naming_compat.py（断言面≠消费面）；
   - 含 LEGACY 标识的行（兼容表/常量/回落分支，方案约定标识）；
   - 含 naming-compat 显式标记的行（目录读侧回落/镜像/场景 fixture 造旧目录行）；
-  - temporal-poc/README.md 退役账行（含「退役」字样）；
+  - engine/README.md 退役账行（含「退役」字样）；
   - 出界不动册：插件面文件名引用（suyou-projects.ts / suyou-temporal-tools /
     suyou-knowledge / suyou-workbench）——另一票面。
 守卫另断言 README 退役账在册（≥7 行 suyou×退役，防「撤了半截」——退役时必须
@@ -39,7 +39,7 @@ OLD_RE = re.compile(
 PLUGIN_REF_RE = re.compile(
     r"suyou-projects\.ts|suyou-temporal-tools|suyou-knowledge|suyou-workbench")
 
-SCAN_ROOTS = ("server/dsh/temporal-poc", "server/tools", "integration")
+SCAN_ROOTS = ("server/engine", "server/tools", "integration")
 SKIP_DIRS = {".venv", "node_modules", "__pycache__", "bin", ".git", ".dsh",
              ".suyou", ".sandbar"}
 TEXT_EXT = {".py", ".md", ".mjs", ".sh", ".yaml", ".yml", ".json", ".ts", ".txt"}
@@ -48,16 +48,16 @@ MERGE_DEBT_FILES = frozenset((
     # main 树并入（t260907-04 merge 轮）仍在用旧名的引擎/清单面：t260907-06 多仓
     # manifest 写 .suyou/repo_worktrees.json、t260907-07 epic 锚钉 SUYOU_EPICS_DIR
     # 语义（其场景/UT 为契约锚）。属跨票旧名债，登记不豁免监督（C 腿自证仍在）。
-    "server/dsh/temporal-poc/agent_activities.py",
-    "server/dsh/temporal-poc/shared.py",
-    "server/dsh/temporal-poc/client.py",
-    "server/dsh/temporal-poc/selfcheck_epic_next.py",
-    "server/dsh/temporal-poc/tests/test_t260907_07_epic_project_anchor.py",
+    "server/engine/agent_activities.py",
+    "server/engine/shared.py",
+    "server/engine/client.py",
+    "server/engine/selfcheck_epic_next.py",
+    "server/engine/tests/test_t260907_07_epic_project_anchor.py",
     "integration/run_scenarios.py",
 ))
 SELF = "integration/t260907-04/sc_naming_grep_assert.py"
-UT = "server/dsh/temporal-poc/tests/test_t260907_04_naming_compat.py"
-README = "server/dsh/temporal-poc/README.md"
+UT = "server/engine/tests/test_t260907_04_naming_compat.py"
+README = "server/engine/README.md"
 
 
 def allowed(rel, line):
@@ -66,8 +66,12 @@ def allowed(rel, line):
         return True
     if rel.startswith("integration/t260907-04/"):
         return True  # 命名场景族自身（fixture 面自证旧名是契约内容）
-    if "/t260907-06/" in rel or "/t260907-07/" in rel or "/t260907-01/" in rel:
-        return True  # main 并入的后续票资产（多仓/立项锚/移仓），旧名属其票语义
+    if ("/t260907-06/" in rel or "/t260907-07/" in rel
+            or "/t260907-01/" in rel or "/t260907-08/" in rel):
+        # main 并入的后续票资产（多仓/立项锚/移仓/对比象限截图目录 .suyou/），
+        # 旧名属其票语义——t260907-08 为 gen5 补账（.suyou/screenshots 存量欠账，
+        # 随专门迁移票处置，与本守卫的写集内零容忍不冲突）
+        return True
     if rel in MERGE_DEBT_FILES:
         return True  # main 并入的代码面旧名债（登记在案，待后续命名清扫轮处置）
     if "LEGACY" in line:

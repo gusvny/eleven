@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
-SRC = REPO / "server" / "dsh" / "temporal-poc" / "agent_activities.py"
+SRC = REPO / "server" / "engine" / "agent_activities.py"
 
 PASS = 0
 FAIL = 0

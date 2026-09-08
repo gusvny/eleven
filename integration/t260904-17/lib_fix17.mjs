@@ -190,8 +190,8 @@ export function mainRoot() {
 }
 
 async function buildProfile(tmpHome, laneWorkbenchDir) {
-  const laneProfile = path.join(REPO_ROOT, 'server', 'dsh', 'profile');
-  const mainProfileNm = path.join(mainRoot(), 'server', 'dsh', 'profile', 'node_modules');
+  const laneProfile = path.join(REPO_ROOT, 'server', 'profile');
+  const mainProfileNm = path.join(mainRoot(), 'server', 'profile', 'node_modules');
   const profDir = path.join(tmpHome, 'profiles', 'suyou');
   await mkdir(profDir, { recursive: true });
   for (const f of ['cordis.yml', 'cordis.patch.yml', 'package.json']) {
@@ -239,7 +239,7 @@ export async function bootConsole(projectsRoot, stub) {
       path.join(process.env.HOME || '', '.dsh', '.credentials.yaml'),
     ].find((p) => existsSync(p));
     if (cred) await copyFile(cred, path.join(tmpHome, '.credentials.yaml')).catch(() => {});
-    await buildProfile(tmpHome, path.join(REPO_ROOT, 'server', 'dsh', 'workbench'));
+    await buildProfile(tmpHome, path.join(REPO_ROOT, 'server', 'plugins', 'workbench'));
     const port = await freePort();
     if (port === 3099) throw new Error('freePort 撞 3099（概率≈0，命中即拒跑）');
     const patchFile = path.join(tmpHome, 'port.patch.yml');
@@ -272,8 +272,8 @@ export function teardownOnExit(teardown) {
 
 /** playwright-core 四路探测（t260904-15 同口径）。null=调用方转环境红（env_fail 点名，KI-036）。 */
 export async function loadPlaywright() {
-  const localPw = new URL('../../server/dsh/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
-  const mainPw = path.join(mainRoot(), 'server', 'dsh', 'ui-check', 'node_modules', 'playwright-core', 'index.mjs');
+  const localPw = new URL('../../server/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
+  const mainPw = path.join(mainRoot(), 'server', 'ui-check', 'node_modules', 'playwright-core', 'index.mjs');
   for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core', localPw,
     existsSync(mainPw) ? pathToFileURL(mainPw).href : null]) {
     if (!c) continue;

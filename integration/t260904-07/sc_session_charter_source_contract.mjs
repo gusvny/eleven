@@ -2,7 +2,7 @@
 //
 // Intent (gray-box, user perspective):
 //   用户验收口径第一依据=宿主定稿真源（notes/discussions/260904-project-session-charter.md
-//   附录模板，拍板④）：server/dsh/session_charter.md 必须与真源附录逐字同步——该文件
+//   附录模板，拍板④）：server/session_charter.md 必须与真源附录逐字同步——该文件
 //   是「当前在案授权」栏的授权档案第一环（git 版本化），漂移=授权声明与定稿脱钩；
 //   宿主合法定稿变更须两处同步（回真源补口径），本场景红即提示同步缺失或落地缺失。
 //   同时冻结端点接线的可感知契约三件：注册路径与客户端请求路径同源（KI-042 同族
@@ -11,7 +11,7 @@
 //   锚「交付物↔宿主定稿真源一致性」与跨端接线一致性（用户验收真源面）。
 //
 // High-level steps:
-//   S1 真源附录（最后一个 ```markdown fenced block）与 server/dsh/session_charter.md
+//   S1 真源附录（最后一个 ```markdown fenced block）与 server/session_charter.md
 //      逐字一致（去尾空白后比对；文件缺失=红——实现段落地前红属预期，TDD 信号，
 //      arbitrate/merge 期必须绿）。
 //   S2 结构契约要素在文：四占位符、两纪律语义锚（notes 落盘攒批 / 点名修复先告知）、
@@ -39,8 +39,8 @@ const check = (name, ok, detail = '') => {
 };
 
 const SRC_DISCUSSION = 'notes/discussions/260904-project-session-charter.md';
-const SRC_CHARTER = 'server/dsh/session_charter.md';
-const WB = 'server/dsh/workbench';
+const SRC_CHARTER = 'server/session_charter.md';
+const WB = 'server/plugins/workbench';
 const EP = '/sandbar-workbench/api/session-charter';
 
 const read = (p) => { try { return readFileSync(p, 'utf8'); } catch { return null; } };

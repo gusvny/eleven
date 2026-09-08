@@ -15,7 +15,7 @@ stub 进程、ps 观测缝桩、端口 guard。铁律：
 t260903-11 arbitrate 环境无关化重造（原夹具三处前提在本环境不成立，均属测试集
 前提错而非实现错）：
 ① 原夹具把 stub 塞 PATH 期待安装器按 PATH 找 temporal——实现按
-   <root>/server/dsh/temporal-poc/bin/temporal 定位，PATH 注入是无效缝；
+   <root>/server/engine/bin/temporal 定位，PATH 注入是无效缝；
    改走公共旗标 --root 注入 fixture 仓（temporal 桩落 fixture 仓内）；
 ② 原夹具占死 7233/8233——真环境常态占用（引擎自己就在跑），运行时三场景
    在调度环境永远 exit 3；改自选空闲端口（安装器旗标本就声明端口可换）；
@@ -360,7 +360,7 @@ def make_fixture_root(tmp, mode):
     +真 VERSION（版本面不是运行时场景的考察对象）。
     """
     fx = os.path.join(tmp, "fxroot")
-    poc = os.path.join(fx, "server", "dsh", "temporal-poc")
+    poc = os.path.join(fx, "server", "engine")
     os.makedirs(os.path.join(poc, "data"), exist_ok=True)
     bin_dir = os.path.join(poc, "bin")
     os.makedirs(bin_dir, exist_ok=True)

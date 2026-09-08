@@ -8,7 +8,7 @@
  *   - loadBannerTexts()：横幅文案锚常量（banner-text.ts）的源码侧加载——
  *     KI-051 锚纪律：场景断言 import 常量而非裸字面量；模块缺席返回 null
  *     （调用方 FAIL 点名「锚常量未落地」，不以字面量回退蒙混该断言）。
- *   - makeFixtureConsole()：staleness 注入台——fixture 真拷贝 server/dsh
+ *   - makeFixtureConsole()：staleness 注入台——fixture 真拷贝 server
  *     （capture-stale-banner.mjs 先例：boot 指纹算 fixture 文件），支持同端口
  *     restart（跨重启存活页面序列的唯一实现方式）。
  * 红线：临时端口 + 临时 DSH_HOME（退出即删）+ 零 3099/7233 接触 + 不 seed 真数据。
@@ -44,7 +44,7 @@ export const FALLBACK_TEXTS = Object.freeze({
 export async function loadBannerTexts() {
   try {
     const mod = await import(pathToFileURL(join(
-      REPO_ROOT, 'server', 'dsh', 'workbench', 'src', 'client', 'banner-text.ts',
+      REPO_ROOT, 'server', 'plugins', 'workbench', 'src', 'client', 'banner-text.ts',
     )).href)
     return { ...FALLBACK_TEXTS, ...mod }
   } catch {
@@ -71,7 +71,7 @@ async function waitReady(port, timeoutMs, logPath) {
 }
 
 /**
- * fixture 注入台：拷贝 server/dsh → 临时 repo（跳过 node_modules）→ buildTempProfile
+ * fixture 注入台：拷贝 server → 临时 repo（跳过 node_modules）→ buildTempProfile
  * 把 sandbar-workbench 指向 fixture 拷贝（boot/盘指纹都算 fixture 文件，真拷贝=控制台
  * 行为全真，只有「落账」这一步由脚本触发）→ start/restart（同端口）/teardown。
  * 同端口 restart 是「跨重启存活页面」序列（M4）的唯一实现方式：页面不重载，
@@ -81,11 +81,11 @@ export async function makeFixtureConsole() {
   const tmpHome = mkdtempSync(join(tmpdir(), 't260905-stale-'))
   const fixtureRepo = join(tmpHome, 'repo')
   await mkdir(fixtureRepo, { recursive: true })
-  await cp(join(REPO_ROOT, 'server', 'dsh'), join(fixtureRepo, 'server', 'dsh'), {
+  await cp(join(REPO_ROOT, 'server'), join(fixtureRepo, 'server'), {
     recursive: true,
     filter: (src) => !src.includes('node_modules'),
   })
-  const fixtureWb = join(fixtureRepo, 'server', 'dsh', 'workbench')
+  const fixtureWb = join(fixtureRepo, 'server', 'plugins', 'workbench')
 
   // capture-lane 必须与被测代码同树解析（t260907-05 仲裁归因）：物化器以插件名声明
   // fixture profile（patch id/node_modules 链），被测 bundle 以同一插件名注册模块——
@@ -94,7 +94,7 @@ export async function makeFixtureConsole() {
   // 被环境错配捂成假绿，KI-051/046 同族）。泳道 profile/node_modules 五链在位后
   // （t260907-05 步5），本树 capture-lane 即可物化全量 temp profile——不再依赖主树。
   const captureLane = await import(pathToFileURL(join(
-    REPO_ROOT, 'server', 'dsh', 'ui-check', 'capture-lane.mjs',
+    REPO_ROOT, 'server', 'ui-check', 'capture-lane.mjs',
   )).href)
   await captureLane.buildTempProfile(tmpHome, fixtureWb)
 

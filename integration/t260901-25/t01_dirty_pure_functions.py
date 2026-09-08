@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
-SRC = REPO / "server" / "dsh" / "temporal-poc" / "agent_activities.py"
+SRC = REPO / "server" / "engine" / "agent_activities.py"
 
 PASS = 0
 FAIL = 0
@@ -98,14 +98,14 @@ def main():
         ok(False, "空输入不应抛异常: %r" % e)
 
     print("== B. _dirty_within_write_set（自愈闸门 fail-closed） ==")
-    ws = ["server/dsh/temporal-poc/dev_lane.py",
-          "server/dsh/temporal-poc/agent_activities.py",
+    ws = ["server/engine/dev_lane.py",
+          "server/engine/agent_activities.py",
           "integration/"]
-    ok(within(["server/dsh/temporal-poc/dev_lane.py"], ws) is True, "写集内文件放行")
+    ok(within(["server/engine/dev_lane.py"], ws) is True, "写集内文件放行")
     ok(within(["integration/t260901-25/t01.py"], ws) is True, "目录前缀条目（integration/）放行")
     ok(within(["server/other/x.py"], ws) is not True, "写集外拒")
     # 同前缀负例（review gen1 意见 1）：文件条目不得用裸 startswith 放行兄弟路径
-    ok(within(["server/dsh/temporal-poc/dev_lane.py.bak"], ws) is not True,
+    ok(within(["server/engine/dev_lane.py.bak"], ws) is not True,
        "同前缀负例 dev_lane.py.bak 拒（防裸 startswith 误放行）")
     # 畸形三态 fail-closed
     ok(within([], []) is not True, "脏清单空 + 空写集：不放行（无自愈对象）")

@@ -4,7 +4,7 @@
 
 intent（守护的用户可感知行为）：
 - `sandbar doctor` 消费 SANDBAR_ZOMBIE_CENSUS 注入的进程 census（fixture 档零真扫）：
-  · 异仓引擎形态（cwd 落在「含 server/dsh/temporal-poc 标记」且引擎根 ≠ 当前引擎根，
+  · 异仓引擎形态（cwd 落在「含 server/engine 标记」且引擎根 ≠ 当前引擎根，
     即 260904 实案=headless cwd 指向冻结仓）→ doctor exit1 + 红行点名 pid 与异仓路径；
   · 干净 census（同仓 cwd + 无关进程 + 空表）→ exit0、兼容矩阵恰 5 行（绿一行
     append 一行）且新行含 zombie 语义探针名、重复 doctor 幂等（行集合不变）；
@@ -48,12 +48,12 @@ def main():
     entry = require_sandbar_entry(fail)
     tmp, env = make_temp_home()
     try:
-        poc_marker = os.path.join("server", "dsh", "temporal-poc")
+        poc_marker = os.path.join("server", "engine")
         fake_foreign_root = os.path.join(tmp, "fake-frozen-engine")  # 模拟冻结仓
         # ---------- ① 红腿：注入异仓引擎形态 census ----------
         bad = os.path.join(tmp, "census_bad.json")
         write_census(bad, [
-            {"pid": FAKE_ZOMBIE_PID, "command": "node server/dsh/temporal-tools/node.ts",
+            {"pid": FAKE_ZOMBIE_PID, "command": "node server/plugins/temporal-tools/node.ts",
              "cwd": os.path.join(fake_foreign_root, poc_marker)},
             {"pid": SAME_OK_PID, "command": "Python worker.py",
              "cwd": os.path.join(REPO, poc_marker)},  # 同仓引擎进程=不红

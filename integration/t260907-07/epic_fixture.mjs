@@ -48,9 +48,9 @@ export function makeEpicFixture() {
   }
 }
 
-/** 跑 python 片段（temporal-poc venv 优先），stdout 原样返回。 */
+/** 跑 python 片段（engine venv 优先），stdout 原样返回。 */
 export function runPython(code, env = {}) {
-  const base = new URL('../../server/dsh/temporal-poc/.venv/bin/python', import.meta.url).pathname
+  const base = new URL('../../server/engine/.venv/bin/python', import.meta.url).pathname
   const exe = existsSync(base) ? base : 'python3'
   return execFileSync(exe, ['-c', code], {
     encoding: 'utf8',

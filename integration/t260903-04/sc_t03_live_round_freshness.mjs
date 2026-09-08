@@ -26,7 +26,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { readAgentLiveTail } from '../../server/dsh/workbench/src/host/agent-live.ts'
+import { readAgentLiveTail } from '../../server/plugins/workbench/src/host/agent-live.ts'
 
 const execFileP = promisify(execFile)
 

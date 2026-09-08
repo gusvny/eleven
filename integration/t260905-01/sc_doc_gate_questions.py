@@ -16,7 +16,7 @@ dev_lane STAGES 两问验收项——锚名字与调用点形状，不锚行号�
 不阻塞语义）。行为半需 temporalio：缺失=ENV_FAIL 点名收场，stdlib 链照跑。
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
 
-与 developer L1（temporal-poc/tests 纯函数白盒）不同层：本条另守源码锁（防
+与 developer L1（engine/tests 纯函数白盒）不同层：本条另守源码锁（防
 触发器被整段拆除而单测随之删除的共谋回退）与契约面（回执小节/转正纪律句/
 去重键含 actual 的 append-only 审计语义）。
 """

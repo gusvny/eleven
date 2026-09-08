@@ -34,7 +34,7 @@ python3 integration/run_scenarios.py
   才绿**（执行器自校验，谎报=产品红）。
 - 舞台纪律（t260904-19 定稿：自搭进程舞台退役，双轨并一轨）：一切需要舞台的场景
   经 **integration/stage_docker.py** 单点搭台（同一 compose 文件
-  server/dsh/docker-compose.test.yml；每场景独立 compose 工程名+端口档，flock 原子
+  server/docker-compose.test.yml；每场景独立 compose 工程名+端口档，flock 原子
   预留、禁区端口排除、teardown 零残留核验，故障模式取舍表见其头注）。docker 缺席/
   测试镜像缺席/起台不健康=ENV_FAIL（exit 2，文案点名缺什么），不假绿不静默回落
   自搭台（capture-lane 的 --boot-local 是 docker 缺席宿主的人工显式通路，闸内不用）。
@@ -52,9 +52,9 @@ python3 integration/run_scenarios.py
 
 Node >=22.18（type-stripping 直跑，全部测试）；其余按条目按需探测：
 python3（stdlib）、docker + 测试镜像 `test-temporal:cli-1.8.3`（舞台场景，
-t260904-19 起必需；重建=`sh server/dsh/build-test-temporal.sh`）、temporalio SDK
-（优先 `server/dsh/temporal-poc/.venv/bin/python`）、temporal CLI
-（`server/dsh/temporal-poc/bin/temporal` 或 PATH，供给台 SA 注册与 temporal-only
+t260904-19 起必需；重建=`sh server/build-test-temporal.sh`）、temporalio SDK
+（优先 `server/engine/.venv/bin/python`）、temporal CLI
+（`server/engine/bin/temporal` 或 PATH，供给台 SA 注册与 temporal-only
 消费面需要）、playwright-core（browser 族，KI-036 三路探测缺失=ENV_FAIL）。
 
 ## 安全红线（测试自己先遵守）
@@ -129,7 +129,7 @@ t260904-19 起必需；重建=`sh server/dsh/build-test-temporal.sh`）、tempor
   控制台、不装浏览器，3099 全程零接触（后者显式把 SANDBAR_CONSOLE_URL 钉死死端口并内置
   红线自检断言）。隔离台端到端实拍（boot 控制台+浏览器出图）是重环境路径，不进 manifest：
   依赖真机凭据与 `$HOME/.dsh` preset 实体，泛化跑只会恒 ENV_FAIL，该口径由
-  `node server/dsh/ui-check/capture-lane.mjs --selftest` 与 implement 段端到端验收步骤承担。
+  `node server/ui-check/capture-lane.mjs --selftest` 与 implement 段端到端验收步骤承担。
 
 ## 基线设计红线（审查标准，integration 岗位维护）
 
@@ -152,7 +152,7 @@ t260904-19 起必需；重建=`sh server/dsh/build-test-temporal.sh`）、tempor
 - **判例（t260901-15 仲裁，第三案）**：`t07-t260901-07-no-code-touched` 与
   `t10-t260901-10-write-set` 两条全局 git 状态断言（`git status --porcelain` /
   `git ls-files --others` / 对 HEAD 的 diff）在共享泳道把在飞工单 t260901-15 的合法写集
-  （写集明含 `server/dsh/workbench/`，且已过 verify_lane 白名单）判成越界，2 败阻塞仲裁。
+  （写集明含 `server/plugins/workbench/`，且已过 verify_lane 白名单）判成越界，2 败阻塞仲裁。
   t260901-11 对前者的「代码目录否定清单」修订仍残留同一病灶（工作区/提交全局视角无法把
   改动归因给哪个工单）。按既定打回口径整段移除（check.sh 留碑注，t06 脚本删除，manifest
   除名 2 条，53→51）：写集纪律由 verify_lane 按当前工单 write_set 精判承接
@@ -181,8 +181,8 @@ run_integration_tests→arbitrate→acceptance_walkthrough→merge_check→merge
 
 隔离要点（引擎 merge 落账目标是 worker 侧 REPO_ROOT 当前分支、无视 base_ref）：
 每轮运行先 `git clone --branch main --single-branch` 本地主库到临时 fixture 仓，worker 从
-fixture 内的 temporal-poc 启动（REPO_ROOT=fixture）——泳道 worktree、settle、merge、拆树
-清理全部发生在 fixture 内，真仓零接触。fixture 内 app/node_modules 与 temporal-poc/.venv
+fixture 内的 engine 启动（REPO_ROOT=fixture）——泳道 worktree、settle、merge、拆树
+清理全部发生在 fixture 内，真仓零接触。fixture 内 app/node_modules 与 engine/.venv
 软链回主 checkout，泳道内 verify_lane 才可绿。
 
 确定性机制：stub 大脑的 arbitrate summary 天然缺 `verdict=`（3 次格式轮即 blocked，场景 D

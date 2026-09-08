@@ -47,7 +47,7 @@ import { pathToFileURL } from 'node:url'
 
 const REPO = process.cwd()
 const FID = 'it05c' // 夹具票 id（alnum；绝不真票）
-const LIB_JS = join(REPO, 'server', 'dsh', 'workbench', 'lib', 'client.js')
+const LIB_JS = join(REPO, 'server', 'plugins', 'workbench', 'lib', 'client.js')
 // L4 探测资产=页面实际执行的 workbench 插件客户端（t260905-05 implement 实锤：
 // dsh 壳层聚合包 dsh-client-modules/client.js 不含 workbench 弹层代码（wb-modal=0），
 // 弹层真源是按 rev 懒加载的 /plugins/sandbar-workbench/client.js——探错资产会把
@@ -67,8 +67,8 @@ async function loadPlaywrightRobust() {
       { cwd: REPO, encoding: 'utf8', timeout: 5000 }).trim()
     if (!common) return null
     const main = resolve(REPO, common, '..')
-    for (const sub of ['server/dsh/ui-check/node_modules/playwright-core/index.mjs',
-      'server/dsh/workbench/node_modules/playwright-core/index.mjs']) {
+    for (const sub of ['server/ui-check/node_modules/playwright-core/index.mjs',
+      'server/plugins/workbench/node_modules/playwright-core/index.mjs']) {
       const p = join(main, sub)
       if (existsSync(p)) {
         try { return await import(pathToFileURL(p).href) } catch { /* next */ }

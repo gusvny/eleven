@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-POC = HERE.parent.parent / "server" / "dsh" / "temporal-poc"
+POC = HERE.parent.parent / "server" / "engine"
 BASE = POC / "base.py"
 LANE = POC / "dev_lane.py"
 CLIENT = POC / "client.py"

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """t260902-07 集成测试 ②：查表函数与钉模型机制的动态行为（需 PyYAML）。
 
-校验对象：server/dsh/temporal-poc/shared.py
+校验对象：server/engine/shared.py
 - model_route_for("integration") 返回 zai-coding-cn/glm-5.3-flash，其余角色无回归
 - 畸形/缺失输入三态：表 YAML 非法 → 返回 None（不抛异常、不落 patch）；
   角色无条目 → 落 default；条目缺字段 → 落 default
 - _pin_default_model：钉用户层、整段替换旧 agent-default-model（含段内注释），
   资源全在临时目录内、测毕清理（生命周期回收）
-cwd = 泳道根。须用带 PyYAML 的解释器（temporal-poc/.venv/bin/python）执行。
+cwd = 泳道根。须用带 PyYAML 的解释器（engine/.venv/bin/python）执行。
 """
 import shutil
 import sys
@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "server" / "dsh" / "temporal-poc"))
+sys.path.insert(0, str(ROOT / "server" / "engine"))
 import shared  # noqa: E402
 try:
     import agent_activities  # noqa: E402,F401  （_pin_default_model 在此，依赖 temporalio）
@@ -38,7 +38,7 @@ def main():
     try:
         import yaml  # noqa: F401
     except ImportError:
-        print("ENV_FAIL: 需要 PyYAML：请用 server/dsh/temporal-poc/.venv/bin/python 执行")
+        print("ENV_FAIL: 需要 PyYAML：请用 server/engine/.venv/bin/python 执行")
         return 2
 
     # 1. 查表：新值 + 无回归
@@ -86,7 +86,7 @@ def main():
         # 4. _pin_default_model：整段替换旧 agent-default-model（含注释），其余内容不动
         if not HAS_AA:
             print("ENV_FAIL: _pin_default_model 用例：本解释器无 temporalio"
-                  "（请用 server/dsh/temporal-poc/.venv/bin/python 复跑）")
+                  "（请用 server/engine/.venv/bin/python 复跑）")
         else:
             dst = tmp / "dsh"
             dst.mkdir()

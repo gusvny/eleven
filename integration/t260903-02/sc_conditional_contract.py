@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-POC = HERE.parents[1] / "server" / "dsh" / "temporal-poc"
+POC = HERE.parents[1] / "server" / "engine"
 DL = (POC / "dev_lane.py").read_text("utf-8")
 SH = (POC / "shared.py").read_text("utf-8")
 

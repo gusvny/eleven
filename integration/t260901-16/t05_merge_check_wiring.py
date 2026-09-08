@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fixture import REPO, summary
 
 fails = []
-src = (REPO / "server" / "dsh" / "temporal-poc" / "agent_activities.py").read_text("utf-8")
+src = (REPO / "server" / "engine" / "agent_activities.py").read_text("utf-8")
 # t260907-06 票B 逐树重构：四门语义锚迁入 _merge_check_one_scope（merge_check 只剩
 # 作用域循环+聚合）——本锁的定位范围随之覆盖两函数并集（锁语义不锁实现位置）。
 _m1 = re.search(r"async def merge_check\(.*?\n(?=@activity\.defn|\Z)", src, re.S)

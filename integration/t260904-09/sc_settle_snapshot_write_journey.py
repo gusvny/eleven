@@ -22,7 +22,7 @@ MergeResult.ok，不锚函数内部）：
      add/del/commits=0、**不把 HEAD 的 numstat 记到本票**（错账面关闭）。
   W8 路径防穿：票 id 含 ../ 注入 → 快照不落 settle 目录之外。
 
-与既有资产 intent 区别：temporal-poc/tests L1（developer）守纯函数级幂等/降级
+与既有资产 intent 区别：engine/tests L1（developer）守纯函数级幂等/降级
 电池；本场景守「真 git squash merge → 快照文件契约」的跨组件写路径旅程。
 预期状态：实现段落地前 W0 起全红属预期（TDD 信号）；merge 关卡必须全绿。
 Run: python3 integration/t260904-09/sc_settle_snapshot_write_journey.py（cwd=仓库根）
@@ -40,7 +40,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = Path(subprocess.run(["git", "-C", str(HERE), "rev-parse", "--show-toplevel"],
                            capture_output=True, text=True).stdout.strip())
-ENGINE = REPO / "server" / "dsh" / "temporal-poc"
+ENGINE = REPO / "server" / "engine"
 
 PASS, FAIL, ENV_FAIL_N = 0, 0, 0
 

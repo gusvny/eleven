@@ -85,7 +85,7 @@ def main():
         return 0
     # 环境前提缺失（venv/pytest 未引导）= 环境红：fail-closed 是引擎正确行为，此处记 ENV_FAIL
     tail = ((p.stdout or "") + (p.stderr or ""))[-200:].strip().replace("\n", " | ")
-    if ".venv" in cmd and not (LANE / "server/dsh/temporal-poc/.venv/bin/python").exists():
+    if ".venv" in cmd and not (LANE / "server/engine/.venv/bin/python").exists():
         print("ENV_FAIL: test 声明在位但泳道 venv 未引导（引擎正确 fail-closed；环境前提项）：%s" % tail)
         return 2
     print("FAIL test 声明命令非零（rc=%d）: %s" % (p.returncode, tail))

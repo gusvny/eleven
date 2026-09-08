@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DL = ROOT / "server/dsh/temporal-poc/dev_lane.py"
+DL = ROOT / "server/engine/dev_lane.py"
 SCENARIOS_PY = ROOT / "integration/run_scenarios.py"
 
 PASS = 0

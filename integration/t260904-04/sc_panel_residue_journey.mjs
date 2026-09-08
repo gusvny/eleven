@@ -21,12 +21,12 @@
  */
 import {
   loadPanelState, metricsQueryString, PANEL_STORAGE_KEY,
-} from '../../server/dsh/workbench/src/client/metrics-model.ts'
+} from '../../server/plugins/workbench/src/client/metrics-model.ts'
 import { NOW, DAY, WORKFLOWS, ticketRow, withStub, makeChecker } from '../t260903-09/lib_integration.mjs'
 
 const { ok, done } = makeChecker()
 
-const m = await import(new URL('../../server/dsh/workbench/src/host/metrics.ts', import.meta.url).pathname)
+const m = await import(new URL('../../server/plugins/workbench/src/host/metrics.ts', import.meta.url).pathname)
 
 /** 旧版残留：用户曾选过非 dev-lane 模板与某立项代号（两个选择器如今均已退役）。 */
 const residue = JSON.stringify({ view: 'time', window: '7d', epic: 'e1', project: '', template: 'other-lane', shape: 'donut' })

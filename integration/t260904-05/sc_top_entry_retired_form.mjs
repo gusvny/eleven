@@ -33,7 +33,7 @@ import { STAGE_SEED_ROW_SEL } from '../lib_stage_console.mjs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { PROJECT_PALETTE } from '../../server/dsh/workbench/src/shared/project-color.ts';
+import { PROJECT_PALETTE } from '../../server/plugins/workbench/src/shared/project-color.ts';
 import {
   BASE, refuseProductionConsole, loadPlaywright, consoleHealthy,
   fetchProjects, makeResults, openTestPage, waitProjectRowOrSkip,
@@ -52,7 +52,7 @@ function hexToRgbString(hex) {
 
 // ── P0 产物静态收口（退役符号零残留 + 新锚在场；与 lib 重建同批为前提）──
 {
-  const libPath = join(dirname(fileURLToPath(import.meta.url)), '../../server/dsh/workbench/lib/client.js');
+  const libPath = join(dirname(fileURLToPath(import.meta.url)), '../../server/plugins/workbench/lib/client.js');
   try {
     const built = readFileSync(libPath, 'utf8');
     const retired = ['SessionTopEntry', 'wb-sessTop', 'pickSwitchTargets', 'renameEntry', 'data-wb-session-'];

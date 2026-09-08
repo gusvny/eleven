@@ -17,13 +17,13 @@
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resolveEpicsDir } from '../../server/dsh/workbench/src/host/epics.ts'
-import { findProject, primaryDir } from '../../server/dsh/suyou-projects.ts'
+import { resolveEpicsDir } from '../../server/plugins/workbench/src/host/epics.ts'
+import { findProject, primaryDir } from '../../server/suyou-projects.ts'
 import { makeEpicFixture, runPython } from './epic_fixture.mjs'
 
 const { ok, envFail, done } = (await import('../t260903-09/lib_integration.mjs')).makeChecker()
 
-const POC = new URL('../../server/dsh/temporal-poc', import.meta.url).pathname
+const POC = new URL('../../server/engine', import.meta.url).pathname
 
 /** 子进程跑 Py 侧解析（同一次夹具、同一份注册表），返回 {engine, external} 或 null。 */
 function pyResolveDirs(regRoot, extraEnv = {}) {

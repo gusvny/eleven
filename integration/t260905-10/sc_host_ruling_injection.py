@@ -124,9 +124,9 @@ def spawn_worker(py, tid, env, log_path, recorder_path, recorder_log):
     wenv["SANDBAR_AGENT_CMD"] = "%s %s" % (py, recorder_path)
     wenv["RECORDER_LOG"] = recorder_log
     logf = open(log_path, "ab")
-    return subprocess.Popen([py, os.path.join(REPO, "server", "dsh", "temporal-poc",
+    return subprocess.Popen([py, os.path.join(REPO, "server", "engine",
                                                "worker.py")],
-                            env=wenv, cwd=os.path.join(REPO, "server", "dsh", "temporal-poc"),
+                            env=wenv, cwd=os.path.join(REPO, "server", "engine"),
                             stdout=logf, stderr=subprocess.STDOUT, start_new_session=True)
 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """t260902-07 集成测试 ①：路由表静态校验（stdlib，无 PyYAML 依赖）。
 
-校验对象：server/dsh/model-routes.yaml
+校验对象：server/model-routes.yaml
 - integration 路由 = zai-coding-cn / glm-5.3-flash
 - 其余角色无回归（default/developer=zai/glm-5.3-flash；ops/artist=kimi-coding/k3）
 - YAML 最小子集格式自检（无 tab、值裸 token 无引号、缩进 2 空格）
@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[3]
 # 变异测试钩子：T07_TABLE_OVERRIDE 指向替代表文件时校验它而非真表
 # （用于证明本测试对「切前旧表」会红——测试非永真）。默认不受环境影响。
 TABLE = Path(os.environ["T07_TABLE_OVERRIDE"]) if os.environ.get("T07_TABLE_OVERRIDE") \
-    else ROOT / "server" / "dsh" / "model-routes.yaml"
+    else ROOT / "server" / "model-routes.yaml"
 
 FAILS = []
 

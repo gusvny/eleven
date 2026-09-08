@@ -15,7 +15,7 @@
  * Isolation (merge activity lands on the worker-side REPO_ROOT current branch and
  * ignores base_ref, agent_activities.py merge()): every scene runs against a
  * disposable "fixture repo" -- a --depth 1 clone of the local main branch. The
- * worker is started from the fixture's own temporal-poc so its REPO_ROOT is the
+ * worker is started from the fixture's own engine so its REPO_ROOT is the
  * fixture: lane worktrees, settles, merges and lane cleanup all happen inside the
  * fixture; the real repo is never touched.
  *
@@ -38,8 +38,8 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
-const POC = join(REPO, 'server', 'dsh', 'temporal-poc')
-const COMPOSE = join(REPO, 'server', 'dsh', 'docker-compose.test.yml')
+const POC = join(REPO, 'server', 'engine')
+const COMPOSE = join(REPO, 'server', 'docker-compose.test.yml')
 export const PROD_ADDR = '127.0.0.1:7233'
 export const TEST_ADDR = '127.0.0.1:17233'
 export const TEST_NS = 'suyou-test'  // naming-compat
@@ -109,14 +109,14 @@ export function findSdkPython(t) {
   const mainCheckout = mainVenv.status === 0 ? dirname(mainVenv.stdout.trim()) : ''
   const candidates = [
     join(POC, '.venv', 'bin', 'python'),
-    ...(mainCheckout ? [join(mainCheckout, 'server', 'dsh', 'temporal-poc', '.venv', 'bin', 'python')] : []),
+    ...(mainCheckout ? [join(mainCheckout, 'server', 'engine', '.venv', 'bin', 'python')] : []),
     'python3',
   ]
   for (const py of candidates) {
     const r = run(py, ['-c', 'import temporalio'], { timeoutMs: 30_000 })
     if (r.status === 0) return py
   }
-  t?.envFailNote?.('temporalio SDK not importable (no server/dsh/temporal-poc/.venv here or in the main checkout, system python3 lacks it): env halves cannot drive real client.py/worker')
+  t?.envFailNote?.('temporalio SDK not importable (no server/engine/.venv here or in the main checkout, system python3 lacks it): env halves cannot drive real client.py/worker')
   return null
 }
 
@@ -177,7 +177,7 @@ export function targetEnv(extra = {}) {
 /**
  * Build the disposable fixture repo the stub worker will call home:
  * clone main (depth 1) from the local main checkout, symlink the gitignored
- * dependency dirs (node_modules / temporal-poc/.venv) so lane-internal
+ * dependency dirs (node_modules / engine/.venv) so lane-internal
  * verify_lane can go green, and drop the epic file suggest_next needs.
  * Returns { fixture, dispose } or null (with ENV_FAIL notes) when impossible.
  */
@@ -225,7 +225,7 @@ export async function buildFixture(t) {
   // REPO_ROOT (the fixture) into the lane; give the fixture something to link.
   for (const [link, target] of [
     [join(fixture, 'app', 'node_modules'), join(mainCheckout, 'app', 'node_modules')],
-    [join(fixture, 'server', 'dsh', 'temporal-poc', '.venv'), join(mainCheckout, 'server', 'dsh', 'temporal-poc', '.venv')],
+    [join(fixture, 'server', 'engine', '.venv'), join(mainCheckout, 'server', 'engine', '.venv')],
   ]) {
     if (existsSync(target)) {
       await mkdir(dirname(link), { recursive: true })
@@ -277,12 +277,12 @@ export function makeApi(sdkPython, fixture) {
 /* ------------------------------------------------------------------ worker */
 
 /**
- * Start the per-ticket stub worker from the fixture's own temporal-poc (so its
+ * Start the per-ticket stub worker from the fixture's own engine (so its
  * REPO_ROOT is the fixture). WATCH mode self-exits when the workflow reaches a
  * non-RUNNING state; the owner handles blocked-steady-state and failure paths.
  */
 export function startStubWorker(fixture, sdkPython, ticketId) {
-  const child = spawn(sdkPython, [join(fixture, 'server', 'dsh', 'temporal-poc', 'worker.py')], {
+  const child = spawn(sdkPython, [join(fixture, 'server', 'engine', 'worker.py')], {
     env: targetEnv({
       SANDBAR_TASK_QUEUES: `sandbar-ticket-${ticketId},suyou-ticket-${ticketId}`,  // naming-compat（新旧双前缀 CSV=ticket_worker.spawn 同款契约，t260907-04）
       SANDBAR_PROJECTS_DIR: join(fixture, '.e2e-projects'),  // 项目注册表夹具化（t260907-04：机器种子 key suyou 指向已退役仓）

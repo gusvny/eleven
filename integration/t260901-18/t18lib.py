@@ -128,7 +128,7 @@ def install_temporalio_stub():
 def import_engine():
     """导入泳道内的 agent_activities + MergeCheckArgs（真代码，非替身）。"""
     install_temporalio_stub()
-    poc = str(lane_root() / "server" / "dsh" / "temporal-poc")
+    poc = str(lane_root() / "server" / "engine")
     if poc not in sys.path:
         sys.path.insert(0, poc)
     import agent_activities

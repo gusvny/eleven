@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "server" / "dsh" / "temporal-poc" / "dev_lane.py"
+SRC = ROOT / "server" / "engine" / "dev_lane.py"
 
 failures = []
 

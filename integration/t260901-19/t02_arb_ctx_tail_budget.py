@@ -26,7 +26,7 @@ def check(name, cond, detail=""):
 
 
 def main():
-    src = pathlib.Path("server/dsh/temporal-poc/dev_lane.py").read_text("utf-8")
+    src = pathlib.Path("server/engine/dev_lane.py").read_text("utf-8")
     lines = src.splitlines()
 
     # 定位装配语句（t260903-02 分叉重锚：只认带【】的装配行——arbitrate/acceptance

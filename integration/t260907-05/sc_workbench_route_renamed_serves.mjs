@@ -66,7 +66,7 @@ const ctx = {
 
 let nodeApi
 try {
-  nodeApi = await import(join(REPO, 'server/dsh/workbench/node.ts'))
+  nodeApi = await import(join(REPO, 'server/plugins/workbench/node.ts'))
 } catch (err) {
   console.log('  FAIL import workbench/node.ts: %s', String(err?.message ?? err))
   console.log('SUMMARY pass=0 fail=1')
@@ -133,7 +133,7 @@ try {
 
   console.log('== 4. bundle 双产物自洽（src 改了产物没重建=浏览器半仍打旧名）')
   for (const f of ['lib/client.js', 'lib/client.cjs']) {
-    const p = join(REPO, 'server/dsh/workbench', f)
+    const p = join(REPO, 'server/plugins/workbench', f)
     let text = null
     try { text = await readFile(p, 'utf8') } catch { text = null }
     check(text !== null && text.includes('/sandbar-workbench/') && !text.includes('/suyou-workbench/'),

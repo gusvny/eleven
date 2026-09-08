@@ -17,7 +17,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { computeTicketDiff } from '../../server/dsh/workbench/src/host/changes.ts'
+import { computeTicketDiff } from '../../server/plugins/workbench/src/host/changes.ts'
 import { makeFixture, makeJudge, requireGit, makeGitWorktree, EPIC_CODE, EPICS_PREFIX, TICKETS_PREFIX } from './lib_wb_anchor.mjs'
 
 const j = makeJudge('sc_wb_anchor_cross_project_faces')

@@ -43,7 +43,7 @@ _amod.activity = _ActivityStub()
 _tmod.activity = _ActivityStub()
 sys.modules.setdefault("temporalio", _tmod)
 sys.modules.setdefault("temporalio.activity", _amod)
-sys.path.insert(0, str(REPO / "server" / "dsh" / "temporal-poc"))
+sys.path.insert(0, str(REPO / "server" / "engine"))
 import agent_activities as aa  # noqa: E402
 
 PASS = FAIL = 0

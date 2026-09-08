@@ -6,7 +6,7 @@
   A 声明命中：项目在注册条目声明 paths 后，spawn 用声明值——角色 patch 指声明目录
     （而不是现行约定目录，即使两者同时存在），模型来自声明表（而不是回落常量表）。
   B 未声明回落：无 paths 节 / 条目不存在 / key 为空 / key 非法（含穿越形状）四态，
-    spawn 与现行约定等价——角色 patch 指 server/dsh/roles，模型读回落常量单源。
+    spawn 与现行约定等价——角色 patch 指 server/roles，模型读回落常量单源。
   C 软语义（锚点在、内容缺）：声明目录里没有该角色的 preset 文件 → 不红、不打角色
     patch（默认 persona）；声明表里查不到该角色且无 default → 不红、不打模型 patch
     （默认模型）。

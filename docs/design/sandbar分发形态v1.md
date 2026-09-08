@@ -61,7 +61,7 @@ updated: 2026-09-07
 - **installer.cli 容器后端接口定稿**：本文只声明「需要新增」与验收方向，接口留给实现票。
 - **安装器域设计面收编**：既有安装器（init/up/down/status/doctor/upgrade）的完整设计文档不在本篇展开（是否收编见 §待宿主裁定项 3）。
 - **Linux fresh-home 腿交付**：成文为跟进项，本期不做腿。
-- **回头改测试台**：19 号 docker 台（测试台 compose 面，现 `server/dsh/docker-compose.test.yml` ＋ `integration/stage_docker.py`）只读复用其机制，不因发行版改动测试台行为（目录随命名表迁 `server/sandbar/` 属迁移票，不属发行版改测试台）。
+- **回头改测试台**：19 号 docker 台（测试台 compose 面，现 `server/docker-compose.test.yml` ＋ `integration/stage_docker.py`）只读复用其机制，不因发行版改动测试台行为（目录随命名表迁 `server/sandbar/` 属迁移票，不属发行版改测试台）。
 
 ## Proposal
 
@@ -180,11 +180,11 @@ updated: 2026-09-07
 
 ### 目录结构与发版清单（宿主令 v6，结构裁定「目录可以」）
 
-**server/ 目录结构定稿**（server/dsh 摊平）：
+**server/ 目录结构定稿**（server 摊平）：
 
 | 目标目录 | 内容 | 备注 |
 |---|---|---|
-| `server/engine/` | 原 `server/dsh/temporal-poc/`（bin/temporal＋data/ 为引擎私属基底） | 引擎正名（v4 改判：重依赖 Temporal 是 design 定的事实，目录名如实反映，只去掉 poc 试验尾巴） |
+| `server/engine/` | 原 `server/engine/`（bin/temporal＋data/ 为引擎私属基底） | 引擎正名（v4 改判：重依赖 Temporal 是 design 定的事实，目录名如实反映，只去掉 poc 试验尾巴） |
 | `server/plugins/` | 原 11 个 dsh 插件目录 | 包名随命名表 suyou-* → sandbar-* |
 | `server/tools/` ＋ `server/ui-check/` | 工具族＋UI 检查 | tools 不动，ui-check 升一级 |
 | `server/profile/` ＋ `server/profile-headless/` | profile 预组 | 不动名 |
@@ -218,14 +218,14 @@ install.sh / entrypoint
 
 | 目标 | 现状 | 备注 |
 |---|---|---|
-| `server/engine/`（v4 改判） | `server/dsh/temporal-poc/` | 引擎正名，去 poc 试验名 |
-| `server/sandbar/` | `server/dsh/` | 脱离宿主壳姓氏；注意 `~/.dsh/profiles/` 外部软链同步改指＋控制台重启边界 |
+| `server/engine/`（v4 改判） | `server/engine/` | 引擎正名，去 poc 试验名 |
+| `server/sandbar/` | `server/` | 脱离宿主壳姓氏；注意 `~/.dsh/profiles/` 外部软链同步改指＋控制台重启边界 |
 | 插件包 `sandbar-*` | `suyou-*`（含 `/suyou-workbench/` 路由前缀 61 处，前后两半同票动） | |
 | 队列 `sandbar` | `suyou-poc` | worker 双队列过渡 |
 | `SANDBAR_*` env（过渡期兼容别名 `SUYOU_*`） | `SUYOU_*` | 泳道 `.suyou/` → `.sandbar/` 同批 |
 | roles persona `{{project}}` 参数化 | 写死「溯游项目」措辞 | v5 改判：去名不换名 |
 
-**迁移顺序**：env → 包名/路由 → 队列 → temporal-poc 目录（128 文件路径面）→ server/dsh 目录（最后）。全部完成于分发 v1 发布前；**每步独立票独立闸**，验收＝对应场景族复跑绿。
+**迁移顺序**：env → 包名/路由 → 队列 → engine 目录（128 文件路径面）→ server 目录（最后）。全部完成于分发 v1 发布前；**每步独立票独立闸**，验收＝对应场景族复跑绿。
 
 
 
@@ -253,7 +253,7 @@ Linux 腿＝同场景在 Linux 复跑（属主映射为变重点）；Windows �
 
 ### 发布前置债（宿主裁定列债，随专门迁移票处置）
 
-发布形态 v1 前必须清（或宿主明示带债发布）：**§目标命名表与迁移顺序**中的全部各行（env → 包名/路由 → 队列 → temporal-poc 目录 → server/dsh 目录，每步独立票独立闸）；本篇发行版旋钮/工程名/卸载子命令的命名随命名表一并终审（当前以「命名待宿主审定」占位）。
+发布形态 v1 前必须清（或宿主明示带债发布）：**§目标命名表与迁移顺序**中的全部各行（env → 包名/路由 → 队列 → engine 目录 → server 目录，每步独立票独立闸）；本篇发行版旋钮/工程名/卸载子命令的命名随命名表一并终审（当前以「命名待宿主审定」占位）。
 
 ### 待宿主裁定项
 
@@ -273,4 +273,4 @@ Linux 腿＝同场景在 Linux 复跑（属主映射为变重点）；Windows �
 
 - 依赖：[测试环境隔离指南](../testing-guide.md)（端口红线、测试台拓扑）；[引擎机制主档](deepseek_harness_and_temporal_based_multi-agent_mechanism.md)；[sandbar 项目接入契约 v1](sandbar项目接入契约v1.md)（⑧节版本/兼容矩阵）
 - 规范依据：[设计文档写作指南](设计文档写作指南.md)
-- 仓内实件（非 docs，现路径 → 目标名见 §目标命名表）：`install.sh`（形态一，待实现票）、仓根 `sandbar`（installer.cli）、测试台 compose 面（现 `server/dsh/docker-compose.test.yml` → 目标 `server/sandbar/` 域）＋ `integration/stage_docker.py`（19 号台）、`server/probes/`（兼容探针）、roles/model-routes（现 `server/dsh/roles`、`server/dsh/model-routes.yaml` → 目标 `server/roles/`、`server/model-routes.yaml`，跨项目通用人格库）
+- 仓内实件（非 docs，现路径 → 目标名见 §目标命名表）：`install.sh`（形态一，待实现票）、仓根 `sandbar`（installer.cli）、测试台 compose 面（现 `server/docker-compose.test.yml` → 目标 `server/sandbar/` 域）＋ `integration/stage_docker.py`（19 号台）、`server/probes/`（兼容探针）、roles/model-routes（现 `server/roles`、`server/model-routes.yaml` → 目标 `server/roles/`、`server/model-routes.yaml`，跨项目通用人格库）

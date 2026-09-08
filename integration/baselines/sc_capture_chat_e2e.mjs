@@ -38,7 +38,7 @@ import { execFileSync } from "node:child_process";
 import { ensureLaneBuild } from "./capture-ensure-build.mjs";
 
 const LANE_ROOT = process.cwd();
-const CAPTURE_LANE = path.join(LANE_ROOT, "server", "dsh", "ui-check", "capture-lane.mjs");
+const CAPTURE_LANE = path.join(LANE_ROOT, "server", "ui-check", "capture-lane.mjs");
 const SEVEN_VIEWS = [
   "console-default.png", "console-board.png", "console-epics.png",
   "console-new-ticket.png", "console-sessions.png", "console-chat.png",
@@ -61,17 +61,17 @@ if (nodeMajor < 22) {
   process.exit(2);
 }
 
-/** 主树 server/dsh/ui-check（playwright-core + 凭据来源约定所在树）。 */
+/** 主树 server/ui-check（playwright-core + 凭据来源约定所在树）。 */
 function resolveMainUiCheck() {
   const env = process.env.SANDBAR_CAPTURE_MAIN_UI_CHECK;
   if (env && existsSync(path.join(env, "node_modules", "playwright-core", "index.mjs"))) return env;
   try {
     const common = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: LANE_ROOT, encoding: "utf8" }).trim();
     const mainRoot = path.resolve(LANE_ROOT, common, "..");
-    const cand = path.join(mainRoot, "server", "dsh", "ui-check");
+    const cand = path.join(mainRoot, "server", "ui-check");
     if (existsSync(path.join(cand, "node_modules", "playwright-core", "index.mjs"))) return cand;
   } catch { /* not a git checkout — fall through */ }
-  const local = path.join(LANE_ROOT, "server", "dsh", "ui-check");
+  const local = path.join(LANE_ROOT, "server", "ui-check");
   if (existsSync(path.join(local, "node_modules", "playwright-core", "index.mjs"))) return local;
   return null;
 }
@@ -117,11 +117,11 @@ async function precheck() {
  *  （等价守卫处方「重建 bundle」的 mtime 效果，离线、字节不动）；有 pending 源码改动
  *  → 不碰，让守卫按真陈旧拒跑（此时拒跑是对的）。 */
 function normalizeLaneBuildMtimes() {
-  const wb = path.join(LANE_ROOT, "server", "dsh", "workbench");
+  const wb = path.join(LANE_ROOT, "server", "plugins", "workbench");
   const lib = path.join(wb, "lib", "client.js");
   if (!existsSync(lib)) return;
   try {
-    const dirty = execFileSync("git", ["status", "--porcelain", "--", "server/dsh/workbench"],
+    const dirty = execFileSync("git", ["status", "--porcelain", "--", "server/plugins/workbench"],
       { cwd: LANE_ROOT, encoding: "utf8" }).trim() !== "";
     if (dirty) return; // 真陈旧风险：留给守卫拒跑
   } catch { return; } // 非 git 环境：不碰

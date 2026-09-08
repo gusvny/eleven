@@ -71,7 +71,7 @@ const get = (qs = '') => fetch(`${BASE}${CHARTER_EP}${qs}`, { signal: AbortSigna
 const keys = await fetchProjectKeys();
 let sectionedKeys = [];
 try {
-  const src = readFileSync('server/dsh/session_charter.md', 'utf8');
+  const src = readFileSync('server/session_charter.md', 'utf8');
   sectionedKeys = [...src.matchAll(/^## project:(\S+)\s*$/gm)].map(m => m[1]);
 } catch { /* 真源读不到：分段腿按 na 折算 */ }
 const hitKey = keys.includes('sandbar') && sectionedKeys.includes('sandbar') ? 'sandbar'
@@ -88,8 +88,8 @@ const probe = await get(`?project=${encodeURIComponent(hitKey)}`);
 if (probe.status === 404) {
   let anchored = false;
   try {
-    const node = readFileSync('server/dsh/workbench/node.ts', 'utf8');
-    const mod = readFileSync('server/dsh/workbench/src/host/session-charter.ts', 'utf8');
+    const node = readFileSync('server/plugins/workbench/node.ts', 'utf8');
+    const mod = readFileSync('server/plugins/workbench/src/host/session-charter.ts', 'utf8');
     anchored = node.includes(CHARTER_EP) || (node.includes('session-charter') && mod.includes(CHARTER_EP));
   } catch { /* 源读不到按未实现处理 */ }
   if (anchored) emit('t1/endpoint-live', 'fail', '源码已接线但活体 404——lib 未重建或测试台未载新代码');

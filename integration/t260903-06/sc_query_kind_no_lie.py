@@ -37,7 +37,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 sys.path.insert(0, str(HERE.parent / 't260901-23'))            # 共享夹具 _stub_temporalio
-sys.path.insert(0, str(REPO / 'server' / 'dsh' / 'temporal-poc'))  # 真 client.py
+sys.path.insert(0, str(REPO / 'server' / 'engine'))  # 真 client.py
 sys.path.insert(0, str(REPO / 'server'))                        # 真 tools_registry
 
 import _stub_temporalio  # noqa: E402

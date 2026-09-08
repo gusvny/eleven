@@ -1,7 +1,7 @@
 // sc_hex_clean.mjs — t260905-08 场景②：工单台写死色清零断言（宿主令 260906 22:1X 裁定②）。
 //
 // intent（裁定②原文「#fff8c5/#ffebe9 等 hex 现场清零（grep 断言）」的机械化）：
-//   server/dsh/workbench/src/client/ 全目录（.ts/.tsx/.css）不得出现「样式消费位」的
+//   server/plugins/workbench/src/client/ 全目录（.ts/.tsx/.css）不得出现「样式消费位」的
 //   裸 hex——写死色全部退役，颜色一律经 token 声明位（自定义属性定义值 / var() fallback）
 //   供出，深浅两档由平台令牌翻转。allowlist 三类零特例（gen2 方案 C1-b：派生基色统一
 //   var() 包裹后全部落第三类）：
@@ -21,7 +21,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 const REPO = new URL('../..', import.meta.url).pathname;
-const CLIENT = join(REPO, 'server/dsh/workbench/src/client');
+const CLIENT = join(REPO, 'server/plugins/workbench/src/client');
 const EXT = /\.tsx?$|\.css$/;
 
 // allowlist A：值级解析 ticket-list-model.ts 的 EPIC_PALETTE 与 EPIC_FALLBACK_COLOR
@@ -73,7 +73,7 @@ const walk = (dir, rel) => {
         const v = m[0].toLowerCase();
         if (paletteValues.has(v)) continue;                       // allowlist A（值级）
         if (inTokenPosition(line, m.index)) continue;             // allowlist C（token 声明位）
-        violations.push(`server/dsh/workbench/src/client/${relP}:${li + 1} ${v}  ${line.trim().slice(0, 90)}`);
+        violations.push(`server/plugins/workbench/src/client/${relP}:${li + 1} ${v}  ${line.trim().slice(0, 90)}`);
       }
     });
   }

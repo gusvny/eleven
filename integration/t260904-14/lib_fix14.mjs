@@ -4,8 +4,8 @@
 // 词汇/env 契约），不锚实现内部结构。
 //
 // 本票特有两件缝（gen2 方案 R2/C3 定稿）：
-// 1. 桩 poc_dir：`--root <stub>` 全局旗标 → InstallPaths.poc_dir=<stub>/server/dsh/
-//    temporal-poc（runtime.py L54 缝）。桩内放真身 shared.py（复制，注册表根仍走
+// 1. 桩 poc_dir：`--root <stub>` 全局旗标 → InstallPaths.poc_dir=<stub>/server/
+//    engine（runtime.py L54 缝）。桩内放真身 shared.py（复制，注册表根仍走
 //    SANDBAR_PROJECTS_DIR env）+ 假 client.py（票号级 ticket-list 通道替身，行为由
 //    FIX14_CTRL 控制文件驱动：ok/exit/badjson/sdk 四模）。在飞闸语义腿全部走此缝，
 //    无环境依赖（C3 表）。
@@ -24,7 +24,7 @@ import path from 'node:path';
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const SANDBAR = path.join(REPO_ROOT, 'sandbar');
-export const POC_REAL = path.join(REPO_ROOT, 'server', 'dsh', 'temporal-poc');
+export const POC_REAL = path.join(REPO_ROOT, 'server', 'engine');
 export const DEAD_TARGET = '127.0.0.1:1';
 
 export function tmpRoot(prefix) {
@@ -55,7 +55,7 @@ export function runCli(args, env) {
 export function pyRegistry(root, extraEnv = {}) {
   const code = [
     "import sys,json",
-    "sys.path.insert(0,'server/dsh/temporal-poc')",
+    "sys.path.insert(0,'server/engine')",
     "import shared",
     "p,q=shared.load_projects_registry()",
     "print(json.dumps({'projects':p,'quarantined':q}))",
@@ -72,7 +72,7 @@ export function pyRegistry(root, extraEnv = {}) {
 export function pyLookupRaw(root, key, extraEnv = {}) {
   const code = [
     "import sys,json",
-    "sys.path.insert(0,'server/dsh/temporal-poc')",
+    "sys.path.insert(0,'server/engine')",
     "import shared",
     "p=shared.lookup_project(" + JSON.stringify(key) + ")",
     "print(json.dumps(p))",
@@ -205,7 +205,7 @@ print(json.dumps({'ok': True, 'result': {'tickets': rows}}))
 
 export function makeStubRoot() {
   const stubRoot = tmpRoot('fix14-stub-');
-  const poc = path.join(stubRoot, 'server', 'dsh', 'temporal-poc');
+  const poc = path.join(stubRoot, 'server', 'engine');
   mkdirSync(poc, { recursive: true });
   copyFileSync(path.join(POC_REAL, 'shared.py'), path.join(poc, 'shared.py'));
   const ctrlPath = path.join(stubRoot, 'ctrl.json');

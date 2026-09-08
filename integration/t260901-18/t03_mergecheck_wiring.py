@@ -36,7 +36,7 @@ def main() -> int:
     args = MergeCheckArgs(ticket_id="t260901-18-it",
                           worktree=str(root), branch=branch,
                           base_ref=base_ref,
-                          write_set=["server/dsh/temporal-poc/agent_activities.py"])
+                          write_set=["server/engine/agent_activities.py"])
 
     with VerifyLaneCapture(aa) as cap:
         res = asyncio.run(aa.merge_check(args))
@@ -48,7 +48,7 @@ def main() -> int:
         ok(cap.payload.get("base") != base_ref,
            "喂给白名单的 base 不再是钉死的 base_ref（KI-010 不复发）")
         ok(cap.payload.get("require_base") is True, "require_base=true 保持（fail-closed 语义不松）")
-        ok(cap.payload.get("write_set") == ["server/dsh/temporal-poc/agent_activities.py"],
+        ok(cap.payload.get("write_set") == ["server/engine/agent_activities.py"],
            "工单 write_set 原样透传")
 
     items = [c.get("item", "") for c in res.checks]

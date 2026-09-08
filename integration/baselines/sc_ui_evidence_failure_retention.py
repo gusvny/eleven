@@ -17,7 +17,7 @@
 
 依赖与降级：import agent_activities 需 temporalio SDK——三态契约定稿 §7.3：
 SDK 不可用 → ENV_FAIL 环境红（exit 2），绝不静默放行。跑法（manifest 侧自动选 venv python）：
-  PY=server/dsh/temporal-poc/.venv/bin/python; [ -x "$PY" ] || PY=python3; \
+  PY=server/engine/.venv/bin/python; [ -x "$PY" ] || PY=python3; \
     "$PY" integration/baselines/ui-evidence-failure-retention.py
 """
 from __future__ import annotations
@@ -29,7 +29,7 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-POC = REPO / "server" / "dsh" / "temporal-poc"
+POC = REPO / "server" / "engine"
 
 pass_n = 0
 fail_n = 0
@@ -51,7 +51,7 @@ def ok(cond, label):
 try:
     import temporalio  # noqa: F401
 except ImportError:
-    print("ENV_FAIL: temporalio SDK unavailable (no server/dsh/temporal-poc/.venv, no "
+    print("ENV_FAIL: temporalio SDK unavailable (no server/engine/.venv, no "
           "system temporalio) -- known limitation, see integration/README.md")
     print("SUMMARY pass=0 fail=0 env_fail=1 na=0")
     sys.exit(2)
@@ -85,7 +85,7 @@ def clear_env():
 def make_fake_main_tree(td):
     """临时假主树：无 capture-lane.mjs（只剩直连候选），capture.mjs 是秒退脚本。"""
     t = td / "maintree"
-    uc = t / "server" / "dsh" / "ui-check"
+    uc = t / "server" / "ui-check"
     uc.mkdir(parents=True, exist_ok=True)
     (uc / "capture.mjs").write_text("process.exit(3);\n", encoding="utf-8")
     return t

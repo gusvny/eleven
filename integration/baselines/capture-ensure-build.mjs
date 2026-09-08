@@ -1,7 +1,7 @@
 // Shared prereq helper for capture baselines (t260901-10 arbitrate gen2).
 //
 // Why: capture-lane.mjs refuses to shoot a stale workbench bundle
-// (`laneBuildRejectReason`, server/dsh/ui-check/capture-lane.mjs) — anti-fraud,
+// (`laneBuildRejectReason`, server/ui-check/capture-lane.mjs) — anti-fraud,
 // 「拍陈旧 build 的截图=证据造假，宁可没证据」。Its own header documents the
 // remedy for the known safe-side false positive: 「mtime 误报（checkout 刷新
 // mtime）是安全侧失败：人工重跑即可」— i.e. rebuild the bundle, then re-run.
@@ -15,7 +15,7 @@
 // What this helper does: automate exactly the documented remedy — rebuild the
 // bundle from current sources before invoking capture-lane. Two guardrails
 // keep this from weakening the anti-fraud semantics:
-//   1. Byte-identity: server/dsh/workbench/lib/* are git-tracked. If the
+//   1. Byte-identity: server/plugins/workbench/lib/* are git-tracked. If the
 //      rebuild produces different bytes, that is REAL content drift (not an
 //      mtime artifact); we restore the tracked files and fail loud, because
 //      landing a rebuilt bundle belongs to the ticket that changed the sources.
@@ -27,7 +27,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 
-const WB_REL = path.join("server", "dsh", "workbench");
+const WB_REL = path.join("server", "plugins", "workbench");
 const SRC_SUBDIRS = ["src/client", "src/host", "src/shared"];
 const LIB_REL = path.join(WB_REL, "lib");
 

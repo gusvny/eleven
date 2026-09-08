@@ -84,7 +84,7 @@ class LifecycleE2E(unittest.TestCase):
                              "FAKE_SERVER_EXIT")}
         os.environ.pop("SANDBAR_HOME", None)
         self.root = pathlib.Path(self.tmp) / "repo"
-        self.poc = self.root / "server" / "dsh" / "temporal-poc"
+        self.poc = self.root / "server" / "engine"
         (self.poc / "data").mkdir(parents=True)
         (self.poc / "worker.py").write_text("# stub\n", encoding="utf-8")
         self.home = pathlib.Path(self.tmp) / "home"

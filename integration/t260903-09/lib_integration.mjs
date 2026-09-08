@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url'
 const pexec = promisify(execFile)
 
 export const HERE = dirname(fileURLToPath(import.meta.url))
-const METRICS_TS = new URL('../../server/dsh/workbench/src/host/metrics.ts', import.meta.url)
+const METRICS_TS = new URL('../../server/plugins/workbench/src/host/metrics.ts', import.meta.url)
 
 /** 固定 now：窗口归窗跨日可复现（与 workbench tests/golden.mjs 同纪律）。 */
 export const NOW = Date.parse('2026-09-03T00:30:00Z')

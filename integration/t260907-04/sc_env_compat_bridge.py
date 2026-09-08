@@ -11,7 +11,7 @@ intent（用户可感知契约，锚 shared.py 头注记载的 env 契约而非�
   5. apply_env_compat 桥幂等：重复调用不二次改写环境（import 时序之外的显式重跑
      通路，UT monkeypatch/运行期注入路径依赖它）。
 
-灰盒：经子进程在 temporal-poc 目录内 import 引擎共享模块读解析结果，锚公开 env
+灰盒：经子进程在 engine 目录内 import 引擎共享模块读解析结果，锚公开 env
 契约不锚内部函数；畸形输入（空值）在腿 4。
 Hermetic：零网络零舞台（TARGET_HOST 只被解析不被连接）。
 **implement 落地前腿 2/3/5 红属预期（TDD 信号），arbitrate/merge 期必须全绿。**
@@ -71,7 +71,7 @@ def main():
     r = lib_naming.Rec()
 
     print("== 腿1 仅旧名环境 → 引擎解析到旧名值（在飞环境不炸）")
-    res = lib_naming.tp_json(PROBE, env_extra=env_of(SUYOU_TASK_QUEUE="q-legacy",
+    res = lib_naming.tp_json(PROBE, env_replace=True, env_extra=env_of(SUYOU_TASK_QUEUE="q-legacy",
                                                      SUYOU_TARGET_HOST="h-legacy:1",
                                                      SUYOU_NAMESPACE="n-legacy"))
     if res[0] is None:
@@ -83,7 +83,7 @@ def main():
                 "TASK_QUEUE/TARGET_HOST/NAMESPACE 全部落旧名值（得 %s）" % obj)
 
     print("== 腿2 仅新名环境 → 生效")
-    res = lib_naming.tp_json(PROBE, env_extra=env_of(SANDBAR_TASK_QUEUE="q-new",
+    res = lib_naming.tp_json(PROBE, env_replace=True, env_extra=env_of(SANDBAR_TASK_QUEUE="q-new",
                                                      SANDBAR_TARGET_HOST="h-new:1"))
     if res[0] is None:
         r.env_fail("求值失败：%s" % res[3][-160:])
@@ -93,7 +93,7 @@ def main():
                 "新名单独生效（得 %s）" % obj)
 
     print("== 腿3 新旧冲突 → 新名优先")
-    res = lib_naming.tp_json(PROBE, env_extra=env_of(SUYOU_TASK_QUEUE="q-old",
+    res = lib_naming.tp_json(PROBE, env_replace=True, env_extra=env_of(SUYOU_TASK_QUEUE="q-old",
                                                      SANDBAR_TASK_QUEUE="q-win"))
     if res[0] is None:
         r.env_fail("求值失败：%s" % res[3][-160:])
@@ -101,7 +101,7 @@ def main():
         r.check(res[0].get("q") == "q-win", "冲突取新名（得 %s）" % res[0].get("q"))
 
     print("== 腿4 新名空串 → 回落旧名（falsy 语义，畸形值不改义）")
-    res = lib_naming.tp_json(PROBE, env_extra=env_of(SANDBAR_TASK_QUEUE="",
+    res = lib_naming.tp_json(PROBE, env_replace=True, env_extra=env_of(SANDBAR_TASK_QUEUE="",
                                                      SUYOU_TASK_QUEUE="q-fallback"))
     if res[0] is None:
         r.env_fail("求值失败：%s" % res[3][-160:])
@@ -109,7 +109,7 @@ def main():
         r.check(res[0].get("q") == "q-fallback", "空串新名回落旧名（得 %s）" % res[0].get("q"))
 
     print("== 腿5 apply_env_compat 桥幂等（显式重跑通路）")
-    res = lib_naming.tp_json(BRIDGE, env_extra=env_of(SUYOU_TASK_QUEUE="q-bridge"))
+    res = lib_naming.tp_json(BRIDGE, env_replace=True, env_extra=env_of(SUYOU_TASK_QUEUE="q-bridge"))
     if res[0] is None:
         r.env_fail("求值失败：%s" % res[3][-160:])
     else:

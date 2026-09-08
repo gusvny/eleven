@@ -126,8 +126,8 @@ ok(!!n.fail && /未被调用/.test(n.fail), '合成未挂载样本（无 load �
 section('2. 真产物：同体 + 外衣 + 契约加载')
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..', '..')
-const cjsPath = join(root, 'server/dsh/workbench/lib/client.cjs')
-const jsPath = join(root, 'server/dsh/workbench/lib/client.js')
+const cjsPath = join(root, 'server/plugins/workbench/lib/client.cjs')
+const jsPath = join(root, 'server/plugins/workbench/lib/client.js')
 ok(existsSync(cjsPath), 'lib/client.cjs 在场（缺=未构建，红）')
 ok(existsSync(jsPath), 'lib/client.js 在场（exports ./client 的指向）')
 if (existsSync(cjsPath) && existsSync(jsPath)) {

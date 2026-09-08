@@ -26,7 +26,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 SUITE = HERE.parent
 REPO = SUITE.parent.parent
-POC = REPO / "server" / "dsh" / "temporal-poc"
+POC = REPO / "server" / "engine"
 VENV_PY = POC / ".venv" / "bin" / "python"
 CLIENT_PY = POC / "client.py"
 
@@ -254,7 +254,7 @@ def invoke_teardown(aa, repo, wt, branch, ticket_id):
 
 # ---------------------------------------------------------------- e2e 公共件
 def ensure_sdk():
-    """保证当前解释器有 temporalio：顶层没有则 re-exec 进 temporal-poc venv。
+    """保证当前解释器有 temporalio：顶层没有则 re-exec 进 engine venv。
 
     返回 (python_executable, error)；error 非空 = 无 SDK 可用，调用方应记 ENV_FAIL（环境红）。
     """

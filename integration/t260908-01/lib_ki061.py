@@ -20,7 +20,10 @@ sys.path.insert(0, os.path.join(REPO, "integration", "t260904-02"))
 from lib_gate import (Fail, parse_out_json, poc_python, read_audit_jsonl,  # noqa: E402,F401
                       require_bench, require_stage, run_poc_client, stage_down)
 
-POC_DIR = os.path.join(REPO, "server", "dsh", "temporal-poc")
+# 引擎目录定位（t260907-10 摊平后=server/engine；回落旧路径一轮，摘除票删旧腿）
+POC_DIR = os.path.join(REPO, "server", "engine")
+if not os.path.isdir(POC_DIR):
+    POC_DIR = os.path.join(REPO, "server", "dsh", "temporal-poc")  # engine-venv-compat
 
 # KI-061 修复契约（create_plan v2 S3 拍板）：测试开关读定于 worker 构造期，
 # 置 1=模拟修复前 worker（重置守卫失效）；缺省=修复启用。场景硬编码此名——

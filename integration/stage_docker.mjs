@@ -47,7 +47,7 @@ export function stageDown(project) {
 /** 容器内 profile 物化（lib_fix15.buildProfile / capture-lane.buildTempProfile 的
  *  docker 台版，克缝始终=测泳道/指定树代码）：
  *  - cordis 配置/sandbar-tools.ts 取 repoProfileDir（committed）；
- *  - node_modules 只放一个目录+被测 workbench 软链（→ /repo/server/dsh/workbench，
+ *  - node_modules 只放一个目录+被测 workbench 软链（→ /repo/server/plugins/workbench，
  *    /repo=被测树）；其余插件由 compose command 从依赖树 /repo-nm（缺省主树，
  *    stage_docker 自动回落）逐项并入——suyou-* 插件是仓内包不在全局 npm，此前
  *    「其余→/usr/local/lib/node_modules」模型对仓内插件是悬空链（gen2 真容器实锤）。
@@ -64,6 +64,6 @@ export function buildStageProfile({ repoProfileDir, laneWorkbenchDir, tmpHome })
   if (existsSync(tsTools)) symlinkSync(tsTools, path.join(profDir, 'sandbar-tools.ts'));
   const nm = path.join(profDir, 'node_modules');
   mkdirSync(nm, { recursive: true });
-  symlinkSync(laneWorkbenchDir ?? '/repo/server/dsh/workbench', path.join(nm, 'sandbar-workbench'), 'dir');
+  symlinkSync(laneWorkbenchDir ?? '/repo/server/plugins/workbench', path.join(nm, 'sandbar-workbench'), 'dir');
   return profDir;
 }

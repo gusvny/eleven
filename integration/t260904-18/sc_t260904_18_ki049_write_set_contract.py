@@ -19,7 +19,7 @@ intent（守护的用户可感知行为/合同）：
 - 解析点三处（agent_activities/_read_result、base.py、dev_lane.py）毁形强转退役=
   源码负锁；StageResult 形状字段贯通 results dict（消费点读形）。
 
-与 developer L1（temporal-poc/tests 纯函数白盒）不同层：本条驱动真实解析函数与
+与 developer L1（engine/tests 纯函数白盒）不同层：本条驱动真实解析函数与
 真实消费点方法（monkeypatch temporalio 上下文门），L1 不覆盖缝契约。
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；
 temporalio 缺失=ENV_FAIL 点名（解析/消费点行为腿），stdlib 链腿与源码锁照跑。

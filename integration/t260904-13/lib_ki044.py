@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """t260904-13 集成测试共享夹具：临时仓复现「粗粒度声明 × 实际 UI diff」判定面（KI-044）。
 
-造仓形态（黑盒，对齐 t260904-05 实证——写集只声明 server/dsh/workbench/ 父目录、
+造仓形态（黑盒，对齐 t260904-05 实证——写集只声明 server/plugins/workbench/ 父目录、
 实际改的是会话区 UI 产物，旧声明口径前缀匹配不命中 → 判「非 UI 票」全绿直过）：
   main 初始 commit A（建票锚点）→ lane 分支提交本票改动（可参数化）→
   main 侧他人改 UI（模拟泳道并入 main 的他人文件，t260901-16 同族）。
@@ -23,7 +23,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]          # integration/t260904-13 → 仓库根
-POC = REPO / "server" / "dsh" / "temporal-poc"
+POC = REPO / "server" / "engine"
 
 sys.path.insert(0, str(POC))
 

@@ -18,7 +18,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
-POC = REPO / "server" / "dsh" / "temporal-poc"
+POC = REPO / "server" / "engine"
 
 # ---- temporalio 桩（同 t260901-21 i01 口径）----
 _tmod = types.ModuleType("temporalio")

@@ -8,9 +8,9 @@
 （agent_activities._copy_creds 及其合并路径），黑盒断言只落在文件系统可观察行为。
 
 夹具一律真实嵌套格式（version + refs，见本票 plan.md），全 tmp/env 桩，
-绝不触真 ~/.sandbar、真 ~/.dsh。依赖 PyYAML 的用例在无 yaml 且无 temporal-poc
+绝不触真 ~/.sandbar、真 ~/.dsh。依赖 PyYAML 的用例在无 yaml 且无 engine
 venv 的解释器上记 ENV_FAIL（三态契约定稿 §7.3「闸内无 SKIP」：缺依赖=环境红）。
-跑法：PY=server/dsh/temporal-poc/.venv/bin/python; "$PY" integration/t260902-09/it01_creds_merge_blackbox.py
+跑法：PY=server/engine/.venv/bin/python; "$PY" integration/t260902-09/it01_creds_merge_blackbox.py
 末行 SUMMARY pass=N fail=N env_fail=N na=N；退出码 0=PASS、1=FAIL（产品红，
 含全腿 N/A）、2=ENV_FAIL（环境红）。
 """
@@ -176,7 +176,7 @@ def main():
 
     if not yaml_ok:
         L.env1("F 组合并正路径（11 用例）",
-               "PyYAML 不可用且无 temporal-poc venv（venv=%s）" % fx.VENV_PY)
+               "PyYAML 不可用且无 engine venv（venv=%s）" % fx.VENV_PY)
         return L.finish()
 
     print("== F 合并正路径（演化态 + 追加点安全）==")

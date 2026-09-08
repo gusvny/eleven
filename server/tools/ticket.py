@@ -2,7 +2,7 @@
 """ticket —— 工单系统（M11 v2 模版即代码 + 260823 多项目化：真源 = Temporal workflow）。
 
 一张工单 = 一条 Temporal workflow（id = 工单 id，单例），状态只在 workflow，
-show/list 全走 client.py ticket-query/ticket-list。旧 server/dsh/tickets/ JSON 投影
+show/list 全走 client.py ticket-query/ticket-list。旧 server/tickets/ JSON 投影
 目录已于 260823 删除（52 张存量全部 closed，历史查 git），老 TicketWorkflow 类与
 adopt/md→json 迁移工具一并退场。
 
@@ -48,14 +48,23 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 
-# Temporal 后端：全部 op 转发 temporal-poc/client.py（workflow update/signal/query/list）。
-TEMP_POC = REPO / 'server' / 'dsh' / 'temporal-poc'
-TEMP_PY = str(TEMP_POC / '.venv' / 'bin' / 'python') if (TEMP_POC / '.venv' / 'bin' / 'python').is_file() else 'python3'
+# Temporal 后端：全部 op 转发 engine/client.py（workflow update/signal/query/list）。
+TEMP_POC = REPO / 'server' / 'engine'
+def _engine_py() -> str:
+    """引擎 venv 解析（回落链与 engine/shared.engine_venv_python 同口径，见该函数注释）。"""
+    for rel in (('server', 'engine'), ('server', 'dsh', 'temporal-poc')):
+        cand = REPO.joinpath(*rel) / '.venv' / 'bin' / 'python'
+        if cand.is_file() and os.access(str(cand), os.X_OK):
+            return str(cand)
+    return 'python3'
+
+
+TEMP_PY = _engine_py()
 
 # 项目注册表（sandbar M1-1 出仓）：真源=机器级 per-key 目录
 # ~/.sandbar/projects/<key>/project.yaml（装载=扫 */project.yaml，与
-# server/dsh/suyou-projects.ts 同一注册表、两边各自最小解析、语义同构）。
-# t260904-02（KI-032 硬闸）：装载逻辑整块上收 temporal-poc/shared.py（单一真源，
+# server/suyou-projects.ts 同一注册表、两边各自最小解析、语义同构）。
+# t260904-02（KI-032 硬闸）：装载逻辑整块上收 engine/shared.py（单一真源，
 # client.py ticket-start 同源锚 project_root），本文件只留薄壳委托（见下方
 # 「项目注册表（薄壳委托）」节）；下面两个常量保留为兼容别名（值与真源一致）。
 # env 优先级（每次调用现读）：SANDBAR_PROJECTS_YAML（legacy 单文件模式，旧格式
@@ -64,7 +73,7 @@ TEMP_PY = str(TEMP_POC / '.venv' / 'bin' / 'python') if (TEMP_POC / '.venv' / 'b
 # 过 PROJECT_KEY_RE 白名单，条目 key 必须与目录名全等；迁移判据只认 .migrated 标记。
 # 无标记且根里有内容时分三类现场（修订 v2.1）：纯种子字节子集=崩溃残留→续迁补齐；
 # 与种子零交集=人工注册表→接受；部分相关不可复现=混合现场→fail-closed 抛错。
-PROJECTS_YAML = REPO / 'server' / 'dsh' / 'projects.yaml'   # 兼容别名（真源=shared.PROJECTS_YAML）
+PROJECTS_YAML = REPO / 'server' / 'projects.yaml'   # 兼容别名（真源=shared.PROJECTS_YAML）
 PROJECT_KEY_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,40}$')   # 兼容别名（真源=shared.PROJECT_KEY_RE）
 
 TOOL = {
@@ -114,7 +123,7 @@ TOOL = {
 
 
 # ---------- 项目注册表（薄壳委托，t260904-02 上收单一真源）----------
-# 装载器真源=server/dsh/temporal-poc/shared.py「项目注册表」节：KI-032 硬闸要求
+# 装载器真源=server/engine/shared.py「项目注册表」节：KI-032 硬闸要求
 # client.py ticket-start 与本文件 create 用同一份装载器锚 project（双份必漂移，
 # t260824 三次事故教训）。本节保留对外函数名与错误文案（逐字不变，wrapper 只转调），
 # 其余调用方（_create/_list 等）零改动。env 语义（SANDBAR_PROJECTS_YAML >
@@ -133,7 +142,7 @@ def _assert_nonempty(projects, quarantined):
 
 
 def _projects():
-    """读项目注册表（per-key 目录模式，语义与 server/dsh/suyou-projects.ts 同构）。"""
+    """读项目注册表（per-key 目录模式，语义与 server/suyou-projects.ts 同构）。"""
     projects, quarantined = _load_registry()
     _assert_nonempty(projects, quarantined)
     return projects
@@ -159,7 +168,7 @@ _SHARED_POC = None
 
 
 def _shared():
-    """加载 temporal-poc/shared.py（workspace 推导/契约/模板类名映射的单一真源，
+    """加载 engine/shared.py（workspace 推导/契约/模板类名映射的单一真源，
     Temporal 侧共用同一模块，两边不漂移）。shared.py 仅依赖 stdlib，可独立加载。"""
     global _SHARED_POC
     if _SHARED_POC is None:
@@ -176,14 +185,14 @@ def _shared():
 
 
 def _poc(subcmd, payload):
-    """spawn temporal-poc/client.py，返回解析后的回执 dict（不判 ok）。"""
+    """spawn engine/client.py，返回解析后的回执 dict（不判 ok）。"""
     cmd = [TEMP_PY, str(TEMP_POC / 'client.py'), subcmd,
            json.dumps(payload, ensure_ascii=False)]
     try:
         proc = subprocess.run(cmd, cwd=str(REPO), capture_output=True, text=True, timeout=900)
     except Exception as e:
         raise ValueError('Temporal 调用失败（temporal server/worker 在线？'
-                         'cd server/dsh/temporal-poc && ./run_server.sh + .venv/bin/python worker.py）: %s' % e)
+                         'cd server/engine && ./run_server.sh + .venv/bin/python worker.py）: %s' % e)
     try:
         return json.loads(proc.stdout)
     except json.JSONDecodeError:

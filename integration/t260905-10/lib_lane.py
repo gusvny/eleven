@@ -62,20 +62,20 @@ def ensure_poc_python() -> None:
               % (sys.argv[0],), flush=True)
         sys.exit(EXIT_ENV)
     cands = []
-    poc_venv = REPO / "server/dsh/temporal-poc/.venv/bin/python"
+    poc_venv = REPO / "server/engine/.venv/bin/python"
     if poc_venv.exists():
         cands.append(poc_venv)
     parts = REPO.parts
     for marker in (".lane", ".worktrees"):
         if marker in parts:
             main = Path(*parts[: parts.index(marker)])
-            cands.append(main / "server/dsh/temporal-poc/.venv/bin/python")
+            cands.append(main / "server/engine/.venv/bin/python")
             break
     for c in cands:
         if c.exists() and str(c) != sys.executable:
             os.execv(str(c), [str(c), str(entry)] + sys.argv[1:])
     print("ENV_FAIL: temporalio 不可导入且回落链无候选解释器"
-          "（试过 %s）——先在主树建 server/dsh/temporal-poc/.venv" % [str(c) for c in cands],
+          "（试过 %s）——先在主树建 server/engine/.venv" % [str(c) for c in cands],
           flush=True)
     sys.exit(EXIT_ENV)
 

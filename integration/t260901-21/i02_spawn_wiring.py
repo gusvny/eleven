@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SRC = REPO / "server" / "dsh" / "temporal-poc" / "agent_activities.py"
+SRC = REPO / "server" / "engine" / "agent_activities.py"
 
 PASS = FAIL = 0
 

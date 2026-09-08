@@ -144,8 +144,8 @@ function mainRepoRoot() {
 async function loadPlaywright() {
   const candidates = ['playwright-core']
   const main = mainRepoRoot()
-  for (const sub of ['server/dsh/ui-check/node_modules/playwright-core/index.mjs',
-    'server/dsh/workbench/node_modules/playwright-core/index.mjs']) {
+  for (const sub of ['server/ui-check/node_modules/playwright-core/index.mjs',
+    'server/plugins/workbench/node_modules/playwright-core/index.mjs']) {
     const p = join(main, sub)
     if (existsSync(p)) candidates.push(pathToFileURL(p).href)
   }
@@ -360,7 +360,7 @@ async function main() {
 
   const healthy = await consoleHealthy()
   if (!healthy) {
-    record('S1 precheck', 'env_fail', `test console unreachable at ${BASE} (docker compose -f server/dsh/docker-compose.test.yml up -d; KI-036 隔离台/playwright 依赖未恢复则 ENV_FAIL)`)
+    record('S1 precheck', 'env_fail', `test console unreachable at ${BASE} (docker compose -f server/docker-compose.test.yml up -d; KI-036 隔离台/playwright 依赖未恢复则 ENV_FAIL)`)
     return summarize()
   }
   const pw = await loadPlaywright()

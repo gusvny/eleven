@@ -45,7 +45,7 @@ class Env(unittest.TestCase):
     def setUp(self):
         self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="sandbar-ut-svc-"))
         self.root = self.tmp / "repo"
-        self.poc = self.root / "server" / "dsh" / "temporal-poc"
+        self.poc = self.root / "server" / "engine"
         (self.poc / "data").mkdir(parents=True)
         (self.poc / "worker.py").write_text("# stub\n", encoding="utf-8")
         self.home = self.tmp / "home"

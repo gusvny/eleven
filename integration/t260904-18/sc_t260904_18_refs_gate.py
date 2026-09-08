@@ -14,7 +14,7 @@ intent（守护的用户可感知行为/合同）：
   回执形状不锚定（布尔/元组/dict/字符串/异常皆容错解释）——锚「拒+点名+分类」行为。
 
 与相邻场景 intent 分界：t260904-02-ticket-start-anchor 守 project 锚定硬闸（KI-032），
-本条守背景文件引用闸；与 developer L1（temporal-poc/tests 纯函数白盒）不同层——
+本条守背景文件引用闸；与 developer L1（engine/tests 纯函数白盒）不同层——
 本条含 cmd_ticket_start 入口装配面与真 git HEAD 态分类。
 
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；

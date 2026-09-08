@@ -22,8 +22,8 @@ CLI 契约面（与 integration/t260904-10 三场景共同冻结，改动须场�
   sandbar project remove --key <key> [--dry-run] [--purge-data]
                          [--purge-credentials] [--confirm-last] [--json]
 
-装载复用真源 = server/dsh/temporal-poc/shared.py（importlib 按路径装载，不改本体；
-与 TS 侧 server/dsh/suyou-projects.ts 同一注册表、两侧各自最小解析、语义同构）。
+装载复用真源 = server/engine/shared.py（importlib 按路径装载，不改本体；
+与 TS 侧 server/suyou-projects.ts 同一注册表、两侧各自最小解析、语义同构）。
 本模块 stdlib-only（installer 惯例；temporalio 依赖隔离在票计数子进程里）。
 
 add 写入故障模式取舍（方案 R2 表，实现落点）：

@@ -22,7 +22,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
-POC = REPO / "server" / "dsh" / "temporal-poc"
+POC = REPO / "server" / "engine"
 
 # ---- 桩：temporalio.* 与 workflows*（client.py 模块级依赖；被测函数走注入缝）----
 _tio = types.ModuleType("temporalio")

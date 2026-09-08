@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-_POC = REPO / "server" / "dsh" / "temporal-poc"
+_POC = REPO / "server" / "engine"
 if str(_POC) not in sys.path:
     sys.path.insert(0, str(_POC))
 
@@ -73,7 +73,7 @@ def v2_prompt(title, workflow_id="dev-lane", prev_ctx="", handoffs=None,
         "workspace": None,
         "user_request": body,
         "spec": spec,
-        "write_set": ["server/dsh/temporal-poc/shared.py"],
+        "write_set": ["server/engine/shared.py"],
     }
     return shared.build_stage_prompt("t-scene-2", meta, stage, handoffs or [],
                                      "/tmp/scene-stage.json", 0, prev_ctx)

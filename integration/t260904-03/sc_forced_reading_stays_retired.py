@@ -8,7 +8,7 @@ intent（验收 E 的机械化，merge 关卡可跑）：server/**/*.py 与活�
 豁免口径（写明防误判）：
   - notes/（KI 册 KI-034/KI-035 行、epic 沿革）——退役审计记录本体，非活引用；
   - .suyou/（段结果快照）——工单过程产物（本扫描根本不进这两处）；  # naming-compat
-  - server/dsh/temporal-poc/tests/*.py——L1 回归测试的**负断言源码**必须写出
+  - server/engine/tests/*.py——L1 回归测试的**负断言源码**必须写出
     token 字样才能断言「不含」（断言面≠消费面）；
   - 本场景文件自身——守卫要能说出自己在守什么。
 真正被守护的活引用面=引擎代码（server/ 其余全部 *.py）+ 活文档 docs/README.md。
@@ -34,7 +34,7 @@ TOKEN_RE = re.compile(r"WORKFLOW_CONTEXT|TITLE_CONTEXT_RULES|context_docs")
 
 # 断言面豁免（≠消费面）：L1 负断言源码与本守卫自身需要写出 token 字样
 SELF_EXEMPT = re.compile(
-    r"(?:^|/)(?:server/dsh/temporal-poc/tests/[^/]+\.py|"
+    r"(?:^|/)(?:server/engine/tests/[^/]+\.py|"
     r"integration/t260904-03/sc_forced_reading_stays_retired\.py)$")
 
 passed, failed = 0, 0
@@ -84,9 +84,9 @@ def main():
     print("== C 豁免面在位（防误判口径自证）")
     check(SELF_EXEMPT.search("integration/t260904-03/sc_forced_reading_stays_retired.py")
           is not None, "守卫自身在豁免表（断言面可写 token 字样）")
-    check(SELF_EXEMPT.search("server/dsh/temporal-poc/tests/test_any.py") is not None,
+    check(SELF_EXEMPT.search("server/engine/tests/test_any.py") is not None,
           "L1 负断言测试源码在豁免表（断言面≠消费面）")
-    check(SELF_EXEMPT.search("server/dsh/temporal-poc/shared.py") is None,
+    check(SELF_EXEMPT.search("server/engine/shared.py") is None,
           "引擎代码不豁免（消费面必查）")
 
     print("SUMMARY pass=%d fail=%d" % (passed, failed))

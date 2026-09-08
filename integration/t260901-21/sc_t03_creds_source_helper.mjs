@@ -13,7 +13,7 @@ import { pathToFileURL } from 'node:url'
 
 const helper = await import(pathToFileURL(
   path.resolve(path.dirname(new URL(import.meta.url).pathname),
-    '../../server/dsh/ui-check/creds-source.mjs')).href)
+    '../../server/ui-check/creds-source.mjs')).href)
 
 let fails = 0
 function check(name, cond, detail = '') {

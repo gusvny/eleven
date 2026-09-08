@@ -5,7 +5,7 @@
 // 任何场景消费，保留仅供 boot 机制自检（buildTempProfile 仍服务 --boot-local
 // 人工通路）。勿在闸内引用。
 //
-// 复用真源 server/dsh/ui-check/capture-lane.mjs（buildTempProfile /
+// 复用真源 server/ui-check/capture-lane.mjs（buildTempProfile /
 // materializePresets / presetMaterializeRejectReason），不复制逻辑（双份必漂移）。
 // 本壳提供 --selfcheck：临时 DSH_HOME + 凭据拷贝（若源在）+ pickFreePort×2 不等 +
 // preset 物化（桩源）+ buildTempProfile + teardown 幂等二连。
@@ -25,7 +25,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = join(HERE, '..')
-const CAPTURE_LANE = join(REPO_ROOT, 'server', 'dsh', 'ui-check', 'capture-lane.mjs')
+const CAPTURE_LANE = join(REPO_ROOT, 'server', 'ui-check', 'capture-lane.mjs')
 
 const hardFails = []
 let envFails = 0
@@ -92,8 +92,8 @@ async function selfcheck() {
   check(existsSync(join(dstPreset, 'preset.yml')), 'preset 物化落地实体')
 
   // ④ buildTempProfile：泳道缺 profile/node_modules 时显式 ENV_FAIL（主树合并后自然全量）
-  const laneWb = join(REPO_ROOT, 'server', 'dsh', 'workbench')
-  const profileNm = join(REPO_ROOT, 'server', 'dsh', 'profile', 'node_modules')
+  const laneWb = join(REPO_ROOT, 'server', 'plugins', 'workbench')
+  const profileNm = join(REPO_ROOT, 'server', 'profile', 'node_modules')
   if (existsSync(profileNm)) {
     try {
       const profDir = await buildTempProfile(tmpHome, laneWb)

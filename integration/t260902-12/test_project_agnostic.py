@@ -14,8 +14,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-YML = ROOT / "server" / "dsh" / "roles" / "integration.yml"
-LANE = ROOT / "server" / "dsh" / "temporal-poc" / "dev_lane.py"
+YML = ROOT / "server" / "roles" / "integration.yml"
+LANE = ROOT / "server" / "engine" / "dev_lane.py"
 VY = ROOT / "verify.yaml"
 RUNNER = ROOT / "integration" / "run_scenarios.py"
 DEAD_MANIFEST = ROOT / "integration" / "manifest.json"

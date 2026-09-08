@@ -56,6 +56,10 @@ EXEMPT_SERVER_INTEG = {
     "integration/t260907-05/sc_naming_residue_fulltext.py",
     "integration/t260907-05/sc_profile_farm_sandbar_links.py",
     "integration/t260907-05/sc_workbench_route_renamed_serves.mjs",
+    # t260907-04 守卫自身（断言载体：PLUGIN_REF_RE 定义的不动面 token 即被测对象；
+    # 与上三行同族——04/05 两票并行落地后才在 main 汇合互见，-05 出闸时未见此文件，
+    # 跨票盲区补账，t260907-10 arbitrate gen4）
+    "integration/t260907-04/sc_naming_grep_assert.py",
     "server/admin.log",
 }
 # docs/ 已声明遗留票清单（本票不改 docs，命中封口在此清单内）。
@@ -127,8 +131,10 @@ def main():
           + ("" if not stray else "——清单外: %s" % stray))
 
     print("== 3. 六插件 package.json 正名在位")
+    PLUG_LAYER = {"ui-check": ""}  # ui-check 在 server/ 直下（v6 未入 plugins 层）
     for plug, want in EXPECTED_NAME.items():
-        pj = os.path.join(REPO, "server", "dsh", plug, "package.json")
+        pj = os.path.join(REPO, "server", PLUG_LAYER.get(plug, "plugins"), plug,
+                          "package.json")
         try:
             with open(pj, "r", encoding="utf-8") as f:
                 name = json.load(f).get("name")
@@ -138,7 +144,8 @@ def main():
 
     print("== 4. package-lock name 双处同步（在场者）")
     for plug in LOCKS:
-        lock_path = os.path.join(REPO, "server", "dsh", plug, "package-lock.json")
+        lock_path = os.path.join(REPO, "server", PLUG_LAYER.get(plug, "plugins"),
+                                 plug, "package-lock.json")
         if not os.path.isfile(lock_path):
             check(False, "%s package-lock.json 在场" % plug)
             continue
@@ -154,17 +161,17 @@ def main():
               "%s lock name 顶=%s/内=%s 均 %s" % (plug, top, inner, want))
 
     print("== 5. 不动面原样在位（现状语义钉死，后续票随其语义同步改本腿）")
-    ui_node = os.path.join(REPO, "server", "dsh", "ui", "node.ts")
+    ui_node = os.path.join(REPO, "server", "plugins", "ui", "node.ts")
     try:
         with open(ui_node, "r", encoding="utf-8") as f:
             ui_text = f.read()
         check("/suyou-admin/" in ui_text, "/suyou-admin/ 前缀仍在 ui/node.ts（非本票面）")
     except OSError:
         check(False, "ui/node.ts 可读")
-    check(os.path.isfile(os.path.join(REPO, "server", "dsh", "suyou-projects.ts")),
-          "server/dsh/suyou-projects.ts 仍在（非本票面）")
+    check(os.path.isfile(os.path.join(REPO, "server", "suyou-projects.ts")),
+          "server/suyou-projects.ts 仍在（非本票面）")
     for prof in ("profile", "profile-headless"):
-        pj = os.path.join(REPO, "server", "dsh", prof, "package.json")
+        pj = os.path.join(REPO, "server", prof, "package.json")
         try:
             with open(pj, "r", encoding="utf-8") as f:
                 name = json.load(f).get("name", "")

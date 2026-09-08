@@ -26,7 +26,7 @@ intent（守护的用户可感知契约 / 工单验收③＋正文③④）：
   迁移后的**新链正确性**，环境债复发形态（链缺）在本条同样红，但 intent 是迁移不是环境。
 
 high-level steps：
-  1. 真身面：server/dsh/sandbar-tools.ts 在场（旧 suyou-tools.ts 不在）、内部工具
+  1. 真身面：server/sandbar-tools.ts 在场（旧 suyou-tools.ts 不在）、内部工具
      注册名 sandbar-tools；
   2. import 面：ui/node.ts、workbench/node.ts、workbench/src/host/metrics.ts 三处
      import 指向 sandbar-tools.ts 且零 suyou-tools.ts 残留；
@@ -51,20 +51,21 @@ import re
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DSH = os.path.join(REPO, "server", "dsh")
+DSH = os.path.join(REPO, "server")
 PROFILES = ["profile", "profile-headless"]
 # 裸包名解析锚 → 实际插件目录（农场五链的「应指」映射）。
+# t260907-10 摊平后插件住 server/plugins/<name>（农场链 ../../plugins/<name>）
 FARM = {
-    "sandbar-admin-ui": "ui",
-    "sandbar-workbench": "workbench",
-    "sandbar-knowledge": "knowledge",
-    "sandbar-providers": "providers",
-    "sandbar-temporal-tools": "temporal-tools",
+    "sandbar-admin-ui": "plugins/ui",
+    "sandbar-workbench": "plugins/workbench",
+    "sandbar-knowledge": "plugins/knowledge",
+    "sandbar-providers": "plugins/providers",
+    "sandbar-temporal-tools": "plugins/temporal-tools",
 }
 IMPORTERS = [
-    "server/dsh/workbench/node.ts",
-    "server/dsh/ui/node.ts",
-    "server/dsh/workbench/src/host/metrics.ts",
+    "server/plugins/workbench/node.ts",
+    "server/plugins/ui/node.ts",
+    "server/plugins/workbench/src/host/metrics.ts",
 ]
 
 passed, failed = 0, 0
@@ -91,8 +92,8 @@ def rd(path):
 def main():
     print("== 1. 真身面：sandbar-tools.ts 在场，旧名不在")
     body = rd(os.path.join(DSH, "sandbar-tools.ts"))
-    check(body is not None, "server/dsh/sandbar-tools.ts 在场")
-    check(not os.path.exists(os.path.join(DSH, "suyou-tools.ts")), "server/dsh/suyou-tools.ts 已不在")
+    check(body is not None, "server/sandbar-tools.ts 在场")
+    check(not os.path.exists(os.path.join(DSH, "suyou-tools.ts")), "server/suyou-tools.ts 已不在")
     check(bool(body) and re.search(r"name\s*[:=]\s*['\"]sandbar-tools['\"]", body) is not None,
           "工具注册名 name='sandbar-tools' 在文")
 
@@ -153,7 +154,7 @@ def main():
     print("== 6. 容器侧面：compose 农场构造链名与 patch id 动态联动一致")
     compose = rd(os.path.join(DSH, "docker-compose.test.yml"))
     if compose is None:
-        check(False, "server/dsh/docker-compose.test.yml 可读")
+        check(False, "server/docker-compose.test.yml 可读")
     elif patch is not None:
         # 动态锚：patch 里 name 指向 ../../workbench 的插件 id（不写死字面——未来再
         # 改名时本腿自动跟随声明侧，只验「compose 与 patch 同 token」的结构性契约）。
@@ -162,13 +163,13 @@ def main():
         check(wb_id is not None,
               "patch 中指向 workbench 的插件 id 恰一条（动态锚可解析）%s" % (("" if wb_id else "——实: %s" % wb_ids)))
         cont = re.search(r'\[\s*"\$\$b"\s*=\s*"([\w.-]+)"\s*\]\s*&&\s*continue', compose)
-        lnn = re.search(r'ln -sfn /repo/server/dsh/workbench "\$\$NM/([\w.-]+)"', compose)
+        lnn = re.search(r'ln -sfn /repo/server/plugins/workbench "\$\$NM/([\w.-]+)"', compose)
         check(cont is not None and cont.group(1) == wb_id,
               "compose continue 跳过名 == patch workbench id（实: %s）" % (cont.group(1) if cont else "未找到"))
         check(lnn is not None and lnn.group(1) == wb_id,
               "compose ln -sfn 直链名 == patch workbench id（实: %s）" % (lnn.group(1) if lnn else "未找到"))
-        check(lnn is not None and "/repo/server/dsh/workbench" in compose,
-              "compose 直链目标=/repo/server/dsh/workbench（被测树，非依赖树回落）")
+        check(lnn is not None and "/repo/server/plugins/workbench" in compose,
+              "compose 直链目标=/repo/server/plugins/workbench（被测树，非依赖树回落）")
         # 顶层拷贝清单契约：注释声明的 tools 文件名完整名锚定（cordis 顶层文件装载——
         # 拷错了=容器台起不了，同样被 ENV_FAIL 捂着）。注：patch 顶层 tools 条目是
         # config 型（无 name、不在插件面 pairs 内）——其 id 已由第 5 节「零 suyou-* 残留」

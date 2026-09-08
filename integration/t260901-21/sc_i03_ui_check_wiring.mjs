@@ -61,7 +61,7 @@ function legacy() {
   return f
 }
 
-const mod = await import(join(repo, 'server', 'dsh', 'ui-check', 'creds-source.mjs'))
+const mod = await import(join(repo, 'server', 'ui-check', 'creds-source.mjs'))
 
 // per-key 优先（两级 legacy 同时在场）
 const pk = perkey('suyou'); const lg = legacy()
@@ -117,8 +117,8 @@ ok(mod.PROJECT_KEY_RE instanceof RegExp && !mod.PROJECT_KEY_RE.test('Suyou') && 
    'A11 PROJECT_KEY_RE 导出且口径正确')
 
 // ---- B. 接线守卫 ----
-const lane = readFileSync(join(repo, 'server', 'dsh', 'ui-check', 'capture-lane.mjs'), 'utf8')
-const dbg = readFileSync(join(repo, 'server', 'dsh', 'ui-check', 'dbg-chat.mjs'), 'utf8')
+const lane = readFileSync(join(repo, 'server', 'ui-check', 'capture-lane.mjs'), 'utf8')
+const dbg = readFileSync(join(repo, 'server', 'ui-check', 'dbg-chat.mjs'), 'utf8')
 for (const [name, src] of [['capture-lane.mjs', lane], ['dbg-chat.mjs', dbg]]) {
   ok(src.includes("from './creds-source.mjs'") || src.includes('from "./creds-source.mjs"'),
      'B1 ' + name + ' 经 creds-source.mjs 取源（未绕开真源逻辑）')

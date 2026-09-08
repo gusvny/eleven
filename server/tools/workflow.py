@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""workflow —— 工单工作流模板（server/dsh/workflows/<id>.yaml，只读热插拔）。
+"""workflow —— 工单工作流模板（server/workflows/<id>.yaml，只读热插拔）。
 
 模板=阶段链：不同活流程不同，工单只挂实例（工单工作流台设计 §8/§9）。
 丢文件即上线（同 tools_registry 热插拔）。模板是线性单链：
@@ -20,7 +20,7 @@ import re
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-DIR = HERE.parent / 'dsh' / 'workflows'
+DIR = HERE.parent / 'workflows'
 
 # M10（t260822-m10-role-consolidation）：五角色定稿为前五个；后五个是退役 id——
 # 在跑工单模板快照钉死（role 仍是旧值）；content-pipeline 人门段已退役 260904，
@@ -28,14 +28,14 @@ DIR = HERE.parent / 'dsh' / 'workflows'
 ROLES = ('developer', 'integration', 'ops', 'product-operation', 'artist',  # M10 五角色定稿
          'dispatcher', 'editor', 'proofreader', 'qa', 'analyst')  # 退役 id（兼容在跑单/人门段）
 
-# 执行主体枚举（t260828-01，与 temporal-poc/shared.py PART_KINDS 同口径；
+# 执行主体枚举（t260828-01，与 engine/shared.py PART_KINDS 同口径；
 # 本文件是 server 层纯 stdlib 工具，不跨层 import，枚举在此复述一份）。
 PART_KINDS = ('agent', 'script', 'human')
 
 TOOL = {
     'name': 'workflow',
     'description': ('工单工作流模板：list 列全部模板（id/name/lane/stages 链），'
-                    'show 看单模板全文。模板存 server/dsh/workflows/<id>.yaml，只读热插拔，'
+                    'show 看单模板全文。模板存 server/workflows/<id>.yaml，只读热插拔，'
                     '线性单链（next=下一段，末段无 next），fanout 表示该段可扇出多 agent。'),
     'parameters': {
         'type': 'object',

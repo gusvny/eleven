@@ -4,7 +4,7 @@
 
 工单背景：自搭进程舞台（随机端口临时控制台 / bench.py 槽位 temporalite / capture-lane
 自搭 boot）与 docker 测试台双轨并存——本文件收拢为单轨：一切需要舞台的场景经本模块
-搭台（同一 compose 文件 server/dsh/docker-compose.test.yml），每台独立 compose 工程
+搭台（同一 compose 文件 server/docker-compose.test.yml），每台独立 compose 工程
 名 + 独立端口档 + 独立容器名/卷前缀，并行互不撞。
 
 子命令：
@@ -60,9 +60,9 @@ import time
 import urllib.request
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-COMPOSE_FILE = REPO / "server" / "dsh" / "docker-compose.test.yml"
+COMPOSE_FILE = REPO / "server" / "docker-compose.test.yml"
 TEMPORAL_IMAGE = "test-temporal:cli-1.8.3"
-TEMPORAL_BUILD_SCRIPT = "server/dsh/build-test-temporal.sh"
+TEMPORAL_BUILD_SCRIPT = "server/build-test-temporal.sh"
 
 # 禁区：生产三口（3099/7233/8233）+ 缺省测试台三口（3199/17233/18233）。
 # 档位分配永不返回禁区端口；显式 env 指定禁区端口=拒收。
@@ -522,7 +522,7 @@ def resolve_temporal_cli():
     except bench.MissingAsset:
         return None
     except Exception:
-        cand = REPO / "server" / "dsh" / "temporal-poc" / "bin" / "temporal"
+        cand = REPO / "server" / "engine" / "bin" / "temporal"
         return str(cand) if cand.exists() else None
 
 
@@ -571,27 +571,68 @@ def register_namespace(ns, addr, timeout=30):
 
 # ---------------------------------------------------------------- up / down / ensure
 
+def _bootstrap_lane_nm():
+    """泳道侧自举 profile 农场链（t260907-10 供给面自愈；gen4 补 headless 变体）。
+
+    目录重构后农场链=五条相对软链（sandbar-* → ../../plugins/<目录>），纯运行期
+    工件（gitignored），任何新泳道/新克隆都天然缺——供给必须自愈而非依赖手工预制。
+    两变体同链（profile 与 profile-headless 的 node_modules 同款五链，cordis.patch.yml
+    注释钦点「两份保持一致」）——只建 web 漏 headless 是 t260907-05 农场场景钉过的
+    对抗面。幂等：链在即跳过；目标插件目录缺席（实现未落地态）不硬造，交由调用方
+    报环境红。
+    """
+    farm = [("sandbar-admin-ui", "ui"), ("sandbar-workbench", "workbench"),
+            ("sandbar-knowledge", "knowledge"), ("sandbar-providers", "providers"),
+            ("sandbar-temporal-tools", "temporal-tools")]
+    missing = [d for _, d in farm
+               if not (REPO / "server" / "plugins" / d).is_dir()]
+    if missing:
+        print("注：泳道 plugins 缺 %s——农场链自举跳过（实现未落地态）" % missing)
+        return False
+    made = 0
+    for prof in ("profile", "profile-headless"):
+        nm = REPO / "server" / prof / "node_modules"
+        nm.mkdir(parents=True, exist_ok=True)
+        for pkg, d in farm:
+            link = nm / pkg
+            if not link.is_symlink():
+                link.symlink_to("../../plugins/%s" % d)
+                made += 1
+    if made:
+        print("注：泳道 profile*/node_modules 农场链自举 %d 条（两变体同款五链，"
+              "sandbar-* → ../../plugins/*，运行期工件不入库）" % made)
+    return True
+
+
 def default_repo_dir():
     """REPO 挂载默认值（gen2 真容器实锤③）：容器内 dsh 是 npm 全局装的控制台，
     /repo 只供 profile+插件——泳道 worktree 恒缺 gitignored 的 profile/node_modules，
     挂泳道=插件解析失败（ERR_MODULE_NOT_FOUND）。故：泳道 profile 带插件依赖→挂
-    泳道；否则回落主树（git common dir 的父级，主树已装齐）。capture/bench 场景被测
-    workbench 不受影响（经 profile 软链显式指 /repo/server/dsh/workbench，而该路径
-    只在被测树作为 repo_dir 显式传入时才有意义——lib_fix15/bench-shot 均显式传）。"""
-    if (REPO / "server" / "dsh" / "profile" / "node_modules").is_dir():
+    泳道（缺则先自举农场链，t260907-10）；否则回落主树（git common dir 的父级，主树
+    已装齐）。capture/bench 场景被测 workbench 不受影响（经 profile 软链显式指
+    /repo/server/plugins/workbench，而该路径只在被测树作为 repo_dir 显式传入时才有
+    意义——lib_fix15/bench-shot 均显式传）。"""
+    nm_complete = all(
+        (REPO / "server" / prof / "node_modules" / pkg).is_symlink()
+        for prof in ("profile", "profile-headless")
+        for pkg in ("sandbar-admin-ui", "sandbar-workbench", "sandbar-knowledge",
+                    "sandbar-providers", "sandbar-temporal-tools"))
+    # 完备性判据=两变体十链齐（gen4：单 profile 在而 headless 缺的半成品态曾短路
+    # 跳过自举——t260907-05 农场场景 profile-headless 五链红即此因）
+    if nm_complete or _bootstrap_lane_nm():
         return str(REPO)
     try:
         p = _run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
                  timeout=15, check=False)
         main = os.path.abspath(os.path.join((p.stdout or "").strip(), ".."))
-        if os.path.isdir(os.path.join(main, "server", "dsh", "profile", "node_modules")):
+        if os.path.isdir(os.path.join(main, "server", "profile", "node_modules")):
             print("注：泳道缺 profile/node_modules——/repo 回落挂主树（插件依赖面）：%s"
                   % main)
             return main
     except (subprocess.SubprocessError, FileNotFoundError):
         pass
-    raise StageError("泳道与主树均无 server/dsh/profile/node_modules——测试台插件依赖面"
-                     "缺失；先在主树 server/dsh/profile 装依赖（npm install）", kind="env")
+    raise StageError("泳道与主树均无 server/profile/node_modules——测试台插件依赖面"
+                     "缺失；先在主树 server/profile 装依赖（npm install）", kind="env")
 
 
 def _wait_diag(project, env):

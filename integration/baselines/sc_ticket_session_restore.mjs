@@ -149,7 +149,7 @@ async function serverScenarios() {
 async function browserScenarios() {
   let pw = null;
   for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core',
-    new URL('../../server/dsh/ui-check/node_modules/playwright-core/index.mjs', `file://${process.cwd()}/`).href]) {
+    new URL('../../server/ui-check/node_modules/playwright-core/index.mjs', `file://${process.cwd()}/`).href]) {
     if (!c) continue;
     try { pw = await import(c); break; } catch { /* next */ }
   }

@@ -16,7 +16,7 @@
 //       里可辨（站道点数=stages.length 的消费源）；epic 独立字段透传（含空 epic）。
 //   另守路由壳回归：缺 project/未知 project=400 点名错误、未知方法=405——S2 重写不得破壳
 //   （KI-025 kind 不谎报口径延续）。
-//   与 UT（server/dsh/workbench/tests/t260904-17-*，四态真值表/哈希色确定性/守卫）intent
+//   与 UT（server/plugins/workbench/tests/t260904-17-*，四态真值表/哈希色确定性/守卫）intent
 //   不同面：本条只守 HTTP 契约，不 import 任何 src/client 模块（KI-023 债族不新增）。
 //
 // high-level steps：

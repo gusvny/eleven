@@ -4,7 +4,7 @@
 覆盖（今晚四类实锤事故的反面）：
   L1 语法：integration/**/*.py 与 workbench/tests/*.mjs 全部编译/语法检查
         （连字符函数名、括号错配在此刻红，不到 pytest 收集时才炸）
-  L2 收集：temporal-poc/tests pytest --collect-only（import 错误、fixture 缺失）
+  L2 收集：engine/tests pytest --collect-only（import 错误、fixture 缺失）
   L3 路径：workbench/tests/*.mjs 相对 import 的目标文件必须存在（深度算错即刻红）
   L4 清单：SCENARIOS 三元组结构完整——name 唯一、intent 非空、cmd 引用的脚本存在
   L5 孤儿：integration/**/ 下测试形态文件未登记 SCENARIOS 且不在豁免表 → 警告
@@ -20,9 +20,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 INTEG = REPO / "integration"
-WB_TESTS = REPO / "server/dsh/workbench/tests"          # ← 项目参数（抄走改这里）
-TP_TESTS = REPO / "server/dsh/temporal-poc/tests"          # ← 项目参数
-VENV_PY = REPO / "server/dsh/temporal-poc/.venv/bin/python"  # ← 项目参数
+WB_TESTS = REPO / "server/plugins/workbench/tests"          # ← 项目参数（抄走改这里）
+TP_TESTS = REPO / "server/engine/tests"          # ← 项目参数
+VENV_PY = REPO / "server/engine/.venv/bin/python"  # ← 项目参数
 PYC = tempfile.mkdtemp(prefix="lint-pyc-")
 
 errors, warns = [], []

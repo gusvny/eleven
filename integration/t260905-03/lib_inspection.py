@@ -1,12 +1,12 @@
 """t260905-03 巡检票①场景共享夹具与驱动（无 sc_ 前缀=共享子检查代码，不登记场景清单）。
 
 三态纪律（t260904-12，闸内不设第三态）：exit 0=PASS / 1=FAIL（产品红，缺什么点名什么）/
-2=ENV_FAIL（环境缺供点名，不假绿不静默）。缺三方依赖=temporal-poc/.venv 可入则重入，
+2=ENV_FAIL（环境缺供点名，不假绿不静默）。缺三方依赖=engine/.venv 可入则重入，
 否则 ENV_FAIL——依赖缺席是环境红；模块/入口未交付是产品红，两不相冒充（KI-051 教训：
 环境红不得捂产品真红）。
 
 绑定面（全部为已交付/已声明的对外契约，场景侧不再发明）：
-- 扫描器 CLI：`python3 server/dsh/temporal-poc/inspection_scan.py --repo-root <dir>`
+- 扫描器 CLI：`python3 server/engine/inspection_scan.py --repo-root <dir>`
   stdout 单行 JSON {ok, result:{face,findings,summary,heartbeat,meta}|error}；
   finding 六键 {id,scan,severity,subject,evidence,suggestion}，severity∈{high,med,low}。
 - 触发面 CLI（已交付，运维通道）：`inspection_trigger.py trigger --instance <id>
@@ -33,7 +33,7 @@ import sys
 import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-TP_DIR = os.path.join(REPO, "server", "dsh", "temporal-poc")
+TP_DIR = os.path.join(REPO, "server", "engine")
 VENV_PY = os.path.join(TP_DIR, ".venv", "bin", "python")
 SCANNER = os.path.join(TP_DIR, "inspection_scan.py")
 TRIGGER = os.path.join(TP_DIR, "inspection_trigger.py")
@@ -88,7 +88,7 @@ def reexec_venv_if_missing(mods=("temporalio",)) -> None:
         return
     if os.path.exists(VENV_PY) and os.path.realpath(VENV_PY) != os.path.realpath(sys.executable):
         os.execv(VENV_PY, [VENV_PY, __file__])
-    die_env("python 三方依赖缺席：%s（server/dsh/temporal-poc/.venv 缺席或不可用）" % ",".join(missing))
+    die_env("python 三方依赖缺席：%s（server/engine/.venv 缺席或不可用）" % ",".join(missing))
 
 
 def run_cmd(cmd, env=None, timeout=180):
@@ -311,7 +311,7 @@ class RepoTree:
 
 # ---------------------------------------------------------------- KI-051 形态夹具族
 
-PRODUCER_REL = "server/dsh/workbench/src/client/capture.mjs"
+PRODUCER_REL = "server/plugins/workbench/src/client/capture.mjs"
 
 
 def _ui_guard_mjs(anchor: str, producer_rel: str = PRODUCER_REL) -> str:
@@ -366,7 +366,7 @@ def ki051_orphan_tree(label: str = "ki051-orphan") -> RepoTree:
     t = RepoTree(label)
     t.write_scenarios([("t-fix-guard", "隔离台新建会话锚守卫夹具", "true")])
     t.write("integration/sc_guard_orphan.mjs",
-            _ui_guard_mjs(KI051_OLD_ANCHOR, "server/dsh/workbench/src/client/definitely_absent.mjs"))
+            _ui_guard_mjs(KI051_OLD_ANCHOR, "server/plugins/workbench/src/client/definitely_absent.mjs"))
     return t
 
 
@@ -390,8 +390,8 @@ def stale_tree(label: str = "stale") -> RepoTree:
     t.write_scenarios([("t-fix-stale", "过时断言夹具：引用缺席与行号越界", "true")])
     t.write("integration/sc_guard_moved.py",
             'CMD = "node integration/baselines/definitely_missing_asset.mjs"\n'
-            'check_line("server/dsh/capture.mjs", 999)  # L999 越界：目标不足 999 行\n')
-    t.write("server/dsh/capture.mjs", "export const ok = true;\n")
+            'check_line("server/capture.mjs", 999)  # L999 越界：目标不足 999 行\n')
+    t.write("server/capture.mjs", "export const ok = true;\n")
     return t
 
 
@@ -404,10 +404,10 @@ def clean_tree(label: str = "clean") -> RepoTree:
     ])
     t.write("integration/sc_clean_guard.py",
             "# 干净守卫\n"
-            "# 守卫对象生产方: server/dsh/capture.mjs\n"
-            'PRODUCER = "server/dsh/capture.mjs"\n'
+            "# 守卫对象生产方: server/capture.mjs\n"
+            'PRODUCER = "server/capture.mjs"\n'
             'assert "面板标题口径" in body, "锚缺失"\n')
-    t.write("server/dsh/capture.mjs", 'export const label = "面板标题口径";\n')
+    t.write("server/capture.mjs", 'export const label = "面板标题口径";\n')
     return t
 
 

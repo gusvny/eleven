@@ -22,7 +22,7 @@ setEnv('DSH_HOME', scenario.dshHome)
 setEnv('HOME', scenario.home)
 if (scenario.chdir) process.chdir(scenario.chdir)
 
-const mod = await import(new URL('../../../server/dsh/ui-check/creds-source.mjs', import.meta.url).href)
+const mod = await import(new URL('../../../server/ui-check/creds-source.mjs', import.meta.url).href)
 let resolved = null
 let threw
 try {

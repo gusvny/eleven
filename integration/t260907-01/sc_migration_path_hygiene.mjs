@@ -9,7 +9,7 @@
  *   1) 代码域零旧仓字面量：grep 全仓（排 node_modules/.git/.suyou/.lane/docs/notes）
  *      不得再出现旧仓绝对路径字面量（needle 见下，串接构造）——docs/notes 是历史文档豁免域，
  *      .suyou 是工单台面转录域（例举原文属合法引用）；三个已知残留文件
- *      （server/dsh/README.md、server/dsh/projects.yaml、temporal-poc/README.md）
+ *      （server/README.md、server/projects.yaml、engine/README.md）
  *      属另开票处置的显式豁免（命中降为 warn 行，不吞掉其它任何新命中）；
  *   2) 清扫面五文件 node --check 语法健康：.debug-chat.mjs、smoke/agent-live.mjs、
  *      smoke/sessions.mjs、smoke/projects.mjs、tests/capture-stale-banner.mjs
@@ -44,11 +44,12 @@ const NEEDLE = '/Users/user/Documents/' + 'suyou'
 
 // 另开票处置的已知残留（t260907-01 review 定案：写集外，登记在案才豁免）
 const KNOWN_RESIDUE = new Set([
-  'server/dsh/README.md',
-  'server/dsh/projects.yaml',
-  'server/dsh/temporal-poc/README.md',
+  'server/README.md',
+  'server/projects.yaml',
+  'server/engine/README.md',
 ])
-const SKIP_DIRS = new Set(['node_modules', '.git', '.suyou', '.lane', 'docs', 'notes', '.venv'])
+// .sandbar=泳道台面记录（工单原文引用旧路径属历史记录域，与 notes/ 同口径——t260907-10 arbitrate gen1 补排除）
+const SKIP_DIRS = new Set(['node_modules', '.git', '.suyou', '.lane', '.sandbar', 'docs', 'notes', '.venv'])
 
 function* walk(dir) {
   for (const name of readdirSync(dir)) {
@@ -89,11 +90,11 @@ section('A 代码域零旧仓字面量（工单验收①）')
 section('B 清扫面五文件语法健康（工单验收②，node --check）')
 {
   const files = [
-    'server/dsh/ui-check/.debug-chat.mjs',
-    'server/dsh/workbench/smoke/agent-live.mjs',
-    'server/dsh/workbench/smoke/sessions.mjs',
-    'server/dsh/workbench/smoke/projects.mjs',
-    'server/dsh/workbench/tests/capture-stale-banner.mjs',
+    'server/ui-check/.debug-chat.mjs',
+    'server/plugins/workbench/smoke/agent-live.mjs',
+    'server/plugins/workbench/smoke/sessions.mjs',
+    'server/plugins/workbench/smoke/projects.mjs',
+    'server/plugins/workbench/tests/capture-stale-banner.mjs',
   ]
   for (const rel of files) {
     try {

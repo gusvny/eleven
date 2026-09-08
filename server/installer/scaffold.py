@@ -6,7 +6,7 @@
 口径：
 - 只对**本次代建的新根目录**落（created_root=True）；接入已存在目录零覆盖零新增。
 - 生成物：CLAUDE.md 骨架、notes/epics/.gitkeep、notes/discussions/.gitkeep、
-  docs/.gitkeep、server/dsh/model-routes.yaml（引擎仓默认表逐字节拷贝，真源唯一
+  docs/.gitkeep、server/model-routes.yaml（引擎仓默认表逐字节拷贝，真源唯一
   不内嵌副本）。
 - 源表三态（R2）：缺失（含 installer 脱离仓布局致源路径失效）与畸形（烂表）
   = fail-closed 红，点名源路径，绝不吞成空拷贝；调用方负责全量回滚。
@@ -23,7 +23,7 @@ from installer.service import FailClosed
 
 # 引擎仓路由默认表（模板真源）：paths.root 下的同族路径——与 ui/node.ts 的
 # routes init 端点、既有运行时查表回落路径同一份文件，三处同源不造两份。
-TEMPLATE_ROUTES_REL = pathlib.Path("server") / "dsh" / "model-routes.yaml"
+TEMPLATE_ROUTES_REL = pathlib.Path("server") / "model-routes.yaml"
 
 # 源表最低结构自检锚：缺任一锚=畸形（真源表必有 default 与 roles 两节）。
 _TEMPLATE_ANCHORS = (b"default:", b"roles:")
@@ -37,7 +37,7 @@ CLAUDE_MD_SKELETON = """# <项目名> —— 项目交接入口
 - notes/epics/：立项单（epic 档案）。
 - notes/discussions/：过程性讨论与立项笔记。
 - docs/：项目定稿知识库（建议索引 = docs/README.md）。
-- server/dsh/model-routes.yaml：模型路由表（声明式，工单 agent 查表用；
+- server/model-routes.yaml：模型路由表（声明式，工单 agent 查表用；
   改表走工单+人审，详见文件头注释）。
 
 ## 硬规则
@@ -77,7 +77,7 @@ def scaffold_container(root: pathlib.Path, engine_root: pathlib.Path, log=print)
     for rel in (pathlib.Path("notes") / "epics",
                 pathlib.Path("notes") / "discussions",
                 pathlib.Path("docs"),
-                pathlib.Path("server") / "dsh"):
+                pathlib.Path("server")):
         d = root / rel
         if not d.is_dir():
             d.mkdir(parents=True)

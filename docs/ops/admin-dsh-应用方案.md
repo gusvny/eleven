@@ -104,9 +104,9 @@ dsh 白捡的能力（我们自写 loop 没有的）：≤8 轮硬上限 → dsh
    浏览器开 127.0.0.1:3080 → 设置→模型 填 DEEPSEEK_API_KEY（写入 `~/.dsh/.credentials.yaml`，热生效）→ 加工作区指向 suyou 仓库 → 跑一句「列出当前目录文件」验证 bash 工具与审批弹窗。
    （版本钉死 rc.7；升级走提案。）
 
-2. **新建插件**（本方案唯一新增的 suyou 侧产物，建议落 `server/dsh-plugin/`，不动现有任何文件）：
+2. **新建插件**（本方案唯一新增的 suyou 侧产物，建议落 `server-plugin/`，不动现有任何文件）：
    ```
-   server/dsh-plugin/
+   server-plugin/
      suyou-admin.ts        # 插件本体（下述骨架）
      cordis.yml            # --patch 覆盖层
    ```
@@ -114,9 +114,9 @@ dsh 白捡的能力（我们自写 loop 没有的）：≤8 轮硬上限 → dsh
    ```yaml
    - insert:
        - id: suyou-admin
-         name: '/Users/user/Documents/suyou/server/dsh-plugin/suyou-admin.ts'
+         name: '/Users/user/Documents/suyou/server-plugin/suyou-admin.ts'
    ```
-   启动：`npx @deepseek-ai/dsh@0.1.0-rc.7 web --patch server/dsh-plugin/cordis.yml`
+   启动：`npx @deepseek-ai/dsh@0.1.0-rc.7 web --patch server-plugin/cordis.yml`
 
 3. **插件骨架**（关键路径，约 120 行；API 形态来自 `docs/cookbook/adding-a-tool.zh.md` 与 `docs/user/develop/basic/tool.zh.md`，均为文档实读）：
    ```ts

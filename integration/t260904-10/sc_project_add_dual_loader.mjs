@@ -9,7 +9,7 @@
 //
 // high-level steps：
 //   1. 全新隔离根（SANDBAR_PROJECTS_DIR=临时目录，无 .migrated）→ Python 侧首次装载：
-//      触发 tracked 种子（server/dsh/projects.yaml）自动播种，断言 suyou 在案+标记落盘；
+//      触发 tracked 种子（server/projects.yaml）自动播种，断言 suyou 在案+标记落盘；
 //   2. 快照注册表根（既有条目字节+目录清单）；
 //   3. 真跑 `project add <key> <name> <root_dir> --json`（裸 fixture 根）→ exit 0、
 //      --json 可解析、含该 key；
@@ -85,7 +85,7 @@ c.check('既有条目集合不变（新增恰两条 fixture）',
 
 // ---- 6. TS 侧同构装载（同一隔离根） ----
 process.env.SANDBAR_PROJECTS_DIR = root; // TS registryRoot() 每调用现读 env（模块头注契约）
-const ts = await import(pathToFileURL(path.join(REPO_ROOT, 'server', 'dsh', 'suyou-projects.ts')).href);
+const ts = await import(pathToFileURL(path.join(REPO_ROOT, 'server', 'suyou-projects.ts')).href);
 const reg = ts.loadRegistry();
 const tsKeys = reg.projects.map((p) => p.key);
 c.check('TS 侧装载出全部新条目',

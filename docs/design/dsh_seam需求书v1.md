@@ -34,13 +34,13 @@ workaround 硬扛，dsh 任意相关变更即静默失效。事实基线（全�
    用户 GUI 写下的同段盖掉。sandbar 260826 事故即此：路由表切
    kimi-coding/zai 全部落空，agent 实跑 scnet，配额一尽全灭。现行
    workaround = 双写（patch 声明层 + 文本行摘段重写 settings.yaml 用户层，
-   `server/dsh/temporal-poc/agent_activities.py:226-248`，调用点 :641）。
+   `server/engine/agent_activities.py:226-248`，调用点 :641）。
 2. **A4 headless 无 resume**：stock runner（cordis id=`headless-runner`，
    `@deepseek-ai/dsh-headless/lib/index.js`，inject=`[agentDefaultModel,
    agents, sessions]`）固定 `sessionId: SessionId(\`session-${randomUUID()}\`)`
    （同文件 :71），无任何 create-or-resume 入口。sandbar 现行 workaround =
    每次 spawn 生成一次性 patch：disable stock runner + insert 自研
-   create-or-resume runner（`server/dsh/headless-resume/node.ts`），依赖
+   create-or-resume runner（`server/headless-resume/node.ts`），依赖
    stock runner 的 cordis id、`headlessStartup` 注入点、
    `!!js ctx.headlessStartup.task` 求值上下文三个内部细节
    （`agent_activities.py:644-665`），任一变更 patch 即失效——会话延续
@@ -128,7 +128,7 @@ dsh 官方认领为约定），stock `headless-runner` 的语义由「固定随�
 6. 退出码按 turn 结局：completed → 0，其余（含 error）→ 非 0
    （编排侧靠 rc 判活，关联债务清单 D2）。
 
-### 对标实现的故障模式取舍（参考实现 = 自研 runner `server/dsh/headless-resume/node.ts`）
+### 对标实现的故障模式取舍（参考实现 = 自研 runner `server/headless-resume/node.ts`）
 
 | 故障模式 | node.ts 现行为（行号） | 带进 seam？ | 理由 |
 | --- | --- | --- | --- |
@@ -167,7 +167,7 @@ dsh 官方认领为约定），stock `headless-runner` 的语义由「固定随�
 ## Proposal（sandbar 侧迁移路径，供上游评估影响面）
 
 - 上游两案可独立交付，互不依赖；A4 落地后 sandbar 删除 resume_patch
-  生成段与 `server/dsh/headless-resume/`（自研 runner 退役），A3 落地后
+  生成段与 `server/headless-resume/`（自研 runner 退役），A3 落地后
   删除 `_pin_default_model` 与 model_patch 生成段——`--patch` 通路仅剩
   角色 preset（A1，合法消费）；
 - 迁移完成即达成决策 4 对 A3/A4 的「dsh 零 patch」口径：sandbar 对 dsh

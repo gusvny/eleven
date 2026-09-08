@@ -31,7 +31,7 @@ function section(t) { console.log(`\n== ${t}`) }
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = resolve(here, '..', '..')
-const testsDir = join(repo, 'server/dsh/workbench/tests')
+const testsDir = join(repo, 'server/plugins/workbench/tests')
 
 section('1. golden 基线逐字节比对（当前实现 vs golden_serial）')
 const p = spawnSync('node', ['golden.mjs', '--compare'], { cwd: testsDir, encoding: 'utf8', timeout: 600000 })
@@ -47,7 +47,7 @@ if (p.error) {
 }
 
 section('2. 纪律机械守护（比对不得污染基线）')
-const dirty = spawnSync('git', ['status', '--porcelain', '--', 'server/dsh/workbench/tests/golden_serial'], { cwd: repo, encoding: 'utf8' })
+const dirty = spawnSync('git', ['status', '--porcelain', '--', 'server/plugins/workbench/tests/golden_serial'], { cwd: repo, encoding: 'utf8' })
 ok((dirty.stdout || '').trim() === '', `golden_serial/ 零 git 脏（无重录）${(dirty.stdout || '').trim() ? '：' + dirty.stdout.trim() : ''}`)
 let leftovers = []
 try { leftovers = readdirSync(testsDir).filter(f => /^stub-.*\.json$/.test(f)) } catch { /* tests 目录缺席由上方 exit 非 0 已红 */ }

@@ -18,7 +18,7 @@ import subprocess
 import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-POC = os.path.join(REPO, "server", "dsh", "temporal-poc")
+POC = os.path.join(REPO, "server", "engine")
 WORKER_PY = os.path.join(POC, "worker.py")
 
 # watch 间隔旋钮（t260905-02 实现面交付：缺省 30s、下限钳制；新命名按宿主令

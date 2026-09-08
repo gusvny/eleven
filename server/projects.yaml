@@ -1,0 +1,17 @@
+# ⚠ 已出仓（sandbar M1-1，t260901-14）：注册表真源 = 机器级 per-key 目录
+# ~/.sandbar/projects/<key>/project.yaml（装载=扫 */project.yaml，格式见
+# docs/design/sandbar项目接入契约v1.md ①节 schema v1）。
+# 本文件不再被运行时读取，仅作一次性自动迁移源（装载器发现新根无 .migrated
+# 标记时从这里迁移，迁移完成后不回写）。新注册项目请建
+# ~/.sandbar/projects/<key>/ 目录；以下存量条目仅为迁移种子，勿再手改。
+# ---- 以下为迁移种子（旧格式，保留原状）----
+# 项目注册表 —— project 是逻辑概念，1:N 对应多个目录。
+# key = Temporal ProjectKey search attribute 值 = 各插件 API 的 ?project= 参数值。
+# dirs 首个 = 主目录：知识库（docs/）、模型路由（server/model-routes.yaml）、会话 cwd 兜底都走主目录；
+# 其余目录用于归属判定（如工单 worktree 落在任一 dir 下即属该项目）。
+# 各插件 host 启动时加载，未知 key 一律 400，无默认值。
+projects:
+  - key: suyou
+    name: 溯游
+    dirs:
+      - /Users/user/Documents/suyou

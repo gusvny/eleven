@@ -22,8 +22,8 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const REPO = resolve(HERE, '..', '..')
-const YAML = join(REPO, 'server', 'dsh', 'workflows', 'dev-lane.yaml')
-const SRC = join(REPO, 'server', 'dsh', 'temporal-poc', 'dev_lane.py')
+const YAML = join(REPO, 'server', 'workflows', 'dev-lane.yaml')
+const SRC = join(REPO, 'server', 'engine', 'dev_lane.py')
 
 let passed = 0, failed = 0, envFailed = 0, naCount = 0
 function ok(cond, label) {
@@ -68,7 +68,7 @@ ok(JSON.stringify(classOrder) === JSON.stringify(EXPECT),
 section('退役步不残留')
 {
   ok(!/integration_review/.test(yamlText), 'yaml 无 integration_review')
-  const readme = readFileSync(join(REPO, 'server', 'dsh', 'workflows', 'README.md'), 'utf8')
+  const readme = readFileSync(join(REPO, 'server', 'workflows', 'README.md'), 'utf8')
   ok(!/integration_review/.test(readme), 'README 无 integration_review')
 }
 

@@ -167,7 +167,7 @@ class AddSuccess(Base):
         self._setenv("SANDBAR_PROJECTS_DIR", str(fresh))
         shared = projects_mod._load_shared(self.paths.poc_dir)
         seed_keys = set()
-        seed = SERVER_DIR / "dsh" / "projects.yaml"
+        seed = SERVER_DIR / "projects.yaml"
         if seed.is_file():
             seed_keys = {p["key"] for p in
                          shared.parse_legacy_registry_file(seed.read_text("utf-8"), str(seed))}
@@ -237,9 +237,8 @@ class AddRejections(Base):
         self.assertTrue((root / "CLAUDE.md").is_file())
         for d in ("notes/epics", "notes/discussions", "docs"):
             self.assertTrue((root / d / ".gitkeep").is_file(), d)
-        engine_table = (REPO_ROOT / "server" / "dsh"
-                        / "model-routes.yaml").read_bytes()
-        self.assertEqual((root / "server" / "dsh" / "model-routes.yaml").read_bytes(),
+        engine_table = (REPO_ROOT / "server" / "model-routes.yaml").read_bytes()
+        self.assertEqual((root / "server" / "model-routes.yaml").read_bytes(),
                          engine_table, "路由表=引擎仓真源逐字节拷贝")
         # 全程无 git：目录树无 .git 产物
         self.assertNotIn(".git", [p.name for p in root.rglob("*")])
@@ -260,7 +259,7 @@ class AddRejections(Base):
         created = payload["scaffold"]["created"]
         for expect in ("CLAUDE.md", "notes/epics/.gitkeep",
                        "notes/discussions/.gitkeep", "docs/.gitkeep",
-                       "server/dsh/model-routes.yaml"):
+                       "server/model-routes.yaml"):
             self.assertIn(expect, created)
         self.assertEqual(payload["scaffold"]["skipped"], [])
         self.assertTrue(any(w["code"] == "container-no-git" for w in payload["warnings"]))
@@ -555,7 +554,7 @@ class ListReport(Base):
         shared = projects_mod._load_shared(self.paths.poc_dir)
         mixed = self.tmp / "mixed-reg"
         mixed.mkdir()
-        seed = SERVER_DIR / "dsh" / "projects.yaml"
+        seed = SERVER_DIR / "projects.yaml"
         entry = shared.parse_legacy_registry_file(seed.read_text("utf-8"), str(seed))[0]
         d = mixed / entry["key"]
         d.mkdir()
@@ -598,7 +597,7 @@ class RemoveStub(Base):
         poc = self.tmp / ("poc-stub-rm-%d" % RemoveStub._stub_seq)
         poc.mkdir()
         # 布桩 poc_dir（方案 R2）：真身 shared.py 复制（装载闸走真语义）+ 假 client.py
-        shutil.copy(SERVER_DIR / "dsh" / "temporal-poc" / "shared.py",
+        shutil.copy(SERVER_DIR / "engine" / "shared.py",
                     poc / "shared.py")
         if stdout is None:
             payload = {"ok": ok, "result": {"tickets": rows}}
@@ -747,7 +746,7 @@ class RemoveLifecycle(RemoveStub):
     def test_timeout_is_fail_closed(self):
         poc = self.tmp / "poc-stub-slow"
         poc.mkdir(exist_ok=True)
-        shutil.copy(SERVER_DIR / "dsh" / "temporal-poc" / "shared.py", poc / "shared.py")
+        shutil.copy(SERVER_DIR / "engine" / "shared.py", poc / "shared.py")
         (poc / "client.py").write_text("import time\ntime.sleep(5)\n", encoding="utf-8")
         paths = SimpleNamespace(poc_dir=str(poc))
         with mock.patch.object(projects_mod, "TICKET_QUERY_TIMEOUT_S", 0.3):

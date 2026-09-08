@@ -19,7 +19,7 @@ export const BASE = (await ensureStageConsole()).base;
 // （stage_docker 供给语义）——浏览器面测的树与本泳道交付物可以不同源，此前归因
 // 只能靠 docker inspect 法证。本行让每次机械跑自带「台 serves 谁」的一手证据。
 {
-  const localLib = new URL('../../server/dsh/workbench/lib/client.js', import.meta.url).pathname;
+  const localLib = new URL('../../server/plugins/workbench/lib/client.js', import.meta.url).pathname;
   try {
     const r = await fetch(`${BASE}/sandbar-workbench/lib/client.js`, { signal: AbortSignal.timeout(5000) });
     if (r.ok) {
@@ -51,7 +51,7 @@ export function refuseProductionConsole() {
  *  第③路在泳道布局必死（ui-check 无 node_modules）——经 git common-dir 解析主树根
  *  只读借用主仓安装位（与 lib_fix17 mainRoot() 同语义，只读不写）。 */
 export async function loadPlaywright() {
-  const localPw = new URL('../../server/dsh/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
+  const localPw = new URL('../../server/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
   let mainPw = null;
   try {
     const { spawnSync } = await import('node:child_process');
@@ -59,7 +59,7 @@ export async function loadPlaywright() {
     const r = spawnSync('git', ['-C', repoRoot, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' });
     const dir = (r.stdout || '').trim();
     if (r.status === 0 && dir) {
-      const p = `${dir.replace(/\/$/, '')}/../server/dsh/ui-check/node_modules/playwright-core/index.mjs`;
+      const p = `${dir.replace(/\/$/, '')}/../server/ui-check/node_modules/playwright-core/index.mjs`;
       if ((await import('node:fs')).existsSync(p)) mainPw = (await import('node:url')).pathToFileURL(p).href;
     }
   } catch { /* 第④路可选：解析失败静默降级为三路 */ }

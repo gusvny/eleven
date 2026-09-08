@@ -38,7 +38,7 @@ const check = (name, ok) => {
 
 let personaRaw;
 try {
-  personaRaw = extractPersona(readFileSync(resolve(root, 'server/dsh/roles/integration.yml'), 'utf8'));
+  personaRaw = extractPersona(readFileSync(resolve(root, 'server/roles/integration.yml'), 'utf8'));
 } catch (e) {
   console.log('[t260902-12][yml] SETUP FAIL: roles yml 读取异常：', e.message);
   process.exit(1);

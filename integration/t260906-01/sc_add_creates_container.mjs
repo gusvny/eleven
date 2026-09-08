@@ -22,7 +22,7 @@ import {
 const c = makeChecks('t260906-01 新目录容器代建一步接入');
 delete process.env.SANDBAR_PROJECTS_YAML;
 
-const ENGINE_TABLE = path.join(REPO_ROOT, 'server', 'dsh', 'model-routes.yaml');
+const ENGINE_TABLE = path.join(REPO_ROOT, 'server', 'model-routes.yaml');
 const sha16 = (p) => createHash('sha256').update(readFileSync(p)).digest('hex').slice(0, 32);
 
 // 假 git 桩：被调用即记账（记录到 calls.log）并退出 0——记账面让「零 git 调用」可机械判定。
@@ -39,7 +39,7 @@ const EXPECTED_FILES = [
   'notes/epics/.gitkeep',
   'notes/discussions/.gitkeep',
   'docs/.gitkeep',
-  'server/dsh/model-routes.yaml',
+  'server/model-routes.yaml',
 ];
 
 // ---- A/B/C/E/F：--json 深路径代建（父目录链也不存在）----
@@ -68,7 +68,7 @@ const EXPECTED_FILES = [
   c.check('脚手架生成物逐项在盘', EXPECTED_FILES.every((f) => existsSync(path.join(projRoot, f))),
     JSON.stringify(EXPECTED_FILES.map((f) => existsSync(path.join(projRoot, f)))));
   c.check('模板表与引擎仓真源逐字节一致（sha256）',
-    sha16(path.join(projRoot, 'server', 'dsh', 'model-routes.yaml')) === sha16(ENGINE_TABLE),
+    sha16(path.join(projRoot, 'server', 'model-routes.yaml')) === sha16(ENGINE_TABLE),
     'copy != engine source');
   c.check('CLAUDE.md 骨架含接力入口与无 git 须知',
     readFileSync(path.join(projRoot, 'CLAUDE.md'), 'utf8').includes('未含 git 仓库'));

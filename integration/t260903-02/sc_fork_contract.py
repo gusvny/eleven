@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SRC = (HERE.parents[1] / "server" / "dsh" / "temporal-poc" / "dev_lane.py").read_text("utf-8")
+SRC = (HERE.parents[1] / "server" / "engine" / "dev_lane.py").read_text("utf-8")
 
 PASS = 0
 FAIL = 0

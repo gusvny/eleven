@@ -20,7 +20,7 @@ import { execFileSync } from 'node:child_process'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const REPO = resolve(HERE, '..', '..')
-const SRC = join(REPO, 'server', 'dsh', 'temporal-poc', 'dev_lane.py')
+const SRC = join(REPO, 'server', 'engine', 'dev_lane.py')
 
 let passed = 0, failed = 0, envFailed = 0, naCount = 0
 function ok(cond, label) {
@@ -74,12 +74,12 @@ section('import 级复核：活类 STAGES 与文本一致、parts 枚举合法�
 {
   const py = `
 import json, sys
-sys.path.insert(0, ${JSON.stringify(join(REPO, 'server', 'dsh', 'temporal-poc'))})
+sys.path.insert(0, ${JSON.stringify(join(REPO, 'server', 'engine'))})
 from workflows_v2 import TEMPLATE_CLASSES
 c = TEMPLATE_CLASSES['dev-lane']
 print(json.dumps({"order": [s.id for s in c.STAGES], "parts": {s.id: list(s.parts) for s in c.STAGES}}))
 `
-  const venvPy = join(REPO, 'server', 'dsh', 'temporal-poc', '.venv', 'bin', 'python')
+  const venvPy = join(REPO, 'server', 'engine', '.venv', 'bin', 'python')
   let out = null, used = ''
   for (const cand of [venvPy, 'python3']) {
     try { out = execFileSync(cand, ['-c', py], { encoding: 'utf8' }); used = cand; break }

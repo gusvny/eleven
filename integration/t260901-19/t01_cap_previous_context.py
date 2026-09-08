@@ -16,7 +16,7 @@ Runs on plain python3 (shared.py is stdlib-only). cwd = lane root.
 import pathlib
 import sys
 
-sys.path.insert(0, "server/dsh/temporal-poc")
+sys.path.insert(0, "server/engine")
 import shared  # noqa: E402
 
 HIST_PREFIXES = [

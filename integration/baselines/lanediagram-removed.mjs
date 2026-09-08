@@ -20,9 +20,9 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const REPO = resolve(HERE, '..', '..')
-const CLIENT_SRC = join(REPO, 'server', 'dsh', 'workbench', 'src', 'client')
-const LIB_JS = join(REPO, 'server', 'dsh', 'workbench', 'lib', 'client.js')
-const LIB_CJS = join(REPO, 'server', 'dsh', 'workbench', 'lib', 'client.cjs')
+const CLIENT_SRC = join(REPO, 'server', 'plugins', 'workbench', 'src', 'client')
+const LIB_JS = join(REPO, 'server', 'plugins', 'workbench', 'lib', 'client.js')
+const LIB_CJS = join(REPO, 'server', 'plugins', 'workbench', 'lib', 'client.cjs')
 
 let passed = 0, failed = 0, envFailed = 0, naCount = 0
 function ok(cond, label) {

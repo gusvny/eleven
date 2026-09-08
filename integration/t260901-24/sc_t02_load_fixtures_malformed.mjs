@@ -19,7 +19,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const REPO = resolve(HERE, '..', '..')
-const CAPTURE = join(REPO, 'server', 'dsh', 'ui-check', 'capture.mjs')
+const CAPTURE = join(REPO, 'server', 'ui-check', 'capture.mjs')
 
 let passed = 0, failed = 0
 const failures = []

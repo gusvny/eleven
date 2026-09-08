@@ -13,7 +13,7 @@
 - SANDBAR_ZOMBIE_CENSUS=<file>：场景/人工注入 census JSON（红绿自证用）。
 
 判定谓词（引擎进程 = 命令名 node/python*）：cwd 所在目录树是「引擎地界」（cwd 是
-poc 目录、引擎仓根，或其祖先链上有 server/dsh/temporal-poc 标记），且该树的
+poc 目录、引擎仓根，或其祖先链上有 server/engine 标记），且该树的
 git 归属**不属于当前仓家族**。家族=当前仓根 + 其主仓 + 主仓的全部 worktree
 （读 .git/worktrees/ 枚举；worktree 的 .git 是 gitfile，指向主仓）——主树 console
 与兄弟泳道 agent 是本仓正常活动，不红（真机实扫 333 进程里它们常驻，误报会让
@@ -30,7 +30,7 @@ import subprocess
 NAME = "probe-engine-zombies"
 
 # poc 目录标记（引擎仓判据）：worker/console 的 cwd 常见就是它（260904 实案形态）。
-_ENGINE_MARKER = os.path.join("server", "dsh", "temporal-poc")
+_ENGINE_MARKER = os.path.join("server", "engine")
 
 # 引擎进程命令名白名单（basename 前缀/全等）：node 系与 python 系。
 # 不含 dsh 本身——dsh 壳是脚本/二进制，其引擎面最终落在 node/python 进程上。
@@ -43,7 +43,7 @@ _LSOF_TIMEOUT = 30
 # cwd 用占位 {ENGINE_ROOT}，probe() 调用时以真实 engine_root 代入——保证
 # 「当前仓内的引擎进程=绿」这条判定在样本档也真被练到。
 _EMBEDDED_SAMPLE_TEMPLATE = [
-    {"pid": 100001, "command": "node /x/console/main.js", "cwd": "{ENGINE_ROOT}/server/dsh/temporal-poc"},
+    {"pid": 100001, "command": "node /x/console/main.js", "cwd": "{ENGINE_ROOT}/server/engine"},
     {"pid": 100002, "command": "python3 /some/unrelated/tool.py", "cwd": "/Users/whoever/work"},
 ]
 
@@ -104,7 +104,7 @@ def _main_root_of(repo_root: str):
 def _engine_origin(cwd: str):
     """从 cwd 向上爬（至多 8 层，到 / 为止），返回 (is_engine, git_root)。
 
-    is_engine=路径落在引擎地界（某祖先目录下存在 server/dsh/temporal-poc，
+    is_engine=路径落在引擎地界（某祖先目录下存在 server/engine，
     或祖先本身以该标记结尾）；git_root=最近的 .git 归属根（无=None）。
     fixture 假路径（不存在的目录）自然走「有引擎标记、无 git 归属」→ 异仓。"""
     cur = os.path.normpath(cwd)

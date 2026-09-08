@@ -11,7 +11,7 @@ import re
 import sys
 from pathlib import Path
 
-TARGET = Path(__file__).resolve().parents[2] / "server/dsh/temporal-poc/agent_activities.py"
+TARGET = Path(__file__).resolve().parents[2] / "server/engine/agent_activities.py"
 LEVELS = ("debug", "info", "warning", "error", "critical", "exception")
 PH_RE = re.compile(r"%[-#0 +]*(?:\d+|\*)?(?:\.(?:\d+|\*))?[hlL]?[diouxXeEfFgGcrsa]")
 

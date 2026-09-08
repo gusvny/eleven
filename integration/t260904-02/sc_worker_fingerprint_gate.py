@@ -40,7 +40,7 @@ import stage_docker  # noqa: E402
 
 TID = "t26090402-gate"
 WORKER_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
-                         "server", "dsh", "temporal-poc", "worker.py")
+                         "server", "engine", "worker.py")
 
 NODE_GATE_EXPORTS = ("readWorkerMeta", "judgeTicketWorkerMeta", "ensureTicketWorkersOnce")
 

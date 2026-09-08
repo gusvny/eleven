@@ -33,7 +33,7 @@ class ParseCensusTest(unittest.TestCase):
     def test_object_contract_shape(self):
         # 集成场景契约形态（sc_doctor_zombie 写档口径）：{"processes": [...]}
         es = zombies.parse_census(json.dumps({"processes": [
-            {"pid": 410242, "command": "node", "cwd": "/old/server/dsh/temporal-poc"},
+            {"pid": 410242, "command": "node", "cwd": "/old/server/engine"},
         ]}))
         self.assertEqual(len(es), 1)
         self.assertEqual(es[0]["pid"], 410242)
@@ -83,14 +83,14 @@ class JudgeTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="sandbar-ut-zombies-")
         self.engine_root = os.path.join(self.tmp, "cur-engine")
-        os.makedirs(os.path.join(self.engine_root, "server", "dsh", "temporal-poc"))
+        os.makedirs(os.path.join(self.engine_root, "server", "engine"))
         os.makedirs(os.path.join(self.engine_root, ".git"))  # git 归属根（否则家族判不了）
 
     def test_current_repo_procs_green(self):
         entries = [
             {"pid": 1, "command": "node /x/main.js", "cwd": self.engine_root},
-            {"pid": 2, "command": "python3 worker.py", "cwd": os.path.join(self.engine_root, "server", "dsh", "temporal-poc")},
-            {"pid": 3, "command": "node agent.js", "cwd": os.path.join(self.engine_root, "server", "dsh")},  # 深层 cwd
+            {"pid": 2, "command": "python3 worker.py", "cwd": os.path.join(self.engine_root, "server", "engine")},
+            {"pid": 3, "command": "node agent.js", "cwd": os.path.join(self.engine_root, "server")},  # 深层 cwd
         ]
         self.assertEqual(zombies.judge_zombies(entries, self.engine_root), [])
 
@@ -99,15 +99,15 @@ class JudgeTest(unittest.TestCase):
         误报会让 doctor 永远红（实现期真机实锤：333 进程 3 个 node 在家族内）。"""
         main = os.path.join(self.tmp, "main-repo")
         os.makedirs(os.path.join(main, ".git", "worktrees", "w1"))
-        os.makedirs(os.path.join(main, "server", "dsh", "temporal-poc"))
+        os.makedirs(os.path.join(main, "server", "engine"))
         lane = os.path.join(main, "w1")
-        os.makedirs(os.path.join(lane, "server", "dsh", "temporal-poc"))
+        os.makedirs(os.path.join(lane, "server", "engine"))
         with open(os.path.join(lane, ".git"), "w", encoding="utf-8") as f:
             f.write("gitdir: %s\n" % os.path.join(main, ".git", "worktrees", "w1"))
         # 从主仓视角：兄弟 worktree 进程绿；主仓自身进程绿
         entries = [
             {"pid": 5, "command": "node console.js", "cwd": main},
-            {"pid": 6, "command": "node agent.js", "cwd": os.path.join(lane, "server", "dsh", "temporal-poc")},
+            {"pid": 6, "command": "node agent.js", "cwd": os.path.join(lane, "server", "engine")},
         ]
         self.assertEqual(zombies.judge_zombies(entries, main), [])
         # 从 worktree 视角：主仓进程同样绿（家族对称）
@@ -115,7 +115,7 @@ class JudgeTest(unittest.TestCase):
 
     def test_foreign_poc_marker_red(self):
         # 谓词 A：fixture 路径无需存在（字符串判据——场景注入面），无 git 归属=保守红
-        entries = [{"pid": 424242, "command": "node headless", "cwd": "/old/frozen-suyou/server/dsh/temporal-poc"}]
+        entries = [{"pid": 424242, "command": "node headless", "cwd": "/old/frozen-suyou/server/engine"}]
         hits = zombies.judge_zombies(entries, self.engine_root)
         self.assertEqual(len(hits), 1)
         self.assertEqual(hits[0]["pid"], 424242)
@@ -124,15 +124,15 @@ class JudgeTest(unittest.TestCase):
         # 异仓 git 根（冻结旧仓形态：独立 .git + poc 目录）
         other = os.path.join(self.tmp, "other-engine")
         os.makedirs(os.path.join(other, ".git"))
-        os.makedirs(os.path.join(other, "server", "dsh", "temporal-poc"))
+        os.makedirs(os.path.join(other, "server", "engine"))
         entries = [{"pid": 7, "command": "python3 worker.py", "cwd": other}]
         self.assertEqual(len(zombies.judge_zombies(entries, self.engine_root)), 1)
         # cwd 在异仓 poc 子目录同样红（260904 实案形态：headless cwd=suyou poc）
-        entries[0]["cwd"] = os.path.join(other, "server", "dsh", "temporal-poc")
+        entries[0]["cwd"] = os.path.join(other, "server", "engine")
         self.assertEqual(len(zombies.judge_zombies(entries, self.engine_root)), 1)
 
     def test_non_engine_command_ignored(self):
-        entries = [{"pid": 8, "command": "/usr/sbin/route monitor", "cwd": "/old/frozen-suyou/server/dsh/temporal-poc"}]
+        entries = [{"pid": 8, "command": "/usr/sbin/route monitor", "cwd": "/old/frozen-suyou/server/engine"}]
         self.assertEqual(zombies.judge_zombies(entries, self.engine_root), [])
 
     def test_non_engine_cwd_ignored(self):
@@ -142,7 +142,7 @@ class JudgeTest(unittest.TestCase):
     def test_python3_variants_counted(self):
         for cmd in ("python worker.py", "python3 worker.py", "Python worker.py", "/usr/bin/python3.9 worker.py"):
             hits = zombies.judge_zombies(
-                [{"pid": 10, "command": cmd, "cwd": "/old/x/server/dsh/temporal-poc"}], self.engine_root)
+                [{"pid": 10, "command": cmd, "cwd": "/old/x/server/engine"}], self.engine_root)
             self.assertEqual(len(hits), 1, cmd)
 
 
@@ -152,7 +152,7 @@ class ProbeTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="sandbar-ut-zombies-p-")
         self.engine_root = os.path.join(self.tmp, "cur-engine")
-        os.makedirs(os.path.join(self.engine_root, "server", "dsh", "temporal-poc"))
+        os.makedirs(os.path.join(self.engine_root, "server", "engine"))
         os.makedirs(os.path.join(self.engine_root, ".git"))  # git 归属根（家族判定前提）
 
     def _write(self, name, text):
@@ -171,11 +171,11 @@ class ProbeTest(unittest.TestCase):
 
     def test_census_bad_red_names_pid(self):
         p = self._write("bad.json", _census(
-            [{"pid": 424242, "command": "node headless", "cwd": "/old/frozen/server/dsh/temporal-poc"}]))
+            [{"pid": 424242, "command": "node headless", "cwd": "/old/frozen/server/engine"}]))
         ok, detail = zombies.probe(engine_root=self.engine_root, census_path=p)
         self.assertFalse(ok)
         self.assertIn("424242", detail)
-        self.assertIn("/old/frozen/server/dsh/temporal-poc", detail)
+        self.assertIn("/old/frozen/server/engine", detail)
 
     def test_census_good_green(self):
         p = self._write("good.json", _census(
@@ -205,7 +205,7 @@ class ScanLiveTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="sandbar-ut-zombies-s-")
         self.engine_root = os.path.join(self.tmp, "cur-engine")
-        os.makedirs(os.path.join(self.engine_root, "server", "dsh", "temporal-poc"))
+        os.makedirs(os.path.join(self.engine_root, "server", "engine"))
         os.makedirs(os.path.join(self.engine_root, ".git"))
 
     def test_lsof_missing_red(self):
@@ -232,7 +232,7 @@ class ScanLiveTest(unittest.TestCase):
         # lsof -F pnc -d cwd 实测块格式：p<pid>/c<command>/fcwd/n<cwd>（见 spike）
         sample = ("p167\nloginwindow\n".replace("loginwindow", "cloginwindow")
                   + "fcwd\nn/\n"
-                  + "p8114\ncnode\nfcwd\nn/Users/x/old/server/dsh/temporal-poc\n")
+                  + "p8114\ncnode\nfcwd\nn/Users/x/old/server/engine\n")
         real_run = zombies.subprocess.run
 
         class R:
@@ -252,7 +252,7 @@ class ScanLiveTest(unittest.TestCase):
         self.assertEqual(len(entries), 2)
         node_entries = [e for e in entries if e["command"] == "node"]
         self.assertEqual(len(node_entries), 1)
-        self.assertEqual(node_entries[0]["cwd"], "/Users/x/old/server/dsh/temporal-poc")
+        self.assertEqual(node_entries[0]["cwd"], "/Users/x/old/server/engine")
 
 
 if __name__ == "__main__":

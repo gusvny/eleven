@@ -26,7 +26,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const WB = resolve(HERE, '..', '..', 'server', 'dsh', 'workbench')
+const WB = resolve(HERE, '..', '..', 'server', 'plugins', 'workbench')
 
 let pass = 0, fail = 0
 function ok(cond, label) {

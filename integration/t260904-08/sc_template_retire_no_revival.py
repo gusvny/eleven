@@ -65,16 +65,16 @@ def main():
                     "'description': '原 content-pipeline 专用，260904 起仅留兼容形态',"),
           "豁免判定自证绿：描述串/报错文案里的退役标记同样豁免（判红的是声称可用，"
           "不是提到退役事实）")
-    check(lib.allow("server/dsh/temporal-poc/shared.py",
+    check(lib.allow("server/engine/shared.py",
                     '("content-pipeline", "ai-review"): ["..."],'),
           "豁免判定自证绿：shared.py 留存数据表键豁免")
-    check(lib.allow("server/dsh/temporal-poc/shared.py",
+    check(lib.allow("server/engine/shared.py",
                     "# 260904 宿主令：仅存 dev-lane（content-pipeline 等已退役）"),
           "豁免判定自证绿：shared.py 带退役标记的注释豁免（表键未命中不得提前返回）")
-    check(not lib.allow("server/dsh/temporal-poc/shared.py",
+    check(not lib.allow("server/engine/shared.py",
                         '"content-pipeline": "ContentPipelineTicketWorkflow",'),
           "豁免判定自证红：shared.py 非表键行（如真源表残行）不豁免")
-    check(lib.allow("server/dsh/temporal-poc/workflows.py",
+    check(lib.allow("server/engine/workflows.py",
                     "class ContentPipelineTicketWorkflow:  # 假想复活"),
           "豁免判定自证绿：v1 留存面整文件豁免（声明保留）")
     hits = lib.scan_lines("server/x_fake.py",
@@ -102,8 +102,8 @@ def main():
     check(n_files > 100, "扫描面非空（%d 个文件；空面=扫描失效，不许静默绿）" % n_files)
 
     print("== C 退役标注面在位（防整文件豁免沦为无标注黑洞）")
-    for rel in ("server/dsh/temporal-poc/README.md",
-                "server/dsh/workflows/README.md") + lib.DOC_TWO:
+    for rel in ("server/engine/README.md",
+                "server/workflows/README.md") + lib.DOC_TWO:
         text = (lib.REPO / rel).read_text("utf-8")
         annotated = "260904" in text and "退役" in text
         if rel in lib.DOC_TWO:

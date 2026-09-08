@@ -100,11 +100,11 @@ updated: 2026-09-04
 
 新代码收在三个新文件 + 一个 CLI：
 
-- `server/dsh/workbench/src/client/metrics.tsx`——面板/视图/筛选/KPI 条（wb- 前缀 CSS 惯例）；
-- `server/dsh/workbench/src/client/metrics-charts.ts`——ECharts adapter：
+- `server/plugins/workbench/src/client/metrics.tsx`——面板/视图/筛选/KPI 条（wb- 前缀 CSS 惯例）；
+- `server/plugins/workbench/src/client/metrics-charts.ts`——ECharts adapter：
   暴露 `stackBar()/groupBar()/hBar()/donut()` 四工厂（入参 categories+series+onDrill），
   视图层不见 echarts 类型；
-- `server/dsh/workbench/src/host/metrics.ts`——聚合唯一实现（三源读取+可弃缓存+失效）；
+- `server/plugins/workbench/src/host/metrics.ts`——聚合唯一实现（三源读取+可弃缓存+失效）；
 - `metrics-cli.mjs`（workbench 下，挂 server/tools 桥 = dsh tool「metrics」）——argv→参数→
   stdout JSON，与 HTTP 同实现同缓存。
 

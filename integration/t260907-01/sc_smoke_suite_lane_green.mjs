@@ -38,7 +38,7 @@ function envDown(label) { envFail++; console.log(`  ENV_FAIL ${label}`) }
 function section(t) { console.log(`\n== ${t}`) }
 
 const REPO = resolve(join(fileURLToPath(import.meta.url), '..', '..', '..'))
-const WB = join(REPO, 'server', 'dsh', 'workbench')
+const WB = join(REPO, 'server', 'plugins', 'workbench')
 
 section('A 三支纯函数 smoke 泳道直跑全绿')
 {

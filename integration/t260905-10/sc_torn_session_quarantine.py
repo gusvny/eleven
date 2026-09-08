@@ -35,7 +35,7 @@ from lib_lane import (EXIT_ENV, EXIT_FAIL, Fail, ensure_poc_python,  # noqa: E40
 
 ensure_poc_python()  # 需要引擎模块（temporalio 链）——回落链重执行
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "server/dsh/temporal-poc"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "server/engine"))
 import agent_activities  # noqa: E402
 
 

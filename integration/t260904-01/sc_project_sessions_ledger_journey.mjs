@@ -41,7 +41,7 @@
  * Exit contract：末行 SUMMARY pass=N fail=M；exit 1 iff fail>0。
  */
 import { deepStrictEqual } from 'node:assert/strict'
-import * as S from '../../server/dsh/workbench/src/shared/sessions.ts'
+import * as S from '../../server/plugins/workbench/src/shared/sessions.ts'
 
 let passed = 0
 let failed = 0

@@ -25,8 +25,8 @@
  */
 import { readFileSync } from 'node:fs'
 
-const LIB_JS = new URL('../../server/dsh/workbench/lib/client.js', import.meta.url)
-const LIB_CJS = new URL('../../server/dsh/workbench/lib/client.cjs', import.meta.url)
+const LIB_JS = new URL('../../server/plugins/workbench/lib/client.js', import.meta.url)
+const LIB_CJS = new URL('../../server/plugins/workbench/lib/client.cjs', import.meta.url)
 
 let pass = 0, fail = 0
 const ok = (name, cond, detail = '') => {

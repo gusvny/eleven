@@ -17,7 +17,7 @@
 //       直连路径默认不带旗）。
 //
 // 环境：SANDBAR_CAPTURE_CHAT_ACTIVE_FORCE_ENV_FAIL=1 使 C1 记 ENV_FAIL 退 2（无 dsh/playwright 环境）；
-//   SANDBAR_CAPTURE_MAIN_UI_CHECK 指主树 server/dsh/ui-check（泳道无 node_modules，
+//   SANDBAR_CAPTURE_MAIN_UI_CHECK 指主树 server/ui-check（泳道无 node_modules，
 //   playwright-core 从主树加载）；captured 输出目录用 mkdtemp，跑完即删。
 // 硬守卫：本基线拒绝以任何方式指向生产控制台端口 3099（SANDBAR_TEST_CONSOLE 若
 //   含 3099 直接退出）；C1 的隔离台端口由 capture-lane 自己挑空闲端口。
@@ -34,8 +34,8 @@ import { ensureLaneBuild } from "./capture-ensure-build.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..", "..");            // 泳道 worktree 根
 const MAIN_TREE = path.resolve(REPO_ROOT, "..", "..");       // 主树（playwright/dsh 供给）
-const MAIN_UI_CHECK = path.join(MAIN_TREE, "server", "dsh", "ui-check");
-const CAPTURE_LANE = path.join(REPO_ROOT, "server", "dsh", "ui-check", "capture-lane.mjs");
+const MAIN_UI_CHECK = path.join(MAIN_TREE, "server", "ui-check");
+const CAPTURE_LANE = path.join(REPO_ROOT, "server", "ui-check", "capture-lane.mjs");
 
 const results = [];
 function record(name, status, detail = "") {
@@ -53,7 +53,7 @@ if ((process.env.SANDBAR_TEST_CONSOLE ?? "").includes(":3099")) {
 async function unitGuards() {
   let m;
   try {
-    m = await import(path.join(REPO_ROOT, "server", "dsh", "ui-check", "capture.mjs"));
+    m = await import(path.join(REPO_ROOT, "server", "ui-check", "capture.mjs"));
   } catch (e) {
     record("U0 capture.mjs 可导入", "fail", String(e).slice(0, 160));
     return 1;
@@ -161,7 +161,7 @@ async function fullChain() {
 // ── C2：门旗红线静态断言（直连路径不带旗；缺旗报错文案含 --allow-seed）──
 async function gateRedLine() {
   let fail = 0;
-  const capSrc = await readFile(path.join(REPO_ROOT, "server", "dsh", "ui-check", "capture.mjs"), "utf8");
+  const capSrc = await readFile(path.join(REPO_ROOT, "server", "ui-check", "capture.mjs"), "utf8");
   // 直连路径不带旗：capture-lane 的 spawn 调用里必须显式传 --allow-seed（隔离台），
   // 而 capture.mjs 的 url 缺省指向 3099 时要求不带旗也能安全报错。
   if (!/--allow-seed/.test(capSrc)) { fail++; record("C2 门旗存在性", "fail", "capture.mjs 无 --allow-seed 门旗"); }
@@ -179,7 +179,7 @@ fail += await gateRedLine();
 // 260904 回迁守卫（KI-036）：本树与主树 ui-check 均缺 playwright-core（安装=宿主
 // 沙箱外 npm install）→ C1 全链记 ENV_FAIL 退 2 不假红；依赖恢复后自动生效，断言面不变。
 import { existsSync as _existsSync } from "node:fs";
-const _pwMissing = !_existsSync(path.join(REPO_ROOT, "server", "dsh", "ui-check",
+const _pwMissing = !_existsSync(path.join(REPO_ROOT, "server", "ui-check",
                                          "node_modules", "playwright-core"))
   && !_existsSync(path.join(MAIN_UI_CHECK, "node_modules", "playwright-core"));
 if (process.env.SANDBAR_CAPTURE_CHAT_ACTIVE_FORCE_ENV_FAIL === "1") {

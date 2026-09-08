@@ -16,7 +16,7 @@ updated: 2026-08-31
 
 > 按《设计文档写作指南》四段结构写。本文描述溯游项目以 DeepSeek Harness（dsh）为运行时底座搭建的
 > 多角色协作基础设施：如何用一群各司其职的 agent 角色协同完成软件开发、内容生产、运营与运维。
-> 截至 2026-08-21，核心机制已落地并多轮实跑（操作总览见 `server/dsh/roles/README.md`）。
+> 截至 2026-08-21，核心机制已落地并多轮实跑（操作总览见 `server/roles/README.md`）。
 > 落地状态不写在本文档——状态一律归立项单与 Temporal。
 
 ## Problem（问题）
@@ -41,9 +41,9 @@ updated: 2026-08-31
 ### 背景知识
 
 - **dsh（DeepSeek Harness）**：本项目的 agent 运行时，提供 profile / preset / roster / 插件 / subagent 委派机制。
-- **preset**：一份 agent 配置（persona + 工具集 + 行为参数）；本项目 preset 由 `server/dsh/presets/gen.py` 从上游 standard 派生。
+- **preset**：一份 agent 配置（persona + 工具集 + 行为参数）；本项目 preset 由 `server/presets/gen.py` 从上游 standard 派生。
 - **roster**：dsh 的 preset 发现机制（实证入口 = `$DSH_HOME/.agent-presets/` 实体镜像）。
-- **工单**：一条 Temporal workflow（id=工单 id，单例，`server/tools/ticket.py` 薄壳 + temporal-poc v2 模版类），是派活、接力、验收、审计的载体；260823 起按 ProjectKey search attribute 区分项目（旧 `server/dsh/tickets/` JSON 投影目录已删）。
+- **工单**：一条 Temporal workflow（id=工单 id，单例，`server/tools/ticket.py` 薄壳 + engine v2 模版类），是派活、接力、验收、审计的载体；260823 起按 ProjectKey search attribute 区分项目（旧 `server/tickets/` JSON 投影目录已删）。
 - **知识库**：`docs/` 目录为项目的知识库（见《知识库设计》），是角色上下文的共享真相源。
 
 
@@ -99,8 +99,8 @@ updated: 2026-08-31
 
 五层结构承载 7 条需求，每层有明确的仓内落点：
 
-1. **岗位说明书层**（`server/dsh/roles/*.md`，8 份）：定义职责/边界/验收清单——解决「角色无约束」。
-2. **Preset 层**（`server/dsh/presets/`，gen.py 从上游 standard 派生 8 preset）：persona 烘焙——解决「上下文无隔离」。
+1. **岗位说明书层**（`server/roles/*.md`，8 份）：定义职责/边界/验收清单——解决「角色无约束」。
+2. **Preset 层**（`server/presets/`，gen.py 从上游 standard 派生 8 preset）：persona 烘焙——解决「上下文无隔离」。
 3. **Roster 层**（`$DSH_HOME/.agent-presets/` 实体镜像 + 默认 suyou-dispatcher）：发现机制——解决「谁是什么角色」。
 4. **派活工具层**（`suyou-dispatcher` preset 的 delegation 组：7 个 `dispatch_`* 实例）：一键派活；只读三角色 toolFilter.deny=[write,edit] **机制强制**——解决「越权无机制」。
 5. **决策链与防幻觉层**：验收清单预写死、生成/验证分离、异模型交叉、红线必人审、可追溯；工单系统 + verify_lane 机械校验——解决「无人把关」。
@@ -223,7 +223,7 @@ agent的执行log，workflow log，必须要能够被记录下来，方便admin�
 ### 五层架构与依赖方向反转
 
 suyou 的这套设施要独立成通用 IDE 项目 sandbar（见立项单）。独立的前提是
-**依赖方向反转**：现状是引擎住在项目仓里（`server/dsh/`）、引擎读项目；目标
+**依赖方向反转**：现状是引擎住在项目仓里（`server/`）、引擎读项目；目标
 形态是**项目向 IDE 注册**，项目仓里一行引擎代码都没有。路线分三步——
 **契约化 → 就地反转 → 物理搬迁，顺序不可倒**：先在项目仓内把引擎与项目的
 接触面收敛成契约（引擎只经契约读项目），再反转，最后才物理搬迁成独立仓。
@@ -259,7 +259,7 @@ IDE 升版就多背一份兼容义务，所以 v1 刻意只转正五样，其余
   （如开发泳道 implement = agent 写码 + worker settle 脚本代落盘 + 自测/verify 脚本门；
   merge = 人签字 + 脚本落账与泳道清理），单值字段是逼代码说谎。
 - **枚举三值可组合**：`agent`（🤖 agent 执行）/ `script`（⚙️ 脚本·程序化）/
-  `human`（👤 人工），在 `Stage.parts`（`temporal-poc/shared.py`，枚举常量
+  `human`（👤 人工），在 `Stage.parts`（`engine/shared.py`，枚举常量
   `PART_KINDS`）上以有序元组声明；yaml 快照、工单台阶段链徽标均由其派生。
   生成器对「任一 stage 缺 parts」硬失败，把「全声明」从自觉降为机械校验。
 - **计入口径**：业务产物落账必需的脚本计入（worker 代落盘、merge 落账）；
@@ -272,7 +272,7 @@ IDE 升版就多背一份兼容义务，所以 v1 刻意只转正五样，其余
   或开 dev-lane 承担；非工单巡检 dispatcher-scan 不属工单模板面，保留。旧档
   「六模版/五模版」为删除前措辞）。
 - **演进安全**：`Stage` 只加带默认值的元数据字段不触确定性，无需 bump patched id；
-  以 `temporal-poc/replay_check.py` 对存量运行中工单做 replay 实测兜底。
+  以 `engine/replay_check.py` 对存量运行中工单做 replay 实测兜底。
 
 > 来源立项：observability（执行主体可见；进度心跳与 token 消耗口径见下两节）
 
@@ -411,5 +411,5 @@ PATCH_ID。配套纪律：改词表/计数/链序前先 grep 已登记场景与 
 - [工单工作流台设计](../design/工单工作流台设计.md)——工作流模板/接力/单例/人门/Temporal 演进（R1/R5/R6 的落地细化）
 - [知识库设计](../design/知识库设计.md)——文档先行总纲（R2/R3/R6 的机制来源）
 - [设计文档写作指南](../design/设计文档写作指南.md)——本文的结构依据
-- `server/dsh/roles/README.md`——操作总览（本文已落地部分的真相源）
+- `server/roles/README.md`——操作总览（本文已落地部分的真相源）
 

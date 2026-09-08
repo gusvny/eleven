@@ -11,7 +11,7 @@ KI-016 根因有两道守卫：_copy_creds 内部 return（it01 钉）+ _prepare
 黑盒边界 = _prepare_agent_spawn 的返回 (cmd, env) 与泳道 .dsh 的文件系统终态；
 全 tmp/env 桩，不触真凭据、不起进程、不连 Temporal。
 依赖 PyYAML 的场景（S1/S3）在无 yaml 且无 venv 的解释器上记 ENV_FAIL（三态契约定稿 §7.3：缺依赖=环境红）。
-跑法：PY=server/dsh/temporal-poc/.venv/bin/python; "$PY" integration/t260902-09/it02_spawn_creds_refresh.py
+跑法：PY=server/engine/.venv/bin/python; "$PY" integration/t260902-09/it02_spawn_creds_refresh.py
 末行 SUMMARY pass=N fail=N env_fail=N na=N；退出码 0=PASS、1=FAIL（产品红）、2=ENV_FAIL（环境红）。
 """
 import os
@@ -64,7 +64,7 @@ def main():
 
     if not yaml_ok:
         L.env1("S1/S3 合并刷新场景（2 用例）",
-                "PyYAML 不可用且无 temporal-poc venv（venv=%s）" % fx.VENV_PY)
+                "PyYAML 不可用且无 engine venv（venv=%s）" % fx.VENV_PY)
         return L.finish()
 
     # S1 KI-016 用户场景：老泳道快照 + 源新增 provider key → 下一次 spawn 可见

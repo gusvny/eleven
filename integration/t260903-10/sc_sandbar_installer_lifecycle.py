@@ -8,7 +8,7 @@
 down 先 worker 后 server（TERM 时间戳红线观测）且终态进程全灭 + run 目录 pid 清空。
 
 隔离（t260903-11 环境无关化）：临时 HOME（状态真源随之隔离）；假 temporal 经
-公共旗标 --root 注入 fixture 仓（安装器按 <root>/server/dsh/temporal-poc/bin/
+公共旗标 --root 注入 fixture 仓（安装器按 <root>/server/engine/bin/
 temporal 定位，PATH 注入是无效缝）；演练端口=自选空闲端口（公共旗标
 --server-port/--ui-port，与真 7233/8233 零接触）；幂等观测走 lsof 监听者 +
 stub 自报 pid 双面（不数全机进程表——机器全局断言在真环境自带 start-dev 时必假红）。

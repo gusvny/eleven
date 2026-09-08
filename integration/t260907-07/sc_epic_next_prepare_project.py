@@ -22,7 +22,7 @@ import tempfile
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.dirname(os.path.dirname(_HERE))
-sys.path.insert(0, os.path.join(_REPO, "server", "dsh", "temporal-poc"))
+sys.path.insert(0, os.path.join(_REPO, "server", "engine"))
 sys.path.insert(0, _HERE)
 
 import epic_fixture as fx  # noqa: E402
@@ -58,11 +58,11 @@ def main():
         # venv 时换解释器重入（与 verify.yaml test check 的 venv 回落同款口径）。
         # 防递归用 env 标记而非 realpath 比对——venv python 常是共享二进制的符号链
         # （venv 语义靠调用路径+pyvenv.cfg 生效），realpath 会误判成同一解释器。
-        venv = os.path.join(_REPO, "server", "dsh", "temporal-poc", ".venv", "bin", "python")
+        venv = os.path.join(_REPO, "server", "engine", ".venv", "bin", "python")
         if os.path.isfile(venv) and not os.environ.get("T26090707_VENV_REENTRY"):
             os.execve(venv, [venv, os.path.abspath(__file__)],
                       dict(os.environ, T26090707_VENV_REENTRY="1"))
-        print("  ENV_FAIL: temporalio SDK 缺失（优先 server/dsh/temporal-poc/.venv/bin/python）",
+        print("  ENV_FAIL: temporalio SDK 缺失（优先 server/engine/.venv/bin/python）",
               flush=True)
         print("SUMMARY pass=%d fail=%d env_fail=1 na=0" % (passed, failed), flush=True)
         return 2

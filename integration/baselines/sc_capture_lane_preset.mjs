@@ -1,6 +1,6 @@
 // capture-lane-preset.mjs —— 隔离台 preset 物化基线（t260901-02）。
 //
-// 断言 server/dsh/ui-check/capture-lane.mjs 的 presetMaterializeRejectReason /
+// 断言 server/ui-check/capture-lane.mjs 的 presetMaterializeRejectReason /
 // materializePresets 三态：缺失源拒跑、畸形源拒跑（空目录/缺关键文件）、完整源
 // 实体复制落地（非软链）。全用临时桩目录 + env 覆盖路径（main() 侧
 // SANDBAR_CAPTURE_PRESET_SOURCE 解耦性由此函数直测覆盖），不 boot 控制台、不碰
@@ -13,7 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const MOD = path.join(REPO, "server", "dsh", "ui-check", "capture-lane.mjs");
+const MOD = path.join(REPO, "server", "ui-check", "capture-lane.mjs");
 
 const { presetMaterializeRejectReason, materializePresets } = await import(
   new URL(`file://${MOD}`).href);

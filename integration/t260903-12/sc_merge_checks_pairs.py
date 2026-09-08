@@ -9,10 +9,10 @@ fail-closed 可见，第三种是静默失效（3.5 节判定「src 前缀无改
 本场景独立守护该对齐，与引擎解析/判定逻辑互不替代。
 
 步骤：
-  1. server/dsh/merge-checks.yaml 在场（缺失=红：护栏未启用）；
+  1. server/merge-checks.yaml 在场（缺失=红：护栏未启用）；
   2. 解析出至少一对 bundle_pairs，形状=引擎 3.5 节契约（顶格 bundle_pairs: +
      缩进「- src: X」/「out: Y」成对、值裸 token、其余缩进行=坏行）；坏行=红；
-  3. 恰含本票声明对 (server/dsh/workbench/src/client/, server/dsh/workbench/lib/)；
+  3. 恰含本票声明对 (server/plugins/workbench/src/client/, server/plugins/workbench/lib/)；
   4. 每对 src/out 前缀均为仓内真实目录（isdir）——防路径写错的静默失效。
 
 Hermetic：纯文件读，零端口零网络，不碰 3099。cwd=仓库根；秒级。
@@ -22,8 +22,8 @@ import os
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-CFG = os.path.join("server", "dsh", "merge-checks.yaml")
-DECLARED_PAIR = ("server/dsh/workbench/src/client/", "server/dsh/workbench/lib/")
+CFG = os.path.join("server", "merge-checks.yaml")
+DECLARED_PAIR = ("server/plugins/workbench/src/client/", "server/plugins/workbench/lib/")
 
 passed, failed = 0, 0
 

@@ -28,10 +28,10 @@ import sys
 
 from lib_ki044 import REPO, summary
 
-sys.path.insert(0, str(REPO / "server" / "dsh" / "temporal-poc"))
+sys.path.insert(0, str(REPO / "server" / "engine"))
 import shared  # noqa: E402
 
-POC = REPO / "server" / "dsh" / "temporal-poc"
+POC = REPO / "server" / "engine"
 ag = (POC / "agent_activities.py").read_text("utf-8")
 sc = (POC / "selfcheck_ui_acceptance.py").read_text("utf-8")
 

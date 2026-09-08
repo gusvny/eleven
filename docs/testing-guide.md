@@ -2,7 +2,7 @@
 
 > **铁律**：开发、测试等工单**不允许重启/停止/修改 `localhost:3099` 上正在运行的 dsh 进程**
 > （那是总管/用户正在使用的生产控制台），也不碰生产 Temporal 的 `7233`（gRPC）/`8233`（Web UI）。
-> 测试一律走本仓库的 **Docker 隔离测试环境**（`server/dsh/docker-compose.test.yml`）。
+> 测试一律走本仓库的 **Docker 隔离测试环境**（`server/docker-compose.test.yml`）。
 
 ## 为什么需要隔离
 
@@ -18,7 +18,7 @@
 | 端口 | 用途 | 谁在用 |
 |------|------|--------|
 | 3099 | 生产 dsh 控制台 | 总管/用户，**禁止碰** |
-| 7233 | 生产 Temporal gRPC | 生产 worker（temporal-poc/run_server.sh），**禁止碰** |
+| 7233 | 生产 Temporal gRPC | 生产 worker（engine/run_server.sh），**禁止碰** |
 | 8233 | 生产 Temporal Web UI | 生产 worker 同源，**禁止碰** |
 | 3199 | **测试 dsh 控制台** | Docker 测试环境 |
 | 17233 | **测试 Temporal gRPC** | Docker 测试环境（容器内 7233） |
@@ -30,7 +30,7 @@
 
 ```bash
 # 在仓库根执行
-docker compose -f server/dsh/docker-compose.test.yml up -d
+docker compose -f server/docker-compose.test.yml up -d
 ```
 
 第一次 `up` 需要联网（dsh 服务 `npm i` 全局 dsh + profile bundles、`apt` 补 python3），
@@ -43,9 +43,9 @@ docker compose -f server/dsh/docker-compose.test.yml up -d
 两个 search attribute（temporalite 无启动参数；注册落数据卷，之后重启自带）：
 
 ```bash
-server/dsh/temporal-poc/bin/temporal operator search-attribute create \
+server/engine/bin/temporal operator search-attribute create \
   --name ProjectKey --type Keyword --namespace suyou-test --address 127.0.0.1:17233
-server/dsh/temporal-poc/bin/temporal operator search-attribute create \
+server/engine/bin/temporal operator search-attribute create \
   --name EpicCode --type Keyword --namespace suyou-test --address 127.0.0.1:17233
 ```
 
@@ -55,7 +55,7 @@ server/dsh/temporal-poc/bin/temporal operator search-attribute create \
 审计/验收证据会蒸发）：新数据卷首次 up 后设置一次（落数据卷，之后重启自带）：
 
 ```bash
-server/dsh/temporal-poc/bin/temporal operator namespace update \
+server/engine/bin/temporal operator namespace update \
   --retention 876000h --namespace suyou-test --address 127.0.0.1:17233
 ```
 
@@ -64,12 +64,12 @@ server/dsh/temporal-poc/bin/temporal operator namespace update \
 ## 验证测试环境
 
 ```bash
-docker compose -f server/dsh/docker-compose.test.yml ps
+docker compose -f server/docker-compose.test.yml ps
 
 # 测试 Temporal：Web UI（浏览器打开，namespace=suyou-test）
 open http://localhost:18233
 # 或命令行核对（用仓库内 temporal CLI）
-server/dsh/temporal-poc/bin/temporal --address 127.0.0.1:17233 operator namespace describe -n suyou-test
+server/engine/bin/temporal --address 127.0.0.1:17233 operator namespace describe -n suyou-test
 
 # 测试 dsh 控制台
 open http://localhost:3199
@@ -80,14 +80,14 @@ curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3199/
 
 ## 跑 worker / 自测（本机跑，指向测试 Temporal）
 
-Temporal SDK 工具（`temporal-poc/.venv`）不装进容器；在本机用仓库内 venv 跑，
-用环境变量指向测试实例——`server/dsh/temporal-poc/shared.py` 支持
+Temporal SDK 工具（`engine/.venv`）不装进容器；在本机用仓库内 venv 跑，
+用环境变量指向测试实例——`server/engine/shared.py` 支持
 `SUYOU_TARGET_HOST` / `SUYOU_NAMESPACE` 覆盖（缺省仍是生产 7233/default）。
 
 ```bash
 # 测试 worker：连测试 Temporal（17233 / suyou-test）
 SUYOU_TARGET_HOST=127.0.0.1:17233 SUYOU_NAMESPACE=suyou-test \
-  server/dsh/temporal-poc/.venv/bin/python server/dsh/temporal-poc/worker.py --daemon
+  server/engine/.venv/bin/python server/engine/worker.py --daemon
 
 ```
 
@@ -98,7 +98,7 @@ SUYOU_TARGET_HOST=127.0.0.1:17233 SUYOU_NAMESPACE=suyou-test \
 
 工单 workflow 不走共享队列：每张工单一个 task queue（`suyou-ticket-<工单id>`）+
 一个专属 worker 进程——`ticket create` 自动拉起（pidfile/log 在
-`temporal-poc/data/worker-<工单id>.{pid,log}`），workflow 收口后 worker 查到状态
+`engine/data/worker-<工单id>.{pid,log}`），workflow 收口后 worker 查到状态
 非 RUNNING 即优雅自退（30s 轮询）；巡检（dispatcher-scan）顺带对账：在跑工单缺
 worker 补拉、已收口工单回收漏退 worker。共享队列 `suyou-poc` 只服务
 dispatcher-scan / content-pipeline（仍需一个常驻共享 worker）。
@@ -110,7 +110,7 @@ Temporal 上，与生产零交集。
 没有 Docker 的机器可用第二个本地 dev server 代替（同等隔离：独立端口+独立 db 文件）：
 
 ```bash
-server/dsh/temporal-poc/bin/temporal server start-dev --ip 127.0.0.1 --port 17233 \
+server/engine/bin/temporal server start-dev --ip 127.0.0.1 --port 17233 \
   --ui-port 18233 --db-filename /tmp/suyou-test.db \
   --search-attribute ProjectKey=Keyword --search-attribute EpicCode=Keyword
 # namespace 用 default 即可（SUYOU_NAMESPACE 缺省），测完 pkill 掉、删 db 文件
@@ -126,15 +126,15 @@ server/dsh/temporal-poc/bin/temporal server start-dev --ip 127.0.0.1 --port 1723
 ## 停止 / 清场
 
 ```bash
-docker compose -f server/dsh/docker-compose.test.yml down      # 停，保留数据卷
-docker compose -f server/dsh/docker-compose.test.yml down -v   # 连测试数据卷一起清（测试票面/工作流全没）
+docker compose -f server/docker-compose.test.yml down      # 停，保留数据卷
+docker compose -f server/docker-compose.test.yml down -v   # 连测试数据卷一起清（测试票面/工作流全没）
 ```
 
 ## 故障排查
 
 - **temporal 起不来**：`temporalio/temporalite` 已停维护；若 flag 不兼容，可删掉该服务的
   `entrypoint`/`command` 两行退回镜像默认（namespace 变 default、数据不落盘），或换成任意
-  dev 模式 Temporal（官方 temporal CLI `temporal server start-dev`，同 temporal-poc 路径）。
+  dev 模式 Temporal（官方 temporal CLI `temporal server start-dev`，同 engine 路径）。
 - **3199 打不开**：容器首次启动要装依赖，`docker compose logs dsh` 看进度；装完才 `exec dsh`。
 - **worker 连不上测试 Temporal**：确认 `docker compose ps` 里 `suyou-test-temporal` 在跑；
   宿主侧地址是 `127.0.0.1:17233`（不是 7233）。
@@ -172,7 +172,7 @@ docker compose -f server/dsh/docker-compose.test.yml down -v   # 连测试数据
 （KI-046 实锤）：①平台 RPC 的**业务失败不 throw 只返回结果对象**（如
 `RpcResult{ok:false}`）——检查返回值，不能只靠 catch；②类型面不收窄，tsc 就不是闸。
 
-**范式**：`server/dsh/workbench/tests/ki046-charter-prompt-shape.mjs`——行为级 mock
+**范式**：`server/plugins/workbench/tests/ki046-charter-prompt-shape.mjs`——行为级 mock
 （真加载模块、桩捕获 prompt 实参、对照冻结镜像契约、畸形输入全路径）+ 三方一致锚
 （src 与构建产物调用形状一致，防「改 src 没重建 bundle」）。
 

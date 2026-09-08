@@ -30,7 +30,7 @@ updated: 2026-09-04
 
 ### 现状哪里不好
 
-1. 引擎住在项目仓里（`server/dsh/`）：引擎读项目，项目背着引擎。IDE 自己的升级
+1. 引擎住在项目仓里（`server/`）：引擎读项目，项目背着引擎。IDE 自己的升级
    与项目的开发、使用耦合死——升级 IDE 要动项目仓，项目升级要跟着引擎走。
 2. 契约未成文：`docs/` 下没有契约文件，没有 `verify.yaml`、没有 `.sandbar/`
    工作区声明。后续「就地反转」「物理搬迁」工单没有前置依据——不知道引擎
@@ -44,7 +44,7 @@ updated: 2026-09-04
   反转**——现状引擎读项目，目标形态是项目向 IDE 注册，项目仓里一行引擎代码都没有。
   路线为「契约化 → 就地反转 → 物理搬迁」，顺序不可倒。
 - **机制与策略分离**：引擎只提供机制（跑项目声明的集成测试、判红绿），检查内容
-  由项目自带（策略）。`server/dsh/merge-checks.yaml` 是这条路线已实证的先行样板：
+  由项目自带（策略）。`server/merge-checks.yaml` 是这条路线已实证的先行样板：
   策略外置到项目仓，引擎读文件、无文件则不生效。
 - **schema 版本**：契约面每样声明一个版本号。版本化是升级解耦的前提——IDE 升级
   时必须知道项目声明的是哪一版语法，项目升级时旧 IDE 必须能识别或明确拒绝。
@@ -307,7 +307,7 @@ profile 镜像、**一切 `.credentials.yaml`（凭据绝不入档）**。文件
 物理搬迁的前置——独立仓后引擎与项目不再同仓）。项目在注册条目
 `<SANDBAR_PROJECTS_DIR|~/.sandbar/projects>/<key>/project.yaml` 顶层声明可选
 `paths` 节，引擎经注册表取值。现行两处消费点：①角色 preset patch 与岗位说明书
-目录（spawn 时 `<泳道>/server/dsh/roles/<role>.yml`；prompt 装配的 role_doc 同源）；
+目录（spawn 时 `<泳道>/server/roles/<role>.yml`；prompt 装配的 role_doc 同源）；
 ②模型路由表（运行时查表文件）。声明形状（与 ①a 严格最小 YAML 子集同传统）：
 
 ```
@@ -318,8 +318,8 @@ project:
     dirs:
       - /abs/path
 paths:                     # 可选整节；缺 = 全部回落现行约定
-  roles_dir: server/dsh/roles                   # 角色目录，相对项目根
-  model_routes: server/dsh/model-routes.yaml    # 模型路由表文件，相对项目根
+  roles_dir: server/roles                   # 角色目录，相对项目根
+  model_routes: server/model-routes.yaml    # 模型路由表文件，相对项目根
 ```
 
 **schema 保 v1**：纯增量可选字段，旧条目（无 paths 节）解析行为不变。援引 ②a
@@ -343,7 +343,7 @@ cwd（泳道 worktree）** 解析——保「worktree 内副本 = 工单快照�
 
 | 态 | 判定 | 引擎行为 |
 | --- | --- | --- |
-| 回落 | 无 paths 节 / 节内缺某键 / 条目文件不存在 / project key 为空、不过白名单或项目未注册 | 该项回落现行约定（`server/dsh/roles`、`server/dsh/model-routes.yaml`），行为与未出仓前逐字节一致。suyou 不声明 paths，零改动零回归 |
+| 回落 | 无 paths 节 / 节内缺某键 / 条目文件不存在 / project key 为空、不过白名单或项目未注册 | 该项回落现行约定（`server/roles`、`server/model-routes.yaml`），行为与未出仓前逐字节一致。suyou 不声明 paths，零改动零回归 |
 | 畸形（声明值） | 声明值非相对 / `..` 越界 / 空或纯空白 / 非标量 / paths 节非映射 / 未知键 | fail-closed：显式报错，含条目文件路径与键名，不静默过滤（同 ②c 纲） |
 | 畸形（条目文件） | project.yaml 存在但顶层形状不可解析（顶层未知键、schema 缺失或非 v1、非 UTF-8） | fail-closed：报错点名 `<key>/project.yaml` 与原因，**不回落不静默**——spawn 时段该文件唯一读者就是本读取器，按「缺失」跳过即三态总纲禁止的猜着跑 |
 | 声明锚点缺失 / 错位 | `model_routes` 解析后不存在或非文件；`roles_dir` 解析后不存在或非目录 | fail-closed 红：报错点名解析后绝对路径（缺失与类型错位都点名同一路径，语义分开写明） |
@@ -357,7 +357,7 @@ cwd（泳道 worktree）** 解析——保「worktree 内副本 = 工单快照�
 内容；若需表内容 fail-closed，另立工单升语义。
 
 **过渡状态**：现行注册表装载器（`server/tools/ticket.py` 条目解析顶层白名单
-只认 `schema:` 与 `project:`；`server/dsh/suyou-projects.ts` 同构）对顶层
+只认 `schema:` 与 `project:`；`server/suyou-projects.ts` 同构）对顶层
 `paths:` 节按「顶层只认两键」拒收——放开工单落地前，任何项目声明 paths 即被
 ①a 单条目隔离（fail-closed 可见，不静默）。**本节语义以装载器放开工单落地为
 生效前提**；suyou 不声明 paths，不受影响。引擎侧消费点（spawn 取角色目录与
@@ -372,7 +372,7 @@ cwd（泳道 worktree）** 解析——保「worktree 内副本 = 工单快照�
   不夹带任何项目特定判断。sandbar 测安装/接线/升级，suyou 测自己的四件套，
   互不夹带，各项目自带内容。
 - **merge-checks.yaml——扩展检查**：合并检查门的项目特定扩展（现行
-  `server/dsh/merge-checks.yaml` 即此样板的实例：src 前缀有改动而 out 前缀
+  `server/merge-checks.yaml` 即此样板的实例：src 前缀有改动而 out 前缀
   无改动即红）。格式约束：引擎内置解析的最小 YAML 子集，值一律裸 token。
 
 **为什么稳定**：这是「机制与策略分离」的落点，也是「检查是项目相关的」问题的
@@ -662,6 +662,7 @@ sandbar 发版 → 项目跟进；禁止跳过探针直接扩区间（关键决�
 | v1.8 | 2026-09-04 | 真源转正（宿主裁定 260904）：本文件由「suyou 仓 v1.7 只读同源副本」升为契约真源，头部声明改写；suyou 侧同名文件降为历史冻结件（不再演进、不作修改目标）。正文语义零变更；①a 增补节（摘除/再接入、单根目录工具口径）随 project-lifecycle 立项票②落地，届时另行记行 | 文档治理面；消费方指引（upgrade/doctor 以本份为准） |
 | v1.9 | 2026-09-04 | t260904-14 摘除面落地：新增 ①a-1——摘除/再接入/数据处置三态成文（条目退役=project.yaml 原子改名 retired-<UTC ISO8601> 零 schema 改动可逆，再接入=同 key re-add 归档链连续；模式闸[legacy 拒收]/在飞闸[不可达 fail-closed 无绕过旗]/最后条目确认闸/closed 全归档闸[purge 前置：未归档差集=Temporal COMPLETED 票号集合−fs archive.json 三态判定集合，畸形 manifest=fail-closed 点名文件]；purge 双旗显式分离、dry-run 全闸预演、摘除报告只报不删项目根 .lane/ 泳道）；单根目录口径工具面落字（工具恰写一条 dirs，多条=装载容忍/工具不产的遗留形状） | ①/①a；安装器 project remove 子命令、摘除报告消费方（ops 手册/将来 UI 面） |
 | v2.2 | 2026-09-04 | t260904-18 三门落地：②a 增列合法顶层键 `ui_evidence`（可选映射 `{dirs, supply?}`；缺失=截图证据项按项目声明缺席 green+可见 note，畸形=fail-closed 红点名字段；supply 保留字段本版引擎不消费）——合并闸 UI 截图证据目录改项目声明，退役引擎侧 `UI_WRITE_PREFIXES` 五路径硬编码活路径身份（仅剩旧票重放/冻结分支兼容回落）；同族：建票口背景文件闸（票面 refs 须已提交且干净 HEAD 态，拒收点名）与 create_plan 回执 files_changed 空数组/畸形可见红（KI-049），属引擎机制面不入本契约字段表 | ②a；verify_lane `_validate_cfg`、merge_check 3.6、ui_changed_paths、仓根 verify.yaml |
+| v2.3 | 2026-09-07 | t260907-10 目录重构（宿主令 v6 定稿）路径锚语义变更：①d `paths` 节回落约定旧锚 `server/dsh/roles`、`server/dsh/model-routes.yaml` **退役**，新回落锚=`server/roles`、`server/model-routes.yaml`（引擎仓 server/dsh 包装层退场、五层摊平上移；引擎本体=temporal-poc→`server/engine`）；未显式声明 `paths` 的项目回落语义不变（仅回落目标换新锚）；已显式声明旧锚的项目按 ①d 锚点缺失 fail-closed 红点名；venv 定位回落链=新路径 `server/engine/.venv` 优先、旧路径 `server/dsh/temporal-poc/.venv` 一轮兼容（摘除票落地后单路径）；本文旧锚字样仅存于本变更记录行（历史事实，非活指针） | ①d/回落约定；agent_activities spawn 两消费点、shared.py DEFAULT_ROLES_DIR/MODEL_ROUTES_REL、installer、仓根 verify.yaml（扩权面） |
 
 > 来源立项：sandbar
 

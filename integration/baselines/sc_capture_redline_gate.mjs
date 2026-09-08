@@ -30,7 +30,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const LANE_ROOT = process.cwd();
-const CAPTURE = path.join(LANE_ROOT, "server", "dsh", "ui-check", "capture.mjs");
+const CAPTURE = path.join(LANE_ROOT, "server", "ui-check", "capture.mjs");
 const CASE_TIMEOUT_MS = 120000;
 
 const results = [];
@@ -53,10 +53,10 @@ function resolveMainUiCheck() {
   if (env && existsSync(path.join(env, "node_modules", "playwright-core", "index.mjs"))) return env;
   try {
     const common = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: LANE_ROOT, encoding: "utf8" }).trim();
-    const cand = path.resolve(LANE_ROOT, common, "..", "server", "dsh", "ui-check");
+    const cand = path.resolve(LANE_ROOT, common, "..", "server", "ui-check");
     if (existsSync(path.join(cand, "node_modules", "playwright-core", "index.mjs"))) return cand;
   } catch { /* not a git checkout — fall through */ }
-  const local = path.join(LANE_ROOT, "server", "dsh", "ui-check");
+  const local = path.join(LANE_ROOT, "server", "ui-check");
   if (existsSync(path.join(local, "node_modules", "playwright-core", "index.mjs"))) return local;
   return null;
 }

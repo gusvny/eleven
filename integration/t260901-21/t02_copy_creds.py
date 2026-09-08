@@ -4,7 +4,7 @@
 合并刷新（KI-016，t260902-09 起取代旧「整段不覆盖」契约；同名叶子 dst 值胜出
 的守卫意图保留）/ 不可读文件 fail-closed 报错含源路径 / 拷贝保留源 mode（0600）。
 全 tmp/env 桩，不读真 ~/.sandbar。三态契约定稿 §7.3：0=PASS、1=FAIL（产品红）、
-2=ENV_FAIL（环境红）。合并用例依赖 PyYAML（temporal-poc venv；manifest 用 venv
+2=ENV_FAIL（环境红）。合并用例依赖 PyYAML（engine venv；manifest 用 venv
 回落链跑），缺失时该用例记 ENV_FAIL（缺依赖=环境红）。
 """
 import logging
@@ -41,7 +41,7 @@ _tmod.activity = _ActivityStub()
 sys.modules.setdefault("temporalio", _tmod)
 sys.modules.setdefault("temporalio.activity", _amod)
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "server" / "dsh" / "temporal-poc"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "server" / "engine"))
 import agent_activities as aa  # noqa: E402
 
 FAILS = []

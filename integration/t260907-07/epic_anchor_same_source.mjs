@@ -10,8 +10,8 @@
  * TS resolveEpicsDir(primaryDir(findProject(key))) 逐项目相等，且各指各自主目录。
  * Run: node integration/t260907-07/epic_anchor_same_source.mjs（cwd=仓库根）
  */
-import { resolveEpicsDir } from '../../server/dsh/workbench/src/host/epics.ts'
-import { findProject, primaryDir } from '../../server/dsh/suyou-projects.ts'
+import { resolveEpicsDir } from '../../server/plugins/workbench/src/host/epics.ts'
+import { findProject, primaryDir } from '../../server/suyou-projects.ts'
 import { makeEpicFixture, runPython } from './epic_fixture.mjs'
 
 const { ok, done } = (await import('../t260903-09/lib_integration.mjs')).makeChecker()
@@ -23,7 +23,7 @@ try {
   delete process.env.SUYOU_EPICS_DIR
   const pyCode = `
 import sys, json
-sys.path.insert(0, ${JSON.stringify(new URL('../../server/dsh/temporal-poc', import.meta.url).pathname)})
+sys.path.insert(0, ${JSON.stringify(new URL('../../server/engine', import.meta.url).pathname)})
 import shared
 print(json.dumps({k: str(shared.resolve_epics_dir(k)) for k in ('engine', 'external')}))
 `

@@ -22,7 +22,7 @@ const REPO_ROOT = path.resolve(HERE, '..', '..');
 const c = makeChecks('t260906-01 空项目会话入口可发现');
 delete process.env.SANDBAR_PROJECTS_YAML;
 
-const WB = path.join(REPO_ROOT, 'server', 'dsh', 'workbench');
+const WB = path.join(REPO_ROOT, 'server', 'plugins', 'workbench');
 const srcRow = path.join(WB, 'src', 'client', 'project-session-row.tsx');
 const srcModal = path.join(WB, 'src', 'client', 'project-modals.tsx');
 const libClient = path.join(WB, 'lib', 'client.js');
