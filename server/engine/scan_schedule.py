@@ -32,7 +32,7 @@ from temporalio.client import (
 )
 from temporalio.service import RPCError
 
-from shared import LEGACY_SCHEDULE_ID, SCHEDULE_ID, TARGET_HOST, NAMESPACE
+from shared import SCHEDULE_ID, TARGET_HOST, NAMESPACE
 from temporalio.client import Client
 
 DEFAULT_MINUTES = 45  # M6 拍板频率：45min（工单建议区间 30–60min 内）
@@ -48,18 +48,6 @@ def _err(msg: str) -> Dict[str, Any]:
 
 async def _connect() -> Client:
     return await Client.connect(TARGET_HOST, namespace=NAMESPACE)
-
-
-async def retire_legacy_schedule(client: Client) -> bool:
-    """退役账#3：幂等删除旧 schedule（LEGACY suyou-dispatcher-scan）。句柄不存在（RPCError）
-    视为已退役，不炸；返回是否删了实体。保留一个发布周期防旧代码引擎并存重建，
-    超期整函数删除（注释即退役期限锚）。"""
-    try:
-        await client.get_schedule_handle(LEGACY_SCHEDULE_ID).delete()
-        print("[t260907-04] retired legacy schedule %s" % LEGACY_SCHEDULE_ID)
-        return True
-    except RPCError:
-        return False
 
 
 async def _describe(handle) -> Dict[str, Any]:
@@ -95,7 +83,6 @@ async def cmd_resume(minutes: int, note: str) -> Dict[str, Any]:
     if minutes < 1 or minutes > 24 * 60:
         return _err("minutes 超出合理区间（1–1440）：%r" % minutes)
     client = await _connect()
-    await retire_legacy_schedule(client)   # 退役账#3（幂等）
     handle = client.get_schedule_handle(SCHEDULE_ID)
 
     def _upd(inp) -> ScheduleUpdate:

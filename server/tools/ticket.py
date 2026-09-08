@@ -63,7 +63,7 @@ TEMP_PY = _engine_py()
 
 # 项目注册表（sandbar M1-1 出仓）：真源=机器级 per-key 目录
 # ~/.sandbar/projects/<key>/project.yaml（装载=扫 */project.yaml，与
-# server/suyou-projects.ts 同一注册表、两边各自最小解析、语义同构）。
+# server/project-registry.ts 同一注册表、两边各自最小解析、语义同构）。
 # t260904-02（KI-032 硬闸）：装载逻辑整块上收 engine/shared.py（单一真源，
 # client.py ticket-start 同源锚 project_root），本文件只留薄壳委托（见下方
 # 「项目注册表（薄壳委托）」节）；下面两个常量保留为兼容别名（值与真源一致）。
@@ -142,7 +142,7 @@ def _assert_nonempty(projects, quarantined):
 
 
 def _projects():
-    """读项目注册表（per-key 目录模式，语义与 server/suyou-projects.ts 同构）。"""
+    """读项目注册表（per-key 目录模式，语义与 server/project-registry.ts 同构）。"""
     projects, quarantined = _load_registry()
     _assert_nonempty(projects, quarantined)
     return projects

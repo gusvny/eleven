@@ -45,8 +45,6 @@ from shared import (
     NAMESPACE,
     PROJECT_SA_NAME,
     TARGET_HOST,
-    LEGACY_TASK_QUEUE,
-    LEGACY_TICKET_QUEUE_PREFIX,
     TASK_QUEUE,
     TICKET_QUEUE_PREFIX,
     HostRulingRequest,
@@ -418,7 +416,7 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
     # 立项关联（epic-linkage）：--epic 强校验单点——代号形状白名单 + 立项档案存在。
     # 项目感知（t260907-07）：校验目录走 resolve_epics_dir(project)——锚项目注册
     # 条目主目录 notes/epics（与工单台 UI resolveEpicsDir 同源同规）；env
-    # SUYOU_EPICS_DIR 现读优先=自测语义保留；按 key 单点解析的取舍（多一次注册表
+    # SANDBAR_EPICS_DIR 现读优先=自测语义保留；按 key 单点解析的取舍（多一次注册表
     # 装载，开票一次性操作无害）见工单方案 C6。空 = 不关联立项（允许）。
     try:
         epic = validate_epic_code(str(args.get("epic") or ""), resolve_epics_dir(project))
@@ -728,8 +726,8 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
     for tid in order:
         wf = runs[tid]
         q = str(getattr(wf, "task_queue", "") or "")
-        if q not in (TASK_QUEUE, LEGACY_TASK_QUEUE) and not (
-                q.startswith(TICKET_QUEUE_PREFIX) or q.startswith(LEGACY_TICKET_QUEUE_PREFIX)):
+        if q not in (TASK_QUEUE,) and not (
+                q.startswith(TICKET_QUEUE_PREFIX)):
             continue
         exec_status = wf.status.name if wf.status is not None else ""
         if exec_status == "TERMINATED":
@@ -851,8 +849,8 @@ async def _closed_ticket_entries(args: Dict[str, Any]) -> "List[Dict[str, Any]]"
                               for c in TEMPLATE_CLASSES.values())
     async for wf in client.list_workflows('(%s) AND ExecutionStatus="Completed"' % type_filter):
         q = str(getattr(wf, "task_queue", "") or "")
-        if q not in (TASK_QUEUE, LEGACY_TASK_QUEUE) and not (
-                q.startswith(TICKET_QUEUE_PREFIX) or q.startswith(LEGACY_TICKET_QUEUE_PREFIX)):
+        if q not in (TASK_QUEUE,) and not (
+                q.startswith(TICKET_QUEUE_PREFIX)):
             continue
         try:
             sa_project = str(wf.typed_search_attributes.get(
@@ -1016,8 +1014,8 @@ async def cmd_running_tickets(args: Dict[str, Any]) -> Dict[str, Any]:
     running: List[Dict[str, str]] = []
     async for wf in client.list_workflows('(%s) AND ExecutionStatus="Running"' % type_filter):
         q = str(getattr(wf, "task_queue", "") or "")
-        if q not in (TASK_QUEUE, LEGACY_TASK_QUEUE) and not (
-                q.startswith(TICKET_QUEUE_PREFIX) or q.startswith(LEGACY_TICKET_QUEUE_PREFIX)):
+        if q not in (TASK_QUEUE,) and not (
+                q.startswith(TICKET_QUEUE_PREFIX)):
             continue  # 自测专属 queue 的滞留实例不收
         running.append({"id": wf.id, "queue": q})
     return _ok({"count": len(running), "running": running})

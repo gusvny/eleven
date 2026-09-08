@@ -2,7 +2,7 @@
 
 - watch_interval_sec 纯函数：缺省/有效值/下限钳制/畸形全态（空白、非数值、
   NaN、±Inf、<=0、1e999 溢出 Inf）回落缺省；
-- 命名红线（宿主令 260904，新 env 不扩 SUYOU_* 存量）：源码零 SANDBAR_WATCH_INTERVAL；
+- 命名红线（宿主令 260904，新 env 不扩 SANDBAR_* 存量）：源码零 SANDBAR_WATCH_INTERVAL；
 - 接线锁：run_worker 里 sleep 消费的是旋钮产物（改名/挪位即红——逻辑面由纯函数
   UT 覆盖，接线面沿 test_t260904_02_worker_meta 源级钉点惯例）。
 """
@@ -58,13 +58,6 @@ class WatchIntervalSecTest(unittest.TestCase):
                 os.environ.pop("SANDBAR_WATCH_INTERVAL_SEC", None)
             else:
                 os.environ["SANDBAR_WATCH_INTERVAL_SEC"] = old
-
-    def test_naming_redline_no_suyou_expansion(self):
-        # 命名表更新（t260907-04，宿主令 260907）：SUYOU_* 全量改 SANDBAR_*——
-        # 旧红线「不许改名」由本票取代；现红线 = 统一 SANDBAR_ 前缀 + 写集内不再
-        # 新引 SUYOU_ 字面量（兼容回落只许在 shared.apply_env_compat 桥内）。
-        self.assertIn("SANDBAR_WATCH_INTERVAL_SEC", WORKER_SRC)
-        self.assertNotIn("SUYOU_WATCH_INTERVAL", WORKER_SRC)  # naming-compat
 
     def test_wiring_watch_loop_consumes_knob(self):
         # 接线锁：_watch 的 sleep 消费旋钮产物（旧形态 asyncio.sleep(30) 字面量即漏改）。

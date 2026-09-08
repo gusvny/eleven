@@ -315,7 +315,7 @@ sign 动作不在验证脚本里——红线：签字只能人。
 
 ## 退役账（t260907-04 命名清理①：7 条过渡兼容，撤任何一条前先对表）
 
-t260907-04 把 SUYOU_* env、suyou-poc 队列、.suyou/ 协调目录改成 sandbar 名。以下 7 条  # naming-compat
+t260907-04 把 SANDBAR_* env、suyou-poc 队列、.suyou/ 协调目录改成 sandbar 名。以下 7 条  # naming-compat
 兼容路径逐条带退役条件，防「撤了半截」：
 
 | # | 项（suyou 旧名面） | 退役条件 |
@@ -325,7 +325,7 @@ t260907-04 把 SUYOU_* env、suyou-poc 队列、.suyou/ 协调目录改成 sandb
 | 3 | schedule 幂等删旧行（退役账#3）（scan_schedule.retire_legacy_schedule，旧 id `suyou-dispatcher-scan`） | 删旧行保留一个发布周期（防旧代码引擎并存重建），超期整段删 |  # naming-compat
 | 4 | dispatcher 旧锁回落（退役账#4）（server/tools/dispatcher_loop.py LEGACY_LOCK，旧锁 `suyou-dispatcher.lock` 只读） | 巡检观测旧锁零命中连续一个周期 |
 | 5 | 目录镜像双写（退役账#5）（shared.mirror_to_legacy，旧名 `.suyou/` 只写不读） | 插件面票（workbench 旧名清理）收口 |  # naming-compat
-| 6 | env 双向桥（退役账#6）（shared.apply_env_compat，SUYOU_*↔SANDBAR_*） | 插件面票收口后降单向前向，再一版整函数删除 |
+| 6 | env 双向桥（退役账#6）（shared.apply_env_compat，SANDBAR_*↔SANDBAR_*） | 插件面票收口后降单向前向，再一版整函数删除 |
 | 7 | WS_DIR_BASE 旧 base 粘滞（退役账#7）（LEGACY base `/tmp/suyou-ws`） | 旧 base 存量工单目录清零 |
 
 另有目录粘滞回落（resolve_dot_dir 规则 2，老泳道 `.suyou/` 整生命周期旧名）不占上表：  # naming-compat

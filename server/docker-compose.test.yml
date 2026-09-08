@@ -12,7 +12,7 @@
 #   测试 dsh 控制台：3199（本文件 dsh 服务缺省映射）
 #
 # 缺省（不带任何 SANDBAR_TEST_* env 直接 up）行为与参数化前逐字节一致：同名容器
-# （suyou-test-*）、同端口（3199/17233/18233）、同卷、namespace suyou-test——
+# （sandbar-test-*）、同端口（3199/17233/18233）、同卷、namespace sandbar-test——
 # docs/testing-guide.md 的拓扑/容器名锚零漂移。
 #
 # 并行实例（t260904-19）：每个舞台独立 compose 工程名 + 独立端口档 + 独立容器名/卷
@@ -41,25 +41,25 @@ services:
   # 立项关联的 EpicCode SA 在新数据卷首次 up 后于本机注册一次（落数据卷，之后重启自带；
   # stage_docker up 会对新卷自动补注册）：
   #   server/engine/bin/temporal operator search-attribute create \
-  #     --name ProjectKey --type Keyword --namespace suyou-test --address 127.0.0.1:17233
+  #     --name ProjectKey --type Keyword --namespace sandbar-test --address 127.0.0.1:17233
   #   server/engine/bin/temporal operator search-attribute create \
-  #     --name EpicCode --type Keyword --namespace suyou-test --address 127.0.0.1:17233
+  #     --name EpicCode --type Keyword --namespace sandbar-test --address 127.0.0.1:17233
   # 保留期同理（temporalite 默认 24h，关闭的 workflow 会被物理删除）首次 up 后设置一次：
   #   server/engine/bin/temporal operator namespace update \
-  #     --retention 876000h --namespace suyou-test --address 127.0.0.1:17233
+  #     --retention 876000h --namespace sandbar-test --address 127.0.0.1:17233
   temporal:
     # 自造镜像（temporalite 上游已归档）：官方 temporal CLI 内嵌 dev server，
     # 与本仓 bin/temporal 同版；重建=sh server/build-test-temporal.sh
     image: test-temporal:cli-1.8.3
-    container_name: ${SANDBAR_TEST_TEMPORAL_NAME:-suyou-test-temporal}
+    container_name: ${SANDBAR_TEST_TEMPORAL_NAME:-sandbar-test-temporal}
     # 镜像自带 entrypoint 是 `temporalite start --ephemeral ...`（数据不落盘），
-    # 这里显式覆盖：namespace=suyou-test + SQLite 落盘到 /data（数据卷持久化）。
+    # 这里显式覆盖：namespace=sandbar-test + SQLite 落盘到 /data（数据卷持久化）。
     entrypoint: ["/temporal", "server", "start-dev"]
     # 旗标与 temporalite 同名同义（--namespace/--ip/--port/--ui-port/--db-filename），
     # 子命令是 start-dev（start 不存在——cobra 会打组帮助假旗标表，别被骗）。
     command:
       - --namespace
-      - ${SANDBAR_TEST_NAMESPACE:-suyou-test}
+      - ${SANDBAR_TEST_NAMESPACE:-sandbar-test}
       - --ip
       - 0.0.0.0
       - --port
@@ -86,14 +86,14 @@ services:
   dsh:
     # node 22：dsh@0.1.1-rc.2 传递依赖要求 node>=22.19（node 20 仅 EBADENGINE 警告但运行期真炸）
     image: node:22-bookworm
-    container_name: ${SANDBAR_TEST_DSH_NAME:-suyou-test-dsh}
+    container_name: ${SANDBAR_TEST_DSH_NAME:-sandbar-test-dsh}
     working_dir: /repo
     environment:
       DSH_HOME: /dsh-home
-      SUYOU_TARGET_HOST: ${SANDBAR_TEST_TARGET_HOST:-temporal:7233}    # 引擎地址（dsh-only 台=死端口 127.0.0.1:1）
-      SUYOU_NAMESPACE: ${SANDBAR_TEST_NAMESPACE:-suyou-test}
+      SANDBAR_TARGET_HOST: ${SANDBAR_TEST_TARGET_HOST:-temporal:7233}    # 引擎地址（dsh-only 台=死端口 127.0.0.1:1）
+      SANDBAR_NAMESPACE: ${SANDBAR_TEST_NAMESPACE:-sandbar-test}
       SANDBAR_PROJECTS_DIR: ${SANDBAR_TEST_PROJECTS_DIR:-/nonexistent} # 场景注入注册表根（容器内路径）
-      SANDBAR_TEST_PROFILE: ${SANDBAR_TEST_PROFILE:-suyou}
+      SANDBAR_TEST_PROFILE: ${SANDBAR_TEST_PROFILE:-sandbar}
       SANDBAR_TEST_PROFILE_SRC: ${SANDBAR_TEST_PROFILE_SRC:-/repo/server/profile}
     volumes:
       - ${SANDBAR_TEST_REPO_DIR:-../..}:/repo:ro     # 仓根（缺省=仓库根，向上两级）
@@ -108,7 +108,7 @@ services:
       # 凭据物化（gen4：容器台无凭据→dsh 壳层准入遮罩全屏拦截指针→弹层输入链路死；
       # 自搭台拷凭据所以无此现象——对照实锤）。stage_docker 负责预创建文件。
       - ${SANDBAR_TEST_CREDENTIALS:-/tmp/sandbar-stage-credentials}:/dsh-home/.credentials.yaml
-      # agent preset 物化（gen6 实锤：会话创建=agent-preset-not-found「suyou-integration」；
+      # agent preset 物化（gen6 实锤：会话创建=agent-preset-not-found「sandbar-integration」；
       # 自搭台从宿主 ~/.dsh/.agent-presets 物化，容器台同口径——stage_docker 拷宿主目录
       # 到 tmp 再 bind，缺失时=空目录（preset 缺失诚实呈现，不假绿）。
       - ${SANDBAR_TEST_AGENT_PRESETS:-/tmp/sandbar-stage-agent-presets}:/dsh-home/.agent-presets
@@ -141,7 +141,7 @@ services:
           cp -r "$$f" "$$DSH_HOME/profiles/$$SANDBAR_TEST_PROFILE/"
         done
         # 插件依赖面（gen4 定稿，realpath 语义）：node 解析对软链取 realpath——
-        # profiles/suyou/node_modules 若整体软链到依赖树，workbench 的 realpath=依赖树
+        # profiles/sandbar/node_modules 若整体软链到依赖树，workbench 的 realpath=依赖树
         # （主树旧 client 被服出=克缝始终破坏+client/host 运行时错配）。故 node_modules
         # 必须是【实目录+逐项软链】：workbench 项直链 /repo（被测树），其余项链依赖树
         # /repo-nm（stage_docker 缺省=主树回落）。dsh 自愈农场（../../<dir> 相对链）的

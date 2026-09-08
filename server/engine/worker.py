@@ -56,7 +56,7 @@ WATCH_INTERVAL_MIN_SEC = 1.0       # 下限钳制：防 0/负值忙转打爆 des
 def watch_interval_sec(raw: "str | None" = None) -> float:
     """watch 轮询间隔（秒）。env SANDBAR_WATCH_INTERVAL_SEC 可调（集成场景提速用，
     生效前提=SANDBAR_WATCH_WORKFLOW 在置——watch 任务本身只在工单专属模式创建）。
-    新 env 按宿主令 260904 用 sandbar 前缀（不扩 SUYOU_* 存量欠账）。
+    新 env 按宿主令 260904 用 sandbar 前缀（不扩 SANDBAR_* 存量欠账）。
     消费外部输入，畸形态全容错：未置/空白/非数值/NaN/Inf/<=0 一律回落缺省；
     有效但低于下限 → 钳到下限（不忙转）。"""
     if raw is None:

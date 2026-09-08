@@ -28,7 +28,7 @@ MODEL = 'deepseek-chat'
 MAX_ROUNDS = 8
 
 SYSTEM = (
-    '你是溯游（suyou）项目的 admin agent。溯游是「大语文 × 游戏」学习 app，'
+    '你是 sandbar 多项目工单引擎的 admin agent（引擎中立面，项目 persona 由各项目仓自带），'
     '内容管线产物在 pipeline/output/<期次>/，app 运行时数据在 app/public/data/。'
     '你通过工具完成 QC、参数调整、数据盘点。规则：'
     '①QC 红项必须逐条列出（ku id + 原因），不许只说"红了"；'

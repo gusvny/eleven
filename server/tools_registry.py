@@ -33,7 +33,7 @@ def load_tools():
         for f in sorted(TOOLS_DIR.glob('*.py')):
             if f.name.startswith(('_', '.')):
                 continue
-            spec = importlib.util.spec_from_file_location('suyou_admin_tool_' + f.stem, f)
+            spec = importlib.util.spec_from_file_location('sandbar_admin_tool_' + f.stem, f)
             mod = importlib.util.module_from_spec(spec)
             try:
                 spec.loader.exec_module(mod)

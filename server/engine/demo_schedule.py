@@ -26,7 +26,6 @@ from temporalio.client import (
 from temporalio.service import RPCError
 
 from demo_common import connect, jdump, say
-from scan_schedule import retire_legacy_schedule
 from shared import (
     DISPATCHER_WF_ID,
     SCHEDULE_ID,
@@ -49,10 +48,6 @@ async def demo_schedule(client) -> None:
         say(f"[清场] 删除旧 schedule {SCHEDULE_ID}")
     except RPCError:
         pass
-    # 退役账#3（t260907-04）：删旧命名 ID——创建走廊与 resume 同接，双调度窗口
-    # 不依赖人工运维触发；句柄不存在幂等不炸，本行保留一个发布周期后删除。
-    if await retire_legacy_schedule(client):
-        say(f"[清场] 退役 LEGACY schedule suyou-dispatcher-scan（t260907-04）")
 
     try:
         handle = await client.create_schedule(

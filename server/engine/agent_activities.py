@@ -185,7 +185,7 @@ def _quarantine_torn_sessions(local_dsh: Path) -> None:
         _quarantine_session_file(local_dsh, f, "torn-frame")
 
 
-# 项目 key 白名单（sandbar M1-2 凭据出仓）：与 server/suyou-projects.ts 的
+# 项目 key 白名单（sandbar M1-2 凭据出仓）：与 server/project-registry.ts 的
 # PROJECT_KEY_RE 同款字符集，兼防 ../ 路径穿越（per-key 凭据路径要拼目录名）。
 # M1-3（t260902-02）真源上移 shared.py（归档路径同用），此处保持旧名 re-export，
 # 既有引用（_resolve_credentials_source 等）不破。

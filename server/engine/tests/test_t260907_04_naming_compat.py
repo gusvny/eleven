@@ -1,65 +1,40 @@
 # -*- coding: utf-8 -*-
-"""t260907-04 命名清理引擎面 UT：env 双向桥 / 队列双 poll / 目录粘滞＋镜像 / ws 粘滞。
+"""t260907-04 命名清理引擎面 UT：env 终切 / 队列单名 / 目录粘滞＋镜像 / ws 粘滞。
 
-设计依据 = .suyou/stage_create_plan_gen2.json（review gen2 conditional 放行案）。
-env 桥语义：SANDBAR_* 新名优先；双向桥单侧互补；畸形输入不炸不静默丢。
+260908 宿主令终切：旧前缀 env 桥整函数删除（退役账#6 收口）、旧共享队列与旧
+ticket 前缀双 poll 撤除（退役账#1/#2 收口，空库重建后无旧队列在飞票）、旧
+schedule id 退役面与 /tmp 旧 ws base 粘滞撤除（退役账#3/#7 收口）。泳道
+.suyou 老名目录粘滞保留——处理在飞老泳道的历史数据，不属引擎命名。
 """
 
-import json
 import pathlib
 
 import pytest
 
-import demo_schedule
 import scan_schedule
 import shared
 import worker
 
 
-# ---- ① env 双向桥 -----------------------------------------------------------
+# ---- ① env 终切（桥已撤） ----------------------------------------------------
 
-def test_env_bridge_legacy_only():
-    env = {"SUYOU_AGENT_CMD": "stub"}
-    shared.apply_env_compat(env)
-    assert env["SANDBAR_AGENT_CMD"] == "stub"
-
-
-def test_env_bridge_new_only_backfills_legacy():
-    env = {"SANDBAR_AGENT_CMD": "stub"}
-    shared.apply_env_compat(env)
-    assert env["SUYOU_AGENT_CMD"] == "stub"          # 插件面旧读侧过渡期仍可读
+def test_env_bridge_removed():
+    """260908 终切：apply_env_compat 整函数删除——旧名 env 不再被镜像。"""
+    assert not hasattr(shared, "apply_env_compat")
+    assert not hasattr(shared, "LEGACY_ENV_PREFIX")
 
 
-def test_env_bridge_conflict_new_wins():
-    env = {"SUYOU_AGENT_CMD": "old", "SANDBAR_AGENT_CMD": "new"}
-    shared.apply_env_compat(env)
-    assert env["SANDBAR_AGENT_CMD"] == "new"
-    assert env["SUYOU_AGENT_CMD"] == "new"           # 冲突时旧名被新名覆盖
+def test_env_prefix_single():
+    assert shared.ENV_PREFIX == "SANDBAR_"
 
 
-def test_env_bridge_malformed_values_no_crash():
-    env = {"SUYOU_EMPTY": "", "SUYOU_JSON": "{bad json", "SUYOU_BIG": "x" * 100000}
-    shared.apply_env_compat(env)
-    assert env["SANDBAR_EMPTY"] == ""                # 空值是合法值，不丢
-    assert env["SANDBAR_JSON"] == "{bad json"        # 非结构内容原样透传
-    assert env["SANDBAR_BIG"] == "x" * 100000
-
-
-def test_env_bridge_idempotent():
-    env = {"SUYOU_AGENT_CMD": "stub"}
-    shared.apply_env_compat(env)
-    once = dict(env)
-    shared.apply_env_compat(env)
-    assert env == once
-
-
-def test_census_bridge_covers_write_set_literals():
-    """census 自愈断言：写集内全部 SUYOU_ 静态字面量必须能被前缀桥映射覆盖
-    （即形如 SUYOU_<大写/数字/下划线>）。出现新形态（小写/特殊字符）= 桥失效 → 红。"""
+def test_census_env_literal_shape():
+    """census 断言：仓内全部 SANDBAR_ 静态字面量形状合规（形如 SANDBAR_<大写/数字/
+    下划线>）。出现新形态（小写/特殊字符）= 有代码绕过约定 → 红。"""
     import re
     roots = [pathlib.Path("server/engine"), pathlib.Path("server/tools"),
              pathlib.Path("integration")]
-    pat = re.compile(r"SUYOU_[A-Za-z0-9_]+")
+    pat = re.compile(r"SANDBAR_[A-Za-z0-9_]+")
     odd = set()
     for root in roots:
         if not root.exists():
@@ -68,15 +43,15 @@ def test_census_bridge_covers_write_set_literals():
             if f.suffix not in (".py", ".mjs", ".md", ".yaml", ".json"):
                 continue
             for m in pat.findall(f.read_text(encoding="utf-8", errors="replace")):
-                if not re.fullmatch(r"SUYOU_[A-Z0-9_]+", m):
+                if not re.fullmatch(r"SANDBAR_[A-Z0-9_]+", m):
                     odd.add(m)
-    assert not odd, "前缀桥覆盖不了的 SUYOU_ 字面量：%s" % sorted(odd)
+    assert not odd, "形状不合规的 SANDBAR_ 字面量：%s" % sorted(odd)
 
 
-# ---- ② 队列 ----------------------------------------------------------------
+# ---- ② 队列（单名终切） ------------------------------------------------------
 
 def _clean_queue_env(monkeypatch):
-    for name in ("SANDBAR_TASK_QUEUE", "SUYOU_TASK_QUEUE", shared.TASK_QUEUES_ENV):
+    for name in ("SANDBAR_TASK_QUEUE", "SANDBAR_TASK_QUEUES"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -86,13 +61,12 @@ def test_shared_queue_defaults(monkeypatch):
     # 常量面断言缺省值，行为面断言 configured_task_queues 尊重常量。
     monkeypatch.setattr(shared, "TASK_QUEUE", "sandbar")
     assert shared.TASK_QUEUE == "sandbar"
-    assert shared.LEGACY_TASK_QUEUE == "suyou-poc"
-    assert shared.configured_task_queues() == ["sandbar", "suyou-poc"]  # 双 poll 证据口径
+    assert shared.configured_task_queues() == ["sandbar"]  # 260908 终切：单队列
 
 
-def test_ticket_queue_dual_prefix():
+def test_ticket_queue_single_prefix():
     qs = shared.ticket_task_queues("t1")
-    assert qs == ["sandbar-ticket-t1", "suyou-ticket-t1"]
+    assert qs == ["sandbar-ticket-t1"]                     # 260908 终切：单前缀
     assert shared.ticket_task_queue("t1") == "sandbar-ticket-t1"
 
 
@@ -102,15 +76,15 @@ def test_ticket_queues_env_csv_override(monkeypatch):
     assert shared.configured_task_queues() == ["q1", "q2"]
     monkeypatch.delenv(shared.TASK_QUEUES_ENV)
     monkeypatch.setattr(shared, "TASK_QUEUE", "sandbar")
-    assert shared.configured_task_queues() == ["sandbar", "suyou-poc"]
+    assert shared.configured_task_queues() == ["sandbar"]
 
 
 def test_schedule_ids():
     assert shared.SCHEDULE_ID == "sandbar-dispatcher-scan"
-    assert shared.LEGACY_SCHEDULE_ID == "suyou-dispatcher-scan"
+    assert not hasattr(shared, "LEGACY_SCHEDULE_ID")       # 260908 终切：旧 id 常量撤
 
 
-# ---- ③④ 目录粘滞＋镜像（R-1 三例） -----------------------------------------
+# ---- ③④ 目录粘滞＋镜像（R-1 三例，老泳道只读兼容保留） ----------------------
 
 def test_dot_dir_new_lane_sticks_to_new_name_after_mirror(tmp_path):
     """R-1 例①：新 base 首写后（镜像已造出 .suyou）第二进程解析仍新名，不翻转。"""
@@ -177,31 +151,30 @@ def test_result_file_new_lane(tmp_path):
     assert ".sandbar/stage_implement_gen0.json" in rf
 
 
-# ---- ⑤ ws dir 粘滞 ----------------------------------------------------------
+# ---- ⑤ ws dir（260908 终切：粘滞撤除，单 base） -----------------------------
 
-def test_ws_dir_path_sticky(tmp_path, monkeypatch):
-    legacy_root = tmp_path / "old-ws"
-    (legacy_root / "t9").mkdir(parents=True)
-    monkeypatch.setattr(shared, "WS_DIR_BASE", str(tmp_path / "new-ws"))
-    monkeypatch.setattr(shared, "LEGACY_WS_DIR_BASE", str(legacy_root))
-    assert shared.ws_dir_path("t9") == str(legacy_root / "t9")     # 在飞粘滞
-    assert shared.ws_dir_path("t-new") == str(tmp_path / "new-ws" / "t-new")
+def test_ws_dir_path_single_base(tmp_path, monkeypatch):
+    monkeypatch.setattr(shared, "WS_DIR_BASE", str(tmp_path / "ws"))
+    assert shared.ws_dir_path("t9") == str(tmp_path / "ws" / "t9")
+    assert not hasattr(shared, "LEGACY_WS_DIR_BASE")               # 旧 base 常量撤
 
 
-def test_result_file_uses_ws_dir_sticky_base(tmp_path, monkeypatch):
-    monkeypatch.setattr(shared, "WS_DIR_BASE", str(tmp_path / "new-ws"))
-    monkeypatch.setattr(shared, "LEGACY_WS_DIR_BASE", str(tmp_path / "old-ws"))
-    (tmp_path / "old-ws" / "t1").mkdir(parents=True)
+def test_result_file_uses_ws_dir_base(tmp_path, monkeypatch):
+    monkeypatch.setattr(shared, "WS_DIR_BASE", str(tmp_path / "ws"))
     rf = shared.result_file_for("t1", "implement", 0, None)
-    assert rf.startswith(str(tmp_path / "old-ws" / "t1"))
+    assert rf.startswith(str(tmp_path / "ws" / "t1"))
 
 
 # ---- 守卫白名单自证 ----------------------------------------------------------
 
 def test_guard_whitelist_anchor():
-    """守卫场景白名单锚：本文件允许出现旧名字面量（fixture/断言），此用例钉住该约定。"""
+    """守卫场景白名单锚：本文件允许出现 .suyou 目录字面量（粘滞面 fixture/断言），
+    但不得再出现已终切的队列/env 旧名——此用例钉住该边界。"""
     src = pathlib.Path(__file__).read_text(encoding="utf-8")
-    assert "suyou-poc" in src and ".suyou" in src
+    assert ".suyou" in src and "sandbar" in src
+    # 拆串构造避免自指：断言字面量本身即文件内容，完整字面量会自打自。
+    assert "suyou" + "-poc" not in src
+    assert "SUYOU" + "_" not in src
 
 
 # ---- ⑥ worker 多队列注册接线锁（docker 台不在位时的行为面证据链：真正台面
@@ -212,52 +185,14 @@ def test_worker_registers_one_worker_per_queue():
     src = pathlib.Path(worker.__file__).read_text(encoding="utf-8")
     assert "for _q in configured_task_queues():" in src
     assert "task_queue=_q" in src                                   # 每队列一个 Worker 实例
-    assert "worker polling queues" in src                           # 双注册日志证据行
+    assert "worker polling queues" in src                           # 注册日志证据行
     assert "await asyncio.gather(*(w.shutdown() for w in workers))" in src  # 全终态停机
 
 
 def test_worker_queues_source_uses_shared_config():
     import inspect
     src = inspect.getsource(shared.configured_task_queues)
-    assert "TASK_QUEUES_ENV" in src and "LEGACY_TASK_QUEUE" in src
-
-
-# ---- ⑦ schedule 删旧接线（arbitrate gen0 打回项：创建走廊必须接删旧，
-# 不得只挂人工运维路径——双调度窗口无界即打回形态）----
-
-def test_retire_legacy_schedule_idempotent_with_stub():
-    class FakeHandle:
-        def __init__(self, log):
-            self._log = log
-        async def delete(self):
-            self._log.append("delete")
-    class FakeClient:
-        def __init__(self, log):
-            self._log = log
-        def get_schedule_handle(self, schedule_id):
-            assert schedule_id == shared.LEGACY_SCHEDULE_ID
-            return FakeHandle(self._log)
-    import asyncio
-    log = []
-    assert asyncio.run(scan_schedule.retire_legacy_schedule(FakeClient(log))) is True
-    assert log == ["delete"]
-    # 幂等：句柄不存在（RPCError）不炸且返回 False
-    class GoneClient:
-        def get_schedule_handle(self, schedule_id):
-            class H:
-                async def delete(self):
-                    raise scan_schedule.RPCError("not found", None, None)
-            return H()
-    assert asyncio.run(scan_schedule.retire_legacy_schedule(GoneClient())) is False
-
-
-def test_create_corridor_wires_legacy_retire():
-    """创建走廊（demo_schedule）删旧接线锁：retire 调用须位于 create_schedule 之前——
-    删旧只挂人工 resume 路径=双调度窗口无界（arbitrate gen0 打回形态）。"""
-    import pathlib
-    src = pathlib.Path(demo_schedule.__file__).read_text(encoding="utf-8")
-    assert "await retire_legacy_schedule(client)" in src
-    assert src.index("retire_legacy_schedule(client)") < src.index("create_schedule(")
+    assert "TASK_QUEUES_ENV" in src and "return [TASK_QUEUE]" in src
 
 
 # ---- ⑧ doc-gate 写失败降级（arbitrate gen1 打回项：粘滞解析的 mkdir 必须被

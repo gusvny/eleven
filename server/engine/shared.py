@@ -9,10 +9,9 @@
 路径可被环境变量覆盖（自测用临时目录）：
   SANDBAR_WORKFLOWS_DIR  模板目录（缺省 <repo>/server/workflows）
 
-命名清理（t260907-04，宿主令 260907）：SUYOU_* env → SANDBAR_*、共享队列
-suyou-poc → sandbar、泳道协调目录（老名→.sandbar/）。过渡期兼容见  # naming-compat
-apply_env_compat / LEGACY_* 常量与 resolve_dot_dir；全量退役账收口在本目录
-README「退役账」表（7 条，逐条可观测），撤任何一条前先对表。
+命名清理（t260907-04 铺桥 → 260908 宿主令终切）：env 全仓 SANDBAR_*（桥已撤）、
+共享队列单名 sandbar（旧队列双 poll 已撤）、泳道协调目录新名 .sandbar/（老名粘滞
+读点保留处理在飞老泳道，见各 # naming-compat 标记）。
 """
 
 from __future__ import annotations
@@ -26,37 +25,11 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 
-# ---- env 命名过渡（t260907-04）------------------------------------------------
-# 语义：SANDBAR_* 为新名真源；双向桥保证过渡期旧调用方（插件面旧代码读 SUYOU_*）
-# 与新代码（读 SANDBAR_*）互见。双侧同名冲突 → 新名优先，旧名被新名覆盖。
-# 触发时机：import shared 时一次性遍历＋本函数可重复显式调用（幂等）。已知限制：
-# import 之后才 setenv 的路径（含 UT 的 monkeypatch）不自动过桥——UT 须在 import
-# 前注入，或显式重跑 apply_env_compat(env)。ticket_worker spawn 注入直接走新名
-# env，不依赖桥。
-# 退役（退役账#6）：插件面票（workbench 旧名清理）收口后，桥降级为单向
-# （只 SUYOU_*→SANDBAR_*，不再回写旧名），再一版整函数删除。
-LEGACY_ENV_PREFIX = "SUYOU_"
+# ---- env 命名（t260907-04 桥→260908 宿主令终切）--------------------------------
+# SANDBAR_* 是唯一 env 前缀（SUYOU_* 旧名随 260908 全仓终切退役，含插页面与全部
+# 测试注入面）。t260907-04 的双向桥 apply_env_compat 已整函数删除（退役账#6 收口，
+# KI-058 的镜像乒乓病随桥根治）——旧名 env 不再被镜像，注入侧一律写 SANDBAR_*。
 ENV_PREFIX = "SANDBAR_"
-
-
-def apply_env_compat(environ: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-    """SUYOU_*↔SANDBAR_* 双向桥（幂等）。返回桥后 env 快照（测试观测用）。"""
-    env = os.environ if environ is None else environ
-    # 旧→新：旧名单侧出现则补新名（新名已存在且非空时不覆盖——新名优先；
-    # 新名为空串视为缺失回落旧名，与现行 `or` 缺省链的 falsy 语义一致）
-    for key, value in list(env.items()):
-        if key.startswith(LEGACY_ENV_PREFIX):
-            new_key = ENV_PREFIX + key[len(LEGACY_ENV_PREFIX):]
-            if not env.get(new_key):
-                env[new_key] = value
-    # 新→旧：新名回写旧名（冲突时新名赢——旧名被新名覆盖；插件面旧代码过渡期读到的
-    # 恒为新名的镜像，两侧不漂移）
-    for key in [k for k in env if k.startswith(ENV_PREFIX)]:
-        env[LEGACY_ENV_PREFIX + key[len(ENV_PREFIX):]] = env[key]
-    return dict(env)
-
-
-apply_env_compat()
 
 # ---- 路径 ----
 POC_DIR = pathlib.Path(__file__).resolve().parent
@@ -71,27 +44,23 @@ OUT_DIR = POC_DIR / "out"
 #   SANDBAR_NAMESPACE      Temporal namespace（缺省 default）
 TARGET_HOST = os.environ.get("SANDBAR_TARGET_HOST") or "127.0.0.1:7233"
 NAMESPACE = os.environ.get("SANDBAR_NAMESPACE") or "default"
-# 共享队列（t260907-04 改名）：缺省新名 sandbar；SANDBAR_TASK_QUEUE 覆盖（单值，
-# 兼容读桥桥出的旧 SANDBAR_TASK_QUEUE）。SANDBAR_TASK_QUEUES（CSV）= 专属 worker
-# 的多队列模式（ticket_worker spawn 注入「新 ticket 队列,旧 ticket 队列」双 poll）。
+# 共享队列（t260907-04 改名 → 260908 终切）：单名 sandbar。SANDBAR_TASK_QUEUE
+# 覆盖（测试注入用）。SANDBAR_TASK_QUEUES（CSV）= 专属 worker 的多队列模式
+# （ticket_worker spawn 注入 ticket 专属队列组）。
 TASK_QUEUE = os.environ.get("SANDBAR_TASK_QUEUE") or "sandbar"
-# 退役账#1：旧共享队列过渡双 poll——新代码 worker 同时 poll LEGACY 旧队列（suyou-poc），让以旧队列
-# 启动的在飞 workflow 自然流干；撤旧条件 = 旧队列连续一个发布周期零任务且在飞
-# 起动的在飞 workflow 流干（观测面：worker 日志双队列行 + temporal
-# workflow list），满足后删本常量与 worker 双注册分支。
-LEGACY_TASK_QUEUE = "suyou-poc"
 TASK_QUEUES_ENV = "SANDBAR_TASK_QUEUES"
 
 
 def configured_task_queues() -> List[str]:
     """本 worker 应 poll 的队列清单。多队列模式（SANDBAR_TASK_QUEUES CSV）优先；
-    缺省 = 新共享队列 + 旧共享队列（退役账#1 过渡双 poll）。"""
+    缺省 = 单共享队列 sandbar（260908 终切：suyou-poc 旧队列双 poll 撤除，
+    空库重建后无旧队列在飞票）。"""
     csv = os.environ.get(TASK_QUEUES_ENV)
     if csv:
         queues = [q.strip() for q in csv.split(",") if q.strip()]
         if queues:
             return queues
-    return [TASK_QUEUE, LEGACY_TASK_QUEUE]
+    return [TASK_QUEUE]
 
 # ---- 每工单专属 worker（260824 用户拍板）----
 # 工单 workflow 不上共享队列：每张工单一个 task queue（sandbar-ticket-<工单id>）+
@@ -100,27 +69,20 @@ def configured_task_queues() -> List[str]:
 # content-pipeline 已退役）。
 # 隔离语义：A 工单的旧代码 worker 永远抢不到 B 工单的任务（260824 版本投毒事件教训）。
 TICKET_QUEUE_PREFIX = "sandbar-ticket-"
-# 退役账#2：旧 ticket 队列前缀——在飞工单的 workflow task queue 在 start 时定死为
-# 旧前缀 <id> 队列；其专属 worker 重启后必须同 tid 双前缀 poll，否则旧 workflow
-# 永不推进（搁浅）。撤旧条件 = 观测旧前缀队列连续一个发布周期零任务且在飞
-# 清单无旧前缀起动的 workflow，随后删本常量、双前缀 poll 与 client 过滤回落。
-LEGACY_TICKET_QUEUE_PREFIX = "suyou-ticket-"
-
-
 def ticket_task_queue(ticket_id: str) -> str:
-    """工单专属 task queue 名（新工单恒新前缀；workflow 启动与专属 worker 两边一致）。"""
+    """工单专属 task queue 名（workflow 启动与专属 worker 两边一致）。"""
     return TICKET_QUEUE_PREFIX + ticket_id
 
 
 def ticket_task_queues(ticket_id: str) -> List[str]:
-    """专属 worker 双 poll 清单：新前缀在前（新任务优先被新语义 worker 领）＋旧前缀
-    （在飞 workflow 流干用）。共享同一 registry。"""
-    return [TICKET_QUEUE_PREFIX + ticket_id, LEGACY_TICKET_QUEUE_PREFIX + ticket_id]
+    """专属 worker poll 清单（260908 终切：suyou-ticket- 旧前缀双 poll 撤除，
+    空库重建后无旧前缀在飞票；保留 list 形态供 spawn 注入面兼容）。"""
+    return [TICKET_QUEUE_PREFIX + ticket_id]
 
 # ---- 多项目化（260823）：工单 workflow 按项目区分，同一个 Temporal 后端 ----
 # ProjectKey = Keyword search attribute，值 = 机器级 per-key 注册表 key
 # （真源 ~/.sandbar/projects/<key>/project.yaml，sandbar M1-1 出仓；见 server/tools/ticket.py
-# 「项目注册表」节与 server/suyou-projects.ts，三处同一注册表口径）。
+# 「项目注册表」节与 server/project-registry.ts，三处同一注册表口径）。
 # 注册：run_server.sh 启动参数自带；运行中的 server 用
 #   bin/temporal operator search-attribute create --name ProjectKey --type Keyword
 # 测试环境（docker-compose.test.yml temporalite）启动后同样 operator create 一次。
@@ -143,10 +105,10 @@ EPIC_SA_NAME = "EpicCode"
 # resolve_epics_dir（t260907-07 立项单校验项目感知化）。接线后剩余消费面：
 #   1. validate_epic_code 默认参数路径（唯一生产消费=server/tools/ticket.py:422
 #      list --epic 过滤，写集外遗留——对 external 项目仍按引擎锚拒收）；
-#   2. 自测/夹具经 env SUYOU_EPICS_DIR 覆盖（自测语义，与 resolve_epics_dir 的
+#   2. 自测/夹具经 env SANDBAR_EPICS_DIR 覆盖（自测语义，与 resolve_epics_dir 的
 #      env 现读同键）。
 # prepare_epic_next（agent_activities）已迁 resolve_epics_dir，不再消费本常量。
-EPICS_DIR = pathlib.Path(os.environ.get("SUYOU_EPICS_DIR") or (REPO_ROOT / "notes" / "epics"))
+EPICS_DIR = pathlib.Path(os.environ.get("SANDBAR_EPICS_DIR") or (REPO_ROOT / "notes" / "epics"))
 # 代号形状白名单：沿用 PROJECT_KEY_RE 字符集，同时防 ../../ 路径穿越。
 EPIC_CODE_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
 
@@ -158,17 +120,17 @@ def resolve_epics_dir(project_key):
     三级解析（仿 registry_root 的「每次调用现读 env」先例；照搬取舍逐项：
     ①env 空串→回落项目锚，带；②env 先 import 后设→现读即生效，带（本票主旨）；
     ③env 指向不存在目录→不预检，由调用侧报错文案兜住，带；④legacy env 互压
-    （registry 侧 SUYOU_PROJECTS_YAML＞SANDBAR_PROJECTS_DIR）→不带（epic 目录无
+    （registry 侧 SANDBAR_PROJECTS_YAML＞SANDBAR_PROJECTS_DIR）→不带（epic 目录无
     legacy 单文件模式，引入反增歧义）；⑤隔离条目/空表抛错语义→经 lookup_project
     复用天然继承）：
-      1. env SUYOU_EPICS_DIR 非空 → 现读即用（自测语义不变）；
+      1. env SANDBAR_EPICS_DIR 非空 → 现读即用（自测语义不变）；
       2. 否则 lookup_project(project_key)['dirs'][0] / notes/epics（未知 key/
          隔离条目 ValueError fail-closed，不静默退引擎仓——契约④三态总纲）；
       3. project_key 空/None → 兜底 REPO_ROOT/notes/epics（引擎锚；生产不可达
          路径——ticket-start 入口拦空 project，仅夹具/在飞工单兼容用，不构成
          语义承诺）。
     """
-    env_dir = os.environ.get("SUYOU_EPICS_DIR") or ""
+    env_dir = os.environ.get("SANDBAR_EPICS_DIR") or ""
     if env_dir.strip():
         return pathlib.Path(env_dir)
     key = str(project_key or "").strip()
@@ -458,7 +420,6 @@ SCHEDULE_ID = "sandbar-dispatcher-scan"
 # 退役账#3：旧 schedule ID（服务端持久标识）。scan_schedule 的 create/ensure 路径
 # 建新 ID 前幂等 delete 旧 ID（句柄不存在不炸），日志留痕；本删旧行保留一个发布
 # 周期（防旧代码引擎并存时重建旧 schedule 造成双调度），超期整段删除。
-LEGACY_SCHEDULE_ID = "suyou-dispatcher-scan"
 
 # ---- demo 用的工单 id 前缀（清场脚本只认这个前缀，绝不碰其它工单）----
 DEMO_PREFIX = "t260821-demo-"
@@ -610,7 +571,7 @@ TICKET_STAGE_STATES = ("running", "awaiting", "awaiting-human", "blocked")
 SCAN_DIR = pathlib.Path(os.environ.get("SANDBAR_SCAN_DIR") or (OUT_DIR / "scan"))
 # 巡检票落账目录（inspection 票①，t260905-03；env 覆盖供自测用临时目录；
 # 缺省 out/inspection，运行产物不入库）。新变量名按宿主令 260904 用 sandbar 前缀
-#（存量 SUYOU_* 是历史欠账，只随专门迁移票处置，新造一律不用）。
+#（存量 SANDBAR_* 是历史欠账，只随专门迁移票处置，新造一律不用）。
 INSPECTION_DIR = pathlib.Path(os.environ.get("SANDBAR_INSPECTION_DIR") or (OUT_DIR / "inspection"))
 # 「疑似卡死」停留时长阈值（小时）。env 可调；activity 读取，不进 workflow 体。
 SCAN_STUCK_HOURS = float(os.environ.get("SANDBAR_SCAN_STUCK_HOURS") or 48)
@@ -777,18 +738,12 @@ def scan_summary(items: List[ScanTicketItem]) -> Dict[str, int]:
 
 # dir 类工作空间根：非开发工单（cleanup/运营类）的隔离目录约定 /tmp/sandbar-ws/<工单id>。
 # （M11 v2：env SANDBAR_WS_DIR_BASE 可覆盖——自测指向临时目录，真 /tmp 零污染。）
-# 退役账#7：旧 base 粘滞——既有 dir 工单的目录在 LEGACY base（/tmp/suyou-ws）/<id>，ws 路径解析
-# 时旧 base 下已存在该工单目录则沿用旧路径（在飞不炸）；退役条件 = LEGACY base
-# 存量工单目录清零（观测：ls 旧 base 为空）后删 LEGACY_WS_DIR_BASE 与粘滞分支。
 WS_DIR_BASE = os.environ.get("SANDBAR_WS_DIR_BASE") or "/tmp/sandbar-ws"
-LEGACY_WS_DIR_BASE = "/tmp/suyou-ws"
 
 
 def ws_dir_path(ticket_id: str) -> str:
-    """dir 类工单工作空间路径（新 base 缺省；旧 base 下已存在同 id 目录→粘滞沿用）。"""
-    legacy = pathlib.Path(LEGACY_WS_DIR_BASE) / ticket_id
-    if legacy.is_dir():
-        return str(legacy)
+    """dir 类工单工作空间路径（260908 终切：/tmp/suyou-ws 旧 base 粘滞撤除——
+    存量目录已清，空库重建后无在飞 dir 工单）。"""
     return WS_DIR_BASE + "/" + ticket_id
 
 
@@ -1713,7 +1668,7 @@ def ui_evidence_dir(worktree) -> pathlib.Path:
 # 拷进来：<REPO_ROOT>/.sandbar/evidence/<ticket_id>/（老主树 .sandbar/ 粘滞）。泳道
 # merge 后拆树，report 里引图不死链靠这份归档；host 只读端点 node.ts evidence
 # 路由同口径读它——node 侧 SANDBAR_EVIDENCE_DIR env 覆盖（=归档基目录本体，自测
-# 指向临时目录；旧 SUYOU_ 名由 apply_env_compat 双向桥兼容）与
+# 指向临时目录，260908 终切后唯一前缀）与
 # agent_activities._archive_shots 同名 env 互指，改一边同步另一边）
 EVIDENCE_DIR = DOT_DIR_NEW + "/evidence"
 
@@ -2441,7 +2396,7 @@ TEMPLATE_CLASS_NAMES: Dict[str, str] = {
 # 归档真源 = 机器级 per-key 数据目录（契约 v1.4 ①c）：完结工单的 stage 结果/结算
 # 报告、会话落盘、UI 证据复制进 <root>/<key>/data/tickets/<id>/，泳道拆除不丢。
 # 这段 PROJECT_KEY_RE 是 M1-2 起真源（原在 agent_activities.py，本单上移）：
-# 与 server/suyou-projects.ts 的 PROJECT_KEY_RE 同款字符集，兼防 ../ 路径穿越
+# 与 server/project-registry.ts 的 PROJECT_KEY_RE 同款字符集，兼防 ../ 路径穿越
 # （per-key 凭据/归档路径都要拼目录名）。EPIC_CODE_RE 是既有同款字符集的另一处
 # 拷贝（防穿越语义同），两处刻意不合并（各自注释说明字符集来源）。
 
@@ -2449,7 +2404,7 @@ PROJECT_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
 
 
 def perkey_projects_root() -> pathlib.Path:
-    """per-key 项目目录根（M1-2 真源上移；每次调用现读 env，仿 suyou-projects.ts
+    """per-key 项目目录根（M1-2 真源上移；每次调用现读 env，仿 project-registry.ts
     registryRoot 语义）。env 语义与 M1-2 有意差异一致：SANDBAR_PROJECTS_DIR 为空串或
     相对路径 = 视为未设置回落默认根——TS 的 `??` 不剔空串（空串会指到根目录本身），
     这里显式拒绝，不猜。"""
@@ -2708,7 +2663,7 @@ import time as _time                                # noqa: E402
 
 # 一次性迁移源（旧单文件）。真源=机器级 per-key 目录
 # ~/.sandbar/projects/<key>/project.yaml（装载=扫 */project.yaml，与
-# server/suyou-projects.ts 同一注册表、两边各自最小解析、语义同构）。
+# server/project-registry.ts 同一注册表、两边各自最小解析、语义同构）。
 # env 优先级（每次调用现读）：SANDBAR_PROJECTS_YAML（legacy 单文件模式，旧格式
 # projects: 列表，行为与 260823 版一致）> SANDBAR_PROJECTS_DIR > ~/.sandbar/projects。
 # 单条目畸形/版本不支持=该项目隔离（fail-closed 可见，不炸其他项目）；目录名必须

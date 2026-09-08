@@ -2,7 +2,7 @@
 
 覆盖（方案 gen1/gen2 验收口径）：
 - resolve_epics_dir 三级解析：项目锚（两项目同名/异名立项单各取各的）/
-  env SUYOU_EPICS_DIR 现读优先（自测语义不变）/ 空 project 引擎锚兜底 /
+  env SANDBAR_EPICS_DIR 现读优先（自测语义不变）/ 空 project 引擎锚兜底 /
   未知 project fail-closed / env 空串回落 / env 指不存在目录不预检；
 - validate_epic_code 加参：项目锚通过/拒绝、报错文案含实际查询目录（诊断
   信息=项目主目录而非引擎锚）、缺省 None 保持 legacy 行为、畸形输入
@@ -36,7 +36,7 @@ def _mk_registry(root, key, name, dirs):
 
 
 class _Env:
-    """env 覆盖上下文（SANDBAR_PROJECTS_DIR / SUYOU_EPICS_DIR）。"""
+    """env 覆盖上下文（SANDBAR_PROJECTS_DIR / SANDBAR_EPICS_DIR）。"""
 
     def __init__(self, **kv):
         self.kv = kv
@@ -102,32 +102,32 @@ class ResolveEpicsDirTest(unittest.TestCase):
                 shared.validate_epic_code("external-only", shared.resolve_epics_dir("engine"))
 
     def test_env_override_selftest_semantics(self):
-        """env SUYOU_EPICS_DIR 现读优先——自测语义不变（先 import 后设 env 也生效）。"""
+        """env SANDBAR_EPICS_DIR 现读优先——自测语义不变（先 import 后设 env 也生效）。"""
         import tempfile
         env_dir = Path(tempfile.mkdtemp(prefix="t260907-07-env-"))
-        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SUYOU_EPICS_DIR=str(env_dir)):
+        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SANDBAR_EPICS_DIR=str(env_dir)):
             self.assertEqual(shared.resolve_epics_dir("external"), env_dir)
             self.assertEqual(shared.resolve_epics_dir(""), env_dir)
         # env 空串 → 回落项目锚（照搬取舍①）
-        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SUYOU_EPICS_DIR=""):
+        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SANDBAR_EPICS_DIR=""):
             self.assertEqual(shared.resolve_epics_dir("external"),
                              self.external_root / "notes" / "epics")
 
     def test_empty_project_engine_anchor_fallback(self):
         """空 project → 引擎锚兜底（生产不可达路径，仅夹具/兼容用——方案 N2 措辞）。"""
-        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SUYOU_EPICS_DIR=None):
+        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SANDBAR_EPICS_DIR=None):
             self.assertEqual(shared.resolve_epics_dir(""), shared.EPICS_DIR)
             self.assertEqual(shared.resolve_epics_dir(None), shared.EPICS_DIR)
 
     def test_unknown_project_fail_closed(self):
         """未知 key / 隔离条目 → ValueError（fail-closed，不静默退引擎仓）。"""
-        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SUYOU_EPICS_DIR=None):
+        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SANDBAR_EPICS_DIR=None):
             with self.assertRaises(ValueError):
                 shared.resolve_epics_dir("no-such")
 
     def test_env_missing_dir_not_prechecked(self):
         """env 指向不存在目录 → 不预检照返回（报错由调用侧文案兜住，取舍③）。"""
-        with _Env(SUYOU_EPICS_DIR="/nonexistent/t260907-07/epics"):
+        with _Env(SANDBAR_EPICS_DIR="/nonexistent/t260907-07/epics"):
             self.assertEqual(shared.resolve_epics_dir("external"),
                              Path("/nonexistent/t260907-07/epics"))
 
@@ -148,7 +148,7 @@ class ValidateEpicCodeProjectAwareTest(unittest.TestCase):
 
     def test_error_message_carries_actual_dir(self):
         """报错文案含实际查询目录=项目主目录 notes/epics（C7 诊断信息断言）。"""
-        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SUYOU_EPICS_DIR=None):
+        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SANDBAR_EPICS_DIR=None):
             with self.assertRaises(ValueError) as cm:
                 shared.validate_epic_code("nope", shared.resolve_epics_dir("external"))
             msg = str(cm.exception)
@@ -157,14 +157,14 @@ class ValidateEpicCodeProjectAwareTest(unittest.TestCase):
 
     def test_env_missing_dir_error_bubbles_with_dir(self):
         """env 指不存在目录 → 档案不存在报错且文案带该目录（C2-③ 显式用例）。"""
-        with _Env(SUYOU_EPICS_DIR="/nonexistent/t260907-07/epics"):
+        with _Env(SANDBAR_EPICS_DIR="/nonexistent/t260907-07/epics"):
             with self.assertRaises(ValueError) as cm:
                 shared.validate_epic_code("gap-b", shared.resolve_epics_dir("external"))
             self.assertIn("/nonexistent/t260907-07/epics", str(cm.exception))
 
     def test_default_none_keeps_legacy(self):
         """缺省 epics_dir=None = legacy 引擎锚行为不变（零回归面）。"""
-        with _Env(SUYOU_EPICS_DIR=None):
+        with _Env(SANDBAR_EPICS_DIR=None):
             # 引擎锚下 gap-b 通常不存在：只断言「不抛非 ValueError 异常」+ 文案锚引擎仓
             try:
                 shared.validate_epic_code("t260907-nope")
@@ -209,8 +209,8 @@ class CmdTicketStartProjectAwareTest(unittest.TestCase):
     def test_external_epic_in_own_root_passes(self):
         """验收①：外部项目立项单在其自己根下 → CLI 开票关联成功。"""
         orig_connect = client._connect
-        orig_env = os.environ.get("SUYOU_EPICS_DIR")
-        os.environ.pop("SUYOU_EPICS_DIR", None)
+        orig_env = os.environ.get("SANDBAR_EPICS_DIR")
+        os.environ.pop("SANDBAR_EPICS_DIR", None)
 
         class _FakeClose:
             async def __aenter__(self):
@@ -237,9 +237,9 @@ class CmdTicketStartProjectAwareTest(unittest.TestCase):
         finally:
             client._connect = orig_connect
             if orig_env is None:
-                os.environ.pop("SUYOU_EPICS_DIR", None)
+                os.environ.pop("SANDBAR_EPICS_DIR", None)
             else:
-                os.environ["SUYOU_EPICS_DIR"] = orig_env
+                os.environ["SANDBAR_EPICS_DIR"] = orig_env
         self.assertTrue(r.get("ok"), r)
         inp = captured.get("input")
         self.assertIsNotNone(inp)
@@ -251,7 +251,7 @@ class CmdTicketStartProjectAwareTest(unittest.TestCase):
 
         （镜像断言：同一 epic 对未知 project 在 resolve 层 fail-closed，由
         ResolveEpicsDirTest.test_unknown_project_fail_closed 覆盖。）"""
-        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SUYOU_EPICS_DIR=None):
+        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SANDBAR_EPICS_DIR=None):
             # 直接驱动校验对（client 层同参），不依赖 _connect stub 细节
             epic = shared.validate_epic_code("gap-b", shared.resolve_epics_dir("external"))
             self.assertEqual(epic, "gap-b")
@@ -261,7 +261,7 @@ class CmdTicketStartProjectAwareTest(unittest.TestCase):
         (self.engine_root / "notes" / "epics").mkdir(parents=True)
         (self.engine_root / "notes" / "epics" / "engine-only.md").write_text(
             "# 立项单：engine-only\n", encoding="utf-8")
-        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SUYOU_EPICS_DIR=None):
+        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SANDBAR_EPICS_DIR=None):
             self.assertEqual(
                 shared.validate_epic_code("engine-only", shared.resolve_epics_dir("engine")),
                 "engine-only")
@@ -301,7 +301,7 @@ class EpicNextPrepProjectAwareTest(unittest.TestCase):
             shared.EpicNextPrepArgs(ticket_id="t1", epic="gap-b", project=project)))
 
     def test_external_project_reads_own_root(self):
-        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SUYOU_EPICS_DIR=None):
+        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SANDBAR_EPICS_DIR=None):
             prep = self._prep("external")
         self.assertTrue(prep.exists)
         self.assertEqual(prep.epic_markdown, self.md)
@@ -311,14 +311,14 @@ class EpicNextPrepProjectAwareTest(unittest.TestCase):
         import tempfile
         env_dir = Path(tempfile.mkdtemp(prefix="t260907-07-prep-env-"))
         (env_dir / "gap-b.md").write_text(self.md, encoding="utf-8")
-        with _Env(SUYOU_EPICS_DIR=str(env_dir)):
+        with _Env(SANDBAR_EPICS_DIR=str(env_dir)):
             prep = self._prep("")
         self.assertTrue(prep.exists)
         self.assertEqual(prep.epic_markdown, self.md)
 
     def test_unknown_project_degrades_soft(self):
         """resolve 抛 ValueError（未知项目）→ 视同档案不可读，软失败不硬炸。"""
-        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SUYOU_EPICS_DIR=None):
+        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SANDBAR_EPICS_DIR=None):
             prep = self._prep("no-such")
         self.assertFalse(prep.exists)
 
