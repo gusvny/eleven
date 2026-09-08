@@ -13,9 +13,15 @@
   不登记、不报警（t260902 宿主令：约定胜过推断）。
 - 一次性交付验收快照不入场（交付完成使命即终，t260902 宿主令重审定案）。
 - cmd 以仓库根为 cwd、/bin/sh -c 执行，单条超时 900s；只用标准库。
+- 池内并发（260909 提速战役）：条目可带第五元素 "serial"——同池内也只许一个接一个
+  跑的场景（进程类/固定端口/pidfile 假设族）；未标 serial 的条目在池内按
+  SANDBAR_POOL_CONC（缺省 4）路并发。SANDBAR_CONC_POOLS（缺省 "main,ro"）圈定
+  哪些命名池吃并发——browser 池共享一台控制台、场景互相驱动同一页面态，本轮
+  不并发（链拆分另案）；SANDBAR_POOL_CONC=1 回退旧语义（池内严格串行）。
 - 清单只收本仓在位资产（L4 口径：cmd 引用脚本必须存在）。迁移种子中指向未迁移
   资产的 84 条悬空引用已移除；suyou 全量场景集与其资产留在 suyou 仓原位。
 """
+import os
 import subprocess
 import sys
 import time
@@ -30,16 +36,16 @@ SCENARIOS = [
 
     ("t260903-10-installer-console-line",
      "3099 红线源码级静态守卫（交接单 §3 C1 全词表）：安装器入口+server/installer 全源对 kill/pkill/重启/spawn/start/launch × 3099/console 上下文零容忍、提示文案（请手动/操作面）白名单豁免区分提示与执行；扫描器自证红绿（干净样本绿+注入 pkill 副本红+含 start 的提示行豁免）；verify.yaml guard-3099-redline 为 2 词行级粗守卫，本场景为全词表+上下文窗细守卫不互替（t260903-10）",
-     "python3 integration/t260903-10/sc_sandbar_installer_console_line.py", "ro"),
+     "python3 integration/t260903-10/sc_sandbar_installer_console_line.py", "ro", "serial"),
     ("t260903-10-installer-lifecycle",
      "安装器生命周期用户旅程（黑盒 CLI+fixture 仓注入+假 temporal 替身+临时 HOME 桩，经公共旗标 --root/--server-port/--ui-port 全程隔离，与真 7233/8233 零接触）：up 起 server（演练端口探活+状态真源 ~/.sandbar/run 落 pidfile）、status 必印「console 属用户操作面，请手动起停」、重复 up 幂等（监听者与 stub 自报 pid 恒为首发进程，不重复拉起）、down 先 worker 后 server（TERM 时间戳红线观测）且终态进程全灭+run 目录 pid 清空；所选端口被占=exit3 环境冲突不对抗（t260903-11 环境无关化重造）",
-     "python3 integration/t260903-10/sc_sandbar_installer_lifecycle.py"),
+     "python3 integration/t260903-10/sc_sandbar_installer_lifecycle.py", "serial"),
     ("t260903-10-installer-orphan-claim",
      "认领契约 V1 三态进程演练（交接单 §2-#9+V1 钦点：down supervisor 持有的 server 必须「报告+不杀+不复活」绝不能杀后被复活）：supervisor 存活→只报告归属不认领（安装器对 ppid 做真 os.kill 存活交叉核对）；父死真孤儿且命令行谓词命中（temporal server start-dev+数据卷属本安装）→认领后 down 停掉；谓词不命中→显式报错不误杀；argv/ppid 观测面经 PATH 前置 ps 桩按登记表供数（本沙箱禁真 ps），存活与信号全走真内核语义；stub 全程自建不与真环境对抗（t260903-10；t260903-11 观测缝重造）",
-     "python3 integration/t260903-10/sc_sandbar_installer_orphan_claim.py"),
+     "python3 integration/t260903-10/sc_sandbar_installer_orphan_claim.py", "serial"),
     ("t260903-10-installer-fail-closed",
      "依赖故障显式红不静默（§2-#1/#8 fail-closed 家族 CLI 面，经公共旗标 --root 注入 fixture 仓驱动真实拉起路径）：temporal 可执行缺失→up 非零且报错点名 temporal；假 temporal 秒退→30s 量级超时内非零显式失败且启动超时子进程就地回收显式声明；status 空态零退出不崩不误报且必印 3099 红线提示（t260903-10；t260903-11 环境无关化重造）",
-     "python3 integration/t260903-10/sc_sandbar_installer_fail_closed.py"),
+     "python3 integration/t260903-10/sc_sandbar_installer_fail_closed.py", "serial"),
     ("t260903-10-doctor-compat-matrix",
      "doctor 一条命令全量探针→兼容矩阵落盘契约（契约⑧-3 三轴）：缺省 fixture 档（不起真 dsh、HOME 桩隔离）doctor 零退出、~/.sandbar/compat-matrix.json 恰 5 行（五面全绿=绿一行 append 一行；第五面 probe-engine-zombies 缺省 census 档绿，t260904-02 落地）、行含 sandbar 版本（单源仓根 VERSION，字面量锚退役 t260903-12）与 dsh 已验证点 0.1.1-rc.2、重复 doctor 幂等行集合不变、坏 JSON 矩阵不静默（读侧 schema 校验：非零报错或恢复合法）（t260903-10）",
      "python3 integration/t260903-10/sc_sandbar_doctor_compat_matrix.py"),
@@ -671,7 +677,12 @@ def main() -> int:
     1=FAIL（产品红）／2=ENV_FAIL（环境红，没验成原因归环境）——旧「缺环境干净
     SKIP（exit 0）」语义退役。汇总行与明细**双向净才绿**：执行器自校验，任一
     不一致按产品红 exit 1（汇总谎报绝不放行）。全腿 N/A 的场景由场景自身按
-    lib_env.fail_if_all_na 记产品红。"""
+    lib_env.fail_if_all_na 记产品红。
+
+    池内并发（260909 提速战役）：SPLIT——先跑池内标 "serial" 的条目（相对
+    顺序保持），再以 SANDBAR_POOL_CONC 路并发跑其余；SANDBAR_CONC_POOLS
+    圈定吃并发的池（缺省 main,ro；browser 共享控制台本轮不并发）；
+    SANDBAR_POOL_CONC=1 回退旧语义。"""
     import threading
     from concurrent.futures import ThreadPoolExecutor
     ran = passed = failed = env_failed = 0
@@ -682,33 +693,62 @@ def main() -> int:
         opt = e[3] if len(e) > 3 else None
         if opt == "exclusive":
             exclusives.append(e)
-        else:
-            pools.setdefault(opt or "main", []).append(e)
+            continue
+        fifth = e[4] if len(e) > 4 else None
+        pool = opt if (opt and opt != "serial") else "main"
+        serial = opt == "serial" or fifth == "serial"
+        pools.setdefault(pool, []).append((e, serial))
+
+    try:
+        conc_width = max(1, int(os.environ.get("SANDBAR_POOL_CONC", "4")))
+    except ValueError:
+        conc_width = 4
+    conc_pools = set(x.strip() for x in
+                     os.environ.get("SANDBAR_CONC_POOLS", "main,ro").split(",")
+                     if x.strip())
 
     def _drain(entries, pool_name):
+        """跑一池：serial 条目严格串行（相对顺序保持），其余按并发宽扇出。"""
         nonlocal ran, passed, failed, env_failed
-        for e in entries:
-            name, exit_code, tail_out, dur = _run_entry(e)
-            dur_tag = " (%.1fs)" % dur
-            # 三态行：0=PASS / 2=ENV_FAIL（环境红，缺什么看缩进尾段）/ 其余=FAIL 产品红。
-            if exit_code == 0:
-                block = ["PASS [%s]%s" % (name, dur_tag)]
-            elif exit_code == 2:
-                block = (["ENV_FAIL [%s] exit=2%s" % (name, dur_tag)]
-                         + ["    " + ln for ln in tail_out.splitlines()[-6:]])
-            else:
-                block = (["FAIL [%s] exit=%d%s" % (name, exit_code, dur_tag)]
-                         + ["    " + ln for ln in tail_out.splitlines()[-6:]])
-            with lock:
-                ran += 1
-                passed += (exit_code == 0)
-                env_failed += (exit_code == 2)
-                failed += (exit_code not in (0, 2))
-                timings.append({"pool": pool_name, "name": name,
-                                "status": ("PASS" if exit_code == 0
-                                           else "ENV_FAIL" if exit_code == 2 else "FAIL"),
-                                "dur_s": round(dur, 1)})
-                print("\n".join(block), flush=True)
+        serials = [e for e, s in entries if s]
+        concs = [e for e, s in entries if not s]
+        for e in serials:
+            _emit(e, pool_name)
+        if not concs:
+            return
+        width = conc_width if pool_name in conc_pools else 1
+        if width <= 1:
+            for e in concs:
+                _emit(e, pool_name)
+            return
+        with ThreadPoolExecutor(max_workers=min(width, len(concs))) as tex:
+            futs = [tex.submit(_emit, e, pool_name) for e in concs]
+            for f in futs:
+                f.result()   # 透传场景异常=产品红归因，不静默吞
+
+    def _emit(e, pool_name):
+        nonlocal ran, passed, failed, env_failed
+        name, exit_code, tail_out, dur = _run_entry(e)
+        dur_tag = " (%.1fs)" % dur
+        # 三态行：0=PASS / 2=ENV_FAIL（环境红，缺什么看缩进尾段）/ 其余=FAIL 产品红。
+        if exit_code == 0:
+            block = ["PASS [%s]%s" % (name, dur_tag)]
+        elif exit_code == 2:
+            block = (["ENV_FAIL [%s] exit=2%s" % (name, dur_tag)]
+                     + ["    " + ln for ln in tail_out.splitlines()[-6:]])
+        else:
+            block = (["FAIL [%s] exit=%d%s" % (name, exit_code, dur_tag)]
+                     + ["    " + ln for ln in tail_out.splitlines()[-6:]])
+        with lock:
+            ran += 1
+            passed += (exit_code == 0)
+            env_failed += (exit_code == 2)
+            failed += (exit_code not in (0, 2))
+            timings.append({"pool": pool_name, "name": name,
+                            "status": ("PASS" if exit_code == 0
+                                       else "ENV_FAIL" if exit_code == 2 else "FAIL"),
+                            "dur_s": round(dur, 1)})
+            print("\n".join(block), flush=True)
 
     timings = []   # KI-060 备料②：耗时分布（每场景一行，含池归属）
     for e in exclusives:      # 独占项先行，不与任何池重叠
@@ -749,6 +789,7 @@ def main() -> int:
         rp.write_text(_json.dumps(
             {"ran": ran, "pass": passed, "fail": failed, "env_fail": env_failed,
              "wall_s": round(wall, 1), "generated": _dt.datetime.now().isoformat(),
+             "conc_width": conc_width, "conc_pools": sorted(conc_pools),
              "timings": timings}, ensure_ascii=False, indent=1), encoding="utf-8")
         print("报告落档：%s" % rp, flush=True)
     except OSError:
