@@ -287,6 +287,12 @@ try {
       ok(!res.error && res.green === true && res.ran === 1 && res.pass === 1 && res.fail === 0,
         'G5 PASS 行 + rc=0 判绿')
     }
+    // G5b: PASS 行带耗时尾注（260908 KI-060 备料②）-> name 取第一个 ]，报告附加行忽略
+    {
+      const res = await mk('"printf \'PASS [ok场景] (3.7s)\\nSCENARIOS ran=1 pass=1 fail=0\\n耗时分解（池内串行合计）：\\n  ro 12s\\n\'"')
+      ok(res.green === true && res.scenarios[0].name === 'ok场景',
+        'G5b PASS 耗时尾注 name 不污染 + 报告附加行被忽略')
+    }
     // G6: 零结果且 rc!=0 -> err 态（非红非绿，测试道自身故障）
     {
       const res = await mk('exit 7')

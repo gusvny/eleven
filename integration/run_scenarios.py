@@ -645,14 +645,19 @@ CMD_TIMEOUT = 900
 
 
 def _run_entry(entry):
-    """跑单条场景（cmd=/bin/sh -c，cwd=仓库根）。返回 (name, exit_code, tail)。"""
+    """跑单条场景（cmd=/bin/sh -c，cwd=仓库根）。返回 (name, exit_code, tail, dur_s)。
+    dur_s=单场景耗时（KI-060 备料②：耗时分布测量——汇总行只给总时长，慢场景
+    定位靠这里逐条打点）。"""
     name, cmd = entry[0], entry[2]
+    t_start = time.time()
     try:
         proc = subprocess.run(["/bin/sh", "-c", cmd], capture_output=True,
                               text=True, timeout=CMD_TIMEOUT)
-        return name, proc.returncode, ((proc.stdout or "") + (proc.stderr or ""))[-1500:]
+        return (name, proc.returncode,
+                ((proc.stdout or "") + (proc.stderr or ""))[-1500:],
+                time.time() - t_start)
     except subprocess.TimeoutExpired:
-        return name, -9, "超时（>%ds）" % CMD_TIMEOUT
+        return name, -9, "超时（>%ds）" % CMD_TIMEOUT, time.time() - t_start
 
 
 def main() -> int:
@@ -679,37 +684,75 @@ def main() -> int:
         else:
             pools.setdefault(opt or "main", []).append(e)
 
-    def _drain(entries):
+    def _drain(entries, pool_name):
         nonlocal ran, passed, failed, env_failed
         for e in entries:
-            name, exit_code, tail_out = _run_entry(e)
+            name, exit_code, tail_out, dur = _run_entry(e)
+            dur_tag = " (%.1fs)" % dur
             # 三态行：0=PASS / 2=ENV_FAIL（环境红，缺什么看缩进尾段）/ 其余=FAIL 产品红。
             if exit_code == 0:
-                block = ["PASS [%s]" % name]
+                block = ["PASS [%s]%s" % (name, dur_tag)]
             elif exit_code == 2:
-                block = (["ENV_FAIL [%s] exit=2" % name]
+                block = (["ENV_FAIL [%s] exit=2%s" % (name, dur_tag)]
                          + ["    " + ln for ln in tail_out.splitlines()[-6:]])
             else:
-                block = (["FAIL [%s] exit=%d" % (name, exit_code)]
+                block = (["FAIL [%s] exit=%d%s" % (name, exit_code, dur_tag)]
                          + ["    " + ln for ln in tail_out.splitlines()[-6:]])
             with lock:
                 ran += 1
                 passed += (exit_code == 0)
                 env_failed += (exit_code == 2)
                 failed += (exit_code not in (0, 2))
+                timings.append({"pool": pool_name, "name": name,
+                                "status": ("PASS" if exit_code == 0
+                                           else "ENV_FAIL" if exit_code == 2 else "FAIL"),
+                                "dur_s": round(dur, 1)})
                 print("\n".join(block), flush=True)
 
+    timings = []   # KI-060 备料②：耗时分布（每场景一行，含池归属）
     for e in exclusives:      # 独占项先行，不与任何池重叠
-        _drain([e])
+        _drain([e], "exclusive")
     with ThreadPoolExecutor(max_workers=max(1, len(pools))) as ex:
-        for f in [ex.submit(_drain, v) for v in pools.values()]:
-            f.result()
+        for fname, pv in pools.items():
+            ex.submit(_drain, pv, fname or "main")
+        ex.shutdown(wait=True)
     # 汇总行五计数（t260904-12 契约 ②b-1）：na=N/A 是腿级状态，已在场景内折算进
     # pass/fail（全腿 N/A=场景红），执行器级恒 0、占位保形状。ran=pass+fail+env_fail
     # 为「双向净」不变式，违反即汇总谎报——按产品红退出（自校验；引擎侧新语义断言随乙段落地）。
     consistent = (ran == passed + failed + env_failed)
+    wall = time.time() - t0
     print("SCENARIOS ran=%d pass=%d fail=%d env_fail=%d na=0 (%.0fs)"
-          % (ran, passed, failed, env_failed, time.time() - t0), flush=True)
+          % (ran, passed, failed, env_failed, wall), flush=True)
+
+    # ---- KI-060 备料②：耗时分布报告（stdout 摘要 + JSON 落档可对比） ----
+    import collections as _c
+    import datetime as _dt
+    import json as _json
+    import pathlib as _pl
+    by_pool = _c.defaultdict(float)
+    for t in timings:
+        by_pool[t["pool"]] += t["dur_s"]
+    print("耗时分解（池内串行合计 / 池间并行，wall=%.0fs）：" % wall)
+    for p, s in sorted(by_pool.items(), key=lambda kv: -kv[1]):
+        n = sum(1 for t in timings if t["pool"] == p)
+        print("  %-10s %6.0fs  (%d 个场景，串行合计——并行关键路径=%s)"
+              % (p, s, n, "是" if s == max(by_pool.values()) else "否"))
+    top = sorted(timings, key=lambda t: -t["dur_s"])[:15]
+    print("最慢 Top15：")
+    for t in top:
+        print("  %6.1fs  %-8s %s" % (t["dur_s"], t["pool"], t["name"]))
+    try:
+        rp = _pl.Path("out") / ("integration-report-%s.json"
+                                % _dt.datetime.now().strftime("%y%m%d-%H%M%S"))
+        rp.parent.mkdir(parents=True, exist_ok=True)
+        rp.write_text(_json.dumps(
+            {"ran": ran, "pass": passed, "fail": failed, "env_fail": env_failed,
+             "wall_s": round(wall, 1), "generated": _dt.datetime.now().isoformat(),
+             "timings": timings}, ensure_ascii=False, indent=1), encoding="utf-8")
+        print("报告落档：%s" % rp, flush=True)
+    except OSError:
+        pass   # 落档失败不改变退出码（报告是观测面）
+
     if not consistent:
         print("FAIL [__summary__] 汇总与明细不一致（双向净校验红）", flush=True)
         return 1

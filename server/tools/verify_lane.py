@@ -553,7 +553,9 @@ def _integ(args):
             ran += 1
             passed += 1
             cur = None
-            scen.append({'name': line[6:-1], 'exit': 0, 'output_tail': ''})
+            # name 取第一个 ]（260908：场景行可带耗时尾注「 (X.Xs)」——KI-060 备料②；
+            # 旧无尾注形态首 ] 即行尾 ]，向后兼容）
+            scen.append({'name': line[6:line.index(']')], 'exit': 0, 'output_tail': ''})
         elif line.startswith('ENV_FAIL ['):
             # 三态协议（t260904-12 契约 ②b-1）：环境红行；畸形（缺 exit=2）沿 FAIL 惯例
             # name=整行、exit=-1 计——畸形输出不静默吞。
