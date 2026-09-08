@@ -176,7 +176,7 @@ async function faultSurface() {
 async function uiScenario() {
   let pw = null;
   for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core',
-    new URL('../../server/ui-check/node_modules/playwright-core/index.mjs', `file://${process.cwd()}/`).href]) {
+    new URL('../../server/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href]) {
     if (!c) continue;
     try { pw = await import(c); break; } catch { /* next */ }
   }
@@ -186,10 +186,25 @@ async function uiScenario() {
     browser = await pw.chromium.launch({ channel: 'chrome', headless: true }).catch(() => pw.chromium.launch({ headless: true }));
     const page = await (await browser.newContext()).newPage();
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await page.waitForSelector('.wb-ticket-row2', { timeout: 12000 });
-    const rows = await page.$$('.wb-ticket-row2');
-    if (rows.length < 1) throw new Error('no rows');
-    await rows[0].click();
+    // 出厂 notice（Continue 遮罩）会拦截行卡点击——先关再断言（lib_browser 同款）。
+    try {
+      const nb = page.locator('button', { hasText: /continue|继续/i }).first();
+      await nb.click({ timeout: 4000 });
+      await nb.waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
+    } catch { /* 无 notice=常态 */ }
+    await page.waitForSelector('.wb-card[data-ticket-id]', { timeout: 12000 });
+    const rowIds = await page.$$eval('.wb-card[data-ticket-id]', (els) => els.map((e) => e.getAttribute('data-ticket-id')));
+    if (rowIds.length < 1) throw new Error('no rows');
+    // 行序不钉死（共享台首行随项目/时间漂移）：逐个问 evidence API，点第一张
+    // 真有证据的票——抽屉断言面前提=目标行有图，无图行点击是夹具事实不是产品失败。
+    let target = null;
+    for (const id of rowIds) {
+      const { status, body } = await evidenceRequest(id);
+      if (status === 200 && body?.ok === true && (body?.result?.files ?? []).length > 0) { target = id; break; }
+    }
+    if (!target) throw new Error('no evidence-bearing row on console');
+    // 票 id 字符集 = [A-Za-z0-9-]（TICKET_ID_RE），无需 CSS.escape（个别无头壳无该全局）。
+    await page.click(`.wb-card[data-ticket-id="${target}"]`);
     await page.waitForSelector('.wb-drawer', { timeout: 10000 });
     await page.waitForSelector('.wb-drawer img[src*="/evidence/"]', { timeout: 10000 });
     const loaded = await page.evaluate(() => {

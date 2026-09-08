@@ -3,7 +3,7 @@
  * 证据目录锚项目化——证据列表/取图按项目根取数，SANDBAR_EVIDENCE_DIR 仅回落默认仓生效。
  *
  * intent（用户可感知面）：宿主在 fpv 视图打开工单详情的「截图证据」区——列表列出
- * fpv 仓 .suyou/evidence 与 .worktrees 泳道两候选的截图，取图端点按 ?project= 从
+ * fpv 仓 .suyou/evidence 与 .worktrees 泳道两候选的截图（naming-compat：.suyou 旧名目录=粘滞契约面），取图端点按 ?project= 从
  * fpv 仓读字节；sandbar 视图同 id 看不到（不串项目）；旧 env 覆盖链保留但只在
  * 无参回落时生效（红线「env 链保留」×方案收窄声明）。与 smoke 既有证据防穿
  * （文件名白名单/TICKET_ID_RE containment）不同面：本条只锁项目化取数与 env 收窄，
@@ -20,8 +20,8 @@ const fx = await makeFixture()
 const TID = 't-fpv-1'
 try {
   // 夹具：fpv 根两候选（归档 + 泳道 screenshots）＋env 覆盖目录
-  const evB = join(fx.repoB, '.suyou', 'evidence', TID)
-  const wtB = join(fx.repoB, '.worktrees', TID, '.suyou', 'screenshots')
+  const evB = join(fx.repoB, '.suyou', 'evidence', TID)  // naming-compat：旧名目录粘滞读点
+  const wtB = join(fx.repoB, '.worktrees', TID, '.suyou', 'screenshots')  // naming-compat：旧名目录粘滞读点
   await mkdir(evB, { recursive: true })
   await mkdir(wtB, { recursive: true })
   await writeFile(join(evB, 'shot-a.png'), 'png-bytes-a', 'utf8')

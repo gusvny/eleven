@@ -52,8 +52,8 @@ try {
 
   // ── 腿B precache 项目化：nextHintCached 与 dismiss 均按项目根，撞码不互串 ──
   {
-    const preB = join(fx.repoB, '.suyou', 'epic-next', EPIC_CODE)
-    const preA = join(fx.repoA, '.suyou', 'epic-next', EPIC_CODE)
+    const preB = join(fx.repoB, '.suyou', 'epic-next', EPIC_CODE)  // naming-compat：旧名目录粘滞读点
+    const preA = join(fx.repoA, '.suyou', 'epic-next', EPIC_CODE)  // naming-compat：旧名目录粘滞读点
     await mkdir(preB, { recursive: true })
     await mkdir(preA, { recursive: true })
     await writeFile(join(preB, 'pre.json'), '{"state_key":"fixture"}', 'utf8')

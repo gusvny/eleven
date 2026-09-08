@@ -268,7 +268,7 @@ const domThumbs = `(() => {
 const domEvidenceSection = `document.querySelector('.wb-eimgs') !== null`
 
 async function openDrawer(page) {
-  const row = page.locator('tr.wb-row', { hasText: FID }).first()
+  const row = page.locator('.wb-card[data-ticket-id]', { hasText: FID }).first()
   if (!(await waitFor(async () => (await row.count()) > 0, 8000))) {
     throw new Error('fixture row not rendered (list stub not consumed?)')
   }
@@ -307,7 +307,7 @@ async function snap(page) {
 /** reload 后重建到「fixture 详情抽屉打开」为止（证据区在抽屉里，光列表不够）。
  *  返回 false 表示板/抽屉没能重建（调用方按环境缺失处理，不算场景失败）。 */
 async function reopenDrawer(page) {
-  const row = page.locator('tr.wb-row', { hasText: FID }).first()
+  const row = page.locator('.wb-card[data-ticket-id]', { hasText: FID }).first()
   if (!(await waitFor(async () => (await row.count()) > 0, 6000))) {
     const boardIcon = page.locator('span.wb-view-icon[title="工单列表"]').first()
     if (!(await boardIcon.count())) return false
@@ -490,7 +490,7 @@ async function runBrowser(pw, browser) {
     }
     await boardIcon.click()
     const rowOk = await waitFor(async () =>
-      (await page.locator('tr.wb-row', { hasText: FID }).count()) > 0, 10000)
+      (await page.locator('.wb-card[data-ticket-id]', { hasText: FID }).count()) > 0, 10000)
     if (!rowOk) {
       record('S1 precheck', 'env_fail', `ticket board did not consume the list stub on ${BASE} (view needs live engine?)`)
       return
