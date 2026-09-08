@@ -32,7 +32,8 @@
 #   SANDBAR_TEST_NAMESPACE / _PROJECTS_DIR / _TARGET_HOST            Temporal namespace / 注册表根 / 引擎地址
 #
 # 详细指南（怎么验证、怎么跑 worker/自测、故障排查）见 server/TESTING.md。
-# 首次 up 需联网：dsh 服务要 npm 装全局 dsh + profile bundles、apt 补 python3。
+# 两服务镜像均本机自建、无 registry 拉取：test-temporal=sh server/build-test-temporal.sh；
+# test-dsh=sh server/build-test-dsh.sh（建镜像时联网一次，之后起台零网络）。
 
 services:
   # ---- 独立 Temporal（temporalite dev server，SQLite 落盘，与 engine 同款免 postgres）----
@@ -84,8 +85,12 @@ services:
   # Temporal SDK 工具（worker / demo / selfcheck）一律在本机跑、用环境变量指向测试
   # Temporal（见 TESTING.md）——engine/.venv 不在容器里。
   dsh:
-    # node 22：dsh@0.1.1-rc.2 传递依赖要求 node>=22.19（node 20 仅 EBADENGINE 警告但运行期真炸）
-    image: node:22-bookworm
+    # 自造镜像（test-dsh）：node:22-bookworm 基座（node>=22.19，dsh@0.1.1-rc.2 传递
+    # 依赖要求）+ dsh 烤进层，起台秒级零联网。此前直接跑 node:22-bookworm、每次
+    # 容器启动 npm 装全局 dsh——456 包每台全网重下 ~2 分钟（可写层随拆台即弃、
+    # npm 缓存留不住，「首次联网」实为「每次」，260908 慢场景解剖实锤）；
+    # 重建=sh server/build-test-dsh.sh（dsh 升版三处同步：脚本+Dockerfile+本行）。
+    image: test-dsh:dsh-0.1.1-rc.2
     container_name: ${SANDBAR_TEST_DSH_NAME:-sandbar-test-dsh}
     working_dir: /repo
     environment:

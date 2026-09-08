@@ -63,6 +63,8 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 COMPOSE_FILE = REPO / "server" / "docker-compose.test.yml"
 TEMPORAL_IMAGE = "test-temporal:cli-1.8.3"
 TEMPORAL_BUILD_SCRIPT = "server/build-test-temporal.sh"
+DSH_IMAGE = "test-dsh:dsh-0.1.1-rc.2"          # 260908：dsh 烤进镜像，起台免每台联网 npm
+DSH_BUILD_SCRIPT = "server/build-test-dsh.sh"
 
 # 禁区：生产三口（3099/7233/8233）+ 缺省测试台三口（3199/17233/18233）。
 # 档位分配永不返回禁区端口；显式 env 指定禁区端口=拒收。
@@ -296,6 +298,14 @@ def docker_present():
 def temporal_image_present():
     try:
         _run(["docker", "image", "inspect", TEMPORAL_IMAGE], timeout=15)
+        return True
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return False
+
+
+def dsh_image_present():
+    try:
+        _run(["docker", "image", "inspect", DSH_IMAGE], timeout=15)
         return True
     except (subprocess.SubprocessError, FileNotFoundError):
         return False
@@ -759,6 +769,11 @@ def do_up_public(project, services_list, opts, timeout):
         raise StageError(
             "ENV_FAIL: 测试镜像缺席：%s（本机自建镜像、无 registry 拉取）——"
             "先跑 sh %s 重建，再重试" % (TEMPORAL_IMAGE, TEMPORAL_BUILD_SCRIPT), kind="env")
+    if "dsh" in services_list and not dsh_image_present():
+        raise StageError(
+            "ENV_FAIL: 测试镜像缺席：%s（本机自建镜像、无 registry 拉取；此前每台容器内"
+            "联网 npm 装 dsh ~2 分钟，260908 起烤进镜像）——先跑 sh %s 重建，再重试"
+            % (DSH_IMAGE, DSH_BUILD_SCRIPT), kind="env")
     ports = explicit_ports(services_list)
     lock_fd = None
     try:

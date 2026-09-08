@@ -33,8 +33,10 @@
 docker compose -f server/docker-compose.test.yml up -d
 ```
 
-第一次 `up` 需要联网（dsh 服务 `npm i` 全局 dsh + profile bundles、`apt` 补 python3），
-之后 `up`/`restart` 走缓存与数据卷，秒级。启动后两个容器：
+两服务镜像均本机自建、无 registry 拉取：`sh server/build-test-temporal.sh`、
+`sh server/build-test-dsh.sh`（建镜像时联网一次；dsh 曾是每次起台容器内联网
+`npm i` 全局装、每台 ~2 分钟，260908 起烤进镜像）。之后 `up`/`restart` 走缓存
+与数据卷，秒级。启动后两个容器：
 
 - `suyou-test-temporal`：独立 Temporal（temporalite dev server，SQLite 落盘）
 - `suyou-test-dsh`：独立 dsh 测试控制台（3199）
