@@ -65,7 +65,10 @@ const bandState = () => page.evaluate(() => {
     headStyle: document.querySelector('style[data-wb-chat-projband-style]')?.textContent ?? null,
     bandBorderWidth: bandEl ? getComputedStyle(bandEl).borderTopWidth : null,
     bandBorderColor: bandEl ? getComputedStyle(bandEl).borderTopColor : null,
-    rowVarColor: getComputedStyle(document.querySelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])') ?? document.body)
+    // 同行同源口径：T2 点的是「第一个项目组」的 +（page.click first-match），色带
+    // 归属=该组；这里也取第一个项目行读 --wb-psess-color——硬锚 SeedWs 行在多项目
+    // 台必错位（band=seedq 蓝 vs var=seedws 绿，260909 全量实锤）。
+    rowVarColor: getComputedStyle(document.querySelector('[data-wb-psess-row]') ?? document.body)
       .getPropertyValue('--wb-psess-color').trim(),
   };
 });

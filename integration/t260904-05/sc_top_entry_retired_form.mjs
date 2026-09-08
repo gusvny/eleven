@@ -126,8 +126,13 @@ try {
   // 源串改比例/换色源/改链即本场景红（变更走正规门，不由热修顺手改）。
   const colors = await page.evaluate(() => {
     const root = document.querySelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])');
-    const dot = document.querySelector('[data-wb-psess-dot]');
-    const plus = document.querySelector('[data-wb-psess-new]');
+    // 同行同源口径：dot 在组头（wb-group-head，psess 行的兄弟位——sidebar 源
+    // 647 行），+ 钮在行内；都取 root 所在组作用域（全局 first-match 在多项目台
+    // 会锚到别行：seedq 行序在前后 first dot=seedq 蓝而 root=seedws 绿，三处同源
+    // 断言必炸；260909 实锤）。
+    const scope = root?.parentElement ?? null;
+    const dot = scope?.querySelector('[data-wb-psess-dot]') ?? null;
+    const plus = root?.querySelector('[data-wb-psess-new]') ?? null;
     if (!root || !dot || !plus) return null;
     const cs = el => getComputedStyle(el);
     // 重基线探针：与 PSESS_STYLES 源串同链同比（锁定契约），挂 root 子树取同作用域
