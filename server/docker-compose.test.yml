@@ -100,6 +100,8 @@ services:
       SANDBAR_PROJECTS_DIR: ${SANDBAR_TEST_PROJECTS_DIR:-/nonexistent} # 场景注入注册表根（容器内路径）
       SANDBAR_TEST_PROFILE: ${SANDBAR_TEST_PROFILE:-sandbar}
       SANDBAR_TEST_PROFILE_SRC: ${SANDBAR_TEST_PROFILE_SRC:-/repo/server/profile}
+      # GUI 模型供给旋钮（见 command 内注释）：空值=不干预（产品默认原样拷贝）
+      SANDBAR_TEST_GUI_MODEL: ${SANDBAR_TEST_GUI_MODEL:-}
     volumes:
       - ${SANDBAR_TEST_REPO_DIR:-../..}:/repo:ro     # 仓根（缺省=仓库根，向上两级）
       - dsh-home:/dsh-home
@@ -145,6 +147,32 @@ services:
           case "$${f##*/}" in node_modules) continue ;; esac
           cp -r "$$f" "$$DSH_HOME/profiles/$$SANDBAR_TEST_PROFILE/"
         done
+        # GUI 会话模型供给旋钮（测试台面；260908：deepseek 账户欠费 → 台内 turn
+        # error 会把用户消息行回滚掉，依赖消息渲染的 chat tag 场景恒红。产品默认
+        # 在 server/profile/cordis.patch.yml 不动——本旋钮只在测试 env 显式设置时
+        # 改台内拷贝（每次启动重拷=幂等）。值形 "provider/model"（kimi-coding/k3
+        # 为实测健康路）。SANDBAR_TEST_GUI_MODEL=kimi-coding/k3
+        if [ -n "$${SANDBAR_TEST_GUI_MODEL:-}" ]; then
+          prov=$${SANDBAR_TEST_GUI_MODEL%%/*}; mod=$${SANDBAR_TEST_GUI_MODEL##*/}
+          sed -i \
+            -e "/- id: agent-default-model/,/^  - id:/ s/    provider: .*/    provider: $$prov/" \
+            -e "/- id: agent-default-model/,/^  - id:/ s/    model: .*/    model: $$mod/" \
+            "$$DSH_HOME/profiles/$$SANDBAR_TEST_PROFILE/cordis.patch.yml"
+          # pi-ai catalog 路由只缺 key 名引用（model-routes.yaml 同款：kimi-coding=
+          # anthropic-messages/api.kimi.com/coding，catalog 自带 k3）。新卷 settings
+          # 恒空 → 目录恒空、composer 恒 disabled（260908 重建台实锤），故非 catalog
+          # 内置的 provider 必须随旋钮补这条 profile 补丁；catalog 自带模型清单，
+          # 补丁只需给 key 名引用、不必列 models。
+          if [ "$$prov" != "deepseek-official" ]; then
+            printf '%s\n' \
+              '- id: llm-pi-ai' \
+              '  config:' \
+              '    providers:' \
+              "      $$prov:" \
+              '        apiKeyEnv: KIMI_API_KEY' \
+              >> "$$DSH_HOME/profiles/$$SANDBAR_TEST_PROFILE/cordis.patch.yml"
+          fi
+        fi
         # 插件依赖面（gen4 定稿，realpath 语义）：node 解析对软链取 realpath——
         # profiles/sandbar/node_modules 若整体软链到依赖树，workbench 的 realpath=依赖树
         # （主树旧 client 被服出=克缝始终破坏+client/host 运行时错配）。故 node_modules
