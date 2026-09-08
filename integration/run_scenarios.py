@@ -751,8 +751,8 @@ def main() -> int:
             print("\n".join(block), flush=True)
 
     timings = []   # KI-060 备料②：耗时分布（每场景一行，含池归属）
-    for e in exclusives:      # 独占项先行，不与任何池重叠
-        _drain([e], "exclusive")
+    for e in exclusives:      # 独占项先行，不与任何池重叠（恒串行）
+        _drain([(e, True)], "exclusive")
     with ThreadPoolExecutor(max_workers=max(1, len(pools))) as ex:
         for fname, pv in pools.items():
             ex.submit(_drain, pv, fname or "main")
