@@ -3411,7 +3411,6 @@ async def run_integration_tests(args: IntegrationRunArgs) -> IntegrationRunResul
     return await _run_scenarios(wt, args.ticket_id)
 
 
-@activity.defn
 def _stub_stage_shortcut(args: AgentStageArgs, settle_on_cache: bool = False) -> Optional[StageResult]:
     """integration 自定义段的 stub/缓存短路（arbitrate/acceptance_walkthrough 补齐）。
 
@@ -3457,6 +3456,7 @@ def _stub_stage_shortcut(args: AgentStageArgs, settle_on_cache: bool = False) ->
     return stub
 
 
+@activity.defn
 async def arbitrate(args: AgentStageArgs) -> StageResult:
     """仲裁步（t260829-07 后续）：integration 读机械测试结果，三态判定——
     pass / tests-fault（自己迭代测试集，改动随本步 settle 落盘）/ code-fault
