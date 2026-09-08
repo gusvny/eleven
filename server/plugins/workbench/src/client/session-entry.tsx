@@ -302,6 +302,13 @@ function isBlankSession(sessions: SessionsFace, id: string): boolean {
  * 抢先发首条则静默跳过（console.info 留痕——用户已接管对话，提示是噪音）。
  */
 export async function injectSessionCharter(sessions: SessionsFace, staged: string, projectKey: string, notify: (text: string, project?: string) => void): Promise<void> {
+  // 截图台豁免（capture 族）：capture.mjs 经 addInitScript 预置 localStorage
+  // 门旗。隔离台没有真 agent 会话，charter prompt 永远挂在 machineBusy，
+  // composer 恒 readOnly，种子消息写不进去、chat 态视图开不出——台内造数
+  // 语义下跳过注入，改由种子消息自己驱动 active（与注入落地前同权）。
+  try {
+    if (globalThis.localStorage?.getItem('sandbar-ui-capture-skip-charter') === '1') return
+  } catch { /* localStorage 不可达（SSR 等）→ 不豁免 */ }
   if (!isBlankSession(sessions, staged)) return
   try {
     const res = await fetch(`${SESSION_CHARTER_PATH}?project=${encodeURIComponent(projectKey)}`)

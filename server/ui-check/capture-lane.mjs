@@ -174,7 +174,7 @@ export async function buildTempProfile(tmpHome, laneWorkbenchDir) {
     throw new Error(`主树 profile/node_modules 缺 sandbar-workbench 软链，无法改指泳道 build（查 ${repoNm}）`);
   }
   // headless profile 也软链一份（同构 docker-compose 测试控制台；截图台不 spawn，兜底）
-  const profHeadless = path.join(tmpHome, "profiles", "suyou-headless");
+  const profHeadless = path.join(tmpHome, "profiles", "sandbar-headless");
   const repoHeadless = path.join(REPO_ROOT, "server", "profile-headless");
   if (existsSync(repoHeadless)) await symlink(repoHeadless, profHeadless);
   return profDir;
@@ -274,7 +274,7 @@ export async function main() {
     console.log("[capture-lane] 降级说明：--boot-local 显式走自搭进程台（docker 缺席宿主的人工通路；闸内一律走 docker 舞台）");
   }
 
-  const consoleCmd = (process.env.SANDBAR_CONSOLE_CMD || "dsh --profile suyou").split(" ");
+  const consoleCmd = (process.env.SANDBAR_CONSOLE_CMD || "dsh --profile sandbar").split(" ");
   const bootTimeoutMs = Number(process.env.SANDBAR_CAPTURE_LANE_BOOT_MS || 45000);
   let tmpHome = null;
   let proc = null;

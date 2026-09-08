@@ -396,7 +396,43 @@ async function seedChatMessage(page) {
   // 新建会话到 composer 挂稳有窗口期（过早拿到的是将被换装的 hero composer，
   // 写进去会被换掉——t260901-02 实测 value 恒空）。重试写：每次现查 textarea、
   // 写后回读校验，值不粘住即等 1s 重来（最多 20s）。
+  // charter 注入后（session-entry.tsx 点「+」即提交 charter）composer 进入
+  // machineBusy：平台 InputBar 把它置 readOnly，此刻写值必被 React 受控回冲。
+  // 且隔离台可能弹「Add an API key」准入模态把会话压在 inert——不点掉
+  // 「Configure later」composer 永远不会 editable。所以写值前先等 composer
+  // 可编辑（textarea 在场且非 readOnly 非 disabled，最长 120s，期间顺手点
+  // 准入模态让路）；data-phase 是否翻 active 不作为前置（平台 class 是
+  // CSS-module 哈希名，不能当选择器用，只认稳定的 data-phase/textarea 锚）。
+  const editableDeadline = Date.now() + Number(process.env.SANDBAR_UI_CAPTURE_COMPOSER_EDITABLE_MS || 120000);
+  let editable = false;
+  while (Date.now() < editableDeadline) {
+    const later = page.locator('button:has-text("Configure later")').first();
+    try {
+      if (await later.isVisible()) { await later.click(); console.log("[capture] key 准入模态已点 Configure later"); }
+    } catch { /* 模态时隐时现，下一轮再试 */ }
+    const ta0 = page.locator("textarea").first();
+    if (await ta0.count()) {
+      const ro = await ta0.evaluate((el) => el.readOnly || el.disabled).catch(() => true);
+      if (!ro) { editable = true; break; }
+    }
+    await page.waitForTimeout(1000);
+  }
+  if (!editable) {
+    const diag = await page.evaluate(() => {
+      const tas = [...document.querySelectorAll("textarea")];
+      return {
+        phases: [...document.querySelectorAll("[data-phase]")].map((e) => e.getAttribute("data-phase")),
+        textareas: tas.map((t) => ({
+          cls: (t.className || "").slice(0, 60), disabled: t.disabled, readOnly: t.readOnly,
+          visible: !!(t.offsetWidth || t.offsetHeight),
+        })),
+      };
+    }).catch((e) => String(e));
+    throw new Error("composer 在 120s 内未恢复可编辑（charter machineBusy 未解除或准入模态未让路），诊断="
+      + JSON.stringify(diag));
+  }
   let filled = "";
+  let lastErr = "";
   for (let i = 0; i < 20; i++) {
     const ta = page.locator("textarea").first();
     if (!(await ta.count())) { await page.waitForTimeout(1000); continue; }
@@ -407,12 +443,24 @@ async function seedChatMessage(page) {
       setter.call(el, txt);
       el.dispatchEvent(new Event("input", { bubbles: true }));
       return el.value;
-    }, promptText).catch(() => "");
+    }, promptText).catch((e) => { lastErr = String(e); return ""; });
     if (filled === promptText) break;
     await page.waitForTimeout(1000);
   }
   if (filled !== promptText) {
-    throw new Error("种子消息写入 composer 失败（重试 20s 后 textarea value=" + JSON.stringify(filled) + "）");
+    const diag = await page.evaluate(() => {
+      const tas = [...document.querySelectorAll("textarea")];
+      return {
+        phases: [...document.querySelectorAll("[data-phase]")].map((e) => e.getAttribute("data-phase")),
+        textareas: tas.map((t) => ({
+          cls: (t.className || "").slice(0, 60), disabled: t.disabled, readOnly: t.readOnly,
+          visible: !!(t.offsetWidth || t.offsetHeight),
+        })),
+      };
+    }).catch((e) => String(e));
+    throw new Error("种子消息写入 composer 失败（重试 20s 后 value=" + JSON.stringify(filled)
+      + (lastErr ? "，末次异常=" + lastErr : "")
+      + "，诊断=" + JSON.stringify(diag) + "）");
   }
   await page.waitForTimeout(300); // 让 React onChange 落 state
   const clicked = await page.evaluate(() => {
@@ -771,6 +819,15 @@ async function main() {
   try {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await ctx.newPage();
+    // charter 豁免门旗（workbench session-entry.tsx 同源约定）：隔离台无真
+    // agent 会话，charter prompt 永远挂 machineBusy、composer 恒 readOnly，
+    // 种子消息写不进去——预置门旗让注入跳过，由种子消息自己驱动 active。
+    // 必须在首个 goto 之前注入（addInitScript 时序）。
+    if (args.allowSeed) {
+      await page.addInitScript(() => {
+        try { localStorage.setItem("sandbar-ui-capture-skip-charter", "1"); } catch { /* 尽力而为 */ }
+      });
+    }
     // fixture 路由 install（t260901-24 R5）：必须在首个 page.goto 之前——否则首屏
     // /tickets 已打到真端点（空家=空列表）。单 handler 内部经 routeDecision 按
     // method+pathname 分派（Playwright 路由 LIFO 匹配的坑从结构上绕开，取舍非遗漏）。

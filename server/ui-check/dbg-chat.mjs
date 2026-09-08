@@ -42,7 +42,7 @@ const logFd = openSync(path.join(tmpHome, "console.log"), "a");
 const portPatch = path.join(tmpHome, "port_patch.yml");
 await (await import("node:fs/promises")).writeFile(portPatch,
   `- id: webserver\n  config:\n    host: 127.0.0.1\n    port: ${port}\n`, "utf8");
-const proc = spawn("dsh", ["--profile", "suyou", "--patch", portPatch,
+const proc = spawn("dsh", ["--profile", "sandbar", "--patch", portPatch,
   "--port", String(port), "--host", "127.0.0.1", "--no-open"], {
   cwd: REPO_ROOT, env: { ...process.env, DSH_HOME: tmpHome }, detached: true,
   stdio: ["ignore", logFd, logFd],
