@@ -619,3 +619,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 病根：隔离台 e2e 场景贵（分钟级）所以场景面偏科函数级；无「动输入契约必带全链场景」的闸规则。
 - 机制补丁（已落）：dev-lane 验收段第四问＋integration persona「整车点火」纪律。修复票=t260908-02。
 - 260908 晨层错修正（宿主点破）：KI-063 补丁首版误入两层共享面（dev-lane.yaml 通用模板＋server/dsh/roles 默认回落人格）——TicketInput 契约是引擎私货，不得污染多项目通用面。两处已撤。正解=sandbar 项目专属声明面：注册表声明 paths.roles_dir 指向引擎仓专属人格目录（项目级 overlay，他项目不受染），随小票落地；「实报即全族」一条是真通用，保留在模板与人格不动。
+
+## KI-064 dev-lane.yaml 生成物漂移（260908 仲裁上报，integration 自记——f67a456 遗留）
+- f67a456（260907 方法论入机制）手改 dev-lane.yaml 未回 dev_lane.py 生成源——yaml 是生成物，手改必漂移（今晨 KI-063 首版入 yaml 又撤，同文件二连踩）。
+- 处置：方法论第三问（实报全族）应改走 dev_lane.py 源码常量（STAGE_ACCEPTANCE_EXTRA 或同源），随专门票；在此之前 yaml 手改段为活漂移，merge 有风险面。
