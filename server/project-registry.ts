@@ -3,9 +3,9 @@
  *
  * 形状：一项目一目录，注册条目 = 目录内 project.yaml，装载 = 扫描根目录下
  * 各项目子目录里的 project.yaml。
- * env 优先级（每次调用现读，仿 SUYOU_PROJECTS_YAML 既有语义，smoke「先 import 后设 env」依赖）：
- *   SUYOU_PROJECTS_YAML  >  SANDBAR_PROJECTS_DIR  >  ~/.sandbar/projects
- * - SUYOU_PROJECTS_YAML（legacy 单文件模式）：指向旧格式注册表文件（projects: 列表），
+ * env 优先级（每次调用现读，仿 SANDBAR_PROJECTS_YAML 既有语义，smoke「先 import 后设 env」依赖）：
+ *   SANDBAR_PROJECTS_YAML  >  SANDBAR_PROJECTS_DIR  >  ~/.sandbar/projects
+ * - SANDBAR_PROJECTS_YAML（legacy 单文件模式）：指向旧格式注册表文件（projects: 列表），
  *   行为与 260823 多项目化版本完全一致——providers/knowledge 两个既有 smoke 依赖此模式。
  * - SANDBAR_PROJECTS_DIR / 默认根目录（per-key 目录模式，契约① schema v1）：
  *   扫描根目录下各项目子目录的 project.yaml；单条目畸形/版本不支持 = 该项目隔离（fail-closed 可见，
@@ -56,7 +56,7 @@ function legacySeedPath(): string {
 
 /** legacy env 模式注册表路径（每次调用现读 env）。 */
 function legacyRegistryPath(): string {
-  return process.env.SUYOU_PROJECTS_YAML ?? legacySeedPath()
+  return process.env.SANDBAR_PROJECTS_YAML ?? legacySeedPath()
 }
 
 /** 剥行尾注释 + 右空白；整行注释/空行返回 null（跳过）。 */
@@ -368,7 +368,7 @@ export interface Registry {
 
 /** 装载注册表全量（好条目 + 隔离条目）。legacy env 在位时走旧单文件模式。 */
 export function loadRegistry(): Registry {
-  if (process.env.SUYOU_PROJECTS_YAML) {
+  if (process.env.SANDBAR_PROJECTS_YAML) {
     return { projects: parseProjectsYaml(readFileSync(legacyRegistryPath(), 'utf8'), legacyRegistryPath()), quarantined: [] }
   }
   const root = registryRoot()

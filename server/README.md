@@ -29,7 +29,7 @@ server/
   sandbar-tools.ts            # 插件本体（唯一真身）；导出 runAdminCli 供 ui/node.ts 复用
   ui/                       # 管理台 UI 插件（包名 sandbar-admin-ui，dsh.client 双面包）
     package.json            #   exports["."]=node.ts（宿主半）/exports["./client"]=lib/client.js
-    node.ts                 #   宿主半：在 dsh webServer 挂 /suyou-admin/api/*（tools/call/audit）
+    node.ts                 #   宿主半：在 dsh webServer 挂 /sandbar-admin/api/*（tools/call/audit）
     src/client/index.tsx    #   浏览器半源码：设置页「溯游」分区（工具直调+审计流水）
     lib/client.js           #   浏览器半产物（已提交；改 src/client 后才需重建，见下）
     tsdown.config.ts        #   构建配置（closure-factory 外衣，react/@deepseek-ai 外部化）
@@ -58,7 +58,7 @@ server/
 
 管理台面板：启动 WebUI → 设置（侧栏齿轮）→ 导航「溯游」（工具直调+审计流水）与「工单台」
 （工单工作流台三区：台面卡片网格/详情抽屉/操作矩阵）。
-工具直调卡走 `/suyou-admin/api/call`（同源，不需 admin token，webServer 只绑回环）；
+工具直调卡走 `/sandbar-admin/api/call`（同源，不需 admin token，webServer 只绑回环）；
 命中 needsApproval 名单的写操作须面板弹窗确认后带 `confirm:true` 重发。
 工单台走 `/sandbar-workbench/api/wf/*`（ticket/workflow M1 引擎；写操作直接执行，run-id 审计
 在 server/admin.log 同一真源）。审计流水读 `server/admin.log` 末 100 行。
@@ -97,7 +97,7 @@ done
 ```
 
 插件里 admin.py 的位置按「本文件上两级」自动推导（= 仓库根），正常无需任何配置；
-非常规布局时设 `export SUYOU_REPO=<仓库根>` 或改 patch 里 sandbar-tools 行的 `config.repo`。
+非常规布局时设 `export SANDBAR_REPO=<仓库根>` 或改 patch 里 sandbar-tools 行的 `config.repo`。
 
 ## 配 key（凭据 seam，key 不进任何仓库文件）
 
@@ -152,7 +152,7 @@ npx @deepseek-ai/dsh@0.1.0-rc.7 --profile suyou --dump-config | grep -A4 sandbar
 
 - profile 起不来 → 先 `--dump-config` 看组装；`--dump-default-config` 可跳过用户层定位坏补丁。
 - 插件行在树里但工具没注册 → 看启动日志 `sandbar-tools:` 前缀的行；多为 python3 不在 PATH
-  或 repo 推导失败（设 `SUYOU_REPO`）。
+  或 repo 推导失败（设 `SANDBAR_REPO`）。
 - cordis 的 `!!js` 表达式**只在 config/disabled 里求值**，插件 `name` 字段不支持——
   所以插件用 profile 目录内相对软链挂载，移动目录结构时保持软链有效即可。
 - macOS 首跑可能弹「文稿目录」授权（TCC，与 app 热更层同款），手点 Allow 一次。

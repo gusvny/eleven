@@ -15,7 +15,7 @@
  * 只用 dsh 稳定面：apply(ctx) + ctx.tools.register + tools/pre-execute；
  * 不碰 preview 不稳定面（不启用 dsh-tool-cordis 动态插件）。
  *
- * repo 解析顺序：config.repo → SUYOU_REPO 环境变量 → 按本文件位置推导
+ * repo 解析顺序：config.repo → SANDBAR_REPO 环境变量 → 按本文件位置推导
  * （<repo>/server/sandbar-tools.ts 上一级）。无任何机器绝对路径写死。
  */
 
@@ -91,7 +91,7 @@ interface PyToolEntry {
 }
 
 export async function apply(ctx: Context, config?: SandbarToolsConfig) {
-  const repo = config?.repo ?? process.env.SUYOU_REPO ?? DEFAULT_REPO
+  const repo = config?.repo ?? process.env.SANDBAR_REPO ?? DEFAULT_REPO
   const python = config?.python ?? 'python3'
   const timeoutMs = config?.timeoutMs ?? 300_000
   const needsApproval = new Set(config?.needsApproval ?? ['params_set'])
