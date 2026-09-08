@@ -3412,6 +3412,51 @@ async def run_integration_tests(args: IntegrationRunArgs) -> IntegrationRunResul
 
 
 @activity.defn
+def _stub_stage_shortcut(args: AgentStageArgs, settle_on_cache: bool = False) -> Optional[StageResult]:
+    """integration 自定义段的 stub/缓存短路（arbitrate/acceptance_walkthrough 补齐）。
+
+    通用 agent 段在 _run_agent_stage_impl 里有前两道前置：结果文件幂等返回 +
+    SANDBAR_AGENT_STUB=1 自写 stub 结果即返回（模块头注释的契约承诺：「stub 时
+    activity 自写结果文件即返回，不起 agent 进程」）。这两个 integration 自定义段
+    绕开了通用实现——260909 实测 stub worker 下验收走查段仍真起 capture-lane +
+    真 agent 进程，外部 rework 信号只能等当前 activity 落地才被 workflow 消费，
+    sc_auto_rework_trace 一笔被拖出 ~590s 无谓等待。此处补齐同款短路：
+    - 结果文件已存在=幂等返回（scene 预置 verdict 的消费路径不变；settle_on_cache
+      由调用方按本段语义决定，arbitrate 非并行分叉期需代落盘）；
+    - stub 模式缺文件=自写 stub 结果即返回——summary 恒无 verdict= 标记，与通用
+      stub 一致（scene D 的仲裁格式轮上限触发器语义不漂移）。
+    """
+    rfile = Path(args.result_file)
+    if rfile.is_file():
+        cached = _read_result(rfile)
+        if cached is not None:
+            activity.logger.info("[%s/%s] 结果文件已存在，幂等返回（gen%d）",
+                                 args.ticket_id, args.stage_id, args.gen)
+            _patch_result_prompt(rfile, args.prompt)
+            if settle_on_cache:
+                note = _settle_worktree_lane(_ws_cwd(args.workspace, args.ticket_id),
+                                             args.ticket_id, args.stage_id, args.gen)
+                if note:
+                    cached.evidence = (cached.evidence + "\n[worker settle] " + note).strip()
+            return cached
+    if os.environ.get("SANDBAR_AGENT_STUB") != "1":
+        return None
+    stub = StageResult(
+        status="ok",
+        summary="[stub] %s 段完成（SANDBAR_AGENT_STUB=1，第 %d 次进段）"
+                % (args.stage_id, args.gen),
+        report="[stub] 做了什么：无（stub 演示）\n\n怎么验证的：无",
+        deliverables=[], files_changed=[], files_changed_shape="ok",
+        evidence="stub evidence: prompt %d 字" % len(args.prompt))
+    rfile.write_text(json.dumps({
+        "status": stub.status, "summary": stub.summary, "report": stub.report,
+        "deliverables": stub.deliverables, "files_changed": stub.files_changed,
+        "evidence": stub.evidence, "prompt": args.prompt,
+    }, ensure_ascii=False, indent=1) + "\n", "utf-8")
+    activity.heartbeat("stub done")
+    return stub
+
+
 async def arbitrate(args: AgentStageArgs) -> StageResult:
     """仲裁步（t260829-07 后续）：integration 读机械测试结果，三态判定——
     pass / tests-fault（自己迭代测试集，改动随本步 settle 落盘）/ code-fault
@@ -3420,6 +3465,12 @@ async def arbitrate(args: AgentStageArgs) -> StageResult:
     verdict 编码契约：summary 首个 ``verdict=<值>`` 标记（FLOW_BRIEF 明示）。"""
     rfile = Path(args.result_file)
     rfile.parent.mkdir(parents=True, exist_ok=True)
+    # stub/缓存短路（260909：通用段同款两道前置补齐——此前 stub worker 下本段
+    # 真起 agent 进程，外部信号要等 activity 落地才被 workflow 消费，一笔场景
+    # 被拖出 ~10 分钟无谓等待）。
+    hit = _stub_stage_shortcut(args, settle_on_cache=not args.skip_settle)
+    if hit is not None:
+        return hit
     cwd = _ws_cwd(args.workspace, args.ticket_id)
     project = await _fetch_ticket_project(args.ticket_id)
     cmd, env = _prepare_agent_spawn(
@@ -3673,6 +3724,11 @@ async def acceptance_walkthrough(args: AgentStageArgs) -> StageResult:
     agent 沙箱跑不了浏览器（t260829-02/-06 两次实测），浏览器一律 worker 代跑。"""
     rfile = Path(args.result_file)
     rfile.parent.mkdir(parents=True, exist_ok=True)
+    # stub/缓存短路（260909：与 arbitrate 同款——stub worker 下本段此前仍真起
+    # capture-lane + 真 agent，一笔场景被拖出 ~590s/~85s 无谓等待）。
+    hit = _stub_stage_shortcut(args)
+    if hit is not None:
+        return hit
     cwd = _ws_cwd(args.workspace, args.ticket_id)
     # 前置：capture-lane 隔离台实拍（best-effort——失败注入说明，agent 按无截图判定）
     cap_out = lane_dot_path(cwd, "screenshots", "acceptance", create=True)

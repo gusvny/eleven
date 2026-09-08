@@ -287,6 +287,9 @@ export function startStubWorker(fixture, sdkPython, ticketId) {
       SANDBAR_TASK_QUEUES: `sandbar-ticket-${ticketId},suyou-ticket-${ticketId}`,  // naming-compat（新旧双前缀 CSV=ticket_worker.spawn 同款契约，t260907-04）
       SANDBAR_PROJECTS_DIR: join(fixture, '.e2e-projects'),  // 项目注册表夹具化（t260907-04：机器种子 key suyou 指向已退役仓）
       SANDBAR_WATCH_WORKFLOW: ticketId,
+      // watch 快档（t260905-02 旋钮）：场景收口 cancel 后 worker 自退从慢档 30s×轮
+      // 缩到 ~4s——cleanupTicket 的 90s 等退窗口此前恒被慢档吃满（260909 计时实锤）。
+      SANDBAR_WATCH_INTERVAL_SEC: '4',
       SANDBAR_AGENT_STUB: '1',
       SANDBAR_SUGGEST_STUB: 'ok',
       SANDBAR_UI_CAPTURE_STUB: '1',
