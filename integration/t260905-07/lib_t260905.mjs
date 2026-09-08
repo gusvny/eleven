@@ -121,7 +121,7 @@ export async function makeFixtureConsole() {
 
   async function start() {
     logFd = openSync(logPath, 'a')
-    proc = spawn('dsh', ['--profile', 'suyou', '--patch', portPatch,
+    proc = spawn('dsh', ['--profile', 'sandbar', '--patch', portPatch,
       '--port', String(port), '--host', '127.0.0.1', '--no-open'], {
       cwd: REPO_ROOT,
       env: {

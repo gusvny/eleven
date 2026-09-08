@@ -59,6 +59,10 @@ function* walk(dir) {
     if (st.isDirectory()) {
       if (!SKIP_DIRS.has(name)) yield* walk(p)
     } else if (st.isFile()) {
+      // *.log=追加式运行审计流水（gitignored，如 server/admin.log 499MB）：闸口回执
+      // 逐字引用历史工单原文（含旧仓绝对路径属事实记录），与 .suyou/.sandbar 运行时
+      // 记录同口径排除；顺带省掉每次全量读大日志的扫描成本（t260907-01 收口补）
+      if (name.endsWith('.log')) continue
       yield p
     }
   }

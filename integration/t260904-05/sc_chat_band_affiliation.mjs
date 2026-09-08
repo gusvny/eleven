@@ -134,7 +134,7 @@ try {
   }
 
   // T5 点工单行归属不动（chat 不切换 → 色带保持）
-  const ticketRow = await page.$('.wb-ticket-row2');
+  const ticketRow = await page.$('.wb-card[data-ticket-id]');
   if (!ticketRow) {
     record('t5/ticket-click-band-stays', 'env_fail', '无工单行 fixture');
   } else {

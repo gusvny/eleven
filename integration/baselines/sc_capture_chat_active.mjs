@@ -37,6 +37,15 @@ const MAIN_TREE = path.resolve(REPO_ROOT, "..", "..");       // 主树（playwri
 const MAIN_UI_CHECK = path.join(MAIN_TREE, "server", "ui-check");
 const CAPTURE_LANE = path.join(REPO_ROOT, "server", "ui-check", "capture-lane.mjs");
 
+// 7 张必备视图清单（与 sc_capture_chat_e2e.mjs 同口径）：
+// --boot-local 自搭台会比 docker 台多产外观/文档/模型路由等尽力视图，
+// 断言只看这 7 张在不在，多产不退化、缺张才算红。
+const SEVEN_VIEWS = [
+  "console-default.png", "console-board.png", "console-epics.png",
+  "console-new-ticket.png", "console-sessions.png", "console-chat.png",
+  "console-refresh.png",
+];
+
 const results = [];
 function record(name, status, detail = "") {
   results.push({ name, status, detail });
@@ -116,7 +125,10 @@ async function fullChain() {
   let combined = "";
   try {
     const code = await new Promise((resolve) => {
-      const p = spawn(process.execPath, [CAPTURE_LANE, "--lane", REPO_ROOT, "--out", out], {
+      // --boot-local：chat 种子要真凭据真模型往返——docker 台模式容器内无凭据，
+      // 会话恒 inert、composer 恒 readOnly，种子写不进去（capture-lane 明示的人工通路）。
+      // 自搭台用空闲端口，不碰用户的 3099 控制台。
+      const p = spawn(process.execPath, [CAPTURE_LANE, "--lane", REPO_ROOT, "--out", out, "--boot-local"], {
         cwd: REPO_ROOT,
         env: {
           ...process.env,
@@ -135,7 +147,10 @@ async function fullChain() {
     });
     if (code !== 0) return record("C1 capture-lane 全链", "fail", `退出码 ${code}`);
     const files = (await readdir(out)).filter((f) => f.endsWith(".png"));
-    if (files.length !== 7) return record("C1 capture-lane 全链", "fail", `期望 7 张视图，实得 ${files.length}: ${files.join(",")}`);
+    // 视图清单断言从「恰 7 张」放宽为「7 张必备视图在场」：--boot-local 的自搭台
+    // 比 docker 台多产外观/文档/模型路由等尽力视图（多不退化，缺才算红）
+    const missing = SEVEN_VIEWS.filter((v) => !files.includes(v));
+    if (missing.length) return record("C1 capture-lane 全链", "fail", `必备视图缺失 ${missing.length} 张: ${missing.join(",")}（实得 ${files.length}）`);
     const sha = async (f) => createHash("sha256").update(await readFile(path.join(out, f))).digest("hex");
     const chatSha = await sha("console-chat.png");
     const defaultSha = await sha("console-default.png");

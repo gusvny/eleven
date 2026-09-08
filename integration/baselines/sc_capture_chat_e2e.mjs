@@ -146,7 +146,7 @@ function normalizeLaneBuildMtimes() {
 async function runCaptureLane(outDir) {
   normalizeLaneBuildMtimes();
   return await new Promise((resolve) => {
-    const child = spawn(process.execPath, [CAPTURE_LANE, "--lane", LANE_ROOT, "--out", outDir], {
+    const child = spawn(process.execPath, [CAPTURE_LANE, "--lane", LANE_ROOT, "--out", outDir, "--boot-local"], {
       cwd: LANE_ROOT,
       detached: true, // 独立进程组：超时能整组杀（含控制台 spawn 的子进程）
       env: { ...process.env, SANDBAR_CAPTURE_MAIN_UI_CHECK: mainUiCheck || "" },
@@ -249,7 +249,9 @@ if (envReason) {
   record("A7 no-bare-typeerror", bareTypeError ? "fail" : "pass",
     bareTypeError ? "输出含裸 TypeError（未过报错包装，违反报错精确纪律）" : "全程无裸 TypeError");
 
-  const ready = run.stdout.match(/隔离台就绪：127\.0\.0\.1:(\d+)/);
+  // 就绪行两种形态都认：自搭路径打「隔离台就绪」，docker 舞台路径打「docker 舞台就绪」
+  //（t260904-19 起缺省走 docker 舞台，旧锚只认自搭形态会误报「台未起来」）
+  const ready = run.stdout.match(/(?:隔离台就绪|docker 舞台就绪).*?127\.0\.0\.1:(\d+)/);
   const tornLog = run.stdout.includes("拆台完成（boot 进程组已回收、临时目录已删）");
   if (!ready) {
     record("A6 console-torn-down", "fail", "stdout 无「隔离台就绪」行（台未起来，谈不上回收）");

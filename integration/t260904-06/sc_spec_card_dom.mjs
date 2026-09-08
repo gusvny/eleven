@@ -198,6 +198,7 @@ const domSpecCard = `(() => {
     injected: el.querySelectorAll('b,script,style,img,iframe').length,
     borderLeftWidth: cs.borderLeftWidth,
     borderLeftColor: cs.borderLeftColor,
+    accentVar: (cs.getPropertyValue('--dsw-derive-accent') || '').trim(),
     maxHeight: cs.maxHeight,
     overflowY: cs.overflowY,
     whiteSpace: cs.whiteSpace,
@@ -221,7 +222,7 @@ async function snap(p) {
 /** 关抽屉→点指定 fixture 行→等抽屉渲染（precedent openFixtureDetail 泛化到多票）。 */
 async function openDetail(page, fid) {
   await page.locator('.wb-drawer .wb-close, .wb-close').first().click({ timeout: 3000 }).catch(() => {})
-  const rowEl = page.locator('tr.wb-row', { hasText: fid }).first()
+  const rowEl = page.locator('.wb-card[data-ticket-id]', { hasText: fid }).first()
   if (!(await waitFor(async () => (await rowEl.count()) > 0, 8000))) {
     throw new Error(`fixture row ${fid} not rendered (list stub not consumed?)`)
   }
@@ -246,7 +247,33 @@ async function scenarioSpecCard(page) {
   if (c.txt !== SPEC_A) return `.txt text not verbatim (len ${c.txt.length} vs ${SPEC_A.length}; newline/escape loss?)`
   if (c.injected !== 0) return `HTML special chars leaked as elements: ${c.injected} injected tags inside card`
   if (c.borderLeftWidth !== '4px') return `blue bar width expected 4px, got ${JSON.stringify(c.borderLeftWidth)}`
-  if (!/rgb\(9,\s*105,\s*218\)/.test(c.borderLeftColor)) return `blue bar color expected #0969da=rgb(9,105,218), got ${JSON.stringify(c.borderLeftColor)}`
+  // 颜色断言：彩条走 var(--dsw-derive-accent, #0969da)。平台现在按主题派生
+  // accent（深色/派生主题下不再是品牌蓝），契约改为「彩条色 == 派生 accent
+  // 变量值，变量缺失时回落品牌蓝 #0969da」；两种序列化（rgb()/color(srgb…)）
+  // 统一折算到 0-255 整数比
+  const srgb255 = (s) => {
+    if (!s) return null
+    const hex = /^#([0-9a-f]{6})$/i.exec(s.trim())
+    if (hex) return [parseInt(hex[1].slice(0, 2), 16), parseInt(hex[1].slice(2, 4), 16), parseInt(hex[1].slice(4, 6), 16)]
+    const m = /rgb\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)\s*\)/.exec(s)
+    if (m) return [Number(m[1]), Number(m[2]), Number(m[3])]
+    const c = /color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/.exec(s)
+    if (c) return c.slice(1).map((x) => Math.round(Number(x) * 255))
+    // color-mix(in srgb, A p%, B)——主题派生 accent 的常见形状（实测
+    // color-mix(in srgb,#0969da 45%,#1f2328)），线性插值折算
+    const mix = /color-mix\(in srgb,\s*(#[0-9a-f]{6})\s+(\d+(?:\.\d+)?)%,\s*(#[0-9a-f]{6})\s*\)/i.exec(s)
+    if (mix) {
+      const a = srgb255(mix[1]), b = srgb255(mix[3])
+      const p = Number(mix[2]) / 100
+      return a.map((v, i) => Math.round(v * p + b[i] * (1 - p)))
+    }
+    return null
+  }
+  const got = srgb255(c.borderLeftColor)
+  const want = srgb255(c.accentVar) || [9, 105, 218]
+  // ±1 容差：color-mix 折算的 0.5 舍入方向两端可能差 1
+  if (!got || got.some((v, i) => Math.abs(v - want[i]) > 1))
+    return `blue bar color expected accent ${c.accentVar || '#0969da (fallback)'}, got ${JSON.stringify(c.borderLeftColor)}`
   if (c.whiteSpace !== 'pre-wrap') return `white-space expected pre-wrap, got ${JSON.stringify(c.whiteSpace)}`
   return null
 }
@@ -312,7 +339,7 @@ async function runBrowser(browser) {
     }
     await boardIcon.click()
     const rowOk = await waitFor(async () =>
-      (await page.locator('tr.wb-row', { hasText: FID_A }).count()) > 0, 10000)
+      (await page.locator('.wb-card[data-ticket-id]', { hasText: FID_A }).count()) > 0, 10000)
     if (!rowOk) {
       record('S1 precheck', 'env_fail', `ticket board did not consume the list stub on ${BASE} (view needs live engine?)`)
       return

@@ -316,10 +316,15 @@ async function envHalf() {
   if (guard === 'fail') { fail++; console.error('  FAIL write-guard: SANDBAR_TARGET_HOST points at the production default'); return }
   const sdkPython = findSdkPython(t)
   if (!await ensureTestTemporal(t)) { envFail++; console.log('  ENV_FAIL env half: Docker test Temporal unavailable'); return }
-  const fixture = await buildFixture(t)
-  if (!fixture) { envFail++; console.log('  ENV_FAIL env half: fixture clone failed'); return }
-  const api = makeApi(sdkPython, fixture)
-  await sceneF(t, api, sdkPython, fixture)
+  const fixtureBuilt = await buildFixture(t)
+  if (!fixtureBuilt) { envFail++; console.log('  ENV_FAIL env half: fixture clone failed'); return }
+  const { fixture, dispose } = fixtureBuilt   // buildFixture 回执是对象：路径字段叫 fixture（同 sc_ticket_lifecycle 解构口径）
+  try {
+    const api = makeApi(sdkPython, fixture)
+    await sceneF(t, api, sdkPython, fixture)
+  } finally {
+    dispose()
+  }
   pass += t.pass; fail += t.fail; envFail += t.envFail
   if (t.envFail) console.log(`  (env helpers: ${t.envFail} env_fail note(s) above)`)
 }

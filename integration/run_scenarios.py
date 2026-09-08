@@ -146,10 +146,10 @@ SCENARIOS = [
      "node integration/t260905-05/sc_multitab_guard_assets.mjs", "ro"),
     ("t02-t260902-02-prune-e2e",
      "client.py 末行 JSON 回执；解析失败 = FAIL。",
-     "python3 integration/t260902-02/sc_t05_prune_e2e.py"),
+     "sh integration/with_stage.sh t26090202-prune python3 integration/t260902-02/sc_t05_prune_e2e.py"),
     ("t02-t260902-02-archive-legacy-e2e",
      "注入缝直调真命令逻辑（活文件系统，零 Temporal server 依赖）。",
-     "python3 integration/t260902-02/sc_t06_archive_legacy_e2e.py"),
+     "sh integration/with_stage.sh t26090202-arch python3 integration/t260902-02/sc_t06_archive_legacy_e2e.py"),
     ("t260903-07-click-no-chat-switch",
      "点工单不切右侧会话（t260903-07①核心反转）：点工单行后中列详情照常开（.wb-d2-steps 在场）、右栏 chat 零变化——【工单上下文】快照零注入、data-phase 不变、项目会话区 tab 全集不含 ticket- 行（票② R8 改锚：顶部行已退役，判据改 [data-wb-psess-tab] 全集）；多行重复点击零注入零 churn（旧契约「点行→开 ticket- 会话」的显式反转守卫，防联动复活）",
      "node integration/t260903-07/sc_t01_click_no_chat_switch.mjs", "browser"),
@@ -163,7 +163,7 @@ SCENARIOS = [
 
     ("auto-rework-trace",
      "---- A1: 五个自动打回场景，各产一条横幅可见记录（用户视角主契约） ---- scenarios = [ ('acceptance', 'implement', '验收",
-     "node integration/baselines/sc_auto_rework_trace.mjs"),
+     "SANDBAR_TARGET_HOST=127.0.0.1:17233 node integration/baselines/sc_auto_rework_trace.mjs"),
     # 260904 转正：原判退役（tests/rework-banner-ui 已安家 UI 半），但它同时是
     # lock-update-integrity 的 EXPECT 数据依赖（sc_auto_rework_trace.mjs），且引擎常量
     # 半（PHASE_MAIN_CHAIN/ROUTES 源解析）与 UI 单测互补——改判带回。
@@ -557,7 +557,7 @@ SCENARIOS = [
      "总管单例锁改名过渡（t260907-04 server/tools 引用面）：接管写锁/他人持新锁只读不派不续写/过期接管三态 + 旧锁（suyou-dispatcher.lock）TTL 内视为 held（防新旧 dispatcher 实例并行双派——过渡回落半边）+ 旧锁过期接管写新锁且旧锁只读不写不删（只回落不续命）。锁路径常量动态发现替换 temp 副本——不碰真 /tmp 锁（真 dispatcher 可能在跑，写它=干扰生产面）。实现段落地前腿 4/5 红属预期（旧锁回落未落地），arbitrate/merge 期必须绿",  # naming-compat
      "python3 integration/t260907-04/sc_dispatcher_lock_fallback.py", "ro"),
     ("t260907-04-queue-dual-registration",
-     "worker 双队列过渡注册可证（t260907-04 验收②「worker 日志两队列」）：缺省启动同 poll 新队列 sandbar+旧队列 suyou-poc（老 workflow 自然流干的正面证据）；工单专属 worker 新名列表 env 同 tid 双前缀（sandbar-ticket-*+suyou-ticket-*）同 poll（在飞旧工单专属 worker 死后重启不搁浅——review gen0 缺口1 正面回归）；仅旧名单值 env 服务旧前缀队列（旧世界重启路径读侧兼容落队列面）。docker 舞台 stage_docker 单点（docker 缺席/镜像缺席/起台不健康=ENV_FAIL 点名缺什么），SDK 走 poc venv。实现段落地前三腿红属预期，arbitrate/merge 期必须绿",  # naming-compat
+     "worker 队列注册契约（t260907-04 验收②，260908 终切翻面——空库重建窗口零兼容负担）：缺省启动单名 poll 新队列 sandbar、suyou-poc 不双 poll（撤双 poll 的负向守卫，复活即红）；显式列表 env 声明的队列名照单全收；显式旧名单值 env 仍服务旧前缀队列（显式声明面≠默认推导面）。docker 舞台 stage_docker 单点（docker 缺席/镜像缺席/起台不健康=ENV_FAIL 点名缺什么），SDK 走 poc venv。腿1 红=双 poll 复活",  # naming-compat
      "python3 integration/t260907-04/sc_queue_dual_registration.py"),
     ("t260907-04-schedule-legacy-retire",
      "dispatcher-scan schedule 服务端持久标识改名退役（t260907-04）：Temporal schedule 改 ID 旧对象不会自己消失——种子旧 ID 在台→跑引擎创建走廊（仓内唯一在树创建点 demo_schedule.demo_schedule）后新 ID 在旧 ID 亡（防新旧双份调度——review gen0 缺口2）→再跑一次幂等（旧 ID 仍亡、不炸）。docker 舞台 stage_docker 单点，缺台/缺 SDK=ENV_FAIL。实现段落地前腿 2/3 红属预期（删旧未接线），arbitrate/merge 期必须绿",
@@ -587,6 +587,7 @@ SCENARIOS = [
      "根亦 git 仓的混合多仓项目全链（t260907-12，灰盒 L2/L3，dengzhufpv 形态=项目根知识库 git 仓+repos/* 子仓并存）：仓集合=[根]+一层子仓（repos_under 短路退位）；写集归属三态——根仓路径票归根树（repo 相对路径=空）、子仓路径票归子仓（最长前缀）、双命中票两树同居一 lane 不串不丢；根树=泳道容器本身（prepare created、分支 lane/<泳道>-root、基线随根仓、清单落盘含 repo=\"\" 条目）；workflow 闸对 repo=\"\" 合法条目放行、缺 branch/分支碰撞真畸形照旧拒（fail-closed 不弱化）；复用幂等（prepare 二次两树 reused、标记幸存、引用不漂=M4 转移接力）；settle 逐树各归其仓（根树落账只含根仓写集文件、清单 repo=\"\" 条目读侧不断链=四消费方间接覆盖）、根仓 status 不受子仓树/清单污染（advisory④ .gitignore 兜底）；单仓零变化对照腿（根 .git 无子仓：derive 不激活、prepare 走旧单仓路径无清单、谓词 False）；真嵌套仓（已登记仓内部套仓）路径拒收点名；引擎自留 .lane/<id> 泳道 worktree 不入仓集合（单仓零变化红线）。与 t260907-06 三场景 intent 分界：彼=父目录作根形态（根无 .git），本=根亦 git 仓混合形态；通用路径逃逸/写集条目畸形形态属既有契约面不另起。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio 缺失=ENV_FAIL 点名（prepare/settle 行为腿），stdlib 仓集合/归属/闸契约腿照跑",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260912/sc_t260912_mixed_root.py", "ro"),
     ("t260908-02-mixed-payload",
+     "混合形态工单的多仓明细以一等字段穿越 Temporal 编解码两跳（t260908-02，t260907-13 实锤 bug 的缝守卫）：TicketInput/WorkspacePrep 均有 repo_worktrees 显形字段（default_factory=list 保存量回放）；编解码往返全等（workflow 启动面不再 TypeError=dengzhufpv T2 停摆修复）；畸形分层拒绝精确——类型毁形在编解码层拒、语义非法在闸层拒互不冒充；新旧闸位同拒；单仓对照零回归。stdlib 腿恒跑，temporalio 缺失=ENV_FAIL",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260908-02/sc_t260908_02_mixed_payload.py", "ro"),
     ("t260907-07-epic-anchor-two-projects",
      "立项目录锚项目感知×env 自测语义（t260907-07，GAP-B 修复回归，验收①②校验面）：双项目夹具（engine/external 桶同名 gap-b+各自异名，tmp per-key 注册表）下 resolve_epics_dir×validate_epic_code 各取各的项目主目录 notes/epics——同名各自通过（改造前 external 误报「立项代号不存在」的面）、异名自桶通过、异名跨桶拒绝且文案带该项目实际查询目录（诊断信息，不误指引擎仓）；未知项目 key fail-closed 不静默兜底；SANDBAR_EPICS_DIR 自测语义不变（两项目同指 env 目录优先于项目锚）、env 空串回落项目锚、env 指不存在目录报错「目录为空或不存在」可辨不崩。shared stdlib 直驱秒级零 docker；实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；与 developer L1（畸形输入细目单测）intent 不同面",

@@ -59,7 +59,11 @@ RE_SEG_FWD = re.compile(
 RE_SEG_REV = re.compile(r"""["']server["']\s*/\s*["']dsh["']""")
 
 SKIP_DIRS = {".git", "node_modules", ".venv", "__pycache__", ".sandbar",
-             ".dsh", "out", "data", "bin"}
+             ".dsh", "out", "data", "bin",
+             ".suyou", ".lane", ".worktrees", ".pytest_cache"}  # naming-compat：运行时/泳道档案：resume_patch 与
+# 台面记录里引用当时真实存在的旧路径（server/dsh/headless-resume 等），属历史事实
+# 记录非活指针——与已排除的 .sandbar 同类（260908 终切后 C 段 3187 命中全在此，
+# 无一在代码面；活指针残留仍会被扫到）
 TEXT_EXT = {".py", ".md", ".mjs", ".js", ".cjs", ".sh", ".yaml", ".yml", ".json",
             ".ts", ".tsx", ".txt", ".html", ".css", ".sql", ".cfg", ".toml"}
 
@@ -70,6 +74,13 @@ EXEMPT_FILES = {
     # 回落契约专属 UT（断言载体：fixture 造旧路径＋「回落命中旧路径」断言，
     # token 即被测契约内容——沿 t260907-04 UT 豁免先例）
     "server/engine/tests/test_engine_venv_fallback.py",
+    # 项目仓内 server/dsh/reviews=**活约定**（workbench node.ts:852
+    # join(anchor.root,'server','dsh') 的审批落点，t260907-11 KI-057 锚定）；项目仓
+    # 布局与引擎仓布局是两个域，v6 摊平只动了引擎仓——这三文件引用的是活指针，
+    # 豁免登记（真退役该项目侧约定时须连豁免一起动）
+    "server/plugins/workbench/smoke/ki057-anchors.mjs",
+    "integration/t260907-11/sc_wb_anchor_cross_project_faces.mjs",
+    "integration/run_scenarios.py",  # 上条活约定的 intent 描述面（:629 引 server/dsh/reviews）
 }
 # 前缀级豁免（历史记录域，非活指针）
 EXEMPT_PREFIXES = (

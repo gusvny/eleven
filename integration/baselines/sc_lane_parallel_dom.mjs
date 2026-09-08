@@ -286,7 +286,7 @@ async function openFixtureDetail(page, snap) {
   // against a live console until t260901-15).
   await page.locator('.wb-drawer .wb-close, .wb-close').first().click({ timeout: 3000 }).catch(() => {})
   // Click the fixture row again so openDetail refetches through the route stub.
-  const row = page.locator('tr.wb-row', { hasText: FID }).first()
+  const row = page.locator('.wb-card[data-ticket-id]', { hasText: FID }).first()
   if (!(await waitFor(async () => (await row.count()) > 0, 8000))) {
     throw new Error('fixture row not rendered (list stub not consumed?)')
   }
@@ -408,7 +408,7 @@ async function runBrowser(pw, browser) {
     }
     await boardIcon.click()
     const rowOk = await waitFor(async () =>
-      (await page.locator('tr.wb-row', { hasText: FID }).count()) > 0, 10000)
+      (await page.locator('.wb-card[data-ticket-id]', { hasText: FID }).count()) > 0, 10000)
     if (!rowOk) {
       record('S1 precheck', 'env_fail', `ticket board did not consume the list stub on ${BASE} (view needs live engine?)`)
       return
