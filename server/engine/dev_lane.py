@@ -858,6 +858,8 @@ class DevLaneWorkflow:
                 prep = WorkspacePrep(
                     ticket_id=self.ticket_id,
                     workspace=self.meta.get("workspace"),
+                    # t260908-02：逐仓明细走独立字段（workspace 不再内嵌 list）
+                    repo_worktrees=list(self.meta.get("repo_worktrees") or []),
                     branch=str(self.meta.get("branch") or ""),
                     base_ref=str(self.meta.get("base_ref") or ""))
                 raw = await workflow.execute_activity(

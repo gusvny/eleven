@@ -442,6 +442,15 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
                             if isinstance(args.get("write_set"), list) else None))
     except ValueError as e:
         return _err("ticket-start 参数非法：%s" % e)
+    # t260908-02：derive 混合/多仓形态会把 repo_worktrees(list[dict]) 内嵌在 ws 里，
+    # 而 TicketInput.workspace 注解是 Dict[str, str]——payload 解码必炸（t260907-13
+    # 实锤）。在本仓唯一调用点拆分：明细提为一等字段 repo_worktrees，workspace 归纯
+    # {type, path}（形状显式，编解码两侧同步）。
+    repo_worktrees = []
+    if isinstance(workspace, dict):
+        rws = workspace.pop("repo_worktrees", None)
+        if isinstance(rws, list) and rws:
+            repo_worktrees = [dict(e) for e in rws if isinstance(e, dict)]
     # 硬闸配套（KI-032）：显式给的绝对 workspace/worktree 必须落在注册目录内
     # （与 ticket.py create 的 _check_paths_under_project 同一判定，防裸入口
     # 显式塞别项目/别处的路径绕锚）。相对路径不拦（已由 project_root 锚定语义覆盖）。
@@ -483,6 +492,7 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         title=str(args.get("title") or ""),
         lane=lane,
         workspace=workspace,
+        repo_worktrees=repo_worktrees,
         worktree=worktree,
         branch=branch,
         base_ref=str(args.get("base_ref") or ""),

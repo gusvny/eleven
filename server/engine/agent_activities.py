@@ -1662,14 +1662,17 @@ async def prepare_workspace(prep: WorkspacePrep) -> WorkspacePrepResult:
             return WorkspacePrepResult(ok=False, kind="dir", action="failed",
                                        path=str(p), error="mkdir -p %s 失败: %s" % (p, e))
         return WorkspacePrepResult(ok=True, kind="dir", action="ensured", path=str(p))
-    # 票B（t260907-06）多仓泳道：workspace.repo_worktrees 在场即多仓票——走逐仓
+    # 票B（t260907-06）多仓泳道：repo_worktrees 在场即多仓票——走逐仓
     # 创建/复用分支（meta.repo_worktrees=唯一真源，本函数校验盘面一致，不重推导）。
-    # 通道形态（夹具/直调）：prep.write_set+prep.project_root 在场且项目根为
-    # 真多仓形态（is_multi_repo_layout 单点谓词，与建票链同源；t260907-12 起根
-    # =仓+子仓并存的混合形态同样激活）→ 由写集归属推导明细（推导逻辑=
-    # shared.build_repo_worktrees 单点，与建票链同源）；单仓项目（项目根=仓根且
-    # 无子仓）不进此分支，旧路径零回归。
-    rws = ws.get("repo_worktrees")
+    # t260908-02 读序三环：
+    #   ① prep.repo_worktrees——Temporal 正路（独立一等字段，经 payload 编解码）；
+    #   ② ws.get("repo_worktrees")——夹具/直调通道回落（绕过 Temporal 编解码）；
+    #   ③ prep.write_set+prep.project_root 推导——通道形态且项目根为真多仓形态
+    #     （is_multi_repo_layout 单点谓词，与建票链同源；t260907-12 起根=仓+子仓
+    #     并存的混合形态同样激活）→ 由写集归属推导明细（推导逻辑=
+    #     shared.build_repo_worktrees 单点，与建票链同源）；单仓项目（项目根=仓根
+    #     且无子仓）不进此分支，旧路径零回归。
+    rws = list(prep.repo_worktrees) if prep.repo_worktrees else ws.get("repo_worktrees")
     if not (isinstance(rws, list) and rws) and prep.write_set and prep.project_root:
         _pr = Path(prep.project_root)
         if is_multi_repo_layout(_pr):

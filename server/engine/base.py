@@ -180,6 +180,9 @@ class TicketWorkflowBase:
             "role": first.role,
             "lane": inp.lane or self.TEMPLATE_LANE,
             "workspace": ws,
+            # t260908-02：多仓/混合形态逐仓明细的真源位（meta 顶层）。workspace 归纯
+            # {type, path}，不再内嵌 list（Dict[str, str] 注解与 Temporal 编解码兼容）。
+            "repo_worktrees": list(inp.repo_worktrees),
             "worktree": inp.worktree,
             "branch": inp.branch,
             "base_ref": inp.base_ref,
@@ -425,6 +428,8 @@ class TicketWorkflowBase:
         prep = WorkspacePrep(
             ticket_id=self.ticket_id,
             workspace=self.meta.get("workspace"),
+            # t260908-02：逐仓明细走独立字段（workspace 不再内嵌 list，编解码兼容）
+            repo_worktrees=list(self.meta.get("repo_worktrees") or []),
             branch=str(self.meta.get("branch") or ""),
             base_ref=str(self.meta.get("base_ref") or ""))
         raw = await workflow.execute_activity(

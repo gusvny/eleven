@@ -1176,29 +1176,41 @@ def lane_workspace_gate_error(meta: Dict[str, Any]) -> str:
                 % (ws["path"], wt))
     if not str(meta.get("branch") or ""):
         return "lane=worktree 但 branch 字段为空——泳道分支缺失，拒跑"
-    # 票B 多仓泳道：workspace.repo_worktrees 在场即多仓票——逐仓校验形状
+    # 票B 多仓泳道：repo_worktrees 在场即多仓票——逐仓校验形状
     #（repo 为项目根相对路径字符串、**允许空串=根仓树**（t260907-12 混合形态，
     # 树=泳道容器本身）、name/branch 非空字符串、branch 唯一）。
-    rw = ws.get("repo_worktrees")
-    if rw is not None:
-        if not isinstance(rw, list) or not rw:
-            return ("workspace.repo_worktrees 形状非法（须非空列表，实际 %r）——多仓泳道"
-                    "明细缺失，拒跑（t260907-06 票B：meta.repo_worktrees=唯一真源）" % (rw,))
-        seen = set()
-        for e in rw:
-            if not isinstance(e, dict):
-                return ("workspace.repo_worktrees 条目须为对象，实际 %r——拒跑" % (e,))
-            if not isinstance(e.get("repo"), str):
-                return ("workspace.repo_worktrees 条目 repo 字段缺失或非字符串（%r）——"
-                        "拒跑" % (e,))
-            if not (isinstance(e.get("name"), str) and e["name"]):
-                return ("workspace.repo_worktrees 条目 name 字段缺失或为空（%r）——拒跑" % (e,))
-            if not (isinstance(e.get("branch"), str) and e["branch"]):
-                return ("workspace.repo_worktrees 条目 branch 字段缺失或为空（%r）——拒跑"
-                        % (e,))
-            if e["branch"] in seen:
-                return ("workspace.repo_worktrees 分支名碰撞: %s——拒跑" % e["branch"])
-            seen.add(e["branch"])
+    # t260908-02 读序：真源已提为 meta 顶层（TicketInput.repo_worktrees 落 meta），
+    # 顶层空列表=新字段缺省（单仓票）直接放行；回落 ws 内嵌旧位时保留既有契约
+    #（在场即校验，含空列表=明细缺失拒收），兜「未来新入口/手写 payload/夹具直调」
+    # 绕过创建链的情形——不是兜旧 RUNNING 票（旧形状 payload 第一跳 decode 就
+    # 起不来，不可能在飞）。
+    if "repo_worktrees" in meta:
+        return _repo_worktrees_gate_error(meta.get("repo_worktrees") or None)
+    return _repo_worktrees_gate_error(ws.get("repo_worktrees"))
+
+
+def _repo_worktrees_gate_error(rw):
+    """repo_worktrees 逐仓明细形状/语义校验（rw=None=非多仓票，放行）。"""
+    if rw is None:
+        return ""
+    if not isinstance(rw, list) or not rw:
+        return ("workspace.repo_worktrees 形状非法（须非空列表，实际 %r）——多仓泳道"
+                "明细缺失，拒跑（t260907-06 票B：meta.repo_worktrees=唯一真源）" % (rw,))
+    seen = set()
+    for e in rw:
+        if not isinstance(e, dict):
+            return ("workspace.repo_worktrees 条目须为对象，实际 %r——拒跑" % (e,))
+        if not isinstance(e.get("repo"), str):
+            return ("workspace.repo_worktrees 条目 repo 字段缺失或非字符串（%r）——"
+                    "拒跑" % (e,))
+        if not (isinstance(e.get("name"), str) and e["name"]):
+            return ("workspace.repo_worktrees 条目 name 字段缺失或为空（%r）——拒跑" % (e,))
+        if not (isinstance(e.get("branch"), str) and e["branch"]):
+            return ("workspace.repo_worktrees 条目 branch 字段缺失或为空（%r）——拒跑"
+                    % (e,))
+        if e["branch"] in seen:
+            return ("workspace.repo_worktrees 分支名碰撞: %s——拒跑" % e["branch"])
+        seen.add(e["branch"])
     return ""
 
 
@@ -1485,6 +1497,12 @@ class TicketInput:
     title: str = ""
     lane: str = ""
     workspace: Optional[Dict[str, str]] = None   # {type: worktree|dir, path} | None
+    # t260908-02（t260907-13 实锤）：多仓/混合形态泳道的逐仓明细提为一等字段（形状显式）。
+    # 此前 derive_lane_workspace 把 list[dict] 内嵌进 workspace 值域，与 Dict[str, str]
+    # 注解冲突 → Temporal dataclass payload 解码 TypeError（worker 日志 Failed
+    # converting field workspace），workflow 启动失败。字段带默认值=存量 RUNNING 实例
+    # 重放缺键回落，不破回放。
+    repo_worktrees: List[Dict[str, str]] = field(default_factory=list)
     worktree: str = ""
     branch: str = ""
     base_ref: str = ""
@@ -1631,6 +1649,10 @@ class WorkspacePrep:
     # 存量 RUNNING 实例重放缺键回落，不破回放。单仓项目两字段被忽略（零回归）。
     write_set: List[str] = field(default_factory=list)
     project_root: str = ""
+    # t260908-02：逐仓明细与 TicketInput.repo_worktrees 同款提为一等字段——第二跳
+    # （workflow→activity）此前同样把含 list 的 workspace 塞进 Dict[str, str] 注解，
+    # Temporal 编解码会在 activity 侧再炸一次。带默认值=replay-safe。
+    repo_worktrees: List[Dict[str, str]] = field(default_factory=list)
 
 
 @dataclass

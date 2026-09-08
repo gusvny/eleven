@@ -586,6 +586,8 @@ SCENARIOS = [
     ("t260907-12-mixed-root-multirepo",
      "根亦 git 仓的混合多仓项目全链（t260907-12，灰盒 L2/L3，dengzhufpv 形态=项目根知识库 git 仓+repos/* 子仓并存）：仓集合=[根]+一层子仓（repos_under 短路退位）；写集归属三态——根仓路径票归根树（repo 相对路径=空）、子仓路径票归子仓（最长前缀）、双命中票两树同居一 lane 不串不丢；根树=泳道容器本身（prepare created、分支 lane/<泳道>-root、基线随根仓、清单落盘含 repo=\"\" 条目）；workflow 闸对 repo=\"\" 合法条目放行、缺 branch/分支碰撞真畸形照旧拒（fail-closed 不弱化）；复用幂等（prepare 二次两树 reused、标记幸存、引用不漂=M4 转移接力）；settle 逐树各归其仓（根树落账只含根仓写集文件、清单 repo=\"\" 条目读侧不断链=四消费方间接覆盖）、根仓 status 不受子仓树/清单污染（advisory④ .gitignore 兜底）；单仓零变化对照腿（根 .git 无子仓：derive 不激活、prepare 走旧单仓路径无清单、谓词 False）；真嵌套仓（已登记仓内部套仓）路径拒收点名；引擎自留 .lane/<id> 泳道 worktree 不入仓集合（单仓零变化红线）。与 t260907-06 三场景 intent 分界：彼=父目录作根形态（根无 .git），本=根亦 git 仓混合形态；通用路径逃逸/写集条目畸形形态属既有契约面不另起。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio 缺失=ENV_FAIL 点名（prepare/settle 行为腿），stdlib 仓集合/归属/闸契约腿照跑",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260912/sc_t260912_mixed_root.py", "ro"),
+    ("t260908-02-mixed-payload",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260908-02/sc_t260908_02_mixed_payload.py", "ro"),
     ("t260907-07-epic-anchor-two-projects",
      "立项目录锚项目感知×env 自测语义（t260907-07，GAP-B 修复回归，验收①②校验面）：双项目夹具（engine/external 桶同名 gap-b+各自异名，tmp per-key 注册表）下 resolve_epics_dir×validate_epic_code 各取各的项目主目录 notes/epics——同名各自通过（改造前 external 误报「立项代号不存在」的面）、异名自桶通过、异名跨桶拒绝且文案带该项目实际查询目录（诊断信息，不误指引擎仓）；未知项目 key fail-closed 不静默兜底；SUYOU_EPICS_DIR 自测语义不变（两项目同指 env 目录优先于项目锚）、env 空串回落项目锚、env 指不存在目录报错「目录为空或不存在」可辨不崩。shared stdlib 直驱秒级零 docker；实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；与 developer L1（畸形输入细目单测）intent 不同面",
      "python3 integration/t260907-07/sc_epic_anchor_two_projects.py", "ro"),
