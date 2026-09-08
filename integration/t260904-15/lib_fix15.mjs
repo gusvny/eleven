@@ -139,8 +139,10 @@ export async function clientBuildStalenessReason() {
 /**
  * 自举隔离台（bench-shot bootConsole 同款 + 本票 env 注入）。
  * 返回 { port, tmpHome, projectsRoot }；失败抛错由调用方转 ENV_FAIL（缺环境=环境红，不 exit 0 假绿）。
+ * opts.services：'dsh'（默认，容器内引擎地址钉死不可达回环口=降级断言面）|
+ *   'full'（dsh+temporal 健康 wiring——真 Temporal 语义腿用，260908 补供给）。
  */
-export async function bootConsole(fixturesRoot) {
+export async function bootConsole(fixturesRoot, opts = {}) {
   // t260904-19：docker 舞台（dsh-only：容器内引擎地址钉死不可达回环口=降级断言面）。
   // fixturesRoot 挂容器 /fixtures（rw），注册表根=<fixturesRoot>/reg（容器内 /fixtures/reg）。
   // 返回 { base, teardown, reg, toStage, project }；失败抛错由调用方转 ENV_FAIL
@@ -153,7 +155,7 @@ export async function bootConsole(fixturesRoot) {
     const project = `fix15-${path.basename(fixturesRoot).toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24)}-${process.pid}`;
     const st = stage.stageUp({
       project,
-      services: 'dsh',
+      services: opts.services ?? 'dsh',
       fixturesDir: fixturesRoot,
       profileDir: path.join(tmpHome, 'profiles', 'suyou'),
       projectsDir: '/fixtures/reg',

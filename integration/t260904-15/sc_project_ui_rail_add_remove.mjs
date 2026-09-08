@@ -25,7 +25,7 @@
 // 执行契约：stdout 末行 SUMMARY 四计数（三态）；playwright-core 或隔离台依赖缺失=
 // ENV_FAIL（exit 2 点名 KI-036/依赖原因，不假绿）；实现落地前红属预期（TDD 信号），
 // arbitrate/merge 期必须绿。
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import {
   tmpRoot, makeFixtures, writeProjectEntry, writeQuarantinedDir,
@@ -225,12 +225,95 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
   const stillGate = !(await rmDlg.locator('[data-wb-pmod-remove-dry]').isVisible().catch(() => false));
   record('remove/fail-closed-inline', /sandbar up|Temporal|拒/.test(errTxt) && stillGate,
     `fail-closed 文案=${errTxt.slice(0, 150)} | 停在gate=${stillGate}`);
+}
 
-  // 四步流后段（dispose→dry 清单→purge key 确认→执行）在 Temporal 不可达环境原理性
-  // 不可达（在飞闸 fail-closed 无绕过旗，①a-1 闸序）——后段状态机与确认纪律由
-  // smoke/project-modals 覆盖；真台腿随隔离台真 Temporal 供给另补（环境缺供=ENV_FAIL 点名，不假绿）。
-  record('remove/dispose-dry-purge-legs', 'env_fail',
-    'Temporal 死端口=在飞闸 fail-closed，后段不可达；smoke 已断言状态机+确认纪律');
+// T4b 四步流后段真台腿（260908 补：原占位 ENV_FAIL「随隔离台真 Temporal 供给另补」——
+// 供给=stage_docker services:'full'，dsh+temporal 健康 wiring，SA 随台注册）。
+// 死端口台上在飞闸恒拒，后段（dispose→dry 清单→确认执行）只能在真台走真。
+{
+  let fullBench, fx2;
+  try {
+    fx2 = makeFixtures('fix15-ui-full-');
+    mkdirSync(path.join(fx2.root, 'proj-keepb'), { recursive: true });
+    mkdirSync(path.join(fx2.root, 'proj-rmb'), { recursive: true });
+    writeProjectEntry(fx2.reg, 'keepb', '真台甲', [fx2.toStage(path.join(fx2.root, 'proj-keepb'))]);
+    writeProjectEntry(fx2.reg, 'rmb', '真台乙', [fx2.toStage(path.join(fx2.root, 'proj-rmb'))]);
+    fullBench = await bootConsole(fx2.root, { services: 'full' });
+    teardownOnExit(fullBench.teardown);
+    record('remove-real/bench-boot', 'pass', fullBench.base);
+  } catch (e) {
+    record('remove-real/bench-boot', 'env_fail',
+      `full 台装配失败（dsh+temporal 供给缺失）：${String(e?.message ?? e).slice(0, 180)}`);
+    fullBench = null;
+  }
+
+  if (fullBench) {
+    const page2 = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    page2.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
+    page2.on('pageerror', (e) => consoleErrors.push(String(e)));
+    try {
+      await page2.goto(`${fullBench.base}/`, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      await dismissShellNotice(page2);
+      await page2.waitForTimeout(1500);
+      await dismissNotice(page2);
+      const sidebar2 = page2.locator('aside, [class*=sidebar]').first();
+      // 组头第五枚设置图标=按组锚：先锚「真台乙」组，再取组内设置图标（两项目组，first 会错锚）。
+      const group = sidebar2.getByText('真台乙', { exact: false }).first()
+        .locator('xpath=ancestor::*[contains(@class,"group")][1]');
+      await forceClick(group.locator('[title="项目设置"], [aria-label="项目设置"]').first());
+      const dlg = page2.locator('[data-wb-pmod-overlay]').last();
+      await page2.waitForTimeout(600);
+      record('remove-real/entry', (await dlg.innerText().catch(() => '')).includes('rmb'),
+        '设置弹层含目标 key（真台组锚）');
+      await forceClick(page2.getByText('摘除项目', { exact: false }).first());
+      await page2.waitForTimeout(600);
+      const rmDlg = page2.locator('[data-wb-pmod-overlay]').last();
+
+      // 步骤1→2：预检过在飞闸 → dispose 步（「摘除清单（dry-run）」钮=干燥清单面）。
+      await forceClick(rmDlg.locator('[data-wb-pmod-remove-precheck]'));
+      await page2.waitForTimeout(2000);
+      const disposed = await rmDlg.locator('[data-wb-pmod-remove-dry]').isVisible().catch(() => false);
+      record('remove-real/precheck-to-dispose', disposed,
+        '真台预检通过，流程前进到处置步（死端口台恒停 gate——对照面）');
+
+      // 步骤2→3：dry 清单 → confirm 步（清单 pre 在场且点名退役改名=将执行面）。
+      if (disposed) {
+        await forceClick(rmDlg.locator('[data-wb-pmod-remove-dry] button').first());
+        await page2.waitForTimeout(2000);
+        const confirmVisible = await rmDlg.locator('[data-wb-pmod-remove-confirm]').isVisible().catch(() => false);
+        const dryTxt = await rmDlg.locator('[data-wb-pmod-remove-confirm] pre').innerText().catch(() => '');
+        record('remove-real/dry-list', confirmVisible && /退役|retire/.test(dryTxt),
+          `confirm=${confirmVisible} dry=${dryTxt.slice(0, 120)}`);
+        // 步骤3→4：无 purge 勾选 → 免 key 二次确认直接执行。成功语义两路皆认：
+        // ① 结果步文本「摘除完成」上屏；② 弹层被 onRemoved 整体卸载（sidebar 的
+        // 成功回调=setModal(null)，结果面与卸载同 tick，单读 result 必扑空——
+        // 260908 双跑实锤：result 恒空而 retired 文件恒在位）。② 路必须同时
+        // 确认错误面不在场，防把失败闪断误当成功。
+        await forceClick(rmDlg.locator('[data-wb-pmod-remove-submit]'));
+        let okTxt = '', modalGone = false, errVisible = false;
+        for (let i = 0; i < 20 && !/摘除完成/.test(okTxt) && !modalGone; i++) {
+          await page2.waitForTimeout(500);
+          modalGone = (await rmDlg.count()) === 0;
+          errVisible = await rmDlg.locator('[data-wb-pmod-remove-error]').isVisible().catch(() => false);
+          if (!modalGone) okTxt = await rmDlg.locator('[data-wb-pmod-remove-result]').innerText().catch(() => '');
+        }
+        record('remove-real/execute-ok', /摘除完成/.test(okTxt) || (modalGone && !errVisible),
+          `result=${okTxt.slice(0, 120)} modalGone=${modalGone} err=${errVisible}`);
+        // 现场核验：注册表根（宿主侧挂载）退役文件在位 = 可逆摘除真落地。
+        const retired = readdirSync(path.join(fx2.reg, 'rmb'))
+          .some((n) => n.startsWith('project.yaml.retired-'));
+        record('remove-real/retired-on-disk', retired, 'project.yaml.retired-* 在位');
+      } else {
+        record('remove-real/dry-list', 'fail', 'dispose 步未达，dry 清单无从断言');
+        record('remove-real/execute-ok', 'fail', 'dispose 步未达');
+        record('remove-real/retired-on-disk', 'fail', 'dispose 步未达');
+      }
+    } catch (e) {
+      record('remove-real/entry', 'env_fail', `真台旅程异常：${String(e?.message ?? e).slice(0, 140)}`);
+    }
+    await page2.close().catch(() => { /* noop */ });
+    fullBench.teardown();
+  }
 }
 
 // T5 console 零 error（豁免：旅程故意触发 fail-closed 的 409 资源日志——浏览器把
