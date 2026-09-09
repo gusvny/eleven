@@ -268,8 +268,14 @@ def state_busy_ports():
             elif now - f.stat().st_mtime < STALE_STATE_GRACE_S:
                 # 新鲜状态 + 容器瞬时空窗 = 刚起好的台，档位按占用保留
                 busy.update(int(p) for p in (st.get("ports") or {}).values())
+            elif residue_containers_stable(str(project)):
+                # run V 实锤（260909 终验）：带龄状态同样会被 docker ps 瞬时空窗
+                # 误判——活台的存量状态被扫掉后，下一次 ensure 读不到状态走冷路
+                # 径，compose 当着在跑场景的面重建活台（run U modal-dialog 红的
+                # 同族）。unlink 是收回决策，必须稳定确认（连续 3 次均空）。
+                busy.update(int(p) for p in (st.get("ports") or {}).values())
             else:
-                f.unlink()   # 带龄确认无容器：真 stale，回收档位（崩溃残留清扫）
+                f.unlink()   # 带龄且稳定无容器：真 stale，回收档位（崩溃残留清扫）
         except (OSError, ValueError):
             continue
     return busy

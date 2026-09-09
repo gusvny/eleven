@@ -16,6 +16,8 @@ UT 随实现重构同批重写，不留指向退役路径的恒红假网，KI-03
 - 档位锁外部占用 → 分配滑档；
 - 状态清扫带龄护栏（run Q 挤台回归锚）：新鲜状态无容器在场也保留档位/
   不删文件；带龄无容器状态才被回收；
+- 清扫稳定确认（run V 挤台回归锚）：带龄状态遇 docker ps 瞬时空窗（前两次
+  空、第三次见容器）不得回收，状态文件与档位均保留；
 - docker 缺席 / 测试镜像缺席 / compose up 失败（半途死）→ 诚实环境红 + 就地清场；
 - 畸形输入全电池：project/端口旋钮/目录/半指定——逐条点名检查项、零副作用；
 - ensure：健康复用（reused）+ 半残拆重起 + 同项目并发 ensure 互斥（run K 雷群
@@ -303,6 +305,40 @@ class BandAllocationTest(StageCLIBase):
         finally:
             fresh.unlink(missing_ok=True)
             old.unlink(missing_ok=True)
+
+    def test_aged_state_survives_transient_residue_blip(self):
+        """run V 清扫回归锚：带龄状态的 unlink 决策改用稳定查询（连续 3 次均
+        空才回收）——docker ps 瞬时空窗（起跑风暴）不再扫掉活台的存量状态。
+        被扫的后果链：下一次 ensure 读不到状态走冷路径 → compose 重建活台
+        （run U modal-dialog page.reload CONNECTION_REFUSED 红的同族）。"""
+        import shutil
+        if not shutil.which("docker"):
+            self.skipTest("docker 缺席——residue 面不可用")
+        root = sd.lock_root()
+        tgt = root / "project-blipswp.json"
+        try:
+            tgt.write_text(json.dumps({"project": "blipswp", "ports": {"console": 24120}}),
+                           encoding="utf-8")
+            os.utime(str(tgt), (0, 0))  # 带龄，必过新鲜护栏，直抵稳定确认
+            real = sd.residue_containers
+            calls = {"n": 0}
+
+            def flaky(project):
+                if project == "blipswp":
+                    calls["n"] += 1
+                    # 前两次瞬时空窗，第三次恢复看见容器 → 台活着，不得回收
+                    return [] if calls["n"] < 3 else ["blipswp-dsh"]
+                return real(project)
+
+            sd.residue_containers = flaky
+            try:
+                busy = sd.state_busy_ports()
+            finally:
+                sd.residue_containers = real
+            self.assertTrue(tgt.exists(), "瞬时空窗不得扫掉带龄活台状态（unlink 须稳定确认）")
+            self.assertIn(24120, busy, "活台档位按占用保留")
+        finally:
+            tgt.unlink(missing_ok=True)
 
 
 class HonestEnvFailTest(StageCLIBase):
