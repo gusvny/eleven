@@ -482,6 +482,22 @@ def residue_containers(project):
         return ["<docker ps 不可用>"]
 
 
+def residue_containers_stable(project, tries=3, gap=1.0):
+    """带重试的残留查询：仅在「拆/拒」类决策点使用（健康复用判定、--keep
+    在跑保护）。run U 实锤（260909 终验）：docker ps 在起跑风暴窗会瞬时空窗
+    返回空——单次空结果把健康台误判成「台没了」，--keep 也因子查询同窗口
+    复现空窗而失守，do_down+do_up 当着在跑场景的面拆了活台（链头场景
+    page.reload 撞 ERR_CONNECTION_REFUSED 红）。连续 tries 次均为空才认空；
+    任一次非空即返回该次结果。docker 不可用保持原语义（非空哨兵）。"""
+    last = []
+    for _ in range(tries):
+        last = residue_containers(project)
+        if last:
+            return last
+        time.sleep(gap)
+    return last
+
+
 # ---------------------------------------------------------------- validation
 
 def validate_project(project):
@@ -614,7 +630,7 @@ def stage_healthy(state):
     """ensure's reuse test: containers running + ports alive."""
     if not state:
         return False
-    if not residue_containers(state["project"]):
+    if not residue_containers_stable(state["project"]):
         return False
     for p in state["ports"].values():
         if not port_open(p, timeout=1.0):
@@ -906,7 +922,7 @@ def do_ensure(project, services_list, opts, timeout, keep=False):
             state = dict(state)
             state["reused"] = True
             return state
-        if state and keep and residue_containers(project):
+        if state and keep and residue_containers_stable(project):
             # --keep: running but unhealthy — do not tear it down (another lane may
             # be using it in the same window); report the environment red honestly
             raise StageError("供给台 %s 在跑但不健康（ports=%s）；--keep 语义不拆在跑台——"
