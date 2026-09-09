@@ -152,6 +152,13 @@ def main():
         # ---------- ① 槽位台 + 真 worker（自报 meta，起跑早写） ----------
         _, stage = require_stage(fail, "t26090402-gate-%d" % os.getpid(),
                                  "stage-gate-%d" % os.getpid())
+        # slot 必须随起台成功置位：finally 的拆台闸靠它判断「台是我起的」。
+        # 260909 提速战役③终验实锤——原代码 slot 恒为 None（require_stage 的
+        # 返回进了 `_`，slot 从未赋值），拆台永不执行，每跑一场泄漏一台
+        # t26090402-gate-<pid>-temporal：连跑 7 场攒 11 台游离 temporal dev
+        # 服务器，OrbStack VM 的常驻 CPU 被吃满，后续每一场的 temporal 初始化
+        # 越来越慢（run E 单台初始化拖过 600s 供给帽的直接环境根因）。
+        slot = stage["project"]
         _STATE["project"] = stage["project"]
         _STATE["queue"] = "bench-gate-%d" % os.getpid()
         fe = stage["ports"]["temporal"]
@@ -248,7 +255,7 @@ def main():
                 pass
         if slot is not None:
             try:
-                stage_down(stage_docker, _STATE.get("project", ""))
+                stage_down(stage_docker, slot)
             except Exception:
                 pass
         cleanup(tmp)
