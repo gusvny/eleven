@@ -1,33 +1,41 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""隔离测试台共享库（票 t260904-02 建、t260904-19 收敛）：「不连生产」守卫 +
-fixture 注册表 + 引擎资产解析。
+"""Shared library for the isolated test bench (created t260904-02, slimmed down
+t260904-19): the "never touch production" guard + fixture registry + engine
+asset resolution.
 
-## 槽位制退役声明（t260904-19）
+## Slot-system retirement note (t260904-19)
 
-本库原有的 temporalite 槽位制已随「所有测试同一 docker 舞台」退役：temporal 台
-由 integration/stage_docker.py 统一供给（compose 工程名隔离 + 端口档位锁 + 零残留
-核验），槽位制处理过的故障模式逐项取舍见 stage_docker.py 头注。本库只留仍被
-场景消费的面：
+This library used to own a temporalite slot system. It retired when "every
+test uses the same docker stage" landed: stage temporal now comes from
+integration/stage_docker.py only (compose project-name isolation + port slot
+locks + zero-residue checks). How each failure mode the slot system used to
+handle is covered now is written up in the stage_docker.py header. What stays
+in this library is only what scenarios still consume:
 
-  PROD_PORTS / ProductionGuardError / assert_not_production   生产守卫（fail-closed）
-  port_open / pick_free_port                                  探测原语
+  PROD_PORTS / ProductionGuardError / assert_not_production   production guard (fail-closed)
+  port_open / pick_free_port                                  probe primitives
   main_root_of / _resolve_asset / resolve_temporal_bin / resolve_poc_python / poc_python
-                                                              泳道资产解析（主树回退）
-  audit_hook_env（+ sitecustomize 模板）                      被测子进程「不连生产」审计钩子
-  write_registry                                              fixture 项目注册表
+                                                              lane asset resolution (main-tree fallback)
+  audit_hook_env (+ sitecustomize template)                   "never touch production" audit hook for child processes
+  write_registry                                              fixture project registry
 
-## 「不连生产」审计钩子（python 面）
-sitecustomize.py 注入被测子进程 PYTHONPATH：sys.addaudithook 监 socket.connect，
-目标端口∈PROD_PORTS 先记 jsonl 后 raise——audit 钩子在系统调用前触发，raise 即
-阻断（自证腿连 127.0.0.1:7233 会被拦，零真连生产）。
-边界（明示不静默）：只覆盖 python 子进程；Go 面（temporal CLI）由显式端口参数断言补面；
-docker 台的容器内出网由 compose 网络拓扑约束（stage_docker 头注取舍表）。
+## "Never touch production" audit hook (python side)
+sitecustomize.py goes into the tested child process via PYTHONPATH:
+sys.addaudithook watches socket.connect; if the target port is in PROD_PORTS
+it first appends to a jsonl log, then raises. The audit hook fires before the
+system call, so raising blocks the connect (the self-check leg proves a
+127.0.0.1:7233 connect gets blocked with zero real production traffic).
+Limits (stated, not hidden): covers python child processes only. The Go side
+(temporal CLI) is covered by explicit port-argument assertions. Outbound
+network from docker-stage containers is constrained by the compose network
+topology (see the trade-off table in the stage_docker header).
 
-环境缝（泳道缺资产时的回退）：
-  SANDBAR_TEMPORAL_BIN   temporal 二进制（缺省 <repo>/server/engine/bin/temporal，
-                        泳道缺失时读 .git gitfile 回退主树同位）
-  SANDBAR_POC_PYTHON     带 temporalio 的解释器（缺省 <repo>/…/.venv/bin/python，同样回退主树）
+Gaps in the lane (fallbacks when an asset is missing):
+  SANDBAR_TEMPORAL_BIN   temporal binary (default <repo>/server/engine/bin/temporal;
+                        falls back to the same path in the main tree via the .git gitfile)
+  SANDBAR_POC_PYTHON     interpreter with temporalio (default <repo>/…/.venv/bin/python,
+                        same main-tree fallback)
 """
 from __future__ import annotations
 
@@ -42,27 +50,30 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
-# 生产端口面（frontend/UI）：本库一切出网路径的 fail-closed 黑名单。
-# metrics 端口生产侧未固定公开，不列入（隔离台自身 metrics 全显式即可）。
+# Production port surface (frontend/UI): fail-closed blacklist for every
+# outbound path in this library. The metrics port is not fixed on the
+# production side, so it is not listed (the isolated bench exposes its own
+# metrics explicitly anyway).
 PROD_PORTS = {7233, 8233}
 
-# 槽位端口基址（槽位制已退役，常量留作历史锚；结构性避开 7233/8233/3099）。
+# Slot port bases (the slot system is retired; the constants stay as a
+# historical anchor — they structurally avoid 7233/8233/3099).
 SLOT_FE_BASE = 19100
 SLOT_UI_BASE = 19200
 SLOT_MET_BASE = 19300
 
 
 class ProductionGuardError(RuntimeError):
-    """目标是生产 temporal（7233/8233）——fail-closed 拒跑。"""
+    """The target is the production temporal (7233/8233) — fail-closed, refuse to run."""
 
 
 class MissingAsset(RuntimeError):
-    """temporal 二进制/venv 解释器不可得（exit2 语义，文案指路）。"""
+    """temporal binary / venv interpreter not available (exit-2 semantics, message points the way)."""
 
 
 def assert_not_production(host_port: str) -> str:
-    """fail-closed：host:port 指向生产（7233/8233）即抛 ProductionGuardError。
-    返回原串（合法时）供链式使用。"""
+    """Fail-closed: raise ProductionGuardError if host:port points at production
+    (7233/8233). Returns the original string (when legal) for chaining."""
     s = str(host_port or "")
     port = None
     if ":" in s:
@@ -93,7 +104,8 @@ def port_open(port, host="127.0.0.1", timeout=1.0) -> bool:
 
 
 def pick_free_port() -> int:
-    """port-0 内核分配（骨架口径：bind(0) 取内核给的端口后释放）。"""
+    """Kernel port-0 allocation (skeleton contract: bind(0), take the kernel's
+    port, release it)."""
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
     n = s.getsockname()[1]
@@ -102,8 +114,9 @@ def pick_free_port() -> int:
 
 
 def main_root_of(repo_root) -> "pathlib.Path | None":
-    """worktree 的 .git 是 gitfile（"gitdir: <main>/.git/worktrees/<name>"）→ 主仓根。
-    非 worktree（.git 是目录）→ None。只读 .git 文件（不写不改）。"""
+    """In a worktree, .git is a gitfile ("gitdir: <main>/.git/worktrees/<name>")
+    → returns the main repo root. Not a worktree (.git is a directory) → None.
+    Only reads the .git file (never writes)."""
     git_path = pathlib.Path(repo_root) / ".git"
     try:
         if not git_path.is_file():
@@ -123,7 +136,7 @@ def main_root_of(repo_root) -> "pathlib.Path | None":
 
 
 def _resolve_asset(env_key, lane_path: pathlib.Path, what: str) -> pathlib.Path:
-    """资产解析：env > 泳道位 > 主树回退（gitfile 推导）> MissingAsset。"""
+    """Asset resolution: env > lane path > main-tree fallback (via gitfile) > MissingAsset."""
     env_val = os.environ.get(env_key)
     if env_val:
         p = pathlib.Path(env_val)
@@ -156,14 +169,16 @@ def resolve_poc_python() -> pathlib.Path:
 
 
 def poc_python() -> str:
-    """引擎 venv 解释器（含主树 gitfile 回退）。"""
+    """Engine venv interpreter (with main-tree gitfile fallback)."""
     return str(resolve_poc_python())
 
 
-# ---- 「不连生产」审计钩子（python 面）----
-# sitecustomize.py 注入被测子进程 PYTHONPATH：sys.addaudithook 监 socket.connect，
-# 目标端口∈PROD_PORTS 先记 jsonl 后 raise。边界（明示不静默）：只覆盖 python 子进程；
-# Go 面（temporal CLI）由显式端口参数断言补面。
+# ---- "Never touch production" audit hook (python side) ----
+# sitecustomize.py is injected into the tested child process via PYTHONPATH:
+# sys.addaudithook watches socket.connect; if the target port is in
+# PROD_PORTS it first appends to a jsonl log, then raises. Limits (stated,
+# not hidden): covers python child processes only; the Go side (temporal CLI)
+# is covered by explicit port-argument assertions.
 
 _AUDIT_SITECUSTOMIZE = '''import json as _json
 import os as _os
@@ -200,8 +215,9 @@ _sys.addaudithook(_bench_audit)
 
 
 def audit_hook_env(dirpath):
-    """装审计钩子。返回 (env 片段, 日志路径)：env 含 PYTHONPATH（前插）+
-    SANDBAR_AUDIT_HITS；复装会清旧记录（每腿从零记账）。"""
+    """Install the audit hook. Returns (env fragment, log path): the env holds
+    PYTHONPATH (prepended) + SANDBAR_AUDIT_HITS. Reinstalling clears the old
+    log (each leg starts counting from zero)."""
     d = pathlib.Path(dirpath)
     d.mkdir(parents=True, exist_ok=True)
     (d / "sitecustomize.py").write_text(
@@ -218,14 +234,15 @@ def audit_hook_env(dirpath):
     return env_add, str(log_path)
 
 
-# ---- fixture 注册表 ----
+# ---- fixture registry ----
 
-_REGISTRY_KEY_RE = None  # 延迟取 shared 的真源正则（见 write_registry）
+_REGISTRY_KEY_RE = None  # loaded lazily from shared's real regex (see write_registry)
 
 
 def write_registry(dirpath, key, project_dir):
-    """造 fixture 项目注册表（形状=server/engine shared.load_projects_registry
-    的 per-key 目录档）。返回注册表根目录（SANDBAR_PROJECTS_DIR 直用）。"""
+    """Create a fixture project registry (same shape as the per-key directory
+    format of server/engine shared.load_projects_registry). Returns the
+    registry root (SANDBAR_PROJECTS_DIR consumes it directly)."""
     import re
     d = pathlib.Path(dirpath)
     d.mkdir(parents=True, exist_ok=True)
@@ -236,8 +253,9 @@ def write_registry(dirpath, key, project_dir):
         raise ValueError("project_dir 必须绝对路径（锚定语义）：%r" % project_dir)
     key_dir = d / str(key)
     key_dir.mkdir(parents=True, exist_ok=True)
-    # project_dir 原文落盘（不做 realpath 解引用）：场景断言以传入路径为锚比对，
-    # macOS 下 /var→/private/var 符号链接解引用会制造假不匹配。
+    # project_dir is written down verbatim (no realpath dereference): scenario
+    # assertions compare against the passed path as the anchor, and on macOS
+    # the /var→/private/var symlink dereference would create false mismatches.
     (key_dir / "project.yaml").write_text(
         "schema: v1\nproject:\n  - key: %s\n    name: %s\n    dirs:\n      - %s\n"
         % (key, key, project_dir),

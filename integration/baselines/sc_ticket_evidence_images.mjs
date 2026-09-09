@@ -1,24 +1,30 @@
-// 票 t260831-08（缺陷②）集成测试——工单抽屉里的截图证据可见。
+// Ticket t260831-08 (defect 2) integration test — screenshot evidence is
+// visible in the ticket drawer.
 //
-// 锁什么（黑盒，用户视角）：
-//   QA 截图（泳道 .suyou/screenshots/*.png）必须在工单详情抽屉可见。修复后的
-//   用户可见契约：
-//     - GET /sandbar-workbench/api/wf/tickets/<id>/evidence 列出 png 文件
-//       （归档 .suyou/evidence/<id>/ 优先，其次泳道 screenshots）；  // naming-compat
-//       无证据→空清单，不报错（抽屉只是不渲染该段）。
-//     - GET .../evidence/<file> 按 image/png 原样回字节。
-//     - 路径穿越/非法文件名/非法票号一律 4xx 拒掉，绝不外发。
-//     - (UI) 抽屉每个文件渲染一个 <img src=".../evidence/<file>">。
+// What it locks (black box, user view):
+//   QA screenshots (lane .suyou/screenshots/*.png) must be visible in the
+//   ticket detail drawer. The user-visible contract after the fix:
+//     - GET /sandbar-workbench/api/wf/tickets/<id>/evidence lists png files
+//       (archive .suyou/evidence/<id>/ first, then lane screenshots);  // naming-compat
+//       no evidence → empty list, no error (the drawer just skips that
+//       section).
+//     - GET .../evidence/<file> returns the bytes as image/png, unchanged.
+//     - Path traversal / illegal file names / illegal ticket ids are always
+//       rejected with 4xx, never served.
+//     - (UI) the drawer renders one <img src=".../evidence/<file>"> per file.
 //
-// 暂存：本套件把一张小合法 PNG 放进 <laneRoot>/.suyou/evidence/<stageId>/  // naming-compat
-// （从本泳道起的 console 的归档基目录），跑完清掉。如果 console 服务的是别的仓根，
-// 暂存文件腿降级 env_fail 并给原因（根不匹配是环境事实不是产品绿；票 t260904-12
-// 三态：环境红 exit 2，绝不 exit 0 假绿）。
-// 红线：永不碰 3099。
+// Staging: this suite puts one small valid PNG into
+// <laneRoot>/.suyou/evidence/<stageId>/  // naming-compat
+// (the archive base directory of a console started from this lane) and
+// removes it when done. If the console serves a different repo root, the
+// staged-file legs degrade to env_fail with a reason (a root mismatch is an
+// environment fact, not a product green; three-state contract of
+// t260904-12: environment red = exit 2, never a fake green with exit 0).
+// Red line: never touch 3099.
 //
-// 执行契约（票 t260904-12 三态）：stdout 末行
-// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`；FAIL>0 或全腿 na → exit 1；
-// env_fail>0 → exit 2。
+// Execution contract (three-state, t260904-12): the last stdout line is
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 or all-legs-na → exit 1;
+// env_fail>0 → exit 2.
 
 import { ensureStageConsole } from '../lib_stage_console.mjs';
 import { mkdir, writeFile, rm } from 'node:fs/promises'
@@ -26,7 +32,7 @@ import { join } from 'node:path'
 
 const BASE = (await ensureStageConsole()).base;
 const LANE = process.cwd();
-const STAGE_ID = 't26083108evtest'; // 必须满足 TICKET_ID_RE（字母数字，无 / 无 .）
+const STAGE_ID = 't26083108evtest'; // must satisfy TICKET_ID_RE (alphanumeric, no / no .)
 const STAGE_DIR = join(LANE, '.suyou', 'evidence', STAGE_ID);  // naming-compat
 const PNG_1x1 = Buffer.from(
   '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489' +
@@ -74,12 +80,12 @@ async function consoleHealthy() {
 async function withStagedEvidence() {
   await mkdir(STAGE_DIR, { recursive: true });
   await writeFile(join(STAGE_DIR, 'shot-a.png'), PNG_1x1);
-  // 诱饵：扩展名不对 / 形状非法——绝不允许出现在清单里
+  // Decoys: wrong extension / illegal shape — must never appear in the list
   await writeFile(join(STAGE_DIR, 'notes.txt'), 'not an image');
-  await writeFile(join(STAGE_DIR, 'weird name.png'), PNG_1x1); // 空格不在白名单
+  await writeFile(join(STAGE_DIR, 'weird name.png'), PNG_1x1); // space is not in the whitelist
 
-  // S1：清单形状——200 {ok,result:{files}}，只收 png 白名单项，诱饵被过滤
-  let stagedVisible = false; // console 是否看到本 lane 暂存目录（根不匹配=环境事实）
+  // S1: list shape — 200 {ok,result:{files}}, only whitelisted pngs, decoys filtered
+  let stagedVisible = false; // does the console see this lane's staged dir (root mismatch = environment fact)
   {
     const { status, body } = await evidenceRequest(STAGE_ID);
     const files = body?.result?.files;
@@ -96,11 +102,13 @@ async function withStagedEvidence() {
     }
   }
 
-  // S2：字节回环——暂存字节原样、image/png。
-  // 前提门控与 S1 同源：console 根不匹配时暂存文件不可见，roundtrip 必 404——那是
-  // 环境事实（见文件头注「mismatch is an environment fact, not a pass」），按 env_fail
-  // 处置不判 FAIL。守卫缺失曾在隔离台锚根漂移时把本腿打成假红
-  // （t260904-04 arbitrate gen1 修正；前提成立时断言面一字不减）。
+  // S2: byte round trip — staged bytes come back unchanged, as image/png.
+  // Same precondition gate as S1: when the console root mismatches, staged
+  // files are invisible and the round trip 404s — that is an environment fact
+  // (see the header: "mismatch is an environment fact, not a pass"), handled
+  // as env_fail, not FAIL. Without this gate the leg went falsely red when
+  // the isolated console's anchor root drifted (fixed in t260904-04 arbitrate
+  // gen1; when the precondition holds, the assertion surface is unchanged).
   {
     if (!stagedVisible) {
       record('server/bytes-roundtrip', 'env_fail', 'staged file not visible — console repo is not this lane root');
@@ -114,7 +122,8 @@ async function withStagedEvidence() {
     }
   }
 
-  // S3：不存在的 png → 404 人话文案（归档与泳道两处都没有）。
+  // S3: a png that does not exist → 404 with a human message (neither archive
+  // nor lane has it).
   {
     const { status, body } = await evidenceRequest(STAGE_ID, 'nope-missing.png');
     if (status === 404 && body?.ok === false && typeof body?.error === 'string') {
@@ -124,12 +133,12 @@ async function withStagedEvidence() {
     }
   }
 
-  // 先清场再跑后面的（穿越用例不许依赖暂存文件）
+  // Clean up before the traversal cases (they must not rely on staged files)
   await rm(STAGE_DIR, { recursive: true, force: true });
 }
 
 async function faultSurface() {
-  // S4：文件名位路径穿越 → 4xx 拒掉，绝不 200。
+  // S4: file-name path traversal → 4xx rejection, never 200.
   for (const [name, file] of [
     ['dotdot-parent', '..%2F..%2Fserver%2Fadmin.log'],
     ['dotdot-inside', '%2e%2e%2fshot.png'],
@@ -146,7 +155,7 @@ async function faultSurface() {
     }
   }
 
-  // S5：非法票号 → 400（不是 5xx，也不是 200）。
+  // S5: illegal ticket id → 400 (not 5xx, not 200).
   for (const [name, id] of [['dotdot', '..'], ['slash', 'a/b'], ['empty-ish', 'x']]) {
     try {
       const { status } = await evidenceRequest(id);
@@ -157,7 +166,8 @@ async function faultSurface() {
     }
   }
 
-  // S6：形状合法但不存在的票号 → 空清单，不报错（软降级）。
+  // S6: well-shaped but nonexistent ticket id → empty list, no error (soft
+  // degradation).
   try {
     const { status, body } = await evidenceRequest('t26083108evnone');
     const files = body?.result?.files;
@@ -184,34 +194,42 @@ async function uiScenario() {
     browser = await pw.chromium.launch({ channel: 'chrome', headless: true }).catch(() => pw.chromium.launch({ headless: true }));
     const page = await (await browser.newContext()).newPage();
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    // 出厂 notice（Continue 遮罩）会拦截行卡点击——先关再断言（lib_browser 同款）。
+    // The factory notice (Continue overlay) blocks row clicks — close it
+    // first (same as lib_browser).
     try {
       const nb = page.locator('button', { hasText: /continue|继续/i }).first();
       await nb.click({ timeout: 4000 });
       await nb.waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
-    } catch { /* 无 notice=常态 */ }
+    } catch { /* no notice = the normal case */ }
     await page.waitForSelector('.wb-card[data-ticket-id]', { timeout: 12000 });
     const rowIds = await page.$$eval('.wb-card[data-ticket-id]', (els) => els.map((e) => e.getAttribute('data-ticket-id')));
     if (rowIds.length < 1) throw new Error('no rows');
-    // 行序不钉死（共享台首行随项目/时间漂移）：逐个问 evidence API，点第一张
-    // 真有证据的票——抽屉断言面前提=目标行有图，无图行点击是夹具事实不是产品失败。
+    // Row order is not pinned (the shared stage's first row drifts with
+    // project/time): ask the evidence API per row and click the first row
+    // that actually has evidence — the drawer assertion needs the target
+    // row to have images; clicking an image-less row is a fixture fact, not
+    // a product failure.
     let target = null;
     for (const id of rowIds) {
       const { status, body } = await evidenceRequest(id);
       if (status === 200 && body?.ok === true && (body?.result?.files ?? []).length > 0) { target = id; break; }
     }
     if (!target) throw new Error('no evidence-bearing row on console');
-    // 票 id 字符集 = [A-Za-z0-9-]（TICKET_ID_RE），无需 CSS.escape（个别无头壳无该全局）。
+    // Ticket id charset = [A-Za-z0-9-] (TICKET_ID_RE), so no CSS.escape needed
+    // (some headless shells lack that global).
     await page.click(`.wb-card[data-ticket-id="${target}"]`);
     await page.waitForSelector('.wb-drawer', { timeout: 10000 });
     await page.waitForSelector('.wb-drawer img[src*="/evidence/"]', { timeout: 10000 });
-    // 等图真解码再取样：waitForSelector 只保证 img 节点在 DOM——并发负载下 PNG
-    // 取回/解码滞后，立即取样=把「加载中」快照误判 decoded=0（260909 全量跑实锤
-    // imgs=1 decoded=0 瞬态红，静机单跑恒绿）。超时落回下方计数如实红，不放水。
+    // Wait for actual decode before sampling: waitForSelector only guarantees
+    // the img nodes are in the DOM — under concurrent load the PNG fetch and
+    // decode lag, and sampling immediately misreads a "still loading" frame
+    // as decoded=0 (proven in the 260909 full run: imgs=1 decoded=0 transient
+    // red, always green standalone). On timeout we fall through to the count
+    // below, which reports red honestly — no watering down.
     await page.waitForFunction(() => {
       const imgs = [...document.querySelectorAll('.wb-drawer img[src*="/evidence/"]')];
       return imgs.length > 0 && imgs.every((i) => i.complete && i.naturalWidth > 0);
-    }, { timeout: 10000 }).catch(() => { /* 解码未成=下方计数如实红 */ });
+    }, { timeout: 10000 }).catch(() => { /* not decoded yet = the count below reports red honestly */ });
     const loaded = await page.evaluate(() => {
       const imgs = [...document.querySelectorAll('.wb-drawer img[src*="/evidence/"]')];
       return { count: imgs.length, natural: imgs.filter(i => i.naturalWidth > 0).length };
@@ -223,8 +241,10 @@ async function uiScenario() {
     }
   } catch (err) {
     const msg = String(err).slice(0, 140);
-    // 首行无抽屉/无证据是夹具事实；已有证据的票上超时才是真产品失败——
-    // 两种情况都如实报，除非 playwright/console 本身就是阻塞原因。
+    // No drawer / no evidence on the first row is a fixture fact; a timeout
+    // on a ticket that does have evidence is a real product failure — both
+    // are reported as they are, unless playwright/console itself is the
+    // blocker.
     record('ui/drawer-images', 'env_fail', `environment/fixture blocker: ${msg}`);
   }
   try { await browser.close(); } catch { /* noop */ }
