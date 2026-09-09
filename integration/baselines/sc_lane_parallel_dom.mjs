@@ -1,4 +1,5 @@
-// lane-parallel-dom —— t260901-09「并行段泳道图 DOM 级双边同亮断言」.
+// lane-parallel-dom — t260901-09 "parallel segment lane diagram: DOM-level
+// both-branches-lit assertion".
 //
 // Intent (black-box, user perspective): t260901-05 shipped the lane diagram's
 // parallel-fork rendering (single pointer -> active-step array, src/client/
@@ -29,9 +30,9 @@
 //      intercepted (fixture snapshots, same shape lane-parallel-states.mjs F4
 //      consumes). Never touches production console (3099) nor real tickets.
 //
-// Execution contract (t260904-12 三态): stdout last line
-// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 或全腿 na -> exit 1;
-// env_fail>0 -> exit 2. Node >= 22.18.
+// Execution contract (t260904-12 three-state): stdout's last line is
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 or every leg na ->
+// exit 1; env_fail>0 -> exit 2. Node >= 22.18.
 
 import { ensureStageConsole } from '../lib_stage_console.mjs';
 import { readFileSync, existsSync } from 'node:fs'
@@ -310,7 +311,8 @@ async function scenarioDoubleLit(page) {
     return `lit steps are not implement+design: ${JSON.stringify(lit.map(x => x.id))}`
   }
   if (!lit.every(x => x.par)) return `parallel peer marker (∥) missing on a lit step: ${JSON.stringify(lit)}`
-  // t260901-09 方案契约：running 步图标均为 ▶，∥ hover 文案互指对方（name 口径）。
+  // The t260901-09 plan contract: running steps all show the ▶ icon, and each
+  // ∥ hover text names its peer branch (by name).
   if (!lit.every(x => x.ico === '▶')) return `running step icon not ▶: ${JSON.stringify(lit.map(x => x.ico))}`
   const impl = lit.find(x => x.id === 'implement'), dsgn = lit.find(x => x.id === 'design_integration_tests')
   if (!impl.parTitle.includes('设计集成测试') || !dsgn.parTitle.includes('实现')) {
@@ -381,9 +383,11 @@ async function runBrowser(pw, browser) {
 
     // API-boundary stub: list/detail carry fixtures; sub-routes and unknown ids
     // answer ok:false so nothing reaches Temporal for the fixture id.
-    // 注意 glob 尾必须是 **：playwright 单 * 编译为 [^/]*（不跨 /，实测
-    // globToRegexPattern），tickets* 拦不到 tickets/<id> 详情——整份 fixture 会
-    // 漏到真控制台，P1-P4 在隔离台必红。
+    // Note the glob must end in **: playwright compiles a single * into [^/]*,
+    // which does not cross / (verified against globToRegexPattern), so
+    // tickets* would not intercept the tickets/<id> detail — the whole fixture
+    // would leak through to the real console and P1-P4 would go red on the
+    // isolated workbench.
     let currentDetail = DETAIL_PARALLEL
     let listMalformed = false
     await page.route('**/sandbar-workbench/api/wf/tickets**', (route) => {
@@ -432,10 +436,15 @@ async function runBrowser(pw, browser) {
     await run('P4 malformed timeline tolerated', scenarioMalformed)
 
     // P5: malformed list payload — must surface as a board error, never crash.
-    // t260903-06 验收更新：轮询优雅降级合同（工单需求③）取代旧口径「单次失败
-    // 立即红条」。新旅程四拍：①首轮失败静默——滞后角标在位、.wb-err 不得出现；
-    // ②连败第 2 拍仍在静默窗；③连续 3 次失败错误态如期浮现（错误可感知、不崩）；
-    // ④恢复健康数据后红条/角标清零（不粘滞，30s 慢轮询节拍内自愈）。
+    // t260903-06 acceptance update: the polling graceful-degrade contract
+    // (ticket requirement 3) replaces the old policy of "a single failure
+    // immediately shows the red bar". The new journey has four beats:
+    // (1) the first failure stays silent — the staleness badge is up and
+    // .wb-err must not appear; (2) the second consecutive failure is still
+    // inside the silent window; (3) after 3 consecutive failures the error
+    // state appears on cue (perceivable error, no crash); (4) once healthy
+    // data returns, the red bar and badge clear (not sticky; self-heals
+    // within the 30s slow-poll beat).
     currentDetail = DETAIL_PARALLEL
     listMalformed = true
     try {
@@ -443,14 +452,14 @@ async function runBrowser(pw, browser) {
       await page.waitForTimeout(2500)
       await dismissOverlays(page)
       await boardIcon.click().catch(() => {})
-      // ① 静默窗（failStreak=1）：角标在位、无红条
+      // (1) silent window (failStreak=1): badge up, no red bar
       const badgeShown = await waitFor(async () =>
         (await page.locator('.wb-sub', { hasText: '数据可能滞后' }).count()) > 0, 10000)
       const earlyErr = (await page.locator('.wb-err').count()) > 0
-      // ② 连败第 2 拍（+4s < 第 3 拍 ~10s）：仍在静默窗
+      // (2) second consecutive failure (+4s < beat 3 at ~10s): still silent
       await page.waitForTimeout(4000)
       const stillSilent = (await page.locator('.wb-err').count()) === 0
-      // ③ 阈值（第 3 次连败）：红条浮现
+      // (3) threshold (3rd consecutive failure): the red bar appears
       const errShown = await waitFor(async () =>
         (await page.locator('.wb-err').count()) > 0, 25000)
       if (!badgeShown || earlyErr || !stillSilent || !errShown) {
@@ -458,7 +467,7 @@ async function runBrowser(pw, browser) {
           `degrade journey broken: badge=${badgeShown} earlyErr=${earlyErr} ` +
           `stillSilent=${stillSilent} thresholdErr=${errShown} @ ${await snap(page)}`)
       } else {
-        // ④ 恢复：健康列表回归，红条与角标清零
+        // (4) recovery: the healthy list returns, red bar and badge clear
         listMalformed = false
         const errGone = await waitFor(async () =>
           (await page.locator('.wb-err').count()) === 0, 60000)

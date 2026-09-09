@@ -1,36 +1,49 @@
-// metrics-donut-dom —— t260903-09「三 donut 白板」修复的 DOM 级黑盒基线。
+// metrics-donut-dom — the DOM-level black-box baseline for the t260903-09
+// "three donuts render as blank slates" fix.
 //
-// Intent (black-box, user perspective): 度量面板在**有数据**时，三张环形图——
-// 「时间去哪了」（time 副1）、「有无代码变更票占比」（delivery 副2）、「模型份额」
-// （token 副1）——必须真渲染（canvas 有非透明像素=非白板），且人审扇区独立橙色；
-// 畸形数据走人话空态不崩。根因历史：renderSpec 缺 'donut' 分支，三张 donut spec
-// 落 default no-op，init 后从不 setOption（白板）。
+// Intent (black-box, user perspective): when the metrics panel **has data**,
+// the three donuts — 「时间去哪了」 (time, secondary 1), 「有无代码变更票占比」
+// (delivery, secondary 2), 「模型份额」 (token, secondary 1) — must really
+// render (the canvas has non-transparent pixels = not a blank slate), and the
+// human-review sector keeps its own orange; malformed data takes the
+// plain-language empty state instead of crashing. Root-cause history:
+// renderSpec had no 'donut' branch, so the three donut specs fell through to
+// the default no-op and setOption was never called after init (blank slates).
 //
-// 与 t03_donut_empty.mjs（integration/t260902-05）的 intent 边界：那边管「无数据
-// 空态」，本场景管「有数据真渲染」——互补不重复。
+// Intent boundary with t03_donut_empty.mjs (integration/t260902-05): that one
+// covers the "no data empty state", this scenario covers "with data it really
+// renders" — complementary, not duplicate.
 //
-// 对 sc_lane_parallel_dom.mjs 七项故障模式的取舍（create_plan gen1 R1 清单）：
-// 全带——①3199 端口隔离（绝不碰 3099）②环境缺失=ENV_FAIL（exit 2） ③SUMMARY 末行契约
-// ④pageerror/console.error 卫生断言（加码：畸形 donut 数据不得触发 echarts 抛错）
-// ⑤stub 消费预检（面板确实发出了 metrics 请求，未消费即 env_fail 不假绿）⑥finally
-// 兜底关浏览器 ⑦不碰真票（API 边界全 stub）。七项理由同源：生产台不可占用、
-// 机器差异不假红、全族运行器口径一致、零异常卫生、不假绿、终态回收、零真数据。
+// Tradeoffs against sc_lane_parallel_dom.mjs's seven fault modes (the
+// create_plan gen1 R1 list) — all carried over:
+// (1) isolated port 3199 (never touches 3099); (2) a missing environment =
+// ENV_FAIL (exit 2); (3) the SUMMARY last-line contract; (4) pageerror /
+// console.error hygiene assertions (hardened: malformed donut data must not
+// make echarts throw); (5) a stub-consumption precheck (the panel really did
+// issue the metrics requests; unconsumed = env_fail, never a fake green);
+// (6) a finally-backstop browser close; (7) no real tickets touched (the API
+// boundary is fully stubbed). The seven share one rationale: the production
+// console is untouchable, machine differences must not fake a red, the whole
+// baseline family shares one runner policy, zero-exception hygiene, no fake
+// green, terminal-state cleanup, zero real data.
 //
 // Two layers:
 //   S0 build-contract (pure node, runs everywhere): twin bundles in sync +
-//      donut 渲染锚点在产物中（donutOption/specToDonutInput/case 'donut'/
-//      &mode=fast/缓存快照角标）+ 纯逻辑 smoke（specToDonutInput/donutOption）。
+//      the donut render anchors present in the artifact (donutOption /
+//      specToDonutInput / case 'donut' / &mode=fast / the cache-snapshot
+//      badge) + a pure-logic smoke (specToDonutInput/donutOption).
 //   S1 browser DOM assertions (real rendering level): needs the ISOLATED test
 //      console (SANDBAR_TEST_CONSOLE, default 127.0.0.1:3199), playwright-core,
 //      and a launchable chromium. Any missing -> ENV_FAIL (exit 2, reason on
-//      stdout). Data stubbed at the API boundary with page.route(): metrics
-//      双门（mode=fast 快照 stale → full 全量）由桩按 query 分流，DOM/React/
-//      echarts 渲染路径全真。Never touches production console (3099) nor real
-//      tickets.
+//      stdout). Data stubbed at the API boundary with page.route(): the
+//      metrics double door (mode=fast snapshot stale → full recompute) is
+//      routed by query in the stub, while the DOM/React/echarts render path is
+//      all real. Never touches production console (3099) nor real tickets.
 //
-// Execution contract (t260904-12 三态): stdout last line
-// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 或全腿 na -> exit 1;
-// env_fail>0 -> exit 2（环境红：没验成，原因归环境）; all pass -> 0. Node >= 22.18.
+// Execution contract (t260904-12 three-state): stdout's last line is
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 or every leg na ->
+// exit 1; env_fail>0 -> exit 2 (an environmental red: nothing was verified and
+// the reason belongs to the environment); all pass -> 0. Node >= 22.18.
 
 import { ensureStageConsole } from '../lib_stage_console.mjs';
 import { readFileSync, existsSync } from 'node:fs'
@@ -71,7 +84,8 @@ const WF = {
 
 const donutSpec = (title, cats, data) => ({ kind: 'donut', title, categories: cats, series: [{ name: '值', data }], drill: true })
 
-/** 用户原话的三张 donut：CLI 实测数据俱在（[2786.5,4824.14]/[395267,293065]/[2,46]）。 */
+/** The three donuts in the user's own words: real CLI-measured numbers
+ *  ([2786.5,4824.14]/[395267,293065]/[2,46]). */
 const VIEW_BODY = {
   time: {
     kpis: { tickets: 48, closed: 10, avg_delivery_min: 126.1, tokens_total: 688332 },
@@ -117,7 +131,8 @@ const staleBody = (view) => ({
   reason: 'fast 无可用缓存（未算过或引擎版本失配），跳过现算',
 })
 
-/** 畸形 donut（全零+维度不齐）：必须走人话空态，不崩不静默画白板。 */
+/** Malformed donut (all zeros + mismatched dimensions): must take the
+ *  plain-language empty state — no crash, no silently painted blank slate. */
 const MALFORMED_BODY = {
   kpis: { tickets: 1, closed: 0, avg_delivery_min: 0.0, tokens_total: 0 },
   charts: {
@@ -231,7 +246,8 @@ async function waitFor(cond, ms) {
   try { return await cond() } catch { return false }
 }
 
-/** canvas 非透明像素采样（真渲染=非白板的 DOM 级证据）。返回每个 canvas 的 painted 采样数。 */
+/** Samples non-transparent canvas pixels (a real render = not a blank slate,
+ *  at DOM level). Returns each canvas's painted-sample count. */
 const domCanvasPainted = `(() => {
   const out = [];
   document.querySelectorAll('.wb-m canvas').forEach(cv => {
@@ -248,7 +264,7 @@ const domCanvasPainted = `(() => {
   return out;
 })()`
 
-/** 指定小标题容器内的 painted 采样数（-1=容器不在场）。 */
+/** Painted-sample count inside the container with the given subtitle (-1 = the container is absent). */
 const domSubPainted = (title) => `(() => {
   const subs = [...document.querySelectorAll('.wb-m-sub')];
   const sub = subs.find(s => (s.querySelector('.t')?.textContent || '').includes(${JSON.stringify(title)}));
@@ -271,8 +287,10 @@ const domSubPainted = (title) => `(() => {
 
 async function openMetricsPanel(page) {
   await page.evaluate(() => localStorage.removeItem('sandbar-workbench-metrics-panel-v1')).catch(() => {})
-  // 入口=侧栏中列底「📊 度量」钮或 shell 覆盖层钮；面板挂 METRICS_TOGGLE_EVENT 总线——
-  // 直接派发同一事件（入口钮 click 的下游就是它），DOM 渲染路径全真。
+  // Entry = the 「📊 度量」 button at the bottom of the sidebar's middle column
+  // or the shell overlay button; the panel listens on the METRICS_TOGGLE_EVENT
+  // bus — dispatching that same event directly (it is what the entry button's
+  // click cascades into) keeps the DOM render path fully real.
   const toggled = await page.evaluate(() => {
     document.dispatchEvent(new CustomEvent('wb-metrics-toggle'))
     return true
@@ -300,9 +318,13 @@ async function runBrowser(pw, browser) {
     page.on('response', (res) => { if (res.status() >= 400) badResponses.push(`${res.status()} ${res.url().slice(-90)}`) })
     page.on('pageerror', e => pageErrors.push(String(e).slice(0, 200)))
     page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200)) })
-    // 路由先于 goto：shell 装载即轮询 /wf/tickets，晚装桩会把台面 502 误记进 D6
-    // API-boundary stub: catch-all 先注册（后注册者优先），隔离台未接 Temporal 的
-    // 面板外轮询端点回 200 空响应——不消音会把环境 502 误记成面板卫生故障（D6）。
+    // Routes go in before goto: the shell polls /wf/tickets as soon as it
+    // loads, so a late stub would mis-attribute the workbench's 502s to D6.
+    // API-boundary stub: the catch-all registers first (later registrations
+    // win), so polling endpoints outside the panel that the isolated workbench
+    // has not wired to Temporal get 200 empty responses — without that
+    // silencing, environmental 502s would be miscounted as panel hygiene
+    // failures (D6).
     await page.route('**/sandbar-workbench/api/**', (route) =>
       route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'scenario catch-all stub' }) }))
     await page.route('**/sandbar-workbench/api/wf/metrics**', (route) => {
@@ -324,7 +346,8 @@ async function runBrowser(pw, browser) {
     await page.waitForTimeout(2000)
 
 
-    // stub 消费预检（R1 取舍⑤）：面板必须真的发出了 metrics 请求（fast+full 两门）。
+    // Stub-consumption precheck (R1 tradeoff 5): the panel must really have
+    // issued the metrics requests (both the fast and full doors).
     const { open } = await openMetricsPanel(page)
     if (!open) {
       record('S1 precheck', 'env_fail', `metrics panel did not open on ${BASE} (app shell not provisioned for workbench plugin?)`)
@@ -346,9 +369,12 @@ async function runBrowser(pw, browser) {
       } catch (e) { await failWith(name, e) }
     }
 
-    // D1 fast 快照角标先在（stale），全量到达后摘除。
+    // D1 the fast-snapshot badge shows first (stale) and is removed once the
+    // full payload arrives.
     await run('D1 stale badge shown then cleared', async (p) => {
-      // 面板打开时 fast 门已先回（角标可能已闪现后被摘）——重开面板复现时序。
+      // By the time the panel opens, the fast door has already answered (the
+      // badge may have flashed and been removed) — reopen the panel to
+      // reproduce the timing.
       await p.locator('.wb-m-x').click()
       await p.waitForTimeout(300)
       await p.evaluate(() => document.dispatchEvent(new CustomEvent('wb-metrics-toggle')))
@@ -361,7 +387,8 @@ async function runBrowser(pw, browser) {
       return null
     })
 
-    // D2 time 视图：主图与副1「时间去哪了」donut 真渲染（canvas 有非透明像素）。
+    // D2 time view: the primary chart and the secondary-1 「时间去哪了」 donut
+    // really render (the canvas has non-transparent pixels).
     await run('D2 time view donut painted', async (p) => {
       const painted = await waitFor(async () => {
         const arr = await p.evaluate(domCanvasPainted)
@@ -373,7 +400,7 @@ async function runBrowser(pw, browser) {
       return null
     })
 
-    // D3 delivery 视图：「有无代码变更票占比」donut 真渲染。
+    // D3 delivery view: the 「有无代码变更票占比」 donut really renders.
     await run('D3 delivery view donut painted', async (p) => {
       if (!(await clickTab(p, '交付'))) return 'delivery tab missing'
       const subPainted = await waitFor(async () => (await p.evaluate(domSubPainted('有无代码变更票占比'))) > 0, 10000)
@@ -381,7 +408,7 @@ async function runBrowser(pw, browser) {
       return null
     })
 
-    // D4 token 视图：「模型份额」donut 真渲染。
+    // D4 token view: the 「模型份额」 donut really renders.
     await run('D4 token view donut painted', async (p) => {
       if (!(await clickTab(p, 'Token'))) return 'token tab missing'
       const subPainted = await waitFor(async () => (await p.evaluate(domSubPainted('模型份额'))) > 0, 10000)
@@ -389,7 +416,8 @@ async function runBrowser(pw, browser) {
       return null
     })
 
-    // D5 畸形 donut 数据：人话空态，不崩、不出白板画布（R1 取舍④加码项）。
+    // D5 malformed donut data: plain-language empty state — no crash and no
+    // blank-slate canvas (the R1 tradeoff-4 hardening).
     await run('D5 malformed donut -> blank-state text, no crash', async (p) => {
       malformedMode = true
       if (!(await clickTab(p, '时间'))) return 'time tab missing'
