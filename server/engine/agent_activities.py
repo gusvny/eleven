@@ -1,33 +1,47 @@
-"""agent_activities —— 「stage 即 activity」的 agent 段与人门准备活动（票 t260822-m11）。
+"""agent_activities — agent stages and human-gate preparation activities under the
+"stage = activity" design (ticket t260822-m11).
 
-架构：一个 stage 一个 activity——
-  - agent 段：activity 名=stage 名（create_plan/implement/…），共用通用实现
-    `_run_agent_stage_impl`：spawn headless agent 进程（`dsh --profile sandbar-headless
-    "<派活指令>"`，工作目录=工单工作空间），轮询结果文件 + activity.heartbeat()。
-    **幂等**：结果文件（.sandbar/stage_<段>_gen<N>（老泳道 .suyou 粘滞）.json）已存在则直接读文件返回——  # naming-compat
-    Temporal 重试/worker 重启后重跑安全；rework 重跑靠 gen+1 换新文件（真重跑）。
-  - 人门段：`prepare_human_gate` 只做机械准备（提案摘录/工作空间清单/diff stat），
-    签字等待在 workflow 级 wait_condition（等外部输入的正解）。
-  - 工作区段：`prepare_workspace` 是**每个工单 workflow 的第一个 activity**——
-    工作区由引擎创建/复用，agent 不再自己搞：
-      worktree 泳道 → `git worktree add`（已建且属本仓库→复用，幂等）；
-      dir 隔离目录 → `mkdir -p`（幂等）；主树道 → 跳过。
-    失败**不抛**（回执交 workflow 转 blocked 等 retry_qc / rework 判读）。
+Architecture: one activity per stage —
+  - Agent stages: activity name = stage name (create_plan/implement/…), all sharing
+    the generic implementation `_run_agent_stage_impl`: spawn a headless agent
+    process (`dsh --profile sandbar-headless "<dispatch prompt>"`, cwd = the ticket
+    workspace), then poll the result file + activity.heartbeat().
+    **Idempotent**: if the result file (.sandbar/stage_<stage>_gen<N>（老泳道 .suyou 粘滞）.json）已存在则直接读文件返回——  # naming-compat
+    safe to re-run after Temporal retries / worker restarts; a rework re-run gets a
+    fresh file via gen+1 (a true re-run).
+  - Human-gate stage: `prepare_human_gate` only does mechanical preparation
+    (proposal excerpt / workspace listing / diff stat); the signature wait lives in a
+    workflow-level wait_condition (the right answer for awaiting external input).
+  - Workspace stage: `prepare_workspace` is **the first activity of every ticket
+    workflow** — the workspace is created/reused by the engine, the agent no longer
+    does it itself:
+      worktree lane → `git worktree add` (already exists and belongs to this repo →
+      reuse, idempotent); dir isolated directory → `mkdir -p` (idempotent); main-tree
+      path → skip.
+    Failure **does not raise** (the receipt goes back to the workflow to turn blocked
+    and wait for retry_qc / rework triage).
 
-结果文件格式（写进派活指令的交付契约）：
+Result-file format (the delivery contract written into the dispatch prompt):
   {"status":"ok|failed","summary":…,"deliverables":[…],"files_changed":[…],"evidence":…}
-  files_changed 必须是**非空路径数组**（票 t260904-18，KI-049 门②）——空数组或写成
-  字符串（逐字符迭代成单字符假列表）都会让写集刷新当场红灯（meta
-  write_set_refresh_fault）；确无文件改动的票走 allow_empty_write_set 建票声明。
+  files_changed must be a **non-empty array of paths** (ticket t260904-18, KI-049
+  gate ②) — an empty array, or a bare string (which iterates character-by-character
+  into a fake list of single chars), both trip the write-set refresh red light on the
+  spot (meta write_set_refresh_fault); tickets that genuinely changed no files
+  declare it up front via allow_empty_write_set.
 
-worker 代落盘（票 t260824-01/-02）：headless agent 沙箱写不了真 .git（worktree 的
-.git 是指向主库 .git/worktrees/<id> 的 gitfile，在 agent 可写范围之外），「agent
-自己 commit」物理做不到——agent 被逼自建 .git-local 假仓库造假。所以 commit 不从
-派活契约要：agent 段拿到结果文件后由 worker（无沙箱）调 `_settle_worktree_lane`
-确定性代落盘（假仓库隔离 + 工作区改动收成一个 commit），merge_check 查代落盘后的真状态。
+Worker-side settling (tickets t260824-01/-02): the headless agent sandbox cannot
+write the real .git (a worktree's .git is a gitfile pointing at the main repo's
+.git/worktrees/<id>, outside the agent's writable scope), so "the agent commits
+itself" is physically impossible — the agent is forced to build a fake .git-local
+repo to fake it. So the commit is not part of the dispatch contract: once the agent
+stage has the result file, the worker (unsandboxed) calls `_settle_worktree_lane`
+to settle deterministically on the agent's behalf (isolate the fake repo + fold the
+workspace changes into a single commit); merge_check then inspects the real
+post-settle state.
 
-自测/演示：`SANDBAR_AGENT_STUB=1` 时 activity 自写结果文件即返回（不起 agent 进程）。
-派活命令可用 `SANDBAR_AGENT_CMD` 覆盖（shlex 切分，缺省 `dsh --profile sandbar-headless`）。
+Self-test / demo: with `SANDBAR_AGENT_STUB=1` the activity writes its own result
+file and returns (no agent process spawned). The dispatch command can be overridden
+via `SANDBAR_AGENT_CMD` (shlex-split; default `dsh --profile sandbar-headless`).
 """
 
 from __future__ import annotations
@@ -112,9 +126,10 @@ DSH_CMD = shlex.split(os.environ.get("SANDBAR_AGENT_CMD") or "dsh --profile sand
 
 
 def _src_dsh_home() -> Path:
-    """profile/凭据/settings 的拷贝源 home：worker 继承的 DSH_HOME 优先；该目录
-    不存在（console 沙箱临时 home 被清，票 t260828-05）时回落真实 home——否则
-    profile 静默拷空，dsh 起来就报 profile 不存在。"""
+    """Copy-source home for profiles/credentials/settings: prefer the DSH_HOME the
+    worker inherited; if that directory is missing (the console sandbox's temp home
+    got wiped, ticket t260828-05) fall back to the real home — otherwise the profile
+    is silently copied empty and dsh starts up reporting the profile missing."""
     env_home = os.environ.get("DSH_HOME")
     if env_home and Path(env_home).is_dir():
         return Path(env_home)
@@ -122,11 +137,15 @@ def _src_dsh_home() -> Path:
 
 
 def _session_jsonl_torn(path: Path) -> bool:
-    """会话档逐行试析（票 t260905-10）：`zstd -dc` 流式解压读（不载全量），逐行
-    json.loads——任一行非合法 JSON（含解压中途炸：尾行必被截断成非法 JSON）=
-    帧好内撕裂，True；全部行合法（含空档、无尾换行的完整行）=健康，False。
-    空白行跳过不判（防误隔离——反向事故比漏检更常态化；合法 JSONL 不含裸空行，
-    跳过只放宽不收紧）。"""
+    """Line-by-line probe of a session file (ticket t260905-10): stream-decompress
+    with `zstd -dc` (never load it whole) and json.loads each line — any line that is
+    not valid JSON (including a mid-decompression blowup: the trailing line is
+    necessarily truncated into invalid JSON) means torn frames inside a healthy
+    frame, True; every line valid (including an empty file, or a complete line with
+    no trailing newline) means healthy, False.
+    Blank lines are skipped, not judged (avoid false quarantines — the reverse
+    accident is more routine than a miss; valid JSONL contains no bare blank lines,
+    so skipping only loosens the check, never tightens it)."""
     proc = subprocess.Popen(["zstd", "-dc", str(path)],
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     out = proc.stdout
@@ -141,7 +160,8 @@ def _session_jsonl_torn(path: Path) -> bool:
                 return True
         return False
     finally:
-        # 全终态回收：正常读尽/中途撕裂/读侧异常各路径都关 fd、杀残留 zstd、wait 收尸
+        # Full terminal-state cleanup: every path (read to end / torn mid-read /
+        # reader-side exception) closes the fd, kills the leftover zstd, and reaps via wait().
         if out is not None:
             out.close()
         if proc.poll() is None:
@@ -151,7 +171,9 @@ def _session_jsonl_torn(path: Path) -> bool:
 
 def _quarantine_session_file(local_dsh: Path, f: Path, reason: str) -> None:
     """坏会话档挪 <cwd>/.sandbar/quarantine/（老泳道 .suyou 粘滞） 留档（挪不删），reason 进告警文案。  # naming-compat
-    挪不动静默留着——同 id create 会再撞，但插件侧兜底已不致死（既有口径不变）。"""
+    If the move fails, leave the file in place silently — a create with the same id
+    will collide again, but the plugin-side fallback already keeps that non-fatal
+    (existing stance unchanged)."""
     qdir = lane_dot_path(local_dsh.parent, "quarantine", create=True)
     try:
         qdir.mkdir(parents=True, exist_ok=True)
@@ -163,15 +185,18 @@ def _quarantine_session_file(local_dsh: Path, f: Path, reason: str) -> None:
 
 
 def _quarantine_torn_sessions(local_dsh: Path) -> None:
-    """spawn 前检疫撕裂的会话文件（票 t260829-06：agent 被杀于写入中会留 zstd
-    撕裂帧，resume 与同 id create 都撞 corrupt 死，整步卡死）。坏文件挪
+    """Quarantine torn session files before spawn (ticket t260829-06: an agent killed
+    mid-write leaves torn zstd frames behind, and both resume and a same-id create
+    then die on corrupt input, wedging the whole step). Bad files are moved to
     <cwd>/.sandbar/quarantine/（老泳道 .suyou 粘滞） 留档，让「同 id 新建」回落走得通（上下文丢但流程活）。  # naming-compat
 
-    两层检疫（票 t260905-10）：
-    1. `zstd -t` 测帧完整性——帧裂即隔离；
-    2. 帧好再逐行试析（_session_jsonl_torn）——**帧好 ≠ 内容好**：JSONL record
-       被截断（票 t260906-05 同型卡死）zstd -t 测不出，解压后撞 json 解析死。
-       坏档走同一条隔离路径（_quarantine_session_file），只换 reason 文案。"""
+    Two layers of quarantine (ticket t260905-10):
+    1. `zstd -t` checks frame integrity — torn frames get quarantined right away;
+    2. if the frames are intact, probe line by line (_session_jsonl_torn) —
+       **intact frames ≠ intact content**: a truncated JSONL record (ticket
+       t260906-05, same shape of wedge) is invisible to zstd -t and dies on JSON
+       parsing after decompression. Bad files take the same quarantine path
+       (_quarantine_session_file); only the reason text differs."""
     sessions = local_dsh / "sessions"
     if not sessions.is_dir():
         return
@@ -184,30 +209,37 @@ def _quarantine_torn_sessions(local_dsh: Path) -> None:
         _quarantine_session_file(local_dsh, f, "torn-frame")
 
 
-# 项目 key 白名单（凭据出仓 M1-2）：与 server/project-registry.ts 的 PROJECT_KEY_RE
-# 同款字符集，兼防 ../ 路径穿越（per-key 凭据路径要拼目录名）。
-# 真源已上移 shared.py（票 t260902-02，M1-3；归档路径同用），此处保持旧名
-# re-export，既有引用（_resolve_credentials_source 等）不破。
+# Project key whitelist (credential exit, M1-2): same character set as PROJECT_KEY_RE
+# in server/project-registry.ts, and it also blocks ../ path traversal (per-key
+# credential paths splice in a directory name).
+# The source of truth moved up into shared.py (ticket t260902-02, M1-3; the archive
+# path uses it too); this keeps the old name as a re-export so existing references
+# (_resolve_credentials_source etc.) don't break.
 PROJECT_KEY_RE = shared.PROJECT_KEY_RE
 
 
 def _perkey_projects_root() -> Path:
-    """per-key 项目目录根（真源 shared.perkey_projects_root；本函数保持旧名
-    供既有调用点使用，语义不变）。"""
+    """Per-key project directory root (source of truth: shared.perkey_projects_root;
+    this wrapper keeps the old name for existing call sites, semantics unchanged)."""
     return shared.perkey_projects_root()
 
 
 def _resolve_credentials_source(project_key: str) -> Optional[Path]:
-    """凭据拷贝源解析（sandbar M1-2 读侧唯一真源逻辑，ui-check/creds-source.mjs 同构）：
+    """Resolve the credential copy source (sandbar M1-2 read-side single source of
+    truth; ui-check/creds-source.mjs is the isomorphic counterpart):
 
-    1. project_key 非空且过 key 白名单，且 <root>/<key>/credentials.yaml 存在（isFile，
-       命中目录不算）→ 用它（per-key 首选，契约①b）；
-    2. 否则 legacy 回落：env DSH_HOME/.credentials.yaml → $HOME/.dsh/.credentials.yaml
-       （=M1-2 前行为，弃用窗口；命中回落时调用方负责打迁移提示日志）；
-    3. 两处皆无 → None（不拷贝，既有 MISSING_CREDENTIAL 口径不变）。
+    1. project_key non-empty and passes the key whitelist, and
+       <root>/<key>/credentials.yaml exists (isFile; a directory hit doesn't count)
+       → use it (per-key first, contract ①b);
+    2. otherwise the legacy fallback: env DSH_HOME/.credentials.yaml →
+       $HOME/.dsh/.credentials.yaml (pre-M1-2 behavior, deprecation window; when the
+       fallback hits, the caller is responsible for logging the migration hint);
+    3. neither exists → None (no copy; the existing MISSING_CREDENTIAL stance is
+       unchanged).
 
-    只做路径解析与存在性判定，不读不解析文件内容（凭据内容由 dsh credentials seam
-    解析，畸形=fail-closed 交 seam，读侧不重复实现解析器）。"""
+    Only path resolution and existence checks — never reads or parses file contents
+    (the credential payload is parsed by the dsh credentials seam; malformed input is
+    fail-closed inside that seam, so the read side does not reimplement a parser)."""
     key = (project_key or "").strip()
     if key and PROJECT_KEY_RE.match(key):
         perkey = _perkey_projects_root() / key / "credentials.yaml"
@@ -216,7 +248,7 @@ def _resolve_credentials_source(project_key: str) -> Optional[Path]:
     for dsh_home in [os.environ.get("DSH_HOME") or "",
                      str(Path.home() / ".dsh")]:
         if not dsh_home:
-            continue  # DSH_HOME 未定义/空串剔除（HOME 空串同理，不拼相对路径）
+            continue  # drop an undefined/empty DSH_HOME (same for an empty HOME; no relative paths)
         cand = Path(dsh_home) / ".credentials.yaml"
         if cand.is_file():
             return cand
@@ -224,39 +256,53 @@ def _resolve_credentials_source(project_key: str) -> Optional[Path]:
 
 
 def _perkey_is_hit(project_key: str, src: Path) -> bool:
-    """project_key 合法且 src 即 per-key 路径（迁移提示日志的判定，测试亦直用）。"""
+    """project_key is valid and src is exactly the per-key path (drives the migration
+    hint log; tests call it directly too)."""
     key = (project_key or "").strip()
     return bool(key) and bool(PROJECT_KEY_RE.match(key)) and \
         src == _perkey_projects_root() / key / "credentials.yaml"
 
 
 def _merge_creds(dst: Path, src: Path) -> None:
-    """暂存凭据快照按 refs 叶子合并刷新（票 t260902-09，KI-016：只合并不覆盖）。
+    """Merge-refresh the staged credential snapshot at refs-leaf granularity
+    (ticket t260902-09, KI-016: merge only, never overwrite).
 
-    背景：泳道 .dsh/.credentials.yaml 是 spawn 时的暂存快照，旧逻辑「目标已存在即
-    return」让快照永不刷新——provider 上线新 key 对老泳道全部 MISSING_CREDENTIAL。
-    合并单位 = refs 子映射的叶子（version 等 seam 自管字段 dst 原样保留）：
-    src 有 dst 缺的叶子追加；同名叶子 dst 值绝对胜出（不抹工单中途换 key 现场）；
-    dst 独有叶子不删。
+    Background: the lane's .dsh/.credentials.yaml is a staged snapshot taken at spawn
+    time, and the old "return if the target already exists" logic meant the snapshot
+    never refreshed — a provider shipping a new key left every old lane with
+    MISSING_CREDENTIAL. The merge unit is the leaves of the refs sub-mapping (seam-
+    managed fields such as version are kept in dst as-is):
+    leaves present in src but missing from dst are appended; for same-named leaves
+    the dst value wins outright (never wipes a mid-ticket key swap); dst-only leaves
+    are not deleted.
 
-    契约偏离声明（项目接入契约 v1 ①b「读侧不重复实现解析器」）：合并必须读内容，
-    读侧用 PyYAML 软依赖解析（shared.model_route_for 同款先例），①b 修订草案已随
-    票 t260902-09 交人审。写回不做再序列化：只在 dst 的 refs 块内文本追加同形新行，
-    其余字节零改动。追加行走 yaml 标量安全序列化（防注入裸行），缩进取 dst refs
-    子级实测缩进；写回同目录 tmp + os.replace 原子替换，mode 照抄 dst。
+    Contract-deviation statement (onboarding contract v1 ①b "the read side does not
+    reimplement the parser"): merging requires reading contents, so the read side
+    parses with a soft PyYAML dependency (same precedent as shared.model_route_for);
+    the ①b revision draft went out for human review with ticket t260902-09. The
+    write-back is not a re-serialization: it only appends same-shaped new lines as
+    text inside dst's refs block, every other byte untouched. Appended lines use
+    yaml-safe scalar serialization (no injectable bare lines), with the indentation
+    taken from the measured indent of dst's refs children; the write-back goes to a
+    tmp file in the same directory + os.replace for an atomic swap, mode copied from
+    dst.
 
-    故障模式取舍（除最后一条外，任一命中 = 不合并、快照原样、只打 warning 不抛——
-    「解析失败维持现状不抛新错」）：
-      - PyYAML 不可用 / 任一侧 yaml 语法错 / 顶层非 dict；
-      - dst 的 refs 行是 inline 形态——再追加缩进子行会产出非法 YAML，宁可少合
-        一个 key，不可毁整份快照（agent 全部凭据不可用比缺一个 key 更糟）；
-      - src 无 refs 段：no-op（seam 只认 refs 叶子，非故障）；
-      - dst 读失败 / CRLF 文件 / 叶子值是多行标量（文本追加保形不安全）；
-      - 写回 OSError：快照原样，tmp 在 finally 清理；
-      - 无新增叶子：零写回（不动 mtime/mode，防无谓抖动）。
+    Fault-mode trade-offs (last item excepted, any hit = no merge, snapshot left as
+    is, warning only, never raise — "on a parse failure keep the status quo, raise no
+    new error"):
+      - PyYAML unavailable / a yaml syntax error on either side / top level not a dict;
+      - dst's refs line is inline form — appending indented children would produce
+        invalid YAML; better to merge one key fewer than to destroy the whole
+        snapshot (an agent with zero usable credentials beats one missing key);
+      - src has no refs section: no-op (the seam only recognizes refs leaves; not a
+        fault);
+      - dst read failure / CRLF file / a leaf value that is a multi-line scalar
+        (text appending cannot preserve shape safely);
+      - OSError on write-back: snapshot untouched, tmp cleaned up in finally;
+      - no new leaves: zero write-back (mtime/mode untouched, avoids pointless churn).
     """
     try:
-        import yaml  # pyyaml（engine venv；shared.model_route_for 同款软依赖）
+        import yaml  # pyyaml (engine venv; same soft dependency as shared.model_route_for)
     except ImportError:
         activity.logger.warning(
             "[creds] 暂存凭据合并跳过（dst=%s src=%s）：PyYAML 不可用，快照原样",
@@ -266,7 +312,7 @@ def _merge_creds(dst: Path, src: Path) -> None:
     def _load(p: Path) -> Optional[dict]:
         try:
             data = yaml.safe_load(p.read_text("utf-8"))
-        except Exception:  # yaml 语法错/OSError/UnicodeDecodeError → 不可解析
+        except Exception:  # yaml syntax error / OSError / UnicodeDecodeError → unparseable
             return None
         return data if isinstance(data, dict) else None
 
@@ -278,7 +324,7 @@ def _merge_creds(dst: Path, src: Path) -> None:
         return
     src_refs = src_data.get("refs")
     if src_refs is None:
-        return  # src 无 refs（扁平老格式）：seam 只认 refs 叶子，无可合并单位
+        return  # src has no refs (flat legacy format): the seam only reads refs leaves, nothing to merge
     if not isinstance(src_refs, dict):
         activity.logger.warning(
             "[creds] 暂存凭据合并跳过（src=%s）：refs 段不是映射，快照原样", src)
@@ -291,11 +337,11 @@ def _merge_creds(dst: Path, src: Path) -> None:
     missing = {k: v for k, v in src_refs.items()
                if not isinstance(dst_refs, dict) or k not in dst_refs}
     if not missing:
-        return  # 无新增叶子：零写回
+        return  # no new leaves: zero write-back
 
     try:
-        # 按字节读入再解码：read_text 的 universal-newlines 会在读取时把 \r\n
-        # 翻译成 \n，下面的 CRLF 守卫就永远打不中。
+        # Read bytes, then decode: read_text's universal-newlines would translate
+        # \r\n into \n while reading, and the CRLF guard below could never fire.
         text = dst.read_bytes().decode("utf-8")
     except (OSError, UnicodeDecodeError) as e:
         activity.logger.warning(
@@ -309,9 +355,9 @@ def _merge_creds(dst: Path, src: Path) -> None:
     trailing_nl = text.endswith("\n")
     raw = text.split("\n")
     if trailing_nl:
-        raw = raw[:-1]  # split 的末尾空串，重构时统一补回
+        raw = raw[:-1]  # the trailing empty string from split; put it back on rejoin
 
-    # 定位 refs: 行；守卫：冒号后有非空内容 = inline 形态，不可合并
+    # Locate the refs: line; guard: non-empty content after the colon = inline form, not mergeable
     refs_idx = None
     for i, ln in enumerate(raw):
         if re.match(r"^refs:\s*$", ln):
@@ -323,14 +369,14 @@ def _merge_creds(dst: Path, src: Path) -> None:
                 "快照原样", dst, ln.strip())
             return
     child_indent: Optional[str] = None
-    insert_at = len(raw)  # refs 块到 EOF 或 dst 无 refs 段 → 都算追加到尾
+    insert_at = len(raw)  # refs block runs to EOF, or dst has no refs section → append at the end either way
     if refs_idx is not None:
         for j in range(refs_idx + 1, len(raw)):
             ln = raw[j]
             if not ln.strip() or ln.lstrip().startswith("#"):
-                continue  # 空行/注释不算块边界
+                continue  # blank lines / comments are not block boundaries
             if not ln[0].isspace():
-                insert_at = j  # 下一个顶层键：refs 块在此结束
+                insert_at = j  # next top-level key: the refs block ends here
                 break
             if child_indent is None:
                 child_indent = " " * (len(ln) - len(ln.lstrip(" ")))
@@ -348,7 +394,7 @@ def _merge_creds(dst: Path, src: Path) -> None:
         add_lines.append(indent + parts[0])
 
     if refs_idx is None:
-        # dst 无 refs 段：文件尾补一个块（seam 读 refs 才能看到新叶子）
+        # dst has no refs section: append a block at EOF (the seam only sees new leaves by reading refs)
         new_text = text + ("" if text.endswith("\n") or not text else "\n") \
             + "refs:\n" + "".join(l + "\n" for l in add_lines)
     else:
@@ -375,25 +421,29 @@ def _merge_creds(dst: Path, src: Path) -> None:
             try:
                 tmp_path.unlink()
             except OSError:
-                pass  # 清理失败不掩盖主流程；残留 tmp 下次合并不受影响
+                pass  # a cleanup failure must not mask the main flow; a leftover tmp doesn't hurt the next merge
     activity.logger.info(
         "[creds] 暂存凭据合并刷新：%s 追加叶子 %s（源=%s，同名叶子未改写）",
         dst, "、".join(str(k) for k in missing), src)
 
 
 def _copy_creds(dst_dsh: Path, project_key: str = "") -> None:
-    """把凭据拷进/合并进工作空间本地 .dsh（API key 透传；拷贝源 = 项目目录
-    ~/.sandbar/projects/<key>/credentials.yaml 优先，legacy 全局回落）。
-    project_key 未知/为空 = 跳过 per-key 首查、仍走 legacy 回落（=M1-2 前行为）。
+    """Copy/merge credentials into the workspace-local .dsh (API key passthrough;
+    copy source = the project's ~/.sandbar/projects/<key>/credentials.yaml first,
+    legacy global fallback). An unknown/empty project_key = skip the per-key first
+    probe and still take the legacy fallback (= pre-M1-2 behavior).
 
-    - dst 缺失：整文件 copy2；copy2 抛错（权限/属主等不可读终态）= fail-closed
-      上抛，报错含源路径，不静默吞。
-    - dst 已存在：refs 叶子级合并刷新（见 _merge_creds，KI-016）——不再整段
-      跳过（旧守卫让暂存快照永不刷新，新 provider 对老泳道全 MISSING_CREDENTIAL），
-      同时保住原守卫意图：同名叶子 dst 值绝不改写（agent 可能已中途换 key，
-      覆盖会把现场抹掉）。
-    解析失败/源缺失维持现状不抛新错：源缺失静默跳过（MISSING_CREDENTIAL 口径
-    由引擎报），解析失败 warning + 快照原样。"""
+    - dst missing: copy2 the whole file; if copy2 raises (unreadable terminal state
+      such as permissions/ownership) that is fail-closed and propagates, the error
+      names the source path, never silently swallowed.
+    - dst present: refs-leaf merge refresh (see _merge_creds, KI-016) — no longer a
+      blanket skip (the old guard meant the staged snapshot never refreshed, so a new
+      provider left every old lane with MISSING_CREDENTIAL), while keeping the old
+      guard's intent: same-named leaves are never rewritten in dst (the agent may
+      have swapped keys mid-ticket; overwriting would erase that state).
+    On a parse failure / missing source, keep the status quo and raise no new error:
+    a missing source is skipped silently (MISSING_CREDENTIAL is reported by the
+    engine); a parse failure logs a warning and leaves the snapshot as is."""
     dst = dst_dsh / ".credentials.yaml"
     src = _resolve_credentials_source(project_key)
     if src is None:
@@ -401,8 +451,10 @@ def _copy_creds(dst_dsh: Path, project_key: str = "") -> None:
     if not dst.exists():
         try:
             shutil.copy2(str(src), str(dst))
-            # dsh 拒载过宽权限凭据（票 t260903-12，安全事件余波）；copy2 保留源
-            # 权限——源若 644，泳道快照带病，拷后强制 0600。
+            # dsh refuses credentials with overly broad permissions (ticket
+            # t260903-12, aftermath of a security incident); copy2 preserves the
+            # source mode — a 644 source would ship a sick lane snapshot, so force
+            # 0600 after the copy.
             os.chmod(str(dst), 0o600)
         except OSError as e:
             raise RuntimeError("凭据拷贝失败（fail-closed，源=%s）：%s" % (src, e))
@@ -416,10 +468,12 @@ def _copy_creds(dst_dsh: Path, project_key: str = "") -> None:
 
 
 async def _fetch_ticket_project(ticket_id: str) -> str:
-    """查自身工单的 project key（M1-2：凭据 per-key 化需要项目目录名）。
-    数据源 = workflow snapshot 的 meta.project（base.py 落快照时写入）；
-    查询失败/超时/为空 → ""（软失败：跳过 per-key 首查走 legacy 回落，
-    绝不因凭据路径查询弄挂 spawn）。先例 = _epic_ticket_rows 的 snapshot 查询。"""
+    """Look up this ticket's project key (M1-2: per-key credentials need the project
+    directory name). Data source = meta.project on the workflow snapshot (written
+    when base.py persists the snapshot); lookup failure / timeout / empty → ""
+    (soft failure: skip the per-key first probe and take the legacy fallback — never
+    let a credential-path lookup break the spawn). Precedent = the snapshot query in
+    _epic_ticket_rows."""
     try:
         from client import _connect
         client = await _connect()
@@ -433,33 +487,39 @@ async def _fetch_ticket_project(ticket_id: str) -> str:
 
 
 def _copy_settings(dst_dsh: Path) -> None:
-    """把 dsh home 的 settings.yaml 拷进工作空间本地 .dsh——llm-pi-ai 的 providers 段在其中，
-    缺了它 kimi-coding/zai/scnet 适配器全部休眠（NO_ADAPTER）。settings.yaml 无密钥
-    （key 走 apiKeyEnv/凭据 seam），拷的是 provider 注册配置。每次 spawn 重拷：
-    设置变更（新 provider/排序）下一个 agent 即生效。"""
+    """Copy the dsh home's settings.yaml into the workspace-local .dsh — llm-pi-ai's
+    providers section lives there; without it the kimi-coding/zai/scnet adapters all
+    stay dormant (NO_ADAPTER). settings.yaml holds no secrets (keys go through
+    apiKeyEnv / the credentials seam); what gets copied is the provider registry
+    config. Re-copied on every spawn: settings changes (new provider / ordering) take
+    effect for the very next agent."""
     src = _src_dsh_home() / "settings.yaml"
     if src.is_file():
         shutil.copy2(str(src), str(dst_dsh / "settings.yaml"))
 
 
 def _pin_default_model(dst_dsh: Path, route: Dict[str, str]) -> None:
-    """把路由结果写进泳道本地 settings.yaml 的 agent-default-model 用户层。
+    """Write the routing decision into the agent-default-model user layer of the
+    lane-local settings.yaml.
 
-    dsh 层叠规则：settings 用户层 > cordis patch 合成层（dsh-settings resolve =
-    mergeLayers(base, section)，用户层后盖）。settings.yaml 里有 GUI 默认模型段
-    （agent-default-model），只发一次性 model_patch 必被它盖掉——260826 事故根因：
-    路由表切 kimi-coding/zai 全部落空，agent 实际全跑 scnet，scnet 配额一尽全灭。
-    所以钉路由必须落用户层；每次 spawn 重拷 settings 故不会残留漂移。"""
+    dsh layering: the settings user layer beats the cordis patch composition layer
+    (dsh-settings resolve = mergeLayers(base, section), user layer applied last).
+    settings.yaml carries a GUI default-model section (agent-default-model), so a
+    one-shot model_patch alone is guaranteed to be shadowed by it — the root cause of
+    the 260826 incident: switching the route table to kimi-coding/zai landed nowhere,
+    every agent actually ran on scnet, and once scnet's quota ran out everything
+    died. So pinning a route must land in the user layer; settings are re-copied on
+    every spawn, so no drift lingers."""
     p = dst_dsh / "settings.yaml"
     if not p.is_file():
         return
     out, skipping = [], False
     for ln in p.read_text("utf-8").splitlines(keepends=True):
         if ln.startswith("agent-default-model:"):
-            skipping = True  # 整段摘除（含段内缩进注释），统一在文末重写
+            skipping = True  # excise the whole section (its indented comments included), rewritten once at EOF
             continue
         if skipping and ln[:1] not in (" ", "\t", "\n", "#"):
-            skipping = False  # 下一个顶层键
+            skipping = False  # next top-level key
         if not skipping:
             out.append(ln)
     out.append("agent-default-model:\n  provider: %s\n  model: %s\n"
@@ -468,33 +528,37 @@ def _pin_default_model(dst_dsh: Path, route: Dict[str, str]) -> None:
 
 
 def _copy_profile(dst_dsh: Path) -> None:
-    """把 sandbar-headless profile 软链拷进工作空间本地 .dsh（沙箱隔离）。"""
+    """Copy the sandbar-headless profile (symlinks included) into the workspace-local
+    .dsh (sandbox isolation)."""
     src = _src_dsh_home() / "profiles" / "sandbar-headless"
     if not src.exists():
-        return  # 无 profile 可拷——headless 用 dsh 内置兜底
+        return  # no profile to copy — headless falls back to dsh's built-in default
     dst = dst_dsh / "profiles"
     dst.mkdir(parents=True, exist_ok=True)
     if not (dst / "sandbar-headless").exists():
         shutil.copytree(str(src), str(dst / "sandbar-headless"), symlinks=True)
 
-# 全部 agent 段的 stage id（activity 名=stage 名；纯门段 machine-qc 与
-# 人门段 approve/final-review/merge 不在此列）。
-# 260824 dev-lane：developer 系工单统一走 create_plan/review_plan/implement/
-# integration_review 四 agent 步（旧 code-lane/build-workbench 的 develop/verify/
-# visual/close 已随模板退场删除）。
+# Every agent-stage stage id (activity name = stage name; the pure-gate stage
+# machine-qc and the human-gate stages approve/final-review/merge are not in here).
+# 260824 dev-lane: developer-family tickets uniformly go through the four agent
+# steps create_plan/review_plan/implement/integration_review (the old code-lane /
+# build-workbench develop/verify/visual/close steps were deleted along with their
+# templates).
 AGENT_STAGE_IDS = (
-    "create_plan", "review_plan", "implement", "integration_review",  # dev-lane（integration_review 仅存量 workflow 重放可达）
-    "design_integration_tests",                      # dev-lane 集成测试机制（票 t260831-02）
-    # 以下四行所属模板已退役（260904 宿主令）：段名仅为存量 workflow 重放兜底保留
-    "propose", "process", "ai-review", "publish",    # content-pipeline（已退役）
-    "review", "report",                              # proofread（已退役；report 兼 regression）
-    "regress",                                       # regression（已退役）
-    "clean", "rederive",                             # cleanup（已退役）
+    "create_plan", "review_plan", "implement", "integration_review",  # dev-lane (integration_review reachable only by replaying existing workflows)
+    "design_integration_tests",                      # dev-lane integration-test machinery (ticket t260831-02)
+    # The templates owning the next four lines were retired (260904 host order): the
+    # stage names remain only as a fallback for replaying existing workflows.
+    "propose", "process", "ai-review", "publish",    # content-pipeline (retired 260904)
+    "review", "report",                              # proofread (retired; report doubles for regression)
+    "regress",                                       # regression (retired)
+    "clean", "rederive",                             # cleanup (retired)
 )
 
 
 def _ws_cwd(ws: Optional[Dict[str, str]], ticket_id: str) -> Path:
-    """agent 进程工作目录：worktree 泳道（相对仓库根）/ dir 隔离目录 / 主树。"""
+    """Working directory for the agent process: worktree lane (relative to the repo
+    root) / dir isolated directory / main tree."""
     if isinstance(ws, dict) and ws.get("path"):
         p = Path(str(ws["path"]))
         if not p.is_absolute():
@@ -508,9 +572,11 @@ def _read_result(path: Path) -> Optional[StageResult]:
         raw = json.loads(path.read_text("utf-8"))
     except Exception:
         return None
-    # files_changed 保形归一（票 t260904-18，KI-049 门②）：不用 [str(x) for x in …]
-    # 毁形强转——字符串回执会被逐字符迭代成单字符假列表静默绕闸；形状由
-    # normalize_files_changed 定形（absent/ok/malformed），消费点据此可见红。
+    # Shape-preserving normalization of files_changed (ticket t260904-18, KI-049
+    # gate ②): no [str(x) for x in …] shape-destroying coercion — a string receipt
+    # would be iterated character-by-character into a fake list of single chars and
+    # slip past the gate silently; normalize_files_changed assigns the shape
+    # (absent/ok/malformed) so consumers can go visibly red on that basis.
     fc, fc_shape = normalize_files_changed(raw.get("files_changed"))
     return StageResult(
         status=str(raw.get("status") or "ok"),
@@ -524,8 +590,9 @@ def _read_result(path: Path) -> Optional[StageResult]:
 
 
 def _patch_result_prompt(rfile: Path, prompt: str) -> None:
-    """把完整 prompt 写进结果 JSON 的 prompt 字段（工单台 Agent 日志页签可查看）。
-    已存在则跳过（不覆盖，保留首次写入的 prompt）。"""
+    """Write the full prompt into the result JSON's prompt field (viewable from the
+    ticket console's Agent log tab). Skipped when already present (no overwrite; the
+    first-written prompt is kept)."""
     try:
         raw = json.loads(rfile.read_text("utf-8"))
     except Exception:
@@ -540,7 +607,8 @@ def _patch_result_prompt(rfile: Path, prompt: str) -> None:
 
 
 def _session_kb(cwd: Path) -> int:
-    """返回工作空间本地 .dsh/sessions/ 下最新 session 文件的 KB 数（agent 进度信号）。"""
+    """KB size of the newest session file under the workspace-local .dsh/sessions/
+    (an agent progress signal)."""
     sd = cwd / ".dsh" / "sessions"
     if not sd.is_dir():
         return 0
@@ -559,35 +627,43 @@ def _session_kb(cwd: Path) -> int:
     return best[1] // 1024
 
 
-# agent 沙箱写不了真 .git 时自建的假仓库目录名（260824 实测：.git-local/.git-obj-tmp/
-# .git-tmp/.git-alt）。settle 发现即隔离进 .sandbar/quarantine/（不删，留档可查）。
+# Fake repo directory names an agent builds when its sandbox cannot write the real
+# .git (observed 260824: .git-local/.git-obj-tmp/.git-tmp/.git-alt). settle
+# quarantines them into .sandbar/quarantine/ on sight (never deleted, kept for audit).
 FAKE_GIT_DIRS = (".git-local", ".git-obj-tmp", ".git-tmp", ".git-alt")
 
 
 def _gitdir_is_real(cwd: Path, repo: Optional[Path] = None) -> bool:
-    """worktree 的 gitdir 是否指向主库 .git 之下（真身校验）。
+    """Does the worktree's gitdir point under the main repo's .git (identity check)?
 
-    票 t260824-03 教训：.git gitfile 在泳道目录内、沙箱可写，agent 可以把它改写指向
-    自建假仓库（.git-alt）——之后泳道里一切 git 操作都落进假仓库，按目录名抓
-    假仓库的排查会全部落空。所以不看名字，看 gitdir 真身。"""
+    Lesson from ticket t260824-03: the .git gitfile sits inside the lane directory,
+    writable by the sandbox, so an agent can rewrite it to point at its own fake repo
+    (.git-alt) — after that every git operation in the lane lands in the fake repo,
+    and any sweep that hunts fake repos by directory name comes up empty. So don't
+    look at names; look at the gitdir's real identity."""
     p = _git(["rev-parse", "--absolute-git-dir"], cwd)
     if p.returncode != 0:
         return False
     try:
         gd = Path(p.stdout.strip()).resolve()
-        # 跨项目（票 t260903-10）：worktree 的真 gitdir 在其所属项目仓 .git 下，
-        # 按路径约定自锚定，不恒锚引擎仓（否则跨项目泳道恒误判被"修复"写坏）。
+        # Cross-project (ticket t260903-10): the worktree's real gitdir lives under
+        # the .git of the project repo that owns it — self-anchored by path
+        # convention, never hard-anchored to the engine repo (otherwise cross-project
+        # lanes are permanently misjudged and "repaired" into corruption).
         return gd.is_relative_to(((repo if repo is not None else _lane_repo_root(cwd)) / ".git").resolve())
     except Exception:
         return False
 
 
 def _registered_gitdir(repo: Path, cwd: Path) -> Optional[Path]:
-    """在 repo 的注册 worktree 表里找反向指针指回 cwd/.git 的注册 gitdir（票B）。
+    """Find, in repo's registered-worktree table, the registered gitdir whose
+    back-pointer points at cwd/.git (ticket B).
 
-    多仓泳道的树名与仓 basename 无对应关系（注册名可能带去重后缀），不能按
-    `cwd.name` 猜——逐个读 `.git/worktrees/*/gitdir` 反查，指回即真身。找不到
-    返回 None（由调用方出「无法自动修复」）。"""
+    Multi-repo lane tree names have no correspondence with the repo basename
+    (registered names may carry dedup suffixes), so don't guess from `cwd.name` —
+    read each `.git/worktrees/*/gitdir` in turn and check the back-pointer; the one
+    that points back is the real one. Returns None when not found (the caller then
+    reports "cannot auto-repair")."""
     reg_root = repo / ".git" / "worktrees"
     if not reg_root.is_dir():
         return None
@@ -598,7 +674,7 @@ def _registered_gitdir(repo: Path, cwd: Path) -> Optional[Path]:
             continue
         try:
             back = Path(gd_file.read_text("utf-8").strip())
-            # 注册 gitdir 文件记的是 <worktree>/.git
+            # The registered gitdir file records <worktree>/.git
             if back.resolve() == want:
                 return reg
         except Exception:
@@ -608,12 +684,15 @@ def _registered_gitdir(repo: Path, cwd: Path) -> Optional[Path]:
 
 def _restore_gitfile(cwd: Path, ticket_id: str, stage_id: str, gen: int,
                      repo: Optional[Path] = None) -> Optional[str]:
-    """gitfile 被改写（指向主库之外）时修复：隔离假仓库 + 重写 gitfile 指向真注册
-    gitdir。返回人读说明；gitfile 没问题返回 None；修不了抛异常（交 Temporal 重试/
-    workflow 转 blocked）。
-    repo（票B t260907-06）：树所属仓根；None=旧口径自算 _lane_repo_root(cwd)
-    （单仓路径零变化）。多仓下真 gitdir 在子仓 .git/worktrees/ 下，必须传子仓根，
-    且注册名经 _registered_gitdir 反查（不按 cwd.name 猜）。"""
+    """Repair a rewritten gitfile (pointing outside the main repo): quarantine the
+    fake repo + rewrite the gitfile to the real registered gitdir. Returns a
+    human-readable note; None when the gitfile is fine; raises when unrepairable
+    (left to Temporal retry / the workflow turning blocked).
+    repo (ticket B, t260907-06): the repo root owning the tree; None = the old
+    stance of computing _lane_repo_root(cwd) here (single-repo path unchanged).
+    In multi-repo setups the real gitdir lives under the child repo's
+    .git/worktrees/, so the child repo root must be passed, and the registered name
+    is found via _registered_gitdir (never guessed from cwd.name)."""
     p = _git(["rev-parse", "--absolute-git-dir"], cwd)
     fake = Path(p.stdout.strip()).resolve() if p.returncode == 0 else None
     if repo is None:
@@ -628,14 +707,15 @@ def _restore_gitfile(cwd: Path, ticket_id: str, stage_id: str, gen: int,
             raise RuntimeError(
                 "settle: gitfile 被改写（指向 %s）且仓 %s 的注册表里找不到反向指回本树"
                 "（%s）的 gitdir，无法自动修复——人工处置" % (fake, repo, cwd))
-    # 真 gitdir 的反向指针校验（gitdir 文件应指回 cwd/.git），对不上说明注册已乱
+    # Back-pointer check on the real gitdir (its gitdir file should point back at
+    # cwd/.git); a mismatch means the registration is already scrambled
     back = (real / "gitdir").read_text("utf-8").strip() if (real / "gitdir").is_file() else ""
     if back and Path(back).resolve() != (cwd / ".git").resolve():
         raise RuntimeError(
             "settle: 真 gitdir %s 的反向指针指向 %s（非本泳道），注册混乱——人工处置" % (real, back))
     (cwd / ".git").write_text("gitdir: %s\n" % real, "utf-8")
     note = "gitfile 被 agent 改写（指向主库外 %s），已恢复指向真 gitdir" % fake
-    # 假仓库隔离留档（在泳道内、且是个 git 目录才挪）
+    # Quarantine the fake repo for the record (moved only if it sits inside the lane and is a git directory)
     if fake and fake.is_relative_to(cwd.resolve()) and (fake / "HEAD").exists() and fake.is_dir():
         qdir = lane_dot_path(cwd, "quarantine", create=True)
         qdir.mkdir(parents=True, exist_ok=True)
@@ -649,25 +729,34 @@ def _restore_gitfile(cwd: Path, ticket_id: str, stage_id: str, gen: int,
     activity.logger.warning("[%s/%s] settle：%s", ticket_id, stage_id, note)
     return note
 
-# settle/merge_check 共用的 git pathspec 排除口径：.dsh（agent 沙箱/credentials）与
-# .sandbar（结果文件/agent 日志/quarantine）是引擎运行时目录，任何泳道必有，不算改动。
-# 注意：本 pathspec 只用于 git status（porcelain 正常）；git add 不可带它——
-# Apple Git 2.50 对「. + :!ignored目录」组合必报错 rc=1（见 _settle_worktree_lane）。
-SETTLE_PATHSPEC = [".", ":!.dsh", ":!.sandbar", ":!.sandbar"]  # .sandbar=老泳道名（粘滞回落，票 t260907-04）
+# The git pathspec exclusion stance shared by settle/merge_check: .dsh (agent
+# sandbox / credentials) and .sandbar (result files / agent logs / quarantine) are
+# engine runtime directories present in every lane, so they don't count as changes.
+# Note: this pathspec is only for git status (fine for porcelain); git add must not
+# carry it — Apple Git 2.50 always errors rc=1 on the ". + :!ignored-dir" combination
+# (see _settle_worktree_lane).
+SETTLE_PATHSPEC = [".", ":!.dsh", ":!.sandbar", ":!.sandbar"]  # the second .sandbar = legacy lane name (sticky fallback, ticket t260907-04)
 
 
-# ---- KI-009（票 t260901-25）：merge_check dirty 红灯前自动补 settle 的两个纯函数 ----
-# 纯函数无 IO，integration 测试（票 t260901-25）用 ast 抽取直接测（环境无 temporalio 导不进模块）。
+# ---- KI-009 (ticket t260901-25): the two pure functions that auto-settle before merge_check goes red on dirty ----
+# Pure functions, no IO; the integration test (ticket t260901-25) extracts them with
+# ast and tests them directly (that environment has no temporalio, so the module
+# cannot be imported).
 
 
 def _dirty_files_from_status_z(raw: str) -> List[str]:
-    """解析 `git status --porcelain -z` 输出为脏文件路径清单（KI-009）。
+    """Parse `git status --porcelain -z` output into a list of dirty file paths
+    (KI-009).
 
-    用 -z 而非普通 --porcelain 的理由：NUL 分隔无 quotePath 引号歧义（含空格/
-    非 ASCII 的路径不会被引号包裹转义），rename/copy 条目拆成 `XY new<NUL>old<NUL>`
-    两字段无「old -> new」箭头解析——两种普通格式的畸形行形态在这里结构上不存在。
-    容错：非串/空串 → []；条目 XY 位不足 2 字符或缺路径 → 丢弃该条不抛（畸形输入
-    fail-closed 交上层判写集外）；rename/copy 只取 new（工作区现状路径）。
+    Why -z instead of plain --porcelain: NUL separation has no quotePath quoting
+    ambiguity (paths with spaces / non-ASCII are never quote-wrapped and escaped),
+    and rename/copy entries split into the two fields `XY new<NUL>old<NUL>` with no
+    "old -> new" arrow to parse — the malformed-line shapes of both plain formats
+    structurally cannot exist here.
+    Tolerance: non-string / empty string → []; an entry with fewer than 2 XY chars or
+    no path is dropped without raising (malformed input fails closed and is left to
+    the caller to judge out-of-write-set); rename/copy keeps only new (the current
+    workspace path).
     """
     if not isinstance(raw, str) or not raw:
         return []
@@ -676,7 +765,7 @@ def _dirty_files_from_status_z(raw: str) -> List[str]:
         if not ent:
             continue
         if len(ent) < 4 or not ent[2] == " ":
-            continue  # XY<space>path 形态不成立：畸形条目丢弃，不猜
+            continue  # the XY<space>path shape doesn't hold: drop the malformed entry, no guessing
         path = ent[3:]
         if not path:
             continue
@@ -685,13 +774,16 @@ def _dirty_files_from_status_z(raw: str) -> List[str]:
 
 
 def _dirty_within_write_set(files: List[str], write_set: Any) -> bool:
-    """脏文件清单是否全部落在工单 write_set 内（KI-009 自愈放行判据，纯函数）。
+    """Is every dirty file inside the ticket's write_set (KI-009 self-heal admission
+    test; pure function)?
 
-    fail-closed：files 为空（没脏不用自愈）/ write_set 非列表或为空 / 任一条目
-    非串或 strip 后为空 / 任一脏文件非串或为空 / 脏文件是绝对路径、含 `..` 段、
-    含反斜杠 / 未命中任何条目 —— 一律 False，不自愈。
-    条目命中口径：脏文件 == 条目，或脏文件以「条目 + /」为目录前缀（条目可写
-    `app/src` 表示整个前缀）；条目以 / 结尾同义。
+    Fail-closed: files empty (nothing dirty, no self-heal needed) / write_set not a
+    list or empty / any entry non-string or empty after strip / any dirty file
+    non-string or empty / a dirty file that is absolute, has a `..` segment, or has a
+    backslash / no entry matches — always False, no self-heal.
+    Entry match stance: dirty file == entry, or the dirty file has "entry + /" as a
+    directory prefix (an entry may be `app/src` to mean the whole prefix); an entry
+    ending in / means the same.
     """
     if not files or not isinstance(write_set, list) or not write_set:
         return False
@@ -710,16 +802,17 @@ def _dirty_within_write_set(files: List[str], write_set: Any) -> bool:
         if f.startswith("/") or "\\" in f or f == ".." or f.startswith("../") \
                 or "/../" in f or f.endswith("/.."):
             return False
-        if any(ch in f for ch in "?!*[]"):  # git 哨兵（?）/通配形态路径：fail-closed 拒
+        if any(ch in f for ch in "?!*[]"):  # git sentinels (?) / glob-shaped paths: rejected fail-closed
             return False
         if not any(f == s or f.startswith(s + "/") for s in pats):
             return False
     return True
 
 
-# ---- KI-009（票 t260901-25）：agent 进程全终态回收（drain 压迟写竞态窗） ----
+# ---- KI-009 (ticket t260901-25): full terminal-state reaping of the agent process (draining closes the late-write race window) ----
 
-# reap 有界窗：terminate 后最多等这么久，超时升级 kill；再等 kill 退出。
+# Bounded reap window: after terminate, wait at most this long before escalating to
+# kill; then wait for the kill to take effect.
 AGENT_REAP_TERM_TIMEOUT_SEC = 15
 AGENT_REAP_KILL_TIMEOUT_SEC = 5
 
@@ -727,23 +820,28 @@ AGENT_REAP_KILL_TIMEOUT_SEC = 5
 def _reap_agent_proc(proc: subprocess.Popen, ticket_id: str = "", stage_id: str = "",
                      term_timeout: float = AGENT_REAP_TERM_TIMEOUT_SEC,
                      kill_timeout: float = AGENT_REAP_KILL_TIMEOUT_SEC) -> str:
-    """agent 进程树全终态回收（KI-009 ②）：terminate → 带超时 wait → 超时 kill → 再 wait。
+    """Full terminal-state reaping of the agent process tree (KI-009 ②):
+    terminate → wait with timeout → kill on timeout → wait again.
 
-    为什么按进程组：dsh runner 会再 spawn 子进程，agent「迟写文件」往往发生在
-    孙进程手里——只杀直接子进程等于把迟写者留成孤儿（KI-009 竞态窗真凶）。
-    所以 spawn 一律 start_new_session=True（独立进程组），本函数对组发信号
-    （killpg），组粒度收整棵树。组不存在（进程已死/已被收）按幂等处理不抛。
-    返回人读说明（供调用方写 log / evidence）；对已退出 proc 幂等返回 ""。
+    Why by process group: the dsh runner spawns children of its own, and an agent's
+    "late file write" usually belongs to a grandchild process — killing only the
+    direct child leaves the late writer behind as an orphan (the real culprit of the
+    KI-009 race window). So every spawn uses start_new_session=True (its own process
+    group) and this function signals the group (killpg), reaping the whole tree at
+    group granularity. A missing group (process already dead / already reaped) is
+    treated as idempotent, no raise. Returns a human-readable note (for the caller's
+    log / evidence); idempotent "" for an already-exited proc.
     """
     if proc.poll() is not None:
-        return ""  # 已退出：幂等
+        return ""  # already exited: idempotent
     tag = "[%s/%s]" % (ticket_id, stage_id) if ticket_id else "[reap]"
 
     def _sig_group(sig: int) -> None:
         try:
             os.killpg(os.getpgid(proc.pid), sig)
         except OSError as e:
-            # 组已不存在（ESRCH）/ 无权限（EPERM）→ 退回只发直接子进程，尽力而为
+            # Group already gone (ESRCH) / no permission (EPERM) → fall back to
+            # signalling the direct child only, best effort
             if e.errno not in (errno.ESRCH, errno.EPERM):
                 raise
             try:
@@ -770,27 +868,37 @@ def _reap_agent_proc(proc: subprocess.Popen, ticket_id: str = "", stage_id: str 
 
 def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
                           repo: Optional[Path] = None) -> str:
-    """worktree 泳道代落盘（确定性，不依赖 agent 自觉）：agent 交付结果文件后调用。
+    """Settle a worktree lane on the agent's behalf (deterministic, never trusting
+    the agent to behave): called once the agent has delivered its result file.
 
-    背景：headless agent 的沙箱写不了真 .git（worktree 的 .git 是指向主库
-    .git/worktrees/<id> 的 gitfile，在沙箱可写范围之外），「agent 自己 commit」
-    物理做不到——agent 被逼自建 .git-local 假仓库「完成 commit」，真泳道 0 commit，
-    merge_check 红灯（票 t260824-01/-02）。所以 commit 由 worker（无沙箱）兜底：
+    Background: the headless agent's sandbox cannot write the real .git (a worktree's
+    .git is a gitfile pointing at the main repo's .git/worktrees/<id>, outside the
+    sandbox's writable scope), so "the agent commits itself" is physically
+    impossible — the agent is forced to build a fake .git-local repo to "finish the
+    commit", leaving the real lane at 0 commits and merge_check red (tickets
+    t260824-01/-02). So the worker (unsandboxed) backs the commit up:
       1. 假 git 仓库目录隔离进 .sandbar/quarantine/（老泳道粘滞 .suyou；挪不删，留档）；  # naming-compat
-      2. 工作区改动（SETTLE_PATHSPEC 口径）收成一个 commit 落到泳道分支。
-    幂等：工作区已干净则不动（agent 若真能 commit，settle 是 no-op）。
-    返回人读说明（追加进 stage evidence）；非 worktree 泳道返回 ""。
-    git 故障抛异常 = 基础设施问题，交 Temporal 重试。
+      2. workspace changes (SETTLE_PATHSPEC stance) are folded into a single commit on
+      the lane branch.
+    Idempotent: a clean workspace is left alone (if the agent really could commit,
+    settle is a no-op).
+    Returns a human-readable note (appended to the stage evidence); returns "" for a
+    non-worktree lane.
+    A git failure raises = an infrastructure problem, left to Temporal retry.
 
-    合并进行中护栏（票 t260826-01）：MERGE_HEAD 在场（冲突消解轮 prep 已留现场）时
-    **不得**自动 add+commit——否则合并提交在这里被抢先落掉（MERGE_HEAD 消耗），
-    settle_conflict_resolution 必报「无进行中的合并」假失败，且 agent 没解干净的
-    冲突标记会被当正文提交进分支。合并进行中的代落盘唯一收口=
-    settle_conflict_resolution（含标记残留校验），本函数直接跳过。正常 implement
-    轮无 MERGE_HEAD，行为不变。
+    Mid-merge guard (ticket t260826-01): while MERGE_HEAD is present (the conflict
+    resolution round's prep left that state behind) this function must **not**
+    auto-add+commit — otherwise the merge commit lands here first (consuming
+    MERGE_HEAD), settle_conflict_resolution then surely reports the false failure "no
+    merge in progress", and any conflict markers the agent failed to clean get
+    committed into the branch as if they were content. The only settlement path for a
+    mid-merge workspace is settle_conflict_resolution (which also checks for leftover
+    markers); this function skips outright. A normal implement round has no
+    MERGE_HEAD, so its behavior is unchanged.
     """
     if not _is_worktree_of(cwd, repo if repo is not None else _lane_repo_root(cwd)):
-        # 票B（票 t260907-06）：repo 给定=多仓树，归属按其子仓判；None=旧单仓自算锚
+        # Ticket B (t260907-06): repo given = a multi-repo tree, ownership judged by
+        # its child repo; None = the old single-repo self-computed anchor
         return ""
     p = _git(["rev-parse", "--verify", "MERGE_HEAD"], cwd)
     if p.returncode == 0:
@@ -798,13 +906,14 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
         activity.logger.info("[%s/%s] settle：%s", ticket_id, stage_id, note)
         return note
     notes: List[str] = []
-    # 0) gitfile 真身校验：被 agent 改写指向假仓库（票 t260824-03 手法）则先修复，
-    #    否则后续 status/commit 全落进假仓库，按目录名的隔离也会落空
+    # 0) gitfile identity check: if an agent rewrote it to point at a fake repo (the
+    #    t260824-03 trick), repair first — otherwise every status/commit below lands
+    #    in the fake repo and even the name-based quarantine comes up empty
     if not _gitdir_is_real(cwd, repo):
         fixed = _restore_gitfile(cwd, ticket_id, stage_id, gen, repo)
         if fixed:
             notes.append(fixed)
-    # 1) 假 git 仓库隔离
+    # 1) Quarantine fake git repos
     for name in FAKE_GIT_DIRS:
         src = cwd / name
         if not src.exists():
@@ -819,16 +928,18 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
         shutil.move(str(src), str(dst))
         notes.append("假 git 目录 %s 已隔离到 %s（agent 沙箱 workaround 产物，留档）"
                      % (name, dst.relative_to(cwd)))
-    # 2) 工作区改动收成 commit
+    # 2) Fold workspace changes into a commit
     p = _git(["status", "--porcelain", "--"] + SETTLE_PATHSPEC, cwd)
     if p.returncode != 0:
         raise RuntimeError("settle: git status 失败: %s" % (p.stderr or "")[-300:])
     dirty = [ln for ln in p.stdout.splitlines() if ln.strip()]
     if dirty:
-        # Apple Git 2.50 实测：排除 pathspec（:!.dsh）拦不住「显式点名 ignored 目录」
-        # 报错（干净仓库必现 rc=1，票 t260826-01 实挂）——改全量 add（.dsh/.sandbar
-        # 有 gitignore 本就不会入暂存），再 reset 摘回作双保险（防老 .gitignore
-        # 泳道；无匹配时 rc=0 静默）。
+        # Observed on Apple Git 2.50: an exclusion pathspec (:!.dsh) does not stop
+        # the "explicitly named ignored directory" error (rc=1 even on a clean repo,
+        # seen live in ticket t260826-01) — so add everything instead (.dsh/.sandbar
+        # are gitignored and would never be staged anyway), then reset them back as
+        # belt and braces (for lanes with an old .gitignore; rc=0 silently when
+        # nothing matches).
         p = _git(["add", "-A", "--", "."], cwd)
         if p.returncode != 0:
             raise RuntimeError("settle: git add 失败: %s" % (p.stderr or "")[-300:])
@@ -853,51 +964,67 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
 def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
                          artifacts_dir: Path, tag: str, project: str = "",
                          session_key: str = ""):
-    """spawn 前共用准备（票 t260828-08 从 _run_agent_stage_impl 提取）：本地 .dsh 建目录 +
-    _copy_profile/_copy_creds/_copy_settings + 角色 preset patch + 模型路由钉
-    agent-default-model（一次性 patch + settings 用户层双写，260826 事故根因——
-    只发 patch 必被 GUI 默认模型段盖掉）+ 会话延续 patch + env 组装。
-    suggest_next（预跑下一单）与通用 agent 步共用本 helper——spawn 口径单点，防两侧漂移。
+    """Shared pre-spawn preparation (extracted from _run_agent_stage_impl in ticket
+    t260828-08): create the local .dsh directory + _copy_profile/_copy_creds/
+    _copy_settings + the role preset patch + pinning the model route into
+    agent-default-model (one-shot patch + a second write into the settings user
+    layer, the root cause of the 260826 incident — a patch alone is always shadowed
+    by the GUI default-model section) + the session-continuation patch + env
+    assembly. suggest_next (pre-running the next ticket) shares this helper with the
+    generic agent step — a single spawn stance, so the two sides cannot drift.
 
-    返回 (cmd 前缀（含各 patch，不含 prompt）, env)。一次性 patch 文件落 artifacts_dir，
-    名带 tag 区分调用方（通用步= stage_gen<N>，预跑步= suggest_next_gen<N>）。
+    Returns (cmd prefix including the patches but not the prompt, env). One-shot
+    patch files land in artifacts_dir, named with a tag to tell callers apart
+    (generic step = stage_gen<N>, pre-run step = suggest_next_gen<N>).
     """
-    # 沙箱隔离：worker 进程可能无权写 ~/.dsh，headless agent 用工作空间本地 .dsh
-    # 目录（DSH_HOME 覆盖），profile 软链照抄一份。
+    # Sandbox isolation: the worker process may lack permission to write ~/.dsh, so
+    # the headless agent uses a workspace-local .dsh directory (via a DSH_HOME
+    # override), with the profile's symlinks copied along.
     local_dsh = cwd / ".dsh"
     local_dsh.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env["DSH_HOME"] = str(local_dsh)
-    # 守卫查 profile 本体（票 t260828-05 教训：查父目录时，首次失败残留的 profiles/
-    # node_modules 会让后续重试永远跳过拷贝）；幂等由 _copy_profile 内部 exists 保证
+    # The guard checks the profile itself (lesson from ticket t260828-05: checking
+    # the parent directory let leftovers from the first failed attempt — profiles/
+    # node_modules — make every later retry skip the copy forever); idempotence is
+    # guaranteed by the exists check inside _copy_profile
     _copy_profile(local_dsh)
     _quarantine_torn_sessions(local_dsh)
-    # 顺便拷 credentials（API key），否则 headless agent 报 MISSING_CREDENTIAL；
-    # 拷贝源 per-key 优先（M1-2），project 未知也走 legacy 回落不改现行为。
-    # KI-016（票 t260902-09）：dst 已存在不再跳过——合并刷新下沉 _copy_creds 单点
-    # （refs 叶子级，同名叶子 dst 值不改写），新 provider 的 key 对老泳道立即可见。
-    # 原外层 exists 守卫是内部守卫的重复，下沉后会把刷新路径整个挡死，已摘。
+    # Copy the credentials too (API key), otherwise the headless agent reports
+    # MISSING_CREDENTIAL; the copy source prefers per-key (M1-2), and an unknown
+    # project still takes the legacy fallback, so current behavior is unchanged.
+    # KI-016 (ticket t260902-09): an existing dst is no longer skipped — the merge
+    # refresh was pushed down into _copy_creds as the single point (refs-leaf
+    # granularity, same-named dst leaves never rewritten), so a new provider's key is
+    # visible to old lanes immediately. The old outer exists guard duplicated the
+    # inner one and, left in place, would have blocked the whole refresh path; removed.
     _copy_creds(local_dsh, project)
-    # settings.yaml 每次重拷（llm-pi-ai providers 注册表；改了下一个 agent 即生效）
+    # settings.yaml is re-copied every time (llm-pi-ai providers registry; a change takes effect for the next agent)
     _copy_settings(local_dsh)
 
     cmd = list(DSH_CMD)
-    # 角色 preset patch（契约①d，票 t260903-03：目录基准经注册条目 paths.roles_dir
-    # 声明取值，未声明回落 <cwd>/server/roles——worktree 内副本=工单快照语义
-    # 不变）：persona=岗位说明书全文，cordis patch 同 id 覆盖。未声明时具体角色
-    # 文件不存在（旧 base_ref）则跳过，退化为 profile 默认 persona——不硬失败；
-    # 声明了而锚点目录缺失/类型错位 = ProjectPathsError 上抛（fail-closed 红，
-    # 报错点名条目文件与解析后路径）。
+    # Role preset patch (contract ①d, ticket t260903-03: the directory base comes
+    # from the registered entry's declared paths.roles_dir, falling back to
+    # <cwd>/server/roles when undeclared — the in-worktree copy keeps the ticket
+    # snapshot semantics): persona = the full role brief, and the cordis patch
+    # overrides by the same id. When undeclared and the concrete role file is absent
+    # (old base_ref) it is skipped, degrading to the profile's default persona — no
+    # hard failure; declared but the anchor directory is missing / the wrong kind =
+    # ProjectPathsError propagates (fail-closed red, the error names the entry file
+    # and the resolved path).
     role_patch = roles_dir_for_spawn(project, cwd) / (role + ".yml")
     if role and role_patch.is_file():
         cmd += ["--patch", str(role_patch)]
-    # 运行时模型路由（gen.py 退役后的唯一消费者）：读路由表查
-    # (role, kind) → provider/model，生成一次性 patch 钉 agent-default-model。
-    # 分工 kind 由 STAGE_DISPATCH_KIND 按 (workflow, stage) 映射（如 ai-review→proofread
-    # 审校家模型）。查不到则不传——agent 用 profile 默认模型，不硬失败。表路径经
-    # 契约①d paths.model_routes 声明取值（routes_file_for_spawn：未声明回落主仓
-    # MODEL_ROUTES_FILE；声明锚点缺失=红；表内容损坏=model_route_for 既有容错
-    # 返回 None，声不声明同语义）。
+    # Runtime model routing (the only consumer left after gen.py retired): read the
+    # route table for (role, kind) → provider/model and generate a one-shot patch
+    # pinning agent-default-model. The division-of-labor kind comes from
+    # STAGE_DISPATCH_KIND mapped by (workflow, stage) (e.g. ai-review → the
+    # proofread reviewer's model). No hit = don't pass one — the agent uses the
+    # profile's default model, no hard failure. The table path comes from the
+    # contract ①d paths.model_routes declaration (routes_file_for_spawn: falls back
+    # to the main repo's MODEL_ROUTES_FILE when undeclared; a missing declared anchor
+    # = red; corrupt table contents = model_route_for's existing tolerance returning
+    # None, so declared or not the semantics are the same).
     route = model_route_for(role, kind, routes_file=routes_file_for_spawn(project))
     if route:
         model_patch = artifacts_dir / ("model_patch_%s.yml" % tag)
@@ -909,15 +1036,21 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
             "    provider: %s\n"
             "    model: %s\n" % (route["provider"], route["model"]), "utf-8")
         cmd += ["--patch", str(model_patch)]
-        # patch 层会被 settings.yaml 用户层的 GUI 默认模型段盖掉（见 _pin_default_model），
-        # 路由必须同时落用户层才真正生效。
+        # The patch layer gets shadowed by the GUI default-model section of the
+        # settings.yaml user layer (see _pin_default_model), so the route must also
+        # land in the user layer to actually take effect.
         _pin_default_model(local_dsh, route)
-    # 会话延续（dsh-headless-resume 插件）：同工单同角色的多次派活延续同一 dsh 会话，
-    # 打回意见在 agent 自己的会话里收到接着改，不再每次 spawn 从零重建上下文。
-    # 机制仿 model_patch：生成一次性 patch（绝对路径指 runner 文件），disable stock
-    # 一次性 runner、换 create-or-resume runner；DSH_HEADLESS_SESSION 传确定性会话 id。
-    # runner 优先取泳道内副本（工单快照语义，同 role_patch），旧泳道没有则回退主仓副本；
-    # 都没有则跳过本段（退化为 stock 一次性，不硬失败）。SANDBAR_AGENT_RESUME=0 一键关停。
+    # Session continuation (dsh-headless-resume plugin): repeated dispatches for the
+    # same ticket and role continue the same dsh session, so rework feedback arrives
+    # inside the agent's own session and it keeps editing instead of rebuilding
+    # context from scratch on every spawn. The mechanism mirrors model_patch:
+    # generate a one-shot patch (absolute path to the runner file) that disables the
+    # stock one-shot runner and swaps in the create-or-resume runner;
+    # DSH_HEADLESS_SESSION carries the deterministic session id. The runner prefers
+    # the in-lane copy (ticket snapshot semantics, same as role_patch), falls back to
+    # the main repo copy for old lanes, and if neither exists this section is skipped
+    # (degrades to the stock one-shot, no hard failure). SANDBAR_AGENT_RESUME=0 turns
+    # it off with one switch.
     if os.environ.get("SANDBAR_AGENT_RESUME", "1") != "0" and role:
         runner = cwd / "server" / "headless-resume" / "node.ts"
         if not runner.is_file():
@@ -935,9 +1068,11 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
                 "      config:\n"
                 "        task: !!js ctx.headlessStartup.task\n" % runner, "utf-8")
             cmd += ["--patch", str(resume_patch)]
-            # 票 t260903-02：会话 id 默认 ticket-role（同角色跨段延续）；并行分叉的
-            # acceptance 边传 ticket-stage 专用 key——同 role 双并发进程绝不同写一个
-            # 会话文件（默认 key 下 arbitrate/acceptance 并发 spawn 确定碰撞）。
+            # Ticket t260903-02: the session id defaults to ticket-role (continuation
+            # across stages of the same role); the parallel-fork acceptance edge
+            # passes a ticket-stage-specific key — two concurrent processes of the
+            # same role must never write one session file (with the default key,
+            # concurrent arbitrate/acceptance spawns collide for certain).
             env["DSH_HEADLESS_SESSION"] = session_key or ("%s-%s" % (ticket_id, role))
     return cmd, env
 
@@ -948,15 +1083,18 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
     cwd = _ws_cwd(args.workspace, args.ticket_id)
     cwd.mkdir(parents=True, exist_ok=True)
 
-    # 幂等：结果文件已存在 → 直接读文件返回（Temporal 重试/worker 重启重跑安全）
+    # Idempotent: the result file already exists → read it and return (safe across
+    # Temporal retries / worker restarts)
     if rfile.is_file():
         cached = _read_result(rfile)
         if cached is not None:
             activity.logger.info("[%s/%s] 结果文件已存在，幂等返回（gen%d）",
                                  args.ticket_id, args.stage_id, args.gen)
             _patch_result_prompt(rfile, args.prompt)
-            # 缓存命中也过 settle（上次 worker 可能死在 agent 交付后、代落盘前）——幂等；
-            # skip_settle（并行分叉期）由汇合点的 settle_lane 统一承担
+            # A cache hit still goes through settle (the last worker may have died
+            # after the agent delivered but before settling) — idempotent;
+            # skip_settle (during the parallel fork) is handled by the single
+            # settle_lane at the join point
             note = ""
             if not args.skip_settle:
                 note = _settle_worktree_lane(cwd, args.ticket_id, args.stage_id, args.gen)
@@ -965,11 +1103,14 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
             return cached
 
     if os.environ.get("SANDBAR_AGENT_STUB") == "1":
-        # 自测/演示 stub：自写结果文件即返回（不起 agent 进程，零模型调用）。
-        # stub 支持显式 files_changed（票 t260904-18：env SANDBAR_AGENT_STUB_FILES，
-        # 逗号分隔路径）——缺省仍恒 []（stub 如实「什么都没做」），但缺省回执过
-        # KI-049 门②会常亮 write_set_refresh_fault 注记；需要演示写集刷新的桩链路
-        # 显式给清单，闸判定本身不放松。
+        # Self-test / demo stub: write our own result file and return (no agent
+        # process, zero model calls).
+        # The stub supports explicit files_changed (ticket t260904-18: env
+        # SANDBAR_AGENT_STUB_FILES, comma-separated paths) — the default stays []
+        # for good (the stub honestly reports "did nothing"), but a default receipt
+        # keeps the write_set_refresh_fault annotation lit through KI-049 gate ②; a
+        # stub chain that needs to demo the write-set refresh passes the list
+        # explicitly, and the gate's own judgement is never loosened.
         stub_files = [x.strip() for x in
                       os.environ.get("SANDBAR_AGENT_STUB_FILES", "").split(",")
                       if x.strip()]
@@ -979,7 +1120,7 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
                     % (args.stage_id, args.gen),
             report="[stub] 做了什么：无（stub 演示）\n\n怎么验证的：无",
             deliverables=[], files_changed=stub_files,
-            files_changed_shape="ok",  # 恒合法形状；空清单的 emptiness 判定在消费点
+            files_changed_shape="ok",  # always a legal shape; the empty-list emptiness call belongs to the consumer
             evidence="stub evidence: prompt %d 字" % len(args.prompt))
         rfile.write_text(json.dumps({
             "status": stub.status, "summary": stub.summary, "report": stub.report,
@@ -989,8 +1130,10 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
         activity.heartbeat("stub done")
         return stub
 
-    # spawn 前共用准备（本地 .dsh 三拷在上方 helper 内 + 角色 patch + 模型路由 +
-    # 会话延续），提取见 _prepare_agent_spawn（票 t260828-08，suggest_next 共用单点）。
+    # Shared pre-spawn preparation (the three local .dsh copies live in the helper
+    # above, plus the role patch, model routing and session continuation); see
+    # _prepare_agent_spawn (ticket t260828-08, shared with suggest_next as the single
+    # point).
     kind = STAGE_DISPATCH_KIND.get((args.workflow_id, args.stage_id), "")
     project = await _fetch_ticket_project(args.ticket_id)
     cmd, env = _prepare_agent_spawn(
@@ -1001,8 +1144,9 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
     activity.logger.info("[%s/%s] spawn headless agent（gen%d，cwd=%s）：%s …",
                          args.ticket_id, args.stage_id, args.gen, cwd,
                          " ".join(cmd[:3]))
-    # start_new_session=True（KI-009）：独立进程组，_reap_agent_proc 才能 killpg
-    # 收 dsh runner 的整棵子进程树（迟写常发生在孙进程手里）
+    # start_new_session=True (KI-009): its own process group, so _reap_agent_proc can
+    # killpg the dsh runner's entire child tree (late writes usually belong to
+    # grandchildren)
     proc = subprocess.Popen(
         cmd, cwd=str(cwd), env=env,
         stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
@@ -1017,14 +1161,19 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
                     activity.logger.info("[%s/%s] 结果文件就绪：status=%s",
                                          args.ticket_id, args.stage_id, res.status)
                     _patch_result_prompt(rfile, args.prompt)
-                    # KI-009（票 t260901-25）：settle 之前先 reap（进程组级全终态回收）
-                    # ——agent 交付结果文件后可能还在迟写工作区文件，不收干净就
-                    # settle，迟写落在 commit 之后=工作区脏=merge_check 假红（KI-009
-                    # 根因）。drain 有界（terminate 15s / kill 5s），见 _reap_agent_proc。
+                    # KI-009 (ticket t260901-25): reap before settling (full
+                    # terminal-state reaping at process-group granularity) — after
+                    # delivering the result file the agent may still be late-writing
+                    # workspace files; settle without draining them and the late
+                    # write lands after the commit = dirty workspace = a false
+                    # merge_check red (the KI-009 root cause). The drain is bounded
+                    # (terminate 15s / kill 5s); see _reap_agent_proc.
                     _reap_agent_proc(proc, args.ticket_id, args.stage_id)
-                    # worker 代落盘（确定性）：agent 沙箱写不了真 .git，
-                    # commit 由 worker 兜底；假 git 目录在此隔离；
-                    # skip_settle（并行分叉期）由汇合点的 settle_lane 统一承担
+                    # Worker-side settling (deterministic): the agent sandbox cannot
+                    # write the real .git, so the worker backs the commit up; fake
+                    # git directories are quarantined here; skip_settle (during the
+                    # parallel fork) is handled by the single settle_lane at the join
+                    # point
                     note = ""
                     if not args.skip_settle:
                         note = _settle_worktree_lane(cwd, args.ticket_id, args.stage_id, args.gen)
@@ -1033,7 +1182,8 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
                     return res
             rc = proc.poll()
             if rc is not None:
-                # agent 进程退出但没写结果文件 = 基础设施/用法故障 → 抛出让 Temporal 重试
+                # The agent process exited without writing a result file = an
+                # infrastructure / usage fault → raise so Temporal retries
                 raise RuntimeError(
                     "headless agent 退出（rc=%s）但未写结果文件 %s（日志 %s）"
                     % (rc, rfile, args.log_file))
@@ -1046,30 +1196,35 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
                     "等结果文件超时（%d 次轮询 × %ds）：%s" % (polls, POLL_SEC, rfile))
             await asyncio.sleep(POLL_SEC)
     finally:
-        # KI-009：finally 兜底升级为组粒度全终态回收（正常/报错/超时/取消四路径
-        # 都走到这里；已退出的 proc 幂等跳过）
+        # KI-009: the finally block escalates to full terminal-state reaping at group
+        # granularity (all four paths — normal / error / timeout / cancel — reach
+        # here; an already-exited proc is skipped idempotently)
         _reap_agent_proc(proc, args.ticket_id, args.stage_id)
 
 
 def _make_stage_activity(stage_id: str):
-    """每个 stage 名注册一个 activity（同一实现，名字=stage 名）。
-    包一层防 activity.defn 在同一函数对象上互相覆盖定义名。"""
+    """Register one activity per stage name (same implementation, name = stage name).
+    The wrapper keeps activity.defn from overwriting its defn name on one function
+    object."""
     async def _impl(args: AgentStageArgs) -> StageResult:
         return await _run_agent_stage_impl(args)
     _impl.__name__ = "stage_" + stage_id.replace("-", "_")
     return activity.defn(_impl, name=stage_id)
 
 
-# ---------- 立项下一单预跑（票 t260828-08）：prepare_epic_next + suggest_next ----------
+# ---------- Pre-running the next ticket after epic creation (ticket t260828-08): prepare_epic_next + suggest_next ----------
 
 async def _epic_ticket_rows(epic: str) -> List[Dict[str, Any]]:
-    """epic 关联工单行（{id,status,closed}）。数据源 = client.py cmd_ticket_list 同款
-    EpicCode SA 查询通路（client.py :555 口径互指；activities.py 巡检「epic 数据源 =
-    ticket list 行形态」同源）：list_workflows 按 WorkflowType 六模版 AND EpicCode 过滤，
-    RUNNING 执行 query snapshot 拿 status，COMPLETED 即 closed。查询失败/环境无 SA 一律
-    返回 []（上层按「列表为空」降级——state_key 仍可算，只是少行；不硬失败）。"""
+    """Ticket rows tied to the epic ({id,status,closed}). Data source = the same
+    EpicCode SA query path as client.py cmd_ticket_list (the two reference each
+    other's stance — client.py :555; activities.py's inspection that "the epic data
+    source = the ticket-list row shape" is the same source): list_workflows filtered
+    by the six WorkflowType templates AND EpicCode, RUNNING executions get their
+    status from a snapshot query, COMPLETED means closed. Query failure / no SA in
+    the environment always returns [] (the caller degrades to "empty list" —
+    state_key is still computable, just with fewer rows; no hard failure)."""
     try:
-        from workflows_v2 import TEMPLATE_CLASSES  # 延迟导入：workflows_v2 反向依赖本模块链
+        from workflows_v2 import TEMPLATE_CLASSES  # late import: workflows_v2 depends back on this module chain
         from client import _connect
         from temporalio.common import SearchAttributeKey
         client = await _connect()
@@ -1085,7 +1240,7 @@ async def _epic_ticket_rows(epic: str) -> List[Dict[str, Any]]:
             seen.add(tid)
             exec_status = wf.status.name if wf.status is not None else ""
             if exec_status == "TERMINATED":
-                continue  # 与 cmd_ticket_list 同口径：清场执行不上账
+                continue  # same stance as cmd_ticket_list: a torn-down execution never enters the books
             status = ""
             if exec_status == "COMPLETED":
                 status = "closed"
@@ -1095,7 +1250,7 @@ async def _epic_ticket_rows(epic: str) -> List[Dict[str, Any]]:
                         client.get_workflow_handle(tid).query("snapshot"), timeout=8)
                     status = str((snap or {}).get("meta", {}).get("status") or "")
                 except Exception:
-                    status = ""  # 快照不可得按 open 记（保守：多算一次冷起，不误判完结）
+                    status = ""  # no snapshot → record as open (conservative: one extra cold start beats a false "finished")
             rows.append({"id": tid, "status": status, "closed": status == "closed"})
         return rows
     except Exception as e:
@@ -1105,16 +1260,21 @@ async def _epic_ticket_rows(epic: str) -> List[Dict[str, Any]]:
 
 @activity.defn
 async def prepare_epic_next(args: EpicNextPrepArgs) -> EpicNextPrepResult:
-    """立项下一单预跑的准备段：读立项全文 + 列关联工单 + 算 state_key，全量内联返回
-    （workflow 内零 IO）。档案不可读 → exists=False（workflow 侧留痕跳过，不阻塞 merge）。"""
+    """Preparation stage for pre-running the next ticket: read the epic document +
+    list its tickets + compute state_key, all returned inline (zero IO inside the
+    workflow). An unreadable document → exists=False (the workflow side logs and
+    skips, never blocks the merge)."""
     code = str(args.epic or "").strip()
     if not EPIC_CODE_RE.match(code):
         activity.logger.warning("[prepare_epic_next] 代号形状非法：%r", code)
         return EpicNextPrepResult(exists=False)
     markdown = ""
-    # 项目感知（票 t260907-07）：档案目录走 resolve_epics_dir(args.project)——env 现读
-    # 优先→项目主目录 notes/epics→空 project 引擎锚兜底（生产不可达，仅夹具/在飞
-    # 工单兼容；resolve 抛 ValueError 视同档案不可读，软失败总则兜住不阻塞 merge）。
+    # Project awareness (ticket t260907-07): the document directory goes through
+    # resolve_epics_dir(args.project) — the env read wins first → the project home's
+    # notes/epics → the engine anchor for an empty project as the last resort
+    # (unreachable in production, kept for fixtures / in-flight tickets; a ValueError
+    # from resolve counts as an unreadable document, and the soft-failure rule catches
+    # it without blocking the merge).
     try:
         epics_dir = shared.resolve_epics_dir(getattr(args, "project", ""))
         path = epics_dir / (code + ".md")
@@ -1128,21 +1288,26 @@ async def prepare_epic_next(args: EpicNextPrepArgs) -> EpicNextPrepResult:
             activity.logger.warning("[prepare_epic_next] %s 读取失败：%s", path, str(e)[:200])
     try:
         rows = await _epic_ticket_rows(code)
-    except Exception as e:  # 查询路径意外抛错也降级为空行表（不硬失败）
+    except Exception as e:  # an unexpected raise on the query path also degrades to an empty row list (no hard failure)
         activity.logger.warning("[prepare_epic_next] epic=%s 工单查询异常（%s）", code, str(e)[:200])
         rows = []
-    # state_key 口径见 shared.py 区块注释：当前工单（即将 merge 收口的本票）强制 closed。
+    # For the state_key stance see the block comment in shared.py: the current ticket
+    # (the one about to close via this merge) is forced closed.
     return EpicNextPrepResult(
         exists=bool(markdown), epic_markdown=markdown, tickets=rows,
         state_key=epic_state_key(rows, args.ticket_id))
 
 
 def _sanitize_suggest_write_set(raw: Any) -> list:
-    """预跑建议 write_set 清洗（纯函数，票 t260901-01）：逐条按 shared._valid_write_set_entry
-    口径校验（仓库内相对路径：非字符串/空串/绝对路径/反斜杠/Windows 盘符/'..' 一律丢条），
-    strip 后保序去重；字段缺失或非列表 → 空数组不阻塞（与 epic-next.ts sanitizeWriteSet
-    同构互指；建议主价值在工单本身）。注意口径差异：建票口 validate_write_set_args 是
-    拒收不清洗，本处（建议口）清洗不拒收——两侧既有决策均不改变。"""
+    """Sanitize the pre-run suggestion's write_set (pure function, ticket
+    t260901-01): validate each entry by the shared._valid_write_set_entry stance
+    (repo-relative paths: non-string / empty / absolute / backslash / Windows drive
+    letter / '..' are all dropped), then strip, dedupe and keep order; a missing field
+    or non-list → an empty array, never blocking (isomorphic with epic-next.ts
+    sanitizeWriteSet — they reference each other; the suggestion's real value is the
+    ticket itself). Mind the stance difference: the ticket-creation side
+    validate_write_set_args rejects without cleaning, while this suggestion side
+    cleans without rejecting — neither existing decision changes."""
     from shared import _valid_write_set_entry
     if not isinstance(raw, list):
         return []
@@ -1157,11 +1322,14 @@ def _sanitize_suggest_write_set(raw: Any) -> list:
 
 
 def _parse_suggest_result(raw: Any):
-    """预跑结果文件三态校验（纯函数）：返回 (kind, suggestion|None, error)。
-    kind ∈ ok/done/failed；ok 形态要求 workflow+title 非空；suggestion 只保留白名单字段。
-    （票 t260901-01：ok 形态白名单增 write_set，清洗后透传，见 _sanitize_suggest_write_set）——
-    build_suggest_next_prompt 的 ok 契约本就要求 agent 产出 write_set，此前落缓存被丢，
-    弹层写集预填恒空。done/failed 形态不触碰 write_set。"""
+    """Three-state validation of the pre-run result file (pure function): returns
+    (kind, suggestion|None, error). kind ∈ ok/done/failed; the ok shape requires a
+    non-empty workflow+title; the suggestion keeps only whitelisted fields.
+    (Ticket t260901-01: the ok-shape whitelist gains write_set, passed through after
+    sanitizing — see _sanitize_suggest_write_set. build_suggest_next_prompt's ok
+    contract always required the agent to produce a write_set, but the cache drop
+    lost it, so the modal's write-set prefill stayed empty forever. The done/failed
+    shapes never touch write_set.)"""
     if not isinstance(raw, dict):
         return ("failed", None, "结果文件不是合法 JSON 对象")
     st = str(raw.get("status") or "")
@@ -1191,19 +1359,22 @@ def _json_dumps(obj) -> str:
 
 def _write_precache(ticket_id: str, code: str, state_key: str,
                     suggestion: Dict[str, Any]) -> str:
-    """校验过的建议落缓存（pre.json，schema 见 shared.EpicNextCache）；返回文件路径。
-    host 读侧 epic-next.ts readPrecache 按 state_key 比对命中（口径互指）。"""
+    """Write a validated suggestion into the cache (pre.json; schema in
+    shared.EpicNextCache); returns the file path. The host read side, epic-next.ts
+    readPrecache, matches on state_key (the two reference each other's stance)."""
     path = epic_next_precache_path(REPO_ROOT, code)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
         "ticket_id": ticket_id, "epic": code, "ts": int(time.time()),
         "state_key": state_key, "suggestion": suggestion,
     }, ensure_ascii=False, indent=1) + "\n", "utf-8")
-    # 插件面过渡镜像（退役账#5）：workbench 读侧仍读 .sandbar/epic-next，新名仓
-    # 写侧补一份旧名镜像，插件面票收口后随 mirror_to_legacy 一并退役。
+    # Transitional mirror for the plugin face (retirement debt #5): the workbench
+    # read side still reads .sandbar/epic-next, so the new-name repo's write side
+    # also produces a legacy-name mirror, to be retired together with
+    # mirror_to_legacy once the plugin-face ticket closes.
     try:
         mirror_to_legacy(REPO_ROOT, Path("epic-next") / code / "pre.json")
-    except Exception:  # noqa: BLE001  镜像 best-effort，主链不受影响
+    except Exception:  # noqa: BLE001  the mirror is best-effort; the main chain is unaffected
         pass
     return str(path)
 
@@ -1211,9 +1382,11 @@ def _write_precache(ticket_id: str, code: str, state_key: str,
 def _sug_stage_result(kind: str, sug: Dict[str, Any], args: AgentStageArgs,
                       rfile: Path, cache_path: str,
                       evidence_extra: str = "") -> StageResult:
-    """校验通过的建议 → StageResult（ok/done 两形态；票 t260901-19 从 _consume_suggest_result
-    提取：rfile 判读与 precache 短路两条路共用同一文案构造，工单台渲染无差异）。
-    evidence_extra：短路命中时追加「precache-hit」等标记。"""
+    """Validated suggestion → StageResult (the ok/done shapes; extracted from
+    _consume_suggest_result in ticket t260901-19 so the rfile path and the precache
+    shortcut share one text builder and the ticket console renders them
+    identically). evidence_extra: on a shortcut hit, append a marker such as
+    「precache-hit」."""
     tag = ("；" + evidence_extra) if evidence_extra else ""
     if kind == "done":
         return StageResult(
@@ -1238,12 +1411,15 @@ def _sug_stage_result(kind: str, sug: Dict[str, Any], args: AgentStageArgs,
 def _precache_hit(args: AgentStageArgs) -> Optional[StageResult]:
     """precache 命中短路（票 t260901-19）：同立项后续票首跑时 rfile 本就不存在，但上一票
     已把建议写入 <repoRoot>/.sandbar/epic-next/<epic>/pre.json（老主树 .suyou 粘滞）（state_key 未变即建议仍  # naming-compat
-    有效）→ 直接复用，零 spawn 省 token。
+    valid) → reuse it directly, zero spawn, tokens saved.
 
-    命中条件与校验（disk 文件人手可改，不信任其内容）：
-      - pre.json 存在且可解析、state_key 与本次一致、suggestion 过 _parse_suggest_result
-        三态校验 + ok 形态模板防幻觉闸——任何一步不过 → 返回 None 落回 spawn（不静默
-        降级、不假 ok）；failed 形态缓存（异常态）同样不短路。
+    Hit conditions and validation (a file on disk is hand-editable, so its contents
+    are not trusted):
+      - pre.json exists and parses, state_key matches this run, and the suggestion
+        passes _parse_suggest_result's three-state validation plus the ok-shape
+        template anti-hallucination gate — any failed step → return None and fall
+        back to spawn (no silent degradation, no fake ok); a failed-shape cache (an
+        abnormal state) also never short-circuits.
     """
     if not args.epic or not args.state_key:
         return None
@@ -1271,9 +1447,12 @@ def _precache_hit(args: AgentStageArgs) -> Optional[StageResult]:
 
 
 def _consume_suggest_result(rfile: Path, args: AgentStageArgs) -> Optional[StageResult]:
-    """读 + 三态校验 + 落缓存（suggest_next 的判读半，幂等重入与轮询共用）。
-    文件不存在 → None（调用方继续轮询）；存在但校验不过 → failed（软失败不抛，
-    merge 照常收口——retry_policy=1，抛了只会把失败变成 activity error，不如如实记账）。"""
+    """Read + three-state validation + cache write (the judging half of suggest_next,
+    shared by idempotent re-entry and polling).
+    Missing file → None (the caller keeps polling); present but failing validation →
+    failed (soft failure, no raise, the merge still closes — with retry_policy=1 a
+    raise would only turn the failure into an activity error, so recording it
+    honestly is better)."""
     if not rfile.is_file():
         return None
     try:
@@ -1290,7 +1469,8 @@ def _consume_suggest_result(rfile: Path, args: AgentStageArgs) -> Optional[Stage
         return StageResult(
             status="failed", summary="integration 判定本单给不出下一步建议：%s" % sug["reason"],
             evidence="result_file=%s" % rfile)
-    # 防幻觉闸：ok 形态的 workflow 必须在模板清单内（与 host validateSuggestion 同闸，双侧校验）
+    # Anti-hallucination gate: the ok shape's workflow must be in the template list
+    # (the same gate as the host's validateSuggestion; enforced on both sides)
     if kind == "ok" and sug["workflow"] not in TEMPLATE_CLASS_NAMES:
         return StageResult(
             status="failed",
@@ -1303,25 +1483,30 @@ def _consume_suggest_result(rfile: Path, args: AgentStageArgs) -> Optional[Stage
 
 @activity.defn
 async def suggest_next(args: AgentStageArgs) -> StageResult:
-    """预跑下一单建议（票 t260828-08）：spawn integration 会话（DSH_HEADLESS_SESSION=
-    <ticket>-integration，复用 integration_review 的会话上下文——本设计核心收益），
-    prompt= workflow 组好的三态契约文本（不走 build_stage_prompt 通用契约）。
+    """Pre-run the next-ticket suggestion (ticket t260828-08): spawn an integration
+    session (DSH_HEADLESS_SESSION=<ticket>-integration, reusing integration_review's
+    session context — the core benefit of this design), with prompt = the three-state
+    contract text assembled by the workflow (not the generic build_stage_prompt
+    contract).
 
-    与通用 agent 步的差异：① 跳过 worker settle（只读分析，不落 commit）；
-    ② 结果文件是三态契约 JSON 而非 StageResult，判读走 _consume_suggest_result；
-    ③ 软失败：超时/进程退出/不合规一律返回 failed 的 StageResult 不抛（merge 照常收口），
-    配合 workflow 侧 retry_policy maximum_attempts=1。"""
+    Differences from the generic agent step: ① skips the worker settle (read-only
+    analysis, no commit); ② the result file is three-state contract JSON rather than
+    a StageResult, judged by _consume_suggest_result; ③ soft failure: timeout /
+    process exit / non-compliance always return a failed StageResult without raising
+    (the merge still closes), matching the workflow side's retry_policy
+    maximum_attempts=1."""
     rfile = Path(args.result_file)
     rfile.parent.mkdir(parents=True, exist_ok=True)
     cwd = _ws_cwd(args.workspace, args.ticket_id)
     cwd.mkdir(parents=True, exist_ok=True)
 
-    # 幂等：结果文件已存在 → 重新判读并回（Temporal 重试/worker 重启重跑安全；缓存写入幂等）
+    # Idempotent: the result file already exists → re-judge and return (safe across
+    # Temporal retries / worker restarts; the cache write is idempotent)
     res = _consume_suggest_result(rfile, args)
     if res is not None:
         return res
 
-    if os.environ.get("SANDBAR_SUGGEST_STUB"):  # 自测桩：自写三态结果文件即判读（零模型调用）
+    if os.environ.get("SANDBAR_SUGGEST_STUB"):  # self-test stub: write our own three-state result file and judge it (zero model calls)
         mode = os.environ["SANDBAR_SUGGEST_STUB"]
         stubs = {
             "ok": {"status": "ok", "workflow": "dev-lane", "title": "[stub] 下一单建议",
@@ -1335,9 +1520,11 @@ async def suggest_next(args: AgentStageArgs) -> StageResult:
         rfile.write_text(payload, "utf-8")
         return _consume_suggest_result(rfile, args)
 
-    # precache 命中短路（票 t260901-19）：在 stub 之后（stub 是测试专用通道最优先）、
-    # spawn 之前——同立项后续票 state_key 未变即复用上一票建议，零 spawn 省 token。
-    # 校验不过（损坏/缺字段/模板非法/failed 形态/state_key 不一致）→ None，照常 spawn。
+    # Precache hit short-circuit (ticket t260901-19): after the stub (the stub is the
+    # test-only channel and always wins) and before spawn — for a later ticket of the
+    # same epic with an unchanged state_key, reuse the previous ticket's suggestion:
+    # zero spawn, tokens saved. Failed validation (corrupt / missing fields / illegal
+    # template / failed shape / state_key mismatch) → None, then spawn as usual.
     res = _precache_hit(args)
     if res is not None:
         activity.logger.info("[%s/suggest_next] precache 命中，零 spawn 复用（epic=%s）",
@@ -1355,7 +1542,7 @@ async def suggest_next(args: AgentStageArgs) -> StageResult:
     proc = subprocess.Popen(
         cmd, cwd=str(cwd), env=env,
         stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-        start_new_session=True)  # KI-009：独立进程组，见 _reap_agent_proc
+        start_new_session=True)  # KI-009: its own process group, see _reap_agent_proc
     polls = 0
     try:
         while True:
@@ -1382,7 +1569,8 @@ async def suggest_next(args: AgentStageArgs) -> StageResult:
                     evidence="result_file=%s log=%s" % (rfile, args.log_file))
             await asyncio.sleep(POLL_SEC)
     finally:
-        # KI-009：finally 兜底升级为组粒度全终态回收（四路径都走到这里）
+        # KI-009: the finally block escalates to full terminal-state reaping at group
+        # granularity (all four paths reach here)
         _reap_agent_proc(proc, args.ticket_id, "suggest_next")
 
 
@@ -1393,31 +1581,38 @@ def _log_tail(log_file: str, n: int = 400) -> str:
         return ""
 
 
-# ---------- M16：工作区准备（workflow 第一个 activity） ----------
+# ---------- M16: workspace preparation (the workflow's first activity) ----------
 
 def _lane_repo_root(cwd: Path) -> Path:
-    """泳道所在仓根（跨项目，票 t260903-10）：按路径约定 <repo>/.lane/<id>
-    自锚定——多项目工单（项目根≠引擎根）的 worktree add/复用/结算都应对项目仓操作，
-    而非引擎仓。不符约定（显式自定义路径/主树/旧相对 payload）回落 REPO_ROOT（旧行为）。"""
-    if cwd.parent.name in (".lane", ".worktrees"):  # .lane=新名；.worktrees=旧名（在飞/存量泳道）
+    """Repo root owning the lane (cross-project, ticket t260903-10): self-anchored by
+    the path convention <repo>/.lane/<id> — for multi-project tickets (project root ≠
+    engine root) the worktree add/reuse/settle must operate on the project repo, not
+    the engine repo. Anything not matching the convention (an explicitly custom path /
+    the main tree / an old relative payload) falls back to REPO_ROOT (old behavior)."""
+    if cwd.parent.name in (".lane", ".worktrees"):  # .lane = new name; .worktrees = old name (in-flight / pre-existing lanes)
         return cwd.parent.parent
     return REPO_ROOT
 
 
-# ---- 票B（t260907-06）：多仓泳道作用域清单（结算/合并/检查逐树化的单一入口） ----
+# ---- Ticket B (t260907-06): multi-repo lane scope list (the single entry point for per-tree settle/merge/check) ----
 
-# 多仓泳道清单（prepare_workspace 落盘；meta.repo_worktrees=唯一真源，此文件是
-# 其落盘镜像，供下游 activity 机械读取）。路径相对：tree 相对 lane 根、repo 相对
-# 项目根（=lane 根的父父目录），泳道搬移不失效。
+# Multi-repo lane manifest (written by prepare_workspace; meta.repo_worktrees is the
+# only source of truth, and this file is its on-disk mirror for downstream activities
+# to read mechanically). Paths are relative: tree relative to the lane root, repo
+# relative to the project root (= the lane root's grandparent), so moving the lane
+# does not invalidate it.
 MULTI_MANIFEST_REL = ".suyou/repo_worktrees.json"
 
 
 def _lane_scopes(wt: Path, branch: str = "", base_ref: str = "",
                  write_set: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-    """泳道作用域清单：单仓=1 个（各字段即旧单锚行为，逐字节回归面）；多仓=每仓
-    一个（清单损坏=RuntimeError 交 Temporal 重试/人工，不静默回落单仓锚——回落
-    意味着结算/合并打错仓）。字段：name/tree/repo/branch/base_ref/write_set，
-    其中 write_set 已按仓重基（树根相对子集；单仓原样透传）。"""
+    """Lane scope list: single repo = 1 entry (each field is exactly the old
+    single-anchor behavior, a byte-level regression surface); multi-repo = one entry
+    per repo (a corrupt manifest = RuntimeError to Temporal retry / a human, never a
+    silent fallback to the single-repo anchor — falling back would settle/merge the
+    wrong repo). Fields: name/tree/repo/branch/base_ref/write_set, where write_set has
+    already been rebased per repo (a tree-root-relative subset; passed through
+    unchanged for a single repo)."""
     mf = wt / MULTI_MANIFEST_REL
     if not mf.is_file():
         return [{"name": "", "tree": wt, "repo": _lane_repo_root(wt), "repo_rel": "",
@@ -1432,8 +1627,10 @@ def _lane_scopes(wt: Path, branch: str = "", base_ref: str = "",
     project_root = wt.parent.parent
     scopes: List[Dict[str, Any]] = []
     for e in entries:
-        # 票 t260907-12：repo 允许空串=根仓树（tree=泳道容器、repo=项目根本身）；
-        # branch 缺失/非串仍拒收（fail-closed 不弱化，文案点名真缺失字段）。
+        # Ticket t260907-12: repo may be an empty string = the root-repo tree
+        # (tree = the lane container, repo = the project root itself); a missing /
+        # non-string branch is still rejected (fail-closed, not weakened; the message
+        # names the genuinely missing field).
         if not isinstance(e, dict):
             raise RuntimeError("多仓泳道清单条目须为对象（%r in %s）——人工处置" % (e, mf))
         if not isinstance(e.get("repo"), str):
@@ -1455,9 +1652,11 @@ def _lane_scopes(wt: Path, branch: str = "", base_ref: str = "",
 
 
 def _is_worktree_of(p: Path, repo: Optional[Path] = None) -> bool:
-    """p 是否**该仓库**（缺省 REPO_ROOT）的已注册 worktree：`git -C repo worktree list --porcelain`
-    里必须有 `worktree <p>` 条目（按绝对路径比对）。
-    不用 `git -C p rev-parse` 判定——仓库内普通子目录会向上走到仓库根被误判成 worktree。"""
+    """Is p a registered worktree of **that repo** (default REPO_ROOT)?
+    `git -C repo worktree list --porcelain` must contain a `worktree <p>` entry
+    (compared as absolute paths).
+    Not decided via `git -C p rev-parse` — an ordinary subdirectory inside the repo
+    walks up to the repo root and would be misjudged as a worktree."""
     try:
         proc = subprocess.run(
             ["git", "-C", str(repo if repo is not None else REPO_ROOT), "worktree", "list", "--porcelain"],
@@ -1478,13 +1677,17 @@ def _is_worktree_of(p: Path, repo: Optional[Path] = None) -> bool:
 
 
 def _check_git_identity(repo: Path) -> Optional[str]:
-    """落盘身份守卫（票 t260905-10）：泳道 settle 的 commit 发生在泳道 worktree
-    （_settle_worktree_lane `git -C 泳道 commit`），git 身份真源=宿主 ~/.gitconfig
-    （该文件消失会让多轨 settle 全 FAILED——隐性依赖事故时刻才现形）。探针锚=
-    **归属仓根**：`git -C 仓根 config` 覆盖 system/global/repo 三层——repo 级
-    config 与全局身份对未来的泳道 worktree 同源生效（worktree 共享主仓 config），
-    且 created 路径泳道尚未建目录时仓根探针依然可用（-C 不存在的泳道会因目录缺失误报
-    身份缺失）。返回 None=身份在位；否则红字文案（点名缺哪项+处置）。"""
+    """Commit-identity guard (ticket t260905-10): a lane settle's commit happens in
+    the lane worktree (_settle_worktree_lane's `git -C lane commit`), and the source
+    of truth for the git identity is the host's ~/.gitconfig (if that file vanishes,
+    every settle track goes FAILED — a hidden dependency that only surfaces at the
+    moment of the accident). The probe anchors on the **owning repo root**:
+    `git -C repo-root config` covers all three layers (system/global/repo) — a repo
+    level config and the global identity apply equally to future lane worktrees
+    (worktrees share the main repo's config), and the repo-root probe still works on
+    the created path before the lane directory exists (with -C on a nonexistent lane,
+    the missing directory would be misreported as a missing identity). Returns None =
+    identity in place; otherwise the red text (naming what's missing + the fix)."""
     missing: List[str] = []
     for key in ("user.name", "user.email"):
         try:
@@ -1504,23 +1707,30 @@ def _check_git_identity(repo: Path) -> Optional[str]:
             "（worktree 与主仓共享 config），然后 retry_qc 重跑本步。" % "、".join(missing))
 
 
-# 泳道依赖目录 bootstrap 清单（票 t260824-12 踩中）：worktree 不继承 gitignored
-# 环境目录，verify_lane「依赖在位」必红。含 server/engine/.venv（票 t260905-10
-# 追加：replay_check 的解释器回落链消费泳道内 venv，260825「泳道无消费方」的旧
-# 拍板已被实测推翻作废）。既有行为保留：主仓对应目录不存在（全新克隆）时
-# _ensure_lane_deps 跳过不报错，红字由 verify_lane「依赖在位」给。
+# Lane dependency directory bootstrap list (hit live in ticket t260824-12): a
+# worktree does not inherit gitignored environment directories, so verify_lane's
+# "dependencies in place" check would always go red. Includes server/engine/.venv
+# (added in ticket t260905-10: replay_check's interpreter fallback chain consumes the
+# in-lane venv — the 260825 ruling that "no lane has a consumer" was overturned by
+# measurement and is void). Existing behavior kept: when the main repo's directory is
+# absent (a fresh clone) _ensure_lane_deps skips without an error, and the red text
+# comes from verify_lane's "dependencies in place".
 LANE_DEP_SYMLINKS = ("app/node_modules", "server/engine/.venv")
 
 
 def _ensure_lane_deps(lane_path: Path) -> str:
-    """把主仓的 gitignored 依赖目录软链进泳道（幂等）。返回 action 文案后缀
-    （"" 或 "+deps:<目录>"），拼进 prepare_workspace 的 action 上报。
+    """Symlink the main repo's gitignored dependency directories into the lane
+    (idempotent). Returns the action text suffix ("" or "+deps:<dir>") appended to
+    prepare_workspace's reported action.
 
-    软链=共享约定：泳道内 pnpm install 会写进主仓依赖目录（安装稀少，接受；
-    要隔离就在泳道里手工 install 成真目录，本函数见已存在即不动）。
-    主仓对应目录不存在（全新克隆）则跳过——verify_lane 的红字会指明原因。"""
+    The symlink is a shared-by-convention arrangement: a pnpm install inside the lane
+    writes into the main repo's dependency directory (installs are rare; accepted —
+    to isolate, hand-install into a real directory inside the lane, and this function
+    leaves anything already present alone).
+    If the main repo's directory doesn't exist (a fresh clone) it is skipped —
+    verify_lane's red text will say why."""
     if _lane_repo_root(lane_path) != REPO_ROOT:
-        return ""  # 跨项目泳道：依赖清单属引擎所在仓，不外链（票 t260903-10）
+        return ""  # cross-project lane: the dependency list belongs to the engine's repo, don't link out (ticket t260903-10)
     linked = []
     for rel in LANE_DEP_SYMLINKS:
         src = REPO_ROOT / rel
@@ -1530,23 +1740,31 @@ def _ensure_lane_deps(lane_path: Path) -> str:
         try:
             os.symlink(src, dst)
         except OSError:
-            continue  # 软链失败不致命：verify_lane「依赖在位」会给出明确红字
+            continue  # a failed symlink is not fatal: verify_lane's "dependencies in place" gives a clear red
         linked.append(rel)
     return "+deps:%s" % ",".join(linked) if linked else ""
 
 
 def _prepare_multirepo_lane(lane_root: Path, entries: Any,
                             prep: WorkspacePrep) -> WorkspacePrepResult:
-    """多仓泳道逐仓创建/复用（票B t260907-06）。失败语义与单仓同族：
-      - 目录在但非本仓 worktree → 该仓 failed 点名，不回滚不删除（人工处置）；
-      - 逐仓身份探针（_check_git_identity），任一仓缺失=整体 failed 红字点名仓；
-      - 任一仓失败=整体 failed 回执（不抛，workflow 转 blocked）；已成功树
-        **不回滚**（与单仓同语义，留人判读）；
-      - 全部成功后落清单 <lane>/.suyou/repo_worktrees.json（下游 _lane_scopes
-        的机械真源；幂等：重试走复用，清单重写同形状）。
-    base_ref：逐仓各自记录建树时的仓 HEAD（单仓 base_ref 语义=主树 HEAD，多仓
-    下不适用——每仓基线独立，记 HEAD 才能供 merge_check 第 1 项判「有本票产出」）。
-    deps 软链不外链；_ensure_lane_deps 仅单仓。"""
+    """Create/reuse a multi-repo lane repo by repo (ticket B, t260907-06). Failure
+    semantics are the same family as single-repo:
+      - a directory present but not a worktree of that repo → that repo is named in a
+        failed result, no rollback, no deletion (human triage);
+      - a per-repo identity probe (_check_git_identity); any repo missing its identity
+        = the whole thing fails with red text naming the repo;
+      - any repo failing = an overall failed receipt (no raise, the workflow turns
+        blocked); already-succeeded trees are **not rolled back** (same semantics as
+        single-repo, left for human triage);
+      - once everything succeeds, write the manifest <lane>/.suyou/repo_worktrees.json
+        (the mechanical source of truth for downstream _lane_scopes; idempotent:
+        retries take the reuse path and the manifest is rewritten with the same
+        shape).
+    base_ref: each repo records the repo HEAD at tree-creation time (single-repo
+    base_ref semantics = main-tree HEAD do not carry over to multi-repo — each repo's
+    baseline is independent, and recording HEAD is what lets merge_check's item 1
+    judge "this ticket produced something").
+    deps symlinks are not linked out; _ensure_lane_deps is single-repo only."""
     if not isinstance(entries, list) or not entries:
         return WorkspacePrepResult(ok=False, kind="worktree", action="failed",
                                    path=str(lane_root),
@@ -1556,8 +1774,10 @@ def _prepare_multirepo_lane(lane_root: Path, entries: Any,
     errors: List[str] = []
     created_n = 0
     for e in entries:
-        # 票 t260907-12：repo 允许空串=根仓树（repo=项目根本身、tree=泳道容器本身，
-        # Path/"" 同式零特判）；name/branch 须非空字符串，缺失照旧拒收。
+        # Ticket t260907-12: repo may be an empty string = the root-repo tree
+        # (repo = the project root itself, tree = the lane container itself; Path/""
+        # share one form with zero special-casing); name/branch must be non-empty
+        # strings, missing ones are rejected as before.
         if not (isinstance(e, dict) and isinstance(e.get("repo"), str)
                 and isinstance(e.get("name"), str) and e["name"]
                 and isinstance(e.get("branch"), str) and e["branch"]):
@@ -1598,7 +1818,8 @@ def _prepare_multirepo_lane(lane_root: Path, entries: Any,
         return WorkspacePrepResult(
             ok=False, kind="worktree", action="failed", path=str(lane_root),
             error="多仓泳道准备未全绿（已成功树不回滚，留人判读）：\n" + "\n".join(errors))
-    # 全绿：落清单（幂等重写）。base_ref=逐仓建树时 HEAD（复用路也刷新读取）。
+    # All green: write the manifest (idempotent rewrite). base_ref = each repo's HEAD
+    # at tree creation (also refreshed on the reuse path).
     manifest = []
     for e in entries:
         repo = project_root / e["repo"]
@@ -1623,17 +1844,24 @@ def _prepare_multirepo_lane(lane_root: Path, entries: Any,
 
 @activity.defn
 async def prepare_workspace(prep: WorkspacePrep) -> WorkspacePrepResult:
-    """工作区创建/复用（M16：workflow 第一个 activity，agent 不再自己 git worktree add / mkdir）。
+    """Workspace creation/reuse (M16: the workflow's first activity — the agent no
+    longer runs git worktree add / mkdir itself).
 
-    - workspace 无/非 worktree|dir → 主树道，跳过（skipped）；
-    - dir → mkdir -p（幂等，ensured）；
-    - worktree → 已是本仓库 worktree 则复用（reused）；否则 `git worktree add -b <branch> <path>`
-      [基点=base_ref]（created）；失败回执 failed（**不抛**——workflow 转 blocked 交人判读）。
-    - worktree 建/复用后跑 _ensure_lane_deps：把主仓 gitignored 依赖目录软链进泳道，
-      否则 verify_lane「依赖在位」必红（票 t260824-12 实测踩中）。
-    - worktree 分支开工前跑 _check_git_identity（票 t260905-10）：git 身份缺失
-      即 failed 红字点名——身份缺失=开工前点名，不是落盘 settle 才炸；
-      dir/main 型工作区无 commit，不查。
+    - no workspace / not worktree|dir → main-tree path, skip (skipped);
+    - dir → mkdir -p (idempotent, ensured);
+    - worktree → if it is already a worktree of this repo, reuse (reused); otherwise
+      `git worktree add -b <branch> <path>` [base point = base_ref] (created); a
+      failure returns a failed receipt (**no raise** — the workflow turns blocked for
+      human triage).
+    - after the worktree is created/reused, _ensure_lane_deps runs: it symlinks the
+      main repo's gitignored dependency directories into the lane, otherwise
+      verify_lane's "dependencies in place" always goes red (hit live in ticket
+      t260824-12).
+    - before work starts on a worktree branch, _check_git_identity runs (ticket
+      t260905-10): a missing git identity is an immediate failed red naming it — the
+      identity is called out before work starts instead of blowing up only at the
+      settling commit;
+      dir/main workspaces have no commit and are not checked.
     """
     ws = prep.workspace
     if not (isinstance(ws, dict) and ws.get("type") in WORKSPACE_TYPES and ws.get("path")):
@@ -1641,8 +1869,10 @@ async def prepare_workspace(prep: WorkspacePrep) -> WorkspacePrepResult:
     p = Path(str(ws["path"]))
     if not p.is_absolute():
         p = REPO_ROOT / p
-    # 跨项目（票 t260903-10）：worktree add/复用判定对**项目仓**操作（路径约定自锚定），
-    # 不再恒锚引擎仓——新单泳道路径已是绝对路径（derive_lane_workspace project_root）。
+    # Cross-project (ticket t260903-10): the worktree add/reuse decision operates on
+    # the **project repo** (self-anchored by path convention), no longer hard-anchored
+    # to the engine repo — new tickets' lane paths are already absolute
+    # (derive_lane_workspace project_root).
     repo = _lane_repo_root(p)
     if ws["type"] == "dir":
         try:
@@ -1651,13 +1881,18 @@ async def prepare_workspace(prep: WorkspacePrep) -> WorkspacePrepResult:
             return WorkspacePrepResult(ok=False, kind="dir", action="failed",
                                        path=str(p), error="mkdir -p %s 失败: %s" % (p, e))
         return WorkspacePrepResult(ok=True, kind="dir", action="ensured", path=str(p))
-    # 票B（票 t260907-06）多仓泳道：repo_worktrees 在场即多仓票——走逐仓
-    # 创建/复用分支（meta.repo_worktrees=唯一真源，本函数只校验盘面一致，不重推导）。
-    # 读序三环（票 t260908-02）：① prep.repo_worktrees（Temporal 正路，一等字段
-    # 经 payload 编解码）→ ② ws.get("repo_worktrees")（夹具/直调回落）→
-    # ③ prep.write_set+prep.project_root 推导（多仓布局判定 is_multi_repo_layout
-    # 与建票链同源，票 t260907-12 起混合形态同样激活；推导逻辑=
-    # shared.build_repo_worktrees 单点）。单仓项目不进此分支，旧路径零回归。
+    # Ticket B (t260907-06) multi-repo lane: repo_worktrees present = a multi-repo
+    # ticket — take the per-repo create/reuse branch (meta.repo_worktrees is the only
+    # source of truth; this function only checks that the disk state agrees, it does
+    # not re-derive).
+    # Three-ring read order (ticket t260908-02): ① prep.repo_worktrees (the Temporal
+    # main road, a first-class field carried through payload encode/decode) →
+    # ② ws.get("repo_worktrees") (fixture / direct-call fallback) → ③ derived from
+    # prep.write_set + prep.project_root (the multi-repo layout test is_multi_repo_layout
+    # shares a source with the ticket-creation chain, and mixed shapes activate it too
+    # since t260907-12; the derivation logic = shared.build_repo_worktrees, the single
+    # point). Single-repo projects never enter this branch, so the old path has zero
+    # regression.
     rws = list(prep.repo_worktrees) if prep.repo_worktrees else ws.get("repo_worktrees")
     if not (isinstance(rws, list) and rws) and prep.write_set and prep.project_root:
         _pr = Path(prep.project_root)
@@ -1668,15 +1903,17 @@ async def prepare_workspace(prep: WorkspacePrep) -> WorkspacePrepResult:
                 return WorkspacePrepResult(ok=False, kind="worktree", action="failed",
                                            path=str(p), error="多仓泳道推导拒收：%s" % e)
         else:
-            rws = None  # 单仓项目：通道字段忽略，走旧单仓路径（回归面）
+            rws = None  # single-repo project: ignore the channel field, take the old single-repo path (regression surface)
     if isinstance(rws, list) and rws:
         return _prepare_multirepo_lane(p, rws, prep)
-    # worktree 泳道
-    # 落盘身份守卫（票 t260905-10）：created/reused 两路开工前都查——身份可能在
-    # 复用间隔里消失；缺失即 failed 回执（workflow 转 blocked 交人，与 worktree add
-    # 失败同路径）。探针锚=归属仓根 repo（created 路径泳道目录尚未建，-C 泳道会误报；
-    # 仓根的 repo 级/全局/系统三层与未来泳道 worktree 同源）。dir/main 型工作区无
-    # commit，不查。
+    # worktree lane
+    # Commit-identity guard (ticket t260905-10): checked before work starts on both
+    # the created and reused paths — the identity can vanish between reuses; missing
+    # = a failed receipt (the workflow turns blocked for a human, the same path as a
+    # worktree add failure). The probe anchors on the owning repo root `repo` (on the
+    # created path the lane directory doesn't exist yet and -C lane would misreport;
+    # the repo root's repo-level/global/system layers are the same source future lane
+    # worktrees will see). dir/main workspaces have no commit and are not checked.
     ident_err = _check_git_identity(repo)
     if ident_err:
         return WorkspacePrepResult(ok=False, kind="worktree", action="failed",
@@ -1702,7 +1939,7 @@ async def prepare_workspace(prep: WorkspacePrep) -> WorkspacePrepResult:
               % (p, branch, (proc.stderr or proc.stdout or "").strip()[-600:]))
 
 
-# ---------- 人门段机械准备 ----------
+# ---------- Human-gate mechanical preparation ----------
 
 def _proposal_excerpt(proposal_id: str) -> str:
     if not proposal_id:
@@ -1750,7 +1987,8 @@ def _diff_stat(worktree: str, base_ref: str) -> str:
 
 @activity.defn
 async def prepare_human_gate(prep: HumanGatePrep) -> HumanGateContext:
-    """人门段机械准备：组装审查上下文（提案摘录/工作空间清单/diff stat），纯机械零判断。"""
+    """Human-gate mechanical preparation: assemble the review context (proposal
+    excerpt / workspace listing / diff stat) — purely mechanical, zero judgement."""
     parts: List[str] = [
         "工单 %s（%s）人门段 %s 待签字" % (prep.ticket_id, prep.title, prep.stage_id)]
     for chunk in (_proposal_excerpt(prep.proposal_id),
@@ -1764,7 +2002,7 @@ async def prepare_human_gate(prep: HumanGatePrep) -> HumanGateContext:
                             note="审查上下文已组装（%d 项）" % (len(parts) - 1))
 
 
-# ---------- dev-lane：merge_check（程序化，无 agent）与 merge（人审后执行） ----------
+# ---------- dev-lane: merge_check (programmatic, no agent) and merge (after human sign-off) ----------
 
 def _git(args: List[str], cwd: Path, timeout: int = 60) -> subprocess.CompletedProcess:
     return subprocess.run(["git"] + args, cwd=str(cwd),
@@ -1772,13 +2010,17 @@ def _git(args: List[str], cwd: Path, timeout: int = 60) -> subprocess.CompletedP
 
 
 def _merge_base_ref(branch: str, repo: Path) -> Tuple[str, str]:
-    """白名单 diff 的基线 ref：当前 merge-base(main, branch)。返回 (ref, err)。
+    """The baseline ref for the whitelist diff: the current merge-base(main, branch).
+    Returns (ref, err).
 
-    ref 非空 = 成功（正常单输出；多行=畸形，取首行继续并在 err 里留痕）。
-    ref 为空 = 解析失败，err 是 fail-closed 红 item 的 detail 文案——调用方
-    不得回落任何 ref（回落钉死 base_ref=复活 KI-010；回落字面 main=两点 diff
-    下泳道落后即误判），空串也绝不传给 verify_lane。
-    （票 t260901-18：口径详解见 merge_check 第 3 项注释。）
+    Non-empty ref = success (normally a single line; multiple lines = malformed, keep
+    the first and leave a trace in err).
+    Empty ref = resolution failed, and err is the detail text for a fail-closed red
+    item — the caller must not fall back to any ref (falling back to the pinned
+    base_ref revives KI-010; falling back to the literal main misjudges as soon as the
+    lane is behind under a two-dot diff), and the empty string is never handed to
+    verify_lane either.
+    (Ticket t260901-18: for the full stance see the merge_check item 3 comment.)
     """
     p = _git(["merge-base", "main", branch], repo)
     if p.returncode != 0 or not (p.stdout or "").strip():
@@ -1794,23 +2036,31 @@ def _merge_base_ref(branch: str, repo: Path) -> Tuple[str, str]:
 
 def _ui_diff_paths(lane_repo: Path, wl_base: str, branch: str,
                    prefixes: Any = None) -> Tuple[List[str], str]:
-    """UI 票判定的 diff 侧共享谓词（KI-044 根修，票 t260904-13）：
-    `git diff --name-only <wl_base>...branch` 的实际改动路径 × shared.match_ui_paths
-    前缀表 → (命中 UI 路径, 错误留痕)。
+    """The diff-side shared predicate for UI-ticket detection (KI-044 root fix,
+    ticket t260904-13): the actual changed paths of
+    `git diff --name-only <wl_base>...branch` × the shared.match_ui_paths prefix
+    table → (UI paths hit, error trace).
 
-    「两处调用同一源」的机制保证：ui_changed_paths activity 与 merge_check 3.6 都走
-    本函数——谓词入口只有 match_ui_paths 一处，diff 口径（三点/锚泳道仓/基线来源）
-    也只有这里一份，改口径不会两边漂。
+    The mechanism guarantee behind "two call sites, one source": both the
+    ui_changed_paths activity and merge_check 3.6 come through this function — the
+    predicate has exactly one entry (match_ui_paths) and the diff stance (three-dot /
+    anchored to the lane repo / where the baseline comes from) exists only here, so a
+    stance change cannot drift between the two sides.
 
-    prefixes（票 t260904-18，KI-050 门③）：UI 口径前缀表=项目声明（泳道根 verify.yaml
-    ui_evidence.dirs，调用方 load_ui_evidence 装载后显式传入）；None 仅限兼容回落
-    ——两处活调用点都必须传声明，不许单参新写。
+    prefixes (ticket t260904-18, KI-050 gate ③): the UI stance's prefix table = the
+    project declaration (the lane root's verify.yaml ui_evidence.dirs, loaded by the
+    caller with load_ui_evidence and passed in explicitly); None is only allowed as a
+    compatibility fallback — both live call sites must pass the declaration, no
+    new single-argument calls.
 
-    wl_base 由调用方用 _merge_base_ref 求得（merge-base(main, branch) 锚泳道仓，
-    票 t260901-18/t260903-11 同族；不回落字面 main——两点 diff 下泳道落后即误判）。
-    fail-closed：wl_base/branch 缺失或 git diff 失败 → (空清单, 错误文案)，调用方
-    按「UI 票待证」处理，不静默 SKIP。子进程同 _git 族现状：同步 run + 有界
-    timeout（超时 raise 由调用方转红），取消即时性属家族既有债不虚标。"""
+    wl_base is computed by the caller with _merge_base_ref (merge-base(main, branch)
+    anchored to the lane repo, the t260901-18/t260903-11 family; never fall back to
+    the literal main — under a two-dot diff a lane that is behind is misjudged).
+    Fail-closed: missing wl_base/branch or a failed git diff → ([], error text), and
+    the caller treats it as "UI ticket, evidence pending", never a silent SKIP. The
+    subprocess follows the _git family as-is: a synchronous run + a bounded timeout
+    (the caller turns a timeout raise into red); cancellation immediacy is the
+    family's existing debt and is not claimed here."""
     if not wl_base or not branch:
         return [], "UI diff 基线缺失（wl_base=%r branch=%r），fail-closed" % (wl_base, branch)
     p = _git(["diff", "--name-only", "%s...%s" % (wl_base, branch)], lane_repo)
@@ -1823,14 +2073,18 @@ def _ui_diff_paths(lane_repo: Path, wl_base: str, branch: str,
 
 
 def _parse_conflict_files(merge_tree_output: str) -> List[str]:
-    """从 `git merge-tree --write-tree` 冲突输出（git≥2.38）解析冲突文件清单（纯函数）。
+    """Parse the conflict file list out of `git merge-tree --write-tree` conflict
+    output (git ≥ 2.38; pure function).
 
-    输出形态（git 2.50 实测）：首行 tree OID；随后每个冲突文件一段——
-    1-3 行「条目行」`<mode> <oid> <stage>\\t<path>`（stage=1 base/2 ours/3 theirs），
-    空行后「CONFLICT (content): Merge conflict in <path>」等消息行。
-    两类行都解析、并集去重、排序返回（顺序不确定——下游「同批文件反复冲突」
-    判定按集合比较）。解析不到任何文件时返回 []——rc=1 也可能是
-    git 异常（bad ref 等），调用方按非冲突红灯处理，不空转消解回路。"""
+    Output shape (measured on git 2.50): the first line is the tree OID; then one
+    block per conflicted file — 1-3 "entry lines" `<mode> <oid> <stage>\\t<path>`
+    (stage = 1 base / 2 ours / 3 theirs), then, after a blank line, message lines such
+    as 「CONFLICT (content): Merge conflict in <path>」.
+    Both kinds of line are parsed, unioned, deduped and returned sorted (order is not
+    deterministic — the downstream "same batch of files conflicting repeatedly" check
+    compares as a set). Returns [] when no file can be parsed — rc=1 can also mean a
+    git fault (a bad ref and the like), and the caller treats that as a non-conflict
+    red rather than spinning the resolution loop."""
     files = set()
     for ln in merge_tree_output.splitlines():
         ln = ln.strip()
@@ -1846,19 +2100,23 @@ def _parse_conflict_files(merge_tree_output: str) -> List[str]:
     return sorted(files)
 
 
-# merge_check 冲突分类专用的内部标记：第 4 项检查（merge 预演）的 item 前缀，
-# 工单台/排查可按此前缀 grep。
+# Internal marker used only by merge_check's conflict classification: the item
+# prefix of check 4 (the merge rehearsal); the ticket console / an investigator can
+# grep for this prefix.
 MERGE_REHEARSAL_ITEM = "merge 预演无冲突"
 
-# 项目级扩展检查的配置文件（仓库相对路径；机制在引擎、策略跟项目仓库走，
-# 见 merge_check 3.5 节注释与该文件头部说明）。
+# Config file for project-level extra checks (repo-relative path; the mechanism
+# lives in the engine while the policy follows the project repo — see the merge_check
+# 3.5 comment and the header of that file).
 MERGE_CHECKS_CFG = "server/merge-checks.yaml"
 
 
 def _parse_bundle_pairs(text: str) -> List[tuple]:
-    """merge-checks.yaml 最小解析（同 model-routes 取舍：只吃固定形状，写坏抛错）。
+    """Minimal parser for merge-checks.yaml (same trade-off as model-routes: accept
+    only the fixed shape, raise on a broken file).
 
-    只认 bundle_pairs: 下「- src: <前缀>」+「out: <前缀>」成对条目，值裸 token。
+    Only the paired 「- src: <prefix>」 + 「out: <prefix>」 entries under bundle_pairs:
+    are recognized, with bare-token values.
     """
     pairs: List[Dict[str, str]] = []
     in_section = False
@@ -1886,29 +2144,41 @@ def _parse_bundle_pairs(text: str) -> List[tuple]:
 
 async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                                  lane_root: Path, multi: bool) -> Dict[str, Any]:
-    """单作用域 merge_check 核心（票B t260907-06 从 merge_check 抽出，逐树复用）。
+    """Single-scope merge_check core (extracted from merge_check in ticket B
+    t260907-06, reused per tree).
 
-    单仓（multi=False）行为与旧单锚实现逐字节一致（回归面）；多仓差异仅三处：
-    ① sc["write_set"] 已按仓重基——白名单门/KI-009 自愈判据逐仓精判；
-    ② ui_evidence 声明读 lane 根，命中判定用剥仓前缀的声明子集（_scope_dirs）；
-    ③ settle 自愈带 repo 锚（gitfile 三件套参数化）。
-    已知限制：逐树 verify_lane path=树，lane 根的项目声明 verify.yaml 工具读不到
-    → 项目声明的 checks 扩展检查在多仓票逐树落入工具自带「按项目声明关闭」可见
-    缺失态（非静默，verify_lane 有关闭注记）；写集精判不受影响。
-    返回 {checks, rehearsal_green, conflict_files, merge_tree_excerpt}。"""
+    Single-repo (multi=False) behavior is byte-identical to the old single-anchor
+    implementation (regression surface); the multi-repo differences are only three:
+    ① sc["write_set"] has been rebased per repo — the whitelist gate and the KI-009
+    self-heal test judge precisely per repo;
+    ② the ui_evidence declaration is read from the lane root, and the hit test uses
+    the repo-prefix-stripped subset of the declaration (_scope_dirs);
+    ③ the settle self-heal carries a repo anchor (the gitfile trio is parameterized).
+    Known limitation: per-tree verify_lane uses path = tree, so the tool cannot read
+    the lane root's project declaration verify.yaml → the project-declared checks
+    extras fall, per tree on multi-repo tickets, into the tool's own visible
+    "disabled per project declaration" state (not silent; verify_lane emits a
+    disabled annotation); the precise write-set judgement is unaffected.
+    Returns {checks, rehearsal_green, conflict_files, merge_tree_excerpt}."""
     checks: List[Dict[str, Any]] = []
-    wl_base = ""  # 第 3 项算出的 merge-base 基线（3.6 UI 判定复用；第 3 项异常未及赋值时为空，3.6 fail-closed 自算）
+    wl_base = ""  # merge-base baseline computed by item 3 (reused by the 3.6 UI judgement; empty if item 3 raised before assigning, in which case 3.6 recomputes fail-closed)
 
-    # 0. KI-009（票 t260901-25）：dirty 红灯前自动补 settle（写集内自愈）。
-    # 放 item 1 之前：自愈补的 commit 让 item 1/2 同读自愈后状态——「补了 commit
-    # 却报 0 commit」的时序组合结构上不可能。放行条件：a) 脏文件全在 write_set 内
-    # （写集外脏=越界改动，维持 blocked 等人）；b) MERGE_HEAD 不在场（消解期脏属
-    # 正常态，收口只走 settle_conflict_resolution，票 t260826-01——这里先自检一次，
-    # _settle_worktree_lane 内部护栏是双保险）。
-    # 自愈成败看自愈后 git status 复查，不看 settle 返回值（非 worktree 等场景
-    # 返回 ""）；settle 的 git 故障异常包 try 转红 item，保住本 activity「红灯不抛、
-    # 回执交 workflow 转 blocked」语义。每次调用最多自愈一次：自愈后仍脏就如实出红，
-    # 不内部循环。
+    # 0. KI-009 (ticket t260901-25): auto-settle before the dirty red light (self-heal
+    # inside the write set).
+    # Placed before item 1 so the self-heal commit makes items 1 and 2 read the same
+    # post-heal state — the timing combination "a commit was added yet 0 commits are
+    # reported" is structurally impossible. Admission conditions: a) every dirty file
+    # is inside the write_set (dirt outside the write set = an out-of-bounds change,
+    # stay blocked for a human); b) MERGE_HEAD is absent (dirt during a resolution
+    # round is a normal state and only settle_conflict_resolution may close it out,
+    # ticket t260826-01 — self-checked once here, and _settle_worktree_lane's internal
+    # guard is the second line of defense).
+    # Whether the self-heal worked is judged by re-running git status afterwards, not
+    # by settle's return value (scenarios like a non-worktree return ""); a git fault
+    # raised by settle is wrapped in try and turned into a red item, preserving this
+    # activity's "red lights don't raise, the receipt goes back to the workflow to
+    # turn blocked" semantics. At most one self-heal per call: still dirty afterwards
+    # = report it honestly as red, no internal loop.
     auto_settle_note = ""
     try:
         p = _git(["status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, sc["tree"])
@@ -1930,13 +2200,13 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                                         % (type(e).__name__, e))[-300:]
             else:
                 auto_settle_note = "脏文件在 write_set 外，不自愈（越界改动交人工）"
-    except Exception as e:  # 自愈前置段自身故障不拦主链：后续 item 照常出红
+    except Exception as e:  # a fault in this pre-check itself never blocks the chain: later items still go red as usual
         auto_settle_note = "自愈前置检查异常: %s: %s" % (type(e).__name__, e)
     if auto_settle_note:
         activity.logger.info("[%s] merge_check 自愈前置：%s", args.ticket_id,
                              auto_settle_note)
 
-    # 1. 泳道有 commit
+    # 1. The lane has commits
     try:
         p = _git(["log", "--oneline", "%s..%s" % (sc["base_ref"], sc["branch"])], sc["repo"])
         n = len([ln for ln in p.stdout.splitlines() if ln.strip()]) if p.returncode == 0 else 0
@@ -1947,11 +2217,15 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
     except Exception as e:
         checks.append({"item": "泳道分支有 commit", "green": False, "detail": "git log 异常: %s" % e})
 
-    # 2. 工作区干净（SETTLE_PATHSPEC 口径——排除 .dsh/ .sandbar/ 引擎运行时目录，
-    #    与 settle 代落盘同口径，注释互相指引；agent 的代码改动不会被这两个前缀误盖）
-    #    KI-009：改 porcelain -z（NUL 分隔，无 quotePath 引号歧义 / rename 箭头
-    #    解析问题），自愈后复查的脏清单也走同一解析（_dirty_files_from_status_z）；
-    #    自愈发生时 detail 带 [auto-settle] 标记，账面可见不静默。
+    # 2. Clean workspace (SETTLE_PATHSPEC stance — the .dsh/ and .sandbar/ engine
+    #    runtime directories are excluded, the same stance as the worker settle; the
+    #    comments point at each other; the agent's code changes can't be wrongly
+    #    covered by those two prefixes)
+    #    KI-009: switched to porcelain -z (NUL separated — no quotePath quoting
+    #    ambiguity and no rename-arrow parsing), and the post-heal re-check of the
+    #    dirty list goes through the same parser (_dirty_files_from_status_z);
+    #    when a self-heal happened the detail carries an [auto-settle] marker, visible
+    #    in the record rather than silent.
     try:
         p = _git(["status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, sc["tree"])
         if p.returncode == 0:
@@ -1968,37 +2242,48 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
     except Exception as e:
         checks.append({"item": "工作区干净", "green": False, "detail": "git status 异常: %s" % e})
 
-    # 3. 泳道内 verify_lane code（跑泳道副本的 admin.py：lane 代码 + lane 工具）
+    # 3. verify_lane code inside the lane (runs the lane's own admin.py copy: lane
+    # code + lane tools)
     try:
-        # t260901-18（KI-010）× t260901-16 合并解：白名单 diff 的 base 用
-        # merge-base(main, branch)（_merge_base_ref，fail-closed）。
-        # 根因（票 t260901-18）：传钉死的 sc["base_ref"] 时，他泳道并进的 main 文件
-        # 在泳道 merge main 后出现在 diff 里、又不在本单 write_set → 误判越界。
-        # 两层防线的分工：verify_lane 侧（票 t260901-16）_diff_names 已改三点
-        # base...HEAD（字面 main 也安全）；merge_check 侧再显式给 merge-base sha——
-        # 各自独立成立，任一单独回退都不复活 KI-010，且 merge-base sha 对「跑到
-        # 旧泳道副本」（工单快照语义）也免疫。注意与第 4 项 merge-tree 字面 main
-        # 的区别：merge-tree 是三路运算、内部自算 merge-base，字面 main 无害。
-        # 票 t260901-08：补传 base + require_base + write_set——写集白名单在合并闸
-        # 按工单 write_set 精判（逐文件上限）、空 base fail-closed，不再静默跳过
-        # （「无 base 跳过」口径对合并闸作废，仅存于手动调用；verify.yaml 的
-        # write_allow 粗判据仅兜手动/未带写集调用）。
-        # 第 1 项 commit 检查仍用钉死 base_ref（语义=泳道有本票产出，防快进误判
-        # 0 commit），两项 base 口径分工不同。
-        wl_base, wl_err = _merge_base_ref(sc["branch"], sc["repo"])  # merge-base 也要锚泳道仓（票 t260903-11 实雷）
+        # Merged resolution of t260901-18 (KI-010) × t260901-16: the whitelist diff's
+        # base is merge-base(main, branch) (_merge_base_ref, fail-closed).
+        # Root cause (ticket t260901-18): with the pinned sc["base_ref"], files that
+        # another lane merged into main show up in the diff after this lane merges
+        # main, are not in this ticket's write_set → a false out-of-bounds verdict.
+        # Division of labor between the two defense lines: on the verify_lane side
+        # (ticket t260901-16) _diff_names already uses the three-dot base...HEAD
+        # (safe even with a literal main); the merge_check side additionally passes
+        # the explicit merge-base sha — each line holds on its own, so reverting
+        # either one alone cannot revive KI-010, and the merge-base sha is also
+        # immune to "running the old lane copy" (ticket snapshot semantics). Note the
+        # difference from item 4's merge-tree with a literal main: merge-tree is a
+        # three-way operation that computes its own merge-base internally, so a
+        # literal main is harmless there.
+        # Ticket t260901-08: base + require_base + write_set are now passed — the
+        # write-set whitelist is judged precisely (per-file cap) against the ticket's
+        # write_set at the merge gate, and an empty base is fail-closed instead of a
+        # silent skip (the "skip without a base" stance is void at the merge gate and
+        # survives only for manual calls; verify.yaml's coarse write_allow only backs
+        # manual calls / calls without a write set).
+        # Item 1's commit check still uses the pinned base_ref (semantics = the lane
+        # has this ticket's output, guarding against a fast-forward misjudged as
+        # 0 commits); the two items intentionally use different base stances.
+        wl_base, wl_err = _merge_base_ref(sc["branch"], sc["repo"])  # the merge-base must also anchor the lane repo (real near-miss in ticket t260903-11)
         if not wl_base:
-            # fail-closed：红 item 是 merge_check 正常通道，activity 不抛。verify_lane
-            # 本轮不跑（tsc/smoke 一并缓，红已定 blocked，重试时恢复）；merge-base
-            # 失败时第 4 项 merge-tree main 几乎必然同红，零新增阻塞面。
+            # Fail-closed: a red item is merge_check's normal channel, the activity
+            # doesn't raise. verify_lane doesn't run this round (tsc/smoke are
+            # skipped with it, the red already means blocked, restored on retry);
+            # when merge-base fails, item 4's merge-tree main almost certainly goes
+            # red too, so no new blocking surface is added.
             checks.append({"item": "写集白名单基线（merge-base main × %s）" % sc["branch"],
                            "green": False, "detail": wl_err})
         else:
-            if wl_err:  # 多行畸形输出：取首行继续，留痕可检索
+            if wl_err:  # multi-line malformed output: keep the first line, leave a searchable trace
                 activity.logger.info("[%s] %s", args.ticket_id, wl_err)
             lane_admin = sc["tree"] / "server" / "admin.py"
             admin_bin = str(lane_admin if lane_admin.is_file() else
-                             Path(__file__).resolve().parents[1] / "admin.py")  # 跨项目无引擎布局回落主树副本
-            vp = await asyncio.create_subprocess_exec(  # async 化（票 t260903-09：阻塞 subprocess 会冻住事件循环）
+                             Path(__file__).resolve().parents[1] / "admin.py")  # cross-project without an engine layout: fall back to the main-tree copy
+            vp = await asyncio.create_subprocess_exec(  # async (ticket t260903-09: a blocking subprocess would freeze the event loop)
                 "python3", admin_bin, "call", "verify_lane",
                 json.dumps({"lane": "code", "path": str(sc["tree"]),
                             "base": wl_base, "require_base": True,
@@ -2011,8 +2296,10 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 res = payload.get("result") or {}
                 green = bool(payload.get("ok")) and bool(res.get("green")) and vp.returncode == 0
                 detail = "exit=%s red=%s" % (res.get("exit_code"), res.get("red_count"))
-                # 红项点名带进 detail（票B G2 契约：写集外注入须在 merge_check 回执
-                # 可检索到文件名；单仓同样受益，纯增量不加严）
+                # Carry the red items' names into the detail (ticket B G2 contract: an
+                # out-of-write-set injection must be findable by filename in the
+                # merge_check receipt; single-repo benefits equally — pure
+                # added visibility, no tightening)
                 _red_lines = []
                 for _chk in (res.get("checks") or []):
                     if _chk.get("level") != "red":
@@ -2031,24 +2318,30 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
         checks.append({"item": "泳道内 verify_lane code 绿灯", "green": False,
                        "detail": "verify_lane 异常: %s" % e})
 
-    # 3.5 项目级扩展检查（策略跟项目仓库走：读泳道内 server/merge-checks.yaml
-    #     ——工单快照语义；无文件=无扩展检查，别的项目不受影响）。
-    #     bundle_pairs：src 前缀有改动而 out 产物前缀无改动 → 红（票 t260827-02 教训：
-    #     src/client 改了没重建 lib，合并=假上线）。保持插在 merge 预演之前——
-    #     预演必须是 checks 末位（conflict 归类认 checks[:-1] 为「非冲突项」）。
+    # 3.5 Project-level extra checks (policy follows the project repo: read the lane's
+    #     own server/merge-checks.yaml — ticket snapshot semantics; no file = no extra
+    #     checks, other projects are unaffected).
+    #     bundle_pairs: a change under the src prefix with no change under the out
+    #     artifact prefix → red (lesson from ticket t260827-02: src/client changed
+    #     without rebuilding lib, so the merge = shipping a lie). Stays inserted
+    #     before the merge rehearsal — the rehearsal must remain the last item in
+    #     checks (the conflict classification treats checks[:-1] as "non-conflict
+    #     items").
     try:
         cfg = sc["tree"] / MERGE_CHECKS_CFG
         if cfg.is_file():
             pairs = _parse_bundle_pairs(cfg.read_text("utf-8"))
             if pairs:
-                # 同第 3 项白名单口径：三点 main...branch 只看泳道带来的改动，
-                # main 侧他人改的 src 不误触发 bundle 新鲜度红（票 t260901-16）。
+                # Same whitelist stance as item 3: the three-dot main...branch only
+                # sees what the lane brought in, so src changed by someone else on the
+                # main side does not falsely trip the bundle freshness red (ticket
+                # t260901-16).
                 p = _git(["diff", "--name-only", "main...%s" % sc["branch"]],
-                         sc["repo"])  # 同族锚补：3.5 bundle 新鲜度 diff 锚泳道仓
+                         sc["repo"])  # same-family anchor fix: the 3.5 bundle freshness diff anchors the lane repo
                 changed = p.stdout.split() if p.returncode == 0 else []
                 for src, out in pairs:
                     if not any(f.startswith(src) for f in changed):
-                        continue  # 本泳道没动这条构建链，不出项（降噪）
+                        continue  # this lane never touched that build chain: no item emitted (noise reduction)
                     rebuilt = any(f.startswith(out) for f in changed)
                     checks.append({"item": "bundle 新鲜度（%s → %s）" % (src, out),
                                    "green": rebuilt,
@@ -2059,24 +2352,38 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                        "detail": "扩展检查异常: %s" % e})
 
     # 3.6 UI 证据闸（票 t260828-09，纯机械查、无 agent）。KI-044 根修（票 t260904-13）：
-    #     判定源从声明写集换成**实际 diff 路径**（声明口径 ≠ 实际写面，可绕过）：
-    #     _ui_diff_paths 与 ui_changed_paths activity 同源，基线复用第 3 项已算出
-    #     的 wl_base（异常未及赋值时 fail-closed 自算并留痕）。
-    #     KI-050 声明制（票 t260904-18 门③）：UI 口径前缀表=项目声明（泳道根
-    #     verify.yaml ui_evidence.dirs，load_ui_evidence 装载）——本 activity 内
-    #     读盘合法；无声明的项目无此闸。四分支钉死：
-    #       ① 声明在场 + diff 命中：现状红绿判定（命中无 png → 红）；
-    #       ② 声明在场 + diff 未命中：不出项（降噪口径不变）；
-    #       ③ 声明缺省 + diff 健康：green + 可见 note（非 SKIP 非假绿）；
-    #       ④ 声明畸形 或 diff 故障：红 fail-closed（畸形点名字段；机制故障≠
-    #          「无 UI 面」，声明缺省不吸收机制故障）。
-    #     diff 命中（或 diff 故障）而无 png → 红：两时点 diff 变化由此兜住——
-    #     ui_evidence 段拍完又改 UI，本闸重算必红，红灯交 workflow 转 blocked 等人
-    #     （人工 rework 以 ui_evidence 为合法 target 补拍），证据必须覆盖最终 diff。
-    #     命中路径写进 detail（gate 记录可检索），处置指引直接给 capture.mjs 命令。
-    #     已知盲区（接受）：只查存在性，不校验截图时间戳/内容——防呆靠
-    #     integration_review 的看图钩子（审读 prompt 带截图 mtime 清单）。
-    #     同样插在 merge 预演之前（预演须保持 checks 末位，见 3.5 注释）。
+    #     The judgement source moved from the declared write set to the **actual diff
+    #     paths** (a declared stance ≠ the real write surface, and could be bypassed):
+    #     _ui_diff_paths shares a source with the ui_changed_paths activity, and the
+    #     baseline reuses the wl_base already computed by item 3 (if item 3 raised
+    #     before assigning it, recompute fail-closed and leave a trace).
+    #     KI-050 declaration regime (ticket t260904-18 gate ③): the UI stance's prefix
+    #     table = the project declaration (the lane root's verify.yaml
+    #     ui_evidence.dirs, loaded by load_ui_evidence) — reading it from disk inside
+    #     this activity is legitimate; a project with no declaration has no gate. The
+    #     four branches, pinned:
+    #       ① declaration present + diff hit: the current red/green judgement (a hit
+    #         with no png → red);
+    #       ② declaration present + diff miss: no item (noise-reduction stance
+    #         unchanged);
+    #       ③ declaration absent + healthy diff: green + a visible note (not a SKIP,
+    #         not a fake green);
+    #       ④ malformed declaration or diff fault: red fail-closed (the malformed
+    #         field is named; a mechanism fault ≠ "no UI surface", and an absent
+    #         declaration does not absorb a mechanism fault).
+    #     A diff hit (or diff fault) with no png → red: this is what catches a diff
+    #     change between the two points in time — if the ui_evidence stage shot its
+    #     screenshots and the UI changed afterwards, recomputing here must go red, and
+    #     the red goes back to the workflow to turn blocked for a human (a manual
+    #     rework may re-shoot with ui_evidence as a legitimate target); the evidence
+    #     must cover the final diff.
+    #     The hit paths go into the detail (searchable gate record), and the guidance
+    #     hands over the capture.mjs command directly.
+    #     Known blind spot (accepted): existence only — screenshot timestamps/contents
+    #     are not validated; the foolproofing is integration_review's
+    #     look-at-the-image hook (its review prompt carries a screenshot mtime list).
+    #     Also inserted before the merge rehearsal (the rehearsal must stay the last
+    #     item in checks; see the 3.5 comment).
     try:
         base_36 = wl_base
         base_note = ""
@@ -2084,13 +2391,16 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             base_36, base_err = _merge_base_ref(sc["branch"], sc["repo"])
             base_note = ("（wl_base 第 3 项未产出、此处自算%s）"
                          % ("失败 fail-closed" if not base_36 else "取 %s" % base_36[:7]))
-            if base_36 and base_err:  # 自算带畸形留痕，不静默
+            if base_36 and base_err:  # the recompute carries its malformed trace, not silent
                 base_note = "（wl_base 此处自算，带畸形留痕：%s）" % base_err[-120:]
-        # 声明读泳道根（sc["tree"]）——与 verify_lane code 道同口径（path=泳道根），
-        # 不读 sc["repo"]（主仓根：main 侧声明改动会污染泳道闸判定）
+        # The declaration is read from the lane root (sc["tree"]) — the same stance as
+        # the verify_lane code lane (path = lane root), not from sc["repo"] (the main
+        # repo root: declaration changes on the main side would pollute the lane's
+        # gate judgement)
         decl_mode, decl_dirs, decl_note = load_ui_evidence(lane_root)
         if decl_mode == "malformed":
-            # ④a 声明畸形：fail-closed 红点名字段（畸形 ≠ 缺省，契约②三态总纲）
+            # ④a Malformed declaration: fail-closed red naming the field (malformed ≠
+            # absent, per contract ②'s three-state master rule)
             checks.append({
                 "item": "UI 截图证据（ui_evidence 声明）",
                 "green": False,
@@ -2100,7 +2410,8 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             ui_paths, diff_err = _ui_diff_paths(sc["repo"], base_36, sc["branch"], _scope_dirs(decl_dirs, sc))
             diff_fault = bool(diff_err or not base_36)
             if decl_mode == "absent" and not diff_fault:
-                # ③ 声明缺省 + diff 健康：green + 可见 note（行为可见非静默）
+                # ③ Declaration absent + healthy diff: green + a visible note (the
+                # behavior is visible, not silent)
                 checks.append({
                     "item": "UI 截图证据（ui_evidence 声明）",
                     "green": True,
@@ -2108,18 +2419,20 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                               "（KI-050 声明制；要启用截图闸在 verify.yaml 声明 "
                               "ui_evidence.dirs）"})
             elif decl_mode == "absent" and diff_fault:
-                # ④b 声明缺省但 diff 故障：机制故障不吸收，红
+                # ④b Declaration absent but the diff is faulty: a mechanism fault is
+                # not absorbed — red
                 checks.append({
                     "item": "UI 截图证据（ui_evidence 声明）",
                     "green": False,
                     "detail": "ui_evidence 未声明且 diff 故障 fail-closed：%s" % (diff_err or "基线缺失")})
             elif ui_paths or diff_fault:
-                # ① 声明在场 + 命中（或在场下 diff 故障）：现状红绿判定
+                # ① Declaration present + a hit (or a diff fault while present): the
+                # current red/green judgement
                 judge = "按 diff 判定（%s...%s，口径=%d 声明目录）%s：%s" % (
                     (base_36 or "?")[:7], sc["branch"], len(decl_dirs), base_note,
                     ("命中 %d 个 UI 路径：%s" % (len(ui_paths), "、".join(ui_paths[:8]))) if ui_paths
                     else ("diff 故障 fail-closed：%s" % (diff_err or "基线缺失")))
-                shots_dir = ui_evidence_dir(lane_root)  # 粘滞解析（票 t260907-04）
+                shots_dir = ui_evidence_dir(lane_root)  # sticky resolution (ticket t260907-04)
                 pngs = sorted(shots_dir.glob("*.png")) if shots_dir.is_dir() else []
                 ui_gate_red = not pngs
                 checks.append({
@@ -2129,14 +2442,17 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                               if pngs else
                               ("%s｜UI 票缺截图证据：跑 server/ui-check/capture.mjs "
                                "--out <worktree>/%s（worker 代跑，只读控制台页面）" % (judge, UI_EVIDENCE_DIR))})
-            # ② 声明在场 + 未命中 + diff 健康：不出项（降噪，现状口径不变）
+            # ② Declaration present + a miss + healthy diff: no item emitted (noise
+            # reduction; the current stance is unchanged)
     except Exception as e:
         checks.append({"item": "UI 截图证据", "green": False, "detail": "证据闸异常: %s" % e})
 
     # 4. merge-tree 预演无冲突（不落地——只把合并结果写成 tree 对象判冲突，
-    #    不改任何工作区/索引；票 t260826-01：输出解析出冲突文件清单带出给消解回路。
-    #    注意：--write-tree 会往主库对象库写 tree/blob（冲突与干净都写），只多
-    #    悬空对象、gc 可回收，不算脏。
+    #    It changes no workspace/index state; ticket t260826-01: the conflict file
+    #    list parsed from the output is carried out for the resolution loop.
+    #    Note: --write-tree writes tree/blob objects into the main repo's object
+    #    store (both for conflicts and for clean merges) — that only adds dangling
+    #    objects, gc can reclaim them, and it does not count as dirt.
     conflict_files: List[str] = []
     merge_tree_excerpt = ""
     rehearsal_green = False
@@ -2160,29 +2476,41 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
 
 
 def _scope_dirs(dirs: List[str], sc: Dict[str, Any]) -> List[str]:
-    """声明目录（lane 根相对）→ 树根相对子集（多仓 UI 命中判定的基线对齐单点）。"""
+    """Declaration directories (lane-root-relative) → a tree-root-relative subset
+    (the single point that aligns baselines for the multi-repo UI hit test)."""
     return rebase_write_set(dirs, str(sc.get("repo_rel") or "")) if sc.get("repo_rel") else list(dirs or [])
 
 
 @activity.defn
 async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
-    """合并前的程序化检查（260824 dev-lane，无 agent——结论全来自 git/脚本，不信口述）。
+    """Programmatic checks before the merge (260824 dev-lane, no agent — every
+    conclusion comes from git/scripts, never from anyone's word).
 
-    四项全绿才放行到人审 merge：
-      1. 泳道分支有 commit（base_ref..branch 非空）——票 t260824-01 漏的就是这项
-         （agent 全程未 commit，旧 verify 门跑主树 diff 为空，全绿假闭环）；
-      2. 工作区干净（git status --porcelain 为空）——不许带未提交改动收口；
-         KI-009（票 t260901-25）：判红前先做写集内自愈（见下方 0 号前置段），
-         agent 迟写文件 worker 没赶上落盘的，在这里补一刀 settle 再复查。
-      3. 泳道内 verify_lane code 绿——跑**泳道副本**的 admin.py（lane 代码+lane 工具），
-         不跑主树（主树没泳道改动，跑了等于没测）；
-      4. merge-tree 预演无冲突（不落地，只判冲突）。
-    另有项目级扩展检查（3.5 节）：读泳道内 server/merge-checks.yaml，
-    无文件=无扩展——检查策略跟项目仓库走，换项目自动不适用。
-    红灯不抛：回执交 workflow 转 blocked 等 retry_qc / rework 判读。
+    Only when all four are green does the ticket advance to the human-reviewed merge:
+      1. the lane branch has commits (base_ref..branch non-empty) — the very item
+         ticket t260824-01 was missing (the agent never committed, the old verify
+         gate ran the main-tree diff which was empty, and everything went green in a
+         fake closed loop);
+      2. the workspace is clean (git status --porcelain empty) — no closing out with
+         uncommitted changes;
+         KI-009 (ticket t260901-25): self-heal within the write set before judging
+         red (see the item 0 pre-check below) — files the agent wrote late and the
+         worker failed to settle in time get one more settle here, then a re-check.
+      3. verify_lane code green inside the lane — runs the **lane's own** admin.py
+         copy (lane code + lane tools), not the main tree (the main tree has none of
+         the lane's changes, so running there tests nothing);
+      4. merge-tree rehearsal with no conflicts (no state change, conflict detection
+         only).
+    Plus project-level extra checks (section 3.5): reads the lane's own
+    server/merge-checks.yaml; no file = no extras — the check policy follows the
+    project repo and stops applying automatically when the project changes.
+    Red lights don't raise: the receipt goes back to the workflow to turn blocked and
+    wait for retry_qc / rework triage.
     """
-    # 票B（票 t260907-06）：作用域清单驱动——单仓=1 作用域（下方逻辑与旧单锚实现
-    # 一致）；多仓=逐树跑核心，item 名加树前缀，跨树聚合红绿与冲突清单。
+    # Ticket B (t260907-06): scope-list driven — a single repo = 1 scope (the logic
+    # below matches the old single-anchor implementation); multi-repo = run the core
+    # per tree, prefix item names with the tree, and aggregate red/green and the
+    # conflict list across trees.
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
@@ -2195,7 +2523,7 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     for sc in scopes:
         core = await _merge_check_one_scope(args, sc, wt, multi)
         sc_checks = core["checks"]
-        if multi:  # 树前缀（多仓可见性：每项红绿点名哪棵树）
+        if multi:  # tree prefix (multi-repo visibility: every red/green names its tree)
             for c in sc_checks:
                 c["item"] = "[%s] %s" % (sc["name"], c["item"])
         checks.extend(sc_checks)
@@ -2204,15 +2532,20 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
         if core["merge_tree_excerpt"]:
             merge_tree_excerpt = (merge_tree_excerpt + "\n" + core["merge_tree_excerpt"]).strip()
     green = all(c["green"] for c in checks)
-    # 票 t260826-01 冲突自动消解回路：红灯细分两类——
-    #   conflict=True：仅 merge 预演项红且解析到非空冲突文件清单 → workflow 自动
-    #     打回 implement 消解，不 blocked。判定不以 rc=1 为准（bad ref 等 git
-    #     异常也 rc=1 但解析不到冲突文件，误归类会让消解回路空转）；
-    #   conflict=False：其它三项（无 commit/工作区脏/verify_lane 红）任一项红，
-    #     或预演红但解析为空 → 维持 blocked 等人。基础问题先交人，不带病消解。
+    # Ticket t260826-01 automatic conflict resolution loop: red lights split into two
+    # classes —
+    #   conflict=True: only the merge rehearsal item is red and a non-empty conflict
+    #     file list was parsed → the workflow automatically bounces it back to
+    #     implement for resolution instead of blocking. The judgement does not trust
+    #     rc=1 alone (git faults such as a bad ref also return rc=1 but parse no
+    #     conflict files; misclassifying them would spin the resolution loop idly);
+    #   conflict=False: any of the other three items red (no commits / dirty
+    #     workspace / verify_lane red), or the rehearsal red with an empty parse →
+    #     stay blocked for a human. Infrastructure problems go to a person first; we
+    #     never resolve while sick.
     other_red = any(not c["green"] for c in checks[:-1])
     conflict = ((not green) and (not other_red) and (not rehearsal_green)
-                and bool(conflict_files) and not multi)  # 多仓：消解回路单仓设计，红灯 blocked 交人（票B 限制）
+                and bool(conflict_files) and not multi)  # multi-repo: the resolution loop is single-repo by design, so a red stays blocked for a human (ticket B limitation)
     activity.logger.info("[%s] merge_check %s：%s%s", args.ticket_id,
                          "绿灯" if green else "红灯",
                          "；".join("%s=%s" % (c["item"], "绿" if c["green"] else "红") for c in checks),
@@ -2222,10 +2555,11 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
                             merge_tree_excerpt=merge_tree_excerpt)
 
 
-# ---------- dev-lane：冲突自动消解回路（票 t260826-01，worker 代跑 merge / 代落盘） ----------
+# ---------- dev-lane: automatic conflict resolution loop (ticket t260826-01; the worker runs the merge and settles) ----------
 
 def _unmerged_files(wt: Path) -> List[str]:
-    """泳道工作区里未解冲突的文件清单（git status --porcelain 的 UU/AA/DU/UD 等行）。"""
+    """Files still carrying unresolved conflicts in the lane workspace (the UU/AA/DU/UD
+    and friends lines of git status --porcelain)."""
     p = _git(["status", "--porcelain"], wt)
     if p.returncode != 0:
         return []
@@ -2238,18 +2572,22 @@ def _unmerged_files(wt: Path) -> List[str]:
 
 @activity.defn
 async def prepare_conflict_resolution(args: ConflictPrepArgs) -> ConflictPrepResult:
-    """worker 代跑 `git merge <base_ref>` 进泳道，把冲突标记文件留在泳道工作区。
+    """Run `git merge <base_ref>` into the lane on the worker's behalf, leaving the
+    conflict-marked files in the lane workspace.
 
-    分工（同 implement 步「agent 写、worker 代落盘」契约的延伸）：agent 沙箱写不了
-    真 .git（worktree 的 .git 是指向主库的 gitfile，物理上提交不了也合并不了），
-    所以合并与提交都由 worker（无沙箱）执行；agent 只编辑工作区里的冲突标记文件。
-    本 activity 之后、settle_conflict_resolution commit 之前工作区必脏——此窗口
-    不跑 merge_check（workflow 编排严格串行：prep → implement → settle → 回
-    merge_check）。
-    竞态兜底：merge 零冲突（rc=0，如 merge_check 与 prep 之间冲突已被消解）→
-    already_clean=True 交 workflow 直接回 merge_check 重验；ref 不存在/merge
-    异常 → ok=False + error（workflow 转 blocked 交人，不空转回路）。
-    """
+    Division of labor (an extension of the implement step's "the agent writes, the
+    worker settles" contract): the agent sandbox cannot write the real .git (a
+    worktree's .git is a gitfile pointing at the main repo, so it can neither commit
+    nor merge), so both the merge and the commit are executed by the worker
+    (unsandboxed); the agent only edits the conflict-marked files in the workspace.
+    After this activity and before settle_conflict_resolution's commit the workspace
+    is necessarily dirty — merge_check does not run in that window (the workflow
+    orchestration is strictly serial: prep → implement → settle → back to
+    merge_check).
+    Race fallback: if the merge finds no conflicts (rc=0, e.g. the conflict was
+    resolved between merge_check and prep) → already_clean=True and the workflow goes
+    straight back to merge_check for a re-check; a missing ref / a merge exception →
+    ok=False + error (the workflow turns blocked for a human, the loop does not spin)."""
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
@@ -2267,7 +2605,8 @@ async def prepare_conflict_resolution(args: ConflictPrepArgs) -> ConflictPrepRes
                                   merge_output=out[:1500])
     files = _unmerged_files(wt)
     if not files:
-        # rc!=0 但无 unmerged 文件 = merge 本身失败（非冲突），如工作区脏被 git 拒
+        # rc != 0 with no unmerged files = the merge itself failed (not a conflict),
+        # e.g. git refused because the workspace was dirty
         return ConflictPrepResult(ok=False, error="git merge %s 失败（非冲突）: %s"
                                   % (target, out[-400:]))
     activity.logger.info("[%s] 冲突消解 prep：merge %s 留现场，冲突文件 %d 个：%s",
@@ -2278,28 +2617,36 @@ async def prepare_conflict_resolution(args: ConflictPrepArgs) -> ConflictPrepRes
 
 @activity.defn
 async def settle_conflict_resolution(args: ConflictSettleArgs) -> ConflictSettleResult:
-    """agent 解完冲突后的 worker 代落盘：校验无标记残留 → add + commit 合并提交。
+    """Worker-side settle after the agent resolved the conflicts: verify no marker
+    residue → add + commit the merge commit.
 
-    判定口径：「没解干净」不能看 git status 的 UU/AA 行
-    ——agent 沙箱写不了真 .git，编辑完文件后 UU 状态仍在（git 要 add 才认已解）。
-    所以本 activity 先代 add，再对**本次合并涉及的文件**（HEAD×MERGE_HEAD diff）
-    扫冲突标记残留（^<<<<<<< / ^>>>>>>> / 整行 =======——git 三路合并的 7 字符
-    标记形态）。有残留 → ok=False + remaining_files（workflow 记一轮失败，上限/
-    同批判定在 workflow 侧）；无残留 → commit 合并提交。add 先于扫描也让重试
-    幂等：上一轮已 stage 的残留这一轮照样扫得出（扫描锚定合并涉及文件，不靠
-    UU 态）。已知误报面：合并涉及文件里行首恰好是上述标记形态的正当内容
-    （如讲 git 冲突的文档）会被判残留——接受，交人工轮兜底。
+    Judgement stance: "not fully resolved" cannot be read from git status's UU/AA
+    lines — the agent sandbox cannot write the real .git, so after editing the files
+    the UU state is still there (git only accepts a resolution once it is added). So
+    this activity adds on the agent's behalf first, then scans the files **this merge
+    touched** (the HEAD × MERGE_HEAD diff) for conflict marker residue (^<<<<<<< /
+    ^>>>>>>> / a whole line of ======= — the 7-character marker shapes of git's
+    three-way merge). Residue → ok=False + remaining_files (the workflow records one
+    failed round; the cap / same-batch rules live on the workflow side); no residue →
+    commit the merge commit. Adding before scanning also makes retries idempotent:
+    residue staged in the previous round is still found this round (the scan anchors
+    on the merge's files, not on the UU state). Known false-positive surface: a file
+    in the merge set whose lines legitimately start with one of those marker shapes
+    (a document explaining git conflicts, say) is judged as residue — accepted, with
+    the human round as the backstop.
     """
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
-    # MERGE_HEAD 不在 = 没有进行中的合并（agent 误把工作区改动当冲突解，或 prep
-    # 的 merge 没留现场）——如实上报，不伪造合并提交
+    # No MERGE_HEAD = no merge in progress (the agent mistook ordinary workspace
+    # changes for conflicts, or prep's merge left nothing behind) — report honestly,
+    # never fake a merge commit
     p = _git(["rev-parse", "--verify", "MERGE_HEAD"], wt)
     if p.returncode != 0:
         return ConflictSettleResult(ok=False,
                                     error="无进行中的合并（MERGE_HEAD 不存在），无法落盘合并提交")
-    # 合并涉及文件（在 add 前取，add 后 diff HEAD MERGE_HEAD 口径不变）
+    # The files this merge touches (taken before add; the diff HEAD MERGE_HEAD stance
+    # is unchanged afterwards)
     p = _git(["diff", "--name-only", "HEAD", "MERGE_HEAD"], wt)
     merge_files = [ln.strip() for ln in p.stdout.splitlines() if ln.strip()] \
         if p.returncode == 0 else []
@@ -2307,15 +2654,17 @@ async def settle_conflict_resolution(args: ConflictSettleArgs) -> ConflictSettle
     if p.returncode != 0:
         return ConflictSettleResult(ok=False, error="git add 失败: %s"
                                     % (p.stderr or "")[-300:])
-    # .dsh/.sandbar 有 gitignore 本不入暂存；reset 摘回是双保险（防老 .gitignore 泳道）
-    # ——与 _settle_worktree_lane 同款（SETTLE_PATHSPEC 的排除项不可带进 git add，
-    # Apple Git 2.50 对「显式点名 ignored 目录」必报 rc=1，票 t260828-02 实测）
+    # .dsh/.sandbar are gitignored and never staged anyway; resetting them back is
+    # belt and braces (for lanes with an old .gitignore) — same as
+    # _settle_worktree_lane (SETTLE_PATHSPEC's exclusions must not go into git add;
+    # Apple Git 2.50 always returns rc=1 for an "explicitly named ignored directory",
+    # measured in ticket t260828-02)
     _git(["reset", "-q", "--", ".dsh", ".suyou", ".sandbar"], wt)  # naming-compat
     remaining = []
     for f in merge_files:
         fp = wt / f
         if not fp.is_file():
-            continue  # agent 选择删除该文件（合法解法之一）——尊重删除
+            continue  # the agent chose to delete this file (one legal resolution) — respect the deletion
         try:
             text = fp.read_text("utf-8", errors="replace")
         except Exception:
@@ -2342,25 +2691,33 @@ async def settle_conflict_resolution(args: ConflictSettleArgs) -> ConflictSettle
     return ConflictSettleResult(ok=True, commit=commit)
 
 
-# ---------- KI-006（票 t260901-26）：squash 收口核心（纯函数，不经 activity 上下文） ----------
+# ---------- KI-006 (ticket t260901-26): the squash close-out core (pure functions, never touching activity context) ----------
 
-# ---------- settle 时刻收口出仓快照（票 t260904-09，KI-017 引擎侧欠账收口） ----------
-# merge 落定后、泳道清理前冻结 token+交付快照到项目级账本：
-#   <projects-root>/<key>/data/settle/<票号>.json（与 metrics 缓存同根约定）。
-# 幂等：已存在且载荷一致=跳过；不一致=keep-old 不回写（不可变追加语义）。
-# 失败软降级：任何异常转 note 拼进 merge warns，绝不阻塞 merge（观测欠账不卡交付，
-#   与 ui_evidence 同款 catch-all→log→不阻塞）。
-# 命名红线（CLAUDE.md 硬规则⑤）：新 env SANDBAR_SETTLE_SNAPSHOT_DIR 为中性名。
+# ---------- The settle-time close-out export snapshot (ticket t260904-09, closing the KI-017 engine-side debt) ----------
+# After the merge lands and before lane teardown, freeze a token + delivery snapshot
+# into the project-level ledger:
+#   <projects-root>/<key>/data/settle/<ticket>.json (same-root convention as the
+#   metrics cache).
+# Idempotent: exists with an identical payload = skip; differs = keep-old, never
+# rewrite (immutable-append semantics).
+# Soft degradation on failure: any exception becomes a note appended to merge's
+# warns and never blocks the merge (an observability debt must not hold up delivery —
+# the same catch-all → log → don't block pattern as ui_evidence).
+# Naming red line (CLAUDE.md hard rule ⑤): the new env SANDBAR_SETTLE_SNAPSHOT_DIR
+# is a neutral name.
 
 SANDBAR_SETTLE_SNAPSHOT_ENV = "SANDBAR_SETTLE_SNAPSHOT_DIR"
 
 
 def _settle_snapshot_dir(project_key: str) -> Optional[Path]:
-    """快照目录解析（与 metrics.ts resolveSettleDir 同一条根链，两侧注释互指）：
-    SANDBAR_SETTLE_SNAPSHOT_DIR ?? SANDBAR_METRICS_DIR ?? SANDBAR_PROJECTS_DIR 链
-    （perkey_projects_root 内含后两段+home 缺省）——env 替换的是**项目根整体**。
-    project_key 为空（Temporal snapshot 查询软降级）→ None，快照跳过并留 note。
-    project_key 过 PROJECT_KEY_RE 白名单防路径穿越（与 ticket_data_dir 同款防呆）。"""
+    """Resolve the snapshot directory (the same root chain as metrics.ts
+    resolveSettleDir; the two sides' comments point at each other): the
+    SANDBAR_SETTLE_SNAPSHOT_DIR ?? SANDBAR_METRICS_DIR ?? SANDBAR_PROJECTS_DIR chain
+    (perkey_projects_root embeds the last two plus the home default) — the env
+    replaces the **whole project root**. An empty project_key (the Temporal snapshot
+    query soft-degraded) → None, the snapshot is skipped with a note. project_key must
+    pass the PROJECT_KEY_RE whitelist to block path traversal (the same guard as
+    ticket_data_dir)."""
     if not project_key or not shared.PROJECT_KEY_RE.match(project_key):
         return None
     root = os.environ.get(SANDBAR_SETTLE_SNAPSHOT_ENV) or os.environ.get("SANDBAR_METRICS_DIR") or ""
@@ -2370,20 +2727,29 @@ def _settle_snapshot_dir(project_key: str) -> Optional[Path]:
 
 
 def _aggregate_lane_usage(wt: Path, ticket_id: str) -> Tuple[Dict[str, Any], str]:
-    """聚合泳道会话 usage（TS agent-usage 通路的 Python 等价，口径逐项对齐）：
-    - 遍历 <wt>/.dsh/sessions/<slug>/<sub>/session.jsonl.zstd，sub==票号或票号- 前缀
-      （同 TS resolveAllSessionFiles）；目录不存在=空集+note，不进入聚合。
-    - 只加总 assistant/message 的 data.usage——assistant/chunk 里同名 usage 是同一份，
-      两处都加会翻倍（TS 侧钉死的红线，本侧同样适用）。
-    - 模型归因：顺序扫描维护当前模型（request/context 的 data.{provider,model}，
-      request/header 的 data.header.config.{provider,model} 兜底），缺失记「?」。
-    - 坏行跳过；单文件解压失败不毁整体加总（原因拼 note）。
-    - 0-usage 有意取舍：快照仍落盘、tokens 全零+tokens_zero 注记（settle 时刻的
-      观测欠账也要固化，与读侧「两处皆无→null」语义相异是有意的）。
-    - by_stage 不带：引擎侧无 workflow timeline 时间窗真源，恒空对象+by_stage_available
-      false 注记（硬造窗口会污染口径）。
-    不带 TS 的防穿越界双保险：本侧路径由自身代码构造（wt 来自 activity 入参，
-    已过 _ws_cwd/_is_worktree_of 防呆），非用户输入，不重复实现。"""
+    """Aggregate the lane sessions' usage (the Python equivalent of the TS
+    agent-usage path, aligned item by item):
+    - walk <wt>/.dsh/sessions/<slug>/<sub>/session.jsonl.zstd where sub == the ticket
+      id or starts with "<ticket id>-" (same as the TS resolveAllSessionFiles); a
+      missing directory = an empty set + note, nothing enters the aggregation.
+    - Only assistant/message's data.usage is summed — the same-named usage inside
+      assistant/chunk is the same one, and counting both would double it (a red line
+      pinned on the TS side, and equally binding here).
+    - Model attribution: the sequential scan keeps the current model (data.{provider,
+      model} of request/context, with request/header's
+      data.header.config.{provider,model} as the fallback); a miss records 「?」.
+    - Bad lines are skipped; a single file's decompression failure never destroys the
+      overall total (the reason is appended to the note).
+    - The 0-usage case is a deliberate trade-off: the snapshot is still written, with
+      all-zero tokens plus a tokens_zero annotation (an observability debt at settle
+      time deserves to be frozen too; differing from the read side's "nothing
+      anywhere → null" is intentional).
+    - by_stage is not produced: the engine side has no source of truth for a workflow
+      timeline window, so it is always an empty object plus a by_stage_available false
+      annotation (inventing a window would pollute the stance).
+    The TS side's double anti-traversal guard is not reproduced here: these paths are
+    built by our own code (wt comes from the activity input and has already passed
+    the _ws_cwd/_is_worktree_of guards), not from user input."""
     zero = {"in": 0, "out": 0, "cacheRead": 0, "by_stage": {},
             "by_model": {}, "by_stage_available": False}
     sess = wt / ".dsh" / "sessions"
@@ -2419,7 +2785,7 @@ def _aggregate_lane_usage(wt: Path, ticket_id: str) -> Tuple[Dict[str, Any], str
                 try:
                     obj = json.loads(line)
                 except ValueError:
-                    continue  # 坏行跳过（畸形输入/文件尾正在写）
+                    continue  # skip bad lines (malformed input / the tail is still being written)
                 t = obj.get("type")
                 d = obj.get("data") or {}
                 if t == "request/context" and "provider" in d:
@@ -2443,7 +2809,7 @@ def _aggregate_lane_usage(wt: Path, ticket_id: str) -> Tuple[Dict[str, Any], str
                     key = "%s/%s" % (cur["provider"] or "?", cur["model"] or "?")
                     by_model[key] = by_model.get(key, 0) + i + o
                     saw_usage = True
-        except Exception as exc:  # 单文件失败不毁整体加总
+        except Exception as exc:  # one file failing never destroys the overall total
             notes.append("%s 聚合异常: %s" % (f.name, str(exc)[:120]))
     tokens = {"in": total["in"], "out": total["out"], "cacheRead": total["cacheRead"],
               "by_stage": {}, "by_model": by_model, "by_stage_available": False,
@@ -2455,12 +2821,17 @@ def _aggregate_lane_usage(wt: Path, ticket_id: str) -> Tuple[Dict[str, Any], str
 
 
 def _squash_snapshot_delivery(repo: Path, commit: str, ticket_id: str) -> Tuple[Dict[str, Any], str]:
-    """squash 真身交付快照。前缀校验唯一真源在本纯函数内：
-    merge_commit 的 subject 首行不以票号开头（真·无内容可收，HEAD=他票 squash）
-    → 记零交付 zero_change=true，**不取 numstat**（否则把他票交付记到本票）；
-    Temporal 重试态（HEAD=本票上次收口，squash 提交模板保证首 token=票号）
-    → 正常取 diff <commit>^1 <commit> --numstat。二进制行（-\t-）跳过求和
-    （同 TS parseNumstatTotal）。hash 口径=short（与 _squash_merge 返回值一致）。"""
+    """The real delivery snapshot behind the squash. The prefix check has exactly one
+    source of truth, in this pure function:
+    if the merge_commit's subject first line does not start with the ticket id
+    (genuinely nothing to collect, HEAD = another ticket's squash) → record a zero
+    delivery with zero_change=true and **do not take numstat** (otherwise another
+    ticket's delivery would be booked to this one);
+    the Temporal retry state (HEAD = this ticket's previous close-out; the squash
+    commit template guarantees the first token = the ticket id) → take
+    diff <commit>^1 <commit> --numstat as normal. Binary lines (-\\t-) are skipped in
+    the sum (same as the TS parseNumstatTotal). The hash stance = short (matching
+    _squash_merge's return value)."""
     p = _git(["log", "-1", "--format=%s", commit], repo)
     if p.returncode != 0:
         return {}, "merge commit %s subject 读取失败: %s" % (commit, (p.stderr or "")[-120:])
@@ -2490,13 +2861,17 @@ def _squash_snapshot_delivery(repo: Path, commit: str, ticket_id: str) -> Tuple[
 
 def _freeze_settle_snapshot(repo: Path, wt: Path, ticket_id: str,
                             project_key: str, squash_commit: str) -> str:
-    """冻结并出仓 settle 快照（绝不抛，返回 note 人话；空串=无事可记）。
-    落盘 tmp+os.replace 原子替换（防双 settle 竞态半文件）。"""
+    """Freeze and export the settle snapshot (never raises; returns a human-readable
+    note, an empty string = nothing to record).
+    Written via a tmp file + os.replace for an atomic swap (so a double settle cannot
+    leave a half-written file)."""
     try:
-        # 票 id 形状白名单（票 t260904-09）：ticket_id 来自外部 meta，裸拼进
-        # 快照文件名会让 `../` 注入上跳目录（实证逃出票级 settle 目录）——与
-        # ticket_data_dir 同款 fail-closed：非法即跳过快照+warn note
-        # （软降级语义内，不阻塞 merge）。
+        # Ticket-id shape whitelist (ticket t260904-09): ticket_id comes from external
+        # meta, and splicing it raw into the snapshot filename would let a `../`
+        # injection climb out of the directory (demonstrated escaping the per-ticket
+        # settle directory) — the same fail-closed stance as ticket_data_dir: an
+        # illegal shape skips the snapshot with a warn note (inside the soft-degradation
+        # semantics, never blocking the merge).
         if not shared.PROJECT_KEY_RE.match(ticket_id):
             return "settle 快照跳过（ticket_id 形状非法，防路径穿越）: %r" % ticket_id[:60]
         d = _settle_snapshot_dir(project_key)
@@ -2535,19 +2910,20 @@ def _freeze_settle_snapshot(repo: Path, wt: Path, ticket_id: str,
         if notes:
             note += "（" + "；".join(notes) + "）"
         return note
-    except Exception as exc:  # catch-all：观测欠账不卡交付
+    except Exception as exc:  # catch-all: an observability debt never holds up delivery
         return "settle 快照失败（不阻塞 merge）: %s" % str(exc)[:200]
 
 
 def _merge_started(repo: Path) -> bool:
-    """判别主树「合并已开始」：MERGE_MSG 在场 或 index 有 unmerged entries。
+    """Decide whether the main tree has "a merge in progress": MERGE_MSG present, or
+    unmerged entries in the index.
 
-    KI-006 清理配方的唯一闸门（git 2.50 实测语义）：
-      - squash 冲突后 rc=1：MERGE_MSG 存在、ls-files -u 有 stage——合并已开始，
-        需要 --quit + reset --merge 才能还原；
-      - 未提交改动重叠被拒：无 MERGE_MSG、无 unmerged——合并从未开始，
-        现场原样，绝不可 reset（会毁掉主树未提交改动）。
-    """
+    The only gate for the KI-006 cleanup recipe (git 2.50 measured semantics):
+      - after a squash conflict with rc=1: MERGE_MSG exists and ls-files -u has
+        stages — the merge did start, and only --quit + reset --merge can restore it;
+      - rejected because of overlapping uncommitted changes: no MERGE_MSG, no
+        unmerged — the merge never started, the state is pristine, and a reset is
+        absolutely forbidden (it would destroy the main tree's uncommitted changes)."""
     p = _git(["rev-parse", "-q", "--verify", "MERGE_MSG"], repo)
     if p.returncode == 0:
         return True
@@ -2557,32 +2933,46 @@ def _merge_started(repo: Path) -> bool:
 
 def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
                   defer_teardown: bool = False, project_key: str = "") -> "MergeResult":
-    """squash 收口实现（merge() activity 转调此函数，便于脱离 Temporal 单测）。
+    """The squash close-out implementation (the merge() activity delegates here, so it
+    can be unit-tested without Temporal).
 
-    与旧 merge --no-edit 的故障模式取舍：
-      a) 全路径不抛，返回 MergeResult 交 workflow（红灯转 blocked/打回）；
-      b) 失败路径不拆 worktree、不删分支——泳道必须活着等重验；
-      c) 泳道清理失败只 warn，聚合进 error 字段，不推翻已完成的收口；
-      d) 清理配方幂等（--quit 重复无害；reset --merge 幂等；复查可重跑），
-         Temporal 超时重试安全：重跑会走「暂存区无可收内容」分支回填 HEAD 头；
-      e) error 精确点名失败环节（防呆/merge/quit/reset/commit/清理验收）。
-    清理三段（git 2.50 实测）：squash 冲突无 MERGE_HEAD，merge --abort 不可用；
-    --quit 只清 MERGE_MSG 不回滚 index/工作区（ls-files -u 仍非空），故紧跟
-    reset --merge HEAD（与真合并 --abort 语义对齐，保留主树无关未暂存改动），
-    并以「冲突态已还原」验收：ls-files -u 空 + status 无 unmerged 行（不要求
-    全树干净——主树上与合并无关的未暂存改动本来就该保留）。
+    Fault-mode trade-offs versus the old merge --no-edit:
+      a) no path raises; a MergeResult goes back to the workflow (red → blocked /
+         bounce);
+      b) failure paths do not tear down the worktree or delete the branch — the lane
+         must stay alive awaiting re-verification;
+      c) a lane cleanup failure only warns and is aggregated into the error field; it
+         never overturns a completed close-out;
+      d) the cleanup recipe is idempotent (a repeated --quit is harmless;
+         reset --merge is idempotent; the re-check can be rerun), so Temporal
+         timeout-retries are safe: a rerun takes the "nothing collectable in the
+         index" branch and back-fills the HEAD sha;
+      e) error names the failing step precisely (input guard / merge / quit / reset /
+         commit / cleanup acceptance).
+    The three-step cleanup (git 2.50 measured): a squash conflict leaves no
+    MERGE_HEAD, so merge --abort is unavailable; --quit clears only MERGE_MSG and does
+    not roll back the index/workspace (ls-files -u is still non-empty), so it is
+    immediately followed by reset --merge HEAD (semantically aligned with a real
+    merge's --abort, preserving unrelated unstaged changes in the main tree), and the
+    acceptance is "the conflict state is restored": ls-files -u empty + no unmerged
+    lines in status (a fully clean tree is not required — unrelated unstaged changes
+    in the main tree deserve to survive).
     """
-    # 0) 入参防呆：在碰任何写操作之前（git 会把 - 开头的值当选项解析，
-    #    branch 全来自外部 meta，必须挡掉；实测 check-ref-format 拒 - 开头/空/含 ..）
+    # 0) Input guard: before touching any write operation (git parses a value starting
+    #    with "-" as an option, and branch comes entirely from external meta, so it
+    #    must be blocked; measured: check-ref-format rejects a leading "-", empty, and
+    #    anything containing "..")
     p = _git(["check-ref-format", "--branch", branch], repo)
     if p.returncode != 0:
         return MergeResult(ok=False, action="failed",
                            error="branch %r 非法（check-ref-format 拒绝）：%s"
                                  % (branch, (p.stderr or "").strip()[-200:]))
 
-    # 0.5) 主树暂存区预检：squash 成功会把既有暂存内容一并卷进出口提交，破坏
-    #      「一单一提交」语义（revert 本单会带走无关改动）——有暂存即拒，不动现场
-    #      （口径比 git 自身更严：非重叠暂存也兜住，fail-closed）。
+    # 0.5) Pre-check the main tree's index: a successful squash would fold any
+    #      pre-staged content into the ticket's own commit, breaking the "one ticket,
+    #      one commit" semantics (reverting this ticket would drag unrelated changes
+    #      with it) — anything staged means refuse, the state is untouched (stricter
+    #      than git itself: even non-overlapping staged content is caught, fail-closed).
     dq0 = _git(["diff", "--cached", "--quiet"], repo)
     if dq0.returncode != 0:
         return MergeResult(ok=False, action="conflict",
@@ -2590,22 +2980,27 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
                                  "（破坏一单一提交语义）；请先处置（commit/stash/"
                                  "还原）再收口（主树现场未动）")
 
-    # 1) squash 合并（不自动 commit）
+    # 1) squash merge (no automatic commit)
     p = _git(["merge", "--squash", branch], repo, timeout=120)
     out = ((p.stdout or "") + "\n" + (p.stderr or "")).strip()
     if p.returncode != 0:
         if not _merge_started(repo):
-            # 合并从未开始（未提交改动重叠等）——只如实上报，绝不动主树现场
+            # The merge never started (overlapping uncommitted changes and the like)
+            # — report honestly, never touch the main tree's state
             return MergeResult(ok=False, action="conflict",
                                error="git merge --squash %s 未开始即被拒：%s（主树未提交改动原样保留）"
                                      % (branch, out[-400:]))
-        # 已开始：清现场（--quit 只清 MERGE_MSG；reset --merge 才回滚 index/工作区
-        # 的合并冲突态）。用 --merge 不用 --hard（票 t260901-26 集成裁决）：--merge 与
-        # 真合并的 --abort 语义对齐，只还原本次合并弄脏的部分，主树上与合并无关的
-        # 未暂存改动逐字节保留；--hard 会把无关未暂存改动一并抹掉=失败路径静默
-        # 丢数据。暂存改动已由 0.5 预检挡在合并前，--merge 不还原暂存的特性无回归面。
+        # It did start: clean up (--quit clears only MERGE_MSG; reset --merge is what
+        # rolls the merge conflict state back out of the index/workspace). --merge
+        # rather than --hard (the ticket t260901-26 integration ruling): --merge
+        # aligns with a real merge's --abort semantics and restores only what this
+        # merge dirtied, preserving unrelated unstaged changes in the main tree byte
+        # for byte; --hard would wipe those unrelated unstaged changes too = silent
+        # data loss on the failure path. Staged changes were already blocked before
+        # the merge by the 0.5 pre-check, so --merge's refusal to restore the index
+        # has no regression surface.
         leftover: List[str] = []
-        _git(["merge", "--quit"], repo, timeout=60)  # 只看后续冲突态复查，不看它的 rc
+        _git(["merge", "--quit"], repo, timeout=60)  # only the conflict-state re-check below matters; its rc is ignored
         rs = _git(["reset", "--merge", "HEAD"], repo, timeout=60)
         if rs.returncode != 0:
             leftover.append("reset --merge rc=%s：%s"
@@ -2615,8 +3010,9 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
             st = _git(["status", "--porcelain"], repo)
             if (lu.stdout or "").strip():
                 leftover.append("ls-files -u 仍非空：%s" % (lu.stdout or "").strip()[:200])
-            # 验收口径只看「冲突态是否还原」（unmerged 行），不看全树干净——
-            # 主树上与合并无关的未暂存改动（ M 行）本来就该保留，不是残留
+            # The acceptance only asks "is the conflict state restored" (unmerged
+            # lines), not "is the whole tree clean" — unrelated unstaged changes in
+            # the main tree (the " M" lines) deserve to survive; they are not residue
             unmerged_lines = [ln for ln in (st.stdout or "").splitlines()
                               if len(ln) >= 2 and ln[:2] in (
                                   "UU", "AA", "DD", "AU", "UA", "DU", "UD")]
@@ -2628,7 +3024,8 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
             err += "；清理后仍有残留：" + "；".join(leftover)
         return MergeResult(ok=False, action="conflict", error=err)
 
-    # 2) 收口：暂存区无可收内容（重试/内容已等价）→ 不产空提交，回填 HEAD 头
+    # 2) Close out: nothing collectable in the index (a retry, or the content is
+    #    already equivalent) → produce no empty commit, back-fill with the HEAD sha
     warns: List[str] = []
     dq = _git(["diff", "--cached", "--quiet"], repo)
     if dq.returncode == 0:
@@ -2636,7 +3033,8 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
         merge_commit = head.stdout.strip() if head.returncode == 0 else ""
         warns.append("main 已含本单改动（squash 暂存区无可收内容），未产新提交")
     else:
-        # message 必含 lane/<id>：工单台 changes.ts 两形态共用同一 grep 口径定位
+        # The message must contain lane/<id>: the ticket console's changes.ts greps
+        # for it in both shapes, so it is the shared locator
         msg = ("%s squash 收口（一单一提交，KI-006）\n\n"
                "来源 %s；审计真源在 Temporal；泳道内小步历史不进 main"
                % (ticket_id, branch))
@@ -2648,18 +3046,24 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
                                      % ((c.stderr or c.stdout or "")[-300:]))
         head = _git(["rev-parse", "--short", "HEAD"], repo)
         merge_commit = head.stdout.strip() if head.returncode == 0 else ""
-    # 2.5) settle 出仓快照（票 t260904-09，KI-017 引擎侧收口）：commit 落定后、
-    #      泳道清理前（此时 .dsh/sessions 尚在）；失败只 warn 不推翻收口，
-    #      project_key 缺省（""）时函数内部跳过并留 note——向后兼容零破坏。
+    # 2.5) Export the settle snapshot (ticket t260904-09, closing the KI-017
+    #      engine-side debt): after the commit lands and before lane teardown (while
+    #      .dsh/sessions still exists); a failure only warns and never overturns the
+    #      close-out; with project_key defaulted ("") the function skips internally
+    #      and leaves a note — backward compatible with zero breakage.
     if merge_commit:
         snap_note = _freeze_settle_snapshot(repo, wt, ticket_id, project_key, merge_commit)
         if snap_note:
             warns.append(snap_note)
-    # 3) 泳道清理（仅 ok 路径；-D：squash 后 -d 必拒 not fully merged，实测）
-    #    M1-3（票 t260902-02）：defer_teardown=True 时跳过内联清理，交后续
-    #    teardown_lane activity（merge→archive→teardown 三段收口）——旧历史
-    #    输入缺该字段反序列化回落默认 False = 旧内联清理语义，存量工单零残留。
-    #    清理失败只 warn 不推翻已完成的收口（取舍 d) 幂等、e) 点名环节两条带过来）。
+    # 3) Lane teardown (the ok path only; -D because after a squash -d always refuses
+    #    with "not fully merged", measured)
+    #    M1-3 (ticket t260902-02): with defer_teardown=True the inline cleanup is
+    #    skipped and handed to the later teardown_lane activity (the three-stage
+    #    close-out merge → archive → teardown) — old history inputs missing that
+    #    field deserialize to the default False = the old inline-cleanup semantics,
+    #    so existing tickets leave no residue.
+    #    A cleanup failure only warns and never overturns the completed close-out
+    #    (carrying over trade-offs d) idempotence and e) naming the failing step).
     if not defer_teardown:
         p = _git(["worktree", "remove", "--force", str(wt)], repo, timeout=60)
         if p.returncode != 0:
@@ -2673,26 +3077,34 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
 
 @activity.defn
 async def merge(args: MergeArgs) -> MergeResult:
-    """人审签字通过后的真实合并（KI-006 改 squash 收口：main 一单一提交）。
+    """The real merge after human sign-off (KI-006 switched to a squash close-out: one
+    commit per ticket on main).
 
-    冲突/故障不抛——回执交 workflow 转 blocked 等人处置；失败路径泳道
-    （worktree/分支）不拆不删，留给打回重验。审计真源在 Temporal，main 上
-    不再留 merge commit；泳道内小步 commit 与冲突消解回路不受影响。
-    defer_teardown=True（M1-3 三段收口）：落账后**不内联清理**，交 teardown_lane。
+    Conflicts/faults do not raise — the receipt goes back to the workflow to turn
+    blocked for human handling; on failure the lane (worktree/branch) is not torn down
+    or deleted, left for the bounce and a re-verification. The audit source of truth
+    is Temporal and main no longer keeps a merge commit; the small-step commits inside
+    the lane and the conflict resolution loop are unaffected.
+    defer_teardown=True (the M1-3 three-stage close-out): **no inline cleanup** after
+    booking; teardown_lane takes over.
     """
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
-    # 项目 key（快照归属目录）：查询失败软降级 "" → _squash_merge 内跳过快照留 note
+    # Project key (which directory the snapshot belongs to): a lookup failure
+    # soft-degrades to "" → _squash_merge skips the snapshot internally with a note
     project_key = await _fetch_ticket_project(args.ticket_id)
-    # 票B（票 t260907-06）：单仓=1 作用域（走旧单锚路径，行为不变）；多仓=逐树 squash
-    # 进各自子仓（_squash_merge a–e 故障取舍逐树保住；重入安全——已收口树走其
-    # 「暂存区无可收内容」幂等分支回填，不重复落账；失败树不拆不删等重验）。
+    # Ticket B (t260907-06): a single repo = 1 scope (the old single-anchor path,
+    # unchanged behavior); multi-repo = squash into each child repo in turn
+    # (_squash_merge's a–e fault trade-offs hold per tree; re-entrant — an
+    # already-closed tree takes its "nothing collectable in the index" idempotent
+    # branch and back-fills instead of booking twice; a failed tree is not torn down
+    # or deleted, awaiting re-verification).
     results = []
     for sc in _lane_scopes(wt, args.branch, base_ref="", write_set=None):
         res = _squash_merge(sc["repo"], sc["tree"], sc["branch"], args.ticket_id,
                             defer_teardown=bool(args.defer_teardown), project_key=project_key)
-        if sc["name"]:  # 多仓：error/merge_commit 前缀树名（docstring e 逐树点名）
+        if sc["name"]:  # multi-repo: prefix the tree name onto error/merge_commit (docstring item e, per tree)
             if res.error:
                 res.error = "[%s] %s" % (sc["name"], res.error)
             if res.merge_commit:
@@ -2717,49 +3129,67 @@ async def merge(args: MergeArgs) -> MergeResult:
                        merge_commit=merged, error=errs)
 
 
-# ---------- dev-lane：完结工单数据出仓归档 + 泳道拆除（M1-3，票 t260902-02） ----------
+# ---------- dev-lane: exporting a finished ticket's data + lane teardown (M1-3, ticket t260902-02) ----------
 
-# 三类入档路径（口径真源 = shared.py 文件尾注释；自测按这些常量锁）：
-#   1) <worktree>/.sandbar/stage_*.json  → stages/（stage 结果/结算报告）
-#   2) <worktree>/.sandbar/screenshots/**/*.png → screenshots/（UI 证据，保相对层级）
-#   3) <worktree>/.dsh/sessions/<repo-slug>/* → sessions/（会话落盘事件文件）
-# 排除（记入 manifest.excluded_rules）：agent_*.log、model_patch_*.yml、
-# resume_patch_*.yml、.dsh/profiles/**、一切 .credentials.yaml（凭据绝不入档）。
+# The three archive intake paths (stance source of truth = the block comment at the
+# end of shared.py; the self-tests pin these constants):
+#   1) <worktree>/.sandbar/stage_*.json  → stages/ (stage results / settle reports)
+#   2) <worktree>/.sandbar/screenshots/**/*.png → screenshots/ (UI evidence, relative
+#      layout preserved)
+#   3) <worktree>/.dsh/sessions/<repo-slug>/* → sessions/ (session event files)
+# Excluded (recorded in manifest.excluded_rules): agent_*.log, model_patch_*.yml,
+# resume_patch_*.yml, .dsh/profiles/**, and every .credentials.yaml (credentials are
+# never archived).
 ARCHIVE_EXCLUDED_LOG_RE = re.compile(r"^agent_.*\.log$")
 
 
 class ArchiveManifestError(Exception):
-    """归档 manifest 被篡改（worktree 灰面：file 非 dict / 状态码 / 结构缺失）
+    """The archive manifest was tampered with (a worktree gray area: file not a dict /
+    a status code / missing structure)
 
-    或 manifest 定位失败——**不静默重产不覆盖**（重产即消灭证据），fail-closed
-    上抛，workflow 转 blocked 泳道不拆（取舍清单 A-② 第 5 条）。"""
+    or the manifest could not be located — **never silently regenerate or overwrite**
+    (regenerating destroys evidence); fail-closed raise, the workflow turns blocked
+    and the lane is not torn down (trade-off list A-② item 5)."""
 
 
 @activity.defn
 async def archive_ticket(args: ArchiveArgs) -> ArchiveResult:
-    """完结工单数据出仓归档（sandbar M1-3 关键决策 3 本体）。
+    """Archive a finished ticket's data out of the repo (the body of sandbar M1-3 key
+    decision 3).
 
-    归档真源复制到 <SANDBAR_PROJECTS_DIR>/<key>/data/tickets/<id>/（复制非移动，
-    泳道拆除由 teardown_lane 执行）+ 写 archive.json manifest（schema v1，字段
-    见 shared.ARCHIVE_* 注释）。文件内容按字节级拷贝——结果文件坏 JSON 也原样入档
-    （归档是拷贝真源，不解析内容；消费侧读时才判畸形）。
+    The archive source of truth is copied to
+    <SANDBAR_PROJECTS_DIR>/<key>/data/tickets/<id>/ (copied, not moved — lane teardown
+    is teardown_lane's job) + an archive.json manifest is written (schema v1; fields in
+    the shared.ARCHIVE_* comments). File contents are copied byte for byte — even a
+    result file with broken JSON is archived as-is (the archive is a copy of the truth
+    and does not parse contents; the consumer judges malformed on read).
 
-    故障模式取舍（M1-3 取舍清单）：
-      a) 全路径不抛——**不沿用**：归档失败必须 fail-closed 上抛（归档成功是
-         拆泳道「不丢报告」的前提，软失败=拆了就丢）。
-      b) 损坏 manifest 不许静默重产（灰面，消灭证据）——manifest 已存在且
-         畸形/file 非 dict/状态码 → ArchiveManifestError 上抛，不改现场。
-      c) 幂等可重跑——manifest 合法存在时读 file 清单校验引用（错项自愈重拷
-         + 记 integrity_repaired），Temporal 重试安全。
-      d) 缺失目录/文件为软处理——.sandbar（或粘滞 .suyou）或 .dsh 不存在：系件数为零且  # naming-compat
-         无 archive.json 历史 → 落代理文件不静默放过；.dsh/sessions 缺失 →
-         manifest.absent 记 absent（同 usage 端点降级口径）；单文件拷失败 →
-         fail-closed 上抛（不「半份归档=半丢报告」）。
-      e) 错误点名环节——抛错信息含 stage/screenshots/sessions/manifest 段名
-         与源/目标路径，blocked 文案可检索。
+    Fault-mode trade-offs (the M1-3 trade-off list):
+      a) no path raises — **not carried over**: an archive failure must fail-closed
+         and raise (archive success is the precondition for tearing down the lane
+         without losing reports; a soft failure = tear it down and the reports are
+         gone).
+      b) A damaged manifest must not be silently regenerated (a gray area that
+         destroys evidence) — a manifest already present that is malformed / has a
+         non-dict file / has a status code → raise ArchiveManifestError, the state is
+         untouched.
+      c) Idempotent and rerunnable — when a valid manifest exists, read its file list
+         and verify the references (a wrong entry self-heals by re-copying and is
+         recorded as integrity_repaired); Temporal retries are safe.
+      d) Missing directories/files are handled softly — no .sandbar (or the sticky
+         .suyou) or .dsh:  # naming-compat
+         no archive.json history → write proxy files instead of letting it slide;
+         .dsh/sessions missing → manifest.absent records absent (the same degraded
+         stance as the usage endpoint); a single file copy failure → fail-closed
+         raise (no "half an archive = half the reports lost").
+      e) Errors name the failing segment — the raised message carries the
+         stage/screenshots/sessions/manifest segment names and the source/target
+         paths, so the blocked text is searchable.
 
-    legacy=True（archive-legacy 存量诚实过账）：跳过扫描直接写 manifest
-    {legacy: true, files: [], absent: ["worktree"], reason}——不伪造不补产。
+    legacy=True (archive-legacy, honest accounting for existing tickets): skip the
+    scan and write the manifest
+    {legacy: true, files: [], absent: ["worktree"], reason} — nothing faked, nothing
+    back-filled.
     """
     res = ArchiveResult()
     dst = shared.ticket_data_dir(args.project_key, args.ticket_id)
@@ -2773,7 +3203,8 @@ async def archive_ticket(args: ArchiveArgs) -> ArchiveResult:
         return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
 
     if args.legacy:
-        # 存量诚实过账：泳道已拆除，只落 manifest 本体（files 空、reason 说明）
+        # Honest accounting for an existing ticket: the lane is already gone, so only
+        # the manifest itself lands (files empty, reason explains)
         reason = "归档前泳道已拆除，stage 报告不可恢复（存量工单诚实过账）"
         dst.mkdir(parents=True, exist_ok=True)
         manifest = {"schema": "v1", "ticket_id": args.ticket_id, "legacy": True,
@@ -2788,26 +3219,31 @@ async def archive_ticket(args: ArchiveArgs) -> ArchiveResult:
         activity.logger.info("[%s] legacy 诚实过账归档：%s（%s）", args.ticket_id, dst, reason)
         return res
 
-    # ---- 扫描三类入档 ----
+    # ---- Scan the three archive intake paths ----
     files: List[Dict[str, Any]] = []
     absent: List[str] = []
     staged_specs: List[Tuple[str, str]] = []   # (src, dst_rel)
-    # 泳道协调目录解析（票 t260907-04）：新泳道 .sandbar/、老泳道 .sandbar/ 粘滞——
-    # 归档读侧与引擎写侧同序（shared.resolve_dot_dir 单一真源），不自造第二套判定。
-    p_dot = shared.resolve_dot_dir(src_root)      # 变量名沿用（语义=协调目录根）
-    dot_prefix = p_dot.name                        # ".sandbar" 或 ".sandbar"
+    # Lane coordination directory resolution (ticket t260907-04): new lanes .sandbar/,
+    # old lanes stick to .sandbar/ — the archive read side uses the same order as the
+    # engine write side (shared.resolve_dot_dir is the single source of truth), so no
+    # second judging scheme is invented here.
+    p_dot = shared.resolve_dot_dir(src_root)      # the variable name is kept (semantics = the coordination directory root)
+    dot_prefix = p_dot.name                        # ".sandbar" or the legacy ".suyou" (sticky fallback)
     p_dsh = src_root / ".dsh"
     if not p_dot.is_dir():
-        # 协调目录缺失 → 前两系件数为零：该泳道 stage_*.json 历史上无真档可拷，
-        # 不静默放过——落明牌代理文件，收口受 stage_acceptance 硬项约束（implement
-        # 段必写结果文件），泳道拆除时灰面暴露无处遁形。
+        # Missing coordination directory → the first two families count as zero: this
+        # lane has no real stage_*.json archive to copy, and it is not allowed to
+        # slide — obvious proxy files are written instead. The close-out is bound by
+        # the stage_acceptance hard items (the implement stage must write its result
+        # file), so the gray area is exposed with nowhere to hide at lane teardown.
         files.append({"src": "%s/stage_implement_gen0.json" % dot_prefix, "dst": "stages/stage_implement_gen0.json", "bytes": 0})
         files.append({"src": "%s/agent_create_plan_gen0.log" % dot_prefix, "dst": "stages/agent_create_plan_gen0.log", "bytes": 0})
     if p_dot.is_dir():
-        # stage 结果文件（排除 .log/.yml 由清单规则记 excluded，不扫描入档）
+        # Stage result files (the excluded .log/.yml are handled by the manifest's
+        # exclusion rules, never scanned in)
         for f in sorted(p_dot.glob("stage_*.json")):
             staged_specs.append((str(f), "stages/" + f.name))
-        # UI 截图证据（保 screenshots/ 相对层级）
+        # UI screenshot evidence (the screenshots/ relative layout is preserved)
         for f in sorted(p_dot.glob("screenshots/**/*.png")):
             staged_specs.append((str(f),
                                  "screenshots/" + str(f.relative_to(p_dot / "screenshots"))))
@@ -2819,10 +3255,10 @@ async def archive_ticket(args: ArchiveArgs) -> ArchiveResult:
             absent.append(".dsh/sessions（会话目录不存在）")
         else:
             for f in sorted(p_sess.iterdir()):
-                if f.is_dir():          # repo-slug 子目录
+                if f.is_dir():          # a repo-slug subdirectory
                     for sf in sorted(f.rglob("*")):
                         if sf.is_file() and ARCHIVE_EXCLUDED_LOG_RE.match(sf.name):
-                            continue   # agent spawn 日志（-gen.log）不入档
+                            continue   # agent spawn logs (-gen.log) are never archived
                         if sf.is_file():
                             staged_specs.append(
                                 (str(sf), "sessions/" + sf.relative_to(p_sess).as_posix()))
@@ -2830,8 +3266,9 @@ async def archive_ticket(args: ArchiveArgs) -> ArchiveResult:
                     staged_specs.append((str(f), "sessions/" + f.name))
     manifest_path = dst / "archive.json"
     if manifest_path.is_file():
-        # 幂等重跑：读既有清单校验（b) 损坏 manifest 不许静默重产；c) 合法清单
-        # 校验引用、错项自愈重拷）
+        # Idempotent rerun: read the existing manifest and verify (b) a damaged
+        # manifest must not be silently regenerated; c) a valid manifest has its
+        # references checked and wrong entries self-heal by re-copying)
         try:
             prev = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as e:
@@ -2844,7 +3281,8 @@ async def archive_ticket(args: ArchiveArgs) -> ArchiveResult:
             raise ArchiveManifestError(
                 "manifest 已存在但 file 字段非 dict 清单（灰面，可能已覆写本单归档）"
                 "——不静默重产，人工处置：%s" % manifest_path)
-        # 引用校验 + 自愈：清单里引用的 dst 文件全数还在？不在则重拷
+        # Reference verification + self-heal: are all the dst files the manifest
+        # references still there? If not, copy them again
         for ent in prev_files:
             drel = str(ent.get("dst") or "")
             if not drel:
@@ -2860,10 +3298,12 @@ async def archive_ticket(args: ArchiveArgs) -> ArchiveResult:
         dfile = dst / drel
         dfile.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dfile)
-        # 字节数以 copy2 后 stat 真值记（归档侧真值，不取源端 racy 值）
+        # The byte count is the post-copy2 stat truth (the archive side's truth, not a
+        # racy value taken from the source)
         files.append({"src": os.path.relpath(src, src_root),
                       "dst": drel, "bytes": dfile.stat().st_size})
-    # 代理文件（.sandbar 缺失灰面）：目录落位 = 接管，内容如实写代理说明
+    # Proxy files (the .sandbar-missing gray area): the directory landing = taking
+    # over, and the contents honestly describe the proxy
     for ent in list(files):
         if ent["bytes"] == 0:
             dfile = dst / ent["dst"]
@@ -2891,20 +3331,24 @@ async def archive_ticket(args: ArchiveArgs) -> ArchiveResult:
 
 @activity.defn
 async def teardown_lane(args: MergeArgs) -> MergeResult:
-    """拆泳道（M1-3 三段收口的最后一段；公式原样=M1-2 时的 _squash_merge step 3）。
+    """Tear down the lane (the last stage of M1-3's three-stage close-out; the recipe
+    is verbatim the _squash_merge step 3 from the M1-2 era).
 
-    只在 merge（squash 落账）与 archive_ticket 都成功后调用（workflow 编排保证）；
-    失败不抛——回执 error 点名 worktree/branch 环节，workflow 侧只记 evidence
-    （泳道残留为可回收垃圾：本体已进 archive.json 清单与 data/ 真源，人工清单可扫，
-    不阻塞工单收口）。清理配方幂等（--quit 重复无害；已不存在的工作区/分支 rc=0
-    视为成功）——Temporal 重试安全（沿用取舍 d)）。
+    Called only after both merge (the squash booking) and archive_ticket succeeded
+    (guaranteed by the workflow orchestration); failures do not raise — the receipt's
+    error names the worktree/branch step and the workflow side only records evidence
+    (a lane leftover is recoverable garbage: its contents are already in the
+    archive.json manifest and the data/ source of truth, a human can sweep the
+    manifest, and the ticket close-out is not blocked). The cleanup recipe is
+    idempotent (a repeated --quit is harmless; a nonexistent worktree/branch returning
+    rc=0 counts as success) — Temporal retries are safe (trade-off d) carries over).
     """
     repo = REPO_ROOT
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
     branch = args.branch
-    # 入参防呆同 _squash_merge step 0（branch 来自外部 meta）
+    # Input guard, same as _squash_merge step 0 (branch comes from external meta)
     p = _git(["check-ref-format", "--branch", branch], repo)
     if p.returncode != 0:
         return MergeResult(ok=False, action="failed",
@@ -2921,22 +3365,27 @@ async def teardown_lane(args: MergeArgs) -> MergeResult:
                        merge_commit="", error="；".join(warns))
 
 
-# ---------- dev-lane：审读判据机械化（t260829-07，纯 git/文件零 LLM） ----------
+# ---------- dev-lane: mechanizing the review-gate criteria (t260829-07; pure git/files, zero LLM) ----------
 
-REVIEW_GATE_GIT_TO_SEC = 30   # 单条 git 命令兜底超时
+REVIEW_GATE_GIT_TO_SEC = 30   # per-command git fallback timeout
 
 
 @activity.defn
 async def verify_review_gate(args: ReviewGateArgs) -> ReviewGateResult:
-    """integration_review ok 后的机械复核（dev_lane REVIEW_GATE_PATCH_ID 门内调用）。
+    """Mechanical re-check after integration_review says ok (called inside dev_lane's
+    REVIEW_GATE_PATCH_ID gate).
 
-    报错精确性三态：
-      - git 查询失败 → git_error 非空、lane_commits=-1（禁止用 0 表达「查不了」，
-        否则 git 故障会被误报成「实现未落盘」）；
-      - screenshots 路径存在但异常（是文件/不可读）→ shots_path_error 非空、
-        png_count=-1（不可断言「证据缺失」）；路径不存在 = 没拍，等价 0 png；
-      - 查询成功 → lane_commits / png_count 给真值，dev_lane 侧据判定打回。
-    本 activity 只回数据不做业务判定（闸逻辑在 workflow，确定性编排可测）。"""
+    Three-state error precision:
+      - a git query failure → git_error non-empty and lane_commits=-1 (0 must never
+        mean "couldn't ask", otherwise a git fault gets misreported as "the
+        implementation never landed");
+      - a screenshots path that exists but is broken (a file / unreadable) →
+        shots_path_error non-empty and png_count=-1 (you may not claim "evidence
+        missing"); a nonexistent path = nothing was shot, equivalent to 0 png;
+      - a successful query → lane_commits / png_count carry real values, and dev_lane
+        bounces based on them.
+    This activity only returns data and makes no business judgement (the gate logic
+    lives in the workflow, keeping the deterministic orchestration testable)."""
     res = ReviewGateResult()
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
@@ -2981,7 +3430,7 @@ async def verify_review_gate(args: ReviewGateArgs) -> ReviewGateResult:
         res.shots_path_error = "%s 存在但不是目录" % shots_dir
         res.png_count = -1
     elif not shots_dir.is_dir():
-        res.png_count = 0  # 目录不存在 = 没拍，等价 0 png（可断言缺失）
+        res.png_count = 0  # no directory = nothing was shot, equivalent to 0 png (safe to claim missing)
     else:
         try:
             res.png_count = len([p for p in shots_dir.iterdir()
@@ -2992,17 +3441,21 @@ async def verify_review_gate(args: ReviewGateArgs) -> ReviewGateResult:
     return res
 
 
-# ---------- dev-lane：UI 截图证据（t260828-09，worker 代跑 capture.mjs） ----------
+# ---------- dev-lane: UI screenshot evidence (t260828-09; the worker runs capture.mjs) ----------
 
-# 子进程超时（秒）：capture.mjs 自身对页面还有更细的超时；本值兜死整个截图流程。
-# 注意与 workflow 侧 activity 超时的关系：activity 的 start_to_close 必须**明显大于**
-# 本值（dev_lane.UI_EVIDENCE_TO=180s vs 120s），否则 Temporal 先杀 activity，
-# 下面的子进程超时回收路径永远走不到（防超时叠超时）。
+# Subprocess timeout (seconds): capture.mjs has its own finer-grained page timeouts;
+# this value is the hard cap on the whole screenshot flow.
+# Mind the relationship with the workflow side's activity timeout: the activity's
+# start_to_close must be **clearly larger** than this value
+# (dev_lane.UI_EVIDENCE_TO=180s vs 120s), otherwise Temporal kills the activity first
+# and the subprocess-timeout cleanup path below is never reached (no timeout stacking
+# on timeout).
 UI_CAPTURE_TIMEOUT_SEC = 120
 
 
 def _shot_lines(shots_dir: Path, names: List[str]) -> List[str]:
-    """「名（mtime iso）」清单——activity 侧算好带回（workflow 侧零 IO，不能查盘）。"""
+    """A 「name (mtime iso)」 list — computed here in the activity and carried back
+    (the workflow side does zero IO and cannot touch the disk)."""
     import datetime
     lines = []
     for n in names:
@@ -3018,13 +3471,18 @@ def _shot_lines(shots_dir: Path, names: List[str]) -> List[str]:
 def _archive_shots(args: UiEvidenceArgs, shots_dir: Path, names: List[str]) -> str:
     """截图归档到主树 <REPO_ROOT>/.sandbar/evidence/<ticket_id>/（老主树粘滞 .suyou/evidence）（t260829-02）。  # naming-compat
 
-    泳道 merge 后拆 worktree，report 里 `![](…/tickets/<id>/evidence/<file>)` 引图
-    不死链靠这份归档（host 只读端点读主树归档处，泳道在时兜底读泳道）。归档失败
-    **不抛不翻 ok**——软失败语义与 capture 一致（证据闸仍看泳道目录），返回人话说明
-    由调用方拼进 detail 留痕。"""
+    After the lane merges the worktree is torn down, and this archive is what keeps
+    the `![](…/tickets/<id>/evidence/<file>)` image references in the report from
+    becoming dead links (the host's read-only endpoint reads the main-tree archive,
+    falling back to the lane while it still exists). An archive failure **neither
+    raises nor flips ok** — the soft-failure semantics match capture's (the evidence
+    gate still looks at the lane directory), and the returned plain-language note is
+    appended to the detail by the caller for the record."""
     if not names:
         return ""
-    # env 覆盖（自测指向临时目录，防污染真主树；node 侧 evidence 端点同名 env 互指）
+    # env override (self-tests point at a temp dir so the real main tree stays clean;
+    # the node-side evidence endpoint shares the same env name, they reference each
+    # other)
     base = evidence_base()
     dst = Path(base) / args.ticket_id
     try:
@@ -3037,16 +3495,23 @@ def _archive_shots(args: UiEvidenceArgs, shots_dir: Path, names: List[str]) -> s
 
 
 def _preserve_failed_shots(args: UiEvidenceArgs, shots_dir: Path) -> Tuple[List[str], List[str], str]:
-    """capture 失败时保留尽力视图（票 t260901-02）：已拍 PNG 不再随失败蒸发。
+    """Preserve a best-effort view when capture fails (ticket t260901-02): PNGs that
+    were shot no longer vanish with the failure.
 
-    三方口径兼得：
-      - 机械闸 review_gate_verdict 数泳道 shots_dir on-disk png（shared.py L1308，
-        merge_check 时重查）——归档**成功**的图从泳道 unlink 移出 → png_count 归 0 →
-        闸红灯不变，残缺视图不骗过闸（软失败不假通过）；
-      - 归档到主树 .sandbar/evidence/<ticket>/ → 抽屉可读、worktree 拆后不蒸发；
-      - **按文件粒度**：归档失败的图**留在泳道**（png_count>0 同样闸红，且图可被
-        人工捞回——归档失败还 unlink=图彻底蒸发，正是本单根治的病）。
-    返回（成功归档并移出的文件名， 归档失败留在泳道的文件名， 人话说明）。不抛。"""
+    All three stances are satisfied at once:
+      - the mechanical gate review_gate_verdict counts the on-disk png in the lane's
+        shots_dir (shared.py L1308, re-checked at merge_check) — images that archived
+        **successfully** are unlinked out of the lane → png_count drops to 0 → the
+        gate stays red, so a partial view cannot fool the gate (a soft failure never
+        fakes a pass);
+      - archiving into the main tree's .sandbar/evidence/<ticket>/ → readable from the
+        drawer and safe from the worktree teardown;
+      - **at file granularity**: an image whose archive failed **stays in the lane**
+        (png_count>0 keeps the gate red, and the image can be rescued by hand —
+        unlinking after a failed archive = the image evaporates entirely, which is
+        exactly the disease this ticket cured).
+    Returns (names archived and moved out successfully, names left in the lane because
+    archiving failed, a plain-language note). Never raises."""
     try:
         pngs = sorted(p.name for p in shots_dir.glob("*.png")) if shots_dir.is_dir() else []
     except OSError:
@@ -3070,7 +3535,7 @@ def _preserve_failed_shots(args: UiEvidenceArgs, shots_dir: Path) -> Tuple[List[
             try:
                 (shots_dir / n).unlink()
             except OSError:
-                kept.append(n)  # unlink 失败：图留泳道，闸红不假通过
+                kept.append(n)  # unlink failed: the image stays in the lane, the gate stays red instead of faking a pass
                 continue
             moved.append(n)
         note = "；capture 失败，尽力视图 %d 张已归档主树并移出泳道（机械闸维持红灯）" % len(moved) if moved else ""
@@ -3078,18 +3543,21 @@ def _preserve_failed_shots(args: UiEvidenceArgs, shots_dir: Path) -> Tuple[List[
             note += "；归档/移出失败 %d 张留泳道（可人工捞回）：%s" % (len(kept), "、".join(kept))
         return moved, kept, note
     except OSError as e:
-        # 归档目录级失败：全部留泳道（闸红 + 可捞回，安全侧）
+        # A directory-level archive failure: everything stays in the lane (gate red +
+        # rescuable — the safe side)
         return [], pngs, "；尽力视图归档失败（留泳道）：%s: %s" % (type(e).__name__, e)
 
 
 def _ui_capture_stub(args: UiEvidenceArgs, shots_dir: Path) -> UiEvidenceResult:
-    """SANDBAR_UI_CAPTURE_STUB=1：自写两张假 png 即返回（不起 node/浏览器，零依赖）。
-    仿 SANDBAR_AGENT_STUB（_run_agent_stage_impl 同款先例），供自测/干跑。"""
+    """SANDBAR_UI_CAPTURE_STUB=1: write two fake pngs and return (no node/browser,
+    zero dependencies).
+    Modeled on SANDBAR_AGENT_STUB (the same precedent as _run_agent_stage_impl), for
+    self-tests / dry runs."""
     shots_dir.mkdir(parents=True, exist_ok=True)
     names = []
     for name in ("console-default.png", "console-chat.png"):
         p = shots_dir / name
-        # 最小合法 PNG（1x1 像素），glob("*.png") 可命中
+        # The smallest valid PNG (1x1 pixels), so glob("*.png") can hit it
         p.write_bytes(bytes.fromhex(
             "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
             "1f15c4890000000a49444154789c63000100000500010d0a2db4"
@@ -3102,15 +3570,18 @@ def _ui_capture_stub(args: UiEvidenceArgs, shots_dir: Path) -> UiEvidenceResult:
 
 @activity.defn
 async def ui_evidence_decl(args: UiEvidenceDeclArgs) -> UiEvidenceDeclResult:
-    """ui_evidence 声明预载（t260904-18 KI-050 门③）：读泳道根 verify.yaml 的
-    ui_evidence 声明，回三态（ok/absent/malformed）交 workflow 落 meta
-    （读盘在 activity、workflow 只读 meta=重放安全）。失败不抛：读不了=
-    absent 态（消费点按「声明缺省」口径兜底——声明读取失败≠项目未声明）。"""
+    """Preload the ui_evidence declaration (t260904-18, KI-050 gate ③): read the
+    ui_evidence declaration from the lane root's verify.yaml and return the three
+    states (ok/absent/malformed) for the workflow to store in meta (the disk read
+    happens in the activity while the workflow only reads meta = replay safe).
+    Failures don't raise: unreadable = the absent state (the consumer falls back on
+    the "declaration absent" stance — a declaration that fails to read is not the same
+    as a project that never declared)."""
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
     lane_repo = _lane_repo_root(wt)
-    mode, dirs, note = load_ui_evidence(wt)  # 声明读泳道根（verify_lane 同口径）
+    mode, dirs, note = load_ui_evidence(wt)  # the declaration is read from the lane root (same stance as verify_lane)
     activity.logger.info("[%s] ui_evidence 声明：%s（%d 目录）%s",
                          args.ticket_id, mode, len(dirs), note)
     return UiEvidenceDeclResult(mode=mode, dirs=dirs, note=note)
@@ -3118,35 +3589,49 @@ async def ui_evidence_decl(args: UiEvidenceDeclArgs) -> UiEvidenceDeclResult:
 
 @activity.defn
 async def ui_changed_paths(args: UiChangedPathsArgs) -> UiChangedPathsResult:
-    """UI 票判定换 diff 源（KI-044 根修，t260904-13）：按泳道分支**实际改动路径**
-    判是不是 UI 票——`git diff --name-only <merge-base>...branch` × UI_WRITE_PREFIXES，
-    返回命中的 UI 路径清单。用户拍板口径（260904）：ui_evidence 段调用一次定「拍不拍」，
-    merge_check 3.6 再算一次定「要不要证据」——两处调用同一源（_ui_diff_paths，
-    谓词入口只有 shared.match_ui_paths 一处），两时点 diff 变化由 3.6 fail-closed 兜底。
+    """UI-ticket detection switched to a diff source (KI-044 root fix, t260904-13):
+    decide whether this is a UI ticket from the lane branch's **actually changed
+    paths** — `git diff --name-only <merge-base>...branch` × UI_WRITE_PREFIXES — and
+    return the UI paths that hit. The user's ruling stance (260904): the ui_evidence
+    stage calls once to decide "shoot or not", and merge_check 3.6 computes again to
+    decide "is evidence required" — both call sites share one source (_ui_diff_paths,
+    with match_ui_paths as the only predicate entry), and a diff change between the
+    two points in time is caught by 3.6's fail-closed backstop.
 
-    基线用 _merge_base_ref（本体复用，故障行为自动全带：rc≠0 fail-closed / 多行
-    畸形取首行留痕 / 空输出判失败 / 不回落 main 字面——t260901-18/t260903-11 同族锚）。
-    fail-closed：merge-base 或 diff 任一失败 → ui_paths 空 + detail 带错误，调用方
-    按「UI 票待证」处理（拍、闸兜底），不静默 SKIP。
-    子进程口径同 _git/_diff_stat 族现状：同步 run + 有界 timeout（超时异常由 Temporal
-    重试语义接），取消即时性属家族既有债，本票不扩大。"""
+    The baseline uses _merge_base_ref (the real thing, reused, so all its failure
+    behavior comes along automatically: rc≠0 fail-closed / multi-line malformed keeps
+    the first line with a trace / empty output = failure / never falls back to a
+    literal main — the t260901-18/t260903-11 family anchors).
+    Fail-closed: a failure of merge-base or diff → empty ui_paths + an error in the
+    detail, and the caller treats it as "UI ticket, evidence pending" (shoot, gate as
+    backstop), never a silent SKIP.
+    The subprocess follows the _git/_diff_stat family as-is: a synchronous run + a
+    bounded timeout (a timeout raise is handled by Temporal's retry semantics);
+    cancellation immediacy is the family's existing debt and is not widened by this
+    ticket."""
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
     lane_repo = _lane_repo_root(wt)
-    # 判定口径=项目声明（泳道根 verify.yaml ui_evidence.dirs，票 t260904-18 门③）。
-    # malformed → fail-closed（ui_paths 空 + detail 带错误，调用方按「UI 票待证」处理）；
-    # absent → 口径空（任何 diff 都不命中=非 UI 票，不拍——无声明项目无截图闸，
-    # detail 留痕可见）。
-    decl_mode, decl_dirs, decl_note = load_ui_evidence(wt)  # 声明读泳道根（同上口径）
+    # The judgement stance = the project declaration (the lane root's verify.yaml
+    # ui_evidence.dirs, ticket t260904-18 gate ③).
+    # malformed → fail-closed (empty ui_paths + an error in the detail; the caller
+    # treats it as "UI ticket, evidence pending");
+    # absent → an empty stance (no diff can hit = not a UI ticket, don't shoot — a
+    # project without a declaration has no screenshot gate, and the detail leaves a
+    # visible trace).
+    decl_mode, decl_dirs, decl_note = load_ui_evidence(wt)  # the declaration is read from the lane root (same stance as above)
     if decl_mode == "malformed":
         detail = "ui_changed_paths fail-closed：ui_evidence 声明畸形：%s" % decl_note
         activity.logger.info("[%s] %s", args.ticket_id, detail)
         return UiChangedPathsResult(ui_paths=[], detail=detail)
     decl_suffix = "" if decl_mode == "ok" else "；ui_evidence 未声明（截图闸按项目声明缺席）"
-    # 票B（票 t260907-06）：单仓=旧单锚一路（行为不变）；多仓=逐树 diff、命中路径加回
-    # 仓前缀成项目根相对后再并集（与声明 dirs 基线同锚，match_ui_paths 单点不变）。
-    # 任一树 diff/基线故障 → fail-closed 空（调用方按「UI 票待证」处理，同族语义）。
+    # Ticket B (t260907-06): a single repo = the old single-anchor path (unchanged
+    # behavior); multi-repo = diff per tree and re-add the repo prefix onto hit paths
+    # to make them project-root-relative before unioning (anchored to the same
+    # baseline as the declared dirs; match_ui_paths stays the single point).
+    # A diff/baseline failure on any tree → fail-closed empty (the caller treats it
+    # as "UI ticket, evidence pending", the same family semantics).
     scopes = _lane_scopes(wt, args.branch, base_ref="", write_set=None)
     ui_paths: List[str] = []
     for sc in scopes:
@@ -3180,17 +3665,22 @@ async def prepare_ui_evidence(args: UiEvidenceArgs) -> UiEvidenceResult:
     """UI 票截图证据（t260828-09）：worker（无沙箱）代跑 ui-check/capture.mjs，
     截控制台默认页 + chat 态两张图落 <worktree>/.sandbar/screenshots/（老泳道 .suyou 粘滞）。  # naming-compat
 
-    只读红线：capture.mjs 只 GET 打开控制台页面并做导航点击，不提交表单、
-    不发工单、不碰任何端口；env SANDBAR_CONSOLE_URL 指向被测环境（缺省 3099，
-    测试环境 3199）。
+    Read-only red line: capture.mjs only GETs the console page open and does
+    navigation clicks — it never submits a form, never files a ticket, never touches
+    any port; env SANDBAR_CONSOLE_URL points at the environment under test (default
+    3099, test environment 3199).
 
-    失败**不抛**：依赖缺失/浏览器探测不到/超时/非零退出一律回执 ok=False，
-    阻塞语义交给 merge_check 证据闸（UI 票无 png → 红灯），本步不拦主链。
+    Failure **does not raise**: a missing dependency / no browser found / timeout /
+    nonzero exit all return ok=False; the blocking semantics belong to merge_check's
+    evidence gate (a UI ticket with no png → red light), and this step never blocks
+    the main chain.
 
-    子进程终态回收（对照 agent spawn 通路 _run_agent_stage_impl）：
-      正常退出 → 读回执；非零退出 → ok=False 回执；超时 → kill + ok=False；
-      activity 取消（asyncio.CancelledError）→ kill + 再抛（Temporal 语义）；
-      finally 兜底 proc 存活即 terminate/kill，不留孤儿浏览器/node 进程。"""
+    Subprocess terminal-state handling (mirroring the agent spawn path
+    _run_agent_stage_impl):
+      normal exit → read the receipt; nonzero exit → ok=False receipt; timeout → kill
+      + ok=False; activity cancellation (asyncio.CancelledError) → kill + re-raise
+      (Temporal semantics); the finally block terminate/kill anything still alive so
+      no orphan browser/node process is left behind."""
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
@@ -3201,12 +3691,18 @@ async def prepare_ui_evidence(args: UiEvidenceArgs) -> UiEvidenceResult:
         activity.logger.info("[%s] ui_evidence stub：%s", args.ticket_id, res.detail)
         return res
 
-    # 票 t260829-02：capture 固定从**主树**跑（playwright-core 等 node_modules 只在主树
-    # 装过，泳道 checkout 没有也不装——票 t260829-01 实测泳道内跑直接软失败）。输出目录
-    # --out 与 cwd 仍是泳道（审读/merge_check 证据闸口径不变）。
-    # 票 t260829-07：优先 capture-lane.mjs 一键隔离台（自动挑端口/boot/拆台，不依赖
-    # 外部控制台）；缺失或失败软降级回退直跑 capture.mjs（旧环境仍可用），降级
-    # 路径写 detail 不静默（自举：本票 merge 前即走旧逻辑软失败+人可手工补）。
+    # Ticket t260829-02: capture always runs from the **main tree** (the playwright-core
+    # node_modules are installed only in the main tree; a lane checkout doesn't have
+    # them and doesn't install them — running inside the lane soft-failed outright in
+    # ticket t260829-01). The --out directory and the cwd stay the lane (the review /
+    # merge_check evidence-gate stance is unchanged).
+    # Ticket t260829-07: prefer the capture-lane.mjs one-shot isolated bench (it picks
+    # a port / boots / tears down by itself, with no dependency on an external
+    # console); a missing script or a failure soft-degrades back to running
+    # capture.mjs directly (old environments keep working), and the degradation is
+    # written into the detail rather than kept silent (bootstrapping: before this
+    # ticket's merge the old logic's soft failure was the norm and a human could patch
+    # by hand).
     ui_check_dir = REPO_ROOT / "server" / "ui-check"
     lane_script = ui_check_dir / "capture-lane.mjs"
     script = REPO_ROOT / "server" / "ui-check" / "capture.mjs"
@@ -3221,7 +3717,7 @@ async def prepare_ui_evidence(args: UiEvidenceArgs) -> UiEvidenceResult:
     candidates.append((["node", str(script), "--url", env["SANDBAR_CONSOLE_URL"],
                         "--out", str(shots_dir)], "capture.mjs（直连 %s）" % env["SANDBAR_CONSOLE_URL"]))
     detail_tail = ""
-    detail_parts: List[str] = []   # 票 t260831-02：逐候选累加，不再相互覆盖
+    detail_parts: List[str] = []   # ticket t260831-02: accumulate per candidate instead of overwriting each other
     for i, (cmd, label) in enumerate(candidates):
         proc = None
         try:
@@ -3237,7 +3733,7 @@ async def prepare_ui_evidence(args: UiEvidenceArgs) -> UiEvidenceResult:
             except asyncio.CancelledError:
                 proc.kill()
                 await proc.wait()
-                raise  # activity 取消：清理后按 Temporal 语义上抛
+                raise  # activity cancelled: clean up, then re-raise per Temporal semantics
             else:
                 out = (out_b or b"").decode("utf-8", "replace").strip()
                 err = (err_b or b"").decode("utf-8", "replace").strip()
@@ -3249,7 +3745,8 @@ async def prepare_ui_evidence(args: UiEvidenceArgs) -> UiEvidenceResult:
                         run_fail = "%s 报成功但 %s 无 png：%s" % (label, UI_EVIDENCE_DIR, out[-300:])
             if not run_fail:
                 activity.logger.info("[%s] ui_evidence（%s）：%s", args.ticket_id, label, "、".join(pngs))
-                # 插件面过渡镜像（退役账#5）：插件/旧链路读侧仍看 .sandbar/screenshots。
+                # Transitional mirror for the plugin face (retirement debt #5): the
+                # plugin / old-chain read side still looks at .sandbar/screenshots.
                 for _n in pngs:
                     try:
                         mirror_to_legacy(wt, Path("screenshots") / _n)
@@ -3259,11 +3756,11 @@ async def prepare_ui_evidence(args: UiEvidenceArgs) -> UiEvidenceResult:
                 return UiEvidenceResult(ok=True, shots=pngs, shot_lines=_shot_lines(shots_dir, pngs),
                                         detail="%s：截图 %d 张：%s%s" % (label, len(pngs), "、".join(pngs), note))
             detail_tail = run_fail
-        except Exception as e:  # 基础设施故障（node 不在/权限等）：回执不抛，闸来红灯
+        except Exception as e:  # infrastructure fault (node missing / permissions / …): the receipt doesn't raise, the gate goes red
             detail_tail = "%s 启动失败：%s: %s" % (label, type(e).__name__, e)
         finally:
             if proc is not None and proc.returncode is None:
-                proc.terminate()  # 兜底：任何未走到回收的路径不留孤儿进程
+                proc.terminate()  # backstop: no path that missed reaping leaves an orphan process
                 try:
                     await asyncio.wait_for(proc.wait(), timeout=10)
                 except asyncio.TimeoutError:
@@ -3272,37 +3769,51 @@ async def prepare_ui_evidence(args: UiEvidenceArgs) -> UiEvidenceResult:
         if i + 1 < len(candidates):
             activity.logger.info("[%s] ui_evidence %s 失败，降级下一候选：%s",
                                  args.ticket_id, label, detail_tail[:200])
-    # 尽力视图保留（票 t260901-02）：候选全败后，已拍 PNG 归档主树 + 成功归档的移出
-    # 泳道（闸 png_count 归 0 维持红灯），归档失败的留泳道可人工捞回。
+    # Best-effort view preservation (ticket t260901-02): after every candidate fails,
+    # PNGs already shot are archived to the main tree and the successfully archived
+    # ones are moved out of the lane (png_count drops to 0 so the gate stays red);
+    # images whose archive failed stay in the lane where a human can rescue them.
     moved, _kept, keep_note = _preserve_failed_shots(args, shots_dir)
     return UiEvidenceResult(ok=False, shots=moved, shot_lines=_shot_lines(shots_dir, moved),
                             detail="；".join(detail_parts) + keep_note)
 
 
-# worker 注册清单：每 stage 名一个 activity + 人门准备 + 工作区准备（M16 首个 activity）
-# + dev-lane 的 merge_check/merge（260824：合并前程序化检查与人审后的真实合并）
-# + 冲突消解两活动（t260826-01：worker 代跑 merge 留现场 / 代落盘合并提交）
-# + UI 截图证据（t260828-09：worker 代跑 capture.mjs，仅 UI 票由 workflow 调用）
+# Worker registration list: one activity per stage name + human-gate preparation +
+# workspace preparation (M16's first activity)
+# + dev-lane's merge_check/merge (260824: the programmatic pre-merge checks and the
+# real merge after human sign-off)
+# + the two conflict-resolution activities (t260826-01: the worker runs the merge and
+# leaves the state / settles the merge commit)
+# + UI screenshot evidence (t260828-09: the worker runs capture.mjs; only UI tickets
+# invoke it from the workflow)
 AGENT_STAGE_ACTIVITIES = [_make_stage_activity(s) for s in AGENT_STAGE_IDS]
 
-# ---- 集成测试机制（t260829-07 后续）：机械测试步 / 统一落盘 / 仲裁 / 验收走查 ----
+# ---- Integration-test machinery (follow-on to t260829-07): the mechanical test step / unified settling / arbitration / acceptance walkthrough ----
 
 @activity.defn
 async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
-    """汇合点统一代落盘（并行分叉期 implement/design 都 skip_settle，此处一次收口）：
-    实现改动 + 测试集（integration/）同一 commit 落泳道分支。幂等：工作区干净则 no-op。
+    """Unified worker-side settle at the join point (during the parallel fork both
+    implement and design run with skip_settle; this settles once here): the
+    implementation changes and the test set (integration/) land in one commit on the
+    lane branch. Idempotent: a clean workspace is a no-op.
 
-    修正①（票 t260901-16）：相对 worktree 路径按 REPO_ROOT 锚定（同 verify_review_gate /
-    run_integration_tests 口径）——此前按 worker 进程 cwd 解析，_is_worktree_of
-    匹配不上已注册 worktree。
-    修正②（票 t260901-16）：不匹配时不许静默回退主树——回退=「该落盘的泳道上什么
-    都没做还报干净」（主树本来就干净 → no-op 假绿，并行分叉票产物全漏落盘，实锤），
-    比报错更糟。改为 raise，交 Temporal 重试/上层失败可见。"""
+    Fix ① (ticket t260901-16): worktree-relative paths are anchored at REPO_ROOT (the
+    same stance as verify_review_gate / run_integration_tests) — they used to be
+    resolved against the worker process's cwd, which never matched a registered
+    worktree in _is_worktree_of.
+    Fix ② (ticket t260901-16): on a mismatch, silently falling back to the main tree is
+    forbidden — falling back = "the lane that had something to settle did nothing and
+    still reported clean" (the main tree is clean to begin with → a no-op fake green,
+    and every artifact of a parallel-fork ticket leaked without landing; proven in the
+    field), which is worse than an error. It now raises, leaving Temporal to retry and
+    the failure visible upstream."""
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
-    # 票B（t260907-06）：单仓=1 作用域（行为不变）；多仓=逐树校验归属+逐树代落盘。
-    # 每树都拒绝回退主树（静默回退=该落盘的泳道什么都不落还报干净，t260901-16 实锤）。
+    # Ticket B (t260907-06): a single repo = 1 scope (unchanged behavior); multi-repo =
+    # verify ownership per tree and settle per tree. Every tree refuses to fall back to
+    # the main tree (a silent fallback = the lane with something to settle lands
+    # nothing and reports clean; proven in t260901-16).
     scopes = _lane_scopes(wt, write_set=None)
     notes: List[str] = []
     commits = -1
@@ -3327,20 +3838,28 @@ BATCH_TIMEOUT_SEC = int(os.environ.get("SANDBAR_INTEG_BATCH_TIMEOUT_SEC") or 540
 
 
 async def _run_scenarios(wt: Path, ticket_id: str) -> IntegrationRunResult:
-    """薄壳（宿主令 t260902 薄壳化）：声明读取/命令执行/契约解析全在 verify_lane lane=integ
-    （单份实现+单份解析器），本函数只下单+把工具 JSON 翻译成 IntegrationRunResult
-    （字段口径不变：ran/passed/failed/details[{name,cmd,exit,output_tail}]，arbitrate 无感）。"""
-    # 泳道工具链副本优先（票 t260904-18）：integ 道以**泳道为被检对象**，
-    # 装载泳道声明必须用泳道自身工具链——worker 侧（主树）副本落后于泳道时（声明先行
-    # 的票合并前是常态），主树 verify_lane 白名单不认泳道新顶层键 → 整道 fail-closed
-    # ran=0。与 merge_check verify 项（:1723 泳道副本优先、worker 副本仅跨项目无引擎
-    # 布局时回落）同一原则——此前 integ 薄壳漏接该先例=两道机械闸行为不一致。
+    """A thin shell (thinned by host order t260902): declaration reading, command
+    execution and contract parsing all live in verify_lane lane=integ (one
+    implementation + one parser); this function only places the order and translates
+    the tool's JSON into an IntegrationRunResult (the field stance is unchanged:
+    ran/passed/failed/details[{name,cmd,exit,output_tail}], invisible to arbitrate)."""
+    # The lane's own toolchain copy wins (ticket t260904-18): the integ lane treats
+    # **the lane as the thing under test**, so loading the lane's declaration must use
+    # the lane's own toolchain — when the worker-side (main tree) copy lags behind the
+    # lane (the normal state before a declaration-first ticket merges), the main
+    # tree's verify_lane whitelist does not recognize the lane's new top-level keys →
+    # the whole lane fails closed with ran=0. The same principle as merge_check's
+    # verify item (:1723 prefers the lane copy, falling back to the worker copy only
+    # cross-project without an engine layout) — the integ shell had missed that
+    # precedent, which meant the two mechanical gates behaved differently.
     lane_admin = wt / "server" / "admin.py"
     admin = str(lane_admin if lane_admin.is_file() else
                 Path(__file__).resolve().parents[1] / "admin.py")
-    # t260903-09 实雷：async 活动里禁止阻塞 subprocess.run——曾把 worker 事件循环
-    # 冻满整套件时长，查询全体 8s 超时（诊断笔记 notes/diag-query-starvation.md）。
-    # 全 async 化：create_subprocess + wait_for，超时先杀再报。
+    # A real near-miss from t260903-09: blocking subprocess.run is forbidden inside an
+    # async activity — it once froze the worker's event loop for the entire scenario
+    # duration and every query timed out at 8s (diagnostic note
+    # notes/diag-query-starvation.md).
+    # Fully async: create_subprocess + wait_for; on timeout, kill first, then report.
     p = await asyncio.create_subprocess_exec(
         "python3", admin, "call", "verify_lane",
         json.dumps({"lane": "integ", "path": str(wt)}),
@@ -3365,7 +3884,7 @@ async def _run_scenarios(wt: Path, ticket_id: str) -> IntegrationRunResult:
     out.ran = int(res.get("ran") or 0)
     out.passed = int(res.get("pass") or 0)
     out.failed = int(res.get("fail") or 0)
-    out.env_fail = int(res.get("env_fail") or 0)   # 可缺席读法兼容旧闸
+    out.env_fail = int(res.get("env_fail") or 0)   # the may-be-absent reading keeps the old gate compatible
     out.details = [{"name": s.get("name", ""), "cmd": "", "exit": int(s.get("exit") or 0),
                     "output_tail": s.get("output_tail") or ""}
                    for s in (res.get("scenarios") or [])]
@@ -3376,8 +3895,10 @@ async def _run_scenarios(wt: Path, ticket_id: str) -> IntegrationRunResult:
 
 @activity.defn
 async def run_integration_tests(args: IntegrationRunArgs) -> IntegrationRunResult:
-    """机械集成测试步（t260829-07 后续）：跑项目声明场景执行器（integration/run_scenarios.py），
-    纯 subprocess 零 LLM。结果交 arbitrate（integration）三态判定——不在此判对错。"""
+    """Mechanical integration-test step (follow-on to t260829-07): runs the project's
+    declared scenario executor (integration/run_scenarios.py), pure subprocess with
+    zero LLM. The result goes to arbitrate (integration) for its three-state verdict —
+    right and wrong are not judged here."""
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
@@ -3385,18 +3906,24 @@ async def run_integration_tests(args: IntegrationRunArgs) -> IntegrationRunResul
 
 
 def _stub_stage_shortcut(args: AgentStageArgs, settle_on_cache: bool = False) -> Optional[StageResult]:
-    """integration 自定义段的 stub/缓存短路（arbitrate/acceptance_walkthrough 补齐）。
+    """Stub/cache short-circuit for the integration-specific stages (filling the gap in
+    arbitrate/acceptance_walkthrough).
 
-    通用 agent 段在 _run_agent_stage_impl 里有前两道前置：结果文件幂等返回 +
-    SANDBAR_AGENT_STUB=1 自写 stub 结果即返回（模块头注释的契约承诺：「stub 时
-    activity 自写结果文件即返回，不起 agent 进程」）。这两个 integration 自定义段
-    绕开了通用实现——260909 实测 stub worker 下验收走查段仍真起 capture-lane +
-    真 agent 进程，外部 rework 信号只能等当前 activity 落地才被 workflow 消费，
-    一笔场景被拖出 ~590s 无谓等待。此处补齐同款短路：
-    - 结果文件已存在=幂等返回（scene 预置 verdict 的消费路径不变；settle_on_cache
-      由调用方按本段语义决定，arbitrate 非并行分叉期需代落盘）；
-    - stub 模式缺文件=自写 stub 结果即返回——summary 恒无 verdict= 标记，与通用
-      stub 一致（scene D 的仲裁格式轮上限触发器语义不漂移）。
+    The generic agent stage has two pre-checks in _run_agent_stage_impl: an idempotent
+    return when the result file exists + with SANDBAR_AGENT_STUB=1 it writes its own
+    stub result and returns (the contract promised in the module header comment: "in
+    stub mode the activity writes its own result file and returns, no agent process").
+    These two integration-specific stages bypassed the generic implementation —
+    measured on 260909 with a stub worker, the acceptance walkthrough stage still
+    really launched capture-lane plus a real agent process, an external rework signal
+    was only consumed by the workflow once the current activity finished, and one
+    scenario dragged out ~590s of pointless waiting. This adds the same short-circuit:
+    - result file present = idempotent return (the path consuming a scene's preset
+      verdict is unchanged; settle_on_cache is decided by the caller per this stage's
+      semantics — arbitrate must settle when not in the parallel fork);
+    - stub mode with no file = write our own stub result and return — the summary never
+      carries a verdict= marker, matching the generic stub (so scene D's
+      arbitration-format round-cap trigger semantics do not drift).
     """
     rfile = Path(args.result_file)
     if rfile.is_file():
@@ -3431,16 +3958,20 @@ def _stub_stage_shortcut(args: AgentStageArgs, settle_on_cache: bool = False) ->
 
 @activity.defn
 async def arbitrate(args: AgentStageArgs) -> StageResult:
-    """仲裁步（t260829-07 后续）：integration 读机械测试结果，三态判定——
-    pass / tests-fault（自己迭代测试集，改动随本步 settle 落盘）/ code-fault
-    （集成测试报告在 report，打回 implement）。prompt 由 workflow 组好
-    （含机械测试结果 JSON），spawn 复用 integration 会话（上下文连续）。
-    verdict 编码契约：summary 首个 ``verdict=<值>`` 标记（FLOW_BRIEF 明示）。"""
+    """The arbitration step (follow-on to t260829-07): integration reads the mechanical
+    test results and issues a three-state verdict — pass / tests-fault (iterate the
+    test set itself, the changes landing with this step's settle) / code-fault (the
+    integration test report goes into report, bounce back to implement). The prompt is
+    assembled by the workflow (including the mechanical test result JSON), and the
+    spawn reuses the integration session (continuous context).
+    Verdict encoding contract: the first ``verdict=<value>`` marker in the summary
+    (stated explicitly in FLOW_BRIEF)."""
     rfile = Path(args.result_file)
     rfile.parent.mkdir(parents=True, exist_ok=True)
-    # stub/缓存短路（260909：通用段同款两道前置补齐——此前 stub worker 下本段
-    # 真起 agent 进程，外部信号要等 activity 落地才被 workflow 消费，一笔场景
-    # 被拖出 ~10 分钟无谓等待）。
+    # Stub/cache short-circuit (260909: the same two pre-checks as the generic stage,
+    # now added — with a stub worker this stage used to really launch an agent process,
+    # an external signal waited for the activity to finish before the workflow consumed
+    # it, and one scenario dragged out ~10 minutes of pointless waiting).
     hit = _stub_stage_shortcut(args, settle_on_cache=not args.skip_settle)
     if hit is not None:
         return hit
@@ -3455,7 +3986,7 @@ async def arbitrate(args: AgentStageArgs) -> StageResult:
                          args.ticket_id, args.gen, str(cwd))
     proc = subprocess.Popen(cmd, cwd=str(cwd), env=env,
                             stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                            start_new_session=True)  # KI-009：独立进程组，见 _reap_agent_proc
+                            start_new_session=True)  # KI-009: its own process group, see _reap_agent_proc
     polls = 0
     try:
         while True:
@@ -3463,11 +3994,15 @@ async def arbitrate(args: AgentStageArgs) -> StageResult:
                 res = _read_result(rfile)
                 if res is not None:
                     _patch_result_prompt(rfile, args.prompt)
-                    # KI-009：settle 之前先 reap——迟写文件收干净再落盘（竞态窗源头）
+                    # KI-009: reap before settling — collect the late-written files
+                    # cleanly before landing them (the source of the race window)
                     _reap_agent_proc(proc, args.ticket_id, "arbitrate")
-                    # tests-fault 的测试集迭代随本步 settle 落盘（提交的代码资产）。
-                    # 票 t260903-02：并行分叉期 skip_settle=True 跳过（防止把走查边
-                    # 半成品一起代落盘），统一落盘由 workflow 的单点 settle_lane 承担。
+                    # In the tests-fault case the test-set iteration lands with this
+                    # step's settle (committed code assets).
+                    # Ticket t260903-02: during the parallel fork skip_settle=True skips
+                    # it (so the walkthrough edge's half-finished work is not settled
+                    # along with it); the unified settle is handled by the workflow's
+                    # single settle_lane.
                     if not args.skip_settle:
                         note = _settle_worktree_lane(cwd, args.ticket_id, args.stage_id, args.gen)
                         if note:
@@ -3484,20 +4019,26 @@ async def arbitrate(args: AgentStageArgs) -> StageResult:
                 raise RuntimeError("等仲裁结果超时（%d 轮询）：%s" % (polls, rfile))
             await asyncio.sleep(POLL_SEC)
     finally:
-        # KI-009：兜底回收升级为组粒度（原 terminate+wait+kill 只收直接子进程）
+        # KI-009: the backstop reap is upgraded to group granularity (the old
+        # terminate+wait+kill only reaped the direct child)
         _reap_agent_proc(proc, args.ticket_id, "arbitrate")
 
 
-# ---- doc-lifecycle 票②（票 t260905-01）：收口两问——沉淀触发器+反向同步闸 ----
-# 轻路载体：结果文件新增 doc_sediment / doc_conflicts 字段（_read_result 丢弃未知键的
-# 既有行为不动），三个纯函数读取→校验→登记→拼装回 StageResult 既有六字段，零
-# workflow 改动。纪律：答与不答都不阻塞（res.status 一律不改，未答也是一条留痕）；
-# failed 轮同样拼装登记（走查打回轮发现的文档矛盾同样是真实债条目，跨轮重复由
-# 登记去重键挡）。债登记转正纪律：人审签字前由 merge 执行人转正进
-# notes/debts/known-issues.md 或 docs 债册——回执小节尾句把这句话带给人审
-# （.sandbar/ 随 teardown_lane 销毁，回执必须携带条目本体全量而非只有路径）。
+# ---- doc-lifecycle ticket ② (t260905-01): the two close-out questions — a sedimentation trigger plus a reverse-sync gate ----
+# Light-path carrier: the result file gains doc_sediment / doc_conflicts fields
+# (_read_result's existing behavior of dropping unknown keys is untouched), and three
+# pure functions read → validate → register → assemble back into StageResult's
+# existing six fields, with zero workflow changes. Discipline: answering or not never
+# blocks (res.status is never changed; an unanswered question is still a record);
+# failed rounds are assembled and registered too (a docs contradiction found in a
+# bounce round is just as real a debt entry, and cross-round duplicates are stopped by
+# the registration dedup key). Debt-promotion discipline: before human sign-off the
+# merge executor promotes the entries into notes/debts/known-issues.md or the docs
+# debt ledger — the receipt section's closing sentence carries that instruction to the
+# human reviewer (.sandbar/ is destroyed by teardown_lane, so the receipt must carry
+# the entries themselves in full, not just paths).
 
-DOC_GATE_DIRNAME = ".sandbar/doc-gate"  # 新泳道缺省；粘滞由使用处 resolve（见 lane_dot_path）
+DOC_GATE_DIRNAME = ".sandbar/doc-gate"  # new-lane default; the sticky form is resolved where it is used (see lane_dot_path)
 PENDING_DOC_SYNC_NAME = "pending-doc-sync.jsonl"
 DOC_GATE_TRANSFER_NOTE = (
     "债条目转正：人审签字前，由 merge 执行人将上述条目登记进 "
@@ -3505,14 +4046,17 @@ DOC_GATE_TRANSFER_NOTE = (
 
 
 def parse_doc_gate(raw: Any) -> Dict[str, Any]:
-    """结果文件原始 dict → 两问判读（零 IO 全容错；畸形=留痕降级不抛）。
+    """The result file's raw dict → a judgement on both questions (zero IO, fully
+    tolerant; malformed = record and degrade, never raise).
 
-    返回键（absent 按问拆，回执分别留痕两问各自的已答/未答）：
-      sediment            = {want: bool, target: str, reason: str} 或 None（未答/畸形）
-      sediment_absent     = bool（键不在场）
-      sediment_malformed  = str（畸形原因；合格时为空）
-      conflicts / conflicts_absent / conflicts_malformed 同构；
-      conflicts           = [{doc, claim, actual}]（只含三要素齐全的条目）
+    Returned keys (absent is tracked per question so the receipt can record each
+    question's answered/unanswered separately):
+      sediment            = {want: bool, target: str, reason: str} or None (unanswered /
+                            malformed)
+      sediment_absent     = bool (the key was not present)
+      sediment_malformed  = str (why it was malformed; empty when fine)
+      conflicts / conflicts_absent / conflicts_malformed follow the same shape;
+      conflicts           = [{doc, claim, actual}] (only entries with all three fields)
     """
     out: Dict[str, Any] = {
         "sediment": None, "sediment_absent": True, "sediment_malformed": "",
@@ -3520,7 +4064,7 @@ def parse_doc_gate(raw: Any) -> Dict[str, Any]:
     }
     if not isinstance(raw, dict):
         return out
-    # ①沉淀一问
+    # ① The sedimentation question
     if "doc_sediment" in raw:
         out["sediment_absent"] = False
         s = raw["doc_sediment"]
@@ -3534,7 +4078,7 @@ def parse_doc_gate(raw: Any) -> Dict[str, Any]:
                 "target": str(s.get("target") or "")[:300],
                 "reason": str(s.get("reason") or "")[:600],
             }
-    # ②反向同步闸
+    # ② The reverse-sync gate
     if "doc_conflicts" in raw:
         out["conflicts_absent"] = False
         c = raw["doc_conflicts"]
@@ -3542,7 +4086,7 @@ def parse_doc_gate(raw: Any) -> Dict[str, Any]:
             out["conflicts_malformed"] = "doc_conflicts 不是列表（%s）" % type(c).__name__
         else:
             bad = []
-            for item in c[:50]:  # 超长截断：清单封顶 50 条，防畸形巨表
+            for item in c[:50]:  # length capping: the list stops at 50 entries, guarding against a malformed giant table
                 if not isinstance(item, dict):
                     bad.append("非对象条目")
                     continue
@@ -3566,16 +4110,21 @@ def parse_doc_gate(raw: Any) -> Dict[str, Any]:
 
 def register_pending_doc_sync(cwd: Path, ticket_id: str,
                               conflicts: List[Dict[str, str]]) -> Dict[str, Any]:
-    """矛盾条目登记进泳道债册 pending-doc-sync.jsonl（append-only，路径可注入）。
+    """Register contradiction entries into the lane's debt ledger
+    pending-doc-sync.jsonl (append-only, path injectable).
 
-    幂等：去重键=ticket+doc+claim+actual（键含 actual——actual 演进=新条目，
-    latest-wins 且旧条目不删，审计友好）；去重扫描容忍既有畸形行（torn write
-    跳行不抛）。写失败降级返回 registered=0+error，不抛（不阻塞验收收口）。"""
+    Idempotent: the dedup key = ticket+doc+claim+actual (the key includes actual — an
+    evolved actual = a new entry, latest-wins with old entries never deleted, which is
+    audit friendly); the dedup scan tolerates pre-existing malformed lines (a torn
+    write skips the line instead of raising). A write failure degrades to
+    registered=0 + error without raising (it never blocks the acceptance close-out)."""
     info: Dict[str, Any] = {"registered": 0, "path": "", "error": ""}
     if not conflicts:
         return info
-    # 粘滞解析（t260907-04）：create=True 会实际建目录——必须在 try 内（只读 base
-    # 下 mkdir 抛 PermissionError，降级契约「写失败返回 error 不抛」覆盖整个路径面）。
+    # Sticky resolution (t260907-04): create=True actually creates the directory, so it
+    # must sit inside the try (a mkdir under a read-only base raises PermissionError,
+    # and the degradation contract "a write failure returns an error without raising"
+    # has to cover the whole path surface).
     try:
         gate_dir = lane_dot_path(cwd, "doc-gate", create=True)
     except OSError as e:
@@ -3593,7 +4142,7 @@ def register_pending_doc_sync(cwd: Path, ticket_id: str,
                 try:
                     row = json.loads(line)
                 except Exception:
-                    continue  # torn write 畸形行：跳过不抛
+                    continue  # a torn-write malformed line: skip, don't raise
                 if isinstance(row, dict):
                     seen.add((str(row.get("ticket") or ""), str(row.get("doc") or ""),
                               str(row.get("claim") or ""), str(row.get("actual") or "")))
@@ -3618,9 +4167,12 @@ def register_pending_doc_sync(cwd: Path, ticket_id: str,
 
 
 def _doc_gate_report_section(pg: Dict[str, Any], reg: Dict[str, Any]) -> str:
-    """两问判读+登记结果 → 回执「收口两问」小节 markdown（人读，条目本体全量）。"""
+    """Both questions' judgement + registration result → the receipt's「close-out two
+    questions」markdown section (human-readable, with the entries themselves in
+    full)."""
     lines = ["## 收口两问（沉淀触发器+反向同步闸）"]
-    # ①沉淀一问（未答/畸形都留痕——验收①「不答不阻塞有实证」的记录形态）
+    # ① The sedimentation question (unanswered / malformed are both recorded — the
+    # record shape behind acceptance ① "not answering doesn't block, with evidence")
     if pg["sediment"] is not None:
         s = pg["sediment"]
         if s["want"]:
@@ -3632,7 +4184,7 @@ def _doc_gate_report_section(pg: Dict[str, Any], reg: Dict[str, Any]) -> str:
                      % pg["sediment_malformed"])
     else:
         lines.append("- 沉淀一问：未答（留痕；不阻塞收口）")
-    # ②反向同步闸
+    # ② The reverse-sync gate
     if pg["conflicts"]:
         lines.append("- 反向同步闸：发现 %d 条 docs 矛盾（条目本体如下）" % len(pg["conflicts"]))
         for i, c in enumerate(pg["conflicts"], 1):
@@ -3656,11 +4208,15 @@ def _doc_gate_report_section(pg: Dict[str, Any], reg: Dict[str, Any]) -> str:
 
 
 def apply_doc_gate(res: StageResult, rfile: Path, cwd: Path, ticket_id: str) -> StageResult:
-    """读结果文件两问字段 → 判读 → 登记 → 拼装进 res（轻路回执，status 不改）。
+    """Read the result file's two-question fields → judge → register → assemble into
+    res (a light-path receipt; status is never changed).
 
-    幂等：activity Temporal 重试整段重执行时 res 是 _read_result 新产物（原始
-    report 未被上次拼装污染），登记去重键挡跨次重复。全程防御：本函数任何异常
-    都不得阻断验收收口（两问是伴生增量，不是裁决面）。"""
+    Idempotent: when the activity's Temporal retry re-executes the whole block, res is
+    a fresh _read_result product (the original report is not polluted by the previous
+    assembly), and the registration dedup key stops cross-run duplicates. Defensive
+    throughout: no exception from this function may ever block the acceptance
+    close-out (the two questions are an accompanying increment, not an adjudication
+    surface)."""
     try:
         try:
             raw = json.loads(Path(rfile).read_text("utf-8"))
@@ -3681,33 +4237,40 @@ def apply_doc_gate(res: StageResult, rfile: Path, cwd: Path, ticket_id: str) -> 
         res.evidence = (res.evidence + "\n[doc-gate] " + ev).strip()
         if reg.get("registered") and reg.get("path") and reg["path"] not in res.deliverables:
             res.deliverables.append(reg["path"])
-    except Exception as e:  # 兜底：任何意外都不阻断收口，只留痕
+    except Exception as e:  # backstop: nothing unexpected may block the close-out, only leave a trace
         res.evidence = (res.evidence + "\n[doc-gate] 判读异常软降级：%s" % str(e)[:200]).strip()
     return res
 
 
 @activity.defn
 async def acceptance_walkthrough(args: AgentStageArgs) -> StageResult:
-    """验收走查步（t260829-07 后续）：测试通过后 integration 以用户视角走查新功能、
-    写验收报告（供人审门查阅）。walkthrough 实证由 worker 前置产出——先跑
-    capture-lane 隔离台实拍（泳道 build，截图落 .sandbar/screenshots/acceptance/），
-    输出注入 prompt；agent 判读截图/DOM 断言写报告（StageResult 契约：
-    status=ok + report=验收报告 / status=failed + report=走查发现的代码问题）。
-    agent 沙箱跑不了浏览器（票 t260829-02/-06 实测），浏览器一律 worker 代跑。"""
+    """The acceptance walkthrough step (follow-on to t260829-07): once the tests pass,
+    integration walks the new feature from the user's point of view and writes the
+    acceptance report (for the human review gate to consult). The walkthrough evidence
+    is produced up front by the worker — first the capture-lane isolated bench shoots
+    for real (a lane build; screenshots land in .sandbar/screenshots/acceptance/), the
+    output is injected into the prompt, and the agent judges the screenshots / DOM
+    assertions to write the report (the StageResult contract: status=ok + report = the
+    acceptance report / status=failed + report = code problems found by the
+    walkthrough). The agent sandbox cannot run a browser (measured in tickets
+    t260829-02/-06), so the browser always runs on the worker."""
     rfile = Path(args.result_file)
     rfile.parent.mkdir(parents=True, exist_ok=True)
-    # stub/缓存短路（260909：与 arbitrate 同款——stub worker 下本段此前仍真起
-    # capture-lane + 真 agent，一笔场景被拖出 ~590s/~85s 无谓等待）。
+    # Stub/cache short-circuit (260909: same as arbitrate — with a stub worker this
+    # stage still really launched capture-lane plus a real agent, dragging one scenario
+    # through ~590s/~85s of pointless waiting).
     hit = _stub_stage_shortcut(args)
     if hit is not None:
         return hit
     cwd = _ws_cwd(args.workspace, args.ticket_id)
-    # 前置：capture-lane 隔离台实拍（best-effort——失败注入说明，agent 按无截图判定）
+    # Up front: the capture-lane isolated bench shoots for real (best-effort — a
+    # failure injects an explanation and the agent judges as if there were no
+    # screenshots)
     cap_out = lane_dot_path(cwd, "screenshots", "acceptance", create=True)
     cap_note = ""
     try:
         lane = str(args.worktree or cwd)
-        cproc = await asyncio.create_subprocess_exec(  # t260903-09 同雷 async 化（浏览器实拍分钟级）
+        cproc = await asyncio.create_subprocess_exec(  # the same t260903-09 trap, made async (a real browser shoot takes minutes)
             "node", str(REPO_ROOT / "server" / "ui-check" / "capture-lane.mjs"),
             "--lane", lane, "--out", str(cap_out),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
@@ -3725,9 +4288,11 @@ async def acceptance_walkthrough(args: AgentStageArgs) -> StageResult:
     cmd, env = _prepare_agent_spawn(
         cwd, args.role, "", args.ticket_id, rfile.parent,
         "acceptance_gen%d" % args.gen, project=project,
-        # 票 t260903-02：ticket-stage 专用会话 key——与并发仲裁边不同会话，双进程
-        # 不同写一个 session 文件（取舍记录：走查会话不进 agent-live/agent-usage
-        # 的 ticket-role 定位，内容仍可从结果文件/日志取）。
+        # Ticket t260903-02: a ticket-stage-specific session key — a different session
+        # from the concurrent arbitration edge, so two processes never write one
+        # session file (trade-off record: the walkthrough session does not appear in
+        # agent-live / agent-usage's ticket-role locator, and its content is still
+        # reachable from the result file / logs).
         session_key="%s-acceptance" % args.ticket_id)
     cmd.append(args.prompt)
     logf = open(args.log_file, "a", buffering=1) if args.log_file else subprocess.DEVNULL
@@ -3735,19 +4300,23 @@ async def acceptance_walkthrough(args: AgentStageArgs) -> StageResult:
                          args.ticket_id, args.gen)
     proc = subprocess.Popen(cmd, cwd=str(cwd), env=env,
                             stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                            start_new_session=True)  # KI-009：独立进程组，见 _reap_agent_proc
+                            start_new_session=True)  # KI-009: its own process group, see _reap_agent_proc
     polls = 0
     try:
         while True:
             if rfile.is_file():
                 res = _read_result(rfile)
                 if res is not None:
-                    # doc-lifecycle 票②：收口两问判读+登记+回执拼装（ok/failed 轮都拼，
-                    # 打回轮发现的矛盾同样是债条目；status 一律不改——不阻塞收口）
+                    # doc-lifecycle ticket ②: judge both close-out questions + register +
+                    # assemble into the receipt (both ok and failed rounds are assembled,
+                    # since a contradiction found in a bounce round is just as real a debt
+                    # entry; status is never changed — the close-out is not blocked)
                     apply_doc_gate(res, rfile, cwd, args.ticket_id)
                     _patch_result_prompt(rfile, args.prompt)
-                    # KI-009：返回前 reap——走查报告不落账（.sandbar 口径内），但迟写
-                    # 的意外工作区脏不能留给 merge_check 与活进程赛跑
+                    # KI-009: reap before returning — the walkthrough report is never
+                    # booked (inside the .sandbar stance), but unexpected workspace dirt
+                    # from a late write must not be left to race a live process at
+                    # merge_check
                     _reap_agent_proc(proc, args.ticket_id, "acceptance_walkthrough")
                     return res
             rc = proc.poll()
@@ -3761,7 +4330,8 @@ async def acceptance_walkthrough(args: AgentStageArgs) -> StageResult:
                 raise RuntimeError("等验收报告超时（%d 轮询）：%s" % (polls, rfile))
             await asyncio.sleep(POLL_SEC)
     finally:
-        # KI-009：兜底回收升级为组粒度（原 terminate+wait+kill 只收直接子进程）
+        # KI-009: the backstop reap is upgraded to group granularity (the old
+        # terminate+wait+kill only reaped the direct child)
         _reap_agent_proc(proc, args.ticket_id, "acceptance_walkthrough")
 
 
@@ -3769,24 +4339,34 @@ async def acceptance_walkthrough(args: AgentStageArgs) -> StageResult:
 ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     prepare_human_gate, prepare_workspace, merge_check, merge,
     prepare_conflict_resolution, settle_conflict_resolution,
-    # M1-3（t260902-02）：三段收口——merge 只落账，archive_ticket 出仓，teardown_lane 拆泳道。
+    # M1-3 (t260902-02): the three-stage close-out — merge only books, archive_ticket
+    # exports, teardown_lane tears the lane down.
     archive_ticket, teardown_lane,
-    # 立项下一单预跑（t260828-08）：prepare 读档案/算 state_key，suggest_next 只读分析。
-    # suggest_next 不进 AGENT_STAGE_IDS——不走 stage 工厂（prompt 由 workflow 组好，
-    # 判读走三态契约而非 StageResult），activity 名即 stage id 供 dev_lane 直调。
+    # Pre-running the next ticket after epic creation (t260828-08): prepare reads the
+    # document / computes state_key, suggest_next is a read-only analysis.
+    # suggest_next does not go into AGENT_STAGE_IDS — it skips the stage factory (the
+    # prompt is assembled by the workflow and the result is judged by the three-state
+    # contract rather than a StageResult), and its activity name doubles as the stage
+    # id so dev_lane can call it directly.
     prepare_epic_next, suggest_next,
     prepare_ui_evidence,
     verify_review_gate,
-    # KI-044 根修（t260904-13）：UI 票判定换 diff 源——ui_evidence 段算一次定「拍不拍」、
-    # merge_check 3.6 再算一次定「要不要证据」，两处同源 _ui_diff_paths。漏注册=worker
-    # 不认、运行时才暴露，selfcheck 有注册断言（selfcheck_ui_acceptance B 段）。
+    # KI-044 root fix (t260904-13): UI-ticket detection switched to a diff source — the
+    # ui_evidence stage computes once to decide "shoot or not", and merge_check 3.6
+    # computes again to decide "is evidence required"; both come from the same
+    # _ui_diff_paths. A missing registration = the worker doesn't recognize the
+    # activity and it only surfaces at runtime; the selfcheck carries a registration
+    # assertion (selfcheck_ui_acceptance section B).
     ui_changed_paths,
-    # KI-050 声明制（t260904-18 门③）：ui_evidence 声明预载（泳道起跑读泳道根
-    # verify.yaml 落 meta，review_gate patched 分支消费）。漏注册同上=运行时才暴露。
+    # KI-050 declaration regime (t260904-18 gate ③): the ui_evidence declaration is
+    # preloaded (when the lane starts it reads the lane root's verify.yaml into meta,
+    # consumed by the review_gate patched branch). A missing registration, as above,
+    # only surfaces at runtime.
     ui_evidence_decl,
-    # 集成测试机制（t260829-07 后续）：settle_lane=汇合点统一落盘；
-    # run_integration_tests=机械测试步（零 LLM）；arbitrate/acceptance_walkthrough
-    # 为 integration 专用 agent 步（prompt 由 workflow 组好，走会话复用），
-    # 不进 AGENT_STAGE_IDS（自定义结果判读）。
+    # Integration-test machinery (follow-on to t260829-07): settle_lane = the unified
+    # settle at the join point; run_integration_tests = the mechanical test step (zero
+    # LLM); arbitrate/acceptance_walkthrough are integration-specific agent steps (the
+    # prompt is assembled by the workflow, with session reuse), not in AGENT_STAGE_IDS
+    # (custom result judgement).
     settle_lane, run_integration_tests, arbitrate, acceptance_walkthrough,
 ]
