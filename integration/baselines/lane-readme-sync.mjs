@@ -1,14 +1,19 @@
 /**
- * lane-readme-sync —— t260901-05「workflows README 同步」断言。
+ * lane-readme-sync — the t260901-05 "workflows README sync" assertions.
  *
- * 直跑：node integration/baselines/lane-readme-sync.mjs（cwd=泳道根，零依赖）。
+ * Run directly: node integration/baselines/lane-readme-sync.mjs (cwd = lane
+ * root, zero dependencies).
  *
- * 覆盖（用户可感知：工单台文档与真实机制脱节）：
- *   1. dev-lane 步链段写全新链（并行分叉/汇合/ui_evidence/机械测试/仲裁/验收走查），
- *      顺序 implement→design_integration_tests→ui_evidence→run_integration_tests；
- *   2. 已退役的 integration_review 打回循环从步链段与执行主体段消失；
- *   3. 执行主体 parts 段含 design_integration_tests。
- * 安全红线：纯本地读文件。
+ * Coverage (user-visible: the workbench docs drifting from the real
+ * mechanism):
+ *   1. the dev-lane stage-chain section describes the new chain (parallel
+ *      fork/join, ui_evidence, mechanical tests, arbitrate, acceptance
+ *      walkthrough) ordered implement→design_integration_tests→ui_evidence
+ *      →run_integration_tests;
+ *   2. the retired integration_review rework loop is gone from both the
+ *      stage-chain and the executor sections;
+ *   3. the executor parts section mentions design_integration_tests.
+ * Safety line: reads local files only.
  */
 
 import { readFileSync } from 'node:fs'
@@ -28,7 +33,7 @@ function section(t) { console.log(`\n== ${t}`) }
 
 const text = readFileSync(README, 'utf8')
 
-/** 抽取「- **dev-lane ...」到下一个「- **<其它模版」之间的段。 */
+/** Extract the block from "- **dev-lane ..." up to the next "- **<other template>". */
 function bulletSection(startRe) {
   const m = text.match(startRe)
   if (!m) return null

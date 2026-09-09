@@ -1,10 +1,12 @@
 // Shared prereq helper for capture baselines (t260901-10 arbitrate gen2).
 //
 // Why: capture-lane.mjs refuses to shoot a stale workbench bundle
-// (`laneBuildRejectReason`, server/ui-check/capture-lane.mjs) — anti-fraud,
-// 「拍陈旧 build 的截图=证据造假，宁可没证据」。Its own header documents the
-// remedy for the known safe-side false positive: 「mtime 误报（checkout 刷新
-// mtime）是安全侧失败：人工重跑即可」— i.e. rebuild the bundle, then re-run.
+// (`laneBuildRejectReason`, server/ui-check/capture-lane.mjs) — anti-fraud:
+// "a screenshot of a stale build is faked evidence; better no evidence at
+// all". Its own header documents the remedy for the known safe-side false
+// positive: "an mtime false alarm (a checkout refreshes mtimes) is a
+// safe-side failure: rebuild by hand and re-run" — i.e. rebuild the bundle,
+// then re-run.
 //
 // The gap: a fresh `git worktree` checkout writes files in index order, which
 // inverts mtimes between lib/client.js and src/* by milliseconds. Every new

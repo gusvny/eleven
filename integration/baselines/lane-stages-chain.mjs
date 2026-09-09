@@ -1,16 +1,24 @@
 /**
- * lane-stages-chain —— t260901-05「STAGES 链序修正」引擎侧断言。
+ * lane-stages-chain — the engine-side assertions for the t260901-05 "STAGES
+ * chain-order fix".
  *
- * 直跑：node integration/baselines/lane-stages-chain.mjs（cwd=泳道根，零依赖）。
+ * Run directly: node integration/baselines/lane-stages-chain.mjs (cwd = lane
+ * root, zero dependencies).
  *
- * 覆盖（全部文本级断言，不依赖 temporalio；import 级复核缺 venv 时按三态契约报
- * ENV_FAIL 退 2，不静默放行）：
- *   1. dev_lane.py STAGES 元数据序 = 新链（implement→design_integration_tests→ui_evidence
- *      →run_integration_tests，并行分叉语义在展示序上线性化）；
- *   2. next 指针同步（implement→design_integration_tests→ui_evidence→run_integration_tests）；
- *   3. design_integration_tests desc 注明并行；全步 parts 非空（文本级）；
- *   4. 附带修复：`_finish("acceptance"` 孤儿键消失、`_finish("acceptance_walkthrough"` 在案。
- * 安全红线：纯本地读文件，不碰 3099/Temporal/网络。
+ * Coverage (all text-level assertions, no temporalio needed; when the venv is
+ * missing the import-level recheck reports ENV_FAIL exit 2 per the
+ * three-state contract — never a silent pass):
+ *   1. the dev_lane.py STAGES metadata order = the new chain
+ *      (implement→design_integration_tests→ui_evidence→
+ *      run_integration_tests, with the parallel fork linearized into the
+ *      display order);
+ *   2. the next pointers agree (implement→design_integration_tests→
+ *      ui_evidence→run_integration_tests);
+ *   3. the design_integration_tests desc mentions parallelism; every stage's
+ *      parts is non-empty (text level);
+ *   4. drive-by fix: the `_finish("acceptance"` orphan key is gone and
+ *      `_finish("acceptance_walkthrough"` is in place.
+ * Safety line: reads local files only; never touches 3099/Temporal/network.
  */
 
 import { readFileSync } from 'node:fs'
@@ -35,7 +43,7 @@ const EXPECT = ['create_plan', 'review_plan', 'implement', 'design_integration_t
 
 const text = readFileSync(SRC, 'utf8')
 
-/* ------------------------------------------------------------ 1. STAGES 顺序 */
+/* ------------------------------------------------------------ 1. STAGES order */
 section('STAGES 元数据序（文本级，真源=类）')
 const start = text.indexOf('STAGES = (')
 const end = text.indexOf('\n    )', start)
@@ -44,7 +52,7 @@ const order = [...region.matchAll(/Stage\(id="([^"]+)"/g)].map(m => m[1])
 ok(order.length === EXPECT.length && order.every((s, i) => s === EXPECT[i]),
   `STAGES 序=新链（got [${order.join(', ')}]）`)
 
-/* ------------------------------------------------------------ 2. next 指针 */
+/* ------------------------------------------------------------ 2. next pointers */
 section('next 指针同步')
 for (const [from, to] of [['implement', 'design_integration_tests'],
   ['design_integration_tests', 'ui_evidence'], ['ui_evidence', 'run_integration_tests']]) {
@@ -62,14 +70,14 @@ section('desc 并行注明 + parts 非空（文本级）')
   ok(noParts.length === 0, `无空 parts 步（${noParts.join(',') || '无'}）`)
 }
 
-/* ------------------------------------------------------------ 4. acceptance 键修复 */
+/* ------------------------------------------------------------ 4. acceptance key fix */
 section('acceptance 键对齐附带修复')
 {
   ok(!/_finish\("acceptance"[,)]/.test(text), '无 _finish("acceptance" 孤儿键调用')
   ok(/_finish\("acceptance_walkthrough"[,)]/.test(text), '_finish("acceptance_walkthrough") 在案')
 }
 
-/* ---------------------------------------------- 5. import 级复核（环境腿，ENV_FAIL-gated） */
+/* ---------------------------------------------- 5. import-level recheck (env leg, ENV_FAIL-gated) */
 section('import 级复核：活类 STAGES 与文本一致、parts 枚举合法（需 temporalio，缺失则 ENV_FAIL 退 2）')
 {
   const py = `

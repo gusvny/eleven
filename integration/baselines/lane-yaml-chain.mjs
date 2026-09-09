@@ -1,19 +1,29 @@
 /**
- * lane-yaml-chain —— t260901-05「STAGES 链序修正」生成物一致性断言。
+ * lane-yaml-chain — artifact-consistency assertions for the t260901-05
+ * "STAGES chain-order fix".
  *
- * 直跑：node integration/baselines/lane-yaml-chain.mjs（cwd=泳道根，零依赖）。
+ * Run directly: node integration/baselines/lane-yaml-chain.mjs (cwd = lane
+ * root, zero dependencies).
  *
- * 背景（review_plan 第 1 轮 P1）：工单台模板序数据源 = workflows/dev-lane.yaml
- * 快照（server/tools/workflow.py load_all glob *.yaml），不是活类。改类不重跑
- * gen_workflows_doc.py = 真源分叉 + stage-parts 有序比对红。
+ * Background (review_plan round 1, P1): the workbench template order is read
+ * from the workflows/dev-lane.yaml snapshot (server/tools/workflow.py
+ * load_all globs *.yaml), not from the live class. Changing the class without
+ * re-running gen_workflows_doc.py = source-of-truth divergence plus a red
+ * ordered stage-parts comparison.
  *
- * 断言口径（arbitrate t260901-05 gen0 修订）：
- *   - 类 STAGES 序 == 期望：硬 FAIL，不降级（类侧漂移永远红）；
- *   - yaml 序 == 类序：一致 → pass；不一致 → FAIL 并大声留痕（收窄分支半交付
- *     与漏跑生成器不可区分，留痕进 output_tail 供人审门判读；venv 在场时
- *     stage-parts-chain 仍硬保 yaml↔类有序比对）。补跑生成器后本条自动恢复全绿。
- *     （三态契约定稿 §7.3：真源分叉属交付物缺陷=产品红，不以环境为条件，不得放行。）
- * 安全红线：纯本地读文件。
+ * Assertion policy (revised by arbitrate t260901-05 gen0):
+ *   - class STAGES order == expected: hard FAIL, never downgraded
+ *     (class-side drift is always red);
+ *   - yaml order == class order: match → pass; mismatch → FAIL with a loud
+ *     paper trail (a narrowed-branch partial delivery and a forgotten
+ *     generator run are indistinguishable, so the trail lands in output_tail
+ *     for the human review gate to judge; where a venv is present,
+ *     stage-parts-chain still enforces the yaml↔class ordered comparison).
+ *     The check returns to green on its own once the generator is re-run.
+ *     (Three-state contract finalization §7.3: source-of-truth divergence is
+ *     a deliverable defect = a product red; it is not conditioned on the
+ *     environment and must not be waved through.)
+ * Safety line: reads local files only.
  */
 
 import { readFileSync } from 'node:fs'
@@ -50,11 +60,15 @@ if (JSON.stringify(yamlOrder) === JSON.stringify(classOrderFromSrc())) {
   passed++
   console.log('  ok yaml 序==类序（生成物随源，无漂移）')
 } else {
-  // 收窄分支（写集未含 dev-lane.yaml，review_plan C3 认可）：yaml 再生成移交下一单。
-  // 此时本测试无法区分「合规半交付」与「漏跑生成器」——FAIL 并大声留痕（进 output_tail
-  // 供 arbitrate/人审门判读），不静默变绿（三态契约闸内无放行语义）；venv 在场的泳道由
-  // stage-parts-chain 继续硬保 yaml↔类有序比对。下一单补跑 gen_workflows_doc.py 后，
-  // 本条自动恢复硬断言（一致→pass）。
+  // Narrowed branch (the write set does not include dev-lane.yaml; accepted by
+  // review_plan C3): regenerating the yaml is handed to the next ticket. This
+  // test then cannot tell a "compliant partial delivery" from a forgotten
+  // generator run — so FAIL with a loud paper trail (into output_tail for
+  // arbitrate/the human review gate to judge) instead of silently going green
+  // (the three-state contract has no pass-through inside the gate); lanes with
+  // a venv keep the yaml↔class ordered comparison enforced by
+  // stage-parts-chain. Once the next ticket re-runs gen_workflows_doc.py,
+  // this check returns to its hard assertion (match → pass).
   failed++
   console.log(`  FAIL 真源分叉在案：dev-lane.yaml 序 [${yamlOrder.join(', ')}] ≠ 类序`)
   console.log('       收窄分支半交付或漏跑生成器，二者本测试不可区分；补跑生成器后自动恢复硬断言')

@@ -1,17 +1,25 @@
 /**
- * lanediagram-removed —— t260901-05「删死代码 LaneDiagram」断言（资源回收面）。
+ * lanediagram-removed — the t260901-05 "delete the dead LaneDiagram code"
+ * assertions (resource reclamation).
  *
- * 直跑：node integration/baselines/lanediagram-removed.mjs（cwd=泳道根，零依赖）。
+ * Run directly: node integration/baselines/lanediagram-removed.mjs (cwd =
+ * lane root, zero dependencies).
  *
- * 背景（review_plan 第 1 轮 P2）：LaneDiagram（index.tsx）全 src 零调用，详情页实际
- * 渲染 D2Stepper/d2StatusLine。本票顺手删除组件及其 .wb-lane* 专属 CSS，并重建
- * lib 产物——若 build 漏跑，线上注入的仍是含死代码的旧 bundle。
+ * Background (review_plan round 1, P2): LaneDiagram (index.tsx) has zero
+ * callers across src; the detail page really renders D2Stepper/d2StatusLine.
+ * This ticket also deletes the component and its .wb-lane* dedicated CSS and
+ * rebuilds the lib artifacts — skip the build and the injected bundle is
+ * still the old one carrying the dead code.
  *
- * 覆盖：
- *   1. src/client/ 无 LaneDiagram 定义、无 .wb-lane 残留引用；
- *   2. lib/client.js 与 lib/client.cjs 已重建（无 LaneDiagram/wb-lane-step 字符串）；
- *   3. 实际渲染组件仍在（防误删过头）：D2Stepper/d2StatusLine/deriveStageStates 消费在案。
- * 安全红线：纯本地读文件。
+ * Coverage:
+ *   1. src/client/ has no LaneDiagram definition and no leftover .wb-lane
+ *      references;
+ *   2. lib/client.js and lib/client.cjs were rebuilt (no LaneDiagram /
+ *      wb-lane-step strings);
+ *   3. the actually-rendered components survive (guarding against
+ *      over-deletion): D2Stepper/d2StatusLine/deriveStageStates consumers are
+ *      in place.
+ * Safety line: reads local files only.
  */
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
