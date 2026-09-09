@@ -1,13 +1,16 @@
 /**
- * smoke/workers.mjs —— /sandbar-workbench/api/wf/workers（一工单一 worker 清单）宿主半冒烟。
+ * smoke/workers.mjs — host half-smoke for /sandbar-workbench/api/wf/workers (one worker per
+ * ticket roster).
  *
- * 直跑：node smoke/workers.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * 覆盖（node.ts apply + mock webServer/req/res，临时 repo 布局）：
- *   A. data 目录不存在 → 200 + 空清单（不抛错）。
- *   B. pidfile 解析：worker.pid=共享池（queue=suyou-poc，ticket=null）；
- *      worker-<tid>.pid=工单 worker（queue=suyou-ticket-<tid>）；非 pid 文件不收。
- *   C. online 判定：当前进程 pid → 在线；不可能存活的 pid → 离线；count_alive 计数正确。
- *   D. log_mtime：对应 worker-<tid>.log 存在 → 秒级时间戳；缺失 → null（不抛错）。
+ * Run: node smoke/workers.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+ * Covers (node.ts apply + mock webServer/req/res, temporary repo layout):
+ *   A. data directory missing → 200 + empty roster (no throw).
+ *   B. pidfile parsing: worker.pid = shared pool (queue=suyou-poc, ticket=null);
+ *      worker-<tid>.pid = ticket worker (queue=suyou-ticket-<tid>); non-pid files are ignored.
+ *   C. online decision: the current process pid → online; a pid that cannot be alive →
+ *      offline; count_alive tallies correctly.
+ *   D. log_mtime: the matching worker-<tid>.log exists → second-resolution timestamp;
+ *      missing → null (no throw).
  */
 
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
@@ -23,7 +26,7 @@ function ok(cond, label) {
 }
 function section(t) { console.log(`\n== ${t}`) }
 
-/** mock webServer：收集注册路由，返回 /wf/workers 的 handler。 */
+/** mock webServer: collects registered routes, returns the /wf/workers handler. */
 function routeOf(repo) {
   const routes = []
   const ws = { register: (x) => { routes.push(x); return () => {} } }
@@ -46,7 +49,7 @@ function mockRes() {
 
 const tmp = await mkdtemp(join(tmpdir(), 'wb-workers-'))
 try {
-  /* ------------------------------------------------------------ A. data 目录不存在 */
+  /* ------------------------------------------------------------ A. data directory missing */
   section('A data 目录不存在 → 空清单降级')
   {
     const route = routeOf(join(tmp, 'repo-nodata'))
@@ -58,16 +61,16 @@ try {
       && Array.isArray(res.body.result.workers), '空清单（count/count_alive=0，不抛错）')
   }
 
-  /* ---------------------------------------------------- B/C/D. pidfile 解析 + 在线判定 + 日志时间 */
+  /* ---------------------------------------------------- B/C/D. pidfile parsing + online check + log time */
   section('B/C/D pidfile 解析 · 在线判定 · log_mtime')
   {
     const repo = join(tmp, 'repo')
     const dataDir = join(repo, 'server', 'engine', 'data')
     await mkdir(dataDir, { recursive: true })
-    await writeFile(join(dataDir, 'worker.pid'), `${process.pid}\n`, 'utf8')          // 共享池，当前进程=在线
-    await writeFile(join(dataDir, 'worker-t-smoke01.pid'), '99999999\n', 'utf8')     // 工单 worker，pid 不可能存活=离线
-    await writeFile(join(dataDir, 'worker-t-smoke01.log'), 'log line\n', 'utf8')     // 有日志 → log_mtime 非空
-    await writeFile(join(dataDir, 'other.txt'), 'x', 'utf8')                          // 非 pid 文件，不收
+    await writeFile(join(dataDir, 'worker.pid'), `${process.pid}\n`, 'utf8')          // shared pool; the current process = online
+    await writeFile(join(dataDir, 'worker-t-smoke01.pid'), '99999999\n', 'utf8')     // ticket worker; a pid that cannot be alive = offline
+    await writeFile(join(dataDir, 'worker-t-smoke01.log'), 'log line\n', 'utf8')     // log exists → log_mtime non-null
+    await writeFile(join(dataDir, 'other.txt'), 'x', 'utf8')                          // not a pid file; not picked up
 
     const route = routeOf(repo)
     const res = mockRes()

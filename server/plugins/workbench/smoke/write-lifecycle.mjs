@@ -1,21 +1,25 @@
 /**
- * smoke/write-lifecycle.mjs —— 写集生命周期（t260829-07）宿主/客户端半冒烟。
+ * smoke/write-lifecycle.mjs — host/client half-smoke for the write-set lifecycle (t260829-07).
  *
- * 直跑：node smoke/write-lifecycle.mjs（node ≥22.18 原生 type-stripping）。
- * 覆盖：
- *   A. host epic-next.ts 纯函数：
- *      validWriteSetEntry（仓库内相对路径放行 / 绝对路径、'..'、反斜杠、盘符、
- *      空串、非字符串拒）；sanitizeWriteSet（保序去重、非法丢弃、非数组容错）；
- *      validateSuggestion（write_set 合法保留 / 缺失 → 空数组不阻塞 / 全非法 →
- *      空数组不阻塞 / 混合 → 只留合法）。
- *   B. client epics-model.ts 纯函数（弹层编辑栏）：
- *      writeSetTextToLines（每行一条/空行容忍/strip）；invalidWriteSetLines
- *      （非法行标红、合法为空）；validWriteSetEntry 同构一致（与 host 判定逐条对拍）。
- *   C. epic-next 泄漏修复回归（t260829-07）：B6 同款 STUB 模式连续 5 次 suggest job
- *      （ok / invalid_json / never_write 混合）后，检查无残留哑进程
- *      （job 目录 agent.log 闭环 + 全部 job 达终态 + stub 哑进程 pid 不存活）。
+ * Run: node smoke/write-lifecycle.mjs (node >= 22.18 native type-stripping).
+ * Covers:
+ *   A. host epic-next.ts pure functions:
+ *      validWriteSetEntry (in-repo relative paths admitted / absolute paths, '..', backslash,
+ *      drive letter, empty string, non-string rejected); sanitizeWriteSet (order-preserving
+ *      dedupe, illegal entries dropped, non-array tolerated); validateSuggestion (valid
+ *      write_set kept / missing → empty array without blocking / all illegal → empty array
+ *      without blocking / mixed → only the legal ones kept).
+ *   B. client epics-model.ts pure functions (the popover edit bar):
+ *      writeSetTextToLines (one entry per line / blank lines tolerated / stripped);
+ *      invalidWriteSetLines (illegal lines flagged red, legal ones absent); validWriteSetEntry
+ *      isomorphism (checked case by case against the host-side verdict).
+ *   C. epic-next leak-fix regression (t260829-07): five suggest jobs in a row under the same
+ *      STUB mode as B6 (ok / invalid_json / never_write mixed), then check for no leftover
+ *      stub processes (agent.log in the job dir closes the loop + every job reaches a terminal
+ *      state + the stub process pids are not alive).
  *
- * 对应 python 侧：engine/selfcheck_write_lifecycle.py（写集校验/刷新/机械复核）。
+ * Python-side counterpart: engine/selfcheck_write_lifecycle.py (write-set validation/refresh/
+ * mechanical review).
  */
 
 import { execFileSync, spawn } from 'node:child_process'
@@ -34,7 +38,7 @@ function ok(cond, label) {
   else { fail++; console.error(`  ✗ ${label}`) }
 }
 
-/* ---------------- A. host 纯函数 ---------------- */
+/* ---------------- A. host pure functions ---------------- */
 console.log('A. host epic-next.ts 写集纯函数')
 ok(validWriteSetEntry('server/engine/client.py'), '仓库内相对路径放行')
 ok(validWriteSetEntry('  app/src/main.ts  '), '首尾空白容忍')
@@ -61,7 +65,7 @@ ok(validateSuggestion({ ...base, write_set: 'junk' }, WF).suggestion.write_set.l
 const p = buildSuggestPrompt({ code: 'e1', epicMarkdown: 'EPIC', ticketsSummary: 'T', workflows: WF.map(id => ({ id, name: id })), resultPath: '/r.json' })
 ok(p.includes('write_set') && p.includes('EPIC') && p.includes('dev-lane'), 'buildSuggestPrompt 含 write_set 契约与全文')
 
-/* ---------------- B. client 纯函数 ---------------- */
+/* ---------------- B. client pure functions ---------------- */
 console.log('B. client epics-model.ts 弹层编辑栏纯函数')
 ok(JSON.stringify(writeSetTextToLines(' a.py\n\n b.py \n')) === JSON.stringify(['a.py', 'b.py']), '每行一条/空行容忍/strip')
 ok(JSON.stringify(invalidWriteSetLines('a.py\n/bad\n..\\x')) === JSON.stringify(['/bad', '..\\x']), '非法行标红清单')
@@ -71,7 +75,7 @@ for (const entry of ['ok.py', '/abs', '../up', 'C:/x', 'a\\b', '', 'x.py']) {
   ok(true, `host/client 判定一致：${JSON.stringify(entry)}`)
 }
 
-/* ---------------- C. 泄漏回归：连续 5 次 STUB suggest job 全终态 ---------------- */
+/* ---------------- C. leak regression: five STUB suggest jobs in a row, all terminal ---------------- */
 console.log('C. epic-next 连续 5 次 suggest job（stub/failed 混合）无残留进程')
 const tmpRepo = await mkdtemp(path.join(tmpdir(), 'wb-write-lifecycle-'))
 process.env.SANDBAR_EPIC_NEXT_DIR = path.join(tmpRepo, '.suyou', 'epic-next')
@@ -84,7 +88,7 @@ const variants = ['ok', 'invalid_json', 'never_write', 'ok', 'invalid_json']
 const epicMd = `# e-smoke\n\n测试立项\n`
 for (let i = 0; i < 5; i++) {
   const v = variants[i]
-  // SANDBAR_EPIC_NEXT_STUB 的值即变体（1=ok 同义）：ok/invalid_json/never_write 混合
+  // the SANDBAR_EPIC_NEXT_STUB value is the variant itself (1=ok is a synonym): ok/invalid_json/never_write mixed
   process.env.SANDBAR_EPIC_NEXT_STUB = v
   const job = await startSuggestJob({
     repo: tmpRepo, code: `e-smoke-${i}`, epicTitle: 'E', epicMarkdown: epicMd,
@@ -98,15 +102,15 @@ for (let i = 0; i < 5; i++) {
     await new Promise(r => setTimeout(r, 150))
   }
   if (!last || last.state === 'running') leaked++
-  // variant=never_write + 2s 超时 → 需要多轮；上面 20×150ms=3s 够触超时终态
+  // variant=never_write + 2s timeout → needs several rounds; the 20×150ms=3s above is enough to hit the timeout terminal state
 }
-// 哑进程存活检查：stub 挂的哑长驻进程若未被 reap 会一直存活
-await new Promise(r => setTimeout(r, 3500)) // 等 reap 的 TERM→3s→KILL 宽限走完
+// stub process liveness check: a long-lived stub process would stay alive if never reaped
+await new Promise(r => setTimeout(r, 3500)) // let the reap grace period TERM→3s→KILL run out
 for (const pid of stubProcPids) {
-  try { process.kill(pid, 0); leaked++; } catch { /* 已死=回收成功 */ }
+  try { process.kill(pid, 0); leaked++; } catch { /* already dead = reaped successfully */ }
 }
 ok(leaked === 0, `5 次 suggest job（含 failed/超时变体）全部达终态且进程无残留（泄漏数=${leaked}）`)
-// 清场：杀掉可能仍存活的哑进程（防本 smoke 自身泄漏——吃自己的狗粮）
+// cleanup: kill any stub process that might still be alive (so this smoke does not leak — eating its own dogfood)
 for (const pid of stubProcPids) { try { process.kill(-pid, 'SIGKILL') } catch { try { process.kill(pid, 'SIGKILL') } catch {} } }
 await rm(tmpRepo, { recursive: true, force: true }).catch(() => {})
 

@@ -1,14 +1,19 @@
 /**
- * smoke/workspace.mjs —— sandbar-workbench M14「工作区」展示纯函数冒烟。
+ * smoke/workspace.mjs — smoke for the sandbar-workbench M14 「workspace」 display pure functions.
  *
- * 直跑：node smoke/workspace.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * 覆盖 workspaceInfoOf / workspaceTextOf（src/shared/workspace.ts）：
- *   A. workspace{type:worktree} → 泳道短 slug（路径末段）；path 透传 title 用。
- *   B. workspace{type:dir} → 非 git 工单隔离目录路径（/tmp/suyou-ws/<id>）。
- *   C. workspace 缺/空 → 回退旧 worktree 字段（legacy code-lane 工单）。
- *   D. 两者皆无 → 主树（数据道/审读/回归直改主树的工单，模板 lane: main）。
- *   E. 边界：workspace 缺 type/path、空串、null、undefined → 按优先级兜底不抛错。
- *   F. workspaceTextOf 紧凑文本（行悬停 title 用）：泳道/目录/主树 前缀。
+ * Run: node smoke/workspace.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+ * Covers workspaceInfoOf / workspaceTextOf (src/shared/workspace.ts):
+ *   A. workspace{type:worktree} → short worklane slug (last path segment); path is passed
+ *      through for the title.
+ *   B. workspace{type:dir} → non-git ticket isolation directory path (/tmp/suyou-ws/<id>).
+ *   C. workspace missing/empty → fall back to the legacy worktree field (legacy code-lane
+ *      tickets).
+ *   D. neither present → main tree (tickets that edit the main tree directly: data lane /
+ *      proofread / regression, template lane: main).
+ *   E. edges: workspace missing type/path, empty string, null, undefined → fall back by
+ *      priority without throwing.
+ *   F. workspaceTextOf compact text (used for the row hover title): worklane / directory /
+ *      main tree prefixes.
  */
 
 import { workspaceInfoOf, workspaceTextOf } from '../src/shared/workspace.ts'
