@@ -160,7 +160,8 @@ function buildContract() {
     record('S0 build-contract', 'fail', 'lib/client.js and lib/client.cjs out of sync — rebuild')
     return false
   }
-  // 产物锚点按 tsdown 压缩后的字面（双引号 case、&mode=fast 拼接、角标文案）
+  // Artifact anchors are written as the post-tsdown-minify literals (the
+  // double-quoted case, the &mode=fast concatenation, the badge copy).
   const anchors = ['donutOption', 'specToDonutInput', 'case "donut": return donut(', '&mode=fast', '缓存快照 · 刷新中']
   const missing = anchors.filter(a => !js.includes(a))
   if (missing.length) {

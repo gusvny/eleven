@@ -226,7 +226,8 @@ try {
   section('G cross-doc consistency')
   if (contract != null && mech != null) {
     // The mechanism doc gives direction and links the contract; it must reference
-    // the three-state semantics as a pointer (见契约), not silently omit them —
+    // the three-state semantics as a pointer ("见契约" / see the contract), not
+    // silently omit them —
     // while NOT re-expanding the per-state vocabulary (double-source guard below).
     const sec = extractSection(mech, '五层架构与依赖方向反转') || ''
     ok(/三态|关闭语义/.test(sec), 'new section references the three-state closing semantics (as pointer to contract v1)')

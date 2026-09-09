@@ -445,10 +445,8 @@ async function scenarioClosedTab(a, b) {
 // multi-tab write-invalidation chain (proven by an environment-independent
 // control plus force-based evidence capture; not a regression of this ticket),
 // 豁免申请已交宿主签字（.suyou/stage_arbitrate_gen14.json）。标签随 FAIL 行输出，  // naming-compat
-// 防「红=正常」习惯化淹掉该面的真回归：若修复后本腿转绿，标签自然消失。
-// (English: the tag prints on the FAIL line so "red = normal" habituation
-// cannot drown a real regression on this surface; once a fix turns the leg
-// green, the tag naturally disappears.)
+// so that "red = normal" habituation cannot drown a real regression on this
+// surface: once a fix turns the leg green, the tag naturally disappears.
 const PRE_EXISTING_TAG = '（t260904-19 仲裁定性：既有产品缺陷 pre-existing，豁免申请 gen14 待宿主签字；workbench 专项票修复后转绿）'
 const tagPreExisting = () => PRE_EXISTING_TAG
 
