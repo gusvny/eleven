@@ -1,45 +1,61 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""docker 测试舞台单点入口（票 t260904-19）：全仓唯一搭台方式。
+"""Single entry point for the docker test stage (t260904-19): the only way the
+repo brings a stage up.
 
-以前自搭进程舞台（随机端口临时控制台、槽位 temporalite、capture-lane 自搭 boot）和
-docker 测试台双轨并存——本文件收拢为单轨：一切需要舞台的场景经这里搭台（同一 compose
-文件 server/docker-compose.test.yml），每台独立 compose 工程名 + 独立端口档 + 独立
-容器名/卷前缀，并行互不撞。
+Hand-built process stages (random-port throwaway consoles, slot-based
+temporalite, capture-lane self-built boots) and the docker test bench used to
+coexist as two tracks — this file collapses them into one: every scenario that
+needs a stage brings it up here (same compose file
+server/docker-compose.test.yml), each stage with its own compose project name +
+own port band + own container-name/volume prefix, so parallel stages never
+collide.
 
-子命令：
-  up --project <名> [--services temporal|dsh|full] [--namespace <ns>]
-     [--fixtures-dir <宿主目录>] [--profile-dir <宿主目录>] [--repo-dir <宿主目录>]
-     [--timeout <sec>]        起台；stdout 回 JSON {project,console,temporal,...}
-     [--nm-repo-dir <dir>]    插件依赖树（profile/node_modules 装齐者；缺省=泳道缺
-                              依赖时回落主树）。与 --repo-dir（被测树）解耦。
-  ensure --project <名> [--keep] [...同 up 旗标]   幂等确保：健康台复用；半残拆重起；
-                              --keep=在跑台不拆不换（供给台语义，撞车时复测健康再试）
-  down --project <名>       拆台（down -v + 零残留核验）；幂等，不存在亦 0
-  selftest                  白盒自测（不碰 docker）：禁区排除/档位锁/畸形输入拒收
+Subcommands:
+  up --project <name> [--services temporal|dsh|full] [--namespace <ns>]
+     [--fixtures-dir <host dir>] [--profile-dir <host dir>] [--repo-dir <host dir>]
+     [--timeout <sec>]        bring a stage up; stdout gets the JSON
+                              {project,console,temporal,...}
+     [--nm-repo-dir <dir>]    plugin dependency tree (profile/node_modules fully
+                              installed; default = fall back to the main tree
+                              when the lane lacks them). Decoupled from
+                              --repo-dir (the tested tree).
+  ensure --project <name> [--keep] [...same flags as up]   idempotent ensure:
+                              a healthy stage is reused; a half-dead one is torn
+                              down and rebuilt; --keep = never tear down or swap
+                              a running stage (supply-stage semantics: on a
+                              clash, re-check health and retry)
+  down --project <name>      tear the stage down (down -v + zero-residue check);
+                              idempotent, exits 0 when absent too
+  selftest                   white-box self test (never touches docker):
+                              forbidden-port exclusion / band locks / malformed
+                              input rejection
 
-退出码（三态契约，integration/README.md）：
-  0=ok；2=ENV_FAIL（docker 缺席/镜像缺席/起台不健康/端口段耗尽——文案点名缺什么）；
-  3=环境冲突（显式指定端口被占，不对抗）；64=用法/畸形输入（场景代码 bug 级）。
+Exit codes (three-state contract, integration/README.md):
+  0=ok; 2=ENV_FAIL (docker absent / image absent / unhealthy boot / port band
+  exhausted — the message names what is missing);
+  3=environment conflict (an explicitly requested port is taken; do not fight
+  it); 64=usage/malformed input (scenario-code bug class).
 
-## 故障模式处置（逐项对照旧舞台的故障，说结论）
+## Failure-mode handling (item by item against the old stage's failures, with the verdict)
 
-| 旧舞台故障 | 本模块处置 |
+| old-stage failure | this module's handling |
 | --- | --- |
-| 端口撞车（钉死端口） | 档位 flock 原子预留 + 禁区排除 + bind 探测。锁贯穿「探测→compose up→健康」全程，释放前端口已被 daemon 真绑定=闭 TOCTOU |
-| 并发串台 | 独立 compose 工程名 + 独立容器名 + 独立卷前缀 + 档位锁。隔离粒度升到容器级 |
-| 持有者崩溃锁不释 | 锁 fd 只在本进程：进程死=内核收 fd=锁自释。死前容器已绑端口时，后来者 bind 探测见忙即滑档 |
-| teardown 重入崩溃 | down 幂等：工程不存在/容器已清均 0 退出，可三连 |
-| detached 进程泄漏 | 容器由 docker daemon 持有、无宿主孙进程树，down 即全灭——docker 化根除该故障面 |
-| 起服务超时无诊断 | 超时带 `docker compose logs` 尾部（2000 字节）+ 就地 down -v 清场再退 |
-| 误连生产 fail-closed | 禁区硬排除 {3099,3199,7233,8233,17233,18233} + 起台后 JSON 端口 ∉ 生产端口自检 |
-| preset 不合拒跑 | 不带：留在 capture-lane（台与证据语义分层） |
-| 五路径终态回收 | CLI 侧：正常/报错/超时/SIGINT/SIGTERM 全走 down -v 清场 |
+| port collision (pinned ports) | band flock atomic reservation + forbidden-zone exclusion + bind probe. The lock spans the whole "probe -> compose up -> healthy" window; by release time the daemon has really bound the port = TOCTOU closed |
+| concurrent cross-talk | own compose project name + own container names + own volume prefix + band lock. Isolation granularity raised to container level |
+| holder crash keeps the lock | the lock fd lives only in this process: process death = kernel closes the fd = the lock releases itself. If the container already bound the port before the crash, the next entrant's bind probe sees it busy and slides to the next band |
+| teardown re-entry crash | down is idempotent: missing project / already-cleared containers both exit 0, safe to call three times in a row |
+| detached process leaks | containers are held by the docker daemon, no host grandchild process tree; down kills everything — dockerization removes this failure surface |
+| service start times out with no diagnosis | the timeout carries a `docker compose logs` tail (2000 bytes) + an in-place down -v cleanup before exiting |
+| accidental production connect, fail-closed | hard forbidden set {3099,3199,7233,8233,17233,18233} + a post-boot self-check that the JSON ports are outside the production set |
+| preset missing refuses to run | it does not: stay on the capture lane (stage and evidence semantics stay layered) |
+| five-path terminal reclamation | CLI side: normal/error/timeout/SIGINT/SIGTERM all run the down -v cleanup |
 
-状态与锁：
-  锁/状态根 = $SANDBAR_STAGE_LOCK_DIR > ~/.sandbar/test-stages > 平台临时区回落
-  （回落打印 stderr 一行，不静默）。band-<n>.lock 为档位锁；
-  project-<名>.json 为在跑台状态（ensure 复用凭据）。
+State and locks:
+  lock/state root = $SANDBAR_STAGE_LOCK_DIR > ~/.sandbar/test-stages > platform
+  temp fallback (the fallback prints one stderr line, never silent).
+  band-<n>.lock is the band lock;
+  project-<name>.json is the running-stage state (ensure's reuse credential).
 """
 
 from __future__ import annotations
@@ -63,30 +79,33 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 COMPOSE_FILE = REPO / "server" / "docker-compose.test.yml"
 TEMPORAL_IMAGE = "test-temporal:cli-1.8.3"
 TEMPORAL_BUILD_SCRIPT = "server/build-test-temporal.sh"
-DSH_IMAGE = "test-dsh:dsh-0.1.1-rc.2"          # 260908：dsh 烤进镜像，起台免每台联网 npm
+DSH_IMAGE = "test-dsh:dsh-0.1.1-rc.2"          # 260908: dsh baked into the image, no per-stage networked npm at boot
 DSH_BUILD_SCRIPT = "server/build-test-dsh.sh"
 
-# 禁区：生产三口（3099/7233/8233）+ 缺省测试台三口（3199/17233/18233）。
-# 档位分配永不返回禁区端口；显式 env 指定禁区端口=拒收。
+# Forbidden zone: the three production ports (3099/7233/8233) + the three
+# default test-bench ports (3199/17233/18233).
+# Band allocation never returns a forbidden port; naming one via env explicitly = rejected.
 FORBIDDEN_PORTS = {3099, 3199, 7233, 8233, 17233, 18233}
-PROD_PORTS = {3099, 7233, 8233}          # 生产面（bench.PROD_PORTS 同口径 + 3099 console）
+PROD_PORTS = {3099, 7233, 8233}          # production surface (same set as bench.PROD_PORTS + the 3099 console)
 DEFAULT_CONSOLE_PORT, DEFAULT_TEMPORAL_PORT, DEFAULT_TEMPORAL_UI_PORT = 3199, 17233, 18233
 
-# 端口档位：21000 起每档 10 宽（console=+0 / temporal=+1 / ui=+2）。
-# 档位基址在常见内核临时端口区间（Linux 32768+ / macOS 49152+）之下，结构性安全；
-# 运行时再读 ip_local_port_range 剔除重叠（读不到=跳过该纵深防御，不单点依赖）。
+# Port bands: 10 wide each, starting at 21000 (console=+0 / temporal=+1 / ui=+2).
+# The band base sits below the common kernel ephemeral ranges (Linux 32768+ /
+# macOS 49152+) — structurally safe;
+# at runtime ip_local_port_range is read as well to strip overlap (unreadable =
+# skip that defense layer, no single point of dependence).
 BAND_BASE, BAND_STEP, BAND_COUNT = 21000, 10, 400
 SLOT_OFFSET = {"console": 0, "temporal": 1, "ui": 2}
 
 PROJECT_RE = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
-DEFAULT_TIMEOUT = 600          # 健康等待上限（盖过 dsh 容器首装 npm i + apt 的实测预算）
-_STOP_TIMEOUT = 120            # compose down 上限
+DEFAULT_TIMEOUT = 600          # health-wait ceiling (covers the measured dsh container first-boot npm i + apt budget)
+_STOP_TIMEOUT = 120            # compose down ceiling
 
 EXIT_OK, EXIT_ENV, EXIT_CONFLICT, EXIT_FAIL, EXIT_USAGE = 0, 2, 3, 1, 64
 
 
 class StageError(Exception):
-    """带退出码语义的舞台错误：kind ∈ env/conflict/usage。"""
+    """Stage error carrying exit-code semantics: kind ∈ env/conflict/usage."""
 
     def __init__(self, message, kind="env"):
         super().__init__(message)
@@ -94,10 +113,11 @@ class StageError(Exception):
         self.exit_code = {"env": EXIT_ENV, "conflict": EXIT_CONFLICT, "usage": EXIT_USAGE}[kind]
 
 
-# ---------------------------------------------------------------- 基础探测
+# ---------------------------------------------------------------- basic probes
 
 def bind_free(port, host="127.0.0.1") -> bool:
-    """端口空闲=能独占 bind（比 connect 探测强：半开/TIME_WAIT 也算不可用）。"""
+    """A port is free only if we can bind it exclusively (stronger than a
+    connect probe: half-open/TIME_WAIT also count as unavailable)."""
     s = socket.socket()
     try:
         s.bind((host, int(port)))
@@ -120,13 +140,14 @@ def port_open(port, host="127.0.0.1", timeout=1.0) -> bool:
 def http_ok(url, timeout=2.0) -> bool:
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
-            return 200 <= r.status < 500  # 控制台 4xx（如未就绪重定向）也算 HTTP 活着
+            return 200 <= r.status < 500  # a console 4xx (e.g. a not-ready redirect) still counts as HTTP alive
     except Exception:
         return False
 
 
 def ephemeral_range():
-    """内核临时端口区间（best-effort，review N2：非 Linux 读不到=返回 None，不崩）。"""
+    """Kernel ephemeral port range (best-effort; review N2: non-Linux reads
+    nothing -> return None, do not crash)."""
     try:
         text = pathlib.Path("/proc/sys/net/ipv4/ip_local_port_range").read_text()
         lo, hi = (int(x) for x in text.split()[:2])
@@ -141,7 +162,8 @@ def band_ports(band_index):
 
 
 def band_ports_ok(ports, ephemeral=None):
-    """档位三端口全部可用（禁区/临时区间构造性排除 + bind 探测）。"""
+    """All three band ports usable (constructive forbidden/ephemeral exclusion
+    + bind probe)."""
     for p in ports.values():
         if p in FORBIDDEN_PORTS:
             return False
@@ -152,7 +174,7 @@ def band_ports_ok(ports, ephemeral=None):
     return True
 
 
-# ---------------------------------------------------------------- 锁与状态根
+# ---------------------------------------------------------------- locks and state root
 
 _LOCK_ROOT_CACHE = None
 
@@ -170,7 +192,9 @@ def lock_root() -> pathlib.Path:
     for source, root in candidates:
         try:
             root.mkdir(parents=True, exist_ok=True)
-            # 探针名带 pid+时钟：并发双起互删同名探针会假报「不可写」（L1 并发用例实锤）
+            # the probe name carries pid + clock: two concurrent boots deleting each
+            # other's same-named probe would falsely report "unwritable" (proven by
+            # the L1 concurrency case)
             probe = root / (".probe-%d-%d" % (os.getpid(), time.time_ns()))
             probe.write_text("ok", encoding="utf-8")
             probe.unlink()
@@ -194,7 +218,8 @@ def lock_root() -> pathlib.Path:
 
 
 def _lock_band(band_index):
-    """flock 独占档位（非阻塞）。成功返回 fd（调用方负责关闭=释放）。"""
+    """flock a band exclusively (non-blocking). Returns the fd on success
+    (the caller closing it = releasing)."""
     path = lock_root() / ("band-%d.lock" % band_index)
     try:
         fd = os.open(str(path), os.O_CREAT | os.O_RDWR, 0o644)
@@ -212,9 +237,12 @@ def _lock_band(band_index):
 
 
 def state_busy_ports():
-    """在跑台（state 文件在 + 容器在）占用的端口面——choose_band 的第二道 busy 判据。
-    bind 探测探不到「daemon 绑了但 holder 恰死」的窗口；state+容器双在=台活着，端口
-    即便瞬时空也别碰。容器不在=陈旧 state（起台进程崩溃未 down）→ 就地清理不阻塞档位。"""
+    """Ports held by running stages (state file present + containers present) —
+    choose_band's second busy check. A bind probe cannot see the window where
+    "the daemon bound it but the holder just died"; state + containers both
+    present = the stage is alive, so leave its ports alone even when they look
+    momentarily free. No containers = stale state (a boot that crashed before
+    down) -> clean it up in place without blocking the band."""
     busy = set()
     for f in lock_root().glob("project-*.json"):
         try:
@@ -225,16 +253,20 @@ def state_busy_ports():
             if residue_containers(str(project)):
                 busy.update(int(p) for p in (st.get("ports") or {}).values())
             else:
-                f.unlink()   # 陈旧 state：容器已灭，档位让出（崩溃残留自愈）
+                f.unlink()   # stale state: containers gone, the band is given up (crash-residue self-heal)
         except (OSError, ValueError):
             continue
     return busy
 
 
 def choose_band(ephemeral=None):
-    """原子预留一个端口档：flock 占位 → bind 探测 + 在跑台 state 面，全过才占用。
-    返回 (band_index, ports, fd)。锁只护「探测→daemon 真绑定」窗口，up 完成即释放
-    （此后由 daemon 绑定 + state 面接管避让——崩溃自释无死锁）。全档耗尽=StageError(env)。"""
+    """Atomically reserve one port band: flock placeholder -> bind probe +
+    running-stage state face; occupy it only if all checks pass.
+    Returns (band_index, ports, fd). The lock only guards the "probe -> daemon
+    really bound" window and is released as soon as up finishes (from then on
+    the daemon's binding + the state face take over collision avoidance — a
+    crash releases the lock, so no deadlock). All bands exhausted =
+    StageError(env)."""
     busy_state = state_busy_ports()
     for i in range(BAND_COUNT):
         ports = band_ports(i)
@@ -244,8 +276,9 @@ def choose_band(ephemeral=None):
             continue
         fd = _lock_band(i)
         if fd is None:
-            continue          # 档被并发者占走 → 滑下一档（非阻塞不排队，见头注取舍）
-        # 锁内复核：并发者可能 probe 后才上锁/起台，拿到锁后再探一次
+            continue          # band taken by a concurrent entrant -> slide to the next (non-blocking, no queueing; see the header trade-off)
+        # re-check inside the lock: a concurrent entrant may have probed before
+        # locking/booting, so probe once more after taking the lock
         if not band_ports_ok(ports, ephemeral) or (set(ports.values()) & state_busy_ports()):
             os.close(fd)
             continue
@@ -279,7 +312,7 @@ def clear_state(project):
         pass
 
 
-# ---------------------------------------------------------------- docker 门槛
+# ---------------------------------------------------------------- docker gates
 
 def _run(cmd, timeout, env=None, check=True):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
@@ -312,7 +345,8 @@ def dsh_image_present():
 
 
 def compose_env(project, services, ports, opts):
-    """compose 渲染 env（docker-compose.test.yml 的 SANDBAR_TEST_* 旋钮）。"""
+    """Env for rendering compose (the SANDBAR_TEST_* knobs of
+    docker-compose.test.yml)."""
     env = dict(os.environ)
     env["SANDBAR_TEST_TEMPORAL_NAME"] = "%s-temporal" % project
     env["SANDBAR_TEST_DSH_NAME"] = "%s-dsh" % project
@@ -322,27 +356,36 @@ def compose_env(project, services, ports, opts):
     env["SANDBAR_TEST_CONSOLE_PORT"] = str(ports["console"])
     if opts.get("repo_dir"):
         env["SANDBAR_TEST_REPO_DIR"] = str(opts["repo_dir"])
-    # 插件依赖树与被测树解耦：/repo=被测 workbench 树，
-    # /repo-nm=profile/node_modules 装齐的树（缺省回落主树）。
+    # Plugin dependency tree decoupled from the tested tree: /repo = the tested
+    # workbench tree,
+    # /repo-nm = a tree with profile/node_modules installed (falls back to the main tree by default).
     env["SANDBAR_TEST_NM_REPO_DIR"] = str(opts.get("nm_repo_dir") or default_repo_dir())
-    # admin.log 遮蔽文件预创建（compose 单文件 bind 的宿主端必须存在，否则 docker
-    # 会建出目录）：每台独立 tmp 副本，主树/泳道真 admin.log 不被测试触碰。
+    # Pre-create the admin.log shadow file (the host side of a compose
+    # single-file bind must exist, otherwise docker creates a directory): one
+    # independent tmp copy per stage, so the main tree's/lane's real admin.log
+    # is never touched by tests.
     admin_log = pathlib.Path(tempfile.gettempdir()) / ("sandbar-admin-log-%s.log" % project)
     if not admin_log.exists():
         admin_log.touch()
     env["SANDBAR_TEST_ADMIN_LOG"] = str(admin_log)
-    # 容器端挂载点预创建（票 t260905-08 泳道实锤）：compose 对 /repo 与 /repo-nm 两处
-    # 单文件 bind admin.log，而 /repo 挂 :ro——被挂树若无 server/admin.log，docker 建
-    # 挂载点=EROFS 起台炸（主树常在跑有此文件，泳道 worktree 作 /repo 即现形）。
-    # *.log 是 gitignored 运行时物，touch 空文件不触交付面。
+    # Pre-create the container-side mount points (proven in a lane by
+    # t260905-08): compose single-file binds admin.log at both /repo and
+    # /repo-nm, and /repo is mounted :ro — if the mounted tree has no
+    # server/admin.log, docker creating the mount point = EROFS and the boot
+    # explodes (the main tree usually has the file while running; a lane
+    # worktree as /repo exposes it).
+    # *.log is a gitignored runtime artifact, so touching an empty file never
+    # touches the deliverable surface.
     for tree in (opts.get("repo_dir") or str(REPO), opts.get("nm_repo_dir") or default_repo_dir()):
         server_dir = pathlib.Path(tree) / "server"
         if server_dir.is_dir():
             shadow = server_dir / "admin.log"
             if not shadow.exists():
                 shadow.touch()
-    # 凭据物化：容器台缺凭据=壳层准入遮罩全屏拦截指针（自搭台对照实锤）。
-    # 源：env SANDBAR_TEST_CREDENTIALS > ~/.sandbar/projects/suyou > <repo>/.dsh > 主树 .dsh。
+    # Materialize credentials: a container stage without credentials = the
+    # shell-access overlay blocking the pointer full-screen (proven against a
+    # self-built stage).
+    # Source: env SANDBAR_TEST_CREDENTIALS > ~/.sandbar/projects/suyou > <repo>/.dsh > main-tree .dsh.
     cred_env = os.environ.get("SANDBAR_TEST_CREDENTIALS")
     cred_src = None
     for cand in ([cred_env] if cred_env else []) + [
@@ -355,11 +398,12 @@ def compose_env(project, services, ports, opts):
     cred_dst = pathlib.Path(tempfile.gettempdir()) / ("sandbar-credentials-%s.yaml" % project)
     if cred_src:
         shutil.copyfile(cred_src, cred_dst)
-        os.chmod(cred_dst, 0o600)  # dsh credentials-local fail-closed：644=拒启（gen4 实锤）
+        os.chmod(cred_dst, 0o600)  # dsh credentials-local is fail-closed: 644 = refuses to start (proven in gen4)
         env["SANDBAR_TEST_CREDENTIALS"] = str(cred_dst)
-    # agent preset 物化（会话创建依赖 sandbar-integration preset；源=宿主  # naming-compat
-    # ~/.dsh/.agent-presets/<项目> 或仓内 .dsh 同位）。缺失=空目录（preset 缺失
-    # 诚实呈现），不阻塞起台。
+    # agent preset materialization (session creation depends on the  # naming-compat
+    # sandbar-integration preset; source = host ~/.dsh/.agent-presets/<project>
+    # or the in-repo .dsh sibling). Missing = an empty directory (preset
+    # absence shown honestly), boot not blocked.
     presets_dir = pathlib.Path(tempfile.gettempdir()) / ("sandbar-agent-presets-%s" % project)
     presets_dir.mkdir(parents=True, exist_ok=True)
     preset_name = "sandbar-integration"  # naming-compat
@@ -387,8 +431,9 @@ def compose_env(project, services, ports, opts):
     if opts.get("projects_dir"):
         env["SANDBAR_TEST_PROJECTS_DIR"] = str(opts["projects_dir"])
     if "temporal" not in services:
-        # dsh-only 舞台：容器内引擎地址钉死不可达回环口（场景的「Temporal 不可达」
-        # 断言面；127.0.0.1:1 在容器内恒拒绝）。绝不落生产 7233。
+        # dsh-only stage: pin the in-container engine address to an unreachable
+        # loopback port (the scenario's "Temporal unreachable" assertion face;
+        # 127.0.0.1:1 always refuses inside the container). Never a production 7233.
         env["SANDBAR_TEST_TARGET_HOST"] = "127.0.0.1:1"
     return env
 
@@ -410,7 +455,8 @@ def compose_logs_tail(project, env, limit=2000):
 
 
 def residue_containers(project):
-    """该工程名下的残留容器清单（零残留核验面）。"""
+    """Residual container list under that project name (the zero-residue check
+    face)."""
     try:
         p = _run(["docker", "ps", "-a", "--filter",
                   "label=com.docker.compose.project=%s" % project,
@@ -420,7 +466,7 @@ def residue_containers(project):
         return ["<docker ps 不可用>"]
 
 
-# ---------------------------------------------------------------- 校验
+# ---------------------------------------------------------------- validation
 
 def validate_project(project):
     if not PROJECT_RE.match(str(project or "")):
@@ -447,7 +493,8 @@ def validate_dir(label, value, required=False):
 
 
 def validate_port_env(name, value):
-    """显式端口旋钮校验：数字/范围/禁区/被占——每条失败都点名检查项。"""
+    """Validate explicit port knobs: numeric/range/forbidden/taken — every
+    failure names what to check."""
     if value is None:
         return None
     v = str(value).strip()
@@ -466,7 +513,8 @@ def validate_port_env(name, value):
 
 
 def explicit_ports(services):
-    """env 显式指定端口路径（全有或全无，杜绝半指定歧义）。"""
+    """The env-explicit-port path (all or nothing, so half-specified ambiguity
+    is impossible)."""
     names = {"console": "SANDBAR_TEST_CONSOLE_PORT", "temporal": "SANDBAR_TEST_TEMPORAL_PORT",
              "ui": "SANDBAR_TEST_TEMPORAL_UI_PORT"}
     values = {k: os.environ.get(v) for k, v in names.items()}
@@ -486,7 +534,7 @@ def explicit_ports(services):
     return {k: validate_port_env(names[k], v) for k, v in given.items()}
 
 
-# ---------------------------------------------------------------- 健康探针
+# ---------------------------------------------------------------- health probes
 
 def wait_temporal(port, timeout):
     t0 = time.time()
@@ -508,7 +556,7 @@ def wait_console(port, timeout):
 
 
 def stage_healthy(state):
-    """ensure 复用判定：容器在跑 + 端口活着。"""
+    """ensure's reuse test: containers running + ports alive."""
     if not state:
         return False
     if not residue_containers(state["project"]):
@@ -522,9 +570,12 @@ def stage_healthy(state):
 # ---------------------------------------------------------------- namespace/SA
 
 def resolve_temporal_cli():
-    """temporal CLI 解析（env > 泳道位 > 主树回退）。"""
-    # env 钉指路不存在/泳道主树均缺=明确不可得，不吞：吞异常会让依赖它的 L1 用例
-    # 假设漂移（supply 自愈在泳道建 bin 软链后实锤）。
+    """Resolve the temporal CLI (env pointer > lane location > main-tree
+    fallback)."""
+    # env pointer nonexistent / both the lane and the main tree missing it =
+    # explicitly unavailable, never swallowed: swallowing the exception would
+    # let the L1 cases depending on it drift their assumptions (proven once
+    # supply's self-heal created the lane's bin symlink).
     try:
         import bench  # noqa: PLC0415 同目录共享库
         return str(bench.resolve_temporal_bin())
@@ -536,17 +587,22 @@ def resolve_temporal_cli():
 
 
 def register_namespace(ns, addr, timeout=30):
-    """namespace + ProjectKey/EpicCode SA + 保留期（幂等；tolerate already exist）。
-    返回 (ok, 说明)。temporal CLI 缺失/失败不阻塞起台——返回 False 由 JSON 如实呈现，
-    依赖 SA 的场景（ticket-start 带 project）会在客户端大声报错（不静默）。"""
+    """namespace + ProjectKey/EpicCode SA + retention period (idempotent;
+    tolerate "already exist").
+    Returns (ok, note). A missing/failing temporal CLI does not block the boot —
+    the False is reported honestly in the JSON, and scenarios depending on the
+    SA (ticket-start with a project) fail loudly client-side (never silently)."""
     cli = resolve_temporal_cli()
     if not cli or not pathlib.Path(cli).exists():
         return False, "temporal CLI 不可得（%s 缺失，env SANDBAR_TEMPORAL_BIN 可指路）——SA/保留期未注册" % cli
     last_err = ""
 
     def cli_ok(args, tolerate):
-        # namespace 服务在 TCP 就绪后仍有短暂未就绪窗——失败短重试（3 次×2s）；
-        # 失败附 CLI stderr 尾（吞 stderr=「create 失败」无从归因，违反报错精确性纪律）。
+        # the namespace service still has a short not-ready window after TCP is
+        # up — retry briefly on failure (3 x 2s);
+        # attach the CLI stderr tail to a failure (swallowing stderr turns it
+        # into a bare "create failed" with nothing to attribute, breaking the
+        # error-precision discipline).
         nonlocal last_err
         for attempt in range(3):
             try:
@@ -573,21 +629,26 @@ def register_namespace(ns, addr, timeout=30):
                       ("already exist", "already defined", "already registered")):
             return False, "SA %s 注册失败（ns=%s）：%s" % (name, ns, last_err)
     cli_ok(["operator", "namespace", "update", "--retention", "876000h",
-            "--namespace", ns, "--address", addr], ())  # 保留期尽力而为，失败仅缺保留
+            "--namespace", ns, "--address", addr], ())  # retention is best-effort; on failure only the retention is missing
     return True, "namespace+SA 就绪"
 
 
 # ---------------------------------------------------------------- up / down / ensure
 
 def _bootstrap_lane_nm():
-    """泳道侧自举 profile 农场链（t260907-10 供给面自愈；gen4 补 headless 变体）。
+    """Bootstrap the lane-side profile farm links (t260907-10 supply-side
+    self-heal; gen4 added the headless variant).
 
-    目录重构后农场链=五条相对软链（sandbar-* → ../../plugins/<目录>），纯运行期
-    工件（gitignored），任何新泳道/新克隆都天然缺——供给必须自愈而非依赖手工预制。
-    两变体同链（profile 与 profile-headless 的 node_modules 同款五链，cordis.patch.yml
-    注释钦点「两份保持一致」）——只建 web 漏 headless 是 t260907-05 农场场景钉过的
-    对抗面。幂等：链在即跳过；目标插件目录缺席（实现未落地态）不硬造，交由调用方
-    报环境红。
+    After the directory restructure the farm chain is five relative symlinks
+    (sandbar-* -> ../../plugins/<dir>), pure runtime artifacts (gitignored),
+    which every new lane/fresh clone naturally lacks — supply must self-heal
+    rather than depend on manual preparation. Both variants share the chain
+    (profile and profile-headless carry the same five links in node_modules;
+    the cordis.patch.yml comments decree "keep the two identical") — building
+    only web and missing headless is exactly the adversarial shape the
+    t260907-05 farm scenario pinned. Idempotent: skip when the links exist.
+    When a target plugin directory is absent (implementation not landed), do
+    not fabricate it — hand the environment red to the caller.
     """
     farm = [("sandbar-admin-ui", "ui"), ("sandbar-workbench", "workbench"),
             ("sandbar-knowledge", "knowledge"), ("sandbar-providers", "providers"),
@@ -613,20 +674,27 @@ def _bootstrap_lane_nm():
 
 
 def default_repo_dir():
-    """REPO 挂载默认值（gen2 真容器实锤③）：容器内 dsh 是 npm 全局装的控制台，
-    /repo 只供 profile+插件——泳道 worktree 恒缺 gitignored 的 profile/node_modules，
-    挂泳道=插件解析失败（ERR_MODULE_NOT_FOUND）。故：泳道 profile 带插件依赖→挂
-    泳道（缺则先自举农场链，t260907-10）；否则回落主树（git common dir 的父级，主树
-    已装齐）。capture/bench 场景被测 workbench 不受影响（经 profile 软链显式指
-    /repo/server/plugins/workbench，而该路径只在被测树作为 repo_dir 显式传入时才有
-    意义——lib_fix15/bench-shot 均显式传）。"""
+    """Default value for the REPO mount (gen2, proven on a real container, 3):
+    the in-container dsh is an npm-globally-installed console, and /repo only
+    serves the profile + plugins — a lane worktree always lacks the gitignored
+    profile/node_modules, so mounting the lane = plugin resolution failure
+    (ERR_MODULE_NOT_FOUND). Therefore: if the lane's profile carries the plugin
+    dependencies, mount the lane (bootstrapping the farm links first when they
+    are missing, t260907-10); otherwise fall back to the main tree (parent of
+    the git common dir, where everything is installed). capture/bench
+    scenarios' tested workbench is unaffected (they point at
+    /repo/server/plugins/workbench explicitly through the profile symlink, and
+    that path only means anything when the tested tree is passed explicitly as
+    repo_dir — lib_fix15/bench-shot both pass it explicitly)."""
     nm_complete = all(
         (REPO / "server" / prof / "node_modules" / pkg).is_symlink()
         for prof in ("profile", "profile-headless")
         for pkg in ("sandbar-admin-ui", "sandbar-workbench", "sandbar-knowledge",
                     "sandbar-providers", "sandbar-temporal-tools"))
-    # 完备性判据=两变体十链齐：单 profile 在而 headless 缺的半成品态曾短路跳过
-    # 自举（票 t260907-05 农场场景 profile-headless 五链红即此因）
+    # Completeness test = all ten links across the two variants: the half-built
+    # state (profile present, headless missing) used to short-circuit and skip
+    # the bootstrap (the t260907-05 farm scenario's profile-headless five-link
+    # red was exactly this)
     if nm_complete or _bootstrap_lane_nm():
         return str(REPO)
     try:
@@ -644,8 +712,9 @@ def default_repo_dir():
 
 
 def _wait_diag(project, env):
-    """wait 失败诊断附件：容器状态行+日志尾（gen2 伴随①：报错必须精确——
-    「console 600s 未就绪」曾把 EROFS crash loop 误导向「慢」）。"""
+    """Diagnostic attachment for a failed wait: container status lines + log
+    tail (gen2 companion 1: errors must be precise — "console not ready in
+    600s" once mis-directed an EROFS crash loop as "slow")."""
     parts = []
     try:
         p = _run(["docker", "ps", "-a", "--filter",
@@ -661,11 +730,14 @@ def _wait_diag(project, env):
 
 
 def do_up(project, services_list, opts, timeout, lock_fd=None):
-    """起台本体（锁由调用方持有；失败路径就地 down -v 清场再抛）。"""
+    """The boot itself (lock held by the caller; the failure path runs the
+    down -v cleanup in place before re-raising)."""
     ports = opts["ports"]
     env = compose_env(project, services_list, ports, opts)
-    # 总时限预算：--timeout 罩住 up+wait 全程（此前 up 与 wait 各自独立吃满 timeout，
-    # 900s 参数实测可拖 20+ 分钟不自退）。清理面（down/logs）另有自身短超时，不计入。
+    # Total time budget: --timeout covers the whole up+wait (previously up and
+    # wait each got the full timeout independently — a 900s value was measured
+    # to drag past 20 minutes without self-terminating). Cleanup (down/logs)
+    # has its own short timeouts and is not counted.
     t0 = time.time()
 
     def _remaining(minimum=30):
@@ -698,7 +770,7 @@ def do_up(project, services_list, opts, timeout, lock_fd=None):
     if "temporal" in services_list:
         sa_registered, sa_note = register_namespace(env["SANDBAR_TEST_NAMESPACE"],
                                                     "127.0.0.1:%d" % ports["temporal"])
-    # 红线自检：起台端口绝不含生产面
+    # Red-line self-check: booted ports never include the production surface
     for name, p in ports.items():
         if p in PROD_PORTS:
             _do_down(project, env, quiet=True)
@@ -714,7 +786,8 @@ def do_up(project, services_list, opts, timeout, lock_fd=None):
 
 
 def _do_down(project, env=None, quiet=False):
-    """down -v + 容器清单核验（内部版本：不清状态文件由 do_down 统一管）。"""
+    """down -v + container list check (internal version: state-file clearing is
+    managed centrally by do_down)."""
     env = env if env is not None else dict(os.environ)
     try:
         compose_cmd(project, ["down", "-v", "--remove-orphans", "--timeout", "30"],
@@ -725,7 +798,8 @@ def _do_down(project, env=None, quiet=False):
 
 
 def do_down(project):
-    """拆台：down -v + 零残留核验 + 清状态文件。幂等（工程不存在亦成功）。"""
+    """Tear a stage down: down -v + zero-residue check + clear the state file.
+    Idempotent (succeeds when the project does not exist too)."""
     validate_project(project)
     if not docker_present():
         raise StageError("docker 不可用（docker info 失败）——拆台需要 docker", kind="env")
@@ -740,7 +814,9 @@ def do_down(project):
 
 
 def do_ensure(project, services_list, opts, timeout, keep=False):
-    """幂等确保：健康台复用；半残拆重起；--keep=不拆在跑台（N3：撞车先复测健康）。"""
+    """Idempotent ensure: reuse a healthy stage; tear down and rebuild a
+    half-dead one; --keep = never tear down a running stage (N3: on a clash,
+    re-check health first)."""
     validate_project(project)
     state = read_state(project)
     if state and stage_healthy(state):
@@ -748,7 +824,8 @@ def do_ensure(project, services_list, opts, timeout, keep=False):
         state["reused"] = True
         return state
     if state and keep and residue_containers(project):
-        # --keep：在跑但不健康——不拆（可能他泳道同窗在用），如实报环境红
+        # --keep: running but unhealthy — do not tear it down (another lane may
+        # be using it in the same window); report the environment red honestly
         raise StageError("供给台 %s 在跑但不健康（ports=%s）；--keep 语义不拆在跑台——"
                          "人工核查或去旗重跑" % (project, state.get("ports")), kind="env")
     if state:
@@ -757,7 +834,8 @@ def do_ensure(project, services_list, opts, timeout, keep=False):
 
 
 def do_up_public(project, services_list, opts, timeout):
-    """up 完整流程：校验 → docker/镜像门槛 → 端口（显式 env 或档位分配）→ 起台。"""
+    """Full up flow: validate -> docker/image gates -> ports (explicit env or
+    band allocation) -> boot."""
     validate_project(project)
     if not docker_present():
         raise StageError("ENV_FAIL: docker 不可用（docker info 失败）——本票测试台一律走 "
@@ -781,10 +859,10 @@ def do_up_public(project, services_list, opts, timeout):
         return do_up(project, services_list, opts, timeout, lock_fd=lock_fd)
     finally:
         if lock_fd is not None:
-            os.close(lock_fd)   # daemon 已真绑定端口，释放后无冲突窗口（头注取舍）
+            os.close(lock_fd)   # the daemon has really bound the ports; releasing now leaves no conflict window (header trade-off)
 
 
-# ---------------------------------------------------------------- selftest（白盒，不碰 docker）
+# ---------------------------------------------------------------- selftest (white box, never touches docker)
 
 def selftest():
     fails = []
@@ -794,7 +872,8 @@ def selftest():
         if not cond:
             fails.append(label)
 
-    # ① 禁区/临时区间构造性排除：全部档位端口永不落禁区与临时区间
+    # 1. constructive forbidden/ephemeral exclusion: no band port ever lands in
+    # the forbidden set or the ephemeral range
     eph = ephemeral_range()
     all_ports = [p for i in range(BAND_COUNT) for p in band_ports(i).values()]
     ok(not (set(all_ports) & FORBIDDEN_PORTS),
@@ -809,7 +888,8 @@ def selftest():
     ok(len({tuple(sorted(band_ports(i).items())) for i in range(BAND_COUNT)}) == BAND_COUNT,
        "档位端口两两不重叠")
 
-    # ② 档位锁互斥：同进程第二 OFD flock 必败（内核语义）
+    # 2. band lock mutual exclusion: a second OFD flock in the same process
+    # must fail (kernel semantics)
     fd = _lock_band(0)
     ok(fd is not None, "band-0 首次上锁成功")
     if fd is not None:
@@ -820,7 +900,7 @@ def selftest():
         if fd2 is not None:
             os.close(fd2)
 
-    # ③ 畸形输入拒收（每条点名检查项，零副作用）
+    # 3. malformed-input rejection (each naming what it checks, zero side effects)
     for project in ("Bad_Name", "", "-x", "a" * 50, "大写"):
         try:
             validate_project(project)
@@ -840,7 +920,7 @@ def selftest():
     except StageError as e:
         ok(e.kind == "usage" and "fixtures-dir" in str(e), "fixtures-dir 拒收点名检查项")
     try:
-        os.environ["SANDBAR_TEST_CONSOLE_PORT"] = "21001"  # 只给 console=半指定
+        os.environ["SANDBAR_TEST_CONSOLE_PORT"] = "21001"  # console only = half-specified
         explicit_ports(("temporal",))
         ok(False, "端口半指定应拒收")
     except StageError as e:
@@ -848,7 +928,7 @@ def selftest():
     finally:
         os.environ.pop("SANDBAR_TEST_CONSOLE_PORT", None)
 
-    # ④ 服务集校验
+    # 4. service-set validation
     for bad in ("", "all", "temporal,dsh"):
         try:
             validate_service_set(bad)
@@ -943,7 +1023,8 @@ def main(argv):
 
 
 def _signal_teardown(project_holder):
-    """SIGTERM 路径：能拿到工程名就清场（四路径回收的信号腿）。"""
+    """SIGTERM path: clean up whenever the project name is available (the
+    signal leg of the multi-path reclamation)."""
     def handler(signum, frame):
         project = project_holder.get("project")
         if project:
@@ -957,7 +1038,8 @@ def _signal_teardown(project_holder):
 
 
 if __name__ == "__main__":
-    # 信号腿需要工程名——粗粒度：从 argv 抓 --project 后注册 handler。
+    # The signal leg needs the project name — coarse approach: grab --project
+    # from argv, then register the handler.
     _holder = {}
     if "--project" in sys.argv:
         idx = sys.argv.index("--project")
