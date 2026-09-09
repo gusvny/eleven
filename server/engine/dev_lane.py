@@ -916,7 +916,7 @@ class DevLaneWorkflow:
                 break
             await self._blocked("workspace", "工作空间准备失败：%s" % (res.error or "未知"))
             if self._rework is not None:
-                self._apply_rework("create_plan")  # 目标步由主循环接管
+                self._apply_rework("create_plan")  # target stage is taken over by the main loop
 
         # t260904-18 KI-050 gate 3: preload the ui_evidence declaration (the disk read
         # happens in an activity, the workflow only reads meta = replay safe).
@@ -1951,7 +1951,7 @@ class DevLaneWorkflow:
                 await workflow.wait_condition(
                     lambda: ("merge" in self._sigs) or (self._rework is not None))
                 if self._rework is not None:
-                    continue  # 主循环顶部统一跳步
+                    continue  # unified stage-skip at the top of the main loop
                 sig = self._sigs.pop("merge")
                 self.signatures["merge"] = {"who": sig.who, "decision": sig.decision,
                                             "note": sig.note, "at": self._now_iso()}

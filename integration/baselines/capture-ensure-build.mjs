@@ -73,7 +73,7 @@ function mainCheckoutRoot(laneRoot) {
   const r = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"],
     { cwd: laneRoot, encoding: "utf8" });
   if (r.status !== 0) return null;
-  const gitDir = (r.stdout || "").trim(); // <main>/.git（worktree 的 gitfile 指向它）
+  const gitDir = (r.stdout || "").trim(); // <main>/.git (the worktree gitfile points here)
   return gitDir ? path.dirname(gitDir) : null;
 }
 
