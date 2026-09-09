@@ -1,19 +1,22 @@
 /**
- * smoke/agent-usage.mjs —— t260828-07「token 消耗聚合」冒烟（observability 立项）。
+ * smoke/agent-usage.mjs — smoke for token usage aggregation (t260828-07, observability epic).
  *
- * 直跑：node smoke/agent-usage.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * 覆盖：
- *   A. stageWindowsFromTimeline（src/host/agent-usage.ts）：timeline running 条目 →
- *      时间窗（第 i 窗=[from_i, from_{i+1})，末窗开放式）；同 stage 重入多窗；
- *      非法/缺 at 过滤；空 timeline → 空数组。
- *   B. aggregateTicketUsage：真 zstd 压自制 jsonl 桩（zstd 不在 PATH 则整段跳过并说明）——
- *      usage 加总与 assistant/chunk 同名 usage 不计（防翻倍，review 意见 1）；
- *      模型归因（request/context，request/header 兜底）；按窗口落 stage；
- *      首窗前事件只进 total；畸形输入（坏 JSON/usage 缺字段/非数值/无 time）不炸；
- *      多文件加总；文件缺失/无 usage → exists=false + 人话 reason。
- *   C. resolveAllSessionFiles + agent-usage 路由：多角色全取（别工单不混入）；
- *      worktree='..' 越界 → 400（防穿，review 意见 2）；坏 id → 400；
- *      正常 → 200 带 byStage/models；无会话 → 200 {exists:false,reason}。
+ * Run: node smoke/agent-usage.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+ * Covers:
+ *   A. stageWindowsFromTimeline (src/host/agent-usage.ts): timeline running entries ->
+ *      time windows (window i = [from_i, from_{i+1}), last window open-ended); re-entering
+ *      the same stage makes multiple windows; entries with bad/missing at are filtered; empty
+ *      timeline -> empty array.
+ *   B. aggregateTicketUsage: real zstd-compressed homemade jsonl stub (if zstd is not on
+ *      PATH the whole section is skipped with a note) — usage summed and same-named
+ *      assistant/chunk usage not double-counted (anti-double-count, review comment 1);
+ *      model attribution (request/context, request/header fallback); events placed into
+ *      windows by stage; events before the first window only count into total; malformed
+ *      input (bad JSON / missing usage fields / non-numeric / no time) must not crash;
+ *      multi-file aggregation; missing file / no usage -> exists=false + human-readable reason.
+ *   C. resolveAllSessionFiles + agent-usage route: all roles collected (other tickets must
+ *      not leak in); worktree='..' escape -> 400 (escape guard, review comment 2); bad id ->
+ *      400; normal -> 200 with byStage/models; no sessions -> 200 {exists:false,reason}.
  */
 
 import { execFile } from 'node:child_process'
@@ -37,7 +40,7 @@ function ok(cond, label) {
 }
 function section(t) { console.log(`\n== ${t}`) }
 
-/** 压一串事件成 session.jsonl.zstd（真 zstd；桩固定文件，不靠真外部会话）。 */
+/** Compress a sequence of events into session.jsonl.zstd (real zstd; the stub uses fixed files, no real external sessions). */
 async function zpack(events, outPath) {
   const plain = join(tmp, `fix-${Math.random().toString(36).slice(2)}.jsonl`)
   await writeFile(plain, events.map(e => JSON.stringify(e)).join('\n') + '\n', 'utf8')
@@ -68,7 +71,7 @@ try {
     ok(stageWindowsFromTimeline([{ at: '垃圾', stage: 'x', state: 'running' }]).length === 0,
       '非法 at 过滤不炸')
     ok(stageWindowsFromTimeline(undefined).length === 0, 'undefined → 空数组')
-    // 乱序输入按时间排序
+    // Out-of-order input sorted by time
     const w2 = stageWindowsFromTimeline([tl[2], tl[0], tl[1]])
     ok(w2.length === 3 && w2[0].stage === 'create_plan' && w2[2].stage === 'review_plan', '乱序按时间排序')
   }
@@ -89,16 +92,16 @@ try {
       { stage: 'review_plan', fromMs: T2, toMs: null },
     ]
     const ev1 = [
-      // 模型归因源：request/context
+      // Model attribution source: request/context
       { type: 'request/context', seq: 1, time: T0 + 1000, data: { provider: 'deepseek', model: 'm-alpha' } },
-      // 窗口 1 的一条 usage……
+      // One usage entry in window 1...
       { type: 'assistant/message', seq: 2, time: T0 + 2000, data: { usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 1000 } } },
-      // ……以及它的 chunk 镜像（同一份 usage，加了就翻倍——review 意见 1 的防呆用例）
+      // ...and its chunk mirror (same usage — adding it would double-count; the anti-double-count case from review comment 1)
       { type: 'assistant/chunk', seq: 3, time: T0 + 2000, data: { chunk: { type: 'usage', usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 1000 } } } },
-      // 窗口 2（implement），换模型
+      // Window 2 (implement), different model
       { type: 'request/context', seq: 4, time: T1 + 1000, data: { provider: 'deepseek', model: 'm-beta' } },
       { type: 'assistant/message', seq: 5, time: T1 + 2000, data: { usage: { inputTokens: 200, outputTokens: 20 } } },
-      // 畸形输入一堆：坏 JSON、usage 缺字段、usage 非数值、无 time、usage 非对象——都不炸不多算
+      // A pile of malformed input: bad JSON, missing usage fields, non-numeric usage, no time, non-object usage — none crash, none over-count
       { type: 'assistant/message', seq: 6, time: T1 + 3000, data: { usage: { inputTokens: 'abc', outputTokens: null } } },
       { type: 'assistant/message', seq: 7, data: { usage: { inputTokens: 5 } } }, // 无 time → 不落段
     ]
@@ -112,17 +115,18 @@ try {
     ok(r1.byStage.create_plan?.input === 100 && r1.byStage.create_plan?.cacheRead === 1000, '窗口 1 落 create_plan')
     ok(r1.byStage.implement?.input === 200 && r1.byStage.implement?.output === 20, '窗口 2 落 implement（同角色跨 stage 切分）')
     ok(r1.byStage.review_plan === undefined, '无事件的段不出现')
-    // 模型分账：m-alpha 100/10、m-beta 200/20；畸形那条 0（值非法当 0）——分账总账对得上
+    // Per-model split: m-alpha 100/10, m-beta 200/20; the malformed one is 0 (bad value treated as 0) — the split must add back up to the total
     ok(r1.models.length === 2, `两个模型（多模型才显模型名的依据）实得 ${r1.models.length}`)
     const alpha = r1.models.find(m => m.model === 'm-alpha')
     const beta = r1.models.find(m => m.model === 'm-beta')
     ok(alpha?.input === 100 && beta?.input === 205, '模型归因跟 request/context 走（无 time 的畸形条归当前模型 beta）')
     ok(alpha.provider === 'deepseek' && beta.provider === 'deepseek', 'provider 一并归因')
-    // 无 time 的畸形条（input 5）：进 total（300+5=305？不——inputTokens='abc' 非数值是 0；
-    // seq7 的 5 无 time 只是不落段，total 仍收）→ total.input=305, byStage 合计 300
+    // Malformed entry without time (input 5): goes into total (300+5=305? no — inputTokens='abc'
+    // is non-numeric so it is 0; seq7's 5 has no time so it only skips the stage bucket, total
+    // still collects it) -> total.input=305, byStage sums to 300
     ok(r1.total.input === 305, `无 time 的事件进 total 不落段（total 305 ≥ Σstage 300）实得 ${r1.total.input}`)
 
-    // 首窗之前的事件：只进 total 不落段
+    // Events before the first window: only count into total, no stage bucket
     const evEarly = [
       { type: 'assistant/message', seq: 1, time: T0 - 60_000, data: { usage: { inputTokens: 50, outputTokens: 5 } } },
     ]
@@ -131,7 +135,7 @@ try {
     const rEarly = await aggregateTicketUsage([fEarly], windows)
     ok(rEarly.total.input === 50 && Object.keys(rEarly.byStage).length === 0, '首窗前事件只进 total（total ≥ ΣbyStage 口径）')
 
-    // request/header 兜底（无 request/context 时）
+    // request/header fallback (when request/context is absent)
     const fHdr = join(tmp, 'hdr.zstd')
     await zpack([
       { type: 'request/header', seq: 1, time: T0, data: { header: { config: { provider: 'zai', model: 'm-fallback' } } } },
@@ -140,12 +144,12 @@ try {
     const rHdr = await aggregateTicketUsage([fHdr], windows)
     ok(rHdr.models[0]?.model === 'm-fallback' && rHdr.models[0]?.input === 7, '无 request/context → request/header 兜底归因')
 
-    // 多文件加总（多角色各一份）
+    // Multi-file aggregation (one file per role)
     const rMulti = await aggregateTicketUsage([file1, fHdr], windows)
     ok(rMulti.files === 2 && rMulti.total.input === 305 + 7, `多角色文件加总（in=${rMulti.total.input}）`)
     ok(rMulti.exists === true, '多文件任一有 usage → exists')
 
-    // 降级：文件不存在 / 压根无 usage / 全是坏行
+    // Degradation: file missing / no usage at all / all lines bad
     const rMiss = await aggregateTicketUsage([join(tmp, 'nope.zstd')], windows)
     ok(rMiss.exists === false && (rMiss.reason ?? '').includes('不存在'), '文件缺失 → exists=false + 人话 reason')
     const fEmpty = join(tmp, 'empty.zstd')
@@ -156,11 +160,12 @@ try {
     await writeFile(fBad, '这不是zstd内容'.repeat(100), 'utf8')
     const rBad = await aggregateTicketUsage([fBad], windows)
     ok(rBad.exists === false && (rBad.reason ?? '').includes('解压失败'), '坏文件 → 解压失败人话降级')
-    // 混合：一份好 + 一份坏 → 好的照常出数
+    // Mixed: one good + one bad file -> the good one still reports numbers
     const rMix = await aggregateTicketUsage([file1, fBad], windows)
     ok(rMix.exists === true && rMix.total.input === 305, '一份坏不毁整体加总')
-    // 入参防呆（t260829-05）：paths 缺参/空数组不裸炸（原实现读 paths.length 会 TypeError），
-    // 与「无会话文件」同一软降级出口（畸形输入用例，消费外部输入的实现必带）
+    // Input guards (t260829-05): missing/empty paths array must not throw raw (the original
+    // implementation would TypeError on paths.length) — same graceful-degradation exit as
+    // "no session files" (malformed-input case; anything consuming external input needs this)
     const rUndef = await aggregateTicketUsage(undefined, windows)
     ok(rUndef.exists === false && rUndef.files === 0 && (rUndef.reason ?? '') !== '', 'paths=undefined → exists=false 不炸（入参防呆）')
     const rNull = await aggregateTicketUsage(null, [])
@@ -169,7 +174,7 @@ try {
     ok(rNone.exists === false && rNone.files === 0 && (rNone.reason ?? '') !== '', 'paths=[] → exists=false + reason')
   }
 
-  /* ---------------------------------------------------- C. resolveAll + 路由 */
+  /* ---------------------------------------------------- C. resolveAll + route */
   section('C resolveAllSessionFiles + agent-usage 路由')
   const repo = join(tmp, 'repo')
   const wt = join(repo, '.worktrees', 'wt')
@@ -179,7 +184,7 @@ try {
   await mkdir(join(sessDir, 't-c-integration'), { recursive: true })
   await mkdir(join(sessDir, 'other-ticket-developer'), { recursive: true })
 
-  // 造带 usage 的会话桩（放在 resolveAll 之前：空目录 → 无文件降级路径已在 B/rNone 覆盖）
+  // Build a session stub with usage (before resolveAll: the empty-dir -> no-files degradation path is already covered in B/rNone)
   {
     const T0 = Date.parse('2026-08-28T10:00:00')
     const T1 = Date.parse('2026-08-28T11:00:00')
@@ -266,8 +271,9 @@ sys.exit(1)
     r = await call(`${pre}/t-no-session/agent-usage`)
     ok(r.status === 200 && r.body.result.exists === false && r.body.result.reason !== undefined,
       '无会话文件 → 200 {exists:false,reason} 软降级（验收 4）')
-    // 只读端点无写分支：POST 不进 agent-usage 分支（落在路由层其它白名单路径上，此处不深究，
-    // 写操作防护由 OPS 操作白名单把守——见 node.ts OPS）。
+    // Read-only endpoint, no write branch: POST does not enter the agent-usage branch (it lands
+    // on some other whitelisted route path — not examined here; write protection is guarded by
+    // the OPS operation whitelist in node.ts).
   }
 } finally {
   await rm(tmp, { recursive: true, force: true })

@@ -1,20 +1,25 @@
 /**
- * smoke/chat-project-tag.mjs —— t260903-07 工单② 装饰器与索引单态冒烟。
+ * smoke/chat-project-tag.mjs — smoke for the ticket-2 decorator and index singleton (t260903-07).
  *
- * 直跑：node smoke/chat-project-tag.mjs（node ≥22.18 原生 type-stripping）。
+ * Run: node smoke/chat-project-tag.mjs (node >= 22.18 native type-stripping).
  *
- * 覆盖（方案 v2 R1 / v3 N2、R5 验收口径）：
- *   A. applyProjectTags：属性施加（幂等不叠加/同值跳过）、映射消失回收、负向排除
- *      （OWN_SCOPE_ATTR 子树不碰）、畸形消息文本不炸、映射缺失不施。
- *   B. project-tag-index 发布语义：成功覆盖；「成功但空」保留 last-known-good+warn 一次；
- *      失败分支不发=单态不变（KI-018 同族）；publishProjects 外部发布即关停兜底。
- *   C. startProjectIndexFallback：成功 onData、失败重试至上限、畸形响应不炸、全终态停止。
- *   D. startChatProjectTag：style 挂载 head（幂等）、scan 施加、stop 零残留（style+属性）、
- *      document 失联 stopped 停手不抛。
+ * Covers (plan v2 R1 / v3 N2, R5 acceptance criteria):
+ *   A. applyProjectTags: attribute applied (idempotent, no stacking / same value skipped),
+ *      mapping removal recovers, negative exclusion (OWN_SCOPE_ATTR subtree untouched),
+ *      malformed message text does not crash, missing mapping -> nothing applied.
+ *   B. project-tag-index publish semantics: success overwrites; "success but empty" keeps
+ *      last-known-good + warns once; the failure branch publishes nothing = singleton
+ *      unchanged (same family as KI-018); publishProjects from outside stops the fallback.
+ *   C. startProjectIndexFallback: success calls onData, retries to the cap on failure,
+ *      malformed response does not crash, stops after all terminals.
+ *   D. startChatProjectTag: style mounted on head (idempotent), scan applies, stop leaves
+ *      zero residue (style + attributes), document lost -> stopped, no throw.
  *
- * 覆盖边界（如实声明）：DOM 用自有最小桩（非 jsdom、非真实 React 环境）——本 smoke
- * 只断言纯逻辑与属性/样式挂载机制；React 协调安全性由机制层「零 childList」结构保证
- * （见 chat-project-tag.ts 头注），此处不做也做不了真 React 协调断言。
+ * Coverage boundary (declared honestly): the DOM is a homemade minimal stub (not jsdom,
+ * not a real React environment) — this smoke only asserts pure logic and the attribute/style
+ * mounting mechanism; React reconciliation safety is guaranteed structurally by the
+ * "zero childList" design (see chat-project-tag.ts header); real React reconciliation
+ * assertions are out of scope here.
  */
 
 import {
@@ -33,9 +38,9 @@ function ok(cond, label) {
 }
 function section(t) { console.log(`\n== ${t}`) }
 
-/* ------------------------------------------------ 最小 DOM 桩 */
+/* ------------------------------------------------ Minimal DOM stub */
 
-/** 元素：属性表 + 子节点 + 父链；querySelectorAll 只认本插件用到的三个选择器（覆盖边界见头注）。 */
+/** Element: attribute map + child nodes + parent chain; querySelectorAll only recognizes the three selectors this plugin uses (coverage boundary in the header). */
 class FakeEl {
   constructor(tag, attrs = {}, parent = null) {
     this.tagName = tag
@@ -93,7 +98,7 @@ class FakeDoc {
     if (sel === '[data-chat-anchor-key][data-chat-flow-kind="user"]') return this.rows.filter(r => r.isUserRow())
     return []
   }
-  /** 组一条用户消息行（text=消息文本；kind 可覆盖造 assistant 行）。 */
+  /** Build one user message row (text = message text; kind can override to make an assistant row). */
   addUserRow(text, { kind = 'user', scope = false } = {}) {
     const row = new FakeEl('div', { 'data-chat-anchor-key': `k${this.rows.length}`, 'data-chat-flow-kind': kind }, this.body)
     if (scope) row.setAttribute('data-wb-projtag-scope', '')
@@ -141,14 +146,14 @@ section('A applyProjectTags：施加/幂等/回收/排除/畸形')
   ok(rowA.getAttribute(PROJTAG_ATTR) === null && rowB.getAttribute(PROJTAG_ATTR) === null, '映射消失 → 回收属性')
   ok(n === 2, `回收计 2 行（got ${n}）`)
 
-  // 畸形消息文本不炸
+  // Malformed message text does not crash
   const weird = doc.addUserRow('t260903-07\x00\u2028 及超长 ' + 'x'.repeat(5000))
   doc.addUserRow('')
   doc.addUserRow(nullLike())
   ok(typeof applyProjectTags(doc, map) === 'number', '畸形文本（控制字符/超长/空）不炸')
   ok(weird.getAttribute(PROJTAG_ATTR) === 'suyou', '控制字符不影响工单 id 命中')
 
-  // 多工单引用取第一个
+  // Multiple ticket refs: the first one wins
   const two = doc.addUserRow('先 t260903-07 后 t260901-15')
   applyProjectTags(doc, map)
   ok(two.getAttribute(PROJTAG_ATTR) === 'suyou', '多引用取第一个命中（确定性）')
@@ -156,7 +161,7 @@ section('A applyProjectTags：施加/幂等/回收/排除/畸形')
 
 function nullLike() { return undefined }
 
-/* ---------------------------------------- B 索引发布语义 */
+/* ---------------------------------------- B. Index publish semantics */
 
 section('B 发布语义：覆盖/空保留 last-known-good/失败不发')
 {
@@ -169,7 +174,7 @@ section('B 发布语义：覆盖/空保留 last-known-good/失败不发')
   publishProjectEntry('suyou', ['t260903-07', 'bad-id', 42, null])
   ok(readProjectTagIndex().projectByTicket.get('t260903-07') === 'suyou', '合法工单 id 入映射，非法值过滤')
 
-  // 「成功但空」→ 保留 last-known-good + warn 一次
+  // "Success but empty" -> keep last-known-good + warn once
   let warned = 0
   const origWarn = console.warn
   console.warn = () => { warned++ }
@@ -179,12 +184,12 @@ section('B 发布语义：覆盖/空保留 last-known-good/失败不发')
   publishProjectEntry('suyou', [])
   ok(warned === 1, `同项目只 warn 一次（got ${warned}）`)
 
-  // 「失败分支不发」=不调 publishProjectEntry，单态自然不变（此处模拟：直接断言现状）
+  // "Failure branch publishes nothing" = publishProjectEntry not called, so the singleton naturally stays unchanged (here simulated: just assert current state)
   const before = readProjectTagIndex().projectByTicket.size
-  // （模拟一次失败轮询：什么都不发）
+  // (simulate one failed poll: nothing is published)
   ok(readProjectTagIndex().projectByTicket.size === before, '失败不发 → 单态不变（KI-018 同族）')
 
-  // 覆盖：非空新值替换旧值（含工单迁移出项目）
+  // Overwrite: a new non-empty value replaces the old (including a ticket moving out of a project)
   publishProjectEntry('suyou', ['t260902-01'])
   const after = readProjectTagIndex().projectByTicket
   ok(after.get('t260902-01') === 'suyou' && !after.has('t260903-07'), '非空新值整体替换（迁移出映射正确摘除）')
@@ -194,7 +199,7 @@ section('B 发布语义：覆盖/空保留 last-known-good/失败不发')
   ok(projectForText(42, after) === null && projectForText('', after) === null, '畸形文本 → null')
 }
 
-/* ---------------------------------------- C 兜底自取 */
+/* ---------------------------------------- C. Fallback self-fetch */
 
 section('C startProjectIndexFallback：成功/失败重试/畸形响应')
 {
@@ -220,7 +225,7 @@ section('C startProjectIndexFallback：成功/失败重试/畸形响应')
   ok(calls === callsAtSuccess, '有数据后不再重试（停止条件）')
   stop()
 
-  // 全失败 → 重试至上限后停
+  // All fail -> retries to the cap, then stops
   _resetProjectTagIndex()
   let failCalls = 0
   stop = startProjectIndexFallback({
@@ -234,7 +239,7 @@ section('C startProjectIndexFallback：成功/失败重试/畸形响应')
   ok(failCalls === c, '达上限后停手（防永久轮询）')
   stop()
 
-  // 畸形响应不炸
+  // Malformed response does not crash
   _resetProjectTagIndex()
   stop = startProjectIndexFallback({
     fetchImpl: async () => ({ json: async () => ({ result: { projects: 'not-an-array' } }) }),
@@ -244,7 +249,7 @@ section('C startProjectIndexFallback：成功/失败重试/畸形响应')
   ok(!readProjectTagIndex().hasData, '畸形响应：不炸、单态保持空（tag 不渲染）')
   stop()
 
-  // 外部发布即自停
+  // External publish stops the fallback immediately
   _resetProjectTagIndex()
   let extCalls = 0
   stop = startProjectIndexFallback({ fetchImpl: goodFetch, initialDelayMs: 1, retryIntervalMs: 2, maxAttempts: 50 })
@@ -258,11 +263,11 @@ section('C startProjectIndexFallback：成功/失败重试/畸形响应')
 
 function tick(ms) { return new Promise(r => setTimeout(r, ms)) }
 
-/* ---------------------------------------- D 装饰器整体 */
+/* ---------------------------------------- D. Decorator as a whole */
 
 section('D startChatProjectTag：挂载/scan/stop 零残留/失联停手')
 {
-  // node 无 MutationObserver：桩一个（childList 回调不触发也行——scan 手动调用断言）
+  // node has no MutationObserver: stub one (childList callback not firing is fine — scan is called manually in assertions)
   class FakeMO { observe() {} disconnect() {} }
   globalThis.MutationObserver = FakeMO
 
@@ -279,19 +284,19 @@ section('D startChatProjectTag：挂载/scan/stop 零残留/失联停手')
   h.scan()
   ok(doc.rows[0].getAttribute(PROJTAG_ATTR) === 'suyou', 'scan 施加属性')
 
-  // 重复挂载不叠加（style 先查再建）
+  // Double mount does not stack (style looked up before creation)
   const h2 = startChatProjectTag({ fetchImpl: async () => { throw new Error('x') }, doc, fallback: { maxAttempts: 0 } })
   ok(doc.querySelectorAll('style[data-wb-projtag-style]').length === undefined || doc.head.children.filter(c => c.attrs['data-wb-projtag-style'] === '').length === 1, 'style 幂等：先查再建不叠加')
   h2.stop()
 
-  // stop 零残留
+  // stop leaves zero residue
   h.stop()
   ok(doc.querySelector('style[data-wb-projtag-style]') === null, 'stop：style 摘除')
   ok(doc.querySelectorAll(`[${PROJTAG_ATTR}]`).length === 0, 'stop：自有属性全摘（出厂树恢复原样）')
   h.stop() // 幂等
   ok(true, 'stop 幂等不炸')
 
-  // 失联停手
+  // Lost document -> stop and stay silent
   const doc2 = new FakeDoc()
   doc2.documentElement.isConnected = false
   const h3 = startChatProjectTag({ fetchImpl: async () => { throw new Error('x') }, doc: doc2, fallback: { maxAttempts: 0 } })
@@ -303,8 +308,9 @@ section('D startChatProjectTag：挂载/scan/stop 零残留/失联停手')
 
 section("E startChatProjectTagEffect：effect 形态入口（F1 接线防呆回归网）")
 {
-  // F1 死因：useEffect 直接返回 handle 对象=cleanup 被忽略、卸载零回收。
-  // effect 入口必须返回**函数**（useEffect 只认函数 cleanup），且调用它=全终态回收。
+  // F1 cause of death: useEffect returning the handle object directly = cleanup ignored,
+  // zero recovery on unmount. The effect entry must return a **function** (useEffect only
+  // accepts a function as cleanup), and calling it must do full terminal-state recovery.
   const doc3 = new FakeDoc()
   doc3.addUserRow('工单 t260903-07 再来')
   publishProjects([{ key: 'suyou', dirs: [] }])

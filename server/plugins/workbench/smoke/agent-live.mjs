@@ -1,19 +1,21 @@
 /**
- * smoke/agent-live.mjs —— t260825-03「agent 实时动态面板」宿主半冒烟。
+ * smoke/agent-live.mjs — host half-smoke for the agent live panel (t260825-03).
  *
- * 直跑：node smoke/agent-live.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * 覆盖：
- *   A. projectDirKey（src/host/agent-live.ts）：cwd-slug 规则与 dsh 侧一致——分隔符
- *      坍缩/前导 '-' 剥离/非常规字符 ~XXXX 转义/251 截断/包 `--…--`；本泳道真实 cwd
- *      对拍（已知真实目录名）。
- *   B. resolveSessionFile：泳道工单 → <wsRoot>/.dsh/sessions/<slug>/<id>-<role>/
- *      session.jsonl.zstd 命中；role 不匹配时前缀扫描兜底取 mtime 最新；worktree='..'
- *      越界 → refused（防穿）；无 sessions 目录/无本工单会话 → reason 人话。
- *   C. readAgentLiveTail + /sandbar-workbench/api/wf/tickets/<id>/agent-live 路由
- *      （node.ts apply + mock webServer/req/res + stub admin.py）：真 zstd 压 fixture
- *      （zstd 不在 PATH 则跳过 C 段并说明）；坏 id → 400；逃逸 worktree 工单 → 400；
- *      正常工单 → 200 + 尾部 N 条事件摘要（assistant 截断/工具调用名+目标路径）；
- *      会话文件缺失 → 200 {exists:false,reason}；n 参数钳制。
+ * Run: node smoke/agent-live.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+ * Covers:
+ *   A. projectDirKey (src/host/agent-live.ts): the cwd-slug rule must match the dsh side —
+ *      separator collapse / strip leading '-' / escape odd chars as ~XXXX / truncate at 251 /
+ *      wrap as `--...--`; checked against this lane's real cwd (the real directory name is known).
+ *   B. resolveSessionFile: lane ticket -> <wsRoot>/.dsh/sessions/<slug>/<id>-<role>/
+ *      session.jsonl.zstd hit; wrong role falls back to a prefix scan picking the newest mtime;
+ *      worktree='..' escape -> refused (path guard); no sessions dir / no session for this
+ *      ticket -> a human-readable reason.
+ *   C. readAgentLiveTail + the /sandbar-workbench/api/wf/tickets/<id>/agent-live route
+ *      (node.ts apply + mock webServer/req/res + stub admin.py): real zstd-compressed fixture
+ *      (if zstd is not on PATH, section C is skipped with a note); bad id -> 400; escaped-
+ *      worktree ticket -> 400; normal ticket -> 200 + last N event summaries (assistant
+ *      truncated / tool call name + target path); missing session file -> 200 {exists:false,
+ *      reason}; the n param is clamped.
  */
 
 import { execFile } from 'node:child_process'
@@ -39,7 +41,7 @@ try {
   /* ------------------------------------------------------------ A. projectDirKey */
   section('A projectDirKey（cwd-slug 规则与 dsh 侧一致）')
   {
-    // 真实目录名对拍（260907 本泳道实测：.lane/<ticket> 布局）：/Users/user/Documents/sandbar/.lane/t260907-01
+    // Check against the real directory name (measured in this lane on 260907: .lane/<ticket> layout): /Users/user/Documents/sandbar/.lane/t260907-01
     const real = projectDirKey('/Users/user/Documents/sandbar/.lane/t260907-01')
     ok(real === '--Users-user-Documents-sandbar-.lane-t260907-01--', `真实泳道 cwd → ${real}`)
     ok(projectDirKey('/a//b\\\\c:d') === '--a-b-c-d--', '分隔符 / \\ : 连续串坍缩成一个 -')
@@ -89,7 +91,7 @@ try {
     ok(r6.path === undefined && (r6.reason ?? '').includes('不存在'), 'sessions 目录不存在 → reason 降级')
   }
 
-  /* ------------------------------------------------------------ C. readAgentLiveTail + 路由 */
+  /* ------------------------------------------------------------ C. readAgentLiveTail + route */
   section('C readAgentLiveTail + agent-live 路由')
   let hasZstd = true
   try { await execFileP('zstd', ['--version']) } catch { hasZstd = false }
@@ -132,7 +134,7 @@ try {
     const miss = await readAgentLiveTail(join(tmp, 'nope.zstd'), 30)
     ok(miss.exists === false && (miss.reason ?? '').includes('不存在'), '文件缺失 → exists=false + reason')
 
-    // 路由（mock webServer + stub admin.py）
+    // Route (mock webServer + stub admin.py)
     await mkdir(join(repo, 'server'), { recursive: true })
     await writeFile(join(repo, 'server', 'admin.py'), `import json, sys
 if len(sys.argv) >= 4 and sys.argv[1] == 'call' and sys.argv[2] == 'ticket':
@@ -197,8 +199,8 @@ sys.exit(1)
       '无会话文件 → 200 {exists:false,reason} 降级不抛错')
   }
 
-  /* ------------------------------------------------------------ D. 轮级新鲜度行（KI-024）
-   * 与 C 段同块（复用 ctx/routes/mock 路由夹具）。 */
+  /* ------------------------------------------------------------ D. per-round freshness line (KI-024)
+   * Same block as section C (reuses the ctx/routes/mock route fixture). */
   section('D 轮级新鲜度行（KI-024，t260903-04）：step/start / llm/retry 上屏')
   if (!hasZstd) {
     console.log('  （跳过 D 段：zstd 不在 PATH）')
@@ -207,9 +209,11 @@ sys.exit(1)
     const slug = projectDirKey(wt)
     const sessPath = join(wt, '.dsh', 'sessions', slug, 't-smoke-2-developer', 'session.jsonl.zstd')
     await mkdir(join(wt, '.dsh', 'sessions', slug, 't-smoke-2-developer'), { recursive: true })
-    // 桩 fixture：复刻 t260903-01 静默窗的事件形态（真会话 zstd -dc 逐行对拍）——
-    // spawn 引导期只有 session/request/step 元信息与 chunk 流；llm/retry 是上游
-    // 限流/超时的自动重试。期望：step/start 与 llm/retry 各出一行，其余不上屏。
+    // Stub fixture: mirrors the event shape of the t260903-01 silent window (line-by-line
+    // checked against a real session via zstd -dc) — during agent spawn bootstrap only
+    // session/request/step meta info and the chunk stream appear; llm/retry is the upstream
+    // rate-limit/timeout auto-retry. Expect: one row each for step/start and llm/retry,
+    // nothing else on screen.
     const events = [
       { type: 'session', version: 0, id: 't-smoke-2-developer', createdAt: 1000 },
       { type: 'request/context', seq: 1, time: 2000, data: {} },
@@ -241,7 +245,7 @@ sys.exit(1)
     ok(!rows.some(e => e.type === 'result'), 'step/end / llm/retry-started / chunk 流不上屏')
     ok(rows.every(e => Number.isFinite(e.ts) && e.ts > 0), '每行带 epoch 秒时间戳')
 
-    // 端到端：路由透传新行型（前端 LIVE_TYPE_LABEL/CSS 按 type=step/retry 消费）
+    // End-to-end: the route passes new row types through (the frontend LIVE_TYPE_LABEL/CSS consume type=step/retry)
     const mockRes2 = () => ({
       status: 0, body: null,
       writeHead(s) { this.status = s },

@@ -1,17 +1,18 @@
 /**
- * smoke/agent-logs.mjs —— sandbar-workbench M12「Agent 日志」的宿主半冒烟。
+ * smoke/agent-logs.mjs — host half-smoke for the M12 "Agent logs" feature of sandbar-workbench.
  *
- * 直跑：node smoke/agent-logs.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * 覆盖：
- *   A. resolveAgentBaseDir（src/host/agent-logs.ts）：泳道工单 → <repo>/<worktree>/.suyou
- *      （防穿：越界 worktree → reason 拒绝）；workspace.dir 的 /tmp/sandbar-ws/ 隔离目录；
- *      无泳道 → /tmp/sandbar-ws/<id>/.suyou 兜底 + reason。
- *   B. listAgentLogs（临时目录）：不存在/空目录 → exists=false + reason；agent_*.log 与
- *      stage_*.json 按 (stage, gen) 排序；log 取尾部内容、result 解析 JSON；坏 JSON →
- *      parseError；junk 文件不入；超大文件截断标记。
- *   C. /sandbar-workbench/api/wf/tickets/<id>/agent-logs 路由（node.ts apply + mock
- *      webServer/req/res + stub admin.py）：坏 id → 400（不到文件层）；真工单 →
- *      200 + 泳道 .suyou 文件列表与内容；无 .suyou 目录 → 200 + reason 降级（不抛错）。
+ * Run: node smoke/agent-logs.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+ * Covers:
+ *   A. resolveAgentBaseDir (src/host/agent-logs.ts): lane ticket -> <repo>/<worktree>/.suyou
+ *      (escape guard: out-of-lane worktree -> refused with reason); the /tmp/sandbar-ws/
+ *      isolated dir from workspace.dir; no lane -> fallback /tmp/sandbar-ws/<id>/.suyou + reason.
+ *   B. listAgentLogs (temp dir): missing/empty dir -> exists=false + reason; agent_*.log and
+ *      stage_*.json sorted by (stage, gen); log returns tail content, result parses JSON; bad
+ *      JSON -> parseError; junk files excluded; oversized files get a truncation marker.
+ *   C. /sandbar-workbench/api/wf/tickets/<id>/agent-logs route (node.ts apply + mock
+ *      webServer/req/res + stub admin.py): bad id -> 400 (rejected before touching files);
+ *      real ticket -> 200 + lane .suyou file list and content; no .suyou dir -> 200 + reason
+ *      (graceful degradation, no error).
  */
 
 import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from 'node:fs/promises'
@@ -83,7 +84,7 @@ try {
     ok(res2.parseError !== undefined && res2.result === undefined, '坏 JSON → parseError 不解析')
     ok(r.files.every(f => f.size > 0 && f.mtime > 0), '每文件带尺寸/时间')
 
-    // 超大 log：截断标记 + 尾部保留
+    // Oversized log: truncation marker + tail kept
     const big = join(tmp, 'ws', 't-c', '.suyou')
     await mkdir(big, { recursive: true })
     await writeFile(join(big, 'agent_develop_gen1.log'), 'x'.repeat(70_000) + 'TAIL-MARK', 'utf8')
@@ -92,7 +93,7 @@ try {
       '超大 log 截断（取尾部）')
   }
 
-  /* ------------------------------------------------------------ C. 路由 */
+  /* ------------------------------------------------------------ C. Route */
   section('C /sandbar-workbench/api/wf/tickets/<id>/agent-logs 路由')
   {
     const repo = join(tmp, 'repo-route')
@@ -102,7 +103,7 @@ try {
     await writeFile(join(repo, '.worktrees', 'wt', '.suyou', 'agent_develop_gen1.log'), 'stub agent 日志行\n', 'utf8')
     await writeFile(join(repo, '.worktrees', 'wt', '.suyou', 'stage_develop_gen1.json'),
       JSON.stringify({ status: 'ok', summary: 'stub 完成' }), 'utf8')
-    // stub admin.py：只应答 call ticket show（返回带 worktree 的工单详情）
+    // stub admin.py: only answers call ticket show (returns ticket detail with worktree)
     await writeFile(join(repo, 'server', 'admin.py'), `import json, sys
 if len(sys.argv) >= 4 and sys.argv[1] == 'call' and sys.argv[2] == 'ticket':
     args = json.loads(sys.argv[3])
@@ -139,7 +140,7 @@ sys.exit(1)
     }
 
     const pre = '/sandbar-workbench/api/wf/tickets'
-    // 坏 id → 400（在 spawn admin.py 之前就拒，防穿）
+    // Bad id -> 400 (rejected before spawning admin.py, escape guard)
     let r = await call(`${pre}/${encodeURIComponent('..%2F..%2Fetc')}/agent-logs`)
     ok(r.status === 400, '坏 id → 400（防穿，不到文件层）')
     r = await call(`${pre}/t-smoke-1/agent-logs`)
@@ -150,7 +151,7 @@ sys.exit(1)
       && (r.body.result.files[0].content ?? '').includes('stub agent 日志行'), 'log 内容透传')
     ok(r.body.result.files[1].result?.summary === 'stub 完成', 'result 解析透传')
 
-    // 泳道 .suyou 不存在 → 200 + reason 降级（不抛错）
+    // Lane .suyou missing -> 200 + reason (graceful degradation, no error)
     const routes2 = []
     const ws2 = { register: (r) => { routes2.push(r); return () => {} } }
     const ctx2 = {
@@ -178,11 +179,12 @@ sys.exit(1)
       && res2.body.result.reason !== undefined, '无 .suyou → 200 + reason 降级')
   }
 
-  /* ------------------------------------- D. _sessionKbFast 选中语义（t260825-03 返工） */
+  /* ------------------------------------- D. _sessionKbFast selection semantics (t260825-03 rework) */
   section('D _sessionKbFast 按 mtime 最新选中活跃会话')
   {
-    // 多角色接力泳道：旧角色会话 size 大但已死，新角色会话 size 小但在涨——
-    // 必须选中 mtime 最新者（按 size 选会显示死会话 KB 并误报停涨）。
+    // Multi-role relay lane: the old role's session is large but dead, the new role's is
+    // small but growing — must pick the newest mtime (picking by size would show the dead
+    // session's KB and falsely report no growth).
     const sessRoot = join(tmp, 'ws', 't-d', '.dsh', 'sessions')
     const slug = '--tmp-x--'
     await mkdir(join(sessRoot, slug, 't-d-developer'), { recursive: true })
@@ -197,7 +199,7 @@ sys.exit(1)
     ok(r.path === newFile && r.kb === 1 && r.alive === true,
       '两会话不同 size/mtime → 选中 mtime 最新者（1KB 活会话，非 4KB 死会话）')
 
-    // 旧扁平布局兜底仍可用
+    // Old flat layout still works as fallback
     const flatRoot = join(tmp, 'ws', 't-flat', '.dsh', 'sessions')
     await mkdir(join(flatRoot, slug), { recursive: true })
     await writeFile(join(flatRoot, slug, 'session-abc123.zstd'), 'z'.repeat(2048), 'utf8')
@@ -211,7 +213,7 @@ sys.exit(1)
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed === 0 ? 0 : 1)
 
-// t260903-11 跨项目守卫放宽：extraRoots=票项目注册目录，命中放行、双失守拒
+// t260903-11 cross-project guard relaxed: extraRoots = the ticket's project registry dir, hit = allowed, miss on both = refused
 {
   const rOk = resolveAgentBaseDir(repo, 't-x11', { worktree: '/otherproj/.lane/t-x11' }, ['/otherproj'])
   ok(rOk.base === '/otherproj/.lane/t-x11/.suyou' && rOk.reason === undefined, 'extraRoots 命中 → 放行（跨项目票）')

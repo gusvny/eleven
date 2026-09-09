@@ -1,15 +1,16 @@
 /**
- * smoke/changes.mjs —— sandbar-workbench M9 PR 式审批台的宿主半冒烟。
+ * smoke/changes.mjs — host half-smoke for the M9 PR-style review panel of sandbar-workbench.
  *
- * 直跑：node smoke/changes.mjs（node ≥22.18 原生 type-stripping，直接 import .ts，
- * 无需编译）。覆盖：
- *   A. computeTicketDiff（src/host/changes.ts，临时 git 仓库 + 真实 worktree）：
- *      泳道道：doc=block diff / code=unified / data=前后值对账 / 新增 untracked /
- *      删除文件 / 无变更→emptyReason / 坏 base→空且说明；
- *      主树道：write_set+base..HEAD 给变更集；无 base/write_set→「无变更记录」。
- *   B. review 端点（node.ts apply + mock webServer/req/res，临时目录）：
- *      GET 空→POST 存→GET 读回；坏 id 400（防穿）；坏 conclude 400；
- *      admin.log 审计留痕（actor=sandbar-workbench + run-id）。
+ * Run: node smoke/changes.mjs (node >= 22.18 native type-stripping, imports .ts directly,
+ * no build needed). Covers:
+ *   A. computeTicketDiff (src/host/changes.ts, temp git repo + real worktree):
+ *      lane path: doc=block diff / code=unified / data=value pairs before/after / added
+ *      untracked / deleted files / no change -> emptyReason / bad base -> empty with reason;
+ *      main-tree path: write_set+base..HEAD gives the change set; no base/write_set ->
+ *      "no change records".
+ *   B. review endpoint (node.ts apply + mock webServer/req/res, temp dir):
+ *      GET empty -> POST store -> GET read back; bad id 400 (escape guard); bad conclude 400;
+ *      admin.log audit line (actor=sandbar-workbench + run-id).
  */
 
 import { execFileSync } from 'node:child_process'
@@ -57,7 +58,7 @@ try {
   git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'base'])
   const base = git(['rev-parse', 'HEAD']).trim()
 
-  // 泳道 worktree：改 doc/code/data + 删 gone.ts + 新增 untracked
+  // Lane worktree: change doc/code/data + delete gone.ts + add untracked
   git(['worktree', 'add', '.worktrees/wt', '-b', 'lane/smoke'])
   const wt = join(repo, '.worktrees/wt')
   await writeFile(join(wt, 'docs/design/x.md'), DOC_BASE.replace('讲一件事', '讲一件更大的事') + '\n## 新增小节\n\n全新段落。\n', 'utf8')
@@ -98,7 +99,7 @@ try {
 
   section('A1b 泳道道：引擎运行时目录排除（.dsh/ .suyou/）')
   {
-    // 在泳道里造 .dsh/ 和 .suyou/ 的 untracked 文件（模拟引擎运行时产物）
+    // Create untracked .dsh/ and .suyou/ files in the lane (engine runtime byproducts)
     await mkdir(join(wt, '.dsh'), { recursive: true })
     await mkdir(join(wt, '.suyou'), { recursive: true })
     await writeFile(join(wt, '.dsh/agent.log'), 'agent runtime log\n', 'utf8')
@@ -110,12 +111,12 @@ try {
     ok(!exPaths.some(p => p.startsWith('.dsh/')), '未出现 .dsh/ 文件')
     ok(!exPaths.some(p => p.startsWith('.suyou/')), '未出现 .suyou/ 文件')
     ok(typeof rEx.excludedEngineFiles === 'number' && rEx.excludedEngineFiles === 4, 'excludedEngineFiles=4（2 .dsh/ + 2 .suyou/）')
-    // 真变更不受影响：doc/code/data/fresh/gone 仍在
+    // Real changes unaffected: doc/code/data/fresh/gone still present
     ok(exPaths.includes('docs/design/x.md'), 'doc 仍在变更集')
     ok(exPaths.includes('src/code.ts'), 'code 仍在变更集')
     ok(exPaths.includes('src/fresh.ts'), 'untracked 新文件仍在变更集')
     ok(exPaths.includes('src/gone.ts'), '删除文件仍在变更集')
-    // committed diff 侧也排除：如果 .dsh/ 下有已跟踪文件，git pathspec 会排除
+    // Also excluded on the committed-diff side: a tracked file under .dsh/ is excluded via git pathspec
     const committedNames = exPaths.filter(p => !['src/fresh.ts'].includes(p)) // fresh 是 untracked
     ok(committedNames.every(p => !p.startsWith('.dsh/') && !p.startsWith('.suyou/')), 'committed 侧也无引擎文件')
   }
@@ -135,7 +136,7 @@ try {
 
   section('A2b 收口工单：merge commit 回放（泳道已拆，260824 详情页「看不见 diff」修复）')
   {
-    // 模拟 merge 收口：泳道提交 → main 上 merge commit → 拆 worktree + 删分支
+    // Simulate merge close-out: lane commits -> merge commit on main -> worktree removed + branch deleted
     git(['worktree', 'add', '.worktrees/wt9', '-b', 'lane/t-smoke-9'])
     const wt9 = join(repo, '.worktrees/wt9')
     await writeFile(join(wt9, 'src/merged.ts'), 'export const merged = 1\n', 'utf8')
@@ -148,21 +149,21 @@ try {
     ok(rM.source === 'merged' && rM.hasBase === true, 'source=merged 且 hasBase')
     const mf = rM.files.find(f => f.path === 'src/merged.ts')
     ok(mf?.status === 'added' && (mf.unified ?? '').includes('+export const merged = 1'), '回放含当时合入的新文件')
-    // 新内容从 merge commit 的 blob 读：merge 后再改同文件，回放的仍是「当时合入的」
+    // New content is read from the merge commit's blob: editing the same file after the merge replays the version that was merged
     await writeFile(join(repo, 'src/merged.ts'), 'export const merged = 2\n', 'utf8')
     git(['add', 'src/merged.ts'])
     git(['commit', '-m', 'later main change'])
     const rM2 = await computeTicketDiff(repo, { id: 't-smoke-9', worktree: '.worktrees/wt9', base_ref: base, write_set: ['src/merged.ts'] })
     const mf2 = rM2.files.find(f => f.path === 'src/merged.ts')
     ok((mf2?.unified ?? '').includes('+export const merged = 1') && !(mf2?.unified ?? '').includes('merged = 2'), '后续改动不污染回放（读 blob 不读工作树）')
-    // write_set 之外的文件不进回放
+    // Files outside write_set are not replayed
     const rM3 = await computeTicketDiff(repo, { id: 't-smoke-9', worktree: '.worktrees/wt9', base_ref: base, write_set: ['src/other.ts'] })
     ok(rM3.files.length === 0 && typeof rM3.emptyReason === 'string', 'write_set 不符 → 空 + 明说')
   }
 
   section('A3 主树道：write_set + git log')
   {
-    // 主树上再进一笔（相对 base 有变更）
+    // One more commit on main (a change relative to base)
     await writeFile(join(repo, 'docs/design/x.md'), DOC_BASE + '\n## 主树小节\n\n主树新增。\n', 'utf8')
     await writeFile(join(repo, 'src/outside.ts'), 'export const o = 1\n', 'utf8')
     git(['add', '.'])
@@ -182,7 +183,7 @@ try {
     ok((r.emptyReason ?? '').includes('无变更记录'), 'emptyReason 显「无变更记录」')
   }
 
-  /* ------------------------------------------------------------ B. review 端点 */
+  /* ------------------------------------------------------------ B. review endpoint */
 
   section('B review 端点（mock webServer）')
   {
@@ -214,10 +215,10 @@ try {
     }
 
     const pre = '/sandbar-workbench/api/wf/tickets'
-    // GET review 空
+    // GET review, empty
     let r = await call(`${pre}/t-smoke-1/review`)
     ok(r.status === 200 && r.body.ok === true && r.body.result.rounds.length === 0, 'GET review 空 rounds（非错误）')
-    // POST 存一轮
+    // POST one round
     r = await call(`${pre}/t-smoke-1/review`, 'POST', {
       base, conclude: 'changes-requested', reviewer: 'op-test',
       blocks: [
@@ -230,30 +231,30 @@ try {
     ok(saved.rounds.length === 1 && saved.rounds[0].conclude === 'changes-requested', '落盘 server/reviews/<工单id>.json')
     ok(saved.rounds[0].blocks.length === 2 && saved.rounds[0].blocks[0].comment === '这里要改', '块意见逐字段落盘')
     ok(saved.rounds[0].reviewer === 'op-test', 'reviewer 落盘')
-    // GET 读回
+    // GET reads it back
     r = await call(`${pre}/t-smoke-1/review`)
     ok(r.body.result.rounds.length === 1, 'GET review 读回一轮')
-    // 第二轮（多轮迭代）
+    // Second round (multi-round iteration)
     r = await call(`${pre}/t-smoke-1/review`, 'POST', { base, conclude: 'approved', blocks: [] })
     ok(r.body.ok === true && r.body.result.rounds === 2, '第二轮追加 rounds=2')
-    // 防穿：坏 id
+    // Escape guard: bad id
     r = await call(`${pre}/${encodeURIComponent('..%2F..%2Fetc')}/review`, 'POST', { base: '', conclude: 'approved', blocks: [] })
     ok(r.status === 400, 'review POST 坏 id → 400（防穿）')
     r = await call(`${pre}/${encodeURIComponent('a/b')}/review`)
     ok(r.status === 400 || r.status === 404, 'review GET 坏 id → 拒绝（400/404，不到文件层）')
-    // 坏 conclude
+    // Bad conclude
     r = await call(`${pre}/t-smoke-1/review`, 'POST', { base: '', conclude: 'lgtm', blocks: [] })
     ok(r.status === 400, '坏 conclude → 400')
-    // 缺 block_key
+    // Missing block_key
     r = await call(`${pre}/t-smoke-1/review`, 'POST', { base: '', conclude: 'approved', blocks: [{ summary: 'x' }] })
     ok(r.status === 400, 'block 缺 block_key → 400')
-    // diff 路由坏 id（在 spawn admin.py 之前就拒）
+    // diff route with bad id (rejected before spawning admin.py)
     r = await call(`${pre}/${encodeURIComponent('a/b')}/diff`)
     ok(r.status === 400 || r.status === 404, 'diff 坏 id → 拒绝（400/404，不到 spawn）')
-    // review 不支持的方法
+    // review method not supported
     r = await call(`${pre}/t-smoke-1/review`, 'PUT')
     ok(r.status === 405, 'review PUT → 405')
-    // 审计留痕
+    // Audit trail
     const log = await readFile(join(repo, 'server/admin.log'), 'utf8')
     const recs = log.trim().split('\n').map(l => JSON.parse(l))
     ok(recs.some(x => x.actor === 'sandbar-workbench' && x.name === 'review.save' && x.ok === true), 'admin.log 有 review.save 成功审计')

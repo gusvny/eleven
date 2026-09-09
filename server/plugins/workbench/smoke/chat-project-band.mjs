@@ -1,20 +1,24 @@
 /**
- * smoke/chat-project-band.mjs —— 右栏 chat 项目色带装饰器冒烟（票② R7，t260904-05）。
+ * smoke/chat-project-band.mjs — smoke for the right-rail chat project color band decorator (ticket 2 R7, t260904-05).
  *
- * 直跑：node smoke/chat-project-band.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * 被测=src/client/chat-project-band.ts（applyProjectBand 纯 DOM 面 + start/stop
- * 生命周期），DOM 用自有桩（无 jsdom），不依赖真平台包——机制对齐
- * smoke/chat-project-tag.mjs 的桩纪律。
+ * Run: node smoke/chat-project-band.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+ * Under test: src/client/chat-project-band.ts (applyProjectBand pure DOM side + start/stop
+ * lifecycle). The DOM is a homemade stub (no jsdom) and does not depend on real platform
+ * packages — the same stub discipline as smoke/chat-project-tag.mjs.
  *
- * 覆盖（对应模块头注故障模式取舍清单）：
- *   A. applyProjectBand：设属性/CSS 变量、幂等（同值跳过）、null/畸形 key 摘除、
- *      多锚齐设、0 锚无害、非元素节点跳过。
- *   B. hexToRgba：正常展开 + 畸形 hex 不抛（NaN 传播属调用方契约，不 crash）。
- *   C. start/stop 生命周期（document 桩）：style 注入与摘除、set→属性落、
- *      stop 后属性清零、stop 幂等、set 在 stop 后无害。
- *   D. MutationObserver 防重建：重建滚动体节点后回调重设属性（真
- *      MutationObserver 不可桩——以 scan 重入面验证：重建=新节点无属性，
- *      再 scan 补齐；Observer 连接性由代码审查+集成面看守，桩面只验重设逻辑）。
+ * Covers (matching the failure-mode tradeoff list in the module header):
+ *   A. applyProjectBand: sets attribute/CSS variable, idempotent (same value skipped),
+ *      null/malformed key removes the band, multiple anchors all set, zero anchors harmless,
+ *      non-element nodes skipped.
+ *   B. hexToRgba: normal expansion + malformed hex does not throw (NaN propagation is the
+ *      caller's contract, no crash).
+ *   C. start/stop lifecycle (document stub): style injected and removed, set -> attribute
+ *      written, stop clears attributes, stop idempotent, set after stop harmless.
+ *   D. MutationObserver rebuild guard: after the scroll-body node is rebuilt, the callback
+ *      re-applies attributes (a real MutationObserver cannot be stubbed — verified via the
+ *      scan re-entry surface: rebuild = new node without attributes, then scan fills them;
+ *      observer connectivity is guarded by code review + integration, the stub only checks
+ *      the re-apply logic).
  */
 
 import {
@@ -34,7 +38,7 @@ function ok(cond, label) {
 }
 function section(t) { console.log(`\n== ${t}`) }
 
-/** 自有 DOM 桩：最小 Element/Document 面（setattr/getattr/attr 记账 + style.setProperty）。 */
+/** Homemade DOM stub: minimal Element/Document surface (setattr/getattr/attribute bookkeeping + style.setProperty). */
 function el(tag = 'div', attrs = {}) {
   const node = {
     tagName: tag,
@@ -79,20 +83,20 @@ section('A applyProjectBand：设/摘/幂等/畸形/多锚')
   ok(applyProjectBand(root, 'suyou') === 0, '幂等：同值跳过零写动')
   ok(applyProjectBand(root, null) === 1 && a.getAttribute(PROJBAND_ATTR) === null, 'null=摘除（不在册不渲染）')
   ok(applyProjectBand(root, null) === 0, '幂等：无属性时摘除零写动')
-  // 畸形 key（账册是 localStorage 外部输入）：按 null 摘除，不设属性
+  // Malformed key (the ledger is external input via localStorage): treated as null -> band removed, no attribute set
   const b = el('div', { 'data-conversation-scroll': '' })
   const root2 = docOf(b)
   for (const bad of ['', 42, null, undefined, { x: 1 }, 'k'.repeat(65), 'bad\nkey']) {
     applyProjectBand(root2, bad)
     ok(b.getAttribute(PROJBAND_ATTR) === null, `畸形 key 不设属性（${JSON.stringify(String(bad)).slice(0, 12)}）`)
   }
-  // 多锚齐设 + 0 锚无害
+  // Multiple anchors all set + zero anchors harmless
   const c1 = el('div', { 'data-conversation-scroll': '' })
   const c2 = el('div', { 'data-conversation-scroll': '' })
   const root3 = docOf(c1, c2)
   ok(applyProjectBand(root3, 'sandbar') === 2 && c1.getAttribute(PROJBAND_ATTR) === 'sandbar' && c2.getAttribute(PROJBAND_ATTR) === 'sandbar', 'N 个锚全部齐设')
   ok(applyProjectBand(docOf(), 'suyou') === 0, '0 锚（blank hero 瞬态）无害返回 0')
-  // 非元素脏节点跳过（畸形输入纪律：桩复现，不靠真外部源）
+  // Non-element dirty nodes skipped (malformed-input discipline: reproduced with a stub, no real external source)
   const dirty = { getAttribute: 'not-a-fn' }
   const root4 = docOf(dirty, el('div', { 'data-conversation-scroll': '' }))
   ok(applyProjectBand(root4, 'suyou') === 1, '脏节点（方法缺失）跳过不崩，健康节点照常')
@@ -112,7 +116,7 @@ section('C start/stop 生命周期（document 桩）')
   const sc = el('div', { 'data-conversation-scroll': '' })
   const doc = docOf(sc)
   let styleNode = null
-  // head.appendChild 捕获注入的 style；observe/disconnect 桩掉（真 Observer 需 DOM）
+  // head.appendChild captures the injected style; observe/disconnect stubbed (a real Observer needs a DOM)
   doc.head.appendChild = (n) => { styleNode = n }
   doc.body.observe = () => {}
   const saved = globalThis.MutationObserver
@@ -134,7 +138,7 @@ section('C start/stop 生命周期（document 桩）')
     h.stop()
     h.set('sandbar')
     ok(sc.getAttribute(PROJBAND_ATTR) === null, 'stop 幂等 + stop 后 set 无害')
-    // effect 形态：返回清理函数本身（F1 防呆）
+    // Effect shape: returns the cleanup function itself (F1 guard)
     const doc2 = docOf(el('div', { 'data-conversation-scroll': '' }))
     doc2.head.appendChild = () => {}
     doc2.body.observe = () => {}
@@ -148,8 +152,9 @@ section('C start/stop 生命周期（document 桩）')
 
 section('D 防重建重设逻辑（scan 重入面）')
 {
-  // 重建=新节点无属性；scan（经 set 同路径）补齐——Observer 连接性由
-  // 模块头注声明 + 集成看守，桩面只验重设逻辑幂等收敛。
+  // Rebuild = new node without attributes; scan (same path as set) fills them — observer
+  // connectivity is declared in the module header + guarded by integration; the stub only
+  // checks the re-apply logic is idempotent and converges.
   const n1 = el('div', { 'data-conversation-scroll': '' })
   const root = docOf(n1)
   applyProjectBand(root, 'suyou')

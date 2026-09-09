@@ -1,16 +1,18 @@
 /**
- * smoke/allow-empty-create.mjs —— 「无文件改动」显式声明（t260901-01）冒烟。
+ * smoke/allow-empty-create.mjs — smoke for the explicit "no file changes" declaration (t260901-01).
  *
- * 直跑：node smoke/allow-empty-create.mjs（node ≥22.18 原生 type-stripping）。
- * 覆盖：
- *   A. epics-model.ts 纯函数：
- *      createWriteSetBlocked（空写集未勾选拦截且文案含两条出路 / 勾选放行 /
- *      非空写集放行）；buildCreatePayload（空写集+勾选才附 allow_empty_write_set /
- *      非空写集不带 / 空写集不勾不带 / 畸形行已由 invalidWriteSetLines 前置拦截）。
- *   B. 源码锁（桥路三层接通，模式同 selfcheck 源码锁惯例）：
- *      node.ts handleCreate 透传 allow_empty_write_set；epics.tsx 弹层复选框 +
- *      提交走 buildCreatePayload/createWriteSetBlocked + 复位三处；
- *      ticket.py schema + payload 声明字段。
+ * Run: node smoke/allow-empty-create.mjs (node >= 22.18 native type-stripping).
+ * Covers:
+ *   A. epics-model.ts pure functions:
+ *      createWriteSetBlocked (empty write set blocked without the checkbox, message names both
+ *      ways out / allowed when checked / allowed when non-empty); buildCreatePayload
+ *      (allow_empty_write_set only attached when empty+checked / not attached when non-empty /
+ *      not attached when empty+unchecked / malformed lines already blocked earlier by
+ *      invalidWriteSetLines).
+ *   B. Source-text locks (bridge wiring lock, same pattern as the selfcheck source locks):
+ *      node.ts handleCreate passes allow_empty_write_set through; epics.tsx modal checkbox +
+ *      submit goes through buildCreatePayload/createWriteSetBlocked + three reset points;
+ *      ticket.py schema declares the payload field.
  */
 
 import { readFile } from 'node:fs/promises'
@@ -28,7 +30,7 @@ function ok(cond, label) {
   else { fail++; console.error(`  ✗ ${label}`) }
 }
 
-/* ---------------- A. 纯函数 ---------------- */
+/* ---------------- A. Pure functions ---------------- */
 console.log('A. epics-model.ts 「无文件改动」纯函数')
 const blocked = createWriteSetBlocked('', false)
 ok(blocked !== '', '空写集未勾选 → 拦截')
@@ -51,7 +53,7 @@ ok(buildCreatePayload({ workflow: 'w', title: ' t ', body: 'b', epic: 'e' }, '',
 ok(invalidWriteSetLines('/abs\n../up\na\\b\nok.py').length === 3,
   '畸形行仍由 invalidWriteSetLines 前置拦截（3 条非法）')
 
-/* ---------------- B. 源码锁 ---------------- */
+/* ---------------- B. Source-text locks ---------------- */
 console.log('B. 桥路三层源码锁')
 const here = path.dirname(fileURLToPath(import.meta.url))
 const nodeSrc = await readFile(path.join(here, '..', 'node.ts'), 'utf8')
