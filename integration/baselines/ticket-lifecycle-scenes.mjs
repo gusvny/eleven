@@ -1,32 +1,28 @@
 /**
- * Scene library for the ticket-lifecycle E2E baseline (group 5).
+ * ticket-lifecycle E2E 基线的场景库（group 5）。
  *
- * What is real here (per the ticket contract): the Docker test Temporal (17233 /
- * namespace suyou-test), a real per-ticket worker (worker.py on the dedicated  // naming-compat
- * task queue with WATCH self-exit), the real engine chain (prepare_workspace ->
- * create_plan <-> review_plan -> implement || design_integration_tests ->
- * run_integration_tests -> arbitrate -> acceptance_walkthrough -> merge_check ->
- * merge [human gate] -> suggest_next inline -> status=closed), real settle/merge/
- * lane cleanup and real human signals via client.py.
+ * 什么是真的：Docker 测试 Temporal（17233 / namespace suyou-test）、真 per-ticket
+ * worker（worker.py 跑专属队列，WATCH 自退）、真引擎链（prepare_workspace →
+ * create_plan ↔ review_plan → implement || design_integration_tests →
+ * run_integration_tests → arbitrate → acceptance_walkthrough → merge_check →
+ * merge [人审闸] → suggest_next inline → status=closed）、真 settle/merge/泳道清理，
+ * 人审信号走真 client.py。
  *
- * What is stubbed: only the agent brains (SANDBAR_AGENT_STUB=1 stages self-complete,
- * SANDBAR_SUGGEST_STUB=ok, zero model calls).
+ * 什么是桩：只有 agent 大脑（SANDBAR_AGENT_STUB=1 时段自完成、
+ * SANDBAR_SUGGEST_STUB=ok，零模型调用）。
  *
- * Isolation (merge activity lands on the worker-side REPO_ROOT current branch and
- * ignores base_ref, agent_activities.py merge()): every scene runs against a
- * disposable "fixture repo" -- a --depth 1 clone of the local main branch. The
- * worker is started from the fixture's own engine so its REPO_ROOT is the
- * fixture: lane worktrees, settles, merges and lane cleanup all happen inside the
- * fixture; the real repo is never touched.
+ * 隔离（merge 落在 worker 侧 REPO_ROOT 当前分支、忽略 base_ref，见 agent_activities.py
+ * merge()）：每个场景对一棵一次性「夹具仓」跑——本地 main 的 --depth 1 clone。
+ * worker 从夹具仓自己的 engine 起，REPO_ROOT=夹具仓：泳道、settle、merge、泳道
+ * 清理全发生在夹具仓里，真仓永不被碰。
  *
- * Determinism lever: agent activities return the cached lane result file when it
- * already exists (agent_activities.py idempotent-cache path). Scenes pre-seed
- * `.suyou/stage_arbitrate_gen<N>.json` (summary with verdict=pass) while the  // naming-compat
- * ticket is mechanically busy in run_integration_tests -- the stub brain alone
- * never emits verdict=, which is itself scene D's round-limit trigger.
+ * 确定性杠杆：agent 段在结果文件已存在时直接返回缓存（agent_activities.py 幂等
+ * 缓存路）。场景在票机械地忙在 run_integration_tests 时预种
+ * `.suyou/stage_arbitrate_gen<N>.json`（summary 带 verdict=pass）——stub 大脑自己
+ * 永不产出 verdict=，这本身就是场景 D 的轮次上限触发器。
  *
- * Safety: same write-guard triad as ticket-validate.mjs (unset target -> 'env_fail' verdict;
- * explicit production default -> FAIL; otherwise pinned to 17233/suyou-test).  // naming-compat
+ * 安全：与 ticket-validate.mjs 同款写集三件套（target env 未设→env_fail；
+ * 显式生产默认→FAIL；否则钉死 17233/suyou-test）。
  */
 
 import { spawn, spawnSync } from 'node:child_process'
@@ -61,13 +57,13 @@ export function makeTally() {
 
 /* ------------------------------------------------------------------ processes */
 
-/** spawnSync a command, returning {status, stdout, stderr} with strings. */
+/** spawnSync 一把命令，返回字符串形态的 {status, stdout, stderr}。 */
 function run(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: opts.timeoutMs ?? 60_000, ...opts })
   return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' }
 }
 
-/** spawn a long-lived child with an owner that can always reap it (TERM -> KILL). */
+/** spawn 长命子进程，配一个永远能收割它的 owner（TERM 不退就 KILL）。 */
 export function own(child) {
   const o = { child, done: false, reaped: false }
   child.once('exit', () => { o.done = true })
@@ -99,10 +95,9 @@ export async function portOpen(host, port, ms = 1500) {
 }
 
 /**
- * Locate a python that can import temporalio (the SDK the engine needs).
- * Preference: the repo-local venv, the main checkout's venv (worktrees share the
- * common .git; prepare_workspace links the same source into lanes), then plain
- * python3. Returns null when absent.
+ * 找一个能 import temporalio 的 python（引擎 SDK 需要）。
+ * 优先序：本树 venv → 主 checkout 的 venv（worktree 共享 .git；
+ * prepare_workspace 会把同源链进泳道）→ 裸 python3。都没有返回 null。
  */
 export function findSdkPython(t) {
   const mainVenv = run('git', ['-C', REPO, 'rev-parse', '--path-format=absolute', '--git-common-dir'])
@@ -121,8 +116,8 @@ export function findSdkPython(t) {
 }
 
 /**
- * Ensure the Docker test Temporal (17233) is reachable: probe first, then an
- * idempotent `docker compose up -d`, then re-probe. Returns true/false.
+ * 确保 Docker 测试 Temporal（17233）可达：先探活，再幂等
+ * `docker compose up -d`，再探一次。返回 true/false。
  */
 export async function ensureTestTemporal(t) {
   if (await portOpen('127.0.0.1', 17233)) return true
@@ -142,11 +137,10 @@ export async function ensureTestTemporal(t) {
 }
 
 /**
- * Write-guard, tri-state (same contract as ticket-validate.mjs):
- * returns 'run' | 'env_fail' | 'fail'（writeGuard 三值裁决词，是本助手对场景声明的
- * API，被 sc_ticket_lifecycle P1 正向断言；t260904-12 三态契约对齐：unset target
- * 的裁决词从旧跳过词改用环境红词 env_fail，三值形状与正向断言面不变）.
- * Never run with an unclear target.
+ * Write-guard 三态（与 ticket-validate.mjs 同款合同）：返回
+ * 'run' | 'env_fail' | 'fail'。target env 未设=env_fail（票 t260904-12 三态契约：
+ * 缺环境用环境红词，不用跳过词）；显式指生产=fail；其余不明目标=fail。
+ * 目标不清楚就绝不开跑。
  */
 export function writeGuard() {
   const target = process.env.SANDBAR_TARGET_HOST
@@ -162,7 +156,7 @@ export function writeGuard() {
   return 'run'
 }
 
-/** Shared env for every client.py/worker invocation (pinned to the test env). */
+/** 每次 client.py/worker 调用的共享 env（钉死测试环境）。 */
 export function targetEnv(extra = {}) {
   return {
     ...process.env,
@@ -175,11 +169,10 @@ export function targetEnv(extra = {}) {
 /* ------------------------------------------------------------------ fixture repo */
 
 /**
- * Build the disposable fixture repo the stub worker will call home:
- * clone main (depth 1) from the local main checkout, symlink the gitignored
- * dependency dirs (node_modules / engine/.venv) so lane-internal
- * verify_lane can go green, and drop the epic file suggest_next needs.
- * Returns { fixture, dispose } or null (with ENV_FAIL notes) when impossible.
+ * 造一次性夹具仓（stub worker 的家）：从本地 checkout clone（depth 1），软链
+ * gitignored 依赖目录（node_modules / engine/.venv，泳道内 verify_lane 要靠它们
+ * 跑绿），放下 suggest_next 需要的立项单文件。返回 { fixture, dispose }；
+ * 不可能时返回 null（带 ENV_FAIL 注记）。
  */
 export async function buildFixture(t) {
   const tmp = await mkdtemp(join(tmpdir(), 'integ-e2e-fixture-'))
@@ -191,9 +184,9 @@ export async function buildFixture(t) {
     return null
   }
   const fixture = join(tmp, 'fixture')
-  // fixture 跟随被测代码（当前检出 HEAD），不钉 main——引擎契约演进期钉 main 会造
-  // 新旧 split-brain（t260907-04 实证：lane client 按新队列名起 workflow × fixture
-  // worker 是旧引擎认旧 env = workflow 搁浅）。合并后 lane==main，行为不变。
+  // fixture 跟随当前检出 HEAD，不钉 main：引擎契约演进期钉 main 会造新旧
+  // split-brain（票 t260907-04 实证：lane client 按新队列名起 workflow，fixture
+  // worker 是旧引擎认旧 env=workflow 搁浅）。合并后 lane==main，行为不变。
   const clone = run('git', ['clone', '--depth', '1', REPO, fixture], { timeoutMs: 300_000 })
   if (clone.status !== 0) {
     t?.envFailNote?.(`git clone main failed: ${(clone.stderr || clone.stdout).trim().slice(0, 200)}`)
@@ -202,11 +195,10 @@ export async function buildFixture(t) {
   }
   run('git', ['-C', fixture, 'config', 'user.email', 'e2e@suyou.test'])
   run('git', ['-C', fixture, 'config', 'user.name', 'integ-e2e'])
-  // 项目注册表夹具化（t260907-04 收尾）：机器级 ~/.sandbar/projects 的 key 'suyou'
-  // 是已退役 suyou 仓的自动迁移残留（dirs 指向不存在的 ~/Documents/suyou），lane
-  // 派生在死项目根上必炸（假象=prepare_workspace 报 git 身份缺失）。场景把注册表
-  // 钉进 fixture（SANDBAR_PROJECTS_DIR=fixture/.e2e-projects）：key 不变（引擎须
-  // 照常服务存量 key），dirs 指向 fixture 自身，整链密闭不触机器态。
+  // 项目注册表夹具化（票 t260907-04）：机器级注册表的 suyou key 指向已退役仓
+  // （自动迁移残留，dirs 是死路径），lane 派生在死项目根上必炸（假象=prepare_workspace
+  // 报 git 身份缺失）。场景把注册表钉进 fixture：key 不变（引擎须照常服务存量 key），
+  // dirs 指向 fixture 自身，整链密闭不触机器态。
   const projectsDir = join(fixture, '.e2e-projects', 'suyou')
   await mkdir(projectsDir, { recursive: true })
   // .migrated 标记：fixture 表与迁移源（fixture 内克隆来的 projects.yaml 种子）key
@@ -221,8 +213,8 @@ export async function buildFixture(t) {
     + '    name: integ-e2e-fixture\n'
     + '    dirs:\n'
     + `      - ${fixture}\n`)
-  // Dependency symlinks: prepare_workspace links gitignored dirs from the worker's
-  // REPO_ROOT (the fixture) into the lane; give the fixture something to link.
+  // 依赖软链：prepare_workspace 会把 worker REPO_ROOT（=fixture）里 gitignored 的
+  // 目录软链进泳道；先给 fixture 备好链接目标。
   for (const [link, target] of [
     [join(fixture, 'app', 'node_modules'), join(mainCheckout, 'app', 'node_modules')],
     [join(fixture, 'server', 'engine', '.venv'), join(mainCheckout, 'server', 'engine', '.venv')],
@@ -232,7 +224,7 @@ export async function buildFixture(t) {
       await symlink(target, link).catch(() => {})
     }
   }
-  // Epic archive for the suggest_next contract (worker-side EPICS_DIR = fixture).
+  // suggest_next 需要的立项单档案（worker 侧 EPICS_DIR=fixture）。
   await mkdir(join(fixture, 'notes', 'epics'), { recursive: true })
   await writeFile(join(fixture, 'notes', 'epics', `${EPIC_CODE}.md`),
     '# 立项单：integ-e2e\n\n| 字段 | 值 |\n| --- | --- |\n| 代号 | `integ-e2e` |\n| 状态 | 已立项（执行中） |\n', 'utf8')
@@ -277,18 +269,17 @@ export function makeApi(sdkPython, fixture) {
 /* ------------------------------------------------------------------ worker */
 
 /**
- * Start the per-ticket stub worker from the fixture's own engine (so its
- * REPO_ROOT is the fixture). WATCH mode self-exits when the workflow reaches a
- * non-RUNNING state; the owner handles blocked-steady-state and failure paths.
+ * 从 fixture 仓自己的 engine 起 per-ticket stub worker（REPO_ROOT=fixture）。
+ * WATCH 模式在 workflow 离开 RUNNING 后自退；blocked 稳态与失败路径由 owner 兜底。
  */
 export function startStubWorker(fixture, sdkPython, ticketId) {
   const child = spawn(sdkPython, [join(fixture, 'server', 'engine', 'worker.py')], {
     env: targetEnv({
       SANDBAR_TASK_QUEUES: `sandbar-ticket-${ticketId},suyou-ticket-${ticketId}`,  // naming-compat（新旧双前缀 CSV=ticket_worker.spawn 同款契约，t260907-04）
-      SANDBAR_PROJECTS_DIR: join(fixture, '.e2e-projects'),  // 项目注册表夹具化（t260907-04：机器种子 key suyou 指向已退役仓）
+      SANDBAR_PROJECTS_DIR: join(fixture, '.e2e-projects'),  // 注册表夹具化（票 t260907-04：机器种子 key 指向已退役仓）
       SANDBAR_WATCH_WORKFLOW: ticketId,
-      // watch 快档（t260905-02 旋钮）：场景收口 cancel 后 worker 自退从慢档 30s×轮
-      // 缩到 ~4s——cleanupTicket 的 90s 等退窗口此前恒被慢档吃满（260909 计时实锤）。
+      // watch 快档（票 t260905-02 旋钮）：场景收口 cancel 后 worker 自退从慢档
+      // 30s×轮缩到 ~4s——cleanupTicket 的 90s 等退窗口此前恒被慢档吃满（260909 计时实锤）。
       SANDBAR_WATCH_INTERVAL_SEC: '4',
       SANDBAR_AGENT_STUB: '1',
       SANDBAR_SUGGEST_STUB: 'ok',
@@ -305,7 +296,7 @@ export function startStubWorker(fixture, sdkPython, ticketId) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
-/** Poll ticket-query until pred(snapshot) holds. Returns last snapshot or null. */
+/** 轮询 ticket-query 直到 pred(snapshot) 成立。返回最后的 snapshot 或 null。 */
 export async function waitFor(api, tid, pred, label, deadlineMs, t) {
   const end = Date.now() + deadlineMs
   let snap = null
@@ -323,7 +314,7 @@ export async function waitFor(api, tid, pred, label, deadlineMs, t) {
   return null
 }
 
-/** Absolute lane worktree path inside the fixture, from a snapshot. */
+/** 从 snapshot 推 fixture 内泳道 worktree 的绝对路径。 */
 export function lanePath(fixture, snap) {
   const p = snap?.meta?.workspace?.path || snap?.meta?.worktree || ''
   if (!p) return ''
@@ -331,9 +322,8 @@ export function lanePath(fixture, snap) {
 }
 
 /**
- * Pre-seed the NEXT arbitrate result file (max existing gen + 1) with a
- * verdict=pass summary. Called while the ticket is busy in
- * run_integration_tests: the idempotent cache then returns it deterministically.
+ * 预种下一代 arbitrate 结果文件（最大已有 gen + 1），summary 带 verdict=pass。
+ * 调用时机=票忙在 run_integration_tests 时：幂等缓存随后确定性地返回它。
  */
 export async function seedArbitratePass(lane) {
   const dir = join(lane, '.suyou')  // naming-compat
@@ -357,7 +347,7 @@ export async function seedArbitratePass(lane) {
   return gen
 }
 
-/** Drop a probe file into the lane (integration/ is write-set exempt). */
+/** 往泳道丢一个探针文件（integration/ 在写集豁免名单里）。 */
 export async function writeProbe(lane, name) {
   const p = join(lane, 'integration', name)
   await mkdir(dirname(p), { recursive: true })
@@ -370,7 +360,7 @@ export async function writeProbe(lane, name) {
 const SCENE_DEADLINE_MS = 10 * 60 * 1000 // ticket contract: <=10 min per scene
 
 async function driveToMergeGate(t, api, sdkPython, fixture, tid, seed = true) {
-  // 1) workspace ready -> write the probe (must be dirty before the join settle)
+  // 1) workspace 就绪→写探针（必须在 join settle 之前弄脏泳道）
   const ready = await waitFor(api, tid, (s) => !!s?.meta?.workspace_prep?.ok,
     'workspace ready', 120_000, t)
   if (!ready) return null
@@ -378,7 +368,7 @@ async function driveToMergeGate(t, api, sdkPython, fixture, tid, seed = true) {
   if (!lane) { t.ok(false, 'snapshot.meta.workspace.path missing'); return null }
   const probeName = `e2e-probe-${tid}.txt`
   await writeProbe(lane, probeName)
-  // 2) while run_integration_tests is mechanically busy, seed arbitrate verdict=pass
+  // 2) run_integration_tests 机械忙段，预种 arbitrate verdict=pass
   if (seed) {
     const s = await waitFor(api, tid, (x) => x?.stage === 'run_integration_tests',
       'run_integration_tests reached', SCENE_DEADLINE_MS, t)
@@ -386,13 +376,13 @@ async function driveToMergeGate(t, api, sdkPython, fixture, tid, seed = true) {
     const gen = await seedArbitratePass(lane)
     t.ok(gen >= 0, `arbitrate verdict=pass pre-seeded (gen${gen})`)
   }
-  // 3) wait for the human gate
+  // 3) 等人审闸
   const snap = await waitFor(api, tid, (x) => x?.stage === 'merge' && x?.stage_state === 'awaiting-human',
     'merge human gate', SCENE_DEADLINE_MS, t)
   return snap ? { snap, lane, probeName } : null
 }
 
-/** Scene A: happy path full chain -> approve -> closed + lane cleanup + suggest_next. */
+/** 场景 A：全链 happy path → 批准 → closed + 泳道清理 + suggest_next。 */
 export async function sceneA(t, api, sdkPython, fixture) {
   const tid = `integ-e2e-a-${Date.now().toString(36)}`
   const worker = startStubWorker(fixture, sdkPython, tid)
@@ -421,10 +411,10 @@ export async function sceneA(t, api, sdkPython, fixture) {
     const mc = (s.gate_runs || []).filter(g => g.stage === 'merge_check').pop()
     t.ok(mc?.green === true, `merge_check four checks green (detail: ${JSON.stringify(mc?.checks?.map(c => [c.item, c.green])) || 'none'})`)
     t.ok(s.signatures?.merge === undefined, 'merge gate is awaiting signature (not yet signed)')
-    // write-set exemption evidence: probe committed although integration/ is exempt
+    // 写集豁免证据：integration/ 虽豁免，探针仍被提交
     const log = run('git', ['-C', lane, 'log', '--name-only', '--pretty=format:', '-5'])
     t.ok(log.stdout.includes(gate.probeName), 'integration/ probe file landed in a lane commit (write-set exemption)')
-    // approve -> real merge + lane cleanup + suggest_next + closed
+    // 批准→真 merge + 泳道清理 + suggest_next + closed
     t.ok(api.sign(tid, 'e2e-human', 'approve', 'E2E 场景 A 放行').body?.ok === true, 'sign approve delivered')
     const fin = await waitFor(api, tid, (x) => x?.status === 'closed', 'ticket closed', SCENE_DEADLINE_MS, t)
     if (!fin) return
@@ -439,7 +429,7 @@ export async function sceneA(t, api, sdkPython, fixture) {
   }
 }
 
-/** Scene B: merge-gate reject -> back to implement with the note injected -> approve -> closed. */
+/** 场景 B：merge 人审拒绝→带注记回到 implement→再批准→closed。 */
 export async function sceneB(t, api, sdkPython, fixture) {
   const tid = `integ-e2e-b-${Date.now().toString(36)}`
   const worker = startStubWorker(fixture, sdkPython, tid)
@@ -456,8 +446,8 @@ export async function sceneB(t, api, sdkPython, fixture) {
     if (!atImpl) return
     t.ok(String(atImpl.meta?.log?.map(l => l.note).join('｜')).includes('人在 merge 打回'),
       'reject logged as human merge rework')
-    // the redo re-enters arbitrate with gen1: seed it again during the manifest
-    // re-run, or the stub brain's missing verdict= hits the format-round limit
+    // 重做以 gen1 重进 arbitrate：manifest 重跑时再种一次，否则 stub 大脑缺
+    // verdict=会撞格式轮上限
     const busy2 = await waitFor(api, tid, (x) => x?.stage === 'run_integration_tests',
       'manifest re-running after reject', SCENE_DEADLINE_MS, t)
     if (!busy2) return
@@ -466,7 +456,7 @@ export async function sceneB(t, api, sdkPython, fixture) {
     const back = await waitFor(api, tid, (x) => x?.stage === 'merge' && x?.stage_state === 'awaiting-human',
       'back at merge gate after redo', SCENE_DEADLINE_MS, t)
     if (!back) return
-    // prev_ctx assertion: read the lane result file directly (snapshot results carry no prompt)
+    // prev_ctx 断言：直接读泳道结果文件（snapshot 结果不带 prompt）
     const impl1 = join(lanePath(fixture, back), '.suyou', 'stage_implement_gen1.json')  // naming-compat
     let prompt = ''
     try { prompt = JSON.parse(await readFile(impl1, 'utf8')).prompt || '' } catch { /* below */ }
@@ -479,7 +469,7 @@ export async function sceneB(t, api, sdkPython, fixture) {
   }
 }
 
-/** Scene C: manual rework (real route + context inheritance + gen bump) + malformed signals. */
+/** 场景 C：人工打回（真路由 + 上下文继承 + gen 递增）+ 畸形信号。 */
 export async function sceneC(t, api, sdkPython, fixture) {
   const tid = `integ-e2e-c-${Date.now().toString(36)}`
   const worker = startStubWorker(fixture, sdkPython, tid)
@@ -487,7 +477,7 @@ export async function sceneC(t, api, sdkPython, fixture) {
     const r = await api.start(tid,['integration/manifest.json'])
     t.ok(r.body?.ok === true, `ticket-start ok (${r.body?.ok ? tid : (r.body?.error || '').slice(0, 120)})`)
     if (r.body?.ok !== true) return
-    // malformed #1: sign while the ticket is NOT awaiting-human (still running create_plan)
+    // 畸形 #1：票未等人审时 sign（还在 create_plan）
     const running = await waitFor(api, tid, (x) => x?.stage === 'create_plan', 'create_plan running', 120_000, t)
     if (!running) return
     const refusedBefore = (running.refused || []).length
@@ -498,7 +488,7 @@ export async function sceneC(t, api, sdkPython, fixture) {
       'malformed sign (non-awaiting state) -> refused entry, stage untouched')
     const gate = await driveToMergeGate(t, api, sdkPython, fixture, tid)
     if (!gate) return
-    // malformed #2/#3: rework to a nonexistent stage and to an inline stage
+    // 畸形 #2/#3：rework 到不存在的段、rework 到 inline 段
     const refusedAtGate = (gate.snap.refused || []).length
     api.rework(tid, 'no_such_stage_xyz', 'E2E malformed rework: nonexistent target')
     const m2 = await waitFor(api, tid, (x) => (x?.refused || []).length > refusedAtGate,
@@ -510,7 +500,7 @@ export async function sceneC(t, api, sdkPython, fixture) {
       'rework(suggest_next) refused', 60_000, t)
     t.ok(!!m3 && m3.stage === 'merge' && m3.stage_state === 'awaiting-human',
       'malformed rework (inline suggest_next) -> refused, ticket stays at the merge gate')
-    // legal rework: back to acceptance_walkthrough (real STAGES id)
+    // 合法 rework：回到 acceptance_walkthrough（真 STAGES id）
     const note = 'E2E rework 意见：走查报告需补充边界场景'
     t.ok(api.rework(tid, 'acceptance_walkthrough', note).body?.ok === true, 'rework -> acceptance_walkthrough delivered')
     const atAcc = await waitFor(api, tid, (x) => x?.stage === 'acceptance_walkthrough',
@@ -534,7 +524,7 @@ export async function sceneC(t, api, sdkPython, fixture) {
   }
 }
 
-/** Scene D: no verdict seed -> real round-limit (arbitrate format rounds) -> blocked -> revive. */
+/** 场景 D：不种 verdict → 真轮次上限（arbitrate 格式轮）→ blocked → 复活。 */
 export async function sceneD(t, api, sdkPython, fixture) {
   const tid = `integ-e2e-d-${Date.now().toString(36)}`
   const worker = startStubWorker(fixture, sdkPython, tid)
@@ -544,13 +534,11 @@ export async function sceneD(t, api, sdkPython, fixture) {
     const r = await api.start(tid,[`integration/${probeName}`])
     t.ok(r.body?.ok === true, `ticket-start ok (${r.body?.ok ? tid : (r.body?.error || '').slice(0, 120)})`)
     if (r.body?.ok !== true) return
-    // Deviation note (ticket body D asked for "round limit via repeated merge rejects";
-    // the engine has no reject round counter -- this scene exercises the real limit:
-    // the stub brain's arbitrate summary lacks verdict=, 3 format-correction rounds -> blocked)
-    // The probe must dirty the lane BEFORE the parallel-join settle: that junction
-    // commit is what satisfies run_integration_tests' 0-commit precheck ("实现未落盘").
-    // Waiting for the mechanical step itself is too late -- the precheck fires first
-    // and would block with the wrong reason. So: probe at workspace-ready, then wait.
+    // 偏离注记（票身 D 原写「merge 反复拒绝触轮限」；引擎没有拒绝计数器——
+    // 本场景走真上限：stub 大脑 arbitrate summary 缺 verdict=，3 轮格式纠正→blocked）
+    // 探针必须在并行 join 的 settle 之前弄脏泳道：正是那个交汇 commit 满足
+    // run_integration_tests 的 0-commit 预检（「实现未落盘」）。等机械步本身就来不及——
+    // 预检先触发，会以错误的理由 block。所以：workspace 一就绪就写探针，再等。
     const ready = await waitFor(api, tid, (x) => !!x?.meta?.workspace_prep?.ok,
       'workspace ready', 120_000, t)
     if (!ready) return
@@ -564,7 +552,7 @@ export async function sceneD(t, api, sdkPython, fixture) {
     t.ok(logs.includes('缺 verdict= 标记'), 'blocked note names the missing verdict= marker')
     t.ok((blocked.timeline || []).filter(e => e.stage === 'arbitrate').length >= 3,
       'three arbitrate format rounds in the timeline (round limit reached)')
-    // revive: rework -> implement; seed the next arbitrate gen while the manifest re-runs
+    // 复活：rework→implement；manifest 重跑时种下一代 arbitrate
     t.ok(api.rework(tid, 'implement', 'E2E：补预置后重跑').body?.ok === true, 'rework -> implement (revive)')
     const busy = await waitFor(api, tid, (x) => x?.stage === 'run_integration_tests',
       'manifest re-running after revive', SCENE_DEADLINE_MS, t)
@@ -582,7 +570,7 @@ export async function sceneD(t, api, sdkPython, fixture) {
   }
 }
 
-/** Scene E: write-set lifecycle assertions on a dedicated ticket (refresh + exemption). */
+/** 场景 E：专票上的写集生命周期断言（刷新 + 豁免）。 */
 export async function sceneE(t, api, sdkPython, fixture) {
   const tid = `integ-e2e-e-${Date.now().toString(36)}`
   const worker = startStubWorker(fixture, sdkPython, tid)
@@ -596,19 +584,19 @@ export async function sceneE(t, api, sdkPython, fixture) {
     if (!ready) return
     const lane = lanePath(fixture, ready)
     await writeProbe(lane, probeName)
-    // initial write_set recorded verbatim
+    // 初始 write_set 原样入账
     t.ok(JSON.stringify([...(ready.meta?.write_set || [])].sort()) === JSON.stringify([...initialWs].sort()),
       `initial meta.write_set equals ticket-start input (${JSON.stringify(ready.meta?.write_set)})`)
-    // after review_plan finalizes the plan the write set is refreshed (union; stub
-    // files_changed=[] keeps the set, and the log line makes it explicit)
+    // review_plan 定稿后写集刷新（并集；stub files_changed=[] 不动集合，
+    // 日志行使这一点显式）
     const refreshed = await waitFor(api, tid,
       (x) => String((x?.meta?.log || []).map(l => l.note).join('｜')).includes('写集已随方案定稿刷新'),
       'write-set refreshed on plan finalization', SCENE_DEADLINE_MS, t)
     if (!refreshed) return
     t.ok((refreshed.meta?.write_set || []).length >= initialWs.length,
       'meta.write_set after refresh still covers the initial set (union semantics)')
-    // authorized extension, pure-function half (deterministic, no race): refresh_write_set
-    // unions plan files into the set and books "授权扩展" for the additions
+    // 授权扩展纯函数半（确定性、无竞态）：refresh_write_set 把 plan 文件并入
+    // 集合并为新增项记「授权扩展」
     const py = run(sdkPython, ['-c', `
 import sys, json
 sys.path.insert(0, ${JSON.stringify(POC)})
@@ -619,8 +607,8 @@ print(json.dumps({"merged": merged, "added": added, "dropped": dropped}))`], { t
     try { ext = JSON.parse(py.stdout.trim()) } catch { /* surfaced by the assert below */ }
     t.ok(ext?.merged?.includes('integration/new-probe.txt') && (ext?.added || []).includes('integration/new-probe.txt'),
       'refresh_write_set unions plan files (authorized extension) and integration/ entries survive')
-    // exemption half: the integration/ probe (not even listed as writable code) is
-    // committed by settle_lane and keeps verify_lane's write-set whitelist green
+    // 豁免半：integration/ 探针（根本不在可写代码名单里）被 settle_lane 提交，
+    // verify_lane 的写集白名单保持绿
     const gate = await driveToMergeGate(t, api, sdkPython, fixture, tid)
     if (!gate) return
     const log = run('git', ['-C', gate.lane, 'log', '--name-only', '--pretty=format:', '-5'])
@@ -639,9 +627,9 @@ print(json.dumps({"merged": merged, "added": added, "dropped": dropped}))`], { t
 /* ------------------------------------------------------------------ cleanup */
 
 /**
- * Best-effort ticket cancel + worker reap + fixture dispose. Unlike the borrowed
- * integration-baseline pattern, a lingering integ-e2e ticket is OUR subject, so
- * cancel failures surface as scene failures (no silent namespace pollution).
+ * 尽力收口：cancel 票 + 收割 worker + 处理夹具仓。与借来的集成基线模式不同：
+ * 残留的 integ-e2e 票是**我们自己的**被测对象，所以 cancel 失败要算场景红
+ * （不许静默污染 namespace）。
  */
 export async function cleanupTicket(t, api, worker, tid) {
   // 先探终态；探不到（查询超时——blocked 重试风暴期 query 会被饿到超时，260909
@@ -655,7 +643,7 @@ export async function cleanupTicket(t, api, worker, tid) {
   if (!closed) {
     try {
       const c = api.cancel(tid)
-      // client.py cancel keys on workflow_id (= ticket id for dev-lane tickets)；
+      // client.py cancel 按 workflow_id 键（dev-lane 票=票号）；
       // 已终态/已不在册的 benign 报错不算失败。
       const errTxt = String((c && (c.body?.error || c.stderr)) || '')
       const benign = /not[ -]?found|不存在|already completed|已收口|已终态|closed/i.test(errTxt)

@@ -1,26 +1,24 @@
-// Integration tests for ticket t260831-08 (defect ②) — screenshot evidence visible in ticket drawer.
+// 票 t260831-08（缺陷②）集成测试——工单抽屉里的截图证据可见。
 //
-// Intent (black-box, user perspective):
-//   QA screenshots (.suyou/screenshots/*.png in the lane) must be visible in the  // naming-compat
-//   ticket detail drawer. The user-visible contract after the fix:
-//     - GET /sandbar-workbench/api/wf/tickets/<id>/evidence lists the png files
-//       (archive .suyou/evidence/<id>/ takes precedence, then lane screenshots);  // naming-compat
-//       no evidence → empty list, no error (drawer simply hides the section).
-//     - GET .../evidence/<file> serves the exact bytes as image/png.
-//     - Path traversal / illegal filenames / illegal ticket ids are rejected
-//       with explicit 4xx errors, never served.
-//     - (UI) the drawer renders an <img src=".../evidence/<file>"> per file.
+// 锁什么（黑盒，用户视角）：
+//   QA 截图（泳道 .suyou/screenshots/*.png）必须在工单详情抽屉可见。修复后的
+//   用户可见契约：
+//     - GET /sandbar-workbench/api/wf/tickets/<id>/evidence 列出 png 文件
+//       （归档 .suyou/evidence/<id>/ 优先，其次泳道 screenshots）；  // naming-compat
+//       无证据→空清单，不报错（抽屉只是不渲染该段）。
+//     - GET .../evidence/<file> 按 image/png 原样回字节。
+//     - 路径穿越/非法文件名/非法票号一律 4xx 拒掉，绝不外发。
+//     - (UI) 抽屉每个文件渲染一个 <img src=".../evidence/<file>">。
 //
-// Staging: this suite stages a tiny valid PNG under <laneRoot>/.suyou/evidence/  // naming-compat
-// <stageId>/ (archive base of the console booted from this lane) and removes it
-// afterwards. If the console serves a different repo root, staged-file scenarios
-// degrade to env_fail with the reason (mismatch is an environment fact, not a
-// pass; t260904-12 三态：环境红 exit 2，绝不 exit 0 假绿).
-// Hard guard: never touches port 3099.
+// 暂存：本套件把一张小合法 PNG 放进 <laneRoot>/.suyou/evidence/<stageId>/  // naming-compat
+// （从本泳道起的 console 的归档基目录），跑完清掉。如果 console 服务的是别的仓根，
+// 暂存文件腿降级 env_fail 并给原因（根不匹配是环境事实不是产品绿；票 t260904-12
+// 三态：环境红 exit 2，绝不 exit 0 假绿）。
+// 红线：永不碰 3099。
 //
-// Execution contract (t260904-12 三态): stdout last line
-// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 或全腿 na → exit 1;
-// env_fail>0 → exit 2.
+// 执行契约（票 t260904-12 三态）：stdout 末行
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`；FAIL>0 或全腿 na → exit 1；
+// env_fail>0 → exit 2。
 
 import { ensureStageConsole } from '../lib_stage_console.mjs';
 import { mkdir, writeFile, rm } from 'node:fs/promises'
@@ -28,7 +26,7 @@ import { join } from 'node:path'
 
 const BASE = (await ensureStageConsole()).base;
 const LANE = process.cwd();
-const STAGE_ID = 't26083108evtest'; // must satisfy TICKET_ID_RE (alnum, no / no .)
+const STAGE_ID = 't26083108evtest'; // 必须满足 TICKET_ID_RE（字母数字，无 / 无 .）
 const STAGE_DIR = join(LANE, '.suyou', 'evidence', STAGE_ID);  // naming-compat
 const PNG_1x1 = Buffer.from(
   '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489' +
@@ -76,11 +74,11 @@ async function consoleHealthy() {
 async function withStagedEvidence() {
   await mkdir(STAGE_DIR, { recursive: true });
   await writeFile(join(STAGE_DIR, 'shot-a.png'), PNG_1x1);
-  // decoys that must never appear in the list: wrong extension / illegal shape
+  // 诱饵：扩展名不对 / 形状非法——绝不允许出现在清单里
   await writeFile(join(STAGE_DIR, 'notes.txt'), 'not an image');
-  await writeFile(join(STAGE_DIR, 'weird name.png'), PNG_1x1); // space not in whitelist
+  await writeFile(join(STAGE_DIR, 'weird name.png'), PNG_1x1); // 空格不在白名单
 
-  // S1: list shape — 200 {ok,result:{files}}, png-whitelist entries only, decoys filtered.
+  // S1：清单形状——200 {ok,result:{files}}，只收 png 白名单项，诱饵被过滤
   let stagedVisible = false; // console 是否看到本 lane 暂存目录（根不匹配=环境事实）
   {
     const { status, body } = await evidenceRequest(STAGE_ID);
@@ -98,7 +96,7 @@ async function withStagedEvidence() {
     }
   }
 
-  // S2: bytes round-trip — exact staged bytes, image/png.
+  // S2：字节回环——暂存字节原样、image/png。
   // 前提门控与 S1 同源：console 根不匹配时暂存文件不可见，roundtrip 必 404——那是
   // 环境事实（见文件头注「mismatch is an environment fact, not a pass」），按 env_fail
   // 处置不判 FAIL。守卫缺失曾在隔离台锚根漂移时把本腿打成假红
@@ -116,7 +114,7 @@ async function withStagedEvidence() {
     }
   }
 
-  // S3: nonexistent png → 404 human-readable (both candidates missing).
+  // S3：不存在的 png → 404 人话文案（归档与泳道两处都没有）。
   {
     const { status, body } = await evidenceRequest(STAGE_ID, 'nope-missing.png');
     if (status === 404 && body?.ok === false && typeof body?.error === 'string') {
@@ -126,12 +124,12 @@ async function withStagedEvidence() {
     }
   }
 
-  // cleanup before the rest (traversal cases must not depend on staged files)
+  // 先清场再跑后面的（穿越用例不许依赖暂存文件）
   await rm(STAGE_DIR, { recursive: true, force: true });
 }
 
 async function faultSurface() {
-  // S4: traversal in file position → rejected (4xx), never 200.
+  // S4：文件名位路径穿越 → 4xx 拒掉，绝不 200。
   for (const [name, file] of [
     ['dotdot-parent', '..%2F..%2Fserver%2Fadmin.log'],
     ['dotdot-inside', '%2e%2e%2fshot.png'],
@@ -148,7 +146,7 @@ async function faultSurface() {
     }
   }
 
-  // S5: illegal ticket ids → 400 (not 5xx, not 200).
+  // S5：非法票号 → 400（不是 5xx，也不是 200）。
   for (const [name, id] of [['dotdot', '..'], ['slash', 'a/b'], ['empty-ish', 'x']]) {
     try {
       const { status } = await evidenceRequest(id);
@@ -159,7 +157,7 @@ async function faultSurface() {
     }
   }
 
-  // S6: unknown-but-well-formed id → empty list, no error (soft degradation).
+  // S6：形状合法但不存在的票号 → 空清单，不报错（软降级）。
   try {
     const { status, body } = await evidenceRequest('t26083108evnone');
     const files = body?.result?.files;
@@ -225,9 +223,8 @@ async function uiScenario() {
     }
   } catch (err) {
     const msg = String(err).slice(0, 140);
-    // no drawer/no evidence for the first row is a fixture fact; timeout on an
-    // existing evidence-bearing ticket would be a real failure — reported as
-    // fail either way unless playwright/console itself is the blocker.
+    // 首行无抽屉/无证据是夹具事实；已有证据的票上超时才是真产品失败——
+    // 两种情况都如实报，除非 playwright/console 本身就是阻塞原因。
     record('ui/drawer-images', 'env_fail', `environment/fixture blocker: ${msg}`);
   }
   try { await browser.close(); } catch { /* noop */ }
