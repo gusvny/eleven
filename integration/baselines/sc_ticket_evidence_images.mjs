@@ -207,6 +207,13 @@ async function uiScenario() {
     await page.click(`.wb-card[data-ticket-id="${target}"]`);
     await page.waitForSelector('.wb-drawer', { timeout: 10000 });
     await page.waitForSelector('.wb-drawer img[src*="/evidence/"]', { timeout: 10000 });
+    // 等图真解码再取样：waitForSelector 只保证 img 节点在 DOM——并发负载下 PNG
+    // 取回/解码滞后，立即取样=把「加载中」快照误判 decoded=0（260909 全量跑实锤
+    // imgs=1 decoded=0 瞬态红，静机单跑恒绿）。超时落回下方计数如实红，不放水。
+    await page.waitForFunction(() => {
+      const imgs = [...document.querySelectorAll('.wb-drawer img[src*="/evidence/"]')];
+      return imgs.length > 0 && imgs.every((i) => i.complete && i.naturalWidth > 0);
+    }, { timeout: 10000 }).catch(() => { /* 解码未成=下方计数如实红 */ });
     const loaded = await page.evaluate(() => {
       const imgs = [...document.querySelectorAll('.wb-drawer img[src*="/evidence/"]')];
       return { count: imgs.length, natural: imgs.filter(i => i.naturalWidth > 0).length };
