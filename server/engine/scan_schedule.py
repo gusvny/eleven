@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-"""dispatcher-scan Schedule 治理工具（M6，t260821-m6-scan-expand）。
+"""dispatcher-scan Schedule governance tool (M6, t260821-m6-scan-expand).
 
-note 治理：pause/resume 必须带 note 说清「谁、为什么、什么频率」——note 进 schedule
-state，任何人 `describe` / Temporal UI 都能查到，不留无解释的暂停。
+Note governance: pause/resume must carry a note saying who, why, and at what
+frequency. The note goes into the schedule state, so anyone can read it via
+`describe` or the Temporal UI — no unexplained pauses.
 
-用法（在 engine 目录，.venv/bin/python）：
-    scan_schedule.py describe                          # 只读快照（含 num_actions 证据）
-    scan_schedule.py resume [--minutes 45] [--note …]  # 定频率 + 解除暂停（默认 45min）
-    scan_schedule.py pause  --note …                   # 暂停（必须给理由）
-    scan_schedule.py trigger                           # 立即手动触发一轮巡检
+Usage (from the engine directory, with .venv/bin/python):
+    scan_schedule.py describe                          # read-only snapshot (includes num_actions evidence)
+    scan_schedule.py resume [--minutes 45] [--note …]  # set interval + unpause (default 45min)
+    scan_schedule.py pause  --note …                   # pause (a reason is required)
+    scan_schedule.py trigger                           # trigger one scan round immediately
 
-stdout 一律单行 JSON {ok, result|error}（与 client.py 同契约）。
-本工具是**运维通道**（人/总管用），不进 dsh 模型工具面——模型侧的 schedule 可见性
-仍只有 client.py schedule-list（只读）。
+stdout is always a single JSON line {ok, result|error} (same contract as
+client.py). This tool is an OPS channel (for humans / the steward); it is not
+exposed to the dsh model tool surface — the model side can only read schedules
+via client.py schedule-list (read-only).
 """
 
 from __future__ import annotations
@@ -35,7 +37,7 @@ from temporalio.service import RPCError
 from shared import SCHEDULE_ID, TARGET_HOST, NAMESPACE
 from temporalio.client import Client
 
-DEFAULT_MINUTES = 45  # M6 拍板频率：45min（工单建议区间 30–60min 内）
+DEFAULT_MINUTES = 45  # M6 decided interval: 45min (inside the suggested 30-60min band)
 
 
 def _ok(result: Any) -> Dict[str, Any]:
@@ -156,7 +158,7 @@ def main() -> None:
             result = asyncio.run(cmd_trigger())
         else:
             result = _err("未知子命令 %r。%s" % (sub, USAGE))
-    except Exception as e:  # 基础设施故障 → 结构化回执
+    except Exception as e:  # infrastructure failure -> structured receipt
         result = _err("%s: %s" % (type(e).__name__, e))
     print(json.dumps(result, ensure_ascii=False))
 

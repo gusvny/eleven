@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
-"""gen_workflows_doc —— 从模版 workflow 类的 STAGES 生成 workflows/*.yaml 参考快照。
+"""gen_workflows_doc — generate the workflows/*.yaml reference snapshots from
+the STAGES of the template workflow classes.
 
-M11 v2（t260822-m11，模版即代码）：**模版真源=代码**（engine/<module>.py 的
-<Class>.STAGES 类属性），workflows/*.yaml 降为「从类定义生成的人类可读参考文档」。
-改模版 = 改类定义 + 重跑本生成器；**勿手改 yaml**（重跑即覆盖）。
+M11 v2 (t260822-m11, templates as code): the source of truth for a template is
+CODE (the <Class>.STAGES class attribute in engine/<module>.py). The
+workflows/*.yaml files are downgraded to human-readable reference documents
+generated from the class definitions. To change a template, edit the class and
+re-run this generator. Do NOT hand-edit the yaml files (a re-run overwrites
+them).
 
-用法（engine 目录下）：
-    .venv/bin/python gen_workflows_doc.py            # 全量生成 + 回读校验
-    .venv/bin/python gen_workflows_doc.py --check    # 只校验：yaml 与代码是否一致（漂移=红）
+Usage (from the engine directory):
+    .venv/bin/python gen_workflows_doc.py            # full generation + read-back check
+    .venv/bin/python gen_workflows_doc.py --check    # check only: yaml matches code (drift = red)
 
-yaml 仍喂 server/tools/workflow.py 的只读模板 list/show（工单台泳道图/create 推导），
-schema 与其 yaml 子集解析器对齐（生成器自带回读校验防漂移）。
+The yaml files still feed the read-only template list/show in
+server/tools/workflow.py (lane diagrams / create derivation). The schema aligns
+with its yaml-subset parser; this generator carries a read-back check to catch
+drift.
 """
 
 from __future__ import annotations
@@ -35,7 +41,8 @@ HEADER = (
 
 
 def _q(s: str) -> str:
-    """字符串标量一律双引号（workflow.py 子集解析器支持；防值内 ':'/' #' 歧义）。"""
+    """Quote every string scalar with double quotes (the workflow.py subset
+    parser supports this; it avoids ambiguity from ':' or ' #' inside values)."""
     if '"' in s:
         raise ValueError("值内不允许双引号（子集解析器限制）: %r" % s)
     return '"%s"' % s
@@ -68,8 +75,10 @@ def render(tid: str) -> str:
             lines.append("    revision_to: %s" % st.revision_to)
         if st.next:
             lines.append("    next: %s" % st.next)
-        # 执行主体组合声明（t260828-01）：硬强制——任一 stage 缺 parts 或值越枚举即失败，
-        # 「全部 stage 有 parts 声明」由生成器机械把关，不靠自觉。
+        # Executor-part declaration (t260828-01), enforced here: any stage
+        # missing parts or using a value outside the enum fails the render.
+        # "Every stage declares parts" is checked mechanically by this
+        # generator, not by human discipline.
         if not st.parts:
             raise ValueError("%s.%s 缺 parts 执行主体声明（agent/script/human 可组合）"
                              % (cls.__name__, st.id))
@@ -94,7 +103,8 @@ def render(tid: str) -> str:
 
 
 def _roundtrip_check() -> List[str]:
-    """回读校验：生成的 yaml 必须过 server/tools/workflow.py 的子集解析+结构校验。"""
+    """Read-back check: the generated yaml must pass the subset parse and the
+    structural validation of server/tools/workflow.py."""
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "_wf_tool", REPO / "server" / "tools" / "workflow.py")

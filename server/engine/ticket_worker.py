@@ -1,24 +1,32 @@
-"""工单专属 worker 的生/死/救（260824 用户拍板：一工单一 worker）。
+"""Lifecycle of a ticket-dedicated worker: start, stop, rescue (host decision
+260824: one worker per ticket).
 
-每张工单 = 专属 task queue（sandbar-ticket-<id>，LEGACY 旧前缀见 shared.ticket_task_queues）
-+ 一个专属 worker 进程。本模块只管进程生命周期：
+Each ticket gets a dedicated task queue (sandbar-ticket-<id>, see the LEGACY old
+prefixes in shared.ticket_task_queues) plus one dedicated worker process. This
+module only manages the process lifecycle:
 
-- spawn_ticket_worker(tid)：拉起专属 worker（已活着则跳过，幂等）。
-- reap_ticket_worker(tid)：SIGTERM 专属 worker（不存在则跳过，幂等）。
-- ensure_ticket_workers(running_tids, all_ticket_ids)：对账——RUNNING 缺
-  worker 补拉；专属 worker 活着但 workflow 不在跑 → 回收。
+- spawn_ticket_worker(tid): start the dedicated worker (skip if already alive;
+  idempotent).
+- reap_ticket_worker(tid): SIGTERM the dedicated worker (skip if absent;
+  idempotent).
+- ensure_ticket_workers(running_tids, all_ticket_ids): reconcile — start a
+  worker for every RUNNING ticket that lacks one; reap workers whose workflow
+  is no longer running.
 
-**定位（260824 A 案二轮拍板后）**：生产路径上工单 worker 由 **console
-keepalive ensure 以子进程 spawn**（temporal-tools supervisor，跟 console 走，
-dispose 带走；ticket.py create 不再 spawn）。本模块退为**手动/测试工具 +
-reconcile 的 reap 原语**（reap_ticket_worker/worker_pid）；spawn 系列只在
-测试栈或无 console 的手动场景用。
+Role (after the 260824 round-A decision): in production, ticket workers are
+spawned as child processes by the console keepalive ensure (temporal-tools
+supervisor, tied to the console lifetime and disposed with it; ticket.py create
+no longer spawns). This module stays as the manual/test tool plus the reap
+primitive for reconcile (reap_ticket_worker / worker_pid). The spawn family is
+only for the test stack or manual use without a console.
 
-**stdlib-only**：server/tools/ticket.py 在系统 python3 下直载本模块（无 temporalio）。
-Temporal 状态查询不在这里做——running/closed 名单由调用方（有 SDK 的一侧）给。
+stdlib-only: server/tools/ticket.py loads this module directly under the system
+python3 (no temporalio available). Temporal state queries do not happen here —
+the caller (the side that has the SDK) supplies the running/closed id lists.
 
-环境变量透传：spawn 继承 os.environ，所以 SANDBAR_TARGET_HOST / SANDBAR_NAMESPACE
-（测试环境指向 Docker 隔离 Temporal，见 docs/testing-guide.md）自动传到子进程。
+Env passthrough: spawn inherits os.environ, so SANDBAR_TARGET_HOST /
+SANDBAR_NAMESPACE (in tests pointing at the Docker-isolated Temporal, see
+docs/testing-guide.md) reach the child process automatically.
 """
 
 from __future__ import annotations
@@ -42,7 +50,8 @@ def _logfile(tid: str) -> pathlib.Path:
 
 
 def worker_pid(tid: str) -> int:
-    """专属 worker 的活 pid（pidfile 在册且进程存活）；否则 0。pidfile 陈旧自动清。"""
+    """Live pid of the dedicated worker (pidfile present and process alive);
+    0 otherwise. A stale pidfile is removed automatically."""
     try:
         pid = int(_pidfile(tid).read_text().strip())
     except Exception:
@@ -57,25 +66,28 @@ def worker_pid(tid: str) -> int:
             pass
         return 0
     except PermissionError:
-        return pid  # 进程在但不是我们的——视为活着，不动
+        return pid  # process exists but is not ours — treat as alive, do not touch
 
 
 def _ticket_task_queue(tid: str) -> str:
-    """工单专属队列名。shared.py 按文件路径直载（ticket.py 直载本模块时 'shared'
-    不在 sys.path 上——它是 stdlib-only，路径加载两边行为一致）。"""
+    """Task queue name for the ticket. shared.py is loaded here by file path
+    (when ticket.py loads this module directly, 'shared' is not on sys.path —
+    this side is stdlib-only, and path loading behaves the same both ways)."""
     import importlib.util
     import sys
     spec = importlib.util.spec_from_file_location('_tw_shared', POC_DIR / 'shared.py')
     mod = importlib.util.module_from_spec(spec)
-    # 必须注册进 sys.modules：py3.9 dataclasses 处理 postponed annotations 时
-    # 按 cls.__module__ 反查 sys.modules，查不到即 AttributeError（260821 实测）。
+    # must register in sys.modules: python 3.9 dataclasses resolves postponed
+    # annotations via cls.__module__ against sys.modules and raises
+    # AttributeError when the lookup fails (observed 260821).
     sys.modules.setdefault('_tw_shared', mod)
     spec.loader.exec_module(mod)
     return mod.ticket_task_queue(tid)
 
 
 def _ticket_task_queues(tid: str) -> list:
-    """双 poll 清单（新前缀在前＋旧前缀，见 shared.ticket_task_queues / 退役账#2）。"""
+    """Both queues to poll (new prefix first, then the old one; see
+    shared.ticket_task_queues and retired-account #2)."""
     import importlib.util
     import sys
     spec = importlib.util.spec_from_file_location('_tw_shared', POC_DIR / 'shared.py')
@@ -86,16 +98,19 @@ def _ticket_task_queues(tid: str) -> list:
 
 
 def spawn_ticket_worker(tid: str) -> str:
-    """拉起工单专属 worker（幂等：已活着直接返回）。返回 'already' | 'spawned'。"""
+    """Start the ticket's dedicated worker (idempotent: returns immediately if
+    alive). Returns 'already' | 'spawned'."""
     if worker_pid(tid):
         return 'already'
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
-    # 多队列注入（t260907-04）：新 ticket 队列在前＋旧 ticket 队列（在飞 workflow
-    # 流干用）；worker.py 按 CSV 逐队列注册（共享同一 registry，日志双队列可证）。
+    # multi-queue injection (t260907-04): the new ticket queue first plus the old
+    # ticket queue (so in-flight workflows on the old queue still drain); worker.py
+    # registers each CSV queue (same registry; the log shows both queues).
     env['SANDBAR_TASK_QUEUES'] = ','.join(_ticket_task_queues(tid))
-    env['SANDBAR_WATCH_WORKFLOW'] = tid  # workflow 收口自退（worker.py watcher）
-    # --daemon：worker.py 自己 fork+setsid 并写 pidfile，本调用立即返回。
+    env['SANDBAR_WATCH_WORKFLOW'] = tid  # worker self-exits when the workflow closes (worker.py watcher)
+    # --daemon: worker.py forks+setsid itself and writes the pidfile, so this
+    # call returns immediately.
     subprocess.Popen(
         [VENV_PY, str(POC_DIR / 'worker.py'), '--daemon',
          '--pidfile', str(_pidfile(tid)), '--logfile', str(_logfile(tid))],
@@ -106,12 +121,12 @@ def spawn_ticket_worker(tid: str) -> str:
 
 
 def reap_ticket_worker(tid: str) -> str:
-    """SIGTERM 回收专属 worker（幂等）。返回 'reaped' | 'none'。"""
+    """SIGTERM the dedicated worker (idempotent). Returns 'reaped' | 'none'."""
     pid = worker_pid(tid)
     if not pid:
         return 'none'
     try:
-        os.kill(pid, signal.SIGTERM)  # 优雅停：在跑 activity 做完再走（worker.py 契约）
+        os.kill(pid, signal.SIGTERM)  # graceful stop: running activities finish first (worker.py contract)
     except ProcessLookupError:
         pass
     try:
@@ -122,10 +137,12 @@ def reap_ticket_worker(tid: str) -> str:
 
 
 def ensure_ticket_workers(running_tids, known_tids) -> dict:
-    """巡检对账（救/收）：running 缺 worker 补拉；known 里不在跑的回收活着的 worker。
+    """Reconcile loop (rescue / collect): start workers for RUNNING tickets
+    that lack one; reap live workers for known tickets that are no longer running.
 
-    running_tids：exec_status=RUNNING 的工单 id 集；known_tids：六模版块所有工单 id
-    （含已收口）。返回 {'spawned': [...], 'reaped': [...]} 供巡检报告留痕。
+    running_tids: ids with exec_status=RUNNING; known_tids: all ticket ids known
+    to the module (including closed ones). Returns {'spawned': [...],
+    'reaped': [...]} so the scan report can keep a trace.
     """
     running = set(running_tids)
     spawned, reaped = [], []

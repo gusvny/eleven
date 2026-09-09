@@ -1,26 +1,35 @@
 #!/usr/bin/env python3
-"""replay_check —— 存量运行中工单的 Temporal replay 安全实测（t260828-01）。
+"""replay_check — replay-safety check for in-flight tickets against the local
+workflow code (t260828-01).
 
-用途：改 workflow 代码（如 STAGES 加 parts 字段）后，把**当前 RUNNING** 的 v2 模版工单
-历史逐条拉下来，用本地新代码过 temporalio.worker.Replayer 回放——非确定性改动
-（缺 patched、改了已执行路径）会在回放时直接炸，本脚本把它变成一条机械红灯。
+Purpose: after changing workflow code (for example adding a parts field to
+STAGES), pull the history of every currently RUNNING v2-template ticket and
+replay it through temporalio.worker.Replayer with the new local code. A
+nondeterministic change (a missing patched marker, an altered already-executed
+path) blows up during replay; this script turns that into a mechanical red
+light.
 
-只读：只调 list_workflows / fetch_history（与工单台 ticket-query 同级只读路径），
-不写任何信号、不启 worker、不碰 3099/8233。连接参数沿用 shared.py 环境变量口径
-（SANDBAR_TARGET_HOST / SANDBAR_NAMESPACE），可用 --host/--ns 覆盖（如 Docker 隔离环境
-127.0.0.1:17233 / sandbar-test）。
+Read-only: it only calls list_workflows / fetch_history (the same read-only
+level as the workbench ticket-query path). It writes no signals, starts no
+worker, and never touches 3099/8233. Connection parameters follow the shared.py
+env conventions (SANDBAR_TARGET_HOST / SANDBAR_NAMESPACE); --host/--ns override
+them (e.g. the Docker-isolated environment 127.0.0.1:17233 / sandbar-test).
 
-解释器自探测（泳道 worktree 内无 .venv）：直接跑 import temporalio 失败时，按
-$SANDBAR_POC_PYTHON → 本目录 .venv → 主库 engine/.venv（worktree 场景）顺序
-找候选解释器 re-exec 自己，换机器不断。
+Interpreter auto-detection (a lane worktree has no .venv): when a direct
+`import temporalio` fails, this script re-execs itself with the first candidate
+interpreter found in the order $SANDBAR_POC_PYTHON -> this directory's .venv ->
+the main repo's engine/.venv (worktree case), so it keeps working on other
+machines.
 
-用法（engine 目录）：
-    replay_check.py                      # 回放当前 RUNNING 的五模版 v2 工单
-    replay_check.py --workflow <id>      # 只回放指定工单（不限运行态）
-    replay_check.py --history <file>     # 离线回放导出的 history JSON（temporal workflow show -o json）
-    replay_check.py --limit 20           # 最多回放条数（缺省 50）
+Usage (from the engine directory):
+    replay_check.py                      # replay all currently RUNNING v2 tickets
+    replay_check.py --workflow <id>      # replay one ticket only (any status)
+    replay_check.py --history <file>     # offline replay of an exported history JSON
+                                         # (temporal workflow show -o json)
+    replay_check.py --limit 20           # max entries to replay (default 50)
 
-stdout 一律单行 JSON {"ok": bool, "results": [...]}（与 client.py 同契约）。
+stdout is always a single JSON line {"ok": bool, "results": [...]} (same
+contract as client.py).
 """
 
 from __future__ import annotations
@@ -39,15 +48,17 @@ def _candidate_pythons() -> list:
     if env:
         cands.append(Path(env))
     cands.append(POC / ".venv" / "bin" / "python")
-    # worktree 场景：<main>/.worktrees/<lane>/server/engine/replay_check.py
+    # worktree case: <main>/.worktrees/<lane>/server/engine/replay_check.py
     parts = POC.parts
     if ".worktrees" in parts:
         main = Path(*parts[: parts.index(".worktrees")])
     elif ".lane" in parts:
         main = Path(*parts[: parts.index(".lane")])
         cands.append(main / "server" / "engine" / ".venv" / "bin" / "python")
-        # 票B（t260907-06）多仓泳道：POC 副本可能在 <proj>/.lane/<id>/<repo>/ 下的
-        # 某个子仓树里——逐子目录探测 .venv（主仓候选不变，单仓路径零回归）。
+        # multi-repo lanes (ticket B, t260907-06): the POC copy may sit inside
+        # a child repo tree under <proj>/.lane/<id>/<repo>/ — probe each child
+        # directory for a .venv (main-repo candidates above stay unchanged, so
+        # single-repo paths regress nothing).
         lane_container = Path(*parts[: parts.index(".lane") + 2])
         if lane_container.is_dir():
             for child in sorted(lane_container.iterdir()):
@@ -73,7 +84,7 @@ from typing import Any, Dict, List, Optional  # noqa: E402
 from temporalio.client import Client, WorkflowHistory  # noqa: E402
 from temporalio.worker import Replayer  # noqa: E402
 
-sys.path.insert(0, str(POC))  # 保证 import 的是本文件旁（泳道内）的模版代码
+sys.path.insert(0, str(POC))  # make sure we import the template code next to this file (inside the lane)
 from shared import NAMESPACE, TARGET_HOST  # noqa: E402
 from workflows_v2 import ALL_WORKFLOWS_V2, TEMPLATE_CLASSES  # noqa: E402
 
@@ -81,8 +92,9 @@ TEMPLATE_TYPES = {cls.__name__ for cls in ALL_WORKFLOWS_V2}
 
 
 def _replayer() -> Replayer:
-    # UnsandboxedWorkflowRunner（Replayer 缺省）：回放只看确定性，不套 sandbox 限流，
-    # 避免泳道内模块 passthrough 配置与 worker 漂移造成假红。
+    # UnsandboxedWorkflowRunner (Replayer default): replay only checks
+    # determinism, so we skip sandbox throttling — this avoids false reds from
+    # lane-local module passthrough config drifting from the worker's.
     return Replayer(workflows=ALL_WORKFLOWS_V2)
 
 
@@ -91,7 +103,7 @@ async def _replay_one_history(history: WorkflowHistory, label: str) -> Dict[str,
     try:
         await _replayer().replay_workflow(history)
         r["ok"] = True
-    except Exception as e:  # 非确定性/代码不兼容 → 红灯但不中断其它条
+    except Exception as e:  # nondeterminism / code incompatibility -> red, but keep replaying the rest
         r["ok"] = False
         r["error"] = "%s: %s" % (type(e).__name__, e)
     return r
@@ -113,7 +125,7 @@ async def cmd_running(host: str, ns: str, limit: int,
     async for wf in client.list_workflows(query, limit=limit):
         wtype = wf.workflow_type
         if wtype not in TEMPLATE_TYPES:
-            continue  # 只回放五模版 v2 工单；dispatcher-scan 等调度流不在本单范围
+            continue  # only replay v2-template tickets; dispatcher-scan and other scheduler flows are out of scope
         handle = client.get_workflow_handle(wf.id, run_id=wf.run_id)
         history = await handle.fetch_history()
         r = await _replay_one_history(history, wf.id)
@@ -124,7 +136,8 @@ async def cmd_running(host: str, ns: str, limit: int,
 
 async def cmd_history_file(path: Path) -> Dict[str, Any]:
     data = json.loads(path.read_text("utf-8"))
-    # temporal CLI `workflow show -o json` 输出 {"events": [...]}；也容忍裸 events 列表
+    # temporal CLI `workflow show -o json` outputs {"events": [...]}; a bare
+    # events list is also accepted
     if isinstance(data, list):
         data = {"events": data}
     history = WorkflowHistory.from_json(path.stem, data)
@@ -170,7 +183,7 @@ def main() -> int:
             out = asyncio.run(cmd_history_file(Path(hfile)))
         else:
             out = asyncio.run(cmd_running(host, ns, limit, only))
-    except Exception as e:  # 基础设施故障（连不上等）→ 结构化回执
+    except Exception as e:  # infrastructure failure (connect error etc.) -> structured receipt
         out = {"ok": False, "error": "%s: %s" % (type(e).__name__, e), "results": []}
     out.update(meta)
     print(json.dumps(out, ensure_ascii=False))

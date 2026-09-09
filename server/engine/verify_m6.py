@@ -1,19 +1,26 @@
 #!/usr/bin/env python3
-"""M6 闭环验证（t260821-m6-scan-expand）：一张真实工单走「巡检→报告→可签建议」。
+"""M6 closed-loop check (t260821-m6-scan-expand): one real ticket drives
+inspect -> report -> sign-ready suggestion.
 
-前置（专属 task queue 隔离验证，不干扰共享队列上的真实 worker（LEGACY 旧队列隔离验证））：
+Prerequisite (a dedicated task queue isolates this run from real workers on the
+shared queue — LEGACY queue isolation check):
     SANDBAR_TASK_QUEUE=sandbar-m6-verify .venv/bin/python worker.py --daemon \
         --pidfile data/worker-m6.pid --logfile data/worker-m6.log
 
-跑法：
+Run:
     SANDBAR_TASK_QUEUE=sandbar-m6-verify .venv/bin/python verify_m6.py
 
-断言（写死当下真实工单地形，环境变了就要改）：
-  - 巡检 workflow 完成，返回 pending_decision ≥ 1 且报告文件落盘；
-  - 报告含真实人门工单 t260820-hanshu-l0（final-review/awaiting-human）且建议=可签；
-  - 报告含真实 settled 工单 t260821-11 且建议=待补（验收未勾齐）；
-  - 红线声明在报告里。
-sign 动作不在本脚本——红线：签字只能人。报告给出「可签」即闭环到验收点。
+Assertions (hardcoded to the current real ticket landscape — update them when
+the environment changes):
+  - the scan workflow finishes, returns pending_decision >= 1, and the report
+    file exists on disk;
+  - the report contains the real human-gate ticket t260820-hanshu-l0
+    (final-review/awaiting-human) with suggestion = signable;
+  - the report contains the real settled ticket t260821-11 with suggestion =
+    needs-more (acceptance checklist not fully checked);
+  - the red-line statement is present in the report.
+The sign action is NOT in this script — red line: only a human may sign. A
+"signable" suggestion in the report is the closed loop up to the sign-off point.
 """
 
 from __future__ import annotations
@@ -29,8 +36,8 @@ from shared import NAMESPACE, SCAN_DIR, SCAN_RED_LINE, TARGET_HOST, TASK_QUEUE
 from workflows import DispatcherScanWorkflow
 
 VERIFY_WF_ID = "dispatcher-scan-m6-verify"
-ASSERT_HUMAN = "t260820-hanshu-l0"   # 真实人门工单：final-review 待人签
-ASSERT_SETTLED = "t260821-11"        # 真实 settled 工单：验收未勾齐
+ASSERT_HUMAN = "t260820-hanshu-l0"   # real human-gate ticket: final-review waiting for a signature
+ASSERT_SETTLED = "t260821-11"        # real settled ticket: acceptance checklist incomplete
 
 
 async def main() -> int:
@@ -89,7 +96,7 @@ async def main() -> int:
             print("  - %s" % f)
         return 1
     print("\n全绿：巡检→报告→可签建议 闭环成立。")
-    # 清理自身产生的 workflow
+    # clean up the workflow this script started
     try:
         h = client.get_workflow_handle(VERIFY_WF_ID)
         await h.terminate(reason='verify_m6 自测完成，自动清理')
