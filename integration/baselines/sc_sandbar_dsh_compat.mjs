@@ -1,28 +1,43 @@
 #!/usr/bin/env node
 /**
- * Baseline: sandbar ⑧ dsh 兼容区间契约守卫（t260903-08）。
+ * Baseline: sandbar ⑧ dsh compatibility-range contract guard (t260903-08).
  *
  * Intent (user-perceivable contract):
- *   契约 v1.7 ⑧节的区间声明与四条升版必查项是机器消费面——sandbar 安装器
- *   `upgrade`/`doctor` 探针集按它展示兼容区间、按必查项清单做升版复扫
- *   （消费关系载体：notes/debts/sandbar-m2-c-installer-handoff.md）。守卫断言：
- *   - ⑧节存在且区间口径为「已验证点列举制」（当前唯一点 0.1.1-rc.2），
- *     缺失或丢点 = 消费方展示空区间/假区间；⑧节内锚定走「节内切片」检查，
- *     变更记录行/其他节里的同词不充当掩护（acceptance 走查收紧，见 CHECKS
- *     的 scope 注释与 no-datapoint/no-failclosed 定向注入）；
- *   - 四条升版必查项（settings/resolve 层叠、headless runner 装配、home 布局
- *     与会话存储格式、headless SIGTERM 语义）逐条在场——任一缺失 = dsh 升版
- *     复扫静默漏项（touchpoints 汇总节转正的整条目的即失守）；
- *   - 版本自报口径的结构锚点（sandbar_version / 0.1.0 / temporal_engine_version
- *     原值保留）在场——锚点词表取自契约⑧-4 条文自身定义的关键词，同源
- *     （V4：结构锚点断言，非 prose 措辞断言，改写叙述不误红）；
- *   - 交接单的故障模式取舍清单覆盖 R1 全关键词（port/keepalive/pid/孤儿）且
- *     含 #5/#9 优先级条款（认领仅限真孤儿）与 3099 六词禁词表——交接单是
- *     sandbar 代码票硬输入，丢条款 = 代码票照搬丢半重演。
+ *   Section ⑧'s range declaration in contract v1.7 and its four upgrade
+ *   re-check items are machine-consumed — the sandbar installer's
+ *   `upgrade`/`doctor` probe set renders the compatibility range from it and
+ *   re-scans the checklist on upgrade (the consumer relationship is recorded
+ *   in notes/debts/sandbar-m2-c-installer-handoff.md). The guard asserts:
+ *   - section ⑧ exists and its range policy is the "enumerated verified
+ *     points" style (currently the single point 0.1.1-rc.2); a missing section
+ *     or a dropped point = the consumer renders an empty/fake range. Anchors
+ *     inside ⑧ are checked against the section-⑧ slice only, so the same words
+ *     on a change-record line or in another section cannot act as cover (an
+ *     acceptance-walkthrough tightening; see the scope comment in CHECKS and
+ *     the no-datapoint/no-failclosed targeted injections);
+ *   - the four upgrade re-check items (settings/resolve layering, headless
+ *     runner assembly, home layout and session storage format, headless
+ *     SIGTERM semantics) are each present — any miss = the dsh upgrade re-scan
+ *     silently skips an item (defeating the whole point of promoting the
+ *     touchpoints summary section);
+ *   - the structural anchors of the version self-report policy
+ *     (sandbar_version / 0.1.0 / temporal_engine_version kept verbatim) are
+ *     present — the anchor vocabulary comes from the keywords that contract
+ *     §⑧-4 itself defines, same source (V4: structural anchor assertions, not
+ *     prose-wording assertions, so rewording the narrative does not fake a
+ *     red);
+ *   - the handoff doc's fault-mode tradeoff list covers every R1 keyword
+ *     (port/keepalive/pid/orphan) and carries the #5/#9 priority clause
+ *     (adoption only for true orphans) plus the 3099 six-word forbidden list —
+ *     the handoff doc is a hard input to sandbar code tickets; dropping a
+ *     clause = the code ticket copies the omission and half the incident
+ *     replays.
  *
- * 本场景为只读文档守卫（ro 池）：对受控文件只读，不注入、不改写。
- * 畸形态红测走 --selftest（V3：对 /tmp 临时副本注入六种畸形态，断言转红），
- * 不在受控契约文件上原地删节再恢复。
+ * This scenario is a read-only documentation guard (the ro pool): it only
+ * reads the controlled files, never injects into or rewrites them.
+ * Malformed-state red tests go through --selftest (V3: inject six malformed
+ * states into a /tmp temporary copy and assert they turn red), never by
+ * trimming the controlled contract file in place and restoring it.
  */
 import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -31,20 +46,24 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CONTRACT = join(ROOT, 'docs', 'design', 'sandbar项目接入契约v1.md');
-const HANDOFF = join(ROOT, 'notes', 'sandbar-m2-c-installer-handoff.md')  // 260904 回迁适配：sandbar 实际位置在 notes/ 根;
+const HANDOFF = join(ROOT, 'notes', 'sandbar-m2-c-installer-handoff.md')  // 260904 migration-back adjustment: sandbar's actual location is the notes/ root;
 
-// —— ⑧节切片与规范化 ——
-// scope='sect' 的断言只对⑧节切片做：节内丢锚即红，变更记录行或其他节的同词
-// 不充当掩护（全文级词面检查曾被走查注入实验证实漏检：只删⑧-1 唯一点/⑧-4
-// fail-closed 句/⑧-5 整段，全文断言全数不转红）。
-// scope='doc' 的断言对全文做：跨节引用（V5 衔接句）与变更记录行本身。
+// —— section-⑧ slice and normalization ——
+// scope='sect' assertions run against the section-⑧ slice only: an anchor
+// dropped inside the section goes red, and the same words on a change-record
+// line or in another section cannot act as cover (a document-level word check
+// was proven to miss things by the walkthrough injection experiment: deleting
+// only ⑧-1's single point / ⑧-4's fail-closed sentence / ⑧-5's whole block
+// left every document-level assertion green).
+// scope='doc' assertions run against the whole document: the cross-section
+// reference (the V5 bridge sentence) and the change-record line itself.
 function section8(c) {
   const m = c.match(/### ⑧ dsh 平台兼容区间与升版必查项[\s\S]*?(?=\n### )/);
   return m ? m[0] : '';
 }
 const norm = s => String(s).replace(/\s+/g, ' ');
 
-// —— 断言词表（V4：与契约⑧条文自身关键词同源，非自由措辞） ——
+// —— assertion vocabulary (V4: same source as contract §⑧'s own keywords, not free-form wording) ——
 const CHECKS = [
   ['⑧节存在', 'doc', c => c.includes('### ⑧ dsh 平台兼容区间与升版必查项')],
   ['区间声明面向 @deepseek-ai/dsh', 'sect', c => c.includes('@deepseek-ai/dsh')],
@@ -96,7 +115,9 @@ function main() {
     console.log(`${r.fails.length ? 'RED' : 'GREEN'}  ${r.name}${r.fails.length ? ' —— 缺失: ' + r.fails.join('; ') : ''}`);
   }
   if (process.argv.includes('--selftest')) return selftest(red.length);
-  // 执行契约（integration/README，三态 §7.3）：末行 SUMMARY 四计数，机读区分真 PASS/产品红/环境红。
+  // Execution contract (integration/README, three-state §7.3): the last line
+  // is a SUMMARY with four counts, so a machine can tell a real PASS from a
+  // product red and an environmental red.
   const total = CHECKS.length + HANDOFF_CHECKS.length;
   const failed = red.reduce((n, r) => n + r.fails.length, 0);
   console.log(`\nSUMMARY pass=${total - failed} fail=${failed} env_fail=0 na=0`);
@@ -104,10 +125,14 @@ function main() {
   console.log('sc_sandbar_dsh_compat: all green');
 }
 
-// —— V3：畸形态注入（临时副本）+ 红测：每种注入必须让对应组转红 ——
-// no-datapoint / no-failclosed / no-section-5 是定向注入：只删⑧节内锚点、
-// 变更记录行里的同词原样保留——专门钉死「全文词面检查被变更行掩护」的漏检面
-// （acceptance 走查注入实验证实过的盲区），节内切片检查必须对它们转红。
+// —— V3: malformed-state injection (into a temporary copy) + red tests: every
+// injection must turn its group red ——
+// no-datapoint / no-failclosed / no-section-5 are targeted injections: only
+// the anchor inside section ⑧ is removed while the same words on the
+// change-record line stay intact — pinning down exactly the blind spot where
+// "a document-level word check is covered by a change line" (a blind spot the
+// acceptance-walkthrough injection experiment demonstrated); the section-slice
+// checks must turn red on them.
 function mutated(src, kind) {
   let t = String(src);
   if (kind === 'no-section') t = t.replace(/### ⑧ dsh 平台兼容区间与升版必查项[\s\S]*?(?=\n### docs 语境合成顺序)/, '\n');
