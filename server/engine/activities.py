@@ -1,14 +1,18 @@
-"""Activity 层 = 一切碰外部世界的动作。
+"""Activity layer = every action that touches the outside world.
 
-两个主通道：
-  - `admin_call`：`python3 server/admin.py call <tool> <args>` 的唯一通道（ticket list/show、
-    workflow show、qc_run、verify_lane…）。工单**读**操作走这里。
-  - `script_gate`：脚本门（qc_run / verify_lane），返回结构化红绿灯，绿才放行。
+Two main channels:
+  - `admin_call`: the only channel for `python3 server/admin.py call <tool> <args>`
+    (ticket list/show, workflow show, qc_run, verify_lane…). Ticket **read**
+    operations go through here.
+  - `script_gate`: the script gate (qc_run / verify_lane), returns a structured
+    red-green result; green is the only pass credential.
 
-票 t260823：project_ticket（tickets/*.json 投影写入器）已删除——工单真源恒为 Temporal workflow。
+Ticket t260823: project_ticket (the tickets/*.json projection writer) was
+deleted — the ticket source of truth is always the Temporal workflow.
 
-设计要点：引擎的**业务拒绝**不当异常抛，返回 ok=False 交 workflow 决策；只有真·基础设施
-故障（超时、崩）才抛，让 Temporal 重试。
+Design point: the engine's **business refusals** are not raised as exceptions;
+they return ok=False and let the workflow decide. Only true infrastructure
+failures (timeouts, crashes) raise, so Temporal retries them.
 """
 
 from __future__ import annotations
@@ -52,7 +56,7 @@ from shared import (
 
 
 def _run(cmd: List[str], timeout: int = 600) -> subprocess.CompletedProcess:
-    # 管线/admin 脚本一律在仓库根跑（CLAUDE.md）
+    # Pipeline/admin scripts always run from the repo root (CLAUDE.md)
     return subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=timeout)
 
 
@@ -67,7 +71,7 @@ def _parse(stdout: str) -> Dict[str, Any]:
         return {}
 
 
-# ---------- 步2 通用引擎通道 ----------
+# ---------- Step-2 generic engine channel ----------
 
 @activity.defn
 async def admin_call(call: EngineCall) -> EngineResult:
@@ -96,7 +100,7 @@ async def admin_call(call: EngineCall) -> EngineResult:
 
 @activity.defn
 async def script_gate(gate: GateSpec) -> GateResult:
-    """跑真实验收脚本（qc_run / verify_lane）。绿=放行的唯一凭据。"""
+    """Run the real acceptance script (qc_run / verify_lane). Green is the only pass credential."""
     cmd = gate.cmd or _admin_cmd(gate.tool, gate.args)
     activity.logger.info("gate[%s] %s", gate.stage, " ".join(cmd))
     proc = await asyncio.to_thread(_run, cmd)
@@ -116,7 +120,7 @@ async def script_gate(gate: GateSpec) -> GateResult:
     )
 
 
-# ---------- 步1 向后兼容（ContentPipelineWorkflow / DispatcherScanWorkflow）----------
+# ---------- Step-1 backward compat (ContentPipelineWorkflow / DispatcherScanWorkflow) ----------
 
 @activity.defn
 async def machine_qc(req: QcRequest) -> QcResult:
@@ -191,12 +195,15 @@ async def ticket_scan() -> TicketScan:
     )
 
 
-# ---------- M6 巡检扩权：待决工单检查报告 ----------
+# ---------- M6 scan expansion: pending-ticket check report ----------
 #
-# 红线：只出建议（疑似卡死/待补/可签），不出决定；签字只能人。
-# 读工单走 admin.py（只读 list/show）；脚本门红绿灯走 Temporal snapshot query（只读），
-# 不可达时回退工单 log 的「脚本门」记录。落盘 out/scan/<日期>.json（同日重跑覆盖，
-# 运行产物 gitignore 不入库；判断依据见 engine/README §10）。
+# Red line: suggestions only (suspected-stuck / needs-supply / signable), no
+# decisions; signing is human-only.
+# Ticket reads go through admin.py (read-only list/show); script-gate red-green
+# goes through a Temporal snapshot query (read-only), falling back to the
+# "脚本门" record in the ticket log when unreachable. The report lands in
+# out/scan/<date>.json (same-day reruns overwrite; runtime output is gitignored;
+# rationale in engine/README §10).
 
 
 async def _admin_payload(tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -205,10 +212,12 @@ async def _admin_payload(tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def _temporal_gate(ticket_id: str) -> Dict[str, Any]:
-    """最近一次脚本门红绿灯：只读 query 工单 workflow 的 snapshot.gate_runs。
+    """Latest script-gate red-green: read-only query of the ticket workflow's snapshot.gate_runs.
 
-    workflow 不在跑（未 adopt / 已完成）或 server 不可达 → green=None + source 说明，
-    调用方回退 log 判读。连接每次新建：巡检是低频动作，不值得常驻连接。
+    Workflow not running (never adopted / already finished) or server unreachable
+    → green=None plus a source note, and the caller falls back to log parsing.
+    A fresh connection each time: the scan is a low-frequency action, not worth
+    a persistent connection.
     """
     try:
         client = await Client.connect(TARGET_HOST, namespace=NAMESPACE)
@@ -219,17 +228,18 @@ async def _temporal_gate(ticket_id: str) -> Dict[str, Any]:
             return {"label": str(last.get("label") or ""),
                     "green": bool(last.get("green")), "source": "temporal"}
         return {"label": "", "green": None, "source": "temporal（无脚本门记录）"}
-    except Exception as e:  # 不可达/未 adopt/已完成 → 结构化降级，不抛（巡检要出全量报告）
+    except Exception as e:  # unreachable / not adopted / finished → structured degradation, no raise (the scan must still emit a full report)
         return {"label": "", "green": None,
                 "source": "temporal 不可达（%s）" % type(e).__name__}
 
 
 async def scan_tickets_report_impl(now_ts: float, stuck_hours: float,
                                    list_fn, show_fn, gate_fn) -> ScanReport:
-    """巡检本体（依赖注入版）：list/show/gate 三个通道由调用方给，自测可全假。
+    """Scan core (dependency-injected): the three channels list/show/gate are
+    supplied by the caller, so tests can stub them all.
 
-    list_fn() → admin ticket list 的 payload；show_fn(tid) → ticket show 的 payload；
-    gate_fn(tid) → {"label","green","source"}。
+    list_fn() → admin ticket list payload; show_fn(tid) → ticket show payload;
+    gate_fn(tid) → {"label","green","source"}.
     """
     payload = await list_fn()
     tickets = ((payload.get("result") or {}).get("tickets")) or []
@@ -252,13 +262,17 @@ async def scan_tickets_report_impl(now_ts: float, stuck_hours: float,
         items.append(build_scan_item(
             full, gate_label=str(gate.get("label") or ""), gate_green=gate.get("green"),
             gate_source=str(gate.get("source") or ""), now_ts=now_ts, stuck_hours=stuck_hours))
-    # 最紧急在前（疑似卡死→待补→可签），同档按停留时长倒序。
+    # Most urgent first (suspected-stuck → needs-supply → signable), same tier
+    # sorted by dwell time descending.
     rank = {s: i for i, s in enumerate(SCAN_SUGGESTIONS)}
     items.sort(key=lambda i: (rank.get(i.suggestion, 9), -i.dwell_hours))
-    # 未归档清单（epic-linkage 验收标准 3）：无 epic 的在途工单进清单。规则是
-    # 「有归属必须绑，巡检盯漏网」——允许无 epic 开工单，但报告里要有它。
-    # closed 不收：已收口工单是历史，全收只会让清单无限增殖变噪音。
-    # epic 数据源 = ticket list 行形态（client.py 从 EpicCode SA 直取）。
+    # Unfiled list (epic-linkage acceptance criterion 3): in-flight tickets with
+    # no epic go on the list. The rule is "with ownership you must bind; the scan
+    # watches for strays" — starting a ticket without an epic is allowed, but the
+    # report must show it. Closed tickets are excluded: settled tickets are
+    # history, and including them all would only grow the list into noise.
+    # The epic data source is the ticket-list row shape (client.py reads the
+    # EpicCode search attribute directly).
     unfiled = sorted(
         str(t.get("id") or "") for t in tickets
         if isinstance(t, dict) and str(t.get("id") or "")
@@ -277,7 +291,7 @@ async def scan_tickets_report_impl(now_ts: float, stuck_hours: float,
 
 @activity.defn
 async def scan_tickets_report() -> ScanReport:
-    """巡检扩权：对 settled/awaiting-human 工单逐张出检查条目 + 建议（只出建议不出决定）。"""
+    """Scan expansion: per settled/awaiting-human ticket emit a check item + a suggestion (suggestions only, no decisions)."""
     activity.logger.info("巡检扩权：扫 settled/awaiting-human 工单（阈值 %.0fh）", SCAN_STUCK_HOURS)
     return await scan_tickets_report_impl(
         now_ts=time.time(),
@@ -290,14 +304,18 @@ async def scan_tickets_report() -> ScanReport:
 
 @activity.defn
 async def reconcile_ticket_workers() -> Dict[str, Any]:
-    """专属 worker 对账（一工单一 worker 时代的遗留职责，现为 reap-only）。
+    """Dedicated-worker reconcile (legacy duty from the one-worker-per-ticket era,
+    now reap-only).
 
-    工单 worker 由 console keepalive 以子进程 spawn、跟 console 走。本 activity
-    不再补拉——daemon 补拉会造出无主 worker，破坏「console 没了就没了」。只回收
-    「workflow 已收口但 worker 还活着」的漏退者；RUNNING 缺 worker 的记进
-    返回值（missing）留痕，补拉归 console ensure。
+    Ticket workers are spawned by console keepalive as child processes and follow
+    the console. This activity no longer pulls missing workers — daemon-style
+    pulling would create orphan workers and break "console gone = workers gone".
+    It only reaps the stragglers that are "workflow settled but worker still
+    alive"; RUNNING tickets missing a worker are recorded in the return value
+    (missing) for the record, and pull-missing belongs to console ensure.
 
-    红线同巡检：只修进程，不碰 workflow 状态。失败不抛，下次巡检再对。
+    Same red line as the scan: fix processes only, never touch workflow state.
+    Failures do not raise; the next scan reconciles again.
     """
     from ticket_worker import reap_ticket_worker, worker_pid
     from workflows_v2 import TEMPLATE_CLASSES
@@ -324,7 +342,7 @@ async def reconcile_ticket_workers() -> Dict[str, Any]:
 
 @activity.defn
 async def write_scan_report(report: ScanReport) -> Dict[str, Any]:
-    """报告落盘 out/scan/<日期>.json（同日重跑覆盖当日文件；每日最多一个文件）。"""
+    """Write the report to out/scan/<date>.json (same-day reruns overwrite that day's file; at most one file per day)."""
     import dataclasses
 
     date = time.strftime("%Y-%m-%d", time.localtime())
@@ -338,7 +356,7 @@ async def write_scan_report(report: ScanReport) -> Dict[str, Any]:
         "stuck_threshold_hours": report.stuck_hours,
         "red_line": SCAN_RED_LINE,
         "summary": report.summary,
-        # 未归档清单（epic-linkage）：无 EpicCode 的在途工单 id，台面按它盯漏网。
+        # Unfiled list (epic-linkage): in-flight ticket ids with no EpicCode; the desk watches strays by it.
         "unfiled": list(report.unfiled),
         "items": [dataclasses.asdict(it) for it in report.items],
     }
@@ -351,15 +369,16 @@ async def write_scan_report(report: ScanReport) -> Dict[str, Any]:
 
 
 # ========================================================================================
-# inspection 票①（t260905-03）：测试面扫描 + 巡检票落账。薄壳——纯函数在
-# inspection_scan.py / inspection_flow.py；业务拒绝返回 ok=False 交 workflow 决策，
-# 只有真·基础设施故障才抛，让 Temporal 重试。
+# Inspection ticket ① (t260905-03): test-face scan + inspection-ticket ledger write.
+# Thin shell — the pure functions live in inspection_scan.py / inspection_flow.py;
+# business refusals return ok=False for the workflow to decide, and only true
+# infrastructure failures raise so Temporal retries.
 # ========================================================================================
 
 @activity.defn
 async def run_inspection_scan(args: Dict[str, Any]) -> Dict[str, Any]:
-    """测试面扫描：仓库根（缺省 REPO_ROOT）+ 场景清单路径（可选）→ findings。
-    延迟导入：防 activities↔inspection_flow 模块环（同 agent_activities 先例）。"""
+    """Test-face scan: repo root (defaults to REPO_ROOT) + optional scenario-list path → findings.
+    Lazy import: prevents an activities↔inspection_flow module cycle (same precedent as agent_activities)."""
     from inspection_scan import ScanError, run_test_face_scan
 
     root = Path(args.get("repo_root") or REPO_ROOT)
@@ -379,7 +398,7 @@ async def run_inspection_scan(args: Dict[str, Any]) -> Dict[str, Any]:
 
 @activity.defn
 async def write_inspection_report(face: Dict[str, Any]) -> Dict[str, Any]:
-    """巡检票落账 out/inspection/<票号>.json（同票重跑覆盖单文件）；收口时再写一次终态。"""
+    """Inspection-ticket ledger write to out/inspection/<ticket-id>.json (same-ticket reruns overwrite the single file); written again at settle for the final state."""
     from inspection_flow import write_inspection_report_impl
 
     try:

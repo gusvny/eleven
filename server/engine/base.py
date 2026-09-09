@@ -1,27 +1,40 @@
-"""TicketWorkflowBase —— M11 v2「模版即代码」的六模版共享基类（票 t260822-m11）。
+"""TicketWorkflowBase — the shared base class of the six M11 v2 "template as code"
+templates (ticket t260822-m11).
 
-模版即代码 + stage 即 activity + 状态只在 workflow。本基类承载所有工单 workflow
-共享的机制，六个子类只声明 STAGES（+各自 patched id）：
+Template as code + stage as activity + state only in the workflow. This base
+class carries every mechanism shared by the ticket workflows; the six subclasses
+only declare STAGES (+ their own patched ids):
 
-  - 通用主循环 `_main`：按 STAGES 顺序驱动——
-      agent 段  → activity（名=stage 名）spawn headless agent，结果文件幂等；
-      脚本门段  → script_gate activity（绿才推进，红则 blocked 等 retry_qc / rework signal）；
-      人门段    → prepare_human_gate activity 做机械准备 → workflow.wait_condition 等 sign；
-  - sign signal：人门签字（approve 推进 / reject 打回=按 revision_to 回路 rework）；
-  - rework signal：回目标段重跑（payload 带 target_stage 与返工指令）；
-  - retry_qc signal：blocked 后请求重跑本段（agent 段重跑活动 / 门段重跑脚本）；
-  - update_status update：note/pending/book_path/status 维护（对外协议与旧类同名同载荷）；
-  - snapshot query：保留旧 TicketWorkflow 的键（stage/stage_state/checks/handoffs/timeline…）
-    并附 meta 全文（JSON 兼容工单形态）与 results（各段产物），工单台/ticket.py 直接消费；
-  - 不变式：closed⇒¬awaiting-human；blocked 只允许 dispatched/settled/rework；
-    awaiting-human 只在 exit=human 段。
+  - Generic main loop `_main`: drives the stages in STAGES order —
+      agent stage  → activity (name = stage name) spawns a headless agent, the
+                     result file is idempotent;
+      script gate  → script_gate activity (green is the only pass; red goes
+                     blocked waiting for a retry_qc / rework signal);
+      human gate   → prepare_human_gate activity does the mechanical prep →
+                     workflow.wait_condition waits for sign;
+  - sign signal: human-gate signature (approve advances / reject sends back =
+    rework along the revision_to loop);
+  - rework signal: rerun from a target stage (payload carries target_stage and
+    the rework instruction);
+  - retry_qc signal: after blocked, request a rerun of the current stage (agent
+    stage reruns the activity / gate stage reruns the script);
+  - update_status update: note/pending/book_path/status maintenance (external
+    protocol same name and payload as the old class);
+  - snapshot query: keeps the old TicketWorkflow keys (stage/stage_state/checks/
+    handoffs/timeline…) plus the full meta (JSON-compatible ticket shape) and
+    results (per-stage artifacts); the ticket desk / ticket.py consume it directly;
+  - invariants: closed⇒¬awaiting-human; blocked only allows dispatched/settled/
+    rework; awaiting-human only on exit=human stages.
 
-确定性纪律：本文件零 IO、零随机、零 wall-clock（只有 workflow.now()）；一切副作用在
-activity。版本化：每个子类声明独立 PATCH_ID，改执行逻辑前 bump/新增 patch id 并在变更点
-用 workflow.patched() 分支（老 running 实例 replay 不破）。
+Determinism discipline: zero IO, zero randomness, zero wall-clock in this file
+(only workflow.now()); all side effects live in activities. Versioning: each
+subclass declares its own PATCH_ID; before changing execution logic, bump or add
+a patch id and branch with workflow.patched() at the change point (old running
+instances replay without breaking).
 
-temporalio 继承约束（实测 1.18.2）：@workflow.run 必须定义在子类上（薄壳转调 _main），
-signal/query/update 可直接继承。
+temporalio inheritance constraint (verified on 1.18.2): @workflow.run must be
+defined on the subclass (a thin shell forwarding to _main); signal/query/update
+can be inherited directly.
 """
 
 from __future__ import annotations
@@ -62,22 +75,24 @@ with workflow.unsafe.imports_passed_through():
 
 SHORT = timedelta(minutes=2)
 GATE_TO = timedelta(minutes=15)
-# agent 段：headless agent 是长活——start_to_close 给足，心跳保活（activity 侧 5s 一次）。
+# Agent stages: a headless agent is a long runner — give start_to_close plenty of
+# room, heartbeats keep it alive (the activity side heartbeats every 5s).
 AGENT_TO = timedelta(hours=6)
 HEARTBEAT_TO = timedelta(minutes=3)
-RETRY = RetryPolicy(maximum_attempts=3)  # 只对基础设施故障生效；业务失败走 StageResult.status
-# KI-003：stage 转换突变串让路点的版本化 marker（_breathe 内 workflow.patched 消费；
-# 老在跑实例重放旧 history 无此 marker → 不让路，保重放确定）。
+RETRY = RetryPolicy(maximum_attempts=3)  # only for infrastructure failures; business failures go through StageResult.status
+# KI-003: versioned marker for the stage-transition yield point (consumed by
+# workflow.patched inside _breathe; old running instances replaying old history
+# have no marker → no yield, keeping replay deterministic).
 BREATHE_PATCH_ID = "ki003-breathe-v1"
 
 
 class TicketWorkflowBase:
-    """六模版子类的共享机制。子类只声明：
-      STAGES: Tuple[Stage, ...]   —— stage 链（真源=代码）
-      PATCH_ID: str               —— 本模版独立 patched id
-      TEMPLATE_ID / TEMPLATE_NAME / TEMPLATE_LANE / TEMPLATE_DESC —— 供快照与 yaml 生成
-      TEMPLATE_WORKSPACE_DIR: bool —— cleanup 类模板（已退役 260904）的 dir 隔离目录约定
-      REVISION_STAGE / REVISION_LIMIT / REVISION_OVERFLOW —— 修订回路（content-pipeline，已退役 260904）
+    """Shared mechanisms for the six template subclasses. A subclass only declares:
+      STAGES: Tuple[Stage, ...]   — the stage chain (source of truth = code)
+      PATCH_ID: str               — this template's own patched id
+      TEMPLATE_ID / TEMPLATE_NAME / TEMPLATE_LANE / TEMPLATE_DESC — for snapshots and yaml generation
+      TEMPLATE_WORKSPACE_DIR: bool — dir-isolated workspace convention for cleanup-type templates (retired 260904)
+      REVISION_STAGE / REVISION_LIMIT / REVISION_OVERFLOW — the revision loop (content-pipeline, retired 260904)
     """
 
     STAGES: tuple = ()
@@ -95,19 +110,19 @@ class TicketWorkflowBase:
         self.ticket_id: str = ""
         self.template_id: str = ""
         self.meta: Dict[str, Any] = {}
-        self.results: Dict[str, Dict[str, Any]] = {}      # stage_id → StageResult 摘要
+        self.results: Dict[str, Dict[str, Any]] = {}      # stage_id → StageResult summary
         self.signatures: Dict[str, Dict[str, Any]] = {}
         self._sigs: Dict[str, Signature] = {}
         self._rework: Optional[ReworkRequest] = None
         self._retry_token: int = 0
-        self._gens: Dict[str, int] = {}                   # stage_id → 进入次数（结果文件分代）
+        self._gens: Dict[str, int] = {}                   # stage_id → entry count (result-file generation)
         self.gate_runs: List[Dict[str, Any]] = []
         self.refused: List[Dict[str, Any]] = []
         self.timeline: List[Dict[str, Any]] = []
         self.human_context: Dict[str, Any] = {}
         self.engine_version: int = ENGINE_VERSION_V2
 
-    # ---------- 内部：时间/日志/记账 ----------
+    # ---------- Internal: time/log/bookkeeping ----------
     def _now_epoch(self) -> int:
         return int(workflow.now().timestamp())
 
@@ -127,22 +142,28 @@ class TicketWorkflowBase:
         self.meta["updated"] = self._now_epoch()
 
     async def _breathe(self) -> None:
-        """stage 转换突变串让路点（KI-003）：await 让出事件循环，给排队的
-        snapshot query（与主协程共用同一 workflow 事件循环）一个执行窗口。
+        """Stage-transition yield point (KI-003): await yields the event loop,
+        giving queued snapshot queries (which share the same workflow event loop
+        as the main coroutine) a window to run.
 
-        为什么是 patched 分支而不是裸 sleep(0)：temporalio 1.18.2 里 sleep(0) 会发
-        真 StartTimer 命令（0 时长无特判），旧在跑票重放旧 history 没有这个命令，
-        直接睡会破确定性。所以旧 history 重放走原路径（无 marker 不让路），新执行 /
-        live edge 走到这里 marker 落史后 sleep(0) 生效（0 长 timer 即发即回）。
-        wait_condition(lambda: True) 不能当让路形态：重放期条件检查和 future 创建的
-        时序可能让协程挂到下个 activation，没有唤回保证。
-        另：DevLaneWorkflow 不继承本基类（同形不继承），它自带一份 _breathe
-        （票 t260901-23：只加在 base 上对 dev-lane 票是 AttributeError）。"""
+        Why a patched branch instead of a bare sleep(0): in temporalio 1.18.2,
+        sleep(0) emits a real StartTimer command (zero duration gets no special
+        case), and old running tickets replaying old history have no such command
+        — sleeping directly would break determinism. So old history replays the
+        original path (no marker, no yield), and new execution / the live edge
+        reaches this point, records the marker, and then sleep(0) takes effect
+        (a zero-length timer fires immediately).
+        wait_condition(lambda: True) cannot serve as the yield shape: during
+        replay, the ordering of the condition check and the future creation can
+        park the coroutine until the next activation, with no wake-up guarantee.
+        Note: DevLaneWorkflow does not inherit this base class (same shape, no
+        inheritance); it carries its own _breathe (ticket t260901-23: adding it
+        only on the base would be an AttributeError for dev-lane tickets)."""
         if not workflow.patched(BREATHE_PATCH_ID):
-            return  # 旧 history 重放：无 marker，跳过让路保重放确定
+            return  # old-history replay: no marker, skip the yield to keep replay deterministic
         await asyncio.sleep(0)
 
-    # ---------- 内部：stage 查找 ----------
+    # ---------- Internal: stage lookup ----------
     def _stage_idx(self, stage_id: str) -> int:
         for i, s in enumerate(self.STAGES):
             if s.id == stage_id:
@@ -152,11 +173,12 @@ class TicketWorkflowBase:
     def _gen(self, stage_id: str) -> int:
         return self._gens.get(stage_id, 0)
 
-    # ---------- 初始化 ----------
+    # ---------- Init ----------
     def _init(self, inp: TicketInput) -> None:
         self.ticket_id = inp.ticket_id
         self.template_id = inp.template_id
-        # patched 纪律：本类首次启用即打 patch 标记，后续改逻辑 bump 子类 PATCH_ID。
+        # Patched discipline: record the patch marker on first use of this class;
+        # bump the subclass PATCH_ID for later logic changes.
         workflow.patched(self.PATCH_ID)
         ws = inp.workspace
         if ws is None and self.TEMPLATE_WORKSPACE_DIR:
@@ -173,8 +195,10 @@ class TicketWorkflowBase:
             "role": first.role,
             "lane": inp.lane or self.TEMPLATE_LANE,
             "workspace": ws,
-            # 票 t260908-02：多仓/混合形态逐仓明细的真源位（meta 顶层）。workspace 归纯
-            # {type, path}，不再内嵌 list（Dict[str, str] 注解与 Temporal 编解码兼容）。
+            # Ticket t260908-02: source-of-truth slot for the per-repo detail of
+            # multi-repo / mixed shapes (top level of meta). workspace stays a
+            # pure {type, path} — no embedded list (Dict[str, str] annotation is
+            # Temporal codec compatible).
             "repo_worktrees": list(inp.repo_worktrees),
             "worktree": inp.worktree,
             "branch": inp.branch,
@@ -187,8 +211,9 @@ class TicketWorkflowBase:
             "acceptance": acc,
             "checks": {first.id: [{"item": it, "done": False, "by": ""} for it in acc]},
             "deliverables": inp.deliverables,
-            # M16：正文=原始用户需求（user_request 逐字保留，显式优先；缺省回落 body）；
-            # spec=加工后派发规格（独立字段，不覆盖正文）。
+            # M16: body = the raw user request (user_request kept verbatim, takes
+            # priority; falls back to body when absent); spec = the processed
+            # dispatch spec (separate field, does not overwrite the body).
             "user_request": inp.user_request,
             "spec": inp.spec,
             "body": inp.user_request or inp.body,
@@ -200,7 +225,7 @@ class TicketWorkflowBase:
             "revision_count": 0,
             "last_advance_stage": None,
             "temporal": True,
-            # 入参快照（供工单详情页展示）
+            # Input snapshot (for the ticket detail page)
             "workflow_input": {
                 "ticket_id": inp.ticket_id,
                 "template_id": inp.template_id,
@@ -231,11 +256,12 @@ class TicketWorkflowBase:
         self._mark(first.id, "awaiting", "adopt v2（模版=%s，stages=%s）"
                    % (inp.template_id, [s.id for s in self.STAGES]))
 
-    # ---------- 段执行：agent 活动 ----------
+    # ---------- Stage execution: agent activity ----------
     async def _run_agent_stage(self, st: Stage) -> Optional[StageResult]:
-        """跑 agent 段活动。返回 None=成功；抛错=基础设施重试耗尽（调用方转 blocked）。"""
+        """Run an agent-stage activity. Returns None = success; raising = infrastructure retries exhausted (the caller turns it into blocked)."""
         gen = self._gen(st.id)
-        # 阶段重跑上下文继承：同 role 再次调用时从工作流历史读上一次返回值
+        # Stage-rerun context inheritance: on a same-role recall, read the
+        # previous return value from the workflow history
         previous_context = ""
         if gen > 1:
             prev = self.results.get(st.id)
@@ -273,12 +299,14 @@ class TicketWorkflowBase:
             workflow_id=str(self.meta.get("workflow_id") or ""),
             previous_context=previous_context)
         raw = await workflow.execute_activity(
-            st.id, args,                       # activity 名 = stage 名（stage 即 activity）
+            st.id, args,                       # activity name = stage name (stage as activity)
             start_to_close_timeout=AGENT_TO, heartbeat_timeout=HEARTBEAT_TO,
             retry_policy=RETRY)
-        # 按名调用无返回类型注解，dataclass 回包以 dict 形态回来——归一成 StageResult。
-        # files_changed 保形归一（票 t260904-18 KI-049 门②）：形状随回执进 results
-        # 字面（消费点 dev_lane 读 results dict，不读 StageResult 本体）。
+        # A by-name call has no return type annotation; the dataclass comes back
+        # as a dict — normalize it into a StageResult. files_changed keeps its
+        # shape normalized (ticket t260904-18 KI-049 gate ②): the shape travels
+        # with the receipt into the results dict verbatim (the consumer dev_lane
+        # reads the results dict, not the StageResult object itself).
         if isinstance(raw, StageResult):
             res = raw
         else:
@@ -299,7 +327,7 @@ class TicketWorkflowBase:
             "evidence": res.evidence, "gen": gen}
         return res
 
-    # ---------- 段执行：脚本门 ----------
+    # ---------- Stage execution: script gate ----------
     def _gate_for(self, st: Stage):
         return self._gate_overrides.get(st.id) or st.gate
 
@@ -312,10 +340,11 @@ class TicketWorkflowBase:
              "red_count": res.red_count, "exit_code": res.exit_code, "checks": res.checks})
         return res
 
-    # ---------- 段执行：人门 ----------
+    # ---------- Stage execution: human gate ----------
     async def _run_human_stage(self, st: Stage, idx: int) -> str:
-        """人门段：activity 机械准备 → wait_condition 等 sign/rework。
-        返回 'next'（签字通过）或 'rework'（打回/显式 rework，主循环统一跳段）。"""
+        """Human-gate stage: activity does the mechanical prep → wait_condition
+        waits for sign/rework. Returns 'next' (signed pass) or 'rework' (reject /
+        explicit rework; the main loop jumps stages uniformly)."""
         prep: HumanGateContext = await workflow.execute_activity(
             prepare_human_gate,
             HumanGatePrep(ticket_id=self.ticket_id, stage_id=st.id,
@@ -344,14 +373,14 @@ class TicketWorkflowBase:
             self._handoff(st, "人门签字通过（签字人 %s：%s）" % (sig.who, sig.note))
             self._log("sign approve: %s 放行（%s）" % (st.id, sig.who))
             return "next"
-        # reject = 打回：缺省回 revision_to / 上一段
+        # reject = send-back: default target is revision_to / the previous stage
         target = st.revision_to or (self.STAGES[idx - 1].id if idx > 0 else "")
         self._rework = ReworkRequest(
             who=sig.who, target_stage=target,
             note="人在 %s 打回：%s（签字人 %s）" % (st.id, sig.note, sig.who))
         return "rework"
 
-    # ---------- 记账：勾选/handoff ----------
+    # ---------- Bookkeeping: checks/handoff ----------
     def _finish_stage(self, st: Stage, by: str, evidence: str) -> None:
         checks = self.meta.setdefault("checks", {}).setdefault(st.id, [])
         items = {c.get("item") for c in checks}
@@ -374,7 +403,8 @@ class TicketWorkflowBase:
 
     # ---------- rework ----------
     def _apply_rework(self, cur_idx: int) -> int:
-        """rework 落段计算。返回目标段下标（非法目标 → 拒绝留痕，停原段）。"""
+        """Compute the rework landing stage. Returns the target stage index
+        (illegal target → refuse with a record, stay on the current stage)."""
         req = self._rework
         self._rework = None
         cur = self.STAGES[cur_idx]
@@ -401,19 +431,23 @@ class TicketWorkflowBase:
         self.meta["status"] = "rework"
         self.meta["stage_state"] = "awaiting"
         self.meta["last_advance_stage"] = None
-        self.meta["last_rework_note"] = req.note     # 阶段重跑上下文继承：打回原因注入 previous_context
+        self.meta["last_rework_note"] = req.note     # stage-rerun context inheritance: the send-back reason feeds previous_context
         self._touch()
         self._log("rework: %s（回 %s）%s——%s" % (req.note, target, extra, req.who))
         self._mark(target, "rework", "%s（%s）" % (req.note, req.who))
         return tidx
 
-    # ---------- M16：工作区准备（workflow 第一个 activity） ----------
+    # ---------- M16: workspace prep (the workflow's first activity) ----------
     async def _prepare_workspace(self) -> Dict[str, Any]:
-        """跑 prepare_workspace 活动（worktree add / dir mkdir / 主树跳过；失败回执不抛）。
+        """Run the prepare_workspace activity (worktree add / dir mkdir / main-tree
+        skip; a failed receipt does not raise).
 
-        先过泳道字段闸（lane_workspace_gate_error）：正常创建链路在 ticket-start 单点
-        推导+校验，这里兜「旧 payload/未来新入口」绕过的情形——lane=worktree 但泳道
-        字段不齐/不一致时按失败回执走 blocked 等人，不放给 activity 静默跳主树。"""
+        First pass the lane-field gate (lane_workspace_gate_error): the normal
+        creation path derives + validates at the ticket-start single point, and
+        this catches cases that bypass it ("old payload / future new entry") —
+        when lane=worktree but the lane fields are incomplete or inconsistent, go
+        through the failure receipt into blocked-waiting-for-human instead of
+        letting the activity silently skip to the main tree."""
         gate = lane_workspace_gate_error(self.meta)
         if gate:
             return {"ok": False, "kind": "config", "action": "rejected",
@@ -421,13 +455,15 @@ class TicketWorkflowBase:
         prep = WorkspacePrep(
             ticket_id=self.ticket_id,
             workspace=self.meta.get("workspace"),
-            # 票 t260908-02：逐仓明细走独立字段（workspace 不再内嵌 list，编解码兼容）
+            # Ticket t260908-02: per-repo detail travels in its own field (no
+            # list embedded in workspace, codec compatible)
             repo_worktrees=list(self.meta.get("repo_worktrees") or []),
             branch=str(self.meta.get("branch") or ""),
             base_ref=str(self.meta.get("base_ref") or ""))
         raw = await workflow.execute_activity(
             prepare_workspace, prep, start_to_close_timeout=SHORT, retry_policy=RETRY)
-        # 按名调用无返回类型注解，回包以 dict 形态回来——归一成字段读
+        # A by-name call has no return type annotation; the payload comes back as
+        # a dict — normalize it into field reads
         res = raw if isinstance(raw, WorkspacePrepResult) else WorkspacePrepResult(
             ok=bool(raw.get("ok", True)), kind=str(raw.get("kind") or ""),
             action=str(raw.get("action") or ""), path=str(raw.get("path") or ""),
@@ -435,11 +471,13 @@ class TicketWorkflowBase:
         return {"ok": bool(res.ok), "kind": res.kind, "action": res.action,
                 "path": res.path, "error": res.error}
 
-    # ---------- 通用主循环（子类 @workflow.run 薄壳转调这里） ----------
+    # ---------- Generic main loop (the subclass @workflow.run thin shell forwards here) ----------
     async def _main(self, inp: TicketInput) -> Dict[str, Any]:
         self._init(inp)
-        # M16：工作区由 workflow 第一个 activity（prepare_workspace）创建/复用，agent 不再自己搞。
-        # 失败 → blocked 等 retry_qc 重试 / rework 打回（目标段照常计算），不吞错。
+        # M16: the workspace is created/reused by the workflow's first activity
+        # (prepare_workspace); agents no longer set it up themselves. Failure →
+        # blocked waiting for a retry_qc retry / rework send-back (the target
+        # stage is still computed as usual); errors are not swallowed.
         start_idx = 0
         while True:
             prep = await self._prepare_workspace()
@@ -465,13 +503,15 @@ class TicketWorkflowBase:
             self._gens[st.id] = self._gen(st.id) + 1
             self.meta["stage"] = st.id
             self.meta["role"] = st.role
-            # v2 状态语义：编排进行中恒 dispatched（无逐项 settle/verify 人工动作）；
-            # rework 后重进段即回 dispatched；终态由收尾置 closed。
+            # v2 status semantics: always dispatched while orchestration is in
+            # progress (no per-item settle/verify manual actions); re-entering a
+            # stage after rework returns to dispatched; the tail sets the final
+            # state to closed.
             self.meta["status"] = "dispatched"
             self.meta["stage_state"] = "running"
             acc = list(st.acceptance)
             if not self.meta.get("acceptance") or self.meta.get("stage") == st.id:
-                # 首段保留 create 时的实例增项；后续段=模版清单
+                # The first stage keeps the instance extras from create; later stages use the template list
                 if self._gen(st.id) > 1 or idx > 0:
                     self.meta["acceptance"] = acc
             self.meta.setdefault("checks", {}).setdefault(
@@ -488,13 +528,14 @@ class TicketWorkflowBase:
                 idx += 1
                 continue
 
-            # agent / gate 段：失败（业务红灯或活动故障）→ blocked，等 retry_qc / rework
+            # agent / gate stages: failure (business red or activity fault) →
+            # blocked, waiting for retry_qc / rework
             while True:
                 failure = ""
                 if st.kind == "agent":
                     try:
                         res = await self._run_agent_stage(st)
-                    except Exception as e:  # activity 重试耗尽：基础设施故障
+                    except Exception as e:  # activity retries exhausted: infrastructure failure
                         failure = "agent 活动故障（已重试）：%s: %s" % (type(e).__name__, e)
                         res = None
                     if res is not None and res.status != "ok":
@@ -528,7 +569,7 @@ class TicketWorkflowBase:
             self._touch()
             idx += 1
 
-        # 全部段完成：自动收口（v2 无人工驱动；人门除外）
+        # All stages done: auto-settle (v2 has no manual driving; human gates excepted)
         last = self.STAGES[-1]
         self.meta["status"] = "closed"
         self.meta["stage_state"] = "awaiting"
@@ -537,10 +578,10 @@ class TicketWorkflowBase:
         self._mark(last.id, "closed", "workflow 完成")
         return self._snapshot()
 
-    # ---------- signal：人门签字 / rework / retry_qc ----------
+    # ---------- signals: human-gate sign / rework / retry_qc ----------
     @workflow.signal
     def sign(self, sig: Signature) -> None:
-        """人门签字。gate 必须是当前等待的 exit=human 段 id（空则取当前段）。"""
+        """Human-gate signature. gate must be the currently-waiting exit=human stage id (empty = the current stage)."""
         stage = str(self.meta.get("stage") or "")
         st = self.STAGES[self._stage_idx(stage)] if self._stage_idx(stage) >= 0 else None
         if not (st and st.exit == "human"):
@@ -555,21 +596,21 @@ class TicketWorkflowBase:
 
     @workflow.signal
     def rework(self, req: ReworkRequest) -> None:
-        """打回重跑：目标段重进（gen+1 → 结果文件换新，agent 真重跑）。"""
+        """Send-back rerun: re-enter the target stage (gen+1 → new result file, the agent really reruns)."""
         self._rework = req
         self._log("rework 请求：%s → %s（%s）"
                   % (req.note, req.target_stage or "缺省目标", req.who))
 
     @workflow.signal
     def retry_qc(self, who: str) -> None:
-        """blocked 后请求重跑本段（脚本门重跑 / agent 段重跑）。"""
+        """After blocked, request a rerun of the current stage (script gate rerun / agent stage rerun)."""
         self._retry_token += 1
         self.timeline.append(
             {"at": self._now_iso(), "stage": str(self.meta.get("stage") or ""),
              "state": "retry-requested",
              "reason": "%s 请求重跑（第 %d 次）" % (who, self._retry_token)})
 
-    # ---------- update：状态维护（对外协议与旧类同名同载荷） ----------
+    # ---------- update: status maintenance (external protocol same name and payload as the old class) ----------
     @workflow.update
     async def update_status(self, status: str, note: str, pending_add: str,
                             book_path: Optional[str]) -> Dict[str, Any]:
@@ -598,7 +639,7 @@ class TicketWorkflowBase:
                 "stage": self.meta.get("stage"), "stage_state": self.meta.get("stage_state"),
                 "log_len": len(self.meta.get("log") or [])}
 
-    # ---------- query：只读快照（旧键全保留 + meta 全文 + results） ----------
+    # ---------- query: read-only snapshot (all old keys kept + full meta + results) ----------
     @workflow.query
     def snapshot(self) -> Dict[str, Any]:
         stage = str(self.meta.get("stage") or "")

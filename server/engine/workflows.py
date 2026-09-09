@@ -1,10 +1,12 @@
-"""Workflow 层 = 状态机本体。
+"""Workflow layer = the state machine itself.
 
-260823 多项目化清理：旧 `TicketWorkflow`（步2 adopt 时代，JSON 投影）已随
-server/tickets/ 投影目录一并退场——工单真源恒为 Temporal workflow，
-v2 模版即代码在 base.py / workflows_v2.py（六模版子类）。
+Multi-project cleanup (260823): the old `TicketWorkflow` (from the step-2 adopt
+era, a JSON projection) was retired together with the server/tickets/ projection
+directory — the ticket source of truth is always the Temporal workflow, and the
+v2 templates live as code in base.py / workflows_v2.py (six template subclasses).
 
-本文件保留步1 的 ContentPipelineWorkflow / DispatcherScanWorkflow（向后兼容）。
+This file keeps the step-1 ContentPipelineWorkflow / DispatcherScanWorkflow
+(backward compatibility).
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ with workflow.unsafe.imports_passed_through():
         ticket_scan,
         write_scan_report,
     )
-    from inspection_flow import InspectionPeriodicWorkflow  # noqa: F401——注册进 ALL_WORKFLOWS
+    from inspection_flow import InspectionPeriodicWorkflow  # noqa: F401——registered into ALL_WORKFLOWS
     from shared import (
         HUMAN_GATES,
         STAGES,
@@ -42,7 +44,7 @@ with workflow.unsafe.imports_passed_through():
 
 
 # ========================================================================================
-# 步1 向后兼容：ContentPipelineWorkflow / DispatcherScanWorkflow
+# Step-1 backward compat: ContentPipelineWorkflow / DispatcherScanWorkflow
 # ========================================================================================
 
 MAX_REVISIONS = 2
@@ -50,8 +52,8 @@ MAX_REVISIONS = 2
 
 @workflow.defn
 class ContentPipelineWorkflow:
-    """content-pipeline 七段：propose→approve(人)→process→machine-qc(脚本)
-    →ai-review→final-review(人)→publish。"""
+    """content-pipeline, seven stages: propose→approve(human)→process→machine-qc(script)
+    →ai-review→final-review(human)→publish."""
 
     def __init__(self) -> None:
         self.stage: str = STAGES[0]
@@ -189,31 +191,39 @@ class ContentPipelineWorkflow:
         }
 
 
-# M6（t260821-m6-scan-expand）巡检扩权的版本分支 id：老 running 实例 replay 走旧分支
-# （分布统计），新实例走扩权分支（检查报告）。改本 workflow 执行逻辑时必须 bump/新增。
+# M6 (t260821-m6-scan-expand) version-branch patch id for the scan expansion:
+# old running instances replay the old branch (distribution stats); new instances
+# take the expanded branch (check report). When changing this workflow's execution
+# logic, bump or add a patch id.
 SCAN_PATCH_ID = "dispatcher-scan-v2"
-# 260824 每工单专属 worker：巡检顺带做 worker 对账（补拉/回收）。独立 patch id——
-# 在跑的旧实例 replay 时跳过对账段，保持确定性。
+# 260824 per-ticket dedicated worker: the scan also reconciles workers (pull
+# missing / reap stray). Separate patch id — old running instances skip the
+# reconcile section on replay, keeping determinism.
 WORKER_RECONCILE_PATCH_ID = "dispatcher-scan-worker-reconcile"
 
 
 @workflow.defn
 class DispatcherScanWorkflow:
-    """dispatcher 例行巡检。M6 扩权：从「工单分布统计」扩为「settled/awaiting-human
-    待决工单检查报告」——逐张出 stage/停留时长/验收勾选率/脚本门红绿灯/pending 数/
-    建议动作（疑似卡死/待补/可签），落盘 out/scan/<日期>.json 供工单台展示。
-    260824 追加：专属 worker 对账（reconcile_ticket_workers，回收漏退的；
-    A 案起补拉归 console keepalive ensure，本 workflow 只记账不 spawn）。
+    """Dispatcher routine scan. M6 expansion: from "ticket distribution stats" to
+    a "settled/awaiting-human pending-ticket check report" — per ticket it emits
+    stage / dwell time / acceptance check rate / script-gate red-green / pending
+    count / suggested action (suspected-stuck / needs-supply / signable), written
+    to out/scan/<date>.json for the ticket desk to display.
+    260824 addition: dedicated-worker reconcile (reconcile_ticket_workers, reaping
+    workers that failed to exit; since plan A, pull-missing moved to console
+    keepalive ensure, so this workflow only records, never spawns).
 
-    红线：只出建议不出决定，签字只能人。确定性规约：读工单、查脚本门、写文件
-    全在 activity（scan_tickets_report / write_scan_report），workflow 只消费返回值。
+    Red line: suggestions only, no decisions — signing is human-only. Determinism
+    contract: reading tickets, checking script gates, and writing files all happen
+    in activities (scan_tickets_report / write_scan_report); the workflow only
+    consumes their return values.
     """
 
     @workflow.run
     async def run(self) -> Dict[str, Any]:
         retry = RetryPolicy(maximum_attempts=3)
         if not workflow.patched(SCAN_PATCH_ID):
-            # M6 前旧分支（老实例 replay 兼容）：只做分布统计。
+            # Pre-M6 old branch (kept for replay compat of old instances): distribution stats only.
             scan: TicketScan = await workflow.execute_activity(
                 ticket_scan,
                 start_to_close_timeout=timedelta(minutes=2),
@@ -235,8 +245,10 @@ class DispatcherScanWorkflow:
             retry_policy=retry)
         reconcile: Dict[str, Any] = {}
         if workflow.patched(WORKER_RECONCILE_PATCH_ID):
-            # 专属 worker 对账：回收收口工单的漏退 worker；RUNNING 缺 worker 记 missing
-            # 留痕（A 案起补拉归 console keepalive ensure，巡检不再 daemon 补拉）。
+            # Dedicated-worker reconcile: reap workers that failed to exit for
+            # settled tickets; RUNNING tickets missing a worker are recorded as
+            # missing (since plan A, pull-missing moved to console keepalive
+            # ensure — the scan no longer daemon-pulls).
             reconcile = await workflow.execute_activity(
                 reconcile_ticket_workers,
                 start_to_close_timeout=timedelta(minutes=2),

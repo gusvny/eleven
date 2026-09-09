@@ -1,29 +1,37 @@
-"""Worker：把 workflow/activity 注册到 task queue 上跑。
+"""Worker: registers workflows/activities onto a task queue and runs them.
 
-worker 是「肌肉」，服务端是「骨架与记忆」。worker 挂了、代码重启，
-workflow 的状态与历史都在服务端不丢。
+The worker is the "muscle"; the server is the "skeleton and memory". If the
+worker dies or the code restarts, workflow state and history stay safe on the
+server.
 
-启动形态：
-    # 前台（调试/看日志）
+How to start:
+    # Foreground (debugging / watching logs)
     .venv/bin/python worker.py
 
-    # 后台（常驻）
+    # Background (long-running)
     .venv/bin/python worker.py --daemon [--pidfile data/worker.pid] [--logfile data/worker.log]
 
-    # 工单专属 worker（一般由 console keepalive 以子进程拉起，不用手跑）：
-    #   SANDBAR_TASK_QUEUE=<队列名> SANDBAR_WATCH_WORKFLOW=<工单id> \
-    #     .venv/bin/python worker.py --daemon --pidfile data/worker-<工单id>.pid --logfile data/worker-<工单id>.log
-    #   WATCH 模式下 worker 周期查自己 workflow 的状态，收口（非 RUNNING）即优雅自退。
-    #   轮询间隔 env SANDBAR_WATCH_INTERVAL_SEC 可调（缺省 30s；畸形值回落缺省，下限 1s）。
-    #   console 子进程模式另置 SANDBAR_WATCH_PPID=1：宿主被 SIGKILL 时 ppid 变 1 即自退，
-    #   不留无主 worker（--daemon 手动拉起时不置此变量，保持常驻）。
-    # 归属指纹（KI-033）：SANDBAR_WORKER_META=<路径> 时起跑即写 meta JSON（repo_root/pid）；
-    #   daemon 模式写 <pidfile>.meta。ensure 侧据此识别异仓 worker 伺服同票（告警+拒接）。
+    # Per-ticket dedicated worker (usually spawned as a child process by console
+    # keepalive; no need to run by hand):
+    #   SANDBAR_TASK_QUEUE=<queue> SANDBAR_WATCH_WORKFLOW=<ticket-id> \
+    #     .venv/bin/python worker.py --daemon --pidfile data/worker-<ticket-id>.pid --logfile data/worker-<ticket-id>.log
+    #   In WATCH mode the worker periodically checks its own workflow status and
+    #   exits gracefully once the workflow settles (no longer RUNNING).
+    #   Poll interval via env SANDBAR_WATCH_INTERVAL_SEC (default 30s; malformed
+    #   values fall back to the default, floor is 1s).
+    #   Console child-process mode also sets SANDBAR_WATCH_PPID=1: if the host is
+    #   SIGKILLed, ppid becomes 1 and the worker exits on its own — no orphan
+    #   workers left behind (not set for manual --daemon starts, which stay up).
+    # Ownership fingerprint (KI-033): with SANDBAR_WORKER_META=<path> the worker
+    #   writes a meta JSON (repo_root/pid) at startup; daemon mode writes
+    #   <pidfile>.meta. The ensure side uses it to detect a worker from another
+    #   repo serving the same ticket (warn + refuse).
 
-优雅停：
-    kill -TERM $(cat data/worker.pid)      # SIGTERM / Ctrl-C（SIGINT）同理
-    → worker.shutdown()：把在跑的 activity 做完、不再领新活，然后干净退出。
-    （worker 停掉期间服务端里的 workflow 仍 RUNNING，攒下的活等重启后自动接着跑。）
+Graceful stop:
+    kill -TERM $(cat data/worker.pid)      # SIGTERM / Ctrl-C (SIGINT) same idea
+    → worker.shutdown(): finish in-flight activities, stop claiming new work,
+    then exit cleanly. (Workflows on the server stay RUNNING while the worker is
+    down; queued work resumes automatically after restart.)
 """
 
 from __future__ import annotations
@@ -48,14 +56,17 @@ from workflows_v2 import ALL_WORKFLOWS_V2
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
-WATCH_INTERVAL_DEFAULT_SEC = 30.0  # 生产缺省：30s 一轮（收口感知延迟上限≈一轮）
-WATCH_INTERVAL_MIN_SEC = 1.0       # 下限钳制：防 0/负值忙转打爆 describe
+WATCH_INTERVAL_DEFAULT_SEC = 30.0  # production default: one poll round per 30s (settle-sensing delay cap ≈ one round)
+WATCH_INTERVAL_MIN_SEC = 1.0       # floor clamp: guards against 0/negative busy-loop hammering describe
 
 
 def watch_interval_sec(raw: "str | None" = None) -> float:
-    """watch 轮询间隔（秒）。env SANDBAR_WATCH_INTERVAL_SEC 可调，集成场景提速用。
-    只在工单专属模式（SANDBAR_WATCH_WORKFLOW 已置）才生效——watch 任务只在这种模式下创建。
-    外部输入全容错：未置/空白/非数值/NaN/Inf/<=0 一律回落缺省；有效但低于下限就钳到下限，防止忙转。"""
+    """Watch poll interval in seconds. Env SANDBAR_WATCH_INTERVAL_SEC overrides,
+    used to speed up integration scenarios. Only takes effect in per-ticket mode
+    (SANDBAR_WATCH_WORKFLOW set) — the watch task is only created in that mode.
+    Fully fault-tolerant on external input: unset/blank/non-numeric/NaN/Inf/<=0
+    all fall back to the default; valid values below the floor clamp to the floor
+    to prevent busy-looping."""
     if raw is None:
         raw = os.environ.get("SANDBAR_WATCH_INTERVAL_SEC") or ""
     raw = str(raw).strip()
@@ -71,15 +82,16 @@ def watch_interval_sec(raw: "str | None" = None) -> float:
 
 
 def worker_meta_path(args: argparse.Namespace) -> str:
-    """归属指纹 meta 的落点（KI-033）。
+    """Where the ownership-fingerprint meta lands (KI-033).
 
-    - 工单专属模式（console supervisor 拉起）：读 env SANDBAR_WORKER_META，
-      约定值=<dataDir>/worker-<tid>.meta，和 pidfile 同目录；
-    - daemon 模式：<pidfile>.meta（worker 自己知道 pidfile 路径）；
-    - 前台调试模式：不落 meta（没有注册方会读它）。
+    - Per-ticket mode (console supervisor spawn): read env SANDBAR_WORKER_META,
+      the agreed value is <dataDir>/worker-<tid>.meta, same dir as the pidfile;
+    - Daemon mode: <pidfile>.meta (the worker knows its own pidfile path);
+    - Foreground debug mode: no meta (nothing will read it).
 
-    pidfile 还是纯数字 pid，meta 是旁车文件。ensure 侧按「pid 活着 + meta 指向
-    别的仓」判定异仓 worker，只告警拒接，不杀别人进程。"""
+    The pidfile stays a bare numeric pid; the meta is a sidecar file. The ensure
+    side flags a foreign-repo worker by "pid alive + meta pointing at another
+    repo" — warn and refuse only, it never kills someone else's process."""
     env_path = os.environ.get("SANDBAR_WORKER_META") or ""
     if env_path:
         return env_path
@@ -99,14 +111,15 @@ def parse_args() -> argparse.Namespace:
 
 
 def daemonize(pidfile: str, logfile: str) -> bool:
-    """单 fork 去会话化。返回 True 表示当前是父进程（调用方应立即退出）。"""
+    """Single-fork detach from the session. Returns True if this is the parent
+    process (the caller should exit immediately)."""
     pid = os.fork()
     if pid > 0:
-        # 父进程：记下子 pid 后退出（子进程 setsid 不改变 pid）
+        # Parent: record the child pid, then exit (setsid in the child keeps the pid)
         pathlib.Path(pidfile).parent.mkdir(parents=True, exist_ok=True)
         pathlib.Path(pidfile).write_text(str(pid))
         return True
-    # 子进程：脱离终端会话，重定向 stdio 到日志文件
+    # Child: leave the terminal session, redirect stdio to the log file
     os.setsid()
     log_path = pathlib.Path(logfile)
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -121,8 +134,10 @@ def daemonize(pidfile: str, logfile: str) -> bool:
 
 async def run_worker(args: argparse.Namespace) -> None:
     logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
-    # 归属指纹早写（KI-033）：Client.connect 之前就写，worker 一活 ensure 侧
-    # 就能读到归属。best-effort，写失败不阻断启动（ensure 对缺失态有 unknown 兼容）。
+    # Write the ownership fingerprint early (KI-033): before Client.connect, so
+    # the ensure side can read the ownership as soon as the worker is alive.
+    # Best-effort — a write failure must not block startup (the ensure side
+    # tolerates a missing meta as unknown).
     meta_path = worker_meta_path(args)
     if meta_path:
         payload = write_worker_meta(meta_path, repo_root=str(REPO_ROOT), pid=os.getpid())
@@ -131,12 +146,15 @@ async def run_worker(args: argparse.Namespace) -> None:
     else:
         logging.info("worker 归属指纹：前台模式不落 meta（repo_root=%s）", REPO_ROOT)
     client = await Client.connect(TARGET_HOST, namespace=NAMESPACE)
-    # 老 TicketWorkflow 已退场（票 t260823，全部工单 closed）。
-    # workflow 清单=步1 两类（兼容）+ 六模版子类；activity 清单=通用活动 + agent 段活动。
-    # 多队列（票 t260907-04 退役账）：每队列一个 Worker 实例、共享同一 registry。
-    # 共享模式 poll 新旧共享队列（旧队列在飞 workflow 流干）；专属模式由
-    # SANDBAR_TASK_QUEUES 注入新旧 ticket 队列（在飞工单 worker 重启后旧前缀
-    # workflow 不搁浅）。启动日志逐队列打印=双注册证据。
+    # The old TicketWorkflow is retired (ticket t260823, all tickets closed).
+    # Workflow list = the two step-1 classes (compat) + the six template
+    # subclasses; activity list = generic activities + agent-stage activities.
+    # Multi-queue (ticket t260907-04 retirement ledger): one Worker instance per
+    # queue, sharing the same registry. Shared mode polls the old and new shared
+    # queues (in-flight workflows on the old queue drain out); dedicated mode
+    # gets the old and new ticket queues injected via SANDBAR_TASK_QUEUES (so
+    # old-prefix workflows of in-flight tickets don't strand after a worker
+    # restart). The startup log prints every queue = evidence of double registration.
     workers = []
     for _q in configured_task_queues():
         workers.append(Worker(
@@ -147,21 +165,24 @@ async def run_worker(args: argparse.Namespace) -> None:
         ))
     logging.info("worker polling queues: %s", ", ".join(configured_task_queues()))
 
-    # 优雅停：SIGTERM/SIGINT → worker.shutdown()（在跑 activity 做完，停领新活）
+    # Graceful stop: SIGTERM/SIGINT → worker.shutdown() (finish in-flight
+    # activities, stop claiming new work)
     loop = asyncio.get_running_loop()
     stop = asyncio.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
             loop.add_signal_handler(sig, stop.set)
         except (NotImplementedError, RuntimeError):
-            pass  # 非主线程 / 平台不支持时退化为无信号处理（前台 Ctrl-C 仍由 asyncio 默认处理）
+            pass  # non-main thread / unsupported platform: degrade to no signal handling (foreground Ctrl-C is still handled by asyncio's default)
 
-    # 工单专属模式：SANDBAR_WATCH_WORKFLOW=<工单id> 时周期查 workflow 状态，
-    # 收口（非 RUNNING）即优雅自退——专属 worker 的生命周期跟工单走，不常驻。
-    # 查询失败不退出（网络抖动/workflow 不存在都不算数）：worker 停了活会攒住，
-    # 宁可多等一轮。
-    # ppid 看守：console 以子进程拉起时置 SANDBAR_WATCH_PPID=1——宿主被 SIGKILL
-    # （dispose 跑不到）时本进程被 launchd 收养、ppid 变 1，据此自退，不留无主 worker。
+    # Per-ticket mode: with SANDBAR_WATCH_WORKFLOW=<ticket-id>, poll the workflow
+    # status periodically and exit gracefully once it settles (no longer RUNNING)
+    # — a dedicated worker's lifecycle follows its ticket, it is not long-running.
+    # A failed query does not exit (network flakiness / missing workflow don't
+    # count): if the worker stops, work piles up, so we prefer to wait one more round.
+    # ppid guard: when console spawns us as a child it sets SANDBAR_WATCH_PPID=1 —
+    # if the host is SIGKILLed (dispose can't run), this process gets adopted by
+    # launchd, ppid becomes 1, and we exit on that — no orphan workers.
     watch_wf = os.environ.get("SANDBAR_WATCH_WORKFLOW") or ""
     watch_ppid = os.environ.get("SANDBAR_WATCH_PPID") == "1"
     watch_interval = watch_interval_sec()
@@ -217,8 +238,10 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        # 优雅停收尾：清自己的 meta。stale meta 本来由 ensure 侧按「pid 死」判掉，
-        # 但主动清更干净。best-effort，清不掉不掩盖退出码。
+        # Graceful-stop cleanup: remove our own meta. A stale meta would be
+        # dropped by the ensure side anyway ("pid dead"), but removing it
+        # actively is cleaner. Best-effort — a removal failure must not mask
+        # the exit code.
         if meta_path:
             try:
                 pathlib.Path(meta_path).unlink()
