@@ -191,6 +191,28 @@ async function browserScenarios() {
     return;
   }
 
+  // 260909 提速战役③终验 run D 误红复盘：data-phase 属出厂 ConversationRoot
+  // （宿主面，非本仓代码）。服务端半 S1 开好全局 ticket 会话后，宿主的会话
+  // 激活是页外异步——负载下可落在本腿原 12s 观察窗内（hero→active 与点击
+  // 无关：现行 onOpen=纯导航 openDetail，不可能切会话；snapshots 0→0 亦自证
+  // 零注入）。基线纪律：点击前先等根相位到达稳态（每秒复读、连续两次一致，
+  // 最多 20s——链池杆有 engine 约 280s 封顶，最坏 +20s 零墙钟代价），只对
+  // 稳态基线断言「点击零切换」。稳态若是 active（宿主已如实展示既有会话），
+  // 相位腿的判别力让位给快照零注入腿——共享全局根的结构性边界，detail 如实记。
+  const readPhase = () => page.evaluate(
+    () => document.querySelector('[data-phase]')?.getAttribute('data-phase') ?? '');
+  let phaseStable = await readPhase();
+  {
+    let last = phaseStable;
+    for (let i = 0; i < 20; i++) {
+      await page.waitForTimeout(1000);
+      const cur = await readPhase();
+      if (cur === last) { phaseStable = cur; break; }
+      last = cur;
+      phaseStable = cur;
+    }
+  }
+
   const contextMsgCount = () => page.evaluate(
     () => document.body.innerText.split('【工单上下文】').length - 1,
   );
@@ -203,12 +225,12 @@ async function browserScenarios() {
   } else {
     try {
       const beforeSnapshots = await contextMsgCount();
-      const phaseBefore = await page.evaluate(() => document.querySelector('[data-phase]')?.getAttribute('data-phase') ?? '');
+      const phaseBefore = phaseStable;
       await rows[0].click();
       await page.waitForSelector('.wb-d2-steps', { timeout: 8000 }); // middle detail opens as usual (the same drawer anchor as t260901-13)
       await page.waitForTimeout(4000); // the old path refresh→waitForListed→open→inject takes seconds; give it a full observation window
       const afterSnapshots = await contextMsgCount();
-      const phaseAfter = await page.evaluate(() => document.querySelector('[data-phase]')?.getAttribute('data-phase') ?? '');
+      const phaseAfter = await readPhase();
       if (afterSnapshots === beforeSnapshots && phaseAfter === phaseBefore) {
         record('browser/click-no-session-open', 'pass', `snapshots=${afterSnapshots} phase=${phaseAfter || '(none)'} 不变`);
       } else {
