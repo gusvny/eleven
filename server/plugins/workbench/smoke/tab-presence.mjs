@@ -1,18 +1,24 @@
-// smoke/tab-presence.mjs —— t260901-15 多页签共存（tab-presence.ts）冒烟。
+// smoke/tab-presence.mjs — smoke for t260901-15 multi-tab coexistence (tab-presence.ts).
 //
-// 直跑：node smoke/tab-presence.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
-// 全部用例桩化：stub BroadcastChannel 总线 + stub localStorage（跨实例 storage 事件），
-// 注入时钟，不碰网络、不碰 3099、不依赖真外部源（畸形输入用例全靠固定桩喂）。
+// Run: node smoke/tab-presence.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+// Every case is stubbed: stub BroadcastChannel bus + stub localStorage (cross-instance storage
+// events), injected clock; no network, no 3099, no real external source (malformed-input cases
+// are fed entirely from fixed stubs).
 //
-// 覆盖（方案验收口径逐条）：
-//   A. parseMsg 畸形输入：非对象/版本不对/缺字段/未知类型/字段类型不对/超长 → null。
-//   B. BroadcastChannel 主通道：双页签互见 viewersOf；setViewingTicket 即时生效；
-//      自己不在自己的 viewersOf 里；bye/stop 即时剔除；TTL 过期剔除（注入时钟）。
-//   C. 写事件：notifyWrite → 对端 onRemoteWrite 收到（ticket/op/who）；
-//      recentRemoteWrite 窗口内命中、窗口外不命中（注入时钟）；自身写不算远端。
-//   D. localStorage 兜底通道：BroadcastChannel 缺席时双页签经 storage 事件互见 + 写事件送达。
-//   E. 坏 JSON：直接向对端 storage 喂非 JSON 值 → 不崩、无回调。
-//   F. 终态回收：stop 后对端不再收到心跳/写事件（等一拍验证，无回调泄漏）。
+// Coverage (item by item per the plan's acceptance criteria):
+//   A. parseMsg malformed input: non-object / wrong version / missing field / unknown type /
+//      wrong field type / over-long → null.
+//   B. BroadcastChannel main channel: two tabs see each other in viewersOf; setViewingTicket
+//      takes effect immediately; a tab is not in its own viewersOf; bye/stop removes
+//      immediately; TTL expiry removes (injected clock).
+//   C. Write events: notifyWrite → the peer's onRemoteWrite receives (ticket/op/who);
+//      recentRemoteWrite hits inside the window and misses outside it (injected clock);
+//      one's own write does not count as remote.
+//   D. localStorage fallback channel: with BroadcastChannel absent, two tabs still see each
+//      other via storage events + write events are delivered.
+//   E. Bad JSON: feeding a non-JSON value straight into the peer's storage → no crash, no callback.
+//   F. Terminal cleanup: after stop the peer no longer receives heartbeats/write events
+//      (verified by waiting a beat; no callback leaks).
 
 import {
   startTabPresence, parseMsg,
@@ -29,7 +35,7 @@ function ok(cond, label) {
 function section(t) { console.log(`\n== ${t}`) }
 const tick = (ms = 5) => new Promise(r => setTimeout(r, ms))
 
-/* --------------------------------------------------------- 桩：BroadcastChannel 总线 */
+/* --------------------------------------------------------- stub: BroadcastChannel bus */
 const bcRegistry = new Map()
 class FakeBC {
   constructor(name) {
@@ -49,7 +55,7 @@ class FakeBC {
   close() { this.closed = true; bcRegistry.get(this.name)?.delete(this) }
 }
 
-/* --------------------------------------------------------- 桩：localStorage（跨实例事件） */
+/* --------------------------------------------------------- stub: localStorage (cross-instance events) */
 const lsRegistry = new Set()
 class FakeLS {
   constructor() { this.m = new Map(); this.handlers = new Set(); lsRegistry.add(this) }
@@ -74,7 +80,7 @@ class FakeLS {
   removeEventListener(_t, h) { this.handlers.delete(h) }
 }
 
-/* --------------------------------------------------------- 桩：document（恒可见） */
+/* --------------------------------------------------------- stub: document (always visible) */
 const fakeDoc = {
   visibilityState: 'visible',
   addEventListener() {}, removeEventListener() {},
@@ -94,7 +100,7 @@ function uninstallGlobals() {
   delete globalThis.window
 }
 
-/* ---------------------------------------------------------------- A parseMsg 畸形输入 */
+/* ---------------------------------------------------------------- A parseMsg malformed input */
 section('A parseMsg：五类畸形一律 null')
 {
   ok(parseMsg(null) === null, 'null → null')
@@ -114,7 +120,7 @@ section('A parseMsg：五类畸形一律 null')
   ok(parseMsg({ v: 1, k: 'presence', tab: 'a', who: 'op-x', ticket: undefined, ts: 100 }) !== null, 'ticket=undefined 按 null 通过')
 }
 
-/* ------------------------------------------------ B BroadcastChannel 主通道：双页签互见 */
+/* ------------------------------------------------ B BroadcastChannel main channel: mutual visibility */
 section('B BroadcastChannel 主通道：双页签互见 / bye 剔除 / TTL 过期')
 {
   installGlobals(true)
@@ -129,19 +135,21 @@ section('B BroadcastChannel 主通道：双页签互见 / bye 剔除 / TTL 过�
   ok(A.viewersOf('t11').length === 1 && A.viewersOf('t11')[0].who === 'op-B', 'A 看到 B 在看 t11')
   ok(B.viewersOf('t13').length === 1 && B.viewersOf('t13')[0].who === 'op-A', 'B 看到 A 在看 t13')
   ok(B.viewersOf('t99').length === 0, '无人看的工单为空')
-  // 切看：即时生效
+  // switch viewed ticket: takes effect immediately
   B.setViewingTicket('t13')
   await tick()
   ok(A.viewersOf('t13').length === 2 - 1 && A.viewersOf('t13')[0].who === 'op-B', 'B 切看 t13 后 A 即时可见')
   B.setViewingTicket(null)
   await tick()
   ok(A.viewersOf('t13').length === 0, 'B 关抽屉（null）后 A 侧即时消失')
-  // TTL：时钟推过 PEER_TTL_MS（期间无新心跳——停掉 A 的节拍靠 stop 后再手发？直接用 stop 测 bye）
+  // TTL: push the clock past PEER_TTL_MS (no fresh heartbeat in between — pausing A's beat
+  // would need a hand-rolled send after stop, so bye is exercised via stop instead)
   B.setViewingTicket('t11')
   B.stop()
   await tick()
   ok(A.viewersOf('t11').length === 0, 'B stop（bye）后 A 即时剔除')
-  // TTL 过期：B 已停，A 侧残留 peers 已在 bye 清掉；改用时钟推 + C 页签只发一拍
+  // TTL expiry: B is already stopped and A's leftover peers were cleared by bye; use a clock
+  // push instead + a C tab that only emits one beat
   const C = startTabPresence('op-C', { tabId: 'tab-C' })
   C.setViewingTicket('t7')
   await tick()
@@ -154,7 +162,7 @@ section('B BroadcastChannel 主通道：双页签互见 / bye 剔除 / TTL 过�
   uninstallGlobals()
 }
 
-/* ------------------------------------------------------------------ C 写事件 + 守门窗口 */
+/* ------------------------------------------------------------------ C write events + gate window */
 section('C 写事件：送达 / recentRemoteWrite 窗口 / 自身写不算远端')
 {
   installGlobals(true)
@@ -174,10 +182,10 @@ section('C 写事件：送达 / recentRemoteWrite 窗口 / 自身写不算远端
     'B 守门窗口内命中 A 的写')
   ok(A.recentRemoteWrite('t13') === undefined, 'A 自己的写不算远端（自身回环过滤）')
   ok(B.recentRemoteWrite('t99') === undefined, '其它工单的写不命中')
-  // 窗口外不命中
+  // outside the window: no hit
   now += WRITE_WINDOW_MS + 1000
   ok(B.recentRemoteWrite('t13') === undefined, '推过守门窗口后不再命中')
-  // 退订后不再收到
+  // no more delivery after unsubscribing
   off()
   A.notifyWrite('t13', 'sign')
   await tick()
@@ -187,12 +195,12 @@ section('C 写事件：送达 / recentRemoteWrite 窗口 / 自身写不算远端
   uninstallGlobals()
 }
 
-/* ------------------------------------------------------ D localStorage 兜底通道（无 BC） */
+/* ------------------------------------------------------ D localStorage fallback channel (no BC) */
 section('D localStorage 兜底：无 BroadcastChannel 时互见 + 写事件送达')
 {
-  installGlobals(false) // 删掉 BroadcastChannel → 自动走 localStorage 通道
-  // 真实浏览器里两个页签是两个 document、各有一份 localStorage 视图；
-  // 这里给 A/B 各配一个 FakeLS 实例，setItem 触发「对端」storage 事件。
+  installGlobals(false) // BroadcastChannel removed → the localStorage channel is chosen automatically
+  // in a real browser the two tabs are two documents, each with its own localStorage view;
+  // here A/B each get a FakeLS instance whose setItem fires the 「peer」 storage event.
   let now = 3_000_000
   __setClockForTests(() => now)
   const A = startTabPresence('op-A', { tabId: 'tab-A' })
@@ -216,7 +224,7 @@ section('D localStorage 兜底：无 BroadcastChannel 时互见 + 写事件送�
   uninstallGlobals()
 }
 
-/* ------------------------------------------------------------------ E 坏 JSON 不崩 */
+/* ------------------------------------------------------------------ E bad JSON does not crash */
 section('E 坏 JSON / 畸形入站：丢弃不崩')
 {
   installGlobals(false)
@@ -226,10 +234,11 @@ section('E 坏 JSON / 畸形入站：丢弃不崩')
   await tick()
   let crashed = false
   process.once('uncaughtException', () => { crashed = true })
-  // 直接往 B 的 storage 塞坏值与非心跳 key（模拟对端/别的脚本写的脏数据）
+  // feed bad values and non-heartbeat keys straight into B's storage (dirt a peer or some
+  // other script might have written)
   globalThis.localStorage.setItem('suyou-wb-tab-tab-A', '{{{not json')
-  globalThis.localStorage.setItem('suyou-wb-tabwrite', '{"v":1,"k":"write","tab":') // 截断 JSON
-  globalThis.localStorage.setItem('suyou-wb-tab-evil', 'null') // 合法 JSON 但 parseMsg 拒
+  globalThis.localStorage.setItem('suyou-wb-tabwrite', '{"v":1,"k":"write","tab":') // truncated JSON
+  globalThis.localStorage.setItem('suyou-wb-tab-evil', 'null') // valid JSON but rejected by parseMsg
   await tick()
   ok(!crashed, '坏 JSON 三件套喂入不崩')
   ok(B.viewersOf('t13').length === 0, '脏数据不产生幽灵在看者')
@@ -237,7 +246,7 @@ section('E 坏 JSON / 畸形入站：丢弃不崩')
   uninstallGlobals()
 }
 
-/* ------------------------------------------------------------------ F 终态回收 */
+/* ------------------------------------------------------------------ F terminal cleanup */
 section('F stop 终态回收：无回调泄漏')
 {
   installGlobals(true)
@@ -245,7 +254,7 @@ section('F stop 终态回收：无回调泄漏')
   const B = startTabPresence('op-B', { tabId: 'tab-B' })
   let beats = 0
   B.onRemoteWrite(() => { beats++ })
-  A.stop() // 首拍已发，stop 后再等几拍：B 不应再收到任何消息
+  A.stop() // first beat already sent; after stop wait a few more beats: B must receive nothing
   await tick(HEARTBEAT_MS * 2 + 20)
   ok(beats === 0, 'A stop 后 B 再无回调（定时器/监听全清）')
   B.stop()

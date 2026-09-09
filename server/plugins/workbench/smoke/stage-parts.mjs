@@ -1,19 +1,23 @@
 /**
- * smoke/stage-parts.mjs —— t260828-01「执行主体 parts 徽标」冒烟（observability 立项）。
+ * smoke/stage-parts.mjs — smoke for t260828-01 「actor parts badges」 (observability kickoff).
  *
- * 直跑：node smoke/stage-parts.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * 覆盖：
- *   A. src/shared/parts.ts 纯函数：组合拼接（agent+script→🤖⚙️、human+script→👤⚙️）、
- *      undefined/空数组 →「—」软降级、未知枚举值 → ❓ 兜底且悬停行点名、不抛错。
- *   B. /sandbar-workbench/api/wf/workflows 路由端到端（真实仓库 repo，无 stub）：
- *      五模版全部 stage 带非空 parts 透出（链路：STAGES→yaml→workflow.py
- *      _brief→路由），且 stage 链/parts 与 Python 侧 STAGES 代码真源逐条比对
- *      （独立基线，不与路由同源；加 stage 不会假红）。
- *   B2. workflow.py validate（真实代码拷进 tmp 仓读自制 yaml）：非法 parts → 非零
- *      退出+大声报错点名；无 parts 旧 yaml → 照常加载、_brief 透出 parts=[]
- *      （数据层软降级，「—」由前端补）。
- *   C. 防穿口径说明：本单零新增端点（徽标数据搭既有 workflows 列表），无新路径面；
- *      agent-live 既有 4XX 防穿用例由 smoke/agent-live.mjs 回归覆盖，本文件不重复。
+ * Run: node smoke/stage-parts.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+ * Covers:
+ *   A. src/shared/parts.ts pure functions: combination concatenation (agent+script -> 🤖⚙️,
+ *      human+script -> 👤⚙️), undefined/empty array -> 「—」 soft fallback, unknown enum value
+ *      -> ❓ fallback plus a hover line naming it, never throws.
+ *   B. /sandbar-workbench/api/wf/workflows route end-to-end (real repo, no stub): all five
+ *      templates expose every stage with a non-empty parts list (chain: STAGES -> yaml ->
+ *      workflow.py _brief -> route), and the stage chain / parts are compared item by item
+ *      against the Python-side STAGES code source of truth (an independent baseline, not
+ *      derived from the route, so adding a stage cannot turn this falsely red).
+ *   B2. workflow.py validate (real code copied into a tmp repo reading a hand-made yaml):
+ *      illegal parts -> non-zero exit + loud error naming the value; legacy yaml without
+ *      parts -> loads as usual and _brief exposes parts=[] (data-layer soft fallback,
+ *      the frontend renders 「—」).
+ *   C. Traversal-guard scope note: this ticket adds zero new endpoints (badge data rides the
+ *      existing workflows list), so there is no new path surface; agent-live's existing 4XX
+ *      traversal-guard cases are regression-covered by smoke/agent-live.mjs, not repeated here.
  */
 
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -40,7 +44,7 @@ const REPO = resolve(HERE, '..', '..', '..', '..')  // <repo>/server/plugins/wor
 
 const tmp = await mkdtemp(join(tmpdir(), 'wb-parts-'))
 try {
-  /* ------------------------------------------------------------ A. 纯函数 */
+  /* ------------------------------------------------------------ A. pure functions */
   section('A parts.ts 纯函数（拼接/降级/未知值）')
   {
     ok(partsIcons(['agent']) === '🤖', 'agent → 🤖')
@@ -55,12 +59,12 @@ try {
       '悬停一行说明（组合态）')
     ok(partsTitle(undefined).includes('旧数据无 parts'), '无 parts 悬停行说明降级口径')
     ok(partsTitle(['robot']).includes('未知执行主体 robot'), '未知值在悬停行点名')
-    // 三枚图标/标签与枚举一一对应（防漏枚举分支）
+    // the three icons/labels map 1:1 onto the enum (guards against a missed enum branch)
     ok(PART_ICON.agent === '🤖' && PART_ICON.script === '⚙️' && PART_ICON.human === '👤',
       '图标表 agent🤖/script⚙️/human👤')
   }
 
-  /* ------------------------------------------------------------ B. workflows 路由透出 */
+  /* ------------------------------------------------------------ B. workflows route exposure */
   section('B /api/wf/workflows 透出 parts（真实链路，无 stub）')
   {
     const routes = []
@@ -96,9 +100,12 @@ try {
     }
     ok(missing.length === 0, `全部 ${total} 个 stage parts 非空透出${missing.length ? '，缺：' + missing.join('、') : ''}`)
 
-    // 与代码真源逐条比对（t260829-04）：基线=Python 侧 STAGES 类属性（真源=代码），
-    // 与 API 路由不同源——不加硬编码 stage 总数，模版加段后本断言自动跟随，不会假红。
-    // temporalio 只有主库/泳道 venv 装了：解释器候选探测（同 replay_check.py 口径）。
+    // Item-by-item comparison against the code source of truth (t260829-04): the baseline is
+    // the Python-side STAGES class attributes (source of truth = code), independent of the API
+    // route — no hardcoded stage total, so the assertion follows automatically when a template
+    // gains a stage and cannot turn falsely red.
+    // temporalio is only installed in the main-repo/worklane venvs: probe interpreter
+    // candidates (same rule as replay_check.py).
     const POC = join(REPO, 'server', 'engine')
     const pyCode = `
 import json, sys
@@ -137,8 +144,9 @@ print(json.dumps({t: [{"id": s.id, "parts": list(s.parts)} for s in c.STAGES] fo
     ok(merge && merge.parts.join('+') === 'human+script', 'merge=human+script（验收口径）')
     ok(dl?.stages.find(s => s.id === 'merge_check')?.parts.join('') === 'script', 'merge_check=script')
 
-    // 负例：真实 workflow.py（拷进 tmp 仓）读非法 parts 的 yaml → 非零退出 + 大声报错；
-    // 无 parts 的旧 yaml → 照常加载（数据层软降级，「—」由前端补）。
+    // Negative case: the real workflow.py (copied into the tmp repo) reading a yaml with
+    // illegal parts -> non-zero exit + loud error; legacy yaml without parts -> loads as
+    // usual (data-layer soft fallback, the frontend renders 「—」).
     section('B2 workflow.py validate：非法 parts 大声报错 / 无 parts 放行')
     await mkdir(join(tmp, 'repo', 'server', 'tools'), { recursive: true })
     await mkdir(join(tmp, 'repo', 'server', 'workflows'), { recursive: true })
@@ -165,12 +173,12 @@ stages:
     role: developer
     name: "甲"
 `, 'utf8')
-    // bad.yaml 必须在：非零退出且 stderr/stdout 点名非法值
+    // bad.yaml must still be present: non-zero exit plus stderr/stdout naming the illegal value
     let r = await execFileP('python3', [join(tmp, 'repo', 'server', 'tools', 'workflow.py')])
       .then(() => ({ rc: 0, out: '' }), (e) => ({ rc: e.code ?? 1, out: String(e.stderr ?? '') + String(e.stdout ?? '') }))
     ok(r.rc !== 0 && r.out.includes('非法值') && r.out.includes('robot'),
       '非法 parts（robot）→ 非零退出 + 大声报错点名')
-    // 只留 old.yaml：无 parts 旧数据照常 list，stages 带 parts: []（_brief 兜底）
+    // only old.yaml left: legacy data without parts still lists, stages carry parts: [] (_brief fallback)
     await rm(join(tmp, 'repo', 'server', 'workflows', 'bad.yaml'))
     r = await execFileP('python3', [join(tmp, 'repo', 'server', 'tools', 'workflow.py')])
       .then((o) => ({ rc: 0, out: o.stdout }), (e) => ({ rc: e.code ?? 1, out: String(e.stderr ?? '') }))
