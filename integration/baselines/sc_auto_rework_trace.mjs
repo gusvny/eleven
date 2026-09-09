@@ -1,46 +1,64 @@
 /**
- * 基线：自动打回时间线契约（票 t260901-04）。
+ * Baseline: the auto-rework timeline contract (ticket t260901-04).
  *
- * 锁什么：t260901-04 修复的用户可见契约——引擎自动把票打回时（验收失败 /
- * arbitrate 代码故障 / integration_review 机械或判读拒绝 / merge 失败），时间线
- * 恰新增一条 state='rework' 记录，带时间/目标步/理由/发起人——工单台打回横幅
- * （D2Reworks）只渲染这一种形状。修复前内部自动打回分支完全绕过时间线，用户
- * 看不到任何理由（t260901-02 事故）。
+ * What it locks: the user-visible contract fixed in t260901-04 — when the
+ * engine sends a ticket back on its own (acceptance failure / arbitrate code
+ * fault / integration_review mechanical or judgment rejection / merge
+ * failure), the timeline gains exactly one record with state='rework',
+ * carrying time / target stage / reason / sender. The workbench rework
+ * banner (D2Reworks) renders only this shape. Before the fix, the internal
+ * auto-rework branches bypassed the timeline entirely, so the user saw no
+ * reason at all (the t260901-02 incident).
  *
- * 纯函数半（永远跑，不需要环境）：
- *   A. 真代码行为矩阵：从 dev_lane.py 逐字抽出 PHASE_MAIN_CHAIN / PHASE_MAIN_ROLES /
- *      _auto_rework / _mark / _log / _touch / _now_*（这里 import 不了 temporalio），
- *      对着假泳道真执行：
- *      - 五个自动打回场景各产恰一条横幅形记录（state/stage/理由/note+发起人/时间）
- *        + meta 五件套；
- *      - 畸形输入矩阵（外部信号视角）：词表步目标（acceptance/parallel_impl_design/
- *        integ_join——在词表但不在 STAGES id 里）必须被接受、映射到对应 role、
- *        永不崩（评审第 3 轮回归护栏）；STAGES-only 目标（acceptance_walkthrough/
- *        ui_evidence/suggest_next/design_integration_tests）、"done"、空串、None
- *        必须被拒：返回 fallback、refused 有账、meta 不动、不留时间线记录；
- *        fallback 非法时返回 meta.stage，绝不返回坏值；
- *      - 空 note 也要产出非空的渲染理由。
- *   B. 结构守卫（用户可见不变式）：
- *      - state='rework' 时间线记录唯一生产者（不双落）；
- *      - merge 失败分支不再塞 self._rework（会双落）；
- *      - 7 个内部调用点 + 1 个壳委托 = 8 个 _auto_rework 调用点。
+ * Pure half (always runs, no environment needed):
+ *   A. Real-code behavior matrix: extract PHASE_MAIN_CHAIN / PHASE_MAIN_ROLES /
+ *      _auto_rework / _mark / _log / _touch / _now_* verbatim from dev_lane.py
+ *      (temporalio cannot be imported here) and run them against a fake lane:
+ *      - each of the five auto-rework scenarios produces exactly one
+ *        banner-shaped record (state/stage/reason/note+sender/time)
+ *        + the five meta fields;
+ *      - malformed-input matrix (external signal view): vocabulary stages
+ *        (acceptance/parallel_impl_design/integ_join — in the vocabulary but
+ *        not in the STAGES ids) must be accepted, mapped to the right role,
+ *        and never crash (round-3 regression guard); STAGES-only targets
+ *        (acceptance_walkthrough/ui_evidence/suggest_next/
+ *        design_integration_tests), "done", empty string, and None must be
+ *        refused: return the fallback, log the refusal, leave meta and the
+ *        timeline untouched; when the fallback itself is illegal, return
+ *        meta.stage — never a bad value;
+ *      - an empty note still yields a non-empty rendered reason.
+ *   B. Structural guards (user-visible invariants):
+ *      - the state='rework' timeline record has a single producer (no double
+ *        logging);
+ *      - the merge failure branch no longer sets self._rework (that would
+ *        double-log);
+ *      - 7 internal call sites + 1 shell delegation = 8 _auto_rework call
+ *        sites.
  *
- * 环境半（要 SDK + Docker 测试 Temporal + 夹具仓 clone，缺了=ENV_FAIL exit 2）：
- *   场景 F：真 dev-lane 票 + stub 大脑 → 对着上面的矩阵发外部打回信号，在真引擎上断言：
- *     F1. rework(target='acceptance')（词表∩¬STAGES）被接受：时间线恰新增一条
- *         state='rework'/stage='acceptance'，理由带 note 与发起人——workflow 不崩
- *         （第 3 轮的 bug）。
- *     F2. rework(target='done') 与 rework(target='suggest_next') 被拒：refused 计数
- *         涨、rework 记录数保持恰 1。
- *   引擎自己的「验收失败自动打回」路径在纯函数半（真代码执行）里已覆盖；逼真 agent
- *   失败超出 stub 大脑范围。
+ * Environment half (needs the SDK + Docker test Temporal + a cloned fixture
+ * repo; missing = ENV_FAIL exit 2):
+ *   Scene F: a real dev-lane ticket + stub brains → send the external rework
+ *   signals from the matrix above against the real engine:
+ *     F1. rework(target='acceptance') (vocabulary ∩ ¬STAGES) is accepted: the
+ *         timeline gains exactly one state='rework'/stage='acceptance' record
+ *         whose reason carries the note and sender — the workflow does not
+ *         crash (the round-3 bug).
+ *     F2. rework(target='done') and rework(target='suggest_next') are
+ *         refused: the refused count grows, the rework record count stays 1.
+ *   The engine's own "acceptance failure → auto rework" path is already
+ *   covered in the pure half (real code execution); realistic agent failure
+ *   is out of scope for stub brains.
  *
- * 写集守卫（本测试建票；目标不清就拒跑）：
- *   SANDBAR_TARGET_HOST 未设→ENV_FAIL；== 生产默认 127.0.0.1:7233→FAIL；
- *   其余必须等于钉死的测试环境 127.0.0.1:17233。
+ * Write-set guard (this test creates tickets; refuse to run on an unclear
+ * target):
+ *   SANDBAR_TARGET_HOST unset → ENV_FAIL; == the production default
+ *   127.0.0.1:7233 → FAIL; anything else must equal the pinned test
+ *   environment 127.0.0.1:17233.
  *
- * 嵌套跑守卫：泳道机械步内（SANDBAR_TASK_QUEUE/SANDBAR_WATCH_WORKFLOW 在场）
- * 环境半大声报 ENV_FAIL——与 ticket-lifecycle 同款递归护栏；纯函数半照跑。
+ * Nested-run guard: inside a lane integration step (SANDBAR_TASK_QUEUE /
+ * SANDBAR_WATCH_WORKFLOW present) the environment half reports ENV_FAIL
+ * loudly — the same recursion guard as ticket-lifecycle; the pure half
+ * still runs.
  */
 
 import { spawnSync } from 'node:child_process'
@@ -62,14 +80,14 @@ function ok(cond, label) {
 }
 function section(t) { console.log(`\n== ${t}`) }
 
-/** 嵌套跑守卫：任何专属 worker env 标记在场=「在泳道里」。 */
+/** Nested-run guard: any dedicated-worker env marker present = "inside a lane". */
 function nestedGuard(env = process.env) {
   return (env.SANDBAR_TASK_QUEUE || env.SANDBAR_WATCH_WORKFLOW) ? 'nested' : 'top'
 }
 
 /* ------------------------------------------------------------------ pure A */
-/* 从 dev_lane.py 抽出真记账代码逐字执行。
- * Python 侧打印 "ok/FAIL" 行加 "PYDONE pass=N fail=M" 汇总。 */
+/* Extract the real bookkeeping code from dev_lane.py and execute it verbatim.
+ * The python side prints "ok/FAIL" lines plus a "PYDONE pass=N fail=M" summary. */
 
 const PY = String.raw`
 import json, re, sys
@@ -121,7 +139,8 @@ PHASE_MAIN_CHAIN = ns['PHASE_MAIN_CHAIN']
 PHASE_MAIN_ROLES = ns['PHASE_MAIN_ROLES']
 ok(set(PHASE_MAIN_ROLES) == set(PHASE_MAIN_CHAIN),
    'PHASE_MAIN_ROLES 键集合与 PHASE_MAIN_CHAIN 一致（13 键）')
-# 锁口径：len = 主链 phase 值全集；t260903-02 增第 13 键 arb_acc_parallel。
+# Lock the contract: len = the full set of main-chain phase values; t260903-02
+# added the 13th key, arb_acc_parallel.
 ok(len(PHASE_MAIN_CHAIN) == 13, 'PHASE_MAIN_CHAIN 恰 13 值')
 
 methods = []
@@ -139,7 +158,7 @@ def fresh(stage):
     lane.refused = []
     return lane
 
-# ---- A1: 五个自动打回场景，各产一条横幅可见记录（用户视角主契约） ----
+# ---- A1: the five auto-rework scenarios, each producing one banner-visible record (main user contract) ----
 scenarios = [
     ('acceptance', 'implement', '验收走查打回（第 2 轮）'),
     ('arbitrate', 'implement', 'code-fault 打回 → implement（第 1 轮）'),
@@ -168,8 +187,9 @@ for cur, target, note in scenarios:
        '%s→%s：role=%s（显式映射，不经 _step）' % (cur, target, PHASE_MAIN_ROLES[target]))
     ok(lane.meta.get('stage') == target, '%s→%s：meta.stage=目标步' % (cur, target))
 
-# ---- A2: 畸形输入矩阵（外部 signal 视角） ----
-# 反向三值：词表有、STAGES 无 —— review 第 3 轮回归护栏（旧码 _step 崩/新码须接受）
+# ---- A2: malformed-input matrix (external signal view) ----
+# Reverse direction: in the vocabulary, not in STAGES — round-3 regression
+# guard (old code crashed in _step / new code must accept)
 for tgt, want_role in (('acceptance', 'integration'),
                        ('parallel_impl_design', 'developer'),
                        ('integ_join', 'developer')):
@@ -186,7 +206,8 @@ for tgt, want_role in (('acceptance', 'integration'),
     ok(len(lane.timeline) == before + 1 and lane.timeline[-1].get('state') == 'rework',
        '畸形输入 target=%s：留一条 rework 记录' % tgt)
 
-# 拒绝方向：STAGES 有、词表无 + done + 空/None —— 拒绝语义与 _apply_rework 拒绝路径一致
+# Refusal direction: in STAGES, not in the vocabulary + done + empty/None —
+# refusal semantics must match the _apply_rework refusal path
 for tgt in ('acceptance_walkthrough', 'ui_evidence', 'suggest_next',
             'design_integration_tests', 'done', '', None):
     lane = fresh('implement')
@@ -204,23 +225,25 @@ for tgt in ('acceptance_walkthrough', 'ui_evidence', 'suggest_next',
     ok(lane.meta == meta_before, '畸形输入 target=%s：拒绝不改写 meta' % label)
     ok(len(lane.timeline) == tl_before, '畸形输入 target=%s：拒绝不留 rework 时间线' % label)
 
-# fallback 非法：返回 meta 现值，绝不让非法值回流 phase
+# Illegal fallback: return the current meta.stage, never let a bad value flow back
 lane = fresh('implement')
 ret = lane._auto_rework('implement', 'ok', 'workflow', '')
 ok(ret == 'implement', 'fallback 非法：返回 meta.stage（合法值）')
 ok(len(lane.refused) == 1, 'fallback 非法：refused 有账')
 ok(len(lane.timeline) == 0, 'fallback 非法：无 rework 时间线')
 
-# 空 note：留痕 reason 仍非空（横幅不渲染空理由）
+# Empty note: the recorded reason is still non-empty (the banner never renders an empty reason)
 lane = fresh('acceptance')
 lane._auto_rework('implement', '', 'workflow', 'acceptance')
 ok(bool(lane.timeline[-1].get('reason')), '空 note：reason 兜底非空')
 
-# ---- B: 结构护栏（用户可见不变量） ----
-# 'rework' 时间线记录的唯一生产者 = _auto_rework 内那处真实调用（docstring 提及不算）
+# ---- B: structural guards (user-visible invariants) ----
+# The single producer of 'rework' timeline records = the one real _mark call
+# inside _auto_rework (docstring mentions do not count)
 ok(len(re.findall(r'^\s+self\._mark\(target,\s*["\']rework["\']', src, re.M)) == 1,
    'state=rework 时间线记录唯一生产者（恰好 1 处真实 _mark 调用）——不双落')
-# merge 人审 reject 保留经壳留痕（既有行为）；merge 失败分支必须不再塞 self._rework
+# The merge human-review reject keeps logging via the shell (existing behavior);
+# the merge failure branch must no longer set self._rework
 ok(len(re.findall(r'self\._rework = ReworkRequest\(', src)) == 1,
    'dev_lane.py 仅存 1 处 ReworkRequest 塞值（merge 人审 reject，经壳留痕）')
 i_fail = src.find('if not mr.ok:')
@@ -228,8 +251,9 @@ i_fin = src.find('self._finish("merge"', i_fail)
 ok(i_fail >= 0 and i_fin > i_fail and
    'self._rework = ReworkRequest(' not in src[i_fail:i_fin],
    'merge 失败分支（if not mr.ok → _finish(merge) 区间）无 ReworkRequest 塞值（直调 _auto_rework 防双落）')
-# 锁口径：调用点计数 = 内部自动打回点 + 1 壳委托；t260903-02 增 arb_acc_parallel
-# 分支 2 处（验收打回 + code-fault 打回）→ 8（7 internal + 1 shell delegation）。
+# Lock the contract: call-site count = internal auto-rework points + 1 shell
+# delegation; t260903-02 added the arb_acc_parallel branch (2 sites: acceptance
+# rejection + code-fault rejection) → 8 (7 internal + 1 shell delegation).
 ok(len(re.findall(r'self\._auto_rework\(', src)) == 8,
    '_auto_rework 调用点=8（1 壳委托 + 7 内部自动打回点）')
 
@@ -251,8 +275,9 @@ function pureHalf() {
 }
 
 /* ------------------------------------------------------------------ env half */
-// 计时探针（260909 并发提速战役）：envHalf 652s 单笔占 wall 52%，先量后动——
-// 每段 wall 时间戳打 stdout，run_scenarios 汇总按段聚合。
+// Timing probes (260909 concurrency speed campaign): envHalf's 652s single
+// scene was 52% of wall — measure before optimizing. Every segment gets a
+// wall-clock timestamp on stdout; the executor aggregates by segment.
 const T0 = { at: Date.now() };
 const stamp = (label) => console.log(`  [timing] ${((Date.now() - T0.at) / 1000).toFixed(1).padStart(7)}s  ${label}`);
 
@@ -276,7 +301,8 @@ async function sceneF(t, api, sdkPython, fixture) {
     const findAccept = (s) => (s?.timeline ?? []).find(
       (e) => e.state === 'rework' && e.stage === 'acceptance')
 
-    // F1: 词表∩¬STAGES 目标（review 第 3 轮回归）——真实引擎不得崩
+    // F1: a vocabulary ∩ ¬STAGES target (round-3 regression) — the real
+    // engine must not crash
     const note = 'e2e: 外部打回到验收（词表∩¬STAGES 回归护栏）'
     api.rework(tid, 'acceptance', note, 'e2e-tester')
     stamp('sceneF: F1 信号已发')
@@ -294,7 +320,7 @@ async function sceneF(t, api, sdkPython, fixture) {
         `F1: role=integration（显式映射，_step 未崩；实得 ${s1.role ?? s1.meta?.role}）`)
     }
 
-    // F2: done / suggest_next 拒绝——refused 增长、rework 记录数不变
+    // F2: done / suggest_next refusals — refused grows, rework record count stays
     const refusedOf = (s) => (s?.refused ?? []).length
     api.rework(tid, 'done', 'e2e: 终态不可为打回目标', 'e2e-tester')
     stamp('sceneF: F2a 信号已发')
@@ -321,7 +347,7 @@ async function sceneF(t, api, sdkPython, fixture) {
 
 async function envHalf() {
   section('env: real engine rework-signal matrix (Docker test Temporal + stub brains)')
-  T0.at = Date.now()   // 计时零点对齐 envHalf 起点（pure half 不在本表口径内）
+  T0.at = Date.now()   // zero the clock at the envHalf start (the pure half is outside this table)
   stamp('envHalf: 入口')
   const t = makeTally()
   const guard = writeGuard()
@@ -334,7 +360,7 @@ async function envHalf() {
   const fixtureBuilt = await buildFixture(t)
   if (!fixtureBuilt) { envFail++; console.log('  ENV_FAIL env half: fixture clone failed'); return }
   stamp('envHalf: buildFixture 回')
-  const { fixture, dispose } = fixtureBuilt   // buildFixture 回执是对象：路径字段叫 fixture（同 sc_ticket_lifecycle 解构口径）
+  const { fixture, dispose } = fixtureBuilt   // buildFixture returns an object whose path field is called fixture (same destructuring as sc_ticket_lifecycle)
   try {
     const api = makeApi(sdkPython, fixture)
     await sceneF(t, api, sdkPython, fixture)
