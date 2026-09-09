@@ -273,8 +273,11 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
       await forceClick(rmDlg.locator('[data-wb-pmod-remove-precheck]'));
       await page2.waitForTimeout(2000);
       const disposed = await rmDlg.locator('[data-wb-pmod-remove-dry]').isVisible().catch(() => false);
+      // 红时回显错误面全文（e43ac45 同口径：仅布尔旗无法归因 transient 红——
+      // 并发下 precheck 拒因只有文案能分辨「台没起好」与「产品真红」）。
+      const preErr = await rmDlg.locator('[data-wb-pmod-remove-error]').innerText().catch(() => '');
       record('remove-real/precheck-to-dispose', disposed,
-        '真台预检通过，流程前进到处置步（死端口台恒停 gate——对照面）');
+        `真台预检通过，流程前进到处置步（死端口台恒停 gate——对照面） err=${preErr.slice(0, 200)}`);
 
       // 步骤2→3：dry 清单 → confirm 步（清单 pre 在场且点名退役改名=将执行面）。
       if (disposed) {
