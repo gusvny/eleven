@@ -1,22 +1,27 @@
-"""Temporal client CLI —— dsh 插件 `sandbar-temporal-tools` spawn 的入口。
+"""Temporal client CLI — the entry point spawned by the dsh plugin
+`sandbar-temporal-tools`.
 
-安全红线（票 t260821-02）：工具面**绝无「设置 stage / 改状态」入口**：
+Safety red line (ticket t260821-02): the tool surface has **no "set stage / change
+status" entry at all**:
 
-    client.py start         启动 workflow（dispatcher-scan）
-    client.py query         读 workflow 快照（只读，改不了状态）
-    client.py schedule-list 列 Schedule（只读）
-    client.py cancel        停掉 workflow（terminate，清场/撤销用）
-    client.py ticket        工单操作（update/sign/rework/ruling/query）
-    client.py ticket-start  创建 v2 工单（M11 模版即代码：模板 id→workflow 类，不落 JSON）
-    client.py ticket-list   v2 工单列表（工单台数据源：Temporal list+query；
-                            可按 project / epic 过滤——EpicCode SA，epic-linkage）
-    client.py ticket-query  单张 v2 工单查询（snapshot+meta+pulse 运行脉搏心跳，票 t260825-03）
+    client.py start         start a workflow (dispatcher-scan)
+    client.py query         read a workflow snapshot (read-only, cannot change state)
+    client.py schedule-list list Schedules (read-only)
+    client.py cancel        stop a workflow (terminate, for teardown/abort)
+    client.py ticket        ticket operations (update/sign/rework/ruling/query)
+    client.py ticket-start  create a v2 ticket (M11 templates-as-code: template id →
+                            workflow class, no JSON projection)
+    client.py ticket-list   v2 ticket list (workbench data source: Temporal list+query;
+                            filterable by project / epic — EpicCode SA, epic-linkage)
+    client.py ticket-query  single v2 ticket query (snapshot+meta+pulse heartbeat,
+                            ticket t260825-03)
 
-stdout 一律输出**单行 JSON** `{"ok": true, "result": ...}` 或 `{"ok": false, "error": "..."}`，
-供 node.ts 插件直接解析。Temporal 的「审计/不可变历史」= workflow 自身的事件历史，
-不需要再另造 run_id。
+stdout always emits **one line of JSON**, `{"ok": true, "result": ...}` or
+`{"ok": false, "error": "..."}`, parsed directly by the node.ts plugin. Temporal's
+"audit / immutable history" is the workflow's own event history; no separate run_id is
+invented.
 
-用法（每个子命令带一个 JSON 参数，缺省 {}）：
+Usage (each subcommand takes one JSON argument, default {}):
 
     python client.py start '{"type":"dispatcher-scan","id":"dispatcher-scan"}'
     python client.py query '{"workflow_id":"t260822-01"}'
@@ -66,46 +71,62 @@ from shared import (
 from workflows import DispatcherScanWorkflow
 from workflows_v2 import TEMPLATE_CLASSES
 
-# ---- Temporal 回归运行态：closed 工单历史主动清理（票 t260902-02，M1-3）----
-# 真删走 temporalio SDK：WorkflowHandle 没有 delete 方法，删除缝=
-# client.workflow_service.delete_workflow_execution + DeleteWorkflowExecutionRequest
-# （temporalio.service 1.18.2 实测存在）。删除对象限「已归档」
-# （<data>/tickets/<id>/archive.json 存在）的 COMPLETED 执行——归档真源在 per-key
-# 数据目录，Temporal 只承担过程状态。
-# WorkflowExecution/DeleteWorkflowExecutionRequest 两个 API 类**不做模块级 import**
-# （延迟到 _sdk_deleter 函数体内，同 shared.py「temporalio 延迟到函数内 import」纪律）：
-# 本文件模块级 SDK 面必须维持 temporalio.client/temporalio.common 最小集，
-# t260901-23 的 _stub_temporalio 桩按此前提覆盖（曾把这两行提到顶层破坏契约，
-# 无 SDK 环境即炸，已修）。
+# ---- Temporal regression runtime: proactive cleanup of closed-ticket history
+#      (ticket t260902-02, M1-3) ----
+# The real delete goes through the temporalio SDK: WorkflowHandle has no delete method,
+# so the deletion seam is client.workflow_service.delete_workflow_execution +
+# DeleteWorkflowExecutionRequest (verified present in temporalio.service 1.18.2). Only
+# COMPLETED executions that are already archived (<data>/tickets/<id>/archive.json
+# exists) are deletable — the archive's source of truth lives in the per-key data
+# directory; Temporal only carries process state.
+# The two API classes WorkflowExecution/DeleteWorkflowExecutionRequest are **not
+# imported at module level** (deferred into the _sdk_deleter function body, same
+# discipline as shared.py's "import temporalio inside functions"): this file's
+# module-level SDK surface must stay the minimal temporalio.client/temporalio.common
+# set, which is the premise t260901-23's _stub_temporalio stub relies on (someone once
+# hoisted those two imports to the top, breaking the contract — it blew up without an
+# SDK and was fixed).
 
-# 收口工单的列表回填窗口（秒）：窗口内的 COMPLETED 执行用 result() 取终态快照，
-# 让左栏驻留期有标题/角色（窗口只封顶回填成本，驻留时长是前端配置项）。
+# List rehydration window for closed tickets (seconds): COMPLETED executions inside the
+# window get their terminal snapshot via result(), so the left-column dwell period has a
+# title/role (the window only caps the rehydration cost; dwell length is a frontend
+# setting).
 CLOSED_HYDRATE_WINDOW_S = 7 * 86400
 
-# ---- 查询错误分级（KI-025，票 t260903-06）----
-# kind 语义（client 产出 → ticket.py 消费 → tools_registry 并入 → 工作台/UI 分流）：
-#   not_found：唯一「工单不存在」语义，只能由 describe 命中 NotFoundFailure 触发；
-#   transient：瞬时查询故障（超时/连接/RPC 抖动/取消传播），文案引导「刷新重试」，
-#              绝不允许出现「不存在」字样（查询失败谎报不存在=KI-025 实案）；
-#   terminal：workflow 已终态（TERMINATED/CANCELED/FAILED 等），永久不可查询，
-#             文案明说「刷新无效」，绝不 transient（对死票无限重试=反向谎报）；
-#   internal：兜底（畸形入参/畸形快照/未知），文案精确说哪个检查失败。
-# 未列出口一律默认 internal——新增 _err 出口时须在此表登记。
+# ---- Query error classification (KI-025, ticket t260903-06) ----
+# kind semantics (produced by client → consumed by ticket.py → merged by tools_registry
+# → routed by the workbench/UI):
+#   not_found: the only "ticket does not exist" meaning; triggered exclusively by
+#              describe hitting NotFoundFailure;
+#   transient: momentary query failure (timeout/connection/RPC jitter/cancel
+#              propagation); the wording must guide "refresh and retry" and must never
+#              contain "does not exist" (a failed query reported as missing = the
+#              KI-025 incident);
+#   terminal: the workflow is in a terminal state (TERMINATED/CANCELED/FAILED etc.),
+#             permanently unqueryable; the wording states plainly that "refreshing is
+#             useless" and it is never transient (retrying a dead ticket forever is the
+#             opposite lie);
+#   internal: catch-all (malformed input/malformed snapshot/unknown); the wording says
+#             precisely which check failed.
+# Anything unlisted defaults to internal — every new _err exit must be registered here.
 KIND_NOT_FOUND = "not_found"
 KIND_TRANSIENT = "transient"
 KIND_TERMINAL = "terminal"
 KIND_INTERNAL = "internal"
 
-# ---- RUNNING snapshot query 重试参数（KI-003，票 t260903-06）----
-# stage 转换 inline 突变窗 1-2 秒即恢复（workflow 侧让路点见 base._breathe）：
-# 指数退避 0.5/1/2s ±20% 抖动，3 次尝试。最坏窗口 = 3×8s 超时 + 3.5s 退避 ≈ 27.5s。
-# 模块级常量供集成测试注入提速，生产不动。
+# ---- RUNNING snapshot query retry parameters (KI-003, ticket t260903-06) ----
+# The stage-transition inline mutation window recovers within 1-2 seconds (the workflow
+# side's yield point is base._breathe): exponential backoff 0.5/1/2s with ±20% jitter,
+# 3 attempts. Worst window = 3×8s timeouts + 3.5s backoff ≈ 27.5s.
+# Module-level constants so integration tests can inject faster values; production
+# leaves them alone.
 QUERY_RETRY_ATTEMPTS = 3
 QUERY_RETRY_BASE_DELAY = 0.5
 QUERY_RETRY_MAX_DELAY = 4.0
 QUERY_RETRY_JITTER = 0.2
 QUERY_TIMEOUT_S = 8.0
-# describe 重试（KI-025 另一半：describe 瞬时失败直接报错也是谎报来源）。
+# describe retry (the other half of KI-025: reporting an error straight away on a
+# momentary describe failure is also a source of false "missing" claims).
 DESCRIBE_RETRY_ATTEMPTS = 2
 DESCRIBE_BASE_DELAY = 0.5
 
@@ -115,18 +136,22 @@ def _ok(result: Any) -> Dict[str, Any]:
 
 
 def _err(msg: str, kind: str = KIND_INTERNAL) -> Dict[str, Any]:
-    """结构化错误回执。kind=错误分级（见上方分级表），消费方据此分流 404/503/410，
-    「工单不存在」文案只能随 kind=not_found 产出。"""
+    """Structured error receipt. kind = the error class (see the table above); consumers
+    route 404/503/410 from it. The "ticket does not exist" wording may only be produced
+    with kind=not_found."""
     return {"ok": False, "error": msg, "kind": kind}
 
 
 def _is_not_found_exc(e: BaseException) -> bool:
-    """判别 describe 异常是否「工单真不存在」语义（KI-025 分级的唯一入水口）。
+    """Decide whether a describe exception carries the "ticket genuinely does not exist"
+    meaning (the only entry point into KI-025's classification).
 
-    结构化判别优先（类名 MRO：WorkflowNotFoundError 及失败族命名变体），异常文案
-    兜底；口径取窄——判不准一律 False（落 transient），误判 not_found 就是
-    KI-025 要消灭的谎报本身。不做模块级 SDK import（维持最小 SDK 面、
-    _stub_temporalio 桩契约），故只按类名识别、不引用具体类对象。"""
+    Structured detection first (class-name MRO: WorkflowNotFoundError and named variants
+    of the failure family), with the exception text as fallback. Take the narrow reading
+    — when unsure, return False (lands as transient); misreading as not_found is exactly
+    the false claim KI-025 exists to eliminate. No module-level SDK import (keeps the
+    minimal SDK surface and the _stub_temporalio stub contract), so recognition is by
+    class name only, never by referencing class objects."""
     for t in type(e).__mro__:
         if t.__name__ in ("WorkflowNotFoundError", "NotFoundFailureError", "NotFoundFailure"):
             return True
@@ -135,8 +160,9 @@ def _is_not_found_exc(e: BaseException) -> bool:
 
 def _backoff_delay(attempt: int, base_delay: float, max_delay: float,
                    jitter: float = 0.0) -> float:
-    """指数退避间隔：base*2^(attempt-1) 封顶 max_delay；jitter>0 时 ±jitter 比例抖动。
-    纯函数（时钟无关），退避序列断言直接调它。"""
+    """Exponential backoff interval: base*2^(attempt-1) capped at max_delay; with
+    jitter>0 it wobbles by ±jitter proportionally. Pure function (clock-independent);
+    backoff-sequence assertions call it directly."""
     import random
     d = min(base_delay * (2 ** max(0, attempt - 1)), max_delay)
     if jitter > 0:
@@ -145,7 +171,7 @@ def _backoff_delay(attempt: int, base_delay: float, max_delay: float,
 
 
 def _ts_epoch(ts_msg: Any) -> int:
-    """proto Timestamp → epoch 秒；缺字段/异常 → 0。"""
+    """proto Timestamp → epoch seconds; missing field/exception → 0."""
     try:
         return int(ts_msg.ToSeconds())
     except Exception:
@@ -153,13 +179,16 @@ def _ts_epoch(ts_msg: Any) -> int:
 
 
 def _pulse_from_desc(desc: Any) -> Optional[Dict[str, Any]]:
-    """从 describe 的 pending activity 掏心跳详情（运行脉搏行的数据源，票 t260825-03）。
+    """Pull heartbeat details out of describe's pending activity (the data source for
+    the running-pulse row, ticket t260825-03).
 
-    agent_activities.py 的轮询循环每 5s（POLL_SEC）heartbeat(json.dumps(
-    {stage,gen,polls,session_kb}))；describe 的 pending_activities 仅 RUNNING 执行有。
-    非 agent 段（prepare_workspace/merge_check 等）不心跳、stub 模式心跳是纯字符串，
-    一律软降级：无 pending → None；心跳非 JSON → heartbeat_raw 截断透传。
-    任何异常都返回现有部分或 None，绝不让查询路径因掏心跳而挂。
+    agent_activities.py's polling loop heartbeats every 5s (POLL_SEC) with
+    json.dumps({stage,gen,polls,session_kb}); describe's pending_activities exist only
+    for RUNNING executions. Non-agent sections (prepare_workspace/merge_check etc.)
+    never heartbeat, and in stub mode the heartbeat is a plain string — so everything
+    degrades softly: no pending → None; a non-JSON heartbeat → truncated passthrough in
+    heartbeat_raw. Any exception returns the partial result or None; the query path must
+    never hang on heartbeat extraction.
     """
     try:
         acts = list(getattr(desc.raw_description, "pending_activities", []) or [])
@@ -188,7 +217,8 @@ def _pulse_from_desc(desc: Any) -> Optional[Dict[str, Any]]:
             vals = desc.data_converter.payload_converter.from_payloads(details)
             raw = vals[0] if vals else None
         except Exception:
-            # 兜底：默认 converter 的心跳是 json/plain 单 payload，手工解一层
+            # Fallback: the default converter's heartbeat is a single json/plain payload;
+            # decode one layer by hand
             raw = json.loads(bytes(details.payloads[0].data).decode("utf-8"))
         if isinstance(raw, str):
             try:
@@ -210,7 +240,7 @@ async def _connect() -> Client:
     return await Client.connect(TARGET_HOST, namespace=NAMESPACE)
 
 
-# ---------- 四个子命令 ----------
+# ---------- the four subcommands ----------
 
 async def cmd_start(args: Dict[str, Any]) -> Dict[str, Any]:
     client = await _connect()
@@ -226,8 +256,9 @@ async def cmd_start(args: Dict[str, Any]) -> Dict[str, Any]:
             {"type": wf_type, "workflow_id": handle.id, "run_id": handle.result_run_id}
         )
 
-    # 宿主令 260904：content-pipeline 已随模版退役，start 合法面收窄为 dispatcher-scan；
-    # 工单一律走 ticket-start（模板 id→workflow 类）。
+    # Host order 260904: content-pipeline was retired along with its template, so
+    # start's legal surface narrows to dispatcher-scan;
+    # tickets always go through ticket-start (template id → workflow class).
     return _err(f"未知 workflow type={wf_type!r}（可用 dispatcher-scan）")
 
 
@@ -249,18 +280,19 @@ async def cmd_query(args: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
-# signal 子命令退役（宿主令 260904）：v1 content-pipeline 删除后 sign/retry_qc 没了
-# 挂靠对象，但 dsh 插件族旧调用面仍可能 spawn 到这里——保留子命令名做退役报错，
-# 不误导成「未知子命令」。
+# The signal subcommand is retired (host order 260904): after v1 content-pipeline was
+# deleted, sign/retry_qc lost their anchor, but the dsh plugin family's old call surface
+# may still spawn here — the subcommand name is kept to produce a retired error, not to
+# mislead into "unknown subcommand".
 async def cmd_signal(args: Dict[str, Any]) -> Dict[str, Any]:
-    del args  # 无参可用
+    del args  # no usable arguments
     return _err("signal 子命令已退役（260904 宿主令）：sign/retry_qc 只服务 v1 "
                 "content-pipeline 人门段，该模板已随模版退役删除；人门签字走 "
                 "ticket op=sign，清场/撤销走 cancel。")
 
 
 async def cmd_schedule_list(args: Dict[str, Any]) -> Dict[str, Any]:
-    del args  # 无参
+    del args  # no arguments
     client = await _connect()
     out: List[Dict[str, Any]] = []
     async for desc in await client.list_schedules():
@@ -295,16 +327,18 @@ async def cmd_cancel(args: Dict[str, Any]) -> Dict[str, Any]:
     handle = client.get_workflow_handle(wf_id)
     try:
         await handle.terminate(reason=reason)
-    except Exception as e:  # 已结束/不存在等一律结构化回执，不抛栈
+    except Exception as e:  # already finished / missing etc. always produce a structured receipt, never a stack trace
         return _err(f"terminate 失败：{type(e).__name__}: {e}")
     return _ok({"workflow_id": wf_id, "terminated": True, "reason": reason})
 
 
 async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
-    """工单 stage 机（步2）：只暴露合法的推进入口，无 set-stage / force_stage。
+    """Ticket stage machine (step 2): exposes only legal advance entries, no set-stage /
+    force_stage.
 
-    op ∈ advance / accept / rework / update / dispatch-next / sign / query。
-    前五个是 workflow update（同步返回结果+进不可变历史）；sign 是人工审批签字；query 只读。
+    op ∈ advance / accept / rework / update / dispatch-next / sign / query.
+    The first five are workflow updates (synchronous result + into the immutable
+    history); sign is a human approval signature; query is read-only.
     """
     op = str(args.get("op") or "")
     tid = str(args.get("ticket_id") or args.get("id") or "")
@@ -322,7 +356,8 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
             "run_id": handle.result_run_id or handle.run_id,
             "status": desc.status.name if desc.status is not None else None,
             "snapshot": snap,
-            # 运行脉搏（t260825-03）：pending activity 心跳；非 RUNNING/无心跳 → None
+            # Running pulse (t260825-03): the pending activity heartbeat; non-RUNNING or
+            # no heartbeat → None
             "pulse": _pulse_from_desc(desc) if running else None,
         })
 
@@ -336,12 +371,12 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
             decision=str(raw.get("decision") or "approve"),
             note=str(raw.get("note") or ""),
         )
-        await handle.signal("sign", sig)  # 新旧类同名的 signal，按名发送两类通吃
+        await handle.signal("sign", sig)  # a signal with the same name on old and new classes; sending by name serves both
         return _ok({"ticket_id": tid, "signal": "sign", "gate": sig.gate,
                     "decision": sig.decision, "who": sig.who, "delivered": True})
 
     if op == "rework":
-        # v2：rework=signal（回目标段重跑）
+        # v2: rework = a signal (re-run from the target stage)
         note = str(args.get("note") or "")
         if not note:
             return _err("rework 需要 note（返工原因）")
@@ -353,9 +388,11 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
                     "target_stage": req.target_stage, "delivered": True})
 
     if op == "ruling":
-        # KI-053：宿主裁决注入——人工意见正规通道，任何状态可发（含 blocked）。
-        # 发完裁决不自动唤醒 blocked：重跑仍发 retry_qc，下一段 prompt 即见裁决
-        # （build_stage_prompt 注入面）。
+        # KI-053: host ruling injection — the official channel for human opinions,
+        # sendable in any state (blocked included).
+        # Sending a ruling does not automatically wake a blocked: the re-run still needs
+        # a retry_qc, and the next prompt picks up the ruling (the build_stage_prompt
+        # injection surface).
         note = str(args.get("note") or "")
         if not note.strip():
             return _err("ruling 需要 note（裁决内容，非空）")
@@ -370,7 +407,8 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
                     "打回用 rework，blocked 重跑用 signal retry_qc" % op)
 
     if op == "update":
-        # v2 base.py 的 update handler（按名调用，新旧类同名历史已随旧类退场）
+        # v2 base.py's update handler (called by name; the same-named handler on the old
+        # class left with that class)
         r = await handle.execute_update(
             "update_status", args=[str(args.get("status") or ""),
                                    str(args.get("note") or ""),
@@ -382,13 +420,15 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
                 "update=更新 / sign=签字 / query=查询）" % op)
 
 
-# ---------- M11 v2：ticket-start / ticket-list / ticket-query ----------
+# ---------- M11 v2: ticket-start / ticket-list / ticket-query ----------
 
 async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
-    """创建 v2 工单：模板 id → workflow 类（shared.TEMPLATE_CLASS_NAMES 映射），
-    业务属性全量钉进 TicketInput（状态只在 workflow，不落 JSON）。
-    epic-linkage：args.epic 给定时强校验（代号形状 + notes/epics/<代号>.md 存在），
-    合法则 workflow 打 EpicCode search attribute，可按 EpicCode="..." 查询捞出。"""
+    """Create a v2 ticket: template id → workflow class (the shared.TEMPLATE_CLASS_NAMES
+    mapping), with every business attribute pinned into TicketInput (state lives only in
+    the workflow, no JSON projection).
+    epic-linkage: when args.epic is given it is strictly validated (code shape + the
+    existence of notes/epics/<code>.md); if valid, the workflow gets the EpicCode search
+    attribute and can be fished out by querying EpicCode="...". """
     tpl = str(args.get("template_id") or args.get("workflow") or "")
     cls = TEMPLATE_CLASSES.get(tpl)
     if cls is None:
@@ -401,26 +441,33 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         return _err("ticket-start 需要 project（projects.yaml 注册表 key，无默认值）——"
                     "无 project 即拒收：泳道落仓禁止退化为「由执行 worker 的 REPO_ROOT 决定」"
                     "的相对路径（t260904-01 首开脑裂形态，宁可拒收不静默降级）")
-    # 硬闸（KI-032）：收 project 即自查机器级注册表锚 project_root，
-    # 与 ticket.py create 同源（单一真源=shared 装载器；SANDBAR_PROJECTS_DIR 等
-    # env 覆盖语义保持）。未锚定（未知 key/条目隔离/注册表空）=创建即拒收——
-    # 裸入口产出的 workspace 必为锚定项目主目录的绝对路径，落仓与执行 worker 解耦。
+    # Hard gate (KI-032): as soon as a project arrives, self-check the machine-level
+    # registry to anchor project_root, same source as ticket.py create (single source of
+    # truth = the shared loader; the SANDBAR_PROJECTS_DIR env override semantics are
+    # preserved). Unanchored (unknown key / quarantined entry / empty registry) = refuse
+    # at creation — the workspace produced by this bare entry must be an absolute path
+    # anchored to the project's main directory, decoupling the landing repo from the
+    # executing worker.
     try:
         proj = lookup_project(project)
     except ValueError as e:
         return _err("ticket-start 拒收（project 未锚定，开票走正规入口请先注册项目）：%s" % e)
     project_root = str(proj["dirs"][0])
-    # 立项关联（epic-linkage）：--epic 强校验单点——代号形状白名单 + 立项档案存在。
-    # 校验目录走 resolve_epics_dir(project)——锚项目注册条目主目录 notes/epics
-    # （与工单台 UI resolveEpicsDir 同源）；env SANDBAR_EPICS_DIR 优先=自测语义保留。
-    # 空 = 不关联立项（允许）。
+    # Epic linkage (epic-linkage): the single strict-validation point for --epic — a
+    # code-shape whitelist + the epic archive existing. The validation directory comes
+    # from resolve_epics_dir(project) — anchored to the project registry entry's main
+    # directory notes/epics (same source as the workbench UI's resolveEpicsDir); the
+    # SANDBAR_EPICS_DIR env wins, keeping the self-test semantics. Empty = no epic
+    # linkage (allowed).
     try:
         epic = validate_epic_code(str(args.get("epic") or ""), resolve_epics_dir(project))
     except ValueError as e:
         return _err(str(e))
-    # 泳道参数推导+校验单点（票 t260824-04/-10/-11 三次事故后收拢）：lane=worktree 的
-    # workspace/worktree/branch 缺省推导、缺一补一、不一致/形态错即拒收——
-    # 不再透传空字段让 prepare_workspace 静默跳过、agent 空目录空跑。
+    # Lane-parameter derivation + validation single point (consolidated after the three
+    # incidents t260824-04/-10/-11): for lane=worktree, workspace/worktree/branch are
+    # derived when absent, filled in one by one, and refused outright on inconsistency
+    # or a bad shape — no more passing empty fields through for prepare_workspace to
+    # silently skip, leaving the agent running in an empty directory.
     try:
         lane, workspace, worktree, branch = derive_lane_workspace(
             tid, cls.TEMPLATE_LANE,
@@ -430,24 +477,30 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
             branch=str(args.get("branch") or ""),
             template_workspace_dir=bool(getattr(cls, "TEMPLATE_WORKSPACE_DIR", False)),
             project_root=project_root,
-            # 票B（t260907-06）：多 repo 项目（父目录作根）由写集归属推导多仓泳道；
-            # 单仓项目（项目根=仓根）在 derive 内静默忽略，旧路径零回归。
+            # Ticket B (t260907-06): multi-repo projects (parent directory as root) get a
+            # multi-repo lane derived from write-set ownership; single-repo projects
+            # (project root == repo root) are silently ignored inside derive, zero
+            # regression on the old path.
             repo_write_set=(args.get("write_set")
                             if isinstance(args.get("write_set"), list) else None))
     except ValueError as e:
         return _err("ticket-start 参数非法：%s" % e)
-    # 票 t260908-02：derive 混合/多仓形态会把 repo_worktrees(list[dict]) 内嵌在 ws 里，
-    # 而 TicketInput.workspace 注解是 Dict[str, str]——payload 解码必炸（票 t260907-13
-    # 实锤）。在本文件唯一调用点拆分：明细提为一等字段 repo_worktrees，workspace 归纯
-    # {type, path}（形状显式，编解码两侧同步）。
+    # t260908-02: derive's mixed/multi-repo shape embeds repo_worktrees (list[dict])
+    # inside ws, while TicketInput.workspace is annotated Dict[str, str] — payload
+    # decoding would certainly blow up (confirmed by t260907-13). Split at this file's
+    # only call site: the detail moves to the first-class repo_worktrees field, and
+    # workspace returns to a pure {type, path} (explicit shape, encode and decode sides
+    # in sync).
     repo_worktrees = []
     if isinstance(workspace, dict):
         rws = workspace.pop("repo_worktrees", None)
         if isinstance(rws, list) and rws:
             repo_worktrees = [dict(e) for e in rws if isinstance(e, dict)]
-    # 硬闸配套（KI-032）：显式给的绝对 workspace/worktree 必须落在注册目录内
-    # （与 ticket.py create 的 _check_paths_under_project 同一判定，防裸入口
-    # 显式塞别项目/别处的路径绕锚）。相对路径不拦（已由 project_root 锚定语义覆盖）。
+    # Hard-gate companion (KI-032): an explicitly given absolute workspace/worktree must
+    # land inside the registered directory (the same judgment as ticket.py create's
+    # _check_paths_under_project, so the bare entry cannot bypass the anchor by explicitly
+    # passing another project's or some unrelated path). Relative paths are not stopped
+    # (already covered by the project_root anchoring semantics).
     try:
         check_paths_under_project(proj, workspace, worktree)
     except ValueError as e:
@@ -460,21 +513,25 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
                 stage=str(g.get("stage") or sid), tool=str(g.get("tool") or "qc_run"),
                 args=dict(g.get("args") or {}), label=str(g.get("label") or ""),
                 cmd=g.get("cmd") or None)
-    # 写集生命周期（票 t260829-07 A1）：空写集拒收单点——空写集票 agent 无白名单护栏、
-    # UI 票判定失效。出路写进拒收文案，不静默放行。
+    # Write-set lifecycle (t260829-07 A1): the single refusal point for an empty write
+    # set — a ticket with an empty write set leaves the agent without its whitelist
+    # guardrail and breaks UI-ticket judgment. The way out is written into the refusal
+    # message; never silently let it through.
     ok_ws, ws_flags, ws_err = validate_write_set_args(
         args.get("write_set"), bool(args.get("allow_empty_write_set")))
     if not ok_ws:
         return _err(ws_err)
-    # 门①背景文件闸（票 t260904-18；工单引用铁律「没提交的 note 不让建工单」）：
-    # 票面引用的背景文件必须已提交且干净（HEAD 态——泳道读的是 HEAD 冻结副本，
-    # 脏改版 agent 读不到）。插在 _connect() 之前：拒收路径不依赖 Temporal 可达。
-    # refs 缺省=不校验（存量在飞票不追溯）。
+    # Gate 1, the background-files gate (t260904-18; the ticket-reference iron rule "an
+    # uncommitted note must not become a ticket"): background files referenced on the
+    # ticket must be committed and clean (HEAD state — the lane reads a frozen HEAD copy,
+    # so a dirty modification is invisible to the agent). Inserted before _connect(): the
+    # refusal path does not depend on Temporal being reachable. refs absent = no
+    # validation (in-flight existing tickets are not retroactively checked).
     refs_raw = args.get("refs")
     refs = [str(x).strip() for x in refs_raw] if isinstance(refs_raw, list) else refs_raw
     try:
         ok_refs, refs_err = validate_background_refs(refs, project_root)
-    except Exception as e:  # 校验器自身异常也拒收（fail-closed，不静默放行）
+    except Exception as e:  # an exception in the validator itself also refuses (fail-closed, never silently allowed)
         return _err("背景文件闸故障（fail-closed）：%s: %s" % (type(e).__name__, e))
     if not ok_refs:
         return _err("ticket-start 拒收：%s" % refs_err)
@@ -496,7 +553,8 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         no_file_changes=bool(ws_flags.get("no_file_changes")),
         acceptance_extra=[str(x) for x in (args.get("acceptance_extra") or [])],
         deliverables=str(args.get("deliverables") or ""),
-        # M16：正文=原始用户需求（user_request 逐字保留，显式优先；缺省回落 body）；spec 独立
+        # M16: body = the original user request (user_request kept verbatim, explicit
+        # and preferred; falls back to body when absent); spec independent
         user_request=str(args.get("user_request") or ""),
         spec=str(args.get("spec") or ""),
         body=str(args.get("body") or ""),
@@ -513,9 +571,11 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         if "AlreadyStarted" in type(e).__name__:
             return _err("工单 %s 已在 Temporal 存在（单例，AlreadyStarted）" % tid)
-        # 立项验收标准 4：EpicCode 未注册的环境必须大声报错，不静默丢标。
-        # 特征匹配不钉死单一文案（temporalite/temporal-server 措辞可能不同）：
-        # 报错含 SA 名 + 「未注册/未定义」类措辞即识别，给修复指引。
+        # Epic acceptance criterion 4: an environment that has not registered EpicCode
+        # must fail loudly, never silently drop the label.
+        # The signature match does not pin one exact wording (temporalite/temporal-server
+        # phrasing may differ): any error containing the SA name plus "unregistered /
+        # not defined"-style wording is recognized, and a fix is suggested.
         msg = "%s: %s" % (type(e).__name__, e)
         if epic and EPIC_SA_NAME in msg and re.search(
                 r"not (defined|registered)|no mapping defined|未注册|no search attribute",
@@ -567,12 +627,15 @@ async def _query_snapshot_with_retry(handle: Any, timeout: float = QUERY_TIMEOUT
                                      base_delay: float = QUERY_RETRY_BASE_DELAY,
                                      max_delay: float = QUERY_RETRY_MAX_DELAY,
                                      jitter: float = QUERY_RETRY_JITTER) -> Any:
-    """RUNNING 工单的 snapshot query 失败重试（KI-003/KI-008 兜底）。
+    """Retry for a failed snapshot query on a RUNNING ticket (the KI-003/KI-008 net).
 
-    8s 超时多半是 stage 转换窗瞬时抖动（workflow 侧让路点见 base._breathe，
-    机制结论：inline 突变窗 1-2 秒即恢复）——指数退避 3 次尝试覆盖突变窗。
-    重试穷尽抛最后一次异常，由调用方走显式降级（详情 transient 报错、列表
-    degraded 行），不再静默吞。delay 参数化供自测注入 0 提速，不拖测试。"""
+    An 8s timeout is mostly momentary jitter in the stage-transition window (the
+    workflow-side yield point is base._breathe; the mechanism conclusion: the inline
+    mutation window recovers within 1-2 seconds) — 3 exponential-backoff attempts cover
+    the window. When retries run out, the last exception is raised and the caller does an
+    explicit degradation (a transient detail error, a degraded list row); no more
+    swallowing silently. The delay parameters are injectable so self-tests can speed
+    things up with 0 and not drag the tests."""
     last: Optional[BaseException] = None
     for i in range(max(1, attempts)):
         if i:
@@ -588,9 +651,11 @@ async def _query_snapshot_with_retry(handle: Any, timeout: float = QUERY_TIMEOUT
 async def _describe_with_retry(handle: Any, attempts: int = DESCRIBE_RETRY_ATTEMPTS,
                                base_delay: float = DESCRIBE_BASE_DELAY,
                                jitter: float = QUERY_RETRY_JITTER) -> Any:
-    """describe 带一次退避重试（KI-025 另一半）：describe 瞬时失败直接报错是谎报
-    「不存在」的另一半来源（连接/超时类故障）。NotFoundFailure 是确定性结论，
-    不重试直接上抛；其余异常按瞬时重试 1 次，穷尽上抛最后一次异常。"""
+    """describe with one backoff retry (the other half of KI-025): failing a momentary
+    describe outright is the other source of false "does not exist" claims
+    (connection/timeout-class failures). NotFoundFailure is a deterministic conclusion —
+    re-raised immediately with no retry; every other exception is treated as momentary
+    and retried once, then the last exception is re-raised when retries run out."""
     last: Optional[BaseException] = None
     for i in range(max(1, attempts)):
         if i:
@@ -606,12 +671,15 @@ async def _describe_with_retry(handle: Any, attempts: int = DESCRIBE_RETRY_ATTEM
 
 
 async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
-    """单张工单查询（v2）：snapshot 全文 + meta（JSON 兼容工单形态，ticket.py show 直接消费）。
+    """Single-ticket query (v2): the full snapshot + meta (a JSON-compatible ticket
+    shape, consumed directly by ticket.py show).
 
-    错误分级契约（KI-025，t260903-06）：回执带 kind 字段，分级表见模块头。
-    「工单不存在」只能由 describe 命中 NotFoundFailure（kind=not_found）触发；
-    超时/连接/取消一律 transient；终态（TERMINATED/CANCELED/FAILED…）一律 terminal
-    （永久不可得，文案明说刷新无效）；畸形入参/快照 internal。"""
+    Error classification contract (KI-025, t260903-06): the receipt carries a kind field;
+    the classification table is in the module header. "Ticket does not exist" may only be
+    triggered by describe hitting NotFoundFailure (kind=not_found); timeout/connection/
+    cancel are always transient; terminal states (TERMINATED/CANCELED/FAILED…) are always
+    terminal (permanently unavailable, with wording that says refreshing is useless);
+    malformed input/snapshot is internal."""
     tid = str(args.get("ticket_id") or args.get("id") or "")
     if not tid:
         return _err("ticket-query 需要 ticket_id", KIND_INTERNAL)
@@ -627,9 +695,11 @@ async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
     exec_status = desc.status.name if desc.status is not None else ""
     snap: Any = None
     if exec_status == "COMPLETED":
-        # 收口 workflow 的 run() 返回值就是最终 snapshot（_snapshot()）——用 result() 直接取，
-        # 不需要 worker。query 会打到已退出的专属 worker 队列上空等超时（实测 29s
-        # 后报假「工单不存在」，关闭工单的详情/变更/Agent 日志全瘫）。
+        # A closed workflow's run() return value is the final snapshot (_snapshot()) —
+        # take it directly with result(), no worker needed. A query would land on the
+        # already-exited dedicated worker's queue and wait out the timeout (observed:
+        # 29s later it reports a false "ticket does not exist" and the closed ticket's
+        # detail/changes/agent log all go dark).
         try:
             snap = await handle.result()
         except Exception as e:
@@ -637,26 +707,32 @@ async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
                         % (type(e).__name__, e), KIND_TRANSIENT)
     elif exec_status == "RUNNING":
         try:
-            # KI-003/KI-008：RUNNING query 失败多为 stage 转换窗瞬时抖动（突变串
-            # 噎事件循环，workflow 侧已插让路点），指数退避重试再报。
+            # KI-003/KI-008: a failing RUNNING query is usually momentary jitter in the
+            # stage-transition window (a mutation burst choking the event loop; the
+            # workflow side already has a yield point), so retry with exponential backoff
+            # before reporting.
             snap = await _query_snapshot_with_retry(handle)
         except Exception as e:
             return _err("snapshot 查询失败（已重试 %d 次，瞬时抖动？请刷新重试）：%s: %s"
                         % (QUERY_RETRY_ATTEMPTS - 1, type(e).__name__, e), KIND_TRANSIENT)
     else:
-        # 终态（TERMINATED/CANCELED/FAILED 等）永久不可查询：独立 kind=terminal，
-        # 文案明说刷新无效——绝不 transient（对死票无限重试=反向谎报，KI-025 review C2）。
+        # Terminal states (TERMINATED/CANCELED/FAILED etc.) are permanently unqueryable:
+        # a dedicated kind=terminal whose wording states plainly that refreshing is
+        # useless — never transient (retrying a dead ticket forever is the opposite lie,
+        # KI-025 review C2).
         return _err("工单已终态（%s），快照不可得——终态票不再推进，刷新无效"
                     % (exec_status or "未知"), KIND_TERMINAL)
-    # 畸形输入防御（票 t260901-23）：query 结果非 dict（旧代码/桩/坏数据）→ 显式
-    # _err，不让命令边界裸抛 AttributeError。
+    # Malformed-input defense (t260901-23): a non-dict query result (old code/stub/bad
+    # data) → an explicit _err, never a bare AttributeError at the command boundary.
     if not isinstance(snap, dict):
-        # 文案纪律：不得含「工单不存在」子串（哪怕否定式——场景按子串守卫谎报面）。
+        # Wording discipline: must not contain the "ticket does not exist" substring
+        # (not even negated — scenarios guard the false-claim surface by substring).
         return _err("snapshot 返回形态异常（预期 dict，实得 %s）——数据/版本问题，"
                     "请核对 worker/模板版本" % type(snap).__name__, KIND_INTERNAL)
-    # epic-linkage：dev-lane 的 _init 在 dev_lane.py（本工单写集外）自建 meta，
-    # 不含 epic 键。epic 以 workflow 的 EpicCode SA 为真源，在查询边界回填——
-    # 快照消费方（ticket.py show / 工单台）看到的 meta.epic 与 SA 恒一致。
+    # epic-linkage: dev-lane's _init builds its own meta in dev_lane.py (outside this
+    # ticket's write set) and has no epic key. The epic's source of truth is the
+    # workflow's EpicCode SA, backfilled at the query boundary — so the meta.epic seen by
+    # snapshot consumers (ticket.py show / the workbench) always matches the SA.
     if isinstance(snap, dict) and isinstance(snap.get("meta"), dict) \
             and "epic" not in snap["meta"]:
         try:
@@ -672,20 +748,27 @@ async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
         "engine": (snap or {}).get("engine") or "",
         "snapshot": snap,
         "ticket": (snap or {}).get("meta") or {},
-        # 运行脉搏（t260825-03）：RUNNING 时从 describe 掏 pending activity 心跳
-        # （{stage,gen,polls,session_kb}+心跳时间）；非 RUNNING/无心跳 → None 降级。
+        # Running pulse (t260825-03): while RUNNING, pull the pending activity heartbeat
+        # out of describe ({stage,gen,polls,session_kb} + heartbeat time); non-RUNNING or
+        # no heartbeat → degraded to None.
         "pulse": _pulse_from_desc(desc) if exec_status == "RUNNING" else None,
     })
 
 
 async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
-    """v2 工单列表：list workflows（六模版类）+ 逐张 query 快照 → ticket.py list 行形态。
-    args.project 给定时按 ProjectKey search attribute 过滤（多项目化，票 t260823；
-    存量未打标的旧执行不匹配过滤条件，只列新工单）。不传 = 全部项目（admin 全局视图）。
-    args.epic 给定时再 AND EpicCode="<代号>"（epic-linkage 验收标准 5；与 project 可叠加）。
-    epic 此处只校形状（EPIC_CODE_RE 白名单）；代号存在性强校验在 ticket.py _list
-    （validate_epic_code 单点）——不存在的代号走 ticket.py 通道会明确报错而非空表。
-    只收生产 task queue 上的执行（自测专属 queue 的滞留实例不查不列——查它们会等超时）。
+    """v2 ticket list: list workflows (the six template classes) + per-ticket snapshot
+    query → ticket.py list row shape. With args.project given, filter by the ProjectKey
+    search attribute (multi-project, ticket t260823; old executions without the label do
+    not match the filter, so only new tickets are listed). Not given = all projects (the
+    admin's global view). With args.epic given, additionally AND EpicCode="<code>"
+    (epic-linkage acceptance criterion 5; stackable with project).
+    epic is only shape-checked here (the EPIC_CODE_RE whitelist); the strong existence
+    check for the code lives in ticket.py _list (the validate_epic_code single point) —
+    a nonexistent code going through the ticket.py channel errors clearly instead of
+    returning an empty table.
+    Only executions on production task queues are collected (stragglers on the self-test
+    dedicated queue are neither queried nor listed — querying them would wait out a
+    timeout).
     260824 起工单走每工单专属队列（LEGACY 旧前缀 <id> 形态），过滤器放行共享队列 + 新旧专属前缀。  # naming-compat"""
     project = str(args.get("project") or "")
     if project and not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,40}", project):
@@ -702,8 +785,10 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
     if epic:
         type_filter = '(%s) AND EpicCode="%s"' % (type_filter, epic)
     rows: List[Dict[str, Any]] = []
-    # 同 id 多 run：非 TERMINATED 优先——terminate 后同 id 重开的票必须上台面
-    # （先标记 seen 会让重开的新 run 被旧 TERMINATED run 吞掉，台面消失）。
+    # Multiple runs with the same id: non-TERMINATED wins — a ticket reopened under the
+    # same id after a terminate must reach the board (a seen-mark-first approach would
+    # let the old TERMINATED run swallow the new reopened run and the board entry would
+    # vanish).
     runs: Dict[str, Any] = {}
     order: List[str] = []
     async for wf in client.list_workflows(type_filter):
@@ -724,9 +809,10 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
             continue
         exec_status = wf.status.name if wf.status is not None else ""
         if exec_status == "TERMINATED":
-            continue  # 清场/撤销的工单不上台面（历史仍在 Temporal 可查）
-        # ProjectKey / EpicCode 从 SA 直取：快照不可得（worker 未跑/旧代码）时
-        # 行内 project / epic 也不丢（SA 是归属真源，snapshot 只是镜像）。
+            continue  # torn-down/aborted tickets stay off the board (history remains queryable in Temporal)
+        # ProjectKey / EpicCode read straight from the SA: even when the snapshot is
+        # unavailable (worker never ran / old code) the row's project / epic are not lost
+        # (the SA is the source of truth for ownership; the snapshot is only a mirror).
         try:
             sa_project = str(wf.typed_search_attributes.get(
                 SearchAttributeKey.for_keyword(PROJECT_SA_NAME)) or "")
@@ -741,22 +827,28 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                         "exec_status": exec_status,
                         "close_ts": wf.close_time.timestamp() if wf.close_time else 0})
 
-    # snapshot query 只对 RUNNING 的执行发，且并发发——非 RUNNING 的 query 会打到
-    # 已退出的专属 worker 队列上空等 8s 超时（实测每张收口工单拖慢列表 8s，串行
-    # 叠加到 16s+，工单台刷新正好落在这个窗口时左栏长时间空白）。
-    # RUNNING query 带重试（KI-003/KI-008）：单票最坏 ~18s（8s×2+2s），gather 并发
-    # 所以列表聚合时延不随票数叠加。重试仍败走显式降级（degraded 行，不静默匿名）。
-    # COMPLETED 且在回填窗口内的走 result() 拿终态快照（run() 返回值=_snapshot()，
-    # 无需 worker）——收口工单在左栏驻留期要有标题/角色，不能是匿名最小行。
+    # The snapshot query is issued only for RUNNING executions, and concurrently — a
+    # non-RUNNING query lands on the already-exited dedicated worker's queue and waits
+    # out the full 8s timeout (observed: each closed ticket slowed the list by 8s,
+    # serially stacking to 16s+, and a workbench refresh landing in that window left the
+    # left column blank for a long time).
+    # RUNNING queries carry retries (KI-003/KI-008): worst case ~18s per ticket
+    # (8s×2+2s), and because gather is concurrent the list's aggregate latency does not
+    # grow with ticket count. A still-failing retry takes the explicit degradation path
+    # (a degraded row, never a silent anonymous one).
+    # COMPLETED executions inside the rehydration window use result() for the terminal
+    # snapshot (run()'s return value = _snapshot(), no worker needed) — a closed ticket's
+    # left-column dwell period must have a title/role, not an anonymous minimal row.
     async def _meta_of(tid: str, exec_status: str, close_ts: float) -> Dict[str, Any]:
         if exec_status == "RUNNING":
             try:
                 snap = await _query_snapshot_with_retry(client.get_workflow_handle(tid))
                 return dict((snap or {}).get("meta") or {})
             except Exception:
-                # KI-008 显式降级：degraded 标记（非静默 {}）——行组装分支据此
-                # 生成「查询超时，刷新重试」行，stage_state 保持 running（真在跑
-                # 的票不能显示成等待态）。
+                # KI-008 explicit degradation: a degraded marker (not a silent {}) — the
+                # row-assembly branch uses it to build a "query timed out, refresh and
+                # retry" row, and stage_state stays running (a ticket that really is
+                # running must not be shown as waiting).
                 return {"_query_degraded": True}
 
         if exec_status == "COMPLETED" and close_ts \
@@ -774,9 +866,10 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
         tid, sa_project, sa_epic = e["id"], e["sa_project"], e["sa_epic"]
         exec_status = e["exec_status"]
         if meta.get("_query_degraded"):
-            # KI-008：RUNNING 查询重试仍败 → 显式降级行。id/project/epic 走 SA
-            # 直取不受影响；stage_state/status 保持运行态口径（不照抄匿名行的
-            # awaiting/空，避免把真在跑的票误导成等待态）。
+            # KI-008: a RUNNING query still failing after retries → an explicit degraded
+            # row. id/project/epic come straight from the SA and are unaffected;
+            # stage_state/status keep the running-state reading (not the anonymous row's
+            # awaiting/empty, so a genuinely running ticket is not misread as waiting).
             rows.append({"id": tid, "project": sa_project, "epic": sa_epic,
                          "role": None,
                          "status": "dispatched",
@@ -789,13 +882,14 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                          "engine": ENGINE_V2, "exec_status": exec_status})
         elif meta:
             meta.setdefault("project", sa_project)
-            # epic 以 EpicCode SA 为真源（SA 优先），meta 兜底（SA 读取失败/未注册时
-            # 用快照镜像）；ticket-query 的 meta.epic 回填是同一理念。
+            # epic takes the EpicCode SA as truth (SA first) with meta as fallback (the
+            # snapshot mirror when the SA read fails or is unregistered); ticket-query's
+            # meta.epic backfill follows the same idea.
             meta["epic"] = sa_epic or str(meta.get("epic") or "")
             row = _row_from_meta(tid, meta, exec_status)
             row["close_ts"] = e["close_ts"]
             rows.append(row)
-        else:  # 快照不可得（已收口超窗/worker 未跑/旧代码）→ 最小行
+        else:  # snapshot unavailable (closed past the window / worker never ran / old code) → minimal row
             rows.append({"id": tid, "project": sa_project, "epic": sa_epic,
                          "role": None,
                          "status": "closed" if exec_status == "COMPLETED" else "",
@@ -809,13 +903,15 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
     return _ok({"count": len(rows), "tickets": rows})
 
 
-# 归档 manifest 解析三态（契约 v1.4 ①c；prune/archive-legacy 共用同一判定）。
+# Archive manifest parsing, three states (contract v1.4 (1)c; prune/archive-legacy share
+# the same judgment).
 def _read_archive_manifest(ticket_id: str, project_key: str) -> Dict[str, Any]:
-    """读 <data>/tickets/<id>/archive.json，返回状态 dict：
+    """Read <data>/tickets/<id>/archive.json and return a status dict:
 
     {"state": "missing"|"ok"|"malformed"|"error", "legacy": bool, "detail": str}
-    missing = 该票未归档（prune 拒删）；malformed = manifest 畸形（fail-closed：
-    计 prune 失败，不静默当未归档）；error = IO 异常（计失败）。"""
+    missing = the ticket is not archived (prune refuses to delete); malformed = a broken
+    manifest (fail-closed: counted as a prune failure, never quietly treated as
+    unarchived); error = an IO exception (counted as a failure)."""
     import json as _json
     try:
         mpath = ticket_data_dir(project_key, ticket_id) / "archive.json"
@@ -835,8 +931,9 @@ def _read_archive_manifest(ticket_id: str, project_key: str) -> Dict[str, Any]:
 
 
 async def _closed_ticket_entries(args: Dict[str, Any]) -> "List[Dict[str, Any]]":
-    """列 COMPLETED（收口）工单条目：{id, sa_project, close_ts}（TERMINATED 不收——
-    与 ticket-list 同口径：清场/撤销的执行不上台面也不进归档清理面）。"""
+    """List COMPLETED (closed) ticket entries: {id, sa_project, close_ts} (TERMINATED is
+    not collected — same reading as ticket-list: torn-down/aborted executions stay off
+    the board and out of the archive-cleanup surface)."""
     client = await _connect()
     type_filter = " OR ".join('WorkflowType="%s"' % c.__name__
                               for c in TEMPLATE_CLASSES.values())
@@ -856,16 +953,22 @@ async def _closed_ticket_entries(args: Dict[str, Any]) -> "List[Dict[str, Any]]"
 
 async def cmd_ticket_prune(args: Dict[str, Any], entries: "Optional[List[Dict[str, Any]]]" = None,
                            deleter: Any = None) -> Dict[str, Any]:
-    """Temporal 回归运行态：清理 closed 且已归档工单的 workflow 历史（M1-3）。
+    """Temporal regression runtime: clean up workflow history for tickets that are both
+    closed and archived (M1-3).
 
-    删除条件（fail-closed 三清单）：archive.json 存在且 schema=v1 → 可删；
-    legacy:true → 需 --allow-legacy（存量诚实过账，人工确认后放行）；missing →
-    跳过（未归档绝不删——历史蒸发=本单要根治的事故）；malformed → 计失败。
-    默认 --dry-run（零删除），--execute 才真删。真删缝 = deleter 注入函数
-    （签名 deleter(workflow_id) -> None；SDK 实现走 workflow_service 级
-    DeleteWorkflowExecution，测试注入假 deleter 不依赖真 Temporal）。
-    单票删除用 asyncio.wait_for 兜死超时；错误逐个捕获计入 failed，不中断全批。
-    entries/deleter 为测试注入缝：缺省走 Temporal 活数据（list_workflows）。
+    Deletion conditions (three fail-closed lists): archive.json exists with schema=v1 →
+    deletable; legacy:true → requires --allow-legacy (an honest legacy posting, released
+    only after human confirmation); missing → skipped (never delete an unarchived ticket
+    — evaporating history is the very incident this ticket exists to fix); malformed →
+    counted as a failure.
+    Default --dry-run (zero deletions); only --execute really deletes. The real deletion
+    seam is an injected deleter function (signature deleter(workflow_id) -> None; the SDK
+    implementation goes through workflow_service-level DeleteWorkflowExecution, so tests
+    can inject a fake deleter without a real Temporal).
+    Per-ticket deletion is bounded by an asyncio.wait_for timeout; errors are caught one
+    by one into failed without interrupting the batch.
+    entries/deleter are test-injection seams: by default it works on live Temporal data
+    (list_workflows).
     """
     dry_run = not bool(args.get("execute"))
     allow_legacy = bool(args.get("allow_legacy"))
@@ -875,13 +978,16 @@ async def cmd_ticket_prune(args: Dict[str, Any], entries: "Optional[List[Dict[st
     per_ticket_timeout = float(args.get("timeout_sec") or 30)
 
     async def _sdk_deleter(wf_id: str) -> None:
-        # SDK API 类函数内 import（模块级 SDK 面最小化纪律，见文件头 M1-3 注释）
+        # SDK API classes imported inside the function (the minimize-module-level-SDK
+        # discipline; see the M1-3 note in the file header)
         from temporalio.api.common.v1 import WorkflowExecution
         from temporalio.api.workflowservice.v1 import DeleteWorkflowExecutionRequest
         c = await _connect()
-        # 显式带 run_id 删：不带 run_id 时 dev 服务器的删除要等 visibility 异步
-        # 收敛才从 describe 消失（实测 >60s，带 run_id ~5s）；先 describe 取当前
-        # run 再删，删除确认的时延不依赖服务器的可见性清扫节奏
+        # Delete with an explicit run_id: without one, the dev server's delete waits for
+        # the visibility store to converge asynchronously before disappearing from
+        # describe (observed >60s; with run_id ~5s). Describe first to get the current
+        # run, then delete, so delete-confirmation latency does not depend on the
+        # server's visibility cleanup cadence.
         desc = await c.get_workflow_handle(wf_id).describe()
         await c.workflow_service.delete_workflow_execution(
             DeleteWorkflowExecutionRequest(
@@ -906,13 +1012,13 @@ async def cmd_ticket_prune(args: Dict[str, Any], entries: "Optional[List[Dict[st
             skipped_not_archived.append(tid)
             continue
         if m["state"] != "ok":
-            failed.append({"id": tid, "why": m["detail"]})   # malformed / error：fail-closed
+            failed.append({"id": tid, "why": m["detail"]})   # malformed / error: fail-closed
             continue
         if m["legacy"] and not allow_legacy:
             skipped_archived_legacy.append(tid)
             continue
         if dry_run:
-            deleted.append(tid)   # dry-run 计入「将删」清单（deleter 零调用）
+            deleted.append(tid)   # dry-run counts into the "would delete" list (deleter never called)
             continue
         try:
             await asyncio.wait_for(deleter(tid), timeout=per_ticket_timeout)
@@ -933,14 +1039,19 @@ async def cmd_ticket_prune(args: Dict[str, Any], entries: "Optional[List[Dict[st
 async def cmd_ticket_archive_legacy(args: Dict[str, Any],
                                     entries: "Optional[List[Dict[str, Any]]]" = None,
                                     result_of: Any = None) -> Dict[str, Any]:
-    """存量诚实过账：为「closed 且泳道已拆除、stage 报告不可恢复」的历史工单写
-    archive.json（legacy:true、files 空、reason 明牌）——不伪造不补产（M1-3 R4）。
+    """Honest legacy posting: write archive.json for historical tickets that are "closed
+    with the lane already torn down and the stage report unrecoverable" (legacy:true,
+    empty files, a plainly stated reason) — never fabricated, never reconstructed
+    (M1-3 R4).
 
-    只处理 COMPLETED 且无 archive.json 的票；已有 manifest 的票跳过（不覆盖真档）。
-    meta 快照取 workflow 终态 result()（COMPLETED 无需 worker）；取不到记空 meta
-    并写进 detail。写盘失败单票计 failed 不中断全批。
-    entries/result_of 为测试注入缝：缺省走 Temporal 活数据（list_workflows /
-    handle.result()），result_of 返回终态 snapshot dict。"""
+    Only COMPLETED tickets without an archive.json are processed; a ticket that already
+    has a manifest is skipped (a real archive is never overwritten). The meta snapshot
+    comes from the workflow's terminal result() (no worker needed for COMPLETED); when
+    unavailable an empty meta is recorded and written into detail. A write failure counts
+    that ticket into failed without interrupting the batch.
+    entries/result_of are test-injection seams: by default it works on live Temporal data
+    (list_workflows / handle.result()), with result_of returning the terminal snapshot
+    dict."""
     import json as _json
     import datetime as _dt
     project = str(args.get("project") or "").strip()
@@ -965,7 +1076,7 @@ async def cmd_ticket_archive_legacy(args: Dict[str, Any],
             continue
         m = _read_archive_manifest(tid, e["sa_project"])
         if m["state"] == "ok":
-            skipped.append(tid)   # 已有真档（或已 legacy 过账）——幂等，不覆盖
+            skipped.append(tid)   # a real archive already exists (or was already legacy-posted) — idempotent, no overwrite
             continue
         if m["state"] == "malformed":
             failed.append({"id": tid, "why": m["detail"]})
@@ -999,12 +1110,14 @@ async def cmd_ticket_archive_legacy(args: Dict[str, Any],
 
 
 async def cmd_running_tickets(args: Dict[str, Any]) -> Dict[str, Any]:
-    """轻量 RUNNING 工单清单（260824 A 案：console keepalive 的 ensure 数据源）。
+    """Lightweight RUNNING ticket list (the 260824 option A: the data source for the
+    console keepalive's ensure).
 
-    只跑一条 visibility 查询（v2 模版类 AND ExecutionStatus=Running；260904 起
-    模板仅 dev-lane），不做
-    逐张 snapshot query——keepalive 每 15s 调一次，重了会打满 worker。
-    返回 [{id, queue}]：queue 从执行本身取（spawn 侧零常量复制）。
+    Runs a single visibility query (v2 template classes AND ExecutionStatus=Running;
+    from 260904 the only template is dev-lane) and does no per-ticket snapshot query —
+    the keepalive calls every 15s, and anything heavier would saturate the worker.
+    Returns [{id, queue}]: queue is read from the execution itself (zero constant
+    duplication on the spawn side).
     """
     client = await _connect()
     type_filter = " OR ".join('WorkflowType="%s"' % c.__name__
@@ -1014,7 +1127,7 @@ async def cmd_running_tickets(args: Dict[str, Any]) -> Dict[str, Any]:
         q = str(getattr(wf, "task_queue", "") or "")
         if q not in (TASK_QUEUE,) and not (
                 q.startswith(TICKET_QUEUE_PREFIX)):
-            continue  # 自测专属 queue 的滞留实例不收
+            continue  # stragglers on the self-test dedicated queue are not collected
         running.append({"id": wf.id, "queue": q})
     return _ok({"count": len(running), "running": running})
 
@@ -1078,7 +1191,7 @@ def main() -> None:
 
     try:
         result = asyncio.run(fn(args))
-    except Exception as e:  # 基础设施故障（连不上 server 等）→ 结构化回执
+    except Exception as e:  # infra failure (cannot reach the server etc.) → structured receipt
         result = _err(f"{type(e).__name__}: {e}")
 
     print(json.dumps(result, ensure_ascii=False))
@@ -1086,10 +1199,14 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    # 连接失败路径上 temporalio Rust core 会在解释器 teardown 期 SIGABRT（260909 容器
-    # 实锤：JSON 回执已落 stdout，退出码却是 -6，subprocess 调用方按信号死收割、诊断串
-    # 退化成 "exit -6"）。回执契约在 main() 内已履行完毕，这里显式刷盘退进程、跳过
-    # teardown——退出码语义与正常路径逐字节一致（main 全路径 exit 0）。仅 __main__
-    # 生效：模块导入面（server/tools 进程内调用）不经过此路径，无副作用。
+    # On the connection-failure path the temporalio Rust core can SIGABRT during
+    # interpreter teardown (confirmed in a 260909 container: the JSON receipt had already
+    # landed on stdout, yet the exit code was -6, so the subprocess caller harvested a
+    # signal death and the diagnostic string degraded to "exit -6"). The receipt contract
+    # is fully discharged inside main(), so here we flush explicitly and exit the process,
+    # skipping teardown — the exit code semantics stay byte-for-byte identical to the
+    # normal path (every main() path exits 0). Active only under __main__: the module
+    # import surface (server/tools calling in-process) never takes this path, so no side
+    # effects.
     sys.stdout.flush()
     os._exit(0)
