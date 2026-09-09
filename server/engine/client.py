@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import sys
 import time
@@ -1093,3 +1094,10 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    # 连接失败路径上 temporalio Rust core 会在解释器 teardown 期 SIGABRT（260909 容器
+    # 实锤：JSON 回执已落 stdout，退出码却是 -6，subprocess 调用方按信号死收割、诊断串
+    # 退化成 "exit -6"）。回执契约在 main() 内已履行完毕，这里显式刷盘退进程、跳过
+    # teardown——退出码语义与正常路径逐字节一致（main 全路径 exit 0）。仅 __main__
+    # 生效：模块导入面（server/tools 进程内调用）不经过此路径，无副作用。
+    sys.stdout.flush()
+    os._exit(0)
