@@ -1,17 +1,16 @@
 """Temporal client CLI —— dsh 插件 `sandbar-temporal-tools` spawn 的入口。
 
-安全红线（t260821-02）：工具面**绝无「设置 stage / 改状态」入口**：
+安全红线（票 t260821-02）：工具面**绝无「设置 stage / 改状态」入口**：
 
-    client.py start         启动 workflow（dispatcher-scan；260904 起 content-pipeline
-                            已退役，工单一律走 ticket-start）
+    client.py start         启动 workflow（dispatcher-scan）
     client.py query         读 workflow 快照（只读，改不了状态）
     client.py schedule-list 列 Schedule（只读）
     client.py cancel        停掉 workflow（terminate，清场/撤销用）
-    client.py ticket        工单操作（步2 update/sign；v2 见下）
+    client.py ticket        工单操作（update/sign/rework/ruling/query）
     client.py ticket-start  创建 v2 工单（M11 模版即代码：模板 id→workflow 类，不落 JSON）
     client.py ticket-list   v2 工单列表（工单台数据源：Temporal list+query；
                             可按 project / epic 过滤——EpicCode SA，epic-linkage）
-    client.py ticket-query  单张 v2 工单查询（snapshot+meta+pulse 运行脉搏心跳，t260825-03）
+    client.py ticket-query  单张 v2 工单查询（snapshot+meta+pulse 运行脉搏心跳，票 t260825-03）
 
 stdout 一律输出**单行 JSON** `{"ok": true, "result": ...}` 或 `{"ok": false, "error": "..."}`，
 供 node.ts 插件直接解析。Temporal 的「审计/不可变历史」= workflow 自身的事件历史，
@@ -67,47 +66,46 @@ from shared import (
 from workflows import DispatcherScanWorkflow
 from workflows_v2 import TEMPLATE_CLASSES
 
-# ---- M1-3（t260902-02）：Temporal 回归运行态——closed 工单历史主动清理 ----
-# 真删走 temporalio SDK（本文件全走 asyncio、零 subprocess；WorkflowHandle 无
-# delete 方法，删除缝 = client.workflow_service.delete_workflow_execution +
-# DeleteWorkflowExecutionRequest，temporalio.service 实测 1.18.2 存在）。删除对象
-# 限「已归档」（<data>/tickets/<id>/archive.json 存在）的 COMPLETED 执行：
-# 归档真源已出仓到 per-key 数据目录（契约 v1.4 ①c），Temporal 只承担过程状态。
-# 注意：WorkflowExecution/DeleteWorkflowExecutionRequest 两个 API 类**不做模块级
-# import**（延迟到 _sdk_deleter 函数体内，同 shared.py「temporalio 延迟到函数内
-# import」纪律）——本文件模块级 SDK 面必须维持 temporalio.client/temporalio.common
-# 最小集，t260901-23 的 _stub_temporalio 桩按此前提覆盖（t260902-02 implement
-# gen0 曾把两行提到顶层破坏该契约，t260901-23 t01/t02 无 SDK 环境即炸，已修）。
+# ---- Temporal 回归运行态：closed 工单历史主动清理（票 t260902-02，M1-3）----
+# 真删走 temporalio SDK：WorkflowHandle 没有 delete 方法，删除缝=
+# client.workflow_service.delete_workflow_execution + DeleteWorkflowExecutionRequest
+# （temporalio.service 1.18.2 实测存在）。删除对象限「已归档」
+# （<data>/tickets/<id>/archive.json 存在）的 COMPLETED 执行——归档真源在 per-key
+# 数据目录，Temporal 只承担过程状态。
+# WorkflowExecution/DeleteWorkflowExecutionRequest 两个 API 类**不做模块级 import**
+# （延迟到 _sdk_deleter 函数体内，同 shared.py「temporalio 延迟到函数内 import」纪律）：
+# 本文件模块级 SDK 面必须维持 temporalio.client/temporalio.common 最小集，
+# t260901-23 的 _stub_temporalio 桩按此前提覆盖（曾把这两行提到顶层破坏契约，
+# 无 SDK 环境即炸，已修）。
 
 # 收口工单的列表回填窗口（秒）：窗口内的 COMPLETED 执行用 result() 取终态快照，
-# 让左栏 sandbar 驻留期有标题/角色（窗口只封顶回填成本，驻留时长是前端配置项）。
+# 让左栏驻留期有标题/角色（窗口只封顶回填成本，驻留时长是前端配置项）。
 CLOSED_HYDRATE_WINDOW_S = 7 * 86400
 
-# ---- 查询错误分级（KI-025，t260903-06）----
+# ---- 查询错误分级（KI-025，票 t260903-06）----
 # kind 语义（client 产出 → ticket.py 消费 → tools_registry 并入 → 工作台/UI 分流）：
 #   not_found：唯一「工单不存在」语义，只能由 describe 命中 NotFoundFailure 触发；
 #   transient：瞬时查询故障（超时/连接/RPC 抖动/取消传播），文案引导「刷新重试」，
-#              绝不允许出现「不存在」字样（查询失败谎报不存在=KI-025 实案 t260903-02）；
+#              绝不允许出现「不存在」字样（查询失败谎报不存在=KI-025 实案）；
 #   terminal：workflow 已终态（TERMINATED/CANCELED/FAILED 等），永久不可查询，
 #             文案明说「刷新无效」，绝不 transient（对死票无限重试=反向谎报）；
-#   internal：兜底（畸形入参/畸形快照/未知），文案精确说哪个检查失败，非不存在非瞬时。
+#   internal：兜底（畸形入参/畸形快照/未知），文案精确说哪个检查失败。
 # 未列出口一律默认 internal——新增 _err 出口时须在此表登记。
 KIND_NOT_FOUND = "not_found"
 KIND_TRANSIENT = "transient"
 KIND_TERMINAL = "terminal"
 KIND_INTERNAL = "internal"
 
-# ---- RUNNING snapshot query 重试参数（KI-003，t260903-06）----
-# 阶段切换 inline 突变窗 1-2 秒即恢复（KI-003 机制结论）：指数退避 0.5/1/2s ±20%
-# 抖动，3 次尝试。最坏窗口 = 3×8s 超时 + 3.5s 退避 ≈ 27.5s（超时每次尝试各付一次），
-# 工作台轮询侧配 in-flight 守卫防堆叠（同票 UI 段）。模块级常量供集成测试注入
-# 提速（t260901-23 t01/t02 直跑形态），生产不动。
+# ---- RUNNING snapshot query 重试参数（KI-003，票 t260903-06）----
+# stage 转换 inline 突变窗 1-2 秒即恢复（workflow 侧让路点见 base._breathe）：
+# 指数退避 0.5/1/2s ±20% 抖动，3 次尝试。最坏窗口 = 3×8s 超时 + 3.5s 退避 ≈ 27.5s。
+# 模块级常量供集成测试注入提速，生产不动。
 QUERY_RETRY_ATTEMPTS = 3
 QUERY_RETRY_BASE_DELAY = 0.5
 QUERY_RETRY_MAX_DELAY = 4.0
 QUERY_RETRY_JITTER = 0.2
 QUERY_TIMEOUT_S = 8.0
-# describe 重试（KI-025 另一半：describe 失败当前直接报错，1 次退避重试消抖）。
+# describe 重试（KI-025 另一半：describe 瞬时失败直接报错也是谎报来源）。
 DESCRIBE_RETRY_ATTEMPTS = 2
 DESCRIBE_BASE_DELAY = 0.5
 
@@ -125,11 +123,10 @@ def _err(msg: str, kind: str = KIND_INTERNAL) -> Dict[str, Any]:
 def _is_not_found_exc(e: BaseException) -> bool:
     """判别 describe 异常是否「工单真不存在」语义（KI-025 分级的唯一入水口）。
 
-    结构化判别优先（类名 MRO：temporalio.client.WorkflowNotFoundError 及失败族
-    命名变体），异常文案兜底；口径取窄——判不准一律 False（落 transient），
-    误判 not_found 就是 KI-025 要消灭的谎报本身。不做模块级 SDK import
-    （维持 temporalio.client/temporalio.common 最小集、_stub_temporalio 桩契约），
-    故只按类名识别、不引用具体类对象。"""
+    结构化判别优先（类名 MRO：WorkflowNotFoundError 及失败族命名变体），异常文案
+    兜底；口径取窄——判不准一律 False（落 transient），误判 not_found 就是
+    KI-025 要消灭的谎报本身。不做模块级 SDK import（维持最小 SDK 面、
+    _stub_temporalio 桩契约），故只按类名识别、不引用具体类对象。"""
     for t in type(e).__mro__:
         if t.__name__ in ("WorkflowNotFoundError", "NotFoundFailureError", "NotFoundFailure"):
             return True
@@ -139,8 +136,7 @@ def _is_not_found_exc(e: BaseException) -> bool:
 def _backoff_delay(attempt: int, base_delay: float, max_delay: float,
                    jitter: float = 0.0) -> float:
     """指数退避间隔：base*2^(attempt-1) 封顶 max_delay；jitter>0 时 ±jitter 比例抖动。
-
-    纯函数（时钟无关）——退避序列断言直接调它（t260901-23 t01）。"""
+    纯函数（时钟无关），退避序列断言直接调它。"""
     import random
     d = min(base_delay * (2 ** max(0, attempt - 1)), max_delay)
     if jitter > 0:
@@ -157,12 +153,12 @@ def _ts_epoch(ts_msg: Any) -> int:
 
 
 def _pulse_from_desc(desc: Any) -> Optional[Dict[str, Any]]:
-    """从 describe 的 pending activity 掏心跳详情（t260825-03 运行脉搏行的数据源）。
+    """从 describe 的 pending activity 掏心跳详情（运行脉搏行的数据源，票 t260825-03）。
 
-    agent_activities.py 的轮询循环每 5s（POLL_SEC）activity.heartbeat(json.dumps(
+    agent_activities.py 的轮询循环每 5s（POLL_SEC）heartbeat(json.dumps(
     {stage,gen,polls,session_kb}))；describe 的 pending_activities 仅 RUNNING 执行有。
-    非 agent 段（prepare_workspace/merge_check 等）不心跳、stub 模式心跳是纯字符串
-    ——一律软降级：无 pending → None；心跳非 JSON → heartbeat_raw 截断透传。
+    非 agent 段（prepare_workspace/merge_check 等）不心跳、stub 模式心跳是纯字符串，
+    一律软降级：无 pending → None；心跳非 JSON → heartbeat_raw 截断透传。
     任何异常都返回现有部分或 None，绝不让查询路径因掏心跳而挂。
     """
     try:
@@ -230,7 +226,7 @@ async def cmd_start(args: Dict[str, Any]) -> Dict[str, Any]:
             {"type": wf_type, "workflow_id": handle.id, "run_id": handle.result_run_id}
         )
 
-    # 260904 宿主令：content-pipeline 已随模版退役，start 合法面收窄为 dispatcher-scan；
+    # 宿主令 260904：content-pipeline 已随模版退役，start 合法面收窄为 dispatcher-scan；
     # 工单一律走 ticket-start（模板 id→workflow 类）。
     return _err(f"未知 workflow type={wf_type!r}（可用 dispatcher-scan）")
 
@@ -253,9 +249,9 @@ async def cmd_query(args: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
-# signal 子命令退役（260904 宿主令）：v1 content-pipeline 随模版退役删除后，
-# sign/retry_qc 无可挂靠对象（白名单一并摘除）；但 dsh 插件族旧调用面仍可能 spawn
-# 到这里——保留子命令名做 fail-closed 退役报错，避免误导为「未知子命令」。
+# signal 子命令退役（宿主令 260904）：v1 content-pipeline 删除后 sign/retry_qc 没了
+# 挂靠对象，但 dsh 插件族旧调用面仍可能 spawn 到这里——保留子命令名做退役报错，
+# 不误导成「未知子命令」。
 async def cmd_signal(args: Dict[str, Any]) -> Dict[str, Any]:
     del args  # 无参可用
     return _err("signal 子命令已退役（260904 宿主令）：sign/retry_qc 只服务 v1 "
@@ -357,9 +353,9 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
                     "target_stage": req.target_stage, "delivered": True})
 
     if op == "ruling":
-        # KI-053（t260905-10 面①）：宿主裁决注入——人工意见正规通道，任何状态可发
-        # （含 blocked）。发完裁决不自动唤醒 blocked：重跑仍发 retry_qc，下一段
-        # prompt 即见裁决（build_stage_prompt 注入面）。
+        # KI-053：宿主裁决注入——人工意见正规通道，任何状态可发（含 blocked）。
+        # 发完裁决不自动唤醒 blocked：重跑仍发 retry_qc，下一段 prompt 即见裁决
+        # （build_stage_prompt 注入面）。
         note = str(args.get("note") or "")
         if not note.strip():
             return _err("ruling 需要 note（裁决内容，非空）")
@@ -405,7 +401,7 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         return _err("ticket-start 需要 project（projects.yaml 注册表 key，无默认值）——"
                     "无 project 即拒收：泳道落仓禁止退化为「由执行 worker 的 REPO_ROOT 决定」"
                     "的相对路径（t260904-01 首开脑裂形态，宁可拒收不静默降级）")
-    # 硬闸（KI-032，t260904-02）：收 project 即自查机器级注册表锚 project_root，
+    # 硬闸（KI-032）：收 project 即自查机器级注册表锚 project_root，
     # 与 ticket.py create 同源（单一真源=shared 装载器；SANDBAR_PROJECTS_DIR 等
     # env 覆盖语义保持）。未锚定（未知 key/条目隔离/注册表空）=创建即拒收——
     # 裸入口产出的 workspace 必为锚定项目主目录的绝对路径，落仓与执行 worker 解耦。
@@ -415,15 +411,14 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         return _err("ticket-start 拒收（project 未锚定，开票走正规入口请先注册项目）：%s" % e)
     project_root = str(proj["dirs"][0])
     # 立项关联（epic-linkage）：--epic 强校验单点——代号形状白名单 + 立项档案存在。
-    # 项目感知（t260907-07）：校验目录走 resolve_epics_dir(project)——锚项目注册
-    # 条目主目录 notes/epics（与工单台 UI resolveEpicsDir 同源同规）；env
-    # SANDBAR_EPICS_DIR 现读优先=自测语义保留；按 key 单点解析的取舍（多一次注册表
-    # 装载，开票一次性操作无害）见工单方案 C6。空 = 不关联立项（允许）。
+    # 校验目录走 resolve_epics_dir(project)——锚项目注册条目主目录 notes/epics
+    # （与工单台 UI resolveEpicsDir 同源）；env SANDBAR_EPICS_DIR 优先=自测语义保留。
+    # 空 = 不关联立项（允许）。
     try:
         epic = validate_epic_code(str(args.get("epic") or ""), resolve_epics_dir(project))
     except ValueError as e:
         return _err(str(e))
-    # 泳道参数推导+校验单点（t260824-04/-10/-11 三次事故）：lane=worktree 的
+    # 泳道参数推导+校验单点（票 t260824-04/-10/-11 三次事故后收拢）：lane=worktree 的
     # workspace/worktree/branch 缺省推导、缺一补一、不一致/形态错即拒收——
     # 不再透传空字段让 prepare_workspace 静默跳过、agent 空目录空跑。
     try:
@@ -441,9 +436,9 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
                             if isinstance(args.get("write_set"), list) else None))
     except ValueError as e:
         return _err("ticket-start 参数非法：%s" % e)
-    # t260908-02：derive 混合/多仓形态会把 repo_worktrees(list[dict]) 内嵌在 ws 里，
-    # 而 TicketInput.workspace 注解是 Dict[str, str]——payload 解码必炸（t260907-13
-    # 实锤）。在本仓唯一调用点拆分：明细提为一等字段 repo_worktrees，workspace 归纯
+    # 票 t260908-02：derive 混合/多仓形态会把 repo_worktrees(list[dict]) 内嵌在 ws 里，
+    # 而 TicketInput.workspace 注解是 Dict[str, str]——payload 解码必炸（票 t260907-13
+    # 实锤）。在本文件唯一调用点拆分：明细提为一等字段 repo_worktrees，workspace 归纯
     # {type, path}（形状显式，编解码两侧同步）。
     repo_worktrees = []
     if isinstance(workspace, dict):
@@ -465,16 +460,16 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
                 stage=str(g.get("stage") or sid), tool=str(g.get("tool") or "qc_run"),
                 args=dict(g.get("args") or {}), label=str(g.get("label") or ""),
                 cmd=g.get("cmd") or None)
-    # 写集生命周期（t260829-07 A1）：空写集拒收单点——空写集票 agent 无白名单护栏、
-    # UI 票判定失效（t260829-05/-06 实锤）。出路写进拒收文案，不静默放行。
+    # 写集生命周期（票 t260829-07 A1）：空写集拒收单点——空写集票 agent 无白名单护栏、
+    # UI 票判定失效。出路写进拒收文案，不静默放行。
     ok_ws, ws_flags, ws_err = validate_write_set_args(
         args.get("write_set"), bool(args.get("allow_empty_write_set")))
     if not ok_ws:
         return _err(ws_err)
-    # 门①背景文件闸（t260904-18；知识库设计.md §1 工单引用铁律，260904 宿主令
-    # 「没提交的 note 不让建工单」）：票面引用的背景文件必须已提交且干净（HEAD 态
-    # ——泳道读的是 HEAD 冻结副本，脏改版 agent 读不到）。插在 _connect() 之前：
-    # 拒收路径不依赖 Temporal 可达。refs 缺省=不校验（存量在飞票不追溯）。
+    # 门①背景文件闸（票 t260904-18；工单引用铁律「没提交的 note 不让建工单」）：
+    # 票面引用的背景文件必须已提交且干净（HEAD 态——泳道读的是 HEAD 冻结副本，
+    # 脏改版 agent 读不到）。插在 _connect() 之前：拒收路径不依赖 Temporal 可达。
+    # refs 缺省=不校验（存量在飞票不追溯）。
     refs_raw = args.get("refs")
     refs = [str(x).strip() for x in refs_raw] if isinstance(refs_raw, list) else refs_raw
     try:
@@ -521,8 +516,6 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         # 立项验收标准 4：EpicCode 未注册的环境必须大声报错，不静默丢标。
         # 特征匹配不钉死单一文案（temporalite/temporal-server 措辞可能不同）：
         # 报错含 SA 名 + 「未注册/未定义」类措辞即识别，给修复指引。
-        # （260825 实测 temporalite 原文：Namespace <ns> has no mapping defined
-        #   for search attribute EpicCode）
         msg = "%s: %s" % (type(e).__name__, e)
         if epic and EPIC_SA_NAME in msg and re.search(
                 r"not (defined|registered)|no mapping defined|未注册|no search attribute",
@@ -574,13 +567,12 @@ async def _query_snapshot_with_retry(handle: Any, timeout: float = QUERY_TIMEOUT
                                      base_delay: float = QUERY_RETRY_BASE_DELAY,
                                      max_delay: float = QUERY_RETRY_MAX_DELAY,
                                      jitter: float = QUERY_RETRY_JITTER) -> Any:
-    """RUNNING 工单的 snapshot query 失败重试（KI-003/KI-008 兜底，t260903-06 升级）。
+    """RUNNING 工单的 snapshot query 失败重试（KI-003/KI-008 兜底）。
 
     8s 超时多半是 stage 转换窗瞬时抖动（workflow 侧让路点见 base._breathe，
-    KI-003 机制结论：inline 突变窗 1-2 秒即恢复）——指数退避 0.5/1/2s ±20% 抖动
-    3 次尝试，覆盖突变窗。重试穷尽抛最后一次异常，由调用方走显式降级（详情
-    transient 报错、列表 degraded 行），不再静默吞。只收 workflow handle
-    （调用方均已持有）。delay 参数化供自测注入 0 提速，不拖测试。"""
+    机制结论：inline 突变窗 1-2 秒即恢复）——指数退避 3 次尝试覆盖突变窗。
+    重试穷尽抛最后一次异常，由调用方走显式降级（详情 transient 报错、列表
+    degraded 行），不再静默吞。delay 参数化供自测注入 0 提速，不拖测试。"""
     last: Optional[BaseException] = None
     for i in range(max(1, attempts)):
         if i:
@@ -596,9 +588,9 @@ async def _query_snapshot_with_retry(handle: Any, timeout: float = QUERY_TIMEOUT
 async def _describe_with_retry(handle: Any, attempts: int = DESCRIBE_RETRY_ATTEMPTS,
                                base_delay: float = DESCRIBE_BASE_DELAY,
                                jitter: float = QUERY_RETRY_JITTER) -> Any:
-    """describe 带一次退避重试（KI-025 另一半）：describe 失败原样裸报是谎报
-    「不存在」的另一半来源（连接/超时类瞬时故障）。NotFoundFailure 是确定性
-    结论，不重试直接上抛；其余异常按瞬时重试 1 次，穷尽上抛最后一次异常。"""
+    """describe 带一次退避重试（KI-025 另一半）：describe 瞬时失败直接报错是谎报
+    「不存在」的另一半来源（连接/超时类故障）。NotFoundFailure 是确定性结论，
+    不重试直接上抛；其余异常按瞬时重试 1 次，穷尽上抛最后一次异常。"""
     last: Optional[BaseException] = None
     for i in range(max(1, attempts)):
         if i:
@@ -636,8 +628,8 @@ async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
     snap: Any = None
     if exec_status == "COMPLETED":
         # 收口 workflow 的 run() 返回值就是最终 snapshot（_snapshot()）——用 result() 直接取，
-        # 不需要 worker。query 会打到已退出的专属 worker 队列上空等超时（260824 实测
-        # 29s 后报假「工单不存在」，关闭工单的详情/变更/Agent 日志全瘫）。
+        # 不需要 worker。query 会打到已退出的专属 worker 队列上空等超时（实测 29s
+        # 后报假「工单不存在」，关闭工单的详情/变更/Agent 日志全瘫）。
         try:
             snap = await handle.result()
         except Exception as e:
@@ -646,7 +638,7 @@ async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
     elif exec_status == "RUNNING":
         try:
             # KI-003/KI-008：RUNNING query 失败多为 stage 转换窗瞬时抖动（突变串
-            # 噎事件循环，t260901-23 已在 workflow 侧插让路点），指数退避重试再报。
+            # 噎事件循环，workflow 侧已插让路点），指数退避重试再报。
             snap = await _query_snapshot_with_retry(handle)
         except Exception as e:
             return _err("snapshot 查询失败（已重试 %d 次，瞬时抖动？请刷新重试）：%s: %s"
@@ -656,7 +648,7 @@ async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
         # 文案明说刷新无效——绝不 transient（对死票无限重试=反向谎报，KI-025 review C2）。
         return _err("工单已终态（%s），快照不可得——终态票不再推进，刷新无效"
                     % (exec_status or "未知"), KIND_TERMINAL)
-    # 畸形输入防御（t260901-23）：query 结果非 dict（旧代码/桩/坏数据）→ 显式
+    # 畸形输入防御（票 t260901-23）：query 结果非 dict（旧代码/桩/坏数据）→ 显式
     # _err，不让命令边界裸抛 AttributeError。
     if not isinstance(snap, dict):
         # 文案纪律：不得含「工单不存在」子串（哪怕否定式——场景按子串守卫谎报面）。
@@ -688,7 +680,7 @@ async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
 
 async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
     """v2 工单列表：list workflows（六模版类）+ 逐张 query 快照 → ticket.py list 行形态。
-    args.project 给定时按 ProjectKey search attribute 过滤（多项目化 260823；
+    args.project 给定时按 ProjectKey search attribute 过滤（多项目化，票 t260823；
     存量未打标的旧执行不匹配过滤条件，只列新工单）。不传 = 全部项目（admin 全局视图）。
     args.epic 给定时再 AND EpicCode="<代号>"（epic-linkage 验收标准 5；与 project 可叠加）。
     epic 此处只校形状（EPIC_CODE_RE 白名单）；代号存在性强校验在 ticket.py _list
@@ -710,8 +702,8 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
     if epic:
         type_filter = '(%s) AND EpicCode="%s"' % (type_filter, epic)
     rows: List[Dict[str, Any]] = []
-    # 同 id 多 run：非 TERMINATED 优先（terminate 后同 id 重开的票必须上台面——
-    # t260831-03 实测：seen 先标记会让重开的新 run 被旧 TERMINATED run 吞掉，台面消失）
+    # 同 id 多 run：非 TERMINATED 优先——terminate 后同 id 重开的票必须上台面
+    # （先标记 seen 会让重开的新 run 被旧 TERMINATED run 吞掉，台面消失）。
     runs: Dict[str, Any] = {}
     order: List[str] = []
     async for wf in client.list_workflows(type_filter):
@@ -750,13 +742,12 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                         "close_ts": wf.close_time.timestamp() if wf.close_time else 0})
 
     # snapshot query 只对 RUNNING 的执行发，且并发发——非 RUNNING 的 query 会打到
-    # 已退出的专属 worker 队列上空等 8s 超时（260824 实测：每张收口工单拖慢列表 8s，
-    # 串行叠加到 16s+，工单台刷新正好落在这个窗口时左栏长时间空白）。
-    # RUNNING query 带 1 次重试（间隔 2s，KI-003/KI-008）：单票最坏 ~18s（8s×2+2s），
-    # gather 并发所以列表聚合时延不随票数叠加。重试仍败走显式降级（degraded 行，
-    # 不再静默匿名）。
+    # 已退出的专属 worker 队列上空等 8s 超时（实测每张收口工单拖慢列表 8s，串行
+    # 叠加到 16s+，工单台刷新正好落在这个窗口时左栏长时间空白）。
+    # RUNNING query 带重试（KI-003/KI-008）：单票最坏 ~18s（8s×2+2s），gather 并发
+    # 所以列表聚合时延不随票数叠加。重试仍败走显式降级（degraded 行，不静默匿名）。
     # COMPLETED 且在回填窗口内的走 result() 拿终态快照（run() 返回值=_snapshot()，
-    # 无需 worker）——收口工单在左栏 sandbar 驻留期要有标题/角色，不能是匿名最小行。
+    # 无需 worker）——收口工单在左栏驻留期要有标题/角色，不能是匿名最小行。
     async def _meta_of(tid: str, exec_status: str, close_ts: float) -> Dict[str, Any]:
         if exec_status == "RUNNING":
             try:
@@ -767,6 +758,7 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                 # 生成「查询超时，刷新重试」行，stage_state 保持 running（真在跑
                 # 的票不能显示成等待态）。
                 return {"_query_degraded": True}
+
         if exec_status == "COMPLETED" and close_ts \
                 and time.time() - close_ts < CLOSED_HYDRATE_WINDOW_S:
             try:

@@ -1,7 +1,7 @@
-"""Worker：把 workflow/activity 注册到 task queue 上跑（定形版，t260821-02）。
+"""Worker：把 workflow/activity 注册到 task queue 上跑。
 
 worker 是「肌肉」，服务端是「骨架与记忆」。worker 挂了、代码重启，
-workflow 的状态与历史都在服务端不丢——这正是要验证的模型性质。
+workflow 的状态与历史都在服务端不丢。
 
 启动形态：
     # 前台（调试/看日志）
@@ -10,16 +10,15 @@ workflow 的状态与历史都在服务端不丢——这正是要验证的模�
     # 后台（常驻）
     .venv/bin/python worker.py --daemon [--pidfile data/worker.pid] [--logfile data/worker.log]
 
-    # 工单专属 worker（260824 A 案起由 console keepalive 以子进程拉起，一般不用手跑）：
-    #   SANDBAR_TASK_QUEUE=suyou-ticket-<工单id>（LEGACY 旧世界单值 env，桥接管）SANDBAR_WATCH_WORKFLOW=<工单id> \
+    # 工单专属 worker（一般由 console keepalive 以子进程拉起，不用手跑）：
+    #   SANDBAR_TASK_QUEUE=<队列名> SANDBAR_WATCH_WORKFLOW=<工单id> \
     #     .venv/bin/python worker.py --daemon --pidfile data/worker-<工单id>.pid --logfile data/worker-<工单id>.log
     #   WATCH 模式下 worker 周期查自己 workflow 的状态，收口（非 RUNNING）即优雅自退。
-    #   轮询间隔 env SANDBAR_WATCH_INTERVAL_SEC 可调（缺省 30s；畸形值回落缺省，下限钳 1s）。
+    #   轮询间隔 env SANDBAR_WATCH_INTERVAL_SEC 可调（缺省 30s；畸形值回落缺省，下限 1s）。
     #   console 子进程模式另置 SANDBAR_WATCH_PPID=1：宿主被 SIGKILL 时 ppid 变 1 即自退，
     #   不留无主 worker（--daemon 手动拉起时不置此变量，保持常驻）。
-    # 归属指纹（KI-033，t260904-02）：SANDBAR_WORKER_META=<路径>（supervisor 指路）时
-    #   起跑即写 meta JSON（repo_root/pid）；daemon 模式写 <pidfile>.meta。ensure 侧
-    #   据此识别异仓 worker 伺服同票（告警+拒接）。
+    # 归属指纹（KI-033）：SANDBAR_WORKER_META=<路径> 时起跑即写 meta JSON（repo_root/pid）；
+    #   daemon 模式写 <pidfile>.meta。ensure 侧据此识别异仓 worker 伺服同票（告警+拒接）。
 
 优雅停：
     kill -TERM $(cat data/worker.pid)      # SIGTERM / Ctrl-C（SIGINT）同理
@@ -54,11 +53,9 @@ WATCH_INTERVAL_MIN_SEC = 1.0       # 下限钳制：防 0/负值忙转打爆 des
 
 
 def watch_interval_sec(raw: "str | None" = None) -> float:
-    """watch 轮询间隔（秒）。env SANDBAR_WATCH_INTERVAL_SEC 可调（集成场景提速用，
-    生效前提=SANDBAR_WATCH_WORKFLOW 在置——watch 任务本身只在工单专属模式创建）。
-    新 env 按宿主令 260904 用 sandbar 前缀（不扩 SANDBAR_* 存量欠账）。
-    消费外部输入，畸形态全容错：未置/空白/非数值/NaN/Inf/<=0 一律回落缺省；
-    有效但低于下限 → 钳到下限（不忙转）。"""
+    """watch 轮询间隔（秒）。env SANDBAR_WATCH_INTERVAL_SEC 可调，集成场景提速用。
+    只在工单专属模式（SANDBAR_WATCH_WORKFLOW 已置）才生效——watch 任务只在这种模式下创建。
+    外部输入全容错：未置/空白/非数值/NaN/Inf/<=0 一律回落缺省；有效但低于下限就钳到下限，防止忙转。"""
     if raw is None:
         raw = os.environ.get("SANDBAR_WATCH_INTERVAL_SEC") or ""
     raw = str(raw).strip()
@@ -74,15 +71,15 @@ def watch_interval_sec(raw: "str | None" = None) -> float:
 
 
 def worker_meta_path(args: argparse.Namespace) -> str:
-    """归属指纹 meta 落点（KI-033，t260904-02）。
+    """归属指纹 meta 的落点（KI-033）。
 
-    - 工单专属模式（console supervisor 以子进程拉起）：读 env SANDBAR_WORKER_META
-      （supervisor spawn 时指路，约定 = <dataDir>/worker-<tid>.meta，与 pidfile 同目录）；
-    - daemon 模式（--daemon 常驻）：<pidfile>.meta（worker 自己知道 pidfile 路径）；
-    - 前台调试模式：不落 meta（无注册方，写了也没人读）。
+    - 工单专属模式（console supervisor 拉起）：读 env SANDBAR_WORKER_META，
+      约定值=<dataDir>/worker-<tid>.meta，和 pidfile 同目录；
+    - daemon 模式：<pidfile>.meta（worker 自己知道 pidfile 路径）；
+    - 前台调试模式：不落 meta（没有注册方会读它）。
 
-    pidfile 本体语义不动（纯数字 pid），meta 是旁车文件——ensure 侧按
-    「pid 活着 + meta 异仓」判异仓（告警+拒接，不杀别人进程）。"""
+    pidfile 还是纯数字 pid，meta 是旁车文件。ensure 侧按「pid 活着 + meta 指向
+    别的仓」判定异仓 worker，只告警拒接，不杀别人进程。"""
     env_path = os.environ.get("SANDBAR_WORKER_META") or ""
     if env_path:
         return env_path
@@ -124,9 +121,8 @@ def daemonize(pidfile: str, logfile: str) -> bool:
 
 async def run_worker(args: argparse.Namespace) -> None:
     logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
-    # 归属指纹自报（KI-033）：起跑早写（Client.connect 前）——确保 worker 一活起来
-    # ensure 侧就能读到归属；best-effort，写失败不阻断启动（ensure 对缺失态有
-    # unknown 兼容处理）。优雅停时 main() 里 best-effort 清理。
+    # 归属指纹早写（KI-033）：Client.connect 之前就写，worker 一活 ensure 侧
+    # 就能读到归属。best-effort，写失败不阻断启动（ensure 对缺失态有 unknown 兼容）。
     meta_path = worker_meta_path(args)
     if meta_path:
         payload = write_worker_meta(meta_path, repo_root=str(REPO_ROOT), pid=os.getpid())
@@ -135,12 +131,12 @@ async def run_worker(args: argparse.Namespace) -> None:
     else:
         logging.info("worker 归属指纹：前台模式不落 meta（repo_root=%s）", REPO_ROOT)
     client = await Client.connect(TARGET_HOST, namespace=NAMESPACE)
-    # 260823：老 TicketWorkflow 已随 tickets/ 投影目录退场（全部工单 closed）。
+    # 老 TicketWorkflow 已退场（票 t260823，全部工单 closed）。
     # workflow 清单=步1 两类（兼容）+ 六模版子类；activity 清单=通用活动 + agent 段活动。
-    # 多队列过渡（t260907-04 退役账#1/#2）：每队列一个 Worker 实例共享同一
-    # registry——共享模式 poll 新旧共享队列（LEGACY 旧队列在飞 workflow 流干）；
-    # 专属模式由 SANDBAR_TASK_QUEUES 注入「新,旧 ticket 队列」（在飞工单 worker
-    # 重启后旧前缀 workflow 不搁浅）。启动日志逐队列打印 = 双注册证据。
+    # 多队列（票 t260907-04 退役账）：每队列一个 Worker 实例、共享同一 registry。
+    # 共享模式 poll 新旧共享队列（旧队列在飞 workflow 流干）；专属模式由
+    # SANDBAR_TASK_QUEUES 注入新旧 ticket 队列（在飞工单 worker 重启后旧前缀
+    # workflow 不搁浅）。启动日志逐队列打印=双注册证据。
     workers = []
     for _q in configured_task_queues():
         workers.append(Worker(
@@ -160,12 +156,12 @@ async def run_worker(args: argparse.Namespace) -> None:
         except (NotImplementedError, RuntimeError):
             pass  # 非主线程 / 平台不支持时退化为无信号处理（前台 Ctrl-C 仍由 asyncio 默认处理）
 
-    # 工单专属模式（260824）：SANDBAR_WATCH_WORKFLOW=<工单id> 时周期查 workflow 状态，
-    # 收口（非 RUNNING）即触发优雅自退——专属 worker 的生命周期跟工单走，不常驻。
-    # 查询失败（网络抖动/workflow 不存在）不退出：worker 停了活会攒住，宁可多等一轮。
-    # A 案（260824 二轮拍板：工单 worker 跟 console 走）：console 以子进程方式拉起时
-    # 置 SANDBAR_WATCH_PPID=1——宿主被 SIGKILL（dispose 跑不到）时本进程被 launchd
-    # 收养、ppid 变 1，据此自退，不留无主 worker（85222 版本投毒教训）。
+    # 工单专属模式：SANDBAR_WATCH_WORKFLOW=<工单id> 时周期查 workflow 状态，
+    # 收口（非 RUNNING）即优雅自退——专属 worker 的生命周期跟工单走，不常驻。
+    # 查询失败不退出（网络抖动/workflow 不存在都不算数）：worker 停了活会攒住，
+    # 宁可多等一轮。
+    # ppid 看守：console 以子进程拉起时置 SANDBAR_WATCH_PPID=1——宿主被 SIGKILL
+    # （dispose 跑不到）时本进程被 launchd 收养、ppid 变 1，据此自退，不留无主 worker。
     watch_wf = os.environ.get("SANDBAR_WATCH_WORKFLOW") or ""
     watch_ppid = os.environ.get("SANDBAR_WATCH_PPID") == "1"
     watch_interval = watch_interval_sec()
@@ -221,8 +217,8 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        # 优雅停收尾：清自己的 meta（stale meta 由 ensure 侧按「pid 死」判定，
-        # 但主动清更干净）。best-effort——清不掉不掩盖退出码。
+        # 优雅停收尾：清自己的 meta。stale meta 本来由 ensure 侧按「pid 死」判掉，
+        # 但主动清更干净。best-effort，清不掉不掩盖退出码。
         if meta_path:
             try:
                 pathlib.Path(meta_path).unlink()

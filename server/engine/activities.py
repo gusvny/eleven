@@ -1,12 +1,11 @@
 """Activity 层 = 一切碰外部世界的动作。
 
-步2（t260821-03）核心：
+两个主通道：
   - `admin_call`：`python3 server/admin.py call <tool> <args>` 的唯一通道（ticket list/show、
     workflow show、qc_run、verify_lane…）。工单**读**操作走这里。
   - `script_gate`：脚本门（qc_run / verify_lane），返回结构化红绿灯，绿才放行。
 
-260823：project_ticket（tickets/*.json 投影写入器）已随投影目录一并删除——
-工单真源恒为 Temporal workflow。
+票 t260823：project_ticket（tickets/*.json 投影写入器）已删除——工单真源恒为 Temporal workflow。
 
 设计要点：引擎的**业务拒绝**不当异常抛，返回 ok=False 交 workflow 决策；只有真·基础设施
 故障（超时、崩）才抛，让 Temporal 重试。
@@ -192,7 +191,7 @@ async def ticket_scan() -> TicketScan:
     )
 
 
-# ---------- M6（t260821-m6-scan-expand）：巡检扩权 —— 待决工单检查报告 ----------
+# ---------- M6 巡检扩权：待决工单检查报告 ----------
 #
 # 红线：只出建议（疑似卡死/待补/可签），不出决定；签字只能人。
 # 读工单走 admin.py（只读 list/show）；脚本门红绿灯走 Temporal snapshot query（只读），
@@ -256,8 +255,8 @@ async def scan_tickets_report_impl(now_ts: float, stuck_hours: float,
     # 最紧急在前（疑似卡死→待补→可签），同档按停留时长倒序。
     rank = {s: i for i, s in enumerate(SCAN_SUGGESTIONS)}
     items.sort(key=lambda i: (rank.get(i.suggestion, 9), -i.dwell_hours))
-    # 未归档清单（epic-linkage 验收标准 3）：无 epic 的在途工单进清单——规则是
-    # 「有归属必须绑，巡检盯漏网」（允许无 epic 开工单，但报告里要有它）。
+    # 未归档清单（epic-linkage 验收标准 3）：无 epic 的在途工单进清单。规则是
+    # 「有归属必须绑，巡检盯漏网」——允许无 epic 开工单，但报告里要有它。
     # closed 不收：已收口工单是历史，全收只会让清单无限增殖变噪音。
     # epic 数据源 = ticket list 行形态（client.py 从 EpicCode SA 直取）。
     unfiled = sorted(
@@ -291,14 +290,14 @@ async def scan_tickets_report() -> ScanReport:
 
 @activity.defn
 async def reconcile_ticket_workers() -> Dict[str, Any]:
-    """专属 worker 对账（260824 一工单一 worker；A 案二轮拍板后改 reap-only）。
+    """专属 worker 对账（一工单一 worker 时代的遗留职责，现为 reap-only）。
 
-    A 案：工单 worker 由 console keepalive 以子进程 spawn、跟 console 走——本
-    activity 不再补拉（daemon 补拉会造出无主 worker，破坏「console 没了就没
-    了」），只回收「workflow 已收口但 worker 还活着」的漏退者；RUNNING 缺
-    worker 的记进返回值（missing）留痕，补拉归 console ensure。
+    工单 worker 由 console keepalive 以子进程 spawn、跟 console 走。本 activity
+    不再补拉——daemon 补拉会造出无主 worker，破坏「console 没了就没了」。只回收
+    「workflow 已收口但 worker 还活着」的漏退者；RUNNING 缺 worker 的记进
+    返回值（missing）留痕，补拉归 console ensure。
 
-    红线同巡检：只修进程，不碰 workflow 状态。失败不抛——下次巡检再对。
+    红线同巡检：只修进程，不碰 workflow 状态。失败不抛，下次巡检再对。
     """
     from ticket_worker import reap_ticket_worker, worker_pid
     from workflows_v2 import TEMPLATE_CLASSES
@@ -352,9 +351,9 @@ async def write_scan_report(report: ScanReport) -> Dict[str, Any]:
 
 
 # ========================================================================================
-# inspection 票①（t260905-03）：测试面扫描 + 巡检票落账（薄壳——纯函数在
+# inspection 票①（t260905-03）：测试面扫描 + 巡检票落账。薄壳——纯函数在
 # inspection_scan.py / inspection_flow.py；业务拒绝返回 ok=False 交 workflow 决策，
-# 只有真·基础设施故障才抛，让 Temporal 重试）。
+# 只有真·基础设施故障才抛，让 Temporal 重试。
 # ========================================================================================
 
 @activity.defn

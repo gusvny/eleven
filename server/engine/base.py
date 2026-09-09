@@ -1,7 +1,7 @@
-"""TicketWorkflowBase —— M11 v2「模版即代码」的六模版共享基类（t260822-m11）。
+"""TicketWorkflowBase —— M11 v2「模版即代码」的六模版共享基类（票 t260822-m11）。
 
-架构转向（2026-08-22 用户拍板）：模版即代码 + stage 即 activity + 状态只在 workflow。
-本基类承载所有工单 workflow 共享的机制，六个子类只声明 STAGES（+各自 patched id）：
+模版即代码 + stage 即 activity + 状态只在 workflow。本基类承载所有工单 workflow
+共享的机制，六个子类只声明 STAGES（+各自 patched id）：
 
   - 通用主循环 `_main`：按 STAGES 顺序驱动——
       agent 段  → activity（名=stage 名）spawn headless agent，结果文件幂等；
@@ -129,22 +129,15 @@ class TicketWorkflowBase:
     async def _breathe(self) -> None:
         """stage 转换突变串让路点（KI-003）：await 让出事件循环，给排队的
         snapshot query（与主协程共用同一 workflow 事件循环）一个执行窗口。
-        故障模式取舍清单（前三项承 t260901-08 终态留痕先例逐项带过来，后两项本点自有）：
-        ①回放安全——本方法不增删任何 mutation，_log/_mark 仍是纯内存 append；
-        ②旧票回落——只插让路点，不改既有 timeline/meta 键语义，存量票呈现不变；
-        ③重跑语义——让路点位于突变簇之间，不重排 append 顺序，timeline 最新态正确；
-        ④在跑旧票重放兼容（实现段已核对 temporalio 1.18.2 源码）——sleep(0) 会发
-        真 StartTimer 命令（_workflow_instance.py:2397 对 0 时长不特判），直接用会让
-        旧 history 重放多出 timer 命令破确定性；故套 workflow.patched() 分支（本文件
-        头注的既定版本化纪律）：旧在跑票重放无 marker → 不让路原路径重放；新执行 /
-        旧票走到 live edge 后 marker 落史 → sleep(0) 生效（0 长 timer 即发即回，
-        自带唤回事件）。注意：wait_condition(lambda: True) 不作让路形态——重放期
-        条件检查与 future 创建的时序可能让协程挂到下个 activation，无唤回保证；
-        另 DevLaneWorkflow 独立于本基类（同形不继承），其 _breathe 在 dev_lane.py
-        自带一份（t260901-23 教训：只加在 base 上对 dev-lane 票是 AttributeError）。
-        ⑤sandbox patch——workflow 上下文的 asyncio.sleep 确被 sandbox 接管为
-        workflow_sleep（源码同上），行为即④所述，必须套 patched 分支。
-        """
+
+        为什么是 patched 分支而不是裸 sleep(0)：temporalio 1.18.2 里 sleep(0) 会发
+        真 StartTimer 命令（0 时长无特判），旧在跑票重放旧 history 没有这个命令，
+        直接睡会破确定性。所以旧 history 重放走原路径（无 marker 不让路），新执行 /
+        live edge 走到这里 marker 落史后 sleep(0) 生效（0 长 timer 即发即回）。
+        wait_condition(lambda: True) 不能当让路形态：重放期条件检查和 future 创建的
+        时序可能让协程挂到下个 activation，没有唤回保证。
+        另：DevLaneWorkflow 不继承本基类（同形不继承），它自带一份 _breathe
+        （票 t260901-23：只加在 base 上对 dev-lane 票是 AttributeError）。"""
         if not workflow.patched(BREATHE_PATCH_ID):
             return  # 旧 history 重放：无 marker，跳过让路保重放确定
         await asyncio.sleep(0)
@@ -180,7 +173,7 @@ class TicketWorkflowBase:
             "role": first.role,
             "lane": inp.lane or self.TEMPLATE_LANE,
             "workspace": ws,
-            # t260908-02：多仓/混合形态逐仓明细的真源位（meta 顶层）。workspace 归纯
+            # 票 t260908-02：多仓/混合形态逐仓明细的真源位（meta 顶层）。workspace 归纯
             # {type, path}，不再内嵌 list（Dict[str, str] 注解与 Temporal 编解码兼容）。
             "repo_worktrees": list(inp.repo_worktrees),
             "worktree": inp.worktree,
@@ -283,8 +276,8 @@ class TicketWorkflowBase:
             st.id, args,                       # activity 名 = stage 名（stage 即 activity）
             start_to_close_timeout=AGENT_TO, heartbeat_timeout=HEARTBEAT_TO,
             retry_policy=RETRY)
-        # 按名调用无返回类型注解，dataclass 回包以 dict 形态回来——归一成 StageResult
-        # files_changed 保形归一（t260904-18 KI-049 门② R1）：形状随回执进 results
+        # 按名调用无返回类型注解，dataclass 回包以 dict 形态回来——归一成 StageResult。
+        # files_changed 保形归一（票 t260904-18 KI-049 门②）：形状随回执进 results
         # 字面（消费点 dev_lane 读 results dict，不读 StageResult 本体）。
         if isinstance(raw, StageResult):
             res = raw
@@ -418,7 +411,7 @@ class TicketWorkflowBase:
     async def _prepare_workspace(self) -> Dict[str, Any]:
         """跑 prepare_workspace 活动（worktree add / dir mkdir / 主树跳过；失败回执不抛）。
 
-        先过泳道字段闸（lane_workspace_gate_error）：创建链路已在 ticket-start 单点
+        先过泳道字段闸（lane_workspace_gate_error）：正常创建链路在 ticket-start 单点
         推导+校验，这里兜「旧 payload/未来新入口」绕过的情形——lane=worktree 但泳道
         字段不齐/不一致时按失败回执走 blocked 等人，不放给 activity 静默跳主树。"""
         gate = lane_workspace_gate_error(self.meta)
@@ -428,7 +421,7 @@ class TicketWorkflowBase:
         prep = WorkspacePrep(
             ticket_id=self.ticket_id,
             workspace=self.meta.get("workspace"),
-            # t260908-02：逐仓明细走独立字段（workspace 不再内嵌 list，编解码兼容）
+            # 票 t260908-02：逐仓明细走独立字段（workspace 不再内嵌 list，编解码兼容）
             repo_worktrees=list(self.meta.get("repo_worktrees") or []),
             branch=str(self.meta.get("branch") or ""),
             base_ref=str(self.meta.get("base_ref") or ""))
