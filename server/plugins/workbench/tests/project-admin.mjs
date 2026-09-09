@@ -3,7 +3,7 @@
  * project-admin.mjs —— project CLI 薄 spawn 壳 UT（t260904-15 票③，S2 面）。
  *
  * 直跑：node tests/project-admin.mjs。全走假 CLI 入口（entryPath 测试缝 + tmp
- * fixture 脚本），零触真仓/真注册表。覆盖 create_plan gen1 R1-① 取舍清单的
+ * fixture 脚本），零触真仓/真注册表。覆盖方案 R1-① 取舍清单的
  * 故障面（含硬性畸形输入用例）：
  *   A. 正常路径：JSON stdout → 解析返回；
  *   B. 非零退出含 stdout JSON 错误体（projects.py FailClosed 口径）→ ProjectCliError

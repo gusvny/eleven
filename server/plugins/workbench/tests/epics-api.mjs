@@ -1,39 +1,30 @@
 /**
- * Baseline: epics (project charter) API contract (group 2).
+ * 基线：立项单（epics）API 契约（第 2 组）。
  *
- * Intent:
- *   The epics API is the read/write surface over project charters. This baseline locks
- *   its contract so route regressions (broken anti-traversal, silently failing close,
- *   lying badge) are caught mechanically instead of by accident.
+ * 意图：epics API 是立项单的读写面。本基线锁定其契约，让路由回归（防穿越破功、
+ * 收口静默失败、徽标说谎）被机械捕获，而不是靠偶然发现。
  *
- * High-level steps (fully offline: tmp repo fixture + stub admin.py + mock HTTP):
- *   A. listEpics over a fixture dir: valid *.md collected/sorted; bad shapes ignored;
- *      missing/empty dir -> empty array, no throw.
- *   B. detail route: 200 with markdown; invalid shapes -> 400 (full shape set);
- *      double-encoded traversal -> 4xx; 404 with existing-code list; POST -> 405;
- *      unknown subpath -> 404.
- *   C. /tickets aggregation: status buckets + row fields; two degraded paths
- *      (admin.py crash and ok:false) -> 200 degraded, never 502.
- *   D. close: POST-only; status row rewritten to 已完结 with /tmp backup; missing
- *      status row -> 422; 404 for unknown code.
- *   E. next-hint cache: bad-JSON cache -> badge lit but hint = miss; stale state_key
- *      -> miss; dismiss deletes cache (with /tmp backup) and is idempotent; invalid
- *      code -> 400.
+ * 步骤（全离线：tmp 仓 fixture + 桩 admin.py + mock HTTP）：
+ *   A. listEpics 扫 fixture 目录：合法 *.md 收集/排序；畸形形状忽略；
+ *      目录缺失/为空 → 空数组，不抛错。
+ *   B. 详情路由：200 带 markdown；畸形形状 → 400（全形状集）；双重编码的
+ *      穿越 → 4xx；404 文案列现存代号；POST → 405；未知子路径 → 404。
+ *   C. /tickets 聚合：状态分桶 + 行字段；两条降级路径（admin.py 崩溃与
+ *      ok:false）→ 200 degraded，永不 502。
+ *   D. 收口：仅 POST；状态行改写为「已完结」并备份 /tmp；缺状态行 → 422；
+ *      未知代号 → 404。
+ *   E. 下一步建议缓存：坏 JSON 缓存 → 徽标亮但建议=miss；state_key 失配
+ *      → miss；dismiss 删缓存（备份 /tmp）且幂等；非法代号 → 400。
  *
- * Reference implementation: server/plugins/workbench/smoke/epics.mjs. Fault-mode
- * trade-offs were reviewed item-by-item in create_plan (all of its 10 fault modes
- * carried over, plus close/dismiss added; ticket rows' epic passthrough NOT
- * duplicated here -- smoke C5 already covers it).
+ * 参考实现：server/plugins/workbench/smoke/epics.mjs。故障模式取舍在方案阶段
+ * 逐项过审（10 项全带，另加 close/dismiss；票行 epic 透传不在此重复——smoke C5
+ * 已覆盖）。
  *
- * Known engine bug (recorded here, to be fixed in a separate ticket -- engine files
- * are outside this ticket's write set):
- *   POST /sandbar-workbench/api/epics/<code>/next-hint/dismiss always returns 405.
- *   Root cause: the GET-only 405 branch (node.ts:1034) sits BEFORE the dismiss branch
- *   (node.ts:1063), contradicting the comment at node.ts:1062 ("must branch before
- *   the GET-only 405"). The frontend [dismiss] button (src/client/epics.tsx:258, POST)
- *   is therefore dead. The contract is asserted at the dismissPrecache function level
- *   below; the route-level probe prints a KNOWN-ISSUE line and does NOT count as FAIL.
- *   After the fix, turn it back into a route-level "POST dismiss -> 200" assertion.
+ * 曾有的引擎缺陷（已修，票 t260907-11）：分支顺序缺陷让
+ * POST /sandbar-workbench/api/epics/<code>/next-hint/dismiss 恒 405——GET-only 405
+ * 分支排在 dismiss 分支之前，前端 [忽略建议] 钮全灭。修复把 dismiss 分支挪到 405
+ * 闸之前。下方路由级探针：200 即断言通过；非 200 打印 KNOWN-ISSUE 行（遗留容忍
+ * 分支，字符串在字面量里，清理需动代码另票做）不计 FAIL。
  */
 
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises'
@@ -68,7 +59,7 @@ const EPIC_MD = `# 立项单：demo-epic
 const tmp = await mkdtemp(join(tmpdir(), 'integ-epics-api-'))
 const savedEnv = { SANDBAR_EPICS_DIR: process.env.SANDBAR_EPICS_DIR, SANDBAR_EPIC_NEXT_DIR: process.env.SANDBAR_EPIC_NEXT_DIR }
 
-/** Mock webServer/req/res harness (same pattern as workbench smoke tests). */
+/** mock webServer/req/res 支架（与 workbench smoke 测试同模式）。 */
 function makeHarness(repo) {
   const routes = []
   const ws = { register: (r) => { routes.push(r); return () => {} } }
@@ -99,7 +90,7 @@ const call = async (handler, url, method = 'GET', bodyObj) => {
   return res
 }
 
-/** Stub admin.py: ticket list / workflow list / ticket create (configurable ok). */
+/** 桩 admin.py：ticket list / workflow list / ticket create（ok 可配）。 */
 async function writeStub(repo, { createOk = true } = {}) {
   await mkdir(join(repo, 'server'), { recursive: true })
   await writeFile(join(repo, 'server', 'admin.py'), `import json, sys
@@ -129,8 +120,8 @@ try {
   await mkdir(epicsDir, { recursive: true })
   await writeFile(join(epicsDir, 'demo-epic.md'), EPIC_MD, 'utf8')
   await writeFile(join(epicsDir, 'aaa.md'), '# 立项单：aaa\n\n| 状态 | 已归档 |\n| 立项日期 | 2026-08-01 |\n', 'utf8')
-  await writeFile(join(epicsDir, 'README.md'), '# notes\n', 'utf8')     // bad shape: not listed
-  await writeFile(join(epicsDir, 'notes.txt'), 'not a charter\n', 'utf8') // not .md: not listed
+  await writeFile(join(epicsDir, 'README.md'), '# notes\n', 'utf8')     // 坏形状：不入列
+  await writeFile(join(epicsDir, 'notes.txt'), 'not a charter\n', 'utf8') // 非 .md：不入列
   const list = await listEpics(epicsDir)
   ok(list.length === 2 && list[0].code === 'aaa' && list[1].code === 'demo-epic', 'only valid *.md collected, sorted by code')
   ok((await listEpics(join(tmp, 'no-such-dir'))).length === 0, 'missing dir -> empty array, no throw')
@@ -152,8 +143,8 @@ try {
     r = await call(h.prefixEpics, `/sandbar-workbench/api/epics/${encodeURIComponent(bad)}`)
     ok(r.status === 400, `invalid shape '${bad.slice(0, 12)}' -> 400`)
   }
-  // '..' is normalized away by URL parsing; traversal shapes hit the route encoded
-  // (same surface a real attacker would use)
+  // '..' 会被 URL 解析规范化掉；穿越形状以编码形式打到路由
+  //（与真实攻击者会用的入口相同）
   for (const enc of ['%2e%2e', '..%2f..%2fetc', '%2e%2e%2f%2e%2e%2fpasswd', 'a%2Fb']) {
     r = await call(h.prefixEpics, `/sandbar-workbench/api/epics/${enc}`)
     ok(r.status >= 400 && r.status < 500, `traversal shape '${enc}' -> rejected with 4xx`)
@@ -173,7 +164,7 @@ try {
   ok(r.body.result.buckets.closed === 1 && r.body.result.buckets.dispatched === 1, 'bucketed by status')
   const row = r.body.result.tickets.find(t => t.id === 't260831-02')
   ok(row !== undefined && row.stage === 'implement' && row.stage_state === 'running', 'ticket row fields present')
-  // Degraded path 1: admin.py crashes (non-JSON) -> 200 degraded, never 502
+  // 降级路径 1：admin.py 崩溃（非 JSON 输出）→ 200 degraded，永不 502
   const repoC = join(tmp, 'repo-c')
   await mkdir(join(repoC, 'server'), { recursive: true })
   await writeFile(join(repoC, 'server', 'admin.py'),
@@ -183,7 +174,7 @@ try {
   ok(r.status === 200 && r.body.result?.degraded === true
     && String(r.body.result.reason).includes('connection refused'),
     'admin.py crash (non-JSON) -> 200 degraded, reason carries underlying error')
-  // Degraded path 2: ok:false -> degraded with reason passthrough
+  // 降级路径 2：ok:false → degraded，reason 透传底层错误
   await writeFile(join(repoC, 'server', 'admin.py'), `import json, sys
 if sys.argv[2] == 'ticket' and json.loads(sys.argv[3]).get('op') == 'list':
     print(json.dumps({"ok": False, "error": "ticket-list failed: temporal unreachable: connection refused"})); sys.exit(1)
@@ -213,27 +204,27 @@ print(json.dumps({"ok": False, "error": "stub unsupported"})); sys.exit(1)
 
   /* ------------------------------------------------------------ E. next-hint cache + dismiss */
   section('E next-hint: bad-JSON cache treated as miss / dismiss delete+backup+idempotent (new vs smoke)')
-  // The precache dir is keyed to the repo by design: resolvePrecacheDir does NOT read
-  // env (env SANDBAR_EPIC_NEXT_DIR only isolates job dirs). Tests follow the real source.
+  // 预缓存目录按设计锚定仓：resolvePrecacheDir 不读 env
+  //（env SANDBAR_EPIC_NEXT_DIR 只隔离 job 目录）。测试跟随真源。
   const cacheDir = join(repoB, '.suyou', 'epic-next')
   const rows = [{ id: 't260831-01', closed: true }, { id: 't260831-02', closed: false }]
   const stateKey = stateKeyFromRows(rows, '')
   const wfIds = ['dev-lane']
-  // Bad JSON cache: badge lit (precacheExists only stats), detail hint = miss
+  // 坏 JSON 缓存：徽标亮（precacheExists 只 stat），详情建议=miss
   await mkdir(join(cacheDir, 'demo-epic'), { recursive: true })
   await writeFile(join(cacheDir, 'demo-epic', 'pre.json'), '{"status":"ok","workflow":"dev-l\\-broken-escape', 'utf8')
   ok(await precacheExists(cacheDir, 'demo-epic') === true, 'bad-JSON cache exists -> badge lit (precacheExists only stats)')
   ok(await readPrecacheHint(cacheDir, 'demo-epic', stateKey, wfIds) === null, 'bad-JSON cache -> hint treated as miss (null, no crash)')
-  // Valid cache hit
+  // 合法缓存命中
   const goodCache = { epic: 'demo-epic', state_key: stateKey, suggestion: { workflow: 'dev-lane', title: 'next ticket', body: 'b', rationale: 'r' } }
   await writeFile(join(cacheDir, 'demo-epic', 'pre.json'), JSON.stringify(goodCache), 'utf8')
   const hint = await readPrecacheHint(cacheDir, 'demo-epic', stateKey, wfIds)
   ok(hint?.status === 'ok' && hint.title === 'next ticket', 'valid cache -> hint hit (state_key aligned)')
   ok(await readPrecacheHint(cacheDir, 'demo-epic', 'stale-key', wfIds) === null, 'stale state_key -> miss (stale suggestion never shows)')
-  // Detail route carries nextHint (full route + stub admin.py queries)
+  // 详情路由带 nextHint（全路由 + 桩 admin.py 查询）
   r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/demo-epic')
   ok(r.status === 200 && r.body.result?.nextHint?.title === 'next ticket', 'GET detail -> nextHint projection hit')
-  // Dismiss: function-level contract (route-level probe below; see known engine bug note)
+  // Dismiss：函数级契约（路由级探针见下；见文件头已知引擎缺陷）
   ok(await dismissPrecache(cacheDir, 'demo-epic').then(r => r.ok === true), 'dismissPrecache -> cache deleted')
   ok(await precacheExists(cacheDir, 'demo-epic') === false, 'after dismiss cache is gone (badge off)')
   const hintBackups = existsSync('/tmp/epic-next-backup') ? await readdir('/tmp/epic-next-backup') : []
@@ -242,7 +233,7 @@ print(json.dumps({"ok": False, "error": "stub unsupported"})); sys.exit(1)
   ok(dr2.ok === true, 'second dismiss -> still ok (idempotent, missing file is fine)')
   const drBad = await dismissPrecache(cacheDir, 'BAD')
   ok(drBad.ok === false && drBad.status === 400, 'dismiss invalid code -> 400 (never deletes the wrong file)')
-  // Route-level probe for the known engine bug (see file header); not counted as FAIL.
+  // 已知引擎缺陷的路由级探针（见文件头）；不计 FAIL。
   r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/demo-epic/next-hint/dismiss', 'POST')
   if (r.status === 200) {
     ok(true, 'POST dismiss route -> 200 (engine bug fixed; route-level contract restored)')
@@ -250,7 +241,7 @@ print(json.dumps({"ok": False, "error": "stub unsupported"})); sys.exit(1)
     console.log(`  KNOWN-ISSUE POST dismiss route -> ${r.status} (engine branch-order defect: GET-only 405 sits before the dismiss branch; see file header, fix in a separate ticket)`)
   }
 } finally {
-  // Full-terminal-state cleanup: restore env, remove tmp fixtures
+  // 终态全回收：还原 env，删除 tmp fixture
   if (savedEnv.SANDBAR_EPICS_DIR === undefined) delete process.env.SANDBAR_EPICS_DIR
   else process.env.SANDBAR_EPICS_DIR = savedEnv.SANDBAR_EPICS_DIR
   if (savedEnv.SANDBAR_EPIC_NEXT_DIR === undefined) delete process.env.SANDBAR_EPIC_NEXT_DIR

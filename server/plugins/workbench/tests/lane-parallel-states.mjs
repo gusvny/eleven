@@ -4,7 +4,7 @@
  *
  * 直跑：node integration/baselines/lane-parallel-states.mjs（cwd=泳道根，零依赖）。
  *
- * 被测契约（integration 侧约定，t260901-05 review_plan 第 4 轮通过的 v3 推导口径）：
+ * 被测契约（integration 侧约定，票 t260901-05 方案 v3 推导口径）：
  *   - 推导函数导出 deriveStageStates，住在 server/plugins/workbench/src/client/ 下的
  *     **纯 .ts 模块**（node 无法 import .tsx；index.tsx 只做消费不做推导）。
  *   - 签名 deriveStageStates(detail, order) → Record<stageId, visual>；

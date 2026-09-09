@@ -91,7 +91,7 @@ try {
     const ev1 = [
       // 模型归因源：request/context
       { type: 'request/context', seq: 1, time: T0 + 1000, data: { provider: 'deepseek', model: 'm-alpha' } },
-      // 窗口 1（create_plan）的一条 usage……
+      // 窗口 1 的一条 usage……
       { type: 'assistant/message', seq: 2, time: T0 + 2000, data: { usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 1000 } } },
       // ……以及它的 chunk 镜像（同一份 usage，加了就翻倍——review 意见 1 的防呆用例）
       { type: 'assistant/chunk', seq: 3, time: T0 + 2000, data: { chunk: { type: 'usage', usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 1000 } } } },

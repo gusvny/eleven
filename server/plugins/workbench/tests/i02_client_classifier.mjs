@@ -1,25 +1,23 @@
 /**
- * i02_client_classifier.mjs — t260902-03 client-side response classifier (hermetic).
+ * i02_client_classifier.mjs —— 票 t260902-03 客户端应答分类器（密封）。
  *
- * User story: the staleness banner must appear ONLY when the server positively reports
- * stale=true inside a healthy (2xx, parseable, result-envelope) response. Every degraded
- * shape — non-2xx, malformed JSON, missing `stale`, non-boolean `stale`, a bare top-level
- * body without the result envelope, or an error envelope — must silently resolve to
- * "no banner". The watchdog must never become a new error source itself.
+ * 用户故事：陈旧横幅只在服务端于健康应答（2xx、可解析、带 result 信封）内
+ * 明确报 stale=true 时才允许出现。一切降级形态——非 2xx、JSON 畸形、缺 `stale`、
+ * `stale` 非布尔、裸顶层 body 无 result 信封、error 信封——都必须静默归约为
+ * 「不挂横幅」。看守自身绝不能成为新的报错源。
  *
- * The classification logic lives in a React-free pure module so it can run in bare node
- * (hero.mjs precedent: modules importing react/runtime fail under plain node). This
- * baseline pins the contract:
+ * 分类逻辑住在无 React 纯模块里，裸 node 可跑（hero.mjs 先例：import 了
+ * react/runtime 的模块在纯 node 下起不来）。本基线钉死契约：
  *
- *   src/client/stale-check.ts exports:
+ *   src/client/stale-check.ts 导出：
  *     classifyBuildInfoResponse(status: number, bodyText: string): { stale: boolean, error?: string }
- *       -> stale=true  iff 2xx AND body parses AND result is an object AND
- *          result.error is absent AND result.stale === true (strict).
- *       -> { stale: false } for every other shape; result.error is passed through for
- *          observability; the function never throws.
+ *       → stale=true 当且仅当 2xx 且 body 可解析且 result 是对象且
+ *         result.error 缺席且 result.stale === true（严格）。
+ *       → 其他一切形状归 { stale: false }；result.error 透传供观测；
+ *         函数永不抛错。
  *
- * Exit contract (integration/README.md): last stdout line `SUMMARY pass=N skip=M fail=K`;
- * exit 1 iff fail>0. Pre-implementation this baseline is RED by design (acceptance bar).
+ * 退出契约（integration/README.md）：stdout 末行 `SUMMARY pass=N skip=M fail=K`；
+ * fail>0 时 exit 1。实现落地前本基线按设计为红（验收线）。
  */
 
 let passed = 0

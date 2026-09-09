@@ -1,31 +1,30 @@
 /**
- * i01_stale_watchdog_e2e.mjs — t260902-03 host stale watchdog, end-to-end (hermetic).
+ * i01_stale_watchdog_e2e.mjs —— 票 t260902-03 host 陈旧看守，端到端（密封）。
  *
- * User story: after a host-half change lands on disk (merge), the running console process
- * keeps executing old code ("一日三咬"). The watchdog must detect this at runtime: the
- * /sandbar-workbench/api/build-info endpoint compares the boot-time fingerprint of the host
- * source files (node.ts + src/host/*.ts) against the current on-disk content and reports
- * stale=true, so every view can show the "restart console" banner.
+ * 用户故事：host 半代码落盘（merge）后，运行中的 console 进程仍在执行旧代码
+ * （「一日三咬」）。看守必须在运行时检出：/sandbar-workbench/api/build-info
+ * 端点比对 host 源文件（node.ts + src/host/*.ts）的 boot 时刻指纹与当前磁盘
+ * 内容，报 stale=true，让每个视图都能挂「重启控制台」横幅。
  *
- * High-level steps (all hermetic: in-process handlers on a mock webServer, fixture repo in
- * a temp dir, zero real ports, zero 3099 contact):
- *   T1 fresh boot            -> 200, result.stale=false, bootFingerprint === diskFingerprint.
- *   T2 mtime-only touch      -> still stale=false (content hash, not mtime — checkout touch
- *                               must not false-positive).
- *   T3 content change        -> result.stale=true, diskFingerprint !== bootFingerprint
- *                               (simulates a host-half merge landing on disk).
- *   T4 boot hash pinned      -> a second apply() in the same process must NOT reset the
- *                               boot fingerprint; stale stays true after T3.
- *   T5 all files missing     -> 200 {stale:false, error:<human>} — cannot judge = no banner.
- *   T6 concurrent polls      -> 5 parallel requests, all 200, identical verdict/fingerprint.
+ * 步骤（全密封：mock webServer 上的进程内 handler、fixture 仓在临时目录、
+ * 零真实端口、零 3099 接触）：
+ *   T1 新 boot                → 200，result.stale=false，bootFingerprint === diskFingerprint。
+ *   T2 只碰 mtime             → 仍 stale=false（内容哈希，不看 mtime——checkout 触
+ *                               碰不得误报）。
+ *   T3 内容变更               → result.stale=true，diskFingerprint !== bootFingerprint
+ *                               （模拟 host 半 merge 落盘）。
+ *   T4 boot 哈希已钉          → 同进程第二次 apply() 不得重置 boot 指纹；T3 之后
+ *                               stale 保持 true。
+ *   T5 文件全缺               → 200 {stale:false, error:<人话>}——无法判定=不挂横幅。
+ *   T6 并发轮询               → 5 个并行请求，全 200，判定/指纹一致。
  *
- * Contract pinned by this baseline (implementation must conform, house envelope style):
- *   - exact route GET /sandbar-workbench/api/build-info registered on the webServer.
- *   - 200 envelope: { ok: true, result: { stale: boolean, bootFingerprint?: string,
- *                     diskFingerprint: string, missing: string[], error?: string } }.
+ * 本基线钉死的契约（实现必须遵守，仓内信封风格）：
+ *   - webServer 上注册 exact 路由 GET /sandbar-workbench/api/build-info。
+ *   - 200 信封：{ ok: true, result: { stale: boolean, bootFingerprint?: string,
+ *                diskFingerprint: string, missing: string[], error?: string } }。
  *
- * Exit contract (integration/README.md): last stdout line `SUMMARY pass=N skip=M fail=K`;
- * exit 1 iff fail>0. Pre-implementation this baseline is RED by design (acceptance bar).
+ * 退出契约（integration/README.md）：stdout 末行 `SUMMARY pass=N skip=M fail=K`；
+ * fail>0 时 exit 1。实现落地前本基线按设计为红（验收线）。
  */
 
 let passed = 0
@@ -59,7 +58,7 @@ try {
 
 const PATH = '/sandbar-workbench/api/build-info'
 
-/** Capture registered routes on a mock webServer, the agent-live.mjs shape. */
+/** 捕获 mock webServer 上注册的路由（agent-live.mjs 同款形状）。 */
 function makeCtx() {
   const routes = []
   const ws = { register: (r) => { routes.push(r); return () => {} } }
@@ -89,10 +88,9 @@ async function call(route, url, method = 'GET') {
 
 const tmp = await mkdtemp(join(tmpdir(), 'wb-stale-it01-'))
 try {
-  /* Fixture repo: the watched list always includes server/plugins/workbench/node.ts
-   * (handwritten HOST_SOURCE_FILES); any watched filenames absent from the fixture land
-   * in missing[] at both boot and poll time, so verdicts below stay meaningful.
-   * T2/T3 therefore touch node.ts — the one file guaranteed to be watched. */
+  /* fixture 仓：看守清单恒含 server/plugins/workbench/node.ts（手写的
+   * HOST_SOURCE_FILES）；fixture 里缺的被看守文件名在 boot 与轮询时都进
+   * missing[]，下方判定才有意义。T2/T3 因此改 node.ts——唯一保证被看守的文件。 */
   const repo = join(tmp, 'repo')
   const wb = join(repo, 'server', 'plugins', 'workbench')
   await mkdir(join(wb, 'src', 'host'), { recursive: true })

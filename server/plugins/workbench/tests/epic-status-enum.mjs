@@ -1,56 +1,38 @@
 /**
- * Baseline: epic status enum + note column + status edit endpoint (t260831-05).
+ * 基线：立项状态枚举 + 备注列 + 状态编辑端点（票 t260831-05）。
  *
- * Intent:
- *   Epic "status" was free-form (seven charters, seven phrasings) so the workbench
- *   could not filter/count by status and agents could not parse it reliably. This
- *   ticket pins status to a 4-value enum, moves free-text detail into a new
- *   "备注" (note) table column, adds POST /api/epics/<code>/status, and migrates
- *   the 7 existing charters. This baseline locks the USER-PERCEIVABLE contract:
- *   only the 4 canonical values are writable, detail text survives the migration
- *   in the note column, malformed input never corrupts a charter file, and the
- *   workbench can filter the list by every enum value.
+ * 背景：立项单「状态」原是自由文本（七张立项单七种写法），工单台无法按状态
+ * 筛选/计数，agent 也无法可靠解析。本票把状态钉成 4 值枚举，自由文本细节
+ * 迁入新增「备注」列，加 POST /api/epics/<code>/status，并迁移存量 7 张立项单。
+ * 本基线锁定用户可感知契约：只有 4 个合法值可写；迁移后细节文本在备注列
+ * 存活；畸形输入绝不损坏立项单文件；工单台可按每个枚举值筛选列表。
  *
- * High-level steps (fully offline: tmp fixtures + real-repo property assertions):
- *   A. Enum source of truth: exactly 4 canonical values (full-width parens);
- *      isEpicStatus accepts precisely those, rejects half-width parens, padded,
- *      substring, empty and look-alike values.
- *   B. Real-repo invariant (property, not snapshot): every charter under
- *      notes/epics carries a status in the enum and a parseable note, with no
- *      free-form residue — the roster follows the directory, no mirror list.
- *      Roster independence itself is fixture-tested (B2, tmp dir with a count
- *      deliberately different from the real repo).
- *   B. Real-repo migration: the charters under notes/epics all carry a status
- *      in the enum and a parseable note column; the migrated detail text is
- *      preserved (sandbar pointer, 2026-08-30 delivery date, pending-decision
- *      notes); listEpics surfaces the note field.
- *   C. setEpicStatus write contract (fixture): legal rewrite persists status+note
- *      with a pre-write /tmp backup (newest backup for the code = original text);
- *      note omitted/null leaves the column, '' clears it; invalid enum -> 422 and
- *      the file is byte-identical afterwards; malformed note (|, newline, backtick,
- *      >200 chars) -> 422, non-string note -> 400, both leave the file untouched;
- *      anti-traversal 400s; missing status row -> 422; unknown code -> 404;
- *      closeEpic regression: close yields 已完结 (in enum), preserves the note,
- *      and backs up.
- *   D. Route contract (mock req/res over apply()): POST /status 200 with
- *      {code,status,note}; malformed JSON / missing status -> 400; invalid enum /
- *      malformed note -> 422; note nine states end-to-end; GET -> 405; unknown
- *      code -> 404; unknown subpath 404 message lists /status.
- *   E. Frontend model contract: filterEpicsByStatus ('' = all, per-enum match,
- *      zero-match -> empty, unknown value -> empty, never throws) and
- *      EPIC_STATUS_OPTIONS stays in lockstep with the host enum (same values,
- *      same order).
- *   F. Suggest-prompt readability: the migrated status line appears verbatim in
- *      the epic-next suggest prompt (agent-facing parseability win).
+ * 步骤（全离线：tmp fixture + 真仓性质断言）：
+ *   A. 枚举真源：恰好 4 个合法值（全角括号）；isEpicStatus 只收这 4 个，
+ *      拒半角括号/首尾空白/子串/空串/形近值。
+ *   B. 真仓不变量（性质断言而非快照）：notes/epics 下每张立项单状态 ∈ 枚举、
+ *      备注可解析、无自由文本残留——名册跟随目录，无镜像清单。
+ *      名册独立性本身用 fixture 测（B2：tmp 目录数量刻意与真仓不同）。
+ *   C. setEpicStatus 写契约（fixture）：合法改写落盘 status+note，写前备份到
+ *      /tmp（该代号最新备份=原文）；note 缺省/null 不动备注列，'' 清空；
+ *      非法枚举 → 422 且文件逐字节不变；畸形备注（|、换行、反引号、>200 字）
+ *      → 422，非字符串备注 → 400，两者都不碰文件；防穿越 → 400；缺状态行 → 422；
+ *      未知代号 → 404；closeEpic 回归：收口得「已完结」（在枚举内）、保留备注、
+ *      有备份。
+ *   D. 路由契约（mock req/res 套 apply()）：POST /status 200 带
+ *      {code,status,note}；畸形 JSON / 缺 status → 400；非法枚举 / 畸形备注 → 422；
+ *      note 九态端到端；GET → 405；未知代号 → 404；未知子路径 404 文案列 /status。
+ *   E. 前端模型契约：filterEpicsByStatus（'' = 全部、按枚举匹配、零命中 → 空、
+ *      未知值 → 空、永不抛错）；EPIC_STATUS_OPTIONS 与 host 枚举同步（同值同序）。
+ *   F. 建议 prompt 可读性：迁移后的状态行原文出现在 epic-next 建议 prompt 里
+ *      （agent 侧可解析）。
  *
- * Note: this baseline FAILS LOUDLY until t260831-05 implement lands (the enum
- * constants, note parsing, setEpicStatus, the /status route and the frontend
- * filter do not exist yet). That is the intended pre-implementation state;
- * run_integration_tests is the judging stage.
+ * 注意：本基线在票 t260831-05 实现落地前会大声失败（枚举常量、备注解析、
+ * setEpicStatus、/status 路由、前端筛选都不存在）——这是实现前的预期状态；
+ * run_integration_tests 是裁决场。
  *
- * Reference: .suyou/stage_create_plan_gen1.json (approved plan v2); fault-mode
- * trade-offs of the reused closeEpic skeleton were reviewed item-by-item in
- * review_plan round 2 (all 7 carried over; backup dir shared /tmp/epic-close-backup).
+ * 参考：已过审方案 v2（.suyou/stage_create_plan_gen1.json）；复用 closeEpic 骨架的
+ * 故障模式取舍逐项过审（7 项全带；备份目录共用 /tmp/epic-close-backup）。
  */
 
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, stat } from 'node:fs/promises'
@@ -78,7 +60,7 @@ const CANONICAL = ['已立项（待开工单）', '已立项（执行中）', '�
 const tmp = await mkdtemp(join(tmpdir(), 'integ-epic-status-'))
 const savedEnv = { SANDBAR_EPICS_DIR: process.env.SANDBAR_EPICS_DIR }
 
-/** Newest backup file for <code> under the shared backup dir (null if none). */
+/** 共享备份目录下 <code> 的最新备份文件（无则 null）。 */
 async function newestBackup(code) {
   const dir = '/tmp/epic-close-backup'
   if (!existsSync(dir)) return null
@@ -92,7 +74,7 @@ async function newestBackup(code) {
   return best
 }
 
-/** Mock webServer/req/res harness (same pattern as baselines/epics-api.mjs). */
+/** mock webServer/req/res 支架（与 baselines/epics-api.mjs 同模式）。 */
 function makeHarness(repo) {
   const routes = []
   const ws = { register: (r) => { routes.push(r); return () => {} } }
@@ -114,7 +96,7 @@ const mockRes = () => ({
   writeHead(s) { this.status = s },
   end(b) { this.body = b ? JSON.parse(b) : null },
 })
-/** bodyObj: JSON object; rawBody: string sent verbatim (for malformed-JSON probe). */
+/** bodyObj：JSON 对象；rawBody：原样发送的字符串（畸形 JSON 探针用）。 */
 const call = async (handler, url, method = 'GET', bodyObj, rawBody) => {
   const res = mockRes()
   let payload = []
@@ -146,14 +128,14 @@ try {
     'EPIC_STATUSES = the 4 canonical values')
   for (const s of CANONICAL) ok(isEpicStatus(s), `isEpicStatus('${s}') accepted`)
   for (const bad of [
-    '已立项(待开工单)',            // half-width parens
-    '已立项（待开工单） ',          // trailing space
-    ' 已立项（待开工单）',          // leading space
-    '已立项',                      // substring, not a value
-    '已完结（2026-08-30）',        // old free-form phrasing
-    '已结项',                      // retired free-form value
-    '',                           // empty
-    '已立项（执行中）\n',          // newline tail
+    '已立项(待开工单)',            // 半角括号
+    '已立项（待开工单） ',          // 尾部空格
+    ' 已立项（待开工单）',          // 首部空格
+    '已立项',                      // 子串，不是合法值
+    '已完结（2026-08-30）',        // 旧自由文本写法
+    '已结项',                      // 已退役的自由文本值
+    '',                           // 空串
+    '已立项（执行中）\n',          // 尾部换行
   ]) ok(!isEpicStatus(bad), `isEpicStatus(${JSON.stringify(bad)}) rejected`)
 
   /* ---------------------------------- B. real-repo invariant + roster independence */
@@ -172,7 +154,7 @@ try {
     ok(EPIC_STATUSES.includes(e.status), `${e.code}: status '${e.status}' is a canonical enum value`)
     ok(typeof e.note === 'string', `${e.code}: note column is parsed (string, possibly empty)`)
   }
-  // Free-form residue scan: no status cell may carry parentheses detail outside the enum.
+  // 自由文本残留扫描：状态格不得带枚举外的括号细节。
   const residue = real.filter(e => /（.*）/.test(e.status) && !isEpicStatus(e.status))
   ok(residue.length === 0, 'no free-form residue left in any status cell')
 
@@ -214,7 +196,7 @@ try {
   process.env.SANDBAR_EPICS_DIR = epicsDir
   const read = (code) => readFile(join(epicsDir, code + '.md'), 'utf8')
 
-  // validateEpicNote unit surface (same口径 consumed by endpoint + smoke)
+  // validateEpicNote 单测面（端点 + smoke 消费的同一口径）
   ok(validateEpicNote('单行正常备注').ok === true, 'validateEpicNote: plain single-line note ok')
   ok(validateEpicNote('x'.repeat(200)).ok === true, 'validateEpicNote: 200-char note ok (boundary)')
   ok(validateEpicNote('x'.repeat(201)).ok === false, 'validateEpicNote: 201-char note rejected')
@@ -229,7 +211,7 @@ try {
   ok(validateEpicNote(null).ok === true && validateEpicNote(undefined).ok === true,
     'validateEpicNote: null/undefined = omitted (ok, no-op)')
 
-  // Legal rewrite: status + note persisted, note readable back, backup = original.
+  // 合法改写：status + note 落盘，备注可读回，备份=原文。
   const before = await read('integ-st-alpha')
   let r = await setEpicStatus(epicsDir, 'integ-st-alpha', '已完结', '交付完成')
   ok(r.ok === true && r.status === '已完结', 'setEpicStatus: legal value accepted')
@@ -242,7 +224,7 @@ try {
   ok(backupFile !== null && (await readFile(backupFile, 'utf8')) === before,
     'setEpicStatus: pre-write backup in shared /tmp/epic-close-backup equals original text')
 
-  // Note omitted / null / '' semantics.
+  // 备注缺省 / null / '' 语义。
   r = await setEpicStatus(epicsDir, 'integ-st-alpha', '已立项（执行中）')
   ok(r.ok === true && parseEpicMeta(await read('integ-st-alpha')).note === '交付完成',
     'setEpicStatus: note omitted -> note column untouched')
@@ -252,12 +234,12 @@ try {
   r = await setEpicStatus(epicsDir, 'integ-st-alpha', '已立项（执行中）', '')
   ok(r.ok === true && parseEpicMeta(await read('integ-st-alpha')).note === '',
     "setEpicStatus: note='' -> note column cleared (explicit action)")
-  // Note row inserted when the charter has none.
+  // 立项单无备注行时新插一行。
   r = await setEpicStatus(epicsDir, 'integ-st-no-note', '已立项（执行中）', '补写的备注')
   ok(r.ok === true && parseEpicMeta(await read('integ-st-no-note')).note === '补写的备注',
     'setEpicStatus: note row inserted when charter lacked one')
 
-  // Rejections must not touch the file (byte-identical after the call).
+  // 拒收绝不能碰文件（调用后逐字节一致）。
   const snap = await read('integ-st-alpha')
   r = await setEpicStatus(epicsDir, 'integ-st-alpha', '已立项(执行中)')
   ok(r.ok === false && r.status === 422 && String(r.error).includes('已立项（执行中）')
@@ -284,11 +266,11 @@ try {
   ok(r.ok === false && r.status === 422 && String(r.error).includes('状态'),
     'setEpicStatus: charter without status row -> 422 (no vague success)')
 
-  // listEpics surfaces note.
+  // listEpics 透出备注。
   const listed = (await listEpics(epicsDir)).find(e => e.code === 'integ-st-alpha')
   ok(listed !== undefined && typeof listed.note === 'string', 'listEpics: note field present per charter')
 
-  // closeEpic regression: enum-aligned, note preserved, backup taken.
+  // closeEpic 回归：枚举对齐、备注保留、有备份。
   const preClose = await read('integ-st-alpha')
   r = await closeEpic(epicsDir, 'integ-st-alpha')
   ok(r.ok === true && r.status === '已完结' && isEpicStatus(r.status),
@@ -316,7 +298,7 @@ try {
 
   r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/status', 'GET')
   ok(r.status === 405, 'GET /status -> 405 (write action is POST-only)')
-  // Rejected-call batch: none of these may modify the charter (snapshot before/after).
+  // 拒收调用批：这些都不得改动立项单（前后快照比对）。
   const snapD = parseEpicMeta(await read('integ-st-alpha'))
   r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/status', 'POST',
     undefined, '{"status": "已完结", broken')
@@ -381,7 +363,7 @@ try {
   const noNoteMeta = parseEpicMeta(FIXTURE_MD('已完结', ''))
   ok(noNoteMeta.note === '', 'parseEpicMeta: missing note row -> empty string, no throw')
 } finally {
-  // Full-terminal-state cleanup: restore env, remove tmp fixtures.
+  // 终态全回收：还原 env，删除 tmp fixture。
   if (savedEnv.SANDBAR_EPICS_DIR === undefined) delete process.env.SANDBAR_EPICS_DIR
   else process.env.SANDBAR_EPICS_DIR = savedEnv.SANDBAR_EPICS_DIR
   await rm(tmp, { recursive: true, force: true }).catch(() => {})

@@ -1,20 +1,18 @@
 /**
- * Baseline: rework-banner UI consumption contract (t260901-04).
+ * 基线：rework 横幅的 UI 消费契约（票 t260901-04）。
  *
- * Intent:
- *   The t260901-04 fix makes the engine emit state='rework' timeline records for
- *   machine send-backs; the workbench banner (D2Reworks) is what turns them into a
- *   user-visible "why was my ticket sent back" answer. This baseline locks the
- *   CONTRACT BETWEEN the two sides so the fix cannot silently stop being visible:
- *     - the banner's filter really is `t.state === 'rework'` in ALL THREE shipped
- *       bundles (src + lib/client.js + lib/client.cjs) — guarding the classic
- *       "src changed but bundle not rebuilt, users still see nothing" failure;
- *     - the record shape the engine writes ({at, stage, state, reason}) matches the
- *       fields the banner renders (t.at / t.stage / t.reason) — no missing key;
- *     - robustness: missing timeline, empty reason, unknown stage id must not break
- *       rendering.
- *   Pure node half only — no server, no Temporal, runs anywhere (incl. inside the
- *   engine's mechanical integration step).
+ * 意图：
+ *   票 t260901-04 的修复让引擎为机器打回发 state='rework' 的 timeline 记录；
+ *   工单台横幅（D2Reworks）负责把它变成用户可见的「我的票为什么被打回」。
+ *   本基线锁定两侧之间的契约，让修复不能静默地从界面上消失：
+ *     - 横幅过滤条件确实是 `t.state === 'rework'`，三个在发的 bundle 全查
+ *       （src + lib/client.js + lib/client.cjs）——防经典事故「src 改了但
+ *       bundle 没重建，用户照样什么都看不见」；
+ *     - 引擎写的记录形状（{at, stage, state, reason}）与横幅渲染的字段
+ *       （t.at / t.stage / t.reason）对齐——不缺键；
+ *     - 健壮性：timeline 缺失、reason 为空、未知 stage id 都不得弄坏渲染。
+ *   只测纯 node 半——无 server、无 Temporal，随处可跑（包括引擎机械
+ *   integration 步内）。
  */
 
 import { readFileSync } from 'node:fs'

@@ -4,7 +4,7 @@
  *
  * 直跑：node integration/baselines/lane-stage-durations.mjs（cwd=泳道根，零依赖）。
  *
- * 被测契约（integration 侧约定，create_plan v4 经 review_plan 第 4 轮通过）：
+ * 被测契约（integration 侧约定，方案 v4 已过审）：
  *   - 推导函数导出 deriveStageDurations 与 fmtDur，住在 server/plugins/workbench/src/client/
  *     下的**纯 .ts 模块**（node 无法 import .tsx；index.tsx 只做消费不做推导）。
  *   - 签名 deriveStageDurations(timeline, order, handoffs?, opts?: {nowMs?, closedTs?})

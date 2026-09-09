@@ -1,27 +1,25 @@
 /**
- * Baseline: verify-lane config-driven contract + merge-gate base passing (t260901-08).
+ * 基线：verify-lane 配置驱动契约 + merge 闸 base 透传（票 t260901-08）。
  *
- * Intent:
- *   sandbar M0: the dev-lane code lane must be fully config-driven — the project
- *   declares its write-set whitelist / checks (v2 list-command form) / integration
- *   cmd in verify.yaml (schema v1), and the engine only runs and judges what is
- *   declared.
- *   Historically verify_lane hardcoded the app/ project shape, and merge_check
- *   called verify_lane without `base`, so the write-set check silently skipped and
- *   the server-ticket merge gate was effectively idle against write-set violations.
+ * 意图：
+ *   sandbar M0：dev-lane 代码道必须全配置驱动——项目把自己的写集白名单 /
+ *   检查项（v2 list-command 形态）/ integration 命令声明在 verify.yaml（schema v1），
+ *   引擎只运行并评判声明了的东西。
+ *   历史上 verify_lane 写死 app/ 项目形状，merge_check 调 verify_lane 又不传
+ *   `base`，写集检查被静默跳过，server-ticket 的 merge 闸对写集违规实际空转。
  *
- * Contract under test (docs/design/sandbar项目接入契约v1.md, three-state semantics):
- *   - verify.yaml missing  -> code lane closed (green item visible, NOT silent);
- *   - verify.yaml malformed / unknown schema -> fail-closed (whole lane red);
- *   - valid config -> whitelist prefixes from write_allow, declared checks only;
- *   - merge gate path (require_base=true) with empty/missing base -> red (fail-closed),
- *     manual path (require_base absent) keeps skip-but-visible behavior;
- *   - zero app/ hardcode residue left in verify_lane.py;
- *   - agent_activities.merge_check passes base + require_base to verify_lane
- *     (static regression rod — this is the actual "gate not idle" fix).
+ * 被测契约（docs/design/sandbar项目接入契约v1.md，三态语义）：
+ *   - verify.yaml 缺失 → 代码道关闭（green 项可见，非静默）；
+ *   - verify.yaml 畸形 / 未知 schema → fail-closed（整条道红）；
+ *   - 合法配置 → 白名单前缀取 write_allow，只跑声明的检查项；
+ *   - merge 闸路径（require_base=true）base 为空/缺失 → 红（fail-closed），
+ *     手动路径（无 require_base）保持 skip 但可见；
+ *   - verify_lane.py 里 app/ 写死残留清零；
+ *   - agent_activities.merge_check 把 base + require_base 传给 verify_lane
+ *     （静态回归桩——这才是「闸不空转」的真正修复）。
  *
- * Fully hermetic: git + python3(stdlib) only, all fixtures in a platform tmpdir.
- * No Docker, no real Temporal, no network. cwd = repo root.
+ * 完全密封：只要 git + python3（stdlib），fixture 全在平台 tmpdir。
+ * 无 Docker、无真 Temporal、无网络。cwd = 仓根。
  */
 
 import { spawnSync } from 'node:child_process'
@@ -42,7 +40,7 @@ const TOOLS = join(REPO, 'server', 'tools')
 const LANE = join(REPO, 'server', 'tools', 'verify_lane.py')
 const ACT = join(REPO, 'server', 'engine', 'agent_activities.py')
 
-// ---- environment probing (clean SKIP when prerequisites missing) ----
+// ---- 环境探测（前置缺失时干净 SKIP） ----
 function probe(cmd, args) {
   const p = spawnSync(cmd, args, { encoding: 'utf8' })
   return p.error ? null : p
@@ -62,7 +60,7 @@ try { root = await mkdtemp(join(tmpdir(), 'vlcfg-')) } catch (e) {
   process.exit(0)
 }
 
-/** git helper inside a fixture repo. */
+/** fixture 仓内的 git 辅助。 */
 function fx(repo, ...args) {
   const p = spawnSync('git', args, { cwd: repo, encoding: 'utf8' })
   if (p.status !== 0) throw new Error(`git ${args.join(' ')}: ${p.stderr}`)
@@ -87,7 +85,7 @@ async function makeRepo(withVerifyYaml, yamlText) {
   return repo
 }
 
-/** Run verify_lane.run() against a fixture repo (path=repo), return parsed result. */
+/** 对 fixture 仓（path=repo）跑 verify_lane.run()，返回解析后的结果。 */
 function runLane(repo, args) {
   const code = `
 import json, sys
@@ -147,11 +145,11 @@ try {
     }
   }
 
-  // ---------- D. valid config: whitelist judged by write_allow ----------
+  // ---------- D. 合法配置：白名单按 write_allow 判 ----------
   section('D. 合法配置：白名单按 write_allow 判（配置驱动，非 app/ 写死）')
   const YAML_OK = 'schema: v1\nlanes:\n  code:\n    write_allow: ["src/"]\n'
   {
-    // D1: clean diff (only src/) -> whitelist green
+    // D1: 干净 diff（只有 src/）→ 白名单 green
     const repo = await makeRepo(true, YAML_OK)
     put(repo, 'src/ok.ts', 'export const ok = 2\n')
     fx(repo, 'add', '-A'); fx(repo, 'commit', '-qm', 'clean')
@@ -163,7 +161,7 @@ try {
     }
   }
   {
-    // D2: out-of-bounds file -> red, names the file
+    // D2: 越界文件 → 红，点名该文件
     const repo = await makeRepo(true, YAML_OK)
     put(repo, 'other/evil.ts', 'export const evil = 1\n')
     fx(repo, 'add', '-A'); fx(repo, 'commit', '-qm', 'out')
@@ -175,7 +173,7 @@ try {
     }
   }
   {
-    // D3: different project shape — write_allow not app/* at all (config-driven proof)
+    // D3: 换一种项目形状——write_allow 完全不是 app/*（配置驱动证明）
     const repo = await makeRepo(true, 'schema: v1\nlanes:\n  code:\n    write_allow: ["lib/"]\n')
     put(repo, 'lib/a.py', 'x = 1\n')
     fx(repo, 'add', '-A'); fx(repo, 'commit', '-qm', 'lib only')
@@ -184,10 +182,10 @@ try {
     if (!res.error) ok(res.green === true, 'D3.1 lib/ 项目按自身声明绿（无 app/ 残留依赖）')
   }
   {
-    // D4: non-ASCII filename INSIDE an allowed prefix -> must be green.
-    // Regression for acceptance S2a: `git diff --name-only` defaults to
-    // core.quotepath=true, which emits quoted octal-escaped names that match no
-    // prefix and got flagged out-of-set (safe-side false red blocking the gate).
+    // D4: 前缀内的非 ASCII 文件名 → 必须绿。
+    // 验收 S2a 回归棒：`git diff --name-only` 默认 core.quotepath=true，
+    // 输出带引号的八进制转义名，匹配不到任何前缀，曾被误判出集
+    //（安全侧假红，挡住 merge 闸）。
     const repo = await makeRepo(true, 'schema: v1\nlanes:\n  code:\n    write_allow: ["docs/"]\n')
     put(repo, 'docs/设计/契约文档v1.md', '# 中文文件名\n')
     fx(repo, 'add', '-A'); fx(repo, 'commit', '-qm', '中文文档')
@@ -197,7 +195,7 @@ try {
       'D4.1 前缀内中文名文件不误判越界（quotepath 修复回归棒）')
   }
   {
-    // D5: non-ASCII filename OUTSIDE every prefix -> red names the real UTF-8 name
+    // D5: 前缀外的非 ASCII 文件名 → 红，点名原样 UTF-8 名
     const repo = await makeRepo(true, 'schema: v1\nlanes:\n  code:\n    write_allow: ["docs/"]\n')
     put(repo, '其他/中文越界.md', 'x\n')
     fx(repo, 'add', '-A'); fx(repo, 'commit', '-qm', '越界')
@@ -222,7 +220,7 @@ try {
     ok(!res2.error && res2.green === true, 'D6b.1 write_set 覆盖的改动全绿（精判放行）')
   }
 
-  // ---------- E. require_base: merge gate fail-closed on empty base ----------
+  // ---------- E. require_base：空 base 时 merge 闸 fail-closed ----------
   section('E. require_base=true × 空 base = fail-closed 红（合并闸不再空转）')
   {
     const repo = await makeRepo(true, YAML_OK)
@@ -232,13 +230,13 @@ try {
       ok(res.green === false, 'E1 空 base 在合并闸口径下红（不许 falsy 静默跳过）')
       ok(/base|base_ref/.test(checksText(res)), 'E2 红字可仲裁（指明 base_ref 未登记）')
     }
-    // E3: manual path keeps skip-but-visible
+    // E3: 手动路径保持 skip 但可见
     const res2 = runLane(repo, { lane: 'code', skip_slow: true })
     ok(!res2.error && res2.green === true, 'E3 手动路径（无 require_base）保持跳过不误伤')
     ok(/base/.test(checksText(res2)), 'E4 手动跳过分支 detail 可见「未验」')
   }
 
-  // ---------- G. integ lane: three-line output contract + per-lane return shape ----------
+  // ---------- G. integ 道：三行输出契约 + 分道返回形状 ----------
   // 契约②b（t260903-01 入约）：三行协议（PASS/FAIL+缩进尾段/SCENARIOS 参考行）、
   // 红绿=rc==0 且 fail==0、零场景绿=integration 道唯一关闭惯用法、err 语义、
   // integ 返回形状 {lane,green,ran,pass,fail,scenarios,err}（无 red_count/checks）。
@@ -314,7 +312,7 @@ try {
     }
   }
 
-  // ---------- H. parser grammar subset = writable domain (contract ②c) ----------
+  // ---------- H. 手写解析器语法子集 = 可写域（契约②c） ----------
   // 每个契约列举的语法形态至少一条正例真跑 _parse_verify_yaml；畸形反例端到端判红。
   section('H. 手写解析器语法子集 = 可写域（契约②c，逐形态钉死）')
   {
@@ -375,7 +373,7 @@ print(json.dumps(verify_lane._parse_verify_yaml(sys.argv[1]), ensure_ascii=False
     }
   }
 
-  // ---------- F. static regression rods ----------
+  // ---------- F. 静态回归棒 ----------
   section('F. 静态回归棒：合并闸补传 base；app/ 硬编码清零；声明与文档在位')
   {
     const act = readFileSync(ACT, 'utf8')
@@ -397,7 +395,7 @@ print(json.dumps(verify_lane._parse_verify_yaml(sys.argv[1]), ensure_ascii=False
     ok(!/app\/src\//.test(lane), 'F5 verify_lane 无 app/src/ 路径残留')
     ok(/lane_cfg/.test(lane) && /write_allow/.test(lane), 'F6 检查项由 verify.yaml 声明装配（lane_cfg/write_allow 在位）')
     ok(/require_base/.test(lane), 'F7 verify_lane 暴露 require_base 参数')
-    // repo-root verify.yaml exists and declares this repo's own shape
+    // 仓根 verify.yaml 在位且声明本仓自身形状
     try {
       const vy = readFileSync(join(REPO, 'verify.yaml'), 'utf8')
       ok(/schema:\s*v1/.test(vy), 'F8 仓库根 verify.yaml 在位且 schema: v1')
@@ -411,7 +409,7 @@ print(json.dumps(verify_lane._parse_verify_yaml(sys.argv[1]), ensure_ascii=False
       ok(!/app\//.test(wl), "F9' write_allow 无 suyou 项目域 app/ 残留")
       ok(/integration\/run_scenarios\.py/.test(vy), 'F10 verify.yaml 声明 integration.cmd（v2 列表命令制）')
     } catch (e) { ok(false, 'F8 仓库根 verify.yaml 在位（缺失: ' + e.code + ')') }
-    // contract doc carries the field-level schema section
+    // 契约文档带字段级 schema 章节
     try {
       const contract = readFileSync(join(REPO, 'docs', 'design', 'sandbar项目接入契约v1.md'), 'utf8')
       ok(/字段级定义/.test(contract) && /write_allow/.test(contract), 'F11 契约文档含 verify.yaml 字段级定义')
@@ -438,7 +436,7 @@ print(json.dumps(verify_lane._parse_verify_yaml(sys.argv[1]), ensure_ascii=False
     } catch (e) { ok(false, 'F11 契约文档可读') }
   }
 } finally {
-  // resource recovery: fixture tree removed on every terminal path
+  // 资源回收：fixture 树在所有终态路径上都被删除
   try { await rm(root, { recursive: true, force: true }) } catch { /* best effort */ }
 }
 

@@ -4,7 +4,7 @@
  * 直跑：node smoke/evidence-lightbox.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
  *
  * 照搬 ticket-switch.mjs 的 loadClientBundle（经构建产物 lib/client.cjs 测真代码，
- * 不是复制品），故障模式取舍清单（create_plan gen1 过审口径）：
+ * 不是复制品），故障模式取舍清单：
  *   ① factory 未按 __ModuleLoader__.load 契约暴露 → 显式 throw 带「先跑 tsdown
  *     构建」诊断 —— 带过来（依赖构建产物，缺失时必须可读报错）。
  *   ② react / @deepseek-ai/* 外部化 → 万能可调用 Proxy stub require —— 带过来
@@ -14,13 +14,13 @@
  *   ④ 入口先断言关键导出，否则 FAIL + exit(1) —— 带过来，断言对象
  *     evidenceNav / evidenceImgSrc / evidenceLightboxKeys。
  *
- * 覆盖（create_plan gen1 验收口径）：
+ * 覆盖：
  *   A. evidenceNav 纯函数：正常前进/后退/循环；畸形输入（空列表、越界下标、
  *      负数/非整数/非数字 delta）不抛且落安全下标；open 期间列表变短的越界收敛。
  *   B. evidenceImgSrc 契约回归（相对端点、非 data:）。
  *   C. evidenceLightboxKeys 键位契约（Escape / ArrowLeft / ArrowRight）。
  *   D. keydown 绑定/回收不在本 smoke 覆盖内（桩驱动组件永不 render）——
- *      由实现段代码走查指认行号（方案 gen1 R2 定案），此处不造假覆盖。
+ *      由实现段代码走查指认行号，此处不造假覆盖。
  */
 
 import { readFileSync } from 'node:fs'

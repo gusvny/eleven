@@ -3,7 +3,7 @@
  *
  * 直跑：node smoke/ticket-switch.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
  *
- * 覆盖（方案 gen1 验收口径逐条）：
+ * 覆盖（逐条）：
  *   A. ticketContext 契约：created=true 首条消息=工单快照（id/标题/阶段/待审批/
  *      验收/正文 600 截断/收尾指令）；畸形 tk（缺字段 / null / 对象型与数字型
  *      pending、acceptance）不崩。

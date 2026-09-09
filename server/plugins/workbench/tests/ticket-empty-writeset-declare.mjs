@@ -1,43 +1,39 @@
 /**
- * Baseline: empty-write-set declaration bridge (ticket t260901-01, group: user scenario).
+ * 基线：空写集显式声明桥（票 t260901-01，组：用户场景）。
  *
- * Intent (black-box, user-visible behavior):
- *   A user creating a ticket that truly changes no files used to hit a dead end:
- *   "Temporal 拒绝: 写集为空". The engine already honors allow_empty_write_set, but the
- *   bridge (agent-facing tool schema -> host create route -> client dialog) dropped the
- *   declaration, and the pre-run suggestion dropped its write_set. This baseline locks
- *   the user-facing promise end to end:
- *     (1) an agent/tool caller CAN pass allow_empty_write_set on create;
- *     (2) the workbench dialog offers the explicit "no file changes" declaration and
- *         attaches it to the POST body only when the write set is empty and checked;
- *     (3) the host forwards the declaration as-is and never fabricates it;
- *     (4) a pre-run suggestion's write_set survives into the cached suggestion;
- *     (5) without the declaration, an empty write set is still rejected with the
- *         two-way-out message (guardrail intact, not silently loosened).
+ * 意图（黑盒、用户可见行为）：
+ *   用户建一张确实不改任何文件的票，曾经走进死胡同：「Temporal 拒绝: 写集为空」。
+ *   引擎已认 allow_empty_write_set，但桥（agent 侧工具 schema → host 建票路由 →
+ *   客户端弹层）把声明弄丢了，预跑建议也丢了 write_set。本基线端到端锁定
+ *   用户侧承诺：
+ *     (1) agent/工具调用方建票时能传 allow_empty_write_set；
+ *     (2) 工单台弹层提供显式「无文件改动」声明，且只在写集为空且勾选时
+ *         挂进 POST body；
+ *     (3) host 原样透传声明，绝不代造；
+ *     (4) 预跑建议的 write_set 存活进缓存建议；
+ *     (5) 没有声明时，空写集仍被拒并给「两条出路」文案（守卫不破、不放松）。
  *
- * High-level steps:
- *   A. Tool-surface contract (offline): import server/tools/ticket.py TOOL schema and
- *      lock the _create payload forwarding of allow_empty_write_set (source lock).
- *   B. Client dialog contract (offline): import src/client/epics-model.ts and assert
- *      createWriteSetBlocked / buildCreatePayload semantics per the approved plan.
- *   C. Host bridge (offline): drive node.ts apply() HTTP harness with a recording
- *      admin.py stub; assert what the host actually forwards to the ticket tool.
- *   D. Pre-run suggestion write_set (needs temporalio SDK, else SKIP): assert
- *      _parse_suggest_result keeps/cleans write_set and done/failed stay unchanged.
- *   E. Env half, negative path (write-guarded): real client.py ticket-start with an
- *      empty write set and NO declaration is rejected BEFORE any workflow starts.
- *      (The positive real-creation path is owned by the ticket-validate baseline env
- *      half, which already creates a declared empty-write-set ticket; not duplicated.)
+ * 步骤：
+ *   A. 工具面契约（离线）：import server/tools/ticket.py TOOL schema，锁定
+ *      _create 对 allow_empty_write_set 的转发（源码锁）。
+ *   B. 客户端弹层契约（离线）：import src/client/epics-model.ts，按已过审方案
+ *      断言 createWriteSetBlocked / buildCreatePayload 语义。
+ *   C. host 桥（离线）：用录音桩 admin.py 驱动 node.ts apply() HTTP 支架；
+ *      断言 host 实际转发给 ticket 工具的参数。
+ *   D. 预跑建议 write_set（需 temporalio SDK，否则 SKIP）：断言
+ *      _parse_suggest_result 保留/清洗 write_set，done/failed 形态不变。
+ *   E. env 半，负路径（写守卫）：真 client.py ticket-start，空写集且无声明
+ *      在任何 workflow 启动前被拒。（正路径真建票归 ticket-validate 基线 env
+ *      半所有，它不重复。）
  *
- * Write-guard (this test refuses to touch production):
- *   SANDBAR_TARGET_HOST unset            -> skip section E loudly (client.py would
- *                                         default to production 127.0.0.1:7233).
- *   SANDBAR_TARGET_HOST == 127.0.0.1:7233 -> FAIL this test itself.
- *   Section E is rejected pre-connect, so no Temporal instance needs to be up.
+ * 写守卫（本测试拒绝碰生产）：
+ *   SANDBAR_TARGET_HOST 未设               → 大声 SKIP E 节（client.py 会
+ *                                           默认指向生产 127.0.0.1:7233）。
+ *   SANDBAR_TARGET_HOST == 127.0.0.1:7233  → 本测试自我判 FAIL。
+ *   E 节在连接前就被拒，无需 Temporal 实例在线。
  *
- * Contract source: approved plan of t260901-01 (create_plan gen1, reviewed gen1).
- * If the pure-function names/signatures drift from the plan, this baseline FAILs by
- * design -- that is the integration acceptance for the implement stage.
+ * 契约来源：票 t260901-01 已过审方案。若纯函数名/签名偏离方案，本基线按设计
+ * 判 FAIL——这就是实现段的 integration 验收。
  */
 
 import { spawnSync } from 'node:child_process'
@@ -61,7 +57,7 @@ const POC = join(REPO, 'server', 'engine')
 const TOOLS = join(REPO, 'server', 'tools')
 const PROD_ADDR = '127.0.0.1:7233'
 
-/** Run a python snippet; forward output; return {stdout, status}. */
+/** 跑一段 python 代码；透传输出；返回 {stdout, status}。 */
 function runPy(python, code, env = {}) {
   const r = spawnSync(python, ['-c', code], { encoding: 'utf8', timeout: 120_000, env: { ...process.env, ...env } })
   process.stdout.write(r.stdout ?? '')
@@ -69,9 +65,9 @@ function runPy(python, code, env = {}) {
   return r
 }
 
-/** Probe for a python interpreter with the temporalio SDK. In a lane worktree the
- *  venv is absent, so also try the main checkout's venv (resolved via git common dir)
- *  -- importing worktree code with the main venv interpreter is safe (sys.path first). */
+/** 探测带 temporalio SDK 的 python 解释器。泳道 worktree 里无 venv，
+ * 故也试主检出的 venv（经 git common dir 解析）——用主 venv 解释器 import
+ * worktree 代码是安全的（sys.path 在前）。 */
 function probeSdkPython() {
   const venvPy = join(POC, '.venv', 'bin', 'python')
   const cands = existsSync(venvPy) ? [venvPy, 'python3'] : ['python3']
@@ -173,7 +169,7 @@ try {
   await mkdir(join(tmp, 'server'), { recursive: true })
   await writeFile(join(tmp, 'server', 'projects.yaml'),
     `projects:\n  - key: suyou\n    name: integ\n    dirs:\n      - ${tmp}\n`, 'utf8')
-  // Recording stub: capture exactly the args the host hands to the ticket tool.
+  // 录音桩：精确捕获 host 交给 ticket 工具的参数。
   await writeFile(join(tmp, 'server', 'admin.py'), `import json, sys, os
 args = json.loads(sys.argv[3]) if len(sys.argv) >= 4 else {}
 tool = sys.argv[2] if len(sys.argv) >= 3 else ''
@@ -290,7 +286,7 @@ section('E real client.py: empty write set WITHOUT declaration is rejected pre-c
         })],
         { encoding: 'utf8', timeout: 120_000, env: { ...process.env, SANDBAR_NAMESPACE: 'suyou-test' } })
       let res = null
-      try { res = JSON.parse(r.stdout ?? '') } catch { /* parse failure falls through */ }
+      try { res = JSON.parse(r.stdout ?? '') } catch { /* 解析失败落到下方判定 */ }
       ok(res?.ok === false && String(res?.error ?? '').includes('写集为空'),
         'empty write set, no declaration -> rejected with 写集为空 (before any workflow starts)')
       ok(String(res?.error ?? '').includes('write_set') && String(res?.error ?? '').includes('allow_empty_write_set'),

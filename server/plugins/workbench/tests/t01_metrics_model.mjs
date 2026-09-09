@@ -3,7 +3,7 @@
  *
  * 直跑：node integration/t260902-01/t01_metrics_model.mjs（node ≥22.18 原生 type-stripping，
  * 直接 import .ts）。全桩化：localStorage 用内存桩，API 响应用固定 JSON 对象喂——
- * 不碰网络、不碰 3099、不依赖真外部源。覆盖 create_plan gen2 步骤 4 的用例清单：
+ * 不碰网络、不碰 3099、不依赖真外部源。覆盖方案步骤 4 的用例清单：
  * 面板状态持久化（含畸形 localStorage）、畸形 API 响应、饼形态组合（含不重复计数
  * 断言与模板缺失降级断言）、onPick 签名、KPI 格式化边界。
  */
@@ -103,7 +103,7 @@ section('B. isChartSpec / sanitizeMetricsResponse 畸形输入')
   ok(kbad.kpis.tickets === 0 && kbad.kpis.closed === 0, '坏 kpis 字段归零')
 }
 
-/* ------------------------------------------------------------ C. 饼形态组合（gen2 决策 4） */
+/* ------------------------------------------------------------ C. 饼形态组合 */
 
 section('C. buildTimeDonut：机器扇区 + 人审合并单橙扇区（不重复计数）')
 const primary = { kind: 'bar', title: 'stage 时长合计（分钟）', categories: ['create_plan', 'human_review', 'implement'], drill: true, series: [{ name: '时长(min)', data: [30, 15, 60] }] }

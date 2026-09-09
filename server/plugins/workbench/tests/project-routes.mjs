@@ -6,7 +6,7 @@
  * harness 模式；注册表 fixture 走 SANDBAR_PROJECTS_DIR 指临时目录（带 .migrated
  * 标记免迁移链），CLI 走假 sandbar 脚本（config.python=process.execPath 测试缝），
  * 零触真仓/真注册表/console。覆盖：
- *   A0. 真 CLI 契约锚（UT 盲区教训[arbitrate gen1]：旗标断言必须锚真 CLI 契约，
+ *   A0. 真 CLI 契约锚（UT 盲区教训：旗标断言必须锚真 CLI 契约，
  *       不许 stub 断言把错误 argv 钉成期望）：sandbar project add|remove --help 实跑——
  *       add 无 --dry-run 旗；remove 为 --key 必选旗+三旗在案；
  *   A. GET /wf/projects：projects + quarantined 同响应（隔离条目带 dir/error 定位）；

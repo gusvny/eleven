@@ -1,23 +1,23 @@
 /**
- * i03_build_contract.mjs — t260902-03 build-contract anchors for the global banner (hermetic).
+ * i03_build_contract.mjs —— 票 t260902-03 全局横幅的构建契约锚（密封）。
  *
- * User story: the "restart console" reminder must be globally visible — on every tab/view
- * (board / knowledge / model routes / epics), not only inside the ticket-board view
- * (review round 1 rejected the Board-only mount). This baseline locks the mounting
- * contract statically so a regression back into a single view is caught without a browser:
+ * 用户故事：「重启控制台」提醒必须全局可见——每个 tab/视图（board / knowledge /
+ * model routes / epics），不能只待在工单台面视图里（评审第 1 轮打回了只挂
+ * Board 的方案）。本基线静态锁定挂载契约，让「退回单视图」类回归无需浏览器
+ * 即可捕获：
  *
- *   1. Rebuilt client bundles (lib/client.cjs AND lib/client.js) both carry the banner copy
- *      and the build-info poll path — catches a forgotten tsdown rebuild.
- *   2. src/client/sidebar.tsx (the shared middle-column shell) hosts the staleness hook
- *      (useStaleBanner; t260905-07 握手矩阵接线改名，单实例挂点契约不变) and renders the banner (wb-stale-banner) ABOVE the
- *      `.wb-right-content` view container — i.e. outside the four mutually-exclusive
- *      views, so it persists across view switches.
- *   3. index.tsx (WorkbenchSection / board view) carries neither the banner markup nor the
- *      hook — regression guard against re-mounting it inside a single view.
+ *   1. 重建后的客户端 bundle（lib/client.cjs 与 lib/client.js）都带横幅文案
+ *      和 build-info 轮询路径——抓住忘跑 tsdown 重建的疏漏。
+ *   2. src/client/sidebar.tsx（共享中列壳）承载陈旧 hook（useStaleBanner；
+ *      t260905-07 握手矩阵接线改名，单实例挂点契约不变），并把横幅
+ *      （wb-stale-banner）渲染在 `.wb-right-content` 视图容器之上——即在四个
+ *      互斥视图之外，切视图不消失。
+ *   3. index.tsx（WorkbenchSection / board 视图）既无横幅 markup 也无 hook——
+ *      防「重新挂回单视图」的回归护栏。
  *
- * Hermetic: plain file reads, zero ports, zero 3099 contact.
- * Exit contract (integration/README.md): last stdout line `SUMMARY pass=N skip=M fail=K`;
- * exit 1 iff fail>0. Pre-implementation (or before the tsdown rebuild) RED by design.
+ * 密封：纯文件读取，零端口，零 3099 接触。
+ * 退出契约（integration/README.md）：stdout 末行 `SUMMARY pass=N skip=M fail=K`；
+ * fail>0 时 exit 1。实现落地前（或 tsdown 重建前）按设计为红。
  */
 
 import { readFileSync, existsSync } from 'node:fs'

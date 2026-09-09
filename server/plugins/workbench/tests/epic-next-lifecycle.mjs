@@ -1,40 +1,32 @@
 /**
- * Baseline: epic "next suggestion" lifecycle (group 3).
+ * 基线：立项「下一步建议」全生命周期（第 3 组）。
  *
- * Intent:
- *   The badge-off lifecycle of the epic next-suggestion chain was historically broken
- *   ("stale badge stays lit"). This baseline locks the full lifecycle: a produced
- *   suggestion surfaces as a detail hint, and is invalidated the moment a prefilled
- *   ticket is actually created — plus the stub degradation paths stay recoverable
- *   with no leaked processes.
+ * 意图：
+ *   立项建议链的徽标消除生命周期曾经坏过（「陈旧徽标常亮」）。本基线锁定全
+ *   生命周期：产出的建议浮为详情提示，预填票真正建出那一刻缓存即失效——
+ *   外加 stub 降级路径可恢复、不留泄漏进程。
  *
- * High-level steps (tmp repo fixture + stub admin.py + mock HTTP; zero real models,
- * zero Temporal connections):
- *   L1. suggest produces: stub job runs to done with a valid suggestion.
- *   L2. precache lands (shared.EpicNextCache schema) -> detail nextHint hit.
- *   L3. prefilled ticket created successfully -> cache deleted, badge off, backup
- *       written; negative contract: failed creation keeps the cache.
- *   L4. dismiss is idempotent (missing file is fine).
- *   V.  stub variants: invalid_json -> fail-fast with a reason naming the bad JSON;
- *       never_write -> timeout degradation; both with smoke-style process-reaping
- *       assertions (no leaked dummy agent processes).
+ * 步骤（tmp 仓 fixture + 桩 admin.py + mock HTTP；零真模型、零 Temporal 连接）：
+ *   L1. 建议产出：stub job 跑到 done，建议合法。
+ *   L2. 预缓存落盘（shared.EpicNextCache schema）→ 详情 nextHint 命中。
+ *   L3. 预填票建出成功 → 缓存删除、徽标灭、有备份；负向契约：建票失败保留缓存。
+ *   L4. dismiss 幂等（文件缺失也算成功）。
+ *   V.  stub 变体：invalid_json → fail-fast 且 reason 点名坏 JSON；never_write →
+ *       超时降级；两者都带 smoke 同款进程回收断言（无泄漏 dummy agent 进程）。
  *
- * What "stub-driven" means: the suggest job normally spawns a real LLM agent (slow,
- * non-deterministic, costly). Setting SANDBAR_EPIC_NEXT_STUB makes startSuggestJob skip
- * the agent spawn and write a canned result.json instead (variants: ok / invalid_json
- * / never_write), while keeping the polling, validation, and process-reaping paths
- * identical to production — so the whole lifecycle is exercised deterministically
- * with zero model calls.
+ * 「stub 驱动」是什么：建议 job 平时会 spawn 真 LLM agent（慢、不确定、贵）。
+ * 设 SANDBAR_EPIC_NEXT_STUB 后 startSuggestJob 跳过 agent spawn，改写一份预制
+ * result.json（变体：ok / invalid_json / never_write），轮询、校验、进程回收
+ * 路径与生产完全一致——整个生命周期确定性可测、零模型调用。
  *
- * Reference implementation: server/plugins/workbench/smoke/epic-next.mjs. Trade-offs
- * (reviewed in create_plan): carried over — B1 stub full chain, invalid_json /
- * never_write variants, B6a/B6b process-reaping assertions (same file, same terminal
- * state); NOT carried over — concurrent jobs / cleanupOldJobs / timeout tuning
- * (fine-grained job-manager contract, already covered by the smoke); NEW here —
- * badge-off on successful prefilled creation, dismiss idempotency + backup.
+ * 参考实现：server/plugins/workbench/smoke/epic-next.mjs。取舍（方案过审）：
+ * 带——B1 stub 全链、invalid_json / never_write 变体、B6a/B6b 进程回收断言
+ * （同文件、同终态）；不带——并发 job / cleanupOldJobs / 超时调参（细粒度
+ * job-manager 契约，smoke 已覆盖）；本基线新增——预填票建出成功即灭徽标、
+ * dismiss 幂等 + 备份。
  *
- * Note: the precache dir is <repo>/.suyou/epic-next by design (resolvePrecacheDir
- * ignores env; SANDBAR_EPIC_NEXT_DIR only isolates job dirs).
+ * 注意：预缓存目录按设计为 <repo>/.suyou/epic-next（resolvePrecacheDir 不读
+ * env；SANDBAR_EPIC_NEXT_DIR 只隔离 job 目录）。
  */
 
 import { spawnSync } from 'node:child_process'
@@ -72,7 +64,7 @@ const killTree = (pid) => {
   try { process.kill(-pid, 'SIGKILL') } catch { try { process.kill(pid, 'SIGKILL') } catch { /* already dead */ } }
 }
 
-/** Stub admin.py: ticket list (one closed row) / workflow list / ticket create (ok configurable). */
+/** 桩 admin.py：ticket list（一行 closed）/ workflow list / ticket create（ok 可配）。 */
 async function writeStub(repoDir, { createOk = true } = {}) {
   await mkdir(join(repoDir, 'server'), { recursive: true })
   await writeFile(join(repoDir, 'server', 'admin.py'), `import json, sys
@@ -120,7 +112,7 @@ const call = async (handler, url, method = 'GET', bodyObj) => {
   return res
 }
 
-/** Poll a job to terminal state (100ms steps, 5s cap). */
+/** 轮询 job 到终态（100ms 步进，5s 封顶）。 */
 async function pollUntilDone(jobId) {
   let job = null
   for (let i = 0; i < 50; i++) {
@@ -131,8 +123,8 @@ async function pollUntilDone(jobId) {
   return job
 }
 
-/** Land the precache the python side would write (schema mirrors shared.EpicNextCache:
- *  epic + state_key + suggestion). */
+/** 落一份 python 侧会写的预缓存（schema 对齐 shared.EpicNextCache：
+ *  epic + state_key + suggestion）。 */
 async function writePrecache(repoDir, code, rows, suggestion) {
   const dir = join(repoDir, '.suyou', 'epic-next', code)
   await mkdir(dir, { recursive: true })
@@ -146,7 +138,7 @@ try {
   await writeFile(join(epicsDir, 'demo-epic.md'),
     '# 立项单：demo-epic\n\n| 字段 | 值 |\n| --- | --- |\n| 代号 | `demo-epic` |\n| 状态 | 已立项（执行中） |\n', 'utf8')
   await writeStub(repo, { createOk: true })
-  // Project registry (POST /wf/tickets ?project= whitelist) pointed at tmp
+  // 项目注册表（POST /wf/tickets ?project= 白名单）指向 tmp
   await writeFile(join(tmp, 'projects.yaml'),
     `projects:\n  - key: suyou\n    name: 溯游\n    dirs:\n      - ${repo}\n`, 'utf8')
   process.env.SANDBAR_EPICS_DIR = epicsDir
@@ -243,7 +235,7 @@ try {
   ok(jStall.proc?.killed === true || !alive(jStall.proc?.pid ?? 0),
     'never_write variant: timeout fallback reaps the dummy process (smoke B6b assertion)')
 } finally {
-  // Full-terminal-state cleanup: kill stub dummy processes, restore env, rm tmp fixtures
+  // 终态全回收：杀 stub dummy 进程、还原 env、删 tmp fixture
   for (const pid of stubPids) killTree(pid)
   for (const [k, v] of Object.entries(savedEnv)) {
     if (v === undefined) delete process.env[k]

@@ -21,8 +21,8 @@
  *      workflow list 失败 → POST 502 可重试。
  *      B5 workflow list 失败 → 502 可重试。
  *      B6 STUB 失败变体（t260828-03，直接 import startSuggestJob/pollSuggestJob）：
- *      B6a invalid_json：文件在但 JSON 非法（复刻 LLM 非法转义 \- 现场）→ 第 1 轮
- *      仍 running（记录文件指纹）→ 第 2 轮 fail-fast failed：reason 明说
+ *      B6a invalid_json：文件在但 JSON 非法（复刻 LLM 非法转义 \- 现场）→ 首次
+ *      轮询仍 running（记录文件指纹）→ 再次轮询 fail-fast failed：reason 明说
  *      「不是合法 JSON」+ parse 摘要、不说「未产出」、哑进程被回收；
  *      B6b never_write + SANDBAR_EPIC_NEXT_TIMEOUT_MS=500：无文件不误判 → 超时
  *      failed「已终止」、哑进程被回收。

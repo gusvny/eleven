@@ -117,7 +117,7 @@ try {
     return best === null ? null : await readFile(best.p, 'utf8')
   }
   {
-    // fixture 代号带 zz- 前缀：共享 /tmp 备份目录防串档（review gen4 提示）。
+    // fixture 代号带 zz- 前缀：共享 /tmp 备份目录防串档。
     await writeFile(join(dirC, 'zz-fix.md'), FIX_MD('已立项（待开工单）', '\n| 备注 | 旧备注 |'), 'utf8')
 
     const r1 = await setEpicStatus(dirC, 'zz-fix', '已立项（执行中）')

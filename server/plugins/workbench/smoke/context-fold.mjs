@@ -6,7 +6,7 @@
  * 定位纯函数 + applyContextFold 施折面 + start/stop 生命周期），DOM 用自有桩
  * （无 jsdom），MutationObserver 桩进 globalThis（同 chat-project-band.mjs 纪律）。
  *
- * 覆盖（对应模块头注故障模式取舍清单 + review 条件 A + arbitrate round1 回归）：
+ * 覆盖（对应模块头注故障模式取舍清单 + 评审条件 A + 仲裁回归）：
  *   A. classifyContextFold：marker 首行命中、前导空白容错、非字符串/空串/
  *      中段提及不误触发。
  *   B. findCharterBubble：唯一子链上爬到有兄弟层/滚动体直接子层、爬到滚动体
@@ -21,7 +21,7 @@
  *   F. 引用计数单例（取舍第 9 项）：双 start 只绑一次 click、先归零才真拆；
  *      StrictMode 序列（start→stop→start）第二段仍活。
  *   G. 点击委托：点小条切折叠态+文案切换；非小条点击不动。
- *   H. children=HTMLCollection 语义回归（arbitrate round1 code-fault 根因）。
+ *   H. children=HTMLCollection 语义回归（仲裁指认的 code-fault 根因）。
  *   I. 平台锚聚合（t260905-09）：平台上下文 N 条 + charter 注入 1 条叠进同一
  *      滚动体 → 全部收折、恰一个小条、N=1 文案逐字不变、N>1 计数文案；多锚
  *      命中同一消息按气泡元素身份去重；负向：普通消息零误折。
@@ -57,7 +57,7 @@ function ok(cond, label) {
 function section(t) { console.log(`\n== ${t}`) }
 
 /* ── 自有 DOM 桩（最小 Element/Document 面）──
- * children 语义=HTMLCollection（arbitrate round1 code-fault 修复回归用例的教训
+ * children 语义=HTMLCollection（code-fault 修复回归用例的教训
  * 落桩：内部 _kids 数组，对外的 children 是**无数组方法的 array-like**——length+
  * 数字索引+Symbol.iterator 全真 DOM 语义，.some/.filter/.push 一律不存在。被测
  * 模块必须经 Array.from 消费，桩面才能代表浏览器真语义；桩回归用例 H 段直接断言
