@@ -1,14 +1,18 @@
 import { ensureStageConsole } from '../lib_stage_console.mjs';
 // Integration tests for the ticket-session surface (t260831-08 origin;
-// browser half reversed by t260903-07 — chat 精简，单全局会话).
+// browser half reversed by t260903-07 — chat slimmed down to a single global
+// session).
 //
 // Intent (black-box, user perspective):
-//   Server layer（路由由 t260903-07 保留为回滚面，客户端已无调用方）:
+//   Server layer (the route is kept by t260903-07 as a rollback surface; the
+//   client has no callers left):
 //     POST /api/ticket-session/open keeps the find-or-create contract —
 //     session id `ticket-<id>`, created flag present, reopen → created:false
-//     (一张工单一个会话); malformed ticket_id / missing or unknown project /
-//     nonexistent ticket fail with explicit 4xx human-readable errors.
-//   Browser layer（t260903-07 反转契约，旧断言方向相反）:
+//     (one ticket, one session); malformed ticket_id / missing or unknown
+//     project / nonexistent ticket fail with explicit 4xx human-readable
+//     errors.
+//   Browser layer (t260903-07 reversed the contract; the old assertions now
+//   point the other way):
 //     clicking a ticket row opens the middle detail drawer and must NOT open or
 //     switch the right chat — zero 【工单上下文】 snapshot injection, data-phase
 //     unchanged, repeated clicks across rows stay zero-injection.
@@ -17,11 +21,12 @@ import { ensureStageConsole } from '../lib_stage_console.mjs';
 // (SANDBAR_TEST_CONSOLE, default 127.0.0.1:3199; hard guard: never 3099).
 // Browser-layer scenarios use playwright-core against the same console and
 // record env_fail (exit 2) when it is unavailable (see integration/README.md
-// provisioning; t260904-12 三态契约：缺环境绝不 exit 0 假绿).
+// provisioning; t260904-12 three-state contract: a missing environment never
+// exits 0 with a fake green).
 //
-// Execution contract (t260904-12 三态): stdout last line
+// Execution contract (t260904-12 three-state): stdout's last line is
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; missing deps → env_fail
-// (exit 2); FAIL>0 或全腿 na → exit 1.
+// (exit 2); FAIL>0 or every leg na → exit 1.
 
 const BASE = (await ensureStageConsole()).base;
 const results = [];
@@ -54,7 +59,8 @@ async function consoleHealthy() {
 }
 
 // ---------- server layer ----------
-// t260903-07：路由保留为回滚面（客户端已无调用方），以下服务端契约继续成立。
+// t260903-07: the route is kept as a rollback surface (the client has no
+// callers left); the server-side contract below still holds.
 
 async function firstTicket() {
   const pr = await (await fetch(`${BASE}/sandbar-workbench/api/wf/projects`)).json();
@@ -160,12 +166,13 @@ async function browserScenarios() {
     context = await browser.newContext();
     page = await context.newPage();
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    // 出厂 notice（Continue 遮罩）会拦截行卡点击——先关再断言（lib_browser 同款）。
+    // The factory notice (the Continue overlay) blocks ticket-row clicks —
+    // dismiss it before asserting (same as lib_browser).
     try {
       const nb = page.locator('button', { hasText: /continue|继续/i }).first();
       await nb.click({ timeout: 4000 });
       await nb.waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
-    } catch { /* 无 notice=常态 */ }
+    } catch { /* no notice = the normal case */ }
   } catch (err) {
     record('browser/deps', 'env_fail', `console/browser unreachable: ${String(err).slice(0, 120)}`);
     try { await browser?.close(); } catch { /* noop */ }
@@ -198,8 +205,8 @@ async function browserScenarios() {
       const beforeSnapshots = await contextMsgCount();
       const phaseBefore = await page.evaluate(() => document.querySelector('[data-phase]')?.getAttribute('data-phase') ?? '');
       await rows[0].click();
-      await page.waitForSelector('.wb-d2-steps', { timeout: 8000 }); // 中列详情照常开（t260901-13 同款抽屉锚）
-      await page.waitForTimeout(4000); // 旧链路 refresh→waitForListed→open→注入需数秒，给足观察窗
+      await page.waitForSelector('.wb-d2-steps', { timeout: 8000 }); // middle detail opens as usual (the same drawer anchor as t260901-13)
+      await page.waitForTimeout(4000); // the old path refresh→waitForListed→open→inject takes seconds; give it a full observation window
       const afterSnapshots = await contextMsgCount();
       const phaseAfter = await page.evaluate(() => document.querySelector('[data-phase]')?.getAttribute('data-phase') ?? '');
       if (afterSnapshots === beforeSnapshots && phaseAfter === phaseBefore) {
