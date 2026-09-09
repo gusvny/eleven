@@ -20,14 +20,18 @@ Conventions:
   delivery lands, t260902).
 - cmd runs with the repo root as cwd via /bin/sh -c, 900s per entry; stdlib
   only.
-- In-pool concurrency (260909 speedup campaign): an entry may carry a fifth
-  element "serial" — scenarios that must run one after another even inside a
-  pool (process-shaped / fixed-port / pidfile-assumption families); entries
-  not marked serial run in-pool at SANDBAR_POOL_CONC (default 4) lanes.
-  SANDBAR_CONC_POOLS (default "main,ro") picks which pools get concurrency —
-  the browser pool shares one console and its scenarios drive the same page
-  state, so it stays serial for now (pool splitting is a separate ticket);
-  SANDBAR_POOL_CONC=1 restores the old semantics (strict in-pool serial).
+- In-pool concurrency (260909 speedup campaign round 2): an entry may carry
+  a fifth element "serial" — scenarios that must run one after another even
+  inside a pool (process-shaped / fixed-port / pidfile-assumption families);
+  entries not marked serial run in-pool at SANDBAR_POOL_CONC (default 4)
+  lanes. SANDBAR_CONC_POOLS (default "main,ro,browser-free") picks which
+  pools get concurrency. The browser pool was split in speedup campaign 3:
+  9 chain entries keep the shared console and stay strictly serial (registry
+  order = execution order; the empty-ledger assertion depends on no
+  concurrent writer); the 12 zero-coupling entries (7 self-hosted / no
+  console + 5 read-only API stubs) moved to browser-free and run
+  concurrently with the chain. SANDBAR_POOL_CONC=1 restores the old
+  semantics (strict in-pool serial).
 - The registry only lists assets present in this repo (L4 rule: every cmd
   script must exist).
 """
@@ -129,39 +133,54 @@ SCENARIOS = [
     #   (t260904-05): the tested surface SessionTopEntry/wb-sessTop family is
     #   gone with no remaining consumer; the replacement watch =
     #   smoke/hero.mjs reverse assertions + project-sessions.mjs S6.)
+    # ---- browser pool split (260909 speedup campaign 3a) ----
+    # Two pools touch the staging console, with different coupling:
+    # - "browser": 9 chain entries driving the same page state. Strictly
+    #   serial; registry order IS the contract (top-entry-retired-form
+    #   asserts an empty ledger, so no concurrent writer may create a
+    #   session; session-lifecycle-ui asserts seq numbers never regress).
+    #   Never width-ize this pool.
+    # - "browser-free": 12 zero-coupling entries running concurrently with
+    #   the chain (this pool is in SANDBAR_CONC_POOLS). 7 are self-hosted
+    #   (own mock server / capture lane / pure file contracts, no console at
+    #   all — the capture-chat twins take kernel-assigned ports and mkdtemp
+    #   homes, verified disjoint under a parallel direct run) and 5 ensure
+    #   the shared console but stub every mutating route (read-only, no
+    #   shared-state assertions). Line-end tags below: "# chain:" vs
+    #   "# free:".
     ("capture-lane-preset",
      "capture-lane-preset.mjs —— 隔离台 preset 物化基线（t260901-02）。 // // 断言 server/ui-check/cap",
-     "node integration/baselines/sc_capture_lane_preset.mjs", "browser"),
+     "node integration/baselines/sc_capture_lane_preset.mjs", "browser-free"),  # free: no console — pure file contract
     ("capture-chat-e2e",
      "(black-box, user perspective): // t260901-02 acceptance walk found the capture evidence ",
-     "node integration/baselines/sc_capture_chat_e2e.mjs", "browser"),
+     "node integration/baselines/sc_capture_chat_e2e.mjs", "browser-free"),  # free: no console — own lane (kernel port + mkdtemp home; verified disjoint from the active twin under parallel direct run)
     ("capture-chat-active",
      "（黑盒，用户视角）： // t260901-02 验收走查实证：隔离台端到端实跑 chat 视图 25s 内未出现 // data-phase=active，capture 退",
-     "node integration/baselines/sc_capture_chat_active.mjs", "browser"),
+     "node integration/baselines/sc_capture_chat_active.mjs", "browser-free"),  # free: no console — own lane (same disjoint mechanics as the e2e twin)
     ("capture-redline-gate",
      "(black-box, user perspective): // The capture evidence tool may create sessions and SEND",
-     "node integration/baselines/sc_capture_redline_gate.mjs", "browser"),
+     "node integration/baselines/sc_capture_redline_gate.mjs", "browser-free"),  # free: no console — own mock server (240s serial pole; in-scenario parallelization = campaign 3c)
     ("t13-evidence-lightbox",
      "(black-box, user perspective): 工单详情抽屉的截图证据缩略图网格 // (t260831-08) 现在支持看图灯箱。用户可感知契约（以 t2609",
-     "node integration/t260901-13/sc_evidence_lightbox_dom.mjs", "browser"),
+     "node integration/t260901-13/sc_evidence_lightbox_dom.mjs", "browser-free"),  # free: shared console read-only — API stubs
     ("lane-parallel-dom",
      "(black-box, user perspective): t260901-05 shipped the lane diagram's // parallel-fork re",
-     "node integration/baselines/sc_lane_parallel_dom.mjs", "browser"),
+     "node integration/baselines/sc_lane_parallel_dom.mjs", "browser-free"),  # free: shared console read-only — API stubs
     ("metrics-donut-dom",
      "t260903-09 度量三 donut 白板修复的 DOM 级基线（黑盒） // 用户视角：有数据时三张环形图——时间去哪了/有无代码变更票占比/模型份额——真渲染非白板（canvas 有非透明像素），人审扇区独立橙色，畸形数据走人话空态不崩；cache-first 先吐 stale 快照角标后台全量替换 // 两层结构同 sc_lane_parallel_dom：S0 bundle 契约+纯逻辑 smoke（全环境跑），S1 隔离测试台真浏览器 DOM（缺环境干净 SKIP）",
-     "node integration/baselines/sc_metrics_donut_dom.mjs", "browser"),
+     "node integration/baselines/sc_metrics_donut_dom.mjs", "browser-free"),  # free: shared console read-only — API stubs
     ("multi-tab-coexistence",
      "(black-box, user perspective): the ticket workbench is used with // MULTIPLE console tab",
-     "node integration/baselines/sc_multi_tab_coexistence.mjs", "browser"),
+     "node integration/baselines/sc_multi_tab_coexistence.mjs", "browser-free"),  # free: shared console read-only — API stubs
     ("t22-t260901-22-approve-modal-ui",
      "* * integration/t260901-22/t02_approve_modal_ui.mjs * —— KI-004「approve 弹层自由备注」用户可感知 UI ",
-     "node integration/t260901-22/sc_t02_approve_modal_ui.mjs", "browser"),
+     "node integration/t260901-22/sc_t02_approve_modal_ui.mjs", "browser-free"),  # free: no console — pure file contract (bundle)
     ("t22-t260901-22-approve-modal-faultmodes",
      "本 UI 家族（wb-modal）无 Esc/外点关闭处理器（rework 打回弹层同样只有「确认/取消」 // 两条真实关闭路径）——验收口径改为：每一处 setApprov",
-     "node integration/t260901-22/sc_t03_approve_modal_faultmodes.mjs", "browser"),
+     "node integration/t260901-22/sc_t03_approve_modal_faultmodes.mjs", "browser-free"),  # free: no console — pure file contract (bundle)
     ("t260905-05-modal-dialog-semantics",
      "wb-modal 弹层族 dialog 语义契约（t260905-05，灰盒 L2）：本票 client 侧唯一行为变化=四类 wb-modal（审批推进/打回/派活指令/内容预览）补 role=dialog+aria-modal——用户可感知承诺=弹层在场时 [role=dialog] 语义通路可发现（全仓 6 个集成 helper 的 dismissOverlays 通路从恒空变可用，即本票改动要兑现的契约）、aria-modal=true 在册、可经语义通路关闭（点弹层按钮遮罩消失）；真台面行为腿（行卡「推进」→审批弹层 / 行卡「打回」→打回弹层，t260904-17 行卡契约锚+页级 API 桩零真写，native confirm 全程自动 accept）+ 服务产物完备腿（盘上 lib/client.js=台面按请求服务的真产物，每处 wb-modal 皆带 role——改 src 忘 tsdown 重建的 KI-052 同族静默穿透在此现形：client 半每次请求从盘现读，未重建=持续红 merge 闸不放行）+ 零 pageerror 卫生。与 t260901-22 approve-modal-ui（弹层出现+内容在场面）/t260903-04 bundle-sync（src≡lib 构建卫生面）/multi-tab-coexistence（跨页签族行为面）intent 不同面。实现段落地前红属预期（TDD 验收门，S0 build-contract 先例），arbitrate/merge 期必须绿",
-     "node integration/t260905-05/sc_modal_dialog_semantics.mjs", "browser"),
+     "node integration/t260905-05/sc_modal_dialog_semantics.mjs", "browser"),  # chain: shared-console writer — real API writes (approve/reject state changes)
     ("t260905-05-multitab-guard-assets",
      "19 号豁免体系资产守卫（t260905-05，静态读源零台面）：本票红线「不改 19 号已落资产语义」+验收条款「force 取证守卫保留」的机械面——sc_multi_tab_coexistence.mjs 内诚实红定性标签 PRE_EXISTING_TAG 仍挂 T2/T5 fail 分支与 failWith catch 路径（防「红=正常」习惯化的守卫，绿则随 fail 分支自消但资产本体必须保留）、force 取证守卫（「force 后抽屉仍不开=产品红如实落」语义注释+force:true 点击通路）在册、三态执行契约（SUMMARY 四计数+退出码 1/2 分家）未弱化、T1-T7 族腿清点零缺失（新增腿不拦、缺腿即红——族覆盖收缩须走票）；检测器红绿自证（真源逐规则绿+四份变异样本逐规则红，检测器失明在此现形）。与 multi-tab-coexistence（运行时行为面）intent 不同面：本场景守守卫资产在册",
      "node integration/t260905-05/sc_multitab_guard_assets.mjs", "ro"),
@@ -173,10 +192,10 @@ SCENARIOS = [
      "sh integration/with_stage.sh t26090202-arch python3 integration/t260902-02/sc_t06_archive_legacy_e2e.py"),
     ("t260903-07-click-no-chat-switch",
      "点工单不切右侧会话（t260903-07①核心反转）：点工单行后中列详情照常开（.wb-d2-steps 在场）、右栏 chat 零变化——【工单上下文】快照零注入、data-phase 不变、项目会话区 tab 全集不含 ticket- 行（票② R8 改锚：顶部行已退役，判据改 [data-wb-psess-tab] 全集）；多行重复点击零注入零 churn（旧契约「点行→开 ticket- 会话」的显式反转守卫，防联动复活）",
-     "node integration/t260903-07/sc_t01_click_no_chat_switch.mjs", "browser"),
+     "node integration/t260903-07/sc_t01_click_no_chat_switch.mjs", "browser"),  # chain: shared-console reader — real ticket rows, zero-churn assertion
     ("t260903-07-chat-project-tag",
      "全局 chat 用户消息项目 tag 契约（t260903-07②）：引用真实工单 id 的消息行渲染文本=注册项目 key 的 chip（颜色非空）；同项目恒同色、不同项目不同色、页面重载后同色（确定性映射的用户可感知面）；全部 chip 文本 ∈ 注册项目键不造假 key；「归属不了→不渲染」是 env 相关声明行为、不在场景层强断言（L1 DOM 桩已锁，chip 经 ::before 伪元素渲染故断言走 getComputedStyle）",
-     "node integration/t260903-07/sc_t02_chat_project_tag.mjs", "browser"),
+     "node integration/t260903-07/sc_t02_chat_project_tag.mjs", "browser"),  # chain: shared-console reader — real ticket rows (chip color mapping)
     ("notes-write-gate",
      "机械闸守卫：dev-lane 工单禁写 notes/（宿主令 260904——票据/知识库账本归 main 侧直管，t260904-01/03 的 KI 行合并冲突与 notes/epics 草案直落为动因）。三执法点：A 合并闸 verify_lane 四态真子进程（声明了 notes/ 也拦防自授权/D 删账同拦/写集内普通文件不误伤/粗判据分支同拦）；B 建单侧 ticket.create 写集含 notes/ 创建即拒（纯函数面零 Temporal，人话指路结算 note）；C 本仓 verify.yaml write_allow 无 notes/ 静态防回潮。tmp git 仓全本地",
      "python3 -B integration/baselines/sc_notes_write_gate.py", "ro"),
@@ -204,7 +223,7 @@ SCENARIOS = [
      "node integration/baselines/sc_sandbar_dsh_compat.mjs", "ro"),
     ("ui-evidence-failure-retention",
      "显式钉死候选环境：单直连候选（假 capture.mjs 秒退 3）+ 死端口 + 临时归档目录。",
-     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=../../server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/baselines/sc_ui_evidence_failure_retention.py", "browser"),
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=../../server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/baselines/sc_ui_evidence_failure_retention.py", "browser-free"),  # free: no console — dead-port negative test
     ("check-auto-rework-trace",
      "从源码解析模块级常量：PHASE_MAIN_CHAIN（frozenset）→ set； PHASE_MAIN_ROLES（Dict）→ dict。解析失败返回 None。",
      "python3 integration/sc_check_auto_rework_trace.py"),
@@ -360,19 +379,19 @@ SCENARIOS = [
      "node integration/t260903-09/sc_metrics_kpi_invariants.mjs", "ro"),
     ("t260904-05-top-entry-retired-form",
      "顶部行退役后的入口形态契约（R8+R7 左栏，browser）：lib 产物零退役符号（SessionTopEntry/wb-sessTop/pickSwitchTargets/renameEntry/data-wb-session-*）且含新锚（projband/psess-dot/psess-color）；DOM 中 data-wb-session-{entry,new,row,reopen} 全不在场、无 wb-sessTop 类元素；出厂全局新建钮继续被压制不回显（拍板 1）；项目色三处同源（t260907-03 重基线：色点=纯色板值 ∈ 确定性色板；+钮边框/文字=同色板值经锁定派生公式 55%/45% color-mix 混平台令牌链的 computed 期望值，页面内同作用域探针精确比对；判定依据见场景头注）、刷新恒色（验收 5）；关闭确认弹层文案含「仅关闭入口/不删除」且无「↺/最近关闭」表述（拍板 2）；console 零 error",
-     "node integration/t260904-05/sc_top_entry_retired_form.mjs", "browser"),
+     "node integration/t260904-05/sc_top_entry_retired_form.mjs", "browser"),  # chain: shared-console reader — empty-ledger assertion needs no concurrent writer
     ("t260904-05-chat-band-affiliation",
      "右栏 chat 项目色带归属通道（R7 核心新意=用户需求③，browser）：fresh 空账册不渲染色带（不在册声明行为）；项目行 + 新建后 [data-conversation-scroll] 本体带 data-wb-chat-projband=<该项目 key>（属性锚非包裹节点=零 childList 侵入的可感知面）；色带 3px + head 自有 style 在场且色与左栏 --wb-psess-color 同源；点工单行归属不动（t01 同契约：chat 不切换）；刷新后归属恢复（账册持久）；console 零 error",
-     "node integration/t260904-05/sc_chat_band_affiliation.mjs", "browser"),
+     "node integration/t260904-05/sc_chat_band_affiliation.mjs", "browser"),  # chain: shared-console writer — real project+session creation
     ("t260904-05-session-lifecycle-ui",
      "项目行会话生命周期 UI 全链（接管随 R8 退役的 session-tab-interactions 用户路径 intent，browser）：+ 新建续号且 active 恰一；关闭确认取消不动/确认才关；序号不回收（关掉的号不填洞，拍板 1）；刷新后整组 tab 持久；关完全部再新建仍续大号（BO-1 closed 号域防撞、计数器不回退）。与 t260904-01 journey（纯函数账册状态机）intent 级不同层：本条=用户操作流×真实 UI 呈现",
-     "node integration/t260904-05/sc_session_lifecycle_ui.mjs", "browser"),
+     "node integration/t260904-05/sc_session_lifecycle_ui.mjs", "browser"),  # chain: shared-console writer — seq numbers never regress
     ("t260904-05-ledger-adversarial-boot",
      "账册外部输入三态的真实 boot 对抗（畸形/缺失/旧版，browser；journey J4 的 boot 路径复验，intent=boot 韧性非函数容错）：旧顶部行时代账册（无 seq+title）升级渲染且补号、ticket- 条目永不进 tab；project 字段畸形（非字符串/空串）条目不落任何项目组、色带不渲染、+钮仍可用；账册+计数器双键坏 JSON → 按丢失处理 boot 干净；各 case console 零 error",
-     "node integration/t260904-05/sc_ledger_adversarial_boot.mjs", "browser"),
+     "node integration/t260904-05/sc_ledger_adversarial_boot.mjs", "browser"),  # chain: shared-console writer — bad localStorage ledger injection
     ("t260904-06-spec-card-dom",
      "工单详情「执行规格（spec）」卡渲染契约（t260904-06，宿主拍板 B 形态，真浏览器 S1-only 无 S0 段）：API 边界桩 fixture、浏览器/console/shipped bundle/React 渲染全真——有 spec 票抽屉正文卡正下方出蓝左条卡（恰 1 个、data-v=B、ttl 含「执行规格（spec）」、徽标=spec.length+「 字」、.txt 全文逐字保真、HTML 特殊字符纯文本零注入、border-left 4px rgb(9,105,218)、pre-wrap）；无 spec 字段老票卡不渲染且正文卡照旧零扰动；超长 spec 限高 260px 滚动收敛不撑爆抽屉、badge 仍计全文；全旅程零 pageerror。与 developer L1 spec-card-ui.mjs 三产物字符串锁 intent 分工：本场景只锁 payload→像素真渲染面（L1 锁不住 JSX 运行时错/落位/徽标算错/换行丢失）；bundle 陈旧时本场景以「卡不在 DOM」正确变红，归因归 merge-checks 闸与 t260903-04 bundle-sync；缺隔离台/playwright 干净 SKIP 注明 KI-036 依赖恢复自动生效；refusing 3099 红线（t260904-06）",
-     "node integration/t260904-06/sc_spec_card_dom.mjs", "browser"),
+     "node integration/t260904-06/sc_spec_card_dom.mjs", "browser-free"),  # free: shared console read-only — API stubs
     ("t260904-09-settle-snapshot-write-journey",
      "收口出仓快照写路径用户旅程（t260904-09，灰盒 L3，真仓真 merge）：工单收口那一刻项目账本上有一份冻结快照（SANDBAR_SETTLE_SNAPSHOT_DIR/<票>.json，schema_version/squash_commit=merge 回执真身/tokens/delivery 键齐）——token 只加总 assistant/message usage（chunk 翻倍哨兵 999 不计、模型归因当时 provider/model）、delivery=squash 真身 numstat 不靠事后 grep；重复收口（Temporal 重试态）载荷稳定不双算、账面被篡改保留旧件不回写（不可变）；会话目录缺失/zstd 撕裂帧软降级 merge 照常 ok（观测欠账不卡交付）；真·无内容可收（HEAD=他票 squash）zero_change=true 不吸他票账；票 id 注入 ../ 不落 settle 目录之外。与 developer L1（engine/tests 纯函数电池）intent 不同层：本条守「真 git squash merge→快照文件契约」跨组件写路径。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "python3 integration/t260904-09/sc_settle_snapshot_write_journey.py"),
@@ -388,7 +407,7 @@ SCENARIOS = [
      "node integration/t260904-07/sc_session_charter_endpoint_live.mjs", "ro"),
     ("t260904-07-charter-injection-journey",
      "charter 注入用户旅程（t260904-07，browser 隔离台）：项目行点 + 新建会话不输入任何内容即见 charter 为首条消息（占位符实值化无 {{ 残留——「每个 session 创建时注入我们想要的 prompt」原话验收面）+截图证据落 .suyou/screenshots/（KI-044 UI 票证据自觉）；随后切换相邻 tab 再切回、reload 重进既有会话，charter 特征串出现次数恒定+tab 集合不变（守卫：恢复/切换路径绝不注入，沿 t260831-08 ⑥ 口径）；console 卫生零 error（过滤无凭据环境已知凭据类噪音）。断言上限=注入链 UI 面，agent kick-off 回复链不在断言面（无凭据隔离台已知限制，有凭据环境人工复判）；未上屏且仅凭据类错误=干净 skip 不假红。与 t260904-05 生命周期场景（tab 形态/续号/关闭链）intent 级不同层：本条锚注入内容可感知行为。t260905-04 随迁折叠面：t1 新会话开头只见「已注入项目背景」小条+默认折叠+点击展开见全文（特征串计数断言因折叠态文本仍在 DOM 零改动兼容）；t2 切换目标会话小条在场性↔含 charter 一致（无 charter 会话不留幽灵小条——React 不移除外部节点，锚定失效须摘除）；t3 恢复路径折叠面随会话恢复不丢。折叠面断言 pre-implement 红属预期（TDD 信号）",  # naming-compat
-     "node integration/t260904-07/sc_session_charter_injection_journey.mjs", "browser"),
+     "node integration/t260904-07/sc_session_charter_injection_journey.mjs", "browser"),  # chain: shared-console writer — session + charter injection
     # ---- t260904-11 charter prompt wire contract freeze (KI-046 regression net, platform side) ----
     ("t260904-11-charter-prompt-wire-contract",
      "charter prompt wire 契约冻结（t260904-11，ro 供给只读面，KI-046 回归网）：07 票事故的病根是「客户端发什么形状×平台 zod 门收什么形状」这条跨组件接缝两端从未同场验证——developer 的 ki046 UT（workbench/tests）锚接缝客户端一端（真跑注入函数捕获 prompt 实参），本场景锚平台一端与镜像同步责任，intent 级不同层：①真源锚=平台供给内 dsh-host-apiproxy bundle 的 session.prompt 请求门确实是 content:array(promptContentPart) 分片数组门+text/image 判别联合（锚真实安装工件防镜像循环断言，宽松正则不锚压缩名）；②用户可感知拒收文案真源 invalid payload for ${method} 在文（toast 错误家族来源，平台改文案=漂移信号人审）；③冻结镜像语义（外部调用形状单测规范条款自范本：真 schema 不可导入则仓内冻结镜像+声明同步责任）——修复后分片载荷通过、KI-046 违规裸字符串被拒、缺 text 字段/非法 mode 同拒；平台门任一方向静默漂移本场景红，人审后两处同步。缺平台供给=显式红点名缺什么，不静默 skip（KI-046 闸穿透教训）",
@@ -557,7 +576,7 @@ SCENARIOS = [
      "node integration/t260905-09/sc_platform_context_anchor_contract.mjs", "ro"),
     ("t260905-09-platform-context-fold-stacked",
      "平台上下文叠台折叠用户旅程（t260905-09，browser 隔离台 3199 拒 3099，工单「怎么算好」原话可执行化）：夹具把平台启动上下文消息×N+工单台 charter 注入×1 叠进同一会话——16 号验收台只测自己注入腿、台面无平台叠加=假绿（宿主实报「还是显示了一堆，只折叠了开头一小部分」）。主断言=恰一个小条（不是 charter 一条+平台又一条，「同一折叠件」原话）+全部候选正文收折（含同气泡双锚去重样本）+点小条整组开/收；负向=中段提及普通消息全程可见零误折（普通用户消息绝不折）；孤儿守卫=夹具气泡移除后小条随摘无幽灵、reload 不复活；console 卫生=零 pageerror（外来节点×React 重渲染崩溃在此现形，证据上报归因不静默）。归因三态：锚真源不在=fail（TDD 信号）、源在而 served bundle 无锚样本=na（未重建/未部署，merge 期自动生效）、行为不符=fail 精确点名。charter 注入腿本身由 t260904-07 journey 守（intent 级不重复，此处只当前置卫兵）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
-     "node integration/t260905-09/sc_platform_context_fold_stacked.mjs", "browser"),
+     "node integration/t260905-09/sc_platform_context_fold_stacked.mjs", "browser"),  # chain: shared-console writer — in-session platform context stacking
 
     # ---- t260905-10: engine immunity against three incidents (interpretation injection channel / torn-session quarantine / on-disk identity dependency) ----
 
@@ -705,11 +724,12 @@ def main() -> int:
     exits product red 1 (a lying summary never passes). Scenarios whose legs
     are all N/A record product red themselves via lib_env.fail_if_all_na.
 
-    In-pool concurrency (260909 speedup campaign): SPLIT — entries marked
+    In-pool concurrency (260909 speedup campaign round 2): entries marked
     "serial" in a pool run first (relative order preserved), then the rest run
     at SANDBAR_POOL_CONC lanes; SANDBAR_CONC_POOLS picks the pools that get
-    concurrency (default main,ro; the browser pool shares one console and
-    stays serial for now); SANDBAR_POOL_CONC=1 restores the old semantics."""
+    concurrency (default main,ro,browser-free; the browser chain pool shares
+    one console and stays strictly serial — registry order is its contract);
+    SANDBAR_POOL_CONC=1 restores the old semantics."""
     import threading
     from concurrent.futures import ThreadPoolExecutor
     ran = passed = failed = env_failed = 0
@@ -731,7 +751,8 @@ def main() -> int:
     except ValueError:
         conc_width = 4
     conc_pools = set(x.strip() for x in
-                     os.environ.get("SANDBAR_CONC_POOLS", "main,ro").split(",")
+                     os.environ.get("SANDBAR_CONC_POOLS",
+                                    "main,ro,browser-free").split(",")
                      if x.strip())
 
     def _drain(entries, pool_name):
@@ -807,7 +828,7 @@ def main() -> int:
     print("耗时分解（池内串行合计 / 池间并行，wall=%.0fs）：" % wall)
     for p, s in sorted(by_pool.items(), key=lambda kv: -kv[1]):
         n = sum(1 for t in timings if t["pool"] == p)
-        print("  %-10s %6.0fs  (%d 个场景，串行合计——并行关键路径=%s)"
+        print("  %-13s %6.0fs  (%d 个场景，串行合计——并行关键路径=%s)"
               % (p, s, n, "是" if s == max(by_pool.values()) else "否"))
     top = sorted(timings, key=lambda t: -t["dur_s"])[:15]
     print("最慢 Top15：")
