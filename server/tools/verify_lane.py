@@ -85,9 +85,9 @@ def _check(name, items):
 
 
 def _sh(cmd, cwd, timeout=300, crop=2000):
-    """默认把输出裁到最后 crop 字节（仅供人类可读 detail）。**逐行解析文件清单
-    的调用必须传 crop=None**：按字节裁剪会把首行裁成半截路径——KI-015 实证
-    （t260902-05）：diff 2650 字节被裁出假路径「ial/token-30d.json」→ 白名单
+    """跑命令并把输出裁到最后 crop 字节（detail 供人读）。
+    逐行解析文件清单的调用必须传 crop=None：按字节裁剪会把首行裁成半截路径——
+    KI-015 实证（t260902-05）：裁出的假路径「ial/token-30d.json」造成白名单
     假越界误阻断，且裁点之前的文件静默漏检。"""
     p = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
     out = p.stdout + p.stderr
@@ -95,12 +95,11 @@ def _sh(cmd, cwd, timeout=300, crop=2000):
 
 
 def _diff_names(base, root):
-    """base...HEAD（三点）变更文件清单：merge-base(base,HEAD)..HEAD——即「本次合并
+    """base...HEAD（三点）变更文件清单=merge-base(base,HEAD)..HEAD——即「本次合并
     将给 main 带来什么」。泳道在制期间他人并入 main 的文件不在差集里，不判越界
-    （t260901-14 假阳性根因：旧两点 base..HEAD 会把 main 侧文件计成泳道改动）。
-    -c core.quotepath=false：非 ASCII 文件名输出原样 UTF-8
-    （缺省 quotepath 会输出「引号+八进制转义」，转义串以 " 开头，任何写集前缀都匹配不上
-    → 中文名文件必被误判越界。t260901-08 acceptance S2a 实测打回项）。
+    （t260901-14：旧两点口径会把 main 侧文件计成泳道改动，假阳性）。
+    -c core.quotepath=false：非 ASCII 文件名输出原样 UTF-8（缺省 quotepath 会输出
+    八进制转义串，任何写集前缀都匹配不上，中文名文件必被误判越界）。
     crop=None：本清单逐行判写集，裁剪即假红+漏检（KI-015），不许裁。"""
     return _sh(['git', '-c', 'core.quotepath=false', 'diff', '--name-only', base + '...HEAD'], root, crop=None)
 
@@ -228,14 +227,13 @@ def _strip_val(vv):
 
 def _parse_verify_yaml(text):
     """verify.yaml 最小 YAML 子集解析器（stdlib-only；裸 python3 无 pyyaml）。
-
-    参照 agent_activities._parse_bundle_pairs 的故障模式取舍（t260901-08 方案②①清单）：
-    ①tab 展开两空格——带过来；②空行与 # 注释跳过——带过来；③未知行 raise ValueError
-    带行内容——带过来并升格为畸形态判定主口径（调用方按契约 fail-closed）；
-    ④结构残缺静默过滤——不带走（verify.yaml 是道的本体声明，残缺=fail-closed，
-    校验在 _validate_cfg）；⑤段作用域隔离——带过来（先按顶层键切段）。
-    支持：嵌套映射（两空格缩进）、裸 token 标量、'- ' 字符串列表、
-    '- k: v' 列表套映射（v2 checks 条目，后续深缩进行并入条目）。"""
+    取舍与 agent_activities 的解析器同口径（t260901-08）：
+    - tab 展开两空格；空行与 # 注释跳过；未知行 raise ValueError（调用方按契约
+      fail-closed 判畸形）。
+    - 结构残缺不静默过滤——verify.yaml 是道的本体声明，残缺=fail-closed，
+      结构校验在 _validate_cfg。
+    支持：嵌套映射（两空格缩进）、裸标量、'- ' 字符串列表、'- k: v' 列表套映射
+    （v2 checks 条目，后续更深缩进行并入该条目）。"""
     root = {}
     stack = [(-1, root, None, None)]  # (indent, container, parent_container, key_in_parent)
     for raw in text.replace('\t', '  ').splitlines():
@@ -420,8 +418,8 @@ def _code(a):
     elif base:
         items = []
         # name-status（非 name-only）：增/改/删分开判——删除敏感路径=正确清退
-        # 不红（t260903-12 实雷：amend 致 merge-base 漂移后清除 .sandbar 的 D
-        # 被误红成「入库」）；新增/修改敏感路径才是泄漏。
+        # 不红（t260903-12：merge-base 漂移后清除运行时目录的 D 被误红成「入库」）；
+        # 新增/修改敏感路径才是泄漏。
         rc, out = _sh(['git', '-c', 'core.quotepath=false', 'diff',
                        '--name-status', base + '...HEAD'], root, crop=None)
         if rc != 0:
@@ -440,9 +438,8 @@ def _code(a):
                 if not f:
                     continue
                 # 宿主令 260904 机械闸：dev-lane 工单禁写 notes/（票据/知识库账本归
-                # main 侧直管，t260904-01/03 的 KI 行合并冲突为直接动因）。独立于
-                # 写集判定——声明了 notes/ 也拦（防自授权）；D 同拦（删账=丢账，
-                # 与运行时前缀「D=清退放行」口径不同：notes 是账本不是运行时残留）。
+                # main 侧直管）。独立于写集判定——声明了 notes/ 也拦（防自授权）；
+                # D 同拦（删账=丢账：notes 是账本，不是运行时残留，不适用清退放行）。
                 if f == 'notes' or f.startswith('notes/'):
                     items.append({'detail': '越界写（notes/ 禁写，宿主令 260904）：'
                                   '票据/知识库账由 main 侧（integration/宿主）直管，'
@@ -465,12 +462,11 @@ def _code(a):
         checks.append({'check': '写集白名单', 'level': 'green', 'items': [],
                        'note': '未传 base，写集白名单未验（要验就显式传 base；合并闸须传 require_base=true）'})
 
-    # ② 检查装配（v2 列表命令制，宿主令 t260902）：checks = [{id, cmd, cwd?, timeout?}]，
-    # 全部 /bin/sh -c、exit 非零=红、并行跑。引擎零项目策略——跑什么、怎么跑全由
+    # ② 检查装配（v2 列表命令制，宿主令 t260902）：checks=[{id,cmd,cwd?,timeout?}]，
+    # 全部 /bin/sh -c、exit 非零=红、并行跑。引擎零项目策略——跑什么全由
     # verify.yaml 声明（旧 shotdebug/tsc/smoke/test/deps_dir 五个专属类型退役：
-    # shotdebug 本质是 grep、tsc/smoke/test 本质是命令、deps 在位护栏并入各 cmd 自带
-    # test -x 前置，防 npx 占位包假绿——t260824-01 教训以声明形态延续）。
-    # skip_slow 语义：跳过全部命令检查（白名单/残留面在①段已完成）。
+    # 本质是 grep/命令，deps 护栏并入各 cmd 自带的 test -x 前置，
+    # 防 npx 占位包假绿）。skip_slow=跳过全部命令检查（白名单面在①已完成）。
     ck = lane_cfg.get('checks')
 
     def _p(v):

@@ -1,41 +1,36 @@
 """sandbar project 子命令族：注册表接入面（add/list/remove）。
 
-立项真源 = notes/epics/project-lifecycle.md 票①（面A 接入 + 面C 报告）+
-票②（面B 摘除，t260904-14）：
-- add：fail-closed 前置校验 → 原子写 <注册表根>/<key>/project.yaml → 接入体检报告
-  （黄牌只提示不代写不阻塞，exit 0）。t260906-01 容器式代建：根目录不存在=
-  闸序全过后 mkdir 代建（含父目录）并落容器最小脚手架（scaffold.py，只对本次
-  代建的新根落；已存在目录零覆盖；全程零 git，报告提示容器未含 git 仓库）。
-- list：注册+隔离条目全列（隔离原因含 <dir>/project.yaml 定位）+ 每 key 票计数
-  （子进程查 Temporal，服务不可达/SDK 缺失两态降级可辨且不红——KI-039 教训：
-  依赖缺失不得吞成「无数据」，也不得与「不可达」混同）。
-- remove：可逆摘除（契约①a-1）——模式闸（legacy 拒收）/最后条目确认闸/在飞闸
-  （拒摘报票号；不可达 fail-closed 无绕过旗）/closed 全归档闸（purge 前置，未归档
-  差集=Temporal COMPLETED−fs archive.json 三态判定）→ project.yaml 退役改名
-  （retired-<UTC>，零 schema 改动可逆）→ 摘除报告（.lane/ 泳道只报不删、
-  closed 未归档黄牌、数据字节数账目）；--purge-data/--purge-credentials 显式
-  分离，--dry-run 全闸预演零现场变更。
+立项：notes/epics/project-lifecycle.md 票①（接入+报告）/ 票②（摘除，t260904-14）。
 
-CLI 契约面（与 integration/t260904-10 三场景共同冻结，改动须场景+ops 手册同步）：
-  sandbar project add --key <key> --name <name> --dir <abs> [--dir <abs> ...] [--json]
+- add：前置校验全 fail-closed → 原子写 <注册表根>/<key>/project.yaml → 体检报告
+  （黄牌只提示不代写不阻塞，exit 0）。根目录不存在时先代建再落脚手架
+  （t260906-01，scaffold.py：只对本票新建的根落，已存在目录零覆盖，全程零 git）。
+- list：注册+隔离条目全列 + 每 key 票计数。票计数走子进程查 Temporal；服务不可达
+  与 SDK 缺失分两态降级、不红（KI-039：依赖缺失不得吞成「无数据」）。
+- remove：可逆摘除（契约①a-1）。闸序：legacy 模式拒收 → 装载/key 闸 → 最后条目
+  确认闸 → 在飞闸（有在飞票拒摘并报票号）→ closed 全归档闸（purge-data 前置）
+  → project.yaml 退役改名（retired-<UTC>，改回文件名即恢复）→ 摘除报告。
+  --purge-data / --purge-credentials 显式分离；--dry-run 全闸预演零现场变更。
+
+CLI 契约（与 integration/t260904-10 三场景共同冻结，改动须场景+ops 手册同步）：
+  sandbar project add --key <key> --name <name> --dir <abs> [--json]
   sandbar project list [--json]
   sandbar project remove --key <key> [--dry-run] [--purge-data]
                          [--purge-credentials] [--confirm-last] [--json]
 
-装载复用真源 = server/engine/shared.py（importlib 按路径装载，不改本体；
-与 TS 侧 server/project-registry.ts 同一注册表、两侧各自最小解析、语义同构）。
-本模块 stdlib-only（installer 惯例；temporalio 依赖隔离在票计数子进程里）。
+装载器复用 server/engine/shared.py（importlib 按路径装载；与 TS 侧
+server/project-registry.ts 同一注册表、语义同构）。本模块 stdlib-only：
+temporalio 依赖隔离在票计数子进程里。
 
-add 写入故障模式取舍（方案 R2 表，实现落点）：
-  tmp 并发互踩→带（_registry_tmp_name 唯一后缀）；写失败残留→带（tmp+认领+空目录清理）；
-  幂等同字节跳过→不带（add 语义=已注册即拒收，与迁移的幂等重写不同）；
-  值严格子集校验→带（name/dirs 拒 # 与换行）；并发同 key TOCTOU→带——
-  排他锚=project.yaml 文件（O_CREAT|O_EXCL 认领），**不锚条目目录**：契约①b 的
-  合法用户旅程允许先手工布置 <root>/<key>/credentials.yaml（目录可先于 add 存在），
-  目录 mkdir 闸会把这条旅程判死；文件认领对并发同 key 提供同一保证（输家
-  FileExistsError → 重装载 → 幂等拒收，绝不静默覆盖）。
+add 的并发与回滚取舍（方案 R2）：
+- tmp 唯一后缀防并发互踩；写失败必清 tmp 和本票建的目录。
+- 已注册即拒收（add 不做幂等改写）。
+- name/dirs 拒 # 与换行（装载器剥注释、换行破结构，源头拒）。
+- 并发同 key 的排他锚是 project.yaml 文件（O_CREAT|O_EXCL 认领），不是条目目录：
+  契约①b 允许用户先手工放 <root>/<key>/credentials.yaml，目录可以先存在；
+  输家 FileExistsError → 重装载 → 幂等拒收，绝不静默覆盖。
 
-出口码沿用 cli.py：0=绿；1=红（FailClosed，语义拒收）；2=用法错（argparse 面）。
+出口码沿用 cli.py：0=绿；1=红（FailClosed 语义拒收）；2=用法错。
 """
 
 from __future__ import annotations
@@ -172,8 +167,7 @@ def cmd_project_add(paths, args, log=print) -> int:
                                           getattr(args, "dir", None) or [])
     reg_root = shared.registry_root()
 
-    # 闸 f：前置装载原样走装载器全语义（seed 自动播种 / 三类现场判定 / 混合现场
-    # fail-closed），不绕过不预判、不自行建根——装载不过就是红（R4 口径）。
+    # 闸 f：装载走装载器全语义（seed/隔离/混合现场都归它判），装载不过就是红。
     try:
         projects, quarantined = shared.load_projects_registry()
     except ValueError as e:
@@ -206,10 +200,8 @@ def cmd_project_add(paths, args, log=print) -> int:
     # 契约①b 旅程：目录可先在（预布置 credentials.yaml 等），缺则建（幂等）。
     key_dir.mkdir(parents=True, exist_ok=True)
 
-    # t260906-01 代建+容器脚手架：闸序（装载/重名/交叉）全过后，根目录不存在=
-    # 代建（mkdir parents，含父目录）并落容器最小脚手架（只对本次代建的新根落，
-    # 已存在目录零覆盖）。脚手架先于条目写入：失败=红+全量回滚（含新建根），
-    # 不留半成品容器。全程零 git（容器式定稿，容器无 git 仓库见报告提示）。
+    # 代建+脚手架（t260906-01）：上面闸全过后，根目录不存在就代建（含父目录）
+    # 并落容器脚手架。脚手架先于条目写入——失败=红+全量回滚，不留半成品。
     created_root = not root.is_dir()
     if created_root:
         try:
@@ -393,13 +385,12 @@ def _archived_count(reg_root, key) -> int:
 
 
 def _ticket_counts(paths, key, reg_root):
-    """票计数三态（R5 口径，KI-039 教训：依赖缺失必须可辨，不得吞成「无数据」）：
+    """票计数三态（KI-039：依赖缺失必须可辨，不得吞成「无数据」）：
     - ok：{"state":"ok","open":n,"closed":m,"archived":a}
-    - unreachable：Temporal 服务不可达/输出不可解析/超时（detail 带诊断）
-    - sdk-missing：子进程缺 temporalio SDK（与不可达分开报，两态输出可辨）
-    子进程隔离 temporalio 依赖（client.py 顶层 import；installer 保持 stdlib-only）。
-    终态四路：正常=wait 收割；报错=returncode+stderr 收割；超时=run 内 kill+wait；
-    本函数无取消路径（同步调用）。"""
+    - unreachable：Temporal 不可达 / 输出不可解析 / 超时（detail 带诊断）
+    - sdk-missing：子进程缺 temporalio SDK（与不可达分开报）
+    temporalio 依赖隔离在子进程（client.py 顶层 import；installer 保持 stdlib-only）。
+    子进程终态：正常=wait 收割；报错=returncode+stderr；超时=run 内 kill+wait。"""
     args_json = json.dumps({"project": key}, ensure_ascii=False)
     cmd = [sys.executable, str(pathlib.Path(paths.poc_dir) / "client.py"),
            "ticket-list", args_json]
@@ -490,30 +481,25 @@ def cmd_project_list(paths, args, log=print) -> int:
 
 # ---------- remove（票②交付：可逆摘除） ----------
 #
-# remove 故障模式取舍（方案 gen2 R1 表，实现落点）：
-#   ticket-list 子进程通道→带（temporalio 依赖隔离在子进程；超时 run 内 kill+wait、
-#     stderr 收割、JSON 解析原样；扩展为票号级 rows——闸/报告都需要票号）；
-#   各态语义反转→带（list 语境=降级黄牌不红；remove 语境=状态变更闸，unreachable/
-#     sdk-missing/ok=false/坏 JSON 一律 fail-closed 拒摘，决策4 无绕过旗）；
-#   子进程终态→三路实情落字（正常=wait 收割、报错=returncode+stderr、超时=run 内
-#     kill+wait；同步调用无取消路——票① L329 自认，不照抄「四路」口号）；
-#   sdk-missing 判定=stderr 字符串启发式→带不改（remove 侧两态同归红拒摘，误分类
-#     不改变行为结局；为分类而分类=引入新漂移面）；
-#   装载闸→带（票①闸 f 原样装载语义，两命令对同一注册表不得有两种装载口径）；
-#   零残留→带+并发补强：回滚改名前 exists 检查 project.yaml——在位即放弃回滚、
-#     报「现场已变，请重跑」（POSIX rename 对文件目标是静默替换，不得依赖其抛错）；
-#   remove 并发立场→单宿主操作面定位（写操作只落安装器 CLI=宿主亲手），不做跨进程
-#     互斥；可立住的保证=回滚路径绝不无条件覆盖他人新条目；
-#   legacy env→带闸（同 add 闸 e：per-key 目录上的退役/purge 对运行时静默无效）。
+# remove 设计取舍（方案 gen2 R1，票②）：
+# - 票查询走子进程（temporalio 依赖隔离；与 list 同一通道，扩展为票号级 rows）。
+# - 语义反转：list 语境 Temporal 降级=黄牌不红；remove 语境=状态变更闸——
+#   任何非 ok 态一律 fail-closed 拒摘，无绕过旗（决策4）。
+# - sdk-missing 靠 stderr 启发式判：两态同归红拒摘，误分类不改变结局，不改。
+# - 回滚零残留+并发补强：回滚改名前 exists 检查——条目在位（并发 add 重建）
+#   即放弃回滚、报「现场已变」（rename 对文件目标是静默替换，不能靠它报错）。
+# - 并发立场：写操作只落安装器 CLI（单宿主亲手面），不做跨进程互斥；
+#   能立住的保证=回滚绝不无条件覆盖他人新条目。
+# - legacy env 同 add 闸 e：per-key 目录上的退役/purge 运行时读不到=假成功，拒收。
 
 _REMOVE_RETIRED_PREFIX = "project.yaml.retired-"
 
 
 def _ticket_rows(paths, key):
-    """票号级查询（复用票① _ticket_counts 的子进程通道，扩展返回 rows）。
+    """票号级查询（与 _ticket_counts 同一子进程通道，扩展返回 rows）。
     返回 (state, rows_or_detail)：state∈ok|unreachable|sdk-missing；ok 时
-    rows=[{id, exec_status}]，否则 detail=诊断串。终态三路：正常=wait 收割；
-    报错=returncode+stderr 收割；超时=run 内 kill+wait（同步调用无取消路）。"""
+    rows=[{id, exec_status}]，否则 detail=诊断串。子进程终态三路同
+    _ticket_counts（正常=wait；报错=returncode+stderr；超时=kill+wait）。"""
     args_json = json.dumps({"project": key}, ensure_ascii=False)
     cmd = [sys.executable, str(pathlib.Path(paths.poc_dir) / "client.py"),
            "ticket-list", args_json]
@@ -734,8 +720,8 @@ def cmd_project_remove(paths, args, log=print) -> int:
                              % (len(projects), len(projects2),
                                 len(quarantined), len(quarantined2)))
     except ValueError as e:
-        # R1-4 并发补强：回滚前 exists 检查——POSIX rename 对文件目标静默替换，
-        # 在位（并发 add 重建）即放弃回滚，绝不无条件覆盖他人新条目。
+        # 并发补强（R1-4）：回滚前 exists 检查——条目在位（并发 add 重建过）
+        # 就放弃回滚，绝不无条件覆盖他人新条目（rename 对文件目标是静默替换）。
         if not target.exists():
             try:
                 os.replace(str(retired), str(target))

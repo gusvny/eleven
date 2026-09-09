@@ -61,18 +61,12 @@ def _engine_py() -> str:
 
 TEMP_PY = _engine_py()
 
-# 项目注册表（sandbar M1-1 出仓）：真源=机器级 per-key 目录
-# ~/.sandbar/projects/<key>/project.yaml（装载=扫 */project.yaml，与
-# server/project-registry.ts 同一注册表、两边各自最小解析、语义同构）。
-# t260904-02（KI-032 硬闸）：装载逻辑整块上收 engine/shared.py（单一真源，
-# client.py ticket-start 同源锚 project_root），本文件只留薄壳委托（见下方
-# 「项目注册表（薄壳委托）」节）；下面两个常量保留为兼容别名（值与真源一致）。
-# env 优先级（每次调用现读）：SANDBAR_PROJECTS_YAML（legacy 单文件模式，旧格式
-# projects: 列表，行为与 260823 版一致）> SANDBAR_PROJECTS_DIR > ~/.sandbar/projects。
-# 单条目畸形/版本不支持=该项目隔离（fail-closed 可见，不炸其他项目）；目录名必须
-# 过 PROJECT_KEY_RE 白名单，条目 key 必须与目录名全等；迁移判据只认 .migrated 标记。
-# 无标记且根里有内容时分三类现场（修订 v2.1）：纯种子字节子集=崩溃残留→续迁补齐；
-# 与种子零交集=人工注册表→接受；部分相关不可复现=混合现场→fail-closed 抛错。
+# 项目注册表：真源=机器级 per-key 目录 ~/.sandbar/projects/<key>/project.yaml，
+# 装载逻辑在 engine/shared.py 单一真源（t260904-02，KI-032：client.py ticket-start
+# 与本文件 create 必须同一份装载器，双份必漂移）。下面两个常量只是兼容别名。
+# env 优先级（每次调用现读）：SANDBAR_PROJECTS_YAML（legacy 单文件模式）>
+# SANDBAR_PROJECTS_DIR > ~/.sandbar/projects。单条目畸形=该项目隔离（不炸其他项目）；
+# 迁移判据只认 .migrated 标记，无标记按现场内容分三类判定（详见 shared.py 注释）。
 PROJECTS_YAML = REPO / 'server' / 'projects.yaml'   # 兼容别名（真源=shared.PROJECTS_YAML）
 PROJECT_KEY_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,40}$')   # 兼容别名（真源=shared.PROJECT_KEY_RE）
 
@@ -122,13 +116,10 @@ TOOL = {
 }
 
 
-# ---------- 项目注册表（薄壳委托，t260904-02 上收单一真源）----------
-# 装载器真源=server/engine/shared.py「项目注册表」节：KI-032 硬闸要求
-# client.py ticket-start 与本文件 create 用同一份装载器锚 project（双份必漂移，
-# t260824 三次事故教训）。本节保留对外函数名与错误文案（逐字不变，wrapper 只转调），
-# 其余调用方（_create/_list 等）零改动。env 语义（SANDBAR_PROJECTS_YAML >
-# SANDBAR_PROJECTS_DIR > ~/.sandbar/projects，每次现读）与迁移/隔离/混合现场
-# 判定逻辑全部随真源走，见 shared.py 注释。
+# ---------- 项目注册表（薄壳委托，t260904-02 上收单一真源） ----------
+# 真源=engine/shared.py：KI-032 要求 client.py ticket-start 与本文件 create 用
+# 同一份装载器（双份必漂移，t260824 三次事故）。本节保留对外函数名与错误文案
+# （逐字不变，wrapper 只转调）；env 语义与迁移/隔离判定全部随真源走。
 
 
 def _load_registry():
@@ -343,8 +334,8 @@ def _create(a):
     wf = wfmod.load(wfmod.DIR / (wid + '.yaml'))  # yaml=代码生成的快照，仅取 lane/workspace 推导
     stage0 = wf['stages'][0]
     role = a.get('role') or stage0['role']
-    # lane/泳道字段推导+校验走 shared 单一真源（t260824-04/-10/-11 三次事故：
-    # 双份推导必漂移；形态错/字段不一致在创建瞬间拒收，不再放跑到运行期才暴露）
+    # lane/泳道字段推导+校验走 shared 单一真源（t260824 三次漂移事故）：
+    # 形态错/字段不一致在创建瞬间拒收，不放跑到运行期才暴露。
     try:
         lane, ws, worktree, branch = _shared().derive_lane_workspace(
             tid, wf['lane'], lane=a.get('lane') or '',
@@ -355,9 +346,8 @@ def _create(a):
     except ValueError as e:
         raise ValueError('create 参数非法：%s' % e)
     _check_paths_under_project(proj, ws, worktree)
-    # t260903-05 教训（宿主令直改不建票）：dev-lane 流程结构性写 integration/
-    # （design_integration_tests 场景落 integration/<票>/ + run_scenarios.py 清单登记），
-    # 建单侧自动并入防人工漏报——白名单拦得对，错在声明漏（red=5 blocked 实案）。
+    # dev-lane 结构性写 integration/（design_integration_tests 落场景文件+清单登记，
+    # t260903-05 实案：白名单拦得对、错在声明漏）——建单侧自动并入，防人工漏报。
     write_set = list(a.get('write_set') or [])
     if wid == 'dev-lane' and 'integration/' not in write_set:
         write_set.append('integration/')
@@ -388,9 +378,9 @@ def _create(a):
         'created': now,
     })
     res = _poc_ok(out)
-    # 每工单专属 worker（260824 A 案二轮拍板）：ticket.py 不再 spawn——console 的
-    # keepalive ensure 是工单 worker 唯一生产 spawn 点（15s 内补拉；无 console 时
-    # 工单在 Temporal 里待命，console 起来自动开跑，活不丢）。
+    # 每工单专属 worker（260824 拍板）：ticket.py 不再 spawn——console 的
+    # keepalive ensure 是唯一生产 spawn 点（15s 内补拉；无 console 时工单在
+    # Temporal 里待命，console 起来自动开跑，活不丢）。
     return {'id': tid, 'path': '',  # 无 JSON 投影（状态只在 workflow）
             'project': proj['key'],
             'epic': res.get('epic') or '',
