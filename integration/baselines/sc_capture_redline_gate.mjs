@@ -33,7 +33,11 @@ import path from "node:path";
 
 const LANE_ROOT = process.cwd();
 const CAPTURE = path.join(LANE_ROOT, "server", "ui-check", "capture.mjs");
-const CASE_TIMEOUT_MS = 120000;
+const CASE_TIMEOUT_MS = 150000;
+// Campaign 3c (260909): raised from 120s because the four legs now run
+// concurrently — 4-way browser contention can stretch a leg's launch/fetch
+// phases, and the budget must stay comfortably above the slowest healthy leg
+// (~85s idle) while still killing genuine hangs.
 
 const results = [];
 function record(name, status, detail = "") {
@@ -168,9 +172,14 @@ if (!(await browserAvailable())) {
 } else {
   const work = await mkdtemp(path.join(tmpdir(), "capture-redline-"));
 
-  // R1 read-only red line: no gate flag → an explicit error and zero writes
-  // anywhere (proven by the mock's request log)
-  {
+  // Campaign 3c (260909): the four legs are self-contained (own mock on an
+  // ephemeral port, own capture child, own outDir under work/), so they run
+  // concurrently — wall = the slowest leg (~85s) instead of the sum (~240s).
+  // record() order becomes completion order (cosmetic; no guard consumes it).
+
+  const legR1 = async () => {
+    // R1 read-only red line: no gate flag → an explicit error and zero writes
+    // anywhere (proven by the mock's request log)
     const mock = await startMockConsole("ok");
     try {
       const r = await runCapture({ url: `http://127.0.0.1:${mock.port}/`, allowSeed: false, outDir: path.join(work, "r1") });
@@ -180,32 +189,34 @@ if (!(await browserAvailable())) {
       record("R1 no-flag-no-write-redline", ok ? "pass" : "fail",
         `exit=${r.code}；报错点名缺门旗=${namedGate}；造数写请求=${writes}（必须为 0）`);
     } finally { mock.server.close(); }
-  }
+  };
 
-  // R2 malformed input, empty cwd: gate flag present and the seeding endpoint
-  // returns an empty cwd → fast explicit failure (not a 25s hang)
-  {
+  const legR2 = async () => {
+    // R2 malformed input, empty cwd: gate flag present and the seeding endpoint
+    // returns an empty cwd → fast explicit failure (not a 25s hang)
     const mock = await startMockConsole("emptycwd");
     try {
       const r = await runCapture({ url: `http://127.0.0.1:${mock.port}/`, allowSeed: true, outDir: path.join(work, "r2") });
       const namesCwd = /cwd/.test(r.both);
-      // Fast-fail budget is 90s (revised by t260907-05 arbitrate gen4: the
+      // Fast-fail budget is 120s (revised by t260907-05 arbitrate gen4: the
       // original 60s was an idle-machine estimate, and on a shared box under
       // resource contention a genuinely-logical explicit failure measured
       // 77.8s and was misjudged — the budget is anchored on "clearly below
       // the 120s hang fallback while keeping non-hang distinguishable"; the
       // four logical assertions (exit≠0 / names cwd / seeding request / no
-      // timeout) are unchanged).
-      const fast = r.elapsedMs < 90000;
+      // timeout) are unchanged. Campaign 3c revised it 90s→120s: the legs
+      // now run 4-way concurrent, and contention stretches launch/fetch —
+      // the budget stays "clearly below CASE_TIMEOUT_MS" under load).
+      const fast = r.elapsedMs < 120000;
       const ok = !r.timedOut && r.code !== 0 && namesCwd && fast && mock.openCalls() >= 1;
       record("R2 empty-cwd-fast-fail", ok ? "pass" : "fail",
-        `exit=${r.code}；报错含 cwd 检查=${namesCwd}；耗时=${(r.elapsedMs / 1000).toFixed(1)}s（须 <90s 快速失败、非 120s 挂死形态）；造数请求=${mock.openCalls()}`);
+        `exit=${r.code}；报错含 cwd 检查=${namesCwd}；耗时=${(r.elapsedMs / 1000).toFixed(1)}s（须 <120s 快速失败、非 150s 挂死形态）；造数请求=${mock.openCalls()}`);
     } finally { mock.server.close(); }
-  }
+  };
 
-  // R3 fault injection, seeding endpoint 500: the error must name
-  // 「台内造数失败」 and carry the API error back
-  {
+  const legR3 = async () => {
+    // R3 fault injection, seeding endpoint 500: the error must name
+    // 「台内造数失败」 and carry the API error back
     const mock = await startMockConsole("error");
     try {
       const r = await runCapture({ url: `http://127.0.0.1:${mock.port}/`, allowSeed: true, outDir: path.join(work, "r3") });
@@ -214,17 +225,22 @@ if (!(await browserAvailable())) {
       record("R3 seed-api-error-loud", ok ? "pass" : "fail",
         `exit=${r.code}；报错点名台内造数失败=${named}`);
     } finally { mock.server.close(); }
-  }
+  };
 
-  // R4 fault injection, console unreachable: a loud nonzero exit within
-  // budget, never a silent hang
-  {
+  const legR4 = async () => {
+    // R4 fault injection, console unreachable: a loud nonzero exit within
+    // budget, never a silent hang
     const port = await closedPort();
     const r = await runCapture({ url: `http://127.0.0.1:${port}/`, allowSeed: false, outDir: path.join(work, "r4") });
     const ok = !r.timedOut && r.code !== 0 && r.both.trim().length > 0;
     record("R4 console-unreachable-loud", ok ? "pass" : "fail",
       `exit=${r.code}；耗时=${(r.elapsedMs / 1000).toFixed(1)}s（预算 ${CASE_TIMEOUT_MS / 1000}s）；stderr 非空=${r.both.trim().length > 0}`);
-  }
+  };
+
+  // R2 gets a head start: its fast-fail budget is the contention-sensitive
+  // one, so it begins before the other three browsers spin up.
+  const r2First = legR2();
+  await Promise.all([r2First, legR1(), legR3(), legR4()]);
 
   await rm(work, { recursive: true, force: true }).catch(() => {});
 }
