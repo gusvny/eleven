@@ -1,17 +1,22 @@
 /**
- * smoke/ticket-switch.mjs —— t260831-08 工单行会话恢复链 + 截图证据可视化冒烟。
+ * smoke/ticket-switch.mjs — smoke for t260831-08 ticket-row session-restore chain + screenshot
+ * evidence visualization.
  *
- * 直跑：node smoke/ticket-switch.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
+ * Run: node smoke/ticket-switch.mjs (node >= 22.18 native type-stripping, imports .ts directly).
  *
- * 覆盖（逐条）：
- *   A. ticketContext 契约：created=true 首条消息=工单快照（id/标题/阶段/待审批/
- *      验收/正文 600 截断/收尾指令）；畸形 tk（缺字段 / null / 对象型与数字型
- *      pending、acceptance）不崩。
- *   B. listEvidenceFiles + 防穿：正常列表（归档+泳道两候选、去重排序）、白名单
- *      过滤（怪名文件不入列表）、目录不存在软降级 []、`../` 与非法 ticket id。
- *   C. evidenceImgSrc 契约（经构建产物 lib/client.cjs 测真代码，不是复制品）。
- *   D.（t260903-07 删除）会话恢复链 openTicketSessionFlow——每工单会话联动下线，
- *      流程体已删；服务端路由按 ③ 数据留存口径保留（node.ts 留痕注释）。
+ * Coverage (item by item):
+ *   A. ticketContext contract: created=true first message = ticket snapshot (id / title /
+ *      stage / pending approvals / acceptance / body truncated at 600 chars / closing
+ *      instruction); malformed tk (missing fields / null / object-typed vs number-typed
+ *      pending, acceptance) does not crash.
+ *   B. listEvidenceFiles + traversal guard: normal listing (archive + worklane candidates,
+ *      deduped and sorted), whitelist filtering (oddly named files stay out of the list),
+ *      missing directory soft-falls back to [], `../` and illegal ticket ids.
+ *   C. evidenceImgSrc contract (exercised through the built artifact lib/client.cjs — real
+ *      code, not a copy).
+ *   D. (removed by t260903-07) the session-restore chain openTicketSessionFlow — the
+ *      per-ticket session linkage was retired and the flow body deleted; the server route
+ *      stays under the ③ data-retention ruling (a trace comment in node.ts).
  */
 
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
@@ -29,7 +34,7 @@ function ok(cond, label) {
 }
 function section(t) { console.log(`\n== ${t}`) }
 
-/* ---------------------------------------------------------------- A ticketContext 契约 */
+/* ---------------------------------------------------------------- A ticketContext contract */
 
 section('A ticketContext：created=true 首条消息=工单快照')
 {
@@ -49,10 +54,10 @@ section('A ticketContext：created=true 首条消息=工单快照')
   ok(ctx.includes('1. 探针场景入 smoke') && ctx.includes('2. 详情抽屉可见截图'), '含验收标准编号列表')
   ok(ctx.includes('工单正文：\n正文一二三'), '含工单正文')
   ok(ctx.endsWith('——以上是这张工单的快照。接下来的对话都围绕它：先回我一段你对现状的理解和下一步建议。'), '收尾指令原样')
-  // 正文 600 截断
+  // body truncated at 600 chars
   const long = ticketContext({ id: 'x', body: '啊'.repeat(700) })
   ok(long.includes('啊'.repeat(600) + '…') && !long.includes('啊'.repeat(601)), '正文超 600 截断加省略号（600 字保留）')
-  // 收尾边界：null blocked_reason 不出现「阻塞原因」行
+  // closing edge: a null blocked_reason emits no 「阻塞原因」 line
   ok(!ticketContext(tk).includes('阻塞原因'), '无阻塞不出现阻塞行')
   ok(ticketContext({ ...tk, blocked_reason: '等人' }).includes('阻塞原因：等人'), '有阻塞出现阻塞行')
 }
@@ -64,7 +69,7 @@ section('A2 ticketContext 畸形输入不崩（取舍清单 #5：Array.isArray �
   ok(ticketContext({ id: 'x', pending: '字符串也行', acceptance: [null, '文字验收'] }).includes('2. 文字验收'), '脏条目容错')
 }
 
-/* ---------------------------------------------------------------- B listEvidenceFiles + 防穿 */
+/* ---------------------------------------------------------------- B listEvidenceFiles + traversal guard */
 
 const TMP_ROOT = mkdtempSync(join(tmpdir(), 't260831-08-smoke-'))
 const ARCHIVE = join(TMP_ROOT, 'archive')
@@ -76,8 +81,8 @@ mkdirSync(join(REPO, '.worktrees', T1, '.suyou', 'screenshots'), { recursive: tr
 mkdirSync(join(REPO, '.worktrees', T2, '.suyou', 'screenshots'), { recursive: true })
 writeFileSync(join(ARCHIVE, T1, 'b.png'), 'x')
 writeFileSync(join(ARCHIVE, T1, 'a.png'), 'x')
-writeFileSync(join(ARCHIVE, T1, 'evil.txt'), 'x')            // 非 png → 不入列表
-writeFileSync(join(ARCHIVE, T1, 'we ird.png'), 'x')          // 形状白名单外（含空格）→ 不入
+writeFileSync(join(ARCHIVE, T1, 'evil.txt'), 'x')            // not a png → stays out of the list
+writeFileSync(join(ARCHIVE, T1, 'we ird.png'), 'x')          // outside the shape whitelist (has a space) → left out
 writeFileSync(join(REPO, '.worktrees', T1, '.suyou', 'screenshots', 'c.png'), 'x')
 writeFileSync(join(REPO, '.worktrees', T1, '.suyou', 'screenshots', 'nope.jpeg'), 'x')
 process.env.SANDBAR_EVIDENCE_DIR = ARCHIVE
@@ -87,8 +92,10 @@ section('B listEvidenceFiles：读序=归档→泳道，白名单过滤，去重
   const files = await listEvidenceFiles(T1, REPO)
   ok(JSON.stringify(files) === JSON.stringify(['a.png', 'b.png', 'c.png']), `归档+泳道合并去重排序（got ${JSON.stringify(files)}）`)
   ok(!files.includes('evil.txt') && !files.includes('nope.jpeg') && !files.includes('we ird.png'), '白名单外文件不入列表')
-  // 注：'..png' 是白名单合法的字面文件名（RE 允许连续点、endsWith(.png)）——它不是路径穿越，
-  // 既有端点同样放行；穿越防线在 id 层（TICKET_ID_RE 不含 / 和 .）与目录 containment。
+  // note: '..png' is a whitelisted literal file name (the RE allows runs of dots and
+  // endsWith(.png)) — it is not path traversal, and the existing endpoint admits it too;
+  // the traversal defense lives at the id layer (TICKET_ID_RE has no / or .) plus directory
+  // containment.
   ok(isEvidenceFileName('a.png') && isEvidenceFileName('..png') && !isEvidenceFileName('x.txt') && !isEvidenceFileName('a.PNG') && !isEvidenceFileName('we ird.png'), 'isEvidenceFileName 口径（小写 .png、白名单字符集）')
 }
 section('B2 软降级与防穿')
@@ -108,11 +115,12 @@ section('B3 归档基目录不存在（env 指空处）仍走泳道候选')
 }
 rmSync(TMP_ROOT, { recursive: true, force: true })
 
-/* ------------------------------------------------- C/D 经构建产物测真代码（lib/client.cjs） */
+/* ------------------------------------------------- C/D real code via the built artifact (lib/client.cjs) */
 
-// dsh 客户端模块契约：window.__ModuleLoader__.load({id, factory})，factory(require) → exports。
-// react 与 @deepseek-ai/* 全外部化走模块表——stub require 给万能可调用代理即可
-//（模块顶层只定义不渲染，hook/jsx 仅在组件 render 时被调用）。
+// dsh client module contract: window.__ModuleLoader__.load({id, factory}), factory(require) → exports.
+// react and @deepseek-ai/* are fully externalized through the module table, so a stub require
+// handing back an all-purpose callable proxy is enough (the module top level only defines
+// things and never renders; hooks/jsx are only touched when a component renders).
 function makeStubRequire() {
   const stub = new Proxy(function () {}, {
     get: (_t, p) => (p === Symbol.toPrimitive ? () => '' : stub),
@@ -136,10 +144,12 @@ if (typeof evidenceImgSrc !== 'function') {
   console.error('  FAIL 构建产物未导出 evidenceImgSrc（检查 tsdown 构建）')
   process.exit(1)
 }
-// t260903-07：原 D 组（openTicketSessionFlow 会话恢复链时序 D1/D2/D3）随流程体删除——
-// 每工单会话联动下线，点工单只开中列详情（右栏 chat 恒为全局会话）。
-// A 组（ticketContext 契约+畸形 tk 用例）保留：ticketContext 是活代码（服务端
-// /api/ticket-session/open 按 ③ 数据留存口径保留，node.ts 有留痕注释）。B/C 与被删链无关，不动。
+// t260903-07: the former group D (openTicketSessionFlow session-restore sequencing D1/D2/D3)
+// was deleted along with the flow body — the per-ticket session linkage is retired, clicking a
+// ticket only opens the middle-column details (the right-column chat is always the global session).
+// Group A (ticketContext contract + malformed tk cases) stays: ticketContext is live code (the
+// server keeps /api/ticket-session/open under the ③ data-retention ruling, with a trace comment
+// in node.ts). B/C have nothing to do with the removed chain and are untouched.
 
 section('C evidenceImgSrc 契约')
 {
