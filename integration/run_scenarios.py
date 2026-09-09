@@ -127,14 +127,14 @@ SCENARIOS = [
     # to the "engine" pool, which runs alongside the other pools in Phase 2
     # but stays serial within itself (width-2 verification flaked; the
     # scenarios boot docker stages and the compose-up herd must stay small).
+    # Within the lane, ticket-start-anchor is deliberately LAST (see its entry):
+    # its stage boots then land in the drained window instead of the Phase-2
+    # t=0 with_stage herd (run E of campaign-3 final verification).
     # Only t260905-03-period-journey stays
     # "exclusive": it writes real tickets to the shared default 7233
     # temporal, and the main-pool decl-gate triggers the same surface
     # (ticket-face pollution is the documented failure mode). Load caveats
     # (timing legs, daemon pressure) are recorded on the entries.
-    ("t260904-02-ticket-start-anchor",
-     "裸入口开票硬闸+隔离台并发隔离端到端（t260904-19 起 docker 测试台双实例，epic 验收1/4/5，KI-032 修复回归）：裸 client.py ticket-start 带 project→Temporal 内 payload workspace.path 绝对路径且锚注册项目主目录/.lane/（worktree 同锚，落仓与执行 worker 解耦）；缺 project/未知 key=创建即拒收且两红因文案互辨；双槽并发开票时间重叠互不见对方工单（ticket-list 双向+跨槽 describe not_found）；审计钩子证被测子进程零连生产 7233/8233（含自证拦截腿）+双台端口面核验（互异/不在禁区 3099/3199/7233/8233/17233/18233）+SANDBAR_TARGET_HOST 指生产构造即拒（红绿自证）；teardown 零残留（down 后 docker ps 无本工程容器）、端口释放、down 幂等二连、同工程名立即 re-up（t260904-19 docker 台语义，容器由 daemon 持有无锁可崩，取舍见 stage_docker 头注）；docker 缺席/镜像缺席=ENV_FAIL exit 2 点名",
-     "python3 integration/t260904-02/sc_ticket_start_anchor.py", "engine"),  # engine: two concurrent docker stages, project-scoped teardown
     ("t260904-02-worker-fingerprint-gate",
      "worker 归属指纹 ensure 闸真执行路径（epic 验收2，KI-033 修复回归；断言落公开行为输出非源级 grep——契约不变的实现重构不得打破本场景；t260904-19 起 temporal 台=docker 测试台单实例）：隔离台内真 worker 自报 meta（pid/repo_root/ts，起跑早写）；node.ts 对外契约 export readWorkerMeta/judgeTicketWorkerMeta 三态真值（same/foreign/unknown）+ensureTicketWorkersOnce 依赖注入真调——同仓照旧不重复拉、异仓拒接不 spawn+告警记录含对方仓根/pid/tid 可断言（绝不 kill 别人进程，杀进程归人）、畸形 meta 兼容跳过+reason 可辨不哑巴；TERM 后 worker 退出且自报 meta 清理（资源回收）",
      "python3 integration/t260904-02/sc_worker_fingerprint_gate.py", "engine"),  # engine: one docker stage + real worker
@@ -714,6 +714,17 @@ SCENARIOS = [
     ("t260908-01-ki061-replay-compat",
      "在飞 workflow 重放兼容契约（t260908-01，KI-061 验收②机械面，044c692 裸改重放炸 99809 的同族回归闸，真 docker 台）：先制造修复前形态在飞 history（DISABLE=1 worker 6 轮超限 blocked＋retry_qc 唤醒一次 settle→再 blocked＝t260907-10 现形态），replay_check 只读回放两腿——腿一 pre-fix 形态 history（含唤醒穿越点 patched 求值）用修复后代码回放 ok=true（命令序列零分歧）；腿二修复 worker 复活（arbitrate respawn、KI-061 marker 入 history）后再回放 ok=true（marker notify 先行→同位 True 的消费路径确定性）。与场景①分工：彼锁 live 复活旅程、本条锁重放确定性；与 developer selfcheck（L2 环境内两相）不同层。replay_check 零写（list/fetch only）；docker/舞台缺件=ENV_FAIL exit 2。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "python3 integration/t260908-01/sc_ki061_inflight_replay_compat.py", "engine"),  # engine: docker stage + worker replay (read-only replay legs)
+    # ③ final-verification run E (260909): anchor boots two docker stages and is
+    # the most stage-boot-sensitive entry (≈3/8 history regardless of engine
+    # width; run E burned the whole 600s ensure budget when its boot coincided
+    # with the main-pool with_stage herd at Phase-2 t=0, wall 924s). It runs
+    # LAST in the engine lane: by then the other pools have drained, so its
+    # stage boots land in a near-empty compose herd. Zero wall cost (engine
+    # serial sum unchanged). The ticket-start concurrency under test is
+    # internal to the scenario (barrier), unaffected by pool position.
+    ("t260904-02-ticket-start-anchor",
+     "裸入口开票硬闸+隔离台并发隔离端到端（t260904-19 起 docker 测试台双实例，epic 验收1/4/5，KI-032 修复回归）：裸 client.py ticket-start 带 project→Temporal 内 payload workspace.path 绝对路径且锚注册项目主目录/.lane/（worktree 同锚，落仓与执行 worker 解耦）；缺 project/未知 key=创建即拒收且两红因文案互辨；双槽并发开票时间重叠互不见对方工单（ticket-list 双向+跨槽 describe not_found）；审计钩子证被测子进程零连生产 7233/8233（含自证拦截腿）+双台端口面核验（互异/不在禁区 3099/3199/7233/8233/17233/18233）+SANDBAR_TARGET_HOST 指生产构造即拒（红绿自证）；teardown 零残留（down 后 docker ps 无本工程容器）、端口释放、down 幂等二连、同工程名立即 re-up（t260904-19 docker 台语义，容器由 daemon 持有无锁可崩，取舍见 stage_docker 头注）；docker 缺席/镜像缺席=ENV_FAIL exit 2 点名",
+     "python3 integration/t260904-02/sc_ticket_start_anchor.py", "engine"),  # engine-LAST (run E): stage boots land in the drained window; concurrency under test is internal
 ]
 
 CMD_TIMEOUT = 900
