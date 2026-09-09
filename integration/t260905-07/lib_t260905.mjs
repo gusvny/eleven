@@ -87,6 +87,24 @@ export async function makeFixtureConsole() {
   })
   const fixtureWb = join(fixtureRepo, 'server', 'plugins', 'workbench')
 
+  // 轮询节拍压缩（260909 提速战役③d，保真度交换票面已认）：M1-M7 断言的是
+  // 握手分类矩阵，不锚生产 30s 节拍值（staleness.ts POLL_MS 无任何断言锚），
+  // 但每轮「等满完整窗」的语义必须保留——故把 fixture 拷贝内的节拍等比压到
+  // 1/6（30s→5s），场景侧等待窗缺省同步下调（窗数不变，env 可上调）。
+  // bundle 是实际运行产物（src 常量已编译进 lib/client.js），两处都 patch。
+  const patchCadence = (rel, from, to) => {
+    const p = join(fixtureRepo, rel)
+    const text = readFileSync(p, 'utf8')
+    if (!text.includes(from)) throw new Error(`节拍压缩锚缺失：${rel} 不含 ${from}`)
+    writeFileSync(p, text.replace(from, to))
+  }
+  patchCadence(join('server', 'plugins', 'workbench', 'src', 'client', 'staleness.ts'),
+    'const POLL_MS = 30_000', 'const POLL_MS = 5000')
+  patchCadence(join('server', 'plugins', 'workbench', 'lib', 'client.js'),
+    'POLL_MS = 3e4', 'POLL_MS = 5000')
+  patchCadence(join('server', 'plugins', 'workbench', 'lib', 'client.cjs'),
+    'POLL_MS = 3e4', 'POLL_MS = 5000')
+
   // capture-lane 必须与被测代码同树解析（t260907-05 仲裁归因）：物化器以插件名声明
   // fixture profile（patch id/node_modules 链），被测 bundle 以同一插件名注册模块——
   // 跨树错窗（主树旧版物化器写旧名 × 泳道新 bundle 注册新名）= dsh 加载器

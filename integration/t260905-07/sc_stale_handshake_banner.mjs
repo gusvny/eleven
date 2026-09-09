@@ -4,7 +4,8 @@
 //   「盘上 bundle×进程内存模块」版本错窗可见化——fixture 真拷贝 server（boot/盘指纹
 //   都算 fixture 文件，capture-stale-banner.mjs 先例：控制台行为全真，只有「落账」由脚本
 //   触发），五分支双向断言（在场方向×3 + 不在场方向×2）：
-//     M5 新鲜态：boot==disk==注入 → 横幅不在场（等满一个 30s 轮询窗才判「不在场」）。
+//     M5 新鲜态：boot==disk==注入 → 横幅不在场（等满一个轮询窗才判「不在场」；
+//        ③d 起窗长=5s 节拍×压缩系数，窗数语义不变）。
 //     M1 盘新内存旧：改 fixture node.ts → 新开页（注入=新盘指纹）≠ boot → 「重启控制台
 //        生效」横幅在场，且「刷新」文案不在场（文案与消除动作绑定：M1 消除动作=重启）。
 //     M2 看守自身内存旧（KI-052 主现场）：拦截 build-info 应答 405 → 重启横幅在场
@@ -41,10 +42,12 @@ import {
 
 const { record, summarize } = makeResults();
 
-// 轮询窗：客户端 30s 可见性轮询。「不在场」断言必须等满一个完整轮询窗才有判据。
-const POLL_WAIT_MS = Number(process.env.SANDBAR_T07_POLL_WAIT_MS || 40_000);
+// 轮询窗：客户端 5s 可见性轮询（③d 起 fixture 拷贝节拍 30s→5s，见 lib_t260905
+// 的 patchCadence——保真度交换：不再演习生产节拍本身）。「不在场」断言必须
+// 等满一个完整轮询窗才有判据。
+const POLL_WAIT_MS = Number(process.env.SANDBAR_T07_POLL_WAIT_MS || 8_000);
 // 在场等待：≥2 个轮询窗（重起台就绪后首个轮询即可命中，留抖动余量）。
-const APPEAR_WAIT_MS = Number(process.env.SANDBAR_T07_APPEAR_WAIT_MS || 75_000);
+const APPEAR_WAIT_MS = Number(process.env.SANDBAR_T07_APPEAR_WAIT_MS || 15_000);
 
 const texts = await loadBannerTexts();
 const BANNER = texts?.STALE_BANNER_TEXT ?? FALLBACK_TEXTS.STALE_BANNER_TEXT;
@@ -99,9 +102,10 @@ const newPage = async () => {
 };
 const waitBannerAppear = (page, timeout) => page.locator('.wb-stale-banner')
   .first().waitFor({ state: 'visible', timeout }).then(() => true).catch(() => false);
-// 等横幅文案包含目标支（30s 轮询粒度：横幅可能已在场、文案要等下一轮询才翻转——
-// 例如 M4 序列里页面在「改盘→重启」窗口先目击 stale=true 的重启支（当时真实），
-// 重启后首个轮询才翻到刷新支；断言必须等翻转完成，不得见横幅即取文本）。
+// 等横幅文案包含目标支（③d 起 5s 轮询粒度：横幅可能已在场、文案要等下一轮询
+// 才翻转——例如 M4 序列里页面在「改盘→重启」窗口先目击 stale=true 的重启支
+//（当时真实），重启后首个轮询才翻到刷新支；断言必须等翻转完成，不得见横幅
+// 即取文本）。
 const waitBannerText = async (page, needle, timeout) => {
   const t0 = Date.now();
   for (;;) {
@@ -148,7 +152,7 @@ try {
   // T4 M4 跨重启存活页面（gen1 打回①序列）：同端口重起台（boot 收编已改盘）→ page1 同页轮询
   //   page1 注入=改盘前指纹（下载时刻盘态）；重起后 boot==disk（一致）而注入旧 → 刷新支。
   await fixture.restart();
-  const m4 = await waitBannerText(page1, RELOAD, APPEAR_WAIT_MS + 60_000);
+  const m4 = await waitBannerText(page1, RELOAD, APPEAR_WAIT_MS + 20_000);
   const m4Text = m4 ? await bannerTextOf(page1) : '';
   record('sb/m4-cross-restart-refresh', m4 && m4Text.includes(RELOAD) && !m4Text.includes(BANNER),
     `跨重启存活页面横幅=「${m4Text.slice(0, 40)}」（须翻转并稳定在刷新支、重启文案不得在场——重启对该态无效）`);
