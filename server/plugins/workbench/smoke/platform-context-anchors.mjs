@@ -1,20 +1,26 @@
 /**
- * smoke/platform-context-anchors.mjs —— 平台自启上下文内容锚冒烟（t260905-09）。
+ * smoke/platform-context-anchors.mjs — smoke for the platform self-start context content anchors (t260905-09).
  *
- * 直跑：node smoke/platform-context-anchors.mjs（node ≥22.18 原生 type-stripping）。
- * 被测=src/client/platform-context-anchors.ts（PLATFORM_CONTEXT_ANCHORS 真源 +
- * classifyPlatformContext 纯函数）。锚的固定桩样本与 integration/t260905-09/
- * fixtures/ 同口径（逐字同步的看守归 integration 侧 ro 冻结场景，本文件内嵌
- * 同文样本双保险；跨目录 import 不引入——同 lib_charter 自足纪律）。
+ * Run: node smoke/platform-context-anchors.mjs (node >= 22.18 native type-stripping).
+ * Under test: src/client/platform-context-anchors.ts (the PLATFORM_CONTEXT_ANCHORS source +
+ * classifyPlatformContext pure function). The fixed stub samples for the anchors are the
+ * same wording as integration/t260905-09/fixtures/ (the cross-directory freeze guard is an
+ * integration-side ro scenario; this file embeds the same text as a second line of defense;
+ * no cross-directory import — same self-contained discipline as lib_charter).
  *
- * 覆盖：
- *   A. 真源卫生：锚清单非空、id 唯一、每锚带出处注、match 词表合法。
- *   B. 命中面：每锚的 fixture 同文样本命中；前导空白容错；锚行后带正文命中。
- *   C. 畸形输入：非字符串/空串 → false；纯锚前缀（整条只有锚行）命中。
- *   D. 负向：中段提及锚字样不折（普通消息误折守卫）；首行非锚开头不折。
- *   E. 前缀命中的固有误折面（声明性用例，防后人当缺陷修）：用户粘贴恰好以
- *      锚行开头=命中——设计内不可分辨（PromptContentPart 无 metadata 字段，
- *      KI-046 实锤；声明见模块头注），行为必须是 true。
+ * Covers:
+ *   A. Source hygiene: the anchor list is non-empty, ids unique, every anchor carries a
+ *      provenance note, every match word list is valid.
+ *   B. Hit surface: every anchor's fixture sample with identical text hits; leading
+ *      whitespace tolerated; a hit with body text after the anchor line.
+ *   C. Malformed input: non-string / empty string -> false; a pure anchor prefix (the whole
+ *      message is only the anchor line) hits.
+ *   D. Negative: an anchor phrase mentioned mid-text does not fold (guard against folding
+ *      normal messages); a message whose first line does not start with an anchor does not fold.
+ *   E. The inherent false-positive surface of prefix matching (declared case, so future
+ *      maintainers do not "fix" it as a bug): a user paste that happens to start with an
+ *      anchor line = a hit — indistinguishable by design (PromptContentPart has no metadata
+ *      field, KI-046); the behavior must be true.
  */
 
 import { PLATFORM_CONTEXT_ANCHORS, classifyPlatformContext } from '../src/client/platform-context-anchors.ts'
@@ -27,7 +33,7 @@ function ok(cond, label) {
 }
 function section(t) { console.log(`\n== ${t}`) }
 
-/** 每锚的 fixture 同文样本（与 integration/t260905-09/fixtures/*.txt 逐字同步）。 */
+/** The fixture sample with identical text for each anchor (byte-synced with integration/t260905-09/fixtures/*.txt). */
 export const ANCHOR_FIXTURE_TEXT = {
   'runtime-context-snapshot': 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent DSH file policy: workspace-write.',
   'runtime-context-preamble': 'The following workspace instructions may be relevant to your work. Use them as guidance when applicable.',
@@ -73,7 +79,7 @@ section('D 负向：普通消息零误折')
 
 section('E 前缀命中的固有误折面（声明性用例）')
 {
-  // 设计内不可分辨：用户粘贴恰好以锚行开头 → 命中即折（可点开看全文，信息不丢）。
+  // Indistinguishable by design: a user paste starting exactly with an anchor line -> hits and folds (full text is one click away, no information lost).
   ok(classifyPlatformContext('# sandbar — 多项目工单引擎\n（用户粘贴的文档开头）') === true,
     '用户粘贴以锚行开头=命中（设计内限制，非缺陷）')
 }

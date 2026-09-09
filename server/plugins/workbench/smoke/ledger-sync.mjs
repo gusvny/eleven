@@ -1,26 +1,30 @@
 /**
- * smoke/ledger-sync.mjs —— sandbar-workbench 会话账册同页双实例同步冒烟（t260830-01）。
+ * smoke/ledger-sync.mjs — smoke for same-page sync between two instances of the session ledger (t260830-01).
  *
- * 直跑：node smoke/ledger-sync.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * node 无 DOM，先 stub globalThis.localStorage 再 import store 模块——可行前提是
- * session-ledger-store.ts 模块顶层零 IO（文件头注释的硬约束，本文件即其回归锁）。
+ * Run: node smoke/ledger-sync.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+ * node has no DOM: globalThis.localStorage is stubbed before importing the store module —
+ * this works only because session-ledger-store.ts does zero IO at module top level (a hard
+ * constraint stated in that file's header; this file is its regression lock).
  *
- * 覆盖（src/client/session-ledger-store.ts）：
- *   0. getItem 抛异常 → 惰性初始化空册不抛（必须在任何快照读取前测——
- *      快照一旦缓存就不再走 getItem）。
- *   A. 同页双实例同步：实例 A persistLedger 新建会话 → 实例 B 视角快照同帧可见；
- *      反向 B touch → A 快照同步（真实行为断言，非静态接线）；persist 落盘
- *      localStorage（刷新找回口径不变）。
- *   B. 订阅通知：多订阅者全量通知；unsubscribe 后不再通知（全终态回收）；
- *      单订阅者回调 throw 被隔离，其它订阅者仍收到本次通知（「静默失同步」
- *      复发路径的回归用例）。
- *   C. 畸形输入（消费外部输入纪律，桩复现不靠真浏览器）：坏 JSON / 非数组 /
- *      脏条目 → parseLedger 既有容错（store 惰性初始化同函数同路径，不放宽）；
- *      setItem 抛异常 → 内存快照仍更新、订阅者仍收到通知、不向上抛。
- *   D. LEDGER_KEY 值不变（账册 key 口径回归）。
+ * Covers (src/client/session-ledger-store.ts):
+ *   0. getItem throwing -> lazy init of an empty ledger without throwing (must be tested
+ *      before any snapshot read — once a snapshot is cached it no longer goes through getItem).
+ *   A. Same-page two-instance sync: instance A persistLedger creates a session -> instance
+ *      B's snapshot view sees it in the same frame; reverse B touch -> A's snapshot syncs
+ *      (real behavior assertion, not static wiring); persist writes localStorage (the
+ *      refresh-and-find semantics are unchanged).
+ *   B. Subscriber notification: all subscribers notified; after unsubscribe no more
+ *      notifications (full terminal recovery); one subscriber's throwing callback is isolated,
+ *      the others still receive this notification (regression case for the "silent
+ *      desync" recurrence path).
+ *   C. Malformed input (malformed-input discipline, reproduced with stubs, no real browser):
+ *      bad JSON / non-array / dirty entries -> parseLedger's existing tolerance (the store's
+ *      lazy init uses the same function on the same path, no loosening); setItem throwing ->
+ *      the in-memory snapshot still updates, subscribers still notified, nothing thrown up.
+ *   D. LEDGER_KEY value unchanged (ledger-key contract regression).
  */
 
-// ---- 先 stub localStorage（必须在 import store 之前）----
+// ---- stub localStorage first (must happen before importing the store) ----
 const backing = new Map()
 let failSetItem = false
 let failGetItem = false
@@ -61,17 +65,17 @@ console.log('0. getItem 抛异常 → 惰性初始化空册（快照缓存前唯
 
 console.log('A. 同页双实例同步')
 {
-  // 「实例 A」「实例 B」= 同一模块的两个消费方视角：同一快照 + 各自订阅。
+  // "instance A" / "instance B" = two consumer views of the same module: same snapshot + separate subscriptions.
   const seenB = []
   const unsubB = subscribeLedger(() => seenB.push(getLedgerSnapshot().length))
   persistLedger(touchEntry([], { id: 'g-1', project: 'suyou', lastOpenedAt: 100 }))
   ok(getLedgerSnapshot().length === 1, '实例 A persist 后快照含新会话')
   ok(seenB.length === 1 && seenB[0] === 1, '实例 B 同帧收到通知且快照同步（同页同步）')
-  // 反向：B 侧 touch（切换会话提升 MRU）→ A 视角快照同步。
+  // Reverse: B-side touch (switching sessions bumps the MRU) -> A's snapshot syncs.
   persistLedger(touchEntry(getLedgerSnapshot(), { id: 'g-1', project: 'suyou', lastOpenedAt: 200 }))
   ok(getLedgerSnapshot()[0].lastOpenedAt === 200, '反向 touch 后快照 MRU 更新')
   ok(seenB.length === 2, '反向变更实例 B 也收到通知')
-  // 落盘语义：persist 同时写 localStorage（刷新找回口径不变）。
+  // Persist semantics: persist also writes localStorage (refresh-and-find semantics unchanged).
   ok(backing.has(LEDGER_KEY) && parseLedger(backing.get(LEDGER_KEY)).length === 1, 'persist 落盘 localStorage（key/格式不变）')
   unsubB()
 }
@@ -99,7 +103,7 @@ console.log('C. 畸形输入容错（桩复现，不放宽）')
     { id: 'a', project: 'p' },
     { id: 'b', project: 'p', lastOpenedAt: 'x' },
   ])).map(e => e.id).join(',') === 'a,b', '脏条目剔除 + 同 id 只留首份 + lastOpenedAt 非数置 0')
-  // setItem 抛异常：内存快照仍更新、订阅者仍收到通知、不向上抛。
+  // setItem throwing: in-memory snapshot still updates, subscribers still notified, nothing thrown up.
   const notified = []
   const un = subscribeLedger(() => notified.push(1))
   failSetItem = true

@@ -1,23 +1,26 @@
 /**
- * smoke/hero.mjs —— sandbar-workbench hero 零接管 + 顶部行退役冒烟
- * （t260831-02 建；票② R8 t260904-05 顶部行退役收口重写）。
+ * smoke/hero.mjs — smoke for zero hero takeover + top-row retirement of sandbar-workbench
+ * (created t260831-02; rewritten for the top-row retirement close-out in ticket 2 R8 t260904-05).
  *
- * 直跑：node smoke/hero.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
+ * Run: node smoke/hero.mjs (node >= 22.18 native type-stripping, imports .ts directly).
  *
- * hero 三槽接管（t260829-06）已彻底拆除——不注册任何 conversation.hero.* 槽，
- * 出厂落地页原样。会话入口沿革：顶部行（t260831-02）→ 票② R8 退役（t260904-05，
- * 入口收口为项目内会话区；出厂全局钮由注入 effect 压制，FACTORY_NEW_LABELS
- * 留守）。本文件测两件事：
+ * The three hero-slot takeover (t260829-06) has been fully removed — no conversation.hero.*
+ * slot is registered, the factory landing page stays as-is. Session entry history: top row
+ * (t260831-02) -> retired in ticket 2 R8 (t260904-05; the entry moved into the per-project
+ * session area; the factory global button is suppressed by an injected effect,
+ * FACTORY_NEW_LABELS remains as the guard). This file checks two things:
  *
- *   B. 静态反接管 + 顶部行退役断言：src/ 与 lib/client.js 产物——无 hero 槽
- *      注册、无 wb-heroSlot 类、无出厂类名压制选择器、无 [data-phase= 锚；
- *      **顶部行已退役**：全 src 与产物无 SessionTopEntry/wb-sessTop 残留。
- *   C. 出厂钮压制锚存在性 + 顶部行锚不在场断言：session-entry.tsx 导出
- *      FACTORY_NEW_LABELS（出厂钮 aria-label 全集，zh/en）；data-wb-session-*
- *      顶部行家族锚在 src 中不在场（防锚回潮——ui-check/integration 已全部
- *      改锚至项目行 data-wb-psess-*，无残留消费方）。
- *      （记账层 A 组已随顶部行退役删除：被看守面消失，口径全量在
- *      smoke/sessions.mjs / project-sessions.mjs。）
+ *   B. Static anti-takeover + top-row retirement assertions: src/ and the lib/client.js
+ *      artifact — no hero slot registration, no wb-heroSlot class, no factory-class-name
+ *      suppression selectors, no [data-phase= anchors; **the top row is retired**: no
+ *      SessionTopEntry/wb-sessTop residue anywhere in src or the artifact.
+ *   C. Factory-button suppression anchor present + top-row anchors absent: session-entry.tsx
+ *      exports FACTORY_NEW_LABELS (the full set of factory button aria-labels, zh/en); the
+ *      data-wb-session-* top-row family anchors are absent from src (guard against anchor
+ *      resurrection — ui-check/integration have all been re-anchored to the project-row
+ *      data-wb-psess-*, no leftover consumers).
+ *      (Ledger layer group A was deleted with the top-row retirement: the guarded surface
+ *      is gone; full accounting lives in smoke/sessions.mjs / project-sessions.mjs.)
  */
 
 import { readFileSync } from 'node:fs'
@@ -35,7 +38,7 @@ function ok(cond, label) {
 }
 function section(t) { console.log(`\n== ${t}`) }
 
-/** 造一条账册条目（lastOpenedAt 直接给序数，越大越新）。 */
+/** Build one ledger entry (lastOpenedAt given directly as an ordinal, larger = newer). */
 function ent(id, extra = {}) {
   return { id, project: 'suyou', cwd: '/repo/suyou', lastOpenedAt: 0, ...extra }
 }
@@ -75,7 +78,7 @@ section('C 出厂钮压制锚在 + 顶部行锚不在场（session-entry.tsx 文
   const text = readFileSync(join(srcRoot, 'client', 'session-entry.tsx'), 'utf8')
   ok(text.includes('FACTORY_NEW_LABELS'), '导出 FACTORY_NEW_LABELS（出厂钮 aria-label 锚集合，压制注入留守）')
   ok(text.includes("'新建会话'") && text.includes("'New session'"), '锚集合含 zh/en 两词条（locale 字典全集）')
-  // 顶部行退役反转断言：data-wb-session-* 家族锚全 src 不在场（无残留消费方）
+  // Top-row retirement inversion assertion: the whole data-wb-session-* family of anchors is absent from src (no leftover consumers)
   const allSrc = readFileSync(join(srcRoot, 'client', 'sidebar.tsx'), 'utf8') + '\n' + text
     + '\n' + readFileSync(join(srcRoot, 'client', 'project-session-row.tsx'), 'utf8')
   ok(!allSrc.includes('data-wb-session-entry') && !allSrc.includes('data-wb-session-new')

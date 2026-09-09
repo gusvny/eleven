@@ -1,15 +1,19 @@
 /**
- * smoke/project-color.mjs —— t260903-07 工单② 项目色纯函数冒烟。
+ * smoke/project-color.mjs — smoke for the project color pure functions (t260903-07 ticket 2).
  *
- * 直跑：node smoke/project-color.mjs（node ≥22.18 原生 type-stripping）。
+ * Run: node smoke/project-color.mjs (node >= 22.18 native type-stripping).
  *
- * 覆盖（方案 v3 R3 可判定三条 + 畸形输入纪律）：
- *   a. 同 key 确定性：同 key 任意次调用恒同值；跨调用无状态漂移。
- *   b. 色板两两可辨：去重 + hue 环距 ≥20°（口径修订与理由见 project-color.ts 头注）
- *      + 亮度可读带（暗底可读）。
- *   c. 畸形输入：''/null/undefined/数字/对象/超长/控制字符 → FALLBACK_COLOR，不 throw。
- *   d. projectTagCssRules：基础规则在、每项目一条着色规则、key 去重、含 `"`/`\` 的
- *      key 被拦（防选择器注入）、key 值忠实出现在选择器与 content 来源（attr 引用）。
+ * Covers (plan v3 R3 three decidable items + the malformed-input discipline):
+ *   a. Same key is deterministic: any number of calls on the same key always return the same
+ *      value; no state drift across calls.
+ *   b. Palette colors are pairwise distinguishable: dedup + hue-ring distance >= 20 degrees
+ *      (the revised criterion and its reason are in the project-color.ts header) + a readable
+ *      luminance band for dark backgrounds.
+ *   c. Malformed input: ''/null/undefined/number/object/overlong/control chars ->
+ *      FALLBACK_COLOR, no throw.
+ *   d. projectTagCssRules: base rules present, one coloring rule per project, keys deduped,
+ *      keys containing `"` or `\` are blocked (selector-injection guard), the key value
+ *      appears faithfully in both the selector and the content source (attr reference).
  */
 
 import { PROJECT_PALETTE, FALLBACK_COLOR, projectColor, projectTagCssRules, fnv1a, isProjectKeyLike } from '../src/shared/project-color.ts'
@@ -22,7 +26,7 @@ function ok(cond, label) {
 }
 function section(t) { console.log(`\n== ${t}`) }
 
-/* ------------------------------------------------ a 同 key 确定性 */
+/* ------------------------------------------------ a. same-key determinism */
 
 section('a 同 key 确定性')
 {
@@ -35,16 +39,16 @@ section('a 同 key 确定性')
     }
   }
   ok(deterministic, '同 key 100 次取色一致')
-  // FNV-1a+murmur3 终混已知向量（F2 修复后口径：纯 FNV ''=0x811c9dc5/'a'=0xe40c292c
-  // 经终混变换；向量锁定防误改哈希）
+  // Known FNV-1a+murmur3 final-mix vectors (post-F2-fix criterion: pure FNV ''=0x811c9dc5/'a'=0xe40c292c
+  // run through the final mix; the vectors lock the hash against accidental changes)
   ok(fnv1a('') === 0xab3e7c0b, 'fnv1a("") 已知向量（终混后）')
   ok(fnv1a('a') === 0x1a80b1b3, 'fnv1a("a") 已知向量（终混后）')
-  // 分布：10 个合成 key 命中 ≥5 种色（均匀性下限，不苛求）
+  // Distribution: 10 synthetic keys hit >= 5 distinct colors (lower bound on uniformity, not a strict demand)
   const spread = new Set(Array.from({ length: 40 }, (_, i) => projectColor(`proj-${i}`)))
   ok(spread.size >= 5, `跨 key 分布命中 ≥5 色（got ${spread.size}）`)
 }
 
-/* ------------------------------------------------ b 色板两两可辨 */
+/* ------------------------------------------------ b. pairwise-distinguishable palette */
 
 section('b 色板两两可辨（hue 环距 + 亮度带）')
 {
@@ -78,22 +82,24 @@ section('b 色板两两可辨（hue 环距 + 亮度带）')
   ok(hues.every(x => x.s > 0.3), '饱和度带：全部 >0.3（低饱和灰不进色板）')
 }
 
-/* ------------------------------------------------ c' 真实注册表键两两不同槽（F2 回归网） */
+/* ------------------------------------------------ c'. real registry keys land in distinct slots (F2 regression net) */
 
 section("c' 真实注册表键取色两两不同（F2 回归断言，验收走查 gen0）")
 {
-  // 用户点名区分的第一对项目（工单正文②原话）+ 现注册表真源（~/.sandbar/projects，
-  // projects.yaml 已出仓只剩 suyou 存量）。纯 FNV 时 suyou/sandbar 同槽（均 %10===2，
-  // 实锤见走查报告 F2）；murmur3 终混后必须错槽。新增注册项目撞槽时本节红=回到
-  // developer 调混合/扩色板，不得删断言了事。
+  // The pair the user explicitly asked to distinguish (original words in the ticket body)
+  // + the current real registry (~/.sandbar/projects; projects.yaml has left the repo, only
+  // the suyou legacy entry remains). With pure FNV, suyou/sandbar land in the same slot
+  // (both %10===2, see the F2 walkthrough report); after the murmur3 final mix they must
+  // land in different slots. If a newly registered project collides, this section goes red
+  // = go back to the developer to tune the mix/expand the palette; do not delete assertions.
   const realKeys = ['suyou', 'sandbar']
   const slots = realKeys.map(k => fnv1a(k) % PROJECT_PALETTE.length)
   ok(new Set(slots).size === realKeys.length, `真实注册表键槽位两两不同（got ${slots.join(',')}）`)
   ok(projectColor('suyou') !== projectColor('sandbar'), 'suyou/sandbar 颜色不同（用户点名对）')
-  // 分布下限断言保留：合成 key 撞色仍允许（概率声明），真实键不允许。
+  // The distribution lower-bound assertion stays: synthetic key collisions remain allowed (a stated probability), real keys are not.
 }
 
-/* ------------------------------------------------ c 畸形输入 */
+/* ------------------------------------------------ c. malformed input */
 
 section('c 畸形输入不炸')
 {
@@ -106,7 +112,7 @@ section('c 畸形输入不炸')
     } catch { stable = false }
   }
   ok(stable, '全部畸形输入 → FALLBACK_COLOR / 非 key，不 throw')
-  // 边界内合法值
+  // In-range legal values
   ok(isProjectKeyLike('a'.repeat(64)), '64 字符 key 合法（上限内）')
   ok(projectColor('suyou') !== FALLBACK_COLOR, '合法 key 进色板（非兜底色）')
 }

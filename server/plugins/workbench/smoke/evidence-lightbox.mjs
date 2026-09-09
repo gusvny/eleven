@@ -1,26 +1,30 @@
 /**
- * smoke/evidence-lightbox.mjs —— t260901-13 截图证据看图灯箱冒烟。
+ * smoke/evidence-lightbox.mjs — smoke for the screenshot-evidence lightbox (t260901-13).
  *
- * 直跑：node smoke/evidence-lightbox.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
+ * Run: node smoke/evidence-lightbox.mjs (node >= 22.18 native type-stripping, imports .ts directly).
  *
- * 照搬 ticket-switch.mjs 的 loadClientBundle（经构建产物 lib/client.cjs 测真代码，
- * 不是复制品），故障模式取舍清单：
- *   ① factory 未按 __ModuleLoader__.load 契约暴露 → 显式 throw 带「先跑 tsdown
- *     构建」诊断 —— 带过来（依赖构建产物，缺失时必须可读报错）。
- *   ② react / @deepseek-ai/* 外部化 → 万能可调用 Proxy stub require —— 带过来
- *     （前提「模块顶层只定义不渲染」对 index.tsx 成立；本 smoke 只取纯导出，
- *     不 render 组件）。
- *   ③ globalThis.window 装载后清回 undefined —— 带过来（不污染后续断言）。
- *   ④ 入口先断言关键导出，否则 FAIL + exit(1) —— 带过来，断言对象
- *     evidenceNav / evidenceImgSrc / evidenceLightboxKeys。
+ * Reuses loadClientBundle from ticket-switch.mjs (tests the real code through the built
+ * artifact lib/client.cjs, not a copy). Failure-mode tradeoff list:
+ *   1. Factory not exposing per the __ModuleLoader__.load contract -> explicit throw with a
+ *      "run the tsdown build first" diagnosis — kept (depends on the build artifact; when
+ *      missing the error must be readable).
+ *   2. react / @deepseek-ai/* externalized -> a callable Proxy stub for require — kept
+ *      (the premise "module top level only defines, never renders" holds for index.tsx;
+ *      this smoke only takes pure exports, never renders components).
+ *   3. globalThis.window cleared back to undefined after loading — kept (no pollution of
+ *      later assertions).
+ *   4. Entry asserts the key exports first, else FAIL + exit(1) — kept; the asserted
+ *      objects are evidenceNav / evidenceImgSrc / evidenceLightboxKeys.
  *
- * 覆盖：
- *   A. evidenceNav 纯函数：正常前进/后退/循环；畸形输入（空列表、越界下标、
- *      负数/非整数/非数字 delta）不抛且落安全下标；open 期间列表变短的越界收敛。
- *   B. evidenceImgSrc 契约回归（相对端点、非 data:）。
- *   C. evidenceLightboxKeys 键位契约（Escape / ArrowLeft / ArrowRight）。
- *   D. keydown 绑定/回收不在本 smoke 覆盖内（桩驱动组件永不 render）——
- *      由实现段代码走查指认行号，此处不造假覆盖。
+ * Covers:
+ *   A. evidenceNav pure function: normal next/prev/wrap; malformed input (empty list,
+ *      out-of-range index, negative/non-integer/non-number delta) does not throw and lands
+ *      on a safe index; out-of-range convergence when the list shrinks while open.
+ *   B. evidenceImgSrc contract regression (relative endpoint, not data:).
+ *   C. evidenceLightboxKeys key contract (Escape / ArrowLeft / ArrowRight).
+ *   D. keydown binding/recovery is not covered by this smoke (the stub-driven component
+ *      never renders) — pointed at by line number in the implementation walkthrough; no
+ *      fake coverage is claimed here.
  */
 
 import { readFileSync } from 'node:fs'
@@ -35,7 +39,7 @@ function ok(cond, label) {
 }
 function section(t) { console.log(`\n== ${t}`) }
 
-// dsh 客户端模块契约：window.__ModuleLoader__.load({id, factory})，factory(require) → exports。
+// dsh client module contract: window.__ModuleLoader__.load({id, factory}), factory(require) -> exports.
 function makeStubRequire() {
   const stub = new Proxy(function () {}, {
     get: (_t, p) => (p === Symbol.toPrimitive ? () => '' : stub),

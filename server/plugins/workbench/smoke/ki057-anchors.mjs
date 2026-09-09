@@ -1,14 +1,17 @@
 /**
- * smoke/ki057-anchors.mjs —— 工单台六面项目感知化的宿主半冒烟（t260907-11 KI-057）。
+ * smoke/ki057-anchors.mjs — host half-smoke for project awareness across the six ticket-board surfaces (t260907-11 KI-057).
  *
- * 直跑：node smoke/ki057-anchors.mjs。mock webServer/req/res 驱动 apply()（changes.mjs
- * 同款 harness），临时注册表 fixture（SANDBAR_PROJECTS_DIR）+ 临时双仓布局，零触
- * 真注册表/真引擎；不触 3099/7233。覆盖（对照方案 S3/S4 路由面）：
- *   A. epics 面：?project=fpv 列 fpv 立项单（resolved.source=project）、无参列引擎仓
- *      立项单（回落不变）、未知 key 400、隔离条目 502；
- *   B. sandbar key 等价断言：?project=sandbar 的 resolved.root 与无参回落链 repo 一致；
- *   C. 审批面写路径：POST review ?project=fpv → 落 <fpv仓>/server/dsh/reviews/，GET 回读一致；
- *   D. 证据面：?project=fpv 枚举 fpv 仓归档+泳道截图，无参回落引擎仓。
+ * Run: node smoke/ki057-anchors.mjs. Drives apply() with the mock webServer/req/res harness
+ * (same as changes.mjs), with a temp registry fixture (SANDBAR_PROJECTS_DIR) + a temp
+ * two-repo layout; never touches the real registry or the real engine; never touches
+ * 3099/7233. Covers (against plan S3/S4 route surfaces):
+ *   A. epics surface: ?project=fpv lists fpv epics (resolved.source=project), no param lists
+ *      the engine-repo epics (fallback unchanged), unknown key 400, quarantined entry 502;
+ *   B. the sandbar key equivalence assertion: ?project=sandbar resolved.root equals the
+ *      no-param fallback chain repo;
+ *   C. review-surface write path: POST review ?project=fpv -> lands in <fpv repo>/server/dsh/reviews/, GET reads it back;
+ *   D. evidence surface: ?project=fpv enumerates the fpv repo's archive + lane screenshots,
+ *      no param falls back to the engine repo.
  */
 
 import { mkdtemp, mkdir, readFile, realpath, writeFile } from 'node:fs/promises'
@@ -36,7 +39,7 @@ await mkdir(join(fpvRepo, 'notes', 'epics'), { recursive: true })
 await writeFile(join(engineRepo, 'notes', 'epics', 'engine-epic.md'), '# 立项单：引擎立项\n\n| 状态 | 进行中 |\n', 'utf8')
 await writeFile(join(fpvRepo, 'notes', 'epics', 'fpv-epic.md'), '# 立项单：fpv 立项\n\n| 状态 | 进行中 |\n', 'utf8')
 
-// 注册表 fixture：sandbar（primaryDir=engineRepo）+ fpv（primaryDir=fpvRepo）+ 坏条目
+// Registry fixture: sandbar (primaryDir=engineRepo) + fpv (primaryDir=fpvRepo) + one broken entry
 const reg = await mkdtemp(join(tmpdir(), 'wb-ki057-reg-'))
 const entry = (key, dir) => `# 注释\nschema: v1\n\nproject:\n  - key: ${key}\n    name: ${key}\n    dirs:\n      - ${dir}\n`
 for (const [key, dir] of [['sandbar', engineRepo], ['fpv', fpvRepo]]) {
@@ -68,7 +71,7 @@ const mockReq = (url, method = 'GET', json) => ({
   async *[Symbol.asyncIterator]() { if (json !== undefined) yield Buffer.from(JSON.stringify(json)) },
 })
 async function call(prefix, url, method = 'GET', json) {
-  // exact 优先（epics 列表挂 exact；带子路径时用 prefix）。URL 与 prefix 完全相等（可带 query）。
+  // exact wins (the epics list uses exact; use prefix for sub-paths). URL equals the prefix exactly (query allowed).
   const bare = url.split('?')[0]
   const r = routes.find(x => x.kind === 'exact' && x.path === bare) ?? routes.find(x => x.kind === 'prefix' && x.path === prefix)
   const res = mockRes()

@@ -1,23 +1,28 @@
 #!/usr/bin/env node
 /**
- * project-modals.mjs —— 项目生命周期四弹层语义锚 smoke（t260904-15 票③，S3 面）。
+ * project-modals.mjs — source-text smoke for the four project-lifecycle modals (t260904-15 ticket 3, surface S3).
  *
- * 直跑：node smoke/project-modals.mjs。纯 node 源文本断言（tsx 不可 node 直跑——
- * spec-card-ui.mjs 同款「源文本锁」取舍；交互真跑由 integration 隔离台浏览器
- * 场景承担，KI-036 守卫）。锁四弹层的语义锚与关键纪律：
- *   A. 左栏三处新增就位（sidebar：设置入口/接入行/隔离行）；
- *   B. 设置弹层：只读面/票计数降级「—」/体检降档占位/danger 区；
- *   C. 接入弹层：预检 dry-run 先行、确认钮以预检为门、错误就地显示锚；
- *   D. 摘除弹层：在飞闸预检/处置默认全保留/dry-run/purge 输入 key 二次确认/executing 锁定；
- *   E. 隔离弹层：原因定位 + 修复指路；
- *   F. 骨架纪律：ESC/遮罩关闭带、executing 不可关（locked）、零 CSS 类名交叉。
+ * Run: node smoke/project-modals.mjs. Pure node source-text assertions (tsx cannot run
+ * directly in node — the same "source-text lock" tradeoff as spec-card-ui.mjs; the real
+ * interaction runs are covered by the integration isolated-console browser scenarios,
+ * KI-036 guard). Locks the semantic anchors and key disciplines of the four modals:
+ *   A. The three new rail entries in place (sidebar: settings entry / add row / quarantine row);
+ *   B. Settings modal: read-only surface / ticket-count degradation 「—」 / health-section
+ *      degraded placeholder / danger zone;
+ *   C. Add modal: precheck dry-run first, the confirm button gated on precheck, inline
+ *      error display anchors;
+ *   D. Remove modal: in-flight-gate precheck / keep-by-default / dry-run / purge requires
+ *      typing the key as a second confirmation / executing lock;
+ *   E. Quarantine modal: reason with file location + repair guidance;
+ *   F. Skeleton discipline: ESC/backdrop close strip, executing not closable (locked), zero
+ *      CSS class-name cross-references.
  */
 
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// 直跑/经 run_tests.mjs（cwd=仓库根）双口径可跑：REPO 从本文件位置推导。
+// Runs both standalone and via run_tests.mjs (cwd = repo root): REPO is derived from this file's location.
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..')
 const read = (p) => readFileSync(join(REPO, p), 'utf8')
 let pass = 0, fail = 0
