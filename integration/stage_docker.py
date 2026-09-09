@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""docker 测试舞台单点入口（t260904-19）：全仓唯一搭台方式。
+"""docker 测试舞台单点入口（票 t260904-19）：全仓唯一搭台方式。
 
-工单背景：自搭进程舞台（随机端口临时控制台 / bench.py 槽位 temporalite / capture-lane
-自搭 boot）与 docker 测试台双轨并存——本文件收拢为单轨：一切需要舞台的场景经本模块
-搭台（同一 compose 文件 server/docker-compose.test.yml），每台独立 compose 工程
-名 + 独立端口档 + 独立容器名/卷前缀，并行互不撞。
+以前自搭进程舞台（随机端口临时控制台、槽位 temporalite、capture-lane 自搭 boot）和
+docker 测试台双轨并存——本文件收拢为单轨：一切需要舞台的场景经这里搭台（同一 compose
+文件 server/docker-compose.test.yml），每台独立 compose 工程名 + 独立端口档 + 独立
+容器名/卷前缀，并行互不撞。
 
 子命令：
   up --project <名> [--services temporal|dsh|full] [--namespace <ns>]
@@ -22,23 +22,23 @@
   0=ok；2=ENV_FAIL（docker 缺席/镜像缺席/起台不健康/端口段耗尽——文案点名缺什么）；
   3=环境冲突（显式指定端口被占，不对抗）；64=用法/畸形输入（场景代码 bug 级）。
 
-## 故障模式取舍清单（review C1：对照 bench.py 槽位制 / capture-lane 自搭台逐项声明）
+## 故障模式处置（逐项对照旧舞台的故障，说结论）
 
-| 旧舞台故障模式 | 本模块处置 | 取舍 |
-| --- | --- | --- |
-| 端口撞车（钉死端口） | 档位 flock 原子预留 + 禁区排除 + bind 探测 | 锁贯穿「探测→compose up→健康」窗口，释放前端口已被 daemon 真绑定=闭 TOCTOU |
-| 并发串台 | -p 工程名 + 独立容器名 + 独立卷前缀 + 档位锁 | 隔离粒度升到容器级 |
-| 持有者崩溃锁不释 | 锁 fd 只在本进程，进程死=内核收 fd=锁自释；若死前容器已绑端口，后来者 bind 探测见忙即滑档 | 不沿用 pass_fds 移交（docker 化后无长命子进程可托管），语义等价 |
-| teardown 重入崩溃 | down 幂等：工程不存在/容器已清均 0 退出，可三连 | 沿用 |
-| detached 进程泄漏 | 不带：容器由 docker daemon 持有、无宿主孙进程树，down 即全灭；本模块自身不留后台进程 | docker 化根除该故障面（声明非遗漏） |
-| 起服务超时无诊断 | 超时带 `docker compose logs` 尾部（2000 字节口径）+ 就地 down -v 清场再退 | 沿用 bench.py 口径 |
-| 误连生产 fail-closed | 禁区硬排除 {3099,3199,7233,8233,17233,18233} + 起台后 JSON 端口 ∉ 生产端口自检；python 审计钩子不带（容器内出网由 compose 网络拓扑约束，宿主 socket 钩子无观测面——场景侧 bench.assert_not_production 沿用） | 钩子搬进本模块=假覆盖，如实不带 |
-| preset 不合拒跑 | 不带：留在 capture-lane（台与证据语义分层） | 拒跑门不搬 |
-| capture-lane 五路径终态回收 | 本模块 CLI 侧：正常/报错/超时/SIGINT/SIGTERM 全走 down -v 清场 | boot 进程组 kill 半边随自搭台退役（无 boot 子进程） |
+| 旧舞台故障 | 本模块处置 |
+| --- | --- |
+| 端口撞车（钉死端口） | 档位 flock 原子预留 + 禁区排除 + bind 探测。锁贯穿「探测→compose up→健康」全程，释放前端口已被 daemon 真绑定=闭 TOCTOU |
+| 并发串台 | 独立 compose 工程名 + 独立容器名 + 独立卷前缀 + 档位锁。隔离粒度升到容器级 |
+| 持有者崩溃锁不释 | 锁 fd 只在本进程：进程死=内核收 fd=锁自释。死前容器已绑端口时，后来者 bind 探测见忙即滑档 |
+| teardown 重入崩溃 | down 幂等：工程不存在/容器已清均 0 退出，可三连 |
+| detached 进程泄漏 | 容器由 docker daemon 持有、无宿主孙进程树，down 即全灭——docker 化根除该故障面 |
+| 起服务超时无诊断 | 超时带 `docker compose logs` 尾部（2000 字节）+ 就地 down -v 清场再退 |
+| 误连生产 fail-closed | 禁区硬排除 {3099,3199,7233,8233,17233,18233} + 起台后 JSON 端口 ∉ 生产端口自检 |
+| preset 不合拒跑 | 不带：留在 capture-lane（台与证据语义分层） |
+| 五路径终态回收 | CLI 侧：正常/报错/超时/SIGINT/SIGTERM 全走 down -v 清场 |
 
 状态与锁：
   锁/状态根 = $SANDBAR_STAGE_LOCK_DIR > ~/.sandbar/test-stages > 平台临时区回落
-  （回落打印 stderr 一行，不静默——沿 bench_root 纪律）。band-<n>.lock 为档位锁；
+  （回落打印 stderr 一行，不静默）。band-<n>.lock 为档位锁；
   project-<名>.json 为在跑台状态（ensure 复用凭据）。
 """
 
@@ -170,7 +170,7 @@ def lock_root() -> pathlib.Path:
     for source, root in candidates:
         try:
             root.mkdir(parents=True, exist_ok=True)
-            # 探针名带 pid+时钟：并发双起两进程互删同名探针会假报「不可写」（L1 并发用例实锤）
+            # 探针名带 pid+时钟：并发双起互删同名探针会假报「不可写」（L1 并发用例实锤）
             probe = root / (".probe-%d-%d" % (os.getpid(), time.time_ns()))
             probe.write_text("ok", encoding="utf-8")
             probe.unlink()
@@ -245,7 +245,7 @@ def choose_band(ephemeral=None):
         fd = _lock_band(i)
         if fd is None:
             continue          # 档被并发者占走 → 滑下一档（非阻塞不排队，见头注取舍）
-        # 锁内复核（以锁为界再探一次：并发者可能 probe 后才上锁/起台）
+        # 锁内复核：并发者可能 probe 后才上锁/起台，拿到锁后再探一次
         if not band_ports_ok(ports, ephemeral) or (set(ports.values()) & state_busy_ports()):
             os.close(fd)
             continue
@@ -322,8 +322,8 @@ def compose_env(project, services, ports, opts):
     env["SANDBAR_TEST_CONSOLE_PORT"] = str(ports["console"])
     if opts.get("repo_dir"):
         env["SANDBAR_TEST_REPO_DIR"] = str(opts["repo_dir"])
-    # 插件依赖树与被测树解耦（gen2 模型）：/repo=被测 workbench 树，
-    # /repo-nm=profile/node_modules 装齐的树（缺省经 default_repo_dir 回落主树）。
+    # 插件依赖树与被测树解耦：/repo=被测 workbench 树，
+    # /repo-nm=profile/node_modules 装齐的树（缺省回落主树）。
     env["SANDBAR_TEST_NM_REPO_DIR"] = str(opts.get("nm_repo_dir") or default_repo_dir())
     # admin.log 遮蔽文件预创建（compose 单文件 bind 的宿主端必须存在，否则 docker
     # 会建出目录）：每台独立 tmp 副本，主树/泳道真 admin.log 不被测试触碰。
@@ -331,9 +331,9 @@ def compose_env(project, services, ports, opts):
     if not admin_log.exists():
         admin_log.touch()
     env["SANDBAR_TEST_ADMIN_LOG"] = str(admin_log)
-    # 容器端挂载点预创建（t260905-08 泳道实锤）：compose 对 /repo 与 /repo-nm 两处单文件
-    # bind admin.log，而 /repo 挂 :ro——被挂树若无 server/admin.log，docker 建挂载点
-    # =EROFS 起台炸（主树常在跑有此文件故 /repo-nm 侧从未露，泳道 worktree 作 /repo 即现形）。
+    # 容器端挂载点预创建（票 t260905-08 泳道实锤）：compose 对 /repo 与 /repo-nm 两处
+    # 单文件 bind admin.log，而 /repo 挂 :ro——被挂树若无 server/admin.log，docker 建
+    # 挂载点=EROFS 起台炸（主树常在跑有此文件，泳道 worktree 作 /repo 即现形）。
     # *.log 是 gitignored 运行时物，touch 空文件不触交付面。
     for tree in (opts.get("repo_dir") or str(REPO), opts.get("nm_repo_dir") or default_repo_dir()):
         server_dir = pathlib.Path(tree) / "server"
@@ -341,7 +341,7 @@ def compose_env(project, services, ports, opts):
             shadow = server_dir / "admin.log"
             if not shadow.exists():
                 shadow.touch()
-    # 凭据物化（gen4）：容器台缺凭据=壳层准入遮罩全屏拦截指针（自搭台对照实锤）。
+    # 凭据物化：容器台缺凭据=壳层准入遮罩全屏拦截指针（自搭台对照实锤）。
     # 源：env SANDBAR_TEST_CREDENTIALS > ~/.sandbar/projects/suyou > <repo>/.dsh > 主树 .dsh。
     cred_env = os.environ.get("SANDBAR_TEST_CREDENTIALS")
     cred_src = None
@@ -357,7 +357,7 @@ def compose_env(project, services, ports, opts):
         shutil.copyfile(cred_src, cred_dst)
         os.chmod(cred_dst, 0o600)  # dsh credentials-local fail-closed：644=拒启（gen4 实锤）
         env["SANDBAR_TEST_CREDENTIALS"] = str(cred_dst)
-    # agent preset 物化（gen6：会话创建依赖 sandbar-integration preset；源=宿主  # naming-compat
+    # agent preset 物化（会话创建依赖 sandbar-integration preset；源=宿主  # naming-compat
     # ~/.dsh/.agent-presets/<项目> 或仓内 .dsh 同位）。缺失=空目录（preset 缺失
     # 诚实呈现），不阻塞起台。
     presets_dir = pathlib.Path(tempfile.gettempdir()) / ("sandbar-agent-presets-%s" % project)
@@ -522,10 +522,9 @@ def stage_healthy(state):
 # ---------------------------------------------------------------- namespace/SA
 
 def resolve_temporal_cli():
-    """temporal CLI 解析（沿 bench._resolve_asset 口径：env > 泳道位 > 主树回退）。"""
-    # MissingAsset（env 钉指路不存在/泳道主树均缺）=明确不可得，不吞——env 钉是
-    # L1「CLI 不可得」分支的依赖面（gen2 实锤：supply 自愈在泳道建 bin 软链后，
-    # 吞异常回退泳道位会让 L1 假设漂移）。
+    """temporal CLI 解析（env > 泳道位 > 主树回退）。"""
+    # env 钉指路不存在/泳道主树均缺=明确不可得，不吞：吞异常会让依赖它的 L1 用例
+    # 假设漂移（supply 自愈在泳道建 bin 软链后实锤）。
     try:
         import bench  # noqa: PLC0415 同目录共享库
         return str(bench.resolve_temporal_bin())
@@ -546,9 +545,8 @@ def register_namespace(ns, addr, timeout=30):
     last_err = ""
 
     def cli_ok(args, tolerate):
-        # gen6 实锤：namespace 服务在 TCP 就绪后仍有短暂未就绪窗——失败短重试
-        # （3 次×2s）；失败时附 CLI stderr 尾（原实现吞 stderr=「create 失败」
-        # 无从归因，违反报错精确性纪律）。
+        # namespace 服务在 TCP 就绪后仍有短暂未就绪窗——失败短重试（3 次×2s）；
+        # 失败附 CLI stderr 尾（吞 stderr=「create 失败」无从归因，违反报错精确性纪律）。
         nonlocal last_err
         for attempt in range(3):
             try:
@@ -627,8 +625,8 @@ def default_repo_dir():
         for prof in ("profile", "profile-headless")
         for pkg in ("sandbar-admin-ui", "sandbar-workbench", "sandbar-knowledge",
                     "sandbar-providers", "sandbar-temporal-tools"))
-    # 完备性判据=两变体十链齐（gen4：单 profile 在而 headless 缺的半成品态曾短路
-    # 跳过自举——t260907-05 农场场景 profile-headless 五链红即此因）
+    # 完备性判据=两变体十链齐：单 profile 在而 headless 缺的半成品态曾短路跳过
+    # 自举（票 t260907-05 农场场景 profile-headless 五链红即此因）
     if nm_complete or _bootstrap_lane_nm():
         return str(REPO)
     try:
@@ -666,9 +664,8 @@ def do_up(project, services_list, opts, timeout, lock_fd=None):
     """起台本体（锁由调用方持有；失败路径就地 down -v 清场再抛）。"""
     ports = opts["ports"]
     env = compose_env(project, services_list, ports, opts)
-    # 总时限预算（gen2 伴随②：--timeout 罩住 up+wait 全程——此前 up 与 wait 各自
-    # 独立吃满 timeout，900s 参数实测可拖 20+ 分钟不自退）。清理面（down/logs）
-    # 另有自身短超时，不计入预算。
+    # 总时限预算：--timeout 罩住 up+wait 全程（此前 up 与 wait 各自独立吃满 timeout，
+    # 900s 参数实测可拖 20+ 分钟不自退）。清理面（down/logs）另有自身短超时，不计入。
     t0 = time.time()
 
     def _remaining(minimum=30):
@@ -751,7 +748,7 @@ def do_ensure(project, services_list, opts, timeout, keep=False):
         state["reused"] = True
         return state
     if state and keep and residue_containers(project):
-        # --keep：在跑但不健康——不拆（可能他泳道同窗在用），如实报环境红（N3 兜底）
+        # --keep：在跑但不健康——不拆（可能他泳道同窗在用），如实报环境红
         raise StageError("供给台 %s 在跑但不健康（ports=%s）；--keep 语义不拆在跑台——"
                          "人工核查或去旗重跑" % (project, state.get("ports")), kind="env")
     if state:

@@ -2,24 +2,21 @@
 """integration 场景执行器（manifest 退役后的项目声明道）。
 
 约定：
-- SCENARIOS = (name, intent, cmd[, pool]) 三元组或四元组——intent 是该场景守护的用户可
-  感知行为/合同；pool 可选："main"（缺省，串行主池）/命名池（如 "ro" 只读并行池，
-  与主池并行）/"exclusive"（独占全程）。同池串行保顺序，跨池并行提吞吐
-  （评审一眼可见；intent 级重复禁止，步骤级共享允许）。
-- 层次：单组件函数测试归 UT（engine/tests pytest、workbench/tests node 源级）；
-  本清单只收跨组件场景、对外合同冻结、用户旅程与故障面对抗。
-- 命名铁律：场景案例文件一律 sc_<slug>.py/.mjs——凡 sc_ 必须登记本清单，
-  凡未登记的 sc_ = 孤儿（lint L5 红）；不带 sc_ 前缀的文件 = 共享/子检查代码，
-  不登记、不报警（t260902 宿主令：约定胜过推断）。
-- 一次性交付验收快照不入场（交付完成使命即终，t260902 宿主令重审定案）。
+- SCENARIOS = (name, intent, cmd[, pool]) 元组。intent=该场景守护的用户可感知行为/合同；
+  pool 可选："main"（缺省，串行主池）/命名池（如 "ro" 只读并行池，与主池并行）/
+  "exclusive"（独占全程）。同池串行保顺序，跨池并行提吞吐；intent 级重复禁止。
+- 层次：单组件函数测试归 UT（pytest / node 源级）；本清单只收跨组件场景、对外合同
+  冻结、用户旅程与故障面对抗。
+- 命名铁律：场景文件一律 sc_<slug>.py/.mjs——凡 sc_ 必须登记本清单，未登记=孤儿
+  （lint L5 红）；不带 sc_ 前缀=共享代码，不登记不报警（票 t260902）。
+- 一次性交付验收快照不入场（交付完成使命即终，票 t260902）。
 - cmd 以仓库根为 cwd、/bin/sh -c 执行，单条超时 900s；只用标准库。
 - 池内并发（260909 提速战役）：条目可带第五元素 "serial"——同池内也只许一个接一个
   跑的场景（进程类/固定端口/pidfile 假设族）；未标 serial 的条目在池内按
-  SANDBAR_POOL_CONC（缺省 4）路并发。SANDBAR_CONC_POOLS（缺省 "main,ro"）圈定
-  哪些命名池吃并发——browser 池共享一台控制台、场景互相驱动同一页面态，本轮
-  不并发（链拆分另案）；SANDBAR_POOL_CONC=1 回退旧语义（池内严格串行）。
-- 清单只收本仓在位资产（L4 口径：cmd 引用脚本必须存在）。迁移种子中指向未迁移
-  资产的 84 条悬空引用已移除；suyou 全量场景集与其资产留在 suyou 仓原位。
+  SANDBAR_POOL_CONC（缺省 4）路并发。SANDBAR_CONC_POOLS（缺省 "main,ro"）圈定哪些池
+  吃并发——browser 池共享一台控制台、场景互相驱动同一页面态，本轮不并发（链拆分另案）；
+  SANDBAR_POOL_CONC=1 回退旧语义（池内严格串行）。
+- 清单只收本仓在位资产（L4 口径：cmd 引用脚本必须存在）。
 """
 import os
 import subprocess
@@ -27,11 +24,10 @@ import sys
 import time
 
 SCENARIOS = [
-    # 移册（t260904-12 乙段，定稿 §7.3「真跑不进闸的（红线禁区/破坏性）不进闸清单」）：
-    # ticket-lifecycle——worker 机械步内恒触发嵌套护栏（SANDBAR_TASK_QUEUE 特征检测，
-    # 防无界自递归：净化半必 clone fixture/起 worker/起票），属设计性环境红，闸内不可
-    # 达 PASS；真实覆盖承接=主库人工清单（t260903-09 主库跑生效）。第二次口径逆转
-    # （t260831-03 不登记→t260831-04 登记→本次移册），依据链见 README「已知限制」。
+    # 移册（票 t260904-12 §7.3：真跑不进闸的（红线禁区/破坏性）不进闸清单）：
+    # ticket-lifecycle 在 worker 机械步内恒触发嵌套护栏（SANDBAR_TASK_QUEUE 特征检测，
+    # 防无界自递归），是设计性环境红，闸内到不了 PASS；真实覆盖由主库人工清单承接
+    # （票 t260903-09）。口径两次翻转（不登记→登记→移册）的依据链见 README「已知限制」。
     # 原 cmd：node integration/baselines/sc_ticket_lifecycle.mjs
 
     ("t260903-10-installer-console-line",
@@ -101,19 +97,18 @@ SCENARIOS = [
      "项目会话区账册状态旅程（t260904-01 面①，灰盒 L3）：多项目用户从顶部行时代旧账册（无 seq）升级——J1 存量迁移各项目独立 1..n+幂等+serialize 往返持久化；J2 编号生命周期兑现拍板 1（关闭不回收余 tab 保号、新会话续号不填空、blank 换绑保号、关闭不回退计数器；↺ 重开已随票② R8 退役）；J3 项目行（pickProjectTabs 过滤/seq 升序/title 三级兜底/active 唯一/工单不进）——票② R8 顶部行消费面已退役，项目行是账册唯一渲染面；J4 跨键不一致对抗（计数器孤高跳号不重发、偏低/丢失按现存最大兜底防撞、账册手改撞号不崩 active 至多一、畸形 seq 剔字段不剔条目后 backfill 重补、LEDGER_CAP 淘汰后计数器不回退）。与随票 smoke（单点纯函数+源文本锚）步骤级共享、intent 级不同：旅程连续状态转移×两消费面交叉×跨键不一致。锚 shared/sessions.ts 公开导出面（方案 D1/D2 定稿：seq 字段/nextProjectSeq max 语义），不锚内部实现；确认框交互/正方形形态/折叠同隐/弹层裁剪为 node 不可测面，人工走查清单见该票结果文件",
      "node integration/t260904-01/sc_project_sessions_ledger_journey.mjs", "ro"),
 
-    # ---- 260904 P3/e2e 回迁（KI-038 收尾）：browser 族 16 条 + t260902-02 e2e 2 条。
-    # 前置已齐：票①(D) 隔离台（bench.py 槽位制）随 t260904-02 落 main；playwright-core
-    # 仍缺（KI-036）——缺环境场景按三态契约记 ENV_FAIL（exit 2）不假红也不假绿，
-    # 依赖恢复后自动生效（t260904-12 闸内无 SKIP 化）。
+    # ---- 260904 browser 族 + e2e 回迁（KI-038 收尾）----
+    # playwright-core 缺（KI-036）时按三态契约记 ENV_FAIL（exit 2）——不假红不假绿，
+    # 依赖恢复后自动生效（票 t260904-12 闸内无 SKIP 化）。
     ("ticket-session-restore",
      "ticket-session 面双半契约（t260831-08 起；browser 半被 t260903-07 反转）：服务端 POST ticket-session/open 保留 find-or-create（session_id=ticket-<id>、created 旗标、重开不重复）与畸形 id/缺 project/未知 project/不存在工单显式 4xx；浏览器半=点工单行中列详情照常开、右栏 chat 零切换（快照零注入、phase 不变、多行点击零 churn）",
      "node integration/baselines/sc_ticket_session_restore.mjs"),
     ("ticket-evidence-images",
      "(black-box, user perspective): // QA screenshots (.suyou/screenshots/*.png in the lane) ",  # naming-compat
      "node integration/baselines/sc_ticket_evidence_images.mjs"),
-    # （session-top-entry / session-tab-interactions 两基线随票② R8 顶部行退役
-    #   正当退役，t260904-05：被测面 SessionTopEntry/wb-sessTop 家族已删，无残留
-    #   消费方；替代看守=smoke/hero.mjs 反转断言 + project-sessions.mjs S6。）
+    # （session-top-entry / session-tab-interactions 随票② R8 退役（票 t260904-05）：
+    #   被测面 SessionTopEntry/wb-sessTop 家族已删，无残留消费方；替代看守=
+    #   smoke/hero.mjs 反转断言 + project-sessions.mjs S6。）
     ("capture-lane-preset",
      "capture-lane-preset.mjs —— 隔离台 preset 物化基线（t260901-02）。 // // 断言 server/ui-check/cap",
      "node integration/baselines/sc_capture_lane_preset.mjs", "browser"),
@@ -170,12 +165,13 @@ SCENARIOS = [
     ("auto-rework-trace",
      "---- A1: 五个自动打回场景，各产一条横幅可见记录（用户视角主契约） ---- scenarios = [ ('acceptance', 'implement', '验收",
      "SANDBAR_TARGET_HOST=127.0.0.1:17233 node integration/baselines/sc_auto_rework_trace.mjs"),
-    # 260904 转正：原判退役（tests/rework-banner-ui 已安家 UI 半），但它同时是
-    # lock-update-integrity 的 EXPECT 数据依赖（sc_auto_rework_trace.mjs），且引擎常量
-    # 半（PHASE_MAIN_CHAIN/ROUTES 源解析）与 UI 单测互补——改判带回。
+    # 260904 改判带回：原判退役（tests/rework-banner-ui 已安家 UI 半），但它同时是
+    # lock-update-integrity 的 EXPECT 数据依赖（sc_auto_rework_trace.mjs），引擎常量半
+    # （PHASE_MAIN_CHAIN/ROUTES 源解析）也与 UI 单测互补。
     # ---- 260904 场景回迁（KI-038，triage=notes/discussions/260904-integration-scenarios-triage.md）----
-    # 自 suyou 冻结仓整族迁回（宿主令直迁）：P1 引擎行为 + P2 ro 面。P3 browser 族与 t260902-02 e2e
-    # 两条暂缓（依赖隔离台基建+playwright 恢复，见 triage）；退役 15 条替代者在 triage 文档。
+    # 自 suyou 冻结仓整族迁回（宿主令直迁）：P1 引擎行为 + P2 ro 面。browser 族与
+    # e2e 两条暂缓（依赖隔离台基建+playwright 恢复，见 triage）；退役 15 条替代者在
+    # triage 文档。
     ("sandbar-contract-v1",
      "Strategy item must name both policy files with their roles. const strat = extractSection",
      "node integration/baselines/sc_sandbar_contract_v1.mjs", "ro"),
@@ -757,9 +753,9 @@ def main() -> int:
         for fname, pv in pools.items():
             ex.submit(_drain, pv, fname or "main")
         ex.shutdown(wait=True)
-    # 汇总行五计数（t260904-12 契约 ②b-1）：na=N/A 是腿级状态，已在场景内折算进
-    # pass/fail（全腿 N/A=场景红），执行器级恒 0、占位保形状。ran=pass+fail+env_fail
-    # 为「双向净」不变式，违反即汇总谎报——按产品红退出（自校验；引擎侧新语义断言随乙段落地）。
+    # 汇总五计数（票 t260904-12）：na=N/A 是腿级状态，场景内已折算进 pass/fail
+    # （全腿 N/A=场景红），执行器级恒 0、占位保形状。ran=pass+fail+env_fail 是
+    # 「双向净」不变式，违反=汇总谎报，按产品红退出（执行器自校验）。
     consistent = (ran == passed + failed + env_failed)
     wall = time.time() - t0
     print("SCENARIOS ran=%d pass=%d fail=%d env_fail=%d na=0 (%.0fs)"

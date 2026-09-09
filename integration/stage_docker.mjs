@@ -1,9 +1,8 @@
-// stage_docker.mjs —— docker 测试舞台 mjs 薄壳（t260904-19）。
+// stage_docker.mjs —— docker 测试舞台 mjs 薄壳（票 t260904-19）。
 //
-// 纪律（review C11）：实现单点在 integration/stage_docker.py（CLI），本文件只做
-// subprocess 调用 + JSON 解析 + 容器内路径的 profile 物化，零分配/健康/回收逻辑
-// 复制（双份必漂移是本仓前科）。场景夹具（lib_fix15/bench-shot/capture-lane）
-// 一律经本壳调用，勿手写 docker compose。
+// 实现单点在 integration/stage_docker.py（CLI）；本文件只做 subprocess 调用 +
+// JSON 解析 + 容器内路径的 profile 物化。分配/健康/回收逻辑零复制——双份必漂移
+// 是本仓前科。场景夹具一律经本壳调用，勿手写 docker compose。
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, cpSync, existsSync, symlinkSync, rmSync } from 'node:fs';
 import path from 'node:path';
@@ -44,14 +43,14 @@ export function stageDown(project) {
   return JSON.parse(p.stdout.trim().split('\n').at(-1));
 }
 
-/** 容器内 profile 物化（lib_fix15.buildProfile / capture-lane.buildTempProfile 的
- *  docker 台版，克缝始终=测泳道/指定树代码）：
+/** 容器内 profile 物化（docker 台版，克缝始终=测泳道/指定树代码）：
  *  - cordis 配置/sandbar-tools.ts 取 repoProfileDir（committed）；
  *  - node_modules 只放一个目录+被测 workbench 软链（→ /repo/server/plugins/workbench，
  *    /repo=被测树）；其余插件由 compose command 从依赖树 /repo-nm（缺省主树，
- *    stage_docker 自动回落）逐项并入——suyou-* 插件是仓内包不在全局 npm，此前
- *    「其余→/usr/local/lib/node_modules」模型对仓内插件是悬空链（gen2 真容器实锤）。
- *  宿主侧不可验证容器内软链解析——由 stage_docker 的 console 健康探针兜底（起不来=ENV_FAIL）。
+ *    stage_docker 自动回落）逐项并入——仓内插件不在全局 npm，「其余→全局
+ *    node_modules」模型对它们是悬空链。
+ *  宿主侧不可验证容器内软链解析——由 stage_docker 的 console 健康探针兜底
+ *  （起不来=ENV_FAIL）。
  *  返回 profileDir（挂载为容器 /profile，SANDBAR_TEST_PROFILE_SRC=/profile）。 */
 export function buildStageProfile({ repoProfileDir, laneWorkbenchDir, tmpHome }) {
   const profDir = path.join(tmpHome, 'profiles', 'suyou');
