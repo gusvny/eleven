@@ -1,11 +1,12 @@
-// multi-tab-coexistence —— t260901-15「工单台多页签共存」集成基线.
+// multi-tab-coexistence — the t260901-15 "ticket workbench multi-tab
+// coexistence" integration baseline.
 //
 // Intent (black-box, user perspective): the ticket workbench is used with
 // MULTIPLE console tabs open at all times. User-reported defects:
 //   (1) tabs are blind to each other — no hint that another tab is viewing a
 //       ticket;
-//   (2) write ops (推进/签字/...) from one tab silently invalidate the other
-//       tab's stale view;
+//   (2) write ops (推进/签字/... — advance/sign-off and friends) from one tab
+//       silently invalidate the other tab's stale view;
 //   (3) hidden tabs keep polling at full rate, amplifying query-channel load
 //       (KI-003); plus the reported race: opening ticket "13" detail "jumps
 //       back to 11" when a stale in-flight poll response lands late.
@@ -28,7 +29,8 @@
 //       a "another tab is viewing" hint; B opening the same ticket shows the
 //       peer line inside the DRAWER; A closing its drawer clears B's hint
 //       (unsubscribe/TTL), not only on tab close.
-//   T2  write cross-invalidation: tab D clicks 推进 on a ticket tab B is
+//   T2  write cross-invalidation: tab D clicks 推进 (advance) on a ticket tab
+//       B is
 //       viewing -> B shows a notice AND silently re-renders the fresh detail
 //       (fixture body marker appears in B's drawer without manual action).
 //       Write-guard: within the recent-remote-write window B's own write
@@ -41,7 +43,8 @@
 //       visible again. If the browser/emulation cannot produce
 //       document.visibilityState === 'hidden' this scenario records env_fail (exit 2) with the
 //       reason (honest coverage declaration, not a dumb guard).
-//   T4  stale-detail race (点 13 跳 11 regression): ticket A's detail response
+//   T4  stale-detail race (the "click 13, land on 11" regression): ticket A's
+//       detail response
 //       is delayed; the user clicks ticket B before it lands; the drawer must
 //       show B and MUST NOT jump back to A when the stale response arrives.
 //   T5  hostile tab traffic: a same-origin page broadcasts malformed messages
@@ -54,8 +57,9 @@
 //       heartbeat-TTL expiry, either acceptable; bounded wait).
 //   T7  hygiene: zero pageerror / console.error across every page.
 //
-// Execution contract (t260904-12 三态): stdout last line
-// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 或全腿 na -> exit 1;
+// Execution contract (t260904-12 three-state): stdout's last line is
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 or every leg na ->
+// exit 1;
 // environment-dependent halves record env_fail (exit 2) with
 // reason). Node >= 22.18. Precedent for the two-layer split, stubbing style
 // and infra helpers: lane-parallel-dom.mjs / session-tab-interactions.mjs.
@@ -128,7 +132,7 @@ const WF = {
     { id: 'merge', name: '合并', role: 'integration', parts: ['human'] },
   ],
 }
-// settled + awaiting-human => availableOps yields 推进/打回 (a no-input write op).
+// settled + awaiting-human => availableOps yields 推进/打回 (advance / send-back, a no-input write op).
 const row = (id, title) => ({
   id, role: 'developer', status: 'settled', title,
   workflow: 'dev-lane', stage: 'merge', stage_state: 'awaiting-human',
@@ -276,7 +280,8 @@ async function openBoard(page) {
   const boardIcon = page.locator('span.wb-view-icon[title="工单列表"]').first()
   if (!(await waitFor(async () => (await boardIcon.count()) > 0, 10000))) return false
   await boardIcon.click()
-  // t260905-05 换锚：行卡契约（boardCard，见上）替代已退役的 tr.wb-row。
+  // t260905-05 re-anchored: the row-card contract (boardCard, above) replaces
+  // the retired tr.wb-row.
   return waitFor(async () =>
     (await boardCard(page, FIDA).count()) > 0 &&
     (await boardCard(page, FIDB).count()) > 0, 10000)
@@ -300,8 +305,9 @@ const domDrawerViewerHint = `(() => {
 })()`
 
 const domDrawerId = `(() => {
-  // 实际类名 wb-d2-id（t260826-02 详情抽屉头部工单号 code），wb-drawer-id 是设计期误记；
-  // 两个候选都试，兼容未来改名（先新后旧）。
+  // The real class is wb-d2-id (the t260826-02 ticket-code in the detail
+  // drawer header); wb-drawer-id was a design-time misnomer. Try both
+  // candidates, newest first, so a future rename stays compatible.
   const el = document.querySelector('.wb-drawer .wb-d2-id') || document.querySelector('.wb-d2-id')
     || document.querySelector('.wb-drawer .wb-drawer-id');
   return el ? el.textContent : null;
@@ -338,19 +344,27 @@ const fnHostileTraffic = `(channel) => {
 
 // ---------------------------------------------------------------- S1 scenarios
 
-// 行卡锚契约（t260904-17 钉死）：中列全尺寸卡与左栏迷你卡共用 data-ticket-id，
-// 用组件自声明 data-compact 消歧——板面=false、左栏=true（裸 locator 会撞车，
-// 先例 integration/t260904-17/sc_ticket_list_rowcard_ui.mjs boardCard）。
-// t260905-05 再锚定：原锚 tr.wb-row 已随 t260904-17 平铺行卡退役（现行 bundle
-// 零匹配，S1 precheck 曾因此恒 env_fail）；断言语义零弱化，仅换锚 + 补 M9
-// 审批弹层跳（见 completeApproveModal）。
+// Row-card anchor contract (pinned by t260904-17): the middle column's
+// full-size card and the left column's mini card share data-ticket-id, so
+// disambiguate with the component's own data-compact declaration —
+// board=false, left column=true (a bare locator would match both; precedent:
+// integration/t260904-17/sc_ticket_list_rowcard_ui.mjs boardCard).
+// t260905-05 re-anchoring: the old tr.wb-row anchor was retired along with
+// t260904-17's flat row cards (zero matches in the current bundle, which kept
+// the S1 precheck at a permanent env_fail); the assertion semantics are
+// unchanged, only the anchor moved, plus the M9 approval-modal hop (see
+// completeApproveModal).
 const boardCard = (page, id) => page.locator(`[data-ticket-id="${id}"][data-compact="false"]`)
 
-/** M9 审批弹层补步（t260901-22 拍板的写链第二跳）：awaiting-human 票点「推进」
- *  开 .wb-modal 审批层，须点「确认通过并推进」才落写（写守门 native confirm 在其
- *  后的 doOp 内，页级 dialog handler 统一 accept）。返回 true=弹层已确认。
- *  判负口径（review C3，不静默跳过）：弹层在场但确认钮缺失 → throw 点名断言；
- *  点击后既无 native confirm 也无写落地 → 由调用方的 guardMsgs/write 计数断言判负。 */
+/** M9 approval-modal helper (the second hop of the write chain decided by
+ *  t260901-22): clicking 推进 on an awaiting-human ticket opens the .wb-modal
+ *  approval layer, and 「确认通过并推进」 must be clicked before the write
+ *  lands (the write-guard native confirm lives in the doOp after it; the
+ *  page-level dialog handler accepts it). Returns true = the modal was
+ *  confirmed. Failure policy (review C3, never silently skipped): the modal
+ *  is present but the confirm button is missing → throw naming the assertion;
+ *  after the click there is neither a native confirm nor a landed write → the
+ *  caller's guardMsgs/write-count assertions decide the failure. */
 async function completeApproveModal(page) {
   if (!(await waitFor(async () => (await page.locator('.wb-modal').count()) > 0, 5000))) return false
   const confirmBtn = page.locator('.wb-modal button', { hasText: '确认通过并推进' }).first()
@@ -375,10 +389,14 @@ async function openDetail(page, id, { force = false } = {}) {
   if (!(await waitFor(async () => (await card.count()) > 0, 8000))) {
     throw new Error(`row ${id} not rendered`)
   }
-  // force=只放宽点击到达手段（跳过 actionability 的 stable 等待），行为断言不变
-  // （抽屉必须真开）。T5b 专用：hostile 流量后 presence 轮询高频重渲染会让 boundingBox
-  // 持续抖动、stable 永不满足=工具伪红（行在场、console 零 error、真实用户点得动）；
-  // 行的正常可点性已由 T4（非 force 路径）单独验证。若 force 后抽屉仍不开=产品红如实落。
+  // force only relaxes how the click reaches the target (skipping
+  // actionability's stable wait); the behavior assertion is unchanged (the
+  // drawer must really open). T5b-only: after hostile traffic, the
+  // high-frequency presence-poll rerenders keep boundingBox jittering so
+  // stable never settles = a tooling fake red (the row is present, the console
+  // has zero errors, a real user can click it). The row's normal
+  // clickability is verified separately by T4 (the non-force path). If the
+  // drawer still does not open after force, that is a real product red.
   await card.click(force ? { force: true, timeout: 8000 } : undefined)
   const ok = await waitFor(async () => {
     const t = await page.evaluate(domDrawerId)
@@ -422,29 +440,38 @@ async function scenarioClosedTab(a, b) {
   return null
 }
 
-// T2/T5 失败文案的定性标签：本两腿经 t260904-19 三轮仲裁定性为 workbench 多页签
-// write-invalidation 链的既有产品缺陷（环境无关对照+force 取证实证，非本票回归），
+// Qualification tag for the T2/T5 failure text: three rounds of t260904-19
+// arbitration qualified both legs as a pre-existing defect of the workbench's
+// multi-tab write-invalidation chain (proven by an environment-independent
+// control plus force-based evidence capture; not a regression of this ticket),
 // 豁免申请已交宿主签字（.suyou/stage_arbitrate_gen14.json）。标签随 FAIL 行输出，  // naming-compat
 // 防「红=正常」习惯化淹掉该面的真回归：若修复后本腿转绿，标签自然消失。
+// (English: the tag prints on the FAIL line so "red = normal" habituation
+// cannot drown a real regression on this surface; once a fix turns the leg
+// green, the tag naturally disappears.)
 const PRE_EXISTING_TAG = '（t260904-19 仲裁定性：既有产品缺陷 pre-existing，豁免申请 gen14 待宿主签字；workbench 专项票修复后转绿）'
 const tagPreExisting = () => PRE_EXISTING_TAG
 
 async function scenarioWriteCrossInvalidation(b, d) {
-  // T1b 留下的抽屉是全屏 overlay，会挡住本场景的行点击——先关（真实用户也会先关）。
+  // The drawer T1b left behind is a full-screen overlay that would block this
+  // scenario's row clicks — close it first (a real user would too).
   await closeDrawer(b)
   await openDetail(b, FIDB)
-  // 写守门口径（方案拍板「宁提醒不强禁」）：B 正在看 FIDB，D 的写会弹 confirm
-  // （提示「另一页签正在查看」）；实测必须显式 accept，否则 Playwright 默认
-  // dismiss = 写被取消。收集文案断言守门确实点名了对端。
+  // Write-guard policy (the plan decided "warn rather than hard-block"): B is
+  // viewing FIDB, so D's write raises a confirm (naming 「另一页签正在查看」);
+  // in practice it must be accepted explicitly, otherwise Playwright's default
+  // dismiss cancels the write. The messages are collected so the assertion can
+  // prove the guard really named the peer.
   const guardMsgs = []
   for (const p of [b, d]) {
     p.on('dialog', (dlg) => { guardMsgs.push(dlg.message()); void dlg.accept() })
   }
   // D performs the write from its list row; B is viewing the same ticket.
   await clickRowAdvance(d, FIDB)
-  await page_wait(800) // confirm + POST 落地
-  // awaiting-human 工单先弹既有「审批通过并推进？」confirm，写守门 confirm 在其后——
-  // 断言「本轮任一 dialog 点名了对端」即可，不钉次序。
+  await page_wait(800) // confirm + POST landing
+  // An awaiting-human ticket first raises the pre-existing 「审批通过并推进？」
+  // confirm, with the write-guard confirm after it — so assert that "some
+  // dialog in this round named the peer" instead of pinning the order.
   const guardHit = guardMsgs.find(m => /另一页签|其它页签|正在查看/.test(m))
   if (!guardHit) {
     return `no dialog names the viewing peer (dialogs: ${JSON.stringify(guardMsgs)})`
@@ -461,13 +488,17 @@ async function scenarioWriteCrossInvalidation(b, d) {
   await clickRowAdvance(d, FIDB)
   await page_wait(1500) // let the broadcast land on B before B's click
   await closeDrawer(b)
-  // B 的写同样走页级持久 dialog handler（guardMsgs 统一收集、统一 accept——
-  // 叠加 once handler 会双 accept 报「already handled」）。以消息计数差判断新弹窗。
+  // B's write goes through the same page-level persistent dialog handler
+  // (guardMsgs collects and accepts them all — stacking a once handler would
+  // double-accept and report "already handled"). A new dialog is detected by
+  // the difference in the message count.
   const before = guardMsgs.length
   await clickRowAdvance(b, FIDB)
-  // B 的写会先弹既有「审批通过并推进？」confirm，写守门 confirm 在其后——
-  // 等 5s 内任一新 dialog 点名对端；同时盯 write 计数（一条 confirm 都没弹
-  // 就直写 = 守门缺失，即刻判负不等超时）。
+  // B's write first raises the pre-existing 「审批通过并推进？」confirm, with
+  // the write-guard confirm after it — wait up to 5s for any new dialog to
+  // name the peer, while also watching the write count (a write that lands
+  // without a single confirm = the guard is missing: fail immediately instead
+  // of waiting out the timeout).
   const beforeWrites = b.__st.counts.write
   const hitPeer = await waitFor(async () => {
     if (guardMsgs.length > before && guardMsgs.slice(before).some(m => /另一页签|其它页签|正在查看|仍要继续|刚刚/.test(m))) return true
@@ -507,11 +538,14 @@ async function scenarioHiddenStopsPolling(front, hidden, ctx) {
   }
   let emulated = false;
   if (vs !== 'hidden') {
-    // 无头 Chrome 对后台 tab 恒报 visible（bringToFront 轮换 + CDP
-    // Page.setWebLifecycleState 均不生效，260908 实锤）——退属性级仿真：覆写
-    // document.visibilityState 并派发 visibilitychange。驱动的仍是 app 的同一
-    // 份监听同一份契约（visibility-poll.ts 按 visibilityState+事件门控轮询），
-    // 断言面（33s 零请求+恢复可见即重拉）一字不松。
+    // Headless Chrome always reports visible for a background tab (both the
+    // bringToFront rotation and CDP Page.setWebLifecycleState failed in
+    // practice, confirmed 260908) — fall back to property-level emulation:
+    // overwrite document.visibilityState and dispatch visibilitychange. This
+    // still drives the app's own listener and contract (visibility-poll.ts
+    // gates polling on visibilityState + the event), and the assertion surface
+    // (33s of zero requests + refetch on becoming visible again) is not
+    // loosened by a word.
     await hidden.evaluate(() => {
       Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true });
       document.dispatchEvent(new Event('visibilitychange'));
@@ -531,7 +565,8 @@ async function scenarioHiddenStopsPolling(front, hidden, ctx) {
   if (leak !== 0) return `hidden tab issued ${leak} API request(s) in 33s (list polls: ${leakList})`
   await hidden.bringToFront()
   if (emulated) {
-    // 恢复可见：仿真态翻回 visible 并派发事件（真 OCCLUSION 环境此步=天然发生）。
+    // Visible again: flip the emulated state back to visible and dispatch the
+    // event (in a real OCCLUSION environment this step happens on its own).
     await hidden.evaluate(() => {
       Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
       document.dispatchEvent(new Event('visibilitychange'));
@@ -543,15 +578,19 @@ async function scenarioHiddenStopsPolling(front, hidden, ctx) {
 }
 
 async function scenarioStaleDetailRace(page, shared) {
-  // Reproduce 点 13 跳 11: FIDA's detail response is held; the user clicks
+  // Reproduce the "click 13, land on 11" jump: FIDA's detail response is
+  // held; the user clicks
   // FIDB before it lands; the late stale response must not overwrite the drawer.
   shared.delays[FIDA] = 1500
   const rowA = boardCard(page, FIDA)
   await rowA.click()
   await page_wait(300) // FIDA request in flight, still pending
-  // FIDA 的抽屉此刻已弹出（全屏 overlay 挡住指针），真实世界的第二跳来自
-  // 侧栏点工单（focusId 联动）——与行点击汇入同一 openDetail 入口。这里用
-  // JS 派发点击同一行卡，过 overlay 驱动同一代码路径（测的是在途竞态，不是遮罩）。
+  // FIDA's drawer is already open at this point (a full-screen overlay blocks
+  // the pointer), so the real-world second hop comes from clicking a ticket in
+  // the sidebar (the focusId linkage) — which funnels into the same openDetail
+  // entry as a row click. Here a JS-dispatched click on the other row card
+  // drives that same code path through the overlay (what is under test is the
+  // in-flight race, not the overlay).
   await page.evaluate(`(() => {
     const row = [...document.querySelectorAll('[data-ticket-id]')].find(r =>
       r.getAttribute('data-ticket-id') === '${FIDB}' && r.getAttribute('data-compact') === 'false')
@@ -632,8 +671,10 @@ async function runBrowser(pw, browser) {
     await attachStub(p, shared, counts)
     return p
   }
-  // failWith（catch 路径）同带定性标签：T2/T5 的 throw 形态（如 drawer did not open）
-  // 走这里而非 err 分支——两条路径都要携带仲裁定性，防习惯化缺一半。
+  // failWith (the catch path) carries the qualification tag too: T2/T5 throws
+  // (e.g. "drawer did not open") land here rather than in the err branch — both
+  // paths must carry the arbitration qualification, or the anti-habituation
+  // measure is only half there.
   const failWith = async (name, e) => record(name, 'fail', String(e).slice(0, 180) + tagPreExisting())
   try {
     const a = await mkPage()
