@@ -95,6 +95,10 @@ DEFAULT_CONSOLE_PORT, DEFAULT_TEMPORAL_PORT, DEFAULT_TEMPORAL_UI_PORT = 3199, 17
 # at runtime ip_local_port_range is read as well to strip overlap (unreadable =
 # bypass that defense layer, no single point of dependence).
 BAND_BASE, BAND_STEP, BAND_COUNT = 21000, 10, 400
+# 状态清扫带龄护栏（state_busy_ports）：daemon 风暴窗内 docker ps 标签过
+# 滤瞬时空窗会把刚写好的状态误判 stale——新鲜状态一律按存活处置（档位保留），
+# 真 stale（秒级坠毁的残留）由护栏期后的清扫回收。取值 >> 起台端到端时长。
+STALE_STATE_GRACE_S = 120
 SLOT_OFFSET = {"console": 0, "temporal": 1, "ui": 2}
 
 PROJECT_RE = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
@@ -242,8 +246,17 @@ def state_busy_ports():
     "the daemon bound it but the holder just died"; state + containers both
     present = the stage is alive, so leave its ports alone even when they look
     momentarily free. No containers = stale state (a boot that crashed before
-    down) -> clean it up in place without blocking the band."""
+    down) -> clean it up in place without blocking the band.
+
+    带龄护栏（260909 提速战役③终验 run Q 实锤）：daemon 风暴窗（多场并发起
+    台的秒级窗口）内 docker ps 标签过滤会瞬时空窗——刚写好的状态文件被误判
+    stale 删除 → 同 compose 项目二次起台 → compose 挤掉刚起好的健康台
+    （run L/M/O 的 console 台三连起台与挤占即此族，~50% 间歇、只发生
+    在开跑风暴窗）。新鲜状态（< STALE_STATE_GRACE_S）只可能是刚起好的
+    台：不按 stale 处置，其档位按占用保留（400 档，宽限期内占用代价可忽略）；
+    真·秒级坠毁的残留状态由护栏期后的清扫回收。"""
     busy = set()
+    now = time.time()
     for f in lock_root().glob("project-*.json"):
         try:
             st = json.loads(f.read_text(encoding="utf-8"))
@@ -252,8 +265,11 @@ def state_busy_ports():
                 continue
             if residue_containers(str(project)):
                 busy.update(int(p) for p in (st.get("ports") or {}).values())
+            elif now - f.stat().st_mtime < STALE_STATE_GRACE_S:
+                # 新鲜状态 + 容器瞬时空窗 = 刚起好的台，档位按占用保留
+                busy.update(int(p) for p in (st.get("ports") or {}).values())
             else:
-                f.unlink()   # stale state: containers gone, the band is given up (crash-residue self-heal)
+                f.unlink()   # 带龄确认无容器：真 stale，回收档位（崩溃残留清扫）
         except (OSError, ValueError):
             continue
     return busy

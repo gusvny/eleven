@@ -14,6 +14,8 @@ UT 随实现重构同批重写，不留指向退役路径的恒红假网，KI-03
 - 并发双起（验收①回归锚）：两进程同时 up，各得不同档位（TOCTOU 闭合面——假 daemon
   真绑端口，后来者 bind 探测见忙滑档）；
 - 档位锁外部占用 → 分配滑档；
+- 状态清扫带龄护栏（run Q 挤台回归锚）：新鲜状态无容器在场也保留档位/
+  不删文件；带龄无容器状态才被回收；
 - docker 缺席 / 测试镜像缺席 / compose up 失败（半途死）→ 诚实环境红 + 就地清场；
 - 畸形输入全电池：project/端口旋钮/目录/半指定——逐条点名检查项、零副作用；
 - ensure：健康复用（reused）+ 半残拆重起 + 同项目并发 ensure 互斥（run K 雷群
@@ -274,6 +276,33 @@ class BandAllocationTest(StageCLIBase):
         finally:
             os.close(fd)
         self.cli("down", "--project", "utb")
+
+    def test_fresh_state_never_swept_as_stale(self):
+        """run Q 挤台回归锚：daemon 风暴窗内 docker ps 标签过滤瞬时空窗会把
+        刚写好的状态误判 stale 删除 → 同 compose 项目二次起台、compose 挤掉
+        刚起好的健康台（run L/M/O 的 console 台反复横跳即此族，~50% 间歇）。
+        带龄护栏：新鲜状态（< STALE_STATE_GRACE_S）无容器在场也按存活处置
+        （档位保留、文件不删）；带龄状态才由清扫回收。"""
+        import shutil
+        if not shutil.which("docker"):
+            self.skipTest("docker 缺席——residue 面不可用")
+        root = sd.lock_root()
+        fresh = root / "project-freshswp.json"
+        old = root / "project-oldswp.json"
+        try:
+            fresh.write_text(json.dumps({"project": "freshswp", "ports": {"console": 24100}}),
+                             encoding="utf-8")
+            old.write_text(json.dumps({"project": "oldswp", "ports": {"console": 24110}}),
+                           encoding="utf-8")
+            os.utime(str(old), (0, 0))  # mtime 纪元 0 → 必过带龄
+            busy = sd.state_busy_ports()
+            self.assertIn(24100, busy, "新鲜状态无容器在场也应按存活保留档位（run Q 护栏）")
+            self.assertTrue(fresh.exists(), "新鲜状态不得被 stale 清扫删除")
+            self.assertFalse(old.exists(), "带龄无容器状态应由清扫回收")
+            self.assertNotIn(24110, busy, "被清扫的档位不再占用")
+        finally:
+            fresh.unlink(missing_ok=True)
+            old.unlink(missing_ok=True)
 
 
 class HonestEnvFailTest(StageCLIBase):
