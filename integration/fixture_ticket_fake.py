@@ -4,15 +4,15 @@
 # ticket-evidence-images）需要台上有「健康工单」——行有标题、抽屉 show 秒回。
 # 真 workflow 没有常驻 worker 时查询会空等到超时（左栏「查询超时，刷新重试」、
 # 抽屉 show 挂起）。而引擎有现成出路：COMPLETED 的 workflow 免 worker 直读
-# （client.py cmd_ticket_query 的 result() 通路，260824 实测口径）——所以夹具
-# 票只要「跑到收口」就永久健康（收口 7 天回填窗内列表行带全量 meta）。
+# （client.py cmd_ticket_query 的 result() 通路）——所以夹具票只要「跑到收口」
+# 就永久健康（收口 7 天回填窗内列表行带全量 meta）。
 #
 # 本模块被 fixture_ticket_worker.py 以 Worker 装载：必须保持「干净模块」
 # （只有 temporalio import + 类定义，无模块级受限调用）——temporalio 沙箱
 # 校验 @workflow.defn 类时会重执行定义模块，模块级 pathlib/subprocess 会炸
-# 校验（integration/t260902-02 同案）。快照 meta 形状对齐 dev_lane._init
-# 的字段面（消费方=client.py _row_from_meta / handleTicketSessionOpen 的
-# workspace/worktree 判定），只填场景要的面，不追求全字段复刻。
+# 校验（票 t260902-02 同案）。快照 meta 形状对齐 dev_lane._init 的字段面
+# （消费方=client.py _row_from_meta / handleTicketSessionOpen 的 workspace/worktree
+# 判定），只填场景要的面，不追求全字段复刻。
 
 from temporalio import workflow
 

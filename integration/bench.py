@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""隔离测试台共享库（t260904-02 建，t260904-19 收敛）：「不连生产」守卫与审计钩子
-+ fixture 注册表 + 引擎资产解析。
+"""隔离测试台共享库（票 t260904-02 建、t260904-19 收敛）：「不连生产」守卫 +
+fixture 注册表 + 引擎资产解析。
 
-## t260904-19 槽位制退役声明
+## 槽位制退役声明（t260904-19）
 
-本库原有 temporalite 槽位制（acquire_slot / Slot / BenchBusy / BenchEnvConflict /
-bench_root / TempDSHHome）已随「所有测试同一 docker 舞台」票退役：temporal 引擎台
-由 integration/stage_docker.py 统一供给（compose 槽位档 → docker 容器档，端口档位
-flock 原子预留、禁区排除、零残留核验、崩溃自释等槽位制已处理的故障模式逐项取舍见
-stage_docker.py 头注对照表）。本库只保留仍被场景消费的面：
+本库原有的 temporalite 槽位制已随「所有测试同一 docker 舞台」退役：temporal 台
+由 integration/stage_docker.py 统一供给（compose 工程名隔离 + 端口档位锁 + 零残留
+核验），槽位制处理过的故障模式逐项取舍见 stage_docker.py 头注。本库只留仍被
+场景消费的面：
 
   PROD_PORTS / ProductionGuardError / assert_not_production   生产守卫（fail-closed）
   port_open / pick_free_port                                  探测原语
@@ -18,9 +17,6 @@ stage_docker.py 头注对照表）。本库只保留仍被场景消费的面：
   audit_hook_env（+ sitecustomize 模板）                      被测子进程「不连生产」审计钩子
   write_registry                                              fixture 项目注册表
 
-契约对齐真源=integration/t260904-02/lib_gate.py 头注（随本票同步收敛）。
-L1=integration/tests/test_stage_docker.py（test_bench.py 已随槽位制退役同批重写）。
-
 ## 「不连生产」审计钩子（python 面）
 sitecustomize.py 注入被测子进程 PYTHONPATH：sys.addaudithook 监 socket.connect，
 目标端口∈PROD_PORTS 先记 jsonl 后 raise——audit 钩子在系统调用前触发，raise 即
@@ -28,10 +24,10 @@ sitecustomize.py 注入被测子进程 PYTHONPATH：sys.addaudithook 监 socket.
 边界（明示不静默）：只覆盖 python 子进程；Go 面（temporal CLI）由显式端口参数断言补面；
 docker 台的容器内出网由 compose 网络拓扑约束（stage_docker 头注取舍表）。
 
-环境缝（泳道缺资产时的回退，KI-020③ 邻接绷带）：
-  SANDBAR_TEMPORAL_BIN   temporal 二进制（缺省：<repo>/server/engine/bin/temporal，
+环境缝（泳道缺资产时的回退）：
+  SANDBAR_TEMPORAL_BIN   temporal 二进制（缺省 <repo>/server/engine/bin/temporal，
                         泳道缺失时读 .git gitfile 回退主树同位）
-  SANDBAR_POC_PYTHON     带 temporalio 的解释器（缺省：<repo>/…/.venv/bin/python，同样回退主树）
+  SANDBAR_POC_PYTHON     带 temporalio 的解释器（缺省 <repo>/…/.venv/bin/python，同样回退主树）
 """
 from __future__ import annotations
 
@@ -50,14 +46,10 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # metrics 端口生产侧未固定公开，不列入（隔离台自身 metrics 全显式即可）。
 PROD_PORTS = {7233, 8233}
 
-# 槽位端口基址：frontend 19100+ / UI 19200+ / metrics 19300+ 槽号。
-# 结构性避开 7233/8233/3099；--ui-port 缺省=--port+1000（CLI 实测），必须显式。
+# 槽位端口基址（槽位制已退役，常量留作历史锚；结构性避开 7233/8233/3099）。
 SLOT_FE_BASE = 19100
 SLOT_UI_BASE = 19200
 SLOT_MET_BASE = 19300
-
-_START_TIMEOUT = 60          # temporalite 就绪上限（秒）
-_STOP_TERM_TIMEOUT = 10      # 优雅停等待（秒）
 
 
 class ProductionGuardError(RuntimeError):
@@ -170,10 +162,8 @@ def poc_python() -> str:
 
 # ---- 「不连生产」审计钩子（python 面）----
 # sitecustomize.py 注入被测子进程 PYTHONPATH：sys.addaudithook 监 socket.connect，
-# 目标端口∈PROD_PORTS 先记 jsonl 后 raise——audit 钩子在系统调用前触发，raise 即
-# 阻断（自证腿连 127.0.0.1:7233 会被拦，零真连生产）。
-# 边界（明示不静默）：只覆盖 python 子进程；Go 面（temporal CLI）由槽位库的
-# 显式端口参数 + argv 断言补面。
+# 目标端口∈PROD_PORTS 先记 jsonl 后 raise。边界（明示不静默）：只覆盖 python 子进程；
+# Go 面（temporal CLI）由显式端口参数断言补面。
 
 _AUDIT_SITECUSTOMIZE = '''import json as _json
 import os as _os

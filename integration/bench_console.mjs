@@ -1,18 +1,17 @@
 #!/usr/bin/env node
-// bench_console.mjs —— 隔离台 console boot 骨架薄壳（t260904-02，review C6）。
-// 【t260904-19 退役注记】自搭进程舞台退役后，本壳只剩「boot 骨架自检」价值：
-// 闸内/场景一律走 integration/stage_docker.py（docker 台单点入口）；本壳不再被
-// 任何场景消费，保留仅供 boot 机制自检（buildTempProfile 仍服务 --boot-local
-// 人工通路）。勿在闸内引用。
+// bench_console.mjs —— 隔离台 console boot 骨架薄壳（票 t260904-02）。
+// 【退役注记 t260904-19】自搭进程舞台退役后，本壳只剩「boot 骨架自检」价值：
+// 闸内/场景一律走 integration/stage_docker.py；本壳不再被任何场景消费，保留仅供
+// boot 机制自检（buildTempProfile 仍服务 --boot-local 人工通路）。勿在闸内引用。
 //
 // 复用真源 server/ui-check/capture-lane.mjs（buildTempProfile /
 // materializePresets / presetMaterializeRejectReason），不复制逻辑（双份必漂移）。
 // 本壳提供 --selfcheck：临时 DSH_HOME + 凭据拷贝（若源在）+ pickFreePort×2 不等 +
 // preset 物化（桩源）+ buildTempProfile + teardown 幂等二连。
 //
-// 与 suyou t260903-06 骨架的差异（落文明示）：骨架里 preset 不合=exit2 拒跑——
-// 那是「场景门」语义；本 selfcheck 是**自检**，buildTempProfile 腿在泳道内缺
-// profile/node_modules 时显式 [ENV_FAIL]（t260904-12 三态：缺环境=exit 2，
+// 与 t260903-06 骨架的差异（落文明示）：骨架里 preset 不合=exit2 拒跑——那是
+// 「场景门」语义；本 selfcheck 是**自检**，buildTempProfile 腿在泳道内缺
+// profile/node_modules 时显式 [ENV_FAIL]（票 t260904-12 三态：缺环境=exit 2，
 // 绝不 exit 0 假绿）并继续跑其余腿（原因必须打印，不静默），
 // 合并回主树后（node_modules 在位）自检腿自然全量。
 //

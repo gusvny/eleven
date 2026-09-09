@@ -1,8 +1,8 @@
 # fixture_ticket_worker.py —— 夹具票收口 worker（260908；lib_stage_console 的
-# seedFixtures  spawn 本脚本，把 RUNNING 的夹具票跑到 COMPLETED）。
+# seedFixtures spawn 本脚本，把 RUNNING 的夹具票跑到 COMPLETED）。
 #
 # 生命周期=一次性排水：起 Worker 轮询各夹具票的专属队列（sandbar-ticket-<id>），
-# 等全部票 COMPLETED 即自退。票已收口的常态下秒退（描述轮询首轮即满足）。
+# 等全部票 COMPLETED 即自退。票已收口的常态下秒退。
 # 为什么值得一个真 worker 进程：COMPLETED 之后整张票免 worker 直读（见
 # fixture_ticket_fake.py 头注）——常驻成本只在首种那几秒。
 #
