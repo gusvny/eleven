@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""spec 四条修订与 FLOW_BRIEF 条款防悄悄回退（合并守卫）（10→3 合并守卫，t260902 宿主令）。"""
+"""Guard against the four spec revisions and the FLOW_BRIEF clauses quietly
+rolling back (merged guard) (10->3 guard merge, host-ordered t260902)."""
 import subprocess
 import sys
 

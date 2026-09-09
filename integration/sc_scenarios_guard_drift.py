@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""文档/链路与代码真源漂移检测（合并守卫）（10→3 合并守卫，t260902 宿主令）。
+"""Doc/lane vs code truth-source drift detection (merged guard) (10->3 guard
+merge, host-ordered t260902).
 
-三态分类（t260904-19 gen10 对齐 pipeline 守卫壳）：baseline 退 2=环境缺供
-（如 lane-stages-chain 在无 temporalio venv 的 worktree 的行为腿降级）=ENV_FAIL，
-不是产品红——旧二态版把 env_fail 形态计成 fail=守卫壳三态计数不一致（KI 提案 B
-的现存实例，本票修正）。汇总退出码沿套件优先级：fail>0→1、env_fail>0→2、全过→0。
+Three-state classification (t260904-19 gen10, aligned with the pipeline guard
+shell): a baseline exiting 2 = missing environment supply (e.g.
+lane-stages-chain's behavior leg degrading in a worktree without a temporalio
+venv) = ENV_FAIL, not product red — the old two-state version counted the
+env_fail shape as fail, which made the guard shell's three-state counts
+disagree (a live instance of KI proposal B, fixed by that ticket). The summary
+exit code follows the suite priority: fail>0 -> 1, env_fail>0 -> 2, all green
+-> 0.
 """
 import subprocess
 import sys

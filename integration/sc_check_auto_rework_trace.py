@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
-"""check_auto_rework_trace.py —— 自动打回留痕自测（t260901-04）。
+"""check_auto_rework_trace.py — self-test for automatic-rework trace records
+(t260901-04).
 
-直跑：python3 integration/check_auto_rework_trace.py（cwd=仓库根）。
-制式：dev_lane 依赖 temporalio（本环境不可导入），不 import dev_lane——
-源码锁断言结构 + 微实现表驱动复刻校验逻辑（两个方向 + fallback + done）。
+Run directly: python3 integration/check_auto_rework_trace.py (cwd = repo root).
+Format: dev_lane depends on temporalio (not importable in this environment), so
+dev_lane is never imported — structural source locks plus a table-driven micro
+implementation that replays the validation logic (both directions + fallback +
+done).
 
-背景：工单台打回横幅只吃 timeline 里 state='rework' 记录；验收走查等
-5 处内部自动打回原来不走 _apply_rework 的留痕路径，用户看不到打回原因。
-本脚本锁：_auto_rework 统一入口在位（含 fallback 形参/词表校验/role 显式映射/
-无 _step 调用）、5 处接入点各自传 who="workflow" 与专属 fallback、merge 点
-不再塞 self._rework（防双落）、PHASE_MAIN_CHAIN/PHASE_MAIN_ROLES 双常量键集合
-一致；并用微实现跑正反向畸形输入用例。
+Background: the workbench rework banner only reads timeline records with
+state='rework'; the five internal automatic rework points (acceptance
+walkthrough etc.) used to bypass _apply_rework's trace path, so users never saw
+why a ticket was sent back. This script locks: the _auto_rework unified entry
+in place (including the fallback parameter / vocabulary validation / explicit
+role mapping / no _step calls), the 5 wire-in points each passing
+who="workflow" and their own fallback, the merge point no longer stuffing
+self._rework (preventing a double write), and the PHASE_MAIN_CHAIN /
+PHASE_MAIN_ROLES key sets agreeing; it also drives the micro implementation
+through forward and backward malformed-input cases.
 """
 
 from __future__ import annotations
@@ -44,7 +51,7 @@ def section(title: str) -> None:
 
 src = DL.read_text("utf-8")
 
-# ---------- A. _auto_rework 定义与留痕体源码锁 ----------
+# ---------- A. _auto_rework definition + trace-body source lock ----------
 section("A _auto_rework 统一入口源码锁")
 ok("def _auto_rework(self, target: str, note: str, who: str, fallback: str) -> str:"
    in src, "签名含 fallback 显式形参")
@@ -58,20 +65,22 @@ for kw in ('self.meta["stage"] = target',
            'self._mark(target, "rework",',
            "self._touch()"):
     ok(kw in src, "留痕体关键行在位：%s" % kw[:44])
-# 崩溃路径焊死（review 第 3 轮）：role 计算绝不走 _step(target)
+# Crash path welded shut (review round 3): role computation never goes through _step(target)
 m_auto = re.search(r"def _auto_rework\(.*?\n(?=\n    def )", src, re.S)
 ok(m_auto is not None, "_auto_rework 函数体可定位")
 if m_auto:
     ok("self._step(" not in m_auto.group(0), "_auto_rework 函数体内不含 self._step( 调用")
 ok("target == \"done\"" in src, "done 被显式拒绝（终态不可为打回目标）")
 
-# ---------- B. 双常量词表与角色映射一致性 ----------
+# ---------- B. twin-constant vocabulary + role mapping consistency ----------
 section("B PHASE_MAIN_CHAIN / PHASE_MAIN_ROLES 常量")
 EXPECT = {"create_plan", "review_plan", "parallel_impl_design", "implement",
           "integ_join", "integration_review", "run_integration_tests", "arbitrate",
           "arb_acc_parallel", "acceptance", "merge_check", "merge", "done"}
-# 锁口径：键集合 = 主链 phase 值全集（含并行分叉 phase 值，非 STAGES id）；
-# t260903-02 增第 13 键 arb_acc_parallel（仲裁∥走查并行分叉，role=integration）。
+# Lock rule: the key set = the full set of main-chain phase values (including
+# the parallel-fork phase values, not STAGES ids);
+# t260903-02 added the 13th key arb_acc_parallel (arbitration || walkthrough
+# parallel fork, role=integration).
 EXPECT_ROLES = {"create_plan": "developer", "review_plan": "integration",
                 "parallel_impl_design": "developer", "implement": "developer",
                 "integ_join": "developer", "integration_review": "integration",
@@ -82,8 +91,9 @@ EXPECT_ROLES = {"create_plan": "developer", "review_plan": "integration",
 
 
 def parse_const(name: str):
-    """从源码解析模块级常量：PHASE_MAIN_CHAIN（frozenset）→ set；
-    PHASE_MAIN_ROLES（Dict）→ dict。解析失败返回 None。"""
+    """Parse a module-level constant out of the source: PHASE_MAIN_CHAIN
+    (frozenset) -> set; PHASE_MAIN_ROLES (Dict) -> dict. Returns None when
+    parsing fails."""
     m_set = re.search(name + r"\s*=\s*frozenset\(\{(.*?)\}\)", src, re.S)
     if m_set:
         return set(re.findall(r'"([^"]+)"', m_set.group(1)))
@@ -103,11 +113,11 @@ ok(roles == EXPECT_ROLES, "PHASE_MAIN_ROLES 角色逐键正确（%s）"
    % ("" if roles == EXPECT_ROLES else {k: v for k, v in (roles or {}).items()
                                         if EXPECT_ROLES.get(k) != v}))
 
-# ---------- C. 5 处自动打回点接入源码锁 ----------
+# ---------- C. source lock on the 5 automatic-rework wire-in points ----------
 section("C 自动打回点接入（who=fallback 字面量 + 不双落）")
-for target_fb in [("implement", '"acceptance"'),      # acceptance 验收打回
+for target_fb in [("implement", '"acceptance"'),      # acceptance walkthrough rework
                   ("implement", '"arbitrate"'),       # arbitrate code-fault
-                  ("implement", '"integration_review"'),  # 机械复核（×1 处断言计数 2）
+                  ("implement", '"integration_review"'),  # mechanical recheck (x1; counted twice by the assertion)
                   ("merge_check", '"merge"')]:
     tgt, fb = target_fb
     calls = [m.start() for m in re.finditer(
@@ -123,10 +133,11 @@ ir_hits = [c for c in ir_calls
 ok(len(ir_hits) == 2, "integration_review 两处（机械复核+审读）均接入（实测 %d 处）"
    % len(ir_hits))
 total_calls = len(re.findall(r"phase = self\._auto_rework\(", src))
-# 锁口径：内部自动打回点计数（壳委托不计）。t260903-02 新增 arb_acc_parallel 分支
-# 2 处（验收走查打回 + code-fault 打回）→ 7 处。
+# Lock rule: count of internal automatic rework points (shell delegation not
+# counted). t260903-02 added the arb_acc_parallel branch with 2 more
+# (acceptance walkthrough rework + code-fault rework) -> 7 points.
 ok(total_calls == 7, "自动打回点恰好 7 处（实测 %d）" % total_calls)
-# merge 点不再塞 self._rework（防一次打回落两条 timeline）
+# The merge point no longer stuffs self._rework (one rework must not land two timeline records)
 merge_block = src[src.find('if not mr.ok:'):src.find('if not mr.ok:') + 2000]
 ok("self._rework = ReworkRequest(" not in merge_block,
    "merge 失败分支不再塞 self._rework（防双落）")
@@ -134,11 +145,11 @@ ok("self._rework = None" in src, "_apply_rework 壳保留 signal 消费语义（
 ok('target in ("suggest_next", "ui_evidence")' in src,
    "suggest_next/ui_evidence 非主链步拒绝守卫在位（旧 selfcheck 锁兼容）")
 
-# ---------- D. 微实现表驱动：正反向 + fallback + done + 空 note ----------
+# ---------- D. table-driven micro implementation: forward + backward + fallback + done + empty note ----------
 section("D 校验逻辑微实现畸形输入用例（不依赖 temporalio）")
 
 
-class W:  # 复刻 _auto_rework 校验语义的等价微实现（与源码锁 A 对照维护）
+class W:  # equivalent micro implementation mirroring _auto_rework's validation semantics (kept in step with source lock A)
     def __init__(self, stage: str):
         self.meta = {"stage": stage, "status": "dispatched", "refused": []}
 
@@ -154,35 +165,39 @@ class W:  # 复刻 _auto_rework 校验语义的等价微实现（与源码锁 A 
         return target
 
 
-# 反向三用例：词表有、STAGES 无——旧 _step 路径会崩，新路径必须走通
+# Three backward cases: in the vocabulary but not in STAGES — the old _step
+# path would crash here; the new path must get through
 for tgt, role in [("acceptance", "integration"), ("parallel_impl_design", "developer"),
                   ("integ_join", "developer")]:
     w = W("merge")
     r = w.auto_rework(tgt, "外部 signal 打回 %s" % tgt, "human", "merge")
     ok(r == tgt and w.meta["role"] == role and w.meta["status"] == "rework",
        "反向：target=%s 通过且 role=%s 不崩" % (tgt, role))
-# 词表外值（acceptance_walkthrough：STAGES 有、词表无）→ 拒绝回 fallback
+# Out-of-vocabulary value (acceptance_walkthrough: in STAGES, not in the
+# vocabulary) -> refused, fall back
 w = W("acceptance")
 r = w.auto_rework("acceptance_walkthrough", "n", "human", "acceptance")
 ok(r == "acceptance" and w.meta["status"] != "rework"
    and len(w.meta["refused"]) == 1, "acceptance_walkthrough 被拒：回 fallback、无留痕")
-# done → 拒绝
+# done -> refused
 w = W("merge_check")
 r = w.auto_rework("done", "n", "human", "merge_check")
 ok(r == "merge_check" and w.meta["status"] != "rework", "done 被拒：回 fallback、无留痕")
-# fallback 非法（空串）→ refused 有账、返回值=meta 现步（绝不回传非法值）
+# Invalid fallback (empty string) -> refused gets an entry and the return
+# value = meta's current step (the invalid value never flows back)
 w = W("arbitrate")
 r = w.auto_rework("implement", "n", "workflow", "")
 ok(r == "arbitrate" and len(w.meta["refused"]) == 1,
    "fallback 非法：返回 meta 现步、非法值不回流")
-# 空 note：走通且横幅 reason（note+who 拼合）非空——留痕不丢发起者列
+# Empty note: goes through and the banner reason (note + who concatenated) is
+# non-empty — the trace record keeps the initiator column
 w = W("acceptance")
 r = w.auto_rework("implement", "", "workflow", "acceptance")
 reason = "%s（%s）" % ("", "workflow")
 ok(r == "implement" and reason.strip("（）") == "workflow" and len(reason) > 0,
    "空 note 走通：reason 由 who 兜底非空")
 
-# ---------- E. 场景清单登记（manifest 退役后口径，t260902） ----------
+# ---------- E. scenario registry registration (post-manifest-retirement rule, t260902) ----------
 section("E run_scenarios 场景清单登记")
 import run_scenarios as _rs  # noqa: E402
 ok(any("check_auto_rework_trace.py" in str(e[2]) for e in _rs.SCENARIOS),
