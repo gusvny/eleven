@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
-"""测试资产 lint（t260902 宿主令新增）——秒级静态检查，写完即红，不等跑套件。
+"""Fast static lint for test assets (added by host order t260902).
 
-覆盖（今晚四类实锤事故的反面）：
-  L1 语法：integration/**/*.py 与 workbench/tests/*.mjs 全部编译/语法检查
-        （连字符函数名、括号错配在此刻红，不到 pytest 收集时才炸）
-  L2 收集：engine/tests pytest --collect-only（import 错误、fixture 缺失）
-  L3 路径：workbench/tests/*.mjs 相对 import 的目标文件必须存在（深度算错即刻红）
-  L4 清单：SCENARIOS 三元组结构完整——name 唯一、intent 非空、cmd 引用的脚本存在
-  L5 孤儿：integration/**/ 下测试形态文件未登记 SCENARIOS 且不在豁免表 → 警告
+Runs in seconds right after writing code — a red here, not after waiting for
+the whole suite. It covers the reverse side of four real accidents seen in
+practice:
+  L1 syntax: compile-check every integration/**/*.py and workbench/tests/*.mjs
+        (bad hyphens in names, unbalanced brackets go red here, not at
+        pytest collection time)
+  L2 collection: engine/tests pytest --collect-only (import errors,
+        missing fixtures)
+  L3 paths: relative imports in workbench/tests/*.mjs must resolve
+        (a wrong depth goes red immediately)
+  L4 registry: SCENARIOS entries structurally complete — unique names,
+        non-empty intent, cmd scripts must exist
+  L5 orphans: test-shaped files under integration/**/ not in SCENARIOS and
+        not in the exemption table → warning
 
-用法：python3 integration/lint_tests.py（仓库根为 cwd；exit 0=过）
+Usage: python3 integration/lint_tests.py (cwd = repo root; exit 0 = pass)
 """
 import py_compile
 import re
@@ -20,9 +27,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 INTEG = REPO / "integration"
-WB_TESTS = REPO / "server/plugins/workbench/tests"          # ← 项目参数（抄走改这里）
-TP_TESTS = REPO / "server/engine/tests"          # ← 项目参数
-VENV_PY = REPO / "server/engine/.venv/bin/python"  # ← 项目参数
+WB_TESTS = REPO / "server/plugins/workbench/tests"          # ← project parameter (fork: change here)
+TP_TESTS = REPO / "server/engine/tests"          # ← project parameter
+VENV_PY = REPO / "server/engine/.venv/bin/python"  # ← project parameter
 PYC = tempfile.mkdtemp(prefix="lint-pyc-")
 
 errors, warns = [], []
@@ -42,7 +49,7 @@ def ok(msg):
     print("ok    " + msg, flush=True)
 
 
-# L1 语法
+# L1 syntax
 def lint_syntax():
     n_py = n_mjs = 0
     for f in INTEG.rglob("*.py"):
@@ -58,9 +65,11 @@ def lint_syntax():
                 err("L1 语法 %s: %s" % (f.relative_to(REPO), (p.stderr or "").splitlines()[-1][:120]))
             else:
                 n_mjs += 1
-    # integration/**/*.mjs 语法（t260907-04 arbitrate 实锤：机械清扫把 python 式
-    # `# naming-compat` 追加进 mjs→SyntaxError 只能在套件执行时才炸，秒级 lint
-    # 本应兜住——L1 原先只查 workbench/tests 的 mjs 是盲区）
+    # Also syntax-check every integration/**/*.mjs (t260907-04: a mechanical
+    # sweep appended a python-style `# naming-compat` line into an mjs file,
+    # and the SyntaxError only blew up when the suite ran — this second-level
+    # lint should have caught it; L1 originally checked only workbench/tests
+    # mjs, which left the blind spot)
     for f in INTEG.rglob("*.mjs"):
         p = subprocess.run(["node", "--check", str(f)], capture_output=True, text=True)
         if p.returncode != 0:
@@ -70,15 +79,16 @@ def lint_syntax():
     ok("L1 语法：py %d / mjs %d 通过" % (n_py, n_mjs))
 
 
-# L2 pytest 收集
+# L2 pytest collection
 def lint_collect():
     td = TP_TESTS
     if not td.is_dir():
         return
     venv_py = VENV_PY
     py = str(venv_py) if venv_py.exists() else sys.executable
-    # 工具面先行分态（t260903-11）：pytest 本身缺席=工具面缺失（可见 WARN），
-    # 不得谎报成「收集失败」——报错必须精确说哪个检查失败。
+    # Check the tool itself first (t260903-11): pytest missing = a missing
+    # tool surface (visible WARN), not a "collection failure" — the error
+    # must say exactly which check could not run.
     probe = subprocess.run([py, "-c", "import pytest"], capture_output=True, text=True, timeout=60)
     if probe.returncode != 0:
         warn("L2 pytest 不可用（%s 无 pytest）：收集检查无法执行——工具面缺失，非收集失败"
@@ -95,7 +105,7 @@ def lint_collect():
         ok("L2 pytest 收集：%s 条" % (cnt.group(1) if cnt else "?"))
 
 
-# L3 mjs 相对 import 解析
+# L3 mjs relative import resolution
 def lint_mjs_imports():
     if not WB_TESTS.is_dir():
         return
@@ -111,11 +121,11 @@ def lint_mjs_imports():
         ok("L3 mjs 相对 import 全部可解析")
 
 
-# L4/L5 SCENARIOS 清单
+# L4/L5 SCENARIOS registry
 EXEMPT = {
     "conftest.py", "fixture.py", "fixture.mjs", "lib.mjs", "cases.json",
     "golden.mjs", "reconcile-tokens.mjs", "build-info.mjs", "lib",
-    # t260901-20：聚合入口已登记，t0*.mjs 为其子检查
+    # t260901-20: the aggregate entry is registered; t0*.mjs are its sub-checks
     "t01_gate_shape.mjs", "t01_params_cache.mjs", "t02_cache_lifecycle.mjs",
     "t03_views_e2e.mjs", "t04_cli_door.mjs", "t05_dual_door.mjs",
     "t07_acceptance_walkthrough.mjs", "t06_results_doc.mjs",
@@ -144,15 +154,18 @@ def lint_registry():
         err("L4 cmd 脚本悬空：%s" % "; ".join(bad_cmd[:5]))
     if not errors:
         ok("L4 清单：%d 条三元组完整" % len(names))
-    # L5 孤儿（纯模式匹配）：sc_* 未登记即红；非 sc_ = 共享代码，合法
+    # L5 orphans (pure pattern match): an sc_* file not registered is an
+    # error; non-sc_ files are shared code and fine
     registered = set()
     for entry in rs.SCENARIOS:
         name, intent, cmd = entry[0], entry[1], entry[2]
         for p in str(cmd).split():
             if p.startswith("integration/"):
                 registered.add((REPO / p).resolve())
-    # t260904-12 移册白名单（定稿 §7.3「真跑不进闸」通道；文件在案供主库人工清单，
-    # 不入 SCENARIOS——移册依据链见 README 已知限制 ticket-lifecycle 条）
+    # t260904-12 deregistration whitelist (final doc §7.3 "cannot run in the
+    # gate" channel; the file stays in the repo for the main-repo manual list
+    # and is not in SCENARIOS — see the ticket-lifecycle entry under
+    # "Known limitations" in README)
     DEREGISTERED = {INTEG / "baselines" / "sc_ticket_lifecycle.mjs"}
     orphans = [str(f.relative_to(REPO)) for f in INTEG.rglob("sc_*")
                if f.is_file() and f.resolve() not in registered
@@ -163,13 +176,17 @@ def lint_registry():
         ok("L5 无孤儿（非 sc_ 文件视为共享代码，不检查）")
 
 
-# L6 三态契约（t260904-12：闸内无 SKIP，定稿 §7.3）——锚真实形态，不锚 [SKIP] 字面
-# （运行时模板串 `[$ {status.toUpperCase()}]` 源码 grep 不到，字面口径恒真化）。
-SKIP_STATE = re.compile(r"""['"`]skip['"`]""")            # mjs/py 里 skip 状态值实参
+# L6 three-state contract (t260904-12: no SKIP inside the gate, final doc
+# §7.3) — anchored on real shapes, not on the literal [SKIP] text (the runtime
+# template string `[$ {status.toUpperCase()}]` is invisible to grep, so a
+# literal match would be vacuously true).
+SKIP_STATE = re.compile(r"""['"`]skip['"`]""")            # skip status literal in mjs/py
 SKIP_SUMMARY = re.compile(r"skip=\{|\bskip=%d|skip=\$\{|SUMMARY[^\n]*\bskip=")
-ENV0_COMBO = re.compile(                                   # 缺环境→exit 0 语义组合
+ENV0_COMBO = re.compile(                                   # missing-env → exit 0 combo
     r"ENV_FAIL[^\n]*\n[^\n]*exit\(0\)|skip[^\n]*\n[^\n]*exit\(0\)", re.I)
-# 注释行与「退役」注记不参与（历史提及合法；行为面由 summarize 形状守卫与守卫场景钉）
+# Comment lines and "retired" notes do not participate (historical mentions
+# are legal; the behavior side is pinned by the summarize-shape guard and the
+# guard scenarios)
 RETIRED = re.compile("退役")
 
 
@@ -179,9 +196,9 @@ def _code_lines(text):
         if RETIRED.search(ln) or st.startswith("//") or st.startswith("#") or st.startswith("*"):
             continue
         yield ln
-SKIP_WHITELIST = {  # 注释性历史提及白名单（按文件名，记录残留由结算 evidence 核对）
-    "bench.py",        # 变更记录表叙述旧口径
-    "run_scenarios.py",  # docstring 对旧语义的退役注记
+SKIP_WHITELIST = {  # files with comment-only historical mentions (by file
+    "bench.py",        # name; residue is reconciled by the closing evidence)
+    "run_scenarios.py",  # docstring note about the old semantics
 }
 
 
@@ -211,7 +228,8 @@ def lint_three_state():
         err("L6 「skip→exit 0」语义组合残留（缺环境必须 exit 2）：%s" % bad_combo[:8])
     else:
         ok("L6 无 skip→exit0 语义组合")
-    # makeResults/summarize 形状守卫：mjs 里自定义 summarize 必须是三态退出码
+    # makeResults/summarize shape guard: a custom summarize in mjs must use
+    # the three-state exit codes
     for f in INTEG.rglob("*.mjs"):
         text = f.read_text(errors="replace")
         if "function summarize" in text or "summarize()" in text and "process.exit" in text:

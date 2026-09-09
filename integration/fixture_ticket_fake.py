@@ -1,26 +1,33 @@
-# fixture_ticket_fake.py —— 夹具票的假 DevLaneWorkflow（260908）。
+# fixture_ticket_fake.py — a fake DevLaneWorkflow for fixture tickets (260908).
 #
-# 为什么存在：等台族的工单场景（ticket-session-restore / t260903-07 族 /
-# ticket-evidence-images）需要台上有「健康工单」——行有标题、抽屉 show 秒回。
-# 真 workflow 没有常驻 worker 时查询会空等到超时（左栏「查询超时，刷新重试」、
-# 抽屉 show 挂起）。而引擎有现成出路：COMPLETED 的 workflow 免 worker 直读
-# （client.py cmd_ticket_query 的 result() 通路）——所以夹具票只要「跑到收口」
-# 就永久健康（收口 7 天回填窗内列表行带全量 meta）。
+# Why this exists: console-based ticket scenarios (ticket-session-restore,
+# the t260903-07 family, ticket-evidence-images) need healthy ticket rows on
+# the stage console — a title on the row and a fast drawer. Without a running
+# worker, real workflows leave queries hanging until timeout (left rail shows
+# "query timeout, retry" and the drawer stalls). The engine already has a way
+# out: a COMPLETED workflow can be read back with no worker at all (the
+# result() path in client.py cmd_ticket_query). So a fixture ticket just needs
+# to reach closed state once, then it stays healthy forever (within the 7-day
+# closed-ticket hydrate window, list rows carry full meta).
 #
-# 本模块被 fixture_ticket_worker.py 以 Worker 装载：必须保持「干净模块」
-# （只有 temporalio import + 类定义，无模块级受限调用）——temporalio 沙箱
-# 校验 @workflow.defn 类时会重执行定义模块，模块级 pathlib/subprocess 会炸
-# 校验（票 t260902-02 同案）。快照 meta 形状对齐 dev_lane._init 的字段面
-# （消费方=client.py _row_from_meta / handleTicketSessionOpen 的 workspace/worktree
-# 判定），只填场景要的面，不追求全字段复刻。
+# This module is loaded by fixture_ticket_worker.py inside a real Worker, so
+# it must stay a clean module: only temporalio imports plus class definitions,
+# no module-level calls like pathlib or subprocess. The temporalio sandbox
+# re-executes the defining module when validating @workflow.defn classes, and
+# restricted calls at module level break that check (same case as t260902-02).
+# The snapshot meta shape mirrors the field surface of dev_lane._init (the
+# consumers are client.py _row_from_meta and handleTicketSessionOpen's
+# workspace/worktree checks). Only the fields scenarios need are filled; this
+# is not a full replica.
 
 from temporalio import workflow
 
 
 def _now_epoch() -> int:
-    # workflow 沙箱禁 time.time()（RestrictedWorkflowAccessError）——
-    # workflow.now() 是沙箱内取时的唯一正道（deterministic，重放安全）；
-    # epoch 化走 timedelta 算术（不经任何 time.* 调用）。
+    # The workflow sandbox blocks time.time() (RestrictedWorkflowAccessError).
+    # workflow.now() is the only safe way to read the clock inside the sandbox
+    # (deterministic, replay-safe). Epoch conversion goes through timedelta
+    # math, never touching any time.* call.
     import datetime as _dt
 
     return int((workflow.now() - _dt.datetime(1970, 1, 1, tzinfo=_dt.timezone.utc))
@@ -28,7 +35,8 @@ def _now_epoch() -> int:
 
 
 def _g(obj, key, default=""):
-    """dict / dataclass 双形态取值（ticket-start 的入参形态以引擎为准，不猜）。"""
+    """Read a value from either a dict or a dataclass (ticket-start input shape
+    follows the engine; we do not guess)."""
     if isinstance(obj, dict):
         return obj.get(key, default)
     return getattr(obj, key, default)
@@ -36,7 +44,8 @@ def _g(obj, key, default=""):
 
 @workflow.defn(name="DevLaneWorkflow")
 class FixtureTicket:
-    """夹具票 workflow：run 直接回吐终态快照（秒收口，零活动零副作用）。"""
+    """Fixture ticket workflow: run() returns the final snapshot directly
+    (closes instantly, zero activities, zero side effects)."""
 
     @workflow.run
     async def run(self, inp) -> dict:
@@ -50,7 +59,8 @@ class FixtureTicket:
             "title": title,
             "role": "developer",
             "lane": str(_g(inp, "lane", "worktree")),
-            # 空路径=宿主随工单走契约的缺省面（open 路由回落 cwd=项目主目录）。
+            # Empty path = the default contract where the host follows the
+            # ticket (the open route falls back to cwd = project main dir).
             "workspace": {"type": "worktree", "path": ""},
             "worktree": "",
             "branch": str(_g(inp, "branch", "")),

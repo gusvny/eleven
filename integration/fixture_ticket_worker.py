@@ -1,13 +1,17 @@
-# fixture_ticket_worker.py —— 夹具票收口 worker（260908；lib_stage_console 的
-# seedFixtures spawn 本脚本，把 RUNNING 的夹具票跑到 COMPLETED）。
+# fixture_ticket_worker.py — drain worker for fixture tickets (260908).
+# lib_stage_console's seedFixtures spawns this script to drive RUNNING
+# fixture tickets to COMPLETED.
 #
-# 生命周期=一次性排水：起 Worker 轮询各夹具票的专属队列（sandbar-ticket-<id>），
-# 等全部票 COMPLETED 即自退。票已收口的常态下秒退。
-# 为什么值得一个真 worker 进程：COMPLETED 之后整张票免 worker 直读（见
-# fixture_ticket_fake.py 头注）——常驻成本只在首种那几秒。
+# Lifecycle: one-shot drain. It starts a Worker polling each fixture ticket's
+# dedicated queue (sandbar-ticket-<id>) and exits once every ticket is
+# COMPLETED. When tickets are already closed, it exits in about a second.
+# A real worker process is worth it: after COMPLETED the whole ticket is
+# readable with no worker at all (see the header of fixture_ticket_fake.py),
+# so the running cost only exists for those few seconds of first seeding.
 #
-# 用法： python3 fixture_ticket_worker.py <host:port> <namespace> <id1,id2,...> [超时秒]
-# 退出码：0=全部收口；1=超时/失败（stderr 给原因——seedFixtures 如实 warn）。
+# Usage: python3 fixture_ticket_worker.py <host:port> <namespace> <id1,id2,...> [timeout seconds]
+# Exit codes: 0 = all closed; 1 = timeout or failure (reason on stderr —
+# seedFixtures surfaces it as a warning).
 import asyncio
 import sys
 
@@ -22,7 +26,7 @@ async def main() -> int:
     budget = float(sys.argv[4]) if len(sys.argv) > 4 else 120.0
     queues = ["sandbar-ticket-%s" % t for t in ids_raw.split(",") if t.strip()]
     client = await Client.connect(addr, namespace=ns)
-    # temporalio 1.18 的 Worker 单 task_queue——每票一个 Worker 并发跑。
+    # temporalio 1.18 Workers take a single task_queue — run one Worker per ticket.
     workers = [Worker(client, task_queue=q, workflows=[FixtureTicket]) for q in queues]
     wts = [asyncio.create_task(w.run()) for w in workers]
 

@@ -1,8 +1,10 @@
-// stage_docker.mjs —— docker 测试舞台 mjs 薄壳（票 t260904-19）。
+// stage_docker.mjs — thin mjs wrapper around the docker test stage CLI (ticket t260904-19).
 //
-// 实现单点在 integration/stage_docker.py（CLI）；本文件只做 subprocess 调用 +
-// JSON 解析 + 容器内路径的 profile 物化。分配/健康/回收逻辑零复制——双份必漂移
-// 是本仓前科。场景夹具一律经本壳调用，勿手写 docker compose。
+// The real logic lives in integration/stage_docker.py (the CLI). This file only
+// does subprocess calls + JSON parsing + in-container profile materialization.
+// Nothing is duplicated — two copies of allocation/health/teardown logic would
+// drift, and drift has happened here before. Scenario fixtures must go through
+// this wrapper; never hand-write docker compose commands.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, cpSync, existsSync, symlinkSync, rmSync } from 'node:fs';
 import path from 'node:path';
@@ -11,8 +13,9 @@ import { fileURLToPath } from 'node:url';
 export const INTEG_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const STAGE_CLI = path.join(INTEG_DIR, 'stage_docker.py');
 
-/** 起台：返回 stage_docker up 的 JSON（project/ports/namespace/...）。
- *  失败抛 Error（message=CLI stderr 的 STAGE_* 行，三态文案已在 CLI 侧点名）。
+/** Start a stage: returns the JSON from `stage_docker up` (project/ports/namespace/...).
+ *  Throws Error on failure (message = the STAGE_* line from CLI stderr; the
+ *  three-state wording is named in the CLI already).
  *  opts: { project, services='dsh', namespace, fixturesDir, profileDir, profileName,
  *          repoDir, projectsDir, timeoutSec } */
 export function stageUp(opts) {
@@ -34,7 +37,8 @@ export function stageUp(opts) {
   return JSON.parse(p.stdout.trim().split('\n').at(-1));
 }
 
-/** 拆台（幂等）。返回 down 结果 JSON（residue 面供场景断言零残留）。 */
+/** Tear down a stage (idempotent). Returns the down-result JSON (the residue
+ * field lets scenarios assert zero leftovers). */
 export function stageDown(project) {
   const p = spawnSync('python3', [STAGE_CLI, 'down', '--project', project],
     { encoding: 'utf8', timeout: 180000 });
@@ -43,15 +47,19 @@ export function stageDown(project) {
   return JSON.parse(p.stdout.trim().split('\n').at(-1));
 }
 
-/** 容器内 profile 物化（docker 台版，克缝始终=测泳道/指定树代码）：
- *  - cordis 配置/sandbar-tools.ts 取 repoProfileDir（committed）；
- *  - node_modules 只放一个目录+被测 workbench 软链（→ /repo/server/plugins/workbench，
- *    /repo=被测树）；其余插件由 compose command 从依赖树 /repo-nm（缺省主树，
- *    stage_docker 自动回落）逐项并入——仓内插件不在全局 npm，「其余→全局
- *    node_modules」模型对它们是悬空链。
- *  宿主侧不可验证容器内软链解析——由 stage_docker 的 console 健康探针兜底
- *  （起不来=ENV_FAIL）。
- *  返回 profileDir（挂载为容器 /profile，SANDBAR_TEST_PROFILE_SRC=/profile）。 */
+/** Materialize the in-container profile (docker stage flavor; the lane under
+ * test always runs its own tree's code):
+ *  - cordis config / sandbar-tools.ts come from repoProfileDir (committed);
+ *  - node_modules holds exactly one entry: a symlink to the workbench under
+ *    test (→ /repo/server/plugins/workbench, where /repo is the tree under
+ *    test). The compose command merges every other plugin from the dependency
+ *    tree /repo-nm (defaults to the main tree, stage_docker falls back
+ *    automatically) — in-repo plugins are not on global npm, so a
+ *    "everything else → global node_modules" model would leave dangling links.
+ *  The host cannot verify how in-container symlinks resolve — the stage's
+ *  console health probe is the backstop (a stage that cannot boot = ENV_FAIL).
+ *  Returns profileDir (mounted as /profile in the container, with
+ *  SANDBAR_TEST_PROFILE_SRC=/profile). */
 export function buildStageProfile({ repoProfileDir, laneWorkbenchDir, tmpHome }) {
   const profDir = path.join(tmpHome, 'profiles', 'suyou');
   mkdirSync(profDir, { recursive: true });
