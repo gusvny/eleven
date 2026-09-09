@@ -46,7 +46,7 @@ Conventions:
   concurrent writer); the 12 zero-coupling entries (7 self-hosted / no
   console + 5 read-only API stubs) moved to browser-free and run
   concurrently with the chain. SANDBAR_POOL_CONC=1 restores the old
-  semantics (strict in-pool serial).
+  semantics (strict serial everywhere — in-pool lanes AND pool-by-pool).
 - The registry only lists assets present in this repo (L4 rule: every cmd
   script must exist).
 """
@@ -774,7 +774,7 @@ def main() -> int:
     width-2 herd already flaked under load, see the module docstring; the
     browser chain pool shares one console and stays strictly serial —
     registry order is its contract); SANDBAR_POOL_CONC=1 restores the old
-    semantics."""
+    semantics (strict serial everywhere, pools included — see Phase 2)."""
     import threading
     from concurrent.futures import ThreadPoolExecutor
     ran = passed = failed = env_failed = 0
@@ -856,10 +856,18 @@ def main() -> int:
     timings = []   # KI-060 prep 2: timing distribution (one row per scenario, with pool attribution)
     for e in exclusives:      # exclusives go first, overlapping no pool (always serial)
         _drain([(e, True)], "exclusive")
-    with ThreadPoolExecutor(max_workers=max(1, len(pools))) as ex:
+    if conc_width <= 1:
+        # SANDBAR_POOL_CONC=1 = 全串行回退语义（提速战役③步骤0 计划验收②）：
+        # 不光池内宽度收 1，池间也顺次排开——否则六个池各一路并发，负载
+        # 敏感场景（起台族/capture 全视图走查）在「回退」里仍要扛六路并发，
+        # 回退形同虚设（260910 实锤：只设池内宽度时 wall=467s 与缺省无差）。
         for fname, pv in pools.items():
-            ex.submit(_drain, pv, fname or "main")
-        ex.shutdown(wait=True)
+            _drain(pv, fname or "main")
+    else:
+        with ThreadPoolExecutor(max_workers=max(1, len(pools))) as ex:
+            for fname, pv in pools.items():
+                ex.submit(_drain, pv, fname or "main")
+            ex.shutdown(wait=True)
     # Summary five counters (t260904-12): na=N/A is a leg-level state, already
     # folded into pass/fail inside the scenario (all legs N/A = scenario red),
     # so at runner level it is always 0 — kept as a placeholder for the shape.
