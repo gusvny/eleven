@@ -537,12 +537,41 @@ def explicit_ports(services):
 # ---------------------------------------------------------------- health probes
 
 def wait_temporal(port, timeout):
+    """Readiness of the stage's temporal frontend.
+
+    Bare TCP is NOT sufficient on Docker Desktop (Mac): the host-side port
+    forwarder accepts connections as soon as the container exists, so
+    connect_ex succeeds while the server inside is still starting, and the
+    very next real client dial gets connection refused on the same port
+    (final-verification flake of campaign ③, 260909: wait_temporal passed,
+    register_namespace's namespace create then got
+    "dial tcp 127.0.0.1:<port>: connect: connection refused" through all
+    of its 3x2s retries). Readiness therefore means: TCP open AND an
+    end-to-end probe with the temporal CLI (operator namespace list — the
+    same dial the namespace/SA registration will perform) succeeds. When
+    the CLI is unavailable we fall back to TCP-only (the registration step
+    reports that honestly in the JSON afterwards)."""
     t0 = time.time()
+    cli = resolve_temporal_cli()
     while time.time() - t0 < timeout:
-        if port_open(port, timeout=1.0):
-            return
-        time.sleep(0.5)
-    raise StageError("temporal %ds 内未就绪（127.0.0.1:%d）" % (timeout, port), kind="env")
+        if not port_open(port, timeout=1.0):
+            time.sleep(0.5)
+            continue
+        if not cli:
+            return  # TCP-only fallback: no CLI to probe with
+        remaining = max(1, int(timeout - (time.time() - t0)))
+        try:
+            p = subprocess.run([cli, "operator", "namespace", "list",
+                                "--address", "127.0.0.1:%d" % port],
+                               capture_output=True, text=True,
+                               timeout=min(5, remaining))
+            if p.returncode == 0:
+                return
+        except (subprocess.SubprocessError, OSError):
+            pass  # not speaking yet — keep waiting
+        time.sleep(1.0)
+    raise StageError("temporal %ds 内未就绪（127.0.0.1:%d，CLI 端到端探针未过）"
+                     % (timeout, port), kind="env")
 
 
 def wait_console(port, timeout):
@@ -935,6 +964,47 @@ def selftest():
             ok(False, "--services %r 应拒收" % bad)
         except StageError:
             ok(True, "--services %r 拒收" % bad)
+
+    # 5. wait_temporal readiness discipline (the 260909 campaign-③ flake:
+    # Docker Desktop's host forwarder accepts bare TCP while the server is
+    # still starting, so a plain listener must NOT count as ready — only an
+    # end-to-end CLI probe may pass the gate; and a closed port must fail
+    # fast with an env-kind error). Uses a stub thread that accepts TCP but
+    # never speaks gRPC; never touches docker.
+    import threading
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    closed_port = probe.getsockname()[1]
+    probe.close()  # port now guaranteed closed
+    try:
+        wait_temporal(closed_port, timeout=1)
+        ok(False, "拒连端口应判未就绪")
+    except StageError as e:
+        ok(e.kind == "env", "拒连端口 → env 红专名")
+    stub = socket.socket()
+    stub.bind(("127.0.0.1", 0))
+    stub.listen(1)
+    stub_port = stub.getsockname()[1]
+
+    def _stub_accept():
+        try:
+            conn, _ = stub.accept()
+            conn.close()
+        except OSError:
+            pass
+    for _ in range(4):
+        threading.Thread(target=_stub_accept, daemon=True).start()
+    try:
+        wait_temporal(stub_port, timeout=3)
+        # Only acceptable when the CLI is missing everywhere (TCP fallback):
+        # then the gate is documented to be TCP-only. With a CLI resolvable
+        # the stub must be rejected.
+        ok(resolve_temporal_cli() is None,
+           "哑 TCP 桩未骗过就绪门（CLI 可得时不得仅凭 TCP 判就绪）")
+    except StageError as e:
+        ok(e.kind == "env", "哑 TCP 桩 → env 红（端到端探针生效）")
+    finally:
+        stub.close()
 
     print(("SELFTEST 全绿" if not fails else "SELFTEST %d 项红" % len(fails)))
     return EXIT_FAIL if fails else EXIT_OK
