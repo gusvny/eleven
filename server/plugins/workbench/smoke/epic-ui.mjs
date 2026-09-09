@@ -1,19 +1,23 @@
 /**
- * smoke/epic-ui.mjs —— 立项单 Tier 3 UI（t260826-02）的纯函数 + 新建工单路由冒烟。
+ * smoke/epic-ui.mjs — smoke for the epic Tier 3 UI (t260826-02) pure functions + the create-ticket route.
  *
- * 直跑：node smoke/epic-ui.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * 覆盖：
- *   A. src/client/epics-model.ts 纯函数：
- *      bucketOf（closed/verified→已完成、terminated→已终止、其余含未知→进行中）；
- *      sortBucketKeys（进行中→已完成→已终止→未知字典序）；sortEpicTickets（进行中前、
- *      已收口后、各按 id 降序；空数组/缺字段容错）；epicBadgeOf 三态（有代号/空串/undefined
- *      → 未归档 code=null）；epicCreateNote（含代号 + 禁手输提示）。
- *   B. POST /sandbar-workbench/api/wf/tickets（node.ts handleTickets method 分支 +
- *      handleTicketCreate，stub admin.py + mock webServer/req/res 同 smoke/epics.mjs C 段制式）：
- *      缺 project/缺 workflow/缺 title → 400；合法 body → admin.py 收到 op=create 且
- *      epic/project/workflow/title/body 原样透传（stub 落 last-call.json 取证）→ 200 带新 id；
- *      admin.py 回 ok:false → 200 透传 error 原文；admin.py 崩（非 JSON）→ 502；
- *      PUT → 405；GET 列表回归不受影响。
+ * Run: node smoke/epic-ui.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+ * Covers:
+ *   A. src/client/epics-model.ts pure functions:
+ *      bucketOf (closed/verified->已完成 (done), terminated->已终止 (terminated), everything
+ *      else including unknown->进行中 (in progress)); sortBucketKeys (in progress -> done ->
+ *      terminated -> unknown in dictionary order); sortEpicTickets (in progress first,
+ *      closed last, each by id descending; empty array / missing fields tolerated);
+ *      epicBadgeOf three states (has code / empty string / undefined -> 未归档 (not archived),
+ *      code=null); epicCreateNote (contains the code + the do-not-type-by-hand hint).
+ *   B. POST /sandbar-workbench/api/wf/tickets (node.ts handleTickets method branch +
+ *      handleTicketCreate, stub admin.py + mock webServer/req/res, same pattern as section C
+ *      of smoke/epics.mjs):
+ *      missing project/workflow/title -> 400; valid body -> admin.py receives op=create with
+ *      epic/project/workflow/title/body passed through byte-identical (the stub writes
+ *      last-call.json as evidence) -> 200 with the new id; admin.py returns ok:false -> 200
+ *      with the error text passed through; admin.py crashes (non-JSON) -> 502; PUT -> 405;
+ *      the GET list regression is unaffected.
  */
 
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -34,7 +38,7 @@ function section(t) { console.log(`\n== ${t}`) }
 
 const tmp = await mkdtemp(join(tmpdir(), 'wb-epic-ui-'))
 try {
-  /* ------------------------------------------------------------ A. 纯函数 */
+  /* ------------------------------------------------------------ A. Pure functions */
   section('A epics-model 纯函数')
 
   ok(bucketOf('closed') === '已完成' && bucketOf('verified') === '已完成'
@@ -95,10 +99,10 @@ try {
       'epicCreateNote：含代号 + 禁手输提示')
   }
 
-  /* ------------------------------------------------------------ B. POST /wf/tickets 新建路由 */
+  /* ------------------------------------------------------------ B. POST /wf/tickets create route */
   section('B POST /sandbar-workbench/api/wf/tickets（handleTicketCreate）')
   {
-    // 公共 mock 件（smoke/epics.mjs C 段同款制式；POST 带 body 时 yield 一个 chunk）
+    // Shared mock pieces (same pattern as section C of smoke/epics.mjs; yields one chunk when the POST carries a body)
     const mockRes = () => ({
       status: 0, body: null,
       writeHead(s) { this.status = s },
@@ -129,8 +133,9 @@ try {
       await handler.handler(mockReq(url, method, payload), res)
       return res
     }
-    // stub admin.py：create 分支把收到的 args 落 last-call.json（取证透传），按 createMode
-    // 回 ok:true（带新 id）/ ok:false（epic 强校验拒收样式）/ 直崩非 JSON；list 正常应答。
+    // stub admin.py: the create branch writes the received args to last-call.json (pass-through
+    // evidence) and answers by createMode: ok:true (with new id) / ok:false (epic strict-validation
+    // rejection style) / crashes with non-JSON; list answers normally.
     const writeStub = async (repo, createMode) => {
       const createBranch =
         createMode === 'ok'
@@ -158,7 +163,7 @@ sys.exit(1)
 `, 'utf8')
     }
 
-    /* --- B1 参数校验：缺 project / workflow / title → 400（不到引擎） --- */
+    /* --- B1 parameter validation: missing project / workflow / title -> 400 (never reaches the engine) --- */
     const repoA = join(tmp, 'repo-a')
     await writeStub(repoA, 'ok')
     const s1 = setup(repoA)
@@ -172,10 +177,10 @@ sys.exit(1)
     r = await call(s1.exactTickets, '/sandbar-workbench/api/wf/tickets?project=suyou', 'POST', { workflow: 'dev-lane', title: '  ' })
     ok(r.status === 400 && r.body.error.includes('title'), 'POST 纯空白 title → 400 人话')
     r = await call(s1.exactTickets, '/sandbar-workbench/api/wf/tickets?project=suyou', 'POST', 'not-json')
-    // 'not-json' 会被 JSON.stringify 包成合法 JSON 字符串，改用非法 body 需裸发——此处断言合法 JSON 但缺字段也 400
+    // 'not-json' gets wrapped into valid JSON by JSON.stringify; to send an illegal body it must be sent raw — here we assert valid JSON with missing fields also gets 400
     ok(r.status === 400, 'POST 合法 JSON 但缺 workflow → 400')
 
-    /* --- B2 合法创建：op=create + epic/project/workflow/title/body 原样透传 --- */
+    /* --- B2 valid create: op=create + epic/project/workflow/title/body passed through byte-identical --- */
     const repoB = join(tmp, 'repo-b')
     await writeStub(repoB, 'ok')
     const s2 = setup(repoB)
@@ -190,7 +195,7 @@ sys.exit(1)
       && lastCall.body === '所属立项：demo-epic\n正文',
       'admin.py 收到 op=create，epic/project/workflow/title/body 原样透传（last-call.json 取证）')
 
-    /* --- B3 引擎失败两条路：ok:false → 200 透传 error；崩 → 502 --- */
+    /* --- B3 engine failure, two paths: ok:false -> 200 passes the error through; crash -> 502 --- */
     const repoC = join(tmp, 'repo-c')
     await writeStub(repoC, 'fail')
     const s3 = setup(repoC)
@@ -208,7 +213,7 @@ sys.exit(1)
     ok(r.status === 502 && String(r.body.error).includes('connection refused'),
       'admin.py 崩（非 JSON）→ 502 含底层 error 原文')
 
-    /* --- B4 method 分支：PUT → 405；GET 列表回归 --- */
+    /* --- B4 method branch: PUT -> 405; GET list regression --- */
     r = await call(s2.exactTickets, '/sandbar-workbench/api/wf/tickets?project=suyou', 'PUT', {})
     ok(r.status === 405, 'PUT → 405')
     r = await call(s2.exactTickets, '/sandbar-workbench/api/wf/tickets?project=suyou')

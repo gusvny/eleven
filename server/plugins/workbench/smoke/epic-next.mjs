@@ -1,35 +1,42 @@
 /**
- * smoke/epic-next.mjs —— 立项单「继续执行」按钮（t260827-02）的宿主半冒烟。
+ * smoke/epic-next.mjs — host half-smoke for the epic "continue" button (t260827-02).
  *
- * 直跑：node smoke/epic-next.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * 覆盖：
- *   A. src/host/epic-next.ts 纯函数：
- *      parseMiniYaml（嵌套映射/整行与行尾注释/裸 token）；modelRouteFromYaml
- *      （角色命中 / 落 default / 全缺 → null；带 tasks 的角色不误取分工层）；
- *      buildSuggestPrompt（必含立项全文/工单汇总/模板清单/结果文件路径）；
- *      validateSuggestion（合规放行 / status!=ok 透传 reason / 幻觉模板 id 拒收 /
- *      空 title 拒收 / 非对象拒收）。
- *   B. 路由（node.ts apply + mock webServer/req/res + stub admin.py，同 epics.mjs 制式）：
- *      B1 STUB 模式（SANDBAR_EPIC_NEXT_STUB=1）全链路：POST 启动 → job_id+running；
- *      轮询 → done 且建议形状合规；prompt.md 落盘且含立项全文/模板清单/工单汇总；
- *      同 code 已完成后再 POST → 新 job_id；连开 6 个 job 后目录保留 ≤5 份。
- *      B2 假 agent 真 spawn（SANDBAR_AGENT_CMD=node <fixture>）：POST → running；
- *      进行中重复 POST → 复用同一 job_id；轮询到 done 拿到假 agent 写的建议。
- *      B3 假 agent 写不合规结果（幻觉模板 id）→ 轮询 → failed + 人话 reason。
- *      B4 错误路径：坏形状 code 400 / 不存在 code 404 / 未知 jobId 404 /
- *      jobId 与 code 不匹配 404 / GET 启动路径 405 / PUT 405 /
- *      workflow list 失败 → POST 502 可重试。
- *      B5 workflow list 失败 → 502 可重试。
- *      B6 STUB 失败变体（t260828-03，直接 import startSuggestJob/pollSuggestJob）：
- *      B6a invalid_json：文件在但 JSON 非法（复刻 LLM 非法转义 \- 现场）→ 首次
- *      轮询仍 running（记录文件指纹）→ 再次轮询 fail-fast failed：reason 明说
- *      「不是合法 JSON」+ parse 摘要、不说「未产出」、哑进程被回收；
- *      B6b never_write + SANDBAR_EPIC_NEXT_TIMEOUT_MS=500：无文件不误判 → 超时
- *      failed「已终止」、哑进程被回收。
- *      B7 真 spawn 进程生命周期（t260828-03）：B7a 假 agent 写非法 JSON 后自退 →
- *      poll 立即 fail-fast（进程已退出，不等两轮稳定性）；B7b 假 agent 写合规结果后
- *      长挂不自退（stock headless 已知行为）→ done 且进程被 kill（done 路径不再泄露）。
- *   C. src/client/epics-model.ts 纯函数：composeSuggestedBody（归属行注入 / 空正文容错）。
+ * Run: node smoke/epic-next.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+ * Covers:
+ *   A. src/host/epic-next.ts pure functions:
+ *      parseMiniYaml (nested mappings / whole-line and trailing comments / bare tokens);
+ *      modelRouteFromYaml (role hit / falls to default / all missing -> null; a role with
+ *      tasks does not mistakenly read the task-split layer); buildSuggestPrompt (must
+ *      contain the full epic text / ticket summary / template list / result file path);
+ *      validateSuggestion (compliant passes / status!=ok passes reason through / hallucinated
+ *      template id rejected / empty title rejected / non-object rejected).
+ *   B. Route (node.ts apply + mock webServer/req/res + stub admin.py, same pattern as epics.mjs):
+ *      B1 STUB mode (SANDBAR_EPIC_NEXT_STUB=1) full chain: POST starts -> job_id+running;
+ *      poll -> done with a compliant suggestion shape; prompt.md on disk containing the epic
+ *      text / template list / ticket summary; POST again for an already-done code -> new
+ *      job_id; after 6 concurrent jobs the directory keeps at most 5.
+ *      B2 fake agent with real spawn (SANDBAR_AGENT_CMD=node <fixture>): POST -> running;
+ *      a second POST while running -> reuses the same job_id; poll to done gets the
+ *      suggestion the fake agent wrote.
+ *      B3 fake agent writes a non-compliant result (hallucinated template id) -> poll ->
+ *      failed with a human-readable reason.
+ *      B4 error paths: malformed code 400 / unknown code 404 / unknown jobId 404 /
+ *      jobId-code mismatch 404 / GET on the start path 405 / PUT 405 /
+ *      workflow list failure -> POST 502 retryable.
+ *      B5 workflow list failure -> 502 retryable.
+ *      B6 STUB failure variants (t260828-03, direct import of startSuggestJob/pollSuggestJob):
+ *      B6a invalid_json: file exists but the JSON is illegal (reproduces the LLM illegal
+ *      \- escape) -> first poll still running (records the file fingerprint) -> second
+ *      poll fails fast with a reason that says "not valid JSON" + parse summary, does not
+ *      say "no output", and the dummy process is reaped;
+ *      B6b never_write + SANDBAR_EPIC_NEXT_TIMEOUT_MS=500: no file -> not misjudged ->
+ *      timeout failed "terminated", dummy process reaped.
+ *      B7 real spawn process lifecycle (t260828-03): B7a fake agent writes illegal JSON then
+ *      exits -> poll fails fast immediately (process already gone, no two-round stability
+ *      wait); B7b fake agent writes a compliant result then hangs (known stock-headless
+ *      behavior) -> done and the process is killed (no leak on the done path).
+ *   C. src/client/epics-model.ts pure functions: composeSuggestedBody (attribution line
+ *      injection / empty body tolerance).
  */
 
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
@@ -64,7 +71,7 @@ const EPIC_MD = `# 立项单：demo-epic
 做个示范。
 `
 
-/** stub admin.py：ticket list --epic 回 2 行；workflow list 回 2 个模板。 */
+/** stub admin.py: ticket list --epic returns 2 rows; workflow list returns 2 templates. */
 const ADMIN_STUB = `import json, sys
 args = json.loads(sys.argv[3]) if len(sys.argv) >= 4 else {}
 tool = sys.argv[2] if len(sys.argv) >= 3 else ''
@@ -84,15 +91,16 @@ print(json.dumps({"ok": False, "error": "stub unsupported"}))
 sys.exit(1)
 `
 
-/** workflow list 失败的 stub（POST 应 502 可重试）。 */
+/** stub with workflow list failing (POST should return 502 retryable). */
 const ADMIN_STUB_NO_WF = `import json, sys
 print(json.dumps({"ok": False, "error": "temporal unreachable: connection refused"}))
 sys.exit(1)
 `
 
 /**
- * 假 agent（真 spawn 路径用）：从最后一个 argv（派活指令）里解析结果文件路径，
- * 延迟 600ms 写入给定 payload 后退出。用法：node fake-agent.mjs '<payload JSON>' <prompt>
+ * Fake agent (for the real-spawn path): parses the result file path out of the last argv
+ * (the assignment instruction), waits 600ms, writes the given payload, exits.
+ * Usage: node fake-agent.mjs '<payload JSON>' <prompt>
  */
 const FAKE_AGENT = `import { writeFileSync } from 'node:fs'
 const payload = process.argv[2]
@@ -105,8 +113,10 @@ setTimeout(() => {
 `
 
 /**
- * 假 agent 变体（t260828-03）：写完结果文件后长挂不自退——模拟 stock headless
- * 「干完活不自退」已知行为，验证 done 终态会 kill 进程（进程泄露回归）。用法同上。
+ * Fake agent variant (t260828-03): writes the result file then hangs without exiting —
+ * simulates the known stock-headless "finishes work but never exits" behavior, verifying
+ * the done terminal kills the process (process-leak regression).
+ * Usage: same as above.
  */
 const FAKE_AGENT_LINGER = `import { writeFileSync } from 'node:fs'
 const payload = process.argv[2]
@@ -123,7 +133,7 @@ const tmp = await mkdtemp(join(tmpdir(), 'wb-epic-next-'))
 const ENV_KEYS = ['SANDBAR_EPIC_NEXT_DIR', 'SANDBAR_EPIC_NEXT_STUB', 'SANDBAR_EPIC_NEXT_TIMEOUT_MS', 'SANDBAR_AGENT_CMD', 'DSH_HOME']
 const savedEnv = Object.fromEntries(ENV_KEYS.map(k => [k, process.env[k]]))
 try {
-  /* ------------------------------------------------------------ A. 纯函数 */
+  /* ------------------------------------------------------------ A. Pure functions */
   section('A epic-next 纯函数')
 
   {
@@ -189,7 +199,7 @@ roles:
       'validateSuggestion：非对象/空值拒收不抛')
   }
 
-  /* ------------------------------------------------------------ B. 路由 */
+  /* ------------------------------------------------------------ B. Route */
   section('B /sandbar-workbench/api/epics/<code>/suggest-next 路由')
   {
     const mockRes = () => ({
@@ -233,7 +243,7 @@ roles:
     process.env.DSH_HOME = join(tmp, 'dsh-home')  // 空目录：profile/creds/settings 拷贝全部 no-op
     await mkdir(process.env.DSH_HOME, { recursive: true })
 
-    /* --- B1 STUB 模式全链路 --- */
+    /* --- B1 STUB mode full chain --- */
     process.env.SANDBAR_EPIC_NEXT_STUB = '1'
     const repoB = await mkRepo('repo-b', ADMIN_STUB, ['demo-epic', 'demo-epic-2'])
     const hB = setup(repoB)
@@ -251,7 +261,7 @@ roles:
       && typeof r.body.result.suggestion?.title === 'string',
       'STUB 轮询 → done，建议形状合规（模板=清单第一个）')
 
-    // t260828-03：done 终态必须回收进程（stub 挂的哑进程应已被 kill，进程泄露回归断言）
+    // t260828-03: the done terminal must reap the process (the dummy process hung by the stub should already be killed — process-leak regression assertion)
     const doneJob = await pollSuggestJob(jobId)
     ok(doneJob?.proc?.killed === true, 'STUB done 终态回收 agent 进程（proc.killed）')
 
@@ -265,12 +275,13 @@ roles:
       '已完成的 code 再 POST → 起新 job（复用只限进行中）')
     const jobIdB = r.body.result.job_id
 
-    // STUB job 要轮询过才算 done（registry 里状态翻转只在 poll 发生）——
-    // 不轮询就继续 POST 会命中「进行中复用」，这是特性不是 bug。
+    // A STUB job only counts as done after a poll (the registry state flips only when a
+    // poll happens) — posting again without polling hits "reuse while running"; that is a
+    // feature, not a bug.
     r = await call(hB, `/sandbar-workbench/api/epics/demo-epic/suggest-next/${jobIdB}`)
     ok(r.body.result.state === 'done', 'STUB job 轮询后状态翻转为 done')
 
-    // 再连开 4 个 job（每个都轮询到 done；含上面共 6 个）→ 目录保留 ≤5 份
+    // Start 4 more jobs (each polled to done; 6 total with the above) -> directory keeps at most 5
     for (let i = 0; i < 4; i++) {
       const p = await call(hB, '/sandbar-workbench/api/epics/demo-epic/suggest-next', 'POST')
       await call(hB, `/sandbar-workbench/api/epics/demo-epic/suggest-next/${p.body.result.job_id}`)
@@ -280,7 +291,7 @@ roles:
       .filter(e => e.isDirectory() && shape.test(e.name))
     ok(dirs.length === 5, `job 目录每 code 保留 5 份（实际 ${dirs.length}；demo-epic-2 的不误清）`)
 
-    /* --- B2 假 agent 真 spawn：running 复用 + 轮询到 done --- */
+    /* --- B2 fake agent, real spawn: running reuse + poll to done --- */
     delete process.env.SANDBAR_EPIC_NEXT_STUB
     const fakeScript = join(tmp, 'fake-agent.mjs')
     await writeFile(fakeScript, FAKE_AGENT, 'utf8')
@@ -305,7 +316,7 @@ roles:
       && final.body.result.suggestion?.title === 'fake 建议标题',
       '假 agent 轮询 → done 拿到它写的建议（spawn/轮询/校验全链路）')
 
-    /* --- B3 假 agent 写不合规结果 → failed --- */
+    /* --- B3 fake agent writes a non-compliant result -> failed --- */
     const badPayload = JSON.stringify({ status: 'ok', workflow: 'made-up-template', title: 'x' })
     process.env.SANDBAR_AGENT_CMD = `${process.execPath} ${fakeScript} '${badPayload}'`
     r = await call(hB, '/sandbar-workbench/api/epics/demo-epic/suggest-next', 'POST')
@@ -320,7 +331,7 @@ roles:
       && String(final3.body.result.reason).includes('不在可用清单内'),
       '幻觉模板 id → failed + 人话 reason（validateSuggestion 闸生效）')
 
-    /* --- B4 错误路径 --- */
+    /* --- B4 error paths --- */
     delete process.env.SANDBAR_AGENT_CMD
     process.env.SANDBAR_EPIC_NEXT_STUB = '1'
     r = await call(hB, '/sandbar-workbench/api/epics/Bad-Code/suggest-next', 'POST')
@@ -340,21 +351,21 @@ roles:
     r = await call(hB, '/sandbar-workbench/api/epics/demo-epic/bogus-op', 'POST')
     ok(r.status === 405, '既有未知子路径 POST → 405 回归不变')
 
-    /* --- B5 workflow list 失败 → 502 可重试 --- */
+    /* --- B5 workflow list failure -> 502 retryable --- */
     const repoC = await mkRepo('repo-c', ADMIN_STUB_NO_WF)
     const hC = setup(repoC)
     r = await call(hC, '/sandbar-workbench/api/epics/demo-epic/suggest-next', 'POST')
     ok(r.status === 502 && String(r.body.error).includes('模板清单查询失败'),
       '模板清单拿不到 → 502 人话（不放行无校验的建议）')
 
-    /* --- B6 STUB 失败变体（t260828-03；直接 import，确定性最强） --- */
+    /* --- B6 STUB failure variants (t260828-03; direct import, strongest determinism) --- */
     section('B6 STUB 失败变体：invalid_json / never_write')
     const directInput = {
       repo: repoB, code: 'demo-epic', epicTitle: 'demo', epicMarkdown: EPIC_MD,
       ticketsSummary: '[]', workflows: [{ id: 'dev-lane', name: '开发泳道' }],
     }
     {
-      // B6a invalid_json：文件在但 JSON 非法 → 两轮 poll 内 fail-fast（不等 10 分钟超时）
+      // B6a invalid_json: file exists but the JSON is illegal -> fail-fast within two polls (no 10-minute timeout wait)
       delete process.env.SANDBAR_AGENT_CMD
       process.env.SANDBAR_EPIC_NEXT_STUB = 'invalid_json'
       const j1 = await startSuggestJob(directInput)
@@ -369,7 +380,7 @@ roles:
       ok(p2?.proc?.killed === true, 'invalid_json fail-fast 终态回收哑进程')
     }
     {
-      // B6b never_write：文件始终不产出 → 不 fail-fast 误判，超时兜底 + 回收
+      // B6b never_write: file never appears -> no fail-fast misjudgment, timeout backstop + reap
       process.env.SANDBAR_EPIC_NEXT_STUB = 'never_write'
       process.env.SANDBAR_EPIC_NEXT_TIMEOUT_MS = '500'
       const j2 = await startSuggestJob(directInput)
@@ -383,11 +394,11 @@ roles:
       delete process.env.SANDBAR_EPIC_NEXT_TIMEOUT_MS
     }
 
-    /* --- B7 真 spawn 进程生命周期（t260828-03） --- */
+    /* --- B7 real spawn process lifecycle (t260828-03) --- */
     section('B7 真 spawn：invalid-JSON 自退 fail-fast / 合规结果长挂回收')
     delete process.env.SANDBAR_EPIC_NEXT_STUB
     {
-      // B7a 复刻 260828 事故现场：写非法 JSON（\- 转义）后自退 → poll 立即 fail-fast
+      // B7a reproduces the 260828 incident: writes illegal JSON (\- escape) then exits -> poll fails fast immediately
       const badJsonPayload = '{"status":"ok","workflow":"dev-lane","title":"bad\\-dash","body":"b"}'
       process.env.SANDBAR_AGENT_CMD = `${process.execPath} ${fakeScript} '${badJsonPayload}'`
       r = await call(hB, '/sandbar-workbench/api/epics/demo-epic-2/suggest-next', 'POST')
@@ -404,7 +415,7 @@ roles:
         '假 agent 写非法 JSON 后自退 → 立即 fail-fast（进程已退出不等两轮；reason 明说不是合法 JSON）')
     }
     {
-      // B7b 假 agent 写合规结果后长挂不自退 → done 且进程被 kill（done 路径泄露修复）
+      // B7b fake agent writes a compliant result then hangs -> done and the process is killed (done-path leak fix)
       const lingerScript = join(tmp, 'fake-agent-linger.mjs')
       await writeFile(lingerScript, FAKE_AGENT_LINGER, 'utf8')
       const okPayload = JSON.stringify({ status: 'ok', workflow: 'regression', title: 'linger 建议', body: 'b', rationale: 'r' })
@@ -427,7 +438,7 @@ roles:
     }
   }
 
-  /* ------------------------------------------------------------ C. client 纯函数 */
+  /* ------------------------------------------------------------ C. client pure functions */
   section('C epics-model composeSuggestedBody')
   {
     const body = composeSuggestedBody('demo-epic', '  做下一件事。\n')

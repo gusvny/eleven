@@ -1,15 +1,19 @@
 /**
- * smoke/epic-precache.mjs —— 立项下一单预跑（t260828-08）宿主半冒烟。
+ * smoke/epic-precache.mjs — host half-smoke for the epic next-ticket precache (t260828-08).
  *
- * 直跑：node smoke/epic-precache.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * 覆盖（纯函数级，零网络 / 零 Temporal / 零真 agent）：
- *   A. stateKeyFromRows：与 python 侧 shared.py epic_state_key 双算同一 fixture 同一字面量
- *      （EXPECT_STATE_KEY，谁漂移谁红灯）——当前票强制 closed 口径、顺序无关；
- *   B. readPrecache：stub pre.json 命中秒回（ok 形态）/ state_key 不符当未命中 /
- *      workflow 不在白名单当未命中 / 非法 JSON 当未命中 / epic 不一致当未命中 /
- *      done 形态命中 / done 空 summary 当未命中 / 代号形状非法当未命中 / 文件缺失当未命中；
- *   C. closeEpic：状态表行外科改写「已完结」+ 写前 /tmp 备份 + 原文件其它内容不动 /
- *      无「状态」行 422 / 代号形状非法 400（防穿）/ 不存在代号 404。
+ * Run: node smoke/epic-precache.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+ * Covers (pure-function level, zero network / zero Temporal / zero real agent):
+ *   A. stateKeyFromRows: computes the same literal (EXPECT_STATE_KEY) from the same fixture
+ *      as the python side shared.py epic_state_key (whichever drifts goes red) — this ticket
+ *      pins the closed semantics, order-independent;
+ *   B. readPrecache: stub pre.json hit returns instantly (ok shape) / state_key mismatch
+ *      counts as a miss / workflow not in the whitelist counts as a miss / illegal JSON
+ *      counts as a miss / epic mismatch counts as a miss / done shape hits / done with empty
+ *      summary counts as a miss / malformed code shape counts as a miss / missing file
+ *      counts as a miss;
+ *   C. closeEpic: rewrites the "状态" table row to 「已完结」+ /tmp backup before writing +
+ *      the rest of the original file untouched / no "状态" row 422 / malformed code 400
+ *      (escape guard) / unknown code 404.
  */
 
 import { mkdtemp, readFile, readdir, rm, writeFile, mkdir } from 'node:fs/promises'
@@ -27,7 +31,7 @@ function ok(cond, label) {
 function section(t) { console.log(`\n== ${t}`) }
 
 // ---------------------------------------------------------------- fixtures
-// 与 python 侧 selfcheck_epic_next.py 的 EXPECT_STATE_KEY 同一 fixture 同一字面量（互指）。
+// The same fixture and the same literal (EXPECT_STATE_KEY) as the python side selfcheck_epic_next.py (cross-referenced).
 const ROWS = [
   { id: 't-demo-01', closed: true },
   { id: 't-demo-02', closed: false },

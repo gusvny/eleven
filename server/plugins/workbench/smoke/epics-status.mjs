@@ -1,24 +1,31 @@
 /**
- * smoke/epics-status.mjs —— 立项单状态 enum 化（t260831-05）宿主半冒烟。
+ * smoke/epics-status.mjs — host half-smoke for the epic status enum (t260831-05).
  *
- * 直跑：node smoke/epics-status.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * 覆盖：
- *   A. EPIC_STATUSES 枚举常量形状（四值、全角括号）+ parseEpicMeta 读「备注」列；
- *   B. validateEpicNote 备注形状校验（拒收不转义）：含 | / 含换行 / 含反引号 /
- *      超 200 字符 / number / object / null=不动 / undefined=不动 / ''=清空；
- *   C. setEpicStatus 全分支：合法改写、非法枚举 422、无状态行 422、404、代号形状 400、
- *      防穿、写前 /tmp 备份（内容=改写前原文，按 <code>- 前缀取 mtime 最新——共享全局
- *      目录，取到旧备份会假绿）、备注新增行（插在状态行后）/清空/不动、
- *      closeEpic 薄封装（状态=已完结且不动备注）；
- *   D. 路由 POST /epics/<code>/status：200 / 400 畸形 JSON / 400 缺 status / 422 非法枚举 /
- *      422 畸形 note / 405 GET / 404 不存在代号；close 路由回归（响应形状不变、
- *      状态=已完结 ∈ EPIC_STATUSES、备份内容=改写前原文、close 不动备注列）；
- *   E. 前端纯函数：filterEpicsByStatus（全部/单值/未知值 console.warn 返空/空列表）、
- *      isEpicStatusValue、EPIC_STATUS_OPTIONS 与 host EPIC_STATUSES 一致性断言；
- *   F. 存量迁移断言：真目录 notes/epics 七单状态全部 ∈ EPIC_STATUSES、备注列存在、
- *      关键映射抽查（dsh-generalize=已归档+备注含 sandbar；sandbar=已立项（执行中））。
- * 全部桩/fixture 复现（SANDBAR_EPICS_DIR 指向临时目录；fixture 代号带 zz- 前缀防 /tmp
- * 备份串档），不靠真外部源。
+ * Run: node smoke/epics-status.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+ * Covers:
+ *   A. EPIC_STATUSES enum constant shape (four values, full-width brackets) + parseEpicMeta
+ *      reading the 「备注」 (note) column;
+ *   B. validateEpicNote note-shape validation (reject without escaping): contains | /
+ *      contains newline / contains backtick / over 200 chars / number / object / null = leave
+ *      untouched / undefined = leave untouched / '' = clear;
+ *   C. setEpicStatus full branch coverage: valid rewrite, illegal enum 422, no status row
+ *      422, 404, malformed code 400, escape guard, /tmp backup before writing (content = the
+ *      pre-rewrite original text, picking the newest mtime among backups with the <code>-
+ *      prefix — a shared global directory, picking an old backup would be a false green),
+ *      note add row (inserted after the status row) / clear / leave, closeEpic thin wrapper
+ *      (status=已完结 (done) without touching the note);
+ *   D. route POST /epics/<code>/status: 200 / 400 malformed JSON / 400 missing status / 422
+ *      illegal enum / 422 malformed note / 405 GET / 404 unknown code; close route
+ *      regression (response shape unchanged, status=已完结 ∈ EPIC_STATUSES, backup content =
+ *      pre-rewrite original text, close does not touch the note column);
+ *   E. frontend pure functions: filterEpicsByStatus (all / single value / unknown value
+ *      console.warn returns empty / empty list), isEpicStatusValue, EPIC_STATUS_OPTIONS
+ *      consistent with the host EPIC_STATUSES;
+ *   F. existing-data migration assertions: all seven real notes/epics epics have status ∈
+ *      EPIC_STATUSES, the note column exists, spot checks on key mappings (dsh-generalize=
+ *      archived with a note containing sandbar; sandbar=已立项（执行中）(approved, in progress)).
+ * All stubs/fixtures reproduce locally (SANDBAR_EPICS_DIR points at a temp dir; fixture
+ * codes carry a zz- prefix so /tmp backups cannot collide), no real external sources.
  */
 
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
@@ -57,7 +64,7 @@ const FIX_MD = (status, noteRow = '') => `# 立项单：zz-fix
 const tmp = await mkdtemp(join(tmpdir(), 'wb-epic-status-'))
 const savedEnv = process.env.SANDBAR_EPICS_DIR
 try {
-  /* ------------------------------------------------------------ A. 枚举常量 + 备注列解析 */
+  /* ------------------------------------------------------------ A. Enum constants + note column parsing */
   section('A EPIC_STATUSES 枚举 + parseEpicMeta 备注列')
   {
     ok(EPIC_STATUSES.length === 4
@@ -73,7 +80,7 @@ try {
     ok(noNote.note === '', '无备注行 → 容错空串不拒收')
   }
 
-  /* ------------------------------------------------------------ B. validateEpicNote 畸形用例 */
+  /* ------------------------------------------------------------ B. validateEpicNote malformed cases */
   section('B validateEpicNote 备注形状校验（拒收不转义）')
   {
     ok(validateEpicNote(undefined).ok === true && validateEpicNote(undefined).note === undefined, 'undefined = 不动备注')
@@ -98,12 +105,12 @@ try {
       'note=object → 400 形状层拒收')
   }
 
-  /* ------------------------------------------------------------ C. setEpicStatus 全分支 */
+  /* ------------------------------------------------------------ C. setEpicStatus full branches */
   section('C setEpicStatus 外科改写全分支')
   const dirC = join(tmp, 'epics-c')
   await mkdir(dirC, { recursive: true })
   const BACKUP_DIR = '/tmp/epic-close-backup'
-  /** 取共享 /tmp 备份目录里 <code>- 前缀 mtime 最新的备份全文（取旧档会假绿）。 */
+  /** Read the full text of the newest-mtime backup with the <code>- prefix from the shared /tmp backup directory (an old backup would be a false green). */
   async function latestBackup(code) {
     let best = null
     try {
@@ -117,7 +124,7 @@ try {
     return best === null ? null : await readFile(best.p, 'utf8')
   }
   {
-    // fixture 代号带 zz- 前缀：共享 /tmp 备份目录防串档。
+    // Fixture codes carry a zz- prefix so the shared /tmp backup directory cannot collide.
     await writeFile(join(dirC, 'zz-fix.md'), FIX_MD('已立项（待开工单）', '\n| 备注 | 旧备注 |'), 'utf8')
 
     const r1 = await setEpicStatus(dirC, 'zz-fix', '已立项（执行中）')
@@ -173,7 +180,7 @@ try {
     ok(parseEpicMeta(afterClose).note === '新插备注', 'close 不动备注列')
   }
 
-  /* ------------------------------------------------------------ D. 路由 POST /status + close 回归 */
+  /* ------------------------------------------------------------ D. POST /status route + close regression */
   section('D 路由：POST /epics/<code>/status + close 回归')
   {
     const mockRes = () => ({
@@ -187,7 +194,7 @@ try {
     })
     const repoD = join(tmp, 'repo-d')
     await mkdir(join(repoD, 'server'), { recursive: true })
-    // stub admin.py：tickets 聚合返回空（走降级或空集均可，本段不验聚合）。
+    // stub admin.py: the tickets aggregate returns empty (degraded or empty set — this section does not check aggregation).
     await writeFile(join(repoD, 'server', 'admin.py'), `import json, sys
 print(json.dumps({"ok": True, "result": {"count": 0, "tickets": []}}))
 sys.exit(0)
@@ -242,7 +249,7 @@ sys.exit(0)
     r = await call(`${B}/no-such-zz/status`, 'POST', JSON.stringify({ status: '已完结' }))
     ok(r.status === 404, '不存在代号 → 404')
 
-    // close 回归网（现有 smoke/epics.mjs 对 closeEpic 零覆盖，本段补齐）。
+    // close regression net (existing smoke/epics.mjs has zero coverage of closeEpic — this section fills it).
     md = await readFile(join(repoD, 'notes', 'epics', 'zz-route.md'), 'utf8')
     r = await call(`${B}/zz-route/close`, 'POST')
     ok(r.status === 200 && r.body.ok === true && r.body.result.code === 'zz-route'
@@ -257,7 +264,7 @@ sys.exit(0)
     ok(r.status === 405, 'GET /close → 405（人审确认语义不变）')
   }
 
-  /* ------------------------------------------------------------ E. 前端纯函数 */
+  /* ------------------------------------------------------------ E. Frontend pure functions */
   section('E epics-model 前端纯函数')
   {
     ok(EPIC_STATUS_OPTIONS.length === 4 && EPIC_STATUS_OPTIONS.every((s, i) => s === EPIC_STATUSES[i]),
@@ -284,7 +291,7 @@ sys.exit(0)
       '未知状态（防御性）→ 空数组 + console.warn 一条（迁移漏网可见）')
   }
 
-  /* ------------------------------------------------------------ F. 存量迁移断言（真目录） */
+  /* ------------------------------------------------------------ F. Existing-data migration assertions (real directory) */
   section('F 存量迁移断言（notes/epics 真目录）')
   {
     const epics = await listEpics(join(process.cwd(), '..', '..', '..', 'notes', 'epics'))
@@ -299,7 +306,7 @@ sys.exit(0)
     ok(byCode['epic-linkage']?.status === '已完结' && String(byCode['epic-linkage']?.note ?? '').includes('2026-08-30'),
       'epic-linkage 长状态 → 已完结 + 备注保留交付信息')
     ok(byCode['observability']?.status === '已立项（待开工单）', 'observability 本就是规范值，不变')
-    // 详情读取链路带 note 字段（readEpicMarkdown 走 parseEpicMeta）。
+    // The detail read path carries the note field (readEpicMarkdown goes through parseEpicMeta).
     const rd = await readEpicMarkdown(join(process.cwd(), '..', '..', '..', 'notes', 'epics'), 'science-content')
     ok(rd.ok === true && rd.status === '已立项（待开工单）' && rd.note === '先做哪条线待拍板',
       'readEpicMarkdown 详情链路带 note（science-content 抽查）')

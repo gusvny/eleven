@@ -1,34 +1,45 @@
 /**
- * smoke/context-fold.mjs —— 上下文折叠件冒烟（t260905-04）。
+ * smoke/context-fold.mjs — smoke for the context fold widget (t260905-04).
  *
- * 直跑：node smoke/context-fold.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * 被测=src/client/context-fold.ts（classifyContextFold 纯函数 + findCharterBubble
- * 定位纯函数 + applyContextFold 施折面 + start/stop 生命周期），DOM 用自有桩
- * （无 jsdom），MutationObserver 桩进 globalThis（同 chat-project-band.mjs 纪律）。
+ * Run: node smoke/context-fold.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+ * Under test: src/client/context-fold.ts (classifyContextFold pure function + findCharterBubble
+ * locating pure function + applyContextFold apply side + start/stop lifecycle). The DOM is a
+ * homemade stub (no jsdom); MutationObserver is stubbed into globalThis (same discipline as
+ * chat-project-band.mjs).
  *
- * 覆盖（对应模块头注故障模式取舍清单 + 评审条件 A + 仲裁回归）：
- *   A. classifyContextFold：marker 首行命中、前导空白容错、非字符串/空串/
- *      中段提及不误触发。
- *   B. findCharterBubble：唯一子链上爬到有兄弟层/滚动体直接子层、爬到滚动体
- *      本体=null（宁不折不藏滚动体）、无 marker=null、嵌套包裹链。
- *   C. applyContextFold：折叠态+小条铸入、幂等（重复回调不重插不重设）、
- *      无 marker 常态 'none'、降级 'degraded'、插入失败回滚属性。
- *   D. 孤儿小条（review 条件 A①）：气泡被移除/容器清空/文本改写后，回调
- *      摘小条+摘属性——幽灵小条不过夜。
- *   E. start/stop 生命周期（document 桩 + MutationObserver 桩）：style 注入与
- *      摘除、接线全树兜底扫、stop 回收（断桩 Observer/解绑 click/摘小条/摘
- *      属性/摘 style）、stop 幂等、无 document 软退化。
- *   F. 引用计数单例（取舍第 9 项）：双 start 只绑一次 click、先归零才真拆；
- *      StrictMode 序列（start→stop→start）第二段仍活。
- *   G. 点击委托：点小条切折叠态+文案切换；非小条点击不动。
- *   H. children=HTMLCollection 语义回归（仲裁指认的 code-fault 根因）。
- *   I. 平台锚聚合（t260905-09）：平台上下文 N 条 + charter 注入 1 条叠进同一
- *      滚动体 → 全部收折、恰一个小条、N=1 文案逐字不变、N>1 计数文案；多锚
- *      命中同一消息按气泡元素身份去重；负向：普通消息零误折。
- *   J. 聚合组开收：点小条整组开/收、计数文案随态切换。
- *   K. 聚合孤儿清扫：混合集合中部分气泡失效（改写/移除）→ 逐气泡摘属性、
- *      全失效才摘小条。
- *   L. warn 收窄：charter 注入物 >1 才 warn；平台叠加 N 条不 warn。
+ * Covers (module header failure-mode list + review condition A + arbitration regression):
+ *   A. classifyContextFold: marker first-line hit, leading-whitespace tolerance, non-string /
+ *      empty string / mid-text mention must not trigger.
+ *   B. findCharterBubble: climb the only-child chain up to a level with siblings / a direct
+ *      child of the scroll body; climbing to the scroll body itself = null (prefer no fold
+ *      over hiding the scroll body); no marker = null; nested wrapper chains.
+ *   C. applyContextFold: folded state + mini-bar injected, idempotent (repeat callbacks do
+ *      not re-insert or re-set), no marker = normal 'none', degraded = 'degraded', failed
+ *      insert rolls the attribute back.
+ *   D. Orphan mini-bars (review condition A1): after the bubble is removed / container
+ *      cleared / text rewritten, the callback removes the mini-bar + the attribute — no
+ *      ghost mini-bars survive the night.
+ *   E. start/stop lifecycle (document stub + MutationObserver stub): style inject/remove,
+ *      full-tree fallback scan on wiring, stop recovers everything (disconnect stub observer /
+ *      unbind click / remove mini-bar / remove attributes / remove style), stop idempotent,
+ *      no document = graceful no-op.
+ *   F. Refcounted singleton (tradeoff item 9): double start binds the click once, teardown
+ *      only after the count reaches zero; StrictMode sequence (start->stop->start) leaves
+ *      the second run alive.
+ *   G. Click delegation: clicking the mini-bar toggles the folded state + label switches;
+ *      clicks elsewhere do nothing.
+ *   H. children=HTMLCollection semantics regression (the code-fault root cause named by
+ *      arbitration).
+ *   I. Platform anchor aggregation (t260905-09): N platform context entries + 1 charter
+ *      injection land in the same scroll body -> all folded, exactly one mini-bar, N=1 label
+ *      byte-identical, N>1 count label; multiple anchors hitting the same message dedupe by
+ *      bubble element identity; negative: normal messages never fold by mistake.
+ *   J. Aggregated group toggle: clicking the mini-bar opens/closes the whole group, count
+ *      label switches with state.
+ *   K. Aggregated orphan cleanup: in a mixed set some bubbles go stale (rewritten/removed)
+ *      -> attributes removed per bubble, mini-bar removed only when all are stale.
+ *   L. warn narrowed: warn only when charter injections >1; platform stacking of N entries
+ *      does not warn.
  */
 
 import {
@@ -56,14 +67,15 @@ function ok(cond, label) {
 }
 function section(t) { console.log(`\n== ${t}`) }
 
-/* ── 自有 DOM 桩（最小 Element/Document 面）──
- * children 语义=HTMLCollection（code-fault 修复回归用例的教训
- * 落桩：内部 _kids 数组，对外的 children 是**无数组方法的 array-like**——length+
- * 数字索引+Symbol.iterator 全真 DOM 语义，.some/.filter/.push 一律不存在。被测
- * 模块必须经 Array.from 消费，桩面才能代表浏览器真语义；桩回归用例 H 段直接断言
- * 「children 无 .some 时折叠照常工作」。 */
+/* -- Homemade DOM stub (minimal Element/Document surface) --
+ * children semantics = HTMLCollection (the lesson from the code-fault fix regression
+ * case is baked into the stub: the internal _kids array is exposed as an **array-like
+ * without array methods** — length + numeric index + Symbol.iterator are the real DOM
+ * semantics; .some/.filter/.push simply do not exist. The module under test must consume
+ * it via Array.from for the stub to represent real browser semantics; stub regression
+ * case H directly asserts "folding still works when children has no .some". */
 let nextId = 1
-/** array-like（无数组方法）：真 HTMLCollection 的最小语义投影。 */
+/** Array-like (no array methods): the minimal semantic projection of a real HTMLCollection. */
 function arrayLike(arr) {
   const obj = { length: arr.length }
   arr.forEach((c, i) => { obj[i] = c })
@@ -80,7 +92,7 @@ function el(tag = 'div', text = '') {
     _text: text,
     attributes: {},
     get textContent() {
-      // 自身文本 + 子树文本拼接（真 DOM 语义）
+      // own text + subtree text concatenated (real DOM semantics)
       return node._text + node._kids.map(c => c.textContent).join('')
     },
     set textContent(v) { node._text = String(v); node._kids = [] },
@@ -152,14 +164,14 @@ function docOf(scroll) {
     addEventListener(type, fn) { (doc._listeners[type] ??= []).push(fn) },
     removeEventListener(type, fn) { doc._listeners[type] = (doc._listeners[type] ?? []).filter(f => f !== fn) },
   }
-  // 模块经 doc.head.appendChild 注入 style——head 挂同一记账入口（摘除同）
+  // the module injects style via doc.head.appendChild — head shares the same bookkeeping entry (removal too)
   doc.head.appendChild = (c) => doc.appendChild(c)
   doc.head.removeChild = (c) => doc.removeChild(c)
   if (scroll) { scroll._isScroll = true; doc.body.append(scroll) }
   return doc
 }
 
-/** 标准会话 DOM：scroll > list > [bubbleCharter, bubbleReply]；charter 内 p 含 marker。 */
+/** Standard session DOM: scroll > list > [bubbleCharter, bubbleReply]; the charter bubble's p contains the marker. */
 function charterScrollDoc() {
   const scroll = el('div')
   const list = el('div')
@@ -191,14 +203,14 @@ section('B findCharterBubble：定位纯函数')
     scroll.append(bubble, reply)
     ok(findCharterBubble(scroll) === bubble, '滚动体直接子层=气泡') }
   { // 无兄弟可分层：scroll > wrap > bubbleCharter——唯一子链爬到滚动体直接子层
-    // 停（wrap=气泡，折叠它是正确语义：藏的只是这条消息，小条由 wrap 父层承载）。
+    // Stop here (wrap=bubble; folding it is the correct semantics: only this message is hidden, the mini-bar is carried by the wrap's parent level).
     const scroll = el('div'); const wrap = el('div'); const bubble = el('div', `${CHARTER_MARKER}\nx`)
     wrap.append(bubble); scroll.append(wrap)
     ok(findCharterBubble(scroll) === wrap, '独苗链爬到滚动体直接子层=wrap（可折）') }
   { const scroll = el('div'); scroll.append(el('div', '没有注入物'))
     ok(findCharterBubble(scroll) === null, '无 marker=null') }
   { // 深嵌套：marker 在最内 c，唯一子链上爬停在「父层有兄弟」的 b 层（b=消息容器，
-      // a=含 sib 的列表层，不是气泡）。
+      // a = the list level that has siblings, not the bubble).
     const scroll = el('div'); const a = el('div'); const b = el('div'); const c = el('div', `${CHARTER_MARKER}\nx`)
     b.append(c); a.append(b); const sibling = el('div', 'sib'); a.append(sibling); scroll.append(a)
     ok(findCharterBubble(scroll) === b, '深嵌套：停在父层有兄弟的 b 层=气泡') }
@@ -206,7 +218,7 @@ section('B findCharterBubble：定位纯函数')
 
 section('C applyContextFold：施折面')
 {
-  // 模块级 state 只能经 start 建立——C 段统一走 start/stop 生命周期施折
+  // module-level state can only be created via start — section C always goes through the start/stop lifecycle to apply folds
   globalThis.MutationObserver = class { observe() {} disconnect() {} }
   {
     const { doc, scroll, bubble } = charterScrollDoc()
@@ -227,8 +239,9 @@ section('C applyContextFold：施折面')
     stop()
   }
   {
-    // 独苗链：爬到滚动体直接子层 wrap=气泡，正常折叠（气泡是滚动体本身才降级，
-    // 该分支结构性不可达——停爬条件含 parentElement===scroll，保底防御保留）。
+    // Only-child chain: climbs to the scroll body's direct child wrap=bubble, folds normally
+    // (only degrades when the bubble is the scroll body itself — that branch is structurally
+    // unreachable; the stop condition includes parentElement===scroll as a defensive backstop).
     const scroll = el('div'); const wrap = el('div'); wrap.append(el('div', `${CHARTER_MARKER}\nx`)); scroll.append(wrap)
     const doc = docOf(scroll)
     const stop = startContextFold({ doc })
@@ -283,7 +296,7 @@ section('E start/stop 生命周期')
   ok((doc._listeners.click ?? []).length === 0 && doc._style === null, 'stop 幂等')
   { // 无 document 软退化
     const savedDoc = globalThis.document
-    // @ts-expect-error 桩面
+    // @ts-expect-error stub surface
     globalThis.document = undefined
     const stop2 = startContextFold()
     ok(typeof stop2 === 'function', '无 document：返回 no-op 清理函数不抛')
@@ -334,8 +347,9 @@ section('G 点击委托：展开/收起')
 
 section('H children=HTMLCollection 语义回归（arbitrate round1 code-fault 根因）')
 {
-  // 桩 children 已是无 .some 的 array-like（真 HTMLCollection 语义投影）——先证桩
-  // 语义本身，再证被测模块在无数组方法 children 上照常工作（Array.from 修复面）。
+  // The stub children is already an array-like without .some (the real HTMLCollection
+  // semantic projection) — first prove the stub semantics itself, then prove the module
+  // under test still works on children without array methods (the Array.from fix surface).
   const { doc, scroll, bubble, list } = charterScrollDoc()
   ok(typeof scroll.children.some !== 'function' && typeof scroll.children.filter !== 'function'
     && scroll.children.length === 1 && scroll.children[0] === list, '桩语义：children 无数组方法、length+索引+可迭代')
@@ -348,14 +362,14 @@ section('H children=HTMLCollection 语义回归（arbitrate round1 code-fault �
   stop()
 }
 
-/* ── t260905-09 聚合语义段（I–L）── */
+/* -- t260905-09 aggregation semantics section (I-L) -- */
 
-/** 平台自启上下文固定样本（锚真源原文派生，与 integration fixtures 同口径）。 */
+/** Fixed samples of platform self-start context (derived from the real anchor source text, same wording as the integration fixtures). */
 const RTX = PLATFORM_CONTEXT_ANCHORS[0].text
 const WSI = PLATFORM_CONTEXT_ANCHORS[1].text
 const INSTR = PLATFORM_CONTEXT_ANCHORS[3].text + '~/proj/CLAUDE.md'
 
-/** 标准叠台 DOM：scroll > list > [bubbleRtx, bubbleWsi, bubbleCharter, bubbleReply]。 */
+/** Standard stacked DOM: scroll > list > [bubbleRtx, bubbleWsi, bubbleCharter, bubbleReply]. */
 function stackedScrollDoc() {
   const scroll = el('div')
   const list = el('div')

@@ -1,19 +1,23 @@
 /**
- * smoke/epics.mjs —— 立项单只读 API（epic-linkage Tier 2，t260825-04）的宿主半冒烟。
+ * smoke/epics.mjs — host half-smoke for the read-only epic API (epic-linkage Tier 2, t260825-04).
  *
- * 直跑：node smoke/epics.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * 覆盖：
- *   A. parseEpicMeta / listEpics（src/host/epics.ts 纯函数）：标题=首个 # 行（剥
- *      「立项单：」前缀）、状态/立项日期=字段表格行（容错缺 ''）；目录不存在/空目录 →
- *      空数组不报错；非 .md / 代号形状不合的文件名不入列；按代号排序。
- *   B. readEpicMarkdown：合法 → 全文+元信息；形状非法（大写/含点/超长）→ 400；
- *      resolve 防穿双保险断言（路径必落在 epicsDir 内）；不存在 → 404 附现有代号清单。
- *   C. 路由（node.ts apply + mock webServer/req/res + stub admin.py）：
- *      GET /api/epics（env SANDBAR_EPICS_DIR 指向临时目录/空目录/缺省 <repo>/notes/epics）；
- *      GET /api/epics/<code>（200 全文 / 400 形状 / 4xx 防穿 ..%2f 类 / 404 不存在）；
- *      GET /api/epics/<code>/tickets（status 分桶 + 工单行字段；admin.py 回 ok:false 与
- *      直接崩非 JSON 两条降级路径都 → 200 {degraded:true, reason 含底层 error 原文}，不 502）；
- *      既有工单列表/详情响应 epic 字段透出（有 epic 带代号，无 epic 为 ''）；POST → 405。
+ * Run: node smoke/epics.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+ * Covers:
+ *   A. parseEpicMeta / listEpics (src/host/epics.ts pure functions): title = first # line
+ *      (the 「立项单：」 prefix stripped), status/start date = field-table rows (tolerant of
+ *      missing ''); directory missing/empty -> empty array, no error; non-.md files / codes
+ *      with an illegal shape are not listed; sorted by code.
+ *   B. readEpicMarkdown: valid -> full text + meta; malformed shape (uppercase / dots /
+ *      overlong) -> 400; resolve escape-guard double-checked (the path must stay inside
+ *      epicsDir); missing -> 404 with the list of existing codes.
+ *   C. Routes (node.ts apply + mock webServer/req/res + stub admin.py):
+ *      GET /api/epics (SANDBAR_EPICS_DIR pointing at a temp dir / empty dir / default
+ *      <repo>/notes/epics); GET /api/epics/<code> (200 full text / 400 shape / 4xx escape
+ *      guard for ..%2f style / 404 missing); GET /api/epics/<code>/tickets (status buckets +
+ *      ticket row fields; both degradation paths — admin.py returns ok:false and admin.py
+ *      crashing non-JSON — end at 200 {degraded:true, reason containing the underlying error
+ *      text}, never 502); the epic field shows through on existing ticket list/detail
+ *      responses (with epic -> carries the code, without epic -> ''); POST -> 405.
  */
 
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -46,7 +50,7 @@ const EPIC_MD = `# 立项单：demo-epic
 const tmp = await mkdtemp(join(tmpdir(), 'wb-epics-'))
 const savedEnv = process.env.SANDBAR_EPICS_DIR
 try {
-  /* ------------------------------------------------------------ A. 纯函数：解析与列表 */
+  /* ------------------------------------------------------------ A. Pure functions: parsing and listing */
   section('A parseEpicMeta / listEpics')
   {
     const meta = parseEpicMeta(EPIC_MD)
@@ -89,10 +93,10 @@ try {
       '不存在 → 404 人话附现有代号清单')
   }
 
-  /* ------------------------------------------------------------ C. 路由 */
+  /* ------------------------------------------------------------ C. Routes */
   section('C /sandbar-workbench/api/epics* 路由')
   {
-    // 公共 mock 件（agent-logs.mjs 同款制式）
+    // Shared mock pieces (same pattern as agent-logs.mjs)
     const mockRes = () => ({
       status: 0, body: null,
       writeHead(s) { this.status = s },
@@ -121,7 +125,7 @@ try {
       await handler.handler(mockReq(url, method), res)
       return res
     }
-    // stub admin.py：应答 ticket list（按 epic 过滤）/ workflow list / ticket show
+    // stub admin.py: answers ticket list (filtered by epic) / workflow list / ticket show
     const LIST_OK = 'print(json.dumps({"ok": True, "result": {"count": 2, "tickets": [\n' +
       '        {"id": "t260825-01", "title": "ticket-list --epic 过滤", "status": "closed",\n' +
       '         "stage": "settled", "stage_state": "done", "epic": "epic-linkage"},\n' +
@@ -149,7 +153,7 @@ sys.exit(1)
 `, 'utf8')
     }
 
-    /* --- C1 列表路由：env 指向 / 空目录 / 缺省 <repo>/notes/epics --- */
+    /* --- C1 list route: env override / empty dir / default <repo>/notes/epics --- */
     const repoC = join(tmp, 'repo-c')
     await writeStub(repoC, { listPayload: {} })
     process.env.SANDBAR_EPICS_DIR = join(tmp, 'epics-a')
@@ -173,7 +177,7 @@ sys.exit(1)
     ok(r.status === 200 && r.body.result.count === 1 && r.body.result.epics[0].code === 'demo-epic',
       '缺省 <repo>/notes/epics 目录解析正确')
 
-    /* --- C2 详情路由：200 / 400 / 防穿 4xx / 404 / 405 --- */
+    /* --- C2 detail route: 200 / 400 / escape-guard 4xx / 404 / 405 --- */
     r = await call(r1c.prefixEpics, '/sandbar-workbench/api/epics/demo-epic')
     ok(r.status === 200 && r.body.result.markdown.includes('## 目标')
       && r.body.result.path === 'notes/epics/demo-epic.md', 'GET /epics/<code> → 全文+path')
@@ -190,7 +194,7 @@ sys.exit(1)
     r = await call(r1c.prefixEpics, '/sandbar-workbench/api/epics/demo-epic/bogus-op')
     ok(r.status === 404, '未知子路径 → 404 人话')
 
-    /* --- C3 /tickets 聚合：分桶 + 行字段 --- */
+    /* --- C3 /tickets aggregation: buckets + row fields --- */
     r = await call(r1c.prefixEpics, '/sandbar-workbench/api/epics/demo-epic/tickets')
     ok(r.status === 200 && r.body.ok === true && r.body.result.count === 2, 'GET /tickets → 2 张工单')
     ok(r.body.result.buckets.closed === 1 && r.body.result.buckets.dispatched === 1,
@@ -204,7 +208,7 @@ sys.exit(1)
     r = await call(r1c.prefixEpics, '/sandbar-workbench/api/epics/BAD/tickets')
     ok(r.status === 400, '/tickets 形状非法 → 400')
 
-    /* --- C4 /tickets 降级：ok:false 与 spawn 崩两条路，都 → 200 degraded 不 502 --- */
+    /* --- C4 /tickets degradation: both paths — ok:false and spawn crash — end at 200 degraded, never 502 --- */
     const repoE = join(tmp, 'repo-e')
     await mkdir(join(repoE, 'notes', 'epics'), { recursive: true })
     await writeFile(join(repoE, 'notes', 'epics', 'demo-epic.md'), EPIC_MD, 'utf8')
@@ -214,7 +218,7 @@ sys.exit(1)
     ok(r.status === 200 && r.body.ok === true && r.body.result.degraded === true
       && String(r.body.result.reason).includes('connection refused'),
       'admin.py 崩（非 JSON）→ 200 degraded，reason 含底层 error 原文')
-    // ok:false 路径：ticket list 被认出但显式回失败
+    // ok:false path: ticket list recognized but explicitly returns failure
     await writeFile(join(repoE, 'server', 'admin.py'), `import json, sys
 args = json.loads(sys.argv[3]) if len(sys.argv) >= 4 else {}
 if sys.argv[2] == 'ticket' and args.get('op') == 'list':
@@ -228,7 +232,7 @@ sys.exit(1)
       && String(r.body.result.reason).includes('connection refused'),
       'admin.py 回 ok:false → 200 degraded，reason 透传底层 error 原文')
 
-    /* --- C5 既有工单列表/详情 epic 字段透出 --- */
+    /* --- C5 epic field shows through on existing ticket list/detail --- */
     const repoF = join(tmp, 'repo-f')
     await writeStub(repoF, {
       listPayload: { id: 't260825-04', title: '本工单', epic: 'epic-linkage', stage_state: 'running' },
