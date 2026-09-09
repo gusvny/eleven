@@ -1,19 +1,26 @@
 #!/usr/bin/env python3
-"""cache_probe —— k3 会话 prompt cache（cacheReadTokens）排查工具（t260901-19 ①，只读）。
+"""cache_probe — prompt-cache (cacheReadTokens) investigation for k3 sessions
+(t260901-19 item 1, read-only).
 
-扫 .worktrees/*/.dsh/sessions/**/*.jsonl.zstd（工单泳道 agent 会话，dsh-headless-resume
-落盘格式），逐 turn 提取 usage（inputTokens/outputTokens/cacheReadTokens），输出每会话
-命中率 cache_read/(input+cache_read) 与节省估算。不写任何文件、不碰 spawn 链路。
+Scans .worktrees/*/.dsh/sessions/**/*.jsonl.zstd (ticket-lane agent sessions,
+the dsh-headless-resume on-disk format), extracts usage per turn
+(inputTokens/outputTokens/cacheReadTokens), and prints each session's hit rate
+cache_read/(input+cache_read) plus a savings estimate. Writes no files and
+never touches the spawn chain.
 
-usage 形态（实测）：
+Observed usage shape:
   {"inputTokens":27,"outputTokens":520,"cacheReadTokens":25856}
-口径：
-  - 每条含 usage 且 inputTokens+outputTokens+cacheReadTokens>0 的消息计一个样本；
-    重复出现两次（dsh 落盘同 turn 双写）不去重——分子分母同倍增，命中率不变。
-  - 畸形/半截行跳过并计数（zstd 撕裂帧、非 JSON 行）。
+Counting rules:
+  - every message carrying usage with inputTokens+outputTokens+cacheReadTokens>0
+    counts as one sample;
+  - the duplicate (dsh writes the same turn twice) is not deduplicated —
+    numerator and denominator double together, so the hit rate is unchanged;
+  - malformed/truncated lines are skipped and counted (torn zstd frames,
+    non-JSON lines).
 
-依赖：系统 zstd 二进制（会话文件是 zstd 压缩 JSONL）。缺失 → 可读报错 + exit(2)。
-跑法：python3 integration/cache_probe.py [root]   # root 缺省=仓库根
+Dependency: the system zstd binary (session files are zstd-compressed JSONL).
+Missing -> readable error + exit(2).
+Usage: python3 integration/cache_probe.py [root]   # root defaults to the repo root
 """
 import json
 import shutil
@@ -21,7 +28,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent  # integration/ 的父目录 = 仓库根
+REPO = Path(__file__).resolve().parent.parent  # parent of integration/ = repo root
 
 
 def fail(msg, code=2):
@@ -30,7 +37,8 @@ def fail(msg, code=2):
 
 
 def probe_session(f: Path):
-    """解压一个会话文件，返回 (samples, bad_n)。sample=(input,output,cache_read)。"""
+    """Decompress one session file, return (samples, bad_n).
+    sample = (input, output, cache_read)."""
     r = subprocess.run(["zstd", "-dc", str(f)], capture_output=True)
     if r.returncode != 0:
         return [], 1
@@ -43,8 +51,8 @@ def probe_session(f: Path):
             continue
         usage = obj.get("usage") if isinstance(obj, dict) else None
         if usage is None and isinstance(obj, dict) and isinstance(obj.get("data"), dict):
-            usage = obj["data"].get("usage")  # dsh 落盘形态：assistant/message 事件，
-            # usage 在 data 下（实测 t260901-16/18 会话）
+            usage = obj["data"].get("usage")  # dsh on-disk shape: assistant/message
+            # events keep usage under "data" (seen in the t260901-16/18 sessions)
         if not isinstance(usage, dict):
             continue
         i = usage.get("inputTokens") or 0

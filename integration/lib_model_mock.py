@@ -1,36 +1,45 @@
 # -*- coding: utf-8 -*-
-"""进程内 mock LLM 端点（t260904-12 乙段 gen4 #3）——零第三方依赖，stdlib only。
+"""In-process mock LLM endpoint (t260904-12 part B gen4 #3) — zero third-party
+dependencies, stdlib only.
 
-消费面对齐（读了消费方代码才定的形状，不凭空造）：
-- 唯一 integration 内消费方 = t260902-07/tests/sc_test_credential_probe.py：
-  它向 `POST <base>/chat/completions` 发 OpenAI 风格请求体
-  `{"model": <str>, "messages": [{"role","content"}, ...], "max_tokens": int}`，
-  带 `Authorization: Bearer <key>` 头；
-  回执断言只要求 HTTP 200 且 payload 含 `glm-5.3-flash` 或 `content` 字样。
-  故本 mock 的「正常」回执取 OpenAI chat.completion 最小面：
+Consumer-aligned surface (shape read off the consumer's code, not invented):
+- the only consumer inside integration = t260902-07/tests/sc_test_credential_probe.py:
+  it sends an OpenAI-style request body to `POST <base>/chat/completions`,
+  `{"model": <str>, "messages": [{"role","content"}, ...], "max_tokens": int}`,
+  with an `Authorization: Bearer <key>` header;
+  its response assertions only require HTTP 200 and a payload containing
+  `glm-5.3-flash` or `content`.
+  So this mock's "normal" reply is the minimal OpenAI chat.completion face:
   `{"id","object":"chat.completion","model":<echo>,
-    "choices":[{"index":0,"message":{"role":"assistant","content":<台词>},
-                "finish_reason":"stop"}]}`。
-- 按**请求体里的 model 字段**回不同固定台词（回执 model 字段回显请求值），
-  便于消费方断言「请求哪个模型、回哪个模型」。
+    "choices":[{"index":0,"message":{"role":"assistant","content":<line>},
+                "finish_reason":"stop"}]}`.
+- replies with a different fixed line per the **model field in the request
+  body** (the response model field echoes the request value), so a consumer
+  can assert "asked for model X, got model X back".
 
-行为注入（供场景畸形输入腿）：
-- 正常（缺省）：200 + 合法 chat.completion JSON；
-- mode=bad_json：200 + 坏 JSON 字节（畸形回执——消费方必须显式红，不得静默过）；
-- mode=http_500：HTTP 500 + 文本体；
-- mode=timeout：挂起 delay 秒后才回（消费方以更短超时打它 → 超时显式红）。
-mode 经查询串 `?mock_mode=...` 或请求头 `X-Mock-LLM-Mode` 逐请求覆盖，
-服务级缺省由 start(mode=...) 设定。
+Behavior injection (for scenario malformed-input legs):
+- ok (default): 200 + a valid chat.completion JSON body;
+- mode=bad_json: 200 + broken JSON bytes (malformed reply — the consumer must
+  go explicitly red, never silently green);
+- mode=http_500: HTTP 500 + a text body;
+- mode=timeout: hangs for `delay` seconds before replying (the consumer hits
+  it with a shorter timeout -> an explicit red on timeout).
+The mode can be overridden per request via the query string `?mock_mode=...`
+or the `X-Mock-LLM-Mode` header; the service-level default comes from
+start(mode=...).
 
-生命周期：start() 起 ThreadingHTTPServer 绑 127.0.0.1:0（内核分配端口）+
-守护线程 serve_forever；stop() 幂等（shutdown → server_close → thread join），
-调用方把它放进 finally 即可全终态回收；也支持 with 语法。
+Lifecycle: start() brings up a ThreadingHTTPServer bound to 127.0.0.1:0
+(kernel-assigned port) plus a daemon thread running serve_forever; stop() is
+idempotent (shutdown -> server_close -> thread join), so a caller can put it
+in a finally block and get full terminal-state reclamation; `with` syntax
+also works.
 """
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# 各模型的固定台词（model 字段 → content）；未知模型回落 _DEFAULT_LINE。
+# Fixed reply line per model (model field -> content); unknown models fall
+# back to _DEFAULT_LINE.
 _DEFAULT_LINE = "好（mock）"
 MODEL_LINES = {
     "glm-5.3-flash": "好（mock glm-5.3-flash）",
@@ -39,14 +48,15 @@ MODEL_LINES = {
 
 
 class _Handler(BaseHTTPRequestHandler):
-    """单端点 handler：忽略路径与 method 细节，只认 body 的 model 字段与 mode 注入。"""
+    """Single-endpoint handler: path and method details are ignored; only the
+    body's model field and the mode injection matter."""
 
     server_version = "SandbarMockLLM/1"
 
-    def log_message(self, fmt, *args):  # 静默：场景 stdout 只装得下断言账本
+    def log_message(self, fmt, *args):  # silent: scenario stdout only fits the assertion ledger
         pass
 
-    # ---- 响应工具 ----
+    # ---- response helpers ----
     def _send_json(self, code, payload):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
@@ -63,10 +73,10 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    # ---- 各 method 都走同一处理 ----
+    # ---- every method takes the same path ----
     def _handle(self):
         mode = getattr(self.server, "mock_mode", "ok")
-        # 逐请求覆盖：查询串优先，其次请求头
+        # per-request override: query string first, then the request header
         if "?" in self.path:
             qs = self.path.split("?", 1)[1]
         else:
@@ -86,7 +96,7 @@ class _Handler(BaseHTTPRequestHandler):
             if isinstance(req, dict):
                 model = req.get("model") if isinstance(req.get("model"), str) else ""
         except (ValueError, UnicodeDecodeError):
-            model = ""  # 畸形请求体：不炸服务，按未知模型回（mock 本身要稳）
+            model = ""  # malformed body: don't crash the service, reply as unknown model (the mock itself must stay stable)
 
         if mode == "http_500":
             self._send_raw(500, "mock injected 500")
@@ -96,14 +106,15 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if mode == "timeout":
             delay = float(getattr(self.server, "mock_delay", 5.0))
-            # 用中断事件等：stop() 时能立刻醒来，不吊线程
+            # wait on the interrupt event: stop() wakes us immediately instead
+            # of leaving the thread hanging
             ev = getattr(self.server, "mock_stop_event", None)
             if ev is not None:
                 ev.wait(delay)
             else:
-                return  # 无事件对象=无法安全挂起，直接回（不制造不可回收路径）
+                return  # no event object = cannot hang safely; reply now (no unreclaimable path)
             if ev.is_set():
-                return  # 服务已被 stop：连接随 shutdown 收尾，不再写
+                return  # service already stopped: the connection closes with shutdown, don't write
         content = MODEL_LINES.get(model, _DEFAULT_LINE)
         self._send_json(200, {
             "id": "chatcmpl-mock-1",
@@ -120,14 +131,14 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 class MockLLMEndpoint:
-    """场景进程内 mock LLM 端点。用法：
+    """In-process mock LLM endpoint for scenarios. Usage:
 
         mock = MockLLMEndpoint().start()
         try:
-            ... urllib 打 mock.base_url + "/chat/completions" ...
+            ... urllib hitting mock.base_url + "/chat/completions" ...
         finally:
             mock.stop()
-        # 或 with MockLLMEndpoint() as mock: ...
+        # or with MockLLMEndpoint() as mock: ...
     """
 
     def __init__(self, mode="ok", delay=5.0):
@@ -137,7 +148,7 @@ class MockLLMEndpoint:
         self._thread = None
         self._stop_event = threading.Event()
 
-    # ---- 属性 ----
+    # ---- attributes ----
     @property
     def base_url(self):
         if self._httpd is None:
@@ -148,9 +159,10 @@ class MockLLMEndpoint:
     def running(self):
         return self._thread is not None and self._thread.is_alive()
 
-    # ---- 生命周期 ----
+    # ---- lifecycle ----
     def start(self):
-        """绑定 127.0.0.1:0 起服务线程。重复 start 幂等（已跑就原样返回）。"""
+        """Bind 127.0.0.1:0 and start the server thread. A repeated start is
+        idempotent (returns as-is when already running)."""
         if self.running:
             return self
         self._stop_event.clear()
@@ -165,15 +177,16 @@ class MockLLMEndpoint:
         return self
 
     def stop(self):
-        """幂等回收：shutdown → server_close → join。finally 里随便调。"""
+        """Idempotent teardown: shutdown -> server_close -> join. Safe to call
+        freely from a finally block."""
         httpd, thread = self._httpd, self._thread
-        self._stop_event.set()          # 先唤醒 timeout 挂起的 handler
+        self._stop_event.set()          # wake the timeout-hung handler first
         if httpd is not None:
-            httpd.shutdown()            # 停 serve_forever 循环（幂等安全）
+            httpd.shutdown()            # stop the serve_forever loop (idempotent-safe)
         if thread is not None:
             thread.join(timeout=10)
         if httpd is not None:
-            httpd.server_close()        # 关监听 fd
+            httpd.server_close()        # close the listening fd
         self._httpd = None
         self._thread = None
 
