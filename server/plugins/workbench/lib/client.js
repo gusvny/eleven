@@ -2051,7 +2051,7 @@ function persistLedger(entries) {
 * sandbar-workbench · 「最近关闭」列表模块级共享 store（t260904-01 D1 修复，
 * session-entry 第 3 面①验收走查打回项）。
 *
-* 为什么存在：D1 回归——t260904-01 双实例拆分（当时为顶部行 +
+* 为什么存在：D1 回归——t260904-01 双实例拆分（顶部行 +
 * sidebar 项目行各持一个 useSessionEntry）前，closedList 是 hook 实例各自的
 * useState，单实例时代够用；拆分后项目行（二号实例）handleClose 只写
 * localStorage + 自身 state，顶部行（一号实例）的 ↺ 钮渲染条件
@@ -2194,7 +2194,7 @@ const CHARTER_MARKER = "<!-- workbench:kind:charter -->";
 * （↺ 恢复已随顶部行退役），无 current 自动登记 effect——关闭当前活跃会话的
 * 终态：tab 消失、current 不变（会话仍在运行），不会复活。
 *
-* 故障模式取舍（t260831-04 gen2 修订；逐项「带/不带」理由见工单方案与实现报告）：
+* 故障模式取舍（票 t260831-04）：
 *   - 新建走 ctx.workspaces.startSession（工厂同款）；workspaces 服务缺失：
 *     行内可见错误 + console.error，按钮不复位为假成功；
 *   - 工作区按项目主目录匹配（workspaceForDir：精确→前缀→realtime 归一），
@@ -2202,7 +2202,7 @@ const CHARTER_MARKER = "<!-- workbench:kind:charter -->";
 *     返回既存工作区）；create 失败：行内提示，不落账不静默；
 *   - startSession 后 current 10s 未落定：行内提示 + warn；工作区已连接，
 *     可从列表进入；
-*   - 切换路径 sessions.open(id) 失败（throw，gen10 勘误：未列出 id 是 throw
+*   - 切换路径 sessions.open(id) 失败（throw：未列出 id 是 throw
 *     不是静默 no-op）：console.error 留痕 + 行内错误提示，账册条目保留
 *     （超时≠磁盘清理，自动 removeEntry 已删——t260831-02 的超时剔账正是
 *     「切回内容丢失」成因之一）；账册中 blank 会话条目（自铸 chat- 残留）
@@ -2257,7 +2257,7 @@ function writeSeqCounters(map) {
 	} catch {}
 }
 /**
-* 等 id 进入客户端会话列表。勘误链（t260831-02 gen10 审读订正）：open(id) 对未
+* 等 id 进入客户端会话列表。勘误后口径（票 t260831-02）：open(id) 对未
 * 列出 id 是 **throw**（manager.select: 'sessions.select: unknown session …'），
 * 不是静默 no-op；scope 的惰性铸造时机是「first resolution」而非「first open」。
 * 等 listed 的价值=把「未列出即 throw」挡在调用前、并把等不到的场景转成明确报错，
@@ -2294,7 +2294,7 @@ function workspaceForDir(items, dir) {
 * 超时未变 = startSession 复用了 prev 指向的 blank 会话（工厂语义：blank 复用，
 * current 合法地不动），此时返回 prev 作为 staged 会话（prev 为 null 则 null）。
 * ⚠️ 不能「等 current 非 null」——点击前 current 就非空（正在看的会话），
-* 那会把旧会话误记进账册（gen2 自测探针实锤过的 bug）。
+* 那会把旧会话误记进账册（自测探针实锤过的 bug）。
 */
 async function waitForStaged(sessions, prev, ms = 1e4) {
 	const read = () => {
@@ -2388,9 +2388,7 @@ async function injectSessionCharter(sessions, staged, projectKey, notify) {
 */
 function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDir }) {
 	const list = sessions.list;
-	const subscribe = (0, react.useCallback)((fn) => list.subscribe(fn), [list]);
-	const getSnapshot = (0, react.useCallback)(() => list.getSnapshot(), [list]);
-	const listState = (0, react.useSyncExternalStore)(subscribe, getSnapshot);
+	const listState = (0, react.useSyncExternalStore)((0, react.useCallback)((fn) => list.subscribe(fn), [list]), (0, react.useCallback)(() => list.getSnapshot(), [list]));
 	const ledger = (0, react.useSyncExternalStore)(subscribeLedger, getLedgerSnapshot);
 	const persist = (0, react.useCallback)((entries) => {
 		persistLedger(entries);
@@ -2419,7 +2417,7 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 	* slotOpen || sessions.open → open 后读 list.current 自检。
 	* - 超时：账册条目保留 + 行内提示，返回 false（t260831-02 的自动
 	*   removeEntry 已删——超时只说明 wire 同步慢，误删=「切回丢内容」成因）；
-	* - open throw（未列出 id，gen10 勘误）：console.error + 行内提示，返回 false；
+	* - open throw（未列出 id）：console.error + 行内提示，返回 false；
 	* - 成功但 current 未跟上：warn 留痕（激活未生效线索），仍返回 true——
 	*   open 调用本身已生效，下一步激活是平台层时序，不在本插件能强制的面内。
 	*/
@@ -2594,7 +2592,7 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 * sandbar-workbench · 项目 key → tag 色 纯函数（t260903-07 工单②：全局 chat 消息
 * 项目 tag 按项目着色，为多项目同屏区分做准备）。
 *
-* 借鉴模式取舍（格式对齐 session-ledger-store.ts 头注，review gen0 R1）：
+* 借鉴模式取舍（格式对齐 session-ledger-store.ts 头注）：
 * - ✅ 确定性哈希取色（FNV-1a 32bit → 调色板下标）：同 key 恒同色，无配置面也稳定。
 * - ❌ 不带运行时随机/持久化记忆：纯函数无状态，刷新/重启不漂移（验收 R3-a）。
 * - ❌ 不读 projects.yaml 配置：色映射零配置面；未来注册表声明色升级 =
@@ -2628,7 +2626,7 @@ const PROJECT_PALETTE = [
 const FALLBACK_COLOR = "#9ca3af";
 /** key 长度上限（超过按畸形处理；projects.yaml 的 key 都是短标识符）。 */
 const KEY_MAX_LEN = 64;
-/** FNV-1a 32bit 哈希 + murmur3 终混（F2 修复，验收走查 gen0）：
+/** FNV-1a 32bit 哈希 + murmur3 终混：
 *  纯 FNV 对短 key 的低 4 位雪崩不足，真实注册表首对项目（suyou/sandbar）即同槽
 *  撞色（两 key FNV 后均 %10===2，实锤见走查报告）——用户点名的第一对就撞，
 *  「撞色风险」从概率声明变现实缺陷。加 murmur3 finalizer 改善低位雪崩；
@@ -3097,14 +3095,13 @@ function ProjectSessionRow(props) {
 	const confirmTab = confirmId === null ? null : tabs.find((t) => t.id === confirmId) ?? null;
 	const showNotice = notice !== "" && (noticeProject === void 0 || noticeProject === projectKey);
 	const color = projectColor(projectKey);
-	const colorVars = {
-		"--wb-psess-color": color,
-		"--wb-psess-hover": hexToRgba(color, .16)
-	};
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-psess",
 		"data-wb-psess-row": "",
-		style: colorVars,
+		style: {
+			"--wb-psess-color": color,
+			"--wb-psess-hover": hexToRgba(color, .16)
+		},
 		children: [
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: PSESS_STYLES }),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
@@ -3342,13 +3339,13 @@ function classifyHandshake(injected, status, bodyText) {
 *   - 新开页/刷新后：init 覆写 injected=当下 disk → 恒 M5（消除动作「刷新」可达，
 *     不会刷新后横幅不消）；
 *   - 页面存活跨合并/跨重启（不刷新）：sessionStorage 保留旧盘态 → injected≠disk
-*     → M4 reload（正是 gen1 打回①点名的序列）。
+*     → M4 reload。
 * 异常（隐私模式禁用 sessionStorage 等）→ injected 恒 null，M4 自动失效退回 L2
 * 行为（仅服务端判定），不误报。
 *
 * 挂点单例在 sidebar 层（.wb-sb-right 共享容器），四视图排他渲染也不影响，横幅常驻。
 *
-* 回收纪律（终态全回收，gen1 打回②c 全带）：
+* 回收纪律（终态全回收）：
 *   - useEffect cleanup 必调 startVisibleInterval 返回的停表函数（幂等）；
 *   - inflight fetch 在组件卸载后回包不得 setState——mounted 标志显式挡（React 18
 *     下无害，按纪律仍显式处理）。
@@ -3541,7 +3538,7 @@ function startProjectIndexFallback(opts) {
 *   产物 client.js：每条 flow 行 `div[data-chat-anchor-key][data-chat-flow-kind="<kind>"]`，
 *   用户消息行 kind="user"）——结构性特征写死为常量并注明出处。
 *
-* 先例借鉴模式取舍（review gen0 R1 清单，对照 sidebar.tsx useHideFactoryNewSession /
+* 先例借鉴模式取舍（对照 sidebar.tsx useHideFactoryNewSession /
 * metrics-anchor.ts / metrics-entry.tsx 三先例）：
 * - ✅ 锚定负向排除（OWN_SUBTREE_MARKER 教训）：正向只认平台 data-chat-* 属性；
 *   候选行 closest('[data-wb-projtag-scope]')（本装饰器自留作用域标记位）命中即跳过，
@@ -3621,7 +3618,7 @@ function applyProjectTags(root, projectByTicket) {
 	return touched;
 }
 /**
-* useEffect 形态入口（F1 防呆，验收走查 gen0）：返回的是**清理函数**本身，
+* useEffect 形态入口（F1 防呆）：返回的是**清理函数**本身，
 * 可直接 `useEffect(() => startChatProjectTagEffect(...), [])`——useEffect 只把
 * 返回函数登记为 cleanup，返回 handle 对象会被静默忽略（F1 死因：sidebar 直接
 * 返回 handle → 卸载零回收）。本入口从形状上消灭该陷阱；新接线一律走这里，
@@ -3881,7 +3878,7 @@ function isFoldCandidate(text) {
 /**
 * 元素子节点集合数组化。真 DOM 的 el.children 是 HTMLCollection（live 集合，
 * 无 .some/.map 等数组方法）——必须 Array.from 落成真数组再集合操作；
-* 直接 `as El[]` 断言会在浏览器运行期炸（arbitrate round1 code-fault 根因，
+* 直接 `as El[]` 断言会在浏览器运行期炸（仲裁指认的 code-fault 根因，
 * KI 候选「桩集合语义分裂」的修复点）。Array.from 对桩数组/HTMLCollection/
 * NodeList 三形态一律成立，遍历期瞬时快照也消除了 live 集合遍历中 DOM 被改
 * 的失稳面。
@@ -4191,8 +4188,7 @@ function ProjectIcon(props) {
 * ProjectRemoveModal（四步流）；左栏末尾「＋ 接入项目」行 → ProjectAddModal；
 * 隔离红色行 → QuarantineModal（原因 + <dir>/project.yaml 定位 + 修复指路）。
 *
-* 骨架先例=session-entry 确认弹层（project-session-row.tsx），取舍（create_plan
-* gen1 R1-② 定稿）：在飞禁点带（写按钮 busy disabled，结果驱动关闭——成功才关、
+* 骨架先例=session-entry 确认弹层（project-session-row.tsx），取舍（方案 R1-② 定稿）：在飞禁点带（写按钮 busy disabled，结果驱动关闭——成功才关、
 * 失败停留就地显示）；ESC/遮罩关闭带但**执行中不可关**（防半途弃置假示完成）；
 * 错误就地显示带（验收 12 口径本体）；焦点/aria 基础带。position:fixed 脱离
 * .wb-ticket-list 滚动容器裁剪（session-entry C1 同款理由）。
@@ -4442,7 +4438,7 @@ function ProjectSettingsModal(props) {
 }
 /**
 * 接入弹层（验收 12）：表单 + 预检 + 拒收就地显示 + 黄牌不阻塞。
-* 预检口径（arbitrate gen1 F1 定稿：CLI `project add` 无 --dry-run 旗，补旗为跨写集
+* 预检口径（CLI `project add` 无 --dry-run 旗，补旗为跨写集
 * 裁定项）——预检降档为**本地形状检查**（key 白名单/根目录绝对路径/非空，不调 CLI、
 * 零落盘），确认时由 CLI 做深度校验（存在性/交叉/重复/legacy）并就地显示；
 * 本地检查=纯形状白名单，不实现 CLI 校验语义（薄壳红线不破）。
@@ -4837,7 +4833,7 @@ function QuarantineModal(props) {
 * ticket-list-model —— 工单列表行卡（t260904-17，mock v5 屏⑤⑥）纯函数层。
 *
 * 零 react / 平台依赖，node 可裸 import 黑盒单测（tests/t260904-17-ticket-list-model.mjs，
-* lane-states.ts 同款分层先例——只借形态不借语义，取舍清单见工单方案 gen1「复用取舍清单②」：
+* lane-states.ts 同款分层先例——只借形态不借语义（复用取舍见票 t260904-17 方案）：
 * 不带入合并分支内联步排除、并行活跃数组等 dev-lane 专属启发式）。
 *
 * 通用口径（一套 UI 裁定，260904 宿主令）：
@@ -5038,7 +5034,7 @@ function firstSentenceOf(body) {
 	if ([...sentence].length > FIRST_SENTENCE_MAX) sentence = [...sentence].slice(0, FIRST_SENTENCE_MAX).join("") + "…";
 	return sentence;
 }
-/** 行卡/详情头部标题展示选择（gen2 打回②收窄口径）：title → title_or_first
+/** 行卡/详情头部标题展示选择（收窄口径）：title → title_or_first
 *  （host enrichment 派生字段，仅 title 为空的票下发）→ 回退工单号（裸编号是
 *  最后兜底——enrichment 失败/老数据缺字段时，宁显编号不显「（无标题）」）。 */
 function ticketDisplayTitle(t) {
@@ -5487,7 +5483,7 @@ function humanStageIds(stages) {
 	return out;
 }
 /**
-* 饼形态组合（方案 a，gen2 决策 4）：
+* 饼形态组合（方案决策 4）：
 * 环形 = Σby_stage 全环——primary（bar，stage 时长合计）的 categories/data 为
 * 机器扇区逐 stage 展开，链内 exit==='human' 的 stage 合并为一个 human 扇区。
 * 人审时长已在链内（human_wait ⊂ by_stage），只合并不追加 → 全环合计=Σby_stage
@@ -6679,7 +6675,7 @@ var Ee = function() {
 		e instanceof t || (e = t.create(e));
 		var i = this, r = i.x, o = i.x + i.width, a = i.y, s = i.y + i.height, l = e.x, u = e.x + e.width, h = e.y, c = e.y + e.height, p = !(o < l || u < r || s < h || c < a);
 		if (n) {
-			var d = 1 / 0, f = 0, g = Math.abs(o - l), y = Math.abs(u - r), v = Math.abs(s - h), m = Math.abs(c - a), x = Math.min(g, y), _ = Math.min(v, m);
+			var d = Infinity, f = 0, g = Math.abs(o - l), y = Math.abs(u - r), v = Math.abs(s - h), m = Math.abs(c - a), x = Math.min(g, y), _ = Math.min(v, m);
 			o < l || u < r ? x > f && (f = x, g < y ? Ce.set(Ne, -g, 0) : Ce.set(Ne, y, 0)) : x < d && (d = x, g < y ? Ce.set(Re, g, 0) : Ce.set(Re, -y, 0)), s < h || c < a ? _ > f && (f = _, v < m ? Ce.set(Ne, 0, -v) : Ce.set(Ne, 0, m)) : x < d && (d = x, v < m ? Ce.set(Re, 0, v) : Ce.set(Re, 0, -m));
 		}
 		return n && Ce.copy(n, p ? Re : Ne), p;
@@ -7303,10 +7299,9 @@ function mn(t, e, n, i, r) {
 }
 function xn(t, e, n, i, r, o) {
 	var a = i + 3 * (e - n) - t, s = 3 * (n - 2 * e + t), l = 3 * (e - t), u = t - r, h = s * s - 3 * a * l, c = s * l - 9 * a * u, p = l * l - 3 * s * u, d = 0;
-	if (gn(h) && gn(c)) {
-		if (gn(s)) o[0] = 0;
-		else (M = -l / s) >= 0 && M <= 1 && (o[d++] = M);
-	} else {
+	if (gn(h) && gn(c)) if (gn(s)) o[0] = 0;
+	else (M = -l / s) >= 0 && M <= 1 && (o[d++] = M);
+	else {
 		var f = c * c - 4 * h * p;
 		if (gn(f)) {
 			var g = c / h, y = -g / 2;
@@ -7340,10 +7335,10 @@ function bn(t, e, n, i, r, o) {
 	o[0] = t, o[1] = a, o[2] = u, o[3] = c, o[4] = c, o[5] = h, o[6] = l, o[7] = i;
 }
 function wn(t, e, n, i, r, o, a, s, l, u, h) {
-	var c, p, d, f, g, y = .005, v = 1 / 0;
+	var c, p, d, f, g, y = .005, v = Infinity;
 	pn[0] = l, pn[1] = u;
 	for (var m = 0; m < 1; m += .05) dn[0] = vn(t, n, r, a, m), dn[1] = vn(e, i, o, s, m), (f = Bt(pn, dn)) < v && (c = m, v = f);
-	v = 1 / 0;
+	v = Infinity;
 	for (var x = 0; x < 32 && !(y < un); x++) p = c - y, d = c + y, dn[0] = vn(t, n, r, a, p), dn[1] = vn(e, i, o, s, p), f = Bt(dn, pn), p >= 0 && f < v ? (c = p, v = f) : (fn[0] = vn(t, n, r, a, d), fn[1] = vn(e, i, o, s, d), g = Bt(fn, pn), d <= 1 && g < v ? (c = d, v = g) : y *= .5);
 	return h && (h[0] = vn(t, n, r, a, c), h[1] = vn(e, i, o, s, c)), sn(v);
 }
@@ -7370,10 +7365,10 @@ function Cn(t, e, n, i, r) {
 	r[0] = t, r[1] = o, r[2] = s, r[3] = s, r[4] = a, r[5] = n;
 }
 function Dn(t, e, n, i, r, o, a, s, l) {
-	var u, h = .005, c = 1 / 0;
+	var u, h = .005, c = Infinity;
 	pn[0] = a, pn[1] = s;
 	for (var p = 0; p < 1; p += .05) dn[0] = Mn(t, n, r, p), dn[1] = Mn(e, i, o, p), (y = Bt(pn, dn)) < c && (u = p, c = y);
-	c = 1 / 0;
+	c = Infinity;
 	for (var d = 0; d < 32 && !(h < un); d++) {
 		var f = u - h, g = u + h;
 		dn[0] = Mn(t, n, r, f), dn[1] = Mn(e, i, o, f);
@@ -10080,7 +10075,7 @@ function fo(t) {
 	t.sort((function(t, e) {
 		return s(t, e, 0) ? -1 : 1;
 	}));
-	for (var e = -1 / 0, n = 1, i = 0; i < t.length;) {
+	for (var e = -Infinity, n = 1, i = 0; i < t.length;) {
 		for (var r = t[i].interval, o = t[i].close, a = 0; a < 2; a++) r[a] <= e && (r[a] = e, o[a] = a ? 1 : 1 - n), e = r[a], n = o[a];
 		r[0] === r[1] && o[0] * o[1] != 1 ? t.splice(i, 1) : i++;
 	}
@@ -10737,7 +10732,7 @@ var Fa = [];
 var Ga = [];
 function Wa(t, e, n, i, r, o, a, s, l, u) {
 	var h = _n, c = vn, p = h(t, n, r, a, Fa);
-	l[0] = 1 / 0, l[1] = 1 / 0, u[0] = -1 / 0, u[1] = -1 / 0;
+	l[0] = Infinity, l[1] = Infinity, u[0] = -Infinity, u[1] = -Infinity;
 	for (var d = 0; d < p; d++) {
 		var f = c(t, n, r, a, Fa[d]);
 		l[0] = ka(f, l[0]), u[0] = La(f, u[0]);
@@ -11078,7 +11073,7 @@ function vs(t, e, n, i, r, o) {
 	var a = (o - e) / (i - e), s = i < e ? 1 : -1;
 	1 !== a && 0 !== a || (s = i < e ? .5 : -.5);
 	var l = a * (n - t) + t;
-	return l === r ? 1 / 0 : l > r ? s : 0;
+	return l === r ? Infinity : l > r ? s : 0;
 }
 var ms = us.CMD;
 var xs = 2 * Math.PI;
@@ -12391,7 +12386,7 @@ function Wu(t, e, n) {
 			var o = function(t, e, n, i) {
 				var r, o, a, s, l = [], u = [], h = [], c = [];
 				if (i) {
-					a = [1 / 0, 1 / 0], s = [-1 / 0, -1 / 0];
+					a = [Infinity, Infinity], s = [-Infinity, -Infinity];
 					for (var p = 0, d = t.length; p < d; p++) Wt(a, a, t[p]), Ht(s, s, t[p]);
 					Wt(a, a, i[0]), Ht(s, s, i[1]);
 				}
@@ -12601,7 +12596,7 @@ var hh = function() {
 		for (l = 0; l < 2; l++) this._origin[l] = i[l].dot(n[0]);
 	}, t.prototype.intersect = function(t, e) {
 		var n = !0, i = !e;
-		return lh.set(1 / 0, 1 / 0), uh.set(0, 0), !this._intersectCheckOneSide(this, t, lh, uh, i, 1) && (n = !1, i) || !this._intersectCheckOneSide(t, this, lh, uh, i, -1) && (n = !1, i) || i || Ce.copy(e, n ? lh : uh), n;
+		return lh.set(Infinity, Infinity), uh.set(0, 0), !this._intersectCheckOneSide(this, t, lh, uh, i, 1) && (n = !1, i) || !this._intersectCheckOneSide(t, this, lh, uh, i, -1) && (n = !1, i) || i || Ce.copy(e, n ? lh : uh), n;
 	}, t.prototype._intersectCheckOneSide = function(t, e, n, i, r, o) {
 		for (var a = !0, s = 0; s < 2; s++) {
 			var l = this._axes[s];
@@ -12662,7 +12657,7 @@ var ph = function(t) {
 		}
 	}, n.prototype.getBoundingRect = function() {
 		if (!this._rect) {
-			for (var t = new Ee(1 / 0, 1 / 0, -1 / 0, -1 / 0), e = 0; e < this._displayables.length; e++) {
+			for (var t = new Ee(Infinity, Infinity, -Infinity, -Infinity), e = 0; e < this._displayables.length; e++) {
 				var n = this._displayables[e], i = n.getBoundingRect().clone();
 				n.needLocalTransform() && i.applyTransform(n.getLocalTransform(ch)), t.union(i);
 			}
@@ -13842,7 +13837,7 @@ var Tp = [[
 ]];
 function Cp(t, e, n, i, r) {
 	var o = 0, a = 0;
-	i ??= 1 / 0, r ??= 1 / 0;
+	i ??= Infinity, r ??= Infinity;
 	var s = 0;
 	e.eachChild((function(l, u) {
 		var h, c, p = l.getBoundingRect(), d = e.childAt(u + 1), f = d && d.getBoundingRect();
@@ -14917,7 +14912,7 @@ function Qd(t, e, n) {
 				null != t && "-" !== t && (X(t) ? a ??= 1 : a = 0);
 			}), n, s, 10) : a = Z(i) ? i : i ? 1 : 0, r || 1 !== a || (r = [], rf((function(t, e) {
 				r[e] = null != t ? t + "" : "";
-			}), n, s, 1 / 0)), o = r ? r.length : n === jp ? s.length : s[0] ? s[0].length : null;
+			}), n, s, Infinity)), o = r ? r.length : n === jp ? s.length : s[0] ? s[0].length : null;
 		} else if (e === Hp) r || (r = function(t) {
 			var e, n = 0;
 			for (; n < t.length && !(e = t[n++]););
@@ -15035,7 +15030,7 @@ var af = function() {
 			return e;
 		}, n = function(t, e, n, i) {
 			for (var r = this._data, o = this._dimSize, a = 0; a < o; a++) {
-				for (var s = i[a], l = null == s[0] ? 1 / 0 : s[0], u = null == s[1] ? -1 / 0 : s[1], h = e - t, c = n[a], p = 0; p < h; p++) {
+				for (var s = i[a], l = null == s[0] ? Infinity : s[0], u = null == s[1] ? -Infinity : s[1], h = e - t, c = n[a], p = 0; p < h; p++) {
 					var d = r[p * o + a];
 					c[t + p] = d, d < l && (l = d), d > u && (u = d);
 				}
@@ -15221,8 +15216,8 @@ var wf = function() {
 		}
 		a === l && s === u || (e = "reset"), (this._dirty || "reset" === e) && (this._dirty = !1, o = this._doReset(i)), this._modBy = l, this._modDataCount = u;
 		var c = t && t.step;
-		if (this._dueEnd = n ? n._outputDueEnd : this._count ? this._count(this.context) : 1 / 0, this._progress) {
-			var p = this._dueIndex, d = Math.min(null != c ? this._dueIndex + c : 1 / 0, this._dueEnd);
+		if (this._dueEnd = n ? n._outputDueEnd : this._count ? this._count(this.context) : Infinity, this._progress) {
+			var p = this._dueIndex, d = Math.min(null != c ? this._dueIndex + c : Infinity, this._dueEnd);
 			if (!i && (o || p < d)) {
 				var f = this._progress;
 				if (H(f)) for (var g = 0; g < f.length; g++) this._doProgress(f[g], p, d, l, u);
@@ -15318,7 +15313,7 @@ var Df = function() {
 var Af = function() {
 	function t(t, e) {
 		var n = "desc" === t;
-		this._resultLT = n ? 1 : -1, e ??= n ? "min" : "max", this._incomparable = "min" === e ? -1 / 0 : 1 / 0;
+		this._resultLT = n ? 1 : -1, e ??= n ? "min" : "max", this._incomparable = "min" === e ? -Infinity : Infinity;
 	}
 	return t.prototype.evaluate = function(t, e) {
 		var n = Z(t) ? t : go(t), i = Z(e) ? e : go(e), r = isNaN(n), o = isNaN(i);
@@ -15492,10 +15487,10 @@ var qf = function() {
 		if (null != r) {
 			if (i[r].type === e) return r;
 		} else r = i.length;
-		return i[r] = { type: e }, n.set(t, r), this._chunks[r] = new Uf[e || "float"](this._rawCount), this._rawExtent[r] = [1 / 0, -1 / 0], r;
+		return i[r] = { type: e }, n.set(t, r), this._chunks[r] = new Uf[e || "float"](this._rawCount), this._rawExtent[r] = [Infinity, -Infinity], r;
 	}, t.prototype.collectOrdinalMeta = function(t, e) {
 		var n = this._chunks[t], i = this._dimensions[t], r = this._rawExtent, o = i.ordinalOffset || 0, a = n.length;
-		0 === o && (r[t] = [1 / 0, -1 / 0]);
+		0 === o && (r[t] = [Infinity, -Infinity]);
 		for (var s = r[t], l = o; l < a; l++) {
 			var u = n[l] = e.parseAndCollect(n[l]);
 			isNaN(u) || (s[0] = Math.min(u, s[0]), s[1] = Math.max(u, s[1]));
@@ -15528,7 +15523,7 @@ var qf = function() {
 			return t.property;
 		})), u = 0; u < a; u++) {
 			var h = o[u];
-			s[u] || (s[u] = [1 / 0, -1 / 0]), jf(r, u, h.type, e, n);
+			s[u] || (s[u] = [Infinity, -Infinity]), jf(r, u, h.type, e, n);
 		}
 		if (i.fillStorage) i.fillStorage(t, e, r, s);
 		else for (var c = [], p = t; p < e; p++) {
@@ -15593,8 +15588,8 @@ var qf = function() {
 	}, t.prototype.indicesOfNearest = function(t, e, n) {
 		var i = this._chunks[t], r = [];
 		if (!i) return r;
-		n ??= 1 / 0;
-		for (var o = 1 / 0, a = -1, s = 0, l = 0, u = this.count(); l < u; l++) {
+		n ??= Infinity;
+		for (var o = Infinity, a = -1, s = 0, l = 0, u = this.count(); l < u; l++) {
 			var h = e - i[this.getRawIndex(l)], c = Math.abs(h);
 			c <= n && ((c < o || c === o && h >= 0 && a < 0) && (o = c, a = h, s = 0), h === a && (r[s++] = l));
 		}
@@ -15664,7 +15659,7 @@ var qf = function() {
 	}, t.prototype.modify = function(t, e) {
 		this._updateDims(this, t, e);
 	}, t.prototype._updateDims = function(t, e, n) {
-		for (var i = t._chunks, r = [], o = e.length, a = t.count(), s = [], l = t._rawExtent, u = 0; u < e.length; u++) l[e[u]] = [1 / 0, -1 / 0];
+		for (var i = t._chunks, r = [], o = e.length, a = t.count(), s = [], l = t._rawExtent, u = 0; u < e.length; u++) l[e[u]] = [Infinity, -Infinity];
 		for (var h = 0; h < a; h++) {
 			for (var c = t.getRawIndex(h), p = 0; p < o; p++) s[p] = i[e[p]][c];
 			s[o] = h;
@@ -15710,12 +15705,9 @@ var qf = function() {
 		}
 		return n._count = l, n._indices = s, n._updateGetRawIdx(), n;
 	}, t.prototype.downSample = function(t, e, n, i) {
-		for (var r = this.clone([t], !0), o = r._chunks, a = [], s = Math.floor(1 / e), l = o[t], u = this.count(), h = r._rawExtent[t] = [1 / 0, -1 / 0], c = new (Zf(this._rawCount))(Math.ceil(u / s)), p = 0, d = 0; d < u; d += s) {
+		for (var r = this.clone([t], !0), o = r._chunks, a = [], s = Math.floor(1 / e), l = o[t], u = this.count(), h = r._rawExtent[t] = [Infinity, -Infinity], c = new (Zf(this._rawCount))(Math.ceil(u / s)), p = 0, d = 0; d < u; d += s) {
 			s > u - d && (s = u - d, a.length = s);
-			for (var f = 0; f < s; f++) {
-				var g = this.getRawIndex(d + f);
-				a[f] = l[g];
-			}
+			for (var f = 0; f < s; f++) a[f] = l[this.getRawIndex(d + f)];
 			var y = n(a), v = this.getRawIndex(Math.min(d + i(a, y) || 0, u - 1));
 			l[v] = y, y < h[0] && (h[0] = y), y > h[1] && (h[1] = y), c[p++] = v;
 		}
@@ -15739,7 +15731,7 @@ var qf = function() {
 			}
 		}
 	}, t.prototype.getDataExtent = function(t) {
-		var e = this._chunks[t], n = [1 / 0, -1 / 0];
+		var e = this._chunks[t], n = [Infinity, -Infinity];
 		if (!e) return n;
 		var i, r = this.count();
 		if (!this._indices) return this._rawExtent[t].slice();
@@ -17743,9 +17735,9 @@ var im = function(t) {
 		this.id;
 	}, n.prototype.getConnectedDataURL = function(t) {
 		if (!this._disposed) {
-			var e = "svg" === t.type, n = this.group, i = Math.min, r = Math.max, o = 1 / 0;
+			var e = "svg" === t.type, n = this.group, i = Math.min, r = Math.max, o = Infinity;
 			if (gm[n]) {
-				var a = o, s = o, l = -1 / 0, h = -1 / 0, c = [], p = t && t.pixelRatio || this.getDevicePixelRatio();
+				var a = o, s = o, l = -Infinity, h = -Infinity, c = [], p = t && t.pixelRatio || this.getDevicePixelRatio();
 				N(fm, (function(o, u) {
 					if (o.group === n) {
 						var p = e ? o.getZr().painter.getSvgDom().innerHTML : o.renderToCanvas(I(t)), d = o.getDom().getBoundingClientRect();
@@ -17928,7 +17920,7 @@ var im = function(t) {
 			if (!t.preventAutoZ) {
 				var n = t.get("z") || 0, i = t.get("zlevel") || 0;
 				e.eachRendered((function(t) {
-					return o(t, n, i, -1 / 0), !0;
+					return o(t, n, i, -Infinity), !0;
 				}));
 			}
 		}
@@ -19322,7 +19314,7 @@ function kx(t, e, n) {
 }
 var Lx = function() {
 	function t(t) {
-		this._setting = t || {}, this._extent = [1 / 0, -1 / 0];
+		this._setting = t || {}, this._extent = [Infinity, -Infinity];
 	}
 	return t.prototype.getSetting = function(t) {
 		return this._setting[t];
@@ -19879,7 +19871,7 @@ var o_ = function(t) {
 		}), n;
 	}, n.prototype.calcNiceExtent = function(t) {
 		var e = this._extent;
-		if (e[0] === e[1] && (e[0] -= Gc, e[1] += Gc), e[1] === -1 / 0 && e[0] === 1 / 0) {
+		if (e[0] === e[1] && (e[0] -= Gc, e[1] += Gc), e[1] === -Infinity && e[0] === Infinity) {
 			var n = /* @__PURE__ */ new Date();
 			e[1] = +new Date(n.getFullYear(), n.getMonth(), n.getDate()), e[0] = e[1] - Gc;
 		}
@@ -19983,7 +19975,7 @@ var __ = function(t) {
 	}, n.prototype.calcNiceTicks = function(t) {
 		t = t || 10;
 		var e = this._extent, n = e[1] - e[0];
-		if (!(n === 1 / 0 || n <= 0)) {
+		if (!(n === Infinity || n <= 0)) {
 			var i = uo(n);
 			for (t / n * i <= .5 && (i *= 10); !isNaN(i) && Math.abs(i) < 1 && Math.abs(i) > 0;) i *= 10;
 			var r = [$r(v_(e[0] / i) * i), $r(y_(e[1] / i) * i)];
@@ -20087,11 +20079,11 @@ function D_(t, e) {
 					min: t,
 					max: e
 				};
-				var s = 1 / 0;
+				var s = Infinity;
 				N(a, (function(t) {
 					s = Math.min(t.offset, s);
 				}));
-				var l = -1 / 0;
+				var l = -Infinity;
 				N(a, (function(t) {
 					l = Math.max(t.offset + t.width, l);
 				})), s = Math.abs(s), l = Math.abs(l);
@@ -20126,7 +20118,7 @@ function k_(t, e) {
 	if (e = e || t.get("type")) switch (e) {
 		case "category": return new Hx({
 			ordinalMeta: t.getOrdinalMeta ? t.getOrdinalMeta() : t.getCategories(),
-			extent: [1 / 0, -1 / 0]
+			extent: [Infinity, -Infinity]
 		});
 		case "time": return new o_({
 			locale: t.ecModel.getLocaleModel(),
@@ -20272,7 +20264,7 @@ var j_ = function(t) {
 	}, n.prototype.getBoundingRect = function(t) {
 		var e = this._rect;
 		if (e && !t) return e;
-		var n = [1 / 0, 1 / 0], i = [-1 / 0, -1 / 0];
+		var n = [Infinity, Infinity], i = [-Infinity, -Infinity];
 		return N(this.geometries, (function(e) {
 			"polygon" === e.type ? Y_(e.exterior, n, i, t) : N(e.points, (function(e) {
 				Y_(e, n, i, t);
@@ -20703,7 +20695,7 @@ var gb = function() {
 				f = 1.3 * y.width, g = 1.3 * y.height, p = Math.max(p, f, 7), d = Math.max(d, g, 7);
 			}
 			var v = p / h, m = d / c;
-			isNaN(v) && (v = 1 / 0), isNaN(m) && (m = 1 / 0);
+			isNaN(v) && (v = Infinity), isNaN(m) && (m = Infinity);
 			var x = Math.max(0, Math.floor(Math.min(v, m))), _ = rb(t.model), b = t.getExtent(), w = _.lastAutoInterval, S = _.lastTickCount;
 			return null != w && null != S && Math.abs(w - x) <= 1 && Math.abs(S - a) <= 1 && w > x && _.axisExtent0 === b[0] && _.axisExtent1 === b[1] ? x = w : (_.lastTickCount = a, _.lastAutoInterval = x, _.axisExtent0 = b[0], _.axisExtent1 = b[1]), x;
 		}(this);
@@ -20767,7 +20759,7 @@ function Ab(t, e, n) {
 	return n.set(Db[0], Db[1]), i;
 }
 function kb(t, e, n) {
-	for (var i, r, o = 0, a = 0, s = 0, l = 0, u = 1 / 0, h = e.data, c = t.x, p = t.y, d = 0; d < h.length;) {
+	for (var i, r, o = 0, a = 0, s = 0, l = 0, u = Infinity, h = e.data, c = t.x, p = t.y, d = 0; d < h.length;) {
 		var f = h[d++];
 		1 === d && (s = o = h[d], l = a = h[d + 1]);
 		var g = u;
@@ -20814,7 +20806,7 @@ function Eb(t, e) {
 				[0, 0]
 			], a = r.candidates || Sb, s = i.getBoundingRect().clone();
 			s.applyTransform(i.getComputedTransform());
-			var l = 1 / 0, u = r.anchor, h = t.getComputedTransform(), c = h && Me([], h), p = e.get("length2") || 0;
+			var l = Infinity, u = r.anchor, h = t.getComputedTransform(), c = h && Me([], h), p = e.get("length2") || 0;
 			u && Ob.copy(u);
 			for (var d = 0; d < a.length; d++) {
 				Mb(a[d], 0, s, Lb, Rb), Ce.scaleAndAdd(Pb, Lb, Rb, p), Pb.transform(c);
@@ -22004,7 +21996,7 @@ var xS = function(t) {
 		function u(t) {
 			if (t.isFinite() && !t.isZero()) if (0 === o.length) (e = new Ee(0, 0, 0, 0)).copy(t), o.push(e);
 			else {
-				for (var e, n = !1, i = 1 / 0, r = 0, u = 0; u < o.length; ++u) {
+				for (var e, n = !1, i = Infinity, r = 0, u = 0; u < o.length; ++u) {
 					var h = o[u];
 					if (h.intersect(t)) {
 						var c = new Ee(0, 0, 0, 0);
@@ -22378,7 +22370,7 @@ var MS = function(t) {
 		sampling: "none",
 		animationEasing: "linear",
 		progressive: 0,
-		hoverLayerThreshold: 1 / 0,
+		hoverLayerThreshold: Infinity,
 		universalTransition: { divideShape: "clone" },
 		triggerLineEvent: !1
 	}, n;
@@ -22816,7 +22808,7 @@ function ZS(t, e) {
 	}
 }
 function jS(t) {
-	for (var e = 1 / 0, n = 1 / 0, i = -1 / 0, r = -1 / 0, o = 0; o < t.length;) {
+	for (var e = Infinity, n = Infinity, i = -Infinity, r = -Infinity, o = 0; o < t.length;) {
 		var a = t[o++], s = t[o++];
 		isNaN(a) || (e = Math.min(a, e), i = Math.max(a, i)), isNaN(s) || (n = Math.min(s, n), r = Math.max(s, r));
 	}
@@ -23319,11 +23311,11 @@ var oM = {
 		return e;
 	},
 	max: function(t) {
-		for (var e = -1 / 0, n = 0; n < t.length; n++) t[n] > e && (e = t[n]);
+		for (var e = -Infinity, n = 0; n < t.length; n++) t[n] > e && (e = t[n]);
 		return isFinite(e) ? e : NaN;
 	},
 	min: function(t) {
-		for (var e = 1 / 0, n = 0; n < t.length; n++) t[n] < e && (e = t[n]);
+		for (var e = Infinity, n = 0; n < t.length; n++) t[n] < e && (e = t[n]);
 		return isFinite(e) ? e : NaN;
 	},
 	nearest: function(t) {
@@ -24492,7 +24484,7 @@ var QM = function(t) {
 	}, n.prototype.getBoundingRect = function() {
 		var t = this._rect;
 		if (!t) {
-			for (var e = this.shape, n = e.points, i = e.size, r = i[0], o = i[1], a = 1 / 0, s = 1 / 0, l = -1 / 0, u = -1 / 0, h = 0; h < n.length;) {
+			for (var e = this.shape, n = e.points, i = e.size, r = i[0], o = i[1], a = Infinity, s = Infinity, l = -Infinity, u = -Infinity, h = 0; h < n.length;) {
 				var c = n[h++], p = n[h++];
 				a = Math.min(c, a), l = Math.max(c, l), s = Math.min(p, s), u = Math.max(p, u);
 			}
@@ -25064,7 +25056,7 @@ var bI = function() {
 			}));
 		}
 		N(this._axesList, (function(t) {
-			if (t.scale.setExtent(1 / 0, -1 / 0), "category" === t.type) {
+			if (t.scale.setExtent(Infinity, -Infinity), "category" === t.type) {
 				var e = t.model.get("categorySortInfo");
 				t.scale.setSortInfo(e);
 			}
@@ -25819,7 +25811,7 @@ var iT = function(t) {
 	}, n.prototype.getInitialData = function(t, e) {
 		return ZM(this, {
 			generateCoord: "indicator_",
-			generateCoordCount: 1 / 0
+			generateCoordCount: Infinity
 		});
 	}, n.prototype.formatTooltip = function(t, e, n) {
 		var i = this.getData(), r = this.coordinateSystem.getIndicatorAxes(), o = this.getData().getName(t), a = "" === o ? this.name : o, s = dg(this, t);
@@ -26026,7 +26018,7 @@ var hT = function() {
 	}, t.prototype.pointToData = function(t) {
 		var e = t[0] - this.cx, n = t[1] - this.cy, i = Math.sqrt(e * e + n * n);
 		e /= i, n /= i;
-		for (var r, o = Math.atan2(-n, e), a = 1 / 0, s = -1, l = 0; l < this._indicatorAxes.length; l++) {
+		for (var r, o = Math.atan2(-n, e), a = Infinity, s = -1, l = 0; l < this._indicatorAxes.length; l++) {
 			var u = this._indicatorAxes[l], h = Math.abs(o - u.angle);
 			h < a && (r = u, s = l, a = h);
 		}
@@ -26043,7 +26035,7 @@ var hT = function() {
 	}, t.prototype.update = function(t, e) {
 		var n = this._indicatorAxes, i = this._model;
 		N(n, (function(t) {
-			t.scale.setExtent(1 / 0, -1 / 0);
+			t.scale.setExtent(Infinity, -Infinity);
 		})), t.eachSeriesByType("radar", (function(e, r) {
 			if ("radar" === e.get("coordinateSystem") && t.getComponent("radar", e.get("radarIndex")) === i) {
 				var o = e.getData();
@@ -26191,7 +26183,7 @@ function xT(t, e, n) {
 function _T(t, e, n, i) {
 	var r = t.target, o = t.zoomLimit, a = t.zoom = t.zoom || 1;
 	if (a *= e, o) {
-		var s = o.min || 0, l = o.max || 1 / 0;
+		var s = o.min || 0, l = o.max || Infinity;
 		a = Math.max(Math.min(l, a), s);
 	}
 	var u = a / t.zoom;
@@ -27319,7 +27311,7 @@ function SC(t) {
 				r[i] = r[i] || [], isNaN(e) || r[i].push(e);
 			}));
 		})), n[0].map(n[0].mapDimension("value"), (function(t, e) {
-			for (var o = "ec-" + n[0].getName(e), a = 0, s = 1 / 0, l = -1 / 0, u = r[o].length, h = 0; h < u; h++) s = Math.min(s, r[o][h]), l = Math.max(l, r[o][h]), a += r[o][h];
+			for (var o = "ec-" + n[0].getName(e), a = 0, s = Infinity, l = -Infinity, u = r[o].length, h = 0; h < u; h++) s = Math.min(s, r[o][h]), l = Math.max(l, r[o][h]), a += r[o][h];
 			return 0 === u ? NaN : "min" === i ? s : "max" === i ? l : "average" === i ? a / u : a;
 		}))), a = 0; a < t.length; a++) t[a].originalData = t[a].getData();
 		for (a = 0; a < t.length; a++) t[a].seriesGroup = t, t[a].needsDrawMap = 0 === a && !t[a].getHostGeoModel(), t[a].setData(o.cloneShallow()), t[a].mainSeries = t[0];
@@ -27512,7 +27504,7 @@ function PC(t, e) {
 			var o = this.projection;
 			if (o) {
 				var a = i[0], s = i[1], l = r[0], u = r[1];
-				i = [1 / 0, 1 / 0], r = [-1 / 0, -1 / 0];
+				i = [Infinity, Infinity], r = [-Infinity, -Infinity];
 				var h = function(t, e, n, a) {
 					for (var s = n - t, l = a - e, u = 0; u <= 100; u++) {
 						var h = u / 100, c = o.project([t + s * h, e + l * h]);
@@ -27671,7 +27663,7 @@ function zC(t, e, n, i) {
 	var r = t.getZoom(), o = t.getCenter(), a = e.zoom, s = t.projectedToPoint ? t.projectedToPoint(o) : t.dataToPoint(o);
 	if (null != e.dx && null != e.dy && (s[0] -= e.dx, s[1] -= e.dy, t.setCenter(EC(t, s), i)), null != a) {
 		if (n) {
-			var l = n.min || 0, u = n.max || 1 / 0;
+			var l = n.min || 0, u = n.max || Infinity;
 			a = Math.max(Math.min(r * a, u), l) / r;
 		}
 		t.scaleX *= a, t.scaleY *= a;
@@ -29027,7 +29019,7 @@ var BD = function(t) {
 			a = l.zoomLimit;
 			var u = l.zoom = l.zoom || 1;
 			if (u *= i, a) {
-				var h = a.min || 0, c = a.max || 1 / 0;
+				var h = a.min || 0, c = a.max || Infinity;
 				u = Math.max(Math.min(c, u), h);
 			}
 			var p = u / l.zoom;
@@ -29181,7 +29173,7 @@ var HD = function() {
 	}, t.dependsOn = function(t, e) {
 		return "color" === e ? !(!t || 0 !== t.indexOf(e)) : t === e;
 	}, t.findPieceIndex = function(t, e, n) {
-		for (var i, r = 1 / 0, o = 0, a = e.length; o < a; o++) {
+		for (var i, r = Infinity, o = 0, a = e.length; o < a; o++) {
 			var s = e[o].value;
 			if (null != s) {
 				if (s === t || X(s) && s === t + "") return o;
@@ -29191,15 +29183,15 @@ var HD = function() {
 		for (o = 0, a = e.length; o < a; o++) {
 			var l = e[o], u = l.interval, h = l.close;
 			if (u) {
-				if (u[0] === -1 / 0) {
+				if (u[0] === -Infinity) {
 					if (tA(h[1], t, u[1])) return o;
-				} else if (u[1] === 1 / 0) {
+				} else if (u[1] === Infinity) {
 					if (tA(h[0], u[0], t)) return o;
 				} else if (tA(h[0], u[0], t) && tA(h[1], t, u[1])) return o;
 				n && c(u[0], o), n && c(u[1], o);
 			}
 		}
-		if (n) return t === 1 / 0 ? e.length - 1 : t === -1 / 0 ? 0 : i;
+		if (n) return t === Infinity ? e.length - 1 : t === -Infinity ? 0 : i;
 		function c(e, n) {
 			var o = Math.abs(e - t);
 			o < r && (r = o, i = n);
@@ -29545,7 +29537,7 @@ function yA(t, e, n, i) {
 			var u = function(t, e, n) {
 				for (var i = 0, r = 0, o = e.length; r < o; r++) i += e[r].getValue();
 				var a, s = t.get("visualDimension");
-				e && e.length ? "value" === s && n ? (a = [e[e.length - 1].getValue(), e[0].getValue()], "asc" === n && a.reverse()) : (a = [1 / 0, -1 / 0], hA(e, (function(t) {
+				e && e.length ? "value" === s && n ? (a = [e[e.length - 1].getValue(), e[0].getValue()], "asc" === n && a.reverse()) : (a = [Infinity, -Infinity], hA(e, (function(t) {
 					var e = t.getValue(s);
 					e < a[0] && (a[0] = e), e > a[1] && (a[1] = e);
 				}))) : a = [NaN, NaN];
@@ -29576,13 +29568,13 @@ function yA(t, e, n, i) {
 				y: d,
 				width: r,
 				height: o
-			}, v = lA(r, o), m = 1 / 0, x = [];
+			}, v = lA(r, o), m = Infinity, x = [];
 			x.area = 0;
 			for (var _ = 0, b = g.length; _ < b;) {
 				var w = g[_];
 				x.push(w), x.area += w.getLayout().area;
 				var S = vA(x, v, e.squareRatio);
-				S <= m ? (_++, m = S) : (x.area -= x.pop().getLayout().area, mA(x, v, y, u, !1), v = lA(y.width, y.height), x.length = x.area = 0, m = 1 / 0);
+				S <= m ? (_++, m = S) : (x.area -= x.pop().getLayout().area, mA(x, v, y, u, !1), v = lA(y.width, y.height), x.length = x.area = 0, m = Infinity);
 			}
 			if (x.length && mA(x, v, y, u, !0), !n) {
 				var M = s.get("childrenVisibleMin");
@@ -29593,9 +29585,9 @@ function yA(t, e, n, i) {
 	}
 }
 function vA(t, e, n) {
-	for (var i = 0, r = 1 / 0, o = 0, a = void 0, s = t.length; o < s; o++) (a = t[o].getLayout().area) && (a < r && (r = a), a > i && (i = a));
+	for (var i = 0, r = Infinity, o = 0, a = void 0, s = t.length; o < s; o++) (a = t[o].getLayout().area) && (a < r && (r = a), a > i && (i = a));
 	var l = t.area * t.area, u = e * e * n;
-	return l ? sA(u * i / l, l / (u * r)) : 1 / 0;
+	return l ? sA(u * i / l, l / (u * r)) : Infinity;
 }
 function mA(t, e, n, i, r) {
 	var o = e === n.width ? 0 : 1, a = 1 - o, s = ["x", "y"], l = ["width", "height"], u = n[s[o]], h = e ? t.area / e : 0;
@@ -30270,7 +30262,7 @@ var hk = Mn;
 var ck = Bt;
 var pk = Math.abs;
 function dk(t, e, n) {
-	for (var i, r = t[0], o = t[1], a = t[2], s = 1 / 0, l = n * n, u = .1, h = .1; h <= .9; h += .1) sk[0] = hk(r[0], o[0], a[0], h), sk[1] = hk(r[1], o[1], a[1], h), (d = pk(ck(sk, e) - l)) < s && (s = d, i = h);
+	for (var i, r = t[0], o = t[1], a = t[2], s = Infinity, l = n * n, u = .1, h = .1; h <= .9; h += .1) sk[0] = hk(r[0], o[0], a[0], h), sk[1] = hk(r[1], o[1], a[1], h), (d = pk(ck(sk, e) - l)) < s && (s = d, i = h);
 	for (var c = 0; c < 32; c++) {
 		var p = i + u;
 		lk[0] = hk(r[0], o[0], a[0], i), lk[1] = hk(r[1], o[1], a[1], i), uk[0] = hk(r[0], o[0], a[0], p), uk[1] = hk(r[1], o[1], a[1], p);
@@ -30823,8 +30815,8 @@ var Dk = function(t) {
 		}));
 		var _ = function(t) {
 			if (t <= 0) return i[0][1];
-			var e = 0;
-			for (; e < i.length; e++) if (i[e][0] >= t && (0 === e ? 0 : i[e - 1][0]) < t) return i[e][1];
+			var e;
+			for (e = 0; e < i.length; e++) if (i[e][0] >= t && (0 === e ? 0 : i[e - 1][0]) < t) return i[e][1];
 			return i[e - 1][1];
 		};
 		this._renderTicks(t, e, n, _, r, s, l, a, d), this._renderTitleAndDetail(t, e, n, _, r), this._renderAnchor(t, r), this._renderPointer(t, e, n, _, r, s, l, a, d);
@@ -31577,7 +31569,7 @@ function $k(t, e) {
 	};
 }
 function Jk(t, e) {
-	return Math.min(null != e[1] ? e[1] : 1 / 0, Math.max(null != e[0] ? e[0] : -1 / 0, t));
+	return Math.min(null != e[1] ? e[1] : Infinity, Math.max(null != e[0] ? e[0] : -Infinity, t));
 }
 var Qk = N;
 var tL = Math.min;
@@ -32630,7 +32622,7 @@ function pP(t, e) {
 					})), n;
 				}(t, a);
 				(function(t, e, n, i, r, o) {
-					var a = 1 / 0;
+					var a = Infinity;
 					N(t, (function(t) {
 						var e = t.length, s = 0;
 						N(t, (function(t) {
@@ -32758,7 +32750,7 @@ function MP(t) {
 	t.eachSeriesByType("sankey", (function(t) {
 		var e = t.getGraph(), n = e.nodes, i = e.edges;
 		if (n.length) {
-			var r = 1 / 0, o = -1 / 0;
+			var r = Infinity, o = -Infinity;
 			N(n, (function(t) {
 				var e = t.getLayout().value;
 				e < r && (r = e), e > o && (o = e);
@@ -33611,7 +33603,7 @@ var fO = function(t) {
 	}, n.prototype.getBoundingRect = function() {
 		var t = this._rect;
 		if (!t) {
-			for (var e = this.shape.segs, n = 1 / 0, i = 1 / 0, r = -1 / 0, o = -1 / 0, a = 0; a < e.length;) {
+			for (var e = this.shape.segs, n = Infinity, i = Infinity, r = -Infinity, o = -Infinity, a = 0; a < e.length;) {
 				var s = e[a++], l = e[a++];
 				n = Math.min(s, n), r = Math.max(s, r), i = Math.min(l, i), o = Math.max(l, o);
 			}
@@ -34019,8 +34011,8 @@ var TO = function(t) {
 				return { interval: [(e.interval[0] - t[0]) / i, (e.interval[1] - t[0]) / i] };
 			}))).length, o = 0;
 			return function(t) {
-				var i = o;
-				for (; i < r; i++) if ((a = e[i].interval)[0] <= t && t <= a[1]) {
+				var i;
+				for (i = o; i < r; i++) if ((a = e[i].interval)[0] <= t && t <= a[1]) {
 					o = i;
 					break;
 				}
@@ -36473,7 +36465,7 @@ var hE = function(t) {
 		var t = this, e = t.getLabelModel(), n = t.scale, i = n.getExtent(), r = n.count();
 		if (i[1] - i[0] < 1) return 0;
 		var o = i[0], a = t.dataToCoord(o + 1) - t.dataToCoord(o), s = Math.abs(a), l = wr(null == o ? "" : o + "", e.getFont(), "center", "top"), u = Math.max(l.height, 7) / s;
-		isNaN(u) && (u = 1 / 0);
+		isNaN(u) && (u = Infinity);
 		var h = Math.max(0, Math.floor(u)), c = uE(t.model), p = c.lastAutoInterval, d = c.lastTickCount;
 		return null != p && null != d && Math.abs(p - h) <= 1 && Math.abs(d - r) <= 1 && p > h ? h = p : (c.lastTickCount = r, c.lastAutoInterval = h), h;
 	}, n;
@@ -36555,7 +36547,7 @@ function dE(t) {
 }
 function fE(t, e) {
 	var n = this, i = n.getAngleAxis(), r = n.getRadiusAxis();
-	if (i.scale.setExtent(1 / 0, -1 / 0), r.scale.setExtent(1 / 0, -1 / 0), t.eachSeries((function(t) {
+	if (i.scale.setExtent(Infinity, -Infinity), r.scale.setExtent(Infinity, -Infinity), t.eachSeries((function(t) {
 		if (t.coordinateSystem === n) {
 			var e = t.getData();
 			N(E_(e, "radius"), (function(t) {
@@ -38151,7 +38143,7 @@ var Dz = function() {
 		if (t === this._dataZoomModel) {
 			var e = this.getTargetSeriesModels();
 			this._dataExtent = function(t, e, n) {
-				var i = [1 / 0, -1 / 0];
+				var i = [Infinity, -Infinity];
 				Tz(n, (function(t) {
 					(function(t, e, n) {
 						e && N(E_(e, n), (function(n) {
@@ -39007,7 +38999,7 @@ var uV = {
 		};
 	},
 	polygon: function(t, e, n, i) {
-		var r = [[1 / 0, -1 / 0], [1 / 0, -1 / 0]];
+		var r = [[Infinity, -Infinity], [Infinity, -Infinity]];
 		return {
 			values: E(n, (function(n) {
 				var o = t ? e.pointToData(n, i) : e.dataToPoint(n, i);
@@ -40085,7 +40077,7 @@ var rB = {
 	},
 	polygon: function(t) {
 		for (var e, n = t.range, i = 0, r = n.length; i < r; i++) {
-			e = e || [[1 / 0, -1 / 0], [1 / 0, -1 / 0]];
+			e = e || [[Infinity, -Infinity], [Infinity, -Infinity]];
 			var o = n[i];
 			o[0] < e[0][0] && (e[0][0] = o[0]), o[0] > e[0][1] && (e[0][1] = o[0]), o[1] < e[1][0] && (e[1][0] = o[1]), o[1] > e[1][1] && (e[1][1] = o[1]);
 		}
@@ -40606,7 +40598,7 @@ var xB = function(t) {
 			if (e = e || t.get("type"), e) switch (e) {
 				case "category": return new Hx({
 					ordinalMeta: t.getCategories(),
-					extent: [1 / 0, -1 / 0]
+					extent: [Infinity, -Infinity]
 				});
 				case "time": return new o_({
 					locale: t.ecModel.getLocaleModel(),
@@ -40753,7 +40745,7 @@ var xB = function(t) {
 	}, n.prototype._toAxisCoord = function(t) {
 		return Bh(t, this._mainGroup.getLocalTransform(), !0);
 	}, n.prototype._findNearestTick = function(t) {
-		var e, n = this.model.getData(), i = 1 / 0, r = this._axis;
+		var e, n = this.model.getData(), i = Infinity, r = this._axis;
 		return n.each(["value"], (function(n, o) {
 			var a = r.dataToCoord(n), s = Math.abs(a - t);
 			s < i && (i = s, e = o);
@@ -41112,7 +41104,7 @@ var YB = function(t, e, n, i) {
 				s = u.valueAxis, l = zB(o, Ax(o, u.valueDataDim), a);
 			}
 			var h = "x" === s.dim ? 0 : 1, c = 1 - h, p = I(i), d = { coord: [] };
-			p.type = null, p.coord = [], p.coord[c] = -1 / 0, d.coord[c] = 1 / 0;
+			p.type = null, p.coord = [], p.coord[c] = -Infinity, d.coord[c] = Infinity;
 			var f = n.get("precision");
 			f >= 0 && Z(l) && (l = +l.toFixed(Math.min(f, 20))), p.coord[h] = d.coord[h] = l, r = [
 				p,
@@ -41274,7 +41266,7 @@ var JB = function(t, e, n, i) {
 	var r = i[0], o = i[1];
 	if (r && o) {
 		var a = OB(t, r), s = OB(t, o), l = a.coord, u = s.coord;
-		l[0] = nt(l[0], -1 / 0), l[1] = nt(l[1], -1 / 0), u[0] = nt(u[0], 1 / 0), u[1] = nt(u[1], 1 / 0);
+		l[0] = nt(l[0], -Infinity), l[1] = nt(l[1], -Infinity), u[0] = nt(u[0], Infinity), u[1] = nt(u[1], Infinity);
 		var h = C([
 			{},
 			a,
@@ -41630,27 +41622,25 @@ var uF = function(t) {
 				return;
 			}
 			var p = n.getSeriesByName(a)[0];
-			if (!l.get(a)) {
-				if (p) {
-					var d = p.getData(), f = d.getVisual("legendLineStyle") || {}, g = d.getVisual("legendIcon"), y = d.getVisual("style"), v = this._createItem(p, a, o, r, e, t, f, y, g, u, i);
-					v.on("click", aF(hF, a, null, i, h)).on("mouseover", aF(pF, p.name, null, i, h)).on("mouseout", aF(dF, p.name, null, i, h)), n.ssr && v.eachChild((function(t) {
+			if (!l.get(a)) if (p) {
+				var d = p.getData(), f = d.getVisual("legendLineStyle") || {}, g = d.getVisual("legendIcon"), y = d.getVisual("style"), v = this._createItem(p, a, o, r, e, t, f, y, g, u, i);
+				v.on("click", aF(hF, a, null, i, h)).on("mouseover", aF(pF, p.name, null, i, h)).on("mouseout", aF(dF, p.name, null, i, h)), n.ssr && v.eachChild((function(t) {
+					var e = il(t);
+					e.seriesIndex = p.seriesIndex, e.dataIndex = o, e.ssrType = "legend";
+				})), l.set(a, !0);
+			} else n.eachRawSeries((function(s) {
+				if (!l.get(a) && s.legendVisualProvider) {
+					var c = s.legendVisualProvider;
+					if (!c.containName(a)) return;
+					var p = c.indexOfName(a), d = c.getItemVisual(p, "style"), f = c.getItemVisual(p, "legendIcon"), g = jn(d.fill);
+					g && 0 === g[3] && (g[3] = .2, d = D(D({}, d), { fill: ii(g, "rgba") }));
+					var y = this._createItem(s, a, o, r, e, t, {}, d, f, u, i);
+					y.on("click", aF(hF, null, a, i, h)).on("mouseover", aF(pF, null, a, i, h)).on("mouseout", aF(dF, null, a, i, h)), n.ssr && y.eachChild((function(t) {
 						var e = il(t);
-						e.seriesIndex = p.seriesIndex, e.dataIndex = o, e.ssrType = "legend";
+						e.seriesIndex = s.seriesIndex, e.dataIndex = o, e.ssrType = "legend";
 					})), l.set(a, !0);
-				} else n.eachRawSeries((function(s) {
-					if (!l.get(a) && s.legendVisualProvider) {
-						var c = s.legendVisualProvider;
-						if (!c.containName(a)) return;
-						var p = c.indexOfName(a), d = c.getItemVisual(p, "style"), f = c.getItemVisual(p, "legendIcon"), g = jn(d.fill);
-						g && 0 === g[3] && (g[3] = .2, d = D(D({}, d), { fill: ii(g, "rgba") }));
-						var y = this._createItem(s, a, o, r, e, t, {}, d, f, u, i);
-						y.on("click", aF(hF, null, a, i, h)).on("mouseover", aF(pF, null, a, i, h)).on("mouseout", aF(dF, null, a, i, h)), n.ssr && y.eachChild((function(t) {
-							var e = il(t);
-							e.seriesIndex = s.seriesIndex, e.dataIndex = o, e.ssrType = "legend";
-						})), l.set(a, !0);
-					}
-				}), this);
-			}
+				}
+			}), this);
 		}), this), r && this._createSelector(r, e, i, o, a);
 	}, n.prototype._createSelector = function(t, e, n, i, r) {
 		var o = this.getSelectorGroup();
@@ -42747,7 +42737,7 @@ var tG = function(t) {
 		], e.layoutMode = {
 			type: "box",
 			ignoreSize: !0
-		}, e.dataBound = [-1 / 0, 1 / 0], e.targetVisuals = {}, e.controllerVisuals = {}, e;
+		}, e.dataBound = [-Infinity, Infinity], e.targetVisuals = {}, e.controllerVisuals = {}, e;
 	}
 	return e(n, t), n.prototype.init = function(t, e, n) {
 		this.mergeDefaultAndTheme(t, n);
@@ -42821,7 +42811,7 @@ var tG = function(t) {
 				}));
 				var u = l.symbolSize;
 				if (null != u) {
-					var h = -1 / 0;
+					var h = -Infinity;
 					qF(u, (function(t) {
 						t > h && (h = t);
 					})), l.symbolSize = jF(u, (function(t) {
@@ -43300,7 +43290,7 @@ var pG = function(t) {
 				r && (i = lG(r, e, n, !0) / 2);
 				return i;
 			}(n, o, r), s = [t - a, t + a], l = lG(t, r, o, !0), u = [lG(s[0], r, o, !0), lG(s[1], r, o, !0)];
-			s[0] < r[0] && (u[0] = -1 / 0), s[1] > r[1] && (u[1] = 1 / 0), e && (u[0] === -1 / 0 ? this._showIndicator(l, u[1], "< ", a) : u[1] === 1 / 0 ? this._showIndicator(l, u[0], "> ", a) : this._showIndicator(l, l, "≈ ", a));
+			s[0] < r[0] && (u[0] = -Infinity), s[1] > r[1] && (u[1] = Infinity), e && (u[0] === -Infinity ? this._showIndicator(l, u[1], "< ", a) : u[1] === Infinity ? this._showIndicator(l, u[0], "> ", a) : this._showIndicator(l, l, "≈ ", a));
 			var h = this._hoverLinkDataIndices, c = [];
 			(e || fG(n)) && (c = this._hoverLinkDataIndices = n.findTargetDataIndices(u));
 			var p = function(t, e) {
@@ -43558,7 +43548,7 @@ var TG = function(t) {
 		else if (null != t.value) e = t.value;
 		else {
 			var n = t.interval || [];
-			e = n[0] === -1 / 0 && n[1] === 1 / 0 ? 0 : (n[0] + n[1]) / 2;
+			e = n[0] === -Infinity && n[1] === Infinity ? 0 : (n[0] + n[1]) / 2;
 		}
 		return e;
 	}, n.prototype.getVisualMeta = function(t) {
@@ -43566,9 +43556,9 @@ var TG = function(t) {
 			var e = [], n = ["", ""], i = this, r = this._pieceList.slice();
 			if (r.length) {
 				var o = r[0].interval[0];
-				o !== -1 / 0 && r.unshift({ interval: [-1 / 0, o] }), (o = r[r.length - 1].interval[1]) !== 1 / 0 && r.push({ interval: [o, 1 / 0] });
-			} else r.push({ interval: [-1 / 0, 1 / 0] });
-			var a = -1 / 0;
+				o !== -Infinity && r.unshift({ interval: [-Infinity, o] }), (o = r[r.length - 1].interval[1]) !== Infinity && r.push({ interval: [o, Infinity] });
+			} else r.push({ interval: [-Infinity, Infinity] });
+			var a = -Infinity;
 			return N(r, (function(t) {
 				var e = t.interval;
 				e && (e[0] > a && s([a, e[0]], "outOfRange"), s(e.slice()), a = e[1]);
@@ -43581,7 +43571,7 @@ var TG = function(t) {
 			var a = i.getRepresentValue({ interval: r });
 			o || (o = i.getValueState(a));
 			var s = t(a, o);
-			r[0] === -1 / 0 ? n[0] = s : r[1] === 1 / 0 ? n[1] = s : e.push({
+			r[0] === -Infinity ? n[0] = s : r[1] === Infinity ? n[1] = s : e.push({
 				value: r[0],
 				color: s
 			}, {
@@ -43611,7 +43601,7 @@ var CG = {
 		r = Math.max(parseInt(r, 10), 1), e.splitNumber = r;
 		for (var o = (i[1] - i[0]) / r; +o.toFixed(n) !== o && n < 5;) n++;
 		e.precision = n, o = +o.toFixed(n), e.minOpen && t.push({
-			interval: [-1 / 0, i[0]],
+			interval: [-Infinity, i[0]],
 			close: [0, 0]
 		});
 		for (var a = 0, s = i[0]; a < r; s += o, a++) {
@@ -43622,7 +43612,7 @@ var CG = {
 			});
 		}
 		e.maxOpen && t.push({
-			interval: [i[1], 1 / 0],
+			interval: [i[1], Infinity],
 			close: [0, 0]
 		}), fo(t), N(t, (function(t, e) {
 			t.index = e, t.text = this.formatValueText(t.interval);
@@ -43653,7 +43643,7 @@ var CG = {
 					1,
 					0,
 					1
-				], l = [-1 / 0, 1 / 0], u = [], h = 0; h < 2; h++) {
+				], l = [-Infinity, Infinity], u = [], h = 0; h < 2; h++) {
 					for (var c = [[
 						"gte",
 						"gt",
@@ -43665,7 +43655,7 @@ var CG = {
 					]][h], p = 0; p < 3 && null == o[h]; p++) o[h] = e[c[p]], a[h] = s[p], u[h] = 2 === p;
 					o[h] ?? (o[h] = l[h]);
 				}
-				u[0] && o[1] === 1 / 0 && (a[0] = 0), u[1] && o[0] === -1 / 0 && (a[1] = 0), o[0] === o[1] && a[0] && a[1] && (i.value = o[0]);
+				u[0] && o[1] === Infinity && (a[0] = 0), u[1] && o[0] === -Infinity && (a[1] = 0), o[0] === o[1] && a[0] && a[1] && (i.value = o[0]);
 			}
 			i.visual = HD.retrieveVisuals(e), t.push(i);
 		}), this), DG(e, t), fo(t), N(t, (function(t) {
@@ -44327,7 +44317,7 @@ function dW(t) {
 	];
 }
 function fW(t, e, n, i) {
-	for (var r = (t.length - 2) / 6, o = 1 / 0, a = 0, s = t.length, l = s - 2, u = 0; u < r; u++) {
+	for (var r = (t.length - 2) / 6, o = Infinity, a = 0, s = t.length, l = s - 2, u = 0; u < r; u++) {
 		for (var h = 6 * u, c = 0, p = 0; p < s; p += 2) {
 			var d = 0 === p ? h : (h + p - 2) % l + 2, f = t[d] - n[0], g = t[d + 1] - n[1], y = e[p] - i[0] - f, v = e[p + 1] - i[1] - g;
 			c += y * y + v * v;
@@ -44378,7 +44368,7 @@ function bW(t, e) {
 		for (var r, o = [], a = 0; a < t.length; a++) {
 			var s = t[a], l = e[a], u = dW(s), h = dW(l);
 			r ??= u[2] < 0 != h[2] < 0;
-			var c = [], p = [], d = 0, f = 1 / 0, g = [], y = s.length;
+			var c = [], p = [], d = 0, f = Infinity, g = [], y = s.length;
 			r && (s = gW(s));
 			for (var v = 6 * fW(s, l, u, h), m = y - 2, x = 0; x < m; x += 2) {
 				var _ = (v + x) % m + 2;
@@ -44446,7 +44436,7 @@ function SW(t, e, n, i, r, o) {
 	return s;
 }
 function MW(t) {
-	var e = 1 / 0, n = 1 / 0, i = -1 / 0, r = -1 / 0;
+	var e = Infinity, n = Infinity, i = -Infinity, r = -Infinity;
 	return E(E(t, (function(t) {
 		var o = t.getBoundingRect(), a = t.getComputedTransform(), s = o.x + o.width / 2 + (a ? a[4] : 0), l = o.y + o.height / 2 + (a ? a[5] : 0);
 		return e = Math.min(s, e), n = Math.min(l, n), i = Math.max(s, i), r = Math.max(l, r), [s, l];
@@ -45520,7 +45510,7 @@ function renderSpec(opts) {
 * 头部=标题/筛选行/口径ⓘ/✕；KPI 条四卡常驻；Tab 条四 tab 全开放（后端四视图
 * 本就同实现，t260902-05③）；主图（时间视图柱↔饼双形态，其余视图单形态）；副图两格。
 *
-* 交互纪律（create_plan gen2 决策 7/9 + t260902-05 修订）：
+* 交互纪律（票 t260901-20 方案决策 7/9 + t260902-05 修订）：
 * - Esc/✕ 关闭；打开才 fetch，关闭 unmount 释放全部 echarts 实例（adapter release）。
 * - 滚动：面板容器自身 overflow-y:auto（中 pane 不锁全页 body 滚动——全幅时代的
 *   body overflow 锁已随中 pane 化移除）。
@@ -45977,10 +45967,10 @@ function footerSlotOk() {
 	return footerSlotRegistered;
 }
 /**
-* shell 覆盖层激活态（模块级最新值 + 惰性常驻监听，第 5 轮探针发现的一次性事件
-* 竞态的根治：槽钮 mount 时机夹在「广播已发/监听未挂」之间时既错过事件、初始
-* 检查时覆盖层钮又尚未挂载——常驻监听保证模块内任何时刻读到的是最新态）。
-* t260902-05 gen6 集成打回修正：常驻监听**不能放模块顶层**——顶层裸 document
+* shell 覆盖层激活态（模块级最新值 + 惰性常驻监听，根治「槽钮 mount 时机夹在
+* 广播已发/监听未挂之间」的一次性事件竞态：错过事件、初始检查时覆盖层钮又尚未
+* 挂载——常驻监听保证模块内任何时刻读到的是最新态）。
+* t260902-05 修正：常驻监听**不能放模块顶层**——顶层裸 document
 * 随 tsdown 进 bundle 后，node 侧 import（t260901-13 S0 bundle-exports 金丝雀）
 * 即 ReferenceError。改为惰性挂一次（幂等守卫 + typeof document 防呆），首次
 * 消费（槽钮 mount / 订阅 / 覆盖层 mount）时激活。
@@ -46049,7 +46039,7 @@ function mountMetricsIntoSettingsRow(root) {
 	}
 	const { settings } = found;
 	/**
-	* body 级 fixed 覆盖层（第 5 轮打回定性修正）：上一版把钮 `settings.after(btn)`
+	* body 级 fixed 覆盖层（打回后改法）：上一版把钮 `settings.after(btn)`
 	* 插进 React 托管的行容器——外部 DOM 变更与 React 协调互踩，页面随机崩/挂
 	* （chat 必挂、hero 高概率挂），即「网络静默破坏源」。改法：钮挂 document.body
 	* （React 树之外），fixed 定位贴到 Settings 齿轮右侧同排视觉，只读 rect、只动
@@ -46987,7 +46977,7 @@ function composeSuggestedBody(code, suggestedBody) {
 /**
 * epics.tsx —— 工单台「立项单」中列第四视图 + 所属立项徽标（epic-linkage Tier 3，t260826-02）。
 *
-* 落地口径（方案 gen1 + review gen4 拍板）：
+* 落地口径（方案 + 评审拍板）：
 *   - 不加路由/不加顶层 tab：本视图挂进 sidebar 中列四视图体系（views.epics），
 *     由项目行立项单图标（t260827-01，空代号=立项清单）/ 工单徽标点击（定位详情）切换进来；
 *   - 真源=API 渲染、前端不存状态（立项单关键决策 5）：列表=GET /api/epics，
@@ -47143,7 +47133,7 @@ function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }) {
 	/** 状态编辑栏（t260831-05）：详情页状态下拉 + 备注输入框 → POST /epics/<code>/status。 */
 	const [editStatus, setEditStatus] = (0, react.useState)("");
 	const [editNote, setEditNote] = (0, react.useState)("");
-	/** 备注是否被改动过（gen1 review #5 拍板）：未改动 → 请求体省略 note 字段（不动备注，
+	/** 备注是否被改动过（评审拍板）：未改动 → 请求体省略 note 字段（不动备注，
 	*  防误清空丢自由文本）；改动过 → 传新值（''=用户显式清空）。显式 dirty 标记比
 	*  字符串比较少边界（改了又改回原文仍视为未动，取安全侧）。 */
 	const [noteDirty, setNoteDirty] = (0, react.useState)(false);
@@ -47395,7 +47385,7 @@ function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }) {
 			failOpen(`启动请求异常——${String(err instanceof Error ? err.message : err)}`);
 			return;
 		}
-		const deadline = Date.now() + 6e5;
+		const deadline = Date.now() + 10 * 6e4;
 		stopSuggestPoll();
 		suggestTimer.current = startVisibleInterval(() => {
 			(async () => {
@@ -48190,7 +48180,7 @@ function DocsSection(_props) {
 *      write 事件写共享 key；BroadcastChannel 不可用（老内核/被禁）时自动走它，
 *      行为等价，降级在注释里写明，不静默。
 *
-* 故障模式取舍（review_plan 钩子要求自查）：
+* 故障模式取舍：
 *   - 页签崩溃发不出 bye → 靠 10s TTL 过期剔除，viewersOf 永不卡死；
 *   - 入站消息是外部输入 → 五类畸形（非 JSON/缺字段/未知类型/字段类型不对/
 *     超长）一律丢弃不崩；
@@ -49995,15 +49985,14 @@ function UsageSummaryLine({ detail, wf, usage }) {
 	}
 	const segs = agentSegmentCount(detail, wf);
 	const names = usageModelNames(usage.models);
-	const title = [
-		`agent 段数 ${segs}`,
-		`in ${usage.total.input} / out ${usage.total.output} / cacheRead ${usage.total.cacheRead}`,
-		names !== "" ? `模型：${names}` : `模型：${usage.models[0]?.model ?? "—"}（单模型不显示模型名）`,
-		`会话文件 ${usage.files} 份（多角色加总）`
-	].join(" · ");
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 		className: "wb-usage",
-		title,
+		title: [
+			`agent 段数 ${segs}`,
+			`in ${usage.total.input} / out ${usage.total.output} / cacheRead ${usage.total.cacheRead}`,
+			names !== "" ? `模型：${names}` : `模型：${usage.models[0]?.model ?? "—"}（单模型不显示模型名）`,
+			`会话文件 ${usage.files} 份（多角色加总）`
+		].join(" · "),
 		children: [
 			"🤖 ",
 			segs,
@@ -50372,15 +50361,13 @@ function DiffBlockBody({ b }) {
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
 			className: "wb-d-cells",
 			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { style: { width: 40 } }), Array.from({ length: cols }, (_, c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("th", { children: ["列 ", c + 1] }, c))] }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tbody", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "旧" }), Array.from({ length: cols }, (_, c) => {
-				const chg = (oc[c] ?? "") !== (nc[c] ?? "");
 				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
-					className: chg ? "wb-d-cell-old" : "",
+					className: (oc[c] ?? "") !== (nc[c] ?? "") ? "wb-d-cell-old" : "",
 					children: oc[c] ?? "—"
 				}, c);
 			})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "新" }), Array.from({ length: cols }, (_, c) => {
-				const chg = (oc[c] ?? "") !== (nc[c] ?? "");
 				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
-					className: chg ? "wb-d-cell-new" : "",
+					className: (oc[c] ?? "") !== (nc[c] ?? "") ? "wb-d-cell-new" : "",
 					children: nc[c] ?? "—"
 				}, c);
 			})] })] })]
@@ -50402,14 +50389,12 @@ function DiffBlockBody({ b }) {
 }
 /** unified diff 文本逐行着色（+绿/-红/@@蓝/头行灰）。 */
 function UnifiedDiffView({ text }) {
-	const lines = text.split("\n");
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 		className: "wb-d-uni",
-		children: lines.map((l, i) => {
-			const k = l.startsWith("@@") ? "hunk" : l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : /^(diff |index |--- |\+\+\+ |new file|deleted file)/.test(l) ? "meta" : "ctx";
+		children: text.split("\n").map((l, i) => {
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "wb-d-line",
-				"data-k": k,
+				"data-k": l.startsWith("@@") ? "hunk" : l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : /^(diff |index |--- |\+\+\+ |new file|deleted file)/.test(l) ? "meta" : "ctx",
 				children: l === "" ? " " : l
 			}, i);
 		})
@@ -50655,7 +50640,6 @@ function ChangesTab({ detail, operator, onMsg }) {
 	};
 	const realFiles = diff.files.filter((f) => !isGenArtifact(f.path));
 	const genFiles = diff.files.filter((f) => isGenArtifact(f.path));
-	const sourceLabel = diff.source === "worktree" ? "泳道 worktree vs base" : diff.source === "merged" ? "已合入 main（merge commit 回放）" : diff.source === "main" ? "主树 write_set + git log" : "无来源";
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 		/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 			className: "wb-section",
@@ -50664,7 +50648,7 @@ function ChangesTab({ detail, operator, onMsg }) {
 					className: "wb-section-title",
 					children: [
 						"变更集（",
-						sourceLabel,
+						diff.source === "worktree" ? "泳道 worktree vs base" : diff.source === "merged" ? "已合入 main（merge commit 回放）" : diff.source === "main" ? "主树 write_set + git log" : "无来源",
 						"）"
 					]
 				}),
