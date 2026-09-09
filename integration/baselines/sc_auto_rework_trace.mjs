@@ -257,16 +257,25 @@ function pureHalf() {
 }
 
 /* ------------------------------------------------------------------ env half */
+// 计时探针（260909 并发提速战役）：envHalf 652s 单笔占 wall 52%，先量后动——
+// 每段 wall 时间戳打 stdout，run_scenarios 汇总按段聚合。
+const T0 = { at: Date.now() };
+const stamp = (label) => console.log(`  [timing] ${((Date.now() - T0.at) / 1000).toFixed(1).padStart(7)}s  ${label}`);
+
 async function sceneF(t, api, sdkPython, fixture) {
   const tid = `integ-auto-rework-${Date.now().toString(36)}`
   console.log(`  -- scene F: external rework signal matrix on ${tid}`)
+  stamp('sceneF: ticket-start 开始')
   const started = await api.start(tid, ['integration/'])
+  stamp('sceneF: ticket-start 回')
   t.ok(started.ok !== false, `ticket ${tid} started (${(started.body?.error ?? 'ok')})`)
   if (started.ok === false) return
   const worker = startStubWorker(fixture, sdkPython, tid)
+  stamp('sceneF: stub worker 已起')
   try {
     const ready = await waitFor(api, tid,
       (s) => !!s?.meta?.workspace_prep?.ok, 'workspace ready', 120_000, t)
+    stamp('sceneF: workspace_prep 就绪')
     if (!ready) return
 
     const reworkCount = (s) => (s?.timeline ?? []).filter((e) => e.state === 'rework').length
@@ -276,9 +285,11 @@ async function sceneF(t, api, sdkPython, fixture) {
     // F1: 词表∩¬STAGES 目标（review 第 3 轮回归）——真实引擎不得崩
     const note = 'e2e: 外部打回到验收（词表∩¬STAGES 回归护栏）'
     api.rework(tid, 'acceptance', note, 'e2e-tester')
+    stamp('sceneF: F1 信号已发')
     const s1 = await waitFor(api, tid,
       (s) => !!findAccept(s), 'rework(target=acceptance) accepted & traced',
       SCENE_TIMEOUT_BUDGET_MS, t)
+    stamp('sceneF: F1 断言态达成')
     if (s1) {
       const rec = findAccept(s1)
       t.ok(reworkCount(s1) === 1, `F1: timeline 恰 1 条 rework 记录（实得 ${reworkCount(s1)}）`)
@@ -292,38 +303,50 @@ async function sceneF(t, api, sdkPython, fixture) {
     // F2: done / suggest_next 拒绝——refused 增长、rework 记录数不变
     const refusedOf = (s) => (s?.refused ?? []).length
     api.rework(tid, 'done', 'e2e: 终态不可为打回目标', 'e2e-tester')
+    stamp('sceneF: F2a 信号已发')
     const s2 = await waitFor(api, tid,
       (s) => refusedOf(s) >= 1, 'rework(target=done) refused', SCENE_TIMEOUT_BUDGET_MS, t)
+    stamp('sceneF: F2a 断言态达成')
     if (s2) {
       t.ok(reworkCount(s2) === 1, `F2a: done 被拒后 rework 记录仍恰 1 条（实得 ${reworkCount(s2)}）`)
     }
     api.rework(tid, 'suggest_next', 'e2e: 内联步不可为打回目标', 'e2e-tester')
+    stamp('sceneF: F2b 信号已发')
     const s3 = await waitFor(api, tid,
       (s) => refusedOf(s) >= 2, 'rework(target=suggest_next) refused', SCENE_TIMEOUT_BUDGET_MS, t)
+    stamp('sceneF: F2b 断言态达成')
     if (s3) {
       t.ok(reworkCount(s3) === 1, `F2b: suggest_next 被拒后 rework 记录仍恰 1 条（实得 ${reworkCount(s3)}）`)
     }
   } finally {
+    stamp('cleanup: 开始（工单清理+worker 退役）')
     await cleanupTicket(t, api, worker, tid)
+    stamp('cleanup: 回')
   }
 }
 
 async function envHalf() {
   section('env: real engine rework-signal matrix (Docker test Temporal + stub brains)')
+  T0.at = Date.now()   // 计时零点对齐 envHalf 起点（pure half 不在本表口径内）
+  stamp('envHalf: 入口')
   const t = makeTally()
   const guard = writeGuard()
   if (guard === 'env_fail') { envFail++; console.log('  ENV_FAIL write-guard: SANDBAR_TARGET_HOST not set explicitly -- refusing to create tickets on an unclear target (set SANDBAR_TARGET_HOST=127.0.0.1:17233)'); return }
   if (guard === 'fail') { fail++; console.error('  FAIL write-guard: SANDBAR_TARGET_HOST points at the production default'); return }
   const sdkPython = findSdkPython(t)
+  stamp('envHalf: findSdkPython 回')
   if (!await ensureTestTemporal(t)) { envFail++; console.log('  ENV_FAIL env half: Docker test Temporal unavailable'); return }
+  stamp('envHalf: ensureTestTemporal 回')
   const fixtureBuilt = await buildFixture(t)
   if (!fixtureBuilt) { envFail++; console.log('  ENV_FAIL env half: fixture clone failed'); return }
+  stamp('envHalf: buildFixture 回')
   const { fixture, dispose } = fixtureBuilt   // buildFixture 回执是对象：路径字段叫 fixture（同 sc_ticket_lifecycle 解构口径）
   try {
     const api = makeApi(sdkPython, fixture)
     await sceneF(t, api, sdkPython, fixture)
   } finally {
     dispose()
+    stamp('envHalf: fixture dispose 回')
   }
   pass += t.pass; fail += t.fail; envFail += t.envFail
   if (t.envFail) console.log(`  (env helpers: ${t.envFail} env_fail note(s) above)`)
