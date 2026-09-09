@@ -37,6 +37,7 @@ INTEG = HERE.parent
 sys.path.insert(0, str(INTEG))
 
 import bench  # noqa: E402  （守卫回归面；槽位制已退役，只剩守卫/审计/registry 助手）
+import stage_docker as sd  # noqa: E402  （共享缺省锁根定位：档位锁/状态面断言用）
 
 SHIM = r'''#!/usr/bin/env python3
 """假 docker（stage_docker L1 专用）：模拟 daemon 端口持有与 HTTP 活性。"""
@@ -145,10 +146,11 @@ if __name__ == "__main__":
 class StageCLIBase(unittest.TestCase):
     def setUp(self):
         self.state = tempfile.mkdtemp(prefix="stage-l1-")
-        # 锁根落仓内 gitignored out/（沙箱对系统临时区并发写有拒绝面，实测不稳）
-        self.locks = pathlib.Path(INTEG.parent, "out",
-                                  "test-stage-locks-%d-%s" % (os.getpid(), time.time_ns()))
-        self.locks.mkdir(parents=True)
+        # 锁根纪律：不设 SANDBAR_STAGE_LOCK_DIR——与生产调用方共享缺省锁根
+        # （flock 档位互斥只在共享根下成立，t260904-19 拓扑注释既定）。260909
+        # 提速战役③终验实锤：本套件曾用 out/ 私有锁根，真台（③b 起常驻
+        # Phase 2 并发窗口）与假台各拿各的档位锁、互不可见，假台 holder
+        # bind 到真台已占端口（run F/J 本套件在套内红、单跑绿即此族）。
         self.bin = tempfile.mkdtemp(prefix="stage-l1-bin-")
         self.shim = pathlib.Path(self.bin, "docker")
         self.shim.write_text(SHIM)
@@ -163,7 +165,6 @@ class StageCLIBase(unittest.TestCase):
     def tearDown(self):
         subprocess.run(["pkill", "-f", "stage-l1-bin-"], capture_output=True)  # 兜底清 holder
         import shutil
-        shutil.rmtree(self.locks, ignore_errors=True)
         for k, v in self._saved_env.items():
             if v is None:
                 os.environ.pop(k, None)
@@ -173,7 +174,6 @@ class StageCLIBase(unittest.TestCase):
     def env(self, **extra):
         e = dict(os.environ)
         e["FAKE_DOCKER_STATE"] = self.state
-        e["SANDBAR_STAGE_LOCK_DIR"] = self.locks
         e["PATH"] = self.bin + os.pathsep + e["PATH"]
         # L1 固定「CLI 不可得」路径：env 指路不存在文件 → resolve 抛 MissingAsset → cli=None
         # （不然主树回退真 CLI 会去连假台，sa_note 落「namespace create 失败」分支）
@@ -259,7 +259,7 @@ class BandAllocationTest(StageCLIBase):
     def test_external_band_lock_skips_band(self):
         """档位锁被外部持有 → 分配滑到下一档（flock 原子预留面）。"""
         import fcntl
-        lock = pathlib.Path(self.locks, "band-0.lock")
+        lock = sd.lock_root() / "band-0.lock"
         lock.write_text("")
         fd = os.open(str(lock), os.O_RDWR)
         fcntl.flock(fd, fcntl.LOCK_EX)  # 持锁不放
@@ -297,7 +297,7 @@ class HonestEnvFailTest(StageCLIBase):
         self.assertIn("up 失败", p.stderr)
         downed = pathlib.Path(self.state, "last-down")
         self.assertTrue(downed.exists(), "半途死必须就地 down（实得无 down 记录）")
-        self.assertFalse(pathlib.Path(self.locks, "project-utf.json").exists(),
+        self.assertFalse((sd.lock_root() / "project-utf.json").exists(),
                          "失败路径零状态残留")
 
 

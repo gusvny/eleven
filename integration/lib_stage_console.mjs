@@ -97,7 +97,12 @@ export async function ensureStageConsole({ services = 'full', project = TREE_PRO
   mkdirSync(FIXTURES_HOST, { recursive: true });
   const env = {
     ...process.env,
-    SANDBAR_STAGE_LOCK_DIR: process.env.SANDBAR_STAGE_LOCK_DIR || '/tmp/sandbar-test-stages',
+    // 锁根纪律（t260904-19 拓扑注释同款）：不设 SANDBAR_STAGE_LOCK_DIR，
+    // 与所有生产调用方共享 stage_docker 缺省锁根（~/.sandbar/test-stages，
+    // 不可写时自带降级）——flock 档位互斥只在共享根下成立。260909 提速战役③
+    // 终验实锤：本行曾私指 /tmp，链台与 engine 族各拿各的档位锁，双命名空间
+    // 互不可见→同档撞端口（run F/J 的 L1 红即此族）。用户显式 env 经
+    // ...process.env 透传不受影响。
     // Registry root for the in-container python engine chain (an in-container
     // path inside the rw mount — see the "fixture seeding" section above;
     // before 260908 this was pinned to /nonexistent, so the toolchain always
