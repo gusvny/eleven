@@ -1,24 +1,32 @@
-"""dev-lane —— developer 系工单的唯一 workflow（票 t260831-02）。
+"""dev-lane — the single workflow for every developer-family ticket (t260831-02).
 
-不抽象「阶段」，workflow 直接编排 activity（步名=activity 名）：
+No "stage" abstraction: the workflow orchestrates activities directly
+(step name == activity name):
 
-    prepare_workspace（代码，无 agent）
-      → create_plan（developer：出方案，不动代码）
-        ⇄ review_plan（integration：写 review comments + 通过/打回；打回 → 回 create_plan）
-      → 【并行分叉】implement（developer：代码+单测）∥ design_integration_tests
-        （integration：按方案设计集成测试集，与 implement 并行）
-      → 汇合（settle_lane 统一代落盘）→ ui_evidence（UI 票隔离台实拍）
-      → run_integration_tests（机械，零 LLM）
-      → arbitrate（三态：pass / tests-fault 迭代测试集 / code-fault 打回 implement，各限 5 轮）
-      → acceptance（integration 用户视角走查 → 验收报告）
-      → merge_check（程序化四项；预演冲突红 → 自动打回 implement 消解，其它红灯 blocked）
-      → merge（人审门：签字 → 真合并 → 归档 fail-closed 成功才拆泳道）
+    prepare_workspace (code, no agent)
+      → create_plan (developer: produce the plan, no code changes)
+        ⇄ review_plan (integration: writes review comments + pass/send-back;
+          send-back → back to create_plan)
+      → [parallel fork] implement (developer: code + unit tests) ∥ design_integration_tests
+        (integration: designs the integration test suite from the plan, parallel to implement)
+      → join (settle_lane commits both sides in one place) → ui_evidence (UI tickets:
+        isolated-bench captures)
+      → run_integration_tests (mechanical, zero LLM)
+      → arbitrate (three verdicts: pass / tests-fault iterates the test suite /
+        code-fault sends back to implement, capped at 5 rounds each)
+      → acceptance (integration walks the feature from the user's view → acceptance report)
+      → merge_check (four programmatic checks; merge dry-run conflict red → auto
+        send back to implement, other reds blocked)
+      → merge (human gate: sign-off → real merge → lane torn down only after the
+        fail-closed archive succeeds)
 
-打回循环的上下文继承：回 create_plan/implement 时注入上一轮的 review comments
-与上次产出（previous_context）。各循环上限见 shared 常量，超限转 blocked。
+Rework-loop context inheritance: returning to create_plan/implement injects the previous
+round's review comments plus the last deliverable (previous_context). Per-loop caps live in
+shared constants; over limit → blocked.
 
-确定性纪律同 base.py：本文件零 IO、零随机、零 wall-clock（只有 workflow.now()），
-副作用全在 activity。STAGES 类属性只是展示/校验元数据，编排逻辑在 run() 直写。
+Determinism discipline same as base.py: this file is zero IO, zero randomness, zero
+wall-clock (only workflow.now()), all side effects live in activities. The STAGES class
+attribute is display/validation metadata only; orchestration logic is written inline in run().
 """
 
 from __future__ import annotations
@@ -117,86 +125,101 @@ with workflow.unsafe.imports_passed_through():
     )
 
 SHORT = timedelta(minutes=2)
-MERGE_CHECK_TO = timedelta(minutes=20)   # merge_check 含泳道内 verify_lane（tsc/smoke，可能数分钟）
+MERGE_CHECK_TO = timedelta(minutes=20)   # merge_check includes the in-lane verify_lane
+                                         # (tsc/smoke, can take minutes)
 MERGE_TO = timedelta(minutes=5)
 AGENT_TO = timedelta(hours=6)
 HEARTBEAT_TO = timedelta(minutes=3)
-SUGGEST_NEXT_TO = timedelta(minutes=12)  # 预跑下一单：integration 实跑 1~5 分钟，软失败封顶
-INTEG_RUN_TO = timedelta(minutes=60)     # 机械集成测试：场景执行器批量跑，批量封顶
-RETRY = RetryPolicy(maximum_attempts=3)  # 只对基础设施故障生效；业务结论走 StageResult.status
-# 预跑重试=1（t260828-08 定稿）：软失败路径 activity 自己返回 failed，不靠 Temporal 重试
+SUGGEST_NEXT_TO = timedelta(minutes=12)  # pre-run next ticket: integration takes 1-5 min; soft-fail cap
+INTEG_RUN_TO = timedelta(minutes=60)     # mechanical integration tests: batch runner, batch cap
+RETRY = RetryPolicy(maximum_attempts=3)  # infra failures only; business verdicts go via StageResult.status
+# Pre-run retry=1 (settled by t260828-08): the soft-fail path has the activity return
+# failed itself, no reliance on Temporal retries.
 SUGGEST_RETRY = RetryPolicy(maximum_attempts=1)
-# 布尔 patch 门（workflows.py 的 WORKER_RECONCILE_PATCH_ID 同族先例）：挂起中的旧
-# workflow 重放走旧分支，因此新门不 bump DevLaneWorkflow.PATCH_ID。下文所有
-# *_PATCH_ID 同此理，各处只留一行指回这里。
+# Boolean patch gates (same family as workflows.py's WORKER_RECONCILE_PATCH_ID): a
+# parked old workflow replays down the old branch, so a new gate must not bump
+# DevLaneWorkflow.PATCH_ID. Every *_PATCH_ID below follows the same rule and only
+# carries a one-line pointer back to this first explanation.
 SUGGEST_NEXT_PATCH_ID = "dev-lane-suggest-next"
-# 票 t260831-02：并行开发 ∥ 测试设计 → 机械测试 → 仲裁循环 → 验收走查。
-# 同构布尔门（见 PATCH_ID 首处说明）
+# t260831-02: parallel implement ∥ test design → mechanical tests → arbitration loop
+# → acceptance walkthrough. Same-shaped boolean gate (see the first PATCH_ID note).
 INTEG_LOOP_PATCH_ID = "dev-lane-integration-tests"
-# 票 t260828-09：UI 验收——prepare_ui_evidence 新步 + merge_check UI 证据闸。
-# 同构布尔门（见 PATCH_ID 首处说明）
+# t260828-09: UI acceptance — the new prepare_ui_evidence step + the merge_check UI
+# evidence gate. Same-shaped boolean gate (see the first PATCH_ID note).
 UI_EVIDENCE_PATCH_ID = "dev-lane-ui-evidence"
-# 票 t260904-13 KI-044 根修：UI 票判定换 diff 源（实际 diff × UI 前缀表，与
-# merge_check 3.6 同源）。不复用 UI_EVIDENCE_PATCH_ID：复用会让「已 patch 证据、
-# 未 patch diff 源」的存量实例重放时走新命令，旧历史无对应事件即破。
-# 同构布尔门（见 PATCH_ID 首处说明）
+# t260904-13 KI-044 root fix: the UI-ticket test switches to a diff source (actual diff
+# × UI prefix table, same source as merge_check 3.6). Deliberately not reusing
+# UI_EVIDENCE_PATCH_ID: reusing it would make instances that already patched the
+# evidence step but not the diff source take the new command on replay, and the old
+# history has no matching event → broken. Same-shaped boolean gate (see the first note).
 UI_DIFF_PATCH_ID = "dev-lane-ui-diff-v1"
-# 票 t260829-07：方案定稿后写集跟随方案刷新（并集），空初始写集票由此获得护栏。
-# 同构布尔门（见 PATCH_ID 首处说明）
+# t260829-07: after the plan is finalized the write set refreshes to follow it (union);
+# tickets starting from an empty write set get their guardrail this way.
+# Same-shaped boolean gate (see the first PATCH_ID note).
 REFRESH_WRITE_SET_PATCH_ID = "dev-lane-refresh-write-set"
 KI061_WAKE_RESET_PATCH_ID = "dev-lane-ki061-wake-reset"
-# KI-061 测试开关（仅测试用）：默认关=修复启用；置 "1" 跳过超限唤醒重置守卫
-# （selfcheck 用它复刻卡死行为）。worker import 时读定、进程内不变；重放安全由
-# 守卫 False 零 command 性质兜底。
+# KI-061 test switch (tests only): default off = fix enabled; set to "1" to skip the
+# over-limit wake-reset guard (a selfcheck uses it to reproduce the stuck behavior).
+# Read once at worker import, constant for the process; replay safety rests on the
+# guard's False being a zero-command value.
 SANDBAR_TEST_DISABLE_KI061 = os.environ.get("SANDBAR_TEST_DISABLE_KI061") == "1"
-# 票 t260904-18 KI-049 门②：create_plan 回执 files_changed 空/畸形 → 可见红+告警，
-# 写集零污染（不再静默 no-op）。
-# 同构布尔门（见 PATCH_ID 首处说明）
+# t260904-18 KI-049 gate 2: an empty/malformed files_changed in the create_plan receipt
+# → visible red + warning, write set left untouched (no more silent no-op).
+# Same-shaped boolean gate (see the first PATCH_ID note).
 WRITE_SET_FAULT_PATCH_ID = "dev-lane-write-set-fault"
-# 票 t260904-18 KI-050 门③：泳道起跑时预载 verify.yaml 的 ui_evidence.dirs 声明进
-# meta（读盘在 activity、workflow 只读 meta=重放安全），review_gate patched 分支按声明判 UI 票。
-# 同构布尔门（见 PATCH_ID 首处说明）
+# t260904-18 KI-050 gate 3: at lane start, preload verify.yaml's ui_evidence.dirs
+# declaration into meta (disk read happens in an activity, the workflow only reads meta
+# = replay safe); the review_gate patched branch judges UI tickets from it.
+# Same-shaped boolean gate (see the first PATCH_ID note).
 UI_EVIDENCE_DECL_PATCH_ID = "dev-lane-ui-evidence-decl"
-# 票 t260829-07：integration_review ok 后 verify_review_gate 机械复核
-# （泳道 0 commit / UI 票截图缺失 → 强制打回；git/路径异常 → 跳过）。
-# 同构布尔门（见 PATCH_ID 首处说明）
+# t260829-07: after integration_review reports ok, verify_review_gate re-checks it
+# mechanically (0 lane commits / missing UI screenshots → forced send-back; git/path
+# errors → skip). Same-shaped boolean gate (see the first PATCH_ID note).
 REVIEW_GATE_PATCH_ID = "dev-lane-review-gate"
-# KI-003 stage 转换突变串让路点（_breathe 内 workflow.patched 消费）：旧在跑票
-# 重放旧 history 无此 marker → 不让路，保重放确定。
+# KI-003 stage-transition yield point inside the mutation burst (consumed by
+# workflow.patched inside _breathe): a ticket already running replays history without
+# this marker → does not yield, replay stays deterministic.
 BREATHE_PATCH_ID = "ki003-breathe-v1"
-# 票 t260902-02 M1-3：完结工单三段收口——merge 只落账 → archive_ticket 出仓 →
-# teardown_lane 拆泳道。归档 fail-closed 成功是拆泳道的前提（stage 报告不随拆丢失）。
-# 同构布尔门（见 PATCH_ID 首处说明）
+# t260902-02 M1-3: closing a ticket in three steps — merge only books the ledger →
+# archive_ticket ships the data out → teardown_lane tears down the lane. Archive
+# succeeding fail-closed is the precondition for tearing down the lane (the stage
+# report must not be lost with it). Same-shaped boolean gate (see the first note).
 ARCHIVE_PATCH_ID = "dev-lane-archive-ticket"
 
-# 票 t260903-02 提速③：review_plan 第三态「附条件放行」——verdict=conditional
-# 轻微瑕疵不改打回级，意见直通 implement，跳过方案重做+复审；reject 仍走打回环。
-# 同构布尔门（见 PATCH_ID 首处说明）
+# t260903-02 speedup 3: a third review_plan verdict, "conditional pass" —
+# verdict=conditional for cosmetic nits does not count as a send-back round; comments go
+# straight to implement, skipping the plan redo + re-review; reject still uses the loop.
+# Same-shaped boolean gate (see the first PATCH_ID note).
 REVIEW_CONDITIONAL_PATCH_ID = "dev-lane-review-conditional-v1"
-# 票 t260903-02 提速②：arbitrate ∥ acceptance_walkthrough 并行分叉——两者吃同一份
-# 机械测试结果、视角不同、无数据依赖，gather 省一段串行。
-# 同构布尔门（见 PATCH_ID 首处说明）
+# t260903-02 speedup 2: arbitrate ∥ acceptance_walkthrough run as a parallel fork — both
+# consume the same mechanical test result from different angles with no data dependency,
+# so gathering saves a serial stretch. Same-shaped boolean gate (see the first note).
 ARB_ACC_PARALLEL_PATCH_ID = "dev-lane-arb-acc-parallel-v1"
-# prepare_ui_evidence activity 超时：必须**明显大于** activity 内子进程超时
-# （agent_activities.UI_CAPTURE_TIMEOUT_SEC=120s），否则 Temporal 先杀 activity，
-# 子进程自己的超时回收路径走不到。
+# prepare_ui_evidence activity timeout: must be **clearly larger** than the subprocess
+# timeout inside the activity (agent_activities.UI_CAPTURE_TIMEOUT_SEC=120s), otherwise
+# Temporal kills the activity first and the subprocess's own timeout recovery never runs.
 UI_EVIDENCE_TO = timedelta(seconds=180)
 
-# MAX_REVIEW_ROUNDS 迁至 shared.py（票 t260903-02：review_plan_route 纯函数需同源消费），
-# 经下方 import 注入；本地不再定义。
-MAX_CONFLICT_ROUNDS = 3  # 冲突自动消解轮数上限（票 t260826-01），超限/同批文件反复冲突转 blocked 交人
+# MAX_REVIEW_ROUNDS moved to shared.py (t260903-02: the review_plan_route pure function
+# must consume the same value); injected via the import below, no longer defined here.
+MAX_CONFLICT_ROUNDS = 3  # conflict auto-resolution round cap (t260826-01); over limit or
+                         # the same file set conflicting twice → blocked, handed to a human
 
-# 票 t260901-04：打回 target/fallback 合法词表（_auto_rework 校验用，显式列值）。
-# 注意：此词表与 STAGES id 词表不一致是既有事实（acceptance 等是 phase 值但不是
-# STAGES id）——只服务打回校验，勿从 STAGES 推导、勿复用他处。
+# t260901-04: the legal vocabulary for rework target/fallback (consumed by the
+# _auto_rework validation, spelled out explicitly). Note: this vocabulary intentionally
+# differs from the STAGES id vocabulary (acceptance etc. are phase values but not
+# STAGES ids) — it serves rework validation only; do not derive it from STAGES or reuse
+# it elsewhere.
 PHASE_MAIN_CHAIN = frozenset({
     "create_plan", "review_plan", "parallel_impl_design", "implement",
     "integ_join", "integration_review", "run_integration_tests", "arbitrate",
     "arb_acc_parallel", "acceptance", "merge_check", "merge", "done"})
-# phase 主链步 → 角色映射（_auto_rework 留痕写 meta['role'] 用）。
-# 不走 _step(target)：词表∩¬STAGES 的三个值会让 _step raise「未知步骤」把 workflow
-# 卡死（票 t260901-04）。角色归属：STAGES 同名步照抄；parallel_impl_design/integ_join
-# 是实现侧聚合/汇合落盘 → developer；acceptance → integration。
+# phase main-chain step → role mapping (used by _auto_rework to record meta['role']).
+# Deliberately not via _step(target): the three values in the vocabulary that are not
+# STAGES ids would make _step raise "unknown step" and wedge the workflow (t260901-04).
+# Role assignment: steps with the same name as STAGES copy it; parallel_impl_design /
+# integ_join are the implement-side aggregation/join commits → developer; acceptance →
+# integration.
 PHASE_MAIN_ROLES: Dict[str, str] = {
     "create_plan": "developer", "review_plan": "integration",
     "parallel_impl_design": "developer", "implement": "developer",
@@ -208,15 +231,20 @@ PHASE_MAIN_ROLES: Dict[str, str] = {
 
 
 def set_parallel_stages(meta: Dict[str, Any], stages: List[str]) -> None:
-    """并行分叉期把活跃边列表写进 meta['parallel_stages']（KI-024）。
+    """While a parallel fork is live, record the active edges into
+    meta['parallel_stages'] (KI-024).
 
-    口径（工单正文 + review_plan C4/C5 裁定，勿自由发挥）：
-      - 双显真源=本列表；meta['stage'] 单字段保持原样不动（旧工单台兼容）。
-      - 清洗：只收 STAGES id 词表内的字符串 id；畸形丢弃、去重保序。
-      - 空列表 → 删键不留空列表：UI 把「键缺失 ∨ 空列表」同视为「无并行」，
-        回落既有 timeline 启发式。离开并行期必须显式清，防陈旧列表把已完成边
-        永久钉在 ▶。
-      - 纯内存函数，重放安全；STAGES 运行期取值（本函数定义在类前）。
+    Contract (fixed by the ticket body + review_plan C4/C5 rulings; do not improvise):
+      - This list is the source of truth for the dual display; the single meta['stage']
+        field stays untouched (workbench backward compatibility).
+      - Sanitizing: only string ids inside the STAGES id vocabulary are accepted;
+        malformed entries dropped, order-preserving dedupe.
+      - Empty list → remove the key rather than store an empty list: the UI treats
+        "key missing ∨ empty list" alike as "no parallelism" and falls back to the
+        existing timeline heuristics. Leaving a parallel period must clear explicitly,
+        so a stale list cannot pin finished edges on ▶ forever.
+      - Pure in-memory function, replay safe; STAGES is resolved at call time (this
+        function is defined before the class).
     """
     valid_ids = {s.id for s in DevLaneWorkflow.STAGES}
     cleaned: List[str] = []
@@ -228,8 +256,9 @@ def set_parallel_stages(meta: Dict[str, Any], stages: List[str]) -> None:
     else:
         meta.pop("parallel_stages", None)
 
-# 各步的派活契约补述（接在 build_stage_prompt 通用指令后）。
-# review 两步的判定约定：status ok=通过 / failed=打回，review comments 写进 summary。
+# Per-step assignment contract supplements (appended after build_stage_prompt's generic
+# instructions). Verdict convention for the two review steps: status ok=pass /
+# failed=send-back, review comments go into summary.
 FLOW_BRIEF = {
     "create_plan": (
         "本步只出方案，不动代码（git 工作区应保持干净）。方案要落到：改哪些文件、"
@@ -311,9 +340,10 @@ FLOW_BRIEF = {
 }
 
 
-# 旧链步定义（仅存量 workflow 重放可达——t260831-02 退役了 integration_review
-# 步，但其历史重放仍需 _step 可解析，否则 NonDeterminism 致 workflow task 永久
-# failed。新执行流不经过它。）
+# Legacy chain step definition (reachable only by replaying existing workflows —
+# t260831-02 retired the integration_review step, but replaying its history still needs
+# _step to resolve it, otherwise NonDeterminism fails the workflow task forever. New
+# executions never pass through it.)
 _LEGACY_STEPS: Dict[str, Stage] = {
     "integration_review": Stage(
         id="integration_review", name="集成审读", role="integration",
@@ -323,21 +353,26 @@ _LEGACY_STEPS: Dict[str, Stage] = {
 
 
 def _prompt_next_no(prompt: str) -> int:
-    """prompt 顶层编号最大值 +1（FLOW_BRIEF 补述接尾用）。
+    """Largest top-level item number in the prompt, plus 1 (where FLOW_BRIEF's
+    supplement gets appended).
 
-    顶层条目「N. 」不缩进；注入的 previous_context（打回意见原文）逐行缩进 3 空格，
-    不会误配。previous_context 注入后通用指令尾号会到 9，硬编码 9 会撞号。"""
+    Top-level entries look like "N. " at column 0; the injected previous_context (the
+    raw send-back comments) is indented 3 spaces per line, so it never matches. After
+    previous_context is injected the generic instructions can reach item 9, so a
+    hardcoded 9 would collide."""
     nums = [int(m) for m in re.findall(r"^(\d+)\.", prompt, re.M)]
     return (max(nums) + 1) if nums else 1
 
 
 @workflow.defn
 class DevLaneWorkflow:
-    """developer 系工单唯一 workflow（dev-lane）。activity 直编排，无 stage 机。
+    """The single workflow for developer-family tickets (dev-lane). Direct activity
+    orchestration, no stage machine.
 
-    STAGES 仅作元数据（yaml 快照/create 推导/工单台展示）；快照键与
-    TicketWorkflowBase 同形（stage/stage_state/checks/handoffs/timeline…），
-    工单台与 ticket.py 无感消费。"""
+    STAGES is metadata only (yaml snapshot / create-time derivation / workbench
+    display); the snapshot keys match TicketWorkflowBase's shape
+    (stage/stage_state/checks/handoffs/timeline…), so the workbench and ticket.py
+    consume it without knowing the difference."""
 
     PATCH_ID = "dev-lane-v1"
     TEMPLATE_ID = "dev-lane"
@@ -348,10 +383,12 @@ class DevLaneWorkflow:
                      "→implement∥design_integration_tests→汇合（ui_evidence/UI 票）"
                      "→run_integration_tests→arbitrate→acceptance_walkthrough"
                      "→merge_check（程序化）→merge（人审）")
-    # 展示/推导元数据（真源编排=run()；顺序与 run 一致）。
-    # parts=执行主体组合声明（agent🤖/script⚙️/human👤，静态声明，工单台徽标用）：
-    # implement=agent+worker settle 代落盘+自测/verify 脚本门；merge=人签字+merge 落账
-    # +泳道清理脚本；merge_check=纯程序化。引擎管道件（结果文件轮询等）不计。
+    # Display/derivation metadata (the real orchestration lives in run(); same order
+    # as run). parts = declaration of the executor mix (agent🤖/script⚙️/human👤,
+    # static, feeds workbench badges): implement = agent + worker settle-on-behalf +
+    # self-test/verify script gates; merge = human sign-off + merge booking + lane
+    # cleanup script; merge_check = purely programmatic. Engine plumbing (result-file
+    # polling etc.) is not counted.
     STAGES = (
         Stage(id="create_plan", name="做方案", role="developer", next="review_plan",
               desc="读需求出实现方案：改动文件清单、步骤、验收口径；不动代码",
@@ -361,21 +398,24 @@ class DevLaneWorkflow:
               desc="审读方案写 review comments：通过 ok / 打回 failed+修改意见",
               parts=("agent",),
               acceptance=("review comments 落结果文件", "通过/打回结论明确")),
-        # implement 与 design_integration_tests 真实并行（asyncio.gather，见 run() 的
-        # parallel_impl_design 段；展示链按线性近似排相邻，汇合点统一代落盘）。
+        # implement and design_integration_tests really run in parallel (asyncio.gather,
+        # see run()'s parallel_impl_design branch; the display chain lines them up
+        # adjacently as a linear approximation, the join point commits for both).
         Stage(id="implement", name="实现", role="developer", next="design_integration_tests",
               desc="按方案开发：写集白名单内；commit 由 worker 代落盘（agent 沙箱写不了真 .git）；"
                    "与 design_integration_tests 并行分叉，两边齐活后汇合统一落盘",
               parts=("agent", "script"),
               acceptance=("写集白名单内", "改动落写集文件（worker 代落盘 commit）", "相关 smoke/自测全绿")),
-        # ---- 票 t260831-02：并行开发 ∥ 测试设计 → 机械测试 → 仲裁循环 → 验收走查 ----
+        # ---- ticket t260831-02: parallel implement ∥ test design → mechanical tests
+        #      → arbitration loop → acceptance walkthrough ----
         Stage(id="design_integration_tests", name="设计集成测试", role="integration", next="ui_evidence",
               desc="按方案评估测试需求：从用户场景出发设计/迭代集成测试集（仓库 integration/ 目录，"
                    "并登记进场景清单），覆盖并发与边界故障面；与 implement 并行，测试集不向 developer 引导",
               parts=("agent",),
               acceptance=("测试集落 integration/ 目录（并登记进场景清单）", "场景覆盖与故障面清单落结果文件")),
-        # 票 t260828-09：仅展示元数据（仅 UI 票、汇合落盘后机械测试前由 run() 内联执行；
-        # 非 UI 票跳过本步；截图缺失由 merge_check 证据闸兜底）。
+        # t260828-09: display metadata only (UI tickets only, run inline in run()
+        # between the join commit and the mechanical tests; non-UI tickets skip this
+        # step; missing screenshots are caught by the merge_check evidence gate).
         Stage(id="ui_evidence", name="UI截图证据", role="developer", next="run_integration_tests",
               desc="UI 票实现落盘后 worker 代跑 ui-check/capture-lane.mjs 隔离台，截控制台"
                    "各视图落 .sandbar/screenshots/（软失败不拦主链，闸兜底）",
@@ -415,8 +455,10 @@ class DevLaneWorkflow:
                    "合并失败（如签字期间他道先进 main 冲突）自动打回 merge_check 重验",
               parts=("human", "script"),
               acceptance=("人审签字", "merge 落账 + 泳道清理")),
-        # 票 t260828-08 预跑下一单：仅展示元数据（工单台进展卡消费 self.results["suggest_next"]），
-        # 不在 phase 主链——merge 分支内联执行（签字 approve 后、merge activity 前，见 run()）。
+        # t260828-08 pre-run next ticket: display metadata only (the workbench progress
+        # card consumes self.results["suggest_next"]); not on the phase main chain —
+        # run inline in the merge branch (after the approve signature, before the merge
+        # activity; see run()).
         Stage(id="suggest_next", name="预跑下一单", role="integration", next="",
               desc="关联立项的工单签字通过后、merge 落账前，复用 integration 会话预跑"
                    "「下一单建议」并落缓存（软失败不阻塞 merge 收口）；立项已无事可做时"
@@ -428,23 +470,26 @@ class DevLaneWorkflow:
     def __init__(self) -> None:
         self.ticket_id: str = ""
         self.meta: Dict[str, Any] = {}
-        self.results: Dict[str, Dict[str, Any]] = {}      # activity 名 → StageResult 摘要
+        self.results: Dict[str, Dict[str, Any]] = {}      # activity name → StageResult summary
         self.signatures: Dict[str, Dict[str, Any]] = {}
         self._sigs: Dict[str, Signature] = {}
         self._rework: Optional[ReworkRequest] = None
         self._retry_token: int = 0
-        # KI-061：仲裁超限 blocked 的进入序号（每进入 +1，跨串行/并行分支共用）——
-        # 唤醒重置守卫的 patch id 后缀取此值，保证同一 id 全实例只在唤醒穿越处求值一次
-        # （SDK memo 首评固化：重放期 False 会被永久记住，id 复用=live 唤醒吃到毒化值）。
+        # KI-061: entry sequence number for arbitrate over-limit blocked (+1 per entry,
+        # shared across the serial/parallel branches) — the wake-reset guard's patch id
+        # suffix takes this value, so the same id is evaluated exactly once per instance
+        # at the wake crossing (the SDK memoizes the first patched() verdict: a False
+        # seen during replay is remembered forever, so reusing an id means a live wake
+        # eats a poisoned value).
         self._arb_over_limit_seq: int = 0
-        self._gens: Dict[str, int] = {}                   # activity 名 → 进入次数
+        self._gens: Dict[str, int] = {}                   # activity name → entry count
         self.gate_runs: List[Dict[str, Any]] = []
         self.refused: List[Dict[str, Any]] = []
         self.timeline: List[Dict[str, Any]] = []
         self.human_context: Dict[str, Any] = {}
         self.engine_version: int = ENGINE_VERSION_V2
 
-    # ---------- 内部：时间/日志 ----------
+    # ---------- internals: time / logging ----------
     def _now_epoch(self) -> int:
         return int(workflow.now().timestamp())
 
@@ -464,13 +509,15 @@ class DevLaneWorkflow:
         self.meta["updated"] = self._now_epoch()
 
     async def _breathe(self) -> None:
-        """stage 转换突变串让路点（KI-003）。本类独立于 TicketWorkflowBase（不继承，
-        故自带 _breathe）；形态与取舍见 base.py 同名方法——在跑旧票重放走旧分支
-        （patched 分支 + 0 长 timer）。只加在 base 上会让 self._breathe AttributeError
-        炸 workflow task。"""
+        """Yield point inside stage-transition mutation bursts (KI-003). This class
+        stands alone from TicketWorkflowBase (no inheritance, hence its own _breathe);
+        shape and trade-offs mirror base.py's same-named method — a ticket already
+        running replays down the old branch (patched branch + zero-length timer).
+        Putting it only on the base would make self._breathe raise AttributeError and
+        blow up the workflow task."""
         if not workflow.patched(BREATHE_PATCH_ID):
-            return  # 旧 history 重放：无 marker，不让路，保重放确定
-        await asyncio.sleep(0)  # 0 长 timer：让出事件循环且自带唤回事件
+            return  # old history replay: no marker, do not yield, keep replay deterministic
+        await asyncio.sleep(0)  # zero-length timer: yields the event loop and carries its own wake event
 
     def _step(self, step_id: str) -> Stage:
         for s in self.STAGES:
@@ -484,7 +531,7 @@ class DevLaneWorkflow:
     def _gen(self, step_id: str) -> int:
         return self._gens.get(step_id, 0)
 
-    # ---------- 初始化 ----------
+    # ---------- initialization ----------
     def _init(self, inp: TicketInput) -> None:
         self.ticket_id = inp.ticket_id
         workflow.patched(self.PATCH_ID)
@@ -541,7 +588,7 @@ class DevLaneWorkflow:
         self._mark("create_plan", "awaiting", "adopt dev-lane（步=%s）"
                    % [s.id for s in self.STAGES])
 
-    # ---------- 步骤进入（meta/记账三件套） ----------
+    # ---------- step entry (the meta/ledger trio) ----------
     def _enter(self, step_id: str) -> None:
         st = self._step(step_id)
         self._gens[step_id] = self._gen(step_id) + 1
@@ -558,10 +605,13 @@ class DevLaneWorkflow:
             c["done"], c["by"] = True, by
             if evidence:
                 c["evidence"] = evidence
-        # 票 t260901-08：终态留痕（三个故障模式取舍）：
-        # ①回放安全——_mark 纯内存 append，无 history 命令，RUNNING 实例重放不破确定性；
-        # ②旧票回落——存量票历史无 done 条目，工单台回落现有 inRun 启发式（不追改存量）；
-        # ③重跑语义——rework 重进时 running 追加在 done 之后，最新态正确回到 running。
+        # t260901-08: terminal-state record (three failure modes weighed):
+        # (1) replay safety — _mark is a pure in-memory append, no history command, so
+        #     RUNNING instances replaying stay deterministic;
+        # (2) old-ticket fallback — existing tickets' history has no done entry, so the
+        #     workbench falls back to its current inRun heuristics (no retroactive fix);
+        # (3) re-run semantics — when a rework re-enters, running is appended after
+        #     done, so the newest state correctly reads as running again.
         self._mark(step_id, "done", by + (("：" + evidence) if evidence else ""))
         self._touch()
 
@@ -573,20 +623,27 @@ class DevLaneWorkflow:
             "engine_version": self.engine_version})
 
     def _refresh_write_set_after_plan(self) -> None:
-        """方案定稿（含附条件放行）后的写集刷新（票 t260829-07；原 review_plan ok
-        分支内联代码原样上移——selfcheck_write_lifecycle E 段字符串在场锁依赖原文）。"""
-        # 票 t260829-07：方案定稿即刷新写集（并集，纯函数；清单来自 create_plan
-        # 回执——已入 workflow 历史，确定性 OK）。
+        """Write-set refresh after the plan is finalized (conditional passes included)
+        (t260829-07; the inline code from the old review_plan ok branch moved up
+        verbatim — the selfcheck_write_lifecycle section E pins on that exact string)."""
+        # t260829-07: plan finalized → refresh the write set (union, pure function; the
+        # list comes from the create_plan receipt — already in workflow history, so
+        # deterministic).
         if workflow.patched(REFRESH_WRITE_SET_PATCH_ID):
             plan_files = (self.results.get("create_plan") or {}).get("files_changed")
-            # 票 t260904-18 KI-049 门②：形状由解析层 normalize_files_changed 定形
-            # （results dict 字面 files_changed_shape 键）。malformed/空回执（未声明
-            # no_file_changes）→ 可见红+告警、写集零污染——空回执曾是写集刷新静默
-            # no-op 根因（三票各多跑 1-2h）；absent → 跳过留痕（旧票兼容）。
-            # 可见红=meta 顶层 flag + WARNING log，不伪造 blocked/rework 时间线状态
-            # （防工单台 ReworkBanner 误触发，KI-001 家族）。
-            # 盲区（接受）：判定只在 review_plan 放行后的刷新点可达，打回轮次内的空
-            # 回执当轮不亮，根治挂写集改革讨论档。
+            # t260904-18 KI-049 gate 2: shape is normalized by the parsing layer
+            # normalize_files_changed (surfaced as the files_changed_shape key in the
+            # results dict). malformed/empty receipt (with no_file_changes undeclared)
+            # → visible red + warning, write set untouched — an empty receipt used to be
+            # the root cause of the write-set refresh silently no-oping (three tickets
+            # each ran 1-2h extra); absent → skip and leave a note (old tickets).
+            # Visible red = a top-level meta flag + WARNING log, never a faked
+            # blocked/rework timeline state (keeps the workbench ReworkBanner from
+            # misfiring, KI-001 family).
+            # Accepted blind spot: this judgment is reachable only at the refresh point
+            # after review_plan passes; an empty receipt inside a send-back round does
+            # not light up that round. The real fix is filed with the write-set reform
+            # discussion.
             plan_shape = (self.results.get("create_plan") or {}).get(
                 "files_changed_shape") or "absent"
             fault = None
@@ -618,7 +675,7 @@ class DevLaneWorkflow:
                               % "、".join(str(d) for d in dropped))
                 self._log("写集已随方案定稿刷新：现 %d 条" % len(merged))
 
-    # ---------- blocked 等待（retry_qc 重跑本步 / rework 跳步） ----------
+    # ---------- blocked wait (retry_qc re-runs this step / rework jumps) ----------
     async def _blocked(self, step_id: str, why: str) -> None:
         self.meta["stage_state"] = "blocked"
         self._touch()
@@ -627,19 +684,24 @@ class DevLaneWorkflow:
         token = self._retry_token
         await workflow.wait_condition(
             lambda: self._retry_token > token or self._rework is not None)
-        # 醒来由主循环看 self._rework / 重跑本步
+        # On wake, the main loop looks at self._rework / re-runs this step
 
     async def _blocked_over_limit(self, why: str) -> bool:
-        """仲裁超限 blocked 唤醒重置守卫（KI-061）。走完 _blocked 等待后返回
-        True=调用方应作废 memoized 仲裁结论（arb_done/arb_res 重置）真重跑 arbitrate 边。
+        """Wake-reset guard for the arbitrate over-limit blocked state (KI-061). After
+        the _blocked wait completes, returns True = the caller must discard the memoized
+        arbitration verdict (reset arb_done/arb_res) and genuinely re-run the arbitrate
+        edge.
 
-        为什么「每进入唯一 patch id」而不是固定 id：SDK 把 patched() 首评结果按实例
-        memo 固化——在飞 workflow 重放会穿越历史唤醒点，固定 id 首评落在重放期
-        （无 marker）得 False 并永久固化，live 唤醒吃到毒化 False（固定 id 热修实测
-        未生效的机械成因，票 t260907-10）。带 `#序号` 后缀后：历史唤醒点各 id 重放期
-        首评 False 且零 command（重放不炸）；live 唤醒点 id 从未求值过 → 首评 True、
-        重置生效。rework 唤醒由主循环统一处理，这里短路返回 False（不求值 patched，
-        两侧重放一致）。"""
+        Why "a unique patch id per entry" instead of a fixed id: the SDK memoizes the
+        first patched() verdict per instance — an in-flight workflow replay crosses the
+        historical wake points, where a fixed id's first evaluation lands during replay
+        (no marker), yields False and is frozen forever, so a live wake eats a poisoned
+        False (the mechanical reason the fixed-id hotfix demonstrably did not work,
+        t260907-10). With the `#<seq>` suffix: at historical wake points each id's first
+        replay evaluation is False and issues zero commands (replay does not break); at
+        a live wake point the id has never been evaluated → first evaluation True, the
+        reset takes effect. A rework wake is handled centrally by the main loop, so this
+        short-circuits to False (patched not evaluated, both sides replay alike)."""
         self._arb_over_limit_seq += 1
         n = self._arb_over_limit_seq
         await self._blocked("arbitrate", why)
@@ -647,18 +709,20 @@ class DevLaneWorkflow:
             return False
         return workflow.patched("%s#%d" % (KI061_WAKE_RESET_PATCH_ID, n))
 
-    # ---------- agent 步 ----------
+    # ---------- agent steps ----------
     async def _run_agent_step(self, step_id: str, previous_context: str = "",
                               settle: bool = True) -> Optional[StageResult]:
-        """跑一个 agent activity（名=步名）。返回 None=基础设施故障（调用方转 blocked）。
-        settle=False：并行分叉期跳过尾部代落盘（汇合点 settle_lane 统一落）。"""
+        """Run one agent activity (named after the step). Returns None = infra failure
+        (caller turns it into blocked). settle=False: during a parallel fork, skip the
+        trailing commit-on-behalf (the join point's settle_lane commits for both)."""
         st = self._step(step_id)
         gen = self._gen(step_id)
         self._enter(step_id)
         ws = stage_workspace(self.meta.get("workspace"), self.ticket_id)
         rfile = result_file_for(self.ticket_id, step_id, gen, ws)
-        # gen 是 0 基（_enter 前取值）：prompt 里「第 N 次进本段」用人话 1 基；
-        # 文件名/args.gen 仍 0 基（结果文件 gen0 起，幂等锚点与磁盘命名连续性）
+        # gen is 0-based (read before _enter): the prompt's "Nth entry into this section"
+        # uses the human-friendly 1-based form; filenames/args.gen stay 0-based (result
+        # files start at gen0, keeping the idempotency anchor and disk naming continuous)
         prompt = build_stage_prompt(self.ticket_id, self.meta, st,
                                     list(self.meta.get("handoffs") or []), rfile, gen + 1,
                                     previous_context)
@@ -677,8 +741,9 @@ class DevLaneWorkflow:
             step_id, args,
             start_to_close_timeout=AGENT_TO, heartbeat_timeout=HEARTBEAT_TO,
             retry_policy=RETRY)
-        # 票 t260904-18 KI-049 门②：files_changed 保形归一（形状随回执进 results
-        # 字面，_refresh_write_set_after_plan 读 results dict 消费）。
+        # t260904-18 KI-049 gate 2: shape-preserving normalization of files_changed (the
+        # shape travels with the receipt into the results dict, consumed by
+        # _refresh_write_set_after_plan reading that dict).
         if isinstance(raw, StageResult):
             res = raw
         else:
@@ -697,24 +762,28 @@ class DevLaneWorkflow:
             "files_changed": list(res.files_changed),
             "files_changed_shape": res.files_changed_shape,
             "evidence": res.evidence, "gen": gen}
-        # KI-003：stage 转换突变串让路点——results 记账与后续 _finish/_handoff/
-        # refresh_write_set 突变簇之间让出事件循环，排队的 snapshot query 不再被
-        # 整段同步突变串噎到超时（工单台左栏转换窗只剩 id 的根因）。
+        # KI-003: yield point inside the stage-transition mutation burst — yields the
+        # event loop between the results bookkeeping and the following
+        # _finish/_handoff/refresh_write_set mutation cluster, so a queued snapshot
+        # query is no longer choked to timeout by the whole synchronous burst (root
+        # cause of the workbench left column showing only ids in its transition window).
         await self._breathe()
         return res
 
-    # ---------- t260828-08：merge 落账前预跑立项下一单建议 ----------
+    # ---------- t260828-08: pre-run the next ticket of the epic before merge books ----------
     async def _suggest_epic_next(self, epic: str) -> None:
-        """prepare_epic_next → build_suggest_next_prompt → suggest_next 三连。
-        软失败总则：档案不可读/建议不合规/超时/基础设施故障一律 _log + _handoff 留痕，
-        不抛不阻塞——merge 照常收口（activity retry_policy=SUGGEST_RETRY=1 次不重试）。"""
+        """The prepare_epic_next → build_suggest_next_prompt → suggest_next chain.
+        Soft-fail rule: unreadable archive / non-compliant suggestion / timeout / infra
+        failure all just _log + _handoff, never raise or block — merge closes normally
+        (activity retry_policy=SUGGEST_RETRY=1, no retry)."""
         self._mark("suggest_next", "running",
                    "merge 签字通过，预跑立项 %s 下一单建议（integration 会话复用）" % epic)
         try:
             prep = await workflow.execute_activity(
                 prepare_epic_next,
-                # project 感知（票 t260907-07）：prepare 读立项档案锚项目主目录
-                # （meta 随 TicketInput.project 携带，入口必传非空）。
+                # project awareness (t260907-07): prepare reads the epic archive anchored
+                # to the project's main directory (meta carries TicketInput.project, the
+                # entry point must pass a non-empty value).
                 EpicNextPrepArgs(ticket_id=self.ticket_id, epic=epic,
                                  project=str(self.meta.get("project") or "")),
                 start_to_close_timeout=SHORT, retry_policy=SUGGEST_RETRY)
@@ -749,18 +818,21 @@ class DevLaneWorkflow:
             else:
                 self._log("预跑下一单软失败（merge 照常收口）：%s" % res.summary)
                 self._handoff("suggest_next", "预跑软失败：%s" % res.summary[:120])
-        except Exception as e:  # 超时/基础设施故障：软失败留痕，不阻塞 merge 收口
+        except Exception as e:  # timeout/infra failure: soft-fail with a note, merge still closes
             self._log("预跑下一单异常软失败（merge 照常收口）：%s" % str(e)[:300])
             self._handoff("suggest_next", "预跑异常软失败：%s" % str(e)[:120])
 
     # ---------- rework ----------
     def _auto_rework(self, target: str, note: str, who: str, fallback: str) -> str:
-        """内部/统一打回落步：校验 target/fallback ∈ PHASE_MAIN_CHAIN（done 除外）。
-        通过 → meta 五件套 + _touch + _log + _mark(target,'rework')，返回 target；
-        拒绝 → refused 记账 + log，返回 fallback（fallback 也非法时退 meta 现值——
-        绝不让非法值回流主循环，防「未知阶段」抛错）。
-        role 走 PHASE_MAIN_ROLES 显式映射，**不经 _step(target)**（词表∩¬STAGES 三值
-        会让 _step raise 把 workflow 卡死）。"""
+        """Internal/unified send-back landing: validates target/fallback ∈
+        PHASE_MAIN_CHAIN (except done). Valid → the five meta fields + _touch + _log +
+        _mark(target,'rework'), returns target; refused → refused bookkeeping + log,
+        returns fallback (if fallback is invalid too, fall back to the current meta
+        value — an invalid value must never flow back into the main loop, or "unknown
+        stage" would raise).
+        role uses the explicit PHASE_MAIN_ROLES mapping, **never _step(target)** (the
+        three vocabulary values outside STAGES would make _step raise and wedge the
+        workflow)."""
         if target == "done" or target not in PHASE_MAIN_CHAIN:
             why = ("终态不可为打回目标" if target == "done"
                    else "目标步不在打回词表 PHASE_MAIN_CHAIN")
@@ -786,31 +858,36 @@ class DevLaneWorkflow:
         return target
 
     def _apply_rework(self, fallback: str) -> str:
-        """外部 rework signal 落步：先消费 signal（拒绝也消费），再委托
-        _auto_rework（留痕逻辑单源）。返回目标步 id（非法目标 → 拒绝留痕，停原步）。"""
+        """Landing for an external rework signal: consume the signal first (refusals
+        consume it too), then delegate to _auto_rework (single source for the
+        bookkeeping). Returns the target step id (invalid target → refusal note, stay on
+        the current step)."""
         req = self._rework
         self._rework = None
         target = req.target_stage or fallback
         if target in ("suggest_next", "ui_evidence"):
-            # 预跑下一单/UI 截图证据都不是 phase 主链步（分别在 merge 分支内联、
-            # implement 分支内联执行），不接受打回——否则 phase 变量落到无编排的
-            # 步上会让主循环抛「未知阶段」
+            # pre-run-next-ticket / UI screenshot evidence are not phase main-chain steps
+            # (run inline in the merge and implement branches respectively) and accept no
+            # rework — otherwise phase would land on a step with no orchestration and the
+            # main loop would raise "unknown stage"
             self.refused.append({"who": req.who, "want": "rework(%s)" % target,
                                  "why": "%s 非主链步，不接受 rework" % target})
             self._log("rework 拒绝：%s 非主链步（%s）" % (target, req.who))
             return fallback
         return self._auto_rework(target, req.note, req.who, fallback)
 
-    # ---------- 主流程（activity 直编排） ----------
+    # ---------- main flow (direct activity orchestration) ----------
     @workflow.run
     async def run(self, inp: TicketInput) -> Dict[str, Any]:
         self._init(inp)
 
-        # 1) prepare_workspace（代码，无 agent；失败 → blocked 等 retry/rework）
+        # 1) prepare_workspace (code, no agent; failure → blocked waiting for retry/rework)
         while True:
-            # 泳道字段闸（票 t260824-04/-10/-11）：创建链路已在 ticket-start 单点
-            # 校验，这里兜「旧 payload/未来新入口」绕过——lane=worktree 字段不齐即按
-            # 失败回执走 blocked，不放给 activity 静默跳主树/临时目录。
+            # Lane field gate (t260824-04/-10/-11): the creation path validates at the
+            # single ticket-start point; this catches bypasses from "old payloads /
+            # future new entry points" — a lane=worktree payload with missing fields is
+            # treated as a failed receipt and goes blocked, never handed to the activity
+            # to silently fall back to the main tree or a temp dir.
             gate = lane_workspace_gate_error(self.meta)
             if gate:
                 raw = WorkspacePrepResult(ok=False, kind="config", action="rejected",
@@ -819,7 +896,8 @@ class DevLaneWorkflow:
                 prep = WorkspacePrep(
                     ticket_id=self.ticket_id,
                     workspace=self.meta.get("workspace"),
-                    # 票 t260908-02：逐仓明细走独立字段（workspace 不再内嵌 list）
+                    # t260908-02: per-repo detail moved to its own field (workspace no
+                    # longer embeds a list)
                     repo_worktrees=list(self.meta.get("repo_worktrees") or []),
                     branch=str(self.meta.get("branch") or ""),
                     base_ref=str(self.meta.get("base_ref") or ""))
@@ -840,10 +918,12 @@ class DevLaneWorkflow:
             if self._rework is not None:
                 self._apply_rework("create_plan")  # 目标步由主循环接管
 
-        # 票 t260904-18 KI-050 门③：ui_evidence 声明预载（读盘在 activity、workflow
-        # 只读 meta=重放安全）。软失败总则：activity 异常不拦主链——meta 缺键由消费点
-        # （review_gate patched 分支）按「声明缺省」口径兜底并留痕；malformed 在
-        # merge_check 3.6 装载时 fail-closed 红，这里只留痕。
+        # t260904-18 KI-050 gate 3: preload the ui_evidence declaration (the disk read
+        # happens in an activity, the workflow only reads meta = replay safe).
+        # Soft-fail rule: an activity exception does not stop the main chain — a missing
+        # meta key is handled at the consumer (the review_gate patched branch) under the
+        # "declaration absent" reading, with a note; malformed declarations turn
+        # fail-closed red when merge_check 3.6 loads them, here we only leave a note.
         if workflow.patched(UI_EVIDENCE_DECL_PATCH_ID):
             try:
                 draw = await workflow.execute_activity(
@@ -867,43 +947,46 @@ class DevLaneWorkflow:
         phase = str(self.meta.get("stage") or "create_plan")
         plan_rounds = 0
         impl_rounds = 0
-        impl_done = False                         # 并行分叉：implement 边完成态
-        design_done = False                       # 并行分叉：design_integration_tests 边完成态
-        code_rounds = 0                           # arbitrate code-fault 打回 developer 累计
-        tests_rounds = 0                          # arbitrate tests-fault 测试集迭代累计
-        acc_rounds = 0                            # 验收走查打回累计
-        arb_format_rounds = 0                     # 仲裁输出缺 verdict= 标记的连续次数
-        # 票 t260903-02 提速②：arbitrate ∥ acceptance_walkthrough 并行分叉的内存态。
-        # 不变式：进入 run_integration_tests 段即全部单点重置（每轮机械测试产出即重
-        # 仲裁、重走查）——覆盖 rework / tests-fault / code-fault 全部回路，不在散分支
-        # 补置位。
-        arb_done = False                          # 仲裁边完成态
-        acc_done = False                          # 走查边完成态
-        arb_res = None                            # 仲裁边 StageResult（边界齐后判定）
-        acc_res = None                            # 走查边 StageResult（pass 时消费）
-        design_ctx = ""                           # design_integration_tests 的注入上下文
-        arb_ctx = ""                              # run_integration_tests 产出的测试结果注入
-        ui_ctx = ""  # 票 t260828-09：UI 截图证据（汇合点产出，acceptance 消费）
-        conflict_rounds = 0                       # 票 t260826-01：冲突自动消解轮数（上限 MAX_CONFLICT_ROUNDS）
-        prev_conflict_files: List[str] = []       # 上一轮冲突文件（排序后集合比较）
+        impl_done = False                         # parallel fork: implement edge finished
+        design_done = False                       # parallel fork: design_integration_tests edge finished
+        code_rounds = 0                           # arbitrate code-fault send-backs to developer, cumulative
+        tests_rounds = 0                          # arbitrate tests-fault suite iterations, cumulative
+        acc_rounds = 0                            # acceptance-walkthrough send-backs, cumulative
+        arb_format_rounds = 0                     # consecutive arbitrate outputs missing the verdict= marker
+        # t260903-02 speedup 2: in-memory state for the arbitrate ∥ acceptance_walkthrough
+        # parallel fork. Invariant: entering the run_integration_tests section resets all
+        # of it in one place (each mechanical test run produces a fresh arbitration and a
+        # fresh walkthrough) — this covers every loop, rework / tests-fault / code-fault,
+        # so no scattered branch needs to set these.
+        arb_done = False                          # arbitration edge finished
+        acc_done = False                          # walkthrough edge finished
+        arb_res = None                            # arbitration edge StageResult (judged once both edges are in)
+        acc_res = None                            # walkthrough edge StageResult (consumed on pass)
+        design_ctx = ""                           # context injected into design_integration_tests
+        arb_ctx = ""                              # test results produced by run_integration_tests, injected
+        ui_ctx = ""  # t260828-09: UI screenshot evidence (produced at the join, consumed by acceptance)
+        conflict_rounds = 0                       # t260826-01: conflict auto-resolution rounds (cap MAX_CONFLICT_ROUNDS)
+        prev_conflict_files: List[str] = []       # last round's conflict files (sorted set comparison)
         prev_ctx = ""
-        ui_ctx = ""   # 票 t260828-09：UI 截图证据清单（汇合点产出，acceptance 走查消费）
+        ui_ctx = ""   # t260828-09: UI screenshot evidence list (produced at the join, consumed by the walkthrough)
 
         while phase != "done":
             if self._rework is not None:
                 fb = "implement" if phase == "parallel_impl_design" else phase
-                # KI-024：rework 离开并行期（目标是串行段）必须清 parallel_stages——
-                # 否则陈旧列表会把已离场的边永久钉在 UI ▶（两条清路径之一，
-                # 另一条是汇合点清；等待期口径见各并行分支失败边的写死注释）。
+                # KI-024: a rework leaving a parallel period (target is a serial section)
+                # must clear parallel_stages — otherwise the stale list pins edges that
+                # already left on UI ▶ forever (one of two clearing paths, the other is
+                # at the join point; the waiting-period contract is spelled out in the
+                # failure-edge comments of each parallel branch).
                 if phase in ("parallel_impl_design", "arb_acc_parallel"):
                     set_parallel_stages(self.meta, [])
                 phase = self._apply_rework(fb)
-                # KI-003：rework 记账突变串（_auto_rework 的 _log/_mark/_touch）后
-                # 让路一次，排队中的 snapshot query 能看到 rework 后的最新态。
+                # KI-003: yield once after the rework bookkeeping burst (_auto_rework's
+                # _log/_mark/_touch) so a queued snapshot query sees the post-rework state.
                 await self._breathe()
                 prev_ctx = str(self.meta.get("last_rework_note") or "")
                 if phase == "implement":
-                    impl_done = False  # 重新实现：汇合点会重新统一落盘
+                    impl_done = False  # re-implement: the join point will commit for both again
                 continue
 
             # 2) create_plan ⇄ review_plan
@@ -932,8 +1015,9 @@ class DevLaneWorkflow:
                     await self._blocked("review_plan", "agent 活动故障（已重试）：%s: %s"
                                         % (type(e).__name__, e))
                     continue
-                # 票 t260903-02 提速③：三态路由（附条件放行 verdict=conditional 不改
-                # 打回级，意见直通 implement）；未 patched 重放走旧 ok/failed 二态。
+                # t260903-02 speedup 3: three-verdict routing (a conditional pass
+                # verdict=conditional does not count a send-back round, comments go
+                # straight to implement); unpatched replays take the old ok/failed binary.
                 if workflow.patched(REVIEW_CONDITIONAL_PATCH_ID):
                     rv = review_plan_route(
                         parse_review_plan_verdict(res.status, res.summary), plan_rounds)
@@ -953,31 +1037,36 @@ class DevLaneWorkflow:
                                   + (res.summary or ""),
                                   artifacts=res.deliverables, report=res.report)
                     if is_cond:
-                        # 附条件放行：修改意见注入 implement（复用 previous_context
-                        # 通道，文案与打回可区分）；不回 create_plan、不复审、不计打回轮数。
+                        # Conditional pass: the change comments are injected into
+                        # implement (reusing the previous_context channel, wording
+                        # distinguishable from a send-back); no return to create_plan, no
+                        # re-review, no send-back round counted.
                         self._log("review_plan 附条件放行（意见直通 implement）")
                         prev_ctx = ("【附条件放行·implement 执行项】review 意见"
                                     "（轻微瑕疵不改打回级，按条件执行）：\n%s"
                                     % (res.report or res.summary or "")).strip()
-                    # 票 t260829-07：方案定稿（含附条件放行）即刷新写集。
-                    # 可达性 guard：本分支只在 review_plan 放行时执行；create_plan
-                    # blocked 直接离开主循环，不会带病走到这里。
+                    # t260829-07: plan finalized (conditional pass included) → refresh
+                    # the write set. Reachability guard: this branch runs only when
+                    # review_plan passes; a blocked create_plan leaves the main loop
+                    # directly and can never arrive here in a bad state.
                     if workflow.patched(REFRESH_WRITE_SET_PATCH_ID):
                         self._refresh_write_set_after_plan()
                     if workflow.patched(INTEG_LOOP_PATCH_ID):
-                        # 新链：并行分叉（implement ∥ design_integration_tests）
+                        # New chain: parallel fork (implement ∥ design_integration_tests)
                         impl_done = False
                         design_done = False
                         design_ctx = ""
                         phase = "parallel_impl_design"
-                        # KI-003：_finish/_handoff/refresh_write_set 大突变簇尾部
-                        # 再让路一次，转换窗被切成两半，query 排队不撞 8s。
+                        # KI-003: yield once more at the tail of the big
+                        # _finish/_handoff/refresh_write_set mutation cluster, splitting
+                        # the transition window in two so queued queries do not hit 8s.
                         await self._breathe()
                         continue
                     phase = "implement"
                     continue
-                # 打回：review comments 注入下一轮 create_plan（comments 在 report 分条，
-                # 旧结果文件无 report 回落 summary——通道换了，意见不能丢）
+                # Send-back: review comments are injected into the next create_plan round
+                # (comments listed in report, older result files fall back to summary —
+                # the channel changed, the comments must not be lost)
                 plan_rounds += 1
                 prev_ctx = ("【方案审读打回（第 %d 轮）】review comments：\n%s\n%s"
                             % (plan_rounds, res.report or res.summary or "",
@@ -994,7 +1083,8 @@ class DevLaneWorkflow:
                 phase = "create_plan"
                 continue
 
-            # 3) implement（developer 代码+单测）——并行分叉的 developer 边 / 打回重跑单边
+            # 3) implement (developer: code + unit tests) — the developer edge of the
+            #    parallel fork, or a single-edge re-run after a send-back
             if phase == "implement":
                 try:
                     res = await self._run_agent_step("implement", prev_ctx, settle=False)
@@ -1011,7 +1101,8 @@ class DevLaneWorkflow:
                 self._handoff("implement", res.summary or "实现完成",
                               artifacts=res.deliverables, report=res.report)
                 if not workflow.patched(INTEG_LOOP_PATCH_ID):
-                    # ---- 旧链尾（仅存量 workflow 重放可达，票 t260831-02）----
+                    # ---- old chain tail (reachable only by replaying existing
+                    #      workflows, ticket t260831-02) ----
                     ui_ctx = ""
                     if workflow.patched(UI_EVIDENCE_PATCH_ID) and \
                             is_ui_write_set(list(self.meta.get("write_set") or [])):
@@ -1046,8 +1137,10 @@ class DevLaneWorkflow:
                 phase = "integ_join"
                 continue
 
-            # 3.0) 旧链尾：integration_review（仅存量 workflow 重放可达；新链走并行分叉，
-            #      把关职责由集成测试+仲裁+验收走查替代——票 t260831-02）
+            # 3.0) old chain tail: integration_review (reachable only by replaying
+            #      existing workflows; the new chain forks in parallel and its gate duty
+            #      is taken over by integration tests + arbitration + the acceptance
+            #      walkthrough — t260831-02)
             if phase == "integration_review":
                 try:
                     res = await self._run_agent_step("integration_review",
@@ -1074,11 +1167,14 @@ class DevLaneWorkflow:
                                 lane_commits=int(graw.get("lane_commits") or -1),
                                 shots_path_error=str(graw.get("shots_path_error") or ""),
                                 png_count=int(graw.get("png_count") or -1))
-                            # 票 t260904-18 KI-050 门③：UI 判定口径供给——patched 分支
-                            # 吃 meta 预载声明（重放安全）；meta 缺键（activity 重试耗尽/
-                            # 异常）按「声明缺省」口径兜底（is_ui=False，note 留痕「声明读取
-                            # 失败≠项目未声明」——供给故障不改成 UI 票判定漂移）；未 patch
-                            # （存量实例重放）保留旧调用形态原样。
+                            # t260904-18 KI-050 gate 3: supplying the UI-judgment input —
+                            # the patched branch reads the meta-preloaded declaration
+                            # (replay safe); a missing meta key (activity retries
+                            # exhausted / exception) falls back to the "declaration
+                            # absent" reading (is_ui=False, with a note that "declaration
+                            # read failure ≠ the project declaring nothing" — a supply
+                            # fault must not drift the UI-ticket judgment); unpatched
+                            # (existing instances replaying) keeps the old call shape as-is.
                             if workflow.patched(UI_EVIDENCE_DECL_PATCH_ID):
                                 decl_dirs = self.meta.get("ui_evidence_dirs")
                                 if isinstance(decl_dirs, list):
@@ -1160,8 +1256,9 @@ class DevLaneWorkflow:
                 phase = "integ_join"
                 continue
 
-            # 3.0) 汇合：统一代落盘（skip_settle 的两边一次收口，实现+测试集同 commit）
-            #      → UI 证据（UI 票）→ 机械集成测试（票 t260831-02）。
+            # 3.0) join: one commit-on-behalf for both edges (skip_settle collapses here,
+            #      implementation + test suite in the same commit) → UI evidence (UI
+            #      tickets) → mechanical integration tests (t260831-02).
             if phase == "integ_join":
                 sraw = await workflow.execute_activity(
                     settle_lane,
@@ -1174,10 +1271,13 @@ class DevLaneWorkflow:
                     lane_commits=int(sraw.get("lane_commits") or -1))
                 self._log("汇合统一落盘：%s（泳道 commit 数 %s）"
                           % (s.note or "干净", s.lane_commits))
-                # UI 证据（UI 票）：落盘后、机械测试前由 worker 代跑隔离台（软失败闸兜底）。
-                # UI 票判定（票 t260904-13 KI-044）：patched 门内换 diff 源——activity 与
-                # merge_check 3.6 同源；未 patch（存量实例重放）保留声明口径旧分支，
-                # 命令序列与旧历史严格一致。旧链尾（integration_review 分支）冻结旧口径。
+                # UI evidence (UI tickets): the worker runs the isolated bench after the
+                # commit and before the mechanical tests (soft failures caught by the gate).
+                # UI-ticket judgment (t260904-13 KI-044): inside the patched gate the diff
+                # source switches — the activity shares a source with merge_check 3.6;
+                # unpatched (existing instances replaying) keeps the declaration-based old
+                # branch, with the command sequence strictly matching old history. The old
+                # chain tail (integration_review branch) freezes the old judgment.
                 ui_ctx = ""
                 ui_is_ticket = False
                 ui_judge_note = ""
@@ -1200,13 +1300,15 @@ class DevLaneWorkflow:
                             ui_judge_note = cp.detail or (
                                 "diff 未命中 UI 路径 → 非 UI 票，跳过实拍" if not ui_is_ticket else "")
                         except Exception as e:
-                            # fail-closed：activity 故障按「UI 票待证」处理（拍，闸兜底）
+                            # fail-closed: an activity failure is treated as "UI ticket
+                            # unproven" (capture anyway, the gate catches it)
                             ui_is_ticket = True
                             ui_judge_note = ("ui_changed_paths 故障 fail-closed：%s: %s"
                                              % (type(e).__name__, e))
                         self._log("UI 票判定（diff 源）：%s" % ui_judge_note)
                     else:
-                        # 未 patch 分支（存量实例重放）：声明口径判定原样保留
+                        # Unpatched branch (existing instances replaying): the
+                        # declaration-based judgment is kept as-is
                         ui_is_ticket = is_ui_write_set(list(self.meta.get("write_set") or []))
                 if workflow.patched(UI_EVIDENCE_PATCH_ID) and ui_is_ticket:
                     try:
@@ -1232,14 +1334,15 @@ class DevLaneWorkflow:
                         else:
                             ui_ctx = "【UI 截图证据缺失】%s（验收按「无截图证据」如实记录）" % ui.detail
                         self._log("prepare_ui_evidence：%s" % (ui.detail or ("ok" if ui.ok else "failed")))
-                    except Exception as e:  # 基础设施故障：留痕不拦主链，merge_check 闸兜底
+                    except Exception as e:  # infra failure: noted, main chain unaffected, merge_check gate catches it
                         ui_ctx = "【UI 截图证据缺失】activity 故障：%s: %s" % (type(e).__name__, e)
                         self._log("prepare_ui_evidence 故障（不拦主链，merge_check 闸兜底）：%s" % str(e)[:200])
                 phase = "run_integration_tests"
                 continue
 
-            # 3.1) 并行分叉：implement ∥ design_integration_tests（票 t260831-02）。
-            #      缺失边重跑：完成态记入内存，blocked 醒来后只补失败边（activity 幂等）。
+            # 3.1) parallel fork: implement ∥ design_integration_tests (t260831-02).
+            #      Re-running a missing edge: completion lives in memory, so after a
+            #      blocked wake only the failed edge is retried (activities are idempotent).
             if phase == "parallel_impl_design":
                 pend = []
                 if not impl_done:
@@ -1247,7 +1350,9 @@ class DevLaneWorkflow:
                 if not design_done:
                     pend.append("design_integration_tests")
                 if pend:
-                    # KI-024：分叉期活跃边列表进 meta（工单台双显真源；单 stage 字段不动）。
+                    # KI-024: the active edge list of the fork goes into meta (the
+                    # workbench's dual-display source of truth; the single stage field
+                    # stays untouched).
                     set_parallel_stages(self.meta, pend)
                     try:
                         rs = await asyncio.gather(*[
@@ -1255,21 +1360,23 @@ class DevLaneWorkflow:
                                 n, prev_ctx if n == "implement" else design_ctx,
                                 settle=False) for n in pend],
                             return_exceptions=True)
-                    except Exception as e:  # gather 本身不应抛（return_exceptions），防御
+                    except Exception as e:  # gather itself should not raise (return_exceptions); defensive
                         await self._blocked("parallel_impl_design", "并行分叉异常：%s" % e)
                         continue
                     failed = False
                     for name, r in zip(pend, rs):
                         if isinstance(r, Exception):
                             failed = True
-                            # KI-024 等待期口径（写死）：摘除失败边——列表只剩仍待补
-                            # 的边，UI 不把待重做边亮成 ▶；失败边本体由 timeline
-                            # blocked 条目显 ✗（_blocked 内 _mark）。
+                            # KI-024 waiting-period contract (fixed): drop the failed
+                            # edge — the list keeps only edges still to redo, so the UI
+                            # does not show a to-redo edge as ▶; the failed edge itself
+                            # shows ✗ through its timeline blocked entry (_mark inside
+                            # _blocked).
                             set_parallel_stages(
                                 self.meta, [n for n in pend if n != name])
                             await self._blocked(name, "agent 活动故障（已重试）：%s: %s"
                                                 % (type(r).__name__, r))
-                            break  # _blocked 内部等 retry_qc/rework；醒来后重算 pend 只补失败边
+                            break  # _blocked waits for retry_qc/rework; after waking, recompute pend and retry only the failed edge
                     if failed:
                         continue
                     for name, r in zip(pend, rs):
@@ -1288,23 +1395,30 @@ class DevLaneWorkflow:
                                           artifacts=r.deliverables, report=r.report)
                 if not (impl_done and design_done):
                     continue
-                # KI-024：两边齐活=离开并行期，删 parallel_stages（UI 回落既有启发式；
-                # 后续 integ_join/settle 是单点串行段，无双显语义）。
+                # KI-024: both edges done = leaving the parallel period, delete
+                # parallel_stages (the UI falls back to its existing heuristics; the
+                # following integ_join/settle is a single serial section with no dual
+                # display semantics).
                 set_parallel_stages(self.meta, [])
                 phase = "integ_join"
                 continue
 
-            # 3.2) 机械集成测试（零 LLM）：跑项目声明场景执行器 integration/run_scenarios.py
+            # 3.2) mechanical integration tests (zero LLM): run the project-declared
+            #      scenario runner integration/run_scenarios.py
             if phase == "run_integration_tests":
                 self._enter("run_integration_tests")
-                # 票 t260903-02 ②：内存态单点重置（不变式：每轮机械测试产出即重仲裁、
-                # 重走查）——覆盖 rework / tests-fault / code-fault 全部回路收敛路径，
-                # 不在散分支补置位（防消费打回前的陈旧走查结果）。
+                # t260903-02 (2): single-point reset of the in-memory state (invariant:
+                # each mechanical test run produces a fresh arbitration and a fresh
+                # walkthrough) — covers every convergence path of the rework /
+                # tests-fault / code-fault loops, so no scattered branch has to set
+                # these (and no stale walkthrough result from before the send-back is
+                # consumed).
                 arb_done = False
                 acc_done = False
                 arb_res = None
                 acc_res = None
-                # 前置机械检查：泳道落盘（统一 settle 后必有；no_file_changes 票豁免）
+                # Pre-check, mechanical: the lane has been committed (guaranteed after
+                # the unified settle; tickets with no_file_changes are exempt)
                 if workflow.patched(REVIEW_GATE_PATCH_ID) and not self.meta.get("no_file_changes"):
                     try:
                         graw = await workflow.execute_activity(
@@ -1342,7 +1456,8 @@ class DevLaneWorkflow:
                 except Exception as e:
                     ir = IntegrationRunResult(error="集成测试 activity 故障：%s: %s"
                                               % (type(e).__name__, e))
-                # 票 t260904-12：headline 带环境红维——混合套件不再呈现「全绿」假叙事。
+                # t260904-12: the headline carries the environment-red dimension — a
+                # mixed suite can no longer tell a fake "all green" story.
                 self.results["run_integration_tests"] = {
                     "status": "failed" if (ir.error or ir.failed or ir.env_fail) else "ok",
                     "summary": "集成测试：%d 跑 / %d 过 / %d 败 / %d 环境红%s"
@@ -1358,27 +1473,30 @@ class DevLaneWorkflow:
                               "集成测试 %d 跑 / %d 过 / %d 败 / %d 环境红%s"
                               % (ir.ran, ir.passed, ir.failed, ir.env_fail,
                                  ("｜" + ir.error) if ir.error else ""))
-                # 票 t260901-19：预算 6000→4000，且尾保（[-4000:]）——details 在 JSON 尾部，
-                # 头部切片会把失败明细挤掉；尾保保住失败明细
+                # t260901-19: budget 6000→4000 with tail-keeping ([-4000:]) — details sit
+                # at the end of the JSON, so a head slice would squeeze out the failure
+                # details; keeping the tail keeps them
                 _arb_json = json.dumps({"ran": ir.ran, "passed": ir.passed,
                                         "failed": ir.failed, "error": ir.error,
                                         "details": ir.details}, ensure_ascii=False)
                 arb_ctx = ("【机械集成测试结果】\n%s\n【测试集】仓库 integration/ 目录"
                            "（integration/ 场景文件与清单为准；你是其作者，tests-fault 时直接迭代它）"
                            % _arb_json[-4000:])
-                # 票 t260903-02 ②：走查边与仲裁吃同一份测试结果（用户走查视角独立，
-                # 不预设测试全过），UI 走查实证一并注入。
+                # t260903-02 (2): the walkthrough edge consumes the same test result as
+                # the arbitration (the user-view walkthrough is independent and does not
+                # assume all tests passed); the UI walkthrough evidence is injected too.
                 acc_ctx = ("【机械集成测试结果】\n%s\n" % _arb_json[-4000:]) + \
                     (("【UI 截图/走查实证（.sandbar/screenshots/）】\n%s\n" % ui_ctx)
                      if ui_ctx else "")
                 if workflow.patched(ARB_ACC_PARALLEL_PATCH_ID):
-                    # 提速②：仲裁 ∥ 验收走查并行分叉（无数据依赖，省一段串行）
+                    # Speedup 2: arbitration ∥ acceptance walkthrough as a parallel fork
+                    # (no data dependency, saves one serial stretch)
                     phase = "arb_acc_parallel"
                 else:
                     phase = "arbitrate"
                 continue
 
-            # 3.3) 仲裁（integration 三态：pass / tests-fault / code-fault）
+            # 3.3) arbitration (integration, three verdicts: pass / tests-fault / code-fault)
             if phase == "arbitrate":
                 try:
                     res = await self._run_agent_step("arbitrate", arb_ctx)
@@ -1407,10 +1525,12 @@ class DevLaneWorkflow:
                     phase = "acceptance"
                     continue
                 if route.startswith("blocked:"):
-                    # KI-061：超限 blocked 唤醒死锁修复——真重跑本步。守卫机制（每进入
-                    # 唯一 patch id 对抗 SDK memo 首评固化）与重放稳定性论证见
-                    # _blocked_over_limit；不重置则唤醒后吃 memoized 仲裁结论立即再
-                    # blocked、arbitrate 永不重 spawn（票 t260907-10 卡闸实锤）。
+                    # KI-061: fixing the wake deadlock of an over-limit blocked state —
+                    # genuinely re-run this step. The guard mechanism (a unique patch id
+                    # per entry, against the SDK's memoized first verdict) and the replay
+                    # stability argument live in _blocked_over_limit; without the reset,
+                    # waking eats the memoized arbitration verdict, blocks again at once,
+                    # and arbitrate is never re-spawned (the t260907-10 stuck gate).
                     if await self._blocked_over_limit(route.split(":", 1)[1]):
                         arb_done = False
                         arb_res = None
@@ -1435,11 +1555,13 @@ class DevLaneWorkflow:
                                           fallback="arbitrate")
                 continue
 
-            # 3.3.1) 票 t260903-02 提速②：arbitrate ∥ acceptance_walkthrough 并行分叉。
-            #      两者吃同一份机械测试结果、视角不同、无数据依赖，gather 省一段串行。
-            #      边名一律 STAGES id（_step 可解析）；arb_acc_parallel 只是 phase 值做
-            #      主循环分发。时序：gather 齐 → 单点 settle_lane（tests-fault 测试集
-            #      改动先落账再重跑）→ arbitrate verdict 判定 → 路由。
+            # 3.3.1) t260903-02 speedup 2: arbitrate ∥ acceptance_walkthrough as a
+            #      parallel fork. Both consume the same mechanical test result from
+            #      different angles with no data dependency, so gathering saves a serial
+            #      stretch. Edge names are always STAGES ids (resolvable by _step);
+            #      arb_acc_parallel is only a phase value for main-loop dispatch.
+            #      Sequence: gather completes → single settle_lane (a tests-fault suite
+            #      change is committed before the re-run) → arbitrate verdict → routing.
             if phase == "arb_acc_parallel":
                 pend = []
                 if not arb_done:
@@ -1447,7 +1569,9 @@ class DevLaneWorkflow:
                 if not acc_done:
                     pend.append("acceptance_walkthrough")
                 if pend:
-                    # KI-024：分叉期活跃边列表进 meta（工单台双显真源；单 stage 字段不动）。
+                    # KI-024: the fork's active edge list goes into meta (the workbench's
+                    # dual-display source of truth; the single stage field stays
+                    # untouched).
                     set_parallel_stages(self.meta, pend)
                     try:
                         rs = await asyncio.gather(*[
@@ -1455,20 +1579,21 @@ class DevLaneWorkflow:
                                 n, arb_ctx if n == "arbitrate" else acc_ctx,
                                 settle=False) for n in pend],
                             return_exceptions=True)
-                    except Exception as e:  # gather 本身不应抛（return_exceptions），防御
+                    except Exception as e:  # gather itself should not raise (return_exceptions); defensive
                         await self._blocked("arb_acc_parallel", "并行分叉异常：%s" % e)
                         continue
                     failed = False
                     for name, r in zip(pend, rs):
                         if isinstance(r, Exception):
                             failed = True
-                            # KI-024 等待期口径（写死）：摘除失败边，同
-                            # parallel_impl_design 分支（失败边由 timeline blocked 显 ✗）。
+                            # KI-024 waiting-period contract (fixed): drop the failed
+                            # edge, same as the parallel_impl_design branch (the failed
+                            # edge shows ✗ through its timeline blocked entry).
                             set_parallel_stages(
                                 self.meta, [n for n in pend if n != name])
                             await self._blocked(name, "agent 活动故障（已重试）：%s: %s"
                                                 % (type(r).__name__, r))
-                            break  # _blocked 内部等 retry_qc/rework；醒来后重算 pend 只补失败边
+                            break  # _blocked waits for retry_qc/rework; after waking, recompute pend and retry only the failed edge
                     if failed:
                         continue
                     for name, r in zip(pend, rs):
@@ -1480,12 +1605,16 @@ class DevLaneWorkflow:
                             acc_res = r
                 if not (arb_done and acc_done):
                     continue
-                # KI-024：两边齐活=离开并行期，删 parallel_stages（后续 verdict 判定/
-                # 格式纠正重跑 arbitrate 边都是单边串行，无双显语义；路由回
-                # run_integration_tests 也该回到单显）。
+                # KI-024: both edges done = leaving the parallel period, delete
+                # parallel_stages (everything after — the verdict judgment, a
+                # format-correction re-run of the arbitrate edge — is single-edge serial
+                # with no dual display semantics; routing back to run_integration_tests
+                # should also return to the single display).
                 set_parallel_stages(self.meta, [])
-                # 单点 settle：先落账（tests-fault 的测试集改动必须先进 commit 再重跑机械
-                # 测试，否则重跑跑在未落账状态、blocked 时工作区留脏），再判 verdict。
+                # Single-point settle: commit first (a tests-fault suite change must be
+                # committed before the mechanical tests re-run, otherwise the re-run
+                # happens on uncommitted state and a blocked leaves a dirty worktree),
+                # then judge the verdict.
                 try:
                     sraw = await workflow.execute_activity(
                         settle_lane,
@@ -1498,7 +1627,7 @@ class DevLaneWorkflow:
                         lane_commits=int(sraw.get("lane_commits") or -1))
                     self._log("并行分叉统一落盘：%s（泳道 commit 数 %s）"
                               % (s.note or "干净", s.lane_commits))
-                except Exception as e:  # 落盘故障：留痕不拦主链，run 前置 0 commit 检查兜底
+                except Exception as e:  # settle failure: noted, main chain unaffected; the run's 0-commit pre-check catches it
                     self._log("settle_lane 故障（不拦主链）：%s: %s" % (type(e).__name__, e))
                 verdict = parse_arbitration_summary(arb_res.summary)
                 if not verdict:
@@ -1507,15 +1636,21 @@ class DevLaneWorkflow:
                         await self._blocked("arbitrate",
                                             "仲裁结论 %d 次缺 verdict= 标记（契约：summary 含 "
                                             "verdict=pass|tests-fault|code-fault）" % arb_format_rounds)
-                        # 票 t260905-10：唤醒即单边重置——arb_res 作废、arb_done 回 False，
-                        # 主循环真重跑 arbitrate 边（prompt 重建：host_ruling 注入的裁决
-                        # 此轮可见）。不重置则 join 吃 memoized 陈旧 arb_res 立即再 blocked、
-                        # arbitrate 永不重 spawn——retry_qc「重跑本步」失效。走查结果留内存不重跑。
+                        # t260905-10: waking resets that single edge — arb_res is
+                        # discarded, arb_done back to False, and the main loop genuinely
+                        # re-runs the arbitrate edge (the prompt is rebuilt, so a ruling
+                        # injected via host_ruling is visible this round). Without the
+                        # reset the join would eat the memoized stale arb_res and block
+                        # again immediately, arbitrate never re-spawning — retry_qc's
+                        # "re-run this step" would be a no-op. The walkthrough result
+                        # stays in memory and is not re-run.
                         arb_done = False
                         arb_res = None
                         continue
-                    # 格式纠正只重跑 arbitrate 边（走查成本高且与格式无关，结果留内存）；
-                    # 该边 settle=True：纠正前可能有测试集改动需落盘。
+                    # The format correction re-runs only the arbitrate edge (the
+                    # walkthrough is expensive and format-independent, its result stays in
+                    # memory); that edge uses settle=True: there may be a suite change
+                    # before the correction that still needs committing.
                     arb_done = False
                     arb_res = None
                     arb_ctx = ("【格式纠正】你的上一份结论缺少 verdict= 标记。请严格输出三态之一："
@@ -1531,7 +1666,7 @@ class DevLaneWorkflow:
                     arb_res = rraw
                     verdict = parse_arbitration_summary(arb_res.summary)
                     if not verdict:
-                        continue  # 下一轮循环再计格式纠正（外层分支入口重判）
+                        continue  # count the format correction on the next loop (re-judged at the outer branch entry)
                 arb_ctx = ""
                 route = integration_route(verdict, tests_rounds, code_rounds)
                 if verdict == "pass":
@@ -1539,18 +1674,21 @@ class DevLaneWorkflow:
                                  evidence=arb_res.evidence or arb_res.summary)
                     self._handoff("arbitrate", "仲裁通过：" + (arb_res.summary or ""),
                                   artifacts=arb_res.deliverables, report=arb_res.report)
-                    # 消费并行走查结果（verdict=pass 才有效；非 pass 已在下方作废）
+                    # Consume the parallel walkthrough result (valid only on
+                    # verdict=pass; non-pass is discarded below)
                     if acc_res is not None and acc_res.status == "ok":
                         self._finish("acceptance_walkthrough", by="integration-agent",
                                      evidence=acc_res.evidence or acc_res.summary)
                         self._handoff("acceptance", "验收报告：" + (acc_res.summary or ""),
                                       artifacts=acc_res.deliverables, report=acc_res.report)
                         phase = "merge_check"
-                        # KI-003：判定+消费大突变簇尾部让路一次（query 排队不撞 8s）
+                        # KI-003: yield once at the tail of the judgment+consume mutation
+                        # cluster (queued queries do not hit 8s)
                         await self._breathe()
                         continue
                     if acc_res is not None:
-                        # 走查边报失败：既有验收打回回路（与旧 acceptance 分支同口径）
+                        # Walkthrough edge reported failure: the existing acceptance
+                        # send-back loop (same contract as the old acceptance branch)
                         acc_rounds += 1
                         prev_ctx = ("【验收走查打回（第 %d 轮）】走查发现代码问题：\n%s"
                                     % (acc_rounds, acc_res.report or acc_res.summary or "")).strip()
@@ -1567,20 +1705,24 @@ class DevLaneWorkflow:
                                                   "验收走查打回（第 %d 轮）" % acc_rounds,
                                                   who="workflow", fallback="arbitrate")
                         continue
-                    # 走查边缺失（异常重跑留痕）：回落旧串行验收补走
+                    # Walkthrough edge missing (left behind by an abnormal re-run): fall
+                    # back to the old serial acceptance to catch up
                     phase = "acceptance"
                     continue
                 if route.startswith("blocked:"):
-                    # KI-061：超限 blocked 唤醒死锁修复——真重跑本步。守卫机制（每进入
-                    # 唯一 patch id 对抗 SDK memo 首评固化）与重放稳定性论证见
-                    # _blocked_over_limit；不重置则唤醒后吃 memoized 仲裁结论立即再
-                    # blocked、arbitrate 永不重 spawn（票 t260907-10 卡闸实锤）。
+                    # KI-061: fixing the wake deadlock of an over-limit blocked state —
+                    # genuinely re-run this step. The guard mechanism (a unique patch id
+                    # per entry, against the SDK's memoized first verdict) and the replay
+                    # stability argument live in _blocked_over_limit; without the reset,
+                    # waking eats the memoized arbitration verdict, blocks again at once,
+                    # and arbitrate is never re-spawned (the t260907-10 stuck gate).
                     if await self._blocked_over_limit(route.split(":", 1)[1]):
                         arb_done = False
                         arb_res = None
                     continue
-                # 非 pass：本轮并行走查结果作废（回路收敛后 run_integration_tests 入口
-                # 单点重置会重走查）——留痕可检索，不静默丢弃。
+                # Non-pass: this round's parallel walkthrough result is discarded (the
+                # single-point reset at the run_integration_tests entry re-walks once the
+                # loop converges) — the note is searchable, never silently dropped.
                 self._log("acceptance 本轮作废：仲裁 %s，回路收敛后重走查" % verdict)
                 acc_res = None
                 acc_done = False
@@ -1605,7 +1747,8 @@ class DevLaneWorkflow:
                                           fallback="arbitrate")
                 continue
 
-            # 3.4) 验收走查（integration 以用户视角走查 → 验收报告，供人审门查阅）
+            # 3.4) acceptance walkthrough (integration walks it from the user's view →
+            #      acceptance report, for the human gate to consult)
             if phase == "acceptance":
                 acc_ctx = (("【UI 截图/走查实证（.sandbar/screenshots/）】\n%s\n" % ui_ctx) if ui_ctx else "")
                 try:
@@ -1633,13 +1776,14 @@ class DevLaneWorkflow:
                     continue
                 self._log("acceptance 打回 → implement（第 %d 轮）" % acc_rounds)
                 impl_done = False
-                # 票 t260901-04：验收失败自动打回必须落 state='rework' timeline 记录，
-                # 工单台打回横幅只消费 state=rework——不走留痕用户就看不到打回原因。
+                # t260901-04: an automatic send-back after a failed acceptance must land
+                # a state='rework' timeline record — the workbench rework banner consumes
+                # only state=rework, so without it the user never sees why.
                 phase = self._auto_rework("implement", "验收走查打回（第 %d 轮）" % acc_rounds,
                                           who="workflow", fallback="acceptance")
                 continue
 
-            # 4) merge_check（程序化，无 agent）
+            # 4) merge_check (programmatic, no agent)
             if phase == "merge_check":
                 self._enter("merge_check")
                 raw = await workflow.execute_activity(
@@ -1672,13 +1816,15 @@ class DevLaneWorkflow:
                     continue
                 red = "；".join("%s: %s" % (c.get("item"), c.get("detail"))
                                 for c in mc.checks if not c.get("green"))
-                # 票 t260826-01 冲突自动消解回路：仅 merge 预演冲突红（mc.conflict）→
-                # 不转 blocked，自动打回 implement 消解（复用 rework 回路，不等 signal）；
-                # 其它红灯维持 blocked 等人。
+                # t260826-01 conflict auto-resolution loop: only a merge dry-run conflict
+                # red (mc.conflict) skips blocked and automatically sends work back to
+                # implement for resolution (reusing the rework loop, no signal needed);
+                # every other red stays blocked waiting for a human.
                 if not mc.conflict:
                     await self._blocked("merge_check", "merge_check 红灯：%s" % (red or mc.error))
                     continue
-                # ---- 冲突类红灯：轮数计数 + 防死循环（blocked 文案锚点统一可 grep）----
+                # ---- conflict-class reds: round counting + loop protection (the blocked
+                #      wording anchors are grep-stable) ----
                 conflict_rounds += 1
                 files_sig = sorted(mc.conflict_files)
                 files_txt = "、".join(files_sig)[:200]
@@ -1699,7 +1845,8 @@ class DevLaneWorkflow:
                           % (conflict_rounds, MAX_CONFLICT_ROUNDS, files_txt))
                 self._handoff("merge_check", "冲突自动消解第 %d 轮：%s"
                               % (conflict_rounds, files_txt))
-                # ① worker 代跑 merge 留冲突现场（agent 沙箱写不了真 .git）
+                # (1) the worker runs merge to leave the conflict scene in place (an agent
+                #     sandbox cannot write a real .git)
                 praw = await workflow.execute_activity(
                     prepare_conflict_resolution,
                     ConflictPrepArgs(ticket_id=self.ticket_id,
@@ -1720,7 +1867,8 @@ class DevLaneWorkflow:
                 if prep.already_clean:
                     self._log("冲突消解 prep：merge 零冲突（竞态兜底），直接回 merge_check 重验")
                     continue
-                # ② agent 解冲突标记（轮次标记，与功能开发/打回返工轮区分开）
+                # (2) the agent resolves the conflict markers (round markers, kept apart
+                #     from feature-development and send-back rework rounds)
                 solve_ctx = (
                     "【冲突消解轮 gen%d/上限%d】本轮不是功能开发：merge_check 检出 merge 预演冲突，"
                     "worker 已在泳道跑过 git merge main，以下文件留有冲突标记"
@@ -1743,8 +1891,10 @@ class DevLaneWorkflow:
                     await self._blocked("implement", "冲突消解第 %d 轮 agent 报失败：%s"
                                         % (conflict_rounds, (res.summary or res.status)[:200]))
                     continue
-                # ③ worker 代落盘合并提交（校验无未解残留；此时段工作区必脏、不跑
-                #    merge_check——prep→implement→settle→回 merge_check 严格串行）
+                # (3) the worker commits the merge on the agent's behalf (verifying no
+                #     unresolved files remain; the worktree is necessarily dirty during
+                #     this window and merge_check is not run — prep→implement→settle→
+                #     back to merge_check is strictly serial)
                 sraw = await workflow.execute_activity(
                     settle_conflict_resolution,
                     ConflictSettleArgs(ticket_id=self.ticket_id,
@@ -1760,9 +1910,10 @@ class DevLaneWorkflow:
                 if not sres.ok:
                     why = ("仍有未解冲突文件：%s" % "、".join(sres.remaining_files[:10])
                            ) if sres.remaining_files else (sres.error or "未知")
-                    # 此时工作区是「合并进行中」态（MERGE_HEAD 在场）——retry_qc 会让
-                    # merge_check 以「工作区脏」红灯再次 blocked（诊断口径错位），文案
-                    # 直接给处置指引
+                    # The worktree is in a "merge in progress" state here (MERGE_HEAD
+                    # present) — a retry_qc would make merge_check block again on a
+                    # "dirty worktree" red (a diagnostic mismatch), so the message gives
+                    # handling instructions directly
                     await self._blocked(
                         "merge_check",
                         "冲突消解第 %d 轮未收敛（worker 代落盘校验未过），转人工处置：%s。"
@@ -1774,11 +1925,12 @@ class DevLaneWorkflow:
                           % (conflict_rounds, sres.commit, len(prep.conflict_files)))
                 self._handoff("implement", "冲突消解第 %d 轮落盘 %s"
                               % (conflict_rounds, sres.commit))
-                # ④ 消解成果直接回 merge_check 重验（机械闸复核工作区/预演）
+                # (4) the resolution goes straight back to merge_check for re-verification
+                #     (the mechanical gate re-checks the worktree and the dry run)
                 phase = "merge_check"
                 continue
 
-            # 5) merge（人审门 → 签字通过 → merge activity 真合并）
+            # 5) merge (human gate → approve signature → the merge activity really merges)
             if phase == "merge":
                 st = self._step("merge")
                 self._enter("merge")
@@ -1808,17 +1960,20 @@ class DevLaneWorkflow:
                         who=sig.who, target_stage="implement",
                         note="人在 merge 打回：%s（签字人 %s）" % (sig.note, sig.who))
                     continue
-                # 签字通过 → 真合并
+                # Approved signature → real merge
                 self.meta["stage_state"] = "running"
                 self._mark("merge", "running", "人审通过（%s），执行 merge" % sig.who)
-                # 票 t260828-08 预跑下一单：必须在 merge activity **之前**——merge 内部
-                # 落账后即拆 worktree（连同本地 .dsh/会话存储），只有此刻 integration
-                # 会话上下文仍健在，DSH_HEADLESS_SESSION 会话复用才成立。
+                # t260828-08 pre-run next ticket: must happen **before** the merge
+                # activity — merge tears down the worktree right after booking (together
+                # with the local .dsh/ session store), and only at this moment is the
+                # integration session context still alive, which is what makes
+                # DSH_HEADLESS_SESSION session reuse work.
                 if workflow.patched(SUGGEST_NEXT_PATCH_ID) and str(self.meta.get("epic") or ""):
                     await self._suggest_epic_next(str(self.meta.get("epic")))
-                # 票 t260902-02 M1-3 三段收口：merge 只落账（defer_teardown），归档
-                # （archive_ticket）与拆泳道（teardown_lane）随后分列——归档 fail-closed
-                # 成功是拆泳道的前提（stage 报告不随拆丢失）。
+                # t260902-02 M1-3 three-step close: merge only books (defer_teardown);
+                # archiving (archive_ticket) and tearing down the lane (teardown_lane)
+                # follow as separate steps — a fail-closed successful archive is the
+                # precondition for tearing down (the stage report must not be lost with it).
                 archive_on = workflow.patched(ARCHIVE_PATCH_ID)
                 raw = await workflow.execute_activity(
                     merge,
@@ -1833,11 +1988,15 @@ class DevLaneWorkflow:
                     merge_commit=str(raw.get("merge_commit") or ""),
                     error=str(raw.get("error") or ""))
                 if not mr.ok:
-                    # 合并失败（典型：签字等待期间别的泳道先进 main 造成冲突）——
-                    # 自动打回 merge_check 重验四项，不转 blocked 空等人：检查红自然
-                    # blocked 等人处置；检查绿回到 merge 人审门重新签字。每轮都要人签字，
-                    # 无死循环风险。直接走 _auto_rework 留痕（不塞 self._rework——塞值会
-                    # 被主循环再走一次 _apply_rework，同一次打回落两条 timeline，票 t260901-04）。
+                    # Merge failure (typically a conflict caused by another lane reaching
+                    # main first while we waited for the signature) — automatically send
+                    # back to merge_check to re-verify the four items rather than blocking
+                    # empty-handed: a red check blocks for a human naturally, a green check
+                    # returns to the merge human gate for a fresh signature. Every round
+                    # needs a human signature, so there is no infinite-loop risk. It goes
+                    # through _auto_rework for the record (not by setting self._rework —
+                    # setting it would make the main loop run _apply_rework a second time
+                    # and land two timeline entries for one send-back, t260901-04).
                     note = "merge 失败（%s）自动打回重验：%s" \
                            % (mr.action, (mr.error or "未知")[:300])
                     self._log(note)
@@ -1845,9 +2004,10 @@ class DevLaneWorkflow:
                                               fallback="merge")
                     continue
                 if archive_on:
-                    # archive_ticket：fail-closed——归档失败=报告会随拆丢失，即转
-                    # blocked、泳道保留（不裸抛：workflow task 异常重试无终态，
-                    # blocked 才有出口）。
+                    # archive_ticket: fail-closed — a failed archive means the report
+                    # would be lost with the teardown, so go blocked and keep the lane
+                    # (no bare raise: a workflow task retrying on an exception never
+                    # reaches a terminal state, only blocked has an exit).
                     try:
                         ares = await workflow.execute_activity(
                             archive_ticket,
@@ -1870,8 +2030,10 @@ class DevLaneWorkflow:
                         continue
                     self._log("工单数据出仓归档完成：%s"
                               % (getattr(ares, "archive_path", "") or "（路径未知）"))
-                    # teardown_lane：拆泳道（清理失败只 warn 回执，泳道残留为可
-                    # 回收垃圾，本体已进 archive.json 清单，不阻塞工单收口）。
+                    # teardown_lane: tear down the lane (a cleanup failure only warns in
+                    # the receipt; lane leftovers are reclaimable garbage, the data itself
+                    # is already listed in archive.json, so closing the ticket is not
+                    # blocked).
                     try:
                         tr = await workflow.execute_activity(
                             teardown_lane,
@@ -1901,9 +2063,9 @@ class DevLaneWorkflow:
                 phase = "done"
                 continue
 
-            raise ValueError("未知阶段 %r" % phase)  # 到不了这里（步链封闭）
+            raise ValueError("未知阶段 %r" % phase)  # unreachable (the step chain is closed)
 
-        # 收口
+        # Close out
         self.meta["status"] = "closed"
         self.meta["stage_state"] = "awaiting"
         self._touch()
@@ -1911,10 +2073,10 @@ class DevLaneWorkflow:
         self._mark("merge", "closed", "workflow 完成")
         return self._snapshot()
 
-    # ---------- signal：人门签字 / rework / retry_qc ----------
+    # ---------- signals: human-gate signature / rework / retry_qc ----------
     @workflow.signal
     def sign(self, sig: Signature) -> None:
-        """人门签字（dev-lane 只有 merge 一道人门）。"""
+        """Human-gate signature (dev-lane has exactly one human gate, merge)."""
         stage = str(self.meta.get("stage") or "")
         if stage != "merge" or self.meta.get("stage_state") != "awaiting-human":
             self.refused.append({"who": sig.who, "want": "sign(%s)" % sig.gate,
@@ -1928,14 +2090,15 @@ class DevLaneWorkflow:
 
     @workflow.signal
     def rework(self, req: ReworkRequest) -> None:
-        """打回重跑：目标步重进（gen+1 → 结果文件换新，agent 真重跑）。"""
+        """Send back for a re-run: the target step re-enters (gen+1 → a fresh result
+        file, the agent genuinely re-runs)."""
         self._rework = req
         self._log("rework 请求：%s → %s（%s）"
                   % (req.note, req.target_stage or "缺省目标", req.who))
 
     @workflow.signal
     def retry_qc(self, who: str) -> None:
-        """blocked 后请求重跑本步。"""
+        """Request a re-run of the current step after a blocked."""
         self._retry_token += 1
         self.timeline.append(
             {"at": self._now_iso(), "stage": str(self.meta.get("stage") or ""),
@@ -1944,11 +2107,14 @@ class DevLaneWorkflow:
 
     @workflow.signal
     def host_ruling(self, req: HostRulingRequest) -> None:
-        """宿主裁决注入（KI-053）：人工意见的正规通道，任何状态可发（含 blocked）。
-        合法裁决 append 进 meta['host_rulings']（build_stage_prompt 注入消费）+ _log
-        留痕；不自动唤醒 blocked——宿主发完裁决再发 retry_qc，下一段 prompt 即见。
-        拒收两态（进 refused，snapshot 可观测）：who/note 空·纯空白、note 超
-        HOST_RULING_NOTE_INPUT_LIMIT（intake 闸，不让超大载荷进事件历史）。"""
+        """Host ruling injection (KI-053): the official channel for human opinions,
+        sendable in any state (blocked included). A valid ruling is appended to
+        meta['host_rulings'] (consumed by build_stage_prompt's injection) + _log; it does
+        not automatically wake a blocked — the host sends the ruling and then retry_qc,
+        and the next prompt picks it up.
+        Two rejection shapes (recorded in refused, observable via snapshot): who/note
+        empty or whitespace-only, and note over HOST_RULING_NOTE_INPUT_LIMIT (an intake
+        gate keeping oversized payloads out of the event history)."""
         who = str(req.who or "").strip()
         note = str(req.note or "").strip()
         if not who or not note:
@@ -1962,13 +2128,14 @@ class DevLaneWorkflow:
             return
         self.meta.setdefault("host_rulings", []).append(
             {"ts": self._now_iso(), "who": who, "note": note})
-        # _log 留痕只进 note 头部（300 字截断+标记）——全文真源在 meta['host_rulings']，
-        # 日志不双份扛大载荷（与 intake 闸同一族取舍）。
+        # The _log record only carries the head of the note (300-char truncation + a
+        # marker) — the full text's source of truth is meta['host_rulings']; the log does
+        # not carry large payloads twice (same family of trade-off as the intake gate).
         log_note = note if len(note) <= 300 else note[:300] + "…（截断，全文见 host_rulings）"
         self._log("宿主裁决注入（%s）：%s" % (who, log_note))
         self._touch()
 
-    # ---------- update：状态维护（与 base.py 同名同载荷，client.py 通吃） ----------
+    # ---------- update: status maintenance (same name and payload as base.py, client.py serves both) ----------
     @workflow.update
     async def update_status(self, status: str, note: str, pending_add: str,
                             book_path: Optional[str]) -> Dict[str, Any]:
@@ -1997,7 +2164,7 @@ class DevLaneWorkflow:
                 "stage": self.meta.get("stage"), "stage_state": self.meta.get("stage_state"),
                 "log_len": len(self.meta.get("log") or [])}
 
-    # ---------- query：只读快照（键与 base.py 同形，工单台/ticket.py 无感消费） ----------
+    # ---------- query: read-only snapshot (same keys as base.py, consumed transparently by the workbench/ticket.py) ----------
     @workflow.query
     def snapshot(self) -> Dict[str, Any]:
         stage = str(self.meta.get("stage") or "")
