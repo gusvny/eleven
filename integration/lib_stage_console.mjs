@@ -53,7 +53,7 @@
 // missing); a seeding failure does not block supply — each scenario's fixture
 // leg names it as env_fail (three-state contract, never fake green).
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -189,6 +189,39 @@ export async function ensureStageConsole({ services = 'full', project = TREE_PRO
 /** Fixture seeding (the design landing point of the header section). Idempotent;
  * failures throw to the caller's warning. */
 async function seedFixtures(st, fixturesHost) {
+  // 0. Per-stage seeding mutex（run S 实锤：播种曾多场景并发，listIds→create
+  //    之间的 advanced-visibility 传播滞后让后到者把已收口（COMPLETED）的
+  //    票同名重建——Temporal 允许 closed 后重用 workflow id——留下 RUNNING
+  //    且无 worker 的残留票：此后每张列表查询为它付 8s 快照查询超时
+  //    （QUERY_TIMEOUT_S），3 票 ≈25.5s，场景行渲染预算被击穿（run L/M/O/
+  //    Q/S 的 fixture 行族 env_fail）。锁内单播种者 + 播种后全票 describe
+  //    核验收口（2c），双保险。锁=目录原子建删；持锁者崩溃会留锁，等待
+  //    有 4min 帽，超时按无锁顶补路径继续（幂等，不裸等）。
+  const SEED_LOCK = path.join(fixturesHost, '.seeding-lock');
+  let lockOwner = false;
+  {
+    const t0 = Date.now();
+    for (;;) {
+      try {
+        mkdirSync(SEED_LOCK);
+        lockOwner = true;
+        break;
+      } catch {
+        if (Date.now() - t0 > 240_000) break;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+  }
+  try {
+    await seedFixturesLocked(st, fixturesHost);
+  } finally {
+    if (lockOwner) {
+      try { rmSync(SEED_LOCK, { recursive: true, force: true }); } catch { /* 留锁不阻断：下一场等满帽后走顶补 */ }
+    }
+  }
+}
+
+async function seedFixturesLocked(st, fixturesHost) {
   // 1. In-container python engine-chain registry (per-key directory format,
   //    schema v1): /fixtures/projects/<key>/project.yaml + in-container
   //    writable project root /fixtures/<key>. Two fixture projects: seedws
@@ -299,12 +332,93 @@ async function seedFixtures(st, fixturesHost) {
   // fixture_ticket_fake.py's header). When tickets are already closed, the
   // drain worker's first poll round exits — seconds.
   const allIds = seedProjects.flatMap((sp) => sp.ids);
-  const drainOut = spawnSync(py, [path.join(HERE, 'fixture_ticket_worker.py'),
-    `127.0.0.1:${st.ports.temporal}`, st.namespace || 'suyou-test',  // naming-compat: namespace name stays with the stage
-    allIds.join(','), '120'],
-    { encoding: 'utf8', env: toolEnv, cwd: WANT_REPO, timeout: 150_000 });
-  if (drainOut.status !== 0) {
-    throw new Error(`fixture ticket drain failed: ${(drainOut.stderr || '').slice(-200)}`);
+  const drain = () => {
+    const drainOut = spawnSync(py, [path.join(HERE, 'fixture_ticket_worker.py'),
+      `127.0.0.1:${st.ports.temporal}`, st.namespace || 'suyou-test',  // naming-compat: namespace name stays with the stage
+      allIds.join(','), '120'],
+      { encoding: 'utf8', env: toolEnv, cwd: WANT_REPO, timeout: 150_000 });
+    if (drainOut.status !== 0) {
+      throw new Error(`fixture ticket drain failed: ${(drainOut.stderr || '').slice(-200)}`);
+    }
+  };
+  drain();
+  // 2c. Post-drain verify（run S 实锤）： visibility 滞后造成的同名重建可能
+  // 发生在任何一次顶补路径里——全票 describe 核验收口，残留 RUNNING 重 drain，
+  // 有界三轮；收口票直读无 worker（fake 头注），这一步把「无 worker 残留票
+  // → 列表 8s/票 查询超时」的根掐死在播种侧。
+  const describeOpen = () => {
+    const out = spawnSync(py, ['-c', [
+      'import sys, json, asyncio',
+      'from temporalio.client import Client',
+      'async def main():',
+      '    c = await Client.connect(sys.argv[1], namespace=sys.argv[2])',
+      '    open_ids = []',
+      '    for tid in sys.argv[3].split(","):',
+      '        try:',
+      '            d = await c.get_workflow_handle(tid).describe()',
+      '            if (d.status.name if d.status is not None else "") != "COMPLETED": open_ids.append(tid)',
+      '        except Exception:',
+      '            open_ids.append(tid)',
+      '    print(json.dumps(open_ids))',
+      'asyncio.run(main())',
+    ].join('\n'), `127.0.0.1:${st.ports.temporal}`, st.namespace || 'suyou-test', allIds.join(',')],  // naming-compat: namespace 名随台走（见 toolEnv 同款）
+      { encoding: 'utf8', env: toolEnv, cwd: WANT_REPO, timeout: 60_000 });
+    if (out.status !== 0) throw new Error(`fixture post-drain describe failed: ${(out.stderr || '').slice(-200)}`);
+    return JSON.parse(String(out.stdout).trim() || '[]');
+  };
+  for (let round = 0; round < 3; round++) {
+    const open = describeOpen();
+    if (open.length === 0) break;
+    console.warn(`[stage-console] fixture drain re-round ${round + 1}: ${open.join(',')} 未收口，重 drain`);
+    drain();
+  }
+  // 2d. Fixture-body stray sweep（run S 实锤）：撞号避让（_uniq_v2 序号递增）
+  // 曾让并发播种者把夹具票建成清单外 id（fixture body 相同）——此类残留
+  // 不在 allIds 内、drain 永不收口、无 worker 使每张列表查询付 8s 超时。
+  // 按 fixture body 特征（集成夹具票前缀，播种专属）精确识别清单外流浪票
+  // 并 terminate：不误伤场景经 UI 自建的票（body 不同）。有界 50 张。
+  // 入参 JSON 的 ensure_ascii 形（\uXXXX），marker 需同形比对才能命中。
+  const markerEsc = FIXTURE_TITLE_PREFIX.replace(/[-￿]/g,
+    (ch) => '\\u' + ch.charCodeAt(0).toString(16).padStart(4, '0'));
+  const sweepOut = spawnSync(py, ['-c', [
+    'import sys, json, asyncio',
+    'from temporalio.client import Client',
+    'async def main():',
+    '    c = await Client.connect(sys.argv[1], namespace=sys.argv[2])',
+    '    keep = set(sys.argv[3].split(",")); marker = sys.argv[4]',
+    '    marker_esc = sys.argv[5]; cap = 50',
+    '    killed = []',
+    '    async for w in c.list_workflows("WorkflowType = \'DevLaneWorkflow\'"):',
+    '        if cap <= 0: break',
+    '        cap -= 1',
+    '        if w.id in keep: continue',
+    '        try:',
+    '            hist = await c.get_workflow_handle(w.id).fetch_history()',
+    '            evs = list(hist.events)',
+    '            if not evs: continue',
+    '            attrs = evs[0].workflow_execution_started_event_attributes',
+    '            body = ""',
+    '            for p in (attrs.input.payloads or []):',
+    '                try:',
+    // run S 实锤：p.data 是 bytes，str() 会把 JSON ensure_ascii 形的反斜杠
+    // 再翻一倍（\\u6d4b → repr 四层），marker/markerEsc 永远失配、清扫静默空转。
+    // 按 utf-8 解码后比对：此时 ensure_ascii 形恰为单层 \uXXXX，与 markerEsc 同形。
+    '                    body += p.data.decode("utf-8", "replace") if isinstance(p.data, bytes) else str(p.data)',
+    '                except Exception: pass',
+    '            if marker not in body and marker_esc not in body: continue',
+    '            if w.status is not None and w.status.name == "RUNNING":',
+    '                await c.get_workflow_handle(w.id).terminate("fixture stray sweep")',
+    '                killed.append(w.id)',
+    '        except Exception:',
+    '            continue',
+    '    print(json.dumps(killed))',
+    'asyncio.run(main())',
+  ].join('\n'), `127.0.0.1:${st.ports.temporal}`, st.namespace || 'suyou-test',  // naming-compat: namespace 名随台走（见 toolEnv 同款）
+    allIds.join(','), FIXTURE_TITLE_PREFIX, markerEsc],  // naming-compat: namespace 名随台走（见 toolEnv 同款）
+    { encoding: 'utf8', env: toolEnv, cwd: WANT_REPO, timeout: 120_000 });
+  if (sweepOut.status === 0) {
+    const killed = JSON.parse(String(sweepOut.stdout).trim() || '[]');
+    if (killed.length) console.warn(`[stage-console] fixture stray sweep terminated: ${killed.join(',')}`);
   }
   // 3. Evidence images (the drawer evidence leg's data source; idempotent =
   // omit files that already exist). The evidence route reads per ticket id
