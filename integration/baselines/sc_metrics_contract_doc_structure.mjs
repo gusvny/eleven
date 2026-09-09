@@ -1,10 +1,14 @@
-// t260901-11 M0 集成测试：契约文档存在性与结构（黑盒文档基线）
-// 验收对象：docs/design/metrics-api契约v1.md
-//  - 存在、frontmatter 齐全（title/category/tags/status/updated）
-//  - 四段结构 Problem → Requirement → Nongoal → Proposal 齐全且有序
-//  - 契约豁免声明在文档开头
-//  - 文末来源标签 `> 来源立项：metrics`
-// 文档缺失 = FAIL（本测试守交付物存在性，不做缺环境放行；三态契约 §7.3 闸内无旧跳过语义）
+// t260901-11 M0 integration test: contract document existence and structure
+// (black-box documentation baseline)
+// Under acceptance: docs/design/metrics-api契约v1.md
+//  - exists, frontmatter complete (title/category/tags/status/updated)
+//  - the four-section structure Problem → Requirement → Nongoal → Proposal
+//    present and ordered
+//  - the contract exemption statement at the top of the document
+//  - the trailing source tag `> 来源立项：metrics`
+// Missing document = FAIL (this test guards deliverable existence and never
+// waves a missing environment through; the three-state contract §7.3 has no
+// legacy skip semantics inside the gate)
 
 import { readFileSync, existsSync } from 'node:fs';
 
@@ -32,7 +36,7 @@ if (existsSync(DOC)) {
     }
   }
 
-  // 四段结构，顺序 Problem → Requirement → Nongoal → Proposal
+  // Four-section structure, ordered Problem → Requirement → Nongoal → Proposal
   const headings = [...text.matchAll(/^#{2,3} (.+)$/gm)].map(m => m[1]);
   const idx = (re) => headings.findIndex(h => re.test(h));
   const iP = idx(/Problem/i), iR = idx(/Requirement/i), iN = idx(/Nongoal/i), iPr = idx(/Proposal/i);
@@ -40,14 +44,15 @@ if (existsSync(DOC)) {
     `Problem=${iP} Requirement=${iR} Nongoal=${iN} Proposal=${iPr}`);
   check('四段有序 P→R→N→Pr', iP < iR && iR < iN && iN < iPr);
 
-  // 契约豁免声明（豁免「Proposal 无 API 名/字段名」自查项）
+  // Contract exemption statement (exempts the self-check item "Proposal has
+  // no API names / field names")
   check('写作指南豁免声明存在',
     /豁免/.test(text) && /字段级冻结/.test(text));
 
-  // 来源标签
+  // Source tag
   check('来源立项标签', text.includes('> 来源立项：metrics'));
 
-  // 契约指针回指（对 UI 规划的三处 delta 之一）
+  // Contract pointer back-reference (one of the three deltas against the UI plan)
   const ui = existsSync(UI) ? readFileSync(UI, 'utf8') : '';
   check('UI 规划含契约指针（字段级契约以契约为准）',
     /metrics-api契约v1/.test(ui), 'UI 规划未引用契约文档');

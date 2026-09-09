@@ -1,9 +1,13 @@
-// t260901-11 M0 集成测试：两文档 schema/枚举冻结同步（防各说各话）
-// 验收对象：
-//  1. 契约文档缓存 schema 行与 UI 规划 §6 schema 行逐字一致（空白归一后比较）
-//     且含 delivery.base 与 delivery_frozen（review 钉死的两个新增字段）
-//  2. epic 枚举 <code|all|none> 两文档一致，epic=none 兜底桶有解释
-//  3. 缓存失效规则（source_version/engine_version/updated_ts）与立项单关键决策 2 一致
+// t260901-11 M0 integration test: the schema/enum freeze stays in sync across
+// the two documents (so they cannot tell different stories)
+// Under acceptance:
+//  1. the contract document's cached schema line is verbatim identical to the
+//     UI plan §6 schema line (compared whitespace-normalized) and contains
+//     delivery.base and delivery_frozen (the two added fields pinned by review)
+//  2. the epic enum <code|all|none> matches across both documents, and the
+//     epic=none fallback bucket is explained
+//  3. the cache invalidation rule (source_version/engine_version/updated_ts)
+//     matches key decision 2 of the proposal ticket
 
 import { readFileSync, existsSync } from 'node:fs';
 
@@ -24,18 +28,21 @@ if (!existsSync(DOC)) {
 const doc = readFileSync(DOC, 'utf8');
 const ui = readFileSync(UI, 'utf8');
 
-// ---- 1. schema 行同步 ----
+// ---- 1. schema line sync ----
 const norm = (s) => s.replace(/\s+/g, '');
 const REQUIRED_FIELDS = [
   'ticket_id', 'template', 'durations', 'by_stage', 'by_round', 'human_wait',
   'delivery', 'base', 'add', 'del', 'commits',
   'tokens', 'by_model', 'in', 'out', 'cacheRead',
   'open', 'delivery_frozen', 'source_version', 'engine_version', 'updated_ts', 'computed_at',
-  // t260903-09 bump：归窗锚点入缓存（派生字段，不入响应）——语义见契约块 3 增补段
+  // t260903-09 bump: the closing-window anchors enter the cache (derived
+  // fields, not part of the response) — semantics in contract block 3's addition
   'created_ms', 'closed_ms',
 ];
 const grabSchema = (text, anchor) => {
-  // 正典字段串：锚点提示词后的第一个反引号代码段（契约文档锚「正典字段串」，UI §6 锚「缓存记录 schema」）
+  // Canonical field string: the first backtick code span after the anchor
+  // phrase (the contract document anchors on 「正典字段串」, UI §6 anchors
+  // on 「缓存记录 schema」)
   const ai = anchor ? text.indexOf(anchor) : 0;
   if (ai < 0) return null;
   const m = text.slice(ai).match(/`([^`]*ticket_id[^`]*)`/);
@@ -56,13 +63,13 @@ for (const f of REQUIRED_FIELDS) {
     `doc=${!!inDoc} ui=${!!inUi}`);
 }
 
-// ---- 2. epic 枚举 ----
+// ---- 2. epic enum ----
 check('契约文档 epic 枚举含 none', /epic=<code\|all\|none>/.test(doc) || /`?none`?[^\n]{0,40}(兜底|未标注)/.test(doc));
 check('UI 规划 epic 枚举含 none', ui.includes('<code|all|none>'),
   'UI 规划 §6 未同步 epic=none（三处 delta 之二）');
 check('epic=none 兜底理由成文', /none[\s\S]{0,120}(兜底|历史无代号|未标注)/.test(doc));
 
-// ---- 3. 失效规则对齐立项单决策 2 ----
+// ---- 3. invalidation rules aligned with proposal decision 2 ----
 for (const f of ['source_version', 'engine_version', 'updated_ts']) {
   check(`失效版本字段 ${f} 在契约中`, doc.includes(f));
 }

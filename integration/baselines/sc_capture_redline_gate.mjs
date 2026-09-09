@@ -11,12 +11,14 @@
 //        records ZERO POST /global-session/open (no write was attempted anywhere);
 //     R2 flag + seed API returns empty cwd -> fast explicit failure naming the cwd
 //        check (blank self-heal can never trigger), NOT a 25s hero-timeout hang;
-//     R3 flag + seed API errors -> loud failure naming 台内造数失败 with the API error;
+//     R3 flag + seed API errors -> loud failure naming the in-lane seeding
+//        failure (台内造数失败) together with the API error;
 //     R4 console unreachable -> loud nonzero exit within budget (no silent hang).
 //
 // Environment: none required from the caller. playwright-core resolves from the main
 // checkout via `git rev-parse --git-common-dir` (same precedent as ticket-validate).
-// ENV_FAIL (exit 2) when playwright/browser unavailable (三态契约 §7.3：缺环境绝不 exit 0).
+// ENV_FAIL (exit 2) when playwright/browser is unavailable (three-state
+// contract §7.3: a missing environment never exits 0).
 // Everything else must PASS on
 // a correct implementation; the R2 cwd assertion lands with this ticket's fix, so this
 // suite is expected to FAIL on pre-fix code (that is the acceptance bar).
@@ -86,7 +88,7 @@ async function browserAvailable() {
 
 // ---------- mock console ----------
 
-/** 假控制台：只应答 capture 造数会碰的三个端点，其余 404。记录每个请求。 */
+/** Mock console: answers only the three endpoints capture seeding touches, 404 for the rest. Logs every request. */
 function startMockConsole(mode) {
   const requests = []; // { method, url }
   let openCalls = 0;
@@ -126,7 +128,8 @@ async function runCapture({ url, allowSeed, outDir }) {
       detached: true,
       env: {
         ...process.env,
-        // 门旗只经 argv 传；env 旗在 R1 必须缺席，显式删除防环境污染
+        // The gate flag travels via argv only; the env flag must be absent in
+        // R1, so it is cleared explicitly to avoid environment pollution.
         SANDBAR_UI_CAPTURE_ALLOW_SEED: allowSeed ? "1" : "",
         SANDBAR_PLAYWRIGHT_MODULE: mainUiCheck ? path.join(mainUiCheck, "node_modules", "playwright-core") : process.env.SANDBAR_PLAYWRIGHT_MODULE || "",
       },
@@ -165,7 +168,8 @@ if (!(await browserAvailable())) {
 } else {
   const work = await mkdtemp(path.join(tmpdir(), "capture-redline-"));
 
-  // R1 只读红线：不带门旗 → 明确报错、且全程零写（mock 请求日志为证）
+  // R1 read-only red line: no gate flag → an explicit error and zero writes
+  // anywhere (proven by the mock's request log)
   {
     const mock = await startMockConsole("ok");
     try {
@@ -178,16 +182,20 @@ if (!(await browserAvailable())) {
     } finally { mock.server.close(); }
   }
 
-  // R2 畸形输入·空 cwd：门旗在位、造数端点回空 cwd → 快速显式失败（非 25s 挂）
+  // R2 malformed input, empty cwd: gate flag present and the seeding endpoint
+  // returns an empty cwd → fast explicit failure (not a 25s hang)
   {
     const mock = await startMockConsole("emptycwd");
     try {
       const r = await runCapture({ url: `http://127.0.0.1:${mock.port}/`, allowSeed: true, outDir: path.join(work, "r2") });
       const namesCwd = /cwd/.test(r.both);
-      // 快速失败预算 90s（t260907-05 arbitrate gen4 修正：原 60s 为空载机估计值，
-      // 共享机器资源竞争下逻辑全真的显式失败实测 77.8s 被误判——预算锚定「显著小于
-      // 120s 挂死兜底、保留非挂死区分度」，四项逻辑断言（exit≠0/点名 cwd/造数请求/
-      // 未超时）原样不动）。
+      // Fast-fail budget is 90s (revised by t260907-05 arbitrate gen4: the
+      // original 60s was an idle-machine estimate, and on a shared box under
+      // resource contention a genuinely-logical explicit failure measured
+      // 77.8s and was misjudged — the budget is anchored on "clearly below
+      // the 120s hang fallback while keeping non-hang distinguishable"; the
+      // four logical assertions (exit≠0 / names cwd / seeding request / no
+      // timeout) are unchanged).
       const fast = r.elapsedMs < 90000;
       const ok = !r.timedOut && r.code !== 0 && namesCwd && fast && mock.openCalls() >= 1;
       record("R2 empty-cwd-fast-fail", ok ? "pass" : "fail",
@@ -195,7 +203,8 @@ if (!(await browserAvailable())) {
     } finally { mock.server.close(); }
   }
 
-  // R3 异常注入·造数端点 500：报错须点名「台内造数失败」并带回 API 错误
+  // R3 fault injection, seeding endpoint 500: the error must name
+  // 「台内造数失败」 and carry the API error back
   {
     const mock = await startMockConsole("error");
     try {
@@ -207,7 +216,8 @@ if (!(await browserAvailable())) {
     } finally { mock.server.close(); }
   }
 
-  // R4 异常注入·控制台不可达：预算内 loud 非零退出，不静默挂死
+  // R4 fault injection, console unreachable: a loud nonzero exit within
+  // budget, never a silent hang
   {
     const port = await closedPort();
     const r = await runCapture({ url: `http://127.0.0.1:${port}/`, allowSeed: false, outDir: path.join(work, "r4") });
