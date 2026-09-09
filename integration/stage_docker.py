@@ -550,10 +550,20 @@ def wait_temporal(port, timeout):
     end-to-end probe with the temporal CLI (operator namespace list — the
     same dial the namespace/SA registration will perform) succeeds. When
     the CLI is unavailable we fall back to TCP-only (the registration step
-    reports that honestly in the JSON afterwards)."""
+    reports that honestly in the JSON afterwards).
+
+    The probe's patience is bounded (PROBE_BUDGET_S, default 180s, 6-9x an
+    idle boot): campaign-3 final verification run I showed an unbounded probe
+    letting a starved boot burn the whole 900s executor cap (SIGKILL loses
+    attribution and skips the scenario's own teardown). If temporal is not
+    CLI-ready within the budget the stage is sick and we fail loud and fast
+    with an env error — strictly better attribution than a silent hang, and
+    strictly more patient than the pre-probe behavior (bare TCP plus a 3x2s
+    SA retry that never outlived a real boot)."""
+    PROBE_BUDGET_S = 180
     t0 = time.time()
     cli = resolve_temporal_cli()
-    while time.time() - t0 < timeout:
+    while time.time() - t0 < min(timeout, PROBE_BUDGET_S):
         if not port_open(port, timeout=1.0):
             time.sleep(0.5)
             continue
@@ -571,7 +581,7 @@ def wait_temporal(port, timeout):
             pass  # not speaking yet — keep waiting
         time.sleep(1.0)
     raise StageError("temporal %ds 内未就绪（127.0.0.1:%d，CLI 端到端探针未过）"
-                     % (timeout, port), kind="env")
+                     % (min(timeout, PROBE_BUDGET_S), port), kind="env")
 
 
 def wait_console(port, timeout):
