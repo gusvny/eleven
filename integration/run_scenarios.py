@@ -6,9 +6,12 @@ Conventions:
 - SCENARIOS holds (name, intent, cmd[, pool]) tuples. intent = the
   user-perceivable behavior/contract the scenario guards; pool is optional:
   "main" (default, the serial main pool) / a named pool (e.g. "ro", the
-  read-only pool running in parallel with main) / "exclusive" (holds the whole
-  run). Within a pool entries run serially to keep order; across pools they
-  run in parallel for throughput. Duplicate intents are forbidden.
+  read-only pool running in parallel with main) / "engine" (docker-stage
+  engine scenarios, concurrent in Phase 2 since campaign 3b) / "exclusive"
+  (runs alone before all pools — since campaign 3b only the
+  shared-temporal ticket writer; see the engine-pool block comment in the
+  registry). Within a pool entries run serially to keep order; across pools
+  they run in parallel for throughput. Duplicate intents are forbidden.
 - Layering: single-component function tests belong to UT (pytest / node at
   source level); this registry only takes cross-component scenarios, frozen
   external contracts, user journeys, and fault-surface adversaries.
@@ -25,7 +28,13 @@ Conventions:
   inside a pool (process-shaped / fixed-port / pidfile-assumption families);
   entries not marked serial run in-pool at SANDBAR_POOL_CONC (default 4)
   lanes. SANDBAR_CONC_POOLS (default "main,ro,browser-free") picks which
-  pools get concurrency. The browser pool was split in speedup campaign 3:
+  pools get concurrency, with an optional per-pool width override ("name" =
+  SANDBAR_POOL_CONC lanes, "name:N" = N lanes). The engine pool deliberately
+  stays OUT of the default list (width 1): its scenarios boot docker stages,
+  and campaign 3b verification showed a width-2 engine already flakes (three
+  runs, three different victims: a 600s stage-up timeout, a fast env fail,
+  and a load product-red) once the concurrent compose-up herd exceeds ~4-6.
+  The browser pool was split in speedup campaign 3:
   9 chain entries keep the shared console and stay strictly serial (registry
   order = execution order; the empty-ledger assertion depends on no
   concurrent writer); the 12 zero-coupling entries (7 self-hosted / no
@@ -103,12 +112,26 @@ SCENARIOS = [
     ("t260904-04-panel-residue-journey",
      "面板持久化残留不锁死面板旅程（t260904-04 A1 验收，灰盒 L3）：持有旧 localStorage 残留（template=other-lane/epic=代号，两选择器均已退役）的用户重开面板——loadPanelState 读时归一（template→dev-lane、epic→all、非退役字段保留）→ 归一查询串过 /metrics 前门 200；对照组证明失败模式真实：未归一残留 template 直打门 400 且 {error,reason} 双人话（旧世界残留=永久 400 空面板）。与 developer L1（归一函数含畸形输入）intent 不同面：本场景守残留→查询串→门的旅程与对照红面",
      "node integration/t260904-04/sc_panel_residue_journey.mjs", "ro"),
+    # ---- engine pool (260909 speedup campaign 3b): the Phase-1 barrier shrunk ----
+    # The "exclusives first" barrier predates every entry (executor seed
+    # a2065b4 fixed the semantics with zero exclusive entries registered; it
+    # was never re-argued). Campaign 3 audited all 11: 10 are project-scoped
+    # (dynamic port-band flock, compose-project teardown, zero fixed ports,
+    # zero daemon-level ops) and overlap safely with every pool — they moved
+    # to the "engine" pool, which runs alongside the other pools in Phase 2
+    # but stays serial within itself (width-2 verification flaked; the
+    # scenarios boot docker stages and the compose-up herd must stay small).
+    # Only t260905-03-period-journey stays
+    # "exclusive": it writes real tickets to the shared default 7233
+    # temporal, and the main-pool decl-gate triggers the same surface
+    # (ticket-face pollution is the documented failure mode). Load caveats
+    # (timing legs, daemon pressure) are recorded on the entries.
     ("t260904-02-ticket-start-anchor",
      "裸入口开票硬闸+隔离台并发隔离端到端（t260904-19 起 docker 测试台双实例，epic 验收1/4/5，KI-032 修复回归）：裸 client.py ticket-start 带 project→Temporal 内 payload workspace.path 绝对路径且锚注册项目主目录/.lane/（worktree 同锚，落仓与执行 worker 解耦）；缺 project/未知 key=创建即拒收且两红因文案互辨；双槽并发开票时间重叠互不见对方工单（ticket-list 双向+跨槽 describe not_found）；审计钩子证被测子进程零连生产 7233/8233（含自证拦截腿）+双台端口面核验（互异/不在禁区 3099/3199/7233/8233/17233/18233）+SANDBAR_TARGET_HOST 指生产构造即拒（红绿自证）；teardown 零残留（down 后 docker ps 无本工程容器）、端口释放、down 幂等二连、同工程名立即 re-up（t260904-19 docker 台语义，容器由 daemon 持有无锁可崩，取舍见 stage_docker 头注）；docker 缺席/镜像缺席=ENV_FAIL exit 2 点名",
-     "python3 integration/t260904-02/sc_ticket_start_anchor.py", "exclusive"),
+     "python3 integration/t260904-02/sc_ticket_start_anchor.py", "engine"),  # engine: two concurrent docker stages, project-scoped teardown
     ("t260904-02-worker-fingerprint-gate",
      "worker 归属指纹 ensure 闸真执行路径（epic 验收2，KI-033 修复回归；断言落公开行为输出非源级 grep——契约不变的实现重构不得打破本场景；t260904-19 起 temporal 台=docker 测试台单实例）：隔离台内真 worker 自报 meta（pid/repo_root/ts，起跑早写）；node.ts 对外契约 export readWorkerMeta/judgeTicketWorkerMeta 三态真值（same/foreign/unknown）+ensureTicketWorkersOnce 依赖注入真调——同仓照旧不重复拉、异仓拒接不 spawn+告警记录含对方仓根/pid/tid 可断言（绝不 kill 别人进程，杀进程归人）、畸形 meta 兼容跳过+reason 可辨不哑巴；TERM 后 worker 退出且自报 meta 清理（资源回收）",
-     "python3 integration/t260904-02/sc_worker_fingerprint_gate.py", "exclusive"),
+     "python3 integration/t260904-02/sc_worker_fingerprint_gate.py", "engine"),  # engine: one docker stage + real worker
     ("t260904-19-stage-docker",
      "docker 测试舞台 L1（t260904-19：全仓唯一搭台方式回归锚，假 docker shim 真跑编排面零 docker 依赖）：档位 flock 原子预留（并发双起各得独立档=验收①回归锚、外部持锁滑档、锁释放复抢=崩溃自释语义）；禁区端口面（生产 3099/7233/8233+缺省台 3199/17233/18233）与内核临时区间构造性排除；畸形输入全电池（project 白名单/端口旋钮非数字越界禁区被占/目录缺失/半指定）逐条点名检查项零副作用；诚实环境红三态（docker 缺席=ENV_FAIL exit 2 点名、镜像缺席点名 build-test-temporal.sh、compose 半途死就地 down 清场零残留）；ensure 幂等（健康复用/半残拆重起）；up→down 零残留+端口释放+幂等二连；bench.py 守卫回归（槽位制退役后保留面）",
      "python3 integration/tests/test_stage_docker.py", "ro"),
@@ -526,7 +549,7 @@ SCENARIOS = [
      "python3 integration/t260904-19/sc_stage_docker_cli_contract.py"),
     ("t260904-19-stage-docker-parallel-zero-residue",
      "双场景并行不互撞+拆台零残留端到端（t260904-19，灰盒 L3，工单验收①④；槽位制退役后并发隔离语义的用户级承接面）：两个 up 进程真同时发车（各自 compose 工程名，temporal-only 档）双台健康、JSON 端口互异、双双 ∉ 生产端口 {3099,7233,8233}；docker ps -a 按 com.docker.compose.project label（compose 公开语义）过滤 A/B 容器集互不相交且 temporal-only 恰 1 容器；拆 A 后 A 端口立即可 bind 且 B 台 TCP 复测仍活（down 爆炸半径恰一个工程）；full 档 console+temporal 双端口真活（helper exit 2=其判环境红不诬产品）；三工程终态零残留、全部用过端口立即 bind 成功（验收④收口）。与 developer L1（档位锁/分配原子性单测）intent 不同层：本条守进程级真并发系统行为，mock 与先后错开都替代不了该形态。资源口径：有意制造并发双台+一次 full 台（dsh 镜像烤制后起台秒级；建镜像才联网，见 build-test-dsh.sh），登记 exclusive 独占执行防与兄弟场景的台互相污染判定面。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
-     "python3 integration/t260904-19/sc_stage_docker_parallel_zero_residue.py", "exclusive"),
+     "python3 integration/t260904-19/sc_stage_docker_parallel_zero_residue.py", "engine"),  # engine: 3 concurrent stages on purpose — daemon-pressure canary (loud ENV_FAIL surface accepted)
 
     # ---- t260905-03 inspection ticket 1 (scheduled quality-check skeleton + test-surface scan) ----
     ("t260905-03-ki051-anchor-replay",
@@ -540,18 +563,18 @@ SCENARIOS = [
      "python3 integration/t260905-03/sc_inspection_decl_gate.py"),
     ("t260905-03-period-journey",
      "手动一期全链用户旅程（t260905-03 验收①主证据，灰盒 L3 真台真票，exclusive）：temp decl 双实例启用+--decl-path/--repo-root 注入夹具（真仓是干净的，不种漂移测不到发现落面；真树零写入红线不破）——种漂移实例：trigger→开票→发现清单落票面（high 带证据+suggested_fix_tickets 逐条 source_inspection=本巡检票号=修复票溯源面）→人门两拍（未签字观察窗内不终态=假门现形即红；运维通道 sign 后收口且发现留存票面=发现/处置审计链不断）；干净实例：零发现心跳票照开照收（全绿期=心跳证明）；两实例票号互异（实例维度不串票）。人门绑定浅：只锚公开 sign 面与终态可见，不锚 snapshot 内部门名。temporalio/共享台缺席=ENV_FAIL 点名（KI-036 家族口径）。登记 exclusive：往共享台写真票，防与兄弟场景互染判定面。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
-     "python3 integration/t260905-03/sc_inspection_period_journey.py", "exclusive"),
+     "python3 integration/t260905-03/sc_inspection_period_journey.py", "exclusive"),  # exclusive: the ONLY barrier entry — writes real tickets to the shared default 7233 temporal (mutex with main-pool decl-gate on the same surface)
     # ---- t260905-02: engine-behavior scenario watch (worker lifecycle / settle self-exit / multi-console dedup; epic follow-up faces) ----
 
     ("t260905-02-worker-lifecycle",
      "工单专属 worker 进程生命周期（t260905-02 行为①，灰盒 L3，docker 舞台）：起=归属 meta（SANDBAR_WORKER_META 指路）限期落盘可解析且形状可辨（pid=真 pid、repo_root=realpath 引擎仓、ts 可解析、version 非空——KI-033 契约数据源面）；退=SIGTERM 限期优雅退出（退出码 0 非崩溃形态）+meta 自清+TERM 二连幂等不炸；异常输入=meta 指向不可写路径（父路径是文件）写失败不阻断启动（best-effort 契约）、起跑痕迹在文（stderr 归属指纹行）、路径上不冒出 meta、TERM 后照常干净退。与 t260904-02-worker-fingerprint-gate 分工：彼=ensure 消费侧三态判定（同仓/异仓/未知），本条=worker 进程侧自身生命周期（TERM 后 meta 被清一面两处观测不互替）；与 t260905-02-ticket-worker-watch-exit 分工：彼=watch 联动自退（自己走），本条=外部信号停（被叫走）。被测子进程零连生产（审计钩子+自证腿）；日志锚兼容正则锚语义（KI-051）",
-     "python3 integration/t260905-02/sc_worker_lifecycle.py", "exclusive"),
+     "python3 integration/t260905-02/sc_worker_lifecycle.py", "engine"),  # engine: one docker stage + real worker (TERM leg)
     ("t260905-02-ticket-worker-watch-exit",
      "收口自退不留尾巴（t260905-02 行为②，灰盒 L3，docker 舞台+真工单）：票收口（workflow 非 RUNNING 终态）→ watch 中的专属 worker 限期自退（退出码 0、收口语义日志在文、meta 自清）——工单收口后不留常驻 worker（260824 A 案：专属 worker 生命周期跟工单走）；孤儿收养自退=宿主死（worker 被收养 ppid=1）→ 自退不留无主 worker（85222 版本投毒教训；收养目标 ppid 随环境为系统状态条件腿，收养不到时按 N/A 折算）；查询失败不误退=watch 指向不存在 workflow → worker 持续存活 ≥ 两轮 watch 周期且留下「查询失败下一轮再试」痕迹（宁可多守一轮，不许票没守到人先走）。watch 生效前提两 env 同置（SANDBAR_WATCH_WORKFLOW 置时 watch 循环才存在，ppid 守护在循环体内）；watch 间隔旋钮 SANDBAR_WATCH_INTERVAL_SEC 提速（「≥两轮」按日志实际轮次判：旋钮生效 ~4s 收工、失效自然回落 30s 慢档 90s 窗内同判，语义不弱化）。与 t260904-02-worker-fingerprint-gate（ensure 消费侧）与 t260905-02-worker-lifecycle（外部信号停）intent 不同面",
-     "python3 integration/t260905-02/sc_ticket_worker_watch_exit.py", "exclusive"),
+     "python3 integration/t260905-02/sc_ticket_worker_watch_exit.py", "engine"),  # engine: one docker stage + worker + watch-timing legs (load-flake watch surface)
     ("t260905-02-console-duplicate-guard",
      "多 console 同槽防重与辨析文案（t260905-02 行为③，灰盒 L2/L3，docker 舞台+node 直跑 node.ts）：server 单例=同槽已有监听者第二 console 静默认领（不重复 spawn 不报错）；worker 单例=daemon pidfile 在册双 console 均不重复拉起且 dispose 不动在册他人 worker（资源归属）；工单 worker pidfile 抢注互斥=同 tid pidfile 位被占（'wx' 确定性必败注入：目录占位，非时序竞态）→ 辨析文案在文且点名 tid（「已被别的实例抢先注册，停掉重复 spawn」语义）、重复 child 当场 SIGTERM 回收（日志 fd 持有者归零观测）、无成功 spawn 文案（不两开花）；dispose 收口=幂等二连不抛、定时器清空（node 自然退出=事件循环空，挂死=超时红）。与 t260904-02-worker-fingerprint-gate 分工：彼=ensureTicketWorkersOnce 纯决策面三态（spawn 可注入），本条=apply 全真路径双 console 防重（纯决策面不含 'wx' 互斥分支，替代不了）。被测 python 子进程零连生产（apply 内部 cli/ensure 的 TARGET_HOST 由子进程 env 钉舞台；审计钩子+自证腿）",
-     "python3 integration/t260905-02/sc_console_duplicate_guard.py", "exclusive"),
+     "python3 integration/t260905-02/sc_console_duplicate_guard.py", "engine"),  # engine: writes real repo server/engine/data (no pool scenario reads that dir)
 
     # ---- t260905-01: the two settle questions (distillation trigger + reverse-sync gate, doc-lifecycle ticket 2) ----
 
@@ -582,7 +605,7 @@ SCENARIOS = [
 
     ("t260905-10-host-ruling-injection",
      "blocked 态宿主裁决注入→arbitrate 下轮 prompt 可见（KI-053 端到端，灰盒 L3，docker 舞台+真工单专属 worker）：SANDBAR_AGENT_CMD recorder 桩（spawn 单点全口径覆盖，含 arbitrate 直 spawn 面）把引擎递来的 prompt 原样落账本=mock 端点收到的 messages 等价观测面；桩回执恒缺 verdict= 标记→三次格式纠正 blocked(arbitrate)（引擎既有契约路径）；blocked 态 client op=ruling 注入（只入账不唤醒）+retry_qc 唤醒→arbitrate gen+1 轮 prompt 含裁决文本与裁决人、注入前各轮不带（对照）；全文兜底 meta.host_rulings 与事件历史 log 留痕经 query 可查（{ts,who,note} 形状、ts 留痕）；拒收两态=超大 note intake 闸拒收进 refused 不入账（不进 Temporal 事件历史）+纯空白 note 绕过 client 直发信号层拒收（钉 workflow 侧契约非仅 client 包装）；多条裁决累积全可见且旧→新排序（最新贴着现在）；被测子进程零连生产（审计钩子）。断言面=recorder 账本/快照，不锚 prompt 小节标题文案（实现副本）。实现段落地前红属预期（host_ruling 信号缺席=点名红），arbitrate/merge 期必须绿；与 developer L1（build_stage_prompt 纯函数单测）intent 不同面：本条守 signal→meta→prompt 全链真 Temporal 编排行为",
-     "python3 integration/t260905-10/sc_host_ruling_injection.py", "exclusive"),
+     "python3 integration/t260905-10/sc_host_ruling_injection.py", "engine"),  # engine: real workflow + ticket-private queue, POLL 60/180 timing legs
     ("t260905-10-torn-session-quarantine",
      "帧好内撕裂会话检疫隔离+同 id 新建走得通（t260905-10 面②，05 号 260906 两次卡死同型，灰盒 L3）：zstd 帧完整但 JSONL record 中截断→spawn 前检疫挪隔离区留档；好帧内非 JSON 行同判；健康对照组=多行合法 JSONL×多帧拼接（真实形态）不检疫（防「见档就隔离」反向事故）且同批健康会话不连坐；同 id 原路径重写合法档再检疫不动（恢复旅程）；挪不动（隔离路径不可建）不抛坏档留原位（既有兜底）；空文件/二进制既有 zstd -t 路径回归；裸空行容忍不判撕裂（合法 JSONL 容忍面，防误隔离）。断言面=文件系统结果，零网络零 docker。实现段落地前红属预期（逐行试析缺席=好帧内撕裂不挪=红），arbitrate/merge 期必须绿；与 developer L1（单函数腿）intent 不同面：本条守会话档族整批判定与恢复旅程",
      "python3 integration/t260905-10/sc_torn_session_quarantine.py", "ro"),
@@ -642,7 +665,7 @@ SCENARIOS = [
      "node integration/t260907-07/sc_epic_anchor_same_source.mjs", "ro"),
     ("t260907-07-epic-cli-ticket-start",
      "开票入口 epic 校验项目感知用户路径（t260907-07 验收①②端到端，docker 测试台单实例）：外部项目 ticket-start 关联其主目录立项单成功（同名 gap-b+异名各自通过）、engine 桶行为不变（同名+异名照常）；负路径连接前拒收零 Temporal 依赖真跑——epic 确缺文案带该项目实际目录、跨桶异名不误指 engine 目录、未知 project 硬闸拒收（KI-032 面回归）。被测 env 显式清 SANDBAR_EPICS_DIR 防宿主泄漏改判锚，显式 SANDBAR_TARGET_HOST 指台（绝不连生产红线）；docker/镜像/SDK/隔离台库缺席=ENV_FAIL exit 2；实现落地前红属预期，arbitrate/merge 期必须绿",
-     "python3 integration/t260907-07/sc_epic_cli_ticket_start.py", "exclusive"),
+     "python3 integration/t260907-07/sc_epic_cli_ticket_start.py", "engine"),  # engine: one docker stage
     ("t260907-07-epic-next-prepare-project",
      "立项预跑读档案项目感知接线（t260907-07 同票接线面=merge 收口预跑不再对外部项目静默跳过）：prepare_epic_next 带 project 读到该项目主目录立项全文（exists+全文匹配+state_key 可算）；不串桶（engine 异名对 external 档案缺失）；project 空=引擎锚兜底（真仓只读缺档软失败）且 env SANDBAR_EPICS_DIR 优先于兜底命中（自测语义）；档案缺失/代号形状非法 exists=False 防穿。_epic_ticket_rows 桩替 workflow 边界（selfcheck E 先例）；temporalio SDK 缺席=ENV_FAIL exit 2；实现落地前红属预期，arbitrate/merge 期必须绿；与 selfcheck E 段（env 夹具单点自测）intent 不同面",
      "python3 integration/t260907-07/sc_epic_next_prepare_project.py", "ro"),
@@ -681,10 +704,10 @@ SCENARIOS = [
      "node integration/t260907-11/sc_wb_anchor_evidence_family.mjs"),
     ("t260908-01-ki061-wake-revive",
      "仲裁超限 blocked 两相复活旅程（t260908-01，KI-061 验收①②的用户可感知面，真 docker 台双 worker 切换）：相一 SANDBAR_TEST_DISABLE_KI061=1（create_plan v2 S3 契约开关=模拟修复前 worker）＋tests-fault 桩驱动 6 轮超限 blocked→宿主注入裁决（host_ruling）→retry_qc 唤醒→断言吃 memoized 仲裁结论立即再 blocked 且 arbitrate 零 respawn（t260907-10 02:12 症状留证）；相二换修复 worker 再唤醒→断言 arbitrate 真 respawn（账本新 spawn、gen 递增）、prompt 含宿主终裁（host_rulings 注入消费面）、verdict=pass 后票离开 arbitrate blocked。与 t260905-10 sc_host_ruling_injection（KI-053 格式纠正路径、单 worker、畸形 ruling 拒收）intent 不同面；与 developer selfcheck（L2 time-skipping 两相闸）不同层不互替；实票复活归宿主发 retry（红线），本条隔离台等价复刻。断言面=stub 账本（agent 实收 prompt）/snapshot，不锚 prompt 文案；docker/舞台缺件=ENV_FAIL exit 2；merge_check 及其后不在范围。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
-     "python3 integration/t260908-01/sc_ki061_overlimit_wake_revive.py", "exclusive"),
+     "python3 integration/t260908-01/sc_ki061_overlimit_wake_revive.py", "engine"),  # engine: docker stage + two-generation worker switch, timing-sensitive legs
     ("t260908-01-ki061-replay-compat",
      "在飞 workflow 重放兼容契约（t260908-01，KI-061 验收②机械面，044c692 裸改重放炸 99809 的同族回归闸，真 docker 台）：先制造修复前形态在飞 history（DISABLE=1 worker 6 轮超限 blocked＋retry_qc 唤醒一次 settle→再 blocked＝t260907-10 现形态），replay_check 只读回放两腿——腿一 pre-fix 形态 history（含唤醒穿越点 patched 求值）用修复后代码回放 ok=true（命令序列零分歧）；腿二修复 worker 复活（arbitrate respawn、KI-061 marker 入 history）后再回放 ok=true（marker notify 先行→同位 True 的消费路径确定性）。与场景①分工：彼锁 live 复活旅程、本条锁重放确定性；与 developer selfcheck（L2 环境内两相）不同层。replay_check 零写（list/fetch only）；docker/舞台缺件=ENV_FAIL exit 2。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
-     "python3 integration/t260908-01/sc_ki061_inflight_replay_compat.py", "exclusive"),
+     "python3 integration/t260908-01/sc_ki061_inflight_replay_compat.py", "engine"),  # engine: docker stage + worker replay (read-only replay legs)
 ]
 
 CMD_TIMEOUT = 900
@@ -710,9 +733,11 @@ def _run_entry(entry):
 def main() -> int:
     """Run the registry as pools (host-ordered t260902 pool split): an entry
     may carry an optional fourth element — None/absent = the "main" pool;
-    "ro"/any other string = a named pool; "exclusive" = holds the whole run
-    (runs alone first). Pools run in parallel; within a pool it is strictly
-    serial (order and reproducibility). Cross-pool ordering may interleave —
+    "ro"/any other string = a named pool; "exclusive" = runs alone before all
+    pools (since campaign 3b only the shared-temporal ticket writer stays
+    there; the other 10 former exclusives are the concurrent "engine" pool).
+    Pools run in parallel; within a pool it is strictly serial (order and
+    reproducibility). Cross-pool ordering may interleave —
     the engine/tools parse line by line and do not care about order.
 
     Three-state exit-code contract (t260904-12, final ruling section 7.3: no
@@ -727,9 +752,12 @@ def main() -> int:
     In-pool concurrency (260909 speedup campaign round 2): entries marked
     "serial" in a pool run first (relative order preserved), then the rest run
     at SANDBAR_POOL_CONC lanes; SANDBAR_CONC_POOLS picks the pools that get
-    concurrency (default main,ro,browser-free; the browser chain pool shares
-    one console and stays strictly serial — registry order is its contract);
-    SANDBAR_POOL_CONC=1 restores the old semantics."""
+    concurrency, "name:N" pins a per-pool width (default main,ro,browser-free
+    — engine stays serial-by-default: its scenarios boot docker stages and a
+    width-2 herd already flaked under load, see the module docstring; the
+    browser chain pool shares one console and stays strictly serial —
+    registry order is its contract); SANDBAR_POOL_CONC=1 restores the old
+    semantics."""
     import threading
     from concurrent.futures import ThreadPoolExecutor
     ran = passed = failed = env_failed = 0
@@ -750,10 +778,18 @@ def main() -> int:
         conc_width = max(1, int(os.environ.get("SANDBAR_POOL_CONC", "4")))
     except ValueError:
         conc_width = 4
-    conc_pools = set(x.strip() for x in
-                     os.environ.get("SANDBAR_CONC_POOLS",
-                                    "main,ro,browser-free").split(",")
-                     if x.strip())
+    # "name" -> SANDBAR_POOL_CONC lanes; "name:N" -> N lanes; absent -> 1.
+    conc_pools = {}
+    for x in os.environ.get(
+            "SANDBAR_CONC_POOLS",
+            "main,ro,browser-free").split(","):
+        name, _, w = x.strip().partition(":")
+        if not name:
+            continue
+        try:
+            conc_pools[name] = max(1, int(w)) if w else conc_width
+        except ValueError:
+            conc_pools[name] = conc_width
 
     def _drain(entries, pool_name):
         """Run one pool: serial entries strictly one after another (relative
@@ -765,7 +801,7 @@ def main() -> int:
             _emit(e, pool_name)
         if not concs:
             return
-        width = conc_width if pool_name in conc_pools else 1
+        width = conc_pools.get(pool_name, 1)
         if width <= 1:
             for e in concs:
                 _emit(e, pool_name)
@@ -841,7 +877,8 @@ def main() -> int:
         rp.write_text(_json.dumps(
             {"ran": ran, "pass": passed, "fail": failed, "env_fail": env_failed,
              "wall_s": round(wall, 1), "generated": _dt.datetime.now().isoformat(),
-             "conc_width": conc_width, "conc_pools": sorted(conc_pools),
+             "conc_width": conc_width,
+             "conc_pools": sorted("%s:%s" % kv for kv in conc_pools.items()),
              "timings": timings}, ensure_ascii=False, indent=1), encoding="utf-8")
         print("报告落档：%s" % rp, flush=True)
     except OSError:
