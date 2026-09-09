@@ -1,20 +1,31 @@
 #!/usr/bin/env python3
-"""集成测试机制自测（t260831-02）：写集生命周期 / 机械测试步 / 三态仲裁路由。
+"""Integration-test mechanism selfcheck (t260831-02): write-set lifecycle /
+mechanical test steps / three-state arbitration routing.
 
-**离线**：零 Temporal server / 零模型调用；真 subprocess 只跑 trivial 命令（true/false），
-真 git 只在 tmp 隔离仓库。不碰任何真实工单与泳道。
+Offline: zero Temporal server, zero model calls; real subprocesses only run
+trivial commands (true/false), real git only inside an isolated tmp repo. No
+real ticket or lane is touched.
 
-覆盖：
-  A. parse_arbitration_summary：三态提取 / 缺标记返回空 / 多余文本不干扰；
-  B. integration_route：pass / tests-fault 与 code-fault 的轮次上限路由（≤5 放行、>5 blocked）；
-  C. _run_manifest（tmp 泳道真跑）：manifest 缺失 / 坏 JSON / 空数组 → error；
-     正常两条（一过一败）→ 计数与明细；缺 cmd 条目 → 记失败；
-  D. shared 契约：AgentStageArgs.skip_settle 默认 False；build_suggest_next_prompt
-     含 write_set 字段（与 host 冷起 prompt 对齐）；
-  E. dev_lane 源码结构断言：并行分叉 gather、两 edge settle=False、汇合 settle_lane、
-     run 前置 0 commit 检查、arbitrate 走 integration_route。
+Coverage:
+  A. parse_arbitration_summary: three-state extraction / empty string when the
+     marker is missing / extra text does not interfere;
+  B. integration_route: pass / tests-fault and code-fault round-limit routing
+     (<=5 re-runs, >5 blocked);
+  C. _run_scenarios (real run in a tmp lane): missing manifest / bad JSON /
+     empty array -> error; a normal two-entry run (one pass, one fail) ->
+     correct counts and details; an entry missing cmd -> recorded as failure;
+  D. shared contracts: AgentStageArgs.skip_settle defaults to False;
+     build_suggest_next_prompt contains the write_set field (aligned with the
+     host cold-start prompt);
+  E. dev_lane source-structure assertions: the parallel fan-out gather, both
+     edges settle=False, the join settle_lane, the pre-run 0-commit check,
+     arbitrate routed through integration_route;
+  F. parse_review_plan_verdict / review_plan_route (t260903-02 three-state
+     conditional release);
+  G. parallel fan-out session mutex (t260903-02 item 2: two stages of the same
+     role must use different session ids).
 
-退出码 0=全绿；非 0=有红灯（stderr 打明细）。
+Exit code 0 = all green; non-zero = at least one red (details on stderr).
 """
 
 from __future__ import annotations
@@ -81,7 +92,7 @@ ok(integration_route("???", 0, 0).startswith("blocked:"), "未知 verdict → bl
 section("C _run_scenarios（tmp 泳道真跑项目声明执行器）")
 
 
-def _run_scenarios_sync(wt, tid):  # t260903-09 后 _run_scenarios async 化，selfcheck 同步桥
+def _run_scenarios_sync(wt, tid):  # after t260903-09 _run_scenarios became async; sync bridge for this selfcheck
     import asyncio as _a
     return _a.run(_run_scenarios(wt, tid))
 from agent_activities import _run_scenarios, settle_lane  # noqa: E402
@@ -111,16 +122,19 @@ ok(len(r.details) == 2 and r.details[0]["exit"] == 0 and r.details[1]["exit"] ==
    and "输出尾段" in r.details[1]["output_tail"],
    "明细逐条带 exit 与尾段")
 
-# t260904-12 三态窗口口径：ENV_FAIL（exit 2）在乙段（verify_lane env_fail 计数）
-# 落地前表现为 err 态（verify_lane 不解析 ENV_FAIL 行 → ran=0 且 rc≠0）——闸仍红
-# 不穿洞，归因交 arbitrate（dev_lane prompt 固定问句），乙段后转机械 env_fail 计数。
+# t260904-12 three-state window wording: before the section-2 change (verify_lane
+# counting env_fail), an ENV_FAIL (exit 2) showed up as an err state (verify_lane
+# did not parse ENV_FAIL lines -> ran=0 and rc!=0) — the gate still went red with
+# no hole, attribution left to arbitrate (the dev_lane prompt's fixed question);
+# after section 2 it became a mechanical env_fail count.
 (tmp / "integ_stub.py").write_text(
     "print('ENV_FAIL [环境缺件] exit=2')\n"
     "print('    ENV_FAIL: playwright-core 缺失（KI-036 族）')\n"
     "print('SCENARIOS ran=1 pass=0 fail=0 env_fail=1 na=0')\n"
     "import sys\nsys.exit(2)\n", encoding="utf-8")
 r = _run_scenarios_sync(tmp, "t-x")
-# t260904-12 乙段落地后：verify_lane 解析 ENV_FAIL 行——纯环境红=ran 计入+env_fail=1+green=false（非 err）。
+# after the t260904-12 section-2 change: verify_lane parses ENV_FAIL lines — a
+# pure environment red counts into ran with env_fail=1 and green=false (not err).
 ok(r.error == "" and r.ran == 1 and r.env_fail == 1 and not (r.green if hasattr(r, "green") else True) or
    (r.error == "" and r.ran == 1 and r.env_fail == 1),
    "纯环境红套件（exit 2）→ env_fail=1 计入、green=false（乙段机械化归因）")
@@ -135,7 +149,8 @@ _mixed_green = (r.error == "" and not getattr(r, "details", []) == [])
 r2 = _run_scenarios_sync(tmp, "t-x")
 ok((r2.error or "") == "" and r2.passed == 1 and r2.failed == 0,
    "混合套件：PASS 计入、闸判非绿（rc=2 → green=False 由 verify_lane 保证）")
-# t260904-12 乙段：supply 装配（失败=err 点名 need；畸形=fail-closed）与纯环境红 env_fail 计数。
+# t260904-12 section 2: supply assembly (failure = err naming the need; malformed
+# = fail-closed) and the pure-environment-red env_fail count.
 (tmp / "verify.yaml").write_text(
     "schema: v1\nlanes:\n  code:\n    write_allow:\n      - .\n"
     "integration:\n  cmd: python3 integ_stub.py\n  supply:\n"
@@ -171,8 +186,10 @@ section("D2 settle_lane 真泳道直测（主仓库真 worktree 夹具，用后�
 import agent_activities  # noqa: E402
 from shared import REPO_ROOT  # noqa: E402
 _wt = Path(tempfile.mkdtemp(prefix="sandbar-settle-lane-wt-"))
-# 泳道/沙箱内跑不了 git worktree add（写不了主仓 .git）——与集成场景同款：夹具
-# 建不出来就响亮 SKIP，不算红灯（host 机直跑仍全量覆盖）。
+# git worktree add cannot run inside a lane/sandbox (no write access to the main
+# repo's .git) — same as the integration scenarios: when the fixture cannot be
+# built, SKIP loudly instead of counting a red (running on the host machine
+# still covers everything).
 _gw = subprocess.run(["git", "-C", str(REPO_ROOT), "worktree", "add", str(_wt),
                       "-b", "selfcheck-settle-lane"], capture_output=True)
 if _gw.returncode != 0:
@@ -209,7 +226,7 @@ ok("if not workflow.patched(INTEG_LOOP_PATCH_ID):" in src
    and "旧链尾（仅存量 workflow 重放可达" in src,
    "旧链尾仅存量重放可达（双路径，重放安全）")
 
-# t260903-02 泳道提速②③：新分支结构与重放安全断言
+# t260903-02 lane-speed items 2 and 3: new-branch structure and replay-safety assertions
 ok("REVIEW_CONDITIONAL_PATCH_ID = " in src and "ARB_ACC_PARALLEL_PATCH_ID = " in src,
    "②③两个新 patch 门已声明（同构布尔门，重放安全）")
 ok('if phase == "arb_acc_parallel":' in src, "仲裁∥走查并行分支在")

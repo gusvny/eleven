@@ -1,32 +1,46 @@
 #!/usr/bin/env python3
-"""selfcheck_ki061_wake_reset —— KI-061 仲裁超限 blocked 唤醒重跑（260908 票）两相主闸。
+"""selfcheck_ki061_wake_reset — the KI-061 two-phase main gate: waking an
+over-limit blocked ticket to re-run (ticket 260908).
 
-真 SDK 实例（temporalio.testing.WorkflowEnvironment.start_local 本地 test server——
-time-skipping 环境双 worker 切换会 wedge（任务调度后无人认领），实测弃用；本地 test
-server 非真部署 server、零模型/零真 agent——全部活动 stub）跨 worker 代码切换，
-区分「真修」与「假绿」：
+Runs against a real SDK instance (temporalio.testing.WorkflowEnvironment.
+start_local local test server — the time-skipping environment wedges when two
+workers switch, tasks stay unclaimed after scheduling, so it was dropped in
+practice; the local test server is not a real deployment server, zero model /
+zero real agent — every activity is a stub) and switches worker code across
+two phases to separate a real fix from a false green:
 
-  相一（复刻 t260907-10 02:12 卡死）：worker 代码带 SANDBAR_TEST_DISABLE_KI061=1
-    （等价修复前行为）驱动到测试集 6 轮超限 blocked，发 retry_qc 唤醒一次，
-    断言 settle→再 blocked、arbitrate 无 respawn（复现 memoized 死循环）。
-  相二（等价换修复后 worker）：同环境起新 worker（开关关=修复启用），先注入
-    host_ruling 宿主终裁再发 retry_qc，断言：
-      ① arbitrate 真 respawn（第 7 次调用，gen 递增）——memo 毒化未吞掉重置；
-      ② prompt 含宿主终裁（host_rulings 注入面消费）；
-      ③ verdict=pass 走到 merge 人审门（过闸）且 workflow task 全程不 failing。
+  Phase one (reproduce the 02:12 stuck state of t260907-10): worker code runs
+    with SANDBAR_TEST_DISABLE_KI061=1 (equivalent to pre-fix behavior) until the
+    test set exceeds the 6-round limit and goes blocked; then one retry_qc wake
+    signal is sent, asserting settle -> blocked again and no arbitrate respawn
+    (the memoized infinite loop is reproduced).
+  Phase two (equivalent to the fixed worker): start a new worker in the same
+    environment (switch off = fix enabled), inject a host_ruling first, then
+    send retry_qc, asserting:
+      1. arbitrate really respawns (7th call, gen increments) — the poisoned
+         memo did not swallow the reset;
+      2. the prompt carries the host ruling (the host_rulings injection surface
+         is consumed);
+      3. verdict=pass reaches the merge human gate (passes the gate) and no
+         workflow task fails along the way.
 
-回归位：rework 唤醒不触发重置（主循环顶处理）——由相二前置 rework 探针覆盖不可行
-（rework 会改 phase），改为单测层断言（见 tests/test_t260908_01_ki061_wake_reset.py）。
+Regression slot: a rework wake must not trigger the reset (handled at the top of
+the main loop) — covering this with a rework probe before phase two is not
+possible (rework changes the phase), so it is asserted at the unit-test layer
+instead (see tests/test_t260908_01_ki061_wake_reset.py).
 
-退出码 0=全绿；非 0=有红灯（stderr 打明细）。资源回收：env/worker 全部 async with
-终态回收；stub 零临时文件。
+Exit code 0 = all green; non-zero = at least one red (details on stderr).
+Resource cleanup: env/worker are all reclaimed via async-with finalizers; the
+stubs create zero temp files.
 
-照 pattern 声明（selfcheck_epic_next / selfcheck_integ_loop）：零模型零真 agent（stub
-回执）、退出码契约、无 wall-clock 时序断言（轮询 poll + 超时护栏）——均已带过来；
-唯一的 pattern 例外是本地 test server（主闸必需，260908 票 review 附条件①已声明，
-降级路径见方案 v2 §3-S3）。
+Pattern declaration (same as selfcheck_epic_next / selfcheck_integ_loop): zero
+model, zero real agent (stub receipts), the exit-code contract, no wall-clock
+timing assertions (poll + timeout guardrails only) — all carried over; the only
+pattern exception is the local test server (required by the main gate,
+declared in the 260908 review condition 1, degradation path in plan v2
+section 3-S3).
 
-用法（engine 目录）：.venv/bin/python selfcheck_ki061_wake_reset.py
+Usage (engine directory): .venv/bin/python selfcheck_ki061_wake_reset.py
 """
 
 from __future__ import annotations
@@ -64,7 +78,7 @@ RULING_NOTE = "宿主 260908 终裁：终裁生效，判 pass 过闸"
 STAGE_OK = "ok"
 
 
-# ---------- 活动桩（全部零 IO，回执=结果 dataclass 内存形态） ----------
+# ---------- activity stubs (all zero IO; receipts are in-memory dataclass shapes) ----------
 
 @activity.defn(name="prepare_workspace")
 async def stub_prepare_workspace(args) -> WorkspacePrepResult:
@@ -143,7 +157,8 @@ async def stub_suggest_next(args) -> StageResult:
 
 
 def _agent_stub(step_id: str, script):
-    """agent 段桩工厂：按 script(step) 回 StageResult，并录 prompt/gen。"""
+    """Factory for agent-stage stubs: returns StageResult per script(step) and
+    records the prompt/gen."""
 
     @activity.defn(name=step_id)
     async def stub(args) -> StageResult:
@@ -153,26 +168,26 @@ def _agent_stub(step_id: str, script):
 
 
 def _script(step_id: str, args) -> StageResult:
-    if not isinstance(args, dict):  # 无类型签名桩收到 dict 载荷（dataclass 序列化形态）
+    if not isinstance(args, dict):  # the untyped stub receives the dict payload (dataclass serialization shape)
         args = vars(args)
     if step_id == "arbitrate":
         CTRL["arb_calls"] += 1
         CTRL["arb_prompts"].append(str(args.get("prompt") or ""))
         CTRL["arb_gens"].append(int(args.get("gen") if args.get("gen") is not None else -1))
         n = CTRL["arb_calls"]
-        if n <= 5:  # 1..5 轮：tests-fault 在限内，回路重跑
+        if n <= 5:  # rounds 1..5: tests-fault within the limit, the loop re-runs
             return StageResult(status=STAGE_OK,
                                summary="verdict=tests-fault 第 %d 轮测试集仍红，迭代" % n,
                                report="r", evidence="e")
-        if n == 6:  # 第 6 轮：票面「6 轮超限」口径（route 用自增前轮数，此轮仍迭代）
+        if n == 6:  # round 6: the ticket's "6 rounds over limit" wording (route uses the pre-increment round count, so this round still iterates)
             return StageResult(status=STAGE_OK,
                                summary="verdict=tests-fault 第 6 轮超限",
                                report="r", evidence="e")
-        if n == 7:  # 第 7 轮：tests_rounds=6>5 → route=blocked 转人工
+        if n == 7:  # round 7: tests_rounds=6>5 -> route=blocked, hand to a human
             return StageResult(status=STAGE_OK,
                                summary="verdict=tests-fault 第 7 轮（route=blocked）",
                                report="r", evidence="e")
-        # 第 7 次（修复后唤醒重跑）：采纳宿主终裁判 pass
+        # 7th call (post-fix wake re-run): adopt the host ruling and judge pass
         return StageResult(status=STAGE_OK,
                            summary="verdict=pass 采纳宿主终裁，过闸",
                            report="r", evidence="e")
@@ -197,7 +212,7 @@ STUBS = [
       "arbitrate", "acceptance_walkthrough")]
 
 
-# ---------- 断言框架 ----------
+# ---------- assertion framework ----------
 
 PASS = 0
 FAIL = 0
@@ -214,7 +229,8 @@ def ok(cond: bool, label: str) -> None:
 
 
 async def wait_for(handle, cond_fn, timeout_s: float, label: str) -> bool:
-    """轮询 snapshot 断言（无 wall-clock 时序耦合，超时只作护栏）。"""
+    """Poll the snapshot for a condition (no wall-clock timing coupling; the
+    timeout is only a guardrail)."""
     loop = asyncio.get_event_loop()
     deadline = loop.time() + timeout_s
     snap = None
@@ -238,19 +254,23 @@ async def main() -> int:
             title="KI-061 两相主闸", lane="dir",
             workspace={"type": "dir", "path": "/tmp/ki061-selfcheck-ws"},
             write_set=[],
-            no_file_changes=True,  # 跳「泳道 0 commit」机械闸（stub 无真泳道）
+            no_file_changes=True,  # skip the "lane has 0 commits" mechanical gate (the stub has no real lane)
             user_request="selfcheck", body="selfcheck")
         handle = await env.client.start_workflow(
             dev_lane.DevLaneWorkflow.run, inp, id="ki061-selfcheck", task_queue=Q)
 
-        # ---- 相一：复刻 02:12 卡死（开关开=修复前行为）----
-        # 注意：Temporal worker 的 workflow sandbox 会独立重导入 dev_lane，对模块属性
-        # 打猴补丁传不进去——只能走环境变量（sandbox import 期读定，worker 构造期生效）。
+        # ---- phase one: reproduce the 02:12 stuck state (switch on = pre-fix behavior) ----
+        # note: the Temporal worker's workflow sandbox re-imports dev_lane on its
+        # own, so monkeypatching module attributes does not reach it — the only
+        # channel is environment variables (read at sandbox import time, effective
+        # at worker construction).
         os.environ["SANDBAR_TEST_DISABLE_KI061"] = "1"
         async with Worker(env.client, task_queue=Q, workflows=[dev_lane.DevLaneWorkflow],
                           activities=STUBS):
-            # 并行分支期 meta.stage=arb_acc_parallel；route 判定用自增前轮数 → 第 7 次调用才 blocked
-            # 并行分叉期 meta.stage=分叉内最后进入的单边（acceptance_walkthrough）
+            # during the parallel branch meta.stage=arb_acc_parallel; the route decision
+            # uses the pre-increment round count -> only the 7th call goes blocked;
+            # during the fan-out meta.stage is the last single-sided stage entered
+            # (acceptance_walkthrough)
             def _stuck(s):
                 return s["stage_state"] == "blocked" and s["stage"] in (
                     "arbitrate", "arb_acc_parallel", "acceptance_walkthrough")
@@ -260,7 +280,7 @@ async def main() -> int:
             ok(n0 == 7, "相一：arbitrate 调了 7 次（1..6 迭代 + 第 7 轮 route=blocked），实际 %d" % n0)
 
             await handle.signal("retry_qc", "selfcheck")
-            await asyncio.sleep(1.5)  # 观察窗：期望 settle→再 blocked，而非 respawn
+            await asyncio.sleep(1.5)  # observation window: expect settle -> blocked again, not a respawn
             n1 = CTRL["arb_calls"]
             snap = await handle.query(dev_lane.DevLaneWorkflow.snapshot)
             ok(n1 == n0, "相一：retry_qc 唤醒后 arbitrate 无 respawn（%d→%d，memoized 复现卡死）"
@@ -268,11 +288,11 @@ async def main() -> int:
             ok(_stuck(snap), "相一：唤醒后 settle→再 blocked（02:12 形态复现）snap=%s/%s"
                % (snap["stage"], snap["stage_state"]))
 
-        # ---- 相二：换修复后 worker（开关关=修复启用），先终裁再唤醒 ----
+        # ---- phase two: switch to the fixed worker (switch off = fix enabled), ruling before wake ----
         os.environ.pop("SANDBAR_TEST_DISABLE_KI061", None)
         async with Worker(env.client, task_queue=Q, workflows=[dev_lane.DevLaneWorkflow],
                           activities=STUBS):
-            await asyncio.sleep(1.0)  # 等 worker2 poller 就绪再发信号
+            await asyncio.sleep(1.0)  # wait for worker2's poller before signalling
             await handle.signal("host_ruling",
                                 HostRulingRequest(who="host", note=RULING_NOTE))
             await handle.signal("retry_qc", "selfcheck")

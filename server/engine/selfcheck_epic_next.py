@@ -1,23 +1,32 @@
 #!/usr/bin/env python3
-"""selfcheck_epic_next —— 立项下一单预跑（t260828-08）自测。
+"""selfcheck_epic_next — selfcheck for the epic-next pre-run (t260828-08).
 
-零 Temporal server / 零模型 / 零真 agent spawn（stub + monkeypatch + 固定 fixture）。
+Zero Temporal server, zero model, zero real agent spawns (stub + monkeypatch +
+fixed fixtures).
 
-覆盖：
-  A. epic_state_key：sorted "id:closed|open" 行 sha1（顺序无关 / 当前票强制 closed——
-     t260828-08 review 第 2 条口径，与 host stateKeyFromRows 双算同一字面量互检）；
-  B. build_suggest_next_prompt：含结果文件路径 / 立项全文 / 工单汇总 / 模板白名单 /
-     三态契约样例（ok/done/failed）；
-  C. _parse_suggest_result 三态校验：ok 放行 / done / failed 透传 / 非对象 / 缺字段 /
-     未知 status（畸形输入用例）；C2（t260901-01）write_set 透传与清洗九种故障模式
-     + done/failed 不受影响 + ticket.py allow_empty_write_set 源码锁；
-  D. _consume_suggest_result：ok 写缓存 / 幻觉模板 id 拒收不落缓存 / done 落缓存 /
-     failed 不落缓存 / 非法 JSON 不落缓存 / 空 state_key 不落缓存 / 缓存内容 schema；
-  E. prepare_epic_next（monkeypatch _epic_ticket_rows + SANDBAR_EPICS_DIR 临时 fixture）：
-     档案读入 / exists=False 降级 / 代号形状非法降级 / state_key 强制当前票 closed；
-  F. suggest_next stub 路径（SANDBAR_SUGGEST_STUB）：ok/done/invalid 三变体判读与缓存。
+Coverage:
+  A. epic_state_key: sha1 of sorted "id:closed|open" rows (order-independent /
+     current ticket forced closed — the review-item-2 wording of t260828-08;
+     cross-checked against the host's stateKeyFromRows computing the same
+     literal on both sides);
+  B. build_suggest_next_prompt: contains the result-file path / full epic text /
+     ticket summary / template whitelist / three-state contract samples
+     (ok/done/failed);
+  C. _parse_suggest_result three-state validation: ok passes / done / failed
+     pass through / non-object / missing fields / unknown status (malformed
+     input cases); C2 (t260901-01) write_set pass-through and cleaning, nine
+     failure modes + done/failed unaffected + ticket.py allow_empty_write_set
+     source lock;
+  D. _consume_suggest_result: ok writes the cache / hallucinated template id
+     refused, no cache write / done cached / failed not cached / invalid JSON
+     not cached / empty state_key not cached / cache content schema;
+  E. prepare_epic_next (monkeypatched _epic_ticket_rows + SANDBAR_EPICS_DIR
+     temporary fixture): archive read / exists=False degradation / illegal code
+     shape degraded / state_key forces the current ticket closed;
+  F. suggest_next stub path (SANDBAR_SUGGEST_STUB): ok/done/invalid variants and
+     their cache behavior.
 
-退出码 0=全绿；非 0=有红灯（stderr 打明细）。
+Exit code 0 = all green; non-zero = at least one red (details on stderr).
 """
 
 from __future__ import annotations
@@ -65,8 +74,9 @@ def section(t: str) -> None:
 # ---------------------------------------------------------------- fixtures
 ROWS = [{"id": "t-demo-01", "status": "closed", "closed": True},
         {"id": "t-demo-02", "status": "open", "closed": False}]
-# 与 workbench smoke/epic-precache.mjs 的 EXPECT_STATE_KEY 同一 fixture 同一字面量：
-# 两侧实现各算一次，谁漂移谁红灯（t260828-08 review 第 2 条口径：当前票强制 closed）。
+# Same fixture and same literal as EXPECT_STATE_KEY in workbench smoke/epic-precache.mjs:
+# both sides compute it independently; whoever drifts goes red (t260828-08 review
+# item 2: the current ticket is forced closed).
 EXPECT_STATE_KEY = "703be9fa425d23a851b7aa8c060dad56f1570b37"
 EPIC_MD = "# 立项单：demo-epic\n\n| 字段 | 值 |\n| --- | --- |\n| 状态 | 已立项（执行中） |\n"
 
@@ -95,7 +105,7 @@ ok(epic_state_key([{"id": "t1"}], "t1") == epic_state_key([{"id": "t1", "closed"
 section("B. build_suggest_next_prompt")
 md = build_suggest_next_prompt(
     code="demo-epic", epic_markdown=EPIC_MD, tickets_summary='[{"id": "t-demo-02"}]',
-    workflows=[{"id": "dev-lane", "name": "开发泳道"}],  # 260904 起模板面仅 dev-lane
+    workflows=[{"id": "dev-lane", "name": "开发泳道"}],  # since 260904 the template surface is dev-lane only
     result_path="/tmp/r.json")
 ok("/tmp/r.json" in md, "含结果文件路径（agent 唯一写点）")
 ok("demo-epic" in md and EPIC_MD in md, "含立项代号与全文")
@@ -105,7 +115,7 @@ ok("开新 dev-lane 票" in md and "main 侧直跑验证" in md, "两类出路�
 ok('"status":"ok"' in md and '"status":"done"' in md and '"status":"failed"' in md,
    "三态契约样例齐（与 host buildSuggestPrompt 的两态差异点）")
 
-# ---------------------------------------------------------------- C. 三态校验
+# ---------------------------------------------------------------- C. three-state validation
 section("C. _parse_suggest_result 三态校验（含畸形输入）")
 kind, sug, err = _parse_suggest_result({"status": "ok", "workflow": "dev-lane", "title": "t",
                                         "body": "b", "rationale": "r"})
@@ -120,7 +130,7 @@ ok(_parse_suggest_result({"status": "ok", "workflow": "dev-lane"})[1] is None, "
 ok(_parse_suggest_result({"status": "whatever"})[1] is None, "未知 status 拒收")
 ok(_parse_suggest_result(None)[1] is None, "null 拒收")
 
-# ------------------------------------------------- C2. write_set 透传与清洗（t260901-01）
+# ------------------------------------------------- C2. write_set pass-through and cleaning (t260901-01)
 section("C2. _parse_suggest_result write_set 透传（t260901-01，清洗口径=_valid_write_set_entry）")
 _WS_OK = "server/engine/client.py"
 
@@ -155,10 +165,12 @@ k3, s3, _ = _parse_suggest_result({"status": "done", "summary": "s", "write_set"
 ok(k3 == "done" and "write_set" not in s3, "done 形态不受影响（不带 write_set）")
 k4, s4, _ = _parse_suggest_result({"status": "failed", "reason": "x", "write_set": ["x.py"]})
 ok(k4 == "failed" and "write_set" not in s4, "failed 形态不受影响（不带 write_set）")
-# 建议口清洗 vs 建票口拒收：口径差异声明（建票口 validate_write_set_args 拒收不清洗）
+# suggest-side cleaning vs create-side rejection: the wording difference is
+# declared here (create-side validate_write_set_args rejects instead of cleaning)
 okr, _, err = shared.validate_write_set_args(["ok.py", "/bad"], False)
 ok(not okr and "非法条目" in err, "建票口仍拒收不清洗（口径未漂移）")
-# ticket.py 源码锁（t260901-01，模式同 selfcheck_ui_acceptance）：schema 与 payload 均接声明
+# ticket.py source lock (t260901-01, same pattern as selfcheck_ui_acceptance):
+# both the schema and the payload wiring are asserted
 _ticket_src = (POC.parent.parent / "tools" / "ticket.py").read_text("utf-8")
 ok("'allow_empty_write_set': {'type': 'boolean'" in _ticket_src,
    "ticket.py schema 已声明 allow_empty_write_set")
@@ -168,12 +180,12 @@ _poc_src = (POC / "client.py").read_text("utf-8")
 ok("validate_write_set_args(" in _poc_src and "allow_empty_write_set" in _poc_src,
    "引擎口校验单点仍在 client.py")
 
-# ---------------------------------------------------------------- D. 判读 + 缓存
+# ---------------------------------------------------------------- D. interpretation + cache
 section("D. _consume_suggest_result 判读与缓存")
 _d = _P(_tf.mkdtemp(prefix="sandbar-selfcheck-en-"))
-shared.REPO_ROOT  # noqa: B018  （确保模块已载）
+shared.REPO_ROOT  # noqa: B018  (make sure the module is loaded)
 _orig_root = agent_activities.REPO_ROOT
-agent_activities.REPO_ROOT = _d  # 缓存写入重定向到临时目录
+agent_activities.REPO_ROOT = _d  # redirect cache writes to the temp directory
 
 
 def _cache_of(code: str):
@@ -214,7 +226,8 @@ ok(_consume_suggest_result(_d / "r_failed.json", a).status == "failed", "failed 
 ok(_consume_suggest_result(_d / "r_bad.json", a).status == "failed", "非法 JSON 判读软失败")
 ok(epic_next_precache_path(_d, "demo-epic").is_file(), "合法结果落缓存")
 
-# 空 state_key / 空 epic：校验过但不落缓存（防脏键污染命中口径）
+# empty state_key / empty epic: validated but not cached (dirty keys must not
+# pollute the hit wording)
 (_d / "r_ok2.json").write_text(_json.dumps(
     {"status": "ok", "workflow": "dev-lane", "title": "t2"}), "utf-8")
 res = _consume_suggest_result(_d / "r_ok2.json", _args(str(_d), epic="", state_key=""))
@@ -225,10 +238,12 @@ agent_activities.REPO_ROOT = _orig_root
 section("E. prepare_epic_next（fixture + monkeypatch 查询）")
 _epics = _P(_tf.mkdtemp(prefix="sandbar-selfcheck-en-epics-"))
 (_epics / "demo-epic.md").write_text(EPIC_MD, "utf-8")
-# t260907-07：prepare 改走 shared.resolve_epics_dir（env SANDBAR_EPICS_DIR 现读优先），
-# 夹具改 env 注入（与 ：16 docstring「SANDBAR_EPICS_DIR 临时 fixture」对齐）；不再
-# monkeypatch agent_activities.EPICS_DIR（该绑定已无消费点）。空 project 在 env
-# 判定之后才兜底引擎锚，故夹具对下面全部构造（均不传 project）生效。
+# t260907-07: prepare now goes through shared.resolve_epics_dir (env
+# SANDBAR_EPICS_DIR read first), so the fixture is injected via env (matching
+# the ":16 docstring" wording "SANDBAR_EPICS_DIR temporary fixture"); we no
+# longer monkeypatch agent_activities.EPICS_DIR (nothing consumes that binding
+# anymore). An empty project falls back to the engine anchor only after the env
+# check, so the fixture applies to every construction below (none pass project).
 _orig_epics_env = os.environ.get("SANDBAR_EPICS_DIR")
 os.environ["SANDBAR_EPICS_DIR"] = str(_epics)
 _orig_rows = agent_activities._epic_ticket_rows
@@ -243,7 +258,7 @@ prep = asyncio.run(prepare_epic_next(EpicNextPrepArgs(ticket_id="t-demo-02", epi
 ok(prep.exists and prep.epic_markdown == EPIC_MD, "立项全文读入")
 ok(prep.state_key == EXPECT_STATE_KEY, "prepare 侧 state_key 含当前票强制 closed 口径")
 ok(prep.tickets == ROWS, "关联工单行内联返回（workflow 内零 IO）")
-agent_activities._epic_ticket_rows = _fake_rows  # 保持（下面换实现再还原）
+agent_activities._epic_ticket_rows = _fake_rows  # keep it (a different impl is swapped in below, then restored)
 
 
 async def _boom(epic: str):
