@@ -1,36 +1,54 @@
 #!/usr/bin/env python3
-"""inspection_scan —— 测试面扫描器（inspection epic 票①第一实例，t260905-03）。
+"""inspection_scan — the test-face scanner (inspection epic ticket 1, first instance,
+t260905-03).
 
-红线：巡检只出报告与开票建议，绝不直接改码——本模块是纯读静态面，零写操作。
+Red line: inspection only produces reports and ticket-opening suggestions, it never
+modifies code — this module is a pure-read static surface with zero write operations.
 
-四项扫描（severity 判据按 review_plan 附条件意见 C1 定死）：
-  S1 duplicate   重复场景检测：SCENARIOS 的 name+intent 分词重叠度（Jaccard）
-                 ≥ DUP_JACCARD → med。
-  S2 guard-anchor 守卫锚→生产方在场性核验（KI-051 常驻化，独立扫描项）：提取守卫
-                 场景源码断言的字面锚，反向索引生产方源码的**措辞在场性**（不是
-                 文件/函数存在性）。模板感知分层：
-                   ① 字面精确命中 → 在场；
-                   ② 组合片段：锚拆片段，任一生产方文件单行内全片段命中 → 在场；
-                   ③ 核心片段（长度≥3）覆盖率=0（字面与组合片段双缺，且生产方
-                     上下文已定位到）→ **high（确证漂移）**；
-                   ④ 核心片段覆盖率>0 但组合失败（相似度悬置）→ med 交人审。
-                 生产方上下文定位不到（守卫源码无现存文件引用）→ 锚跳过记 meta，
-                 不出发现——防「无法定位=误报满屏」。
-                 KI-051 判定话术：本项是**静态面**，不依赖场景真跑，天然绕开
-                 env_fail 捂真红（KI-051 被环境红捂数日的根因）——这正是它存在的
-                 理由。真实 capture.mjs 案（新旧文案共享前缀「隔离台」）落④ med
-                 同样必报；夹具复刻纯重写形态走③ high 支路（见测试与场景）。
-  S3 stale-ref   过时断言：守卫引用的文件路径不存在（已挪/已删）→ high；
-                 引用的行号超出目标文件行数 → high（行号越界）。
-  汇总          零发现=heartbeat true（全绿期=零发现票作心跳证明）。
+Four scans (severity criteria fixed by review_plan conditional-pass comment C1):
+  S1 duplicate   duplicate-scenario detection: token overlap (Jaccard) of SCENARIOS
+                 name+intent ≥ DUP_JACCARD → med.
+  S2 guard-anchor guard-anchor → producer wording-presence verification (KI-051 made
+                 permanent, as a standalone scan): extract the literal anchors asserted
+                 by guard scenario source and reverse-index the **presence of the
+                 wording** in producer source (not file/function existence).
+                 Template-aware tiers:
+                   (1) exact literal hit → present;
+                   (2) combined fragments: split the anchor into fragments; if any single
+                     line of any producer file contains all of them → present;
+                   (3) core-fragment (length ≥ 3) coverage = 0 (both the literal and the
+                     combined fragments missing, with the producer context located) →
+                     **high (confirmed drift)**;
+                   (4) core coverage > 0 but the combination fails (similarity
+                     suspended) → med, handed to human review.
+                 When the producer context cannot be located (the guard source references
+                 no existing file), the anchor is skipped and noted in meta, producing no
+                 finding — preventing "cannot locate = a screen full of false positives".
+                 KI-051 rationale: this scan is a **static surface** and does not depend
+                 on scenarios actually running, so it naturally sidesteps env_fail
+                 covering up a true red (the root cause of KI-051 being masked by
+                 environment reds for days) — that is exactly why it exists. The real
+                 capture.mjs case (old and new copy sharing the prefix "隔离台") lands in
+                 tier 4 med and is still reported; a fixture replicating a pure rewrite
+                 takes the tier 3 high branch (see the tests and scenarios).
+  S3 stale-ref   stale assertions: a file path referenced by a guard no longer exists
+                 (moved/deleted) → high; a referenced line number exceeds the target
+                 file's line count → high (line number out of range).
+  Summary        zero findings = heartbeat true (an all-green period opens a
+                 zero-finding ticket as heartbeat proof).
 
-输入面（全部可注入，供单测桩复现；畸形输入不崩，逐项降级记 meta/finding）：
-  - 场景清单：integration/run_scenarios.py 的 SCENARIOS——用 ast 只取字面量，
-    不 import 执行器（零副作用）；畸形元组 → S1 级 med finding 点名。
-  - 守卫源码：integration/**/sc_*.py|.mjs|.ts|.tsx|.js（凡 sc_ 必登记的既有纪律）。
-  - 生产方源码：PRODUCER_ROOTS 下文本源文件 + 守卫源码里引用到的现存文件。
+Input surface (all injectable for unit-test stubs; malformed input never crashes, it
+degrades item by item into meta/findings):
+  - Scenario manifest: SCENARIOS from integration/run_scenarios.py — read with ast as
+    literals only, never importing the runner (zero side effects); a malformed tuple → a
+    named S1-level med finding.
+  - Guard source: integration/**/sc_*.py|.mjs|.ts|.tsx|.js (the existing "every sc_ file
+    must be registered" discipline).
+  - Producer source: text source files under PRODUCER_ROOTS plus existing files
+    referenced from guard source.
 
-CLI（运维/场景通道）：stdout 一律单行 JSON {ok, result|error}（与 client.py 同契约）。
+CLI (ops/scenario channel): stdout always emits a single line of JSON {ok, result|error}
+(same contract as client.py).
     python3 inspection_scan.py --repo-root <repo> [--scenarios-path <run_scenarios.py>]
 """
 
@@ -48,8 +66,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 SCAN_NAMES = ("duplicate", "guard-anchor", "stale-ref")
 SEVERITY_ORDER = {"high": 0, "med": 1, "low": 2}
-DUP_JACCARD = 0.55          # S1 阈值（真仓标定记录见票报告；调阈值=改行为，须带用例）
-_WINDOW_ALL = 1.0           # 组合片段：单行内全片段命中
+DUP_JACCARD = 0.55          # S1 threshold (calibration notes from the real repo live in the ticket report; changing it changes behavior, so it needs test cases)
+_WINDOW_ALL = 1.0           # combined fragments: all fragments hit within a single line
 STOPWORDS = {"the", "a", "an", "of", "for", "and", "with", "by", "to", "in", "on", "vs", "at", "is", "be"}
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _PATH_RE = re.compile(r"(?:\.\./|\./)?[A-Za-z0-9_][A-Za-z0-9_\-./]*\.(?:py|mjs|ts|tsx|js|sh|md|ya?ml|json)\b")
@@ -59,12 +77,14 @@ GUARD_EXTS = {".py", ".mjs", ".ts", ".tsx", ".js"}
 
 
 class ScanError(Exception):
-    """扫描无法开始（仓库根/清单缺位）——fail-closed 点名，不静默返回空。"""
+    """The scan cannot start (repo root/manifest missing) — fail-closed and named, never a
+    silent empty return."""
 
 
 @dataclass
 class Finding:
-    """一条发现（发现清单落票面的最小单元：分严重度带证据）。"""
+    """One finding (the smallest unit that lands on the ticket face: severity with
+    evidence)."""
 
     scan: str
     severity: str                # high | med | low
@@ -84,14 +104,15 @@ class Finding:
 
 
 def finding_id(scan: str, subject: str) -> str:
-    """确定性 id（sha1 短摘要）——同一发现跨期稳定，供修复票引用与去重。"""
+    """Deterministic id (a short sha1 digest) — stable for the same finding across
+    periods, for fix-ticket references and dedupe."""
     return "%s:%s" % (scan, hashlib.sha1(("%s|%s" % (scan, subject)).encode("utf-8")).hexdigest()[:10])
 
 
 def summarize(findings: List[Finding]) -> Dict[str, Any]:
     counts = {"high": 0, "med": 0, "low": 0}
     by_id: Dict[str, Finding] = {}
-    for f in findings:                       # 同一发现（同 id）跨锚点重复出现只记一条
+    for f in findings:                       # the same finding (same id) recurring across anchors is recorded once
         by_id.setdefault(finding_id(f.scan, f.subject), f)
     deduped = list(by_id.values())
     for f in deduped:
@@ -101,11 +122,11 @@ def summarize(findings: List[Finding]) -> Dict[str, Any]:
 
 
 # ========================================================================================
-# S1 duplicate —— 重复场景检测（锚点/断言重叠度）
+# S1 duplicate — duplicate-scenario detection (anchor/assertion overlap)
 # ========================================================================================
 
 def tokenize(text: str) -> set:
-    """确定性分词：ascii 词 + CJK 二元组；停用词剔除。"""
+    """Deterministic tokenization: ascii words + CJK bigrams; stopwords removed."""
     tokens: set = set()
     low = (text or "").lower()
     ascii_words = re.findall(r"[a-z0-9][a-z0-9_\-]{1,}", low)
@@ -128,8 +149,9 @@ def jaccard(a: set, b: set) -> float:
 
 
 def scan_duplicate_scenarios(entries: List[Dict[str, Any]]) -> Tuple[List[Finding], Dict[str, Any]]:
-    """entries: [{name, intent, cmd}]（畸形入口由 parse_scenarios 保证形状后仍可带错）。
-    返回 (findings, meta)。O(n²) 两两比对，n≤百级。"""
+    """entries: [{name, intent, cmd}] (malformed entries are shape-normalized by
+    parse_scenarios but may still carry errors). Returns (findings, meta). O(n²) pairwise
+    comparison, n at the scale of hundreds."""
     meta: Dict[str, Any] = {"compared": 0}
     findings: List[Finding] = []
     norm = []
@@ -153,11 +175,12 @@ def scan_duplicate_scenarios(entries: List[Dict[str, Any]]) -> Tuple[List[Findin
 
 
 # ========================================================================================
-# 场景清单解析（ast 只取字面量，不 import 执行器）
+# Scenario manifest parsing (ast takes literals only, the runner is never imported)
 # ========================================================================================
 
 def parse_scenarios(path: Path) -> Tuple[List[Dict[str, str]], List[str]]:
-    """从 run_scenarios.py 抽 SCENARIOS 三元组/四元组；畸形项进 problems（不崩）。"""
+    """Extract the SCENARIOS triples/quadruples from run_scenarios.py; malformed items go
+    into problems (no crash)."""
     problems: List[str] = []
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -176,25 +199,26 @@ def parse_scenarios(path: Path) -> Tuple[List[Dict[str, str]], List[str]]:
     entries: List[Dict[str, str]] = []
     for idx, el in enumerate(raw.elts):
         try:
-            parts = [ast.literal_eval(x) for x in el.elts]  # 非元组/含非常量 → ValueError
+            parts = [ast.literal_eval(x) for x in el.elts]  # non-tuple / non-constant member → ValueError
             if not isinstance(el, ast.Tuple):
                 raise ValueError("条目不是元组")
             if len(parts) < 3:
                 raise ValueError("字段数 %d<3" % len(parts))
             entries.append({"name": str(parts[0]), "intent": str(parts[1]),
                             "cmd": " ".join(str(p) for p in parts[2:])})
-        except Exception as e:  # noqa: BLE001——畸形清单条目逐条降级，不让单项毁全扫
+        except Exception as e:  # noqa: BLE001 — each malformed manifest entry degrades on its own; one bad item must not ruin the whole scan
             problems.append("SCENARIOS[%d] 畸形（%s）" % (idx, e))
     return entries, problems
 
 
 # ========================================================================================
-# 守卫锚提取 + S2/S3
+# Guard-anchor extraction + S2/S3
 # ========================================================================================
 
 def extract_string_literals(source: str, ext: str) -> List[str]:
-    """从守卫源码抽字符串字面量：.py 走 ast（语法错→ScanError 由上层逐文件降级）；
-    其余扩展名走引号正则（mjs/ts/js 的模板串/单双引号）。"""
+    """Pull string literals out of guard source: .py goes through ast (a syntax error →
+    ScanError, degraded per file by the caller); other extensions go through a quoting
+    regex (mjs/ts/js template strings and single/double quotes)."""
     if ext == ".py":
         vals: List[str] = []
         for node in ast.walk(ast.parse(source)):
@@ -208,9 +232,11 @@ def extract_string_literals(source: str, ext: str) -> List[str]:
 
 
 def is_anchor_literal(s: str) -> bool:
-    """守卫断言的候选字面锚（判据收紧防误报满屏，真仓 260905 标定）：
-    够长、含 ≥2 个 CJK 字符（UI 文案形态，本仓锚皆中文）；
-    排除模板插值（${…}=守卫自身报错文案）、多行模板串、选择器/路径/URL 形态。"""
+    """Candidate literal anchors for guard assertions (tightened criteria to avoid a
+    screen full of false positives; calibrated on the real repo 260905):
+    long enough, contains ≥2 CJK characters (UI-copy shape; this repo's anchors are all
+    Chinese); excludes template interpolation (${…} = the guard's own error text),
+    multi-line template strings, and selector/path/URL shapes."""
     s = s.strip()
     if len(s) < 6 or "\n" in s:
         return False
@@ -218,24 +244,26 @@ def is_anchor_literal(s: str) -> bool:
         return False
     if len(CJK_RE.findall(s)) < 2:
         return False
-    if re.match(r"^[\w\-./: ]+$", s):   # 纯 ascii 选择器/路径带空格形态
+    if re.match(r"^[\w\-./: ]+$", s):   # a pure ascii selector/path with spaces
         return False
-    if re.search(r"%[sdrif]", s):        # 断言/日志格式串（守卫自身文案，非生产方锚）
+    if re.search(r"%[sdrif]", s):        # assertion/log format strings (the guard's own wording, not a producer anchor)
         return False
-    if re.search(r"\[\w+[=~^|]?", s):    # 属性选择器（DOM 定位器，非文案锚）
+    if re.search(r"\[\w+[=~^|]?", s):    # attribute selectors (DOM locators, not copy anchors)
         return False
     return True
 
 
 def anchor_fragments(anchor: str) -> List[str]:
-    """锚 → 片段（组合片段策略）：按非 CJK/字母数字切分，保留长度≥2 的段。"""
+    """Anchor → fragments (the combined-fragment strategy): split on non-CJK/non-
+    alphanumeric boundaries, keeping segments of length ≥ 2."""
     parts = re.findall(r"[\u4e00-\u9fff]+|[A-Za-z0-9_]+", anchor)
     return [p for p in parts if len(p) >= 2]
 
 
 def _producer_hit(content: str, anchor: str, fragments: List[str]) -> Tuple[bool, float]:
-    """在单个生产方文件内容里判定锚在场性：字面命中 → (True, 1.0)；
-    组合片段单行全中 → (True, 1.0)；否则返回 (False, 核心片段覆盖率)。"""
+    """Decide an anchor's presence within one producer file's content: exact literal hit →
+    (True, 1.0); all combined fragments within a single line → (True, 1.0); otherwise
+    (False, core-fragment coverage)."""
     if anchor in content:
         return True, 1.0
     if not fragments:
@@ -246,16 +274,19 @@ def _producer_hit(content: str, anchor: str, fragments: List[str]) -> Tuple[bool
         if all(f in line for f in fragments):
             return True, 1.0
         cov = sum(1 for f in core if f in line) / len(core)
-        # 跨行覆盖率：核心片段任意出现在文件任何位置也算部分证据（悬置判定用）
+        # Cross-line coverage: a core fragment appearing anywhere in the file also counts
+        # as partial evidence (used for the suspended judgment)
         best_cov = max(best_cov, cov)
     any_cov = sum(1 for f in core if f in content) / len(core)
     return False, max(best_cov, any_cov)
 
 
 def is_ui_guard(source: str) -> bool:
-    """UI 捕获型守卫判定（S2 范围闸，真仓标定 260905）：源码含 DOM/页面捕获标记。
-    非 UI 守卫（纯逻辑断言）没有文案生产方可索引——其字符串是场景自述/断言标签，
-    混入即噪声（首扫 1300+ 条的教训）；这些守卫只进 S1/S3。"""
+    """Decide whether a guard captures UI (the S2 scope gate; calibrated on the real repo
+    260905): the source contains DOM/page capture markers.
+    Non-UI guards (pure logic assertions) have no copy producer to index — their strings
+    are scenario self-descriptions/assertion labels, and mixing them in is pure noise
+    (the lesson of the first scan's 1300+ findings); those guards only enter S1/S3."""
     return any(marker in (source or "") for marker in
                ("page.", "locator(", "getBy", "innerText", "textContent", "page(", "driver."))
 
@@ -264,9 +295,9 @@ def scan_guard_anchor_presence(
     guards: List[Tuple[str, str, List[str]]],
     producer_contents: Dict[str, str],
 ) -> Tuple[List[Finding], Dict[str, Any]]:
-    """guards: [(rel_path, source, producer_rels)]——producer_rels=该守卫解析命中（state=ok）
-    的生产方仓相对路径清单；producer_contents 为其内容。判据见头注 ①~④。
-    返回 (findings, meta)。"""
+    """guards: [(rel_path, source, producer_rels)] — producer_rels is the list of
+    repo-relative producer paths this guard resolved to (state=ok); producer_contents
+    holds their content. Criteria in header tiers (1)-(4). Returns (findings, meta)."""
     findings: List[Finding] = []
     meta: Dict[str, Any] = {"guards": len(guards), "anchors_checked": 0,
                             "anchors_skipped_no_producer": 0, "guards_no_producer": [],
@@ -288,10 +319,12 @@ def scan_guard_anchor_presence(
             frags = anchor_fragments(lit)
             hit_files = [p for p, c in producer_here.items() if _producer_hit(c, lit, frags)[0]]
             if hit_files:
-                continue  # ①② 在场，零发现
+                continue  # tiers 1/2: present, zero findings
             cov = max((_producer_hit(c, lit, frags)[1] for c in producer_here.values()), default=0.0)
             if cov <= 0.0:
-                # ③ 确证漂移：生产方上下文在位、字面与组合片段双缺、核心片段全缺
+                # tier 3 confirmed drift: the producer context is in place, both the
+                # literal and the combined fragments are missing, and every core fragment
+                # is missing
                 findings.append(Finding(
                     scan="guard-anchor", severity="high",
                     subject="%s ⇢ %s" % (rel, lit[:40]),
@@ -300,7 +333,8 @@ def scan_guard_anchor_presence(
                              % "、".join(sorted(producer_here)),
                     suggestion="改锚措辞兼容生产方现文案（锚语义不锚字面），或确认实现回退——修一律走 dev-lane 工单"))
             else:
-                # ④ 相似度悬置：部分片段在场——交人审，不判绿不判红
+                # tier 4 similarity suspended: some fragments are present — hand to human
+                # review, judging neither green nor red
                 findings.append(Finding(
                     scan="guard-anchor", severity="med",
                     subject="%s ⇢ %s" % (rel, lit[:40]),
@@ -310,10 +344,13 @@ def scan_guard_anchor_presence(
     return findings, meta
 
 
-# 仓顶目录词表：带路径引用以此开头才按「仓内绝对路径」判定缺失=high；
-# 其余带路径缺失（~/ 凭据、宿主相对语境）语境不明 → med 交人审（不冤判）。
+# Repo-top directory vocabulary: only path references starting with one of these are
+# judged "in-repo absolute path" when missing = high;
+# other path misses (~/ credentials, host-relative context) have unclear context → med,
+# handed to human review (no wrongful conviction).
 REPO_TOP_DIRS = ("integration", "server", "docs", "app", "bin", "notes", "tools")
-# 环境依赖路径段：引用含这些段一律 external（装态相关，不是代码漂移）。
+# Environment-dependent path segments: a reference containing any of these is always
+# external (installation-state related, not code drift).
 _ENV_PATH_SEGMENTS = ("node_modules", ".venv", "out/", "/out", "__pycache__")
 
 
@@ -321,18 +358,22 @@ def scan_stale_assertions(
     guards: List[Tuple[str, str, List[str], Dict[str, str]]],
     line_count: Callable[[str], Optional[int]],
 ) -> Tuple[List[Finding], Dict[str, Any]]:
-    """S3 过时断言。引用解析已在外层完成（guards 第四元 ref→状态映射）：
-      missing：仓顶目录开头的带路径引用或裸代码名全仓无命中 → high（已挪/已删）；
-               其余语境的带路径缺失 → med 交人审；
-      ok 且引用行号超出目标行数 → high（行号越界）；
-      external（环境路径/配置文档裸名等）→ 不判，记 meta 防误报。"""
+    """S3 stale assertions. Reference resolution already happened in the outer layer (the
+    fourth tuple element maps ref → state):
+      missing: a path reference starting with a repo-top directory, or a bare code name
+               with no hit anywhere in the repo → high (moved/deleted);
+               a path miss in any other context → med, handed to human review;
+      ok with a referenced line number beyond the target's line count → high (line number
+               out of range);
+      external (environment paths / bare names in config docs etc.) → not judged, noted
+               in meta to prevent false positives."""
     findings: List[Finding] = []
     meta: Dict[str, Any] = {"refs_checked": 0, "refs_external": 0}
     for rel, source, _resolved, ref_states in guards:
         for line_no, line in enumerate(source.splitlines(), start=1):
             for ref in _path_refs(line):
                 if is_self_ref(ref, rel):
-                    continue  # 自引用（含 sc_ 前缀变体）
+                    continue  # self-reference (including sc_ prefix variants)
                 if any(seg in ref for seg in _ENV_PATH_SEGMENTS):
                     meta["refs_external"] += 1
                     continue
@@ -367,8 +408,10 @@ def scan_stale_assertions(
 
 
 def _path_refs(source: str) -> set:
-    """路径引用提取。跳过紧邻前缀为 `.` 或 `~` 的命中：前者是点前缀目录名
-    （.dsh/.git 等，正则表达不了），后者是 HOME 相对语境——都不是仓内路径引用。"""
+    """Path reference extraction. Skips hits whose immediately preceding character is `.`
+    or `~`: the former are dot-prefixed directory names (.dsh/.git etc., which the regex
+    cannot express), the latter is HOME-relative context — neither is an in-repo path
+    reference."""
     out = set()
     for m in _PATH_RE.finditer(source or ""):
         if m.start() > 0 and source[m.start() - 1] in (".", "~"):
@@ -378,12 +421,17 @@ def _path_refs(source: str) -> set:
 
 
 def build_ref_resolver(repo_root: Path):
-    """引用三态解析器（S2 生产方定位 / S3 存在性共用；判据真源）：
-      ① ./ ../ 相对引用 → 守卫文件目录（出仓=external）；
-      ② 带目录引用（含 /）→ 仓根相对（不在=missing）；
-      ③ 裸文件名 → 全仓按名检索（代码扩展名；命中=ok 取稳定首序；
-         零命中：代码扩展名=missing，配置/文档=external——常指仓外环境不误报）。
-    返回 resolve(ref, guard_rel) -> (state, repo_rel_path|None)，state ∈ ok|missing|external。"""
+    """Three-state reference resolver (shared by S2 producer locating and S3 existence;
+    the source of truth for the criteria):
+      (1) ./ ../ relative references → the guard file's directory (leaving the repo =
+          external);
+      (2) directory-carrying references (containing /) → repo-root relative (absent =
+          missing);
+      (3) bare file names → repo-wide search by name (code extensions; a hit = ok, taking
+          the stable first order; zero hits: a code extension = missing, config/docs =
+          external — these usually point outside the repo, so no false positive).
+    Returns resolve(ref, guard_rel) -> (state, repo_rel_path|None), state ∈
+    ok|missing|external."""
     root = repo_root.resolve()
     basename_index: Dict[str, List[str]] = {}
     for p in sorted(root.rglob("*")):
@@ -403,7 +451,8 @@ def build_ref_resolver(repo_root: Path):
         if "/" in ref:
             if (root / ref).is_file():
                 return "ok", ref
-            # 命名法变体回退：-/ _互换、sc_ 前缀互变（场景文件名两代惯例并存）
+            # Naming-convention variant fallback: -/_ swapped, sc_ prefix toggled (two
+            # generations of scenario file naming coexist)
             d, b = ref.rsplit("/", 1)
             variants = {b, "sc_" + b, b[3:] if b.startswith("sc_") else b,
                         b.replace("-", "_"), "sc_" + b.replace("-", "_")}
@@ -412,7 +461,8 @@ def build_ref_resolver(repo_root: Path):
                     return "ok", "%s/%s" % (d, alt)
             return "missing", ref
         name = Path(ref).name
-        # 裸名变体解析：sc_ 前缀互变、-/ _互换（场景文件常以旧名被引用）
+        # Bare-name variant resolution: sc_ prefix toggled, -/_ swapped (scenario files
+        # are often referenced by their old name)
         bare_variants = {name, "sc_" + name, name[3:] if name.startswith("sc_") else name,
                          name.replace("-", "_"), "sc_" + name.replace("-", "_")}
         for cand in sorted(bare_variants):
@@ -427,8 +477,10 @@ def build_ref_resolver(repo_root: Path):
 
 
 def is_self_ref(ref: str, guard_rel: str) -> bool:
-    """守卫自引用判定（含 sc_ 前缀变体：守卫头注常以不带 sc_ 的名指自己）；
-    另滤通配碎片（如 `*.d.ts` 被截成 `d.ts`——词干≤1 字符）。"""
+    """Guard self-reference check (including sc_ prefix variants: a guard's header often
+    refers to itself without the sc_ prefix);
+    also filters wildcard fragments (e.g. `*.d.ts` truncated to `d.ts` — a stem of ≤1
+    character)."""
     stem = Path(ref).stem
     if len(stem) <= 1:
         return True
@@ -438,7 +490,7 @@ def is_self_ref(ref: str, guard_rel: str) -> bool:
 
 
 # ========================================================================================
-# 汇总入口（activity 消费；纯读）
+# Summary entry point (consumed by the activity; pure read)
 # ========================================================================================
 
 PRODUCER_ROOTS = ("server", "app", "bin", "docs")
@@ -455,7 +507,8 @@ def collect_guards(repo_root: Path) -> List[Tuple[str, str]]:
         try:
             out.append((p.relative_to(repo_root).as_posix(), p.read_text(encoding="utf-8")))
         except (OSError, UnicodeDecodeError) as e:
-            # 读不了（权限/编码毁损）=可观测降级：记 meta，不静默也不崩
+            # Unreadable (permissions/encoding corruption) = an observable degradation:
+            # noted in meta, neither silent nor fatal
             out.append((p.relative_to(repo_root).as_posix() + " (unreadable: %s)" % e, ""))
     return out
 
@@ -491,7 +544,8 @@ def run_test_face_scan(
     scenarios_path: Optional[Path] = None,
     producer_roots: Optional[Tuple[str, ...]] = None,
 ) -> Dict[str, Any]:
-    """测试面扫描主入口（activity 薄壳包它）。返回单行 JSON 的 result 形态。"""
+    """Main entry point of the test-face scan (the activity is a thin shell around it).
+    Returns the result shape of the single-line JSON output."""
     repo_root = Path(repo_root)
     if not repo_root.is_dir():
         raise ScanError("仓库根不存在：%s" % repo_root)
@@ -517,11 +571,12 @@ def run_test_face_scan(
         if rel.endswith(".py"):
             try:
                 ast.parse(source)
-            except (SyntaxError, ValueError) as e:  # ValueError=含空字节等毁损源
+            except (SyntaxError, ValueError) as e:  # ValueError = corrupted source such as embedded NUL bytes
                 bad_guards.append("%s (unparseable: %s)" % (rel, e))
                 continue
         parsed_guards.append((rel, source))
-    # 引用三态解析（S2 生产方定位 / S3 存在性共用一个判据真源）
+    # Three-state reference resolution (one source of truth for the criteria, shared by
+    # S2 producer locating and S3 existence)
     resolver = build_ref_resolver(repo_root)
     guard_states: List[Tuple[str, str, List[str], Dict[str, Tuple[str, Optional[str]]]]] = []
     producers_needed: set = set()

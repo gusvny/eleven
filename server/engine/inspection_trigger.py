@@ -1,30 +1,41 @@
 #!/usr/bin/env python3
-"""inspection_trigger —— 巡检调度运维通道（inspection epic 票①，t260905-03）。
+"""inspection_trigger — the ops channel for inspection scheduling (inspection epic
+ticket 1, t260905-03).
 
-定位（照搬 scan_schedule.py 运维通道取舍清单②③）：本工具是**人/总管的运维通道**，
-不进 dsh 模型工具面——模型侧对巡检调度的可见性只读，防模型侧随意触发破坏每期一票。
+Positioning (following scan_schedule.py's ops-channel trade-off list items 2 and 3):
+this tool is the **ops channel for humans/the supervisor** and does not enter the dsh
+model tool surface — the model side's visibility into inspection scheduling is
+read-only, preventing arbitrary model-side triggers from breaking one ticket per period.
 
-照搬取舍清单（review_plan R2 六项逐项）：
-  ① overlap：SKIP（同实例同期重复触发合并为一张票——票号=workflow id 幂等，
-     AlreadyStarted 即 deduped；schedule 层再叠 SKIP，撞期不另开）。
-  ② note 治理：schedule-up 必带 --note（谁、为什么、什么频率），进 schedule state 可查。
-  ③ 运维通道定位：不进 dsh 模型工具面（见上）。
-  ④ stdout 单行 JSON {ok, result|error}（与 client.py/scan_schedule.py 同契约）。
-  ⑤ 报错精确：RPCError 显式转译「…不存在或不可达」，不静默。
-  ⑥ 参数区间 fail-closed：instance 须命中声明**已启用**实例（未启用=显式报错，先于
-     任何网络动作）；period 须 YYYYMMDD 且为真实日历日；decision 只认 approve/reject；
-     who 非空且不得是 agent 角色名（签字只能人）。
+Borrowed trade-off list (review_plan R2, all six items):
+  (1) overlap: SKIP (a repeated trigger of the same instance in the same period merges
+      into one ticket — the ticket id = the workflow id, so idempotent; AlreadyStarted
+      means deduped; the schedule layer adds SKIP on top, so a period collision opens no
+      extra ticket).
+  (2) note governance: schedule-up must carry --note (who, why, what frequency); it goes
+      into the schedule state and stays queryable.
+  (3) ops-channel positioning: not in the dsh model tool surface (see above).
+  (4) stdout emits a single line of JSON {ok, result|error} (the same contract as
+      client.py/scan_schedule.py).
+  (5) precise errors: RPCError is translated explicitly as "... does not exist or is
+      unreachable", never silently.
+  (6) fail-closed argument ranges: instance must match an **enabled** instance in the
+      declaration (not enabled = explicit error, before any network action); period must
+      be YYYYMMDD and a real calendar day; decision accepts only approve/reject; who must
+      be non-empty and must not be an agent role name (only humans sign).
 
-声明驱动（验收③行为级）：触发面只消费 build_schedule_specs 的输出——声明里
-enabled=false 的实例在 specs 中不存在，trigger/schedule-up 对它一律显式报错；
-改声明即改行为，不改引擎码。
+Declaration-driven (acceptance 3, behavior level): the trigger surface consumes only
+build_schedule_specs's output — an instance with enabled=false in the declaration simply
+does not exist in specs, and trigger/schedule-up always error explicitly on it; changing
+the declaration changes the behavior, no engine code involved.
 
-用法（venv python 或任一装了 temporalio 的解释器；decl 子操作零依赖纯标准库）：
+Usage (venv python or any interpreter with temporalio; the decl subcommand is
+dependency-free pure stdlib):
     inspection_trigger.py decl [--decl-path P]
     inspection_trigger.py trigger --instance test-face [--period YYYYMMDD] [--repo-root R]
-    inspection_trigger.py sign --instance test-face --who 用户 [--decision approve|reject] [--note 文本] [--period P]
+    inspection_trigger.py sign --instance test-face --who <user> [--decision approve|reject] [--note <text>] [--period P]
     inspection_trigger.py describe --instance test-face [--period P]
-    inspection_trigger.py schedule-up --instance test-face --note 文本
+    inspection_trigger.py schedule-up --instance test-face --note <text>
 """
 
 from __future__ import annotations
@@ -75,7 +86,8 @@ def _valid_period(period: str) -> Optional[str]:
 
 
 def _enabled_spec(decl_path: Optional[Path], instance_id: str) -> Dict[str, Any]:
-    """声明 → 该实例的调度意图；未启用/未声明一律显式报错（fail-closed 先于网络）。"""
+    """Declaration → that instance's scheduling intent; not enabled / not declared always
+    errors explicitly (fail-closed before any network)."""
     decl = load_inspection_decl(decl_path) if decl_path else load_inspection_decl()
     if decl.instance(instance_id) is None:
         raise ValueError("实例 %r 未在声明中（在册：%s）"
@@ -88,7 +100,8 @@ def _enabled_spec(decl_path: Optional[Path], instance_id: str) -> Dict[str, Any]
 
 
 # ========================================================================================
-# 服务端动作（temporalio 延迟导入：decl 子操作零依赖可跑，也供场景道 stdlib 复用）
+# Server-side actions (temporalio imported lazily: the decl subcommand runs with zero
+# dependencies and stays reusable by the scenario lane's stdlib)
 # ========================================================================================
 
 def _lazy_engine():
@@ -112,13 +125,13 @@ async def cmd_trigger(args: argparse.Namespace) -> Dict[str, Any]:
         spec = _enabled_spec(args.decl_path, args.instance)
     except ValueError as e:
         return _err(str(e))
-    except Exception as e:  # noqa: BLE001——声明解析 fail-closed 转译
+    except Exception as e:  # noqa: BLE001 — declaration parsing fails closed, translated here
         return _err("声明不可用：%s" % e)
     InspectionPeriodicInput, ticket_id_of, _, _, _, task_queue = _lazy_engine()
     ticket_id = ticket_id_of(args.instance, period)
     try:
         client = await _connect()
-    except Exception as e:  # noqa: BLE001——连接故障显式点名（取舍⑤精神，不静默）
+    except Exception as e:  # noqa: BLE001 — connection failures are named explicitly (the spirit of trade-off 5, never silent)
         return _err("temporal server 不可达：%s" % e)
     from temporalio.service import RPCError
     try:
@@ -133,7 +146,8 @@ async def cmd_trigger(args: argparse.Namespace) -> Dict[str, Any]:
                     "first_run_id": handle.first_execution_run_id})
     except Exception as e:  # noqa: BLE001
         if type(e).__name__ == "WorkflowAlreadyStartedError" or "already started" in str(e).lower():
-            # 取舍①：同票号重复触发=同票去重（每期一票的机械保证）
+            # Trade-off 1: a repeated trigger with the same ticket id = deduped to the same
+            # ticket (the mechanical one-ticket-per-period guarantee)
             return _ok({"triggered": False, "deduped": True, "ticket_id": ticket_id,
                         "period": period, "reason": "同期巡检票已在（每期一票）"})
         if isinstance(e, RPCError):
@@ -185,8 +199,9 @@ async def cmd_describe(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 async def cmd_schedule_up(args: argparse.Namespace) -> Dict[str, Any]:
-    """声明 → Temporal Schedule（通用调度器的接线动作；行为随声明，不改引擎码）。
-    note 治理（取舍②）：必带 --note。"""
+    """Declaration → Temporal Schedule (the wiring action for the generic scheduler;
+    behavior follows the declaration, no engine code changes).
+    note governance (trade-off 2): --note is mandatory."""
     if not args.note:
         return _err("schedule-up 必须带 --note（note 治理：不留无解释的常驻定时器）")
     try:
@@ -215,7 +230,8 @@ async def cmd_schedule_up(args: argparse.Namespace) -> Dict[str, Any]:
         handle = client.get_schedule_handle(schedule_id)
         cron_expr = spec["cron"]
 
-        # 先试更新（幂等），不存在再创建——改声明（cron）后重跑 schedule-up 即生效。
+        # Try an update first (idempotent), create only if absent — after changing the
+        # declaration's cron, re-running schedule-up makes it take effect.
         def _upd(inp) -> ScheduleUpdate:
             sched = inp.description.schedule
             sched.spec = ScheduleSpec(cron_expressions=[cron_expr])
@@ -254,10 +270,11 @@ async def cmd_schedule_up(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def cmd_decl(args: argparse.Namespace) -> Dict[str, Any]:
-    """离线声明视图（零 temporalio 依赖；声明驱动的解析级证据面）。"""
+    """Offline declaration view (zero temporalio dependency; the declaration-driven,
+    parsing-level evidence surface)."""
     try:
         decl = load_inspection_decl(args.decl_path) if args.decl_path else load_inspection_decl()
-    except Exception as e:  # noqa: BLE001——DeclError/IO 一律单行 JSON 显式报错
+    except Exception as e:  # noqa: BLE001 — DeclError/IO always becomes an explicit single-line JSON error
         return _err("声明不可用：%s" % e)
     return _ok({
         "source": decl.source,
@@ -304,7 +321,7 @@ def main() -> None:
         else:
             result = asyncio.run({"trigger": cmd_trigger, "sign": cmd_sign,
                                   "describe": cmd_describe, "schedule-up": cmd_schedule_up}[args.op](args))
-    except Exception as e:  # noqa: BLE001——通道级兜底：任何异常都转单行 JSON，不裸栈
+    except Exception as e:  # noqa: BLE001 — channel-level backstop: any exception becomes single-line JSON, never a bare stack
         result = _err("inspection_trigger.%s 异常：%s: %s" % (args.op, type(e).__name__, e))
     _emit(result, exit_code=0 if result.get("ok") else 1)
 

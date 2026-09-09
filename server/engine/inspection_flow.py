@@ -1,19 +1,28 @@
-"""inspection_flow —— 巡检票骨架（inspection epic 票①，t260905-03）。
+"""inspection_flow — the inspection ticket skeleton (inspection epic ticket 1,
+t260905-03).
 
-轻量巡检票模板：扫 → 报 → 人门 → 收口（无方案/实现重段）。每期一票：期号=实例 id+当期
-日期，票号即 workflow id（inspection-<实例>-<期号>），同票号重复触发被服务端
-AlreadyStarted 拒收 = 每期一票的机械保证（重叠语义 SKIP，照搬取舍清单①；
-全绿也开票——零发现票=心跳证明）。
+A lightweight inspection ticket template: scan → report → human gate → close (no plan /
+implement stages). One ticket per period: the period key = instance id + current date,
+the ticket id is the workflow id (inspection-<instance>-<period>), and a repeated trigger
+with the same ticket id is rejected by the server's AlreadyStarted — that is the
+mechanical guarantee of one ticket per period (overlap semantics SKIP, borrowed from
+trade-off list item 1; a ticket opens even on an all-green run — a zero-finding ticket is
+the heartbeat proof).
 
-红线（票面每份落账都带）：巡检只出报告与开票建议，绝不直接改码；修复一律走
-dev-lane 工单，修复票引用巡检票号（source_inspection=<巡检票号>）。
+Red line (carried on every ticket-face posting): inspection only produces reports and
+ticket-opening suggestions, it never modifies code directly; every fix goes through a
+dev-lane ticket that references the inspection ticket (source_inspection=<inspection
+ticket id>).
 
-人门（M3）：复用既有票据审批门机制——signal sign + Signature 载荷（shared.Signature：
-who 由调用方注入、agent 不得自签），本模板只定义自己的门 id（inspection-close）。
-未批准时收口不可达（stage_state=awaiting-human 真拦），批准后才收口。
+Human gate (M3): reuses the existing ticket approval-gate machinery — signal sign with a
+Signature payload (shared.Signature: who is injected by the caller, agents may not sign
+for themselves); this template only defines its own gate id (inspection-close). Closing
+is unreachable before approval (stage_state=awaiting-human really blocks) and happens
+only after it.
 
-确定性纪律：workflow 体零 IO、零 wall-clock（只有 workflow.now()）；一切副作用在
-activity（run_inspection_scan / write_inspection_report，activities.py 薄壳）。
+Determinism discipline: the workflow body does zero IO and zero wall-clock (only
+workflow.now()); every side effect lives in an activity (run_inspection_scan /
+write_inspection_report, thin shells in activities.py).
 """
 
 from __future__ import annotations
@@ -28,14 +37,16 @@ from typing import Any, Dict, List, Optional, Tuple
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 
-# shared 顶层有 Path.resolve/environ（非确定性），workflow 上下文内须按仓惯例
-# 透传该 import（同 workflows.py 头部口径），否则沙箱校验即红。
+# shared's module top has Path.resolve/environ (non-deterministic), so inside a workflow
+# context this import must be passed through per repo convention (same as workflows.py's
+# header), otherwise the sandbox validation goes red.
 with workflow.unsafe.imports_passed_through():
     from shared import Signature
 
 CLOSE_GATE_ID = "inspection-close"
 INSPECTION_RED_LINE = "巡检只出报告与开票建议，绝不直接改码；修复一律走 dev-lane 工单。"
-# agent 不得自签（Signature 语义复用）：人门 who 不得是 M10 五 agent 角色名。
+# Agents may not sign for themselves (reusing Signature semantics): the human gate's who
+# must not be one of the M10 five agent role names.
 AGENT_ROLE_NAMES = frozenset({"developer", "integration", "ops", "product-operation", "artist"})
 PERIOD_RE = re.compile(r"^\d{8}$")
 MAX_WHO_LEN = 64
@@ -46,24 +57,28 @@ SCAN_TO = timedelta(minutes=15)
 
 
 # ========================================================================================
-# 纯逻辑（单测面）：期号/票号/票面渲染/签字校验/落账
+# Pure logic (the unit-test surface): period keys / ticket ids / face rendering /
+# signature validation / posting
 # ========================================================================================
 
 def period_key(now: Optional[datetime] = None) -> str:
-    """期号=当期日期（YYYYMMDD）。every-n-tickets 接线时期语义重定义是接线票的活。"""
+    """Period key = the current date (YYYYMMDD). Redefining period semantics when
+    every-n-tickets gets wired is that wiring ticket's job."""
     dt = now or datetime.now()
     return dt.strftime("%Y%m%d")
 
 
 def inspection_ticket_id(instance_id: str, period: str) -> str:
-    """巡检票号 = workflow id（同票号重复触发=同票，每期一票机械保证）。"""
+    """Inspection ticket id = workflow id (a repeated trigger with the same id = the same
+    ticket, the mechanical one-ticket-per-period guarantee)."""
     if not instance_id or not PERIOD_RE.match(period or ""):
         raise ValueError("票号组成非法：instance=%r period=%r（期号须 YYYYMMDD）" % (instance_id, period))
     return "inspection-%s-%s" % (instance_id, period)
 
 
 def validate_trigger_args(instance_id: str, period: str) -> Optional[str]:
-    """触发参数 fail-closed（照搬取舍清单⑥扩展）；返回错误消息或 None。"""
+    """Trigger arguments fail-closed (an extension of trade-off list item 6); returns an
+    error message or None."""
     if not instance_id or not re.match(r"^[a-z0-9][a-z0-9-]{0,63}$", instance_id):
         return "instance 非法：%r（小写 slug）" % instance_id
     if not PERIOD_RE.match(period or ""):
@@ -78,7 +93,8 @@ def build_ticket_face(
     period: str,
     scan_result: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """发现清单落票面（渲染数据）：分严重度带证据 + 心跳 + 开票建议（零改码）。"""
+    """Put the finding list onto the ticket face (rendering data): per-severity with
+    evidence + heartbeat + ticket-opening suggestions (zero code changes)."""
     if not ticket_id or not instance_id:
         raise ValueError("票面缺票号/实例")
     if not isinstance(scan_result, dict) or not isinstance(scan_result.get("findings"), list):
@@ -93,7 +109,7 @@ def build_ticket_face(
         suggestions.append({
             "template": "dev-lane",
             "title": "修:%s %s" % (f.get("scan", ""), str(f.get("subject", ""))[:60]),
-            "source_inspection": ticket_id,           # 修复票引用巡检票号（ epic 票①④）
+            "source_inspection": ticket_id,           # the fix ticket references the inspection ticket id (epic tickets 1/4)
             "urgency": "立即开票" if f.get("severity") == "high" else "人审后定",
             "evidence": f.get("evidence", ""),
         })
@@ -114,8 +130,9 @@ def build_ticket_face(
 
 
 def validate_close_signature(sig: Any, expected_gate: str = CLOSE_GATE_ID) -> Tuple[Optional[Dict[str, str]], str]:
-    """人门签字校验（复用 Signature 语义）：返回 (规整后的载荷, 错误消息)。
-    agent 自签（who 命中五 agent 角色名）拒收——签字只能人。"""
+    """Validate the human-gate signature (reusing Signature semantics): returns
+    (normalized payload, error message). Self-signing by an agent (who matches one of the
+    five agent role names) is refused — only a human may sign."""
     if isinstance(sig, Signature):
         payload = {"who": sig.who, "gate": sig.gate, "decision": sig.decision, "note": sig.note or ""}
     elif isinstance(sig, dict):
@@ -137,7 +154,9 @@ def validate_close_signature(sig: Any, expected_gate: str = CLOSE_GATE_ID) -> Tu
 
 
 def write_inspection_report_impl(face: Dict[str, Any], out_dir: Path) -> Dict[str, Any]:
-    """落账（纯 impl，activity 薄壳包它）：out/inspection/<票号>.json，同票重跑覆盖单文件。"""
+    """Posting (a pure impl; the activity is a thin shell around it):
+    out/inspection/<ticket id>.json, a re-run of the same ticket overwrites that single
+    file."""
     ticket_id = str(face.get("ticket_id") or "")
     if not ticket_id:
         raise ValueError("落账缺 ticket_id")
@@ -149,12 +168,13 @@ def write_inspection_report_impl(face: Dict[str, Any], out_dir: Path) -> Dict[st
 
 
 # ========================================================================================
-# Workflow：扫 → 报 → 人门 → 收口
+# Workflow: scan → report → human gate → close
 # ========================================================================================
 
 @dataclass
 class InspectionPeriodicInput:
-    """一期巡检的输入（声明实例 + 期号；period 空=由 workflow.now() 推——schedule 触发路径）。"""
+    """Input for one inspection period (declaration instance + period key; an empty
+    period = derived from workflow.now() — the schedule-triggered path)."""
 
     instance_id: str
     face: str = "test"
@@ -165,8 +185,10 @@ class InspectionPeriodicInput:
 
 @workflow.defn
 class InspectionPeriodicWorkflow:
-    """一期巡检票。状态机：scan → report → close(人门) → 收口终态。
-    业务拒绝不抛异常：扫描/落账失败 → blocked 终态票（可见、可查），不假绿。"""
+    """One inspection-period ticket. State machine: scan → report → close (human gate) →
+    a terminal closed state.
+    Business refusals do not raise: a scan/posting failure → a blocked terminal ticket
+    (visible, queryable), never a fake green."""
 
     def __init__(self) -> None:
         self.stage: str = ""
@@ -187,7 +209,8 @@ class InspectionPeriodicWorkflow:
 
     @workflow.signal
     def sign(self, sig: Signature) -> None:
-        """人门签字（既有审批门机制）。gate 不匹配的签字忽略留痕，不误收。"""
+        """Human-gate signature (the existing approval-gate machinery). A signature whose
+        gate does not match is ignored with a note, never accepted by mistake."""
         payload, err = validate_close_signature(sig)
         if err:
             self._gate_err = err
@@ -198,7 +221,8 @@ class InspectionPeriodicWorkflow:
 
     @workflow.query
     def snapshot(self) -> Dict[str, Any]:
-        """票面快照（工单台/运维通道消费；shape=票：stage/stage_state/status/票面/时间线）。"""
+        """Ticket-face snapshot (consumed by the workbench / ops channel; shape = a
+        ticket: stage/stage_state/status/face/timeline)."""
         return {
             "id": workflow.info().workflow_id,
             "kind": "inspection",
@@ -236,7 +260,7 @@ class InspectionPeriodicWorkflow:
             start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
         if written.get("ok"):
             self.face["report_path"] = written["result"].get("path", "")
-        # 人门：未批准前收口不可达（awaiting-human 真拦）
+        # Human gate: closing is unreachable before approval (awaiting-human really blocks)
         self._enter("close", "awaiting-human", "人审发现清单：sign(gate=%s) approve=收口 / reject=毙单收口" % CLOSE_GATE_ID)
         await workflow.wait_condition(lambda: self._close_sig is not None)
         self.decision = self._close_sig["decision"]  # type: ignore[index]

@@ -1,29 +1,43 @@
-"""inspection_decl —— 巡检声明读取/校验器（inspection epic 票①，t260905-03）。
+"""inspection_decl — inspection declaration reader/validator (inspection epic
+ticket 1, t260905-03).
 
-机制在引擎，面在项目声明：本模块只做「声明文件 → 结构化实例表」的一件事，
-调度与开票机制（inspection_trigger.py / InspectionPeriodicWorkflow）消费它的输出。
+The mechanism lives in the engine, the face lives in the project declaration: this
+module does exactly one thing, "declaration file → structured instance table", which
+the scheduling and ticket-opening machinery (inspection_trigger.py /
+InspectionPeriodicWorkflow) consumes.
 
-设计定稿（review_plan 附条件放行意见 C1~C3 前置约束 + M2/M4）：
-  - 落位：独立 inspection.yaml（不进 verify.yaml——那是每票跑的复验闸，巡检调度是
-    定时器域，塞入=语义漂移+引擎白名单扩围；「同 ui_evidence 一族」的本质是
-    「机制在引擎、面在项目声明」原则，不是同文件）。
-  - 解析器：**零依赖 YAML 子集解析器**（docker 测试镜像 / 场景道 / 本机全可跑，
-    只用标准库）。只认本头注声明的子集，子集外形态一律 fail-closed 报错点名行号
-    ——不猜、不静默降级。两套解析器必漂移，故不用 pyyaml 双轨。
-  - 未接线 kind（M2）：KNOWN_KINDS 收录全部「文档化 kind」，WIRED_KINDS 只收已接线
-    的。**启用实例**声明未接线 kind → 显式报错并点名已接线清单；禁用实例允许
-    （禁用=纯占位不触发，声明即文档）。绝不允许「解析通过、运行时静默不触发」。
-  - 路径：环境变量 SANDBAR_INSPECTION_DECL 可覆盖缺省声明路径（测试隔离；路径常量
-    单点在本函数，M4）。
+Settled design (preconditions from review_plan conditional-pass comments C1-C3 + M2/M4):
+  - Location: a standalone inspection.yaml (not inside verify.yaml — that is the
+    per-ticket re-verification gate; inspection scheduling belongs to the timer domain,
+    and stuffing it in means semantic drift plus a wider engine whitelist. What
+    "same family as ui_evidence" really means is the "mechanism in the engine, face in
+    the project declaration" principle, not the same file).
+  - Parser: a **zero-dependency YAML subset parser** (runs in the docker test image /
+    scenario lane / locally, stdlib only). It accepts only the subset declared in this
+    header; anything outside the subset fails closed with an error naming the line
+    number — no guessing, no silent degradation. Two parsers would inevitably drift, so
+    no pyyaml dual track.
+  - Unwired kinds (M2): KNOWN_KINDS holds every "documented kind", WIRED_KINDS only the
+    wired ones. An **enabled instance** declaring an unwired kind → explicit error
+    naming the wired list; disabled instances are allowed (disabled = pure placeholder,
+    never triggers; the declaration is documentation). "Parses fine but silently never
+    triggers at runtime" is never acceptable.
+  - Path: the SANDBAR_INSPECTION_DECL env var overrides the default declaration path
+    (test isolation; the path constant has its single point in default_decl_path, M4).
 
-YAML 子集文法（逐条由单测钉死）：
-  - 缩进只允许空格，禁 tab；层级固定：根映射(0) → 实例列表项(- 于 2) → 实例键(4)
-    → schedule 映射(6) → schedule 键(8)。
-  - 行形态只有五种：空行 / 全行注释(# 起头，含前导空格) / `key: 标量` /
-    `key:`(开子结构) / `- key: 标量`(列表项首键，续键用同层级 `key: 标量`)。
-  - 标量原样取字符串（不做类型推断），bool 只认 true/false 字面，strip 尾随空白；
-    `#` 不在行内截断（cron `*` 等字符安全）。
-  - 键重复 / 同键双形态（既有标量又开子结构）/ 子结构内出现列表项 → 报错。
+YAML subset grammar (each rule pinned by a unit test):
+  - Indentation is spaces only, tabs forbidden; fixed levels: root mapping (0) →
+    instance list item (- at 2) → instance keys (4) → schedule mapping (6) →
+    schedule keys (8).
+  - Only five line shapes: blank / full-line comment (starting with #,
+    leading spaces allowed) / `key: scalar` / `key:` (opens a sub-structure) /
+    `- key: scalar` (a list item's first key; continuation keys use same-level
+    `key: scalar`).
+  - Scalars are taken as strings verbatim (no type inference); booleans accept only the
+    true/false literals; trailing whitespace is stripped; `#` is never truncated
+    mid-line (cron `*` and friends stay safe).
+  - Duplicate keys / a key with two shapes (both a scalar and an open sub-structure) /
+    a list item inside a sub-structure → error.
 """
 
 from __future__ import annotations
@@ -36,27 +50,31 @@ from typing import Any, Dict, List, Optional
 
 DECL_FILE_NAME = "inspection.yaml"
 
-# kind 词表：KNOWN=文档化全量（声明里出现合法），WIRED=引擎已接线全量（启用实例白名单）。
+# kind vocabulary: KNOWN = the full documented set (legal to appear in a declaration),
+# WIRED = the subset the engine has actually wired (the whitelist for enabled instances).
 KNOWN_KINDS = ("cron", "every-n-tickets", "race-first")
 WIRED_KINDS = ("cron",)
-# 引擎已接线可被声明指名的巡检 workflow 类型名白名单（fail-closed 防声明指到不存在的
-# workflow 后运行期静默不触发——同 M2 精神）。
+# Whitelist of inspection workflow type names the engine has wired and a declaration may
+# name (fail-closed so a declaration cannot point at a nonexistent workflow and then
+# silently never trigger — same spirit as M2).
 WIRED_WORKFLOWS = ("InspectionPeriodicWorkflow",)
 SCHEMA = "v1"
 INSTANCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
-# cron 五字段词法：`*` `*/n` `n` `n-m` `n-m/n` `n,m`（逗号列表），月/星域放宽三字母名。
+# Five-field cron lexicon: `*` `*/n` `n` `n-m` `n-m/n` `n,m` (comma lists); the month and
+# weekday fields also allow three-letter names.
 _CRON_ATOM = r"(?:\*|\*/\d+|\d+|\d+-\d+(?:/\d+)?|[a-z]{3}(?:-[a-z]{3})?)"
 _CRON_FIELD_RE = re.compile(r"^%s(?:,%s)*$" % (_CRON_ATOM, _CRON_ATOM))
 BOOL_RE = re.compile(r"^(true|false)$")
 
 
 class DeclError(Exception):
-    """声明畸形/越权——fail-closed，消息点名问题与位置，绝无缺省回落。"""
+    """Malformed or out-of-scope declaration — fail-closed; the message names the problem
+    and its location, never a default fallback."""
 
 
 @dataclass
 class InstanceSpec:
-    """一个巡检实例（声明驱动的一切行为的锚）。"""
+    """One inspection instance (the anchor for everything declaration-driven)."""
 
     id: str
     face: str
@@ -70,7 +88,7 @@ class InstanceSpec:
 
 @dataclass
 class InspectionDecl:
-    """整份声明的结构化形态。"""
+    """The structured form of a whole declaration."""
 
     schema: str
     instances: List[InstanceSpec] = field(default_factory=list)
@@ -87,7 +105,8 @@ class InspectionDecl:
 
 
 def default_decl_path() -> Path:
-    """声明路径单点（env 可覆盖；缺省=本模块同目录 inspection.yaml）。"""
+    """Single point for the declaration path (env-overridable; default = inspection.yaml
+    next to this module)."""
     env = os.environ.get("SANDBAR_INSPECTION_DECL")
     if env:
         return Path(env)
@@ -95,16 +114,16 @@ def default_decl_path() -> Path:
 
 
 # ========================================================================================
-# YAML 子集解析器（只认头注文法；一切越界=fail-closed）
+# YAML subset parser (accepts only the header-declared grammar; every excursion = fail-closed)
 # ========================================================================================
 
 class _Line:
     __slots__ = ("no", "indent", "text", "kind")
 
     def __init__(self, no: int, indent: int, text: str, kind: str) -> None:
-        self.no = no            # 1-based 行号（报错点名用）
+        self.no = no            # 1-based line number (for naming in error messages)
         self.indent = indent
-        self.text = text        # 去缩进后的有效内容（注释已剥）
+        self.text = text        # the effective content after de-indenting (comments stripped)
         self.kind = kind        # blank | comment | kv | open | item
 
 
@@ -145,7 +164,8 @@ def _split_kv(text: str) -> tuple:
 
 
 def _parse_mapping(lines: List[_Line], pos: int, indent: int, ctx: str) -> tuple:
-    """解析一层映射（同缩进连续 kv/open），返回 (mapping, next_pos)。"""
+    """Parse one mapping level (consecutive kv/open at the same indent); returns
+    (mapping, next_pos)."""
     out: Dict[str, Any] = {}
     i = pos
     while i < len(lines):
@@ -172,8 +192,9 @@ def _parse_mapping(lines: List[_Line], pos: int, indent: int, ctx: str) -> tuple
 
 
 def _parse_child(lines: List[_Line], pos: int, parent_indent: int, ctx: str) -> tuple:
-    """解析 open 键的子结构：更深层映射，或列表项序列（实例表）。
-    列表项允许比开键更深（YAML 惯例），以首个列表项缩进为列表基准层。"""
+    """Parse an open key's sub-structure: a deeper mapping, or a sequence of list items
+    (the instance table). List items may sit deeper than their opening key (the YAML
+    convention); the first list item's indent becomes the list's base level."""
     if pos >= len(lines) or lines[pos].indent <= parent_indent:
         raise DeclError("第 %d 行：%s 开了子结构但无内容" % (lines[pos - 1].no if pos else 0, ctx))
     if lines[pos].kind == "item":
@@ -182,7 +203,8 @@ def _parse_child(lines: List[_Line], pos: int, parent_indent: int, ctx: str) -> 
 
 
 def _parse_item_list(lines: List[_Line], pos: int, indent: int, ctx: str) -> tuple:
-    """实例列表：`- key: 标量` 起头（同一基准缩进），续键为 +2 缩进的 kv / open。"""
+    """Instance list: starts with `- key: scalar` (all at the same base indent);
+    continuation keys are kv/open at indent+2."""
     items: List[Dict[str, Any]] = []
     i = pos
     while i < len(lines):
@@ -192,14 +214,14 @@ def _parse_item_list(lines: List[_Line], pos: int, indent: int, ctx: str) -> tup
         if ln.kind != "item" or ln.indent != indent:
             raise DeclError("第 %d 行：列表项形态/缩进非法：%r" % (ln.no, ln.text))
         item: Dict[str, Any] = {}
-        # item 行是原文（未经 kv 标记化），在此切 key: 标量
+        # The item line is raw text (not tokenized as kv), so split key: scalar here
         ikey, _, ival = ln.text.partition(":")
         ikey = ikey.strip()
         if not ikey or not ival.strip():
             raise DeclError("第 %d 行：列表项首键必须 key: 标量形态：%r" % (ln.no, ln.text))
         item[ikey] = ival.strip()
         i += 1
-        # 续键：缩进 = indent+2 的 kv / open
+        # Continuation keys: kv/open at indent+2
         while i < len(lines) and lines[i].indent == indent + 2:
             cont = lines[i]
             if cont.kind in ("item", "comment"):
@@ -221,7 +243,7 @@ def _parse_item_list(lines: List[_Line], pos: int, indent: int, ctx: str) -> tup
 
 
 def parse_decl_text(text: str, source: str = "<text>") -> InspectionDecl:
-    """子集文法解析 + 结构校验（fail-closed），文本入口。"""
+    """Text entry point: subset-grammar parsing + structural validation (fail-closed)."""
     lines = _tokenize(text)
     if not lines:
         raise DeclError("%s：声明为空" % source)
@@ -230,7 +252,8 @@ def parse_decl_text(text: str, source: str = "<text>") -> InspectionDecl:
 
 
 def load_inspection_decl(path: Optional[Path] = None) -> InspectionDecl:
-    """文件入口（env 路径单点见 default_decl_path）。读文件失败=显式报错。"""
+    """File entry point (the env path single point is default_decl_path). A failed read
+    is an explicit error."""
     p = Path(path) if path else default_decl_path()
     try:
         text = p.read_text(encoding="utf-8")
@@ -240,7 +263,7 @@ def load_inspection_decl(path: Optional[Path] = None) -> InspectionDecl:
 
 
 # ========================================================================================
-# 结构校验（畸形输入一律 DeclError 点名）
+# Structural validation (every malformed input is named in a DeclError)
 # ========================================================================================
 
 def _req_str(where: str, data: Dict[str, Any], key: str, no: str = "") -> str:
@@ -274,7 +297,9 @@ def _validate_schedule(where: str, sched: Any, enabled: bool) -> tuple:
         if len(fields) != 5 or any(not _CRON_FIELD_RE.match(f) for f in fields):
             raise DeclError("%s：cron 非法 %r（需五字段，词法 * */n n n-m n-m/n 名称/逗号列表）"
                             % (where, cron))
-        # 数值域（单值逐域校验；含 */区间/列表的域交调度器语义，这里只拦单值越域）
+        # Numeric fields (per-field validation of bare values; fields containing */ranges/
+        # lists are left to the scheduler's semantics — here we only stop a bare value out
+        # of range)
         _CRON_MAX = (59, 23, 31, 12, 7)
         for pos, (f, top) in enumerate(zip(fields, _CRON_MAX)):
             if f.isdigit() and int(f) > top:
@@ -291,7 +316,8 @@ def _validate_schedule(where: str, sched: Any, enabled: bool) -> tuple:
 
 
 def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
-    """映射入口校验（文本解析后的公共窄口；单测直接喂 dict 复现畸形）。"""
+    """Mapping entry validation (the common narrow gate after text parsing; unit tests
+    feed dicts directly to reproduce malformed shapes)."""
     if not isinstance(data, dict):
         raise DeclError("%s：声明根必须是映射（got %s）" % (source, type(data).__name__))
     unknown_top = sorted(set(data) - {"schema", "instances"})
@@ -338,8 +364,10 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
 
 
 def build_schedule_specs(decl: InspectionDecl) -> List[Dict[str, Any]]:
-    """行为级声明消费点（M1 验收③）：只输出**启用**实例的调度意图。
-    禁用实例产出为零——「enabled=false 不跑」在这里成形，触发面只认本函数输出。"""
+    """The behavior-level declaration consumption point (M1 acceptance 3): outputs the
+    scheduling intent of **enabled** instances only.
+    Disabled instances produce nothing — "enabled=false does not run" takes shape here,
+    and the trigger surface trusts only this function's output."""
     specs: List[Dict[str, Any]] = []
     for it in decl.instances:
         if not it.enabled:
@@ -352,8 +380,10 @@ def build_schedule_specs(decl: InspectionDecl) -> List[Dict[str, Any]]:
             "n": it.n,
             "workflow": it.workflow,
             "template": it.template,
-            # overlap 语义（照搬取舍清单①）：同实例同期重复触发合并为一张票（每期一票），
-            # 撞期不另开——schedule 层 SKIP，workflow id 幂等兜底（见 inspection_trigger.py）。
+            # overlap semantics (borrowed from trade-off list item 1): repeated triggers of
+            # the same instance in the same period merge into one ticket (one ticket per
+            # period), no extra ticket on collision — SKIP at the schedule layer, with the
+            # workflow id's idempotency as the backstop (see inspection_trigger.py).
             "overlap": "SKIP",
         })
     return specs
