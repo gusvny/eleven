@@ -198,18 +198,18 @@ section('B findCharterBubble：定位纯函数')
 {
   { const { scroll, bubble } = charterScrollDoc()
     ok(findCharterBubble(scroll) === bubble, '唯一子链上爬到有兄弟层=消息气泡') }
-  { // 滚动体直接子层：scroll > [bubbleCharter, reply]
+  { // the scroll element's direct child layer: scroll > [bubbleCharter, reply]
     const scroll = el('div'); const bubble = el('div', `${CHARTER_MARKER}\nx`); const reply = el('div', 'r')
     scroll.append(bubble, reply)
     ok(findCharterBubble(scroll) === bubble, '滚动体直接子层=气泡') }
-  { // 无兄弟可分层：scroll > wrap > bubbleCharter——唯一子链爬到滚动体直接子层
+  { // no sibling level to split on: scroll > wrap > bubbleCharter — the only-child chain climbs to the scroll element's direct child layer
     // Stop here (wrap=bubble; folding it is the correct semantics: only this message is hidden, the mini-bar is carried by the wrap's parent level).
     const scroll = el('div'); const wrap = el('div'); const bubble = el('div', `${CHARTER_MARKER}\nx`)
     wrap.append(bubble); scroll.append(wrap)
     ok(findCharterBubble(scroll) === wrap, '独苗链爬到滚动体直接子层=wrap（可折）') }
   { const scroll = el('div'); scroll.append(el('div', '没有注入物'))
     ok(findCharterBubble(scroll) === null, '无 marker=null') }
-  { // 深嵌套：marker 在最内 c，唯一子链上爬停在「父层有兄弟」的 b 层（b=消息容器，
+  { // deeply nested: the marker sits in the innermost c; the only-child chain stops at b, the level whose parent has a sibling (b = the message container,
       // a = the list level that has siblings, not the bubble).
     const scroll = el('div'); const a = el('div'); const b = el('div'); const c = el('div', `${CHARTER_MARKER}\nx`)
     b.append(c); a.append(b); const sibling = el('div', 'sib'); a.append(sibling); scroll.append(a)
@@ -252,17 +252,17 @@ section('C applyContextFold：施折面')
 
 section('D 孤儿小条：气泡移除/清空/改写后不残留（review 条件 A）')
 {
-  { // 气泡被移除（会话切换：列表整体替换）
+  { // the bubble was removed (session switch: the list is replaced wholesale)
     const { doc, scroll, list, bubble } = charterScrollDoc()
     const stop = startContextFold({ doc })
     ok(scroll.querySelectorAll(`[${CHIP_ATTR}]`).length === 1, '前置：小条在场')
-    list._kids = list._kids.filter(c => c !== bubble) // 模拟 React 清气泡（小条非 React 记录节点，不被清）
+    list._kids = list._kids.filter(c => c !== bubble) // simulating React dropping the bubble (the mini-bar is not a React-recorded node, so it is not dropped)
     applyContextFold(scroll, doc)
     ok(scroll.querySelectorAll(`[${CHIP_ATTR}]`).length === 0, '气泡被移除：小条被孤儿清扫摘除')
     ok(bubble.getAttribute(FOLD_ATTR) === null, '被摘气泡的折叠态属性清除')
     stop()
   }
-  { // 容器内容清空
+  { // the container's contents were emptied
     const { doc, scroll, list } = charterScrollDoc()
     const stop = startContextFold({ doc })
     list._kids = []
@@ -270,7 +270,7 @@ section('D 孤儿小条：气泡移除/清空/改写后不残留（review 条件
     ok(scroll.querySelectorAll(`[${CHIP_ATTR}]`).length === 0, '容器清空：小条不残留')
     stop()
   }
-  { // 气泡文本被改写（marker 消失）
+  { // the bubble text was rewritten (the marker disappeared)
     const { doc, scroll, p } = charterScrollDoc()
     const stop = startContextFold({ doc })
     p._text = '普通回复文本'
@@ -292,9 +292,9 @@ section('E start/stop 生命周期')
   ok((doc._listeners.click ?? []).length === 0, 'stop 解绑 click')
   ok(scroll.querySelectorAll(`[${CHIP_ATTR}]`).length === 0, 'stop 摘自铸小条')
   ok(bubble.getAttribute(FOLD_ATTR) === null, 'stop 摘折叠态属性')
-  stop() // 幂等
+  stop() // idempotent
   ok((doc._listeners.click ?? []).length === 0 && doc._style === null, 'stop 幂等')
-  { // 无 document 软退化
+  { // soft degradation without a document
     const savedDoc = globalThis.document
     // @ts-expect-error stub surface
     globalThis.document = undefined
@@ -317,7 +317,7 @@ section('F 引用计数单例：双 start 只绑一次 / StrictMode 序列')
   ok(doc._style !== null, '引用未归零：style 仍在')
   stop2()
   ok((doc._listeners.click ?? []).length === 0 && doc._style === null, '引用归零才真拆')
-  { // StrictMode：start→stop→start 第二段仍活
+  { // StrictMode: start→stop→start, the second stint stays alive
     const s1 = startContextFold({ doc })
     s1()
     const s2 = startContextFold({ doc })
@@ -336,11 +336,11 @@ section('G 点击委托：展开/收起')
   ok(bubble.getAttribute(FOLD_ATTR) === 'open' && chip.textContent === CHIP_LABEL_OPEN, '点小条：展开+文案切换')
   click({ target: chip })
   ok(bubble.getAttribute(FOLD_ATTR) === 'folded' && chip.textContent === CHIP_LABEL_FOLDED, '再点：收起+文案还原')
-  click({ target: bubble }) // 非小条点击
+  click({ target: bubble }) // a click that is not on the mini-bar
   ok(bubble.getAttribute(FOLD_ATTR) === 'folded', '非小条点击不动')
-  click({ target: { closest: () => null } }) // closest 不命中
+  click({ target: { closest: () => null } }) // closest finds nothing
   ok(bubble.getAttribute(FOLD_ATTR) === 'folded', 'closest 不命中不动')
-  click({ target: null }) // 畸形 target
+  click({ target: null }) // malformed target
   ok(bubble.getAttribute(FOLD_ATTR) === 'folded', 'target=null 容错不抛')
   stop()
 }
@@ -357,7 +357,7 @@ section('H children=HTMLCollection 语义回归（arbitrate round1 code-fault �
   const stop = startContextFold({ doc })
   ok(bubble.getAttribute(FOLD_ATTR) === 'folded' && scroll.querySelectorAll(`[${CHIP_ATTR}]`).length === 1,
     '无数组方法 children 上折叠全链路照常工作（Array.from 消费）')
-  applyContextFold(scroll, doc) // 重复回调（原崩溃路径：elementChildren().some）
+  applyContextFold(scroll, doc) // repeated callback (the original crash path: elementChildren().some)
   ok(scroll.querySelectorAll(`[${CHIP_ATTR}]`).length === 1, '重复回调不再 TypeError（回归锚）')
   stop()
 }
@@ -397,7 +397,7 @@ section('I 平台锚聚合：叠台 N+1 全折 + 恰一小条 + 去重 + 负向'
     ok(again === 'folded' && scroll.querySelectorAll(`[${CHIP_ATTR}]`).length === 1, '叠台重复回调幂等')
     stop()
   }
-  { // 多锚命中同一消息：Instructions from 行 + CLAUDE.md 头行同处一条气泡=去重为 1
+  { // several anchors hit the same message: the Instructions-from line and the CLAUDE.md header share one bubble = deduped to 1
     const scroll = el('div'); const list = el('div')
     const b = el('div'); b.append(el('p', `${INSTR}\n# sandbar — 多项目工单引擎\n正文`))
     const reply = el('div', 'r'); list.append(b, reply); scroll.append(list)
@@ -411,7 +411,7 @@ section('I 平台锚聚合：叠台 N+1 全折 + 恰一小条 + 去重 + 负向'
       '单注入物（N=1）：文案与现行逐字一致不带计数')
     stop()
   }
-  { // 负向：普通用户消息绝不折（含中段提及锚字样/CLAUDE.md 字样）
+  { // negative: an ordinary user message is never folded (not even when it mentions anchor wording / CLAUDE.md mid-text)
     const scroll = el('div'); const list = el('div')
     const u1 = el('div'); u1.append(el('p', '帮我看看 CLAUDE.md 的硬规则第一条'))
     const u2 = el('div'); u2.append(el('p', `上文提过「${RTX}」这句，什么意思？`))
@@ -423,7 +423,7 @@ section('I 平台锚聚合：叠台 N+1 全折 + 恰一小条 + 去重 + 负向'
     ok(scroll.querySelectorAll(`[${CHIP_ATTR}]`).length === 0, '普通消息会话无小条')
     stop()
   }
-  { // 独苗降级：scroll > wrap > 单条平台消息（唯一子链爬到滚动体直接子层=wrap，可折）
+  { // only-child fallback: scroll > wrap > a single platform message (the only-child chain climbs to the scroll element's direct child layer = wrap, foldable)
     const scroll = el('div'); const wrap = el('div'); wrap.append(el('div', `${RTX}\n快照正文`)); scroll.append(wrap)
     const doc = docOf(scroll)
     const stop = startContextFold({ doc })
@@ -450,10 +450,10 @@ section('J 聚合组开收：整组切换 + 计数文案随态')
 
 section('K 聚合孤儿清扫：逐气泡失效、全失效才摘条')
 {
-  { // 部分失效（文本改写去锚）：失效者摘属性+出集合，小条保留且计数降档
+  { // partial invalidation (a text rewrite removes the anchor): the invalidated bubble loses its attribute and leaves the set, the mini-bar stays and the count steps down
     const { doc, scroll, bubbles, list } = stackedScrollDoc()
     const stop = startContextFold({ doc })
-    bubbles[0].querySelectorAll('*')[0]._text = '这条被改写成普通文本' // 清 b1 的 p 文本
+    bubbles[0].querySelectorAll('*')[0]._text = '这条被改写成普通文本' // wiping b1's p text
     applyContextFold(scroll, doc)
     ok(bubbles[0].getAttribute(FOLD_ATTR) === null, '失效气泡：折叠属性摘除')
     ok(bubbles.slice(1).every(b => b.getAttribute(FOLD_ATTR) === 'folded'), '有效气泡保持折叠')
@@ -462,7 +462,7 @@ section('K 聚合孤儿清扫：逐气泡失效、全失效才摘条')
     ok(list.children.length === 6, '小条仍在 list 内（4 消息+小条+回复=6，未漂移）')
     stop()
   }
-  { // 全部失效（React 清掉自己记录的消息节点，外部小条不被清）：小条摘除（幽灵不过夜）
+  { // everything invalidated (React drops its own recorded message nodes, external mini-bars are not dropped): the mini-bar comes off (no ghost left overnight)
     const { doc, scroll, bubbles, list } = stackedScrollDoc()
     const stop = startContextFold({ doc })
     for (const b of bubbles) b.remove()
@@ -479,7 +479,7 @@ section('L warn 收窄：charter >1 才 warn，平台叠加不 warn')
   let warned = ''
   console.warn = (...a) => { warned += a.join(' ') }
   try {
-    { // 平台 3 条 + charter 1 条：不 warn
+    { // 3 platform + 1 charter: no warn
       const { doc } = stackedScrollDoc()
       const stop = startContextFold({ doc })
       console.warn = origWarn
@@ -488,7 +488,7 @@ section('L warn 收窄：charter >1 才 warn，平台叠加不 warn')
     }
     warned = ''
     console.warn = (...a) => { warned += a.join(' ') }
-    { // charter 2 条：warn 一次
+    { // 2 charter: one warn
       const scroll = el('div'); const list = el('div')
       const m1 = el('div'); m1.append(el('p', `${CHARTER_MARKER}\nx`))
       const m2 = el('div'); m2.append(el('p', `${CHARTER_MARKER}\ny`))
@@ -502,7 +502,7 @@ section('L warn 收窄：charter >1 才 warn，平台叠加不 warn')
   } finally {
     console.warn = origWarn
   }
-  { // isFoldCandidate 与 classifyContextFold 口径冒烟（谓词常量消费面）
+  { // smoke for the isFoldCandidate vs classifyContextFold rule (the predicate constant's consumer side)
     ok(isFoldCandidate(`${CHARTER_MARKER}\nx`) === true, 'isFoldCandidate：marker 路径命中')
     ok(isFoldCandidate(`${RTX}\n快照`) === true, 'isFoldCandidate：平台锚路径命中')
     ok(isFoldCandidate('普通消息') === false && isFoldCandidate('') === false && isFoldCandidate(null) === false,
