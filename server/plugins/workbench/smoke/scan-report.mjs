@@ -1,13 +1,15 @@
 /**
- * smoke/scan-report.mjs —— sandbar-workbench M6「巡检报告」区的宿主半冒烟。
+ * smoke/scan-report.mjs — host half-smoke for the M6 "inspection report" area of sandbar-workbench.
  *
- * 直跑：node smoke/scan-report.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * 覆盖：
- *   A. readLatestScanReport（src/host/scan-report.ts，临时目录）：
- *      目录不存在→reason；空目录→暂无报告；多日期取文件名序最新；非报告文件不入
- *      候选（白名单 YYYY-MM-DD.json）；最新文件坏 JSON→解析失败 reason。
- *   B. /sandbar-workbench/api/wf/scan-report 路由（node.ts apply + mock webServer/req/res）：
- *      有报告→200+report 逐字段；无报告→200+reason 降级（不抛错）。
+ * Run: node smoke/scan-report.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+ * Covers:
+ *   A. readLatestScanReport (src/host/scan-report.ts, temp dir):
+ *      directory missing -> reason; empty directory -> no report yet; multiple dates take the
+ *      newest by filename order; non-report files are not candidates (whitelist YYYY-MM-DD.json);
+ *      the newest file with bad JSON -> a parse-failure reason.
+ *   B. /sandbar-workbench/api/wf/scan-report route (node.ts apply + mock webServer/req/res):
+ *      report present -> 200 + report field by field; no report -> 200 + reason degradation
+ *      (no error).
  */
 
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
@@ -56,10 +58,10 @@ try {
   await writeFile(join(scanDir, '2026-08-20.json'), JSON.stringify({ generated_at: 'old', items: [] }), 'utf8')
   await writeFile(join(scanDir, '2026-08-22.json'), JSON.stringify(SAMPLE), 'utf8')
   await writeFile(join(scanDir, 'notes.txt'), '不是报告', 'utf8')
-  await writeFile(join(scanDir, '2026-08-99.json'), JSON.stringify({ generated_at: 'bad-date' }), 'utf8') // 格式合法但日期假——仍按文件名取
+  await writeFile(join(scanDir, '2026-08-99.json'), JSON.stringify({ generated_at: 'bad-date' }), 'utf8') // well-formed JSON but a fake date — still picked by filename order
   r = await readLatestScanReport(scanDir)
   ok(r.file === '2026-08-99.json', '取文件名序最新（白名单只卡格式不卡日历真伪）')
-  r = await (async () => { // 去掉假日期文件后再取
+  r = await (async () => { // pick again after removing the fake-date file
     const { unlink } = await import('node:fs/promises')
     await unlink(join(scanDir, '2026-08-99.json'))
     return readLatestScanReport(scanDir)
@@ -73,16 +75,16 @@ try {
   ok(r.file === '2026-08-23.json' && r.report === null && r.reason.includes('解析失败'),
     '最新文件坏 JSON → 解析失败 reason（不抛错）')
 
-  /* ------------------------------------------------------------ B. 路由 */
+  /* ------------------------------------------------------------ B. Route */
   section('B /sandbar-workbench/api/wf/scan-report 路由（mock webServer）')
   {
-    // 清掉坏文件，留 2026-08-22 作为最新
+    // Delete the bad file, keep 2026-08-22 as the newest
     const { unlink } = await import('node:fs/promises')
     await unlink(join(scanDir, '2026-08-23.json'))
-    // 构造 node.ts 期望的 repo 布局：<repo>/server/engine/out/scan
+    // Build the repo layout node.ts expects: <repo>/server/engine/out/scan
     const repo = join(tmp, 'repo')
     await mkdir(join(repo, 'server', 'engine', 'out'), { recursive: true })
-    // 用符号链接把临时 scan 目录挂进 repo 布局（免复制）
+    // Symlink the temp scan dir into the repo layout (no copy needed)
     const { symlink } = await import('node:fs/promises')
     await symlink(scanDir, join(repo, 'server', 'engine', 'out', 'scan'))
 
@@ -108,7 +110,7 @@ try {
     ok(res.body.result.file === '2026-08-22.json', '命中最新报告文件')
     ok(res.body.result.report.items[0].ticket_id === 't-smoke-scan', '报告内容透传')
 
-    // 无报告场景：另一个 repo 布局（目录不存在）→ 200 + reason 降级
+    // No-report scenario: another repo layout (directory missing) -> 200 + reason degradation
     const res2 = {
       status: 0, body: null,
       writeHead(s) { this.status = s },

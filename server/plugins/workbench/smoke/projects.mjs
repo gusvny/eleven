@@ -1,13 +1,13 @@
 /**
- * smoke/projects.mjs —— 项目注册表解析器纯函数冒烟。
+ * smoke/projects.mjs — smoke for the project registry parser pure functions.
  *
- * 直跑：node smoke/projects.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * 覆盖 project-registry.ts parseProjectsYaml：
- *   A. 标准单项目（含注释/空行）→ key/name/dirs 解析正确。
- *   B. 多项目 + 多目录（1:N）→ 顺序与归属正确。
- *   C. 写坏的形状一律抛错：缺 projects: 根 / dirs 相对路径 / 缺 name / 缺 dirs / key 重复 /
- *      key 形状不合法 / 不认的键 / dirs 同行给值。
- *   D. PROJECT_KEY_RE 边界。
+ * Run: node smoke/projects.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+ * Covers project-registry.ts parseProjectsYaml:
+ *   A. A standard single project (with comments / blank lines) -> key/name/dirs parsed correctly.
+ *   B. Multiple projects + multiple dirs (1:N) -> order and ownership correct.
+ *   C. Every broken shape throws: missing projects: root / relative dirs path / missing name /
+ *      missing dirs / duplicate key / illegal key shape / unknown key / dirs value on the same line.
+ *   D. PROJECT_KEY_RE boundaries.
  */
 
 import { parseProjectsYaml, PROJECT_KEY_RE } from '../../../project-registry.ts'

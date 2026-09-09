@@ -1,17 +1,21 @@
 /**
- * smoke/session-charter.mjs —— session-charter 渲染纯函数 + 接线锚冒烟（t260904-07）。
+ * smoke/session-charter.mjs — smoke for the session-charter render pure functions + wiring anchors (t260904-07).
  *
- * 直跑：node smoke/session-charter.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * 覆盖：
- *   A. renderSessionCharter：四占位符全量替换（含注释/分段内字样，R4 统一渲染）、
- *      多次出现、未知占位符不动、非字符串容错、vars 缺项容错。
- *   B. splitProjectSections：通用段/分段切分、key trim、重复分段、无分段、畸形输入。
- *   C. composeSessionCharter：真实 charter 文件渲染（分段命中/未命中）、
- *      缺文件/空/非字符串回落兜底模板（不 5xx 语义）、渲染结果空回落、空 key、
- *      重复分段取首个。
- *   D. 源文本断言：node.ts 路由注册（SESSION_CHARTER_PATH 同源常量，R7 防漂移）、
- *      session-entry 注入守卫（blank 判定/恰一次 prompt 调用点/TOCTOU 复核/就地
- *      try-catch）、charter 文件内容锚（两条宿主纪律/在案授权=无/两分段/四占位符）。
+ * Run: node smoke/session-charter.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+ * Covers:
+ *   A. renderSessionCharter: all four placeholders replaced (including placeholder-like text
+ *      inside comments and sections, R4 unified rendering), multiple occurrences, unknown
+ *      placeholders untouched, non-string input tolerated, missing vars entries tolerated.
+ *   B. splitProjectSections: generic-section / per-section split, key trimming, duplicate
+ *      sections, no sections, malformed input.
+ *   C. composeSessionCharter: rendering the real charter file (section hit / miss),
+ *      missing file / empty / non-string falls back to the fallback template (no-5xx
+ *      semantics), empty render result falls back, empty key, duplicate sections take the first.
+ *   D. Source-text assertions: the node.ts route registration (SESSION_CHARTER_PATH same-source
+ *      constant, R7 anti-drift), the session-entry injection guards (blank judgment / exactly
+ *      one prompt call site / TOCTOU re-check / local try-catch), the charter file content
+ *      anchors (the two host disciplines / in-case authorization = none / two sections /
+ *      four placeholders).
  */
 
 import { readFileSync } from 'node:fs'
@@ -26,8 +30,8 @@ import {
 } from '../src/host/session-charter.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
-// cwd 兼容：仓库根（run_tests 约定）或 workbench 目录直跑都能定位真源文件。
-// here=<repo>/server/plugins/workbench/smoke → 上四级=仓库根。
+// cwd compatibility: works both from the repo root (the run_tests convention) and from the
+// workbench directory directly. here=<repo>/server/plugins/workbench/smoke -> four levels up = repo root.
 const repoRoot = join(here, '..', '..', '..', '..')
 const charterFilePath = join(repoRoot, 'server', 'session_charter.md')
 const nodeTsPath = join(repoRoot, 'server', 'plugins', 'workbench', 'node.ts')
@@ -41,9 +45,9 @@ function ok(cond, label) {
 }
 function section(t) { console.log(`\n== ${t}`) }
 
-// 真源 charter 文件（C 段渲染输入 / D 段内容锚同源）。
+// The real charter file (the rendering input of section C / the content anchor of section D, same source).
 const real = readFileSync(charterFilePath, 'utf8')
-// 剥注释行后的源码（恰一次计数等源断言只看代码，不看头注）。
+// Source with comment lines stripped (counting assertions like "exactly once" only look at code, not the header).
 const entryCode = readFileSync(entryTsxPath, 'utf8')
   .split('\n')
   .filter(l => { const t = l.trim(); return !t.startsWith('*') && !t.startsWith('/*') && !t.startsWith('//') })

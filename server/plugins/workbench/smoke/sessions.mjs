@@ -1,27 +1,36 @@
 /**
- * smoke/sessions.mjs —— sandbar-workbench 会话记账层纯函数冒烟（t260828-02 建，
- * 口径：项目归属 + 只列 UI 主动打开的会话；t260831-02 起消费方=顶部会话入口行，
- * 左栏「会话」区块已移除——记账层语义零改动，本文件口径不变照常全绿）。
+ * smoke/sessions.mjs — smoke for the session ledger pure functions of sandbar-workbench
+ * (created t260828-02; criterion: project attribution + only sessions the UI actively opened;
+ * since t260831-02 the consumer is the top session-entry row and the left-rail "sessions"
+ * block has been removed — the ledger semantics are unchanged, this file's criterion is
+ * unchanged and stays fully green).
  *
- * 直跑：node smoke/sessions.mjs（node ≥22.18 原生 type-stripping，直接 import .ts）。
- * 覆盖 parseLedger / serializeLedger / touchEntry / removeEntry / pickProjectTabs /
- * isGlobalSessionId / labelOf（src/shared/sessions.ts）。
- * 票② R8（t260904-05）：顶部行专属组 E/F/G/H/I/J/N 与 O 段顶部行零回归锚随
- * pickSwitchTargets/SWITCH_LIMIT/renameEntry 退役删除；K/M 渲染代理改
- * pickProjectTabs（项目行=账册唯一渲染消费面）：
- *   A. parseLedger 容错：坏 JSON / 非数组 / 脏条目（缺 id、缺 project、lastOpenedAt
- *      非有限数）剔除；同 id 重复只留首份；空入参 → 空册。
- *   B. touchEntry 登记：新条目入 MRU 头部；同 id upsert（更新 project/cwd/时间并提头）；
- *      ticket- 前缀工单会话与空 project 拒绝入账；不改入参。
- *   C. touchEntry 上限：超 LEDGER_CAP 淘汰最旧（MRU 收敛）。
- *   D. removeEntry：按 id 剔除，不存在的 id 无害。
- *   K. 磁盘存量/工单/subagent 口径：账册里没有的 id 再大 updatedAt 也不出现
- *     （列表数据源=账册而非全量枚举——本单的核心口径）。
- *   L. serializeLedger ↔ parseLedger 往返一致。
- *   M. chat- 会话入账回归（t260831-04 缺陷①防线）：chat-<ts>-<rand4> 走通
- *      「入账 → 渲染 ≥1 行」全链；账册往返后行仍在；removeEntry 语义边界。
- *   O. seq/title 字段透传（记账层）：畸形输入剔字段不崩、往返持久化保留
- *      （深度口径在 smoke/project-sessions.mjs；重命名/顶部行渲染锚已退役）。
+ * Run: node smoke/sessions.mjs (node >= 22.18 native type-stripping, imports .ts directly).
+ * Covers parseLedger / serializeLedger / touchEntry / removeEntry / pickProjectTabs /
+ * isGlobalSessionId / labelOf (src/shared/sessions.ts).
+ * Ticket 2 R8 (t260904-05): the top-row-specific groups E/F/G/H/I/J/N and the section-O
+ * top-row zero-regression anchors were deleted with pickSwitchTargets/SWITCH_LIMIT/renameEntry;
+ * K/M render proxies changed to pickProjectTabs (the project row = the ledger's only render
+ * consumer surface):
+ *   A. parseLedger tolerance: bad JSON / non-array / dirty entries (missing id, missing
+ *      project, non-finite lastOpenedAt) dropped; duplicate ids keep only the first; empty
+ *      input -> empty ledger.
+ *   B. touchEntry registration: a new entry goes to the MRU head; same-id upsert (updates
+ *      project/cwd/time and moves to the head); ticket- prefixed ticket sessions and empty
+ *      project are refused; input not mutated.
+ *   C. touchEntry cap: over LEDGER_CAP the oldest is evicted (MRU convergence).
+ *   D. removeEntry: removes by id, a missing id is harmless.
+ *   K. Disk-existing/ticket/subagent criterion: an id not in the ledger never appears no
+ *      matter how large its updatedAt (the list data source is the ledger, not full
+ *      enumeration — the core criterion of this ticket).
+ *   L. serializeLedger <-> parseLedger round-trip consistency.
+ *   M. chat- session registration regression (defense line for defect 1 of t260831-04):
+ *      a chat-<ts>-<rand4> session passes the full chain "touchEntry -> pickProjectTabs
+ *      project-row tab render"; the row survives a ledger round-trip; removeEntry semantics
+ *      boundary.
+ *   O. seq/title field pass-through (ledger layer): malformed input drops the field without
+ *      crashing, the round-trip keeps it (the deep criterion lives in smoke/project-sessions.mjs;
+ *      the rename/top-row render anchors are retired).
  */
 
 import {
@@ -43,7 +52,7 @@ function ok(cond, label) {
 }
 function section(t) { console.log(`\n== ${t}`) }
 
-/** 造一条账册条目（lastOpenedAt 直接给序数，越大越新）。 */
+/** Build one ledger entry (lastOpenedAt given directly as an ordinal, larger = newer). */
 function ent(id, extra = {}) {
   return { id, project: 'suyou', cwd: '/repo/suyou', lastOpenedAt: 0, ...extra }
 }
@@ -56,10 +65,10 @@ section('A parseLedger 容错')
   ok(parseLedger('[1,"x",null]').length === 0, '非对象条目全脏 → 空册')
   const mixed = parseLedger(JSON.stringify([
     ent('good-1', { lastOpenedAt: 5 }),
-    { id: '', project: 'suyou' },                    // 空 id
-    { id: 'no-proj' },                               // 缺 project
-    { id: 'bad-ts', project: 'suyou', lastOpenedAt: 'x' }, // 时间非数 → 0 兜底保留
-    ent('good-1', { lastOpenedAt: 9 }),              // 重复 id → 只留首份
+    { id: '', project: 'suyou' },                    // empty id
+    { id: 'no-proj' },                               // missing project
+    { id: 'bad-ts', project: 'suyou', lastOpenedAt: 'x' }, // non-numeric time → kept with 0 fallback
+    ent('good-1', { lastOpenedAt: 9 }),              // duplicate id → keep only the first
   ]))
   ok(mixed.length === 2, '脏条目剔除、重复 id 去重')
   ok(mixed[0].id === 'good-1' && mixed[0].lastOpenedAt === 5, '重复 id 留最靠前一份')
@@ -92,7 +101,7 @@ section('C touchEntry 上限（MRU 收敛）')
   }
   ok(l.length === LEDGER_CAP && LEDGER_CAP === 20, '账册上限 20')
   ok(l[0].id === `chat-${LEDGER_CAP + 2}` && !l.some(e => e.id === 'chat-0'), '最旧的被淘汰、最新的在头部')
-  // upsert 不占新名额：满册时 touch 已有 id，长度不变
+  // upsert does not take a new slot: touching an existing id in a full ledger leaves the length unchanged
   l = touchEntry(l, { id: `chat-${LEDGER_CAP + 2}`, project: 'suyou', lastOpenedAt: 999 })
   ok(l.length === LEDGER_CAP && l[0].lastOpenedAt === 999, '满册 upsert 长度不变')
 }
@@ -108,8 +117,9 @@ section('D removeEntry')
 
 section('K 核心口径：列表=账册，不是全量枚举')
 {
-  // 磁盘存量/工单/subagent 会话在 ctx.sessions.list 的 byId 里都在，
-  // 但没登记进账册 → 一律不出现（本单相对 t260825-02 的口径翻转点）
+  // Disk-existing/ticket/subagent sessions are all in the byId map of ctx.sessions.list,
+  // but not registered in the ledger -> they never appear (the criterion flip of this
+  // ticket relative to t260825-02).
   const l = [ent('chat-mine', { lastOpenedAt: 1, seq: 1 })]
   const byId = {
     'chat-mine': { displayTitle: '我打开过的' },
@@ -132,28 +142,30 @@ section('L serializeLedger ↔ parseLedger 往返')
 
 section('M chat- 会话入账回归（t260831-04 缺陷①防线）')
 {
-  // 缺陷①的口径锚：global-session/open 铸造的 chat-<ts>-<rand4> 会话必须走通
-  // 「touchEntry 入账 → pickProjectTabs 项目行 tab 渲染」全链——任何一环把它
-  // 挡在 tab 外（门错杀/过滤错杀）都在这里红。生产注册表现状=单项目 suyou。
+  // The criterion anchor of defect 1: a chat-<ts>-<rand4> session cast by global-session/open
+  // must pass the full chain "touchEntry registration -> pickProjectTabs project-row tab
+  // render" — any link that keeps it out of the tab (gate false-kill / filter false-kill)
+  // goes red here. The production registration surface is currently the single project suyou.
   const sid = 'chat-20260831-120000-abcd'
   const ledger = touchEntry([], { id: sid, project: 'suyou', cwd: '/Users/user/Documents/sandbar', lastOpenedAt: 1, seq: 1 })
   ok(ledger.length === 1 && ledger[0].id === sid, 'chat- 会话入账不被 isGlobalSessionId 门错杀')
   const rows = pickProjectTabs(ledger, { project: 'suyou' })
   ok(rows.length >= 1 && rows[0].id === sid, '账册有货 → 项目行 tab 数 ≥1（缺陷①回归锚）')
-  // 缺陷③防线锚：超时不再自动 removeEntry——此处仅固化 removeEntry 语义边界，
-  // 「打开链超时不动账册」属 UI 层纪律（session-entry.tsx openSession，无自动调用点）。
+  // Defect-3 defense anchor: timeout no longer auto-removes entries — this only locks the
+  // removeEntry semantics boundary; "the open chain does not touch the ledger on timeout" is
+  // a UI-layer discipline (session-entry.tsx openSession, no automatic call site).
   const l2 = touchEntry([], { id: sid, project: 'suyou', lastOpenedAt: 2 })
   ok(removeEntry(l2, sid).length === 0 && l2.length === 1, 'removeEntry 仅显式路径可用，纯函数语义不变')
-  // 往返再渲染：账册经 localStorage 序列化往返后 chat- 条目仍能渲染出行
+  // Round-trip then render again: a chat- entry still renders a row after the ledger goes through localStorage serialization
   const rows2 = pickProjectTabs(parseLedger(serializeLedger(ledger)), { project: 'suyou' })
   ok(rows2.length === 1 && rows2[0].id === sid, '账册往返后 tab 仍在（持久化不丢入账）')
 }
 
 section('O seq/title 字段透传（记账层，第 3 面①：项目内登记序号，关闭不回收）')
 {
-  // touchEntry 带 seq 入账 + upsert 更新 + 畸形剔字段 + 往返持久化。
-  // 深度口径（补号/续号/不回收链）在 smoke/project-sessions.mjs，此处只守
-  // 记账层透传不回归。
+  // touchEntry carrying seq + upsert updates + malformed field dropping + round-trip persistence.
+  // The deep criterion (backfill/continuation/no-recycling chain) lives in smoke/project-sessions.mjs;
+  // here we only guard the ledger pass-through against regression.
   const l1 = touchEntry([], { id: 'chat-a', project: 'suyou', lastOpenedAt: 1, seq: 3 })
   ok(l1.length === 1 && l1[0].seq === 3, 'touchEntry 采纳有限数 seq')
   const l2 = touchEntry(l1, { id: 'chat-a', project: 'suyou', lastOpenedAt: 2, seq: 4 })
@@ -164,7 +176,7 @@ section('O seq/title 字段透传（记账层，第 3 面①：项目内登记�
   ok(bad2.length === 1 && bad2[0].seq === undefined, 'parseLedger 非数字 seq 剔字段')
   const back = parseLedger(serializeLedger(l2))
   ok(back.length === 1 && back[0].seq === 4, 'seq 往返持久化保留')
-  // 渲染零回归锚（票② R8 后唯一消费面=项目行）：带 seq 条目照常出 tab
+  // Zero-render-regression anchor (after ticket 2 R8 the only consumer surface is the project row): an entry with seq still produces a tab
   const tabs = pickProjectTabs(l2, { project: 'suyou' })
   ok(tabs.length === 1 && tabs[0].id === 'chat-a' && tabs[0].seq === 4, '带 seq 条目经项目行照常渲染')
 }
