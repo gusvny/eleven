@@ -1,17 +1,20 @@
-"""Temporal POC 公共配置与数据契约。
+"""Temporal POC shared configuration and data contracts.
 
-工单真源恒为 **Temporal workflow**（v2 模版即代码，base.py 六子类）；workflow id
-= 工单 id（单例）；项目区分 = ProjectKey search attribute（ticket-start 打标，
-ticket-list --project 过滤）。
+The ticket's source of truth is always the **Temporal workflow** (the v2 templates are
+code, the six subclasses in base.py); workflow id = ticket id (a singleton); project
+separation = the ProjectKey search attribute (stamped by ticket-start, filtered by
+ticket-list --project).
 
-保留步1 的 ContentPipelineWorkflow / DispatcherScanWorkflow 与 demo 数据契约（向后兼容）。
+Step 1's ContentPipelineWorkflow / DispatcherScanWorkflow and the demo data contracts
+are kept (backward compatible).
 
-路径可被环境变量覆盖（自测用临时目录）：
-  SANDBAR_WORKFLOWS_DIR  模板目录（缺省 <repo>/server/workflows）
+Paths can be overridden by environment variables (temp dirs for self-tests):
+  SANDBAR_WORKFLOWS_DIR  the template directory (default <repo>/server/workflows)
 
-命名终切（票 t260907-04 铺桥、260908 落地）：env 全仓 SANDBAR_*、共享队列单名
-sandbar、泳道协调目录新名 .sandbar/（老名粘滞读点保留处理在飞老泳道，
-见各 # naming-compat 标记）。
+Final naming switch (bridged by ticket t260907-04, landed 260908): env is SANDBAR_*
+repo-wide, the shared queue is the single name sandbar, and the lane coordination
+directory's new name is .sandbar/ (the old name stays as a sticky read side to handle
+in-flight old lanes — see the individual # naming-compat markers).
 """
 
 from __future__ import annotations
@@ -25,34 +28,39 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 
-# ---- env 命名（票 t260907-04 铺桥、260908 终切）----
-# SANDBAR_* 是唯一 env 前缀（SUYOU_* 旧名已随终切退役）。双向桥 apply_env_compat
-# 已整函数删除（KI-058 的镜像乒乓病随桥根治）——注入侧一律写 SANDBAR_*。
+# ---- env naming (bridged by ticket t260907-04, final switch 260908) ----
+# SANDBAR_* is the only env prefix (the old SUYOU_* names were retired with the final
+# switch). The bidirectional bridge apply_env_compat was deleted as a whole function
+# (the mirror ping-pong disease of KI-058 was cured by removing the bridge) —
+# injection sides always write SANDBAR_*.
 ENV_PREFIX = "SANDBAR_"
 
-# ---- 路径 ----
+# ---- Paths ----
 POC_DIR = pathlib.Path(__file__).resolve().parent
-REPO_ROOT = POC_DIR.parents[1]          # server/engine -> 仓库根
+REPO_ROOT = POC_DIR.parents[1]          # server/engine -> repo root
 ADMIN_PY = REPO_ROOT / "server" / "admin.py"
 WORKFLOWS_DIR = pathlib.Path(os.environ.get("SANDBAR_WORKFLOWS_DIR") or (REPO_ROOT / "server" / "workflows"))
 OUT_DIR = POC_DIR / "out"
 
-# ---- Temporal 接入点 ----
-# 可被环境变量覆盖（测试环境走 Docker 独立 Temporal，见 docs/testing-guide.md）：
-#   SANDBAR_TARGET_HOST    Temporal gRPC 地址（缺省生产 127.0.0.1:7233）
-#   SANDBAR_NAMESPACE      Temporal namespace（缺省 default）
+# ---- Temporal endpoints ----
+# Overridable by environment variables (the test environment runs its own Temporal in
+# Docker, see docs/testing-guide.md):
+#   SANDBAR_TARGET_HOST    Temporal gRPC address (production default 127.0.0.1:7233)
+#   SANDBAR_NAMESPACE      Temporal namespace (default "default")
 TARGET_HOST = os.environ.get("SANDBAR_TARGET_HOST") or "127.0.0.1:7233"
 NAMESPACE = os.environ.get("SANDBAR_NAMESPACE") or "default"
-# 共享队列（票 t260907-04 改名、260908 终切）：单名 sandbar。SANDBAR_TASK_QUEUE
-# 可覆盖（测试注入用）。SANDBAR_TASK_QUEUES（CSV）= 专属 worker 的多队列模式
-# （ticket_worker spawn 注入 ticket 专属队列组）。
+# Shared queue (renamed in ticket t260907-04, final switch 260908): the single name
+# sandbar. SANDBAR_TASK_QUEUE can override it (for test injection).
+# SANDBAR_TASK_QUEUES (CSV) = the multi-queue mode for dedicated workers
+# (ticket_worker spawn injects a ticket-specific queue group).
 TASK_QUEUE = os.environ.get("SANDBAR_TASK_QUEUE") or "sandbar"
 TASK_QUEUES_ENV = "SANDBAR_TASK_QUEUES"
 
 
 def configured_task_queues() -> List[str]:
-    """本 worker 应 poll 的队列清单。多队列模式（SANDBAR_TASK_QUEUES CSV）优先；
-    缺省 = 单共享队列 sandbar（suyou-poc 旧队列双 poll 已随终切撤除）。"""
+    """The queues this worker should poll. Multi-queue mode (SANDBAR_TASK_QUEUES CSV)
+    wins; the default = the single shared queue sandbar (the old dual poll of the
+    suyou-poc queue was removed with the final switch)."""
     csv = os.environ.get(TASK_QUEUES_ENV)
     if csv:
         queues = [q.strip() for q in csv.split(",") if q.strip()]
@@ -60,66 +68,87 @@ def configured_task_queues() -> List[str]:
             return queues
     return [TASK_QUEUE]
 
-# ---- 每工单专属 worker ----
-# 工单 workflow 不上共享队列：每张工单一个 task queue（sandbar-ticket-<工单id>）+
-# 一个专属 worker 进程（ticket create 时拉起，workflow 收口后自退，巡检兜底救/收）。
-# 共享队列 sandbar 只留不属任何工单的 workflow（dispatcher-scan）。
-# 隔离语义：A 工单的旧代码 worker 永远抢不到 B 工单的任务（260824 版本投毒事件教训）。
+# ---- A dedicated worker per ticket ----
+# Ticket workflows stay off the shared queue: one task queue per ticket
+# (sandbar-ticket-<ticket id>) plus one dedicated worker process (started at ticket
+# create, exits by itself once the workflow closes out, with the inspection sweep as
+# the backstop to rescue/collect it).
+# The shared queue sandbar only keeps workflows that belong to no ticket
+# (dispatcher-scan).
+# Isolation semantics: a worker running ticket A's old code can never steal ticket B's
+# tasks (the lesson of the 260824 version-poisoning incident).
 TICKET_QUEUE_PREFIX = "sandbar-ticket-"
 def ticket_task_queue(ticket_id: str) -> str:
-    """工单专属 task queue 名（workflow 启动与专属 worker 两边一致）。"""
+    """The ticket-specific task queue name (identical on the workflow-start side and
+    the dedicated-worker side)."""
     return TICKET_QUEUE_PREFIX + ticket_id
 
 
 def ticket_task_queues(ticket_id: str) -> List[str]:
-    """专属 worker poll 清单（suyou-ticket- 旧前缀双 poll 已随终切撤除；保留
-    list 形态供 spawn 注入面兼容）。"""
+    """The dedicated worker's poll list (the old suyou-ticket- prefix dual poll was
+    removed with the final switch; the list shape is kept for spawn-injection surface
+    compatibility)."""
     return [TICKET_QUEUE_PREFIX + ticket_id]
 
-# ---- 多项目化：工单 workflow 按项目区分，同一个 Temporal 后端 ----
-# ProjectKey = Keyword search attribute，值 = 机器级 per-key 注册表 key
-# （真源 ~/.sandbar/projects/<key>/project.yaml，见 server/tools/ticket.py
-# 「项目注册表」节与 server/project-registry.ts，三处同一注册表口径）。
-# 注册：run_server.sh 启动参数自带；运行中的 server 用
+# ---- Multi-project: ticket workflows are separated per project, on one Temporal backend ----
+# ProjectKey = a Keyword search attribute whose value = the machine-level per-key
+# registry key (source of truth ~/.sandbar/projects/<key>/project.yaml; see the
+# 「项目注册表」 section of server/tools/ticket.py and server/project-registry.ts —
+# three places, one registry stance).
+# Registration: run_server.sh's launch arguments carry it; for a running server use
 #   bin/temporal operator search-attribute create --name ProjectKey --type Keyword
-# 测试环境（docker-compose.test.yml temporalite）启动后同样 operator create 一次。
+# The test environment (docker-compose.test.yml temporalite) does the same operator
+# create once after startup.
 PROJECT_SA_NAME = "ProjectKey"
 
 
 def project_search_attributes(project: str):
-    """构造 ProjectKey typed SA（start_workflow 打标用；ticket-list --project 按它过滤）。
-    temporalio 延迟到函数内 import——本模块保持 stdlib-only（server/tools/ticket.py 直载）。"""
+    """Build the ProjectKey typed SA (for stamping start_workflow; ticket-list
+    --project filters on it). temporalio is imported inside the function — this module
+    stays stdlib-only (server/tools/ticket.py loads it directly)."""
     from temporalio.common import SearchAttributeKey, SearchAttributePair, TypedSearchAttributes
     return TypedSearchAttributes([SearchAttributePair(SearchAttributeKey.for_keyword(PROJECT_SA_NAME), project)])
 
-# ---- 立项关联（epic-linkage，260824）：工单 workflow 可按立项代号关联 ----
-# EpicCode = Keyword search attribute，值 = notes/epics/<代号>.md 的文件主名。
-# 注册：run_server.sh 启动参数自带；运行中的 server 用
+# ---- Epic linkage (260824): a ticket workflow can be tied to an epic code ----
+# EpicCode = a Keyword search attribute whose value = the file stem of
+# notes/epics/<code>.md.
+# Registration: run_server.sh's launch arguments carry it; for a running server use
 #   bin/temporal operator search-attribute create --name EpicCode --type Keyword
-# 测试环境（docker-compose.test.yml temporalite）启动后同样 operator create 一次。
+# The test environment (docker-compose.test.yml temporalite) does the same operator
+# create once after startup.
 EPIC_SA_NAME = "EpicCode"
-# legacy 常量：import 时固化 env（「先设 env 后 import」语义），运行路径一律走
-# resolve_epics_dir（票 t260907-07 立项单校验项目感知化）。剩余消费面：
-#   1. validate_epic_code 默认参数路径（唯一生产消费=server/tools/ticket.py
-#      list --epic 过滤，写集外遗留——对 external 项目仍按引擎锚拒收）；
-#   2. 自测/夹具经 env SANDBAR_EPICS_DIR 覆盖（与 resolve_epics_dir 的
-#      env 现读同键）。
-# prepare_epic_next（agent_activities）已迁 resolve_epics_dir，不再消费本常量。
+# Legacy constant: env is frozen at import time ("set env, then import" semantics),
+# while the runtime paths all go through resolve_epics_dir (ticket t260907-07 made the
+# epic-document validation project-aware). Remaining consumers:
+#   1. the validate_epic_code default-argument path (the only production consumer =
+#      server/tools/ticket.py list --epic filtering, a leftover outside the write set —
+#      external projects are still rejected on the engine anchor);
+#   2. self-tests / fixtures overriding via env SANDBAR_EPICS_DIR (the same key as
+#      resolve_epics_dir's live env read).
+# prepare_epic_next (agent_activities) has moved to resolve_epics_dir and no longer
+# consumes this constant.
 EPICS_DIR = pathlib.Path(os.environ.get("SANDBAR_EPICS_DIR") or (REPO_ROOT / "notes" / "epics"))
-# 代号形状白名单：沿用 PROJECT_KEY_RE 字符集，同时防 ../../ 路径穿越。
+# Code-shape whitelist: reuses the PROJECT_KEY_RE character set and also blocks
+# ../../ path traversal.
 EPIC_CODE_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
 
 
 def resolve_epics_dir(project_key):
-    """立项档案目录解析单点（票 t260907-07：CLI 校验锚点=项目注册条目主目录，与
-    工单台 UI resolveEpicsDir 同源同规——同一注册表、同一拼装规则 <主目录>/notes/epics）。
+    """The single resolution point for the epic document directory (ticket t260907-07:
+    the CLI validation anchor = the project registry entry's home directory, same
+    source and same rule as the ticket console UI's resolveEpicsDir — the same
+    registry, the same assembly rule <home>/notes/epics).
 
-    三级解析（仿 registry_root 的「每次调用现读 env」先例）：
-      1. env SANDBAR_EPICS_DIR 非空 → 现读即用（自测语义不变）；
-      2. 否则 lookup_project(project_key)['dirs'][0] / notes/epics（未知 key/
-         隔离条目 ValueError fail-closed，不静默退引擎仓）；
-      3. project_key 空/None → 兜底 REPO_ROOT/notes/epics（引擎锚；生产不可达，
-         仅夹具/在飞工单兼容用，不构成语义承诺）。
+    Three-level resolution (mirroring registry_root's "read env fresh on every call"
+    precedent):
+      1. env SANDBAR_EPICS_DIR non-empty → use it as read (self-test semantics
+         unchanged);
+      2. otherwise lookup_project(project_key)['dirs'][0] / notes/epics (an unknown
+         key / an isolated entry is a fail-closed ValueError, never a silent retreat to
+         the engine repo);
+      3. empty/None project_key → fall back to REPO_ROOT/notes/epics (the engine
+         anchor; unreachable in production, kept only for fixture / in-flight ticket
+         compatibility — not a semantic promise).
     """
     env_dir = os.environ.get("SANDBAR_EPICS_DIR") or ""
     if env_dir.strip():
@@ -132,16 +161,19 @@ def resolve_epics_dir(project_key):
 
 
 def validate_epic_code(code: str, epics_dir=None) -> str:
-    """ticket-start --epic 强校验（校验单点，client.py 调用；ticket.py 只透传不
-    双份实现）。注意：校验单点≠目录锚点单点——目录解析统一走 resolve_epics_dir。
+    """Strict validation for ticket-start --epic (a single validation point, called by
+    client.py; ticket.py only passes through and keeps no second copy). Note: a single
+    validation point ≠ a single directory anchor — directory resolution always goes
+    through resolve_epics_dir.
 
-    epics_dir 缺省 None = legacy EPICS_DIR（引擎锚，ticket.py list --epic 遗留
-    路径）；调用方应显式传 resolve_epics_dir(project) 做项目感知校验。
+    epics_dir default None = the legacy EPICS_DIR (the engine anchor; the leftover
+    ticket.py list --epic path); callers should pass resolve_epics_dir(project)
+    explicitly to validate with project awareness.
 
-    空串放行（允许无 epic 工单）→ 返回 ""。形状非法 / 立项档案不存在 → ValueError
-    （文案带实际查询目录——项目锚下的诊断关键信息）。返回归一后的代号（原样；
-    白名单已约束形状）。
-    """
+    An empty string passes (tickets without an epic are allowed) → returns "". An
+    illegal shape / a missing epic document → ValueError (the message carries the
+    directory actually queried — key diagnostic information under a project anchor).
+    Returns the normalized code (as-is; the whitelist already constrains the shape)."""
     code = str(code or "").strip()
     if not code:
         return ""
@@ -159,8 +191,9 @@ def validate_epic_code(code: str, epics_dir=None) -> str:
 
 
 def ticket_search_attributes(project: str, epic: str = ""):
-    """构造工单 typed SA：ProjectKey 恒打 + epic 非空加打 EpicCode。
-    temporalio 延迟到函数内 import——本模块保持 stdlib-only（server/tools/ticket.py 直载）。"""
+    """Build the ticket's typed SA: ProjectKey always stamped, plus EpicCode when epic
+    is non-empty. temporalio is imported inside the function — this module stays
+    stdlib-only (server/tools/ticket.py loads it directly)."""
     from temporalio.common import SearchAttributeKey, SearchAttributePair, TypedSearchAttributes
     pairs = [SearchAttributePair(SearchAttributeKey.for_keyword(PROJECT_SA_NAME), project)]
     if epic:
@@ -168,21 +201,28 @@ def ticket_search_attributes(project: str, epic: str = ""):
     return TypedSearchAttributes(pairs)
 
 
-# ---- 立项下一单预跑（票 t260828-08）：merge 签字通过后预跑 integration 建议并落缓存 ----
-# 缓存真源 = <repoRoot>/.sandbar/epic-next/<code>/pre.json；读侧 = workbench
-# src/host/epic-next.ts readPrecache（互指同步：改一边必须同步另一边）。
-# 与同根 <jobId> 形状的 job 目录共存安全：job 目录清理只删「<code>-<base36时间戳>-<6hex>」
-# 形状的目录，<code>/ 子目录不在其列。
-# state_key 口径（与 epic-next.ts stateKeyFromRows 互指）：sorted "<id>:closed|open"
-# 行以 "\n" 拼接后 sha1 hex；**当前预跑工单一律按 closed 计入**（预跑只发生在 merge
-# 签字通过后，本票必然收口；host 读侧点击时工单已 closed，两侧口径对齐——否则缓存
-# 永不命中）。
+# ---- Pre-running the next ticket after epic creation (ticket t260828-08): after the merge sign-off, pre-run the integration suggestion and cache it ----
+# The cache's source of truth = <repoRoot>/.sandbar/epic-next/<code>/pre.json; the
+# read side = workbench src/host/epic-next.ts readPrecache (they reference each other
+# and must be updated in lockstep: change one side, sync the other).
+# Coexists safely with <jobId>-shaped job directories under the same root: job
+# directory cleanup only deletes directories shaped 「<code>-<base36 timestamp>-<6hex>」,
+# and the <code>/ subdirectories are not among them.
+# The state_key stance (referenced by epic-next.ts stateKeyFromRows, and vice versa):
+# the sorted "<id>:closed|open" rows joined with "\n" then sha1 hex; **the ticket being
+# pre-run for always counts as closed** (a pre-run only happens after the merge
+# sign-off, so this ticket certainly closes out; by the time the host read side is
+# clicked the ticket is closed — the two sides' stances align, otherwise the cache
+# would never hit).
 
 def epic_next_precache_path(repo_root, code: str) -> pathlib.Path:
-    """预跑缓存文件绝对路径（写侧 agent_activities / 读侧 host epic-next.ts 同口径）。
-    目录面走 resolve_dot_dir（新名 .sandbar/ 优先、LEGACY 老仓老名粘滞）——老仓粘滞
-    旧名时插件面读侧天然不断供；新名仓由写侧镜像补旧名（mirror_to_legacy），
-    插件面过渡期同样不断供。"""
+    """Absolute path of the pre-run cache file (the same stance on the write side,
+    agent_activities, and the read side, host epic-next.ts).
+    The directory surface goes through resolve_dot_dir (the new name .sandbar/ wins,
+    with LEGACY old-repo old-name stickiness) — when an old repo stays sticky on the
+    old name, the plugin-face read side is naturally never cut off; a new-name repo has
+    the write side mirror the old name (mirror_to_legacy), so the plugin face is not
+    cut off during the transition either."""
     p = lane_dot_path(repo_root, "epic-next", code)
     if not p.is_absolute():
         p = REPO_ROOT / p
@@ -190,7 +230,8 @@ def epic_next_precache_path(repo_root, code: str) -> pathlib.Path:
 
 
 def epic_state_key(rows: List[Dict[str, Any]], current_ticket_id: str = "") -> str:
-    """state_key = sha1(sorted "id:closed|open" 行拼接)（口径见上方区块注释）。"""
+    """state_key = sha1 of the sorted "id:closed|open" rows joined (stance in the
+    block comment above)."""
     import hashlib
     lines = sorted(
         "%s:%s" % (str(r.get("id") or ""),
@@ -203,9 +244,12 @@ def epic_state_key(rows: List[Dict[str, Any]], current_ticket_id: str = "") -> s
 
 @dataclass
 class EpicNextPrepArgs:
-    """prepare_epic_next activity 入参：立项代号 + 触发工单（state_key 强制 closed 口径用）。
-    project（票 t260907-07）：项目 key，prepare 读立项档案按 resolve_epics_dir(project)
-    锚项目主目录；缺省空串=引擎锚兜底（在飞工单旧载荷兼容，dataclass 默认值解码）。"""
+    """Inputs of the prepare_epic_next activity: the epic code + the triggering ticket
+    (used to force the closed stance in state_key).
+    project (ticket t260907-07): the project key; prepare reads the epic document
+    anchored to the project home via resolve_epics_dir(project); the default empty
+    string = the engine anchor fallback (compatibility with old payloads of in-flight
+    tickets, decoded via the dataclass default)."""
 
     ticket_id: str
     epic: str
@@ -214,17 +258,19 @@ class EpicNextPrepArgs:
 
 @dataclass
 class EpicNextPrepResult:
-    """prepare_epic_next 回执：立项全文 + 关联工单行 + state_key，全量内联（workflow 内零 IO）。"""
+    """The prepare_epic_next receipt: the epic document + its ticket rows + state_key,
+    all inline (zero IO inside the workflow)."""
 
-    exists: bool = False                        # 立项档案存在且可读
-    epic_markdown: str = ""                     # notes/epics/<code>.md 全文
+    exists: bool = False                        # the epic document exists and is readable
+    epic_markdown: str = ""                     # the full text of notes/epics/<code>.md
     tickets: List[Dict[str, Any]] = field(default_factory=list)  # [{id,status,closed}]
     state_key: str = ""
 
 
 @dataclass
 class EpicNextCache:
-    """pre.json 缓存形状（schema 真源；TS 读侧按字段容错读）。"""
+    """The pre.json cache shape (the schema source of truth; the TS read side reads
+    tolerantly per field)."""
 
     ticket_id: str
     epic: str
@@ -235,12 +281,15 @@ class EpicNextCache:
 
 def build_suggest_next_prompt(code: str, epic_markdown: str, tickets_summary: str,
                               workflows: List[Dict[str, str]], result_path: str) -> str:
-    """预跑下一单派活指令（纯函数，零 IO）。
+    """The pre-run dispatch prompt for the next ticket (pure function, zero IO).
 
-    与 workbench src/host/epic-next.ts buildSuggestPrompt 文案互指同步（改一边必须
-    同步另一边）；结果契约三态（host validateSuggestion 只认 ok 形态，done/failed
-    是 python 侧扩展）：ok 建议下一张工单 / done 立项可完结 / failed 有原因放弃。
-    workflows 清单即防幻觉白名单（suggest_next 与 host readPrecache 双侧校验）。
+    The wording is lockstep-synced with workbench src/host/epic-next.ts
+    buildSuggestPrompt (they reference each other: change one side, sync the other);
+    the result contract has three states (the host's validateSuggestion only accepts
+    the ok shape; done/failed are python-side extensions): ok = suggest the next
+    ticket / done = the epic can be closed / failed = give up with a reason.
+    The workflows list is the anti-hallucination whitelist (validated on both sides by
+    suggest_next and the host's readPrecache).
     """
     wf_lines = "\n".join("- %s：%s" % (w.get("id", ""), w.get("name", "")) for w in workflows)
     return """【任务】你是 sandbar 项目的 integration 角色。本立项的一张关联工单刚通过人审即将合并，请在合并落账前预判：这个立项下一步最应该开的一张工单是什么（或者是否已经无事可做）。
@@ -272,48 +321,55 @@ def build_suggest_next_prompt(code: str, epic_markdown: str, tickets_summary: st
        wf_lines if wf_lines.strip() else "（清单为空）")
 
 
-# ---- 集成测试机制（票 t260829-07 后续，dev-lane 并行开发 ∥ 测试设计）----
-# 测试集 = 仓库根 integration/ 目录（**提交的代码资产**，随泳道正常进 main）；
-# manifest 契约：integration/manifest.json = [{"name": str, "cmd": str, "cwd": str?}]，
-# cmd 以泳道根为 cwd 直接执行（shell 语义由 worker 用 shlex 切分后逐条跑）。
-# 保密后置（票 t260831-02）：agent 无读沙箱，物理隔离暂不做——developer 的
-# prompt/handoffs 不引导、不展示测试集内容即可，沙箱级限制后续再做。
+# ---- Integration-test machinery (follow-on to ticket t260829-07, dev-lane development ∥ test design) ----
+# The test set = the repo root's integration/ directory (**committed code assets**,
+# entering main through the lane like everything else);
+# manifest contract: integration/manifest.json = [{"name": str, "cmd": str, "cwd": str?}],
+# each cmd is executed with the lane root as cwd (shell semantics: the worker shlex
+# splits it and runs the pieces one by one).
+# Confidentiality deferred (ticket t260831-02): the agent has no read sandbox and no
+# physical isolation for now — it is enough that the developer prompt/handoffs neither
+# steer toward nor display the test set's contents; sandbox-level limits come later.
 
 INTEG_DIR_NAME = "integration"
 INTEG_MANIFEST = "manifest.json"
-MAX_TESTS_FAULT_ROUNDS = 5     # 测试集迭代上限（arbitrate 判 tests-fault 的连续轮数）
-MAX_CODE_FAULT_ROUNDS = 5      # 打回 developer 上限（arbitrate 判 code-fault 的累计轮数）
-MAX_ACCEPTANCE_ROUNDS = 2      # 验收报告重写上限（报告不合格 → 打回 acceptance 重写）
-MAX_REVIEW_ROUNDS = 5          # 方案审读打回上限（review_plan reject 循环；review_plan_route 消费）
+MAX_TESTS_FAULT_ROUNDS = 5     # test-set iteration cap (consecutive tests-fault rounds judged by arbitrate)
+MAX_CODE_FAULT_ROUNDS = 5      # bounce-to-developer cap (cumulative code-fault rounds judged by arbitrate)
+MAX_ACCEPTANCE_ROUNDS = 2      # acceptance-report rewrite cap (an inadequate report → bounce back to acceptance)
+MAX_REVIEW_ROUNDS = 5          # plan-review bounce cap (the review_plan reject loop; consumed by review_plan_route)
 
 ARBITRATION_VERDICTS = ("pass", "tests-fault", "code-fault")
 
 
 @dataclass
 class IntegrationRunArgs:
-    """run_integration_tests 入参：泳道内按 integration/manifest.json 逐条跑测试。"""
+    """Inputs of run_integration_tests: run each entry of integration/manifest.json
+    inside the lane."""
 
     ticket_id: str
-    worktree: str                               # 泳道根（cmd 的 cwd，测试集所在）
+    worktree: str                               # the lane root (the cmds' cwd, where the test set lives)
 
 
 @dataclass
 class IntegrationRunResult:
-    """run_integration_tests 回执：ran 条数 / 通过条数 / 失败明细（截断）/ 原始输出。
+    """The run_integration_tests receipt: how many ran / how many passed / failure
+    details (truncated) / raw output.
 
-    error 非空 = 基础设施/manifest 缺失等启动层失败（未跑任何测试）。"""
+    A non-empty error = a startup-level failure such as missing infrastructure or a
+    missing manifest (no test was run)."""
 
     ran: int = 0
     passed: int = 0
     failed: int = 0
-    env_fail: int = 0            # 票 t260904-12：环境红维（翻译层不再丢弃）
+    env_fail: int = 0            # ticket t260904-12: the environment-red dimension (the translation layer no longer drops it)
     details: List[Dict[str, Any]] = field(default_factory=list)  # [{name,cmd,exit,output_tail}]
     error: str = ""
 
 
 @dataclass
 class SettleLaneArgs:
-    """settle_lane 入参：汇合点统一代落盘（实现+测试集同 commit）。"""
+    """Inputs of settle_lane: the unified worker-side settle at the join point
+    (implementation + test set in the same commit)."""
 
     ticket_id: str
     worktree: str
@@ -324,25 +380,31 @@ class SettleLaneArgs:
 @dataclass
 class SettleLaneResult:
     note: str = ""
-    lane_commits: int = -1                      # -1 = 未知（rev-list 失败）
+    lane_commits: int = -1                      # -1 = unknown (rev-list failed)
     error: str = ""
 
 
 def parse_arbitration_summary(summary: str) -> str:
-    r"""从 arbitrate agent 的 summary 提取 verdict（FLOW_BRIEF 契约：summary 含
-    **唯一** ``verdict=xxx`` 标记则取 xxx，且必须 ∈ ARBITRATION_VERDICTS；
-    否则返回 ""。缺失/零个/多个/非法都算格式缺失——多个 verdict=畸形仲裁摘要，
-    取任何一个都是猜，与「解析失败由 workflow 侧重跑 arbitrate，不猜」一致
-    （票 t260902-10 由「取首个匹配」改为「唯一匹配否则空串」；调用方 dev_lane
-    空 verdict 走格式纠正重试 ≤2 轮再 blocked）。负向断言 (?![\w-])：
-    合法值后跟词字符或连字符（如 verdict=pass-fault）不算标记，返回 ""。"""
+    r"""Extract the verdict from the arbitrate agent's summary (the FLOW_BRIEF
+    contract: when the summary contains exactly **one** ``verdict=xxx`` marker, return
+    xxx, and it must be ∈ ARBITRATION_VERDICTS; otherwise return "". Missing / zero /
+    multiple / illegal all count as a format failure — multiple verdicts = a malformed
+    arbitration summary, and picking any one of them is guessing, consistent with "on a
+    parse failure the workflow side re-runs arbitrate rather than guessing"
+    (ticket t260902-10 changed "take the first match" to "exactly one match or an empty
+    string"; the caller dev_lane treats an empty verdict as a format fix and retries
+    ≤2 rounds before blocking). The negative lookahead (?![\w-]): a legal value
+    followed by a word character or hyphen (e.g. verdict=pass-fault) is not a marker,
+    return ""."""
     hits = re.findall(r"verdict=(pass|tests-fault|code-fault)(?![\w-])", summary or "")
     return hits[0] if len(hits) == 1 else ""
 
 
 def integration_route(verdict: str, tests_rounds: int, code_rounds: int) -> str:
-    """arbitrate 三态路由（纯函数，selfcheck 直测）。返回下一 phase 名或 "blocked:<原因>"。
-    上限（票 t260831-02）：测试集迭代 / 打回 developer 各 5 轮，超限 blocked 交人。"""
+    """The arbitrate three-state route (pure function, tested directly by the
+    selfcheck). Returns the next phase name or "blocked:<reason>".
+    Caps (ticket t260831-02): test-set iteration and bounce-to-developer each 5 rounds;
+    past the cap, blocked and handed to a human."""
     if verdict == "pass":
         return "acceptance"
     if verdict == "tests-fault":
@@ -360,15 +422,20 @@ REVIEW_PLAN_VERDICTS = ("pass", "conditional", "reject")
 
 
 def parse_review_plan_verdict(status: str, summary: str) -> str:
-    """review_plan 三态判定（纯函数，selfcheck 直测；票 t260903-02「附条件放行」）。
+    """The review_plan three-state verdict (pure function, tested directly by the
+    selfcheck; ticket t260903-02's "conditional pass").
 
-    返回 "pass" | "conditional" | "reject"。契约：
-    - **status=failed 恒 reject（保守侧）**：结果文件 status 与 summary verdict 标记
-      矛盾时（failed + verdict=conditional）不许放行——放行是高风险动作，取保守侧。
-    - status=ok 时按 summary 含**唯一** ``verdict=pass|conditional|reject`` 标记判定
-      （负向断言 (?![\\w-])，verdict=pass-foo 不算标记）；标记缺/多/非法一律回落
-      "pass"（与旧二态 status=ok 行为兼容——旧 agent 输出/旧结果文件无标记不破）。
-    - status 其它值（畸形）回落 reject。"""
+    Returns "pass" | "conditional" | "reject". The contract:
+    - **status=failed is always reject (the conservative side)**: when the result
+      file's status contradicts the summary's verdict marker (failed +
+      verdict=conditional), passing is not allowed — passing is a high-risk action, so
+      take the conservative side.
+    - When status=ok, judge by the summary containing exactly **one**
+      ``verdict=pass|conditional|reject`` marker (negative lookahead (?![\\w-]), so
+      verdict=pass-foo is not a marker); a missing / multiple / illegal marker always
+      falls back to "pass" (compatible with the old two-state status=ok behavior — old
+      agent output / old result files without markers don't break).
+    - Any other status value (malformed) falls back to reject."""
     if (status or "") == "failed":
         return "reject"
     if (status or "") == "ok":
@@ -380,11 +447,13 @@ def parse_review_plan_verdict(status: str, summary: str) -> str:
 
 
 def review_plan_route(verdict: str, plan_rounds: int) -> str:
-    """review_plan 三态路由（纯函数，selfcheck 直测）。返回 "create_plan" |
-    "parallel_impl_design" 或 "blocked:<原因>"。
+    """The review_plan three-state route (pure function, tested directly by the
+    selfcheck). Returns "create_plan" | "parallel_impl_design" or "blocked:<reason>".
 
-    conditional（附条件放行）不改打回级：与 pass 同样直通实现段，修改意见由调用方
-    注入 implement 的 previous_context；不计打回轮数。reject 走既有打回环。"""
+    conditional (a pass with conditions) does not change the bounce level: like pass it
+    goes straight to the implementation stage, and the requested changes are injected
+    by the caller into implement's previous_context; it does not count against the
+    bounce rounds. reject takes the existing bounce loop."""
     if verdict in ("pass", "conditional"):
         return "parallel_impl_design"
     if verdict == "reject":
@@ -395,48 +464,56 @@ def review_plan_route(verdict: str, plan_rounds: int) -> str:
     return "blocked:审读结论未知 verdict=%r，转人工判读" % verdict
 
 
-# ---- 单例 workflow id 约定 ----
+# ---- Singleton workflow id conventions ----
 def pipeline_wf_id(proposal_id: str) -> str:
-    """一张提案 = 一个 workflow id。重复 start 会被服务端拒绝（AlreadyStarted）。"""
+    """One proposal = one workflow id. A repeated start is rejected by the server
+    (AlreadyStarted)."""
     return f"content-pipeline:{proposal_id}"
 
 
 def wf_id(ticket_id: str) -> str:
-    """工单 workflow id **就是**工单 id（同一工单同一时刻只可能有一条编排在跑）。"""
+    """The ticket workflow id **is** the ticket id (only one orchestration for a given
+    ticket can be running at any moment)."""
     return ticket_id
 
 
 DISPATCHER_WF_ID = "dispatcher-scan"
 SCHEDULE_ID = "sandbar-dispatcher-scan"
-# 旧 schedule ID（服务端持久标识，退役过渡期）。scan_schedule 的 create/ensure 路径
-# 建新 ID 前幂等 delete 旧 ID（句柄不存在不炸），日志留痕；本删旧行保留一个发布
-# 周期（防旧代码引擎并存时重建旧 schedule 造成双调度），超期整段删除。
+# The old schedule ID (a server-side persistent identifier, in its retirement window).
+# scan_schedule's create/ensure path idempotently deletes the old ID before creating
+# the new one (a missing handle doesn't blow up) and logs it; this delete-old line is
+# kept for one release cycle (so an old-code engine running alongside cannot rebuild
+# the old schedule and double-schedule), and the whole block is removed after that.
 
-# ---- demo 用的工单 id 前缀（清场脚本只认这个前缀，绝不碰其它工单）----
+# ---- Ticket id prefix used by the demo (the cleanup scripts only recognize this
+# prefix and never touch any other ticket) ----
 DEMO_PREFIX = "t260821-demo-"
 DEMO_TICKET = DEMO_PREFIX + "advance"
 
-# ---- 步1 七段状态机（ContentPipelineWorkflow 向后兼容）----
+# ---- Step 1's seven-stage state machine (ContentPipelineWorkflow backward compat) ----
 STAGES: List[str] = [
     "propose",
-    "approve",        # 人门（signal）
+    "approve",        # human gate (signal)
     "process",
-    "machine-qc",     # 脚本门（activity 跑真 qc_run）
+    "machine-qc",     # script gate (an activity runs the real qc_run)
     "ai-review",
-    "final-review",   # 人门（signal）
+    "final-review",   # human gate (signal)
     "publish",
 ]
 
 HUMAN_GATES = {"approve", "final-review"}
 
-# ---- 步2：脚本门映射（确定性，写在代码里；stage 机=确定性 workflow 代码）----
-# (template_id, stage_id) -> GateSpec。挂在「离开该段前必须跑绿」的段上。
+# ---- Step 2: the script-gate mapping (deterministic, written in code; the stage
+# machine = deterministic workflow code) ----
+# (template_id, stage_id) -> GateSpec. Attached to the stages that "must run green
+# before the stage may be left".
 # qc_run scope=all / verify_lane content scope=auto / verify_lane code skip_slow=False。
 DEFAULT_SCRIPT_GATES: Dict[str, Dict[str, "GateSpec"]] = {}
 
 
 def default_gate_for(template_id: str, stage_id: str) -> Optional["GateSpec"]:
-    """确定性脚本门：按 (模板, 段) 返回 GateSpec，无则 None。"""
+    """The deterministic script gate: returns the GateSpec for (template, stage), or
+    None when there is none."""
     table = {
         ("content-pipeline", "machine-qc"): GateSpec(
             stage="machine-qc", tool="qc_run", args={"scope": "all"}, label="qc_run all"),
@@ -449,7 +526,7 @@ def default_gate_for(template_id: str, stage_id: str) -> Optional["GateSpec"]:
     return table.get((template_id, stage_id))
 
 
-# ---- 步1 数据契约（向后兼容）----
+# ---- Step 1 data contracts (backward compatible) ----
 @dataclass
 class QcRequest:
     scope: str = "260627"
@@ -483,19 +560,20 @@ class TicketScan:
     exit_code: int
 
 
-# ---- 步2 数据契约（TicketWorkflow）----
+# ---- Step 2 data contracts (TicketWorkflow) ----
 @dataclass
 class EngineCall:
-    """一次真实引擎调用：`python3 server/admin.py call <tool> <args-json>`。"""
+    """One real engine call: `python3 server/admin.py call <tool> <args-json>`."""
 
     tool: str                                  # ticket | workflow | qc_run | verify_lane …
     args: Dict[str, Any] = field(default_factory=dict)
-    why: str = ""                              # 进历史的人话
+    why: str = ""                              # the human-readable line that enters the history
 
 
 @dataclass
 class EngineResult:
-    """引擎回执。业务拒绝（ValueError）不抛异常，走 ok=False 交 workflow 判断。"""
+    """The engine receipt. A business rejection (ValueError) raises nothing; it comes
+    back as ok=False for the workflow to judge."""
 
     ok: bool
     result: Dict[str, Any] = field(default_factory=dict)
@@ -507,7 +585,8 @@ class EngineResult:
 
 @dataclass
 class GateSpec:
-    """脚本门：跑真实验收脚本，绿才放行。默认 cmd=`admin.py call <tool> <args>`。"""
+    """A script gate: runs the real acceptance script and only lets the ticket through
+    on green. Default cmd = `admin.py call <tool> <args>`."""
 
     stage: str
     tool: str = "qc_run"
@@ -528,87 +607,101 @@ class GateResult:
 
 @dataclass
 class Signature:
-    """人门签字（signal 载荷）。who=签字人身份，由调用方注入，agent 不得自签自己的角色名。"""
+    """A human-gate signature (the signal payload). who = the signer's identity,
+    injected by the caller; an agent may never sign under its own role name."""
 
     who: str
-    gate: str = "approve"          # approve | final-review（或其它 exit=human 段 id）
+    gate: str = "approve"          # approve | final-review (or another exit=human stage id)
     decision: str = "approve"      # approve | reject
     note: str = ""
 
 
 @dataclass
 class StageAttempt:
-    """agent 试图直接改状态的记录（一律拒绝，留痕）。"""
+    """A record of the agent trying to change state directly (always refused, kept for
+    the record)."""
 
     who: str
     want_stage: str
     reason: str = ""
 
 
-# 工单状态机常量（与 server/tools/ticket.py 同口径）
+# Ticket state-machine constants (the same stance as server/tools/ticket.py)
 TICKET_STATUSES = ("dispatched", "settled", "verified", "closed", "rework")
 TICKET_STAGE_STATES = ("running", "awaiting", "awaiting-human", "blocked")
 
 
 # ========================================================================================
-# 自治巡检扩权（票 t260821-m6-scan-expand）：settled/awaiting-human 工单检查报告
+# Autonomous inspection with expanded scope (ticket t260821-m6-scan-expand): a check
+# report over settled / awaiting-human tickets
 #
-# 本区契约与纯函数只服务 activity 层（scan_tickets_report / write_scan_report）与自测；
-# workflow 体只消费 activity 返回值，不直接读这里的目录/阈值常量做 IO（确定性规约）。
-# 建议动作只有三档（可签/待补/疑似卡死）——巡检只出建议不出决定，签字只能人（红线）。
+# This section's contracts and pure functions serve only the activity layer
+# (scan_tickets_report / write_scan_report) and the self-tests; the workflow body only
+# consumes activity return values and never reads the directory/threshold constants
+# here to do IO (the determinism rule).
+# There are only three suggestion levels (signable / needs work / suspected stuck) —
+# inspection only suggests, it never decides; only a human may sign (a red line).
 # ========================================================================================
 
-# 报告落盘目录（env 覆盖供自测用临时目录；缺省 POC out/scan，运行产物，gitignore 不入库）。
+# Where reports are written (env override for self-test temp dirs; default the POC's
+# out/scan — a run artifact, gitignored, not committed).
 SCAN_DIR = pathlib.Path(os.environ.get("SANDBAR_SCAN_DIR") or (OUT_DIR / "scan"))
-# 巡检票落账目录（票 t260905-03；env 覆盖供自测用临时目录；
-# 缺省 out/inspection，运行产物不入库）。新变量名按宿主令 260904 用 sandbar 前缀
-#（存量 SANDBAR_* 是历史欠账，只随专门迁移票处置，新造一律不用）。
+# The inspection ticket ledger directory (ticket t260905-03; env override for self-test
+# temp dirs; default out/inspection, a run artifact, not committed). The new variable
+# name takes the sandbar prefix per the 260904 host order (pre-existing SANDBAR_* are a
+# historical debt handled only by a dedicated migration ticket; nothing new may use one).
 INSPECTION_DIR = pathlib.Path(os.environ.get("SANDBAR_INSPECTION_DIR") or (OUT_DIR / "inspection"))
-# 「疑似卡死」停留时长阈值（小时）。env 可调；activity 读取，不进 workflow 体。
+# The 「suspected stuck」 dwell-time threshold (hours). env-tunable; read by the
+# activity, never enters the workflow body.
 SCAN_STUCK_HOURS = float(os.environ.get("SANDBAR_SCAN_STUCK_HOURS") or 48)
-# 建议动作三档（report 排序按此序：最紧急在前）。
+# The three suggestion levels (reports are sorted in this order: most urgent first).
 SCAN_SUGGESTIONS = ("疑似卡死", "待补", "可签")
-# 报告红线声明（落进每份报告，台面展示同款）。
+# The report red-line statement (written into every report, shown the same way in the
+# console).
 SCAN_RED_LINE = "巡检只出建议不出决定；签字只能人（sign who=用户/总管）。"
 
 
 @dataclass
 class ScanTicketItem:
-    """一张待决工单的巡检条目（字段即工单台「巡检报告」区的列）。"""
+    """One pending ticket's inspection row (the fields are the columns of the ticket
+    console's 「巡检报告」 section)."""
 
     ticket_id: str
     title: str = ""
     status: str = ""
     stage: str = ""
     stage_state: str = ""
-    dwell_hours: float = 0.0                 # 停留时长（距最后一次投影/日志/pending 活动）
-    acceptance_done: int = 0                 # 当前段验收清单已勾数
-    acceptance_total: int = 0                # 当前段验收清单总数
-    pending_count: int = 0                   # 未决 pending 条数
-    gate_label: str = ""                     # 最近一次脚本门标签（无则空）
-    gate_green: Optional[bool] = None        # 最近一次脚本门红绿灯（None=无记录/不可得）
-    suggestion: str = ""                     # 疑似卡死 / 待补 / 可签
+    dwell_hours: float = 0.0                 # dwell time (since the last projection / log / pending activity)
+    acceptance_done: int = 0                 # how many of this stage's acceptance checklist items are checked
+    acceptance_total: int = 0                # this stage's acceptance checklist total
+    pending_count: int = 0                   # how many pending entries await a ruling
+    gate_label: str = ""                     # the latest script-gate label (empty when none)
+    gate_green: Optional[bool] = None        # the latest script-gate red/green (None = no record / unavailable)
+    suggestion: str = ""                     # suspected stuck / needs work / signable
     reasons: List[str] = field(default_factory=list)
 
 
 @dataclass
 class ScanReport:
-    """一次巡检的完整报告（write_scan_report 落盘 out/scan/<日期>.json）。"""
+    """One inspection's full report (write_scan_report writes out/scan/<date>.json)."""
 
     generated_at: str
     total_tickets: int
     by_status: Dict[str, int]
     items: List[ScanTicketItem] = field(default_factory=list)
-    summary: Dict[str, int] = field(default_factory=dict)   # 建议动作 → 张数
+    summary: Dict[str, int] = field(default_factory=dict)   # suggestion → count
     stuck_hours: float = SCAN_STUCK_HOURS
     exit_code: int = 0
-    # 未归档清单（epic-linkage 验收标准 3）：无 EpicCode 的在途工单 id（sorted）。
-    # 允许无 epic 开工单，但巡检要盯到它；closed 不收（历史工单全收只会增殖噪音）。
+    # The unfiled list (epic-linkage acceptance criterion 3): in-flight ticket ids with
+    # no EpicCode (sorted). Opening a ticket without an epic is allowed, but inspection
+    # keeps an eye on it; closed tickets are not collected (collecting all history would
+    # only multiply noise).
     unfiled: List[str] = field(default_factory=list)
 
 
 def is_pending_decision(t: Dict[str, Any]) -> bool:
-    """「待决」判定：未 closed 且（status=settled 或 stage_state=awaiting-human）。"""
+    """The 「pending decision」 test: not closed and (status=settled or
+    stage_state=awaiting-human)."""
     if str(t.get("status") or "") == "closed":
         return False
     return (str(t.get("status") or "") == "settled"
@@ -616,7 +709,8 @@ def is_pending_decision(t: Dict[str, Any]) -> bool:
 
 
 def _last_activity_ts(t: Dict[str, Any]) -> int:
-    """工单最后一次活动时间：投影 updated / log / pending 三者取最大。"""
+    """The ticket's last activity time: the max of the projection's updated / log /
+    pending."""
     ts = int(t.get("updated") or 0)
     for l in (t.get("log") or []):
         if isinstance(l, dict):
@@ -628,7 +722,8 @@ def _last_activity_ts(t: Dict[str, Any]) -> int:
 
 
 def gate_from_log(t: Dict[str, Any]) -> Dict[str, Any]:
-    """脚本门兜底（Temporal 不可达时）：从工单 log 倒序找「脚本门」记录判红绿灯。"""
+    """Script-gate fallback (when Temporal is unreachable): scan the ticket's log in
+    reverse for a 「脚本门」 record and read its red/green."""
     for l in reversed(t.get("log") or []):
         note = str((l or {}).get("note") or "")
         if "脚本门" in note:
@@ -641,20 +736,26 @@ def build_scan_item(t: Dict[str, Any], gate_label: str = "",
                     gate_green: Optional[bool] = None, gate_source: str = "",
                     now_ts: float = 0.0,
                     stuck_hours: float = SCAN_STUCK_HOURS) -> ScanTicketItem:
-    """由工单 JSON（show 全量）+ 脚本门信息算巡检条目。纯函数，可脱 Temporal 自测。
+    """Compute an inspection row from the ticket JSON (the full show output) plus the
+    script-gate information. Pure function, self-testable without Temporal.
 
-    建议规则（只出建议不出决定）：
-      1. 停留 ≥ 阈值 → 疑似卡死（最优先，含人门久候）；
-      2. awaiting-human → 可签（人门待人签字；验收在签字时由 sign 机械全勾）；
-      3. settled：验收未勾齐 / 脚本门最近一次红 → 待补；否则 → 可签（可验收推进）。
+    Suggestion rules (suggest only, never decide):
+      1. dwell ≥ threshold → suspected stuck (highest priority, including a long-waiting
+         human gate);
+      2. awaiting-human → signable (a human gate waiting for a signature; acceptance is
+         all-checked mechanically by sign at signing time);
+      3. settled: acceptance not fully checked / the script gate's latest result red →
+         needs work; otherwise → signable (acceptance can advance).
     """
     stage = str(t.get("stage") or "")
     acc = [x for x in (t.get("acceptance") or [])]
     checks = []
     if stage and isinstance(t.get("checks"), dict):
         checks = [c for c in (t["checks"].get(stage) or []) if isinstance(c, dict)]
-    # 勾选率口径：只数「条目在当前验收清单里」的勾选——历史段残留的孤儿 check
-    # （item 不在 acceptance，如 rework 回段后的旧记录）不计入，否则勾选率失真。
+    # The check-rate stance: only count checks whose item is in the current acceptance
+    # list — orphan checks left over from earlier stages (an item no longer in
+    # acceptance, e.g. old records after a rework re-entered the stage) don't count,
+    # otherwise the check rate is distorted.
     acc_items = {str(x) for x in acc}
     done = sum(1 for c in checks
                if c.get("done") and (not acc_items or str(c.get("item") or "") in acc_items))
@@ -712,7 +813,8 @@ def build_scan_item(t: Dict[str, Any], gate_label: str = "",
 
 
 def scan_summary(items: List[ScanTicketItem]) -> Dict[str, int]:
-    """建议动作 → 张数（三档全出现，便于台面直接渲染）。"""
+    """Suggestion → count (all three levels always appear, so the console can render
+    directly)."""
     s: Dict[str, int] = {k: 0 for k in SCAN_SUGGESTIONS}
     for it in items:
         s[it.suggestion] = s.get(it.suggestion, 0) + 1
@@ -720,64 +822,79 @@ def scan_summary(items: List[ScanTicketItem]) -> Dict[str, int]:
 
 
 # ========================================================================================
-# 工作空间机制化 + dispatch-next 上下文装配（票 t260821-m45-ticket-engine）
+# Workspace mechanization + dispatch-next context assembly (ticket t260821-m45-ticket-engine)
 #
-# 本区是**单一真源**：ticket.py（旧引擎路径）与 workflows.py（Temporal TicketWorkflow）
-# 的 dispatch-next 生成器都从这里取，两边派活指令不漂移。
-# 全部函数只依赖入参与本模块常量（纯函数，可在 workflow sandbox 里确定性执行）。
+# This section is the **single source of truth**: the dispatch-next generators of both
+# ticket.py (the old engine path) and workflows.py (the Temporal TicketWorkflow) take
+# from here, so the two sides' dispatch prompts cannot drift.
+# Every function depends only on its inputs and this module's constants (pure
+# functions, executable deterministically inside a workflow sandbox).
 # ========================================================================================
 
-# dir 类工作空间根：非开发工单（cleanup/运营类）的隔离目录约定 /tmp/sandbar-ws/<工单id>。
-# env SANDBAR_WS_DIR_BASE 可覆盖——自测指向临时目录，真 /tmp 零污染。
+# Root for dir-type workspaces: the isolated-directory convention for non-development
+# tickets (cleanup / ops) /tmp/sandbar-ws/<ticket id>.
+# env SANDBAR_WS_DIR_BASE can override it — self-tests point at a temp dir so the real
+# /tmp stays untouched.
 WS_DIR_BASE = os.environ.get("SANDBAR_WS_DIR_BASE") or "/tmp/sandbar-ws"
 
 
 def ws_dir_path(ticket_id: str) -> str:
-    """dir 类工单工作空间路径（/tmp/suyou-ws 旧 base 粘滞已随终切撤除——
-    存量目录已清）。"""
+    """The dir-type ticket workspace path (the old /tmp/suyou-ws base stickiness was
+    removed with the final switch — the leftover directories have been cleared)."""
     return WS_DIR_BASE + "/" + ticket_id
 
 
-# ---- 泳道协调目录命名过渡（票 t260907-04）----
-# 解析优先级（三条，次序不可动）：
-#   1. base/.sandbar 存在 → 新名（此 base 的 .sandbar/ 若存在仅是插件面镜像，
-#      只写不读——镜像目录对解析不可见，防粘滞判定被自身产物自反翻转）；
-#   2. elif base/.suyou 存在 → 旧名（老泳道粘滞：整生命周期读写都钉旧名，
-#      绝不同 base 混用两名，交接/归档零劈叉）；
-#   3. else → 新名（create=True 时首写建 .sandbar/，插件面镜像由 mirror 帮手补）。
-# 带外建 .sandbar（人工/工具误建）会按规则 1 翻转为新名——单次翻转后权威仍唯一，
-# 视为显式迁改名，不是 bug。
-# 退役：粘滞分支（规则 2）退役条件 = .suyou 泳道存量清零；镜像帮手退役条件 =
-# 插件面旧名清理收口。两者解耦。
+# ---- Lane coordination directory naming transition (ticket t260907-04) ----
+# Resolution priority (three rules, the order is not negotiable):
+#   1. base/.sandbar exists → the new name (if this base also has a .sandbar/, it is
+#      only the plugin-face mirror, written but never read — mirror directories are
+#      invisible to resolution, so the stickiness decision cannot be flipped by its own
+#      artifacts);
+#   2. elif base/.suyou exists → the old name (old-lane stickiness: reads and writes
+#      are pinned to the old name for the lane's whole life; the two names are never
+#      mixed within one base, so handover/archiving never forks);
+#   3. else → the new name (with create=True the first write creates .sandbar/, and the
+#      plugin-face mirror is filled in by the mirror helper).
+# An out-of-band .sandbar (created by a human or a tool by mistake) flips resolution to
+# the new name per rule 1 — after that single flip the authority is still unique; treat
+# it as an explicit migration rename, not a bug.
+# Retirement: the sticky branch (rule 2) retires when the .suyou lane stock reaches
+# zero; the mirror helper retires when the plugin-face old-name cleanup closes out. The
+# two are decoupled.
 DOT_DIR_NEW = ".sandbar"
 DOT_DIR_OLD = ".suyou"  # naming-compat
-MIRROR_RELPATHS = ("screenshots", "epic-next")   # 插件面真实读点，仅此两类镜像
+MIRROR_RELPATHS = ("screenshots", "epic-next")   # the plugin face's real read points; only these two are mirrored
 
 
 def resolve_dot_dir(base, create: bool = False) -> pathlib.Path:
-    """按三条优先级解析 base 下的泳道协调目录（.sandbar/ 新名优先、DOT_DIR_OLD 粘滞回落）。"""
+    """Resolve the lane coordination directory under base by the three priorities (the
+    new name .sandbar/ wins, with a sticky fallback to DOT_DIR_OLD)."""
     b = pathlib.Path(base)
     new = b / DOT_DIR_NEW
     old = b / DOT_DIR_OLD
     if new.exists():
-        return new                       # 规则 1：新名权威；旧名仅镜像（只写不读）
+        return new                       # rule 1: the new name is authoritative; the old name is mirror-only (write, never read)
     if old.exists():
-        return old                       # 规则 2：老泳道粘滞
-    if create:                           # 规则 3：创建侧恒新名
+        return old                       # rule 2: old-lane stickiness
+    if create:                           # rule 3: the creating side always uses the new name
         new.mkdir(parents=True, exist_ok=True)
     return new
 
 
 def lane_dot_path(base, *parts, create: bool = False) -> pathlib.Path:
-    """解析后的协调目录下的相对路径（引擎写点/读点统一入口）。"""
+    """A relative path inside the resolved coordination directory (the single entry
+    point for the engine's write and read points)."""
     return resolve_dot_dir(base, create=create).joinpath(*parts)
 
 
 def mirror_to_legacy(base, rel: pathlib.Path) -> bool:
-    """插件面过渡镜像：把 base 新名协调目录内的 rel 文件复制到 DOT_DIR_OLD 目录同相对路径。
-    仅当解析结果为新名（老泳道本就在旧名，无需镜像）且 rel 顶级目录在
-    MIRROR_RELPATHS 白名单内才镜像；best-effort，失败不影响主链。
-    退役条件 = 插件面旧名清理收口，届时删本函数与全部调用点。"""
+    """Transitional mirror for the plugin face: copy the rel file from base's new-name
+    coordination directory to the same relative path under DOT_DIR_OLD.
+    Only mirrors when resolution yields the new name (an old lane already lives under
+    the old name and needs no mirror) and rel's top-level directory is in the
+    MIRROR_RELPATHS whitelist; best-effort, a failure never affects the main chain.
+    Retirement condition = the plugin-face old-name cleanup closing out, at which point
+    this function and all its call sites are deleted."""
     b = pathlib.Path(base)
     if resolve_dot_dir(b) != b / DOT_DIR_NEW:
         return False
@@ -799,10 +916,11 @@ WORKSPACE_TYPES = ("worktree", "dir")
 
 
 def workspace_of(meta: Dict[str, Any], template_lane: str = "") -> Optional[Dict[str, str]]:
-    """工单的工作空间 {type: worktree|dir, path}。
+    """The ticket's workspace {type: worktree|dir, path}.
 
-    优先读 meta['workspace']（M4 新字段）；旧工单无此字段时按 lane 推导（worktree 泳道），
-    lane=main 且无 workspace → None（主树直改，无独立空间）。向后兼容。
+    Reads meta['workspace'] first (the M4 field); when an old ticket lacks it, derive
+    from the lane (a worktree lane); lane=main with no workspace → None (direct main-tree
+    edits, no separate space). Backward compatible.
     """
     ws = meta.get("workspace")
     if isinstance(ws, dict) and ws.get("type") in WORKSPACE_TYPES and ws.get("path"):
@@ -812,25 +930,33 @@ def workspace_of(meta: Dict[str, Any], template_lane: str = "") -> Optional[Dict
     return None
 
 
-# ---- lane=worktree 推导与校验（创建链路单一真源）----
-# 三次事故立的规矩（notes/inbox/260824-ticket-start-lane-params.md）：
-#   t260824-04 只传 lane=worktree、泳道字段全空 → prepare_workspace 跳过 → agent 空目录空跑；
-#   t260824-10 只传裸 worktree/branch 字符串、无 workspace dict → 同样跳过；
-#   t260824-11 传了 workspace+branch 漏 worktree 字符串 → merge_check 静默回落主树，
-#     「工作区干净」被主树脏文件误伤、verify_lane 测错代码（假绿）。
-# 规矩：两条创建路径（server/tools/ticket.py create / client.py ticket-start 裸调）都必须
-# 过 derive_lane_workspace，不得再各自推导或透传；workflow 侧再以 lane_workspace_gate_error
-# 兜底（防旧 payload/未来新入口绕过创建校验）——宁可 blocked 等人，不静默降级主树/临时目录。
+# ---- lane=worktree derivation and validation (the single source of truth for the
+# creation chain) ----
+# Rules written by three incidents (notes/inbox/260824-ticket-start-lane-params.md):
+#   t260824-04 passed only lane=worktree with the lane fields empty → prepare_workspace
+#     skipped → the agent ran in an empty directory doing nothing;
+#   t260824-10 passed bare worktree/branch strings with no workspace dict → skipped the
+#     same way;
+#   t260824-11 passed workspace+branch but omitted the worktree string → merge_check
+#     silently fell back to the main tree, "clean workspace" was polluted by the main
+#     tree's dirty files, and verify_lane tested the wrong code (a fake green).
+# The rule: both creation paths (server/tools/ticket.py create / a bare client.py
+# ticket-start call) must go through derive_lane_workspace and may no longer derive or
+# pass through on their own; the workflow side additionally backstops with
+# lane_workspace_gate_error (so an old payload or a future new entry cannot bypass the
+# creation validation) — better blocked awaiting a human than silently degraded to the
+# main tree / a temp directory.
 LANE_WORKTREE = "worktree"
 
 
 def default_lane_paths(ticket_id: str) -> Tuple[str, str]:
-    """worktree 泳道默认命名（.lane/t<日期>-<别名> / lane/t<日期>-<别名>；宿主令
-    20260903 改名 .worktrees→.lane——名字反映概念不反映 git 细节；旧名兼容见
-    _lane_repo_root/replay_check）。
+    """Default worktree-lane naming (.lane/t<date>-<alias> / lane/t<date>-<alias>; the
+    20260903 host order renamed .worktrees → .lane — the name reflects the concept, not
+    a git detail; old-name compatibility in _lane_repo_root / replay_check).
 
-    中文/长串不进目录与分支名，只留在工单/UI；日期+别名保证确定性且避免撞名；
-    纯中文标题 → md5 短哈希兜底。
+    Chinese text / long strings never enter directory or branch names, they stay in the
+    ticket/UI; date + alias keeps it deterministic and collision-free; a purely Chinese
+    title falls back to a short md5 hash.
     """
     name = ticket_id if ticket_id.startswith("t") else "t" + ticket_id
     date_part, rest = "", name
@@ -846,45 +972,58 @@ def default_lane_paths(ticket_id: str) -> Tuple[str, str]:
     return ".lane/" + wname, "lane/" + wname
 
 
-# ---------- 票 t260907-06：多 repo 项目（父目录作根、repos 为子目录）仓锚推导 ----------
+# ---------- Ticket t260907-06: multi-repo projects (the parent directory as root, repos as subdirectories) — repo anchor derivation ----------
 #
-# 目录模型：多 repo 项目=父目录作项目目录、各 repo 为子目录。一票涉多仓时（由写集
-# 目录、各 repo 为子目录。一票涉多仓时（由写集路径归属推导），泳道=<项目根>/.lane/<id>/
-# 普通目录容器，其下每仓一棵树 <lane>/<仓相对项目根路径>；单仓项目（项目根=仓根）
-# 不走本节任何函数的激活路径——行为零变化（回归面）。
+# Directory model: a multi-repo project = the parent directory as the project directory
+# and each repo as a subdirectory. When one ticket spans several repos (derived from
+# which repo the write-set paths belong to), the lane = <project root>/.lane/<id>/, an
+# ordinary directory container holding one tree per repo at <lane>/<repo path relative
+# to the project root>; a single-repo project (project root = repo root) never takes any
+# activated path in this section — zero behavior change (regression surface).
 
-# refname 安全段清洗族（与 default_lane_paths alias 同一口径）：refname 非法字符
-# （空格/~/^/:/?/*/[/\ 等）统一压成 '-'，防 worktree add -b 直接 fail-closed。
+# The refname-safe segment cleaning family (the same stance as default_lane_paths'
+# alias): refname-illegal characters (space / ~ / ^ / : / ? / * / [ / \ and so on) are
+# uniformly squeezed to '-', so worktree add -b doesn't fail closed outright.
 REFNAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 def sanitize_branch_segment(seg: str) -> str:
-    """仓目录名/路径段 → refname 安全段。清洗后为空兜底 'repo'（防全非法名字段）。"""
+    """A repo directory name / path segment → a refname-safe segment. If cleaning
+    leaves it empty, fall back to 'repo' (guards an all-illegal name field)."""
     s = REFNAME_UNSAFE_RE.sub("-", str(seg)).strip("-")
     return s or "repo"
 
 
 def flatten_branch_suffix(repo_rel: str) -> str:
-    """仓相对项目根路径 → 分支名后缀段（'/'→'-' 再过 refname 清洗）。
+    """A repo path relative to the project root → a branch-name suffix segment
+    ('/' → '-', then refname cleaning).
 
-    唯一性由仓路径唯一性构造保证（同 basename 形态不碰撞；嵌套仓本身
-    fail-closed，见 repos_under 不递归）。"""
+    Uniqueness is guaranteed structurally by repo-path uniqueness (same-basename shapes
+    don't collide; nested repos themselves are fail-closed — see repos_under, which does
+    not recurse)."""
     return sanitize_branch_segment(str(repo_rel).replace("/", "-"))
 
 
 def repos_under(project_root) -> List[pathlib.Path]:
-    """项目根下可作泳道挂靠的 git 仓清单（本节唯一扫描真源）。
+    """The git repos under the project root that a lane can attach to (this section's
+    only scanning source of truth).
 
-    - 项目根本身含 .git（目录或 gitfile）→ [项目根] + **一层子仓**集合
-      （票 t260907-12 放宽：根=知识库仓 + 子仓并存的混合形态，根仓也在候选集合内；
-      根下无子仓 → 恒 [项目根]，单仓项目行为零变化）；
-    - 根不含 .git → 同口径扫**一层**子目录（含 .git 目录或 .git 文件=worktree
-      形态仓）。
-    一层口径是不变量防线的护栏：引擎自留泳道 .lane/<id>（直属子目录下的二层，
-    其 .git=gitfile 指回本仓）绝不能进仓集合，否则带历史泳道的单仓项目
-    （sandbar 自身）会被误判多仓形态全链误激活；二层容器目录下的仓同属集合外，
-    按嵌套仓 fail-closed 拒收——集合外仓内写集路径创建即拒收，不静默归上层仓
-    （跨仓误结算比拒收更糟）。"""
+    - If the project root itself has a .git (directory or gitfile) → [project root] plus
+      the **one-level-down child repo** set (relaxed by ticket t260907-12: the mixed
+      shape where the root is a knowledge repo and child repos coexist — the root repo is
+      in the candidate set too; with no child repos under the root it is always
+      [project root], so single-repo behavior is unchanged);
+    - if the root has no .git → scan **one level** of subdirectories with the same
+      stance (a .git directory or a .git file = a worktree-shaped repo).
+    The one-level stance is the invariant line's guardrail: the engine's own lanes
+    .lane/<id> (a second-level directory directly under the root, whose .git is a gitfile
+    pointing back at this repo) must never enter the repo set, otherwise a single-repo
+    project carrying historical lanes (sandbar itself) would be misjudged as multi-repo
+    and the whole chain would activate by mistake; repos under second-level container
+    directories are likewise outside the set and rejected fail-closed as nested repos —
+    a write-set path inside an out-of-set repo is rejected at creation, never silently
+    attributed to the parent repo (settling against the wrong repo is worse than
+    rejecting)."""
     root = pathlib.Path(project_root)
     repos: List[pathlib.Path] = []
     if (root / ".git").exists():
@@ -893,7 +1032,7 @@ def repos_under(project_root) -> List[pathlib.Path]:
         try:
             children = sorted(root.iterdir())
         except OSError:
-            children = []  # 不可读目录 best-effort 跳过（扫描真源不因权限炸）
+            children = []  # skip unreadable directories best-effort (the scanning source of truth must not die on permissions)
         for child in children:
             if child.is_dir() and (child / ".git").exists():
                 repos.append(child)
@@ -901,11 +1040,15 @@ def repos_under(project_root) -> List[pathlib.Path]:
 
 
 def is_multi_repo_layout(project_root) -> bool:
-    """多仓泳道推导激活判定（票 t260907-12 单点谓词，derive 与 prepare 通道腿共用）。
+    """Activation test for multi-repo lane derivation (ticket t260907-12's single
+    predicate, shared by the derive and prepare channel legs).
 
-    True=真多仓形态：根无 .git 且扫得到子仓，或根=仓 + 至少一个子仓并存（混合形态）。
-    False=单仓项目（根含 .git 且无子仓）——调用方走旧单仓路径，行为零变化；根无
-    .git 且无仓同样 False（无仓开不了票，由 resolve 的空集合拒收兜底）。"""
+    True = a genuine multi-repo shape: the root has no .git and child repos are found,
+    or the root is a repo with at least one child repo alongside (the mixed shape).
+    False = a single-repo project (the root has .git and no child repos) — the caller
+    takes the old single-repo path with zero behavior change; a root with neither .git
+    nor repos is also False (no repos means no ticket; resolve's empty-set rejection is
+    the backstop)."""
     root = pathlib.Path(project_root)
     repos = repos_under(root)
     return bool(repos) and (len(repos) > 1 or not (root / ".git").exists())
@@ -919,20 +1062,26 @@ def _repo_rel(repo: pathlib.Path, rels) -> str:
 
 
 def resolve_repos_for_paths(project_root, paths) -> Dict[str, List[str]]:
-    """写集路径 → 所属仓归属（票 t260907-06 仓锚推导单一真源）。
+    """Write-set paths → which repo owns them (ticket t260907-06's single source of
+    truth for repo anchor derivation).
 
-    返回 {仓绝对路径字符串: [写集条目…]}；任一条目非法 → ValueError（创建即拒收，
-    把「跑 1.5 小时后才暴露」提前到创建瞬间）。口径：
-      - 条目必须是项目根相对 posix 路径（非绝对、无 .. 逃逸）；
-      - 归属=repos_under 集合内**最长前缀**仓；集合外（含嵌套仓内）→ ValueError；
-      - 空仓集合 → ValueError（父目录作根的项目一个仓都没有，开不了工单）。"""
+    Returns {repo absolute path string: [write-set entries…]}; any illegal entry →
+    ValueError (rejected at creation, pulling "surfaces only after running 1.5 hours"
+    forward to the moment of creation). The stance:
+      - an entry must be a project-root-relative posix path (not absolute, no ..
+        escape);
+      - ownership = the **longest-prefix** repo within the repos_under set; outside the
+        set (including inside nested repos) → ValueError;
+      - an empty repo set → ValueError (a parent-directory-as-root project with no repos
+        at all cannot open tickets)."""
     root = pathlib.Path(project_root).resolve()
     repos = repos_under(root)
     if not repos:
         raise ValueError("项目根 %s 下未发现任何 git 仓（多 repo 项目=父目录作根，"
                          "需先建/clone 子仓再开票；引擎不代建仓）" % root)
-    # 仓 → 项目根相对 posix 前缀（根仓=空串——relative_to 对根本身产 "."，须归一；
-    # 长前缀优先，保归属最内层已登记仓）
+    # Repo → project-root-relative posix prefix (the root repo = the empty string —
+    # relative_to produces "." for the root itself, which must be normalized; longer
+    # prefixes first, so ownership lands on the innermost registered repo)
     rels = sorted(((r, "" if r == root else r.relative_to(root).as_posix()) for r in repos),
                   key=lambda x: len(x[1]), reverse=True)
     owner_set = {str(r) for r in repos}
@@ -946,16 +1095,19 @@ def resolve_repos_for_paths(project_root, paths) -> Dict[str, List[str]]:
             raise ValueError("写集条目必须为项目根相对路径且不得逃逸项目根: %r" % raw)
         owner = None
         for repo, rel in rels:
-            # rel=""（根仓，混合形态）→ 兜底命中一切根下路径；子仓 rel 更长且
-            # 排序在前 → 最长前缀优先，子仓路径归子仓。
+            # rel="" (the root repo, the mixed shape) → matches everything under the
+            # root as a fallback; child repos have longer rels and sort first → longest
+            # prefix wins, so a child repo's paths belong to the child repo.
             if not rel or entry == rel or entry.startswith(rel + "/"):
                 owner = repo
                 break
         if owner is None:
             raise ValueError("写集条目 %r 不落在项目根 %s 下任何 git 仓内"
                              "（嵌套仓 fail-closed：嵌套仓内文件不可开票）" % (entry, root))
-        # 嵌套仓判定：归属路径的中途目录若自带 .git 且不在仓集合内 → 该条目实属
-        # 集合外嵌套仓，拒收（不静默归外层仓=错仓落账前奏）。
+        # Nested-repo test: if an intermediate directory of the owned path has its own
+        # .git and is not in the repo set → the entry really belongs to an out-of-set
+        # nested repo, reject (never silently attribute it to the outer repo = the
+        # prelude to booking against the wrong repo).
         cursor = owner
         for part in entry[len(_repo_rel(owner, rels)):].split("/"):
             cursor = cursor / part
@@ -968,11 +1120,15 @@ def resolve_repos_for_paths(project_root, paths) -> Dict[str, List[str]]:
 
 
 def rebase_write_set(write_set, repo_rel: str) -> List[str]:
-    """项目根相对写集 → 树根相对子集（多仓逐树白名单判据的重基单点）。
+    """A project-root-relative write set → a tree-root-relative subset (the single
+    rebase point for the multi-repo per-tree whitelist test).
 
-    repo_rel=""（单仓）原样透传（回归面：单仓判据逐字节不变）；非空时剥仓前缀，
-    不属本仓的条目不进子集。条目恰等于仓目录名本身时不产出（写集语义是仓内
-    文件路径，创建校验已挡目录条目，这里兜畸形不炸）。"""
+    repo_rel="" (single repo) passes through unchanged (regression surface: the
+    single-repo test stays byte-identical); when non-empty, the repo prefix is stripped
+    and entries that don't belong to this repo don't enter the subset. An entry exactly
+    equal to the repo directory name produces nothing (the write-set semantics are
+    file paths inside a repo, creation validation already blocks directory entries, and
+    this just tolerates the malformed case without blowing up)."""
     ws = list(write_set or [])
     if not repo_rel:
         return ws
@@ -982,23 +1138,27 @@ def rebase_write_set(write_set, repo_rel: str) -> List[str]:
 
 
 def build_repo_worktrees(project_root, write_set, lane_dir_name: str) -> List[Dict[str, str]]:
-    """由写集归属推导多仓泳道明细（meta.repo_worktrees 形状唯一构造点）。
+    """Derive the multi-repo lane details from write-set ownership (the only
+    constructor of meta.repo_worktrees' shape).
 
-    返回 [{"repo": 仓相对项目根路径, "name": refname 安全段, "branch": 泳道分支}]；
-    树路径 = repo（同名构造，两边零漂移）。分支名 = lane/<泳道目录名>-<压平段>。
-    任一输入非法 → ValueError 透传（resolve_repos_for_paths 的 fail-closed 口径）。"""
+    Returns [{"repo": the repo path relative to the project root, "name": a
+    refname-safe segment, "branch": the lane branch}]; the tree path = repo (built from
+    the same name, so the two sides cannot drift). Branch name =
+    lane/<lane directory name>-<flattened segment>. Any illegal input → ValueError
+    propagates (resolve_repos_for_paths' fail-closed stance)."""
     if not write_set or not isinstance(write_set, list):
         raise ValueError("多仓泳道推导需要非空写集（write_set 为归属推导唯一输入）")
-    root = pathlib.Path(project_root).resolve()  # macOS /var→/private/var 同源化
+    root = pathlib.Path(project_root).resolve()  # macOS /var → /private/var normalization
     base = sanitize_branch_segment(lane_dir_name)
     entries: List[Dict[str, str]] = []
     seen_branch = set()
     for repo_abs, _paths in resolve_repos_for_paths(project_root, write_set).items():
         repo_rel = pathlib.Path(repo_abs).relative_to(root).as_posix()
         if repo_rel == ".":
-            repo_rel = ""  # 根仓树（混合形态）：rel 归一空串
-        # repo_rel=""（根仓树）→ name 显式 "root"（树路径=泳道容器本身）；子仓名
-        # 恰为 root 的理论碰撞由 seen_branch fail-closed 兜住。
+            repo_rel = ""  # the root-repo tree (the mixed shape): rel normalized to the empty string
+        # repo_rel="" (the root-repo tree) → name explicitly "root" (the tree path = the
+        # lane container itself); the theoretical collision of a child repo literally
+        # named root is caught by seen_branch fail-closed.
         name = flatten_branch_suffix(repo_rel) if repo_rel else "root"
         branch = "lane/%s-%s" % (base, name)
         if branch in seen_branch:
@@ -1018,25 +1178,35 @@ def derive_lane_workspace(
         project_root: str = "",
         repo_write_set: Optional[List[str]] = None,
 ) -> Tuple[str, Optional[Dict[str, str]], str, str]:
-    """lane / workspace / worktree / branch 的推导与校验（创建链路单一真源）。
+    """Derivation and validation of lane / workspace / worktree / branch (the single
+    source of truth for the creation chain).
 
-    project_root（跨项目，票 t260903-10）：给了则把相对泳道路径存成绝对路径
-    （锚项目注册目录）——下游九处 ``if not p.is_absolute(): REPO_ROOT/p`` 全走直通
-    分支，引擎根与项目根解耦。缺省空=旧行为（相对路径，运行侧锚引擎根，兼容引擎
-    住在项目里的历史 payload）。
+    project_root (cross-project, ticket t260903-10): when given, relative lane paths are
+    stored as absolute paths (anchored at the project's registered directory) — the nine
+    downstream ``if not p.is_absolute(): REPO_ROOT/p`` sites all take the pass-through
+    branch, decoupling the engine root from the project root. The default empty = the
+    old behavior (relative paths, the runtime side anchoring the engine root, compatible
+    with historical payloads where the engine lived inside the project).
 
-    返回 (lane, workspace, worktree, branch)；非法 → ValueError（创建即拒收，
-    把「跑 1.5 小时后才暴露」的错提前到创建瞬间）。规则：
-      1. lane = 显式 or 模板 lane。
-      2. 显式 workspace 形状必须是 {"type": worktree|dir, "path": 非空}，否则 ValueError。
-      3. lane=worktree：
-         - workspace 显式给了但 type!=worktree → ValueError（不给静默降级的机会）；
-         - workspace.path 与 worktree 字符串都给且不一致 → ValueError（两字段必须同指
-           一个泳道：prepare_workspace 用前者、merge_check/merge 用后者，两张皮必出事故）；
-         - 缺一补一（path ↔ worktree 互填），都缺 → default_lane_paths 推导；
-         - branch 缺省 = lane/<泳道目录名>。
-      4. 非 worktree 道 + template_workspace_dir → 缺省 {type:dir, WS_DIR_BASE/<工单id>}；
-         否则 workspace 保持 None（主树道直改，无独立空间）。
+    Returns (lane, workspace, worktree, branch); illegal → ValueError (rejected at
+    creation, pulling the "surfaces only after running 1.5 hours" error forward to the
+    moment of creation). Rules:
+      1. lane = explicit or the template lane.
+      2. An explicit workspace must be shaped {"type": worktree|dir, "path": non-empty},
+         otherwise ValueError.
+      3. lane=worktree:
+         - a workspace given with type != worktree → ValueError (no chance of a silent
+           downgrade);
+         - workspace.path and the worktree string both given but different → ValueError
+           (the two fields must name the same lane: prepare_workspace uses the former,
+           merge_check/merge the latter — two versions of the truth guarantee an
+           accident);
+         - if one is missing, fill it from the other (path ↔ worktree); if both are
+           missing → derived by default_lane_paths;
+         - branch default = lane/<lane directory name>.
+      4. A non-worktree lane + template_workspace_dir → default
+         {type:dir, WS_DIR_BASE/<ticket id>}; otherwise workspace stays None (the
+         main-tree lane edits directly, no separate space).
     """
     lane = str(lane or "") or str(template_lane or "")
     ws = None
@@ -1059,11 +1229,15 @@ def derive_lane_workspace(
                 "workspace.path（%s）与 worktree（%s）不一致——两字段必须同指一个泳道，"
                 "否则 merge_check/merge 与 prepare_workspace 各跑各的（t260824-11 教训）"
                 % (ws["path"], worktree))
-        # 票 t260907-06 多仓推导：仅在**真多仓形态**激活（判定收敛到
-        # is_multi_repo_layout 单点谓词）——lane=worktree、project_root 给定、无显式
-        # workspace/worktree 组合、且根无 .git 有子仓或根=仓+子仓并存（混合形态）。
-        # 任一条件不满足 → repo_write_set 静默忽略，旧路径零回归。真多仓下推导失败
-        # （逃逸/嵌套/不在仓内）→ ValueError 创建即拒收（fail-closed，不给静默归仓）。
+        # Ticket t260907-06 multi-repo derivation: activates only in a **genuine
+        # multi-repo shape** (the test converges on the single is_multi_repo_layout
+        # predicate) — lane=worktree, project_root given, no explicit
+        # workspace/worktree combination, and either the root has no .git but has child
+        # repos, or the root is a repo with child repos alongside (the mixed shape).
+        # Any unmet condition → repo_write_set is silently ignored and the old path has
+        # zero regression. In a genuine multi-repo shape a derivation failure (escape /
+        # nesting / outside any repo) → ValueError, rejected at creation (fail-closed,
+        # never a silent attribution to some repo).
         if (repo_write_set and lane == LANE_WORKTREE and project_root
                 and ws is None and not worktree
                 and is_multi_repo_layout(project_root)):
@@ -1075,7 +1249,7 @@ def derive_lane_workspace(
                   "path": project_root.rstrip("/") + "/" + _lane_rel,
                   "repo_worktrees": _entries}
             worktree = str(ws["path"])
-            branch = "lane/" + _lane_dir  # meta 兼容占位；真实分支逐仓在 repo_worktrees
+            branch = "lane/" + _lane_dir  # a meta-compatible placeholder; the real per-repo branches live in repo_worktrees
         if ws is not None:
             worktree = worktree or ws["path"]
         elif worktree:
@@ -1095,11 +1269,14 @@ def derive_lane_workspace(
 
 
 def lane_workspace_gate_error(meta: Dict[str, Any]) -> str:
-    """workflow 侧最后防线：meta 声明 lane=worktree 但泳道字段不齐/不一致 → 错误文案
-    （调用方走 blocked 回执拒跑）；齐 → ""。
+    """The workflow side's last line of defense: when meta declares lane=worktree but
+    the lane fields are incomplete/inconsistent → an error message (the caller returns a
+    blocked receipt and refuses to run); when complete → "".
 
-    创建链路已单点推导+校验（derive_lane_workspace），这里兜「旧工单/手写 payload/
-    未来新入口」绕过创建校验的情况——宁可 blocked 等人，不静默降级主树/临时目录。
+    The creation chain already derives and validates at a single point
+    (derive_lane_workspace); this catches "old tickets / hand-written payloads / future
+    new entry points" bypassing the creation validation — better blocked awaiting a
+    human than silently degraded to the main tree / a temp directory.
     """
     if str(meta.get("lane") or "") != LANE_WORKTREE:
         return ""
@@ -1116,21 +1293,26 @@ def lane_workspace_gate_error(meta: Dict[str, Any]) -> str:
                 % (ws["path"], wt))
     if not str(meta.get("branch") or ""):
         return "lane=worktree 但 branch 字段为空——泳道分支缺失，拒跑"
-    # 票 t260907-06 多仓泳道：repo_worktrees 在场即多仓票——逐仓校验形状
-    #（repo 为项目根相对路径字符串、**允许空串=根仓树**（混合形态，树=泳道容器
-    # 本身）、name/branch 非空字符串、branch 唯一）。
-    # 票 t260908-02 读序：真源已提为 meta 顶层（TicketInput.repo_worktrees 落 meta），
-    # 顶层空列表=新字段缺省（单仓票）直接放行；回落 ws 内嵌旧位时保留既有契约
-    #（在场即校验，含空列表=明细缺失拒收），兜「未来新入口/手写 payload/夹具直调」
-    # 绕过创建链的情形——不是兜旧 RUNNING 票（旧形状 payload 第一跳 decode 就
-    # 起不来，不可能在飞）。
+    # Ticket t260907-06 multi-repo lanes: repo_worktrees present = a multi-repo ticket —
+    # validate the shape per repo (repo is a project-root-relative path string, **an
+    # empty string allowed = the root-repo tree** (the mixed shape, where the tree = the
+    # lane container itself), name/branch non-empty strings, branch unique).
+    # Ticket t260908-02 read order: the source of truth has been lifted to meta's top
+    # level (TicketInput.repo_worktrees lands in meta); an empty top-level list = the new
+    # field's default (a single-repo ticket), pass straight through; when falling back to
+    # the old position nested in ws, the existing contract is kept (present = validate,
+    # including an empty list = details missing, reject), catching "future new entry
+    # points / hand-written payloads / fixtures calling directly" that bypass the
+    # creation chain — not old RUNNING tickets (a payload of the old shape fails at the
+    # very first decode hop and cannot be in flight).
     if "repo_worktrees" in meta:
         return _repo_worktrees_gate_error(meta.get("repo_worktrees") or None)
     return _repo_worktrees_gate_error(ws.get("repo_worktrees"))
 
 
 def _repo_worktrees_gate_error(rw):
-    """repo_worktrees 逐仓明细形状/语义校验（rw=None=非多仓票，放行）。"""
+    """Per-repo shape/semantics validation of repo_worktrees (rw=None = not a multi-repo
+    ticket, pass)."""
     if rw is None:
         return ""
     if not isinstance(rw, list) or not rw:
@@ -1154,9 +1336,10 @@ def _repo_worktrees_gate_error(rw):
     return ""
 
 
-# 显式契约（票 t260822-m4③）：「一个空间一个 agent / 转移接力」。
-#   占用 = 工单 stage_state=running 期间空间有主；
-#   转移 = rework / dispatch-next 换 agent，接手方复用同一空间。
+# An explicit contract (ticket t260822-m4③): 「one space, one agent / a handover relay」.
+#   Occupancy = while the ticket's stage_state=running, the space has an owner;
+#   Transfer = a rework / the next dispatch-next swaps the agent, and the taker reuses
+#   the same space.
 OWNERSHIP_CONTRACT = (
     "工作空间契约（M4「一个空间一个 agent / 转移接力」）：\n"
     "  - 占用：本工单 stage_state=running 期间，上述工作空间归你（当前 agent）独占——"
@@ -1167,10 +1350,12 @@ OWNERSHIP_CONTRACT = (
 
 
 def _workspace_clause(ws: Optional[Dict[str, str]], meta: Dict[str, Any]) -> str:
-    """dispatch-next 的工作空间条款（按类型分三种：worktree 泳道 / dir 隔离目录 / 主树）。
+    """The dispatch-next workspace clause (three shapes by type: a worktree lane / a dir
+    isolated directory / the main tree).
 
-    M16：工作区已由 workflow 第一个 activity（prepare_workspace）创建/复用——
-    agent 直接进入干活，勿自行 git worktree add / mkdir。
+    M16: the workspace has already been created/reused by the workflow's first activity
+    (prepare_workspace) — the agent walks straight in and works; it must not run git
+    worktree add / mkdir itself.
     """
     if ws and ws["type"] == "worktree":
         wt = ws["path"]
@@ -1195,18 +1380,25 @@ def _workspace_clause(ws: Optional[Dict[str, str]], meta: Dict[str, Any]) -> str
     return "工作空间：主树（数据道，不建 worktree 不开隔离目录），小步落盘直接提交。"
 
 
-# ---- 派活上下文索引化（KI-035，票 t260904-03）----
-# 旧制已退役：按 workflow 映射表+标题关键词推导，把设计文档以「必读、按序先读」
-# 塞进每段派活头——agent 每会话全文读机制主档（与票面相关性无关的重复 token
-# 消耗），且映射与 docs/ 实况手工耦合（260904 迁移即断链，留守 sandbar 的项目域
-# 文档仍被指向）。新制=恒定知识库规约：目录=docs/README.md，agent 对照工单
-# 标题/写集判断相关性，相关的读全文、不相关不读；结算 note 列「参考 docs 清单」
-# 作审计。勿再按 workflow/标题推导必读文档（旧表取值与退役全案见 KI-035 行；
-# 零残留由 integration/t260904-03 场景守卫机械把关）。
+# ---- Indexing the dispatch context (KI-035, ticket t260904-03) ----
+# The old regime is retired: a workflow mapping table + title keywords decided which
+# design documents were pushed into every stage's dispatch header as 「required reading,
+# in this order」 — the agent re-read the whole mechanism document every session (token
+# spend unrelated to the ticket at hand), and the mapping was hand-coupled to the actual
+# state of docs/ (the 260904 migration broke it, while documents of projects staying on
+# sandbar were still being pointed at). The new regime = a constant knowledge-base rule:
+# the directory = docs/README.md; the agent judges relevance against the ticket's
+# title/write set, reading in full what is relevant and skipping what is not; the settle
+# note lists a 「docs consulted」 list for audit. Never again derive required reading
+# from workflow/title (the old table's values and the full retirement case are in the
+# KI-035 row; zero residue is mechanically enforced by the
+# integration/t260904-03 scenario guard).
 
 
-# 段专项条款（票 t260822-m5②）：content-pipeline ai-review 段接 knowledge review 闭环；模板已退役。
-# 本表为留存数据：派活头引擎与 t260904-03 守卫仍在消费。
+# Stage-specific clauses (ticket t260822-m5②): the content-pipeline ai-review stage (retired 260904)
+# wired the knowledge review closed loop.
+# This table is retained data: the dispatch-header engine and the t260904-03 guard still
+# consume it.
 STAGE_CLAUSES: Dict[Tuple[str, str], List[str]] = {
     ("content-pipeline", "ai-review"): [
         "审校落盘条款（M5 review 闭环）：逐块意见落 docs/reviews 制式——"
@@ -1219,33 +1411,41 @@ STAGE_CLAUSES: Dict[Tuple[str, str], List[str]] = {
 
 
 # ========================================================================================
-# 票 t260822-m10：dispatch-next 按 stage 选 dispatch 实例
+# Ticket t260822-m10: dispatch-next picks the dispatch instance per stage
 #
-# 同一 role 可有多个 dispatch 实例（product-operation 的加工/审校/验证/出数四分工）。
-# 本表 = 模板 stage → 分工 kind 的唯一真源（**宁少勿滥**：只放「该 stage 必须由分工
-# 实例承载」的映射，拿不准不进表；无映射的段走默认实例 dispatch_<role>）。
-# 分工的模型家写在 KIND_MODELS 供 prompt 展示（真源=model-routes.yaml 的 tasks 段，
-# smoke_routes.py 有交叉断言防漂移）。
+# One role can have several dispatch instances (product-operation's four specializations:
+# production / review / verification / data extraction).
+# This table = the single source of truth for template stage → specialization kind
+# (**fewer but safer**: only mappings where "this stage must be carried by a
+# specialization instance" belong here; when unsure, leave it out; stages with no
+# mapping use the default instance dispatch_<role>).
+# The specializations' model homes are written in KIND_MODELS for prompt display (source
+# of truth = the tasks section of model-routes.yaml, with a cross-assertion in
+# smoke_routes.py to prevent drift).
 # ========================================================================================
 
 STAGE_DISPATCH_KIND: Dict[Tuple[str, str], str] = {
-    ("content-pipeline", "ai-review"): "proofread",   # AI 审校段 → 审校分工实例
-    ("proofread", "review"): "proofread",             # 独立审读段 → 审校分工实例
-    ("regression", "regress"): "qa",                  # 独立回归段 → 验证分工实例
-    ("dev-lane", "integration_review"): "qa",         # 集成审读（diff 审读）→ 验证分工实例
+    ("content-pipeline", "ai-review"): "proofread",   # the AI review stage → the review specialization instance
+    ("proofread", "review"): "proofread",             # the standalone review stage → the review specialization instance
+    ("regression", "regress"): "qa",                  # the standalone regression stage → the verification specialization instance
+    ("dev-lane", "integration_review"): "qa",         # integration review (a diff review) → the verification specialization instance
 }
 
 KIND_LABELS: Dict[str, str] = {"proofread": "审校", "qa": "验证", "analyst": "出数"}
-# v1 旧引擎（build_dispatch_prompt，replay 冻结）仍引用，勿删：
+# Still referenced by the v1 old engine (build_dispatch_prompt, frozen for replay) — do
+# not delete:
 KIND_DOCS: Dict[str, str] = {"proofread": "proofreader.md", "qa": "qa.md", "analyst": "analyst.md"}
 KIND_MODELS: Dict[str, str] = {"proofread": "zai/glm-5.2", "qa": "zai/glm-5.2", "analyst": "zai/glm-5.2"}
 
-# ---- 运行时模型路由（gen.py 退役后唯一消费者：agent activity spawn 时查表）----
-# 查表规则：roles.<role>.tasks.<kind> → roles.<role> → default；全落空返回 None
-#（不覆盖，agent 用 profile 默认模型）。表=server/model-routes.yaml（工单台
-#「模型」页签可视化编辑，下一次 spawn 即生效——无生成步骤）。契约①d：
-# 表路径可由项目注册条目 paths.model_routes 声明（见 routes_file_for_spawn），
-# 未声明回落本常量——sandbar 不声明 paths，逐字节零回归。
+# ---- Runtime model routing (the only consumer left after gen.py retired: an agent
+# activity looks up the table at spawn time) ----
+# Lookup rule: roles.<role>.tasks.<kind> → roles.<role> → default; if all miss, return
+# None (no override, the agent uses the profile's default model). The table =
+# server/model-routes.yaml (visually editable in the ticket console's 「模型」 tab, in
+# effect from the next spawn — no generation step). Contract ①d: the table path can be
+# declared by a project registry entry's paths.model_routes (see routes_file_for_spawn);
+# undeclared, it falls back to this constant — sandbar declares no paths, so byte-level
+# zero regression.
 
 MODEL_ROUTES_REL = "server/model-routes.yaml"
 MODEL_ROUTES_FILE = REPO_ROOT / MODEL_ROUTES_REL
@@ -1253,14 +1453,18 @@ MODEL_ROUTES_FILE = REPO_ROOT / MODEL_ROUTES_REL
 
 def model_route_for(role: str, kind: str = "",
                     routes_file: Optional[pathlib.Path] = None) -> Optional[Dict[str, str]]:
-    """读模型路由表查 (role, kind) 的 provider/model。activity 侧调用（允许 IO）。
+    """Read the model route table for (role, kind)'s provider/model. Called from the
+    activity side (IO allowed).
 
-    routes_file 缺省 MODEL_ROUTES_FILE；项目声明 paths.model_routes 时由
-    routes_file_for_spawn 解析传入（契约①d）。表文件缺失/内容不可解析 = 返回
-    None（既有容错语义——agent 用 profile 默认模型；①d「锚点 vs 内容」明文：
-    本函数容错覆盖表内容，声不声明同语义，fail-closed 只归锚点判定）。"""
+    routes_file defaults to MODEL_ROUTES_FILE; when a project declares
+    paths.model_routes, routes_file_for_spawn resolves and passes it in (contract ①d).
+    A missing table file / unparseable contents = returns None (the existing tolerant
+    semantics — the agent uses the profile's default model; ①d's "anchor versus
+    contents" is explicit: this function's tolerance covers the table contents, so
+    declared or not the semantics are the same, and fail-closed belongs only to anchor
+    decisions)."""
     try:
-        import yaml  # pyyaml（engine venv）
+        import yaml  # pyyaml (engine venv)
         table = yaml.safe_load((routes_file or MODEL_ROUTES_FILE).read_text("utf-8")) or {}
     except Exception:
         return None
@@ -1276,8 +1480,11 @@ def model_route_for(role: str, kind: str = "",
             return {"provider": str(cand["provider"]), "model": str(cand["model"])}
     return None
 
-# 退役角色 → 新角色兜底（在跑工单模板快照钉死仍带旧 role id；新工单一律新模板新 role）。
-# 先归一角色再套分工：旧模板 ai-review 段 role=proofreader → product-operation + proofread 分工。
+# Retired role → new role fallback (the template snapshots pinned inside running
+# tickets still carry the old role ids; new tickets always use the new templates and new
+# roles).
+# Normalize the role first, then apply the specialization: the old template's ai-review
+# stage had role=proofreader → product-operation with the proofread specialization.
 LEGACY_ROLE: Dict[str, str] = {
     "dispatcher": "integration",
     "editor": "product-operation",
@@ -1288,8 +1495,9 @@ LEGACY_ROLE: Dict[str, str] = {
 
 
 def dispatch_instance_for(workflow_id: str, stage: str, role: str) -> Tuple[str, str, str]:
-    """按 (workflow, stage, role) 选派活工具实例名。返回 (tool_name, effective_role, kind)
-    （kind 无则 ''；effective_role = 旧 role 归一后的新角色 id）。"""
+    """Pick the dispatch tool instance name by (workflow, stage, role). Returns
+    (tool_name, effective_role, kind) (kind = '' when there is none; effective_role =
+    the new role id after normalizing the old role)."""
     eff = LEGACY_ROLE.get(role, role)
     kind = STAGE_DISPATCH_KIND.get((workflow_id, stage), "")
     tool = "dispatch_" + eff.replace("-", "_") + (("_" + kind) if kind else "")
@@ -1298,9 +1506,11 @@ def dispatch_instance_for(workflow_id: str, stage: str, role: str) -> Tuple[str,
 
 def build_dispatch_prompt(tid: str, meta: Dict[str, Any], template_lane: str,
                           stage_def: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
-    """dispatch-next 派活指令（ticket.py 旧路径与 TicketWorkflow 共用的单一生成器）。
+    """The dispatch-next dispatch prompt (the single generator shared by ticket.py's old
+    path and the TicketWorkflow).
 
-    返回 (prompt_text, parts)。parts 供调用方结构化透出（context/workspace 等）。
+    Returns (prompt_text, parts). parts lets the caller expose the pieces in a
+    structured form (context / workspace and so on).
     """
     stage = str(meta.get("stage") or "")
     role = str(stage_def.get("role") or "")
@@ -1309,12 +1519,16 @@ def build_dispatch_prompt(tid: str, meta: Dict[str, Any], template_lane: str,
     wid = str(meta.get("workflow_id") or "")
     title = str(meta.get("title") or "")
     ws = workspace_of(meta, template_lane)
-    # 按 stage 选 dispatch 实例（旧 role 先归一；分工段选分工实例）
+    # Pick the dispatch instance per stage (the old role normalized first; a
+    # specialization stage picks the specialization instance)
     tool, eff_role, kind = dispatch_instance_for(wid, stage, role)
-    # 契约①d（票 t260903-03）：role_doc/kind_doc 的目录基准经注册条目 paths.roles_dir
-    # 声明取值，未声明回落 DEFAULT_ROLES_DIR（相对路径字符串形态与改前一致）。
-    # prompt 只是文本指引，声明锚点缺失的红在 spawn 真消费点报（roles_dir_for_spawn）；
-    # 条目文件本身不可解析照常 fail-closed（ProjectPathsError 上抛）。
+    # Contract ①d (ticket t260903-03): the directory base of role_doc/kind_doc comes
+    # from the registered entry's declared paths.roles_dir, falling back to
+    # DEFAULT_ROLES_DIR when undeclared (the relative-path string shape matches
+    # pre-change behavior).
+    # The prompt is only textual guidance; a missing declared anchor reports red at the
+    # spawn-time real consumer (roles_dir_for_spawn); an entry file that itself cannot
+    # be parsed still fails closed as usual (ProjectPathsError propagates).
     roles_rel = roles_rel_for_prompt(str(meta.get("project") or ""))
     role_doc = "%s/%s.md" % (roles_rel, eff_role)
     kind_doc = ("%s/%s" % (roles_rel, KIND_DOCS[kind])) if kind else ""
@@ -1375,47 +1589,56 @@ def build_dispatch_prompt(tid: str, meta: Dict[str, Any], template_lane: str,
 
 
 # ========================================================================================
-# 票 t260822-m11：模版即代码 —— workflow 类共享契约
-#（code-lane/build-workbench 已删；宿主令 260904 content-pipeline/proofread/
-# regression/cleanup 四模版退役，现仅存 dev-lane；历史文档中「五模版/六模版」
-# 为删前措辞）
+# Ticket t260822-m11: templates as code — the workflow-class shared contract
+# (code-lane/build-workbench deleted; content-pipeline/proofread/regression/cleanup retired 260904,
+# leaving only dev-lane; the 「five templates / six templates」 wording in historical
+# documents predates the deletion)
 #
-# 真源=代码：各套模版的 stage 链从 yaml 直译进各子类的 STAGES 类属性（Stage 元组），
-# workflows/*.yaml 降为 gen_workflows_doc.py 生成的参考快照（勿手改）。
-# 本区全部是纯数据/纯函数：workflow sandbox 内可确定性使用，零 IO。
+# The source of truth = code: each template's stage chain is translated straight from
+# yaml into the STAGES class attribute (Stage tuples) of its subclass, and
+# workflows/*.yaml is demoted to a reference snapshot generated by gen_workflows_doc.py
+# (never hand-edited).
+# Everything in this section is pure data / pure functions: deterministically usable
+# inside a workflow sandbox, zero IO.
 # ========================================================================================
 
-# v2 引擎标记（snapshot['engine']；ticket.py/client.py 据此分流新旧路径）
+# The v2 engine marker (snapshot['engine']; ticket.py/client.py route old/new paths on it)
 ENGINE_V2 = "template-as-code-v2"
 ENGINE_VERSION_V2 = 3
 
-# 执行主体枚举（票 t260828-01，observability 立项「执行主体可见」）：
-# stage 内部活动（parts）的组合态声明——agent=🤖 agent 执行 / script=⚙️ 脚本·程序化 /
-# human=👤 人工。不做 stage 单值（implement=agent+脚本、merge=人+脚本 的混合执行已存在，
-# 单值是逼代码说谎）。动态真源仍为 Temporal history，parts 只是静态声明（工单台徽标用）。
+# The executor enumeration (ticket t260828-01, the observability ticket 「executors made
+# visible」): a declaration of the combination of a stage's internal activities (parts) —
+# agent = 🤖 run by the agent / script = ⚙️ script, programmatic / human = 👤 manual.
+# No single value per stage (implement = agent + script and merge = human + script are
+# mixed executions that already exist; a single value would force the code to lie). The
+# dynamic source of truth is still the Temporal history; parts is only a static
+# declaration (used by the ticket console badges).
 PART_KINDS: Tuple[str, ...] = ("agent", "script", "human")
 
 
 @dataclass(frozen=True)
 class Stage:
-    """一段的定义（子类 STAGES 类属性的元素）。kind 由 exit/agent 派生：
-    exit='human' → 人门段；agent=False → 纯脚本门段；否则 agent 段（可再挂 gate 尾门）。
-    parts=执行主体组合声明（PART_KINDS 子集，有序元组）：仅展示元数据，
-    引擎管道件（结果文件轮询/prepare_human_gate 机械准备/no-op settle）不计，
-    业务产物落账必需的脚本计入（implement 的 worker 代落盘、merge 的落账+泳道清理）。"""
+    """The definition of one stage (an element of a subclass's STAGES class attribute).
+    kind derives from exit/agent: exit='human' → a human-gate stage; agent=False → a pure
+    script-gate stage; otherwise an agent stage (which may still carry a trailing gate).
+    parts = the executor-combination declaration (an ordered subset of PART_KINDS):
+    display metadata only — the engine's plumbing (result-file polling /
+    prepare_human_gate's mechanical preparation / a no-op settle) doesn't count, while
+    scripts required to land business output do (implement's worker settle, merge's
+    booking + lane teardown)."""
 
     id: str
     name: str
-    role: str                                  # 五角色（票 t260822-m10）：developer/integration/ops/product-operation/artist
+    role: str                                  # the five roles (ticket t260822-m10): developer/integration/ops/product-operation/artist
     desc: str = ""
     acceptance: Tuple[str, ...] = ()
-    next: str = ""                             # 展示/快照用；驱动以 STAGES 序为准
-    exit: str = ""                             # 'human' = 人门段（signal+wait_condition）
-    fanout: int = 0                            # 审读类扇出声明（保留自 yaml，当前=1）
-    revision_to: str = ""                      # rework 缺省回退目标（原 content-pipeline 修订回路，已退役 260904）
-    agent: bool = True                         # False = 纯脚本门段（无 agent 活动，只跑 gate）
-    gate: Optional[GateSpec] = None            # 尾门：本段产物落定后必须跑绿才推进
-    parts: Tuple[str, ...] = ()                # 执行主体组合（PART_KINDS 子集）；空=未声明（UI 软降级「—」）
+    next: str = ""                             # for display/snapshot; the driver follows the STAGES order
+    exit: str = ""                             # 'human' = a human-gate stage (signal + wait_condition)
+    fanout: int = 0                            # the review-type fan-out declaration (kept from yaml, currently 1)
+    revision_to: str = ""                      # the rework default fallback target (the old content-pipeline revision loop, retired 260904)
+    agent: bool = True                         # False = a pure script-gate stage (no agent activity, only the gate runs)
+    gate: Optional[GateSpec] = None            # trailing gate: must run green after this stage's output lands before advancing
+    parts: Tuple[str, ...] = ()                # the executor combination (a subset of PART_KINDS); empty = undeclared (the UI soft-degrades to 「—」)
 
     @property
     def kind(self) -> str:
@@ -1428,20 +1651,24 @@ class Stage:
 
 @dataclass
 class TicketInput:
-    """v2 workflow 输入：创建即钉死全部业务属性（确定性）；stage 链在子类代码里不进输入。"""
+    """The v2 workflow input: every business attribute is pinned at creation
+    (deterministic); the stage chain lives in subclass code and never enters the
+    input."""
 
     ticket_id: str
     template_id: str
-    project: str = ""                            # 项目 key（机器级 per-key 注册表 ~/.sandbar/projects/<key>/project.yaml）；空=非法，ticket-start 入口拦截
-    epic: str = ""                               # 立项代号（notes/epics/<代号>.md 必须存在）；空=不关联立项
+    project: str = ""                            # the project key (the machine-level per-key registry ~/.sandbar/projects/<key>/project.yaml); empty = illegal, blocked at the ticket-start entry
+    epic: str = ""                               # the epic code (notes/epics/<code>.md must exist); empty = not tied to an epic
     title: str = ""
     lane: str = ""
     workspace: Optional[Dict[str, str]] = None   # {type: worktree|dir, path} | None
-    # 票 t260908-02（t260907-13 实锤）：多仓/混合形态泳道的逐仓明细提为一等字段（形状显式）。
-    # 此前 derive_lane_workspace 把 list[dict] 内嵌进 workspace 值域，与 Dict[str, str]
-    # 注解冲突 → Temporal dataclass payload 解码 TypeError（worker 日志 Failed
-    # converting field workspace），workflow 启动失败。字段带默认值=存量 RUNNING 实例
-    # 重放缺键回落，不破回放。
+    # Ticket t260908-02 (proven by t260907-13): the per-repo details of a multi-repo /
+    # mixed-shape lane are promoted to a first-class field (an explicit shape).
+    # Previously derive_lane_workspace embedded a list[dict] into the workspace value,
+    # which conflicts with the Dict[str, str] annotation → a TypeError decoding the
+    # Temporal dataclass payload (worker log "Failed converting field workspace") and a
+    # failed workflow start. The field has a default = existing RUNNING instances replay
+    # with the key missing and fall back, without breaking replay.
     repo_worktrees: List[Dict[str, str]] = field(default_factory=list)
     worktree: str = ""
     branch: str = ""
@@ -1449,59 +1676,74 @@ class TicketInput:
     proposal_id: str = ""
     book_path: str = ""
     write_set: List[str] = field(default_factory=list)
-    # 票 t260904-18 门①（知识库设计.md §1 工单引用铁律，宿主令 260904）：票面引用的
-    # 背景文件清单（仓库相对路径）——建票入口 validate_background_refs 已校验
-    # 「已提交且干净（HEAD 态）」，此处原样带入作票面记录；缺省空=旧票不追溯。
+    # Ticket t260904-18 gate ① (知识库设计.md §1's ticket-reference iron rule, host order
+    # 260904): the list of background files the ticket references (repo-relative paths) —
+    # the creation entry's validate_background_refs has already verified 「committed and
+    # clean (the HEAD state)」, and they are carried here verbatim as part of the ticket
+    # record; the default empty = old tickets are not retroactively covered.
     refs: List[str] = field(default_factory=list)
-    # 票 t260829-07 写集生命周期：建票显式声明「本票无文件改动」（allow_empty_write_set
-    # 才可能置真）——机械复核闸据此跳过「泳道 0 commit」判定。
+    # Ticket t260829-07's write-set lifecycle: the ticket creation explicitly declares
+    # 「this ticket changes no files」 (only allow_empty_write_set can set it true) — the
+    # mechanical re-check gate then skips the 「lane has 0 commits」 test.
     no_file_changes: bool = False
-    acceptance_extra: List[str] = field(default_factory=list)  # A5.5：实例增项（追加到首段清单）
+    acceptance_extra: List[str] = field(default_factory=list)  # A5.5: per-instance additions (appended to the first stage's checklist)
     deliverables: str = ""
-    # 正文=原始用户需求（票 t260822-m16：user_request 逐字保留，显式优先；缺省回落 body）；
-    # spec=加工后派发规格（独立字段，不覆盖正文）。
+    # Body = the original user request (ticket t260822-m16: user_request kept verbatim,
+    # taking precedence when present; the default falls back to body);
+    # spec = the processed dispatch specification (a separate field, never overwriting
+    # the body).
     user_request: str = ""
     spec: str = ""
     body: str = ""
     created: int = 0
-    gate_overrides: Dict[str, GateSpec] = field(default_factory=dict)  # 自测门替换（生产恒空）
+    gate_overrides: Dict[str, GateSpec] = field(default_factory=dict)  # gate replacement for self-tests (always empty in production)
 
 
 @dataclass
 class StageResult:
-    """agent 段结果（= 工作空间结果文件的内存形态；格式即 {status,summary,report,
-    deliverables,files_changed,evidence}）。
+    """An agent stage's result (= the in-memory form of the workspace result file; the
+    format is exactly {status,summary,report,deliverables,files_changed,evidence}).
 
-    三层口径：summary=台面一句话（列表/交接时间线）；report=人读进展报告 markdown
-    （详情卡片/交接注入/打回注入）；evidence=机器口径原始证据（默认折叠）。"""
+    Three layers: summary = the console's one-liner (lists / handover timelines); report
+    = a human-readable markdown progress report (detail cards / handover injection /
+    bounce injection); evidence = machine-stance raw evidence (collapsed by default)."""
 
     status: str = "ok"                         # ok | failed
     summary: str = ""
     report: str = ""
     deliverables: List[str] = field(default_factory=list)
     files_changed: List[str] = field(default_factory=list)
-    # 票 t260904-18 KI-049 门②：files_changed 的原始形状（解析层保形，消费点判
-    # emptiness 政策）。三态：absent=回执无此字段（旧票/旧回执兼容）；ok=list[str]；
-    # malformed=字段在但不是字符串列表（解析层拒收毁形，消费点据此可见红，杜绝
-    # 「字符串逐字符迭代成单字符假列表」绕过新闸）。带默认值：旧 RUNNING 实例
-    # 重放历史事件无此字段不破回放。
+    # Ticket t260904-18, KI-049 gate ②: files_changed's original shape (the parsing layer
+    # preserves the shape; the consumer decides the emptiness policy). Three states:
+    # absent = the receipt has no such field (compat with old tickets/receipts);
+    # ok = list[str]; malformed = the field is present but not a list of strings (the
+    # parsing layer rejects the shape-destroying form so consumers can visibly go red,
+    # ruling out 「a string iterated character-by-character into a fake list of single
+    # chars」 bypassing the new gate). Has a default: old RUNNING instances replaying
+    # historical events without this field don't break.
     files_changed_shape: str = "absent"
     evidence: str = ""
 
 
 def normalize_files_changed(raw: Any):
-    """create_plan 回执 files_changed 保形归一（纯函数，票 t260904-18 KI-049 门②）。
+    """Shape-preserving normalization of the create_plan receipt's files_changed (pure
+    function, ticket t260904-18 KI-049 gate ②).
 
-    返回 (files, shape)：shape ∈ "absent" | "ok" | "malformed"。
-      - raw is None → ([], "absent")：回执无字段（旧票回落，消费点按跳过语义）；
-      - raw 是列表且全为字符串 → (strip 去空后清单, "ok")：emptiness（是否空数组）
-        政策留给消费点（design_integration_tests 等段空数组合法）；
-      - 其余（字符串/数字/字典/含非字符串元素的列表）→ ([], "malformed")：
-        **拒收毁形不清洗**——旧实现 `[str(x) for x in raw]` 会把字符串
-        "server/foo.py" 逐字符迭代成单字符假列表，静默绕过闸并污染写集。
+    Returns (files, shape): shape ∈ "absent" | "ok" | "malformed".
+      - raw is None → ([], "absent"): the receipt has no field (old-ticket fallback; the
+        consumer applies skip semantics);
+      - raw is a list of all strings → (the stripped, emptied-out list, "ok"): the
+        emptiness (is it an empty array) policy belongs to the consumer (empty arrays are
+        legal in stages such as design_integration_tests);
+      - anything else (a string / number / dict / a list with non-string elements) →
+        ([], "malformed"): **reject the shape-destroying form, never clean it** — the old
+        `[str(x) for x in raw]` would iterate the string "server/foo.py"
+        character-by-character into a fake list of single chars, silently bypassing the
+        gate and polluting the write set.
 
-    三个解析点（agent_activities._read_result / base / dev_lane 的 activity 回包
-    归一处）统一走本函数，替换原强转毁形。"""
+    All three parsing points (agent_activities._read_result / base / dev_lane's activity
+    reply normalization) go through this function, replacing the old shape-destroying
+    coercion."""
     if raw is None:
         return [], "absent"
     if not isinstance(raw, list):
@@ -1513,7 +1755,9 @@ def normalize_files_changed(raw: Any):
 
 @dataclass
 class ReworkRequest:
-    """rework signal 载荷：回目标段重跑。target_stage 空 = 缺省（当前段 revision_to 或上一段）。"""
+    """The rework signal payload: go back to a target stage and re-run. An empty
+    target_stage = the default (the current stage's revision_to, or the previous
+    stage)."""
 
     who: str
     target_stage: str = ""
@@ -1522,9 +1766,11 @@ class ReworkRequest:
 
 @dataclass
 class HostRulingRequest:
-    """host_ruling signal 载荷（KI-053）：宿主人工意见的正规注入通道，任何状态可发
-    （含 blocked）。who/note 均必填非空——空/纯空白由 workflow 侧拒收进 refused；
-    note 超 HOST_RULING_NOTE_INPUT_LIMIT 同拒（intake 闸，不让超大载荷进事件历史）。"""
+    """The host_ruling signal payload (KI-053): the formal injection channel for the
+    host's human opinion, sendable in any state (including blocked). Both who and note
+    are required and non-empty — empty / pure whitespace is refused by the workflow side
+    into refused; a note over HOST_RULING_NOTE_INPUT_LIMIT is refused the same way (an
+    intake gate, so oversized payloads never enter the event history)."""
 
     who: str
     note: str
@@ -1532,30 +1778,34 @@ class HostRulingRequest:
 
 @dataclass
 class AgentStageArgs:
-    """agent 段 activity 入参（activity 名=stage 名；实现通用，按 stage 派活）。"""
+    """Inputs of an agent-stage activity (the activity name = the stage name; the
+    implementation is generic, dispatching per stage)."""
 
     ticket_id: str
     stage_id: str
     role: str
-    prompt: str                                # 派活指令（workflow 侧纯函数组装，确定性）
+    prompt: str                                # the dispatch prompt (assembled by a pure function on the workflow side, deterministic)
     workspace: Optional[Dict[str, str]] = None
-    result_file: str = ""                      # 幂等锚点：存在即直接读（重跑安全）
+    result_file: str = ""                      # the idempotence anchor: if it exists, read it directly (safe to re-run)
     log_file: str = ""
-    gen: int = 0                               # 第几次进本段（rework 重跑换新结果文件）
-    max_polls: int = 0                         # 0=缺省（activity 侧常量）
-    # 票 t260828-08 suggest_next 专用（通用 agent 步留空；加默认字段对旧事件序列化向后兼容）：
-    epic: str = ""                             # 立项代号（缓存写入路径 + 档案锚点）
-    state_key: str = ""                        # prepare_epic_next 算出的 state_key（缓存比对键）
-    workflow_id: str = ""                      # 模板 id（分工级模型路由查 STAGE_DISPATCH_KIND 用）
-    previous_context: str = ""                 # 上次运行上下文（同 stage 重跑时从工作流历史继承）
-    # 票 t260829-07：并行分叉期 implement/design 都跳过尾部 settle（防止把对方半成品
-    # 一起代落盘），统一落盘由汇合点的 settle_lane activity 承担。
+    gen: int = 0                               # how many times this stage has been entered (a rework re-run gets a fresh result file)
+    max_polls: int = 0                         # 0 = default (the activity-side constant)
+    # Ticket t260828-08, suggest_next only (the generic agent step leaves it empty; the
+    # defaulted fields stay backward compatible with old serialized events):
+    epic: str = ""                             # the epic code (the cache write path + the document anchor)
+    state_key: str = ""                        # the state_key computed by prepare_epic_next (the cache comparison key)
+    workflow_id: str = ""                      # the template id (used to look up STAGE_DISPATCH_KIND for specialization-level model routing)
+    previous_context: str = ""                 # the previous run's context (inherited from the workflow history when the same stage re-runs)
+    # Ticket t260829-07: during the parallel fork both implement and design skip the
+    # trailing settle (so neither settles the other's half-finished work); the unified
+    # settle is handled by the settle_lane activity at the join point.
     skip_settle: bool = False
 
 
 @dataclass
 class HumanGatePrep:
-    """人门段机械准备 activity 入参/回执：组装审查上下文（diff/提案摘录/前段产物清单）。"""
+    """Inputs/receipt of the human-gate mechanical preparation activity: assembles the
+    review context (diff / proposal excerpt / previous stage's deliverables)."""
 
     ticket_id: str
     stage_id: str
@@ -1569,65 +1819,79 @@ class HumanGatePrep:
 @dataclass
 class HumanGateContext:
     ok: bool = True
-    context_text: str = ""                     # 给签字人看的机械上下文（进 snapshot 展示）
+    context_text: str = ""                     # the mechanical context shown to the signer (rendered into the snapshot)
     note: str = ""
 
 
 @dataclass
 class WorkspacePrep:
-    """工作区准备 activity 入参（M16：工作区由 workflow 第一个 activity 创建，agent 不再自己搞）。"""
+    """Inputs of the workspace preparation activity (M16: the workspace is created by the
+    workflow's first activity, the agent no longer does it itself)."""
 
     ticket_id: str
-    workspace: Optional[Dict[str, str]] = None  # {type: worktree|dir, path} | None（主树=None）
-    branch: str = ""                            # worktree 泳道的新分支名（create 已登记）
-    base_ref: str = ""                          # 基点（create 时主树 HEAD；空=缺省 HEAD）
-    # 票 t260907-06 多仓通道：write_set+project_root 在场且项目根无 .git（父目录
-    # 作根的多 repo 项目）→ prepare 由写集归属推导 repo_worktrees（meta 唯一真源在
-    # 建票链 derive_lane_workspace；prepare 按真源推导物校验盘面）。字段带默认值=
-    # 存量 RUNNING 实例重放缺键回落，不破回放。单仓项目两字段被忽略（零回归）。
+    workspace: Optional[Dict[str, str]] = None  # {type: worktree|dir, path} | None (main tree = None)
+    branch: str = ""                            # the worktree lane's new branch name (registered at create)
+    base_ref: str = ""                          # the base point (the main-tree HEAD at create; empty = the default HEAD)
+    # Ticket t260907-06 multi-repo channel: when write_set + project_root are present and
+    # the project root has no .git (a multi-repo project with the parent directory as
+    # root) → prepare derives repo_worktrees from write-set ownership (the meta source of
+    # truth is the creation chain's derive_lane_workspace; prepare verifies the disk
+    # against what the source of truth derived). Defaulted fields = existing RUNNING
+    # instances replay with the key missing and fall back, without breaking replay. For a
+    # single-repo project both fields are ignored (zero regression).
     write_set: List[str] = field(default_factory=list)
     project_root: str = ""
-    # 票 t260908-02：逐仓明细与 TicketInput.repo_worktrees 同款提为一等字段——第二跳
-    #（workflow→activity）此前同样把含 list 的 workspace 塞进 Dict[str, str] 注解，
-    # Temporal 编解码会在 activity 侧再炸一次。带默认值=replay-safe。
+    # Ticket t260908-02: the per-repo details are promoted to a first-class field, the
+    # same way as TicketInput.repo_worktrees — the second hop (workflow → activity)
+    # previously also stuffed a workspace containing a list into a Dict[str, str]
+    # annotation, and Temporal's codec would blow up a second time on the activity side.
+    # Defaulted = replay-safe.
     repo_worktrees: List[Dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
 class WorkspacePrepResult:
-    """工作区准备回执（失败不抛——回执交 workflow 转 blocked 等 retry_qc / rework 判读）。"""
+    """The workspace preparation receipt (failure does not raise — the receipt goes back
+    to the workflow to turn blocked and wait for retry_qc / rework triage)."""
 
     ok: bool = True
-    kind: str = ""        # worktree | dir | main（主树/无独立空间）
+    kind: str = ""        # worktree | dir | main (the main tree / no separate space)
     action: str = ""      # created | reused | ensured | skipped | failed
     path: str = ""
-    error: str = ""       # failed 时给原因（如目录已存在但非本仓库 worktree）
+    error: str = ""       # the reason on failed (e.g. the directory exists but is not a worktree of this repo)
 
 
 @dataclass
 class MergeCheckArgs:
-    """merge_check activity 入参（dev-lane：合并前的程序化检查，无 agent）。
+    """Inputs of the merge_check activity (dev-lane: the programmatic pre-merge checks,
+    no agent).
 
-    补的正是票 t260824-01 漏掉的检查：那张工单 agent 全程未 commit，verify 门跑在
-    主树上（改动在 worktree，主树 diff 为空 → 白名单检查形同虚设）全绿假闭环。
-    所以本 activity 硬性要求：泳道有 commit、工作区干净、verify 跑在泳道内。"""
+    It adds exactly the check ticket t260824-01 was missing: on that ticket the agent
+    never committed, the verify gate ran against the main tree (the changes were in the
+    worktree, the main-tree diff was empty → the whitelist check was a no-op) and
+    everything went green in a fake closed loop. So this activity hard-requires: the lane
+    has commits, the workspace is clean, and verify runs inside the lane."""
 
     ticket_id: str
-    worktree: str = ""                        # 泳道 worktree 路径（相对仓库根或绝对）
-    branch: str = ""                          # 泳道分支名
-    base_ref: str = ""                        # 基点（create 时主树 HEAD）
-    # 票 t260828-09 UI 证据闸：工单写集原样带入（dev_lane 调用点从 meta["write_set"] 传）；
-    # 带默认值——旧 RUNNING 实例重放历史事件时无此字段，不破回放。
+    worktree: str = ""                        # the lane worktree path (repo-relative or absolute)
+    branch: str = ""                          # the lane branch name
+    base_ref: str = ""                        # the base point (the main-tree HEAD at create)
+    # Ticket t260828-09's UI evidence gate: the ticket's write set carried in verbatim
+    # (the dev_lane call site passes meta["write_set"]); defaulted — old RUNNING
+    # instances replaying historical events have no such field, so replay doesn't break.
     write_set: List[str] = field(default_factory=list)
 
 
-# ---- 票 t260828-09：UI 验收机制（截图通道 + 看图审读 + merge_check 证据闸）----
+# ---- Ticket t260828-09: the UI acceptance machinery (the screenshot channel + look-at-the-image review + merge_check's evidence gate) ----
 
-# UI 文件口径（票 t260904-18 KI-050 声明制后的**兼容回落数据源**，不再是活路径真源）：
-#   活路径（merge_check 3.6 / ui_changed_paths / review_gate patched 分支）一律吃
-#   项目声明（verify.yaml ui_evidence.dirs，load_ui_evidence 装载）；本常量仅供
-#   prefixes=None 的旧票重放与冻结/未 patch 分支回落（重放确定性必需），膨胀收窄
-#   不再改这里——改 sandbar 的 verify.yaml 声明。物理退役随存量 RUNNING 实例清零。
+# The UI file stance (**the compatibility fallback data source** after ticket t260904-18's
+# KI-050 declaration regime, no longer the live path's source of truth):
+#   live paths (merge_check 3.6 / ui_changed_paths / the review_gate patched branch) all
+#   consume the project declaration (verify.yaml ui_evidence.dirs, loaded by
+#   load_ui_evidence); this constant serves only the prefixes=None replay of old tickets
+#   and the frozen/unpatched branch fallback (required for replay determinism). Widening
+#   or narrowing it no longer happens here — change sandbar's verify.yaml declaration.
+# Physical retirement follows the stock of RUNNING instances reaching zero.
 UI_WRITE_PREFIXES = (
     "server/plugins/workbench/src/client/",
     "server/plugins/workbench/lib/",
@@ -1637,26 +1901,34 @@ UI_WRITE_PREFIXES = (
 )
 
 
-# 截图证据目录（新泳道缺省 .sandbar/screenshots；老泳道由 ui_evidence_dir() 粘滞
-# 解析回老名——capture.mjs --out 与 merge_check 闸都走帮手同一解析，不各自判目录名）。
-# 本常量仅作文案缺省展示与 fixture 用。
+# The screenshot evidence directory (new lanes default to .sandbar/screenshots; old
+# lanes are resolved back to the old name by ui_evidence_dir()'s sticky resolution —
+# capture.mjs's --out and merge_check's gate both go through the helper's one
+# resolution rather than each judging the directory name).
+# This constant is for default display text and fixtures only.
 UI_EVIDENCE_DIR = DOT_DIR_NEW + "/screenshots"
 
 
 def ui_evidence_dir(worktree) -> pathlib.Path:
-    """泳道截图目录（粘滞解析：resolve_dot_dir(worktree)/screenshots）。"""
+    """The lane's screenshot directory (sticky resolution:
+    resolve_dot_dir(worktree)/screenshots)."""
     return lane_dot_path(worktree, "screenshots")
 
-# 截图证据归档目录（相对主树 REPO_ROOT；prepare_ui_evidence 成功后把泳道截图
-# 拷进来：主树协调目录粘滞解析 /evidence）。泳道 merge 后拆树，report 里引图不死链
-# 靠这份归档；host 只读端点 node.ts evidence 路由同口径读它——node 侧
-# SANDBAR_EVIDENCE_DIR env 覆盖（=归档基目录本体，自测指向临时目录）与
-# agent_activities._archive_shots 同名 env 互指，改一边同步另一边）
+# The screenshot evidence archive directory (relative to the main tree REPO_ROOT; after
+# prepare_ui_evidence succeeds it copies the lane's screenshots in here: the main tree's
+# coordination directory, sticky resolution, /evidence). After a lane merges its tree is
+# torn down, and this archive is what keeps the images referenced in a report from
+# becoming dead links; the host's read-only endpoint, node.ts's evidence route, reads it
+# with the same stance — the node-side SANDBAR_EVIDENCE_DIR env override (= the archive
+# base directory itself, pointed at a temp dir by self-tests) and
+# agent_activities._archive_shots reference the same env name: change one side, sync the
+# other)
 EVIDENCE_DIR = DOT_DIR_NEW + "/evidence"
 
 
 def evidence_base(repo_root=None) -> pathlib.Path:
-    """主树归档基目录（env 覆盖优先；否则主树协调目录粘滞解析 /evidence）。"""
+    """The main tree's archive base directory (the env override wins; otherwise the main
+    tree's coordination directory resolved stickily, /evidence)."""
     env = os.environ.get("SANDBAR_EVIDENCE_DIR")
     if env:
         return pathlib.Path(env)
@@ -1664,19 +1936,25 @@ def evidence_base(repo_root=None) -> pathlib.Path:
 
 
 def match_ui_paths(paths: Any, prefixes: Any = None) -> List[str]:
-    """路径清单 × UI 口径前缀表 → 命中的 UI 路径（保序去重，纯函数，无 IO）。
+    """A path list × the UI stance's prefix table → the UI paths that hit (order
+    preserved, deduped; pure function, no IO).
 
-    KI-044 根修（票 t260904-13）的谓词单点入口：UI 票判定吃**实际 diff 路径**
-    （git diff --name-only <merge-base>...branch 的产物 × 本函数），不吃声明写集
-    ——声明口径 ≠ 实际写面，粒度越粗关卡越弱（声明整个父目录即绕过）。
+    The single predicate entry of KI-044's root fix (ticket t260904-13): UI-ticket
+    detection consumes the **actual diff paths** (the output of
+    git diff --name-only <merge-base>...branch × this function), not the declared write
+    set — a declared stance ≠ the real write surface, and the coarser the granularity the
+    weaker the gate (declaring a whole parent directory bypasses it).
 
-    KI-050 声明制（票 t260904-18）：前缀表来源改为**项目声明**（verify.yaml
-    ui_evidence.dirs）；prefixes=None（缺省）回落模块级 UI_WRITE_PREFIXES，
-    **仅限旧票重放与冻结/未 patch 分支的兼容回落数据源**——活路径一律显式传声明，
-    不许新调用点用单参形态新写。
+    KI-050's declaration regime (ticket t260904-18): the prefix table now comes from the
+    **project declaration** (verify.yaml ui_evidence.dirs); prefixes=None (the default)
+    falls back to the module-level UI_WRITE_PREFIXES, **only as the compatibility
+    fallback data source for old-ticket replay and frozen/unpatched branches** — live
+    paths always pass the declaration explicitly, and new call sites may not be written
+    in the single-argument form.
 
-    容错：非列表/元组、None、空集 → 空清单；元素两端空白 strip；非字符串元素
-    忽略；路径按仓库相对路径前缀比对。"""
+    Tolerance: a non-list/tuple, None, or an empty set → an empty list; elements are
+    stripped at both ends; non-string elements are ignored; paths are compared by
+    repo-relative prefix."""
     if prefixes is None:
         prefixes = UI_WRITE_PREFIXES
     if not paths or not isinstance(paths, (list, tuple)):
@@ -1695,32 +1973,42 @@ def match_ui_paths(paths: Any, prefixes: Any = None) -> List[str]:
 
 
 def is_ui_write_set(write_set: Any, prefixes: Any = None) -> bool:
-    """写集命中 UI 口径即 UI 票（纯函数，无 IO）——委托 match_ui_paths 单点维护。
+    """A write set that hits the UI stance means a UI ticket (pure function, no IO) —
+    delegated to match_ui_paths as the single maintained point.
 
-    KI-044（票 t260904-13）后本函数仅存两处合法调用面：review_gate 机械复核
-    （dev_lane，声明口径语义）与旧链尾冻结分支（存量实例重放兼容）；UI 票判定
-    主通路已换 diff 源（ui_changed_paths activity 与 merge_check 3.6 共用
-    agent_activities._ui_diff_paths），勿在新判定路径再引入本函数。
-    KI-050 声明制（票 t260904-18）：prefixes 语义同 match_ui_paths——review_gate
-    patched 分支显式传项目声明清单；None 仅限旧分支回落兼容数据源。"""
+    After KI-044 (ticket t260904-13) this function has only two legitimate call surfaces:
+    review_gate's mechanical re-check (dev_lane, the declaration-stance semantics) and
+    the old chain tail's frozen branch (compat with replaying existing instances); the
+    main UI-ticket detection path has switched to the diff source (the ui_changed_paths
+    activity and merge_check 3.6 share agent_activities._ui_diff_paths), so never
+    introduce this function into a new judgement path.
+    KI-050's declaration regime (ticket t260904-18): prefixes means the same as in
+    match_ui_paths — the review_gate patched branch passes the project's declaration list
+    explicitly; None is only for the old branch's fallback compatibility data source."""
     return bool(match_ui_paths(write_set, prefixes))
 
 
 def load_ui_evidence(root: Any):
-    """读项目根 verify.yaml 的 ui_evidence 声明（KI-050 声明制，票 t260904-18）。
+    """Read the ui_evidence declaration from the project root's verify.yaml (KI-050's
+    declaration regime, ticket t260904-18).
 
-    返回 (dirs, note, mode) 三态：
-      - ("ok", dirs, "")：声明在场且形状合法；
-      - ("absent", [], "…note…")：verify.yaml 缺失或无 ui_evidence 键——按项目
-        声明关闭：截图证据项 green+可见 note（非 SKIP 非假绿），由调用方拼项；
-      - ("malformed", [], "…err…")：声明在场但形状非法——fail-closed 红，调用方
-        点名 err（畸形 ≠ 缺省）。
+    Returns (dirs, note, mode), three states:
+      - ("ok", dirs, ""): the declaration is present and legally shaped;
+      - ("absent", [], "…note…"): verify.yaml is missing or has no ui_evidence key —
+        treated as disabled per the project declaration: the screenshot evidence item is
+        green + a visible note (not a SKIP, not a fake green), and the caller assembles
+        the item;
+      - ("malformed", [], "…err…"): the declaration is present but illegally shaped —
+        a fail-closed red, and the caller names err (malformed ≠ absent).
 
-    读盘函数：只在 activity/CLI 侧调用（agent_activities / verify_lane 同族），
-    workflow 内禁调（workflow 侧走 meta 预载）。本函数只认 `ui_evidence:` 顶层块
-    + `dirs:` 两空格缩进 `- ` 列表的最小子集，其余块不碰（verify_lane 是道的装载
-    与结构校验真源，两边白名单同票同步）。root 缺失/不可读按 absent 处理
-    （泳道根无 verify.yaml 是合法声明态）。"""
+    This is a disk-reading function: call it only from the activity/CLI side (the
+    agent_activities / verify_lane family), never inside a workflow (the workflow side
+    consumes the meta preload). This function only recognizes the minimal subset of a
+    top-level `ui_evidence:` block plus a `dirs:` list of two-space-indented `- ` items
+    and touches no other block (verify_lane is the source of truth for loading and
+    structurally validating the lane, and the two sides' whitelists were synced in the
+    same ticket). A missing/unreadable root is treated as absent (a lane root with no
+    verify.yaml is a legal declaration state)."""
     try:
         base = pathlib.Path(root)
         text = (base / "verify.yaml").read_text("utf-8")
@@ -1743,7 +2031,7 @@ def load_ui_evidence(root: Any):
             if in_block:
                 saw_block = True
             if stripped.startswith("ui_evidence:") and stripped != "ui_evidence:":
-                # 行内值（如 `ui_evidence: foo`）= 非映射声明，畸形态
+                # An inline value (e.g. `ui_evidence: foo`) = a non-mapping declaration, the malformed state
                 return "malformed", [], ("ui_evidence 须为映射（实际行内标量 %r）"
                                          % stripped.split(":", 1)[1].strip())
             continue
@@ -1766,13 +2054,15 @@ def load_ui_evidence(root: Any):
                 return "malformed", [], "ui_evidence.dirs 含空条目"
             dirs.append(item)
             continue
-        # 块内其它键（supply 等）：本版引擎不消费，跳过；但更深层缩进的孤儿行
-        # （既不在 dirs 列表里又比块头缩进更深且不是键值行）按畸形处理
+        # Other keys inside the block (supply etc.): this engine version doesn't consume
+        # them, skip; but deeper-indented orphan lines (neither in the dirs list nor
+        # deeper than the block header without being a key-value line) are treated as
+        # malformed
         if ":" not in stripped and not stripped.startswith("- "):
             return "malformed", [], "ui_evidence 块含无法解析的行: %s" % stripped
         in_dirs = False
     if not saw_block:
-        # 文件里没有 ui_evidence 键 = 声明缺省态（absent），不是畸形
+        # No ui_evidence key in the file = the declaration-absent state, not malformed
         return "absent", [], "verify.yaml 无 ui_evidence 声明（截图证据项按项目声明缺席）"
     if not saw_dirs:
         return "malformed", [], "ui_evidence 声明缺 dirs 列表"
@@ -1780,24 +2070,30 @@ def load_ui_evidence(root: Any):
 
 
 def validate_background_refs(refs: Any, project_root: Any):
-    """建票背景文件闸（票 t260904-18 门①；知识库设计.md §1 工单引用铁律，
-    宿主令 260904「没提交的 note 不让建工单」）。
+    """The ticket-creation background-file gate (ticket t260904-18 gate ①;
+    知识库设计.md §1's ticket-reference iron rule; the 260904 host order: 「an
+    uncommitted note may not open a ticket」).
 
-    票面引用的背景文件必须**已提交且干净（HEAD 态）**——泳道读的是 HEAD 冻结
-    副本，脏改版 agent 读不到。逐文件两查：
-      ① `git ls-files --error-unmatch`：已跟踪=已提交进 HEAD 祖先（未跟踪/不存在
-         即拒——「未提交」点名）；
-      ② `git status --porcelain -- <file>`：输出必须为空（暂存/未暂存/改类型等
-         任何脏态即拒——「带脏改」点名，git add 暂存新文件 `A ` 态同样被②捕获）。
+    Background files referenced by the ticket must be **committed and clean (the HEAD
+    state)** — the lane reads the HEAD-frozen copy, so an agent cannot read a dirty,
+    modified version. Two checks per file:
+      ① `git ls-files --error-unmatch`: tracked = committed into a HEAD ancestor
+         (untracked / nonexistent is refused — named as 「uncommitted」);
+      ② `git status --porcelain -- <file>`: the output must be empty (any dirty state —
+         staged / unstaged / type changed — is refused, named as 「carrying dirty
+         changes」; a newly staged file in the `A ` state is caught by ② as well).
 
-    返回 (ok, err)：ok=True 放行建票；err 为逐文件点名的拒收文案（报错必须精确
-    ——哪个文件、什么原因）。refs 为 None/空清单 → (True, "")（缺省不校验，
-    存量在飞票不追溯）；refs 非列表 → 拒收（字符串会被逐字符迭代成假清单，
-    票 t260902-10 同族判例）；条目形态过 _valid_write_set_entry（绝对路径/..）→ 拒收。
+    Returns (ok, err): ok=True lets the ticket be created; err is the per-file refusal
+    text (the error must be precise — which file, and why). refs None / an empty list →
+    (True, "") (unchecked by default; in-flight tickets are not retroactively covered);
+    a non-list refs → refused (a string would be iterated character-by-character into a
+    fake list, the t260902-10 family precedent); an entry failing _valid_write_set_entry
+    (absolute paths / ..) → refused.
 
-    查盘函数：只在建票入口（client.py ticket-start，_connect() 之前——拒收路径
-    不依赖 Temporal 可达）调用；workflow 内禁调。git 不可用=拒收（fail-closed，
-    不静默放行）。"""
+    A disk-reading function: called only at the ticket-creation entry (client.py
+    ticket-start, before _connect() — the refusal path does not depend on Temporal being
+    reachable); never inside a workflow. git unavailable = refuse (fail-closed, never a
+    silent pass)."""
     if refs is None or refs == []:
         return True, ""
     if not isinstance(refs, list):
@@ -1834,31 +2130,36 @@ def validate_background_refs(refs: Any, project_root: Any):
 
 
 def _valid_write_set_entry(p: Any) -> bool:
-    """写集条目合法性（纯函数）：仓库内相对路径——非字符串/空串/绝对路径/含 '..'/
-    反斜杠路径一律非法（不越界判断不查盘，形态判断足够）。"""
+    """Write-set entry legality (pure function): a repo-relative path — non-string /
+    empty / absolute / containing '..' / a backslash path are all illegal (no boundary
+    check, no disk access; the shape check is enough)."""
     if not isinstance(p, str):
         return False
     s = p.strip()
     if not s or s.startswith("/") or s.startswith("\\") or "\\" in s:
         return False
-    if len(s) >= 2 and s[1] == ":" and s[0].isalpha():  # Windows 盘符 C:/…
+    if len(s) >= 2 and s[1] == ":" and s[0].isalpha():  # a Windows drive letter C:/…
         return False
     return ".." not in s.split("/")
 
 
 def validate_write_set_args(write_set: Any, allow_empty: bool):
-    """建票写集校验（纯函数，t260829-07 A1）。
+    """Ticket-creation write-set validation (pure function, t260829-07 A1).
 
-    返回 (ok, flags, err)：
-      ok           是否放行建票
-      flags        {"no_file_changes": bool}——空写集+显式声明时置真
-      err          拒收文案（含两条出路），ok=True 时为空串
-    口径：写集为 None → 按空集口径（既有自检 selfcheck_write_lifecycle 与
-    client.py 建票口锁定的有意容错）；写集非 list（含字符串——不拒收会被
-    for 迭代成单字符列表变假护栏，t260902-10）→ 拒收；写集非空 → 放行
-    （条目形态逐条校验，非法条目在 client 侧直接拒收——建票是护栏起点，
-    不静默清洗）；空集 + allow_empty_write_set → 放行并记 no_file_changes；
-    空集且无声明 → 拒收。"""
+    Returns (ok, flags, err):
+      ok           whether the ticket may be created
+      flags        {"no_file_changes": bool} — set true on an empty write set with an
+                   explicit declaration
+      err          the refusal text (including both ways out); an empty string when
+                   ok=True
+    The stance: write_set None → treated as an empty set (a deliberate tolerance locked
+    in by the existing selfcheck selfcheck_write_lifecycle and client.py's creation
+    entry); a non-list write set (including a string — accepting it would let a for loop
+    iterate it into a list of single chars and a fake guard, t260902-10) → refused; a
+    non-empty write set → pass (each entry's shape is validated; illegal entries are
+    refused directly on the client side — ticket creation is where the guard starts, so
+    no silent cleaning); an empty set + allow_empty_write_set → pass and record
+    no_file_changes; an empty set with no declaration → refuse."""
     if write_set is not None and not isinstance(write_set, list):
         return False, {}, ("写集须为列表（实际 %s）：字符串会被逐字符迭代成假护栏，"
                            "请传 [\"路径\", …] 或 None" % type(write_set).__name__)
@@ -1878,17 +2179,21 @@ def validate_write_set_args(write_set: Any, allow_empty: bool):
 
 
 def refresh_write_set(initial: Any, plan_files: Any):
-    """写集跟随方案（纯函数，票 t260829-07）。
+    """The write set follows the plan (pure function, ticket t260829-07).
 
-    merged = initial ∪ plan_files 合法条目（保序：先 initial 后新增，去重 strip）。
-    **并集而非替换**（有意偏差于「刷新为方案清单」）：初始写集是人/建议先验，
-    方案漏列时先验不应被冲掉；verify_lane 白名单是上限放行不是强制清单，多余
-    文件只多留余量，不红灯、不进 diff。
-    三态口径：
-      - plan_files 里非法条目（非字符串/绝对路径/含 '..'/越界形态）丢弃进
-        dropped——拒条不拒次；
-      - added = plan_files 合法条目 − initial（调用方记 timeline「授权扩展」）；
-      - initial 同样过形态过滤（建票口已校验，这里兜底）。
+    merged = the legal entries of initial ∪ plan_files (order preserved: initial first
+    then additions, deduped after strip). **A union, not a replacement** (a deliberate
+    deviation from 「refresh to the plan's list」): the initial write set is a human /
+    suggestion prior, and a prior should not be washed away when the plan forgets to
+    list it; the verify_lane whitelist is a cap on what is allowed, not a mandatory list,
+    so extra files only leave extra headroom — no red light, not in the diff.
+    Three-state stance:
+      - illegal entries in plan_files (non-string / absolute / containing '..' /
+        out-of-bounds shapes) are dropped into dropped — refuse the entry, not the run;
+      - added = plan_files' legal entries − initial (the caller records an
+        「authorization extension」 on the timeline);
+      - initial goes through the same shape filter (validated at the creation entry; this
+        is the backstop).
     """
     def _clean(seq):
         out, dropped = [], []
@@ -1915,23 +2220,27 @@ def refresh_write_set(initial: Any, plan_files: Any):
 
 @dataclass
 class ReviewGateArgs:
-    """verify_review_gate activity 入参（t260829-07：审读判据机械化，纯 git/文件零 LLM）。"""
+    """Inputs of the verify_review_gate activity (t260829-07: mechanizing the review
+    criteria, pure git/files with zero LLM)."""
 
     ticket_id: str
-    worktree: str = ""                        # 泳道 worktree（git -C 查询泳道 commit 数）
+    worktree: str = ""                        # the lane worktree (git -C queries the lane's commit count)
     write_set: List[str] = field(default_factory=list)
-    no_file_changes: bool = False             # 建票声明「本票无文件改动」→ 跳过 0-commit 闸
+    no_file_changes: bool = False             # the creation declared 「this ticket changes no files」 → skip the 0-commit gate
 
 
 @dataclass
 class ReviewGateResult:
-    """verify_review_gate 回执。报错精确性三态（票 t260829-07）：
+    """The verify_review_gate receipt. Three-state error precision (ticket t260829-07):
 
-    - git_error 空串 = 泳道 commit 查询成功，lane_commits 有意义；非空 = 查询失败，
-      lane_commits=-1 哨兵（禁止用 0 表达「查不了」——「异常记 0」会把 git 故障
-      误报成「实现未落盘」，与事实可能相反）。
-    - shots_path_error 空串 = screenshots 路径正常（不存在=没拍，等价 0 png，可断言
-      缺失）；非空 = 路径存在但异常（是文件/不可读），png_count=-1（不可断言缺失）。"""
+    - an empty git_error = the lane commit query succeeded and lane_commits is
+      meaningful; non-empty = the query failed and lane_commits=-1 is the sentinel
+      (0 may never mean "couldn't ask" — recording 0 on an exception would misreport a
+      git fault as "the implementation never landed", which may be the opposite of the
+      truth).
+    - An empty shots_path_error = the screenshots path is fine (nonexistent = nothing was
+      shot, equivalent to 0 png, safe to claim missing); non-empty = the path exists but
+      is broken (a file / unreadable) and png_count=-1 (you may not claim missing)."""
 
     git_error: str = ""
     lane_commits: int = -1
@@ -1943,11 +2252,14 @@ class ReviewGateResult:
 
 def review_gate_verdict(git_error: str, lane_commits: int, shots_path_error: str,
                         png_count: int, no_file_changes: bool, is_ui: bool):
-    """审读机械复核判定（纯函数，票 t260829-07；selfcheck 直测不依赖 temporalio）。
+    """The mechanical review re-check verdict (pure function, ticket t260829-07; tested
+    directly by the selfcheck without temporalio).
 
-    返回 (rework, note)：rework 非空 = 强制打回文案（prev_ctx 注入 implement）；
-    note 非空 = 跳过说明（记 timeline，可见不静默不打回）。报错精确性纪律：
-    查询失败不得断言「未落盘/证据缺失」——断言必须与事实同向。"""
+    Returns (rework, note): a non-empty rework = the forced bounce text (injected into
+    implement as prev_ctx); a non-empty note = an explanation of the skip (recorded on
+    the timeline, visible rather than silent, no bounce). Error-precision discipline: a
+    failed query may never assert 「not landed / evidence missing」 — an assertion must
+    point the same way as the facts."""
     if git_error:
         return "", "机械复核跳过：git 查询失败：%s" % git_error
     if lane_commits == 0 and not no_file_changes:
@@ -1961,140 +2273,164 @@ def review_gate_verdict(git_error: str, lane_commits: int, shots_path_error: str
 
 @dataclass
 class UiEvidenceArgs:
-    """prepare_ui_evidence activity 入参（t260828-09：worker 代跑 ui-check/capture.mjs 截图）。"""
+    """Inputs of the prepare_ui_evidence activity (t260828-09: the worker runs
+    ui-check/capture.mjs to take the screenshots)."""
 
     ticket_id: str
-    worktree: str = ""                        # 泳道 worktree 路径（截图落 <worktree>/.sandbar/screenshots/）
-    screenshots_dir: str = ""                 # 缺省 <worktree>/.sandbar/screenshots
+    worktree: str = ""                        # the lane worktree path (screenshots land in <worktree>/.sandbar/screenshots/)
+    screenshots_dir: str = ""                 # default <worktree>/.sandbar/screenshots
 
 
 @dataclass
 class UiEvidenceResult:
-    """prepare_ui_evidence 回执（失败不抛——截图缺失由 merge_check 证据闸红灯收口）。"""
+    """The prepare_ui_evidence receipt (failure does not raise — missing screenshots are
+    closed out by merge_check's evidence gate going red)."""
 
     ok: bool = False
-    shots: List[str] = field(default_factory=list)  # 成功产出的截图文件名（不含目录）
-    # 每张截图一行的「名（mtime iso）」清单（activity 侧算好带回——workflow 侧零 IO
-    # 纪律，dev_lane 直接拼进审读 prompt，供 agent 比对截图落盘时间防旧图充数）
+    shots: List[str] = field(default_factory=list)  # the screenshot filenames produced successfully (no directories)
+    # A 「name (mtime iso)」 list, one line per screenshot (computed in the activity and
+    # carried back — the workflow side's zero-IO discipline; dev_lane splices it straight
+    # into the review prompt so the agent can compare screenshot timestamps and old
+    # images cannot pose as fresh ones)
     shot_lines: List[str] = field(default_factory=list)
-    detail: str = ""                          # 失败原因 / 成功摘要（给 prompt 与 gate 留痕）
-    skipped: bool = False                     # 非 UI 票跳过时置真（兜底语义，正常由 workflow 侧守卫）
+    detail: str = ""                          # the failure reason / success summary (a trace for the prompt and the gate)
+    skipped: bool = False                     # set true when skipped as a non-UI ticket (a backstop semantic; the workflow side normally guards this)
 
 
 @dataclass
 class UiChangedPathsArgs:
-    """ui_changed_paths activity 入参（t260904-13 KI-044 根修：UI 票判定换 diff 源）。"""
+    """Inputs of the ui_changed_paths activity (t260904-13, the KI-044 root fix: UI-ticket
+    detection switched to a diff source)."""
 
     ticket_id: str
-    worktree: str = ""                        # 泳道 worktree 路径（diff 锚泳道所属仓，_lane_repo_root）
-    branch: str = ""                          # 泳道分支名
-    base_ref: str = ""                        # 建票基点（留痕/回放兼容；diff 基线走 merge-base，不吃钉死基点）
+    worktree: str = ""                        # the lane worktree path (the diff anchors the repo owning the lane, _lane_repo_root)
+    branch: str = ""                          # the lane branch name
+    base_ref: str = ""                        # the creation base point (for the record / replay compat; the diff baseline uses merge-base and ignores the pinned base point)
 
 
 @dataclass
 class UiChangedPathsResult:
-    """ui_changed_paths 回执（git 失败不抛——ui_paths 空即 fail-closed，调用方按「UI 票待证」处理）。"""
+    """The ui_changed_paths receipt (a git failure doesn't raise — empty ui_paths is
+    fail-closed, and the caller treats it as 「UI ticket, evidence pending」)."""
 
-    ui_paths: List[str] = field(default_factory=list)  # diff 命中 UI 口径的路径（保序）
-    detail: str = ""                          # 判定口径与错误留痕（log / results evidence 消费）
+    ui_paths: List[str] = field(default_factory=list)  # the paths whose diff hit the UI stance (order preserved)
+    detail: str = ""                          # the judgement stance and error trace (consumed by log / results evidence)
 
 
 @dataclass
 class UiEvidenceDeclArgs:
-    """ui_evidence_decl activity 入参（t260904-18 KI-050 门③：声明预载）。
+    """Inputs of the ui_evidence_decl activity (t260904-18 KI-050 gate ③: the declaration
+    preload).
 
-    泳道起跑时读泳道根 verify.yaml 的 ui_evidence 声明落 meta（读盘在 activity、
-    workflow 只读 meta=重放安全）；review_gate patched 分支据此判 UI 票。"""
+    When the lane starts, the ui_evidence declaration is read from the lane root's
+    verify.yaml into meta (the disk read happens in the activity while the workflow only
+    reads meta = replay safe); the review_gate patched branch judges UI tickets from it."""
 
     ticket_id: str
-    worktree: str = ""                        # 泳道 worktree 路径（声明读 <worktree>/verify.yaml）
+    worktree: str = ""                        # the lane worktree path (the declaration is read from <worktree>/verify.yaml)
 
 
 @dataclass
 class UiEvidenceDeclResult:
-    """ui_evidence_decl 回执（三态同 load_ui_evidence；失败不抛——消费点按声明缺省兜底）。"""
+    """The ui_evidence_decl receipt (three states as in load_ui_evidence; failure doesn't
+    raise — the consumer falls back to the declaration-absent stance)."""
 
     mode: str = "absent"                      # ok | absent | malformed
-    dirs: List[str] = field(default_factory=list)  # 声明的截图证据目录（mode=ok 时有意义）
-    note: str = ""                            # 缺省/畸形留痕（log 消费）
+    dirs: List[str] = field(default_factory=list)  # the declared screenshot evidence directories (meaningful when mode=ok)
+    note: str = ""                            # the absent/malformed trace (consumed by the log)
 
 
 @dataclass
 class MergeCheckResult:
-    """merge_check 回执（红灯不抛——回执交 workflow 判读）。
+    """The merge_check receipt (red lights don't raise — the receipt goes back to the
+    workflow for triage).
 
-    票 t260826-01 冲突自动消解回路：红灯细分两类——conflict=True（merge 预演冲突，
-    交 workflow 自动打回 implement 消解）与 conflict=False（其它红灯，维持
-    blocked 等人）。conflict 判定以「merge 预演项红且解析到非空 conflict_files」
-    为准（不能只看 merge-tree rc=1：bad ref 等 git 异常也 rc=1 但无冲突文件，
-    误判成可消解冲突会让消解回路空转）。且其它三项（无 commit /
-    工作区脏 / verify_lane 红）任一项红时一律 conflict=False：先让人解掉基础
-    问题，不带病消解。"""
+    Ticket t260826-01's automatic conflict resolution loop: red lights split into two
+    classes — conflict=True (a merge rehearsal conflict, handed to the workflow to bounce
+    back to implement automatically) and conflict=False (any other red, stay blocked for
+    a human). The conflict test is 「the merge rehearsal item is red AND a non-empty
+    conflict_files was parsed」 (merge-tree's rc=1 alone is not enough: git faults such as
+    a bad ref also return rc=1 with no conflict files, and misclassifying them as a
+    resolvable conflict would spin the resolution loop idly). And whenever any of the
+    other three items is red (no commits / a dirty workspace / verify_lane red),
+    conflict=False unconditionally: a human solves the underlying problem first — never
+    resolve while sick."""
 
     green: bool = False
     checks: List[Dict[str, Any]] = field(default_factory=list)  # [{item, green, detail}]
-    error: str = ""                           # 基础设施故障（git 不可用等）时给原因
-    conflict: bool = False                    # True=merge 预演冲突（自动消解）；False=其它红灯（blocked）
-    conflict_files: List[str] = field(default_factory=list)  # 冲突文件清单（解析自 merge-tree 输出）
-    merge_tree_excerpt: str = ""              # merge-tree 输出摘要（截断带出，注入 agent 解冲突 prompt）
+    error: str = ""                           # the reason on an infrastructure fault (git unavailable etc.)
+    conflict: bool = False                    # True = a merge rehearsal conflict (auto-resolve); False = any other red (blocked)
+    conflict_files: List[str] = field(default_factory=list)  # the conflict file list (parsed from the merge-tree output)
+    merge_tree_excerpt: str = ""              # a truncated merge-tree output excerpt (carried out and injected into the agent's conflict-resolution prompt)
 
 
 @dataclass
 class ConflictPrepArgs:
-    """prepare_conflict_resolution activity 入参（票 t260826-01：worker 代跑 merge 留冲突现场）。
+    """Inputs of the prepare_conflict_resolution activity (ticket t260826-01: the worker
+    runs the merge and leaves the conflict state in place).
 
-    agent 沙箱写不了真 .git（worktree 的 .git 是指向主库的 gitfile），没法自己
-    git merge——所以合并由 worker（无沙箱）代跑，冲突标记文件留在泳道工作区，
-    agent 只负责编辑解标记（与 implement 步「agent 写、worker 代落盘」同契约）。"""
+    The agent sandbox cannot write the real .git (a worktree's .git is a gitfile pointing
+    at the main repo), so it cannot git merge by itself — the worker (unsandboxed) runs
+    the merge instead, the conflict-marked files stay in the lane workspace, and the
+    agent only edits the markers away (the same contract as the implement step's 「the
+    agent writes, the worker settles」)."""
 
     ticket_id: str
-    worktree: str = ""                        # 泳道 worktree 路径（相对仓库根或绝对）
-    branch: str = ""                          # 泳道分支名
-    base_ref: str = ""                        # 要合进泳道的目标 ref（现状口径=main，不换 rebase）
+    worktree: str = ""                        # the lane worktree path (repo-relative or absolute)
+    branch: str = ""                          # the lane branch name
+    base_ref: str = ""                        # the target ref to merge into the lane (the current stance = main, no rebase swap)
 
 
 @dataclass
 class ConflictPrepResult:
-    """prepare_conflict_resolution 回执（失败不抛——回执交 workflow 判读）。"""
+    """The prepare_conflict_resolution receipt (failure doesn't raise — the receipt goes
+    back to the workflow for triage)."""
 
     ok: bool = False
-    conflict_files: List[str] = field(default_factory=list)  # 冲突文件清单（UU/AA 行）
-    merge_output: str = ""                    # git merge 输出截断（agent 解冲突上下文）
-    already_clean: bool = False               # True=合并零冲突（竞态兜底：base_ref 未动，直接回 merge_check）
-    error: str = ""                           # 基础设施故障（ref 不存在/merge 异常等）时给原因
+    conflict_files: List[str] = field(default_factory=list)  # the conflict file list (the UU/AA lines)
+    merge_output: str = ""                    # a truncated git merge output (the agent's conflict-resolution context)
+    already_clean: bool = False               # True = the merge found no conflicts (the race backstop: base_ref untouched, go straight back to merge_check)
+    error: str = ""                           # the reason on an infrastructure fault (a missing ref / a merge exception etc.)
 
 
 @dataclass
 class ConflictSettleArgs:
-    """settle_conflict_resolution activity 入参（agent 解完冲突后 worker 代落盘）。"""
+    """Inputs of the settle_conflict_resolution activity (the worker settles after the
+    agent resolved the conflicts)."""
 
     ticket_id: str
     worktree: str = ""
     branch: str = ""
     base_ref: str = ""
-    round_no: int = 0                         # 冲突消解轮次（写进 commit message 与日志）
+    round_no: int = 0                         # the conflict resolution round (written into the commit message and the log)
 
 
 @dataclass
 class ConflictSettleResult:
-    """settle_conflict_resolution 回执（失败不抛——回执交 workflow 判读）。"""
+    """The settle_conflict_resolution receipt (failure doesn't raise — the receipt goes
+    back to the workflow for triage)."""
 
     ok: bool = False
-    commit: str = ""                          # 落盘的合并提交短 hash
-    remaining_files: List[str] = field(default_factory=list)  # 仍有未解冲突的文件（非空=agent 没解干净）
+    commit: str = ""                          # the short hash of the landed merge commit
+    remaining_files: List[str] = field(default_factory=list)  # files still carrying unresolved conflicts (non-empty = the agent didn't finish)
     error: str = ""
 
 
 @dataclass
 class MergeArgs:
-    """merge activity 入参（人审签字通过后执行的真实合并 + 泳道清理）。
+    """Inputs of the merge activity (the real merge after human sign-off, plus lane
+    teardown).
 
-    defer_teardown（票 t260902-02 M1-3）：True 时 squash 落账后**跳过内联泳道清理**，
-    交后续 teardown_lane activity（merge→archive→teardown 三段收口）；False = 旧
-    语义（落账后内联清理）。字段带默认值 False 的负载兼容手段（patched 门只门
-    workflow 侧分支、管不到 activity 行为版本）：存量历史输入序列化时**无此键**，
-    temporalio dataclass 反序列化对缺键字段回落默认值 False → 走旧内联清理语义，
-    新 worker 部署后存量工单签字收口照常拆泳道、零残留。"""
+    defer_teardown (ticket t260902-02, M1-3): when True, the inline lane cleanup is
+    **skipped after the squash booking** and handed to the later teardown_lane activity
+    (the three-stage close-out merge → archive → teardown); False = the old semantics
+    (inline cleanup after booking). Defaulting the field to False is the payload
+    compatibility device (the patched gate only gates the workflow-side branch and cannot
+    reach the activity's behavior version): existing historical inputs are serialized
+    **without this key**, and temporalio's dataclass deserialization falls back to the
+    default False for a missing key → the old inline-cleanup semantics, so after a new
+    worker deploy the existing tickets still tear their lane down normally at sign-off
+    with zero residue."""
 
     ticket_id: str
     worktree: str = ""
@@ -2105,39 +2441,48 @@ class MergeArgs:
 
 @dataclass
 class ArchiveArgs:
-    """archive_ticket activity 入参（票 t260902-02 M1-3：完结工单数据出仓归档）。
+    """Inputs of the archive_ticket activity (ticket t260902-02 M1-3: exporting a
+    finished ticket's data).
 
-    归档真源出仓到 per-key 数据目录（契约 v1.4 ①c），根治「完结工单 stage 报告
-    随泳道拆除丢失」。worktree 为空 = 主树道工单——协调目录取主树根（resolve_dot_dir 粘滞解析）
-    归档（代理文件属灰面，归档即清扫，不静默放过）。meta 快照由 workflow 侧传入
-    （workflow 不查盘纪律）；文件清单与拷贝由 activity 按 ARCHIVE_INCLUDE_* 口径现扫。"""
+    The archive source of truth is exported to the per-key data directory (contract v1.4
+    ①c), curing 「a finished ticket's stage reports vanishing with the lane teardown」. An
+    empty worktree = a main-tree-lane ticket — the coordination directory is taken from
+    the main-tree root (resolve_dot_dir's sticky resolution) for archiving (proxy files
+    are a gray area; archiving is the sweep, never a silent pass). The meta snapshot is
+    passed in by the workflow side (the workflow-never-touches-disk discipline); the file
+    list and the copying are scanned fresh by the activity under the ARCHIVE_INCLUDE_*
+    stance."""
 
     ticket_id: str
-    project_key: str = ""             # 归档归属 key（过 PROJECT_KEY_RE 白名单）
-    worktree: str = ""                # 泳道 worktree 路径（相对仓库根或绝对）
-    meta: Dict[str, Any] = field(default_factory=dict)  # 工单 meta 快照（stage/status/timeline/handoffs/checks…）
-    legacy: bool = False              # True = archive-legacy 存量诚实过账（manifest 记 reason，无文件负载）
+    project_key: str = ""             # the key the archive belongs to (must pass the PROJECT_KEY_RE whitelist)
+    worktree: str = ""                # the lane worktree path (repo-relative or absolute)
+    meta: Dict[str, Any] = field(default_factory=dict)  # the ticket's meta snapshot (stage/status/timeline/handoffs/checks…)
+    legacy: bool = False              # True = archive-legacy's honest accounting for an existing ticket (the manifest records a reason, no file payload)
 
 
 @dataclass
 class ArchiveResult:
-    """archive_ticket 回执（失败抛错 fail-closed——归档成功是拆泳道的前提，不降级）。
+    """The archive_ticket receipt (failures raise, fail-closed — archive success is the
+    precondition for tearing down the lane, no degradation).
 
-    幂等：重跑覆盖同路径（Temporal 重试安全）。retained = 泳道仍在原位（新顺序
-    archive 在 teardown 之前），本单恒 True；False 只在 archive-legacy 无 worktree
-    路径场景出现（泳道早已拆除）。files = manifest.files 回带（workflow 侧留痕用）。"""
+    Idempotent: a rerun overwrites the same paths (safe under Temporal retries).
+    retained = the lane is still in place (in the new order archive runs before
+    teardown), always True for this ticket; False appears only in the archive-legacy
+    no-worktree scenario (the lane was torn down long ago). files = manifest.files
+    carried back (for the workflow side's records)."""
 
     ok: bool = False
-    archive_path: str = ""            # data/tickets/<id>/ 目录绝对路径
-    retained: bool = True             # 泳道是否仍在原位（True=待 teardown_lane 拆；False= legacy 无泳道）
-    files: List[Dict[str, Any]] = field(default_factory=list)   # manifest.files 镜像
-    absent: List[str] = field(default_factory=list)             # manifest.absent 镜像
-    error: str = ""                   # 失败原因（workflow 侧拼 blocked 文案）
+    archive_path: str = ""            # the absolute path of the data/tickets/<id>/ directory
+    retained: bool = True             # whether the lane is still in place (True = awaiting teardown_lane; False = legacy, no lane)
+    files: List[Dict[str, Any]] = field(default_factory=list)   # a mirror of manifest.files
+    absent: List[str] = field(default_factory=list)             # a mirror of manifest.absent
+    error: str = ""                   # the failure reason (the workflow side assembles the blocked text from it)
 
 
 @dataclass
 class MergeResult:
-    """merge 回执（冲突/故障不抛——回执交 workflow 转 blocked 等人处置）。"""
+    """The merge receipt (conflicts/faults don't raise — the receipt goes back to the
+    workflow to turn blocked for human handling)."""
 
     ok: bool = False
     action: str = ""      # merged | conflict | failed
@@ -2145,11 +2490,14 @@ class MergeResult:
     error: str = ""
 
 
-# ---- 结果文件/日志路径（纯函数；activity 与 prompt 组装共用同一真源，防漂移）----
+# ---- Result file / log paths (pure functions; the activity and the prompt assembly
+# share this one source of truth, so they cannot drift) ----
 
 def stage_workspace(inp_ws: Optional[Dict[str, str]], ticket_id: str) -> Optional[Dict[str, str]]:
-    """agent 段工作目录：工单登记的 workspace 优先；无 → /tmp/sandbar-ws/<工单id> 隔离目录（LEGACY 老 base 粘滞）
-    （主树道工单的 agent 也在仓库根干活，但结果文件/日志一律落隔离目录，主树零污染）。"""
+    """The agent stage's working directory: the ticket's registered workspace wins; with
+    none → the /tmp/sandbar-ws/<ticket id> isolated directory (LEGACY old-base stickiness)
+    (an agent on a main-tree lane also works in the repo root, but result files / logs
+    always land in the isolated directory, leaving the main tree untouched)."""
     if isinstance(inp_ws, dict) and inp_ws.get("type") in WORKSPACE_TYPES and inp_ws.get("path"):
         return {"type": str(inp_ws["type"]), "path": str(inp_ws["path"])}
     return {"type": "dir", "path": ws_dir_path(ticket_id)}
@@ -2157,8 +2505,10 @@ def stage_workspace(inp_ws: Optional[Dict[str, str]], ticket_id: str) -> Optiona
 
 def result_file_for(ticket_id: str, stage_id: str, gen: int,
                     ws: Optional[Dict[str, str]]) -> str:
-    """本段第 gen 次进入的结果文件绝对路径（幂等锚点；rework 重跑 gen+1 换新文件）。
-    目录面走 resolve_dot_dir（写点：老泳道粘滞旧名，新泳道落 .sandbar/，不混用）。"""
+    """The absolute path of this stage's result file for entry number gen (the
+    idempotence anchor; a rework re-run uses gen+1 for a fresh file).
+    The directory surface goes through resolve_dot_dir (a write point: an old lane stays
+    sticky on the old name, a new lane lands in .sandbar/, never mixed)."""
     base = (ws or {}).get("path") or ws_dir_path(ticket_id)
     p = pathlib.Path(base)
     if not p.is_absolute():
@@ -2168,8 +2518,10 @@ def result_file_for(ticket_id: str, stage_id: str, gen: int,
 
 def agent_log_for(ticket_id: str, stage_id: str,
                   gen: int, ws: Optional[Dict[str, str]]) -> str:
-    """agent 运行日志路径（写点：同 result_file_for 的粘滞口径，不许盲 sed 成新名——
-    老泳道日志写进新名目录会绕过粘滞，交接/归档双侧失踪）。"""
+    """The agent run log path (a write point: the same sticky stance as result_file_for —
+    never blindly sed it to the new name; writing an old lane's logs into the new-name
+    directory would bypass the stickiness and the logs would vanish from both the handover
+    and the archive)."""
     base = (ws or {}).get("path") or ws_dir_path(ticket_id)
     p = pathlib.Path(base)
     if not p.is_absolute():
@@ -2177,18 +2529,22 @@ def agent_log_for(ticket_id: str, stage_id: str,
     return str(lane_dot_path(p, "agent_%s_gen%d.log" % (stage_id, gen)))
 
 
-# stage 级验收增项（票 t260901-09）：常驻检查项挂在 prompt 组装真源（build_stage_prompt），
-# 按 stage id 键控——build_stage_prompt 由 base.py 与 dev_lane.py 共用，键不命中
-# 即零变化（对 base 系 workflow 无影响）；文案自带「不涉及则标注不适用」兜底。
+# Stage-level acceptance extras (ticket t260901-09): standing check items hung on the
+# prompt assembly source of truth (build_stage_prompt), keyed by stage id —
+# build_stage_prompt is shared by base.py and dev_lane.py, so a missing key means zero
+# change (no effect on base-family workflows); the wording carries its own 「if not
+# applicable, mark it not applicable」 backstop.
 STAGE_ACCEPTANCE_EXTRA: Dict[str, Tuple[str, ...]] = {
     "acceptance_walkthrough": (
         "若本票涉及 UI/泳道图渲染，验收报告必含『并行期 UI 呈现』检查项：并行分叉期"
         "步骤条双边同亮（两步同帧 data-s=running 且各带 ∥ 标记）+ 状态行报"
         "『并行分叉中』，以隔离台实拍/DOM 断言输出为证；不涉及 UI 则标注『不适用』并说明",
-        # 票 t260905-01（doc-lifecycle 票②）：收口两问——沉淀触发器+反向同步闸。
-        # 答与不答都不阻塞验收，但必须写进结果文件 doc_sediment / doc_conflicts
-        # 字段留痕（引擎侧 apply_doc_gate 判读登记；未答也是一条记录，矛盾条目
-        # 登记债册）。
+        # Ticket t260905-01 (doc-lifecycle ticket ②): the two close-out questions — a
+        # sedimentation trigger plus a reverse-sync gate. Answering or not never blocks
+        # acceptance, but the answer must be recorded in the result file's doc_sediment /
+        # doc_conflicts fields (the engine side's apply_doc_gate judges and registers;
+        # an unanswered question is still a record, and contradiction entries go into the
+        # debt ledger).
         "收口两问（答与不答都不阻塞验收，但必须留痕）：①沉淀一问——盘点本票 "
         "deliverables，判断是否留下值得沉淀进 docs/ 的事实；有则预填建议"
         "（target=建议文档路径/分类，reason=理由，从改动清单与验收结论推导），"
@@ -2202,33 +2558,43 @@ STAGE_ACCEPTANCE_EXTRA: Dict[str, Tuple[str, ...]] = {
 }
 
 
-# ---------- previous_context 封顶（票 t260901-19：打回意见逐字 + 历史摘要封顶） ----------
-# 封顶类 = base.py 组装的六类历史行（封闭前缀表，逐字对齐 base.py 历史行格式）。
-# 注意：base 未来新增「- 上次*」以外的历史行类型会逃逸封顶——由透传行 2 万字符
-# 硬顶兜底（防畸形巨型行），不追改本表。
+# ---------- Capping previous_context (ticket t260901-19: bounce feedback verbatim + history summaries capped) ----------
+# The capped class = the six history line types assembled by base.py (a closed prefix
+# table, matching base.py's history line format character for character).
+# Note: if base later adds history line types beyond 「- 上次*」 they would escape the
+# cap — the pass-through lines' 20000-character hard cap backstops that (against a
+# malformed giant line); this table is not chased after the fact.
 CAP_PREV_LINE_PREFIXES: Tuple[str, ...] = (
     "- 上次状态：", "- 上次摘要：", "- 上次报告：",
     "- 上次产物：", "- 上次改动文件：", "- 上次验收证据：",
 )
-CAP_PREV_LINE_LIMIT = 800        # 封顶类单行上限
-CAP_PREV_TOTAL_LIMIT = 4000      # 封顶类合计上限（超限从尾部行丢弃）
-CAP_PREV_HARD_LIMIT = 20000      # 透传行硬顶（只防畸形，正常负载远低于此）
+CAP_PREV_LINE_LIMIT = 800        # the capped class's per-line limit
+CAP_PREV_TOTAL_LIMIT = 4000      # the capped class's total limit (over the limit, lines are dropped from the tail)
+CAP_PREV_HARD_LIMIT = 20000      # the pass-through lines' hard cap (only guards against malformation; normal payloads are far below this)
 _CAP_TRUNC_MARK = "…（截断）"
 _CAP_OMIT_MARK = "…（后续历史已省略）"
 
 
 def cap_previous_context(text: Any) -> str:
-    """previous_context 封顶（纯函数）：只截封顶类历史行，其余一律透传。
+    """Cap previous_context (pure function): only the capped class of history lines gets
+    truncated, everything else passes through untouched.
 
-    - 封顶类（前缀命中 CAP_PREV_LINE_PREFIXES）：单行超 800 截到 800+省略标记；
-      合计超 4000 从尾部行丢弃（历史行按新旧排列，尾部是最旧的），丢过即加尾注。
-    - 透传类：「- 打回原因：」行与一切未识别前缀的行（裸打回意见、结构化打回块、
-      arb_ctx 单行 JSON 等 dev_lane 负载）原样保留，仅单行超 2 万字符时截断防畸形
-      ——这些行是打回意见/机器结果的载体，截了会掏空下一棒的输入（票 t260901-19）。
-    - 防御性归一：None/非字符串/空白串 → 空串；空串 → 返回空串（调用方注入守卫不变）。"""
+    - The capped class (a prefix hit on CAP_PREV_LINE_PREFIXES): a line over 800 is cut
+      to 800 + an elision marker; past 4000 in total, lines are dropped from the tail
+      (history lines run oldest-last, so the tail is the oldest), and once anything was
+      dropped a tail note is added.
+    - The pass-through class: 「- 打回原因：」 lines and every line with an unrecognized
+      prefix (bare bounce feedback, structured bounce blocks, arb_ctx single-line JSON —
+      dev_lane's payloads) are kept verbatim, only truncated at 20000 characters per line
+      to guard against malformation — these lines carry the bounce feedback / machine
+      results, and cutting them would hollow out the next round's input (ticket
+      t260901-19).
+    - Defensive normalization: None / non-string / whitespace-only → an empty string; an
+      empty string → returns an empty string (the caller's injection guard is
+      unchanged)."""
     if not isinstance(text, str) or not text.strip():
         return ""
-    capped: List[Tuple[bool, str]] = []  # (是否封顶类, 行文本)
+    capped: List[Tuple[bool, str]] = []  # (is a capped-class line, the line text)
     for ln in text.splitlines():
         if ln.startswith(CAP_PREV_LINE_PREFIXES):
             if len(ln) > CAP_PREV_LINE_LIMIT:
@@ -2253,27 +2619,35 @@ def cap_previous_context(text: Any) -> str:
     return "\n".join(out)
 
 
-# ---- KI-053（票 t260905-10）宿主裁决注入面常量 ----
-# prompt 只消费末 N 条（旧→新排序，最新贴着「现在」）；note 超 LIMIT 截断加
-# _CAP_TRUNC_MARK 标记（不静默切断——agent 不得误以为读到完整指令）；被截全文
-# 与掉出 prompt 的旧裁决兜底在 meta['host_rulings']（snapshot 可读）+ 注入留痕
-# 事件历史；prompt 预算硬上界 ≈5×(1200+行头~80)+小节框架 ≈6.6KB，不随裁决数
-# 线性膨胀。
+# ---- KI-053 (ticket t260905-10) constants for the host-ruling injection surface ----
+# The prompt consumes only the last N entries (ordered old → new, the newest hugging
+# 「now」); a note over LIMIT is truncated with a _CAP_TRUNC_MARK marker (never cut
+# silently — the agent must not believe it read the complete instruction); the full
+# truncated text and any older rulings that fell out of the prompt are backstopped in
+# meta['host_rulings'] (readable from the snapshot) plus the injection-trace event
+# history; the prompt's hard budget ceiling ≈ 5×(1200 + ~80 of line header) + section
+# framing ≈ 6.6KB, so it does not grow linearly with the number of rulings.
 HOST_RULING_PROMPT_MAX = 5
 HOST_RULING_NOTE_LIMIT = 1200
-# 裁决 note 的 intake 上限（dev_lane signal 入参闸）：超限拒收进 refused
-# （文案点名），不进事件历史——与 cap_previous_context 的 HARD_LIMIT 同值族。
+# The intake cap for a ruling note (dev_lane's signal input gate): over the limit it is
+# refused into refused (the text names it) and never enters the event history — the same
+# value family as cap_previous_context's HARD_LIMIT.
 HOST_RULING_NOTE_INPUT_LIMIT = 20000
 
 
 def build_stage_prompt(ticket_id: str, meta: Dict[str, Any], stage: Stage,
                        handoffs: List[Dict[str, Any]], result_file: str,
                        gen: int, previous_context: str = "") -> str:
-    """agent 段派活指令（纯函数，零 IO——workflow 内确定性调用）。
-    上下文=工单业务属性 + 前段 handoff 摘要 + 结果文件契约。
-    previous_context 非空即追加（上次运行产出+打回原因，来自工作流历史）。
-    注意 gen 只是「第几次进本段」的展示值——各引擎基制不一（base 1 基/dev_lane 0 基），
-    不拿它当注入守卫（曾因 gen>1 守卫吞掉 0 基引擎第一次打回的意见，票 t260828-04）。"""
+    """An agent stage's dispatch prompt (pure function, zero IO — called
+    deterministically inside the workflow).
+    Context = the ticket's business attributes + the previous stage's handoff summaries +
+    the result-file contract.
+    A non-empty previous_context is appended (the last run's output + the bounce reason,
+    from the workflow history).
+    Note that gen is only the display value of 「how many times this stage was entered」 —
+    the engines disagree on the base (base is 1-based, dev_lane 0-based), so it is never
+    used as an injection guard (a gen>1 guard once swallowed the first bounce feedback of
+    the 0-based engine, ticket t260828-04)."""
     ws = stage_workspace(meta.get("workspace"), ticket_id)
     lines = [
         "【派活指令】工单 %s（%s）阶段：%s（%s，角色=%s，第 %d 次进本段）"
@@ -2288,8 +2662,10 @@ def build_stage_prompt(ticket_id: str, meta: Dict[str, Any], stage: Stage,
         "机器索引 docs/index.json 备用）。动手前对照目录与你的标题/写集判断相关"
         "设计文档，相关的读全文，不相关不读。",
     ]
-    # 正文=原始用户需求（票 t260822-m16：user_request 逐字保留，显式优先；缺省回落 body），
-    # 加工后派发规格独立呈现（spec），不再混入正文。
+    # Body = the original user request (ticket t260822-m16: user_request kept verbatim,
+    # taking precedence when present; the default falls back to body); the processed
+    # dispatch specification is presented separately (spec) and no longer mixed into the
+    # body.
     body = str(meta.get("user_request") or meta.get("body") or "").strip()
     spec = str(meta.get("spec") or "").strip()
     if body or spec:
@@ -2306,10 +2682,12 @@ def build_stage_prompt(ticket_id: str, meta: Dict[str, Any], stage: Stage,
     if acceptance_items:
         lines.append("4. 本段验收清单（结算自检用）：%s" % "；".join(acceptance_items))
     sec = 5
-    # KI-053（票 t260905-10）：宿主裁决注入面——人工意见的正规通道（blocked 态可
-    # 注入，注入留痕事件历史）。arbitrate/acceptance 等机械段 prompt 同样消费，
-    # 人工意见不再只能借 create_plan/implement 的 rework 备注转达。无裁决时本节
-    # 不出现，后续段号维持既有 5/6/7 排布（零回归）。
+    # KI-053 (ticket t260905-10): the host-ruling injection surface — the formal channel
+    # for human opinions (injectable even in the blocked state, with the injection traced
+    # into the event history). Mechanical-stage prompts such as arbitrate/acceptance
+    # consume it too, so a human opinion no longer has to travel via create_plan /
+    # implement's rework note. With no rulings this section doesn't appear and the
+    # following section numbers keep the existing 5/6/7 layout (zero regression).
     rulings = [r for r in (meta.get("host_rulings") or []) if isinstance(r, dict)]
     if rulings:
         lines.append("%d. 宿主裁决注入（人工意见正规通道，按此校准执行方向；旧→新排序，"
@@ -2328,8 +2706,9 @@ def build_stage_prompt(ticket_id: str, meta: Dict[str, Any], stage: Stage,
         for h in reversed(prev[-3:]):
             body = str(h.get("report") or "") or str(h.get("summary") or "")
             lines.append("   - [%s] %s" % (h.get("stage", "?"), body[:1200]))
-    # 阶段重跑上下文继承：调用方只在本段重跑时才传非空 previous_context，
-    # 非空即注入（不拿 gen 当守卫——dev_lane 的 gen 是 0 基，gen>1 会漏掉第一次打回）
+    # Stage re-run context inheritance: the caller passes a non-empty previous_context
+    # only when this stage is re-running, and non-empty means injected (gen is never the
+    # guard — dev_lane's gen is 0-based, so a gen>1 guard would miss the first bounce)
     n = sec
     prev_ctx_text = cap_previous_context(previous_context)
     if prev_ctx_text:
@@ -2363,28 +2742,36 @@ def build_stage_prompt(ticket_id: str, meta: Dict[str, Any], stage: Stage,
     return "\n".join(lines)
 
 
-# 模板 id → workflow 类名（client.py ticket-start 选类唯一真源；worker 注册列表与此表一致）
-# 260904 宿主令：仅存 dev-lane（content-pipeline/proofread/regression/cleanup 已退役）
+# Template id → workflow class name (the single source of truth for client.py
+# ticket-start's class choice; the worker registration list matches this table)
+# 260904 host order: only dev-lane remains (content-pipeline/proofread/regression/cleanup
+# retired)
 TEMPLATE_CLASS_NAMES: Dict[str, str] = {
     "dev-lane": "DevLaneWorkflow",
 }
 
-# ---- 引擎数据出仓归档路径（票 t260902-02 M1-3）----
-# 归档真源 = 机器级 per-key 数据目录（契约 v1.4 ①c）：完结工单的 stage 结果/结算
-# 报告、会话落盘、UI 证据复制进 <root>/<key>/data/tickets/<id>/，泳道拆除不丢。
-# 这段 PROJECT_KEY_RE 是真源（原在 agent_activities.py，本单上移）：
-# 与 server/project-registry.ts 的 PROJECT_KEY_RE 同款字符集，兼防 ../ 路径穿越
-#（per-key 凭据/归档路径都要拼目录名）。EPIC_CODE_RE 是既有同款字符集的另一处
-# 拷贝（防穿越语义同），两处刻意不合并（各自注释说明字符集来源）。
+# ---- The engine's data-export archive paths (ticket t260902-02, M1-3) ----
+# The archive source of truth = the machine-level per-key data directory (contract v1.4
+# ①c): a finished ticket's stage results / settle reports, session records and UI
+# evidence are copied into <root>/<key>/data/tickets/<id>/, so tearing down the lane
+# loses nothing.
+# This PROJECT_KEY_RE is the source of truth (originally in agent_activities.py, moved up
+# by that ticket): the same character set as server/project-registry.ts's PROJECT_KEY_RE,
+# and it also blocks ../ path traversal (per-key credential/archive paths all splice in a
+# directory name). EPIC_CODE_RE is another copy of the same character set (the same
+# anti-traversal semantics); the two are deliberately not merged (each carries its own
+# comment on where the character set comes from).
 
 PROJECT_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
 
 
 def perkey_projects_root() -> pathlib.Path:
-    """per-key 项目目录根（真源；每次调用现读 env，仿 project-registry.ts
-    registryRoot 语义）。env 语义与 TS 侧有意差异：SANDBAR_PROJECTS_DIR 为空串或
-    相对路径 = 视为未设置回落默认根——TS 的 `??` 不剔空串（空串会指到根目录本身），
-    这里显式拒绝，不猜。"""
+    """The per-key project directory root (the source of truth; env is read fresh on
+    every call, mirroring project-registry.ts's registryRoot semantics). The env
+    semantics differ deliberately from the TS side: an empty or relative
+    SANDBAR_PROJECTS_DIR = treated as unset, falling back to the default root — TS's `??`
+    does not reject an empty string (which would point at the root directory itself),
+    while here it is rejected explicitly rather than guessed."""
     root = os.environ.get("SANDBAR_PROJECTS_DIR") or ""
     if not root or not os.path.isabs(root):
         return pathlib.Path.home() / ".sandbar" / "projects"
@@ -2392,10 +2779,13 @@ def perkey_projects_root() -> pathlib.Path:
 
 
 def ticket_data_dir(project_key: str, ticket_id: str) -> pathlib.Path:
-    """完结工单归档目录（M1-3）：<SANDBAR_PROJECTS_DIR|~/.sandbar/projects>/<key>/data/tickets/<id>/。
+    """A finished ticket's archive directory (M1-3):
+    <SANDBAR_PROJECTS_DIR|~/.sandbar/projects>/<key>/data/tickets/<id>/.
 
-    project_key / ticket_id 双双过 PROJECT_KEY_RE 白名单——两者都由外部 meta 拼进
-    归档路径，任一越界（../、- 开头等）即 ValueError，调用方不得自行兜底拼接。"""
+    Both project_key and ticket_id must pass the PROJECT_KEY_RE whitelist — both are
+    spliced into the archive path from external meta, so any boundary violation (../, a
+    leading "-", etc.) raises ValueError, and the caller may not do its own fallback
+    splicing."""
     key = str(project_key or "").strip()
     if not PROJECT_KEY_RE.match(key):
         raise ValueError("project_key 形状非法：%r（白名单 %s）" % (key, PROJECT_KEY_RE.pattern))
@@ -2405,41 +2795,55 @@ def ticket_data_dir(project_key: str, ticket_id: str) -> pathlib.Path:
     return perkey_projects_root() / key / "data" / "tickets" / tid
 
 
-# ---- 契约①d：project.yaml paths 节——项目内路径声明（票 t260903-03）----
-# 引擎不得约定「项目内某固定路径」（sandbar M2 物理搬迁前置）：角色目录与模型
-# 路由表两处项目内路径由项目在注册条目顶层可选 paths 节声明（相对项目根），引擎
-# 经本读取器取值。契约真源 = docs/design/sandbar项目接入契约v1.md ①d：
-#   回落四类（无 paths 节 / 节内缺键 / 条目文件不存在 / project key 空 or 不过
-#     白名单）→ 未声明，消费点回落现行约定（sandbar 零改动零回归）；
-#   声明值畸形 / 条目文件顶层形状不可解析 / 声明锚点缺失或类型错位 → fail-closed
-#     红（ProjectPathsError），点名条目文件或解析后路径——文件烂不得按「缺失」
-#     静默回落；
-#   锚点 vs 内容：per-role 文件缺失维持软跳过、路由表内容损坏继承查表容错
-#     （model_route_for 返回 None → 默认模型）——四态只覆盖声明值与锚点。
-# 解析基准差异：roles_dir 相对 spawn cwd（泳道 worktree，工单快照语义），
-# model_routes 相对条目 dirs[0]（主目录，运行时真源随主仓）。
-# 手写解析 stdlib-only（系统 python3 无 pyyaml；spawn 时段条目文件唯一读者是本
-# 读取器，装载器只在建票/注册时运行）：顶层只认 schema:/project:/paths:，
-# schema 缺失=畸形、非 v1=版本不支持；project: 节内字段形状归装载器（①a）管，
-# 这里只取 dirs 列表首项作解析基准。值不含 #（行尾 # 起截断），与装载器
-# _strip_line 同口径。
+# ---- Contract ①d: the project.yaml paths section — in-project path declarations
+# (ticket t260903-03) ----
+# The engine may not hardcode 「some fixed path inside the project」 (a precondition of
+# sandbar's M2 physical migration): the two in-project paths — the roles directory and
+# the model route table — are declared by the project in the registry entry's optional
+# top-level paths section (relative to the project root), and the engine reads them
+# through this reader. The contract's source of truth =
+# docs/design/sandbar项目接入契约v1.md ①d:
+#   The four fallback classes (no paths section / a missing key inside it / the entry
+#     file doesn't exist / an empty project key or one failing the whitelist) →
+#     undeclared; the consumer falls back to the current convention (zero change, zero
+#     regression for sandbar);
+#   A malformed declared value / an unparseable top-level shape in the entry file / a
+#     declared anchor missing or the wrong kind → fail-closed red (ProjectPathsError)
+#     naming the entry file or the resolved path — a broken file must never be silently
+#     treated as 「missing」;
+#   Anchor versus contents: a missing per-role file keeps the soft skip, and a corrupt
+#     route table inherits the lookup tolerance (model_route_for returns None → the
+#     default model) — the four states only cover declared values and anchors.
+# Resolution base differs: roles_dir is relative to the spawn cwd (the lane worktree,
+# ticket snapshot semantics), model_routes is relative to the entry's dirs[0] (the home
+# directory; the runtime source of truth follows the main repo).
+# Hand-written parsing, stdlib-only (the system python3 has no pyyaml; at spawn time the
+# only reader of the entry file is this reader, while the loader runs only at ticket
+# creation / registration): the top level only accepts schema:/project:/paths:, a missing
+# schema = malformed, a non-v1 schema = unsupported version; the shape of the fields
+# inside project: belongs to the loader (①a), and only the first item of the dirs list is
+# taken here as the resolution base. Values may not contain # (a trailing # starts a
+# truncation), the same stance as the loader's _strip_line.
 
-DEFAULT_ROLES_DIR = "server/roles"   # 回落约定：角色目录（相对项目根）
+DEFAULT_ROLES_DIR = "server/roles"   # the fallback convention: the roles directory (relative to the project root)
 
 PATHS_DECL_KEYS = ("roles_dir", "model_routes")
 
 
 class ProjectPathsError(ValueError):
-    """契约①d fail-closed：声明值畸形 / 条目文件不可解析 / 声明锚点缺失或错位。"""
+    """Contract ①d fail-closed: a malformed declared value / an unparseable entry file /
+    a declared anchor missing or misplaced."""
 
 
 def _entry_paths_parse(text: str, label: str) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
-    """条目文件最小解析：返回 (paths 声明 dict 或 None, dirs 首项或 None)。
-    顶层形状不可解析 = ProjectPathsError（不回落——R1：烂文件必须红）。"""
+    """Minimal parse of the entry file: returns (the paths declaration dict or None, the
+    first dirs item or None).
+    An unparseable top-level shape = ProjectPathsError (never a fallback — R1: a broken
+    file must go red)."""
     schema: Optional[str] = None
     paths: Optional[Dict[str, str]] = None
     main_dir: Optional[str] = None
-    section = ""  # 当前所在顶层节名（"" = 还没见到任何顶层键）
+    section = ""  # the top-level section we are currently in ("" = no top-level key seen yet)
     for i, raw in enumerate(text.split("\n"), 1):
         line = re.sub(r"#.*$", "", raw).rstrip()
         if not line.strip():
@@ -2477,7 +2881,8 @@ def _entry_paths_parse(text: str, label: str) -> Tuple[Optional[Dict[str, str]],
                 raise ProjectPathsError("%s:%d paths.%s 重复" % (label, i, k))
             paths[k] = v
         elif section == "project":
-            # 条目字段形状归装载器管，这里只抓 dirs 列表首项（绝对路径）作解析基准
+            # The entry fields' shape belongs to the loader; here we only grab the first
+            # item of the dirs list (an absolute path) as the resolution base
             if main_dir is None:
                 m_item = re.match(r"^\s+-\s+(.+)$", line)
                 if m_item and m_item.group(1).strip().startswith("/"):
@@ -2492,7 +2897,8 @@ def _entry_paths_parse(text: str, label: str) -> Tuple[Optional[Dict[str, str]],
 
 
 def _decl_rel(key: str, v: str, label: str) -> str:
-    """paths 声明值校验（契约①d）：非空相对路径，禁绝对/越界/非标量。"""
+    """Validate a paths declaration value (contract ①d): a non-empty relative path;
+    absolute / out-of-bounds / non-scalar are forbidden."""
     v = v.strip()
     if not v:
         raise ProjectPathsError("%s: paths.%s 声明值为空或纯空白（strip 后判空，畸形）" % (label, key))
@@ -2507,17 +2913,21 @@ def _decl_rel(key: str, v: str, label: str) -> str:
 
 def project_paths(project_key: str, roles_base: str = "",
                   routes_base: str = "") -> Dict[str, Any]:
-    """读注册条目 project.yaml 的 paths 节（契约①d 唯一读取入口）。返回：
+    """Read the paths section of a registered entry's project.yaml (contract ①d's only
+    read entry point). Returns:
       {"roles_dir": Path|None, "roles_rel": str|None,
        "model_routes": Path|None, "model_routes_rel": str|None, "main_dir": str|None}
 
-    未声明（回落四类任一）→ 两个 Path/rel 均为 None，消费点回落现行约定；
-    声明 → 解析后绝对路径（roles_base 缺省 os.getcwd()，routes_base 缺省条目
-    dirs[0]）。本函数只做「解析与声明值校验」——锚点存在性/类型判定归各消费
-    点 helper（roles_dir_for_spawn / routes_file_for_spawn，判定基准与真消费
-    基准同源，避免单键消费误判另一键锚点）。条目文件只有存在且 key 合法才被
-    解析——文件烂 = ProjectPathsError，不静默回落。roles_base / routes_base
-    为测试注入位（production 调用点只传 roles_base=str(cwd)）。"""
+    Undeclared (any of the four fallback classes) → both the Path and the rel are None and
+    the consumer falls back to the current convention; declared → the resolved absolute
+    path (roles_base defaults to os.getcwd(), routes_base to the entry's dirs[0]). This
+    function only does 「parsing and declared-value validation」 — anchor existence / kind
+    decisions belong to each consumer's helper (roles_dir_for_spawn /
+    routes_file_for_spawn, so the judging base and the real consumption base share a
+    source and consuming one key cannot misjudge the other key's anchor). The entry file is
+    parsed only when it exists and the key is legal — a broken file = ProjectPathsError,
+    never a silent fallback. roles_base / routes_base are test injection points
+    (production call sites pass only roles_base=str(cwd))."""
     key = str(project_key or "").strip()
     info: Dict[str, Any] = {"roles_dir": None, "roles_rel": None,
                             "model_routes": None, "model_routes_rel": None,
@@ -2555,9 +2965,12 @@ def project_paths(project_key: str, roles_base: str = "",
 
 
 def _require_anchor(label: str, key: str, p: pathlib.Path, want: str) -> None:
-    """声明锚点存在性/类型判定（fail-closed 红，点名条目文件与解析后路径）。
-    缺失与类型错位分开报——语义不同（①d 四态表），红级相同。只判声明锚点，
-    回落路径的存在性归各消费点既有软语义（未声明缺失=软跳过/容错，不硬失败）。"""
+    """Anchor existence/kind decision for a declaration (fail-closed red, naming the
+    entry file and the resolved path).
+    A missing anchor and a mis-typed anchor are reported separately — the semantics
+    differ (①d's four-state table), the red level is the same. Only declared anchors are
+    judged; existence of fallback paths belongs to each consumer's existing soft semantics
+    (missing while undeclared = a soft skip / tolerance, not a hard failure)."""
     if not p.exists():
         raise ProjectPathsError("%s: paths.%s 声明锚点不存在（fail-closed 红）：%s" % (label, key, p))
     if want == "dir" and not p.is_dir():
@@ -2567,10 +2980,12 @@ def _require_anchor(label: str, key: str, p: pathlib.Path, want: str) -> None:
 
 
 def roles_dir_for_spawn(project_key: str, cwd) -> pathlib.Path:
-    """spawn 消费点①：角色 preset patch 目录。声明 = project_paths 解析 + 锚点
-    fail-closed 判定；未声明回落 <cwd>/server/roles（现行约定，worktree
-    工单快照语义不变，目录缺失不在此炸——具体 <role>.yml 缺失的软跳过归调用点
-    既有逻辑，声明与未声明在这层同软）。"""
+    """Spawn consumer ①: the role preset patch directory. Declared = project_paths
+    parsing + a fail-closed anchor decision; undeclared falls back to
+    <cwd>/server/roles (the current convention, the worktree ticket snapshot semantics
+    unchanged; a missing directory doesn't blow up here — the soft skip for a missing
+    concrete <role>.yml belongs to the call site's existing logic, and declared and
+    undeclared are equally soft at this layer)."""
     info = project_paths(project_key, roles_base=str(cwd))
     if info["roles_dir"] is not None:
         _require_anchor(info["entry"], "roles_dir", info["roles_dir"], "dir")
@@ -2579,10 +2994,12 @@ def roles_dir_for_spawn(project_key: str, cwd) -> pathlib.Path:
 
 
 def routes_file_for_spawn(project_key: str) -> pathlib.Path:
-    """spawn 消费点②：模型路由表文件。声明 = project_paths 解析 + 锚点
-    fail-closed 判定；未声明回落 MODEL_ROUTES_FILE（主仓现行约定，逐字节零
-    回归）。表内容损坏的容错归 model_route_for（返回 None → 默认模型，①d
-    「锚点 vs 内容」明文）。只判 model_routes 锚点，不碰 roles 锚点。"""
+    """Spawn consumer ②: the model route table file. Declared = project_paths parsing +
+    a fail-closed anchor decision; undeclared falls back to MODEL_ROUTES_FILE (the main
+    repo's current convention, byte-level zero regression). Tolerance for corrupt table
+    contents belongs to model_route_for (returns None → the default model, ①d's 「anchor
+    versus contents」 is explicit). Only the model_routes anchor is judged; the roles
+    anchor is untouched."""
     info = project_paths(project_key)
     if info["model_routes"] is not None:
         _require_anchor(info["entry"], "model_routes", info["model_routes"], "file")
@@ -2591,21 +3008,27 @@ def routes_file_for_spawn(project_key: str) -> pathlib.Path:
 
 
 def roles_rel_for_prompt(project_key: str) -> str:
-    """prompt 装配消费点：role_doc/kind_doc 的目录基准（相对路径字符串）。
-    声明 = 声明值；未声明 = DEFAULT_ROLES_DIR（拼出的文本与改前一致）。
-    锚点存在性不在此判（prompt 只是文本指引，红在 spawn 真消费点报）；条目
-    文件不可解析照常 fail-closed（ProjectPathsError 上抛）。"""
+    """The prompt-assembly consumer: the directory base of role_doc/kind_doc (a relative
+    path string).
+    Declared = the declared value; undeclared = DEFAULT_ROLES_DIR (the assembled text
+    matches pre-change behavior). Anchor existence is not decided here (the prompt is
+    only textual guidance; red reports at the spawn-time real consumer); an unparseable
+    entry file still fails closed as usual (ProjectPathsError propagates)."""
     info = project_paths(project_key)
     return info["roles_rel"] or DEFAULT_ROLES_DIR
 
 
-# 归档文件清单口径（契约 v1.4 ①c 附录；activity 扫描与将来消费侧共用同一真源）：
-#   入档 = .sandbar/stage_*.json（stage 结果/结算报告）、.sandbar/screenshots/**/*.png
-#   （UI 证据，保相对层级）、.dsh/sessions/<repo-slug>/*（会话落盘事件文件）
-#   排除（记入 manifest.excluded_rules，不入档）= agent_*.log（worker spawn 运行时
-#   日志）、model_patch_*.yml / resume_patch_*.yml（引擎内部续接物）、.dsh/profiles/**
-#   与一切 .credentials.yaml（凭据绝不入档）。会话目录缺失 = 软处理（manifest 记
-#   absent），同 usage 端点「历史工单无会话文件」的既有降级口径。
+# The archive file-list stance (contract v1.4 ①c appendix; the activity's scan and the
+# future consumers share this one source of truth):
+#   Archived = .sandbar/stage_*.json (stage results / settle reports),
+#   .sandbar/screenshots/**/*.png (UI evidence, relative layout preserved),
+#   .dsh/sessions/<repo-slug>/* (session event files).
+#   Excluded (recorded in manifest.excluded_rules, never archived) = agent_*.log (worker
+#   spawn runtime logs), model_patch_*.yml / resume_patch_*.yml (engine-internal
+#   continuation artifacts), .dsh/profiles/** and every .credentials.yaml (credentials
+#   are never archived). A missing session directory = handled softly (the manifest
+#   records absent), the same degraded stance as the usage endpoint's 「a historical
+#   ticket has no session files」.
 ARCHIVE_INCLUDE_STAGE_GLOB = DOT_DIR_NEW + "/stage_*.json"
 ARCHIVE_INCLUDE_SHOTS_GLOB = DOT_DIR_NEW + "/screenshots/**/*.png"
 ARCHIVE_INCLUDE_SESSIONS_DIR = ".dsh/sessions"
@@ -2617,50 +3040,63 @@ ARCHIVE_EXCLUDED_RULES = (
 )
 
 
-# 模板 id → 台面展示名（build_suggest_next_prompt 的白名单清单用；host 侧 buildSuggestPrompt
-# 的 name 来自 workflow list op，同一语义——改名两边同步）。dev-lane 名与
-# DevLaneWorkflow.TEMPLATE_NAME 同源。宿主令 260904：仅存 dev-lane（其余模版已退役）
+# Template id → console display name (used by build_suggest_next_prompt's whitelist
+# list; the host side's buildSuggestPrompt takes its name from the workflow list op —
+# the same semantics, so a rename syncs both sides). The dev-lane name shares a source
+# with DevLaneWorkflow.TEMPLATE_NAME. Host order 260904: only dev-lane remains (the
+# other templates retired)
 TEMPLATE_DISPLAY_NAMES: Dict[str, str] = {
     "dev-lane": "开发泳道",
 }
 
 
-# ---- 项目注册表（单一真源，票 t260904-02 自 server/tools/ticket.py 上收）----
-# 起因=KI-032：裸 client.py ticket-start 不锚 project_root，泳道相对路径落仓由执行
-# worker 的 REPO_ROOT 决定（脑裂）。硬闸要求 client.py 与 ticket.py 用**同一份**
-# 装载器锚 project，双份复制必漂移（票 t260824-04/-10/-11 三次事故的教训），
-# 故整块上收至此。
-# ticket.py 保留薄壳委托（对外函数名与错误文案逐字不变）；client.py 直 import 本节。
-# 本节保持 stdlib-only（server/tools/ticket.py 直载本模块的既定约束）。
-# 注意：json/time 的 import 放在本节而非文件头——追加式修订不整体漂移行号
-#（notes/debts/known-issues.md 多条条目按行号锚定本文件）。
+# ---- The project registry (the single source of truth, collected here from
+# server/tools/ticket.py in ticket t260904-02) ----
+# The cause = KI-032: a bare client.py ticket-start did not anchor project_root, so which
+# repo a relative lane path landed in was decided by the executing worker's REPO_ROOT
+# (a split brain). The hard gate requires client.py and ticket.py to use **the same**
+# loader to anchor the project — two copies inevitably drift (the lesson of the three
+# incidents t260824-04/-10/-11) — so the whole block was collected here.
+# ticket.py keeps a thin shell delegating (external function names and error texts
+# verbatim unchanged); client.py imports this section directly.
+# This section stays stdlib-only (the established constraint that
+# server/tools/ticket.py loads this module directly).
+# Note: the json/time imports sit in this section rather than at the file head, so an
+# append-style revision doesn't shift every line number (several entries in
+# notes/debts/known-issues.md anchor this file by line number).
 import json as _json                                # noqa: E402
 import time as _time                                # noqa: E402
 
-# 一次性迁移源（旧单文件）。真源=机器级 per-key 目录
-# ~/.sandbar/projects/<key>/project.yaml（装载=扫 */project.yaml，与
-# server/project-registry.ts 同一注册表、两边各自最小解析、语义同构）。
-# env 优先级（每次调用现读）：SANDBAR_PROJECTS_YAML（legacy 单文件模式，旧格式
-# projects: 列表）> SANDBAR_PROJECTS_DIR > ~/.sandbar/projects。
-# 单条目畸形/版本不支持=该项目隔离（fail-closed 可见，不炸其他项目）；目录名必须
-# 过 PROJECT_KEY_RE 白名单，条目 key 必须与目录名全等；迁移判据只认 .migrated 标记。
+# The one-time migration source (the old single file). The source of truth = the
+# machine-level per-key directory ~/.sandbar/projects/<key>/project.yaml (loading =
+# scanning */project.yaml — the same registry as server/project-registry.ts, each side
+# with its own minimal parse, semantically isomorphic).
+# env priority (read fresh on every call): SANDBAR_PROJECTS_YAML (the legacy single-file
+# mode, the old projects: list format) > SANDBAR_PROJECTS_DIR > ~/.sandbar/projects.
+# A malformed entry / an unsupported version = that project is isolated (visibly
+# fail-closed, other projects unaffected); the directory name must pass the
+# PROJECT_KEY_RE whitelist, an entry's key must equal its directory name exactly, and the
+# migration test only recognizes the .migrated marker.
 PROJECTS_YAML = REPO_ROOT / 'server' / 'projects.yaml'
 
 
 def registry_root():
-    """per-key 注册表根目录（每次调用现读 env，防「先 import 后设 env」覆盖失效）。"""
+    """The per-key registry root directory (env is read fresh on every call, so an env
+    set after import still takes effect)."""
     return pathlib.Path(os.environ.get('SANDBAR_PROJECTS_DIR') or (pathlib.Path.home() / '.sandbar' / 'projects'))
 
 
 def strip_registry_line(raw):
-    """剥行尾注释 + 右空白；整行注释/空行返回 None（跳过）。本注册表值不含 #。"""
+    """Strip a trailing comment + trailing whitespace; return None (skip) for a
+    whole-line comment / a blank line. Values in this registry contain no #."""
     line = re.sub(r'#.*$', '', raw).rstrip()
     return line if line.strip() else None
 
 
 def parse_legacy_registry_file(text, label):
-    """旧格式单文件解析（projects: 列表）——legacy env 模式与迁移源共用，
-    行为与 260823 版 parseProjectsYaml 一致（含 key 重复检查），写坏大声报错。"""
+    """The old single-file format parse (a projects: list) — shared by the legacy env
+    mode and the migration source; behavior matches the 260823 parseProjectsYaml
+    (including the duplicate-key check), and a broken file reports loudly."""
     projects = []
     cur = None
     in_dirs = False
@@ -2726,29 +3162,31 @@ def parse_legacy_registry_file(text, label):
 
 
 def parse_project_file(text, label):
-    """per-key 单条目解析（project.yaml，契约① schema v1 固定形状）：
+    """Parse one per-key entry (project.yaml, contract ①'s schema v1 fixed shape):
 
-        schema: v1            （必带；缺失=畸形；非 v1=版本不支持 fail-closed）
+        schema: v1            (required; missing = malformed; non-v1 = unsupported
+                               version, fail-closed)
         project:
           - key: <key>
-            name: <名>
+            name: <name>
             dirs:
               - /abs/path
 
-    key 白名单校验在此做；key 与目录名全等的核对由装载方做。"""
+    The key whitelist check happens here; verifying that the key equals the directory
+    name is the loader's job."""
     cur = None
     in_dirs = False
     saw_project = False
-    in_paths = False   # ①d：顶层 paths: 节装载器透传不解析（语义/锚点 fail-closed 归
-    schema = None      # shared.project_paths ①d 读取器）
-    for i, raw in enumerate(text.split('\n'), 1):  # project: 节内字段形状归装载器管
+    in_paths = False   # ①d: the top-level paths: section passes through the loader unparsed (semantics / anchors are fail-closed in
+    schema = None      # shared.project_paths's ①d reader)
+    for i, raw in enumerate(text.split('\n'), 1):  # the shape of fields inside project: belongs to the loader
         line = strip_registry_line(raw)
         if line is None:
             continue
         if in_paths:
             if raw[:1].isspace():
-                continue    # paths 节内行：透传（①d 读取器负责形状与锚点）
-            in_paths = False    # 非缩进行=paths 节结束，落回正常顶层处理
+                continue    # a line inside the paths section: pass through (the ①d reader owns shape and anchors)
+            in_paths = False    # a non-indented line = the paths section is over, back to normal top-level handling
         if line == 'paths:':
             in_paths = True
             continue
@@ -2816,7 +3254,8 @@ def parse_project_file(text, label):
 
 
 def serialize_registry_project(p, seed_label):
-    """per-key 条目序列化（迁移用）：严格子集可往返（值不含 # / 换行，迁移时校验）。"""
+    """Serialize a per-key entry (for migration): a strict subset that round-trips (no #
+    / newline in values, verified at migration time)."""
     lines = ['# 由 %s 自动迁移（sandbar M1-1），格式=契约① per-key 注册条目，勿手改' % seed_label,
              'schema: v1', 'project:', '  - key: %s' % p['key'], '    name: %s' % p['name'], '    dirs:']
     lines += ['      - %s' % d for d in p['dirs']]
@@ -2824,7 +3263,8 @@ def serialize_registry_project(p, seed_label):
 
 
 def scan_registry(root):
-    """扫注册表根目录：好条目进 projects，坏条目进 quarantined（fail-closed 可见不炸全表）。"""
+    """Scan the registry root: good entries go into projects, bad ones into quarantined
+    (visibly fail-closed without killing the whole table)."""
     projects = []
     quarantined = []
     for child in sorted(root.iterdir()):
@@ -2832,7 +3272,7 @@ def scan_registry(root):
             continue
         f = child / 'project.yaml'
         if not f.is_file():
-            continue  # 无注册条目的目录（如 data/ 保留位）跳过
+            continue  # skip directories with no registry entry (e.g. a data/ placeholder)
         label = str(f)
         if not PROJECT_KEY_RE.match(child.name):
             quarantined.append({'dir': str(child),
@@ -2850,8 +3290,10 @@ def scan_registry(root):
 
 
 def migrate_registry(root, seed):
-    """一次性迁移：旧单文件 → per-key 目录。tmp+rename 原子入位；.migrated 独占创建。
-    任一步失败抛错（fail-closed）；已入位条目留在现场，下次启动命中半迁移分支显式报出。"""
+    """One-time migration: the old single file → the per-key directories. tmp + rename for
+    an atomic landing; .migrated is created exclusively. Any step failing raises
+    (fail-closed); already-landed entries stay where they are, and the next startup hits
+    the half-migrated branch and reports it explicitly."""
     seed_label = str(seed)
     projects = parse_legacy_registry_file(seed.read_text('utf-8'), seed_label)
     for p in projects:
@@ -2865,7 +3307,8 @@ def migrate_registry(root, seed):
         d.mkdir(parents=True, exist_ok=True)
         content = serialize_registry_project(p, seed_label)
         target = d / 'project.yaml'
-        # 幂等：已有同字节条目直接跳过（二次调用零重写；并发双迁亦收敛）
+        # Idempotent: an identical-bytes entry already present is skipped (a second call
+        # rewrites nothing; concurrent double migrations also converge)
         if target.is_file() and target.read_text('utf-8') == content:
             continue
         tmp = pathlib.Path(_registry_tmp_name(target))
@@ -2876,22 +3319,25 @@ def migrate_registry(root, seed):
         with os.fdopen(fd, 'w') as fh:
             fh.write('source: %s\nmigrated_at: %s\n' % (seed_label, _time.strftime('%Y-%m-%dT%H:%M:%SZ', _time.gmtime())))
     except FileExistsError:
-        pass  # 并发首启：另一个进程已写标记，内容等价，忽略
+        pass  # a concurrent first start: another process already wrote the marker with equivalent contents, ignore
 
 
 def _registry_tmp_name(target):
-    """并发安全的临时文件名：进程唯一后缀（确定性 tmp 名会被并发双迁互踩，
-    赢家 rename 后输家撞 FileNotFoundError，票 t260901-14 集成测试实测）。"""
+    """A concurrency-safe temp filename with a process-unique suffix (a deterministic tmp
+    name gets trampled by concurrent double migrations — after the winner renames, the
+    loser hits FileNotFoundError; reproduced in ticket t260901-14's integration test)."""
     return '%s.tmp.%s.%s' % (target, os.getpid(), _time.time_ns())
 
 
 def _expected_registry_entries(projects, seed_label):
-    """迁移期望表：种子每条目 → 迁移会写出的精确文本（续迁判等用）。"""
+    """The migration expectation table: each seed entry → the exact text migration will
+    write (used for the resume-migration equality test)."""
     return {p['key']: serialize_registry_project(p, seed_label) for p in projects}
 
 
 def _resume_registry_migration(root, expected, on_disk_keys):
-    """续迁：只补写种子里缺失的条目（盘上已有的不动，防覆盖人工改动），最后补 .migrated。"""
+    """Resume the migration: only write the seed entries that are missing (entries already
+    on disk are left alone, so manual edits are never overwritten), then add .migrated."""
     for key, content in expected.items():
         if key in on_disk_keys:
             continue
@@ -2905,16 +3351,21 @@ def _resume_registry_migration(root, expected, on_disk_keys):
         with os.fdopen(fd, 'w') as fh:
             fh.write('source: %s\nmigrated_at: %s\n' % (PROJECTS_YAML, _time.strftime('%Y-%m-%dT%H:%M:%SZ', _time.gmtime())))
     except FileExistsError:
-        pass  # 并发：另一个进程已写标记，内容等价，忽略
+        pass  # concurrent: another process already wrote the marker with equivalent contents, ignore
 
 
 def ensure_registry_migrated(root):
-    """per-key 模式装载前的一致性检查：跳过判据只认 .migrated。无标记且根里有内容时，
-    区分三类现场（字面「有内容无标记=fail-closed」会把正常手工注册的注册表全部
-    判死，实现期自测发现）：
-    - 纯人工注册表（盘上 key 与种子零交集，或种子不在时）→ 接受；
-    - 崩溃残留/丢标记（盘上全是种子条目的精确文本子集，无隔离）→ 续迁补齐 + 补标记；
-    - 混合现场（部分相关但不可复现）→ fail-closed 抛错，人工处置，不静默跳过。"""
+    """A consistency check before loading in per-key mode: the skip test only trusts
+    .migrated. With no marker but content in the root, three kinds of scene are told apart
+    (a literal 「content without a marker = fail-closed」 would condemn every normally
+    hand-registered registry — found during the implementation self-test):
+    - a purely manual registry (no intersection between the on-disk keys and the seed, or
+      no seed at all) → accept;
+    - crash leftovers / a lost marker (everything on disk is an exact text subset of the
+      seed entries, nothing quarantined) → resume the migration to fill the gaps + add the
+      marker;
+    - a mixed scene (partly related but not reproducible) → fail-closed raise, human
+      triage, never a silent skip."""
     if (root / '.migrated').is_file():
         return
     projects, quarantined = scan_registry(root)
@@ -2926,7 +3377,7 @@ def ensure_registry_migrated(root):
         migrate_registry(root, PROJECTS_YAML)
         return
     if not PROJECTS_YAML.is_file():
-        return  # 纯人工注册表：种子不在，无从判定也无从迁移，接受现状
+        return  # a purely manual registry: no seed, so there is nothing to judge or migrate from — accept the state
     try:
         expected = _expected_registry_entries(
             parse_legacy_registry_file(PROJECTS_YAML.read_text('utf-8'), str(PROJECTS_YAML)), str(PROJECTS_YAML))
@@ -2937,7 +3388,7 @@ def ensure_registry_migrated(root):
     seed_keys = set(expected.keys())
     on_disk_keys = set([p['key'] for p in projects] + [pathlib.Path(q['dir']).name for q in quarantined])
     if not (on_disk_keys & seed_keys):
-        return  # 纯人工注册表（与种子无关），接受现状
+        return  # a purely manual registry (unrelated to the seed), accept the state
     pure_subset = (not quarantined and all(
         p['key'] in seed_keys
         and (root / p['key'] / 'project.yaml').read_text('utf-8') == expected.get(p['key'])
@@ -2952,8 +3403,9 @@ def ensure_registry_migrated(root):
 
 
 def load_projects_registry():
-    """装载注册表全量，返回 (projects, quarantined)。
-    legacy env（SANDBAR_PROJECTS_YAML）在位时走旧单文件模式（无隔离概念）。"""
+    """Load the whole registry, returning (projects, quarantined).
+    When the legacy env (SANDBAR_PROJECTS_YAML) is set, the old single-file mode is used
+    (no quarantine concept)."""
     legacy = os.environ.get('SANDBAR_PROJECTS_YAML')
     if legacy:
         return parse_legacy_registry_file(pathlib.Path(legacy).read_text('utf-8'), legacy), []
@@ -2969,7 +3421,8 @@ def load_projects_registry():
 
 
 def assert_registry_nonempty(projects, quarantined):
-    """空注册表统一报错（三分支全显式）：无任何条目 / 全部被隔离（列原因）。"""
+    """A single error path for an empty registry (all three branches explicit): no entries
+    at all / everything quarantined (with reasons)."""
     if projects:
         return
     if quarantined:
@@ -2980,8 +3433,10 @@ def assert_registry_nonempty(projects, quarantined):
 
 
 def lookup_project(key):
-    """按 key 查注册表项目；缺失/未知一律 ValueError（无默认值）。返回 {key,name,dirs}。
-    key 对应隔离条目时错误文案带目录+原因（fail-closed 可见，不静默当未知）。"""
+    """Look up a registry project by key; missing/unknown always raise ValueError (no
+    defaults). Returns {key,name,dirs}.
+    When the key matches a quarantined entry, the error carries the directory + reason
+    (visibly fail-closed rather than silently treated as unknown)."""
     if not key or not PROJECT_KEY_RE.match(key):
         raise ValueError('project 不合法（注册表 key 白名单：小写字母/数字/中划线），实际 %r' % (key,))
     projects, quarantined = load_projects_registry()
@@ -2997,27 +3452,32 @@ def lookup_project(key):
 
 
 def check_paths_under_project(proj, ws, worktree):
-    """显式给的绝对路径必须落在该项目注册目录之一（防把别的项目的目录登记进来）；
-    相对路径不拦（执行侧对项目主目录解析）。"""
+    """An explicitly given absolute path must land inside one of the project's registered
+    directories (so another project's directory cannot be registered here); relative paths
+    are not blocked (the executing side resolves them against the project home)."""
     for label, p in (('workspace', (ws or {}).get('path') or ''), ('worktree', worktree or '')):
         if p.startswith('/') and not any(p == d or p.startswith(d.rstrip('/') + '/') for d in proj['dirs']):
             raise ValueError('%s 路径 %s 不在项目 %s 的注册目录内（%s）'
                              % (label, p, proj['key'], '、'.join(proj['dirs'])))
 
 
-# ---- worker 归属指纹（KI-033，票 t260904-02）----
-# 工单 worker 注册带引擎仓指纹：worker 自写 meta JSON（repo_root 绝对路径），
-# temporal-tools ensureTicketWorkers 读取判定异仓（告警+拒接，不杀别人进程）。
-# 指纹=repo_root realpath 而非 git HEAD——同仓先后 commit 不该误判异仓
-#（supervisor 与 worker 常是先后从同一棵树起的）。纯函数落此（stdlib-only），
-# worker.py 只留薄接线。
+# ---- Worker ownership fingerprint (KI-033, ticket t260904-02) ----
+# A ticket worker registers with an engine-repo fingerprint: the worker writes its own
+# meta JSON (the repo_root absolute path), and temporal-tools ensureTicketWorkers reads
+# it to detect a foreign repo (warn + refuse the work, never killing someone else's
+# process).
+# The fingerprint = repo_root's realpath, not git HEAD — successive commits in the same
+# repo must not be misjudged as foreign (the supervisor and the worker are often started
+# one after the other from the same tree). The pure functions live here (stdlib-only) and
+# worker.py keeps only thin wiring.
 WORKER_META_VERSION = 1
 
 
 def worker_meta_payload(repo_root=None, pid=None) -> Dict[str, Any]:
-    """meta JSON 内容：{version, pid, repo_root, ts}（ts=epoch 秒；字段名=工单场景
-    契约）。repo_root 走 realpath（比对双方用同一规范化口径，符号链接差异不产生
-    假异仓）。"""
+    """The meta JSON contents: {version, pid, repo_root, ts} (ts = epoch seconds; the
+    field names are the ticket-scenario contract). repo_root goes through realpath (both
+    sides of the comparison use the same normalization, so symlink differences cannot
+    produce a fake foreign repo)."""
     root = os.path.realpath(str(repo_root if repo_root is not None else REPO_ROOT))
     return {
         'version': WORKER_META_VERSION,
@@ -3028,8 +3488,10 @@ def worker_meta_payload(repo_root=None, pid=None) -> Dict[str, Any]:
 
 
 def write_worker_meta(path, repo_root=None, pid=None) -> Optional[Dict[str, Any]]:
-    """best-effort 写 meta（归属指纹是可观测性增强，写失败不阻断 worker 启动——
-    ensure 侧对缺失态有 unknown 处理，不会因写失败而误判异仓）。返回 payload。"""
+    """Best-effort meta write (the ownership fingerprint is an observability enhancement;
+    a write failure never blocks the worker from starting — the ensure side handles the
+    missing state as unknown and cannot misjudge a foreign repo because of it). Returns
+    the payload."""
     payload = worker_meta_payload(repo_root=repo_root, pid=pid)
     try:
         p = pathlib.Path(path)
@@ -3043,9 +3505,11 @@ def write_worker_meta(path, repo_root=None, pid=None) -> Optional[Dict[str, Any]
 
 
 def read_worker_meta_state(path) -> Tuple[Optional[Dict[str, Any]], str, str]:
-    """读 meta，返回 (meta|None, state, detail)。state 四态：
-    ok / missing（文件不在）/ malformed（JSON 坏或形状错）/ read_error（其它读失败）。
-    失败态分开报，保证 ensure 侧兼容跳过时可定位（不许哑巴）。"""
+    """Read the meta, returning (meta|None, state, detail). Four states:
+    ok / missing (the file isn't there) / malformed (broken JSON or the wrong shape) /
+    read_error (any other read failure).
+    Failure states are reported separately so the ensure side can locate the problem when
+    it skips compatibly (no going mute)."""
     try:
         raw = pathlib.Path(path).read_text('utf-8')
     except FileNotFoundError:
@@ -3064,13 +3528,17 @@ def read_worker_meta_state(path) -> Tuple[Optional[Dict[str, Any]], str, str]:
 
 
 def engine_venv_python(repo_root) -> Optional[pathlib.Path]:
-    """引擎 venv 解释器解析（票 t260907-10 目录重构回落链）。
+    """Resolve the engine venv interpreter (ticket t260907-10's directory restructure
+    fallback chain).
 
-    新路径 server/engine/.venv 优先；回落旧路径 server/dsh/temporal-poc/.venv
-    （迁移窗口期一轮——主树 .venv 物理迁移完成前后各有一段旧路径存活期；
-    回落摘除后本函数退化为单路径）。
-    畸形输入 fail-closed：repo_root 不存在/非目录/候选非普通文件/不可执行 → None，
-    由调用方显式报错或回落系统解释器，不静默假装可用。
+    The new path server/engine/.venv wins; it falls back to the old path
+    server/dsh/temporal-poc/.venv (one migration-window round — the old path lives on for
+    a while before and after the main tree's .venv is physically moved; once the fallback
+    is removed this function degenerates to a single path).
+    Malformed input fails closed: a nonexistent / non-directory repo_root, a candidate
+    that isn't a regular file, or a non-executable one → None, and the caller reports the
+    error explicitly or falls back to the system interpreter rather than silently
+    pretending it works.
     """
     base = pathlib.Path(repo_root)
     for rel in (("server", "engine"), ("server", "dsh", "temporal-poc")):
