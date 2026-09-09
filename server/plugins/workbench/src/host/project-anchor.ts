@@ -7,7 +7,7 @@
  * 本模块把「请求层按项目键解析项目根」收口成单一纯函数（find 注入可单测），
  * 供 node.ts 各路由逐请求取锚。
  *
- * 取舍清单（create_plan gen1 R1-① 评审定稿体例，实现照单落）：
+ * 取舍清单（体例借票 t260901-01 方案 R1-①，实现照单落）：
  * - key 缺省/空白：回落 fallback（config.repo→SANDBAR_REPO→DEFAULT_REPO 全链不变），
  *   source='default'——兼容 viewProject 为空与老调用，sandbar 自身票行为不变。
  * - key 已注册：root=primaryDir(findProject(key))（project-registry.ts dirs[0]），

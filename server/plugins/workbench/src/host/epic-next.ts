@@ -151,7 +151,7 @@ export type EpicNextState = 'running' | 'done' | 'failed'
 /** 轻量缓存命中探测（立项列表徽标「下一步已备」用）：只 stat pre.json 存在性，
  *  不解析不验 state_key——列表 N 个代号逐个算 state_key 太重，准态由详情响应的
  *  nextHint 承担（node.ts handleEpicRoute）。坏缓存也报 true：详情卡 readPrecache
- *  会当未命中，徽标与卡片短暂不一致是接受的性能取舍（create_plan 方案口径）。 */
+ *  会当未命中，徽标与卡片短暂不一致是接受的性能取舍。 */
 export async function precacheExists(dir: string, code: string): Promise<boolean> {
   if (!EPIC_CODE_RE.test(code)) return false
   try {

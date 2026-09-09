@@ -215,7 +215,7 @@ const NOTE_ROW_RE = /^(\|\s*备注\s*\|\s*)([^|]*?)(\s*\|)/m
  * note 语义：undefined = 不动备注列；'' = 清空备注（显式动作）；
  * 非空 = 写入备注列（无备注行则新插一行，插在「状态」行之后）。
  *
- * 备份目录与 closeEpic 单点共用 /tmp/epic-close-backup（review gen4 决策：
+ * 备份目录与 closeEpic 单点共用 /tmp/epic-close-backup（评审定案：
  * 两函数写同一份档案真源，回滚单点，只查一个目录）。真源分工不变：只改
  * notes/epics/*.md 这一份档案真源；工单状态仍以 Temporal 为真源。
  */

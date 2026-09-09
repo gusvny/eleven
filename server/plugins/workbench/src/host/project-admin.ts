@@ -3,7 +3,7 @@
  * （project-lifecycle 票③面D，写路径薄壳单源纪律：UI 不实现任何校验/闸逻辑，
  * add/remove/list 全部落安装器 CLI `sandbar project … --json`，行为与命令行同源）。
  *
- * 借鉴先例与故障模式取舍（create_plan gen1 R1-① 评审定稿，实现照单落）：
+ * 借鉴先例与故障模式取舍（方案 R1-① 定稿，实现照单落）：
  *   借 runAdminCli（server/sandbar-tools.ts）的**模式**，不借函数——它硬编码
  *   spawn `python3 <repo>/server/admin.py`，而 project 命令族真实入口=仓根
  *   `sandbar` 薄壳（installer.cli.main；admin.py 内零 project 接线，实核）。
@@ -109,7 +109,7 @@ export function runProjectCli(opts: ProjectCliOptions, args: string[], signal?: 
           reject(new ProjectCliError(pendingStatus, pendingWhy))
           return
         }
-        // 报错路径（arbitrate gen1 F3 定稿：按 CLI exit 码分流，不解析语义仍薄壳）：
+        // 报错路径（按 CLI exit 码分流，不解析语义仍薄壳）：
         //   JSON 体在（FailClosed 机器口径）→ 409 原体透传；
         //   exit 1 且无人话 JSON → 409+原文转述（用户输入拒收≠上游故障；票① add 拒收
         //     现状输出 [红] 人话——契约缺口已跨票上报）；

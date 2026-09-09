@@ -7,7 +7,7 @@
  * 数据契约唯一真源 = docs/design/metrics-api契约v1.md（v1 冻结版），字段增删须
  * 开新工单 bump（块 6），本文件不得私改 schema。
  *
- * 口径出处（方案 gen2 已过三过审读，实现锚点）：
+ * 口径出处（票 t260901-20 方案，实现锚点）：
  * - 时间维：stage 时长 v1=handoff 近似，窗口派生复用 agent-usage.ts
  *   stageWindowsFromTimeline（乱序按 from 排序）；末窗封口是本模块新增语义
  *   （agent-usage 末窗 toMs=null 开放式，L82-93），实现为 closeStageWindows
@@ -18,7 +18,7 @@
  * - token 维：复用 aggregateTicketUsage（块 5 八项故障模式随函数全量带入）；
  *   泳道会话陪葬后回落项目级 usage 账本（SANDBAR_USAGE_LEDGER_DIR 前向契约），
  *   缓存存量降维保留（engine_version 失配不再整条作废）。
- * - 纳票/归窗口径（契约真空，gen2 成文、已上报用户裁决）：closed 票归窗时刻=
+ * - 纳票/归窗口径（原契约未覆盖，票 t260901-20 成文、已上报用户裁决）：closed 票归窗时刻=
  *   闭单终态时刻，未结票=创建时刻；KPI 分母与 charts 聚合同一口径、跨视图一致。
  * - health 视图：直查不读缓存（块 2 L157）；kpis 恒冻结四字段（tokens_total=
  *   0+reason，token 维不在直查路径）；blocked/silent 落 charts；server/worker
@@ -797,7 +797,7 @@ function inWindow(ms: number | null, from: number, to: number): boolean {
   return ms >= from && ms < to
 }
 
-/** 归窗锚点（gen2 成文口径）：closed 票=闭单终态时刻；未结票=创建时刻。KPI 与 charts 同口径。 */
+/** 归窗锚点（票 t260901-20 口径）：closed 票=闭单终态时刻；未结票=创建时刻。KPI 与 charts 同口径。 */
 
 export interface MetricsResponse {
   status: number
@@ -936,7 +936,7 @@ export async function buildMetricsResponse(
   }
   const entries = recordEntries.filter((e): e is RecordWithAnchor => e !== null)
 
-  // KPI 单一口径（t260903-09 S2 锚点归窗统一，gen2 成文）：四指标同一 anchor——
+  // KPI 单一口径（票 t260903-09 收口）：四指标同一 anchor——
   // closed 票按闭单时刻、未结票按创建时刻归窗。原实现 tickets 按创建归窗、closed
   // 按闭单归窗，出现「关闭数(10) > 工单数(8)」悖论，此处收口为单一人口。
   const kpis = emptyKpis()
@@ -948,7 +948,7 @@ export async function buildMetricsResponse(
     if (anchor === null || !inWindow(anchor, from, to)) continue
     kpis.tickets += 1
     kept.push(e.rec)
-    // 近似 notice 计数口径=「通过归窗的近似条目数」（验收 gen2 残留①）：与 KPI
+    // 近似 notice 计数口径=「通过归窗的近似条目数」：与 KPI
     // 人口严格一致，响应中途重算导致的边界排除票不再被 notice 多报。
     if (e.anchorApproximated === true) approxInWindow += 1
     if (!e.rec.open) {
@@ -960,7 +960,7 @@ export async function buildMetricsResponse(
   kpis.tokens_total = kept.reduce((s, r) => s + (r.tokens ? r.tokens.in + r.tokens.out : 0), 0)
 
   const body = buildChartsBody(p.view, kept, stageIds, kpis)
-  // cache.status 契约字面语义（t260901-20 acceptance P1 打回后回归字面；t260903-09
+  // cache.status 契约字面语义（t260901-20 回归字面；t260903-09
   // bump 增 'stale'）：'computed'=本响应含本次惰性生成（缓存 miss）的记录；'hit'=
   // 全部记录由缓存读命中；'stale'=fast 模式缓存快照（可能缺票，客户端随后台全量替换）。
   // 双前门字节级一致由此保住：t05/M3 比对基线在两门前**预热缓存**（同请求先跑一次），

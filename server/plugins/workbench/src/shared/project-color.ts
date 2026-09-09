@@ -2,7 +2,7 @@
  * sandbar-workbench · 项目 key → tag 色 纯函数（t260903-07 工单②：全局 chat 消息
  * 项目 tag 按项目着色，为多项目同屏区分做准备）。
  *
- * 借鉴模式取舍（格式对齐 session-ledger-store.ts 头注，review gen0 R1）：
+ * 借鉴模式取舍（格式对齐 session-ledger-store.ts 头注）：
  * - ✅ 确定性哈希取色（FNV-1a 32bit → 调色板下标）：同 key 恒同色，无配置面也稳定。
  * - ❌ 不带运行时随机/持久化记忆：纯函数无状态，刷新/重启不漂移（验收 R3-a）。
  * - ❌ 不读 projects.yaml 配置：色映射零配置面；未来注册表声明色升级 =
@@ -40,7 +40,7 @@ export const FALLBACK_COLOR = '#9ca3af'
 /** key 长度上限（超过按畸形处理；projects.yaml 的 key 都是短标识符）。 */
 const KEY_MAX_LEN = 64
 
-/** FNV-1a 32bit 哈希 + murmur3 终混（F2 修复，验收走查 gen0）：
+/** FNV-1a 32bit 哈希 + murmur3 终混：
  *  纯 FNV 对短 key 的低 4 位雪崩不足，真实注册表首对项目（suyou/sandbar）即同槽
  *  撞色（两 key FNV 后均 %10===2，实锤见走查报告）——用户点名的第一对就撞，
  *  「撞色风险」从概率声明变现实缺陷。加 murmur3 finalizer 改善低位雪崩；

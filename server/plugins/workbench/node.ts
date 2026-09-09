@@ -257,8 +257,7 @@ export function ticketContext(input: any): string {
  * 工单截图证据文件列表（t260831-08）：GET /wf/tickets/<id>/evidence 的数据源。
  * 读序与既有取图端点（handleTicketEvidence，t260829-02）一致：①主树归档
  * <base>/<id>/（base=SANDBAR_EVIDENCE_DIR env 或 <repo>/.suyou/evidence）；②泳道
- * <repo>/.worktrees/<id>/.suyou/screenshots/。取舍清单（t260831-08 方案 gen1
- * #1b/#1c/#1d）：目录级 containment（resolve 后 startsWith 各自数据根——词法纵深
+ * <repo>/.worktrees/<id>/.suyou/screenshots/。取舍结论（票 t260831-08，#1b/#1c/#1d）：目录级 containment（resolve 后 startsWith 各自数据根——词法纵深
  * 防御，配合 TICKET_ID_RE 不含 / 和 . 双保险）；枚举结果逐名过 isEvidenceFileName
  * （泳道目录可能被手塞怪名文件，不进列表即不渲染）；目录不存在→该候选空（软降级
  * 不报错，枚举语义没有 404，files=[] 即人话）。symlink 防线不带：截图目录内容来自
@@ -1859,7 +1858,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
   /**
    * 项目详情（票③面D，设置弹层数据面）：GET detail?key= —— spawn 安装器
    * `sandbar project list --json` 单点取票计数（tickets{open,closed,archived}）。
-   * 口径（create_plan gen1 R2a 定稿）：决策 8「读不 spawn CLI」指注册表读面
+   * 口径（票③面D 决策 8）：「读不 spawn CLI」指注册表读面
    * （上方 handleProjects 走 TS 装载器防两份漂移）；票计数属 Temporal 查询=CLI
    * 独有数据，spawn 恰是同源而非第二份。Temporal 不可达时 CLI 自己降级
    * （tickets_state/tickets_note），本路由原样透传由弹层显「—」提示（不红）。
@@ -1900,8 +1899,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
    * （CLI 单源）；CLI 拒收（非零退出含 stdout JSON 错误体）→ 409 原体透传，弹层就地显示。
    */
   async function handleProjectAdd(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    // dry_run 口径（arbitrate gen1 F1 定稿）：CLI `project add` 无 --dry-run 旗
-    // （--help 实证；补旗=跨写集改动，裁定项已上浮）——预检=弹层本地形状检查，
+    // dry_run 口径：CLI `project add` 无 --dry-run 旗（--help 实证；补旗=跨写集改动，
     // 路由收到 dry_run:true 时不 spawn、422 显式应答不支持（零现场变更保证）；
     // 深度校验（存在性/交叉/重复/legacy）在确认时由 CLI 执行并就地显示。
     await projectWriteRoute(req, res, 'add', (body, dryRun) => {
@@ -1918,7 +1916,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
    */
   async function handleProjectRemove(req: IncomingMessage, res: ServerResponse): Promise<void> {
     await projectWriteRoute(req, res, 'remove', (body, dryRun) => {
-      // F2 修正（arbitrate gen1）：key 是 --key 必选旗，非位置参数（CLI --help 实证）。
+      // key 是 --key 必选旗，非位置参数（CLI --help 实证）。
       const args = ['project', 'remove', '--key', String(body?.key ?? ''), '--json']
       if (dryRun) args.push('--dry-run')
       if (body?.purge_data) args.push('--purge-data')

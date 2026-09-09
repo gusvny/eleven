@@ -26,7 +26,7 @@ export function isDocsScope(v: unknown): v is DocsScope {
  * docs/notes 下 .md 相对路径白名单：
  * 段字符集 = 字母数字下划线 + 中文 + 连字符（\w 含下划线）；`/` 分段；必须 .md 结尾。
  * 显式拒绝：绝对路径、`..` 段、反斜杠、空格、全角符号、URL 编码残留（%xx）、空串。
- * （真库 31 篇全过——review gen0 实测；后续新增带空格/全角文件名会被拒收并进 skipped，可见。）
+ * （真库 31 篇全过；后续新增带空格/全角文件名会被拒收并进 skipped，可见。）
  */
 const DOC_REL_RE = /^(?:[\w\u4e00-\u9fff-]+\/)*[\w\u4e00-\u9fff-]+\.md$/
 

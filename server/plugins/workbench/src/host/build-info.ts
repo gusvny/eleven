@@ -10,7 +10,7 @@
  * KI-052 补刀：看守自身也会内存旧（405 现场=进程启动早于看守代码落盘）——根治面
  * 在客户端握手（src/client/stale-check.ts classifyHandshake 三元组判定矩阵），
  * 本模块为其供同一份清单、同一个指纹函数（同构性由「同一函数」保证，不靠两份
- * 清单人肉同步——gen0 打回①钉死口径）。
+ * 清单人肉同步）。
  *
  * 指纹算法：FNV-1a 64 位（纯 TS、BigInt 实现）。不用 node:crypto 的理由——本插件
  * 不设 node_modules、node-shims.d.ts 是最小手声明，自实现散列零新增类型面。陈旧
