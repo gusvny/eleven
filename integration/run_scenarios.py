@@ -27,9 +27,15 @@ Conventions:
   a fifth element "serial" — scenarios that must run one after another even
   inside a pool (process-shaped / fixed-port / pidfile-assumption families);
   entries not marked serial run in-pool at SANDBAR_POOL_CONC (default 4)
-  lanes. SANDBAR_CONC_POOLS (default "main,ro,browser-free") picks which
+  lanes. SANDBAR_CONC_POOLS (default "main:3,ro:3,browser-free:3") picks which
   pools get concurrency, with an optional per-pool width override ("name" =
-  SANDBAR_POOL_CONC lanes, "name:N" = N lanes). The engine pool deliberately
+  SANDBAR_POOL_CONC lanes, "name:N" = N lanes). The default pins width 3, one
+  below SANDBAR_POOL_CONC: final verification of campaign 3 saw a load flake
+  at full width 4 (capture-chat-e2e's 11-view walk lost two best-effort
+  views to element-wait timeouts under the 12-lane herd), and width 3 costs
+  zero wall — the serial engine lane (~280s) is the Phase-2 pole while the
+  widest other pool tops out around ~165s, so the fourth lane only bought
+  shadow headroom, not wall. The engine pool deliberately
   stays OUT of the default list (width 1): its scenarios boot docker stages,
   and campaign 3b verification showed a width-2 engine already flakes (three
   runs, three different victims: a 600s stage-up timeout, a fast env fail,
@@ -782,7 +788,7 @@ def main() -> int:
     conc_pools = {}
     for x in os.environ.get(
             "SANDBAR_CONC_POOLS",
-            "main,ro,browser-free").split(","):
+            "main:3,ro:3,browser-free:3").split(","):
         name, _, w = x.strip().partition(":")
         if not name:
             continue
