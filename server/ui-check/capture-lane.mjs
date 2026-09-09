@@ -356,7 +356,7 @@ export async function main() {
           // 凭据来源：capture-lane 已把用户真 .credentials.yaml 拷进临时 DSH_HOME
           // （见上方 copyFile 循环），控制台从这里读到真 key——准入与模型调用全通。
           // ⚠️ 不要在此处 env 硬设 DEEPSEEK_API_KEY 假值：env 优先级高于
-          // .credentials.yaml，会把真 key 遮蔽成假 key（t260831-02 第 13 轮实锤：
+          // .credentials.yaml，会把真 key 遮蔽成假 key（票 t260831-02 实锤：
           // 会话激活拿假 key 连 provider 必败，data-phase 恒 hero）。
         },
         detached: true,

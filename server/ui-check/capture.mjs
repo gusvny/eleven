@@ -300,7 +300,7 @@ async function seedSessions(page, url) {
 // 出厂 ConversationRoot 的 data-phase 取值是 hero/settling/active（无 "chat"），
 // 打开会话成功后根元素应翻到 data-phase="active"——以此为视图变化断言，防同帧假成功。
 async function navigateToChat(page, allowSeed = false) {
-  // 浏览器 console 回执（t260831-02 第 10 轮审读要求）：chat 打不开时把页面侧
+  // 浏览器 console 回执（票 t260831-02 审读结论）：chat 打不开时把页面侧
   // console/pageerror 带回来定位——没有它，staging 层真因只能靠猜。
   const browserConsole = [];
   page.on("console", (m) => {
@@ -347,7 +347,7 @@ async function navigateToChat(page, allowSeed = false) {
     anchor = "项目会话区 tab 锚（[data-wb-psess-tab]）";
   }
   // 等 active；窗口期内若出厂弹「Add an API key」准入模态（隔离台无 key 实测会弹，
-  // 遮罩挡会话激活——t260831-02 第 8 轮目视实锤），点「Configure later」让路后继续等。
+  // 遮罩挡会话激活——票 t260831-02 目视实锤），点「Configure later」让路后继续等。
   // 隔离台带种子消息：模型往返有延迟，预算放宽（env 可调，缺省 90s）。
   const activeBudgetMs = Number(process.env.SANDBAR_UI_CAPTURE_CHAT_ACTIVE_MS || (allowSeed ? 90000 : 25000));
   const deadline = Date.now() + activeBudgetMs;
@@ -511,7 +511,7 @@ async function forceClick(locator, timeoutMs = 5000) {
 }
 
 /** 准入模态关闭（t260901-03 Step ①）：出厂「Add an API key」准入模态在隔离台全新
- * DSH_HOME 下会弹并盖住后续交互/截图（t260831-02 第 8 轮目视实锤）——点「Configure
+ * DSH_HOME 下会弹并盖住后续交互/截图（票 t260831-02 目视实锤）——点「Configure
  * later」（无则首个可用钮/Escape）后轮询等 [role=dialog] 消失（≤8s）。只读导航语义：
  * 只点关闭/稍后，不提交任何配置。返回 null=本就无模态，否则人话锚点。
  * @throws {Error} 让路后 dialog 仍残留（遮罩拦截会污染后续一切视图与截图）。 */
@@ -542,7 +542,7 @@ async function dismissAdmissionModal(page) {
 }
 
 /** 首屏就绪：出厂「Internal Testing Notice」（Continue 按钮）在全新 DSH_HOME 首次
- * 打开时弹出并盖住其后全部视图（t260829-07 review 第 2 轮实锤）——先等它出现则
+ * 打开时弹出并盖住其后全部视图（票 t260829-07 实锤）——先等它出现则
  * 点掉（Continue=关闭提示框，只读导航语义，不提交任何表单），超时未出现则继续。
  * reload 后可能再弹，每个视图入口前都可安全重复调用。返回人话锚点或 null。 */
 async function dismissNotice(page) {
@@ -606,11 +606,11 @@ async function openNewTicketModal(page) {
 // 相同 = 导航没生效的同帧假验收，大声报错退出非 0。例外：console-refresh.png
 // **不在 pairwise 袋里**——refresh 视图的回归语义是「刷新回得去」，reload 后回到
 // default 同款首页、字节相同是正确行为（首页确定性渲染时更然），旧闸把它判死是
-// 假阳性（integration_review t260831-02 第 5 轮实锤）。它的专属断言在 main 的
+// 假阳性（票 t260831-02 实锤）。它的专属断言在 main 的
 // 刷新回归段：存在、非空白，回得去时与 default 一致（只加分不拦路）。
 const REFRESH_SHOT = "console-refresh.png";
 // sessions 视图是「断言视图」：不导航，DOM 断言在视图函数内完成——截图与 default
-// 同帧是正确行为（integration_review t260831-02 第 7 轮实锤判明），摘出 pairwise 袋。
+// 同帧是正确行为（票 t260831-02 实锤判明），摘出 pairwise 袋。
 const SESSIONS_SHOT = "console-sessions.png";
 async function assertDistinct(shots) {
   const { createHash } = await import("node:crypto");

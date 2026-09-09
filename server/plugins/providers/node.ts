@@ -116,8 +116,8 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 
 /** 取 provider 的模型 id 清单（供前端 datalist 下拉）。
  *  优先级：① dsh-llm 运行时注册表 listModels（catalog + settings 手配合并后的真值，
- *  pi-ai 适配器 1660 实现；旧版从 settings JSON 上找 piProvider.getModels 是断的——
- *  settings 值是纯 JSON 没有运行时对象，恒空，260828 修好）；
+ *  pi-ai 适配器 1660 实现；从 settings JSON 找 piProvider.getModels 是断的——
+ *  settings 值是纯 JSON 没有运行时对象，恒空）；
  *  ② settings JSON 的 models 段（手配 route 如 scnet 直接有）；
  *  ③ 空数组（前端退化为自由文本，原降级契约保留）。 */
 async function modelsOf(ctx: any, id: string, prof: any): Promise<string[]> {
