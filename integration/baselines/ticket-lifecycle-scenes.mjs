@@ -1,7 +1,7 @@
 /**
  * Scenario library for the ticket-lifecycle E2E baseline (group 5).
  *
- * What is real: the Docker test Temporal (17233 / namespace suyou-test), a
+ * What is real: the Docker test Temporal (17233 / namespace suyou-test), a  (naming-compat)
  * real per-ticket worker (worker.py on a dedicated queue, WATCH self-exit),
  * the real engine chain (prepare_workspace -> create_plan <-> review_plan ->
  * implement || design_integration_tests -> run_integration_tests -> arbitrate
@@ -21,14 +21,14 @@
  *
  * Determinism levers: the agent stage returns a cached result when the result
  * file already exists (agent_activities.py idempotent cache path). Scenarios
- * pre-seed `.suyou/stage_arbitrate_gen<N>.json` (summary carries verdict=pass)
+ * pre-seed `.suyou/stage_arbitrate_gen<N>.json` (summary carries verdict=pass)  (naming-compat)
  * while the ticket is mechanically busy in run_integration_tests — the stub
  * brain never produces verdict= on its own, and that is exactly scene D's
  * round-limit trigger.
  *
  * Safety: same write-guard trio as ticket-validate.mjs (target env unset ->
  * env_fail; explicit production default -> FAIL; otherwise pinned to
- * 17233/suyou-test).
+ * 17233/suyou-test).  (naming-compat)
  */
 
 import { spawn, spawnSync } from 'node:child_process'
@@ -147,7 +147,7 @@ export async function ensureTestTemporal(t) {
  * Write-guard three states (same contract as ticket-validate.mjs): returns
  * 'run' | 'env_fail' | 'fail'. Target env unset = env_fail (ticket t260904-12
  * three-state contract: a missing environment uses the env red word, never a
- * skip word); explicitly pointing at production = fail; any other unclear
+ * "skipped" outcome word); explicitly pointing at production = fail; any other unclear
  * target = fail. Never start when the target is unclear.
  */
 export function writeGuard() {
@@ -663,7 +663,7 @@ print(json.dumps({"merged": merged, "added": added, "dropped": dropped}))`], { t
  */
 export async function cleanupTicket(t, api, worker, tid) {
   // Probe the terminal state first; when the probe fails (query times out —
-  // during a blocked retry storm queries can starve, 260909 proven) never skip
+  // during a blocked retry storm queries can starve, 260909 proven) never bypass
   // cancel: the old implementation skipped everything on one query exception,
   // cancel never went out, and the worker could only be SIGKILLed at the 90s
   // deadline.

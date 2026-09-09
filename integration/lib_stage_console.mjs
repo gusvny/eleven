@@ -286,15 +286,15 @@ async function seedFixtures(st, fixturesHost) {
     throw new Error(`fixture ticket drain failed: ${(drainOut.stderr || '').slice(-200)}`);
   }
   // 3. Evidence images (the drawer evidence leg's data source; idempotent =
-  // skip files that already exist). The evidence route reads per ticket id
-  // (<ticket-id>/.suyou/evidence/<file>), independent of whether a workflow
+  // omit files that already exist). The evidence route reads per ticket id
+  // (<ticket-id>/.suyou/evidence/<file>), independent of whether a workflow  // naming-compat
   // has a worker. Give every fixture ticket an image: row order is not
   // guaranteed, and clicking the wrong row means that ticket has no evidence
   // → the drawer image leg times out.
   // Land in two places: the repo root (the default anchor / no-project API
   // surface) + each fixture project root (after KI-057 the drawer's apiGet
   // always carries ?project=, and evidence enumeration anchors at
-  // <project-root>/.suyou/evidence — with only the repo root, the project
+  // <project-root>/.suyou/evidence — with only the repo root, the project  // naming-compat
   // surface is empty and the drawer evidence section does not render at all,
   // proven when the stage was rebuilt on 260908).
   for (const sp of seedProjects) {

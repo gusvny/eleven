@@ -8,7 +8,7 @@
  * Background (review_plan round 1, P2): LaneDiagram (index.tsx) has zero
  * callers across src; the detail page really renders D2Stepper/d2StatusLine.
  * This ticket also deletes the component and its .wb-lane* dedicated CSS and
- * rebuilds the lib artifacts — skip the build and the injected bundle is
+ * rebuilds the lib artifacts — omit the build and the injected bundle is
  * still the old one carrying the dead code.
  *
  * Coverage:

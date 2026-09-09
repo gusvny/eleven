@@ -3532,7 +3532,7 @@ def engine_venv_python(repo_root) -> Optional[pathlib.Path]:
     fallback chain).
 
     The new path server/engine/.venv wins; it falls back to the old path
-    server/dsh/temporal-poc/.venv (one migration-window round — the old path lives on for
+    server/dsh/temporal-poc/.venv (engine-venv-compat fallback; one migration-window round — the old path lives on for
     a while before and after the main tree's .venv is physically moved; once the fallback
     is removed this function degenerates to a single path).
     Malformed input fails closed: a nonexistent / non-directory repo_root, a candidate

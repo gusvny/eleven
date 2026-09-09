@@ -75,7 +75,7 @@ function detect(src) {
 
   // G2 force 取证守卫：语义注释 + force: true 点击通路。
   const force = []
-  if (!src.includes('若 force 后抽屉仍不开=产品红如实落')) force.push('force 取证守卫注释（产品红如实落口径）缺失')
+  if (!src.includes('still does not open after force, that is a real product red')) force.push('force 取证守卫注释（产品红如实落口径）缺失')
   if (!/force: true/.test(src)) force.push('force: true 点击通路缺失')
   violations['G2 force 取证守卫'] = force
 
@@ -108,7 +108,7 @@ const realV = detect(src)
 const selfProof = []
 const mutations = [
   ['G1 诚实红定性标签', src => src.replace(/const PRE_EXISTING_TAG = [^\n]+/, 'const __TAG_REMOVED = ""')],
-  ['G2 force 取证守卫', src => src.replace('若 force 后抽屉仍不开=产品红如实落', '（注释占位）')],
+  ['G2 force 取证守卫', src => src.replace('still does not open after force, that is a real product red', '（注释占位）')],
   ['G3 三态执行契约', src => src.replace(/SUMMARY pass=\$\{p\}[^\n]*/, 'console.log("SUMMARY done")')],
   ['G4 T1-T7 族腿清点', src => src.replaceAll('T7 zero pageerror/console.error', 'T7 hygiene')],
 ]

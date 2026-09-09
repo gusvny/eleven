@@ -389,7 +389,7 @@ async function openDetail(page, id, { force = false } = {}) {
   if (!(await waitFor(async () => (await card.count()) > 0, 8000))) {
     throw new Error(`row ${id} not rendered`)
   }
-  // force only relaxes how the click reaches the target (skipping
+  // force only relaxes how the click reaches the target (bypassing
   // actionability's stable wait); the behavior assertion is unchanged (the
   // drawer must really open). T5b-only: after hostile traffic, the
   // high-frequency presence-poll rerenders keep boundingBox jittering so

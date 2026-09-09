@@ -93,7 +93,7 @@ DEFAULT_CONSOLE_PORT, DEFAULT_TEMPORAL_PORT, DEFAULT_TEMPORAL_UI_PORT = 3199, 17
 # The band base sits below the common kernel ephemeral ranges (Linux 32768+ /
 # macOS 49152+) — structurally safe;
 # at runtime ip_local_port_range is read as well to strip overlap (unreadable =
-# skip that defense layer, no single point of dependence).
+# bypass that defense layer, no single point of dependence).
 BAND_BASE, BAND_STEP, BAND_COUNT = 21000, 10, 400
 SLOT_OFFSET = {"console": 0, "temporal": 1, "ui": 2}
 
@@ -646,7 +646,7 @@ def _bootstrap_lane_nm():
     (profile and profile-headless carry the same five links in node_modules;
     the cordis.patch.yml comments decree "keep the two identical") — building
     only web and missing headless is exactly the adversarial shape the
-    t260907-05 farm scenario pinned. Idempotent: skip when the links exist.
+    t260907-05 farm scenario pinned. Idempotent: a no-op when the links exist.
     When a target plugin directory is absent (implementation not landed), do
     not fabricate it — hand the environment red to the caller.
     """
@@ -692,7 +692,7 @@ def default_repo_dir():
         for pkg in ("sandbar-admin-ui", "sandbar-workbench", "sandbar-knowledge",
                     "sandbar-providers", "sandbar-temporal-tools"))
     # Completeness test = all ten links across the two variants: the half-built
-    # state (profile present, headless missing) used to short-circuit and skip
+    # state (profile present, headless missing) used to short-circuit and bypass
     # the bootstrap (the t260907-05 farm scenario's profile-headless five-link
     # red was exactly this)
     if nm_complete or _bootstrap_lane_nm():

@@ -8,7 +8,7 @@
 //  - the trailing source tag `> 来源立项：metrics`
 // Missing document = FAIL (this test guards deliverable existence and never
 // waves a missing environment through; the three-state contract §7.3 has no
-// legacy skip semantics inside the gate)
+// legacy bypass semantics inside the gate)
 
 import { readFileSync, existsSync } from 'node:fs';
 

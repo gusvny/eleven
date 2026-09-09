@@ -2,7 +2,7 @@
 // visible in the ticket drawer.
 //
 // What it locks (black box, user view):
-//   QA screenshots (lane .suyou/screenshots/*.png) must be visible in the
+//   QA screenshots (lane .suyou/screenshots/*.png) must be visible in the  // naming-compat
 //   ticket detail drawer. The user-visible contract after the fix:
 //     - GET /sandbar-workbench/api/wf/tickets/<id>/evidence lists png files
 //       (archive .suyou/evidence/<id>/ first, then lane screenshots);  // naming-compat
