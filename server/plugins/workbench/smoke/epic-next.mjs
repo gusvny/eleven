@@ -240,7 +240,7 @@ roles:
     }
 
     process.env.SANDBAR_EPIC_NEXT_DIR = join(tmp, 'jobs')
-    process.env.DSH_HOME = join(tmp, 'dsh-home')  // 空目录：profile/creds/settings 拷贝全部 no-op
+    process.env.DSH_HOME = join(tmp, 'dsh-home')  // empty dir: the profile/creds/settings copies are all no-ops
     await mkdir(process.env.DSH_HOME, { recursive: true })
 
     /* --- B1 STUB mode full chain --- */

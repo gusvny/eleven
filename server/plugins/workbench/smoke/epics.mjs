@@ -65,8 +65,8 @@ try {
     await mkdir(dir, { recursive: true })
     await writeFile(join(dir, 'demo-epic.md'), EPIC_MD, 'utf8')
     await writeFile(join(dir, 'aaa.md'), '# 立项单：aaa\n\n| 状态 | 已归档 |\n| 立项日期 | 2026-08-01 |\n', 'utf8')
-    await writeFile(join(dir, 'README.md'), '# 说明\n', 'utf8')       // 形状不合（大写）不入列
-    await writeFile(join(dir, 'notes.txt'), '不是立项单\n', 'utf8')   // 非 .md 不入列
+    await writeFile(join(dir, 'README.md'), '# 说明\n', 'utf8')       // wrong shape (uppercase) → not listed
+    await writeFile(join(dir, 'notes.txt'), '不是立项单\n', 'utf8')   // not a .md → not listed
     const list = await listEpics(dir)
     ok(list.length === 2 && list[0].code === 'aaa' && list[1].code === 'demo-epic',
       '只收形状合法的 *.md，按代号排序')
@@ -212,7 +212,7 @@ sys.exit(1)
     const repoE = join(tmp, 'repo-e')
     await mkdir(join(repoE, 'notes', 'epics'), { recursive: true })
     await writeFile(join(repoE, 'notes', 'epics', 'demo-epic.md'), EPIC_MD, 'utf8')
-    await writeStub(repoE, { listPayload: {}, listFails: true })   // ticket list 分支直崩（stderr+exit 2，非 JSON）
+    await writeStub(repoE, { listPayload: {}, listFails: true })   // the ticket-list branch fails outright (stderr + exit 2, non-JSON)
     const r1d = setup(repoE)
     r = await call(r1d.prefixEpics, '/sandbar-workbench/api/epics/demo-epic/tickets')
     ok(r.status === 200 && r.body.ok === true && r.body.result.degraded === true

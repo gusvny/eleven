@@ -13,17 +13,17 @@
  *      pre-rewrite original text, picking the newest mtime among backups with the <code>-
  *      prefix — a shared global directory, picking an old backup would be a false green),
  *      note add row (inserted after the status row) / clear / leave, closeEpic thin wrapper
- *      (status=已完结 (done) without touching the note);
+ *      (status=「已完结」 (done) without touching the note);
  *   D. route POST /epics/<code>/status: 200 / 400 malformed JSON / 400 missing status / 422
  *      illegal enum / 422 malformed note / 405 GET / 404 unknown code; close route
- *      regression (response shape unchanged, status=已完结 ∈ EPIC_STATUSES, backup content =
+ *      regression (response shape unchanged, status=「已完结」 ∈ EPIC_STATUSES, backup content =
  *      pre-rewrite original text, close does not touch the note column);
  *   E. frontend pure functions: filterEpicsByStatus (all / single value / unknown value
  *      console.warn returns empty / empty list), isEpicStatusValue, EPIC_STATUS_OPTIONS
  *      consistent with the host EPIC_STATUSES;
  *   F. existing-data migration assertions: all seven real notes/epics epics have status ∈
  *      EPIC_STATUSES, the note column exists, spot checks on key mappings (dsh-generalize=
- *      archived with a note containing sandbar; sandbar=已立项（执行中）(approved, in progress)).
+ *      archived with a note containing sandbar; sandbar=「已立项（执行中）」 (approved, in progress)).
  * All stubs/fixtures reproduce locally (SANDBAR_EPICS_DIR points at a temp dir; fixture
  * codes carry a zz- prefix so /tmp backups cannot collide), no real external sources.
  */
@@ -120,7 +120,7 @@ try {
         const s = await stat(p)
         if (best === null || s.mtimeMs > best.mtimeMs) best = { p, mtimeMs: s.mtimeMs }
       }
-    } catch { /* 目录不存在视为无备份 */ }
+    } catch { /* a missing directory counts as no backup */ }
     return best === null ? null : await readFile(best.p, 'utf8')
   }
   {

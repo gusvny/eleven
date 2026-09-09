@@ -4,11 +4,11 @@
  * Run: node smoke/epic-ui.mjs (node >= 22.18 native type-stripping, imports .ts directly).
  * Covers:
  *   A. src/client/epics-model.ts pure functions:
- *      bucketOf (closed/verified->已完成 (done), terminated->已终止 (terminated), everything
- *      else including unknown->进行中 (in progress)); sortBucketKeys (in progress -> done ->
+ *      bucketOf (closed/verified->「已完成」 (done), terminated->「已终止」 (terminated), everything
+ *      else including unknown->「进行中」 (in progress)); sortBucketKeys (in progress -> done ->
  *      terminated -> unknown in dictionary order); sortEpicTickets (in progress first,
  *      closed last, each by id descending; empty array / missing fields tolerated);
- *      epicBadgeOf three states (has code / empty string / undefined -> 未归档 (not archived),
+ *      epicBadgeOf three states (has code / empty string / undefined -> 「未归档」 (not archived),
  *      code=null); epicCreateNote (contains the code + the do-not-type-by-hand hint).
  *   B. POST /sandbar-workbench/api/wf/tickets (node.ts handleTickets method branch +
  *      handleTicketCreate, stub admin.py + mock webServer/req/res, same pattern as section C

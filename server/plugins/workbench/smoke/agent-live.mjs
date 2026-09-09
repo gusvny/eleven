@@ -227,7 +227,7 @@ sys.exit(1)
       { type: 'step/start', seq: 9, time: 9000, data: {} },
     ]
     const jsonl = events.map(e => JSON.stringify(e)).join('\n')
-      + '\n' + '{bad json line' + '\n'   // 畸形行：坏 JSON 跳过不崩
+      + '\n' + '{bad json line' + '\n'   // malformed line: bad JSON is skipped without crashing
     await writeFile(join(tmp, 'fixture-rounds.jsonl'), jsonl, 'utf8')
     await execFileP('zstd', ['-q', '-f', join(tmp, 'fixture-rounds.jsonl'), '-o', sessPath])
 

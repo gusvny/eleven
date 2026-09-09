@@ -191,8 +191,8 @@ sys.exit(1)
     await mkdir(join(sessRoot, slug, 't-d-integration'), { recursive: true })
     const oldFile = join(sessRoot, slug, 't-d-developer', 'session.jsonl.zstd')
     const newFile = join(sessRoot, slug, 't-d-integration', 'session.jsonl.zstd')
-    await writeFile(oldFile, 'x'.repeat(4096), 'utf8')   // 4KB 死会话
-    await writeFile(newFile, 'y'.repeat(1536), 'utf8')   // 1.5KB 活会话
+    await writeFile(oldFile, 'x'.repeat(4096), 'utf8')   // 4KB dead session
+    await writeFile(newFile, 'y'.repeat(1536), 'utf8')   // 1.5KB live session
     const old = new Date(Date.now() - 3600_000)
     await utimes(oldFile, old, old)
     const r = await _sessionKbFast(sessRoot)

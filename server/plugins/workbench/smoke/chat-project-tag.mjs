@@ -126,7 +126,7 @@ section('A applyProjectTags：施加/幂等/回收/排除/畸形')
   const rowA = doc.addUserRow('【派活指令】工单 t260903-07 干活')
   const rowB = doc.addUserRow('工单 t260901-15 的事')
   const rowPlain = doc.addUserRow('随便聊聊，没有工单引用')
-  const asst = doc.addAssistantRow('工单 t260903-07 的回复') // assistant 行不装饰（R7 范围）
+  const asst = doc.addAssistantRow('工单 t260903-07 的回复') // assistant rows are not decorated (R7 scope)
   const scoped = doc.addUserRow('工单 t260903-07 在自有作用域内', { scope: true })
 
   let n = applyProjectTags(doc, map)
@@ -142,7 +142,7 @@ section('A applyProjectTags：施加/幂等/回收/排除/畸形')
   rowA.setAttribute(PROJTAG_ATTR, 'suyou')
   ok(applyProjectTags(doc, map) === 0, '先查再设：同值不重写')
 
-  n = applyProjectTags(doc, new Map()) // 映射清空（如项目下线）
+  n = applyProjectTags(doc, new Map()) // mapping emptied (e.g. the project was retired)
   ok(rowA.getAttribute(PROJTAG_ATTR) === null && rowB.getAttribute(PROJTAG_ATTR) === null, '映射消失 → 回收属性')
   ok(n === 2, `回收计 2 行（got ${n}）`)
 
@@ -253,7 +253,7 @@ section('C startProjectIndexFallback：成功/失败重试/畸形响应')
   _resetProjectTagIndex()
   let extCalls = 0
   stop = startProjectIndexFallback({ fetchImpl: goodFetch, initialDelayMs: 1, retryIntervalMs: 2, maxAttempts: 50 })
-  publishProjects([{ key: 'x', dirs: [] }]) // 侧栏外部发布
+  publishProjects([{ key: 'x', dirs: [] }]) // published from outside the sidebar
   await tick(20)
   extCalls = calls
   await tick(20)
@@ -293,7 +293,7 @@ section('D startChatProjectTag：挂载/scan/stop 零残留/失联停手')
   h.stop()
   ok(doc.querySelector('style[data-wb-projtag-style]') === null, 'stop：style 摘除')
   ok(doc.querySelectorAll(`[${PROJTAG_ATTR}]`).length === 0, 'stop：自有属性全摘（出厂树恢复原样）')
-  h.stop() // 幂等
+  h.stop() // idempotent
   ok(true, 'stop 幂等不炸')
 
   // Lost document -> stop and stay silent
@@ -320,7 +320,7 @@ section("E startChatProjectTagEffect：effect 形态入口（F1 接线防呆回�
   cleanup()
   ok(doc3.querySelector('style[data-wb-projtag-style]') === null
     && doc3.querySelectorAll(`[${PROJTAG_ATTR}]`).length === 0, 'cleanup=全终态回收：style+属性零残留')
-  cleanup() // 幂等
+  cleanup() // idempotent
   ok(true, 'cleanup 幂等不炸')
 }
 

@@ -117,7 +117,7 @@ try {
     ok(exPaths.includes('src/fresh.ts'), 'untracked 新文件仍在变更集')
     ok(exPaths.includes('src/gone.ts'), '删除文件仍在变更集')
     // Also excluded on the committed-diff side: a tracked file under .dsh/ is excluded via git pathspec
-    const committedNames = exPaths.filter(p => !['src/fresh.ts'].includes(p)) // fresh 是 untracked
+    const committedNames = exPaths.filter(p => !['src/fresh.ts'].includes(p)) // fresh is untracked
     ok(committedNames.every(p => !p.startsWith('.dsh/') && !p.startsWith('.suyou/')), 'committed 侧也无引擎文件')
   }
 

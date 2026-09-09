@@ -56,8 +56,8 @@ try {
       { at: '2026-08-28T10:00:00', stage: 'create_plan', state: 'running' },
       { at: '2026-08-28T11:00:00', stage: 'implement', state: 'running' },
       { at: '2026-08-28T12:00:00', stage: 'review_plan', state: 'running' },
-      { at: '2026-08-28T13:00:00', stage: 'implement', state: 'running' }, // rework 重入
-      { at: '2026-08-28T14:00:00', stage: 'implement', state: 'blocked' }, // 非 running 不成窗
+      { at: '2026-08-28T13:00:00', stage: 'implement', state: 'running' }, // rework re-entry
+      { at: '2026-08-28T14:00:00', stage: 'implement', state: 'blocked' }, // non-running does not open a window
     ]
     const w = stageWindowsFromTimeline(tl)
     ok(w.length === 4, `4 条 running → 4 窗（实得 ${w.length}）`)
@@ -103,7 +103,7 @@ try {
       { type: 'assistant/message', seq: 5, time: T1 + 2000, data: { usage: { inputTokens: 200, outputTokens: 20 } } },
       // A pile of malformed input: bad JSON, missing usage fields, non-numeric usage, no time, non-object usage — none crash, none over-count
       { type: 'assistant/message', seq: 6, time: T1 + 3000, data: { usage: { inputTokens: 'abc', outputTokens: null } } },
-      { type: 'assistant/message', seq: 7, data: { usage: { inputTokens: 5 } } }, // 无 time → 不落段
+      { type: 'assistant/message', seq: 7, data: { usage: { inputTokens: 5 } } }, // no time → no segment recorded
     ]
     const file1 = join(tmp, 'f1.zstd')
     await zpack(ev1, file1)

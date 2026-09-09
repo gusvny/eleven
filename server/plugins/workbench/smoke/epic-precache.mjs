@@ -11,8 +11,8 @@
  *      counts as a miss / epic mismatch counts as a miss / done shape hits / done with empty
  *      summary counts as a miss / malformed code shape counts as a miss / missing file
  *      counts as a miss;
- *   C. closeEpic: rewrites the "状态" table row to 「已完结」+ /tmp backup before writing +
- *      the rest of the original file untouched / no "状态" row 422 / malformed code 400
+ *   C. closeEpic: rewrites the 「状态」 table row to 「已完结」+ /tmp backup before writing +
+ *      the rest of the original file untouched / no 「状态」 row 422 / malformed code 400
  *      (escape guard) / unknown code 404.
  */
 
@@ -37,7 +37,7 @@ const ROWS = [
   { id: 't-demo-02', closed: false },
 ]
 const EXPECT_STATE_KEY = '703be9fa425d23a851b7aa8c060dad56f1570b37'
-const CUR_KEY = stateKeyFromRows(ROWS, 't-demo-02')  // 预跑口径：当前票（本票）强制 closed
+const CUR_KEY = stateKeyFromRows(ROWS, 't-demo-02')  // pre-run rule: the current ticket (this one) is forced closed
 const WFS = ['dev-lane', 'content-pipeline', 'proofread', 'regression', 'cleanup']
 
 const EPIC_MD = `# 立项单：demo-epic
@@ -139,7 +139,7 @@ section('C. closeEpic（结项写函数）')
   ok(/\|\s*状态\s*\|\s*已完结\s*\|/.test(after), '改写落盘（仅状态行）')
   ok(after.includes('把建议链路跑顺') && after.includes('| 代号 | `demo-epic` |'),
     '其它内容原样保留（外科改写，不重排）')
-  const backupDir = '/tmp/epic-close-backup'  // 与 closeEpic 同一常量（规格字面「备份 /tmp」）
+  const backupDir = '/tmp/epic-close-backup'  // same constant closeEpic uses (the spec's literal 「备份 /tmp」)
   const backups = (await readdir(backupDir)).filter((f) => f.startsWith('demo-epic-'))
   ok(backups.length >= 1, '写前 /tmp 备份存在（可回滚）')
   const backupText = await readFile(join(backupDir, backups[backups.length - 1]), 'utf8')
