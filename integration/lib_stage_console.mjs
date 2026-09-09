@@ -166,8 +166,17 @@ export async function ensureStageConsole({ services = 'full', project = TREE_PRO
       body: JSON.stringify({ key: SEED.key, name: SEED.name, dir, dry_run: false }),
     }).catch(() => {});
   } catch { /* seeding failure does not block supply: each scenario names it as env_fail */ }
-  seedFixtures(st, FIXTURES_HOST).catch((e) =>
-    console.warn(`[stage-console] fixture seeding failed (scenario fixture legs will name env_fail): ${e}`));
+  // 260909 提速战役③终验 run K 实锤：冷台首跑时 seedFixtures 曾 fire-and-
+  // forget——播种在途（未失败）而场景已开跑，先手的链头场景断言夹具票行
+  // 必 env_fail（11 连ENV_FAIL即此族；热台被存量掩住，冷暴露随锁根归一
+  // 首次现形）。语义不变（播种失败仍不阻断供给、由各场景 fixture 腿点名
+  // env_fail），只把「在途竞态」收敛为「完成才放行」。并发 ensure 下同票
+  // 竞建由 create 后的重列兜底：对方建成=本方顶补成功（幂等口径不变）。
+  try {
+    await seedFixtures(st, FIXTURES_HOST);
+  } catch (e) {
+    console.warn(`[stage-console] fixture seeding failed (scenario fixture legs will name env_fail): ${e}`);
+  }
   return {
     base: `http://127.0.0.1:${st.ports.console}`,
     project: st.project,
@@ -246,7 +255,14 @@ async function seedFixtures(st, fixturesHost) {
         body: '测试台夹具票：供集成场景行卡/抽屉/tag 断言使用，人手勿操作',
         allow_empty_write_set: true,
       }));
-      if (createOut.status !== 0) throw new Error(`fixture ticket ${fid} create failed: ${createOut.stderr?.slice(-200)}`);
+      if (createOut.status !== 0) {
+        // 并发 ensure 下同票竞建（run K 供给在途竞态修复后，多场景 t=0 齐
+        // 调 ensure，播种不再 fire-and-forget）：本方 create 撞上「workflow
+        // id 已存在」即对方刚建成——重列确认在场则视同本方顶补成功，幂等
+        // 口径不变；真失败（对方也没建成）才抛。
+        if (listIds(sp.key).has(fid)) continue;
+        throw new Error(`fixture ticket ${fid} create failed: ${createOut.stderr?.slice(-200)}`);
+      }
     }
   }
   // 2a. Clean up the old short-id fixtures: integfix1/2 are outside the tag

@@ -16,7 +16,9 @@ UT 随实现重构同批重写，不留指向退役路径的恒红假网，KI-03
 - 档位锁外部占用 → 分配滑档；
 - docker 缺席 / 测试镜像缺席 / compose up 失败（半途死）→ 诚实环境红 + 就地清场；
 - 畸形输入全电池：project/端口旋钮/目录/半指定——逐条点名检查项、零副作用；
-- ensure：健康复用（reused）+ 半残拆重起；
+- ensure：健康复用（reused）+ 半残拆重起 + 同项目并发 ensure 互斥（run K 雷群
+  回归锚：双绿、恰一方复用、全窗口单起台——先到先得独占起台，后来者持锁
+  等待后双查健康）；
 - bench.py 守卫回归（assert_not_production 红绿）。
 
 跑法：python3 integration/tests/test_stage_docker.py（stdlib-only，秒级，无 docker）。
@@ -97,6 +99,8 @@ def main():
                 {"project": proj, "services": services, "ports": ports,
                  "env": {k: v for k, v in os.environ.items() if k.startswith("SANDBAR_TEST_")
                          or k in ("SANDBAR_TARGET_HOST", "SANDBAR_PROJECTS_DIR")}}))
+            cnt = pathlib.Path(STATE, "up-count")
+            cnt.write_text(str(int(cnt.read_text()) if cnt.exists() else 0) + " ")
             log = open(pathlib.Path(STATE, "up.log"), "a")
             subprocess.Popen([sys.executable, __file__, "--hold", json.dumps(ports)],
                              stdout=log, stderr=log, start_new_session=True,
@@ -361,6 +365,26 @@ class EnsureTest(StageCLIBase):
         st3 = json.loads(p2.stdout.strip().splitlines()[-1])
         self.assertNotIn("reused", st3, "半残台应拆重起而非复用")
         self.cli("down", "--project", "ute")
+
+    def test_concurrent_ensure_same_project_single_boot(self):
+        """run K 雷群回归锚：冷台同项目并发 ensure 互斥——先到先得独占起台，
+        后来者持锁等待后双查健康直接复用；双绿且全窗口只起一次台。"""
+        ps = [subprocess.Popen(
+            [sys.executable, str(INTEG / "stage_docker.py"), "ensure",
+             "--project", "utc", "--services", "dsh", "--timeout", "60"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=self.env()) for _ in range(2)]
+        outs = [p.communicate() for p in ps]
+        for p, (out, err) in zip(ps, outs):
+            self.assertEqual(p.returncode, 0, "并发 ensure 应双绿：%s %s" % (out, err))
+        states = [json.loads(out.strip().splitlines()[-1]) for out, _ in outs]
+        self.assertEqual(len([s for s in states if s.get("reused")]), 1,
+                         "恰一方复用（实得 %s）" % states)
+        self.assertEqual(states[0]["ports"], states[1]["ports"], "互斥后复用同台同端口")
+        cnt = pathlib.Path(self.state, "up-count")
+        self.assertEqual(len(cnt.read_text().split()), 1,
+                         "全窗口只起一次台（实得 %r 次）" % cnt.read_text())
+        self.cli("down", "--project", "utc")
 
 
 class BenchGuardRegression(unittest.TestCase):

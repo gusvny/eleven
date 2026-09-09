@@ -862,14 +862,44 @@ def do_ensure(project, services_list, opts, timeout, keep=False):
         state = dict(state)
         state["reused"] = True
         return state
-    if state and keep and residue_containers(project):
-        # --keep: running but unhealthy — do not tear it down (another lane may
-        # be using it in the same window); report the environment red honestly
-        raise StageError("供给台 %s 在跑但不健康（ports=%s）；--keep 语义不拆在跑台——"
-                         "人工核查或去旗重跑" % (project, state.get("ports")), kind="env")
-    if state:
-        do_down(project)
-    return do_up_public(project, services_list, opts, timeout)
+    # 冷/半残路径按项目串行化（260909 终验 run K 雷群实锤：锁根归一后冷台
+    # 首跑，跨池多路 ensure 齐头抢起同一项目，各自滑档起台 + 播种互踩，
+    # 11 连 ENV_FAIL）。flock 互斥只在共享锁根下成立——ensure 锁与档位锁同
+    # 根，纪律见 lock_root()。先到先得者独占起台，后来者持锁等待后双查
+    # 健康（TOCTOU 闭合，等同并发双起的档位避让先例）：等待期间先到者已
+    # 起好台则直接复用。等待预算=调用方 timeout（供给层 600s 帽），超时=
+    # 诚实环境红，绝不裸等超执行器单场景 900s 帽。
+    lock_path = lock_root() / ("ensure-%s.lock" % project)
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+    t0 = time.time()
+    try:
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.time() - t0 >= timeout:
+                    raise StageError(
+                        "供给台 %s ensure 互斥等待超时（%ds）：同项目并发 ensure 未在"
+                        "预算内完成——疑似起台卡死，查 docker 后重试" % (project, timeout),
+                        kind="env")
+                time.sleep(1.0)
+        # 持锁后双查：等待窗口里先到者可能已完成起台。
+        state = read_state(project)
+        if state and stage_healthy(state):
+            state = dict(state)
+            state["reused"] = True
+            return state
+        if state and keep and residue_containers(project):
+            # --keep: running but unhealthy — do not tear it down (another lane may
+            # be using it in the same window); report the environment red honestly
+            raise StageError("供给台 %s 在跑但不健康（ports=%s）；--keep 语义不拆在跑台——"
+                             "人工核查或去旗重跑" % (project, state.get("ports")), kind="env")
+        if state:
+            do_down(project)
+        return do_up_public(project, services_list, opts, timeout)
+    finally:
+        os.close(fd)
 
 
 def do_up_public(project, services_list, opts, timeout):
