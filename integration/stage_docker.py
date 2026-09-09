@@ -275,7 +275,15 @@ def state_busy_ports():
                 # 同族）。unlink 是收回决策，必须稳定确认（连续 3 次均空）。
                 busy.update(int(p) for p in (st.get("ports") or {}).values())
             else:
-                f.unlink()   # 带龄且稳定无容器：真 stale，回收档位（崩溃残留清扫）
+                # 双信号稳定确认才回收（run X 实锤：docker ps 空窗可持续数秒，
+                # 三次 1s 间隔采样同空仍可假空；但活台端口全程可连——空窗与拒连
+                # 同现的概率可忽略）：容器查询连续为空 AND 状态端口全部拒连。
+                # 否则按存活保留（档位占用的代价可忽略，400 档）。
+                ports = [int(p) for p in (st.get("ports") or {}).values()]
+                if ports and all(not port_open(p, timeout=1.0) for p in ports):
+                    f.unlink()   # 带龄 + 稳定无容器 + 端口全拒：真 stale，回收档位
+                else:
+                    busy.update(ports)
         except (OSError, ValueError):
             continue
     return busy
