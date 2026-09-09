@@ -26,8 +26,8 @@ export interface EpicMeta {
 
 /**
  * 立项状态枚举类型与选项清单。真源单点在 host src/host/epics.ts EPIC_STATUSES——
- * 但 host 模块依赖 node:fs，不能进浏览器 bundle（tsdown platform=browser），故按
- * gen1 方案降级：此处复制四值，一致性由 smoke/epics-status.mjs 两端比对断言兜底，
+ * 但 host 模块依赖 node:fs，不能进浏览器 bundle（tsdown platform=browser），故
+ * 降级处理：此处复制四值，一致性由 smoke/epics-status.mjs 两端比对断言兜底，
  * 防单边漂移（改一边必须同步另一边）。
  */
 export type EpicStatus = '已立项（待开工单）' | '已立项（执行中）' | '已完结' | '已归档'

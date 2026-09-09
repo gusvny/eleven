@@ -3,14 +3,14 @@
  * 握手矩阵扩展）。不 import react / 无 DOM，smoke 裸 node 直跑（响应分类逻辑必须
  * 可单测）。
  *
- * 两层判定，演进不另起新文件（gen1 打回③口径）：
+ * 两层判定，演进不另起新文件：
  *
  * 1) classifyBuildInfoResponse —— 服务端应答分类（t260902-03 原口径不变）：
  *    非 2xx、JSON 解析失败、缺 stale 字段、带 error 字段 → {stale:false} 不抛错
  *    （看守自身不得成为新报错源；error=指纹全缺部署异常，不属陈旧提醒范畴）。
  *
  * 2) classifyHandshake —— 三元组（boot/disk/injected）握手判定矩阵（KI-052 根治，
- *    方案 gen2 M1-M7＋review 附条件意见1 修订）：
+ *    方案 M1-M7＋评审附条件意见 1 修订）：
  *    M1  200 & stale=true（boot≠disk，服务端旧）        → 显「重启」横幅
  *    M2  405/404（端点内存无=看守更旧，KI-052 主现场）   → 显「重启」横幅
  *    M3  200 & 无 error & 缺/类型错 bootFingerprint      → 显「重启」横幅（同构性破坏）

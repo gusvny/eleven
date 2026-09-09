@@ -6,7 +6,7 @@
  * integration/t260902-01/t01_metrics_model.mjs）。UI 层（metrics.tsx）只做渲染
  * 与交互时序，不含数据推导。
  *
- * 口径出处（create_plan gen2 决策 4/9，两论审查通过）：
+ * 口径出处（票 t260901-20 方案决策 4/9，已过审）：
  * - 饼形态 = 机器 stage 各一扇区（模板链序）+ 链内 exit==='human' 的 stage
  *   时长合并为一个橙色扇区；全环合计 = Σby_stage，人审时长不重复计数
  *   （后端 human_wait ⊂ by_stage，见 host/metrics.ts L343/349）。模板数据缺失
@@ -228,7 +228,7 @@ export function humanStageIds(stages: unknown): Set<string> {
 }
 
 /**
- * 饼形态组合（方案 a，gen2 决策 4）：
+ * 饼形态组合（方案决策 4）：
  * 环形 = Σby_stage 全环——primary（bar，stage 时长合计）的 categories/data 为
  * 机器扇区逐 stage 展开，链内 exit==='human' 的 stage 合并为一个 human 扇区。
  * 人审时长已在链内（human_wait ⊂ by_stage），只合并不追加 → 全环合计=Σby_stage

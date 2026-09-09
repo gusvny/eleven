@@ -16,13 +16,13 @@
  *   - 新开页/刷新后：init 覆写 injected=当下 disk → 恒 M5（消除动作「刷新」可达，
  *     不会刷新后横幅不消）；
  *   - 页面存活跨合并/跨重启（不刷新）：sessionStorage 保留旧盘态 → injected≠disk
- *     → M4 reload（正是 gen1 打回①点名的序列）。
+ *     → M4 reload。
  * 异常（隐私模式禁用 sessionStorage 等）→ injected 恒 null，M4 自动失效退回 L2
  * 行为（仅服务端判定），不误报。
  *
  * 挂点单例在 sidebar 层（.wb-sb-right 共享容器），四视图排他渲染也不影响，横幅常驻。
  *
- * 回收纪律（终态全回收，gen1 打回②c 全带）：
+ * 回收纪律（终态全回收）：
  *   - useEffect cleanup 必调 startVisibleInterval 返回的停表函数（幂等）；
  *   - inflight fetch 在组件卸载后回包不得 setState——mounted 标志显式挡（React 18
  *     下无害，按纪律仍显式处理）。

@@ -24,8 +24,7 @@
  * bgBase 收录依据（t260907-03 补评审门正名）：宿主平台 0.1.1-rc.2 的平台壳**没有**
  * `--dsw-alias-bg-primary` 名、只有 `--dsw-alias-bg-base`；bgPrimary 的兜底链
  * `var(--dsw-alias-bg-primary, var(--dsw-alias-bg-base, #fff))` = 兼容旧版平台——
- * 属**平台版本契约扩容**（多认一个旧平台令牌名）。原由热修 17b673f 顺手改入未走
- * 评审，本票过门收录入账。
+ * 属**平台版本契约扩容**（多认一个旧平台令牌名），本票过门收录入账。
  */
 export const ALIAS = {
   bgPrimary: 'var(--dsw-alias-bg-primary, var(--dsw-alias-bg-base, #fff))',

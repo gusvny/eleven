@@ -10,7 +10,7 @@
  *   产物 client.js：每条 flow 行 `div[data-chat-anchor-key][data-chat-flow-kind="<kind>"]`，
  *   用户消息行 kind="user"）——结构性特征写死为常量并注明出处。
  *
- * 先例借鉴模式取舍（review gen0 R1 清单，对照 sidebar.tsx useHideFactoryNewSession /
+ * 先例借鉴模式取舍（对照 sidebar.tsx useHideFactoryNewSession /
  * metrics-anchor.ts / metrics-entry.tsx 三先例）：
  * - ✅ 锚定负向排除（OWN_SUBTREE_MARKER 教训）：正向只认平台 data-chat-* 属性；
  *   候选行 closest('[data-wb-projtag-scope]')（本装饰器自留作用域标记位）命中即跳过，
@@ -107,7 +107,7 @@ export interface ChatProjectTagHandle {
 }
 
 /**
- * useEffect 形态入口（F1 防呆，验收走查 gen0）：返回的是**清理函数**本身，
+ * useEffect 形态入口（F1 防呆）：返回的是**清理函数**本身，
  * 可直接 `useEffect(() => startChatProjectTagEffect(...), [])`——useEffect 只把
  * 返回函数登记为 cleanup，返回 handle 对象会被静默忽略（F1 死因：sidebar 直接
  * 返回 handle → 卸载零回收）。本入口从形状上消灭该陷阱；新接线一律走这里，

@@ -163,7 +163,7 @@ interface SidebarProps {
   /** 槽注入的会话打开动作（WorkspaceBrowserInjected.open，默认浏览器同款路径；
    *  260824 起优先于 sessions.open——后者要求 id 已在客户端 list，ticket 会话
    *  同步稍慢时会 fail loud）。由 slot props 透传（apply() 里 {...props}）。
-   *  t260831-04 gen2 勘误：WorkspaceBrowserInjected 是 ui-workspace 注册者私有
+   *  t260831-04 勘误：WorkspaceBrowserInjected 是 ui-workspace 注册者私有
    *  注入，slot owner props 里没有 open——本 prop 恒 undefined，历史分支仅留
    *  兼容，真正的新建语义走下方 workspaces 公开服务。 */
   open?: (sessionId: string) => void
@@ -378,7 +378,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
   const [epicCode, setEpicCode] = useState('')
   const [epicNonce, setEpicNonce] = useState(0)
   // metrics M2a（t260902-01）：度量面板开/关 + ⚙ settings 弹层；「度量」钮 ref
-  // 供面板关闭时焦点归还（gen2 决策 7 焦点管理最小实现）。
+  // 供面板关闭时焦点归还（焦点管理最小实现）。
   const [metricsOpen, setMetricsOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const metricsBtnRef = useRef<HTMLButtonElement | null>(null)
@@ -569,7 +569,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
 
   // chat 项目 tag 装饰器（t260903-07 工单②）：挂/卸随本组件（插件在装即挂，
   // 卸载=全终态回收，见 chat-project-tag.ts teardown 清单）。
-  // F1 修复（验收走查 gen0）：走 effect 形态入口——返回值就是 cleanup 函数，
+  // F1 修复：走 effect 形态入口——返回值就是 cleanup 函数，
   // 杜绝「useEffect 直接返回 handle 对象被忽略 → 卸载零回收」的接线陷阱。
   useEffect(() => startChatProjectTagEffect({ fetchImpl: fetch.bind(globalThis) }), [])
 

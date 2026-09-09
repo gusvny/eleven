@@ -6,8 +6,7 @@
  * ProjectRemoveModal（四步流）；左栏末尾「＋ 接入项目」行 → ProjectAddModal；
  * 隔离红色行 → QuarantineModal（原因 + <dir>/project.yaml 定位 + 修复指路）。
  *
- * 骨架先例=session-entry 确认弹层（project-session-row.tsx），取舍（create_plan
- * gen1 R1-② 定稿）：在飞禁点带（写按钮 busy disabled，结果驱动关闭——成功才关、
+ * 骨架先例=session-entry 确认弹层（project-session-row.tsx），取舍（方案 R1-② 定稿）：在飞禁点带（写按钮 busy disabled，结果驱动关闭——成功才关、
  * 失败停留就地显示）；ESC/遮罩关闭带但**执行中不可关**（防半途弃置假示完成）；
  * 错误就地显示带（验收 12 口径本体）；焦点/aria 基础带。position:fixed 脱离
  * .wb-ticket-list 滚动容器裁剪（session-entry C1 同款理由）。
@@ -184,7 +183,7 @@ export function ProjectSettingsModal(props: {
 
 /**
  * 接入弹层（验收 12）：表单 + 预检 + 拒收就地显示 + 黄牌不阻塞。
- * 预检口径（arbitrate gen1 F1 定稿：CLI `project add` 无 --dry-run 旗，补旗为跨写集
+ * 预检口径（CLI `project add` 无 --dry-run 旗，补旗为跨写集
  * 裁定项）——预检降档为**本地形状检查**（key 白名单/根目录绝对路径/非空，不调 CLI、
  * 零落盘），确认时由 CLI 做深度校验（存在性/交叉/重复/legacy）并就地显示；
  * 本地检查=纯形状白名单，不实现 CLI 校验语义（薄壳红线不破）。

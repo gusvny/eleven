@@ -10,8 +10,8 @@
  * 但工单快照只有单值 stage 指针，UI 按单点高亮会漏掉另一并行步。
  * 本模块把「单值指针」推导为「活跃步数组」（多步同显 running）。
  *
- * 推导优先级（真值表每条锚定 dev_lane.py 源码行，方案 v3 经 review_plan
- * 第 4 轮通过；t260901-08 追加范围起引擎 _finish 落 done 终态条目（旧票无该
+ * 推导优先级（真值表每条锚定 dev_lane.py 源码行，方案 v3 已过审；t260901-08
+ * 起引擎 _finish 落 done 终态条目（旧票无该
  * 条目自然回落下述启发式，存量数据不追改）：
  *  1. status==='closed' → 全部 done（短路）。
  *  2. timeline 最新一条显式态 ∈ {blocked, awaiting-human, done} → 直采该态
@@ -44,8 +44,8 @@
  *  - 列表合法非空 → 真值优先：列表内的步若已被显式终态（done/blocked/
  *    awaiting-human，来自 timeline 最新态）钉住则保持终态（先完成边的收口窗，
  *    引擎汇合前不把已完成边重亮成 ▶），否则强制 running 并入活跃数组
- *    （fork 瞬间 timeline 轮询滞后/启发式误判面， arbitrate∥acceptance_walkthrough
- *    相邻边尤其受益）；
+ *    （fork 瞬间 timeline 轮询滞后/启发式误判面，
+ *    acceptance_walkthrough 相邻边尤其受益）；
  *  - 畸形条目（非字符串/模板外 id）丢弃，与 timeline 畸形输入同纪律。
  */
 

@@ -148,7 +148,7 @@ type El = {
 /**
  * 元素子节点集合数组化。真 DOM 的 el.children 是 HTMLCollection（live 集合，
  * 无 .some/.map 等数组方法）——必须 Array.from 落成真数组再集合操作；
- * 直接 `as El[]` 断言会在浏览器运行期炸（arbitrate round1 code-fault 根因，
+ * 直接 `as El[]` 断言会在浏览器运行期炸（仲裁指认的 code-fault 根因，
  * KI 候选「桩集合语义分裂」的修复点）。Array.from 对桩数组/HTMLCollection/
  * NodeList 三形态一律成立，遍历期瞬时快照也消除了 live 集合遍历中 DOM 被改
  * 的失稳面。

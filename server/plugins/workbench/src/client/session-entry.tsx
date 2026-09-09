@@ -26,7 +26,7 @@
  * （↺ 恢复已随顶部行退役），无 current 自动登记 effect——关闭当前活跃会话的
  * 终态：tab 消失、current 不变（会话仍在运行），不会复活。
  *
- * 故障模式取舍（t260831-04 gen2 修订；逐项「带/不带」理由见工单方案与实现报告）：
+ * 故障模式取舍（票 t260831-04）：
  *   - 新建走 ctx.workspaces.startSession（工厂同款）；workspaces 服务缺失：
  *     行内可见错误 + console.error，按钮不复位为假成功；
  *   - 工作区按项目主目录匹配（workspaceForDir：精确→前缀→realtime 归一），
@@ -34,7 +34,7 @@
  *     返回既存工作区）；create 失败：行内提示，不落账不静默；
  *   - startSession 后 current 10s 未落定：行内提示 + warn；工作区已连接，
  *     可从列表进入；
- *   - 切换路径 sessions.open(id) 失败（throw，gen10 勘误：未列出 id 是 throw
+ *   - 切换路径 sessions.open(id) 失败（throw：未列出 id 是 throw
  *     不是静默 no-op）：console.error 留痕 + 行内错误提示，账册条目保留
  *     （超时≠磁盘清理，自动 removeEntry 已删——t260831-02 的超时剔账正是
  *     「切回内容丢失」成因之一）；账册中 blank 会话条目（自铸 chat- 残留）
@@ -169,9 +169,9 @@ export interface SessionsFace {
 
 /**
  * workspaces 服务面（ctx.workspaces 的子集；IWorkspaces 公开契约的结构投影）。
- * t260831-04 gen2 取证实锤：WorkspaceBrowserInjected.open/startSession 是
+ * t260831-04 取证实锤：WorkspaceBrowserInjected.open/startSession 是
  * ui-workspace 的**注册者私有注入**，slot owner props（wide/expandSidebar）里
- * 拿不到——gen0 之前代码里「slotOpen 优先」的分支恒走 sessions.open 兜底。
+ * 拿不到——旧代码里「slotOpen 优先」的分支恒走 sessions.open 兜底。
  * 新建的工厂同款语义在公开面 ctx.workspaces.startSession：绑工作区 + 复用
  * blank 会话 + 正确打开（staging）。
  */
@@ -182,7 +182,7 @@ export interface WorkspacesFace {
 }
 
 /** host 侧 create 的 session 经 list 流同步到 client 有延迟——轮询等 scope 可解析（≤ms 毫秒）。
- *  ⚠️ 勘误（t260831-02 gen8）：sessions 服务头注明 scope 是「首次 open 才惰性铸造」——
+ *  ⚠️ 勘误（票 t260831-02）：sessions 服务头注明 scope 是「首次 open 才惰性铸造」——
  *  open 之前等 scope 永远超时，本函数对打开路径没有前置价值，保留只为 sidebar.tsx
  *  工单点击路径的既有调用（ticket 会话由同链路 open，行为不变）。
  *  打开路径的正确前置=waitForListed（等 id 进客户端 list，见下）。 */
@@ -199,7 +199,7 @@ export async function waitForScope(sessions: SessionsFace, id: string, ms = 4000
 }
 
 /**
- * 等 id 进入客户端会话列表。勘误链（t260831-02 gen10 审读订正）：open(id) 对未
+ * 等 id 进入客户端会话列表。勘误后口径（票 t260831-02）：open(id) 对未
  * 列出 id 是 **throw**（manager.select: 'sessions.select: unknown session …'），
  * 不是静默 no-op；scope 的惰性铸造时机是「first resolution」而非「first open」。
  * 等 listed 的价值=把「未列出即 throw」挡在调用前、并把等不到的场景转成明确报错，
@@ -252,7 +252,7 @@ function workspaceForDir(items: readonly { workspaceId: string; path: string }[]
  * 超时未变 = startSession 复用了 prev 指向的 blank 会话（工厂语义：blank 复用，
  * current 合法地不动），此时返回 prev 作为 staged 会话（prev 为 null 则 null）。
  * ⚠️ 不能「等 current 非 null」——点击前 current 就非空（正在看的会话），
- * 那会把旧会话误记进账册（gen2 自测探针实锤过的 bug）。
+ * 那会把旧会话误记进账册（自测探针实锤过的 bug）。
  */
 async function waitForStaged(sessions: SessionsFace, prev: string | null | undefined, ms = 10000): Promise<string | null> {
   const read = (): string | null => {
@@ -386,7 +386,7 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
    * slotOpen || sessions.open → open 后读 list.current 自检。
    * - 超时：账册条目保留 + 行内提示，返回 false（t260831-02 的自动
    *   removeEntry 已删——超时只说明 wire 同步慢，误删=「切回丢内容」成因）；
-   * - open throw（未列出 id，gen10 勘误）：console.error + 行内提示，返回 false；
+   * - open throw（未列出 id）：console.error + 行内提示，返回 false；
    * - 成功但 current 未跟上：warn 留痕（激活未生效线索），仍返回 true——
    *   open 调用本身已生效，下一步激活是平台层时序，不在本插件能强制的面内。
    */
@@ -418,7 +418,7 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
 
   // 切换（t260831-06：不再 touchEntry 重排——点 tab 停在原地，顺序=登记顺序），
   // 直接走 openSession 统一链。超时不剔账（见 openSession 注释）。
-  // blank 自愈（t260831-04 gen2）：账册里的 blank 会话（gen1 前宿主端自铸的
+  // blank 自愈（票 t260831-04）：账册里的 blank 会话（早期宿主端自铸的
   // chat- 条目——没绑工作区，永远不会被 staging 之外的路径写入内容，平台
   // 语义「hero ⟺ 当前会话 blank」决定点它只会看到 hero+工作区选择器）改走
   // startSession(工作区)——blank 会话零内容，换绑新 id 无内容损失，账册同步
@@ -454,7 +454,7 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
     await openSession(id, entry?.project)
   }, [openSession, workspaces, sessions, ledger, persist, projectKey])
 
-  // 新建（t260831-04 gen2 重写）：不再走宿主端 global-session/open 自铸会话
+  // 新建（票 t260831-04 重写）：不再走宿主端 global-session/open 自铸会话
   // （自铸会话不绑工作区 → 平台语义「hero ⟺ blank」下永远停在 hero、内容被
   // 发到别处——仲裁 S2/S3 失败的根因）。改走 ctx.workspaces.startSession——
   // 与出厂 New Session 完全同款：绑当前项目工作区、复用既有 blank 会话

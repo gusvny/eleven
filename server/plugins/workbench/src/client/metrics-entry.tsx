@@ -33,10 +33,10 @@ export function markFooterSlot(ok: boolean): void { footerSlotRegistered = ok }
 export function footerSlotOk(): boolean { return footerSlotRegistered }
 
 /**
- * shell 覆盖层激活态（模块级最新值 + 惰性常驻监听，第 5 轮探针发现的一次性事件
- * 竞态的根治：槽钮 mount 时机夹在「广播已发/监听未挂」之间时既错过事件、初始
- * 检查时覆盖层钮又尚未挂载——常驻监听保证模块内任何时刻读到的是最新态）。
- * t260902-05 gen6 集成打回修正：常驻监听**不能放模块顶层**——顶层裸 document
+ * shell 覆盖层激活态（模块级最新值 + 惰性常驻监听，根治「槽钮 mount 时机夹在
+ * 广播已发/监听未挂之间」的一次性事件竞态：错过事件、初始检查时覆盖层钮又尚未
+ * 挂载——常驻监听保证模块内任何时刻读到的是最新态）。
+ * t260902-05 修正：常驻监听**不能放模块顶层**——顶层裸 document
  * 随 tsdown 进 bundle 后，node 侧 import（t260901-13 S0 bundle-exports 金丝雀）
  * 即 ReferenceError。改为惰性挂一次（幂等守卫 + typeof document 防呆），首次
  * 消费（槽钮 mount / 订阅 / 覆盖层 mount）时激活。
@@ -111,7 +111,7 @@ export function mountMetricsIntoSettingsRow(root: HTMLElement): () => void {
   }
   const { settings } = found
   /**
-   * body 级 fixed 覆盖层（第 5 轮打回定性修正）：上一版把钮 `settings.after(btn)`
+   * body 级 fixed 覆盖层（打回后改法）：上一版把钮 `settings.after(btn)`
    * 插进 React 托管的行容器——外部 DOM 变更与 React 协调互踩，页面随机崩/挂
    * （chat 必挂、hero 高概率挂），即「网络静默破坏源」。改法：钮挂 document.body
    * （React 树之外），fixed 定位贴到 Settings 齿轮右侧同排视觉，只读 rect、只动

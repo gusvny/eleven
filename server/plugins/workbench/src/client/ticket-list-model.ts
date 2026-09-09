@@ -2,7 +2,7 @@
  * ticket-list-model —— 工单列表行卡（t260904-17，mock v5 屏⑤⑥）纯函数层。
  *
  * 零 react / 平台依赖，node 可裸 import 黑盒单测（tests/t260904-17-ticket-list-model.mjs，
- * lane-states.ts 同款分层先例——只借形态不借语义，取舍清单见工单方案 gen1「复用取舍清单②」：
+ * lane-states.ts 同款分层先例——只借形态不借语义（复用取舍见票 t260904-17 方案）：
  * 不带入合并分支内联步排除、并行活跃数组等 dev-lane 专属启发式）。
  *
  * 通用口径（一套 UI 裁定，260904 宿主令）：
@@ -285,7 +285,7 @@ export function firstSentenceOf(body?: unknown): string | null {
   return sentence
 }
 
-/** 行卡/详情头部标题展示选择（gen2 打回②收窄口径）：title → title_or_first
+/** 行卡/详情头部标题展示选择（收窄口径）：title → title_or_first
  *  （host enrichment 派生字段，仅 title 为空的票下发）→ 回退工单号（裸编号是
  *  最后兜底——enrichment 失败/老数据缺字段时，宁显编号不显「（无标题）」）。 */
 export function ticketDisplayTitle(t: { id: string; title?: string; title_or_first?: string }): string {

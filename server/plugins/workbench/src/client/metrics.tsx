@@ -6,7 +6,7 @@
  * 头部=标题/筛选行/口径ⓘ/✕；KPI 条四卡常驻；Tab 条四 tab 全开放（后端四视图
  * 本就同实现，t260902-05③）；主图（时间视图柱↔饼双形态，其余视图单形态）；副图两格。
  *
- * 交互纪律（create_plan gen2 决策 7/9 + t260902-05 修订）：
+ * 交互纪律（票 t260901-20 方案决策 7/9 + t260902-05 修订）：
  * - Esc/✕ 关闭；打开才 fetch，关闭 unmount 释放全部 echarts 实例（adapter release）。
  * - 滚动：面板容器自身 overflow-y:auto（中 pane 不锁全页 body 滚动——全幅时代的
  *   body overflow 锁已随中 pane 化移除）。
@@ -102,7 +102,7 @@ export function MetricsPanel(props: {
   /* 状态持久化：每次变更落 localStorage（容错在 model 层）。 */
   useEffect(() => { savePanelState(state) }, [state])
 
-  /* Esc 关闭（捕获阶段；epics modal 无此先例，本单自带——gen2 决策 7）。 */
+  /* Esc 关闭（捕获阶段；epics modal 无此先例，本单自带）。 */
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') props.onClose() }
     document.addEventListener('keydown', h, true)
@@ -193,7 +193,7 @@ export function MetricsPanel(props: {
     [data, state.shape, state.view, templateStages],
   )
 
-  /* 下钻（副2 Top 票）：先关面板再开抽屉——面板状态已持久化，重开恢复（gen2 决策 9(a)）。
+  /* 下钻（副2 Top 票）：先关面板再开抽屉——面板状态已持久化，重开恢复。
      依赖收窄到父级回调本身，避免父组件重渲染导致副图反复重建。 */
   const pickTicket = useCallback((ticketId: string) => {
     props.onClose()

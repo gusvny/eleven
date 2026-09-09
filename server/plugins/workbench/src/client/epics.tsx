@@ -1,7 +1,7 @@
 /**
  * epics.tsx —— 工单台「立项单」中列第四视图 + 所属立项徽标（epic-linkage Tier 3，t260826-02）。
  *
- * 落地口径（方案 gen1 + review gen4 拍板）：
+ * 落地口径（方案 + 评审拍板）：
  *   - 不加路由/不加顶层 tab：本视图挂进 sidebar 中列四视图体系（views.epics），
  *     由项目行立项单图标（t260827-01，空代号=立项清单）/ 工单徽标点击（定位详情）切换进来；
  *   - 真源=API 渲染、前端不存状态（立项单关键决策 5）：列表=GET /api/epics，
@@ -214,7 +214,7 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
   /** 状态编辑栏（t260831-05）：详情页状态下拉 + 备注输入框 → POST /epics/<code>/status。 */
   const [editStatus, setEditStatus] = useState<EpicStatus | ''>('')
   const [editNote, setEditNote] = useState('')
-  /** 备注是否被改动过（gen1 review #5 拍板）：未改动 → 请求体省略 note 字段（不动备注，
+  /** 备注是否被改动过（评审拍板）：未改动 → 请求体省略 note 字段（不动备注，
    *  防误清空丢自由文本）；改动过 → 传新值（''=用户显式清空）。显式 dirty 标记比
    *  字符串比较少边界（改了又改回原文仍视为未动，取安全侧）。 */
   const [noteDirty, setNoteDirty] = useState(false)
