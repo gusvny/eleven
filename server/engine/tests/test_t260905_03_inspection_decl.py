@@ -186,7 +186,8 @@ def test_trigger_decl_op_offline_real_file():
     payload = json.loads(proc.stdout.strip().splitlines()[-1])
     assert payload["ok"] is True
     ids = [i["id"] for i in payload["result"]["instances"]]
-    assert ids == ["test-face", "doc-face"]
+    # t260910-09 票②：新增 mechanism-face/simplify-face 占位实例（enabled=false 不进 schedule_specs）
+    assert ids == ["test-face", "doc-face", "mechanism-face", "simplify-face"]
     assert [s["instance_id"] for s in payload["result"]["schedule_specs"]] == ["test-face"]
 
 

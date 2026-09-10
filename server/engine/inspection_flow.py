@@ -240,10 +240,12 @@ class InspectionPeriodicWorkflow:
     async def run(self, inp: InspectionPeriodicInput) -> Dict[str, Any]:
         period = inp.period or period_key(workflow.now())
         ticket_id = inspection_ticket_id(inp.instance_id, period)
-        self._enter("scan", "running", "测试面扫描（实例 %s 期 %s）" % (inp.instance_id, period))
+        # C4（t260910-09 review）：时间线文案带 face 值——新面票不再误写「测试面」；face 字段透传进 activity 分派
+        self._enter("scan", "running", "%s 面扫描（实例 %s 期 %s）" % (inp.face, inp.instance_id, period))
         scan_result: Dict[str, Any] = await workflow.execute_activity(
             "run_inspection_scan",
-            args=[{"repo_root": inp.repo_root, "scenarios_path": inp.scenarios_path}],
+            args=[{"repo_root": inp.repo_root, "scenarios_path": inp.scenarios_path,
+                   "face": inp.face}],
             start_to_close_timeout=SCAN_TO, retry_policy=RETRY)
         if not scan_result.get("ok"):
             self.status = "blocked"

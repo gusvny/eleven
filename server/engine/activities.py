@@ -377,16 +377,42 @@ async def write_scan_report(report: ScanReport) -> Dict[str, Any]:
 
 @activity.defn
 async def run_inspection_scan(args: Dict[str, Any]) -> Dict[str, Any]:
-    """Test-face scan: repo root (defaults to REPO_ROOT) + optional scenario-list path → findings.
+    """Inspection scan by declared face (ticket 2, t260910-09; rework r2 semantics):
+      - face=test (also the default / missing key) → ticket-1 test-face scan, behavior
+        identical to before ticket 2 (existing callers/scenarios unchanged);
+      - face=mechanism/simplify → the ticket-2 scanners;
+      - ANY OTHER face (a declared-but-unwired face like doc, or a typo) → FALLBACK to
+        the test-face scan with an explicit meta annotation (face_fallback naming the
+        requested face and the wired scanners). Rationale (arbitrate code-fault 260910):
+        ticket-1 treated face as a display-only field, so declared-but-unwired instances
+        (doc-face) legitimately ran the test scan — rejecting them turned the zero-finding
+        heartbeat ticket into a blocked terminal, breaking ticket-1 semantics. The
+        activity cannot see the trigger-side declaration (--decl-path lives with the
+        trigger), so "declared" vs "typo" is indistinguishable here; per the
+        no-silent-degradation discipline the fallback is never silent — it is annotated
+        on the ticket face (scan_meta.face_fallback) and logged. Fail-closed stays at the
+        CLI (--face choices) and run_face_scan layer, where the caller is the operator.
     Lazy import: prevents an activities↔inspection_flow module cycle (same precedent as agent_activities)."""
     from inspection_scan import ScanError, run_test_face_scan
+    from inspection_scan_ms import run_face_scan
 
     root = Path(args.get("repo_root") or REPO_ROOT)
-    sp = args.get("scenarios_path")
+    face = str(args.get("face") or "test")
     try:
-        result = run_test_face_scan(root, Path(sp) if sp else None)
+        if face == "test":
+            sp = args.get("scenarios_path")
+            result = run_test_face_scan(root, Path(sp) if sp else None)
+        elif face in ("mechanism", "simplify"):
+            result = run_face_scan(face, root)
+        else:
+            result = run_test_face_scan(root, None)
+            fallback_note = ("声明面 %r 未接线扫描器（已接线：mechanism、simplify）——回落 test 面"
+                             "扫描（票① 行为）；接线或改名走 dev-lane 工单" % face)
+            result.setdefault("meta", {})["face_fallback"] = fallback_note
+            activity.logger.warning("巡检面回落：%s", fallback_note)
         activity.logger.info(
-            "测试面扫描完成：%d 条发现（high=%s/med=%s/low=%s）heartbeat=%s",
+            "巡检面 %s 扫描完成：%d 条发现（high=%s/med=%s/low=%s）heartbeat=%s",
+            face,
             result["summary"].get("high", 0) + result["summary"].get("med", 0)
             + result["summary"].get("low", 0),
             result["summary"].get("high", 0), result["summary"].get("med", 0),

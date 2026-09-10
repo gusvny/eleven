@@ -570,6 +570,14 @@ SCENARIOS = [
     ("t260905-03-period-journey",
      "手动一期全链用户旅程（t260905-03 验收①主证据，灰盒 L3 真台真票，exclusive）：temp decl 双实例启用+--decl-path/--repo-root 注入夹具（真仓是干净的，不种漂移测不到发现落面；真树零写入红线不破）——种漂移实例：trigger→开票→发现清单落票面（high 带证据+suggested_fix_tickets 逐条 source_inspection=本巡检票号=修复票溯源面）→人门两拍（未签字观察窗内不终态=假门现形即红；运维通道 sign 后收口且发现留存票面=发现/处置审计链不断）；干净实例：零发现心跳票照开照收（全绿期=心跳证明）；两实例票号互异（实例维度不串票）。人门绑定浅：只锚公开 sign 面与终态可见，不锚 snapshot 内部门名。temporalio/共享台缺席=ENV_FAIL 点名（KI-036 家族口径）。登记 exclusive：往共享台写真票，防与兄弟场景互染判定面。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "python3 integration/t260905-03/sc_inspection_period_journey.py", "exclusive"),  # exclusive: the ONLY barrier entry — writes real tickets to the shared default 7233 temporal (mutex with main-pool decl-gate on the same surface)
+
+    # ---- t260910-09: inspection ticket 2 (mechanism/simplify faces — dead-man generalization + patch-retirement) ----
+    ("t260910-09-ms-scan-contract",
+     "机制/简化面扫描器对外契约（t260910-09 主证据，灰盒 L2 固定夹具，纯 stdlib 零 env 依赖）：新两面 CLI 单行 JSON {ok,result|error} 同票①、result{face,findings,summary,heartbeat,meta} 形状齐、findings 六键/severity 三值域/id 唯一/证据非空（UI 巡检行通用消费的数据面承诺）；dead-man 正例=三重零命中（场景零引用+日志字面零命中+代码路径零调用）必报 med 且证据含 文件:行+带分母零计数（0/N 形——空集≠查过零，review C2 口径；零日志字面机制仍判，日志面空集不得当豁免）、meta 记录「全史」口径局限（方案 D2 不静默承诺）；反例三连=场景引用/被调用/注册表豁免任一命中即不报（并集破零）、在役函数零误报；影子代码=零调用+新旧命名对必报 med 且在役侧不报；补丁退役=*_patch 宿主被 v2 取代必报 med 且 suggestion 含「删了会怎样」风险注（本票硬性口径）；重复防御层 med；过长/过深点名 low（显著超阈 120 行/深 8 必点名、显著低于 40 行/深 2 不误点名——阈值精确边界 80/81 真值表归 developer L1）；零发现=findings==[]+heartbeat true（全绿期心跳票数据面，语义与票①逐字段同构）；红线判定化=两 face 扫描全程被扫树逐字节不变（巡检绝不直接改码）；畸形输入不崩（NUL 乱码模块逐项降级 meta 点名不株连、仓根缺失 ok:false+非零退出+error 点名路径 fail-closed）；真仓 smoke 两 face 只读可跑（发现量级不 pin，沿票① 腿8 口径）；face 分派缝=activities.run_inspection_scan 缺省（无 face 键）走 test 既有语义零变化、face=mechanism 走新面、未知 face ok:false 且 error 点名已知面清单（腿需 temporalio=venv 重入，缺席 ENV_FAIL 点名不假红）。与 t260905-03-scan-contract intent 不同面（彼守测试面 S1/S2/S3 契约，本守新两面）；与场景②不同面（彼守声明位与门数据面，本守扫描行为本身）；与 developer L1 不同层。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260910-09/sc_inspection_ms_scan_contract.py", "ro"),
+    ("t260910-09-ms-decl-gate",
+     "新巡检实例声明门——mechanism-face/simplify-face 声明位与门数据面（t260910-09，灰盒 L2 离线腿为主）：仓内 inspection.yaml 两新实例在场（face=mechanism/simplify 原样、enabled=false 占位）且不进 schedule_specs（「enabled 按宿主节奏」+零发现心跳票语义不变的声明半边=不调度不触发；声明是引擎解析器逐期读取的机器契约，守卫合法非快照 pin）；夹具声明 enabled 新实例进 specs 且 face 原样透传、disabled 不进（改声明改行为、decl 零改动承诺的数据面）；enabled 新实例过门真触发腿（回执带票号）缺 temporalio/共享台=ENV_FAIL 点名不假红（沿票① decl-gate 三态分级）。与 t260905-03-decl-gate intent 不同面且不重测：彼守门行为本身（畸形/未接线 kind/占位/未知四类拒绝+test-face 放行——新实例同走该门不另测，防 intent 级重复），本守新实例的声明位在场与 face 透传数据面；与 developer L1（decl 纯函数真值表）不同层。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260910-09/sc_inspection_ms_decl_gate.py", "ro"),
     # ---- t260905-02: engine-behavior scenario watch (worker lifecycle / settle self-exit / multi-console dedup; epic follow-up faces) ----
 
     ("t260905-02-worker-lifecycle",

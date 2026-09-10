@@ -32,6 +32,25 @@ instances:
       cron: 0 10 * * 1
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
+  # ---- 票②（t260910-09）新面：能力已交付（inspection_scan_ms.py + face 分派），
+  # ---- enabled=false 占位——启用按宿主节奏。启用路径：本文件改 true（或
+  # ---- inspection_trigger.py schedule-up），启用即按 cron 每周自动开票。
+  - id: mechanism-face
+    face: mechanism
+    enabled: false
+    schedule:
+      kind: cron
+      cron: 0 7 * * 1
+    workflow: InspectionPeriodicWorkflow
+    template: inspection-lite
+  - id: simplify-face
+    face: simplify
+    enabled: false
+    schedule:
+      kind: cron
+      cron: 0 8 * * 1
+    workflow: InspectionPeriodicWorkflow
+    template: inspection-lite
 # ---- 未接线 kind 示例（禁入启用实例；接线票落地后迁移为正式声明）----
 #   schedule:
 #     kind: every-n-tickets   # 每并 N 张票触发（票计数源未接线，启用=显式报错）
