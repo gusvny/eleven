@@ -209,6 +209,15 @@
      **队列余项**：阶段闸（t260911-03 在飞）、巡检续票（t260911-02 已落账）、路由迁移（14 在飞）、
      压缩器钉死（15 已落账，KI-073 为其后续增量）。
 
+**03:30 轮**：**t260910-14（suggest_next 退役 + 模型路由表迁出 git）已代签**——按「八条签字门槛 + 宿主风险令八条清单」
+     双重核验：①五条场景全绿（解析同源平价／三态+兜底+回滚腿／UI 保存平价／退役重放兼容／退役面清空）；
+     ②**仓内 model-routes.yaml 未删**（零断供分层：decl_missing/file_missing/bad_content 三态点名 + 兜底仓内表，
+     禁静默回落 profile 默认）；③UI 与引擎同源解析（resolveRoutesFilePath ↔ resolve_routes_table）；
+     ④泳道未写机器级路径（唯一 home 写入为 tmp 夹具）；⑤产物同批重建 + UI 证据 11 张（integration 补拍）；
+     ⑥冲突预演 0、main 干净。**遗留由我执行（不在票内）**：存量项目迁移（拷表到
+     ~/.sandbar/projects/<key>/model-routes.yaml + 落声明）＋迁移前后真 spawn 冒烟——按风险令**择看板空闲窗口**执行，
+     不在宿主会话/worker 跑关键任务时动路由；仓内表保留至新路径稳定后另票删除。
+
 ## 七 本夜新增账
 
 - **KI-072**（问题册）：负载敏感的不稳定检查——三实证（reap 组回收集 / scenario-guard-pipeline-landed / ticket-session-restore，均并发红、单跑绿），含三条处置方向（判据层归 13、测试层归校准、运维层限并发）。
