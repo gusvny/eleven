@@ -109,6 +109,18 @@
      （epic=inspection；触发条件＝11 落账已满足；兑现宿主 260910 拍板②③：触发可声明不写死 +
      文档同步收编为第二实例）。写集 server/engine/ + integration/。
 
+**00:45 轮**（本轮抓到一个真回归 + 一次环境治理）：
+1. **t260910-12（起台面租约化）打回实现段**——真回归：`t02-t260902-02-prune-e2e` 在 main 上 19/0 全绿，
+   在本泳道连跑两次均 5/9 稳定红；失败形态＝连到了没有该 namespace 的服务（`127.0.0.1:21021` 拒连 +
+   `Namespace suyou-test is not found`），即「租到的档位端口上坐着的不是本台」。复现配方与嫌疑面
+   （stage_docker 租约重写 × 真实端口占用 × ensure 回执语义）已写进打回 note。本票六条自有场景
+   独立复跑全绿（含 herd 零串台 44/0、持有者被杀回收 15/0），说明主功能可用、回归在兼容面。
+2. **环境治理（integration 自决，已记录）**：docker 报 `all predefined address pools have been exhausted`
+   ——本夜 28 个 compose 项目里 26 个是 1.5~35 小时前的泄漏台，占满地址池致新台起不来（多条场景
+   env_fail）。处置：清「无状态记录 或 状态 >2h」的死台 18 个（容器 41→16、网络 32→13），保留活台与
+   共享台（sandbar-test-integ、t26090402-a-70476）；清后实测起台恢复（sc_idempotent_reup 12/0 零残留）。
+   建议：起台工具缺一条「地址池接近耗尽」的显式告警与自动回收（候选并入 t260911-01 或起台面后续票）。
+
 ## 七 本夜新增账
 
 - **KI-072**（问题册）：负载敏感的不稳定检查——三实证（reap 组回收集 / scenario-guard-pipeline-landed / ticket-session-restore，均并发红、单跑绿），含三条处置方向（判据层归 13、测试层归校准、运维层限并发）。
