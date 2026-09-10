@@ -402,12 +402,17 @@ async def run_inspection_scan(args: Dict[str, Any]) -> Dict[str, Any]:
         if face == "test":
             sp = args.get("scenarios_path")
             result = run_test_face_scan(root, Path(sp) if sp else None)
+        elif face == "doc":
+            # t260911-02：docs 面接线（docs-sync 第二实例）——声明 scan_face=doc 的实例
+            # 不再回落 test 面（fallback 名单同步收窄）。
+            from inspection_scan_doc import run_doc_face_scan
+            result = run_doc_face_scan(root)
         elif face in ("mechanism", "simplify"):
             result = run_face_scan(face, root)
         else:
             result = run_test_face_scan(root, None)
-            fallback_note = ("声明面 %r 未接线扫描器（已接线：mechanism、simplify）——回落 test 面"
-                             "扫描（票① 行为）；接线或改名走 dev-lane 工单" % face)
+            fallback_note = ("声明面 %r 未接线扫描器（已接线：doc、mechanism、simplify）——回落 "
+                             "test 面扫描（票① 行为）；接线或改名走 dev-lane 工单" % face)
             result.setdefault("meta", {})["face_fallback"] = fallback_note
             activity.logger.warning("巡检面回落：%s", fallback_note)
         activity.logger.info(
@@ -436,6 +441,59 @@ async def write_inspection_report(face: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": "巡检票落账失败：%s" % e}
 
 
+@activity.defn
+async def count_archived_tickets(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Ticket-count source for the watcher（t260911-02）：per-key 归档目录计数。
+    纯实现=inspection_ticket_count.count_archived_tickets（本壳零业务判断）；
+    projects_root 可由 args 显式注入（隔离台用），缺省走 env/默认根（shared 同语义）。"""
+    from inspection_ticket_count import count_archived_tickets as count_impl
+
+    try:
+        result = await asyncio.to_thread(
+            count_impl, str(args.get("projects_root") or ""),
+            str(args.get("project_key") or ""))
+    except Exception as e:  # noqa: BLE001——真基础设施故障显式化（Temporal 重试面）
+        return {"ok": False, "error": "计数 activity 异常：%s: %s" % (type(e).__name__, e)}
+    if not result.get("ok"):
+        return {"ok": False, "error": str(result.get("error"))}
+    return {"ok": True, "result": result["result"]}
+
+
+@activity.defn
+async def trigger_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
+    """watcher → 巡检期票（t260911-02）：trigger CLI 的运维语义在 activity 面——
+    票号=workflow id（一票一期机械去重），AlreadyStarted=deduped 回执不报错；
+    scan_face 由声明（spec.scan_face）透传进票的扫描分派。task_queue 用 activity
+    自身所在队列（watcher 与巡检票同 worker 池）。"""
+    from inspection_flow import InspectionPeriodicInput, InspectionPeriodicWorkflow, inspection_ticket_id
+    from temporalio.service import RPCError
+
+    instance_id = str(args.get("instance_id") or "")
+    period = str(args.get("period") or "")
+    try:
+        ticket_id = inspection_ticket_id(instance_id, period)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    try:
+        client = await Client.connect(TARGET_HOST, namespace=NAMESPACE)
+        handle = await client.start_workflow(
+            InspectionPeriodicWorkflow,
+            InspectionPeriodicInput(instance_id=instance_id, period=period,
+                                    repo_root=str(args.get("repo_root") or ""),
+                                    face=str(args.get("scan_face") or "test")),
+            id=ticket_id, task_queue=activity.info().task_queue)
+        return {"ok": True, "result": {"triggered": True, "ticket_id": ticket_id,
+                                       "first_run_id": handle.first_execution_run_id}}
+    except Exception as e:  # noqa: BLE001
+        if type(e).__name__ == "WorkflowAlreadyStartedError" or "already started" in str(e).lower():
+            return {"ok": True, "result": {"triggered": False, "deduped": True,
+                                           "ticket_id": ticket_id,
+                                           "reason": "同期巡检票已在（每期一票）"}}
+        if isinstance(e, RPCError):
+            return {"ok": False, "error": "workflow %s 启动失败（不存在或不可达）：%s" % (ticket_id, e)}
+        return {"ok": False, "error": "workflow %s 启动失败：%s: %s" % (ticket_id, type(e).__name__, e)}
+
+
 ALL_ACTIVITIES = [
     admin_call,
     script_gate,
@@ -450,4 +508,6 @@ ALL_ACTIVITIES = [
     write_scan_report,
     run_inspection_scan,
     write_inspection_report,
+    count_archived_tickets,
+    trigger_inspection_period,
 ]

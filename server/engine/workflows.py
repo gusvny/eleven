@@ -30,7 +30,10 @@ with workflow.unsafe.imports_passed_through():
         ticket_scan,
         write_scan_report,
     )
-    from inspection_flow import InspectionPeriodicWorkflow  # noqa: F401——registered into ALL_WORKFLOWS
+    from inspection_flow import (  # noqa: F401——registered into ALL_WORKFLOWS
+        InspectionPeriodicWorkflow,
+        InspectionTicketCountWatcherWorkflow,
+    )
     from shared import (
         HUMAN_GATES,
         STAGES,
@@ -270,4 +273,7 @@ class DispatcherScanWorkflow:
         }
 
 
-ALL_WORKFLOWS = [ContentPipelineWorkflow, DispatcherScanWorkflow, InspectionPeriodicWorkflow]
+# t260911-02：watcher（计数触发调度器）入注册表——workflow 注册真源只有这一行清单
+# （worker.py 只汇总导入本清单；R4 修正：不新增 per-workflow 注册点）。
+ALL_WORKFLOWS = [ContentPipelineWorkflow, DispatcherScanWorkflow, InspectionPeriodicWorkflow,
+                 InspectionTicketCountWatcherWorkflow]

@@ -42,6 +42,8 @@ instances:
     template: inspection-lite
 """
 
+# t260911-02 更新：every-n-tickets/race-first 已接线，「未接线 kind」负例迁移到
+# 「启用计数 kind 缺 source」（仍 fail-closed 点名；未接线词表面由缺失字段报错承担）
 UNWIRED_DECL = """schema: v1
 instances:
   - id: integration-tests
@@ -102,8 +104,10 @@ def main() -> int:
         # ── 离线拒绝腿（纯标准库可验，闸内即跑）──
         # 腿a：畸形声明——拒绝且理由指向声明本身，不指向连接/命名空间
         ok_a = expect_refuse("腿a(畸形声明)", malformed, "integration-tests", ["声明"])
-        # 腿b：启用实例声明未接线 kind——拒绝并点名该 kind 与已接线 kind 清单（M2）
-        ok_b = expect_refuse("腿b(未接线kind)", unwired, "integration-tests", ["every-n-tickets", "cron"])
+        # 腿b（t260911-02 更新）：启用计数 kind 缺 source——拒绝并点名 source 与已接线
+        # 计数源清单（fail-closed 语义不随接线扩大而松动；未接线 kind 词表负例已随
+        # 三 kind 全接线迁移至源词表）
+        ok_b = expect_refuse("腿b(计数缺source)", unwired, "integration-tests", ["source", "archive-dir"])
         # 腿c：enabled=false 实例——拒绝并点名实例（声明门行为级核心）
         ok_c = expect_refuse("腿c(占位实例)", normal, "docs-sync", ["docs-sync"])
         # 腿d：未知实例——拒绝并点名实例
@@ -114,7 +118,7 @@ def main() -> int:
             for m in failures:
                 print("FAIL_REASON: " + m, flush=True)
             return 1
-        print("离线拒绝腿 4/4 通过（畸形声明/未接线 kind/占位实例/未知实例）", flush=True)
+        print("离线拒绝腿 4/4 通过（畸形声明/计数缺source/占位实例/未知实例）", flush=True)
 
         # ── 放行腿（server 腿）：缺 temporalio/共享台=ENV_FAIL，拒绝腿已验部分如实陈述 ──
         # （主进程零 temporalio 依赖：client/trigger 子进程自选 venv python；探活失败
@@ -157,7 +161,7 @@ def main() -> int:
         for m in failures:
             print("FAIL_REASON: " + m, flush=True)
         return 1
-    print("PASS: 畸形声明/未接线 kind/占位实例/未知实例四类拒绝精确点名（离线）；"
+    print("PASS: 畸形声明/计数缺source/占位实例/未知实例四类拒绝精确点名（离线）；"
           "enabled 实例放行带票号；同期重复触发仍一票（每期一票）", flush=True)
     return 0
 

@@ -57,11 +57,14 @@ def test_schedule_specs_only_enabled_instances():
 
 
 def test_real_decl_file_loads_and_test_face_enabled():
+    # t260911-02：docs-sync 收编启用（第二实例，scan_face=doc）——两实例进 specs
     d = decl.load_inspection_decl(POC / "inspection.yaml")
     assert d.schema == "v1"
     assert d.instance("integration-tests").enabled is True
-    assert d.instance("docs-sync").enabled is False
-    assert [s["instance_id"] for s in decl.build_schedule_specs(d)] == ["integration-tests"]
+    assert d.instance("docs-sync").enabled is True
+    assert d.instance("docs-sync").scan_face == "doc"
+    assert [s["instance_id"] for s in decl.build_schedule_specs(d)] == [
+        "integration-tests", "docs-sync"]
 
 
 def test_default_decl_path_env_override(monkeypatch, tmp_path):
@@ -86,14 +89,53 @@ def test_real_decl_file_has_no_face_field():
 # ---------- M2：未接线 kind ----------
 
 def test_enabled_instance_unwired_kind_rejected_names_wired():
-    text = VALID.replace("kind: cron\n      cron: 0 9 * * 1", "kind: every-n-tickets\n      n: 20", 1)
+    # t260911-02 后三 kind 全接线，「未接线 kind」负例迁移到「未接线计数源」：
+    # 计数 kind 声明了未接线 source → 报错点名已接线源词表（fail-closed 语义不回退）
+    text = VALID.replace("kind: cron\n      cron: 0 9 * * 1",
+                         "kind: every-n-tickets\n      n: 20\n      source: temporal-vis\n"
+                         "      project_key: sandbar", 1)
     with pytest.raises(decl.DeclError) as ei:
         decl.parse_decl_text(text)
     msg = str(ei.value)
-    assert "every-n-tickets" in msg and "cron" in msg  # 点名未接线 kind 与已接线清单
+    assert "temporal-vis" in msg and "archive-dir" in msg  # 点名未接线源与已接线清单
 
 
-def test_disabled_instance_unwired_kind_allowed_as_placeholder():
+def test_enabled_count_kind_missing_source_rejected():
+    # 计数 kind 不带 source=报错点名（不猜默认源——「取数面可配置且确定」）
+    text = VALID.replace("kind: cron\n      cron: 0 9 * * 1",
+                         "kind: every-n-tickets\n      n: 20", 1)
+    with pytest.raises(decl.DeclError) as ei:
+        decl.parse_decl_text(text)
+    assert "source" in str(ei.value)
+
+
+def test_count_kind_illegal_project_key_rejected():
+    text = VALID.replace("kind: cron\n      cron: 0 9 * * 1",
+                         "kind: race-first\n      cron: 0 9 * * 1\n      n: 5\n"
+                         "      source: archive-dir\n      project_key: ../evil", 1)
+    with pytest.raises(decl.DeclError) as ei:
+        decl.parse_decl_text(text)
+    assert "project_key" in str(ei.value)
+
+
+def test_unknown_scan_face_rejected():
+    text = VALID.replace("template: inspection-lite", "template: inspection-lite\n    scan_face: mood", 1)
+    with pytest.raises(decl.DeclError) as ei:
+        decl.parse_decl_text(text)
+    assert "scan_face" in str(ei.value) and "doc" in str(ei.value)
+
+
+def test_cron_instance_with_count_only_fields_rejected():
+    # source/project_key 只属于计数 kind（多余字段 fail-closed）
+    text = VALID.replace("cron: 0 9 * * 1", "cron: 0 9 * * 1\n      source: archive-dir", 1)
+    with pytest.raises(decl.DeclError) as ei:
+        decl.parse_decl_text(text)
+    assert "source" in str(ei.value)
+
+
+def test_disabled_instance_unwired_source_allowed_as_placeholder():
+    # t260911-02：kind 全接线后，占位语义迁移到「禁用实例的计数 kind 可缺 source」
+    # （enabled=false=纯占位不校验计数面；启用才 fail-closed）
     text = VALID.replace("kind: cron\n      cron: 0 10 * * 1", "kind: race-first\n      n: 20")
     d = decl.parse_decl_text(text)
     assert d.instance("docs-sync").kind == "race-first"
@@ -197,7 +239,11 @@ def test_trigger_decl_op_offline_real_file():
     # 本票（t260910-11）改名去后缀 + main 侧 t260910-09 新增占位实例，两边语义合取：
     # ids=新名两实例+t260910-09 两个占位；占位 enabled=false 不进 schedule_specs
     assert ids == ["integration-tests", "docs-sync", "mechanism-face", "simplify-face"]
-    assert [s["instance_id"] for s in payload["result"]["schedule_specs"]] == ["integration-tests"]
+    # t260911-02：docs-sync 启用（scan_face=doc）→ 两实例进 specs
+    assert [s["instance_id"] for s in payload["result"]["schedule_specs"]] == [
+        "integration-tests", "docs-sync"]
+    faces = {s["instance_id"]: s["scan_face"] for s in payload["result"]["schedule_specs"]}
+    assert faces == {"integration-tests": "test", "docs-sync": "doc"}
 
 
 def test_trigger_decl_op_malformed_file_single_line_error(tmp_path):
@@ -217,11 +263,15 @@ def test_enabled_spec_helper_offline_gates():
     spec = _enabled_spec(POC / "inspection.yaml", "integration-tests")
     assert spec["workflow"] == "InspectionPeriodicWorkflow"
     with pytest.raises(ValueError, match="未启用"):
-        _enabled_spec(POC / "inspection.yaml", "docs-sync")
+        # t260910-09 占位实例仍禁用——fail-closed 负例迁移到它
+        _enabled_spec(POC / "inspection.yaml", "mechanism-face")
     with pytest.raises(ValueError, match="未在声明"):
         _enabled_spec(POC / "inspection.yaml", "nope")
     assert _valid_period("20260905") is None
+    assert _valid_period("20260905-2") is None          # t260911-02：计数期形态放行
     assert _valid_period("2026-09-05") is not None
+    assert _valid_period("20260905-0") is not None      # 桶号须正整数（前导 0 拒）
+    assert _valid_period("20260905-02") is not None
     assert _valid_period("20261399") is not None  # 非真实日历日
 
 

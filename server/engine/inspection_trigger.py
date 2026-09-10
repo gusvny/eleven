@@ -76,10 +76,12 @@ def _emit(payload: Dict[str, Any], exit_code: int = 0) -> None:
 
 
 def _valid_period(period: str) -> Optional[str]:
-    if not re.match(r"^\d{8}$", period or ""):
-        return "period 非法：%r（须 YYYYMMDD）" % period
+    # t260911-02：计数期=YYYYMMDD-<bucket>（与 inspection_flow.PERIOD_RE 同词法）；
+    # 桶段须正整数（前导 0 拒绝——期号是去重键，形态必须规范化唯一）
+    if not re.match(r"^\d{8}(-[1-9]\d*)?$", period or ""):
+        return "period 非法：%r（须 YYYYMMDD 或 YYYYMMDD-<bucket>）" % period
     try:
-        datetime.strptime(period, "%Y%m%d")
+        datetime.strptime(period.split("-")[0], "%Y%m%d")
     except ValueError:
         return "period 非真实日历日：%r" % period
     return None
@@ -139,6 +141,8 @@ async def cmd_trigger(args: argparse.Namespace) -> Dict[str, Any]:
             spec["workflow"],
             InspectionPeriodicInput(
                 instance_id=args.instance, period=period,
+                # 声明驱动：跑哪个巡检面由实例 scan_face 声明决定（缺省 test=票① 行为）
+                face=str(spec.get("scan_face") or "test"),
                 repo_root=args.repo_root or ""),
             id=ticket_id, task_queue=task_queue)
         return _ok({"triggered": True, "ticket_id": ticket_id, "period": period,
@@ -256,9 +260,13 @@ async def cmd_describe(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 async def cmd_schedule_up(args: argparse.Namespace) -> Dict[str, Any]:
-    """Declaration → Temporal Schedule (the wiring action for the generic scheduler;
-    behavior follows the declaration, no engine code changes).
-    note governance (trade-off 2): --note is mandatory."""
+    """Declaration → scheduler wiring（t260911-02 双形态）:
+      - kind=cron → Temporal Schedule（现状语义不变）；
+      - kind=every-n-tickets / race-first → 幂等拉起/复活计数 watcher workflow
+        （id=inspection-watcher-<instance>，从声明确定导出——重跑即幂等：running 原样
+        回执，非 running/不存在 → 起新 run。复活路径=KI-049 对答：可死机制必有可辨
+        的拉活手段）。
+    note governance (trade-off 2): --note is mandatory (both forms)."""
     if not args.note:
         return _err("schedule-up 必须带 --note（note 治理：不留无解释的常驻定时器）")
     try:
@@ -268,7 +276,7 @@ async def cmd_schedule_up(args: argparse.Namespace) -> Dict[str, Any]:
     except Exception as e:  # noqa: BLE001
         return _err("声明不可用：%s" % e)
     if spec["kind"] != "cron":
-        return _err("kind %r 未接线，schedule-up 只支持 cron（已接线清单见 inspection_decl.WIRED_KINDS）" % spec["kind"])
+        return await _schedule_up_watcher(args, spec)
     try:
         from temporalio.client import (
             Schedule,
@@ -326,6 +334,79 @@ async def cmd_schedule_up(args: argparse.Namespace) -> Dict[str, Any]:
                     % (args.instance, type(e).__name__, e))
 
 
+async def _schedule_up_watcher(args: argparse.Namespace, spec: Dict[str, Any]) -> Dict[str, Any]:
+    """计数 kind 的拉起/复活面（R3）：describe 探活 → running 原样回执；否则起 watcher。
+    同声明重跑必命中同一 workflow id（C-2，形状单点=inspection_flow.watcher_workflow_id）。"""
+    try:
+        from temporalio.client import Client
+        from inspection_flow import (
+            InspectionTicketCountWatcherWorkflow,
+            InspectionWatcherInput,
+            watcher_workflow_id,
+        )
+        from shared import NAMESPACE, TARGET_HOST, TASK_QUEUE
+        wf_id = watcher_workflow_id(spec["instance_id"])
+        client = await Client.connect(TARGET_HOST, namespace=NAMESPACE)
+        handle = client.get_workflow_handle(wf_id)
+        try:
+            desc = await handle.describe()
+            status = str(getattr(desc.status, "name", desc.status) or "")
+            if "RUNNING" in status.upper() or "CONTINUED" in status.upper():
+                return _ok({"schedule_id": wf_id, "mode": "already-running",
+                            "status": status, "note": args.note,
+                            "instance": spec["instance_id"],
+                            "kind": spec["kind"], "n": spec["n"]})
+            mode = "revived"
+        except Exception:  # noqa: BLE001——不存在/已终态 → 起新 run（复活路径）
+            mode = "created"
+        await client.start_workflow(
+            InspectionTicketCountWatcherWorkflow,
+            InspectionWatcherInput(
+                instance_id=spec["instance_id"], n=spec["n"], cron=spec["cron"],
+                scan_face=str(spec.get("scan_face") or "test"),
+                project_key=str(spec.get("project_key") or ""),
+                repo_root=args.repo_root or ""),
+            id=wf_id, task_queue=TASK_QUEUE)
+        return _ok({"schedule_id": wf_id, "mode": mode, "note": args.note,
+                    "instance": spec["instance_id"], "kind": spec["kind"],
+                    "n": spec["n"], "cron": spec["cron"]})
+    except ImportError as e:
+        return _err("temporalio SDK 缺失：%s（运维通道需 venv：server/engine/setup.sh）" % e)
+    except Exception as e:  # noqa: BLE001
+        return _err("watcher %s 拉起失败（不存在或不可达）：%s: %s"
+                    % (spec["instance_id"], type(e).__name__, e))
+
+
+async def cmd_watcher(args: argparse.Namespace) -> Dict[str, Any]:
+    """watcher 只读活性观测面（R3）：快照回执；不 RUNNING=非 running 状态点名
+    （「死了」必须可辨——KI-049 族：死机制无人知即事故）。"""
+    from temporalio.service import RPCError
+    try:
+        from inspection_flow import watcher_workflow_id
+        wf_id = watcher_workflow_id(args.instance)
+    except ValueError as e:
+        return _err(str(e))
+    try:
+        from temporalio.client import Client
+        from shared import NAMESPACE, TARGET_HOST
+        client = await Client.connect(TARGET_HOST, namespace=NAMESPACE)
+        handle = client.get_workflow_handle(wf_id)
+        try:
+            snap = await handle.query("snapshot")
+            desc = await handle.describe()
+            status = str(getattr(desc.status, "name", desc.status) or "")
+        except RPCError as e:
+            return _err("watcher %s（实例 %s）不存在或未拉起（RPC %s）——schedule-up 可复活；"
+                        "查无此票≠连不上" % (wf_id, args.instance, type(e).__name__))
+        if not isinstance(snap, dict):
+            return _err("watcher %s 无快照（状态=%s）——查无此票≠连不上" % (wf_id, status))
+        return _ok({"watcher_id": wf_id, "status": status, "snapshot": snap})
+    except ImportError as e:
+        return _err("temporalio SDK 缺失：%s" % e)
+    except Exception as e:  # noqa: BLE001
+        return _err("temporal 不可达（查询 %s 失败）：%s: %s" % (wf_id, type(e).__name__, e))
+
+
 def cmd_decl(args: argparse.Namespace) -> Dict[str, Any]:
     """Offline declaration view (zero temporalio dependency; the declaration-driven,
     parsing-level evidence surface)."""
@@ -337,7 +418,9 @@ def cmd_decl(args: argparse.Namespace) -> Dict[str, Any]:
         "source": decl.source,
         "schema": decl.schema,
         "instances": [{"id": i.id, "enabled": i.enabled, "kind": i.kind,
-                       "cron": i.cron, "workflow": i.workflow, "template": i.template}
+                       "cron": i.cron, "n": i.n, "source": i.source,
+                       "project_key": i.project_key, "scan_face": i.scan_face,
+                       "workflow": i.workflow, "template": i.template}
                       for i in decl.instances],
         "schedule_specs": build_schedule_specs(decl),
     })
@@ -367,9 +450,13 @@ def main() -> None:
     p.add_argument("--instance", required=True)
     p.add_argument("--period", default=None)
     p.add_argument("--decl-path", default=None)
-    p = sub.add_parser("schedule-up", help="声明→Temporal Schedule（必带 --note）")
+    p = sub.add_parser("watcher", help="计数 watcher 只读活性观测（快照回执）")
+    p.add_argument("--instance", required=True)
+    p.add_argument("--decl-path", default=None)
+    p = sub.add_parser("schedule-up", help="声明→调度器接线（cron→Schedule；计数 kind→watcher，必带 --note）")
     p.add_argument("--instance", required=True)
     p.add_argument("--note", default="")
+    p.add_argument("--repo-root", default="")
     p.add_argument("--decl-path", default=None)
     args = ap.parse_args()
     if not args.op:
@@ -380,7 +467,9 @@ def main() -> None:
             result = cmd_decl(args)
         else:
             result = asyncio.run({"trigger": cmd_trigger, "sign": cmd_sign,
-                                  "describe": cmd_describe, "ticket": cmd_ticket, "schedule-up": cmd_schedule_up}[args.op](args))
+                                  "describe": cmd_describe, "ticket": cmd_ticket,
+                                  "watcher": cmd_watcher,
+                                  "schedule-up": cmd_schedule_up}[args.op](args))
     except Exception as e:  # noqa: BLE001 — channel-level backstop: any exception becomes single-line JSON, never a bare stack
         result = _err("inspection_trigger.%s 异常：%s: %s" % (args.op, type(e).__name__, e))
     _emit(result, exit_code=0 if result.get("ok") else 1)

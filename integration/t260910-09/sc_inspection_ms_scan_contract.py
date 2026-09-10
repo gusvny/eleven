@@ -289,17 +289,19 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         base.die_env("activities 不可导入（%s: %s）——前 12 腿已过；分派缝腿需 temporalio 环境"
                      % (type(e).__name__, e))
-    # ── 腿13：face 分派缝（rework r2 语义，arbitrate code-fault 260910 修订）——
-    #     缺省（无 face 键）=test 既有语义零变化；face=mechanism 走新面；
-    #     未接线面（doc/bogus 均然——activity 看不到触发侧声明，二者不可辨）回落 test
-    #     面扫描但绝不静默：result.meta.face_fallback 点名请求面与已接线清单（票①
-    #     doc-face 零发现心跳票语义由此保持；fail-closed 保留在 CLI --face choices 层）。
+    # ── 腿13：face 分派缝（rework r2 语义，arbitrate code-fault 260910 修订；
+    #     t260911-02 arbitrate 再修订：doc 面已接线——「声明驱动、面在项目声明」
+    #     拍板②兑现后 face=doc 不再回落 test，改为真分派 docs 面扫描器；对无 docs/
+    #     的仓 fail-closed 点名（ok:false + error 点名 docs 目录缺失）。未接线面的
+    #     回落契约（ok:true + meta.face_fallback 点名请求面与已接线清单、绝不静默）
+    #     以 bogus-face 继续钉住，覆盖不收缩。缺省（无 face 键）=test 既有语义零变
+    #     化；face=mechanism 走新面。 ──
     t = lib.dead_hit_tree("dispatch")
     try:
         r_default = asyncio.run(activities.run_inspection_scan({"repo_root": t.root}))
         r_mech = asyncio.run(activities.run_inspection_scan(
             {"repo_root": t.root, "face": "mechanism"}))
-        r_unwired = asyncio.run(activities.run_inspection_scan(
+        r_doc = asyncio.run(activities.run_inspection_scan(
             {"repo_root": t.root, "face": "doc"}))
         r_bogus = asyncio.run(activities.run_inspection_scan(
             {"repo_root": t.root, "face": "bogus-face"}))
@@ -315,10 +317,19 @@ def main() -> int:
             failures.append("腿13 face=mechanism 分派未走新面 ok:true：%r" % (r_mech,))
         elif (r_mech.get("result") or {}).get("face") != "mechanism":
             failures.append("腿13 mechanism 回执 face 未回写：%r" % (r_mech.get("result"),))
-        for tag, r_un, req in (("声明未接线面 doc", r_unwired, "doc"),
-                               ("未接线面 bogus-face", r_bogus, "bogus-face")):
+        # face=doc（t260911-02 起已接线）：真分派 docs 面扫描器——对无 docs/ 的仓
+        # fail-closed 点名（ok:false + error 点名 docs 目录缺失），不回落不静默
+        if not (isinstance(r_doc, dict) and r_doc.get("ok") is False):
+            failures.append("腿13 face=doc 已接线却未走 docs 面 fail-closed（回落/假绿均破）：%r"
+                            % (r_doc,))
+        else:
+            err_doc = str(r_doc.get("error") or "")
+            if "docs" not in err_doc:
+                failures.append("腿13 face=doc fail-closed 未点名 docs 目录（报错精确纪律）：%r"
+                                % err_doc[:200])
+        for tag, r_un, req in (("未接线面 bogus-face", r_bogus, "bogus-face"),):
             if not (isinstance(r_un, dict) and r_un.get("ok") is True):
-                failures.append("腿13(%s) 未回落 ok:true（票① doc-face 心跳票语义破）：%r"
+                failures.append("腿13(%s) 未回落 ok:true（未接线面回落契约破）：%r"
                                 % (tag, r_un))
                 continue
             res = r_un.get("result") or {}
@@ -339,8 +350,8 @@ def main() -> int:
           "空集日志面仍判）与反例三连（引用/调用/豁免任一即不报）；影子路径 med；"
           "补丁退役 med 带「删了会怎样」；重复防御层 med；过长过深 low 点名；"
           "零发现心跳 true；被扫树逐字节未动；乱码/缺根 fail-closed；真仓只读可跑；"
-          "face 分派缝缺省 test 零变化+未接线面回落 test 带 face_fallback 标注（票① "
-          "doc-face 心跳票语义保持）",
+          "face 分派缝缺省 test 零变化+doc 面已接线（fail-closed 点名缺 docs 目录）"
+          "+未接线面回落 test 带 face_fallback 标注（t260911-02 起的接线后契约）",
           flush=True)
     return 0
 

@@ -53,11 +53,19 @@ DECL_FILE_NAME = "inspection.yaml"
 # kind vocabulary: KNOWN = the full documented set (legal to appear in a declaration),
 # WIRED = the subset the engine has actually wired (the whitelist for enabled instances).
 KNOWN_KINDS = ("cron", "every-n-tickets", "race-first")
-WIRED_KINDS = ("cron",)
+# t260911-02：every-n-tickets / race-first 接线（计数真源=归档目录，见
+# inspection_ticket_count.py 头注）。未知 kind 仍 fail-closed（KNOWN 之外的启用/禁用
+# 声明一律报错点名）——接线只扩白名单，不扩词法。
+WIRED_KINDS = ("cron", "every-n-tickets", "race-first")
 # Whitelist of inspection workflow type names the engine has wired and a declaration may
 # name (fail-closed so a declaration cannot point at a nonexistent workflow and then
 # silently never trigger — same spirit as M2).
 WIRED_WORKFLOWS = ("InspectionPeriodicWorkflow",)
+# 计数源词表（t260911-02）：现在只接了归档目录一源；扩源必须先扩此表+计数模块。
+TICKET_COUNT_SOURCES = ("archive-dir",)
+# 扫描面词表（t260911-02）：实例可声明 scan_face 指定跑哪个扫描器（「跑哪个巡检面」
+# 由项目声明决定——拍板③原文）；缺省 test（票① 行为兼容，零声明实例不回退不报错）。
+WIRED_FACES = ("test", "doc", "mechanism", "simplify")
 SCHEMA = "v1"
 INSTANCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 # Five-field cron lexicon: `*` `*/n` `n` `n-m` `n-m/n` `n,m` (comma lists); the month and
@@ -81,6 +89,9 @@ class InstanceSpec:
     kind: str
     cron: str = ""
     n: int = 0
+    source: str = ""
+    project_key: str = ""
+    scan_face: str = "test"
     workflow: str = ""
     template: str = ""
 
@@ -277,7 +288,7 @@ def _req_str(where: str, data: Dict[str, Any], key: str, no: str = "") -> str:
 def _validate_schedule(where: str, sched: Any, enabled: bool) -> tuple:
     if not isinstance(sched, dict):
         raise DeclError("%s：schedule 必须是映射（got %r）" % (where, sched))
-    unknown = sorted(set(sched) - {"kind", "cron", "n"})
+    unknown = sorted(set(sched) - {"kind", "cron", "n", "source", "project_key"})
     if unknown:
         raise DeclError("%s：schedule 未知字段 %s（合法：cron/n/kind）" % (where, unknown))
     kind = _req_str(where, sched, "kind")
@@ -290,19 +301,29 @@ def _validate_schedule(where: str, sched: Any, enabled: bool) -> tuple:
                         % (where, kind, "、".join(WIRED_KINDS)))
     cron = ""
     n = 0
-    if kind == "cron":
-        cron = _req_str(where, sched, "cron")
-        fields = cron.split()
-        if len(fields) != 5 or any(not _CRON_FIELD_RE.match(f) for f in fields):
-            raise DeclError("%s：cron 非法 %r（需五字段，词法 * */n n n-m n-m/n 名称/逗号列表）"
-                            % (where, cron))
-        # Numeric fields (per-field validation of bare values; fields containing */ranges/
-        # lists are left to the scheduler's semantics — here we only stop a bare value out
-        # of range)
-        _CRON_MAX = (59, 23, 31, 12, 7)
-        for pos, (f, top) in enumerate(zip(fields, _CRON_MAX)):
-            if f.isdigit() and int(f) > top:
-                raise DeclError("%s：cron 第 %d 域 %s 超出数值域（≤%d）" % (where, pos + 1, f, top))
+    if kind in ("cron", "race-first"):   # race-first 的 cron 侧与 cron kind 同词法
+        if kind == "cron" and sched.get("n") is not None:
+            raise DeclError("%s：n 只属于计数 kind（every-n-tickets/race-first），cron 实例"
+                            "声明了 n——多余字段 fail-closed" % where)
+        if kind == "race-first" and not enabled and not sched.get("cron"):
+            # race-first 禁用占位允许缺 cron（占位=纯声明文档，同 source 的占位豁免口径）
+            cron = ""
+        else:
+            cron = _req_str(where, sched, "cron")
+        if cron:
+            fields = cron.split()
+            if len(fields) != 5 or any(not _CRON_FIELD_RE.match(f) for f in fields):
+                raise DeclError("%s：cron 非法 %r（需五字段，词法 * */n n n-m n-m/n 名称/逗号列表）"
+                                % (where, cron))
+            # Numeric fields (per-field validation of bare values; fields containing */ranges/
+            # lists are left to the scheduler's semantics — here we only stop a bare value
+            # out of range)
+            _CRON_MAX = (59, 23, 31, 12, 7)
+            for pos, (f, top) in enumerate(zip(fields, _CRON_MAX)):
+                if f.isdigit() and int(f) > top:
+                    raise DeclError("%s：cron 第 %d 域 %s 超出数值域（≤%d）" % (where, pos + 1, f, top))
+    source = ""
+    project_key = ""
     if kind in ("every-n-tickets", "race-first"):
         n_raw = sched.get("n")
         try:
@@ -311,7 +332,29 @@ def _validate_schedule(where: str, sched: Any, enabled: bool) -> tuple:
             raise DeclError("%s：n 必须是整数（got %r）" % (where, n_raw)) from None
         if n < 1 or n > 10000:
             raise DeclError("%s：n 超出合理区间（1–10000）：%d" % (where, n))
-    return kind, cron, n
+        # 计数源必须显式声明且在已接线词表内（fail-closed：不猜默认源——「取数面可配置
+        # 且确定」是本票验收前提，缺声明=报错点名，绝不静默回退）。enabled=false 占位
+        # 豁免必填（占位=纯声明文档，不调度不触发；但给了就照词法校验，不因禁用放行坏值）。
+        source = str(sched.get("source") or "")
+        project_key = str(sched.get("project_key") or "")
+        if enabled:
+            if not source:
+                raise DeclError("%s：缺必填字段 source（计数源词表：%s）"
+                                % (where, "、".join(TICKET_COUNT_SOURCES)))
+            if not project_key:
+                raise DeclError("%s：缺必填字段 project_key（计数取数面的项目 key）" % where)
+        if source:
+            if source not in TICKET_COUNT_SOURCES:
+                raise DeclError("%s：ticket 计数源 %r 未接线（已接线：%s）"
+                                % (where, source, "、".join(TICKET_COUNT_SOURCES)))
+            if not INSTANCE_ID_RE.match(project_key):
+                raise DeclError("%s：project_key 非法 %r（小写 slug，同实例 id 词法）"
+                                % (where, project_key))
+    elif sched.get("source") or sched.get("project_key"):
+        raise DeclError("%s：source/project_key 只属于计数 kind（every-n-tickets/race-first），"
+                        "cron 实例声明了 %s——多余字段 fail-closed"
+                        % (where, "、".join(k for k in ("source", "project_key") if sched.get(k))))
+    return kind, cron, n, source, project_key
 
 
 def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
@@ -335,7 +378,8 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
         where = "%s instances[%d]" % (source, idx)
         if not isinstance(item, dict):
             raise DeclError("%s：实例必须是映射（got %s）" % (where, type(item).__name__))
-        unknown = sorted(set(item) - {"id", "enabled", "schedule", "workflow", "template"})
+        unknown = sorted(set(item) - {"id", "enabled", "schedule", "workflow", "template",
+                                      "scan_face"})
         if unknown:
             raise DeclError("%s：未知实例字段 %s（合法：id/enabled/schedule/workflow/template；"
                             "face 已于 260910 巡检校准票 t260910-11 除名——零消费者，旧声明含 face 一律拒收点名）"
@@ -355,9 +399,16 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
             raise DeclError("%s：workflow %r 未接线（可指名：%s）——防声明指空后静默不触发"
                             % (where, workflow_name, "、".join(WIRED_WORKFLOWS)))
         template = _req_str(where, item, "template")
-        kind, cron, n = _validate_schedule(where, item.get("schedule"), enabled)
+        scan_face = "test"
+        if item.get("scan_face") is not None:
+            scan_face = _req_str(where, item, "scan_face")
+            if scan_face not in WIRED_FACES:
+                raise DeclError("%s：scan_face %r 未接线（可指名：%s）——面在项目声明，"
+                                "引擎只提供已接线的扫描器" % (where, scan_face, "、".join(WIRED_FACES)))
+        kind, cron, n, source, project_key = _validate_schedule(where, item.get("schedule"), enabled)
         instances.append(InstanceSpec(
             id=inst_id, enabled=enabled, kind=kind, cron=cron, n=n,
+            source=source, project_key=project_key, scan_face=scan_face,
             workflow=workflow_name, template=template))
     return InspectionDecl(schema=SCHEMA, instances=instances, source=source)
 
@@ -376,6 +427,9 @@ def build_schedule_specs(decl: InspectionDecl) -> List[Dict[str, Any]]:
             "kind": it.kind,
             "cron": it.cron,
             "n": it.n,
+            "source": it.source,
+            "project_key": it.project_key,
+            "scan_face": it.scan_face,
             "workflow": it.workflow,
             "template": it.template,
             # overlap semantics (borrowed from trade-off list item 1): repeated triggers of

@@ -64,21 +64,24 @@ def test_activity_default_face_is_test_and_dispatch_wiring():
 
 
 def test_activity_unwired_face_falls_back_to_test_with_annotation(tmp_path):
-    """分派行为锁（arbitrate code-fault 260910 修复面）：face=doc（票① 声明在案未接线
-    面）回落 test 面扫描 ok:true——doc-face 零发现心跳票语义保持；回落绝不静默：
-    meta.face_fallback 点名请求面与已接线清单。"""
+    """分派行为锁（arbitrate code-fault 260910 修复面；t260911-02 更新）：doc 面已接线
+    （docs-sync 第二实例）→ 不再回落，走 doc 扫描器；夹具无 docs 目录=fail-closed
+    ok:false 点名（不回落不假绿）。回落语义只对真正未接线的面（bogus-face）生效，
+    回落绝不静默：meta.face_fallback 点名请求面与已接线清单（含 doc）。"""
     import asyncio
 
     import activities  # noqa: E402  # 需 temporalio（venv 解释器）
 
     root = make_repo(tmp_path)
-    for req in ("doc", "bogus-face"):
-        r = asyncio.run(activities.run_inspection_scan({"repo_root": str(root), "face": req}))
-        assert r["ok"] is True, r
-        res = r["result"]
-        assert res["face"] == "test"
-        note = str(res["meta"].get("face_fallback") or "")
-        assert req in note and "mechanism" in note and "simplify" in note, note
+    r = asyncio.run(activities.run_inspection_scan({"repo_root": str(root), "face": "doc"}))
+    assert r["ok"] is False, r
+    assert "docs 目录缺失" in str(r.get("error")), r
+    r = asyncio.run(activities.run_inspection_scan({"repo_root": str(root), "face": "bogus-face"}))
+    assert r["ok"] is True, r
+    res = r["result"]
+    assert res["face"] == "test"
+    note = str(res["meta"].get("face_fallback") or "")
+    assert "bogus-face" in note and "doc" in note and "mechanism" in note, note
 
 
 def test_activity_wired_faces_dispatch(tmp_path):

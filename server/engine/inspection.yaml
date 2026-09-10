@@ -12,8 +12,12 @@
 #   instances 巡检实例表（每实例=一个扫描面的调度位；每期一票按实例独立开票）
 #   id        实例标识（小写 slug，作票号组成段；票号形如 inspection-<id>-<期号>）
 #   enabled   是否启用（false=占位不调度不触发——声明驱动开关，行为级验收点）
-#   schedule  定时法声明：kind=cron（已接线）| every-n-tickets / race-first（未接线，只可
-#             以注释示例存在——启用实例声明未接线 kind=解析显式报错并点名已接线清单）
+#   schedule  定时法声明：kind=cron（五字段 cron）| every-n-tickets（每并 N 张票触发）|
+#             race-first（cron 与计数先到者——t260911-02 全接线）。计数 kind 必带：
+#             n（阈值 1–10000）、source（计数源，现只接 archive-dir=ticket 归档目录）、
+#             project_key（归档目录的项目 key，票计数=该 key data/tickets 一级条目数）
+#   scan_face 本实例跑的扫描器（t260911-02 新增：「跑哪个巡检面」由声明决定；可指名
+#             test|doc|mechanism|simplify；缺省 test=票① 行为）
 #   workflow  本实例跑的 workflow 类型名（引擎侧已接线巡检 workflow 白名单校验）
 #   template  巡检票模板标识（票面展示用）
 schema: v1
@@ -26,7 +30,8 @@ instances:
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
   - id: docs-sync
-    enabled: false
+    enabled: true
+    scan_face: doc
     schedule:
       kind: cron
       cron: 0 10 * * 1
@@ -49,11 +54,17 @@ instances:
       cron: 0 8 * * 1
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
-# ---- 未接线 kind 示例（禁入启用实例；接线票落地后迁移为正式声明）----
+# ---- 计数 kind 声明示例（t260911-02 已接线；启用前把 project_key 指向真项目 key，
+# ---- 再 inspection_trigger.py schedule-up --instance <id> --note <谁/为何/频率>
+# ---- 拉起/复活 watcher）----
 #   schedule:
-#     kind: every-n-tickets   # 每并 N 张票触发（票计数源未接线，启用=显式报错）
+#     kind: every-n-tickets   # 每并 N 张票触发（计数源=ticket 归档目录）
 #     n: 20
+#     source: archive-dir
+#     project_key: sandbar
 #   schedule:
-#     kind: race-first        # cron 与每 N 张票多条件先到者
-#     cron: 0 9 * * 1
+#     kind: race-first        # cron 与每 N 张票先到者（计数触发→cron 相位推进；
+#     cron: 0 9 * * 1         #  cron 触发→计数基线复位；同日两形态期票并存合法）
 #     n: 20
+#     source: archive-dir
+#     project_key: sandbar

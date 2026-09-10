@@ -48,7 +48,9 @@ INSPECTION_RED_LINE = "巡检只出报告与开票建议，绝不直接改码；
 # Agents may not sign for themselves (reusing Signature semantics): the human gate's who
 # must not be one of the M10 five agent role names.
 AGENT_ROLE_NAMES = frozenset({"developer", "integration", "ops", "product-operation", "artist"})
-PERIOD_RE = re.compile(r"^\d{8}$")
+# 期号两形态（t260911-02 接线 every-n-tickets/race-first）：cron 期=纯 YYYYMMDD；
+# 计数期=YYYYMMDD-<bucket>（同日多期可区分；一票一期按（实例,期号）去重不变）。
+PERIOD_RE = re.compile(r"^\d{8}(-[1-9]\d*)?$")
 MAX_WHO_LEN = 64
 
 RETRY = RetryPolicy(maximum_attempts=3)
@@ -62,8 +64,9 @@ SCAN_TO = timedelta(minutes=15)
 # ========================================================================================
 
 def period_key(now: Optional[datetime] = None) -> str:
-    """Period key = the current date (YYYYMMDD). Redefining period semantics when
-    every-n-tickets gets wired is that wiring ticket's job."""
+    """Period key = the current date (YYYYMMDD) — the cron-period form. Count periods
+    (YYYYMMDD-<bucket>) are minted by the ticket-count watcher
+    (inspection_ticket_count.decide / count_period)."""
     dt = now or datetime.now()
     return dt.strftime("%Y%m%d")
 
@@ -72,8 +75,18 @@ def inspection_ticket_id(instance_id: str, period: str) -> str:
     """Inspection ticket id = workflow id (a repeated trigger with the same id = the same
     ticket, the mechanical one-ticket-per-period guarantee)."""
     if not instance_id or not PERIOD_RE.match(period or ""):
-        raise ValueError("票号组成非法：instance=%r period=%r（期号须 YYYYMMDD）" % (instance_id, period))
+        raise ValueError("票号组成非法：instance=%r period=%r（期号须 YYYYMMDD 或 "
+                         "YYYYMMDD-<bucket>）" % (instance_id, period))
     return "inspection-%s-%s" % (instance_id, period)
+
+
+def watcher_workflow_id(instance_id: str) -> str:
+    """watcher workflow id（C-2，review_plan gen1 条件项）：id 从声明确定导出——同声明
+    重跑 schedule-up 必命中同一 workflow（幂等拉起/复活的前提）。形状变更=运维契约
+    变更，须带单测锁定（test_t260911_02_watcher.py）。"""
+    if not instance_id or not re.match(r"^[a-z0-9][a-z0-9-]{0,63}$", instance_id):
+        raise ValueError("watcher id 组成非法：instance=%r（小写 slug）" % instance_id)
+    return "inspection-watcher-%s" % instance_id
 
 
 def validate_trigger_args(instance_id: str, period: str) -> Optional[str]:
@@ -82,7 +95,7 @@ def validate_trigger_args(instance_id: str, period: str) -> Optional[str]:
     if not instance_id or not re.match(r"^[a-z0-9][a-z0-9-]{0,63}$", instance_id):
         return "instance 非法：%r（小写 slug）" % instance_id
     if not PERIOD_RE.match(period or ""):
-        return "period 非法：%r（须 YYYYMMDD）" % period
+        return "period 非法：%r（须 YYYYMMDD 或 YYYYMMDD-<bucket>）" % period
     return None
 
 
@@ -279,3 +292,136 @@ class InspectionPeriodicWorkflow:
             self.decision, self.face.get("summary", {}).get("high", 0),
             self.face.get("summary", {}).get("med", 0), self.face.get("summary", {}).get("low", 0)))
         return self.snapshot()
+
+
+# ========================================================================================
+# Ticket-count watcher（t260911-02）：every-n-tickets / race-first 的通用调度器。
+# 每个启用的计数 kind 实例一个；workflow id=inspection-watcher-<instance>（从声明确定
+# 导出——schedule-up 幂等拉起/复活的前提，C-2）。语义按方案 R2：计数越桶先触发
+# （期号=YYYYMMDD-<bucket>）；cron 到点触发并复位基线（期号=纯 YYYYMMDD）；双侧规则
+# 单点在 inspection_ticket_count.decide（单测面）。确定性纪律同主 workflow：workflow
+# 体零 IO 零钟表（计数与开票都在 activity，唯一时间源=workflow.now()）。
+# ========================================================================================
+
+@dataclass
+class InspectionWatcherInput:
+    """Watcher 输入，全部由声明 spec 导出（schedule-up 是唯一生产侧拉起点）。
+    baseline / cron_anchor / triggered_total 三字段跨 continue_as_new 携带状态
+    （无界历史治理：每 WATCHER_MAX_ITERATIONS 轮换一代历史）。"""
+
+    instance_id: str
+    n: int = 0
+    cron: str = ""
+    scan_face: str = "test"
+    repo_root: str = ""
+    project_key: str = ""
+    poll_seconds: float = 60.0
+    baseline: int = -1                 # -1 = 基线未立（首轮成功计数即立，不回看历史票）
+    cron_anchor: str = ""              # ISO datetime；空=cron 侧未激活
+    triggered_total: int = 0
+
+
+WATCHER_MAX_ITERATIONS = 500   # continue_as_new 节流（默认 60s 轮询≈每 8.3 小时换一代）
+
+
+@workflow.defn
+class InspectionTicketCountWatcherWorkflow:
+    """常驻轮询调度器：计数 → 纯决策（decide）→ 开期票（票号幂等=一票一期去重兜底）。
+    取消/失败终态随 workflow 自身收敛（Temporal 持久化）；死亡+复活=schedule-up
+    （inspection_trigger.py）——本票新引入的可死机制的 KI-049 对答。"""
+
+    def __init__(self) -> None:
+        self.last_count: int = -1
+        self.last_error: str = ""
+        self.last_trigger: Dict[str, Any] = {}
+        self.iterations: int = 0
+        self._baseline: int = -1
+        self._triggered_total: int = 0
+        self._next_fire: Optional[datetime] = None
+        self._last_event: Dict[str, Any] = {}
+
+    def _enter(self, stage: str, state: str, reason: str) -> None:
+        self._last_event = {"at": workflow.now().isoformat(timespec="seconds"),
+                            "stage": stage, "state": state, "reason": reason}
+
+    @workflow.query
+    def snapshot(self) -> Dict[str, Any]:
+        """活性/运维面（`watcher` 子命令消费）：没有这份快照，死 watcher 不可见
+        （KI-049 族纪律）。"""
+        return {
+            "id": workflow.info().workflow_id,
+            "kind": "inspection-watcher",
+            "last_count": self.last_count,
+            "last_error": self.last_error,
+            "last_trigger": self.last_trigger,
+            "triggered_total": self._triggered_total,
+            "baseline": self._baseline,
+            "next_cron_fire": self._next_fire.isoformat(timespec="seconds") if self._next_fire else "",
+            "iterations": self.iterations,
+            "last_event": self._last_event,
+        }
+
+    @workflow.run
+    async def run(self, inp: InspectionWatcherInput) -> Dict[str, Any]:
+        # 输入形状 fail-closed：畸形 watcher 绝不「跑着但什么都不做」
+        if not inp.instance_id or not inp.project_key or inp.n < 1:
+            from temporalio.exceptions import ApplicationError
+            raise ApplicationError(
+                "watcher 输入非法：instance=%r project_key=%r n=%r"
+                % (inp.instance_id, inp.project_key, inp.n), non_retryable=True)
+        from inspection_ticket_count import decide, next_cron_fire
+        self._baseline = inp.baseline
+        self._triggered_total = inp.triggered_total
+        anchor: datetime = (datetime.fromisoformat(inp.cron_anchor)
+                            if inp.cron_anchor else workflow.now())
+        self._next_fire = next_cron_fire(inp.cron, anchor) if inp.cron else None
+        self._enter("poll", "running", "计数 watcher 运行（实例 %s，n=%d，源=archive-dir:%s，"
+                    "cron=%s）" % (inp.instance_id, inp.n, inp.project_key, inp.cron or "无"))
+        while True:
+            res: Dict[str, Any] = await workflow.execute_activity(
+                "count_archived_tickets",
+                args=[{"project_key": inp.project_key}],
+                start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
+            now = workflow.now()
+            cron_due = False
+            if res.get("ok"):
+                self.last_count = int((res.get("result") or {}).get("count", -1))
+                self.last_error = ""
+                if self._baseline < 0:
+                    # 初始基线=0（存量计数按桶即判：当前计数已达 k*n 即触发当期；watcher
+                    # 死亡复活后同桶重放由票号幂等去重兜底，不会双开票）
+                    self._baseline = 0
+                if self._next_fire is not None and now >= self._next_fire:
+                    cron_due = True
+            else:
+                # 计数失败：如实进快照，绝不拿旧计数或 0 假判（「数不了」≠「0 张」）
+                self.last_error = str(res.get("error") or "count failed")
+                self._enter("poll", "running", "计数失败（本轮不判触发）：%s" % self.last_error)
+            if res.get("ok") and self._baseline >= 0:
+                d = decide(self.last_count, self._baseline, inp.n, cron_due, now)
+                if d["trigger"]:
+                    opened: Dict[str, Any] = await workflow.execute_activity(
+                        "trigger_inspection_period",
+                        args=[{"instance_id": inp.instance_id, "period": d["period"],
+                               "repo_root": inp.repo_root, "scan_face": inp.scan_face}],
+                        start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
+                    deduped = bool((opened.get("result") or {}).get("deduped"))
+                    self.last_trigger = {"kind": d["trigger"], "period": d["period"],
+                                         "deduped": deduped}
+                    self._triggered_total += 1
+                    self._baseline = d["baseline"]
+                    anchor = now                          # R2：任一侧触发都推进 cron 相位
+                    self._next_fire = next_cron_fire(inp.cron, anchor) if inp.cron else None
+                    self._enter("trigger", "running",
+                                "%s 触发 → 期 %s（deduped=%s，基线=%d）"
+                                % (d["trigger"], d["period"], deduped, self._baseline))
+            self.iterations += 1
+            if self.iterations >= WATCHER_MAX_ITERATIONS:
+                workflow.continue_as_new(InspectionWatcherInput(
+                    instance_id=inp.instance_id, n=inp.n, cron=inp.cron,
+                    scan_face=inp.scan_face, repo_root=inp.repo_root,
+                    project_key=inp.project_key, poll_seconds=inp.poll_seconds,
+                    baseline=self._baseline,
+                    cron_anchor=anchor.isoformat(timespec="seconds"),
+                    triggered_total=self._triggered_total))
+            await workflow.sleep(timedelta(seconds=inp.poll_seconds))
