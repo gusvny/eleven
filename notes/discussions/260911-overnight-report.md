@@ -104,6 +104,11 @@
      全量最新一轮 fail=0（8 条 ENV_FAIL 为设计三态）、共享 bundle 守卫仅注释 1 行改动（断言零改动）、
      写集合规、冲突预演 0。意义：工单台前端的 diff 噪音（同源码重建几百行压缩器化妆差异）此后消失。
 
+**00:30 轮**：t260910-15 已落账（main `3f4bfe7`）。在跑 5 张（有空位）→ 按计划补开
+     **t260911-02「巡检续票：触发 kind 接线（every-n-tickets/race-first）+ docs-sync 第二实例」**
+     （epic=inspection；触发条件＝11 落账已满足；兑现宿主 260910 拍板②③：触发可声明不写死 +
+     文档同步收编为第二实例）。写集 server/engine/ + integration/。
+
 ## 七 本夜新增账
 
 - **KI-072**（问题册）：负载敏感的不稳定检查——三实证（reap 组回收集 / scenario-guard-pipeline-landed / ticket-session-restore，均并发红、单跑绿），含三条处置方向（判据层归 13、测试层归校准、运维层限并发）。
