@@ -667,3 +667,14 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 定性教训（同类第二次）：**断言没打在交付物终态上**——t260910-03 场景只断言 TicketInput 载荷持久化（G8c），integration 签字时随其断言面复核同样漏过；正确面=泳道磁盘逐仓物化（成员仓工作区+分支+清单）。
 - 同票另一条（dengzhufpv 复核报）：test_t260910_03_fuses.py::test_fuse_a_no_project_root_member_entries_still_rejected 结果依赖 cwd（仓根 25 passed／/tmp 跑 24+1 failed，撞 shared.py:1105 豁免分支）。
 - 修复票=t260910-08（明细贯通+断言上移诊断终态+CWD 敏感红收口）。
+
+## KI-072 负载敏感的不稳定检查（并发下假红，单跑全绿）——260910 夜 三实证
+- 现象：同一检查在并发环境（merge_check/全量套件内）红、安静面单跑全绿：
+  ①`integration/t260901-25/t03_reap_process_group.py`：t260910-11 merge_check 内 `pass=7 fail=1`，
+  泳道与 main 单独复跑均 `pass=8 fail=0`（进程组回收/幂等容错腿对时序敏感）；
+  ②`scenario-guard-pipeline-landed`：t260910-08 套件内红，泳道安静面复跑 `GUARD ran=3 fail=0`、main 基线亦绿；
+  ③`ticket-session-restore`：t260910-08 套件内红，泳道安静面复跑 `pass=10 fail=0`、main 基线亦绿。
+- 危害：为环境瞬态反复触发仲裁迭代（260910 05/08 各撞 6 轮上限转人工），并诱导「改测试集」的错误处置。
+- 处置方向：①判据层面＝t260910-13（失败形态分类+机械基线对照）落地后，此类红不再堵票；
+  ②测试层面＝这些检查需加时序容忍/重试或去掉对墙钟与并发的依赖（归巡检校准 t260910-11 或后续小票）；
+  ③运维层面＝过夜/高峰期限制同时跑套件数（并发争抢是共同诱因）。
