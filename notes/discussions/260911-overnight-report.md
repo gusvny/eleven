@@ -186,6 +186,18 @@
      （`var e = 0; for (;…)` ↔ `var e; for (e = 0;…)`），说明 15 的钉死只在受控环境成立、未覆盖全部重建入口
      与工具解析链；危害＝diff 噪音回归 + 跨票产物差异引发无意义冲突与越界判据（本夜 02 即因此卡门）。
 
+**03:00 轮**：**三张同时到门，全部代签**：
+1. **t260910-12（起台面租约化）**——打回项已修：prune-e2e 泳道复跑 **19/0**（打回时 5/9）；核心场景
+   herd 零串台 **44/0**、持有者被杀回收 **15/0**；写集合规、冲突 0、main 干净。
+2. **t260910-04（暂停功能补全：host 透传 paused）**——核心场景 sc_console_paused_list **20/0**
+   （真台真引擎：console 列表行 paused/paused_phase 与引擎快照逐键一致、resume 后回 false 且续派到收口、
+   零残留）；全量最新轮 **fail=0**；其对共享浏览器库的改动为新增可选参数（按 URL 点名豁免已知夹具幽灵 400，
+   其余 ≥400 照旧红），留痕于签字记录。
+3. **t260911-02（巡检续票）**——越界写纠正后全复核：两条场景全绿（触发 kind 12 腿、docs-sync 5 腿）；
+   红名单逐条定性（charter＝main 侧漂移已修；docs 两条＝并发窗口假红，安静面 8/0+17/0；no-skip 7/0、
+   ms-scan-contract 全 PASS；chat-project-tag/multi-tab/pause-gate＝KI-072；build-reproducible＝KI-073）。
+   交付内容＝宿主拍板②③：触发 kind 接线（every-n-tickets/race-first，声明驱动）+ docs-sync 第二实例。
+
 ## 七 本夜新增账
 
 - **KI-072**（问题册）：负载敏感的不稳定检查——三实证（reap 组回收集 / scenario-guard-pipeline-landed / ticket-session-restore，均并发红、单跑绿），含三条处置方向（判据层归 13、测试层归校准、运维层限并发）。
