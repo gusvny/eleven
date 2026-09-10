@@ -198,6 +198,17 @@
    ms-scan-contract 全 PASS；chat-project-tag/multi-tab/pause-gate＝KI-072；build-reproducible＝KI-073）。
    交付内容＝宿主拍板②③：触发 kind 接线（every-n-tickets/race-first，声明驱动）+ docs-sync 第二实例。
 
+**03:15 轮**：①t260910-04（370539e）与 t260911-02（c9b5aef）均已落账；t260910-12 亦已落账；
+     ②**t260910-14 证据补齐后仅剩冲突预演红**（bundle 新鲜度与 UI 证据已转绿）→ 引擎按设计自动转消解
+     （与刚落账的 04 同动 workbench 面），无需干预；③**补开两张队列票**（触发均满足：16＝08 落账、20＝13 落账）：
+     · **t260911-04 全链多仓旅程守卫**（补 KI-071 那一跳：正规入口→全程→merge→断言成员仓 main 落仓+内容正确+
+       拆除零残留+没落仓必红；成本可控用 08 的桩脑手法；写集 integration/）
+     · **t260911-05 KI-048 修复 + 详情人话状态卡**（合并受阻正确分类走 13 协议原因码、人门/票面原因可见、
+       合并前主动脏检查且**严禁 auto-stash/auto-commit**（260908 事故红线）、详情 H 块人话状态卡；
+       写集 server/engine/+workbench+integration/，要求同批重建产物+UI 截图）
+     **队列余项**：阶段闸（t260911-03 在飞）、巡检续票（t260911-02 已落账）、路由迁移（14 在飞）、
+     压缩器钉死（15 已落账，KI-073 为其后续增量）。
+
 ## 七 本夜新增账
 
 - **KI-072**（问题册）：负载敏感的不稳定检查——三实证（reap 组回收集 / scenario-guard-pipeline-landed / ticket-session-restore，均并发红、单跑绿），含三条处置方向（判据层归 13、测试层归校准、运维层限并发）。
