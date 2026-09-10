@@ -117,3 +117,16 @@
 - 票 = **t260910-12「起台面租约化」**：租约语义替换启发式（申请/续租/释放/TTL+pid 判活）、
   幂等 ensure（同租约内不许重复起同一套台，取代「二次起台挤掉健康台」）、满员排队、
   三类瞬态场景侧自动重试一次、保留禁产端口硬集与诚实 ENV_FAIL。不做常驻 daemon。
+
+## 补记（260910 晚·路由表迁出 git 与 epic-next 退役）
+
+- 宿主拍板：①模型路由真源迁出 git（仓内那份退役，以 `paths.model_routes` 声明指向的
+  文件为准；引擎读/UI 读写同源；无 env 层；**init 引导先不做**）；②`epic-next` /
+  `suggest_next` **整条退役**（无用 + 实测两次拖慢合并各约 4 分钟）。
+- 票序（避免同文件撞车）：
+  1. **退役票**：dev_lane 的 suggest_next 段 + prepare_epic_next/build_suggest_next_prompt
+     activities + workbench host 的 epic-next job 与 UI 入口 + 场景/prompt 引用 +
+     `.suyou/epic-next` 状态目录去留；写集=server/engine/ + server/plugins/workbench/ + integration/；
+  2. **路由表迁移票**：仓内真源退役、UI 读写同源、两份守卫改读声明表、三态点名告警；
+     写集=server/engine/ + server/plugins/ui/ + server/installer/ + integration/。
+  两张都碰 workbench/node.ts 面 → 与在飞 10（文档视图，刚打回实现段）串行，等 10 落账再开。

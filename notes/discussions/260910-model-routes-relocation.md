@@ -11,7 +11,11 @@
    引擎就读哪个、UI 就写哪个（单一真源，读写同源）；
 3. **init 流程**：路由表由用户在建项目时填/选（做一次填表不麻烦），
    必要时做一条 `sandbar project add` 的引导流程；
-4. 不引入 env 覆盖层（曾提的 `SANDBAR_MODEL_ROUTES` 否决）。
+4. 不引入 env 覆盖层（曾提的 `SANDBAR_MODEL_ROUTES` 否决）；
+5. **`epic-next` / `suggest_next` 整条退役**（宿主 260910 拍板：该功能无用，且实测两次
+   拖慢合并收口各约 4 分钟）——退掉后本迁移票少一个引用点（见 §三 清单第 3 条）；
+6. **init 引导先不做**（宿主拍板）：新项目按 docs 样例手填一份表即可；表缺失按新口径
+   点名告警，不静默。
 
 ## 二、目标形态
 
@@ -33,12 +37,13 @@
 3. **引用点一并改**（今日实测清单）：
    - `server/engine/shared.py`：`MODEL_ROUTES_FILE` 常量退场，`model_route_for` 收路径参数单点；
    - `server/plugins/ui/src/host/routes.ts`（UI 读写，`:540`/`:203` 两处 `join(repo,'server','model-routes.yaml')`）；
-   - `server/plugins/workbench/src/host/epic-next.ts`（`:479` 预跑建议生成 patch 时读表）；
+   - ~~`server/plugins/workbench/src/host/epic-next.ts`~~ —— 该文件随 suggest_next 整条退役
+     （宿主 260910 拍板），本迁移票不再触及；**前置票=退役票**。
    - 守卫 `integration/t260902-07/tests/test_route_table.py`、`test_route_lookup.py`
      （已去快照化，改读「声明指向的表」并保留性质断言）；
    - `server/plugins/workbench/node.ts` 注释与「模型」页（生效来源展示）。
-4. **init 引导**：`sandbar project add` 生成机器级表（用户填空或选模板）+ 写声明；
-   UI 侧「初始化」动作的落点从仓内改为机器级。
+4. ~~init 引导~~（宿主 260910 拍板先不做）：实施时 UI 的「初始化」动作若保留，落点必须
+   是声明指向的文件（不落仓内）；新项目建表=人工按 docs 样例填。
 5. **生效时机说明**：引擎在**每次派活时读表**（不需重启即生效）；console 的路由编辑
    端点在内存服务内（重启 3099 才见新逻辑，KI-052 同族）——界面须写明，避免「改了没生效」误读。
 
