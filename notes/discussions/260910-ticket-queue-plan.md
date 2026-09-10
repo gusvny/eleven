@@ -58,3 +58,14 @@
   大纲」+ 右栏正文全宽 + 英文固定 UI 元素 + 正文 Verified 新鲜度 chip（doc-lifecycle
   面B verified 时间戳亮出）。写集=server/plugins/workbench/ + integration/；
   场景必含：项目锚 docs tree 断言（另一项目读到自己的 docs）+ 回落引擎仓断言。
+
+## 宿主待办（260910 记）：退役「下一单建议」
+
+- 宿主 260910 拍板：**suggest_next（合并签字后预跑「下一单建议」，spawn 一个
+  integration agent 会话产建议）已无使用价值，后续去掉**。先记账不即做。
+- 成本面（记录用）：每张票收口都会多跑一次 agent 会话（t260910-03 合并时实测
+  触发：suggest_next/running → spawn），属纯开销。
+- 退役口径建议（实现时定）：dev_lane 主链去掉 suggest_next 段 + 相关 activity
+  （prepare_epic_next/suggest_next）+ 场景与 prompt 引用一并清；epic-next 状态
+  目录（.suyou/epic-next，t260910 快照里仍在）是否随之退场需一并裁。
+- 排期：独立小票，排第二批（与入口收口/文档视图同批，不插止血队）。
