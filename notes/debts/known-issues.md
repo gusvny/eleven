@@ -660,3 +660,10 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 根因：node.ts handleDocsTree/handleDocsDoc 用 join(repo, scope)，repo=引擎仓根；代码注释自认「C1 写死：全仓单例，docs 属仓不属项目」。多项目化未跟上的同族缺口（与 KI-066 diff 单仓同族）。
 - 修复：docs tree/doc 按当前项目根解析（复用项目锚/enrich 的 root 传递链，同证据列表端点），缺省回落引擎仓；UI 一票升级（mock v1：Project 切换+Search+左栏上文件浏览器下 On this page 大纲+英文固定元素+正文 Verified 新鲜度 chip）。
 - 票=文档视图修复（排队计划 260910-ticket-queue-plan.md）；设计 mock=notes/discussions/260910-docs-view-mock.html（宿主 260910 过稿）。
+
+## KI-071 多仓修复半程：明细贯通断在 workflow→prepare 一跳（260910 实证，t260910-03 补程=t260910-08）
+- 现象：t260910-03（21903b7）修好创建链后，真项目仍建单仓泳道——dengzhufpv t260910-07（创建于合并后 18:12）创建载荷双仓明细齐全，但泳道无成员仓工作区、无 .suyou/repo_worktrees.json、meta.repo_worktrees=null。
+- 根因：dev_lane._init 不搬 TicketInput.repo_worktrees 进 meta（全文件零写入，仅 906 一处读 meta）；建泳道前 WorkspacePrep 构造不传 write_set/project_root → agent_activities prepare_workspace 三环读取（prep 明细/ws/写集+项目根推导）全空 → 恒单仓路径。
+- 定性教训（同类第二次）：**断言没打在交付物终态上**——t260910-03 场景只断言 TicketInput 载荷持久化（G8c），integration 签字时随其断言面复核同样漏过；正确面=泳道磁盘逐仓物化（成员仓工作区+分支+清单）。
+- 同票另一条（dengzhufpv 复核报）：test_t260910_03_fuses.py::test_fuse_a_no_project_root_member_entries_still_rejected 结果依赖 cwd（仓根 25 passed／/tmp 跑 24+1 failed，撞 shared.py:1105 豁免分支）。
+- 修复票=t260910-08（明细贯通+断言上移诊断终态+CWD 敏感红收口）。
