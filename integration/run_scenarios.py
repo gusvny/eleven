@@ -790,6 +790,14 @@ SCENARIOS = [
     ("t260910-15-toolchain-pinned",
      "打包工具链锁定完备负锁（t260910-15 验收①前置=t260908-01 化妆噪音故障的复发条件移除守卫，灰盒 L2 纯读秒级）：仓内不存在任何会拉到非 0.22.2 tsdown 的活声明口径——package.json devDependencies 精确版本无 ^/~；package-lock.json 根 specifier 与 node_modules/tsdown resolved 双点、pnpm-lock.yaml importers 段 specifier/version 双点均 0.22.2（双锁矛盾即 260910 实锤病灶：pnpm 路径曾锁漂移版）；口径载体文件集（package.json/两把 lockfile/tsdown.config.ts/build-client.sh/README）零漂移版本词面负锁（活口径只长在承诺载体上；验收记录等叙述面合法不扫——词面全仓扫会误咬历史叙述并自咬本场景，试跑实录）；start-console.sh 的 npx@0.22.2 为写集外合法固定面，主版本锚不进载体集合）；组件公开构建入口 scripts.build 指向仓内构建脚本非裸 tsdown。判定器先红绿自证（0.22.14 合成锁样必咬≥4 处、0.22.2 锁样必绿=防恒真）；锁定载体文件缺失/不可解析=FAIL 点名（承诺载体被拆是产品红非环境缺）。与 developer L1 负锁断言 intent 不同层；与 t260903-12-merge-checks-pairs（护栏配置对齐面）不同面。锚文件终态不锚行号与内部结构。实现段落地前红属预期（TDD 信号：当前仓双锁矛盾在案），arbitrate/merge 期必须绿",
      "node integration/t260910-15/sc_toolchain_pinned.mjs", "ro"),
+
+    # ---- t260911-01: 工单 diff 面多仓汇总 + 引擎过程产物过滤（dengzhufpv 260910 缺陷 2a/2b 回归面） ----
+    ("t260911-01-multirepo-diff-faces",
+     "多仓票 diff 面人审可见性主干（t260911-01 场景①，2a/2b 缺陷回归，临时 git 夹具多仓项目零真实依赖）：成员仓文件在逐仓汇总 repos[] 与顶层兼容层（<repo>/ 前缀定位口径归一）双面可见且 unified 可展开、各仓 base 各自对照不串；过程物（.sandbar/.dsh/out/__pycache__/node_modules/.venv，含嵌套 a/b/__pycache__ 与成员仓内形态）不进清单且 excludedPaths 点名到具体路径带仓前缀（验收 d「或点名」腿，上限封顶）；单仓退化零回归（repo_worktrees 缺省/空 → 单仓路径原样无前缀）；畸形 repo_worktrees（非列表/缺字段/repo 含 .. 或绝对路径）整体视同单仓不炸不部分采纳；成员仓未物化 emptyReason 点名他仓照常；成员仓 >60 文件按仓封顶不全局互挤（R3：大成员仓不把根仓挤出清单、顶层=各仓封顶拼接）。被测缝=host 公开契约 computeTicketDiff（t260907-11 同款直驱先例），与 developer L1 真值表分层面；git 缺席=ENV_FAIL exit 2",
+     "node integration/t260911-01/sc_t260911_01_multirepo_diff_faces.mjs", "ro"),
+    ("t260911-01-filter-contract-guard",
+     "过程物过滤口径单一真源契约护栏（t260911-01 场景②，读源断言 L2）：workbench 过滤表（changes.ts PROCESS_ARTIFACT_DIRS）⊇ 引擎两表现有排除（agent_activities.SETTLE_PATHSPEC + verify_lane.RUNTIME_PREFIXES，ast 抠字面量、跨语言无法 import 真源）——白名单可扩但不得丢 .dsh/.sandbar/.suyou 已有覆盖（丢=引擎自管过程物回流人审 diff 面，2b 复发形态即红）；派发白名单五目录（.sandbar/.dsh/out/__pycache__/node_modules）在表；闸3=handler 透传一跳护栏（node.ts computeTicketDiff 调用参数必须透传 repo_worktrees——t260908-01 同族「host 挑字段漏透传→场景全绿 UI 全瞎」断点防线）；挂账面可判定不判红——workbench 有而引擎侧没有的差集逐行打 LEDGER（out/pycache 误代落盘实案根因的引擎根修挂账，根修落地后差集收空即可销账）。纯 stdlib 零环境依赖",
+     "python3 integration/t260911-01/sc_t260911_01_filter_contract_guard.py"),
 ]
 
 CMD_TIMEOUT = 900

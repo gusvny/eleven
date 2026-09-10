@@ -406,6 +406,10 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-dtab[data-on=true]{color:var(--dsw-derive-accent,#0969da);font-weight:600;border-bottom-color:var(--dsw-derive-accent,#0969da)}
 .wb-d-sum{font-size:12px;color:var(--dsw-derive-muted,#57606a);display:flex;gap:14px;flex-wrap:wrap}
 .wb-d-file{border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;background:var(--dsw-derive-canvas,#ffffff);overflow:hidden}
+/* 多仓票逐仓分组（t260911-01 2a）：仓头条 + 组内文件列表 */
+.wb-d-repo{margin:10px 0}
+.wb-d-repohead{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:6px 2px;font-size:12px;
+  color:var(--dsw-derive-muted,#57606a);border-bottom:1px dashed var(--dsw-derive-border,#d0d7de);margin-bottom:6px}
 .wb-d-fhead{display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--dsw-derive-surface,#f6f8fa);
   border-bottom:1px solid var(--dsw-derive-surface-2,#e8ebef);flex-wrap:wrap}
 .wb-d-fpath{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--dsw-derive-fg,#1f2328);
@@ -1941,8 +1945,26 @@ interface TicketDiffResult {
   emptyReason?: string
   files: FileDiffEntry[]
   filesTruncated: boolean
-  /** 泳道道被排除的引擎运行时文件数（.dsh/ .suyou/）；没有该计数时不显示。 */
+  /** 泳道道被排除的引擎过程物条数（.sandbar/ .dsh/ out/ __pycache__/ 等）；没有该计数时不显示。 */
   excludedEngineFiles?: number
+  /** 被剔除过程物点名（上限 20 条，t260911-01 验收 d 的「点名」腿）。 */
+  excludedPaths?: string[]
+  /** 多仓票逐仓汇总（t260911-01 2a）；单仓票恒 undefined，渲染路径不变。 */
+  repos?: RepoDiffSummary[]
+}
+
+/** 多仓票单仓汇总（与 host changes.ts 同形；UI 分组渲染的数据源，R3）。 */
+interface RepoDiffSummary {
+  repo: string
+  name: string
+  branch: string
+  base: string
+  changed: boolean
+  files: FileDiffEntry[]
+  filesTruncated: boolean
+  excludedCount?: number
+  excludedPaths?: string[]
+  emptyReason?: string
 }
 
 interface ReviewBlockEntry {
@@ -2298,6 +2320,76 @@ function ChangesTab({ detail, operator, onMsg }: {
     : diff.source === 'merged' ? '已合入 main（merge commit 回放）'
     : diff.source === 'main' ? '主树 write_set + git log' : '无来源'
 
+  // 单文件渲染体（t260911-01 抽取：单仓列表与多仓分组共用同一套文件级 UI/意见通路）。
+  const renderFile = (f: FileDiffEntry) => (
+    <div className="wb-d-file" key={f.path}>
+      <div className="wb-d-fhead">
+        <span className="wb-d-badge" data-s={f.status}>{STATUS_LABEL[f.status]}</span>
+        <span className="wb-d-type">{KIND_LABEL[f.kind]}</span>
+        <span className="wb-d-fpath">{f.path}</span>
+        {f.kind === 'code' && f.unified !== undefined && (() => {
+          const st = unifiedStats(f.unified)
+          return <span className="wb-d-stats"><span className="add">+{st.add}</span>{' '}<span className="del">−{st.del}</span></span>
+        })()}
+      </div>
+      {f.kind === 'doc' && (f.blocks ?? [])
+        .filter(b => showUnchanged || b.status !== 'unchanged')
+        .map(b => {
+          const key = entryKeyOf(f, b)
+          return (
+            <div className="wb-d-block" key={key}>
+              <div className="wb-d-bhead">
+                <span className="wb-d-badge" data-s={b.status}>{STATUS_LABEL[b.status]}</span>
+                <span className="wb-d-type">{TYPE_LABEL[b.type] ?? b.type}</span>
+                <span className="wb-sub">{b.summary}</span>
+              </div>
+              <DiffBlockBody b={b} />
+              {b.status !== 'unchanged' && (
+                <ReviewActions rv={reviews[key]} onPatch={p => patchReview(key, p)} />
+              )}
+            </div>
+          )
+        })}
+      {f.kind === 'code' && (
+        <>
+          {f.unifiedTruncated === true && <div className="wb-d-trunc">diff 超长已截断（完整见泳道 git diff）。</div>}
+          <UnifiedDiffView text={f.unified ?? '（无 unified diff）'} />
+          <ReviewActions rv={reviews[entryKeyOf(f)]} onPatch={p => patchReview(entryKeyOf(f), p)} />
+        </>
+      )}
+      {f.kind === 'data' && (
+        <>
+          {f.reconTruncated === true && <div className="wb-d-trunc">对账条目超封顶已截断。</div>}
+          <ReconTable recon={f.recon ?? []} />
+          <ReviewActions rv={reviews[entryKeyOf(f)]} onPatch={p => patchReview(entryKeyOf(f), p)} />
+        </>
+      )}
+    </div>
+  )
+
+  // 多仓分组（R3：分组数据源=repos[]，各仓 files 已按仓封顶；成员仓文件路径加 <repo>/ 前缀
+  // 与审批意见 key 归一）。仓头=名称+branch+base 对照+文件计数；逐仓 emptyReason/截断/点名可见。
+  const renderRepoSection = (r: RepoDiffSummary) => {
+    const prefix = r.repo === '' ? '' : r.repo + '/'
+    return (
+      <div className="wb-d-repo" key={r.repo || '(root)'}>
+        <div className="wb-d-repohead">
+          <span className="wb-d-fpath">{r.repo === '' ? '根仓（root）' : r.repo}</span>
+          <span className="wb-sub">{r.name} · {r.branch}</span>
+          <span>base：<code>{r.base === '' ? '（无）' : r.base.slice(0, 12)}</code></span>
+          <span>文件 {r.files.length}{r.filesTruncated ? '（超封顶截断）' : ''}</span>
+          {r.emptyReason !== undefined && <span className="wb-sub">{r.emptyReason}</span>}
+          {r.excludedCount !== undefined && r.excludedCount > 0 && (
+            <span style={{color: 'var(--dsw-derive-muted,#57606a)'}}>
+              已排除 {r.excludedCount} 个过程物{r.excludedPaths !== undefined && r.excludedPaths.length > 0 ? `：${r.excludedPaths.join('、')}` : ''}
+            </span>
+          )}
+        </div>
+        {r.files.map(f => renderFile({ ...f, path: prefix + f.path }))}
+      </div>
+    )
+  }
+
   return (
     <>
       <div className="wb-section">
@@ -2307,7 +2399,12 @@ function ChangesTab({ detail, operator, onMsg }: {
           {diff.worktree !== undefined && <span>泳道：{shortSlug(diff.worktree)}</span>}
           <span>文件 {diff.files.length}{diff.filesTruncated ? '（超封顶截断）' : ''}（文档 {summary.doc} / 代码 {summary.code} / 数据 {summary.data}）</span>
           {diff.excludedEngineFiles !== undefined && diff.excludedEngineFiles > 0 && (
-            <span style={{color: 'var(--dsw-derive-muted,#57606a)'}}>已排除 {diff.excludedEngineFiles} 个引擎运行时文件</span>
+            <span style={{color: 'var(--dsw-derive-muted,#57606a)'}}>
+              已排除 {diff.excludedEngineFiles} 个引擎过程物
+              {diff.excludedPaths !== undefined && diff.excludedPaths.length > 0
+                ? `：${diff.excludedPaths.join('、')}${diff.excludedPaths.length < diff.excludedEngineFiles ? '…' : ''}`
+                : ''}
+            </span>
           )}
           <span>意见：通过 {summary.approved} / 驳回 {summary.rejected}</span>
           {latestRound !== undefined && (
@@ -2322,54 +2419,8 @@ function ChangesTab({ detail, operator, onMsg }: {
         )}
       </div>
 
-      {realFiles.map(f => (
-        <div className="wb-d-file" key={f.path}>
-          <div className="wb-d-fhead">
-            <span className="wb-d-badge" data-s={f.status}>{STATUS_LABEL[f.status]}</span>
-            <span className="wb-d-type">{KIND_LABEL[f.kind]}</span>
-            <span className="wb-d-fpath">{f.path}</span>
-            {f.kind === 'code' && f.unified !== undefined && (() => {
-              const st = unifiedStats(f.unified)
-              return <span className="wb-d-stats"><span className="add">+{st.add}</span>{' '}<span className="del">−{st.del}</span></span>
-            })()}
-          </div>
-
-          {f.kind === 'doc' && (f.blocks ?? [])
-            .filter(b => showUnchanged || b.status !== 'unchanged')
-            .map(b => {
-              const key = entryKeyOf(f, b)
-              return (
-                <div className="wb-d-block" key={key}>
-                  <div className="wb-d-bhead">
-                    <span className="wb-d-badge" data-s={b.status}>{STATUS_LABEL[b.status]}</span>
-                    <span className="wb-d-type">{TYPE_LABEL[b.type] ?? b.type}</span>
-                    <span className="wb-sub">{b.summary}</span>
-                  </div>
-                  <DiffBlockBody b={b} />
-                  {b.status !== 'unchanged' && (
-                    <ReviewActions rv={reviews[key]} onPatch={p => patchReview(key, p)} />
-                  )}
-                </div>
-              )
-            })}
-
-          {f.kind === 'code' && (
-            <>
-              {f.unifiedTruncated === true && <div className="wb-d-trunc">diff 超长已截断（完整见泳道 git diff）。</div>}
-              <UnifiedDiffView text={f.unified ?? '（无 unified diff）'} />
-              <ReviewActions rv={reviews[entryKeyOf(f)]} onPatch={p => patchReview(entryKeyOf(f), p)} />
-            </>
-          )}
-
-          {f.kind === 'data' && (
-            <>
-              {f.reconTruncated === true && <div className="wb-d-trunc">对账条目超封顶已截断。</div>}
-              <ReconTable recon={f.recon ?? []} />
-              <ReviewActions rv={reviews[entryKeyOf(f)]} onPatch={p => patchReview(entryKeyOf(f), p)} />
-            </>
-          )}
-        </div>
-      ))}
+      {/* t260911-01：多仓票按 repos[] 分组渲染；单仓票（repos undefined）走原扁平列表，零回归 */}
+      {diff.repos !== undefined ? diff.repos.map(renderRepoSection) : realFiles.map(renderFile)}
 
       {genFiles.length > 0 && (
         <details className="wb-d-gen">

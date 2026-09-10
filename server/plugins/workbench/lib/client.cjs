@@ -30851,8 +30851,8 @@ var Dk = function(t) {
 		}));
 		var _ = function(t) {
 			if (t <= 0) return i[0][1];
-			var e = 0;
-			for (; e < i.length; e++) if (i[e][0] >= t && (0 === e ? 0 : i[e - 1][0]) < t) return i[e][1];
+			var e;
+			for (e = 0; e < i.length; e++) if (i[e][0] >= t && (0 === e ? 0 : i[e - 1][0]) < t) return i[e][1];
 			return i[e - 1][1];
 		};
 		this._renderTicks(t, e, n, _, r, s, l, a, d), this._renderTitleAndDetail(t, e, n, _, r), this._renderAnchor(t, r), this._renderPointer(t, e, n, _, r, s, l, a, d);
@@ -34047,8 +34047,8 @@ var TO = function(t) {
 				return { interval: [(e.interval[0] - t[0]) / i, (e.interval[1] - t[0]) / i] };
 			}))).length, o = 0;
 			return function(t) {
-				var i = o;
-				for (; i < r; i++) if ((a = e[i].interval)[0] <= t && t <= a[1]) {
+				var i;
+				for (i = o; i < r; i++) if ((a = e[i].interval)[0] <= t && t <= a[1]) {
 					o = i;
 					break;
 				}
@@ -49294,6 +49294,10 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-dtab[data-on=true]{color:var(--dsw-derive-accent,#0969da);font-weight:600;border-bottom-color:var(--dsw-derive-accent,#0969da)}
 .wb-d-sum{font-size:12px;color:var(--dsw-derive-muted,#57606a);display:flex;gap:14px;flex-wrap:wrap}
 .wb-d-file{border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;background:var(--dsw-derive-canvas,#ffffff);overflow:hidden}
+/* 多仓票逐仓分组（t260911-01 2a）：仓头条 + 组内文件列表 */
+.wb-d-repo{margin:10px 0}
+.wb-d-repohead{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:6px 2px;font-size:12px;
+  color:var(--dsw-derive-muted,#57606a);border-bottom:1px dashed var(--dsw-derive-border,#d0d7de);margin-bottom:6px}
 .wb-d-fhead{display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--dsw-derive-surface,#f6f8fa);
   border-bottom:1px solid var(--dsw-derive-surface-2,#e8ebef);flex-wrap:wrap}
 .wb-d-fpath{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--dsw-derive-fg,#1f2328);
@@ -51012,6 +51016,145 @@ function ChangesTab({ detail, operator, onMsg }) {
 	};
 	const realFiles = diff.files.filter((f) => !isGenArtifact(f.path));
 	const genFiles = diff.files.filter((f) => isGenArtifact(f.path));
+	const sourceLabel = diff.source === "worktree" ? "泳道 worktree vs base" : diff.source === "merged" ? "已合入 main（merge commit 回放）" : diff.source === "main" ? "主树 write_set + git log" : "无来源";
+	const renderFile = (f) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-d-file",
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-d-fhead",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-d-badge",
+						"data-s": f.status,
+						children: STATUS_LABEL[f.status]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-d-type",
+						children: KIND_LABEL[f.kind]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-d-fpath",
+						children: f.path
+					}),
+					f.kind === "code" && f.unified !== void 0 && (() => {
+						const st = unifiedStats(f.unified);
+						return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							className: "wb-d-stats",
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "add",
+									children: ["+", st.add]
+								}),
+								" ",
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "del",
+									children: ["−", st.del]
+								})
+							]
+						});
+					})()
+				]
+			}),
+			f.kind === "doc" && (f.blocks ?? []).filter((b) => showUnchanged || b.status !== "unchanged").map((b) => {
+				const key = entryKeyOf(f, b);
+				return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-d-block",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "wb-d-bhead",
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "wb-d-badge",
+									"data-s": b.status,
+									children: STATUS_LABEL[b.status]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "wb-d-type",
+									children: TYPE_LABEL[b.type] ?? b.type
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "wb-sub",
+									children: b.summary
+								})
+							]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DiffBlockBody, { b }),
+						b.status !== "unchanged" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ReviewActions, {
+							rv: reviews[key],
+							onPatch: (p) => patchReview(key, p)
+						})
+					]
+				}, key);
+			}),
+			f.kind === "code" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+				f.unifiedTruncated === true && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-d-trunc",
+					children: "diff 超长已截断（完整见泳道 git diff）。"
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(UnifiedDiffView, { text: f.unified ?? "（无 unified diff）" }),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ReviewActions, {
+					rv: reviews[entryKeyOf(f)],
+					onPatch: (p) => patchReview(entryKeyOf(f), p)
+				})
+			] }),
+			f.kind === "data" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+				f.reconTruncated === true && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-d-trunc",
+					children: "对账条目超封顶已截断。"
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ReconTable, { recon: f.recon ?? [] }),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ReviewActions, {
+					rv: reviews[entryKeyOf(f)],
+					onPatch: (p) => patchReview(entryKeyOf(f), p)
+				})
+			] })
+		]
+	}, f.path);
+	const renderRepoSection = (r) => {
+		const prefix = r.repo === "" ? "" : r.repo + "/";
+		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: "wb-d-repo",
+			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-d-repohead",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-d-fpath",
+						children: r.repo === "" ? "根仓（root）" : r.repo
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: "wb-sub",
+						children: [
+							r.name,
+							" · ",
+							r.branch
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: ["base：", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: r.base === "" ? "（无）" : r.base.slice(0, 12) })] }),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
+						"文件 ",
+						r.files.length,
+						r.filesTruncated ? "（超封顶截断）" : ""
+					] }),
+					r.emptyReason !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-sub",
+						children: r.emptyReason
+					}),
+					r.excludedCount !== void 0 && r.excludedCount > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						style: { color: "var(--dsw-derive-muted,#57606a)" },
+						children: [
+							"已排除 ",
+							r.excludedCount,
+							" 个过程物",
+							r.excludedPaths !== void 0 && r.excludedPaths.length > 0 ? `：${r.excludedPaths.join("、")}` : ""
+						]
+					})
+				]
+			}), r.files.map((f) => renderFile({
+				...f,
+				path: prefix + f.path
+			}))]
+		}, r.repo || "(root)");
+	};
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 		/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 			className: "wb-section",
@@ -51020,7 +51163,7 @@ function ChangesTab({ detail, operator, onMsg }) {
 					className: "wb-section-title",
 					children: [
 						"变更集（",
-						diff.source === "worktree" ? "泳道 worktree vs base" : diff.source === "merged" ? "已合入 main（merge commit 回放）" : diff.source === "main" ? "主树 write_set + git log" : "无来源",
+						sourceLabel,
 						"）"
 					]
 				}),
@@ -51050,7 +51193,8 @@ function ChangesTab({ detail, operator, onMsg }) {
 							children: [
 								"已排除 ",
 								diff.excludedEngineFiles,
-								" 个引擎运行时文件"
+								" 个引擎过程物",
+								diff.excludedPaths !== void 0 && diff.excludedPaths.length > 0 ? `：${diff.excludedPaths.join("、")}${diff.excludedPaths.length < diff.excludedEngineFiles ? "…" : ""}` : ""
 							]
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
@@ -51089,99 +51233,7 @@ function ChangesTab({ detail, operator, onMsg }) {
 				})
 			]
 		}),
-		realFiles.map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-			className: "wb-d-file",
-			children: [
-				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "wb-d-fhead",
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "wb-d-badge",
-							"data-s": f.status,
-							children: STATUS_LABEL[f.status]
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "wb-d-type",
-							children: KIND_LABEL[f.kind]
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "wb-d-fpath",
-							children: f.path
-						}),
-						f.kind === "code" && f.unified !== void 0 && (() => {
-							const st = unifiedStats(f.unified);
-							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-								className: "wb-d-stats",
-								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-										className: "add",
-										children: ["+", st.add]
-									}),
-									" ",
-									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-										className: "del",
-										children: ["−", st.del]
-									})
-								]
-							});
-						})()
-					]
-				}),
-				f.kind === "doc" && (f.blocks ?? []).filter((b) => showUnchanged || b.status !== "unchanged").map((b) => {
-					const key = entryKeyOf(f, b);
-					return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "wb-d-block",
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "wb-d-bhead",
-								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "wb-d-badge",
-										"data-s": b.status,
-										children: STATUS_LABEL[b.status]
-									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "wb-d-type",
-										children: TYPE_LABEL[b.type] ?? b.type
-									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "wb-sub",
-										children: b.summary
-									})
-								]
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DiffBlockBody, { b }),
-							b.status !== "unchanged" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ReviewActions, {
-								rv: reviews[key],
-								onPatch: (p) => patchReview(key, p)
-							})
-						]
-					}, key);
-				}),
-				f.kind === "code" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-					f.unifiedTruncated === true && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "wb-d-trunc",
-						children: "diff 超长已截断（完整见泳道 git diff）。"
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(UnifiedDiffView, { text: f.unified ?? "（无 unified diff）" }),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ReviewActions, {
-						rv: reviews[entryKeyOf(f)],
-						onPatch: (p) => patchReview(entryKeyOf(f), p)
-					})
-				] }),
-				f.kind === "data" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-					f.reconTruncated === true && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "wb-d-trunc",
-						children: "对账条目超封顶已截断。"
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ReconTable, { recon: f.recon ?? [] }),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ReviewActions, {
-						rv: reviews[entryKeyOf(f)],
-						onPatch: (p) => patchReview(entryKeyOf(f), p)
-					})
-				] })
-			]
-		}, f.path)),
+		diff.repos !== void 0 ? diff.repos.map(renderRepoSection) : realFiles.map(renderFile),
 		genFiles.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
 			className: "wb-d-gen",
 			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("summary", { children: [

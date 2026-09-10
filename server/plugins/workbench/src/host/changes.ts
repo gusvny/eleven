@@ -56,6 +56,32 @@ export interface FileDiffEntry {
   newHash: string
 }
 
+/** 多仓票的逐仓明细（票面 meta.repo_worktrees，t260908-02 起为真源槽位；
+ *  条目形状由 shared.build_repo_worktrees 构造：{repo(空串=根仓树),name,branch}。 */
+export interface RepoWorktreeEntry {
+  repo: string
+  name: string
+  branch: string
+  /** 物化清单 <lane>/.suyou/repo_worktrees.json 另带开票时各仓 HEAD；票面条目可能缺。 */
+  base_ref?: string
+}
+
+/** 单仓 diff 汇总（多仓票 repos[] 的元素；单仓票不产出该结构）。 */
+export interface RepoDiffSummary {
+  repo: string
+  name: string
+  branch: string
+  base: string
+  changed: boolean
+  files: FileDiffEntry[]
+  filesTruncated: boolean
+  /** 该仓被过滤掉的过程物总条数。 */
+  excludedCount?: number
+  /** 该仓被过滤掉的过程物点名（上限 MAX_EXCLUDED_PATHS 条，验收 d 的「点名」腿）。 */
+  excludedPaths?: string[]
+  emptyReason?: string
+}
+
 export interface TicketDiffResult {
   id: string
   base: string
@@ -67,8 +93,13 @@ export interface TicketDiffResult {
   emptyReason?: string
   files: FileDiffEntry[]
   filesTruncated: boolean
-  /** 泳道道被排除的引擎运行时文件数（.dsh/ .suyou/）；主树道/无变更集时为 undefined。 */
+  /** 泳道道被排除的引擎过程物条数（.sandbar/ .dsh/ out/ __pycache__/ 等）；主树道/无变更集时为 undefined。 */
   excludedEngineFiles?: number
+  /** 过程物点名（上限 MAX_EXCLUDED_PATHS 条，验收 d）：被剔除的具体路径，不只聚合计数。 */
+  excludedPaths?: string[]
+  /** 多仓票逐仓汇总（t260911-01 2a）：repo_worktrees 非空时按仓各自 diff；
+   *  单仓票/缺省恒 undefined（单仓走旧路径零回归）。 */
+  repos?: RepoDiffSummary[]
 }
 
 /** 工单 JSON 里参与 diff 的字段（show 结果的子集）。 */
@@ -77,6 +108,9 @@ export interface TicketForDiff {
   worktree?: string
   base_ref?: string
   write_set?: string[]
+  /** 多仓/混合形的逐仓明细（meta 顶层；client.py ticket show 全量透传 meta，链路已核）。
+   *  畸形（非列表/条目形状非法）由调用方消毒视同缺省 → 走单仓路径。 */
+  repo_worktrees?: RepoWorktreeEntry[]
   /** 票所属项目 key（t260907-11 KI-057）：本函数不消费它——「判界用哪个仓根」由调用方
    *  解析（project-anchor）后作为 repo 参数传入；字段收进来只为票面形状自描述。 */
   project?: string
@@ -169,13 +203,23 @@ function parseNameStatus(text: string): Array<{ status: 'A' | 'M' | 'D'; path: s
   return out
 }
 
-/** 引擎运行时目录前缀（与 merge_check agent_activities.py 同口径：
- *  git status --porcelain -- :!.dsh :!.suyou；changes.ts 在 committed diff 侧
- *  用 git pathspec 排除，untracked 侧用 JS 等价过滤并计数，注释互相指引）。 */
-const ENGINE_EXCLUDE_PATHS = [':!.dsh', ':!.suyou']
-function isEngineFile(p: string): boolean {
-  return p.startsWith('.dsh/') || p.startsWith('.suyou/')
+/** 引擎自管过程物目录表（t260911-01 2b，单一表两用）：
+ *  - JS 过滤（isProcessArtifact）是**真源**：前缀式匹配，天然覆盖嵌套（a/b/__pycache__/x）；
+ *  - git pathspec（artifactExcludePathspecs）只是 committed 道的性能预滤，漏了由 JS 兜住，
+ *    不让 pathspec 通配深度成为正确性依赖（`:!out/` 只命中顶层，嵌套靠 JS）。
+ *  口径与 merge_check SETTLE_PATHSPEC（server/engine/agent_activities.py）及 verify_lane
+ *  RUNTIME_PREFIXES（server/tools/verify_lane.py）镜像——跨语言无法 import 真源，靠
+ *  integration/t260911-01 契约测试反向锁「本表 ⊇ 引擎表现有排除」，不得丢 .dsh/.sandbar 覆盖。
+ *  （engine 侧 SETTLE_PATHSPEC 现缺 out/__pycache__ 覆盖 = 已挂账缺口，根修属引擎写集，另票。） */
+const PROCESS_ARTIFACT_DIRS = ['.sandbar/', '.suyou/', '.dsh/', 'out/', '__pycache__/', 'node_modules/', '.venv/']
+const ENGINE_EXCLUDE_PATHS = [':!.dsh', ':!.suyou', ':!.sandbar', ':!out/', ':!**/__pycache__/', ':!**/node_modules/', ':!.venv/']
+/** 导出给 integration/t260911-01 契约测试做反向护栏断言（本表 ⊇ 引擎表现有排除）。 */
+export function isProcessArtifact(p: string): boolean {
+  return PROCESS_ARTIFACT_DIRS.some(d => p.startsWith(d) || p.includes('/' + d))
 }
+export const PROCESS_ARTIFACT_TABLE = PROCESS_ARTIFACT_DIRS
+/** 过程物点名上限（验收 d：被剔除路径要可点名，不只聚合计数）。 */
+const MAX_EXCLUDED_PATHS = 20
 
 /* ---------------------------------------------------------------- 数据对账（JSON 递归 diff） */
 
@@ -422,6 +466,7 @@ async function mergedTicketDiff(repo: string, ticket: TicketForDiff): Promise<Ti
   const base = parents === 2 ? `${commit}^1` : `${commit}~1`
   const paths = writeSetPaths(ticket.write_set)
   const ns = parseNameStatus(await git(repo, ['diff', '--name-status', '-M', `${base}..${commit}`, '--', ...paths]))
+    .filter(c => !isProcessArtifact(c.path)) // 2b：收口回放同样不展示引擎过程物
   const capped = ns.slice(0, MAX_FILES)
   const files: FileDiffEntry[] = []
   for (const f of capped) {
@@ -439,8 +484,82 @@ async function mergedTicketDiff(repo: string, ticket: TicketForDiff): Promise<Ti
 }
 
 /**
+ * 单棵工作树 vs base 的 diff（t260911-01 重构自原单仓 worktree 道主体，行为等价搬家）：
+ * committed diff + untracked 并入、过程物双侧过滤并计数/点名、按树封顶 MAX_FILES。
+ * 截断口径（R4 取舍）：按树各自封顶，不做全局 cap——多仓票逐仓调用时成员仓不会被
+ * 根仓挤出清单；全局扁平兼容层由 computeTicketDiff 负责拼接。
+ */
+async function diffOneTree(treeAbs: string, base: string): Promise<{
+  files: FileDiffEntry[]
+  filesTruncated: boolean
+  excludedCount: number
+  excludedPaths: string[]
+}> {
+  // committed diff：git pathspec 预滤过程物（真源=下方 JS 过滤，pathspec 漏了兜得住）
+  const committedRaw = parseNameStatus(await git(treeAbs, ['diff', '--name-status', '-M', base, '--', ...ENGINE_EXCLUDE_PATHS]))
+  const committed = committedRaw.filter(c => !isProcessArtifact(c.path))
+
+  // untracked：全量枚举后 JS 过滤并计数/点名（等价于 git ls-files --others + 排除表）
+  const untrackedRaw = await git(treeAbs, ['ls-files', '--others', '--exclude-standard'])
+  const untrackedAll = untrackedRaw.split('\n').map(s => s.trim()).filter(s => s !== '')
+  const artifactFiles = untrackedAll.filter(p => isProcessArtifact(p))
+  const excludedSet = new Set([
+    ...committedRaw.filter(c => isProcessArtifact(c.path)).map(c => c.path),
+    ...artifactFiles,
+  ])
+  const excludedPaths = [...excludedSet].sort().slice(0, MAX_EXCLUDED_PATHS)
+  const seen = new Set(committed.map(c => c.path))
+  const untracked = untrackedAll.filter(s => !seen.has(s) && !isProcessArtifact(s))
+  const all = [
+    ...committed.map(c => ({ status: (c.status === 'A' ? 'added' : c.status === 'D' ? 'removed' : 'modified') as FileStatus, path: c.path, oldPath: c.oldPath })),
+    ...untracked.map(p => ({ status: 'added' as FileStatus, path: p, oldPath: undefined })),
+  ]
+  const capped = all.slice(0, MAX_FILES)
+  const files: FileDiffEntry[] = []
+  for (const f of capped) {
+    const e = await buildFileEntry(treeAbs, treeAbs, base, f.path, f.status, f.oldPath)
+    if (e !== null) files.push(e)
+  }
+  return {
+    files,
+    filesTruncated: all.length > MAX_FILES,
+    excludedCount: excludedSet.size,
+    excludedPaths,
+  }
+}
+
+/** 票面 repo_worktrees 消毒（M1）：非列表/条目形状非法（缺 name/branch、repo 含 .. 或绝对化）
+ *  → 整体视同缺省（返回 undefined），走单仓路径，不 500 不部分采纳。 */
+function sanitizeRepoWorktrees(entries: unknown): RepoWorktreeEntry[] | undefined {
+  if (!Array.isArray(entries) || entries.length === 0) return undefined
+  for (const e of entries) {
+    if (typeof e !== 'object' || e === null) return undefined
+    const it = e as Record<string, unknown>
+    if (typeof it.repo !== 'string' || typeof it.name !== 'string' || typeof it.branch !== 'string') return undefined
+    if (it.name === '' || it.branch === '') return undefined
+    if (it.repo.includes('..') || it.repo.startsWith('/') || it.repo.startsWith('~')) return undefined
+    if (it.base_ref !== undefined && typeof it.base_ref !== 'string') return undefined
+  }
+  return entries as RepoWorktreeEntry[]
+}
+
+/** 定一棵树相对 main 的缺省基线：merge-base(HEAD, main)（工单未登记 base_ref 时的回落口径）。 */
+async function defaultBase(treeAbs: string): Promise<string> {
+  try {
+    return (await git(treeAbs, ['merge-base', 'HEAD', 'main'])).trim()
+  } catch {
+    return ''
+  }
+}
+
+/**
  * 算一张工单的变更集。纯只读（git diff/show/status + readFile）。
- * 泳道道：worktree 工作树（含未提交）vs base_ref；untracked 新文件并入。
+ * 泳道道：worktree 工作树（含未提交）vs base_ref；untracked 新文件并入；
+ *   票面 repo_worktrees 非空（消毒通过）时逐仓汇总进 repos[]——根仓=容器自身（repo==""），
+ *   成员仓=容器/<repo>，每仓 base 取条目 base_ref、缺省回落 merge-base(HEAD, main)；
+ *   顶层 files=各仓封顶后按序拼接的兼容层（成员仓路径加 <repo>/ 前缀，与 write_set/
+ *   merged 道定位口径归一），顶层 filesTruncated=任一仓截断即置位（C1）。
+ *   单仓票（空/缺省/畸形）走原路径，行为零变化。
  * 主树道：base_ref..HEAD 限 write_set pathspec。两头都给不出 → source=none。
  */
 export async function computeTicketDiff(repo: string, ticket: TicketForDiff): Promise<TicketDiffResult> {
@@ -460,46 +579,76 @@ export async function computeTicketDiff(repo: string, ticket: TicketForDiff): Pr
       // 泳道已拆（merge 收口清理会删 worktree + 分支）——回放 main 上的收口痕迹（merge commit / squash 提交）
       return mergedTicketDiff(repo, ticket)
     }
-    // base 缺省回退 merge-base(HEAD, main)；都没有就老实报「定不了基线」。
-    let base = base0
-    if (base === '') {
-      try {
-        base = (await git(wtAbs, ['merge-base', 'HEAD', 'main'])).trim()
-      } catch {
-        base = ''
+    const rws = sanitizeRepoWorktrees(ticket.repo_worktrees)
+    if (rws !== undefined) {
+      // 多仓道：逐仓各自 diff（各自 base、各自封顶、各自 emptyReason 点名，不整体降级）
+      const repos: RepoDiffSummary[] = []
+      let totalExcluded = 0
+      const totalExcludedPaths = new Set<string>()
+      for (const e of rws) {
+        const treeAbs = e.repo === '' ? wtAbs : resolve(wtAbs, e.repo)
+        const summary: RepoDiffSummary = { repo: e.repo, name: e.name, branch: e.branch, base: e.base_ref ?? '', changed: false, files: [], filesTruncated: false }
+        let ok = true
+        try {
+          const st = await stat(treeAbs)
+          if (!st.isDirectory()) throw new Error('not dir')
+        } catch {
+          summary.emptyReason = `成员仓树未物化（泳道内不存在 ${e.repo || '（根仓树）'}）`
+          ok = false
+        }
+        if (ok) {
+          let base = (e.base_ref ?? '').trim()
+          if (base === '') base = await defaultBase(treeAbs)
+          summary.base = base
+          if (base === '' || !(await validBase(treeAbs, base))) {
+            summary.emptyReason = `base ref 无效或定不了基线：${e.base_ref || '（条目未带 base_ref，merge-base 也失败）'}`
+          } else {
+            const r = await diffOneTree(treeAbs, base)
+            summary.files = r.files
+            summary.filesTruncated = r.filesTruncated
+            summary.changed = r.files.length > 0
+            if (r.excludedCount > 0) {
+              summary.excludedCount = r.excludedCount
+              if (r.excludedPaths.length > 0) summary.excludedPaths = r.excludedPaths
+              totalExcluded += r.excludedCount
+              for (const p of r.excludedPaths) totalExcludedPaths.add((e.repo === '' ? '' : e.repo + '/') + p)
+            }
+            if (r.files.length === 0) summary.emptyReason = `仓 ${e.name} 相对 base ${base.slice(0, 12)} 无变更`
+          }
+        }
+        repos.push(summary)
+      }
+      // 顶层兼容层：各仓封顶后按序拼接，成员仓路径加前缀；不再叠加全局 cap（R3）
+      const files: FileDiffEntry[] = []
+      for (const r of repos) {
+        const prefix = r.repo === '' ? '' : r.repo + '/'
+        for (const f of r.files) files.push({ ...f, path: prefix + f.path })
+      }
+      return {
+        id, base: base0, hasBase: base0 !== '' || repos.every(r => r.base !== ''), source: 'worktree', worktree,
+        changed: files.length > 0,
+        emptyReason: files.length === 0 ? '多仓泳道各仓均无变更（或基线不可定，见逐仓 emptyReason）' : undefined,
+        files,
+        filesTruncated: repos.some(r => r.filesTruncated),
+        excludedEngineFiles: totalExcluded > 0 ? totalExcluded : undefined,
+        excludedPaths: totalExcludedPaths.size > 0 ? [...totalExcludedPaths].sort().slice(0, MAX_EXCLUDED_PATHS) : undefined,
+        repos,
       }
     }
+    // 单仓道（含 repo_worktrees 畸形/缺省的退化路径）：行为与历史版本一致
+    let base = base0
+    if (base === '') base = await defaultBase(wtAbs)
     if (base === '' || !(await validBase(wtAbs, base))) {
       return { id, base, hasBase: false, source: 'worktree', worktree, changed: false, files: [], filesTruncated: false, emptyReason: `base ref 无效或定不了基线：${base0 || '（工单未登记 base_ref，merge-base 也失败）'}` }
     }
-    // committed diff：git pathspec 排除引擎运行时目录（与 merge_check 同口径）
-    const committedRaw = parseNameStatus(await git(wtAbs, ['diff', '--name-status', '-M', base, '--', ...ENGINE_EXCLUDE_PATHS]))
-    // JS 双保险：再滤一遍 .dsh/ .suyou/（防止 git pathspec 在极端情况漏过）
-    const committed = committedRaw.filter(c => !isEngineFile(c.path))
-
-    // untracked：全量枚举后 JS 过滤并计数排除量（等价于 git ls-files --others -- :!.dsh :!.suyou）
-    const untrackedRaw = await git(wtAbs, ['ls-files', '--others', '--exclude-standard'])
-    const untrackedAll = untrackedRaw.split('\n').map(s => s.trim()).filter(s => s !== '')
-    const engineFiles = untrackedAll.filter(p => isEngineFile(p))
-    const excludedEngineFiles = engineFiles.length
-    const seen = new Set(committed.map(c => c.path))
-    const untracked = untrackedAll.filter(s => !seen.has(s) && !isEngineFile(s))
-    const all = [
-      ...committed.map(c => ({ status: (c.status === 'A' ? 'added' : c.status === 'D' ? 'removed' : 'modified') as FileStatus, path: c.path, oldPath: c.oldPath })),
-      ...untracked.map(p => ({ status: 'added' as FileStatus, path: p, oldPath: undefined })),
-    ]
-    const capped = all.slice(0, MAX_FILES)
-    const files: FileDiffEntry[] = []
-    for (const f of capped) {
-      const e = await buildFileEntry(wtAbs, wtAbs, base, f.path, f.status, f.oldPath)
-      if (e !== null) files.push(e)
-    }
+    const r = await diffOneTree(wtAbs, base)
     return {
       id, base, hasBase: true, source: 'worktree', worktree,
-      changed: files.length > 0,
-      emptyReason: files.length === 0 ? `泳道相对 base ${base.slice(0, 12)} 无变更` : undefined,
-      files, filesTruncated: all.length > MAX_FILES,
-      excludedEngineFiles: excludedEngineFiles > 0 ? excludedEngineFiles : undefined,
+      changed: r.files.length > 0,
+      emptyReason: r.files.length === 0 ? `泳道相对 base ${base.slice(0, 12)} 无变更` : undefined,
+      files: r.files, filesTruncated: r.filesTruncated,
+      excludedEngineFiles: r.excludedCount > 0 ? r.excludedCount : undefined,
+      excludedPaths: r.excludedPaths.length > 0 ? r.excludedPaths : undefined,
     }
   }
 
@@ -515,6 +664,7 @@ export async function computeTicketDiff(repo: string, ticket: TicketForDiff): Pr
     return { id, base: base0, hasBase: false, source: 'main', changed: false, files: [], filesTruncated: false, emptyReason: `base ref 无效：${base0}` }
   }
   const ns = parseNameStatus(await git(repo, ['diff', '--name-status', '-M', `${base0}..HEAD`, '--', ...paths]))
+    .filter(c => !isProcessArtifact(c.path)) // 2b：主树道同样不展示引擎过程物
   const capped = ns.slice(0, MAX_FILES)
   const files: FileDiffEntry[] = []
   for (const f of capped) {

@@ -871,6 +871,9 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       if (anchor === null) return
       const result = await computeTicketDiff(anchor.root, {
         id, worktree: t.worktree, base_ref: t.base_ref, write_set: t.write_set, project: t.project,
+        // t260911-01 2a：多仓逐仓明细随 meta 全量透传（client.py ticket show 链路已核）；
+        // 畸形形状由 changes.ts sanitizeRepoWorktrees 消毒（视同缺省走单仓，不 500）。
+        repo_worktrees: t.repo_worktrees,
       })
       sendJson(res, 200, { ok: true, result, resolved: resolvedMark(anchor) })
     } catch (err) {
