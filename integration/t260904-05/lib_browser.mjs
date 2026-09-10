@@ -173,7 +173,7 @@ export async function dismissFirstRunModals(page) {
  * consoleErrors 数组由调用方传入收集 console error/pageerror（卫生断言用）。
  * 打开后先过首屏模态网（准入模态 mask 会拦截一切点击——场景②实测）。
  */
-export async function openTestPage(pw, { results, tag, consoleErrors, initScript } = {}) {
+export async function openTestPage(pw, { results, tag, consoleErrors, badResponses, initScript } = {}) {
   let browser;
   // playwright-core 不自带浏览器二进制（泳道无 ms-playwright 缓存）：优先系统
   // Chrome（channel:"chrome"，同 ui-check/capture.mjs launchBrowser 先例），
@@ -189,6 +189,10 @@ export async function openTestPage(pw, { results, tag, consoleErrors, initScript
     const page = await context.newPage();
     page.on('console', m => { if (m.type() === 'error') consoleErrors?.push(m.text()); });
     page.on('pageerror', e => consoleErrors?.push(String(e)));
+    // URL 感知卫生面（260910 gen1 仲裁）：console error 文本只有状态码没有 URL——
+    // 调用方要按端点点名豁免（一次性夹具幽灵行的 agent-usage 400，详见
+    // sc_chat_band_affiliation t7 注）必须另收响应面，其余 >=400 照旧红。
+    page.on('response', r => { if (r.status() >= 400) badResponses?.push(`${r.status()} ${r.url()}`); });
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });
     try { await dismissFirstRunModals(page); } catch (e) {
       results.record(`${tag}/first-run-modals`, 'env_fail', `首屏模态网未过：${String(e).slice(0, 120)}`);

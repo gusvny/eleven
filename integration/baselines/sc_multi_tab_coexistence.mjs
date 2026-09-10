@@ -746,23 +746,28 @@ async function runBrowser(pw, browser) {
       } catch (e) { await failWith('T5 hostile traffic tolerated', e) }
     }
 
-    // T7 卫生断言三态化（t260910-05 仲裁 gen6）：pageerror=客户端 JS 异常=产品面；
-    // console.error 里的「Failed to load resource … 5xx」是后端瞬断（网关/上游
-    // 不可达）混进客户端健康断言——多泳道同机时后端瞬断是环境事件（本轮实捕：
-    // 502 ×1，pageerrors=0，行为腿 T1-T6 全过），诚实改判 env_fail 点名重跑，
-    // 不作产品判定；客户端异常与其余 console.error（含 4xx 资源错=应用错路）
-    // 照旧 FAIL。
-    const serverFaults = consoleErrors.filter(t => /Failed to load resource.*status of 5\d\d/.test(t))
-    const clientFaults = pageErrors.length
-      + consoleErrors.filter(t => !/Failed to load resource.*status of 5\d\d/.test(t)).length
+    // T7 卫生断言合并语义（t260910-04 gen2 传输层噪声豁免 × t260910-05 gen6 三态化，
+    // 冲突消解两边都保留）：pageerror=客户端 JS 异常=产品面；console.error 拆三类——
+    // ①传输层断裂（ERR_INCOMPLETE_CHUNKED_ENCODING/CONNECTION_RESET 等网络级噪声，
+    // 多泳道并发期共享台面重启窗的环境产物）与 ②后端瞬断（Failed to load resource
+    // 5xx，网关/上游不可达）都是环境事件：仅②时诚实改判 env_fail 点名重跑（不作产品
+    // 判定），仅①时 pass 带豁免计数；③其余 console.error（含 4xx 资源错=应用错路）
+    // 与客户端异常照旧 FAIL。
+    const TRANSPORT = /Failed to load resource: net::ERR_(INCOMPLETE_CHUNKED_ENCODING|CONNECTION_RESET|CONNECTION_ABORTED|NETWORK_CHANGED)$/
+    const SERVER5XX = /Failed to load resource.*status of 5\d\d/
+    const transportNoise = consoleErrors.filter(t => TRANSPORT.test(t))
+    const serverFaults = consoleErrors.filter(t => SERVER5XX.test(t))
+    const real = consoleErrors.filter(t => !TRANSPORT.test(t) && !SERVER5XX.test(t))
+    const clientFaults = pageErrors.length + real.length
     if (clientFaults === 0 && serverFaults.length > 0) {
       record('T7 zero pageerror/console.error', 'env_fail',
         `后端瞬断混入卫生断言：${serverFaults.length} 条 5xx 资源加载错（first=${serverFaults[0]}）——客户端 pageerror=0、行为腿全过；多泳道争抢窗，重跑定判`)
     } else if (clientFaults === 0) {
-      record('T7 zero pageerror/console.error', 'pass')
+      record('T7 zero pageerror/console.error', 'pass',
+        transportNoise.length ? `豁免传输层噪声 ${transportNoise.length} 条（并发窗共享台重启）` : '')
     } else {
       record('T7 zero pageerror/console.error', 'fail',
-        `pageerrors=${pageErrors.length} first=${pageErrors[0] ?? ''} consoleErrors=${consoleErrors.length} firstConsole=${consoleErrors[0] ?? ''}`)
+        `pageerrors=${pageErrors.length} first=${pageErrors[0] ?? ''} consoleErrors=${real.length} firstConsole=${real[0] ?? ''}`)
     }
   } finally {
     await ctx.close().catch(() => {})

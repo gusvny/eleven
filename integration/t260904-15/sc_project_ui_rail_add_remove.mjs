@@ -322,9 +322,11 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
 }
 
 // T5 console 零 error（豁免：旅程故意触发 fail-closed 的 409 资源日志——浏览器把
-// 非 2xx fetch 记为 console error，属预期交互产物非 UI 缺陷；其余 error 零容忍）
+// 非 2xx fetch 记为 console error，属预期交互产物非 UI 缺陷；t260910-04 R3 起本台
+// （容器内引擎地址钉死不可达=降级断言面）的工单列表显式 502 同属预期产物，同款豁免；
+// 其余 error 零容忍）
 record('browser/console-clean',
-  consoleErrors.filter((e) => !/Failed to load resource.*409/.test(e)).length === 0,
+  consoleErrors.filter((e) => !/Failed to load resource.*(409|502)/.test(e)).length === 0,
   consoleErrors.slice(0, 3).join(' | '));
 
 await browser.close();

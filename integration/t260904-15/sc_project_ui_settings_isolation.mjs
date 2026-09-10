@@ -182,7 +182,11 @@ record('bench/boot-B', 'pass', benchB.base);
   benchB.teardown();
 }
 
-// T4 console 零 error
-record('browser/console-clean', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
+// T4 console 零 error（豁免 502 资源日志：本台容器内引擎地址钉死不可达=降级断言面，
+// t260910-04 R3 起工单列表对引擎不可达显式 502（不再吃成 200 空表谎报空态）——浏览器把
+// 非 2xx fetch 记为 console error，属预期产物非 UI 缺陷；其余 error 零容忍）
+record('browser/console-clean',
+  consoleErrors.filter((e) => !/Failed to load resource.*502/.test(e)).length === 0,
+  consoleErrors.slice(0, 3).join(' | '));
 
 summarize();

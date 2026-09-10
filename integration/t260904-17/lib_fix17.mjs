@@ -12,7 +12,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import {
   mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, openSync, closeSync,
-  readdirSync, realpathSync, chmodSync,
+  readdirSync, realpathSync, chmodSync, symlinkSync, unlinkSync,
 } from 'node:fs';
 import { copyFile, mkdir, symlink } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -21,7 +21,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const DEAD_TEMPORAL = '127.0.0.1:17233'; // 死端口：本票票源全走桩，真 Temporal 不可达=兜底红线
+const DEAD_TEMPORAL = '127.0.0.1:1'; // 死端口兜底红线。勿用 17233——那是供给台 Temporal 的实占端口（260910 实锤：列表直走引擎通道后「死端口」连上了供给台，ok:true 空行=隔离假绿）；夹具票源全走桩
 
 export function tmpRoot(prefix) {
   return mkdtempSync(path.join(tmpdir(), prefix));
@@ -90,17 +90,13 @@ export function makeTicketStub() {
 import sys, json, os, time
 REAL = ${JSON.stringify(REAL)}
 args = sys.argv[1:]
-tool = None
-payload = {}
-try:
-    i = args.index('call')
-    tool = args[i + 1] if i + 1 < len(args) else None
-    if i + 2 < len(args):
-        payload = json.loads(args[i + 2])
-except (ValueError, IndexError, json.JSONDecodeError):
-    tool = None
 isAdmin = any(a.endswith('admin.py') for a in args)
-if not isAdmin or tool not in ('ticket', 'workflow'):
+# 引擎通道拦截（t260910-04 起列表主数据直走 client.py ticket-list，不再经 admin.py
+# ticket:list——桩必须同拦两条通道，否则夹具行恒空=整族契约红）。runPocCli 的 venv
+# 优先解析会短路 PATH shim，靠 benchEnv 的 SANDBAR_REPO 夹具仓把 .venv/bin/python
+# 符链回本桩，引擎通道才落得进拦截面。
+isEngineList = (not isAdmin) and any(a.endswith('client.py') for a in args) and ('ticket-list' in args)
+if not isAdmin and not isEngineList:
     os.execv(REAL, [REAL] + args)  # 非本桩面：透传真解释器
 ctrl_path = os.environ['FIX17_CTRL']
 trace_path = os.environ['FIX17_TRACE']
@@ -114,6 +110,28 @@ def trace(op, tid):
 def emit(obj):
     sys.stdout.write(json.dumps(obj))
     sys.exit(0)
+if isEngineList:
+    i = args.index('ticket-list')
+    try:
+        epayload = json.loads(args[i + 1]) if i + 1 < len(args) else {}
+    except json.JSONDecodeError:
+        epayload = {}
+    eproj = str(epayload.get('project', ''))
+    trace('ticket:list', eproj)
+    ectrl = json.load(open(ctrl_path))
+    erows = [t for t in ectrl.get('tickets', []) if t.get('project') == eproj]
+    emit({'ok': True, 'result': {'count': len(erows), 'tickets': erows}})
+tool = None
+payload = {}
+try:
+    i = args.index('call')
+    tool = args[i + 1] if i + 1 < len(args) else None
+    if i + 2 < len(args):
+        payload = json.loads(args[i + 2])
+except (ValueError, IndexError, json.JSONDecodeError):
+    tool = None
+if not isAdmin or tool not in ('ticket', 'workflow'):
+    os.execv(REAL, [REAL] + args)  # admin 面外 op：透传真解释器
 if tool == 'workflow':
     op = payload.get('op', 'list')
     trace('workflow:' + str(op), '')
@@ -173,6 +191,27 @@ function benchEnv(tmpHome, projectsRoot, stub) {
   delete env.SANDBAR_NAMESPACE;
   env.FIX17_CTRL = stub.ctrlPath;
   env.FIX17_TRACE = stub.tracePath;
+  // 引擎通道夹具仓（t260910-04 起 handleTickets 直调 runPocCli→client.py；其 python
+  // 解析 venv 优先、PATH shim 被短路）——造一个 .venv/bin/python=桩 shim 的假引擎仓，
+  // SANDBAR_REPO 把 workbench 的 repo 锚（config.repo ?? SANDBAR_REPO ?? 位置推导）
+  // 指过去，引擎通道才落进桩的拦截面。client.py 只放占位（桩按 argv 拦 ticket-list，
+  // 拦截面外的引擎调用炸得响=干净失败，不静默漏真 Temporal）。
+  const engineRepo = path.join(stub.dir, 'engine-repo');
+  const venvBin = path.join(engineRepo, 'server', 'engine', '.venv', 'bin');
+  mkdirSync(venvBin, { recursive: true });
+  writeFileSync(path.join(engineRepo, 'server', 'engine', 'client.py'),
+    '# fix17 夹具占位：引擎通道由 FIX17 桩按 argv 拦截（ticket-list）；拦截面外到此=桩缺口\n');
+  try { unlinkSync(path.join(venvBin, 'python')); } catch { /* 首次无 */ }
+  symlinkSync(path.join(stub.dir, 'python3'), path.join(venvBin, 'python'));
+  // repo 其余可读面投影（t260910-04 验收补）：docs 路由读 <repo>/docs|notes（真库定稿
+  // 知识库），repo 锚到夹具仓后必须把这两面软链回真树，否则 t260905-06 文档族
+  // 「真库篇目」断言全数假红（260910 实测：docs 树=0 篇）。软链=只读投影，不写真树。
+  for (const face of ['docs', 'notes']) {
+    const dest = path.join(engineRepo, face);
+    try { unlinkSync(dest); } catch { /* 首次无 */ }
+    symlinkSync(path.join(REPO_ROOT, face), dest);
+  }
+  env.SANDBAR_REPO = engineRepo;
   env.PATH = `${stub.dir}${path.delimiter === ':' ? ':' : ':'}${process.env.PATH || ''}`;
   return env;
 }

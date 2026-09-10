@@ -593,4 +593,13 @@ async function main() {
   summarize()
 }
 
-main().catch(e => { console.error(String(e)); summarize() })
+// 中途异常按三态 triage（260911 gen5 仲裁补洞，sc_lane_parallel_dom 同款）：main()
+// 途中抛错（goto/reload 超时、连接拒绝=stub 台未就绪/被并发抢占）原来只打印不计数，
+// fail=0 时 summarize 会 exit 0——「半程假绿」实锤。现在：导航/连接类记 env_fail
+// （exit 2），其余记 fail（exit 1），绝不静默。
+main().catch(e => {
+  const s = String(e?.message ?? e);
+  const nav = /Timeout\s*\d+ms\s+exceeded|networkidle|ERR_CONNECTION|ECONNREFUSED|socket hang up|Target closed|net::/i.test(s);
+  record('mid-run-abort', nav ? 'env_fail' : 'fail', s.slice(0, 200));
+  summarize();
+})

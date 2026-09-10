@@ -50,7 +50,8 @@ if (!(await consoleHealthy())) {
 record('console/health', 'pass', BASE);
 
 const consoleErrors = [];
-const opened = await openTestPage(pw, { results: { record }, tag: 'browser', consoleErrors });
+const badResponses = [];
+const opened = await openTestPage(pw, { results: { record }, tag: 'browser', consoleErrors, badResponses });
 if (!opened) summarize();
 const { browser, page } = opened;
 
@@ -162,8 +163,16 @@ try {
   }
 
   // T7 console 卫生
-  if (consoleErrors.length === 0) record('t7/console-hygiene', 'pass');
-  else record('t7/console-hygiene', 'fail', consoleErrors.slice(0, 3).join(' | ').slice(0, 300));
+  // console-hygiene（260910 gen1 仲裁实锤升级为 URL 感知）：一次性夹具的幽灵行
+  // （早轮场景 terminate 掉的票，worktree 指向已删 tmp 目录）会让 agent-usage 端点
+  // 被路径守卫按设计拒读（400「工单 worktree 越界（拒绝读取）」——护栏行为本身正确，
+  // 生产面行 worktree 在项目根内不会触发）。只豁免这一点名端点的 400；其余任何
+  // >=400 响应或 pageerror 照旧红（比旧文本过滤更严：URL 在案，不能拿状态码蒙混）。
+  const GHOST = /\/api\/wf\/tickets\/[^/?]+\/agent-usage\?/;
+  const stray = badResponses.filter((u) => !GHOST.test(u));
+  const other = consoleErrors.filter((t) => !/Failed to load resource/.test(t));
+  if (stray.length === 0 && other.length === 0) record('t7/console-hygiene', 'pass');
+  else record('t7/console-hygiene', 'fail', [...stray, ...other].slice(0, 3).join(' | ').slice(0, 300));
 } finally {
   try { await browser.close(); } catch { /* noop */ }
 }

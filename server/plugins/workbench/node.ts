@@ -109,9 +109,12 @@
  *                                                 admin.log 同形 JSONL 审计+run-id；块 key 含内容哈希，
  *                                                 内容变→旧意见客户端标「已过期」，支持多轮迭代）
  *
- * 数据源=server/tools/ticket.py（M1 已落地）：读写统一走 runAdminCli spawn
+ * 数据源：写操作=server/tools/ticket.py（读写统一走 runAdminCli spawn
  * admin.py（读列也走，不直读 json）——与模型通道 sandbar-tools 共用同一函数，
  * run-id 审计唯一数据源始终在 python server/admin.log（面板写操作不另开审计通道）。
+ * t260910-04 起工单列表主数据改直走引擎 client.py ticket-list（runPocCli）：
+ * 引擎行原生带 paused/paused_phase（t260908-01 暂停二态），ticket.py 薄壳投影
+ * 曾把这两键丢掉；写操作/模型通道仍走 ticket.py+admin.py 审计口径不变。
  * M11 v2（t260822-m11 模版即代码）+ 260823 多项目化：**工单状态只在 Temporal
  * workflow**（旧 tickets/ JSON 投影目录已删）——ticket.py 薄壳内部全走 client.py
  * ticket-start/ticket-list/ticket-query/ticket，本插件路由按 project 传参即完成分流；
@@ -520,13 +523,27 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
    * 按项目解析会把今天能用的跨项目签署打断成 502（外部项目无引擎 clone）。若宿主
    * 真实意图是「外部项目各带引擎克隆、独立 Temporal」，那是整套引擎拓扑（worker/
    * namespace/端口）专门票，不随本票做。cwd 同保留引擎仓：两操作只带 id，无文件相对行为。
+   *
+   * opts（t260910-04）：timeout/maxBuffer 可注入，缺省维持现值（120s / execFile 默认
+   * 1MB）——sign/retry-qc 是单票小回执，缺省够用，调用点零变化。ticket-list 这类
+   * 批量响应的调用方必须显式传大 maxBuffer（对齐 runAdminCli 的 16MB）与宽 timeout
+   * （RUNNING 票逐票 snapshot 查询+3 次重试），见 handleTickets。
    */
-  async function runPocCli(_cli: { repo: string }, args: string[]): Promise<any> {
+  async function runPocCli(
+    _cli: { repo: string },
+    args: string[],
+    opts: { timeoutMs?: number; maxBufferBytes?: number } = {},
+  ): Promise<any> {
     const poc = join(repo, 'server', 'engine')
-    const python = join(poc, '.venv', 'bin', 'python')
+    // 引擎 python 解析回落链（对齐 server/tools/ticket.py _engine_py 同口径）：
+    // venv 在场且可执行则用，否则回落 python3——泳道 worktree/测试台容器常无
+    // venv（未入库），硬编码 venv 会让列表 502 ENOENT（t260910-04 场景实测）。
+    const venvPy = join(poc, '.venv', 'bin', 'python')
+    const python = existsSync(venvPy) ? venvPy : 'python3'
     const { stdout } = await execFileP(python, [join(poc, 'client.py'), ...args], {
       cwd: repo,
-      timeout: 120_000,
+      timeout: opts.timeoutMs ?? 120_000,
+      ...(opts.maxBufferBytes !== undefined ? { maxBuffer: opts.maxBufferBytes } : {}),
     })
     return JSON.parse(stdout)
   }
@@ -625,11 +642,37 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       return
     }
     try {
+      // t260910-04：列表主数据直走引擎 ticket-list（runPocCli）——引擎行原生带
+      // paused/paused_phase（t260908-01 段间暂停二态，UI ⏸ 徽标/操作位数据源），
+      // 原 ticket.py op=list 投影把这两键丢了（薄壳改不动属 server/tools/ 写集外，
+      // 见该通道模型/CLI 消费者的后续专门票）。
+      // 参数取舍（runPocCli 先例=sign/retry-qc 单票小回执，缺省 120s/1MB 不够）：
+      // ticket-list 是批量响应（全项目行、closed 也在列）→ maxBuffer 16MB（对齐
+      // runAdminCli）；RUNNING 票逐票 snapshot 查询+3 次重试 → timeout 300s。
+      // 行形状差异表（引擎行 vs 原 ticket.py 出行）：引擎行是**超集**——多
+      // paused/paused_phase/exec_status 三键，其余键（workflow/updated/updated_ts/
+      // stage_state 缺省 awaiting/handoff·pending 计数/close_ts…）同形，无缺键；
+      // close_ts ?? 0 仅为防御性归一（键恒在场）。
       const [t, w] = await Promise.all([
-        callTool('ticket', { op: 'list', project: projectKey }),
+        runPocCli(cli, ['ticket-list', JSON.stringify({ project: projectKey })],
+          { timeoutMs: 300_000, maxBufferBytes: 16 * 1024 * 1024 }),
         callTool('workflow', { op: 'list' }),
       ])
-      const tickets = t?.result?.tickets ?? []
+      // t260910-04 顺手修（R3）：引擎回执 ok:false 原先被 `?? []` 吃成 200 空列表
+      // （引擎挂=台面静默变空）。报错必须精确：显式 502 原文透传。注意 client.py
+      // main 全路径 exit 0（含 infra 失败），execFile 不会因此 reject——ok 检查
+      // 必须做在回执结构上，靠 throw/catch 兜不住。workflow list 同族补查。
+      if (t?.ok === false) {
+        sendJson(res, 502, { ok: false, error: `ticket-list 失败: ${t.error ?? JSON.stringify(t)}` })
+        return
+      }
+      if (w?.ok === false) {
+        sendJson(res, 502, { ok: false, error: `workflow-list 失败: ${w.error ?? JSON.stringify(w)}` })
+        return
+      }
+      // 行形状归一：close_ts 防御性补 0（键本恒在场，`?? 0` 只兜畸形引擎回执，
+      // 不改语义）；其余键逐键透传不清洗（paused/paused_phase 等以引擎为真源）。
+      const tickets = (t?.result?.tickets ?? []).map((r: any) => ({ ...r, close_ts: r.close_ts ?? 0 }))
       // workflow list 返回 {workflows:[...]}（M1 引擎结构），兼容裸数组。
       const workflows = w?.result?.workflows ?? (Array.isArray(w?.result) ? w.result : [])
       // t260904-17「主数据先行」（R5/场景 T2）：主响应窗口内零 show——逐票 show 只
