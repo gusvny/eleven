@@ -220,11 +220,12 @@ const TICKETS_PREFIX = '/sandbar-workbench/api/wf/tickets'
 /** 立项单路由前缀（epic-linkage Tier 2）：exact 挂列表，prefix 挂 <code>[ /tickets]。 */
 const EPICS_PREFIX = '/sandbar-workbench/api/epics'
 /** POST 操作白名单（admin.py 引擎的 op 子集 + sign=审批签字走 Temporal signal；
- *  M11 v2 加 retry-qc=blocked 重跑走 Temporal retry_qc signal）。
+ *  M11 v2 加 retry-qc=blocked 重跑走 Temporal retry_qc signal；
+ *  t260908-01 加 pause/resume=段间暂停·恢复走 Temporal pause/resume signal）。
  *  create 不进此表：它没有工单 id，落 exact 路由 /wf/tickets 的 POST 分支
  *  （handleTicketCreate，epic-linkage Tier 3 / t260826-02），与 <id>/<op> 路径正交。
  *  review（审批意见落盘）不进此表——它不经过 admin.py，在路由里按 method 单独分支。 */
-const OPS = new Set(['accept', 'advance', 'dispatch-next', 'rework', 'update', 'sign', 'retry-qc'])
+const OPS = new Set(['accept', 'advance', 'dispatch-next', 'rework', 'update', 'sign', 'retry-qc', 'pause', 'resume'])
 
 /** 工单 id 白名单：review 落盘文件名由它拼出，必须防穿路径（同 knowledge DOC_PATH_RE 的角色）。
  *  放行 Han 字（真实工单 id 含中文，54 张全量体检零误伤）；/ \ . % 与控制字符全在表外，穿路径无门。 */
@@ -1129,6 +1130,20 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
           const who = String(body.who ?? 'op-local')
           const r = await runPocCli(cli, ['signal', JSON.stringify({
             workflow_id: id, signal: 'retry_qc', input: who,
+          })])
+          sendJson(res, 200, r)
+          return
+        }
+        // t260908-01：pause/resume = 段间暂停·恢复（Temporal pause/resume signal，
+        // 与 sign/retry-qc 同款绕 ticket.py 直调 engine client.py——不造旁路）。
+        // 幂等反馈可辨在 workflow 侧（重复 pause/空态 resume/畸形 payload 落 refused，
+        // snapshot 可观测）；通道失败（非零退出/120s 超时/非 JSON）由下方 try/catch
+        // 转 502 结构化，前端走既有 apiPost 错误通路。
+        if (op === 'pause' || op === 'resume') {
+          const who = String(body.who ?? 'op-local')
+          const note = String(body.note ?? '')
+          const r = await runPocCli(cli, ['ticket', JSON.stringify({
+            op, ticket_id: id, who, note,
           })])
           sendJson(res, 200, r)
           return

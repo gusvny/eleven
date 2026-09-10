@@ -58,6 +58,9 @@ with workflow.unsafe.imports_passed_through():
         GateResult,
         HumanGateContext,
         HumanGatePrep,
+        PAUSE_NOTE_INPUT_LIMIT,
+        PAUSE_PATCH_ID,
+        PauseRequest,
         ReworkRequest,
         Signature,
         Stage,
@@ -86,7 +89,123 @@ RETRY = RetryPolicy(maximum_attempts=3)  # only for infrastructure failures; bus
 BREATHE_PATCH_ID = "ki003-breathe-v1"
 
 
-class TicketWorkflowBase:
+class TicketPauseMixin:
+    """段间暂停机制（工单 t260908-01，设计基准=notes/epics/ticket-pause.md）——所有
+    工单 workflow 的共用骨架：pause/resume 信号 + 段间等待门 + paused 二态快照。
+
+    子类接线（dev_lane 侧零私有逻辑=本 mixin 全包）：
+      ①继承本 mixin——temporalio 的 signal/query/update 装饰器可继承（本文件头注
+        已证 1.18.2），TicketWorkflowBase 与 DevLaneWorkflow 同款挂法；
+      ②在自己的主循环段间门口调 `await self._pause_gate()`（每轮相位/段切换前）；
+      ③snapshot() 返回字典并 `**self._pause_snapshot()`。
+
+    语义（拍板①②）：
+    - 粒度=段间暂停：pause 受理只置位，不打断在飞 activity——当前段（含在飞 agent
+      activity）自然跑完，主循环走到下一个段间门口时门把它停住，不派下一段；
+      resume 清位后 wait_condition 唤醒，接着走。
+    - 仅人门：信号唯一入口=client.py ticket op=pause/resume（与 sign/rework 同族
+      的 CLI 信号通道），agent prompt/activities 无发送面。
+    - 暂停是正交维度：不碰 status/stage_state 状态机（blocked/awaiting-human 票
+      也可暂停——语义=retry_qc 重跑完本段即停门口）。
+    - pause×rework 交互（显式声明）：门插在 rework 分支之前，暂停期间到达的 rework
+      压在门口，resume 后循环先走 rework 分支（打回先于下一段派发）。
+
+    反馈可辨（幂等）：重复 pause / 空态 resume / 畸形 payload（who 空白、note 超
+    PAUSE_NOTE_INPUT_LIMIT）均落 refused（文案点名原因，不进事件历史，host_ruling
+    同款 intake gate）；成功 pause/resume 落 _log+timeline。
+    """
+
+    _paused: bool = False         # 类属性缺省（布尔不可变，不碰子类 __init__）
+    _paused_at_gate: bool = False
+
+    @workflow.signal
+    def pause(self, req: PauseRequest) -> None:
+        who = str(req.who or "").strip()
+        note = str(req.note or "")
+        # R4（review_plan gen1）：老 RUNNING 实例（功能上线前开出的票）重放/执行时
+        # 事件历史无 PAUSE marker → 门恒 no-op。若受理置位，snapshot/UI 会谎称
+        # 「已暂停」而 workflow 照跑（KI-018 误导信号同族）——改为一处可辨拒绝。
+        if not workflow.patched(PAUSE_PATCH_ID):
+            self.refused.append({"who": who, "want": "pause",
+                                 "why": "该工单启动于暂停功能上线前，不支持暂停"
+                                        "（事件历史无 ticket-pause-v1 marker）"})
+            return
+        if not who:
+            self.refused.append({"who": who, "want": "pause",
+                                 "why": "who 必填非空（空/纯空白拒收）"})
+            return
+        if len(note) > PAUSE_NOTE_INPUT_LIMIT:
+            self.refused.append({"who": who, "want": "pause",
+                                 "why": "note 超限（%d > %d 字符），不进事件历史——"
+                                        "拆条后重发" % (len(note), PAUSE_NOTE_INPUT_LIMIT)})
+            return
+        if self._paused:
+            self.refused.append({"who": who, "want": "pause",
+                                 "why": "已处于暂停（幂等拒绝，重复 pause 不重复置位）"})
+            return
+        self._paused = True
+        self._paused_at_gate = False
+        self._log("pause 受理（%s）%s——当前段自然跑完，停在段间门口等 resume"
+                  % (who, "：%s" % note if note else ""))
+        self._mark(str(self.meta.get("stage") or ""), "paused",
+                   "%s（%s）" % (note, who) if note else who)
+        self._touch()
+
+    @workflow.signal
+    def resume(self, req: PauseRequest) -> None:
+        who = str(req.who or "").strip()
+        note = str(req.note or "")
+        # resume 无 patched 前置分支：老实例 _paused 恒 False（pause 已被前置拒收），
+        # 自然落「未处于暂停」空态拒绝——一处分支不重复。
+        if not who:
+            self.refused.append({"who": who, "want": "resume",
+                                 "why": "who 必填非空（空/纯空白拒收）"})
+            return
+        if len(note) > PAUSE_NOTE_INPUT_LIMIT:
+            self.refused.append({"who": who, "want": "resume",
+                                 "why": "note 超限（%d > %d 字符），不进事件历史——"
+                                        "拆条后重发" % (len(note), PAUSE_NOTE_INPUT_LIMIT)})
+            return
+        if not self._paused:
+            self.refused.append({"who": who, "want": "resume",
+                                 "why": "未处于暂停（空态拒绝）"})
+            return
+        self._paused = False
+        self._paused_at_gate = False
+        self._log("resume（%s）%s——段间门口放行，继续派段"
+                  % (who, "：%s" % note if note else ""))
+        self._mark(str(self.meta.get("stage") or ""), "resumed",
+                   "%s（%s）" % (note, who) if note else who)
+        self._touch()
+
+    async def _pause_gate(self) -> None:
+        """段间门口：主循环每次相位/段切换前调用。未暂停=零开销返回；已暂停→
+        paused_at_gate 置位 + wait_condition 等 resume。门本身是 await 点，事件
+        循环让出，snapshot 查询暂停期照常可跑（KI-008 相邻面天然覆盖）。
+        回放安全（KI-003 _breathe 同款纪律）：老实例重放无 marker → 门为 no-op。"""
+        if not workflow.patched(PAUSE_PATCH_ID):
+            return
+        if not self._paused:
+            return
+        self._paused_at_gate = True
+        self._mark(str(self.meta.get("stage") or ""), "paused-waiting",
+                   "段间暂停生效，等 resume signal")
+        await workflow.wait_condition(lambda: not self._paused)
+        self._paused_at_gate = False
+        self._mark(str(self.meta.get("stage") or ""), "resumed",
+                   "resume 放行，继续派段")
+
+    def _pause_snapshot(self) -> Dict[str, Any]:
+        """paused 二态快照键（pending=已受理待段间生效——当前段还在跑/在人门/
+        blocked 等位；at_gate=已停在段间门口）。UI 徽标按此二态文案，
+        防「已暂停却还在跑」被误读为 bug。"""
+        if not self._paused:
+            return {"paused": False, "paused_phase": ""}
+        return {"paused": True,
+                "paused_phase": "at_gate" if self._paused_at_gate else "pending"}
+
+
+class TicketWorkflowBase(TicketPauseMixin):
     """Shared mechanisms for the six template subclasses. A subclass only declares:
       STAGES: Tuple[Stage, ...]   — the stage chain (source of truth = code)
       PATCH_ID: str               — this template's own patched id
@@ -499,6 +618,9 @@ class TicketWorkflowBase:
             self._mark("workspace", "running", "重试 prepare_workspace（retry_qc / rework 后）")
         idx = start_idx
         while idx < len(self.STAGES):
+            # 段间暂停门（t260908-01）：上一段（含在飞 activity）已自然跑完，此处即
+            # 段间门口——已暂停则停住等 resume，不派下一段。
+            await self._pause_gate()
             st = self.STAGES[idx]
             self._gens[st.id] = self._gen(st.id) + 1
             self.meta["stage"] = st.id
@@ -650,6 +772,7 @@ class TicketWorkflowBase:
             "ticket_id": self.ticket_id,
             "template_id": self.template_id,
             "workflow_class": type(self).__name__,
+            **self._pause_snapshot(),
             "stage": stage,
             "stage_name": sdef.name if sdef else "",
             "stage_acceptance": list(sdef.acceptance) if sdef else [],

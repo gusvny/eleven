@@ -15,7 +15,7 @@ import type { MouseEvent } from 'react'
 import { epicChipColor } from './theme'
 import {
   deriveTicketState, STATE4_LABEL, epicColorOf, stageShortOf, relativeTime,
-  laneDots, toMillis, ticketDisplayTitle, type WfLike,
+  laneDots, toMillis, ticketDisplayTitle, pausedBadgeText, type WfLike,
 } from './ticket-list-model.ts'
 
 /** 行卡消费的工单最小字段面（对齐 index.tsx TicketRow，多字段不关心）。 */
@@ -33,6 +33,10 @@ export interface CardTicket {
   updated_ts?: number
   created?: number
   blocked_reason?: string
+  /** 段间暂停二态（t260908-01，host 行形状透传）：paused=已受理；
+   *  paused_phase=pending（待段间生效）/ at_gate（已停在段间门口）。 */
+  paused?: boolean
+  paused_phase?: string
 }
 
 /** 进展行（host enrichment 透传；缺省=行卡降级只显相对时间）。 */
@@ -42,7 +46,7 @@ export interface CardProgress {
 }
 
 /** 管理动作位键集（与台面 availableOps 的返回键同名单）。 */
-export type CardOp = 'advance' | 'dispatch-next' | 'rework' | 'unblock' | 'close'
+export type CardOp = 'advance' | 'dispatch-next' | 'rework' | 'unblock' | 'close' | 'pause' | 'resume'
 
 export interface TicketRowCardProps {
   t: CardTicket
@@ -65,6 +69,8 @@ export interface TicketRowCardProps {
   onRework?: () => void
   onUnblock?: () => void
   onClose?: () => void
+  onPause?: () => void
+  onResume?: () => void
   onOpenEpic?: (code: string) => void
 }
 
@@ -81,7 +87,7 @@ function cardTitle(t: CardTicket, wf?: WfLike | null): string {
 
 export function TicketRowCard({
   t, wf, progress, compact = false, active = false, busy = false, updatedTsMs,
-  ops = [], peerViewers = [], onOpen, onAdvance, onDispatch, onRework, onUnblock, onClose, onOpenEpic,
+  ops = [], peerViewers = [], onOpen, onAdvance, onDispatch, onRework, onUnblock, onClose, onPause, onResume, onOpenEpic,
 }: TicketRowCardProps) {
   const state4 = deriveTicketState(t.status, t.stage_state)
   const epicColor = epicColorOf(t.epic)
@@ -110,6 +116,17 @@ export function TicketRowCard({
             不与迷你站道圆点混数（UI 场景 T5 以几何特征数点） */}
         <span className="wb-card-dot" data-state={state4} />
         <span className="wb-card-state" data-state={state4}>{STATE4_LABEL[state4]}</span>
+        {/* 段间暂停徽标（t260908-01）：二态文案防「已暂停却还在跑」误读——
+            pending=信号已受理、当前段还在跑（待段间生效）；at_gate=已停在段间门口。 */}
+        {t.paused && (
+          <span className="wb-card-paused" data-paused="1"
+            data-paused-phase={t.paused_phase || 'pending'}
+            title={t.paused_phase === 'at_gate'
+              ? '已停在段间门口：不派下一段，点「恢复」继续'
+              : '暂停已受理：当前段（含在飞 agent）自然跑完后停住'}>
+            {pausedBadgeText(t.paused_phase)}
+          </span>
+        )}
         <span className="wb-card-id">{t.id}</span>
         {(peerViewers?.length ?? 0) > 0 && (
           <span title={`另一页签正在查看：${(peerViewers ?? []).map(v => v.who).join('、')}`}>👀</span>
@@ -168,6 +185,14 @@ export function TicketRowCard({
         )}
         {!compact && ops.includes('rework') && (
           <button className="wb-card-btn wb-card-btn-danger" disabled={busy} onClick={stop(onRework)}>打回</button>
+        )}
+        {!compact && ops.includes('pause') && (
+          <button className="wb-card-btn" disabled={busy} onClick={stop(onPause)}
+            title="段间暂停：当前段（含在飞 agent）自然跑完后停住，不派下一段">暂停</button>
+        )}
+        {!compact && ops.includes('resume') && (
+          <button className="wb-card-btn wb-card-btn-green" disabled={busy} onClick={stop(onResume)}
+            title="恢复：段间门口放行，继续派段">恢复</button>
         )}
         {!compact && ops.includes('close') && (
           <button className="wb-card-btn wb-card-btn-green" disabled={busy} onClick={stop(onClose)}>完成</button>

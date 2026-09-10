@@ -93,6 +93,8 @@ from shared import (
     SettleLaneResult,
     StageResult,
     TEMPLATE_CLASS_NAMES,
+    TEST_STUB_ENV_KNOBS,
+    WORKER_ROUTING_ENV_KNOBS,
     UI_EVIDENCE_DIR,
     ui_evidence_dir,
     evidence_base,
@@ -553,6 +555,7 @@ AGENT_STAGE_IDS = (
     "review", "report",                              # proofread (retired; report doubles for regression)
     "regress",                                       # regression (retired)
     "clean", "rederive",                             # cleanup (retired)
+    "fx_step_one", "fx_step_two",                    # fixture-two-step 测试夹具模板（t260908-01，仅 SANDBAR_FIXTURE_TEMPLATES=1 下可开票）
 )
 
 
@@ -1111,6 +1114,14 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
         # keeps the write_set_refresh_fault annotation lit through KI-049 gate ②; a
         # stub chain that needs to demo the write-set refresh passes the list
         # explicitly, and the gate's own judgement is never loosened.
+        # t260908-01：可注入的桩段时长 SANDBAR_AGENT_STUB_DELAY_SEC（秒，缺省 0=
+        # 即时回执，既有语义不变）——段间暂停集成腿需要确定性的「段在飞」窗口
+        #（在飞中发 pause、断言段自然跑完才停门口）；无此旋钮桩段秒过，信号永远
+        # 落在段外，在飞粒度不可验。睡眠在写结果文件之前=在飞窗真实拉长。
+        _stub_delay = float(os.environ.get("SANDBAR_AGENT_STUB_DELAY_SEC") or 0)
+        if _stub_delay > 0:
+            activity.heartbeat("stub delayed start (%ss)" % _stub_delay)
+            await asyncio.sleep(_stub_delay)
         stub_files = [x.strip() for x in
                       os.environ.get("SANDBAR_AGENT_STUB_FILES", "").split(",")
                       if x.strip()]
@@ -2288,7 +2299,14 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 json.dumps({"lane": "code", "path": str(sc["tree"]),
                             "base": wl_base, "require_base": True,
                             "write_set": list(sc["write_set"])}),
-                cwd=str(sc["tree"]), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                cwd=str(sc["tree"]), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                # t260908-01：剥除测试台桩旋钮族+worker 路由旋钮族
+                #（shared.TEST_STUB_ENV_KNOBS / WORKER_ROUTING_ENV_KNOBS）——
+                # 桩脑工单的 worker env 会把它们漏进 verify_lane 的 pytest 子进程，
+                # 被测契约 UT 被换成桩行为/测试台值造成假红（e2e 两轮实证）。
+                # 生产 worker 的正常运转不依赖子进程携带这些旋钮，剥除对生产恒等。
+                env={k: v for k, v in os.environ.items()
+                     if k not in TEST_STUB_ENV_KNOBS and k not in WORKER_ROUTING_ENV_KNOBS})
             try:
                 vo_b, ve_b = await asyncio.wait_for(vp.communicate(), timeout=900)
                 v_stdout, v_stderr = vo_b.decode("utf-8", "replace"), ve_b.decode("utf-8", "replace")

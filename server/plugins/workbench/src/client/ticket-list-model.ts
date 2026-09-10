@@ -48,6 +48,23 @@ export function deriveTicketState(status?: string, stageState?: string): TicketS
   }
 }
 
+/**
+ * 段间暂停操作键推导（t260908-01）：未暂停 → 'pause'，已暂停 → 'resume'。
+ * closed 票由调用方（availableOps）早退不进此函数；畸形输入（undefined/非布尔真值）
+ * 按真值性归 resume/pause，不 throw。推导住纯函数层（index.tsx 只消费），UT 直测。
+ */
+export function pauseOpOf(paused: unknown): 'pause' | 'resume' {
+  return paused ? 'resume' : 'pause'
+}
+
+/**
+ * 段间暂停徽标二态文案（t260908-01）：pending=已受理待段间生效（当前段还在跑），
+ * at_gate=已停在段间门口；未知/空相位按 pending 文案兜底（宁可保守提示不可静默）。
+ */
+export function pausedBadgeText(phase?: unknown): string {
+  return phase === 'at_gate' ? '⏸ 已暂停在段间' : '⏸ 暂停中（待段间生效）'
+}
+
 /* ------------------------------------------------------------- epic 哈希色 */
 
 /**

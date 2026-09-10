@@ -65,6 +65,12 @@ import os  # noqa: E402  （_Env 依赖，置后导入保持 defs 上方无副�
 class ResolveEpicsDirTest(unittest.TestCase):
     def setUp(self):
         import tempfile
+        # ambient 隔离（t260908-01 实证）：resolve_epics_dir 设计上 env
+        # SANDBAR_EPICS_DIR 现读优先——桩脑工单泳道里 merge_check 的 pytest 会
+        # 继承 worker 的测试台 env，ambient 值压过本类自建项目锚造成假红。
+        # 专项测「env 现读优先」的用例经 _Env 自行注入，不受影响。
+        self._saved_epics_env = os.environ.get("SANDBAR_EPICS_DIR")
+        os.environ.pop("SANDBAR_EPICS_DIR", None)
         self.root = Path(tempfile.mkdtemp(prefix="t260907-07-reg-"))
         # 两项目夹具：engine 桶 + external 桶，各自主目录下 notes/epics 放
         # 同名（gap-b.md）+ 异名（各自独有）立项单——被测的是解析代码路径，
@@ -82,6 +88,10 @@ class ResolveEpicsDirTest(unittest.TestCase):
     def tearDown(self):
         import shutil
         shutil.rmtree(self.root, ignore_errors=True)
+        if self._saved_epics_env is None:
+            os.environ.pop("SANDBAR_EPICS_DIR", None)
+        else:
+            os.environ["SANDBAR_EPICS_DIR"] = self._saved_epics_env
 
     def test_project_anchor_per_project(self):
         """两项目同名/异名立项单各取各的（验收①②的解析层）。"""

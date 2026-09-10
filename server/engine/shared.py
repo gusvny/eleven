@@ -1776,6 +1776,45 @@ class HostRulingRequest:
     note: str
 
 
+# ---- Ticket pause（工单 t260908-01，设计基准=notes/epics/ticket-pause.md）----
+# pause/resume 与 sign/rework/ruling 同族：只从 client.py CLI 信号通道进，agent
+# prompt/activities 无发送入口。粒度=段间暂停（当前段含在飞 activity 自然跑完，
+# workflow 停在段间门口等 resume）。机制真源=base.py 的 TicketPauseMixin。
+PAUSE_PATCH_ID = "ticket-pause-v1"
+# note 上限与 HOST_RULING_NOTE_INPUT_LIMIT 同值同源（intake gate：超限拒收、不进
+# 事件历史），但独立常量——两机制未来取值可能各自演进，不互相绑死。
+PAUSE_NOTE_INPUT_LIMIT = 20000
+
+# 测试台桩旋钮族（t260908-01）：这些 env 只应由测试线束设置（桩大脑/桩截图/夹具
+# 模板门/桩段时长）。机械闸（merge_check 的泳道内 verify_lane）与被测契约 UT 的
+# 子进程必须剥除它们——否则桩旋钮随 worker env 漏进被测进程，把真实行为换成桩
+# 行为造成假红（e2e 实证：SANDBAR_SUGGEST_STUB 漏进 suggest_next 契约 UT 假红）。
+# 生产 worker 从不设置它们，剥除对生产是恒等操作。
+TEST_STUB_ENV_KNOBS = ("SANDBAR_AGENT_STUB", "SANDBAR_AGENT_STUB_FILES",
+                       "SANDBAR_AGENT_STUB_DELAY_SEC", "SANDBAR_SUGGEST_STUB",
+                       "SANDBAR_UI_CAPTURE_STUB", "SANDBAR_FIXTURE_TEMPLATES")
+
+# worker 路由旋钮族（t260908-01 r10 实证追加）：这些 env 指挥 worker 进程自身
+# （poll 哪些队列/watch 哪张票/退出口径），verify_lane 的 pytest 子进程不是
+# worker——漏进去会让 worker 配置 UT 读到测试台值假红（SANDBAR_WATCH_INTERVAL_SEC
+# 漏进 watch_interval_sec 缺省断言实证）。merge_check 的泳道内 verify_lane 调用点
+# 与 TEST_STUB_ENV_KNOBS 一并剥除；对「恰好在跑 verify 的 worker 自身」无影响
+# （剥的是子进程 env，不是本进程）。
+WORKER_ROUTING_ENV_KNOBS = ("SANDBAR_TASK_QUEUE", "SANDBAR_TASK_QUEUES",
+                            "SANDBAR_WATCH_WORKFLOW", "SANDBAR_WATCH_INTERVAL_SEC")
+
+
+@dataclass
+class PauseRequest:
+    """The pause / resume signal payload（工单 t260908-01）。who=操作人（身份注入，
+    与 Signature 同一份代签纪律——agent 不得以自己角色名发起）；note=可选理由
+    （intake gate：who 空/纯空白拒收、note 超 PAUSE_NOTE_INPUT_LIMIT 拒收，均落
+    refused 不进事件历史，host_ruling 同款双形态）。"""
+
+    who: str
+    note: str = ""
+
+
 @dataclass
 class AgentStageArgs:
     """Inputs of an agent-stage activity (the activity name = the stage name; the
@@ -2749,6 +2788,13 @@ def build_stage_prompt(ticket_id: str, meta: Dict[str, Any], stage: Stage,
 TEMPLATE_CLASS_NAMES: Dict[str, str] = {
     "dev-lane": "DevLaneWorkflow",
 }
+# 夹具模板环境门（工单 t260908-01）：SANDBAR_FIXTURE_TEMPLATES=1 时把测试夹具模板
+# fixture-two-step 挂进注册表——生产/闸内默认面恰为 {dev-lane}（sc_template_face
+# _narrowing 的收窄断言以默认面为准，env 只在测试场景 worker 子进程注入），夹具
+# 模板永不上生产板。workflows_v2 的 TEMPLATE_CLASSES/ALL_WORKFLOWS_V2 同款同门。
+FIXTURE_TEMPLATES_ENV = "SANDBAR_FIXTURE_TEMPLATES"
+if os.environ.get(FIXTURE_TEMPLATES_ENV) == "1":
+    TEMPLATE_CLASS_NAMES["fixture-two-step"] = "FixtureTwoStepWorkflow"
 
 # ---- The engine's data-export archive paths (ticket t260902-02, M1-3) ----
 # The archive source of truth = the machine-level per-key data directory (contract v1.4
@@ -3048,6 +3094,9 @@ ARCHIVE_EXCLUDED_RULES = (
 TEMPLATE_DISPLAY_NAMES: Dict[str, str] = {
     "dev-lane": "开发泳道",
 }
+if os.environ.get(FIXTURE_TEMPLATES_ENV) == "1":
+    # 与 TEMPLATE_CLASS_NAMES 同门（上段）：收窄断言以默认面为准。
+    TEMPLATE_DISPLAY_NAMES["fixture-two-step"] = "夹具两段"
 
 
 # ---- The project registry (the single source of truth, collected here from

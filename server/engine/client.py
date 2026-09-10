@@ -53,6 +53,7 @@ from shared import (
     TASK_QUEUE,
     TICKET_QUEUE_PREFIX,
     HostRulingRequest,
+    PauseRequest,
     ReworkRequest,
     Signature,
     TicketInput,
@@ -401,6 +402,21 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
         return _ok({"ticket_id": tid, "signal": "host_ruling", "who": req.who,
                     "delivered": True})
 
+    if op in ("pause", "resume"):
+        # t260908-01：段间暂停/恢复（与 sign/rework/ruling 同族的信号通道）。
+        # 幂等反馈可辨在 workflow 侧（重复 pause / 空态 resume / 畸形 payload 落
+        # refused，snapshot 可观测）；本侧只对「对端不可达/已终结」报结构化 _err。
+        # payload 兼容两形：input 包装（node.ts/集成场景先例同 sign）与顶层直给。
+        raw = args.get("input")
+        if not isinstance(raw, dict):
+            raw = args
+        who = str(raw.get("who") or "op-local")
+        note = str(raw.get("note") or "")
+        req = PauseRequest(who=who, note=note)
+        await handle.signal(op, req)
+        return _ok({"ticket_id": tid, "signal": op, "who": req.who,
+                    "delivered": True})
+
     if op in ("advance", "accept", "dispatch-next"):
         return _err("v2 引擎（模版即代码）已取消 %s：workflow 过门自动推进，"
                     "验收=事后看产物（query 快照的 results/handoffs）；"
@@ -417,7 +433,7 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
         return _ok(r)
 
     return _err("未知工单操作 %r（可用：rework=打回 / ruling=宿主裁决注入 / "
-                "update=更新 / sign=签字 / query=查询）" % op)
+                "pause|resume=段间暂停·恢复 / update=更新 / sign=签字 / query=查询）" % op)
 
 
 # ---------- M11 v2: ticket-start / ticket-list / ticket-query ----------
@@ -610,6 +626,8 @@ def _row_from_meta(tid: str, meta: Dict[str, Any], exec_status: str) -> Dict[str
         "proposal_id": meta.get("proposal_id") or "",
         "stage": meta.get("stage"),
         "stage_state": meta.get("stage_state") or "awaiting",
+        "paused": bool(meta.get("paused")),                     # t260908-01 段间暂停二态（列表徽标/操作位数据源）
+        "paused_phase": str(meta.get("paused_phase") or ""),    # pending=已受理待段间生效 / at_gate=已停段间门口
         "handoff_count": len(meta.get("handoffs") or []),
         "pending_count": len(meta.get("pending") or []),
         "worktree": meta.get("worktree") or "",
@@ -843,7 +861,12 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
         if exec_status == "RUNNING":
             try:
                 snap = await _query_snapshot_with_retry(client.get_workflow_handle(tid))
-                return dict((snap or {}).get("meta") or {})
+                m = dict((snap or {}).get("meta") or {})
+                # t260908-01：paused 二态是 snapshot 顶层键（TicketPauseMixin 的产物，
+                # 不进 meta）——行形状（列表徽标/操作位数据源）在此显式并入。
+                m["paused"] = bool((snap or {}).get("paused"))
+                m["paused_phase"] = str((snap or {}).get("paused_phase") or "")
+                return m
             except Exception:
                 # KI-008 explicit degradation: a degraded marker (not a silent {}) — the
                 # row-assembly branch uses it to build a "query timed out, refresh and
@@ -856,7 +879,10 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
             try:
                 snap = await asyncio.wait_for(
                     client.get_workflow_handle(tid).result(), timeout=8)
-                return dict((snap or {}).get("meta") or {})
+                m = dict((snap or {}).get("meta") or {})
+                m["paused"] = bool((snap or {}).get("paused"))
+                m["paused_phase"] = str((snap or {}).get("paused_phase") or "")
+                return m
             except Exception:
                 return {}
         return {}
@@ -1152,10 +1178,12 @@ USAGE = (
     "安全红线：工具面只暴露上述子命令，无 set-stage / force_stage / 改状态入口。\n"
     "signal 子命令已退役（260904 宿主令）：调用一律返回结构化退役报错（sign/retry_qc\n"
     "  只服务 v1 content-pipeline 人门段，该模板已删）；签字走 ticket op=sign。\n"
-    "ticket 子命令（步2）：op=rework|ruling|update|sign|query。\n"
+    "ticket 子命令（步2）：op=rework|ruling|pause|resume|update|sign|query。\n"
     "  v2 引擎（M11 模版即代码）：advance/accept/dispatch-next 已取消（自动推进），\n"
     "  rework=signal 回目标段重跑，ruling=宿主裁决注入（人工意见正规通道，任何状态\n"
     "  可发，blocked 态注入后配 retry_qc 重跑下段即见），sign=人工审批签字，\n"
+    "  pause/resume=段间暂停·恢复（t260908-01：当前段自然跑完停在段间门口，重复/空态\n"
+    "  /畸形拒收落 refused，snapshot 的 paused/paused_phase 二态可观测），\n"
     "  update=状态维护，query 只读。\n"
     "ticket-start 创建 v2 工单（模板 id→workflow 类）；ticket-list/ticket-query=工单台数据源。\n"
     "ticket-prune 清理 closed 且已归档工单的 workflow 历史（Temporal 回归运行态，M1-3；\n"

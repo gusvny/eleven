@@ -42,6 +42,7 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
+    from base import TicketPauseMixin
     from agent_activities import (
         arbitrate,
         acceptance_walkthrough,
@@ -365,14 +366,18 @@ def _prompt_next_no(prompt: str) -> int:
 
 
 @workflow.defn
-class DevLaneWorkflow:
+class DevLaneWorkflow(TicketPauseMixin):
     """The single workflow for developer-family tickets (dev-lane). Direct activity
     orchestration, no stage machine.
 
     STAGES is metadata only (yaml snapshot / create-time derivation / workbench
     display); the snapshot keys match TicketWorkflowBase's shape
     (stage/stage_state/checks/handoffs/timeline…), so the workbench and ticket.py
-    consume it without knowing the difference."""
+    consume it without knowing the difference.
+
+    段间暂停（t260908-01）：零私有逻辑——pause/resume 信号、段间门、paused 二态
+    快照全部由 TicketPauseMixin（base 通用层）承载；本类只做接线（继承 +
+    主相循环顶部一个 _pause_gate() 调用 + snapshot 并 _pause_snapshot()）。"""
 
     PATCH_ID = "dev-lane-v1"
     TEMPLATE_ID = "dev-lane"
@@ -971,6 +976,11 @@ class DevLaneWorkflow:
         ui_ctx = ""   # t260828-09: UI screenshot evidence list (produced at the join, consumed by the walkthrough)
 
         while phase != "done":
+            # 段间暂停门（t260908-01，接线点，语义=TicketPauseMixin）：当前相位
+            # （含在飞 activity）自然跑完后，每轮循环先过门——已暂停则停住等
+            # resume，不推进下一相位。门在 rework 分支之前（显式语义：暂停期间
+            # 到达的 rework 压在门口，resume 后先打回再派段）。
+            await self._pause_gate()
             if self._rework is not None:
                 fb = "implement" if phase == "parallel_impl_design" else phase
                 # KI-024: a rework leaving a parallel period (target is a serial section)
@@ -2178,6 +2188,7 @@ class DevLaneWorkflow:
             "ticket_id": self.ticket_id,
             "template_id": self.TEMPLATE_ID,
             "workflow_class": type(self).__name__,
+            **self._pause_snapshot(),
             "stage": stage,
             "stage_name": sdef.name if sdef else "",
             "stage_acceptance": list(sdef.acceptance) if sdef else [],

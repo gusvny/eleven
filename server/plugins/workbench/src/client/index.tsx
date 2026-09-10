@@ -102,7 +102,7 @@ import { TicketRowCard, type CardOp } from './ticket-row-card.tsx'
 import {
   deriveTicketState, countByState, filterRows, progressLineOf, epicColorOf,
   STATE4_LABEL, firstSentenceOf, snapshotDigest, type SnapshotDigest,
-  type TicketState4,
+  pauseOpOf, type TicketState4,
 } from './ticket-list-model.ts'
 // t260901-15 多页签共存：在看心跳/写事件广播（tab-presence）+ 不可见页签暂停轮询门。
 import { startTabPresence } from './tab-presence.ts'
@@ -184,6 +184,9 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-card-state[data-state=blocked]{color:var(--dsw-derive-danger,#cf222e)}
 .wb-card-state[data-state=active]{color:var(--dsw-derive-accent,#0969da)}
 .wb-card-state[data-state=done]{color:var(--dsw-derive-muted,#57606a)}
+/* 段间暂停徽标（t260908-01）：主题令牌着色（warm 系=注意但非故障），
+   data-paused-phase 锚点是集成断言面。 */
+.wb-card-paused{font-size:11px;font-weight:600;flex:none;padding:0 7px;border:1px solid var(--dsw-derive-warn-border,#eac54f);border-radius:10px;color:var(--dsw-derive-warn-deep,#7d4e00);background:var(--dsw-derive-warn-surface,#fff8e6);white-space:nowrap}
 .wb-card-id{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--dsw-derive-accent,#0969da);flex:none}
 .wb-card-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .wb-card-epic{font-size:11px;padding:0 8px;border:1px solid;border-radius:10px;flex:none;white-space:nowrap}
@@ -771,6 +774,10 @@ interface TicketRow {
   epic?: string
   stage: string | null
   stage_state: string
+  /** 段间暂停二态（t260908-01，host 行形状透传）：paused=已受理；paused_phase=
+   *  pending（待段间生效）/ at_gate（已停在段间门口）。 */
+  paused?: boolean
+  paused_phase?: string
   handoff_count: number
   pending_count: number
   worktree: string
@@ -1856,7 +1863,7 @@ function D2Stages({ detail, wf, usage, durs, nowMs }: {
 
 /** 按 v0.3 §10 矩阵计算可用操作（accept 内嵌在验收清单逐项打勾，不进操作区）。
  *  行式台面（TicketRow）与详情抽屉（TicketDetail）共用：两者都带 status/stage_state/stage。 */
-function availableOps(t: { status: string; stage_state: string; stage: string | null; engine?: string }, wf?: Wf): string[] {
+function availableOps(t: { status: string; stage_state: string; stage: string | null; engine?: string; paused?: boolean }, wf?: Wf): string[] {
   const s = t.status
   const ss = t.stage_state
   // M11 v2（模版即代码）：自动推进——无 dispatch-next/逐项 accept；人门=签字（advance 钮），
@@ -1867,6 +1874,10 @@ function availableOps(t: { status: string; stage_state: string; stage: string | 
     if (ss === 'awaiting-human') v2ops.push('advance', 'rework')
     else if (ss === 'blocked') v2ops.push('unblock', 'rework')
     else v2ops.push('rework')
+    // t260908-01 段间暂停·恢复：任何进行态（含 blocked/awaiting-human——暂停是正交
+    // 维度，不碰状态机；blocked 票暂停=retry_qc 重跑完本段即停门口，语义自洽）
+    // 未暂停给暂停键、已暂停给恢复键；closed 无（上面已早退）。推导=pauseOpOf 纯函数层。
+    v2ops.push(pauseOpOf(t.paused))
     return v2ops
   }
   const ops: string[] = []
@@ -3440,6 +3451,8 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
             onAdvance={() => { doAdvance(t.id, t.stage_state, t.epic) }}
             onDispatch={() => { void doOp(t.id, 'dispatch-next', {}, '已生成派活指令') }}
             onRework={() => { openRework(t.id, t.stage_state === 'awaiting-human') }}
+            onPause={() => { void doOp(t.id, 'pause', { who: operator }, '已发送段间暂停（当前段跑完后停住）') }}
+            onResume={() => { void doOp(t.id, 'resume', { who: operator }, '已发送恢复，继续派段') }}
             onUnblock={() => {
               if (t.engine === 'template-as-code-v2') {
                 void doOp(t.id, 'retry-qc', { who: operator }, '已请求重跑（retry_qc）')
