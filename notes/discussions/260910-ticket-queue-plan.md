@@ -49,3 +49,12 @@
   t260904-06。未落地主体：①总布局（人话状态卡+泳道图+检查明细）②红灯文案对照
   ③真泳道双道与逐轮分格。排「工单详情观测面重设计」票进第二批（与 KI-019/027 同族，
   勿与 project-lifecycle 项目管理 UI mock v5 混淆——后者已落地）。
+
+## 补记（260910 文档视图修复，宿主 mock 过稿）
+
+- 票「文档视图修复」：①bug——docs tree/doc 按当前项目根解析（KI-070，修「只能看
+  sandbar 文档」）；②UI——按 mock v1 重做（notes/discussions/260910-docs-view-mock.html，
+  宿主过稿）：Project 切换 + Search + 左栏上「Docs/Notes 文件浏览器」下「On this page
+  大纲」+ 右栏正文全宽 + 英文固定 UI 元素 + 正文 Verified 新鲜度 chip（doc-lifecycle
+  面B verified 时间戳亮出）。写集=server/plugins/workbench/ + integration/；
+  场景必含：项目锚 docs tree 断言（另一项目读到自己的 docs）+ 回落引擎仓断言。

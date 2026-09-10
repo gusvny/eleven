@@ -654,3 +654,9 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 ## KI-069 UI 证据链失效：截图取景不可靠+证据读路径三层旧名错位+无人看像素（260910 暂停票全程实证）
 - 现象：①capture.mjs 板面视图在主列表渲染完成前按快门，拍出无按钮废图带全绿进归档；②workbench 取图/列表端点只认旧名（.suyou/evidence、.worktrees/<id>/.suyou/screenshots），引擎/截图台写新名（.sandbar/screenshots、.lane/<id>）——功能实际失效，靠手工复制兜底；③走查 agent 文本模型看不了像素、合并闸只查文件存在（自认盲区）——唯一看图环节=人门最后一步。
 - 修复票=t260910-05（截图内容断言+路径新名迁移；宿主拍板：不做签字界面嵌图）。
+
+## KI-070 文档视图单仓硬编码：多项目只读 sandbar docs（260910 宿主实报）
+- 现象：任何项目点「文档」都只显示 sandbar 仓 docs/，别的项目自己的文档看不见——影响使用。
+- 根因：node.ts handleDocsTree/handleDocsDoc 用 join(repo, scope)，repo=引擎仓根；代码注释自认「C1 写死：全仓单例，docs 属仓不属项目」。多项目化未跟上的同族缺口（与 KI-066 diff 单仓同族）。
+- 修复：docs tree/doc 按当前项目根解析（复用项目锚/enrich 的 root 传递链，同证据列表端点），缺省回落引擎仓；UI 一票升级（mock v1：Project 切换+Search+左栏上文件浏览器下 On this page 大纲+英文固定元素+正文 Verified 新鲜度 chip）。
+- 票=文档视图修复（排队计划 260910-ticket-queue-plan.md）；设计 mock=notes/discussions/260910-docs-view-mock.html（宿主 260910 过稿）。

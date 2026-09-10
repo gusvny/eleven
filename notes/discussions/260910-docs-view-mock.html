@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>工单台「文档」视图重设计 mock v1 · 260910</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 13px/1.65 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         color: #1f2328; background: #f6f8fa; padding: 20px; }
+  h1.mock-head { font-size: 17px; margin-bottom: 4px; }
+  .sub { color: #57606a; font-size: 12px; margin-bottom: 18px; max-width: 900px; }
+  .legend { background:#fff; border:1px dashed #d0d7de; border-radius:8px; padding:10px 14px;
+            font-size:12px; color:#57606a; margin-bottom:18px; max-width:900px; line-height:1.7; }
+  .legend b { color:#1f2328; }
+
+  /* ============ 框架 ============ */
+  .app { display:flex; flex-direction:column; height:640px; background:#fff;
+         border:1px solid #d0d7de; border-radius:10px; overflow:hidden; box-shadow:0 1px 4px rgba(31,35,40,.06); }
+  .topbar { display:flex; align-items:center; gap:10px; padding:8px 14px;
+            border-bottom:1px solid #e6e8eb; background:#fbfbfc; }
+  .topbar .crumb { color:#57606a; font-size:12px; display:flex; align-items:center; gap:6px; }
+  .topbar .crumb .sep { color:#c5c9ce; }
+  .topbar .spacer { flex:1; }
+  .project-select { display:flex; align-items:center; gap:6px; font-size:12px; color:#57606a; }
+  .project-select select { font:inherit; padding:3px 8px; border:1px solid #d0d7de; border-radius:6px; background:#fff; color:#1f2328; }
+  .search { width:220px; padding:4px 10px; border:1px solid #d0d7de; border-radius:6px; font:inherit; font-size:12px; }
+
+  .body { display:flex; flex:1; min-height:0; }
+  /* ============ 左目录 ============ */
+  .toc { width:252px; flex:none; border-right:1px solid #e6e8eb; padding:10px 8px; background:#fbfbfc;
+         display:flex; flex-direction:column; min-height:0; }
+  .toc-files { flex:1; overflow-y:auto; min-height:0; }
+  .outline { flex:none; max-height:42%; overflow-y:auto; padding:10px 6px 6px; font-size:12px;
+             border-top:1px solid #e6e8eb; }
+  .scope-tabs { display:flex; gap:4px; margin-bottom:10px; }
+  .scope-tabs button { flex:1; border:1px solid #d0d7de; background:transparent; color:#57606a;
+                       padding:4px 0; border-radius:6px; cursor:pointer; font-size:12px; }
+  .scope-tabs button.on { background:#1f6feb; border-color:#1f6feb; color:#fff; }
+  .group { margin-bottom:6px; }
+  .group-head { display:flex; align-items:center; gap:6px; padding:6px 8px; font-size:11px;
+                color:#8c959f; letter-spacing:.03em; cursor:pointer; border-radius:6px; user-select:none; }
+  .group-head:hover { background:#eef1f4; }
+  .group-head .count { margin-left:auto; font-size:10px; background:#e6e8eb; border-radius:8px; padding:0 6px; color:#57606a; }
+  .doc-item { display:flex; align-items:center; gap:7px; width:100%; text-align:left; border:0;
+              background:transparent; color:#1f2328; padding:5px 8px 5px 22px; border-radius:6px;
+              cursor:pointer; font-size:12.5px; line-height:1.5; }
+  .doc-item:hover { background:#eef1f4; }
+  .doc-item.active { background:#ddf4ff; color:#0969da; font-weight:600; }
+  .doc-item .dot { width:4px; height:4px; border-radius:50%; background:#c5c9ce; flex:none; }
+  .doc-item.active .dot { background:#0969da; }
+
+  /* ============ 正文 ============ */
+  .main { flex:1; overflow-y:auto; min-width:0; }
+  .article { max-width:760px; margin:0 auto; padding:26px 36px 60px; }
+  .meta-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:8px 0 18px; }
+  .chip { font-size:11px; padding:1px 9px; border-radius:12px; border:1px solid #d0d7de; color:#57606a; background:#fff; }
+  .chip.verified { border-color:#b6e3c6; color:#1a7f37; background:#dafbe1; }
+  .chip.status { border-color:#ffd8a8; color:#9a6700; background:#fff8c5; }
+  .chip .k { opacity:.7; margin-right:4px; }
+  .article h1 { font-size:22px; line-height:1.35; margin-bottom:2px; letter-spacing:-.01em; }
+  .article h2 { font-size:16px; margin:26px 0 8px; padding-bottom:6px; border-bottom:1px solid #e6e8eb; }
+  .article h3 { font-size:14px; margin:18px 0 6px; }
+  .article p { margin:8px 0; }
+  .article code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12.5px;
+                  background:#f0f2f5; border-radius:4px; padding:1px 5px; }
+  .article pre { background:#1e1e24; color:#e6e6f0; border-radius:8px; padding:12px 14px; overflow-x:auto;
+                 margin:12px 0; font-size:12px; line-height:1.6; }
+  .article pre code { background:transparent; padding:0; color:inherit; }
+  .article blockquote { border-left:3px solid #54aeff; background:#f6f8fa; padding:8px 14px;
+                        border-radius:0 6px 6px 0; color:#57606a; margin:12px 0; }
+  .article table { border-collapse:collapse; margin:12px 0; width:100%; font-size:12.5px; }
+  .article th, .article td { border:1px solid #d0d7de; padding:6px 10px; text-align:left; }
+  .article th { background:#f6f8fa; font-weight:600; }
+  .article a { color:#0969da; text-decoration:none; }
+  .article a:hover { text-decoration:underline; }
+
+  /* ============ 左栏下部：本篇大纲 ============ */
+  .outline .ttl { font-size:11px; color:#8c959f; margin-bottom:8px; letter-spacing:.03em; }
+  .outline a { display:block; color:#57606a; text-decoration:none; padding:3px 8px; border-left:2px solid transparent; }
+  .outline a:hover { color:#1f2328; }
+  .outline a.on { color:#0969da; border-left-color:#0969da; font-weight:600; }
+  .outline a.lv2 { padding-left:20px; }
+
+  .callout { position:absolute; background:#fff8c5; border:1px solid #d4a72c; border-radius:6px;
+             padding:4px 10px; font-size:11px; color:#4d2d00; max-width:250px; z-index:5;
+             box-shadow:0 1px 2px rgba(0,0,0,.08); }
+  .note-wrap { position:relative; }
+</style>
+</head>
+<body>
+
+<h1 class="mock-head">工单台「文档」视图重设计 · mock v1</h1>
+<div class="sub">两件事一起改：① 文档目录按<b>当前项目根</b>解析（修「只能看 sandbar 文档」的单仓硬编码 bug，见顶部项目切换）；② 版面从「光秃两栏」升级为「Project + Search + 两栏（左=文件浏览器/本篇大纲上下分区，右=正文）」，正文带状态·新鲜度·分类元信息条。</div>
+<div class="legend"><b>设计要点</b>：顶部条=Project 切换器（多项目文档入口，缺省回落引擎仓）+ 面包屑 + Search；左栏上下分区——<b>上部</b>文件浏览器（Docs/Notes tabs + 分组目录，可折叠），<b>下部</b>「On this page」当前文档大纲（h2/h3 锚点，点击跳转、滚动高亮；未选文档时为空）；右栏=正文全宽（排版强化：层级/引用/代码/表格/链接，元信息 chip 含 Verified 新鲜度——顺带把 doc-lifecycle 面B 的 verified 时间戳亮出来）。窄栏退化成「目录↔正文」单栏流（沿用现有 @container 纪律，此处不展开）。</div>
+
+<div class="app note-wrap">
+  <div class="callout" style="top:52px; right:190px;">A · 项目切换：文档树按所选项目根解析（每个项目自己的 docs/），修多项目 bug</div>
+  <div class="callout" style="top:52px; right:10px; max-width:180px;">B · 搜索：当前项目内按标题/路径过滤</div>
+
+  <!-- 顶条 -->
+  <div class="topbar">
+    <div class="crumb">Docs <span class="sep">/</span> design <span class="sep">/</span> <b>工单工作流台设计</b></div>
+    <div class="spacer"></div>
+    <div class="project-select">
+      Project
+      <select>
+        <option selected>sandbar</option>
+        <option>dengzhufpv</option>
+      </select>
+    </div>
+    <input class="search" placeholder="Search…">
+  </div>
+
+  <div class="body">
+    <!-- 左栏：上=文件浏览器 / 下=本篇大纲 -->
+    <nav class="toc">
+      <div class="scope-tabs">
+        <button class="on">Docs</button>
+        <button>Notes</button>
+      </div>
+      <div class="toc-files">
+        <div class="group">
+          <div class="group-head">📁 设计准则 <span class="count">3</span></div>
+          <button class="doc-item"><span class="dot"></span>知识库设计</button>
+          <button class="doc-item active"><span class="dot"></span>工单工作流台设计</button>
+          <button class="doc-item"><span class="dot"></span>项目管理 UI 设计</button>
+        </div>
+        <div class="group">
+          <div class="group-head">📘 操作手册 <span class="count">2</span></div>
+          <button class="doc-item"><span class="dot"></span>README</button>
+          <button class="doc-item"><span class="dot"></span>术语表</button>
+        </div>
+        <div class="group">
+          <div class="group-head">🧪 测试指南 <span class="count">1</span></div>
+          <button class="doc-item"><span class="dot"></span>集成测试指南</button>
+        </div>
+      </div>
+      <div class="outline note-wrap">
+        <div class="callout" style="top:10px; right:170px; max-width:170px;">D · On this page：当前文档 h2/h3 锚点，滚动高亮、点击跳转</div>
+        <div class="ttl">On this page</div>
+        <a class="on" href="#s1">1. 工单列表</a>
+        <a href="#s2">2. 详情抽屉</a>
+        <a class="lv2" href="#s2a">2.1 操作条</a>
+        <a class="lv2" href="#s2b">2.2 快照要点</a>
+        <a href="#s3">3. 人门与签字</a>
+        <a href="#s4">4. 示例代码</a>
+      </div>
+    </nav>
+
+    <!-- 正文 -->
+    <main class="main note-wrap">
+      <div class="callout" style="top:18px; left:260px; max-width:230px;">C · 元信息 chip：status（状态）+ 上次核对（verified 时间戳）+ 分类 + 更新日期——文档新鲜度一眼可见</div>
+      <article class="article">
+        <h1>工单工作流台设计</h1>
+        <div class="meta-row">
+          <span class="chip status"><span class="k">Status</span>final</span>
+          <span class="chip verified">✓ Verified 09-10</span>
+          <span class="chip"><span class="k">Category</span>design</span>
+          <span class="chip"><span class="k">Updated</span>2026-09-04</span>
+          <span class="chip"><span class="k">Path</span>docs/design/工单工作流台设计.md</span>
+        </div>
+        <p>工单台把「一张工单的一生」搬进可读视图：<strong>工单列表</strong>给全局，<strong>详情抽屉</strong>给纵深，<strong>人门</strong>给审批。本文是这套 UI 的设计准则与不变式。</p>
+
+        <h2 id="s1">1. 工单列表</h2>
+        <p>列表平铺不分组，状态靠配色区分：<code>等你</code>=黄调、<code>受阻</code>=红调、<code>活跃</code>=常规。每行右侧的派生动作位只做导航，零写操作。</p>
+
+        <h2 id="s2">2. 详情抽屉</h2>
+        <h3 id="s2a">2.1 操作条</h3>
+        <p>操作条钉在头部下方，主操作平铺、低频收「更多」。任何页签都能看到状态、直接操作。</p>
+        <h3 id="s2b">2.2 快照要点</h3>
+        <blockquote>快照要点 = 阶段时间线 + 最近交接 + 门与签字记录 + 工作流快照，全部 ticket show 直读。</blockquote>
+
+        <h2 id="s3">3. 人门与签字</h2>
+        <p>到终态前若出口=human，<code>stage_state=awaiting-human</code>，UI 标「等你签字」。</p>
+        <table>
+          <tr><th>stage_state</th><th>含义</th><th>UI 表现</th></tr>
+          <tr><td>awaiting-human</td><td>等人签字</td><td>「等你签字」徽标</td></tr>
+          <tr><td>blocked</td><td>机械校验受阻</td><td>红调 + 原因横幅</td></tr>
+          <tr><td>running</td><td>进行中</td><td>常规色</td></tr>
+        </table>
+
+        <h2 id="s4">4. 示例代码</h2>
+        <pre><code>def availableOps(t, wf=None):
+    if t['engine'] == 'template-as-code-v2':
+        return ['pause' if not t.get('paused') else 'resume', 'rework']</code></pre>
+        <p>完整口径见 <a href="#">docs/design/工单工作流台设计.md</a>。</p>
+      </article>
+    </main>
+  </div>
+</div>
+
+</body>
+</html>
