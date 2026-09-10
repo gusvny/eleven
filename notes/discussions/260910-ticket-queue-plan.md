@@ -130,3 +130,11 @@
   2. **路由表迁移票**：仓内真源退役、UI 读写同源、两份守卫改读声明表、三态点名告警；
      写集=server/engine/ + server/plugins/ui/ + server/installer/ + integration/。
   两张都碰 workbench/node.ts 面 → 与在飞 10（文档视图，刚打回实现段）串行，等 10 落账再开。
+  **260910 宿主拍板：两票合成一张**——《suggest_next 退役 + 模型路由表迁出 git》：
+  ①退役面=dev_lane suggest_next 段 + prepare_epic_next/build_suggest_next_prompt
+  activities + workbench epic-next.ts job 与「继续执行」入口 + 场景/prompt 引用 +
+  `.suyou/epic-next` 状态目录去留；②迁移面=仓内 model-routes.yaml 退役、真源=
+  paths.model_routes 指向的文件、引擎读与 UI 读写同源（放宽路径解析到机器级/绝对）、
+  两份守卫改读声明表、缺表三态点名（无 init 引导）；写集=server/engine/ +
+  server/plugins/workbench/ + server/plugins/ui/ + integration/。整票偏大（两主题），
+  换省一轮冲突与两次等待。
