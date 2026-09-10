@@ -2,11 +2,20 @@
 """t260902-07 集成测试 ②：查表函数与钉模型机制的动态行为（需 PyYAML）。
 
 校验对象：server/engine/shared.py
-- model_route_for("integration") 返回 kimi-coding/k3（260907 宿主改表），其余角色无回归
+
+口径（260910 宿主拍板）：**路由表运行期可调——谁跑哪个模型不钉死**。本测试只做
+性质断言，不做角色取值的快照：
+- 表里每个角色：`model_route_for(role)` 返回 provider/model 齐备，且**与表内容一致**
+  （防「查表函数与真源漂移」这类真错误）；
+- `integration` 角色必须在表里（不许整段删掉）；
+- 无 tasks 段的角色：带 kind 与不带 kind 的查表结果一致（分工键不串）；
 - 畸形/缺失输入三态：表 YAML 非法 → 返回 None（不抛异常、不落 patch）；
-  角色无条目 → 落 default；条目缺字段 → 落 default
+  位置缺条目 → 落 default；条目缺字段 → 落 default；
 - _pin_default_model：钉用户层、整段替换旧 agent-default-model（含段内注释），
-  资源全在临时目录内、测毕清理（生命周期回收）
+  资源全在临时目录内、测毕清理（生命周期回收）。
+
+历史沿革：本测试原先钉死 integration=kimi-coding/k3 等角色取值（260907 口径）；
+260910 宿主裁定后快照断言移除（同 test_route_table.py）。
 cwd = 泳道根。须用带 PyYAML 的解释器（engine/.venv/bin/python）执行。
 """
 import shutil
@@ -41,22 +50,29 @@ def main():
         print("ENV_FAIL: 需要 PyYAML：请用 server/engine/.venv/bin/python 执行")
         return 2
 
-    # 1. 查表：新值 + 无回归（260907 宿主改表：integration→kimi-coding/k3）
-    r = shared.model_route_for("integration")
-    check(r == {"provider": "kimi-coding", "model": "k3"},
-          "model_route_for(integration) = %r" % r)
-    expect = {"default": ("zai", "glm-5.3-flash"), "developer": ("zai", "glm-5.3-flash"),
-              "ops": ("kimi-coding", "k3"), "artist": ("kimi-coding", "k3"),
-              "product-operation": ("zai", "glm-5.3-flash")}
-    for role, (p, m) in expect.items():
-        r = shared.model_route_for(role)
-        check(r == {"provider": p, "model": m},
-              "无回归 model_route_for(%s) = %s/%s（实得 %r）" % (role, p, m, r))
+    # 1+2. 查表与真源一致（性质断言，不钉角色取值）
+    table = yaml.safe_load(Path(shared.MODEL_ROUTES_FILE).read_text("utf-8")) or {}
+    roles = table.get("roles") or {}
+    check("integration" in roles, "表中含 integration 角色（不许整段删掉）")
+    for role, declared in roles.items():
+        if role == "product-operation":
+            continue  # 其 tasks 子表由分工键性质覆盖
+        declared = declared if isinstance(declared, dict) else {}
+        got = shared.model_route_for(role)
+        check(isinstance(got, dict) and bool(got.get("provider")) and bool(got.get("model")),
+              "model_route_for(%s) 返回 provider/model 齐备（实得 %r）" % (role, got))
+        check(got == {"provider": declared.get("provider"), "model": declared.get("model")},
+              "model_route_for(%s) 与表内容一致（表=%r 实得=%r）"
+              % (role, {"provider": declared.get("provider"),
+                        "model": declared.get("model")}, got))
 
-    # 2. 分工键不串：integration 无 tasks 段，proofread 分工仍落 role 级
+    default_declared = table.get("default") or {}
     r = shared.model_route_for("integration", "proofread")
-    check(r == {"provider": "kimi-coding", "model": "k3"},
-          "integration+proofread 分工落 role 级（260907 宿主改表；实得 %r）" % r)
+    check(r == {"provider": roles.get("integration", {}).get("provider")
+                or default_declared.get("provider"),
+                "model": roles.get("integration", {}).get("model")
+                or default_declared.get("model")},
+          "integration 无 tasks 段 → 分工键落 role 级（实得 %r）" % r)
 
     # 3. 畸形输入：表 YAML 非法 → 优雅返回 None
     tmp = Path(tempfile.mkdtemp(prefix="t260902-07-itest-"))
