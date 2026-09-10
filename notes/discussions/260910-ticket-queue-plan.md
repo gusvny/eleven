@@ -138,3 +138,17 @@
   两份守卫改读声明表、缺表三态点名（无 init 引导）；写集=server/engine/ +
   server/plugins/workbench/ + server/plugins/ui/ + integration/。整票偏大（两主题），
   换省一轮冲突与两次等待。
+
+## 补记（260910 深夜·失败分类协议开票）
+
+宿主拍板口径（本轮讨论）：
+- **不做 junit 适配、不引中间格式**：协议=**一行 JSON = 一个用例**（唯一规范），各框架从源头产出；
+  pytest 侧用原生钩子（pytest_runtest_logreport）产出，零第三方。
+- 字段表（最小必需）：`name/suite/status(pass|fail|not-checked)/cause(self|external|unknown)/
+  reason(原因码)/dur_s/attempt/started/git_sha/evidence(一行原文)/artifacts[]`；**汇总行由闸生成**
+  （ran/pass/fail/not_checked/wall_s/concurrency/pool_config/env_fingerprint/baseline_ref）。
+- 责任线索 `cause` 是治「ENV_FAIL 当免责标签」的关键；**无证据的 ENV_FAIL 按 FAIL 处理**（fail-closed）。
+- 判定=三维（是否真检验到 × 责任线索 × main 基线归属）→ 决策表；基线只答「谁的锅」，
+  不答「是不是环境」（integration 260910 说岔过，此处订正）。
+- 票 = **t260910-13「失败分类协议 + 机械归属判定」**（epic=engine-hardening，
+  写集 server/engine/ + server/tools/ + integration/ + docs/）。
