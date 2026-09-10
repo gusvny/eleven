@@ -93,8 +93,8 @@ roles:
     model: k3
   # ── 审校家（260902 起 integration=zai-coding-cn/glm-5.3-flash 第二账号，见头部 M10 修正）──
   integration:       # 全局把关：审查/巡检/验收审批/机械收口/持有 dispatch_*
-    provider: kimi-coding
-    model: k3
+    provider: zai-coding-cn
+    model: glm-5.3-flash
   # ── product-operation：默认实例=加工分工（生成家）；tasks 段=审校/验证/出数分工（审校家）──
   product-operation:
     provider: zai # 默认实例 dispatch_product_operation = 加工分工（editor.md 分工卡）

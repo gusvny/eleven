@@ -14,12 +14,18 @@
       "handoff_count": 3,
       "pending_count": 1,
       "worktree": ".worktrees/t-fixture-a",
-      "workspace": { "type": "worktree", "path": "/tmp/suyou-fixture/lane-t-fixture-a" },
+      "workspace": {
+        "type": "worktree",
+        "path": "/tmp/suyou-fixture/lane-t-fixture-a"
+      },
       "created": 1700000000,
       "updated": "01-01 00:00",
       "updated_ts": 1700000000,
       "pending": [
-        { "ts": 1700000000, "note": "merge_check 全绿，请人审签字（fixture 注入台造的审批理由）" }
+        {
+          "ts": 1700000000,
+          "note": "merge_check 全绿，请人审签字（fixture 注入台造的审批理由）"
+        }
       ]
     },
     {
@@ -34,69 +40,207 @@
       "handoff_count": 2,
       "pending_count": 0,
       "worktree": ".worktrees/t-fixture-b",
-      "workspace": { "type": "worktree", "path": "/tmp/suyou-fixture/lane-t-fixture-b" },
+      "workspace": {
+        "type": "worktree",
+        "path": "/tmp/suyou-fixture/lane-t-fixture-b"
+      },
       "created": 1700000000,
       "updated": "01-01 00:00",
       "updated_ts": 1700000000
     }
   ],
-  "result": { "count": 2, "tickets": [
-    {
-      "id": "T-FIX-A",
-      "role": "integration",
-      "status": "running",
-      "title": "【fixture 注入票】合并人审门（awaiting-human，供审批抽屉截图）",
-      "workflow": "dev-lane",
-      "epic": "",
-      "stage": "merge",
-      "stage_state": "awaiting-human",
-      "handoff_count": 3,
-      "pending_count": 1,
-      "worktree": ".worktrees/t-fixture-a",
-      "workspace": { "type": "worktree", "path": "/tmp/suyou-fixture/lane-t-fixture-a" },
-      "created": 1700000000,
-      "updated": "01-01 00:00",
-      "updated_ts": 1700000000,
-      "pending": [
-        { "ts": 1700000000, "note": "merge_check 全绿，请人审签字（fixture 注入台造的审批理由）" }
-      ]
-    },
-    {
-      "id": "T-FIX-B",
-      "role": "developer",
-      "status": "running",
-      "title": "【fixture 注入票】并行实现中（implement ∥ 设计集成测试，供泳道并行态截图）",
-      "workflow": "dev-lane",
-      "epic": "",
-      "stage": "design_integration_tests",
-      "stage_state": "running",
-      "handoff_count": 2,
-      "pending_count": 0,
-      "worktree": ".worktrees/t-fixture-b",
-      "workspace": { "type": "worktree", "path": "/tmp/suyou-fixture/lane-t-fixture-b" },
-      "created": 1700000000,
-      "updated": "01-01 00:00",
-      "updated_ts": 1700000000
-    }
-  ] },
+  "result": {
+    "count": 2,
+    "tickets": [
+      {
+        "id": "T-FIX-A",
+        "role": "integration",
+        "status": "running",
+        "title": "【fixture 注入票】合并人审门（awaiting-human，供审批抽屉截图）",
+        "workflow": "dev-lane",
+        "epic": "",
+        "stage": "merge",
+        "stage_state": "awaiting-human",
+        "handoff_count": 3,
+        "pending_count": 1,
+        "worktree": ".worktrees/t-fixture-a",
+        "workspace": {
+          "type": "worktree",
+          "path": "/tmp/suyou-fixture/lane-t-fixture-a"
+        },
+        "created": 1700000000,
+        "updated": "01-01 00:00",
+        "updated_ts": 1700000000,
+        "pending": [
+          {
+            "ts": 1700000000,
+            "note": "merge_check 全绿，请人审签字（fixture 注入台造的审批理由）"
+          }
+        ],
+        "engine": "template-as-code-v2"
+      },
+      {
+        "id": "T-FIX-B",
+        "role": "developer",
+        "status": "running",
+        "title": "【fixture 注入票】并行实现中（implement ∥ 设计集成测试，供泳道并行态截图）",
+        "workflow": "dev-lane",
+        "epic": "",
+        "stage": "design_integration_tests",
+        "stage_state": "running",
+        "handoff_count": 2,
+        "pending_count": 0,
+        "worktree": ".worktrees/t-fixture-b",
+        "workspace": {
+          "type": "worktree",
+          "path": "/tmp/suyou-fixture/lane-t-fixture-b"
+        },
+        "created": 1700000000,
+        "updated": "01-01 00:00",
+        "updated_ts": 1700000000,
+        "engine": "template-as-code-v2"
+      },
+      {
+        "id": "T-FIX-P",
+        "role": "developer",
+        "status": "dispatched",
+        "title": "【fixture 注入票】实现段跑完停在段间门口（paused，供暂停徽标/恢复按钮截图）",
+        "workflow": "dev-lane",
+        "epic": "ticket-pause",
+        "stage": "implement",
+        "stage_state": "paused",
+        "paused": true,
+        "paused_phase": "at_gate",
+        "handoff_count": 4,
+        "pending_count": 0,
+        "worktree": ".lane/t-fixture-p",
+        "workspace": {
+          "type": "worktree",
+          "path": "/tmp/sandbar-fixture/lane-t-fixture-p"
+        },
+        "created": 1700000000,
+        "updated": 1700000123,
+        "engine": "template-as-code-v2"
+      }
+    ]
+  },
   "workflows": [
     {
       "id": "dev-lane",
       "name": "开发泳道（fixture）",
       "lane": "dev",
-      "order": ["create_plan", "review_plan", "implement", "ui_evidence", "design_integration_tests", "run_integration_tests", "arbitrate", "acceptance_walkthrough", "merge_check", "merge", "suggest_next"],
+      "order": [
+        "create_plan",
+        "review_plan",
+        "implement",
+        "ui_evidence",
+        "design_integration_tests",
+        "run_integration_tests",
+        "arbitrate",
+        "acceptance_walkthrough",
+        "merge_check",
+        "merge",
+        "suggest_next"
+      ],
       "stages": [
-        { "id": "create_plan", "role": "developer", "name": "做方案", "next": "review_plan", "parts": ["agent"] },
-        { "id": "review_plan", "role": "integration", "name": "审方案", "next": "implement", "parts": ["agent"] },
-        { "id": "implement", "role": "developer", "name": "实现", "next": "ui_evidence", "parts": ["agent"] },
-        { "id": "ui_evidence", "role": "developer", "name": "UI截图证据", "next": "design_integration_tests", "parts": ["agent"] },
-        { "id": "design_integration_tests", "role": "test", "name": "设计集成测试", "next": "run_integration_tests", "parts": ["agent"] },
-        { "id": "run_integration_tests", "role": "test", "name": "跑集成测试", "next": "arbitrate", "parts": ["agent"] },
-        { "id": "arbitrate", "role": "integration", "name": "仲裁", "next": "acceptance_walkthrough", "parts": ["agent"] },
-        { "id": "acceptance_walkthrough", "role": "integration", "name": "验收走查", "next": "merge_check", "parts": ["agent"] },
-        { "id": "merge_check", "role": "developer", "name": "合并检查", "next": "merge", "parts": ["script"] },
-        { "id": "merge", "role": "integration", "name": "合并（人审）", "next": "suggest_next", "parts": ["human"] },
-        { "id": "suggest_next", "role": "developer", "name": "预跑下一单", "parts": ["agent"] }
+        {
+          "id": "create_plan",
+          "role": "developer",
+          "name": "做方案",
+          "next": "review_plan",
+          "parts": [
+            "agent"
+          ]
+        },
+        {
+          "id": "review_plan",
+          "role": "integration",
+          "name": "审方案",
+          "next": "implement",
+          "parts": [
+            "agent"
+          ]
+        },
+        {
+          "id": "implement",
+          "role": "developer",
+          "name": "实现",
+          "next": "ui_evidence",
+          "parts": [
+            "agent"
+          ]
+        },
+        {
+          "id": "ui_evidence",
+          "role": "developer",
+          "name": "UI截图证据",
+          "next": "design_integration_tests",
+          "parts": [
+            "agent"
+          ]
+        },
+        {
+          "id": "design_integration_tests",
+          "role": "test",
+          "name": "设计集成测试",
+          "next": "run_integration_tests",
+          "parts": [
+            "agent"
+          ]
+        },
+        {
+          "id": "run_integration_tests",
+          "role": "test",
+          "name": "跑集成测试",
+          "next": "arbitrate",
+          "parts": [
+            "agent"
+          ]
+        },
+        {
+          "id": "arbitrate",
+          "role": "integration",
+          "name": "仲裁",
+          "next": "acceptance_walkthrough",
+          "parts": [
+            "agent"
+          ]
+        },
+        {
+          "id": "acceptance_walkthrough",
+          "role": "integration",
+          "name": "验收走查",
+          "next": "merge_check",
+          "parts": [
+            "agent"
+          ]
+        },
+        {
+          "id": "merge_check",
+          "role": "developer",
+          "name": "合并检查",
+          "next": "merge",
+          "parts": [
+            "script"
+          ]
+        },
+        {
+          "id": "merge",
+          "role": "integration",
+          "name": "合并（人审）",
+          "next": "suggest_next",
+          "parts": [
+            "human"
+          ]
+        },
+        {
+          "id": "suggest_next",
+          "role": "developer",
+          "name": "预跑下一单",
+          "parts": [
+            "agent"
+          ]
+        }
       ]
     }
   ]

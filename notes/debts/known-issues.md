@@ -634,3 +634,23 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 处置（260908 午后宿主裁定收口）：git 侧 squash 落账（536d5fc）＋四根文件 A1 复位（035a99e）＋engine/ 新家重建 venv/bin＋农场软链重指＋~/.dsh 重定向；票务基础数据双存档（server/engine/data/exports/ 与 ~/Documents/sandbar-data-recovery-260908/）。
 - 教训：机器层生效步骤必须 untracked 白名单化（.venv/bin/data 先 mv 后清，或只动 tracked）；checkout 建软链前旧目录若含 untracked 应报错而非清场；temporal 数据卷的 WAL/SHM 应与主库同列保护清单；「不能重启的幽灵态 server」要第一时间导出（本次 12:54 导出在删除后仍得骨架，侥幸）。
 - 遗留：t260908-02 在飞执行依赖旧 venv 内存态的 worker，收口后随 console 重启统一换新路径 worker；temporal server 空库重建（宿主已裁定「历史票基础数据够用」）择 t260908-02 收口后执行；旧名链 ~/.dsh/profiles/suyou{,-headless} 处置随宿主裁定。
+
+## KI-066 多仓写集静默丢代码：正规入口预派生堵死引擎多仓链（260910 dengzhufpv t260910-01 实锤）
+- 现象：多仓写集 [fpv-toolchain/, integration/] 全流程绿灯收口，成员仓零落仓（代码仅泳道侥幸保全）；snapshot meta.repo_worktrees=null（单仓形态）。
+- 根因（260910 integration 定位）：server/tools/ticket.py `_create` 预调 derive_lane_workspace 未传 repo_write_set（缺参），算出单仓 workspace 显式转发 client.py，堵死引擎侧派生触发条件（ws is None and not worktree）；shared.build_repo_worktrees 本身正确（现场复现双仓明细）。裸入口派生正确=「正规入口反而事故入口」。
+- 连锁放大：成员仓被根仓 .gitignore 忽略 → diff/越界/合并闸全盲。
+- 修复票=t260910-03（病灶+双保险丝+逐仓物化+正规入口全链场景）；对方仓报告=dengzhufpv/notes/discussions/260910-sandbar-multirepo-defects.md。
+
+## KI-067 正规入口 ticket.py 静默失败：create/rework 输出空、无审计、信号未送达（260910 两实证）
+- 现象：ticket.py create 与 rework 均返回空输出、admin.log 无痕、Temporal 无信号；裸 client.py 同操作一发即通。
+- 危害：操作面不可信+审计盲区；同族=sign/retry_qc 从未包进正规入口（代签这类敏感操作恰是唯一不进审计的工单操作）、signal 子命令退役后 CLI 无 retry_qc 通道（260910 曾用 Temporal 直连发信号兜底）。
+- 排队票「入口收口」（审计+回执嵌提醒+sign/retry_qc 包装），前置=t260910-03 收口（同文件 ticket.py 串行）。
+
+## KI-068 暂停功能 UI 半残：host 列表接口不透传 paused（t260908-01 合并后实测实锤）
+- 现象：引擎侧暂停语义全验证通过；console 列表行无 paused/paused_phase → 无 ⏸ 徽标、按钮恒显「暂停」、暂停中的票 UI 无法恢复。
+- 根因：t260908-01 只做了前端消费面（注释自称「host 行形状透传」=假设 host 会带），node.ts 行形状未实现；其场景只断言引擎查询面，未断言 console API 面——断层面写窄放行。
+- 修复票=t260910-04；活体验证对象=t260910-02（停在 at_gate）。教训入册：合并前「同路径推断会在」不算实证（260910 integration 认领）。
+
+## KI-069 UI 证据链失效：截图取景不可靠+证据读路径三层旧名错位+无人看像素（260910 暂停票全程实证）
+- 现象：①capture.mjs 板面视图在主列表渲染完成前按快门，拍出无按钮废图带全绿进归档；②workbench 取图/列表端点只认旧名（.suyou/evidence、.worktrees/<id>/.suyou/screenshots），引擎/截图台写新名（.sandbar/screenshots、.lane/<id>）——功能实际失效，靠手工复制兜底；③走查 agent 文本模型看不了像素、合并闸只查文件存在（自认盲区）——唯一看图环节=人门最后一步。
+- 修复票=t260910-05（截图内容断言+路径新名迁移；宿主拍板：不做签字界面嵌图）。
