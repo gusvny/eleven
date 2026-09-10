@@ -237,6 +237,23 @@ SCENARIOS = [
      "机械闸守卫：dev-lane 工单禁写 notes/（宿主令 260904——票据/知识库账本归 main 侧直管，t260904-01/03 的 KI 行合并冲突与 notes/epics 草案直落为动因）。三执法点：A 合并闸 verify_lane 四态真子进程（声明了 notes/ 也拦防自授权/D 删账同拦/写集内普通文件不误伤/粗判据分支同拦）；B 建单侧 ticket.create 写集含 notes/ 创建即拒（纯函数面零 Temporal，人话指路结算 note）；C 本仓 verify.yaml write_allow 无 notes/ 静态防回潮。tmp git 仓全本地",
      "python3 -B integration/baselines/sc_notes_write_gate.py", "ro"),
 
+    # ---- t260911-03 双闸（阶段路径闸+受保护路径闸，settle 落盘时刻执法）----
+    # 260910 宿主实证回归：仲裁/走查等零代码段越权改码、泳道改共享守卫期望值给自己发免红令。
+    # 实现段落地前闸腿红属预期（TDD 验收门，先例见 t260905-05/t260904-08 族），arbitrate/merge 期必须绿；
+    # sc_pathgate_legacy_compat D1 腿（老票零干扰）现状即绿。
+    ("t260911-03-walkthrough-settle-reject",
+     "阶段路径闸·零代码改动段拒绝落盘（t260911-03 验收 a，灰盒 L3）：真实 settle 单点（tmp 主仓+真注册泳道 worktree 直调，零 Temporal）——acceptance_walkthrough/review_plan 注入产品代码改动→拒绝落盘终态三件套（0 新 commit+回执点名段 id 与文件+机读 path_gate_reason=unauthorized_path）、工作区原样保留（agent 产物不丢，.sandbar 结果文件伴脏不救场）；对照腿=仅 .sandbar/ 结果文件照常落地（闸不误伤结果文件面）。与 notes-write-gate（合并闸 notes 面）/ki044 patch 门（merge 面）/t260904-18 背景文件闸（建单面）intent 不同面：本条执法点=settle 时刻阶段白名单；与 developer L1 judge 矩阵不同层（本条锁接线与回执传播）",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260911-03/tests/sc_pathgate_walkthrough_reject.py", "ro"),
+    ("t260911-03-protected-settle-reject",
+     "受保护路径闸·真源与期望值文件（t260911-03 验收 b，灰盒 L3，260910 实证①回归）：共享电池（design_integration_tests 段、integration/ 阶段面内→非 unauthorized_path，双闸独立性证明）、共享守卫 test_route_table（arbitrate 段、测试面内——泳道改守卫期望值给自己发免红令的事故原样重放）均被拒+path_gate_reason=protected_path+点名+0 commit；「存在才拦」分叉点语义三腿=闸自身出生放行、本票同泳道 rework 再改放行（base=分叉点非 HEAD，防每轮人审死锁）、落地 main 后新分叉泳道改它即拦（改共享守卫须 main 侧走票）",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260911-03/tests/sc_pathgate_protected_reject.py", "ro"),
+    ("t260911-03-normal-faces-land",
+     "阶段路径闸·正常面不误伤（t260911-03 验收 c 反例三连，灰盒 L3）：implement 写集内两文件、design_integration_tests 只改 integration/、arbitrate 只改本票 tests/ 测试面——三腿全部放行且回执零原因码、commit 真落地（git show 逐文件点名在 HEAD）；仲裁段碰产品代码负腿仍拒+点名（code-fault 只许打回 implement，260910 实证另一半回归）。机械闸不得堵死正常流；与 developer L1 judge 矩阵不同层（本条锁「放行=真落地」终态）",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260911-03/tests/sc_pathgate_normal_faces_land.py", "ro"),
+    ("t260911-03-legacy-compat-closed",
+     "双闸兼容面（t260911-03 验收 d+R1②闭环，灰盒 L3）：老调用形状（不传闸参数=存量序列化缺字段形态）走查段改产品代码照常落盘——老在途票按 patch 门保护不追溯、行为零变化（该腿现状即绿，兼当本套 fixture 机械证明）；显式 path_gate=False 同放行（开关语义）；path_gate=True 未知段 brand_new_stage→拒+path_gate_reason=unknown_stage+出路文案（补配规则/人审放行），新段忘配规则被堵出来而非自动免检（review_plan R1② fail-closed 裁决的链路级回归）",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260911-03/tests/sc_pathgate_legacy_compat.py", "ro"),
+
 
     ("auto-rework-trace",
      "---- A1: 五个自动打回场景，各产一条横幅可见记录（用户视角主契约） ---- scenarios = [ ('acceptance', 'implement', '验收",

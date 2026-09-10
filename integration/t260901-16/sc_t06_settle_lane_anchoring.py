@@ -115,7 +115,10 @@ try:
         captured = {}
 
         # t260907-06 票B：settle_lane 逐树化，settle 收 repo 锚（单仓=None 语义不变）
-        def _fake_settle(cwd, ticket_id, stage_id, gen, repo=None):
+        # t260911-03：settle_lane 现在还传 write_set/path_gate/base_ref（路径闸接线）——
+        # 本桩只锚「cwd 锚定 + note 透传」两条承诺，新形参用 **_kw 收下不参与断言
+        # （锚定契约不随闸参数增减漂移）。
+        def _fake_settle(cwd, ticket_id, stage_id, gen, repo=None, **_kw):
             captured["cwd"] = Path(cwd)
             return "captured"
 

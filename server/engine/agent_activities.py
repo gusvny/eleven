@@ -63,6 +63,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from temporalio import activity
 import failure_protocol
+import path_gates
 import shared
 from shared import (
     REPO_ROOT,
@@ -865,8 +866,46 @@ def _reap_agent_proc(proc: subprocess.Popen, ticket_id: str = "", stage_id: str 
     return note
 
 
+def _path_exists_at_ref(repo: Path, ref: str, path: str) -> bool:
+    """受保护闸的「基点已存在」判定（t260911-03）：`git cat-file -e <ref>:<path>`。
+
+    ref = 泳道分叉点（base_ref，建泳道时各仓 HEAD；**不是 HEAD**——取 HEAD 会把本票
+    早段 commit 里的文件误判为已存在，票内 rework 会被自保护闸红掉、每轮需人审放行）。
+    ref 缺省（锚不可知）→ 一律按已存在处理（fail-closed 拦），绝不因锚缺失放行。
+    """
+    if not ref:
+        return True
+    p = _git(["cat-file", "-e", "%s:%s" % (ref, path)], repo)
+    return p.returncode == 0
+
+
+def _settle_with_gate(args: AgentStageArgs, cwd: Path) -> str:
+    """通用 agent 段的带闸 settle（t260911-03）：把 AgentStageArgs 里的闸参数传给
+    _settle_worktree_lane——单一拼装点，generic 段/缓存命中分支/arbitrate 系共用，
+    两侧不可能漂移。"""
+    return _settle_worktree_lane(
+        cwd, args.ticket_id, args.stage_id, args.gen,
+        write_set=list(args.write_set or []),
+        path_gate=bool(args.path_gate),
+        base_ref=str(args.base_ref or ""))
+
+
+def _apply_settle_note(res: StageResult, note: str) -> StageResult:
+    """settle note 落回执：普通 note 进 evidence；闸拒绝（含 path_gate_reason= 键值）
+    把结果改判 failed、summary 换成拒绝回执——workflow 侧按既有 failed 处理转
+    blocked，点名段/文件与合法出路随回执上台面（协议三态之「越权」可辨）。"""
+    if not note:
+        return res
+    res.evidence = (res.evidence + "\n[worker settle] " + note).strip()
+    if path_gates.is_gate_refusal(note):
+        res.status = "failed"
+        res.summary = note
+    return res
+
+
 def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
-                          repo: Optional[Path] = None) -> str:
+                          repo: Optional[Path] = None, write_set: Optional[List[str]] = None,
+                          path_gate: bool = False, base_ref: str = "") -> str:
     """Settle a worktree lane on the agent's behalf (deterministic, never trusting
     the agent to behave): called once the agent has delivered its result file.
 
@@ -894,6 +933,16 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
     mid-merge workspace is settle_conflict_resolution (which also checks for leftover
     markers); this function skips outright. A normal implement round has no
     MERGE_HEAD, so its behavior is unchanged.
+
+    路径闸（t260911-03，仅 path_gate=True 的票生效；False=老票 patch 门保护，行为与
+    旧版逐字节一致）：脏清单非空时先过两道闸——阶段路径闸（段 × 允许面，judge_stage_paths）
+    与受保护路径闸（真源与期望值，judge_protected_paths，锚=base_ref 泳道分叉点）。
+    任一违规 = **不 add 不 commit**（工作区原样保留，agent 产物不丢），返回带
+    path_gate_reason=<码> 与点名文件清单的拒绝 note，由调用方转 blocked。闸判定严格
+    先于任何 git add——脏清单=未暂存工作区态，rename 只会呈 D+?? 两态（lane agent
+    物理写不了 .git），D 条目保留旧路径、受保护闸可拦；该前提是闸判 rename 盲区
+    不可达的根据。git status 失败 = 改动清单未知 = fail-closed 拒绝落盘
+    （reason=status_failed，环境类），不留给实现猜。
     """
     if not _is_worktree_of(cwd, repo if repo is not None else _lane_repo_root(cwd)):
         # Ticket B (t260907-06): repo given = a multi-repo tree, ownership judged by
@@ -928,10 +977,31 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
         notes.append("假 git 目录 %s 已隔离到 %s（agent 沙箱 workaround 产物，留档）"
                      % (name, dst.relative_to(cwd)))
     # 2) Fold workspace changes into a commit
-    p = _git(["status", "--porcelain", "--"] + SETTLE_PATHSPEC, cwd)
+    #    t260911-03: status 改走 -z（与 KI-009 解析器 _dirty_files_from_status_z 同源，
+    #    免 quotePath 引号歧义与 rename 箭头解析）；闸判定在任何 git add 之前。
+    p = _git(["status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, cwd)
     if p.returncode != 0:
+        if path_gate:
+            note = path_gates.gate_refusal_note(stage_id, [], "status_failed")
+            activity.logger.warning("[%s/%s] settle：%s", ticket_id, stage_id, note)
+            return note
         raise RuntimeError("settle: git status 失败: %s" % (p.stderr or "")[-300:])
-    dirty = [ln for ln in p.stdout.splitlines() if ln.strip()]
+    dirty = _dirty_files_from_status_z(p.stdout)
+    if path_gate and dirty:
+        # 闸①：段 × 允许面（纯路径白名单，零猜测）
+        allowed, violations, reason = path_gates.judge_stage_paths(
+            stage_id, dirty, write_set=write_set, ticket_id=ticket_id)
+        # 闸②：受保护路径（真源与期望值，「存在才拦」，锚=泳道分叉点 base_ref）
+        if allowed:
+            anchor = repo if repo is not None else _lane_repo_root(cwd)
+            pv, preason = path_gates.judge_protected_paths(
+                dirty, exists_at_base=lambda path: _path_exists_at_ref(anchor, base_ref, path))
+            if pv:
+                allowed, violations, reason = False, pv, preason
+        if not allowed:
+            note = path_gates.gate_refusal_note(stage_id, violations, reason)
+            activity.logger.warning("[%s/%s] settle：%s", ticket_id, stage_id, note)
+            return note
     if dirty:
         # Observed on Apple Git 2.50: an exclusion pathspec (:!.dsh) does not stop
         # the "explicitly named ignored directory" error (rc=1 even on a clean repo,
@@ -952,7 +1022,7 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
         head = _git(["rev-parse", "--short", "HEAD"], cwd)
         notes.append("worker 代落盘 commit %s（%d 项：%s）"
                      % (head.stdout.strip() if head.returncode == 0 else "?",
-                        len(dirty), "、".join(ln[3:].strip() for ln in dirty[:5])))
+                        len(dirty), "、".join(dirty[:5])))
     else:
         notes.append("工作区已干净，无需代落盘")
     note = "；".join(notes)
@@ -1102,9 +1172,8 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
             # settle_lane at the join point
             note = ""
             if not args.skip_settle:
-                note = _settle_worktree_lane(cwd, args.ticket_id, args.stage_id, args.gen)
-            if note:
-                cached.evidence = (cached.evidence + "\n[worker settle] " + note).strip()
+                note = _settle_with_gate(args, cwd)
+            _apply_settle_note(cached, note)
             return cached
 
     if os.environ.get("SANDBAR_AGENT_STUB") == "1":
@@ -1188,9 +1257,8 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
                     # point
                     note = ""
                     if not args.skip_settle:
-                        note = _settle_worktree_lane(cwd, args.ticket_id, args.stage_id, args.gen)
-                    if note:
-                        res.evidence = (res.evidence + "\n[worker settle] " + note).strip()
+                        note = _settle_with_gate(args, cwd)
+                    _apply_settle_note(res, note)
                     return res
             rc = proc.poll()
             if rc is not None:
@@ -1904,7 +1972,10 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             elif _dirty_within_write_set(dirty_files, sc["write_set"]):
                 try:
                     note = _settle_worktree_lane(
-                        sc["tree"], args.ticket_id, "merge_check", 0)
+                        sc["tree"], args.ticket_id, "merge_check", 0,
+                        write_set=list(sc.get("write_set") or []),
+                        path_gate=bool(getattr(args, "path_gate", False)),
+                        base_ref=str(sc.get("base_ref") or getattr(args, "base_ref", "") or ""))
                     auto_settle_note = "[auto-settle] %s" % (note or "settle 返回空（见后续复查）")
                 except Exception as e:
                     auto_settle_note = ("[auto-settle] settle 异常（转红不抛）: %s: %s"
@@ -3556,7 +3627,8 @@ async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
     # verify ownership per tree and settle per tree. Every tree refuses to fall back to
     # the main tree (a silent fallback = the lane with something to settle lands
     # nothing and reports clean; proven in t260901-16).
-    scopes = _lane_scopes(wt, write_set=None)
+    scopes = _lane_scopes(wt, base_ref=str(args.base_ref or ""),
+                          write_set=list(args.write_set or []))
     notes: List[str] = []
     commits = -1
     for sc in scopes:
@@ -3566,7 +3638,14 @@ async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
                 "拒绝回退主树代落盘（静默回退=该落盘的泳道什么都不落还报干净，t260901-16 实锤）"
                 % (args.worktree, sc["tree"], sc["repo"]))
         sc_note = _settle_worktree_lane(sc["tree"], args.ticket_id, args.stage_id,
-                                        args.gen, repo=sc["repo"])
+                                        args.gen, repo=sc["repo"],
+                                        write_set=list(sc.get("write_set") or []),
+                                        path_gate=bool(args.path_gate),
+                                        base_ref=str(sc.get("base_ref") or args.base_ref or ""))
+        # t260911-03：闸拒绝随 error 上抛给 workflow（join 点点名段/文件转 blocked，
+        # 不静默吞成一条 note——否则违规改动不落盘、0-commit 预检只会给一句含糊红）。
+        if path_gates.is_gate_refusal(sc_note):
+            return SettleLaneResult(note=sc_note, error=sc_note, lane_commits=commits)
         if sc["name"]:
             sc_note = "[%s] %s" % (sc["name"], sc_note or "settle 返回空")
         notes.append(sc_note)
@@ -3697,10 +3776,9 @@ def _stub_stage_shortcut(args: AgentStageArgs, settle_on_cache: bool = False) ->
                                  args.ticket_id, args.stage_id, args.gen)
             _patch_result_prompt(rfile, args.prompt)
             if settle_on_cache:
-                note = _settle_worktree_lane(_ws_cwd(args.workspace, args.ticket_id),
-                                             args.ticket_id, args.stage_id, args.gen)
-                if note:
-                    cached.evidence = (cached.evidence + "\n[worker settle] " + note).strip()
+                note = _settle_with_gate(
+                    args, _ws_cwd(args.workspace, args.ticket_id))
+                _apply_settle_note(cached, note)
             return cached
     if os.environ.get("SANDBAR_AGENT_STUB") != "1":
         return None
@@ -3768,9 +3846,8 @@ async def arbitrate(args: AgentStageArgs) -> StageResult:
                     # along with it); the unified settle is handled by the workflow's
                     # single settle_lane.
                     if not args.skip_settle:
-                        note = _settle_worktree_lane(cwd, args.ticket_id, args.stage_id, args.gen)
-                        if note:
-                            res.evidence = (res.evidence + "\n[worker settle] " + note).strip()
+                        note = _settle_with_gate(args, cwd)
+                        _apply_settle_note(res, note)
                     return res
             rc = proc.poll()
             if rc is not None:

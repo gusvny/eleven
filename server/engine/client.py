@@ -611,6 +611,10 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         body=str(args.get("body") or ""),
         created=int(args.get("created") or 0),
         gate_overrides=overrides,
+        # t260911-03 路径闸总开关：新派单钉死进输入（replay 稳定）——只对 dev-lane 模板
+        # 开（段×面规则表的键集=dev-lane 段链；退役模板/fixture 模板不受闸，回归面为零）。
+        # 老在途票的已记录输入无此字段 → 永远 False，不追溯。
+        path_gate=(str(tpl) == "dev-lane"),
     )
     client = await _connect()
     try:

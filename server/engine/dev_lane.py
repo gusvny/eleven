@@ -560,6 +560,9 @@ class DevLaneWorkflow(TicketPauseMixin):
             "stage_state": "awaiting",
             "write_set": list(inp.write_set),
             "no_file_changes": bool(getattr(inp, "no_file_changes", False)),
+            # t260911-03 路径闸总开关：随派单输入钉死（getattr 缺省 False=老在途票
+            # 永远关闸，patch 门保护不追溯）
+            "path_gate": bool(getattr(inp, "path_gate", False)),
             "acceptance": acc,
             "checks": {s.id: [{"item": it, "done": False, "by": ""} for it in s.acceptance]
                        for s in self.STAGES},
@@ -580,6 +583,7 @@ class DevLaneWorkflow(TicketPauseMixin):
                 "lane": inp.lane or self.TEMPLATE_LANE,
                 "worktree": inp.worktree, "branch": inp.branch,
                 "base_ref": inp.base_ref, "write_set": list(inp.write_set),
+                "path_gate": bool(getattr(inp, "path_gate", False)),
                 # t260910-08: mirror the two new carries so the ledger keeps a
                 # complete input record (consumers read defensively, extra keys safe)
                 "repo_worktrees": list(getattr(inp, "repo_worktrees", None) or []),
@@ -744,7 +748,12 @@ class DevLaneWorkflow(TicketPauseMixin):
             gen=gen,
             workflow_id=str(self.meta.get("workflow_id") or ""),
             previous_context=previous_context,
-            skip_settle=not settle)
+            skip_settle=not settle,
+            # t260911-03 路径闸：settle 落点判「段 × 允许面 + 受保护名单」；
+            # path_gate 随派单输入钉死（老在途票 meta 无此键=False，不追溯）
+            write_set=list(self.meta.get("write_set") or []),
+            base_ref=str(self.meta.get("base_ref") or ""),
+            path_gate=bool(self.meta.get("path_gate")))
         raw = await workflow.execute_activity(
             step_id, args,
             start_to_close_timeout=AGENT_TO, heartbeat_timeout=HEARTBEAT_TO,
@@ -1223,11 +1232,20 @@ class DevLaneWorkflow(TicketPauseMixin):
                     settle_lane,
                     SettleLaneArgs(ticket_id=self.ticket_id,
                                    worktree=str(self.meta.get("worktree") or ""),
-                                   stage_id="implement", gen=impl_rounds),
+                                   stage_id="implement", gen=impl_rounds,
+                                   write_set=list(self.meta.get("write_set") or []),
+                                   base_ref=str(self.meta.get("base_ref") or ""),
+                                   path_gate=bool(self.meta.get("path_gate"))),
                     start_to_close_timeout=SHORT, retry_policy=RETRY)
                 s = sraw if isinstance(sraw, SettleLaneResult) else SettleLaneResult(
                     note=str(sraw.get("note") or ""),
-                    lane_commits=int(sraw.get("lane_commits") or -1))
+                    lane_commits=int(sraw.get("lane_commits") or -1),
+                    error=str(sraw.get("error") or ""))
+                # t260911-03：路径闸拒绝（error 带 path_gate_reason=）→ blocked 点名
+                # 段/文件与合法出路——不静默吞成一条日志（0-commit 预检的红不含闸细节）。
+                if s.error and "path_gate_reason=" in s.error:
+                    await self._blocked("implement", s.error)
+                    continue
                 self._log("汇合统一落盘：%s（泳道 commit 数 %s）"
                           % (s.note or "干净", s.lane_commits))
                 # UI evidence (UI tickets): the worker runs the isolated bench after the
@@ -1580,11 +1598,21 @@ class DevLaneWorkflow(TicketPauseMixin):
                         settle_lane,
                         SettleLaneArgs(ticket_id=self.ticket_id,
                                        worktree=str(self.meta.get("worktree") or ""),
-                                       stage_id="arbitrate", gen=tests_rounds),
+                                       stage_id="arbitrate", gen=tests_rounds,
+                                       write_set=list(self.meta.get("write_set") or []),
+                                       base_ref=str(self.meta.get("base_ref") or ""),
+                                       path_gate=bool(self.meta.get("path_gate"))),
                         start_to_close_timeout=SHORT, retry_policy=RETRY)
                     s = sraw if isinstance(sraw, SettleLaneResult) else SettleLaneResult(
                         note=str(sraw.get("note") or ""),
-                        lane_commits=int(sraw.get("lane_commits") or -1))
+                        lane_commits=int(sraw.get("lane_commits") or -1),
+                        error=str(sraw.get("error") or ""))
+                    # t260911-03：路径闸拒绝（越权改动不落盘）→ blocked 点名，不进
+                    # 「不拦主链」的日志通道——套件改动没 commit 就重跑机械测试是
+                    # 假红制造机，必须停在闸上等处置。
+                    if s.error and "path_gate_reason=" in s.error:
+                        await self._blocked("arbitrate", s.error)
+                        continue
                     self._log("并行分叉统一落盘：%s（泳道 commit 数 %s）"
                               % (s.note or "干净", s.lane_commits))
                 except Exception as e:  # settle failure: noted, main chain unaffected; the run's 0-commit pre-check catches it
@@ -1752,7 +1780,8 @@ class DevLaneWorkflow(TicketPauseMixin):
                                    worktree=str(self.meta.get("worktree") or ""),
                                    branch=str(self.meta.get("branch") or ""),
                                    base_ref=str(self.meta.get("base_ref") or ""),
-                                   write_set=list(self.meta.get("write_set") or [])),
+                                   write_set=list(self.meta.get("write_set") or []),
+                                   path_gate=bool(self.meta.get("path_gate"))),
                     start_to_close_timeout=MERGE_CHECK_TO, retry_policy=RETRY)
                 mc = raw if isinstance(raw, MergeCheckResult) else MergeCheckResult(
                     green=bool(raw.get("green")), checks=list(raw.get("checks") or []),

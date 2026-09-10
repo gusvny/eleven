@@ -267,6 +267,11 @@ class SettleLaneArgs:
     worktree: str
     stage_id: str
     gen: int
+    # t260911-03 路径闸三件（defaulted——老 RUNNING 实例 replay 历史事件缺字段→默认值，
+    # replay 不破；path_gate 只有新票输入钉死后才会 True，老在途票不追溯）：
+    write_set: List[str] = field(default_factory=list)   # 逐仓 rebase 前的工单写集
+    base_ref: str = ""                                   # 泳道分叉点（单仓锚；多仓以清单 per-repo base_ref 优先）
+    path_gate: bool = False                              # 闸总开关
 
 
 @dataclass
@@ -1723,6 +1728,10 @@ class TicketInput:
     body: str = ""
     created: int = 0
     gate_overrides: Dict[str, GateSpec] = field(default_factory=dict)  # gate replacement for self-tests (always empty in production)
+    # t260911-03 阶段路径闸/受保护路径闸的总开关：随派单输入钉死（replay 稳定的判别锚）
+    # ——老在途票的已记录输入无此字段 → getattr 缺省 False，永久关闸（patch 门保护，
+    # 不追溯）；新 dev-lane 票由 dispatch 入口置 True（见 client.py ticket-start）。
+    path_gate: bool = False
 
 
 @dataclass
@@ -1866,6 +1875,12 @@ class AgentStageArgs:
     # trailing settle (so neither settles the other's half-finished work); the unified
     # settle is handled by the settle_lane activity at the join point.
     skip_settle: bool = False
+    # t260911-03 路径闸四件（defaulted——老序列化事件缺字段→默认值，skip_settle 先例；
+    # path_gate 只有新票输入（TicketInput.path_gate）钉死后才会 True，老在途票不追溯）：
+    write_set: List[str] = field(default_factory=list)   # 段允许面：implement/integ_join 的写集
+    ui_dirs: List[str] = field(default_factory=list)     # 段允许面：ui_evidence 的 verify.yaml ui_evidence.dirs
+    base_ref: str = ""                                   # 泳道分叉点（受保护闸「存在才拦」的锚，非 HEAD）
+    path_gate: bool = False                              # 闸总开关
 
 
 @dataclass
@@ -1972,6 +1987,9 @@ class MergeCheckArgs:
     # (the dev_lane call site passes meta["write_set"]); defaulted — old RUNNING
     # instances replaying historical events have no such field, so replay doesn't break.
     write_set: List[str] = field(default_factory=list)
+    # t260911-03 路径闸：merge_check 的 KI-009 自愈 settle 同受闸（defaulted，老事件
+    # 缺字段→False=不自愈受闸、行为与旧版一致）；base_ref/write_set 复用上两字段。
+    path_gate: bool = False
 
 
 # ---- Ticket t260828-09: the UI acceptance machinery (the screenshot channel + look-at-the-image review + merge_check's evidence gate) ----
