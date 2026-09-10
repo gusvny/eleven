@@ -70,8 +70,27 @@ UI：通用渲染器直接吃（一套 UI 裁定），shape=循环+门。
 - 票② 机制面+简化面扫描（dead-man 泛化、补丁退役判定）
 - 票③（视①②消化情况）跨面聚合报告（周报一页纸：新增发现/已修/超龄未审）
 
-## ⚑ 待宿主拍板
+## ⚑ 宿主拍板（260910 定）
 
-1. 代号：建议 `inspection`（巡检体系）——与 doc-lifecycle/project-lifecycle 命名同构；
-2. 收编与否：文档同步 flow 并入本 epic 作第二实例（推荐），还是各自独立；
-3. 触发：周定时 vs 每并 20 张票 vs 两者取先到。
+1. 代号：`inspection`（260904 已定）。
+2. **收编：要**——文档同步 flow 并入本 epic 作第二实例（doc-face）。
+3. **触发：必须项目可声明、不写死**——通用层只提供「巡检能力」，其他项目可
+   自定义巡检 flow 与触发方式；机制在引擎、面在项目声明（cron／every-n-tickets
+   ／race-first 均为声明值，缺什么 kind 接线什么 kind，不写死）。
+
+## 盘库记录（260910 integration，只读）
+
+- **已交付（t260905-03）**：inspection_scan.py（S1 重复/S2 守卫锚点 KI-051 常驻/
+  S3 过时断言三扫）、inspection_flow.py（轻量巡检票 workflow：扫→报→人门→收口，
+  一期一票+零发现心跳）、inspection_trigger.py（ops 通道：decl/trigger/sign/describe/
+  schedule-up，人不能代 agent 签字）、inspection_decl.py（零依赖 YAML 子集解析器，
+  声明驱动）、inspection.yaml（test-face 启用+cron 接线；doc-face 占位 disabled）。
+- **前端**：workbench 已有巡检报告区/独立页（ScanReportSection）。
+- **缺口（对应票②③与拍板②③）**：
+  1. 触发 kind 只接了 cron——every-n-tickets / race-first 未接线（声明里仅注释示例，
+     启用即显式报错）→ 拍板③的核心差距；
+  2. doc-face 只有占位，文档同步 flow 本身未实现 → 拍板②的收编工作量；
+  3. 机制面/简化面扫描（dead-man 泛化、补丁退役判定）未做（票②）；
+  4. 跨面聚合周报未做（票③）；
+  5. 待核：host 侧巡检数据路由（node.ts 无 inspection 字样）；今天清的旧名定时器
+     `suyou-dispatcher-scan` 治理随本 epic。
