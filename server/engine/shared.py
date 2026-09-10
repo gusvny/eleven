@@ -1188,6 +1188,9 @@ def multirepo_fuse_a_error(project_root, write_set, repo_worktrees) -> str:
         **完备性**归保险丝B 在 merge_check 逐仓物化判定，两道保险丝各守一态
         （A 守创建时刻明细缺失，B 守合并时刻物化落成），不在此重复判完备；
       - 显式 workspace/worktree 不能绕过：判据是写集归属，不是派生路径；
+      - project_root 为空=归属锚缺失：fail-closed 拒收并点名全部条目（t260910-08
+        收口——此前借 Path("").resolve()=cwd 兜底解析，判定随运行目录翻转，
+        环境依赖即缺陷；现在零 IO，cwd 无关）；
       - resolve_repos_for_paths 自身的 ValueError（逃逸/嵌套仓/空仓集/条目畸形）
         原样上抛——归属真源故障同样 fail-closed，绝不静默放行。
     真纯函数（无 git 子进程、无 IO），client.py ticket-start 单点消费。"""
@@ -1196,7 +1199,23 @@ def multirepo_fuse_a_error(project_root, write_set, repo_worktrees) -> str:
         return ""
     if isinstance(repo_worktrees, list) and repo_worktrees:
         return ""
-    root = str(pathlib.Path(project_root).resolve()) if project_root else ""
+    # Ticket t260910-08（cwd 敏感红收口）: an empty project_root = no ownership
+    # anchor at all. Previously this fell through to resolve_repos_for_paths(""),
+    # where Path("").resolve() = the *current working directory* — the verdict then
+    # depended on the directory pytest happened to run from (repo root → offender
+    # named; /tmp → the "no git repos" exemption → silently passed). Same input,
+    # different cwd, opposite verdict = the verdict is meaningless. The stance is
+    # now pinned by the test's own declared reading: no anchor → every write-set
+    # entry is an offender → fail-closed reject naming the entries (no repo scan,
+    # no cwd dependency — 真纯函数承诺兑现).
+    if not project_root:
+        return ("保险丝A拒收（t260910-03）：写集条目命中成员仓路径但 project_root 缺失"
+                "（归属锚不在）且派生结果 repo_worktrees 为空——无法证伪多仓票缺逐仓"
+                "明细=成员仓零落仓（dengzhufpv 260910 缺陷形态），fail-closed 拒收。"
+                "%s。请走正规创建链（不显式传 workspace/worktree），由 "
+                "derive_lane_workspace 按写集归属产出逐仓明细。"
+                % "；".join("<-%s" % e for e in entries))
+    root = str(pathlib.Path(project_root).resolve())
     try:
         mapping = resolve_repos_for_paths(project_root, entries)
     except ValueError as e:
@@ -1205,7 +1224,7 @@ def multirepo_fuse_a_error(project_root, write_set, repo_worktrees) -> str:
         raise  # 逃逸/嵌套仓/条目畸形：fail-closed 照旧拒收
     offenders = []
     for repo_abs, paths in mapping.items():
-        if root and str(pathlib.Path(repo_abs).resolve()) == root:
+        if str(pathlib.Path(repo_abs).resolve()) == root:
             continue  # 归属根仓的条目不触发（单仓/混合形态的根树部分）
         offenders.append((pathlib.Path(repo_abs).name or str(repo_abs), paths))
     if not offenders:
@@ -1722,6 +1741,14 @@ class TicketInput:
     # failed workflow start. The field has a default = existing RUNNING instances replay
     # with the key missing and fall back, without breaking replay.
     repo_worktrees: List[Dict[str, str]] = field(default_factory=list)
+    # Ticket t260910-08: the project's registered root directory (the same source
+    # client.py's ticket-start derives from, proj["dirs"][0]). Carried into
+    # meta.project_root so the workflow's WorkspacePrep can feed prepare_workspace's
+    # fallback ring ③ (write_set + project_root → per-repo derivation) — without it
+    # the ring is dead and a multi-repo ticket silently materializes single-repo
+    # (the dengzhufpv t260910-07 incident). Default empty = existing RUNNING
+    # instances replay with the key missing and fall back, without breaking replay.
+    project_root: str = ""
     worktree: str = ""
     branch: str = ""
     base_ref: str = ""
@@ -1950,6 +1977,32 @@ class WorkspacePrepResult:
     action: str = ""      # created | reused | ensured | skipped | failed
     path: str = ""
     error: str = ""       # the reason on failed (e.g. the directory exists but is not a worktree of this repo)
+
+
+def build_workspace_prep(ticket_id: str, meta: Dict[str, Any]) -> "WorkspacePrep":
+    """Single construction point of WorkspacePrep from ticket meta (ticket t260910-08).
+
+    The t260910-07 incident's root cause was exactly this construction being
+    duplicated (dev_lane.run / base._prepare_workspace): the dev_lane copy was
+    silently starved — meta.repo_worktrees was never carried by _init and
+    write_set/project_root were never fed, so prepare_workspace's three read rings
+    (① prep.repo_worktrees ② ws["repo_worktrees"] ③ write_set+project_root
+    derivation) were all empty and every multi-repo ticket materialized as a
+    single-repo lane. Collapsing both call sites onto this one function makes the
+    three feeds structurally un-droppable, and the binding-anchor UT
+    (test_t260910_08_lane_materialization.py::test_workspace_prep_construction_is_single_point)
+    reds the moment either workflow family inlines WorkspacePrep(...) again.
+
+    meta is the workflow's ticket ledger dict (all reads defensive with defaults —
+    replay of old RUNNING instances may lack any of the newer keys)."""
+    return WorkspacePrep(
+        ticket_id=ticket_id,
+        workspace=meta.get("workspace"),
+        repo_worktrees=list(meta.get("repo_worktrees") or []),
+        branch=str(meta.get("branch") or ""),
+        base_ref=str(meta.get("base_ref") or ""),
+        write_set=list(meta.get("write_set") or []),
+        project_root=str(meta.get("project_root") or ""))
 
 
 @dataclass

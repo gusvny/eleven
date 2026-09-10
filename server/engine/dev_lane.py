@@ -106,12 +106,12 @@ with workflow.unsafe.imports_passed_through():
         UiEvidenceDeclArgs,
         UiEvidenceDeclResult,
         UiEvidenceResult,
-        WorkspacePrep,
         WorkspacePrepResult,
         UI_EVIDENCE_DIR,
         agent_log_for,
         build_stage_prompt,
         build_suggest_next_prompt,
+        build_workspace_prep,
         integration_route,
         is_ui_write_set,
         lane_workspace_gate_error,
@@ -551,6 +551,18 @@ class DevLaneWorkflow(TicketPauseMixin):
             "role": first.role,
             "lane": inp.lane or self.TEMPLATE_LANE,
             "workspace": inp.workspace,
+            # Ticket t260910-08（t260910-07 实案收口）: the per-repo detail carried
+            # through verbatim — the previous drop of this key left
+            # meta.repo_worktrees permanently null and every multi-repo ticket
+            # materialized single-repo (dengzhufpv incident). Carried **raw** (no
+            # per-entry rewrite): a malformed entry must reach the existing
+            # _repo_worktrees_gate_error judge for a readable rejection, not blow up
+            # here inside the workflow with a bare ValueError (base._init 既有同款).
+            "repo_worktrees": list(getattr(inp, "repo_worktrees", None) or []),
+            # Same ticket: the project root feeds prepare_workspace's fallback ring
+            # ③ (write_set+project_root derivation). getattr = old payloads replay
+            # with the key missing and fall back to "" without breaking replay.
+            "project_root": str(getattr(inp, "project_root", "") or ""),
             "worktree": inp.worktree,
             "branch": inp.branch,
             "base_ref": inp.base_ref,
@@ -581,6 +593,10 @@ class DevLaneWorkflow(TicketPauseMixin):
                 "lane": inp.lane or self.TEMPLATE_LANE,
                 "worktree": inp.worktree, "branch": inp.branch,
                 "base_ref": inp.base_ref, "write_set": list(inp.write_set),
+                # t260910-08: mirror the two new carries so the ledger keeps a
+                # complete input record (consumers read defensively, extra keys safe)
+                "repo_worktrees": list(getattr(inp, "repo_worktrees", None) or []),
+                "project_root": str(getattr(inp, "project_root", "") or ""),
                 "user_request": inp.user_request, "spec": inp.spec, "body": inp.body,
                 "created": inp.created or self._now_epoch(),
             },
@@ -898,14 +914,12 @@ class DevLaneWorkflow(TicketPauseMixin):
                 raw = WorkspacePrepResult(ok=False, kind="config", action="rejected",
                                           path="", error=gate)
             else:
-                prep = WorkspacePrep(
-                    ticket_id=self.ticket_id,
-                    workspace=self.meta.get("workspace"),
-                    # t260908-02: per-repo detail moved to its own field (workspace no
-                    # longer embeds a list)
-                    repo_worktrees=list(self.meta.get("repo_worktrees") or []),
-                    branch=str(self.meta.get("branch") or ""),
-                    base_ref=str(self.meta.get("base_ref") or ""))
+                # t260910-08: construction collapsed onto the single point
+                # (shared.build_workspace_prep) — the previous inline copy was the
+                # incident's root cause (repo_worktrees read an always-empty meta key;
+                # write_set/project_root were never fed → prepare_workspace's three
+                # read rings all empty → multi-repo ticket materialized single-repo).
+                prep = build_workspace_prep(self.ticket_id, self.meta)
                 raw = await workflow.execute_activity(
                     prepare_workspace, prep, start_to_close_timeout=SHORT, retry_policy=RETRY)
             res = raw if isinstance(raw, WorkspacePrepResult) else WorkspacePrepResult(

@@ -591,6 +591,10 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         lane=lane,
         workspace=workspace,
         repo_worktrees=repo_worktrees,
+        # t260910-08: the project root travels into the workflow so meta.project_root
+        # exists and WorkspacePrep's fallback ring ③ (write_set+project_root derivation)
+        # stays alive — the t260910-07 incident's second dead feed
+        project_root=project_root,
         worktree=worktree,
         branch=branch,
         base_ref=str(args.get("base_ref") or ""),

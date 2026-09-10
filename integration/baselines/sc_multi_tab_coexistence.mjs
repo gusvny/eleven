@@ -170,13 +170,16 @@ async function attachStub(page, shared, counts) {
     const url = new URL(req.url())
     counts.total++
     const m = /^\/sandbar-workbench\/api\/wf\/tickets(?:\/([^/]+)(?:\/([^/]+))?)?$/.exec(url.pathname)
-    const body = (b) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(b) })
+    // fulfill 去险化（t260910-08 arbitrate gen6，tail 点名 :179 'Route is already
+    // handled!'）：负载下页面导航会取消在途请求，fetch→fulfill 窗口内路由已被
+    // 处理属良性竞态——stub 不许因此 crash 整个场景进程（业务断言已被误杀一次）。
+    const body = (b) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(b) }).catch(() => {})
     if (!m) {
       try {
         const resp = await route.fetch()
         await route.fulfill({ response: resp })
       } catch {
-        await route.fulfill({ status: 502, contentType: 'application/json', body: '{"ok":false,"error":"fixture passthrough failed"}' })
+        await route.fulfill({ status: 502, contentType: 'application/json', body: '{"ok":false,"error":"fixture passthrough failed"}' }).catch(() => {})
       }
       return
     }

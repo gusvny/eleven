@@ -144,6 +144,8 @@ SCENARIOS = [
     ("t260904-19-stage-docker",
      "docker 测试舞台 L1（t260904-19：全仓唯一搭台方式回归锚，假 docker shim 真跑编排面零 docker 依赖）：档位 flock 原子预留（并发双起各得独立档=验收①回归锚、外部持锁滑档、锁释放复抢=崩溃自释语义）；禁区端口面（生产 3099/7233/8233+缺省台 3199/17233/18233）与内核临时区间构造性排除；畸形输入全电池（project 白名单/端口旋钮非数字越界禁区被占/目录缺失/半指定）逐条点名检查项零副作用；诚实环境红三态（docker 缺席=ENV_FAIL exit 2 点名、镜像缺席点名 build-test-temporal.sh、compose 半途死就地 down 清场零残留）；ensure 幂等（健康复用/半残拆重起）；up→down 零残留+端口释放+幂等二连；bench.py 守卫回归（槽位制退役后保留面）",
      "python3 integration/tests/test_stage_docker.py", "exclusive"),  # engine 池仍不够：电池含 flock/端口禁区/up-down 零残留，任何并发起台都扰动（套件 573s 挂 1，隔离三连绿 121/125s）——独占先跑=搭台 L1 先验台面（t260910-05 仲裁 gen2）
+     # exclusive（t260910-08 arbitrate）：三连机械波内各 1 败、单跑恒绿（17/17×2）——
+     # 真 docker 全栈+console 就绪探针与同波浏览器族重负载争用；断言零改动只挪排程。
     ("t260904-02-doctor-zombie",
      "doctor 引擎僵尸探测红绿自证（epic 验收3，fixture 注入档零真扫零端口）：SANDBAR_ZOMBIE_CENSUS 注入异仓引擎形态（cwd 含 server/engine 标记且引擎根≠当前，即 260904 headless 指向冻结仓实案）→exit1 红行点名 pid+异仓路径且同仓进程不误报；干净 census→exit0+兼容矩阵恰 5 行含 zombie 语义新行+重复 doctor 幂等；坏 JSON census=显式红不假绿（畸形输入三态）；文案自辨：僵尸面输出带 --live 指引（缺省 sample 档防「跑过=无僵尸」误读）+完成语不写死「四面」（数字随探针数漂移）",
      "python3 integration/t260904-02/sc_doctor_zombie.py", "ro"),
@@ -677,6 +679,10 @@ SCENARIOS = [
     ("t260910-03-formal-entry-fuses",
      "正规入口多仓票全链+双保险丝（t260910-03，dengzhufpv 260910 缺陷回归面，灰盒 L2/L3）：正规入口创建链补传——ticket.py 同款 derive（repo_write_set=写集）多仓项目产出双仓 repo_worktrees（复现形态修复后必须双仓）、明细经 ticket-start 二跳 dict workspace 转发不丢（缺陷根因=此通道被堵）、漏传=单仓明细缺失（旧病灶形状对照腿）、单仓项目透传零回归不激活；保险丝A（开票拒收）——ticket-start 显式 worktree+成员仓写集创建即拒收且红字点名条目（连接前拒收零 Temporal 依赖；只锚拒+点名不锚措辞）、对照腿不误伤（纯根仓写集放行、多仓写集合法派生放行=显式 worktree 不是绕闸通道）；逐仓物化落成硬断言——prepare_workspace 双仓树均=所属仓已注册 worktree（git worktree list 绝对路径可验）+清单落盘两仓条目；保险丝B（合并红灯，混合形态=缺陷现场）——清单缺失（_lane_scopes 单仓回落=缺陷形态）×成员仓写集：merge_check 红灯且物化检查项红点名缺失仓、非冲突类（conflict=False 不进自动消解回路，KI-047 同族防线）、merge 同源保险丝 ok=False 不落账（成员仓 main 零新提交、泳道保留交人工）、物化齐全对照腿同检查项绿（不误伤）；隔离台持久化契约（docker 台，真建票只发生在一次性 namespace 跑完即拆）——正规入口 ticket.py create 真建票与裸入口 client.py ticket-start（无显式 worktree，勿回归红线）的 Temporal payload TicketInput.repo_worktrees 均含双仓（probe_wf_input 读起始事件 input=对外数据契约），create 返回体为辅证。与 t260907-06/-12/-07 intent 分界：彼守多仓泳道本体/混合形态归属/epic 锚定，本守「正规入口补传+双保险丝+裸入口不回归」缺陷回归面。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio 缺失=ENV_FAIL 点名（行为腿），stdlib 形状腿照跑；docker/隔离台库缺席=ENV_FAIL 点名（台面腿）",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260910-03/sc_t260910_03_formal_entry_fuses.py", "engine"),
+    ("t260910-08-lane-materialization",
+     "真开票后泳道磁盘逐仓物化终态（t260910-08，dengzhufpv 形态=根仓+子仓写集，灰盒 L3，工单验收第 1 条的仪器）：正规入口 ticket.py create 真开票→真专属 worker 跑 DevLaneWorkflow→prepare_workspace 真建泳道→磁盘四件套——逐成员仓工作区目录在位（repo=\"\" 根树=泳道容器本身是根仓已注册 worktree）、分支名 lane/<票>-<seg>（根树=-root）、清单 .suyou/repo_worktrees.json repo/name/branch 逐条与明细一致、meta.repo_worktrees 非空（ticket show 读面=取证同面，此前恒 null 误导诊断）；Temporal 起始事件 payload 明细双仓（对外数据契约）；单仓对照同链零回归（workspace_prep=created、无清单、meta 明细空）；畸形明细两层互不冒充——类型毁形 start 受理但 worker 解码面拒收（实证注记：本仓 temporalio type-hints 校验在 decode 侧，编码面不设防；t260910-13 同款 Failed converting 签名=workflow 代码不执行、零落仓、payload 原样过线）、语义毁形（codec 可过闸必拒：条目缺 name）进 blocked 可读拒收且不落任何泳道形态（不崩 _init、绝不静默单仓）；KI-067 设计进去（create 返回体只作辅证，真值锚磁盘/Temporal 侧效果，异常/空输出/拒收回执=红灯点名）。与 t260910-03/-06/-12 intent 分界：彼等复刻 derive/直调 prepare 均不经过 dev_lane._init 第二跳（KI-063 同构盲区=t260910-07 真机单仓实证），本场景唯一守 TicketInput→_init→meta→WorkspacePrep→activity 全跳真码+磁盘终态。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker/隔离台库/temporalio 缺席=ENV_FAIL exit 2（真链腿无 stdlib 替代）",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260910-08/sc_t260910_08_lane_materialization.py", "engine"),
+
 
     # ---- t260910-11: 巡检校准五事（改名去face / 扫描误报校准 / 测试腿隔离红线 / 票面可查询） ----
     ("t260910-11-decl-v2-rename",
@@ -890,9 +896,16 @@ def _run_entry(entry):
     total; finding the slow scenarios relies on these per-entry marks)."""
     name, cmd = entry[0], entry[2]
     t_start = time.time()
+    # 净化 lane 自身 env 再下放（t260910-08 arbitrate）：机械跑若从 dev-lane 内
+    # 发起（runner 本身住在泳道里），SANDBAR_TASK_QUEUE/SANDBAR_WATCH_WORKFLOW
+    # 会触发带递归守卫的场景（capture 族/auto-rework-trace）的「嵌套于 lane 步」
+    # ENV_FAIL——那是运行姿势误伤，不是被测环境缺席。顶层跑场景=被授权的顶层，
+    # 守卫针对的递归自举不适用。
+    child_env = {k: v for k, v in os.environ.items()
+                 if k not in ("SANDBAR_TASK_QUEUE", "SANDBAR_WATCH_WORKFLOW")}
     try:
         proc = subprocess.run(["/bin/sh", "-c", cmd], capture_output=True,
-                              text=True, timeout=CMD_TIMEOUT)
+                              text=True, timeout=CMD_TIMEOUT, env=child_env)
         return (name, proc.returncode,
                 ((proc.stdout or "") + (proc.stderr or ""))[-1500:],
                 time.time() - t_start, t_start,
@@ -1030,7 +1043,11 @@ def main() -> int:
             timings.append({"pool": pool_name, "name": name,
                             "status": ("PASS" if exit_code == 0
                                        else "ENV_FAIL" if exit_code == 2 else "FAIL"),
-                            "dur_s": round(dur, 1)})
+                            "dur_s": round(dur, 1),
+                            # 非绿条目持久化尾段（t260910-08 arbitrate gen3）：此前
+                            # tail 只进 stdout 即弃，报告对 FAIL 无败因可读，仲裁轮
+                            # 只能盲跑复现。PASS 不存（体积与隐私面，绿的无须读）。
+                            **({} if exit_code == 0 else {"tail": tail_out[-1200:]})})
             print("\n".join(block), flush=True)
 
     timings = []   # KI-060 prep 2: timing distribution (one row per scenario, with pool attribution)

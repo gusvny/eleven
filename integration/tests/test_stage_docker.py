@@ -242,19 +242,23 @@ class StageCLIBase(unittest.TestCase):
         e.update({k: str(v) for k, v in extra.items()})
         return e
 
-    def cli(self, *args, **kw):
-        # --timeout 预算统一 ×TSCALE（共机慢化容忍，见模块头注）——扫参数单点，
-        # 断言与工具语义零变更。
+    def cli(self, *args, _timeout=120, **kw):
+        # _timeout：测试壳的子进程外层超时（默认 120s）。慢 daemon 下 stage_docker
+        # 自身的 docker/compose 子调用也会爬行，外层须 ≥ 该调用的内部预算 + 余量
+        # （t260910-08 arbitrate：full 档测 90s 内预算被 120s 外层掐死的实证）。
+        # --timeout 预算统一 ×TSCALE（共机慢化容忍，见模块头注，main 侧语义）——
+        # 扫参数单点，断言与工具语义零变更；外层超时同乘 TSCALE 保比例。
         scaled = list(args)
         for i, a in enumerate(scaled):
             if a == "--timeout" and i + 1 < len(scaled) and scaled[i + 1].isdigit():
                 scaled[i + 1] = str(int(scaled[i + 1]) * TSCALE)
         return subprocess.run(
             [sys.executable, str(INTEG / "stage_docker.py")] + scaled,
-            capture_output=True, text=True, timeout=120 * TSCALE, env=self.env(**kw))
+            capture_output=True, text=True, timeout=_timeout * TSCALE,
+            env=self.env(**kw))
 
-    def up_json(self, project, *extra):
-        p = self.cli("up", "--project", project, *extra)
+    def up_json(self, project, *extra, _timeout=120):
+        p = self.cli("up", "--project", project, *extra, _timeout=_timeout)
         self.assertEqual(p.returncode, 0, "up 应成功：%s%s" % (p.stdout, p.stderr))
         return json.loads(p.stdout.strip().splitlines()[-1])
 
@@ -265,7 +269,11 @@ class StageCLIBase(unittest.TestCase):
 
 class UpDownTest(StageCLIBase):
     def test_up_full_then_down_zero_residue_and_idempotent(self):
-        st = self.up_json("uta", "--services", "full", "--namespace", "ns-uta", "--timeout", "30")
+        # 就绪窗 90s：同机并发台（多 console 栈）负载下 30s 会误判超时（t260910-08
+        # arbitrate 实证：监听/容器本质健康，只是冷启动探针窗口过紧）——只放宽前置
+        # 等待，零残留/幂等/禁区断言原样不动。
+        st = self.up_json("uta", "--services", "full", "--namespace", "ns-uta", "--timeout", "90",
+                          _timeout=300)
         self.assertEqual(st["project"], "uta")
         self.assertEqual(sorted(st["services"]), ["dsh", "temporal"])
         ports = st["ports"]
@@ -493,9 +501,12 @@ class EnsureTest(StageCLIBase):
     def test_concurrent_ensure_same_project_single_boot(self):
         """run K 雷群回归锚：冷台同项目并发 ensure 互斥——先到先得独占起台，
         后来者持锁等待后双查健康直接复用；双绿且全窗口只起一次台。"""
+        # 预算 240s（t260910-08 arbitrate，tail 点名本测）：60s 是锁等待+起台+健康
+        # 探的总预算，daemon 被同机其他台拖慢时双绿必爆一——只放宽预算，互斥/
+        # 复用/单起台断言原样。
         ps = [subprocess.Popen(
             [sys.executable, str(INTEG / "stage_docker.py"), "ensure",
-             "--project", "utc", "--services", "dsh", "--timeout", "60"],
+             "--project", "utc", "--services", "dsh", "--timeout", "240"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             env=self.env()) for _ in range(2)]
         outs = [p.communicate() for p in ps]

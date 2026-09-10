@@ -67,10 +67,10 @@ with workflow.unsafe.imports_passed_through():
         StageResult,
         TicketInput,
         normalize_files_changed,
-        WorkspacePrep,
         WorkspacePrepResult,
         agent_log_for,
         build_stage_prompt,
+        build_workspace_prep,
         lane_workspace_gate_error,
         result_file_for,
         stage_workspace,
@@ -319,6 +319,11 @@ class TicketWorkflowBase(TicketPauseMixin):
             # pure {type, path} — no embedded list (Dict[str, str] annotation is
             # Temporal codec compatible).
             "repo_worktrees": list(inp.repo_worktrees),
+            # Ticket t260910-08: same-family completion — the fallback ring ③
+            # (write_set+project_root derivation) in prepare_workspace stays dead
+            # without the anchor; old RUNNING instances replay without the key and
+            # fall back to "" (ring inactive, same as before — zero regression).
+            "project_root": str(getattr(inp, "project_root", "") or ""),
             "worktree": inp.worktree,
             "branch": inp.branch,
             "base_ref": inp.base_ref,
@@ -571,14 +576,11 @@ class TicketWorkflowBase(TicketPauseMixin):
         if gate:
             return {"ok": False, "kind": "config", "action": "rejected",
                     "path": "", "error": gate}
-        prep = WorkspacePrep(
-            ticket_id=self.ticket_id,
-            workspace=self.meta.get("workspace"),
-            # Ticket t260908-02: per-repo detail travels in its own field (no
-            # list embedded in workspace, codec compatible)
-            repo_worktrees=list(self.meta.get("repo_worktrees") or []),
-            branch=str(self.meta.get("branch") or ""),
-            base_ref=str(self.meta.get("base_ref") or ""))
+        # t260910-08: construction collapsed onto the single point
+        # (shared.build_workspace_prep) — same reason as dev_lane.run; the base copy
+        # additionally gains the write_set/project_root feeds its inline form never had
+        # (fallback ring ③ was dead here too).
+        prep = build_workspace_prep(self.ticket_id, self.meta)
         raw = await workflow.execute_activity(
             prepare_workspace, prep, start_to_close_timeout=SHORT, retry_policy=RETRY)
         # A by-name call has no return type annotation; the payload comes back as
