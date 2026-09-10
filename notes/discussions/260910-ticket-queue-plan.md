@@ -32,3 +32,11 @@
 - t260910-02（暂停实测活体票）：t260910-04 验收用，验完撤。
 - charter 修订：见 notes/discussions/260910-session-charter-revision.md
   （宿主令：本批问题搞完后落盘）。
+
+## 补记（260910 巡检清场）
+
+- `suyou-dispatcher-scan` 定时器已暂停（旧名+触发类型名错配 `dispatcher-scan`
+  ≠真名 `DispatcherScanWorkflow`，曾产 3 个 RUNNING 僵尸已 terminate，
+  留 Temporal 历史可溯）。随 inspection 票① 一并治理：定时器命名/类型对齐。
+- 巡检 epic 现状：骨架模块在（inspection_* + DispatcherScanWorkflow），
+  票①②③ 未开；排第二批，且作为本批缺陷修复后的全面验证手段。
