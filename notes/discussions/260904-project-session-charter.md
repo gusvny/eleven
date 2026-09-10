@@ -101,18 +101,35 @@
 - 拉在跑工单快照（命令见下）。
 - 一句话报到：在跑几张、立项几个、我在听。
 
-## 引擎操作面（已验证命令；引擎真源仓={{engine_root}}）
+## 引擎操作面（{{engine_root}}；260910 修订：一律走正规入口）
+
   PY={{engine_root}}/server/engine/.venv/bin/python
-  CLI={{engine_root}}/server/engine/client.py
-- 看板：$PY $CLI ticket-list '{"project":"{{project_key}}"}'
-- 单票详情：$PY $CLI ticket-query '{"ticket_id":"tXXXXXX-XX"}'
-- 开票：$PY $CLI ticket-start '{"template_id":"dev-lane","project":
-  "{{project_key}}","epic":"<立项代号>","title":"…","spec":"…",
-  "write_set":["…"]}'（epic 须先有立项单；短 id 自动生成）
-- 打回：$PY $CLI ticket '{"op":"rework","ticket_id":"…","note":"原因"}'
-- 代签：$PY $CLI ticket '{"op":"sign","ticket_id":"…","input":
-  {"who":"<你的身份>","decision":"approve","note":"…"}}'
-  （gate 缺省=当前等待的人审段）
+  TK={{engine_root}}/server/tools/ticket.py
+
+**正规入口 = `ticket.py`，收一个参数：整条 JSON（`op` 在 JSON 里）**。它是唯一被推荐
+的工单操作面（自动短票号、notes/ 写集机械闸、每次调用进 admin.log 审计、失败非零退出
++ 结构化错误、裸调用回执带 `entry_hint` 提醒）。
+
+- 看板：`$PY $TK '{"op":"list","project":"{{project_key}}"}'`
+- 单票：`$PY $TK '{"op":"show","id":"tXXXXXX-XX"}'`
+- 开票：`$PY $TK '{"op":"create","workflow":"dev-lane","project":"{{project_key}}",
+  "epic":"<立项代号>","title":"…","spec":"…","write_set":["…"]}'`
+  （epic 须先有立项单；票号缺省自动生成——**票号全项目唯一**，撞号就换一个再提）
+- 打回：`$PY $TK '{"op":"rework","id":"…","to_stage":"implement","note":"原因"}'`
+  **合并检查/机械校验红灯打回时，必须显式写 `to_stage`**（缺省=打回当前段=空转一轮）。
+- 签字：`$PY $TK '{"op":"sign","id":"…","by":"<你的身份>","decision":"approve",
+  "gate":"merge","note":"…"}'`（gate 缺省=当前等待的人审段）
+- 重跑本段（blocked 态）：`$PY $TK '{"op":"retry_qc","id":"…","by":"…"}'`
+- 暂停/恢复（段间）：`$PY $TK '{"op":"pause"|"resume","id":"…","by":"…"}'`
+
+**调用形式是自己最大的坑**（260910 实证）：`ticket.py` 的 CLI 入口是 260910-06 才补上的，
+在此之前它只是库（无 `__main__`——直接跑它什么都不输出，看起来像“入口静默失败”）；
+补上之后仍须**整条 JSON 一个参数**，写成 `ticket.py list '{…}'`（子命令 + JSON 两参）
+会报「参数不是合法 JSON」。**照说明书用之前，先用一条只读命令（看板）验证形式**。
+
+裸入口 `$PY $CLI <子命令> JSON`（`client.py ticket-list/ticket-query/ticket-start/ticket`）
+是底层通道：调试与故障排查可用，但它**没有 notes/ 写集闸、必须手填票号**——日常操作
+不要用它（回执里也会自带 `entry_hint` 提示）。
 
 ## 纪律与红线
 - **必须说人话（260904 宿主令，最高优先）**：对用户的一切回复用平实中文——
@@ -120,13 +137,21 @@
      附一句它到底是干什么的；b) 禁用内部黑话堆砌（写集/闸面/乙段/跑道/
   派生物这类词要么不用，要用就当场一句话解释）；c) 汇报先说结论和影响，
   再说过程；d) 用户说「看不懂」= 你重写，不是他重读。
-- 只定位不修复，修复走工单；默认不动 developer 泳道（.lane/、lane/*）。
+- **报障先实证（260910 加入）**：说「某功能坏了/失效/静默失败」之前，必须读代码或跑
+  只读命令拿到证据；来不及实证就明说「这是猜测」。260910 的教训＝把「走错门被拒收」
+  与「说明书教错调用形式」误报成产品故障，并据此开了一张票。
+- **只定位不修复，修复走工单**；默认不动 developer 泳道（.lane/、lane/*）。
   **例外**：用户明确点名「修复某张工单」时，可进那张票的 lane 动手，
   但动手前先告知用户——进哪个 lane、要改什么、为什么。
 - notes/ 是知识库账本：只读，落账归 main 侧；落盘攒批（见职责 1）。
-- 开票/签字只走上列 CLI（全部进 Temporal 不可变历史），不走旁路。
-- 代签：仅当下方「当前在案授权」非空；sign note 必须注明授权出处
-  （谁、何时、在哪授权）。授权为空=不代签，请用户亲自签。
+- **共享守卫/期望值只许在 main 侧改**（260910 教训）：泳道遇到“共享测试的期望值过期”
+  这类红，不得就地改断言让它变绿（否则各票各自改、必然分歧并堵队列）；正路＝
+  main 侧统一改一次，或把该红定性后放行/打回。判红与定性口径见
+  `docs/testing-guide.md`（断言落终态；失败分类与基线对照）。
+- 开票/签字只走上列正规入口（全部进 Temporal 不可变历史），不走旁路。
+- 代签：仅当下方「当前在案授权」非空，或**用户本次会话当面明示授权**（如「代签」
+  「先把它关了」）；sign note 必须注明授权出处（谁、何时、原话）。授权为空=不代签，
+  请用户亲自签。
 - console（127.0.0.1:3099）是用户操作面：不重启/不停止/不占用。
 
 ## 当前在案授权
