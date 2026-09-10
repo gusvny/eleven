@@ -1991,7 +1991,11 @@ class DevLaneWorkflow(TicketPauseMixin):
                               worktree=str(self.meta.get("worktree") or ""),
                               branch=str(self.meta.get("branch") or ""),
                               base_ref=str(self.meta.get("base_ref") or ""),
-                              defer_teardown=archive_on),
+                              defer_teardown=archive_on,
+                              # 保险丝B 输入（t260910-03）：票面写集，merge 逐仓
+                              # squash 前验「多仓写集 × 逐仓物化」。空=在途旧票
+                              # 兼容（保险丝不触发），见 shared.MergeArgs 注释。
+                              write_set=list(self.meta.get("write_set") or [])),
                     start_to_close_timeout=MERGE_TO, retry_policy=RETRY)
                 mr = raw if isinstance(raw, MergeResult) else MergeResult(
                     ok=bool(raw.get("ok")), action=str(raw.get("action") or ""),

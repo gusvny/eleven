@@ -1170,6 +1170,48 @@ def build_repo_worktrees(project_root, write_set, lane_dir_name: str) -> List[Di
     return entries
 
 
+def multirepo_fuse_a_error(project_root, write_set, repo_worktrees) -> str:
+    """保险丝A（开票拒收，工单 t260910-03）：多仓写集 × 空 repo_worktrees 的
+    fail-closed 背闸（dengzhufpv 260910 缺陷：ticket.py 预派生漏传 repo_write_set
+    → 单仓 workspace 显式转发 → 成员仓零落仓）。
+
+    语义：写集条目经 resolve_repos_for_paths 归属到**非项目根本体**的成员仓，
+    而 repo_worktrees 为空（明细缺失）→ 返回点名条目+归属仓的拒收文案；
+    否则返回 ""（放行）。
+      - 单仓项目（全部条目归根本体）恒放行——零回归面；
+      - repo_worktrees 非空（明细已在，哪怕未必穷尽写集归属）→ 放行：明细的
+        **完备性**归保险丝B 在 merge_check 逐仓物化判定，两道保险丝各守一态
+        （A 守创建时刻明细缺失，B 守合并时刻物化落成），不在此重复判完备；
+      - 显式 workspace/worktree 不能绕过：判据是写集归属，不是派生路径；
+      - resolve_repos_for_paths 自身的 ValueError（逃逸/嵌套仓/空仓集/条目畸形）
+        原样上抛——归属真源故障同样 fail-closed，绝不静默放行。
+    真纯函数（无 git 子进程、无 IO），client.py ticket-start 单点消费。"""
+    entries = list(write_set or [])
+    if not entries:
+        return ""
+    if isinstance(repo_worktrees, list) and repo_worktrees:
+        return ""
+    root = str(pathlib.Path(project_root).resolve()) if project_root else ""
+    try:
+        mapping = resolve_repos_for_paths(project_root, entries)
+    except ValueError as e:
+        if "未发现任何 git 仓" in str(e):
+            return ""  # 仓集合为空=无成员仓可言，保险丝不适用（存量无 .git 注册目录面）
+        raise  # 逃逸/嵌套仓/条目畸形：fail-closed 照旧拒收
+    offenders = []
+    for repo_abs, paths in mapping.items():
+        if root and str(pathlib.Path(repo_abs).resolve()) == root:
+            continue  # 归属根仓的条目不触发（单仓/混合形态的根树部分）
+        offenders.append((pathlib.Path(repo_abs).name or str(repo_abs), paths))
+    if not offenders:
+        return ""
+    return ("保险丝A拒收（t260910-03）：写集条目命中成员仓路径但派生结果 "
+            "repo_worktrees 为空——多仓票缺逐仓明细=成员仓零落仓（dengzhufpv "
+            "260910 缺陷形态），拒收。%s。请走正规创建链（不显式传 "
+            "workspace/worktree），由 derive_lane_workspace 按写集归属产出逐仓明细。"
+            % "；".join("[%s]<-%s" % (name, ",".join(paths)) for name, paths in offenders))
+
+
 def derive_lane_workspace(
         ticket_id: str, template_lane: str, lane: str = "",
         workspace: Optional[Dict[str, str]] = None,
@@ -1217,6 +1259,11 @@ def derive_lane_workspace(
                 "workspace 必须形如 {\"type\":\"worktree|dir\",\"path\":\"...\"}，实际 %r"
                 % (workspace,))
         ws = {"type": str(workspace["type"]), "path": str(workspace["path"])}
+        # t260910-03：上游（ticket.py 正规入口）经同一本函数派生的多仓明细挂在
+        # workspace dict 上，这里重建 dict 时必须保留——否则明细在创建链第二跳被
+        # 丢弃，保险丝A 会对正规入口误拒（显式转发 ≠ 旁路：明细来自同一单点派生）。
+        if isinstance(workspace.get("repo_worktrees"), list):
+            ws["repo_worktrees"] = workspace["repo_worktrees"]
     worktree = str(worktree or "")
     branch = str(branch or "")
     if lane == LANE_WORKTREE:
@@ -2476,6 +2523,12 @@ class MergeArgs:
     branch: str = ""
     base_ref: str = ""
     defer_teardown: bool = False
+    # 保险丝B 输入（t260910-03）：票面写集，merge 循环逐仓 squash 前跑
+    # multirepo_materialization_error 用。payload 兼容先例=defer_teardown：在途旧票
+    # 序列化无此键，反序列化回落空列表。语义明示：**空列表=保险丝不触发**（在途旧票
+    # 已过 merge_check 前置闸，按旧语义收口，不追溯红灯）——这是兼容约定，不是
+    # 静默降级；新票由 dev_lane 构造处恒传 meta.write_set。
+    write_set: List[str] = field(default_factory=list)
 
 
 @dataclass

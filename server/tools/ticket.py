@@ -334,24 +334,39 @@ def _create(a):
     wf = wfmod.load(wfmod.DIR / (wid + '.yaml'))  # yaml=代码生成的快照，仅取 lane/workspace 推导
     stage0 = wf['stages'][0]
     role = a.get('role') or stage0['role']
+    # dev-lane 结构性写 integration/（design_integration_tests 落场景文件+清单登记，
+    # t260903-05 实案：白名单拦得对、错在声明漏）——建单侧自动并入，防人工漏报。
+    # t260910-03：write_set 组装（含 integration/ 自动并入）必须先于 derive——
+    # derive_lane_workspace 的多仓派生以写集归属为唯一输入（repo_write_set），
+    # 组装滞后=并入条目不参与归属推导=成员仓明细缺失（dengzhufpv 260910 缺陷形态）。
+    write_set = list(a.get('write_set') or [])
+    if wid == 'dev-lane' and 'integration/' not in write_set:
+        # t260910-03：并入前先探归属——补传 repo_write_set 后，无 integration/
+        # 成员仓的多仓项目若盲目并入，整票在派生即拒收（integration/ 不落任何仓）。
+        # 单仓项目归属恒成功（前缀归属不查存在性），行为与旧无条件并入完全一致；
+        # 多仓项目无此成员路径则跳过并入（自动化便利项缺席≠静默降级：票照开，
+        # 写集白名单仍守用户声明面）。
+        try:
+            _shared().resolve_repos_for_paths(proj['dirs'][0], ['integration/'])
+            write_set.append('integration/')
+        except ValueError:
+            pass
+    validate_write_set_no_notes(write_set)
     # lane/泳道字段推导+校验走 shared 单一真源（t260824 三次漂移事故）：
     # 形态错/字段不一致在创建瞬间拒收，不放跑到运行期才暴露。
+    # t260910-03：补传 repo_write_set——与裸 client.py 入口共用同一多仓派生条件
+    # （ws is None and not worktree × 写集归属），正规入口不再堵死引擎侧多仓明细。
     try:
         lane, ws, worktree, branch = _shared().derive_lane_workspace(
             tid, wf['lane'], lane=a.get('lane') or '',
             workspace=a.get('workspace'), worktree=a.get('worktree') or '',
             branch=a.get('branch') or '',
             template_workspace_dir=(wf.get('workspace') == 'dir'),
-            project_root=proj['dirs'][0])
+            project_root=proj['dirs'][0],
+            repo_write_set=write_set)
     except ValueError as e:
         raise ValueError('create 参数非法：%s' % e)
     _check_paths_under_project(proj, ws, worktree)
-    # dev-lane 结构性写 integration/（design_integration_tests 落场景文件+清单登记，
-    # t260903-05 实案：白名单拦得对、错在声明漏）——建单侧自动并入，防人工漏报。
-    write_set = list(a.get('write_set') or [])
-    if wid == 'dev-lane' and 'integration/' not in write_set:
-        write_set.append('integration/')
-    validate_write_set_no_notes(write_set)
     tpl_acc = list(stage0.get('acceptance') or [])
     extra = [x for x in (a.get('acceptance') or []) if x not in tpl_acc]  # A5.5 实例增项
     out = _poc('ticket-start', {

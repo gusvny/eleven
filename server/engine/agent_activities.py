@@ -118,6 +118,7 @@ from shared import (
     rebase_write_set,
     build_repo_worktrees,
     is_multi_repo_layout,
+    resolve_repos_for_paths,
     roles_dir_for_spawn,
     routes_file_for_spawn,
 )
@@ -1687,6 +1688,63 @@ def _is_worktree_of(p: Path, repo: Optional[Path] = None) -> bool:
     return False
 
 
+def multirepo_materialization_error(lane_root: Path, write_set: Optional[List[str]],
+                                    scopes: List[Dict[str, Any]],
+                                    is_worktree_of=None) -> str:
+    """保险丝B（合并红灯，工单 t260910-03）：多仓写集 × 未逐仓物化的 fail-closed
+    背闸（dengzhufpv 260910 缺陷：明细缺失时 _lane_scopes 静默回落单仓锚 → 成员仓
+    零落仓仍可全绿收口）。
+
+    语义：写集经 resolve_repos_for_paths 归属出的**成员仓集合**（归属≠项目根本体），
+    必须 ⊆ scopes 中已物化仓集合（scope name 非空、tree 目录在位、
+    is_worktree_of(tree, repo) 为真）；任一缺失 → 返回点名缺失仓+未落成条目的
+    红灯文案；否则 ""（放行）。
+      - 写集为空 → ""（保险丝不触发：旧在途票 MergeArgs.write_set 反序列化缺键
+        回落空列表，按旧语义收口不追溯——兼容约定，非静默降级）；
+      - 写集全归根本体（单仓/混合形态的根树部分）→ ""（零回归面）；
+      - 清单缺失（单 scope 回落形态，name=""）+ 写集含成员仓条目 → 全部成员仓
+        判未物化（正是缺陷形态）；清单**损坏**仍走 _lane_scopes 的 RuntimeError，
+        不在本函数重复判（两态互补封口）；
+      - 归属解析 ValueError（逃逸/嵌套仓/条目畸形）→ 转红灯文案不 raise（
+        merge_check 红灯不抛的既有语义；创建时刻已被保险丝A/写集校验拦截，
+        此处再红一道是纵深，不是第一防线）；
+      - is_worktree_of 参数注入（默认 _is_worktree_of）：UT 用桩谓词，免 git
+        子进程依赖；消费方（merge_check / merge）共用同一判定源，不另造第二真源。
+    """
+    entries = list(write_set or [])
+    if not entries:
+        return ""
+    predicate = is_worktree_of or _is_worktree_of
+    lane_root = Path(lane_root)
+    project_root = lane_root.parent.parent
+    try:
+        mapping = resolve_repos_for_paths(project_root, entries)
+    except ValueError as e:
+        if "未发现任何 git 仓" in str(e):
+            return ""  # 仓集合为空=无成员仓可言，保险丝不适用（存量无 .git 注册目录面）
+        return ("写集归属解析 fail-closed（t260910-03 保险丝B）：%s" % e)
+    root_abs = str(project_root.resolve())
+    member = {repo: paths for repo, paths in mapping.items()
+              if str(Path(repo).resolve()) != root_abs}
+    if not member:
+        return ""
+    materialized = set()
+    for sc in scopes or []:
+        if not str(sc.get("name") or ""):
+            continue  # 单仓回落 scope（清单缺失）：无逐仓物化可言
+        repo_abs = str(Path(str(sc.get("repo"))).resolve())
+        tree = Path(str(sc.get("tree")))
+        if tree.is_dir() and predicate(tree, Path(str(sc.get("repo")))):
+            materialized.add(repo_abs)
+    missing = {repo: paths for repo, paths in member.items()
+               if str(Path(repo).resolve()) not in materialized}
+    if not missing:
+        return ""
+    return ("多仓写集未逐仓物化（t260910-03 保险丝B，绝不静默收口）：%s"
+            % "；".join("[%s] 未落成（写集条目 %s）" % (repo, ",".join(paths))
+                       for repo, paths in sorted(missing.items())))
+
+
 def _check_git_identity(repo: Path) -> Optional[str]:
     """Commit-identity guard (ticket t260905-10): a lane settle's commit happens in
     the lane worktree (_settle_worktree_lane's `git -C lane commit`), and the source
@@ -1784,7 +1842,11 @@ def _prepare_multirepo_lane(lane_root: Path, entries: Any,
     notes: List[str] = []
     errors: List[str] = []
     created_n = 0
-    for e in entries:
+    # 根树（repo=""，树=泳道容器本身）恒最先建（t260910-03）：混合形态下若子树
+    # 先建，容器目录会先以普通目录形态存在，根树的 worktree add 随即误判
+    # 「目录已存在但非已注册 worktree」整票 failed（缺陷现场写集 integration/
+    # 归根仓且排后即踩）。排序只动创建顺序，不动明细/清单本身。
+    for e in sorted(entries, key=lambda x: 0 if not str((x or {}).get("repo") or "") else 1):
         # Ticket t260907-12: repo may be an empty string = the root-repo tree
         # (repo = the project root itself, tree = the lane container itself; Path/""
         # share one form with zero special-casing); name/branch must be non-empty
@@ -2549,6 +2611,21 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
         conflict_files.extend(core["conflict_files"])
         if core["merge_tree_excerpt"]:
             merge_tree_excerpt = (merge_tree_excerpt + "\n" + core["merge_tree_excerpt"]).strip()
+    # 保险丝B（t260910-03）：多仓写集必须逐仓物化落成，任一成员仓缺失 → 红灯。
+    # 插入位置钉死在 rehearsal 项**之前**（rehearsal 必须保持 checks[-1]，冲突分类
+    # 把 checks[:-1] 当非冲突类——保险丝红恒为非冲突类，绝不进自动消解回路，
+    # 直接 blocked 交人；KI-047 同族位置风险由此消解）。
+    fuse_b_err = multirepo_materialization_error(wt, args.write_set, scopes)
+    if fuse_b_err:
+        checks.insert(max(len(checks) - 1, 0),
+                      {"item": "repo_worktrees 逐仓物化（t260910-03 保险丝B）",
+                       "green": False, "detail": fuse_b_err})
+    elif multi and args.write_set:
+        # 绿对照可见项（红灯不扩大化的反面：全绿也不静默——多仓票恒有物化闸记录）
+        checks.insert(max(len(checks) - 1, 0),
+                      {"item": "repo_worktrees 逐仓物化（t260910-03 保险丝B）",
+                       "green": True,
+                       "detail": "多仓写集逐仓物化齐全（%d 仓）" % len(scopes)})
     green = all(c["green"] for c in checks)
     # Ticket t260826-01 automatic conflict resolution loop: red lights split into two
     # classes —
@@ -3118,8 +3195,17 @@ async def merge(args: MergeArgs) -> MergeResult:
     # already-closed tree takes its "nothing collectable in the index" idempotent
     # branch and back-fills instead of booking twice; a failed tree is not torn down
     # or deleted, awaiting re-verification).
+    scopes = _lane_scopes(wt, args.branch, base_ref="", write_set=None)
+    # 保险丝B（t260910-03）：逐仓 squash 前先验「多仓写集 × 逐仓物化」——明细缺失/
+    # 漂移（含 _lane_scopes 清单缺失静默回落单仓锚的缺陷形态）→ 整体 failed，lane
+    # 不拆不删交人工，绝不按单仓锚静默落账。write_set 空（在途旧票缺键回落）→
+    # 保险丝不触发，按旧语义收口（payload 兼容约定，见 shared.MergeArgs 注释）。
+    fuse_b_err = multirepo_materialization_error(wt, args.write_set, scopes)
+    if fuse_b_err:
+        return MergeResult(ok=False, action="failed",
+                           error="合并红灯（t260910-03 保险丝B）：%s" % fuse_b_err)
     results = []
-    for sc in _lane_scopes(wt, args.branch, base_ref="", write_set=None):
+    for sc in scopes:
         res = _squash_merge(sc["repo"], sc["tree"], sc["branch"], args.ticket_id,
                             defer_teardown=bool(args.defer_teardown), project_key=project_key)
         if sc["name"]:  # multi-repo: prefix the tree name onto error/merge_commit (docstring item e, per tree)

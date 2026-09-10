@@ -60,6 +60,7 @@ from shared import (
     check_paths_under_project,
     derive_lane_workspace,
     lookup_project,
+    multirepo_fuse_a_error,
     project_search_attributes,
     ticket_data_dir,
     ticket_search_attributes,
@@ -521,6 +522,17 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         check_paths_under_project(proj, workspace, worktree)
     except ValueError as e:
         return _err("ticket-start 参数非法：%s" % e)
+    # 保险丝A（t260910-03，开票拒收）：写集条目命中成员仓路径（resolve_repos_for_paths
+    # 归属非项目根本体）而 repo_worktrees 为空 → fail-closed 拒收并点名条目（显式
+    # workspace/worktree 也不能绕过——判据是写集归属不是派生路径）。归属解析自身的
+    # ValueError（逃逸/嵌套仓/条目畸形）同样拒收，绝不静默放行。单仓项目恒放行。
+    try:
+        fuse_a_err = multirepo_fuse_a_error(project_root,
+                                            args.get("write_set"), repo_worktrees)
+    except ValueError as e:
+        return _err("ticket-start 拒收（写集归属解析 fail-closed）：%s" % e)
+    if fuse_a_err:
+        return _err(fuse_a_err)
     overrides: Dict[str, Any] = {}
     for sid, g in (args.get("gate_overrides") or {}).items():
         if isinstance(g, dict):
