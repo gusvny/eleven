@@ -183,7 +183,9 @@ try {
   }
 
   // T3 notes 观察窗：页签切换 → notes 篇目出现
-  const notesTab = page.getByText(/notes\s*观察窗/).first();
+  // （finder 更新=t260910-10：页签文案随 mock v1 固定元素英文化改为 "Notes"，定位改走
+  //   契约锚 data-wb-docs-scope-notes——断言语义不变：notes 页签在场且切换后出 notes 篇目。）
+  const notesTab = page.locator('[data-wb-docs-scope-notes]').first();
   if (await notesTab.isVisible().catch(() => false)) {
     await notesTab.click();
     await page.waitForTimeout(1200);

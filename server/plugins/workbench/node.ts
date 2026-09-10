@@ -29,14 +29,17 @@
  *   POST /sandbar-workbench/api/wf/tickets/<id>/accept|advance|dispatch-next|rework|update
  *                                               → 写操作，走 admin.py call ticket（run-id 审计）
  *   GET  /sandbar-workbench/api/wf/workflows      → workflow list（模板链，泳道图用）
- *   GET  /sandbar-workbench/api/wf/docs/tree?scope=docs|notes
- *                                               → 「文档」视图目录树（t260905-06，全仓单例）：
- *                                                 仓根 docs/ 定稿库或 notes/ 观察窗下 .md 动态
- *                                                 分组（title 自 frontmatter）；白名单拒收文件进
- *                                                 skipped（可见性）；目录缺席 {empty,reason} 降级
- *   GET  /sandbar-workbench/api/wf/docs/doc?scope=docs&path=design/xx.md
+ *   GET  /sandbar-workbench/api/wf/docs/tree?scope=docs|notes[&project=<key>]
+ *                                               → 「文档」视图目录树（t260905-06；KI-070 起
+ *                                                 按项目根解析——?project= 项目锚下读该项目
+ *                                                 自己的 docs|notes，缺省/未锚回落引擎仓）：
+ *                                                 .md 动态分组（title 自 frontmatter）；白名单
+ *                                                 拒收文件进 skipped（可见性）；目录缺席
+ *                                                 {empty,reason} 降级；resolved 挂解析来源
+ *   GET  /sandbar-workbench/api/wf/docs/doc?scope=docs&path=design/xx.md[&project=<key>]
  *                                               → 「文档」视图按篇正文（原文+frontmatter 元数据；
- *                                                 白名单/穿路径/大小上限逐检查精确报错；只读）
+ *                                                 项目根口径同 tree；白名单/穿路径/大小上限
+ *                                                 逐检查精确报错；只读）
  *   GET  /sandbar-workbench/api/wf/book?path=books/hanshu/jizhuan.json&limit=5
  *                                               → 内容预览（审批前过目）：只读 app/public/data/<path>，
  *                                                 返回 meta + 前 limit 章（标题+段落）；path 白名单防穿路径
@@ -144,7 +147,7 @@ import { anchorEnv, anchorEpicsDir, resolveProjectAnchor, resolvedMark, type Pro
 // 项目生命周期 CLI 薄壳（票③面D：写路径单源=安装器 CLI，读注册表仍走 TS 装载器；
 // 票据/体检数据=CLI 独有面，spawn 恰是同源——取舍清单见 src/host/project-admin.ts 头注）。
 import { ProjectCliError, runProjectCli } from './src/host/project-admin.ts'
-// 「文档」视图宿主半（t260905-06）：仓根 docs/ 定稿库 + notes/ 观察窗只读枚举/读取。
+// 「文档」视图宿主半（t260905-06；KI-070 起按项目根解析）：docs/ 定稿库 + notes/ 观察窗只读枚举/读取。
 // 降级/白名单/句柄终态口径见该模块头注（R1 取舍清单 2）。
 import { listDocs, readDoc } from './src/host/docs.ts'
 import { isDocsScope } from './src/shared/docs-model.ts'
@@ -671,26 +674,37 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     }
   }
 
-  /** 「文档」视图（t260905-06）：仓根 docs/ 定稿库 + notes/ 观察窗，scope 必传二选一。
-   *  全仓单例语义（不按项目分流——docs/ 定稿库属仓不属项目）；只读，无写路径。 */
-  async function handleDocsTree(_req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const url = new URL(_req.url ?? '/', 'http://x')
+  /** 「文档」视图（t260905-06；KI-070 修复=t260910-10）：docs/ 定稿库 + notes/ 观察窗，
+   *  scope 必传二选一。树按 ?project= 项目根解析（项目锚显式传 root，缺省/未锚回落
+   *  引擎仓——取舍清单见方案 gen1 R1：未注册 400/隔离·装载 502/primaryDir 空 502 不回落
+   *  全随 anchorOf+anchorGuard 带过来）；装载器 listDocs 语义不变，只换 root 来源。
+   *  只读，无写路径。 */
+  async function handleDocsTree(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const url = new URL(req.url ?? '/', 'http://x')
     const scope = url.searchParams.get('scope')
     if (!isDocsScope(scope)) {
       sendJson(res, 400, { ok: false, error: `scope 必传且只能是 docs|notes（收到: ${String(scope)}）` })
       return
     }
+    const anchor = anchorGuard(res, anchorOf(url))
+    if (anchor === null) return
     try {
-      sendJson(res, 200, { ok: true, result: await listDocs(join(repo, scope), scope) })
+      sendJson(res, 200, {
+        ok: true,
+        result: await listDocs(join(anchor.root, scope), scope),
+        resolved: resolvedMark(anchor),
+      })
     } catch (err: any) {
       sendJson(res, 500, { ok: false, error: `docs 目录枚举失败: ${String(err?.message ?? err)}` })
     }
   }
 
-  /** 「文档」视图按篇正文（t260905-06）：scope+path 必传；path 白名单/穿路径/大小上限
-   *  每步失败的 reason 点名该检查（精确报错纪律，R1 取舍清单 2）。 */
-  async function handleDocsDoc(_req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const url = new URL(_req.url ?? '/', 'http://x')
+  /** 「文档」视图按篇正文（t260905-06；KI-070 修复=t260910-10）：scope+path 必传；
+   *  篇按 ?project= 项目根解析（同 handleDocsTree 锚口径，缺省回落引擎仓）。
+   *  path 白名单/穿路径/大小上限每步失败的 reason 点名该检查（精确报错纪律，
+   *  R1 取舍清单 2）。 */
+  async function handleDocsDoc(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const url = new URL(req.url ?? '/', 'http://x')
     const scope = url.searchParams.get('scope')
     const rel = url.searchParams.get('path') ?? ''
     if (!isDocsScope(scope)) {
@@ -701,14 +715,12 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       sendJson(res, 400, { ok: false, error: 'path 必传（scope 下相对路径，.md 结尾）' })
       return
     }
+    const anchor = anchorGuard(res, anchorOf(url))
+    if (anchor === null) return
     try {
-      const r = await readDoc(join(repo, scope), rel)
-      if (r.empty) {
-        // 降级走 200 + {empty,reason}（人话可见，同 book/scan-report 风格——路径问题不是服务器错）
-        sendJson(res, 200, { ok: true, result: r })
-        return
-      }
-      sendJson(res, 200, { ok: true, result: r })
+      const r = await readDoc(join(anchor.root, scope), rel)
+      // 降级走 200 + {empty,reason}（人话可见，同 book/scan-report 风格——路径问题不是服务器错）
+      sendJson(res, 200, { ok: true, result: r, resolved: resolvedMark(anchor) })
     } catch (err: any) {
       sendJson(res, 500, { ok: false, error: `docs 篇章读取失败: ${String(err?.message ?? err)}` })
     }
@@ -2012,7 +2024,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         ws.register({ kind: 'prefix', path: TICKETS_PREFIX, handler: handleTicketRoute }),
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/workflows', handler: handleWorkflows }),
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/book', handler: handleBook }),
-        // 「文档」视图两路由（t260905-06）：目录树 + 按篇正文（仓根 docs/notes，全仓单例）。
+        // 「文档」视图两路由（t260905-06；KI-070 起按 ?project= 项目根解析）：目录树 + 按篇正文。
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/docs/tree', handler: handleDocsTree }),
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/docs/doc', handler: handleDocsDoc }),
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/temporal-health', handler: handleTemporalHealth }),

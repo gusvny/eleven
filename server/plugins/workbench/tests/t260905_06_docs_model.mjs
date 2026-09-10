@@ -110,4 +110,16 @@ ok('docTitleOf：frontmatter title 优先，回落文件名去扩展名', () => 
   assert.equal(docTitleOf({ title: '' }, 'a/b.md'), 'b')
 })
 
+ok('frontmatter：verified 键透传（t260910-10 面 B 消费面；畸形值定值不造不炸）', () => {
+  const p = parseFrontmatter('---\ntitle: 新鲜篇\nverified: 2026-09-10\n---\n正文')
+  assert.equal(p.meta.verified, '2026-09-10')
+  // 畸形值：非日期形状字符串原样透传（不解析不格式化——UI 占位判定自担）；空值=空串透传
+  const weird = parseFrontmatter('---\nverified: [a, b]\n---\n')
+  assert.equal(weird.meta.verified, '[a, b]')
+  const emptyV = parseFrontmatter('---\nverified:\n---\n')
+  assert.equal(emptyV.meta.verified, '')
+  // 无 verified 键：键缺席（UI 侧走 'pending' 占位，模型层不造默认值）
+  assert.equal(typeof parseFrontmatter('---\ntitle: 无新鲜度\n---\n').meta.verified, 'undefined')
+})
+
 console.log(`DOCS_MODEL_TESTS ran=${n} pass=${n} fail=0`)

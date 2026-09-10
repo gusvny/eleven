@@ -1,9 +1,11 @@
 /**
- * docs.ts —— 「文档」视图宿主半（t260905-06）：仓根 docs/ 定稿库与 notes/ 观察窗的
- * 只读枚举/读取（node.ts docs 端点的实作单源，纯 fs 无进程/无监听，便于直测）。
+ * docs.ts —— 「文档」视图宿主半（t260905-06；KI-070 起按项目根解析=t260910-10）：
+ * docs/ 定稿库与 notes/ 观察窗的只读枚举/读取（node.ts docs 端点的实作单源，
+ * 纯 fs 无进程/无监听，便于直测）。root 由调用方（node.ts docs 端点）按 ?project=
+ * 项目锚解析后显式传入——本模块对项目语义无感，装载语义与单仓时代完全一致。
  *
  * 降级口径（R1 取舍清单 2 承接——精确报错，对照 KI-025「不许谎报没有」）：
- *   - scope 目录缺席 → { empty:true, reason:'<scope>/ 目录不存在（仓根=<root>）' }（真没有）；
+ *   - scope 目录缺席 → { empty:true, reason:'<scope>/ 目录不存在（项目根=<root>）' }（真没有）；
  *   - rel 白名单拒 → 每类检查失败的 reason 各不相同（点了哪个检查就报哪个）；
  *   - 白名单允许但读不到（ENOENT）→ '文件不存在'（白名单真允许、读后确无）；
  *   - 超限 → '文件超过大小上限'；读失败 → '读取失败: <原文>'。
@@ -64,7 +66,7 @@ async function walkMd(root: string): Promise<WalkResult | null> {
 export async function listDocs(root: string, scope: 'docs' | 'notes'): Promise<DocsTreeResult> {
   const walk = await walkMd(root)
   if (walk === null) {
-    return { empty: true, reason: `${scope}/ 目录不存在（仓根=${root}）`, scope, groups: [], skipped: [] }
+    return { empty: true, reason: `${scope}/ 目录不存在（项目根=${root}）`, scope, groups: [], skipped: [] }
   }
   const files = walk.files.sort()
   const skipped: { path: string; reason: string }[] = walk.links.map((rel) => ({

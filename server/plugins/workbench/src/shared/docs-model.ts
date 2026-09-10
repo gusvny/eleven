@@ -38,12 +38,16 @@ export function isSafeDocRel(rel: unknown): rel is string {
   return !rel.split('/').includes('..')
 }
 
-/** frontmatter 简版元数据（仅取标量键，YAML 不做嵌套/列表——定稿库头部是平面键）。 */
+/** frontmatter 简版元数据（仅取标量键，YAML 不做嵌套/列表——定稿库头部是平面键）。
+ *  verified=文档新鲜度时间戳（doc-lifecycle 面 B 口径）：解析循环全键透传（下方
+ *  meta[m[1]]=m[2].trim()），此处显式声明仅供 UI 消费面定型——存量库无该键时
+ *  UI 走显式占位不留假值（t260910-10）。 */
 export interface DocMeta {
   title?: string
   status?: string
   updated?: string
   category?: string
+  verified?: string
   [key: string]: string | undefined
 }
 
@@ -79,7 +83,8 @@ export function parseFrontmatter(text: string): ParsedDoc {
 /** 目录树节点：dir=相对根的目录路径（''=根级），files=该目录下的篇（按路径排序）。 */
 export interface DocTreeGroup {
   dir: string
-  /** 客户端展示名：根级='总目录'，子目录=目录名最后一段。 */
+  /** 客户端展示名：根级='总目录'（组标签随库内容走，不属工单固定 UI 元素英文清单——
+   *  t260910-10 维持 C2 既有口径，登记场景与既有单测均锚此），子目录=目录名最后一段。 */
   label: string
   files: { rel: string; title: string }[]
 }

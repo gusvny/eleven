@@ -31,10 +31,12 @@ test('listDocs：动态分组 + frontmatter 标题 + skipped 可见（C2/C3）',
   assert.match(t.skipped[1].reason, /仅 \.md/)
 })
 
-test('listDocs：目录缺席 → empty+reason 点名真没有（KI-025 口径）', async () => {
+test('listDocs：目录缺席 → empty+reason 点名真没有（KI-025 口径；措辞=项目根 t260910-10）', async () => {
   const t = await listDocs(join(fresh(), '不存在的目录'), 'notes')
   assert.equal(t.empty, true)
   assert.match(t.reason, /目录不存在/)
+  assert.match(t.reason, /项目根=/)
+  assert.doesNotMatch(t.reason, /仓根/) // KI-070 后 root=项目锚解析的项目根，措辞不误导诊断（C7）
   assert.deepEqual(t.groups, [])
   assert.deepEqual(t.skipped, [])
 })

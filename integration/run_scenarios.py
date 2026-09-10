@@ -742,6 +742,14 @@ SCENARIOS = [
     ("t260904-02-ticket-start-anchor",
      "裸入口开票硬闸+隔离台并发隔离端到端（t260904-19 起 docker 测试台双实例，epic 验收1/4/5，KI-032 修复回归）：裸 client.py ticket-start 带 project→Temporal 内 payload workspace.path 绝对路径且锚注册项目主目录/.lane/（worktree 同锚，落仓与执行 worker 解耦）；缺 project/未知 key=创建即拒收且两红因文案互辨；双槽并发开票时间重叠互不见对方工单（ticket-list 双向+跨槽 describe not_found）；审计钩子证被测子进程零连生产 7233/8233（含自证拦截腿）+双台端口面核验（互异/不在禁区 3099/3199/7233/8233/17233/18233）+SANDBAR_TARGET_HOST 指生产构造即拒（红绿自证）；teardown 零残留（down 后 docker ps 无本工程容器）、端口释放、down 幂等二连、同工程名立即 re-up（t260904-19 docker 台语义，容器由 daemon 持有无锁可崩，取舍见 stage_docker 头注）；docker 缺席/镜像缺席=ENV_FAIL exit 2 点名",
      "python3 integration/t260904-02/sc_ticket_start_anchor.py", "engine"),  # engine-LAST (run E): stage boots land in the drained window; concurrency under test is internal
+
+    # ---- t260910-10: docs per-project root (KI-070) + docs view mock v1 — project-anchor docs family ----
+    ("t260910-10-docs-project-anchor",
+     "docs tree/doc 按项目根解析（t260910-10，KI-070 主干 API 面，隔离台 HTTP 直读，工单必含①②）：非 sandbar 夹具项目（真目录真文件真读）锚下 tree 出夹具篇目（根级+嵌套 sub/）绝不含 sandbar 定稿库签名篇目、doc 真读出夹具正文且全文无 sandbar docs/notes 双签名串入（正反两面）、notes scope 同构（夹具 notes 在场/epics 不串）；resolved 可观测契约={source:'project',key,root=夹具注册主目录逐字节}（resolvedMark 六面路由统一口径；root 逐字节=KI-070 终态判据）；缺省/未锚回落引擎仓（tree/doc 读 sandbar 真库篇目、resolved source='default'、无夹具串入=旧行为零回归）；未注册 key 显式 400 且 error 点名「未知项目」、无 resolved、无 sandbar 篇目（不静默回落=防数据串仓）；空 scope 目录诚实降级（200 empty=true+人话 reason 非空+groups 空，不 500 不谎报，措辞不锚字面）。lib_fix17 自举临时注册表+双夹具项目，零浏览器依赖（纯 API 无 KI-036 环境腿）；端口红线 ≠3099/7233。与 t260905-06-doc-read-through intent 不同面：那条锁缺省锚单仓阅读链路+穿路径白名单+窄栏（本票回归面不重复设计），本条锁多项目锚解析/回落/注入。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "node integration/t260910-10/sc_docs_project_anchor.mjs", "ro"),
+    ("t260910-10-docs-ui-mock-v1",
+     "文档视图 mock v1 终态旅程（t260910-10，KI-070 UI 半+260910 过稿版式，隔离台浏览器走查，工单必含③）：初值=缺省引擎仓选择态（synthesized 选项不依赖注册表真有 sandbar 条目）且首屏树=sandbar 篇目、初载 docs 请求无 project= 参数（缺省回落线上证据）；固定 UI 元素英文在场（Project/Docs/Notes/Search 输入框/On this page）；Project 切换器换夹具项目 → 请求带 ?project=<夹具>（wire 层反 viewProject 漂移）且树随所选项目切换（夹具篇目在场/sandbar 篇目退场）；开篇正文真渲染+五枚 chip 键在场（Status/Verified/Category/Updated/Path）、Verified 无数据源=显式 pending 占位且无日期形状（不留假值终态化）；On this page 大纲随选中文档渲染（h2 条目在场）且点击真跳转（目标标题入视口）；分组可折叠（组头点按条目可见性翻转）；Search 当前项目内过滤终态（收窄/清空还原）；空态退化（无 notes 的夹具切 Notes 页签 → 零条目+诚实 reason 在场+On this page 空+不残留旧项目内容+不炸）。断言锚=公开契约锚 data-wb-docs-root/[data-wb-doc-item]+元素角色/可见文本，不锚内部类名；playwright/浏览器缺失=env_fail（KI-036 家族）。与 t260905-06-doc-read-through intent 不同面：那条锁单仓阅读链路+代码块+窄栏单栏流+无溢出（回归归它），本条锁 mock v1 新元素与新旅程；与 t260910-10-docs-project-anchor 不同层（API 契约 vs DOM 终态）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "node integration/t260910-10/sc_docs_ui_mock_v1.mjs", "ro"),
 ]
 
 CMD_TIMEOUT = 900
