@@ -1,7 +1,8 @@
 # ui-check —— 控制台 UI 验收截图通道（t260828-09）
 
-UI 改动票的验收证据：headless 浏览器截控制台关键视图，落泳道 `.suyou/screenshots/`，
-integration 审读 agent 看图判定，merge_check 机械查「UI 票无 png → 红灯」。
+UI 改动票的验收证据：headless 浏览器截控制台关键视图，落泳道 `.sandbar/screenshots/`
+（旧泳道 `.suyou/screenshots/` 粘滞保留，naming-compat），审读判定的诚实口径见
+「流水线接线」节：截图**存在性**由机械闸核验，**像素质量归人门**。
 
 ## 用法
 
@@ -13,7 +14,7 @@ cd server/ui-check && npm install
 node capture.mjs --selftest
 
 # 截图（通常由工单引擎 worker 代跑，也可手动补跑）
-node capture.mjs --url http://127.0.0.1:3199 --out <泳道worktree>/.suyou/screenshots
+node capture.mjs --url http://127.0.0.1:3199 --out <泳道worktree>/.sandbar/screenshots
 
 # 泳道隔离台一键（临时 DSH_HOME+临时端口，不碰 3099）
 node capture-lane.mjs --lane <泳道worktree> --out <dir>
@@ -33,6 +34,7 @@ node capture-lane.mjs --lane <泳道worktree> --out <dir>
 | `SANDBAR_CAPTURE_PRESET_SOURCE` | `$HOME/.dsh/.agent-presets/sandbar-integration` | 隔离台 preset 物化源（单测/基线桩覆盖用） |
 | `SANDBAR_CAPTURE_FIXTURES` | 不设 | **capture-lane 专用**（bench 级开关）：`=1` 时向 capture.mjs 追加 `--fixtures`，开启状态注入 |
 | `SANDBAR_UI_CAPTURE_FIXTURES` | 不设 | **capture.mjs 直跑专用**（capture 级开关）：`=1` 等价 `--fixtures`。两个 env 名不通用，见下节 |
+| `SANDBAR_UI_CAPTURE_BOARD_MS` | `15000` | 板面就绪断言预算（t260910-05）：快门前等「筛选条在场且（行卡≥1 或空态在场）」的窗口；非有限正数回落缺省并 loud 提示 |
 
 ## 状态注入（fixture 票，t260901-24）
 
@@ -135,8 +137,10 @@ DSH_HOME——控制台默认 preset 缺失会导致建会话报 agent-preset-no
   preset（造假证据红线）。物化全落临时家内，五路径 teardown 天然回收。
 - 断言基线：`node integration/baselines/capture-lane-preset.mjs`（三态，不 boot）。
 - **失败尽力视图**（worker 侧 `prepare_ui_evidence`）：capture 失败时已拍 PNG 归档
-  主树 `.suyou/evidence/<ticket>/`，归档成功的从泳道 screenshots 移出（机械闸
-  png_count 归 0 维持红灯，残缺视图不假通过），归档失败的留泳道可人工捞回。
+  主树 `.sandbar/evidence/<ticket>/`（旧名 `.suyou/evidence/` 只读回落，naming-compat；
+  读侧候选序=workbench node.ts `evidenceCandidateDirs` 单一收口），归档成功的从泳道
+  screenshots 移出（机械闸 png_count 归 0 维持红灯，残缺视图不假通过），归档失败的
+  留泳道可人工捞回。
 
 ## 截图最小集 v1
 
@@ -145,17 +149,31 @@ DSH_HOME——控制台默认 preset 缺失会导致建会话报 agent-preset-no
 
 导航定位一律用语义锚（`data-phase`、可见文本、`data-wb-*`），禁哈希类名选择器。
 
+## 板面就绪断言（t260910-05 截图内容断言）
+
+板面三视图（`console-board` / `-dark` / `-light`）快门前断言**关键 DOM 在场**：
+筛选条（`.wb-chip-btn`）在场 且（行卡（`.wb-card`）≥1 或 人话空态（`.wb-empty`）在场）
+——260910 暂停票实证「主列表渲染完成前按快门，废图（无操作按钮）全绿混进归档无人
+发现」（走查 agent 是文本模型看不了像素、合并闸只查文件存在性）。断言失败=该视图
+失败不交图，沿既有 run→failures→exitCode 链全链红（无「不交图但全链绿」的旁路）。
+预算 env `SANDBAR_UI_CAPTURE_BOARD_MS`；接线锁=sc_capture_board_assert 场景（桩 page
+驱动 capture.mjs 导出条目面，行为锁不锚源码字面，KI-051）。
+
 ## 只读红线
 
 只 GET 打开控制台页面并做导航点击，**不提交任何表单、不发工单、不碰任何进程端口**。
 台内写操作（建会话/种子消息）仅限 `--allow-seed` 隔离台路径。
 
-## 流水线接线
+## 流水线接线（审读口径：存在性已机械核，像素质量归人门）
 
 - `dev_lane` implement 落盘后：UI 票（`shared.is_ui_write_set` 命中）自动执行
   `prepare_ui_evidence`（worker 代跑本脚本，`SANDBAR_UI_CAPTURE_STUB=1` 可桩跑）；
-- `integration_review` prompt 注入截图清单（含 mtime），审读按「无截图证据=打回」；
-- `merge_check`：UI 票且 `.suyou/screenshots/` 无 png → 红灯 + 处置指引。
+- `integration_review` prompt 注入截图清单（含 mtime）；走查/审读 agent 是文本模型，
+  **看不了像素**——截图存在性与板面就绪锚已由机械闸+截图内容断言核验，审读不得
+  假装「看过图」下像素级结论；像素质量（布局/配色/遮挡）归人门实看，无截图证据=
+  打回的口径不变（缺证据=不可判，不是「审读看过没问题」）；
+- `merge_check`：UI 票且 `.sandbar/screenshots/`（旧名 `.suyou/screenshots/` 回落）
+  无 png → 红灯 + 处置指引。
 
 ## 故障语义
 

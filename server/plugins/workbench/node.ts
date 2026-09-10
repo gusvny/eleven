@@ -258,14 +258,50 @@ export function ticketContext(input: any): string {
 }
 
 /**
- * 工单截图证据文件列表（t260831-08）：GET /wf/tickets/<id>/evidence 的数据源。
- * 读序与既有取图端点（handleTicketEvidence，t260829-02）一致：①主树归档
- * <base>/<id>/（base=SANDBAR_EVIDENCE_DIR env 或 <repo>/.suyou/evidence）；②泳道
- * <repo>/.worktrees/<id>/.suyou/screenshots/。取舍结论（票 t260831-08，#1b/#1c/#1d）：目录级 containment（resolve 后 startsWith 各自数据根——词法纵深
- * 防御，配合 TICKET_ID_RE 不含 / 和 . 双保险）；枚举结果逐名过 isEvidenceFileName
+ * 证据候选目录收口（t260910-05 路径新名迁移）：取图/列表两端点共用的唯一候选面，
+ * 杜绝两处再错位。读侧全面切新名（`.sandbar/` 点目录、`.lane/<id>` 泳道根）并保留
+ * 旧名只读回落（naming-compat：`.suyou/` 粘滞泳道、`.worktrees/` 老泳道根——处理在飞
+ * 老泳道的历史数据；写侧真源=引擎 shared.ui_evidence_dir/evidence_base，新泳道只写
+ * 新名）。读侧用枚举回落而非照抄引擎 resolve_dot_dir 粘滞判定：读侧纯只读，宿主可能
+ * 新旧泳道同仓并存，枚举比状态复判稳且可测。
+ *
+ * 顺序=新名在前（命中即用），旧名只读回落；env 语义=C1 独占替换：SANDBAR_EVIDENCE_DIR
+ * 在场时归档候选=仅 env 一处（env 指临时目录供自测，miss 回落默认目录会击穿自测隔离
+ * 读到真仓证据）；泳道/老泳道候选不受 env 影响。
+ *
+ * 返回 [候选目录, containment 根] 对：旧取图端点的 `resolve(abs,'..','..')` 两级上跳
+ * 对更深候选恒真（装饰性断言），改每候选显式 root startsWith 真加固。
+ */
+export interface EvidenceCandidate { dir: string; containRoot: string }
+export function evidenceCandidateDirs(root: string, envBase: string | null, id: string): EvidenceCandidate[] {
+  const out: EvidenceCandidate[] = []
+  if (envBase) {
+    // env 独占替换（自测隔离口径）：归档仅此一处，不与默认目录并读。
+    out.push({ dir: resolve(envBase, id), containRoot: resolve(envBase) })
+  } else {
+    for (const dot of ['.sandbar', '.suyou']) {  // naming-compat: .suyou=旧名只读回落
+      out.push({ dir: resolve(root, dot, 'evidence', id), containRoot: resolve(root, dot) })
+    }
+  }
+  for (const laneRoot of ['.lane', '.worktrees']) {   // naming-compat: .worktrees=老泳道根回落
+    for (const dot of ['.sandbar', '.suyou']) {       // naming-compat: .suyou=旧名只读回落
+      out.push({ dir: resolve(root, laneRoot, id, dot, 'screenshots'), containRoot: resolve(root, laneRoot, id) })
+    }
+  }
+  return out
+}
+
+/**
+ * 工单截图证据文件列表（t260831-08 建；t260910-05 候选面切新名+回落，收口见
+ * evidenceCandidateDirs）：GET /wf/tickets/<id>/evidence 的数据源。取舍结论（票
+ * t260831-08，#1b/#1c/#1d）：目录级 containment（resolve 后 startsWith 各自数据根——
+ * 词法纵深防御，配合 TICKET_ID_RE 不含 / 和 . 双保险）；枚举结果逐名过 isEvidenceFileName
  * （泳道目录可能被手塞怪名文件，不进列表即不渲染）；目录不存在→该候选空（软降级
- * 不报错，枚举语义没有 404，files=[] 即人话）。symlink 防线不带：截图目录内容来自
- * 自家 QA agent 工具产物，非外部输入，与既有取图端点同洞（不单侧加防线造伪安全）。
+ * 不报错，枚举语义没有 404，files=[] 即人话）。同名文件跨候选去重。列表端点行为面
+ * 因 .lane 候选扩大=修复本体非回归（t260910-05 C4 注记）：新泳道证据自此可列，
+ * 此前只能靠手工复制兜底。
+ * symlink 防线不带：截图目录内容来自自家 QA agent 工具产物，非外部输入，与既有取图
+ * 端点同洞（不单侧加防线造伪安全）。
  *
  * t260907-11 KI-057 穿参：repo 参数=判界用项目根（默认仓锚传引擎仓、项目锚传项目主
  * 目录，containment 闸随锚走、语义不变）；envBase=SANDBAR_EVIDENCE_DIR 覆盖值——缺省
@@ -277,16 +313,9 @@ export async function listEvidenceFiles(
   envBase: string | null = process.env.SANDBAR_EVIDENCE_DIR ?? null,
 ): Promise<string[]> {
   if (!TICKET_ID_RE.test(id) || /[./]/.test(id)) return []
-  const base = envBase ?? join(repo, '.suyou', 'evidence')
-  const roots = [resolve(base), resolve(repo, '.worktrees')]
-  const dirs = [
-    resolve(roots[0], id),
-    resolve(roots[1], id, '.suyou', 'screenshots'),
-  ]
   const seen = new Set<string>()
-  for (let i = 0; i < dirs.length; i++) {
-    const dir = dirs[i]
-    if (!dir.startsWith(roots[i] + sep)) continue // containment：越界基目录直接跳过
+  for (const { dir, containRoot } of evidenceCandidateDirs(repo, envBase, id)) {
+    if (!dir.startsWith(containRoot + sep)) continue // containment：越界基目录直接跳过
     let names: string[]
     try {
       names = await readdir(dir)
@@ -956,12 +985,15 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
   }
 
   /**
-   * 工单截图证据只读端点（t260829-02）：GET /wf/tickets/<id>/evidence/<file>。
-   * 读序：①主树归档 <repo>/.suyou/evidence/<id>/<file>（泳道拆树后 report 引图不死链）；
-   * ②泳道在时 <repo>/.worktrees/<id>/.suyou/screenshots/<file>（命名约定 lane/t<id>，
-   * merge 拆树后自然落空，归档处兜底）。防穿三层：TICKET_ID_RE 白名单 + 文件名白名单
-   * （^[A-Za-z0-9._-]+$ 且 .png 结尾）+ resolve 落点断言。归档基目录 SANDBAR_EVIDENCE_DIR
-   * env 可覆盖（python 侧 _archive_shots 同名 env 互指，自测指向临时目录）。
+   * 工单截图证据只读端点（t260829-02 建；t260910-05 候选面切新名+回落）：GET /wf/tickets/<id>/evidence/<file>。
+   * 候选序=evidenceCandidateDirs 单一收口：①归档新名 <root>/.sandbar/evidence/<id>（泳道
+   * 拆树后 report 引图不死链）→ 旧名 .suyou/evidence 回落（naming-compat）；②泳道
+   * <root>/.lane/<id>/.sandbar/screenshots（新）→ .suyou 回落；③老泳道 .worktrees/<id>
+   * 两代点目录回落。防穿三层：TICKET_ID_RE 白名单 + 文件名白名单（^[A-Za-z0-9._-]+$ 且
+   * .png 结尾）+ 每候选显式 containment 根断言（旧「resolve(abs,'..','..')」两级上跳对
+   * 深候选恒真，t260910-05 改真加固）。归档基目录 SANDBAR_EVIDENCE_DIR env 独占替换
+   * （python 侧 _archive_shots 同名 env 互指，自测指向临时目录；在场则归档仅 env 一处，
+   * 泳道候选不受影响）。
    * KI-057：候选根随 ?project= 项目主目录走（env 仅默认仓锚透出，取舍见 project-anchor.ts）。
    */
   async function handleTicketEvidence(req: IncomingMessage, res: ServerResponse, id: string, file: string): Promise<void> {
@@ -976,15 +1008,12 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     const anchor = anchorGuard(res, anchorOf(new URL(req.url ?? '/', 'http://x')))
     if (anchor === null) return
     const root = anchor.root
-    const base = anchorEnv(anchor, 'SANDBAR_EVIDENCE_DIR') ?? join(root, '.suyou', 'evidence')
-    const candidates = [
-      resolve(base, id, file),
-      resolve(root, '.lane', id, '.suyou', 'screenshots', file),
-      resolve(root, '.worktrees', id, '.suyou', 'screenshots', file),
-    ]
-    for (const abs of candidates) {
-      const root = resolve(abs, '..', '..')
-      if (!abs.startsWith(root + sep)) continue // 落点越界（.. 穿越等），直接跳过
+    // 项目锚显式传 null（env 仅默认仓锚生效，红线口径）；默认锚走 anchorEnv（env 独占）。
+    const envBase = anchorEnv(anchor, 'SANDBAR_EVIDENCE_DIR')
+    const candidates = evidenceCandidateDirs(root, envBase, id)
+    for (const { dir, containRoot } of candidates) {
+      const abs = resolve(dir, file)
+      if (!abs.startsWith(containRoot + sep)) continue // 落点越界（.. 穿越等），直接跳过
       try {
         const png = await readFile(abs)
         res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-store' })
@@ -996,7 +1025,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         return
       }
     }
-    sendJson(res, 404, { ok: false, error: `证据不存在：${file}（归档处与泳道 screenshots 均无）` })
+    sendJson(res, 404, { ok: false, error: `证据不存在：${file}（归档处与新旧泳道 screenshots 均无）` })
   }
 
   /**

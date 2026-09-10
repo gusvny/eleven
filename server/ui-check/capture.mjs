@@ -25,10 +25,16 @@
 //                                  自己的 SANDBAR_CAPTURE_FIXTURES（bench 级开关），两者名字
 //                                  不通用——错设本台 env 名=不注入（无告警，行为=7 视图），
 //                                  正确做法是经 capture-lane 的 env 或直跑本脚本带 --fixtures。
+//   SANDBAR_UI_CAPTURE_BOARD_MS  板面就绪断言预算，缺省 15000（t260910-05）；非有限正数
+//                                  （NaN/0/负/非数字）回落缺省并 loud 提示一行——错设成
+//                                  畸形值不会让板面视图静默失效（本清单 env 名错设无告警
+//                                  的同族坑，见上一条教训）。
 //
 // 视图清单（t260829-07 六视图 + 立项单列表；尽力视图失败置非零退出码但不阻断其余）：
 //   console-default.png      hero 落地页（必成视图，失败即整体非零退出）
-//   console-board.png        工单入口（侧栏「工单列表」视图图标）
+//   console-board.png        工单入口（侧栏「工单列表」视图图标）——快门前过板面就绪
+//                            断言（t260910-05）：筛选条在场且（行卡≥1 或 空态在场），
+//                            未就绪=loud 报错不交图（废图防线）
 //   console-epics.png        立项单列表（侧栏「立项单」视图图标 → .wb-ep-root）
 //   console-new-ticket.png   新建工单弹层打开态（只开不提交——「新建后」的只读红线
 //                            降级口径，t260829-07 review 定案；真新建=写操作不豁免）
@@ -251,6 +257,91 @@ export function parseLedgerIds(raw) {
 
 /** 账册键（capture-chat-active 基线与插件账册同键；供单测/外部锚定）。 */
 export { LEDGER_KEY };
+
+// ── 板面就绪断言（t260910-05 截图内容断言）──
+// 病灶：板面视图在主列表渲染完成前按快门，拍到无操作按钮的废图，且走查 agent 是
+// 文本模型看不了像素、合并闸只查文件存在性——废图全绿混进归档无人发现。修法：把
+// 「拍到该拍的」机械化——快门前断言板面就绪锚在场，断言失败=截图失败不交图（run
+// 抛错走既有 failures[]→exitCode=1 链传导 prepare_ui_evidence 红，禁止对断言单独
+// 包 try/catch「不阻断」——那会做出「不交图但全链绿」的半吊子）。
+/** 板面就绪锚（语义锚，禁哈希类名）：筛选条=操作面在场；行卡=主列表已渲染；
+ *  空态=数据为空但已渲染完（.wb-empty「没有符合筛选的工单。」，src/client/index.tsx）。 */
+export const BOARD_ANCHORS = { chips: ".wb-chip-btn", rows: ".wb-card", empty: ".wb-empty" };
+/** 就绪预算缺省值（SANDBAR_UI_CAPTURE_BOARD_MS 畸形时回落到此，见 resolveBoardBudgetMs）。 */
+export const BOARD_BUDGET_DEFAULT_MS = 15000;
+
+/** 就绪预算解析（纯函数，供 selftest/场景单测）：非有限正数（NaN/0/负/非数字/空串）
+ *  → 回落缺省 15000 并置 defaulted=true（调用方 loud 提示一行，不静默吞、不因畸形
+ *  env 拒跑）；合法值原样透传。 */
+export function resolveBoardBudgetMs(raw) {
+  const n = Number(raw);
+  if (raw === undefined || raw === null || raw === "" || !Number.isFinite(n) || n <= 0) {
+    return { ms: BOARD_BUDGET_DEFAULT_MS, defaulted: true };
+  }
+  return { ms: n, defaulted: false };
+}
+
+/** 板面就绪断言：轮询至「筛选条在场 且（行卡 ≥1 或 人话空态在场）」，超时 loud 抛错
+ *  （附三锚计数诊断，沿用 chat 态诊断写法）。探针异常（locator.count 炸）即刻 loud，
+ *  不静默不重试吞掉。budgetMs 显式传参优先（场景红腿钉极小值用），否则读 env。
+ *  桩 page 契约（sc_capture_board_assert 依赖）：只需 locator(sel).count()。 */
+export async function assertBoardReady(page, budgetMs) {
+  const { ms, defaulted } = resolveBoardBudgetMs(budgetMs ?? process.env.SANDBAR_UI_CAPTURE_BOARD_MS);
+  if (defaulted && budgetMs === undefined) {
+    console.log(`[capture] SANDBAR_UI_CAPTURE_BOARD_MS 畸形（须为有限正数）→ 回落缺省 ${BOARD_BUDGET_DEFAULT_MS}ms（loud 提示，不静默）`);
+  }
+  const deadline = Date.now() + ms;
+  const count = async (sel) => {
+    try {
+      return await page.locator(sel).count();
+    } catch (e) {
+      throw new Error(`板面就绪探针失败（${sel}）：${e?.message ?? e}——按失败处理，不交图`);
+    }
+  };
+  for (;;) {
+    const chips = await count(BOARD_ANCHORS.chips);
+    const rows = await count(BOARD_ANCHORS.rows);
+    const empty = await count(BOARD_ANCHORS.empty);
+    if (chips > 0 && (rows > 0 || empty > 0)) {
+      return `板面就绪（筛选条=${chips} 行卡=${rows} 空态=${empty}）`;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`板面未就绪（${ms}ms 预算耗尽）：筛选条=${chips} 行卡=${rows} 空态=${empty}`
+        + `——主列表渲染未完成，拒拍废图（t260910-05 截图内容断言）`);
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+/** 板面视图统一 run：切视图 → 就绪断言（抛错即该视图失败=不 shoot=无图）。 */
+async function openBoardView(page) {
+  const anchor = await openView(page, "工单列表");
+  const ready = await assertBoardReady(page);
+  return `${anchor} → ${ready}`;
+}
+
+/** 板面视图统一 run 工厂（t260910-05 P1 接线锁）：返回「切视图 → 就绪断言」的
+ *  run 函数（抛错即该视图失败=不 shoot=无图）。条目与场景共用此工厂产出的同一
+ *  函数对象；条目被解绑回裸 openView 时，sc_capture_board_assert 的零 DOM 死板面
+ *  腿必红（桩只满足 openView 导航面，未接断言的条目会照常 resolve=真红）。 */
+export function makeBoardRun() {
+  return (page) => openBoardView(page);
+}
+
+/** 板面三视图导出条目（t260910-05 P1 接线锁）：default/dark/light 三条 run 收敛到
+ *  模块级可导出**数组**面（sc_capture_board_assert findViewEntries 按数组识别），
+ *  main 的 VIEWS 与深浅外观循环都从这里取条目——场景桩 page 驱动同一批对象，条目
+ *  被解绑即场景红（KI-051 行为锁，不用字面源文本锚）。外观切换（emulateMedia）留在
+ *  主循环：条目只管「导航+就绪断言」，桩 page 无需 emulateMedia 面。
+ *  与 design_integration_tests 兄弟段预置的 sc_capture_board_assert.mjs 契约对齐
+ *  （导出面=makeBoardRun/assertBoardReady/BOARD_ANCHORS + 数组条目；本文件改动不得
+ *  单方面破坏该契约，汇合时以场景为准）。 */
+export const BOARD_VIEWS = [
+  { file: "console-board.png", title: "工单入口（板面就绪断言）", run: makeBoardRun() },
+  { file: "console-board-dark.png", title: "工单入口（dark 外观，板面就绪断言）", scheme: "dark", run: makeBoardRun() },
+  { file: "console-board-light.png", title: "工单入口（light 外观，板面就绪断言）", scheme: "light", run: makeBoardRun() },
+];
+
 async function seedSessions(page, url) {
   const base = url.replace(/\/$/, "");
   // ① 项目注册表：取第一个项目 key（新建落点；隔离台通常单项目）
@@ -682,8 +773,9 @@ async function main() {
 
   // 视图清单（声明式；见文件头注释）。run 返回锚点说明；抛错=该视图失败。
   const VIEWS = [
-    { file: "console-board.png", title: "工单入口",
-      run: (page) => openView(page, "工单列表") },
+    // t260910-05：板面条目=导出数组面 BOARD_VIEWS 的同一条目对象（P1 接线锁——
+    // selftest 校验 run 身份相等，解绑回裸 openView = selftest 红 + 场景红）。
+    { ...BOARD_VIEWS.find((v) => v.file === "console-board.png") },
     { file: "console-epics.png", title: "立项单列表",
       run: (page) => openView(page, "立项单", ".wb-ep-root") },
     { file: "console-new-ticket.png", title: "新建工单弹层打开态",
@@ -770,9 +862,38 @@ async function main() {
       console.error(`[capture] selftest 红：${e.message}`);
       process.exit(3);
     }
+    // 板面就绪断言接线身份锁（t260910-05 P1，行为锁的自检半）：VIEWS 板面条目必须
+    // 引用导出数组面 BOARD_VIEWS 同一条目的同一 run 函数对象——被解绑回裸
+    // openView 时身份不等，selftest 红（闸上红绿半=sc_capture_board_assert 桩驱动
+    // 导出条目）。
+    const boardExport = BOARD_VIEWS.find((v) => v.file === "console-board.png");
+    const boardEntry = VIEWS.find((v) => v.file === "console-board.png");
+    if (!boardExport || !boardEntry || boardEntry.run !== boardExport.run) {
+      console.error("[capture] selftest 红：VIEWS 板面条目未引用导出条目 BOARD_VIEWS 的同一 run（接线解绑，t260910-05 P1）");
+      process.exit(3);
+    }
+    for (const e of BOARD_VIEWS) {
+      if (typeof e.run !== "function" || !e.file.startsWith("console-board")) {
+        console.error("[capture] selftest 红：BOARD_VIEWS 条目缺 run/file（导出面形状漂移）");
+        process.exit(3);
+      }
+    }
+    for (const e of BOARD_VIEWS.filter((v) => v.scheme)) {
+      if (typeof e.scheme !== "string" || !e.file.startsWith("console-board-")) {
+        console.error("[capture] selftest 红：BOARD_VIEWS 深浅外观条目缺 scheme（导出面形状漂移）");
+        process.exit(3);
+      }
+    }
+    // 预算解析三态（纯函数，C3）：合法透传 / 畸形回落缺省置 defaulted。
+    const budOk = resolveBoardBudgetMs("50");
+    const budBad = resolveBoardBudgetMs("abc");
+    if (budOk.ms !== 50 || budOk.defaulted || budBad.ms !== BOARD_BUDGET_DEFAULT_MS || !budBad.defaulted) {
+      console.error("[capture] selftest 红：SANDBAR_UI_CAPTURE_BOARD_MS 解析三态不符（畸形须回落缺省并置 defaulted）");
+      process.exit(3);
+    }
     const probe = path.join(args.out, ".selftest-probe");
     await writeFile(probe, "ok");
-    console.log(`[capture] selftest 绿：依赖在位，url=${url}，out=${args.out} 可写，视图数=${VIEWS.length + 3}`);
+    console.log(`[capture] selftest 绿：依赖在位，url=${url}，out=${args.out} 可写，视图数=${VIEWS.length + 3}，板面就绪断言接线身份锁绿（t260910-05）`);
     process.exit(0);
   }
 
@@ -908,15 +1029,17 @@ async function main() {
     // 深浅外观证明（t260907-05 验收面③）：主题跟随 prefers-color-scheme
     // （theme.ts 口径），emulateMedia 切换后各拍工单列表一张——改名后的
     // 装载链在两种外观下都成立；拍完恢复仿真（防污染 chat 态）。
-    for (const scheme of ["dark", "light"]) {
+    // t260910-05：条目从导出面 BOARD_VIEWS 取（P1 接线锁，同 VIEWS 板面条目）；
+    // 外观切换留在主循环，条目只管「导航+就绪断言」（桩 page 无需 emulateMedia）。
+    for (const entry of BOARD_VIEWS.filter((v) => v.scheme)) {
       try {
-        await page.emulateMedia({ colorScheme: scheme });
-        const anchor = await openView(page, "工单列表");
-        await shoot(`console-board-${scheme}.png`);
-        console.log(`[capture]   锚=${anchor}（${scheme} 外观）`);
+        await page.emulateMedia({ colorScheme: entry.scheme });
+        const anchor = await entry.run(page);
+        await shoot(entry.file);
+        console.log(`[capture]   锚=${anchor}（${entry.scheme} 外观）`);
       } catch (e) {
-        failures.push(`外观 ${scheme}：${e.message}`);
-        console.error(`[capture] 视图失败（尽力视图，不阻断）：外观 ${scheme}——${e.message}`);
+        failures.push(`外观 ${entry.scheme}：${e.message}`);
+        console.error(`[capture] 视图失败（尽力视图，不阻断）：外观 ${entry.scheme}——${e.message}`);
       }
     }
     await page.emulateMedia(null).catch(() => {});

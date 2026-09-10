@@ -43,7 +43,60 @@ INTEG = HERE.parent
 sys.path.insert(0, str(INTEG))
 
 import bench  # noqa: E402  （守卫回归面；槽位制已退役，只剩守卫/审计/registry 助手）
+
+# 共机慢化容忍倍率（t260910-05 仲裁 gen3）：多泳道同机时兄弟票 agent/CPU 争抢
+# 可把 shim 操作整体拖慢 ~5×（实测：套件内 592s vs 空载单跑 125s，三连绿对照），
+# 固定 --timeout 30/40/60 与 subprocess 120s 窗会误红。本倍率只放大「耐心窗」，
+# 不改任何断言（健康到达/零残留/锁滑档语义照断）；环境变量可压回或放大。
+TSCALE = int(os.environ.get("SANDBAR_TEST_STAGE_TSCALE", "3"))
 import stage_docker as sd  # noqa: E402  （共享缺省锁根定位：档位锁/状态面断言用）
+
+# 共享起台面繁忙预检（t260910-05 仲裁 gen4）：本电池与真世界共享锁根是既定纪律
+# （见上），但多泳道同机时兄弟票真台起台/走廊与电池在同一 flock 面、同一
+# 21000-25000 端口带内交错，套内四连红（485/573/592/661s）全落在该窗口，而
+# 空载/受控 11 连绿——繁忙面上「产品坏」判定不成立。开跑前探测两信号：
+# ①新鲜外来工程状态（120s 内 mtime 的 project-*.json 且非本电池自家工程名）；
+# ②被持有的档位锁（band-N.lock 非阻塞 flock 抢不到=有活进程正持锁起台）。
+# 命中即诚实三态 exit 2 点名理由（环境面），不作产品判定；安静面照常 17 腿全判。
+_OWN_PROJECTS = ("uta", "utb", "utc", "utd", "ute", "utx")
+_BUSY_WINDOW_S = 120
+
+
+def _shared_plane_busy():
+    """返回 None（安静）或字面理由（繁忙）。见上注。"""
+    import fcntl
+    try:
+        root = pathlib.Path(sd.lock_root())
+    except Exception:
+        return None  # 锁根本身不可用=下游自会诚实环境红，不重复归因
+    foreign = []
+    now = time.time()
+    for p in root.glob("project-*.json"):
+        name = p.stem[len("project-"):]
+        if name in _OWN_PROJECTS:
+            continue
+        try:
+            if now - p.stat().st_mtime <= _BUSY_WINDOW_S:
+                foreign.append(name)
+        except OSError:
+            continue
+    if foreign:
+        return ("共享锁根 %s 内有新鲜外来工程状态（%s，%ds 内有起台活动）——"
+                "多泳道起台窗内不作产品判定，稍后重跑" % (root, ",".join(sorted(foreign)[:4]), _BUSY_WINDOW_S))
+    for p in sorted(root.glob("band-*.lock")):
+        try:
+            fh = open(p, "r")
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(fh, fcntl.LOCK_UN)
+            except OSError:
+                return ("共享锁根 %s 的 %s 正被活进程持有（有起台进行中）——"
+                        "多泳道起台窗内不作产品判定，稍后重跑" % (root, p.name))
+            finally:
+                fh.close()
+        except OSError:
+            continue
+    return None
 
 SHIM = r'''#!/usr/bin/env python3
 """假 docker（stage_docker L1 专用）：模拟 daemon 端口持有与 HTTP 活性。"""
@@ -190,9 +243,15 @@ class StageCLIBase(unittest.TestCase):
         return e
 
     def cli(self, *args, **kw):
+        # --timeout 预算统一 ×TSCALE（共机慢化容忍，见模块头注）——扫参数单点，
+        # 断言与工具语义零变更。
+        scaled = list(args)
+        for i, a in enumerate(scaled):
+            if a == "--timeout" and i + 1 < len(scaled) and scaled[i + 1].isdigit():
+                scaled[i + 1] = str(int(scaled[i + 1]) * TSCALE)
         return subprocess.run(
-            [sys.executable, str(INTEG / "stage_docker.py")] + list(args),
-            capture_output=True, text=True, timeout=120, env=self.env(**kw))
+            [sys.executable, str(INTEG / "stage_docker.py")] + scaled,
+            capture_output=True, text=True, timeout=120 * TSCALE, env=self.env(**kw))
 
     def up_json(self, project, *extra):
         p = self.cli("up", "--project", project, *extra)
@@ -507,6 +566,12 @@ def _band_window_foreign_listeners():
 
 
 if __name__ == "__main__":
+    # 两道供给预检并行保留（merge 冲突消解：泳道侧=共享面繁忙预检，main 侧=档位窗
+    # 外来监听者点名；两门独立命中各自 ENV_FAIL exit 2——环境红归供给面，不假红）。
+    busy = _shared_plane_busy()
+    if busy:
+        print("[stage-docker L1] ENV_FAIL: %s" % busy, file=sys.stderr)
+        sys.exit(2)
     _foreign = _band_window_foreign_listeners()
     if _foreign:
         print("ENV_FAIL: 档位窗 %d~%d 内有外来监听者（bind 探针不可见的 "

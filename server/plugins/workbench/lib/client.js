@@ -30851,8 +30851,8 @@ var Dk = function(t) {
 		}));
 		var _ = function(t) {
 			if (t <= 0) return i[0][1];
-			var e;
-			for (e = 0; e < i.length; e++) if (i[e][0] >= t && (0 === e ? 0 : i[e - 1][0]) < t) return i[e][1];
+			var e = 0;
+			for (; e < i.length; e++) if (i[e][0] >= t && (0 === e ? 0 : i[e - 1][0]) < t) return i[e][1];
 			return i[e - 1][1];
 		};
 		this._renderTicks(t, e, n, _, r, s, l, a, d), this._renderTitleAndDetail(t, e, n, _, r), this._renderAnchor(t, r), this._renderPointer(t, e, n, _, r, s, l, a, d);
@@ -34047,8 +34047,8 @@ var TO = function(t) {
 				return { interval: [(e.interval[0] - t[0]) / i, (e.interval[1] - t[0]) / i] };
 			}))).length, o = 0;
 			return function(t) {
-				var i;
-				for (i = o; i < r; i++) if ((a = e[i].interval)[0] <= t && t <= a[1]) {
+				var i = o;
+				for (; i < r; i++) if ((a = e[i].interval)[0] <= t && t <= a[1]) {
 					o = i;
 					break;
 				}

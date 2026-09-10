@@ -80,7 +80,10 @@ export function anchorEnv(a: Extract<ProjectAnchor, { ok: true }>, name: string)
 export function anchorEpicsDir(a: Extract<ProjectAnchor, { ok: true }>): string {
   return anchorEnv(a, 'SANDBAR_EPICS_DIR') ?? join(a.root, 'notes', 'epics')
 }
-/** 证据归档基目录：默认仓锚=SANDBAR_EVIDENCE_DIR 优先（node.ts 既有先例）；项目锚=<项目根>/.suyou/evidence。 */
+/** 证据归档基目录：默认仓锚=SANDBAR_EVIDENCE_DIR 优先（node.ts 既有先例）；项目锚=<项目根>/.suyou/evidence。
+ * ⚠️ t260910-05 注记：本函数当前无生产消费方（证据读侧真源=node.ts evidenceCandidateDirs——
+ * 新名 .sandbar/evidence 在前、旧名 .suyou/evidence 只读回落；单串返回值表达不了回落序）。
+ * 新消费方接入前先读 node.ts 收口，勿把本函数的旧名单串当读侧真源，防三层错位复发。 */
 export function anchorEvidenceBase(a: Extract<ProjectAnchor, { ok: true }>): string {
   return anchorEnv(a, 'SANDBAR_EVIDENCE_DIR') ?? join(a.root, '.suyou', 'evidence')
 }

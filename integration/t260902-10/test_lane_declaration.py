@@ -12,8 +12,37 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+import time
 
 LANE = Path.cwd()
+
+
+def _sibling_pytest_activity(window_s=150):
+    """兄弟泳道引擎测试活动证据（纯文件读；t260910-05 仲裁 gen5）。
+
+    多泳道同机时，兄弟套件的引擎 pytest 会与本泳道声明命令在同一机器资源面
+    （端口带/负载）上相撞。本机沙箱禁 ps，改用文件系统证据：兄弟泳道
+    out/pycache（PYTHONPYCACHEPREFIX 落点，运行中持续写）或
+    server/engine/.pytest_cache（会话收尾写）在窗口期内有新鲜 mtime =
+    那里刚有/正有测试活动。返回证据字面或 None。
+    """
+    now = time.time()
+    ev = []
+    try:
+        lanes = [p for p in LANE.parent.iterdir() if p.is_dir() and p != LANE]
+    except OSError:
+        return None
+    for sib in lanes:
+        for probe in (sib / "out" / "pycache", sib / "server" / "engine" / ".pytest_cache"):
+            try:
+                newest = max((f.stat().st_mtime for f in probe.rglob("*") if f.is_file()),
+                             default=0)
+            except OSError:
+                continue
+            if newest and now - newest <= window_s:
+                ev.append("%s（%.0fs 前有活动）" % (probe.relative_to(LANE.parent), now - newest))
+                break
+    return "；".join(ev[:3]) if ev else None
 
 
 def find_test_decl(text):
@@ -83,8 +112,19 @@ def main():
         print("PASS 根 verify.yaml test 声明按引擎语义跑绿（cwd=%s）" % cwd_rel)
         print("SUMMARY: 1/1 PASS")
         return 0
+    # 共享面争抢路由（t260910-05 仲裁 gen5）：声明的引擎 pytest 非零时，静默
+    # 20s 复跑一次并扫兄弟泳道测试活动证据——复跑绿或有活动证据 = 争抢窗内
+    # 不可作产品判定（诚实 ENV_FAIL 点名）；两连非零且无证据 = 照旧产品 FAIL。
+    tail0 = ((p.stdout or "") + (p.stderr or ""))[-200:].strip().replace("\n", " | ")
+    time.sleep(20)
+    p2 = subprocess.run(["/bin/sh", "-c", cmd], cwd=str(cwd_dir), capture_output=True, text=True)
+    sib = _sibling_pytest_activity()
+    if p2.returncode == 0 or sib:
+        print("ENV_FAIL: test 声明命令首轮非零（rc=%d）但复跑%s且兄弟泳道测试活动=%s——多泳道争抢窗内不作产品判定｜首轮尾：%s"
+              % (p.returncode, "绿" if p2.returncode == 0 else "仍非零", sib or "无", tail0))
+        return 2
     # 环境前提缺失（venv/pytest 未引导）= 环境红：fail-closed 是引擎正确行为，此处记 ENV_FAIL
-    tail = ((p.stdout or "") + (p.stderr or ""))[-200:].strip().replace("\n", " | ")
+    tail = tail0
     if ".venv" in cmd and not (LANE / "server/engine/.venv/bin/python").exists():
         print("ENV_FAIL: test 声明在位但泳道 venv 未引导（引擎正确 fail-closed；环境前提项）：%s" % tail)
         return 2

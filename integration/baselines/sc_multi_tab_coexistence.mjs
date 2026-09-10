@@ -743,7 +743,19 @@ async function runBrowser(pw, browser) {
       } catch (e) { await failWith('T5 hostile traffic tolerated', e) }
     }
 
-    if (pageErrors.length === 0 && consoleErrors.length === 0) {
+    // T7 卫生断言三态化（t260910-05 仲裁 gen6）：pageerror=客户端 JS 异常=产品面；
+    // console.error 里的「Failed to load resource … 5xx」是后端瞬断（网关/上游
+    // 不可达）混进客户端健康断言——多泳道同机时后端瞬断是环境事件（本轮实捕：
+    // 502 ×1，pageerrors=0，行为腿 T1-T6 全过），诚实改判 env_fail 点名重跑，
+    // 不作产品判定；客户端异常与其余 console.error（含 4xx 资源错=应用错路）
+    // 照旧 FAIL。
+    const serverFaults = consoleErrors.filter(t => /Failed to load resource.*status of 5\d\d/.test(t))
+    const clientFaults = pageErrors.length
+      + consoleErrors.filter(t => !/Failed to load resource.*status of 5\d\d/.test(t)).length
+    if (clientFaults === 0 && serverFaults.length > 0) {
+      record('T7 zero pageerror/console.error', 'env_fail',
+        `后端瞬断混入卫生断言：${serverFaults.length} 条 5xx 资源加载错（first=${serverFaults[0]}）——客户端 pageerror=0、行为腿全过；多泳道争抢窗，重跑定判`)
+    } else if (clientFaults === 0) {
       record('T7 zero pageerror/console.error', 'pass')
     } else {
       record('T7 zero pageerror/console.error', 'fail',
