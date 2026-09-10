@@ -574,13 +574,263 @@ def _integ(args):
             scen.append(cur)
         elif cur is not None and line.startswith('    '):
             cur['output_tail'] = (cur['output_tail'] + line + '\n')[-4000:]
-    if ran == 0 and proc.returncode != 0:
+    _has_spec = any(ln.strip()[:1] in ('{', '[')
+                    for ln in (proc.stdout or '').splitlines())
+    if ran == 0 and not _has_spec and proc.returncode != 0:
         return {'lane': 'integ', 'green': False,
                 'err': '场景执行器未产出结果（exit=%s）：%s'
                        % (proc.returncode, ((proc.stdout or '') + (proc.stderr or ''))[-2000:])}
-    return {'lane': 'integ', 'green': failed == 0 and env_failed == 0 and proc.returncode == 0,
+
+    # ---------------- t260910-13：失败分类协议 + 机械归属判定 ----------------
+    # 双解析：规范行（首字符 { 的 JSON 行）权威；旧文本行保留计数（兼容期观测面）。
+    # 畸形规范行计红不静默（消费外部输入 fail-closed）。
+    sys.path.insert(0, str(HERE.parent / 'engine'))
+    import failure_protocol as fp
+
+    lane_out = proc.stdout or ''
+    case_objs, malformed = [], []
+    for ln in lane_out.splitlines():
+        s = ln.strip()
+        if s[:1] in ('{', '['):
+            parsed = fp.parse_spec_line(s)
+            if parsed is None or '__malformed__' in parsed:
+                malformed.append(s[:200])
+            else:
+                case_objs.append(parsed)
+    lane_cases = [fp.normalize_case(o) for o in case_objs]
+    # attempt 盖写（t260910-13 K4：单写者=引擎侧——工单 rework 代数由引擎 activity
+    # 经 args 传入；0/缺省=未声明，保留发射器写的 1）
+    _attempt = int(args.get('attempt') or 0)
+    if _attempt > 0:
+        lane_cases = [dict(c, attempt=_attempt) for c in lane_cases]
+    cases_dedup, dupes = fp.dedupe_cases(lane_cases)
+
+    executor_summary = None
+    for ln in lane_out.splitlines():
+        if ln.startswith('INTEG_SUMMARY '):
+            try:
+                executor_summary = json.loads(ln[len('INTEG_SUMMARY '):])
+            except json.JSONDecodeError:
+                malformed.append(('INTEG_SUMMARY 畸形：' + ln)[:200])
+
+    lane_fp = fp.env_fingerprint(_env_fp_parts(root))
+
+    # 闸重算复核（C6/C8：权威=闸重算；执行器汇总只是前置快检）+
+    # 清单完整性（t260911 仲裁③：expected 在场时 ran==expected 是唯一机械不变式，
+    # 自洽性挡不住条目级丢失——执行器静默丢条面在此现形）
+    recount_mismatch = None
+    if executor_summary is not None and cases_dedup:
+        real = fp.recount(cases_dedup)
+        if (real['ran'] != executor_summary.get('ran')
+                or real['pass'] != executor_summary.get('pass')
+                or real['fail'] + real['not_checked']
+                != (executor_summary.get('fail') or 0)
+                + (executor_summary.get('not_checked') or 0)):
+            recount_mismatch = '闸重算 %r 与执行器汇总 %r 不一致（汇总谎报=红）' % (
+                real, executor_summary)
+        elif executor_summary.get('expected') is not None \
+                and int(executor_summary['expected']) != executor_summary.get('ran'):
+            recount_mismatch = ('清单残缺：ran=%s != 在册 expected=%s'
+                                '（条目静默丢失面，t260911）'
+                                % (executor_summary.get('ran'),
+                                   executor_summary['expected']))
+
+    legacy_red = (failed + env_failed) > 0
+    baseline_enabled = _os.environ.get('SANDBAR_GATE_BASELINE', '1').lower() \
+        not in ('0', 'off', 'false', 'no')
+
+    baseline_ok, baseline_cases, baseline_err, baseline_ref, baseline_fp = \
+        True, [], None, None, None
+    # 先泳道后基线串行（C4）：只有泳道有红时才需要基线对照；全绿跳过=零额外成本。
+    # K6①：基线强制 SANDBAR_POOL_CONC=1 是「降负载串行」，不是泳道缺省多宽池同口径。
+    need_baseline = baseline_enabled and (legacy_red or any(
+        c['status'] != 'pass' for c in cases_dedup))
+    if need_baseline:
+        (baseline_ok, baseline_cases, baseline_err,
+         baseline_ref, baseline_fp) = _run_baseline(root, cmd, args.get('base'),
+                                                    timeout)
+    else:
+        baseline_ref = args.get('base') or None
+
+    aff = (fp.apply_affiliation(cases_dedup, baseline_cases, lane_fp,
+                                baseline_fp, baseline_ok=baseline_ok)
+           if (cases_dedup or legacy_red) else None)
+
+    # 兼容文本行红面（无规范行可判）→ fail-closed 红不猜测归属（C5 盲区明示：
+    # 兼容路径无 cause/reason，违约类机械不可见，这里只保守红不归因）。
+    compat_unparsed_red = legacy_red and not cases_dedup and not malformed
+
+    protocol_mode = bool(case_objs or malformed)
+    blockers = (aff or {}).get('blockers') or []
+    # 执行器异常退出/汇总行缺席 = 用例集可能残缺（崩溃/被杀形态）——「没检验到
+    # 却出绿结论」的闸侧 fail-open 形态，fail-closed 治理（验收走查 gen1 问题一）：
+    # 协议模式要求 INTEG_SUMMARY 在场（真执行器必吐；缺席=用例集可能残缺）；
+    # 汇总在场时 rc 与用例集红面须一致（rc!=0 而用例全绿 / rc=0 而用例有红 = 同为
+    # 撒谎面）。注意 rc!=0 × 用例有红不是崩溃（场景级产品红与用例红一致，S3 面）。
+    _real = fp.recount(cases_dedup) if cases_dedup else None
+    _real_red = bool(_real and (_real['fail'] + _real['not_checked']) > 0)
+    executor_crashed = (protocol_mode
+                        and (executor_summary is None
+                             or (proc.returncode != 0 and not _real_red)
+                             or (proc.returncode == 0 and _real_red)))
+    crash_note = ('执行器异常退出（exit=%s）或汇总行缺席/与用例集不一致——用例集可能残缺，'
+                  'fail-closed 不出绿（协议纪律：非正常退出≠绿）' % proc.returncode)
+    if protocol_mode:
+        # 规范行模式：红绿由用例判定面决定（旧退出码被用例 status 收编——
+        # 「基线红只记录不堵票」的机械面就是 record 用例不抬 green=false）；
+        # 例外=执行器异常退出面（上），收编前提是用例集完整。
+        green = (not blockers
+                 and not malformed
+                 and not recount_mismatch
+                 and not dupes
+                 and not executor_crashed)
+    else:
+        green = (failed == 0 and env_failed == 0 and proc.returncode == 0
+                 and not recount_mismatch and not compat_unparsed_red)
+    summary = None
+    if cases_dedup:
+        summary = fp.summarize(
+            cases_dedup, executor_summary.get('wall_s') if executor_summary else None,
+            executor_summary.get('concurrency') if executor_summary else None,
+            executor_summary.get('pool_config') if executor_summary else None,
+            env_fp=lane_fp['value'], baseline_ref=baseline_ref)
+    return {'lane': 'integ', 'green': green,
             'ran': ran, 'pass': passed, 'fail': failed, 'env_fail': env_failed,
-            'scenarios': scen, 'err': None}
+            'scenarios': scen, 'err': None,
+            'cases': cases_dedup, 'summary': summary,
+            'affiliation': aff,
+            'baseline_ref': baseline_ref,
+            'baseline': {'ok': baseline_ok, 'err': baseline_err,
+                         'enabled': baseline_enabled},
+            'detail_red': ([{'malformed': m} for m in malformed]
+                           + ([{'executor_crashed': crash_note}] if executor_crashed else [])
+                           + ([{'recount': recount_mismatch}] if recount_mismatch else [])
+                           + ([{'compat_unparsed_red': '兼容文本行红无规范行，fail-closed 不归因'}]
+                              if compat_unparsed_red else [])),
+            'deprecation': (sorted(set(dupes)) and
+                            ['重复规范行（一行=一个用例被破坏）：%s' % ', '.join(sorted(set(dupes)))] or [])}
+
+
+def _env_fp_parts(root):
+    """闸侧指纹键集（与 integration/run_scenarios.py 执行器同键集同算法——
+    键集选成永 diff 面=lane/基线恒不等=归属恒 unknown，K1）。键值取 root
+    （泳道根或基线树根）下的协议库内容——票改协议库 → 与 main 基线合法 diff。"""
+    import hashlib as _h
+    import platform as _pl
+    parts = {'python': _pl.python_version()}
+    try:
+        nv = subprocess.run(['node', '--version'], capture_output=True,
+                            text=True, timeout=10)
+        parts['node'] = nv.stdout.strip() if nv.returncode == 0 else 'absent'
+    except Exception:
+        parts['node'] = 'absent'
+    h = _h.sha256()
+    integ = Path(root) / 'integration'
+    for f in ('lib_env.py', 'lib_result.py', 'conftest_result_protocol.py',
+              'conftest.py'):
+        p = integ / f
+        if p.is_file():
+            h.update(f.encode() + b'\0' + p.read_bytes() + b'\0')
+    parts['integ_protocol_libs'] = h.hexdigest()
+    return parts
+
+
+def _resolve_base_ref(root, base):
+    if base:
+        return str(base)
+    for ref in ('main', 'origin/main'):
+        p = subprocess.run(['git', '-C', str(root), 'rev-parse', '--verify', ref],
+                           capture_output=True, text=True, timeout=30)
+        if p.returncode == 0:
+            return p.stdout.strip()
+    return None
+
+
+def _baseline_root(_root, _ref):
+    """占位：基线树指纹在 _run_baseline 内部采（临时树路径只有它知道）。"""
+    return None
+
+
+def _run_baseline(root, cmd, base, lane_timeout):
+    """main 基线跑（t260910-13 机械归属）：临时 detach worktree + 同一命令 +
+    SANDBAR_POOL_CONC=1（降负载串行，C4/K6①）。借鉴 prepare_workspace 先例的
+    取舍清单（gen1 方案 C3）逐项落地：
+    - worktree add 120s 超时；目录被占/非本仓 worktree → 基线缺席降级，不覆盖不删除；
+    - 墙钟上限 SANDBAR_GATE_BASELINE_TIMEOUT_SEC（缺省 1800s），超时=降级+组回收；
+    - 终态回收：finally 里 worktree remove --force（自建路径，KI-065 半径限界）
+      + rmtree 兜底，正常/报错/超时/取消四路都到；
+    - 不带依赖引导（裸态保「main 实况」）：基线缺依赖 → 场景自身 not-checked，
+      红名单口径只收 checked fail，不污染归属（C1）。
+    返回 (ok, baseline_cases, err, baseline_ref, baseline_fp)。"""
+    import os as _os2
+    import shutil as _shutil
+    import tempfile as _tempfile
+    sys.path.insert(0, str(HERE.parent / 'engine'))
+    import failure_protocol as fp2
+    ref = _resolve_base_ref(root, base)
+    if not ref:
+        return False, [], '基线缺席：base ref 解析失败（main/origin/main 均不可解析）', None, None
+    tmp = _tempfile.mkdtemp(prefix='sandbar-baseline-')
+    try:
+        try:
+            p = subprocess.run(['git', '-C', str(root), 'worktree', 'add',
+                                '--detach', tmp, ref],
+                               capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            return False, [], '基线缺席：git worktree add 超时（>120s）', ref, None
+        if p.returncode != 0:
+            return False, [], ('基线缺席：git worktree add 失败（目录已存在但非本仓 '
+                               'worktree？不覆盖不删除）：%s'
+                               % ((p.stderr or p.stdout or '').strip()[-400:])), ref, None
+        base_fp = fp2.env_fingerprint(_env_fp_parts(tmp))
+        bl_timeout = int(_os2.environ.get('SANDBAR_GATE_BASELINE_TIMEOUT_SEC') or 1800)
+        env = dict(_os2.environ, SANDBAR_POOL_CONC='1')
+        # 真进程组回收（验收走查 gen1 问题三：terminate→wait→kill 升级链，
+        # 孙进程随组全灭——start_new_session 使子进程自成进程组）
+        bp = subprocess.Popen(['/bin/sh', '-c', cmd], cwd=tmp,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              text=True, env=env, start_new_session=True)
+        timed_out = False
+        try:
+            out, _err = bp.communicate(timeout=bl_timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            import signal as _signal
+            try:
+                _os2.killpg(_os2.getpgid(bp.pid), _signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+            try:
+                bp.communicate(timeout=30)
+            except subprocess.TimeoutExpired:
+                try:
+                    _os2.killpg(_os2.getpgid(bp.pid), _signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+                out, _err = bp.communicate()
+        if timed_out:
+            return False, [], '基线缺席：整体超时（>%ds，进程组 TERM→KILL 已终态回收）' % bl_timeout, ref, base_fp
+        cases, bad = [], []
+        for ln in out.splitlines():
+            s = ln.strip()
+            if s[:1] in ('{', '['):
+                parsed = fp2.parse_spec_line(s)
+                if parsed is None or '__malformed__' in parsed:
+                    bad.append(s[:200])
+                else:
+                    cases.append(fp2.normalize_case(parsed))
+        if bad:
+            return False, cases, ('基线输出含畸形规范行（fail-closed 降级）：%s'
+                                  % '; '.join(bad[:3])), ref, base_fp
+        return True, cases, None, ref, base_fp
+    finally:
+        # 全终态回收（四路都到；自建路径，KI-065 半径限界）
+        try:
+            subprocess.run(['git', '-C', str(root), 'worktree', 'remove', '--force', tmp],
+                           capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            pass
+        _shutil.rmtree(tmp, ignore_errors=True)
 
 
 def run(args):

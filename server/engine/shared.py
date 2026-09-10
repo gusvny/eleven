@@ -348,6 +348,7 @@ class IntegrationRunArgs:
 
     ticket_id: str
     worktree: str                               # the lane root (the cmds' cwd, where the test set lives)
+    attempt: int = 0                            # t260910-13：rework 代数（0=未声明；闸按此盖写规范行 attempt——K4 单写者=引擎侧）
 
 
 @dataclass
@@ -364,6 +365,10 @@ class IntegrationRunResult:
     env_fail: int = 0            # ticket t260904-12: the environment-red dimension (the translation layer no longer drops it)
     details: List[Dict[str, Any]] = field(default_factory=list)  # [{name,cmd,exit,output_tail}]
     error: str = ""
+    # t260910-13 失败分类协议：闸机械归属判定面（默认空=协议未产出，老回放兼容）
+    blockers: List[str] = field(default_factory=list)   # 闸拦名单（决策表 verdict=block）
+    affiliation_confidence: str = ""                    # ok / unknown(fingerprint_mismatch) / unknown(baseline_unavailable)
+    baseline_ref: str = ""                              # 基线 ref（main@sha），闸补
 
 
 @dataclass

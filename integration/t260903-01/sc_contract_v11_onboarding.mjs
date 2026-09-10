@@ -122,9 +122,15 @@ try {
   ok(integRes.ok === true, 'B6 admin.py call 真入口可用（lane=integ）')
   if (integRes.ok) {
     const r = integRes.result
-    // t260904-12 乙段：契约 ②b-2 env_fail 转必含 → 键集锚随契约反转（守卫随闸同票，R4 修法①）
-    ok(JSON.stringify(Object.keys(r).sort()) === JSON.stringify(['env_fail', 'err', 'fail', 'green', 'lane', 'pass', 'ran', 'scenarios']),
-      'B7 integ 道返回键集恰为 {lane,green,ran,pass,fail,env_fail,scenarios,err}（契约 ②b-2 v2.1 起必含，非 content 形状）')
+    // t260904-12 乙段：契约 ②b-2 env_fail 转必含 → v2.1 八键恒必含（旧字段不动承诺，缩水即红）。
+    // t260910-13 失败分类协议 v1：回执超集扩展键（cases/summary/affiliation）随契约升级转必含
+    // （键集锚从「恰等」升「超集钉死」——旧键不许删、新键不许缺，比恰等更严的合同面）。
+    const integKeys = Object.keys(r)
+    const v21Keys = ['env_fail', 'err', 'fail', 'green', 'lane', 'pass', 'ran', 'scenarios']
+    ok(v21Keys.every(k => integKeys.includes(k)),
+      'B7 integ 道返回 v2.1 八键恒必含 {lane,green,ran,pass,fail,env_fail,scenarios,err}（契约 ②b-2，旧字段不动）')
+    ok(['cases', 'summary', 'affiliation'].every(k => integKeys.includes(k)),
+      'B7b integ 道返回协议扩展键必含 {cases,summary,affiliation}（失败分类协议 v1 回执形状）')
     ok(r.green === true && r.ran === 1 && r.pass === 1, 'B8 声明 integration.cmd 真跑：ran=1 pass=1 绿')
   }
 

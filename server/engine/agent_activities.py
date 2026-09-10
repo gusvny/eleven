@@ -62,6 +62,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from temporalio import activity
+import failure_protocol
 import shared
 from shared import (
     REPO_ROOT,
@@ -3966,7 +3967,7 @@ async def _run_scenarios(wt: Path, ticket_id: str) -> IntegrationRunResult:
     # Fully async: create_subprocess + wait_for; on timeout, kill first, then report.
     p = await asyncio.create_subprocess_exec(
         "python3", admin, "call", "verify_lane",
-        json.dumps({"lane": "integ", "path": str(wt)}),
+        json.dumps({"lane": "integ", "path": str(wt), "baseline": True}),
         cwd=str(wt), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
         p_out_b, p_err_b = await asyncio.wait_for(
@@ -3992,6 +3993,28 @@ async def _run_scenarios(wt: Path, ticket_id: str) -> IntegrationRunResult:
     out.details = [{"name": s.get("name", ""), "cmd": "", "exit": int(s.get("exit") or 0),
                     "output_tail": s.get("output_tail") or ""}
                    for s in (res.get("scenarios") or [])]
+    # ---- t260910-13 失败分类协议：闸机械归属判定接线 ----
+    # 闸决策表 verdict=block 的用例（真回归/本票造成的 not-checked/协议违约）
+    # 机械计入 failed（被改判的 not-checked 从 env_fail 挪走）——「拦」不是文字
+    # 建议，是计数的机械面；归属结论与基线 ref 随回执上送仲裁。
+    aff = res.get("affiliation") or {}
+    out.blockers = [str(b) for b in (aff.get("blockers") or [])]
+    out.affiliation_confidence = str(aff.get("affiliation_confidence") or "")
+    out.baseline_ref = str(res.get("baseline_ref") or "")
+    if out.blockers:
+        case_status = {c.get("name"): c.get("status")
+                       for c in (aff.get("cases") or [])}
+        out.failed, out.env_fail = failure_protocol.apply_gate_blockers(
+            out.failed, out.env_fail, case_status, out.blockers)
+        out.details.append({
+            "name": "__gate_blockers__", "cmd": "", "exit": 1,
+            "output_tail": "闸拦（t260910-13 决策表）：%s ｜ 归属置信=%s ｜ 基线=%s"
+                           % (", ".join(out.blockers),
+                              out.affiliation_confidence or "n/a",
+                              out.baseline_ref or "n/a")})
+    activity.logger.info("[%s] 归属判定：confidence=%s blockers=%s baseline=%s",
+                         ticket_id, out.affiliation_confidence or "n/a",
+                         out.blockers or "无", out.baseline_ref or "n/a")
     activity.logger.info("[%s] 场景汇总：ran=%s pass=%s fail=%s env_fail=%s",
                          ticket_id, out.ran, out.passed, out.failed, out.env_fail)
     return out

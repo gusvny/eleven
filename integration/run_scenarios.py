@@ -50,6 +50,9 @@ Conventions:
 - The registry only lists assets present in this repo (L4 rule: every cmd
   script must exist).
 """
+import datetime
+import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -691,6 +694,18 @@ SCENARIOS = [
     ("t260910-06-ki067-entry-audit",
      "KI-067 工单操作入口收口（t260910-06，260910 两实证缺陷回归面，灰盒 L2/L3）：静默失败根治——正规入口 ticket.py 任何 op 失败=非零退出+stdout 结构化 {ok:false,error}（绝不空输出：260910 实证病灶=空输出+退出 0+admin.log 无痕；A 段 stdlib 直调现形状，create 缺参/无参/畸形 argsJSON/-h 全非零）；无差别自审计——client.py 每次调用无论来源记 admin.log（含未知子命令拒收/连接失败/-h，拒收不记=盲区），source 记 env SANDBAR_CLIENT_ENTRY 原值（缺省 bare；审计落 SANDBAR_ADMIN_LOG 覆盖 tmp，不污染真账）；回执嵌提醒——裸入口回执（含失败回执）附 entry_hint、env 精确等值 'ticket' 才安静、任意值（'ticket.py'）不获静默且 source 记原值（claimed-source 非身份鉴别，宿主 260910 裁非安全语义）、参数面注入 source 字段不污染标记；双行审计契约——ticket.py 直调一次=admin.log 两行（ticket.py-direct+ticket）call_id 一致（有意双行非重复记 bug，关联键=SANDBAR_CLIENT_CALL_ID）；sign/retry_qc 包进正规入口（who 调用方注入，包装层只加审计不加权力）——retry_qc 贴 workflow 裸串契约（隔离台真票 timeline reason 以 who 开头且无 dict 乱码={who,note} 误转发现形特征）、note 非空 CLI 层显式拒收点名 note、sign 通道 delivered=true 且 Signature payload 形状落 workflow 可观测面（fresh 票非人门→refused 条目 want 含 sign、who 原样，同 pause KI-061 族文档化回执面；人门签字接受面属 workflow 门逻辑 L1 不重复）。与 t260910-03 intent 分界：彼守多仓派生+双保险丝（create 链），本守入口收口面（退出码/审计/entry_hint/sign/retry_qc 包装）；与 t260908-01 分界：彼守 workflow 侧 pause/retry_qc 幂等唤醒语义，本守 CLI 包装与审计/提醒面。实现落地前红属预期（TDD 信号：A 段红即 KI-067 病灶形状复现），arbitrate/merge 期必须绿；三态契约无 SKIP——stdlib A 段恒跑，temporalio 缺失=ENV_FAIL 点名（B/C 段），docker/bench/隔离台库缺席=ENV_FAIL 点名（C 段）；红线：一切被测子进程 Temporal 地址指不可达桩 127.0.0.1:9 或一次性隔离台，真票只发生在一次性 namespace 跑完即拆",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260910-06/sc_ki067_entry_audit.py", "engine"),
+    # ---- t260910-13: failure classification protocol + mechanical baseline attribution (gate decision table / pytest producer seam) ----
+
+    ("t260910-13-failure-protocol-gate",
+     "失败分类协议闸判定真缝（t260910-13 主证据，灰盒 L2/L3）：260910 三误判根治面——单行 JSON 规范行 + 闸机械判定。经 admin.py call verify_lane lane=integ 真入口钉死：规范行权威（{ 起始可 json.loads、必含最小字段，判定以行为准、文本行降兼容）；无证据 not-checked 闸内改判 FAIL 拦（fail-closed 治 ENV_FAIL 免责标签）；fail×prepare-reason=违约改判+violation 拦且不因 main 也红放行（capture-chat-active 型）；基线归属决策表——真 git 基线腿（fixture 仓 main 提交桩×泳道脏改桩，闸真跑 worktree add --detach）：真回归×基线绿拦（t260910-10 型）、同红既有欠账记录不堵且汇总诚实计数、not-checked×self×绿拦 / ×external×绿记录促治理；基线缺席=降级显式声明不静默且产品红保守不放松；指纹闭环（summary.env_fingerprint 在场、baseline_ref 缺席显式 None）；畸形规范行（缺必填字段/伪 JSON 行/同名重复行）fail-closed 不静默零场景绿；闸不认识场景名（异名同 payload 同判、归属各归其名）；基线 worktree 终态回收零残留（git worktree list 断言）。与 t260904-12 甲/乙段（三态文本行不可穿闸）与 t260903-01 ②b-(a)（畸形 FAIL 行 fallback）intent 不同面：彼守旧文本协议，本守规范行+归属决策表；与 developer L1（决策表纯函数真值表/畸形 JSON 电池）不同层：本条锁真缝组装行为。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；git 缺失=ENV_FAIL exit 2 点名（基线腿不可验）。fixture 全落临时目录，零 3099/7233 零 docker",
+     "python3 integration/t260910-13/sc_t260910_13_failure_protocol_gate.py", "ro"),
+    ("t260910-13-failure-protocol-pytest-source",
+     "失败分类协议 pytest 生产端映射真跑（t260910-13 锚⑤，灰盒 L2 缝守卫）：微型真 pytest（非 mock，KI-049 同族缝）钉死 conftest_result_protocol 经 -p 显式装配（cwd=integration，不依赖 pytest_plugins 非根 conftest 的版本敏感行为，方案 K5）——ERROR→not-checked（setup 炸点证据在案）、FAILED→fail、PASSED→pass；相位合并：teardown ERROR 不翻转已判 case 且噪声附记证据不静默吞；一行=一用例不变式（四用例恰四行）；规范行最小字段完备（dur_s 数值=巡检 B 面耗时趋势数据源、started/git_sha/suite 在场）、evidence 单行无内嵌换行。与 developer L1（pytest_runtest_logreport 钩子单测）不同层：本条锁真 pytest 进程 stdout 的生产端输出缝。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；pytest 缺失（venv 与系统均无）=ENV_FAIL exit 2 点名。微型测试文件落系统临时目录，零真仓写入",
+     "python3 integration/t260910-13/sc_t260910_13_failure_protocol_pytest_source.py", "ro"),
+    ("t260910-13-executor-fail-closed",
+     "执行器条目完整性 fail-closed（t260911 仲裁 code-fault 打回的 L1 钉，monkeypatch 级）：复刻池级 submit 不存句柄 → 异常不上浮 → 条目静默丢失照常出绿的实锤形态（004654 报告），钉三层修复——池级异常句柄保留逐个 .result() 上浮=响亮产品红中止（FAIL [__executor__] 点名）；spawn OSError 在 _run_entry 内按协议分类落红（not-checked×external，evidence 点名原文，条目不丢 ran==在册数）；ran==在册数=唯一机械不变式（自校验 complete 红 + INTEG_SUMMARY.expected=在册数供闸复核，闸侧腿见 failure-protocol-gate S9c）。与 failure-protocol-gate intent 分界：彼守闸解析与归属，本条守执行器自身条目完整性，同票两面不互替",
+     "python3 integration/t260910-13/sc_t260910_13_executor_fail_closed.py", "ro"),
+
     ("t260908-02-mixed-payload",
      "混合形态工单的多仓明细以一等字段穿越 Temporal 编解码两跳（t260908-02，t260907-13 实锤 bug 的缝守卫）：TicketInput/WorkspacePrep 均有 repo_worktrees 显形字段（default_factory=list 保存量回放）；编解码往返全等（workflow 启动面不再 TypeError=dengzhufpv T2 停摆修复）；畸形分层拒绝精确——类型毁形在编解码层拒、语义非法在闸层拒互不冒充；新旧闸位同拒；单仓对照零回归。stdlib 腿恒跑，temporalio 缺失=ENV_FAIL",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260908-02/sc_t260908_02_mixed_payload.py", "ro"),
@@ -778,6 +793,86 @@ SCENARIOS = [
 ]
 
 CMD_TIMEOUT = 900
+_SPAWN_FAIL = -8   # spawn 面（OSError 等）：非超时非断言，综合为 not-checked×external
+
+
+try:   # 协议纯函数核心（INTEG_SUMMARY 明细计数/规范行解析用）；缺席=回落旧计数
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "..", "server", "engine"))
+    import failure_protocol as _fp_mod
+except Exception:   # pragma: no cover — 协议库缺席不炸执行器（观测面降级留痕）
+    _fp_mod = None
+
+
+def _env_fp_parts():
+    """执行器侧指纹键集（运行语境不变面，t260910-13；与闸侧 verify_lane 同键集
+    同算法——lane/基线各采一次，键集选成永 diff 面=归属恒 unknown）。键：
+    python/node 工具链版本 + 协议库内容哈希（票改协议库 → 与 main 基线合法 diff）。
+    排除工单语境键与临时路径（failure_protocol.FP_EXCLUDED_KEYS 同口径）。"""
+    import platform
+    parts = {"python": platform.python_version()}
+    try:
+        nv = subprocess.run(["node", "--version"], capture_output=True,
+                            text=True, timeout=10)
+        parts["node"] = nv.stdout.strip() if nv.returncode == 0 else "absent"
+    except Exception:
+        parts["node"] = "absent"
+    h = hashlib.sha256()
+    here = os.path.dirname(os.path.abspath(__file__))
+    for f in ("lib_env.py", "lib_result.py", "conftest_result_protocol.py",
+              "conftest.py"):
+        p = os.path.join(here, f)
+        if os.path.isfile(p):
+            with open(p, "rb") as fh:
+                h.update(f.encode() + b"\0" + fh.read() + b"\0")
+    parts["integ_protocol_libs"] = h.hexdigest()
+    return parts
+
+
+def _spec_from_output(name, pool, out, exit_code, dur, started):
+    """执行器综合规范行（场景自产规范行时零综合——场景 stdout 中出现任何
+    `{` 行即视为协议在产，执行器只透传不重复）。旧场景只有退出码与文本尾巴，
+    按三态契约反推：exit1=断言级产品红（cause=self/reason=assert_mismatch）、
+    exit2=环境红（cause=external，evidence=尾巴——ENV_FAIL 行点名缺什么）。
+    退出码封闭性之外的码按 fail×other 处理（不归环境）。"""
+    if any(ln.lstrip().startswith("{") for ln in out.splitlines()):
+        return None
+    started_iso = datetime.datetime.fromtimestamp(
+        started, datetime.timezone.utc).isoformat(timespec="seconds")
+    tail = " | ".join(ln.strip() for ln in out.splitlines() if ln.strip())[-500:]
+    sha = os.environ.get("SANDBAR_GIT_SHA", "")
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import lib_result
+    if exit_code == 0:
+        return lib_result.spec_line(name=name, suite=pool, status="pass",
+                                    dur_s=round(dur, 3), started=started_iso,
+                                    git_sha=sha)
+    if exit_code == -9:
+        # 超时不是断言失败（走查 gen1 问题④）：标签用 timeout，不冒充 assert_mismatch
+        return lib_result.spec_line(name=name, suite=pool, status="fail",
+                                    cause="self", reason="timeout",
+                                    evidence="超时（>%ds）" % CMD_TIMEOUT,
+                                    dur_s=round(dur, 3), started=started_iso,
+                                    git_sha=sha)
+    if exit_code == _SPAWN_FAIL:
+        # spawn 面（t260911 仲裁①）：没跑到断言=not-checked×external，evidence
+        # 点名 spawn 失败原文（_run_entry 已把原文放进 tail；out 全程为空）
+        return lib_result.spec_line(name=name, suite=pool, status="not-checked",
+                                    cause="external", reason="other",
+                                    evidence=tail or "spawn 失败（原因缺失，异常）",
+                                    dur_s=round(dur, 3), started=started_iso,
+                                    git_sha=sha)
+    if exit_code == 2:
+        return lib_result.spec_line(name=name, suite=pool, status="not-checked",
+                                    cause="external", reason="other",
+                                    evidence=tail or "ENV_FAIL exit=2（无文本尾巴）",
+                                    dur_s=round(dur, 3), started=started_iso,
+                                    git_sha=sha)
+    return lib_result.spec_line(name=name, suite=pool, status="fail",
+                                cause="self", reason="assert_mismatch",
+                                evidence=tail or ("exit=%d" % exit_code),
+                                dur_s=round(dur, 3), started=started_iso,
+                                git_sha=sha)
 
 
 def _run_entry(entry):
@@ -792,9 +887,17 @@ def _run_entry(entry):
                               text=True, timeout=CMD_TIMEOUT)
         return (name, proc.returncode,
                 ((proc.stdout or "") + (proc.stderr or ""))[-1500:],
-                time.time() - t_start)
+                time.time() - t_start, t_start,
+                ((proc.stdout or "") + (proc.stderr or "")))
     except subprocess.TimeoutExpired:
-        return name, -9, "超时（>%ds）" % CMD_TIMEOUT, time.time() - t_start
+        return (name, -9, "超时（>%ds）" % CMD_TIMEOUT, time.time() - t_start,
+                t_start, "")
+    except OSError as ex:
+        # spawn 面（t260911 仲裁实锤：宿主资源压力下 spawn 可抛 OSError）——
+        # 按协议分类落红绝不 raise 穿透（条目静默丢失＝fail-open 家族复发）：
+        # 专用码 -8（非超时非断言），综合为 not-checked×external，evidence 点名原文。
+        return (name, _SPAWN_FAIL, "spawn 失败: %s: %s" % (type(ex).__name__, ex),
+                time.time() - t_start, t_start, "")
 
 
 def main() -> int:
@@ -880,14 +983,33 @@ def main() -> int:
 
     def _emit(e, pool_name):
         nonlocal ran, passed, failed, env_failed
-        name, exit_code, tail_out, dur = _run_entry(e)
+        name, exit_code, tail_out, dur, t_start, full_out = _run_entry(e)
+        spec = _spec_from_output(name, pool_name, full_out, exit_code, dur, t_start)
+        if spec:
+            print(spec, flush=True)   # 规范行（协议消费面；执行器综合或场景自产透传判定见 _spec_from_output）
+        # 场景自产规范行透传面（走查 gen1 问题②闭环）：场景 stdout 的 `{` 行
+        # 即协议在产，收集进 case 计数——INTEG_SUMMARY 以规范行明细为准，
+        # 场景自产多 case 时与闸重算天然一致（否则首例自产即撞复核红）。
+        with lock:
+            for ln in full_out.splitlines():
+                s = ln.strip()
+                if s[:1] in ('{', '['):
+                    obj = _fp_mod.parse_spec_line(s)
+                    if obj and '__malformed__' not in obj:
+                        spec_cases.append(_fp_mod.normalize_case(obj))
+            if spec:
+                obj = _fp_mod.parse_spec_line(spec)
+                if obj and '__malformed__' not in obj:
+                    spec_cases.append(_fp_mod.normalize_case(obj))
         dur_tag = " (%.1fs)" % dur
         # Three-state line: 0=PASS / 2=ENV_FAIL (environment red — the indented
-        # tail says what is missing) / anything else = FAIL product red.
+        # tail says what is missing) / -8=spawn 面（同 ENV_FAIL 口径，t260911 仲裁①）
+        # / anything else = FAIL product red.
+        env_like = exit_code in (2, _SPAWN_FAIL)
         if exit_code == 0:
             block = ["PASS [%s]%s" % (name, dur_tag)]
-        elif exit_code == 2:
-            block = (["ENV_FAIL [%s] exit=2%s" % (name, dur_tag)]
+        elif env_like:
+            block = (["ENV_FAIL [%s] exit=%s%s" % (name, exit_code, dur_tag)]
                      + ["    " + ln for ln in tail_out.splitlines()[-6:]])
         else:
             block = (["FAIL [%s] exit=%d%s" % (name, exit_code, dur_tag)]
@@ -895,8 +1017,8 @@ def main() -> int:
         with lock:
             ran += 1
             passed += (exit_code == 0)
-            env_failed += (exit_code == 2)
-            failed += (exit_code not in (0, 2))
+            env_failed += env_like
+            failed += (exit_code not in (0, 2, _SPAWN_FAIL))
             timings.append({"pool": pool_name, "name": name,
                             "status": ("PASS" if exit_code == 0
                                        else "ENV_FAIL" if exit_code == 2 else "FAIL"),
@@ -904,20 +1026,30 @@ def main() -> int:
             print("\n".join(block), flush=True)
 
     timings = []   # KI-060 prep 2: timing distribution (one row per scenario, with pool attribution)
+    spec_cases = []   # t260910-13：规范行明细（场景自产透传 + 执行器综合），INTEG_SUMMARY 以此为准
+    executor_error = None   # t260911 仲裁②：池级异常必须响亮产品红，绝不静默吞
     for e in exclusives:      # exclusives go first, overlapping no pool (always serial)
         _drain([(e, True)], "exclusive")
-    if conc_width <= 1:
-        # SANDBAR_POOL_CONC=1 = 全串行回退语义（提速战役③步骤0 计划验收②）：
-        # 不光池内宽度收 1，池间也顺次排开——否则六个池各一路并发，负载
-        # 敏感场景（起台族/capture 全视图走查）在「回退」里仍要扛六路并发，
-        # 回退形同虚设（260910 实锤：只设池内宽度时 wall=467s 与缺省无差）。
-        for fname, pv in pools.items():
-            _drain(pv, fname or "main")
-    else:
-        with ThreadPoolExecutor(max_workers=max(1, len(pools))) as ex:
+    try:
+        if conc_width <= 1:
+            # SANDBAR_POOL_CONC=1 = 全串行回退语义（提速战役③步骤0 计划验收②）：
+            # 不光池内宽度收 1，池间也顺次排开——否则六个池各一路并发，负载
+            # 敏感场景（起台族/capture 全视图走查）在「回退」里仍要扛六路并发，
+            # 回退形同虚设（260910 实锤：只设池内宽度时 wall=467s 与缺省无差）。
             for fname, pv in pools.items():
-                ex.submit(_drain, pv, fname or "main")
-            ex.shutdown(wait=True)
+                _drain(pv, fname or "main")
+        else:
+            with ThreadPoolExecutor(max_workers=max(1, len(pools))) as ex:
+                # 句柄必须保留逐个 .result()（t260911 仲裁②实锤：submit 不存句柄
+                # 时池级异常从不上浮=条目静默丢失照常出绿——自家注释承诺落空态）
+                futs = [ex.submit(_drain, pv, fname or "main")
+                        for fname, pv in pools.items()]
+                for f in futs:
+                    f.result()
+    except Exception as ex:   # noqa: BLE001 —— 任何池级异常 = 响亮产品红中止
+        executor_error = "池级异常（%s: %s）——条目可能丢失，响亮产品红中止" % (
+            type(ex).__name__, ex)
+        print("FAIL [__executor__] %s" % executor_error, flush=True)
     # Summary five counters (t260904-12): na=N/A is a leg-level state, already
     # folded into pass/fail inside the scenario (all legs N/A = scenario red),
     # so at runner level it is always 0 — kept as a placeholder for the shape.
@@ -925,8 +1057,41 @@ def main() -> int:
     # violating it = the summary is lying, exit product red (runner self-check).
     consistent = (ran == passed + failed + env_failed)
     wall = time.time() - t0
+    # t260911 仲裁③：ran==在册数是唯一机械不变式（汇总自洽挡不住条目级丢失）
+    expected = len(SCENARIOS)
+    complete = (ran == expected) and executor_error is None
+    if ran != expected:
+        print("FAIL [__executor__] 清单残缺：ran=%d != 在册 %d（条目静默丢失面，"
+              "fail-closed 红）" % (ran, expected), flush=True)
     print("SCENARIOS ran=%d pass=%d fail=%d env_fail=%d na=0 (%.0fs)"
           % (ran, passed, failed, env_failed, wall), flush=True)
+
+    # ---- t260910-13：执行器汇总行（闸补 baseline_ref 并以规范行明细重算复核——
+    # C6 分工：执行器产计数/耗时/并发/指纹，测试不写汇总；此行是执行器前置快检，
+    # 复核权威=闸重算）。计数来源：有规范行明细时按明细计（场景自产多 case 时与
+    # 闸重算一致，走查 gen1 问题②闭环）；无明细回落旧三态计数。 ----
+    try:
+        _here = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, os.path.join(_here, "..", "server", "engine"))
+        import failure_protocol as _fp
+        _parts = _env_fp_parts()
+        _fpv = _fp.env_fingerprint(_parts)
+        if spec_cases and _fp_mod is not None:
+            _counts = _fp.recount(spec_cases)
+            _ran, _p, _f, _nc = (_counts["ran"], _counts["pass"],
+                                 _counts["fail"], _counts["not_checked"])
+        else:
+            _ran, _p, _f, _nc = ran, passed, failed, env_failed
+        print("INTEG_SUMMARY " + json.dumps({
+            "ran": _ran, "pass": _p, "fail": _f,
+            "not_checked": _nc, "wall_s": round(wall, 1),
+            "concurrency": conc_width,
+            "pool_config": ",".join(sorted("%s:%s" % kv for kv in conc_pools.items())),
+            "env_fingerprint": _fpv["value"],
+            "expected": expected,   # t260911 仲裁③：在册条数——闸复核 ran==expected
+        }, ensure_ascii=False), flush=True)
+    except Exception as _ex:   # 汇总行失败不改场景红绿（观测面），但大声留痕
+        print("INTEG_SUMMARY_ERROR %r" % _ex, flush=True)
 
     # ---- KI-060 prep 2: timing distribution report (stdout summary + JSON archive for comparison) ----
     import collections as _c
@@ -959,8 +1124,9 @@ def main() -> int:
     except OSError:
         pass   # a failed report write does not change the exit code (the report is an observation surface)
 
-    if not consistent:
-        print("FAIL [__summary__] 汇总与明细不一致（双向净校验红）", flush=True)
+    if not complete or not consistent:
+        # 清单残缺/池级异常/汇总撒谎都是执行器自校验红（t260911 仲裁③：
+        # ran==在册数是唯一机械不变式，自洽性挡不住条目级丢失）
         return 1
     if failed > 0:            # product red first (C7): with FAILs present, environment reds do not dilute the product red
         return 1

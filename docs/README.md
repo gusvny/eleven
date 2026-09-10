@@ -32,6 +32,7 @@ updated: 2026-09-04
 | `design/知识库设计.md` | 知识库设计定稿：四目录、markdown 规范、UI、迁移映射 |
 | `design/dsh_seam需求书v1.md` | dsh 插件接缝需求书（插件族契约） |
 | `design/杂务工单模版设计.md` | chore-lane 杂务工单模版（草案，待宿主审定稿） |
+| `design/失败分类协议v1.md` | 失败分类协议 v1 与机械归属判定：一行 JSON 规范行 + 三态收紧 + 闸 main 基线差集决策表（t260910-13） |
 | `design/设计文档写作指南.md` | 设计文档写作规范 |
 | `design/sandbar项目接入契约v1.md` | sandbar 项目接入契约 v1（键表/接手面/append 式变更记录） |
 

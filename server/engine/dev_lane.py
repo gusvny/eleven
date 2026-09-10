@@ -1455,7 +1455,8 @@ class DevLaneWorkflow(TicketPauseMixin):
                     rraw = await workflow.execute_activity(
                         run_integration_tests,
                         IntegrationRunArgs(ticket_id=self.ticket_id,
-                                           worktree=str(self.meta.get("worktree") or "")),
+                                           worktree=str(self.meta.get("worktree") or ""),
+                                           attempt=self._gen("run_integration_tests") + 1),
                         start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
                     ir = rraw if isinstance(rraw, IntegrationRunResult) else IntegrationRunResult(
                         ran=int(rraw.get("ran") or 0), passed=int(rraw.get("passed") or 0),

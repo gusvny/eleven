@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-09-07T19:26:35+08:00",
-  "total": 14,
+  "generated_at": "2026-09-10T22:53:39+08:00",
+  "total": 15,
   "categories": [
     "design",
     "content",
@@ -109,6 +109,23 @@
       ],
       "status": "draft",
       "updated": "2026-08-29",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/失败分类协议v1.md",
+      "file": "失败分类协议v1.md",
+      "title": "失败分类协议 v1 与机械归属判定",
+      "category": "design",
+      "tags": [
+        "失败分类",
+        "归属判定",
+        "集成闸",
+        "协议",
+        "mode: 依赖",
+        "mode: 实践参考"
+      ],
+      "status": "active",
+      "updated": "2026-09-10",
       "has_frontmatter": true
     },
     {
