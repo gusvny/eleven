@@ -11,6 +11,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 INTEG = os.path.dirname(HERE)
@@ -70,7 +71,12 @@ def tp_eval(snippet, env_extra=None, args=None, timeout=120, env_replace=False):
     env_replace=True 时 env_extra 为**完整**子进程环境（不做 overlay）——
     调用方已做父环境净化的场景必须用它，否则剥离键会被 os.environ 放回
     （t260907-10 arbitrate 实证：runner 注入的 SANDBAR_TASK_QUEUE 泳道值
-    经 overlay 复活，净化失效）。缺省 False 保持既有 overlay 语义。"""
+    经 overlay 复活，净化失效）。缺省 False 保持既有 overlay 语义。
+    瞬态重试（t260910-12 目标④接线，arbitrate gen2）：台「回报 state=up」
+    与 host 侧端口转发实际就绪之间存在缝隙（OrbStack 实证：容器 Up、容器内
+    SA 自检过，host 侧 127.0.0.1 连接秒 refused 数秒）——连接类红命中瞬态
+    白名单时自动重试一次（分类走 lib_transient_retry 单源，本库不复制名单）；
+    重试仍红原样上报不吞不改。"""
     py = poc_python()
     if py is None:
         return None
@@ -81,12 +87,27 @@ def tp_eval(snippet, env_extra=None, args=None, timeout=120, env_replace=False):
         if env_extra:
             env.update(env_extra)
     code = "import sys; sys.path.insert(0, %r)\n%s" % (TP, snippet)
-    try:
-        p = subprocess.run([py, "-c", code] + list(args or []), env=env, cwd=TP,
-                           capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return (-1, "", "timeout %ss" % timeout)
-    return (p.returncode, p.stdout, p.stderr)
+
+    def _run_once():
+        try:
+            p = subprocess.run([py, "-c", code] + list(args or []), env=env,
+                               cwd=TP, capture_output=True, text=True,
+                               timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return (-1, "", "timeout %ss" % timeout)
+        return (p.returncode, p.stdout, p.stderr)
+
+    r = _run_once()
+    if r[0] != 0:
+        combined = (r[1] or "") + (r[2] or "")
+        probe = subprocess.run(
+            [sys.executable,
+             os.path.join(INTEG, "lib_transient_retry.py"), "is-transient"],
+            input=combined, capture_output=True, text=True, timeout=30)
+        if probe.returncode == 0:
+            time.sleep(2)
+            r = _run_once()
+    return r
 
 
 def tp_json(snippet, env_extra=None, args=None, timeout=120, env_replace=False):

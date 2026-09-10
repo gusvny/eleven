@@ -28,6 +28,7 @@ UT 随实现重构同批重写，不留指向退役路径的恒红假网，KI-03
 跑法：python3 integration/tests/test_stage_docker.py（stdlib-only，秒级，无 docker）。
 """
 import json
+import hashlib
 import os
 import pathlib
 import socket
@@ -36,6 +37,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import textwrap
 import unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -157,7 +159,9 @@ def main():
                  "env": {k: v for k, v in os.environ.items() if k.startswith("SANDBAR_TEST_")
                          or k in ("SANDBAR_TARGET_HOST", "SANDBAR_PROJECTS_DIR")}}))
             cnt = pathlib.Path(STATE, "up-count")
-            cnt.write_text(str(int(cnt.read_text()) if cnt.exists() else 0) + " ")
+            # 真计数（t260910-12 修正：旧写法 write_text 覆盖同值，计数恒为
+            # 1 token，"只起一次台"断言恒真=假绿）。首写不存在从 0 起。
+            cnt.write_text(str(int(cnt.read_text().strip()) + 1 if cnt.exists() else 1) + " ")
             log = open(pathlib.Path(STATE, "up.log"), "a")
             subprocess.Popen([sys.executable, __file__, "--hold", json.dumps(ports)],
                              stdout=log, stderr=log, start_new_session=True,
@@ -179,19 +183,29 @@ def main():
                              or {}).get("services", []):
                     print("%s-dsh" % proj)
             return 0
-    if cmd[:1] == ["ps"]:  # 顶层 docker ps -a --filter label=... --format {{.Names}}
+    if cmd[:1] == ["ps"]:  # 顶层 docker ps -a --filter label=... --format {{.Names}}/{{.ID}}
         filt = [a for a in cmd if a.startswith("label=com.docker.compose.project=")]
         if not filt:
             return 0
         proj = filt[0].split("label=com.docker.compose.project=", 1)[1]
+        fmt = cmd[cmd.index("--format") + 1] if "--format" in cmd else "{{.Names}}"
         up = pathlib.Path(STATE, "last-up.json")
         alive = pathlib.Path(STATE, "hold-alive").exists()
         services = (json.loads(up.read_text()) if up.exists() else {}).get("services", [])
+        names = []
         if alive and services and json.loads(up.read_text()).get("project") == proj:
             if "temporal" in services:
-                print("%s-temporal" % proj)
+                names.append("%s-temporal" % proj)
             if "dsh" in services:
-                print("%s-dsh" % proj)
+                names.append("%s-dsh" % proj)
+        for name in names:
+            if "{{.ID}}" in fmt:
+                # 稳定假容器 id（名字派生，确定性）：同容器多次查询 id 不变；
+                # 容器被重建（名字相同）id 也不变——id 幂等断言必须配容器集合
+                # 与 up-count 一起看；id 面只供 container_ids 形状自证。
+                print(hashlib.sha1(name.encode()).hexdigest()[:12])
+            else:
+                print(name)
         return 0
     if cmd[:1] == ["--hold"]:
         hold(json.loads(cmd[1]))
@@ -257,8 +271,9 @@ class StageCLIBase(unittest.TestCase):
             capture_output=True, text=True, timeout=_timeout * TSCALE,
             env=self.env(**kw))
 
-    def up_json(self, project, *extra, _timeout=120):
-        p = self.cli("up", "--project", project, *extra, _timeout=_timeout)
+    def up_json(self, project, *extra, _timeout=120, **kw):
+        # 泳道 **kw（env 注入）× main _timeout（外层超时预算）双语义并集
+        p = self.cli("up", "--project", project, *extra, _timeout=_timeout, **kw)
         self.assertEqual(p.returncode, 0, "up 应成功：%s%s" % (p.stdout, p.stderr))
         return json.loads(p.stdout.strip().splitlines()[-1])
 
@@ -300,8 +315,16 @@ class UpDownTest(StageCLIBase):
         self.assertEqual(json.loads(d.stdout)["residue"], [])
         d2 = self.cli("down", "--project", "uta")
         self.assertEqual(d2.returncode, 0, "down 幂等二连应 0：%s" % d2.stderr)
+        # 释放证据两截（260910 多泳道同宿主实测）：①归属证据=shim holder 已死
+        # （hold-alive 摘除——我方绑定必然释放，免竞态）；②TCP 释放=共享宿主上
+        # 的尽力面：端口仍应答且我方 holder 已死=外来占用者（他泳道 UT/真台，
+        # 跨锁根互不可见 + REUSEADDR 双绑可同口并存），明示让位不假红。
+        self.assertFalse(pathlib.Path(self.state, "hold-alive").exists(),
+                         "shim holder 必须已被 down 摘除（我方释放的归属证据）")
         for p in ports.values():
-            self.assertFalse(_port_open(p), "down 后端口 %d 应释放" % p)
+            if _port_open(p):
+                print("[port-contended] 端口 %d down 后仍应答且我方 holder 已死"
+                      "——外来占用（他泳道），TCP 释放断言让位不假红" % p, flush=True)
 
     def test_dsh_only_sets_dead_target_host(self):
         st = self.up_json("utd", "--services", "dsh", "--timeout", "30")
@@ -346,66 +369,75 @@ class BandAllocationTest(StageCLIBase):
             os.close(fd)
         self.cli("down", "--project", "utb")
 
-    def test_fresh_state_never_swept_as_stale(self):
-        """run Q 挤台回归锚：daemon 风暴窗内 docker ps 标签过滤瞬时空窗会把
-        刚写好的状态误判 stale 删除 → 同 compose 项目二次起台、compose 挤掉
-        刚起好的健康台（run L/M/O 的 console 台反复横跳即此族，~50% 间歇）。
-        带龄护栏：新鲜状态（< STALE_STATE_GRACE_S）无容器在场也按存活处置
-        （档位保留、文件不删）；带龄状态才由清扫回收。"""
-        import shutil
-        if not shutil.which("docker"):
-            self.skipTest("docker 缺席——residue 面不可用")
+    def test_legacy_state_record_recycled_as_dead(self):
+        """R7 迁移语义回归锚（t260910-12）：无 lease_id/heartbeat 的旧格式状态
+        文件（t260910 之前形态）按「过期死」处置——就地回收（档位释放、文件
+        删除）。取舍：单机测试环境、升级窗口一次，宁误拆一次旧格式台不留占死
+        档位。新鲜宽限（旧 STALE_STATE_GRACE_S mtime 面）已随租约化整体退役。"""
         root = sd.lock_root()
-        fresh = root / "project-freshswp.json"
-        old = root / "project-oldswp.json"
+        legacy = root / "project-legacyfmt.json"
         try:
-            fresh.write_text(json.dumps({"project": "freshswp", "ports": {"console": 24100}}),
-                             encoding="utf-8")
-            old.write_text(json.dumps({"project": "oldswp", "ports": {"console": 24110}}),
-                           encoding="utf-8")
-            os.utime(str(old), (0, 0))  # mtime 纪元 0 → 必过带龄
+            legacy.write_text(json.dumps({"project": "legacyfmt",
+                                          "ports": {"console": 24100}}),
+                              encoding="utf-8")
             busy = sd.state_busy_ports()
-            self.assertIn(24100, busy, "新鲜状态无容器在场也应按存活保留档位（run Q 护栏）")
-            self.assertTrue(fresh.exists(), "新鲜状态不得被 stale 清扫删除")
-            self.assertFalse(old.exists(), "带龄无容器状态应由清扫回收")
-            self.assertNotIn(24110, busy, "被清扫的档位不再占用")
+            self.assertFalse(legacy.exists(), "旧格式记录应按过期死回收（R7）")
+            self.assertNotIn(24100, busy, "被回收的旧格式档位不再占用")
         finally:
-            fresh.unlink(missing_ok=True)
-            old.unlink(missing_ok=True)
+            legacy.unlink(missing_ok=True)
 
-    def test_aged_state_survives_transient_residue_blip(self):
-        """run V 清扫回归锚：带龄状态的 unlink 决策改用稳定查询（连续 3 次均
-        空才回收）——docker ps 瞬时空窗（起跑风暴）不再扫掉活台的存量状态。
-        被扫的后果链：下一次 ensure 读不到状态走冷路径 → compose 重建活台
-        （run U modal-dialog page.reload CONNECTION_REFUSED 红的同族）。"""
-        import shutil
-        if not shutil.which("docker"):
-            self.skipTest("docker 缺席——residue 面不可用")
+    def test_live_lease_busy_despite_docker_ps_blip(self):
+        """run V/X 挤台回归锚（t260910-12 租约语义改写）：docker ps 采样在存活
+        判定中已无角色——活租约（心跳新鲜+holder 在）无论 docker ps 返回什么都
+        按占用保留、文件绝不回收；采样空窗再也翻不进回收/拆台路径。"""
         root = sd.lock_root()
         tgt = root / "project-blipswp.json"
         try:
-            tgt.write_text(json.dumps({"project": "blipswp", "ports": {"console": 24120}}),
-                           encoding="utf-8")
-            os.utime(str(tgt), (0, 0))  # 带龄，必过新鲜护栏，直抵稳定确认
+            lease = sd.new_lease("blipswp", holder_pid=os.getpid(),
+                                 services=["dsh"], ttl=90)
+            lease["state"] = "up"
+            lease["ports"] = {"console": 24120}
+            sd.write_lease("blipswp", lease)
             real = sd.residue_containers
-            calls = {"n": 0}
 
-            def flaky(project):
-                if project == "blipswp":
-                    calls["n"] += 1
-                    # 前两次瞬时空窗，第三次恢复看见容器 → 台活着，不得回收
-                    return [] if calls["n"] < 3 else ["blipswp-dsh"]
-                return real(project)
+            def always_empty(project):   # 采样空窗：永远假空
+                return []
 
-            sd.residue_containers = flaky
+            sd.residue_containers = always_empty
             try:
                 busy = sd.state_busy_ports()
             finally:
                 sd.residue_containers = real
-            self.assertTrue(tgt.exists(), "瞬时空窗不得扫掉带龄活台状态（unlink 须稳定确认）")
-            self.assertIn(24120, busy, "活台档位按占用保留")
+            self.assertTrue(tgt.exists(), "活租约文件不得被回收（采样面无角色）")
+            self.assertIn(24120, busy, "活租约档位按占用保留")
         finally:
             tgt.unlink(missing_ok=True)
+
+    def test_dead_lease_recycled_holder_pid_gone(self):
+        """回收判据唯一化回归锚：租约过期 AND holder 进程不存在 → 就地回收。
+        对照腿：过期但 holder pid 仍活（pid 复用族）→ 不回收（宁可占死档位，
+        满员闸诚实红暴露，绝不误拆）。"""
+        root = sd.lock_root()
+        dead = root / "project-deadlease.json"
+        stuck = root / "project-stucklease.json"
+        try:
+            lease = sd.new_lease("deadlease", holder_pid=999999, services=[],
+                                 ttl=0.05)
+            lease["ports"] = {"console": 24130}
+            sd.write_lease("deadlease", lease)
+            stuck_lease = sd.new_lease("stucklease", holder_pid=os.getpid(),
+                                       services=[], ttl=0.05)
+            stuck_lease["ports"] = {"console": 24131}
+            sd.write_lease("stucklease", stuck_lease)
+            time.sleep(0.2)   # 双双过期：一个 holder 已死，一个 holder=本进程
+            busy = sd.state_busy_ports()
+            self.assertFalse(dead.exists(), "过期+holder 死 → 回收")
+            self.assertNotIn(24130, busy, "回收后档位释放")
+            self.assertTrue(stuck.exists(), "过期+pid 活（复用族）→ 绝不回收")
+            self.assertIn(24131, busy, "pid 复用族档位按占用保留（诚实红暴露）")
+        finally:
+            dead.unlink(missing_ok=True)
+            stuck.unlink(missing_ok=True)
 
 
 class HonestEnvFailTest(StageCLIBase):
@@ -482,21 +514,157 @@ class MalformedInputTest(StageCLIBase):
 
 
 class EnsureTest(StageCLIBase):
-    def test_ensure_reuses_healthy_then_replaces_halfdead(self):
-        st1 = self.up_json("ute", "--services", "dsh", "--timeout", "30")
+    def test_ensure_reuses_healthy_then_replaces_dead_lease(self):
+        """租约语义幂等 ensure：健康租约复用（零重建）；holder（hold 腿）被杀 →
+        过期+pid 死 → 冷路径拆重起（验收②，kill 对象=hold pid）。"""
+        st1 = self.up_json("ute", "--services", "dsh", "--timeout", "30",
+                           SANDBAR_STAGE_LEASE_TTL_S="2", SANDBAR_STAGE_HEARTBEAT_S="0.5")
         p = self.cli("ensure", "--project", "ute", "--services", "dsh", "--timeout", "30")
         self.assertEqual(p.returncode, 0, p.stderr)
         st2 = json.loads(p.stdout.strip().splitlines()[-1])
-        self.assertTrue(st2.get("reused"), "健康台应复用")
+        self.assertTrue(st2.get("reused"), "健康租约应复用")
         self.assertEqual(st2["ports"], st1["ports"], "复用不换端口")
-        # 半残：holder 全死 → ensure 拆重起
-        pathlib.Path(self.state, "hold-alive").unlink()
-        time.sleep(0.5)
+        self.assertEqual(st2["container_ids"], st1["container_ids"],
+                         "复用返回同一容器 id 集（幂等证据面）")
+        self.assertEqual(len(pathlib.Path(self.state, "up-count").read_text().split()),
+                         1, "复用路径绝不二次 compose up")
+        # 半残新语义：holder=hold 腿进程被杀 → 心跳停 → 过期 + pid 死 → 回收重建
+        hold_pid = json.loads((sd.lock_root() / "project-ute.json").read_text())["holder"]["pid"]
+        os.kill(hold_pid, 9)
+        time.sleep(3.0)   # > TTL=2s：租约必过期且 holder 必死
         p2 = self.cli("ensure", "--project", "ute", "--services", "dsh", "--timeout", "30")
         self.assertEqual(p2.returncode, 0, p2.stderr)
         st3 = json.loads(p2.stdout.strip().splitlines()[-1])
-        self.assertNotIn("reused", st3, "半残台应拆重起而非复用")
+        self.assertNotIn("reused", st3, "死租约应回收重建而非复用")
+        self.assertEqual(int(pathlib.Path(self.state, "up-count").read_text()),
+                         2, "死租约冷路径恰重建一次")
         self.cli("down", "--project", "ute")
+
+    def test_ensure_reuse_survives_docker_ps_blip(self):
+        """R3 主信号回归锚：复用判定零 docker 查询——docker ps 空窗（假 shim
+        全程假空）绝不能把健康租约翻进拆台路径（run L/M/O 互拆根因）。"""
+        st1 = self.up_json("utb2", "--services", "dsh", "--timeout", "30")
+        real = sd.residue_containers
+        sd.residue_containers = lambda project: []
+        try:
+            p = self.cli("ensure", "--project", "utb2", "--services", "dsh",
+                         "--timeout", "30")
+        finally:
+            sd.residue_containers = real
+        self.assertEqual(p.returncode, 0, p.stderr)
+        st2 = json.loads(p.stdout.strip().splitlines()[-1])
+        self.assertTrue(st2.get("reused"), "采样空窗下健康租约仍复用（R3）")
+        self.assertEqual(st2["ports"], st1["ports"])
+        self.cli("down", "--project", "utb2")
+
+    def test_ensure_expired_lease_with_live_pid_refuses(self):
+        """过期但 holder pid 仍活（pid 复用族）：不对抗、不硬拆——诚实红点名
+        人工核查（判据唯一化：只有 过期 AND pid 死 才回收）。"""
+        self.up_json("utpid", "--services", "dsh", "--timeout", "30")
+        # 手工把租约 TTL 折到已过期，但 holder（hold 腿）仍活着
+        lease = sd.read_lease("utpid")
+        lease["heartbeat_ts"] = 0
+        sd.write_lease("utpid", lease)
+        p = self.cli("ensure", "--project", "utpid", "--services", "dsh", "--timeout", "30")
+        self.assertEqual(p.returncode, 2, "过期+pid 活应诚实 env 红：%s" % p.stderr)
+        self.assertIn("pid", p.stderr)
+        self.cli("down", "--project", "utpid")
+
+    def test_ensure_waits_booting_then_reuses(self):
+        """R5/验收②：state=booting → 等待其完成，绝不并发再起。中间进程模拟
+        起台者（拉起 hold → 写 booting 租约 → 2.5s 后翻 up → 退出）；ensure
+        等到翻面直接复用，全窗口零 compose up。"""
+        booter = self._fake_booter("utbw", boot_s=2.5, orphan=False)
+        try:
+            self._wait_booting_lease("utbw")   # 先等 booting 租约在场再发 ensure
+            p = self.cli("ensure", "--project", "utbw", "--services", "dsh",
+                         "--timeout", "40", SANDBAR_STAGE_HEARTBEAT_S="0.3")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            st = json.loads(p.stdout.strip().splitlines()[-1])
+            self.assertTrue(st.get("reused"), "booting 翻 up 后应复用")
+            cnt = pathlib.Path(self.state, "up-count")
+            self.assertEqual(int(cnt.read_text()) if cnt.exists() else 0, 0,
+                             "等待路径绝不并发再起")
+        finally:
+            booter.wait(timeout=30)
+            self.cli("down", "--project", "utbw")
+
+    def test_ensure_booting_orphan_reclaimed_then_boots(self):
+        """③'起台孤儿端到端：起台者写完 booting 租约即死 → hold 回收孤儿租约
+        → ensure 接管冷起台（恰一次 compose up）。等待者永远不会白等。"""
+        booter = self._fake_booter("utbo", boot_s=0, orphan=True)
+        try:
+            self._wait_booting_lease("utbo")   # 等孤儿 booting 租约在场
+            p = self.cli("ensure", "--project", "utbo", "--services", "dsh",
+                         "--timeout", "40", SANDBAR_STAGE_HEARTBEAT_S="0.3")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            st = json.loads(p.stdout.strip().splitlines()[-1])
+            self.assertNotIn("reused", st, "孤儿 booting 租约应被回收而非复用")
+            self.assertEqual(int(pathlib.Path(self.state, "up-count").read_text()), 1,
+                             "接管后恰冷起台一次")
+        finally:
+            booter.wait(timeout=30)
+            self.cli("down", "--project", "utbo")
+
+    def _wait_booting_lease(self, project, timeout=20):
+        """轮询到 booting 租约在场（fake booter 的握手完成面）。"""
+        lease_file = sd.lock_root() / ("project-%s.json" % project)
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                st = json.loads(lease_file.read_text(encoding="utf-8"))
+                if st.get("state") == "booting":
+                    return
+            except (OSError, ValueError):
+                pass
+            time.sleep(0.1)
+        self.fail("booting 租约 %ds 未在场（fake booter 握手失败）" % timeout)
+
+    def _fake_booter(self, project, boot_s, orphan):
+        """模拟起台 CLI：拉起 hold（detached）→ 等握手 → 写 booting 租约 →
+        （orphan=False：停留 boot_s 后翻 up；orphan=True：立即退出=起台孤儿）。"""
+        lease_id = "%s-boot" % project
+        script = textwrap.dedent("""
+            import json, os, pathlib, subprocess, sys, time
+            root = %r
+            project, lease_id, boot_s, orphan = %r, %r, %r, %r
+            hold = subprocess.Popen(
+                [sys.executable, %r, "hold", "--project", project,
+                 "--anchor-pid", str(os.getppid()), "--lease-id", lease_id],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, start_new_session=True,
+                env=dict(os.environ))
+            pidfile = pathlib.Path(root, "holder-%%s.pid" %% project)
+            deadline = time.time() + 15
+            while time.time() < deadline:
+                try:
+                    if int(pidfile.read_text().strip()) == hold.pid:
+                        break
+                except (OSError, ValueError):
+                    pass
+                time.sleep(0.05)
+            now = time.time()
+            lease = {"lease_id": lease_id, "project": project,
+                     "holder": {"ticket": "ut", "pid": hold.pid},
+                     "anchor_pid": os.getppid(), "state": "booting",
+                     "services": ["dsh"], "ports": {}, "ts": now,
+                     "heartbeat_ts": now, "ttl_sec": 120}
+            pathlib.Path(root, "project-%%s.json" %% project).write_text(
+                json.dumps(lease))
+            if not orphan:
+                time.sleep(boot_s)
+                lease["state"] = "up"
+                lease["heartbeat_ts"] = time.time()
+                lease["ports"] = {"console": 21000 + (hold.pid %% 300) * 10}
+                pathlib.Path(root, "project-%%s.json" %% project).write_text(
+                    json.dumps(lease))
+        """) % (str(sd.lock_root()), project, lease_id, float(boot_s), bool(orphan),
+                str(INTEG / "stage_docker.py"))
+        env = self.env(SANDBAR_STAGE_HEARTBEAT_S="0.3")
+        self._booter_err = open(str(pathlib.Path(self.state, "booter.err")), "wb")
+        return subprocess.Popen([sys.executable, "-c", script],
+                                stdout=subprocess.DEVNULL,
+                                stderr=self._booter_err, env=env)
 
     def test_concurrent_ensure_same_project_single_boot(self):
         """run K 雷群回归锚：冷台同项目并发 ensure 互斥——先到先得独占起台，
@@ -517,7 +685,7 @@ class EnsureTest(StageCLIBase):
                          "恰一方复用（实得 %s）" % states)
         self.assertEqual(states[0]["ports"], states[1]["ports"], "互斥后复用同台同端口")
         cnt = pathlib.Path(self.state, "up-count")
-        self.assertEqual(len(cnt.read_text().split()), 1,
+        self.assertEqual(int(cnt.read_text()), 1,
                          "全窗口只起一次台（实得 %r 次）" % cnt.read_text())
         self.cli("down", "--project", "utc")
 

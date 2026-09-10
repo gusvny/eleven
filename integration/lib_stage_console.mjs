@@ -57,6 +57,7 @@ import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isTransient } from './lib_transient_retry.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(HERE, 'stage_docker.py');
@@ -133,12 +134,20 @@ export async function ensureStageConsole({ services = 'full', project = TREE_PRO
   // reason). With the budget below the cap, "cannot supply" lands as an
   // honest env_fail exit 2 naming the stage. Healthy reuse returns in seconds.
   const ensureBudget = Number(process.env.SANDBAR_STAGE_ENSURE_TIMEOUT || 600);
-  const p = spawnSync('python3', [CLI, 'ensure', '--project', project, '--keep',
+  const ensureArgs = ['ensure', '--project', project, '--keep',
     '--repo-dir', WANT_REPO,
     '--services', services,
     '--fixtures-dir', FIXTURES_HOST,
-    '--timeout', String(ensureBudget)],
-  { encoding: 'utf8', env, timeout: ensureBudget * 1000 + 60_000 });
+    '--timeout', String(ensureBudget)];
+  const ensureOnce = () => spawnSync('python3', [CLI, ...ensureArgs],
+    { encoding: 'utf8', env, timeout: ensureBudget * 1000 + 60_000 });
+  let p = ensureOnce();
+  if ((p.error || p.status !== 0) && isTransient(String(p.stderr ?? ''))) {
+    // 瞬态重试（t260910-12 目标④）：命中白名单（502/拒连/起台面繁忙）自动
+    // 重试一次——判定走 lib_transient_retry 单源；仍红才按环境红收口。
+    console.error('[stage-console] ensure 红命中瞬态白名单，2s 后自动重试一次');
+    p = ensureOnce();
+  }
   if (p.error || p.status !== 0) {
     const named = String(p.stderr ?? '').split('\n').filter((l) => l.startsWith('STAGE_')).at(-1);
     const why = p.error

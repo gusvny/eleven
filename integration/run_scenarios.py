@@ -565,6 +565,31 @@ SCENARIOS = [
      "双场景并行不互撞+拆台零残留端到端（t260904-19，灰盒 L3，工单验收①④；槽位制退役后并发隔离语义的用户级承接面）：两个 up 进程真同时发车（各自 compose 工程名，temporal-only 档）双台健康、JSON 端口互异、双双 ∉ 生产端口 {3099,7233,8233}；docker ps -a 按 com.docker.compose.project label（compose 公开语义）过滤 A/B 容器集互不相交且 temporal-only 恰 1 容器；拆 A 后 A 端口立即可 bind 且 B 台 TCP 复测仍活（down 爆炸半径恰一个工程）；full 档 console+temporal 双端口真活（helper exit 2=其判环境红不诬产品）；三工程终态零残留、全部用过端口立即 bind 成功（验收④收口）。与 developer L1（档位锁/分配原子性单测）intent 不同层：本条守进程级真并发系统行为，mock 与先后错开都替代不了该形态。资源口径：有意制造并发双台+一次 full 台（dsh 镜像烤制后起台秒级；建镜像才联网，见 build-test-dsh.sh），登记 exclusive 独占执行防与兄弟场景的台互相污染判定面。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "python3 integration/t260904-19/sc_stage_docker_parallel_zero_residue.py", "engine"),  # engine: 3 concurrent stages on purpose — daemon-pressure canary (loud ENV_FAIL surface accepted)
 
+    # ---- t260910-12: 起台面租约化（启发式存活判断换租约语义+幂等ensure+并发上限+瞬态重试）----
+    # 消费面单一入口=stage_docker.py（with_stage.sh / stage_docker.mjs / 池内 with_stage 雷群），
+    # 场景锚 CLI 进程级公开行为与 docker/进程表公开观测面，不锚租约内部文件布局。
+    ("t260910-12-herd-no-crosstalk",
+     "并发 N=6 套件起台零端口重叠零互相拆台（t260910-12 验收①，灰盒 L3）：六路 ensure 真同时发车（temporal-only 档）全成功、端口两两不相交且 ∉ 禁产硬集 {3099,3199,7233,8233,17233,18233}、各台端口全程 TCP 可连；持有期内二次 ensure=幂等复用（reused 且 container_ids 与首起一致）——「同 compose 项目二次起台挤掉健康台」（背景 run L/M/O 族）在 herd 风暴窗根治的用户级证据；六工程终态零残留、全部用过端口立即 bind。与 t260904-19-stage-docker-parallel-zero-residue（双台隔离/爆炸半径）intent 不同面：本条锚 herd 风暴窗规模（产品红阈值上沿 N=6）与持有期幂等稳定。资源口径：6×temporal-only 台 engine 池同窗执行（与兄弟场景互为真实负载，竞态压力就是被测面）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker 缺席=ENV_FAIL exit 2",
+     "python3 integration/t260910-12/sc_herd_no_crosstalk.py", "engine"),
+    ("t260910-12-holder-kill-reclaim",
+     "持有者被杀→TTL 后回收且不影响他人（t260910-12 验收②，灰盒 L3）：起台 A 后持有腿进程在场（pgrep -f 匹配 CLI 子命令行，进程表公开观测面）→SIGKILL 杀持有腿→杀后立即起台 B 成功且可服务（他人零波及）→注入小 TTL（SANDBAR_STAGE_LEASE_TTL_S 方案注入口）等租约过期→A 再 ensure=接管重起（container_ids 更替=旧台回收重建，非复活残台）→B 全程不受回收影响→双工程零残留。锚「回收判据=租约过期 AND 持有者进程不存在」的确定语义：持有者死亡是唯一触发，无 docker ps 采样/新鲜宽限参与。与 L1（假 pid 四象限 UT）不同层：本条守真进程 kill 的系统行为。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker 缺席=ENV_FAIL exit 2",
+     "python3 integration/t260910-12/sc_holder_kill_reclaim.py", "engine"),
+    ("t260910-12-full-capacity-queue",
+     "满员诚实排队等待释放不假红（t260910-12 验收③，灰盒 L3）：注入 SANDBAR_STAGE_MAX_STAGES=1（env 旋钮=方案注入口，只影响本场景子进程）——先到者 A 占满唯一名额后，后到者 B 在 A 持有期内发起 ensure 排队不退出不假红（进程存活、无 STAGE_ENV 红行）；A down 释放后 B 预算内成功入位且端口可服务、全程无满员超时红。排队成功腿为主断言面；超时文案腿归 developer L1（注入成本考量，intent 不重复）。锁根拓扑（arbitrate gen1 修正，非弱化）：本场景用隔离锁根——容量闸计数=锁根内全部活租约，生产共享根上并行泳道活动台会被计入导致注入小容量自卡死（gen0 两次 600s 超时实锤）；隔离根上 A/B 排队互斥（capacity flock+ensure flock+租约状态机）真实同根执行，跨泳道容量竞争不属于本条 intent（生产由缺省值 12 承担）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker 缺席=ENV_FAIL exit 2",
+     "python3 integration/t260910-12/sc_full_capacity_queue.py", "engine"),
+    ("t260910-12-idempotent-reup",
+     "同租约二次 up 幂等复用容器未被重建（t260910-12 验收④，灰盒 L2/L3）：首起记 container_ids→同项目二次 ensure：reused=true、container_ids 逐个一致（容器 id 不变=工单原文口径）、端口一致且台可服务；down 拆台零残留。与 t260904-19-stage-docker-cli-contract 的 ensure 幂等锚不同粒度（彼锚 CLI 缝 exit 0/JSON 形，本条锚本票新交付 container_ids 契约字段与「容器 id 不变」强断言——互拆根治的直接证据，mock 替代不了真容器 id 观测）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker 缺席=ENV_FAIL exit 2",
+     "python3 integration/t260910-12/sc_idempotent_reup.py", "engine"),
+    ("t260910-12-cwd-independence",
+     "全部 CLI 行为在不同 cwd 下结果一致（t260910-12 验收⑤，灰盒 L2）：cwd=仓库根起台后，cwd=/tmp 与 cwd=/ 对同项目 ensure=幂等复用（reused、container_ids 与端口和首起完全一致——cwd 不改变锁根/仓库锚/状态面解析，另起一台即红）；cwd=/ down 成功零残留；场景自身路径全 __file__ 锚。防本票新增 hold 腿/租约文件/容量闸任一环写成 cwd 相对路径。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker 缺席=ENV_FAIL exit 2",
+     "python3 integration/t260910-12/sc_cwd_independence.py", "engine"),
+    ("t260910-12-transient-retry-contract",
+     "瞬态分类与一次重试契约（t260910-12 目标④，灰盒 L2 库契约，秒级零 docker）：三类已知瞬态（台内 502/端口拒连族/起台面繁忙族）判 transient、终态环境红（镜像缺席等）判 fatal 不重试；retry 恰一次——首试瞬态次试成功=成功且调用计数=2、两试皆瞬态=原样抛最后一次文案逐字节不变（仲裁分类器不再被迫吸收）、首试非瞬态=不重试；畸形输入（空串/非字符串/超长行）安全拒收不炸；py judge 子命令逐桩输出 transient|fatal（单源真源），mjs 薄包装 node 可加载。锚方案承诺的公开契约（库函数名/judge 子命令/薄包装存在），不锚内部布局。实现段落地前 import 红=FAIL 属预期（TDD 信号），arbitrate/merge 期必须绿；node 缺席=ENV_FAIL 点名（mjs 腿）",
+     "python3 integration/t260910-12/sc_transient_retry_contract.py", "ro"),
+    ("t260910-12-lease-unit",
+     "租约化起台面 developer L1 全电池（t260910-12，灰盒 L1，假 docker shim 零 docker 依赖）：回收判据四象限（新鲜+活=复用/过期+死=回收/过期+活=诚实红绝不硬拆/新鲜+死=判死回收）锚「过期 AND holder pid 不存在」唯一判据；并发写原子性（8 线程×40 写读者只见完整 JSON）；满员闸（计数=活租约+占位同临界区不超售、超时红带活租约清单、释放准入）；hold 腿七路终态（正常收割 exit 0 且不补写/downing 二次校验不回写/锚死回收/起台孤儿回收/写失败非0/SIGTERM 130 不拆台/超帽 rc6）+预租约等待预算=起台者存活期；ensure 状态机（TTL 加速真翻面复用、R3 ps 空窗扛性、booting 等待零再起、孤儿 booting 接管恰一次冷起）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/tests/test_stage_lease.py", "ro"),
+
     # ---- t260905-03 inspection ticket 1 (scheduled quality-check skeleton + test-surface scan) ----
     ("t260905-03-ki051-anchor-replay",
      "KI-051 守卫锚×生产方措辞漂移静态回放必抓（t260905-03 验收②主证据=KI-051 事故回归用例，灰盒 L2）：真形态夹具（生产方在位——模板拼接旧字面搜不到，即 KI-051 实录 capture.mjs L342 形态——+守卫断言旧字面）扫描必报 high 且证据双点名守卫与生产方；健康对照（字面在场）零误报 high；无法确证（生产方在位但措辞无近亲）降级 med 提示交人审，不判绿不静默；空壳守卫不崩。纯 stdlib 夹具零 env 依赖零真仓接触——环境红永远捂不住本断言面（KI-051 被 env_fail 捂数日的教训内建）。与 developer L1（扫描纯函数真值表）不同层；与 t260904-08 模板退役负扫描不同面（彼守退役类名零活引用，本守在役守卫锚×生产方措辞在场性）。扫描器 CLI 与 findings 形状为本票场景侧裁定（integration/t260905-03/lib_inspection.py 头注）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",

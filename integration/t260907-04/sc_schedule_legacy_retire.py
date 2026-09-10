@@ -27,7 +27,12 @@ INTEG = os.path.dirname(HERE)
 sys.path.insert(0, INTEG)
 import lib_naming  # noqa: E402
 
-PROJECT = "t26090704-sched"
+# 泳道唯一化（t260910-12 arbitrate gen2）：compose 项目名 daemon 全局可见，
+# 并行泳道跑同名场景会互相 down 对方的台（docker events 铁证）——后缀=
+# 本 worktree 路径 hash，同 worktree 稳定、跨 worktree 不同。
+import hashlib as _hashlib
+REPO = os.path.dirname(INTEG)
+PROJECT = "t26090704-sched-" + _hashlib.md5(REPO.encode("utf-8")).hexdigest()[:8]
 
 SEED = r"""
 import asyncio, json, sys

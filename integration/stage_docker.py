@@ -21,21 +21,38 @@ Subcommands:
                               when the lane lacks them). Decoupled from
                               --repo-dir (the tested tree).
   ensure --project <name> [--keep] [...same flags as up]   idempotent ensure:
-                              a healthy stage is reused; a half-dead one is torn
-                              down and rebuilt; --keep = never tear down or swap
-                              a running stage (supply-stage semantics: on a
-                              clash, re-check health and retry)
-  down --project <name>      tear the stage down (down -v + zero-residue check);
-                              idempotent, exits 0 when absent too
+                              a live lease (state=up + fresh heartbeat + holder
+                              alive) is reused with zero docker queries; a
+                              booting lease is waited for, never double-booted;
+                              a dead lease (expired AND holder gone) is
+                              reclaimed and rebuilt; --keep = never tear down a
+                              running face (supply-stage semantics: honest red
+                              instead of fighting); --keep boots a RESIDENT
+                              lease (keep=true): its hold leg skips the ③
+                              anchor-death reclaim — the caller shell is
+                              short-lived by design (verify.yaml supply 闸后
+                              常驻不拆); the stage lives until explicit down /
+                              the MAX_HOLD_S cap / a crash, all folding into
+                              the single expiry+holder-dead reclaim criterion
+  down --project <name>      tear the stage down (state→downing → hold harvest
+                              → down -v → lease release); idempotent, exits 0
+                              when absent too
+  hold --project <name> --anchor-pid <pid> --lease-id <id>
+                             the lease-holding leg (spawned internally by
+                             up/ensure; heartbeats the lease for exactly its
+                             holding period; seven terminal states — see
+                             cmd_hold)
   selftest                   white-box self test (never touches docker):
-                              forbidden-port exclusion / band locks / malformed
-                              input rejection
+                              forbidden-port exclusion / band locks / lease
+                              criteria / malformed input rejection
 
 Exit codes (three-state contract, integration/README.md):
   0=ok; 2=ENV_FAIL (docker absent / image absent / unhealthy boot / port band
-  exhausted — the message names what is missing);
-  3=environment conflict (an explicitly requested port is taken; do not fight
-  it); 64=usage/malformed input (scenario-code bug class).
+  exhausted / capacity full past queueing budget — the message names what is
+  missing, for capacity the live-lease manifest with holder pid+ticket);
+  3=environment conflict (an explicitly requested port is taken; a live lease
+  already holds the project — do not fight it); 64=usage/malformed input
+  (scenario-code bug class).
 
 ## Failure-mode handling (item by item against the old stage's failures, with the verdict)
 
@@ -45,17 +62,47 @@ Exit codes (three-state contract, integration/README.md):
 | concurrent cross-talk | own compose project name + own container names + own volume prefix + band lock. Isolation granularity raised to container level |
 | holder crash keeps the lock | the lock fd lives only in this process: process death = kernel closes the fd = the lock releases itself. If the container already bound the port before the crash, the next entrant's bind probe sees it busy and slides to the next band |
 | teardown re-entry crash | down is idempotent: missing project / already-cleared containers both exit 0, safe to call three times in a row |
-| detached process leaks | containers are held by the docker daemon, no host grandchild process tree; down kills everything — dockerization removes this failure surface |
+| detached process leaks | containers are held by the docker daemon, no host grandchild process tree; the hold leg is the one detached process — it lives exactly one lease and exits via its seven terminal states (release/signal/anchor-death/cap/crash); down harvests it by pid before unlinking the lease |
 | service start times out with no diagnosis | the timeout carries a `docker compose logs` tail (2000 bytes) + an in-place down -v cleanup before exiting |
 | accidental production connect, fail-closed | hard forbidden set {3099,3199,7233,8233,17233,18233} + a post-boot self-check that the JSON ports are outside the production set |
 | preset missing refuses to run | it does not: stay on the capture lane (stage and evidence semantics stay layered) |
 | five-path terminal reclamation | CLI side: normal/error/timeout/SIGINT/SIGTERM all run the down -v cleanup |
 
-State and locks:
+State and locks (t260910-12 lease semantics):
   lock/state root = $SANDBAR_STAGE_LOCK_DIR > ~/.sandbar/test-stages > platform
   temp fallback (the fallback prints one stderr line, never silent).
   band-<n>.lock is the band lock;
-  project-<name>.json is the running-stage state (ensure's reuse credential).
+  capacity-0.lock is the满员闸 global lock (count + placeholder written inside
+  ONE flock critical section — count-then-claim is atomic, no oversell);
+  ensure-<project>.lock serializes same-project cold boots;
+  project-<name>.json is the LEASE record — the single liveness fact:
+    {lease_id, holder:{ticket,pid}, anchor_pid, state: booting|up|downing,
+     ports, heartbeat_ts, ttl_sec, container_ids, ...}
+  Reclaim criterion (the ONLY one): lease expired (now - heartbeat > TTL) AND
+  holder process does not exist. No docker ps sampling, no mtime freshness
+  grace, no foreign-activity yielding — every "guess whether the other guy is
+  dead" heuristic is gone (all three failed in concurrent windows: run
+  L/M/O/Q/U/X recorded in the old code comments).
+
+  Who keeps the lease alive: the `hold` subcommand — a detached child spawned
+  by up/ensure BEFORE booting, living exactly as long as the lease (booting +
+  up), heartbeating every LEASE_HEARTBEAT_S. The one-shot CLI process exits
+  right after printing its JSON; the hold leg is the process whose pid the
+  lease records as holder.pid. Invariant: for the whole holding period there
+  is one probeable real process; when it dies (crash/kill -9) the heartbeat
+  stops and the lease becomes reclaimable after TTL. This is NOT a daemon:
+  one hold per lease, no single point, and a dead hold leaves a
+  self-consistent system (expiry + pid-death reclaim).
+
+  Hold's orphan anchor: the CLI passes its own parent pid (--anchor-pid) —
+  with_stage.sh's shell / the mjs node process, i.e. the long-lived caller
+  that co-exists with the scenario. Anchor death = caller tree gone → hold
+  reclaims the orphan stage (down + release). Anchor pid reuse (scenario dead
+  + pid recycled) is bounded by SANDBAR_STAGE_MAX_HOLD_S: the hold exits
+  honestly past the cap instead of heartbeating forever. When calling the CLI
+  straight from an interactive shell, the anchor is that shell — the stage
+  then lives up to the cap unless you `down` it (or set a small
+  SANDBAR_STAGE_MAX_HOLD_S); the cap-exit stderr line names this.
 """
 
 from __future__ import annotations
@@ -95,11 +142,41 @@ DEFAULT_CONSOLE_PORT, DEFAULT_TEMPORAL_PORT, DEFAULT_TEMPORAL_UI_PORT = 3199, 17
 # at runtime ip_local_port_range is read as well to strip overlap (unreadable =
 # bypass that defense layer, no single point of dependence).
 BAND_BASE, BAND_STEP, BAND_COUNT = 21000, 10, 400
-# 状态清扫带龄护栏（state_busy_ports）：daemon 风暴窗内 docker ps 标签过
-# 滤瞬时空窗会把刚写好的状态误判 stale——新鲜状态一律按存活处置（档位保留），
-# 真 stale（秒级坠毁的残留）由护栏期后的清扫回收。取值 >> 起台端到端时长。
-STALE_STATE_GRACE_S = 120
 SLOT_OFFSET = {"console": 0, "temporal": 1, "ui": 2}
+
+# ---- 租约旋钮（env 可调；测试注入小值用，生产缺省见各函数 docstring）----
+# 旋钮一律走函数实时读 env：单测同进程改 env 即生效，不必 reload 模块。
+
+
+def lease_ttl_s():
+    """租约 TTL（秒）：过期判据的第一条腿。缺省 90s >> 心跳 5s——心跳线程
+    被调度/GC 停顿一两个周期不致误判死。"""
+    return float(os.environ.get("SANDBAR_STAGE_LEASE_TTL_S", 90))
+
+
+def lease_heartbeat_s():
+    """hold 心跳周期（秒）。"""
+    return float(os.environ.get("SANDBAR_STAGE_HEARTBEAT_S", 5))
+
+
+def max_hold_s():
+    """hold 最大持有期帽（秒）：锚 pid 被复用（场景死+pid 被无关新进程顶替）
+    时 hold 会误活——帽把损害上限封死，超帽诚实自退（stderr 留痕），台交给
+    判死回收/人工 down。缺省 4h >> 单场景 900s 执行器帽。"""
+    return float(os.environ.get("SANDBAR_STAGE_MAX_HOLD_S", 4 * 3600))
+
+
+def max_stages():
+    """满员闸：活租约并发上限。档位有 400 个，真实约束是 daemon 面压力
+    （260910 实证 herd ~4-6 即产品红）——闸的职责是排队而不是硬挤。"""
+    return int(os.environ.get("SANDBAR_STAGE_MAX_STAGES", 12))
+
+
+def hold_wait_s():
+    """双向有界握手预算（秒）：ensure 等 hold 写就绪 pid 文件 / hold 等租约
+    出现，都以此为帽（R1'a：Popen 返回 ≠ 子进程真起来了）。"""
+    return float(os.environ.get("SANDBAR_STAGE_HOLD_WAIT_S", 10))
+
 
 PROJECT_RE = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
 DEFAULT_TIMEOUT = 600          # health-wait ceiling (covers the measured dsh container first-boot npm i + apt budget)
@@ -240,52 +317,481 @@ def _lock_band(band_index):
     return fd
 
 
-def state_busy_ports():
-    """Ports held by running stages (state file present + containers present) —
-    choose_band's second busy check. A bind probe cannot see the window where
-    "the daemon bound it but the holder just died"; state + containers both
-    present = the stage is alive, so leave its ports alone even when they look
-    momentarily free. No containers = stale state (a boot that crashed before
-    down) -> clean it up in place without blocking the band.
+# ---------------------------------------------------------------- lease primitives (t260910-12)
 
-    带龄护栏（260909 提速战役③终验 run Q 实锤）：daemon 风暴窗（多场并发起
-    台的秒级窗口）内 docker ps 标签过滤会瞬时空窗——刚写好的状态文件被误判
-    stale 删除 → 同 compose 项目二次起台 → compose 挤掉刚起好的健康台
-    （run L/M/O 的 console 台三连起台与挤占即此族，~50% 间歇、只发生
-    在开跑风暴窗）。新鲜状态（< STALE_STATE_GRACE_S）只可能是刚起好的
-    台：不按 stale 处置，其档位按占用保留（400 档，宽限期内占用代价可忽略）；
-    真·秒级坠毁的残留状态由护栏期后的清扫回收。"""
-    busy = set()
+def pid_alive(pid):
+    """Process liveness probe (the lease's second reclaim leg). os.kill(pid,0)
+    delivers no signal — it only checks existence: ESRCH = gone (False);
+    EPERM = exists but not ours (True — a process we may not signal is still
+    alive). Known weakness (KI, reported to the integration owner): a recycled
+    pid reads as alive — an expired lease whose pid got reused stays
+    "busy" until the满员闸 surfaces it as an honest red; never a teardown of
+    someone else's stage. Faults toward NOT reclaiming by design."""
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def holder_pid(lease):
+    """Extract holder.pid, tolerating missing/malformed holder blocks (→ None
+    = un-judgeable, treated as dead downstream)."""
+    try:
+        pid = (lease or {}).get("holder", {}).get("pid")
+        return int(pid) if pid is not None else None
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def new_lease(project, holder_pid, services, ticket=None, anchor_pid=None, ttl=None,
+              lease_id=None):
+    """A complete occupancy granted at claim time (ticket spec ①): holder =
+    ticket+pid, state=booting, TTL + fresh heartbeat. Written atomically inside
+    the caller's flock critical section. lease_id injectable so the hold leg
+    can be spawned knowing the id it must find (handshake)."""
     now = time.time()
-    for f in lock_root().glob("project-*.json"):
-        try:
-            st = json.loads(f.read_text(encoding="utf-8"))
-            project = st.get("project")
-            if not project:
+    return {
+        "lease_id": lease_id or ("%s-%d-%s" % (project, int(now * 1000), os.urandom(4).hex())),
+        "project": project,
+        "holder": {"ticket": ticket or os.environ.get("SANDBAR_STAGE_TICKET") or "unknown",
+                   "pid": int(holder_pid)},
+        "anchor_pid": int(anchor_pid) if anchor_pid else None,
+        "state": "booting",
+        "services": list(services),
+        "ports": {},
+        "ts": now,
+        "heartbeat_ts": now,
+        "ttl_sec": float(ttl if ttl is not None else lease_ttl_s()),
+    }
+
+
+def validate_holder_pid(pid):
+    """holder pid 入口校验（R1'a：绝不把空/0/负数记进租约——记空=租约永可判
+    死，回到 R1 的交付即拆）。非法=usage 红点名。"""
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        raise StageError("holder pid 非法：%r（必须正整数——hold 腿 pid 缺失时"
+                         "绝不起台）" % (pid,), kind="usage")
+    return pid
+
+
+def lease_path(project) -> pathlib.Path:
+    return lock_root() / ("project-%s.json" % project)
+
+
+def read_lease(project):
+    """Read one lease. Malformed (truncated JSON / wrong shape) = None — never
+    crash on foreign garbage; None reads as dead downstream."""
+    try:
+        data = json.loads(lease_path(project).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def write_lease(project, lease):
+    """Atomic lease write: temp file + os.replace — a reader never sees a half
+    file (the R5 no-lock polling relies on this). tmp 名带 time_ns：同进程多
+    线程并发写不互偷 tmp（UT 实锤：仅 pid 后缀时线程 B 的 replace 会抢走线程
+    A 的 tmp → FileNotFoundError）。"""
+    p = lease_path(project)
+    tmp = p.with_name(".%s.tmp-%d-%d" % (p.name, os.getpid(), time.time_ns()))
+    tmp.write_text(json.dumps(lease, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(str(tmp), str(p))
+
+
+def release_lease(project):
+    """主动释放（正常 down 的最后一步 / 失败路径清理）。幂等。"""
+    try:
+        lease_path(project).unlink()
+    except FileNotFoundError:
+        pass
+
+
+def lease_expired(lease, now=None):
+    """过期判据第一条腿：heartbeat 停更超过 TTL。"""
+    if not isinstance(lease, dict):
+        return True
+    try:
+        hb = float(lease.get("heartbeat_ts"))
+        ttl = float(lease.get("ttl_sec"))
+    except (TypeError, ValueError):
+        return True
+    return (now if now is not None else time.time()) - hb > ttl
+
+
+def lease_dead(lease, now=None, alive=None):
+    """THE reclaim criterion (ticket spec ①): expired AND holder process does
+    not exist. Nothing else kills a lease — not docker ps samples, not file
+    age, not port reachability. Legacy pre-lease state files (no lease_id, the
+    t260904-19 format) and malformed records count as dead: single-host test
+    bench, one-shot upgrade window, prefer one false reclaim of an old-format
+    stage over a stuck band (review R7). alive() injectable for tests."""
+    if not isinstance(lease, dict) or not lease.get("lease_id"):
+        return True
+    pid = holder_pid(lease)
+    if not pid:
+        return True
+    if not lease_expired(lease, now=now):
+        return False
+    alive_fn = alive if alive is not None else pid_alive
+    return not alive_fn(pid)
+
+
+def lease_reusable(lease, now=None, alive=None):
+    """ensure's reuse test — the R3 primary signal: state=up + heartbeat FRESH
+    + holder alive → reuse, ZERO docker queries. Container presence is NOT
+    consulted here (docker ps sampling windows must never flip a live lease
+    into the teardown path — that was the run L/M/O mutual-teardown family);
+    container queries appear only in recovery confirmation and in the
+    idempotent-reup evidence (container_ids), never in this decision.
+    Expired-but-pid-alive is deliberately NOT reusable: freshness is the
+    holder's own claim of liveness — a stale heartbeat with a living pid is
+    the pid-reuse/僵死 shape, answered downstream by an honest red instead of
+    a silent reuse or a teardown."""
+    if not isinstance(lease, dict) or lease.get("state") != "up":
+        return False
+    if lease_expired(lease, now=now):
+        return False
+    pid = holder_pid(lease)
+    if not pid:
+        return False
+    alive_fn = alive if alive is not None else pid_alive
+    return bool(alive_fn(pid))
+
+
+def enumerate_leases(now=None, alive=None, reclaim=True):
+    """All live leases, keyed by project. Dead leases (expired + holder gone)
+    and malformed/legacy records are reclaimed in place (unlink) when
+    reclaim=True — reclaim is a local file decision, never a docker call
+    (residue containers of a dead lease are cleaned by the next cold boot's
+    idempotent do_down, not here: this runs inside choose_band/capacity
+    counters where a docker call per record would be a storm amplifier)."""
+    live = {}
+    root = lock_root()
+    for f in sorted(root.glob("project-*.json")):
+        project = f.name[len("project-"):-len(".json")]
+        lease = read_lease(project)
+        if lease is not None and not lease_dead(lease, now=now, alive=alive):
+            live[project] = lease
+        elif reclaim:
+            try:
+                f.unlink()
+            except OSError:
+                pass
+    return live
+
+
+def live_lease_manifest(live):
+    """Human-auditable one-line-per-lease manifest (review R2: the满员 red must
+    name holder pid + ticket + lease id + claim time so a pid-reuse suspicion
+    is checkable at a glance)."""
+    lines = []
+    for project, lease in sorted(live.items()):
+        holder = lease.get("holder") or {}
+        lines.append("project=%s holder=%s/pid=%s lease=%s state=%s 起租=%s" % (
+            project, holder.get("ticket"), holder.get("pid"),
+            str(lease.get("lease_id"))[:16], lease.get("state"),
+            time.strftime("%H:%M:%S", time.localtime(lease.get("ts") or 0))))
+    return "\n".join(lines)
+
+
+def capacity_acquire(project, lease, timeout):
+    """满员排队闸（ticket spec ③; review R4 atomicity): count live leases and
+    claim the slot (write the placeholder lease — the placeholder IS the
+    count) inside ONE global flock critical section, so N concurrent entrants
+    can never all count N-1 and all enter. Full = queue honestly: sleep-poll
+    outside the lock, re-enter to reclaim-then-count, until budget out. Never
+    steals, never fakes; timeout = honest env red carrying the live-lease
+    manifest (review R2 format)."""
+    path = lock_root() / "capacity-0.lock"
+    fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o644)
+    t0 = time.time()
+    try:
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as e:
+                if e.errno not in (errno.EACCES, errno.EAGAIN):
+                    raise
+                if time.time() - t0 >= timeout:
+                    raise StageError("满员闸锁等待超时（%ds）：capacity-0.lock 被"
+                                     "长期持有——查残留进程" % timeout, kind="env")
+                time.sleep(0.5)
                 continue
-            if residue_containers(str(project)):
-                busy.update(int(p) for p in (st.get("ports") or {}).values())
-            elif now - f.stat().st_mtime < STALE_STATE_GRACE_S:
-                # 新鲜状态 + 容器瞬时空窗 = 刚起好的台，档位按占用保留
-                busy.update(int(p) for p in (st.get("ports") or {}).values())
-            elif residue_containers_stable(str(project)):
-                # run V 实锤（260909 终验）：带龄状态同样会被 docker ps 瞬时空窗
-                # 误判——活台的存量状态被扫掉后，下一次 ensure 读不到状态走冷路
-                # 径，compose 当着在跑场景的面重建活台（run U modal-dialog 红的
-                # 同族）。unlink 是收回决策，必须稳定确认（连续 3 次均空）。
-                busy.update(int(p) for p in (st.get("ports") or {}).values())
-            else:
-                # 双信号稳定确认才回收（run X 实锤：docker ps 空窗可持续数秒，
-                # 三次 1s 间隔采样同空仍可假空；但活台端口全程可连——空窗与拒连
-                # 同现的概率可忽略）：容器查询连续为空 AND 状态端口全部拒连。
-                # 否则按存活保留（档位占用的代价可忽略，400 档）。
-                ports = [int(p) for p in (st.get("ports") or {}).values()]
-                if ports and all(not port_open(p, timeout=1.0) for p in ports):
-                    f.unlink()   # 带龄 + 稳定无容器 + 端口全拒：真 stale，回收档位
-                else:
-                    busy.update(ports)
+            try:
+                live = enumerate_leases()
+                if len(live) < max_stages():
+                    write_lease(project, lease)   # 占位即计数（state=booting）
+                    return lease
+                manifest = live_lease_manifest(live)
+            finally:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            if time.time() - t0 >= timeout:
+                raise StageError(
+                    "起台面满员：并发上限 %d 已用尽，排队 %ds 未等到释放——"
+                    "当前活租约清单（含 holder pid/票号，供人工核对 pid 复用）：\n%s"
+                    % (max_stages(), timeout, manifest), kind="env")
+            time.sleep(1.0)
+    finally:
+        os.close(fd)
+
+
+def _spawn_hold(project, lease_id, keep=False):
+    """Spawn the hold leg (detached session so signals to the caller's process
+    group don't reach it; it dies only via its own seven terminal states).
+    keep=True → hold argv 带 --keep：常驻基建台（verify.yaml supply 语义）的锚
+    =短命调用方 shell，hold 对其禁③锚死回收（arbitrate 打回修复）。stderr
+    goes to hold-<project>.log under the lock root — diagnostics
+    survive the CLI's exit and the pipe is never broken by the spawner.
+    Returns the Popen once the hold has proven it is running (pid file written
+    = parsed args + handlers registered). Bounded wait (R1'a): Popen returning
+    ≠ the child actually started (interpreter/permission); timeout = honest
+    env red naming the hold leg — never a lease with a bogus holder pid."""
+    hold_script = pathlib.Path(__file__).resolve()
+    hold_argv = [sys.executable, str(hold_script), "hold", "--project", project,
+                 "--anchor-pid", str(os.getppid()), "--lease-id", lease_id]
+    if keep:
+        hold_argv.append("--keep")
+    proc = subprocess.Popen(
+        hold_argv,
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=open(str(lock_root() / ("hold-%s.log" % project)), "ab"),
+        start_new_session=True, env=dict(os.environ))
+    pidfile = lock_root() / ("holder-%s.pid" % project)
+    try:
+        pidfile.unlink()
+    except FileNotFoundError:
+        pass
+    t0 = time.time()
+    while time.time() - t0 < hold_wait_s():
+        if proc.poll() is not None:
+            raise StageError("hold 腿启动即退（rc=%s，日志 %s）"
+                             % (proc.returncode, lock_root() / ("hold-%s.log" % project)),
+                             kind="env")
+        try:
+            got = int(pidfile.read_text(encoding="utf-8").strip())
+            if got == proc.pid:
+                return proc
         except (OSError, ValueError):
-            continue
+            pass
+        time.sleep(0.2)
+    _harvest_hold(proc)
+    raise StageError("hold 腿未在 %ds 内就绪（pid 文件未落/不匹配）——起台放弃，"
+                     "绝不带空 holder pid 起台" % hold_wait_s(), kind="env")
+
+
+def _harvest_hold(proc, grace=5.0):
+    """Reap a hold child we spawned: SIGTERM → bounded wait → SIGKILL. Used on
+    every failure path (R1'a: a failed boot must not leak a hold). Never
+    raises."""
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+    except (OSError, ProcessLookupError):
+        pass
+    t0 = time.time()
+    while time.time() - t0 < grace:
+        if proc.poll() is not None:
+            return
+        time.sleep(0.1)
+    try:
+        proc.kill()
+    except (OSError, ProcessLookupError):
+        pass
+    try:
+        proc.wait(timeout=5)
+    except (subprocess.SubprocessError, OSError):
+        pass
+
+
+def _stop_hold_by_pid(pid, grace=5.0):
+    """down-side hold harvest: the down process has no Popen handle, only the
+    pid recorded in the lease. SIGTERM → bounded wait → SIGKILL. Self-target
+    skipped (the orphan-reclaim path runs INSIDE the hold itself). Window
+    where the pid was reused in the last seconds = we signal an innocent
+    process — accepted, noted in KI (same family as pid-reuse misalive); the
+    alternative (leaked hold heartbeating a downed stage) is worse."""
+    if not pid or pid == os.getpid() or not pid_alive(pid):
+        return
+    try:
+        os.kill(int(pid), signal.SIGTERM)
+    except (OSError, ProcessLookupError, TypeError, ValueError):
+        return
+    t0 = time.time()
+    while time.time() - t0 < grace:
+        if not pid_alive(pid):
+            return
+        time.sleep(0.1)
+    try:
+        os.kill(int(pid), signal.SIGKILL)
+    except (OSError, ProcessLookupError, TypeError, ValueError):
+        pass
+
+
+def cmd_hold(project, anchor_pid, lease_id=None, keep=False):
+    """The hold leg: heartbeats the lease for exactly as long as it is held.
+    Seven terminal states (t260910-12 gen2, review R1'/R1'a/R1'b):
+      ① released: lease file gone or lease_id ≠ mine → exit 0, write nothing,
+         tear down nothing (down owns the teardown);
+      ② state=downing (including the pre-write re-check, R1'b) → exit 0;
+      ③ anchor dead (the long-lived caller tree is gone) → orphan reclaim:
+         down the stage + release the lease + exit 0 (accelerated path — the
+         ONLY reclaim criterion stays "expired AND holder pid gone");
+         **keep 租约例外（arbitrate 打回修复）**：常驻基建台（--keep，verify.yaml
+         supply 语义「闸后有意常驻不拆」）的锚=短命调用方 shell，锚死≠弃台——
+         跳过本腿继续心跳，台由租约+hold 持有直至显式 down / ⑥帽 / ⑦崩
+         （帽后心跳停=过期 AND holder 死=同一判据交判死回收，无启发式）;
+      ③' booting-orphan: lease still booting AND the booting CLI (this hold's
+         original parent, captured at spawn) is dead → the boot can never
+         complete (nobody will flip the state) → reclaim + release + exit 0.
+         Without this leg a crashed booter would leave an eternal booting
+         lease heartbeated by the anchor-alive hold — waiters would wait
+         forever;（keep 台同样适用：起台未完成即死=起台孤儿，与常驻无关）
+      ④ heartbeat write fails / foreign lease appeared → honest non-zero exit
+         with a stderr line, stop writing (never overwrite someone's lease);
+      ⑤ SIGTERM/SIGINT → exit 130, no down (the signal sender owns teardown —
+         usually down's harvest or a test injection);
+      ⑥ SANDBAR_STAGE_MAX_HOLD_S cap exceeded → honest exit, stderr line, the
+         stage is left to expiry reclaim / manual down (anchor-pid-reuse
+         damage cap; calling up from an interactive shell makes the anchor
+         that shell — see header, review C2; keep 台同帽约束=常驻的损害上限，
+         缺省 14400s ≥ 10×TTL 满足 supply 批跑窗);
+      ⑦ own crash → heartbeat stops → expiry+pid-death reclaim (the designed
+         crash path).
+    Plus the bounded lease-wait self-exit: if no lease with my holder pid
+    appears within HOLD_WAIT_S, the ensure that spawned me died — exit
+    non-zero, no lease is ever created for a dead hold."""
+    hold_pid = os.getpid()
+    if not anchor_pid or int(anchor_pid) <= 0:
+        print("STAGE_USAGE: hold 缺 --anchor-pid（孤儿锚=长命调用方进程 pid）",
+              file=sys.stderr)
+        return EXIT_USAGE
+    anchor_pid = int(anchor_pid)
+    pidfile = lock_root() / ("holder-%s.pid" % project)
+    try:
+        pidfile.write_text(str(hold_pid), encoding="utf-8")
+    except OSError as e:
+        print("STAGE_ENV: hold pid 文件不可写（%s：%s；锁根 %s）"
+              % (type(e).__name__, e, lock_root()), file=sys.stderr)
+        return EXIT_ENV
+
+    stopping = {"flag": False}
+
+    def _on_signal(signum, frame):
+        stopping["flag"] = True     # ⑤：心跳循环下轮退出，不在 handler 里做任何 IO/拆台
+        sys.exit(130)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, _on_signal)
+
+    # ⓪ 有界等待租约出现（R1'a）：预算=起台者（本 hold 的原始父进程）存活期
+    # ——容量排队（capacity_acquire）可远超固定秒数，hold 不得提前自退。先读
+    # 租约再判起台者死：租约已落即算数（主循环的 ③' 起台孤儿腿接管后续），
+    # 只有「租约确实未落且起台者已死」才为一具尸体自退。
+    booter_pid = os.getppid()   # 起台 CLI：③' 孤儿起台判据同款
+    lease = None
+    while True:
+        if stopping["flag"]:
+            return 130
+        lease = read_lease(project)
+        if isinstance(lease, dict) and holder_pid(lease) == hold_pid:
+            break
+        if not pid_alive(anchor_pid) and not keep:
+            return 0   # 锚死且租约未落：调用方树没了，无可清理——静默退
+        # keep 台例外：锚死≠弃台（常驻基建锚=短命 shell），继续等起台者落租约
+        if not pid_alive(booter_pid):
+            # 起台者死且租约未落=为一具尸体起租（keep/非 keep 同判——起台者
+            # 一死 boot 永不可完成，keep 也不等）
+            print("STAGE_ENV: 起台进程 %d 已亡且租约未落——hold 自退，绝不带空"
+                  "租约滞留" % booter_pid, file=sys.stderr)
+            return EXIT_ENV
+        time.sleep(0.2)
+    if lease.get("lease_id") != lease_id and lease_id:
+        # ensure 用它自己的 lease_id 建了租约——本 hold 是孤儿握手残留
+        print("STAGE_ENV: hold lease_id 与租约不符——握手残留自退", file=sys.stderr)
+        return EXIT_ENV
+    if not lease_id:
+        lease_id = lease["lease_id"]
+    # keep 的权威面=租约记录（argv 是起台注入；翻面/心跳读改写全链路透传）
+    keep = keep or bool(lease.get("keep"))
+
+    start_ts = float(lease.get("ts") or time.time())
+    while True:
+        if stopping["flag"]:
+            return 130                                                       # ⑤
+        if not pid_alive(anchor_pid) and not keep:                           # ③
+            print("[hold] 锚进程 %d 已亡——调用方树消失，回收孤儿台" % anchor_pid,
+                  file=sys.stderr)
+            try:
+                do_down(project, harvest_hold=False)
+            except Exception as e:
+                print("[hold] 孤儿台回收失败（%s：%s）——台交判死回收" %
+                      (type(e).__name__, e), file=sys.stderr)
+                release_lease(project)
+            try:
+                pidfile.unlink()
+            except FileNotFoundError:
+                pass
+            return 0
+        # keep 台：锚死跳过回收（常驻基建例外）——心跳继续，台交显式 down /
+        # ⑥帽 / ⑦崩处置；锚死+心跳停的组合态由 ⑥ 帽封顶损害
+        lease = read_lease(project)
+        if not isinstance(lease, dict) or lease.get("lease_id") != lease_id:  # ①
+            try:
+                pidfile.unlink()
+            except FileNotFoundError:
+                pass
+            return 0
+        if lease.get("state") == "booting" and not pid_alive(booter_pid):     # ③'
+            print("[hold] 起台进程 %d 已亡而租约仍 booting——起台孤儿，回收" % booter_pid,
+                  file=sys.stderr)
+            try:
+                do_down(project, harvest_hold=False)
+            except Exception as e:
+                print("[hold] 起台孤儿回收失败（%s：%s）——台交判死回收" %
+                      (type(e).__name__, e), file=sys.stderr)
+                release_lease(project)
+            return 0
+        if lease.get("state") not in ("booting", "up"):                       # ②
+            return 0
+        if time.time() - start_ts > max_hold_s():                             # ⑥
+            print("STAGE_HOLD_CAP: hold 超过最大持有期 %ds 自退——台留给租约过期"
+                  "回收或人工 down（提示：人工直调 up 的台锚=你的 shell，属明示"
+                  "行为；可调小 SANDBAR_STAGE_MAX_HOLD_S 或显式 down）" % max_hold_s(),
+                  file=sys.stderr)
+            return 6
+        if holder_pid(lease) != hold_pid:                                     # ④
+            print("STAGE_ENV: 租约 holder 变更（pid=%s）——外来租约，停写自退"
+                  % holder_pid(lease), file=sys.stderr)
+            return EXIT_ENV
+        lease["heartbeat_ts"] = time.time()
+        try:
+            write_lease(project, lease)
+        except OSError as e:                                                  # ④
+            print("STAGE_ENV: 心跳写失败（%s：%s）——诚实停写自退，台交判死回收"
+                  % (type(e).__name__, e), file=sys.stderr)
+            return EXIT_ENV
+        time.sleep(lease_heartbeat_s())
+
+
+def state_busy_ports(now=None, alive=None):
+    """Ports held by live leases — choose_band's second busy check, lease-based
+    (t260910-12). The old heuristic stack (mtime freshness grace + docker ps
+    triple sampling + ports-all-refused double confirmation) is deleted: all
+    three guessed at other holders' liveness and all three misfired in
+    concurrent windows (run L/M/O/Q/U/X). Now: live lease → ports busy; dead
+    lease (expired AND holder gone) / legacy record / malformed record →
+    reclaimed in place (no docker call — residue containers are handled by the
+    next cold boot's idempotent do_down; the bind probe still protects against
+    ports the daemon still holds)."""
+    busy = set()
+    for project, lease in enumerate_leases(now=now, alive=alive).items():
+        busy.update(int(p) for p in (lease.get("ports") or {}).values())
     return busy
 
 
@@ -321,25 +827,29 @@ def choose_band(ephemeral=None):
 
 
 def state_path(project) -> pathlib.Path:
-    return lock_root() / ("project-%s.json" % project)
+    """Compatibility alias of lease_path (t260910-12: the state file IS the
+    lease record now)."""
+    return lease_path(project)
 
 
 def read_state(project):
-    try:
-        return json.loads(state_path(project).read_text(encoding="utf-8"))
-    except Exception:
-        return None
+    return read_lease(project)
 
 
 def write_state(project, data):
-    state_path(project).write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    """Compatibility shim: bare state dict (pre-lease shape) → merge into the
+    existing lease when one is live, else write through. do_up's up-flip uses
+    _flip_lease_up instead — this shim only serves ad-hoc external callers."""
+    lease = read_lease(project)
+    if isinstance(lease, dict) and lease.get("lease_id"):
+        lease.update(data)
+        write_lease(project, lease)
+    else:
+        write_lease(project, data)
 
 
 def clear_state(project):
-    try:
-        state_path(project).unlink()
-    except FileNotFoundError:
-        pass
+    release_lease(project)
 
 
 # ---------------------------------------------------------------- docker gates
@@ -496,20 +1006,8 @@ def residue_containers(project):
         return ["<docker ps 不可用>"]
 
 
-def residue_containers_stable(project, tries=3, gap=1.0):
-    """带重试的残留查询：仅在「拆/拒」类决策点使用（健康复用判定、--keep
-    在跑保护）。run U 实锤（260909 终验）：docker ps 在起跑风暴窗会瞬时空窗
-    返回空——单次空结果把健康台误判成「台没了」，--keep 也因子查询同窗口
-    复现空窗而失守，do_down+do_up 当着在跑场景的面拆了活台（链头场景
-    page.reload 撞 ERR_CONNECTION_REFUSED 红）。连续 tries 次均为空才认空；
-    任一次非空即返回该次结果。docker 不可用保持原语义（非空哨兵）。"""
-    last = []
-    for _ in range(tries):
-        last = residue_containers(project)
-        if last:
-            return last
-        time.sleep(gap)
-    return last
+# （residue_containers_stable 三次采样已随租约化退役——t260910-12 删除
+# 「猜别人死没死」启发式的最后一个采样点；存活判断只有租约事实。
 
 
 # ---------------------------------------------------------------- validation
@@ -641,15 +1139,12 @@ def wait_console(port, timeout):
 
 
 def stage_healthy(state):
-    """ensure's reuse test: containers running + ports alive."""
-    if not state:
-        return False
-    if not residue_containers_stable(state["project"]):
-        return False
-    for p in state["ports"].values():
-        if not port_open(p, timeout=1.0):
-            return False
-    return True
+    """ensure 的复用判据（t260910-12 起为租约事实，R3 主信号）：state=up 且
+    心跳新鲜且 holder 进程在 → 复用，零 docker 查询。容器在场与否不进本判定
+    ——docker ps 采样空窗（run L/M/O 互拆根因）绝不能把活租约翻进拆台路径。
+    容器查询只出现在两处次要角色：过期租约的回收确认、幂等复用的证据面
+    （container_ids）。"""
+    return lease_reusable(state)
 
 
 # ---------------------------------------------------------------- namespace/SA
@@ -814,9 +1309,52 @@ def _wait_diag(project, env):
     return "\n".join(parts)
 
 
-def do_up(project, services_list, opts, timeout, lock_fd=None):
-    """The boot itself (lock held by the caller; the failure path runs the
-    down -v cleanup in place before re-raising)."""
+def container_ids(project):
+    """Stable container identity list for the project — the idempotent-reup
+    evidence face (ticket acceptance: a second up must NOT rebuild containers;
+    the id list comes back in the lease/JSON so a scenario can assert it
+    unchanged). Query failure = [] honestly (evidence absence, never
+    fabricated)."""
+    try:
+        p = _run(["docker", "ps", "-a", "--filter",
+                  "label=com.docker.compose.project=%s" % project,
+                  "--format", "{{.ID}}"], timeout=15)
+        return [x.strip() for x in (p.stdout or "").splitlines() if x.strip()]
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return []
+
+
+def _flip_lease_up(project, lease, ports, services_list, env, opts,
+                   sa_registered, sa_note):
+    """boot 完成 → 翻 state=up（原子写，写前保 lease_id/holder 不变）。CLI 翻面
+    自带一拍新鲜心跳，此后心跳由 hold 腿接管；container_ids 在此定格，作为
+    同租约二次 up 幂等复用的证据面（验收④：容器 id 不变=未被重建）。"""
+    lease = lease if isinstance(lease, dict) and lease.get("lease_id") else (
+        read_lease(project) or new_lease(project, holder_pid=os.getpid(),
+                                         services=services_list))
+    used = [k for k in ("temporal", "ui", "console") if k in ports
+            and ("temporal" in services_list if k in ("temporal", "ui") else "dsh" in services_list)]
+    lease.update({
+        "state": "up",
+        "services": list(services_list),
+        "namespace": env["SANDBAR_TEST_NAMESPACE"],
+        "ports": {k: ports[k] for k in used},
+        "repo_dir": opts.get("repo_dir"),
+        "container_ids": container_ids(project),
+        "sa_registered": sa_registered,
+        "sa_note": sa_note,
+        "booted_ts": int(time.time()),
+        "heartbeat_ts": time.time(),
+    })
+    write_lease(project, lease)
+    return lease
+
+
+def do_up(project, services_list, opts, timeout, lock_fd=None, lease=None):
+    """The boot itself (band lock held by the caller when band-allocated; the
+    claim placeholder lease was written by _boot_new_stage. The failure path
+    runs the down -v cleanup in place before re-raising; lease release is the
+    caller's — the hold sees the lease vanish and exits by itself)."""
     ports = opts["ports"]
     env = compose_env(project, services_list, ports, opts)
     # Total time budget: --timeout covers the whole up+wait (previously up and
@@ -861,13 +1399,8 @@ def do_up(project, services_list, opts, timeout, lock_fd=None):
             _do_down(project, env, quiet=True)
             raise StageError("起台端口 %s=%d 落在生产端口面——红线自检失败，已就地清场"
                              % (name, p), kind="env")
-    used = [k for k in ("temporal", "ui", "console") if k in ports
-            and ("temporal" in services_list if k in ("temporal", "ui") else "dsh" in services_list)]
-    state = {"project": project, "services": services_list, "namespace": env["SANDBAR_TEST_NAMESPACE"],
-             "ports": {k: ports[k] for k in used}, "repo_dir": opts.get("repo_dir"),
-             "ts": int(time.time()), "sa_registered": sa_registered, "sa_note": sa_note}
-    write_state(project, state)
-    return state
+    return _flip_lease_up(project, lease, ports, services_list, env, opts,
+                          sa_registered, sa_note)
 
 
 def _do_down(project, env=None, quiet=False):
@@ -882,39 +1415,163 @@ def _do_down(project, env=None, quiet=False):
             raise
 
 
-def do_down(project):
-    """Tear a stage down: down -v + zero-residue check + clear the state file.
-    Idempotent (succeeds when the project does not exist too)."""
+def do_down(project, harvest_hold=True):
+    """Tear a stage down = the lease's voluntary release (ticket spec ①), in
+    the order that closes the R6/R1'b races:
+      1. state → downing (atomic): the reuse primary signal dies immediately —
+         no third-party ensure can claim this stage from this moment;
+      2. harvest the hold (SIGTERM → bounded wait → SIGKILL): guarantees no
+         heartbeat lands after the lease file is gone (R6 — a post-unlink
+         heartbeat would resurrect a fake up-file and cost the next entrant a
+         full TTL);
+      3. compose down -v (idempotent);
+      4. unlink the lease (release) + hold pid file.
+    Idempotent (absent project / already-cleared containers both succeed).
+    harvest_hold=False is the hold's own orphan-reclaim path (it IS the hold —
+    signaling itself is skipped; _stop_hold_by_pid also self-guards)."""
     validate_project(project)
+    lease = read_lease(project)
+    if isinstance(lease, dict) and lease.get("lease_id"):
+        if lease.get("state") != "downing":
+            lease["state"] = "downing"
+            try:
+                write_lease(project, lease)
+            except OSError:
+                pass   # downing 翻面失败不阻断拆台：hold 仍会在 unlink 后自退
+        if harvest_hold:
+            _stop_hold_by_pid(holder_pid(lease))
     if not docker_present():
+        release_lease(project)
         raise StageError("docker 不可用（docker info 失败）——拆台需要 docker", kind="env")
     env = dict(os.environ)
     env.setdefault("SANDBAR_TEST_TEMPORAL_NAME", "%s-temporal" % project)
     env.setdefault("SANDBAR_TEST_DSH_NAME", "%s-dsh" % project)
     compose_cmd(project, ["down", "-v", "--remove-orphans", "--timeout", "30"],
                 env, timeout=_STOP_TIMEOUT)
-    clear_state(project)
+    release_lease(project)
+    try:
+        (lock_root() / ("holder-%s.pid" % project)).unlink()
+    except FileNotFoundError:
+        pass
     residue = residue_containers(project)
     return {"project": project, "down": True, "residue": residue}
 
 
+def _gates(services_list):
+    """docker / image presence gates (the honest three-state ENV_FAIL face —
+    preserved verbatim, ticket spec ⑤)."""
+    if not docker_present():
+        raise StageError("ENV_FAIL: docker 不可用（docker info 失败）——本票测试台一律走 "
+                         "docker；启动 Docker/OrbStack 后重试", kind="env")
+    if "temporal" in services_list and not temporal_image_present():
+        raise StageError(
+            "ENV_FAIL: 测试镜像缺席：%s（本机自建镜像、无 registry 拉取）——"
+            "先跑 sh %s 重建，再重试" % (TEMPORAL_IMAGE, TEMPORAL_BUILD_SCRIPT), kind="env")
+    if "dsh" in services_list and not dsh_image_present():
+        raise StageError(
+            "ENV_FAIL: 测试镜像缺席：%s（本机自建镜像、无 registry 拉取；此前每台容器内"
+            "联网 npm 装 dsh ~2 分钟，260908 起烤进镜像）——先跑 sh %s 重建，再重试"
+            % (DSH_IMAGE, DSH_BUILD_SCRIPT), kind="env")
+
+
+def _boot_new_stage(project, services_list, opts, timeout, cold_cleanup=False,
+                    keep=False):
+    """The full boot sequence, shared by `up` and ensure's cold path:
+    gates → (idempotent cold cleanup) → hold leg → capacity claim → ports
+    (explicit env or band) → boot → flip state=up. Every failure path releases
+    the lease and reaps the hold — no half-claimed occupancy is ever left
+    (R1'a; the hold also self-exits via its bounded lease-wait as a backstop).
+    keep=True：常驻基建台——租约记 keep 标，hold 腿据此禁③锚死回收（锚=
+    短命调用方 shell）；其余终态与判死回收判据原样，绝不引入存活启发式。"""
+    _gates(services_list)
+    if cold_cleanup:
+        # 冷清理幂等：无台=快速 no-op；有残留（过期死租约的孤儿容器）就地清——
+        # compose 同名二次起台的容器名冲突根，正是 run L/M/O 互拆族的一个面。
+        # 清理失败不阻断（do_down 内部已尽力），后续 compose up 自会报真错。
+        try:
+            do_down(project)
+        except StageError:
+            pass
+    lease_id = "%s-%d-%s" % (project, int(time.time() * 1000), os.urandom(4).hex())
+    hold_proc = _spawn_hold(project, lease_id, keep=keep)
+    try:
+        validate_holder_pid(hold_proc.pid)
+        lease = new_lease(project, holder_pid=hold_proc.pid, services=services_list,
+                          anchor_pid=os.getppid(), lease_id=lease_id)
+        if keep:
+            lease["keep"] = True   # 占位/心跳读改写全链路透传（常驻标记随租约存续）
+        capacity_acquire(project, lease, timeout)   # R4：数+占位同一把全局锁
+        try:
+            ports = explicit_ports(services_list)
+            lock_fd = None
+            try:
+                if ports is None:
+                    _, ports, lock_fd = choose_band(ephemeral_range())
+                lease["ports"] = dict(ports)
+                write_lease(project, lease)   # 择带结果回填（仍 state=booting，占位计数不变）
+                opts = dict(opts)
+                opts["ports"] = ports
+                return do_up(project, services_list, opts, timeout,
+                             lock_fd=lock_fd, lease=lease)
+            finally:
+                if lock_fd is not None:
+                    os.close(lock_fd)   # daemon 已真绑端口，释放无冲突窗（header trade-off）
+        except BaseException:
+            release_lease(project)   # hold 见租约消失 → ①自退；外层收割兜底
+            raise
+    except BaseException:
+        _harvest_hold(hold_proc)
+        raise
+
+
+def _reused(st):
+    st = dict(st)
+    st["reused"] = True
+    return st
+
+
+def _wait_booting(project, lock_fd, deadline):
+    """booting 等待（ticket ② state=booting → 等待其完成；review R5）：轮询
+    时不持项目锁（os.replace 原子写保证无锁读安全；持锁轮询会让起台者永远拿
+    不到锁=自锁死）。预算=调用方剩余 timeout。返回时已重新持锁。"""
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    except OSError:
+        pass
+    try:
+        while time.time() < deadline:
+            st = read_lease(project)
+            if not isinstance(st, dict) or st.get("state") != "booting":
+                return st   # 翻 up / downing / 被回收 / 消失 → 回锁终判
+            time.sleep(1.0)
+        return read_lease(project)
+    finally:
+        while True:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.time() >= deadline:
+                    raise StageError(
+                        "供给台 %s booting 等待后回锁超时：同项目起台者未在预算内"
+                        "交付也未消亡——查 docker 与 hold 日志" % project, kind="env")
+                time.sleep(0.5)
+
+
 def do_ensure(project, services_list, opts, timeout, keep=False):
-    """Idempotent ensure: reuse a healthy stage; tear down and rebuild a
-    half-dead one; --keep = never tear down a running stage (N3: on a clash,
-    re-check health first)."""
+    """Idempotent ensure (ticket spec ②), as a lease state machine:
+      快路径（无锁）：state=up + heartbeat fresh + holder alive → 复用，
+      零 docker 查询（R3 主信号——docker ps 采样空窗绝进不了本判定）；
+      state=booting 且租约活 → 不持锁等待其翻面（R5），绝不并发再起；
+      state=downing / 缺失 / 过期死（租约过期 AND holder 不存在）/ 旧格式 →
+      冷路径：幂等清残留 → hold 腿 → 满员占位 → 择带 → 起台；
+      租约过期但 holder pid 仍在 → 拒收诚实红（疑似 pid 复用/僵死，不对抗）。
+    --keep：在跑面（活租约已在上面复用返回；无主容器在跑的孤儿台）一律不拆，
+    诚实环境红交人工。冷/半残路径按项目串行化（run K 雷群回归锚保留）。"""
     validate_project(project)
-    state = read_state(project)
-    if state and stage_healthy(state):
-        state = dict(state)
-        state["reused"] = True
-        return state
-    # 冷/半残路径按项目串行化（260909 终验 run K 雷群实锤：锁根归一后冷台
-    # 首跑，跨池多路 ensure 齐头抢起同一项目，各自滑档起台 + 播种互踩，
-    # 11 连 ENV_FAIL）。flock 互斥只在共享锁根下成立——ensure 锁与档位锁同
-    # 根，纪律见 lock_root()。先到先得者独占起台，后来者持锁等待后双查
-    # 健康（TOCTOU 闭合，等同并发双起的档位避让先例）：等待期间先到者已
-    # 起好台则直接复用。等待预算=调用方 timeout（供给层 600s 帽），超时=
-    # 诚实环境红，绝不裸等超执行器单场景 900s 帽。
+    st = read_lease(project)
+    if lease_reusable(st):
+        return _reused(st)
     lock_path = lock_root() / ("ensure-%s.lock" % project)
     fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
     t0 = time.time()
@@ -930,51 +1587,51 @@ def do_ensure(project, services_list, opts, timeout, keep=False):
                         "预算内完成——疑似起台卡死，查 docker 后重试" % (project, timeout),
                         kind="env")
                 time.sleep(1.0)
-        # 持锁后双查：等待窗口里先到者可能已完成起台。
-        state = read_state(project)
-        if state and stage_healthy(state):
-            state = dict(state)
-            state["reused"] = True
-            return state
-        if state and keep and residue_containers_stable(project):
-            # --keep: running but unhealthy — do not tear it down (another lane may
-            # be using it in the same window); report the environment red honestly
-            raise StageError("供给台 %s 在跑但不健康（ports=%s）；--keep 语义不拆在跑台——"
-                             "人工核查或去旗重跑" % (project, state.get("ports")), kind="env")
-        if state:
-            do_down(project)
-        return do_up_public(project, services_list, opts, timeout)
+        # 持锁终判：等待窗口里先到者可能已完成起台。
+        deadline = t0 + timeout
+        st = read_lease(project)
+        if lease_reusable(st):
+            return _reused(st)
+        if isinstance(st, dict) and st.get("state") == "booting" and not lease_dead(st):
+            # 他人在起台：不持锁等待（R5），绝不并发再起
+            st = _wait_booting(project, fd, deadline)
+            if lease_reusable(st):
+                return _reused(st)
+        if isinstance(st, dict) and st.get("state") == "up" and not lease_dead(st):
+            # 租约过期但 holder pid 仍在：不对抗（判据唯一化），点名交人工
+            raise StageError(
+                "供给台 %s 租约过期但 holder pid=%s 仍在（心跳停更）——疑似 pid 复用"
+                "或 holder 僵死；绝不硬拆，人工核查后 down（可查 hold-%s.log）"
+                % (project, holder_pid(st), project), kind="env")
+        if keep and residue_containers(project):
+            # --keep：无主容器在跑（租约已死）——不拆别人的台，诚实环境红
+            raise StageError("供给台 %s 有无主容器在跑（租约已死/缺失）——--keep 语义"
+                             "不拆在跑台，人工核查或去旗重跑" % project, kind="env")
+        # 冷路径：缺失 / downing / 过期死 / 旧格式 → 完整起台序列
+        return _boot_new_stage(project, services_list, opts, timeout,
+                               cold_cleanup=True, keep=keep)
     finally:
         os.close(fd)
 
 
-def do_up_public(project, services_list, opts, timeout):
-    """Full up flow: validate -> docker/image gates -> ports (explicit env or
-    band allocation) -> boot."""
+def do_up_public(project, services_list, opts, timeout, keep=False):
+    """`up` subcommand full flow: validate → live-lease conflict gate → boot
+    sequence. A live lease on the same project = refuse (exit 3, conflict):
+    idempotent reuse belongs to ensure; fighting a second compose-up over the
+    same project name is exactly the mutual-teardown root this ticket kills,
+    so `up` never does it. keep=True：直调 up --keep 同样落常驻租约（hold 禁
+    ③锚死回收；C2 提示照旧）。"""
     validate_project(project)
-    if not docker_present():
-        raise StageError("ENV_FAIL: docker 不可用（docker info 失败）——本票测试台一律走 "
-                         "docker；启动 Docker/OrbStack 后重试", kind="env")
-    if "temporal" in services_list and not temporal_image_present():
+    st = read_lease(project)
+    if st and not lease_dead(st):
         raise StageError(
-            "ENV_FAIL: 测试镜像缺席：%s（本机自建镜像、无 registry 拉取）——"
-            "先跑 sh %s 重建，再重试" % (TEMPORAL_IMAGE, TEMPORAL_BUILD_SCRIPT), kind="env")
-    if "dsh" in services_list and not dsh_image_present():
-        raise StageError(
-            "ENV_FAIL: 测试镜像缺席：%s（本机自建镜像、无 registry 拉取；此前每台容器内"
-            "联网 npm 装 dsh ~2 分钟，260908 起烤进镜像）——先跑 sh %s 重建，再重试"
-            % (DSH_IMAGE, DSH_BUILD_SCRIPT), kind="env")
-    ports = explicit_ports(services_list)
-    lock_fd = None
-    try:
-        if ports is None:
-            _, ports, lock_fd = choose_band(ephemeral_range())
-        opts = dict(opts)
-        opts["ports"] = ports
-        return do_up(project, services_list, opts, timeout, lock_fd=lock_fd)
-    finally:
-        if lock_fd is not None:
-            os.close(lock_fd)   # the daemon has really bound the ports; releasing now leaves no conflict window (header trade-off)
+            "项目 %s 已有活租约（state=%s holder pid=%s 起租=%s）——幂等复用走 ensure；"
+            "确认无主先 down 再 up（对抗式二次起台=互拆根因，up 拒收）"
+            % (project, st.get("state"), holder_pid(st),
+               time.strftime("%H:%M:%S", time.localtime(st.get("ts") or 0))),
+            kind="conflict")
+    return _boot_new_stage(project, services_list, opts, timeout,
+                           cold_cleanup=True, keep=keep)
 
 
 # ---------------------------------------------------------------- selftest (white box, never touches docker)
@@ -1102,7 +1759,8 @@ def _parse_opts(argv, i, opts):
     flags = {"--namespace": "namespace", "--fixtures-dir": "fixtures_dir",
              "--profile-dir": "profile_dir", "--profile-name": "profile_name",
              "--repo-dir": "repo_dir", "--nm-repo-dir": "nm_repo_dir",
-             "--services": "_services"}
+             "--services": "_services", "--anchor-pid": "anchor_pid",
+             "--lease-id": "lease_id"}
     while i < len(argv):
         a = argv[i]
         if a in flags:
@@ -1158,18 +1816,25 @@ def main(argv):
                 "projects_dir": opts.get("projects_dir") or os.environ.get("SANDBAR_TEST_PROJECTS_DIR"),
             }
             if cmd == "up":
-                state = do_up_public(project, services, clean_opts, timeout)
+                state = do_up_public(project, services, clean_opts, timeout,
+                                     keep=opts.get("keep", False))
             else:
                 state = do_ensure(project, services, clean_opts, timeout, keep=opts.get("keep", False))
             print(json.dumps(state, ensure_ascii=False))
             return EXIT_OK
+        if cmd == "hold":
+            if not project:
+                raise StageError("hold 缺 --project <名>", kind="usage")
+            return cmd_hold(project, opts.get("anchor_pid"),
+                            lease_id=opts.get("lease_id") or None,
+                            keep=opts.get("keep", False))
         if cmd == "down":
             if not project:
                 raise StageError("down 缺 --project <名>", kind="usage")
             result = do_down(project)
             print(json.dumps(result, ensure_ascii=False))
             return EXIT_OK if not result["residue"] else EXIT_FAIL
-        raise StageError("未知子命令：%s（可选 up/ensure/down/selftest）" % cmd, kind="usage")
+        raise StageError("未知子命令：%s（可选 up/ensure/down/hold/selftest）" % cmd, kind="usage")
     except StageError as e:
         print("STAGE_%s: %s" % (e.kind.upper(), e), file=sys.stderr)
         return e.exit_code
