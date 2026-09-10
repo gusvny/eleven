@@ -237,6 +237,15 @@
      t16-settle-lane-anchoring＝本票仅改测试桩接收新形参、断言语义未动且独立连跑三次 5/0 → 判套件内序/环境假红，
      **登记为观察项**）。写集合规、冲突 0、main 干净。
 
+**04:30 轮**：t260911-03 已落账（`0dd1df9`）；在跑降至 3 张。**路由迁移运维动作：沙箱受阻，改预备包 +
+     **不在无人监督时动机器级注册表**（宿主风险令所警告的形态）：
+     · 实测：本会话沙箱仅允许写工作目录，`~/.sandbar/projects/sandbar/project.yaml` 写入被拒
+       （`[sandbox: file access denied under workspace-write mode]`）；
+     · 且此刻无法向宿主取授权（睡眠中），故**主动不执行**，也不贸然提权——属于「改机器级注册表」的高风险动作。
+     · 已就绪：`.sandbar/routes-migration-260911/`（表副本 + README：执行三步、验证脚本、真 spawn 冒烟步骤、一条命令回滚）。
+       迁移设计保证零断供（仓内表保留 + 分层兜底 + 三态点名），回滚=删除声明行即回落。
+     · **待宿主**：醒后执行该包（或授权 integration 提权执行），执行后按 README 做真 spawn 冒烟；两项目（sandbar、dengzhufpv）各自一遍。
+
 ## 七 本夜新增账
 
 - **KI-072**（问题册）：负载敏感的不稳定检查——三实证（reap 组回收集 / scenario-guard-pipeline-landed / ticket-session-restore，均并发红、单跑绿），含三条处置方向（判据层归 13、测试层归校准、运维层限并发）。
