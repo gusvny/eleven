@@ -32,7 +32,6 @@ NEW_FACES = (("mechanism-face", "mechanism"), ("simplify-face", "simplify"))
 FIXTURE_DECL = """schema: v1
 instances:
   - id: test-face
-    face: test
     enabled: true
     schedule:
       kind: cron
@@ -40,7 +39,6 @@ instances:
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
   - id: mechanism-face
-    face: mechanism
     enabled: true
     schedule:
       kind: cron
@@ -48,7 +46,6 @@ instances:
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
   - id: simplify-face
-    face: simplify
     enabled: false
     schedule:
       kind: cron
@@ -98,8 +95,11 @@ def main() -> int:
                     failures.append("腿a 仓内声明缺新实例 %s（工单声明位验收）：%r"
                                     % (iid, sorted(inst)))
                     continue
-                if it.get("face") != face:
-                    failures.append("腿a %s face 声明错（期 %r）：%r" % (iid, face, it.get("face")))
+                # 声明 face 字段已随 t260910-11 除名（零消费者）；面由实例 id 承载
+                # （mechanism-face → mechanism 可派生），改锁 id 派生关系不弱化断言
+                if iid.rsplit("-", 1)[0] != face:
+                    failures.append("腿a %s 实例 id 与面名派生关系破（期望 -%s 后缀）：%r"
+                                    % (iid, face, iid))
                 if it.get("enabled") is not False:
                     failures.append("腿a %s 应 enabled=false 占位（启用按宿主节奏）：%r"
                                     % (iid, it.get("enabled")))
@@ -124,13 +124,14 @@ def main() -> int:
             if "mechanism-face" not in spec:
                 failures.append("腿b enabled mechanism-face 未进 schedule_specs（应调度）：%r"
                                 % (sorted(spec),))
-            elif spec["mechanism-face"].get("face") != "mechanism":
-                failures.append("腿b specs 未透传 face=mechanism：%r" % (spec["mechanism-face"],))
+            elif "face" in spec["mechanism-face"]:
+                failures.append("腿b specs 仍透传已除名的 face 字段（t260910-11 schema）：%r"
+                                % (spec["mechanism-face"],))
             if "simplify-face" in spec:
                 failures.append("腿b disabled simplify-face 进了 specs（不调度破）：%r"
                                 % (sorted(spec),))
-            if inst.get("simplify-face", {}).get("face") != "simplify":
-                failures.append("腿b instances 未透传 face=simplify 标量：%r"
+            if inst.get("simplify-face", {}).get("id") != "simplify-face":
+                failures.append("腿b instances 缺 simplify-face 实例（id 承载面名）：%r"
                                 % (inst.get("simplify-face"),))
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
@@ -184,7 +185,7 @@ def main() -> int:
         for m in failures:
             print("FAIL_REASON: " + m, flush=True)
         return 1
-    print("PASS: 仓内 yaml 两新实例占位不调度；enabled 新实例进规格+face 透传+真触发过门",
+    print("PASS: 仓内 yaml 两新实例占位不调度；enabled 新实例进规格（面由 id 承载，声明 face 已除名）+真触发过门",
           flush=True)
     return 0
 

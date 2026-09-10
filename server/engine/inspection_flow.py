@@ -89,7 +89,6 @@ def validate_trigger_args(instance_id: str, period: str) -> Optional[str]:
 def build_ticket_face(
     ticket_id: str,
     instance_id: str,
-    face_name: str,
     period: str,
     scan_result: Dict[str, Any],
 ) -> Dict[str, Any]:
@@ -117,7 +116,6 @@ def build_ticket_face(
         "ticket_id": ticket_id,
         "kind": "inspection",
         "instance_id": instance_id,
-        "face": face_name,
         "period": period,
         "red_line": INSPECTION_RED_LINE,
         "heartbeat": heartbeat,
@@ -177,6 +175,9 @@ class InspectionPeriodicInput:
     period = derived from workflow.now() — the schedule-triggered path)."""
 
     instance_id: str
+    # 兼容红线（t260910-11）：声明 schema 的 face 字段已除名（零消费者），但本输入
+    # 结构保留 face 并给默认值——历史 workflow 重放按字段名解码，删字段会解码报错。
+    # 新代码不得再消费该值（报告输出里的 "face" 键已随本票删除）。
     face: str = "test"
     period: str = ""
     repo_root: str = ""
@@ -251,12 +252,12 @@ class InspectionPeriodicWorkflow:
             self.status = "blocked"
             self._enter("scan", "blocked", str(scan_result.get("error") or "扫描失败"))
             self.face = {"ticket_id": ticket_id, "kind": "inspection", "instance_id": inp.instance_id,
-                         "face": inp.face, "period": period, "red_line": INSPECTION_RED_LINE,
+                         "period": period, "red_line": INSPECTION_RED_LINE,
                          "heartbeat": False, "summary": {}, "findings": [],
                          "suggested_fix_tickets": [], "blocked_reason": str(scan_result.get("error"))}
             return self.snapshot()
         self._enter("report", "running", "发现清单落票面（%d 条）" % len(scan_result["result"].get("findings") or []))
-        self.face = build_ticket_face(ticket_id, inp.instance_id, inp.face, period, scan_result["result"])
+        self.face = build_ticket_face(ticket_id, inp.instance_id, period, scan_result["result"])
         written: Dict[str, Any] = await workflow.execute_activity(
             "write_inspection_report", args=[self.face],
             start_to_close_timeout=SHORT_TO, retry_policy=RETRY)

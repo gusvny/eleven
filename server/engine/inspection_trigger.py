@@ -32,10 +32,10 @@ the declaration changes the behavior, no engine code involved.
 Usage (venv python or any interpreter with temporalio; the decl subcommand is
 dependency-free pure stdlib):
     inspection_trigger.py decl [--decl-path P]
-    inspection_trigger.py trigger --instance test-face [--period YYYYMMDD] [--repo-root R]
-    inspection_trigger.py sign --instance test-face --who <user> [--decision approve|reject] [--note <text>] [--period P]
-    inspection_trigger.py describe --instance test-face [--period P]
-    inspection_trigger.py schedule-up --instance test-face --note <text>
+    inspection_trigger.py trigger --instance integration-tests [--period YYYYMMDD] [--repo-root R]
+    inspection_trigger.py sign --instance integration-tests --who <user> [--decision approve|reject] [--note <text>] [--period P]
+    inspection_trigger.py describe --instance integration-tests [--period P]
+    inspection_trigger.py schedule-up --instance integration-tests --note <text>
 """
 
 from __future__ import annotations
@@ -138,7 +138,7 @@ async def cmd_trigger(args: argparse.Namespace) -> Dict[str, Any]:
         handle = await client.start_workflow(
             spec["workflow"],
             InspectionPeriodicInput(
-                instance_id=args.instance, face=spec["face"], period=period,
+                instance_id=args.instance, period=period,
                 repo_root=args.repo_root or ""),
             id=ticket_id, task_queue=task_queue)
         return _ok({"triggered": True, "ticket_id": ticket_id, "period": period,
@@ -178,6 +178,63 @@ async def cmd_sign(args: argparse.Namespace) -> Dict[str, Any]:
                     "who": payload["who"], "status": (snap or {}).get("status")})
     except Exception as e:  # noqa: BLE001
         return _err("巡检票 %s 签字失败（不存在或不可达）：%s: %s" % (ticket_id, type(e).__name__, e))
+
+
+def ticket_receipt(snap: Dict[str, Any], ticket_id: str) -> Dict[str, Any]:
+    """workflow snapshot 查询 → 工单详情同构回执（纯函数；畸形快照逐字段降级不崩，
+    畸形≠缺省：缺键如实出 None/空，不编造值）。"""
+    face = snap.get("face") if isinstance(snap.get("face"), dict) else {}
+    findings = face.get("findings") if isinstance(face.get("findings"), list) else []
+    brief = [{"id": f.get("id"), "scan": f.get("scan"), "severity": f.get("severity"),
+              "subject": str(f.get("subject") or "")[:80]}
+             for f in findings[:10] if isinstance(f, dict)]
+    return {
+        "id": snap.get("id") or ticket_id,
+        "kind": snap.get("kind"),
+        "stage": snap.get("stage"),
+        "stage_state": snap.get("stage_state"),
+        "status": snap.get("status"),
+        "decision": snap.get("decision"),
+        "face": {
+            "summary": face.get("summary") if isinstance(face.get("summary"), dict) else {},
+            "heartbeat": face.get("heartbeat"),
+            "findings_total": len(findings),
+            "findings_brief": brief,
+            "red_line": face.get("red_line"),
+        },
+        "timeline_len": len(snap.get("timeline") or []) if isinstance(snap.get("timeline"), list) else 0,
+        "human_gate": face.get("human_gate"),
+        "report_path": face.get("report_path") or "",
+    }
+
+
+async def cmd_ticket(args: argparse.Namespace) -> Dict[str, Any]:
+    """巡检票只读查询面（t260910-11 验收⑤）：与工单详情同构的阶段/状态/发现清单摘要。
+
+    形状口径：result 顶层 = {id, kind, stage, stage_state, status, decision, face,
+    timeline, report_path}——face 只出摘要（summary/high·med 前 N 条主题），防满屏
+    刷屏；查不到=精确点名实例/票号（不许笼统「连不上/transient」把诊断引向网络方向）。
+    降级口径：工单台（workbench 插件）查询面不在本票写集，工单台侧继续不可查是**已知
+    降级**；本子命令是巡检票的唯一查询面（运维通道）。"""
+    from temporalio.service import RPCError
+    from inspection_flow import inspection_ticket_id
+    period = args.period or datetime.now().strftime("%Y%m%d")
+    err = _valid_period(period)
+    if err:
+        return _err(err)
+    ticket_id = inspection_ticket_id(args.instance, period)
+    try:
+        client = await _connect()
+        handle = client.get_workflow_handle(ticket_id)
+        snap = await handle.query("snapshot")
+    except RPCError as e:
+        return _err("巡检票 %s（实例 %s 期 %s）不存在或未开（RPC %s）——查无此票≠连不上"
+                    % (ticket_id, args.instance, period, type(e).__name__))
+    except Exception as e:  # noqa: BLE001——连接失败精确翻译，不谎报票不存在
+        return _err("temporal 不可达（查询 %s 失败）：%s: %s" % (ticket_id, type(e).__name__, e))
+    if not isinstance(snap, dict):
+        return _err("巡检票 %s（实例 %s 期 %s）无快照——查无此票≠连不上" % (ticket_id, args.instance, period))
+    return _ok(ticket_receipt(snap, ticket_id))
 
 
 async def cmd_describe(args: argparse.Namespace) -> Dict[str, Any]:
@@ -248,7 +305,7 @@ async def cmd_schedule_up(args: argparse.Namespace) -> Dict[str, Any]:
                 Schedule(
                     action=ScheduleActionStartWorkflow(
                         spec["workflow"],
-                        InspectionPeriodicInput(instance_id=spec["instance_id"], face=spec["face"], period=""),
+                        InspectionPeriodicInput(instance_id=spec["instance_id"], period=""),
                         id="inspection-%s-period" % spec["instance_id"],
                         task_queue=TASK_QUEUE,
                     ),
@@ -279,7 +336,7 @@ def cmd_decl(args: argparse.Namespace) -> Dict[str, Any]:
     return _ok({
         "source": decl.source,
         "schema": decl.schema,
-        "instances": [{"id": i.id, "face": i.face, "enabled": i.enabled, "kind": i.kind,
+        "instances": [{"id": i.id, "enabled": i.enabled, "kind": i.kind,
                        "cron": i.cron, "workflow": i.workflow, "template": i.template}
                       for i in decl.instances],
         "schedule_specs": build_schedule_specs(decl),
@@ -303,6 +360,9 @@ def main() -> None:
     p.add_argument("--note", default="")
     p.add_argument("--period", default=None)
     p.add_argument("--decl-path", default=None)
+    p = sub.add_parser("ticket", help="巡检票只读查询（工单详情同构：阶段/状态/发现摘要）")
+    p.add_argument("--instance", required=True)
+    p.add_argument("--period", default=None)
     p = sub.add_parser("describe", help="查一期巡检票快照")
     p.add_argument("--instance", required=True)
     p.add_argument("--period", default=None)
@@ -320,7 +380,7 @@ def main() -> None:
             result = cmd_decl(args)
         else:
             result = asyncio.run({"trigger": cmd_trigger, "sign": cmd_sign,
-                                  "describe": cmd_describe, "schedule-up": cmd_schedule_up}[args.op](args))
+                                  "describe": cmd_describe, "ticket": cmd_ticket, "schedule-up": cmd_schedule_up}[args.op](args))
     except Exception as e:  # noqa: BLE001 — channel-level backstop: any exception becomes single-line JSON, never a bare stack
         result = _err("inspection_trigger.%s 异常：%s: %s" % (args.op, type(e).__name__, e))
     _emit(result, exit_code=0 if result.get("ok") else 1)

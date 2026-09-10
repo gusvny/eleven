@@ -307,3 +307,109 @@ def test_cli_missing_root_single_line_error():
     assert len(lines) == 1
     payload = json.loads(lines[0])
     assert payload["ok"] is False and "仓库根" in payload["error"]
+
+
+# ========================================================================================
+# t260910-11 误报校准：路径形态/根排除/拼装锚降级/S1 三级复核
+# ========================================================================================
+
+def test_bare_module_name_not_reported_stale_ref(tmp_path):
+    """S3 校准①：代码里的模块名（index.mjs 等裸名，import/require 形态）不是路径断言，
+    不得报 stale-ref（首期真实报告的主要误报源）。"""
+    guard = (
+        'import { x } from "index.mjs";\n'
+        'const y = require("lib_helpers_py.py");\n'
+        'const plain = "readme.md 中提到";\n'
+    )
+    root = make_repo(tmp_path, {"integration/baselines/sc_bare_names.mjs": guard})
+    result = run_scan(root)
+    assert finding_of(result, "stale-ref", "") == []
+
+
+def test_relative_and_repo_path_refs_still_judged(tmp_path):
+    """S3 校准②：真路径形态（含 /）引用不豁免——存在=可解析、缺失=照报 high。"""
+    root = make_repo(tmp_path, {
+        "integration/baselines/sc_paths.mjs":
+            'const a = "integration/helper_ok.py";\n'
+            'const b = "integration/zz_gone.py";\n',
+    })
+    (root / "integration" / "helper_ok.py").write_text("a = 1\n", encoding="utf-8")
+    result = run_scan(root)
+    hits = finding_of(result, "stale-ref", "zz_gone")
+    assert len(hits) == 1 and hits[0]["severity"] == "high"
+    assert finding_of(result, "stale-ref", "helper_ok") == []
+
+
+def test_lane_and_process_dirs_excluded_from_scan_roots(tmp_path):
+    """S2 校准①：泳道/过程目录（.lane/.worktrees/.suyou/.sandbar/.dsh/out/node_modules）  # naming-compat（点名排除的存量目录名）
+    不是生产方源码——文案只存在于泳道副本时，生产方定位不到→锚跳过记 meta，
+    不得把泳道副本当生产方（首期满屏 high 的根因之一）。"""
+    guard = (
+        'const producer = "server/plugins/workbench/lib/copy_panel.mjs";\n'
+        'const text = await page.locator(".copy-panel").innerText();\n'
+        'assert(text === "只活在泳道副本里的文案甲乙");\n'
+    )
+    files = {"integration/baselines/sc_lane.mjs": guard}
+    root = make_repo(tmp_path, files)
+    # 三处泳道副本都带着「同款生产方路径 + 同款文案」
+    for lane in (".lane/t260901-01", ".worktrees/w1", ".suyou/old"):  # naming-compat（夹具泳道旧目录名）
+        p = root / lane / "server/plugins/workbench/lib/copy_panel.mjs"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text('const copy = "只活在泳道副本里的文案甲乙";\n', encoding="utf-8")
+    result = run_scan(root)
+    assert finding_of(result, "guard-anchor", "") == []       # 不把泳道当生产方（也不误报 high）
+    assert result["meta"]["anchors_skipped_no_producer_ctx"] == 1
+
+
+def test_assembled_or_dom_anchor_capped_at_med(tmp_path):
+    """S2 校准②：运行时拼装/DOM 结构锚（CJK 粘连 ASCII 操作符，如「文案甲 + mode」）
+    核心片段全缺也只 med，不得报 high（校准红线）。全角引号内的按钮符号（「+ 新建」）
+    是文案装饰不触发降级——KI-051 回放锚仍走 high（见上回放用例）。"""
+    guard = (
+        'const producer = "server/plugins/workbench/lib/copy_panel.mjs";\n'
+        'const text = await page.locator(".copy-panel").innerText();\n'
+        'assert(text === "同步状态 + runtime 输出完毕");\n'
+    )
+    root = make_repo(tmp_path, {
+        "server/plugins/workbench/lib/copy_panel.mjs": "const q = 1;\n",
+        "integration/baselines/sc_assembled.mjs": guard,
+    })
+    result = run_scan(root)
+    hits = finding_of(result, "guard-anchor", "sc_assembled")
+    assert len(hits) == 1 and hits[0]["severity"] == "med"
+    assert "降级" in hits[0]["evidence"]
+
+
+def test_s1_three_level_recheck_suppresses_intent_only_pairs(tmp_path):
+    """S1 校准：意图近重但断言对象（cmd）分歧 → 不判重（suppressed 计数）；
+    三级全符才报 med。首期 t18-* 四场景互配对形态即被此复核压掉。"""
+    text = '''"""场景执行器桩"""
+SCENARIOS = [
+    ("sc_a_one", "守卫场景甲：验证甲行为", "python3 integration/tree_one.py"),
+    ("sc_a_two", "守卫场景甲：验证甲行为", "python3 integration/tree_two.py"),
+    ("sc_a_three", "守卫场景丙：验证丙行为", "python3 integration/tree_one.py"),
+]
+'''
+    root = make_repo(tmp_path, {})
+    (root / "integration" / "run_scenarios.py").write_text(text, encoding="utf-8")
+    result = run_scan(root)
+    # 甲/甲：意图逐字同 + cmd 分歧（tree_one vs tree_two）→ 压掉
+    # 甲/丙：意图不同 → 一级就不过
+    assert finding_of(result, "duplicate", "dup:") == []
+    assert result["meta"]["duplicate_suppressed"] >= 1
+
+def test_s1_three_level_reports_when_all_three_align(tmp_path):
+    """S1 校准：意图+断言对象+选择器三级全符 → 照报 med（复核不吞真重复）。"""
+    text = (
+        '"""场景执行器桩"""\n'
+        'SCENARIOS = [\n'
+        '    ("sc_b_one", "守卫场景甲：验证甲行为", \'python3 integration/same.py --pick "选择器甲"\'),\n'
+        '    ("sc_b_two", "守卫场景甲：验证甲行为", \'python3 integration/same.py --pick "选择器甲"\'),\n'
+        ']\n'
+    )
+    root = make_repo(tmp_path, {})
+    (root / "integration" / "run_scenarios.py").write_text(text, encoding="utf-8")
+    result = run_scan(root)
+    hits = finding_of(result, "duplicate", "sc_b_one")
+    assert len(hits) == 1 and hits[0]["severity"] == "med"
+    assert "三级复核全符" in hits[0]["evidence"]

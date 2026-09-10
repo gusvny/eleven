@@ -22,16 +22,14 @@ VALID = """
 
 schema: v1
 instances:
-  - id: test-face
-    face: test
+  - id: integration-tests
     enabled: true
     schedule:
       kind: cron
       cron: 0 9 * * 1
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
-  - id: doc-face
-    face: doc
+  - id: docs-sync
     enabled: false
     schedule:
       kind: cron
@@ -45,7 +43,7 @@ instances:
 
 def test_parse_valid_two_instances():
     d = decl.parse_decl_text(VALID)
-    assert [i.id for i in d.instances] == ["test-face", "doc-face"]
+    assert [i.id for i in d.instances] == ["integration-tests", "docs-sync"]
     assert d.instances[0].enabled is True and d.instances[1].enabled is False
     assert d.instances[0].cron == "0 9 * * 1"
 
@@ -54,16 +52,16 @@ def test_schedule_specs_only_enabled_instances():
     """行为级（M1 解析级半边）：禁用实例产出为零——触发面只认 specs。"""
     d = decl.parse_decl_text(VALID)
     specs = decl.build_schedule_specs(d)
-    assert [s["instance_id"] for s in specs] == ["test-face"]
+    assert [s["instance_id"] for s in specs] == ["integration-tests"]
     assert specs[0]["overlap"] == "SKIP" and specs[0]["cron"] == "0 9 * * 1"
 
 
 def test_real_decl_file_loads_and_test_face_enabled():
     d = decl.load_inspection_decl(POC / "inspection.yaml")
     assert d.schema == "v1"
-    assert d.instance("test-face").enabled is True
-    assert d.instance("doc-face").enabled is False
-    assert [s["instance_id"] for s in decl.build_schedule_specs(d)] == ["test-face"]
+    assert d.instance("integration-tests").enabled is True
+    assert d.instance("docs-sync").enabled is False
+    assert [s["instance_id"] for s in decl.build_schedule_specs(d)] == ["integration-tests"]
 
 
 def test_default_decl_path_env_override(monkeypatch, tmp_path):
@@ -71,7 +69,18 @@ def test_default_decl_path_env_override(monkeypatch, tmp_path):
     p.write_text(VALID, encoding="utf-8")
     monkeypatch.setenv("SANDBAR_INSPECTION_DECL", str(p))
     assert decl.default_decl_path() == p
-    assert decl.load_inspection_decl().instance("test-face") is not None
+    assert decl.load_inspection_decl().instance("integration-tests") is not None
+
+
+def test_legacy_decl_with_face_field_rejected_and_named():
+    """旧声明（含 face 字段）拒收且报错点名 face（t260910-11 验收：除名后 fail-closed）。"""
+    legacy = VALID.replace("  - id: integration-tests\n", "  - id: integration-tests\n    face: test\n", 1)
+    _reject(legacy, "face")
+
+
+def test_real_decl_file_has_no_face_field():
+    d = decl.load_inspection_decl(POC / "inspection.yaml")
+    assert d.instance("integration-tests") is not None and d.instance("docs-sync") is not None
 
 
 # ---------- M2：未接线 kind ----------
@@ -87,9 +96,9 @@ def test_enabled_instance_unwired_kind_rejected_names_wired():
 def test_disabled_instance_unwired_kind_allowed_as_placeholder():
     text = VALID.replace("kind: cron\n      cron: 0 10 * * 1", "kind: race-first\n      n: 20")
     d = decl.parse_decl_text(text)
-    assert d.instance("doc-face").kind == "race-first"
+    assert d.instance("docs-sync").kind == "race-first"
     # 禁用实例不触发，占位合法；启用实例照常出 spec
-    assert [s["instance_id"] for s in decl.build_schedule_specs(d)] == ["test-face"]
+    assert [s["instance_id"] for s in decl.build_schedule_specs(d)] == ["integration-tests"]
 
 
 def test_unknown_kind_rejected_names_known():
@@ -130,7 +139,7 @@ def test_malformed_roots():
 
 
 def _instance(**over):
-    base = {"id": "test-face", "face": "test", "enabled": "true",
+    base = {"id": "integration-tests", "enabled": "true",
             "schedule": {"kind": "cron", "cron": "0 9 * * 1"},
             "workflow": "InspectionPeriodicWorkflow", "template": "inspection-lite"}
     base.update(over)
@@ -140,7 +149,6 @@ def _instance(**over):
 def test_malformed_instance_fields():
     _reject(_instance(id=None), "id")
     _reject(_instance(id="Bad_Slug"), "slug")
-    _reject(_instance(face=None), "face")
     _reject(_instance(enabled="yes"), "enabled")
     _reject(_instance(schedule=None), "schedule")
     _reject(_instance(schedule={"kind": "cron"}), "cron")
@@ -186,9 +194,10 @@ def test_trigger_decl_op_offline_real_file():
     payload = json.loads(proc.stdout.strip().splitlines()[-1])
     assert payload["ok"] is True
     ids = [i["id"] for i in payload["result"]["instances"]]
-    # t260910-09 票②：新增 mechanism-face/simplify-face 占位实例（enabled=false 不进 schedule_specs）
-    assert ids == ["test-face", "doc-face", "mechanism-face", "simplify-face"]
-    assert [s["instance_id"] for s in payload["result"]["schedule_specs"]] == ["test-face"]
+    # 本票（t260910-11）改名去后缀 + main 侧 t260910-09 新增占位实例，两边语义合取：
+    # ids=新名两实例+t260910-09 两个占位；占位 enabled=false 不进 schedule_specs
+    assert ids == ["integration-tests", "docs-sync", "mechanism-face", "simplify-face"]
+    assert [s["instance_id"] for s in payload["result"]["schedule_specs"]] == ["integration-tests"]
 
 
 def test_trigger_decl_op_malformed_file_single_line_error(tmp_path):
@@ -205,10 +214,10 @@ def test_trigger_decl_op_malformed_file_single_line_error(tmp_path):
 def test_enabled_spec_helper_offline_gates():
     """触发面 fail-closed 先于网络：未启用实例/未声明实例/畸形期号都就地拒绝。"""
     from inspection_trigger import _enabled_spec, _valid_period
-    spec = _enabled_spec(POC / "inspection.yaml", "test-face")
+    spec = _enabled_spec(POC / "inspection.yaml", "integration-tests")
     assert spec["workflow"] == "InspectionPeriodicWorkflow"
     with pytest.raises(ValueError, match="未启用"):
-        _enabled_spec(POC / "inspection.yaml", "doc-face")
+        _enabled_spec(POC / "inspection.yaml", "docs-sync")
     with pytest.raises(ValueError, match="未在声明"):
         _enabled_spec(POC / "inspection.yaml", "nope")
     assert _valid_period("20260905") is None

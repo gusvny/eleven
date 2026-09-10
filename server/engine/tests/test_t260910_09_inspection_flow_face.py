@@ -126,9 +126,11 @@ def _mechanism_result() -> dict:
 
 
 def test_build_ticket_face_consumes_mechanism_result_generically():
+    # t260910-11：报告 face 展示键退役 → build_ticket_face 收敛回 4 参（分派 face 仍在 activity 入参）
     face = build_ticket_face("inspection-mechanism-face-20260910", "mechanism-face",
-                             "mechanism", "20260910", _mechanism_result())
-    assert face["kind"] == "inspection" and face["face"] == "mechanism"
+                             "20260910", _mechanism_result())
+    # 报告 face 展示键已随 t260910-11 除名（消费面=扫描器 result.face 与 activity 分派）
+    assert face["kind"] == "inspection" and "face" not in face
     assert face["heartbeat"] is False and face["summary"]["med"] == 1
     assert face["findings"][0]["id"] == "dead-mechanism:abc1234567"
     sugg = face["suggested_fix_tickets"]
@@ -141,7 +143,7 @@ def test_build_ticket_face_heartbeat_zero_finding_semantics():
     result = {"face": "simplify", "findings": [],
               "summary": {"high": 0, "med": 0, "low": 0}, "heartbeat": True, "meta": {}}
     face = build_ticket_face("inspection-simplify-face-20260910", "simplify-face",
-                             "simplify", "20260910", result)
+                             "20260910", result)
     assert face["heartbeat"] is True
     assert "心跳" in face["heartbeat_note"]
     assert face["suggested_fix_tickets"] == []
@@ -150,4 +152,4 @@ def test_build_ticket_face_heartbeat_zero_finding_semantics():
 def test_build_ticket_face_malformed_result_fails_closed():
     from inspection_flow import INSPECTION_RED_LINE
     with pytest.raises(ValueError):
-        build_ticket_face("t", "i", "mechanism", "20260910", {"findings": "not-a-list"})
+        build_ticket_face("t", "i", "20260910", {"findings": "not-a-list"})

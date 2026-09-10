@@ -26,16 +26,14 @@ import lib_inspection as lib
 
 NORMAL_DECL = """schema: v1
 instances:
-  - id: test-face
-    face: test
+  - id: integration-tests
     enabled: true
     schedule:
       kind: cron
       cron: 0 6 * * 1
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
-  - id: doc-face
-    face: doc
+  - id: docs-sync
     enabled: false
     schedule:
       kind: cron
@@ -46,8 +44,7 @@ instances:
 
 UNWIRED_DECL = """schema: v1
 instances:
-  - id: test-face
-    face: test
+  - id: integration-tests
     enabled: true
     schedule:
       kind: every-n-tickets
@@ -104,11 +101,11 @@ def main() -> int:
     try:
         # ── 离线拒绝腿（纯标准库可验，闸内即跑）──
         # 腿a：畸形声明——拒绝且理由指向声明本身，不指向连接/命名空间
-        ok_a = expect_refuse("腿a(畸形声明)", malformed, "test-face", ["声明"])
+        ok_a = expect_refuse("腿a(畸形声明)", malformed, "integration-tests", ["声明"])
         # 腿b：启用实例声明未接线 kind——拒绝并点名该 kind 与已接线 kind 清单（M2）
-        ok_b = expect_refuse("腿b(未接线kind)", unwired, "test-face", ["every-n-tickets", "cron"])
+        ok_b = expect_refuse("腿b(未接线kind)", unwired, "integration-tests", ["every-n-tickets", "cron"])
         # 腿c：enabled=false 实例——拒绝并点名实例（声明门行为级核心）
-        ok_c = expect_refuse("腿c(占位实例)", normal, "doc-face", ["doc-face"])
+        ok_c = expect_refuse("腿c(占位实例)", normal, "docs-sync", ["docs-sync"])
         # 腿d：未知实例——拒绝并点名实例
         ok_d = expect_refuse("腿d(未知实例)", normal, "nope", ["nope"])
 
@@ -132,7 +129,7 @@ def main() -> int:
         private_queue = "suyou-insp-decl-%05d" % os.getpid()
         os.environ["SANDBAR_TASK_QUEUE"] = private_queue
         with lib.StageWorker(private_queue):
-            proc, parsed = lib.run_trigger(["trigger", "--instance", "test-face",
+            proc, parsed = lib.run_trigger(["trigger", "--instance", "integration-tests",
                                             "--decl-path", normal])
             if not isinstance(parsed, dict) or parsed.get("ok") is not True:
                 failures.append("腿e enabled 实例触发未放行：%r | stderr=%s"
@@ -145,7 +142,7 @@ def main() -> int:
                                     % (result,))
                 else:
                     # 腿f：同期重复触发——每期一票：回执仍指同一张票，不得开出第二张
-                    proc2, parsed2 = lib.run_trigger(["trigger", "--instance", "test-face",
+                    proc2, parsed2 = lib.run_trigger(["trigger", "--instance", "integration-tests",
                                                       "--decl-path", normal])
                     r2 = (parsed2 or {}).get("result") or {}
                     tid2 = str(r2.get("ticket_id") or "")

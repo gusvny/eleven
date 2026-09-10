@@ -1,4 +1,7 @@
 # sandbar 巡检声明（inspection epic 票①，t260905-03）——机制在引擎，面在项目声明。
+# 260910 巡检校准（t260910-11）：id 去后缀（test-face→integration-tests、doc-face→docs-sync），
+# 声明字段 face 除名（零消费者，旧声明含 face 一律解析拒收点名；workflow 输入
+# InspectionPeriodicInput.face 保留默认值兼容历史重放）。
 # 引擎只出通用调度器与开票机制（inspection_trigger.py / InspectionPeriodicWorkflow），
 # 「怎么定时、跑哪个 workflow」全部由本文件声明：改声明即改行为，不改引擎码。
 # 解析真源=inspection_decl.py，只认其头注声明的 YAML 子集；子集外形态一律
@@ -7,8 +10,7 @@
 # 字段说明：
 #   schema    声明格式版本（现只认 v1）
 #   instances 巡检实例表（每实例=一个扫描面的调度位；每期一票按实例独立开票）
-#   id        实例标识（小写 slug，作票号组成段）
-#   face      扫描面（test=测试面 / doc=文档面……自由标量，票面展示用）
+#   id        实例标识（小写 slug，作票号组成段；票号形如 inspection-<id>-<期号>）
 #   enabled   是否启用（false=占位不调度不触发——声明驱动开关，行为级验收点）
 #   schedule  定时法声明：kind=cron（已接线）| every-n-tickets / race-first（未接线，只可
 #             以注释示例存在——启用实例声明未接线 kind=解析显式报错并点名已接线清单）
@@ -16,16 +18,14 @@
 #   template  巡检票模板标识（票面展示用）
 schema: v1
 instances:
-  - id: test-face
-    face: test
+  - id: integration-tests
     enabled: true
     schedule:
       kind: cron
       cron: 0 9 * * 1
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
-  - id: doc-face
-    face: doc
+  - id: docs-sync
     enabled: false
     schedule:
       kind: cron
@@ -36,7 +36,6 @@ instances:
   # ---- enabled=false 占位——启用按宿主节奏。启用路径：本文件改 true（或
   # ---- inspection_trigger.py schedule-up），启用即按 cron 每周自动开票。
   - id: mechanism-face
-    face: mechanism
     enabled: false
     schedule:
       kind: cron
@@ -44,7 +43,6 @@ instances:
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
   - id: simplify-face
-    face: simplify
     enabled: false
     schedule:
       kind: cron

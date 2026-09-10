@@ -1,7 +1,7 @@
 """inspection_decl — inspection declaration reader/validator (inspection epic
 ticket 1, t260905-03).
 
-The mechanism lives in the engine, the face lives in the project declaration: this
+The mechanism lives in the engine, the scheduling face lives in the project declaration: this
 module does exactly one thing, "declaration file → structured instance table", which
 the scheduling and ticket-opening machinery (inspection_trigger.py /
 InspectionPeriodicWorkflow) consumes.
@@ -10,8 +10,8 @@ Settled design (preconditions from review_plan conditional-pass comments C1-C3 +
   - Location: a standalone inspection.yaml (not inside verify.yaml — that is the
     per-ticket re-verification gate; inspection scheduling belongs to the timer domain,
     and stuffing it in means semantic drift plus a wider engine whitelist. What
-    "same family as ui_evidence" really means is the "mechanism in the engine, face in
-    the project declaration" principle, not the same file).
+    "same family as ui_evidence" really means is the "mechanism in the engine, scheduling
+    face in the project declaration" principle, not the same file).
   - Parser: a **zero-dependency YAML subset parser** (runs in the docker test image /
     scenario lane / locally, stdlib only). It accepts only the subset declared in this
     header; anything outside the subset fails closed with an error naming the line
@@ -77,7 +77,6 @@ class InstanceSpec:
     """One inspection instance (the anchor for everything declaration-driven)."""
 
     id: str
-    face: str
     enabled: bool
     kind: str
     cron: str = ""
@@ -336,9 +335,10 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
         where = "%s instances[%d]" % (source, idx)
         if not isinstance(item, dict):
             raise DeclError("%s：实例必须是映射（got %s）" % (where, type(item).__name__))
-        unknown = sorted(set(item) - {"id", "face", "enabled", "schedule", "workflow", "template"})
+        unknown = sorted(set(item) - {"id", "enabled", "schedule", "workflow", "template"})
         if unknown:
-            raise DeclError("%s：未知实例字段 %s（合法：id/face/enabled/schedule/workflow/template）"
+            raise DeclError("%s：未知实例字段 %s（合法：id/enabled/schedule/workflow/template；"
+                            "face 已于 260910 巡检校准票 t260910-11 除名——零消费者，旧声明含 face 一律拒收点名）"
                             % (where, unknown))
         inst_id = _req_str(where, item, "id")
         if not INSTANCE_ID_RE.match(inst_id):
@@ -346,7 +346,6 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
         if inst_id in seen_ids:
             raise DeclError("%s：实例 id 重复：%s" % (where, inst_id))
         seen_ids.add(inst_id)
-        face = _req_str(where, item, "face")
         enabled_raw = item.get("enabled")
         if not isinstance(enabled_raw, str) or not BOOL_RE.match(enabled_raw):
             raise DeclError("%s：enabled 只认 true/false 字面（got %r）" % (where, enabled_raw))
@@ -358,7 +357,7 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
         template = _req_str(where, item, "template")
         kind, cron, n = _validate_schedule(where, item.get("schedule"), enabled)
         instances.append(InstanceSpec(
-            id=inst_id, face=face, enabled=enabled, kind=kind, cron=cron, n=n,
+            id=inst_id, enabled=enabled, kind=kind, cron=cron, n=n,
             workflow=workflow_name, template=template))
     return InspectionDecl(schema=SCHEMA, instances=instances, source=source)
 
@@ -374,7 +373,6 @@ def build_schedule_specs(decl: InspectionDecl) -> List[Dict[str, Any]]:
             continue
         specs.append({
             "instance_id": it.id,
-            "face": it.face,
             "kind": it.kind,
             "cron": it.cron,
             "n": it.n,

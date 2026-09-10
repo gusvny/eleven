@@ -74,6 +74,13 @@ _PATH_RE = re.compile(r"(?:\.\./|\./)?[A-Za-z0-9_][A-Za-z0-9_\-./]*\.(?:py|mjs|t
 _LINE_REF_RE = re.compile(r"\bL(\d{1,5})\b")
 _PRODUCER_EXTS = {".py", ".mjs", ".ts", ".tsx", ".js", ".md", ".sh", ".yaml", ".yml", ".json"}
 GUARD_EXTS = {".py", ".mjs", ".ts", ".tsx", ".js"}
+# 扫描根排除表（t260910-11 误报校准）：泳道与过程目录不是生产方源码——旧泳道副本
+# （.lane/<票>/…）曾被 S2 当成生产方、把已删文案判成「在场」（假绿）或反衬出满屏 high。
+# 单点常量：collect_producers / collect_guards / build_ref_resolver 三处共用。
+EXCLUDED_DIRS = frozenset((
+    "node_modules", ".git", "out", ".venv", "data", "__pycache__",
+    ".lane", ".worktrees", ".suyou", ".sandbar", ".dsh",  # naming-compat（工单③点名的排除目录，数据非新标识）
+))
 
 
 class ScanError(Exception):
@@ -148,29 +155,71 @@ def jaccard(a: set, b: set) -> float:
     return inter / union if union else 0.0
 
 
+_CMD_JACCARD = 0.75          # S1 第二级（断言对象）阈值（近重必近同 cmd；单 token 差异形态=守不同对象，须压掉）
+_SELECTOR_JACCARD = 0.50     # S1 第三级（选择器/锚点字面）阈值
+
+
+def _quoted_literals(text: str) -> set:
+    """cmd/断言里的引号字面（选择器/锚点形态的提取面；无引号=空集=该维度无分歧）。"""
+    out = set()
+    for m in re.finditer(r'"([^"\\]+)"|' + r"'([^'\\]+)'" + r"|`([^`\\]+)`", text or ""):
+        out.add(next(g for g in m.groups() if g is not None))
+    return out
+
+
+def _pair_is_true_duplicate(name_a: str, tok_a: set, entry_a: Dict[str, Any],
+                            name_b: str, tok_b: set, entry_b: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    """S1 三级复核（t260910-11 校准）：意图 + 断言对象 + 选择器三级全符才判重；
+    任一维度分歧不判重（返回 False，调用方计入 duplicate_suppressed）——防阈值
+    一级就吞掉「意图相近但守不同对象」的真重复，也防静默放过真重复（复核链路
+    在 meta 里留计数，人可查）。"""
+    detail = {"pair": "%s × %s" % (name_a, name_b)}
+    # 一级：意图（name+intent 词 Jaccard，调用方已过阈值）
+    cmd_a, cmd_b = str(entry_a.get("cmd", "")), str(entry_b.get("cmd", ""))
+    tok_cmd_a, tok_cmd_b = tokenize(cmd_a), tokenize(cmd_b)
+    # 二级：断言对象（cmd 词 Jaccard；双方 cmd 均无 token 视为该维度不分歧）
+    if tok_cmd_a or tok_cmd_b:
+        if jaccard(tok_cmd_a, tok_cmd_b) < _CMD_JACCARD:
+            detail["diverge"] = "cmd"
+            return False, detail
+    # 三级：选择器/锚点字面（cmd 引号字面 Jaccard；双方均无字面=不分歧）
+    sel_a, sel_b = _quoted_literals(cmd_a), _quoted_literals(cmd_b)
+    if sel_a or sel_b:
+        if jaccard(sel_a, sel_b) < _SELECTOR_JACCARD:
+            detail["diverge"] = "selector"
+            return False, detail
+    return True, detail
+
+
 def scan_duplicate_scenarios(entries: List[Dict[str, Any]]) -> Tuple[List[Finding], Dict[str, Any]]:
     """entries: [{name, intent, cmd}] (malformed entries are shape-normalized by
     parse_scenarios but may still carry errors). Returns (findings, meta). O(n²) pairwise
     comparison, n at the scale of hundreds."""
-    meta: Dict[str, Any] = {"compared": 0}
+    meta: Dict[str, Any] = {"compared": 0, "duplicate_suppressed": 0}
     findings: List[Finding] = []
     norm = []
     for e in entries:
         text = "%s %s" % (e.get("name", ""), e.get("intent", ""))
-        norm.append((str(e.get("name", "")), tokenize(text)))
+        norm.append((str(e.get("name", "")), tokenize(text), e))
     for i in range(len(norm)):
         for j in range(i + 1, len(norm)):
-            name_a, tok_a = norm[i]
-            name_b, tok_b = norm[j]
+            name_a, tok_a, e_a = norm[i]
+            name_b, tok_b, e_b = norm[j]
             meta["compared"] += 1
             score = jaccard(tok_a, tok_b)
-            if score >= DUP_JACCARD:
-                findings.append(Finding(
-                    scan="duplicate", severity="med",
-                    subject="dup:%s × %s" % (name_a, name_b),
-                    evidence="intent/name 词重叠 Jaccard=%.2f（阈值 %.2f），共享词 %d 个"
-                             % (score, DUP_JACCARD, len(tok_a & tok_b)),
-                    suggestion="两场景意图近重——合并或显式分化意图描述（intent 级重复禁止是清单纪律）"))
+            if score < DUP_JACCARD:
+                continue
+            # 一级过阈值后走三级复核（t260910-11）：意图+断言对象+选择器全符才判重
+            is_dup, detail = _pair_is_true_duplicate(name_a, tok_a, e_a, name_b, tok_b, e_b)
+            if not is_dup:
+                meta["duplicate_suppressed"] += 1
+                continue
+            findings.append(Finding(
+                scan="duplicate", severity="med",
+                subject="dup:%s × %s" % (name_a, name_b),
+                evidence="三级复核全符（意图 Jaccard=%.2f ≥ %.2f + 断言对象/选择器不分歧），"
+                         "共享词 %d 个" % (score, DUP_JACCARD, len(tok_a & tok_b)),
+                suggestion="两场景意图/对象/选择器三近重——合并或显式分化（intent 级重复禁止是清单纪律）"))
     return findings, meta
 
 
@@ -246,11 +295,90 @@ def is_anchor_literal(s: str) -> bool:
         return False
     if re.match(r"^[\w\-./: ]+$", s):   # a pure ascii selector/path with spaces
         return False
+    if re.search(r"[？！?]", s) or s.endswith("："):  # 疑问/说明语气=守卫自述散文，非文案锚
+        return False
+    if re.search(r"（[^（）]*[A-Za-z0-9][^（）]*）", s):  # 全角括号内嵌 ascii=注释性短语（执行规格（spec）），非文案字面
+        return False
+    if re.search(r"\([^()]*[A-Za-z0-9][^()]*\)", s):    # 半角括号内嵌 ascii 同理（KI-036 注释形态）
+        return False
     if re.search(r"%[sdrif]", s):        # assertion/log format strings (the guard's own wording, not a producer anchor)
         return False
     if re.search(r"\[\w+[=~^|]?", s):    # attribute selectors (DOM locators, not copy anchors)
         return False
     return True
+
+
+# 断言行/守卫自述行判据（t260910-11 校准）：文案锚只可能出现在「对捕获到的页面文本做
+# 断言」的行上；throw/Error/日志行里的长散文是守卫自己的失败说明（首期 high 误报主体），
+# 不是生产方文案锚。
+_ASSERT_LINE_RE = re.compile(r"\b(assert|check|expect|toContain|includes|toBe|toHave|match|snapshot)\w*\b")
+_GUARDSELF_LINE_RE = re.compile(r"(throw\b|new Error\(|console\.|\bprint\(|\blog\(|FAIL_REASON)")
+
+
+_FIXTURE_WRITE_CALL_RE = re.compile(r"\.\s*write\s*\(|write_text\s*\(|write_scenarios\s*\(")
+
+
+def _fixture_write_span(source: str) -> set:
+    """夹具造文件语句（t.write(…)/write_text(…)/write_scenarios(…)）的实参行号集合
+    （含续行直到括号闭合）——这些行里的路径字面是**写进夹具树的数据**，不是对真仓
+    的路径断言（自举夹具场景与 lib 型共享夹具的合法形态），S3 不判 stale、S2 不取锚。
+    括号不平衡/截断时保守地只标记到文件尾（宁可多豁免一行散文，不误判夹具数据）。"""
+    out: set = set()
+    depth = 0
+    in_call = False
+    for no, line in enumerate((source or "").splitlines(), start=1):
+        if not in_call and _FIXTURE_WRITE_CALL_RE.search(line):
+            in_call = True
+            depth = 0
+        if in_call:
+            out.add(no)
+            for ch in line:
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+            if depth <= 0:
+                in_call = False
+    return out
+
+
+def _anchor_candidate_lines(source: str) -> List[str]:
+    """Source → the lines where copy anchors may live (assertion lines minus guard-self
+    prose lines). Malformed lines simply yield no literals — degradation, not crash."""
+    fixture_span = _fixture_write_span(source)
+    out = []
+    for no, line in enumerate((source or "").splitlines(), start=1):
+        if no in fixture_span:
+            continue
+        if _GUARDSELF_LINE_RE.search(line):
+            continue
+        if _ASSERT_LINE_RE.search(line):
+            out.append(line)
+    return out
+
+
+def _line_string_literals(line: str) -> List[str]:
+    """Quoted literals from one line (single/double/backtick; no escapes spanning)."""
+    out = []
+    for m in re.finditer(r'"([^"\\\n]{1,400})"|' + r"'([^'\\\n]{1,400})'" + r"|`([^`\\\n]{1,400})`", line):
+        out.append(next(g for g in m.groups() if g is not None))
+    return out
+
+
+_ASSEMBLED_RE = re.compile(
+    r"[\u4e00-\u9fff]\s*[+|=<>(){}\[\]/\\]"   # CJK 粘连操作符
+    r"|[A-Za-z0-9]\s*[+|=<>(){}\[\]]"            # ascii 胶水（last+1 形态=行为描述非文案）
+    r"| getBy\(|aria-")
+
+
+def is_assembled_or_dom_anchor(anchor: str) -> bool:
+    """运行时拼装文本/DOM 结构锚判据（t260910-11 误报校准）：锚内 CJK 直接粘连 ASCII
+    操作符/选择器（「文案甲 + 文案乙」、aria-*、getBy(…)），说明锚描述的是运行时拼装
+    输出或 DOM 结构而非人读文案字面——这类锚组合失败可能是拼装顺序变了而非文案漂移，
+    **不得报 high**（校准红线），最高 med 交人审。注意全角引号内的按钮符号（「+ 新建」）
+    不是拼装痕迹——『』「」是 UI 文案字面的常态装饰，KI-051 回放锚（真文案漂移）必须
+    仍走 high 支路，判据不能把它误吞。"""
+    return bool(_ASSEMBLED_RE.search(anchor or ""))
 
 
 def anchor_fragments(anchor: str) -> List[str]:
@@ -294,14 +422,19 @@ def is_ui_guard(source: str) -> bool:
 def scan_guard_anchor_presence(
     guards: List[Tuple[str, str, List[str]]],
     producer_contents: Dict[str, str],
+    repo_wide_producers: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[Finding], Dict[str, Any]]:
     """guards: [(rel_path, source, producer_rels)] — producer_rels is the list of
     repo-relative producer paths this guard resolved to (state=ok); producer_contents
-    holds their content. Criteria in header tiers (1)-(4). Returns (findings, meta)."""
+    holds their content. Criteria in header tiers (1)-(4). Returns (findings, meta).
+    repo_wide_producers（t260910-11 校准）：tier-3（守卫定位的生产方内双缺）先做全仓
+    在场回退——锚字面/片段在仓内**任何**生产方文件在场 → 措辞未漂移，只是守卫引用的
+    生产方定位不完整 → 记 meta 不出发现（真实报告满屏 high 的主根因即此）；全仓双缺
+    才进确证/降级判定。"""
     findings: List[Finding] = []
     meta: Dict[str, Any] = {"guards": len(guards), "anchors_checked": 0,
                             "anchors_skipped_no_producer": 0, "guards_no_producer": [],
-                            "guards_non_ui": 0}
+                            "guards_non_ui": 0, "anchors_present_repo_wide": 0}
     for rel, source, producer_rels in guards:
         if not is_ui_guard(source):
             meta["guards_non_ui"] += 1
@@ -311,7 +444,10 @@ def scan_guard_anchor_presence(
             meta["guards_no_producer"].append(rel)
             continue
         ext = Path(rel).suffix
-        literals = extract_string_literals(source, ext)
+        # t260910-11 校准：文案锚只从断言行取字面（守卫自述散文行豁免）——首期 147 条
+        # high 的主体是 throw/日志行里的失败说明散文被当成了文案锚
+        literals = [lit for line in _anchor_candidate_lines(source)
+                    for lit in _line_string_literals(line)]
         for lit in literals:
             if not is_anchor_literal(lit):
                 continue
@@ -321,7 +457,24 @@ def scan_guard_anchor_presence(
             if hit_files:
                 continue  # tiers 1/2: present, zero findings
             cov = max((_producer_hit(c, lit, frags)[1] for c in producer_here.values()), default=0.0)
-            if cov <= 0.0:
+            assembled = is_assembled_or_dom_anchor(lit)
+            if cov <= 0.0 and repo_wide_producers:
+                elsewhere = any(_producer_hit(c, lit, frags)[0]
+                                for c in repo_wide_producers.values())
+                if elsewhere:
+                    meta["anchors_present_repo_wide"] += 1
+                    continue  # 措辞在仓内在场：定位不完整 ≠ 漂移，不出发现
+            if cov <= 0.0 and assembled:
+                # 校准降级（t260910-11）：拼装/DOM 形态锚核心片段全缺也只 med——拼装顺序
+                # 变化 ≠ 文案漂移，静态面无法确证，交人审（校准红线：不得报 high）
+                findings.append(Finding(
+                    scan="guard-anchor", severity="med",
+                    subject="%s ⇢ %s" % (rel, lit[:40]),
+                    evidence="拼装/DOM 形态锚（含运行时拼接或选择器痕迹）核心片段全缺——"
+                             "可能拼装顺序变化而非文案漂移，降级 med 交人审（生产方：%s）"
+                             % "、".join(sorted(producer_here)),
+                    suggestion="人审比对锚与生产方现措辞；确认漂移则修守卫（dev-lane 工单）"))
+            elif cov <= 0.0:
                 # tier 3 confirmed drift: the producer context is in place, both the
                 # literal and the combined fragments are missing, and every core fragment
                 # is missing
@@ -368,9 +521,17 @@ def scan_stale_assertions(
       external (environment paths / bare names in config docs etc.) → not judged, noted
                in meta to prevent false positives."""
     findings: List[Finding] = []
-    meta: Dict[str, Any] = {"refs_checked": 0, "refs_external": 0}
+    meta: Dict[str, Any] = {"refs_checked": 0, "refs_external": 0,
+                            "refs_fixture_or_doc": 0}
+    scratch_re = re.compile(
+        r"(^x_|fake|dummy|fixture|sample|_any\b|tmp_|example"
+        r"|^(x|bg|other|staged|missing|test|tmp|demo|example|foo|bar|baz)([.\-_]|$))",
+        re.IGNORECASE)
     for rel, source, _resolved, ref_states in guards:
+        fixture_span = _fixture_write_span(source)
         for line_no, line in enumerate(source.splitlines(), start=1):
+            if line_no in fixture_span:
+                continue  # 夹具造文件语句的实参行：路径是写进夹具树的数据，非真仓断言
             for ref in _path_refs(line):
                 if is_self_ref(ref, rel):
                     continue  # self-reference (including sc_ prefix variants)
@@ -383,6 +544,26 @@ def scan_stale_assertions(
                     meta["refs_external"] += 1
                     continue
                 if state == "missing":
+                    # 语境豁免（t260910-11 校准）：①注释/文档散文行（* # // > 开头）——
+                    # 交叉引用不是路径断言；②fixture/纯函数测试数据行（check/assert 调用、
+                    # == 断言、repo/workdir 等夹具变量）——路径是喂给夹具的数据，本就不该
+                    # 在真仓存在；③scratch 命名（x_fake.py / *_any 等）——自证非生产资产。
+                    # 三类只计数不出发现（首期 stale-ref 误报主体）。
+                    stripped = line.strip()
+                    if (stripped.startswith(("*", "#", "//", ">", "|"))   # 注释/文档散文（含 //；修复点：前版 [:1] 只比单字符永远吃不到 //）
+                            or re.search(r"\b(check|assert|expect|record|ok|log|print)\w*\(", line)
+                            or re.search(r"(console\.|ENV_FAIL|FAIL_REASON)", line)
+                            or "==" in line
+                            or re.search(r"[\"']\s+(not\s+)?in\s+", line)   # 成员测试（消息/集合数据，非路径断言）
+                            or re.search(r" is (True|False)\b", line)
+                            or re.search(r"(repo|workdir|tmp_path|tmp_repo|fixture|sandbox)", line)
+                            or re.search(r":\s*[\"']", line)          # path→content 映射（夹具文件表）
+                            or re.search(r"\[[^\]]*[\"'][^\]]*\]", line)  # 字符串列表实参（write_set/refs 数据）
+                            or re.search(r"\.write\(|write_text\(|mkdir|makedirs", line)  # 夹具造文件调用
+                            or re.match(r"[A-Z_]{2,}\s*=\s*[\"']", stripped)  # 夹具常量表（UI_PROD = "…"）
+                            or scratch_re.search(Path(ref).name)):
+                        meta["refs_fixture_or_doc"] += 1
+                        continue
                     repo_anchored = ref.split("/")[0] in REPO_TOP_DIRS
                     findings.append(Finding(
                         scan="stale-ref",
@@ -408,15 +589,20 @@ def scan_stale_assertions(
 
 
 def _path_refs(source: str) -> set:
-    """Path reference extraction. Skips hits whose immediately preceding character is `.`
-    or `~`: the former are dot-prefixed directory names (.dsh/.git etc., which the regex
-    cannot express), the latter is HOME-relative context — neither is an in-repo path
-    reference."""
+    """Path reference extraction (t260910-11 calibrated): only **path-shaped** refs —
+    a ref must carry a path separator (relative `./ ../ dir/…` or repo-root-relative).
+    Bare file names (`index.mjs`) are module-specifier shapes (import/require forms),
+    not file-path assertions — emitting them was the main S3 false-positive source
+    (a module name is not a path that must exist). Dot-prefixed directory names
+    (.dsh/.git etc.) and HOME-relative (`~/`) contexts stay excluded as before."""
     out = set()
     for m in _PATH_RE.finditer(source or ""):
         if m.start() > 0 and source[m.start() - 1] in (".", "~"):
             continue
-        out.add(m.group(0))
+        ref = m.group(0)
+        if "/" not in ref:
+            continue  # 模块加载形态（裸名）：不是路径断言，不判 stale
+        out.add(ref)
     return out
 
 
@@ -437,7 +623,7 @@ def build_ref_resolver(repo_root: Path):
     for p in sorted(root.rglob("*")):
         if not p.is_file() or p.suffix not in _PRODUCER_EXTS:
             continue
-        if any(seg in ("node_modules", ".git", "out", ".venv", "data") for seg in p.parts):
+        if EXCLUDED_DIRS.intersection(p.parts):
             continue
         basename_index.setdefault(p.name, []).append(p.relative_to(root).as_posix())
 
@@ -449,6 +635,15 @@ def build_ref_resolver(repo_root: Path):
                 return "ok", target.relative_to(root).as_posix()
             return "external", None
         if "/" in ref:
+            # `..` 段归一化（server/../server/... 形态）：守卫里常见的「保险前缀」写法
+            # 不归一化会假性 missing（t260910-11 校准）
+            parts = []
+            for seg in ref.split("/"):
+                if seg == ".." and parts:
+                    parts.pop()
+                    continue
+                parts.append(seg)
+            ref = "/".join(parts)
             if (root / ref).is_file():
                 return "ok", ref
             # Naming-convention variant fallback: -/_ swapped, sc_ prefix toggled (two
@@ -469,8 +664,8 @@ def build_ref_resolver(repo_root: Path):
             hits = basename_index.get(cand, [])
             if hits:
                 return "ok", hits[0]
-        if ref.rsplit(".", 1)[-1] in ("py", "mjs", "ts", "tsx", "js"):
-            return "missing", ref
+        # t260910-11 校准：裸名（无路径分隔符）不再判 missing（模块名不是必须存在的
+        # 路径）——语境不明一律 external，只记 meta 不出发现
         return "external", None
 
     return resolve
@@ -522,7 +717,7 @@ def collect_producers(repo_root: Path, extra_refs: set, producer_roots: Tuple[st
         for p in base.rglob("*"):
             if p.suffix not in _PRODUCER_EXTS or not p.is_file():
                 continue
-            if "node_modules" in p.parts or "/out/" in p.as_posix():
+            if EXCLUDED_DIRS.intersection(p.parts):
                 continue
             rel = p.relative_to(repo_root).as_posix()
             try:
@@ -594,8 +789,10 @@ def run_test_face_scan(
                 producers_needed.add(target)
         guard_states.append((rel, source, producer_rels, states))
     producers = collect_producers(repo_root, producers_needed, producer_roots or PRODUCER_ROOTS)
+    repo_wide = collect_producers(repo_root, set(), producer_roots or PRODUCER_ROOTS)
     anchor_findings, anchor_meta = scan_guard_anchor_presence(
-        [(rel, source, producer_rels) for rel, source, producer_rels, _ in guard_states], producers)
+        [(rel, source, producer_rels) for rel, source, producer_rels, _ in guard_states], producers,
+        repo_wide_producers=repo_wide)
     findings.extend(anchor_findings)
 
     def _lines(ref: str) -> Optional[int]:
@@ -620,6 +817,7 @@ def run_test_face_scan(
         "meta": {
             "scenarios": len(entries),
             "duplicate_compared": dup_meta.get("compared", 0),
+            "duplicate_suppressed": dup_meta.get("duplicate_suppressed", 0),
             "guards": anchor_meta.get("guards", 0),
             "guards_unparseable": bad_guards,
             "anchors_checked": anchor_meta.get("anchors_checked", 0),

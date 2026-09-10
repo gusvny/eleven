@@ -25,21 +25,19 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lib_inspection as lib
 
 # 实例 id 带进程级唯一戳：每期一票按「实例 id+期号」去重——共享台上重跑旅程/与
-# decl-gate 的 test-face 同实例同日会撞去重回执（拿到已收口旧票=假门误报），
+# decl-gate 的 integration-tests 同实例同日会撞去重回执（拿到已收口旧票=假门误报），
 # 唯一实例 id 让旅程每次拿到自己的新票（期号仍取当日，两实例票号互异断言不变）。
 _STAMP = os.getpid() % 100000
 TWO_INSTANCE_DECL = """schema: v1
 instances:
-  - id: test-face-%05d
-    face: test
+  - id: integration-tests-%05d
     enabled: true
     schedule:
       kind: cron
       cron: 0 6 * * 1
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
-  - id: doc-face-%05d
-    face: doc
+  - id: docs-sync-%05d
     enabled: true
     schedule:
       kind: cron
@@ -198,10 +196,10 @@ def main() -> int:
         # 起 worker 起票。__exit__ 必回收（TERM→KILL）。合并后主仓 worker 承接，仍兼容。
         with lib.StageWorker(private_queue):
             # 全链·种漂移实例：开票→发现落面（high+溯源建议）→人门两拍→收口→发现留存
-            tid_a = journey_one("journey[test-face]", "test-face-%05d" % _STAMP, drift.root,
+            tid_a = journey_one("journey[integration-tests]", "integration-tests-%05d" % _STAMP, drift.root,
                                 workdir, failures, expect_findings=True)
             # 全链·干净实例：零发现心跳票照开照收（全绿期=心跳证明）
-            tid_b = journey_one("journey[doc-face]", "doc-face-%05d" % _STAMP, clean.root,
+            tid_b = journey_one("journey[docs-sync]", "docs-sync-%05d" % _STAMP, clean.root,
                                 workdir, failures, expect_findings=False)
             if tid_a and tid_b and tid_a == tid_b:
                 failures.append("两实例开出同一票号（实例维度串票）：%r" % tid_a)

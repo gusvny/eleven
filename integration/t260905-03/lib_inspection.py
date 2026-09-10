@@ -91,10 +91,80 @@ def reexec_venv_if_missing(mods=("temporalio",)) -> None:
     die_env("python 三方依赖缺席：%s（server/engine/.venv 缺席或不可用）" % ",".join(missing))
 
 
+# ── 测试腿隔离生产 Temporal（t260910-11 红线）──
+# 事故形态（260910 实证）：本 lib 从不注入 SANDBAR_TARGET_HOST，trigger/worker/client
+# 子进程全落 shared.py 默认 127.0.0.1:7233 生产台——全套件每跑一次即向生产写两张巡检
+# 票，私有 worker 死亡后票永久 RUNNING，真实期次号被「一票一期」锁占住。
+# 口径（review 钉死）：子进程 env 一律由 spawn_env 单点构造（TEST_TARGET_HOST 常量），
+# 构造后自检「已设且 ==17233 且 namespace==测试台存量名（TEST_NAMESPACE）」；ambient 为空→注入隔离台；
+# ambient 指生产 7233 或任何第三方值→die_fail 点名失败的检查项；ambient 的
+# SANDBAR_* 不得静默穿透进子进程（构造时显式覆盖/剔除）。
+TEST_TARGET_HOST = "127.0.0.1:17233"
+TEST_NAMESPACE = "suyou-test"  # naming-compat：绑定存量 docker 测试台命名空间（docker-compose.test.yml 定义；改名随专门迁移票）
+_ENV_OVERRIDES = ("SANDBAR_TARGET_HOST", "SANDBAR_NAMESPACE")  # 红线键：绝不穿透
+
+
+def spawn_env(extra=None):
+    """子进程 env 构造单点（白名单 fail-closed，见上注）。"""
+    ambient = os.environ.get("SANDBAR_TARGET_HOST")
+    if ambient:
+        if ":7233" in ambient:
+            die_fail("测试腿目标指向生产 Temporal（SANDBAR_TARGET_HOST=%s）——拒跑："
+                     "巡检测试禁止写生产台 7233（260910 事故回归；请用 docker 隔离台 %s，"
+                     "sh server/docker-compose.test.yml up -d）" % (ambient, TEST_TARGET_HOST))
+        if ambient != TEST_TARGET_HOST:
+            die_fail("SANDBAR_TARGET_HOST=%s 既非隔离台 %s 亦非生产值——第三方值语境不明，"
+                     "fail-closed 拒跑（失败的检查项：目标白名单）" % (ambient, TEST_TARGET_HOST))
+    # 队列不属红线面：ambient 的 SANDBAR_TASK_QUEUE 照认（场景以 ambient 传私有队列），
+    # extra 显式覆盖；目标/namespace 两键绝不穿透（红线单点）
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("SANDBAR_TARGET_HOST", "SANDBAR_NAMESPACE")}
+    env["SANDBAR_TARGET_HOST"] = TEST_TARGET_HOST
+    env["SANDBAR_NAMESPACE"] = TEST_NAMESPACE
+    if extra:
+        env.update(extra)
+    # 构造后自检（不许 fail-open）：任一不满足即点名失败项
+    if env.get("SANDBAR_TARGET_HOST") != TEST_TARGET_HOST:
+        die_fail("spawn_env 自检失败：SANDBAR_TARGET_HOST=%r ≠ 隔离台 %r"
+                 % (env.get("SANDBAR_TARGET_HOST"), TEST_TARGET_HOST))
+    if ":7233" in env.get("SANDBAR_TARGET_HOST", ""):
+        die_fail("spawn_env 自检失败：目标含生产台 7233")
+    if env.get("SANDBAR_NAMESPACE") != TEST_NAMESPACE:
+        die_fail("spawn_env 自检失败：SANDBAR_NAMESPACE=%r ≠ %r"
+                 % (env.get("SANDBAR_NAMESPACE"), TEST_NAMESPACE))
+    return env
+
+
+# 本进程经 run_trigger 开出的巡检票登记（退出自清的账本；pid 戳见各场景实例名）
+STARTED_TICKETS = []
+
+
+def note_started_ticket(ticket_id: str) -> None:
+    if ticket_id and ticket_id not in STARTED_TICKETS:
+        STARTED_TICKETS.append(ticket_id)
+
+
+def cleanup_tickets(per_call_timeout: float = 20.0) -> None:
+    """退出自清：对本进程开过的巡检票逐个 cancel（幂等——已终态的票 cancel 报错即
+    忽略）。每次调用自带超时（防退出路径挂死）；失败只 WARN 放行退出，不吞不炸
+    （残留只可能落隔离台 17233，非生产风险）。已知边界（与 journey pid 戳做法一致的
+    两条）：①pid 复用+同日残留票可能撞「一票一期」去重——pid 戳把概率压到可忽略，
+    撞了也是隔离台内的去重回执，非生产污染；②进程被硬杀（SIGKILL）时本清理不执行，
+    残留同样只落隔离台。"""
+    for tid in list(STARTED_TICKETS):
+        try:
+            run_cmd([py_runner(), CLIENT, "cancel", json.dumps({"workflow_id": tid}, ensure_ascii=False)],
+                    timeout=per_call_timeout)
+        except Exception as e:  # noqa: BLE001——清理失败 WARN 后放行退出（不吞细节也不炸退出路径）
+            print("WARN: 退出自清 cancel %s 失败（%s）——残留落在隔离台 %s"
+                  % (tid, e, TEST_TARGET_HOST), flush=True)
+        finally:
+            STARTED_TICKETS.remove(tid)
+
+
 def run_cmd(cmd, env=None, timeout=180):
-    full_env = dict(os.environ)
-    if env:
-        full_env.update(env)
+    # env 一律过 spawn_env 单点（t260910-11 隔离红线；调用方 extra 显式覆盖）
+    full_env = spawn_env(env)
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                           cwd=REPO, env=full_env)
 
@@ -124,11 +194,16 @@ def run_scanner(repo_root: str):
 
 
 def run_trigger(action_args, env=None):
-    """跑触发面 CLI（如 ["trigger", "--instance", "test-face"]），返回 (proc, parsed)。"""
+    """跑触发面 CLI（如 ["trigger", "--instance", "integration-tests"]），返回 (proc, parsed)。
+    放行回执带票号时登记进 STARTED_TICKETS（退出自清账本）。"""
     require_entry(TRIGGER, "巡检触发入口")
     proc = run_cmd([py_runner(), TRIGGER] + list(action_args), env=env)
     env_fail_if_missing_dep(proc)
-    return proc, last_json(proc.stdout)
+    parsed = last_json(proc.stdout)
+    res = scanner_result(parsed)
+    if res:
+        note_started_ticket(str(res.get("ticket_id") or ""))
+    return proc, parsed
 
 
 def run_client(sub: str, args: dict):
@@ -178,8 +253,9 @@ class StageWorker:
         import time as _time
         fd, self.log_path = tempfile.mkstemp(prefix="sandbar-insp-worker-", suffix=".log")
         os.close(fd)
-        env = dict(os.environ)
-        env["SANDBAR_TASK_QUEUE"] = self.queue
+        # t260910-11 隔离红线：worker 子进程 env 同样只从 spawn_env 单点出（私有队列
+        # 经 extra 显式传入；目标/namespace 白名单自检在 spawn_env 内）
+        env = spawn_env({"SANDBAR_TASK_QUEUE": self.queue})
         for k in self.ENTANGLED:
             env.pop(k, None)
         self._log = open(self.log_path, "a", encoding="utf-8")
@@ -220,6 +296,13 @@ class StageWorker:
         finally:
             if self._log is not None:
                 self._log.close()
+            # 退出自清（t260910-11）：worker 回收后对本进程开过的巡检票逐个 cancel——
+            # 正常/报错/超时/取消四条退出路径都过 __exit__（with 保证）；cleanup 内部
+            # 每调用自带超时、失败 WARN 放行（不挂死退出路径、不在隔离台留僵尸票）
+            try:
+                cleanup_tickets()
+            except Exception as e:  # noqa: BLE001——自清失败不炸 __exit__
+                print("WARN: 退出自清异常（%s）" % e, flush=True)
         return False
 
 
@@ -389,7 +472,7 @@ def stale_tree(label: str = "stale") -> RepoTree:
     t = RepoTree(label)
     t.write_scenarios([("t-fix-stale", "过时断言夹具：引用缺席与行号越界", "true")])
     t.write("integration/sc_guard_moved.py",
-            'CMD = "node integration/baselines/definitely_missing_asset.mjs"\n'
+            'cmd_target = "node integration/baselines/definitely_missing_asset.mjs"  # 小写赋值：真仓路径断言形态\n'
             'check_line("server/capture.mjs", 999)  # L999 越界：目标不足 999 行\n')
     t.write("server/capture.mjs", "export const ok = true;\n")
     return t
