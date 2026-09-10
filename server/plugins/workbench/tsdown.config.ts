@@ -1,8 +1,10 @@
 // 工单工作流台插件构建：产物形态对齐 dsh 客户端模块契约
 // （window.__ModuleLoader__.load({id, factory}) 惰性 CJS 工厂，react 与
 // @deepseek-ai/* 全部外部化走平台模块表）。
-// 构建（在 server/plugins/workbench/ 下；suyou 仓库无 npm 依赖，tsdown 从外部供给）：
-//   npx -y tsdown@0.22.2 -c tsdown.config.ts
+// 构建唯一入口：`bash build-client.sh`（在 server/plugins/workbench/ 下）。
+// tsdown 版本由 package.json / package-lock.json / pnpm-lock.yaml 三处钉死
+// （0.22.2，t260910-15）；参数全部来自本文件。禁止手跑 tsdown/npx/pnpm 构建
+// （其传递依赖不受本目录 lockfile 约束，是压缩器漂移入口）。
 // 产物 lib/client.js 已随仓库提交；只有改了 src/client/ 才需要重建。
 
 // closure-factory 外衣——与 dsh 共享 clientBundle 预设的产物形态一致。

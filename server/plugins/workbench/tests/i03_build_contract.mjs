@@ -45,7 +45,7 @@ section('1. rebuilt bundles carry banner copy + poll path (both cjs and esm)')
 for (const rel of ['server/plugins/workbench/lib/client.cjs', 'server/plugins/workbench/lib/client.js']) {
   const src = read(rel)
   if (src === null) {
-    ok(false, `${rel} exists (run: cd server/plugins/workbench && npx -y tsdown@0.22.2 -c tsdown.config.ts)`)
+    ok(false, `${rel} exists (run: cd server/plugins/workbench && bash build-client.sh)`)
     continue
   }
   ok(src.includes('重启控制台生效'), `${rel} contains banner copy 「重启控制台生效」（t260905-07 文案常量同源）`)

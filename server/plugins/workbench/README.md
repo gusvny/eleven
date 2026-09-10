@@ -72,9 +72,28 @@ variant 类 `<哈希>_hero`）整体 display:none，方向上不可收敛。t260
 
 ```
 cd server/plugins/workbench
-npx -y tsdown@0.22.2 -c tsdown.config.ts   # 产物 lib/client.cjs → client.js
+bash build-client.sh                        # 唯一构建入口：npm ci → tsdown → cjs≡js 复核 → sha256
+node tests/build-determinism.mjs            # 确定性自测：同源码连续两次构建 sha256 相等 + lib 无 git diff
 for f in smoke/*.mjs; do node "$f"; done   # 冒烟全绿
 ```
+
+**版本与参数钉死口径**（t260910-15）：tsdown 精确钉在 `0.22.2`——`package.json`
+（无 `^`/`~`）、`package-lock.json`、`pnpm-lock.yaml`（`pnpm import` 自 npm 锁同源
+导入，rolldown/oxc 压缩链两把锁版本一致）三处锁定；构建参数全部来自
+`tsdown.config.ts`。**禁止绕过 build-client.sh 手跑 tsdown/npx/pnpm 构建**：
+npx 与裸 pnpm install 的传递依赖（rolldown/oxc）不受本目录 lockfile 约束，
+是几百行压缩器化妆噪音（`Infinity`↔`1/0`、花括号风格）的复燃入口。
+
+**副产物口径**：产物仅 `lib/client.cjs` 与 `lib/client.js` 两个（config 未开
+sourcemap、无 gzip 步骤，无 mtime 类副产物进产物）；未来若开 sourcemap，
+map 内含绝对路径，不入仓。
+
+**遗留面（写集外，建议后续小票处置）**：仓根 `start-console.sh:56-65` 有活的
+自动构建入口——console 启动时 `src/client/index.tsx -nt lib/client.js` 即自动
+重建，三支：本地 `node_modules/.bin/tsdown`（本票钉死后拿 0.22.2）、回退
+`npx -y tsdown@0.22.2`（主版本有锚但传递依赖不受本目录 lockfile 约束=残余
+漂移面）、均不可用则跳过并显式告警。三分支参数都来自 tsdown.config.ts；建议
+后续小票把该自动构建改为调 `build-client.sh` 收口。
 
 产物已随仓库提交；只有改了 `src/client/` 才需要重建。dsh console 加载 `lib/client.js`
 生效（重启 console 由用户执行，3099 不由工单 agent 操作）。

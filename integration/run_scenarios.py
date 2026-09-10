@@ -767,6 +767,14 @@ SCENARIOS = [
     ("t260910-10-docs-ui-mock-v1",
      "文档视图 mock v1 终态旅程（t260910-10，KI-070 UI 半+260910 过稿版式，隔离台浏览器走查，工单必含③）：初值=缺省引擎仓选择态（synthesized 选项不依赖注册表真有 sandbar 条目）且首屏树=sandbar 篇目、初载 docs 请求无 project= 参数（缺省回落线上证据）；固定 UI 元素英文在场（Project/Docs/Notes/Search 输入框/On this page）；Project 切换器换夹具项目 → 请求带 ?project=<夹具>（wire 层反 viewProject 漂移）且树随所选项目切换（夹具篇目在场/sandbar 篇目退场）；开篇正文真渲染+五枚 chip 键在场（Status/Verified/Category/Updated/Path）、Verified 无数据源=显式 pending 占位且无日期形状（不留假值终态化）；On this page 大纲随选中文档渲染（h2 条目在场）且点击真跳转（目标标题入视口）；分组可折叠（组头点按条目可见性翻转）；Search 当前项目内过滤终态（收窄/清空还原）；空态退化（无 notes 的夹具切 Notes 页签 → 零条目+诚实 reason 在场+On this page 空+不残留旧项目内容+不炸）。断言锚=公开契约锚 data-wb-docs-root/[data-wb-doc-item]+元素角色/可见文本，不锚内部类名；playwright/浏览器缺失=env_fail（KI-036 家族）。与 t260905-06-doc-read-through intent 不同面：那条锁单仓阅读链路+代码块+窄栏单栏流+无溢出（回归归它），本条锁 mock v1 新元素与新旅程；与 t260910-10-docs-project-anchor 不同层（API 契约 vs DOM 终态）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "node integration/t260910-10/sc_docs_ui_mock_v1.mjs", "ro"),
+
+    # ---- t260910-15: build determinism — pin bundler version/args (byte-stable rebuild of committed lib/) ----
+    ("t260910-15-build-reproducible",
+     "同源码重建逐字节稳定（t260910-15 验收①②，灰盒 L3）：经组件公开构建入口（npm run build→仓内唯一构建脚本）依赖装一次（npm ci 按 lockfile，registry 漂移不混入断言）、同一 node_modules 连续两次构建 → lib/client.{cjs,js} sha256 逐字节相等且 cjs≡js 同体；构建后 git status 对 lib/ 为空=重建产物与落仓产物一致+零 map/gzip 等计划外副产物文件（porcelain 对 untracked 计数，副产物口径的兑现形态）；mtime 注入腿（改 src mtime 不改内容→第三次构建）sha 不变=时间戳不入产物（门禁/证据类断言的 mtime 干扰面）；终态自证 lib/ 仍干净=场景净零副作用。S3 判红语义：HEAD 产物若非锁定工具链可复现（历史漂移版本所建）即病灶实锤，实施段校准重建（一次性真实 diff）后恒绿。npm ci 网络/缓存失败=ENV_FAIL exit 2 点名尾段不假红；依赖在位时构建非零退出=FAIL 产品红。与 developer L1（workbench/tests build-determinism）intent 不同层（彼随实现重写不作契约网，本条闸内常驻锚公开接口与磁盘终态）；与 t260903-04-client-bundle-sync（改 src 别忘重建）、t260903-13-workbench-bundle-loads（产物形态合同）intent 不同面：本条守「重建必然逐字节可复现」。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "node integration/t260910-15/sc_build_reproducible.mjs"),
+    ("t260910-15-toolchain-pinned",
+     "打包工具链锁定完备负锁（t260910-15 验收①前置=t260908-01 化妆噪音故障的复发条件移除守卫，灰盒 L2 纯读秒级）：仓内不存在任何会拉到非 0.22.2 tsdown 的活声明口径——package.json devDependencies 精确版本无 ^/~；package-lock.json 根 specifier 与 node_modules/tsdown resolved 双点、pnpm-lock.yaml importers 段 specifier/version 双点均 0.22.2（双锁矛盾即 260910 实锤病灶：pnpm 路径曾锁漂移版）；口径载体文件集（package.json/两把 lockfile/tsdown.config.ts/build-client.sh/README）零漂移版本词面负锁（活口径只长在承诺载体上；验收记录等叙述面合法不扫——词面全仓扫会误咬历史叙述并自咬本场景，试跑实录）；start-console.sh 的 npx@0.22.2 为写集外合法固定面，主版本锚不进载体集合）；组件公开构建入口 scripts.build 指向仓内构建脚本非裸 tsdown。判定器先红绿自证（0.22.14 合成锁样必咬≥4 处、0.22.2 锁样必绿=防恒真）；锁定载体文件缺失/不可解析=FAIL 点名（承诺载体被拆是产品红非环境缺）。与 developer L1 负锁断言 intent 不同层；与 t260903-12-merge-checks-pairs（护栏配置对齐面）不同面。锚文件终态不锚行号与内部结构。实现段落地前红属预期（TDD 信号：当前仓双锁矛盾在案），arbitrate/merge 期必须绿",
+     "node integration/t260910-15/sc_toolchain_pinned.mjs", "ro"),
 ]
 
 CMD_TIMEOUT = 900

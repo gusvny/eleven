@@ -19,9 +19,10 @@
     }
   },
   "devDependencies": {
-    "tsdown": "^0.22.2"
+    "tsdown": "0.22.2"
   },
   "scripts": {
-    "build": "tsdown -c tsdown.config.ts"
+    "build": "bash build-client.sh",
+    "build:check": "node tests/build-determinism.mjs"
   }
 }
