@@ -2,11 +2,21 @@
 """t260902-07 集成测试 ①：路由表静态校验（stdlib，无 PyYAML 依赖）。
 
 校验对象：server/model-routes.yaml
-- integration 路由 = kimi-coding / k3（260907 宿主改表）
-- 其余角色无回归（default/developer=zai/glm-5.3-flash；ops/artist=kimi-coding/k3）
-- YAML 最小子集格式自检（无 tab、值裸 token 无引号、缩进 2 空格）
-- 头部「可用 ref 核实清单」含 zai-coding-cn 条目（模型 ref 不许发明的红线）
-- M10 注释含「交叉口径让位于配额急救」的如实记录（review R2 采纳项）
+
+口径（260910 宿主拍板）：**路由表是运行期可调的配置——谁跑哪个模型不钉死**。
+本测试只做「防错」的性质断言，不做角色取值的快照：
+- 每个角色/分工都有非空 provider 与 model（字段齐备、格式合法）；
+- 所有 provider/model 取值必须出现在表头「可用 ref 核实清单」里（**不许发明
+  ref**——这是真错误面）；
+- `roles.integration` 角色必须存在（不许整段被删）；
+- YAML 最小子集格式自检（无 tab、值裸 token 无引号、缩进 2 空格）；
+- 头部「可用 ref 核实清单」含 zai-coding-cn 条目与 ZAI_CODING_CN_API_KEY 标注
+  （ref 清单自身的完备性，与具体角色分配无关）；
+- M10 注释含「交叉口径让位于配额急救」的如实记录（review R2 采纳项）。
+历史沿革：本测试原先钉死 integration=kimi-coding/k3 等角色取值（260907 口径）。
+260910 宿主裁定「model-route 本来就应该动态可调，不需要这个断言」后，快照断言
+全部移除——改表不再需要同步改守卫；留性质断言防「写错不存在的模型名」「角色
+被整段删掉」这类真错误。
 cwd = 泳道根。
 """
 import os
@@ -67,32 +77,30 @@ def main():
 
     table = parse_minimal_yaml(text)
     roles = table.get("roles", {})
+    header = text.split("roles:")[0]          # 「可用 ref 核实清单」所在的表头区
+    header_known = set(re.findall(r"[A-Za-z0-9_.\-]+", header))
 
-    integ = roles.get("integration", {})
-    check(integ.get("provider") == "kimi-coding",
-          "roles.integration.provider == kimi-coding（260907 宿主改表；实得 %r）" % integ.get("provider"))
-    check(integ.get("model") == "k3",
-          "roles.integration.model == k3（260907 宿主改表；实得 %r）" % integ.get("model"))
+    def check_refs(where, entry):
+        """性质断言：provider/model 非空 + 取值出现在表头 ref 清单内（不发明 ref）。"""
+        p, m = entry.get("provider"), entry.get("model")
+        check(bool(p) and bool(m), "%s provider/model 非空（实得 %r/%r）" % (where, p, m))
+        for kind, v in (("provider", p), ("model", m)):
+            if not v:
+                continue
+            check(v in header_known,
+                  "%s 的 %s=%r 在表头「可用 ref 核实清单」内（不许发明 ref）" % (where, kind, v))
 
-    expect = {
-        "default": ("zai", "glm-5.3-flash"),
-        "developer": ("zai", "glm-5.3-flash"),
-        "ops": ("kimi-coding", "k3"),
-        "artist": ("kimi-coding", "k3"),
-        "product-operation": ("zai", "glm-5.3-flash"),
-    }
-    for role, (p, m) in expect.items():
-        e = table.get(role, {}) if role == "default" else roles.get(role, {})
-        check(e.get("provider") == p and e.get("model") == m,
-              "无回归 %s = %s/%s（实得 %s/%s）" % (role, p, m, e.get("provider"), e.get("model")))
+    # 角色面：凡是表里出现的角色，一律过性质断言（不钉具体取值 = 路由可动态调配）
+    check("integration" in roles, "roles.integration 角色存在（不许整段删掉）")
+    for role, entry in roles.items():
+        if role == "product-operation":
+            continue  # 其 tasks 子表另行过检
+        check_refs("roles.%s" % role, entry if isinstance(entry, dict) else {})
 
     po_tasks = roles.get("product-operation", {}).get("tasks", {})
-    for kind, (p, m) in {"proofread": ("zai", "glm-5.2"),
-                         "qa": ("zai", "glm-5.3"),
-                         "analyst": ("zai", "glm-5.2")}.items():
-        e = po_tasks.get(kind, {})
-        check(e.get("provider") == p and e.get("model") == m,
-              "无回归 product-operation.tasks.%s = %s/%s" % (kind, p, m))
+    for kind, entry in (po_tasks.items() if isinstance(po_tasks, dict) else []):
+        check_refs("roles.product-operation.tasks.%s" % kind,
+                   entry if isinstance(entry, dict) else {})
 
     check("zai-coding-cn" in text.split("roles:")[0],
           "头部「可用 ref 核实清单」含 zai-coding-cn 条目")
