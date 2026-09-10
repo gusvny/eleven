@@ -73,6 +73,11 @@ from shared import (
 from workflows import DispatcherScanWorkflow
 from workflows_v2 import TEMPLATE_CLASSES
 
+# KI-067（t260910-06）：无差别自审计 + entry_hint 单一真源（stdlib-only，同目录）。
+# main() 每个出口（含 -h/无参/未知子命令/argsJSON 非法/连接失败兜底）都经
+# _emit() 记 admin.log 并按 claimed-source 附回执提醒——连被拒收的调用也记。
+import audit
+
 # ---- Temporal regression runtime: proactive cleanup of closed-ticket history
 #      (ticket t260902-02, M1-3) ----
 # The real delete goes through the temporalio SDK: WorkflowHandle has no delete method,
@@ -389,6 +394,19 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
         return _ok({"ticket_id": tid, "signal": "rework",
                     "target_stage": req.target_stage, "delivered": True})
 
+    if op == "retry_qc":
+        # KI-067（t260910-06）：retry_qc 的 CLI 正规通道（signal 子命令退役后唯一
+        # 非直连入口）。workflow 侧契约（base.py retry_qc(self, who: str)）只收
+        # **裸字符串**：本侧只转发 who；note 非空显式拒收（静默蒸发不可接受），
+        # 带话走 update pending_add 或 ruling 注入。包装层只加审计不加权力。
+        if str(args.get("note") or "").strip():
+            return _err("retry_qc 不收 note（workflow 契约只收 who）——带话走 "
+                        "ticket op=update 的 pending_add，或 op=ruling 注入裁决")
+        who = str(args.get("who") or "op-local")
+        await handle.signal("retry_qc", who)
+        return _ok({"ticket_id": tid, "signal": "retry_qc", "who": who,
+                    "delivered": True})
+
     if op == "ruling":
         # KI-053: host ruling injection — the official channel for human opinions,
         # sendable in any state (blocked included).
@@ -421,7 +439,7 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
     if op in ("advance", "accept", "dispatch-next"):
         return _err("v2 引擎（模版即代码）已取消 %s：workflow 过门自动推进，"
                     "验收=事后看产物（query 快照的 results/handoffs）；"
-                    "打回用 rework，blocked 重跑用 signal retry_qc" % op)
+                    "打回用 rework，blocked 重跑用 ticket op=retry_qc" % op)
 
     if op == "update":
         # v2 base.py's update handler (called by name; the same-named handler on the old
@@ -434,7 +452,8 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
         return _ok(r)
 
     return _err("未知工单操作 %r（可用：rework=打回 / ruling=宿主裁决注入 / "
-                "pause|resume=段间暂停·恢复 / update=更新 / sign=签字 / query=查询）" % op)
+                "retry_qc=blocked 重跑 / pause|resume=段间暂停·恢复 / update=更新 / "
+                "sign=签字 / query=查询）" % op)
 
 
 # ---------- M11 v2: ticket-start / ticket-list / ticket-query ----------
@@ -1189,8 +1208,9 @@ USAGE = (
     "用法：python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-prune|ticket-archive-legacy> [argsJSON]\n"
     "安全红线：工具面只暴露上述子命令，无 set-stage / force_stage / 改状态入口。\n"
     "signal 子命令已退役（260904 宿主令）：调用一律返回结构化退役报错（sign/retry_qc\n"
-    "  只服务 v1 content-pipeline 人门段，该模板已删）；签字走 ticket op=sign。\n"
-    "ticket 子命令（步2）：op=rework|ruling|pause|resume|update|sign|query。\n"
+    "  只服务 v1 content-pipeline 人门段，该模板已删）；签字走 ticket op=sign，\n"
+    "  blocked 重跑走 ticket op=retry_qc（t260910-06 正规通道）。\n"
+    "ticket 子命令（步2）：op=rework|ruling|retry_qc|pause|resume|update|sign|query。\n"
     "  v2 引擎（M11 模版即代码）：advance/accept/dispatch-next 已取消（自动推进），\n"
     "  rework=signal 回目标段重跑，ruling=宿主裁决注入（人工意见正规通道，任何状态\n"
     "  可发，blocked 态注入后配 retry_qc 重跑下段即见），sign=人工审批签字，\n"
@@ -1206,15 +1226,23 @@ USAGE = (
 )
 
 
+def _emit(sub: str, args: Dict[str, Any], result: Dict[str, Any]) -> None:
+    """唯一回执出口（KI-067）：附 entry_hint（bare 待遇，含成功回执）→ 打印 →
+    记 admin.log 一行（claimed-source 可辨，连被拒收调用也记）。审计失败不吞回执。"""
+    audit.attach_entry_hint(result)
+    print(json.dumps(result, ensure_ascii=False))
+    audit.audit_call(sub or "(none)", result)
+
+
 def main() -> None:
+    sub = sys.argv[1] if len(sys.argv) > 1 else ""
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
-        print(json.dumps({"ok": False, "error": USAGE}, ensure_ascii=False))
+        _emit(sub or "help", {}, {"ok": False, "error": USAGE})
         return
 
-    sub = sys.argv[1]
     fn = COMMANDS.get(sub)
     if fn is None:
-        print(json.dumps({"ok": False, "error": f"未知子命令 {sub!r}。{USAGE}"}, ensure_ascii=False))
+        _emit(sub, {}, {"ok": False, "error": f"未知子命令 {sub!r}。{USAGE}"})
         return
 
     args: Dict[str, Any] = {}
@@ -1222,11 +1250,11 @@ def main() -> None:
         try:
             parsed = json.loads(sys.argv[2])
             if not isinstance(parsed, dict):
-                print(json.dumps({"ok": False, "error": "argsJSON 需为 JSON 对象"}, ensure_ascii=False))
+                _emit(sub, {}, {"ok": False, "error": "argsJSON 需为 JSON 对象"})
                 return
             args = parsed
         except json.JSONDecodeError as e:
-            print(json.dumps({"ok": False, "error": f"argsJSON 不是合法 JSON：{e}"}, ensure_ascii=False))
+            _emit(sub, {}, {"ok": False, "error": f"argsJSON 不是合法 JSON：{e}"})
             return
 
     try:
@@ -1234,7 +1262,7 @@ def main() -> None:
     except Exception as e:  # infra failure (cannot reach the server etc.) → structured receipt
         result = _err(f"{type(e).__name__}: {e}")
 
-    print(json.dumps(result, ensure_ascii=False))
+    _emit(sub, args, result)
 
 
 if __name__ == "__main__":

@@ -476,5 +476,43 @@ def _port_open(port):
         return False
 
 
+def _band_window_foreign_listeners():
+    """档位窗内外来监听者点名（t260910-06 仲裁实证的假红根因）。
+
+    stage_docker 的 bind 探针看不见 SO_REUSEPORT 窃听者：本机 OrbStack 把
+    活容器/泄漏台的发布端口 1:1 转发到 127.0.0.1:2xxxx，正好落在档位窗
+    （BAND_BASE~+BAND_COUNT*BAND_STEP）内——假 shim 的 console 口被窃听后
+    bind 探针照过、就绪探针永不回 → 「console 30s 内未就绪」假红。预检把
+    这一环境态显式化：有外来监听=点名 ENV_FAIL exit 2（三态契约：环境红归
+    供给面），不许静默撞运气。lsof 不可得（非 macOS）= 预检自弃不拦套件。"""
+    try:
+        out = subprocess.run(["lsof", "-iTCP", "-sTCP:LISTEN", "-n", "-P"],
+                             capture_output=True, text=True, timeout=30).stdout
+    except Exception:
+        return []
+    lo = sd.BAND_BASE
+    hi = sd.BAND_BASE + sd.BAND_COUNT * sd.BAND_STEP
+    hits = []
+    for ln in out.splitlines():
+        parts = ln.split()
+        if len(parts) < 9 or not parts[8].startswith("127.0.0.1:"):
+            continue
+        try:
+            port = int(parts[8].rsplit(":", 1)[1])
+        except ValueError:
+            continue
+        if lo <= port < hi:
+            hits.append("%s(pid=%s) port=%d" % (parts[0], parts[1], port))
+    return hits
+
+
 if __name__ == "__main__":
+    _foreign = _band_window_foreign_listeners()
+    if _foreign:
+        print("ENV_FAIL: 档位窗 %d~%d 内有外来监听者（bind 探针不可见的 "
+              "REUSEPORT 窃听面，典型=泄漏台容器的 OrbStack 端口转发）——"
+              "先清泄漏台（docker ps 查陈旧 stage-console-* 对）再跑：%s"
+              % (sd.BAND_BASE, sd.BAND_BASE + sd.BAND_COUNT * sd.BAND_STEP,
+                 "; ".join(_foreign[:8])), file=sys.stderr)
+        sys.exit(2)
     unittest.main(verbosity=2)

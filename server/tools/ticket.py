@@ -33,16 +33,27 @@ op:
   show   {id}   → 全文（snapshot+meta：含 handoffs/checks/pending/log/body/results/
                   pulse 运行脉搏=RUNNING 工单的 pending activity 心跳，无心跳为 None）
   rework {id, to_stage?, note}  → 打回（signal 回目标段重跑），status=rework，log 记原因
+  sign   {id, gate?, by(who), decision(approve|reject), note?}  → 人工审批签字（signal）
+  retry_qc {id, by(who)}  → blocked 重跑请求（signal 裸串 who；不收 note——workflow
+                            契约只收 who，带话走 update pending_add / ruling）
   accept/advance/dispatch-next  → v2 已取消（workflow 过门自动推进，验收=事后看产物；
-                                  blocked 重跑=client.py signal retry_qc），保留 op 报结构化错误
+                                  blocked 重跑=retry_qc op），保留 op 报结构化错误
 
-全部调用经 admin.log run-id 审计（tools_registry）。
+全部调用经 admin.log 审计：registry.call 路径=run-id 审计（tools_registry）；
+直 spawn 路径（__main__，t260910-06）=本文件自记 source=ticket.py-direct 一行 +
+client.py 记 source=ticket 一行（call_id 关联）——双行形状是契约不是重复 bug。
+
+直 spawn 形态（KI-067 根因修复）：本文件历史上没有 CLI 入口，任何直接
+`python3 ticket.py '{...}'` 都是空输出+退出 0+admin.log 无痕（260910 两实证）。
+现提供 __main__：首参 JSON（含 op）→ run() → 结构化回执；任何失败**非零退出**+
+{ok:false,error,kind?}，绝不空输出。
 """
 import json
 import os
 import re
 import subprocess
 import time
+import uuid
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -82,8 +93,9 @@ TOOL = {
         'type': 'object',
         'properties': {
             'op': {'type': 'string', 'enum': ['create', 'update', 'list', 'show', 'accept',
-                                              'advance', 'dispatch-next', 'rework']},
-            'id': {'type': 'string', 'description': '工单 id（update/show/accept/advance/dispatch-next/rework 必填；create 可指定否则自动生成）'},
+                                              'advance', 'dispatch-next', 'rework',
+                                              'sign', 'retry_qc']},
+            'id': {'type': 'string', 'description': '工单 id（update/show/accept/advance/dispatch-next/rework/sign/retry_qc 必填；create 可指定否则自动生成）'},
             'project': {'type': 'string', 'description': '项目 key（机器级注册表 ~/.sandbar/projects/<key>/project.yaml；create 必传、无默认值；list 可选过滤，不传=全部项目）'},
             'epic': {'type': 'string', 'description': '立项代号（epic-linkage 机制，可选）：notes/epics/<代号>.md 必须存在否则 create 拒收；合法则 workflow 打 EpicCode search attribute，可按 EpicCode 查询捞出。list 可按 epic 过滤（先强校验，不存在的代号明确报错而非空表）'},
             'workflow': {'type': 'string', 'description': '工作流模板 id（create 必填，见 workflow list）'},
@@ -108,7 +120,10 @@ TOOL = {
             'worktree': {'type': 'string', 'description': 'create 显式登记泳道路径（缺省 dev-lane 自动 .lane/<id>）'},
             'branch': {'type': 'string', 'description': 'create 显式登记分支名（缺省 lane/<id>）'},
             'workspace': {'type': 'object', 'description': 'create 显式登记工作空间 {type: worktree|dir, path}（缺省按模板推导：lane=worktree→泳道，模板带 workspace:dir→/tmp/sandbar-ws/<id> 隔离目录（老 base 粘滞））'},
-            'by': {'type': 'string', 'description': 'rework 操作人（身份注入）'},
+            'by': {'type': 'string', 'description': 'rework/sign/retry_qc 操作人（身份注入，who 语义由调用方负责；等价别名 who 也收）'},
+            'who': {'type': 'string', 'description': '操作人别名（=by，信号语义名；rework/sign/retry_qc 收）'},
+            'gate': {'type': 'string', 'description': 'sign：审批门标识（可选，缺省空串透传）'},
+            'decision': {'type': 'string', 'enum': ['approve', 'reject'], 'description': 'sign：审批决定（缺省 approve=放行推进；reject=打回）'},
         },
         'required': ['op'],
         'additionalProperties': False,
@@ -175,12 +190,39 @@ def _shared():
     return _SHARED_POC
 
 
+def _audit_mod():
+    """加载 engine/audit.py（无差别审计+entry_hint 单一真源，stdlib-only）。"""
+    global _AUDIT_MOD
+    if _AUDIT_MOD is None:
+        import importlib.util
+        import sys
+        spec = importlib.util.spec_from_file_location('_poc_audit', TEMP_POC / 'audit.py')
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules['_poc_audit'] = mod
+        spec.loader.exec_module(mod)
+        _AUDIT_MOD = mod
+    return _AUDIT_MOD
+
+
+_AUDIT_MOD = None
+
+
 def _poc(subcmd, payload):
-    """spawn engine/client.py，返回解析后的回执 dict（不判 ok）。"""
+    """spawn engine/client.py，返回解析后的回执 dict（不判 ok）。
+
+    子进程注入自报家门标记 SANDBAR_CLIENT_ENTRY='ticket'（普通 env，非密钥——
+    client.py 据此免附 entry_hint、admin.log source 记 'ticket'）与关联键
+    SANDBAR_CLIENT_CALL_ID（__main__ 直调路径生成，使双行审计可关联）。"""
+    env = dict(os.environ)
+    env['SANDBAR_CLIENT_ENTRY'] = _audit_mod().ENTRY_MARK
+    cid = os.environ.get(_audit_mod().CALL_ID_ENV)
+    if cid:
+        env[_audit_mod().CALL_ID_ENV] = cid
     cmd = [TEMP_PY, str(TEMP_POC / 'client.py'), subcmd,
            json.dumps(payload, ensure_ascii=False)]
     try:
-        proc = subprocess.run(cmd, cwd=str(REPO), capture_output=True, text=True, timeout=900)
+        proc = subprocess.run(cmd, cwd=str(REPO), capture_output=True, text=True,
+                              timeout=900, env=env)
     except Exception as e:
         raise ValueError('Temporal 调用失败（temporal server/worker 在线？'
                          'cd server/engine && ./run_server.sh + .venv/bin/python worker.py）: %s' % e)
@@ -513,7 +555,46 @@ def _rework(a):
     out = _poc('ticket', {'op': 'rework', 'ticket_id': tid,
                           'note': a.get('note') or '',
                           'to_stage': a.get('to_stage') or '',
-                          'who': a.get('by') or ''})
+                          'who': _who(a)})
+    return _poc_ok(out)
+
+
+def _who(a):
+    """操作人字段双读：by（本工具 schema 主名）| who（信号语义名，workbench/场景
+    同名面）——who 在包装层被丢=代签无主（K-067 包装面事故形状），双读防漏。"""
+    return str(a.get('by') or a.get('who') or '')
+
+
+def _sign(a):
+    """人工审批签字（KI-067：此前代签只走裸 client.py，是唯一不进审计的工单操作；
+    现包进正规入口——包装层只加审计不加权力，who 仍由调用方注入）。"""
+    tid = a.get('id') or ''
+    if not tid:
+        raise ValueError('sign 需要 id')
+    decision = a.get('decision') or 'approve'
+    if decision not in ('approve', 'reject'):
+        raise ValueError("sign decision 只收 approve|reject（收到 %r）" % (decision,))
+    out = _poc('ticket', {'op': 'sign', 'ticket_id': tid,
+                          'input': {'who': _who(a),
+                                    'gate': a.get('gate') or '',
+                                    'decision': decision,
+                                    'note': a.get('note') or ''}})
+    return _poc_ok(out)
+
+
+def _retry_qc(a):
+    """blocked 重跑请求（KI-067：signal 子命令退役后 CLI 无 retry_qc 通道，当日只能
+    Temporal 直连兜底）。workflow 侧契约（base.py retry_qc(self, who: str)）只收
+    **裸字符串**：note 非空在此显式拒收（静默蒸发不可接受），带话走 update
+    pending_add 或 ruling。"""
+    tid = a.get('id') or ''
+    if not tid:
+        raise ValueError('retry_qc 需要 id')
+    if str(a.get('note') or '').strip():
+        raise ValueError('retry_qc 不收 note（workflow 契约只收 who）——带话走 '
+                         'update pending_add，或 ruling 注入裁决')
+    out = _poc('ticket', {'op': 'retry_qc', 'ticket_id': tid,
+                          'who': _who(a) or 'op-local'})
     return _poc_ok(out)
 
 
@@ -549,4 +630,60 @@ def run(args):
         return _dispatch_next(args)
     if op == 'rework':
         return _rework(args)
+    if op == 'sign':
+        return _sign(args)
+    if op == 'retry_qc':
+        return _retry_qc(args)
     raise ValueError('未知 op: %r' % (op,))
+
+
+# ---------- 直 spawn CLI（KI-067 根因修复） ----------
+# 用法：python3 server/tools/ticket.py '{"op":"list",...}'
+# 契约：任何 op 失败 = stdout 一行结构化 {ok:false,error,kind?} + 退出码 1
+# （绝不空输出、绝不退出 0）；成功 = 回执 JSON + 退出码 0；无参/畸形首参 =
+# 结构化报错 + 非零。无参→非零无争议；-h 也非零是防误用：本 CLI 无交互面，
+# 避免打印用法后空跑被上游当成功。直 spawn 每次调用（含失败）自记 admin.log
+# 一行（source=ticket.py-direct），与 client.py 行共享 call_id。
+
+_TICKET_CLI_USAGE = ('用法：python3 server/tools/ticket.py \'<json 对象，含 op>\'\n'
+                     'op: create/update/list/show/rework/sign/retry_qc'
+                     '（accept/advance/dispatch-next 已取消，报结构化错误）\n'
+                     '失败契约：非零退出 + {ok:false,error,kind?}，绝不空输出。')
+
+
+def _cli(argv):
+    """直 spawn 入口，返回进程退出码。"""
+    if not argv or argv[0] in ('-h', '--help', 'help'):
+        print(json.dumps({'ok': False, 'error': _TICKET_CLI_USAGE}, ensure_ascii=False))
+        return 2
+    try:
+        payload = json.loads(argv[0])
+    except json.JSONDecodeError as e:
+        print(json.dumps({'ok': False, 'error': '参数不是合法 JSON：%s' % e},
+                         ensure_ascii=False))
+        return 1
+    if not isinstance(payload, dict):
+        print(json.dumps({'ok': False, 'error': '参数需为 JSON 对象（含 op）'},
+                         ensure_ascii=False))
+        return 1
+    audit = _audit_mod()
+    call_id = uuid.uuid4().hex[:12]
+    os.environ[audit.CALL_ID_ENV] = call_id   # 传给 _poc → client.py 行共享关联键
+    try:
+        res = run(payload)
+        out = {'ok': True, 'result': res}
+    except Exception as e:
+        out = {'ok': False, 'error': '%s: %s' % (type(e).__name__, e)}
+        kind = getattr(e, 'kind', None)
+        if isinstance(kind, str) and kind:
+            out['kind'] = kind
+    # sub 记 'ticket.<op>'（带 ticket 前缀：与 client.py 行同族可检索，source 区分入口）
+    audit.audit_call('ticket.%s' % (payload.get('op') or '(none)'), out,
+                     call_id=call_id, source='ticket.py-direct')
+    print(json.dumps(out, ensure_ascii=False))
+    return 0 if out.get('ok') else 1
+
+
+if __name__ == '__main__':
+    import sys
+    sys.exit(_cli(sys.argv[1:]))
