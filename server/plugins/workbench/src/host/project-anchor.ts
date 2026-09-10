@@ -18,8 +18,9 @@
  * - 隔离条目 / 注册表装载失败：findProject throw → 显式 502 透传原文（不吞、
  *   不降级；隔离项目回落默认仓=读 sandbar 数据，违背隔离语义）。
  * - env 覆盖链红线（工单规格「旧 env 覆盖链保留」）：SANDBAR_EPICS_DIR /
- *   SANDBAR_EVIDENCE_DIR / SANDBAR_EPIC_NEXT_DIR 三族**仅 source='default' 时生效**
- *   （anchorEpicsDir / anchorEvidenceBase / anchorEpicNextDir 内收口）——项目根
+ *   SANDBAR_EVIDENCE_DIR 等族**仅 source='default' 时生效**
+ *   （anchorEpicsDir / anchorEvidenceBase 内收口；t260910-14 退役注记：原作业根
+ *   env 锚与其 anchor 函数已随预跑建议面退役删除）——项目根
  *   路径不走 env（env 指向引擎仓，per-project 时会串味）；默认仓路径 env 行为
  *   与既有完全一致（测试桩不受影响）。
  * - 可观测性：解析结果经 resolvedMark() 挂进响应（source/key/root），回落原因由
@@ -86,9 +87,4 @@ export function anchorEpicsDir(a: Extract<ProjectAnchor, { ok: true }>): string 
  * 新消费方接入前先读 node.ts 收口，勿把本函数的旧名单串当读侧真源，防三层错位复发。 */
 export function anchorEvidenceBase(a: Extract<ProjectAnchor, { ok: true }>): string {
   return anchorEnv(a, 'SANDBAR_EVIDENCE_DIR') ?? join(a.root, '.suyou', 'evidence')
-}
-
-/** epic-next 作业根目录：默认仓锚=SANDBAR_EPIC_NEXT_DIR 优先（epic-next.ts resolveEpicNextDir 同款）；项目锚=<项目根>/.suyou/epic-next。 */
-export function anchorEpicNextDir(a: Extract<ProjectAnchor, { ok: true }>): string {
-  return anchorEnv(a, 'SANDBAR_EPIC_NEXT_DIR') ?? join(a.root, '.suyou', 'epic-next')
 }

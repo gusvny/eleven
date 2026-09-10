@@ -94,17 +94,9 @@
             "id": "merge",
             "role": "integration",
             "name": "合并（人审）",
-            "next": "suggest_next",
+            "next": "",
             "parts": [
               "human"
-            ]
-          },
-          {
-            "id": "suggest_next",
-            "role": "developer",
-            "name": "预跑下一单",
-            "parts": [
-              "agent"
             ]
           }
         ],
@@ -118,8 +110,7 @@
           "arbitrate",
           "acceptance_walkthrough",
           "merge_check",
-          "merge",
-          "suggest_next"
+          "merge"
         ]
       }
     ]
@@ -134,8 +125,7 @@
     "arbitrate",
     "acceptance_walkthrough",
     "merge_check",
-    "merge",
-    "suggest_next"
+    "merge"
   ],
   "workflows": [
     {
@@ -228,17 +218,9 @@
           "id": "merge",
           "role": "integration",
           "name": "合并（人审）",
-          "next": "suggest_next",
+          "next": "",
           "parts": [
             "human"
-          ]
-        },
-        {
-          "id": "suggest_next",
-          "role": "developer",
-          "name": "预跑下一单",
-          "parts": [
-            "agent"
           ]
         }
       ],
@@ -252,8 +234,7 @@
         "arbitrate",
         "acceptance_walkthrough",
         "merge_check",
-        "merge",
-        "suggest_next"
+        "merge"
       ]
     }
   ]

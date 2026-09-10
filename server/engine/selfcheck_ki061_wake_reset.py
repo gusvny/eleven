@@ -33,7 +33,7 @@ Exit code 0 = all green; non-zero = at least one red (details on stderr).
 Resource cleanup: env/worker are all reclaimed via async-with finalizers; the
 stubs create zero temp files.
 
-Pattern declaration (same as selfcheck_epic_next / selfcheck_integ_loop): zero
+Pattern declaration (same as selfcheck_integ_loop): zero
 model, zero real agent (stub receipts), the exit-code contract, no wall-clock
 timing assertions (poll + timeout guardrails only) — all carried over; the only
 pattern exception is the local test server (required by the main gate,
@@ -151,8 +151,6 @@ async def stub_teardown_lane(args) -> str:
     return "stub"
 
 
-@activity.defn(name="suggest_next")
-async def stub_suggest_next(args) -> StageResult:
     return StageResult(status="ok", summary="stub")
 
 
@@ -206,7 +204,7 @@ STUBS = [
     stub_verify_review_gate, stub_settle_lane, stub_ui_changed_paths,
     stub_run_integration_tests, stub_merge_check, stub_prepare_conflict_resolution,
     stub_settle_conflict_resolution, stub_prepare_human_gate, stub_merge,
-    stub_archive_ticket, stub_teardown_lane, stub_suggest_next,
+    stub_archive_ticket, stub_teardown_lane,
 ] + [_agent_stub(s, _script) for s in
      ("create_plan", "review_plan", "implement", "design_integration_tests",
       "arbitrate", "acceptance_walkthrough")]

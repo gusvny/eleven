@@ -206,7 +206,7 @@ ok('相对时间畸形：缺失/非数/非正数/未来超容差 → null（行�
 // dispatch-next/advance 等操作词亦不属禁列——禁的是「流程段名」不是「操作/状态」）。
 const BANNED_TOKENS = [
   'create_plan', 'review_plan', 'implement', 'integration_scene', 'arbitrate',
-  'acceptance_walkthrough', 'merge_check', 'suggest_next', 'parallel_impl_design',
+  'acceptance_walkthrough', 'merge_check', 'parallel_impl_design',
 ]
 // 扫描范围=本票列表面四文件（整文件扫描，不按行号段——行号随编辑漂移会假红/假绿）。
 const SCAN_FILES = [

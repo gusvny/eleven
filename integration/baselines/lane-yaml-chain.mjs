@@ -44,7 +44,9 @@ function section(t) { console.log(`\n== ${t}`) }
 
 const EXPECT = ['create_plan', 'review_plan', 'implement', 'design_integration_tests',
   'ui_evidence', 'run_integration_tests', 'arbitrate', 'acceptance_walkthrough',
-  'merge_check', 'merge', 'suggest_next']
+  'merge_check', 'merge']
+// t260910-14：suggest_next 段整链退役（宿主拍板），金链随退役收口更新——
+// 老金链含 suggest_next 属过期基准（arbitrate 段 tests-fault 迭代）。
 
 function classOrderFromSrc() {
   const srcText = readFileSync(SRC, 'utf8')
@@ -82,6 +84,7 @@ ok(JSON.stringify(classOrder) === JSON.stringify(EXPECT),
 section('退役步不残留')
 {
   ok(!/integration_review/.test(yamlText), 'yaml 无 integration_review')
+  ok(!/suggest_next/.test(yamlText), 'yaml 无 suggest_next（t260910-14 退役步同族归档）')
   const readme = readFileSync(join(REPO, 'server', 'workflows', 'README.md'), 'utf8')
   ok(!/integration_review/.test(readme), 'README 无 integration_review')
 }

@@ -188,7 +188,7 @@ def build_fixture(fail):
                 "schema: v1\nproject:\n  - key: %s\n    name: integ-pause-fixture\n"
                 "    dirs:\n      - %s\n" % (PROJECT_KEY, fixture))
     G["projects"] = projects
-    # 立项单（ticket-start epic 校验 + suggest_next 消费面）
+    # 立项单（ticket-start epic 校验）
     epics = os.path.join(fixture, "notes", "epics")
     os.makedirs(epics, exist_ok=True)
     with open(os.path.join(epics, "%s.md" % EPIC_CODE), "w") as f:
@@ -214,7 +214,6 @@ def start_worker(py, stage, tid, fixture_templates=False):
         "SANDBAR_AGENT_STUB_DELAY_SEC": "6",   # 桩段时长（t260908-01 引擎旋钮）：
                                                # 确定性的「段在飞」窗口——秒过桩段下
                                                # 暂停信号永远落在段外，在飞粒度不可验
-        "SANDBAR_SUGGEST_STUB": "ok",
         "SANDBAR_UI_CAPTURE_STUB": "1",
     }
     if fixture_templates:

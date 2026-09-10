@@ -62,10 +62,7 @@ export interface EpicMeta {
   note: string
   /** 立项日期 = 字段表格里「立项日期」行的值；缺行给 ''。 */
   created: string
-  /** 下一步建议缓存命中标记（t260829-02）：.suyou/epic-next/<code>/pre.json 存在
-   *  （只 stat 存在性，不验 state_key——准态见详情响应 nextHint）。listEpics 本身
-   *  不做探测；node.ts handleEpics 组装列表响应时填充，未填充 = undefined 视为无。 */
-  nextHintCached?: boolean
+  // t260910-14 退役注记：原「下一步已备」缓存命中标记随预跑建议整链退役删除。
 }
 
 /** readEpicMarkdown 的返回：成功带全文+元信息；失败带 HTTP 状态码与人话 error。 */

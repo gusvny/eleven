@@ -17,7 +17,7 @@ semver 从 v0.1.0 起（首版=搬迁快照）。依赖 dsh 发行包（@deepsee
 | server/tools/{verify_lane,ticket,workflow,dispatcher_loop}.py | 同路径 | 引擎工具（admin call 消费面） |
 | server/{projects.yaml,suyou-projects.ts,sandbar-tools.ts} | v6 现路径 | 注册表迁移种子+装载器+工具桥插件（改名/改造=M2-C） |
 
-留 suyou 侧：roles/、model-routes.yaml、merge-checks.yaml（项目侧声明，契约①d/③）、
+留 suyou 侧：roles/、model-routes.yaml（t260910-14 起降级为迁移窗口的读侧兜底表——真源=各项目声明 paths.model_routes 指向的文件）、merge-checks.yaml（项目侧声明，契约①d/③）、
 serve.py/admin.py 等 suyou 业务服务端。逐文件判定真源=suyoU 仓
 notes/debts/sandbar-m2-migration-manifest.md。
 

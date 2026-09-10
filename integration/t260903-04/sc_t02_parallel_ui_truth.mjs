@@ -40,9 +40,10 @@ function section(t) { console.log(`\n== ${t} ==`) }
 
 /* ------------------------------------------------- W. 场景词表防漂移 */
 section('W 词表与 dev-lane.yaml 同构')
+// t260910-14：suggest_next 段整链退役，词表随退役收口更新（老 11 步=过期基准）
 const ORDER = ['create_plan', 'review_plan', 'implement', 'design_integration_tests',
   'ui_evidence', 'run_integration_tests', 'arbitrate', 'acceptance_walkthrough',
-  'merge_check', 'merge', 'suggest_next']
+  'merge_check', 'merge']
 {
   const yaml = readFileSync(resolve(REPO, 'server/workflows/dev-lane.yaml'), 'utf8')
   const ids = [...yaml.matchAll(/^\s*- id:\s*(\S+)\s*$/gm)].map(m => m[1])

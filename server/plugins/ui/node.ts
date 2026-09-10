@@ -45,7 +45,7 @@ import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import { runAdminCli } from '../../sandbar-tools.ts'
 import { findProject, primaryDir } from '../../project-registry.ts'
-import { buildRoutesView, initRoutesTable, saveRoutesTable } from './src/host/routes.ts'
+import { buildRoutesView, saveRoutesTable } from './src/host/routes.ts'
 
 export const name = 'sandbar-admin-ui'
 // webServer 只存在于 web profile；headless 下本插件待机即可，故不走 inject 硬依赖。
@@ -169,8 +169,10 @@ export function apply(ctx: Context, config?: SuyouAdminUiConfig): void {
     }
   }
 
-  /** project 解析（routes 两条路由共用）：?project=/body.project 必传、无默认值。 */
-  function projOf(req: IncomingMessage, res: ServerResponse, body?: any): string | null {
+  /** project 解析（routes 各路由共用）：?project=/body.project 必传、无默认值。
+   *  返回 {key, primary}——t260910-14 起路由表真源=声明 paths.model_routes（读自
+   *  per-key 条目），key 与主目录都不可少。 */
+  function projOf(req: IncomingMessage, res: ServerResponse, body?: any): { key: string; primary: string } | null {
     const url = new URL(req.url ?? '/', 'http://x')
     const key = String(url.searchParams.get('project') ?? body?.project ?? '')
     if (!key) {
@@ -188,18 +190,19 @@ export function apply(ctx: Context, config?: SuyouAdminUiConfig): void {
       sendJson(res, 400, { ok: false, error: `未知项目：${key}（projects.yaml 未注册）` })
       return null
     }
-    return primaryDir(proj)
+    return { key, primary: primaryDir(proj) }
   }
 
-  /** 模型路由视图（M12，只读）：解析 <项目主目录> 的 model-routes.yaml + 扫生成 preset 烘焙实例。
+  /** 模型路由视图（M12，只读；t260910-14 读写同源化）：解析「声明 paths.model_routes
+   *  指向的路由表」（未声明回落仓内兜底表）+ 扫生成 preset 烘焙实例。
    *  解析失败/读取故障 → 200 {ok:false, error}（UI 显示原因不渲染空表），不抛 500；
-   *  表缺失 → 200 {ok:true, result.uninitialized:true, template_source}（t260906-01
-   *  无表引导态：缺失=未初始化非错误，UI 渲染引导卡片 + 生成默认表动作）。 */
+   *  声明与兜底表全缺 → 200 {ok:true, result.uninitialized:true}（纯指引引导态，
+   *  init 动作已退役）。 */
   async function handleRoutes(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const primary = projOf(req, res)
-    if (primary === null) return
+    const proj = projOf(req, res)
+    if (proj === null) return
     try {
-      const view = await buildRoutesView(primary)
+      const view = await buildRoutesView(proj.primary, { projectKey: proj.key })
       if (view.error !== undefined) {
         sendJson(res, 200, { ok: false, error: view.error })
         return
@@ -210,7 +213,7 @@ export function apply(ctx: Context, config?: SuyouAdminUiConfig): void {
     }
   }
 
-  /** 模型路由保存（M13，写）：{table} → saveRoutesTable 写 model-routes.yaml。
+  /** 模型路由保存（M13，写；t260910-14 落点=声明指向文件，未声明=仓内兜底表）：{table} → saveRoutesTable。
    *  载荷非法/表缺失/备份失败 → 200 {ok:false, error}（不抛 500）；
    *  成功 → {ok:true, result:{written, routes_file, backup, changed, regenerate}}。 */
   async function handleRoutesSave(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -225,44 +228,18 @@ export function apply(ctx: Context, config?: SuyouAdminUiConfig): void {
       sendJson(res, 400, { ok: false, error: `请求体不是合法 JSON：${String(err instanceof Error ? err.message : err)}` })
       return
     }
-    const primary = projOf(req, res, body)
-    if (primary === null) return
+    const proj = projOf(req, res, body)
+    if (proj === null) return
     if (body?.table === undefined || typeof body.table !== 'object') {
       sendJson(res, 400, { ok: false, error: '缺少保存载荷 table（{default?, roles?}）' })
       return
     }
-    const result = await saveRoutesTable(primary, body.table)
+    const result = await saveRoutesTable(proj.primary, body.table, { projectKey: proj.key })
     if (result.error !== undefined) {
       sendJson(res, 200, { ok: false, error: result.error })
       return
     }
     sendJson(res, 200, { ok: true, result })
-  }
-
-  /** 模型路由初始化（t260906-01，写）：POST /sandbar-admin/api/routes/init
-   *  项目主目录无 model-routes.yaml 时从引擎仓默认表拷贝生成（引导态动作）。
-   *  表已存在=200 {ok:false}（零覆盖拒收）；成功 → {ok:true, result:{routes_file}}。
-   *  注意（R4）：本端点落在 console 内存服务端——宿主重启 3099 后才生效（KI-052 同族）。 */
-  async function handleRoutesInit(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (req.method !== 'POST') {
-      sendJson(res, 405, { ok: false, error: 'POST only' })
-      return
-    }
-    let body: any = {}
-    try {
-      const raw = await readJsonBody(req)
-      if (raw && typeof raw === 'object') body = raw
-    } catch {
-      // init 无必需载荷：空体/非 JSON 容忍（project 可在 query string）。
-    }
-    const primary = projOf(req, res, body)
-    if (primary === null) return
-    const result = await initRoutesTable(primary)
-    if (!result.ok) {
-      sendJson(res, 200, { ok: false, error: result.error })
-      return
-    }
-    sendJson(res, 200, { ok: true, result: { routes_file: result.routes_file } })
   }
 
   /** 把四条路由挂到 webServer（同一 effect，卸载随插件生命周期）。 */
@@ -273,7 +250,6 @@ export function apply(ctx: Context, config?: SuyouAdminUiConfig): void {
         ws.register({ kind: 'exact', path: '/sandbar-admin/api/call', handler: handleCall }),
         ws.register({ kind: 'exact', path: '/sandbar-admin/api/audit', handler: handleAudit }),
         ws.register({ kind: 'exact', path: '/sandbar-admin/api/routes', handler: handleRoutes }),
-        ws.register({ kind: 'exact', path: '/sandbar-admin/api/routes/init', handler: handleRoutesInit }),
         ws.register({ kind: 'exact', path: '/sandbar-admin/api/routes/save', handler: handleRoutesSave }),
       ]
       return () => { for (const dispose of disposers) dispose() }

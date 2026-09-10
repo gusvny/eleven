@@ -54,7 +54,6 @@ MERGE_DEBT_FILES = frozenset((
     "server/engine/agent_activities.py",
     "server/engine/shared.py",
     "server/engine/client.py",
-    "server/engine/selfcheck_epic_next.py",
     "server/engine/tests/test_t260907_07_epic_project_anchor.py",
     "integration/run_scenarios.py",
 ))
@@ -70,10 +69,13 @@ def allowed(rel, line):
     if rel.startswith("integration/t260907-04/"):
         return True  # 命名场景族自身（fixture 面自证旧名是契约内容）
     if ("/t260907-06/" in rel or "/t260907-07/" in rel
-            or "/t260907-01/" in rel or "/t260907-08/" in rel):
+            or "/t260907-01/" in rel or "/t260907-08/" in rel
+            or "/t260910-14/fixtures/" in rel):
         # main 并入的后续票资产（多仓/立项锚/移仓/对比象限截图目录 .suyou/），
         # 旧名属其票语义——t260907-08 为 gen5 补账（.suyou/screenshots 存量欠账，
-        # 随专门迁移票处置，与本守卫的写集内零容忍不冲突）
+        # 随专门迁移票处置，与本守卫的写集内零容忍不冲突）。t260910-14/fixtures/
+        # =退役前 history 生成器（arbitrate 段 fixtures/README 路①）：复刻退役前
+        # 双队列环境（sandbar+suyou 双注册）是生成物的契约内容，非新代码旧名。
         return True
     if rel in MERGE_DEBT_FILES:
         return True  # main 并入的代码面旧名债（登记在案，待后续命名清扫轮处置）

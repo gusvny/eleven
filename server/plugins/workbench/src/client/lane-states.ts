@@ -20,8 +20,8 @@
  *     而非 ▶；done 终态条目优先于 inRun 计数——t260901-07 实锤：仲裁内部重跑
  *     复用结果文件不增 gen、merge_check 等脚本门重复进段只落 checks 不落
  *     results，计数启发式在重验循环后必误亮，终态留痕才是根治）。
- *  3. suggest_next 永不进活跃数组（merge 分支内联步，软失败留 running 无
- *     results，计数推导必误亮；全量 _mark 复核内联 running mark 仅此一例）。
+ *  3.（t260910-14 退役注记：原「预跑段永不进活跃数组」规则随该段退役失效——
+ *     order 来自 STAGES，已不含该 id；老票 timeline 残留条目不进推导。）
  *  4. inRun = running 条数 > attempts（区分「完成停在 running」vs「重跑中」）：
  *     attempts = results[s] 存在则 gen+1（ui_evidence 软失败 failed 亦计次）；
  *     无 results 而 checks[s] 全 done（merge/merge_check 纯脚本门）记 1。
@@ -164,8 +164,9 @@ export function deriveStageStates(detail: LaneDetailLike, order: string[]): Lane
       states[id] = last
       return
     }
-    // 规则 3+4：suggest_next 内联步排除；inRun 计数（走到这里最新态必是 running 或无条目）。
-    if (id !== 'suggest_next' && (runningCount[id] ?? 0) > attemptsOf(id)) {
+    // 规则 4：inRun 计数（走到这里最新态必是 running 或无条目）。
+    // （t260910-14：原预跑段排除条件随该段退役删除。）
+    if ((runningCount[id] ?? 0) > attemptsOf(id)) {
       states[id] = 'running'
       active.push(id)
       return

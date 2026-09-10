@@ -352,8 +352,8 @@ SCENARIOS = [
      "spec 四条修订与 FLOW_BRIEF 条款防悄悄回退（合并守卫）",
      "python3 integration/sc_scenarios_guard_spec.py"),
     ("scenario-guard-pipeline-landed",
-     "UT 工序与 verify test 道落地防回退（合并守卫）",
-     "python3 integration/sc_scenarios_guard_pipeline.py"),
+     "UT 工序与 verify test 道落地防回退（合并守卫）；arbitrate t260910-14 移入 exclusive：其 test 道子进程=整条 engine pytest 走廊，与各池并发跑时受 docker 起台/端口窗负载挤撞两期实红、单跑恒绿——排他先行串行隔离（供给隔离，断言不变）",
+     "python3 integration/sc_scenarios_guard_pipeline.py", "exclusive"),
     ("scenario-guard-doc-drift",
      "文档/链路与代码真源漂移检测（合并守卫）",
      "python3 integration/sc_scenarios_guard_drift.py", "ro"),
@@ -450,7 +450,7 @@ SCENARIOS = [
      "charter prompt wire 契约冻结（t260904-11，ro 供给只读面，KI-046 回归网）：07 票事故的病根是「客户端发什么形状×平台 zod 门收什么形状」这条跨组件接缝两端从未同场验证——developer 的 ki046 UT（workbench/tests）锚接缝客户端一端（真跑注入函数捕获 prompt 实参），本场景锚平台一端与镜像同步责任，intent 级不同层：①真源锚=平台供给内 dsh-host-apiproxy bundle 的 session.prompt 请求门确实是 content:array(promptContentPart) 分片数组门+text/image 判别联合（锚真实安装工件防镜像循环断言，宽松正则不锚压缩名）；②用户可感知拒收文案真源 invalid payload for ${method} 在文（toast 错误家族来源，平台改文案=漂移信号人审）；③冻结镜像语义（外部调用形状单测规范条款自范本：真 schema 不可导入则仓内冻结镜像+声明同步责任）——修复后分片载荷通过、KI-046 违规裸字符串被拒、缺 text 字段/非法 mode 同拒；平台门任一方向静默漂移本场景红，人审后两处同步。缺平台供给=显式红点名缺什么，不静默 skip（KI-046 闸穿透教训）",
      "node integration/t260904-11/sc_charter_prompt_wire_contract.mjs", "ro"),
     ("t260904-08-template-face-narrowing",
-     "工单模板面收窄契约（宿主令 260904，t260904-08）：真源三表（TEMPLATE_CLASS_NAMES/TEMPLATE_CLASSES/TEMPLATE_DISPLAY_NAMES）恰存 dev-lane、四退役 .py/.yaml 物理退场、v1 幸存面（workflows.py 步1 类+DispatcherScanWorkflow）不过删；用户拒收面——create/ticket-start 传四退役模板任一被拒且报错文案恰列 dev-lane（列全=仅 dev-lane，多列/漏列都算文案失真）、dev-lane 仍过模板闸（推进到下一道必填校验而非「未知模板」）；suggest_next 推荐面收「开新 dev-lane 票 / main 侧直跑验证」两类出路且零退役模板名；client start 类型面收敛 dispatcher-scan（文案锚）。stdlib 段零依赖恒跑；ticket-start CLI 段 venv-half（解释器缺失干净 SKIP 注原因，KI-020③）。与既有模板面守卫无 intent 重复（退役收窄为本票新契约）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "工单模板面收窄契约（宿主令 260904，t260904-08）：真源三表（TEMPLATE_CLASS_NAMES/TEMPLATE_CLASSES/TEMPLATE_DISPLAY_NAMES）恰存 dev-lane、四退役 .py/.yaml 物理退场、v1 幸存面（workflows.py 步1 类+DispatcherScanWorkflow）不过删；用户拒收面——create/ticket-start 传四退役模板任一被拒且报错文案恰列 dev-lane（列全=仅 dev-lane，多列/漏列都算文案失真）、dev-lane 仍过模板闸（推进到下一道必填校验而非「未知模板」）；suggest_next 推荐面已随功能整链退役（t260910-14）；client start 类型面收敛 dispatcher-scan（文案锚）。stdlib 段零依赖恒跑；ticket-start CLI 段 venv-half（解释器缺失干净 SKIP 注原因，KI-020③）。与既有模板面守卫无 intent 重复（退役收窄为本票新契约）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "python3 integration/t260904-08/sc_template_face_narrowing.py", "ro"),
     ("t260904-08-template-retire-no-revival",
      "模板退役防复活负扫描（宿主令 260904，t260904-08）：写集五面（引擎/tools/integration/两篇指定 docs）对四退役类名+content-pipeline 记号零无豁免活引用——防从历史抄回复活注册、防半截清除（注册删了但 USAGE/示例仍教学可用）；豁免=带退役标注的注释、v1 留存引擎样例（t260904-03 R1 裁定面+shared.py 留存数据表键）、声明保留的 v1 演示面与退役标注面（两 docs/两 README，且场景反向钉标注在位防豁免黑洞）、注册表 intent 文本与 test_t260904_03_t01 历史对照夹具（C1）；扫描器自证红绿（活引用样本红+标注样本豁免+留存键/留存文件规则命中+面完整性哨兵防空面假绿）。与 t260904-03-forced-reading-retired 分工：彼守 KI-035 旧文档映射表零活引用，本守 260904 模板族退役零活引用，对象不同不互替。实现段落地前红属预期，扫描红输出即待清残留清单，arbitrate/merge 期必须绿",
@@ -541,7 +541,7 @@ SCENARIOS = [
      "容器脚手架故障面对抗（t260906-01，ro 隔离根+--root 桩树注入源表三态）：已存在目录接入=项目根树快照逐字节一致（零新增零覆盖，自带自定义 model-routes.yaml 与 marker 不动、scaffold.created 空、root_created=false）；源表缺失与畸形（缺 default:/roles: 结构锚）两态=fail-closed 红+点名源路径+注册表与新建根零残留（回滚含整根与父链移除，绝不吞成空拷贝）；代建×防呆闸交互=新根为已注册根的「尚不存在」祖先仍被闸 d 拒（拒后祖先不被代建=闸序在 mkdir 之前的锚、注册表快照不变）。F1 并发同根异 key TOCTOU 为已登记预存洞（本票不修），不入闸防并发假红。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "node integration/t260906-01/sc_add_scaffold_faultlines.mjs", "ro"),
     ("t260906-01-routes-uninitialized-init",
-     "路由无表引导态+一键初始化（t260906-01，API 面无浏览器，mock webServer 手法同 ui smoke E 段、进程内 apply 零 3099 接触）：无表项目路由视图=uninitialized+template_source 引导态非 error（红错退役——运行时本就回落默认模型，无表≠故障）；畸形表=解析失败红错不降级为引导态（三态：畸形 fail-closed）；POST /sandbar-admin/api/routes/init 对无表项目=建父目录+原子写引擎真源表（写入与引擎表逐字节一致、无 tmp 泄漏）、对已有表=拒收零覆盖（放用户自有表再 init 断言内容不被冲掉）、init 后 GET 视图出表（uninitialized 消失、default 可解析）。wire 口径=project 走 ?project= 查询参（与同族 GET 一致）。与 t260904-15-host-routes（workbench 薄壳透传面）intent 不同面：本条守 ui 路由视图自身契约。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "路由无表引导态+init 退役终态（t260906-01 场景③，t260910-14 退役收口重写；API 面无浏览器，mock webServer 手法同 ui smoke E 段、进程内 apply 零 3099 接触）：无声明项目=分层兜底（宿主风险令 260910）——视图/API 出仓内兜底表内容（default 可解析）且分态可辨（state=decl_missing 留痕不洗白）、routes_file=兜底仓内表（真源锚）、uninitialized 红错态与 template_source 引导字段退场（init 动作退役，新项目按 docs 样例人工填表+落声明）；init 端点退场（POST /sandbar-admin/api/routes/init 不再挂载=零写动作）；已有项目自有表但未声明→不被读也不被改（字节零变更，「拒收零覆盖」意图由零写动作天然承担）；声明指向畸形表→编辑视图诚实暴露解析失败（不静默换表展示；运行时读侧兜底归 t260903-03/t260910-14-S1 钉）。wire 口径=project 走 ?project= 查询参（与同族 GET 一致）。与 t260904-15-host-routes（workbench 薄壳透传面）intent 不同面：本条守 ui 路由视图自身契约。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "node integration/t260906-01/sc_routes_uninitialized_init.mjs", "ro"),
     ("t260906-01-session-entry-empty-labeled",
      "空项目会话入口可发现+弹层代建口径（t260906-01，workbench 客户端 src+lib 双锚灰盒，同 project-sessions.mjs S3 守卫手法）：账册空=「＋ 新建会话」带字按钮锚（wb-psess-new-labeled 变体+tabs.length===0 条件分支）在 src 在场、lib/client.js 同批在场（lib 锚=bundle 重建看守，KI-052 客户端半从盘现读——盘上 bundle 旧=改了也看不见）；data-wb-psess-new 数据锚与 24px 方块样式保留（有 tab 恢复现行形态、既有 smoke 旧断言不回归）；接入弹层预检口径退役「存在性」措辞、改「自动创建」。真 DOM 呈现归合并闸 ui_evidence 截图证据面（KI-036/044 家族），不重复 browser 腿。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
@@ -755,9 +755,11 @@ SCENARIOS = [
     ("t260907-07-epic-cli-ticket-start",
      "开票入口 epic 校验项目感知用户路径（t260907-07 验收①②端到端，docker 测试台单实例）：外部项目 ticket-start 关联其主目录立项单成功（同名 gap-b+异名各自通过）、engine 桶行为不变（同名+异名照常）；负路径连接前拒收零 Temporal 依赖真跑——epic 确缺文案带该项目实际目录、跨桶异名不误指 engine 目录、未知 project 硬闸拒收（KI-032 面回归）。被测 env 显式清 SANDBAR_EPICS_DIR 防宿主泄漏改判锚，显式 SANDBAR_TARGET_HOST 指台（绝不连生产红线）；docker/镜像/SDK/隔离台库缺席=ENV_FAIL exit 2；实现落地前红属预期，arbitrate/merge 期必须绿",
      "python3 integration/t260907-07/sc_epic_cli_ticket_start.py", "engine"),  # engine: one docker stage
-    ("t260907-07-epic-next-prepare-project",
-     "立项预跑读档案项目感知接线（t260907-07 同票接线面=merge 收口预跑不再对外部项目静默跳过）：prepare_epic_next 带 project 读到该项目主目录立项全文（exists+全文匹配+state_key 可算）；不串桶（engine 异名对 external 档案缺失）；project 空=引擎锚兜底（真仓只读缺档软失败）且 env SANDBAR_EPICS_DIR 优先于兜底命中（自测语义）；档案缺失/代号形状非法 exists=False 防穿。_epic_ticket_rows 桩替 workflow 边界（selfcheck E 先例）；temporalio SDK 缺席=ENV_FAIL exit 2；实现落地前红属预期，arbitrate/merge 期必须绿；与 selfcheck E 段（env 夹具单点自测）intent 不同面",
-     "python3 integration/t260907-07/sc_epic_next_prepare_project.py", "ro"),
+    # t260907-07-epic-next-prepare-project 已随 suggest_next 整链退役删除（t260910-14）。
+
+    ("t260910-14-routes-resolver-parity",
+     "路由表解析器 python/TS 一致性守卫（t260910-14 方案 M2）：paths.model_routes 双实现（引擎 shared.resolve_routes_table 查表面 × UI resolveRoutesFilePath 读写面）对同一 per-key 注册表夹具矩阵（相对/~展开/绝对/../逃逸/空值/缺 paths 节）逐项 state+path 全等、拒收腿两侧同 fail-closed——读写同源不漂移（本票核心目的的机械保障）；畸形输入全走临时夹具零外部源；node 缺席=ENV_FAIL exit 2（KI-046 第三层）。实现落地前红属预期，arbitrate/merge 期必须绿",
+     "server/engine/.venv/bin/python integration/t260910-14/sc_routes_resolver_parity.py", "ro"),
 
     # ---- t260907-01: repo-move wrap-up (sweeping old repo paths) — acceptance regression anchor ----
 
@@ -823,6 +825,19 @@ SCENARIOS = [
      "文档视图 mock v1 终态旅程（t260910-10，KI-070 UI 半+260910 过稿版式，隔离台浏览器走查，工单必含③）：初值=缺省引擎仓选择态（synthesized 选项不依赖注册表真有 sandbar 条目）且首屏树=sandbar 篇目、初载 docs 请求无 project= 参数（缺省回落线上证据）；固定 UI 元素英文在场（Project/Docs/Notes/Search 输入框/On this page）；Project 切换器换夹具项目 → 请求带 ?project=<夹具>（wire 层反 viewProject 漂移）且树随所选项目切换（夹具篇目在场/sandbar 篇目退场）；开篇正文真渲染+五枚 chip 键在场（Status/Verified/Category/Updated/Path）、Verified 无数据源=显式 pending 占位且无日期形状（不留假值终态化）；On this page 大纲随选中文档渲染（h2 条目在场）且点击真跳转（目标标题入视口）；分组可折叠（组头点按条目可见性翻转）；Search 当前项目内过滤终态（收窄/清空还原）；空态退化（无 notes 的夹具切 Notes 页签 → 零条目+诚实 reason 在场+On this page 空+不残留旧项目内容+不炸）。断言锚=公开契约锚 data-wb-docs-root/[data-wb-doc-item]+元素角色/可见文本，不锚内部类名；playwright/浏览器缺失=env_fail（KI-036 家族）。与 t260905-06-doc-read-through intent 不同面：那条锁单仓阅读链路+代码块+窄栏单栏流+无溢出（回归归它），本条锁 mock v1 新元素与新旅程；与 t260910-10-docs-project-anchor 不同层（API 契约 vs DOM 终态）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "node integration/t260910-10/sc_docs_ui_mock_v1.mjs", "ro"),
 
+    # ---- t260910-14: suggest_next 退役 + 模型路由表迁出 git（真源=声明指向文件，宿主风险令 260910 夜口径）----
+    ("t260910-14-routes-truth-fallback",
+     "路由表真源随项目声明走（t260910-14 主题二读面，宿主风险令①③④b/c 口径）：声明 paths.model_routes 指向文件=引擎读面（改表→解析即新模型=验收 A 解析腿）；声明缺失/文件缺失/内容坏三态分态可辨且**分层兜底=仓内 server/model-routes.yaml**（本票保留不删，删除延后另票）留痕点名、禁静默回落 profile 默认；声明改回仓内相对路径=回滚可操作（④b）；`..` 逃逸 fail-closed、`~/x` 展开、空值拒收（形状腿，夹具注册表 SANDBAR_PROJECTS_DIR 隔离零真环境写）。与 t260902-07 两守卫（表静态校验/查表性质，L2 随票重写）与 G6 重写钉（分态新语义）intent 不同面：本条锁真源随声明+分层兜底留痕的系统拼装行为。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；引擎 venv 缺席=ENV_FAIL exit 2",
+     "python3 integration/t260910-14/sc_routes_truth_fallback.py", "ro"),
+    ("t260910-14-routes-ui-parity-save",
+     "路由真源迁移 UI 面读写同源（t260910-14 主题二，验收 B/宿主令④d）：saveRoutesTable 落声明指向的机器级文件（字节级）且夹具仓 git 工作区零变更；buildRoutesView 回传 routes_file=声明指向路径（生效路径+来源展示面）；initRoutesTable/engineRoutesTemplatePath 导出退场（init 引导退役，宿主拍板）。arbitrate 段去重：python/TS 解析矩阵一致性守卫归 t260910-14-routes-resolver-parity（named 函数双面逐项全等），本条剥原矩阵腿专锁 UI 读写/展示终态（覆盖率由彼条保全非弱化）。与 t260910-14-routes-truth-fallback 不同面：彼锁 python 读面，本条锁 UI 读写同源终态。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；node/git 缺席=ENV_FAIL exit 2",
+     "node integration/t260910-14/sc_routes_ui_parity_save.mjs", "ro"),
+    ("t260910-14-retire-replay-compat",
+     "suggest_next 退役 cutover 在飞重放兼容（t260910-14 主题一，方案 T1-2 三层机械面）：绿腿=退役后代码回放无 suggestion 命令的在飞 history（docker 台 lib_ki061 成熟驱动 merge 签字前复杂形态）+全 RUNNING 集回放零分歧（drain 闸同款）；负向腿=含 prepare_epic_next/suggest_next 活动命令的旧形态导出 history 回放**响亮红**（预期边界留档=drain 必要性机械证据；夹具缺席=显式红点名不静默，备齐程序见 integration/t260910-14/fixtures/README）。与 t260908-01 场景② intent 不同面：彼锁 KI-061 marker 消费重放，本条锁退役 cutover 命令序兼容边界。实现落地前腿三红属预期（TDD 信号），arbitrate/merge 期按口径绿；docker/镜像/舞台缺件=ENV_FAIL exit 2",
+     "python3 integration/t260910-14/sc_retire_replay_compat.py", "engine"),
+    ("t260910-14-retire-surface-clear",
+     "suggest_next/epic-next 退役面功能引用清零扫（t260910-14 主题一，验收 G 机械腿）：dev_lane/agent_activities/shared/工作流参考快照全文字符零退役 token；workbench src+node.ts 零 epic-next 导入/路由/janitor/客户端入口；退役文件在位性九件（epic-next.ts、selfcheck_epic_next、t260901-19 两场景、t260907-07 建议场景、对应单测与 tests/smoke）均退场；ui-check 夹具零 suggest_next 段数据；run_scenarios 零指向退役文件的登记路径、auto-rework 场景旧源码锁断言串退场。白名单=notes/docs/roles 历史账（integration.yml:67 教训行）/.sandbar/workbench lib 构建产物/本票目录。与 t260907-05 suyou 命名残扫 intent 不同面（不同 token 族）；与 t260910-14 其他三条不同面（彼锁行为，本条锁退役完备性）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；纯 stdlib 恒可跑",
+     "python3 integration/t260910-14/sc_retire_surface_clear.py", "ro"),
     # ---- t260910-15: build determinism — pin bundler version/args (byte-stable rebuild of committed lib/) ----
     ("t260910-15-build-reproducible",
      "同源码重建逐字节稳定（t260910-15 验收①②，灰盒 L3）：经组件公开构建入口（npm run build→仓内唯一构建脚本）依赖装一次（npm ci 按 lockfile，registry 漂移不混入断言）、同一 node_modules 连续两次构建 → lib/client.{cjs,js} sha256 逐字节相等且 cjs≡js 同体；构建后 git status 对 lib/ 为空=重建产物与落仓产物一致+零 map/gzip 等计划外副产物文件（porcelain 对 untracked 计数，副产物口径的兑现形态）；mtime 注入腿（改 src mtime 不改内容→第三次构建）sha 不变=时间戳不入产物（门禁/证据类断言的 mtime 干扰面）；终态自证 lib/ 仍干净=场景净零副作用。S3 判红语义：HEAD 产物若非锁定工具链可复现（历史漂移版本所建）即病灶实锤，实施段校准重建（一次性真实 diff）后恒绿。npm ci 网络/缓存失败=ENV_FAIL exit 2 点名尾段不假红；依赖在位时构建非零退出=FAIL 产品红。与 developer L1（workbench/tests build-determinism）intent 不同层（彼随实现重写不作契约网，本条闸内常驻锚公开接口与磁盘终态）；与 t260903-04-client-bundle-sync（改 src 别忘重建）、t260903-13-workbench-bundle-loads（产物形态合同）intent 不同面：本条守「重建必然逐字节可复现」。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
@@ -923,6 +938,30 @@ def _spec_from_output(name, pool, out, exit_code, dur, started):
                                 git_sha=sha)
 
 
+def _docker_hygiene():
+    """起跑前台面卫生（t260910-14 arbitrate gen2/gen3，tests-fault 供给面迭代）：
+    全量闸每期起 ~15+ 个 compose 台，场景崩溃/超时时 stage_docker 的 down 走不到，
+    停止态容器与其网络逐期堆积 → docker 地址池耗尽（gen2 实锤：30 个 *_default
+    网络后 'all predefined address pools have been fully subnetted'，19 个场景连坐
+    ENV_FAIL）。本扫只动**停止态**的 compose 台容器与**闲置**网络——在跑台（含其他
+    泳道的供给台）零接触；docker 缺席/任何失败=静默跳过（卫生是尽力而为，不是闸）。
+    """
+    try:
+        stopped = subprocess.run(
+            ["docker", "ps", "-aq", "--filter", "status=exited",
+             "--filter", "status=created",
+             "--filter", "label=com.docker.compose.project"],
+            capture_output=True, text=True, timeout=30)
+        ids = [x for x in (stopped.stdout or "").split() if x.strip()]
+        if ids:
+            subprocess.run(["docker", "rm", "-f", *ids],
+                           capture_output=True, text=True, timeout=120)
+        subprocess.run(["docker", "network", "prune", "-f"],
+                       capture_output=True, text=True, timeout=60)
+    except Exception:  # noqa: BLE001——卫生尽力而为；docker 缺席静默跳过
+        pass
+
+
 def _run_entry(entry):
     """Run one scenario (cmd via /bin/sh -c, cwd = repo root). Returns
     (name, exit_code, tail, dur_s). dur_s = that scenario's wall time
@@ -952,6 +991,14 @@ def _run_entry(entry):
         # 按协议分类落红绝不 raise 穿透（条目静默丢失＝fail-open 家族复发）：
         # 专用码 -8（非超时非断言），综合为 not-checked×external，evidence 点名原文。
         return (name, _SPAWN_FAIL, "spawn 失败: %s: %s" % (type(ex).__name__, ex),
+                time.time() - t_start, t_start, "")
+    except Exception as e:  # noqa: BLE001
+        # 丢单防御（t260910-14 arbitrate gen3）：起跑侧任何异常若穿出到 drain 线程，
+        # 该场景将零结果行（gen0 实锤：登记 196 实跑 195、t02 静默消失）——兜底记
+        # ENV 口径一行留痕（起跑失败=环境/供给事件，非产品红），计数保持诚实。
+        # （6 元组形态随 main 侧协议扩展对齐；OSError 已由上一支专用码承接。）
+        return (name, 2,
+                "runner 捕获场景进程异常（留痕不静默丢场景）：%r" % (e,),
                 time.time() - t_start, t_start, "")
 
 
@@ -1085,6 +1132,7 @@ def main() -> int:
             print("\n".join(block), flush=True)
 
     timings = []   # KI-060 prep 2: timing distribution (one row per scenario, with pool attribution)
+    _docker_hygiene()   # 起跑前台面卫生（t260910-14 arbitrate gen2/gen3：见函数注）
     spec_cases = []   # t260910-13：规范行明细（场景自产透传 + 执行器综合），INTEG_SUMMARY 以此为准
     executor_error = None   # t260911 仲裁②：池级异常必须响亮产品红，绝不静默吞
     for e in exclusives:      # exclusives go first, overlapping no pool (always serial)

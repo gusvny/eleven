@@ -131,25 +131,12 @@ export function epicCreateNote(code: string): string {
   return `所属立项：${code}（代号由界面带入，不可修改）`
 }
 
-/** integration「继续执行」建议（host epic-next.ts EpicNextSuggestion 互指；suggest-next 路由的 suggestion 形状）。
- *  字段可选以容纳 done 形态（t260828-08：{status:'done',summary} 建议结项）；消费侧一律 String(x ?? '') 容错读。 */
-export interface EpicNextSuggestion {
-  workflow?: string
-  title?: string
-  body?: string
-  rationale?: string
-  /** 'ok'=建议下一单（缺省视为 ok）；'done'=立项可完结（前端出「建议结项」卡片）。 */
-  status?: 'ok' | 'done'
-  /** status='done' 时的人话说明（立项目标已达成）。 */
-  summary?: string
-  /** t260829-07：建议的预计改动文件清单（host epic-next.ts sanitizeWriteSet 已清洗：
-   *  仓库内相对路径、保序去重）；缺失/全非法为空数组。预填新建工单弹层写集编辑栏。 */
-  write_set?: string[]
-}
+// t260910-14 退役注记：原「下一步建议」suggestion 形状接口随预跑建议整链退役删除。
 
 /* ---------------- 写集生命周期（t260829-07）：弹层写集编辑栏纯函数 ---------------- */
 
-/** 单条写集路径合法性（host epic-next.ts validWriteSetEntry 同构互指）：
+/** 单条写集路径合法性（建票弹层写集编辑栏自有实现；t260910-14 起 host 同构副本
+ *  已随预跑建议面退役，本函数为仓内唯一 TS 面）：
  *  仓库内相对路径——空串/绝对路径/含 '..'/反斜杠/Windows 盘符一律非法。 */
 export function validWriteSetEntry(p: unknown): boolean {
   if (typeof p !== 'string') return false
@@ -207,11 +194,4 @@ export function buildCreatePayload(
   return payload
 }
 
-/**
- * 继续执行建议回填正文合成（t260827-02）：首行归属说明（同 epicCreateNote 口径）
- * + 空行 + 建议正文；建议正文为空只留归属行（与 openCreate 的空预填形态一致）。
- */
-export function composeSuggestedBody(code: string, suggestedBody: string): string {
-  const body = String(suggestedBody ?? '').trim()
-  return body === '' ? epicCreateNote(code) + '\n' : `${epicCreateNote(code)}\n\n${body}`
-}
+// t260910-14 退役注记：原建议预填正文合成函数随预跑建议链路退役。

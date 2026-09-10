@@ -145,16 +145,8 @@ def main():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
-    print("== D suggest_next 推荐面收窄（stdlib 恒跑）")
-    wf_devlane = [{"id": "dev-lane", "name": "开发泳道"}]
-    for label, wf_list in (("正常清单", wf_devlane), ("空清单回退", [])):
-        prompt = shared.build_suggest_next_prompt(
-            code="epic-x", epic_markdown="【立项单】x", tickets_summary="",
-            workflows=wf_list, result_path="/tmp/r.json")
-        check("开新 dev-lane 票" in prompt and "main 侧直跑验证" in prompt,
-              "两类出路措辞在位（%s）" % label)
-        check(not any(t in prompt for t in lib.RETIRED_TEMPLATE_IDS),
-              "推荐面零退役模板名（%s）" % label)
+    # t260910-14 退役注记：原 D 段（suggest_next 推荐面收窄断言）随功能整链退役
+    # 删除——build_suggest_next_prompt 已不存在，推荐面本身不复存在。
 
     print("== E client start 类型面收敛（静态契约）")
     client_text = (lib.POC / "client.py").read_text("utf-8")

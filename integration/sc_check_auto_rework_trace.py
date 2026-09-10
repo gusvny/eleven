@@ -142,8 +142,11 @@ merge_block = src[src.find('if not mr.ok:'):src.find('if not mr.ok:') + 2000]
 ok("self._rework = ReworkRequest(" not in merge_block,
    "merge 失败分支不再塞 self._rework（防双落）")
 ok("self._rework = None" in src, "_apply_rework 壳保留 signal 消费语义（先清再委托）")
-ok('target in ("suggest_next", "ui_evidence")' in src,
-   "suggest_next/ui_evidence 非主链步拒绝守卫在位（旧 selfcheck 锁兼容）")
+_retired_lines = [ln for ln in src.splitlines()
+                  if 'suggest_next' in ln and not ln.lstrip().startswith(('#', '*', '//'))
+                  and not ln.strip().startswith(('（', '*'))]
+ok('target in ("ui_evidence",)' in src and not _retired_lines,
+   "ui_evidence 非主链步拒绝守卫在位；suggest_next 无功能引用（t260910-14 退役，注释留痕豁免）")
 
 # ---------- D. table-driven micro implementation: forward + backward + fallback + done + empty note ----------
 section("D 校验逻辑微实现畸形输入用例（不依赖 temporalio）")

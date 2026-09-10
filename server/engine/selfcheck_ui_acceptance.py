@@ -31,7 +31,9 @@ import time
 from pathlib import Path
 
 POC = Path(__file__).resolve().parent
-REPO = POC.parent.parent.parent          # 仓库根（worktree 根）
+# t260910-14 修正：t260907-10 版面摊平后引擎在 <repo>/server/engine，仓库根=上两级
+# （旧三级深度的残锚已废——即摊平前的引擎目录深度，实测解析到 .lane 的上级）。
+REPO = POC.parent.parent                 # 仓库根（worktree 根）
 sys.path.insert(0, str(POC))
 
 from shared import (  # noqa: E402
@@ -113,7 +115,10 @@ ok("is_ui_write_set(args.write_set)" not in src,
 ok("ui-check/capture.mjs" in src and "UI_EVIDENCE_DIR" in src,
    "红灯文案带 capture.mjs 处置指引（源码锁）")
 # KI-050 声明制（t260904-18）：UI 口径=项目声明（泳道根 verify.yaml ui_evidence.dirs）
-ok("load_ui_evidence(wt)" in src and "_ui_diff_paths(lane_repo, base_36, args.branch, decl_dirs)" in src,
+# t260910-14 修正：锁串随多仓 scoped 消费面更新（_scope_dirs 包声明 dirs；判定仍吃
+# 项目声明，意图不弱化——旧锁串「_ui_diff_paths(lane_repo, …, decl_dirs)」是
+# t260907-06 多仓化前的单仓形态，HEAD 已不一致）。
+ok("load_ui_evidence(wt)" in src and "_scope_dirs(decl_dirs" in src,
    "merge_check 3.6 判定口径吃项目声明（KI-050 声明制，源码锁）")
 ok("按项目声明" in src and "缺席" in src,
    "声明缺省=green+可见 note 文案在场（非静默，源码锁）")
@@ -233,7 +238,7 @@ _tail_at = dl.find("if not workflow.patched(INTEG_LOOP_PATCH_ID):")
 _tail = dl[_tail_at:_tail_at + 1500] if _tail_at >= 0 else ""
 ok('is_ui_write_set(list(self.meta.get("write_set") or []))' in _tail,
    "旧链尾冻结声明口径判定（存量独占路径零改动）")
-ok('target in ("suggest_next", "ui_evidence")' in dl,
+ok('target in ("ui_evidence",)' in dl,
    "ui_evidence 非主链步，rework 拒绝守卫在位")
 ok("审读必看" in dl and "无截图证据=打回" in dl.replace("「", "").replace("」", ""),
    "审读 prompt 注入截图清单")
@@ -296,23 +301,21 @@ section("G capture 输出目录口径")
 ok("--out" in src and "shots_dir" in src and "UI_EVIDENCE_DIR" in src,
    "--out=泳道 screenshots 口径保留（证据闸/审读仍看泳道）")
 
-# ---------- H. workbench 宿主半冒烟（node 直测 TS：evidence 白名单 + next-hint） ----------
+# ---------- H. workbench 宿主半冒烟（node 直测 TS：evidence 白名单） ----------
 # 写集约束：workbench/smoke/*.mjs 不在本票写集，冒烟脚本由本自测生成到临时目录再
-# node 直跑（node ≥22.18 原生 type-stripping 直接 import .ts，smoke/epic-precache.mjs
-# 同款先例）。覆盖：图片端点文件名白名单（../ 穿越/非 png/大写后缀）+ readPrecacheHint
-# 命中/state_key 漂移不命中 + dismissPrecache 删除/幂等/防穿/备份。
-section("H workbench 宿主半冒烟（evidence 白名单 + next-hint 两态）")
+# node 直跑（node ≥22.18 原生 type-stripping 直接 import .ts）。覆盖：图片端点文件
+# 名白名单（../ 穿越/非 png/大写后缀）。
+# t260910-14 退役注记：原 H 段的「下一步建议缓存」白盒半（三函数 import 自已删的
+# 宿主模块）随预跑建议面整链退役删除；本段仅存 evidence 文件名白名单半（仍锚
+# epics.ts 的 isEvidenceFileName，未退役）。
+section("H workbench 宿主半冒烟（evidence 白名单）")
 NODE_SNIPPET = r"""
-import { mkdtemp, writeFile, mkdir, readFile, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { readPrecacheHint, stateKeyFromRows, dismissPrecache } from '<WB>/src/host/epic-next.ts'
 import { isEvidenceFileName } from '<WB>/src/host/epics.ts'
 
 let failed = 0
 const ok = (cond, label) => { console.log((cond ? '  ok ' : '  FAIL ') + label); if (!cond) failed++ }
 
-// 1) evidence 文件名白名单（node.ts handleTicketEvidence 同口径纯函数）
+// evidence 文件名白名单（node.ts handleTicketEvidence 同口径纯函数）
 ok(isEvidenceFileName('console-default.png'), '白名单内 png 通过')
 ok(isEvidenceFileName('a.b-c_d.png'), '多点/连字符/下划线 png 通过')
 ok(!isEvidenceFileName('../evil.png'), '../ 穿越拒绝')
@@ -320,49 +323,11 @@ ok(!isEvidenceFileName('sub/evil.png'), '/ 穿越拒绝')
 ok(!isEvidenceFileName('shot.txt'), '非 png 拒绝')
 ok(!isEvidenceFileName('shot.PNG'), '大写后缀拒绝（口径=严格 .png）')
 ok(!isEvidenceFileName(''), '空文件名拒绝')
-
-// 2) readPrecacheHint 两态（state_key 现算比对）
-const cacheDir = await mkdtemp(join(tmpdir(), 'wb-hint-'))
-const rows = [{ id: 't-a', closed: true }, { id: 't-b', closed: false }]
-const sk = stateKeyFromRows(rows, '')
-const wfIds = ['dev-lane']
-await mkdir(join(cacheDir, 'ep-x'), { recursive: true })
-await writeFile(join(cacheDir, 'ep-x', 'pre.json'), JSON.stringify({
-  epic: 'ep-x', state_key: sk,
-  suggestion: { status: 'ok', workflow: 'dev-lane', title: '下一单', body: 'b', rationale: 'r' },
-}), 'utf8')
-const hit = await readPrecacheHint(cacheDir, 'ep-x', sk, wfIds)
-ok(hit !== null && hit.status === 'ok' && hit.title === '下一单' && hit.rationale === 'r',
-  'state_key 对齐 → hint 命中')
-const sk2 = stateKeyFromRows([{ id: 't-a', closed: true }, { id: 't-b', closed: true }], '')
-ok(await readPrecacheHint(cacheDir, 'ep-x', sk2, wfIds) === null, 'state_key 漂移 → 未命中')
-ok(await readPrecacheHint(cacheDir, 'ep-x', '', wfIds) === null, '空 state_key → 未命中')
-ok(await readPrecacheHint(cacheDir, 'ep-y', sk, wfIds) === null, '无缓存代号 → 未命中')
-await rm(join(cacheDir, 'ep-x', 'pre.json'))
-await writeFile(join(cacheDir, 'ep-x', 'pre.json'), '{bad json', 'utf8')
-ok(await readPrecacheHint(cacheDir, 'ep-x', sk, wfIds) === null, '坏 JSON → 当未命中')
-
-// 3) dismissPrecache：删除 + /tmp 备份 + 幂等 + 防穿
-await mkdir(join(cacheDir, 'ep-d'), { recursive: true })
-await writeFile(join(cacheDir, 'ep-d', 'pre.json'), '{"epic":"ep-d"}', 'utf8')
-const d1 = await dismissPrecache(cacheDir, 'ep-d')
-ok(d1.ok === true, 'dismiss 成功')
-let gone = false
-try { await readFile(join(cacheDir, 'ep-d', 'pre.json')) } catch { gone = true }
-ok(gone, 'pre.json 已删除')
-const backups = await readdir('/tmp/epic-next-backup').catch(() => [])
-ok(backups.some((f) => f.startsWith('ep-d-')), '删除前已备份 /tmp/epic-next-backup')
-const d2 = await dismissPrecache(cacheDir, 'ep-d')
-ok(d2.ok === true, '重复 dismiss 幂等 ok')
-const d3 = await dismissPrecache(cacheDir, '../evil')
-ok(d3.ok === false && d3.status === 400, '非法代号 400 防穿')
-const d4 = await dismissPrecache(cacheDir, 'no-such-code')
-ok(d4.ok === true, '不存在的代号也幂等 ok')
 console.log(failed === 0 ? 'NODE_SMOKE_GREEN' : 'NODE_SMOKE_RED')
 process.exit(failed === 0 ? 0 : 1)
-""".replace("<WB>", str(REPO / "server" / "plugins", "workbench"))
+""".replace("<WB>", str(REPO / "server" / "plugins" / "workbench"))
 with tempfile.TemporaryDirectory() as td:
-    mjs = Path(td) / "_hint_smoke.mjs"
+    mjs = Path(td) / "_evidence_smoke.mjs"
     mjs.write_text(NODE_SNIPPET, "utf8")
     r = subprocess.run(["node", str(mjs)], capture_output=True, text=True, timeout=120)
     print(r.stdout.strip())

@@ -125,8 +125,8 @@ EPIC_SA_NAME = "EpicCode"
 #      external projects are still rejected on the engine anchor);
 #   2. self-tests / fixtures overriding via env SANDBAR_EPICS_DIR (the same key as
 #      resolve_epics_dir's live env read).
-# prepare_epic_next (agent_activities) has moved to resolve_epics_dir and no longer
-# consumes this constant.
+# the retired pre-run-next-ticket preparation (agent_activities) has moved to
+# resolve_epics_dir and no longer consumes this constant.
 EPICS_DIR = pathlib.Path(os.environ.get("SANDBAR_EPICS_DIR") or (REPO_ROOT / "notes" / "epics"))
 # Code-shape whitelist: reuses the PROJECT_KEY_RE character set and also blocks
 # ../../ path traversal.
@@ -208,119 +208,6 @@ def ticket_search_attributes(project: str, epic: str = ""):
 # Coexists safely with <jobId>-shaped job directories under the same root: job
 # directory cleanup only deletes directories shaped 「<code>-<base36 timestamp>-<6hex>」,
 # and the <code>/ subdirectories are not among them.
-# The state_key stance (referenced by epic-next.ts stateKeyFromRows, and vice versa):
-# the sorted "<id>:closed|open" rows joined with "\n" then sha1 hex; **the ticket being
-# pre-run for always counts as closed** (a pre-run only happens after the merge
-# sign-off, so this ticket certainly closes out; by the time the host read side is
-# clicked the ticket is closed — the two sides' stances align, otherwise the cache
-# would never hit).
-
-def epic_next_precache_path(repo_root, code: str) -> pathlib.Path:
-    """Absolute path of the pre-run cache file (the same stance on the write side,
-    agent_activities, and the read side, host epic-next.ts).
-    The directory surface goes through resolve_dot_dir (the new name .sandbar/ wins,
-    with LEGACY old-repo old-name stickiness) — when an old repo stays sticky on the
-    old name, the plugin-face read side is naturally never cut off; a new-name repo has
-    the write side mirror the old name (mirror_to_legacy), so the plugin face is not
-    cut off during the transition either."""
-    p = lane_dot_path(repo_root, "epic-next", code)
-    if not p.is_absolute():
-        p = REPO_ROOT / p
-    return p / "pre.json"
-
-
-def epic_state_key(rows: List[Dict[str, Any]], current_ticket_id: str = "") -> str:
-    """state_key = sha1 of the sorted "id:closed|open" rows joined (stance in the
-    block comment above)."""
-    import hashlib
-    lines = sorted(
-        "%s:%s" % (str(r.get("id") or ""),
-                   "closed" if (r.get("closed")
-                                or (current_ticket_id and str(r.get("id") or "") == current_ticket_id))
-                   else "open")
-        for r in rows if str(r.get("id") or ""))
-    return hashlib.sha1("\n".join(lines).encode("utf-8")).hexdigest()
-
-
-@dataclass
-class EpicNextPrepArgs:
-    """Inputs of the prepare_epic_next activity: the epic code + the triggering ticket
-    (used to force the closed stance in state_key).
-    project (ticket t260907-07): the project key; prepare reads the epic document
-    anchored to the project home via resolve_epics_dir(project); the default empty
-    string = the engine anchor fallback (compatibility with old payloads of in-flight
-    tickets, decoded via the dataclass default)."""
-
-    ticket_id: str
-    epic: str
-    project: str = ""
-
-
-@dataclass
-class EpicNextPrepResult:
-    """The prepare_epic_next receipt: the epic document + its ticket rows + state_key,
-    all inline (zero IO inside the workflow)."""
-
-    exists: bool = False                        # the epic document exists and is readable
-    epic_markdown: str = ""                     # the full text of notes/epics/<code>.md
-    tickets: List[Dict[str, Any]] = field(default_factory=list)  # [{id,status,closed}]
-    state_key: str = ""
-
-
-@dataclass
-class EpicNextCache:
-    """The pre.json cache shape (the schema source of truth; the TS read side reads
-    tolerantly per field)."""
-
-    ticket_id: str
-    epic: str
-    ts: int
-    state_key: str
-    suggestion: Dict[str, Any]                  # {status:"ok"|"done", ...}
-
-
-def build_suggest_next_prompt(code: str, epic_markdown: str, tickets_summary: str,
-                              workflows: List[Dict[str, str]], result_path: str) -> str:
-    """The pre-run dispatch prompt for the next ticket (pure function, zero IO).
-
-    The wording is lockstep-synced with workbench src/host/epic-next.ts
-    buildSuggestPrompt (they reference each other: change one side, sync the other);
-    the result contract has three states (the host's validateSuggestion only accepts
-    the ok shape; done/failed are python-side extensions): ok = suggest the next
-    ticket / done = the epic can be closed / failed = give up with a reason.
-    The workflows list is the anti-hallucination whitelist (validated on both sides by
-    suggest_next and the host's readPrecache).
-    """
-    wf_lines = "\n".join("- %s：%s" % (w.get("id", ""), w.get("name", "")) for w in workflows)
-    return """【任务】你是 sandbar 项目的 integration 角色。本立项的一张关联工单刚通过人审即将合并，请在合并落账前预判：这个立项下一步最应该开的一张工单是什么（或者是否已经无事可做）。
-
-【硬性要求】
-1. 这是只读分析任务：除最后的结果文件外，不创建、不修改任何文件，不做任何 git 写操作。
-2. 建议的工单模板必须来自下方「可用工单模板」清单，原样填 id，不得发明。
-   可用模板面（260904 宿主令收窄）仅 dev-lane：下一单出路只有两类——开新 dev-lane 票，
-   或 main 侧直跑验证（无需开票，用 status=done 表达）。
-3. 结论写入结果文件：%s
-   UTF-8 JSON，三态之一：
-   {"status":"ok","workflow":"<模板id>","title":"<工单标题，一句话说清做什么>","body":"<工单正文：背景、要做什么、验收要点>","rationale":"<给人类看的一句话理由>","write_set":["<预计改动文件，仓库内相对路径，一条一个>"]}
-   {"status":"done","summary":"<立项目标已达成的人话说明，给人类确认结项时看>"}
-   {"status":"failed","reason":"<放弃原因>"}
-4. 写完结果文件即结束，不要等待人类输入，不要开任何工单。
-
-【所属立项】%s（新工单的代号由界面带入，正文无需声明绑定方式）
-
-【立项单全文】
-%s
-
-【关联工单实时状态】
-%s
-
-【可用工单模板】
-%s
-""" % (result_path, code, epic_markdown,
-       tickets_summary if str(tickets_summary or "").strip() else "（本立项暂无关联工单）",
-       wf_lines if wf_lines.strip() else "（清单为空）")
-
-
 # ---- Integration-test machinery (follow-on to ticket t260829-07, dev-lane development ∥ test design) ----
 # The test set = the repo root's integration/ directory (**committed code assets**,
 # entering main through the lane like everything else);
@@ -1518,27 +1405,87 @@ KIND_MODELS: Dict[str, str] = {"proofread": "zai/glm-5.2", "qa": "zai/glm-5.2", 
 # undeclared, it falls back to this constant — sandbar declares no paths, so byte-level
 # zero regression.
 
+# 仓内兜底表（宿主风险令 260910：读侧分层——声明指向文件优先，仓内表兜底；本票
+# 不删仓内表，删除延后另开小票）。真源=声明所指向的文件，这份只是迁移窗口的兜底。
 MODEL_ROUTES_REL = "server/model-routes.yaml"
 MODEL_ROUTES_FILE = REPO_ROOT / MODEL_ROUTES_REL
 
+# 路由表解析三态（t260910-14，KI-030 收窄）：state ∈
+#   ok           —— 声明指向文件存在且可解析（真源生效）
+#   decl_missing —— 条目未声明 paths.model_routes（兜底=仓内表，留痕不静默）
+#   file_missing —— 声明存在但文件缺失（兜底=仓内表若在，否则无表，均留痕）
+#   bad_content  —— 声明文件存在但不可解析（兜底=仓内表若在，否则无表，均留痕）
+# 任何非 ok 态都必须由消费方点名日志（state+path+error），禁静默回落 profile 默认。
+
+
+def resolve_routes_table(project_key: str) -> Dict[str, Any]:
+    """Model route table resolution — the single entry point for 读=写=生效（真源=
+    paths.model_routes 指向的文件；UI 读写与引擎查表共用同一解析，contract ①d）。
+
+    Returns {"state", "declared", "path", "table", "error"}:
+      state     —— 上方四态之一（兜底链走完后按「实际生效来源」的缺陷面命名）
+      declared  —— 声明的绝对路径（未声明=None）
+      path      —— 实际应读/写的文件（声明文件；或兜底=仓内表；或声明文件——
+                   file_missing/bad_content 时 UI 写面仍指声明路径，读面才兜底）
+      table     —— 解析成功的表（dict）或 None
+      error     —— 非 ok 态的人话原因（ok 态为空串）
+    条目文件本身解析不了仍照旧 fail-closed（ProjectPathsError 传播）。"""
+    import yaml  # pyyaml（engine venv）
+    info = project_paths(project_key)
+    declared: Optional[pathlib.Path] = info["model_routes"]
+    if declared is None:
+        fb = {"state": "decl_missing", "declared": None, "path": MODEL_ROUTES_FILE,
+              "table": None, "error": "条目未声明 paths.model_routes（读侧兜底=仓内表 " + str(MODEL_ROUTES_FILE) + "）"}
+        try:
+            fb["table"] = yaml.safe_load(MODEL_ROUTES_FILE.read_text("utf-8")) or {}
+        except FileNotFoundError:
+            fb["error"] = "未声明 paths.model_routes 且仓内兜底表缺失：" + str(MODEL_ROUTES_FILE)
+        except Exception as e:
+            fb["error"] = "未声明 paths.model_routes 且仓内兜底表不可解析：%s（%s）" % (MODEL_ROUTES_FILE, str(e)[:160])
+        # state 恒为 decl_missing（点名态不因兜底成功而洗白——三态可辨禁静默）
+        return fb
+    base = {"state": "ok", "declared": declared, "path": declared, "table": None, "error": ""}
+    try:
+        base["table"] = yaml.safe_load(pathlib.Path(declared).read_text("utf-8")) or {}
+    except FileNotFoundError:
+        base.update(state="file_missing",
+                    error="声明指向的路由表文件缺失：%s" % declared)
+    except Exception as e:
+        base.update(state="bad_content",
+                    error="声明指向的路由表不可解析：%s（%s）" % (declared, str(e)[:160]))
+    if base["state"] != "ok":
+        # 兜底腿：声明面坏/缺 → 仓内表若在则接管读（写面仍指声明路径），留痕由消费方做
+        try:
+            base["table"] = yaml.safe_load(MODEL_ROUTES_FILE.read_text("utf-8")) or {}
+            base["path"] = MODEL_ROUTES_FILE
+            base["error"] += "（读侧兜底=仓内表 " + str(MODEL_ROUTES_FILE) + "）"
+        except Exception:
+            base["table"] = None  # 无表：查表回落 profile 默认（消费方点名留痕）
+    return base
+
 
 def model_route_for(role: str, kind: str = "",
-                    routes_file: Optional[pathlib.Path] = None) -> Optional[Dict[str, str]]:
+                    routes_file: Optional[pathlib.Path] = None,
+                    table: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, str]]:
     """Read the model route table for (role, kind)'s provider/model. Called from the
     activity side (IO allowed).
 
-    routes_file defaults to MODEL_ROUTES_FILE; when a project declares
-    paths.model_routes, routes_file_for_spawn resolves and passes it in (contract ①d).
-    A missing table file / unparseable contents = returns None (the existing tolerant
-    semantics — the agent uses the profile's default model; ①d's "anchor versus
-    contents" is explicit: this function's tolerance covers the table contents, so
-    declared or not the semantics are the same, and fail-closed belongs only to anchor
-    decisions)."""
-    try:
-        import yaml  # pyyaml (engine venv)
-        table = yaml.safe_load((routes_file or MODEL_ROUTES_FILE).read_text("utf-8")) or {}
-    except Exception:
-        return None
+    routes_file 必选单点（t260910-14：常量隐式缺省取消；或直接传 resolve_routes_table
+    的 table 免二次 IO）。文件读取失败=None 但**留痕**（logging warning 点名路径，
+    KI-030 收窄——不再静默）；解析容错（缺条目/缺字段→default→None）语义不变。"""
+    if table is None:
+        if routes_file is None:
+            raise ValueError("model_route_for: routes_file 必选（t260910-14 单点化）——"
+                             "或传 resolve_routes_table 的 table")
+        try:
+            import yaml  # pyyaml (engine venv)
+            table = yaml.safe_load(pathlib.Path(routes_file).read_text("utf-8")) or {}
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "[model_route_for] 路由表读取失败（回落 profile 默认，留痕）：%s（%s）",
+                routes_file, str(e)[:160])
+            return None
     eff = LEGACY_ROLE.get(role, role)
     entry = (table.get("roles") or {}).get(eff) or {}
     cands = []
@@ -1867,10 +1814,10 @@ PAUSE_NOTE_INPUT_LIMIT = 20000
 # 测试台桩旋钮族（t260908-01）：这些 env 只应由测试线束设置（桩大脑/桩截图/夹具
 # 模板门/桩段时长）。机械闸（merge_check 的泳道内 verify_lane）与被测契约 UT 的
 # 子进程必须剥除它们——否则桩旋钮随 worker env 漏进被测进程，把真实行为换成桩
-# 行为造成假红（e2e 实证：SANDBAR_SUGGEST_STUB 漏进 suggest_next 契约 UT 假红）。
+# 行为造成假红。
 # 生产 worker 从不设置它们，剥除对生产是恒等操作。
 TEST_STUB_ENV_KNOBS = ("SANDBAR_AGENT_STUB", "SANDBAR_AGENT_STUB_FILES",
-                       "SANDBAR_AGENT_STUB_DELAY_SEC", "SANDBAR_SUGGEST_STUB",
+                       "SANDBAR_AGENT_STUB_DELAY_SEC",
                        "SANDBAR_UI_CAPTURE_STUB", "SANDBAR_FIXTURE_TEMPLATES")
 
 # worker 路由旋钮族（t260908-01 r10 实证追加）：这些 env 指挥 worker 进程自身
@@ -1908,10 +1855,11 @@ class AgentStageArgs:
     log_file: str = ""
     gen: int = 0                               # how many times this stage has been entered (a rework re-run gets a fresh result file)
     max_polls: int = 0                         # 0 = default (the activity-side constant)
-    # Ticket t260828-08, suggest_next only (the generic agent step leaves it empty; the
-    # defaulted fields stay backward compatible with old serialized events):
-    epic: str = ""                             # the epic code (the cache write path + the document anchor)
-    state_key: str = ""                        # the state_key computed by prepare_epic_next (the cache comparison key)
+    # t260910-14 退役注记：epic/state_key 曾专属「预跑下一单」段（已整链退役）；字段
+    # 保留为恒空默认——老 history 事件反序列化仍带这两键，删字段会让旧票重放
+    # TypeError（解码安全优先于字段洁癖）。
+    epic: str = ""                             # retired (t260910-14): kept for old-event decoding, always empty
+    state_key: str = ""                        # retired (t260910-14): kept for old-event decoding, always empty
     workflow_id: str = ""                      # the template id (used to look up STAGE_DISPATCH_KIND for specialization-level model routing)
     previous_context: str = ""                 # the previous run's context (inherited from the workflow history when the same stage re-runs)
     # Ticket t260829-07: during the parallel fork both implement and design skip the
@@ -3068,6 +3016,34 @@ def _decl_rel(key: str, v: str, label: str) -> str:
     return v
 
 
+def _decl_routes_path(key: str, v: str, label: str) -> str:
+    """paths.model_routes 专用声明校验（t260910-14 解析放宽）：相对路径语义不变；
+    额外允许机器级形态——`~/…`（展开到当前用户家）与绝对路径（含 Windows 盘符）。
+    展开后仍拒绝 `..` 逃逸与空/非标量。返回原声明串（解析成绝对路径由调用方做）。"""
+    v = v.strip()
+    if not v:
+        raise ProjectPathsError("%s: paths.%s 声明值为空或纯空白（strip 后判空，畸形）" % (label, key))
+    if v[:1] in "{[":
+        raise ProjectPathsError("%s: paths.%s 声明值非标量: %s" % (label, key, v[:40]))
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+        v = v[1:-1]  # 引号包裹的标量：剥引号后判空/解析（与 TS 解析器同判，t260910-14）
+        if v == "":
+            raise ProjectPathsError("%s: paths.%s 声明值为空（strip 后判空，畸形）" % (label, key))
+    if any(p == ".." for p in pathlib.PurePosixPath(v).parts):
+        raise ProjectPathsError("%s: paths.%s 禁止 .. 越界（机器级形态同样适用）: %s" % (label, key, v))
+    return v
+
+
+def _resolve_decl_routes_path(v: str) -> pathlib.Path:
+    """把 _decl_routes_path 放行的声明值解析成绝对路径：`~`/绝对 → expanduser 后原样；
+    相对 → 调用方拼项目主目录（project_paths 内 base / v）。"""
+    if v == "~" or v.startswith("~/"):
+        return pathlib.Path(v).expanduser()
+    if pathlib.PurePosixPath(v).is_absolute() or (len(v) > 1 and v[1] == ":"):
+        return pathlib.Path(v)
+    return pathlib.Path(v)  # 相对：由调用方拼 base
+
+
 def project_paths(project_key: str, roles_base: str = "",
                   routes_base: str = "") -> Dict[str, Any]:
     """Read the paths section of a registered entry's project.yaml (contract ①d's only
@@ -3111,9 +3087,13 @@ def project_paths(project_key: str, roles_base: str = "",
         if not base:
             raise ProjectPathsError(
                 "%s: paths.model_routes 已声明但条目缺可用 dirs 首项，无法定项目主目录（畸形）" % label)
-        rel = _decl_rel("model_routes", paths["model_routes"], label)
-        info["model_routes"] = pathlib.Path(base) / rel
-        info["model_routes_rel"] = rel
+        raw = _decl_routes_path("model_routes", paths["model_routes"], label)
+        resolved = _resolve_decl_routes_path(raw)
+        if resolved.is_absolute():
+            info["model_routes"] = resolved          # 机器级/绝对形态（t260910-14 放宽）
+        else:
+            info["model_routes"] = pathlib.Path(base) / resolved  # 相对：项目主目录下，语义不变
+        info["model_routes_rel"] = raw
     if "roles_dir" in paths:
         rel = _decl_rel("roles_dir", paths["roles_dir"], label)
         info["roles_dir"] = pathlib.Path(roles_base or os.getcwd()) / rel
@@ -3150,18 +3130,14 @@ def roles_dir_for_spawn(project_key: str, cwd) -> pathlib.Path:
     return pathlib.Path(cwd) / DEFAULT_ROLES_DIR
 
 
-def routes_file_for_spawn(project_key: str) -> pathlib.Path:
-    """Spawn consumer ②: the model route table file. Declared = project_paths parsing +
-    a fail-closed anchor decision; undeclared falls back to MODEL_ROUTES_FILE (the main
-    repo's current convention, byte-level zero regression). Tolerance for corrupt table
-    contents belongs to model_route_for (returns None → the default model, ①d's 「anchor
-    versus contents」 is explicit). Only the model_routes anchor is judged; the roles
-    anchor is untouched."""
-    info = project_paths(project_key)
-    if info["model_routes"] is not None:
-        _require_anchor(info["entry"], "model_routes", info["model_routes"], "file")
-        return info["model_routes"]
-    return MODEL_ROUTES_FILE
+def routes_file_for_spawn(project_key: str) -> Dict[str, Any]:
+    """Spawn consumer ②（t260910-14 重构）：路由表解析（真源=声明指向文件；读侧分层
+    兜底=仓内表，宿主风险令 260910）。原「fail-closed 锚点红」改为分态软回落：
+    声明缺失/文件缺失/内容坏三态分别可辨（resolve_routes_table），任何非 ok 态由
+    消费方点名日志后用兜底表继续——agent 仍可跑，绝不静默。返回 resolve_routes_table
+    的判别 dict（{"state","declared","path","table","error"}）。roles 锚点不受影响
+    （_require_anchor 只剩 roles_dir 消费）。"""
+    return resolve_routes_table(project_key)
 
 
 def roles_rel_for_prompt(project_key: str) -> str:
@@ -3197,11 +3173,10 @@ ARCHIVE_EXCLUDED_RULES = (
 )
 
 
-# Template id → console display name (used by build_suggest_next_prompt's whitelist
-# list; the host side's buildSuggestPrompt takes its name from the workflow list op —
-# the same semantics, so a rename syncs both sides). The dev-lane name shares a source
+# Template id → console display name (the dev-lane name shares a source
 # with DevLaneWorkflow.TEMPLATE_NAME. Host order 260904: only dev-lane remains (the
-# other templates retired)
+# other templates retired). t260910-14 注记：原预跑段防幻觉白名单消费面随
+# 功能退役，本表其余消费面（工单台展示等）不变。
 TEMPLATE_DISPLAY_NAMES: Dict[str, str] = {
     "dev-lane": "开发泳道",
 }

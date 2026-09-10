@@ -24,8 +24,7 @@
  *      note 九态端到端；GET → 405；未知代号 → 404；未知子路径 404 文案列 /status。
  *   E. 前端模型契约：filterEpicsByStatus（'' = 全部、按枚举匹配、零命中 → 空、
  *      未知值 → 空、永不抛错）；EPIC_STATUS_OPTIONS 与 host 枚举同步（同值同序）。
- *   F. 建议 prompt 可读性：迁移后的状态行原文出现在 epic-next 建议 prompt 里
- *      （agent 侧可解析）。
+ *   （t260910-14 退役注记：原 F 段「建议 prompt 可读性」随 epic-next 退役删除。）
  *
  * 注意：本基线在票 t260831-05 实现落地前会大声失败（枚举常量、备注解析、
  * setEpicStatus、/status 路由、前端筛选都不存在）——这是实现前的预期状态；
@@ -44,7 +43,6 @@ import {
   EPIC_STATUSES, isEpicStatus, listEpics, parseEpicMeta,
   setEpicStatus, validateEpicNote, closeEpic,
 } from './../src/host/epics.ts'
-import { buildSuggestPrompt } from './../src/host/epic-next.ts'
 import { EPIC_STATUS_OPTIONS, filterEpicsByStatus } from './../src/client/epics-model.ts'
 import { apply } from './../node.ts'
 
@@ -345,18 +343,6 @@ try {
   ok(Array.isArray(filterEpicsByStatus(rows, '已冻结')) && filterEpicsByStatus(rows, '已冻结').length === 0,
     'unknown value -> empty result, no throw')
   ok(rows.length === 4, 'filter is pure: input list not mutated')
-
-  /* ------------------------------------------------ F. suggest-prompt readability */
-  section('F epic-next suggest prompt carries the canonical status line verbatim')
-  const prompt = buildSuggestPrompt({
-    code: 'integ-st-alpha',
-    epicTitle: '集成测试桩',
-    epicMarkdown: FIXTURE_MD('已归档', '已迁移的细节'),
-    ticketsSummary: '（无关联工单）',
-    workflows: [{ id: 'dev-lane', name: 'dev' }],
-    resultPath: '/tmp/integ-st-result.json',
-  })
-  ok(prompt.includes('| 状态 | 已归档 |'), 'suggest prompt inlines the canonical status row (agent-parseable)')
 
   /* ------------------------------------------------ G. degraded note-column read */
   section('G note-column read tolerance (charters without the row)')

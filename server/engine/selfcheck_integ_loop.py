@@ -15,8 +15,7 @@ Coverage:
      empty array -> error; a normal two-entry run (one pass, one fail) ->
      correct counts and details; an entry missing cmd -> recorded as failure;
   D. shared contracts: AgentStageArgs.skip_settle defaults to False;
-     build_suggest_next_prompt contains the write_set field (aligned with the
-     host cold-start prompt);
+         host cold-start prompt);
   E. dev_lane source-structure assertions: the parallel fan-out gather, both
      edges settle=False, the join settle_lane, the pre-run 0-commit check,
      arbitrate routed through integration_route;
@@ -47,7 +46,6 @@ from shared import (  # noqa: E402
     MAX_TESTS_FAULT_ROUNDS,
     SettleLaneArgs,
     AgentStageArgs,
-    build_suggest_next_prompt,
     integration_route,
     parse_arbitration_summary,
 )
@@ -175,12 +173,10 @@ ok(r.error == "" and r.ran == 1 and r.env_fail == 1 and r.failed == 0,
    "纯环境红（乙段）→ env_fail=1 计入明细、green=false（verify_lane 三态解析）")
 
 
-section("D shared 契约（skip_settle 默认 / suggest prompt 带 write_set）")
+section("D shared 契约（skip_settle 默认）")
 a = AgentStageArgs(ticket_id="t", stage_id="s", role="developer", prompt="p")
 ok(a.skip_settle is False, "skip_settle 默认 False（串行步照常 settle）")
-p = build_suggest_next_prompt("obs", "# 立项单", "[]",
-                              [{"id": "dev-lane", "name": "开发泳道"}], "/tmp/r.json")
-ok('"write_set":["<预计改动文件' in p, "suggest prompt 契约含 write_set（与 host 对齐）")
+# t260910-14 退役注记：suggest prompt write_set 契约断言随 suggest_next 整链退役删除。
 
 section("D2 settle_lane 真泳道直测（主仓库真 worktree 夹具，用后即清）")
 import agent_activities  # noqa: E402

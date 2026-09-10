@@ -11,40 +11,28 @@
  *   - 新建工单（验收标准 9）：模板下拉（GET /api/wf/workflows）+ 标题 + 正文，
  *     epic 由界面传值（只读行展示，无手输框）→ POST /api/wf/tickets（host
  *     handleTicketCreate，t260826-02 新增，需重启 dsh 生效）。
- *   - 继续执行（t260827-02）：详情头部按钮 → POST /api/epics/<code>/suggest-next
- *     启动 integration 建议 job → 3s 轮询 GET .../suggest-next/<jobId>；done 把建议
- *     （模板/标题/正文）预填进新建工单弹层并展示理由横幅，人确认后才走上面的创建
- *     通路；failed/超时黄条降级并照常打开空白弹层——建议链路永不阻塞手动新建。
+ *   - （t260910-14 退役注记：原「继续执行」建议链路——建议 job/预跑缓存卡/
+ *     结项建议卡/写集建议预填——随预跑建议段整链退役删除；新建工单弹层为纯手工
+ *     通路，写集编辑栏（通用字段）保留。）
  *   - EpicBadge 同时供 index.tsx 工单列表行/详情头部复用；口径单点=epics-model.ts。
  *
  * 不做（工单红线）：归档按钮/快照 UI（archive API 另单）；立项单编辑 UI（真源=文件，编辑走仓库）。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 // 渲染态 markdown 复用 knowledge 浏览器半（与 index.tsx:57 同款，纯函数无依赖）。
 import { renderMarkdown } from '../../../knowledge/src/client/markdown.ts'
 import {
-  buildCreatePayload, composeSuggestedBody, createWriteSetBlocked, epicBadgeOf, epicCreateNote,
+  buildCreatePayload, createWriteSetBlocked, epicBadgeOf, epicCreateNote,
   filterEpicsByStatus, invalidWriteSetLines, mergeBuckets, sortBucketKeys, sortEpicTickets,
 } from './epics-model.ts'
-import type { EpicMeta, EpicNextSuggestion, EpicStatus, EpicTicketsResult } from './epics-model.ts'
+import type { EpicMeta, EpicStatus, EpicTicketsResult } from './epics-model.ts'
 import { EPIC_NOTE_INPUT_MAX, EPIC_STATUS_OPTIONS, isEpicStatusValue } from './epics-model.ts'
 import { startVisibleInterval } from './visibility-poll.ts'
 import { DERIVE_TOKENS_CSS } from './theme';
 
-/** 详情响应的「下一步建议」投影（host epic-next.ts EpicNextHint 互指；全 string 宿主已收口）。 */
-interface EpicNextHint {
-  status: 'ok' | 'done'
-  workflow: string
-  title: string
-  body: string
-  rationale: string
-  summary: string
-}
-
-/** 列表行（host epics.ts EpicMeta + nextHintCached 标记；epics-model.ts 不在本票写集，
- *  本地扩展类型对齐，字段缺省 undefined=未命中）。 */
-type EpicListRow = EpicMeta & { nextHintCached?: boolean }
+/** 列表行（host epics.ts EpicMeta；t260910-14：原 nextHintCached 扩展随预跑缓存退役）。 */
+type EpicListRow = EpicMeta
 
 /* ---------------------------------------------------------------- 样式（wb-ep-* 独立前缀） */
 
@@ -94,7 +82,6 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-ep-done-card{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
   border:1px solid var(--dsw-derive-success-border,#7dd9a0);background:var(--dsw-derive-success-bg,#dafbe1);border-radius:6px;padding:8px 12px}
 .wb-ep-done-title{font-size:12px;font-weight:600;color:var(--dsw-derive-success-deep,#116329)}
-.wb-ep-hint-badge{display:inline-block;margin-left:8px;font-size:10px;border-radius:6px;
   padding:0 6px;color:var(--dsw-derive-success-deep,#116329);background:var(--dsw-derive-success-bg,#dafbe1);border:1px solid var(--dsw-derive-success-border,#a6e0b1)}
 .wb-ep-done-reason{font-size:12px;color:var(--dsw-derive-success-deep,#116329);flex:1;min-width:200px}
 /* 立项清单表（未选代号时的落列表） */
@@ -195,20 +182,8 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
   const [createAllowEmpty, setCreateAllowEmpty] = useState(false)
   const [createBusy, setCreateBusy] = useState(false)
   const [createMsg, setCreateMsg] = useState('')
-  /** 弹层顶部横幅：integration 建议理由（可改提示）或建议不可用的降级说明（t260827-02）。 */
-  const [createHint, setCreateHint] = useState('')
-  const [suggestBusy, setSuggestBusy] = useState(false)
-  /** 继续执行：integration 建议 job 进行中（按钮禁用态 + 轮询停表函数句柄；
-   *  t260901-15 起为 visibility 门停表函数，非定时器 id）。 */
-  const suggestTimer = useRef<(() => void) | null>(null)
-  /** 建议结项卡片（t260828-08）：suggestion.status==='done' 时置位，出绿色「确认结项」卡。 */
-  const [suggestDone, setSuggestDone] = useState<Partial<EpicNextSuggestion> | null>(null)
-  const [closeBusy, setCloseBusy] = useState(false)
-  const [closeMsg, setCloseMsg] = useState('')
-  // 下一步建议可见性（t260829-02）：详情响应的 nextHint（host readPrecacheHint 投影，
-  // state_key 已对齐才命中）；status='done' 复用 suggestDone 结项卡，'ok' 出预填小卡。
-  const [hint, setHint] = useState<EpicNextHint | null>(null)
-  const [hintBusy, setHintBusy] = useState(false)
+  // t260910-14 退役注记：原建议 job/预跑缓存/结项建议卡八态随预跑建议段整链
+  // 退役删除；结项动作由状态编辑栏（枚举「已完结」）承担。
   /** 立项列表状态筛选（t260831-05）：'' = 全部，其余为四枚举值之一（纯前端过滤）。 */
   const [statusFilter, setStatusFilter] = useState<EpicStatus | ''>('')
   /** 状态编辑栏（t260831-05）：详情页状态下拉 + 备注输入框 → POST /epics/<code>/status。 */
@@ -250,20 +225,12 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
     let cancelled = false
     setDetail(undefined)
     setError('')
-    setHint(null)
     void (async () => {
       try {
         const d = await getJson(`${EPICS_API}/${encodeURIComponent(code)}`)
         if (cancelled) return
         if (d?.ok !== true) { setError(d?.error ?? '立项单加载失败'); return }
         setDetail(d.result as EpicMeta & { markdown: string })
-        // 下一步建议（t260829-02）：done 形态复用结项卡；ok 形态出预填小卡
-        const h = (d.result?.nextHint ?? null) as EpicNextHint | null
-        if (h !== null && String(h.status ?? '') === 'done') {
-          setSuggestDone(h as Partial<EpicNextSuggestion>)
-        } else {
-          setHint(h)
-        }
       } catch (err) {
         if (!cancelled) setError(String(err instanceof Error ? err.message : err))
       }
@@ -271,26 +238,7 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
     return () => { cancelled = true }
   }, [code])
 
-  /** [忽略] 下一步建议（t260829-02）：删预跑缓存（host 幂等）→ 刷新详情清卡。 */
-  const dismissHint = useCallback(async () => {
-    if (hintBusy) return
-    setHintBusy(true)
-    try {
-      const res = await fetch(`${EPICS_API}/${encodeURIComponent(code)}/next-hint/dismiss`, { method: 'POST' })
-      const d = await res.json()
-      if (d?.ok === true) {
-        setHint(null)
-        try {
-          const e = await getJson(`${EPICS_API}/${encodeURIComponent(code)}`)
-          if (e?.ok === true) setDetail(e.result as EpicMeta & { markdown: string })
-        } catch { /* 静默：保留旧详情 */ }
-      }
-    } catch { /* 网络抖动静默：卡保留，下次可再点 */ } finally {
-      setHintBusy(false)
-    }
-  }, [code, hintBusy])
-
-  // 状态编辑栏随详情重置（t260831-05）：详情刷新（首次加载/保存后重拉/忽略建议重拉）
+  // 状态编辑栏随详情重置（t260831-05）：详情刷新（首次加载/保存后重拉）
   // 都把下拉与备注框归位到档案现值，清 dirty 标记与保存提示——在编辑中途刷新不残留半成品。
   useEffect(() => {
     if (detail === undefined) return
@@ -366,142 +314,8 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
     setCreateWsText('')
     setCreateAllowEmpty(false)
     setCreateMsg('')
-    setCreateHint('')
     setCreateOpen(true)
   }, [code])
-
-  /** 停轮询（建议落地/失败/换立项/组件卸载都走这里；t260901-15 起调停表函数）。 */
-  const stopSuggestPoll = useCallback(() => {
-    if (suggestTimer.current !== null) {
-      suggestTimer.current()
-      suggestTimer.current = null
-    }
-  }, [])
-
-  // 换立项/卸载：停轮询、解除忙碌态（旧 code 的 job 结果不再回填新弹层）。
-  useEffect(() => {
-    return () => {
-      stopSuggestPoll()
-      setSuggestBusy(false)
-    }
-  }, [code, stopSuggestPoll])
-
-  /** 建议落地处理（done 分流，t260828-08 抽局部函数）：status='done' 出绿色结项卡；
-   *  其余（ok/缺省）走既有预填新建工单弹层。 */
-  const applySuggestion = useCallback((s: Partial<EpicNextSuggestion>) => {
-    if (String(s.status ?? '') === 'done') {
-      setSuggestDone(s)
-      return
-    }
-    setCreateWf(String(s.workflow ?? ''))
-    setCreateTitle(String(s.title ?? ''))
-    setCreateBody(composeSuggestedBody(code, String(s.body ?? '')))
-    // 写集预填（t260829-07）：建议 write_set（host 已清洗）每行一条，人可增删。
-    setCreateWsText((Array.isArray(s.write_set) ? s.write_set : []).join('\n'))
-    setCreateAllowEmpty(false)
-    setCreateMsg('')
-    setCreateHint(`integration 建议（可直接修改后再提交）：${String(s.rationale ?? '').trim() || '（agent 未给理由）'}`)
-    setCreateOpen(true)
-  }, [code])
-
-  /** 确认结项（t260828-08）：POST /epics/<code>/close（人审确认语义）→ 刷新详情与工单汇总。 */
-  const confirmClose = useCallback(async () => {
-    if (closeBusy) return
-    setCloseBusy(true)
-    setCloseMsg('')
-    try {
-      const res = await fetch(`${EPICS_API}/${encodeURIComponent(code)}/close`, { method: 'POST' })
-      const d = await res.json()
-      if (d?.ok !== true) {
-        setCloseMsg(`结项失败：${String(d?.error ?? '未知错误')}`)
-        return
-      }
-      setSuggestDone(null)
-      setCreateMsg(`立项 ${code} 已标记完结（notes/epics/${code}.md 状态已更新）`)
-      // 刷新详情（状态行）与关联工单汇总
-      try {
-        const e = await getJson(`${EPICS_API}/${encodeURIComponent(code)}`)
-        if (e?.ok === true) setDetail(e.result as EpicMeta & { markdown: string })
-      } catch { /* 静默：保留旧详情 */ }
-    } catch (err) {
-      setCloseMsg(`结项请求异常：${String(err instanceof Error ? err.message : err)}`)
-    } finally {
-      setCloseBusy(false)
-    }
-  }, [closeBusy, code])
-
-  // 建议结项卡片随立项切换清空（旧 code 的 done 结论不属于新立项）。
-  useEffect(() => {
-    setSuggestDone(null)
-    setCloseMsg('')
-  }, [code])
-
-  /**
-   * 继续执行（t260827-02）：POST 启动 integration 建议 job → 3s 轮询（封顶 10 分钟）。
-   * done → 建议预填进新建工单弹层 + 理由横幅；failed/超时/启动失败 → 黄条降级
-   * 并照常打开空白弹层（建议链路永不阻塞手动新建）。工单只在人点「创建工单」后
-   * 才真正创建（走 submitCreate 既有通路）。
-   */
-  const openSuggest = useCallback(async () => {
-    if (suggestBusy) return
-    /** 降级出口：停轮询 + 打开空白弹层 + 黄条写明原因。 */
-    const failOpen = (reason: string) => {
-      stopSuggestPoll()
-      setSuggestBusy(false)
-      openCreate()
-      setCreateHint(`integration 建议不可用：${reason}。已打开空白新建工单，可手工填写提交。`)
-    }
-    setSuggestBusy(true)
-    let jobId = ''
-    try {
-      const res = await fetch(`${EPICS_API}/${encodeURIComponent(code)}/suggest-next`, { method: 'POST' })
-      const d = await res.json()
-      if (d?.ok !== true) {
-        failOpen(`启动失败——${String(d?.error ?? '未知错误')}`)
-        return
-      }
-      // 预跑缓存命中（t260828-08）：跳过轮询直接走 done 处理，秒开不再等 1~5 分钟
-      if (d.result?.cached === true && String(d.result?.state ?? '') === 'done') {
-        setSuggestBusy(false)
-        applySuggestion((d.result?.suggestion ?? {}) as Partial<EpicNextSuggestion>)
-        return
-      }
-      jobId = String(d.result?.job_id ?? '')
-      if (jobId === '') {
-        failOpen('启动失败——响应缺 job_id')
-        return
-      }
-    } catch (err) {
-      failOpen(`启动请求异常——${String(err instanceof Error ? err.message : err)}`)
-      return
-    }
-    const deadline = Date.now() + 10 * 60_000
-    stopSuggestPoll()
-    // t260901-15：建议 job 轮询同样吃可见性门（隐藏时停查、回可见补查——
-    // 轮询体自带 done/failed/deadline 判定，补跑一拍不会丢状态）。
-    suggestTimer.current = startVisibleInterval(() => {
-      void (async () => {
-        try {
-          const d = await getJson(`${EPICS_API}/${encodeURIComponent(code)}/suggest-next/${encodeURIComponent(jobId)}`)
-          if (d?.ok !== true) {
-            failOpen(`查询建议状态失败——${String(d?.error ?? '未知错误')}`)
-            return
-          }
-          const st = String(d.result?.state ?? '')
-          if (st === 'done') {
-            stopSuggestPoll()
-            setSuggestBusy(false)
-            applySuggestion((d.result?.suggestion ?? {}) as Partial<EpicNextSuggestion>)
-          } else if (st === 'failed') {
-            failOpen(String(d.result?.reason ?? 'agent 未给出原因'))
-          } else if (Date.now() > deadline) {
-            failOpen('等待超过 10 分钟仍未产出建议（已停止轮询；宿主侧 job 会自行超时终止）')
-          }
-          // running：等下个周期
-        } catch { /* 网络抖动静默，下个周期重试 */ }
-      })()
-    }, 3000)
-  }, [code, suggestBusy, openCreate, stopSuggestPoll, applySuggestion])
 
   const submitCreate = useCallback(async () => {
     if (createBusy) return
@@ -584,12 +398,7 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
             <tbody>
               {filterEpicsByStatus(list, statusFilter).map(e => (
                 <tr key={e.code} onClick={() => setCode(e.code)}>
-                  <td><span className="wb-ep-code">{e.code}</span>
-                    {e.nextHintCached === true && (
-                      <span className="wb-ep-hint-badge" data-testid="epic-next-hint-badge"
-                        title="上一单收口时已预跑「下一步建议」缓存，进详情可直接预填开票">下一步已备</span>
-                    )}
-                  </td>
+                  <td><span className="wb-ep-code">{e.code}</span></td>
                   <td>{e.title || '—'}</td>
                   <td>{e.status || '—'}</td>
                   <td>{e.note || '—'}</td>
@@ -636,48 +445,11 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
         </button>
         {saveMsg !== '' && <span className="wb-ep-sub">{saveMsg}</span>}
         <span style={{ flex: 1 }} />
-        <button className="wb-ep-btn" disabled={suggestBusy}
-          onClick={() => { void openSuggest() }}
-          title="调用 integration 角色分析本立项现状，建议下一步工单并预填到新建工单弹层（人工确认后才会真正创建）">
-          {suggestBusy ? 'integration 分析中…' : '▶ 继续执行'}
-        </button>
         <button className="wb-ep-btn wb-ep-btn-green" onClick={openCreate}
           title="从本立项发起新工单（代号自动带入，不可手输）">＋ 新建工单</button>
       </div>
       {createMsg !== '' && !createOpen && <div className="wb-ep-msgok">{createMsg}</div>}
       {error !== '' && <div className="wb-ep-err">{error}</div>}
-      {/* 下一步建议小卡（t260829-02）：预跑缓存命中（state_key 与当前工单集合对齐）——
-          建议标题+理由 + [预填开票]（走既有缓存命中路径秒开弹层）/[忽略]（删缓存） */}
-      {hint !== null && (
-        <div className="wb-ep-done-card" data-testid="epic-next-hint-card">
-          <span className="wb-ep-done-title">🧭 下一步建议已就绪</span>
-          <span className="wb-ep-done-reason">
-            {hint.title !== '' ? `建议工单：${hint.title}` : ''}{hint.rationale !== '' ? ` —— ${hint.rationale}` : ''}
-          </span>
-          <button className="wb-ep-btn wb-ep-btn-green" data-testid="epic-next-hint-apply"
-            onClick={() => applySuggestion(hint as Partial<EpicNextSuggestion>)}
-            title="用这份建议预填新建工单弹层（人工确认后才会真正创建）">预填开票</button>
-          <button className="wb-ep-btn" disabled={hintBusy}
-            onClick={() => { void dismissHint() }}
-            title="删除预跑缓存（可重新点「继续执行」再算）">{hintBusy ? '忽略中…' : '忽略'}</button>
-        </div>
-      )}
-      {/* 建议结项卡片（t260828-08）：agent 判定立项目标已达成，人审确认后正经结项 */}
-      {suggestDone !== null && (
-        <div className="wb-ep-done-card" data-testid="epic-done-card">
-          <span className="wb-ep-done-title">✅ integration 建议结项</span>
-          <span className="wb-ep-done-reason">
-            {String(suggestDone.summary ?? '').trim() || 'integration 判定本立项目标已全部达成。'}
-          </span>
-          {closeMsg !== '' && <span className="wb-ep-err">{closeMsg}</span>}
-          <button className="wb-ep-btn wb-ep-btn-green" disabled={closeBusy}
-            onClick={() => { void confirmClose() }}
-            title="把 notes/epics 状态表改为「已完结」（写前自动备份，可回滚）">
-            {closeBusy ? '结项中…' : '确认结项'}
-          </button>
-          <button className="wb-ep-btn" onClick={() => setSuggestDone(null)}>暂不</button>
-        </div>
-      )}
       <div className="wb-ep-cols">
         {/* 左：立项单 Markdown 全文（renderMarkdown 复用 knowledge 渲染器 + wb-md 样式作用域） */}
         <div className="wb-ep-md">
@@ -722,7 +494,6 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
         <div className="wb-ep-modal">
           <div className="wb-ep-modal-box">
             <div className="wb-ep-modal-title">新建工单 — 从立项 {code} 发起</div>
-            {createHint !== '' && <div className="wb-ep-degraded">{createHint}</div>}
             <div className="wb-ep-field">
               所属立项（界面带入，不可修改）
               <div className="wb-ep-readonly">{code}</div>

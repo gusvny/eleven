@@ -76,7 +76,7 @@ console.log(`  ok resolve deriveStageDurations+fmtDur @ src/client/${deriveFrom}
 /* ---------------------------------------------------------------- 工具与常量 */
 const ORDER = ['create_plan', 'review_plan', 'implement', 'design_integration_tests',
   'ui_evidence', 'run_integration_tests', 'arbitrate', 'acceptance_walkthrough',
-  'merge_check', 'merge', 'suggest_next']
+  'merge_check', 'merge']  // t260910-14：suggest_next 段退役，链中移除
 const B = Date.parse('2026-09-01T00:00:00.000Z') // 整分钟，秒级 epoch 可整除
 const iso = ms => new Date(ms).toISOString()
 const sec = ms => ms / 1000 // epoch 秒（handoff.ts / closedTs 的单位）

@@ -325,11 +325,14 @@ paths:                     # 可选整节；缺 = 全部回落现行约定
 **schema 保 v1**：纯增量可选字段，旧条目（无 paths 节）解析行为不变。援引 ②a
 v1.5 裁定：勘误与增量不升 schema 版，不触发 semver 升版义务。
 
-**解析基准**：`项目根` = 注册条目 `dirs[0]`（主目录）。两条声明必须是非空相对
+**解析基准**：`项目根` = 注册条目 `dirs[0]`（主目录）。`roles_dir` 必须是非空相对
 路径（strip 后判空 = 畸形，纯空白值同），禁绝对路径、禁 `..` 越界、禁 `~` 与
-非标量（`{}`/`[]` 形）。基准差异是声明语义的一部分：`roles_dir` 相对 **spawn
-cwd（泳道 worktree）** 解析——保「worktree 内副本 = 工单快照」语义；`model_routes`
-相对**项目主目录（dirs[0]）** 解析——保运行时真源随主仓、不随泳道漂移的现行语义。
+非标量（`{}`/`[]` 形），相对 **spawn cwd（泳道 worktree）** 解析——保「worktree
+内副本 = 工单快照」语义。`model_routes` 自 t260910-14 起**放宽为机器级形态**：
+相对路径语义不变（相对项目主目录 dirs[0] 解析，保运行时真源随主仓），另允许
+`~/…`（展开到当前用户家，建议缺省 `~/.sandbar/projects/<key>/model-routes.yaml`）
+与绝对路径（含 Windows 盘符）；展开后仍禁 `..` 越界与空/非标量，引号包裹的标量
+剥引号后同判（与 TS 解析器同判，一致性守卫=t260910-14 parity 场景）。
 
 **读取器解析子集（引擎侧 stdlib-only 手写，与 ①a 装载器同口径：值不含 `#`、
 行尾 `#` 起截断）**：顶层只认 `schema:`、`project:`、`paths:` 三键；`schema`
@@ -346,15 +349,17 @@ cwd（泳道 worktree）** 解析——保「worktree 内副本 = 工单快照�
 | 回落 | 无 paths 节 / 节内缺某键 / 条目文件不存在 / project key 为空、不过白名单或项目未注册 | 该项回落现行约定（`server/roles`、`server/model-routes.yaml`），行为与未出仓前逐字节一致。suyou 不声明 paths，零改动零回归 |
 | 畸形（声明值） | 声明值非相对 / `..` 越界 / 空或纯空白 / 非标量 / paths 节非映射 / 未知键 | fail-closed：显式报错，含条目文件路径与键名，不静默过滤（同 ②c 纲） |
 | 畸形（条目文件） | project.yaml 存在但顶层形状不可解析（顶层未知键、schema 缺失或非 v1、非 UTF-8） | fail-closed：报错点名 `<key>/project.yaml` 与原因，**不回落不静默**——spawn 时段该文件唯一读者就是本读取器，按「缺失」跳过即三态总纲禁止的猜着跑 |
-| 声明锚点缺失 / 错位 | `model_routes` 解析后不存在或非文件；`roles_dir` 解析后不存在或非目录 | fail-closed 红：报错点名解析后绝对路径（缺失与类型错位都点名同一路径，语义分开写明） |
+| 声明锚点缺失 / 错位 | `roles_dir` 解析后不存在或非目录 | fail-closed 红：报错点名解析后绝对路径 |
+| `model_routes` 声明面缺陷（t260910-14 改软回落） | 声明指向文件缺失（file_missing）或内容不可解析（bad_content）；未声明（decl_missing） | 读侧分层兜底（宿主风险令 260910）：仓内 `server/model-routes.yaml` 若在则接管**读**（写面/UI 仍指声明路径），且**必须点名留痕**（state+path+原因，禁静默回落 profile 默认）；兜底亦缺 → 查表回落 profile 默认，同样留痕。真源=声明指向的文件（引擎读、UI 读写同源；python `resolve_routes_table` × TS `resolveRoutesFilePath` 同判） |
 
 **锚点 vs 内容**：fail-closed 只覆盖声明锚点本身，不覆盖声明对象的内容语义。
 两条边界裁定随本节成文：①`roles_dir` 声明后某具体角色的 yml/md 缺失 = 维持
 既有软跳过（缺 patch 退化为默认 persona，契约③「只加不改」）；②`model_routes`
 声明表存在但 role 条目查不到 = 维持查表函数返回空（agent 用 profile 默认模型）。
-同纲：`model_routes` 声明表**内容**不可解析，继承查表函数既有容错语义（返回空
-→ 默认模型），与未声明回落路径同语义——本节四态只覆盖声明值与锚点，不覆盖表
-内容；若需表内容 fail-closed，另立工单升语义。
+同纲（t260910-14 修订）：`model_routes` 声明表**内容**不可解析不再静默继承查表
+容错——升级为 bad_content 点名态（分态留痕，KI-030 收窄）：日志/UI 点名
+state+path+原因后，读侧兜底仓内表或回落 profile 默认（agent 仍可跑，绝不无声）。
+本节四态只覆盖声明值与锚点；表 role 条目查不到仍维持查表函数返回空（默认模型）。
 
 **过渡状态**：现行注册表装载器（`server/tools/ticket.py` 条目解析顶层白名单
 只认 `schema:` 与 `project:`；`server/project-registry.ts` 同构）对顶层
@@ -663,6 +668,7 @@ sandbar 发版 → 项目跟进；禁止跳过探针直接扩区间（关键决�
 | v1.9 | 2026-09-04 | t260904-14 摘除面落地：新增 ①a-1——摘除/再接入/数据处置三态成文（条目退役=project.yaml 原子改名 retired-<UTC ISO8601> 零 schema 改动可逆，再接入=同 key re-add 归档链连续；模式闸[legacy 拒收]/在飞闸[不可达 fail-closed 无绕过旗]/最后条目确认闸/closed 全归档闸[purge 前置：未归档差集=Temporal COMPLETED 票号集合−fs archive.json 三态判定集合，畸形 manifest=fail-closed 点名文件]；purge 双旗显式分离、dry-run 全闸预演、摘除报告只报不删项目根 .lane/ 泳道）；单根目录口径工具面落字（工具恰写一条 dirs，多条=装载容忍/工具不产的遗留形状） | ①/①a；安装器 project remove 子命令、摘除报告消费方（ops 手册/将来 UI 面） |
 | v2.2 | 2026-09-04 | t260904-18 三门落地：②a 增列合法顶层键 `ui_evidence`（可选映射 `{dirs, supply?}`；缺失=截图证据项按项目声明缺席 green+可见 note，畸形=fail-closed 红点名字段；supply 保留字段本版引擎不消费）——合并闸 UI 截图证据目录改项目声明，退役引擎侧 `UI_WRITE_PREFIXES` 五路径硬编码活路径身份（仅剩旧票重放/冻结分支兼容回落）；同族：建票口背景文件闸（票面 refs 须已提交且干净 HEAD 态，拒收点名）与 create_plan 回执 files_changed 空数组/畸形可见红（KI-049），属引擎机制面不入本契约字段表 | ②a；verify_lane `_validate_cfg`、merge_check 3.6、ui_changed_paths、仓根 verify.yaml |
 | v2.3 | 2026-09-07 | t260907-10 目录重构（宿主令 v6 定稿）路径锚语义变更：①d `paths` 节回落约定旧锚 `server/dsh/roles`、`server/dsh/model-routes.yaml` **退役**，新回落锚=`server/roles`、`server/model-routes.yaml`（引擎仓 server/dsh 包装层退场、五层摊平上移；引擎本体=temporal-poc→`server/engine`）；未显式声明 `paths` 的项目回落语义不变（仅回落目标换新锚）；已显式声明旧锚的项目按 ①d 锚点缺失 fail-closed 红点名；venv 定位回落链=新路径 `server/engine/.venv` 优先、旧路径 `server/dsh/temporal-poc/.venv` 一轮兼容（摘除票落地后单路径）；本文旧锚字样仅存于本变更记录行（历史事实，非活指针） | ①d/回落约定；agent_activities spawn 两消费点、shared.py DEFAULT_ROLES_DIR/MODEL_ROUTES_REL、installer、仓根 verify.yaml（扩权面） |
+| v2.4 | 2026-09-10 | t260910-14 模型路由表迁出 git（真源=项目声明指向的文件）：①d `model_routes` 声明值放宽——相对主目录语义不变，新增 `~/` 展开（建议缺省 `~/.sandbar/projects/<key>/model-routes.yaml`）与绝对路径形态，`..` 逃逸/空值/非标量仍 fail-closed，引号标量剥引号同判；缺表语义从「锚点缺失=fail-closed 红」改**分态软回落**——decl_missing/file_missing/bad_content 三态点名留痕（禁静默回落 profile 默认，KI-030 收窄），读侧分层兜底=仓内 `server/model-routes.yaml`（宿主风险令 260910：迁移窗口不断供，仓内表本票保留，删除延后另票）；引擎查表（`resolve_routes_table` 三态判别）与 UI 读写（TS `resolveRoutesFilePath`）同源同判（一致性守卫=t260910-14 parity 场景）；init 引导退役（新项目按 docs 样例人工填表）。| ①d；shared.py 路由节/agent_activities spawn 消费点、ui routes.ts（view/save/init 退役）、守卫 t260902-07 两件、sc_paths_contract_doc_guard G6 随新语义同步改 |
 
 > 来源立项：sandbar
 

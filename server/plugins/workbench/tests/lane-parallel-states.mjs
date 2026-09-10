@@ -62,7 +62,7 @@ console.log(`  ok resolve deriveStageStates @ src/client/${deriveFrom}`)
 /* ---------------------------------------------------------------- fixture 构造 */
 const ORDER = ['create_plan', 'review_plan', 'implement', 'design_integration_tests',
   'ui_evidence', 'run_integration_tests', 'arbitrate', 'acceptance_walkthrough',
-  'merge_check', 'merge', 'suggest_next']
+  'merge_check', 'merge']  // t260910-14：suggest_next 段退役，链中移除
 const DONE = 'done', RUN = 'running', BLK = 'blocked', AH = 'awaiting-human', TODO = 'todo'
 
 const okRes = (gen = 0) => ({ status: 'ok', gen })
@@ -120,8 +120,8 @@ section('F1 merge 签字期：✋ 且非活跃（review v3 规则 2+7）')
   expectAll(st, {
     create_plan: DONE, review_plan: DONE, implement: DONE, design_integration_tests: DONE,
     ui_evidence: DONE, run_integration_tests: DONE, arbitrate: DONE,
-    acceptance_walkthrough: DONE, merge_check: DONE, merge: AH, suggest_next: TODO,
-  }, 'merge=✋，前序全 done，suggest_next=todo')
+    acceptance_walkthrough: DONE, merge_check: DONE, merge: AH,
+  }, 'merge=✋，前序全 done')
   ok(activeOf(st).length === 0, '活跃数组为空（或回退后无 running 步）')
 }
 
@@ -138,7 +138,6 @@ section('F2 merge 执行期：恰 merge 单活跃')
   const st = run(d)
   ok(st.merge === RUN, 'merge=▶ running')
   ok(JSON.stringify(activeOf(st)) === JSON.stringify(['merge']), `活跃恰={merge}（got ${JSON.stringify(activeOf(st))}）`)
-  ok(st.suggest_next === TODO, 'suggest_next=todo')
 }
 
 /* ---------------------------------------------------------------- F3 merge_check 首尝试 blocked */
@@ -152,7 +151,7 @@ section('F3 merge_check 首尝试即 blocked：✗ 非活跃（review v3 规则 
   const st = run(d)
   ok(st.merge_check === BLK, 'merge_check=✗ blocked')
   ok(!activeOf(st).includes('merge_check'), 'blocked 步不进活跃数组')
-  ok(st.merge === TODO && st.suggest_next === TODO, '后续步 todo')
+  ok(st.merge === TODO, '后续步 todo')
 }
 
 /* ---------------------------------------------------------------- F4 并行分叉双高亮 */
@@ -206,22 +205,7 @@ section('F6 ui_evidence：UI 票 ok=done；软失败 C1 双可')
     `活跃恰={run_integration_tests}（got ${JSON.stringify(activeOf(stFl))}）`)
 }
 
-/* ---------------------------------------------------------------- F7 suggest_next 软失败 */
-section('F7 suggest_next 软失败：永不点亮（review v3 排除项）')
-{
-  const d = baseDetail(['create_plan', 'review_plan', 'implement', 'design_integration_tests',
-    'run_integration_tests', 'arbitrate', 'acceptance_walkthrough', 'merge_check'])
-  d.checks.merge = [{ item: '人审签字', done: true, by: 'x' }, { item: 'merge 落账', done: false, by: '' }]
-  d.timeline.push(tle('merge', 'running', '进入本步'))
-  d.timeline.push(tle('merge', AH, '等人签字'))
-  d.timeline.push(tle('merge', 'running', '人审通过'))
-  d.timeline.push(tle('suggest_next', 'running', '预跑下一单'))  // 软失败：无 results
-  d.stage = 'merge'; d.stage_state = RUN
-  const st = run(d)
-  ok(!activeOf(st).includes('suggest_next'), 'suggest_next 不在活跃数组')
-  ok(st.suggest_next === TODO, 'suggest_next=todo')
-  ok(activeOf(st).join(',') === 'merge', `活跃恰={merge}（got ${activeOf(st)}）`)
-}
+// t260910-14 退役注记：原 F7 段（suggest_next 软失败永不点亮）随该段退役删除。
 
 /* ---------------------------------------------------------------- F8 closed */
 section('F8 closed 工单：全表 done')
@@ -277,7 +261,7 @@ section('F10/F11 timeline 缺省/空：回退单值指针口径（软降级不�
     expectAll(st, {
       create_plan: DONE, review_plan: DONE, implement: RUN,
       design_integration_tests: TODO, ui_evidence: TODO, run_integration_tests: TODO,
-      arbitrate: TODO, acceptance_walkthrough: TODO, merge_check: TODO, merge: TODO, suggest_next: TODO,
+      arbitrate: TODO, acceptance_walkthrough: TODO, merge_check: TODO, merge: TODO,
     }, `${label} → 指针口径（前 done/指针 running/后 todo）`)
   }
 }

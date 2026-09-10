@@ -66,8 +66,6 @@ import failure_protocol
 import shared
 from shared import (
     REPO_ROOT,
-    EPIC_CODE_RE,
-    EPIC_SA_NAME,
     STAGE_DISPATCH_KIND,
     WORKSPACE_TYPES,
     AgentStageArgs,
@@ -77,8 +75,6 @@ from shared import (
     ConflictPrepResult,
     ConflictSettleArgs,
     ConflictSettleResult,
-    EpicNextPrepArgs,
-    EpicNextPrepResult,
     HumanGateContext,
     HumanGatePrep,
     INTEG_MANIFEST,
@@ -112,8 +108,6 @@ from shared import (
     UiEvidenceResult,
     WorkspacePrep,
     WorkspacePrepResult,
-    epic_next_precache_path,
-    epic_state_key,
     match_ui_paths,
     model_route_for,
     rebase_write_set,
@@ -975,12 +969,12 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
     agent-default-model (one-shot patch + a second write into the settings user
     layer, the root cause of the 260826 incident — a patch alone is always shadowed
     by the GUI default-model section) + the session-continuation patch + env
-    assembly. suggest_next (pre-running the next ticket) shares this helper with the
-    generic agent step — a single spawn stance, so the two sides cannot drift.
+    assembly. (t260910-14: the pre-run-next-ticket consumer retired; the helper
+    remains the single spawn stance of the generic agent step.)
 
     Returns (cmd prefix including the patches but not the prompt, env). One-shot
     patch files land in artifacts_dir, named with a tag to tell callers apart
-    (generic step = stage_gen<N>, pre-run step = suggest_next_gen<N>).
+    (generic step = stage_gen<N>).
     """
     # Sandbox isolation: the worker process may lack permission to write ~/.dsh, so
     # the headless agent uses a workspace-local .dsh directory (via a DSH_HOME
@@ -1026,11 +1020,17 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
     # STAGE_DISPATCH_KIND mapped by (workflow, stage) (e.g. ai-review → the
     # proofread reviewer's model). No hit = don't pass one — the agent uses the
     # profile's default model, no hard failure. The table path comes from the
-    # contract ①d paths.model_routes declaration (routes_file_for_spawn: falls back
-    # to the main repo's MODEL_ROUTES_FILE when undeclared; a missing declared anchor
-    # = red; corrupt table contents = model_route_for's existing tolerance returning
-    # None, so declared or not the semantics are the same).
-    route = model_route_for(role, kind, routes_file=routes_file_for_spawn(project))
+    # contract ①d paths.model_routes declaration (t260910-14 重构)：resolve_routes_table
+    # 单点解析（真源=声明指向文件；读侧分层兜底=仓内表，宿主风险令 260910）。
+    # 任何非 ok 态在此点名留痕（state+path+error）后继续用兜底表——agent 仍可跑，
+    # 绝不静默回落 profile 默认（KI-030 收窄）。
+    resolved = routes_file_for_spawn(project)
+    if resolved["state"] != "ok":
+        activity.logger.warning(
+            "[model_route] 路由表解析非 ok（state=%s，读=%s）：%s",
+            resolved["state"], resolved["path"], resolved["error"])
+    route = model_route_for(role, kind, table=resolved["table"],
+                            routes_file=resolved["path"])
     if route:
         model_patch = artifacts_dir / ("model_patch_%s.yml" % tag)
         model_patch.write_text(
@@ -1145,8 +1145,7 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
 
     # Shared pre-spawn preparation (the three local .dsh copies live in the helper
     # above, plus the role patch, model routing and session continuation); see
-    # _prepare_agent_spawn (ticket t260828-08, shared with suggest_next as the single
-    # point).
+    # _prepare_agent_spawn (ticket t260828-08).
     kind = STAGE_DISPATCH_KIND.get((args.workflow_id, args.stage_id), "")
     project = await _fetch_ticket_project(args.ticket_id)
     cmd, env = _prepare_agent_spawn(
@@ -1223,368 +1222,6 @@ def _make_stage_activity(stage_id: str):
         return await _run_agent_stage_impl(args)
     _impl.__name__ = "stage_" + stage_id.replace("-", "_")
     return activity.defn(_impl, name=stage_id)
-
-
-# ---------- Pre-running the next ticket after epic creation (ticket t260828-08): prepare_epic_next + suggest_next ----------
-
-async def _epic_ticket_rows(epic: str) -> List[Dict[str, Any]]:
-    """Ticket rows tied to the epic ({id,status,closed}). Data source = the same
-    EpicCode SA query path as client.py cmd_ticket_list (the two reference each
-    other's stance — client.py :555; activities.py's inspection that "the epic data
-    source = the ticket-list row shape" is the same source): list_workflows filtered
-    by the six WorkflowType templates AND EpicCode, RUNNING executions get their
-    status from a snapshot query, COMPLETED means closed. Query failure / no SA in
-    the environment always returns [] (the caller degrades to "empty list" —
-    state_key is still computable, just with fewer rows; no hard failure)."""
-    try:
-        from workflows_v2 import TEMPLATE_CLASSES  # late import: workflows_v2 depends back on this module chain
-        from client import _connect
-        from temporalio.common import SearchAttributeKey
-        client = await _connect()
-        type_filter = " OR ".join(
-            'WorkflowType="%s"' % c.__name__ for c in TEMPLATE_CLASSES.values())
-        type_filter = '(%s) AND %s="%s"' % (type_filter, EPIC_SA_NAME, epic)
-        rows: List[Dict[str, Any]] = []
-        seen: set = set()
-        async for wf in client.list_workflows(type_filter):
-            tid = wf.id
-            if tid in seen:
-                continue
-            seen.add(tid)
-            exec_status = wf.status.name if wf.status is not None else ""
-            if exec_status == "TERMINATED":
-                continue  # same stance as cmd_ticket_list: a torn-down execution never enters the books
-            status = ""
-            if exec_status == "COMPLETED":
-                status = "closed"
-            elif exec_status == "RUNNING":
-                try:
-                    snap = await asyncio.wait_for(
-                        client.get_workflow_handle(tid).query("snapshot"), timeout=8)
-                    status = str((snap or {}).get("meta", {}).get("status") or "")
-                except Exception:
-                    status = ""  # no snapshot → record as open (conservative: one extra cold start beats a false "finished")
-            rows.append({"id": tid, "status": status, "closed": status == "closed"})
-        return rows
-    except Exception as e:
-        activity.logger.warning("[prepare_epic_next] epic=%s 工单查询降级（%s）", epic, str(e)[:200])
-        return []
-
-
-@activity.defn
-async def prepare_epic_next(args: EpicNextPrepArgs) -> EpicNextPrepResult:
-    """Preparation stage for pre-running the next ticket: read the epic document +
-    list its tickets + compute state_key, all returned inline (zero IO inside the
-    workflow). An unreadable document → exists=False (the workflow side logs and
-    skips, never blocks the merge)."""
-    code = str(args.epic or "").strip()
-    if not EPIC_CODE_RE.match(code):
-        activity.logger.warning("[prepare_epic_next] 代号形状非法：%r", code)
-        return EpicNextPrepResult(exists=False)
-    markdown = ""
-    # Project awareness (ticket t260907-07): the document directory goes through
-    # resolve_epics_dir(args.project) — the env read wins first → the project home's
-    # notes/epics → the engine anchor for an empty project as the last resort
-    # (unreachable in production, kept for fixtures / in-flight tickets; a ValueError
-    # from resolve counts as an unreadable document, and the soft-failure rule catches
-    # it without blocking the merge).
-    try:
-        epics_dir = shared.resolve_epics_dir(getattr(args, "project", ""))
-        path = epics_dir / (code + ".md")
-    except ValueError as e:
-        activity.logger.warning("[prepare_epic_next] 项目 %r 锚定失败：%s", getattr(args, "project", ""), str(e)[:200])
-        path = None
-    if path is not None and path.is_file():
-        try:
-            markdown = path.read_text("utf-8")
-        except Exception as e:
-            activity.logger.warning("[prepare_epic_next] %s 读取失败：%s", path, str(e)[:200])
-    try:
-        rows = await _epic_ticket_rows(code)
-    except Exception as e:  # an unexpected raise on the query path also degrades to an empty row list (no hard failure)
-        activity.logger.warning("[prepare_epic_next] epic=%s 工单查询异常（%s）", code, str(e)[:200])
-        rows = []
-    # For the state_key stance see the block comment in shared.py: the current ticket
-    # (the one about to close via this merge) is forced closed.
-    return EpicNextPrepResult(
-        exists=bool(markdown), epic_markdown=markdown, tickets=rows,
-        state_key=epic_state_key(rows, args.ticket_id))
-
-
-def _sanitize_suggest_write_set(raw: Any) -> list:
-    """Sanitize the pre-run suggestion's write_set (pure function, ticket
-    t260901-01): validate each entry by the shared._valid_write_set_entry stance
-    (repo-relative paths: non-string / empty / absolute / backslash / Windows drive
-    letter / '..' are all dropped), then strip, dedupe and keep order; a missing field
-    or non-list → an empty array, never blocking (isomorphic with epic-next.ts
-    sanitizeWriteSet — they reference each other; the suggestion's real value is the
-    ticket itself). Mind the stance difference: the ticket-creation side
-    validate_write_set_args rejects without cleaning, while this suggestion side
-    cleans without rejecting — neither existing decision changes."""
-    from shared import _valid_write_set_entry
-    if not isinstance(raw, list):
-        return []
-    out: list = []
-    for p in raw:
-        if not _valid_write_set_entry(p):
-            continue
-        s = str(p).strip()
-        if s not in out:
-            out.append(s)
-    return out
-
-
-def _parse_suggest_result(raw: Any):
-    """Three-state validation of the pre-run result file (pure function): returns
-    (kind, suggestion|None, error). kind ∈ ok/done/failed; the ok shape requires a
-    non-empty workflow+title; the suggestion keeps only whitelisted fields.
-    (Ticket t260901-01: the ok-shape whitelist gains write_set, passed through after
-    sanitizing — see _sanitize_suggest_write_set. build_suggest_next_prompt's ok
-    contract always required the agent to produce a write_set, but the cache drop
-    lost it, so the modal's write-set prefill stayed empty forever. The done/failed
-    shapes never touch write_set.)"""
-    if not isinstance(raw, dict):
-        return ("failed", None, "结果文件不是合法 JSON 对象")
-    st = str(raw.get("status") or "")
-    if st == "ok":
-        wf = str(raw.get("workflow") or "").strip()
-        title = str(raw.get("title") or "").strip()
-        if wf == "":
-            return ("failed", None, "ok 形态缺 workflow 字段")
-        if title == "":
-            return ("failed", None, "ok 形态缺 title 字段")
-        return ("ok", {"status": "ok", "workflow": wf, "title": title,
-                       "body": str(raw.get("body") or ""),
-                       "rationale": str(raw.get("rationale") or ""),
-                       "write_set": _sanitize_suggest_write_set(raw.get("write_set"))}, "")
-    if st == "done":
-        return ("done", {"status": "done",
-                         "summary": str(raw.get("summary") or "")}, "")
-    if st == "failed":
-        return ("failed", {"status": "failed",
-                           "reason": str(raw.get("reason") or "未说明原因")}, "")
-    return ("failed", None, "未知 status: %r（三态契约：ok/done/failed）" % st)
-
-
-def _json_dumps(obj) -> str:
-    return json.dumps(obj, ensure_ascii=False, indent=1) + "\n"
-
-
-def _write_precache(ticket_id: str, code: str, state_key: str,
-                    suggestion: Dict[str, Any]) -> str:
-    """Write a validated suggestion into the cache (pre.json; schema in
-    shared.EpicNextCache); returns the file path. The host read side, epic-next.ts
-    readPrecache, matches on state_key (the two reference each other's stance)."""
-    path = epic_next_precache_path(REPO_ROOT, code)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({
-        "ticket_id": ticket_id, "epic": code, "ts": int(time.time()),
-        "state_key": state_key, "suggestion": suggestion,
-    }, ensure_ascii=False, indent=1) + "\n", "utf-8")
-    # Transitional mirror for the plugin face (retirement debt #5): the workbench
-    # read side still reads .sandbar/epic-next, so the new-name repo's write side
-    # also produces a legacy-name mirror, to be retired together with
-    # mirror_to_legacy once the plugin-face ticket closes.
-    try:
-        mirror_to_legacy(REPO_ROOT, Path("epic-next") / code / "pre.json")
-    except Exception:  # noqa: BLE001  the mirror is best-effort; the main chain is unaffected
-        pass
-    return str(path)
-
-
-def _sug_stage_result(kind: str, sug: Dict[str, Any], args: AgentStageArgs,
-                      rfile: Path, cache_path: str,
-                      evidence_extra: str = "") -> StageResult:
-    """Validated suggestion → StageResult (the ok/done shapes; extracted from
-    _consume_suggest_result in ticket t260901-19 so the rfile path and the precache
-    shortcut share one text builder and the ticket console renders them
-    identically). evidence_extra: on a shortcut hit, append a marker such as
-    「precache-hit」."""
-    tag = ("；" + evidence_extra) if evidence_extra else ""
-    if kind == "done":
-        return StageResult(
-            status="ok",
-            summary="integration 判定立项 %s 已无事可做，可结项：%s%s%s"
-                    % (args.epic or "（未关联）", sug["summary"],
-                       "（缓存 %s）" % cache_path if cache_path else "", tag),
-            evidence="kind=done result_file=%s cache=%s%s"
-                     % (rfile, cache_path, (" " + evidence_extra) if evidence_extra else ""))
-    return StageResult(
-        status="ok",
-        summary="预跑下一单建议：%s（模板 %s）%s%s"
-                % (sug["title"], sug["workflow"],
-                   "（缓存 %s）" % cache_path if cache_path else "", tag),
-        report="integration 预跑（merge 签字通过后、落账前）给出下一步建议，"
-               "点立项单「继续执行」可直接秒开预填弹层。\n理由：%s"
-               % (sug["rationale"] or "（未给理由）"),
-        evidence="kind=ok result_file=%s cache=%s%s"
-                 % (rfile, cache_path, (" " + evidence_extra) if evidence_extra else ""))
-
-
-def _precache_hit(args: AgentStageArgs) -> Optional[StageResult]:
-    """precache 命中短路（票 t260901-19）：同立项后续票首跑时 rfile 本就不存在，但上一票
-    已把建议写入 <repoRoot>/.sandbar/epic-next/<epic>/pre.json（老主树 .suyou 粘滞）（state_key 未变即建议仍  # naming-compat
-    valid) → reuse it directly, zero spawn, tokens saved.
-
-    Hit conditions and validation (a file on disk is hand-editable, so its contents
-    are not trusted):
-      - pre.json exists and parses, state_key matches this run, and the suggestion
-        passes _parse_suggest_result's three-state validation plus the ok-shape
-        template anti-hallucination gate — any failed step → return None and fall
-        back to spawn (no silent degradation, no fake ok); a failed-shape cache (an
-        abnormal state) also never short-circuits.
-    """
-    if not args.epic or not args.state_key:
-        return None
-    ppath = epic_next_precache_path(REPO_ROOT, args.epic)
-    if not ppath.is_file():
-        return None
-    try:
-        cache = json.loads(ppath.read_text("utf-8"))
-    except Exception:
-        return None
-    if not isinstance(cache, dict):
-        return None
-    if str(cache.get("state_key") or "") != args.state_key:
-        return None
-    raw_sug = cache.get("suggestion")
-    if not isinstance(raw_sug, dict):
-        return None
-    kind, sug, _err = _parse_suggest_result(raw_sug)
-    if sug is None or kind == "failed":
-        return None
-    if kind == "ok" and sug["workflow"] not in TEMPLATE_CLASS_NAMES:
-        return None
-    return _sug_stage_result(kind, sug, args, Path("(precache)"),
-                             str(ppath), evidence_extra="precache-hit")
-
-
-def _consume_suggest_result(rfile: Path, args: AgentStageArgs) -> Optional[StageResult]:
-    """Read + three-state validation + cache write (the judging half of suggest_next,
-    shared by idempotent re-entry and polling).
-    Missing file → None (the caller keeps polling); present but failing validation →
-    failed (soft failure, no raise, the merge still closes — with retry_policy=1 a
-    raise would only turn the failure into an activity error, so recording it
-    honestly is better)."""
-    if not rfile.is_file():
-        return None
-    try:
-        raw = json.loads(rfile.read_text("utf-8"))
-    except Exception as e:
-        return StageResult(
-            status="failed", summary="预跑结果文件不是合法 JSON：%s" % str(e)[:160],
-            evidence="result_file=%s" % rfile)
-    kind, sug, err = _parse_suggest_result(raw)
-    if sug is None:
-        return StageResult(status="failed", summary="预跑建议不合规（%s），软失败跳过" % err,
-                           evidence=json.dumps(raw, ensure_ascii=False)[:800])
-    if kind == "failed":
-        return StageResult(
-            status="failed", summary="integration 判定本单给不出下一步建议：%s" % sug["reason"],
-            evidence="result_file=%s" % rfile)
-    # Anti-hallucination gate: the ok shape's workflow must be in the template list
-    # (the same gate as the host's validateSuggestion; enforced on both sides)
-    if kind == "ok" and sug["workflow"] not in TEMPLATE_CLASS_NAMES:
-        return StageResult(
-            status="failed",
-            summary="预跑建议的模板 %r 不在可用清单内（防幻觉拒收，软失败跳过）" % sug["workflow"],
-            evidence="whitelist=%s" % ",".join(sorted(TEMPLATE_CLASS_NAMES)))
-    cache_path = _write_precache(args.ticket_id, args.epic, args.state_key, sug) \
-        if args.epic and args.state_key else ""
-    return _sug_stage_result(kind, sug, args, rfile, cache_path)
-
-
-@activity.defn
-async def suggest_next(args: AgentStageArgs) -> StageResult:
-    """Pre-run the next-ticket suggestion (ticket t260828-08): spawn an integration
-    session (DSH_HEADLESS_SESSION=<ticket>-integration, reusing integration_review's
-    session context — the core benefit of this design), with prompt = the three-state
-    contract text assembled by the workflow (not the generic build_stage_prompt
-    contract).
-
-    Differences from the generic agent step: ① skips the worker settle (read-only
-    analysis, no commit); ② the result file is three-state contract JSON rather than
-    a StageResult, judged by _consume_suggest_result; ③ soft failure: timeout /
-    process exit / non-compliance always return a failed StageResult without raising
-    (the merge still closes), matching the workflow side's retry_policy
-    maximum_attempts=1."""
-    rfile = Path(args.result_file)
-    rfile.parent.mkdir(parents=True, exist_ok=True)
-    cwd = _ws_cwd(args.workspace, args.ticket_id)
-    cwd.mkdir(parents=True, exist_ok=True)
-
-    # Idempotent: the result file already exists → re-judge and return (safe across
-    # Temporal retries / worker restarts; the cache write is idempotent)
-    res = _consume_suggest_result(rfile, args)
-    if res is not None:
-        return res
-
-    if os.environ.get("SANDBAR_SUGGEST_STUB"):  # self-test stub: write our own three-state result file and judge it (zero model calls)
-        mode = os.environ["SANDBAR_SUGGEST_STUB"]
-        stubs = {
-            "ok": {"status": "ok", "workflow": "dev-lane", "title": "[stub] 下一单建议",
-                   "body": "[stub] 正文", "rationale": "[stub] 理由"},
-            "done": {"status": "done", "summary": "[stub] 立项目标已达成"},
-            "failed": {"status": "failed", "reason": "[stub] 放弃原因"},
-            "invalid": "{not-json",
-        }
-        payload = stubs["invalid"] if mode == "invalid" else \
-            _json_dumps(stubs.get(mode, stubs["failed"]))
-        rfile.write_text(payload, "utf-8")
-        return _consume_suggest_result(rfile, args)
-
-    # Precache hit short-circuit (ticket t260901-19): after the stub (the stub is the
-    # test-only channel and always wins) and before spawn — for a later ticket of the
-    # same epic with an unchanged state_key, reuse the previous ticket's suggestion:
-    # zero spawn, tokens saved. Failed validation (corrupt / missing fields / illegal
-    # template / failed shape / state_key mismatch) → None, then spawn as usual.
-    res = _precache_hit(args)
-    if res is not None:
-        activity.logger.info("[%s/suggest_next] precache 命中，零 spawn 复用（epic=%s）",
-                             args.ticket_id, args.epic)
-        return res
-
-    project = await _fetch_ticket_project(args.ticket_id)
-    cmd, env = _prepare_agent_spawn(
-        cwd, args.role, "", args.ticket_id, rfile.parent,
-        "suggest_next_gen%d" % args.gen, project=project)
-    cmd.append(args.prompt)
-    activity.logger.info("[%s/suggest_next] spawn integration 预跑（cwd=%s）：%s …",
-                         args.ticket_id, cwd, " ".join(cmd[:3]))
-    logf = open(args.log_file, "a", buffering=1) if args.log_file else subprocess.DEVNULL
-    proc = subprocess.Popen(
-        cmd, cwd=str(cwd), env=env,
-        stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-        start_new_session=True)  # KI-009: its own process group, see _reap_agent_proc
-    polls = 0
-    try:
-        while True:
-            res = _consume_suggest_result(rfile, args)
-            if res is not None:
-                return res
-            rc = proc.poll()
-            if rc is not None:
-                return StageResult(
-                    status="failed",
-                    summary="预跑 integration agent 退出（rc=%s）但未写合规结果，软失败跳过"
-                            % rc,
-                    evidence="log=%s tail=%s" % (args.log_file, _log_tail(args.log_file)))
-            if activity.in_activity():
-                activity.heartbeat(json.dumps(
-                    {"stage": "suggest_next", "gen": args.gen, "polls": polls,
-                     "session_kb": _session_kb(cwd)}))
-            polls += 1
-            if args.max_polls and polls >= args.max_polls:
-                return StageResult(
-                    status="failed",
-                    summary="预跑等结果文件超时（%d 次轮询 × %ds），软失败跳过"
-                            % (polls, POLL_SEC),
-                    evidence="result_file=%s log=%s" % (rfile, args.log_file))
-            await asyncio.sleep(POLL_SEC)
-    finally:
-        # KI-009: the finally block escalates to full terminal-state reaping at group
-        # granularity (all four paths reach here)
-        _reap_agent_proc(proc, args.ticket_id, "suggest_next")
 
 
 def _log_tail(log_file: str, n: int = 400) -> str:
@@ -4469,13 +4106,6 @@ ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     # M1-3 (t260902-02): the three-stage close-out — merge only books, archive_ticket
     # exports, teardown_lane tears the lane down.
     archive_ticket, teardown_lane,
-    # Pre-running the next ticket after epic creation (t260828-08): prepare reads the
-    # document / computes state_key, suggest_next is a read-only analysis.
-    # suggest_next does not go into AGENT_STAGE_IDS — it skips the stage factory (the
-    # prompt is assembled by the workflow and the result is judged by the three-state
-    # contract rather than a StageResult), and its activity name doubles as the stage
-    # id so dev_lane can call it directly.
-    prepare_epic_next, suggest_next,
     prepare_ui_evidence,
     verify_review_gate,
     # KI-044 root fix (t260904-13): UI-ticket detection switched to a diff source — the

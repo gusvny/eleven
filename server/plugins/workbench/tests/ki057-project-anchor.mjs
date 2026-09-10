@@ -9,7 +9,7 @@
  *      未知 key→400 / 隔离条目 throw→502 / 注册表装载异常→502 / primaryDir 空串→502 /
  *      畸形 key 类型（数字/对象）→视同缺省。
  *   B. 真注册表 fixture（SANDBAR_PROJECTS_DIR temp）：sandbar/fpv 双条目解析＋坏条目隔离回落。
- *   C. env 覆盖闸红线：SANDBAR_EPICS_DIR / SANDBAR_EVIDENCE_DIR / SANDBAR_EPIC_NEXT_DIR
+ *   C. env 覆盖闸红线：SANDBAR_EPICS_DIR / SANDBAR_EVIDENCE_DIR（t260910-14：SANDBAR_EPIC_NEXT_DIR 随 epic-next 退役）
  *      仅默认仓锚生效，项目锚恒 root 拼接（防串味）。
  *   D. computeTicketDiff 按项目根判界（防穿越闸语义不弱化）：项目根内泳道放行
  *      （KI-057 实报修复点）/ ../ 穿越仍拒 / 根外绝对路径仍拒 / 同 worktree 在引擎
@@ -22,7 +22,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { resolveProjectAnchor, anchorEpicsDir, anchorEvidenceBase, anchorEpicNextDir, resolvedMark } from './../src/host/project-anchor.ts'
+import { resolveProjectAnchor, anchorEpicsDir, anchorEvidenceBase, resolvedMark } from './../src/host/project-anchor.ts'
 import { computeTicketDiff } from './../src/host/changes.ts'
 import { listEvidenceFiles } from './../node.ts'
 
@@ -88,18 +88,14 @@ section('C env 覆盖闸（红线：旧 env 链保留，仅默认仓锚生效）
 {
   process.env.SANDBAR_EPICS_DIR = '/env/epics'
   process.env.SANDBAR_EVIDENCE_DIR = '/env/evidence'
-  process.env.SANDBAR_EPIC_NEXT_DIR = '/env/epic-next'
   const def = resolveProjectAnchor('', FALLBACK, FIND_OK)
   ok(anchorEpicsDir(def) === '/env/epics', '默认锚：SANDBAR_EPICS_DIR 生效（旧链保留）')
   ok(anchorEvidenceBase(def) === '/env/evidence', '默认锚：SANDBAR_EVIDENCE_DIR 生效')
-  ok(anchorEpicNextDir(def) === '/env/epic-next', '默认锚：SANDBAR_EPIC_NEXT_DIR 生效')
   const proj = resolveProjectAnchor('fpv', FALLBACK, FIND_OK)
   ok(anchorEpicsDir(proj) === '/fpv/primary/notes/epics', '项目锚：epics 目录随项目根，env 不透出')
   ok(anchorEvidenceBase(proj) === '/fpv/primary/.suyou/evidence', '项目锚：证据基目录随项目根')
-  ok(anchorEpicNextDir(proj) === '/fpv/primary/.suyou/epic-next', '项目锚：作业根随项目根')
   delete process.env.SANDBAR_EPICS_DIR
   delete process.env.SANDBAR_EVIDENCE_DIR
-  delete process.env.SANDBAR_EPIC_NEXT_DIR
   ok(anchorEvidenceBase(def) === join(FALLBACK, '.suyou', 'evidence'), '默认锚：env 缺省回 <repo>/.suyou/evidence（行为不变）')
 }
 

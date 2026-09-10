@@ -31,7 +31,7 @@
  * 修订候选已上报用户，谁也不代改冻结文档。env SANDBAR_METRICS_DIR 仅测试覆盖。
  * legacy SANDBAR_PROJECTS_YAML 单文件模式下 per-key 目录无定义 → 缓存禁用+SKIP。
  *
- * 测试缝（同 SANDBAR_EPIC_NEXT_STUB 先例）：env SANDBAR_METRICS_STUB 指向 stub JSON
+ * 测试缝（同既有测试桩 env 先例）：env SANDBAR_METRICS_STUB 指向 stub JSON
  * {tickets, workflows, shows, deliveries}，deps 全离线零 admin.py/git 真源，
  * 供 CLI 双前门基线与泳道测试用；未设时走真通路。
  */

@@ -590,7 +590,7 @@ function RoutesTableSection({ providers, projectKey }: { providers: ProviderRow[
   async function save(): Promise<void> {
     if (draft === undefined) return
     const confirmed = window.confirm(
-      '保存将改写 server/model-routes.yaml（真源，写前备份 /tmp）。\n' +
+      '保存将改写项目声明 paths.model_routes 指向的路由表（真源；未声明时落仓内 server/model-routes.yaml，写前备份 /tmp）。\n' +
       '保存即生效：路由表是运行时查表，下一个工单 agent spawn 时就按新表走，无需任何生成/重启步骤。\n' +
       '确认保存路由表？')
     if (!confirmed) return
@@ -629,7 +629,7 @@ function RoutesTableSection({ providers, projectKey }: { providers: ProviderRow[
     return (
       <div className="syp-route-card">
         <div className="syp-route-title">路 由 表</div>
-        <div className="syp-err">{error}{'\n'}（/sandbar-admin/api/routes 返回错误——按上面文案排查：缺参/未知项目=调用问题；表缺失/解析失败=该项目主目录的 model-routes.yaml 问题。）</div>
+        <div className="syp-err">{error}{'\n'}（/sandbar-admin/api/routes 返回错误——按上面文案排查：缺参/未知项目=调用问题；表缺失/解析失败=声明指向的路由表（或仓内兜底表）问题。）</div>
       </div>
     )
   }
@@ -669,7 +669,7 @@ function RoutesTableSection({ providers, projectKey }: { providers: ProviderRow[
       </div>
 
       <div className="syp-route-redline">
-        改表红线：保存直接改写 model-routes.yaml（写前备份 /tmp）；模型 ref 不许发明——只用下方
+        改表红线：保存直接改写声明指向的路由表（未声明时落仓内兜底表；写前备份 /tmp）；模型 ref 不许发明——只用下方
         provider 下拉里实证存在的 provider 及其模型 id。保存后<strong>下一个工单 agent 启动即生效</strong>，无需任何生成/重启步骤。
       </div>
 

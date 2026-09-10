@@ -33,7 +33,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { EPIC_CODE_RE, listEpics, resolveEpicsDir } from './../src/host/epics.ts'
-import { precacheExists, readPrecacheHint, dismissPrecache, stateKeyFromRows } from './../src/host/epic-next.ts'
 import { apply } from './../node.ts'
 
 let pass = 0, fail = 0, skip = 0
@@ -57,7 +56,7 @@ const EPIC_MD = `# 立项单：demo-epic
 `
 
 const tmp = await mkdtemp(join(tmpdir(), 'integ-epics-api-'))
-const savedEnv = { SANDBAR_EPICS_DIR: process.env.SANDBAR_EPICS_DIR, SANDBAR_EPIC_NEXT_DIR: process.env.SANDBAR_EPIC_NEXT_DIR }
+const savedEnv = { SANDBAR_EPICS_DIR: process.env.SANDBAR_EPICS_DIR }
 
 /** mock webServer/req/res 支架（与 workbench smoke 测试同模式）。 */
 function makeHarness(repo) {
@@ -202,50 +201,12 @@ print(json.dumps({"ok": False, "error": "stub unsupported"})); sys.exit(1)
   r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/no-such-epic/close', 'POST')
   ok(r.status === 404, 'close on non-existent code -> 404')
 
-  /* ------------------------------------------------------------ E. next-hint cache + dismiss */
-  section('E next-hint: bad-JSON cache treated as miss / dismiss delete+backup+idempotent (new vs smoke)')
-  // 预缓存目录按设计锚定仓：resolvePrecacheDir 不读 env
-  //（env SANDBAR_EPIC_NEXT_DIR 只隔离 job 目录）。测试跟随真源。
-  const cacheDir = join(repoB, '.suyou', 'epic-next')
-  const rows = [{ id: 't260831-01', closed: true }, { id: 't260831-02', closed: false }]
-  const stateKey = stateKeyFromRows(rows, '')
-  const wfIds = ['dev-lane']
-  // 坏 JSON 缓存：徽标亮（precacheExists 只 stat），详情建议=miss
-  await mkdir(join(cacheDir, 'demo-epic'), { recursive: true })
-  await writeFile(join(cacheDir, 'demo-epic', 'pre.json'), '{"status":"ok","workflow":"dev-l\\-broken-escape', 'utf8')
-  ok(await precacheExists(cacheDir, 'demo-epic') === true, 'bad-JSON cache exists -> badge lit (precacheExists only stats)')
-  ok(await readPrecacheHint(cacheDir, 'demo-epic', stateKey, wfIds) === null, 'bad-JSON cache -> hint treated as miss (null, no crash)')
-  // 合法缓存命中
-  const goodCache = { epic: 'demo-epic', state_key: stateKey, suggestion: { workflow: 'dev-lane', title: 'next ticket', body: 'b', rationale: 'r' } }
-  await writeFile(join(cacheDir, 'demo-epic', 'pre.json'), JSON.stringify(goodCache), 'utf8')
-  const hint = await readPrecacheHint(cacheDir, 'demo-epic', stateKey, wfIds)
-  ok(hint?.status === 'ok' && hint.title === 'next ticket', 'valid cache -> hint hit (state_key aligned)')
-  ok(await readPrecacheHint(cacheDir, 'demo-epic', 'stale-key', wfIds) === null, 'stale state_key -> miss (stale suggestion never shows)')
-  // 详情路由带 nextHint（全路由 + 桩 admin.py 查询）
-  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/demo-epic')
-  ok(r.status === 200 && r.body.result?.nextHint?.title === 'next ticket', 'GET detail -> nextHint projection hit')
-  // Dismiss：函数级契约（路由级探针见下；见文件头已知引擎缺陷）
-  ok(await dismissPrecache(cacheDir, 'demo-epic').then(r => r.ok === true), 'dismissPrecache -> cache deleted')
-  ok(await precacheExists(cacheDir, 'demo-epic') === false, 'after dismiss cache is gone (badge off)')
-  const hintBackups = existsSync('/tmp/epic-next-backup') ? await readdir('/tmp/epic-next-backup') : []
-  ok(hintBackups.some(f => f.startsWith('demo-epic-')), 'dismiss backed up to /tmp/epic-next-backup before deleting')
-  const dr2 = await dismissPrecache(cacheDir, 'demo-epic')
-  ok(dr2.ok === true, 'second dismiss -> still ok (idempotent, missing file is fine)')
-  const drBad = await dismissPrecache(cacheDir, 'BAD')
-  ok(drBad.ok === false && drBad.status === 400, 'dismiss invalid code -> 400 (never deletes the wrong file)')
-  // 已知引擎缺陷的路由级探针（见文件头）；不计 FAIL。
-  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/demo-epic/next-hint/dismiss', 'POST')
-  if (r.status === 200) {
-    ok(true, 'POST dismiss route -> 200 (engine bug fixed; route-level contract restored)')
-  } else {
-    console.log(`  KNOWN-ISSUE POST dismiss route -> ${r.status} (engine branch-order defect: GET-only 405 sits before the dismiss branch; see file header, fix in a separate ticket)`)
-  }
+  // t260910-14 退役注记：原 E 段（next-hint 缓存命中/坏 JSON 容错/dismiss 删除
+  // + 备份 + 幂等）随 suggest_next 整链退役删除。
 } finally {
   // 终态全回收：还原 env，删除 tmp fixture
   if (savedEnv.SANDBAR_EPICS_DIR === undefined) delete process.env.SANDBAR_EPICS_DIR
   else process.env.SANDBAR_EPICS_DIR = savedEnv.SANDBAR_EPICS_DIR
-  if (savedEnv.SANDBAR_EPIC_NEXT_DIR === undefined) delete process.env.SANDBAR_EPIC_NEXT_DIR
-  else process.env.SANDBAR_EPIC_NEXT_DIR = savedEnv.SANDBAR_EPIC_NEXT_DIR
   await rm(tmp, { recursive: true, force: true }).catch(() => {})
 }
 

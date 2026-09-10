@@ -19,9 +19,10 @@
  *   D. saveRoutesTable —— 读真源 → 校验 → 补丁 → 备份到 /tmp → 写回 model-routes.yaml。
  */
 
-import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { copyFile, readFile, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /* ------------------------------------------------------------ 显示名常量（直接维护） */
@@ -170,12 +171,17 @@ export interface RoutesView {
   /** 非空=视图组装失败（解析失败/读取故障等），UI 显示 error 不渲染空表。
    *  注意：表「缺失」不再是 error——那是未初始化态（uninitialized）。 */
   error?: string
-  /** t260906-01 无表引导态：项目主目录无 model-routes.yaml（缺失=声明的本意，
-   *  运行时回落 profile 默认模型，不炸）→ true，UI 渲染「未初始化」引导卡片 +
-   *  「生成默认表」动作，替代旧红错。解析失败仍走 error（畸形=fail-closed）。 */
+  /** t260906-01 无表引导态（t260910-14 收窄为纯指引：init 动作已退役，
+   *  新项目按 docs/model-routes-sample.yaml 人工填表）。 */
   uninitialized?: boolean
-  /** 引导态动作的模板来源（引擎仓真源表路径；与 installer 脚手架同源不造两份）。 */
-  template_source?: string
+  /** t260910-14：声明 paths.model_routes 解析出的真源路径（未声明=null）。 */
+  declared?: string | null
+  /** t260910-14：解析四态（ok/decl_missing/file_missing/bad_content），与引擎
+   *  resolve_routes_table 同名同判——禁静默，UI 须展示非 ok 态的 resolution_error。 */
+  state?: 'ok' | 'decl_missing' | 'file_missing' | 'bad_content'
+  /** 非 ok 态人话原因（生效来源/兜底说明）；生效时机=每次派活读表即生效；
+   *  路由编辑端点在内存服务内，重启 3099 才见新逻辑（KI-052 同族）。 */
+  resolution_error?: string
 }
 
 function entryOf(e: Record<string, unknown> | null): { provider: string | null; model: string | null } | null {
@@ -186,55 +192,132 @@ function entryOf(e: Record<string, unknown> | null): { provider: string | null; 
   }
 }
 
-/** 引擎仓路由默认表（模板真源）：本文件在 server/plugins/ui/src/host/ 下，
- *  上三级即 server/。与 installer/scaffold.py 的 TEMPLATE_ROUTES_REL
- *  同一份文件（同源不造两份）。 */
-export function engineRoutesTemplatePath(): string {
+/** 仓内兜底表（宿主风险令 260910：读侧分层——声明指向文件优先，仓内表兜底；
+ *  本票不删仓内表）。本文件在 server/plugins/ui/src/host/ 下，上三级即 server/。 */
+export function repoRoutesFallbackPath(): string {
   return fileURLToPath(new URL('../../../../model-routes.yaml', import.meta.url))
 }
 
-/**
- * 生成默认表（init，t260906-01）：项目主目录无表时，从引擎仓真源表拷贝初始化。
- * 语义（review R3 定稿）：目标表已存在=拒收（零覆盖 fail-closed，不覆盖现场）；
- * 父目录不存在=mkdir 递归建（「引导即初始化」）；写入原子（tmp+rename）；
- * 模板缺失/不可读=红，零落盘。返回 {ok} 或 {ok:false,error}（不抛）。
- */
-export async function initRoutesTable(repo: string): Promise<{ ok: boolean; routes_file?: string; error?: string }> {
-  const routesFile = join(repo, 'server', 'model-routes.yaml')
-  let exists = true
-  try {
-    await readFile(routesFile, 'utf8')
-  } catch (err: any) {
-    if (err?.code === 'ENOENT') exists = false
-    else return { ok: false, error: `目标表不可读（${routesFile}）: ${String(err?.message ?? err)}` }
-  }
-  if (exists) return { ok: false, error: `路由表已存在: ${routesFile}（零覆盖：init 不覆盖现场，如需重建请人工处置）` }
-  const template = engineRoutesTemplatePath()
-  let text: string
-  try {
-    text = await readFile(template, 'utf8')
-  } catch (err: any) {
-    return { ok: false, error: `模板表不可读（${template}）: ${String(err?.message ?? err)}——零落盘` }
-  }
-  try {
-    parseRoutesYaml(text, 'model-routes.yaml(模板)') // 畸形模板 fail-closed，不落盘
-  } catch (err) {
-    return { ok: false, error: `模板表畸形: ${err instanceof Error ? err.message : String(err)}——零落盘` }
-  }
-  try {
-    await mkdir(dirname(routesFile), { recursive: true })
-    const tmp = routesFile + '.init-tmp'
-    await writeFile(tmp, text, 'utf8')
-    await rename(tmp, routesFile)
-  } catch (err: any) {
-    return { ok: false, error: `默认表写入失败: ${String(err?.message ?? err)}` }
-  }
-  return { ok: true, routes_file: routesFile }
+export interface ResolvedRoutesFile {
+  /** ok=声明指向文件在用；decl_missing=未声明（兜底=仓内表）；file_missing=声明文件
+   *  缺失（读侧兜底）；bad_content=声明文件解析失败（读侧兜底）。与 python
+   *  shared.resolve_routes_table 四态一一对应（一致性守卫见 integration 夹具矩阵）。 */
+  state: 'ok' | 'decl_missing' | 'file_missing' | 'bad_content'
+  /** 实际读/写目标：声明指向文件；未声明时=仓内兜底表。 */
+  path: string
+  /** 声明的绝对路径（未声明=null）。 */
+  declared: string | null
+  /** 非 ok 态的人话原因（ok 态空串）。禁静默：消费方须展示/留痕。 */
+  error: string
 }
 
-/** 组装视图：读 model-routes.yaml（真源），查表补齐 effective。 */
-export async function buildRoutesView(repo: string): Promise<RoutesView> {
-  const routesFile = join(repo, 'server', 'model-routes.yaml')
+/** 解析选项：projectsDir=注册表根注入点（测试夹具；缺省读 SANDBAR_PROJECTS_DIR）；
+ *  projectKey=注册 key（缺省=未声明态）。 */
+export interface RoutesResolveOpts {
+  projectsDir?: string
+  projectKey?: string
+}
+
+/** 读取注册表 per-key 条目的顶层 paths.model_routes 声明（最小行解析，镜像 python
+ *  shared.project_paths 的 paths 节语义；SANDBAR_PROJECTS_DIR 覆盖同源）。 */
+function readDeclaredRoutesPath(projectKey: string, projectsDir?: string): string | null {
+  if (!PROJECT_KEY_TS_RE.test(projectKey)) return null
+  const root = projectsDir ?? process.env.SANDBAR_PROJECTS_DIR ?? join(homedir(), '.sandbar', 'projects')
+  const entry = join(root, projectKey, 'project.yaml')
+  let text: string
+  try {
+    text = readFileSync(entry, 'utf8')
+  } catch {
+    return null // 条目缺失/未注册=未声明（与 python project_paths 同判）
+  }
+  let inPaths = false
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/(#.*)?$/, '').trimEnd()
+    if (line.trim() === '' || line.trim().startsWith('#')) continue
+    if (line === 'paths:') { inPaths = true; continue }
+    if (!/^\s/.test(raw)) inPaths = false // 退回顶层
+    if (!inPaths) continue
+    const m = line.trim().match(/^model_routes:\s*(.*)$/)
+    if (m) {
+      const v = m[1].trim().replace(/^["']|["']$/g, '')
+      if (v === '') throw new Error(`paths.model_routes 声明值为空（strip 后判空，畸形）: ${entry}`)
+      if (v.startsWith('{') || v.startsWith('[')) {
+        throw new Error(`paths.model_routes 声明值非标量（fail-closed）: ${v.slice(0, 40)}`)
+      }
+      return v
+    }
+  }
+  return null
+}
+
+const PROJECT_KEY_TS_RE = /^[a-z0-9][a-z0-9-]{0,40}$/
+
+/** 主目录反查 key（save/view 未显式传 key 时）：扫注册表根各条目 project.yaml 的
+ *  dirs 列表，dirs[0]==primaryDir 的 key 即真源条目（与 python project_paths 的
+ *  dirs[0] 主目录语义同源；找不到=null → 未声明态）。 */
+function findKeyByPrimaryDir(projectsDir: string | undefined, primaryDir: string): string | null {
+  const root = projectsDir ?? process.env.SANDBAR_PROJECTS_DIR ?? join(homedir(), '.sandbar', 'projects')
+  let entries: string[] = []
+  try {
+    entries = readFileSync(root, { withFileTypes: true }).map(e => e.name)
+  } catch { return null }
+  const want = resolve(primaryDir)
+  for (const name of entries) {
+    const f = join(root, name, 'project.yaml')
+    let text: string
+    try { text = readFileSync(f, 'utf8') } catch { continue }
+    let inDirs = false
+    let first: string | null = null
+    for (const raw of text.split('\n')) {
+      const line = raw.replace(/(#.*)?$/, '').trimEnd()
+      if (line.trim() === '' || line.trim().startsWith('#')) continue
+      if (line === 'dirs:') { inDirs = true; continue }
+      if (!/^\s/.test(raw)) inDirs = false
+      if (!inDirs) continue
+      const m = line.trim().match(/^-\s*(.+)$/)
+      if (m) { first = m[1].trim(); break }
+    }
+    if (first !== null && resolve(first) === want) return name
+  }
+  return null
+}
+
+/** 路由表文件解析——UI 读写与引擎查表的同一入口（t260910-14 读写同源）：
+ *  声明 paths.model_routes 指向的文件优先（~/展开/绝对路径/相对项目主目录，
+ *  `..` 逃逸 fail-closed 拒收），未声明回落仓内兜底表。三态分态可辨禁静默。 */
+export function resolveRoutesFilePath(primaryDir: string, opts: RoutesResolveOpts = {}): ResolvedRoutesFile {
+  const key = opts.projectKey ?? findKeyByPrimaryDir(opts.projectsDir, primaryDir)
+  if (key === null) {
+    return { state: 'decl_missing', path: repoRoutesFallbackPath(), declared: null,
+             error: '注册表中未找到主目录对应的条目（读侧兜底=仓内表 ' + repoRoutesFallbackPath() + '）' }
+  }
+  const declaredRaw = readDeclaredRoutesPath(key, opts.projectsDir)
+  if (declaredRaw === null || declaredRaw === '') {
+    return { state: 'decl_missing', path: repoRoutesFallbackPath(), declared: null,
+             error: '条目未声明 paths.model_routes（读侧兜底=仓内表 ' + repoRoutesFallbackPath() + '）' }
+  }
+  if (declaredRaw.includes('..') && (declaredRaw === '..' || declaredRaw.includes('/../') || declaredRaw.startsWith('../') || declaredRaw.endsWith('/..'))) {
+    throw new Error(`paths.model_routes 禁止 .. 越界（机器级形态同样适用）: ${declaredRaw}`)
+  }
+  let declared: string
+  if (declaredRaw === '~' || declaredRaw.startsWith('~/')) {
+    declared = join(homedir(), declaredRaw.slice(1))
+  } else if (declaredRaw.startsWith('/') || /^[a-zA-Z]:/.test(declaredRaw)) {
+    declared = declaredRaw
+  } else {
+    declared = join(primaryDir, declaredRaw)
+  }
+  // 合法声明 → ok 态（存在性/内容缺陷由读面 buildRoutesView 在 readFile/parse 时
+  // 分态点名——与 python project_paths（声明解析）+ resolve_routes_table（读侧分态）
+  // 两层同构）。
+  return { state: 'ok', path: declared, declared, error: '' }
+}
+
+/** 组装视图：读「声明指向的路由表」（真源，t260910-14 读写同源；未声明回落仓内
+ *  兜底表——宿主风险令 260910 读侧分层），查表补齐 effective。 */
+export async function buildRoutesView(primaryDir: string, opts: RoutesResolveOpts = {}): Promise<RoutesView> {
+  const resolved = resolveRoutesFilePath(primaryDir, opts)
+  const routesFile = resolved.path
   const view: RoutesView = {
     routes_file: routesFile,
     parsed_at: Math.floor(Date.now() / 1000),
@@ -242,14 +325,34 @@ export async function buildRoutesView(repo: string): Promise<RoutesView> {
     roles: [],
     warnings: [],
   }
+  view.declared = resolved.declared
+  view.state = resolved.state
+  view.resolution_error = resolved.error
   let text: string
   try {
     text = await readFile(routesFile, 'utf8')
   } catch (err: any) {
     if (err?.code === 'ENOENT') {
-      // t260906-01：表缺失=未初始化（非错误）——引导态 + 生成默认表动作
-      view.uninitialized = true
-      view.template_source = engineRoutesTemplatePath()
+      // 读侧分层兜底（宿主风险令 260910）：声明文件缺失 → 仓内兜底表若在则接管读
+      // （写面仍指声明路径）；兜底也缺 = 未初始化引导态（纯指引，动作已随 init 退役）。
+      if (resolved.declared !== null) {
+        try {
+          // 分层兜底接管**读内容**；routes_file 保持声明路径（真源/写面不漂移）
+          text = await readFile(repoRoutesFallbackPath(), 'utf8')
+          view.state = 'file_missing'
+          view.resolution_error = resolved.error + '（读侧兜底=仓内表 ' + repoRoutesFallbackPath() + '）'
+        } catch (err2: any) {
+          if (err2?.code === 'ENOENT') {
+            view.uninitialized = true
+          } else {
+            view.error = `路由表读取失败: ${String(err2?.message ?? err2)}`
+          }
+          return view
+        }
+      } else {
+        // t260910-14：无表引导态保留为纯指引（init 动作已退役，新项目按 docs 样例人工填表）
+        view.uninitialized = true
+      }
     } else {
       view.error = `路由表读取失败: ${String(err?.message ?? err)}`
     }
@@ -536,8 +639,8 @@ export interface RoutesSaveResult {
 
 /** M13 保存：读真源 → validateRouteTable → applyRouteEdits → 备份 /tmp → 写回。
  *  表缺失/解析失败/载荷非法 → 返回 error（不抛，由 handler 转 200 {ok:false}）。 */
-export async function saveRoutesTable(repo: string, edits: RouteTableEdits): Promise<RoutesSaveResult> {
-  const routesFile = join(repo, 'server', 'model-routes.yaml')
+export async function saveRoutesTable(primaryDir: string, edits: RouteTableEdits, opts: RoutesResolveOpts = {}): Promise<RoutesSaveResult> {
+  const routesFile = resolveRoutesFilePath(primaryDir, opts).path
   const base: RoutesSaveResult = {
     written: false, routes_file: routesFile, backup: null, changed: [], regenerate: REGEN_HINT,
   }

@@ -13,7 +13,7 @@ declare module 'node:child_process' {
     options: { cwd?: string; timeout?: number },
     callback: (error: Error | null, stdout: string, stderr: string) => void,
   ): unknown
-  /** t260827-02 补：epic-next.ts spawn 一次性 headless agent（detached 长任务，poll 判活）。
+  /** t260827-02 补：宿主 spawn 一次性 headless agent（detached 长任务，poll 判活；原 epic-next.ts 消费面已随 t260910-14 退役，声明保留给其余宿主面）。
    *  t260828-03 补：signalCode（kill 后判死）与 unref（stub 哑进程不拖宿主退出）。 */
   export interface ChildProcess {
     readonly exitCode: number | null
@@ -42,18 +42,18 @@ declare module 'node:fs/promises' {
   export function mkdir(path: string, options?: { recursive?: boolean }): Promise<void>
   export function writeFile(path: string, data: string, encoding?: 'utf8'): Promise<void>
   export function appendFile(path: string, data: string, encoding?: 'utf8'): Promise<void>
-  /** t260827-02 补：epic-next.ts 拷 profile/creds/settings 与清理过期 job 目录。 */
+  /** t260827-02 补：宿主侧拷 profile/creds/settings 与目录清理（原 epic-next.ts 消费面已随 t260910-14 退役）。 */
   export function cp(src: string, dst: string, options?: { recursive?: boolean }): Promise<void>
   export function rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>
 }
 
-/** t260827-02 补：epic-next.ts 同步探测（existsSync）与 agent.log 文件描述符（openSync）。 */
+/** t260827-02 补：同步探测（existsSync）与日志文件描述符（openSync）。 */
 declare module 'node:fs' {
   export function existsSync(path: string): boolean
   export function openSync(path: string, flags: string): number
 }
 
-/** t260827-02 补：epic-next.ts 解析用户级 ~/.dsh（DSH_HOME 缺省值）。 */
+/** t260827-02 补：解析用户级 ~/.dsh（DSH_HOME 缺省值）。 */
 declare module 'node:os' {
   export function homedir(): string
 }
@@ -112,6 +112,6 @@ declare const Buffer: {
 declare const process: {
   env: Record<string, string | undefined>
   kill(pid: number, signal?: number): void
-  /** t260828-03 补：epic-next.ts stub 哑进程 spawn（process.execPath -e ...）。 */
+  /** t260828-03 补：stub 哑进程 spawn（process.execPath -e ...）。 */
   execPath: string
 }

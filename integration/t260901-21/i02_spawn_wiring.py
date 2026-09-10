@@ -8,7 +8,7 @@
 
 本测试守卫四条接线（零 Temporal 依赖，源级断言）：
   1. _prepare_agent_spawn 签名收 project；
-  2. 4 个调用点（_run_agent_stage_impl / suggest_next / arbitrate /
+  2. 调用点（_run_agent_stage_impl / arbitrate /
      acceptance_walkthrough）各自先 `await _fetch_ticket_project(...)`；
   3. 每个 _prepare_agent_spawn( 调用都带 project=project；
   4. _fetch_ticket_project 的降级语义在位（try/except + timeout，软失败返回 ""）。
@@ -43,12 +43,12 @@ ok(sig is not None and re.search(r"project\s*[:=]", sig.group(1)) is not None,
    "_prepare_agent_spawn 签名含 project 参数")
 
 # 2/3 逐调用点接线：函数体内先 fetch 再传 project=project
-ok(src.count("_prepare_agent_spawn(") == 5,  # 1 定义 + 4 调用
-   "调用点数 = 4（实际 _prepare_agent_spawn( 出现 %d 次，含定义）" % src.count("_prepare_agent_spawn("))
+ok(src.count("_prepare_agent_spawn(") == 4,  # 1 定义 + 3 调用（t260910-14：suggest_next 退役后 4→3）
+   "调用点数 = 3（实际 _prepare_agent_spawn( 出现 %d 次，含定义）" % src.count("_prepare_agent_spawn("))
 
 # 按函数切块（顶层 async def 边界），逐块查接线
 funcs = re.split(r"\n(?=async def |def )", src)
-hosts = ["_run_agent_stage_impl", "suggest_next", "arbitrate", "acceptance_walkthrough"]
+hosts = ["_run_agent_stage_impl", "arbitrate", "acceptance_walkthrough"]
 for host in hosts:
     body = next((f for f in funcs if f.startswith("async def %s(" % host)), None)
     if body is None:

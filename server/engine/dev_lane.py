@@ -50,14 +50,12 @@ with workflow.unsafe.imports_passed_through():
         merge,
         merge_check,
         prepare_conflict_resolution,
-        prepare_epic_next,
         prepare_human_gate,
         prepare_ui_evidence,
         prepare_workspace,
         run_integration_tests,
         settle_conflict_resolution,
         settle_lane,
-        suggest_next,
         teardown_lane,
         ui_changed_paths,
         ui_evidence_decl,
@@ -72,15 +70,12 @@ with workflow.unsafe.imports_passed_through():
         MAX_CODE_FAULT_ROUNDS,
         MAX_REVIEW_ROUNDS,
         MAX_TESTS_FAULT_ROUNDS,
-        TEMPLATE_CLASS_NAMES,
-        TEMPLATE_DISPLAY_NAMES,
         TICKET_STATUSES,
         AgentStageArgs,
         ConflictPrepArgs,
         ConflictPrepResult,
         ConflictSettleArgs,
         ConflictSettleResult,
-        EpicNextPrepArgs,
         GateResult,
         HOST_RULING_NOTE_INPUT_LIMIT,
         HostRulingRequest,
@@ -110,7 +105,6 @@ with workflow.unsafe.imports_passed_through():
         UI_EVIDENCE_DIR,
         agent_log_for,
         build_stage_prompt,
-        build_suggest_next_prompt,
         build_workspace_prep,
         integration_route,
         is_ui_write_set,
@@ -131,17 +125,17 @@ MERGE_CHECK_TO = timedelta(minutes=20)   # merge_check includes the in-lane veri
 MERGE_TO = timedelta(minutes=5)
 AGENT_TO = timedelta(hours=6)
 HEARTBEAT_TO = timedelta(minutes=3)
-SUGGEST_NEXT_TO = timedelta(minutes=12)  # pre-run next ticket: integration takes 1-5 min; soft-fail cap
 INTEG_RUN_TO = timedelta(minutes=60)     # mechanical integration tests: batch runner, batch cap
 RETRY = RetryPolicy(maximum_attempts=3)  # infra failures only; business verdicts go via StageResult.status
-# Pre-run retry=1 (settled by t260828-08): the soft-fail path has the activity return
-# failed itself, no reliance on Temporal retries.
-SUGGEST_RETRY = RetryPolicy(maximum_attempts=1)
 # Boolean patch gates (same family as workflows.py's WORKER_RECONCILE_PATCH_ID): a
 # parked old workflow replays down the old branch, so a new gate must not bump
 # DevLaneWorkflow.PATCH_ID. Every *_PATCH_ID below follows the same rule and only
 # carries a one-line pointer back to this first explanation.
-SUGGEST_NEXT_PATCH_ID = "dev-lane-suggest-next"
+# t260910-14 退役注记：旧「预跑下一单」布尔门（常量已删）随预跑建议段整链退役
+# 删除，新代码不再查询该 marker。含预跑建议活动命令的旧 history 对本代码重放必
+# 响亮红（Temporal 命令序非确定性，边界证明）——安全前提是
+# cutover 前的 drain 核验（RUNNING 集只读回放零分歧）；违例票（merge 已签、suggestion
+# 在飞）运维处置=在旧代码 worker 上跑完再重启（见工单 runbook）。
 # t260831-02: parallel implement ∥ test design → mechanical tests → arbitration loop
 # → acceptance walkthrough. Same-shaped boolean gate (see the first PATCH_ID note).
 INTEG_LOOP_PATCH_ID = "dev-lane-integration-tests"
@@ -455,21 +449,14 @@ class DevLaneWorkflow(TicketPauseMixin):
               acceptance=("泳道分支有 commit", "工作区干净（无未提交改动）",
                           "泳道内 verify_lane code 绿灯",
                           "merge 预演无冲突（冲突则自动消解 %d 轮内收敛）" % MAX_CONFLICT_ROUNDS)),
-        Stage(id="merge", name="合并（人审）", role="integration", next="suggest_next", exit="human",
+        Stage(id="merge", name="合并（人审）", role="integration", next="", exit="human",
               desc="人审签字后执行 merge：合 main + 泳道清理（拆 worktree、删分支）；"
                    "合并失败（如签字期间他道先进 main 冲突）自动打回 merge_check 重验",
               parts=("human", "script"),
               acceptance=("人审签字", "merge 落账 + 泳道清理")),
-        # t260828-08 pre-run next ticket: display metadata only (the workbench progress
-        # card consumes self.results["suggest_next"]); not on the phase main chain —
-        # run inline in the merge branch (after the approve signature, before the merge
-        # activity; see run()).
-        Stage(id="suggest_next", name="预跑下一单", role="integration", next="",
-              desc="关联立项的工单签字通过后、merge 落账前，复用 integration 会话预跑"
-                   "「下一单建议」并落缓存（软失败不阻塞 merge 收口）；立项已无事可做时"
-                   "给出可结项结论，工单台「继续执行」秒回 + 「确认结项」动作",
-              parts=("agent",),
-              acceptance=("建议落缓存 .sandbar/epic-next/<代号>/pre.json（或软失败留痕）",)),
+        # t260910-14 退役注记：旧「预跑下一单」Stage 整链退役（宿主 260910 拍板）。
+        # 老票 results 里残留的该段键由展示/推进面按未知键自然忽略（STAGES 不再含
+        # 该 id，不构成推进阻塞）。
     )
 
     def __init__(self) -> None:
@@ -791,58 +778,6 @@ class DevLaneWorkflow(TicketPauseMixin):
         await self._breathe()
         return res
 
-    # ---------- t260828-08: pre-run the next ticket of the epic before merge books ----------
-    async def _suggest_epic_next(self, epic: str) -> None:
-        """The prepare_epic_next → build_suggest_next_prompt → suggest_next chain.
-        Soft-fail rule: unreadable archive / non-compliant suggestion / timeout / infra
-        failure all just _log + _handoff, never raise or block — merge closes normally
-        (activity retry_policy=SUGGEST_RETRY=1, no retry)."""
-        self._mark("suggest_next", "running",
-                   "merge 签字通过，预跑立项 %s 下一单建议（integration 会话复用）" % epic)
-        try:
-            prep = await workflow.execute_activity(
-                prepare_epic_next,
-                # project awareness (t260907-07): prepare reads the epic archive anchored
-                # to the project's main directory (meta carries TicketInput.project, the
-                # entry point must pass a non-empty value).
-                EpicNextPrepArgs(ticket_id=self.ticket_id, epic=epic,
-                                 project=str(self.meta.get("project") or "")),
-                start_to_close_timeout=SHORT, retry_policy=SUGGEST_RETRY)
-            if not prep.exists:
-                self._log("预跑跳过：立项单 %s 档案不可读（merge 照常收口）" % epic)
-                self._handoff("suggest_next", "预跑跳过：%s 档案不可读" % epic)
-                return
-            ws = stage_workspace(self.meta.get("workspace"), self.ticket_id)
-            rfile = result_file_for(self.ticket_id, "suggest_next", 0, ws)
-            rows_text = json.dumps(prep.tickets, ensure_ascii=False, indent=1) \
-                if prep.tickets else "（本立项暂无关联工单）"
-            prompt = build_suggest_next_prompt(
-                code=epic, epic_markdown=prep.epic_markdown, tickets_summary=rows_text,
-                workflows=[{"id": tid, "name": TEMPLATE_DISPLAY_NAMES.get(tid, tid)}
-                           for tid in sorted(TEMPLATE_CLASS_NAMES)],
-                result_path=rfile)
-            res = await workflow.execute_activity(
-                suggest_next,
-                AgentStageArgs(
-                    ticket_id=self.ticket_id, stage_id="suggest_next", role="integration",
-                    prompt=prompt, workspace=ws, result_file=rfile,
-                    log_file=agent_log_for(self.ticket_id, "suggest_next", 0, ws),
-                    gen=0, epic=epic, state_key=prep.state_key),
-                start_to_close_timeout=SUGGEST_NEXT_TO, retry_policy=SUGGEST_RETRY)
-            self.results["suggest_next"] = {
-                "status": res.status, "summary": res.summary, "report": res.report,
-                "deliverables": list(res.deliverables), "files_changed": list(res.files_changed),
-                "evidence": res.evidence, "gen": 0}
-            if res.status == "ok":
-                self._log("预跑下一单完成：%s" % res.summary)
-                self._handoff("suggest_next", res.summary)
-            else:
-                self._log("预跑下一单软失败（merge 照常收口）：%s" % res.summary)
-                self._handoff("suggest_next", "预跑软失败：%s" % res.summary[:120])
-        except Exception as e:  # timeout/infra failure: soft-fail with a note, merge still closes
-            self._log("预跑下一单异常软失败（merge 照常收口）：%s" % str(e)[:300])
-            self._handoff("suggest_next", "预跑异常软失败：%s" % str(e)[:120])
-
     # ---------- rework ----------
     def _auto_rework(self, target: str, note: str, who: str, fallback: str) -> str:
         """Internal/unified send-back landing: validates target/fallback ∈
@@ -886,7 +821,7 @@ class DevLaneWorkflow(TicketPauseMixin):
         req = self._rework
         self._rework = None
         target = req.target_stage or fallback
-        if target in ("suggest_next", "ui_evidence"):
+        if target in ("ui_evidence",):
             # pre-run-next-ticket / UI screenshot evidence are not phase main-chain steps
             # (run inline in the merge and implement branches respectively) and accept no
             # rework — otherwise phase would land on a step with no orchestration and the
@@ -1988,13 +1923,8 @@ class DevLaneWorkflow(TicketPauseMixin):
                 # Approved signature → real merge
                 self.meta["stage_state"] = "running"
                 self._mark("merge", "running", "人审通过（%s），执行 merge" % sig.who)
-                # t260828-08 pre-run next ticket: must happen **before** the merge
-                # activity — merge tears down the worktree right after booking (together
-                # with the local .dsh/ session store), and only at this moment is the
-                # integration session context still alive, which is what makes
-                # DSH_HEADLESS_SESSION session reuse work.
-                if workflow.patched(SUGGEST_NEXT_PATCH_ID) and str(self.meta.get("epic") or ""):
-                    await self._suggest_epic_next(str(self.meta.get("epic")))
+                # t260910-14: the pre-run-next-ticket step retired — merge proceeds straight to
+                # the merge activity after the signature.
                 # t260902-02 M1-3 three-step close: merge only books (defer_teardown);
                 # archiving (archive_ticket) and tearing down the lane (teardown_lane)
                 # follow as separate steps — a fail-closed successful archive is the

@@ -9,8 +9,7 @@
   （路径穿越/空串放行/目录为空）；
 - client.cmd_ticket_start 项目感知开票（真函数级，stub _connect）：外部项目
   epic 在其主目录 → 校验通过（TicketInput 落参断言）；引擎项目行为不变；
-- EpicNextPrepArgs.project 缺省兼容 + agent_activities.prepare_epic_next
-  读段项目感知（monkeypatch _epic_ticket_rows，不经 Temporal）。
+- （t260910-14 退役注记：原 prepare_epic_next 项目感知段随功能整链退役删除。）
 """
 
 import asyncio
@@ -280,58 +279,8 @@ class CmdTicketStartProjectAwareTest(unittest.TestCase):
                 shared.validate_epic_code("engine-only", shared.resolve_epics_dir("external"))
 
 
-class EpicNextPrepProjectAwareTest(unittest.TestCase):
-    """prepare_epic_next 读段项目感知（monkeypatch _epic_ticket_rows，不经 Temporal）。"""
-
-    def setUp(self):
-        import tempfile
-        self.root = Path(tempfile.mkdtemp(prefix="t260907-07-prep-"))
-        self.external_root = self.root / "ext"
-        epics = self.external_root / "notes" / "epics"
-        epics.mkdir(parents=True)
-        self.md = "# 立项单：gap-b\n\n内容"
-        (epics / "gap-b.md").write_text(self.md, encoding="utf-8")
-        _mk_registry(self.root, "external", "外部项目", [str(self.external_root)])
-        import agent_activities
-        self.aa = agent_activities
-        self._orig_rows = agent_activities._epic_ticket_rows
-
-        async def _fake_rows(epic):
-            return []
-
-        agent_activities._epic_ticket_rows = _fake_rows
-
-    def tearDown(self):
-        self.aa._epic_ticket_rows = self._orig_rows
-        import shutil
-        shutil.rmtree(self.root, ignore_errors=True)
-
-    def _prep(self, project):
-        return asyncio.run(self.aa.prepare_epic_next(
-            shared.EpicNextPrepArgs(ticket_id="t1", epic="gap-b", project=project)))
-
-    def test_external_project_reads_own_root(self):
-        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SANDBAR_EPICS_DIR=None):
-            prep = self._prep("external")
-        self.assertTrue(prep.exists)
-        self.assertEqual(prep.epic_markdown, self.md)
-
-    def test_default_project_empty_still_env_capable(self):
-        """project 缺省（在飞旧载荷）+ env 夹具 → 可读（selfcheck E 段同机制）。"""
-        import tempfile
-        env_dir = Path(tempfile.mkdtemp(prefix="t260907-07-prep-env-"))
-        (env_dir / "gap-b.md").write_text(self.md, encoding="utf-8")
-        with _Env(SANDBAR_EPICS_DIR=str(env_dir)):
-            prep = self._prep("")
-        self.assertTrue(prep.exists)
-        self.assertEqual(prep.epic_markdown, self.md)
-
-    def test_unknown_project_degrades_soft(self):
-        """resolve 抛 ValueError（未知项目）→ 视同档案不可读，软失败不硬炸。"""
-        with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SANDBAR_EPICS_DIR=None):
-            prep = self._prep("no-such")
-        self.assertFalse(prep.exists)
-
+# t260910-14 退役注记：原 EpicNextPrepProjectAwareTest（prepare_epic_next 读段
+# 项目感知）随 suggest_next 整链退役删除。
 
 if __name__ == "__main__":
     unittest.main()

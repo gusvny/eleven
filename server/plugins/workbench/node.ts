@@ -85,15 +85,8 @@
  *                                                 --epic 通路）：按 status 分桶计数 + 工单行
  *                                                 （id/title/status/stage/stage_state）；Temporal
  *                                                 不可达 → {degraded:true, reason} 降级不 502
- *   POST /sandbar-workbench/api/epics/<code>/suggest-next
- *                                               → 「继续执行」建议 job 启动（t260827-02）：spawn 一次性
- *                                                 headless integration agent 分析立项现状，产出下一步
- *                                                 工单建议（模板/标题/正文）；同 code 进行中 job 复用
- *                                                 不重复起。agent 只产建议，不直接创建工单
- *   GET  /sandbar-workbench/api/epics/<code>/suggest-next/<jobId>
- *                                               → 建议 job 轮询：{state:running|done|failed,
- *                                                 suggestion?|reason?}；宿主重启丢注册表 → 404
- *                                                 （前端重新点击即可）
+ *   （t260910-14 退役注记：原 POST/GET <code>/suggest-next[/<jobId>] 建议 job 两支
+ *     随 suggest_next 整链退役删除。）
  *   归档快照 POST /epics/<code>/archive 本工单不做（无调用方，留给归档动作真正发生时的工单）。
  *
  * PR 式审批台（M9，t260821-m9-pr-approval）：
@@ -180,11 +173,6 @@ import { computeHostFingerprint, type HostFingerprint } from './src/host/build-i
 import { deriveTitleOrFirst } from './src/host/enrich.ts'
 import { SESSION_CHARTER_PATH, composeSessionCharter } from './src/host/session-charter.ts'
 import { closeEpic, isEvidenceFileName, listEpics, readEpicMarkdown, setEpicStatus } from './src/host/epics.ts'
-import {
-  dismissPrecache, findRunningJob, pollSuggestJob, precacheExists, readPrecache,
-  readPrecacheHint, resolvePrecacheDir, startEpicNextJanitor, startSuggestJob, stateKeyFromRows,
-  type EpicNextJob,
-} from './src/host/epic-next.ts'
 import {
   CONCLUDES, appendReviewRound, loadReview,
   type ReviewBlockEntry, type ReviewConclude, type ReviewRound,
@@ -419,10 +407,6 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
   }
   type OkAnchor = Extract<ProjectAnchor, { ok: true }>
 
-  // t260829-07 epic-next 泄漏修复：宿主侧 janitor 定时扫 JOBS 补 poll（前端停 poll
-  // 后 running job 的 agent 进程不再无人回收）。unref，不拖宿主退出。
-  startEpicNextJanitor()
-
   /** 调 admin.py call <tool> <args>，成功/结构化失败都原样透传（含 run_id）。 */
   async function callTool(tool: string, args: unknown): Promise<any> {
     return runAdminCli(cli, ['call', tool, JSON.stringify(args ?? {})])
@@ -596,18 +580,6 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         args.allow_empty_write_set = true
       }
       const r = await callTool('ticket', args)
-      // t260829-06 追加：建票成功即失效该立项的「下一步已备」预跑缓存——新票一出现，
-      // 缓存里的建议就是过期的（state_key 失配），挂着只会让列表徽标说谎。
-      // best-effort：删失败不影响建票结果。
-      if (r?.ok === true && epic) {
-        try {
-          // KI-057：缓存目录随票所属项目根走（跨项目撞码不互串；key 已过白名单，
-          // 解析异常兜底回落默认仓——缓存失效是 best-effort，不该阻断建票响应）。
-          const pa = resolveProjectAnchor(projectKey, repo)
-          const root = pa.ok ? pa.root : repo
-          await dismissPrecache(resolvePrecacheDir(root), epic)
-        } catch { /* 缓存删除失败不阻塞建票 */ }
-      }
       sendJson(res, 200, r)
     } catch (err) {
       sendJson(res, 502, { ok: false, error: String(err instanceof Error ? err.message : err) })
@@ -1402,14 +1374,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     if (anchor === null) return
     try {
       const epics = await listEpics(anchorEpicsDir(anchor))
-      // t260829-02：轻量带上「下一步已备」缓存命中标记（只 stat pre.json 存在性，
-      // 不逐个算 state_key；准态由详情响应 nextHint 承担），前端列表行直接消费。
-      const cacheDir = resolvePrecacheDir(anchor.root)
-      const withHint = await Promise.all(epics.map(async (e) => ({
-        ...e,
-        nextHintCached: await precacheExists(cacheDir, e.code),
-      })))
-      sendJson(res, 200, { ok: true, result: { count: withHint.length, epics: withHint }, resolved: resolvedMark(anchor) })
+      sendJson(res, 200, { ok: true, result: { count: epics.length, epics }, resolved: resolvedMark(anchor) })
     } catch (err) {
       sendJson(res, 500, { ok: false, error: String(err instanceof Error ? err.message : err) })
     }
@@ -1450,119 +1415,9 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     sendJson(res, 200, { ok: true, result: { code, count: rows.length, buckets, tickets: rows } })
   }
 
-  /** 「继续执行」建议 job 启动（t260827-02，host 半，需重启 dsh 生效）：
-   *  code 校验复用 readEpicMarkdown 口径（形状 400/不存在 404）；同 code 有进行中
-   *  job 直接复用（不重复 spawn agent）；模板清单（验证建议合法性的白名单基准）
-   *  拿不到 → 502 可重试（不放行无校验的建议）；工单状态汇总失败降级为说明文字
-   *  内联进 prompt（不阻塞建议链路）。 */
-  async function handleSuggestNextStart(res: ServerResponse, code: string, anchor: OkAnchor): Promise<void> {
-    const chk = await readEpicMarkdown(anchorEpicsDir(anchor), code)
-    if (!chk.ok) {
-      sendJson(res, chk.status, { ok: false, error: chk.error })
-      return
-    }
-    const existing = findRunningJob(code)
-    if (existing) {
-      sendJson(res, 200, { ok: true, result: { job_id: existing.jobId, state: existing.state, reused: true } })
-      return
-    }
-    let workflows: { id: string; name: string }[]
-    try {
-      const w = await callTool('workflow', { op: 'list' })
-      if (w?.ok !== true) {
-        sendJson(res, 502, { ok: false, error: `模板清单查询失败：${String(w?.error ?? '返回缺 error 字段')}（可重试）` })
-        return
-      }
-      workflows = ((w.result?.workflows ?? []) as any[])
-        .map((x) => ({ id: String(x?.id ?? ''), name: String(x?.name ?? '') }))
-        .filter((x) => x.id !== '')
-    } catch (err) {
-      sendJson(res, 502, { ok: false, error: `模板清单查询失败：${String(err instanceof Error ? err.message : err)}（可重试）` })
-      return
-    }
-    let ticketsSummary: string
-    let ticketRows: { id: string; closed: boolean }[] = []
-    try {
-      const t = await callTool('ticket', { op: 'list', epic: code })
-      if (t?.ok === true) {
-        const rows = ((t.result?.tickets ?? []) as any[]).map((x) => ({
-          id: String(x?.id ?? ''), title: String(x?.title ?? ''), status: String(x?.status ?? ''),
-          stage: String(x?.stage ?? ''), stage_state: String(x?.stage_state ?? ''),
-        }))
-        ticketRows = rows.map((r) => ({ id: r.id, closed: r.status === 'closed' }))
-        ticketsSummary = rows.length === 0 ? '（本立项暂无关联工单）' : JSON.stringify(rows, null, 1)
-      } else {
-        ticketsSummary = `（工单状态查询失败：${String(t?.error ?? '未知错误')}，请基于立项单全文判断）`
-      }
-    } catch (err) {
-      ticketsSummary = `（工单状态查询失败：${String(err instanceof Error ? err.message : err)}，请基于立项单全文判断）`
-    }
-    // 预跑缓存命中（t260828-08）→ 秒回，不再 spawn agent 冷启动（1~5 分钟 → 毫秒级）。
-    // state_key 口径：点击时本票已 closed（ticketRows 里就是 closed），与 python 预跑侧
-    // 「当前票强制 closed」口径对齐（shared.py epic_state_key / stateKeyFromRows 互指）。
-    // 坏缓存 readPrecache 一律当未命中 → 落回下方原冷起路径。
-    if (ticketRows.length > 0) {
-      const cached = await readPrecache(
-        resolvePrecacheDir(anchor.root), code,
-        stateKeyFromRows(ticketRows, ''), workflows.map((w) => w.id))
-      if (cached) {
-        sendJson(res, 200, { ok: true, result: { state: 'done', suggestion: cached, cached: true } })
-        return
-      }
-    }
-    try {
-      const job: EpicNextJob = await startSuggestJob({
-        // KI-057：repo=引擎仓锚（roles/model-routes=引擎侧声明，保留）；root=项目根
-        // （job 目录/预跑缓存随项目走，epic-next.ts 消费）。
-        repo, root: anchor.root, code, epicTitle: chk.title, epicMarkdown: chk.markdown, ticketsSummary, workflows,
-      })
-      sendJson(res, 200, { ok: true, result: { job_id: job.jobId, state: job.state, reused: false } })
-    } catch (err) {
-      sendJson(res, 500, { ok: false, error: `建议任务启动失败：${String(err instanceof Error ? err.message : err)}` })
-    }
-  }
-
-  /** 建议 job 轮询：done 带 suggestion / failed 带人话 reason（200 透传，前端黄条降级）。 */
-  async function handleSuggestNextPoll(res: ServerResponse, code: string, jobId: string): Promise<void> {
-    if (!/^[a-z0-9-]{6,80}$/.test(jobId)) {
-      sendJson(res, 400, { ok: false, error: `job id 形状不合法：'${jobId}'` })
-      return
-    }
-    const job = await pollSuggestJob(jobId)
-    if (!job || job.code !== code) {
-      sendJson(res, 404, { ok: false, error: '无此建议任务（宿主可能已重启，回到立项单重新点击「继续执行」即可）' })
-      return
-    }
-    const result: Record<string, unknown> = { job_id: job.jobId, state: job.state }
-    if (job.state === 'done') result.suggestion = job.suggestion
-    if (job.state === 'failed') result.reason = job.reason ?? '未知原因'
-    sendJson(res, 200, { ok: true, result })
-  }
-
-  /** 立项详情的「下一步建议」准态（t260829-02）：工单集合现算 state_key（本票已
-   *  closed 口径，currentTicketId 传 '' 与 suggest-next 缓存命中路径同款）+
-   *  readPrecacheHint 全量校验。任一查询失败 → null（详情不被建议链路拖垮）。 */
-  async function epicNextHintFor(code: string, anchor: OkAnchor): Promise<unknown> {
-    try {
-      const [w, t] = await Promise.all([
-        callTool('workflow', { op: 'list' }),
-        callTool('ticket', { op: 'list', epic: code }),
-      ])
-      if (w?.ok !== true || t?.ok !== true) return null
-      const workflowIds = ((w.result?.workflows ?? []) as any[])
-        .map((x) => String(x?.id ?? '')).filter((x) => x !== '')
-      const rows = ((t.result?.tickets ?? []) as any[]).map((x) => ({
-        id: String(x?.id ?? ''), closed: String(x?.status ?? '') === 'closed',
-      }))
-      return await readPrecacheHint(
-        resolvePrecacheDir(anchor.root), code, stateKeyFromRows(rows, ''), workflowIds)
-    } catch {
-      return null
-    }
-  }
-
-  /** 立项单详情/工单聚合/继续执行建议：prefix 路由，<code> 或 <code>/tickets
-   *  （只读 GET）或 <code>/suggest-next[/<jobId>]（t260827-02：POST 启动 + GET 轮询）。 */
+  /** 立项单详情/工单聚合：prefix 路由，<code> 或 <code>/tickets（只读 GET）。
+   *  （t260910-14 退役注记：原详情准态「下一步建议」hint 函数与建议 job
+   *   启动/轮询两支一并删除。） */
   async function handleEpicRoute(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://x')
     let rest: string
@@ -1576,23 +1431,6 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     // KI-057：项目锚在分支前解析（?project= 缺省回落默认仓；未知/隔离显式 400/502）。
     const anchor = anchorGuard(res, anchorOf(url))
     if (anchor === null) return
-    // suggest-next 两支（t260827-02）须在下面的 GET-only 405 之前分支。
-    if (parts.length === 2 && parts[1] === 'suggest-next') {
-      if (req.method !== 'POST') {
-        sendJson(res, 405, { ok: false, error: 'suggest-next 启动只支持 POST' })
-        return
-      }
-      await handleSuggestNextStart(res, parts[0], anchor)
-      return
-    }
-    if (parts.length === 3 && parts[1] === 'suggest-next') {
-      if (req.method !== 'GET') {
-        sendJson(res, 405, { ok: false, error: 'suggest-next 轮询只支持 GET' })
-        return
-      }
-      await handleSuggestNextPoll(res, parts[0], parts[2])
-      return
-    }
     // 结项动作（t260828-08）：POST /epics/<code>/close——立项目标达成后人审确认，
     // 外科改写 notes/epics/<code>.md 状态表行为「已完结」（写前备份 /tmp）。须在
     // 下面的 GET-only 405 之前分支。
@@ -1637,28 +1475,6 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       sendJson(res, 200, { ok: true, result: { code: r.code, status: r.status, note: r.note } })
       return
     }
-    // [忽略] 动作（t260829-02）：POST /epics/<code>/next-hint/dismiss——删预跑缓存
-    // pre.json（幂等；删除前备份 /tmp）。与 suggest-next/close/status 同理须在下方
-    // GET-only 405 之前分支（t260907-11 顺手修复：分支原被卡在 405 闸之后，POST
-    // dismiss 恒 405，前端 [忽略建议] 按钮全灭；tests/epics-api.mjs 已备修复后断言）。
-    if (parts.length === 3 && parts[1] === 'next-hint' && parts[2] === 'dismiss') {
-      if (req.method !== 'POST') {
-        sendJson(res, 405, { ok: false, error: '忽略建议只支持 POST（写动作语义）' })
-        return
-      }
-      const chk = await readEpicMarkdown(anchorEpicsDir(anchor), parts[0])
-      if (!chk.ok) {
-        sendJson(res, chk.status, { ok: false, error: chk.error })
-        return
-      }
-      const dr = await dismissPrecache(resolvePrecacheDir(anchor.root), parts[0])
-      if (!dr.ok) {
-        sendJson(res, dr.status, { ok: false, error: dr.error })
-        return
-      }
-      sendJson(res, 200, { ok: true, result: { code: dr.code, dismissed: true } })
-      return
-    }
     if (req.method !== 'GET') {
       sendJson(res, 405, { ok: false, error: '立项单路由只支持 GET（只读）' })
       return
@@ -1669,9 +1485,6 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         sendJson(res, r.status, { ok: false, error: r.error })
         return
       }
-      // t260829-02：详情准态「下一步建议」——state_key 现算 + readPrecacheHint 全量
-      // 校验（命中才带 nextHint；工单/模板清单查询失败一律静默 null，不拖垮详情）。
-      const nextHint = await epicNextHintFor(parts[0], anchor)
       sendJson(res, 200, {
         ok: true,
         result: {
@@ -1682,7 +1495,6 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
           note: r.note,
           created: r.created,
           markdown: r.markdown,
-          nextHint,
         },
       })
       return
@@ -1691,7 +1503,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       await handleEpicTickets(res, parts[0], anchor)
       return
     }
-    sendJson(res, 404, { ok: false, error: '路径不合法：/sandbar-workbench/api/epics/<代号>[/tickets | /suggest-next[/<jobId>] | /next-hint/dismiss | /close | /status]' })
+    sendJson(res, 404, { ok: false, error: '路径不合法：/sandbar-workbench/api/epics/<代号>[/tickets | /close | /status]' })
   }
 
   /** 工单 agent 日志（M12，只读）：show 工单 → 定 .suyou 目录 → 列 agent_*.log / stage_*.json。

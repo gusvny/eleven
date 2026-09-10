@@ -25,10 +25,18 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / "server" / "engine"))
+import shared  # noqa: E402
 # 变异测试钩子：T07_TABLE_OVERRIDE 指向替代表文件时校验它而非真表
 # （用于证明本测试对「切前旧表」会红——测试非永真）。默认不受环境影响。
+# t260910-14：校验对象=「声明指向的表」（读侧分层：声明优先 → 仓内表兜底，
+# 宿主风险令 260910）——经 shared.resolve_routes_table 单点解析，与引擎读同源。
+def _resolve_table() -> Path:
+    resolved = shared.resolve_routes_table(os.environ.get("T07_PROJECT_KEY", ""))
+    return Path(resolved["path"])
+
 TABLE = Path(os.environ["T07_TABLE_OVERRIDE"]) if os.environ.get("T07_TABLE_OVERRIDE") \
-    else ROOT / "server" / "model-routes.yaml"
+    else _resolve_table()
 
 FAILS = []
 

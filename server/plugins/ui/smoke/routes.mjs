@@ -203,39 +203,19 @@ section('E /sandbar-admin/api/routes 路由（mock webServer）')
       end(b) { this.body = b ? JSON.parse(b) : null },
     }
     await route2.handler({ url: '/sandbar-admin/api/routes?project=empty', method: 'GET' }, res2)
-    // t260906-01：表缺失=未初始化引导态（非错误）——uninitialized:true + 模板来源
+    // t260910-14：未声明 paths.model_routes → decl_missing 点名 + 读侧兜底=仓内表
+    // （宿主风险令 260910：迁移窗口不断供；真源=声明指向文件）。
     ok(res2.status === 200 && res2.body.ok === true
-      && res2.body.result.uninitialized === true
-      && typeof res2.body.result.template_source === 'string'
-      && res2.body.result.template_source.includes('model-routes.yaml'),
-      '路由表缺失 → 200 ok + uninitialized 引导态（不抛错不红）')
+      && res2.body.result.state === 'decl_missing'
+      && res2.body.result.declared === null
+      && String(res2.body.result.routes_file).includes('model-routes.yaml')
+      && String(res2.body.result.resolution_error ?? '').includes('兜底'),
+      '未声明 → 200 ok + decl_missing 点名 + 仓内兜底表接管（不抛错不静默）')
 
-    // t260906-01 init 端点：无表 → 从引擎默认表生成；已有表 → 拒收（零覆盖）
-    const initRoute = routes2.find(x => x.kind === 'exact' && x.path === '/sandbar-admin/api/routes/init')
-    ok(initRoute !== undefined, 'routes/init exact 路由已挂')
-    const res3 = { status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } }
-    await initRoute.handler({ url: '/sandbar-admin/api/routes/init?project=empty', method: 'POST' }, res3)
-    ok(res3.status === 200 && res3.body.ok === true && res3.body.result.routes_file.includes('model-routes.yaml'),
-      'init POST（无表）→ 200 ok，默认表已生成')
-    const initedText = await readFile(join(tmp, 'repo-empty', 'server', 'model-routes.yaml'), 'utf8')
-    const engineText = await readFile(join(REPO, 'server', 'model-routes.yaml'), 'utf8')
-    ok(initedText === engineText, '生成的表=引擎仓真源逐字节一致（同源模板）')
-    const res4 = { status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } }
-    await initRoute.handler({ url: '/sandbar-admin/api/routes/init?project=empty', method: 'POST' }, res4)
-    ok(res4.status === 200 && res4.body.ok === false && (res4.body.error ?? '').includes('已存在'),
-      'init 对已存在表 → 200 ok:false（零覆盖拒收）')
-    // 深层父目录：init 建父目录（repo-empty2 完全无 server 层级）
-    const res5 = { status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } }
-    const req5 = { url: '/sandbar-admin/api/routes/init?project=deep', method: 'POST', [Symbol.asyncIterator]: async function* () { yield Buffer.from('{}', 'utf8') } }
-    apply(ctx2, { repo: join(tmp, 'repo-empty2') })
-    const initRoute2 = routes2.filter(x => x.path === '/sandbar-admin/api/routes/init').pop()
-    await initRoute2.handler(req5, res5)
-    ok(res5.status === 200 && res5.body.ok === true
-      && (await readFile(join(tmp, 'repo-empty2', 'server', 'model-routes.yaml'), 'utf8')) === engineText,
-      'init 对深层缺失父目录 → mkdir 递归后生成')
-    const res6 = { status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } }
-    await initRoute2.handler({ url: '/sandbar-admin/api/routes/init?project=deep', method: 'GET' }, res6)
-    ok(res6.status === 405, 'init GET → 405')
+    // t260910-14 退役断言：routes/init 引导动作已随 init 退役删除（宿主拍板：
+    // 新项目按 docs 样例人工填表），路由不再注册。
+    ok(routes2.find(x => x.path === '/sandbar-admin/api/routes/init') === undefined,
+      'routes/init 路由已退役（不再注册）')
   } finally {
     delete process.env.SANDBAR_PROJECTS_YAML
     await rm(tmp, { recursive: true, force: true })
@@ -378,10 +358,13 @@ section('H POST /sandbar-admin/api/routes/save（mock webServer + 临时 repo）
     const route = routes.find(x => x.kind === 'exact' && x.path === '/sandbar-admin/api/routes/save')
     ok(route !== undefined, 'save exact 路由已挂')
 
-    // 注册表夹具（同 E 段口径）：projOf 需要已注册项目，主目录=临时 repo。
-    const fixtureReg = join(tmp, 'projects.yaml')
-    await writeFile(fixtureReg, `projects:\n  - key: demo\n    name: Demo\n    dirs:\n      - ${repo}\n`, 'utf8')
-    process.env.SANDBAR_PROJECTS_YAML = fixtureReg
+    // 注册表夹具（t260910-14 同源化）：per-key 注册表 + 声明 paths.model_routes 指向
+    // 临时表——保存落点=声明指向文件（真源），绝不触碰真仓兜底表。
+    const reg = join(tmp, 'reg')
+    await mkdir(join(reg, 'demo'), { recursive: true })
+    await writeFile(join(reg, 'demo', 'project.yaml'),
+      `schema: v1\npaths:\n  model_routes: ${routesFile}\nproject:\n  - key: demo\n    name: Demo\n    dirs:\n      - ${repo}\n`, 'utf8')
+    process.env.SANDBAR_PROJECTS_DIR = reg
 
     const res = () => ({ status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } })
     const call = async (body) => {
@@ -415,7 +398,7 @@ section('H POST /sandbar-admin/api/routes/save（mock webServer + 临时 repo）
     ok((r1.body.result.regenerate ?? '').includes('生效'), '响应带生效话术（运行时查表）')
     const savedText = await readFile(routesFile, 'utf8')
     ok(savedText.includes('k3-256k') && savedText.includes('  developer:') && savedText.includes('roles:'), '文件已写 + 结构保留')
-    const view = await buildRoutesView(repo)
+    const view = await buildRoutesView(repo, { projectKey: 'demo' })
     ok(view.roles.find(rr => rr.role === 'developer')?.effective?.model === 'k3-256k', '保存后查表生效')
 
     // 无变更 → written=false 不写

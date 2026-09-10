@@ -107,18 +107,9 @@ stages:
     name: "合并（人审）"
     desc: "人审签字后执行 merge：合 main + 泳道清理（拆 worktree、删分支）；合并失败（如签字期间他道先进 main 冲突）自动打回 merge_check 重验"
     exit: human
-    next: suggest_next
     parts:
       - human
       - script
     acceptance:
       - "人审签字"
       - "merge 落账 + 泳道清理"
-  - id: suggest_next
-    role: integration
-    name: "预跑下一单"
-    desc: "关联立项的工单签字通过后、merge 落账前，复用 integration 会话预跑「下一单建议」并落缓存（软失败不阻塞 merge 收口）；立项已无事可做时给出可结项结论，工单台「继续执行」秒回 + 「确认结项」动作"
-    parts:
-      - agent
-    acceptance:
-      - "建议落缓存 .sandbar/epic-next/<代号>/pre.json（或软失败留痕）"

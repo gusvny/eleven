@@ -50,27 +50,23 @@ try {
       'fpv 视图详情读 fpv 仓全文')
   }
 
-  // ── 腿B precache 项目化：nextHintCached 与 dismiss 均按项目根，撞码不互串 ──
+  // ── 腿B next-hint 面退役（t260910-14 主题一收口重写）：预跑缓存与 dismiss 动作
+  // 随 epic-next 整链退役——视图不再产出 nextHintCached 字段、dismiss 路由退场、
+  // 项目根零缓存写入（撞码不互串的意图由「无缓存可串」天然承担）。原腿钉缓存
+  // 项目化取数，其宿主功能已整链退役，旧钉=过期基准。 ──
   {
     const preB = join(fx.repoB, '.suyou', 'epic-next', EPIC_CODE)  // naming-compat：旧名目录粘滞读点
     const preA = join(fx.repoA, '.suyou', 'epic-next', EPIC_CODE)  // naming-compat：旧名目录粘滞读点
-    await mkdir(preB, { recursive: true })
-    await mkdir(preA, { recursive: true })
-    await writeFile(join(preB, 'pre.json'), '{"state_key":"fixture"}', 'utf8')
-    await writeFile(join(preA, 'pre.json'), '{"state_key":"fixture"}', 'utf8')
     const rFpv = await fx.drive(fx.repoA)(EPICS_PREFIX, `${EPICS_PREFIX}?project=fpv`)
     const eFpv = rFpv.body?.result?.epics?.find((e) => e.code === EPIC_CODE)
-    j.ok(eFpv?.nextHintCached === true, 'fpv 视图 demo-x nextHintCached=true（缓存锚在 fpv 根）')
+    j.ok(eFpv?.nextHintCached === undefined, 'fpv 视图不再产出 nextHintCached（预跑建议面退役）')
     const rA = await fx.drive(fx.repoA)(EPICS_PREFIX, `${EPICS_PREFIX}?project=sandbar`)
     const eA = rA.body?.result?.epics?.find((e) => e.code === EPIC_CODE)
-    j.ok(eA?.nextHintCached === true, 'sandbar 视图 demo-x nextHintCached=true（各自根各有缓存）')
-    // dismiss fpv：只删 fpv 根的缓存，sandbar 根的不动
+    j.ok(eA?.nextHintCached === undefined, 'sandbar 视图同样零 hint 字段（两项目一致退役）')
     const rDis = await fx.drive(fx.repoA)(EPICS_PREFIX, `${EPICS_PREFIX}/${EPIC_CODE}/next-hint/dismiss?project=fpv`, 'POST')
-    j.ok(rDis.status === 200 && rDis.body?.ok === true, `dismiss ?project=fpv → 200（实得 ${rDis.status}）`)
-    j.ok(!existsSync(join(preB, 'pre.json')), 'fpv 根 pre.json 已删')
-    j.ok(existsSync(join(preA, 'pre.json')), 'sandbar 根 pre.json 不受牵连（撞码不互串）')
-    await rm(preA, { recursive: true, force: true })
-    await rm(preB, { recursive: true, force: true })
+    j.ok(rDis.status === 404 || rDis.status === 405, `dismiss 路由退场（实得 ${rDis.status}，404/405 均算不在册）`)
+    j.ok(!existsSync(join(preA, 'pre.json')) && !existsSync(join(preB, 'pre.json')),
+      '两项目根零缓存写入（无缓存可串=撞码不互串的退役形态）')
   }
 
   // ── 腿C 审批面：写落 fpv 仓 reviews/，sandbar 视图读不到 ──

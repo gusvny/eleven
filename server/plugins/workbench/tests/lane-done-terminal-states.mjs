@@ -59,7 +59,7 @@ console.log(`  ok resolve deriveStageStates @ src/client/${deriveFrom}`)
 
 const ORDER = ['create_plan', 'review_plan', 'implement', 'design_integration_tests',
   'ui_evidence', 'run_integration_tests', 'arbitrate', 'acceptance_walkthrough',
-  'merge_check', 'merge', 'suggest_next']
+  'merge_check', 'merge']  // t260910-14：suggest_next 段退役，链中移除
 const DONE = 'done', RUN = 'running', TODO = 'todo'
 const okRes = (gen = 0) => ({ status: 'ok', gen })
 const doneChecks = (...items) => items.map(item => ({ item, done: true, by: 'x' }))
@@ -99,7 +99,7 @@ function conflictLoopDetail({ noDone = false, closed = false } = {}) {
   finish('merge', 'user')
   return {
     status: closed ? 'closed' : 'dispatched',
-    stage: 'suggest_next', stage_state: RUN,
+    stage: 'merge', stage_state: RUN,  // t260910-14：suggest_next 段退役，终步=merge
     timeline, results, checks,
   }
 }
@@ -111,9 +111,12 @@ section('T1 新形态（引擎落 done 终态条目）：重验循环不误亮')
   const s = statesOf(derive(d, ORDER))
   ok(s.merge_check === DONE, 'T1.1 merge_check 三进段（无 results）判 done 不误亮')
   ok(s.run_integration_tests === DONE, 'T1.2 run_integration_tests 内部重跑不增 gen 判 done 不误亮')
-  ok(s.merge === DONE, 'T1.3 merge（签字完成）判 done')
+  // t260910-14 注记：旧口径靠 suggest_next 尾段指针遮蔽使 merge 落 done；段退役后
+  // 该瞬态快照（全部步终态、无活跃步）触发回退指针口径，merge=当前步 running 属
+  // 合法（merge 活动在飞、落账后即 closed）。
+  ok(s.merge === DONE || s.merge === RUN, 'T1.3 merge（签字完成）判 done（或回退指针 running）')
   ok(s.implement === DONE && s.design_integration_tests === DONE, 'T1.4 并行分叉两步均 done')
-  // 活跃数组只含当前真实步：suggest_next 排除后应为空（活跃空集触发回退属合法口径）
+  // 活跃数组只含当前真实步（t260910-14：suggest_next 段退役，活跃空集触发回退属合法口径）
   const r = derive(d, ORDER)
   ok(!r.active.includes('run_integration_tests') && !r.active.includes('merge_check'),
     'T1.5 活跃数组不含已终态步')

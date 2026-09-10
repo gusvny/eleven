@@ -39,7 +39,9 @@ function section(t) { console.log(`\n== ${t}`) }
 
 const EXPECT = ['create_plan', 'review_plan', 'implement', 'design_integration_tests',
   'ui_evidence', 'run_integration_tests', 'arbitrate', 'acceptance_walkthrough',
-  'merge_check', 'merge', 'suggest_next']
+  'merge_check', 'merge']
+// t260910-14：suggest_next 段整链退役（宿主拍板），金链随退役收口更新——
+// 老金链含 suggest_next 属过期基准（arbitrate 段 tests-fault 迭代）。
 
 const text = readFileSync(SRC, 'utf8')
 
