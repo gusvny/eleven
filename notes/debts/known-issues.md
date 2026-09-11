@@ -693,3 +693,73 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 处置方向：①查明真实重建入口与工具解析链（lane 内 bash build-client.sh 是否可用、tsdown 版本是否同源）；
   ②在闸侧加固：产物类文件**只允许经唯一构建入口产生**，且重建结果须与分叉点/主树一致，否则点名；
   ③15 的收口追加场景：**在泳道内**（非主树）重建后断言逐字节一致。
+
+## KI-074 引擎受保护路径名单写死 sandbar 私货＝多项目闸盲（t260911-03 出生，260911 通用性审计立案）
+- 现象：`server/engine/path_gates.py:55-72` `PROTECTED_PATHS` 这份「真源与期望值」名单里全是
+  **sandbar 这个项目的文件名**（`verify.yaml`、`server/model-routes.yaml`、`server/merge-checks.yaml`、
+  `server/projects.yaml`、`server/project-registry.ts`、`server/roles`、`docs/design`、
+  `integration/baselines`、`integration/t260902-07/tests/test_route_{table,lookup}.py`），
+  而全仓**没有任何项目声明入口**能改这份名单：`grep PROTECTED_PATHS` 只有定义处、
+  `judge_protected_paths`（`:282`）与它自己的单测引用，无注入参数、无 override 读取。
+- 为什么算违背：本条犯的是「机制在引擎，内容在项目声明」的界线错误（判据取自 KI-050 修复方向
+  与 260908 层错修正）。「哪些文件是真源/期望值」是**项目的内容**，引擎只该留机制。
+  KI-050（UI 证据闸写死 sandbar 五条 UI 路径）是同族第一例，本条是**第二例且落点更核心**——
+  受保护闸守的是真源与期望值，正是「人审环节不可被绕」的机械保障。
+- 危害（他项目上两种，都不好）：
+  ①**闸静默全绿**：闸语义是「存在才拦」（`exists_at_base`，`:270-293`），他项目仓里没有名单内
+  这些路径 → 永不命中 → 永远放行。表现为「检查项在、看着验过了、实际什么都没验」；
+  注意现有 fail-closed 只覆盖「锚不可知」（谓词故障/None），**不覆盖名单空命中**，故不报警。
+  ②**他项目的真源不拦**：他自己命名的真源文件不在名单里，本来要防的「泳道改期望值给自己发
+  免红令」照旧无防护。
+  ③**扩面会加深违背**：260911 待审清单里的「闸第二层（名单扩到共享测试基建＋他票场景目录）」
+  若照现写法落地＝把私货规模做大，必须先声明制。
+- 同族小项（不单列）：`STAGE_PATH_RULES["design_integration_tests"]["prefixes"] = ("integration",)`
+  （`:91`）把「测试目录叫 integration/」当所有项目约定；`RESULT_FILE_PREFIXES = (".sandbar", ".suyou")`
+  （`:48`）是平台级 dot 目录（可接受，`.suyou` 已标 naming-compat）。
+- 诚实边界：只做了字面量与调用点扫描；「引擎零私货」的盖章需另做一轮逐文件精读。
+- 处置方向：①名单改**声明制**（引擎留机制＋项目声明给名单）；②「缺声明」的行为必须写死
+  （建议＝闸拓扑级缺席＋显式报告，不得静默全绿，同 KI-050 立场）；③声明可给时，闸应能报出
+  「本项目真源是否漏配」的可观测信号，避免他项目复制 sandbar 名单了事。
+- 定位：`server/engine/path_gates.py:48/:55-72/:91/:270-293/:282`；出生＝commit `0dd1df9`（t260911-03）；
+  审计档＝`notes/discussions/260911-generality-audit.md`
+
+## KI-075 共享测试/工具面写死宿主绝对路径与项目键＝多机即断，且路径卫生守卫针太窄致其长期漏检（260911 通用性审计立案）
+- 判据修正（宿主 260911 立）：**绝对路径违规不是「多项目」问题，是「多机」问题**——sandbar
+  自己换台电脑、换个用户名、换个检出位置就断。故「代码域不得写死本机路径」与项目数无关。
+- 现象（逐条，均已实测）：
+  ① `integration/stage_docker.py:932` 凭证候选 `~/.sandbar/projects/suyou/credentials.yaml`——
+     **项目键 suyou 写死**。实测 `~/.sandbar/projects/{suyou,sandbar,dengzhufpv}/credentials.yaml`
+     三者**全都不存在** → 今天是无害死候选；但它是**跨项目串凭证隐患**：哪天有人放上 suyou 的
+     per-key 凭证，**任意项目**（如 dengzhufpv）起台都会静默使用 suyou 的凭证，身份错位且无日志。
+  ② `integration/stage_docker.py:934` 候选 `/Users/user/Documents/sandbar/.dsh/.credentials.yaml`、
+  ③ `:952` 候选 `/Users/user/Documents/sandbar/.dsh/.agent-presets`——**宿主绝对路径写死**。
+     实测：`REPO = integration/..`（`:125`）＝同一路径，即 ②③ 与紧邻上一候选**是同一个文件**，
+     今天零功能价值；泳道 8 条中 7 条自带 `.dsh/.credentials.yaml` → 实际从不轮到 ②。
+     `~/.dsh/.agent-presets/sandbar-integration` 才命中，③ 之后的候选恒死。
+  ④ `server/ui-check/.debug-chat.mjs:51` `spawn("/opt/homebrew/bin/dsh", [… "--profile suyou" …])`
+     ——**可执行文件绝对路径**。别的开发者用 nvm/volta/其他位置装 dsh 即断；该文件头自称
+     「临时，不入库」但实际在 git 跟踪面内。
+  ⑤ `server/projects.yaml:17` `/Users/user/Documents/suyou`：**声明面承载机器路径属「数据」性质**
+     （不算代码违规），但它在 git 里，别人克隆后指向不存在目录——需确认解析器在目录缺失时是
+     **显式报告**还是静默丢弃（待查）。
+- 危害：换机/换用户即断或变假红；②类是「容器内凭证/人格缺失 → shell-access overlay 挡全屏」
+  那个原始 bug 的复发形态（外观像环境问题，难归因）；①类是跨项目身份错位且无日志。
+  引擎正层 `server/engine/**` 经扫描**零绝对路径**（只有注释文本），故本条的危害面集中在
+  **共享测试/工具面**——而这两处是每个项目、每台机器都要跑的。
+- 根因（可执行的一面）：路径卫生守卫 `integration/t260907-01/sc_migration_path_hygiene.mjs:43`
+  的 needle 只对**旧仓 suyou 路径**这一根具体串，不对**「任意本机绝对路径」这一类**。260907 那次
+  清扫只清了旧仓路径，于是 ②③④ 从它眼皮下存活至今（`/opt/homebrew/bin/dsh` 属漏网新证据）。
+  附警示：`server/plugins/workbench/smoke/agent-live.mjs:39` 注释里仍留宿主真值
+  `--Users-user-Documents-suyou-.worktrees-t260825-03--`，不炸但教后来者「写宿主路径没事」。
+- 边界（不算违规）：`smoke/agent-live.mjs:46`（纯字符串函数输入→输出对拍）、`smoke/projects.mjs`、
+  `server/installer/tests/test_zombies.py`、`server/installer/zombies.py:47`、
+  `integration/t260902-02/lib/fixture.py:175`、`integration/t260907-10/sc_worker_reap_predicate.py:41`
+  ＝样本数据/夹具，不读真机文件，只是样本值长得像宿主真路径（丑但不断）。
+- 处置方向：①needle 从「具体旧仓名」扩成「**类**」——代码域禁 `/Users/`、`/home/<user>`、
+  `/opt/homebrew` 等本机路径，只许 env/HOME/自文件相对推导；声明面按位置豁免（数据面 vs 代码面
+  的界线正是这条规矩的核心）；②stage_docker 三条候选改按 `project_key` 解析（抄
+  `agent_activities._resolve_credentials_source`（`:226`）/`shared.perkey_projects_root()`，
+  该函数手上本就有 `project` 变量）；③`.debug-chat.mjs` 的 dsh 解析改 `which`/`process.execPath`。
+- 定位：`integration/stage_docker.py:125/:932/:934/:952`；`server/ui-check/.debug-chat.mjs:51`；
+  `integration/t260907-01/sc_migration_path_hygiene.mjs:43`；引入时间＝`e936847`（2026-09-06，t260904-19，
+  非 260910 夜改入；但 t260910-12 昨夜重写此文件时未顺手清）；审计档＝`notes/discussions/260911-generality-audit.md`
