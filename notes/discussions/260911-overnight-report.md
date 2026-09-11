@@ -115,6 +115,33 @@
   疑似某场景/调试遗留的工作树注册；另有 4 条历史泳道（t260903-12/-14、t260907-10、t260908-02）
   属已关闭票但泳道未拆。是否收进「起台/泳道运维缺口」一并处置待宿主定。
 
+**260911 夜 · 在飞三票集体 blocked 与恢复（宿主令）**
+
+- 13:22 在飞三票（04/05/06）**同时 blocked**，签名一致：`dsh: TRANSPORT: Connection error.`
+  （arbitrate + acceptance 两段同刻失败，`ActivityError: Activity task failed` → 重试后仍失败）。
+  三票各自独立，同一时刻同签名 ⇒ 判为共同底层，非各自回归。
+- 宿主 260911 判定根因=**模型限额**，令「让他们重试」→ 三票各发一次 `retry_qc`（who=host），
+  全部 delivered；看板 **blocked → running**（22:54）。
+- 恢复实证：三票两段各进新 gen（04 gen2 / 05 gen5 / 06 gen4），22:55–22:56 新 `stage_*.json`
+  正常落盘，新 agent 日志**不再出现** TRANSPORT 报错 —— 限额/传输问题已过。
+- 关联：本次重试落在**新账号**上（integration 角色 22:47 由 zai-coding-cn 改为
+  deepseek-official/deepseek-flash，见下条）。
+- 运维教训（待并入「起台/运维缺口」）：**模型限额耗尽时报错形态是 dsh TRANSPORT 连接错误**，
+  归因需靠「同刻多票同签名 + 宿主配额信息」，引擎侧看不到"限额"字样 → 建议失败分类协议
+  （t260910-13）补一条可辨信号。
+
+**260911 夜 · 模型路由改版（宿主令，改的是机器级真源）**
+
+- developer：`zai/glm-5.3-flash` → **`zai-coding-cn/glm-5.3-flash`**；
+  integration：`zai-coding-cn/glm-5.3-flash` → **`deepseek-official/deepseek-flash`**（＝DeepSeek-V4.1-Flash）。
+  效果＝生成家(zai 系)/审校家(deepseek) **异家交叉恢复**；`default`/`ops`/`artist`/`product-operation` 未动。
+- 改的是**机器级真源** `~/.sandbar/projects/sandbar/model-routes.yaml`（路由表仓外化的第一次实际使用），
+  表内留变更记录；备份 `/tmp/model-routes-sandbar-260911-2250.yaml.bak`；仓内表未动，只加了
+  「本文件已不是生效真源、内容陈旧」的失效声明（`1ffc9b4`）。
+- 同夜登记 **KI-076**（`6680c9c`）：`ui/src/host/routes.ts:262` 用 `readFileSync` 列目录 → Node 26 抛
+  EISDIR 被 catch 吞 → 按目录反查注册表恒失败 → **静默回落仓内旧表**；ui-smoke D 段因此空转
+  （改真源后仍 70/0 全绿）。产品面不中招（`node.ts:205` 显式传 key）。
+
 **另需宿主动作**：①路由迁移执行（自跑或授权提权）；②**重启 console**（让今夜 host 侧改动在界面生效：
 截图证据直读、暂停/恢复按钮、多仓逐仓 diff、构建产物不再抖动）。
 
