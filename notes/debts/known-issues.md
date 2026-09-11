@@ -763,3 +763,36 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 定位：`integration/stage_docker.py:125/:932/:934/:952`；`server/ui-check/.debug-chat.mjs:51`；
   `integration/t260907-01/sc_migration_path_hygiene.mjs:43`；引入时间＝`e936847`（2026-09-06，t260904-19，
   非 260910 夜改入；但 t260910-12 昨夜重写此文件时未顺手清）；审计档＝`notes/discussions/260911-generality-audit.md`
+
+## KI-076 路由表「按目录反查注册表」恒失败（readFileSync 列目录 → EISDIR）→ 静默回落仓内旧表；smoke 因此空转（t260910-14 引入，260911 宿主质询时发现）
+- 现象：`buildRoutesView(某目录)` **不显式给 projectKey** 时恒得 `state=decl_missing`、读**仓内兜底表**——
+  而该目录明明就是注册表里某条目的 `dirs` 值（260911 实测：REPO=/Users/user/Documents/sandbar，
+  机器级 `~/.sandbar/projects/sandbar/project.yaml` 在、声明也在，仍判「未找到条目」）。
+- 根因：`server/plugins/ui/src/host/routes.ts:258-283` `findKeyByPrimaryDir` 用
+  **`readFileSync(root, { withFileTypes: true })`**（`:262`）列举注册表根目录——列目录应使用
+  `readdirSync`。Node v26.5.0 对「读目录」直接抛 `EISDIR: illegal operation on a directory, read`，
+  被紧邻的 `catch { return null }` 吞掉 → 该函数**恒返回 null** → `resolveRoutesFilePath` 走
+  `key === null` 分支 → `decl_missing` + 仓内兜底表（`:290-293`）。
+- 证据：①`node -e` 实测 `readFileSync(dir,{withFileTypes:true})` → EISDIR（Node v26.5.0）；
+  ②逐字复刻该函数跑真注册表 → 返回 null（异常在 catch 里被吞，连条目枚举都没进）；
+  ③探针 A/B 对照：A=`buildRoutesView(REPO)` → `decl_missing`/读仓内/`developer=zai`、
+  `integration=zai-coding-cn`（旧值）；B=`buildRoutesView(REPO,{projectKey:'sandbar'})` →
+  `ok`/读机器级/`developer=zai-coding-cn`、`integration=deepseek-official`（新值）。
+- 影响面：**产品面当前不中招**——唯一产品调用点 `server/plugins/ui/node.ts:205` 显式传
+  `{ projectKey: proj.key }`。中招的是**只给目录**的调用：`server/plugins/ui/smoke/routes.mjs:124`、
+  `server/plugins/providers/smoke/routes-save.mjs:39/:61/:113/:130`，以及今后任何省略 key 的调用。
+  危害形态＝**静默降级**：`state` 虽点名 `decl_missing`，但调用方不看 state 就会把兜底表当真源用。
+- **守卫空转实证（本条最值得记的一面）**：`ui/smoke/routes.mjs` D 段标签写「对真源钉当前值（防路由表
+  漂移）」，实际因上述缺陷**读到的一直是仓内兜底表**——260911 宿主改真源（developer→zai-coding-cn、
+  integration→deepseek-official）后该 smoke **仍 70/0 全绿**，对真源变化**零洞察力**；它钉死的旧值
+  反而会诱导下一个人去「同步」一个不需要同步的守卫。
+- 定性教训（同族第三例，KI-046/KI-050/KI-071 家族＝「测试在场≠测试生效」）：t260910-14 的五支场景
+  **全部显式传 projectKey/projectsDir 夹具**，按目录反查这条真实路径**无测试覆盖** → 带病通过
+  260911 凌晨 integration 的代签（复核时只见场景全绿，未追问「哪条路径没被测」）。
+- 处置方向：①一行修：`readFileSync(…withFileTypes)` → `readdirSync`；②补场景：真实形态注册表
+  （per-key `project.yaml`、`dirs:` 带缩进）**只给目录**调用 → 断言 `state=ok` 且 routes_file＝声明文件
+  （不是兜底）；③smoke D 段要么显式传 key、要么改成与解析结果对拍，否则它永久只测兜底且把兜底值钉死。
+- 跨机边界：该缺陷与 Node 版本相关（EISDIR 在 Node 26 正确抛出；个别旧版本/平台「读目录」行为不同），
+  属 KI-075 划定的「多机」隐患族。
+- 定位：`server/plugins/ui/src/host/routes.ts:258-283`（`:262` 病灶、`:290-293` 回落分支）；
+  注入提交 `bfc1c34`（t260910-14 squash 收口）；产品调用点 `server/plugins/ui/node.ts:205`
