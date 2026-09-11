@@ -1,3 +1,12 @@
+# ⚠️⚠️ 本文件已不是生效真源（260911 起）——改路由不要改这里 ⚠️⚠️
+#   生效真源 = 机器级注册表里项目声明的 paths.model_routes 指向的文件：
+#     ~/.sandbar/projects/sandbar/model-routes.yaml（声明在 ~/.sandbar/projects/sandbar/project.yaml）
+#   本文件现在的唯一作用 = **兜底**：条目未声明 / 声明文件读不到时，读侧才回落读本文件
+#   （回落容易「静默发生」——如 t260910-14 的 readFileSync 列目录缺陷曾使「按目录反查注册表」
+#    恒失败而悄悄落到这里，见 KI-076）。
+#   因此本文件内容**已陈旧**：停在 260911 之前（developer=zai、integration=zai-coding-cn），
+#   **不代表当前生效路由**（当前：developer=zai-coding-cn、integration=deepseek-official）。
+#   处置待定：宿主 260911 令「先不动，注释说明即可」。仓内表最终删留另议。
 # ════════════════════════════════════════════════════════════════════════
 # 溯游·声明式模型路由表（M8 起；gen.py 退役后改为运行时消费）
 #
