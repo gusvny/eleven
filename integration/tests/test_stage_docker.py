@@ -136,6 +136,11 @@ def main():
     cmd = sys.argv[1:]
     if cmd == ["info"]:
         return 0
+    if cmd[:1] == ["network"]:
+        # 受管网段面（t260912-02）：daemon 现存网段=空（净态宿主语义，ls -q/
+        # --format 均空输出）、rm/inspect/prune 幂等成功——分配排除集为空、
+        # 撞号清网腿（compose up 撞子网后 docker network rm）可走通。
+        return 0
     if cmd[:2] == ["image", "inspect"]:
         return 0 if pathlib.Path(STATE, "image-ok").exists() else 1
     if cmd[:1] == ["compose"]:
@@ -189,6 +194,9 @@ def main():
             return 0
         proj = filt[0].split("label=com.docker.compose.project=", 1)[1]
         fmt = cmd[cmd.index("--format") + 1] if "--format" in cmd else "{{.Names}}"
+        if ".Label" in fmt:
+            return 0  # working_dir 探针格式：shim 无该 label → 空输出（探针=None，
+                      # 判定走保守分支——不能回容器名假造 working_dir）
         up = pathlib.Path(STATE, "last-up.json")
         alive = pathlib.Path(STATE, "hold-alive").exists()
         services = (json.loads(up.read_text()) if up.exists() else {}).get("services", [])
@@ -234,7 +242,8 @@ class StageCLIBase(unittest.TestCase):
         self._saved_env = {}
         for k in ("FAKE_DOCKER_STATE", "SANDBAR_STAGE_LOCK_DIR", "PATH",
                   "SANDBAR_TEST_CONSOLE_PORT", "SANDBAR_TEST_TEMPORAL_PORT",
-                  "SANDBAR_TEST_TEMPORAL_UI_PORT", "SANDBAR_TEMPORAL_BIN"):
+                  "SANDBAR_TEST_TEMPORAL_UI_PORT", "SANDBAR_TEMPORAL_BIN",
+                  "SANDBAR_STAGE_SWEEP"):
             self._saved_env[k] = os.environ.get(k)
 
     def tearDown(self):
@@ -253,6 +262,10 @@ class StageCLIBase(unittest.TestCase):
         # L1 固定「CLI 不可得」路径：env 指路不存在文件 → resolve 抛 MissingAsset → cli=None
         # （不然主树回退真 CLI 会去连假台，sa_note 落「namespace create 失败」分支）
         e["SANDBAR_TEMPORAL_BIN"] = "/nonexistent-stage-l1/temporal"
+        # 共享缺省锁根纪律的配套（t260912-02）：起台挂点的残台清扫必须明示关闭
+        # ——假 compose down 只动 FAKE 状态面，真去判拆共享根上的别泳道活租约
+        # 会误释放真台。清扫语义面由 test_stage_lease.SweepJudgeTest 白盒覆盖。
+        e.setdefault("SANDBAR_STAGE_SWEEP", "off")
         e.update({k: str(v) for k, v in extra.items()})
         return e
 
@@ -295,8 +308,9 @@ class UpDownTest(StageCLIBase):
         self.assertEqual(len(set(ports.values())), 3, "三端口互异")
         for name, p in ports.items():
             self.assertNotIn(p, stage_forbidden(), "%s=%d 落禁区" % (name, p))
-            self.assertGreaterEqual(min(ports.values()), 21000, "档位窗下界")
-            self.assertLess(max(ports.values()), 25000, "档位窗上界")
+            self.assertGreaterEqual(min(ports.values()), sd.band_base(), "档位窗下界")
+            self.assertLess(max(ports.values()),
+                            sd.band_base() + sd.BAND_COUNT * sd.BAND_STEP, "档位窗上界")
         up = self.last_up()
         self.assertEqual(up["project"], "uta")
         self.assertEqual(up["env"]["SANDBAR_TEST_TEMPORAL_NAME"], "uta-temporal")
@@ -364,7 +378,8 @@ class BandAllocationTest(StageCLIBase):
         try:
             st = self.up_json("utb", "--services", "temporal", "--timeout", "30")
             base = min(st["ports"].values())
-            self.assertGreaterEqual(base, 21000 + 10, "band-0 被占应滑档（实得 %s）" % st["ports"])
+            self.assertGreaterEqual(base, sd.band_base() + sd.BAND_STEP,
+                                    "band-0 被占应滑档（实得 %s）" % st["ports"])
         finally:
             os.close(fd)
         self.cli("down", "--project", "utb")
@@ -742,6 +757,39 @@ def _band_window_foreign_listeners():
         if lo <= port < hi:
             hits.append("%s(pid=%s) port=%d" % (parts[0], parts[1], port))
     return hits
+
+
+class NetFuseTest(StageCLIBase):
+    """受管网段+保险丝端到端（t260912-02，shim 假容器真编排）：up 的 lease 落
+    subnet∈受管表且注入 compose env；关扫明示可见；畸形 NET_BASE=usage 红零副作用。"""
+
+    def test_up_lease_subnet_in_table_and_env_injected(self):
+        proj = "l1-net-a"
+        proc = self.cli("up", "--project", proj, "--services", "temporal",
+                        SANDBAR_STAGE_SWEEP="off")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("STAGE_SWEEP_WARN", proc.stderr, "关扫必须有响亮提示行")
+        st = json.loads(proc.stdout.strip().splitlines()[-1])
+        lease = json.loads(sd.lease_path(proj).read_text())
+        table = sd.net_table()
+        self.assertIn(lease.get("subnet"), table, "lease.subnet 必来自受管网段表")
+        self.assertNotEqual(lease.get("subnet"), table[-1], "保留尾槽不参与分配")
+        up = self.last_up()
+        self.assertEqual(up["env"].get("SANDBAR_TEST_SUBNET"), lease.get("subnet"),
+                         "compose 收到的子网与租约记录一致")
+        self.assertEqual(st.get("subnet"), lease.get("subnet"),
+                         "up JSON 对账同一子网")
+        self.cli("down", "--project", proj)
+
+    def test_malformed_net_base_usage_red_zero_side_effect(self):
+        proj = "l1-net-bad"
+        p = self.cli("up", "--project", proj, "--services", "temporal",
+                     SANDBAR_STAGE_NET_BASE="nonsense", _timeout=60)
+        self.assertEqual(p.returncode, 64)
+        self.assertIn("STAGE_USAGE", p.stderr)
+        self.assertIn("SANDBAR_STAGE_NET_BASE", p.stderr)
+        self.assertIsNone(self.last_up(), "畸形 base：compose 一次都不该被调用")
+        self.assertFalse(sd.lease_path(proj).exists(), "不留半租约")
 
 
 if __name__ == "__main__":

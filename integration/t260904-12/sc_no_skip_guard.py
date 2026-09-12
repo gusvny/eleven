@@ -57,6 +57,8 @@ ALLOW = [
                                         # 三态契约的负向表述，与「闸内无 SKIP」退役注记同族）
     re.compile(r"SKIP_DIRS"),                                           # 目录排除表常量名（非测试状态词）
     re.compile(r"skipTest"),                                            # unittest 内建 API（环境前提不可测时跳过单用例），非三态状态词
+    re.compile(r"skipped_budget"),                                      # 被测产品回执字段名（t260912-02 stage_docker sweep 报告
+                                        # 的预算跳过清单键；acceptance 走查脚本读它=产品域，非套件状态值）
 ]
 
 hits = []

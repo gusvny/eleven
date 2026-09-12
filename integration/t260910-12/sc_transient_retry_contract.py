@@ -24,6 +24,9 @@ LIB = os.path.join(REPO, "integration", "lib_transient_retry.py")
 LIB_MJS = os.path.join(REPO, "integration", "lib_transient_retry.mjs")
 
 # 固定消息桩清单（py/mjs 两态同源比对；含畸形三态）
+# 「满员」桩注（t260912-02）：生产者（满员排队红）已随名额闸退役，白名单里的
+# 「满员」模式降级为**旧文案兼容面**（历史日志/报告仍应判 transient）——本桩
+# 保留正是钉住这条兼容语义，不是死字符串误留。
 TRANSIENT_SAMPLES = [
     "HTTP 502 Bad Gateway",
     "connect refused（tcp 127.0.0.1:21001）",
@@ -35,6 +38,10 @@ FATAL_SAMPLES = [
     "ENV_FAIL: 测试镜像缺席：test-temporal:cli-1.8.3（本机自建镜像、无 registry 拉取）",
     "usage 红：project 名含非法字符",
     "STAGE_ENV: 供给台 x ensure 互斥等待超时（600s）",
+    # t260912-02：起台保险丝刹停红**必须判 fatal**——失控循环的红被自动重试=
+    # 放大 herd，白名单按「满员」匹配不到新文案（刻意不重字），此桩钉住正向面。
+    "STAGE_ENV: 起台保险丝（SANDBAR_STAGE_MAX_STAGES=12）触发：活租约 12 已达上限"
+    "——疑似失控循环，刹停不排队。当前活租约清单：cap-a(pid 4321)",
 ]
 MALFORMED_SAMPLES = ["", None, 12345, {"msg": "HTTP 502 Bad Gateway"}, "x" * 100000]
 

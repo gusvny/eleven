@@ -48,6 +48,27 @@ python3 integration/run_scenarios.py
   （别泳道构建上红绿失真实录见 t260906-01 仲裁报告）；`SANDBAR_TEST_CONSOLE` 显式
   指台仍优先。旧 stage-console-shared 若仍在跑属历史遗留，归供给面清理。
 
+  **舞台生命周期旋钮（t260912-02）**：
+  - 残台清扫（按主人存在性：compose 工作目录已删 / 泳道不在 git worktree list /
+    心跳陈旧超阈；booting 新鲜与在册泳道两阀不碰）：`SANDBAR_STAGE_SWEEP_STALE_S`
+    （缺省 600）、`SANDBAR_STAGE_SWEEP_BUDGET_S`（缺省 30）；清理挂两处——全量闸
+    开跑前 + 每台起台时（`SANDBAR_STAGE_SWEEP=off|0` 显式关闭，响亮
+    STAGE_SWEEP_WARN 不静默）；手工入口 `python3 integration/stage_docker.py sweep
+    [--dry-run]`（判拆点名，失败非零上抛）。
+  - 起台保险丝：`SANDBAR_STAGE_MAX_STAGES` **缺省 100**（原 12 排队闸已退役——
+    全机共用名额只制造假拥堵；保险丝只在失控循环刹停，触闸红不含「满员」字样，
+    瞬态白名单不会重试放大）。
+  - 受管网段：起台建网显式指定子网（`10.213.0.0/16` 切 /24，尾槽
+    `10.213.255.0/24` 保留给手工直跑 compose 的缺省路径），爆发建网不再向 docker
+    分配器申请库存（fully subnetted 病灶根治）。**手工并行注意**：两个手工台同起
+    会撞保留槽——手工并行请各自显式传 `SANDBAR_TEST_SUBNET=10.213.x.0/24`
+    （x 不取保留尾槽）；与宿主 VPN/局域网撞号时 `SANDBAR_STAGE_NET_BASE` 重指
+    整张表（畸形=usage 红）。docs/testing-guide.md 的手工 compose 段落有同款
+    漂移（docs/ 不在票写集），随本票 merge 一并核对。
+  - 档位带基址：`SANDBAR_STAGE_BAND_BASE`（缺省 21000 语义不变）——多泳道共用
+    一台宿主时兄弟泳道真台常驻 21000 窗，L1 电池（需要全净窗）可重指空闲窗跑；
+    畸形或撞生产/缺省台窗=usage 红。
+
 ## 环境前提
 
 Node >=22.18（type-stripping 直跑，全部测试）；其余按条目按需探测：

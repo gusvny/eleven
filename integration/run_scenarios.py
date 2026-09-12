@@ -592,7 +592,7 @@ SCENARIOS = [
      "持有者被杀→TTL 后回收且不影响他人（t260910-12 验收②，灰盒 L3）：起台 A 后持有腿进程在场（pgrep -f 匹配 CLI 子命令行，进程表公开观测面）→SIGKILL 杀持有腿→杀后立即起台 B 成功且可服务（他人零波及）→注入小 TTL（SANDBAR_STAGE_LEASE_TTL_S 方案注入口）等租约过期→A 再 ensure=接管重起（container_ids 更替=旧台回收重建，非复活残台）→B 全程不受回收影响→双工程零残留。锚「回收判据=租约过期 AND 持有者进程不存在」的确定语义：持有者死亡是唯一触发，无 docker ps 采样/新鲜宽限参与。与 L1（假 pid 四象限 UT）不同层：本条守真进程 kill 的系统行为。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker 缺席=ENV_FAIL exit 2",
      "python3 integration/t260910-12/sc_holder_kill_reclaim.py", "engine"),
     ("t260910-12-full-capacity-queue",
-     "满员诚实排队等待释放不假红（t260910-12 验收③，灰盒 L3）：注入 SANDBAR_STAGE_MAX_STAGES=1（env 旋钮=方案注入口，只影响本场景子进程）——先到者 A 占满唯一名额后，后到者 B 在 A 持有期内发起 ensure 排队不退出不假红（进程存活、无 STAGE_ENV 红行）；A down 释放后 B 预算内成功入位且端口可服务、全程无满员超时红。排队成功腿为主断言面；超时文案腿归 developer L1（注入成本考量，intent 不重复）。锁根拓扑（arbitrate gen1 修正，非弱化）：本场景用隔离锁根——容量闸计数=锁根内全部活租约，生产共享根上并行泳道活动台会被计入导致注入小容量自卡死（gen0 两次 600s 超时实锤）；隔离根上 A/B 排队互斥（capacity flock+ensure flock+租约状态机）真实同根执行，跨泳道容量竞争不属于本条 intent（生产由缺省值 12 承担）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker 缺席=ENV_FAIL exit 2",
+     "保险丝刹停点名不假红（t260910-12 验收③；原「满员诚实排队」语义随 t260912-02 ①退役——排队闸是全机共用名额，实测只制造假拥堵：上限 12 时 12 台并发 3 台卡满 150s 超时、改 30 即 12/12 共 5.3s；闸的职责收敛为防呆保险丝，本条为断言强度等价迁移非放宽）：注入 SANDBAR_STAGE_MAX_STAGES=1（env 旋钮=方案注入口，只影响本场景子进程）——先到者 A 占满唯一额度后正常起台且全程可服务（先到者不受扰）；后到者 B 在 A 持有期内发起 ensure **立即刹停退出**：rc=2、stderr 点名「起台保险丝」并附活租约清单（holder pid/票号）、期间零容器（不硬挤不假红）、红行**不含「满员」字样**（瞬态白名单不得重试失控红）；A down 释放后 C 预算内成功入位且端口可服务。锁根拓扑（arbitrate gen1 修正沿袭）：本场景用隔离锁根——保险丝计数=锁根内全部活租约，生产共享根上并行泳道活动台会被计入导致注入小额度自卡死（gen0 两次 600s 超时实锤）；隔离根上 A/B/C 判定互斥真实同根执行，跨泳道竞争不属于本条 intent（生产由缺省值 100 承担）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker 缺席=ENV_FAIL exit 2",
      "python3 integration/t260910-12/sc_full_capacity_queue.py", "engine"),
     ("t260910-12-idempotent-reup",
      "同租约二次 up 幂等复用容器未被重建（t260910-12 验收④，灰盒 L2/L3）：首起记 container_ids→同项目二次 ensure：reused=true、container_ids 逐个一致（容器 id 不变=工单原文口径）、端口一致且台可服务；down 拆台零残留。与 t260904-19-stage-docker-cli-contract 的 ensure 幂等锚不同粒度（彼锚 CLI 缝 exit 0/JSON 形，本条锚本票新交付 container_ids 契约字段与「容器 id 不变」强断言——互拆根治的直接证据，mock 替代不了真容器 id 观测）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker 缺席=ENV_FAIL exit 2",
@@ -604,7 +604,7 @@ SCENARIOS = [
      "瞬态分类与一次重试契约（t260910-12 目标④，灰盒 L2 库契约，秒级零 docker）：三类已知瞬态（台内 502/端口拒连族/起台面繁忙族）判 transient、终态环境红（镜像缺席等）判 fatal 不重试；retry 恰一次——首试瞬态次试成功=成功且调用计数=2、两试皆瞬态=原样抛最后一次文案逐字节不变（仲裁分类器不再被迫吸收）、首试非瞬态=不重试；畸形输入（空串/非字符串/超长行）安全拒收不炸；py judge 子命令逐桩输出 transient|fatal（单源真源），mjs 薄包装 node 可加载。锚方案承诺的公开契约（库函数名/judge 子命令/薄包装存在），不锚内部布局。实现段落地前 import 红=FAIL 属预期（TDD 信号），arbitrate/merge 期必须绿；node 缺席=ENV_FAIL 点名（mjs 腿）",
      "python3 integration/t260910-12/sc_transient_retry_contract.py", "ro"),
     ("t260910-12-lease-unit",
-     "租约化起台面 developer L1 全电池（t260910-12，灰盒 L1，假 docker shim 零 docker 依赖）：回收判据四象限（新鲜+活=复用/过期+死=回收/过期+活=诚实红绝不硬拆/新鲜+死=判死回收）锚「过期 AND holder pid 不存在」唯一判据；并发写原子性（8 线程×40 写读者只见完整 JSON）；满员闸（计数=活租约+占位同临界区不超售、超时红带活租约清单、释放准入）；hold 腿七路终态（正常收割 exit 0 且不补写/downing 二次校验不回写/锚死回收/起台孤儿回收/写失败非0/SIGTERM 130 不拆台/超帽 rc6）+预租约等待预算=起台者存活期；ensure 状态机（TTL 加速真翻面复用、R3 ps 空窗扛性、booting 等待零再起、孤儿 booting 接管恰一次冷起）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "租约化起台面 developer L1 全电池（t260910-12，灰盒 L1，假 docker shim 零 docker 依赖）：回收判据四象限（新鲜+活=复用/过期+死=回收/过期+活=诚实红绝不硬拆/新鲜+死=判死回收）锚「过期 AND holder pid 不存在」唯一判据；并发写原子性（8 线程×40 写读者只见完整 JSON）；起台保险丝（t260912-02 语义迁移：计数=活租约+占位同临界区不超售、触闸红点名保险丝并附活租约清单且不含「满员」字样、非触闸负锁、锁获取有界等待保留、释放准入）；残台清扫判据矩阵（主人存在性 crit_i/ii/iii 拆、booting 新鲜/泳道在册两阀不碰、C4b 活台+目录在 fail-closed、畸形租约保守）；受管网段分配（表内/随机不序列/排除在册与 daemon/保留槽/畸形 base 拒收）；hold 腿七路终态（正常收割 exit 0 且不补写/downing 二次校验不回写/锚死回收/起台孤儿回收/写失败非0/SIGTERM 130 不拆台/超帽 rc6）+预租约等待预算=起台者存活期；ensure 状态机（TTL 加速真翻面复用、R3 ps 空窗扛性、booting 等待零再起、孤儿 booting 接管恰一次冷起）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "python3 integration/tests/test_stage_lease.py", "ro"),
 
     # ---- t260905-03 inspection ticket 1 (scheduled quality-check skeleton + test-surface scan) ----
@@ -870,6 +870,31 @@ SCENARIOS = [
     ("t260911-01-filter-contract-guard",
      "过程物过滤口径单一真源契约护栏（t260911-01 场景②，读源断言 L2）：workbench 过滤表（changes.ts PROCESS_ARTIFACT_DIRS）⊇ 引擎两表现有排除（agent_activities.SETTLE_PATHSPEC + verify_lane.RUNTIME_PREFIXES，ast 抠字面量、跨语言无法 import 真源）——白名单可扩但不得丢 .dsh/.sandbar/.suyou 已有覆盖（丢=引擎自管过程物回流人审 diff 面，2b 复发形态即红）；派发白名单五目录（.sandbar/.dsh/out/__pycache__/node_modules）在表；闸3=handler 透传一跳护栏（node.ts computeTicketDiff 调用参数必须透传 repo_worktrees——t260908-01 同族「host 挑字段漏透传→场景全绿 UI 全瞎」断点防线）；挂账面可判定不判红——workbench 有而引擎侧没有的差集逐行打 LEDGER（out/pycache 误代落盘实案根因的引擎根修挂账，根修落地后差集收空即可销账）。纯 stdlib 零环境依赖",
      "python3 integration/t260911-01/sc_t260911_01_filter_contract_guard.py"),
+
+    # ---- t260912-02: 测试台生命周期三修（去名额闸留保险丝 / 残台自动认领并拆 / 起台自管网段）----
+    # 六条 intent 互不重叠：burst=爆发规模×地址池零复发×清场（A/B/G）；
+    # sweep-owner-gone=判拆矩阵+三负锁（C）；sweep-cost=成本+失败可见（D）；
+    # net-table=分配契约缝；headroom=常驻不挤名额（F）；runaway=失控刹停点名（E）。
+    # 残台形态注入=租约状态面手术（工单验收 C 明令注入口）；断言只锚 CLI 进程级
+    # 行为与 docker 公开观测面（compose label/网络 IPAM/端口/进程表）。
+    ("t260912-02-burst-managed-subnets",
+     "并发 32 台 dsh 真台同一瞬爆发 32/32 成功、零超时红、墙钟≤60s；全部子进程输出与 docker network 事件流零命中「fully subnetted」（地址池报错零复发）且零保险丝红（缺省 100 不被 32 台触发）；逐台 inspect 断言网段全部∈受管网段表（base /16 切 /24）、跨台两两互异、无一等于手工直跑 compose 的缺省网段（保留槽不被分配器发出）；48 台 temporal 轮每路只许 rc=0 或环境红 rc=2（非环境类失败=产品红）且成功≥40；收口=80 工程容器/网络/卷逐项零残留、全机容器数与网络数回落跑前基线、3099/7233 LISTEN pid 跑前跑后一致（t260912-02 验收 A/B/G，灰盒 L3）。与 t260904-19-parallel-zero-residue（N=2 隔离/爆炸半径）、t260910-12-herd-no-crosstalk（N=6 端口互斥+幂等）intent 不同层：本条锚爆发规模下网段自管与地址池零复发，是病灶三的用户级证据。登记 exclusive：地址池/保险丝判定对共机负载敏感，并发池污染判定面。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker/测试镜像缺席=ENV_FAIL exit 2",
+     "python3 integration/t260912-02/sc_stage_burst_managed_subnets.py", "exclusive"),
+    ("t260912-02-sweep-owner-gone",
+     "残台按主人存在性自动认领并拆（t260912-02 验收 C，灰盒 L3）：注入五残台形态（工作目录已删真台/目录删+pid 活+心跳新鲜合成台/泳道不在 worktree list/心跳陈旧 2h+pid 活/legacy 旧格式 repo_dir 已删）清扫必须全拆（容器+网络+卷逐项空）且报告逐条点名；三负锁不得误拆（booting 且心跳新鲜且 owner 非工作树=阀1、泳道在册健康台=阀2 零接触、legacy 活台 repo_dir 非工作树=fail-closed 不拆只留报告行）；sweep --dry-run 只认领不拆；起台时挂点行为证明（再造残台后正常 up 新工程，新台健康同时旧残台被顺手拆掉且健康台原封不动）；清扫二连幂等。pid 存活只是辅证的断言腿=形态(i-a)/(iii)（pid 活+心跳新鲜/陈旧都拆得主）。与 t260910-12-holder-kill-reclaim（hold 被杀才触发的判死回收、租约四象限）intent 不同面：本条锚 hold 活着也拆得主的主人存在性清道夫（病灶二）。登记 engine：拆台按工程名隔离不碰他台。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker 缺席=ENV_FAIL exit 2",
+     "python3 integration/t260912-02/sc_stage_sweep_owner_gone.py", "engine"),
+    ("t260912-02-sweep-cost-failure",
+     "清扫成本与失败可见性（t260912-02 验收 D，灰盒 L3）：零残台时单次扫描+清理连续三遍每遍≤5s 且 rc=0、零点名（没有残台不得编造点名）；注入「主人目录已删」残台+置坏 docker 桩（PATH 前置必失败假体，只遮蔽 docker）→ sweep 必须非零退出并在输出点名该残台——静默吞掉=红；撤桩重扫同一残台被正常拆掉（恢复路径真通）；幂等二扫仍在预算内。与 t260912-02-sweep-owner-gone（拆谁/不拆谁的判定矩阵）intent 分工：本条锚拆得快不快、失败了看不看得见。登记 exclusive：≤5s 是负载敏感断言（KI-072 家族），并发池会打假红。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker 缺席=ENV_FAIL exit 2",
+     "python3 integration/t260912-02/sc_stage_sweep_cost_failure.py", "exclusive"),
+    ("t260912-02-net-table-contract",
+     "受管网段分配的 CLI 契约缝（t260912-02 病灶三用户级契约，灰盒 L2/L3）：两台真台各建一网网段∈受管表且互异（分配对照在册防撞号的用户级证据）；同项目 ensure 幂等复用 reused=true 且网段不漂移（复用不得重新分配）；down 后网络消失且该网段在全机 daemon 网络中不再被占（槽位归还）；compose 渲染契约（手工直跑路径）：无 env 渲染出缺省 ipam 子网∈受管表、显式注入自由槽后渲染=注入值（手工并行台错槽出路在场）；畸形 SANDBAR_STAGE_NET_BASE 按 usage 档拒收（rc 非 0/2）+输出点名旋钮+零容器产生。与 t260912-02-burst-managed-subnets（爆发规模系统行为）intent 分工：本条锚单台粒度分配契约缝；畸形底座真值表归 developer L1。登记 engine。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker 缺席=ENV_FAIL exit 2",
+     "python3 integration/t260912-02/sc_stage_net_table_contract.py", "engine"),
+    ("t260912-02-fuse-headroom-resident",
+     "常驻租约在场时并发起台不再自我挤压（t260912-02 验收 F，灰盒 L3）：注入 6 条常驻形态租约（在飞票控制台台/供给台镜像面：state=up+keep+持有者进程活+心跳续鲜+主人=本仓工作树）后并发 16 台 temporal 真台 ensure：16/16 全绿、端口两两互异、全部∉生产/禁区面、全程零保险丝红（6 常驻+16 场景=22 活租约远不触闸）；风暴后 6 条常驻租约原封不动（在册+持有者进程仍活）；风暴台终态零残留。与 t260912-02-fuse-runaway-named-stop（超限刹停）正反两面不互替；与 t260910-12-herd-no-crosstalk（N=6 端口互斥）不同层：本条锚「常驻在场」床位前提——旧满员闸把常驻计入 12 名额正是自挤根源（病灶一）。登记 exclusive：16 路并发 compose-up 是修复宣称的生产级负载，独占保判定面。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker/测试镜像缺席=ENV_FAIL exit 2",
+     "python3 integration/t260912-02/sc_stage_fuse_headroom_resident.py", "exclusive"),
+    ("t260912-02-fuse-runaway-named-stop",
+     "失控起台循环被保险丝刹停并逐条点名（t260912-02 验收 E，灰盒 L3）：注入小保险丝（SANDBAR_STAGE_MAX_STAGES=4 隔离锁根；生产缺省 100 的不触闸面由 burst 场景与 L1 缺省值断言承担不在此重复）+一口气 200 路并发 up（失控循环样本）：恰≤4 路入位（原子不超售）、其余全部刹停且每路红行点名保险丝并附活租约清单（pid=/lease= 可核对——「点名」是硬断言）、刹停红一律环境档 rc=2；损害有界：全程在跑容器≤4 台规模、风暴结束无孤儿持有腿进程残留（pgrep 公开观测面）、清理后零容器残留；全程零地址池报错。与 t260910-12-full-capacity-queue（小闸 2 路最小形态的语义迁移面）intent 分工：本条锚 200 路风暴的损害有界与逐条点名，是验收 E 本体强度。登记 exclusive。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker/测试镜像缺席=ENV_FAIL exit 2",
+     "python3 integration/t260912-02/sc_stage_fuse_runaway_named_stop.py", "exclusive"),
 ]
 
 CMD_TIMEOUT = 900
@@ -955,6 +980,29 @@ def _spec_from_output(name, pool, out, exit_code, dur, started):
                                 git_sha=sha)
 
 
+def _sweep_residue_stages():
+    """套件前残台清扫（t260912-02 清理挂点①）：按主人存在性（compose 工作目录
+    已删 / 泳道不在 git worktree list / 心跳陈旧超阈）判拆上一期留下的残台，
+    判拆逐条点名、stdout 可见。清理失败响亮留痕但**不中止套件**——清道夫失败
+    不应烧掉全量闸全部场景（每条场景起台时还会再扫一遍=清理挂点②，双重冗余）；
+    docker 缺席时 sweep 子命令按三态诚实报 ENV_FAIL，同样只留痕不中止。"""
+    cli = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stage_docker.py")
+    try:
+        p = subprocess.run([sys.executable, cli, "sweep"], capture_output=True,
+                           text=True, timeout=300)
+    except (OSError, subprocess.SubprocessError) as e:
+        print("[stage-sweep] 套件前清扫未跑成（%s: %s）——残台交起台时清扫/人工"
+              % (type(e).__name__, e), flush=True)
+        return
+    for stream in (p.stdout or "", p.stderr or ""):
+        for line in stream.splitlines():
+            if line.startswith(("[stage-sweep]", "ENV_FAIL", "STAGE_")):
+                print(line, flush=True)
+    if p.returncode != 0:
+        print("[stage-sweep] 套件前清扫失败（rc=%d）——不中止套件，失败项已点名；"
+              "起台时清扫与下一期套件前清扫会再试" % p.returncode, flush=True)
+
+
 def _docker_hygiene():
     """起跑前台面卫生（t260910-14 arbitrate gen2/gen3，tests-fault 供给面迭代）：
     全量闸每期起 ~15+ 个 compose 台，场景崩溃/超时时 stage_docker 的 down 走不到，
@@ -962,6 +1010,10 @@ def _docker_hygiene():
     网络后 'all predefined address pools have been fully subnetted'，19 个场景连坐
     ENV_FAIL）。本扫只动**停止态**的 compose 台容器与**闲置**网络——在跑台（含其他
     泳道的供给台）零接触；docker 缺席/任何失败=静默跳过（卫生是尽力而为，不是闸）。
+    t260912-02 注：起台建网已显式带受管子网（stage_docker 分配，fully subnetted
+    不再是活路径），且受管网络随 compose down 自拆——本卫生保留为防御面（手工
+    直跑/旧期残留），在跑台零接触的边界原样。与 _sweep_residue_stages（残台清扫）
+    分工：彼按租约判主人生死、可拆在跑的残台；本只扫无主停止态容器与闲置网络。
     """
     try:
         stopped = subprocess.run(
@@ -1149,6 +1201,7 @@ def main() -> int:
             print("\n".join(block), flush=True)
 
     timings = []   # KI-060 prep 2: timing distribution (one row per scenario, with pool attribution)
+    _sweep_residue_stages()   # t260912-02 清理挂点①：套件前残台清扫（判拆点名；失败响亮不中止）
     _docker_hygiene()   # 起跑前台面卫生（t260910-14 arbitrate gen2/gen3：见函数注）
     spec_cases = []   # t260910-13：规范行明细（场景自产透传 + 执行器综合），INTEG_SUMMARY 以此为准
     executor_error = None   # t260911 仲裁②：池级异常必须响亮产品红，绝不静默吞

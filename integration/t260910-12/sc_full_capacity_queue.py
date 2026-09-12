@@ -1,17 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""t260910-12 场景：满员诚实排队等待释放，不硬挤不假红（灰盒 L3，工单验收③）。
+"""t260910-12 场景：起台保险丝刹停点名不假红（灰盒 L3，工单验收③）。
 
-intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：
+语义迁移（t260912-02 ①，断言强度等价非放宽）：原「满员诚实排队等待释放」随
+名额排队闸一并退役——排队闸是全机共用名额，实测只制造假拥堵（上限 12 时 12 台
+并发 3 台卡满 150s；改 30 即 12/12 共 5.3s）。闸的职责收敛为防呆保险丝，本场景
+改锚新契约：
 - 注入 SANDBAR_STAGE_MAX_STAGES=1（env 旋钮=方案注入口，只影响本场景子进程）
   做最小可观测形态；
-- 先到者 A 占满唯一名额后，后到者 B 在 A 持有期内发起 ensure：**排队不退出
-  不假红**（进程存活、无 STAGE_ENV 红行）；
-- A down 释放名额后 B 预算内成功入位且端口可服务，全程无满员超时红；
-- 排队成功腿为主断言面；超时文案腿归 developer L1（注入成本考量，intent
-  不重复）；
+- 先到者 A 占满唯一额度后正常起台、全程可服务（**先到者不受扰**——原场景
+  「A 不受扰」腿保留）；
+- 后到者 B 在 A 持有期内发起 ensure **立即刹停退出**（原「排队不退出」腿按新
+  语义翻转）：rc=2、stderr 点名「起台保险丝」并附活租约清单（holder pid/票号/
+  lease id）、期间零容器（不硬挤不假红）、红行**不含「满员」字样**（瞬态白名单
+  按字样自动重试，失控红不得被重试放大）；
+- A down 释放额度后 C 预算内成功入位且端口可服务（**释放准入**腿保留）；
 - 终态零残留、持有腿收割。docker 缺席=ENV_FAIL exit 2。
+
+intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体；原排队语义退役
+已在注册行注明）。
 """
+import json
 import os
 import subprocess
 import sys
@@ -35,73 +44,82 @@ from lib_herd_case import (  # noqa: E402
 )
 
 TAG = stage_tag("t26091012-cap")  # 泳道唯一化（跨泳道同项目名互拆根治）
-# 隔离锁根（arbitrate gen1 修正，非弱化）：容量闸计数=锁根内全部活租约，生产
-# 锁根（/tmp/sandbar-test-stages）全机共享——并行泳道的活动台会被计入「我的
-# 容量」，注入 MAX_STAGES=1 必然自卡死（gen0 全量跑两次 600s 超时实锤）。隔离
-# 根上 MAX_STAGES=1 语义纯净：A/B 排队互斥（capacity flock + ensure flock +
-# 租约状态机）全部真实同根执行，被测面=满员闸排队语义本身；跨泳道容量竞争
-# 不属于本条 intent（生产由全局缺省值 12 承担）。
+# 隔离锁根（arbitrate gen1 修正沿袭，非弱化）：保险丝计数=锁根内全部活租约，
+# 生产锁根全机共享——并行泳道的活动台会被计入「我的额度」，注入 MAX_STAGES=1
+# 必然自卡死（gen0 全量跑两次 600s 超时实锤）。隔离根上 MAX_STAGES=1 语义纯净：
+# A/B/C 判定互斥（capacity flock + ensure flock + 租约状态机）全部真实同根执行，
+# 被测面=保险丝判定语义本身；跨泳道竞争不属于本条 intent（生产由缺省值 100 承担）。
 ISO_ROOT = "/tmp/sandbar-cap-t26091012"
 ENV = {"SANDBAR_STAGE_MAX_STAGES": "1", "SANDBAR_STAGE_LOCK_DIR": ISO_ROOT}
-PROJ_A, PROJ_B = "%s-a" % TAG, "%s-b" % TAG
+PROJ_A = "%s-a" % TAG
+PROJ_B = "%s-b" % TAG
+PROJ_C = "%s-c" % TAG
 
 
-def spawn_ensure(project, timeout_arg):
-    """并发/排队发车：ensure 子进程（不等待；共享缺省锁根纪律）。"""
-    env = dict(os.environ)
-    env.update(ENV)
-    return subprocess.Popen(
-        [sys.executable, CLI, "ensure", "--project", project,
-         "--services", "temporal", "--timeout", str(timeout_arg)],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        cwd=REPO, env=env)
+def last_json(proc):
+    try:
+        return json.loads((proc.stdout or "").strip().split("\n")[-1])
+    except (ValueError, IndexError):
+        return {}
 
 
 def main():
     if not docker_present():
-        envfail("docker 缺席——满员排队面不可验（启动 Docker/OrbStack 后重试）")
+        envfail("docker 缺席——起台保险丝面不可验（启动 Docker/OrbStack 后重试）")
         finish()
     os.makedirs(ISO_ROOT, exist_ok=True)
     try:
-        # A 占满唯一名额（超时容错转 FAIL：三态契约要求总产出 SUMMARY 行）
+        # A 占满唯一额度（超时容错转 FAIL：三态契约要求总产出 SUMMARY 行）
         try:
             proc = cli("ensure", "--project", PROJ_A, "--services", "temporal",
                        timeout=600, env_extra=ENV)
         except subprocess.TimeoutExpired:
-            check(False, "A 起台 600s 超时（容量闸排队未入位——隔离根上不应发生）")
+            check(False, "A 起台 600s 超时（保险丝不应拦第一台——隔离根上不应发生）")
             finish()
         env_guard(proc.stderr, "A 起台腿")
-        if not check(proc.returncode == 0, "A 台起好（名额占满，rc=%s）"
+        if not check(proc.returncode == 0, "A 台起好（额度占满，rc=%s）"
                      % proc.returncode):
             finish()
+        port_a = ((last_json(proc) or {}).get("ports") or {}).get("temporal")
+        check(bool(port_a) and tcp_open(port_a),
+              "A 台可服务（先到者不受扰，temporal %s）" % port_a)
+        a_holder_pid = (last_json(proc) or {}).get("holder", {}).get("pid")
 
-        # B 发车：排队（存活、不硬挤）
-        b_proc = spawn_ensure(PROJ_B, 300)
-        time.sleep(8)
-        check(b_proc.poll() is None, "B 排队中（8s 未退出=不硬挤不假红）")
-        check(not compose_containers(PROJ_B), "B 排队期间零容器（没硬挤起台）")
+        # B 发车：立即刹停（不排队、不硬挤、不假红）
+        t0 = time.time()
+        proc_b = cli("ensure", "--project", PROJ_B, "--services", "temporal",
+                     timeout=120, env_extra=ENV)
+        dur_b = time.time() - t0
+        check(proc_b.returncode == 2, "B 刹停红 rc=2（env 语义，实际 rc=%s）"
+              % proc_b.returncode)
+        check(dur_b < 60, "B 立即刹停不排队（%.1fs 内退出；旧排队语义是挂住等释放）"
+              % dur_b)
+        err_b = proc_b.stderr or ""
+        check("起台保险丝" in err_b, "B 红行点名「起台保险丝」：%s"
+              % " ".join(err_b.split())[:120])
+        check("SANDBAR_STAGE_MAX_STAGES=1" in err_b, "B 红行点名注入上限")
+        check(("pid=%s" % a_holder_pid) in err_b or PROJ_A in err_b,
+              "B 红行附活租约清单（holder pid / 工程名可辨）")
+        check("满员" not in err_b, "B 红行不含「满员」字样（瞬态白名单不得重试失控红）")
+        check(not compose_containers(PROJ_B), "B 期间零容器（不硬挤起台）")
 
-        # A down 释放 → B 预算内入位
+        # A down 释放 → C 预算内入位（释放准入腿保留）
         d_proc = cli("down", "--project", PROJ_A, timeout=300, env_extra=ENV)
         env_guard(d_proc.stderr, "A 拆台腿")
-        check(d_proc.returncode == 0, "A down 释放名额（rc=%s）" % d_proc.returncode)
+        check(d_proc.returncode == 0, "A down 释放额度（rc=%s）" % d_proc.returncode)
         t0 = time.time()
-        out_b, err_b = b_proc.communicate(timeout=300)
-        env_guard(err_b, "B 入位腿")
-        check(b_proc.returncode == 0, "B 在预算内入位双绿（rc=%s，用时 %.0fs）"
-              % (b_proc.returncode, time.time() - t0))
-        try:
-            st_b = __import__("json").loads((out_b or "").strip().split("\n")[-1])
-        except (ValueError, IndexError):
-            st_b = None
-        port_b = (st_b or {}).get("ports", {}).get("temporal")
-        check(bool(port_b) and tcp_open(port_b), "B 台可服务（temporal %s）" % port_b)
-        check("STAGE_ENV" not in (err_b or ""), "B 全程无 STAGE_ENV 红行（不假红）")
+        proc_c = cli("ensure", "--project", PROJ_C, "--services", "temporal",
+                     timeout=600, env_extra=ENV)
+        env_guard(proc_c.stderr, "C 入位腿")
+        check(proc_c.returncode == 0, "C 释放后预算内入位（rc=%s，用时 %.0fs）"
+              % (proc_c.returncode, time.time() - t0))
+        port_c = ((last_json(proc_c) or {}).get("ports") or {}).get("temporal")
+        check(bool(port_c) and tcp_open(port_c), "C 台可服务（temporal %s）" % port_c)
     finally:
-        guarded_down([PROJ_A, PROJ_B])
+        guarded_down([PROJ_A, PROJ_B, PROJ_C])
 
-    check(not compose_containers(PROJ_A), "A 终态零残留")
-    check(not compose_containers(PROJ_B), "B 终态零残留")
+    for proj in (PROJ_A, PROJ_B, PROJ_C):
+        check(not compose_containers(proj), "%s 终态零残留" % proj)
     finish()
 
 

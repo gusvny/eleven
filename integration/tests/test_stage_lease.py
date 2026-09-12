@@ -21,9 +21,12 @@
 
 跑法：python3 integration/tests/test_stage_lease.py（stdlib-only，秒级，无 docker）。
 """
+import errno
+import fcntl
 import json
 import os
 import pathlib
+import shutil
 import signal
 import subprocess
 import sys
@@ -35,6 +38,7 @@ import unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
 INTEG = HERE.parent
+REPO = INTEG.parent
 STAGE = INTEG / "stage_docker.py"
 sys.path.insert(0, str(INTEG))
 
@@ -161,6 +165,9 @@ class LeaseCriteriaTest(LeaseTestBase):
 
 
 class CapacityGateTest(LeaseTestBase):
+    """起台保险丝（t260912-02 语义迁移：满员排队闸退役，原子不超售/占位即计数/
+    释放准入三条性质保留，仅「满员」断言换成保险丝断言——票面授权的语义变更）。"""
+
     def test_placeholder_counts_and_release_admits(self):
         os.environ["SANDBAR_STAGE_MAX_STAGES"] = "1"
         first = sd.new_lease("cap1", holder_pid=os.getpid(), services=[], ttl=90)
@@ -169,18 +176,23 @@ class CapacityGateTest(LeaseTestBase):
         second = sd.new_lease("cap2", holder_pid=os.getpid(), services=[], ttl=90)
         with self.assertRaises(sd.StageError) as ctx:
             sd.capacity_acquire("cap2", second, timeout=1.5)
-        self.assertIn("满员", str(ctx.exception))
-        # 超时红带 R2 清单：holder pid + 票号 + lease_id + 起租时刻
-        self.assertIn("pid=%d" % os.getpid(), str(ctx.exception))
-        self.assertIn("cap1", str(ctx.exception))
-        self.assertIn("lease=", str(ctx.exception))
+        msg = str(ctx.exception)
+        self.assertIn("起台保险丝", msg)
+        # 刹停红必须点名 env 上限与缺省差异 + R2 清单（holder pid+票号+lease_id）
+        self.assertIn("SANDBAR_STAGE_MAX_STAGES=1", msg)
+        self.assertIn("pid=%d" % os.getpid(), msg)
+        self.assertIn("cap1", msg)
+        self.assertIn("lease=", msg)
+        # 负锁（防恒真）：新红文案不含「满员」——瞬态白名单按字样自动重试，
+        # 失控循环的红不得被重试放大（review C1/C7）。
+        self.assertNotIn("满员", msg)
         # 释放即入位：占位租约被回收后（cap1 过期死），cap2 立即可入
         sd.release_lease("cap1")
         sd.capacity_acquire("cap2", second, timeout=2)
         self.assertTrue(sd.lease_path("cap2").exists())
 
     def test_concurrent_claim_no_oversell(self):
-        """R4：数+占位同一把全局锁——N 线程同抢容量 1 的闸，恰一个入位。"""
+        """R4：数+占位同一把全局锁——N 线程同抢额度 1，恰一个入位。"""
         os.environ["SANDBAR_STAGE_MAX_STAGES"] = "1"
         won, lost = {"n": 0}, {"n": 0}
 
@@ -198,8 +210,269 @@ class CapacityGateTest(LeaseTestBase):
             x.start()
         for x in ts:
             x.join()
-        self.assertEqual(won["n"], 1, "容量 1 恰售 1（实得 %d）" % won["n"])
-        self.assertEqual(lost["n"], 5, "落选者诚实排队超时红，绝不硬挤")
+        self.assertEqual(won["n"], 1, "额度 1 恰售 1（实得 %d）" % won["n"])
+        self.assertEqual(lost["n"], 5, "落选者立即刹停红，绝不硬挤")
+
+    def test_fuse_default_is_100(self):
+        """C7：缺省保险丝=100（L1 显式断言，防回落到旧值 12 或被误改）。"""
+        saved = os.environ.pop("SANDBAR_STAGE_MAX_STAGES", None)
+        try:
+            self.assertEqual(sd.max_stages(), 100)
+        finally:
+            if saved is not None:
+                os.environ["SANDBAR_STAGE_MAX_STAGES"] = saved
+
+    def test_fuse_not_tripped_below_limit(self):
+        """负锁（防恒真）：少量在册租约（3<缺省 100）不触闸——保险丝只在失控
+        循环刹停，正常负载（含 32 台爆发+常驻台）永不触及。"""
+        for i in range(3):
+            lease = sd.new_lease("neg%d" % i, holder_pid=os.getpid(), services=[], ttl=90)
+            sd.capacity_acquire("neg%d" % i, lease, timeout=2)
+        self.assertTrue(sd.lease_path("neg2").exists())
+
+    def test_lock_acquire_bounded_wait_kept(self):
+        """C5：锁获取的有界等待不得随排队循环一起退役——capacity-0.lock 被
+        长期持有时，等满预算=诚实红（不是裸阻塞 flock 永久挂起）。"""
+        os.environ["SANDBAR_STAGE_MAX_STAGES"] = "100"
+        lock_path = sd.lock_root() / "capacity-0.lock"
+        fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+        fcntl.flock(fd, fcntl.LOCK_EX)          # 外部持锁不放手
+        try:
+            lease = sd.new_lease("cap-locked", holder_pid=os.getpid(), services=[], ttl=90)
+            t0 = time.time()
+            with self.assertRaises(sd.StageError) as ctx:
+                sd.capacity_acquire("cap-locked", lease, timeout=0.5)
+            self.assertLess(time.time() - t0, 5, "有界等待必须到期即红")
+            self.assertIn("锁等待超时", str(ctx.exception))
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+
+class SweepJudgeTest(LeaseTestBase):
+    """残台清扫判据矩阵（t260912-02）：三判据拆 / 两阀不碰 / C4b 仅报告 /
+    畸形保守 / worktree 不可得 fail-closed——全参注入，防恒真负锁齐备。"""
+
+    def setUp(self):
+        super().setUp()
+        # 注入用 worktree 集：只含隔离根自身（真实仓根不在其中，判定全本地化）
+        self.worktree = {os.path.realpath(self.root)}
+
+    def mk(self, project="p", state="up", hb_age=1, holder=os.getpid(),
+           owner="__unset__", anchorless=False):
+        now = time.time()
+        lease = sd.new_lease(project, holder_pid=holder, services=[], ttl=90)
+        lease["state"] = state
+        lease["heartbeat_ts"] = now - hb_age
+        if anchorless:
+            del lease["owner_root"]           # 旧格式：连 repo_dir 也无
+        elif owner != "__unset__":
+            lease["owner_root"] = owner
+        return lease
+
+    def test_crit_shapes_condemned(self):
+        deleted = os.path.join(self.root, "doomed")
+        os.makedirs(deleted)
+        shutil.rmtree(deleted)                # 先删后判：crit_i 的前提是目录已不在
+        v, why = sd.judge_residue(self.mk(owner=deleted), worktree_roots=self.worktree)
+        self.assertEqual("condemn", v, why)
+        self.assertTrue(why.startswith("crit_i"), why)
+        # (ii) 非工作树锚（目录在）+ holder 死
+        nonwt = os.path.join(self.root, "nonwt"); os.makedirs(nonwt)
+        v, why = sd.judge_residue(self.mk(holder=999999, owner=nonwt),
+                                  worktree_roots=self.worktree)
+        self.assertEqual("condemn", v, why)
+        self.assertTrue(why.startswith("crit_ii"), why)
+        shutil.rmtree(nonwt)
+        # (iii) 心跳陈旧超阈（holder 死；holder 活也不翻案——PID 只作辅证）。
+        # 锚必须无：锚在而 worktree 集不含它时 crit_ii 抢先命中，测不到 crit_iii。
+        v, why = sd.judge_residue(self.mk(hb_age=6000, holder=999999,
+                                          anchorless=True),
+                                  worktree_roots=self.worktree)
+        self.assertEqual("condemn", v, why)
+        self.assertTrue(why.startswith("crit_iii"), why)
+
+    def test_valves_keep_healthy(self):
+        """阀1 阀2 + 负锁：健康台恒 keep——谓词对健康输入永远不判拆（防恒真）。"""
+        lane = os.path.join(self.root, "lane"); os.makedirs(lane)
+        wt = {os.path.realpath(lane)}
+        v, why = sd.judge_residue(self.mk(state="booting", owner=lane), worktree_roots=wt)
+        self.assertEqual("keep", v, "阀1：%s" % why)
+        v, why = sd.judge_residue(self.mk(owner=lane), worktree_roots=wt)
+        self.assertEqual("keep", v, "阀2：%s" % why)
+
+    def test_c4b_live_owner_dir_nonworktree_report_only(self):
+        """C4b 负锁：活台（up+心跳新鲜+holder 活）+ owner 目录在 + 非工作树 →
+        不拆（repo_dir 回落失真面，只允许 report 留行）——防误拆别泳道供给台。"""
+        d = os.path.join(self.root, "tmp-tree"); os.makedirs(d)
+        v, why = sd.judge_residue(self.mk(owner=d), worktree_roots=self.worktree)
+        self.assertEqual("report", v, why)
+        shutil.rmtree(d)
+
+    def test_git_unavailable_fail_closed(self):
+        """worktree list 不可得（None）：crit_ii 跳过，余判据照判（stale 仍拆）。"""
+        d = os.path.join(self.root, "nowt"); os.makedirs(d)
+        v, _ = sd.judge_residue(self.mk(hb_age=6000, holder=999999, owner=d),
+                                worktree_roots=None)
+        self.assertEqual(v, "condemn", "crit_iii 不受 git 缺席影响")
+        v, why = sd.judge_residue(self.mk(holder=999999, owner=d), worktree_roots=None)
+        self.assertEqual(v, "keep", "crit_ii 在 git 缺席时 fail-closed（%s）" % why)
+        shutil.rmtree(d)
+
+    def test_malformed_and_anchor_precedence(self):
+        """畸形/无锚保守 + 锚优先级：非租约记录 keep；无任何锚的新鲜活台 keep；
+        owner_root 优先于 repo_dir（新字段权威）。"""
+        v, _ = sd.judge_residue({"project": "x", "ts": 1}, worktree_roots=set())
+        self.assertEqual(v, "keep")
+        v, why = sd.judge_residue(self.mk(anchorless=True), worktree_roots=set())
+        self.assertEqual(v, "keep", "无锚活台保守不拆（%s）" % why)
+        d = os.path.join(self.root, "anchor-x"); os.makedirs(d)
+        lease = self.mk(owner=d)
+        lease["repo_dir"] = str(REPO)         # 回落值指向真仓根（在 worktree 集）
+        v, why = sd.judge_residue(lease, worktree_roots={os.path.realpath(REPO)})
+        self.assertEqual(v, "report", "锚取 owner_root（非工作树）而非 repo_dir：%s" % why)
+        shutil.rmtree(d)
+
+    def test_sweep_full_cycle_tears_down_and_releases(self):
+        """sweep_stages 全链（真锁根真租约，docker 腿注入为 no-op）：判拆项走
+        teardown 并逐条点名；保留/报告项租约原地不动；dry_run 不落任何动作。"""
+        deleted = os.path.join(self.root, "gone-lane")
+        sd.write_lease("res1", self.mk("res1", owner=deleted))   # 目录从未存在=crit_i
+        sd.write_lease("ok1", self.mk("ok1"))
+
+        def teardown(proj):                   # 桩模仿真 do_down 完整终态：拆面+释放
+            sd.release_lease(proj)
+            return {"residue": []}
+        rpt = sd.sweep_stages(worktree_roots=self.worktree, do_down_fn=teardown)
+        self.assertIn("res1", [c["project"] for c in rpt["condemned"]])
+        self.assertNotIn("ok1", [c["project"] for c in rpt["condemned"]])
+        self.assertNotIn("ok1", [e["project"] for e in rpt["errors"]])
+        self.assertFalse(sd.lease_path("res1").exists(), "判拆项租约一并释放")
+        self.assertTrue(sd.lease_path("ok1").exists(), "保留/报告项租约原封不动")
+        # dry_run：判拆但不落任何动作
+        sd.write_lease("res2", self.mk("res2",
+                                       owner=os.path.join(self.root, "never-was")))
+        rpt2 = sd.sweep_stages(dry_run=True, worktree_roots=self.worktree,
+                               do_down_fn=teardown)
+        hit = [c for c in rpt2["condemned"] if c["project"] == "res2"]
+        self.assertTrue(hit and hit[0].get("dry_run"))
+        self.assertTrue(sd.lease_path("res2").exists(), "dry-run 不拆不释放")
+
+    def test_working_dir_probe_upgrades_legacy(self):
+        """旧格式租约（无 owner_root，repo_dir 回落到存在的 tmp 树）+ working_dir
+        探针：真工作目录已删 → crit_i 补刀判拆（260912 存量残台主路径）；仍在 →
+        fail-closed 只报告。"""
+        d = os.path.join(self.root, "tmp-tree"); os.makedirs(d)
+        legacy = self.mk("legacy", anchorless=True)
+        legacy["repo_dir"] = d
+        sd.write_lease("legacy", legacy)
+        noop = lambda proj: {"residue": []}  # noqa: E731
+        dead_lane = os.path.join(self.root, "dead-lane")
+        rpt = sd.sweep_stages(owner_probe=lambda p: dead_lane,
+                              worktree_roots=self.worktree, do_down_fn=noop)
+        hit = [c for c in rpt["condemned"] if c["project"] == "legacy"]
+        self.assertTrue(hit and "crit_i" in hit[0]["why"], rpt)
+        alive_lane = os.path.join(self.root, "alive-lane"); os.makedirs(alive_lane)
+        sd.write_lease("legacy2", dict(legacy, project="legacy2"))
+        rpt2 = sd.sweep_stages(owner_probe=lambda p: alive_lane,
+                               worktree_roots=self.worktree, do_down_fn=noop)
+        self.assertIn("legacy2", [c["project"] for c in rpt2["report_only"]], rpt2)
+        self.assertTrue(sd.lease_path("legacy2").exists())
+
+
+class NetAllocTest(LeaseTestBase):
+    """受管网段分配（t260912-02 病灶三）：表内/随机不序列/排除在册与 daemon/
+    保留槽排除/畸形 base 拒收/表耗尽红——daemon 集经 monkeypatch 注入，零 docker。"""
+
+    def test_slots_shape_and_reserved_excluded(self):
+        slots = sd.net_table()
+        self.assertEqual(len(slots), 256)
+        self.assertTrue(all(s.startswith("10.213.") and s.endswith(".0/24") for s in slots))
+        self.assertEqual(sd.NET_BASE_DEFAULT, "10.213.0.0/16")
+        reserved = set(slots[-sd.NET_RESERVED_TAIL:])
+        self.assertEqual(reserved, {"10.213.255.0/24"})
+        orig = sd.daemon_subnets
+        sd.daemon_subnets = lambda: set()
+        try:
+            free, used_by = sd.net_free_slots()
+            self.assertNotIn("10.213.255.0/24", free, "保留槽不在可分配集")
+            self.assertIn("10.213.255.0/24", " ".join(used_by), "保留槽在占用明细里点名")
+            pick = sd.alloc_subnet("p1")
+            self.assertIn(pick, free)
+        finally:
+            sd.daemon_subnets = orig
+
+    def test_excludes_leased_and_daemon(self):
+        lease = sd.new_lease("netuser", holder_pid=os.getpid(), services=[], ttl=90)
+        lease["subnet"] = "10.213.3.0/24"
+        sd.write_lease("netuser", lease)
+        daemon = {"10.213.5.0/24", "172.17.0.0/16"}
+        orig = sd.daemon_subnets
+        sd.daemon_subnets = lambda: daemon
+        try:
+            for i in range(20):
+                pick = sd.alloc_subnet("p2")
+                self.assertNotEqual(pick, "10.213.3.0/24", "在册租约占用必被排除")
+                self.assertFalse(sd._subnet_overlap(pick, daemon),
+                                 "daemon 网段重叠必被排除（%s）" % pick)
+        finally:
+            sd.daemon_subnets = orig
+
+    def test_random_not_sequential(self):
+        """随机选槽（同批不序列、网段随台不同不可猜）：连取 8 槽不得全等于同一
+        槽（恒等概率 ~10^-17，防「分配器退化为取最小」的恒真面）。"""
+        orig = sd.daemon_subnets
+        sd.daemon_subnets = lambda: set()
+        try:
+            picks = [sd.alloc_subnet("r%d" % i) for i in range(8)]
+        finally:
+            sd.daemon_subnets = orig
+        self.assertFalse(all(p == picks[0] for p in picks),
+                         "随机面退化：8 连全同槽 %s" % picks)
+
+    def test_malformed_base_rejected(self):
+        saved = os.environ.pop("SANDBAR_STAGE_NET_BASE", None)
+        try:
+            for bad in ("nonsense", "10.213.0.0/24", "10.213/16", "999.1.1.1/16", ""):
+                os.environ["SANDBAR_STAGE_NET_BASE"] = bad
+                with self.assertRaises(sd.StageError) as ctx:
+                    sd.net_base()
+                self.assertEqual(ctx.exception.kind, "usage")
+            os.environ.pop("SANDBAR_STAGE_NET_BASE", None)
+            self.assertEqual(sd.net_base(), sd.NET_BASE_DEFAULT, "缺失=缺省（三态）")
+        finally:
+            if saved is not None:
+                os.environ["SANDBAR_STAGE_NET_BASE"] = saved
+
+    def test_subnet_overlap_semantics(self):
+        self.assertTrue(sd._subnet_overlap("10.213.3.0/24", {"10.213.0.0/16"}))
+        self.assertTrue(sd._subnet_overlap("10.213.0.0/16", {"10.213.3.0/24"}))
+        self.assertFalse(sd._subnet_overlap("10.213.3.0/24", {"10.214.3.0/24"}))
+        self.assertFalse(sd._subnet_overlap("10.213.3.0/24", {"not-a-cidr"}))
+
+    def test_exhaustion_red_names_remaining_and_occupants(self):
+        """表耗尽=诚实 env 红且点名剩余槽数+占用者清单（C8）。"""
+        orig = sd.daemon_subnets
+        sd.daemon_subnets = lambda: set()
+        leases = []
+        try:
+            slots = sd.net_table()
+            for i, s in enumerate(slots[:-sd.NET_RESERVED_TAIL]):
+                lease = sd.new_lease("full%d" % i, holder_pid=os.getpid(),
+                                     services=[], ttl=90)
+                lease["subnet"] = s
+                sd.write_lease("full%d" % i, lease)
+                leases.append("full%d" % i)
+            with self.assertRaises(sd.StageError) as ctx:
+                sd.alloc_subnet("p9")
+            self.assertEqual(ctx.exception.kind, "env")
+            self.assertIn("可分配槽 0", str(ctx.exception))
+            self.assertIn("占用明细", str(ctx.exception))
+            self.assertIn("10.213.255.0/24", str(ctx.exception))
+        finally:
+            sd.daemon_subnets = orig
+            for p in leases:
+                sd.release_lease(p)
 
 
 class HoldLegTest(LeaseTestBase):

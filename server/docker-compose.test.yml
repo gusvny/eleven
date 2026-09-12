@@ -11,9 +11,13 @@
 #   生产 dsh 控制台：3099（start-console.sh）
 #   测试 dsh 控制台：3199（本文件 dsh 服务缺省映射）
 #
-# 缺省（不带任何 SANDBAR_TEST_* env 直接 up）行为与参数化前逐字节一致：同名容器
-# （sandbar-test-*）、同端口（3199/17233/18233）、同卷、namespace sandbar-test——
-# docs/testing-guide.md 的拓扑/容器名锚零漂移。
+# 缺省（不带任何 SANDBAR_TEST_* env 直接 up）行为：同名容器（sandbar-test-*）、
+# 同端口（3199/17233/18233）、同卷、namespace sandbar-test——docs/testing-guide.md
+# 的拓扑/容器名锚零漂移。t260912-02 一处例外：default 网络显式指定子网（见文件尾
+# networks 块），缺省落受管网段表 10.213.0.0/16 的保留尾槽 10.213.255.0/24——
+# 单台手工直跑照常可用；并行/爆发起台一律走 stage_docker（每台分配互异槽位，
+# 建网不再撞 docker 分配器库存）；两个手工台同起会撞保留槽，手工并行请显式传
+# SANDBAR_TEST_SUBNET=10.213.x.0/24（x 不取保留槽）。
 #
 # 并行实例（t260904-19）：每个舞台独立 compose 工程名 + 独立端口档 + 独立容器名/卷
 # 前缀。全部分配逻辑（档位 flock 原子预留、生产/缺省台端口禁区排除、健康探针、
@@ -204,3 +208,19 @@ services:
 volumes:
   temporal-data:
   dsh-home:
+
+# ---- 受管网段（t260912-02 病灶三）：default 网络显式指定子网 ----
+# 建网不再向 docker 分配器申请库存——「all predefined address pools have been
+# fully subnetted」从根上消失（260912 实测：爆发 32 台走池 23/32，指定网段
+# 32/32 1.35s）。子网来源两级：stage_docker 每台从受管表（SANDBAR_STAGE_NET_BASE，
+# 缺省 10.213.0.0/16 切 /24）分配互异槽位并注入 SANDBAR_TEST_SUBNET（择槽即写
+# 租约占位，并发互见——C2）；手工直跑 compose 不带 env 时落保留尾槽（单台可用，
+# 并行手工台须各自显式传 SANDBAR_TEST_SUBNET）。网络随 compose down 自拆，
+# 零新增清理义务。
+networks:
+  default:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: ${SANDBAR_TEST_SUBNET:-10.213.255.0/24}

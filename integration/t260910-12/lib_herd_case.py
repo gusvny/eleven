@@ -37,6 +37,9 @@ def stage_tag(base):
 FORBIDDEN_PORTS = {3099, 3199, 7233, 8233, 17233, 18233}
 
 # docker daemon 资源类失败特征（t260905-06 归因纪律：环境缺件≠产品红）。
+# t260912-02 注：fully subnetted 一支自受管网段落地起**不再是活路径**（建网
+# 显式带子网，不走分配器库存），保留为防御性归因——手工直跑 compose/旧期
+# 残留仍可能撞池，命中照归环境红，不诬产品。
 DAEMON_ENV_PAT = re.compile(
     r"address pools have been fully subnetted"
     r"|no space left on device"

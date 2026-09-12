@@ -43,6 +43,9 @@ PASSED = FAILED = ENV_FAILED = 0
 # 耗尽/不可达属环境缺件（t260904-12 归因纪律：环境红记成产品红=假红，误导仲裁——
 # 实锤：宿主 28 条残留网络耗尽地址池，本场景双 up 被记 FAIL exit 1）。特征窄列
 # 三类，不吞任意 up 失败——产品缺陷导致的 up 失败仍走 FAIL 断言面。
+# t260912-02 注：fully subnetted 一支自受管网段落地起**不再是活路径**（起台建网
+# 显式带子网，不走分配器库存；本场景新增受管网段腿=其回归锚），保留为防御性
+# 归因（手工直跑 compose/旧期残留仍可能撞池），命中照归环境红不诬产品。
 DAEMON_ENV_PAT = re.compile(
     r"address pools have been fully subnetted"
     r"|no space left on device"
@@ -119,6 +122,14 @@ def containers_of(project):
                         "label=com.docker.compose.project=%s" % project,
                         "--format", "{{.Names}}"], capture_output=True, text=True, timeout=15)
     return sorted(x for x in (p.stdout or "").splitlines() if x.strip())
+
+
+def network_subnet(project):
+    """该工程 compose 默认网络的子网（inspect 公开观测面；不存在=None）。"""
+    p = subprocess.run(["docker", "network", "inspect", sd.NET_NAME_FMT % project,
+                        "--format", "{{(index .IPAM.Config 0).Subnet}}"],
+                       capture_output=True, text=True, timeout=15)
+    return (p.stdout or "").strip() if p.returncode == 0 else None
 
 
 def main():
@@ -200,6 +211,18 @@ def main():
                     print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (PASSED, FAILED, ENV_FAILED))
                     sys.exit(2)
                 check(False, "full 台起台（rc=%s %s）" % (pf_out.returncode, pf_out.stderr.strip()[-160:]))
+
+            # 受管网段腿（t260912-02，验收 B 的常跑回归网）：每台网络的子网必来自
+            # 受管网段表——建网不再走 docker 分配器库存，「fully subnetted」病灶
+            # （260912 实测 32 台走池 23/32）的回归锚落常跑套件，不只活在票内脚本。
+            managed = set(sd.net_table())
+            pf_state = (json.loads(pf_out.stdout.strip().splitlines()[-1])
+                        if pf_out.returncode == 0 else None)
+            for st in [s for s in (a, b, pf_state) if s]:
+                sub = network_subnet(st["project"])
+                check(sub in managed,
+                      "%s 网络子网 ∈ 受管网段表（%s；表 %d 槽）"
+                      % (st["project"], sub, len(managed)))
 
             # 拆 A：A 端口立即可 bind、B 台仍活（爆炸半径恰一个工程）
             d = cli_down(a["project"])

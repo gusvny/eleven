@@ -80,6 +80,13 @@ ok("FAIL [__executor__]" in out and "池级异常" in out,
    "A2 异常点名 FAIL [__executor__]（可见非无痕）", out[-300:])
 
 # ---------------- B 层：spawn OSError 按协议分类落红 ----------------
+# 注入点必须钉在**条目 spawn 调用点**（`/bin/sh -c <条命令>`），不能是「首个
+# subprocess.run」：起跑前已有两处 preflight 会先调用（t260910-14 `_docker_hygiene`
+# 静默吞异常；t260912-02 `_sweep_residue_stages` 响亮留痕不中止），首个调用被它们
+# 吃掉后异常根本到不了 _run_entry，本层就退化成恒绿空转（260913 首轮套件实测
+# B1 rc=0/B2 缺原文；基线 6054e58 已有 hygiene，属存量退位非本票引入）。按调用点
+# 注入后，断言强度不变：entry spawn 的 OSError 仍须分类 not-checked×external、rc=2、
+# evidence 点名原文、条目不丢——正是本条 intent 写的「在 _run_entry 内」。
 rs = load_rs()
 rs.SCENARIOS = [STUB_OK, STUB2_OK]
 _real_subprocess_run = rs.subprocess.run
@@ -87,15 +94,20 @@ _calls2 = {"n": 0}
 
 
 def _oserror_run(*a, **kw):
-    _calls2["n"] += 1
-    if _calls2["n"] == 1:
-        raise OSError("spawn 失败面：资源暂时不可用")
+    argv = a[0] if a else kw.get("args")
+    is_entry_spawn = (isinstance(argv, (list, tuple)) and len(argv) >= 2
+                      and argv[0] == "/bin/sh" and argv[1] == "-c")
+    if is_entry_spawn:
+        _calls2["n"] += 1
+        if _calls2["n"] == 1:
+            raise OSError("spawn 失败面：资源暂时不可用")
     return _real_subprocess_run(*a, **kw)
 
 
 rs.subprocess.run = _oserror_run
 code, out = run_main(rs)
 rs.subprocess.run = _real_subprocess_run
+ok(_calls2["n"] >= 1, "B0 注入点命中条目 spawn 调用点（实得 %d 次）" % _calls2["n"])
 ok(code == 2, "B1 spawn OSError → not-checked 落红（rc=2 环境红，条目不丢）",
    "rc=%r" % code)
 ok("spawn 失败面" in out and '"cause": "external"' in out.replace("'", '"'),

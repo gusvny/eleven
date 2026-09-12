@@ -41,6 +41,9 @@ PROD_PORTS = {3099, 7233, 8233}
 # daemon 资源类失败特征（t260905-06 仲裁 tests-fault 迭代）：docker daemon 侧资源
 # 耗尽/不可达属环境缺件（t260904-12 归因纪律：环境红记成产品红=假红——实锤：宿主
 # 残留网络耗尽地址池，本场景起台腿被记 FAIL exit 1）。特征窄列三类，不吞任意失败。
+# t260912-02 注：fully subnetted 一支自受管网段落地起不再是活路径（建网显式带
+# 子网，回归锚在 sc_stage_docker_parallel_zero_residue 的受管网段腿），保留为
+# 防御性归因（手工直跑/旧期残留仍可能撞池），命中照归环境红。
 DAEMON_ENV_PAT = re.compile(
     r"address pools have been fully subnetted"
     r"|no space left on device"
