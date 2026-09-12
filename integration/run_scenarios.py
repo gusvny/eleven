@@ -254,6 +254,19 @@ SCENARIOS = [
      "双闸兼容面（t260911-03 验收 d+R1②闭环，灰盒 L3）：老调用形状（不传闸参数=存量序列化缺字段形态）走查段改产品代码照常落盘——老在途票按 patch 门保护不追溯、行为零变化（该腿现状即绿，兼当本套 fixture 机械证明）；显式 path_gate=False 同放行（开关语义）；path_gate=True 未知段 brand_new_stage→拒+path_gate_reason=unknown_stage+出路文案（补配规则/人审放行），新段忘配规则被堵出来而非自动免检（review_plan R1② fail-closed 裁决的链路级回归）",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260911-03/tests/sc_pathgate_legacy_compat.py", "ro"),
 
+    # ---- t260912-03 人授权例外通道（受保护路径 + 仲裁上限；唯一入口=既有 sign 面）----
+    # 260912 双实证回归：受保护路径闸无「人审放行」入口（t260912-01 停 implement/blocked）、
+    # 仲裁超限后的人裁定无回灌通道（t260911-05 两轮 blocked）。实现段落地前红属预期，arbitrate/merge 期必须绿。
+    ("t260912-03-authz-protected-path",
+     "受保护路径的人授权通道（t260912-03 验收 A/C/D 受保护腿，灰盒 L3）：无授权改 integration/baselines/* → 照旧拒（path_gate_reason=protected_path+点名+0 commit+脏改动保留）；持覆盖该路径、未过期的授权 → 同一改动落盘成功且回执点名授权人/签发时间/路径/理由；负锁=scope 不匹配、空 scope、精确路径对照腿一律照旧红；信号面 intake（真 handler，零 Temporal）负锁=过期授权不生效、who 为 agent 角色名（五角色全域+大小写/空白归一+-agent 家族）拒收、arbitration_verdict 别票票号拒收、不带 authorize 的 merge 签字语义不变、who/reason/scope 超上限与非法路径拒收。与 t260911-03-protected-settle-reject 同台架不同 intent（彼锁无授权面的 settle 执法终态，本条锁「有授权＝真落地+记名点名」与授权负锁）；与 developer L1（judge 纯函数/载荷矩阵/_within 相邻串）不同层不重复",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260912-03/tests/sc_authz_protected_path.py", "ro"),
+    ("t260912-03-authz-overlimit-accept",
+     "仲裁上限的人授权回灌（t260912-03 验收 B/C/D 仲裁腿，灰盒 L3，真 docker 台+桩脑，单票单 worker 单舞台）：修复启用的 worker（非 SANDBAR_TEST_DISABLE_KI061=1——授权消费点=唤醒后新一轮 route 判定，需真 respawn 才可达；与 lib_ki061.drive_to_overlimit_blocked 的 DISABLE=1 驱动不兼容，本场景自建同形驱动）＋恒 tests-fault 桩驱动 6 轮超限→相一无授权仍 blocked（零回归，meta 无授权条目、uses 零）；相二经真 CLI 入口（client.py op=authorize→Signature.authorize→sign 信号面）投已过期授权→落 snapshot.refused（文案含「已过期」）、meta 不入条目、uses 全零，retry_qc 唤醒后仲裁真重跑仍 blocked（未被放行、历史无授权放行记录）；相三投未过期「接受本判决」授权（kind=arbitration_verdict、scope=[本票票号]）→meta 落条目（who/scope/reason/expires，issued 由 workflow.now() 盖写）→retry_qc 后票离开超限 blocked 推进 acceptance_walkthrough 或更后，handoff 可读「经人授权接受判决」+判决原文关键词（「测试集迭代」「超限」）+授权人，且该条目 uses≥1（消费留痕）；审计账本空+拆台零残留（后续 merge_check 段桩票转 blocked 属合法终态不判）。与 t260908-01-ki061-wake-revive 同台架不同 intent：彼两条锁「超限 blocked 的复活与重放兼容」（host_ruling 改判+retry_qc 唤醒的 arbitrate respawn＝KI-061 修复面），本条锁「人授权接受判决→超限不阻断」新通道及其无授权/过期负锁，不互替；与本票 sc_authz_protected_path 同票不同面；与 developer L1/L2（纯函数矩阵/四 handler 卫兵/归一）不同层不重复。docker/镜像/舞台缺件=ENV_FAIL exit 2 点名",
+     "python3 integration/t260912-03/tests/sc_authz_overlimit_accept.py", "engine"),
+    ("t260912-03-authz-cli-queryable",
+     "人授权可查面（t260912-03 验收 C，灰盒 L3，真 docker 台+真用户 CLI）：走 server/tools/ticket.py 的 op=authorize/op=show/op=list 三个用户入口（不是引擎内部 snapshot、不是裸 client.py）——生效授权须在 show 读出类型/范围/授权人/到期/状态（生效中）/消费次数，并有签发事件（timeline state=authorized 点名 who+scope），工单列表行给出生效中计数 authz_active=1；负锁=过期授权经 sign 面送达（回执 ok）但 workflow 落 refused「已过期」且可查面条目数与计数不增（死授权不进历史面）、who=agent 角色名（反自签）同样拒收且可查面零变化；审计账本空+拆台零残留。与另两条同票场景不同 intent：彼二锁闸的行为（无授权红/有授权绿/超限不阻断，读引擎 snapshot meta），本条锁用户查询管道（CLI→client.py ticket-query/ticket-list→Temporal query→meta，KI-076 同族断点面）；与 developer L1（_authz_view/_list 合成 snapshot 格式化）不同层不重复",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260912-03/tests/sc_authz_cli_queryable.py", "engine"),
+
 
     ("auto-rework-trace",
      "---- A1: 五个自动打回场景，各产一条横幅可见记录（用户视角主契约） ---- scenarios = [ ('acceptance', 'implement', '验收",

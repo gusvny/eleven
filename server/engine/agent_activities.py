@@ -62,6 +62,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from temporalio import activity
+import authz_gates
 import failure_protocol
 import path_gates
 import shared
@@ -882,12 +883,14 @@ def _path_exists_at_ref(repo: Path, ref: str, path: str) -> bool:
 def _settle_with_gate(args: AgentStageArgs, cwd: Path) -> str:
     """通用 agent 段的带闸 settle（t260911-03）：把 AgentStageArgs 里的闸参数传给
     _settle_worktree_lane——单一拼装点，generic 段/缓存命中分支/arbitrate 系共用，
-    两侧不可能漂移。"""
+    两侧不可能漂移。t260912-03：人授权结构化记录（已由 workflow 侧按票+时效过滤）
+    一并下传，受保护闸据此做豁免摘除。"""
     return _settle_worktree_lane(
         cwd, args.ticket_id, args.stage_id, args.gen,
         write_set=list(args.write_set or []),
         path_gate=bool(args.path_gate),
-        base_ref=str(args.base_ref or ""))
+        base_ref=str(args.base_ref or ""),
+        authorizations=list(getattr(args, "authorizations", None) or []))
 
 
 def _apply_settle_note(res: StageResult, note: str) -> StageResult:
@@ -905,7 +908,8 @@ def _apply_settle_note(res: StageResult, note: str) -> StageResult:
 
 def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
                           repo: Optional[Path] = None, write_set: Optional[List[str]] = None,
-                          path_gate: bool = False, base_ref: str = "") -> str:
+                          path_gate: bool = False, base_ref: str = "",
+                          authorizations: Optional[List[Dict[str, Any]]] = None) -> str:
     """Settle a worktree lane on the agent's behalf (deterministic, never trusting
     the agent to behave): called once the agent has delivered its result file.
 
@@ -992,16 +996,27 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
         allowed, violations, reason = path_gates.judge_stage_paths(
             stage_id, dirty, write_set=write_set, ticket_id=ticket_id)
         # 闸②：受保护路径（真源与期望值，「存在才拦」，锚=泳道分叉点 base_ref）
+        # t260912-03：定性仍走 judge_protected_paths 单点（判定严格先于任何 git add），
+        # 随后按本票生效中的人授权做「豁免摘除」——无授权/不匹配时 violations 与
+        # 旧版逐字节相同（零回归面）。豁免命中＝记名点名 + 机读键（谁批/何时/批哪条）。
+        passed: List[Dict[str, Any]] = []
         if allowed:
             anchor = repo if repo is not None else _lane_repo_root(cwd)
             pv, preason = path_gates.judge_protected_paths(
                 dirty, exists_at_base=lambda path: _path_exists_at_ref(anchor, base_ref, path))
+            pv, passed = authz_gates.exempt_authorized(
+                pv, authorizations=list(authorizations or []))
             if pv:
                 allowed, violations, reason = False, pv, preason
         if not allowed:
             note = path_gates.gate_refusal_note(stage_id, violations, reason)
             activity.logger.warning("[%s/%s] settle：%s", ticket_id, stage_id, note)
             return note
+        if passed:
+            # 记名点名 + 机读键（谁批、何时、批的哪条路径）——进回执/时间线，审计可回溯
+            authz_note = authz_gates.authorized_passage_note(passed)
+            notes.append(authz_note)
+            activity.logger.info("[%s/%s] settle：%s", ticket_id, stage_id, authz_note)
     if dirty:
         # Observed on Apple Git 2.50: an exclusion pathspec (:!.dsh) does not stop
         # the "explicitly named ignored directory" error (rc=1 even on a clean repo,
@@ -1975,7 +1990,8 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                         sc["tree"], args.ticket_id, "merge_check", 0,
                         write_set=list(sc.get("write_set") or []),
                         path_gate=bool(getattr(args, "path_gate", False)),
-                        base_ref=str(sc.get("base_ref") or getattr(args, "base_ref", "") or ""))
+                        base_ref=str(sc.get("base_ref") or getattr(args, "base_ref", "") or ""),
+                        authorizations=list(getattr(args, "authorizations", None) or []))
                     auto_settle_note = "[auto-settle] %s" % (note or "settle 返回空（见后续复查）")
                 except Exception as e:
                     auto_settle_note = ("[auto-settle] settle 异常（转红不抛）: %s: %s"
@@ -3641,7 +3657,8 @@ async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
                                         args.gen, repo=sc["repo"],
                                         write_set=list(sc.get("write_set") or []),
                                         path_gate=bool(args.path_gate),
-                                        base_ref=str(sc.get("base_ref") or args.base_ref or ""))
+                                        base_ref=str(sc.get("base_ref") or args.base_ref or ""),
+                                        authorizations=list(getattr(args, "authorizations", None) or []))
         # t260911-03：闸拒绝随 error 上抛给 workflow（join 点点名段/文件转 blocked，
         # 不静默吞成一条 note——否则违规改动不落盘、0-commit 预检只会给一句含糊红）。
         if path_gates.is_gate_refusal(sc_note):

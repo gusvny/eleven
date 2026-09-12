@@ -43,6 +43,7 @@ from temporalio.client import Client
 from temporalio.common import SearchAttributeKey
 
 from shared import (
+    AUTH_KINDS,
     DISPATCHER_WF_ID,
     ENGINE_V2,
     EPIC_CODE_RE,
@@ -53,6 +54,7 @@ from shared import (
     TASK_QUEUE,
     TICKET_QUEUE_PREFIX,
     HostRulingRequest,
+    HumanAuthorization,
     PauseRequest,
     ReworkRequest,
     Signature,
@@ -382,6 +384,21 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
         return _ok({"ticket_id": tid, "signal": "sign", "gate": sig.gate,
                     "decision": sig.decision, "who": sig.who, "delivered": True})
 
+    if op == "authorize":
+        # t260912-03：人授权例外通道（受保护路径 / 仲裁上限）——**唯一入口＝sign 信号面**
+        # （Signature.authorize 载荷；此处不新开信号，与签字同源同审计面）。本侧只做
+        # payload 归一（expires 收 ISO8601|epoch 秒两形）+ 结构性拒收（畸形=结构化 _err，
+        # 不进事件历史）；who/scope/reason/上限与反自签的权威判定在 workflow intake
+        # （authz_gates.validate_authorization，refused 可观测）。
+        auth, aerr = normalize_authorize_args(args)
+        if auth is None:
+            return _err(aerr)
+        sig = Signature(who=auth.who, gate="", decision="approve", authorize=auth)
+        await handle.signal("sign", sig)  # 同一 sign 信号面（不得新开旁路）
+        return _ok({"ticket_id": tid, "signal": "sign(authorize)", "kind": auth.kind,
+                    "who": auth.who, "scope": list(auth.scope),
+                    "expires": auth.expires, "delivered": True})
+
     if op == "rework":
         # v2: rework = a signal (re-run from the target stage)
         note = str(args.get("note") or "")
@@ -452,8 +469,8 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
         return _ok(r)
 
     return _err("未知工单操作 %r（可用：rework=打回 / ruling=宿主裁决注入 / "
-                "retry_qc=blocked 重跑 / pause|resume=段间暂停·恢复 / update=更新 / "
-                "sign=签字 / query=查询）" % op)
+                "authorize=人授权签发（sign 信号面） / retry_qc=blocked 重跑 / "
+                "pause|resume=段间暂停·恢复 / update=更新 / sign=签字 / query=查询）" % op)
 
 
 # ---------- M11 v2: ticket-start / ticket-list / ticket-query ----------
@@ -652,8 +669,58 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
     })
 
 
+def normalize_authorize_args(args: Dict[str, Any]):
+    """authorize 载荷归一（纯函数，单测直调）：返回 (HumanAuthorization|None, error)。
+
+    - 两形兼容：input 包装（node.ts/集成场景先例同 sign）与顶层直给；
+    - expires 收 epoch 秒（int/数字串）或 ISO8601（含 Z 尾），畸形=结构化错误；
+    - scope 收数组或逗号分隔串；kind/scope/expires/who 的结构性拒收在此（人话错误），
+      who/scope/reason 的上限与反自签权威判定在 workflow intake（authz_gates）。
+    """
+    raw = args.get("input")
+    if not isinstance(raw, dict) or not raw:
+        raw = args          # input 包装与顶层直给两形（空 dict 视同未包装）
+    kind = str(raw.get("kind") or "")
+    if kind not in AUTH_KINDS:
+        return (None, "authorize 需要 kind ∈ %s（收到 %r）" % ("|".join(AUTH_KINDS), kind))
+    scope = raw.get("scope")
+    if isinstance(scope, str):
+        scope = [s for s in scope.split(",") if s.strip()]
+    if not isinstance(scope, list) or not scope:
+        return (None, "authorize 需要非空 scope（数组，或逗号分隔串）：路径/目录前缀 "
+                      "（protected_path）或本票票号（arbitration_verdict）")
+    exp_raw = raw.get("expires")
+    exp = exp_raw if isinstance(exp_raw, int) else None
+    if exp is None:
+        s_exp = str(exp_raw or "").strip()
+        try:
+            exp = int(s_exp)
+        except ValueError:
+            try:
+                from datetime import datetime as _dt
+                exp = int(_dt.fromisoformat(s_exp.replace("Z", "+00:00")).timestamp())
+            except (ValueError, OverflowError, OSError):
+                return (None, "authorize 的 expires 非法：%r（收 epoch 秒或 ISO8601）"
+                              % (exp_raw,))
+    if exp is None or exp <= 0:
+        return (None, "authorize 需要 expires（epoch 秒或 ISO8601，必填——授权必须到期作废）")
+    who = str(raw.get("who") or "")
+    if not who.strip():
+        return (None, "authorize 需要 who（授权人身份由调用方注入，不得留空）")
+    return (HumanAuthorization(kind=kind, who=who, scope=[str(s).strip() for s in scope],
+                               reason=str(raw.get("reason") or ""), expires=int(exp)), "")
+
+
 def _row_from_meta(tid: str, meta: Dict[str, Any], exec_status: str) -> Dict[str, Any]:
     import time as _t
+    # t260912-03：生效中的人授权计数（列表可读面）。口径＝meta['authorizations'] 里
+    # kind 合法且 expires>now 的条数；读侧是 CLI 进程（非 workflow 代码），墙钟可用
+    # （工单留痕口径：issued/expires 一律 epoch 秒，比较点=读取时刻）。
+    _now = int(_t.time())
+    _authz = [a for a in (meta.get("authorizations") or [])
+              if isinstance(a, dict)
+              and str(a.get("kind") or "") in ("protected_path", "arbitration_verdict")
+              and int(a.get("expires") or 0) > _now]
     return {
         "id": tid,
         "project": meta.get("project") or "",
@@ -676,6 +743,9 @@ def _row_from_meta(tid: str, meta: Dict[str, Any], exec_status: str) -> Dict[str
         "updated_ts": meta.get("updated"),
         "engine": ENGINE_V2,
         "exec_status": exec_status,
+        # t260912-03：本票生效中的人授权（类型/范围/授权人/到期在 ticket show 的
+        # meta.authorizations 全量可读；列表行只给计数徽标数据源）
+        "authz_active": len(_authz),
     }
 
 
@@ -944,7 +1014,8 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                          "handoff_count": 0, "pending_count": 0, "worktree": "",
                          "workspace": None, "created": None, "updated": "", "updated_ts": 0,
                          "close_ts": e["close_ts"],
-                         "engine": ENGINE_V2, "exec_status": exec_status})
+                         "engine": ENGINE_V2, "exec_status": exec_status,
+                         "authz_active": 0})  # t260912-03 降级/极简行同形（无快照=无授权面可读）
         elif meta:
             meta.setdefault("project", sa_project)
             # epic takes the EpicCode SA as truth (SA first) with meta as fallback (the
@@ -963,7 +1034,8 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                          "handoff_count": 0, "pending_count": 0, "worktree": "",
                          "workspace": None, "created": None, "updated": "", "updated_ts": 0,
                          "close_ts": e["close_ts"],
-                         "engine": ENGINE_V2, "exec_status": exec_status})
+                         "engine": ENGINE_V2, "exec_status": exec_status,
+                         "authz_active": 0})  # t260912-03 降级/极简行同形（无快照=无授权面可读）
     rows.sort(key=lambda r: -(r.get("created") or 0))
     return _ok({"count": len(rows), "tickets": rows})
 
@@ -1218,7 +1290,9 @@ USAGE = (
     "signal 子命令已退役（260904 宿主令）：调用一律返回结构化退役报错（sign/retry_qc\n"
     "  只服务 v1 content-pipeline 人门段，该模板已删）；签字走 ticket op=sign，\n"
     "  blocked 重跑走 ticket op=retry_qc（t260910-06 正规通道）。\n"
-    "ticket 子命令（步2）：op=rework|ruling|retry_qc|pause|resume|update|sign|query。\n"
+    "ticket 子命令（步2）：op=rework|ruling|authorize|retry_qc|pause|resume|update|sign|query。\n"
+    "  authorize=人授权签发（t260912-03：受保护路径/仲裁上限的放行钥匙，唯一入口＝\n"
+    "  sign 信号面；kind/who/scope/reason/expires 由调用方注入，agent 不得自签）。\n"
     "  v2 引擎（M11 模版即代码）：advance/accept/dispatch-next 已取消（自动推进），\n"
     "  rework=signal 回目标段重跑，ruling=宿主裁决注入（人工意见正规通道，任何状态\n"
     "  可发，blocked 态注入后配 retry_qc 重跑下段即见），sign=人工审批签字，\n"

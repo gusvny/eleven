@@ -152,6 +152,15 @@ class ContentPipelineWorkflow:
 
     @workflow.signal
     def sign(self, sig: Signature) -> None:
+        # t260912-03：带 authorize 的人授权载荷只认 dev_lane 的 sign 面；本模板
+        # （content-pipeline 人门族）无授权面——显式拒收（不得被当作普通人门签字
+        # 按 decision=approve 放行）。
+        if getattr(sig, "authorize", None) is not None:
+            self.refused_attempts.append(
+                {"who": sig.who, "want": "sign(authorize)",
+                 "why": "本模板无人授权面，authorize 载荷拒收（不落签字）"})
+            workflow.logger.warn("拒绝 authorize 载荷：本模板无人授权面")
+            return
         if sig.gate not in HUMAN_GATES:
             self.refused_attempts.append(
                 {"who": sig.who, "want": f"sign({sig.gate})", "why": "非人门，签字无效"})

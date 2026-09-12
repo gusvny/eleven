@@ -43,6 +43,7 @@ from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from base import TicketPauseMixin
+    import authz_gates
     from agent_activities import (
         arbitrate,
         acceptance_walkthrough,
@@ -71,6 +72,8 @@ with workflow.unsafe.imports_passed_through():
         MAX_REVIEW_ROUNDS,
         MAX_TESTS_FAULT_ROUNDS,
         TICKET_STATUSES,
+        AUTH_ARBITRATION_VERDICT,
+        AUTH_PROTECTED_PATH,
         AgentStageArgs,
         ConflictPrepArgs,
         ConflictPrepResult,
@@ -103,7 +106,9 @@ with workflow.unsafe.imports_passed_through():
         UiEvidenceResult,
         WorkspacePrepResult,
         UI_EVIDENCE_DIR,
+        active_authorizations,
         agent_log_for,
+        arbitration_cap_route,
         build_stage_prompt,
         build_workspace_prep,
         integration_route,
@@ -111,6 +116,7 @@ with workflow.unsafe.imports_passed_through():
         lane_workspace_gate_error,
         normalize_files_changed,
         parse_arbitration_summary,
+        parse_authz_used,
         parse_review_plan_verdict,
         refresh_write_set,
         review_gate_verdict,
@@ -753,7 +759,10 @@ class DevLaneWorkflow(TicketPauseMixin):
             # path_gate 随派单输入钉死（老在途票 meta 无此键=False，不追溯）
             write_set=list(self.meta.get("write_set") or []),
             base_ref=str(self.meta.get("base_ref") or ""),
-            path_gate=bool(self.meta.get("path_gate")))
+            path_gate=bool(self.meta.get("path_gate")),
+            # t260912-03：生效中的受保护授权结构化记录（who/issued/reason/scope 逐条
+            # 下传，activity 据此豁免+记名点名；时效判定只在此处用 workflow.now()）
+            authorizations=self._protected_authz_records())
         raw = await workflow.execute_activity(
             step_id, args,
             start_to_close_timeout=AGENT_TO, heartbeat_timeout=HEARTBEAT_TO,
@@ -779,6 +788,9 @@ class DevLaneWorkflow(TicketPauseMixin):
             "files_changed": list(res.files_changed),
             "files_changed_shape": res.files_changed_shape,
             "evidence": res.evidence, "gen": gen}
+        # t260912-03：回执里的 path_gate_authz_used= 机读键 → 授权消费留痕（只在真
+        # 豁免时键在场；无键不记——防「用过」被恒真伪造）
+        self._record_authz_uses(res.evidence, step_id)
         # KI-003: yield point inside the stage-transition mutation burst — yields the
         # event loop between the results bookkeeping and the following
         # _finish/_handoff/refresh_write_set mutation cluster, so a queued snapshot
@@ -1235,12 +1247,15 @@ class DevLaneWorkflow(TicketPauseMixin):
                                    stage_id="implement", gen=impl_rounds,
                                    write_set=list(self.meta.get("write_set") or []),
                                    base_ref=str(self.meta.get("base_ref") or ""),
-                                   path_gate=bool(self.meta.get("path_gate"))),
+                                   path_gate=bool(self.meta.get("path_gate")),
+                                   authorizations=self._protected_authz_records()),
                     start_to_close_timeout=SHORT, retry_policy=RETRY)
                 s = sraw if isinstance(sraw, SettleLaneResult) else SettleLaneResult(
                     note=str(sraw.get("note") or ""),
                     lane_commits=int(sraw.get("lane_commits") or -1),
                     error=str(sraw.get("error") or ""))
+                # t260912-03：join 点落盘的授权消费留痕（机读键在场才记）
+                self._record_authz_uses(s.note, "integ_join")
                 # t260911-03：路径闸拒绝（error 带 path_gate_reason=）→ blocked 点名
                 # 段/文件与合法出路——不静默吞成一条日志（0-commit 预检的红不含闸细节）。
                 if s.error and "path_gate_reason=" in s.error:
@@ -1494,12 +1509,40 @@ class DevLaneWorkflow(TicketPauseMixin):
                                "verdict=pass / verdict=tests-fault / verdict=code-fault，并重判。")
                     continue
                 arb_ctx = ""
-                route = integration_route(verdict, tests_rounds, code_rounds)
+                arb_authz = self._arbitration_authz()
+                route = arbitration_cap_route(verdict, tests_rounds, code_rounds,
+                                              arb_authz is not None)
                 if verdict == "pass":
                     self._finish("arbitrate", by="integration-agent",
                                  evidence=res.evidence or res.summary)
                     self._handoff("arbitrate", "仲裁通过：" + (res.summary or ""),
                                   artifacts=res.deliverables, report=res.report)
+                    phase = "acceptance"
+                    continue
+                if arb_authz is not None and route == "acceptance":
+                    # t260912-03：超限 + 本票生效中的「接受本判决」授权 → 不阻断，
+                    # 按授权语义推进 acceptance_walkthrough（判决原文+授权一并进历史）。
+                    # C2：与 verdict=pass 分支同形（_finish 落 arbitrate 终态 + _handoff）。
+                    # 判决原文取「原因文案」本体（split 掉 route 的内部 blocked: 前缀）——
+                    # 人读文案里不得漏进路由内部标记。
+                    cap_reason = integration_route(verdict, tests_rounds, code_rounds) \
+                        .split(":", 1)[-1]
+                    self._append_authz_use(
+                        arb_authz, "arbitrate",
+                        "接受仲裁判决：verdict=%s（%s）→ acceptance_walkthrough"
+                        % (verdict, cap_reason))
+                    self._finish("arbitrate", by="integration-agent",
+                                 evidence=res.evidence or res.summary)
+                    self._handoff(
+                        "arbitrate",
+                        "仲裁超限经人授权接受判决 → acceptance_walkthrough：verdict=%s，%s"
+                        "（授权人 %s，签发 %s，到期 %s，理由 %s）"
+                        % (verdict, cap_reason,
+                           arb_authz.get("who"), arb_authz.get("issued"),
+                           arb_authz.get("expires"), arb_authz.get("reason")),
+                        report=res.report)
+                    self._log("仲裁超限经人授权接受判决（%s）→ acceptance_walkthrough"
+                              % arb_authz.get("who"))
                     phase = "acceptance"
                     continue
                 if route.startswith("blocked:"):
@@ -1601,12 +1644,15 @@ class DevLaneWorkflow(TicketPauseMixin):
                                        stage_id="arbitrate", gen=tests_rounds,
                                        write_set=list(self.meta.get("write_set") or []),
                                        base_ref=str(self.meta.get("base_ref") or ""),
-                                       path_gate=bool(self.meta.get("path_gate"))),
+                                       path_gate=bool(self.meta.get("path_gate")),
+                                       authorizations=self._protected_authz_records()),
                         start_to_close_timeout=SHORT, retry_policy=RETRY)
                     s = sraw if isinstance(sraw, SettleLaneResult) else SettleLaneResult(
                         note=str(sraw.get("note") or ""),
                         lane_commits=int(sraw.get("lane_commits") or -1),
                         error=str(sraw.get("error") or ""))
+                    # t260912-03：仲裁段落盘的授权消费留痕（机读键在场才记）
+                    self._record_authz_uses(s.note, "arbitrate")
                     # t260911-03：路径闸拒绝（越权改动不落盘）→ blocked 点名，不进
                     # 「不拦主链」的日志通道——套件改动没 commit 就重跑机械测试是
                     # 假红制造机，必须停在闸上等处置。
@@ -1656,12 +1702,37 @@ class DevLaneWorkflow(TicketPauseMixin):
                     if not verdict:
                         continue  # count the format correction on the next loop (re-judged at the outer branch entry)
                 arb_ctx = ""
-                route = integration_route(verdict, tests_rounds, code_rounds)
-                if verdict == "pass":
+                arb_authz = self._arbitration_authz()
+                route = arbitration_cap_route(verdict, tests_rounds, code_rounds,
+                                              arb_authz is not None)
+                # t260912-03：超限 + 本票生效中的「接受本判决」授权 → 与 verdict=pass
+                # 同形推进（_finish 落 arbitrate 终态 + _handoff 记判决原文与授权），
+                # 并复用 pass 的在飞走查结果消费路径（C2）。
+                authz_advance = bool(verdict != "pass" and arb_authz is not None
+                                     and route == "acceptance")
+                if verdict == "pass" or authz_advance:
+                    if authz_advance:
+                        reason_txt = integration_route(verdict, tests_rounds,
+                                                       code_rounds).split(":", 1)[-1]
+                        self._append_authz_use(
+                            arb_authz, "arbitrate",
+                            "接受仲裁判决：verdict=%s（%s）→ acceptance_walkthrough"
+                            % (verdict, reason_txt))
+                        arb_note = (
+                            "仲裁超限经人授权接受判决 → acceptance_walkthrough：verdict=%s，%s"
+                            "（授权人 %s，签发 %s，到期 %s，理由 %s）"
+                            % (verdict, reason_txt, arb_authz.get("who"),
+                               arb_authz.get("issued"), arb_authz.get("expires"),
+                               arb_authz.get("reason")))
+                    else:
+                        arb_note = "仲裁通过：" + (arb_res.summary or "")
                     self._finish("arbitrate", by="integration-agent",
                                  evidence=arb_res.evidence or arb_res.summary)
-                    self._handoff("arbitrate", "仲裁通过：" + (arb_res.summary or ""),
+                    self._handoff("arbitrate", arb_note,
                                   artifacts=arb_res.deliverables, report=arb_res.report)
+                    if authz_advance:
+                        self._log("仲裁超限经人授权接受判决（%s）→ acceptance_walkthrough"
+                                  % arb_authz.get("who"))
                     # Consume the parallel walkthrough result (valid only on
                     # verdict=pass; non-pass is discarded below)
                     if acc_res is not None and acc_res.status == "ok":
@@ -1781,7 +1852,8 @@ class DevLaneWorkflow(TicketPauseMixin):
                                    branch=str(self.meta.get("branch") or ""),
                                    base_ref=str(self.meta.get("base_ref") or ""),
                                    write_set=list(self.meta.get("write_set") or []),
-                                   path_gate=bool(self.meta.get("path_gate"))),
+                                   path_gate=bool(self.meta.get("path_gate")),
+                                   authorizations=self._protected_authz_records()),
                     start_to_close_timeout=MERGE_CHECK_TO, retry_policy=RETRY)
                 mc = raw if isinstance(raw, MergeCheckResult) else MergeCheckResult(
                     green=bool(raw.get("green")), checks=list(raw.get("checks") or []),
@@ -1789,6 +1861,9 @@ class DevLaneWorkflow(TicketPauseMixin):
                     conflict=bool(raw.get("conflict")),
                     conflict_files=[str(x) for x in (raw.get("conflict_files") or [])],
                     merge_tree_excerpt=str(raw.get("merge_tree_excerpt") or ""))
+                # t260912-03：merge_check 自愈 settle 的授权消费留痕（键在场才记）
+                self._record_authz_uses(
+                    "；".join(str(c.get("detail") or "") for c in mc.checks), "merge_check")
                 self.gate_runs.append({
                     "stage": "merge_check", "label": "merge_check（程序化检查）",
                     "green": mc.green,
@@ -2064,7 +2139,15 @@ class DevLaneWorkflow(TicketPauseMixin):
     # ---------- signals: human-gate signature / rework / retry_qc ----------
     @workflow.signal
     def sign(self, sig: Signature) -> None:
-        """Human-gate signature (dev-lane has exactly one human gate, merge)."""
+        """Human-gate signature (dev-lane has exactly one human gate, merge).
+
+        t260912-03：本信号面也是**人授权例外通道的唯一入口**——带 authorize 载荷的
+        sign 走授权 intake 分支（任意态可投：blocked/awaiting/running 均可，授权在
+        下一轮 settle/超限判定被消费）；不带 authorize 的签字＝既有 merge 人门语义，
+        逐字节不变。"""
+        if getattr(sig, "authorize", None) is not None:
+            self._intake_authorization(sig.authorize)
+            return
         stage = str(self.meta.get("stage") or "")
         if stage != "merge" or self.meta.get("stage_state") != "awaiting-human":
             self.refused.append({"who": sig.who, "want": "sign(%s)" % sig.gate,
@@ -2075,6 +2158,69 @@ class DevLaneWorkflow(TicketPauseMixin):
                                  "why": "gate 与当前等待步 merge 不符"})
             return
         self._sigs["merge"] = sig
+
+    # ---------- 人授权例外通道（t260912-03）：签发 / 生效过滤 / 消费留痕 ----------
+    def _intake_authorization(self, auth) -> None:
+        """sign 面 authorize 载荷的 intake（任意态可投）：校验不过=refused 点名、不进
+        事件历史（host_ruling/pause 同款双形态）；通过=append meta['authorizations']
+        （kind/who/scope/reason/issued/expires/uses）+ 时间线签发事件 + log 记名。
+
+        issued 由 workflow.now() 盖写（不信任调用方）；反自签（agent 角色名/-agent 后缀）
+        与上限（who/reason/scope 条数与长度、expires 上限）在 authz_gates 单一实现。"""
+        now = self._now_epoch()
+        err = authz_gates.validate_authorization(auth, now, self.ticket_id)
+        who = str(getattr(auth, "who", "") or (auth.get("who") if isinstance(auth, dict) else "") or "")
+        if err:
+            self.refused.append({"who": who, "want": "sign(authorize)",
+                                 "why": err})
+            self._log("人授权拒收（%s）：%s" % (who or "?", err))
+            return
+        rec = authz_gates.authorization_record(auth, now)
+        self.meta.setdefault("authorizations", []).append(rec)
+        note = ("人授权签发（%s）：kind=%s scope=%s 到期=%s 理由=%s"
+                % (rec["who"], rec["kind"], "、".join(rec["scope"]),
+                   authz_gates.fmt_ts(rec["expires"]), rec["reason"]))
+        self.timeline.append({"at": self._now_iso(),
+                              "stage": str(self.meta.get("stage") or ""),
+                              "state": "authorized", "reason": note})
+        self._log(note)
+        self._touch()
+
+    def _active_authz(self, kind: str) -> List[Dict[str, Any]]:
+        """本票生效中的授权条目（kind 筛选；arbitration_verdict 另按票号筛 scope）。"""
+        return active_authorizations(self.meta.get("authorizations"), self._now_epoch(),
+                                     kind=kind, ticket_id=self.ticket_id)
+
+    def _protected_authz_records(self) -> List[Dict[str, Any]]:
+        """受保护闸 args 面：生效中的 protected_path 授权结构化记录（C1：带 who/issued/
+        reason，activity 据此记名点名与归因）。"""
+        return [dict(it) for it in self._active_authz(AUTH_PROTECTED_PATH)]
+
+    def _arbitration_authz(self) -> Optional[Dict[str, Any]]:
+        """生效中的「接受本判决」授权（最新签发者胜）——仲裁超限判定点的消费面。"""
+        items = self._active_authz(AUTH_ARBITRATION_VERDICT)
+        return items[-1] if items else None
+
+    def _append_authz_use(self, rec: Dict[str, Any], stage: str, detail: str) -> None:
+        """消费留痕（不可变历史的一部分：meta 变更随 workflow 事件落账）。"""
+        rec.setdefault("uses", []).append(
+            {"ts": self._now_epoch(), "stage": stage, "detail": detail})
+
+    def _record_authz_uses(self, text: str, stage: str) -> None:
+        """解析回执里的机读键 path_gate_authz_used=<who>@<issued>:<files> → 落 uses。
+        只在键在场（=真发生豁免）时记——无受保护命中/未命中授权的回执没有键，不记。"""
+        items = parse_authz_used(text)
+        if not items:
+            return
+        for it in items:
+            for rec in (self.meta.get("authorizations") or []):
+                if not isinstance(rec, dict):
+                    continue
+                if str(rec.get("who") or "") == it["who"] \
+                        and str(int(rec.get("issued") or 0)) == it["issued"]:
+                    self._append_authz_use(rec, stage, "受保护路径豁免：%s" % it["files"])
+                    self._log("人授权被使用（%s @ %s）：受保护路径 %s 放行落盘（段 %s）"
+                              % (it["who"], it["issued"], it["files"], stage))
 
     @workflow.signal
     def rework(self, req: ReworkRequest) -> None:

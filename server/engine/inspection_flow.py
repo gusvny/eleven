@@ -224,7 +224,14 @@ class InspectionPeriodicWorkflow:
     @workflow.signal
     def sign(self, sig: Signature) -> None:
         """Human-gate signature (the existing approval-gate machinery). A signature whose
-        gate does not match is ignored with a note, never accepted by mistake."""
+        gate does not match is ignored with a note, never accepted by mistake.
+
+        t260912-03：本巡检模板无授权面——带 authorize 的载荷在 validate 之前显式拒收
+        （validate_close_signature 不感知 authorize，若放行会被当作普通人门签字）。"""
+        if getattr(sig, "authorize", None) is not None:
+            self._gate_err = "本巡检模板无人授权面，authorize 载荷拒收（不落签字）"
+            workflow.logger.warning("拒收 authorize 载荷：本巡检模板无人授权面")
+            return
         payload, err = validate_close_signature(sig)
         if err:
             self._gate_err = err

@@ -272,6 +272,9 @@ class SettleLaneArgs:
     write_set: List[str] = field(default_factory=list)   # 逐仓 rebase 前的工单写集
     base_ref: str = ""                                   # 泳道分叉点（单仓锚；多仓以清单 per-repo base_ref 优先）
     path_gate: bool = False                              # 闸总开关
+    # t260912-03 人授权结构化记录（defaulted 空表，零回归）：join 点落盘的受保护闸
+    # 豁免面（workflow 侧已按票+时效过滤，activity 不读墙钟）。
+    authorizations: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -313,6 +316,136 @@ def integration_route(verdict: str, tests_rounds: int, code_rounds: int) -> str:
             "blocked:打回 developer %d 轮超限（上限 %d），转人工判读" % (
                 code_rounds, MAX_CODE_FAULT_ROUNDS)
     return "blocked:仲裁结论未知 verdict=%r，转人工判读" % verdict
+
+
+# ---- 人授权例外通道（工单 t260912-03）----
+# 受保护路径闸与仲裁上限的「记名留痕、到期作废」放行钥匙。唯一入口＝既有 sign 信号面
+# （Signature.authorize 可选载荷），授权与签字同源、同审计面（Temporal 不可变历史）。
+# 落地形态 meta['authorizations']=[{kind,who,scope,reason,issued,expires,uses:[...]}]：
+# 签发=signal 事件；每次真实消费 append uses（workflow 侧解析 settle 回执的
+# path_gate_authz_used= 机读键，只真豁免才记）。默认 fail-closed 不变：无授权 /
+# 不匹配 / 已过期 → 两闸行为与装通道前逐字节一致。
+AUTH_PROTECTED_PATH = "protected_path"
+AUTH_ARBITRATION_VERDICT = "arbitration_verdict"
+AUTH_KINDS = (AUTH_PROTECTED_PATH, AUTH_ARBITRATION_VERDICT)
+
+# intake 上限（超限=refused，不进 Temporal 事件历史）。常量同值不同源：与 host_ruling /
+# pause 的 note 上限、inspection_flow.MAX_WHO_LEN 各自独立演进，不互相绑死。
+AUTHZ_EXPIRES_MAX_SEC = 30 * 24 * 3600      # 授权有效期上限（防「顺手批一年」）
+AUTHZ_WHO_MAX_LEN = 64                      # 与 inspection_flow.MAX_WHO_LEN 同值
+AUTHZ_REASON_MAX_LEN = 20000                # 与 HOST_RULING/PAUSE_NOTE_INPUT_LIMIT 同值族
+AUTHZ_SCOPE_MAX_ITEMS = 16                  # scope 条目数上界
+AUTHZ_SCOPE_ITEM_MAX_LEN = 256              # 单条 scope 长度上界
+
+# 全域 agent 角色名（反自签红线的机械口径）：与 inspection_flow.AGENT_ROLE_NAMES 同集合，
+# 两集合相等由单测源码锁定（防未来只改一处判定）。
+AUTHZ_AGENT_ROLE_NAMES = frozenset(
+    {"developer", "integration", "ops", "product-operation", "artist"})
+
+# settle 回执内嵌的机读键（path_gate_reason= 同族，t260910-13 先例）：
+#   path_gate_authz_used=<who>@<issued>:<file1,file2>
+AUTHZ_USED_KEY = "path_gate_authz_used="
+
+
+@dataclass
+class HumanAuthorization:
+    """sign 信号面的人授权载荷（工单 t260912-03）。who 由调用方注入；agent 角色名
+    签发=拒收（反自签红线）。kind=protected_path 时 scope=精确路径或目录前缀；
+    kind=arbitration_verdict 时 scope=[本票票号]（别票=拒收——一次授权只对指定票/
+    指定路径生效）。expires/issued 为 epoch 秒，issued 由 workflow intake 用
+    workflow.now() 盖写（不信任调用方）。"""
+
+    kind: str = ""
+    who: str = ""
+    scope: List[str] = field(default_factory=list)
+    reason: str = ""
+    expires: int = 0
+    issued: int = 0
+
+
+def _authz_int(v: Any) -> int:
+    """epoch 秒容忍转换：非数/非法一律 0（调用方按 0 处理=fail-closed）。"""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
+
+
+def active_authorizations(items: Any, now_epoch: int, kind: str = "",
+                          ticket_id: str = "") -> List[Dict[str, Any]]:
+    """meta['authorizations'] 的清洗+生效过滤（纯函数，畸形条目不炸）。只留 dict、
+    kind 合法、expires>now；kind 给定再筛类型；kind=arbitration_verdict 且给定
+    ticket_id 时 scope 必须含该票号（protected_path 的 scope 是路径面，不做票号筛）。
+    返回原条目引用（保序）。"""
+    out: List[Dict[str, Any]] = []
+    for it in items if isinstance(items, (list, tuple)) else []:
+        if not isinstance(it, dict):
+            continue
+        if str(it.get("kind") or "") not in AUTH_KINDS:
+            continue
+        if kind and str(it.get("kind") or "") != kind:
+            continue
+        exp = _authz_int(it.get("expires"))
+        if exp <= 0 or exp <= _authz_int(now_epoch):
+            continue
+        if kind == AUTH_ARBITRATION_VERDICT and ticket_id:
+            scopes = it.get("scope")
+            scopes = [str(s) for s in scopes] if isinstance(scopes, (list, tuple)) else []
+            if str(ticket_id) not in scopes:
+                continue
+        out.append(it)
+    return out
+
+
+def authorization_scopes(items: Any, now_epoch: int, kind: str,
+                         ticket_id: str = "") -> List[str]:
+    """生效授权 × kind 的 scope 并集（去重保序，纯函数）：受保护闸的裸 scope 视图
+    （供测试与降级读法；生产 args 面走结构化记录，见 authz_gates.split_protected）。"""
+    out: List[str] = []
+    for it in active_authorizations(items, now_epoch, kind=kind, ticket_id=ticket_id):
+        scopes = it.get("scope")
+        for s in (scopes if isinstance(scopes, (list, tuple)) else []):
+            s = str(s)
+            if s and s not in out:
+                out.append(s)
+    return out
+
+
+def arbitration_cap_route(verdict: str, tests_rounds: int, code_rounds: int,
+                          authorized: bool) -> str:
+    """带人授权的仲裁三态路由（纯函数）。authorized=False → 与 integration_route
+    逐字节一致（零回归）；True 时**只**把两条上限原因放行到 "acceptance"——授权语义
+    是「接受本判决」，判决不存在（verdict 非法）或 blocked 原因非两条上限，授权在场
+    也不放行。判定用 verdict×轮次谓词，不做 "blocked:" 字符串前缀匹配（防未来新增
+    原因被静默放行）。"""
+    route = integration_route(verdict, tests_rounds, code_rounds)
+    if not authorized:
+        return route
+    if verdict == "tests-fault" and tests_rounds > MAX_TESTS_FAULT_ROUNDS:
+        return "acceptance"
+    if verdict == "code-fault" and code_rounds > MAX_CODE_FAULT_ROUNDS:
+        return "acceptance"
+    return route
+
+
+def parse_authz_used(text: Any) -> List[Dict[str, str]]:
+    """解析 settle 回执里的机读键 path_gate_authz_used=<who>@<issued>:<f1,f2>
+    （纯函数）。多段取全部；畸形段丢弃不炸。返回 [{who, issued, files}]。"""
+    out: List[Dict[str, str]] = []
+    if not isinstance(text, str) or AUTHZ_USED_KEY not in text:
+        return out
+    for chunk in text.split(AUTHZ_USED_KEY)[1:]:
+        seg = chunk
+        for sep in ("；", ";", "\n", "\r"):
+            seg = seg.split(sep)[0]
+        seg = seg.strip()
+        who, at, rest = seg.partition("@")
+        issued, colon, files = rest.partition(":")
+        who, issued, files = who.strip(), issued.strip(), files.strip()
+        if not who or not issued.isdigit() or not colon:
+            continue
+        out.append({"who": who, "issued": issued, "files": files})
+    return out
 
 
 REVIEW_PLAN_VERDICTS = ("pass", "conditional", "reject")
@@ -511,6 +644,10 @@ class Signature:
     gate: str = "approve"          # approve | final-review (or another exit=human stage id)
     decision: str = "approve"      # approve | reject
     note: str = ""
+    # t260912-03：人授权载荷（唯一入口＝本 sign 信号面）。defaulted=None——老历史事件
+    # 反序列化缺字段→None，签字语义逐字节不变；带 authorize 的载荷只在 dev_lane
+    # 的 sign handler 被接受，其余三个 handler（base/workflows/inspection_flow）显式拒收。
+    authorize: Optional[HumanAuthorization] = None
 
 
 @dataclass
@@ -1881,6 +2018,10 @@ class AgentStageArgs:
     ui_dirs: List[str] = field(default_factory=list)     # 段允许面：ui_evidence 的 verify.yaml ui_evidence.dirs
     base_ref: str = ""                                   # 泳道分叉点（受保护闸「存在才拦」的锚，非 HEAD）
     path_gate: bool = False                              # 闸总开关
+    # t260912-03 人授权结构化记录（defaulted 空表——老事件 replay 缺字段→[]，零回归）：
+    # workflow 侧已按「kind=protected_path + 本票 + expires>workflow.now()」过滤；
+    # activity 侧只据此做受保护闸的豁免摘除与记名，不读墙钟（重放/复跑判定不吃时钟）。
+    authorizations: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -1990,6 +2131,9 @@ class MergeCheckArgs:
     # t260911-03 路径闸：merge_check 的 KI-009 自愈 settle 同受闸（defaulted，老事件
     # 缺字段→False=不自愈受闸、行为与旧版一致）；base_ref/write_set 复用上两字段。
     path_gate: bool = False
+    # t260912-03 人授权结构化记录（defaulted 空表，零回归）：自愈 settle 的受保护闸
+    # 豁免面与 workflow 侧一致（workflow 已按票+时效过滤）。
+    authorizations: List[Dict[str, Any]] = field(default_factory=list)
 
 
 # ---- Ticket t260828-09: the UI acceptance machinery (the screenshot channel + look-at-the-image review + merge_check's evidence gate) ----

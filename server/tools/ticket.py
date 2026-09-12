@@ -493,6 +493,7 @@ def _list(a):
         'worktree': r.get('worktree') or '', 'workspace': r.get('workspace'),
         'created': r.get('created'), 'updated': r.get('updated_ts') or 0,
         'close_ts': r.get('close_ts') or 0,
+        'authz_active': int(r.get('authz_active') or 0),   # t260912-03 生效中授权计数
     } for r in v2_rows]
     out_rows = []
     for meta in rows:
@@ -521,8 +522,48 @@ def _list(a):
             'updated': time.strftime('%m-%d %H:%M', time.localtime(meta.get('updated', 0))),
             'updated_ts': meta.get('updated'),
             'close_ts': meta.get('close_ts') or 0,
+            # t260912-03：列表可读面＝生效中的人授权条数（client.py 行内已按
+            # expires>now 过滤；行缺键=老引擎，补 0 不炸）
+            'authz_active': int(meta.get('authz_active') or 0),
         })
     return {'count': len(out_rows), 'tickets': out_rows}
+
+
+def _authz_view(snap):
+    """ticket show 的人授权可读面（t260912-03）：全量条目 + 逐条状态（生效中/已过期）。
+    口径写死：show=全量（含已过期，供审计回溯），list=authz_active 只数生效中。
+    状态比较点=CLI 进程读取时刻（issued/expires 均为 epoch 秒，workflow 侧不读墙钟）。
+    形状兼容两吃（260912 仲裁实证：_show 实参=_v2_query[0]=扁平 ticket face，
+    authorizations 在顶层——只吃嵌套 meta 形状会让真路径恒拿 None，展示层假死）：
+      · 扁平（真路径）：{'authorizations': [...], ...}
+      · 嵌套（快照形状/兼容）：{'meta': {'authorizations': [...]}}"""
+    if not isinstance(snap, dict):
+        return None
+    meta = snap.get('meta') if isinstance(snap.get('meta'), dict) else {}
+    items = snap.get('authorizations')
+    if not isinstance(items, list):
+        items = meta.get('authorizations')
+    if not isinstance(items, list):
+        return None
+    now = int(time.time())
+    out = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        exp = int(it.get('expires') or 0)
+        uses = it.get('uses') if isinstance(it.get('uses'), list) else []
+        out.append({
+            'kind': str(it.get('kind') or ''),
+            'who': str(it.get('who') or ''),
+            'scope': [str(s) for s in (it.get('scope') or [])],
+            'reason': str(it.get('reason') or ''),
+            'issued': int(it.get('issued') or 0),
+            'expires': exp,
+            'status': '生效中' if exp > now else '已过期',
+            'uses': uses,
+            'used_count': len(uses),
+        })
+    return out
 
 
 def _show(a):
@@ -532,7 +573,15 @@ def _show(a):
         # None 的唯一来源=kind=not_found（_v2_query 契约）——这里必须带 kind 抛
         # QueryError，否则 registry 回执丢 kind，工作台 404 分流失去唯一合法判据。
         raise QueryError('工单不存在: %s（Temporal 无此 workflow）' % tid, kind='not_found')
-    return v2[0]
+    snap = v2[0]
+    # t260912-03 可查面：authorizations 全量已在（_v2_query[0] 扁平 ticket face，
+    # 引擎 ticket 面原样投影），此处加展示层 authz（逐条状态+消费次数）与计数——
+    # 附加键，不改既有形状（老票无该键=返回 None 不加）。
+    authz = _authz_view(snap)
+    if authz is not None and isinstance(snap, dict):
+        snap['authz'] = authz
+        snap['authz_active'] = len([x for x in authz if x['status'] == '生效中'])
+    return snap
 
 
 def _accept(a):
@@ -598,6 +647,38 @@ def _retry_qc(a):
     return _poc_ok(out)
 
 
+def _authorize(a):
+    """人授权签发（t260912-03，KI-067 教训：包装层只加审计不加权力，who/scope/reason/
+    expires 全由调用方注入）。唯一入口＝既有 sign 信号面——本 op 只是它的载荷封装，
+    与 sign 同审计面；agent 不得自签（who 不得为 agent 角色名）由 workflow intake 判。
+    kind=protected_path（scope=路径/目录前缀）/ arbitration_verdict（scope=[本票票号]）。"""
+    tid = a.get('id') or ''
+    if not tid:
+        raise ValueError('authorize 需要 id')
+    who = _who(a)
+    if not who.strip():
+        raise ValueError('authorize 需要 by|who（授权人身份由调用方注入，不得留空）')
+    kind = str(a.get('kind') or '')
+    if kind not in ('protected_path', 'arbitration_verdict'):
+        raise ValueError("authorize 的 kind 只收 protected_path|arbitration_verdict（收到 %r）"
+                         % (kind,))
+    scope = a.get('scope')
+    if isinstance(scope, str):
+        scope = [s.strip() for s in scope.split(',') if s.strip()]
+    if not isinstance(scope, list) or not scope:
+        raise ValueError('authorize 需要 scope（数组或逗号分隔串）：路径/目录前缀或本票票号')
+    if a.get('expires') in (None, ''):
+        raise ValueError('authorize 需要 expires（epoch 秒或 ISO8601——授权必须到期作废）')
+    if not str(a.get('reason') or '').strip():
+        raise ValueError('authorize 需要 reason（为什么批——授权记录必须能回答此问）')
+    out = _poc('ticket', {'op': 'authorize', 'ticket_id': tid,
+                          'input': {'who': who, 'kind': kind,
+                                    'scope': [str(s).strip() for s in scope],
+                                    'reason': str(a.get('reason') or ''),
+                                    'expires': a.get('expires')}})
+    return _poc_ok(out)
+
+
 def validate_write_set_no_notes(write_set):
     """宿主令 260904 机械闸（建单侧）：工单写集禁含 notes/——票据/知识库账本
     （KI 册/epic 立项单/决策与讨论档）由 main 侧 integration/宿主直管，工单不写。
@@ -632,6 +713,8 @@ def run(args):
         return _rework(args)
     if op == 'sign':
         return _sign(args)
+    if op == 'authorize':
+        return _authorize(args)
     if op == 'retry_qc':
         return _retry_qc(args)
     raise ValueError('未知 op: %r' % (op,))
@@ -646,7 +729,7 @@ def run(args):
 # 一行（source=ticket.py-direct），与 client.py 行共享 call_id。
 
 _TICKET_CLI_USAGE = ('用法：python3 server/tools/ticket.py \'<json 对象，含 op>\'\n'
-                     'op: create/update/list/show/rework/sign/retry_qc'
+                     'op: create/update/list/show/rework/sign/authorize/retry_qc'
                      '（accept/advance/dispatch-next 已取消，报结构化错误）\n'
                      '失败契约：非零退出 + {ok:false,error,kind?}，绝不空输出。')
 

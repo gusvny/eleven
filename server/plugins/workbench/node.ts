@@ -215,11 +215,13 @@ const TICKETS_PREFIX = '/sandbar-workbench/api/wf/tickets'
 const EPICS_PREFIX = '/sandbar-workbench/api/epics'
 /** POST 操作白名单（admin.py 引擎的 op 子集 + sign=审批签字走 Temporal signal；
  *  M11 v2 加 retry-qc=blocked 重跑走 Temporal retry_qc signal；
- *  t260908-01 加 pause/resume=段间暂停·恢复走 Temporal pause/resume signal）。
+ *  t260908-01 加 pause/resume=段间暂停·恢复走 Temporal pause/resume signal；
+ *  t260912-03 加 authorize=人授权签发（唯一入口＝sign 信号面，走 ticket.py 审计面，
+ *  不新开旁路））。
  *  create 不进此表：它没有工单 id，落 exact 路由 /wf/tickets 的 POST 分支
  *  （handleTicketCreate，epic-linkage Tier 3 / t260826-02），与 <id>/<op> 路径正交。
  *  review（审批意见落盘）不进此表——它不经过 admin.py，在路由里按 method 单独分支。 */
-const OPS = new Set(['accept', 'advance', 'dispatch-next', 'rework', 'update', 'sign', 'retry-qc', 'pause', 'resume'])
+const OPS = new Set(['accept', 'advance', 'dispatch-next', 'rework', 'update', 'sign', 'authorize', 'retry-qc', 'pause', 'resume'])
 
 /** 工单 id 白名单：review 落盘文件名由它拼出，必须防穿路径（同 knowledge DOC_PATH_RE 的角色）。
  *  放行 Han 字（真实工单 id 含中文，54 张全量体检零误伤）；/ \ . % 与控制字符全在表外，穿路径无门。 */
@@ -1179,6 +1181,26 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
             op: 'sign',
             ticket_id: id,
             input: { who, gate: '', decision, note },
+          }
+          const r = await runPocCli(cli, ['ticket', JSON.stringify(pocArgs)])
+          sendJson(res, 200, r)
+          return
+        }
+        // t260912-03：authorize = 人授权签发（受保护路径 / 仲裁上限的放行钥匙）。
+        // 唯一入口＝sign 信号面——经 ticket.py op=authorize 转发（与 sign 同审计面，
+        // 不造旁路）；who/kind/scope/reason/expires 全由调用方注入（agent 不得自签，
+        // workflow intake 机械拒收 agent 角色名）。expires 收 ISO8601 或 epoch 秒。
+        if (op === 'authorize') {
+          const pocArgs = {
+            op: 'authorize',
+            ticket_id: id,
+            input: {
+              who: String(body.who ?? 'op-local'),
+              kind: String(body.kind ?? ''),
+              scope: body.scope ?? [],
+              reason: String(body.reason ?? ''),
+              expires: body.expires ?? '',
+            },
           }
           const r = await runPocCli(cli, ['ticket', JSON.stringify(pocArgs)])
           sendJson(res, 200, r)

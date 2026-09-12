@@ -706,6 +706,12 @@ class TicketWorkflowBase(TicketPauseMixin):
     @workflow.signal
     def sign(self, sig: Signature) -> None:
         """Human-gate signature. gate must be the currently-waiting exit=human stage id (empty = the current stage)."""
+        # t260912-03：带 authorize 的人授权载荷只认 dev_lane 的 sign 面；本模板（v1
+        # 人门族）无授权面——显式拒收（误投不得被当作普通人门签字按 approve 放行）。
+        if getattr(sig, "authorize", None) is not None:
+            self.refused.append({"who": sig.who, "want": "sign(authorize)",
+                                 "why": "本模板无人授权面，authorize 载荷拒收（不落签字）"})
+            return
         stage = str(self.meta.get("stage") or "")
         st = self.STAGES[self._stage_idx(stage)] if self._stage_idx(stage) >= 0 else None
         if not (st and st.exit == "human"):
