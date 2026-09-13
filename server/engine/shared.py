@@ -2714,6 +2714,14 @@ class MergeArgs:
     # 已过 merge_check 前置闸，按旧语义收口，不追溯红灯）——这是兼容约定，不是
     # 静默降级；新票由 dev_lane 构造处恒传 meta.write_set。
     write_set: List[str] = field(default_factory=list)
+    # 拆道逐仓化输入（t260913-05）：teardown_lane 的成员仓明细，由 workflow 侧传
+    # meta.repo_worktrees（唯一真源，条目形状 {repo,name,branch}，build_repo_worktrees
+    # 定形）。payload 兼容先例=defer_teardown/write_set：在途旧票序列化无此键，反序列化
+    # 回落空列表。语义明示：**空列表=不提供救源**——teardown 回落到盘上清单镜像（与
+    # merge 同输入，正常态），清单缺失再回落旧单仓路径（引擎仓泳道命令流逐字节不变）；
+    # 有值而盘上清单已随部分拆除消失时用它点名成员仓（堵「重试回落单仓锚 → 成员仓静默
+    # 残留」）。merge 不消费本字段。
+    repo_worktrees: List[Dict[str, str]] = field(default_factory=list)
 
 
 @dataclass

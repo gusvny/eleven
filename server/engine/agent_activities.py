@@ -1338,25 +1338,36 @@ MULTI_MANIFEST_REL = ".suyou/repo_worktrees.json"
 
 
 def _lane_scopes(wt: Path, branch: str = "", base_ref: str = "",
-                 write_set: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+                 write_set: Optional[List[str]] = None,
+                 entries: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
     """Lane scope list: single repo = 1 entry (each field is exactly the old
     single-anchor behavior, a byte-level regression surface); multi-repo = one entry
     per repo (a corrupt manifest = RuntimeError to Temporal retry / a human, never a
     silent fallback to the single-repo anchor — falling back would settle/merge the
     wrong repo). Fields: name/tree/repo/branch/base_ref/write_set, where write_set has
     already been rebased per repo (a tree-root-relative subset; passed through
-    unchanged for a single repo)."""
+    unchanged for a single repo).
+
+    `entries`（t260913-05，拆道逐仓化）：明细的另一种入参——workflow 递来的
+    `meta.repo_worktrees`（唯一真源）。传了就跳过读盘清单、直接走同一段条目校验 +
+    归一化（判定单点，不另造第二套解析）；None=读盘清单镜像（merge 等既有调用点
+    原样零回归）。参数必须留在末尾：:2322 现存 4 个位置实参调用
+    `_lane_scopes(wt, args.branch, args.base_ref, args.write_set)`。
+    损坏/畸形一律 RuntimeError（两源同语义），绝不静默回落单仓锚。"""
     mf = wt / MULTI_MANIFEST_REL
-    if not mf.is_file():
-        return [{"name": "", "tree": wt, "repo": _lane_repo_root(wt), "repo_rel": "",
-                 "branch": branch or ("lane/" + wt.name), "base_ref": base_ref,
-                 "write_set": list(write_set or [])}]
-    try:
-        entries = json.loads(mf.read_text("utf-8"))
-    except Exception as e:
-        raise RuntimeError("多仓泳道清单损坏（%s: %s）——人工处置，不静默回落单仓锚" % (mf, e))
+    from_entries = entries is not None
+    if not from_entries:
+        if not mf.is_file():
+            return [{"name": "", "tree": wt, "repo": _lane_repo_root(wt), "repo_rel": "",
+                     "branch": branch or ("lane/" + wt.name), "base_ref": base_ref,
+                     "write_set": list(write_set or [])}]
+        try:
+            entries = json.loads(mf.read_text("utf-8"))
+        except Exception as e:
+            raise RuntimeError("多仓泳道清单损坏（%s: %s）——人工处置，不静默回落单仓锚" % (mf, e))
+    src = "meta.repo_worktrees 明细" if from_entries else str(mf)
     if not isinstance(entries, list) or not entries:
-        raise RuntimeError("多仓泳道清单为空或非列表（%s）——人工处置" % mf)
+        raise RuntimeError("多仓泳道清单为空或非列表（%s）——人工处置" % src)
     project_root = wt.parent.parent
     scopes: List[Dict[str, Any]] = []
     for e in entries:
@@ -1365,13 +1376,13 @@ def _lane_scopes(wt: Path, branch: str = "", base_ref: str = "",
         # non-string branch is still rejected (fail-closed, not weakened; the message
         # names the genuinely missing field).
         if not isinstance(e, dict):
-            raise RuntimeError("多仓泳道清单条目须为对象（%r in %s）——人工处置" % (e, mf))
+            raise RuntimeError("多仓泳道清单条目须为对象（%r in %s）——人工处置" % (e, src))
         if not isinstance(e.get("repo"), str):
             raise RuntimeError("多仓泳道清单条目 repo 字段缺失或非字符串（%r in %s）"
-                               "——人工处置" % (e, mf))
+                               "——人工处置" % (e, src))
         if not (isinstance(e.get("branch"), str) and e["branch"]):
             raise RuntimeError("多仓泳道清单条目 branch 字段缺失或为空（%r in %s）"
-                               "——人工处置" % (e, mf))
+                               "——人工处置" % (e, src))
         scopes.append({
             "name": str(e.get("name") or e["repo"] or "root"),
             "tree": wt / e["repo"],
@@ -1382,6 +1393,21 @@ def _lane_scopes(wt: Path, branch: str = "", base_ref: str = "",
             "write_set": rebase_write_set(write_set, str(e["repo"])),
         })
     return scopes
+
+
+def _scope_tag(sc: Dict[str, Any]) -> str:
+    """逐仓点名的 tag（t260913-05）：清单 name 优先，其次仓相对路径；旧单仓回落
+    条目（name/repo_rel 皆空）返回空串——调用方不加前缀，warn 文案与旧代码逐字一致
+    （单仓路径逐字节零回归）。"""
+    name = str(sc.get("name") or "")
+    if name:
+        return name
+    return str(sc.get("repo_rel") or "")
+
+
+def _tagged(tag: str, msg: str) -> str:
+    """带 tag 的逐仓 warn 文案；tag 空（旧单仓回落）= 原样，零回归。"""
+    return ("[%s] %s" % (tag, msg)) if tag else msg
 
 
 def _is_worktree_of(p: Path, repo: Optional[Path] = None) -> bool:
@@ -3161,35 +3187,88 @@ async def archive_ticket(args: ArchiveArgs) -> ArchiveResult:
 @activity.defn
 async def teardown_lane(args: MergeArgs) -> MergeResult:
     """Tear down the lane (the last stage of M1-3's three-stage close-out; the recipe
-    is verbatim the _squash_merge step 3 from the M1-2 era).
+    is _squash_merge step 3, now applied **per repo**).
 
-    Called only after both merge (the squash booking) and archive_ticket succeeded
-    (guaranteed by the workflow orchestration); failures do not raise — the receipt's
-    error names the worktree/branch step and the workflow side only records evidence
-    (a lane leftover is recoverable garbage: its contents are already in the
-    archive.json manifest and the data/ source of truth, a human can sweep the
-    manifest, and the ticket close-out is not blocked). The cleanup recipe is
-    idempotent (a repeated --quit is harmless; a nonexistent worktree/branch returning
-    rc=0 counts as success) — Temporal retries are safe (trade-off d) carries over).
-    """
-    repo = REPO_ROOT
+    逐仓化（t260913-05）：泳道可能是多仓的，判定与 merge 落账**同源**（都过
+    `_lane_scopes`，拆道不另造第二套判定），逐仓对**该仓自己**执行
+    `git -C <repo> worktree remove --force <tree>` + `git -C <repo> branch -D <branch>`
+    （旧写法硬编码 repo=REPO_ROOT，成员仓的 worktree 注册与 lane/* 分支完全够不着，
+    残留且不可见）。根树条目（repo=""）的仓 = 泳道容器父项目的根仓（_lane_scopes
+    解析）。明细取用序：①盘上清单镜像（与 merge 同输入，正常态）；②清单随部分拆除
+    消失时取 workflow 递来的 `args.repo_worktrees`（meta 真源=救源，堵「重试回落
+    单仓锚 → 成员仓静默残留」）；③都无=旧单仓回落（引擎仓泳道 repo==REPO_ROOT，
+    git 命令流逐字节与旧代码一致）。
+
+    不对称（有意为之，两态各守一边）：
+      - 明细损坏/畸形、或逐仓 branch 非法 → ok=False + action="failed" → dev_lane
+        置 blocked 交人工，泳道不拆（fail-closed，绝不在错仓上静默收口）；
+      - git 清理失败、成员仓目录已不在盘上 → **逐仓点名**进回执 error 字段、恒
+        ok=True：残留=可回收垃圾（内容已在 archive.json 清单与 data/ 真源），不阻断
+        收口（既有取舍 d 承袭），但点名后残留可被巡检消费（时间线「泳道拆除告警」行
+        原样透传 error，不再笼统一条）。裸 `_git` 对缺失 cwd 会抛 FileNotFoundError，
+        故动手前判 `repo.is_dir()`——一个坏仓不得把可回收残留升级成卡票。
+    The cleanup recipe is idempotent in outcome (a repeated --quit is harmless). NB
+    (measured, t260913-05 acceptance F1): a rerun over an already-torn lane does NOT
+    get rc=0 per step — git says not-a-working-tree / branch-not-found (rc=128) and
+    each step records a **named** warn while the receipt stays ok=True — Temporal
+    retries are still safe (trade-off d) carries over)."""
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
     branch = args.branch
-    # Input guard, same as _squash_merge step 0 (branch comes from external meta)
-    p = _git(["check-ref-format", "--branch", branch], repo)
+    # Input guard, same as _squash_merge step 0 (branch comes from external meta).
+    # 刻意锚 REPO_ROOT：check-ref-format 是纯字符串校验（与仓无关），而 -C 指向一个
+    # 已不存在的成员仓会 rc=128（cannot change to）被误读成 branch 非法（review 实测）。
+    p = _git(["check-ref-format", "--branch", branch], REPO_ROOT)
     if p.returncode != 0:
         return MergeResult(ok=False, action="failed",
                            error="branch %r 非法（check-ref-format 拒绝）：%s"
                                  % (branch, (p.stderr or "").strip()[-200:]))
+    # 明细取用序（见 docstring）：清单镜像在 → 读盘（与 merge 同输入）；不在而
+    # workflow 递来 meta 明细 → 走 entries（同一归一化段）；都无 → 旧单仓回落。
+    entries = None
+    if not (wt / MULTI_MANIFEST_REL).is_file() and args.repo_worktrees:
+        entries = list(args.repo_worktrees)
+    try:
+        scopes = _lane_scopes(wt, branch, entries=entries)
+    except RuntimeError as e:
+        # 与 merge/merge_check 同语义：损坏=人工处置，绝不静默回落单仓锚（那会去清错仓）
+        return MergeResult(ok=False, action="failed", error=str(e)[:400])
+    # 逐仓 branch 守卫，全部先校验完再动任何破坏性命令：args.branch 已在上方逐字校验，
+    # 此处补成员仓 branch（同款 check-ref-format，仍锚 REPO_ROOT）。任一非法 → 整体
+    # failed，一个仓都不碰（外部输入不得带病进入 git 破坏性命令段）。
+    for sc in scopes:
+        br = str(sc["branch"])
+        if br == branch:
+            continue  # 旧单仓路径：不重复校验，命令流与旧代码一字不差
+        p = _git(["check-ref-format", "--branch", br], REPO_ROOT)
+        if p.returncode != 0:
+            return MergeResult(ok=False, action="failed",
+                               error=_tagged(_scope_tag(sc),
+                                             "branch %r 非法（check-ref-format 拒绝）：%s"
+                                             % (br, (p.stderr or "").strip()[-200:])))
     warns: List[str] = []
-    p = _git(["worktree", "remove", "--force", str(wt)], repo, timeout=60)
-    if p.returncode != 0:
-        warns.append("worktree remove 失败: %s" % (p.stderr or "").strip()[-200:])
-    p = _git(["branch", "-D", branch], repo, timeout=30)
-    if p.returncode != 0:
-        warns.append("branch -D 失败: %s" % (p.stderr or "").strip()[-200:])
+    # 成员树先删、根树（泳道容器）最后：移除容器会把整个目录树带走（成员树的目录就
+    # 在容器里）。实测 git 2.x 对「目录已不在但注册还在」的 worktree remove 仍 rc=0
+    # （草拟补丁担心的注册残留不成立），此处保持成员先行的确定性序：每次 remove 都锚
+    # 在活目录上，不依赖 dangling 注册那条路径。
+    ordered = ([sc for sc in scopes if str(sc.get("repo_rel") or "")]
+               + [sc for sc in scopes if not str(sc.get("repo_rel") or "")])
+    for sc in ordered:
+        tag = _scope_tag(sc)
+        repo = Path(str(sc["repo"]))
+        tree = Path(str(sc["tree"]))
+        if not repo.is_dir():
+            # 仓目录已不在盘上：无注册/分支可清（_git 会 FileNotFoundError）；点名不阻断
+            warns.append(_tagged(tag, "仓目录不存在（%s），无注册/分支可清" % repo))
+            continue
+        p = _git(["worktree", "remove", "--force", str(tree)], repo, timeout=60)
+        if p.returncode != 0:
+            warns.append(_tagged(tag, "worktree remove 失败: %s"
+                                 % (p.stderr or "").strip()[-200:]))
+        p = _git(["branch", "-D", str(sc["branch"])], repo, timeout=30)
+        if p.returncode != 0:
+            warns.append(_tagged(tag, "branch -D 失败: %s" % (p.stderr or "").strip()[-200:]))
     return MergeResult(ok=True, action="teardown",
                        merge_commit="", error="；".join(warns))
 

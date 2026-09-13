@@ -2114,7 +2114,13 @@ class DevLaneWorkflow(TicketPauseMixin):
                             teardown_lane,
                             MergeArgs(ticket_id=self.ticket_id,
                                       worktree=str(self.meta.get("worktree") or ""),
-                                      branch=str(self.meta.get("branch") or "")),
+                                      branch=str(self.meta.get("branch") or ""),
+                                      # 拆道逐仓化（t260913-05）：meta.repo_worktrees 是
+                                      # 明细真源，递给 teardown 逐仓三清——盘上清单镜像
+                                      # 已随部分拆除消失（Temporal 重试）时，靠它仍能点
+                                      # 名成员仓，绝不回落单仓锚留静默残留。payload 兼容：
+                                      # 在途旧票无此键 → 空列表 → teardown 回落清单/单仓。
+                                      repo_worktrees=list(self.meta.get("repo_worktrees") or [])),
                             start_to_close_timeout=SHORT, retry_policy=RETRY)
                     except Exception as e:
                         await self._blocked(
