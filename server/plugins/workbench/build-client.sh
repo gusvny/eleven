@@ -5,8 +5,19 @@
 # 构建（npx 与裸 pnpm install 的传递依赖不受本目录 lockfile 约束，是压缩器
 # 漂移入口）。产物仅 lib/client.cjs 与 lib/client.js 两个（config 未开
 # sourcemap、无 gzip 步骤；未来若开 sourcemap，map 含绝对路径不入仓）。
+# 跨包依赖（t260911-06/KI-073 钉链）：src/client/index.tsx 以 ../../../
+# 相对引用兄弟插件包 knowledge/providers（上三级=server/plugins/），二者
+# 缺席时构建必然 UNRESOLVED_IMPORT 非零——前置自检显式点名，不留给压缩
+# 报错兜圈子。若未来移除该依赖，请同步删除对应自检项。
 set -euo pipefail
 cd "$(dirname "$0")"
+
+for sibling in ../knowledge/src ../providers/src; do
+  if [ ! -d "$sibling" ]; then
+    echo "FAIL 构建跨包依赖缺席：$sibling 不在场（本入口按 server/plugins/ 同层布局解析 ../../../knowledge|providers），拒绝在残缺树上构建" >&2
+    exit 1
+  fi
+done
 
 echo "[build-client] node $(node -v) / npm $(npm -v)（版本留痕，便于事后归因）"
 
@@ -17,7 +28,16 @@ if ! npm ci --no-audit --ignore-scripts; then
   exit 1
 fi
 
-node_modules/.bin/tsdown -c tsdown.config.ts
+# 失败消法（t260911-06/C6，260911 夜全量回归实证修订）：tsdown 失败时拆掉旧
+# 产物再退非零——失败构建呈现「缺件」响亮红（git status deleted 极醒目），机械
+# 消解「旧产物冒充现场」。rm 必须只在失败路径：成功路径上先拆后建会给并发读
+# lib 的兄弟场景（bundle-sync/bundle-loads/capture 族）制造 ENOENT 缺件窗口
+# （全量回归实锤回红）；成功路径由 tsdown 原子性覆盖 + 尾部 cmp 复核兜底。
+if ! node_modules/.bin/tsdown -c tsdown.config.ts; then
+  rm -f lib/client.cjs lib/client.js
+  echo "FAIL tsdown 构建失败：已拆 lib 旧产物（缺件响亮红），拒绝留旧产物冒充现场" >&2
+  exit 1
+fi
 
 # 复核 onSuccess 复制：cjs 与 js 必须逐字节一致（不一致=半新产物，FAIL 点名）。
 if ! cmp -s lib/client.cjs lib/client.js; then

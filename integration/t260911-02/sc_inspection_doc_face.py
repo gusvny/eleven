@@ -51,7 +51,10 @@ updated: 2026-09-11
 
 FIXTURE_DECL = """schema: v1
 instances:
-  - id: docs-sync-%(pid)s
+  # id 形态必须与触发侧 STAMP（05d 五位补零）逐字节一致——此前声明侧不补零，
+  # PID 不足五位数时两处分叉（docs-sync-05175 对 docs-sync-5175），触发被产品
+  # fail-closed 拒「未在声明中」=PID 依赖间歇假红（260911 仲裁实锤）。
+  - id: docs-sync-%(pid)05d
     enabled: true
     scan_face: doc
     schedule:

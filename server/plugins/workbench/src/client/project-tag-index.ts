@@ -6,11 +6,20 @@
  *   publishProjectEntry；catch 分支**不发**（失败不得顶掉 last-known-good，
  *   KI-018 同族预防）。侧栏窄模式（wide=false）不轮询。
  * - 谁读：chat-project-tag.ts 装饰器（消息文本里的工单 id → 项目归属）。
+ * - 变更通知（t260911-06 补缺）：publish* 只在**数据实际变化**时通知订阅者
+ *   （onProjectTagIndexChange）——此前外部发布后装饰器不重扫，行是否补装饰
+ *   全看「碰巧有无别的 DOM 变动」；新消息行在索引空窗插入即永久裸奔（260911
+ *   夜 chat-project-tag 间歇红实证签名：新行无 chip、旧行有）。
  * - 兜底自取：装饰器挂载时若单态为空（侧栏未挂载/窄模式），自行 fetch 一次
  *   /wf/projects + 各项目 /wf/tickets?project=，成功后同样走 publish* 合并语义；
  *   60s 重试直到有数据、或侧栏外部发布（publishProjects 被外部调用即停自取定时器，
  *   绝不出现两条 10s 轮询）。取舍已声明：允许 decorator 侧一条低频（60s）兜底轮询，
  *   换取窄模式下 tag 不死。
+ * - 按需强取（t260911-06 补缺，nudge）：scan 发现「带票号引用却未归属」的行时，
+ *   兜底 handle 的 nudge() 单次强取一轮（绕过 hasData/外部发布停止条件——那两个
+ *   条件防的是**定时轮询双跑**，不防「数据源落后于刚建成的新票」）。有界三闸：
+ *   在途去重（同时只一轮）、最小间隔（默认 5s）、按引用去重（同一票号只强取一次）。
+ *   取到即 publish → 变更通知 → 装饰器重扫；仍取不到（假票号）不重试。
  * - 失败语义：单态按项目键 last-known-good 合并——新值非空覆盖；新值为空且已有
  *   旧值 → 保留旧值 + warn 一次（「fetch 成功但空列表」与失败在数据上同形，统一
  *   口径不猜服务端；项目工单真清零属低频事件且 tag 缺失不炸，无过期机制的代价
@@ -45,36 +54,72 @@ const state = {
 }
 
 /** 归一化工单 id 引用（字符串白名单：t\\d{6}-\\d{2} 口径由调用方先行过滤）。 */
-function addTicketsOfProject(key: string, ticketIds: readonly string[]): void {
-  // 该项目旧映射先摘（工单可能迁移/关闭；project 维度整体替换，同项目内 last-known-good
-  // 在调用侧判空）
+function addTicketsOfProject(key: string, ticketIds: readonly string[]): boolean {
+  // 该项目旧映射先比对：集合等价（同引用同归属）则零写动（10s 轮询同值重发
+  // 不算变更，不惊扰订阅者）；确有变化才整体替换（delete-then-add 原子完成，
+  // 项目维度 last-known-good 在调用侧判空）。返回是否有实际变化。
+  const fresh = new Set<string>()
+  for (const tid of ticketIds) {
+    if (typeof tid === 'string' && tid !== '') fresh.add(tid)
+  }
+  const prev: string[] = []
+  for (const [tid, k] of Array.from(state.projectByTicket)) {
+    if (k === key) prev.push(tid)
+  }
+  if (prev.length === fresh.size && prev.every(tid => fresh.has(tid))) return false
   for (const [tid, k] of Array.from(state.projectByTicket)) {
     if (k === key) state.projectByTicket.delete(tid)
   }
-  for (const tid of ticketIds) {
-    if (typeof tid === 'string' && tid !== '') state.projectByTicket.set(tid, key)
+  for (const tid of fresh) state.projectByTicket.set(tid, key)
+  return true
+}
+
+/* ── 变更通知（t260911-06）：数据实际变化时广播；监听器异常不炸发布方 ── */
+type IndexChangeListener = () => void
+const changeListeners = new Set<IndexChangeListener>()
+
+/** 订阅索引变更（仅实际变化触发）。返回退订函数（幂等）。 */
+export function onProjectTagIndexChange(listener: IndexChangeListener): () => void {
+  changeListeners.add(listener)
+  return () => { changeListeners.delete(listener) }
+}
+
+function notifyIndexChange(): void {
+  for (const l of Array.from(changeListeners)) {
+    try { l() } catch { /* 单个监听器异常不炸发布路径（侧栏轮询必须恒可达） */ }
   }
 }
 
 /**
  * 发布项目注册表（/wf/projects 整体一个请求，成功才调；失败不发）。
  * 外部发布即关停 decorator 兜底自取。畸形条目跳过，不 throw。
+ * 数据实际变化才通知订阅者（同值重发=10s 轮询常态，不惊扰）。
  */
 export function publishProjects(entries: readonly ProjectIndexEntry[] | unknown): void {
   if (!Array.isArray(entries)) return
   state.externallyPublished = true
-  state.projectDirs.clear()
+  const next = new Map<string, string[]>()
   for (const e of entries) {
     const key = (e as ProjectIndexEntry)?.key
     const dirs = (e as ProjectIndexEntry)?.dirs
     if (typeof key !== 'string' || key === '' || !Array.isArray(dirs)) continue
-    state.projectDirs.set(key, dirs.filter(d => typeof d === 'string' && d !== ''))
+    next.set(key, dirs.filter(d => typeof d === 'string' && d !== ''))
   }
+  let changed = next.size !== state.projectDirs.size
+  if (!changed) {
+    for (const [k, v] of next) {
+      const cur = state.projectDirs.get(k)
+      if (cur === undefined || cur.length !== v.length || v.some((d, i) => cur[i] !== d)) { changed = true; break }
+    }
+  }
+  state.projectDirs = next
+  if (changed) notifyIndexChange()
 }
 
 /**
  * 逐项目发布工单 id → 项目映射（仅在该项目 fetch 成功分支调用）。
  * last-known-good 合并：tickets 空 且 该项目已有旧映射 → 保留旧值 + warn 一次。
+ * 数据实际变化才通知订阅者。
  */
 export function publishProjectEntry(projectKey: string, ticketIds: readonly string[]): void {
   if (typeof projectKey !== 'string' || projectKey === '') return
@@ -88,7 +133,7 @@ export function publishProjectEntry(projectKey: string, ticketIds: readonly stri
     }
     return
   }
-  addTicketsOfProject(projectKey, clean)
+  if (addTicketsOfProject(projectKey, clean)) notifyIndexChange()
 }
 
 /** 只读快照（复制 Map 引用不计成本：装饰器每次扫描只读一次）。 */
@@ -118,26 +163,42 @@ export interface FallbackOptions {
   maxAttempts?: number
   /** 拉到数据后的回调（装饰器据此刷 CSS/重扫；成功路径恰好一次调用）。 */
   onData?: () => void
+  /** nudge 最小间隔 ms（默认 5_000；smoke/UT 传小值或大值做有界断言）。 */
+  nudgeMinIntervalMs?: number
+}
+
+/** 兜底自取句柄：stop=全终态回收；nudge=按需单次强取（t260911-06）。 */
+export interface FallbackHandle {
+  stop(): void
+  nudge(): void
 }
 
 /**
  * 装饰器兜底自取：单态为空时拉 /wf/projects + 各项目 /wf/tickets?project=，
- * 60s 重试直至有数据或侧栏外部发布。返回停止函数（全终态回收：清定时器）。
+ * 60s 重试直至有数据或侧栏外部发布。返回句柄：stop() 清定时器全终态回收；
+ * nudge() 绕过 hasData/外部发布停止条件单次强取（那两个条件防的是**定时轮询
+ * 双跑**，不防「数据源落后于刚建成的新票」），受三闸约束：在途去重、最小间隔
+ * （nudgeMinIntervalMs，默认 5s）、（引用级去重在装饰器侧做——它看得到行）。
  * 所有失败路径静默降级（console.warn 一次），不 throw、不影响装饰器主循环。
  */
-export function startProjectIndexFallback(opts: FallbackOptions): () => void {
+export function startProjectIndexFallback(opts: FallbackOptions): FallbackHandle {
   const { fetchImpl } = opts
   const initialDelayMs = typeof opts.initialDelayMs === 'number' ? opts.initialDelayMs : 0
   const retryIntervalMs = typeof opts.retryIntervalMs === 'number' ? opts.retryIntervalMs : 60_000
   const maxAttempts = typeof opts.maxAttempts === 'number' ? opts.maxAttempts : 60
+  const nudgeMinIntervalMs = typeof opts.nudgeMinIntervalMs === 'number' ? opts.nudgeMinIntervalMs : 5_000
   let timer: ReturnType<typeof setTimeout> | null = null
   let stopped = false
   let warned = false
   let attempts = 0
+  let inFlight = false
+  let lastNudgeAt = 0
 
-  async function tryOnce(): Promise<void> {
-    if (stopped || state.externallyPublished || readProjectTagIndex().hasData) return
-    attempts++
+  async function tryOnce(force = false): Promise<void> {
+    if (stopped || inFlight) return
+    if (!force && (state.externallyPublished || readProjectTagIndex().hasData)) return
+    inFlight = true
+    if (!force) attempts++
     try {
       const pr = await fetchImpl('/sandbar-workbench/api/wf/projects').then(r => r.json())
       const list: ProjectIndexEntry[] = pr?.result?.projects ?? []
@@ -158,6 +219,8 @@ export function startProjectIndexFallback(opts: FallbackOptions): () => void {
         warned = true
         console.warn('[workbench] chat 项目 tag 索引兜底拉取失败（将持续低频重试）：', String(err instanceof Error ? err.message : err))
       }
+    } finally {
+      inFlight = false
     }
   }
 
@@ -172,5 +235,18 @@ export function startProjectIndexFallback(opts: FallbackOptions): () => void {
   }
 
   schedule()
-  return () => { stopped = true; if (timer !== null) clearTimeout(timer); timer = null }
+  return {
+    stop() {
+      stopped = true
+      if (timer !== null) clearTimeout(timer)
+      timer = null
+    },
+    nudge() {
+      if (stopped || inFlight) return
+      const now = Date.now()
+      if (now - lastNudgeAt < nudgeMinIntervalMs) return
+      lastNudgeAt = now
+      void tryOnce(true)
+    },
+  }
 }

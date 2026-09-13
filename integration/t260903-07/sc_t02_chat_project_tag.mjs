@@ -166,6 +166,25 @@ async function browserScenarios(fixtureProjects) {
     return [];
   }
 
+  // 前置探针（报错必须精确，260911 仲裁实证）：chip 缺席有两种**诊断方向相反**的成因——
+  //   ①marker 文本全页缺席＝消息未上屏/会话未恢复（环境面优先，与 t4 的 env 口径一致）；
+  //   ②marker 行在场但无 chip＝渲染/着色面（产品面）。
+  // 红那轮原文只写「marker 行上未找到 chip；探得=[]」，两者混说，把环境面引向产品方向
+  // （闸因此判 2 条产品红并拦）。此处**只加证据不改判定**：行在场仍 FAIL，断言不弱化。
+  async function rowProbe(marker) {
+    return page.evaluate((m) => {
+      const body = document.body ? (document.body.textContent || '') : '';
+      return { markerOnPage: body.includes(m) };
+    }, marker).catch(() => ({ markerOnPage: null }));
+  }
+
+  function rowProbeText(p) {
+    if (p.markerOnPage === null) return '前置探针不可得（页面求值失败）';
+    return p.markerOnPage
+      ? '前置探针：marker 文本在场（行在场→查 chip 渲染/着色=产品面）'
+      : '前置探针：marker 文本全页缺席（消息未上屏/会话未恢复→环境面优先，与 t4 同口径）';
+  }
+
   async function pollSent(text, timeout = 10000) {
     const ta = page.locator('textarea:visible').first();
     const t0 = Date.now();
@@ -193,8 +212,9 @@ async function browserScenarios(fixtureProjects) {
       colorA = hit.color;
       record('t1/tag-renders', 'pass', `chip="${hit.text}" color=${hit.color}`);
     } else {
+      const probe = await rowProbe(markerA);
       record('t1/tag-renders', 'fail',
-        `marker 行上未找到文本=「${tag0.key}」的 chip；探得=${JSON.stringify(chips).slice(0, 200)}`);
+        `marker 行上未找到文本=「${tag0.key}」的 chip；探得=${JSON.stringify(chips).slice(0, 200)}；${rowProbeText(probe)}`);
     }
   }
 
@@ -207,7 +227,10 @@ async function browserScenarios(fixtureProjects) {
       if (hit && colorA) {
         record('t2/same-key-same-color', hit.color === colorA ? 'pass' : 'fail',
           hit.color === colorA ? `stable ${colorA}` : `${colorA} → ${hit.color}`);
-      } else record('t2/same-key-same-color', 'fail', `chip 探得=${JSON.stringify(chips).slice(0, 160)}`);
+      } else {
+        const probe2 = await rowProbe(markerA2);
+        record('t2/same-key-same-color', 'fail', `chip 探得=${JSON.stringify(chips).slice(0, 160)}；${rowProbeText(probe2)}`);
+      }
     } else record('t2/same-key-same-color', 'env_fail', 'second send failed (env)');
   }
 
@@ -221,7 +244,10 @@ async function browserScenarios(fixtureProjects) {
       if (hit && colorA) {
         record('t3/different-key-different-color', hit.color !== colorA ? 'pass' : 'fail',
           `${tag0.key}=${colorA} vs ${tag1.key}=${hit.color}`);
-      } else record('t3/different-key-different-color', 'fail', `chip 探得=${JSON.stringify(chips).slice(0, 160)}`);
+      } else {
+        const probeB = await rowProbe(markerB);
+        record('t3/different-key-different-color', 'fail', `chip 探得=${JSON.stringify(chips).slice(0, 160)}；${rowProbeText(probeB)}`);
+      }
     } else record('t3/different-key-different-color', 'env_fail', 'send failed (env)');
   } else {
     record('t3/different-key-different-color', 'env_fail', 'fixture has <2 projects with tickets');

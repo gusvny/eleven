@@ -3423,27 +3423,58 @@ const state$1 = {
 };
 /** 归一化工单 id 引用（字符串白名单：t\\d{6}-\\d{2} 口径由调用方先行过滤）。 */
 function addTicketsOfProject(key, ticketIds) {
+	const fresh = /* @__PURE__ */ new Set();
+	for (const tid of ticketIds) if (typeof tid === "string" && tid !== "") fresh.add(tid);
+	const prev = [];
+	for (const [tid, k] of Array.from(state$1.projectByTicket)) if (k === key) prev.push(tid);
+	if (prev.length === fresh.size && prev.every((tid) => fresh.has(tid))) return false;
 	for (const [tid, k] of Array.from(state$1.projectByTicket)) if (k === key) state$1.projectByTicket.delete(tid);
-	for (const tid of ticketIds) if (typeof tid === "string" && tid !== "") state$1.projectByTicket.set(tid, key);
+	for (const tid of fresh) state$1.projectByTicket.set(tid, key);
+	return true;
+}
+const changeListeners = /* @__PURE__ */ new Set();
+/** 订阅索引变更（仅实际变化触发）。返回退订函数（幂等）。 */
+function onProjectTagIndexChange(listener) {
+	changeListeners.add(listener);
+	return () => {
+		changeListeners.delete(listener);
+	};
+}
+function notifyIndexChange() {
+	for (const l of Array.from(changeListeners)) try {
+		l();
+	} catch {}
 }
 /**
 * 发布项目注册表（/wf/projects 整体一个请求，成功才调；失败不发）。
 * 外部发布即关停 decorator 兜底自取。畸形条目跳过，不 throw。
+* 数据实际变化才通知订阅者（同值重发=10s 轮询常态，不惊扰）。
 */
 function publishProjects(entries) {
 	if (!Array.isArray(entries)) return;
 	state$1.externallyPublished = true;
-	state$1.projectDirs.clear();
+	const next = /* @__PURE__ */ new Map();
 	for (const e of entries) {
 		const key = e?.key;
 		const dirs = e?.dirs;
 		if (typeof key !== "string" || key === "" || !Array.isArray(dirs)) continue;
-		state$1.projectDirs.set(key, dirs.filter((d) => typeof d === "string" && d !== ""));
+		next.set(key, dirs.filter((d) => typeof d === "string" && d !== ""));
 	}
+	let changed = next.size !== state$1.projectDirs.size;
+	if (!changed) for (const [k, v] of next) {
+		const cur = state$1.projectDirs.get(k);
+		if (cur === void 0 || cur.length !== v.length || v.some((d, i) => cur[i] !== d)) {
+			changed = true;
+			break;
+		}
+	}
+	state$1.projectDirs = next;
+	if (changed) notifyIndexChange();
 }
 /**
 * 逐项目发布工单 id → 项目映射（仅在该项目 fetch 成功分支调用）。
 * last-known-good 合并：tickets 空 且 该项目已有旧映射 → 保留旧值 + warn 一次。
+* 数据实际变化才通知订阅者。
 */
 function publishProjectEntry(projectKey, ticketIds) {
 	if (typeof projectKey !== "string" || projectKey === "") return;
@@ -3456,7 +3487,7 @@ function publishProjectEntry(projectKey, ticketIds) {
 		}
 		return;
 	}
-	addTicketsOfProject(projectKey, clean);
+	if (addTicketsOfProject(projectKey, clean)) notifyIndexChange();
 }
 /** 只读快照（复制 Map 引用不计成本：装饰器每次扫描只读一次）。 */
 function readProjectTagIndex() {
@@ -3468,7 +3499,10 @@ function readProjectTagIndex() {
 }
 /**
 * 装饰器兜底自取：单态为空时拉 /wf/projects + 各项目 /wf/tickets?project=，
-* 60s 重试直至有数据或侧栏外部发布。返回停止函数（全终态回收：清定时器）。
+* 60s 重试直至有数据或侧栏外部发布。返回句柄：stop() 清定时器全终态回收；
+* nudge() 绕过 hasData/外部发布停止条件单次强取（那两个条件防的是**定时轮询
+* 双跑**，不防「数据源落后于刚建成的新票」），受三闸约束：在途去重、最小间隔
+* （nudgeMinIntervalMs，默认 5s）、（引用级去重在装饰器侧做——它看得到行）。
 * 所有失败路径静默降级（console.warn 一次），不 throw、不影响装饰器主循环。
 */
 function startProjectIndexFallback(opts) {
@@ -3476,13 +3510,18 @@ function startProjectIndexFallback(opts) {
 	const initialDelayMs = typeof opts.initialDelayMs === "number" ? opts.initialDelayMs : 0;
 	const retryIntervalMs = typeof opts.retryIntervalMs === "number" ? opts.retryIntervalMs : 6e4;
 	const maxAttempts = typeof opts.maxAttempts === "number" ? opts.maxAttempts : 60;
+	const nudgeMinIntervalMs = typeof opts.nudgeMinIntervalMs === "number" ? opts.nudgeMinIntervalMs : 5e3;
 	let timer = null;
 	let stopped = false;
 	let warned = false;
 	let attempts = 0;
-	async function tryOnce() {
-		if (stopped || state$1.externallyPublished || readProjectTagIndex().hasData) return;
-		attempts++;
+	let inFlight = false;
+	let lastNudgeAt = 0;
+	async function tryOnce(force = false) {
+		if (stopped || inFlight) return;
+		if (!force && (state$1.externallyPublished || readProjectTagIndex().hasData)) return;
+		inFlight = true;
+		if (!force) attempts++;
 		try {
 			const list = (await fetchImpl("/sandbar-workbench/api/wf/projects").then((r) => r.json()))?.result?.projects ?? [];
 			if (!Array.isArray(list) || list.length === 0) throw new Error("projects 列表为空/畸形");
@@ -3504,6 +3543,8 @@ function startProjectIndexFallback(opts) {
 				warned = true;
 				console.warn("[workbench] chat 项目 tag 索引兜底拉取失败（将持续低频重试）：", String(err instanceof Error ? err.message : err));
 			}
+		} finally {
+			inFlight = false;
 		}
 	}
 	function schedule() {
@@ -3518,10 +3559,19 @@ function startProjectIndexFallback(opts) {
 		}, attempts === 0 ? initialDelayMs : retryIntervalMs);
 	}
 	schedule();
-	return () => {
-		stopped = true;
-		if (timer !== null) clearTimeout(timer);
-		timer = null;
+	return {
+		stop() {
+			stopped = true;
+			if (timer !== null) clearTimeout(timer);
+			timer = null;
+		},
+		nudge() {
+			if (stopped || inFlight) return;
+			const now = Date.now();
+			if (now - lastNudgeAt < nudgeMinIntervalMs) return;
+			lastNudgeAt = now;
+			tryOnce(true);
+		}
 	};
 }
 //#endregion
@@ -3545,15 +3595,20 @@ function startProjectIndexFallback(opts) {
 *   杜绝误伤自有/同形节点。
 * - ✅ 锚丢失显式降级：扫描前验 document isConnected；失联置 stopped、断 Observer、
 *   warn 一次后停手——不进入反复重探风暴。
-* - ✅ 全终态回收四项：①断 MutationObserver；②window/document 级监听：本机制无（不带）；
-*   ③摘自铸物：head 里的 style 元素 remove + 自记账 Set 里全部已设属性 removeAttribute
-*   （只摘自己设过的，绝不动出厂节点）；④降级广播：console.warn 留痕（不新增横幅面）。
+* - ✅ 全终态回收五项：①断 MutationObserver；②退订索引变更通知（t260911-06 新增，
+*   onProjectTagIndexChange 的退订函数）；③兜底自取句柄 stop（定时器清理+nudge 停）；
+*   ④摘自铸物：head 里的 style 元素 remove + 自记账 Set 里全部已设属性 removeAttribute
+*   （只摘自己设过的，绝不动出厂节点）；⑤降级广播：console.warn 留痕（不新增横幅面）。
 * - ✅「移除自铸节点」语义（非「还原出厂值」）：本机制不动任何出厂属性，故无还原义务，
 *   卸载=移除自铸物——与 useHideFactoryNewSession 的「还原出厂 display」是两类，不混写。
 * - ✅ bounded 上溯 ≤10 层：本机制按属性直接 querySelectorAll，无上溯（不带，理由注明）。
 * - ✅ 幂等先查再设：属性同值跳过；style 文本同值跳过——React 重渲染反复触发也不抖。
 * - ✅ MutationObserver 兜防复活：盯 body 子树 childList（同 metrics-entry 先例），
 *   React 重建行节点后重设属性；attributes 不盯（自有属性无人动）。
+* - ✅ 索引数据落地即补扫（t260911-06，260911 夜「新行无 chip、旧行有」间歇红收口）：
+*   订阅索引变更通知（外部发布/nudge 成功且数据实际变化 → scan）+ scan 发现
+*   「带票号未归属」的新引用时按需 nudge 单次强取（有界：在途去重/最小间隔/
+*   按引用去重）——堵住「数据到了没人扫、新票映射要干等下个 10s 轮询」两缺口。
 * - ❌ body 级 overlay 贴 rect（metrics-entry 最终形态）：不带——tag 需逐消息行贴装且
 *   随流式增长移动，fixed overlay 逐帧跟 rect 成本与脆性远高于属性锚。
 *
@@ -3618,6 +3673,28 @@ function applyProjectTags(root, projectByTicket) {
 	return touched;
 }
 /**
+* 找第一个「带工单号引用却未归属」的用户行引用（t260911-06 新增，nudge 判据）。
+* 仅统计**当前未装饰**的行——已装饰行不参与；映射里查不到该引用才返回。
+* 纯 DOM 逻辑，UT 桩直测。返回 null=没有这种行（不 nudge）。
+*/
+function firstUnmappedTicketRef(root, projectByTicket) {
+	let rows;
+	try {
+		rows = Array.from(root.querySelectorAll(USER_ROW_SELECTOR));
+	} catch {
+		return null;
+	}
+	for (const row of rows) {
+		const el = row;
+		if (typeof el.getAttribute !== "function") continue;
+		if (el.closest(`[${OWN_SCOPE_ATTR}]`) !== null) continue;
+		if (el.getAttribute("data-wb-projtag") !== null) continue;
+		const m = (typeof el.textContent === "string" ? el.textContent : "").match(TICKET_REF_RE);
+		if (m && !projectByTicket.has(m[0])) return m[0];
+	}
+	return null;
+}
+/**
 * useEffect 形态入口（F1 防呆）：返回的是**清理函数**本身，
 * 可直接 `useEffect(() => startChatProjectTagEffect(...), [])`——useEffect 只把
 * 返回函数登记为 cleanup，返回 handle 对象会被静默忽略（F1 死因：sidebar 直接
@@ -3658,6 +3735,7 @@ function startChatProjectTag(opts) {
 	refreshCss();
 	let stopped = false;
 	let warnedDisconnected = false;
+	const nudgedRefs = /* @__PURE__ */ new Set();
 	const scan = () => {
 		if (stopped) return;
 		if (!doc.documentElement.isConnected) {
@@ -3669,14 +3747,25 @@ function startChatProjectTag(opts) {
 			return;
 		}
 		refreshCss();
-		applyProjectTags(doc, readProjectTagIndex().projectByTicket);
+		const idx = readProjectTagIndex();
+		applyProjectTags(doc, idx.projectByTicket);
+		if (idx.hasData) {
+			const ref = firstUnmappedTicketRef(doc, idx.projectByTicket);
+			if (ref !== null && !nudgedRefs.has(ref)) {
+				nudgedRefs.add(ref);
+				indexFallback.nudge();
+			}
+		}
 	};
 	const observer = new MutationObserver(scan);
 	observer.observe(doc.body ?? doc.documentElement, {
 		childList: true,
 		subtree: true
 	});
-	const stopFallback = startProjectIndexFallback({
+	const unsubscribeIndexChange = onProjectTagIndexChange(() => {
+		if (!stopped) scan();
+	});
+	const indexFallback = startProjectIndexFallback({
 		fetchImpl: opts.fetchImpl,
 		initialDelayMs: opts.fallback?.initialDelayMs ?? 0,
 		retryIntervalMs: opts.fallback?.retryIntervalMs,
@@ -3691,7 +3780,8 @@ function startChatProjectTag(opts) {
 			if (stopped) return;
 			stopped = true;
 			observer.disconnect();
-			stopFallback();
+			unsubscribeIndexChange();
+			indexFallback.stop();
 			style.remove();
 			for (const row of Array.from(doc.querySelectorAll(`[${PROJTAG_ATTR}]`))) row.removeAttribute(PROJTAG_ATTR);
 		}

@@ -213,7 +213,7 @@ section('C startProjectIndexFallback：成功/失败重试/畸形响应')
     }
     return { json: async () => ({ result: { tickets: [{ id: 't260903-07' }] } }) }
   }
-  let stop = startProjectIndexFallback({
+  let fb = startProjectIndexFallback({
     fetchImpl: goodFetch, initialDelayMs: 1, retryIntervalMs: 5, maxAttempts: 3,
     onData: () => { onDataCalls++ },
   })
@@ -223,12 +223,12 @@ section('C startProjectIndexFallback：成功/失败重试/畸形响应')
   const callsAtSuccess = calls
   await tick(30)
   ok(calls === callsAtSuccess, '有数据后不再重试（停止条件）')
-  stop()
+  fb.stop()
 
   // All fail -> retries to the cap, then stops
   _resetProjectTagIndex()
   let failCalls = 0
-  stop = startProjectIndexFallback({
+  fb = startProjectIndexFallback({
     fetchImpl: async () => { failCalls++; throw new Error('boom') },
     initialDelayMs: 1, retryIntervalMs: 2, maxAttempts: 3,
   })
@@ -237,27 +237,27 @@ section('C startProjectIndexFallback：成功/失败重试/畸形响应')
   const c = failCalls
   await tick(20)
   ok(failCalls === c, '达上限后停手（防永久轮询）')
-  stop()
+  fb.stop()
 
   // Malformed response does not crash
   _resetProjectTagIndex()
-  stop = startProjectIndexFallback({
+  fb = startProjectIndexFallback({
     fetchImpl: async () => ({ json: async () => ({ result: { projects: 'not-an-array' } }) }),
     initialDelayMs: 1, retryIntervalMs: 2, maxAttempts: 2,
   })
   await tick(40)
   ok(!readProjectTagIndex().hasData, '畸形响应：不炸、单态保持空（tag 不渲染）')
-  stop()
+  fb.stop()
 
   // External publish stops the fallback immediately
   _resetProjectTagIndex()
   let extCalls = 0
-  stop = startProjectIndexFallback({ fetchImpl: goodFetch, initialDelayMs: 1, retryIntervalMs: 2, maxAttempts: 50 })
+  fb = startProjectIndexFallback({ fetchImpl: goodFetch, initialDelayMs: 1, retryIntervalMs: 2, maxAttempts: 50 })
   publishProjects([{ key: 'x', dirs: [] }]) // published from outside the sidebar
   await tick(20)
   extCalls = calls
   await tick(20)
-  stop()
+  fb.stop()
   ok(calls === extCalls, '外部发布后兜底自取停（无双轮询面）')
 }
 

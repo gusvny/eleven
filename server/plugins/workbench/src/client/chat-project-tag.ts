@@ -17,15 +17,20 @@
  *   杜绝误伤自有/同形节点。
  * - ✅ 锚丢失显式降级：扫描前验 document isConnected；失联置 stopped、断 Observer、
  *   warn 一次后停手——不进入反复重探风暴。
- * - ✅ 全终态回收四项：①断 MutationObserver；②window/document 级监听：本机制无（不带）；
- *   ③摘自铸物：head 里的 style 元素 remove + 自记账 Set 里全部已设属性 removeAttribute
- *   （只摘自己设过的，绝不动出厂节点）；④降级广播：console.warn 留痕（不新增横幅面）。
+ * - ✅ 全终态回收五项：①断 MutationObserver；②退订索引变更通知（t260911-06 新增，
+ *   onProjectTagIndexChange 的退订函数）；③兜底自取句柄 stop（定时器清理+nudge 停）；
+ *   ④摘自铸物：head 里的 style 元素 remove + 自记账 Set 里全部已设属性 removeAttribute
+ *   （只摘自己设过的，绝不动出厂节点）；⑤降级广播：console.warn 留痕（不新增横幅面）。
  * - ✅「移除自铸节点」语义（非「还原出厂值」）：本机制不动任何出厂属性，故无还原义务，
  *   卸载=移除自铸物——与 useHideFactoryNewSession 的「还原出厂 display」是两类，不混写。
  * - ✅ bounded 上溯 ≤10 层：本机制按属性直接 querySelectorAll，无上溯（不带，理由注明）。
  * - ✅ 幂等先查再设：属性同值跳过；style 文本同值跳过——React 重渲染反复触发也不抖。
  * - ✅ MutationObserver 兜防复活：盯 body 子树 childList（同 metrics-entry 先例），
  *   React 重建行节点后重设属性；attributes 不盯（自有属性无人动）。
+ * - ✅ 索引数据落地即补扫（t260911-06，260911 夜「新行无 chip、旧行有」间歇红收口）：
+ *   订阅索引变更通知（外部发布/nudge 成功且数据实际变化 → scan）+ scan 发现
+ *   「带票号未归属」的新引用时按需 nudge 单次强取（有界：在途去重/最小间隔/
+ *   按引用去重）——堵住「数据到了没人扫、新票映射要干等下个 10s 轮询」两缺口。
  * - ❌ body 级 overlay 贴 rect（metrics-entry 最终形态）：不带——tag 需逐消息行贴装且
  *   随流式增长移动，fixed overlay 逐帧跟 rect 成本与脆性远高于属性锚。
  *
@@ -41,7 +46,7 @@
  */
 
 import { projectColor, projectTagCssRules, isProjectKeyLike } from '../shared/project-color.ts'
-import { readProjectTagIndex, startProjectIndexFallback } from './project-tag-index.ts'
+import { onProjectTagIndexChange, readProjectTagIndex, startProjectIndexFallback } from './project-tag-index.ts'
 
 /** 自有属性名（tag 值=project key）。 */
 export const PROJTAG_ATTR = 'data-wb-projtag'
@@ -89,6 +94,32 @@ export function applyProjectTags(root: ParentNode, projectByTicket: ReadonlyMap<
     if (cur !== key) { el.setAttribute(PROJTAG_ATTR, key); touched++ }
   }
   return touched
+}
+
+/**
+ * 找第一个「带工单号引用却未归属」的用户行引用（t260911-06 新增，nudge 判据）。
+ * 仅统计**当前未装饰**的行——已装饰行不参与；映射里查不到该引用才返回。
+ * 纯 DOM 逻辑，UT 桩直测。返回 null=没有这种行（不 nudge）。
+ */
+export function firstUnmappedTicketRef(
+  root: ParentNode,
+  projectByTicket: ReadonlyMap<string, string>,
+): string | null {
+  let rows: Element[]
+  try {
+    rows = Array.from(root.querySelectorAll(USER_ROW_SELECTOR))
+  } catch {
+    return null
+  }
+  for (const row of rows) {
+    const el = row as Element
+    if (typeof el.getAttribute !== 'function') continue
+    if (el.closest(`[${OWN_SCOPE_ATTR}]`) !== null) continue
+    if (el.getAttribute(PROJTAG_ATTR) !== null) continue
+    const m = (typeof el.textContent === 'string' ? el.textContent : '').match(TICKET_REF_RE)
+    if (m && !projectByTicket.has(m[0])) return m[0]
+  }
+  return null
 }
 
 export interface ChatProjectTagOptions {
@@ -150,6 +181,8 @@ export function startChatProjectTag(opts: ChatProjectTagOptions): ChatProjectTag
   // ── 扫描（幂等；锚失联降级）──
   let stopped = false
   let warnedDisconnected = false
+  // nudge 按引用去重：同一票号只强取一次（假票号/真未建票不无限重试；新引用才再取）。
+  const nudgedRefs = new Set<string>()
   const scan = (): void => {
     if (stopped) return
     if (!doc.documentElement.isConnected) {
@@ -161,15 +194,30 @@ export function startChatProjectTag(opts: ChatProjectTagOptions): ChatProjectTag
       return
     }
     refreshCss()
-    applyProjectTags(doc, readProjectTagIndex().projectByTicket)
+    const idx = readProjectTagIndex()
+    applyProjectTags(doc, idx.projectByTicket)
+    // t260911-06：索引已有数据但行里的票号归属不了 = 数据源落后于刚建成的新票
+    //（此前只能干等侧栏下一个 10s 轮询周期，负载窗内即「新行无 chip、旧行有」
+    // 的间歇红）。按需单次强取：取到 → publish → 变更通知 → 本装饰器重扫补装。
+    if (idx.hasData) {
+      const ref = firstUnmappedTicketRef(doc, idx.projectByTicket)
+      if (ref !== null && !nudgedRefs.has(ref)) {
+        nudgedRefs.add(ref)
+        indexFallback.nudge()
+      }
+    }
   }
 
   // ── Observer 兜防复活：React 重建行节点后重设（body 子树 childList，同 metrics-entry 先例）──
   const observer = new MutationObserver(scan)
   observer.observe(doc.body ?? doc.documentElement, { childList: true, subtree: true })
 
+  // ── 索引变更订阅（t260911-06 补缺）：外部发布（侧栏轮询/nudge 成功）数据实际
+  //    变化即重扫——此前数据落地后无人重扫，行是否补装饰全看碰巧的无关 DOM 变动。──
+  const unsubscribeIndexChange = onProjectTagIndexChange(() => { if (!stopped) scan() })
+
   // ── 索引兜底自取（侧栏未挂载/窄模式时 60s 低频；外部发布即自停）──
-  const stopFallback = startProjectIndexFallback({
+  const indexFallback = startProjectIndexFallback({
     fetchImpl: opts.fetchImpl,
     initialDelayMs: opts.fallback?.initialDelayMs ?? 0,
     retryIntervalMs: opts.fallback?.retryIntervalMs,
@@ -184,7 +232,8 @@ export function startChatProjectTag(opts: ChatProjectTagOptions): ChatProjectTag
       if (stopped) return
       stopped = true
       observer.disconnect()
-      stopFallback()
+      unsubscribeIndexChange()
+      indexFallback.stop()
       // 摘自铸物：style 元素 + 全部已设自有属性（只动自己的）。
       style.remove()
       for (const row of Array.from(doc.querySelectorAll(`[${PROJTAG_ATTR}]`))) {

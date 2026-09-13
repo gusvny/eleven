@@ -17,6 +17,9 @@
 //      [aria-label="知识库"] 不在场（旧提法退役的入口面）。
 //   T2 键盘可达：图标 .focus() 成功（可聚焦性）→ keyboard Enter →
 //      中列发起 GET /api/wf/docs/tree?scope=docs 且 200（目录加载的用户可感知面）。
+//      并发载荷下该腿曾间歇红（260911 仲裁实证：空闲 6/6 绿/请求 105ms，争抢下 1/3 红）
+//      ——按 KI-072 处置方向②加**有界重试 ≤3 轮**（断言不变：三轮全无=真红；证据记命中轮次
+//      与焦点归属，不掩盖竞态频率）。
 //   T3 active 态：切换后图标 class 含 active（方案承诺排他视图高亮语言）。
 //   T4 红线：端口 ≠ 3099/7233；finally 回收进程树/浏览器/临时目录。
 //
@@ -86,13 +89,28 @@ try {
     await docIcon.focus();
     const focused = await docIcon.evaluate((el) => el === document.activeElement);
     record('entry/focusable', focused, focused ? '图标可键盘聚焦' : '图标 focus() 后非 activeElement（不可聚焦/被吞）');
-    const hitsBefore = docTreeHits.length;
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(1500);
-    const treeHits = docTreeHits.slice(hitsBefore);
-    const okTree = treeHits.some((h) => h.status === 200);
+    // 有界重试（≤3 轮）=KI-072 处置方向②「这些检查需加时序容忍/重试」的落地点：
+    // 260911 仲裁实证该腿在并发载荷下间歇红（单跑 3 连 2 绿 1 红、套件内 1 红；
+    // 空闲诊断 6/6 绿、请求 105ms 到达、焦点始终在手——产品行为健康，红=墙钟窗口
+    // 在争抢下不够）。**契约不变**：focus+Enter 必须触发 200 目录加载，三轮全无=真红；
+    // 证据面记录命中轮次与每轮焦点归属，使重试不掩盖竞态频率（报错必须精确）。
+    let okTree = false;
+    let treeHits = [];
+    let attempt = 0;
+    const focusLog = [];
+    for (let i = 1; i <= 3 && !okTree; i++) {
+      attempt = i;
+      await docIcon.focus();
+      const held = await docIcon.evaluate((el) => el === document.activeElement);
+      focusLog.push(`#${i}${held ? '焦点在' : '焦点丢'}`);
+      const hitsBefore = docTreeHits.length;
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(1500);
+      treeHits = docTreeHits.slice(hitsBefore);
+      okTree = treeHits.some((h) => h.status === 200);
+    }
     record('entry/enter-loads-tree', okTree,
-      okTree ? `Enter 触发 docs/tree 200：${treeHits.map((h) => h.url.split('?')[1] ?? '').join(' ; ')}` : `Enter 后无 200 的 tree 请求（hits=${JSON.stringify(treeHits)}）`);
+      okTree ? `Enter 触发 docs/tree 200：${treeHits.map((h) => h.url.split('?')[1] ?? '').join(' ; ')}（命中第 ${attempt}/3 轮；${focusLog.join(' ')}）` : `Enter 三轮后仍无 200 的 tree 请求（hits=${JSON.stringify(treeHits)}；${focusLog.join(' ')}）`);
 
     // T3 active 态（方案承诺的排他视图高亮）
     if (okTree) {
