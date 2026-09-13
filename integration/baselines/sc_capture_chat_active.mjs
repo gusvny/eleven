@@ -41,11 +41,16 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { ensureLaneBuild } from "./capture-ensure-build.mjs";
+// playwright-core 依赖解析唯一真源（t260912-01 缺陷③：位置无关四路口径）。
+import { mainRoot } from "../lib_pw_deps.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..", "..");            // lane worktree root
-const MAIN_TREE = path.resolve(REPO_ROOT, "..", "..");       // main tree (supplies playwright/dsh)
-const MAIN_UI_CHECK = path.join(MAIN_TREE, "server", "ui-check");
+// 主树解析位置无关化（t260912-01 缺陷③）：旧 `path.resolve(REPO_ROOT, "..", "..")`
+// 位置算术在非 <主仓>/.lane/<票> 布局（如宿主 260912 副本开在 /private/tmp）指错
+// 目录 → 依赖恒假缺。git-common-dir 口径=worktree 布局无关（lib_pw_deps 同款语义）。
+// SANDBAR_MAIN_ROOT 可显式覆盖主树根（lib_pw_deps 取舍清单 #1）。
+const MAIN_UI_CHECK = path.join(mainRoot(), "server", "ui-check");
 const CAPTURE_LANE = path.join(REPO_ROOT, "server", "ui-check", "capture-lane.mjs");
 
 // The 7 required views (same list as sc_capture_chat_e2e.mjs):
@@ -229,11 +234,13 @@ async function gateRedLine() {
 
 let fail = await unitGuards();
 fail += await gateRedLine();
-// 260904 migration-back guard (KI-036): when both this tree's and the main
-// tree's ui-check lack playwright-core (installing it = npm install outside
-// the host sandbox) → the C1 full chain records ENV_FAIL exit 2 instead of a
-// fake red; it re-arms by itself once the dependency is back, assertions
-// unchanged.
+// 260904 migration-back guard (KI-036; t260912-01 位置无关化): the two candidates
+// (this tree's and the main tree's ui-check, the latter resolved via
+// lib_pw_deps.mainRoot() = git-common-dir) both lack playwright-core → the C1
+// full chain records ENV_FAIL exit 2 instead of a fake red. Copy states facts
+// only (candidate paths) — no "dependency missing / sandbox" attribution that
+// would point at the environment while the real defect is layout arithmetic.
+// It re-arms by itself once the dependency is back, assertions unchanged.
 import { existsSync as _existsSync } from "node:fs";
 const _pwMissing = !_existsSync(path.join(REPO_ROOT, "server", "ui-check",
                                          "node_modules", "playwright-core"))
@@ -242,7 +249,8 @@ if (process.env.SANDBAR_CAPTURE_CHAT_ACTIVE_FORCE_ENV_FAIL === "1") {
   record("C1 capture-lane 全链", "env_fail", "SANDBAR_CAPTURE_CHAT_ACTIVE_FORCE_ENV_FAIL=1");
 } else if (_pwMissing) {
   record("C1 capture-lane 全链", "env_fail",
-    "KI-036：ui-check 缺 playwright-core（本树+主树均无），宿主沙箱外安装后本链自动恢复");
+    `KI-036：两侧候选均未探得 playwright-core（本树 ${path.join(REPO_ROOT, "server", "ui-check")}`
+    + `；主树 ${MAIN_UI_CHECK}）——依赖就位后本链自动恢复，断言面不变`);
 } else {
   await fullChain();
   fail += results.filter((r) => r.name.startsWith("C1") && r.status === "fail").length;

@@ -94,7 +94,14 @@ python3（stdlib）、docker + 测试镜像 `test-temporal:cli-1.8.3`（舞台�
 t260904-19 起必需；重建=`sh server/build-test-temporal.sh`）、temporalio SDK
 （优先 `server/engine/.venv/bin/python`）、temporal CLI
 （`server/engine/bin/temporal` 或 PATH，供给台 SA 注册与 temporal-only
-消费面需要）、playwright-core（browser 族，KI-036 三路探测缺失=ENV_FAIL）。
+消费面需要）、playwright-core（browser 族，t260912-01 起统一四路口径：
+`SANDBAR_PLAYWRIGHT_PATH` → `SANDBAR_PLAYWRIGHT_MODULE`（旧名兜底同语义）→
+裸导入 → 本树 `server/ui-check` → 主树 `server/ui-check`（主树经
+`lib_pw_deps.mjs` mainRoot()=git rev-parse --git-common-dir 位置无关解析，
+`SANDBAR_MAIN_ROOT` 可显式覆盖；泳道无 node_modules 时由主树供给）。
+探测全空=ENV_FAIL，文案点名全部候选面实路径——不做「依赖缺失/布局算错」
+式归因（t260912-01：旧 `../..` 位置算术在非 `<主仓>/.lane/<票>` 布局指错
+目录却谎报依赖缺失，已随票退役，守卫=t260912-01-pw-path-resolution）。
 
 ## 安全红线（测试自己先遵守）
 

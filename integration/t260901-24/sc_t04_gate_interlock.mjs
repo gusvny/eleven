@@ -32,6 +32,8 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+// playwright-core 依赖解析唯一真源（t260912-01 缺陷③：位置无关四路口径）。
+import { loadPlaywright, pwMissingDetail, mainRoot } from '../lib_pw_deps.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const REPO = resolve(HERE, '..', '..')
@@ -51,16 +53,14 @@ function section(t) { console.log(`\n== ${t}`) }
 
 const tmp = mkdtempSync(join(tmpdir(), 't260901-24-t04-'))
 
-// 260904 回迁守卫（KI-036）：本树与主树 ui-check 均缺 playwright-core（依赖未随迁移
-// 恢复，安装=宿主沙箱外 npm install）→ ENV_FAIL（exit 2）不假红；依赖恢复后本守卫自动生效，
-// 断言面不变。
+// 260904 回迁守卫（KI-036；t260912-01 位置无关化）：探测真源=lib_pw_deps（本树+主树
+// git-common-dir 解析+双 env 名四路）。探测全空 → ENV_FAIL（exit 2）不假红，文案只报
+// 候选面事实——不再把布局算错说成安装归因（把归因引向环境=掩盖测试自身缺陷）。
+// 依赖就位后本守卫自动生效，断言面不变。
 {
-  const pwLane = join(REPO, 'server', 'ui-check', 'node_modules', 'playwright-core')
-  const pwMain = join(resolve(REPO, '..', '..'), 'server', 'ui-check',
-                      'node_modules', 'playwright-core')
-  if (!process.env.SANDBAR_PLAYWRIGHT_MODULE && !existsSync(pwLane) && !existsSync(pwMain)) {
-    console.log('ENV_FAIL（KI-036）：ui-check 缺 playwright-core（本树+主树均无），'
-      + '宿主沙箱外安装恢复后本守卫自动生效')
+  const pw = await loadPlaywright()
+  if (!pw) {
+    console.log('ENV_FAIL（KI-036）：' + pwMissingDetail())
     process.exit(2)
   }
 }
@@ -154,10 +154,12 @@ function run(script, args, extraEnv = {}) {
       SANDBAR_UI_CAPTURE_ALLOW_SEED: '', SANDBAR_UI_CAPTURE_FIXTURES: '',
       SANDBAR_CAPTURE_FIXTURES: '',
       // 本树 ui-check 缺 playwright-core 时镜像 capture-lane 的回退：主树 ui-check
-      // （worktree 布局 <main>/.worktrees/<id> 与引擎泳道布局同构）。环境已设则不覆盖。
+      //（t260912-01：主树经 lib_pw_deps.mainRoot()=git-common-dir 解析，位置无关；
+      // 下游 capture.mjs/capture-lane.mjs 消费旧名 SANDBAR_PLAYWRIGHT_MODULE，保持该名）。
+      // 环境已设则不覆盖。
       ...(!process.env.SANDBAR_PLAYWRIGHT_MODULE && !existsSync(join(REPO, 'server', 'ui-check',
         'node_modules', 'playwright-core'))
-        ? { SANDBAR_PLAYWRIGHT_MODULE: join(resolve(REPO, '..', '..'), 'server', 'ui-check',
+        ? { SANDBAR_PLAYWRIGHT_MODULE: join(mainRoot(), 'server', 'ui-check',
             'node_modules', 'playwright-core') }
         : {}),
       ...extraEnv },

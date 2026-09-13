@@ -1,4 +1,6 @@
 import { ensureStageConsole } from '../lib_stage_console.mjs';
+// playwright-core 依赖解析唯一真源（t260912-01 缺陷③：位置无关四路口径）。
+import { loadPlaywright, pwMissingDetail } from '../lib_pw_deps.mjs';
 // Integration scenario t260903-07 ② — global chat project tag coloring contract.
 //
 // Intent (black-box, user perspective):
@@ -83,13 +85,9 @@ const CHIP_PROBE = (marker) => {
 };
 
 async function browserScenarios(fixtureProjects) {
-  let pw = null;
-  for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core',
-    new URL('../../server/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href]) {
-    if (!c) continue;
-    try { pw = await import(c); break; } catch { /* next */ }
-  }
-  if (!pw) { record('browser/deps', 'env_fail', 'playwright-core unavailable'); return; }
+  // t260912-01：四路探测单源（lib_pw_deps），布局无关；失败文案只报事实不归因环境。
+  const pw = await loadPlaywright();
+  if (!pw) { record('browser/deps', 'env_fail', pwMissingDetail()); return; }
   let browser, context, page;
   try {
     browser = await pw.chromium.launch({ channel: 'chrome', headless: true }).catch(() => pw.chromium.launch({ headless: true }));

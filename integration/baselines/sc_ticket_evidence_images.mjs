@@ -36,6 +36,8 @@
 // env_fail>0 → exit 2.
 
 import { ensureStageConsole } from '../lib_stage_console.mjs';
+// playwright-core 依赖解析唯一真源（t260912-01 缺陷③：位置无关四路口径）。
+import { loadPlaywright, pwMissingDetail } from '../lib_pw_deps.mjs';
 import { mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -287,13 +289,9 @@ async function faultSurface() {
 }
 
 async function uiScenario() {
-  let pw = null;
-  for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core',
-    new URL('../../server/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href]) {
-    if (!c) continue;
-    try { pw = await import(c); break; } catch { /* next */ }
-  }
-  if (!pw) { record('ui/drawer-images', 'env_fail', 'playwright-core unavailable'); return; }
+  // t260912-01：四路探测单源（lib_pw_deps），布局无关；失败文案只报事实不归因环境。
+  const pw = await loadPlaywright();
+  if (!pw) { record('ui/drawer-images', 'env_fail', pwMissingDetail()); return; }
   let browser;
   try {
     browser = await pw.chromium.launch({ channel: 'chrome', headless: true }).catch(() => pw.chromium.launch({ headless: true }));

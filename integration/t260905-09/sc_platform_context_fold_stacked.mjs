@@ -34,6 +34,8 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { STAGE_SEED_ROW_SEL } from '../lib_stage_console.mjs';
+// playwright-core 依赖解析唯一真源（t260912-01 缺陷③：位置无关四路口径）。
+import { loadPlaywright, pwMissingDetail } from '../lib_pw_deps.mjs';
 import {
   stageBase, refuseProductionConsole, makeResults, consoleHealthy,
   loadFixtures, injectPlatformBubbles, foldProbe, clickChip,
@@ -59,13 +61,9 @@ const launchBrowser = async () => {
 };
 
 // ---- T0 卫兵链 ----
-const localPw = new URL('../../server/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
-let pw = null;
-for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core', localPw]) {
-  if (!c) continue;
-  try { pw = await import(c); break; } catch { /* next */ }
-}
-if (!pw) { record('t0/browser-deps', 'env_fail', 'playwright-core unavailable'); summarize(); }
+// t260912-01：四路探测单源（lib_pw_deps），布局无关；失败文案只报事实不归因环境。
+const pw = await loadPlaywright();
+if (!pw) { record('t0/browser-deps', 'env_fail', pwMissingDetail()); summarize(); }
 if (!(await consoleHealthy(BASE))) {
   record('t0/console-health', 'env_fail', `test console not reachable at ${BASE} (see integration/README.md provisioning)`);
   summarize();

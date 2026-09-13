@@ -786,7 +786,7 @@ SCENARIOS = [
      "失败分类协议 pytest 生产端映射真跑（t260910-13 锚⑤，灰盒 L2 缝守卫）：微型真 pytest（非 mock，KI-049 同族缝）钉死 conftest_result_protocol 经 -p 显式装配（cwd=integration，不依赖 pytest_plugins 非根 conftest 的版本敏感行为，方案 K5）——ERROR→not-checked（setup 炸点证据在案）、FAILED→fail、PASSED→pass；相位合并：teardown ERROR 不翻转已判 case 且噪声附记证据不静默吞；一行=一用例不变式（四用例恰四行）；规范行最小字段完备（dur_s 数值=巡检 B 面耗时趋势数据源、started/git_sha/suite 在场）、evidence 单行无内嵌换行。与 developer L1（pytest_runtest_logreport 钩子单测）不同层：本条锁真 pytest 进程 stdout 的生产端输出缝。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；pytest 缺失（venv 与系统均无）=ENV_FAIL exit 2 点名。微型测试文件落系统临时目录，零真仓写入",
      "python3 integration/t260910-13/sc_t260910_13_failure_protocol_pytest_source.py", "ro"),
     ("t260910-13-executor-fail-closed",
-     "执行器条目完整性 fail-closed（t260911 仲裁 code-fault 打回的 L1 钉，monkeypatch 级）：复刻池级 submit 不存句柄 → 异常不上浮 → 条目静默丢失照常出绿的实锤形态（004654 报告），钉三层修复——池级异常句柄保留逐个 .result() 上浮=响亮产品红中止（FAIL [__executor__] 点名）；spawn OSError 在 _run_entry 内按协议分类落红（not-checked×external，evidence 点名原文，条目不丢 ran==在册数）；ran==在册数=唯一机械不变式（自校验 complete 红 + INTEG_SUMMARY.expected=在册数供闸复核，闸侧腿见 failure-protocol-gate S9c）。与 failure-protocol-gate intent 分界：彼守闸解析与归属，本条守执行器自身条目完整性，同票两面不互替",
+     "执行器条目完整性 fail-closed（t260911 仲裁 code-fault 打回的 L1 钉，monkeypatch 级）：复刻池级 submit 不存句柄 → 异常不上浮 → 条目静默丢失照常出绿的实锤形态（004654 报告），钉三层修复——池级异常句柄保留逐个 .result() 上浮=响亮产品红中止（FAIL [__executor__] 点名）；spawn OSError 在 _run_entry 内按协议分类落红（not-checked×external，evidence 点名原文，条目不丢 ran==在册数）；ran==在册数=唯一机械不变式（自校验 complete 红 + INTEG_SUMMARY.expected=在册数供闸复核，闸侧腿见 failure-protocol-gate S9c）。注入锚=条目面 spawn（argv[0]==\"/bin/sh\"）且与 _docker_hygiene 解耦、双桩 serial 顺序由构造确定（t260912-01 缺陷①：旧「第 N 次 subprocess.run」注入被 hygiene 三连 subprocess.run 先行消费+except 吞掉=B 层假红守门狗自身失效）。与 failure-protocol-gate intent 分界：彼守闸解析与归属，本条守执行器自身条目完整性，同票两面不互替",
      "python3 integration/t260910-13/sc_t260910_13_executor_fail_closed.py", "ro"),
 
     ("t260908-02-mixed-payload",
@@ -899,6 +899,30 @@ SCENARIOS = [
     ("t260911-01-filter-contract-guard",
      "过程物过滤口径单一真源契约护栏（t260911-01 场景②，读源断言 L2）：workbench 过滤表（changes.ts PROCESS_ARTIFACT_DIRS）⊇ 引擎两表现有排除（agent_activities.SETTLE_PATHSPEC + verify_lane.RUNTIME_PREFIXES，ast 抠字面量、跨语言无法 import 真源）——白名单可扩但不得丢 .dsh/.sandbar/.suyou 已有覆盖（丢=引擎自管过程物回流人审 diff 面，2b 复发形态即红）；派发白名单五目录（.sandbar/.dsh/out/__pycache__/node_modules）在表；闸3=handler 透传一跳护栏（node.ts computeTicketDiff 调用参数必须透传 repo_worktrees——t260908-01 同族「host 挑字段漏透传→场景全绿 UI 全瞎」断点防线）；挂账面可判定不判红——workbench 有而引擎侧没有的差集逐行打 LEDGER（out/pycache 误代落盘实案根因的引擎根修挂账，根修落地后差集收空即可销账）。纯 stdlib 零环境依赖",
      "python3 integration/t260911-01/sc_t260911_01_filter_contract_guard.py"),
+    # ---- t260912-01: 集测三护栏缺陷回归（看门狗注入解耦 / 汇总计数单源化 / 依赖解析位置无关） ----
+    ("t260912-01-summary-count-purity",
+     "执行器汇总两套计数单源化回归（t260912-01 缺陷②，in-process monkeypatch 级，stdlib 秒级零 docker）："
+     "合成「场景 stdout 混入嵌套 JSON」样（嵌套 pass 规范行 + exit 1）→ SCENARIOS 行与 INTEG_SUMMARY 行"
+     "逐字段一致且真红不被顶替（子进程 stdout 不进 recount 输入——灌水缝构造性移除）；通过桩混入嵌套 JSON/"
+     "畸形规范行（{not-json、[1,2、缺字段行）→ 不炸不计数两行照旧一致；闸同款解析腿（对执行器自身 stdout 按 "
+     "verify_lane strip→首字符→parse 口径重算）== INTEG_SUMMARY 且候选名集无嵌套名（尾段回显中和面闭合："
+     "否则闸 recount_mismatch 错归因假红）；负锁——真灌水（recount 面多出一条 pass）、漏收（两条目缺一行明细，"
+     "明细 ran<rc ran）、综合行与 rc 相矛盾（分叉双向）任一注入必 FAIL [__executor__] 汇总两套计数分叉 + rc=1"
+     "（谎报即红）；_counts_mismatch 纯函数单元三态（一致 None/灌水点名/漏收点名；空明细=声明降级面返 None，"
+     "单条目漏收不可机械检出的边界在案）；夹具桩 _docker_hygiene（被测面=结算计数，不耦合 docker 环境）",
+     "python3 integration/t260912-01/sc_t260912_01_summary_count_purity.py", "ro"),
+    ("t260912-01-pw-path-resolution",
+     "浏览器场景 playwright-core 依赖解析位置无关守卫（t260912-01 缺陷③，读源断言 L2 + 运行互证）："
+     "八条 mjs（t260903-07 两/t260904-07/t260905-09/t260901-24/baselines 三）统一引用 lib_pw_deps.mjs 单源"
+     "（mainRoot=git rev-parse --git-common-dir 位置无关 + 四路探测 + SANDBAR_PLAYWRIGHT_PATH/MODULE 双 env 名）；"
+     "禁词面=主树位置算术（resolve(REPO,'..','..')、path.resolve(REPO_ROOT,..,..)、MAIN_TREE、"
+     "ui-check/node_modules/playwright-core 候选字面量）与谎报文案（playwright-core unavailable/沙箱外安装/"
+     "本树+主树均无——布局算错不得说成依赖缺失），泳道根 HERE/../.. 形态显式豁免（位置无关合法面）；"
+     "变异自证防恒真四样本（主树算术必咬/合法泳道根必过/干净样过/文案样必咬）；mainRoot 与 git 直呼双算互证；"
+     "临时主仓+git worktree 位置无关腿：非 .lane 布局（任意父目录）下 loadPlaywright() 组合路径真装载、"
+     "mainRoot 落主仓内（git worktree add 终态回收+worktree list 零残留）；主树 playwright-core 可 import 且"
+     "来源路径==mainRoot 拼出路径（防裸包侥幸命中盖住第④路缺陷）。git 缺席=ENV_FAIL exit 2 点名",
+     "node integration/t260912-01/sc_t260912_01_pw_path_resolution.mjs", "ro"),
 
     # ---- t260912-02: 测试台生命周期三修（去名额闸留保险丝 / 残台自动认领并拆 / 起台自管网段）----
     # 六条 intent 互不重叠：burst=爆发规模×地址池零复发×清场（A/B/G）；
@@ -948,7 +972,6 @@ SCENARIOS = [
     ("t260913-03-executor-pool-exclude-l1",
      "执行器池排除旋钮机械行为自证（t260913-03）：被排除池条目不在本轮在册数（不计 ran/expected，expected=本轮在册且 ran==expected 不变式保持）；点名行「本轮跳过池=…（少 N 条）」原文与两次点名；INTEG_SUMMARY 仅在排除生效时增 excluded_pools/excluded_count 键（缺省键集逐键全等=零新增）；非法 token 剥离+响亮 WARN 且 rc 语义不变；零命中响亮 WARN 不红；缺省路径与 git HEAD 改前执行器在假表上逐字节一致（源码级 A/B）；--print-pool-assets 真注册表派生（未知池 exit 2 点名、cmd token ∪ import 闭包 ∪ integration/ 根共享基建面、环境前缀 token 不误收、非被排除池资产不入面）；既有两条执行器电池在排除 env 继承下照常绿（回归腿）。与 t260904-12-executor-three-state（三态出口契约）/t260910-13-executor-fail-closed（条目完整性）intent 不同面：本条锚池排除旋钮自身",
      "python3 integration/tests/test_pool_exclude_executor.py", "ro"),
-
 ]
 
 CMD_TIMEOUT = 900
@@ -989,13 +1012,15 @@ def _env_fp_parts():
 
 
 def _spec_from_output(name, pool, out, exit_code, dur, started):
-    """执行器综合规范行（场景自产规范行时零综合——场景 stdout 中出现任何
-    `{` 行即视为协议在产，执行器只透传不重复）。旧场景只有退出码与文本尾巴，
-    按三态契约反推：exit1=断言级产品红（cause=self/reason=assert_mismatch）、
-    exit2=环境红（cause=external，evidence=尾巴——ENV_FAIL 行点名缺什么）。
-    退出码封闭性之外的码按 fail×other 处理（不归环境）。"""
-    if any(ln.lstrip().startswith("{") for ln in out.splitlines()):
-        return None
+    """执行器综合规范行（t260912-01 缺陷②起无条件综合——本层唯一生产缝）。
+
+    旧口径「场景 stdout 出现 `{` 行即协议在产、执行器零综合」随 stdout 收集缝一并
+    退役：该口径让嵌套执行器输出顶替本层综合行（260912 实锤：真红被嵌套 pass 顶成
+    绿，两套汇总分叉照常放行）。场景 stdout 的 `{`/`[` 行一律视为嵌套产出物——既不
+    进本层计数（收集缝已删，见 _emit），也不得经尾段回显混入闸候选（回显中和见
+    _echo_tail）。旧场景只有退出码与文本尾巴，按三态契约反推：exit1=断言级产品红
+    （cause=self/reason=assert_mismatch）、exit2=环境红（cause=external，evidence=
+    尾巴——ENV_FAIL 行点名缺什么）。退出码封闭性之外的码按 fail×other 处理（不归环境）。"""
     started_iso = datetime.datetime.fromtimestamp(
         started, datetime.timezone.utc).isoformat(timespec="seconds")
     tail = " | ".join(ln.strip() for ln in out.splitlines() if ln.strip())[-500:]
@@ -1083,6 +1108,39 @@ def _docker_hygiene():
                        capture_output=True, text=True, timeout=60)
     except Exception:  # noqa: BLE001——卫生尽力而为；docker 缺席静默跳过
         pass
+
+
+def _echo_tail(ln):
+    """尾段回显一行（t260912-01 缺陷②闸层中和）：闸按 strip 后首字符筛规范行候选
+    （verify_lane 同款口径，缩进不豁免），回显里 strip 后以 `{`/`[` 开头的行加 `| `
+    前缀使其不成候选；行首 4 空格缩进保持（output_tail 捕获面不变）、原文保留
+    （败因诊断面不破坏——t260910-08 型仲裁要读原文归因）。"""
+    s = ln.strip()
+    if s[:1] in ('{', '['):
+        return "    | " + s
+    return "    " + ln
+
+
+def _counts_mismatch(spec_cases, ran, passed, failed, env_failed):
+    """两套计数互证（t260912-01 缺陷②「谎报即红」）：规范行明细重算必须与 rc 三态
+    计数逐字段相等——灌水（明细多出）、漏收（明细缺失）、重分类（状态漂移）任何一种
+    都返回点名文本（供 FAIL [__executor__] 输出），一致返回 None。
+
+    显式降级面（非静默）：协议库缺席（_fp_mod=None）或明细为空（spec_cases==[]，
+    同 INTEG_SUMMARY 的 rc 回落支路口径——回落时 stdout 上的综合行仍在，闸侧独立
+    recount 与 rc 计数一致，不构成谎报面）→ 返回 None。因此漏收可机械检出的前提是
+    明细非空但 ran<rc ran（条目数 ≥2 时缺行可检出；单条目明细独苗被漏收即触发回落
+    支路，属声明降级边界，记录于回归场景/报告）。"""
+    if _fp_mod is None or not spec_cases:
+        return None
+    try:
+        c = _fp_mod.recount(spec_cases)
+    except Exception as ex:   # noqa: BLE001 —— 明细形状坏本身就是分叉，点名不吞
+        return "明细重算失败（%s: %s）" % (type(ex).__name__, ex)
+    want = (("ran", ran), ("pass", passed), ("fail", failed),
+            ("not_checked", env_failed))
+    diff = ["%s 明细=%s rc=%s" % (k, c.get(k), v) for k, v in want if c.get(k) != v]
+    return "；".join(diff) if diff else None
 
 
 def _run_entry(entry):
@@ -1410,18 +1468,14 @@ def main(exclude_pools=None) -> int:
         name, exit_code, tail_out, dur, t_start, full_out = _run_entry(e)
         spec = _spec_from_output(name, pool_name, full_out, exit_code, dur, t_start)
         if spec:
-            print(spec, flush=True)   # 规范行（协议消费面；执行器综合或场景自产透传判定见 _spec_from_output）
-        # 场景自产规范行透传面（走查 gen1 问题②闭环）：场景 stdout 的 `{` 行
-        # 即协议在产，收集进 case 计数——INTEG_SUMMARY 以规范行明细为准，
-        # 场景自产多 case 时与闸重算天然一致（否则首例自产即撞复核红）。
+            print(spec, flush=True)   # 规范行（协议消费面；本层唯一生产缝=执行器综合，t260912-01）
+        # 计数单源化（t260912-01 缺陷②）：spec_cases 只收执行器本层综合行，子进程
+        # stdout 一律不进 recount 输入——旧「场景 stdout 的 `{` 行即协议在产」收集缝
+        # 把嵌套执行器输出灌进明细（260912 实锤：+1 pass 重分类 fail，两套汇总分叉
+        # 照常放行）。`_fp_mod` 显式守卫：协议库缺席时明细留空 → INTEG_SUMMARY 走
+        # rc 回落支路、_counts_mismatch 降级返回 None（声明降级面，真实可达）。
         with lock:
-            for ln in full_out.splitlines():
-                s = ln.strip()
-                if s[:1] in ('{', '['):
-                    obj = _fp_mod.parse_spec_line(s)
-                    if obj and '__malformed__' not in obj:
-                        spec_cases.append(_fp_mod.normalize_case(obj))
-            if spec:
+            if spec and _fp_mod is not None:
                 obj = _fp_mod.parse_spec_line(spec)
                 if obj and '__malformed__' not in obj:
                     spec_cases.append(_fp_mod.normalize_case(obj))
@@ -1434,10 +1488,10 @@ def main(exclude_pools=None) -> int:
             block = ["PASS [%s]%s" % (name, dur_tag)]
         elif env_like:
             block = (["ENV_FAIL [%s] exit=%s%s" % (name, exit_code, dur_tag)]
-                     + ["    " + ln for ln in tail_out.splitlines()[-6:]])
+                     + [_echo_tail(ln) for ln in tail_out.splitlines()[-6:]])
         else:
             block = (["FAIL [%s] exit=%d%s" % (name, exit_code, dur_tag)]
-                     + ["    " + ln for ln in tail_out.splitlines()[-6:]])
+                     + [_echo_tail(ln) for ln in tail_out.splitlines()[-6:]])
         with lock:
             ran += 1
             passed += (exit_code == 0)
@@ -1456,7 +1510,7 @@ def main(exclude_pools=None) -> int:
     timings = []   # KI-060 prep 2: timing distribution (one row per scenario, with pool attribution)
     _sweep_residue_stages()   # t260912-02 清理挂点①：套件前残台清扫（判拆点名；失败响亮不中止）
     _docker_hygiene()   # 起跑前台面卫生（t260910-14 arbitrate gen2/gen3：见函数注）
-    spec_cases = []   # t260910-13：规范行明细（场景自产透传 + 执行器综合），INTEG_SUMMARY 以此为准
+    spec_cases = []   # t260912-01：规范行明细（只收执行器本层综合行；子进程 stdout 不进计数），INTEG_SUMMARY 以此为准
     executor_error = None   # t260911 仲裁②：池级异常必须响亮产品红，绝不静默吞
     for e in exclusives:      # exclusives go first, overlapping no pool (always serial)
         _drain([(e, True)], "exclusive")
@@ -1502,8 +1556,18 @@ def main(exclude_pools=None) -> int:
 
     # ---- t260910-13：执行器汇总行（闸补 baseline_ref 并以规范行明细重算复核——
     # C6 分工：执行器产计数/耗时/并发/指纹，测试不写汇总；此行是执行器前置快检，
-    # 复核权威=闸重算）。计数来源：有规范行明细时按明细计（场景自产多 case 时与
-    # 闸重算一致，走查 gen1 问题②闭环）；无明细回落旧三态计数。 ----
+    # 复核权威=闸重算）。计数来源：有规范行明细时按明细计（明细=执行器本层综合行，
+    # 与 rc 三态计数由 _counts_mismatch 强制互证）；明细空/协议库缺席回落旧三态计数
+    # （声明降级面）。----
+    # 谎报即红（t260912-01 缺陷②）：明细重算与 rc 三态计数必须逐字段相等——灌水/
+    # 漏收/重分类任何分叉 = 响亮产品红，绝不带着分叉出绿；INTEG_SUMMARY 行保持
+    # 明确实值照印（观测面暴露分叉，红因点名见上一行）。
+    summary_lie = False
+    _mismatch = _counts_mismatch(spec_cases, ran, passed, failed, env_failed)
+    if _mismatch:
+        summary_lie = True
+        print("FAIL [__executor__] 汇总两套计数分叉（谎报即红，t260912-01）：%s"
+              % _mismatch, flush=True)
     try:
         _here = os.path.dirname(os.path.abspath(__file__))
         sys.path.insert(0, os.path.join(_here, "..", "server", "engine"))
@@ -1566,9 +1630,10 @@ def main(exclude_pools=None) -> int:
     except OSError:
         pass   # a failed report write does not change the exit code (the report is an observation surface)
 
-    if not complete or not consistent:
-        # 清单残缺/池级异常/汇总撒谎都是执行器自校验红（t260911 仲裁③：
-        # ran==在册数是唯一机械不变式，自洽性挡不住条目级丢失）
+    if not complete or not consistent or summary_lie:
+        # 清单残缺/池级异常/汇总撒谎/两套计数分叉都是执行器自校验红（t260911 仲裁③：
+        # ran==在册数是唯一机械不变式，自洽性挡不住条目级丢失；t260912-01：明细与
+        # rc 计数互证挡住灌水/漏收/重分类型谎报）
         return 1
     if failed > 0:            # product red first (C7): with FAILs present, environment reds do not dilute the product red
         return 1
