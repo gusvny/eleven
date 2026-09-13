@@ -236,6 +236,8 @@ class IntegrationRunArgs:
     ticket_id: str
     worktree: str                               # the lane root (the cmds' cwd, where the test set lives)
     attempt: int = 0                            # t260910-13：rework 代数（0=未声明；闸按此盖写规范行 attempt——K4 单写者=引擎侧）
+    write_set: List[str] = field(default_factory=list)  # t260913-03：票面声明写集（integ 道例外腿求交判据；缺省空=老载荷回放）
+    apply_skip_pools: bool = False              # t260913-03：每票段显式置位才消费声明（缺省=恒全跑，验收 E 机械锁）
 
 
 @dataclass
@@ -256,6 +258,21 @@ class IntegrationRunResult:
     blockers: List[str] = field(default_factory=list)   # 闸拦名单（决策表 verdict=block）
     affiliation_confidence: str = ""                    # ok / unknown(fingerprint_mismatch) / unknown(baseline_unavailable)
     baseline_ref: str = ""                              # 基线 ref（main@sha），闸补
+    # t260913-03 池排除回执面（少跑必须点名到回执；缺省空=未启用）
+    excluded_pools: List[str] = field(default_factory=list)  # 实际排除的池名（applied 时）
+    excluded_count: int = 0                                  # 被排除条目数（本轮不在册）
+    forced_by: List[str] = field(default_factory=list)       # 例外腿命中资产（非空=强制全跑）
+
+
+def integ_verify_payload(lane_root, write_set=None, apply_skip_pools=False):
+    """run_integration_tests → verify_lane lane=integ 的载荷（薄壳只下单，t260913-03）。
+
+    策略面（是否按泳道 verify.yaml 声明排除池）只由调用方显式置位——本函数只透传：
+    缺省 apply_skip_pools=False = 巡检/手动/老载荷回放恒全跑（验收 E 的机械锁面）；
+    write_set 供闸侧例外腿求交（命中被排除池资产 = 强制全跑）。"""
+    return {'lane': 'integ', 'path': str(lane_root), 'baseline': True,
+            'write_set': [str(x) for x in (write_set or [])],
+            'apply_skip_pools': bool(apply_skip_pools)}
 
 
 @dataclass

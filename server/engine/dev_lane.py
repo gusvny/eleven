@@ -1438,7 +1438,11 @@ class DevLaneWorkflow(TicketPauseMixin):
                         run_integration_tests,
                         IntegrationRunArgs(ticket_id=self.ticket_id,
                                            worktree=str(self.meta.get("worktree") or ""),
-                                           attempt=self._gen("run_integration_tests") + 1),
+                                           attempt=self._gen("run_integration_tests") + 1,
+                                           # t260913-03：每票段唯一 true 站（策略面只在
+                                           # 调用点显式置位；write_set 供例外腿求交）
+                                           write_set=list(self.meta.get("write_set") or []),
+                                           apply_skip_pools=True),
                         start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
                     ir = rraw if isinstance(rraw, IntegrationRunResult) else IntegrationRunResult(
                         ran=int(rraw.get("ran") or 0), passed=int(rraw.get("passed") or 0),
@@ -1451,11 +1455,19 @@ class DevLaneWorkflow(TicketPauseMixin):
                                               % (type(e).__name__, e))
                 # t260904-12: the headline carries the environment-red dimension — a
                 # mixed suite can no longer tell a fake "all green" story.
+                # t260913-03: the exclusion face is named on the ticket face — either
+                # the named skip set or the exception leg that forced a full run.
+                _pe_note = ""
+                if ir.forced_by:
+                    _pe_note = "｜例外腿命中被排除池资产，强制全跑（%s）" % "、".join(ir.forced_by)
+                elif ir.excluded_pools:
+                    _pe_note = "｜本轮跳过池=%s（少 %d 条）" % (
+                        "、".join(ir.excluded_pools), ir.excluded_count)
                 self.results["run_integration_tests"] = {
                     "status": "failed" if (ir.error or ir.failed or ir.env_fail) else "ok",
-                    "summary": "集成测试：%d 跑 / %d 过 / %d 败 / %d 环境红%s"
+                    "summary": "集成测试：%d 跑 / %d 过 / %d 败 / %d 环境红%s%s"
                                % (ir.ran, ir.passed, ir.failed, ir.env_fail,
-                                  ("｜" + ir.error) if ir.error else ""),
+                                  ("｜" + ir.error) if ir.error else "", _pe_note),
                     "report": "", "deliverables": [], "files_changed": [],
                     "evidence": json.dumps(ir.details, ensure_ascii=False)[:4000], "gen": 0}
                 self._finish("run_integration_tests", by="run_integration_tests",
@@ -1463,9 +1475,9 @@ class DevLaneWorkflow(TicketPauseMixin):
                                                     "过" if d.get("exit") == 0 else "败")
                                                 for d in ir.details))
                 self._handoff("run_integration_tests",
-                              "集成测试 %d 跑 / %d 过 / %d 败 / %d 环境红%s"
+                              "集成测试 %d 跑 / %d 过 / %d 败 / %d 环境红%s%s"
                               % (ir.ran, ir.passed, ir.failed, ir.env_fail,
-                                 ("｜" + ir.error) if ir.error else ""))
+                                 ("｜" + ir.error) if ir.error else "", _pe_note))
                 # t260901-19: budget 6000→4000 with tail-keeping ([-4000:]) — details sit
                 # at the end of the JSON, so a head slice would squeeze out the failure
                 # details; keeping the tail keeps them

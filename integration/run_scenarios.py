@@ -23,6 +23,20 @@ Conventions:
   delivery lands, t260902).
 - cmd runs with the repo root as cwd via /bin/sh -c, 900s per entry; stdlib
   only.
+- Pool exclusion (t260913-03, host order: pull the slow pools out of the
+  per-ticket segment): SANDBAR_SCENARIO_EXCLUDE_POOLS="engine,exclusive" (or
+  --exclude-pools) drops entries whose registry-declared pool is in the set.
+  Dropped entries are NOT part of this round's register — expected =
+  len(SCENARIOS) - excluded, and they are neither run nor counted as passed —
+  and the excluded face is named twice in the output ("本轮跳过池=…（少 N 条）")
+  so a shorter round can never masquerade as a full one. Unknown/illegal pool
+  names are only loudly warned on this path (rc semantics unchanged — the
+  injected fake-table batteries keep working); the single point that fails
+  closed on them is --print-pool-assets, which reads the real registry in a
+  fresh process and also derives the excluded pools' asset face (cmd tokens +
+  their import/require closure + the integration/ root shared-infra files)
+  for the gate's forced-full-run exception leg. Default (no env, no flag) =
+  every entry runs, byte-identical to before.
 - In-pool concurrency (260909 speedup campaign round 2): an entry may carry
   a fifth element "serial" — scenarios that must run one after another even
   inside a pool (process-shaped / fixed-port / pidfile-assumption families);
@@ -50,10 +64,12 @@ Conventions:
 - The registry only lists assets present in this repo (L4 rule: every cmd
   script must exist).
 """
+import ast
 import datetime
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -908,6 +924,31 @@ SCENARIOS = [
     ("t260912-02-fuse-runaway-named-stop",
      "失控起台循环被保险丝刹停并逐条点名（t260912-02 验收 E，灰盒 L3）：注入小保险丝（SANDBAR_STAGE_MAX_STAGES=4 隔离锁根；生产缺省 100 的不触闸面由 burst 场景与 L1 缺省值断言承担不在此重复）+一口气 200 路并发 up（失控循环样本）：恰≤4 路入位（原子不超售）、其余全部刹停且每路红行点名保险丝并附活租约清单（pid=/lease= 可核对——「点名」是硬断言）、刹停红一律环境档 rc=2；损害有界：全程在跑容器≤4 台规模、风暴结束无孤儿持有腿进程残留（pgrep 公开观测面）、清理后零容器残留；全程零地址池报错。与 t260910-12-full-capacity-queue（小闸 2 路最小形态的语义迁移面）intent 分工：本条锚 200 路风暴的损害有界与逐条点名，是验收 E 本体强度。登记 exclusive。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker/测试镜像缺席=ENV_FAIL exit 2",
      "python3 integration/t260912-02/sc_stage_fuse_runaway_named_stop.py", "exclusive"),
+
+    # ---- t260913-03: 每票集测段池排除开关（声明面 apply + 命中被跳池资产强制全跑）----
+    # integration 设计段产物（L2/L3 灰盒：真闸 + 真执行器 + mini 注册表夹具，秒级）。
+    # 四条 intent 互不重叠：①消费形态矩阵（A/B/E）②例外腿正负锁（D）
+    # ③红线对抗（不得吞在册红 / 缩围必须可见）④资产面在真注册表上闭合（独立机械复算）。
+    # 与 developer 的 L1 电池分工：彼测入口解析/计数形状（白盒可随实现），
+    # 本条测用户可感知的闸行为与机械不变式（绑定公开回执与执行器末行契约）。
+    # 实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
+    ("t260913-03-pool-exclude-switch-forms",
+     "池排除开关的消费形态矩阵（t260913-03 验收 A/B/E，灰盒 L2，真闸+真执行器+mini 注册表夹具）：声明面打开+每票段传 apply → 被跳池条目不在本轮在册（不计 ran/pass/fail）、汇总点名「本轮跳过池=engine,exclusive（少 N 条）」、INTEG_SUMMARY 的 ran==expected==本轮在册、条件键点名池与条数；声明面在场但不传 apply（巡检/手动/老回放形态）→ 恒全跑（开关不得外溢）；声明面缺省 + apply → 全跑且汇总零新增键（不假造排除面）。断言面=真入口 admin.py call verify_lane 的公开回执 + 执行器末行/汇总契约，不锚内部实现。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260913-03/sc_pool_exclude_switch_forms.py", "ro"),
+    ("t260913-03-pool-exclude-force-assets",
+     "例外腿：写集命中被跳池资产 → 强制全跑（t260913-03 验收 D，灰盒 L2）：判据纯机械=票面 write_set 与（声明固定资产 ∪ 注册表派生资产）求交非空，命中即不注入排除、被跳池条目回到在册并在回执 forced_by 点名命中资产；正腿覆盖声明固定资产（integration/stage_docker.py）/ 被跳场景文件本身（cmd token 派生）/ 写集目录前缀三形态；负锁覆盖写集不相交 / 空写集（老回放票语义）/ 只命中在册条目文件三形态（绝不误触发）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260913-03/sc_pool_exclude_force_assets.py", "ro"),
+    ("t260913-03-pool-exclude-no-false-green",
+     "排除不得吞在册红、被跳池红不得计成通过（t260913-03 红线对抗腿，灰盒 L2）：在册条目红+被跳池条目红时闸必须红且红名单点名在册那条，被跳池那条既不在明细也不计 pass（不在本轮在册）；只有被跳池条目红时本轮不判它但必须点名「少 N 条」+ 汇总排除数如实在案（缩围可见，不是静默通过）。断言面=真闸回执 affiliation 红名单 + 执行器直跑点名行/汇总键。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260913-03/sc_pool_exclude_no_false_green.py", "ro"),
+    ("t260913-03-pool-exclude-asset-closure",
+     "例外腿资产面在真注册表上闭合（t260913-03 灰盒 L2，独立机械复算）：执行器资产入口 --print-pool-assets 读真注册表且不跑套件；被跳池每个条目 cmd 里的 integration/ 落盘 token（场景文件本身、with_stage.sh 等）与这些场景文件 import 到的共享模块（同目录 / integration 顶层可解析者，含舞台单点 stage_docker.py 与各协议库）逐条都在派生资产集内；非 integration/ token（PY=server/engine/.venv/... 形态）零误收；未知池名在资产入口与真闸两端都非零/红并点名（配错不得静默少跑或静默全跑）。先做有界安全探针（临时 cwd+短超时+杀进程组）防「入口缺席时真跑全量」拖住套件。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260913-03/sc_pool_exclude_asset_closure.py", "ro"),
+    # ---- t260913-03 每票集测段池排除旋钮（机械过滤面自证；ro 池=纯 stdlib 秒级）----
+    ("t260913-03-executor-pool-exclude-l1",
+     "执行器池排除旋钮机械行为自证（t260913-03）：被排除池条目不在本轮在册数（不计 ran/expected，expected=本轮在册且 ran==expected 不变式保持）；点名行「本轮跳过池=…（少 N 条）」原文与两次点名；INTEG_SUMMARY 仅在排除生效时增 excluded_pools/excluded_count 键（缺省键集逐键全等=零新增）；非法 token 剥离+响亮 WARN 且 rc 语义不变；零命中响亮 WARN 不红；缺省路径与 git HEAD 改前执行器在假表上逐字节一致（源码级 A/B）；--print-pool-assets 真注册表派生（未知池 exit 2 点名、cmd token ∪ import 闭包 ∪ integration/ 根共享基建面、环境前缀 token 不误收、非被排除池资产不入面）；既有两条执行器电池在排除 env 继承下照常绿（回归腿）。与 t260904-12-executor-three-state（三态出口契约）/t260910-13-executor-fail-closed（条目完整性）intent 不同面：本条锚池排除旋钮自身",
+     "python3 integration/tests/test_pool_exclude_executor.py", "ro"),
+
 ]
 
 CMD_TIMEOUT = 900
@@ -1084,7 +1125,185 @@ def _run_entry(entry):
                 time.time() - t_start, t_start, "")
 
 
-def main() -> int:
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+_EXCLUDE_TOKEN = re.compile(r"^[a-z0-9-]+$")
+
+# 被排除池共用的根级共享基建面（t260913-03 R5 收口）：integration/ 一级文件里的
+# 舞台链/协议库/执行器自身——sc_ 前缀是注册场景文件（归属各自池），不入此面。
+_SHARED_INFRA_SUFFIXES = (".py", ".mjs", ".sh")
+
+
+def pool_of(entry):
+    """条目所属池名（与 main() 的注册表切分同口径的单源）。
+
+    第 4 元 "exclusive"=exclusive 池；为空或 "serial"（无池标注的串行条目）=main
+    池；其余值即池名。"""
+    opt = entry[3] if len(entry) > 3 else None
+    return opt if (opt and opt != "serial") else "main"
+
+
+# 注册表自有的池词汇表（模块导入期快照，t260913-03）：--print-pool-assets 的未知池
+# 判据用它、而不是调用时的 SCENARIOS——注入式夹具把 mini 注册表插在 __main__ 之前，
+# SCENARIOS 会被换成小表，但池词汇表必须仍代表本仓注册表的池名全集：否则「声明面照旧
+# 列出 engine,exclusive、而 mini 表恰好没有 exclusive 条目」这一合法形态会被误判未知池
+# （t260913-03 设计段场景③实锤）。判据与「跳过集合」解耦是 R2 收口面。
+_REGISTRY_POOL_VOCAB = frozenset(pool_of(e) for e in SCENARIOS)
+
+
+def parse_exclude_pools(raw):
+    """池排除串解析 → (合法池名列表, 违规 token 列表)。
+
+    逗号切分+strip+去空+去重；token 语法 [a-z0-9-]+。违规 token 只剥离不判红——
+    主路径必须与「注入假场景表」的既有电池共存（那些假表里没有 engine/exclusive
+    池，按「未知池红」会把每张过滤生效的票判红）。配置错误的判红单点在
+    --print-pool-assets（独立进程读真注册表）。"""
+    names, bad = [], []
+    for tok in str(raw or "").split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        if _EXCLUDE_TOKEN.match(tok):
+            if tok not in names:
+                names.append(tok)
+        else:
+            bad.append(tok)
+    return names, bad
+
+
+def _cmd_asset_tokens(cmd):
+    """cmd 中形如仓内真实文件的 integration/ 路径 token（环境前缀 token 如
+    PY=server/… 不以 integration/ 开头，机械排除）。"""
+    out = []
+    for raw in re.split(r"[\s;|&()]+", str(cmd)):
+        tok = raw.strip().strip("'\"")
+        if not tok.startswith("integration/") or tok in out:
+            continue
+        if os.path.isfile(os.path.join(_REPO_ROOT, tok)):
+            out.append(tok)
+    return out
+
+
+def _py_import_targets(rel):
+    """py 文件的 import 目标候选（框定 integration/ 前缀，存在性由调用方判）。"""
+    with open(os.path.join(_REPO_ROOT, rel), encoding="utf-8") as fh:
+        tree = ast.parse(fh.read())
+    mods = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            mods.update(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                mods.add("." * node.level + (node.module or ""))
+            elif node.module:
+                mods.add(node.module)
+    base = os.path.dirname(rel)
+    cands = set()
+    for m in mods:
+        if m.startswith("."):
+            name = m.lstrip(".").replace(".", "/")
+            stem = os.path.join(base, name) if name else base
+            cands.add(stem + ".py")
+            cands.add(os.path.join(stem, "__init__.py"))
+        else:
+            p = m.replace(".", "/")
+            cands.add(p + ".py")                        # 仓根解析
+            cands.add(os.path.join(base, p + ".py"))    # 同目录
+            cands.add("integration/" + p + ".py")       # 场景约定 sys.path=integration/
+            cands.add(os.path.join("integration", p, "__init__.py"))
+    return cands
+
+
+_MJS_IMPORT = re.compile(r"""(?:from|import|require)\s*\(?\s*['"](\.[^'"]+)['"]""")
+
+
+def _mjs_import_targets(rel):
+    with open(os.path.join(_REPO_ROOT, rel), encoding="utf-8") as fh:
+        src = fh.read()
+    base = os.path.dirname(rel)
+    out = set()
+    for m in _MJS_IMPORT.findall(src):
+        p = os.path.normpath(os.path.join(base, m))
+        out.add(p)
+        out.update(p + ext for ext in (".mjs", ".js", "/index.mjs", "/index.js"))
+    return out
+
+
+def _shared_infra_assets():
+    """integration/ 一级共享基建文件（非 sc_ 场景文件）：舞台链/协议库/执行器自身。
+    保守面——宁多触发全跑，不漏被排除池消费面；新增根级共享文件自动入面。"""
+    integ = os.path.join(_REPO_ROOT, "integration")
+    out = []
+    try:
+        names = sorted(os.listdir(integ))
+    except OSError:
+        return out
+    for name in names:
+        p = os.path.join(integ, name)
+        if not os.path.isfile(p) or name.startswith("sc_"):
+            continue
+        if os.path.splitext(name)[1] in _SHARED_INFRA_SUFFIXES:
+            out.append("integration/" + name)
+    return out
+
+
+def collect_pool_assets(pool_names):
+    """被排除池资产面（机械派生）：cmd token ∪ import/require 传递闭包 ∪ 根共享基建面。
+
+    返回 (assets, warnings)。闭包解析失败=保留该文件并告警（不阻断派生；方向安全=
+    交集只增不减=更易强制全跑）。"""
+    warnings = []
+    seen = set()
+    queue = []
+    for entry in SCENARIOS:
+        if pool_of(entry) not in pool_names:
+            continue
+        for tok in _cmd_asset_tokens(entry[2]):
+            if tok not in seen:
+                seen.add(tok)
+                queue.append(tok)
+    while queue:
+        rel = queue.pop()
+        try:
+            if rel.endswith(".py"):
+                cands = _py_import_targets(rel)
+            elif rel.endswith((".mjs", ".js")):
+                cands = _mjs_import_targets(rel)
+            else:
+                continue
+        except (OSError, SyntaxError, ValueError) as ex:
+            warnings.append("%s 解析失败（%s: %s）——保留该文件，闭包未展开"
+                            % (rel, type(ex).__name__, ex))
+            continue
+        for cand in cands:
+            cand = os.path.normpath(cand)
+            if not cand.startswith("integration/") or cand in seen:
+                continue
+            if os.path.isfile(os.path.join(_REPO_ROOT, cand)):
+                seen.add(cand)
+                queue.append(cand)
+    seen.update(_shared_infra_assets())
+    return sorted(seen), warnings
+
+
+def print_pool_assets(pool_arg):
+    """--print-pool-assets：真注册表校验池名（未知池=exit 2 点名）+ 资产面派生。
+
+    闸侧单点判红面（独立进程读真注册表，进程内注入假表够不到）。"""
+    names, bad = parse_exclude_pools(pool_arg)
+    known = sorted(_REGISTRY_POOL_VOCAB)
+    bad_all = bad + [p for p in names if p not in _REGISTRY_POOL_VOCAB]
+    if not names or bad_all:
+        sys.stderr.write("池名非法或不在册：%s；在册池=%s\n"
+                         % (",".join(bad_all) or "（空）", ",".join(known)))
+        return 2
+    assets, warnings = collect_pool_assets(set(names))
+    print(json.dumps({"pools": names, "assets": assets, "warnings": warnings},
+                     ensure_ascii=False), flush=True)
+    return 0
+
+
+def main(exclude_pools=None) -> int:
     """Run the registry as pools (host-ordered t260902 pool split): an entry
     may carry an optional fourth element — None/absent = the "main" pool;
     "ro"/any other string = a named pool; "exclusive" = runs alone before all
@@ -1117,8 +1336,29 @@ def main() -> int:
     ran = passed = failed = env_failed = 0
     t0 = time.time()
     lock = threading.Lock()
+    # ---- t260913-03 池排除（缺省零分支：无 env/CLI 时 excluded=[]，逐字节同改前）----
+    excluded, bad_tokens = parse_exclude_pools(
+        os.environ.get("SANDBAR_SCENARIO_EXCLUDE_POOLS")
+        if exclude_pools is None else exclude_pools)
+    for tok in bad_tokens:
+        print("EXCLUDE_POOLS_WARN [%s] 池名 token 非法（合法形 [a-z0-9-]+）——已剥离，"
+              "本轮未排除该 token" % tok, flush=True)
+    excluded_entries = [e for e in SCENARIOS if excluded and pool_of(e) in excluded]
+    if excluded:
+        _known = sorted({pool_of(e) for e in SCENARIOS})
+        for _p in excluded:
+            if _p not in _known:
+                print("EXCLUDE_POOLS_WARN [%s] 在册池零命中（在册池=%s）——本轮未因此少跑"
+                      "任何条目；闸侧 --print-pool-assets 会把未知池判红"
+                      % (_p, ",".join(_known)), flush=True)
+        print("本轮跳过池=%s（少 %d 条）" % (",".join(excluded), len(excluded_entries)),
+              flush=True)
+        for e in excluded_entries:
+            print("  跳过 [%s]（池=%s）" % (e[0], pool_of(e)), flush=True)
     pools, exclusives = {}, []
     for e in SCENARIOS:
+        if excluded and pool_of(e) in excluded:
+            continue
         opt = e[3] if len(e) > 3 else None
         if opt == "exclusive":
             exclusives.append(e)
@@ -1248,11 +1488,15 @@ def main() -> int:
     consistent = (ran == passed + failed + env_failed)
     wall = time.time() - t0
     # t260911 仲裁③：ran==在册数是唯一机械不变式（汇总自洽挡不住条目级丢失）
-    expected = len(SCENARIOS)
+    # t260913-03：在册数=本轮在册（扣除被排除池条目——不在本轮在册，不冒充已跑）
+    expected = len(SCENARIOS) - len(excluded_entries)
     complete = (ran == expected) and executor_error is None
     if ran != expected:
         print("FAIL [__executor__] 清单残缺：ran=%d != 在册 %d（条目静默丢失面，"
               "fail-closed 红）" % (ran, expected), flush=True)
+    if excluded:
+        print("本轮跳过池=%s（少 %d 条）" % (",".join(excluded), len(excluded_entries)),
+              flush=True)
     print("SCENARIOS ran=%d pass=%d fail=%d env_fail=%d na=0 (%.0fs)"
           % (ran, passed, failed, env_failed, wall), flush=True)
 
@@ -1272,14 +1516,19 @@ def main() -> int:
                                  _counts["fail"], _counts["not_checked"])
         else:
             _ran, _p, _f, _nc = ran, passed, failed, env_failed
-        print("INTEG_SUMMARY " + json.dumps({
+        _summary = {
             "ran": _ran, "pass": _p, "fail": _f,
             "not_checked": _nc, "wall_s": round(wall, 1),
             "concurrency": conc_width,
             "pool_config": ",".join(sorted("%s:%s" % kv for kv in conc_pools.items())),
             "env_fingerprint": _fpv["value"],
             "expected": expected,   # t260911 仲裁③：在册条数——闸复核 ran==expected
-        }, ensure_ascii=False), flush=True)
+            # t260913-03：条件键——仅排除旋钮生效时出现（缺省键集逐字节不变）
+        }
+        if excluded:
+            _summary["excluded_pools"] = list(excluded)
+            _summary["excluded_count"] = len(excluded_entries)
+        print("INTEG_SUMMARY " + json.dumps(_summary, ensure_ascii=False), flush=True)
     except Exception as _ex:   # 汇总行失败不改场景红绿（观测面），但大声留痕
         print("INTEG_SUMMARY_ERROR %r" % _ex, flush=True)
 
@@ -1304,12 +1553,15 @@ def main() -> int:
         rp = _pl.Path("out") / ("integration-report-%s.json"
                                 % _dt.datetime.now().strftime("%y%m%d-%H%M%S"))
         rp.parent.mkdir(parents=True, exist_ok=True)
-        rp.write_text(_json.dumps(
-            {"ran": ran, "pass": passed, "fail": failed, "env_fail": env_failed,
-             "wall_s": round(wall, 1), "generated": _dt.datetime.now().isoformat(),
-             "conc_width": conc_width,
-             "conc_pools": sorted("%s:%s" % kv for kv in conc_pools.items()),
-             "timings": timings}, ensure_ascii=False, indent=1), encoding="utf-8")
+        _report = {"ran": ran, "pass": passed, "fail": failed, "env_fail": env_failed,
+                   "wall_s": round(wall, 1), "generated": _dt.datetime.now().isoformat(),
+                   "conc_width": conc_width,
+                   "conc_pools": sorted("%s:%s" % kv for kv in conc_pools.items()),
+                   "timings": timings}
+        if excluded:
+            _report["excluded_pools"] = list(excluded)
+            _report["excluded_count"] = len(excluded_entries)
+        rp.write_text(_json.dumps(_report, ensure_ascii=False, indent=1), encoding="utf-8")
         print("报告落档：%s" % rp, flush=True)
     except OSError:
         pass   # a failed report write does not change the exit code (the report is an observation surface)
@@ -1325,5 +1577,18 @@ def main() -> int:
     return 0
 
 
+def _cli(argv):
+    """唯一 argv 解析点（t260913-03）：main() 缺省不读 sys.argv——既有注入式电池
+    无参直调 rs.main() 必须字节兼容（全树无带参调用者：verify.yaml 的 integration.cmd
+    无参数）。未知 flag 忽略（保持旧调用面宽容）。"""
+    if "--print-pool-assets" in argv:
+        i = argv.index("--print-pool-assets")
+        return print_pool_assets(argv[i + 1] if i + 1 < len(argv) else "")
+    if "--exclude-pools" in argv:
+        i = argv.index("--exclude-pools")
+        return main(exclude_pools=argv[i + 1] if i + 1 < len(argv) else "")
+    return main()
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_cli(sys.argv[1:]))

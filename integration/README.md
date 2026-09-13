@@ -32,6 +32,24 @@ python3 integration/run_scenarios.py
 - 场景内部 SUMMARY 行格式 `SUMMARY pass=X fail=Y env_fail=Z na=W`（skip 计数退役）；
   执行器级末行 `SCENARIOS ran=N pass=N fail=N env_fail=N na=N`，汇总与明细**双向净
   才绿**（执行器自校验，谎报=产品红）。
+- 池排除旋钮（t260913-03，机械判据=注册表自带的池名，缺省全跑）：每票集测段可声明
+  `integration.exclude_pools`（如 `engine,exclusive`），被排除池的条目**不在本轮在册数**
+  ——不计 ran/expected（`SCENARIOS ran=` 的 ran=本轮在册，`INTEG_SUMMARY.expected` 同步为
+  本轮在册），执行器起跑前与汇总处**两次点名** `本轮跳过池=engine,exclusive（少 N 条）`
+  （禁止静默少跑），过滤生效时 `INTEG_SUMMARY` 额外带 `excluded_pools`/`excluded_count`
+  （缺省路径零新增行/键）。消费闸门=闸侧显式参数 `apply_skip_pools`（每票段由 dev-lane
+  置 true；巡检/手动/缺省一律全跑）。等价 env/CLI 通路：
+  `SANDBAR_SCENARIO_EXCLUDE_POOLS=engine,exclusive`、`--exclude-pools engine,exclusive`
+  （CLI 优先）。执行器主路径对未知池只响亮点名（`EXCLUDE_POOLS_WARN`，rc 语义不变——
+  不能与注入假场景表的既有电池冲突），未知池判红单点在
+  `python3 integration/run_scenarios.py --print-pool-assets <池名>`（读真注册表、不跑
+  套件，非零=红；池词汇表取模块导入期快照，与注入式 mini 注册表解耦）。
+  **例外腿**：票面 write_set（闸侧精确路径/目录前缀语义）∩（声明
+  `exclude_pools_force_assets` ∪ 执行器机械派生面）= 非空 → 本票集测段**强制全跑**并在
+  回执 `pool_exclude.forced_by` 点名——改被排除池资产的票绝不许跳过被排除池。派生面=
+  被排除条目 cmd token ∪ 其 import/require 传递闭包 ∪ `integration/` 根共享基建面
+  （舞台链/协议库/执行器自身，sc_ 场景文件除外）。已知缺口（动态导入、非 integration/
+  且未声明的资产面、.sh 内容不遍历）登记在 t260913-03 结算，由定期巡检跑全集兜底。
 - 舞台纪律（t260904-19 定稿：自搭进程舞台退役，双轨并一轨）：一切需要舞台的场景
   经 **integration/stage_docker.py** 单点搭台（同一 compose 文件
   server/docker-compose.test.yml；每场景独立 compose 工程名+端口档，flock 原子

@@ -54,7 +54,10 @@ TOOL = {
                     '即「本次合并将给 main 带来什么」；合并闸传当前 main tip）、'
                     'write_set 指当前工单声明写集（优先于 write_allow）、'
                     'require_base=true 供合并闸——base 为空即白名单 fail-closed 判红）。'
-                    '返回 {lane, green, red_count, checks}。'),
+                    '或 lane="integ"（跑泳道声明 integration.cmd 并解析三态输出契约；'
+                    'apply_skip_pools=true 时按 integration.exclude_pools 声明排除池，'
+                    '票面 write_set 命中被排除池资产则强制全跑）。'
+                    '返回 {lane, green, red_count, checks}（integ 道为 {lane, green, ran, pass, fail, scenarios, err[, pool_exclude]}）。'),
     'parameters': {
         'type': 'object',
         'properties': {
@@ -63,7 +66,9 @@ TOOL = {
             'path': {'type': 'string', 'description': 'code 道：泳道根目录（缺省主树）'},
             'base': {'type': 'string', 'description': 'code 道：diff 对比的 git ref（三点口径 base...HEAD；合并闸必传当前 main tip；手动调用缺省=跳过白名单并注明）'},
             'write_set': {'type': 'array', 'items': {'type': 'string'},
-                          'description': 'code 道：当前工单声明写集（文件或目录前缀）；提供时优先于 verify.yaml write_allow，空列表=零写集'},
+                          'description': 'code 道：当前工单声明写集（文件或目录前缀）；提供时优先于 verify.yaml write_allow，空列表=零写集。integ 道：票面写集，用作例外腿求交判据（命中被排除池资产=强制全跑）'},
+            'apply_skip_pools': {'type': 'boolean',
+                                 'description': 'integ 道：true=按泳道 verify.yaml integration.exclude_pools 声明排除池（每票段由引擎显式置位）；缺省 false/不传=恒全跑（巡检、手动、老回放形态不受声明影响）。命中 exclude_pools_force_assets 或执行器派生资产面时强制全跑，回执 pool_exclude.forced_by 点名'},
             'require_base': {'type': 'boolean',
                              'description': 'code 道：合并闸调用置 true——base 为空/未传时写集白名单 fail-closed 判红（不许静默跳过）'},
             'skip_slow': {'type': 'boolean', 'description': 'code 道：跳过全部命令检查（只验白名单与装配面）'},
@@ -336,9 +341,28 @@ def _validate_cfg(cfg):
     if integ:
         if not isinstance(integ, dict):
             raise ValueError('integration 结构不合法')
-        unk = set(integ) - {'cmd', 'supply'}
+        unk = set(integ) - {'cmd', 'supply', 'exclude_pools',
+                            'exclude_pools_force_assets'}
         if unk:
-            raise ValueError('integration 未知键: %s（v2：只认 cmd/supply）' % '、'.join(sorted(unk)))
+            raise ValueError('integration 未知键: %s（v2：只认 cmd/supply/'
+                             'exclude_pools/exclude_pools_force_assets）'
+                             % '、'.join(sorted(unk)))
+        # t260913-03 池排除声明（纯增量可选键；缺省=全跑零回归）：
+        # exclude_pools=逗号分隔池名（token 形 [a-z0-9-]+；未知池由执行器资产入口
+        # --print-pool-assets 单点判红）；exclude_pools_force_assets=被排除池的
+        # 项目级资产路径列表（票面写集命中即强制全跑）。
+        ep = integ.get('exclude_pools')
+        if ep is not None:
+            if not isinstance(ep, str) or \
+                    not re.match(r'^[a-z0-9-]+(,[a-z0-9-]+)*$', ep.strip()):
+                raise ValueError('integration.exclude_pools 结构不合法'
+                                 '（逗号分隔池名，形如 engine,exclusive）')
+        efa = integ.get('exclude_pools_force_assets')
+        if efa is not None:
+            if not isinstance(efa, list) or not efa or \
+                    any(not isinstance(x, str) or not x.strip() for x in efa):
+                raise ValueError('integration.exclude_pools_force_assets 须为非空'
+                                 '字符串路径列表（被排除池的项目级资产面）')
         sup = integ.get('supply')
         if sup is not None:
             if not isinstance(sup, list) or not sup:
@@ -501,6 +525,73 @@ def _code(a):
     return checks
 
 
+def _pool_exclude_assets(root, pools, declared):
+    """被排除池资产面 = 声明固定资产 ∪ 泳道执行器 --print-pool-assets 派生面（t260913-03）。
+
+    返回 (assets, err)。派生入口缺席/超时/非零/坏 JSON = 红点名（fail-closed：例外腿
+    判据不可得时不得静默放行，也不得静默少跑）。未知池名由执行器资产入口单点判红
+    （独立进程读真注册表，进程内注入假表够不到）。"""
+    assets = set(str(x).strip() for x in (declared or []) if str(x).strip())
+    runner = Path(root) / 'integration' / 'run_scenarios.py'
+    if not runner.is_file():
+        return [], ('池排除资产派生失败：泳道缺 integration/run_scenarios.py（%s）'
+                    '——例外腿判据不可得，fail-closed' % runner)
+    try:
+        p = subprocess.run(['python3', str(runner), '--print-pool-assets',
+                            ','.join(pools)],
+                           cwd=str(root), capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        return [], ('池排除资产派生超时（>120s）：--print-pool-assets %s'
+                    % ','.join(pools))
+    except OSError as ex:
+        return [], ('池排除资产派生 spawn 失败（%s: %s）'
+                    % (type(ex).__name__, ex))
+    if p.returncode != 0:
+        return [], ('池排除资产派生失败（--print-pool-assets %s，exit=%d）：%s'
+                    % (','.join(pools), p.returncode,
+                       ((p.stdout or '') + (p.stderr or ''))[-800:]))
+    try:
+        data = json.loads((p.stdout or '').strip().splitlines()[-1])
+        derived = [str(x) for x in (data.get('assets') or [])]
+    except (ValueError, IndexError, AttributeError):
+        return [], ('池排除资产派生输出畸形（坏 JSON）：%s' % (p.stdout or '')[-300:])
+    assets.update(a for a in derived if a)
+    return sorted(assets), None
+
+
+def _integ_pool_exclude(root, integ_cfg, args):
+    """池排除消费面（t260913-03）→ (回执 dict | None, 子进程 env | None)。
+
+    - apply 参数缺省/False（巡检、手动、老回放形态）→ (None, None)：一个分支都不进，
+      行为与加旋钮前逐字节一致（验收 B/E 的机械锁）；
+    - apply=True 且声明在场 → 派生被排除池资产面（泳道自持执行器 --print-pool-assets）
+      与票面 write_set 求交（_in_write_set 前缀语义）：
+        命中 → 不注入 env（**强制全跑**）+ 回执 forced_by 点名命中资产（验收 D）；
+        未命中 → 注入 SANDBAR_SCENARIO_EXCLUDE_POOLS（cmd 与基线子进程同 env）；
+    - 派生失败 → 回执带 err（调用方整道红点名，不静默）。
+    """
+    import os as _os
+    if not args.get('apply_skip_pools'):
+        return None, None
+    integ_cfg = integ_cfg or {}
+    decl = str(integ_cfg.get('exclude_pools') or '').strip()
+    if not decl:
+        return None, None
+    pools = [p.strip() for p in decl.split(',') if p.strip()]
+    declared = [str(x).strip() for x in
+                (integ_cfg.get('exclude_pools_force_assets') or [])
+                if str(x).strip()]
+    assets, err = _pool_exclude_assets(root, pools, declared)
+    if err:
+        return {'err': err}, None
+    ws = [str(x) for x in (args.get('write_set') or [])]
+    forced = sorted(a for a in assets if _in_write_set(a, ws))
+    if forced:
+        return {'declared': pools, 'applied': False, 'forced_by': forced}, None
+    return ({'declared': pools, 'applied': True},
+            dict(_os.environ, SANDBAR_SCENARIO_EXCLUDE_POOLS=decl))
+
+
 def _integ(args):
     """集成道（薄壳化，宿主令 t260902）：执行项目声明的 integration.cmd 并解析输出契约
     （PASS/FAIL 行 + 末行 SCENARIOS ran=N pass=N fail=N）。执行与解析全天下唯此一份——
@@ -536,9 +627,13 @@ def _integ(args):
                     'err': 'supply 装配失败（need=%s，exit=%d）：%s——供给面红点名，不静默'
                            % (need, sp.returncode, ((sp.stdout or '') + (sp.stderr or ''))[-1500:])}
     timeout = int(_os.environ.get('SANDBAR_INTEG_BATCH_TIMEOUT_SEC') or 5400)
+    # ---- t260913-03 池排除（每票段专用通道；apply 缺省 False=零分支）----
+    pool_exclude, cmd_env = _integ_pool_exclude(root, integ_cfg, args)
+    if pool_exclude is not None and pool_exclude.get('err'):
+        return {'lane': 'integ', 'green': False, 'err': pool_exclude['err']}
     try:
         proc = subprocess.run(['/bin/sh', '-c', cmd], cwd=str(root), capture_output=True,
-                              text=True, timeout=timeout)
+                              text=True, timeout=timeout, env=cmd_env)
     except subprocess.TimeoutExpired:
         return {'lane': 'integ', 'green': False, 'err': '场景执行器整体超时（>%ds）' % timeout}
     ran = passed = failed = env_failed = 0
@@ -648,7 +743,7 @@ def _integ(args):
     if need_baseline:
         (baseline_ok, baseline_cases, baseline_err,
          baseline_ref, baseline_fp) = _run_baseline(root, cmd, args.get('base'),
-                                                    timeout)
+                                                    timeout, env=cmd_env)
     else:
         baseline_ref = args.get('base') or None
 
@@ -694,7 +789,7 @@ def _integ(args):
             executor_summary.get('concurrency') if executor_summary else None,
             executor_summary.get('pool_config') if executor_summary else None,
             env_fp=lane_fp['value'], baseline_ref=baseline_ref)
-    return {'lane': 'integ', 'green': green,
+    _out = {'lane': 'integ', 'green': green,
             'ran': ran, 'pass': passed, 'fail': failed, 'env_fail': env_failed,
             'scenarios': scen, 'err': None,
             'cases': cases_dedup, 'summary': summary,
@@ -709,6 +804,14 @@ def _integ(args):
                               if compat_unparsed_red else [])),
             'deprecation': (sorted(set(dupes)) and
                             ['重复规范行（一行=一个用例被破坏）：%s' % ', '.join(sorted(set(dupes)))] or [])}
+    if pool_exclude is not None:
+        # t260913-03：排除面/例外腿必须点名到消费面（红线：少跑不得静默）
+        if pool_exclude.get('applied') and executor_summary is not None:
+            pool_exclude['excluded_count'] = executor_summary.get('excluded_count')
+            pool_exclude['excluded_pools'] = \
+                executor_summary.get('excluded_pools') or []
+        _out['pool_exclude'] = pool_exclude
+    return _out
 
 
 def _env_fp_parts(root):
@@ -751,7 +854,7 @@ def _baseline_root(_root, _ref):
     return None
 
 
-def _run_baseline(root, cmd, base, lane_timeout):
+def _run_baseline(root, cmd, base, lane_timeout, env=None):
     """main 基线跑（t260910-13 机械归属）：临时 detach worktree + 同一命令 +
     SANDBAR_POOL_CONC=1（降负载串行，C4/K6①）。借鉴 prepare_workspace 先例的
     取舍清单（gen1 方案 C3）逐项落地：
@@ -784,7 +887,9 @@ def _run_baseline(root, cmd, base, lane_timeout):
                                % ((p.stderr or p.stdout or '').strip()[-400:])), ref, None
         base_fp = fp2.env_fingerprint(_env_fp_parts(tmp))
         bl_timeout = int(_os2.environ.get('SANDBAR_GATE_BASELINE_TIMEOUT_SEC') or 1800)
-        env = dict(_os2.environ, SANDBAR_POOL_CONC='1')
+        # t260913-03：过滤开启时基线同 env（泳道/基线同口径；main 侧执行器认该 env
+        # 后基线墙钟同步受益——合并前 main 版执行器无视它=恒全集，仅慢不假）
+        env = dict(env if env is not None else _os2.environ, SANDBAR_POOL_CONC='1')
         # 真进程组回收（验收走查 gen1 问题三：terminate→wait→kill 升级链，
         # 孙进程随组全灭——start_new_session 使子进程自成进程组）
         bp = subprocess.Popen(['/bin/sh', '-c', cmd], cwd=tmp,

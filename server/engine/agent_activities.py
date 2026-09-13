@@ -3675,7 +3675,8 @@ async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
 BATCH_TIMEOUT_SEC = int(os.environ.get("SANDBAR_INTEG_BATCH_TIMEOUT_SEC") or 5400)
 
 
-async def _run_scenarios(wt: Path, ticket_id: str) -> IntegrationRunResult:
+async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
+                         apply_skip_pools: bool = False) -> IntegrationRunResult:
     """A thin shell (thinned by host order t260902): declaration reading, command
     execution and contract parsing all live in verify_lane lane=integ (one
     implementation + one parser); this function only places the order and translates
@@ -3700,7 +3701,9 @@ async def _run_scenarios(wt: Path, ticket_id: str) -> IntegrationRunResult:
     # Fully async: create_subprocess + wait_for; on timeout, kill first, then report.
     p = await asyncio.create_subprocess_exec(
         "python3", admin, "call", "verify_lane",
-        json.dumps({"lane": "integ", "path": str(wt), "baseline": True}),
+        # t260913-03：载荷面薄壳只下单——是否按泳道声明排除池由调用方（每票段）显式
+        # 置位，本层只透传；缺省 False=巡检/老回放形态恒全跑（验收 E 机械锁）
+        json.dumps(shared.integ_verify_payload(wt, write_set, apply_skip_pools)),
         cwd=str(wt), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
         p_out_b, p_err_b = await asyncio.wait_for(
@@ -3726,6 +3729,22 @@ async def _run_scenarios(wt: Path, ticket_id: str) -> IntegrationRunResult:
     out.details = [{"name": s.get("name", ""), "cmd": "", "exit": int(s.get("exit") or 0),
                     "output_tail": s.get("output_tail") or ""}
                    for s in (res.get("scenarios") or [])]
+    # ---- t260913-03 池排除回执面：applied（跳过面点名）与 forced（例外腿点名）两态
+    # 都进 details——红线「少跑必须点名」；例外腿命中不是静默全跑 ----
+    _pe = res.get("pool_exclude") or {}
+    out.excluded_pools = [str(x) for x in (_pe.get("excluded_pools") or [])]
+    out.excluded_count = int(_pe.get("excluded_count") or 0)
+    out.forced_by = [str(x) for x in (_pe.get("forced_by") or [])]
+    if out.forced_by:
+        out.details.append({"name": "__pool_exclude__", "cmd": "", "exit": 0,
+                            "output_tail": "例外腿命中被排除池资产 → 强制全跑：%s"
+                                           % "、".join(out.forced_by)})
+    elif _pe.get("applied"):
+        out.details.append({"name": "__pool_exclude__", "cmd": "", "exit": 0,
+                            "output_tail": "本轮跳过池=%s（少 %d 条）"
+                                           % ("、".join(str(x) for x in
+                                                       (_pe.get("declared") or [])),
+                                              out.excluded_count)})
     # ---- t260910-13 失败分类协议：闸机械归属判定接线 ----
     # 闸决策表 verdict=block 的用例（真回归/本票造成的 not-checked/协议违约）
     # 机械计入 failed（被改判的 not-checked 从 env_fail 挪走）——「拦」不是文字
@@ -3762,7 +3781,11 @@ async def run_integration_tests(args: IntegrationRunArgs) -> IntegrationRunResul
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
-    return await _run_scenarios(wt, args.ticket_id)
+    # t260913-03：每票段是全仓唯一显式打开「按声明排除池」的调用点；write_set 供例外腿
+    # 求交（命中被排除池资产=强制全跑）。策略值只透传，activity 不回填策略。
+    return await _run_scenarios(wt, args.ticket_id,
+                                write_set=list(getattr(args, "write_set", None) or []),
+                                apply_skip_pools=bool(getattr(args, "apply_skip_pools", False)))
 
 
 def _stub_stage_shortcut(args: AgentStageArgs, settle_on_cache: bool = False) -> Optional[StageResult]:
