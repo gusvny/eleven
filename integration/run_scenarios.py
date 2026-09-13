@@ -753,6 +753,9 @@ SCENARIOS = [
     ("t260910-08-lane-materialization",
      "真开票后泳道磁盘逐仓物化终态（t260910-08，dengzhufpv 形态=根仓+子仓写集，灰盒 L3，工单验收第 1 条的仪器）：正规入口 ticket.py create 真开票→真专属 worker 跑 DevLaneWorkflow→prepare_workspace 真建泳道→磁盘四件套——逐成员仓工作区目录在位（repo=\"\" 根树=泳道容器本身是根仓已注册 worktree）、分支名 lane/<票>-<seg>（根树=-root）、清单 .suyou/repo_worktrees.json repo/name/branch 逐条与明细一致、meta.repo_worktrees 非空（ticket show 读面=取证同面，此前恒 null 误导诊断）；Temporal 起始事件 payload 明细双仓（对外数据契约）；单仓对照同链零回归（workspace_prep=created、无清单、meta 明细空）；畸形明细两层互不冒充——类型毁形 start 受理但 worker 解码面拒收（实证注记：本仓 temporalio type-hints 校验在 decode 侧，编码面不设防；t260910-13 同款 Failed converting 签名=workflow 代码不执行、零落仓、payload 原样过线）、语义毁形（codec 可过闸必拒：条目缺 name）进 blocked 可读拒收且不落任何泳道形态（不崩 _init、绝不静默单仓）；KI-067 设计进去（create 返回体只作辅证，真值锚磁盘/Temporal 侧效果，异常/空输出/拒收回执=红灯点名）。与 t260910-03/-06/-12 intent 分界：彼等复刻 derive/直调 prepare 均不经过 dev_lane._init 第二跳（KI-063 同构盲区=t260910-07 真机单仓实证），本场景唯一守 TicketInput→_init→meta→WorkspacePrep→activity 全跳真码+磁盘终态。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker/隔离台库/temporalio 缺席=ENV_FAIL exit 2（真链腿无 stdlib 替代）",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260910-08/sc_t260910_08_lane_materialization.py", "engine"),
+    ("t260911-04-multirepo-fullchain-landing",
+     "全链多仓旅程守卫（t260911-04，补 KI-071 传递断链的最后一跳「merge→成员仓 main 落仓」，灰盒 L3）：正规入口 ticket.py create 真开票→真专属 worker 跑 DevLaneWorkflow（桩脑自动过段零模型调用）→merge 人审签字面驱动（不旁路 workflow、零 activity 直调）→逐仓 squash 落 main 终态+泳道拆除零残留——断言全落磁盘/git 终态（testing-guide 260910 节）：成员仓 repo_a main 恰多一个该票 squash 提交（rev-list 计数=基线+1、lane/* 分支已删）、内容正确且不串仓（repo_a/src/a.py 票内内容在 main、repo_b 零新提交）、根仓 main 恰+1 且 docs/root.md 落位、worktree/分支/目录三清零残留、ticket show 非 blocked（辅证）；反向腿=merge 人审挂起窗删泳道 .suyou/repo_worktrees.json（夹具级注入=缺明细形态，不改产品）→ 保险丝B 红灯咬合：workflow blocked 且公开读面点名「未逐仓物化/保险丝B」、三仓 main 提交数全部不变（绝不静默单仓收口）。intent 三维分界：与 t260907-06① journey 差在链形态（全链 vs 直调 activity）与落点（main vs 分支）、与② merge_gate 差在零 activity 直调（彼=KI-063 同族）、与③ failclosed 差在注入时点（merge 人审窗 vs prepare 时点）、与 t260910-08 差在终点（彼止步泳道磁盘物化）；畸形明细两层互不冒充 intent 归 t260910-08 不带。KI-067 辅证纪律（create/show 输出只作辅证，真值锚磁盘/git）、worker holder+finally 全终态回收（TERM 20s→kill 兜底计红）、env_for 剥 SANDBAR_* 防 CWD/env 泄染、两腿共台（900s 预算）。docker/隔离台/temporalio 缺席=ENV_FAIL exit 2（真链腿无 stdlib 替代）",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260911-04/sc_t260911_04_multirepo_fullchain_landing.py", "engine"),
 
 
     # ---- t260910-11: 巡检校准五事（改名去face / 扫描误报校准 / 测试腿隔离红线 / 票面可查询） ----
@@ -1158,8 +1161,13 @@ def _run_entry(entry):
     child_env = {k: v for k, v in os.environ.items()
                  if k not in ("SANDBAR_TASK_QUEUE", "SANDBAR_WATCH_WORKFLOW")}
     try:
+        # 解码加固（t260911-04 仲裁 gen3 实锤）：text=True 默认严格解码，任一场景输出
+        # 含非法字节即抛 UnicodeDecodeError 穿透池线程 → 池级异常 → 该池未跑条目静默
+        # 丢失（实案：192 跑 ≠ 在册 216，池级异常点名 0xef 处解码失败）。诊断文本按
+        # 替换字符净化，判定仍严格由退出码承载——不弱化三态契约，只堵条目丢失。
         proc = subprocess.run(["/bin/sh", "-c", cmd], capture_output=True,
-                              text=True, timeout=CMD_TIMEOUT, env=child_env)
+                              text=True, encoding="utf-8", errors="replace",
+                              timeout=CMD_TIMEOUT, env=child_env)
         return (name, proc.returncode,
                 ((proc.stdout or "") + (proc.stderr or ""))[-1500:],
                 time.time() - t_start, t_start,
