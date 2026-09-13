@@ -796,3 +796,221 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   属 KI-075 划定的「多机」隐患族。
 - 定位：`server/plugins/ui/src/host/routes.ts:258-283`（`:262` 病灶、`:290-293` 回落分支）；
   注入提交 `bfc1c34`（t260910-14 squash 收口）；产品调用点 `server/plugins/ui/node.ts:205`
+
+## KI-077 测试台残骸堆积＝docker 地址池报错的真因（池子没小，是台没拆）——260912 实测
+- 现象：全量/并发跑时场景报 `Error response from daemon: all predefined address pools have been fully subnetted`
+  （`t260904-19-stage-docker-parallel-zero-residue`、`t260910-12-herd-no-crosstalk` 连坐环境红）。
+- **宿主的质询是对的：不是网络数少不够用**。两步实测否掉了「池子小」这个解释：
+  ①空闲池探测＝临时新建网络随手分到 `192.0.2.0/24`（池子远未枯竭）；
+  ②现场 15 条 `stage-console-*` 台，按容器标签 `com.docker.compose.project.working_dir` 反查，
+  **12 条的工作目录已不存在**（`/private/var/folders/.../sandbar-baseline-*`）：测试自建基线树起台，
+  临时树删了**台还开着**（最久 6 小时）；另有 17-18 小时的 `fix15-*`、存活 4 天的 `suyou-test-temporal`；
+  同时死测试残骸 10 个容器（`t26090419-par-*`「并行零残留」自造台活了 3-4 小时——报池满的正是它自己）。
+- 真因两条：①**残骸堆积**（主人早没了，台还占网络与内存；引擎现有起跑前卫生只清
+  「停止态容器 + 闲置网络」，够不着「还开着但主人早死」的台）；②**瞬时爆发**（一条场景一次起多台、
+  每台一条 compose 默认网络，几十条 /24 同时申请即撞分配器限额——总量不缺，缺的是**同一瞬间**的头寸）。
+- 危害：假环境红连坐（一次实测 19 条连坐史）、内存被残骸吃掉（本机 docker 上限实测 15.66 GB，
+  十余台同时开着）、把归因引向「机器不够用」。
+- 处置方向（引擎侧，归票）：①起台时把**索租方身份**写进租约，收尾扫「持有者已死 / 工作目录已不存在」
+  的台逐台拆（容器+网络+卷）并点名；②建期前先回收孤儿台；③**减少建网次数**——不再每台各建一条
+  默认网络，改复用一条专用测试网络或整轮共用一个工程名。可选兜底＝扩大 docker `default-address-pools`
+  （**OrbStack 是否支持该 Docker 原生键尚未确认**，且改它需重启 OrbStack 会打断在跑台，故不作首选）。
+- 已当场清场（宿主授权，只清无票面归属/主人已死/死测试残骸，未动任何在飞票的台）：
+  **容器 45→13、网络 31→11**；生产面复核完好（console 3099 HTTP 200、引擎活得、四票照常推进）。
+- **260912 全天实测修正（重要，替换上面几处推断）**：
+  - **「并发 4-6 台就不稳」这条历史记载无据，已实测推翻**：起台本身极快（串行单台 2.1 秒；
+    12 台并发去掉名额闸后 5.3 秒全绿；16 台 7.0 秒 16/16）。真正卡人的是**满员闸**
+    （缺省上限 12，全机共用名额，把在飞票常驻台与残台一并计入）：同一轮 12 台并发，
+    上限 12 → 3 台卡到 150 秒超时；**仅把上限改 30 → 12/12 全部 5.3 秒起完**。
+  - **地址池报错的真触发条件＝瞬间爆发量**，与存量网络数无关：同瞬间新建网络 16 条全绿、
+    24 条失败 1、**32 条失败 9**（报错全为 `fully subnetted`）。**天花板≈23 条**。
+  - **天花板可以绕开，且不必动 docker 守护配置**：同样爆发 32 条但由我们**指定网段**
+    （`docker network create --subnet 10.213.x.0/24`）→ **32/32 成功、1.35 秒**。
+    故首选修法是「stage_docker 自管受管网段表 + 每台指定网段」，而非扩大 daemon 池。
+  - 残台判据的缺口更明确了：残台的 hold 心跳进程仍活着 → 租约永新鲜 → 「过期+持有者进程消失」
+    这条判据**抓不到真残台**；须改按**主人存在性**（工作目录/泳道/心跳陈旧度）+ 两条安全阀
+    （booting 且心跳新鲜不碰、泳道仍在 worktree list 不碰）。
+  - 已立案修复票：**t260912-02**（去名额闸留 100 保险丝 / 残台自动认领并拆 / 起台自管网段），
+    验收基线＝并发 32 台 32/32 零超时、地址池报错零复发、残台三形态全拆且两对照不误拆。
+- 定位：`integration/stage_docker.py`（台的生命周期与锁根）、`server/docker-compose.test.yml`（无 networks 声明
+  ＝每工程一条默认网络）、`server/engine/agent_activities.py:_docker_hygiene()`（起跑前卫生够不着残骸台）
+
+## KI-078 单票集测段是在跑「整套全局场景」＋超时静默重试＝三小时黑洞（260912 实测）
+- 现象：`run_integration_tests` 段（**机械段，零模型调用**，`dev_lane.py:423` `agent=False`）执行
+  `verify.yaml` 的 `integration.cmd` ＝ `run_scenarios.py` 全量；每张票都跑**整套**场景，
+  与该票改了什么无关。票内实测单轮 36-50 分钟（t260911-06 五次入场：36/48/101/41/50 分），
+  而我独立单跑同版全量＝18.7 分钟（并发宽度同、机器负载更高）→ 差额来自**多票各自跑整套**互相争抢。
+- 二次危害：活动超时 `INTEG_RUN_TO`（原 60 分钟，`dev_lane.py:135`）配实际 40-50 分钟＝**贴着上限赌博**；
+  超时后 Temporal 自动重试（`MaximumAttempts=3`），一轮可吃 3 小时才报错（t260911-04/06 实测
+  各已超时两次）。症状表现为「段一直在跑」，不像故障，容易误判为模型慢。
+- 相关改动（由 t260911-05 顺手改入，待定性）：`INTEG_RUN_TO` 60min→100min，理由＝外层 60 < 内层批量帽 95
+  自相矛盾（诊断成立）；但方向与宿主 260912「单票集测 ≤10 分钟」相反，故暂按**临时**处理，
+  集测分轨/限时落地后收回。
+- 处置方向：①按票裁剪——每票只跑与该票写集相关的场景子集，整套挪给**定期巡检**单独跑；
+  ②超时不再静默重试（或重试必须上抛可见告警）；③两轨共用一份场景清单，只靠标记（cadence）区分，
+  不得复制成两份；④巡检跑时独占机器。
+- 定位：`server/engine/dev_lane.py:128/:423/:1427`；`server/engine/agent_activities.py:_run_scenarios`（`:3661`）；
+  `server/tools/verify_lane.py` 集成道（`:505` 起）；`verify.yaml` `integration.cmd`；
+  基线数据＝`~/.lane/t260911-05/out/integration-report-260912-035013.json` 与
+  integration 独立跑 `/tmp/integ-bench-20260912-025906.log`
+
+## KI-080 人授权通道的 authorize 载荷送不到：钥匙插不进去（t260912-03 落地后立即实证，阻塞级）
+- 现象：260913 对两张卡住的票签发人授权（`ticket.py op=authorize`），回执均 `ok / delivered=true`，
+  但票面 `refused` 记的是 **`{"want":"sign()","why":"当前步 <段> 非人审等待中，签字无效"}`**——
+  即被**当普通签字**处理，`meta['authorizations']` 始终为空。含义：新落地的人授权例外通道
+  **在任何工单状态下都无法签发**，两条本应被它解开的判定（受保护路径闸、仲裁上限）仍无出口。
+- 实证（integration 侧只读复现，含一条无副作用对照）：
+  ① t260911-05（arbitrate/blocked）发 arbitration_verdict 授权 → 得 sign() 拒收；
+  ② t260912-01（design_integration_tests/blocked）发 protected_path 授权 → 同上；
+  ③ 对照：对 t260911-06（acceptance_walkthrough/running）发**已过期**授权（必被拒、不落账）
+  → 仍得 sign() 拒收。若载荷送达，intake 应先到并回报「expires 已过期」，而非走 stage 判定。
+- 定位线索（读源，未改）：发送侧 `server/engine/client.py:396` 构造
+  `Signature(who=…, gate="", decision="approve", authorize=auth)` 后 `handle.signal("sign", sig)`；
+  接收侧 `server/engine/dev_lane.py:2148` 的 `getattr(sig,"authorize",None) is not None` 分支**从未进入**
+  → 归一化后的 authorize 在传输/反序列化一跳丢失。载荷定义 `shared.py:350-363`（HumanAuthorization
+  dataclass，scope 为 List[str]）；本信号面此前只带标量（who/gate/decision/note），**本案是首次携带
+  嵌套对象载荷**——嫌疑面＝嵌套载荷的编码/解码不对称，且失败是**静默回落**（走普通签字路径）而非点名。
+- 为什么守卫没抓住：t260912-03 的三套单测（payload/sign/cli，15+ 用例）**只覆盖纯函数与 schema**
+  （`grep handle.signal` 零命中），**无一条真走信号往返**；而该缺陷只在真投递时出现。此为
+  「测试在场≠测试生效」家族的又一例（KI-046/KI-050/KI-071/KI-076 同族）。
+- 处置方向：①修正嵌套载荷的编码/解码不对称（intake 侧已支持 dict/dataclass 双读，优先让解码产出 dict）；
+  ②接收侧加**可见失败**——authorize 载荷存在但解析为 None 时须 refused 点名，不得静默走普通签字路径；
+  ③补真往返守卫：至少一条经真实信号投递的集成场景（受保护路径放行 + 仲裁超限推进），含过期/错票号/自签/畸形四条负锁。
+- 定位：`server/engine/client.py:387-400`；`server/engine/dev_lane.py:2140-2187`；`server/engine/shared.py:350-363,650`；
+  已立案修复票 **t260913-01**（验收 F 腿：修好后 t260911-05 与 t260912-01 至少一张必须实际被解开）。
+
+## KI-079 说明书与实际入口不符：`ticket.py` 无 pause/resume（且旁路丢身份）
+- 现象：会话宪章（`session_charter.md`「引擎操作面」）列了
+  `$PY $TK '{"op":"pause"|"resume",...}'`，实际 `server/tools/ticket.py` 的 op 白名单只有
+  create/update/list/show/accept/advance/dispatch-next/rework/sign/retry_qc（`:617-636`）
+  ——调 pause 报 `ValueError: 未知 op: 'pause'`。暂停只能回落裸入口
+  `client.py ticket '{"op":"pause",...}'`：无 notes 写集闸、回执自带 `entry_hint` 提醒，
+  且**调用方身份丢失**（实测事件里 who 记成 `op-local`，`by` 字段未透传）。
+- 危害：每次暂停都走旁路＝审计面缺身份；说明书教了一个不存在的入口＝与 260910 教训同族
+  （「说明书教错调用形式」被误报成产品故障）。同族小项：`t260911-05` 的仲裁超限（`MAX_TESTS_FAULT_ROUNDS=5`）
+  在引擎里是**机械上限**而非代码缺陷，但现场无从一步看出「该由谁判、判完怎么放行」，
+  缺一句「转人工后如何处置」的可见说明（本次由 integration 逐条复现后裁定放行，裁定档
+  `notes/t260911-05-verdict.md`）。
+- 处置方向：①给 `ticket.py` 补 pause/resume 并把 who 透传进事件历史；或②改宪章口径并写明
+  pause 走哪条正规入口；两者择一，别让说明书继续教错。
+- 定位：`server/tools/ticket.py:617-636`；`server/engine/client.py:424`（pause/resume 实现处）；
+  宪章＝`session_charter.md`「引擎操作面」节
+
+## KI-081 引擎代码已落 main，但在跑的工单工人仍跑旧码＝新信号静默被丢（260913 实证）
+- 现象：引擎修复落 main 后，**已存在的工单专属 worker 进程不会自动重载**——它们的内存里是启动那一刻的代码；
+  表现分两种，都不显眼：
+  ① **新信号被静默丢弃**：260913 给 t260912-01 / t260911-05 签发人授权（`ticket.py op=authorize`）与
+  `retry_qc`，回执均 `ok / delivered=true`，但票面 `authorizations` 恒为空、段位不动、`refused` 也空
+  ——即「送达但不生效、且无任何报错」。同一时刻 **t260913-01（工人是当天新起的）同一操作成功落账**，
+  对照坐实「差在工人进程的新旧」；
+  ② **内存与磁盘代码不匹配**：旧进程日志出现
+  `[creds] 工单 t260911-05 的 project 查询降级（cannot import name 'AUTH_KINDS' from 'shared'）`
+  ——它启动后磁盘上的 `shared.py` 已新增名字，旧进程 import 失败并静默降级。
+- 处置（260913 已执行并验证）：对无在跑活动的票**优雅重启其工人**（`server/engine/ticket_worker.py`
+  `reap_ticket_worker`（SIGTERM，未完成活动先跑完）→ `spawn_ticket_worker`；或由控制台 ensure 补拉）。
+  重启后**连排队中被丢弃的信号都补处理**：两张票的在册授权从 0 变 3 条（含重启前签发的那几条），
+  `retry_qc` 随即生效、段位开始推进。
+- 通用教训：**「代码落地」≠「行为生效」**——凡改了引擎/worker 侧判定与协议（新增 dataclass 字段、
+  新信号载荷、新 import 名），必须同时处理「在跑工人持有的旧码」，否则症状是「一切都成功但没反应」。
+- 定位：`server/engine/ticket_worker.py:100`（spawn）/`:130`（reap）/`:139`（ensure 对账）；
+  证据＝`server/engine/data/worker-t260911-05.log`、`worker-t260912-01.log`（260913 11:19 两条）；
+  票面证据＝t260912-01 / t260911-05 的 `authorizations` 从空到 3 条的时间线。
+
+## KI-085 禁用 sandbox-policy 会把整个插件树卡死（console 起不来）——来历不明的工作区改动，260913 实证
+- 现象：`dsh web` / 控制台启动即失败：
+  `Error: dsh: plugin tree failed to load: dsh: 3 entries did not activate` ——
+  `dsh-bash-sandbox: pending (waiting for service: sandboxPolicy)`、
+  `dsh-fs-sandbox: pending (waiting for service: sandboxPolicy)`、
+  `dsh-permission-presets: pending (waiting for service: shell)`。
+- 根因（宿主排查确认）：`server/profile/cordis.patch.yml` 末尾被加了 **`sandbox-policy: disabled` 两行**
+  → `sandboxPolicy` 服务无人提供 → 两个沙箱消费者 pending；受限执行器起不来又导致 `shell` 服务缺失
+  → `permission-presets` 也 pending，**三者连坐把插件树卡死**，控制台无法 boot。
+- 关键事实：该两行是**未提交的工作区改动**、**没有任何笔记说明来历**（谁加的、想解决什么均无记录）。
+  集成侧自查：本会话对配置面写操作 **0 次**（`git status` 仅 `notes/debts/known-issues.md` 为本会话所写）；
+  引擎侧唯一写 `disabled: true` 的位置是 `agent_activities.py:1150` 附近的**会话延续 patch**（禁用的是
+  原版 headless runner、换 resume runner，与 `sandbox-policy` 无关）——**归因未定，如实留档**。
+- 教训与处置：①**「禁掉沙箱」是一条会把整棵树拖死的操作**（服务链上有依赖顺序），不是局部开关；
+  ②凡在 profile 层做 `disabled`/`consumers` 类改动，**必须留注释说明来历与目的**（本仓硬规则之一就是
+  文档/注释可追溯），否则下一个人只能靠猜——这次是宿主在外部排查才复起的；
+  ③排查口诀：看到 `pending (waiting for service: X)` 先查**谁本该提供 X**（本例 provider 被 disabled），
+  再顺链看下一个 pending。
+- 定位：`server/profile/cordis.patch.yml`（末尾两行；headless 侧同名文件是指向它的软链，一并受影响）；
+  诊断输出＝控制台启动时的 `3 entries did not activate` 清单。
+
+## KI-084 仲裁段的「测试面」定义不含被 import 的测试基建助手＝修法落不进该段（260913 三例）
+- 现象：仲裁段判出测试基建红（tests-fault）后，其**修法落在「被场景 import 的共享助手」**上，而段规则
+  `STAGE_PATH_RULES["arbitrate"] = {"kind": "test_face"}` 的测试面＝**场景脚本（sc_*）+ test_*.py +
+  tests/ 目录 + 本票场景 + 结果文件**，**不含**助手库 → `stage-path 闸` 拒收，票停在 blocked：
+  `段 arbitrate 不允许改 <文件>（本段只许：测试面…）——合法出路：打回目标段或回 main 侧走票`。
+- 三例实证（260913 同日）：①`integration/baselines/capture-ensure-build.mjs`（界面场景共享构建助手）；
+  ②`server/engine/dev_lane.py`（仲裁要修集测段活动超时，属引擎代码面）；③
+  `integration/t260912-02/lib_lifecycle_case.py`（起台腿三态归类的单源函数落点）。
+- 结构性原因：仲裁被设计成「可迭代测试集」，而**测试集的主体恰恰是助手库与共享资产**（sc_* 只是入口薄壳）；
+  「测试面＝脚本」这个定义与实际形态不符，于是**每一次「仲裁要修测试基建」都会撞墙**。
+  现实处置＝每次给该文件签一张 `protected_path` 授权再打回实现段（260913 三次均如此），
+  **症状被压住但缝隙仍在**；且每次要多一轮（打回 → 实现 → 集测 → 仲裁）。
+- 处置方向（二选一，建议②）：
+  ①**扩规则**：测试面定义扩到「从失败场景出发的 import 闭包」（可机械实现：解析场景文件的 import 图，
+  取其 `integration/` 内闭包为测试面）——一劳永逸，但仲裁段可写面变大，需与「受保护名单」边界一起审视；
+  ②**保留授权路**：承认「助手文件属受保护真源、须人授权」是**有意设计**，则把这条写进流程说明
+  （仲裁段遇此情形应**主动报为「需授权」**而不是干等超时/反复重跑），并把授权范围从「单文件」改成
+  「本票测试面闭包」以减少签批次数。
+- 附带（同轮仲裁新报，待另票/另 KI 评估）：①console 台 hold 上限 14400s 自退 → 租约过期 →
+  ensure 对活容器 fail-closed ⇒ **单台死亡连坐约 17 场景**；②锁根分裂（沙箱降级根写入的租约对闸不可见 →
+  「容器在跑却报租约已死/缺失」）。
+- 定位：`server/engine/path_gates.py`（`STAGE_PATH_RULES["arbitrate"]`、`_is_scenario_script` 的测试面判定）；
+  实证＝票 t260913-01 / t260913-02 的时间线（260913 三条 blocked 记录，reason 内含上述拒绝原文）。
+
+## KI-083 macOS 宿主机无可用沙箱后端 → agent 命令面 fail-closed（260913 全链取证；容器内已验证可解）
+- 现象：本机 headless agent **一律无法执行 shell 命令**，报
+  `sandbox mode "workspace-write" is requested but no sandbox backend is usable on this host; refusing to
+  run the command unconfined. …`；而它**读写文件一切正常**（能改代码、能写结果文件）——故极易误判成
+  「这个 agent 有问题 / 这张票有问题」。
+- 取证（按 DSH 官方手册的四项证据法，集成侧实测）：
+  ①环境＝macOS 26.4.1 / 内核 25.4.0、dsh 0.1.1-rc.2、Node v26.5.0、`/usr/bin/sandbox-exec` 在位；
+  ②Node 直接 spawn 裸名与绝对路径**都成功**（排除 issue #4849 那种 `spawn ENOENT` 环境桥故障）；
+  ③provider 链＝`darwin: ["seatbelt"]` 唯一一条腿，可用性探测＝用真实 read-only profile 跑
+  `sandbox-exec -p … -- true` 要求 status===0 → **实测退出码 71（`sandbox_apply: Operation not permitted`）**
+  → 判定 unusable → **fail-closed**；连最小 profile `(version 1)(allow default)` 也返回 71
+  （即本机**无法应用任何 Seatbelt profile**，非 profile 语法问题）；
+  ④无沙箱对照（宿主直跑命令）正常 → 命令面本身没坏，只有「戴项圈」被内核拒绝。
+- 分层原因（本条最容易被误读的点）：DSH 的**文件读写**走 `dsh-fs-sandbox`＝**进程内文件栅栏**（不依赖
+  sandbox-exec），**执行命令**走 `dsh-bash-sandbox`＝**必须由系统沙箱包住子进程**。所以同一台机器上
+  「文件工具可用、命令工具全废」是**预期分层**，不是随机故障。
+- 官方立场（重要）：手册把这类判为 `SANDBOX_UNAVAILABLE`（无可用后端＝预期 fail-closed，不是文件越权），
+  **明文反对**用切 `danger-full-access` 来「修」（且全权路径另有未修 bug：discussion #5298 提权校验、
+  #4763 模型乱填字段）；官方正解＝**用容器 / microVM / 远程执行器替换整条执行面**
+  （dsh-sandbox README：「同一世界隔离；需要整体环境隔离时请用容器」）。
+- **容器内已验证**（集成侧原型，`test-dsh:dsh-0.1.1-rc.2`，Linux/OrbStack 内核 7.0.14）：同一份 profile、
+  同一 `workspace-write` 模式，agent **命令面完全可用**（十余条命令均有真实输出）；文件改写为真；
+  **沙箱确在生效**——agent 尝试写工作区外（`/usr/local/lib/python3.11/…`）被 `Permission denied`。
+  即：同模式在 Linux 有可用后端（bwrap/Landlock），且把写入限制在工作区内。→ 已开票 **t260913-04**
+  （agent 执行面容器化：镜像预装依赖 + 引擎接线 + 回归）。
+- 附带发现（同票一并处置）：①容器镜像内 Python 依赖不齐（无 pytest），`pip install` 遇
+  `externally-managed-environment`、`venv` 因缺 ensurepip 失败 → 镜像必须预装；②**bash 工具 60 秒超时**
+  对分钟级测试命令不适用（`pip download` 即被掐断）——agent 侧应用后台任务 + 轮询。
+- 未查明（如实留档，不编）：同一张票 `t260911-05` 在 09-13 11:23 有**成功执行命令**的痕迹
+  （git/pytest/shasum），而当日 15:56 之后的段全部失败；机制侧无直接证据解释这一时间差
+  （已排除：agent 进程新旧——新起进程同样失败；配置差异——两泳道 `.dsh` 权限项均未配；系统更新——
+  安装历史无 09-12/13 的 OS 更新，仅 XProtect 数据更新）。
+- 定位：`dsh-sandbox-local`（探测 `defaultProbeSeatbelt`、`darwin: ["seatbelt"]`）；
+  `dsh-bash-sandbox` vs `dsh-fs-sandbox`（分层原因）；手册＝deepseek-harness-handbook
+  `troubleshooting/sandbox-denied-vs-unavailable.md`；复现命令＝
+  `/usr/bin/sandbox-exec -p '(version 1)(allow default)' -- true`（期望 0，实测 71）。
+
+## KI-082 老票越放越难合：分叉点落后 main 无任何提示，最终以「越界写/冲突」形态爆出（260913 实证）
+- 现象：`t260911-05` 分叉点停在 09-11，到 09-13 已**落后 main 28 个提交**；期间它自己照常跑阶段、
+  人数次推它过门，直到 `merge_check` 三红才暴露：①越界写 `.sandbox_tmp_gen9.md`（仲裁段 09-13 11:22
+  留下的两字 placeholder 临时文件，未被 gitignore 忽略 → settle 判越界）；②泳道内 `verify_lane code`
+  `exit=None red=1`（未跑成，疑似被前序超时连累）；③**合并预演冲突三文件**——`integration/stage_docker.py`
+  （main 侧已被 t260912-02 改）、`integration/run_scenarios.py` 与 `server/engine/dev_lane.py`
+  （main 侧已被 t260913-03 改）。即：**同一批文件被别的票先改，老票只会以冲突形态知道**。
+- 危害：①老票的每轮集测都在**旧基线上**跑，判红/判绿都可能与 main 现状无关（误导仲裁）；
+  ②解冲突时极易用旧版覆盖别人的新实现（本票退票附注已明确写「以 main 侧为基础，只保留本票增量」）；
+  ③票越老单轮成本越高，形成「越拖越贵、越贵越拖」。
+- 处置方向：①给票面/列表加**落后度可见**（分叉点落后 main 多少提交/多少小时），并在落后超阈值时
+  在段入口给出提示或强制对齐；②段间自动对账：进入集测段前先与 main 对齐（或明确声明「本轮在旧基线上跑」）；
+  ③临时文件类工作产物要么进 gitignore、要么由作者清理——`.sandbox_tmp_*` 这类不该进 settle 的脏面。
+- 定位：`t260911-05` 泳道（`.lane/t260911-05`，HEAD 862907a 未含 main tip b614392）；
+  merge_check 报文明细见其时间线 09-13 11:23；退票附注（对齐口径）见同票 09-13 07:56 事件。
+
