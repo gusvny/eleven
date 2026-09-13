@@ -916,6 +916,29 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   证据＝`server/engine/data/worker-t260911-05.log`、`worker-t260912-01.log`（260913 11:19 两条）；
   票面证据＝t260912-01 / t260911-05 的 `authorizations` 从空到 3 条的时间线。
 
+## KI-087 老名泳道必卡：判脏清单漏 `.suyou` + 空提交抛异常（dengzhufpv 每次卡 create_plan 的真根因）
+- 现象：`dengzhufpv/t260911-07` 每次重跑都在 `create_plan` 段 blocked，报「agent 活动故障」——
+  而**agent 的产物其实是好的**（`.suyou/stage_create_plan_gen3.json` 与失败同分钟落盘）。
+- 复现与原文（260914 实跑取证）：触发重跑 80 秒后 blocked，worker 日志异常：
+  `settle: git commit 失败: … Untracked files: .dsh/ .suyou/ … nothing added to commit but untracked files present`。
+- 病灶三处（均定位到行，main 当前态）：
+  ① `server/engine/agent_activities.py:739` `SETTLE_PATHSPEC = [".", ":!.dsh", ":!.sandbar", ":!.sandbar"]`
+  —— `.sandbar` 写两遍、**老名 `.suyou` 全漏**（行尾注释还把它称 legacy lane name）；引入于 260907 改名票
+  （搬迁快照里本行原本是正确的 `:!.suyou`）。
+  ② `:1036` 空提交 `raise RuntimeError(...)` ——链路＝判脏非空 →`git add -A -- .`→`git reset -- .dsh .suyou .sandbar`
+  （撤下协调目录）→暂存区空→commit 非零→抛异常；而**「无改动可提交」是正常工作态**（只产出协调目录产物的段）。
+  ③ `:1650` `mf_dir = lane_root / ".suyou"` 硬编码老名 —— 创建多仓泳道即写下老名，泳道整条命粘老名
+  （`resolve_dot_dir` 老名粘滞规则），故后续每段都在 `.suyou/` 下。
+- 为什么只有它踩（对照解释）：sandbar 自己的票多数泳道是 `.sandbar/` 或**两者都有**（`.sandbar` 在清单里→不判脏），
+  而 dengzhufpv 这条**只有老名 `.suyou/`** → 每次必踩。即：**「认双名」这件事没补上**。
+- 危害：①任何老名泳道里「只产出协调目录产物」的段（create_plan/review_plan/ui_evidence 等）**必卡**，且重跑无用；
+  ②报错被上抛成「agent 活动故障」，**归因噪声极大**（本票已让多张票各重跑数次、误判为网络/配额各一轮）；
+  ③「改了引擎但工单看起来是 agent 挂了」这一形态与 KI-081 同族。
+- 处置：已开票 **t260914-01**（判脏口径补老名并收单源／空提交按正常收口且与真失败可辨／多仓清单走真源），
+  回归锚＝`dengzhufpv/t260911-07` 重跑后 create_plan 正常收口。
+- 定位：`server/engine/agent_activities.py:739 / :1036 / :1650`；实证＝`server/engine/data/worker-t260911-07.log`
+  （260914 07:08）与 `dengzhufpv/.lane/t260911-07/.suyou/stage_create_plan_gen3.json`。
+
 ## KI-086 备选方案备忘：整张票的 worker 进容器（B 案，260914 宿主拍板「先做 A、B 记录一下」）
 - 背景：t260913-04 落地的是 **A 案**——「worker 在宿主、agent 在容器」（宿主 worker 跑 DevLaneWorkflow，
   到 agent 段时 `docker exec` 进该票容器；容器每票一个、常驻 `sleep infinity`、挂载=仅该票泳道且**同路径**）。
