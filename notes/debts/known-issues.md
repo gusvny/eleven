@@ -916,6 +916,30 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   证据＝`server/engine/data/worker-t260911-05.log`、`worker-t260912-01.log`（260913 11:19 两条）；
   票面证据＝t260912-01 / t260911-05 的 `authorizations` 从空到 3 条的时间线。
 
+## KI-086 备选方案备忘：整张票的 worker 进容器（B 案，260914 宿主拍板「先做 A、B 记录一下」）
+- 背景：t260913-04 落地的是 **A 案**——「worker 在宿主、agent 在容器」（宿主 worker 跑 DevLaneWorkflow，
+  到 agent 段时 `docker exec` 进该票容器；容器每票一个、常驻 `sleep infinity`、挂载=仅该票泳道且**同路径**）。
+  容器内模式按宿主口径放开为**全权**（边界由挂载面承担）。**B 案＝连跑工作流那个 worker 进程也在容器里**
+  （容器自己轮询 Temporal、自己起 agent，不再需要 docker exec）。本条目只记录 B 案的技术要点与取舍，未排期。
+- B 案要解决的六件事（本日实核，逐条给结论）：
+  ① **容器里要有「引擎+仓库」**：现镜像只有 dsh+python/git（给 agent 用）；整 worker 需再加引擎代码、
+     venv 依赖（temporalio）、worker 入口（`worker.py --pidfile … --logfile …`）。
+  ② **泳道必须在容器内「同路径」**（关键技术点）：泳道是 git worktree，其 `.git` 是**文件**、内含
+     **宿主绝对路径**（指向主仓 `.git/worktrees/<id>`）。容器内若不存在该宿主路径，则容器内一切 git 命令
+     （status/commit＝worker 代落盘、merge、teardown）全失败。做法＝`-v <宿主泳道>:<宿主泳道>` **且**把主仓
+     `.git` 也按同路径挂进去；同款「同路径挂载 + git-common-dir」在测试台 compose 里已有先例可抄。
+  ③ **容器要能连上宿主 Temporal**：宿主地址 `127.0.0.1:7233` 在容器内指向容器自身。可选
+     `host.docker.internal:7233`（需 darwin host 网关配置）或容器 `--network host`——**后者等于放弃
+     「仅出口」的网络边界，是新的取舍点，须宿主拍**。
+  ④ **接线点**：现起台点＝宿主「console → 起 worker 进程」；B 案要改成「console → 起容器（里面跑 worker）」
+     ——即 t260913-04 报告所指的那个接线点（`node.ts:623` 原文：console 是工单 worker 的唯一生产 spawn 点）；
+     console 属用户面，改动与重启须宿主操作。
+  ⑤ **生命周期**：按票起、收口即拆、起不来**回落宿主**（不让工单卡死）；worker 日志/结果文件仍落泳道内。
+  ⑥ **性能待实测**：挂载是宿主文件系统（OrbStack 有代价），worker 频繁读写泳道文件，可能比现在慢。
+- 判断（260914）：**先 A 后 B**——A 能立刻解掉「agent 必须在容器里执行命令」这个真实卡点（macOS Seatbelt
+  不可用，见 KI-083），且不引入 git 路径/网络边界/性能三个新变量；B 的收益是「连工作流引擎那层也在容器里」
+  的更强隔离，优先级取决于宿主对隔离强度的需求。若启用 B，③的网络取舍与④的 console 接线须先由宿主拍板。
+
 ## KI-085 禁用 sandbox-policy 会把整个插件树卡死（console 起不来）——来历不明的工作区改动，260913 实证
 - 现象：`dsh web` / 控制台启动即失败：
   `Error: dsh: plugin tree failed to load: dsh: 3 entries did not activate` ——
