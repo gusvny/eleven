@@ -51,6 +51,28 @@ integration:
     # 语义=**台**供给一条；浏览器依赖供给是另一维度，并列保留。
     - need: playwright-core（泳道 ui-check node_modules 软链主树，KI-036）
       cmd: 'MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/ui-check/node_modules/playwright-core"; [ -d "$SRC" ] || SRC="$MAIN/server/dsh/ui-check/node_modules/playwright-core"; [ -d "$SRC" ] || { echo "ENV_FAIL: 主树 playwright-core 缺失：$SRC"; exit 1; }; mkdir -p server/ui-check/node_modules; DST=server/ui-check/node_modules/playwright-core; [ -e "$DST" ] || ln -s "$SRC" "$DST"; [ -e "$DST/package.json" ] || { echo "ENV_FAIL: 软链后不可解析：$DST"; exit 1; }'  # engine-venv-compat（t260907-10 主树迁移窗口回落；摘除票删旧腿）
+  # ---- 每票集测段跳过慢池（t260913-03 落地；本声明由 main 侧随该票合并落账）----
+  # 宿主 260913 令：把「耗时长、又不经常动」的基础类测试先拿出每票段，交给每天一次的
+  # 集成测试巡检跑（巡检票 t260913-02）。判据纯机械＝**按执行器注册表自声明的池名过滤**，
+  # 不做任何「基础设施/产品」的人工分类。
+  # 实测依据（260913）：整套 237 条墙钟 20-28 分钟，其中 engine（约 1100s）+ exclusive
+  # （约 590s）＝整轮墙钟（1693s，误差 0）；跳过两池后每票段 ran=194、墙钟 169s
+  # （改前段级全跑 1498.9s）——即每票段从 25 分钟级降到 3 分钟级。
+  # 生效边界（三态语义，环环可机械验证）：
+  #   ① 仅每票集测段显式置 apply 时消费本声明（run_integration_tests → dev_lane 唯一
+  #      true 站点）；巡检/手动/老载荷回放缺省=false → **恒全跑**（不含跳过面）；
+  #   ② 跳过必须点名：执行器汇总与起始各打一次「本轮跳过池=…（少 N 条）」，且
+  #      ran==expected==本轮在册（被跳条目不在本轮在册，不冒充已跑、不假绿）；
+  #   ③ 例外（本条声明的意义）：票面写集命中 exclude_pools_force_assets、或命中执行器
+  #      用 --print-pool-assets 从注册表派生的被跳池资产面（被跳场景文件本身、其 import
+  #      的共享模块、integration/ 根级共享基建）→ **强制全跑**并在回执 forced_by 点名。
+  # 资产面取值理由（260913 实核）：被跳池的场景只依赖「测试台定义 + 测试基建」，不直接
+  # 依赖引擎源码（grep 无 agent_activities/verify_lane 引用），故强制面只圈测试台定义；
+  # compose 文件经实测**不在**注册表派生面内（须靠本声明入面），否则改了测试台定义反而
+  # 不跑测试台自证场景。
+  exclude_pools: engine,exclusive
+  exclude_pools_force_assets:
+    - server/docker-compose.test.yml
 
 ui_evidence:
   dirs:
