@@ -46,6 +46,17 @@ KI 相邻面：KI-008（暂停中 snapshot 可查=门是 await 点，L3.2 显式
 KI-018（暂停期相位语境=paused_phase 二态+timeline 标记，防「信号存在但误导」）；
 KI-003（patched 回放安全与老实例拒收文案归 developer selfcheck_pause.py——行为面
 合成不出 pre-patch history，本场景不做伪覆盖，review_plan 附条件②钦定）。
+
+t260914-04 扩腿（KI-079 收口，review_plan C1-C5 条件已内建）：
+- L0b=离线契约腿：调 integration/t260914-04/offline_ticket_pause_entry.py（零
+  Temporal：ticket.py pause/resume 包装层载荷逐键/D1 身份闸/CLI 畸形输入）；
+- L3.6b=正规入口腿：宪章所教形式经**真仓工作树** ticket.py（C1：夹具仓 clone 自
+  HEAD 没有 implement 期新 op；既有 CLI 腿本就跑真仓 client.py 同口径）——回执 ok
+  且无 entry_hint、refused who=注入身份、本票 snapshot timeline+refused 零
+  op-local、缺 by 在 CLI 层拒收。
+- 层次分工（C5）：「who 空白→workflow refused」仍由 L3.1 裸入口腿承载；「重复
+  pause/空态 resume/note 超限」两入口各验一笔，正规入口这轮断 who==注入值（C3：
+  timeline 身份断言用 any 命中口径，op-local 零命中限定本票 snapshot 范围）。
 """
 import json
 import os
@@ -95,6 +106,20 @@ def cli(py, stage, sub, args, extra=None, timeout=180):
     return parse_out_json(out)
 
 
+def tk_cli(py, stage, payload, timeout=180):
+    """跑真仓工作树 server/tools/ticket.py <整条 JSON>（t260914-04 正规入口）。
+
+    C1（review_plan）：必须走真仓工作树——既有 CLI 腿跑的就是真仓 client.py
+    （run_poc_client，cwd=REPO），夹具仓 clone 自 HEAD、implement 期没有新 op；
+    SANDBAR_ADMIN_LOG 指场景 tmp（C6，sc_ki067_entry_audit 先例）。返回解析后的
+    回执 dict（ticket.py 直 spawn=stdout 单行 JSON 契约）。"""
+    env = env_for(stage, {"SANDBAR_ADMIN_LOG": os.path.join(G["tmp"], "admin-entry.log")})
+    p = subprocess.run([py, os.path.join(REPO, "server", "tools", "ticket.py"),
+                        json.dumps(payload, ensure_ascii=False)],
+                       env=env, cwd=REPO, capture_output=True, text=True, timeout=timeout)
+    return parse_out_json((p.stdout or "") + (p.stderr or ""))
+
+
 def wait_snap(fail, py, stage, tid, pred, label, deadline_s):
     """轮询 ticket-query 直到 pred(snapshot) 成立。返回 snapshot 或 None（已计红）。
 
@@ -131,6 +156,19 @@ def refused_has(snap, want_sub, why_sub):
     """snapshot.refused 中存在 want 含 want_sub 且 why 含 why_sub 的条目（语义锚）。"""
     for r in (snap or {}).get("refused") or []:
         if want_sub in str(r.get("want") or "") and why_sub in str(r.get("why") or ""):
+            return True
+    return False
+
+
+def refused_who_among(snap, want_sub, why_sub, who):
+    """refused 中 want/why 语义匹配条目里**是否存在**该 who（身份透传的机械断言）。
+
+    必须是存在性判定，不能写「首条匹配的 who == 注入值」：同一语义锚的既有腿条目
+    （L3.1/L3.3 全是 e2e-host）排在更早、首条永远是它们——首条相等式 wait 谓词永假
+    ＝实现正确也假红（t260914-04 design 段修正）。"""
+    for r in (snap or {}).get("refused") or []:
+        if (want_sub in str(r.get("want") or "") and why_sub in str(r.get("why") or "")
+                and str(r.get("who") or "") == who):
             return True
     return False
 
@@ -280,6 +318,17 @@ def main():
         fail.check(env0["SANDBAR_TARGET_HOST"] == "127.0.0.1:%d" % fe,
                    "L0 写守卫：开票面 SANDBAR_TARGET_HOST 恒=本场景舞台地址")
         build_fixture(fail)
+
+        # ---------- L0b 离线契约腿（t260914-04）：ticket.py pause/resume 包装层 ----------
+        # 零 Temporal（载荷形状/D1 身份闸/CLI 畸形输入）；单独可秒跑，闸内由此携带执行。
+        off = subprocess.run([sys.executable,
+                              os.path.join(REPO, "integration", "t260914-04",
+                                           "offline_ticket_pause_entry.py")],
+                             cwd=REPO, capture_output=True, text=True, timeout=120)
+        off_tail = ((off.stdout or "").strip().splitlines() or [""])[-1]
+        fail.check(off.returncode == 0,
+                   "L0b 离线契约脚本全绿（包装层载荷/D1/畸形输入；实得 %s）"
+                   % (off_tail or (off.stderr or "")[:120]))
 
         # ---------- L1 通用性 env 门负腿：门关时 fixture 模板不可开票 ----------
         neg = ticket_start(py, stage, "pause-e2e-neg-%x" % os.getpid(), FIXTURE_TEMPLATE_ID)
@@ -443,6 +492,56 @@ def main():
                        "L3.6 因果序：resumed 在前、打回重进入在后")
             fail.check(bool([e for e in tl if "rework" in str(e.get("state") or "")]),
                        "L3.6 timeline 有 rework 痕迹（打回可观测）")
+
+        # ---------- L3.6b 正规入口腿（t260914-04，KI-079）：宪章所教形式经 ticket.py ----------
+        # 落点=C2：只落 tid1、L3.6 之后（L3.7 末断言读首个 paused-waiting/resumed 的
+        # 首现序，本周期晚于首现不扰动），且以 resume 收尾（否则 L3.7 的 merge 人门
+        # 会被暂停门挡住）。C5 分工：「who 空白→workflow refused」由 L3.1 裸入口腿
+        # 承载，正规入口在 CLI 层即拒（D1）；note 长度不在 CLI 层抢答（单点=workflow
+        # intake），故 note 超限经正规入口仍落 refused。
+        tk_who = "charter-human"
+        p0 = tk_cli(py, stage, {"op": "pause", "id": tid1, "by": tk_who,
+                                "note": "正规入口腿暂停"})
+        fail.check(p0.get("ok") is True and (p0.get("result") or {}).get("delivered") is True,
+                   "L3.6b 宪章形式 pause 经 ticket.py 回执 ok（验收①；实得 %s）"
+                   % str(p0.get("error") or p0)[:160])
+        fail.check("entry_hint" not in json.dumps(p0),
+                   "L3.6b 正规入口回执无 entry_hint（非裸入口待遇）")
+        wait_snap(fail, py, stage, tid1,
+                  lambda x: x.get("paused") is True and x.get("paused_phase") == "at_gate",
+                  "L3.6b 正规入口 pause 停段间门口", 240)
+        # 重复 pause + note 超限：回执都是投递 ok——拒收判定在 workflow intake
+        tk_cli(py, stage, {"op": "pause", "id": tid1, "by": tk_who, "note": "重复暂停"})
+        tk_cli(py, stage, {"op": "pause", "id": tid1, "by": tk_who,
+                           "note": "x" * (NOTE_LIMIT + 1)})
+        wait_snap(fail, py, stage, tid1,
+                  lambda x: (refused_who_among(x, "pause", "已", tk_who)
+                             and refused_who_among(x, "pause", "超限", tk_who)),
+                  "L3.6b 重复 pause/note 超限 落 refused 且 who=注入值（验收④）", 120)
+        # 恢复（正规入口）+ 空态 resume：拒收语义与裸口一致
+        r0 = tk_cli(py, stage, {"op": "resume", "id": tid1, "by": tk_who})
+        fail.check(r0.get("ok") is True and (r0.get("result") or {}).get("delivered") is True,
+                   "L3.6b 正规入口 resume 回执 ok（以 resume 收尾，C2b）")
+        tk_cli(py, stage, {"op": "resume", "id": tid1, "by": tk_who})
+        wait_snap(fail, py, stage, tid1,
+                  lambda x: x.get("paused") is False
+                            and refused_who_among(x, "resume", "未", tk_who),
+                  "L3.6b 恢复生效+空态 resume refused 且 who=注入值（验收④）", 120)
+        # D1 负锁：缺 by → CLI 层结构化拒收（不触引擎，票不置位）
+        d1 = tk_cli(py, stage, {"op": "pause", "id": tid1})
+        fail.check(d1.get("ok") is False and "by|who" in str(d1.get("error") or ""),
+                   "L3.6b 缺 by → CLI 层结构化拒收（D1；C5：不进 refused[]；实得 %s）"
+                   % str(d1)[:160])
+        # who 机械断言（验收②；C3 口径=any 命中 + 限定本票 snapshot timeline+refused）
+        cur = cli(py, stage, "ticket-query", {"ticket_id": tid1})
+        cs = (cur.get("result") or {}).get("snapshot") or {}
+        hits = [e for e in (cs.get("timeline") or [])
+                if tk_who in str(e.get("reason") or "")]
+        fail.check(bool(hits), "L3.6b timeline 有含注入身份 %r 的条目（C3 any 口径）" % tk_who)
+        blob = json.dumps({"timeline": cs.get("timeline") or [],
+                           "refused": cs.get("refused") or []}, ensure_ascii=False)
+        fail.check("op-local" not in blob,
+                   "L3.6b 本票 snapshot timeline+refused 全量零 op-local（验收②）")
 
         # L3.7 恢复后走完：探针脏泳道 → run_integration_tests 窗口预置仲裁 pass →
         # merge 人门 sign approve → closed

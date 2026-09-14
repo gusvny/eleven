@@ -36,6 +36,12 @@ op:
   sign   {id, gate?, by(who), decision(approve|reject), note?}  → 人工审批签字（signal）
   retry_qc {id, by(who)}  → blocked 重跑请求（signal 裸串 who；不收 note——workflow
                             契约只收 who，带话走 update pending_add / ruling）
+  pause/resume {id, by(who), note?}  → 段间暂停·恢复（signal；t260914-04 补正规入口
+      ——KI-079：宪章「引擎操作面」教的此形式此前不存在，暂停只能回落裸 client.py
+      ticket，且裸口只认 who 不认宪章教的 by＝事件历史 who 全落 op-local 无法追溯）。
+      who 必填由调用方注入、纯空白在本层拒收（D1：正规入口不落 op-local——
+      client.py 的 op-local 缺省只留给裸入口）；note 可选透传，上限不在此抢答
+      （单点=workflow intake PAUSE_NOTE_INPUT_LIMIT）。
   accept/advance/dispatch-next  → v2 已取消（workflow 过门自动推进，验收=事后看产物；
                                   blocked 重跑=retry_qc op），保留 op 报结构化错误
 
@@ -85,7 +91,8 @@ TOOL = {
     'name': 'ticket',
     'description': ('工单系统（真源=Temporal workflow）：create（派活，挂 workflow 模板，'
                     'project 必传）/update（结算/验收/收口/返工）'
-                    '/list（结构化，可按 project/epic 过滤）/show/rework（打回）。'
+                    '/list（结构化，可按 project/epic 过滤）/show/rework（打回）'
+                    '/pause·resume（段间暂停·恢复，t260914-04）。'
                     'accept/advance/dispatch-next 在 v2 引擎已取消（自动推进+事后看产物）。'
                     'status 状态机 dispatched→settled→verified→closed/rework，'
                     'stage_state=running/awaiting/awaiting-human/blocked 为进度维度，两者正交。'),
@@ -94,8 +101,8 @@ TOOL = {
         'properties': {
             'op': {'type': 'string', 'enum': ['create', 'update', 'list', 'show', 'accept',
                                               'advance', 'dispatch-next', 'rework',
-                                              'sign', 'retry_qc']},
-            'id': {'type': 'string', 'description': '工单 id（update/show/accept/advance/dispatch-next/rework/sign/retry_qc 必填；create 可指定否则自动生成）'},
+                                              'sign', 'retry_qc', 'pause', 'resume']},
+            'id': {'type': 'string', 'description': '工单 id（update/show/accept/advance/dispatch-next/rework/sign/retry_qc/pause/resume 必填；create 可指定否则自动生成）'},
             'project': {'type': 'string', 'description': '项目 key（机器级注册表 ~/.sandbar/projects/<key>/project.yaml；create 必传、无默认值；list 可选过滤，不传=全部项目）'},
             'epic': {'type': 'string', 'description': '立项代号（epic-linkage 机制，可选）：notes/epics/<代号>.md 必须存在否则 create 拒收；合法则 workflow 打 EpicCode search attribute，可按 EpicCode 查询捞出。list 可按 epic 过滤（先强校验，不存在的代号明确报错而非空表）'},
             'workflow': {'type': 'string', 'description': '工作流模板 id（create 必填，见 workflow list）'},
@@ -114,14 +121,14 @@ TOOL = {
             'body': {'type': 'string', 'description': '工单正文（向后兼容：user_request 缺省时作正文）'},
             'status': {'type': 'string', 'enum': ['dispatched', 'settled', 'verified', 'closed', 'rework']},
             'stage_state': {'type': 'string', 'enum': ['running', 'awaiting', 'awaiting-human', 'blocked']},
-            'note': {'type': 'string', 'description': '备注（结算摘要/验收结论/返工原因）'},
+            'note': {'type': 'string', 'description': '备注（结算摘要/验收结论/返工原因；pause/resume 为可选理由，上限由 workflow intake 把关）'},
             'pending_add': {'type': 'string', 'description': '追加一条挂起项（遗留问题，不硬改交回）'},
             'to_stage': {'type': 'string', 'description': 'rework 打回目标 stage（缺省回上一段）'},
             'worktree': {'type': 'string', 'description': 'create 显式登记泳道路径（缺省 dev-lane 自动 .lane/<id>）'},
             'branch': {'type': 'string', 'description': 'create 显式登记分支名（缺省 lane/<id>）'},
             'workspace': {'type': 'object', 'description': 'create 显式登记工作空间 {type: worktree|dir, path}（缺省按模板推导：lane=worktree→泳道，模板带 workspace:dir→/tmp/sandbar-ws/<id> 隔离目录（老 base 粘滞））'},
-            'by': {'type': 'string', 'description': 'rework/sign/retry_qc 操作人（身份注入，who 语义由调用方负责；等价别名 who 也收）'},
-            'who': {'type': 'string', 'description': '操作人别名（=by，信号语义名；rework/sign/retry_qc 收）'},
+            'by': {'type': 'string', 'description': 'rework/sign/retry_qc/pause/resume 操作人（身份注入，who 语义由调用方负责；等价别名 who 也收；pause/resume 必填非空——正规入口不落 op-local）'},
+            'who': {'type': 'string', 'description': '操作人别名（=by，信号语义名；rework/sign/retry_qc/pause/resume 收）'},
             'gate': {'type': 'string', 'description': 'sign：审批门标识（可选，缺省空串透传）'},
             'decision': {'type': 'string', 'enum': ['approve', 'reject'], 'description': 'sign：审批决定（缺省 approve=放行推进；reject=打回）'},
         },
@@ -647,6 +654,29 @@ def _retry_qc(a):
     return _poc_ok(out)
 
 
+def _pause_resume(a, op):
+    """段间暂停/恢复（t260914-04，KI-079 收口）：宪章 session_charter「引擎操作面」
+    所教形式 `{"op":"pause"|"resume","id":"…","by":"…"}` 此前无此 op，暂停只能回落
+    裸 client.py ticket——无写集闸、回执带 entry_hint，且裸口只认 who 不认宪章教的
+    by＝事件历史 who 全落 op-local。薄壳委托 client.py ticket op=pause|resume，
+    与 rework/retry_qc 同族顶层载荷形状（client.py 对 pause/resume 本就
+    input/顶层双吃，零适配）。D1 身份闸（review_plan C4②/C5）：who 必填由调用方
+    注入、纯空白在本层拒收——_authorize 同族先例；client.py 的 'op-local' 缺省
+    从此只留给裸入口，正规入口机械保证不产生 op-local。note 可选透传，上限不在此
+    抢答（单点=workflow intake PAUSE_NOTE_INPUT_LIMIT，不造第二真源）；「who 空白
+    → workflow refused」语义仍由裸入口承载（场景 L3.1 腿，不重复设防）。"""
+    tid = a.get('id') or ''
+    if not tid:
+        raise ValueError('%s 需要 id' % op)
+    who = _who(a).strip()
+    if not who:
+        raise ValueError('%s 需要 by|who（操作人身份由调用方注入，不得留空）'
+                         '——正规入口不落 op-local' % op)
+    out = _poc('ticket', {'op': op, 'ticket_id': tid, 'who': who,
+                          'note': str(a.get('note') or '')})
+    return _poc_ok(out)
+
+
 def _authorize(a):
     """人授权签发（t260912-03，KI-067 教训：包装层只加审计不加权力，who/scope/reason/
     expires 全由调用方注入）。唯一入口＝既有 sign 信号面——本 op 只是它的载荷封装，
@@ -717,6 +747,8 @@ def run(args):
         return _authorize(args)
     if op == 'retry_qc':
         return _retry_qc(args)
+    if op in ('pause', 'resume'):
+        return _pause_resume(args, op)
     raise ValueError('未知 op: %r' % (op,))
 
 
@@ -730,6 +762,7 @@ def run(args):
 
 _TICKET_CLI_USAGE = ('用法：python3 server/tools/ticket.py \'<json 对象，含 op>\'\n'
                      'op: create/update/list/show/rework/sign/authorize/retry_qc'
+                     '/pause/resume'
                      '（accept/advance/dispatch-next 已取消，报结构化错误）\n'
                      '失败契约：非零退出 + {ok:false,error,kind?}，绝不空输出。')
 
