@@ -38,6 +38,11 @@
 # 详细指南（怎么验证、怎么跑 worker/自测、故障排查）见 server/TESTING.md。
 # 两服务镜像均本机自建、无 registry 拉取：test-temporal=sh server/build-test-temporal.sh；
 # test-dsh=sh server/build-test-dsh.sh（建镜像时联网一次，之后起台零网络）。
+# 第三镜像（t260913-04，不属任何 compose 服务——引擎「每票一容器」agent 执行面基座，
+# 由引擎 agent_runtime 按 SANDBAR_AGENT_RUNTIME=docker 直接 run，缺省 tag
+# sandbar-agent:dsh-0.1.1-rc.2-s1）：sandbar-agent=sh server/engine/build_agent_image.sh；
+# 回归台经 stage_docker 镜像门 opt-in 校验（SANDBAR_REQUIRE_AGENT_IMAGE=1，缺=ENV_FAIL
+# exit 2 点名构建命令）。
 
 services:
   # ---- 独立 Temporal（temporalite dev server，SQLite 落盘，与 engine 同款免 postgres）----

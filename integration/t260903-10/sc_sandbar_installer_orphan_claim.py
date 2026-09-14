@@ -78,13 +78,19 @@ class Half:
             # executable=必须给可执行真身（sys.executable）：supervisor.py 是无
             # shebang 的 python 源，直接 execve 会 Exec format error（原版同款先天缺陷）
             self.sup = Proc([sys.executable, sup_src], sys.executable, self.env)
+            # 等「存在且非空」：文件先被创建、内容后写入是两步——高负载下（t260913-04
+            # 仲裁轮 242 条全量并发，实得 int('') ValueError）只等存在会读到空档。
+            # 只加等非空，判定语义不变（超时仍走原异常面）。
             deadline = time.time() + 8
+            raw = ""
             while time.time() < deadline:
                 if os.path.exists(self.child_file):
-                    break
+                    with open(self.child_file) as f:
+                        raw = f.read().strip()
+                    if raw:
+                        break
                 time.sleep(0.05)
-            with open(self.child_file) as f:
-                self.child_pid = int(f.read().strip())
+            self.child_pid = int(raw)
             # 观测缝登记：argv 面=「temporal server start-dev --data 本安装状态家」
             # （真 ps 在场时读到的正是这个伪装面）；ppid=真 supervisor pid，
             # 死活由安装器 pid_state 真核对。

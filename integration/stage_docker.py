@@ -1006,6 +1006,17 @@ def dsh_image_present():
         return False
 
 
+def agent_image_present():
+    """agent 执行面镜像在场（t260913-04；tag 单点=agent_runtime.agent_image()）。"""
+    try:
+        sys.path.insert(0, str(REPO / "server" / "engine"))
+        import agent_runtime   # stdlib-only；缺省 tag 版本三处同步的单点
+        _run(["docker", "image", "inspect", agent_runtime.agent_image()], timeout=30)
+        return True
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return False
+
+
 def compose_env(project, services, ports, opts):
     """Env for rendering compose (the SANDBAR_TEST_* knobs of
     docker-compose.test.yml)."""
@@ -2026,6 +2037,17 @@ def _gates(services_list):
             "ENV_FAIL: 测试镜像缺席：%s（本机自建镜像、无 registry 拉取；此前每台容器内"
             "联网 npm 装 dsh ~2 分钟，260908 起烤进镜像）——先跑 sh %s 重建，再重试"
             % (DSH_IMAGE, DSH_BUILD_SCRIPT), kind="env")
+    # t260913-04（C5①）：agent 执行面镜像门——opt-in（不设 env 的台零变化，不破既有台
+    # 契约）；设 SANDBAR_REQUIRE_AGENT_IMAGE=1 的台（容器执行面回归族）缺镜像=点名
+    # ENV_FAIL（exit 2）+ 构建命令。判定放 gates 层而非 boot 窗口内自动 build——
+    # 联网构建分钟级，混进 boot 超时会把诊断引向「起台超时」错方向（review C5）。
+    if os.environ.get("SANDBAR_REQUIRE_AGENT_IMAGE") == "1" and not agent_image_present():
+        sys.path.insert(0, str(REPO / "server" / "engine"))
+        import agent_runtime
+        raise StageError(
+            "ENV_FAIL: agent 执行面镜像缺席：%s（引擎「每票一容器」的运行时基座；"
+            "本机自建、无 registry 拉取）——先跑 sh server/engine/build_agent_image.sh "
+            "重建，再重试" % agent_runtime.agent_image(), kind="env")
 
 
 def _boot_new_stage(project, services_list, opts, timeout, cold_cleanup=False,

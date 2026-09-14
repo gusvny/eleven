@@ -62,6 +62,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from temporalio import activity
+import agent_runtime  # 容器执行面传输层（t260913-04）：stdlib-only；其内不得 import 本包避免环
 import authz_gates
 import failure_protocol
 import path_gates
@@ -555,6 +556,11 @@ AGENT_STAGE_IDS = (
     "clean", "rederive",                             # cleanup (retired)
     "fx_step_one", "fx_step_two",                    # fixture-two-step 测试夹具模板（t260908-01，仅 SANDBAR_FIXTURE_TEMPLATES=1 下可开票）
 )
+
+
+def _ws_kind_of(ws: Any) -> str:
+    """工作区形态（容器执行面挂载准入用：worktree|dir 可挂；main/未知=spawn_agent 拒）。"""
+    return ws.get("type") if isinstance(ws, dict) else ""
 
 
 def _ws_cwd(ws: Optional[Dict[str, str]], ticket_id: str) -> Path:
@@ -1143,6 +1149,26 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
     # it off with one switch.
     if os.environ.get("SANDBAR_AGENT_RESUME", "1") != "0" and role:
         runner = cwd / "server" / "headless-resume" / "node.ts"
+        if not runner.is_file() and agent_runtime.runtime_mode() == "docker":
+            # 容器执行面（t260913-04，A 腿真链实测缺陷修复）：runner 缺泳道内副本时会回落到
+            # REPO_ROOT（引擎主树=宿主路径），该路径在容器里**不可见**（红线 2：不挂工作区
+            # 以外宿主路径）→ dsh boot 直接 ERR_MODULE_NOT_FOUND「…/server/headless-resume/
+            # node.ts」而整段全灭（实测：真 worker+docker runtime 的 implement 段容器内
+            # agent 起不来，容器空转到段超时）。修法=把 runner 落进【泳道内】再引用：整目录
+            # 拷到 <lane>/.sandbar/agent-plugins/headless-resume/（.sandbar 不入 settle
+            # 清单、path 闸放行；泳道本就挂进容器，路径天然可见）。
+            _src_runner_dir = REPO_ROOT / "server" / "headless-resume"
+            _dst_runner_dir = cwd / ".sandbar" / "agent-plugins" / "headless-resume"
+            if _src_runner_dir.is_dir():
+                try:
+                    _dst_runner_dir.parent.mkdir(parents=True, exist_ok=True)
+                    if not _dst_runner_dir.exists():
+                        shutil.copytree(str(_src_runner_dir), str(_dst_runner_dir))
+                    runner = _dst_runner_dir / "node.ts"
+                except OSError as e:
+                    activity.logger.info(
+                        "[%s/%s] 泳道内 runner 物化失败（%s）——回落宿主路径（容器内不可见）",
+                        ticket_id, tag, e)
         if not runner.is_file():
             runner = REPO_ROOT / "server" / "headless-resume" / "node.ts"
         if runner.is_file():
@@ -1164,6 +1190,32 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
             # same role must never write one session file (with the default key,
             # concurrent arbitrate/acceptance spawns collide for certain).
             env["DSH_HEADLESS_SESSION"] = session_key or ("%s-%s" % (ticket_id, role))
+    # ---- 容器执行面专属（t260913-04，方案 D5/D8；host 形态零改动） ----
+    if agent_runtime.runtime_mode() == "docker":
+        # profile 篡改面重置（对抗面闭环）：泳道 .dsh 对 agent 可写，且 _copy_profile 的
+        # exists 守卫使 profile 层【跨段持久】——agent 段内往自己的 profile patch 里注
+        # `disabled: true`（关沙箱）或 `- insert:` 任意插件，下一 spawn 会原样加载
+        # （260913 真探针实证 disabled 面穿透 patch 钉死）。docker 分支每次 spawn 删旧
+        # 重拷：profile 回到宿主真源票快照；dsh 自愈农场的 profiles/node_modules 兄弟位
+        # 不动（容器内自愈重指的链接仍有效）。settings/凭据本就每段重拷（_copy_settings/
+        # _copy_creds），沙箱模式另由下方 sandbox_pin 钉死——三层合围后无跨段持久注入面。
+        _lane_profile = local_dsh / "profiles" / "sandbar-headless"
+        if _lane_profile.exists():
+            shutil.rmtree(str(_lane_profile))
+        _copy_profile(local_dsh)
+        # 一次性钉死 patch（内容单点=agent_runtime.sandbox_pin_yaml；每次 spawn 重写）：
+        # ① sandbox-policy.mode 字面量 'danger-full-access'（宿主 260914 A 案：容器内
+        #    全权，隔离由挂载面承担——容器只见本票泳道，宿主边界守卫=neglock 场景的
+        #    「宿主边界不可达」腿；字面量仍压掉 dsh-base 的 !!js env 表达式与 env 面
+        #    DSH_PERMISSION_MODE 任何值，「模式不被篡改」这层机械保障不变）+
+        #    workspaceRoot 一并写（C1：防整段替换丢授予面）+ 入口级 disabled:false
+        #    （压 profile 层 disabled 注入）；
+        # ② bash-sandbox timeoutMs/maxTimeoutMs=900s（D8：60s 硬顶会掐分钟级测试；对齐
+        #    SANDBAR_INTEG_CMD_TIMEOUT_SEC 缺省，执行面容量参数而非判定放宽；仅 docker
+        #    作用域——host 形态命令面本就 fail-closed，不扩无谓动面）。
+        sandbox_pin = artifacts_dir / ("sandbox_pin_%s.yml" % tag)
+        sandbox_pin.write_text(agent_runtime.sandbox_pin_yaml(), "utf-8")
+        cmd += ["--patch", str(sandbox_pin)]
     return cmd, env
 
 
@@ -1243,10 +1295,11 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
     # start_new_session=True (KI-009): its own process group, so _reap_agent_proc can
     # killpg the dsh runner's entire child tree (late writes usually belong to
     # grandchildren)
-    proc = subprocess.Popen(
-        cmd, cwd=str(cwd), env=env,
-        stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-        start_new_session=True)
+    _ws_kind = _ws_kind_of(args.workspace)
+    proc = agent_runtime.spawn_agent(
+        cmd, cwd=cwd, env=env, logf=logf, ticket_id=args.ticket_id,
+        stage_tag="%s_gen%d" % (args.stage_id, args.gen), project=project,
+        workspace_kind=_ws_kind, lane=cwd, log=activity.logger.info)
 
     polls = 0
     try:
@@ -1264,7 +1317,7 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
                     # write lands after the commit = dirty workspace = a false
                     # merge_check red (the KI-009 root cause). The drain is bounded
                     # (terminate 15s / kill 5s); see _reap_agent_proc.
-                    _reap_agent_proc(proc, args.ticket_id, args.stage_id)
+                    proc.reap(args.ticket_id, args.stage_id)
                     # Worker-side settling (deterministic): the agent sandbox cannot
                     # write the real .git, so the worker backs the commit up; fake
                     # git directories are quarantined here; skip_settle (during the
@@ -1294,7 +1347,7 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
         # KI-009: the finally block escalates to full terminal-state reaping at group
         # granularity (all four paths — normal / error / timeout / cancel — reach
         # here; an already-exited proc is skipped idempotently)
-        _reap_agent_proc(proc, args.ticket_id, args.stage_id)
+        proc.reap(args.ticket_id, args.stage_id)
 
 
 def _make_stage_activity(stage_id: str):
@@ -1686,6 +1739,10 @@ async def prepare_workspace(prep: WorkspacePrep) -> WorkspacePrepResult:
     ws = prep.workspace
     if not (isinstance(ws, dict) and ws.get("type") in WORKSPACE_TYPES and ws.get("path")):
         return WorkspacePrepResult(ok=True, kind="main", action="skipped", path="")
+    # D7③（t260913-04）：每票首活动扫尾——孤儿 agent 容器回收（label 过滤+泳道目录已
+    # 不存在才拆；worker 崩溃残留由下一票首活动兜底）。一切异常容忍，不拦工作流。
+    for _gc_note in agent_runtime.gc_stale_containers():
+        activity.logger.info("[agent-gc] %s", _gc_note)
     p = Path(str(ws["path"]))
     if not p.is_absolute():
         p = REPO_ROOT / p
@@ -2917,6 +2974,11 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
         p = _git(["branch", "-D", branch], repo, timeout=30)
         if p.returncode != 0:
             warns.append("branch -D 失败: %s" % (p.stderr or "").strip()[-200:])
+        # D7②（t260913-04）：内联清理路径（defer_teardown=False 的老票语义）同口径拆
+        # agent 容器——收口即拆；幂等、失败留痕不拦收口。
+        _rm_note = agent_runtime.remove_container(ticket_id)
+        if _rm_note:
+            warns.append("agent 容器回收: %s" % _rm_note)
     return MergeResult(ok=True, action="merged", merge_commit=merge_commit,
                        error="；".join(warns))
 
@@ -3269,6 +3331,14 @@ async def teardown_lane(args: MergeArgs) -> MergeResult:
         p = _git(["branch", "-D", str(sc["branch"])], repo, timeout=30)
         if p.returncode != 0:
             warns.append(_tagged(tag, "branch -D 失败: %s" % (p.stderr or "").strip()[-200:]))
+    # D7②（t260913-04）：票收口即拆——agent 容器随泳道拆除（幂等；失败留痕不拦收口，
+    # 与邻位 git 清理同口径；异常残留由后续票 prepare_workspace 的 gc 兜底）。放在仓树
+    # 清理之后：容器挂载面=泳道根，先清干净成员/根仓树的 git 注册再拆容器。
+    # 拆除成功/本就无容器=正常路径不留 warn（teardown 的 warns 契约=只装异常面，
+    # t260913-05 多仓 teardown 测试钉死空 warns）；只有真失败才留痕。
+    _rm_note = agent_runtime.remove_container(args.ticket_id)
+    if _rm_note and not _rm_note.startswith("已拆"):
+        warns.append("agent 容器回收: %s" % _rm_note)
     return MergeResult(ok=True, action="teardown",
                        merge_commit="", error="；".join(warns))
 
@@ -3958,9 +4028,11 @@ async def arbitrate(args: AgentStageArgs) -> StageResult:
     logf = open(args.log_file, "a", buffering=1) if args.log_file else subprocess.DEVNULL
     activity.logger.info("[%s/arbitrate] spawn integration 仲裁（gen%d，cwd=%s）",
                          args.ticket_id, args.gen, str(cwd))
-    proc = subprocess.Popen(cmd, cwd=str(cwd), env=env,
-                            stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                            start_new_session=True)  # KI-009: its own process group, see _reap_agent_proc
+    proc = agent_runtime.spawn_agent(
+        cmd, cwd=cwd, env=env, logf=logf, ticket_id=args.ticket_id,
+        stage_tag="arbitrate_gen%d" % args.gen, project=project,
+        workspace_kind=_ws_kind_of(args.workspace), lane=cwd,
+        log=activity.logger.info)  # KI-009：host 形态内部仍 start_new_session（独立进程组）
     polls = 0
     try:
         while True:
@@ -3970,7 +4042,7 @@ async def arbitrate(args: AgentStageArgs) -> StageResult:
                     _patch_result_prompt(rfile, args.prompt)
                     # KI-009: reap before settling — collect the late-written files
                     # cleanly before landing them (the source of the race window)
-                    _reap_agent_proc(proc, args.ticket_id, "arbitrate")
+                    proc.reap(args.ticket_id, "arbitrate")
                     # In the tests-fault case the test-set iteration lands with this
                     # step's settle (committed code assets).
                     # Ticket t260903-02: during the parallel fork skip_settle=True skips
@@ -3994,7 +4066,7 @@ async def arbitrate(args: AgentStageArgs) -> StageResult:
     finally:
         # KI-009: the backstop reap is upgraded to group granularity (the old
         # terminate+wait+kill only reaped the direct child)
-        _reap_agent_proc(proc, args.ticket_id, "arbitrate")
+        proc.reap(args.ticket_id, "arbitrate")
 
 
 # ---- doc-lifecycle ticket ② (t260905-01): the two close-out questions — a sedimentation trigger plus a reverse-sync gate ----
@@ -4271,9 +4343,11 @@ async def acceptance_walkthrough(args: AgentStageArgs) -> StageResult:
     logf = open(args.log_file, "a", buffering=1) if args.log_file else subprocess.DEVNULL
     activity.logger.info("[%s/acceptance_walkthrough] spawn integration 验收走查（gen%d）",
                          args.ticket_id, args.gen)
-    proc = subprocess.Popen(cmd, cwd=str(cwd), env=env,
-                            stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                            start_new_session=True)  # KI-009: its own process group, see _reap_agent_proc
+    proc = agent_runtime.spawn_agent(
+        cmd, cwd=cwd, env=env, logf=logf, ticket_id=args.ticket_id,
+        stage_tag="acceptance_gen%d" % args.gen, project=project,
+        workspace_kind=_ws_kind_of(args.workspace), lane=cwd,
+        log=activity.logger.info)  # KI-009：host 形态内部仍 start_new_session（独立进程组）
     polls = 0
     try:
         while True:
@@ -4290,7 +4364,7 @@ async def acceptance_walkthrough(args: AgentStageArgs) -> StageResult:
                     # booked (inside the .sandbar stance), but unexpected workspace dirt
                     # from a late write must not be left to race a live process at
                     # merge_check
-                    _reap_agent_proc(proc, args.ticket_id, "acceptance_walkthrough")
+                    proc.reap(args.ticket_id, "acceptance_walkthrough")
                     return res
             rc = proc.poll()
             if rc is not None:
@@ -4305,7 +4379,7 @@ async def acceptance_walkthrough(args: AgentStageArgs) -> StageResult:
     finally:
         # KI-009: the backstop reap is upgraded to group granularity (the old
         # terminate+wait+kill only reaped the direct child)
-        _reap_agent_proc(proc, args.ticket_id, "acceptance_walkthrough")
+        proc.reap(args.ticket_id, "acceptance_walkthrough")
 
 
 

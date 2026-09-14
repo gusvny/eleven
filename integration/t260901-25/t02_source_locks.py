@@ -50,6 +50,12 @@ def fn_body(text, header):
 
 def main():
     text = SRC.read_text("utf-8")
+    # t260913-04（agent 执行面容器化）：三处 spawn/reap 的实现形态迁入传输层
+    # agent_runtime.py（agent_runtime.spawn_agent / AgentProc.reap），KI-009 语义不变。
+    # 本锁按「兼容双形态」扩锚：旧=真源内直 Popen+_reap_agent_proc；新=经传输层。
+    # 锁语义不锁形态；共享守卫锚点更新随 t260913-04 交付，merge 侧复核。
+    RUNTIME_SRC = REPO / "server" / "engine" / "agent_runtime.py"
+    text_runtime = RUNTIME_SRC.read_text("utf-8") if RUNTIME_SRC.exists() else ""
 
     print("== 前置 ==")
     ok("_dirty_within_write_set" in text and "_dirty_files_from_status_z" in text,
@@ -79,8 +85,13 @@ def main():
            "脏清单解析用 --porcelain -z")
 
     print("== drain 压竞态窗（②terminate 后组粒度回收） ==")
-    ok("start_new_session=True" in text, "spawn 改 start_new_session=True（进程组隔离）")
-    ok("os.killpg" in text, "按进程组 killpg 回收（孙进程树一并收）")
+    # t260913-04：组隔离实现可留真源（host 直跑）也可迁传输层（agent_runtime）。
+    ok("start_new_session=True" in text or "start_new_session=True" in text_runtime,
+       "spawn 改 start_new_session=True（进程组隔离）")
+    ok("os.killpg" in text or "os.killpg" in text_runtime,
+       "按进程组 killpg 回收（孙进程树一并收）")
+    ok("agent_runtime.spawn_agent(" in text or "subprocess.Popen" in text,
+       "三处 agent spawn 经统一入口（传输层或真源直跑）")
     for header, has_settle in (
             ("async def _run_agent_stage_impl", True),
             ("async def arbitrate", True),
@@ -89,13 +100,16 @@ def main():
         if not body:
             ok(False, "%s：函数体不可定位" % header)
             continue
-        reap = [m.start() for m in re.finditer(r"_reap_agent_proc\(", body)]
+        # reap 形态双锚：旧=真源直调 _reap_agent_proc(；新=AgentProc.reap(
+        reap = [m.start() for m in re.finditer(r"_reap_agent_proc\(|proc\.reap\(", body)]
         settle = [m.start() for m in re.finditer(r"_settle_worktree_lane\(", body)]
         ok(len(reap) >= 2, "%s：reap 接入结果就绪路径 + finally 兜底" % header)
         if has_settle and settle:
-            # 精确口径：Popen 之前的 settle 是幂等直读（缓存命中，无存活 agent，
-            # 不需 reap）——豁免；Popen 之后每处 settle 前必须有 reap。
-            popen = body.find("subprocess.Popen")
+            # 精确口径：spawn 之前的 settle 是幂等直读（缓存命中，无存活 agent，
+            # 不需 reap）——豁免；spawn 之后每处 settle 前必须有 reap。
+            spawn_at = [x for x in (body.find("subprocess.Popen"),
+                                    body.find("agent_runtime.spawn_agent(")) if x >= 0]
+            popen = min(spawn_at) if spawn_at else -1
             prev = popen
             bad = []
             for s in settle:

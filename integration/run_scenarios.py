@@ -991,6 +991,31 @@ SCENARIOS = [
     ("t260913-03-executor-pool-exclude-l1",
      "执行器池排除旋钮机械行为自证（t260913-03）：被排除池条目不在本轮在册数（不计 ran/expected，expected=本轮在册且 ran==expected 不变式保持）；点名行「本轮跳过池=…（少 N 条）」原文与两次点名；INTEG_SUMMARY 仅在排除生效时增 excluded_pools/excluded_count 键（缺省键集逐键全等=零新增）；非法 token 剥离+响亮 WARN 且 rc 语义不变；零命中响亮 WARN 不红；缺省路径与 git HEAD 改前执行器在假表上逐字节一致（源码级 A/B）；--print-pool-assets 真注册表派生（未知池 exit 2 点名、cmd token ∪ import 闭包 ∪ integration/ 根共享基建面、环境前缀 token 不误收、非被排除池资产不入面）；既有两条执行器电池在排除 env 继承下照常绿（回归腿）。与 t260904-12-executor-three-state（三态出口契约）/t260910-13-executor-fail-closed（条目完整性）intent 不同面：本条锚池排除旋钮自身",
      "python3 integration/tests/test_pool_exclude_executor.py", "ro"),
+
+    # ---- t260913-04: agent 执行面容器化（macOS 无可用沙箱后端 → 每票容器内执行）----
+    # integration 设计段产物（L2/L3 灰盒）。五条 intent 互不重叠：
+    # ①引擎接线契约（挂载/env/user/无特权/pin/host 冻结/生产接线棒，hermetic）
+    # ②镜像+supervisor 契约（真镜像真跑）③生命周期（常驻/收割/孤儿回收/零残留）
+    # ④多仓形态（E）⑤真沙箱负锁（B/C 核心，真 agent 门控）。
+    # A/F（真工单全段+计时）由实现段 Step 6 驱动脚本承担，判据钉在本票设计段结果文件。
+    # 实现段落地前红属预期（TDD 验收棒），arbitrate/merge 期必须绿；
+    # docker/镜像/凭据缺席=ENV_FAIL exit 2（点名构建命令/门控旋钮，无 SKIP）。
+    ("t260913-04-wiring-contract",
+     "引擎接线契约：docker 形态下传给 docker 的完整 argv 钉死该票泳道为容器可见世界（t260913-04 验收 B/C/D/G+红线 1/2/3/4，灰盒 L2/L3，hermetic）：挂载面=恰好泳道一项（无主树/~/.dsh 全量/docker.sock/他票路径）、env 白名单（DSH_HOME 在、DSH_PERMISSION_MODE 族结构性禁入）、user=宿主 worker uid:gid（容器内新建文件宿主可提交）、无 privileged/cap-add/pid=host/network=host、sandbox_pin 一次性 patch 用字面量 mode:'danger-full-access'+permission defaultPreset:'danger-full-access'（宿主 260914 A 案：容器内全权、隔离由挂载面承担；defaultPreset 缺位=合成缺省不匹配任何预设，dsh boot 拒启）+bash-sandbox 900000 且仅 docker 形态、容器名 sandbar-agent-<ticket>+label 锚票、host 缺省形态零 docker 调用+agent 宿主直跑+结果文件形状不变（存量冻结）、run_worker.sh 显式 export 旋钮（生产接线棒）。断言面=SANDBAR_DOCKER_BIN 注入桩记录的 argv 与泳道落盘物，不锚引擎内部函数。实现段落地前容器面红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260913-04/sc_t26091304_wiring_contract.py", "ro"),
+    ("t260913-04-image-supervisor",
+     "工程镜像与容器内 supervisor 契约（t260913-04 块 1，灰盒 L3，真 docker 真镜像）：镜像内 dsh 本体 PATH 可解析、node>=22、python3+pytest/temporalio/pyyaml 预装（工单源事故附带发现①）、git/zstd 在场；sandbar-exec 协议真跑：pgid 落盘→按组 kill -TERM 整组消失→退出清档→坏参非零点名（fail-closed 不静默）。这是验收 G 与 KI-009 收割语义在容器形态的物理前提；与 t260913-04-wiring-contract 分工：彼锁引擎传参，本条锁镜像里真跑的终态。实现段落地前红属预期；docker/镜像缺席=ENV_FAIL exit 2（点名 sh server/engine/build_agent_image.sh）",
+     "python3 integration/t260913-04/sc_t26091304_image_supervisor.py", "engine"),
+    ("t260913-04-lifecycle-gc",
+     "容器生命周期：票在容器在/段间收割干净/异常可回收/收口零残留（t260913-04 验收 D/G+红线 3，灰盒 L3，真 docker+引擎 spawn 链直调）：spawn 即 ensure（sandbar-agent-<ticket> running）、agent 桩真在容器里跑（uid=宿主 worker uid、cwd=泳道、env 无沙箱旋钮、spy 经同路径挂载落回宿主）、结果文件/日志落泳道原位形状不变（验收 D）、迟写轮交付后进程树按组收割且 pgid 档清零（KI-009 容器形态）、孤儿容器（label 在泳道亡）被 gc 手工入口收走而泳道活容器不误杀（安全阀）、收尾容器/网络/卷三面零残留。与 t260910-12-herd/t260912-02 生命周期族 intent 分工：彼锁舞台台（compose 工程），本条锁 agent 工单容器。实现段落地前容器面红属预期；docker/镜像缺席=ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260913-04/sc_t26091304_lifecycle_gc.py", "engine"),
+    ("t260913-04-multirepo",
+     "多仓泳道容器形态：每棵成员仓树容器内可写、宿主可见、按树落盘（t260913-04 验收 E+红线 2+D2 降级面，灰盒 L3，真 docker）：两棵成员仓（真主仓+真注册 worktree）挂泳道根下，容器内对根/树A/树B 写入宿主全可见且属主=worker uid、inspect Mounts 源=仅泳道根（成员主树零暴露）、容器内 git status 呈预期失败形态 fatal: not a git repository（有意降级可辨，不误读为树坏）、宿主逐树 settle 直调后 commit 落各成员泳道分支。与 t260913-04-wiring-contract 分工：彼锁单仓接线 argv，本条锁多仓终态与 git 降级契约。实现段落地前容器面红属预期；docker/镜像缺席=ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260913-04/sc_t26091304_multirepo.py", "engine"),
+    ("t260913-04-sandbox-neglock",
+     "容器执行面锁：容器形态下 agent 命令面能用、宿主边界不可达、容器本地可干活（t260913-04 验收 B/C 核心+红线 2，灰盒 L3，真 dsh agent，门控）：正锁=工作区内写成功（不是全拒）；负锁（挂载面守卫）=宿主主树/他票路径在容器里不存在、/usr/local（uid OS 权限）零落盘；正腿（宿主 260914 A 案）=容器本地 /tmp 可写（容器内无 dsh 沙箱拦截）；>60s 命令跑完（D8：bash-sandbox 900000ms；工单源事故附带发现②）；会话档记录 sandbox mode=danger-full-access 与真实拒绝（pin 同时钉 permission defaultPreset，缺位时 dsh boot 拒启）；对抗轮=env 注入 DSH_PERMISSION_MODE=workspace-write、泳道 profile patch 注入 disabled，两条路 pin 字面量都必须仍钉在 danger-full-access 且正锁仍成立；git 预期失败形态（D2）。判据全机械落盘（文件存在性+证据档关键词），不读 agent 自我报告。跑法：缺省=单轮真 agent 基线（闸内默认真验 B/C，分钟级）；SANDBAR_E2E_REAL=1 追加 >65s 长命令腿（D8）与两个对抗轮；缺 docker/镜像/凭据=ENV_FAIL exit 2 点名（供给面，非产品红）",
+     "python3 integration/t260913-04/sc_t26091304_sandbox_neglock.py", "engine"),
+
 ]
 
 CMD_TIMEOUT = 900
