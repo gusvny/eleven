@@ -1,5 +1,17 @@
 # t260913-03 main 侧落地清单（票面钦定、main 侧执行）
 
+> **⚠ 宿主 260914 口径变更（先读这段：本文件下文所述「例外腿」已撤除）**
+> 起因＝KI-089：例外腿判据是「票面 write_set ∩ 被排除池资产面」（目录前缀语义），而写集只要带
+> 目录形条目（如 `integration/`）即命中整个测试目录——实测四张在跑票逐票命中 77~78 项，排除声明
+> 对**全部**在跑票恒失效。现口径：**apply=true（每票段）时声明即跳过，不设例外腿**；被跳池只由
+> 项目级全量轮（巡检/手动/回放——均不传 apply）覆盖；旧命中面仍进回执
+> `pool_exclude.former_force_assets` 留痕（少跑必须可见），但不再据此放行。
+> 同步改动面：`server/tools/verify_lane.py`（`_integ_pool_exclude` 消费面 + TOOL schema 描述）、
+> `server/engine/agent_activities.py` 与 `server/engine/dev_lane.py`（回执消费/票面注记）、
+> `server/engine/tests/test_t260913_03_pool_exclude.py`（契约测试 d/e/f 改判）、
+> `integration/t260913-03/sc_pool_exclude_force_assets.py`（票面场景②改判）、`integration/README.md`。
+> 本文件下文凡出现「命中即强制全跑」处，一律按上述新口径理解。
+
 > 依据：verify.yaml 是受保护路径（`server/engine/path_gates.py` PROTECTED_PATHS），dev-lane 泳道内
 > 改它即 settle 拒绝落盘；先例 commit 9664a23「verify.yaml 直落 t260904-12 乙段 supply 两条
 > （票面钦定合并后粘回）」。本文件即「main 侧需求清单」：本票 merge 后由 main 侧**同窗口一次落三处**。

@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""t260913-03 场景②：例外腿（write_set 命中被跳池资产 → 强制全跑）正/负锁（真闸，灰盒 L2）。
+"""t260913-03 场景②：旧例外腿命中面留痕 + 「声明即跳过」正/负锁（真闸，灰盒 L2）。
 
-intent（用户可感知）：一张票改到「被跳池自己的资产」时，集测段**必须跑被跳过的池**——
-  否则「改了基础资产的票」正好跳过了验证该资产的池。判据纯机械：票面 write_set
-  与（声明固定资产 ∪ 注册表派生资产：被跳场景文件本身的 cmd token + import 闭包）求交非空。
-  同时钉死负锁：write_set 与资产**不相交**时绝不触发（否则开关白设）。
+宿主管 260914 口径变更（起因＝KI-089：写集带目录形条目时例外腿恒命中，排除声明对全部
+在跑票失效）：例外腿**已撤除**——每票段一律跳过声明池，被跳池只由项目级全量轮
+（巡检/手动/回放，不传 apply）覆盖。本场景随之改判：
+
+intent（用户可感知）：①一张票无论改到什么资产，集测段**都按声明跳过**被跳池（不再被
+  「碰了就得全跑」拦下）；②旧口径的命中面必须**可见**——回执 former_force_assets 逐项
+  点名「这些资产在旧口径下会触发全跑」，不许静默消失（少跑必须点名到回执）；③负锁：
+  写集与资产面不相交时该字段为空，不许无差别乱报。
 
 high-level steps：最小真泳道（声明 exclude_pools=engine,exclusive + 固定资产 integration/stage_docker.py），
-  经真闸逐个形态传 write_set：声明固定资产 / 被跳场景文件 / 目录前缀 / 不相交 / 空写集——
-  断言 ran（全跑 vs 在册）、回执 applied 与 forced_by 点名。
+  经真闸逐个形态传 write_set：声明固定资产 / 被跳场景文件 / 目录前缀 / 不相交 / 空写集 /
+  在册条目文件——断言 ran（在册面）、回执 applied=true 与 former_force_assets 点名。
 """
 import sys
 from pathlib import Path
@@ -48,38 +52,39 @@ with F.tmpdir() as td:
     lane = F.build_lane(Path(td) / "lane", SPEC,
                         force_assets=(DECLARED_ASSET,))["lane"]
 
-    # ---------------- 正腿 1：声明固定资产命中 ----------------
+    # ---------------- 命中态 1：声明固定资产命中 → 仍跳过 + 留痕 ----------------
     g1 = F.call_gate(lane, apply=True, write_set=[DECLARED_ASSET])
     r1, pe1 = (g1.get("result") or {}), ((g1.get("result") or {}).get("pool_exclude") or {})
     C.check(r1.get("err") is None, "D1 真闸无 err", _diag(g1))
-    C.check(r1.get("ran") == len(ALL_NAMES) and set(F.scenario_names(r1)) == set(ALL_NAMES),
-            "D2 命中声明固定资产 → 强制全跑 %d 条（被跳池条目在册）" % len(ALL_NAMES), _diag(g1))
-    C.check(pe1.get("applied") is False, "D3 回执 applied=false（未注入排除）", _diag(g1))
-    C.check(DECLARED_ASSET in str(pe1.get("forced_by")),
-            "D4 回执 forced_by 点名命中资产", "pool_exclude=%s" % pe1)
+    C.check(r1.get("ran") == len(IN_NAMES) and set(F.scenario_names(r1)) == set(IN_NAMES),
+            "D2 命中声明固定资产 → 仍按声明跳过（在册 %d 条）" % len(IN_NAMES), _diag(g1))
+    C.check(pe1.get("applied") is True, "D3 回执 applied=true（已注入排除）", _diag(g1))
+    C.check(DECLARED_ASSET in str(pe1.get("former_force_assets")),
+            "D4 回执 former_force_assets 点名命中资产（旧口径命中面可见）", "pool_exclude=%s" % pe1)
 
-    # ---------------- 正腿 2：被跳场景文件本身（注册表 cmd token 派生面） ----------------
+    # ---------------- 命中态 2：被跳场景文件本身（注册表 cmd token 派生面） ----------------
     g2 = F.call_gate(lane, apply=True, write_set=[DERIVED_ASSET])
     r2, pe2 = (g2.get("result") or {}), ((g2.get("result") or {}).get("pool_exclude") or {})
-    C.check(r2.get("ran") == len(ALL_NAMES) and set(F.scenario_names(r2)) == set(ALL_NAMES),
-            "D5 命中被跳场景文件本身 → 强制全跑", _diag(g2))
-    C.check(DERIVED_ASSET in str(pe2.get("forced_by")),
-            "D6 forced_by 点名被跳场景文件", "pool_exclude=%s" % pe2)
+    C.check(r2.get("ran") == len(IN_NAMES) and set(F.scenario_names(r2)) == set(IN_NAMES),
+            "D5 命中被跳场景文件本身 → 仍按声明跳过", _diag(g2))
+    C.check(DERIVED_ASSET in str(pe2.get("former_force_assets")),
+            "D6 former_force_assets 点名被跳场景文件", "pool_exclude=%s" % pe2)
 
-    # ---------------- 正腿 3：目录前缀形态 ----------------
+    # ---------------- 命中态 3：目录前缀形态（KI-089 的现场形态） ----------------
     g3 = F.call_gate(lane, apply=True, write_set=[DIR_PREFIX])
-    r3 = g3.get("result") or {}
-    C.check(r3.get("ran") == len(ALL_NAMES) and (r3.get("pool_exclude") or {}).get("applied") is False,
-            "D7 写集目录前缀命中被跳场景文件 → 强制全跑（前缀语义与写集判定同源）", _diag(g3))
+    r3, pe3 = g3.get("result") or {}, ((g3.get("result") or {}).get("pool_exclude") or {})
+    C.check(r3.get("ran") == len(IN_NAMES) and pe3.get("applied") is True
+            and pe3.get("former_force_assets"),
+            "D7 写集目录前缀 → 仍跳过，且旧口径命中面留痕非空（KI-089 不再致排除失效）", _diag(g3))
 
-    # ---------------- 负锁 1：write_set 不相交绝不触发 ----------------
+    # ---------------- 负锁 1：write_set 不相交 → 排除照常、留痕为空 ----------------
     g4 = F.call_gate(lane, apply=True, write_set=["docs/testing-guide.md", "server/engine/shared.py"])
     r4, pe4 = (g4.get("result") or {}), ((g4.get("result") or {}).get("pool_exclude") or {})
     C.check(r4.get("err") is None, "D8 真闸无 err", _diag(g4))
     C.check(r4.get("ran") == len(IN_NAMES) and set(F.scenario_names(r4)) == set(IN_NAMES),
             "D9 负锁：写集不相交 → 排除照常生效（在册 %d 条）" % len(IN_NAMES), _diag(g4))
-    C.check(pe4.get("applied") is True and not pe4.get("forced_by"),
-            "D10 负锁：applied=true 且 forced_by 空", "pool_exclude=%s" % pe4)
+    C.check(pe4.get("applied") is True and not pe4.get("former_force_assets"),
+            "D10 负锁：applied=true 且 former_force_assets 空", "pool_exclude=%s" % pe4)
 
     # ---------------- 负锁 2：空写集（老回放票形态）不得被当成全命中 ----------------
     g5 = F.call_gate(lane, apply=True, write_set=[])

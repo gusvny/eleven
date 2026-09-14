@@ -56,7 +56,7 @@ TOOL = {
                     'require_base=true 供合并闸——base 为空即白名单 fail-closed 判红）。'
                     '或 lane="integ"（跑泳道声明 integration.cmd 并解析三态输出契约；'
                     'apply_skip_pools=true 时按 integration.exclude_pools 声明排除池，'
-                    '票面 write_set 命中被排除池资产则强制全跑）。'
+                    '声明即跳过——例外腿已按宿主 260914 口径撤除）。'
                     '返回 {lane, green, red_count, checks}（integ 道为 {lane, green, ran, pass, fail, scenarios, err[, pool_exclude]}）。'),
     'parameters': {
         'type': 'object',
@@ -66,9 +66,9 @@ TOOL = {
             'path': {'type': 'string', 'description': 'code 道：泳道根目录（缺省主树）'},
             'base': {'type': 'string', 'description': 'code 道：diff 对比的 git ref（三点口径 base...HEAD；合并闸必传当前 main tip；手动调用缺省=跳过白名单并注明）'},
             'write_set': {'type': 'array', 'items': {'type': 'string'},
-                          'description': 'code 道：当前工单声明写集（文件或目录前缀）；提供时优先于 verify.yaml write_allow，空列表=零写集。integ 道：票面写集，用作例外腿求交判据（命中被排除池资产=强制全跑）'},
+                          'description': 'code 道：当前工单声明写集（文件或目录前缀）；提供时优先于 verify.yaml write_allow，空列表=零写集。integ 道：票面写集——宿主 260914 口径下**不再**参与排除例外腿判定，仅用于旧口径命中面留痕（回执 pool_exclude.former_force_assets）'},
             'apply_skip_pools': {'type': 'boolean',
-                                 'description': 'integ 道：true=按泳道 verify.yaml integration.exclude_pools 声明排除池（每票段由引擎显式置位）；缺省 false/不传=恒全跑（巡检、手动、老回放形态不受声明影响）。命中 exclude_pools_force_assets 或执行器派生资产面时强制全跑，回执 pool_exclude.forced_by 点名'},
+                                 'description': 'integ 道：true=按泳道 verify.yaml integration.exclude_pools 声明排除池（每票段由引擎显式置位，**声明即跳过**）；缺省 false/不传=恒全跑（巡检、手动、老回放形态不受声明影响，被跳池只由这一路覆盖）。资产派生仍跑，用于未知池/非法池名单点判红；旧例外腿命中面写进回执 pool_exclude.former_force_assets 但不再拦'},
             'require_base': {'type': 'boolean',
                              'description': 'code 道：合并闸调用置 true——base 为空/未传时写集白名单 fail-closed 判红（不许静默跳过）'},
             'skip_slow': {'type': 'boolean', 'description': 'code 道：跳过全部命令检查（只验白名单与装配面）'},
@@ -560,15 +560,22 @@ def _pool_exclude_assets(root, pools, declared):
 
 
 def _integ_pool_exclude(root, integ_cfg, args):
-    """池排除消费面（t260913-03）→ (回执 dict | None, 子进程 env | None)。
+    """池排除消费面（t260913-03；宿主 260914 口径变更）→ (回执 dict | None, 子进程 env | None)。
 
     - apply 参数缺省/False（巡检、手动、老回放形态）→ (None, None)：一个分支都不进，
-      行为与加旋钮前逐字节一致（验收 B/E 的机械锁）；
-    - apply=True 且声明在场 → 派生被排除池资产面（泳道自持执行器 --print-pool-assets）
-      与票面 write_set 求交（_in_write_set 前缀语义）：
-        命中 → 不注入 env（**强制全跑**）+ 回执 forced_by 点名命中资产（验收 D）；
-        未命中 → 注入 SANDBAR_SCENARIO_EXCLUDE_POOLS（cmd 与基线子进程同 env）；
-    - 派生失败 → 回执带 err（调用方整道红点名，不静默）。
+      行为与加旋钮前逐字节一致（验收 B/E 的机械锁）；**巡检/手动轮由此恒全跑**；
+    - apply=True 且声明在场 → 注入 SANDBAR_SCENARIO_EXCLUDE_POOLS（cmd 与基线子进程
+      同 env），**声明即跳过、不再设例外腿**；
+    - 资产派生失败 → 回执带 err（调用方整道红点名，不静默）。
+
+    宿主 260914 口径（取代 t260913-03 的「碰了就得全跑」例外腿）：**每票段一律跳过
+    声明池；被跳池只由项目级全量轮（巡检/手动/回放）覆盖**。原例外腿的判据是「票面
+    write_set 与被排除池资产面求交」（_in_write_set 前缀语义），而写集带目录形条目
+    （如 integration/）即命中整个测试目录——实测四张在跑票写集全含 integration/、
+    逐票命中 77~78 项，导致排除声明对**全部**在跑票恒定失效（KI-089）。
+    旧口径下的命中面仍会被算出并写进回执 `former_force_assets`（迁移期可见性），
+    但不再据此放行。资产派生（`--print-pool-assets`）保留：由既定入口单点判未知池/
+    池名非法，仍 fail-closed、不静默降级。
     """
     import os as _os
     if not args.get('apply_skip_pools'):
@@ -585,10 +592,12 @@ def _integ_pool_exclude(root, integ_cfg, args):
     if err:
         return {'err': err}, None
     ws = [str(x) for x in (args.get('write_set') or [])]
-    forced = sorted(a for a in assets if _in_write_set(a, ws))
-    if forced:
-        return {'declared': pools, 'applied': False, 'forced_by': forced}, None
-    return ({'declared': pools, 'applied': True},
+    former = sorted(a for a in assets if _in_write_set(a, ws))
+    rec = {'declared': pools, 'applied': True}
+    if former:
+        # 可见性留痕：这些资产在旧口径下会触发全跑，现按宿主口径不再拦。
+        rec['former_force_assets'] = former
+    return (rec,
             dict(_os.environ, SANDBAR_SCENARIO_EXCLUDE_POOLS=decl))
 
 

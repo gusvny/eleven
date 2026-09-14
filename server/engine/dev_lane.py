@@ -1455,12 +1455,11 @@ class DevLaneWorkflow(TicketPauseMixin):
                                               % (type(e).__name__, e))
                 # t260904-12: the headline carries the environment-red dimension — a
                 # mixed suite can no longer tell a fake "all green" story.
-                # t260913-03: the exclusion face is named on the ticket face — either
-                # the named skip set or the exception leg that forced a full run.
+                # t260913-03: the exclusion face is named on the ticket face.
+                # 宿主 260914 口径：例外腿已撤除——每票段一律跳过声明池，票面只报跳过面；
+                # 旧口径命中面（forced_by）只作迁移期留痕，不再出现在票面注记里。
                 _pe_note = ""
-                if ir.forced_by:
-                    _pe_note = "｜例外腿命中被排除池资产，强制全跑（%s）" % "、".join(ir.forced_by)
-                elif ir.excluded_pools:
+                if ir.excluded_pools:
                     _pe_note = "｜本轮跳过池=%s（少 %d 条）" % (
                         "、".join(ir.excluded_pools), ir.excluded_count)
                 self.results["run_integration_tests"] = {

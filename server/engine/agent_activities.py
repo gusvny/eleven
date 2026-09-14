@@ -3808,17 +3808,22 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     out.details = [{"name": s.get("name", ""), "cmd": "", "exit": int(s.get("exit") or 0),
                     "output_tail": s.get("output_tail") or ""}
                    for s in (res.get("scenarios") or [])]
-    # ---- t260913-03 池排除回执面：applied（跳过面点名）与 forced（例外腿点名）两态
-    # 都进 details——红线「少跑必须点名」；例外腿命中不是静默全跑 ----
+    # ---- t260913-03 池排除回执面：applied（跳过面点名）与旧口径命中面留痕两态
+    # 都进 details——红线「少跑必须点名」；宿主管 260914 起例外腿已撤除，
+    # former_force_assets 只作迁移期可见性（说明这些资产在旧口径下会触发全跑）----
     _pe = res.get("pool_exclude") or {}
     out.excluded_pools = [str(x) for x in (_pe.get("excluded_pools") or [])]
     out.excluded_count = int(_pe.get("excluded_count") or 0)
-    out.forced_by = [str(x) for x in (_pe.get("forced_by") or [])]
-    if out.forced_by:
+    out.forced_by = [str(x) for x in (_pe.get("former_force_assets") or [])]
+    if _pe.get("applied"):
+        _tail = "本轮跳过池=%s（少 %d 条）" % (
+            "、".join(str(x) for x in (_pe.get("declared") or out.excluded_pools)),
+            out.excluded_count)
+        if out.forced_by:
+            _tail += "｜旧口径命中面（已撤除，不再据此全跑）%d 项" % len(out.forced_by)
         out.details.append({"name": "__pool_exclude__", "cmd": "", "exit": 0,
-                            "output_tail": "例外腿命中被排除池资产 → 强制全跑：%s"
-                                           % "、".join(out.forced_by)})
-    elif _pe.get("applied"):
+                            "output_tail": _tail})
+    else:
         out.details.append({"name": "__pool_exclude__", "cmd": "", "exit": 0,
                             "output_tail": "本轮跳过池=%s（少 %d 条）"
                                            % ("、".join(str(x) for x in
@@ -3860,8 +3865,9 @@ async def run_integration_tests(args: IntegrationRunArgs) -> IntegrationRunResul
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
-    # t260913-03：每票段是全仓唯一显式打开「按声明排除池」的调用点；write_set 供例外腿
-    # 求交（命中被排除池资产=强制全跑）。策略值只透传，activity 不回填策略。
+    # t260913-03：每票段是全仓唯一显式打开「按声明排除池」的调用点——宿主管 260914
+    # 口径为「声明即跳过」（例外腿已撤除），write_set 只余旧口径命中面留痕用途。
+    # 策略值只透传，activity 不回填策略。
     return await _run_scenarios(wt, args.ticket_id,
                                 write_set=list(getattr(args, "write_set", None) or []),
                                 apply_skip_pools=bool(getattr(args, "apply_skip_pools", False)))

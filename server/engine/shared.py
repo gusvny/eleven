@@ -261,7 +261,7 @@ class IntegrationRunResult:
     # t260913-03 池排除回执面（少跑必须点名到回执；缺省空=未启用）
     excluded_pools: List[str] = field(default_factory=list)  # 实际排除的池名（applied 时）
     excluded_count: int = 0                                  # 被排除条目数（本轮不在册）
-    forced_by: List[str] = field(default_factory=list)       # 例外腿命中资产（非空=强制全跑）
+    forced_by: List[str] = field(default_factory=list)       # 旧口径例外腿命中面（宿主管 260914 撤除例外腿：不再拦，仅留痕）
 
 
 def integ_verify_payload(lane_root, write_set=None, apply_skip_pools=False):
@@ -269,7 +269,8 @@ def integ_verify_payload(lane_root, write_set=None, apply_skip_pools=False):
 
     策略面（是否按泳道 verify.yaml 声明排除池）只由调用方显式置位——本函数只透传：
     缺省 apply_skip_pools=False = 巡检/手动/老载荷回放恒全跑（验收 E 的机械锁面）；
-    write_set 供闸侧例外腿求交（命中被排除池资产 = 强制全跑）。"""
+    置位 True（每票段）= 按声明一律跳过（宿主管 260914 口径：例外腿已撤除），
+    write_set 只剩旧口径命中面留痕用途。"""
     return {'lane': 'integ', 'path': str(lane_root), 'baseline': True,
             'write_set': [str(x) for x in (write_set or [])],
             'apply_skip_pools': bool(apply_skip_pools)}
