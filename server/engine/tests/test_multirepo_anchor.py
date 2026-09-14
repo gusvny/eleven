@@ -150,6 +150,18 @@ def test_rebase_strips_prefix_and_drops_other_repo():
     assert shared.rebase_write_set(None, "repo_a") == []
 
 
+def test_rebase_repo_name_entry_yields_no_blank_entry():
+    """仓名形条目（"repo_a/"）剥前缀后是空串：必须**滤掉**而不是留下 ""。
+
+    实测出处 dengzhufpv/t260911-07：多仓票写集写 ['fpv-toolchain/', 'integration/']
+    （只圈成员仓、不逐子目录列），成员仓 rebased 写集得 [''] → 写集闸判
+    write_set_missing fail-closed → 该仓整仓禁写、settle 卡死整票。
+    文档语义＝「等于仓名的条目产出空」，本条锁住实现与文档一致。"""
+    assert shared.rebase_write_set(["repo_a/"], "repo_a") == []
+    assert "" not in shared.rebase_write_set(["repo_a/", "repo_a/src/a.py"], "repo_a")
+    assert shared.rebase_write_set(["repo_a/", "repo_a/src/a.py"], "repo_a") == ["src/a.py"]
+
+
 # ---------- build_repo_worktrees ----------
 
 def test_build_repo_worktrees_shape_and_branch(multirepo):

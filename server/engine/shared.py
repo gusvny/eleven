@@ -1234,8 +1234,15 @@ def rebase_write_set(write_set, repo_rel: str) -> List[str]:
     if not repo_rel:
         return ws
     prefix = repo_rel + "/"
-    return [p[len(prefix):] for p in ws
-            if isinstance(p, str) and p.startswith(prefix)]
+    # t260914-02（dengzhufpv/t260911-07 实测）：剥前缀后**必须滤掉空串**。仓名条目
+    # （如 "fpv-toolchain/"，多仓票的常见写法：只想圈住成员仓、不逐子目录列）满足
+    # startswith(prefix)，剥完剩 ""——而空白条目会被写集闸判「写集非法」fail-closed
+    # （path_gates._entries / agent_activities._dirty_within_write_set 同立场），
+    # 于是该成员仓整仓禁写、settle 报 write_set_missing 卡死整票。文档早已声明
+    # 「等于仓名的条目产出空」，实现此前与之不符；此处对齐文档，不改变既有非空子集语义。
+    out = [p[len(prefix):] for p in ws
+           if isinstance(p, str) and p.startswith(prefix)]
+    return [p for p in out if p.strip()]
 
 
 def build_repo_worktrees(project_root, write_set, lane_dir_name: str) -> List[Dict[str, str]]:
