@@ -25,7 +25,8 @@ KI-067 辅证纪律：create/show 输出只作辅证，真值锚磁盘与 git）
 - T3d 泳道拆除零残留：git worktree list 两仓均无 lane 路径 + .lane 目录不存在；
 - T3e ticket show 终态非 blocked（收口链未断，辅证）；
 - T4 反向腿（保险丝B 终态咬合）：同链真开票，merge 人审挂起时删泳道内
-  .suyou/repo_worktrees.json（naming-compat：旧名清单镜像路径；夹具级磁盘注入=缺明细形态，不改产品）→ 签字后
+  清单 repo_worktrees.json（落点＝引擎真写点 shared.multi_manifest_path；夹具级磁盘注入=缺明细形态，
+  不改产品，注入前置带在场/已删双断言防空转）→ 签字后
   merge/merge_check 红灯拦住（点名「未逐物化/保险丝B」）、workflow blocked，
   **三仓 main 提交数全部不变**——绝不静默单仓收口。
 
@@ -276,7 +277,7 @@ def run_leg(py, tk, tid, mixed, holder, fuse=False, proj=PROJ):
     root = mixed
     lane_rel, _ = shared.default_lane_paths(tid)
     lane = root / lane_rel
-    manifest = lane / ".suyou" / "repo_worktrees.json"  # naming-compat 存量产品路径
+    manifest = shared.multi_manifest_path(lane)  # 引擎真写点（协调目录解析位，t260914-01）
     base = {"root": main_count(root), "repo_a": main_count(root / "repo_a"),
             "repo_b": main_count(root / "repo_b")}
 
@@ -319,11 +320,16 @@ def run_leg(py, tk, tid, mixed, holder, fuse=False, proj=PROJ):
 
     if fuse and at_gate:
         # merge 时点夹具注入：删泳道逐仓清单（缺明细形态=单仓回落）——不改产品，
-        # 保险丝B 应在 merge/merge_check 红灯拦住。
+        # 保险丝B 应在 merge/merge_check 红灯拦住。清单路径=引擎真写点（t260914-01），
+        # 注入前置带非空转负锁：删前确在场、删后确不在（否则注入空转=保险丝腿失效）。
+        check("%s T4 注入前置：清单确在场" % tid, manifest.is_file(),
+              "manifest=%s" % manifest)
         try:
             manifest.unlink()
         except OSError as e:
             check("%s T4 注入前置：清单删除成功" % tid, False, str(e))
+        check("%s T4 注入前置：清单确已删除（负锁非空转）" % tid, not manifest.is_file(),
+              "manifest=%s" % manifest)
 
     if at_gate:
         sres, serr = None, ""

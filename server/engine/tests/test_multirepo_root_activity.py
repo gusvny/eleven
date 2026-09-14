@@ -61,9 +61,10 @@ def test_prepare_multirepo_lane_root_tree_created_and_reused(mixed):
     # 树=泳道容器本身（repo="" Path 零特判），且身份=根仓 worktree
     assert aa._is_worktree_of(lane, root)
     assert aa._is_worktree_of(lane / "repo_a", a)
-    # 清单落盘，repo="" 原样记录（路径取 MULTI_MANIFEST_REL 真源，不写字面量）
+    # 清单落盘位＝shared.multi_manifest_path（t260914-01：写读两侧的解析真源；新泳道
+    # 落新名协调目录——不再按老名镜像常量直拼盘上路径）
     import json
-    mf = json.loads((lane / aa.MULTI_MANIFEST_REL).read_text("utf-8"))
+    mf = json.loads(shared.multi_manifest_path(lane).read_text("utf-8"))
     assert [e["repo"] for e in mf] == ["", "repo_a"]
     # 复用幂等（M4）：二次执行全 reused，树内标记文件幸存
     (lane / "marker.txt").write_text("keep\n", encoding="utf-8")

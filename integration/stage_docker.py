@@ -1858,6 +1858,75 @@ def container_ids(project):
         return []
 
 
+def _docker_published_port(container, container_port):
+    """容器已发布的宿主端口（认领判据：端口真在服务才算活着）。拿不到返 None。"""
+    try:
+        p = _run(["docker", "port", container, container_port], timeout=15)
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return None
+    line = ((p.stdout or "").strip().splitlines() or [""])[0]
+    if ":" not in line:
+        return None
+    try:
+        return int(line.rsplit(":", 1)[1])
+    except ValueError:
+        return None
+
+
+def _container_running(name):
+    try:
+        p = _run(["docker", "inspect", "-f", "{{.State.Running}}", name], timeout=15)
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return False
+    return (p.stdout or "").strip() == "true"
+
+
+def adopt_live_residue(project, services_list, opts):
+    """认领「活着但本根无租约」的同名台（--keep 语义下的跨锁根自愈，t260914-01）。
+
+    同一工程名可能在两个锁根各有一份记录（宿主根 ~/.sandbar/test-stages 与沙箱降级根
+    $TMPDIR/sandbar-test-stages；声明侧供给台另用 /tmp/sandbar-test-stages）——本根租约
+    缺失/已死而容器仍在跑时，旧行为一律诚实拒收（「不拆别人的台」），于是**另一上下文起的
+    同名活台会把本上下文的消费者全部堵死**（t260914-01 实测：17 条 UI 场景连坐 env 红，
+    且因沙箱不可写宿主根而长期无法复现）。
+
+    本函数**不拆任何容器**：容器在跑 + 端口真在服务 ⇒ 幂等补注册 namespace/SA ⇒ 本根落一份
+    state=up 的租约（并接一条 hold 腿维持心跳）；任一判据不成立（容器不在跑 / 端口不服务 /
+    半残形态）⇒ 返回 None，调用方照旧诚实拒收——「不拆在跑台」的安全语义一字未动。
+    """
+    names = residue_containers(project)
+    if not names or any(n.startswith("<") for n in names):
+        return None
+    temporal = next((n for n in names if n.endswith("-temporal")), None)
+    if not temporal or not _container_running(temporal):
+        return None
+    t_port = _docker_published_port(temporal, "7233/tcp")
+    if not t_port or not port_open(t_port):
+        return None
+    ports = {"temporal": t_port}
+    u_port = _docker_published_port(temporal, "8233/tcp")
+    if u_port and port_open(u_port):
+        ports["ui"] = u_port
+    dsh = next((n for n in names if n.endswith("-dsh")), None)
+    if dsh:
+        if not _container_running(dsh):
+            return None                      # 半残（dsh 起不来）：不认领，照旧拒收
+        c_port = _docker_published_port(dsh, "3199/tcp")
+        if not c_port or not http_ok("http://127.0.0.1:%d" % c_port):
+            return None
+        ports["console"] = c_port
+    ns = opts.get("namespace") or "suyou-test"  # naming-compat: 台 namespace 名沿用既有值
+    sa_ok, sa_note = register_namespace(ns, "127.0.0.1:%d" % t_port)   # 幂等；失败则如实记账
+    lease = _flip_lease_up(project, None, ports, services_list,
+                           {"SANDBAR_TEST_NAMESPACE": ns}, opts, sa_ok, sa_note)
+    try:
+        _spawn_hold(project, lease.get("lease_id"), keep=True)
+    except Exception:
+        pass      # hold 起不来不阻断认领（心跳死后下次 ensure 会再认领）
+    lease["adopted"] = True
+    return _reused(lease)
+
+
 def _flip_lease_up(project, lease, ports, services_list, env, opts,
                    sa_registered, sa_note):
     """boot 完成 → 翻 state=up（原子写，写前保 lease_id/holder 不变）。CLI 翻面
@@ -2185,6 +2254,20 @@ def do_ensure(project, services_list, opts, timeout, keep=False):
             st = _wait_booting(project, fd, deadline)
             if lease_reusable(st):
                 return _reused(st)
+        if keep and residue_containers(project):
+            # --keep 消费者（常驻基建台/夹具台）在「本根租约不可复用 + 同名容器在跑」时
+            # 一律**先认领后拒收**（t260914-01，跨锁根自愈）。覆盖三副面孔：
+            #   ①本根无租约、容器在跑（宿主根 vs 沙箱降级根的 split-brain）；
+            #   ②租约已死/缺失但容器仍在服务；
+            #   ③租约在册但已不可用（心跳停更 + holder pid 僵死/被复用）而容器仍在服务
+            #     ——旧行为在此先抛「不对抗，人工核查后 down」，于是同一堵死面换个签名复发。
+            # 认领不拆任何容器、不与僵死 holder 对抗：只在活体判据（容器 Running + 端口真在
+            # 服务）全过时，把本根租约刷成一份带新 lease_id 的活租约并接 hold 腿——旧 hold
+            # 见 lease_id 更换即自退（其终止态之一）。认领不成 ⇒ 落到下面两条原有拒收分支，
+            # 「不拆在跑台」的安全语义与文案一字未动。
+            adopted = adopt_live_residue(project, services_list, opts)
+            if adopted is not None:
+                return adopted
         if isinstance(st, dict) and st.get("state") == "up" and not lease_dead(st):
             # 租约过期但 holder pid 仍在：不对抗（判据唯一化），点名交人工
             raise StageError(
@@ -2192,9 +2275,9 @@ def do_ensure(project, services_list, opts, timeout, keep=False):
                 "或 holder 僵死；绝不硬拆，人工核查后 down（可查 hold-%s.log）"
                 % (project, holder_pid(st), project), kind="env")
         if keep and residue_containers(project):
-            # --keep：无主容器在跑（租约已死）——不拆别人的台，诚实环境红
             raise StageError("供给台 %s 有无主容器在跑（租约已死/缺失）——--keep 语义"
-                             "不拆在跑台，人工核查或去旗重跑" % project, kind="env")
+                             "不拆在跑台，且认领失败（容器不在跑／端口不服务／半残）；"
+                             "人工核查或去旗重跑" % project, kind="env")
         # 冷路径：缺失 / downing / 过期死 / 旧格式 → 完整起台序列
         return _boot_new_stage(project, services_list, opts, timeout,
                                cold_cleanup=True, keep=keep)

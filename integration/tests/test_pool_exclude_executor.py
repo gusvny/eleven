@@ -236,7 +236,16 @@ ok(_p3.returncode == 2, "F11 非法池名 exit 2（闸侧单点判红）", _p3.r
 
 # ---- H 缺省路径与改前执行器逐字节一致（验收 B 的源码级 A/B，只读取改前快照）----
 def _norm_run(out):
-    """归一化耗时/时间戳/指纹等运行语境字段（结构面逐字节比对）。"""
+    """归一化耗时/时间戳/指纹等运行语境字段（结构面逐字节比对）。
+
+    t260914-01（arbitrate 段 tests-fault 迭代）补两类**墙钟噪声派生**的注释面：
+    ①每池「并行关键路径=是/否」——判据是 `s == max(池耗时)`，毫秒级抖动即翻面；
+    ②「耗时分解」块内的行序（每池串行合计按耗时降序、最慢 Top15 按 dur_s 排序，
+      近似并列时次序不稳）。两处都是**机器快慢的产物，不是池排除旋钮的行为**，
+    参与逐字节比对＝负载下一次假红（实测 260914 10:26 全量跑红，单跑 6/6 绿）。
+    归一化只掩时间派生注释：rc、每条场景行、清单/汇总键值、池归属一律照旧逐字节比对；
+    同处新增 H2 负锁证明归一化不吞行为差异（否则 H1 会退化成恒真）。
+    """
     out = re.sub(r'"dur_s": [\d.]+', '"dur_s": N', out)
     out = re.sub(r'"started": "[^"]*"', '"started": "T"', out)
     out = re.sub(r"\d+(?:\.\d+)?s", "Ns", out)
@@ -289,11 +298,25 @@ else:
         _rc_a, _out_a = drive(TRIO, None, mod=_mod_old, extra_env=_serial)
         _rc_b, _out_b = drive(TRIO, None, mod=rs, extra_env=_serial)
         _ha, _hb = _norm_run(_out_a), _norm_run(_out_b)
-        _diff = next((i for i, (x, y) in enumerate(zip(_ha.splitlines(), _hb.splitlines()))
-                      if x != y), None)
+        _la, _lb = _ha.splitlines(), _hb.splitlines()
+        _diff = next((i for i, (x, y) in enumerate(zip(_la, _lb)) if x != y), None)
+        _dd = ""
+        if _ha != _hb:   # 报错必须可诊：点名首处差异行的两侧原文与行数（旧版只说「行号」）
+            _i = _diff if _diff is not None else min(len(_la), len(_lb))
+            _dd = "首处差异行=%d（行数 %d/%d）｜A: %s｜B: %s" % (
+                _i, len(_la), len(_lb),
+                (_la[_i] if _i < len(_la) else "<A 无此行>")[:200],
+                (_lb[_i] if _i < len(_lb) else "<B 无此行>")[:200])
         ok(_rc_a == 0 and _rc_b == 0 and _ha == _hb,
-           "H1 缺省路径（无旋钮）输出与改前执行器逐字节一致",
-           "首处差异行=%s" % (_diff if _diff is not None else "-"))
+           "H1 缺省路径（无旋钮）输出与改前执行器逐字节一致", _dd)
+        # H2 负锁（t260914-01 arbiter 补）：归一化不得吞行为差异——多一条 main 条目的
+        # 探针表跑当前执行器，归一化后必须与 TRIO 的结果不同（否则 H1 是恒真断言）。
+        _QUAD = TRIO + [("t913-main2", None, "print('m2')\n")]
+        _rc_c, _out_c = drive(_QUAD, None, extra_env=_serial)
+        _hc = _norm_run(_out_c)
+        ok(_rc_c == 0 and _hc != _hb,
+           "H2 负锁：归一化不吞行为差异（探针表多一条条目必须可比出来）",
+           "rc=%s 归一化后与 H1 相同=%s" % (_rc_c, _hc == _hb))
 
 print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (pass_n, fail_n))
 sys.exit(1 if fail_n > 0 else 0)

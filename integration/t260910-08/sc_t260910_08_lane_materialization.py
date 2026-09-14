@@ -7,8 +7,8 @@ intent（守护的用户可感知行为/合同，工单 t260910-08 验收第 1 �
   worker 跑 DevLaneWorkflow → prepare_workspace 真建泳道 → 泳道磁盘终态四件套：
   ① 泳道容器下逐成员仓工作区目录存在（repo="" 根树=容器本身是根仓已注册 worktree）；
   ② 每仓分支名 = lane/<票>-<seg>（根树 = lane/<票>-root）；
-  ③ 清单 .suyou/repo_worktrees.json 在位（.suyou=存量产品路径 naming-compat），
-    repo/name/branch 与派生明细逐条一致；
+  ③ 清单 repo_worktrees.json 在引擎真写点位（shared.multi_manifest_path 解析位，
+    t260914-01 起新泳道=新名协调目录），repo/name/branch 与派生明细逐条一致；
   ④ meta.repo_worktrees 非空（ticket show 读面 = dengzhufpv 取证同一读面，
     该字段此前恒 null 误导诊断）。
 - Temporal 持久化契约：TicketInput.repo_worktrees 双仓在起始事件 payload
@@ -362,7 +362,7 @@ try:
             # 与 create 实际落点同源——手写 .lane/<票号> 与派生名不等=磁盘断言永久假红）
             lane_rel, _lane_br = shared.default_lane_paths(TICKET)
             lane = mixed / lane_rel
-            manifest = lane / ".suyou" / "repo_worktrees.json"  # naming-compat 存量产品路径
+            manifest = shared.multi_manifest_path(lane)  # 引擎真写点（协调目录解析位，t260914-01）
             # 期望明细=创建链同一单点派生（build_repo_worktrees 纯函数，无 git 子进程）
             detail = shared.build_repo_worktrees(mixed, WS, lane_rel.rsplit("/", 1)[-1])
 
@@ -462,7 +462,7 @@ try:
                 s_err = "%s: %s" % (type(e).__name__, str(e)[:200])
             lane_s_rel, _ = shared.default_lane_paths(TICKET_SINGLE)
             lane_s = single / lane_s_rel
-            mf_s = lane_s / ".suyou" / "repo_worktrees.json"  # naming-compat 存量产品路径
+            mf_s = shared.multi_manifest_path(lane_s)  # 单仓对照腿：真写点无清单（不该有）
             if (not isinstance(s_res, dict)) or s_err:
                 for nm in ("T5a", "T5b", "T5c"):
                     check(nm + "（依赖 create 受理）", False, "create 失败：%s" % (s_err or s_res))

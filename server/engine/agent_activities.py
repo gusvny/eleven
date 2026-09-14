@@ -737,12 +737,23 @@ def _restore_gitfile(cwd: Path, ticket_id: str, stage_id: str, gen: int,
     return note
 
 # The git pathspec exclusion stance shared by settle/merge_check: .dsh (agent
-# sandbox / credentials) and .sandbar (result files / agent logs / quarantine) are
-# engine runtime directories present in every lane, so they don't count as changes.
+# sandbox / credentials) and both coordination-directory names (new .sandbar +
+# legacy sticky .suyou, see shared.resolve_dot_dir) are engine runtime directories
+# present in every lane, so they don't count as changes.
 # Note: this pathspec is only for git status (fine for porcelain); git add must not
 # carry it — Apple Git 2.50 always errors rc=1 on the ". + :!ignored-dir" combination
 # (see _settle_worktree_lane).
-SETTLE_PATHSPEC = [".", ":!.dsh", ":!.sandbar", ":!.sandbar"]  # the second .sandbar = legacy lane name (sticky fallback, ticket t260907-04)
+# The literal shape is an ast contract: integration/t260911-01 extracts this list with
+# ast.literal_eval, so it cannot become a runtime-derived expression; the unit test
+# test_t260914_01_settle_lane_stance pins it to shared.DOT_DIR_NEW/DOT_DIR_OLD instead
+# (single source at the name level, drift = red). t260914-01 fixed the 260907 rename
+# slip that had written .sandbar twice and dropped the legacy name entirely.
+SETTLE_PATHSPEC = [".", ":!.dsh", ":!.sandbar", ":!.suyou"]  # naming-compat: .suyou = legacy coordination dir (shared.DOT_DIR_OLD)
+
+# 协调目录撤下清单（add -A 之后的 reset 目标）：从 shared 真源派生，杜绝旧名/新名
+# 各抄一份（t260914-01；同族教训 KI-074/KI-077）。settle 与 settle_conflict_resolution
+# 共用同一元组，两处不再各写一份字面量。
+_SETTLE_RESET_PATHS = (".dsh", shared.DOT_DIR_OLD, shared.DOT_DIR_NEW)  # naming-compat
 
 
 # ---- KI-009 (ticket t260901-25): the two pure functions that auto-settle before merge_check goes red on dirty ----
@@ -1033,17 +1044,37 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
         p = _git(["add", "-A", "--", "."], cwd)
         if p.returncode != 0:
             raise RuntimeError("settle: git add 失败: %s" % (p.stderr or "")[-300:])
-        _git(["reset", "-q", "--", ".dsh", ".suyou", ".sandbar"], cwd)  # naming-compat
-        msg = ("%s %s：worker 代落盘（gen%d，%d 项改动）\n\n"
-               "headless agent 沙箱写不了主库 .git，commit 由 worker 确定性兜底"
-               % (ticket_id, stage_id, gen, len(dirty)))
-        p = _git(["commit", "-m", msg], cwd)
-        if p.returncode != 0:
-            raise RuntimeError("settle: git commit 失败: %s" % (p.stderr or p.stdout or "")[-300:])
-        head = _git(["rev-parse", "--short", "HEAD"], cwd)
-        notes.append("worker 代落盘 commit %s（%d 项：%s）"
-                     % (head.stdout.strip() if head.returncode == 0 else "?",
-                        len(dirty), "、".join(dirty[:5])))
+        _git(["reset", "-q", "--", *_SETTLE_RESET_PATHS], cwd)
+        # t260914-01（dengzhufpv/t260911-07 根因之二）：判脏非空但撤下协调目录后暂存区
+        # 可能为空——该段只产出协调目录产物时就是这种形态，「无改动可提交」是正常工作态，
+        # 不是基础设施故障（旧版在此让 commit rc≠0 上抛 RuntimeError，被 Temporal 表现成
+        # 「agent 活动故障」，归因噪声极大）。显式预检把两态分开：空暂存=可辨 note（含
+        # 判脏项数与点名，进回执 evidence，不含 path_gate_reason= 键故不会被判闸拒绝）；
+        # 暂存非空而 commit 仍失败=真失败，照旧响亮。
+        st = _git(["diff", "--cached", "--quiet"], cwd)
+        if st.returncode == 0:
+            note = ("判脏 %d 项均为引擎运行时目录（%s），撤下后暂存区为空——无需代落盘"
+                    "（空提交=正常工作态，非故障；判脏=%s）"
+                    % (len(dirty), "、".join(_SETTLE_RESET_PATHS),
+                       "、".join(dirty[:5]) + ("…" if len(dirty) > 5 else "")))
+            activity.logger.info("[%s/%s] settle：%s", ticket_id, stage_id, note)
+            notes.append(note)
+        else:
+            if st.returncode != 1:
+                # rc=1 之外都不是「有差异」而是 git 自身出问题（索引损坏等）：环境类
+                # fail-closed，绝不吞成 note
+                raise RuntimeError("settle: 暂存区检查失败（diff --cached --quiet rc=%d）: %s"
+                                   % (st.returncode, (st.stderr or "")[-200:]))
+            msg = ("%s %s：worker 代落盘（gen%d，%d 项改动）\n\n"
+                   "headless agent 沙箱写不了主库 .git，commit 由 worker 确定性兜底"
+                   % (ticket_id, stage_id, gen, len(dirty)))
+            p = _git(["commit", "-m", msg], cwd)
+            if p.returncode != 0:
+                raise RuntimeError("settle: git commit 失败: %s" % (p.stderr or p.stdout or "")[-300:])
+            head = _git(["rev-parse", "--short", "HEAD"], cwd)
+            notes.append("worker 代落盘 commit %s（%d 项：%s）"
+                         % (head.stdout.strip() if head.returncode == 0 else "?",
+                            len(dirty), "、".join(dirty[:5])))
     else:
         notes.append("工作区已干净，无需代落盘")
     note = "；".join(notes)
@@ -1387,7 +1418,10 @@ def _lane_repo_root(cwd: Path) -> Path:
 # to read mechanically). Paths are relative: tree relative to the lane root, repo
 # relative to the project root (= the lane root's grandparent), so moving the lane
 # does not invalidate it.
-MULTI_MANIFEST_REL = ".suyou/repo_worktrees.json"
+# 盘上位置的唯一真源＝shared.multi_manifest_path（协调目录解析三规则）；本常量只剩
+# 「老名存量镜像路径」这一语义：改名前的泳道清单落在它上面（读侧回落锚），夹具与
+# 存量消费方仍按它直读（t260914-01；值必须保持老名相对路径不变）。
+MULTI_MANIFEST_REL = shared.DOT_DIR_OLD + "/" + shared.MULTI_MANIFEST_NAME  # naming-compat
 
 
 def _lane_scopes(wt: Path, branch: str = "", base_ref: str = "",
@@ -1407,7 +1441,7 @@ def _lane_scopes(wt: Path, branch: str = "", base_ref: str = "",
     原样零回归）。参数必须留在末尾：:2322 现存 4 个位置实参调用
     `_lane_scopes(wt, args.branch, args.base_ref, args.write_set)`。
     损坏/畸形一律 RuntimeError（两源同语义），绝不静默回落单仓锚。"""
-    mf = wt / MULTI_MANIFEST_REL
+    mf = shared.multi_manifest_path(wt, legacy_fallback=True)
     from_entries = entries is not None
     if not from_entries:
         if not mf.is_file():
@@ -1625,10 +1659,12 @@ def _prepare_multirepo_lane(lane_root: Path, entries: Any,
       - any repo failing = an overall failed receipt (no raise, the workflow turns
         blocked); already-succeeded trees are **not rolled back** (same semantics as
         single-repo, left for human triage);
-      - once everything succeeds, write the manifest <lane>/.suyou/repo_worktrees.json
-        (the mechanical source of truth for downstream _lane_scopes; idempotent:
-        retries take the reuse path and the manifest is rewritten with the same
-        shape).
+      - once everything succeeds, write the manifest at the lane's resolved
+        coordination directory (shared.multi_manifest_path; the mechanical source of
+        truth for downstream _lane_scopes; idempotent: retries take the reuse path and
+        the manifest is rewritten with the same shape — for an existing legacy lane the
+        resolution is sticky, so it is rewritten in place under the old name and no
+        new-name directory is born).
     base_ref: each repo records the repo HEAD at tree-creation time (single-repo
     base_ref semantics = main-tree HEAD do not carry over to multi-repo — each repo's
     baseline is independent, and recording HEAD is what lets merge_check's item 1
@@ -1700,15 +1736,18 @@ def _prepare_multirepo_lane(lane_root: Path, entries: Any,
         manifest.append({"repo": e["repo"], "name": str(e.get("name") or e["repo"]),
                          "branch": e["branch"],
                          "base_ref": rc.stdout.strip() if rc.returncode == 0 else ""})
-    mf_dir = lane_root / ".suyou"
+    # 清单落盘位＝shared.multi_manifest_path（协调目录解析真源；新泳道必落新名，
+    # 存量老名泳道粘滞原地复写——绝不硬编码名字，t260914-01 三病灶之三）。create=True
+    # 只建解析位目录；报错文案点名**实际解析出的**路径（老名位只在回落到它时出现）。
+    mf_path: Optional[Path] = None
     try:
-        mf_dir.mkdir(parents=True, exist_ok=True)
-        (mf_dir / "repo_worktrees.json").write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=1), "utf-8")
+        mf_path = shared.multi_manifest_path(lane_root, create=True)
+        mf_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=1), "utf-8")
     except Exception as ex:
         return WorkspacePrepResult(ok=False, kind="worktree", action="failed",
                                    path=str(lane_root),
-                                   error="多仓泳道清单落盘失败（%s）: %s" % (MULTI_MANIFEST_REL, ex))
+                                   error="多仓泳道清单落盘失败（%s）: %s"
+                                         % (mf_path or "路径解析失败", ex))
     action = "created" if created_n else "reused"
     activity.logger.info("[%s] prepare 多仓泳道：%s（%s）", prep.ticket_id, action,
                          "；".join(notes))
@@ -2582,12 +2621,9 @@ async def settle_conflict_resolution(args: ConflictSettleArgs) -> ConflictSettle
     if p.returncode != 0:
         return ConflictSettleResult(ok=False, error="git add 失败: %s"
                                     % (p.stderr or "")[-300:])
-    # .dsh/.sandbar are gitignored and never staged anyway; resetting them back is
-    # belt and braces (for lanes with an old .gitignore) — same as
-    # _settle_worktree_lane (SETTLE_PATHSPEC's exclusions must not go into git add;
-    # Apple Git 2.50 always returns rc=1 for an "explicitly named ignored directory",
-    # measured in ticket t260828-02)
-    _git(["reset", "-q", "--", ".dsh", ".suyou", ".sandbar"], wt)  # naming-compat
+    # .dsh 与两个协调目录名都没被暂存（协同目录被 .gitignore 兜住时本就进不了暂存）；
+    # reset 目标从 shared 真源派生（与 _settle_worktree_lane 同一元组，不再各抄一份）。
+    _git(["reset", "-q", "--", *_SETTLE_RESET_PATHS], wt)
     remaining = []
     for f in merge_files:
         fp = wt / f
@@ -3473,7 +3509,8 @@ async def teardown_lane(args: MergeArgs) -> MergeResult:
     # 明细取用序（见 docstring）：清单镜像在 → 读盘（与 merge 同输入）；不在而
     # workflow 递来 meta 明细 → 走 entries（同一归一化段）；都无 → 旧单仓回落。
     entries = None
-    if not (wt / MULTI_MANIFEST_REL).is_file() and args.repo_worktrees:
+    # 盘上清单存在性走同一读侧（解析位优先＋老名镜像回落），与 _lane_scopes 不可能漂移
+    if not shared.multi_manifest_path(wt, legacy_fallback=True).is_file() and args.repo_worktrees:
         entries = list(args.repo_worktrees)
     try:
         scopes = _lane_scopes(wt, branch, entries=entries)

@@ -185,6 +185,27 @@ async function browserScenarios(fixtureProjects) {
       : '前置探针：marker 文本全页缺席（消息未上屏/会话未恢复→环境面优先，与 t4 同口径）';
   }
 
+  // 第二重前置探针（t260914-01 仲裁段补，260914 实测）：chip 的文本＝项目 key，key 的**唯一真源**
+  // 是控制台项目注册表 API；该源不可得时（请求失败/列表空/不含该 key）页面**没有任何数据**能渲出
+  // 该 chip——此时「行在场但无 chip」是环境面（与 t4「session not restored」同窗共现，实测 260914
+  // 全量窗：本场景 4/3/1 且 t4 env_fail，而同一代码相邻窗与隔离复跑 8/0 全绿）。
+  // 只在键源**明确不可得**时把该腿降为 env_fail；键源健康而 chip 仍未渲染 ⇒ 照旧 FAIL（产品面），
+  // 断言强度一字未放。fetch 直打本场景自己的 BASE（不引 lib_charter，避免跨台 BASE 混淆）。
+  async function keySourceHas(key) {
+    try {
+      const r = await fetch(`${BASE}/sandbar-workbench/api/wf/projects`, { signal: AbortSignal.timeout(3000) });
+      if (!r.ok) return { ok: false, why: `registry HTTP ${r.status}` };
+      const data = await r.json();
+      const list = Array.isArray(data) ? data : (data?.result?.projects ?? data?.projects ?? []);
+      const keys = list.map((p) => p.key ?? p.id ?? '').filter(Boolean);
+      return keys.includes(key)
+        ? { ok: true }
+        : { ok: false, why: `registry 不含 ${key}（实得 ${JSON.stringify(keys.slice(0, 8))}）` };
+    } catch (e) {
+      return { ok: false, why: `registry 请求失败 ${e?.name || e}` };
+    }
+  }
+
   async function pollSent(text, timeout = 10000) {
     const ta = page.locator('textarea:visible').first();
     const t0 = Date.now();
@@ -213,8 +234,10 @@ async function browserScenarios(fixtureProjects) {
       record('t1/tag-renders', 'pass', `chip="${hit.text}" color=${hit.color}`);
     } else {
       const probe = await rowProbe(markerA);
-      record('t1/tag-renders', 'fail',
-        `marker 行上未找到文本=「${tag0.key}」的 chip；探得=${JSON.stringify(chips).slice(0, 200)}；${rowProbeText(probe)}`);
+      const detail = `marker 行上未找到文本=「${tag0.key}」的 chip；探得=${JSON.stringify(chips).slice(0, 200)}；${rowProbeText(probe)}`;
+      const ks = await keySourceHas(tag0.key);
+      if (!ks.ok) record('t1/tag-renders', 'env_fail', `${detail}；键源不可得（${ks.why}）⇒ 无数据可渲该 chip，环境面`);
+      else record('t1/tag-renders', 'fail', detail);
     }
   }
 
@@ -229,7 +252,10 @@ async function browserScenarios(fixtureProjects) {
           hit.color === colorA ? `stable ${colorA}` : `${colorA} → ${hit.color}`);
       } else {
         const probe2 = await rowProbe(markerA2);
-        record('t2/same-key-same-color', 'fail', `chip 探得=${JSON.stringify(chips).slice(0, 160)}；${rowProbeText(probe2)}`);
+        const detail2 = `chip 探得=${JSON.stringify(chips).slice(0, 160)}；${rowProbeText(probe2)}`;
+        const ks2 = await keySourceHas(tag0.key);
+        if (!ks2.ok) record('t2/same-key-same-color', 'env_fail', `${detail2}；键源不可得（${ks2.why}）⇒ 环境面`);
+        else record('t2/same-key-same-color', 'fail', detail2);
       }
     } else record('t2/same-key-same-color', 'env_fail', 'second send failed (env)');
   }
@@ -246,7 +272,10 @@ async function browserScenarios(fixtureProjects) {
           `${tag0.key}=${colorA} vs ${tag1.key}=${hit.color}`);
       } else {
         const probeB = await rowProbe(markerB);
-        record('t3/different-key-different-color', 'fail', `chip 探得=${JSON.stringify(chips).slice(0, 160)}；${rowProbeText(probeB)}`);
+        const detailB = `chip 探得=${JSON.stringify(chips).slice(0, 160)}；${rowProbeText(probeB)}`;
+        const ksB = await keySourceHas(tag1.key);
+        if (!ksB.ok) record('t3/different-key-different-color', 'env_fail', `${detailB}；键源不可得（${ksB.why}）⇒ 环境面`);
+        else record('t3/different-key-different-color', 'fail', detailB);
       }
     } else record('t3/different-key-different-color', 'env_fail', 'send failed (env)');
   } else {

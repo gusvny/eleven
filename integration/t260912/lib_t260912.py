@@ -27,6 +27,7 @@ from lib_t260907_06 import (  # noqa: E402,F401
 )
 
 sys.path.insert(0, str(POC))  # shared / agent_activities 可导入（call_prepare 依赖）
+import shared  # noqa: E402  纯标准库（temporalio 仅函数内 lazy import），清单路径真源
 
 
 def build_mixed_project(prefix="t260907-12-mixed-", nested=False):
@@ -34,13 +35,14 @@ def build_mixed_project(prefix="t260907-12-mixed-", nested=False):
     （票文口径「[根]+一层子仓集合」，dengzhufpv 形态）。
 
       <root>/                 git 仓（基线提交含 README.md、docs/kb.md、
-                              .gitignore 忽略子仓目录与 .suyou/（naming-compat：旧名清单镜像面））
+                              .gitignore 忽略子仓目录与两个协调目录名（naming-compat：含旧名清单镜像面））
       <root>/repo_a/          git 仓（基线提交含 src/a.py）
       <root>/repo_b/          git 仓（基线提交含 lib/b.py）
 
     .gitignore 是契约 advisory④ 的夹具落地：根树=泳道容器本身时，子仓树与
-    泳道清单（.suyou/）落在根仓工作区内，必须被忽略（根仓 status 不受污染；naming-compat：旧名清单镜像面，
-    真源=agent_activities.MULTI_MANIFEST_REL——stdlib 面不 import 其 temporalio 依赖，字面量对齐即可）。
+    泳道清单（落点＝shared.multi_manifest_path 解析位，t260914-01 起新泳道=新名）落在根仓工作区内，
+    必须被忽略（根仓 status 不受污染；真源=shared.multi_manifest_path/MULTI_MANIFEST_NAME——
+    两名协调目录都写进夹具，老名面为存量兼容观察点）。
     nested=True 时在 <root>/docs/nested/ 再放一个嵌套 git 仓——一层扫描之外的
     集合外嵌套仓（归属游走从根仓起全长走，专测混合形态的 fail-closed：
     子仓若挂在二层容器目录下同样按此语义拒收，不静默归根仓）。
@@ -50,7 +52,9 @@ def build_mixed_project(prefix="t260907-12-mixed-", nested=False):
     _init_repo(root, "baseline: 根仓（知识库仓）")
     (root / "docs").mkdir()
     (root / "docs" / "kb.md").write_text("knowledge base entry\n", encoding="utf-8")
-    (root / ".gitignore").write_text("repo_a/\nrepo_b/\n.suyou/\n", encoding="utf-8")  # naming-compat fixture：造旧名清单镜像目录
+    # advisory④ 夹具落地：根树=泳道容器本身时，子仓树与协调目录（清单落点）必须被忽略
+    # ——两名协调目录都写（t260914-01 起新泳道清单落新名位；老名行为存量兼容面）。
+    (root / ".gitignore").write_text("repo_a/\nrepo_b/\n.suyou/\n.sandbar/\n", encoding="utf-8")  # naming-compat fixture：含旧名清单镜像目录
     git("add", "-A", cwd=root)
     git("commit", "-m", "root: docs/kb.md + advisory④ gitignore", cwd=root)
 
@@ -111,9 +115,13 @@ def build_single_repo_project(prefix="t260907-12-single-"):
 
 
 def read_manifest(container):
-    """读泳道清单（workspace.repo_worktrees 的落盘镜像=公开契约面）。缺失返 None。"""
+    """读泳道清单（workspace.repo_worktrees 的落盘镜像=公开契约面）。缺失返 None。
+
+    路径＝引擎真写点 shared.multi_manifest_path（协调目录解析位；t260914-01 起新泳道
+    落新名）；存量老名镜像位只在解析位缺失时回落（读侧单点策略，与引擎同一函数）。
+    """
     import json
-    mf = container / ".suyou" / "repo_worktrees.json"  # naming-compat：旧名镜像读点（真源=MULTI_MANIFEST_REL）
+    mf = shared.multi_manifest_path(container, legacy_fallback=True)
     if not mf.is_file():
         return None
     return json.loads(mf.read_text("utf-8"))

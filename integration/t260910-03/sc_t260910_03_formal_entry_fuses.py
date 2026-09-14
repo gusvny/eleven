@@ -249,7 +249,7 @@ try:
                               cwd=root / rel).splitlines()
                 if ln.startswith("worktree "))
             for rel in ("repo_a", "repo_b"))
-        mf = lane_dir / aa.MULTI_MANIFEST_REL  # 引擎单一真源常量（旧名路径不经新字面量）
+        mf = shared.multi_manifest_path(lane_dir)  # 引擎真写点（协调目录解析位，t260914-01）
         mf_ok = False
         if mf.is_file():
             try:

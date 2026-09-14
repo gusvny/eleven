@@ -49,7 +49,12 @@ const KNOWN_RESIDUE = new Set([
   'server/engine/README.md',
 ])
 // .sandbar=泳道台面记录（工单原文引用旧路径属历史记录域，与 notes/ 同口径——t260907-10 arbitrate gen1 补排除）
-const SKIP_DIRS = new Set(['node_modules', '.git', '.suyou', '.lane', '.sandbar', 'docs', 'notes', '.venv'])
+// out/=运行产物/报告落档域（进程物目录：out/integration-report-*.json 由执行器每轮写，
+//   其 timings.tail 逐字转发场景回执——被转发原文含旧仓绝对路径属事实记录，与 .log/.sandbar
+//   同口径排除；不排除即「执行器自己写的报告把自己判成新病灶」的自污染假红，
+//   t260914-01 arbitrate gen2 实测：out/integration-report-260914-102037.json 即此形态）。
+//   扫描面意图不变=**源码/文档域**零旧仓字面量；out/ 内不放源码（脚本/源码在 server/、integration/）。
+const SKIP_DIRS = new Set(['node_modules', '.git', '.suyou', '.lane', '.sandbar', 'docs', 'notes', '.venv', 'out'])
 
 function* walk(dir) {
   for (const name of readdirSync(dir)) {

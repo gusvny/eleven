@@ -964,6 +964,30 @@ def lane_dot_path(base, *parts, create: bool = False) -> pathlib.Path:
     return resolve_dot_dir(base, create=create).joinpath(*parts)
 
 
+# 多仓泳道清单（repo_worktrees.json）的盘上路径真源：写侧一律落解析位（新泳道=新名
+# 协调目录），读侧可开启老名镜像回落（见 multi_manifest_path）。清单名与解析规则都收
+# 在这一处——「多处各抄一份名字」是同族教训（KI-074/KI-077，t260914-01 收单源）。
+MULTI_MANIFEST_NAME = "repo_worktrees.json"
+
+
+def multi_manifest_path(base, create: bool = False,
+                        legacy_fallback: bool = False) -> pathlib.Path:
+    """多仓泳道清单的盘上路径（写读两侧唯一入口）。
+
+    legacy_fallback=True（读侧专用，t260914-01）：解析位不在场时回落到老名固定镜像
+    位。存量泳道若已带杂散新名目录而清单仍留在老名（改名过渡期的现实形态），读侧不得
+    因为解析规则翻到新名就看不见清单——回落保证与「直读老名」的旧行为一致，单仓回落 /
+    损坏清单 RuntimeError 等既有判定语义一概不动。写侧（create=True）不得开回落：新泳道
+    只落解析位，否则又是一次「新泳道诞出老名目录」。
+    """
+    p = lane_dot_path(base, MULTI_MANIFEST_NAME, create=create)
+    if legacy_fallback and not p.is_file():
+        legacy = pathlib.Path(base) / DOT_DIR_OLD / MULTI_MANIFEST_NAME
+        if legacy.is_file():
+            return legacy
+    return p
+
+
 def mirror_to_legacy(base, rel: pathlib.Path) -> bool:
     """Transitional mirror for the plugin face: copy the rel file from base's new-name
     coordination directory to the same relative path under DOT_DIR_OLD.

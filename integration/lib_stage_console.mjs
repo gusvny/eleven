@@ -335,9 +335,31 @@ async function seedFixturesLocked(st, fixturesHost) {
   // (integfix1/2) are never indexed, so the t02 chip leg was red permanently
   // (proven 260908). Idempotence anchor = the list's id (no worker query
   // needed; the title degrades when there is no worker).
+  // SA 生效窗（t260914-01 arbitrate gen4 实测）：台冷启动时 namespace/SA 注册与
+  // 首个消费者的 ticket-list 之间存在短窗（同刻多泳道起台时更明显）——客户端会拿到
+  // `column name 'ProjectKey' is not a valid search attribute`。staged 工具自身对
+  // namespace 未就绪窗就用「重试 3×2s」吸收（stage_docker.register_namespace），
+  // 夹具这里同口径吸收同一窗；**重试后仍失败=照旧响亮红**（真缺 SA 绝不放过），
+  // 且报错点名台身份（project/address/namespace）——旧文案只贴 stderr 尾巴，
+  // 无从判断「查的是哪台哪个 namespace」（本次定位耗时即此）。
+  const SA_NOT_READY = /is not a valid search attribute/i;
   const listIds = (project) => {
-    const out = runTool(JSON.stringify({ op: 'list', project }));
-    if (out.status !== 0) throw new Error(`fixture ticket count failed: ${out.stderr?.slice(-200)}`);
+    let out;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      out = runTool(JSON.stringify({ op: 'list', project }));
+      if (out.status === 0) break;
+      const tail = `${out.stderr || ''}${out.stdout || ''}`;
+      if (attempt < 2 && SA_NOT_READY.test(tail)) {   // 只在 SA 生效窗上重试，其它错误立即红
+        spawnSync('sleep', ['2']);
+        continue;
+      }
+      break;
+    }
+    if (out.status !== 0) {
+      throw new Error('fixture ticket count failed'
+        + `（台 project=${project} address=127.0.0.1:${st.ports.temporal}`
+        + ` namespace=${toolEnv.SANDBAR_NAMESPACE}）：${out.stderr?.slice(-200)}`);
+    }
     return new Set((JSON.parse(out.stdout.trim())?.tickets ?? []).map((t) => t?.id));
   };
   for (const sp of seedProjects) {

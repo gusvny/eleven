@@ -74,16 +74,6 @@ tmp = tmpdir("t260913-05-l3")
 FIX = {}
 
 
-def manifest_rel():
-    """盘上清单相对路径：消费引擎单一真源常量（禁落 dot 目录裸字面量）；
-    temporalio 缺席的 stdlib 腿回落存量产品路径（naming-compat，只用于夹具自证）。"""
-    try:
-        import agent_activities as _aa
-        return _aa.MULTI_MANIFEST_REL
-    except Exception:
-        return ".suyou/repo_worktrees.json"  # naming-compat：存量清单镜像路径
-
-
 def env_for(extra):
     """子进程 env：剥掉环境里全部其它 SANDBAR_*（泳道标记不得泄给被测链），
     只保留台面三键 + 显式 extra。"""
@@ -261,7 +251,7 @@ def run_leg(py, tk):
     root = Path(FIX["mixed"])
     lane_rel, _ = shared.default_lane_paths(TICKET)
     lane = root / lane_rel
-    manifest = lane / manifest_rel()
+    manifest = shared.multi_manifest_path(lane)  # 引擎真写点（协调目录解析位，t260914-01）
     base = {"root": main_count(root), "repo_a": main_count(root / "repo_a"),
             "repo_b": main_count(root / "repo_b")}
     holder = []
