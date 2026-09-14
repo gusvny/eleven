@@ -303,6 +303,9 @@ class SettleLaneResult:
     note: str = ""
     lane_commits: int = -1                      # -1 = unknown (rev-list failed)
     error: str = ""
+    # t260915-01 ②：闸拒绝的结构化明细（首个拒绝 scope 的 gate_red_detail 产出）。
+    # None = 非闸拒绝/老回执（dict 反序列化态经 .get 缺省，重放安全）。
+    gate_refusal: Optional[Dict[str, Any]] = None
 
 
 def parse_arbitration_summary(summary: str) -> str:
@@ -2089,6 +2092,10 @@ class StageResult:
     # historical events without this field don't break.
     files_changed_shape: str = "absent"
     evidence: str = ""
+    # t260915-01 ②：闸拒绝的结构化明细（path_gates.gate_red_detail 产出，经
+    # _apply_settle_note 挂载）。None = 非闸拒绝/老回执（缺省值保证在途实例重放
+    # 历史事件不破，演进安全惯例）；消费侧必经 sanitize_gate_refusal 校形。
+    gate_refusal: Optional[Dict[str, Any]] = None
 
 
 def normalize_files_changed(raw: Any):

@@ -39,7 +39,7 @@
 本模块零 IO 零进程零网络（「基点已存在」由调用方注入谓词），全部纯函数——单测
 （server/engine/tests/test_t260911_03_path_gates.py）与场景可直调。
 """
-from typing import Any, Callable, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 # 拒绝回执的机器可辨键值：is_gate_refusal 以此辨认闸拒绝（区别于其它 settle note）。
 PATH_GATE_REASON_KEY = "path_gate_reason="
@@ -338,3 +338,70 @@ def gate_refusal_note(stage_id: str, violations: Sequence[str], reason_code: str
 def is_gate_refusal(note: str) -> bool:
     """settle note 是否为闸拒绝回执（机器口径：含 path_gate_reason= 键值）。"""
     return PATH_GATE_REASON_KEY in str(note or "")
+
+
+# ---------------- 结构化红灯明细（t260915-01；只结构化既有结论，零新判定） ----------------
+
+_NEXT_ACTION_HINTS = {
+    "unauthorized_path": "把改动收回本段允许面/写集内，或拆票走正式流程；越权文件不落盘",
+    "protected_path": "共享真源与守卫的改动走 main 侧专用票；本票只读不写",
+    "unknown_stage": "给该段配置允许改动面（fail-closed 缺省=拒），或改用已配置段",
+    "write_set_missing": "工单写集为空/缺失——回 create_plan 补结构化回执后再实现",
+    "ui_dirs_missing": "补 verify.yaml 的 ui_evidence.dirs 声明（或按项目口径补截图证据）",
+    "status_failed": "修复泳道 git 环境（git status 失败=改动清单未知，fail-closed）后发 retry_qc 重验",
+}
+
+
+def next_action_hint(reason_code: str) -> str:
+    """reason_code → 人话下一步动作（与 gate_refusal_note 的出路文案同向，不改 note）。"""
+    return _NEXT_ACTION_HINTS.get(
+        str(reason_code or ""), "按 worker 日志核对该拒绝原因后处置")
+
+
+def gate_red_detail(stage_id: str, violations: Sequence[str],
+                    reason_code: str, note: str) -> Dict[str, Any]:
+    """闸拒绝的结构化检查项明细（t260915-01 ②），供详情页「人话红灯卡」。
+
+    纯函数、零判定：输入=闸已算出的 violations/reason_code 与**原样** note。
+    files 全量不截断——_fmt_files 的 cap 只作用于人读 note 文本，结构化面必须保真
+    （「不得丢文件」验收口径）。evidence=note 原文（与 worker 日志同一字符串，
+    满足「与 worker 日志原文一致」）。畸形输入 fail-visible 不抛：violations 非
+    字符串序列→files=[]；reason_code 空→gate_refusal_unknown（消费侧还有
+    sanitize_gate_refusal 兜底）。"""
+    files: List[str] = []
+    if isinstance(violations, (list, tuple)):
+        files = [str(v) for v in violations if isinstance(v, str) and v]
+    rc = str(reason_code or "").strip() or "gate_refusal_unknown"
+    return {
+        "check_id": "path_gate@%s" % (str(stage_id or "") or "unknown_stage"),
+        "item": "受保护路径闸" if rc == "protected_path" else "段×允许面路径闸",
+        "red": True,
+        "reason_code": rc,
+        "files": files,
+        "next_action": next_action_hint(rc),
+        "evidence": str(note or ""),
+    }
+
+
+def sanitize_gate_refusal(raw: Any) -> Optional[Dict[str, Any]]:
+    """跨活动边界来的 gate_refusal 写上票面前的校形（t260915-01 ② C7）。
+
+    引擎侧不把未校验数据当契约面：返回 None = 不可救（非 dict / reason_code 键
+    缺失或非串），消费点不写；返回 dict = 可上台面（缺 files→[]；files 非列表→
+    降级可辨码 gate_refusal_malformed）。只校形不改判定语义：合法字段原样透传。"""
+    if not isinstance(raw, dict):
+        return None
+    rc = raw.get("reason_code")
+    if not isinstance(rc, str) or not rc.strip():
+        return None
+    files = raw.get("files")
+    malformed = False
+    if files is None:
+        files = []
+    elif not isinstance(files, list):
+        files, malformed = [], True
+    out = dict(raw)
+    if malformed:
+        out["reason_code"] = "gate_refusal_malformed"
+    out["files"] = [str(f) for f in files if isinstance(f, (str, int, float))]
+    return out

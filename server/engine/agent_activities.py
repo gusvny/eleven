@@ -897,36 +897,45 @@ def _path_exists_at_ref(repo: Path, ref: str, path: str) -> bool:
     return p.returncode == 0
 
 
-def _settle_with_gate(args: AgentStageArgs, cwd: Path) -> str:
+def _settle_with_gate(args: AgentStageArgs, cwd: Path,
+                      refusal: Optional[Dict[str, Any]] = None) -> str:
     """通用 agent 段的带闸 settle（t260911-03）：把 AgentStageArgs 里的闸参数传给
     _settle_worktree_lane——单一拼装点，generic 段/缓存命中分支/arbitrate 系共用，
     两侧不可能漂移。t260912-03：人授权结构化记录（已由 workflow 侧按票+时效过滤）
-    一并下传，受保护闸据此做豁免摘除。"""
+    一并下传，受保护闸据此做豁免摘除。t260915-01：refusal 收集口（缺省 None=
+    既有直调场景逐字不变；传 dict 时闸拒绝的结构化明细写入其中随回执上台面）。"""
     return _settle_worktree_lane(
         cwd, args.ticket_id, args.stage_id, args.gen,
         write_set=list(args.write_set or []),
         path_gate=bool(args.path_gate),
         base_ref=str(args.base_ref or ""),
-        authorizations=list(getattr(args, "authorizations", None) or []))
+        authorizations=list(getattr(args, "authorizations", None) or []),
+        refusal=refusal)
 
 
-def _apply_settle_note(res: StageResult, note: str) -> StageResult:
+def _apply_settle_note(res: StageResult, note: str,
+                       refusal: Optional[Dict[str, Any]] = None) -> StageResult:
     """settle note 落回执：普通 note 进 evidence；闸拒绝（含 path_gate_reason= 键值）
     把结果改判 failed、summary 换成拒绝回执——workflow 侧按既有 failed 处理转
-    blocked，点名段/文件与合法出路随回执上台面（协议三态之「越权」可辨）。"""
+    blocked，点名段/文件与合法出路随回执上台面（协议三态之「越权」可辨）。
+    t260915-01：refusal 在场=结构化明细随回执挂载（res.gate_refusal，workflow 侧
+    经 sanitize 校形后写 blocked_detail）；None=不挂（既有直调场景逐字不变）。"""
     if not note:
         return res
     res.evidence = (res.evidence + "\n[worker settle] " + note).strip()
     if path_gates.is_gate_refusal(note):
         res.status = "failed"
         res.summary = note
+        if refusal:
+            res.gate_refusal = dict(refusal)
     return res
 
 
 def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
                           repo: Optional[Path] = None, write_set: Optional[List[str]] = None,
                           path_gate: bool = False, base_ref: str = "",
-                          authorizations: Optional[List[Dict[str, Any]]] = None) -> str:
+                          authorizations: Optional[List[Dict[str, Any]]] = None,
+                          refusal: Optional[Dict[str, Any]] = None) -> str:
     """Settle a worktree lane on the agent's behalf (deterministic, never trusting
     the agent to behave): called once the agent has delivered its result file.
 
@@ -1004,6 +1013,10 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
     if p.returncode != 0:
         if path_gate:
             note = path_gates.gate_refusal_note(stage_id, [], "status_failed")
+            # t260915-01 ②：结构化明细随拒绝收集（refusal 在场才写；不传=逐字不变）
+            if refusal is not None:
+                refusal.update(path_gates.gate_red_detail(
+                    stage_id, [], "status_failed", note))
             activity.logger.warning("[%s/%s] settle：%s", ticket_id, stage_id, note)
             return note
         raise RuntimeError("settle: git status 失败: %s" % (p.stderr or "")[-300:])
@@ -1027,6 +1040,11 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
                 allowed, violations, reason = False, pv, preason
         if not allowed:
             note = path_gates.gate_refusal_note(stage_id, violations, reason)
+            # t260915-01 ②：结构化明细随拒绝收集（files=闸已判定的全量清单，不走
+            # 文本解析——_fmt_files 的 cap 只作用于 note 文本，结构化面保真）
+            if refusal is not None:
+                refusal.update(path_gates.gate_red_detail(
+                    stage_id, violations, reason, note))
             activity.logger.warning("[%s/%s] settle：%s", ticket_id, stage_id, note)
             return note
         if passed:
@@ -1284,8 +1302,9 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
             # settle_lane at the join point
             note = ""
             if not args.skip_settle:
-                note = _settle_with_gate(args, cwd)
-            _apply_settle_note(cached, note)
+                refusal: Dict[str, Any] = {}
+                note = _settle_with_gate(args, cwd, refusal=refusal)
+                _apply_settle_note(cached, note, refusal=refusal or None)
             return cached
 
     if os.environ.get("SANDBAR_AGENT_STUB") == "1":
@@ -1370,8 +1389,9 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
                     # point
                     note = ""
                     if not args.skip_settle:
-                        note = _settle_with_gate(args, cwd)
-                    _apply_settle_note(res, note)
+                        refusal2: Dict[str, Any] = {}
+                        note = _settle_with_gate(args, cwd, refusal=refusal2)
+                        _apply_settle_note(res, note, refusal=refusal2 or None)
                     return res
             rc = proc.poll()
             if rc is not None:
@@ -2110,6 +2130,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
     # turn blocked" semantics. At most one self-heal per call: still dirty afterwards
     # = report it honestly as red, no internal loop.
     auto_settle_note = ""
+    clean_gate_refusal: Optional[Dict[str, Any]] = None  # t260915-01 ②：自愈被闸拒的结构化明细
     try:
         p = _git(["status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, sc["tree"])
         dirty_z = p.stdout if p.returncode == 0 else ""
@@ -2122,12 +2143,16 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 auto_settle_note = "合并进行中（MERGE_HEAD 在场），不自愈"
             elif _dirty_within_write_set(dirty_files, sc["write_set"]):
                 try:
+                    heal_refusal: Dict[str, Any] = {}
                     note = _settle_worktree_lane(
                         sc["tree"], args.ticket_id, "merge_check", 0,
                         write_set=list(sc.get("write_set") or []),
                         path_gate=bool(getattr(args, "path_gate", False)),
                         base_ref=str(sc.get("base_ref") or getattr(args, "base_ref", "") or ""),
-                        authorizations=list(getattr(args, "authorizations", None) or []))
+                        authorizations=list(getattr(args, "authorizations", None) or []),
+                        refusal=heal_refusal)
+                    if heal_refusal:
+                        clean_gate_refusal = dict(heal_refusal)
                     auto_settle_note = "[auto-settle] %s" % (note or "settle 返回空（见后续复查）")
                 except Exception as e:
                     auto_settle_note = ("[auto-settle] settle 异常（转红不抛）: %s: %s"
@@ -2147,9 +2172,15 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
         checks.append({"item": "泳道分支有 commit（%s..%s）" % (sc["base_ref"][:7], sc["branch"]),
                        "green": p.returncode == 0 and n > 0,
                        "detail": ("%d 个 commit" % n) if n else
-                                 (p.stderr or p.stdout or "0 个 commit").strip()[-300:]})
+                                 (p.stderr or p.stdout or "0 个 commit").strip()[-300:],
+                       "id": "lane_commits",
+                       **({} if (p.returncode == 0 and n > 0) else {
+                           "reason_code": "no_commits",
+                           "next_action": "实现未落盘（泳道 0 commit）——发 rework 回 implement，"
+                                          "或排查实现段 settle 代落盘"})})
     except Exception as e:
-        checks.append({"item": "泳道分支有 commit", "green": False, "detail": "git log 异常: %s" % e})
+        checks.append({"item": "泳道分支有 commit", "green": False, "detail": "git log 异常: %s" % e,
+                       "id": "lane_commits", "reason_code": "no_commits"})
 
     # 2. Clean workspace (SETTLE_PATHSPEC stance — the .dsh/ and .sandbar/ engine
     #    runtime directories are excluded, the same stance as the worker settle; the
@@ -2168,13 +2199,28 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             detail = ("干净" if clean else "未提交：%s" % "、".join(dirty[:5]))
             if auto_settle_note:
                 detail = "%s ｜ %s" % (detail, auto_settle_note)
-            checks.append({"item": "工作区干净（无未提交改动）", "green": clean,
-                           "detail": detail})
+            item = {"item": "工作区干净（无未提交改动）", "green": clean,
+                    "detail": detail,
+                    "id": "worktree_clean"}  # t260915-01 ② D4：检查项 id（绿项只带 id）
+            if not clean:
+                item["reason_code"] = "worktree_dirty"
+                item["files"] = [str(f) for f in dirty[:20]]
+                # 自愈 settle 被闸拒绝时，闸的结构化明细（含精准 next_action）优先
+                item["next_action"] = (
+                    str(clean_gate_refusal.get("next_action") or "")
+                    if clean_gate_refusal else
+                    "把改动收回写集内后发 retry_qc 重验（settle 代落盘未触发=排查实现段）")
+                if clean_gate_refusal:
+                    item["gate_refusal"] = dict(clean_gate_refusal)
+            checks.append(item)
         else:
             checks.append({"item": "工作区干净（无未提交改动）", "green": False,
-                           "detail": "git status 失败: %s" % (p.stderr or "")[-200:]})
+                           "detail": "git status 失败: %s" % (p.stderr or "")[-200:],
+                           "id": "worktree_clean", "reason_code": "status_failed",
+                           "next_action": path_gates.next_action_hint("status_failed")})
     except Exception as e:
-        checks.append({"item": "工作区干净", "green": False, "detail": "git status 异常: %s" % e})
+        checks.append({"item": "工作区干净", "green": False, "detail": "git status 异常: %s" % e,
+                       "id": "worktree_clean", "reason_code": "status_failed"})
 
     # 3. verify_lane code inside the lane (runs the lane's own admin.py copy: lane
     # code + lane tools)
@@ -2210,7 +2256,9 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             # when merge-base fails, item 4's merge-tree main almost certainly goes
             # red too, so no new blocking surface is added.
             checks.append({"item": "写集白名单基线（merge-base main × %s）" % sc["branch"],
-                           "green": False, "detail": wl_err})
+                           "green": False, "detail": wl_err,
+                           "id": "verify_lane_code", "reason_code": "merge_base_failed",
+                           "next_action": "泳道内 merge-base 失败（git 环境类）——排查泳道仓后发 retry_qc"})
         else:
             if wl_err:  # multi-line malformed output: keep the first line, leave a searchable trace
                 activity.logger.info("[%s] %s", args.ticket_id, wl_err)
@@ -2254,10 +2302,17 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 green, detail = False, "verify_lane 超时（>900s）"
             except json.JSONDecodeError:
                 green, detail = False, (v_stderr or v_stdout or "无输出").strip()[-300:]
-            checks.append({"item": "泳道内 verify_lane code 绿灯", "green": green, "detail": detail})
+            checks.append({"item": "泳道内 verify_lane code 绿灯", "green": green, "detail": detail,
+                           "id": "verify_lane_code",
+                           **({} if green else {
+                               "reason_code": "verify_red",
+                               # 文件级归因在 verify_lane 回执 detail 文本里（保持文本，
+                               # 不二次解析）；此处不现造 files
+                               "next_action": "按 detail 里的红灯项修复后发 retry_qc 重验"})})
     except Exception as e:
         checks.append({"item": "泳道内 verify_lane code 绿灯", "green": False,
-                       "detail": "verify_lane 异常: %s" % e})
+                       "detail": "verify_lane 异常: %s" % e,
+                       "id": "verify_lane_code", "reason_code": "verify_red"})
 
     # 3.5 Project-level extra checks (policy follows the project repo: read the lane's
     #     own server/merge-checks.yaml — ticket snapshot semantics; no file = no extra
@@ -2287,10 +2342,16 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                     checks.append({"item": "bundle 新鲜度（%s → %s）" % (src, out),
                                    "green": rebuilt,
                                    "detail": "src 改动已同批重建产物" if rebuilt else
-                                             "src 有改动但产物未同批重建（泳道内 tsdown 重建，settle 代落盘）"})
+                                             "src 有改动但产物未同批重建（泳道内 tsdown 重建，settle 代落盘）",
+                                   "id": "bundle_freshness",
+                                   **({} if rebuilt else {
+                                       "reason_code": "bundle_stale",
+                                       "files": [str(src), str(out)],
+                                       "next_action": "泳道内重建产物（tsdown）后发 retry_qc 重验"})})
     except Exception as e:
         checks.append({"item": "bundle 新鲜度（%s）" % MERGE_CHECKS_CFG, "green": False,
-                       "detail": "扩展检查异常: %s" % e})
+                       "detail": "扩展检查异常: %s" % e,
+                       "id": "bundle_freshness", "reason_code": "bundle_stale"})
 
     # 3.6 UI 证据闸（票 t260828-09，纯机械查、无 agent）。KI-044 根修（票 t260904-13）：
     #     The judgement source moved from the declared write set to the **actual diff
@@ -2346,7 +2407,9 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 "item": "UI 截图证据（ui_evidence 声明）",
                 "green": False,
                 "detail": "ui_evidence 声明畸形 fail-closed：%s（修 verify.yaml 的 "
-                          "ui_evidence.dirs 或删声明走缺省态）" % decl_note})
+                          "ui_evidence.dirs 或删声明走缺省态）" % decl_note,
+                "id": "ui_evidence", "reason_code": "ui_evidence_malformed",
+                "next_action": path_gates.next_action_hint("ui_dirs_missing")})
         else:
             ui_paths, diff_err = _ui_diff_paths(sc["repo"], base_36, sc["branch"], _scope_dirs(decl_dirs, sc))
             diff_fault = bool(diff_err or not base_36)
@@ -2358,14 +2421,17 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                     "green": True,
                     "detail": "ui_evidence 未声明：截图证据项按项目声明缺席"
                               "（KI-050 声明制；要启用截图闸在 verify.yaml 声明 "
-                              "ui_evidence.dirs）"})
+                              "ui_evidence.dirs）",
+                    "id": "ui_evidence"})
             elif decl_mode == "absent" and diff_fault:
                 # ④b Declaration absent but the diff is faulty: a mechanism fault is
                 # not absorbed — red
                 checks.append({
                     "item": "UI 截图证据（ui_evidence 声明）",
                     "green": False,
-                    "detail": "ui_evidence 未声明且 diff 故障 fail-closed：%s" % (diff_err or "基线缺失")})
+                    "detail": "ui_evidence 未声明且 diff 故障 fail-closed：%s" % (diff_err or "基线缺失"),
+                    "id": "ui_evidence", "reason_code": "ui_evidence_missing",
+                    "next_action": "排查泳道 git diff/基线后发 retry_qc 重验"})
             elif ui_paths or diff_fault:
                 # ① Declaration present + a hit (or a diff fault while present): the
                 # current red/green judgement
@@ -2382,11 +2448,18 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                     "detail": ("%s｜%d 张截图在位：%s" % (judge, len(pngs), "、".join(p.name for p in pngs[:5])))
                               if pngs else
                               ("%s｜UI 票缺截图证据：跑 server/ui-check/capture.mjs "
-                               "--out <worktree>/%s（worker 代跑，只读控制台页面）" % (judge, UI_EVIDENCE_DIR))})
+                               "--out <worktree>/%s（worker 代跑，只读控制台页面）" % (judge, UI_EVIDENCE_DIR)),
+                    "id": "ui_evidence",
+                    **({} if not ui_gate_red else {
+                        "reason_code": "ui_evidence_missing",
+                        # 命中的 UI 路径清单已在手（diff 判定产物），逐字带上
+                        "files": [str(x) for x in ui_paths[:20]],
+                        "next_action": "泳道内产出截图证据（server/ui-check/capture.mjs）后发 retry_qc"})})
             # ② Declaration present + a miss + healthy diff: no item emitted (noise
             # reduction; the current stance is unchanged)
     except Exception as e:
-        checks.append({"item": "UI 截图证据", "green": False, "detail": "证据闸异常: %s" % e})
+        checks.append({"item": "UI 截图证据", "green": False, "detail": "证据闸异常: %s" % e,
+                       "id": "ui_evidence", "reason_code": "ui_evidence_missing"})
 
     # 3.7 KI-048 (t260911-05): pre-merge main-workspace dirty check (active, not
     #     post-facto). The four original items only inspect the lane side; main-tree
@@ -2408,10 +2481,16 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
         checks.append({"item": "main 工作区无未提交改动（合并前脏检查）",
                        "green": not dirty_kind,
                        "detail": ("干净（无未提交改动、无与本单收口路径相撞的未跟踪文件）"
-                                  if not dirty_kind else human)})
+                                  if not dirty_kind else human),
+                       "id": "main_untouched",
+                       **({} if not dirty_kind else {
+                           "reason_code": "main_dirty",
+                           "next_action": "在 main 提交或暂存（git stash）这些改动，或在票面说明后"
+                                          "发 retry_qc 重验（引擎不自动 stash/提交）"})})
     except Exception as e:  # a fault in this read-only pre-check goes red honestly, the activity never raises
         checks.append({"item": "main 工作区无未提交改动（合并前脏检查）",
-                       "green": False, "detail": "脏检查异常: %s" % e})
+                       "green": False, "detail": "脏检查异常: %s" % e,
+                       "id": "main_untouched", "reason_code": "main_dirty"})
 
     # 4. merge-tree 预演无冲突（不落地——只把合并结果写成 tree 对象判冲突，
     #    It changes no workspace/index state; ticket t260826-01: the conflict file
@@ -2433,9 +2512,16 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                        "green": rehearsal_green,
                        "detail": "无冲突" if rehearsal_green else
                                  ("冲突文件：%s" % "、".join(conflict_files) if conflict_files
-                                  else (p.stdout or p.stderr or "有冲突").strip()[-300:])})
+                                  else (p.stdout or p.stderr or "有冲突").strip()[-300:]),
+                       "id": "merge_rehearsal",
+                       **({} if rehearsal_green else {
+                           "reason_code": "merge_conflict",
+                           "files": [str(f) for f in conflict_files[:20]],
+                           "next_action": "冲突自动消解（引擎自动打回 implement）；消解失败转人工时"
+                                          "按票面 blocked 文案处置"})})
     except Exception as e:
-        checks.append({"item": MERGE_REHEARSAL_ITEM, "green": False, "detail": "merge-tree 异常: %s" % e})
+        checks.append({"item": MERGE_REHEARSAL_ITEM, "green": False, "detail": "merge-tree 异常: %s" % e,
+                       "id": "merge_rehearsal", "reason_code": "merge_conflict"})
     return {"checks": checks, "rehearsal_green": rehearsal_green,
             "conflict_files": conflict_files,
             "merge_tree_excerpt": merge_tree_excerpt}
@@ -2505,13 +2591,15 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     if fuse_b_err:
         checks.insert(max(len(checks) - 1, 0),
                       {"item": "repo_worktrees 逐仓物化（t260910-03 保险丝B）",
-                       "green": False, "detail": fuse_b_err})
+                       "green": False, "detail": fuse_b_err,
+                       "id": "fuse_b_materialize", "reason_code": "fuse_b_incomplete"})
     elif multi and args.write_set:
         # 绿对照可见项（红灯不扩大化的反面：全绿也不静默——多仓票恒有物化闸记录）
         checks.insert(max(len(checks) - 1, 0),
                       {"item": "repo_worktrees 逐仓物化（t260910-03 保险丝B）",
                        "green": True,
-                       "detail": "多仓写集逐仓物化齐全（%d 仓）" % len(scopes)})
+                       "detail": "多仓写集逐仓物化齐全（%d 仓）" % len(scopes),
+                       "id": "fuse_b_materialize"})
     green = all(c["green"] for c in checks)
     # Ticket t260826-01 automatic conflict resolution loop: red lights split into two
     # classes —
@@ -4037,16 +4125,21 @@ async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
                 "settle_lane: worktree %r（解析为 %s）不是其归属仓（%s）的已注册 worktree，"
                 "拒绝回退主树代落盘（静默回退=该落盘的泳道什么都不落还报干净，t260901-16 实锤）"
                 % (args.worktree, sc["tree"], sc["repo"]))
+        sc_refusal: Dict[str, Any] = {}          # t260915-01 ②：闸拒绝结构化收集口
         sc_note = _settle_worktree_lane(sc["tree"], args.ticket_id, args.stage_id,
                                         args.gen, repo=sc["repo"],
                                         write_set=list(sc.get("write_set") or []),
                                         path_gate=bool(args.path_gate),
                                         base_ref=str(sc.get("base_ref") or args.base_ref or ""),
-                                        authorizations=list(getattr(args, "authorizations", None) or []))
+                                        authorizations=list(getattr(args, "authorizations", None) or []),
+                                        refusal=sc_refusal)
         # t260911-03：闸拒绝随 error 上抛给 workflow（join 点点名段/文件转 blocked，
         # 不静默吞成一条 note——否则违规改动不落盘、0-commit 预检只会给一句含糊红）。
+        # t260915-01 ②：结构化明细随回执（首个拒绝 scope 的 gate_red_detail 产出；
+        # 空收集=None，老回执形状不变）。
         if path_gates.is_gate_refusal(sc_note):
-            return SettleLaneResult(note=sc_note, error=sc_note, lane_commits=commits)
+            return SettleLaneResult(note=sc_note, error=sc_note, lane_commits=commits,
+                                    gate_refusal=(dict(sc_refusal) or None))
         if sc["name"]:
             sc_note = "[%s] %s" % (sc["name"], sc_note or "settle 返回空")
         notes.append(sc_note)
@@ -4213,9 +4306,10 @@ def _stub_stage_shortcut(args: AgentStageArgs, settle_on_cache: bool = False) ->
                                  args.ticket_id, args.stage_id, args.gen)
             _patch_result_prompt(rfile, args.prompt)
             if settle_on_cache:
+                refusal3: Dict[str, Any] = {}
                 note = _settle_with_gate(
-                    args, _ws_cwd(args.workspace, args.ticket_id))
-                _apply_settle_note(cached, note)
+                    args, _ws_cwd(args.workspace, args.ticket_id), refusal=refusal3)
+                _apply_settle_note(cached, note, refusal=refusal3 or None)
             return cached
     if os.environ.get("SANDBAR_AGENT_STUB") != "1":
         return None
@@ -4285,8 +4379,9 @@ async def arbitrate(args: AgentStageArgs) -> StageResult:
                     # along with it); the unified settle is handled by the workflow's
                     # single settle_lane.
                     if not args.skip_settle:
-                        note = _settle_with_gate(args, cwd)
-                        _apply_settle_note(res, note)
+                        refusal4: Dict[str, Any] = {}
+                        note = _settle_with_gate(args, cwd, refusal=refusal4)
+                        _apply_settle_note(res, note, refusal=refusal4 or None)
                     return res
             rc = proc.poll()
             if rc is not None:

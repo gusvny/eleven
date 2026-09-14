@@ -44,6 +44,7 @@ from temporalio.common import RetryPolicy
 with workflow.unsafe.imports_passed_through():
     from base import TicketPauseMixin
     import authz_gates
+    import path_gates  # t260915-01 ②：闸拒绝结构化明细的构造/校形（纯函数零 IO）
     from agent_activities import (
         arbitrate,
         acceptance_walkthrough,
@@ -201,6 +202,15 @@ REVIEW_CONDITIONAL_PATCH_ID = "dev-lane-review-conditional-v1"
 # consume the same mechanical test result from different angles with no data dependency,
 # so gathering saves a serial stretch. Same-shaped boolean gate (see the first note).
 ARB_ACC_PARALLEL_PATCH_ID = "dev-lane-arb-acc-parallel-v1"
+# t260915-01 详情数据面（三件事一个门）：①blocked 当前态字段解除时清空；②闸拒绝/
+# merge_check 红的结构化明细（blocked_detail 泛化写点）；③timeline/handoff 的
+# gen+phase 键与 snapshot.gens 新段。纪律：
+# - 唯一求值点=_init()（run 起点，非唤醒穿越处）→ 无 KI-061 memo 毒化形态；在途
+#   实例重放时首评落在重放段=False 永固化→旧分支逐字不变；新实例首评 live→True。
+# - workflow.patched 禁止出现在 @query 定义的可读函数里（SDK _assert_not_read_only
+#   硬约束：query handler 整段 read-only）——snapshot 等读 self._detail_face_on
+#   缓存位（getattr 防御，UT 壳 object.__new__ 不跑 __init__）。
+DETAIL_FACE_PATCH_ID = "dev-lane-detail-face-v1"
 # prepare_ui_evidence activity timeout: must be **clearly larger** than the subprocess
 # timeout inside the activity (agent_activities.UI_CAPTURE_TIMEOUT_SEC=120s), otherwise
 # Temporal kills the activity first and the subprocess's own timeout recovery never runs.
@@ -236,7 +246,8 @@ PHASE_MAIN_ROLES: Dict[str, str] = {
     "merge": "integration", "done": "integration"}
 
 
-def set_parallel_stages(meta: Dict[str, Any], stages: List[str]) -> None:
+def set_parallel_stages(meta: Dict[str, Any], stages: List[str],
+                        phase: str = "") -> None:
     """While a parallel fork is live, record the active edges into
     meta['parallel_stages'] (KI-024).
 
@@ -251,6 +262,12 @@ def set_parallel_stages(meta: Dict[str, Any], stages: List[str]) -> None:
         so a stale list cannot pin finished edges on ▶ forever.
       - Pure in-memory function, replay safe; STAGES is resolved at call time (this
         function is defined before the class).
+      - t260915-01 ③ phase 实参三态（review_plan C5 写死）：phase 非空且 stages 非空
+        → 同时记 meta['parallel_phase']（分叉相位名，如 arb_acc_parallel——timeline
+        条目的 phase 键读它）；stages 清空（离场）→ parallel_stages 与 parallel_phase
+        两键同删；phase 缺省 ''且 stages 非空（摘失败边调用）→ parallel_phase 保持
+        现值不动（摘边不得抹掉相位）。门纪律：两个分叉调用点只在 self._detail_face_on
+        时传 phase——在途实例重放零新键（旧分支逐字不变）。
     """
     valid_ids = {s.id for s in DevLaneWorkflow.STAGES}
     cleaned: List[str] = []
@@ -259,8 +276,11 @@ def set_parallel_stages(meta: Dict[str, Any], stages: List[str]) -> None:
             cleaned.append(s)
     if cleaned:
         meta["parallel_stages"] = cleaned
+        if phase:
+            meta["parallel_phase"] = phase
     else:
         meta.pop("parallel_stages", None)
+        meta.pop("parallel_phase", None)
 
 # Per-step assignment contract supplements (appended after build_stage_prompt's generic
 # instructions). Verdict convention for the two review steps: status ok=pass /
@@ -486,6 +506,9 @@ class DevLaneWorkflow(TicketPauseMixin):
         # eats a poisoned value).
         self._arb_over_limit_seq: int = 0
         self._gens: Dict[str, int] = {}                   # activity name → entry count
+        # t260915-01：详情数据面门缓存位（唯一求值点在 _init；缺省 False=UT 壳/异常
+        # 形态走旧分支；所有使用点读 getattr 防御，@query 内禁调 workflow.patched）。
+        self._detail_face_on: bool = False
         self.gate_runs: List[Dict[str, Any]] = []
         self.refused: List[Dict[str, Any]] = []
         self.timeline: List[Dict[str, Any]] = []
@@ -504,8 +527,17 @@ class DevLaneWorkflow(TicketPauseMixin):
             {"ts": self._now_epoch(), "status": status or self.meta.get("status", ""), "note": note})
 
     def _mark(self, step: str, state: str, reason: str = "") -> None:
-        self.timeline.append(
-            {"at": self._now_iso(), "stage": step, "state": state, "reason": reason})
+        entry: Dict[str, Any] = {"at": self._now_iso(), "stage": step,
+                                 "state": state, "reason": reason}
+        if getattr(self, "_detail_face_on", False):
+            # t260915-01 ③：轮次/并行相位可读维度（门内追加键；门关=旧 4 键逐字）。
+            # gen=该步当前进入计数（_enter 已自增→本条目归属第几轮）；phase=并行
+            # 相位名（meta['parallel_phase'] 由 set_parallel_stages 维护，串行期缺省）。
+            entry["gen"] = self._gen(step)
+            phase = self.meta.get("parallel_phase")
+            if phase:
+                entry["phase"] = phase
+        self.timeline.append(entry)
         workflow.logger.info("[%s] %s/%s %s", self.ticket_id, step, state, reason)
 
     def _touch(self) -> None:
@@ -538,6 +570,11 @@ class DevLaneWorkflow(TicketPauseMixin):
     def _init(self, inp: TicketInput) -> None:
         self.ticket_id = inp.ticket_id
         workflow.patched(self.PATCH_ID)
+        # t260915-01：详情数据面门缓存位——全实例唯一求值点（run 起点非唤醒穿越处，
+        # 无 KI-061 memo 毒化形态）。在途实例重放：首评落重放段→False 永固化→旧分支
+        # 逐字不变；新实例：首评 live→True+marker→重放同判定。所有使用点（含
+        # snapshot）只读本布尔位，不再触碰 SDK 门判定调用。
+        self._detail_face_on = workflow.patched(DETAIL_FACE_PATCH_ID)
         first = self.STAGES[0]
         acc = list(first.acceptance) + [x for x in inp.acceptance_extra
                                         if x not in first.acceptance]
@@ -620,6 +657,12 @@ class DevLaneWorkflow(TicketPauseMixin):
         self.meta["status"] = "dispatched"
         self.meta["stage_state"] = "running"
         self.meta["acceptance"] = list(st.acceptance)
+        if getattr(self, "_detail_face_on", False):
+            # t260915-01 ②（R2 清点②）：blocked_detail＝「当前受阻明细」，非
+            # blocked 期恒空——所有非 blocked 推进的唯一步进入口在此统一清，关掉
+            # 不经 _blocked 的失败路径留下的陈旧红卡（merge_check 冲突自动消解成功、
+            # 仲裁格式纠正轮失败后下轮成功等）。与 _blocked wake 清（清点①）双保险。
+            self.meta["blocked_detail"] = None
         self._touch()
         self._mark(step_id, "running", "进入本步（第 %d 次）" % self._gen(step_id))
 
@@ -640,10 +683,15 @@ class DevLaneWorkflow(TicketPauseMixin):
 
     def _handoff(self, step_id: str, summary: str,
                  artifacts: Optional[List[str]] = None, report: str = "") -> None:
-        self.meta.setdefault("handoffs", []).append({
-            "stage": step_id, "agent_id": "", "summary": summary, "report": report,
-            "artifacts": list(artifacts or []), "ts": self._now_epoch(),
-            "engine_version": self.engine_version})
+        entry: Dict[str, Any] = {"stage": step_id, "agent_id": "", "summary": summary,
+                                 "report": report,
+                                 "artifacts": list(artifacts or []),
+                                 "ts": self._now_epoch(),
+                                 "engine_version": self.engine_version}
+        if getattr(self, "_detail_face_on", False):
+            # t260915-01 ③：handoff 携带轮次（现状 0 条含 gen；详情页轮带消费）。
+            entry["gen"] = self._gen(step_id)
+        self.meta.setdefault("handoffs", []).append(entry)
 
     def _refresh_write_set_after_plan(self) -> None:
         """Write-set refresh after the plan is finalized (conditional passes included)
@@ -711,6 +759,14 @@ class DevLaneWorkflow(TicketPauseMixin):
         token = self._retry_token
         await workflow.wait_condition(
             lambda: self._retry_token > token or self._rework is not None)
+        if getattr(self, "_detail_face_on", False):
+            # t260915-01 ①（清点①）：block 解除的唯一汇合点——retry_qc（token 增）
+            # 与 rework（_rework 置位）两条出路都经此，清「当前是否受阻」的两个当前
+            # 态字段；上方 _mark 落的 blocked 历史条目＝审计留痕，不动。门缓存位读
+            # getattr（R1：@query 只读约束无关此处，但 UT 壳 object.__new__ 不跑
+            # __init__，统一防御）。
+            self.meta["blocked_reason"] = ""
+            self.meta["blocked_detail"] = None
         # On wake, the main loop looks at self._rework / re-runs this step
 
     async def _blocked_over_limit(self, why: str) -> bool:
@@ -735,6 +791,75 @@ class DevLaneWorkflow(TicketPauseMixin):
         if self._rework is not None or SANDBAR_TEST_DISABLE_KI061:
             return False
         return workflow.patched("%s#%d" % (KI061_WAKE_RESET_PATCH_ID, n))
+
+    # ---------- structured red-light detail pins (t260915-01 ②) ----------
+    def _pin_agent_refusal(self, res: StageResult) -> None:
+        """agent 段闸拒绝的结构化明细 → meta['blocked_detail']（当前受阻明细）。
+        只在 status=failed 且回执带 gate_refusal 时写；消费必经 sanitize（C7：跨
+        活动边界数据不当契约面）；门关=零写（在途实例逐字不变）。清点=清点①②。"""
+        if not getattr(self, "_detail_face_on", False):
+            return
+        if str(getattr(res, "status", "")) == "ok":
+            return
+        refusal = getattr(res, "gate_refusal", None)
+        if not refusal:
+            return
+        detail = path_gates.sanitize_gate_refusal(refusal)
+        if detail:
+            self.meta["blocked_detail"] = detail
+
+    def _pin_settle_refusal(self, result: Any) -> None:
+        """settle_lane join 点的闸拒绝明细（A3）：SettleLaneResult.gate_refusal 经
+        sanitize 后写 blocked_detail；缺键/None=老回执→回落既有文本 why（零改动）。"""
+        if not getattr(self, "_detail_face_on", False):
+            return
+        refusal = getattr(result, "gate_refusal", None)
+        if not refusal:
+            return
+        detail = path_gates.sanitize_gate_refusal(refusal)
+        if detail:
+            self.meta["blocked_detail"] = detail
+
+    def _pin_merge_red_detail(self, checks: Any, fallback_files: Any = None) -> None:
+        """merge_check 红灯的结构化明细（A4）：取首红项的既有结论（id/item/
+        reason_code/files/next_action/detail）结构化写 blocked_detail——只做「已有
+        结论结构化」，红绿判定与文案零改动。无红项时回落 fallback_files（conflict
+        类的 conflict_files，D4 已逐文件在 checks 里，此处是畸形兜底）。三处调用点
+        全部紧邻 _blocked（非 blocked 期由清点①②清空，R2 生命周期）。"""
+        if not getattr(self, "_detail_face_on", False):
+            return
+        red: Optional[Dict[str, Any]] = None
+        for c in (checks if isinstance(checks, list) else []):
+            if isinstance(c, dict) and c.get("green") is False:
+                red = c
+                break
+        if red is None:
+            if not (isinstance(fallback_files, list) and fallback_files):
+                return
+            detail = {"check_id": "merge_check", "item": "", "red": True,
+                      "reason_code": "merge_conflict",
+                      "files": [str(f) for f in fallback_files[:20]],
+                      "next_action": "冲突消解失败转人工——按票面 blocked 文案处置",
+                      "evidence": ""}
+        else:
+            files = red.get("files")
+            detail = {
+                "check_id": str(red.get("id") or "merge_check"),
+                "item": str(red.get("item") or ""),
+                "red": True,
+                "reason_code": str(red.get("reason_code") or "merge_check_red"),
+                "files": [str(f) for f in files[:20]]
+                         if isinstance(files, list) else [],
+                "next_action": str(red.get("next_action") or ""),
+                "evidence": str(red.get("detail") or ""),
+            }
+            # 检查项自带的结构化明细（如自愈 settle 的闸拒绝）优先透传
+            inner = path_gates.sanitize_gate_refusal(red.get("gate_refusal"))
+            if inner:
+                detail = inner
+        safe = path_gates.sanitize_gate_refusal(detail)
+        if safe:
+            self.meta["blocked_detail"] = safe
 
     # ---------- agent steps ----------
     async def _run_agent_step(self, step_id: str, previous_context: str = "",
@@ -790,13 +915,19 @@ class DevLaneWorkflow(TicketPauseMixin):
                 deliverables=[str(x) for x in (raw.get("deliverables") or [])],
                 files_changed=_fc,
                 files_changed_shape=_fc_shape,
-                evidence=str(raw.get("evidence") or ""))
+                evidence=str(raw.get("evidence") or ""),
+                # t260915-01 ②：结构化闸拒绝明细随回执（缺省 None=老回执/在途重放安全）
+                gate_refusal=raw.get("gate_refusal"))
         self.results[step_id] = {
             "status": res.status, "summary": res.summary, "report": res.report,
             "deliverables": list(res.deliverables),
             "files_changed": list(res.files_changed),
             "files_changed_shape": res.files_changed_shape,
             "evidence": res.evidence, "gen": gen}
+        # t260915-01 ②（A2）：闸拒绝的结构化明细随回执上台面——单点覆盖全部
+        # 「agent 报失败」blocked 调用点（~15 处零改动）；清点=_blocked wake（①）+
+        # _enter（②）双保险（R2 生命周期：非 blocked 期恒空）。
+        self._pin_agent_refusal(res)
         # t260912-03：回执里的 path_gate_authz_used= 机读键 → 授权消费留痕（只在真
         # 豁免时键在场；无键不记——防「用过」被恒真伪造）
         self._record_authz_uses(res.evidence, step_id)
@@ -1268,6 +1399,9 @@ class DevLaneWorkflow(TicketPauseMixin):
                 # t260911-03：路径闸拒绝（error 带 path_gate_reason=）→ blocked 点名
                 # 段/文件与合法出路——不静默吞成一条日志（0-commit 预检的红不含闸细节）。
                 if s.error and "path_gate_reason=" in s.error:
+                    # t260915-01 ②（A3）：新回执带结构化明细→上台面；老回执无键→
+                    # 既有文本 why 逐字不变。
+                    self._pin_settle_refusal(s)
                     await self._blocked("implement", s.error)
                     continue
                 self._log("汇合统一落盘：%s（泳道 commit 数 %s）"
@@ -1354,7 +1488,12 @@ class DevLaneWorkflow(TicketPauseMixin):
                     # KI-024: the active edge list of the fork goes into meta (the
                     # workbench's dual-display source of truth; the single stage field
                     # stays untouched).
-                    set_parallel_stages(self.meta, pend)
+                    # t260915-01 ③（A6）：相位名随分叉入 meta（timeline phase 键的
+                    # 数据源）；门内才传——在途实例重放零新键（C5 门纪律）。
+                    set_parallel_stages(
+                        self.meta, pend,
+                        phase="parallel_impl_design"
+                              if getattr(self, "_detail_face_on", False) else "")
                     try:
                         rs = await asyncio.gather(*[
                             self._run_agent_step(
@@ -1613,7 +1752,11 @@ class DevLaneWorkflow(TicketPauseMixin):
                     # KI-024: the fork's active edge list goes into meta (the workbench's
                     # dual-display source of truth; the single stage field stays
                     # untouched).
-                    set_parallel_stages(self.meta, pend)
+                    # t260915-01 ③（A6）：同 parallel_impl_design——相位名门内才传。
+                    set_parallel_stages(
+                        self.meta, pend,
+                        phase="arb_acc_parallel"
+                              if getattr(self, "_detail_face_on", False) else "")
                     try:
                         rs = await asyncio.gather(*[
                             self._run_agent_step(
@@ -1677,6 +1820,8 @@ class DevLaneWorkflow(TicketPauseMixin):
                     # 「不拦主链」的日志通道——套件改动没 commit 就重跑机械测试是
                     # 假红制造机，必须停在闸上等处置。
                     if s.error and "path_gate_reason=" in s.error:
+                        # t260915-01 ②（A3）：同 integ_join——结构化明细上台面
+                        self._pin_settle_refusal(s)
                         await self._blocked("arbitrate", s.error)
                         continue
                     self._log("并行分叉统一落盘：%s（泳道 commit 数 %s）"
@@ -1905,6 +2050,9 @@ class DevLaneWorkflow(TicketPauseMixin):
                 # implement for resolution (reusing the rework loop, no signal needed);
                 # every other red stays blocked waiting for a human.
                 if not mc.conflict:
+                    # t260915-01 ②（A4）：非冲突红转 blocked——首红项既有结论结构化
+                    # 紧邻 _blocked 写入（当前受阻明细；非 blocked 期由清点①②清空）。
+                    self._pin_merge_red_detail(mc.checks)
                     await self._blocked("merge_check", "merge_check 红灯：%s" % (red or mc.error))
                     continue
                 # ---- conflict-class reds: round counting + loop protection (the blocked
@@ -1913,12 +2061,16 @@ class DevLaneWorkflow(TicketPauseMixin):
                 files_sig = sorted(mc.conflict_files)
                 files_txt = "、".join(files_sig)[:200]
                 if conflict_rounds > MAX_CONFLICT_ROUNDS:
+                    # t260915-01 ②（A4）：conflict 类转人工的红——首红项（rehearsal）
+                    # /conflict_files 结构化，紧邻 _blocked（C6 口径：消解常态路径不写）
+                    self._pin_merge_red_detail(mc.checks, mc.conflict_files)
                     await self._blocked(
                         "merge_check",
                         "冲突消解 %d 轮未收敛（上限 %d），转人工处置：冲突文件 %s"
                         % (conflict_rounds - 1, MAX_CONFLICT_ROUNDS, files_txt))
                     continue
                 if prev_conflict_files and files_sig == prev_conflict_files:
+                    self._pin_merge_red_detail(mc.checks, mc.conflict_files)
                     await self._blocked(
                         "merge_check",
                         "同批文件反复冲突（连续 2 轮集合相同，第 %d 轮），转人工处置：%s"
@@ -2416,6 +2568,12 @@ class DevLaneWorkflow(TicketPauseMixin):
             # for legacy tickets).
             "blocked_reason": str(self.meta.get("blocked_reason") or ""),
             "blocked_detail": self.meta.get("blocked_detail"),
+            # t260915-01 ③：段→第几轮（gen）读数（门内新段；拷贝=查询只读，不暴露
+            # 内部计数器）。并行相位=meta.parallel_stages/parallel_phase（随上方
+            # meta 键上台面）+ timeline 条目的 gen/phase 键。R1 纪律：此处只读
+            # _detail_face_on 缓存位——@query 内禁止 SDK 的门判定调用（只读约束）。
+            **({"gens": dict(self._gens)}
+               if getattr(self, "_detail_face_on", False) else {}),
             "meta": dict(self.meta),
         }
 

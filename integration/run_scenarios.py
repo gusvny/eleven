@@ -1041,6 +1041,20 @@ SCENARIOS = [
      "多仓泳道协调目录名的写读姿态（t260914-01 验收 D，灰盒 L2，真 git 夹具+直调 prepare activity，零 docker 零 Temporal，秒级）：**新建多仓泳道不再诞出老名目录**——清单落解析真源位（新泳道=新名协调目录）、清单条目与明细逐条一致、两树均为所属仓已注册 worktree；prepare 幂等重入位置不变；**存量老名泳道保持粘滞**——重进 prepare 原地复写、不诞出新名目录、不翻转在飞票（本修不得依赖任何手工迁移）；**读侧对存量位置零回归**——老名清单照旧可读（含「杂散新名目录＋老名清单」过渡形态仍取到清单、读动作零副作用），判定不放宽（清单损坏照旧 RuntimeError、无形单仓照旧回落 1 scope）。与 t260910-08/t260911-04/t260913-05 真链场景分工：本修只让那些场景的清单锚点跟随真源（intent 不变），本条守目录名姿态本体。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio 缺席=ENV_FAIL exit 2",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260914-01/sc_multirepo_dir_stance.py", "ro"),
 
+    # ---- t260915-01: 详情数据面（受阻陈旧态清除 / 结构化红灯明细 / 轮次与分支维度）----
+    # 两条 intent 互不重叠：①回执缝正负例三段（生产/消费/兼容，implement 段交付、本段
+    # 登记；其 L1 正例已用 5 探针>cap 锁「清单全量不截断」）②详情数据面全链旅程（L3
+    # 真台真票）。与 t260911-03 系（闸的 settle 执法终态）、t260911-05（merge 分类+
+    # KI-048 状态卡）分界见各条 intent；developer L1（test_t260915_01_detail_face
+    # 纯函数矩阵+源码锁）不同层。实现段落地前红属预期（TDD 信号），arbitrate/merge
+    # 期必须绿；temporalio/docker/舞台缺供=ENV_FAIL exit 2 点名（三态契约）。
+    ("t260915-01-detail-red-refusal-end2end",
+     "闸拒绝结构化明细回执缝端到端（t260915-01 ②，灰盒 L2，真 git 夹具+直调 settle 单点，零 docker 零 Temporal）：路径闸拒绝落盘时**活动回执**除人读 note 外带结构化明细 gate_refusal——三缝各守一段：L0 兼容腿=三处 refusal 形参缺省 None+StageResult/SettleLaneResult.gate_refusal 缺省 None（既有直调场景逐字不变、老回执重放不破）；L1 正例=acceptance_walkthrough 注入 5 个产品代码越权探针（>cap）→拒绝回执与判定/note 一致（reason_code 与 note 内嵌码一致、files 与闸判定清单全量相等且 5 探针一个不丢——_fmt_files cap 只许作用人读 note 文本，结构化面不得丢文件、evidence 与 note 逐字相同、check_id 点名段、red+next_action 在场、0 新 commit）；L2 负腿=写集内正常落盘→零明细收集不误挂；L3 受保护路径腿=改已存在真源 verify.yaml→protected_path+人话名「受保护路径闸」；L4 接线腿=真回执+真 refusal 喂 _apply_settle_note→挂载逐字不走样（非自造 dict）；L5 消费腿=workflow 侧 _pin_agent_refusal 消费真回执→blocked_detail 结构键齐（check_id/item/red/reason_code/files/next_action/evidence）。从真实 settle 判定点驱动=接线断裂（dict 建了没传/传了没挂）必红（KI-046/049 反面）。与同票 journey 条分工：本条锁回执缝与清单保真（单段级），彼锁全链旅程与轮次/分支维度（票级）；与 t260911-03 系（闸执法终态 note 文本/0 落盘）intent 不同面；developer L1 纯函数矩阵不同层。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；git/temporalio 缺席=ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260915-01/tests/sc_detail_red_refusal_receipt.py", "ro"),
+    ("t260915-01-detail-face-journey",
+     "详情数据面全链旅程（t260915-01 ①②③验收的用户旅程面，灰盒 L3，真 docker 台+夹具仓桩脑链+工单专属 worker）：真票造真实闸拒绝（create_plan 运行中写越权探针，真判定器选必拒路径）→ blocked → 票面受阻原因=闸拒绝回执（不是与 stage_state 矛盾的「活动故障」脏文案）＋blocked_detail 结构化明细（reason_code 与真判定一致/全量 files 点名探针/next_action/red/check_id/evidence=回执原文）＋正规入口 ticket.py show 投影面同可达（跨组件缝）→ retry_qc 唤醒 → blocked_reason 清空+blocked_detail 清空（陈旧态清零、与 stage_state 自洽）而 timeline 原 blocked 条目仍在（机械断言，留痕不丢）+retry-requested 留痕 → 轮次与分支维度：timeline 条目带 gen、分叉期条目带 phase、meta.parallel_phase 两个分叉点各采样一次（parallel_impl_design/arb_acc_parallel，stub 拉宽窗口）、离场相位键同删、snapshot.gens 读 段→第几轮（重跑后 create_plan=第 2 轮）、handoff 条目带 gen；审计钩子自证零生产面接触。前置步（stdlib 恒跑的契约锁，docker 台外快速点名防三分钟白跑：门判定只在 _init 求值一次、snapshot 函数体零 workflow.patched、_blocked wake 清两字段且 _mark blocked 留痕写点仍在、_enter 清 detail、snapshot 透传面不回归+gens 段、set_parallel_stages 相位键、ticket.py 投影白名单带 gens——同一批源码锁的完整矩阵归 developer L1，本条只作旅程前置卫兵）。门对新部署新建票恒 True——blocked→唤醒清态断言只在新建票上成立（C8 前提）。与同票 end2end 条分工：彼锁回执缝与清单保真（单段级），本条锁全链旅程与轮次/分支维度（票级）；与 t260908-01 三条（超限复活/重放兼容/pause 旅程）intent 不同面；t260911-05 不碰 merge 面；t260911-03 只当判定器 oracle 造真实拒绝。docker/镜像/舞台/台库缺供=ENV_FAIL exit 2（前置契约锁仍恒跑）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260915-01/tests/sc_detail_face_journey.py", "engine"),
+
     # ---- t260914-05: 收口迁表裁决（删仓内旧路由表+缺表不静默+引用点退场）----
     # 四条 intent 互不重叠（integration 设计段产物，L2/L3 灰盒，全零 docker 零模型成本）：
     # ①取表来源封闭性+消费方点名可见（260914 现场 A 毒面泛化：未声明/坏声明/项目主目录
