@@ -916,6 +916,30 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   证据＝`server/engine/data/worker-t260911-05.log`、`worker-t260912-01.log`（260913 11:19 两条）；
   票面证据＝t260912-01 / t260911-05 的 `authorizations` 从空到 3 条的时间线。
 
+## KI-092 多仓票写集「只写仓名」= 该仓整仓禁写：声明残缺在建票期不拦，到 settle 才炸（dengzhufpv/t260911-07 实证）
+- 现象：`dengzhufpv/t260911-07` 过了 create_plan（settle 三修生效）后，在 implement/design 段落盘时
+  `path_gate_reason=write_set_missing`：「段 implement 无写集可判（写集空/缺失），改动 .gitignore、Cargo.lock、
+  Cargo.toml（等 6 项）出白名单面」——**整仓禁写、票卡死**，而 agent 的活其实全干完了（方案与场景产物俱在）。
+- 根因链（实算）：该票写集＝`['fpv-toolchain/', 'integration/']`（多仓票只圈了成员仓名，未列仓内任何路径）。
+  `shared.rebase_write_set(ws, 'fpv-toolchain')` 按 `prefix='fpv-toolchain/'` 剥前缀 → 仓名条目满足 startswith
+  → 剥完剩空串 → 得 `['']`；写集闸对空白条目 fail-closed（`path_gates._entries` 与
+  `agent_activities._dirty_within_write_set` 同立场）→ 判 `write_set_missing`。滤空后仍是空表、仍判同一红
+  ——**即「只写仓名」在这套语义下等价于「该仓没有任何可写面」**，与该票实做（仓根 Cargo.toml/app/crates 等）不符。
+- 附带修（已落 `4965bda`）：`rebase_write_set` 剥前缀后**滤掉空串条目**（对齐其自身 docstring「等于仓名的
+  条目产出空」；原实现留 `''` 这种畸形条目，且把错因引向 `write_set_missing` 而非「写集面为空」）；补边界单测。
+  引擎全量单测 825 passed。**注意：此修不改变本票结果**，只消掉畸形条目与错因误导。
+- 暴露的两层缺口：①**建票期不拦**——写集条目以 `/` 结尾（目录形）或只到仓名，本应在 create 时点名拒收
+  （现有校验只在 `ticket-start` 侧解析「写集归属」，未拦目录形条目），于是畸形声明一路跑到 settle 才炸，
+  且**代价是整段机时**；②**运行中无救**——`update` 的字段白名单只有 `status/note/pending_add/book_path`，
+  `write_set` 建票即钉进 workflow 输入，**无任何入口可改**（死结，除非人重建票）。
+- 处置方向（建议，未实施，需宿主定夺）：①**建票期校验**：拒收「以 `/` 结尾的目录形条目」，并点名提示
+  「请给具体文件或子目录路径（如 `fpv-toolchain/app/`）」——治根，防下次再踩；②**给出路**：允许以「仓名＋
+  仓内路径」重述写集（如重建同项目新票、或用既有的写集刷新面），使在途票有救；③**不建议**把「仓名条目
+  ＝整仓可写」写进引擎语义（那是「声明越粗、权限越大」，与白名单立场相反）。
+- 定位：写集＝`dengzhufpv/t260911-07` 的 `workflow_input.write_set`；实算＝`shared.rebase_write_set(['fpv-toolchain/','integration/'],'fpv-toolchain')`；
+  闸＝`path_gates.judge_stage_paths('implement', ['Cargo.toml','.gitignore'], write_set=[''])` → `write_set_missing`；
+  日志＝`server/engine/data/worker-t260911-07.log` 17:41 段；成员仓产出＝`/Users/user/Documents/dengzhufpv/.lane/t260911-07/fpv-toolchain`（`git status` 6 项）。
+
 ## KI-091 路由解析静默兜底 → 走错 provider 撞额度：表现为「agent 失败」，真因是「票用错模型」（260914 实证）
 - 现象：`t260911-05` 唤醒后 agent 连试 3 次全失败，agent 日志只有
   `dsh: QUOTA: 429: {"code":"1113","message":"Insufficient balance or no resource package. Please recharge."}`
