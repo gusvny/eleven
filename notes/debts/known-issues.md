@@ -916,6 +916,25 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   证据＝`server/engine/data/worker-t260911-05.log`、`worker-t260912-01.log`（260913 11:19 两条）；
   票面证据＝t260912-01 / t260911-05 的 `authorizations` 从空到 3 条的时间线。
 
+## KI-088 provider 瞬断（TRANSPORT Connection error）→ agent 活动失败 → 票 blocked（外部因素；260914 二度实测）
+- 现象：agent 段跑到一半整批失败并 blocked，报「agent 活动故障（已重试）：ActivityError: Activity task failed /
+  Activity task timed out」，而 agent 日志尾部只有重复的
+  `dsh: TRANSPORT: Connection error.`（偶有 `DeepSeek API request to https://api.deepseek.com failed`）。
+  **agent 的活往往已经干完**（泳道里能看到它的交付与进展），只是最后一步连不上模型、结果文件没写出。
+- 归因（宿主 260914 亲证）：**是宿主侧网络的问题**，不是引擎缺陷、也不是 provider 计费/限流
+  （同时刻 `curl https://api.deepseek.com/` 返回 401＝可达）。当日两次整批发生（约 06:5x 与 09:4x），
+  每次需人工 `retry_qc` 后即可继续。
+- 已实测的恢复路径：`ticket.py op=retry_qc` → 段重进 → 正常继续（本会话两次均如此，未丢交付物）。
+- 危害与噪声：①票凭空停摆、看起来像引擎/模型故障，易误判（本会话已先后误判为限流/配额各一轮）；
+  ②与 KI-081（工人跑旧码致信号静默被丢）在症状上同族——**「一切正常但没反应」**，需靠日志尾部区分。
+- 处置方向（建议，未实施）：①**活动级自动重试**：agent 段活动当前 `MaximumAttempts=3` 且失败即 blocked；
+  可考虑对「网络类失败（TRANSPORT/连接错误，且无结果文件、泳道无损坏）」增加**一次跨时间窗重试**
+  （间隔数十秒，避开瞬断窗口），仍失败才 blocked——注意保持「真失败不吞」；②**归因可见**：把「网络类失败」
+  在与结果文件同处记一条可辨标记（如 `net_transient`），使「agent 失败」与「环境瞬断」可一眼分开；
+  ③工程上更干净的方向＝provider 侧冗余/换线路，属环境面，不在本仓。
+- 定位：实证＝`server/engine/data/worker-t260913-01.log` / `worker-t260913-02.log`（260914）；
+  相关＝KI-081（同族「静默无反应」）、KI-078（活动超时与预算口径）。
+
 ## KI-087 老名泳道必卡：判脏清单漏 `.suyou` + 空提交抛异常（dengzhufpv 每次卡 create_plan 的真根因）
 - 现象：`dengzhufpv/t260911-07` 每次重跑都在 `create_plan` 段 blocked，报「agent 活动故障」——
   而**agent 的产物其实是好的**（`.suyou/stage_create_plan_gen3.json` 与失败同分钟落盘）。
