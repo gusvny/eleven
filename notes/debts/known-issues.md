@@ -933,19 +933,31 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   ③每票单轮集测 30~40 分钟（engine+exclusive 占 57%+18% 的机时），这是当前最贵的一笔固定开销；
   ④表象有欺骗性：排除「看起来已实施」却毫无效果，需要翻 `pool_exclude` 回执才能发现（本次即靠报告键
   有无 `excluded_pools` 才定位）。
+- **已处置（宿主管 260914 令「一律全跳过，engine 池只在巡检跑」）**：撤除例外腿——`apply=true`（每票段）
+  时**声明即跳过**；被跳池只由项目级全量轮（巡检/手动/回放，均不传 apply）覆盖；旧命中面改写进回执
+  `pool_exclude.former_force_assets` 留痕（少跑仍可见，不再据此放行）。落地面＝`server/tools/verify_lane.py`
+  `_integ_pool_exclude` + TOOL schema 描述、回执消费面 `server/engine/agent_activities.py` /
+  `server/engine/dev_lane.py`、`server/engine/shared.py` 字段注释、契约测试
+  `server/engine/tests/test_t260913_03_pool_exclude.py`（d/e/f 由「命中即全跑」改判为「命中仍跳过+留痕」，18 条全过）、
+  票面场景 `integration/t260913-03/sc_pool_exclude_force_assets.py`（改判后 13/0 绿；同族另三个场景
+  19/0、11/0、17/0 全绿）、`integration/README.md`、`verify.yaml` 注释。提交＝`9b12b8d`（代码）+ `4960b32`（verify.yaml 注释）。
+  口径变化带来的取舍（宿主已认可）：改了被跳池资产的票，其改动**不**由该票自己那轮集测覆盖，由全量轮兜底。
 - 处置方向（建议，未实施；设计定稿权在宿主）：①**把强制面的粒度从「目录前缀」收紧到「被排除池的判据文件」**
   （即只在真正改了 `engine/`、`exclusive` 两池自己的场景/夹具时才强制全跑），目录形写集不再天然构成命中；
   ②或反向：写集声明器要求给到**文件粒度**，禁止只给目录；③无论取哪条，都要求在回执里**肉眼可见**地给出
-  `declared / applied / forced_by`——现在「失效」是无提示的。
+  `declared / applied / forced_by`——现在「失效」是无提示的。（①②已被上面的「一律全跳」取代；③已落地为
+  `former_force_assets` 留痕。）
 - 260914 12:55 现场复核（四张在跑票逐票实算，写集×强制面求交）：`t260913-01`（写集含 `integration/`）命中 77 项、
   `t260913-02` 命中 77、`t260913-04` 命中 78（另含 `server/docker-compose.test.yml` 固定资产）、`t260914-01` 命中 77
   ——**四张全部判「强制全跑」，跳过全部作废**。对应现场：`t260913-01` 12:52 一轮 ran=233/2465s、`t260913-02` 12:07
   一轮 ran=235/1603s、`t260913-04` 12:41 一轮 ran=242/2000s（被跳的 47 条整整齐齐回来）、`t260914-01` 12:19 一轮
   ran=246/2367s，报告里**都没有** `excluded_pools`。**结论：当下没有任何一张票吃到这个优化。**
-- 一处未解释的异常（如实留档）：`t260913-04` 12:20 那轮报告**确实带** `excluded_pools=['engine','exclusive']`、
-  `excluded_count=47`、ran=195/132.7s，与同票写集应判「强制全跑」相矛盾；无法排除是票自身池排除类验收场景
-  （`integration/t260913-03/lib_pool_exclude_lane.py` 的夹具台，`write_set=None` 形态）打出的报告，而其场景自述
-  「真闸 + 真执行器」。**该轮来源未查实，不作为口径依据**；口径以上面四张的现场实算为准。
+- 一处异常**已查实**：`t260913-04` 12:20 那轮报告带 `excluded_pools=['engine','exclusive']`、ran=195/132.7s，
+  12:41 那轮又回到 ran=242/2000s。查实＝**工人进程内存里的代码版本差异**（KI-081 同族）：泳道闸文件
+  `.lane/t260913-04/server/tools/verify_lane.py` 时间戳 09-13 18:05，早于上游把池排除落进来的 09-14 11:05；
+  该票的工人在**重新派发前**仍是旧进程（无池排除段→照旧全跑，与「跳过」无关），重新派发后加载泳道现行闸
+  （带例外腿→写集含 `integration/` 即拒绝注入 env→全跑）。同族另见 `.lane/t260913-01|02` 的闸文件
+  （09-14 08:25/10:22）里**完全没有池排除段**（`forced_by` 零命中）＝更早分叉的泳道连机制都没有。
 - 定位：`server/tools/verify_lane.py:529 _pool_exclude_assets` / `:574 _integ_pool_exclude` / `_in_write_set`；
   `server/engine/dev_lane.py:1445`（显式置位）；`server/engine/shared.py:267 integ_verify_payload`；
   证据报告＝`.lane/t260913-04/out/integration-report-260914-122055.json`（生效）与 `…-114004.json`（未生效）；
