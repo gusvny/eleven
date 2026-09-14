@@ -937,6 +937,15 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   （即只在真正改了 `engine/`、`exclusive` 两池自己的场景/夹具时才强制全跑），目录形写集不再天然构成命中；
   ②或反向：写集声明器要求给到**文件粒度**，禁止只给目录；③无论取哪条，都要求在回执里**肉眼可见**地给出
   `declared / applied / forced_by`——现在「失效」是无提示的。
+- 260914 12:55 现场复核（四张在跑票逐票实算，写集×强制面求交）：`t260913-01`（写集含 `integration/`）命中 77 项、
+  `t260913-02` 命中 77、`t260913-04` 命中 78（另含 `server/docker-compose.test.yml` 固定资产）、`t260914-01` 命中 77
+  ——**四张全部判「强制全跑」，跳过全部作废**。对应现场：`t260913-01` 12:52 一轮 ran=233/2465s、`t260913-02` 12:07
+  一轮 ran=235/1603s、`t260913-04` 12:41 一轮 ran=242/2000s（被跳的 47 条整整齐齐回来）、`t260914-01` 12:19 一轮
+  ran=246/2367s，报告里**都没有** `excluded_pools`。**结论：当下没有任何一张票吃到这个优化。**
+- 一处未解释的异常（如实留档）：`t260913-04` 12:20 那轮报告**确实带** `excluded_pools=['engine','exclusive']`、
+  `excluded_count=47`、ran=195/132.7s，与同票写集应判「强制全跑」相矛盾；无法排除是票自身池排除类验收场景
+  （`integration/t260913-03/lib_pool_exclude_lane.py` 的夹具台，`write_set=None` 形态）打出的报告，而其场景自述
+  「真闸 + 真执行器」。**该轮来源未查实，不作为口径依据**；口径以上面四张的现场实算为准。
 - 定位：`server/tools/verify_lane.py:529 _pool_exclude_assets` / `:574 _integ_pool_exclude` / `_in_write_set`；
   `server/engine/dev_lane.py:1445`（显式置位）；`server/engine/shared.py:267 integ_verify_payload`；
   证据报告＝`.lane/t260913-04/out/integration-report-260914-122055.json`（生效）与 `…-114004.json`（未生效）；
