@@ -916,6 +916,35 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   证据＝`server/engine/data/worker-t260911-05.log`、`worker-t260912-01.log`（260913 11:19 两条）；
   票面证据＝t260912-01 / t260911-05 的 `authorizations` 从空到 3 条的时间线。
 
+## KI-091 路由解析静默兜底 → 走错 provider 撞额度：表现为「agent 失败」，真因是「票用错模型」（260914 实证）
+- 现象：`t260911-05` 唤醒后 agent 连试 3 次全失败，agent 日志只有
+  `dsh: QUOTA: 429: {"code":"1113","message":"Insufficient balance or no resource package. Please recharge."}`
+  ——看起来像「额度用尽」，而宿主核对 `zai-coding-cn` **额度仍在**，形成矛盾。
+- 真因链（逐段实测）：
+  ① 该票 `developer` 角色的**生效路由**＝`zai-coding-cn` / `glm-5.3-flash`（机器级
+     `~/.sandbar/projects/sandbar/model-routes.yaml`，由 project.yaml 的 `paths.model_routes` 声明）；
+  ② 但在跑的是 **09-13 起的老 worker 进程**（内存里是当时的 `shared.py`：按**旧路径约定**找声明，
+     找不到）→ 日志 `[model_route] 路由表解析非 ok（state=decl_missing，读=<仓内兜底表>）`；
+  ③ 兜底读 `server/model-routes.yaml`——**该文件自注「已不是生效真源、内容陈旧」**，其 `default`
+     是 `provider: zai`（BigModel 那套 `ZAI_API_KEY`，与 `zai-coding-cn` 是**两把不同的 key**）；
+  ④ 于是 agent 被钉到 **`zai`** 而不是 `zai-coding-cn` → 撞上 `zai` 那侧余额不足 → 429 报「insufficient balance」。
+  实证：同票 gen0 patch=zai、gen1/gen2=zai-coding-cn（那时解析 ok）、**gen3=zai**（声明读不到的那一轮）；
+  重启 worker 后 gen4 patch 回到 `zai-coding-cn`，agent 立刻正常开工。
+  另证：主树与泳道各自直调 `shared.resolve_routes_table('sandbar')` → `state=ok`、
+  `roles.developer={'provider':'zai-coding-cn'}`；老进程报 `decl_missing` 只因**内存码旧**（KI-081 同族）。
+- 危害：①**归因误导**——报错文案说「余额不足」，实际是「票用错了 provider」，会把人引去充值/查错账户
+  （本次已实测误导宿主一轮）；②静默性：全链只有一条 WARNING 落在 worker 日志里，**票面与回执面完全看不见**
+  「本轮 agent 用的是哪个 provider/model」，事后只能逐一翻 `.sandbar/model_patch_*.yml`；③老进程存活越久
+  越容易踩（与 KI-081/KI-082 同族：引擎已改，在跑实例不重载）。
+- 处置方向（建议，未实施）：①**把「本轮 agent 实际路由」显示到票面/回执**（provider/model 逐轮留痕），
+  让「用错模型」不必靠翻日志；②解析非 ok 的兜底改为**响亮**（现仅 WARNING）——或至少在票面时间线落一条
+  可辨事件（「本轮模型来自兜底表，可能非生效路由」）；③`server/model-routes.yaml`（陈旧兜底表）按宿主
+  260911 的「先不动」继续保留，其注释已足够警示，真修法是①的可见性。
+- 定位：证据＝`.lane/t260911-05/.sandbar/model_patch_implement_gen{0,1,2,3,4}.yml`（provider 逐轮）、
+  `server/engine/data/worker-t260911-05.log` 的 `[model_route]` WARNING；读侧＝`server/engine/shared.py`
+  `resolve_routes_table`（`decl_missing` 分支）/ `project_paths`；兜底表＝`server/model-routes.yaml`
+  （自注「已非生效真源」）；生效表＝`~/.sandbar/projects/sandbar/model-routes.yaml`。
+
 ## KI-090 曾被误提交的 `.sandbar/` 状态目录借「合并 main」复发：老分叉泳道在 merge_check 判红（260914 双票实证）
 - 现象：`t260913-01` 走到 merge_check 判红两条——「工作区干净（无未提交改动）」红 + 「敏感/运行时路径
   入库（必须 untrack）」红，点名 `.sandbar/routes-migration-260911/README.md` 与 `…/model-routes.yaml.to-machine`。
