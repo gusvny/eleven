@@ -11,6 +11,10 @@
 
 1. **粒度=段间暂停**：当前段（含在飞 agent activity）自然跑完，workflow 停在段间
    门口等待，不派下一段；恢复后接着走。不打断在飞 activity。
+   **（260914 宿主复决：段内暂停＝不做，本条维持。**现场依据：integration 当日暂停
+   `t260913-01` 时其当前段仍在跑，只能等段末生效；若需立即停手，处置＝重启该票
+   专属 worker（kill -TERM 后 console 补拉新码进程，新 worker 加载新码的副产品）。
+   故「段内暂停」的需求由「段间暂停 + 必要时重启 worker」覆盖，不再单立面。**）**
 2. **权限=仅人门**：pause/resume 只从 client.py CLI 信号通道进（与 sign/rework
    同族），agent prompt/activities 无发送入口，代签纪律同现有。
 3. **一票全包**：引擎 + UI 同票交付。
