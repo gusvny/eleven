@@ -145,10 +145,16 @@ async function fullChain() {
   // identity guardrail, stronger than touching timestamps and without
   // weakening the anti-fraud guard): an inverted-mtime fresh checkout makes
   // capture-lane's anti-fraud guard refuse to run; we perform the guard's own
-  // documented remedy (rebuild the bundle, restricted to byte identity), and
-  // report a C1 failure when it cannot be satisfied.
+  // documented remedy (rebuild the bundle, restricted to byte identity).
+  //
+  // t260913-01 仲裁修正（三态归属）：前提**无法满足**时（工具链不可得/重建失败/
+  // 真实字节漂移）记 env_fail=not-checked 并点名缺什么——prepare 型原因记 FAIL
+  // 是协议违约（README 已明文：本基线在泳道机械跑下「一律 ENV_FAIL」）。
+  // 绝不改判 0；前提成立后真跑 capture-lane 的断言面照旧判 FAIL（下方链不动）。
   const buildErr = ensureLaneBuild(REPO_ROOT);
-  if (buildErr) return record("C1 capture-lane 全链", "fail", `build 前提：${buildErr}`);
+  if (buildErr) {
+    return record("C1 capture-lane 全链", "env_fail", `build 前提未满足（not-checked）：${buildErr}`);
+  }
   const out = await mkdtemp(path.join(tmpdir(), "suyou-capture-chat-active-"));
   let combined = "";
   try {

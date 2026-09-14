@@ -44,6 +44,7 @@ from temporalio.common import SearchAttributeKey
 
 from shared import (
     AUTH_KINDS,
+    AUTHZ_SIGNAL_GATE_MARKER,
     DISPATCHER_WF_ID,
     ENGINE_V2,
     EPIC_CODE_RE,
@@ -68,6 +69,7 @@ from shared import (
     ticket_search_attributes,
     ticket_task_queue,
     resolve_epics_dir,
+    sign_face_fingerprint,
     validate_background_refs,
     validate_epic_code,
     validate_write_set_args,
@@ -122,6 +124,21 @@ KIND_NOT_FOUND = "not_found"
 KIND_TRANSIENT = "transient"
 KIND_TERMINAL = "terminal"
 KIND_INTERNAL = "internal"
+# t260913-01（authorize 端到端）：新 kind 只加不占旧义；未列名单走 internal 兜底。
+KIND_AUTHZ_FACE_ABSENT = "authz_face_absent"                # 旧 worker 无 sign_face query
+KIND_AUTHZ_FACE_MISMATCH = "authz_face_mismatch"            # 指纹漂移
+KIND_AUTHZ_FACE_UNREACHABLE = "authz_face_unreachable"      # worker 不在/超时/已终态
+KIND_AUTHZ_FACE_ERROR = "authz_face_error"                  # 指纹 handler 自身失败（不吞成 absent）
+KIND_AUTHZ_FACE_WRONG_TEMPLATE = "authz_face_wrong_template"  # 非 dev-lane 模板无人授权面
+KIND_AUTHZ_SIGNAL_FAILED = "authz_signal_failed"            # signal 自身投递失败
+KIND_AUTHZ_LANDING_UNCONFIRMED = "authz_landing_unconfirmed"  # 预算内无落账无拒收
+
+# ---- authorize 落账确认轮询参数（t260913-01）----
+# 投递后有界轮询（指数退避 0.5→8s，6 轮 ≈ 20s 上限）：intake 在 worker 激活边界即跑，
+# 常态 1-3s 内可见。常量模块级，便于单测注入加速。
+AUTHZ_LANDING_POLLS = 6
+AUTHZ_LANDING_BASE_DELAY = 0.5
+AUTHZ_LANDING_MAX_DELAY = 8.0
 
 # ---- RUNNING snapshot query retry parameters (KI-003, ticket t260903-06) ----
 # The stage-transition inline mutation window recovers within 1-2 seconds (the workflow
@@ -390,14 +407,62 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
         # payload 归一（expires 收 ISO8601|epoch 秒两形）+ 结构性拒收（畸形=结构化 _err，
         # 不进事件历史）；who/scope/reason/上限与反自签的权威判定在 workflow intake
         # （authz_gates.validate_authorization，refused 可观测）。
+        # t260913-01：投递前先验对端 worker 的 sign 信号面指纹（旧 worker 会把 authorize
+        # 当未知字段解码静默丢弃——本票事故根因），缺失/漂移/不在=拒发并点名检查；
+        # 投递后有界轮询确认落账三态（landed/refused/unconfirmed）——delivered=true
+        # 从此只代表「送达 server」，端到端结果看 landing 键。既有回执键全保留。
         auth, aerr = normalize_authorize_args(args)
         if auth is None:
             return _err(aerr)
-        sig = Signature(who=auth.who, gate="", decision="approve", authorize=auth)
-        await handle.signal("sign", sig)  # 同一 sign 信号面（不得新开旁路）
-        return _ok({"ticket_id": tid, "signal": "sign(authorize)", "kind": auth.kind,
-                    "who": auth.who, "scope": list(auth.scope),
-                    "expires": auth.expires, "delivered": True})
+
+        # 基线快照：同时供给模板分叉（C2）与落账 diff 的基线。拿不到基线不盲投
+        # （无法区分旧账/新账），按其异常类别结构化报错（工单不存在≠瞬时抖动）。
+        try:
+            snap0 = await _query_snapshot_with_retry(handle)
+        except Exception as e:
+            if _is_not_found_exc(e):
+                return _err("工单不存在：%s（Temporal 无此 workflow）" % tid, KIND_NOT_FOUND)
+            return _err("基线快照不可得（%s: %s）——authorize 已拒发未投递，稍后重试"
+                        % (type(e).__name__, e), KIND_TRANSIENT)
+        wf_class = str((snap0 or {}).get("workflow_class") or "")
+        template_id = str((snap0 or {}).get("template_id") or "")
+
+        # face 前置检查（拒发）：absent/mismatch/unreachable/face_error 一律不投。
+        state, detail, _out = await _probe_sign_face(handle)
+        if state != "match":
+            kind, msg = authz_face_refusal(state, detail, wf_class, template_id)
+            return _err(msg, kind)
+
+        baseline_authz = _authz_entries(snap0)
+        baseline_refused = _refused_entries(snap0)
+        sig = Signature(who=auth.who, gate=AUTHZ_SIGNAL_GATE_MARKER, decision="approve",
+                        authorize=auth)
+        try:
+            await handle.signal("sign", sig)  # 同一 sign 信号面（不得新开旁路）
+        except Exception as e:
+            return _err("授权信号投递失败：%s: %s——信号未投出（票面无变化）；工单可能已完单"
+                        "或连接异常" % (type(e).__name__, e), KIND_AUTHZ_SIGNAL_FAILED)
+
+        state2, payload, last_snap = await _await_authz_landing(
+            handle, baseline_authz, baseline_refused, auth.who, auth.kind, int(auth.expires))
+        face_keys = {"ticket_id": tid, "signal": "sign(authorize)", "kind": auth.kind,
+                     "who": auth.who, "scope": list(auth.scope),
+                     "expires": auth.expires, "delivered": True}
+        if state2 == "landed":
+            return _ok({**face_keys, "landing": "landed", "authorization": payload})
+        if state2 == "refused":
+            return _ok({**face_keys, "landing": "refused", "refused_why": payload})
+        plain = ""
+        for it in _refused_entries(last_snap):
+            if str(it.get("want") or "") != "sign(authorize)":
+                plain = "want=%s why=%s" % (it.get("want"), it.get("why"))
+                break
+        hint = "face=match 但预算内既无落账也无 sign(authorize) 拒收"
+        if plain:
+            hint += "；却出现普通签字拒收（%s）——与 face=match 矛盾，优先核该票 worker 血统" % plain
+        return _err("授权送达确认超时（%s）。请核该票专属 worker（data/worker-<票号>.pid.meta"
+                    " 的 repo_root 必须本仓，KI-033）并重启后重试" % hint,
+                    KIND_AUTHZ_LANDING_UNCONFIRMED)
 
     if op == "rework":
         # v2: rework = a signal (re-run from the target stage)
@@ -709,6 +774,190 @@ def normalize_authorize_args(args: Dict[str, Any]):
         return (None, "authorize 需要 who（授权人身份由调用方注入，不得留空）")
     return (HumanAuthorization(kind=kind, who=who, scope=[str(s).strip() for s in scope],
                                reason=str(raw.get("reason") or ""), expires=int(exp)), "")
+
+
+# ---- t260913-01：authorize 端到端（sign_face 指纹先验 + 落账三态确认） ----
+# 事故根因：常驻 worker 的内存代码可以早于磁盘代码（本次=旧 Signature 类解码时把
+# authorize 当未知字段静默丢弃），delivered=true 只证「信号送达 server」。本组函数把
+# 「投递前先验对端 worker 新鲜度、投递后确认真落账」做成 op=authorize 的固定步骤。
+
+def _authz_entries(snap: Any) -> List[Dict[str, Any]]:
+    """快照里的授权条目（容错读面）：条目真源在 snapshot['meta']['authorizations']
+    （dev_lane intake 落 meta），顶层亦容——镜像 integration 场景 authz_items 的双读
+    先例。任何畸形（snap/meta 非 dict、authorizations 非 list、条目非 dict）一律降级
+    空表：不炸、不误判（降级只会让落账判定停在 pending，不会假报 landed）。"""
+    try:
+        holders = [snap if isinstance(snap, dict) else None,
+                   snap.get("meta") if isinstance(snap, dict) else None]
+    except Exception:
+        return []
+    for holder in holders:
+        if not isinstance(holder, dict):
+            continue
+        items = holder.get("authorizations")
+        if isinstance(items, list):
+            return [it for it in items if isinstance(it, dict)]
+    return []
+
+
+def _refused_entries(snap: Any) -> List[Dict[str, Any]]:
+    """快照顶层 refused 的容错读面（非 list/条目非 dict 一律跳过，不炸）。"""
+    if not isinstance(snap, dict):
+        return []
+    items = snap.get("refused")
+    if not isinstance(items, list):
+        return []
+    return [it for it in items if isinstance(it, dict)]
+
+
+def classify_query_failure(exc_name: str, msg: str) -> "tuple[str, str]":
+    """sign_face query 失败三分（纯函数，SDK 异常类在探针函数体内才导入——本文件
+    模块级 SDK 导面最小化契约，t260901-23）：
+
+    - QueryFailed 且文案含「expected but not found」→ absent：旧 worker 没有该 query
+      （结构性陈旧判别；query 未命中不写历史不失败 task，零副作用）；
+    - 其它 QueryFailed → face_error：指纹 handler 自身失败，**不得吞成 absent**
+      （吞了会把「代码漂移」误报成「代码陈旧」）；
+    - 其余（超时/RPC/已终态）→ unreachable。"""
+    if "QueryFailed" in (exc_name or "") and "expected but not found" in (msg or ""):
+        return ("absent", msg or "")
+    if "QueryFailed" in (exc_name or ""):
+        return ("face_error", "%s: %s" % (exc_name, msg))
+    return ("unreachable", "%s: %s" % (exc_name, msg))
+
+
+def classify_sign_face(hint: str, payload: Any,
+                       expected: Any) -> "tuple[str, str]":
+    """sign_face 探针结果 → (state, detail)（纯函数）。hint ∈ ok/absent/face_error/
+    unreachable；ok 时与 expected（CLI 进程现算的指纹）逐键比对 → match/mismatch。"""
+    if hint != "ok":
+        return (hint, str(payload or ""))
+    if not isinstance(payload, dict):
+        return ("face_error", "sign_face 返回形状非法: %r" % (payload,))
+    if not isinstance(expected, dict):
+        return ("match", "")
+    diffs = []
+    for k in sorted(set(payload) | set(expected)):
+        if payload.get(k) != expected.get(k):
+            diffs.append("%s: cli=%r worker=%r" % (k, expected.get(k), payload.get(k)))
+    if diffs:
+        return ("mismatch", "; ".join(diffs))
+    return ("match", "")
+
+
+def authz_face_refusal(state: str, detail: str,
+                       wf_class: str = "", template_id: str = "") -> "tuple[str, str]":
+    """face 拒发文案（纯函数）。C2：先分叉模板/类名再出文案——absent 对「非 dev-lane
+    模板」是误投（该模板结构性无授权面），对「dev_lane 票」才是 worker 陈旧，两句话
+    必须可辨。返回 (kind, msg)。"""
+    lineage = ("并核该票专属 worker 血统：data/worker-<票号>.pid.meta 的 repo_root 必须"
+               "本仓（KI-033），SIGTERM 后 console keepalive 会重生新代码 worker")
+    if state == "absent":
+        is_dev_lane = ("DevLaneWorkflow" in (wf_class or "")) or \
+                      ((template_id or "") == "dev-lane")
+        if wf_class and not is_dev_lane:
+            return (KIND_AUTHZ_FACE_WRONG_TEMPLATE,
+                    "该票模板 %s（workflow_class=%s）无人授权面——人授权唯一入口是 "
+                    "dev_lane 模板；未投递，票面无变化" % (template_id or "?", wf_class or "?"))
+        if wf_class:
+            return (KIND_AUTHZ_FACE_ABSENT,
+                    "worker 代码早于本票（sign_face query 不存在）——旧 Signature 类解码时"
+                    "会静默丢弃 authorize 载荷，已拒发未投递。处置：重启该票专属 worker"
+                    "（kill -TERM $(cat data/worker-<票号>.pid)），%s" % lineage)
+        return (KIND_AUTHZ_FACE_ABSENT,
+                "worker 不带 sign_face 指纹面且快照不可得（worker 代码早于本票，或票已完单/"
+                "worker 不在）——authorize 已拒发未投递。处置：%s" % lineage)
+    if state == "mismatch":
+        return (KIND_AUTHZ_FACE_MISMATCH,
+                "worker 与 CLI 代码漂移（sign_face 指纹不符：%s）——authorize 已拒发未投递。"
+                "处置：重启该票专属 worker，%s" % (detail, lineage))
+    if state == "face_error":
+        return (KIND_AUTHZ_FACE_ERROR,
+                "sign_face 指纹面自身失败（非「query 不存在」）：%s——authorize 已拒发"
+                "未投递，按 worker 侧错误排查（不得当作旧 worker 处理）" % detail)
+    return (KIND_AUTHZ_FACE_UNREACHABLE,
+            "worker 不在服务或查询超时（%s）——authorize 已拒发未投递；核该票专属 worker "
+            "进程存活与血统后重试" % detail)
+
+
+def _authz_key(it: Dict[str, Any]) -> "tuple[str, str, int, int]":
+    return (str(it.get("who") or "").strip(), str(it.get("kind") or ""),
+            int(it.get("expires") or 0), int(it.get("issued") or 0))
+
+
+def evaluate_authz_landing(baseline_authz: List[Any], baseline_refused: List[Any],
+                           snap: Any, who: str, kind: str, expires: int,
+                           ) -> "tuple[str, Any]":
+    """落账三态判定（纯函数）：landed / refused / pending。集合式 diff（不数条数，
+    重复授权由 intake 盖写的 issued 区分）；基线不可读（畸形降级空表）最多导致
+    pending，不炸、不误报。"""
+    want = (who or "").strip()
+    base_keys = {_authz_key(b) for b in baseline_authz if isinstance(b, dict)}
+    for it in _authz_entries(snap):
+        if str(it.get("who") or "").strip() != want or str(it.get("kind") or "") != kind:
+            continue
+        if int(it.get("expires") or 0) != int(expires):
+            continue
+        if _authz_key(it) not in base_keys:
+            return ("landed", dict(it))
+    base_ref = set()
+    for it in baseline_refused:
+        if isinstance(it, dict):
+            base_ref.add((str(it.get("want") or ""), str(it.get("who") or ""),
+                          str(it.get("why") or "")))
+    for it in _refused_entries(snap):
+        key = (str(it.get("want") or ""), str(it.get("who") or ""), str(it.get("why") or ""))
+        if key[0] == "sign(authorize)" and key not in base_ref:
+            return ("refused", key[2])
+    return ("pending", "")
+
+
+async def _probe_sign_face(handle: Any, timeout: float = QUERY_TIMEOUT_S,
+                           ) -> "tuple[str, str, Any]":
+    """sign_face query 探针（指纹在 worker 进程内现算）。SDK 异常类在此函数体内导入
+    （模块级 SDK 导面最小化契约，t260901-23/_sdk_deleter 同款纪律）。"""
+    from temporalio.client import WorkflowQueryFailedError as _WQF
+    from temporalio.service import RPCError as _RPCError
+    expected = sign_face_fingerprint()
+    try:
+        out = await asyncio.wait_for(handle.query("sign_face"), timeout=timeout)
+    except _WQF as e:
+        hint, detail = classify_query_failure(type(e).__name__, str(e))
+        return (hint, detail, None)
+    except (_RPCError, asyncio.TimeoutError) as e:
+        return ("unreachable", "%s: %s" % (type(e).__name__, e), None)
+    except Exception as e:   # CLI 健壮度兜底：未知异常不炸整条 CLI，归 unreachable
+        return ("unreachable", "%s: %s" % (type(e).__name__, e), None)
+    hint, detail = classify_sign_face("ok", out, expected)
+    return (hint, detail, out)
+
+
+async def _await_authz_landing(handle: Any, baseline_authz: List[Any],
+                               baseline_refused: List[Any],
+                               who: str, kind: str, expires: int,
+                               polls: int = AUTHZ_LANDING_POLLS,
+                               base_delay: float = AUTHZ_LANDING_BASE_DELAY,
+                               max_delay: float = AUTHZ_LANDING_MAX_DELAY,
+                               timeout: float = QUERY_TIMEOUT_S,
+                               ) -> "tuple[str, Any, Any]":
+    """投递后有界轮询（指数退避）：返回 (state, payload, 末次快照)。单轮快照失败按
+    过渡窗抖动处理（KI-003 同源），下一轮再取；预算走完仍是 pending 交由调用方出
+    unconfirmed。"""
+    delay = base_delay
+    last_snap: Any = None
+    for _ in range(max(1, polls)):
+        await asyncio.sleep(delay)
+        delay = min(max_delay, delay * 2)
+        try:
+            s = await asyncio.wait_for(handle.query("snapshot"), timeout=timeout)
+        except Exception:
+            continue
+        last_snap = s
+        state, payload = evaluate_authz_landing(baseline_authz, baseline_refused,
+                                                s, who, kind, expires)
+        if state != "pending":
+            return (state, payload, s)
+    return ("pending", None, last_snap)
 
 
 def _row_from_meta(tid: str, meta: Dict[str, Any], exec_status: str) -> Dict[str, Any]:

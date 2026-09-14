@@ -44,6 +44,7 @@ from lib_lifecycle_case import (  # noqa: E402
     network_subnets,
     stage_tag,
     tcp_open,
+    up_ok,
     up_stage,
 )
 
@@ -123,10 +124,10 @@ def main():
     try:
         # ---- 分配：两台真台，表内 + 互异 ----
         proca, st_a = up_stage(ROOT, PA, services="temporal", timeout=600)
-        if not check(proca.returncode == 0, "A 台起台 rc=0"):
+        if not up_ok(proca, "A 台起台 rc=0"):
             finish()
         procb, st_b = up_stage(ROOT, PB, services="temporal", timeout=600)
-        if not check(procb.returncode == 0, "B 台起台 rc=0"):
+        if not up_ok(procb, "B 台起台 rc=0"):
             finish()
         names_a, subs_a = subnets_of(PA)
         names_b, subs_b = subnets_of(PB)

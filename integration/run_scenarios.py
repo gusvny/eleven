@@ -282,7 +282,12 @@ SCENARIOS = [
     ("t260912-03-authz-cli-queryable",
      "人授权可查面（t260912-03 验收 C，灰盒 L3，真 docker 台+真用户 CLI）：走 server/tools/ticket.py 的 op=authorize/op=show/op=list 三个用户入口（不是引擎内部 snapshot、不是裸 client.py）——生效授权须在 show 读出类型/范围/授权人/到期/状态（生效中）/消费次数，并有签发事件（timeline state=authorized 点名 who+scope），工单列表行给出生效中计数 authz_active=1；负锁=过期授权经 sign 面送达（回执 ok）但 workflow 落 refused「已过期」且可查面条目数与计数不增（死授权不进历史面）、who=agent 角色名（反自签）同样拒收且可查面零变化；审计账本空+拆台零残留。与另两条同票场景不同 intent：彼二锁闸的行为（无授权红/有授权绿/超限不阻断，读引擎 snapshot meta），本条锁用户查询管道（CLI→client.py ticket-query/ticket-list→Temporal query→meta，KI-076 同族断点面）；与 developer L1（_authz_view/_list 合成 snapshot 格式化）不同层不重复",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260912-03/tests/sc_authz_cli_queryable.py", "engine"),
-
+    # ---- t260913-01: 人授权通道传输缺陷（authorize 载荷丢失→静默回落普通签字） ----
+    # 260913 integration 侧三条实锤复现（回执 delivered=true 只证送达；票面 refused 是
+    # sign() 普通签字文案）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
+    ("t260913-01-authz-signal-delivery",
+     "人授权通道的真信号送达面+接收侧丢失可见化（t260913-01 验收 A 送达半边/C/D-A 腿，灰盒 L3，真 docker 台+真用户 CLI+真专属 worker+真 workflow）：人授权唯一入口（server/tools/ticket.py op=authorize→Signature.authorize→sign 信号）在真实投递链上必须送达并被 intake 落账——本票事故面=载荷在传输/解码一跳静默丢失后回落普通签字；sign_face 指纹 query 在场且自述含 authorize 字段与 marker 保留值（worker 内存 signal 面可被客户端实时核验，陈旧 worker 结构性 absent=重启判据/拒发的根）；A 腿真信号落账字段完整（who/kind/scope/reason/expires/issued/uses）+timeline 签发事件+回执 landing=landed 机读键；负锁矩阵全真信号投递且一律不落账：①过期（refused「已过期」+回执 landing=refused）②arbitration_verdict scope=别票（点名别票票号）③who=agent 角色名（反自签）④marker 保留值直发而无 authorize 载荷（=传输丢失后的解码等价形态）→refused want=sign(authorize) 点名「载荷解析失败」且与「非人审等待中」文案可辨（静默回落普通签字=事故形态）⑤畸形 decode-safe 裸 dict 缺字段→intake 语义拒收；类型不兼容毒载荷（authorize=123）故意不用=value_to_type TypeError 进 workflow task 重试循环。与 t260912-03 三场景不同面：彼锁闸的行为（protected_path）/仲裁回灌消费面（overlimit=本票验收 B 腿与 D 的 B 半边）/用户可查面（cli_queryable），本条锁送达面+丢失可见化；与 developer L1（指纹/分类/落账纯函数单测）不同层。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker/镜像/舞台缺件=ENV_FAIL exit 2 点名",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260913-01/tests/sc_authz_signal_delivery.py", "engine"),
 
     ("auto-rework-trace",
      "---- A1: 五个自动打回场景，各产一条横幅可见记录（用户视角主契约） ---- scenarios = [ ('acceptance', 'implement', '验收",

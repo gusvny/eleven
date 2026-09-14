@@ -65,6 +65,31 @@ def envfail(label):
     print("ENV_FAIL %s（环境缺件，没验成——原因归环境，exit 2）" % label, flush=True)
 
 
+# stage_docker 退出码档位（EXIT_OK,EXIT_ENV,EXIT_CONFLICT,EXIT_FAIL,EXIT_USAGE = 0,2,3,1,64）
+EXIT_ENV, EXIT_CONFLICT = 2, 3
+
+
+def ensure_leg(project, rc, tail):
+    """起台腿三态归属（t260913-01 仲裁修，与 t260912-02 up_ok 同口径；单源可测）：
+    rc=0=pass；rc=2(env)/3(conflict)=ENV_FAIL（prepare 型环境/并发面，点名档位+证据）；
+    其余=FAIL（产品/契约面）。返回 'ok'|'env'|'fail'（调用方据 env 决定下游腿是否可评）。
+
+    为什么：起台是 prepare 型前置面——环境拒跑记 FAIL 属三态协议违约（260914 实测：
+    6 台里 1 台 rc=2「docker compose up 失败」，被记 FAIL 并连坐下游「全部交付」腿）。
+    """
+    if rc == 0:
+        check(True, "%s ensure 双绿（rc=0，%s）" % (project, tail))
+        return "ok"
+    if rc in (EXIT_ENV, EXIT_CONFLICT):
+        envfail("%s ensure 未验成：stage_docker rc=%d=%s 档（prepare 型环境/并发面，"
+                "非产品红）｜证据尾：%s"
+                % (project, rc, "env" if rc == EXIT_ENV else "conflict", tail))
+        return "env"
+    check(False, "%s ensure 双绿（rc=%s，非 0/2/3＝产品/契约面）｜证据尾：%s"
+          % (project, rc, tail))
+    return "fail"
+
+
 def finish():
     print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (_passed, _failed, _env_failed), flush=True)
     sys.exit(2 if _env_failed and not _failed else (1 if _failed else 0))

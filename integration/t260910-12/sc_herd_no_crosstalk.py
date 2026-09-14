@@ -31,6 +31,7 @@ from lib_herd_case import (  # noqa: E402
     cli,
     compose_containers,
     docker_present,
+    ensure_leg,
     ensure_up,
     env_guard,
     envfail,
@@ -79,15 +80,26 @@ def main():
             env_guard(err, "%s 起台腿" % project)
             results.append((project, proc.returncode, out, err))
 
+        # 起台腿三态归属（t260913-01 仲裁修，同族 t260912-02 up_ok 口径）：环境拒跑
+        # （rc=2/3）记 ENV_FAIL 且**下游腿一并 not-checked**，不与产品契约混账。
+        env_legs = []
         for project, rc, out, err in results:
-            check(rc == 0, "%s ensure 双绿（rc=%s，%s）"
-                  % (project, rc, " ".join((err or "").strip().split())[:110]))
+            # 证据尾取两流合并的末段（真实原因在 stdout 的 STAGE_ENV 行；stderr 常只有
+            # 降级提示——只取 stderr 会把诊断引错方向）
+            tail = " ".join(((out or "") + " " + (err or "")).strip().split())[-160:]
+            if ensure_leg(project, rc, tail) == "env":
+                env_legs.append(project)
         states = {}
         for project, rc, out, _ in results:
             if rc == 0:
                 st = parse_state(out)
                 if st is not None:
                     states[project] = st
+        if env_legs:
+            envfail("六台全部交付租约化 JSON 未验成：%d 台起台环境拒跑（%s）——"
+                    "下游端口/幂等腿一并 not-checked（环境面，非产品红）"
+                    % (len(env_legs), "、".join(env_legs)))
+            finish()
         if not check(len(states) == N,
                      "六台全部交付租约化 JSON（实得 %d 台）" % len(states)):
             finish()

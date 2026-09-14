@@ -19,6 +19,7 @@ in-flight old lanes — see the individual # naming-compat markers).
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import pathlib
 import re
@@ -364,6 +365,14 @@ AUTHZ_AGENT_ROLE_NAMES = frozenset(
 #   path_gate_authz_used=<who>@<issued>:<file1,file2>
 AUTHZ_USED_KEY = "path_gate_authz_used="
 
+# sign 信号面保留标记值（t260913-01）：client op=authorize 发 sign 信号时 gate 用本值。
+# workflow 侧「authorize 载荷缺失但 gate=本值」＝载荷在传输/反序列化一跳丢失（旧 worker
+# 的旧 Signature 类不含 authorize 字段，temporalio 解码对未知字段静默丢弃）→ dev_lane
+# 的 sign handler 据此 refused 点名「载荷解析失败」，绝不静默回落普通签字路径。
+# marker 是标量字段、旧类解码也存活，故丢失在接收侧有痕可判；单测锁它与全部模板的
+# 合法 gate 值（Stage.id 全集 ∪ HUMAN_GATES ∪ CLOSE_GATE_ID）不相交。
+AUTHZ_SIGNAL_GATE_MARKER = "__authorize__"
+
 
 @dataclass
 class HumanAuthorization:
@@ -666,6 +675,22 @@ class Signature:
     # 反序列化缺字段→None，签字语义逐字节不变；带 authorize 的载荷只在 dev_lane
     # 的 sign handler 被接受，其余三个 handler（base/workflows/inspection_flow）显式拒收。
     authorize: Optional[HumanAuthorization] = None
+
+
+def sign_face_fingerprint() -> Dict[str, Any]:
+    """sign 信号面指纹（t260913-01，单一实现，两端各算各的）。
+
+    dev_lane 的 `sign_face` query 在 **worker 进程内**算一次（旧 worker 没有这个 query
+    ⇒ 客户端 query 报「expected but not found」＝结构性陈旧判别）；CLI（每调用新进程、
+    代码必新）比对两边指纹：字段集漂移 ⇒ mismatch（带 diff）。据此把「磁盘修了、
+    进程没重启」的事故形态在使用点实时点名，authorize 不再盲投旧 worker。
+    纯计算、零状态、重放安全（query handler 只读）。"""
+    return {
+        "face": "sign",
+        "fields": sorted(f.name for f in dataclasses.fields(Signature)),
+        "authorize_fields": sorted(f.name for f in dataclasses.fields(HumanAuthorization)),
+        "marker": AUTHZ_SIGNAL_GATE_MARKER,
+    }
 
 
 @dataclass

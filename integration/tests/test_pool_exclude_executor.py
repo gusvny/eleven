@@ -243,7 +243,28 @@ def _norm_run(out):
     out = re.sub(r'"wall_s": [\d.]+', '"wall_s": N', out)
     out = re.sub(r'"env_fingerprint": "[0-9a-f]+"', '"env_fingerprint": "F"', out)
     out = re.sub(r"integration-report-\d+-\d+\.json", "integration-report-T.json", out)
-    return out
+    # 同族抖动（第二批）：块内行自带**耗时派生布尔**「并行关键路径=是/否」（判据
+    # s == max(by_pool.values())）——耗时并列时该布尔自身翻面（实测同模块连跑可得是/否两种），
+    # 与耗时数值同类属运行语境字段，一并归一为 "?"（确定序场景下该字段本无信息差）。
+    out = re.sub(r"并行关键路径=[是否]", "并行关键路径=?", out)
+    # t260913-01 仲裁修（H1 抖动根治）：执行器有两个**按耗时排序**的报告块，耗时并列时
+    # 次序随调度抖动——实测同一模块连跑 6 次得 3 种池序（main,ro,engine ×4 /
+    # ro,engine,main ×1 / main,engine,ro ×1），列值已被上行归一为 "Ns" 后仅剩顺序差异，
+    # H1 的逐字节比对因此必假红（契约不可满足）。此处对这两块**块内行排序**：内容仍逐字节
+    # 比对，只归一调度抖动；其余行序保持严格逐字节。
+    _lines, _res, _i = out.splitlines(), [], 0
+    _heads = ("耗时分解", "最慢 Top15")
+    while _i < len(_lines):
+        _res.append(_lines[_i])
+        if any(_lines[_i].startswith(h) for h in _heads):
+            _j = _i + 1
+            while _j < len(_lines) and _lines[_j].startswith("  "):
+                _j += 1
+            _res.extend(sorted(_lines[_i + 1:_j]))
+            _i = _j
+            continue
+        _i += 1
+    return "\n".join(_res)
 
 
 _old = subprocess.run(["git", "show", "HEAD:integration/run_scenarios.py"],

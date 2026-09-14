@@ -60,6 +60,45 @@ WATCH_INTERVAL_DEFAULT_SEC = 30.0  # production default: one poll round per 30s 
 WATCH_INTERVAL_MIN_SEC = 1.0       # floor clamp: guards against 0/negative busy-loop hammering describe
 
 
+def verify_signal_transport() -> list:
+    """信号面运输自检（t260913-01，**窄效力**）：带 authorize 的 Signature 经默认转换器
+    编码→带类型提示解码，逐 dataclass 字段断言存活。只兜「本进程的载荷类与转换器
+    不兼容」（如新增字段类型不可序列化）这类带病上线；**不宣称**能测「进程陈旧」——
+    旧进程根本不跑本函数，对端 worker 陈旧由 client 的 sign_face 指纹面在每次
+    op=authorize 时实时鉴别（C1/C4 效力口径）。返回问题列表（空=通过）。"""
+    problems: list = []
+    try:
+        import dataclasses as _dc
+
+        from temporalio.converter import DefaultPayloadConverter
+
+        from shared import (AUTHZ_SIGNAL_GATE_MARKER as _MARKER,
+                            HumanAuthorization as _HA,
+                            Signature as _SIG)
+        auth = _HA(kind="protected_path", who="__boot__", scope=["integration/x"],
+                   reason="boot 自检", expires=1)
+        sig = _SIG(who="__boot__", gate=_MARKER, decision="approve", note="", authorize=auth)
+        pc = DefaultPayloadConverter()
+        out = pc.from_payload(pc.to_payload(sig), _SIG)
+        for f in _dc.fields(_SIG):
+            if not hasattr(out, f.name):
+                problems.append("Signature.%s 解码丢失（转换器静默丢弃未知字段）" % f.name)
+        got = getattr(out, "authorize", None)
+        if got is None:
+            problems.append("authorize 载荷解码后为空——sign 信号面会静默回落普通签字路径")
+        else:
+            for f in _dc.fields(_HA):
+                if not hasattr(got, f.name):
+                    problems.append("HumanAuthorization.%s 解码丢失" % f.name)
+            if got.kind != auth.kind or list(got.scope) != list(auth.scope):
+                problems.append("authorize 字段值漂移（kind/scope 不一致）")
+        if str(getattr(out, "gate", "")) != _MARKER:
+            problems.append("gate 标量字段未存活（authorize 丢失可见化依赖它）")
+    except Exception as e:
+        problems.append("运输自检异常：%s: %s" % (type(e).__name__, e))
+    return problems
+
+
 def watch_interval_sec(raw: "str | None" = None) -> float:
     """Watch poll interval in seconds. Env SANDBAR_WATCH_INTERVAL_SEC overrides,
     used to speed up integration scenarios. Only takes effect in per-ticket mode
@@ -228,6 +267,14 @@ async def run_worker(args: argparse.Namespace) -> None:
 
 def main() -> None:
     args = parse_args()
+    # 信号面运输自检（t260913-01）在 daemonize 之前跑：坏 worker 在前台 loud 死掉，
+    # 不留一个静默丢字段的后台进程。窄效力声明见 verify_signal_transport。
+    boot_problems = verify_signal_transport()
+    if boot_problems:
+        for p in boot_problems:
+            print("worker boot 自检失败：%s" % p, file=sys.stderr)
+        raise SystemExit("worker 代码与 sign 信号面不匹配，拒绝上线（authorize 会被"
+                         "解码端静默丢弃；修代码或换兼容转换器后再启动）")
     if args.daemon:
         is_parent = daemonize(args.pidfile, args.logfile)
         if is_parent:

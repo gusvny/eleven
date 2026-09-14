@@ -74,6 +74,7 @@ with workflow.unsafe.imports_passed_through():
         TICKET_STATUSES,
         AUTH_ARBITRATION_VERDICT,
         AUTH_PROTECTED_PATH,
+        AUTHZ_SIGNAL_GATE_MARKER,
         AgentStageArgs,
         ConflictPrepArgs,
         ConflictPrepResult,
@@ -122,6 +123,7 @@ with workflow.unsafe.imports_passed_through():
         review_gate_verdict,
         review_plan_route,
         result_file_for,
+        sign_face_fingerprint,
         stage_workspace,
     )
 
@@ -132,6 +134,9 @@ MERGE_TO = timedelta(minutes=5)
 AGENT_TO = timedelta(hours=6)
 HEARTBEAT_TO = timedelta(minutes=3)
 INTEG_RUN_TO = timedelta(minutes=60)     # mechanical integration tests: batch runner, batch cap
+# 配对不变量（t260913-01 仲裁修）：本值必须 > agent_activities.BATCH_TIMEOUT_SEC + 300s
+# （内层 wait_for 守卫），否则内层的结构化超时回报永远等不到、只剩 Temporal 硬杀 + 3 次重试。
+# 由单测 test_t260913_01_integ_budget_pair.py 机械锁住；一改必查另一侧。
 RETRY = RetryPolicy(maximum_attempts=3)  # infra failures only; business verdicts go via StageResult.status
 # Boolean patch gates (same family as workflows.py's WORKER_RECONCILE_PATCH_ID): a
 # parked old workflow replays down the old branch, so a new gate must not bump
@@ -2161,9 +2166,22 @@ class DevLaneWorkflow(TicketPauseMixin):
         t260912-03：本信号面也是**人授权例外通道的唯一入口**——带 authorize 载荷的
         sign 走授权 intake 分支（任意态可投：blocked/awaiting/running 均可，授权在
         下一轮 settle/超限判定被消费）；不带 authorize 的签字＝既有 merge 人门语义，
-        逐字节不变。"""
+        逐字节不变。
+        t260913-01：client op=authorize 发 sign 时 gate=AUTHZ_SIGNAL_GATE_MARKER——
+        authorize 缺失但 gate=标记 ⇒ 载荷在传输/反序列化一跳丢失（旧 worker 的旧
+        Signature 类解码时被 temporalio 静默丢弃），refused 点名「载荷解析失败」，
+        绝不静默回落普通签字路径；marker 是保留值，普通签字路径逐字节不动。"""
         if getattr(sig, "authorize", None) is not None:
             self._intake_authorization(sig.authorize)
+            return
+        if str(getattr(sig, "gate", "") or "") == AUTHZ_SIGNAL_GATE_MARKER:
+            self.refused.append(
+                {"who": sig.who, "want": "sign(authorize)",
+                 "why": "authorize 载荷解析失败：gate 标记在场但载荷为空（传输/反序列化"
+                        "一跳丢失——疑似该票 worker 代码过期，重启该票专属 worker 后重试）；"
+                        "不按普通签字处理"})
+            self._log("人授权拒收（%s）：authorize 载荷解析失败（gate 标记在场但载荷为空）"
+                      % (sig.who or "?"))
             return
         stage = str(self.meta.get("stage") or "")
         if stage != "merge" or self.meta.get("stage_state") != "awaiting-human":
@@ -2353,6 +2371,16 @@ class DevLaneWorkflow(TicketPauseMixin):
             "retry_count": self._retry_token,
             "meta": dict(self.meta),
         }
+
+    # ---------- query: sign 信号面指纹（t260913-01） ----------
+    @workflow.query
+    def sign_face(self) -> Dict[str, Any]:
+        """本 worker 进程所跑代码的 sign 信号面指纹（shared.sign_face_fingerprint 单一
+        实现，query 时在 worker 进程内现算）。旧 worker（早于 t260913-01 的代码）没有
+        本 query ⇒ 客户端收到「expected but not found」= 结构性陈旧判别；字段集漂移 ⇒
+        客户端比对 mismatch。纯计算零状态访问（重放安全），authorize 投递前由 CLI
+        先验，缺失/漂移一律拒发。"""
+        return sign_face_fingerprint()
 
     def _snapshot(self) -> Dict[str, Any]:
         return self.snapshot()

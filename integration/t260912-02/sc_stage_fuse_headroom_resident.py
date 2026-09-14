@@ -46,6 +46,7 @@ from lib_lifecycle_case import (  # noqa: E402
     read_lease_file,
     sleep_holder,
     stage_tag,
+    up_batch_env_only,
 )
 
 TAG = stage_tag("t26091202-headroom")
@@ -98,8 +99,17 @@ def main():
         for proj, _rc, _out, err in results:
             env_guard(err, "16 台起台腿 %s" % proj)
         oks = [(p, rc) for p, rc, _o, _e in results if rc == 0]
-        check(len(oks) == N_BURST, "16/16 全绿（实得 %d，非零 %s）"
-              % (len(oks), [(p, rc) for p, rc, _o, _e in results if rc != 0][:3]))
+        nonzero = [(p, rc) for p, rc, _o, _e in results if rc != 0]
+        # t260913-01 仲裁修（同族第 5 例，与 up_ok 同口径单源）：起台腿 rc 档位归类——
+        # 非零全为 env(2)/conflict(3) ⇒ ENV_FAIL（prepare 型环境/并发面，not-checked，
+        # 点名每台 rc）；含 fail(1)/usage(64)/执行器杀(-1) ⇒ FAIL（产品/契约面）。
+        # 原实现一律 check(len(oks)==N) ⇒ 环境拒跑被记产品红（260914 实测 16 台里 2 台 rc=2）。
+        if nonzero and up_batch_env_only({p: rc for p, rc in nonzero}):
+            envfail("16 台并发起台未验成：%d 台 rc 档位全为 env/conflict（prepare 型环境/"
+                    "并发面，非产品红）：%s" % (len(nonzero), nonzero[:4]))
+        else:
+            check(len(oks) == N_BURST, "16/16 全绿（实得 %d，非零 %s）"
+                  % (len(oks), nonzero[:3]))
         all_err = "\n".join(e for _p, _r, _o, e in results)
         check(FUSE_MARK not in all_err,
               "全程零保险丝红（缺省 100 档，6 常驻+16 场景=22 活租约远不触闸）")

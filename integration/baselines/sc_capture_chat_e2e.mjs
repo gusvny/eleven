@@ -221,25 +221,36 @@ if (envReason) {
     // nothing — outDir kept on failure for inspection, removed below on full pass
   }
   const both = `${run.stdout}\n${run.stderr}`;
+  // t260913-01 仲裁修正（三态归属）：内层 capture-lane 以 **exit 2** 报「环境前提
+  // 未满足」（构建守卫/凭据/浏览器/节点等，见本文件头部 ENV_FAIL 清单）= not-checked，
+  // 不是产品断言红——统一记 env_fail 并带内层 stderr 证据；内层真跑过（exit 0/1）
+  // 才评 A1~A8 产品断言（README 已知限制政策：泳道机械跑环境前提天然不满足，
+  // 故一律 ENV_FAIL exit 2，不再把 prepare 型原因记成 FAIL=协议违约）。
+  // 不改判 0、不放宽任何断言：envRefused 只在 exit 2 时成立。
+  const envRefused = !run.timedOut && run.code === 2;
+  const envWhy = "capture-lane 环境前提未满足（内层 exit 2，not-checked）："
+    + run.stderr.trim().split("\n").slice(-3).join(" | ").slice(0, 300);
+  const recordLeg = (name, status, detail) => (envRefused ? record(name, "env_fail", envWhy) : record(name, status, detail));
+
   if (run.timedOut) {
-    record("A1 lane-exit-0", "fail", `${RUN_TIMEOUT_MS}ms 超时，进程组已 SIGKILL（含孤儿控制台风险，见 A6）`);
+    recordLeg("A1 lane-exit-0", "fail", `${RUN_TIMEOUT_MS}ms 超时，进程组已 SIGKILL（含孤儿控制台风险，见 A6）`);
   } else {
-    record("A1 lane-exit-0", run.code === 0 ? "pass" : "fail", `exit=${run.code}${run.code !== 0 ? "；stderr 尾部：" + run.stderr.trim().split("\n").slice(-3).join(" | ") : ""}`);
+    recordLeg("A1 lane-exit-0", run.code === 0 ? "pass" : "fail", `exit=${run.code}${run.code !== 0 ? "；stderr 尾部：" + run.stderr.trim().split("\n").slice(-3).join(" | ") : ""}`);
   }
 
   const missing = SEVEN_VIEWS.filter((f) => !existsSync(path.join(outDir, f)));
   const tiny = SEVEN_VIEWS.filter((f) => existsSync(path.join(outDir, f)) && statSync(path.join(outDir, f)).size < 2048);
-  record("A2 seven-views-produced", missing.length === 0 && tiny.length === 0 ? "pass" : "fail",
+  recordLeg("A2 seven-views-produced", missing.length === 0 && tiny.length === 0 ? "pass" : "fail",
     missing.length ? `缺 ${missing.join(",")}` : tiny.length ? `${tiny.join(",")} 小于 2048 字节（疑似空白）` : "7/7 视图齐且非空白");
 
   const chat = path.join(outDir, "console-chat.png"), def = path.join(outDir, "console-default.png");
   if (existsSync(chat) && existsSync(def)) {
     const hC = createHash("sha256").update(await readFile(chat)).digest("hex");
     const hD = createHash("sha256").update(await readFile(def)).digest("hex");
-    record("A3 chat-differs-from-default", hC !== hD ? "pass" : "fail",
+    recordLeg("A3 chat-differs-from-default", hC !== hD ? "pass" : "fail",
       hC !== hD ? "chat 与 default 字节级不同（视图真的切换了）" : "chat ≡ default（同帧假验收嫌疑）");
   } else {
-    record("A3 chat-differs-from-default", "fail", "截图缺失，无法比对");
+    recordLeg("A3 chat-differs-from-default", "fail", "截图缺失，无法比对");
   }
 
   // Post-gen3-alignment isolated-workbench path anchor: clicking 「+ 新建会话」
@@ -247,10 +258,10 @@ if (envReason) {
   const anchorOk = /锚=隔离台(?:项目行)?「\+ (?:新建会话|钮)」\+ 种子消息/.test(both);
   const viewFailures = (both.match(/尽力视图失败/g) || []).length;
   const modalBlocked = both.includes("准入模态遮挡");
-  record("A4 chat-active-anchor-no-view-failures", anchorOk && viewFailures === 0 && !modalBlocked ? "pass" : "fail",
+  recordLeg("A4 chat-active-anchor-no-view-failures", anchorOk && viewFailures === 0 && !modalBlocked ? "pass" : "fail",
     `chat 锚=${anchorOk ? "出现" : "未出现"}；尽力视图失败=${viewFailures}；chat 证据被准入模态遮挡=${modalBlocked ? "是" : "否"}`);
 
-  record("A5 distinctness-gate-passed", both.includes("健全性断言绿") ? "pass" : "fail",
+  recordLeg("A5 distinctness-gate-passed", both.includes("健全性断言绿") ? "pass" : "fail",
     both.includes("健全性断言绿") ? "各视图截图字节级不同" : "未见「健全性断言绿」日志");
 
   // A8 message-on-screen anchor (the fix for the t260901-03 acceptance
@@ -259,7 +270,7 @@ if (envReason) {
   // contains the user message bubble, so the mechanical green = criterion 2's
   // third leg truly green.
   const onTranscript = both.includes("种子消息已上屏");
-  record("A8 seed-message-on-transcript", onTranscript ? "pass" : "fail",
+  recordLeg("A8 seed-message-on-transcript", onTranscript ? "pass" : "fail",
     onTranscript ? "种子消息已上屏（会话转录含消息词）" : "无「种子消息已上屏」锚——chat 证据缺用户消息气泡");
 
   // C② re-verification (t260901-03 gen3): the seed chain must not let an
@@ -267,7 +278,7 @@ if (envReason) {
   // occasionally produced `Cannot read properties of undefined (reading 'length')`
   // run to run).
   const bareTypeError = /Cannot read properties of undefined/.test(both);
-  record("A7 no-bare-typeerror", bareTypeError ? "fail" : "pass",
+  recordLeg("A7 no-bare-typeerror", bareTypeError ? "fail" : "pass",
     bareTypeError ? "输出含裸 TypeError（未过报错包装，违反报错精确纪律）" : "全程无裸 TypeError");
 
   // Accept both ready-line shapes: the self-hosted path prints 「隔离台就绪」,
@@ -277,10 +288,10 @@ if (envReason) {
   const ready = run.stdout.match(/(?:隔离台就绪|docker 舞台就绪).*?127\.0\.0\.1:(\d+)/);
   const tornLog = run.stdout.includes("拆台完成（boot 进程组已回收、临时目录已删）");
   if (!ready) {
-    record("A6 console-torn-down", "fail", "stdout 无「隔离台就绪」行（台未起来，谈不上回收）");
+    recordLeg("A6 console-torn-down", "fail", "stdout 无「隔离台就绪」行（台未起来，谈不上回收）");
   } else {
     const refused = await portRefuses(Number(ready[1]));
-    record("A6 console-torn-down", tornLog && refused ? "pass" : "fail",
+    recordLeg("A6 console-torn-down", tornLog && refused ? "pass" : "fail",
       `拆台日志=${tornLog ? "有" : "无"}；端口 ${ready[1]} 退出后拒连=${refused ? "是" : "否（孤儿控制台！）"}`);
   }
 

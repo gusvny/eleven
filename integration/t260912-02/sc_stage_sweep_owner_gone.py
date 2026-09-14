@@ -66,6 +66,8 @@ from lib_lifecycle_case import (  # noqa: E402
     stage_tag,
     sweep,
     tcp_open,
+    up_batch_env_only,
+    up_ok,
     up_stage,
 )
 
@@ -156,8 +158,20 @@ def main():
         booted.update(batch2)
         failed_boot = [p for p in REAL_PROJS
                        if (booted.get(p) or (None, None))[0].returncode != 0]
-        if not check(not failed_boot, "7 台真台全部起好（失败 %s）" % failed_boot):
-            finish()
+        if failed_boot:
+            # t260913-01 仲裁修（同族补齐，与 net_table 同口径）：批量起台失败按引擎
+            # 自报档位归类——全为 env(2)/conflict(3) ⇒ ENV_FAIL（prepare 型环境/并发面，
+            # 带每台 rc 证据，not-checked）；任一为 fail(1)/usage(64) ⇒ FAIL（产品/契约面）。
+            # 原实现一律记 FAIL＝三态协议违约；并发窗实测 7 台里 3 台起不来（260914）。
+            rcs = {p: (booted.get(p) or (None, None))[0].returncode for p in failed_boot}
+            if up_batch_env_only(rcs):
+                envfail("7 台真台全部起好：%d 台起台失败（rc 档位全为 env/conflict"
+                        "＝prepare 型环境/并发面，非产品红）：%s"
+                        % (len(failed_boot), rcs))
+                finish()
+            if not check(False, "7 台真台全部起好（失败 %s，rc=%s：含非 env/conflict 档"
+                                "＝产品/契约面）" % (failed_boot, rcs)):
+                finish()
         ports = {p: ((booted.get(p) or (None, {}))[1] or {}).get("ports") or {}
                  for p in REAL_PROJS}
 
@@ -237,7 +251,7 @@ def main():
         # ---- 起台时挂点：新台 up 顺手拆掉再造残台 ----
         edit_lease(ROOT, P_HOOK, lambda d: {**d, "owner_root": gone_hook})
         proc_n, st_n = up_stage(ROOT, P_NEW, services="temporal", timeout=600)
-        if not check(proc_n.returncode == 0, "挂点腿新台 up 成功（rc=%s）"
+        if not up_ok(proc_n, "挂点腿新台 up 成功（rc=%s）"
                      % proc_n.returncode):
             finish()
         check(not compose_containers(P_HOOK) and not compose_networks(P_HOOK),

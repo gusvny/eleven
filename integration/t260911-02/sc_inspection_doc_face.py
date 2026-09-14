@@ -54,7 +54,7 @@ instances:
   # id 形态必须与触发侧 STAMP（05d 五位补零）逐字节一致——此前声明侧不补零，
   # PID 不足五位数时两处分叉（docs-sync-05175 对 docs-sync-5175），触发被产品
   # fail-closed 拒「未在声明中」=PID 依赖间歇假红（260911 仲裁实锤）。
-  - id: docs-sync-%(pid)05d
+  - id: docs-sync-%(stamp)s
     enabled: true
     scan_face: doc
     schedule:
@@ -62,7 +62,10 @@ instances:
       cron: 0 6 * * 1
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
-""" % {"pid": PID}
+""" % {"stamp": STAMP}   # t260913-01 仲裁修：声明与请求的实例 id 必须同源同形
+# （原 %{"pid": PID} 用未补零的原值，请求侧用 STAMP="%05d"%PID——PID<10000 时
+#  二者不等 → 「实例未在声明中」假红，PID>=10000 才碰巧绿。同族 trigger_kinds 与
+#  t260905-03 均为同源写法，此处是唯一不一致点）。
 
 
 def wait_until(fn, budget, interval=2.0):

@@ -118,6 +118,38 @@ def finish():
     sys.exit(0)
 
 
+EXIT_ENV, EXIT_CONFLICT = 2, 3   # stage_docker 档位：EXIT_OK,EXIT_ENV,EXIT_CONFLICT,EXIT_FAIL,EXIT_USAGE = 0,2,3,1,64
+
+
+def up_ok(proc, label):
+    """起台腿三态归属（t260913-01 仲裁修）：rc=0=pass；rc=2(env)/3(conflict)=ENV_FAIL
+    （not-checked，点名档位+docker 输出证据）；其余=FAIL（产品/契约面）。
+
+    为什么：起台是 **prepare 型前置面**——环境/并发窗内的 rc≠0 被记 FAIL 属三态协议
+    违约（t260910-13 决策表：fail×prepare 型原因=改判 not-checked+violation）；实测
+    在 48+32 台 burst 并发窗内制造假产品红（t260913-01 仲裁两轮实证：独立复跑恒绿）。
+    与同库 env_guard（stderr 命中 daemon 资源特征）互补：本函数按引擎**自报退出码
+    档位**归类，证据=进程输出末 220 字。真实起台失败（rc=1/64）仍按 FAIL 判，不放宽。
+    """
+    if proc.returncode == 0:
+        return check(True, label)
+    ev = " ".join(((proc.stderr or "") + " " + (proc.stdout or "")).split())[-220:]
+    if proc.returncode in (EXIT_ENV, EXIT_CONFLICT):
+        envfail("%s（stage_docker rc=%d=%s 档=prepare 型环境/并发面，非产品红）｜证据尾：%s"
+                % (label, proc.returncode,
+                   "env" if proc.returncode == EXIT_ENV else "conflict", ev))
+        return False
+    return check(False, "%s（rc=%s，非 0/2/3：产品/契约面）｜证据尾：%s"
+                 % (label, proc.returncode, ev))
+
+
+def up_batch_env_only(rcs):
+    """批量起台失败的档位归类（与 up_ok 同口径的单源实现）：全为 env(2)/conflict(3)
+    ⇒ True（prepare 型环境/并发面，归 ENV_FAIL）；任一 fail(1)/usage(64) ⇒ False
+    （产品/契约面，须 FAIL）；空集 ⇒ False（无失败就不该走本判）。"""
+    return bool(rcs) and all(rc in (EXIT_ENV, EXIT_CONFLICT) for rc in rcs.values())
+
+
 def env_guard(err, leg="腿"):
     """stderr 命中 daemon 资源类失败 → ENV_FAIL exit 2（点名特征），不吞产品红。"""
     if err and _daemon_env_pat().search(err):

@@ -3751,7 +3751,14 @@ async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
     return SettleLaneResult(note="\n".join(n for n in notes if n), lane_commits=commits)
 
 
-BATCH_TIMEOUT_SEC = int(os.environ.get("SANDBAR_INTEG_BATCH_TIMEOUT_SEC") or 5400)
+# t260913-01 仲裁修（测试道预算对）：本值 +300s 守卫必须**严格小于** dev_lane.INTEG_RUN_TO
+# （该 activity 的 start_to_close_timeout，现行 60min）——否则本函数 :3710 的结构化超时
+# 回报是死代码：套件只会被 Temporal 硬杀成「Activity task timed out（ran=0，无归因）」，
+# 且 RETRY(maximum_attempts=3) 会把每次硬杀再重试 3 轮（每轮 60min 白烧）。
+# 原默认 5400s（=95min 守卫）恒晚于 60min 外层 ⇒ 实测（260913）连续两轮 0 跑无归因。
+# 3000s（+300=55min）给正常 ~25min 套件 2× 余量，超限则走结构化回报。运维可用
+# SANDBAR_INTEG_BATCH_TIMEOUT_SEC 覆盖，但覆盖时须同步抬高 dev_lane.INTEG_RUN_TO。
+BATCH_TIMEOUT_SEC = int(os.environ.get("SANDBAR_INTEG_BATCH_TIMEOUT_SEC") or 3000)
 
 
 async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,

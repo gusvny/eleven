@@ -41,6 +41,7 @@ from lib_lifecycle_case import (  # noqa: E402
     hold_pids_prefix,
     iso_root,
     stage_tag,
+    up_batch_env_only,
 )
 
 TAG = stage_tag("t26091202-runaway")
@@ -79,6 +80,12 @@ def main():
                 if rc == 2 and FUSE_MARK in e]
         other = [(p, rc, (e or "")[-140:]) for p, rc, o, e in results
                  if rc != 0 and not (rc == 2 and FUSE_MARK in e)]
+        # t260913-01 仲裁修（同族口径）：other 桶按档位分家——rc 全为 env(2)/conflict(3)
+        # ＝prepare 型环境/并发面（not-checked，点名每台 rc 与证据尾）；含 1/64/-1 仍按
+        # 产品红（「执行器杀死按产品红记录，不吞」的口径不变）。
+        other_env = [(p, rc, t) for p, rc, t in other if rc in (2, 3)]
+        other_red = [(p, rc, t) for p, rc, t in other if rc not in (2, 3)]
+        other_env_only = bool(other_env) and not other_red
 
         if not oks and not fuse and results:
             # 全军覆没且无保险丝红=供给面缺席（镜像/daemon），按环境红收口
@@ -89,10 +96,19 @@ def main():
         check(len(oks) >= 1, "至少 1 路入位（实得 %d）" % len(oks))
         check(len(oks) <= FUSE_LIMIT,
               "入位 ≤ 保险丝档 %d（实得 %d——原子不超售）" % (FUSE_LIMIT, len(oks)))
-        check(len(fuse) == N_TOTAL - len(oks),
-              "其余 %d 路全部被保险丝刹停（实得 %d）"
-              % (N_TOTAL - len(oks), len(fuse)))
-        check(not other, "刹停面之外零杂红（违例 %s）" % other[:3])
+        if other_env_only:
+            envfail("其余 %d 路刹停面未验成：%d 路为环境拒跑（rc 档位全为 env/conflict，"
+                    "prepare 型环境/并发面，非产品红）：%s"
+                    % (N_TOTAL - len(oks), len(other_env), other_env[:3]))
+        else:
+            check(len(fuse) == N_TOTAL - len(oks),
+                  "其余 %d 路全部被保险丝刹停（实得 %d）"
+                  % (N_TOTAL - len(oks), len(fuse)))
+        if other_env_only:
+            envfail("刹停面之外 %d 路为环境拒跑（非产品红，证据尾）：%s"
+                    % (len(other_env), other_env[:2]))
+        else:
+            check(not other, "刹停面之外零杂红（违例 %s）" % other[:3])
 
         # 点名面：每路刹停红都带保险丝字样与活租约清单（可核对 pid/lease）
         unnamed = [p for p, _rc, _o, e in fuse

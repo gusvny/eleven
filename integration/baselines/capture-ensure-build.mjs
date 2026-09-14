@@ -78,6 +78,26 @@ function mainCheckoutRoot(laneRoot) {
 }
 
 /**
+ * 构建工具链解析（t260913-01 仲裁修正）：**被测树优先**，主检出回落。
+ *
+ * 为什么改：重建必须在被测树里执行——工具链随泳道自举
+ * （`<lane>/server/plugins/workbench/node_modules/.bin/tsdown`），而主检出常常根本
+ * 没有 node_modules（本机实证：main 无该目录、lane 有）。原实现只认主检出的
+ * tsdown，于是「新泳道检出 mtime 倒置」这一**已知可自愈**的前提被判成
+ * 「无法自动重建」→ 外层把 prepare 型原因记成 FAIL（三态协议违约，实测两条
+ * capture 基线整条红）。两处都没有才 fail loud——不静默放过旧 bundle。
+ */
+export function resolveTsdown(laneRoot) {
+  const cands = [path.join(laneRoot, WB_REL, "node_modules", ".bin", "tsdown")];
+  const mainRoot = mainCheckoutRoot(laneRoot);
+  if (mainRoot) cands.push(path.join(mainRoot, WB_REL, "node_modules", ".bin", "tsdown"));
+  for (const cand of cands) {
+    if (existsSync(cand)) return cand;
+  }
+  return null;
+}
+
+/**
  * Ensure the lane workbench bundle is not stale-per-mtime. Returns null when
  * fresh (or healed by a byte-identical rebuild); returns a human reason string
  * when the precondition cannot be satisfied (caller must FAIL loud).
@@ -86,11 +106,10 @@ export function ensureLaneBuild(laneRoot) {
   const stale = laneBuildStaleReason(laneRoot);
   if (!stale) return null;
 
-  const mainRoot = mainCheckoutRoot(laneRoot);
-  const tsdown = mainRoot && path.join(mainRoot, WB_REL, "node_modules", ".bin", "tsdown");
-  if (!tsdown || !existsSync(tsdown)) {
-    return `${stale}；且无法自动重建（主检出无 ${WB_REL}/node_modules/.bin/tsdown` +
-      `${mainRoot ? "" : "，git-common-dir 解析失败"}）。按守卫指路人工重建后重跑。`;
+  const tsdown = resolveTsdown(laneRoot);
+  if (!tsdown) {
+    return `${stale}；且无法自动重建（被测树与主检出均无 ` +
+      `${WB_REL}/node_modules/.bin/tsdown）。按守卫指路人工重建后重跑。`;
   }
 
   const wb = path.join(laneRoot, WB_REL);
