@@ -2,9 +2,10 @@
  * routes.ts —— 模型路由视图（M12，t260822-m12 模型路由UI+agent log）的宿主半纯函数。
  *
  * 数据源（只读，不改表）：
- *   ① server/model-routes.yaml —— 声明式路由表（真源，治理红线见文件头注释：
- *      改路由=改本表，走工单+人审；**运行时生效**：agent activity 每次 spawn 查表
- *      生成 --patch，下一个工单 agent 即用新模型，无生成步骤）。
+ *   ① 注册条目 paths.model_routes 声明指向的路由表 —— 唯一真源（t260910-14 读写
+ *      同源；t260914-05 仓内兜底表退役：未声明/声明缺陷=无表引导态+点名 resolution_error，
+ *      绝不静默回落任何仓内文件——「表在场但过期」比缺表更毒。运行时生效：agent
+ *      activity 每次 spawn 查表生成 --patch，下一个工单 agent 即用新模型，无生成步骤）。
  *
  * 本模块做四件事（全部纯函数/只读文件或显式保存，可被 smoke 直测）：
  *   A. parseRoutesYaml —— 严格最小 YAML 子集解析器
@@ -21,9 +22,9 @@
 
 import { copyFile, readFile, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 /* ------------------------------------------------------------ 显示名常量（直接维护） */
 
@@ -57,6 +58,29 @@ export class RoutesParseError extends Error { }
 
 function asMap(v: unknown): Record<string, unknown> | null {
   return (typeof v === 'object' && v !== null && !Array.isArray(v)) ? v as Record<string, unknown> : null
+}
+
+/**
+ * 查表链形状校验（与引擎 shared._routes_table_shape_error 同判，260915 gen2）：
+ * roles/条目/tasks 在位时必须是映射——此前 asMap 静默吞掉非映射值，视图对坏表出
+ * 「默认路由」假象（与引擎 bad_content 判分叉）。回 null=形状可用。
+ * default 段非映射不拦（两侧一致：消费方 isinstance 容错，不崩不为它扩态）。
+ */
+function routesShapeError(root: Record<string, unknown>): string | null {
+  const roles = root['roles']
+  if (roles !== undefined && roles !== null && asMap(roles) === null) {
+    return `roles 段不是映射（yaml 顶层 roles=${typeof roles}）`
+  }
+  for (const [name, entry] of Object.entries(asMap(roles) ?? {})) {
+    if (entry !== undefined && entry !== null && asMap(entry) === null) {
+      return `roles.${name} 条目不是映射（=${typeof entry}）`
+    }
+    const tasks = asMap(entry)?.['tasks']
+    if (tasks !== undefined && tasks !== null && asMap(tasks) === null) {
+      return `roles.${name}.tasks 不是映射（=${typeof tasks}）`
+    }
+  }
+  return null
 }
 
 /**
@@ -192,18 +216,14 @@ function entryOf(e: Record<string, unknown> | null): { provider: string | null; 
   }
 }
 
-/** 仓内兜底表（宿主风险令 260910：读侧分层——声明指向文件优先，仓内表兜底；
- *  本票不删仓内表）。本文件在 server/plugins/ui/src/host/ 下，上三级即 server/。 */
-export function repoRoutesFallbackPath(): string {
-  return fileURLToPath(new URL('../../../../model-routes.yaml', import.meta.url))
-}
-
+/** 路由表解析结果（t260910-14 读写同源；t260914-05 兜底腿退役）。 */
 export interface ResolvedRoutesFile {
-  /** ok=声明指向文件在用；decl_missing=未声明（兜底=仓内表）；file_missing=声明文件
-   *  缺失（读侧兜底）；bad_content=声明文件解析失败（读侧兜底）。与 python
-   *  shared.resolve_routes_table 四态一一对应（一致性守卫见 integration 夹具矩阵）。 */
+  /** ok=声明指向文件在用；decl_missing=未声明（无表）；file_missing=声明文件缺失
+   *  （无表）；bad_content=声明文件解析失败（无表）。与 python
+   *  shared.resolve_routes_table 四态一一对应（一致性守卫见 integration 夹具矩阵）；
+   *  非 ok 态一律 table 无、**不回落任何仓内文件**。 */
   state: 'ok' | 'decl_missing' | 'file_missing' | 'bad_content'
-  /** 实际读/写目标：声明指向文件；未声明时=仓内兜底表。 */
+  /** 实际读/写目标：声明指向的文件；未声明=""（无落点，保存显式拒写）。 */
   path: string
   /** 声明的绝对路径（未声明=null）。 */
   declared: string | null
@@ -282,19 +302,22 @@ function findKeyByPrimaryDir(projectsDir: string | undefined, primaryDir: string
   return null
 }
 
-/** 路由表文件解析——UI 读写与引擎查表的同一入口（t260910-14 读写同源）：
- *  声明 paths.model_routes 指向的文件优先（~/展开/绝对路径/相对项目主目录，
- *  `..` 逃逸 fail-closed 拒收），未声明回落仓内兜底表。三态分态可辨禁静默。 */
+/** 路由表文件解析——UI 读写与引擎查表的同一入口（t260910-14 读写同源；
+ *  t260914-05 兜底腿退役）：唯一真源=注册条目 paths.model_routes 声明指向的文件
+ *  （~/展开/绝对路径/相对项目主目录，`..` 逃逸 fail-closed 拒收）。未声明=decl_missing
+ *  无表（path=""，不回落任何仓内文件）；声明面存在性/内容缺陷由读面分态点名。 */
 export function resolveRoutesFilePath(primaryDir: string, opts: RoutesResolveOpts = {}): ResolvedRoutesFile {
   const key = opts.projectKey ?? findKeyByPrimaryDir(opts.projectsDir, primaryDir)
   if (key === null) {
-    return { state: 'decl_missing', path: repoRoutesFallbackPath(), declared: null,
-             error: '注册表中未找到主目录对应的条目（读侧兜底=仓内表 ' + repoRoutesFallbackPath() + '）' }
+    return { state: 'decl_missing', path: '', declared: null,
+             error: '注册表中未找到主目录对应的条目（未声明 paths.model_routes，无表可读）' }
   }
   const declaredRaw = readDeclaredRoutesPath(key, opts.projectsDir)
   if (declaredRaw === null || declaredRaw === '') {
-    return { state: 'decl_missing', path: repoRoutesFallbackPath(), declared: null,
-             error: '条目未声明 paths.model_routes（读侧兜底=仓内表 ' + repoRoutesFallbackPath() + '）' }
+    return { state: 'decl_missing', path: '', declared: null,
+             error: '条目未声明 paths.model_routes（读侧不再回落仓内表）；'
+               + '建表建议落点 ~/.sandbar/projects/' + key + '/model-routes.yaml'
+               + '（模板=docs/model-routes-sample.yaml，落声明后生效）' }
   }
   if (declaredRaw.includes('..') && (declaredRaw === '..' || declaredRaw.includes('/../') || declaredRaw.startsWith('../') || declaredRaw.endsWith('/..'))) {
     throw new Error(`paths.model_routes 禁止 .. 越界（机器级形态同样适用）: ${declaredRaw}`)
@@ -313,13 +336,12 @@ export function resolveRoutesFilePath(primaryDir: string, opts: RoutesResolveOpt
   return { state: 'ok', path: declared, declared, error: '' }
 }
 
-/** 组装视图：读「声明指向的路由表」（真源，t260910-14 读写同源；未声明回落仓内
- *  兜底表——宿主风险令 260910 读侧分层），查表补齐 effective。 */
+/** 组装视图：读「声明指向的路由表」（唯一真源，t260910-14 读写同源；t260914-05
+ *  兜底腿退役——未声明/声明文件缺失=无表引导态，解析失败=bad_content 点名+指纹）。 */
 export async function buildRoutesView(primaryDir: string, opts: RoutesResolveOpts = {}): Promise<RoutesView> {
   const resolved = resolveRoutesFilePath(primaryDir, opts)
-  const routesFile = resolved.path
   const view: RoutesView = {
-    routes_file: routesFile,
+    routes_file: resolved.path,
     parsed_at: Math.floor(Date.now() / 1000),
     default: null,
     roles: [],
@@ -328,31 +350,25 @@ export async function buildRoutesView(primaryDir: string, opts: RoutesResolveOpt
   view.declared = resolved.declared
   view.state = resolved.state
   view.resolution_error = resolved.error
+  if (resolved.state === 'decl_missing') {
+    // t260914-05：未声明=无表（不回落仓内表）→ 纯指引引导态（init 动作已退役，
+    // 新项目按 docs/model-routes-sample.yaml 人工填表+落声明）
+    view.uninitialized = true
+    return view
+  }
+  const routesFile = resolved.path
   let text: string
   try {
     text = await readFile(routesFile, 'utf8')
   } catch (err: any) {
     if (err?.code === 'ENOENT') {
-      // 读侧分层兜底（宿主风险令 260910）：声明文件缺失 → 仓内兜底表若在则接管读
-      // （写面仍指声明路径）；兜底也缺 = 未初始化引导态（纯指引，动作已随 init 退役）。
-      if (resolved.declared !== null) {
-        try {
-          // 分层兜底接管**读内容**；routes_file 保持声明路径（真源/写面不漂移）
-          text = await readFile(repoRoutesFallbackPath(), 'utf8')
-          view.state = 'file_missing'
-          view.resolution_error = resolved.error + '（读侧兜底=仓内表 ' + repoRoutesFallbackPath() + '）'
-        } catch (err2: any) {
-          if (err2?.code === 'ENOENT') {
-            view.uninitialized = true
-          } else {
-            view.error = `路由表读取失败: ${String(err2?.message ?? err2)}`
-          }
-          return view
-        }
-      } else {
-        // t260910-14：无表引导态保留为纯指引（init 动作已退役，新项目按 docs 样例人工填表）
-        view.uninitialized = true
-      }
+      // t260914-05：声明文件缺失=file_missing 点名（无表，不回落任何仓内文件）→
+      // 纯指引引导态（resolution_error 含路径与建表建议，禁静默）
+      view.state = 'file_missing'
+      view.resolution_error = `声明指向的路由表文件缺失：${routesFile}；`
+        + '建表建议落点 ~/.sandbar/projects/<key>/model-routes.yaml'
+        + '（模板=docs/model-routes-sample.yaml，落 paths.model_routes 声明后生效）'
+      view.uninitialized = true
     } else {
       view.error = `路由表读取失败: ${String(err?.message ?? err)}`
     }
@@ -362,7 +378,22 @@ export async function buildRoutesView(primaryDir: string, opts: RoutesResolveOpt
   try {
     root = parseRoutesYaml(text)
   } catch (err) {
-    view.error = `路由表解析失败: ${err instanceof Error ? err.message : String(err)}`
+    // t260914-05：解析失败=bad_content 点名（补齐与引擎 resolve_routes_table 的
+    // parity 缺口）；指纹进人话串——有字节可指纹，用于定位坏版本。
+    const fp = `sha256:${createHash('sha256').update(text).digest('hex').slice(0, 12)}`
+    view.state = 'bad_content'
+    view.error = `路由表解析失败: ${err instanceof Error ? err.message : String(err)}（指纹=${fp}）`
+    view.resolution_error = `声明指向的路由表不可解析：${routesFile}（指纹=${fp}）`
+    return view
+  }
+  const shapeErr = routesShapeError(root)
+  if (shapeErr) {
+    // t260914-05 gen2：形状坏表（roles/条目/tasks 值非映射）与引擎同判 bad_content——
+    // 禁「视图对坏表静默出默认路由」假象；指纹进人话串（可定位坏版本）。
+    const fp = `sha256:${createHash('sha256').update(text).digest('hex').slice(0, 12)}`
+    view.state = 'bad_content'
+    view.error = `路由表形状不可用: ${shapeErr}（指纹=${fp}）`
+    view.resolution_error = `声明指向的路由表形状不可用：${routesFile}（${shapeErr}，指纹=${fp}）`
     return view
   }
   const dft = asMap(root['default'])
@@ -638,9 +669,19 @@ export interface RoutesSaveResult {
 }
 
 /** M13 保存：读真源 → validateRouteTable → applyRouteEdits → 备份 /tmp → 写回。
- *  表缺失/解析失败/载荷非法 → 返回 error（不抛，由 handler 转 200 {ok:false}）。 */
+ *  未声明（无落点）→ 显式拒写+指引（t260914-05：不代写仓内兜底表）；表缺失/解析
+ *  失败/载荷非法 → 返回 error（不抛，由 handler 转 200 {ok:false}）。 */
 export async function saveRoutesTable(primaryDir: string, edits: RouteTableEdits, opts: RoutesResolveOpts = {}): Promise<RoutesSaveResult> {
-  const routesFile = resolveRoutesFilePath(primaryDir, opts).path
+  const resolved = resolveRoutesFilePath(primaryDir, opts)
+  if (resolved.state === 'decl_missing') {
+    // t260914-05：未声明=无落点可写（仓内兜底表已退役，绝不静默代写仓内文件）——
+    // 显式拒写并给建表指引（读写单点契约不变：仍走 resolveRoutesFilePath 单点解析）。
+    return {
+      written: false, routes_file: '', backup: null, changed: [], regenerate: REGEN_HINT,
+      error: '未声明 paths.model_routes，无落点可写（仓内兜底表已退役，不代写仓内文件）：' + resolved.error,
+    }
+  }
+  const routesFile = resolved.path
   const base: RoutesSaveResult = {
     written: false, routes_file: routesFile, backup: null, changed: [], regenerate: REGEN_HINT,
   }

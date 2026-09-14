@@ -23,6 +23,10 @@ A（端到端，验收 A，门控 SANDBAR_E2E_REAL=1）：
   写集文件由容器内 agent 真写出且宿主可见（D1 同路径挂载）/ worker 代落盘 commit 含该
   文件（验收 A 收口）/ agent 日志含 docker spawn 行（可审计）/ 收尾零残留（验收 G）。
   模型成本=一个真 agent 段。
+  260915 加固（本票 t260914-05 顺手修，走查 P2）：结果文件改「连续两次解析同值」的
+  稳定读（防半写撕裂误崩）；读不出=点名 FAIL（附原始字节头）不吃掉后续腿；中途异常=
+  记账+traceback+夹具 tmp 保全不删（证据可取证），仍走 SUMMARY 出口码。S0 自检腿
+  （零依赖恒跑）先自证稳定读判定可靠。
 
 用法：
   python3 integration/t260913-04/run_real_ticket_e2e.py                # F 腿（默认，零模型成本）
@@ -37,7 +41,9 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import traceback
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -163,8 +169,58 @@ def f_leg():
 
 # ---------------- A：真票端到端腿 ----------------
 
+# 隔离台自声明路由表（t260914-05 验收 4）：260914 生产机器表镜像快照（同构值，非同
+# 文件），让隔离场景与生产口径同源——否则隔离注册表未声明时将无表可用（迁表前则是
+# 静默捡仓内旧表被钉到死账号，现场 B 实证）。模型 ref 不许发明：只写表内「可用 ref
+# 核实清单」里实证存在的组合（容器凭据物化链见 integration/stage_docker.py）。
+E2E_ROUTES_TABLE = """\
+# t260913-04 隔离台路由表（镜像 260914 生产机器表；真源=本文件，注册条目 paths.model_routes 声明）
+# 模型 ref 不许发明：只写下方「可用 ref 核实清单」里实证存在的组合。
+# 【可用 ref 核实清单】（260914 实证：容器凭据物化链含以下账号 env）
+#   zai / glm-5.3-flash —— 主生成家（ZAI_API_KEY）
+#   zai-coding-cn / glm-5.3-flash —— 第二 z.ai 账号（ZAI_CODING_CN_API_KEY）
+#   deepseek-official / deepseek-flash —— 审校家（DEEPSEEK_API_KEY）
+# 分工：生成/审校同为 zai 系 glm-5.3-flash、仅异账号——M10 异模型交叉口径让位于配额急救，
+# 与 260914 生产表口径一致。
+default:
+  provider: zai
+  model: glm-5.3-flash
+roles:
+  integration:
+    provider: zai
+    model: glm-5.3-flash
+  developer:
+    provider: zai-coding-cn
+    model: glm-5.3-flash
+  product-operation:
+    provider: zai
+    model: glm-5.3-flash
+"""
+
+
+def _routes_table_text() -> str:
+    """旋钮注入：T26091304_MODEL_ROUTES="provider/model"=全条目统一覆盖（凭据缺席时
+    可整体切 deepseek-official/deepseek-flash）。畸形值（非 provider/model 形）忽略并
+    保留镜像表——隔离台宁可跑镜像口径，也不因旋钮写错而无表。"""
+    hit = (os.environ.get("T26091304_MODEL_ROUTES") or "").strip()
+    if hit.count("/") == 1:
+        p, m = (x.strip() for x in hit.split("/", 1))
+        if p and m and " " not in p and " " not in m:
+            out = []
+            for line in E2E_ROUTES_TABLE.splitlines():
+                if line.lstrip().startswith("provider: ") or line.lstrip().startswith("model: "):
+                    indent = line[:len(line) - len(line.lstrip())]
+                    key = "provider" if line.lstrip().startswith("provider") else "model"
+                    line = "%s%s: %s" % (indent, key, p if key == "provider" else m)
+                out.append(line)
+            return "\n".join(out) + "\n"
+    return E2E_ROUTES_TABLE
+
+
 def build_project(tmp):
-    """临时项目（单仓）：真 git 仓（有 HEAD）+ 写集目标位；票泳道落 <proj>/.lane/。"""
+    """临时项目（单仓）：真 git 仓（有 HEAD）+ 写集目标位；票泳道落 <proj>/.lane/。
+    t260914-05：隔离注册表**自声明** paths.model_routes → 自带镜像表（260914 生产
+    同构），隔离场景与生产口径同源，不再直接/间接依赖仓内 server/model-routes.yaml。"""
     proj = Path(tmp) / "proj"
     proj.mkdir(parents=True)
     (proj / "README.md").write_text("# e2e project\n", "utf-8")
@@ -175,9 +231,12 @@ def build_project(tmp):
     git("commit", "-qm", "seed", cwd=proj)
     regroot = Path(tmp) / "reg"
     (regroot / PROJ).mkdir(parents=True)
+    table = regroot / PROJ / "model-routes.yaml"
+    table.write_text(_routes_table_text(), "utf-8")
     (regroot / PROJ / "project.yaml").write_text(
-        "schema: v1\nproject:\n  - key: %s\n    name: t260913-04 e2e\n    dirs:\n      - %s\n"
-        % (PROJ, proj), "utf-8")
+        "schema: v1\npaths:\n  model_routes: %s\n"
+        "project:\n  - key: %s\n    name: t260913-04 e2e\n    dirs:\n      - %s\n"
+        % (table, PROJ, proj), "utf-8")
     return proj, regroot
 
 
@@ -186,6 +245,37 @@ def containers_for_ticket():
                         "label=sandbar.agent.ticket=%s" % TID, "--format", "{{.Names}}"],
                        capture_output=True, text=True, timeout=60)
     return [x for x in (p.stdout or "").split() if x]
+
+
+def _read_result_stable(path, attempts=5, delay=3.0):
+    """结果文件稳定读（260915 P2 收紧）：连续两次解析成功且同值才认数，防半写撕裂读。
+
+    引擎侧写结果文件非原子替换时，验收台「一出现就读」可能读到半截 JSON 而
+    自己崩掉（A4–A7 连 N/A 都不记、finally 又把现场删了——260915 首跑实证）。
+    回 (dict, "")；读不到/解析不了回 (None, 原因含原始字节头)——调用方点名 FAIL
+    并保全现场，绝不静默。"""
+    last_err = ""
+    prev = None
+    seen_any = False
+    for i in range(max(2, attempts)):
+        try:
+            rf = json.loads(path.read_text("utf-8"))
+            seen_any = True
+        except Exception as e:  # noqa: BLE001 — 半写/非 UTF8/瞬失都重试
+            last_err = "%s: %s" % (type(e).__name__, str(e)[:160])
+            rf = None
+        if seen_any and rf is not None and rf == prev:
+            return rf, ""
+        prev = rf
+        if i < max(2, attempts) - 1:
+            time.sleep(delay)
+    head = ""
+    try:
+        head = path.read_bytes()[:200].decode("utf-8", errors="replace")
+    except OSError:
+        pass
+    return None, ("重试 %d 次仍不可解析/不稳定（%s；原始字节头=%r）"
+                  % (max(2, attempts), last_err or "空文件", head))
 
 
 def a_leg():
@@ -225,6 +315,7 @@ def a_leg():
     worker = None
     stage = stage_mod = None
     saved = {}
+    keep_evidence = False   # 崩溃/坏结果文件路径置 True：tmp 保全不删（260915 P2 收紧）
     try:
         proj, regroot = build_project(tmp)
         bench = require_bench(_Fail())
@@ -363,10 +454,14 @@ def a_leg():
             na("A7 worker 日志含容器 spawn 行", "配额 429，真段未跑")
             head = ""
         else:
-            rf = json.loads(new_result.read_text("utf-8")) if new_result else None
-            ok(bool(rf) and rf.get("status") == "ok",
+            rf, rf_err = (None, "未等到结果文件（段窗口超时）") if not new_result \
+                else _read_result_stable(new_result)
+            if rf is None and new_result is not None:
+                keep_evidence = True   # 结果文件读到但坏=点名 FAIL+保全现场，不吃掉 A5–A7
+            ok(rf is not None and rf.get("status") == "ok",
                "A4 结果文件落泳道原位、形状不变（验收 D 读方零改动）",
-               str(new_result) if rf is None else rf.get("status"))
+               str(rf.get("status")) if rf else
+               "%s（文件=%s）" % (rf_err, new_result))
 
             # ---- ④ 容器内真改文件 + worker 代落盘 ----
             target = lane / WS_FILE
@@ -394,6 +489,11 @@ def a_leg():
             ok(bool(line), "A7 worker 日志含容器 spawn 行（runtime=docker 落痕，可审计）",
                "\n".join(line)[:300])
             print("  [A] spawn 行：%s" % ("\n".join(line)[:400] or "(无)"), flush=True)
+    except Exception as e:  # noqa: BLE001 — 崩溃路径必须留证据（260915 P2）：点名+保全 tmp，仍走 SUMMARY 响亮红
+        keep_evidence = True
+        traceback.print_exc()
+        ok(False, "A 腿中途异常（证据保全：tmp 保留不删，路径见下）",
+           "%s: %s" % (type(e).__name__, str(e)[:200]))
     finally:
         if worker is not None:
             worker.terminate()
@@ -415,13 +515,54 @@ def a_leg():
                       flush=True)
             except Exception as e:  # noqa: BLE001
                 print("  (stage_down 容错：%s)" % str(e)[:120], flush=True)
+        if keep_evidence:
+            # 证据保全：异常/坏结果文件现场不删（P2 收紧）——人工取证后手动清理
+            print("  [证据保全] 夹具 tmp 保留（含 worker 日志/结果文件现场）：%s" % tmp, flush=True)
+        else:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+def harness_selfcheck():
+    """S0 验收台自检（零依赖恒跑，260915 P2 收紧的回归网）：结果文件稳定读先自证可靠。
+
+    腿：好文件两次解析同值→认数；半写后补全→重试内恢复；恒坏→(None, 原因含原始字节头)。
+    验收台自己先站得住，A 腿判据才有资格当「唯一口径」。"""
+    print("\n== S0 验收台自检（结果文件稳定读，零依赖）==", flush=True)
+    tmp = Path(tempfile.mkdtemp(prefix="t26091304-selfcheck-"))
+    try:
+        f = tmp / "result.json"
+        f.write_text(json.dumps({"status": "ok"}), "utf-8")
+        rf, err = _read_result_stable(f, delay=0.05)
+        ok(rf == {"status": "ok"} and err == "", "S0a 稳定读：好文件两次解析同值→认数",
+           "%r %r" % (rf, err))
+
+        good = json.dumps({"status": "ok", "n": 1})
+        f.write_text(good[: len(good) // 2], "utf-8")          # 先半写
+        # 0.05s 后补全；稳定读首读点在 t=0（半写）、次读点 t=0.5（已补全）——补全远离读点，
+        # 无「读时正被写」竞态，断言确定性
+        t = threading.Timer(0.05, lambda: f.write_text(good, "utf-8"))
+        t.start()
+        rf, err = _read_result_stable(f, delay=0.5)
+        ok(rf == {"status": "ok", "n": 1} and err == "",
+           "S0b 稳定读：半写→重试内读到完整 JSON（不误崩）", "%r %r" % (rf, err))
+        t.join()
+
+        f.write_text('{"status": "ok",,,,}', "utf-8")
+        rf, err = _read_result_stable(f, attempts=3, delay=0.05)
+        ok(rf is None and "原始字节头" in err,
+           "S0c 稳定读：恒坏→点名原因+原始字节头（不静默）", "%r %r" % (rf, err))
+    finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--leg", choices=("f", "a", "both"), default="f")
+    ap.add_argument("--no-selfcheck", action="store_true",
+                    help="略过 S0 验收台自检（正常勿用；供调试）")
     args = ap.parse_args()
+    if not args.no_selfcheck:
+        harness_selfcheck()
     if args.leg in ("f", "both"):
         f_leg()
     if args.leg in ("a", "both"):

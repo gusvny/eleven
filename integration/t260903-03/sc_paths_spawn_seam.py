@@ -4,14 +4,16 @@
 黑盒口径（从引擎 spawn 唯一准备入口进，观测产物 = cmd 的 --patch 链与 patch 文件内容，
 即「这个 agent 拿到哪份 persona、哪个模型」的用户可感知结果）：
   A 声明命中：项目在注册条目声明 paths 后，spawn 用声明值——角色 patch 指声明目录
-    （而不是现行约定目录，即使两者同时存在），模型来自声明表（而不是回落常量表）。
-  B 未声明回落：无 paths 节 / 条目不存在 / key 为空 / key 非法（含穿越形状）四态，
-    spawn 与现行约定等价——角色 patch 指 server/roles，模型读回落常量单源。
+    （而不是现行约定目录，即使两者同时存在），模型来自声明表（roles 契约不变）。
+  B 未声明（t260914-05 兜底腿退役）：无 paths 节 / 条目不存在 / key 为空 / key 非法
+    （含穿越形状）多态，角色 patch 仍走现行约定（roles 语义不变），模型面**无表**：
+    不打 model patch（=本轮模型来 profile 默认）且引擎面点名 state=decl_missing——
+    绝不静默取任何仓内表。
   C 软语义（锚点在、内容缺）：声明目录里没有该角色的 preset 文件 → 不红、不打角色
     patch（默认 persona）；声明表里查不到该角色且无 default → 不红、不打模型 patch
     （默认模型）。
 
-夹具全 tmp（注册表 env 注入、回落常量进程内替换，退出还原），不写仓内、不碰 3099。
+夹具全 tmp（注册表 env 注入、告警捕获退出还原），不写仓内、不碰 3099。
 依赖：temporalio SDK（venv）——不可用则 ENV_FAIL 环境红退 2（三态契约 §7.3，绝不放行）。
 """
 import shutil
@@ -58,15 +60,13 @@ def main():
             declared_role_yml = declared_roles / "reviewer.yml"
             declared_role_yml.write_text("persona: declared-roles-marker\n", encoding="utf-8")
             legacy_yml = fx.mk_legacy_roles(ws)  # 现行约定位置也放一份——证明声明优先
-            declared_table = fx.write_routes_table(ws / "cfg" / "routes.yaml",
-                                                   "prov-declared", "model-declared")
+            fx.write_routes_table(ws / "cfg" / "routes.yaml",
+                                  "prov-declared", "model-declared")
             reg.write_entry("alpha", ws_dirs(ws), paths_lines=[
                 ("roles_dir", "cfg/roles"),
                 ("model_routes", "cfg/routes.yaml"),
             ])
-            with fx.PatchedRoutesFile(ws / "legacy-table.yaml"):
-                fx.write_routes_table(ws / "legacy-table.yaml", "prov-legacy", "model-legacy")
-                cmd, _env, art = fx.spawn(ws, project="alpha")
+            cmd, _env, art = fx.spawn(ws, project="alpha")
             ok(any(p == str(declared_role_yml) for p in fx.patch_paths(cmd)),
                "A1 角色 patch 指声明目录（非现行约定）")
             ok(not fx.patches_ending(cmd, str(legacy_yml)),
@@ -76,24 +76,27 @@ def main():
             shutil.rmtree(ws / "cfg")
             shutil.rmtree(ws / "server")
 
-        # ---- B 未声明回落：与现行约定等价（四态）----
+        # ---- B 未声明=无表（t260914-05）：roles 走现行约定，模型面无表+点名 ----
         legacy_yml = fx.mk_legacy_roles(ws)
+
+        def b_leg(label, project, tag):
+            """公共断言：角色 patch 走现行约定（roles 语义不变）+ 模型面无表（不打
+            model patch）+ 引擎面点名 state=decl_missing（禁静默回落仓内表）。"""
+            with fx.capture_route_warnings() as warns:
+                cmd, _env, art = fx.spawn(ws, project=project, tag=tag)
+            ok(fx.patches_ending(cmd, str(legacy_yml)), label + "角色 patch 走现行约定")
+            ok(not fx.model_patch_files(art),
+               label + "模型面无表：不打 model patch（禁静默回落）")
+            ok(any("[model_route]" in w and "state=decl_missing" in w for w in warns),
+               label + "引擎面点名 state=decl_missing")
+
         with fx.Registry() as reg:
             reg.write_entry("beta", ws_dirs(ws))  # b1 无 paths 节
-            with fx.PatchedRoutesFile(ws / "legacy-table.yaml"):
-                fx.write_routes_table(ws / "legacy-table.yaml", "prov-legacy", "model-legacy")
-                cmd, _env, art = fx.spawn(ws, project="beta")
-                ok(fx.patches_ending(cmd, str(legacy_yml)), "B1 无 paths 节 → 角色 patch 走现行约定")
-                ok("provider: prov-legacy" in fx.model_patch_text(art),
-                   "B1 模型走回落常量单源")
-                cmd2, _e2, _a2 = fx.spawn(ws, project="ghost", tag="b2")  # b2 条目不存在
-                ok(fx.patches_ending(cmd2, str(legacy_yml)), "B2 条目文件不存在 → 回落现行约定")
-                cmd3, _e3, _a3 = fx.spawn(ws, project="", tag="b3")  # b3 key 空
-                ok(fx.patches_ending(cmd3, str(legacy_yml)), "B3 key 为空 → 回落现行约定")
-                cmd4, _e4, _a4 = fx.spawn(ws, project="../evil", tag="b4")  # b4 key 穿越形状
-                ok(fx.patches_ending(cmd4, str(legacy_yml)), "B4 key 穿越形状 → 回落且不越界读")
-                cmd5, _e5, _a5 = fx.spawn(ws, project="BAD_KEY", tag="b4b")  # b4' key 白名单外
-                ok(fx.patches_ending(cmd5, str(legacy_yml)), "B4' key 白名单外 → 回落现行约定")
+            b_leg("B1 无 paths 节 → ", "beta", "b1")
+            b_leg("B2 条目文件不存在 → ", "ghost", "b2")
+            b_leg("B3 key 为空 → ", "", "b3")
+            b_leg("B4 key 穿越形状 → ", "../evil", "b4")
+            b_leg("B4' key 白名单外 → ", "BAD_KEY", "b4b")
 
         # ---- C 软语义：锚点在、内容缺 → 不红、不打对应 patch ----
         with fx.Registry() as reg:

@@ -439,10 +439,10 @@ SCENARIOS = [
      "本票勘误回归棒（KI-020① 同族「真源文件自身漂移」）：verify_lane.py 幻影/退役措辞零残留、契约文档 F1（integration 道无关闭态+零场景绿惯用法）与 F2（汇总行参考性）语义明文、verify.yaml 头注指向 ②a~②e；实现落地前红=预期（t260903-01）",
      "node integration/t260903-01/sc_contract_v11_regression_rods.mjs", "ro"),
     ("t260903-03-paths-spawn-seam",
-     "路径契约化端到端（跨组件：注册条目×路径解析×spawn 组装×patch 产物，观测=cmd --patch 链与 patch 文件内容）：声明命中用声明值（roles patch 指声明目录、模型来自声明表，声明优先于现行约定）；未声明四回落态（无 paths 节/条目不存在/key 空/key 非法含穿越形状）与现行约定等价、模型走回落常量单源；锚点在内容缺走软语义不红（t260903-03 ①d 用户旅程）",
+     "路径契约化端到端（跨组件：注册条目×路径解析×spawn 组装×patch 产物，观测=cmd --patch 链与 patch 文件内容）：声明命中用声明值（roles patch 指声明目录、模型来自声明表，声明优先于现行约定）；未声明多态（无 paths 节/条目不存在/key 空/key 非法含穿越形状）角色 patch 走现行约定（roles 语义不变）而模型面无表=不打 model patch+引擎面点名 state=decl_missing（t260914-05 兜底腿退役，禁静默回落仓内表）；锚点在内容缺走软语义不红（t260903-03 ①d 用户旅程）",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260903-03/sc_paths_spawn_seam.py"),
     ("t260903-03-paths-failclosed-red",
-     "路径契约化故障面对抗（spawn 缝隙红传导，用户视角=红工单点名文件而非静默猜着跑）：条目 project.yaml 损坏（现行约定在位也必须红，不静默回落）、声明锚点缺失（不被 per-role 软跳过吞掉）、锚点类型错位（表↔目录/目录↔文件）、声明值畸形代表例（未知键/绝对路径/../穿越）一律红且文案点名键或解析后路径（t260903-03 ①d 三态）",
+     "路径契约化故障面对抗（spawn 缝隙红传导，用户视角=红工单点名文件而非静默猜着跑）：条目 project.yaml 损坏（现行约定在位也必须红，不静默回落）、无表三态（t260914-05：指向缺失文件/未声明/目录当表=spawn 不红+无模型 patch+引擎面点名 state+指纹，三态互异不静默回落仓内表）、roles_dir 锚点缺失与类型错位仍红（roles 契约未放宽）、声明值畸形代表例（未知键/绝对路径/../穿越）一律红且文案点名键或解析后路径（t260903-03 ①d 三态）",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260903-03/sc_paths_failclosed_red.py", "ro"),
     ("t260903-03-paths-contract-doc-guard",
      "契约 ①d/v1.6 落地防漂移（对外合同冻结）：①d 两键声明、条目文件畸形 fail-closed 不回落、装载器放开前生效前提过渡句、锚点/内容软语义、声明表内容损坏容错边界、空白值 strip 口径（t260903-03）",
@@ -592,7 +592,7 @@ SCENARIOS = [
      "容器脚手架故障面对抗（t260906-01，ro 隔离根+--root 桩树注入源表三态）：已存在目录接入=项目根树快照逐字节一致（零新增零覆盖，自带自定义 model-routes.yaml 与 marker 不动、scaffold.created 空、root_created=false）；源表缺失与畸形（缺 default:/roles: 结构锚）两态=fail-closed 红+点名源路径+注册表与新建根零残留（回滚含整根与父链移除，绝不吞成空拷贝）；代建×防呆闸交互=新根为已注册根的「尚不存在」祖先仍被闸 d 拒（拒后祖先不被代建=闸序在 mkdir 之前的锚、注册表快照不变）。F1 并发同根异 key TOCTOU 为已登记预存洞（本票不修），不入闸防并发假红。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "node integration/t260906-01/sc_add_scaffold_faultlines.mjs", "ro"),
     ("t260906-01-routes-uninitialized-init",
-     "路由无表引导态+init 退役终态（t260906-01 场景③，t260910-14 退役收口重写；API 面无浏览器，mock webServer 手法同 ui smoke E 段、进程内 apply 零 3099 接触）：无声明项目=分层兜底（宿主风险令 260910）——视图/API 出仓内兜底表内容（default 可解析）且分态可辨（state=decl_missing 留痕不洗白）、routes_file=兜底仓内表（真源锚）、uninitialized 红错态与 template_source 引导字段退场（init 动作退役，新项目按 docs 样例人工填表+落声明）；init 端点退场（POST /sandbar-admin/api/routes/init 不再挂载=零写动作）；已有项目自有表但未声明→不被读也不被改（字节零变更，「拒收零覆盖」意图由零写动作天然承担）；声明指向畸形表→编辑视图诚实暴露解析失败（不静默换表展示；运行时读侧兜底归 t260903-03/t260910-14-S1 钉）。wire 口径=project 走 ?project= 查询参（与同族 GET 一致）。与 t260904-15-host-routes（workbench 薄壳透传面）intent 不同面：本条守 ui 路由视图自身契约。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "路由无表引导态+init 退役终态（t260906-01 场景③，t260914-05 兜底腿退役重写；API 面无浏览器，mock webServer 手法同 ui smoke E 段、进程内 apply 零 3099 接触）：无声明项目=无表引导态——state=decl_missing+uninitialized=true+default=null+routes_file=\"\"（无落点），resolution_error 点名「未声明」+建表模板指引；**反毒断言**：仓内 server/model-routes.yaml 即使仍在位也不被读、内容不透出（「过期表被静默用错」=t260914-05 要杀的毒面）；init 端点退场（POST /sandbar-admin/api/routes/init 不再挂载=零写动作）；已有项目自有表但未声明→不被读也不被改（字节零变更）；声明指向畸形表→编辑视图诚实暴露解析失败并给 state=bad_content+内容指纹（与引擎 parity；运行时读面归 t260903-03/t260910-14-S1 钉）。wire 口径=project 走 ?project= 查询参（与同族 GET 一致）。与 t260904-15-host-routes（workbench 薄壳透传面）intent 不同面：本条守 ui 路由视图自身契约。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "node integration/t260906-01/sc_routes_uninitialized_init.mjs", "ro"),
     ("t260906-01-session-entry-empty-labeled",
      "空项目会话入口可发现+弹层代建口径（t260906-01，workbench 客户端 src+lib 双锚灰盒，同 project-sessions.mjs S3 守卫手法）：账册空=「＋ 新建会话」带字按钮锚（wb-psess-new-labeled 变体+tabs.length===0 条件分支）在 src 在场、lib/client.js 同批在场（lib 锚=bundle 重建看守，KI-052 客户端半从盘现读——盘上 bundle 旧=改了也看不见）；data-wb-psess-new 数据锚与 24px 方块样式保留（有 tab 恢复现行形态、既有 smoke 旧断言不回归）；接入弹层预检口径退役「存在性」措辞、改「自动创建」。真 DOM 呈现归合并闸 ui_evidence 截图证据面（KI-036/044 家族），不重复 browser 腿。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
@@ -887,7 +887,7 @@ SCENARIOS = [
 
     # ---- t260910-14: suggest_next 退役 + 模型路由表迁出 git（真源=声明指向文件，宿主风险令 260910 夜口径）----
     ("t260910-14-routes-truth-fallback",
-     "路由表真源随项目声明走（t260910-14 主题二读面，宿主风险令①③④b/c 口径）：声明 paths.model_routes 指向文件=引擎读面（改表→解析即新模型=验收 A 解析腿）；声明缺失/文件缺失/内容坏三态分态可辨且**分层兜底=仓内 server/model-routes.yaml**（本票保留不删，删除延后另票）留痕点名、禁静默回落 profile 默认；声明改回仓内相对路径=回滚可操作（④b）；`..` 逃逸 fail-closed、`~/x` 展开、空值拒收（形状腿，夹具注册表 SANDBAR_PROJECTS_DIR 隔离零真环境写）。与 t260902-07 两守卫（表静态校验/查表性质，L2 随票重写）与 G6 重写钉（分态新语义）intent 不同面：本条锁真源随声明+分层兜底留痕的系统拼装行为。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；引擎 venv 缺席=ENV_FAIL exit 2",
+     "路由表真源随项目声明走（t260910-14 主题二读面；t260914-05 兜底腿退役口径）：声明 paths.model_routes 指向文件=引擎读面（改表→解析即新模型=验收 A 解析腿）；无表三态分态可辨且**一律无表**——decl_missing（未声明，path=\"\"）/file_missing（文件缺失）/bad_content（内容坏，带 sha256 字节指纹），引擎面单点告警点名 state+路径+指纹（stderr 捕获断言），生效模型=None=profile 默认绝不静默取仓内表；**反毒腿**：仓内 server/model-routes.yaml 即使在位（(b) 降级口径不删文件）也不被读；显式声明仓内相对路径=显式声明合法生效（state=ok）；`..` 逃逸 fail-closed、`~/x` 展开、空值拒收（形状腿，夹具注册表 SANDBAR_PROJECTS_DIR 隔离零真环境写）。与 t260902-07 两守卫（表静态校验/查表性质，L2 随票重写）与 G6 重写钉（分态新语义）intent 不同面：本条锁真源随声明+无表三态点名的系统拼装行为。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；引擎 venv 缺席=ENV_FAIL exit 2",
      "python3 integration/t260910-14/sc_routes_truth_fallback.py", "ro"),
     ("t260910-14-routes-ui-parity-save",
      "路由真源迁移 UI 面读写同源（t260910-14 主题二，验收 B/宿主令④d）：saveRoutesTable 落声明指向的机器级文件（字节级）且夹具仓 git 工作区零变更；buildRoutesView 回传 routes_file=声明指向路径（生效路径+来源展示面）；initRoutesTable/engineRoutesTemplatePath 导出退场（init 引导退役，宿主拍板）。arbitrate 段去重：python/TS 解析矩阵一致性守卫归 t260910-14-routes-resolver-parity（named 函数双面逐项全等），本条剥原矩阵腿专锁 UI 读写/展示终态（覆盖率由彼条保全非弱化）。与 t260910-14-routes-truth-fallback 不同面：彼锁 python 读面，本条锁 UI 读写同源终态。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；node/git 缺席=ENV_FAIL exit 2",
@@ -1040,6 +1040,28 @@ SCENARIOS = [
     ("t260914-01-multirepo-dir-stance",
      "多仓泳道协调目录名的写读姿态（t260914-01 验收 D，灰盒 L2，真 git 夹具+直调 prepare activity，零 docker 零 Temporal，秒级）：**新建多仓泳道不再诞出老名目录**——清单落解析真源位（新泳道=新名协调目录）、清单条目与明细逐条一致、两树均为所属仓已注册 worktree；prepare 幂等重入位置不变；**存量老名泳道保持粘滞**——重进 prepare 原地复写、不诞出新名目录、不翻转在飞票（本修不得依赖任何手工迁移）；**读侧对存量位置零回归**——老名清单照旧可读（含「杂散新名目录＋老名清单」过渡形态仍取到清单、读动作零副作用），判定不放宽（清单损坏照旧 RuntimeError、无形单仓照旧回落 1 scope）。与 t260910-08/t260911-04/t260913-05 真链场景分工：本修只让那些场景的清单锚点跟随真源（intent 不变），本条守目录名姿态本体。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio 缺席=ENV_FAIL exit 2",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260914-01/sc_multirepo_dir_stance.py", "ro"),
+
+    # ---- t260914-05: 收口迁表裁决（删仓内旧路由表+缺表不静默+引用点退场）----
+    # 四条 intent 互不重叠（integration 设计段产物，L2/L3 灰盒，全零 docker 零模型成本）：
+    # ①取表来源封闭性+消费方点名可见（260914 现场 A 毒面泛化：未声明/坏声明/项目主目录
+    #   同名旧表诱饵/跨项目串扰/表在场无命中）②告警内容指纹的诊断效力（内容敏感/稳定/
+    #   跨进程一致/日志一致——指纹撒谎则验收 1「可机械断言」形同虚设）③隔离测试台自声明
+    #   （现场 B 根因回归网：85 断言全绿仍放过真 agent 段 429 的盲区）④生产两项目声明面
+    #   哨兵（验收 5：收口票最易出的回归是顺手伤生产）。
+    # 实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；
+    # temporalio/PyYAML/机器注册表缺席=ENV_FAIL exit 2（点名，无 SKIP）。
+    ("t260914-05-routes-no-silent-pickup",
+     "兜底表退役后的取表来源封闭性与消费方可见性（t260914-05 验收 1/2，灰盒 L2/L3，真 spawn 缝隙+夹具注册表注入，零 docker 零模型成本）：未声明/声明面坏（文件缺失/内容坏）的项目 agent 绝不被钉到任何没人声明的表——引擎仓内旧表、项目主目录里恰好同名的过期表（现场 A 毒面泛化）都不许被捡；无表现场与「表在场但该角色无命中」现场都必须点名可见（禁静默回落 profile 默认），两因文本可辨；项目间不串（一个项目的表不得影响另一个项目的 spawn）；绿锚=声明面好时表内容原样生效（不许为防过期引入内容新鲜度判定＝查表语义零改动红线）。与 t260910-14-routes-truth-fallback（真源随声明走+分层兜底留痕，随本票改口径）与 t260903-03-paths-failclosed-red（路径锚点红传导/roles 面）intent 不同面：本条锁兜底退役后的来源封闭性+消费方点名。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio/PyYAML 缺席=ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260914-05/sc_routes_no_silent_pickup.py", "ro"),
+    ("t260914-05-routes-fingerprint-diagnostics",
+     "告警内容指纹的诊断效力（t260914-05 验收 1「含表路径与内容指纹（可机械断言）」，灰盒 L2，性质口径不锚摘要算法——换 sha256 为别的摘要不得打破本条）：指纹必须真能标识当时读到的字节——同文件两次解析同值、换内容变值、跨进程（子进程）同值（挡 hash()/id()/时间戳型指纹）、坏表（字节可读解析失败）仍给指纹且与好版本可辨、无字节两态（decl_missing/file_missing）不得拿常量冒充指纹；日志不撒谎：告警文本里的指纹=返回值指纹、无字节态告警仍点名路径。与 t260910-14/t260902-07（随本票改写，钉指纹在场性）intent 不同面：本条钉指纹的诊断效力。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；PyYAML 缺席=ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260914-05/sc_routes_fingerprint_diagnostics.py", "ro"),
+    ("t260914-05-routes-isolation-bench-selfdecl",
+     "隔离测试台自声明路由表（t260914-05 验收 3 的根因回归网＝260914 现场 B，灰盒 L2，零 docker 零模型成本秒级）：e2e 夹具注册表条目必须自声明 paths.model_routes 且表可用（存在/可解析/implement 段 developer 条目 provider+model 非空——「先做隔离台自声明再删表」顺序的机械判据，防把「静默用错」换成「无表」），解析走声明面且路径落夹具根内（引擎仓退场），provider 在本机供应面（settings.yaml 或出厂适配器）有名（review R4 面：防表里写个容器没配的 provider 再撞 401）。与 t260913-04 五条（容器执行面）intent 不同面：彼锁执行面，本条锁夹具注册表的声明面契约——85 断言全绿仍放过现场 B 的盲区由本条闭合。直调 run_real_ticket_e2e.build_project（模块级无副作用，import 安全）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；PyYAML/引擎 venv 缺席=ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260914-05/sc_routes_isolation_bench_declares_table.py", "ro"),
+    ("t260914-05-routes-production-declarations",
+     "生产两项目声明面照旧生效+引擎仓退出取表来源（t260914-05 验收 5，灰盒 L2 只读探针，零写零 docker）：sandbar/dengzhufpv 注册条目仍声明 paths.model_routes、解析 state=ok、roles.developer provider/model 非空（性质断言不钉值——模型是运行时可调项，260910 裁决心智）；解析路径在引擎仓之外（真源机器级不变式）；未登记 key 走三态口径（decl_missing/无表/路径不落仓）＝引擎仓对任何人不再是取表来源；只读 pledge（机器表字节摘要探针前后一致）。条目在场但声明缺失=产品红（契约被破坏），机器注册表/项目条目缺席=ENV_FAIL exit 2（点名）。与 t260902-07 表守卫（随本票改写，单项目表静态性质）intent 不同面：本条锁生产注册面端到端解析拼装+不许伤生产哨兵。本条落地前后都应绿",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260914-05/sc_routes_production_declarations.py", "ro"),
 
 
 ]

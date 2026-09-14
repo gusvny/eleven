@@ -11,17 +11,23 @@
  *                                   由 UI 弹人工确认后重发（面板通道的两阶段提交）
  *   GET  /sandbar-admin/api/audit?n → server/admin.log 末 n 行（JSONL 原样解析）
  *   GET  /sandbar-admin/api/routes?project=<key>
- *                                 → 模型路由视图（M12，只读）：解析 <项目主目录>/server/
- *                                   model-routes.yaml（真源）+ 扫生成 preset 的
- *                                   dispatch_* 烘焙实例（生效态）→ 路由表 + 查表
- *                                   结果 + 生效实例；本接口只读不改。
+ *                                 → 模型路由视图（M12，只读）：解析注册条目
+ *                                   paths.model_routes 声明指向的路由表（唯一真源，
+ *                                   t260910-14 读写同源；t260914-05 仓内兜底表退役：
+ *                                   未声明/声明文件缺失=无表引导态 uninitialized+点名
+ *                                   resolution_error，解析失败=bad_content 点名+指纹）
+ *                                   + 扫生成 preset 的 dispatch_* 烘焙实例（生效态）
+ *                                   → 路由表 + 查表结果 + 生效实例；本接口只读不改。
  *                                   多项目化（260823）：project 必传、无默认值（projects.yaml
- *                                   注册表 key），路由表按项目主目录解析；项目无该文件走
+ *                                   注册表 key），路由表按声明解析；读/解析故障走
  *                                   {ok:false, error} 人话降级。
  *   POST /sandbar-admin/api/routes  → M13 保存：{project, table}（default/roles 的
  *                                   provider|model，schema 锁死可编辑槽位）→
- *                                   外科补丁写 <项目主目录> 的 model-routes.yaml（写前备份
- *                                   /tmp；保存即生效——运行时查表）。由 sandbar-providers
+ *                                   外科补丁写声明指向的 model-routes.yaml（写前备份
+ *                                   /tmp；保存即生效——引擎每次派活读表，下一 spawn 即用
+ *                                   新模型；本端点在内存服务内，重启 3099 才见本文件
+ *                                   新逻辑，KI-052 同族）。未声明项目显式拒写+建表指引
+ *                                   （t260914-05：不代写仓内文件）。由 sandbar-providers
  *                                   「模型」页签「路由表」分区调用。
  *
  * M13（t260822-m13-model-routes-edit）：浏览器半不再注册 settings.section
@@ -193,11 +199,11 @@ export function apply(ctx: Context, config?: SuyouAdminUiConfig): void {
     return { key, primary: primaryDir(proj) }
   }
 
-  /** 模型路由视图（M12，只读；t260910-14 读写同源化）：解析「声明 paths.model_routes
-   *  指向的路由表」（未声明回落仓内兜底表）+ 扫生成 preset 烘焙实例。
-   *  解析失败/读取故障 → 200 {ok:false, error}（UI 显示原因不渲染空表），不抛 500；
-   *  声明与兜底表全缺 → 200 {ok:true, result.uninitialized:true}（纯指引引导态，
-   *  init 动作已退役）。 */
+  /** 模型路由视图（M12，只读；t260910-14 读写同源化；t260914-05 兜底腿退役）：
+   *  解析「声明 paths.model_routes 指向的路由表」（未声明/声明文件缺失=无表）+
+   *  扫生成 preset 烘焙实例。解析失败/读取故障 → 200 {ok:false, error}（UI 显示
+   *  原因不渲染空表），不抛 500；无表 → 200 {ok:true, result.uninitialized:true}
+   *  （纯指引引导态，resolution_error 点名原因与建表建议，init 动作已退役）。 */
   async function handleRoutes(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const proj = projOf(req, res)
     if (proj === null) return
@@ -213,7 +219,8 @@ export function apply(ctx: Context, config?: SuyouAdminUiConfig): void {
     }
   }
 
-  /** 模型路由保存（M13，写；t260910-14 落点=声明指向文件，未声明=仓内兜底表）：{table} → saveRoutesTable。
+  /** 模型路由保存（M13，写；t260910-14 落点=声明指向文件；t260914-05 未声明=显式
+   *  拒写+建表指引，不代写仓内文件）：{table} → saveRoutesTable。
    *  载荷非法/表缺失/备份失败 → 200 {ok:false, error}（不抛 500）；
    *  成功 → {ok:true, result:{written, routes_file, backup, changed, regenerate}}。 */
   async function handleRoutesSave(req: IncomingMessage, res: ServerResponse): Promise<void> {

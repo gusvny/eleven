@@ -7,18 +7,19 @@
  *      结构）；非法行/缩进/键重复/带引号值 → RoutesParseError 带行号（不静默丢）。
  *   B. effectiveRoute：查表链路 tasks.<kind> → roles.<role> → default；条目缺
  *      provider/model → 告警并向上落；全落空 → null。
- *   D. buildRoutesView 对真源（model-routes.yaml + sandbar-integration preset）钉当前值：
- *      默认 kimi-coding/k3、integration=zai/glm-5.2、product-operation 分工=zai/glm-5.2、
- *      8 个 dispatch 实例（5 默认 + 3 分工）、只读口径——防 gen.py/路由表漂移。
+ *   D. buildRoutesView 读「声明指向的表」（夹具注册表+自写夹具表，性质断言）：
+ *      state=ok 读写同源、查表链/分工序/只读口径、常量面；声明文件缺失=file_missing
+ *      点名+引导态（t260914-05：不回落任何仓内表）。
  *   E. /sandbar-admin/api/routes 路由（node.ts apply + mock webServer/req/res）：
- *      临时 repo 布局 → 200 路由表+实例；路由表缺失 → 200 ok+uninitialized 引导态
- *      （t260906-01）；POST /routes/init 从引擎默认表生成（已存在拒收、建父目录）。
+ *      声明命中 → 200 路由表透传；未声明 → 200 ok+decl_missing 引导态，**仓内形状的
+ *      表在场也不被读**（反毒断言）；routes/init 退役不再注册。
+ *   H. 保存端点：声明命中正常保存（备份/生效话术）；未声明 → 显式拒写+建表指引
+ *      （t260914-05：不代写仓内文件）。
  */
 
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import {
   KINDS, PROVIDER_FAMILY, ROLES,
   RoutesParseError, applyRouteEdits, buildRoutesView, effectiveRoute,
@@ -33,9 +34,6 @@ function ok(cond, label) {
   else { failed++; console.log(`  FAIL ${label}`) }
 }
 function section(t) { console.log(`\n== ${t}`) }
-
-const HERE = dirname(fileURLToPath(import.meta.url))
-const REPO = join(HERE, '..', '..', '..', '..') // server/plugins/ui/smoke -> 仓库根
 
 /* ------------------------------------------------------------ A. parseRoutesYaml */
 
@@ -117,41 +115,115 @@ roles:
   ok(r6?.provider === 'dft' && r6?.via === 'default', 'task 缺条目落 default')
 }
 
-/* ------------------------------------------------------------ D. 真源钉值 */
+/* ------------------------------------------------------------ D. 视图读声明表（性质断言） */
 
-section('D buildRoutesView 对真源钉当前值（防路由表漂移）')
+const FIXTURE_TABLE = [
+  '# 夹具表（t260914-05：真源=声明 paths.model_routes 指向的文件）',
+  'default:',
+  '  provider: fx-dft',
+  '  model: fx-m0',
+  'roles:',
+  '  integration:',
+  '    provider: fx-int',
+  '    model: fx-mi',
+  '  developer:',
+  '    provider: fx-dev',
+  '    model: fx-md',
+  '  product-operation:',
+  '    provider: fx-po',
+  '    model: fx-mp',
+  '    tasks:',
+  '      proofread:',
+  '        provider: fx-pr',
+  '        model: fx-mpr',
+  '      qa:',
+  '        provider: fx-qa',
+  '        model: fx-mqa',
+  '      analyst:',
+  '        provider: fx-an',
+  '        model: fx-man',
+  '',
+].join('\n')
+
+async function fixtureRegistry(tmp, entries) {
+  const reg = join(tmp, 'reg')
+  for (const [key, body] of Object.entries(entries)) {
+    await mkdir(join(reg, key), { recursive: true })
+    await writeFile(join(reg, key, 'project.yaml'), body, 'utf8')
+  }
+  return reg
+}
+
+const entryYaml = (key, repoDir, declaredPath) => `schema: v1\n`
+  + (declaredPath ? `paths:\n  model_routes: ${declaredPath}\n` : '')
+  + `project:\n  - key: ${key}\n    name: ${key.toUpperCase()}\n    dirs:\n      - ${repoDir}\n`
+
+section('D buildRoutesView 读「声明指向的表」（夹具自足，性质断言不钉生产值）')
 {
-  const view = await buildRoutesView(REPO)
-  ok(view.error === undefined, '真源视图组装无 error')
-  ok(view.default?.provider === 'zai' && view.default?.model === 'glm-5.3-flash' && view.default?.via === 'default',
-    'default = zai/glm-5.3-flash（260902 配额急救修正后的表值）')
-  ok(view.roles.length === 3, '三角色齐全')
-  ok(view.roles.map(r => r.role).join(',') === 'integration,developer,product-operation',
-    '角色顺序 = ROLES 常量顺序')
-  const dev = view.roles.find(r => r.role === 'developer')
-  ok(dev?.effective?.provider === 'zai' && dev?.effective?.via === 'roles.developer', 'developer 落角色条目 zai')
-  const integ = view.roles.find(r => r.role === 'integration')
-  ok(integ?.effective?.provider === 'zai-coding-cn' && integ?.effective?.via === 'roles.integration', 'integration = zai-coding-cn（第二账号）')
-  const po = view.roles.find(r => r.role === 'product-operation')
-  ok(po?.tasks.length === 3, 'product-operation 三个分工')
-  ok(po?.tasks.map(t => t.kind).join(',') === 'proofread,qa,analyst', '分工序 = KINDS 常量序')
-  const proofread = po?.tasks.find(t => t.kind === 'proofread')
-  ok(proofread?.effective?.provider === 'zai' && proofread?.effective?.model === 'glm-5.2'
-    && proofread?.effective?.via === 'roles.product-operation.tasks.proofread', '审校分工 = zai/glm-5.2')
-  ok(proofread?.readonly === true, '审校分工只读')
-  ok(PROVIDER_FAMILY['kimi-coding'] === '生成家' && PROVIDER_FAMILY.zai === '审校家', '家映射常量')
-  ok(KINDS.proofread.display === '审校' && ROLES.developer.display === '开发', '显示名常量')
+  const tmp = await mkdtemp(join(tmpdir(), 'syadm-routes-view-'))
+  try {
+    const repo = join(tmp, 'repo')
+    await mkdir(repo, { recursive: true })
+    const tablePath = join(tmp, 'declared', 'routes.yaml')
+    await mkdir(dirname(tablePath), { recursive: true })
+    await writeFile(tablePath, FIXTURE_TABLE, 'utf8')
+    const reg = await fixtureRegistry(tmp, { fxdemo: entryYaml('fxdemo', repo, tablePath) })
+
+    const view = await buildRoutesView(repo, { projectsDir: reg, projectKey: 'fxdemo' })
+    ok(view.error === undefined, '视图组装无 error')
+    ok(view.state === 'ok' && view.declared === tablePath && view.routes_file === tablePath,
+      'state=ok 且读写同源（路径=声明文件）')
+    ok(view.default?.provider === 'fx-dft' && view.default?.via === 'default', 'default 条目来自声明表')
+    ok(view.roles.length === 3, '三角色齐全')
+    ok(view.roles.map(r => r.role).join(',') === 'integration,developer,product-operation',
+      '角色顺序 = ROLES 常量顺序')
+    const dev = view.roles.find(r => r.role === 'developer')
+    ok(dev?.effective?.provider === 'fx-dev' && dev?.effective?.via === 'roles.developer', 'developer 落角色条目')
+    const integ = view.roles.find(r => r.role === 'integration')
+    ok(integ?.effective?.provider === 'fx-int' && integ?.effective?.via === 'roles.integration', 'integration 落角色条目')
+    const po = view.roles.find(r => r.role === 'product-operation')
+    ok(po?.tasks.length === 3 && po?.tasks.map(t => t.kind).join(',') === 'proofread,qa,analyst',
+      'product-operation 分工序 = KINDS 常量序')
+    const proofread = po?.tasks.find(t => t.kind === 'proofread')
+    ok(proofread?.effective?.provider === 'fx-pr'
+      && proofread?.effective?.via === 'roles.product-operation.tasks.proofread', '审校分工查 task 级')
+    ok(proofread?.readonly === true, '审校分工只读')
+    ok(PROVIDER_FAMILY['kimi-coding'] === '生成家' && PROVIDER_FAMILY.zai === '审校家', '家映射常量')
+    ok(KINDS.proofread.display === '审校' && ROLES.developer.display === '开发', '显示名常量')
+
+    // 声明文件缺失 → file_missing 点名 + 引导态（不回落任何仓内表，t260914-05）
+    await rm(tablePath)
+    const v2 = await buildRoutesView(repo, { projectsDir: reg, projectKey: 'fxdemo' })
+    ok(v2.state === 'file_missing' && v2.uninitialized === true && v2.default === null,
+      '声明文件缺失 → file_missing 引导态（无表）')
+    ok(String(v2.resolution_error).includes('文件缺失') && String(v2.resolution_error).includes(tablePath),
+      'file_missing 点名声明路径')
+    ok(!String(v2.resolution_error).includes('兜底'), '无「兜底」语义残留')
+  } finally {
+    await rm(tmp, { recursive: true, force: true })
+  }
 }
 
 /* ------------------------------------------------------------ E. 路由 */
 
-section('E /sandbar-admin/api/routes 路由（mock webServer）')
+section('E /sandbar-admin/api/routes 路由（mock webServer + per-key 注册表）')
 {
   const tmp = await mkdtemp(join(tmpdir(), 'syadm-routes-'))
   try {
     const repo = join(tmp, 'repo')
     await mkdir(join(repo, 'server'), { recursive: true })
-    await copyFile(join(REPO, 'server', 'model-routes.yaml'), join(repo, 'server', 'model-routes.yaml'))
+    // 反毒夹具：仓内形状的表在场，但项目未声明——证明「在场也不被读」（t260914-05 毒面反证）
+    await writeFile(join(repo, 'server', 'model-routes.yaml'),
+      'default:\n  provider: stale-zai\n  model: stale-m\nroles: {}\n', 'utf8')
+
+    const tablePath = join(tmp, 'declared', 'routes.yaml')
+    await mkdir(dirname(tablePath), { recursive: true })
+    await writeFile(tablePath, FIXTURE_TABLE, 'utf8')
+    const reg = await fixtureRegistry(tmp, {
+      demo: entryYaml('demo', repo, tablePath),
+      stale: entryYaml('stale', repo, null),
+    })
+    process.env.SANDBAR_PROJECTS_DIR = reg
 
     const routes = []
     const ws = { register: (r) => { routes.push(r); return () => {} } }
@@ -165,59 +237,45 @@ section('E /sandbar-admin/api/routes 路由（mock webServer）')
     const route = routes.find(x => x.kind === 'exact' && x.path === '/sandbar-admin/api/routes')
     ok(route !== undefined, 'routes exact 路由已挂')
 
-    // 注册表夹具（SANDBAR_PROJECTS_YAML legacy 单文件模式，loadRegistry 每次现读 env）：
-    // projOf 需要已注册项目；三个 key 各指一个主目录（有表 / 无表 / 深层无父目录）。
-    // 先 import 后设 env 依赖此口径。
-    const fixtureReg = join(tmp, 'projects.yaml')
-    await writeFile(fixtureReg,
-      `projects:\n  - key: demo\n    name: Demo\n    dirs:\n      - ${repo}`
-      + `\n  - key: empty\n    name: Empty\n    dirs:\n      - ${join(tmp, 'repo-empty')}`
-      + `\n  - key: deep\n    name: Deep\n    dirs:\n      - ${join(tmp, 'repo-empty2')}\n`, 'utf8')
-    process.env.SANDBAR_PROJECTS_YAML = fixtureReg
-
     const res = {
       status: 0, body: null,
       writeHead(s) { this.status = s },
       end(b) { this.body = b ? JSON.parse(b) : null },
     }
-    await route.handler({ url: '/sandbar-admin/api/routes?project=demo', method: 'GET' }, res)
-    ok(res.status === 200 && res.body.ok === true, 'GET 200')
-    ok(res.body.result.roles.length === 3, '路由表 3 角色')
-    ok(res.body.result.default.provider === 'zai', 'default 透传')
+    const callGet = async (key) => {
+      const r = { status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } }
+      await route.handler({ url: '/sandbar-admin/api/routes?project=' + key, method: 'GET' }, r)
+      return r
+    }
 
-    // 路由表缺失 → 200 ok + uninitialized 引导态（不抛错不红）
-    const routes2 = []
-    const ws2 = { register: (r) => { routes2.push(r); return () => {} } }
-    const ctx2 = {
-      effect: (fn) => { fn() },
-      logger: { info() {}, warn() {} },
-      get: (k) => (k === 'webServer' ? ws2 : undefined),
-      on: () => () => {},
-    }
-    await mkdir(join(tmp, 'repo-empty', 'server'), { recursive: true })
-    apply(ctx2, { repo: join(tmp, 'repo-empty') })
-    const route2 = routes2.find(x => x.kind === 'exact' && x.path === '/sandbar-admin/api/routes')
-    const res2 = {
-      status: 0, body: null,
-      writeHead(s) { this.status = s },
-      end(b) { this.body = b ? JSON.parse(b) : null },
-    }
-    await route2.handler({ url: '/sandbar-admin/api/routes?project=empty', method: 'GET' }, res2)
-    // t260910-14：未声明 paths.model_routes → decl_missing 点名 + 读侧兜底=仓内表
-    // （宿主风险令 260910：迁移窗口不断供；真源=声明指向文件）。
-    ok(res2.status === 200 && res2.body.ok === true
-      && res2.body.result.state === 'decl_missing'
-      && res2.body.result.declared === null
-      && String(res2.body.result.routes_file).includes('model-routes.yaml')
-      && String(res2.body.result.resolution_error ?? '').includes('兜底'),
-      '未声明 → 200 ok + decl_missing 点名 + 仓内兜底表接管（不抛错不静默）')
+    // 声明命中（ok）：读声明表并透传
+    const r1 = await callGet('demo')
+    ok(r1.status === 200 && r1.body.ok === true, 'GET 200（声明命中）')
+    ok(r1.body.result.state === 'ok' && r1.body.result.routes_file === tablePath,
+      '读写同源：routes_file=声明文件')
+    ok(r1.body.result.default.provider === 'fx-dft', 'default 透传（来自声明表）')
+    ok(r1.body.result.roles.length === 3, '路由表 3 角色')
+
+    // 未声明（反毒）：decl_missing 引导态，仓内形状的表在场也不被读
+    const r2 = await callGet('stale')
+    ok(r2.status === 200 && r2.body.ok === true, 'GET 200（未声明=引导态不红）')
+    ok(r2.body.result.state === 'decl_missing' && r2.body.result.declared === null,
+      'decl_missing 分态可辨')
+    ok(r2.body.result.uninitialized === true && r2.body.result.default === null,
+      '无表引导态（不渲染旧表）')
+    ok(r2.body.result.routes_file === '', 'routes_file 空（不再指仓内表）')
+    const err2 = String(r2.body.result.resolution_error ?? '')
+    ok(err2.includes('未声明') && err2.includes('docs/model-routes-sample.yaml'),
+      'resolution_error 点名+建表指引')
+    ok(!err2.includes('兜底'), '无「兜底」语义残留')
+    ok(!JSON.stringify(r2.body.result).includes('stale-zai'), '仓内表内容未被透出（在场也不被读）')
 
     // t260910-14 退役断言：routes/init 引导动作已随 init 退役删除（宿主拍板：
     // 新项目按 docs 样例人工填表），路由不再注册。
-    ok(routes2.find(x => x.path === '/sandbar-admin/api/routes/init') === undefined,
+    ok(routes.find(x => x.path === '/sandbar-admin/api/routes/init') === undefined,
       'routes/init 路由已退役（不再注册）')
   } finally {
-    delete process.env.SANDBAR_PROJECTS_YAML
+    delete process.env.SANDBAR_PROJECTS_DIR
     await rm(tmp, { recursive: true, force: true })
   }
 }
@@ -343,8 +401,9 @@ section('H POST /sandbar-admin/api/routes/save（mock webServer + 临时 repo）
   try {
     const repo = join(tmp, 'repo')
     await mkdir(join(repo, 'server'), { recursive: true })
-    await copyFile(join(REPO, 'server', 'model-routes.yaml'), join(repo, 'server', 'model-routes.yaml'))
     const routesFile = join(repo, 'server', 'model-routes.yaml')
+    // t260914-05：自写夹具表（不再拷贝仓内表当夹具——真源=声明指向文件，夹具自足）
+    await writeFile(routesFile, FIXTURE_TABLE, 'utf8')
 
     const routes = []
     const ws = { register: (r) => { routes.push(r); return () => {} } }
@@ -359,18 +418,18 @@ section('H POST /sandbar-admin/api/routes/save（mock webServer + 临时 repo）
     ok(route !== undefined, 'save exact 路由已挂')
 
     // 注册表夹具（t260910-14 同源化）：per-key 注册表 + 声明 paths.model_routes 指向
-    // 临时表——保存落点=声明指向文件（真源），绝不触碰真仓兜底表。
-    const reg = join(tmp, 'reg')
-    await mkdir(join(reg, 'demo'), { recursive: true })
-    await writeFile(join(reg, 'demo', 'project.yaml'),
-      `schema: v1\npaths:\n  model_routes: ${routesFile}\nproject:\n  - key: demo\n    name: Demo\n    dirs:\n      - ${repo}\n`, 'utf8')
+    // 临时表——保存落点=声明指向文件（真源）；nodecl 条目不声明（拒写腿用）。
+    const reg = await fixtureRegistry(tmp, {
+      demo: entryYaml('demo', repo, routesFile),
+      nodecl: entryYaml('nodecl', join(tmp, 'repo2'), null),
+    })
     process.env.SANDBAR_PROJECTS_DIR = reg
 
     const res = () => ({ status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } })
-    const call = async (body) => {
+    const call = async (body, key = 'demo') => {
       const r = res()
       const req = {
-        url: '/sandbar-admin/api/routes/save?project=demo',
+        url: '/sandbar-admin/api/routes/save?project=' + key,
         method: 'POST',
         [Symbol.asyncIterator]: async function* () { yield Buffer.from(JSON.stringify(body ?? {}), 'utf8') },
       }
@@ -415,9 +474,16 @@ section('H POST /sandbar-admin/api/routes/save（mock webServer + 临时 repo）
     // 缺 table → 400
     const r4 = await call({})
     ok(r4.status === 400, '缺 table → 400')
-  } finally {
-    delete process.env.SANDBAR_PROJECTS_YAML
 
+    // t260914-05：未声明项目保存 → 200 ok:false 显式拒写+建表指引（不代写仓内文件）
+    const r5 = await call({ table: { default: { provider: 'x', model: 'y' } } }, 'nodecl')
+    ok(r5.status === 200 && r5.body.ok === false,
+      '未声明保存 → 200 ok:false（显式拒写，无 result 键）')
+    ok(String(r5.body.error).includes('无落点可写')
+      && String(r5.body.error).includes('docs/model-routes-sample.yaml'),
+      '拒写文案点名原因+建表指引')
+  } finally {
+    delete process.env.SANDBAR_PROJECTS_DIR
     await rm(tmp, { recursive: true, force: true })
   }
 }

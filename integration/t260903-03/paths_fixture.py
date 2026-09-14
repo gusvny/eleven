@@ -1,10 +1,14 @@
 # t260903-03 共享夹具（非 sc_ 前缀 = 共享/子检查代码，不入 SCENARIOS 清单）。
 # 供 sc_paths_spawn_seam.py / sc_paths_failclosed_red.py 复用：tmp 注册表（SANDBAR_PROJECTS_DIR）、
-# 条目 project.yaml 手写桩、spawn 缝隙调用、cmd --patch 观测。只用标准库。
+# 条目 project.yaml 手写桩、spawn 缝隙调用、cmd --patch 观测、shared 模块告警捕获。
+# 只用标准库（t260914-05：PatchedRoutesFile 随 MODEL_ROUTES_FILE 常量一并退役——
+# 无表三态的观测面改为「capture_route_warnings 捕获 [model_route] 点名」）。
+import logging
 import os
 import shutil
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -95,22 +99,27 @@ def write_empty_routes_table(path):
     return path
 
 
-class PatchedRoutesFile:
-    """把回落单源常量 MODEL_ROUTES_FILE 指 tmp 桩（观测回落读的是常量这一件事）；退出还原。"""
+@contextmanager
+def capture_route_warnings():
+    """捕获 shared 模块 logger 的 WARNING（[model_route] 单点点名），退出还原。
+    t260914-05：非 ok 态观测面=本捕获（引擎单点）+ spawn 面消费方点名，禁静默。"""
+    shared = import_shared()
+    records = []
 
-    def __init__(self, path):
-        self.path = Path(path)
+    class _H(logging.Handler):
+        def emit(self, record):
+            records.append(record.getMessage())
 
-    def __enter__(self):
-        shared = import_shared()
-        self._mod = shared
-        self._old = shared.MODEL_ROUTES_FILE
-        shared.MODEL_ROUTES_FILE = self.path
-        return self
-
-    def __exit__(self, *exc):
-        self._mod.MODEL_ROUTES_FILE = self._old
-        return False
+    h = _H()
+    logger = logging.getLogger(shared.__name__)
+    old_level = logger.level
+    logger.addHandler(h)
+    logger.setLevel(logging.WARNING)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(h)
+        logger.setLevel(old_level)
 
 
 _SPAWN_SEQ = iter(range(10000))

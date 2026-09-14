@@ -20,6 +20,8 @@ in-flight old lanes — see the individual # naming-compat markers).
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import logging
 import os
 import pathlib
 import re
@@ -1614,70 +1616,129 @@ KIND_MODELS: Dict[str, str] = {"proofread": "zai/glm-5.2", "qa": "zai/glm-5.2", 
 # ---- Runtime model routing (the only consumer left after gen.py retired: an agent
 # activity looks up the table at spawn time) ----
 # Lookup rule: roles.<role>.tasks.<kind> → roles.<role> → default; if all miss, return
-# None (no override, the agent uses the profile's default model). The table =
-# server/model-routes.yaml (visually editable in the ticket console's 「模型」 tab, in
-# effect from the next spawn — no generation step). Contract ①d: the table path can be
-# declared by a project registry entry's paths.model_routes (see routes_file_for_spawn);
-# undeclared, it falls back to this constant — sandbar declares no paths, so byte-level
-# zero regression.
+# None (no override, the agent uses the profile's default model). The single truth
+# source is the file declared by the project registry entry's paths.model_routes
+# (contract ①d; see routes_file_for_spawn). The in-repo server/model-routes.yaml was
+# retired (t260914-05): a stale in-repo table that the read side silently falls back to
+# is worse than having no table at all — a missing table gets named loudly, a stale one
+# gets used silently (260914 live incidents A/B both pinned agents to a dead account).
 
-# 仓内兜底表（宿主风险令 260910：读侧分层——声明指向文件优先，仓内表兜底；本票
-# 不删仓内表，删除延后另开小票）。真源=声明所指向的文件，这份只是迁移窗口的兜底。
-MODEL_ROUTES_REL = "server/model-routes.yaml"
-MODEL_ROUTES_FILE = REPO_ROOT / MODEL_ROUTES_REL
-
-# 路由表解析三态（t260910-14，KI-030 收窄）：state ∈
+# 路由表解析四态（t260910-14 三态化；t260914-05 兜底腿退役）：state ∈
 #   ok           —— 声明指向文件存在且可解析（真源生效）
-#   decl_missing —— 条目未声明 paths.model_routes（兜底=仓内表，留痕不静默）
-#   file_missing —— 声明存在但文件缺失（兜底=仓内表若在，否则无表，均留痕）
-#   bad_content  —— 声明文件存在但不可解析（兜底=仓内表若在，否则无表，均留痕）
-# 任何非 ok 态都必须由消费方点名日志（state+path+error），禁静默回落 profile 默认。
+#   decl_missing —— 条目未声明 paths.model_routes（无表，不回落任何仓内文件）
+#   file_missing —— 声明存在但文件缺失
+#   bad_content  —— 声明文件存在但不可解析（含读不了/目录当表/yaml 顶层非映射：标量、
+#                   列表；以及查表链形状坏：roles/条目/tasks 值非映射，260915 gen2 收口）
+# 任何非 ok 态：table=None、path=声明路径（decl_missing 为 ""），并由本函数单点
+# **点名告警**（state+path+指纹+原因，decl_missing 附建表建议落点）——查表侧回落
+# profile 默认再由消费方点名一次，禁静默。指纹=fingerprint（实际读到字节的 sha256 前 12）。
+
+
+def routes_fingerprint(path: Any) -> str:
+    """内容指纹：实际读到字节的 sha256 前 12 位（"sha256:<12hex>"）；无字节可读=""。"""
+    try:
+        data = pathlib.Path(path).read_bytes()
+    except Exception:
+        return ""
+    return "sha256:" + hashlib.sha256(data).hexdigest()[:12]
+
+
+def _routes_landing_hint() -> str:
+    """缺表点名时给的建表建议落点与模板指引（人可见话术，防「不知道去哪建表」）。"""
+    return ("建表建议落点 ~/.sandbar/projects/<key>/model-routes.yaml"
+            "（模板=docs/model-routes-sample.yaml，落 paths.model_routes 声明后生效）")
+
+
+def _log_routes_state(state: str, path: Any, fingerprint: str, error: str) -> None:
+    """非 ok 态单点点名：state+path+指纹+原因——任何消费方都共享同一条留痕。"""
+    logging.getLogger(__name__).warning(
+        "[model_route] 路由表解析非 ok（state=%s，读=%s，指纹=%s）：%s",
+        state, str(path) or "（无表）", fingerprint or "（无字节）", error)
+
+
+def _routes_table_shape_error(table: Dict[str, Any]) -> Optional[str]:
+    """查表链形状校验（260915 gen2，P5 另一半）：roles/条目/tasks 在位时必须是映射。
+
+    消费方 model_route_for 沿链 .get 取值——这些位置出现标量/列表会让 spawn 以
+    AttributeError 晦涩崩溃（260915 独立探针实证）。回 None=形状可用；回 str=人话
+    原因（resolve 层收进 bad_content 点名，带字节指纹）。default 段非映射**不拦**：
+    消费方 isinstance 容错、查表链跳过=default 不命中，语义既有且不崩（不为它扩态，
+    防语义漂移）。"""
+    roles = table.get("roles")
+    if roles is not None and not isinstance(roles, dict):
+        return "roles 段不是映射（yaml 顶层 roles=%s）" % type(roles).__name__
+    for name, entry in (roles or {}).items():
+        if entry is not None and not isinstance(entry, dict):
+            return "roles.%s 条目不是映射（=%s）" % (name, type(entry).__name__)
+        tasks = (entry or {}).get("tasks")
+        if tasks is not None and not isinstance(tasks, dict):
+            return "roles.%s.tasks 不是映射（=%s）" % (name, type(tasks).__name__)
+    return None
 
 
 def resolve_routes_table(project_key: str) -> Dict[str, Any]:
-    """Model route table resolution — the single entry point for 读=写=生效（真源=
-    paths.model_routes 指向的文件；UI 读写与引擎查表共用同一解析，contract ①d）。
+    """Model route table resolution — 单一入口（真源=paths.model_routes 指向的文件；
+    UI 读写与引擎查表共用同一解析，contract ①d）。
 
-    Returns {"state", "declared", "path", "table", "error"}:
-      state     —— 上方四态之一（兜底链走完后按「实际生效来源」的缺陷面命名）
-      declared  —— 声明的绝对路径（未声明=None）
-      path      —— 实际应读/写的文件（声明文件；或兜底=仓内表；或声明文件——
-                   file_missing/bad_content 时 UI 写面仍指声明路径，读面才兜底）
-      table     —— 解析成功的表（dict）或 None
-      error     —— 非 ok 态的人话原因（ok 态为空串）
-    条目文件本身解析不了仍照旧 fail-closed（ProjectPathsError 传播）。"""
+    Returns {"state", "declared", "path", "table", "error", "fingerprint"}:
+      state       —— 上方四态之一
+      declared    —— 声明的绝对路径（未声明=None）
+      path        —— 声明指向的文件（未声明=""；不再回落任何仓内表）
+      table       —— 解析成功的表（dict）或 None（非 ok 态一律 None）
+      error       —— 非 ok 态的人话原因（ok 态为空串）
+      fingerprint —— 本腿实际读到字节的 sha256 前 12（"sha256:<12hex>"）；无字节可读=""
+    非 ok 态在本函数内单点 WARNING 点名（state+path+指纹+原因）；条目文件本身解析不了
+    仍照旧 fail-closed（ProjectPathsError 传播）。"""
     import yaml  # pyyaml（engine venv）
     info = project_paths(project_key)
-    declared: Optional[pathlib.Path] = info["model_routes"]
+    declared = info["model_routes"]
     if declared is None:
-        fb = {"state": "decl_missing", "declared": None, "path": MODEL_ROUTES_FILE,
-              "table": None, "error": "条目未声明 paths.model_routes（读侧兜底=仓内表 " + str(MODEL_ROUTES_FILE) + "）"}
-        try:
-            fb["table"] = yaml.safe_load(MODEL_ROUTES_FILE.read_text("utf-8")) or {}
-        except FileNotFoundError:
-            fb["error"] = "未声明 paths.model_routes 且仓内兜底表缺失：" + str(MODEL_ROUTES_FILE)
-        except Exception as e:
-            fb["error"] = "未声明 paths.model_routes 且仓内兜底表不可解析：%s（%s）" % (MODEL_ROUTES_FILE, str(e)[:160])
-        # state 恒为 decl_missing（点名态不因兜底成功而洗白——三态可辨禁静默）
-        return fb
-    base = {"state": "ok", "declared": declared, "path": declared, "table": None, "error": ""}
+        err = ("未声明 paths.model_routes（读侧不再回落仓内表；条目=%s）；%s"
+               % (info["entry"] or "（条目缺失/未注册）", _routes_landing_hint()))
+        _log_routes_state("decl_missing", "", "", err)
+        return {"state": "decl_missing", "declared": None, "path": "", "table": None,
+                "error": err, "fingerprint": ""}
+    declared = pathlib.Path(declared)
     try:
-        base["table"] = yaml.safe_load(pathlib.Path(declared).read_text("utf-8")) or {}
+        raw = declared.read_bytes()
     except FileNotFoundError:
-        base.update(state="file_missing",
-                    error="声明指向的路由表文件缺失：%s" % declared)
+        err = "声明指向的路由表文件缺失：%s；%s" % (declared, _routes_landing_hint())
+        _log_routes_state("file_missing", declared, "", err)
+        return {"state": "file_missing", "declared": declared, "path": declared,
+                "table": None, "error": err, "fingerprint": ""}
+    except Exception as e:  # 目录当表/权限/不可读：坏表族（无字节可指纹）
+        err = "声明指向的路由表不可解析（读取失败）：%s（%s）" % (declared, str(e)[:160])
+        _log_routes_state("bad_content", declared, "", err)
+        return {"state": "bad_content", "declared": declared, "path": declared,
+                "table": None, "error": err, "fingerprint": ""}
+    fp = "sha256:" + hashlib.sha256(raw).hexdigest()[:12]
+    try:
+        parsed = yaml.safe_load(raw.decode("utf-8"))
     except Exception as e:
-        base.update(state="bad_content",
-                    error="声明指向的路由表不可解析：%s（%s）" % (declared, str(e)[:160]))
-    if base["state"] != "ok":
-        # 兜底腿：声明面坏/缺 → 仓内表若在则接管读（写面仍指声明路径），留痕由消费方做
-        try:
-            base["table"] = yaml.safe_load(MODEL_ROUTES_FILE.read_text("utf-8")) or {}
-            base["path"] = MODEL_ROUTES_FILE
-            base["error"] += "（读侧兜底=仓内表 " + str(MODEL_ROUTES_FILE) + "）"
-        except Exception:
-            base["table"] = None  # 无表：查表回落 profile 默认（消费方点名留痕）
-    return base
+        err = "声明指向的路由表不可解析：%s（%s）" % (declared, str(e)[:160])
+        _log_routes_state("bad_content", declared, fp, err)
+        return {"state": "bad_content", "declared": declared, "path": declared,
+                "table": None, "error": err, "fingerprint": fp}
+    table = parsed or {}   # 空文件/空文档=空表（软语义：条目缺→查表回落 profile 默认，契约 ①d）
+    if not isinstance(table, dict):
+        # 可解析但顶层非映射（标量/列表）：UI 半一直判 bad_content（行式解析器拒收），
+        # py 半若放行，消费方 model_route_for 会在 .get 处 AttributeError 晦涩崩溃——
+        # 统一收进 bad_content 点名态（py/TS 同判，t260914-05 P5 收紧）。
+        err = ("声明指向的路由表不是映射结构（yaml 顶层=%s）：%s（须为 default:/roles: 键值映射）"
+               % (type(parsed).__name__, declared))
+        _log_routes_state("bad_content", declared, fp, err)
+        return {"state": "bad_content", "declared": declared, "path": declared,
+                "table": None, "error": err, "fingerprint": fp}
+    shape_err = _routes_table_shape_error(table)
+    if shape_err:
+        # 形状坏表（roles/条目/tasks 值非映射）：同族收口（260915 gen2）——消费方沿链
+        # .get 必崩，与顶层非映射一样收进 bad_content 点名，禁晦涩堆栈。
+        err = "声明指向的路由表形状不可用：%s：%s" % (shape_err, declared)
+        _log_routes_state("bad_content", declared, fp, err)
+        return {"state": "bad_content", "declared": declared, "path": declared,
+                "table": None, "error": err, "fingerprint": fp}
+    return {"state": "ok", "declared": declared, "path": declared, "table": table,
+            "error": "", "fingerprint": fp}
 
 
 def model_route_for(role: str, kind: str = "",
@@ -1687,26 +1748,48 @@ def model_route_for(role: str, kind: str = "",
     activity side (IO allowed).
 
     routes_file 必选单点（t260910-14：常量隐式缺省取消；或直接传 resolve_routes_table
-    的 table 免二次 IO）。文件读取失败=None 但**留痕**（logging warning 点名路径，
-    KI-030 收窄——不再静默）；解析容错（缺条目/缺字段→default→None）语义不变。"""
+    的 table 免二次 IO）。文件读取失败/顶层非映射/查表链形状坏=None 但**留痕**（logging
+    warning 点名路径与原因，KI-030 收窄——不再静默；260915 P5/gen2 收紧：非映射与形状坏
+    表不再 AttributeError 晦涩崩溃，与 resolve_routes_table 的 bad_content 同判）；解析
+    容错（缺条目/缺字段→default→None）语义不变。"""
     if table is None:
         if routes_file is None:
             raise ValueError("model_route_for: routes_file 必选（t260910-14 单点化）——"
                              "或传 resolve_routes_table 的 table")
         try:
             import yaml  # pyyaml (engine venv)
-            table = yaml.safe_load(pathlib.Path(routes_file).read_text("utf-8")) or {}
+            loaded = yaml.safe_load(pathlib.Path(routes_file).read_text("utf-8"))
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning(
                 "[model_route_for] 路由表读取失败（回落 profile 默认，留痕）：%s（%s）",
                 routes_file, str(e)[:160])
             return None
+        table = loaded or {}   # 空文件=空表（软语义）
+        if not isinstance(table, dict):
+            import logging
+            logging.getLogger(__name__).warning(
+                "[model_route_for] 路由表顶层非映射（回落 profile 默认，留痕）：%s"
+                "（yaml 顶层=%s，须为 default:/roles: 键值映射）",
+                routes_file, type(loaded).__name__)
+            return None
+        shape_err = _routes_table_shape_error(table)
+        if shape_err:
+            import logging
+            logging.getLogger(__name__).warning(
+                "[model_route_for] 路由表形状不可用（回落 profile 默认，留痕）：%s（%s）",
+                routes_file, shape_err)
+            return None
     eff = LEGACY_ROLE.get(role, role)
-    entry = (table.get("roles") or {}).get(eff) or {}
+    # 直传表（绕过 resolve）形状坏=不命中（点名归 resolve 面与直读留痕），此处只防崩
+    roles = table.get("roles") if isinstance(table, dict) else None
+    entry = (roles.get(eff) if isinstance(roles, dict) else None) or {}
+    if not isinstance(entry, dict):
+        entry = {}
     cands = []
     if kind:
-        cands.append((entry.get("tasks") or {}).get(kind))
+        tasks = entry.get("tasks")
+        cands.append(tasks.get(kind) if isinstance(tasks, dict) else None)
     cands.append(entry)
     cands.append(table.get("default"))
     for cand in cands:
@@ -3385,11 +3468,11 @@ def roles_dir_for_spawn(project_key: str, cwd) -> pathlib.Path:
 
 
 def routes_file_for_spawn(project_key: str) -> Dict[str, Any]:
-    """Spawn consumer ②（t260910-14 重构）：路由表解析（真源=声明指向文件；读侧分层
-    兜底=仓内表，宿主风险令 260910）。原「fail-closed 锚点红」改为分态软回落：
-    声明缺失/文件缺失/内容坏三态分别可辨（resolve_routes_table），任何非 ok 态由
-    消费方点名日志后用兜底表继续——agent 仍可跑，绝不静默。返回 resolve_routes_table
-    的判别 dict（{"state","declared","path","table","error"}）。roles 锚点不受影响
+    """Spawn consumer ②（t260910-14 重构；t260914-05 兜底腿退役）：路由表解析（真源=
+    声明指向文件）。声明缺失/文件缺失/内容坏三态分别可辨且**点名告警**（解析层单点
+    WARNING 含 state+path+指纹，消费方再点名「本轮模型=profile 默认」）——agent 仍可跑，
+    但绝不静默回落任何仓内兜底表。返回 resolve_routes_table 的判别 dict
+    （{"state","declared","path","table","error","fingerprint"}）。roles 锚点不受影响
     （_require_anchor 只剩 roles_dir 消费）。"""
     return resolve_routes_table(project_key)
 

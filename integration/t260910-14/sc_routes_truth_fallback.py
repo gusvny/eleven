@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""t260910-14 场景①：模型路由表真源=声明指向文件，分层兜底留痕（宿主风险令 260910 夜口径）。
+"""t260910-14 场景①：模型路由表真源=声明指向文件（t260914-05 兜底腿退役后的无表三态口径）。
 
 intent（登记于 run_scenarios.py，本文件为其执行体）：
 真源=项目注册表条目 paths.model_routes 指向的文件，引擎读面（python 半）逐腿断言：
-  腿0 仓内表在位：server/model-routes.yaml 本票保留不删（宿主令①——删除延后另开小票）；
+  腿0 仓内表在位（(b) 降级口径：本票不删仓内文件、只退役读腿）——并以此为反毒前提：
+      它在场也绝不被静默读（见腿4）；
   腿1 声明 ok：paths.model_routes 指向机器级文件 → model_route_for 读到该表内容（哨兵模型）；
   腿2 改表生效：改声明指向文件 → 下次解析拿新模型（验收 A 的解析面）；
-  腿3 声明文件缺失：分态可辨（state!=ok）且**分层兜底=仓内表**（宿主令①零断供）——
-      生效模型==仓内表 integration 条目，绝非静默回落 profile 默认（宿主令③）；
-  腿4 声明缺失：分态可辨（decl 缺失态）+ 兜底仓内表留痕（现行行为零回归，宿主令④c）；
-  腿5 内容坏：分态可辨 + 点名 path+原因，解析不炸（spawn 不被毒表打死）；
-  腿6 回滚可操作（宿主令④b）：声明改回仓内相对路径 → 生效==仓内表（与腿4 同值）；
+  腿3 声明文件缺失：state=file_missing 分态可辨、**无表**（生效模型=None=profile 默认），
+      引擎面单点告警点名 state+路径+指纹（t260914-05：绝无「兜底=仓内表」腿）；
+  腿4 声明缺失：state=decl_missing、path=""、无表；**反毒断言**：仓内表即使在位，
+      生效模型也不是它的值（现场 A/B「过期表被静默用错」的机械反证）+ 引擎面点名；
+  腿5 内容坏：state=bad_content 分态可辨 + 字节指纹（sha256:12hex）+ 点名 path+原因，
+      解析不炸（spawn 不被毒表打死）；
+  腿6 显式声明仓内相对路径 → state=ok、生效==仓内表（(b) 口径下文件在=显式声明合法；
+      (a) 删表后此腿自动退化为「声明指向缺失→file_missing」，语义仍自洽）；
   腿7 形状：`..` 逃逸 fail-closed 拒收（点名条目+键）；`~/x` 展开到家目录（不写真 HOME）；
       空值拒收。
 三态：引擎 venv（PyYAML）缺席=ENV_FAIL exit 2；断言破面=exit 1；全绿=exit 0。
-实现落地前红属预期（TDD 信号，契约形状=批准方案 T2-2 的判别结果），arbitrate/merge 期必须绿。
-与 t260902-07 守卫（表静态校验/查表性质，L2）与 sc_paths_contract_doc_guard G6（重写后钉新语义）
-intent 不同面：本条锁「真源随声明走 + 分层兜底留痕」的系统拼装行为。
+与 t260902-07 守卫（表静态校验/查表性质，L2）与 sc_paths_contract_doc_guard G6
+intent 不同面：本条锁「真源随声明走 + 无表三态点名不静默」的系统拼装行为。
 """
 import json
 import os
@@ -58,7 +61,7 @@ def check(cond, msg):
 
 
 def run_py(script, env):
-    """在引擎解释器里跑一段探针脚本（cwd=server/engine 以 import shared），回 (rc, stdout)。"""
+    """在引擎解释器里跑一段探针脚本（cwd=server/engine 以 import shared），回 (rc, stdout, stderr)。"""
     p = subprocess.run([PY, "-c", script], capture_output=True, text=True,
                        cwd=os.path.join(REPO, "server", "engine"), env=env, timeout=120)
     return p.returncode, p.stdout, p.stderr
@@ -82,27 +85,25 @@ sys.path.insert(0, os.getcwd())
 import shared
 key = %(key)r
 out = {}
-def snap():
-    try:
-        r = shared.routes_file_for_spawn(key)
-        out["shape"] = "dict" if isinstance(r, dict) else "raw"
-        if isinstance(r, dict):
-            out["state"] = r.get("state")
-            out["path"] = str(r.get("path") or "")
-            out["error"] = str(r.get("error") or "")
-            rf = r.get("path")
-        else:
-            out["path"] = str(r)
-            rf = r
-        out["model"] = shared.model_route_for("integration", "", routes_file=rf)
-    except shared.ProjectPathsError as e:
-        out["shape"] = "error"
-        out["error"] = str(e)
-    except Exception as e:
-        out["shape"] = "crash"
-        out["error"] = "%%s: %%s" %% (type(e).__name__, str(e)[:200])
-    print(json.dumps(out))
-snap()
+try:
+    r = shared.routes_file_for_spawn(key)
+    out["shape"] = "dict"
+    out["state"] = r.get("state")
+    out["path"] = str(r.get("path") or "")
+    out["error"] = str(r.get("error") or "")
+    out["fingerprint"] = str(r.get("fingerprint") or "")
+    if r.get("table") is None:
+        out["model"] = None  # 无表=本轮模型来 profile 默认（消费方面同构：不打 patch）
+    else:
+        out["model"] = shared.model_route_for("integration", "",
+                                              table=r.get("table"), routes_file=r.get("path"))
+except shared.ProjectPathsError as e:
+    out["shape"] = "error"
+    out["error"] = str(e)
+except Exception as e:
+    out["shape"] = "crash"
+    out["error"] = "%%s: %%s" %% (type(e).__name__, str(e)[:200])
+print(json.dumps(out))
 '''
 
 
@@ -110,7 +111,14 @@ def probe(env):
     rc, so, se = run_py(PROBE % {"key": KEY}, env)
     if rc != 0 or not so.strip():
         return {"shape": "probe-fail", "error": (se or so).strip()[:300]}
-    return json.loads(so.strip().splitlines()[-1])
+    r = json.loads(so.strip().splitlines()[-1])
+    r["stderr"] = se or ""  # 引擎单点告警走 stderr（lastResort handler），父进程可断言
+    return r
+
+
+def has_named_warning(stderr, state):
+    """引擎面单点点名：[model_route] + state=<态> + 指纹段。"""
+    return "[model_route]" in stderr and ("state=%s" % state) in stderr and "指纹=" in stderr
 
 
 REPO_TABLE_PROBE = r'''
@@ -147,7 +155,7 @@ try:
         print("ENV_FAIL: 引擎 venv（PyYAML/shared 可导入）缺席——路由真源场景无法执行（三态 exit 2）")
         sys.exit(2)
     tmp = tempfile.mkdtemp(prefix="t26091014a-")
-    # 夹具仓：server/model-routes.yaml（=仓内表副本，宿主令①兜底件）+ machine 级目标（仓外）
+    # 夹具仓：server/model-routes.yaml（仓内表副本——(b) 口径下它在场，用作反毒/显式声明腿）
     FIX_REPO = os.path.join(tmp, "fixrepo")
     os.makedirs(os.path.join(FIX_REPO, "server"), exist_ok=True)
     shutil.copyfile(os.path.join(REPO, "server", "model-routes.yaml"),
@@ -162,9 +170,10 @@ try:
     base_env = dict(os.environ)
     base_env["SANDBAR_PROJECTS_DIR"] = REG
 
-    # 腿0：仓内表在位（本票不删，宿主令①/④c 前提）
-    check(os.path.isfile(os.path.join(REPO, "server", "model-routes.yaml")),
-          "腿0：仓内 server/model-routes.yaml 在位（本票保留=兜底件，删除延后另票）")
+    # 腿0：仓内表在位（(b) 口径保留；它是腿4 反毒与腿6 显式声明的前提，不是兜底件）
+    repo_table = os.path.join(REPO, "server", "model-routes.yaml")
+    check(os.path.isfile(repo_table),
+          "腿0：仓内 server/model-routes.yaml 在位（(b) 降级口径：不删文件、只退役读腿）")
     repo_model = repo_table_integration_model()
     check(bool(repo_model and repo_model[1]),
           "腿0：仓内表可解析出 integration 生效模型（%s）" % (repo_model,))
@@ -184,42 +193,52 @@ try:
     check(r.get("model") == {"provider": "sentinel-machine", "model": "machine-b"},
           "腿2：改表即生效（machine-b，实际 %s）" % (r.get("model"),))
 
-    # 腿3：声明文件缺失 → 分态可辨 + 兜底=仓内表（禁静默回落 profile 默认）
+    # 腿3：声明文件缺失 → file_missing 点名 + 无表（不再有兜底腿）
     write_registry(REG, os.path.join(MACHINE_DIR, "absent.yaml"))
     r = probe(base_env)
-    check(r.get("shape") == "dict" and r.get("state") not in (None, "ok"),
-          "腿3：声明文件缺失 → 分态点名非 ok（实际 state=%s）" % (r.get("state"),))
-    check(r.get("model") == {"provider": repo_model[0], "model": repo_model[1]},
-          "腿3：兜底生效=仓内表 integration 模型（宿主令①零断供；实际 %s）" % (r.get("model"),))
-    check(bool(r.get("error")), "腿3：留痕非静默（result.error 点名 path+原因，实际 %r)" % (r.get("error") or "")[:160])
+    check(r.get("shape") == "dict" and r.get("state") == "file_missing",
+          "腿3：声明文件缺失 → state=file_missing 分态可辨（实际 state=%s）" % (r.get("state"),))
+    check(r.get("model") is None,
+          "腿3：无表=生效模型 None（=profile 默认；实际 %s）" % (r.get("model"),))
+    check(os.path.join(MACHINE_DIR, "absent.yaml") in (r.get("error") or ""),
+          "腿3：留痕点名声明路径（error=%r）" % (r.get("error") or "")[:160])
+    check(has_named_warning(r.get("stderr", ""), "file_missing"),
+          "腿3：引擎面单点告警含 state=file_missing+指纹（stderr=%r）" % (r.get("stderr", "") or "")[:200])
 
-    # 腿4：声明缺失 → 分态可辨 + 仓内表兜底（现行行为零回归）
+    # 腿4：声明缺失 → decl_missing + 无表 + 反毒（仓内表在场也不被读）
     write_registry(REG, None)
     r = probe(base_env)
-    check(r.get("shape") == "dict" and r.get("state") not in (None, "ok"),
-          "腿4：声明缺失 → 分态点名（实际 state=%s）" % (r.get("state"),))
-    check(r.get("model") == {"provider": repo_model[0], "model": repo_model[1]},
-          "腿4：未声明行为零回归=仓内表（实际 %s）" % (r.get("model"),))
-    check(bool(r.get("error")) or bool(r.get("state")),
-          "腿4：分态留痕在结果可辨（宿主令③禁静默）")
+    check(r.get("shape") == "dict" and r.get("state") == "decl_missing" and r.get("path") == "",
+          "腿4：声明缺失 → state=decl_missing 且 path=\"\"（实际 state=%s path=%r）"
+          % (r.get("state"), r.get("path")))
+    check(r.get("model") is None and repo_model[1] not in json.dumps(r.get("model")),
+          "腿4：反毒——仓内表在位但生效模型不是它的值（model=%s，仓内表=%s）"
+          % (r.get("model"), repo_model))
+    check(has_named_warning(r.get("stderr", ""), "decl_missing"),
+          "腿4：引擎面单点告警含 state=decl_missing+指纹（stderr=%r）" % (r.get("stderr", "") or "")[:200])
 
-    # 腿5：内容坏 → 分态点名 + 解析不炸
+    # 腿5：内容坏 → bad_content + 字节指纹 + 点名路径，解析不炸
     BAD = os.path.join(MACHINE_DIR, "bad.yaml")
     with open(BAD, "w", encoding="utf-8") as f:
         f.write("roles: [broken:\n  - :\n")
     write_registry(REG, BAD)
     r = probe(base_env)
-    check(r.get("shape") == "dict" and r.get("state") not in (None, "ok"),
-          "腿5：坏表 → 分态点名非 ok（实际 state=%s）" % (r.get("state"),))
+    check(r.get("shape") == "dict" and r.get("state") == "bad_content",
+          "腿5：坏表 → state=bad_content 分态可辨（实际 state=%s）" % (r.get("state"),))
     check(r.get("shape") != "crash", "腿5：毒表不炸解析面（shape=%s）" % r.get("shape"))
-    check(BAD in (r.get("error") or "") or MACHINE_DIR in (r.get("error") or ""),
+    check(BAD in (r.get("error") or ""),
           "腿5：留痕点名毒表路径（error=%r）" % (r.get("error") or "")[:160])
+    check(re.match(r"^sha256:[0-9a-f]{12}$", r.get("fingerprint") or "") is not None,
+          "腿5：可读字节的坏文件带内容指纹（fingerprint=%s）" % (r.get("fingerprint"),))
+    check("sha256:" in (r.get("stderr") or ""),
+          "腿5：引擎面告警含指纹段（stderr=%r）" % (r.get("stderr", "") or "")[:200])
 
-    # 腿6：回滚=声明改回仓内相对路径（宿主令④b）
+    # 腿6：显式声明仓内相对路径 → state=ok、生效==仓内表（显式声明合法，非兜底）
     write_registry(REG, "server/model-routes.yaml")
     r = probe(base_env)
-    check(r.get("model") == {"provider": repo_model[0], "model": repo_model[1]},
-          "腿6：声明改回仓内相对路径 → 生效==仓内表（回滚可操作；实际 %s）" % (r.get("model"),))
+    check(r.get("state") == "ok" and r.get("model") == {"provider": repo_model[0], "model": repo_model[1]},
+          "腿6：显式声明仓内相对路径 → 生效==仓内表（state=%s，实际 %s）"
+          % (r.get("state"), r.get("model")))
 
     # 腿7：形状——.. 拒收 / ~ 展开 / 空值拒收
     write_registry(REG, "../../etc/passwd")

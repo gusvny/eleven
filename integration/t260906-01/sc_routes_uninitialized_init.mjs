@@ -1,18 +1,18 @@
 // sc_routes_uninitialized_init.mjs — t260906-01 场景③：路由无表引导态 + init 退役终态。
 //
-// intent（t260910-14 退役收口后的重写版；原「一键初始化」动作随宿主拍板整体退役）：
-//   A. 无声明项目 → 分层兜底（宿主风险令 260910）：视图/API 出**仓内兜底表**内容
-//      （default 可解析）且分态可辨（state=decl_missing 留痕不洗白）、routes_file=兜底
-//      仓内表路径（真源锚）、不再有「未初始化红错」旧态；template_source 字段退场
-//      （init 动作退役，新项目按 docs 样例人工填表+落声明）。
+// intent（t260914-05 兜底腿退役后的重写版；t260910-14 已退役 init 动作）：
+//   A. 无声明项目 → 无表引导态：视图/API state=decl_missing、uninitialized=true、
+//      default=null、routes_file=""（无落点），resolution_error 点名「未声明」+建表
+//      模板指引；**反毒断言**：仓内 server/model-routes.yaml 即使仍在位也不被读、
+//      内容不被透出（「表在场但过期被静默用错」= 本票要杀的毒面）。
 //   B. init 端点退场：POST /sandbar-admin/api/routes/init 不再挂载（零写动作=零覆盖面）。
-//   C. 已有项目自有表但未声明 → 自有表不被读也不被改（state=decl_missing、读兜底表、
+//   C. 已有项目自有表但未声明 → 自有表不被读也不被改（state=decl_missing、无表、
 //      文件字节不变——「已有表拒收零覆盖」意图在 init 退役后由「零写动作」天然承担）。
-//   D. 声明指向畸形表 → 编辑视图诚实暴露解析失败（不静默换表展示；读侧运行时兜底
-//      归引擎面 t260903-03/t260910-14-S1 钉，本条锁编辑面）。
+//   D. 声明指向畸形表 → 编辑视图诚实暴露解析失败并给 state=bad_content + 内容指纹
+//      （t260914-05 补齐与引擎 resolve_routes_table 的 parity；读侧运行时行为归引擎面
+//      t260903-03/t260910-14-S1 钉，本条锁编辑面）。
 // 台别：API 面（mock webServer 手法同 server/plugins/ui/smoke/routes.mjs，无浏览器，
 // 进程内 apply 不起监听、零 3099 接触）；wire 口径=project 走 ?project= 查询参。
-// 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -22,11 +22,11 @@ import { tmpRoot, makeChecks, writeProjectEntry } from '../t260904-14/lib_fix14.
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const REPO_ROOT = path.resolve(HERE, '..', '..');
-const c = makeChecks('t260906-01 路由无表引导态+init 退役终态');
+const c = makeChecks('t260906-01 路由无表引导态+init 退役终态（t260914-05 兜底退役版）');
 delete process.env.SANDBAR_PROJECTS_YAML;
 
 const ENGINE_TABLE = path.join(REPO_ROOT, 'server', 'model-routes.yaml');
-const { buildRoutesView, repoRoutesFallbackPath } = await import(
+const { buildRoutesView } = await import(
   pathToFileURL(path.join(REPO_ROOT, 'server', 'plugins', 'ui', 'src', 'host', 'routes.ts')).href);
 const { apply } = await import(
   pathToFileURL(path.join(REPO_ROOT, 'server', 'plugins', 'ui', 'node.ts')).href);
@@ -43,7 +43,7 @@ process.env.SANDBAR_PROJECTS_DIR = regRoot;
 function writeEntry(key, dirs, pathsLines) {
   const d = path.join(regRoot, key);
   mkdirSync(d, { recursive: true });
-  const lines = ['schema: v1', 'project:', `  - key: ${key}`, `    name: ${key}`, '  dirs:'.replace('  dirs:', '    dirs:'),
+  const lines = ['schema: v1', 'project:', `  - key: ${key}`, `    name: ${key}`, '    dirs:',
     ...dirs.map((x) => `      - ${x}`)];
   if (pathsLines) lines.push('paths:', ...pathsLines.map(([k, v]) => `  ${k}: ${v}`));
   writeFileSync(path.join(d, 'project.yaml'), lines.join('\n') + '\n');
@@ -76,26 +76,34 @@ async function call(handler, url, method = 'GET') {
 const projUrl = (key) => '/sandbar-admin/api/routes?project=' + encodeURIComponent(key)
 const initUrl = (key) => '/sandbar-admin/api/routes/init?project=' + encodeURIComponent(key)
 
-// ---- A：无声明=分层兜底出仓内表 + 分态留痕（视图半 + API 半双面）----
+// ---- A：无声明=无表引导态 + 反毒（仓内表在场也不被读；视图半 + API 半双面）----
 const emptyRepo = await mktempRepo('t260906-noroutes-')
 writeProjectEntry(regRoot, 'rtk', 'RT', [emptyRepo]) // 已注册项目、未声明 paths.model_routes
 {
-  c.check('前提：仓内兜底表在位（宿主令①零断供的本票前提）', existsSync(ENGINE_TABLE), ENGINE_TABLE)
+  c.check('前提：仓内表仍在位（(b) 降级口径；下两条证它在场也不被读）',
+    existsSync(ENGINE_TABLE), ENGINE_TABLE)
   const v = await buildRoutesView(emptyRepo, { projectsDir: regRoot, projectKey: 'rtk' })
-  c.check('无声明视图：state=decl_missing 留痕（不再 uninitialized 红错）',
-    v.state === 'decl_missing' && v.declared == null && v.uninitialized === undefined,
-    JSON.stringify({ s: v.state, d: v.declared, u: v.uninitialized }))
-  c.check('视图出兜底表内容（default 可解析）', v.default !== null,
-    JSON.stringify(v.default))
-  c.check('routes_file=兜底仓内表（真源锚；template_source 退场）',
-    v.routes_file === repoRoutesFallbackPath() && v.template_source === undefined,
+  c.check('无声明视图：state=decl_missing + uninitialized 引导态 + default=null',
+    v.state === 'decl_missing' && v.declared == null && v.uninitialized === true
+      && v.default === null,
+    JSON.stringify({ s: v.state, d: v.declared, u: v.uninitialized, dft: v.default }))
+  c.check('routes_file=""（无落点，不再指任何仓内表）',
+    v.routes_file === '' && v.template_source === undefined,
     JSON.stringify({ rf: v.routes_file, ts: v.template_source }))
+  const err = String(v.resolution_error ?? '')
+  c.check('resolution_error 点名未声明+建表模板指引（禁静默）',
+    err.includes('未声明') && err.includes('docs/model-routes-sample.yaml') && !err.includes('兜底'),
+    err.slice(0, 200))
 
   const find = mountRoutes(emptyRepo)
   const r = await call(find('/sandbar-admin/api/routes').handler, projUrl('rtk'))
-  c.check('API 无声明=200 ok:true + state=decl_missing 透传 + 兜底表出内容',
+  c.check('API 无声明=200 ok:true + state=decl_missing 透传 + 引导态（无表内容）',
     r.status === 200 && r.body.ok === true && r.body.result?.state === 'decl_missing'
-      && r.body.result?.default !== null && r.body.result?.uninitialized === undefined,
+      && r.body.result?.default === null && r.body.result?.uninitialized === true,
+    JSON.stringify(r.body).slice(0, 260))
+  c.check('API 反毒：仓内表路径与内容均不透出',
+    !JSON.stringify(r.body).includes('server/model-routes.yaml')
+      && !JSON.stringify(r.body).includes('glm'),
     JSON.stringify(r.body).slice(0, 260))
 }
 
@@ -116,14 +124,13 @@ writeProjectEntry(regRoot, 'rtk', 'RT', [emptyRepo]) // 已注册项目、未声
   writeFileSync(p, own)
 
   const v = await buildRoutesView(repo2, { projectsDir: regRoot, projectKey: 'hask' })
-  c.check('未声明的自有表不被读（读兜底仓内表、state=decl_missing）',
-    v.state === 'decl_missing' && v.default !== null
-      && v.default.provider !== 'mine',
-    JSON.stringify({ s: v.state, d: v.default }))
+  c.check('未声明的自有表不被读（无表引导态，default=null）',
+    v.state === 'decl_missing' && v.default === null && v.routes_file === '',
+    JSON.stringify({ s: v.state, d: v.default, rf: v.routes_file }))
   c.check('自有表字节零变更（init 退役=零写动作）', readFileSync(p, 'utf8') === own, 'table touched')
 }
 
-// ---- D：声明指向畸形表 → 编辑视图诚实暴露解析失败（不静默换表展示）----
+// ---- D：声明指向畸形表 → 解析失败点名 + state=bad_content + 内容指纹（parity 补齐）----
 {
   const repo3 = await mktempRepo('t260906-badtable-')
   writeEntry('badk', [repo3], [['model_routes', 'bad-table.yaml']])
@@ -133,6 +140,49 @@ writeProjectEntry(regRoot, 'rtk', 'RT', [emptyRepo]) // 已注册项目、未声
     typeof vBad.error === 'string' && vBad.error.includes('解析失败')
       && vBad.uninitialized === undefined,
     JSON.stringify({ e: vBad.error, u: vBad.uninitialized, s: vBad.state }))
+  c.check('state=bad_content 分态可辨 + 内容指纹进人话串（sha256:12hex）',
+    vBad.state === 'bad_content'
+      && /指纹=sha256:[0-9a-f]{12}/.test(String(vBad.error))
+      && /指纹=sha256:[0-9a-f]{12}/.test(String(vBad.resolution_error)),
+    JSON.stringify({ s: vBad.state, e: vBad.error, re: vBad.resolution_error }))
+}
+
+// ---- D2：声明指向「可解析但非映射」表（标量/列表）→ 同 bad_content（260915 P5：py/TS 同判）----
+// py 侧此形曾判 ok 而消费方 AttributeError（t260914-05 走查 P5，已收紧）；UI 半行式解析器
+// 一直拒收此形。本腿把 UI 判定钉住，与引擎 UT（test_non_mapping_table_is_bad_content）互为两岸。
+{
+  const repo4 = await mktempRepo('t260906-nonmap-')
+  writeEntry('nonmapk', [repo4], [['model_routes', 'scalar-table.yaml']])
+  writeFileSync(path.join(repo4, 'scalar-table.yaml'), 'just-a-scalar\n')
+  const v1 = await buildRoutesView(repo4, { projectsDir: regRoot, projectKey: 'nonmapk' })
+  c.check('标量表=bad_content + 指纹（与引擎同判，非 ok 放行）',
+    v1.state === 'bad_content' && /指纹=sha256:[0-9a-f]{12}/.test(String(v1.error)),
+    JSON.stringify({ s: v1.state, e: v1.error }))
+  writeFileSync(path.join(repo4, 'scalar-table.yaml'), '- a\n- b\n')
+  const v2 = await buildRoutesView(repo4, { projectsDir: regRoot, projectKey: 'nonmapk' })
+  c.check('列表形表=同判 bad_content（指纹随字节变）',
+    v2.state === 'bad_content' && v2.error !== v1.error,
+    JSON.stringify({ s: v2.state, e: v2.error }))
+}
+
+// ---- D3：形状坏表（roles/条目/tasks 值非映射）→ 与引擎同判 bad_content（260915 gen2）----
+// 引擎侧此形曾 state=ok 而消费方 AttributeError（260915 独立探针，已收口）；UI 半 asMap
+// 曾静默吞非映射值→视图对坏表出「默认路由」假象。本腿钉住 TS 判定（引擎 UT
+// test_shape_broken_table_is_bad_content 互为两岸）。
+{
+  const repo5 = await mktempRepo('t260906-shapebad-')
+  writeEntry('shapebadk', [repo5], [['model_routes', 'shape-bad.yaml']])
+  writeFileSync(path.join(repo5, 'shape-bad.yaml'), 'roles: just-a-string\n')
+  const v3 = await buildRoutesView(repo5, { projectsDir: regRoot, projectKey: 'shapebadk' })
+  c.check('roles 段非映射=bad_content + 指纹（引擎/TS 同判，不静默出默认路由）',
+    v3.state === 'bad_content' && v3.default == null
+      && /指纹=sha256:[0-9a-f]{12}/.test(String(v3.error)),
+    JSON.stringify({ s: v3.state, e: v3.error }))
+  writeFileSync(path.join(repo5, 'shape-bad.yaml'), 'roles:\n  developer:\n    tasks: not-a-map\n')
+  const v4 = await buildRoutesView(repo5, { projectsDir: regRoot, projectKey: 'shapebadk' })
+  c.check('tasks 值非映射=同判 bad_content（点名 roles.developer.tasks）',
+    v4.state === 'bad_content' && String(v4.error).includes('roles.developer.tasks'),
+    JSON.stringify({ s: v4.state, e: v4.error }))
 }
 
 c.finish();

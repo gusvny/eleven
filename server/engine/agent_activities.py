@@ -1142,21 +1142,35 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
     # STAGE_DISPATCH_KIND mapped by (workflow, stage) (e.g. ai-review → the
     # proofread reviewer's model). No hit = don't pass one — the agent uses the
     # profile's default model, no hard failure. The table path comes from the
-    # contract ①d paths.model_routes declaration (t260910-14 重构)：resolve_routes_table
-    # 单点解析（真源=声明指向文件；读侧分层兜底=仓内表，宿主风险令 260910）。
-    # 任何非 ok 态在此点名留痕（state+path+error）后继续用兜底表——agent 仍可跑，
-    # 绝不静默回落 profile 默认（KI-030 收窄）。
+    # contract ①d paths.model_routes declaration (t260910-14 重构；t260914-05 兜底腿
+    # 退役)：resolve_routes_table 单点解析（真源=声明指向文件；**不再回落任何仓内表**）。
+    # 任何非 ok 态在此点名留痕（state+path+指纹+error）；无表可查时不打模型 patch，
+    # 并**再点名一条「本轮模型=profile 默认」**——agent 仍可跑，但绝不静默回落（KI-030 收窄）。
     resolved = routes_file_for_spawn(project)
+    route = None
     if resolved["state"] != "ok":
         activity.logger.warning(
-            "[model_route] 路由表解析非 ok（state=%s，读=%s）：%s",
-            resolved["state"], resolved["path"], resolved["error"])
-    route = model_route_for(role, kind, table=resolved["table"],
-                            routes_file=resolved["path"])
+            "[model_route] 路由表解析非 ok（state=%s，读=%s，指纹=%s）：%s",
+            resolved["state"], resolved["path"] or "（无表）",
+            resolved["fingerprint"] or "（无字节）", resolved["error"])
+    if resolved["table"] is None:
+        # 无表 = 本轮模型来自 profile 默认：显式点名（禁静默回落）。
+        activity.logger.warning(
+            "[model_route] 本轮模型=profile 默认（无表可查：state=%s，读=%s，指纹=%s）",
+            resolved["state"], resolved["path"] or "（无表）",
+            resolved["fingerprint"] or "（无字节）")
+    else:
+        route = model_route_for(role, kind, table=resolved["table"],
+                                routes_file=resolved["path"])
+        if route is None:
+            # 有表但 (role, kind) 未命中：同样是 profile 默认，同样点名（语义不变，只加可见性）。
+            activity.logger.warning(
+                "[model_route] 本轮模型=profile 默认（表无命中：role=%s kind=%s，表=%s，指纹=%s）",
+                role, kind or "-", resolved["path"], resolved["fingerprint"] or "（无字节）")
     if route:
         model_patch = artifacts_dir / ("model_patch_%s.yml" % tag)
         model_patch.write_text(
-            "# 本文件由 agent activity 每次 spawn 时生成（运行时模型路由，真源=model-routes.yaml）。\n"
+            "# 本文件由 agent activity 每次 spawn 时生成（运行时模型路由，真源=声明 paths.model_routes 指向的表）。\n"
             "- id: agent-default-model\n"
             "  name: '@deepseek-ai/dsh-agent-default-model'\n"
             "  config:\n"
