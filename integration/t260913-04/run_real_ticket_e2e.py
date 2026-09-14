@@ -6,10 +6,10 @@
 
 F（成本，验收 F）：
   基线=同宿主 host runtime 下 `dsh --profile sandbar-headless --version` 进程就绪耗时
-       （N=3 取中位；另附 `--dump-config`（真装载 profile 栈）作参考口径）；
+       （N=3 取中位；**260914 宿主令起仅作参考打印、不参与判定**——比值臂退役，见 f_leg 头注）；
   被测=`ensure_container`（docker run -d 到就绪）+ 首 `docker exec … dsh --version`
        （N=3 取中位；每次冷起，先拆旧）；
-  判定=被测 ≤ 基线×3 **且** ≤10s（两条臂各自出结论，不合并成一句「PASS」）。
+  判定=**绝对臂单臂**：被测 ≤10s（原「≤基线×3 且 ≤10s」二臂并存中的比值臂已退役）。
   time.monotonic 三时点打点：ensure 起 / 容器就绪 / 首 exec 完成。
 
 A（端到端，验收 A，门控 SANDBAR_E2E_REAL=1）：
@@ -111,19 +111,22 @@ def f_leg():
     import agent_runtime as ar
     lane = Path(tempfile.mkdtemp(prefix="t26091304-f-leg-"))
     try:
-        base, base_dump = [], []
+        # 260914 宿主令：**比值臂退役**（原判据「被测 ≤ 宿主基线×3 且 ≤10s」二臂并存）。
+        # 退役理由（实测三批佐证）：基线 `dsh --version` 是 node CLI 打印版本（43~46ms，
+        # 不装载 profile 栈），被测是 `docker run -d` + 容器就绪 + 首 exec（377~433ms）——
+        # 量级天然不同（容器冷起固定成本 ~250~450ms 即物理下限），该比值只反映"那次基线
+        # 抖了多少"而非容器健康度（实测漂移 5.68x / 11.28x / 8.84x / 9.52x）。真正要防的
+        # 回归＝「容器冷启变慢影响体验」，由**绝对臂**直接测（≤10s，实测亚秒级）。
+        # 故只保留绝对臂；下面两行环境基线仅作**参考信息**打印，不参与判定。
+        ref = []
         for _ in range(N):
             t0 = time.monotonic()
             p = subprocess.run(["dsh", "--profile", "sandbar-headless", "--version"],
                                capture_output=True, text=True, timeout=180)
-            base.append(time.monotonic() - t0)
+            ref.append(time.monotonic() - t0)
             if p.returncode != 0:
-                env_fail("宿主 dsh 基线不可得：rc=%s %s" % (p.returncode, p.stderr[:160]))
+                env_fail("宿主 dsh 参考基线不可得：rc=%s %s" % (p.returncode, p.stderr[:160]))
                 return
-            t0 = time.monotonic()
-            subprocess.run(["dsh", "--profile", "sandbar-headless", "--dump-config"],
-                           capture_output=True, text=True, timeout=180)
-            base_dump.append(time.monotonic() - t0)
         meas, pts = [], []
         for _ in range(N):
             ar.remove_container(TID)
@@ -138,23 +141,17 @@ def f_leg():
                 return
             meas.append(t2 - t0)
             pts.append((t1 - t0, t2 - t1))
-        print("  基线 dsh --version        N=%d median=%.3fs  %s"
-              % (N, med(base), ["%.3f" % x for x in base]))
-        print("  参考 dsh --dump-config    N=%d median=%.3fs  %s"
-              % (N, med(base_dump), ["%.3f" % x for x in base_dump]))
+        print("  参考（不判定）宿主 dsh --version N=%d median=%.3fs  %s"
+              % (N, med(ref), ["%.3f" % x for x in ref]))
         print("  被测 ensure+首 exec       N=%d median=%.3fs  %s"
               % (N, med(meas), ["%.3f" % x for x in meas]))
         print("  打点 ensure 段=%s 首 exec 段=%s"
               % (["%.3f" % a for a, _ in pts], ["%.3f" % b for _, b in pts]))
-        ratio = med(meas) / med(base)
-        print("  比值臂：%.2fx（判据 ≤3x）→ %s；绝对臂：%.3fs（判据 ≤10s）→ %s"
-              % (ratio, "PASS" if ratio <= 3 else "FAIL",
-                 med(meas), "PASS" if med(meas) <= 10 else "FAIL"))
+        if med(ref) > 0:
+            print("  比值（仅参考，260914 起不判定）：%.2fx（原判据 ≤3x 已退役）"
+                  % (med(meas) / med(ref)))
         ok(med(meas) <= 10, "F 绝对臂：容器 ensure+首 exec ≤10s（起容器到 agent 可用=亚秒级）",
            "median=%.3fs" % med(meas))
-        ok(ratio <= 3, "F 比值臂：被测 ≤ 宿主基线×3（R6 字面判据）",
-           "ratio=%.2fx（基线 median=%.3fs=`dsh --version`：只打印版本、不装载 profile 栈）"
-           % (ratio, med(base)))
     finally:
         try:
             import agent_runtime as ar2
