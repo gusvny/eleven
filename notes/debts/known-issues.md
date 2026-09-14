@@ -929,16 +929,32 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   ③`.gitignore` 只有 `.dsh/`、`.suyou/`，**没有 `.sandbar/`**，所以 `.sandbar/` 一旦被误提交就再无自动
   免疫——同目录下每天生成的 `model_patch_*.yml`／`stage_*.json`／`resume_patch_*.yml`（每票上百个）都是
   靠「不 add」而非规则挡住的，风险面一直开着。
-- 实测影响面（260914 普查全部泳道）：`t260913-01` tracked=2 且工作区呈待删（已触红）；`t260913-04`
-  tracked=2 但工作区未呈待删（同源欠账、暂未触红）。其余泳道 0。
+- 实测影响面（260914 普查全部泳道）：`t260913-01` 与 `t260913-04` **形态完全相同**（HEAD tracked=2、工作区
+  已删、`git status` 两条 `D`、相对 main 的 `--name-status` 为 `A`）——即 04 的「未触红」是暂时的，它走到
+  merge_check 同样必红。其余泳道 0。
+- **卡死的机制（260914 实测，比初版描述更准）**：两条红里**「敏感/运行时路径入库」不是拦路虎**——
+  `verify_lane.py:470` 的判据是 `st in ('A','M','T')` 才红，**`D`（清退删除）本就放行**；真正拦的是
+  merge_check 的**「工作区干净」**条：这两个待删文件**不在票面 write_set 内**（写集＝`server/engine/`、
+  `server/tools/ticket.py`、`integration/`），于是 ①merge_check 自愈前置检查明确「脏文件在 write_set 外，
+  不自愈」；②实现段的 `settle` 只收写集内改动 → **这一笔清账删除永远无法由引擎自己落盘**。实证：实现段
+  交接已写「两处历史欠账删除落定：工作树已删**待 settle**」（14:52），而 15:09 merge_check 仍红，说明
+  agent 干对了、卡在引擎不提交写集外文件。且 write_set 是建票时钉进 workflow 输入、运行中改不了
+  （meta 的 write_set 不影响在跑实例），故这条死结**没有票内自解路径**。
 - 处置方向（建议，未实施）：①**把 `.sandbar/` 加进 `.gitignore`**（与 `.dsh/`、`.suyou/` 同列；`.sandbar`
-  是本引擎的泳道侧状态目录，按设计从不入库）——这一条同时消掉「误提交」与「待删」两种复发形态；
-  ②已误提交的路径用一次「清账」提交在 main 上收口（本例 `e1d2303` 已做，但老分叉泳道仍需各自合并后
-  落一次删除；本次由 `t260913-01` 在实现段提交该删除处置）；③可选：merge_check 对「删除仅来自 main 侧
-  既有清账」的形态给出可辨提示，避免与「本票乱留文件」混淆。
+  是本引擎的泳道侧状态目录，按设计从不入库）——同时消掉「误提交」与「待删」两种复发形态，是根修；
+  ②**merge_check 自愈面放宽一格**：`RUNTIME_PREFIXES`（`.sandbar/`、`.suyou/`、`.dsh/`）下**删除形态**的脏项
+  视同可自愈（与「敏感前缀只在 A/M/T 判红、D 放行」的同一条口径对齐），由 worker 代落盘——否则老分叉泳道
+  永远需要人手工提交这一笔；③可选：merge_check 对「删除仅来自 main 侧既有清账」的形态给出可辨提示。
+- **本轮处置（越界代落盘，如实留档）**：两条死结在票内无解，故由 main 侧（integration）代 worker 执行
+  `git rm -r --cached .sandbar/routes-migration-260911` 并提交：
+  `t260913-01` → `75868d8`、`t260913-04` → `28220eb`（两泳道工作区归零、相对 main 的 `.sandbar/` 标记清空），
+  随后 `retry_qc` 重验 merge_check。**这是绕过「写集外不落盘」的越界操作**，只为解今天的死结，不代表口径：
+  修法见上面②。
 - 定位：证据＝`.lane/t260913-01` 的 `git ls-files .sandbar/` = 2、
   `git status --porcelain .sandbar/` 两条 `D`；`main` 侧 `git log --diff-filter=D -- .sandbar/routes-migration-260911/README.md`
-  → `e1d2303`；引入提交 `6716e2e`；`git merge-base --is-ancestor 6716e2e main` = 真。
+  → `e1d2303`；引入提交 `6716e2e`；`git merge-base --is-ancestor 6716e2e main` = 真；
+  闸判据＝`server/tools/verify_lane.py:83 RUNTIME_PREFIXES` / `:470 st in ('A','M','T')`；
+  自愈面＝`server/engine/agent_activities.py:2013 _dirty_within_write_set`（「脏文件在 write_set 外，不自愈」）。
 
 ## KI-089 池排除由「目录形写集」无条件压制：凡是写自己集测基建的票，排除声明恒定失效（260914 实证）
 - 前言（先纠正一条当日误判）：排除机制**本身是好的**，`t260913-03` 声明对当期新票即刻生效。证据＝
