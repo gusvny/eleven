@@ -1164,6 +1164,21 @@ def _repo_rel(repo: pathlib.Path, rels) -> str:
     return ""
 
 
+def _repo_root_entry_example(repo_dir: pathlib.Path, prefix: str = "") -> str:
+    """整仓拒收文案的列举实例（t260915-04）：仓顶层真实条目≤3（目录带尾斜杠、隐藏项
+    跳过），加仓前缀让用户可直接粘进写集。读盘失败/空目录 → 空串（文案省略例句，
+    拒收判定不受影响——例句只是人话，不是判定输入）。仅拒收路径上调用，零常驻 IO。"""
+    try:
+        names = sorted(
+            (p.name + "/" if p.is_dir() else p.name)
+            for p in repo_dir.iterdir() if not p.name.startswith("."))
+    except OSError:
+        return ""
+    if not names:
+        return ""
+    return "、".join((prefix + "/" + n) if prefix else n for n in names[:3])
+
+
 def resolve_repos_for_paths(project_root, paths) -> Dict[str, List[str]]:
     """Write-set paths → which repo owns them (ticket t260907-06's single source of
     truth for repo anchor derivation).
@@ -1196,6 +1211,28 @@ def resolve_repos_for_paths(project_root, paths) -> Dict[str, List[str]]:
         pp = pathlib.PurePosixPath(entry)
         if pp.is_absolute() or ".." in pp.parts:
             raise ValueError("写集条目必须为项目根相对路径且不得逃逸项目根: %r" % raw)
+        # t260915-04（建票期拒收「整仓根形态」，宿主 260915 口径：写集一律列举、
+        # 不得把某个 repo 的整个根目录作为写集）：条目归一（PurePosixPath 消尾斜杠/
+        # 内嵌 './'）后等于项目根（"."——单仓=整仓；混合形态=根仓）或等于任一成员仓
+        # 的根相对路径（如 "fpv-toolchain"；"fpv-toolchain/""fpv-toolchain//"
+        # "fpv-toolchain/." 归一后同形）→ 拒收。根因：整仓条目运行期被
+        # rebase_write_set 按前缀剥成空串，写集闸 fail-closed 判整仓禁写
+        # （dengzhufpv/t260911-07 整票作废形态）——在创建时刻拦下，不给静默失效
+        # 留入口，与「嵌套仓 fail-closed」同族。归一结果只用于本判定：归属（最长
+        # 前缀）与嵌套仓 fail-closed 逻辑零改动。
+        norm = pp.as_posix()
+        if norm == "." or any(rel and norm == rel for _r, rel in rels):
+            if norm == ".":
+                target = "项目根本体（单仓=整仓；混合形态=根仓）"
+                example = _repo_root_entry_example(root)
+            else:
+                target = "成员仓 %s 的整仓根目录" % norm
+                example = _repo_root_entry_example(root / norm, norm)
+            raise ValueError(
+                "写集条目 %r 等于%s——整仓条目运行期会被剥前缀成空串，写集闸 "
+                "fail-closed 判整仓禁写（dengzhufpv/t260911-07 整票作废形态）。"
+                "要覆盖整仓＝逐个子目录+根文件列举（参照该仓 .gitignore）%s"
+                % (raw, target, ("，例：" + example) if example else ""))
         owner = None
         for repo, rel in rels:
             # rel="" (the root repo, the mixed shape) → matches everything under the
@@ -2512,7 +2549,8 @@ def validate_background_refs(refs: Any, project_root: Any):
                        % (type(refs).__name__, str(refs)[:80]))
     bad_shape = [r for r in refs if not _valid_write_set_entry(r)]
     if bad_shape:
-        return False, ("背景文件引用含非法条目（须为仓库内相对路径，禁绝对路径与 '..'）："
+        return False, ("背景文件引用含非法条目（须为仓库内相对路径；禁绝对路径、'..'、"
+                       "'.' 整仓形态与通配哨兵 ?!*[]——t260915-04 与写集闸同口径）："
                        + "、".join(str(b) for b in bad_shape[:8]))
     problems = []
     for r in refs:
@@ -2543,7 +2581,17 @@ def validate_background_refs(refs: Any, project_root: Any):
 def _valid_write_set_entry(p: Any) -> bool:
     """Write-set entry legality (pure function): a repo-relative path — non-string /
     empty / absolute / containing '..' / a backslash path are all illegal (no boundary
-    check, no disk access; the shape check is enough)."""
+    check, no disk access; the shape check is enough).
+
+    t260915-04 口径统一（与运行期写集闸同立场，收「建票说合法、闸说不合法」漂移）：
+      - '.' 形态（'./'/'.//' 归一后同形）非法——等于项目根=整仓；闸面本就事实性
+        永不匹配（unauthorized_path），归属面曾归根仓透传（单仓/混合形态），两处
+        口径在此对齐；
+      - 含 git 通配哨兵字符 ?!*[] 的条目非法——镜像 path_gates._is_safe_path /
+        agent_activities._dirty_within_write_set 对文件侧的既有哨兵立场：条目含
+        哨兵=建票拒收；条目不含哨兵时，闸面对哨兵文件名本就 fail-closed 不认，
+        故这是口径对齐不是新造分岔。文件名含哨兵的合法 POSIX 文件自此不可经写集
+        授权（宿主 260915 口径：一律列举+哨兵不可写），记录防误摘。"""
     if not isinstance(p, str):
         return False
     s = p.strip()
@@ -2551,7 +2599,13 @@ def _valid_write_set_entry(p: Any) -> bool:
         return False
     if len(s) >= 2 and s[1] == ":" and s[0].isalpha():  # a Windows drive letter C:/…
         return False
-    return ".." not in s.split("/")
+    if ".." in s.split("/"):
+        return False
+    if pathlib.PurePosixPath(s).as_posix() == ".":  # '.'/'./'/'.//' = 项目根（整仓）
+        return False
+    if any(ch in s for ch in "?!*[]"):  # git 通配哨兵，镜像 path_gates._is_safe_path
+        return False
+    return True
 
 
 def validate_write_set_args(write_set: Any, allow_empty: bool):
@@ -2577,7 +2631,8 @@ def validate_write_set_args(write_set: Any, allow_empty: bool):
     ws = [w.strip() for w in (write_set or []) if isinstance(w, str)]
     bad = [w for w in (write_set or []) if not _valid_write_set_entry(w)]
     if bad:
-        return False, {}, ("写集含非法条目（须为仓库内相对路径，禁绝对路径与 '..'）：%s"
+        return False, {}, ("写集含非法条目（须为仓库内相对路径；禁绝对路径、'..'、"
+                           "'.' 整仓形态与通配哨兵 ?!*[]——t260915-04 与写集闸同口径）：%s"
                            % "、".join(str(b) for b in bad[:5]))
     if ws:
         return True, {"no_file_changes": False}, ""

@@ -70,6 +70,8 @@ ok(validate_write_set_args(None, True)[0], "None 写集 + 声明 → 放行（�
 ok(not validate_write_set_args([None, 123], False)[0], "非串元素 → 拒收（建票口不静默清洗）")
 ok(not validate_write_set_args(["  "], False)[0], "纯空白条目 → 拒收")
 ok(validate_write_set_args(["  app/src/main.ts  "], False)[0], "首尾空白容忍")
+ok(not validate_write_set_args(["."], False)[0], "'.' 整仓形态条目 → 拒收（t260915-04 与闸同口径）")
+ok(not validate_write_set_args(["src/*.py"], False)[0], "通配哨兵条目 → 拒收（t260915-04 口径统一）")
 
 # ---------- B. 写集跟随方案 ----------
 section("B refresh_write_set 写集刷新")
@@ -136,7 +138,10 @@ import dataclasses as _dc
 _gd = {f.name: f.default for f in _dc.fields(__import__("shared").ReviewGateResult)}
 ok(_gd.get("lane_commits") == -1 and _gd.get("png_count") == -1,
    "ReviewGateResult 默认 -1 哨兵（git 失败早退路径也非 0）")
-ok("目录不存在 = 没拍，等价 0 png" in aa, "screenshots 不存在 = 等价 0 png")
+# t260915-04 顺修（既有红，与本票写集改动无关）：原锁字符串「目录不存在 = 没拍，
+# 等价 0 png」已在 agent_activities.py 源码中失踪（措辞漂移），行为本身仍在——
+# 改锁真实承载该语义的代码行（shots_dir 不存在 → pngs=[] → ui_gate_red）。
+ok("if shots_dir.is_dir() else []" in aa, "screenshots 不存在 = 等价 0 png")
 ok("shots_path_error" in aa, "路径异常独立字段（与真 0 png 可区分）")
 ok("verify_review_gate" in aa.split("ALL_AGENT_ACTIVITIES")[1], "verify_review_gate 已注册 worker")
 ok("capture-lane.mjs" in aa, "prepare_ui_evidence 改跑 capture-lane（隔离台）")

@@ -35,3 +35,19 @@ def test_none_keeps_empty_set_semantics():
     ok, flags, err = v(None, False)
     assert ok is False and err  # 无声明 → 拒收
     assert v(None, True) == (True, {"no_file_changes": True}, "")
+
+
+def test_dot_and_glob_entries_rejected():
+    """t260915-04 口径统一：'.' 形态与 git 通配哨兵建票期不再判合法——旧判合法、
+    写集闸本就拒（unauthorized_path / _is_safe_path 哨兵立场），收「建票说合法、
+    闸说不合法」漂移。"""
+    for ws in (["."], ["./"], [".//"], [" . "], ["*"], ["**"], ["a/*"], ["src/*.py"],
+               ["a?"], ["a!b"], ["a[b]"]):
+        ok, flags, err = v(ws, False)
+        assert ok is False and flags == {} and err, ws
+
+
+def test_directory_form_entry_still_legal():
+    """存量目录形条目（'server/'）是仓内子目录、不是仓根——t260915-04 不误伤。"""
+    assert v(["server/"], False) == (True, {"no_file_changes": False}, "")
+    assert v(["server/engine/x.py"], False) == (True, {"no_file_changes": False}, "")

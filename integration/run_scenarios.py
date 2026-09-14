@@ -1063,6 +1063,9 @@ SCENARIOS = [
      "生产两项目声明面照旧生效+引擎仓退出取表来源（t260914-05 验收 5，灰盒 L2 只读探针，零写零 docker）：sandbar/dengzhufpv 注册条目仍声明 paths.model_routes、解析 state=ok、roles.developer provider/model 非空（性质断言不钉值——模型是运行时可调项，260910 裁决心智）；解析路径在引擎仓之外（真源机器级不变式）；未登记 key 走三态口径（decl_missing/无表/路径不落仓）＝引擎仓对任何人不再是取表来源；只读 pledge（机器表字节摘要探针前后一致）。条目在场但声明缺失=产品红（契约被破坏），机器注册表/项目条目缺席=ENV_FAIL exit 2（点名）。与 t260902-07 表守卫（随本票改写，单项目表静态性质）intent 不同面：本条锁生产注册面端到端解析拼装+不许伤生产哨兵。本条落地前后都应绿",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260914-05/sc_routes_production_declarations.py", "ro"),
 
+    ("t260915-04-write-set-root-entry-gate",
+     "建票期拒收「整仓根形态」写集条目（t260915-04，KI-092 事故回归面，宿主 260915 口径一律列举，灰盒 L3，真 git 夹具+真实建票双入口，零 docker 零真 Temporal）：多仓混合形态（根仓+成员仓=dengzhufpv 现场）写集条目==成员仓根（'repo_a' 裸仓名与 'repo_a/' 尾斜杠两形态归一同判）→正规入口 ticket.py create 与裸入口 client.py ticket-start 均建票即拒、点名条目且文案含列举式改法关键词（整仓/逐个子目录/.gitignore——锚关键词不锚整串措辞）；仓内子目录/文件/'integration/'（归根仓）照常受理（放行对照腿防判别面失真：拒收与「放行后败于连接」可辨）；单仓项目 '.' 建票拒收（与运行期闸同口径，经保险丝A 归属解析可达）、'*'/'**'/空串/纯空白/含哨兵字符样本建票期不再判合法（拒收并点名）、'..' 段既有拒收不因新判定失序、目录形子目录条目（'server/'）不误伤（存量兼容）；显式 worktree 不能绕过（保险丝A 传播同拒——判据是写集归属不是派生路径）；畸形输入（写集=字符串逐字符假清单形态）拒收点名须为列表；边角=成员仓名恰为 integration 的项目建票不炸（自动化并入撞闸被跳过）；纵深=legacy/手写载荷形态（显式明细在+根形态条目漏进）merge 期保险丝B fail-closed 红灯点名不静默。与 t260910-03-formal-entry-fuses intent 分界：彼守「成员仓子目录写集×明细缺失」双保险丝与正规入口补传（其写集全为仓内条目，新口径不翻红），本守「条目形态==仓根/项目根」的建票期形态闸（明细在也一样拒）；与 t260907-06/t260912（归属三态/嵌套仓 fail-closed）、t260914-01（泳道目录姿态）、notes-write-gate/t260904-18（建票口其它门）不同面；developer L1（resolve/validate 纯函数矩阵）不同层。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；引擎 venv/temporalio 缺席=ENV_FAIL exit 2 点名",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260915-04/sc_t260915_04_write_set_root_entry_gate.py", "ro"),
 
 ]
 
