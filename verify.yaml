@@ -60,16 +60,20 @@ integration:
   # （改前段级全跑 1498.9s）——即每票段从 25 分钟级降到 3 分钟级。
   # 生效边界（三态语义，环环可机械验证）：
   #   ① 仅每票集测段显式置 apply 时消费本声明（run_integration_tests → dev_lane 唯一
-  #      true 站点）；巡检/手动/老载荷回放缺省=false → **恒全跑**（不含跳过面）；
+  #      true 站点）；巡检/手动/老载荷回放缺省=false → **恒全跑**（不含跳过面）——
+  #      被跳池只由这一路覆盖，故该路的完整轮必须保持有效；
   #   ② 跳过必须点名：执行器汇总与起始各打一次「本轮跳过池=…（少 N 条）」，且
   #      ran==expected==本轮在册（被跳条目不在本轮在册，不冒充已跑、不假绿）；
-  #   ③ 例外（本条声明的意义）：票面写集命中 exclude_pools_force_assets、或命中执行器
-  #      用 --print-pool-assets 从注册表派生的被跳池资产面（被跳场景文件本身、其 import
-  #      的共享模块、integration/ 根级共享基建）→ **强制全跑**并在回执 forced_by 点名。
+  #   ③ 例外腿**已撤除**（宿主管 260914，起因＝KI-089）：旧口径为「票面写集命中
+  #      exclude_pools_force_assets、或命中执行器 --print-pool-assets 派生的被跳池资产面
+  #      → 强制全跑」；实测该腿对**全部**在跑票恒命中（写集带目录形条目如 integration/
+  #      即命中整个测试目录，四票逐票命中 77~78 项），排除声明一次都没生效。现行：apply=true
+  #      时**声明即跳过**；旧命中面仍进回执 pool_exclude.former_force_assets 留痕（少跑必须
+  #      可见），但不再据此放行。下方 exclude_pools_force_assets 保留为历史声明/迁移期参照，
+  #      **不再被消费**。
   # 资产面取值理由（260913 实核）：被跳池的场景只依赖「测试台定义 + 测试基建」，不直接
-  # 依赖引擎源码（grep 无 agent_activities/verify_lane 引用），故强制面只圈测试台定义；
-  # compose 文件经实测**不在**注册表派生面内（须靠本声明入面），否则改了测试台定义反而
-  # 不跑测试台自证场景。
+  # 依赖引擎源码（grep 无 agent_activities/verify_lane 引用）；compose 文件经实测**不在**
+  # 注册表派生面内。派生面仍被 --print-pool-assets 用于未知池/非法池名单点判红。
   exclude_pools: engine,exclusive
   exclude_pools_force_assets:
     - server/docker-compose.test.yml
