@@ -916,6 +916,30 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   证据＝`server/engine/data/worker-t260911-05.log`、`worker-t260912-01.log`（260913 11:19 两条）；
   票面证据＝t260912-01 / t260911-05 的 `authorizations` 从空到 3 条的时间线。
 
+## KI-090 曾被误提交的 `.sandbar/` 状态目录借「合并 main」复发：老分叉泳道在 merge_check 判红（260914 双票实证）
+- 现象：`t260913-01` 走到 merge_check 判红两条——「工作区干净（无未提交改动）」红 + 「敏感/运行时路径
+  入库（必须 untrack）」红，点名 `.sandbar/routes-migration-260911/README.md` 与 `…/model-routes.yaml.to-machine`。
+  它当时在跑冲突消解（worker 代 `git merge main`），**红不是它自己的改动造成的**。
+- 根因（实测链）：该两文件由 `6716e2e`（09-11 04:31「路由迁移预备包 + 过夜报告」）**误提交进 main 历史**；
+  随后 `e1d2303`（t260911-06 squash 收口）在 main 上删除该路径（`main` 现 `git ls-tree -r main -- .sandbar/`
+  = 0 条）。**分叉点早于 `e1d2303` 的泳道仍带着这两文件**（`git ls-files .sandbar/` = 2）；合并 main 时
+  收到这次删除 → 工作区呈现「待删 tracked 文件」→ 工作区不干净 + 敏感路径入库两条红同时成立。
+- 危害：①老票越老越容易撞（与 KI-082 同族），且**形态误导**——看起来像本票在工作区乱留东西，实际是
+  历史欠账借合并复发；②只由 merge_check/merge 阶段暴露，前面所有段都看不见，而那时已经烧掉大量机时；
+  ③`.gitignore` 只有 `.dsh/`、`.suyou/`，**没有 `.sandbar/`**，所以 `.sandbar/` 一旦被误提交就再无自动
+  免疫——同目录下每天生成的 `model_patch_*.yml`／`stage_*.json`／`resume_patch_*.yml`（每票上百个）都是
+  靠「不 add」而非规则挡住的，风险面一直开着。
+- 实测影响面（260914 普查全部泳道）：`t260913-01` tracked=2 且工作区呈待删（已触红）；`t260913-04`
+  tracked=2 但工作区未呈待删（同源欠账、暂未触红）。其余泳道 0。
+- 处置方向（建议，未实施）：①**把 `.sandbar/` 加进 `.gitignore`**（与 `.dsh/`、`.suyou/` 同列；`.sandbar`
+  是本引擎的泳道侧状态目录，按设计从不入库）——这一条同时消掉「误提交」与「待删」两种复发形态；
+  ②已误提交的路径用一次「清账」提交在 main 上收口（本例 `e1d2303` 已做，但老分叉泳道仍需各自合并后
+  落一次删除；本次由 `t260913-01` 在实现段提交该删除处置）；③可选：merge_check 对「删除仅来自 main 侧
+  既有清账」的形态给出可辨提示，避免与「本票乱留文件」混淆。
+- 定位：证据＝`.lane/t260913-01` 的 `git ls-files .sandbar/` = 2、
+  `git status --porcelain .sandbar/` 两条 `D`；`main` 侧 `git log --diff-filter=D -- .sandbar/routes-migration-260911/README.md`
+  → `e1d2303`；引入提交 `6716e2e`；`git merge-base --is-ancestor 6716e2e main` = 真。
+
 ## KI-089 池排除由「目录形写集」无条件压制：凡是写自己集测基建的票，排除声明恒定失效（260914 实证）
 - 前言（先纠正一条当日误判）：排除机制**本身是好的**，`t260913-03` 声明对当期新票即刻生效。证据＝
   `t260913-04` 12:20 那轮报告 `excluded_pools=['engine','exclusive']`、`excluded_count=47`，
