@@ -126,9 +126,16 @@ def tp_json(snippet, env_extra=None, args=None, timeout=120, env_replace=False):
 def stage_ensure(project, services="temporal"):
     """stage_docker 单点搭台（CLI 子进程，退出码三态透传）。
     返回 (info_dict|None, errmsg)。环境红由调用方按 ENV_FAIL 收口。"""
-    p = subprocess.run([sys.executable, STAGE_DOCKER, "ensure",
-                        "--project", project, "--services", services],
-                       capture_output=True, text=True, timeout=600)
+    try:
+        p = subprocess.run([sys.executable, STAGE_DOCKER, "ensure",
+                            "--project", project, "--services", services],
+                           capture_output=True, text=True, timeout=600)
+    except subprocess.TimeoutExpired:
+        # 260911 仲裁实锤（t260907-04 在地址池耗尽轮被计成产品红）：起台挂起超时应
+        # 走 ENV_FAIL（调用方 info is None→env_fail），不许 TimeoutExpired 冒泡成
+        # 退出码 1 冒充产品红——环境面归环境面，账目必须准。
+        return None, ("stage ensure 超时（>600s）——起台挂起（多泳道 docker 容量/"
+                      "地址池压力），环境红非产品")
     if p.returncode != 0:
         return None, (p.stdout + p.stderr).strip()[-500:]
     try:

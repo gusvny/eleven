@@ -2796,9 +2796,19 @@ class MergeResult:
     workflow to turn blocked for human handling)."""
 
     ok: bool = False
-    action: str = ""      # merged | conflict | failed
+    # KI-048 (t260911-05): action gains "dirty" — a main-workspace dirt rejection is
+    # git's local-change protection, NOT a conflict; misclassifying it as conflict
+    # made the workflow auto-bounce (t260904-14: a first sign-off silently consumed).
+    action: str = ""      # merged | conflict | dirty | failed
     merge_commit: str = ""
     error: str = ""
+    # Failure-classification protocol reason code (open vocabulary, never empty on a
+    # failure — unclassifiable shapes fall to merge_fault, never coerced to conflict):
+    #   main_staged / main_dirty / untracked_collision / conflict / merge_fault
+    reason: str = ""
+    # Named files blocking the merge (KI-048 件②: the human-gate/ticket face must see
+    # WHICH file). Default empty = old receipts deserialize untouched.
+    files: List[str] = field(default_factory=list)
 
 
 # ---- Result file / log paths (pure functions; the activity and the prompt assembly

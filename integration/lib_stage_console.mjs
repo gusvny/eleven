@@ -134,19 +134,45 @@ export async function ensureStageConsole({ services = 'full', project = TREE_PRO
   // reason). With the budget below the cap, "cannot supply" lands as an
   // honest env_fail exit 2 naming the stage. Healthy reuse returns in seconds.
   const ensureBudget = Number(process.env.SANDBAR_STAGE_ENSURE_TIMEOUT || 600);
-  const ensureArgs = ['ensure', '--project', project, '--keep',
-    '--repo-dir', WANT_REPO,
-    '--services', services,
-    '--fixtures-dir', FIXTURES_HOST,
-    '--timeout', String(ensureBudget)];
-  const ensureOnce = () => spawnSync('python3', [CLI, ...ensureArgs],
-    { encoding: 'utf8', env, timeout: ensureBudget * 1000 + 60_000 });
+  // 260912 仲裁第 10 次进段自查修正：本段各次 ensure 必须**共享同一个总预算**，
+  // 不能每次各拿满 600s——否则「初试 + 瞬态重试 + 自愈(down + 重 ensure)」叠加可把
+  // 单条场景的供给时间放大到 20~40 分钟：既破坏了本文件原有不变式「供给帽 600s
+  // 严格低于执行器 900s/场景 kill 帽」，也是多泳道风暴下套件 wall 冲过机械步外层
+  // 预算（主树 INTEG_RUN_TO=60min）的助推因素。改为按总预算衰减下发每次 --timeout，
+  // 预算耗尽即不再重试、直接以诚实 env_fail 收口（判定语义与断言一律不变）。
+  const ensureDeadline = Date.now() + ensureBudget * 1000 + 60_000;
+  const remainingSec = () => Math.max(0, Math.ceil((ensureDeadline - Date.now()) / 1000));
+  const ensureOnce = () => {
+    const budget = Math.min(ensureBudget, remainingSec());
+    if (budget <= 30) {
+      return { status: 1, error: null,
+        stderr: `STAGE_ENSURE: 供给总预算已耗尽（前置尝试/自愈已用尽 ${ensureBudget}s 帽）` };
+    }
+    return spawnSync('python3', [CLI, 'ensure', '--project', project, '--keep',
+      '--repo-dir', WANT_REPO,
+      '--services', services,
+      '--fixtures-dir', FIXTURES_HOST,
+      '--timeout', String(budget)],
+      { encoding: 'utf8', env, timeout: budget * 1000 + 60_000 });
+  };
   let p = ensureOnce();
   if ((p.error || p.status !== 0) && isTransient(String(p.stderr ?? ''))) {
     // 瞬态重试（t260910-12 目标④）：命中白名单（502/拒连/起台面繁忙）自动
     // 重试一次——判定走 lib_transient_retry 单源；仍红才按环境红收口。
     console.error('[stage-console] ensure 红命中瞬态白名单，2s 后自动重试一次');
     p = ensureOnce();
+  }
+  // FM-B 自愈（260911 仲裁多轮实锤）：`~/.sandbar` 可写性震荡→锁根降级后本根无租约
+  // 而本台容器仍在跑→stage_docker 报「有无主容器在跑（租约已死/缺失）」拒起——18 条
+  // 台面族场景连片环境红的唯一根因。判定式命中即视为**本泳道自己的孤儿台**（project
+  // 名由本树路径哈希派生，不可能指向他泳道）；down 本台（幂等回收）+ 重 ensure 一次
+  // =自愈。只动本项目，绝不触碰任何别的泳道容器；仍红才按环境红收口。
+  if ((p.error || p.status !== 0) && /有无主容器在跑/.test(String(p.stderr ?? ''))) {
+    console.error('[stage-console] 自愈：本台容器在跑而无主租约（锁根震荡假孤儿），down 本台后重 ensure 一次');
+    spawnSync('python3', [CLI, 'down', '--project', project],
+      { encoding: 'utf8', env, timeout: 180000 });
+    p = ensureOnce();
+    if ((p.error || p.status !== 0) && isTransient(String(p.stderr ?? ''))) p = ensureOnce();
   }
   if (p.error || p.status !== 0) {
     const named = String(p.stderr ?? '').split('\n').filter((l) => l.startsWith('STAGE_')).at(-1);
@@ -158,7 +184,34 @@ export async function ensureStageConsole({ services = 'full', project = TREE_PRO
     console.error(`[ENV_FAIL] stage-console — ${named ?? why}\n${String(p.stderr ?? '').slice(-600)}`);
     process.exit(2);
   }
-  const st = JSON.parse(String(p.stdout).trim().split('\n').at(-1));
+  let st = JSON.parse(String(p.stdout).trim().split('\n').at(-1));
+  // 身份验证（260911 仲裁实锤，t260906-01 异树病还魂形态）：ensure 曾在租约/
+  // 容器churn 窗口返回本项目的名字+端口，但该端口实际被另一棵树（他泳道）的
+  // console 容器持有——本树场景连上别家台面，「产品卡缺失」假红。base 必须由
+  // 本项目自己的 -dsh 容器持有；不持即拆重 ensure 一次，仍不持=诚实环境红。
+  const portHeldByOwn = () => {
+    const q = spawnSync('docker', ['port', `${st.project}-dsh`, '3199'],
+      { encoding: 'utf8', timeout: 15000 });
+    return q.status === 0 && String(q.stdout).includes(`:${st.ports.console}`);
+  };
+  if (!portHeldByOwn()) {
+    console.error('[stage-console] base 未由本项目容器持有（端口改配/异树串连窗），down 后重 ensure 一次');
+    spawnSync('python3', [CLI, 'down', '--project', st.project],
+      { encoding: 'utf8', env, timeout: 180000 });
+    p = ensureOnce();
+    if ((p.error || p.status !== 0) && isTransient(String(p.stderr ?? ''))) p = ensureOnce();
+    if (p.error || p.status !== 0) {
+      const named = String(p.stderr ?? '').split('\n').filter((l) => l.startsWith('STAGE_')).at(-1);
+      console.error(`[ENV_FAIL] stage-console — 重 ensure 仍失败：${named ?? `rc=${p.status}`}\n${String(p.stderr ?? '').slice(-600)}`);
+      process.exit(2);
+    }
+    st = JSON.parse(String(p.stdout).trim().split('\n').at(-1));
+    if (!portHeldByOwn()) {
+      console.error('[ENV_FAIL] stage-console — 重 ensure 后 base 仍非本项目容器持有（跨树串连窗，稍后重跑）：'
+        + `project=${st.project} port=${st.ports.console}`);
+      process.exit(2);
+    }
+  }
   const SEED = { key: 'seedws', name: 'SeedWs' };
   // In-container fixture project seeding (gen6 ruling, option b): the default
   // registry's suyou entries point at host absolute paths that the container

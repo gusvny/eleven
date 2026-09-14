@@ -106,6 +106,7 @@ import {
 } from './ticket-list-model.ts'
 // t260901-15 多页签共存：在看心跳/写事件广播（tab-presence）+ 不可见页签暂停轮询门。
 import { startTabPresence } from './tab-presence.ts'
+import { buildStatusCard } from '../host/status-card.ts'
 import type { TabPresence, PeerViewer } from './tab-presence.ts'
 import { buildApproveNote } from './approve-note.ts'
 import { startVisibleInterval } from './visibility-poll.ts'
@@ -273,6 +274,21 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-drawer-head{display:flex;align-items:baseline;gap:10px;border-bottom:1px solid var(--dsw-derive-border,#d0d7de);padding-bottom:10px}
 .wb-d2-blocked{margin:8px 0;padding:6px 12px;border:1px solid var(--dsw-derive-danger,#cf222e);border-radius:6px;
   background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e);font-size:12.5px}
+/* KI-048（t260911-05）人话状态卡：红调=blocked / 黄调=其它态带受阻面；主题令牌派生。 */
+.wb-status-card{margin:8px 0;padding:10px 12px;border:1px solid var(--dsw-derive-danger,#cf222e);border-left:4px solid var(--dsw-derive-danger,#cf222e);border-radius:8px;background:var(--dsw-derive-danger-bg,#ffebe9)}
+.wb-status-card[data-sev=amber]{border-color:var(--dsw-derive-warn,#bf8700);border-left-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5)}
+.wb-status-card .sc-head{font-size:13px;font-weight:700;line-height:1.6;color:var(--dsw-derive-danger,#cf222e)}
+.wb-status-card[data-sev=amber] .sc-head{color:var(--dsw-derive-warn-deep,#7d4e00)}
+.wb-status-card .sc-files{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 0}
+.wb-status-card .sc-file{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;padding:1px 6px;border-radius:4px;background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-border,#d0d7de);color:var(--dsw-derive-danger,#cf222e)}
+.wb-status-card .sc-file-more{font-size:11px;color:var(--dsw-derive-muted,#8c959f);align-self:center}
+.wb-status-card .sc-next{margin-top:6px;font-size:12px;line-height:1.6;color:var(--dsw-derive-danger,#7d2222)}
+.wb-status-card[data-sev=amber] .sc-next{color:var(--dsw-derive-warn-deep,#5a4500)}
+.wb-status-card .sc-next b{font-weight:700}
+.wb-status-card .sc-raw{margin-top:6px}
+.wb-status-card .sc-raw>summary{cursor:pointer;font-size:11.5px;color:var(--dsw-derive-muted,#57606a)}
+.wb-status-card .sc-raw[open]>summary{color:var(--dsw-derive-accent,#0969da)}
+.wb-status-card .sc-raw pre{margin:4px 0 0;padding:6px 8px;font-size:11px;line-height:1.5;max-height:200px;overflow:auto;background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;white-space:pre-wrap;word-break:break-all}
 .wb-drawer-id{font-size:12px;color:var(--dsw-derive-muted,#57606a);word-break:break-all}
 .wb-close{position:absolute;top:14px;right:16px;font-size:22px;color:var(--dsw-derive-muted,#57606a);cursor:pointer;background:none;border:none}
 .wb-close:hover{color:var(--dsw-derive-fg,#1f2328)}
@@ -877,6 +893,9 @@ interface TicketDetail {
   workflow_id: string
   /** 阻塞原因（t260904-17：行卡「看原因」导航锚——ticket show 透传字段）。 */
   blocked_reason?: string
+  /** KI-048（t260911-05）：v2 snapshot 顶层透传的结构化受阻面（人话状态卡数据源；
+   *  旧快照缺省 → status-card 回落 meta.blocked_detail）。 */
+  blocked_detail?: { reason_code?: string; files?: string[]; next_action?: string } | null
   /** 所属立项代号（epic-linkage；详情 API 已透出，t260825-04）。 */
   epic?: string
   stage: string | null
@@ -923,7 +942,11 @@ interface TicketDetail {
   /** KI-024 并行真源（t260903-04）：引擎 snapshot 附 meta 全文；UI 只消费
    *  parallel_stages（并行分叉期活跃边列表）——lane-states 真值优先双显，
    *  缺失/空回落既有 timeline 启发式。 */
-  meta?: { parallel_stages?: string[] } | null
+  meta?: {
+    parallel_stages?: string[]
+    /** KI-048（t260911-05）：引擎 dev_lane 落的结构化受阻面（人话状态卡数据源）。 */
+    blocked_detail?: { reason_code?: string; files?: string[]; next_action?: string } | null
+  } | null
 }
 
 /** Temporal pending activity 心跳（agent_activities.py 每 5s 上报 {stage,gen,polls,session_kb}）。 */
@@ -3596,6 +3619,31 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
               {detail.blocked_reason && (
                 <div className="wb-d2-blocked">⛔ 受阻原因：{detail.blocked_reason}</div>
               )}
+              {/* KI-048（t260911-05）人话状态卡（mock 260904 A 块口径，四件：人话
+                  主文案／挡事文件点名／下一步安排／原始日志折叠）。视图模型由
+                  buildStatusCard 纯函数派生（表驱动翻译，UI 不翻译它没拿到的
+                  信息）；非受阻且无受阻面 → null 整卡不渲染（老票零侵入）。
+                  固定界面元素英文（Status card 口径），正文人话中文。 */}
+              {(() => {
+                const card = buildStatusCard(detail)
+                if (!card) return null
+                return (
+                  <div className="wb-status-card" data-sev={card.severity} data-testid="status-card">
+                    <div className="sc-head">⛔ {card.headline}</div>
+                    {(card.files.length > 0 || card.filesMore > 0) && (
+                      <div className="sc-files">
+                        {card.files.map((f) => <code className="sc-file" key={f}>{f}</code>)}
+                        {card.filesMore > 0 && <span className="sc-file-more">+{card.filesMore} more</span>}
+                      </div>
+                    )}
+                    <div className="sc-next"><b>Next:</b> {card.next}</div>
+                    <details className="sc-raw">
+                      <summary>Raw engine log</summary>
+                      <pre>{card.rawLog.join('\n')}</pre>
+                    </details>
+                  </div>
+                )
+              })()}
               {/* t260901-15 多页签共存：另一页签正在看此工单时提示（心跳驱动，TTL 自动消失）。 */}
               {drawerPeerViewers.length > 0 && (
                 <div style={{ background: 'var(--dsw-derive-accent-bg,#ddf4ff)', border: '1px solid var(--dsw-derive-accent-border,#54aeff)', borderRadius: 6,

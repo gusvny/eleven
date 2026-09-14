@@ -48689,6 +48689,92 @@ function startTabPresence(who, opts) {
 	return self;
 }
 //#endregion
+//#region src/host/status-card.ts
+/**
+* status-card.ts —— 工单详情「人话状态卡」视图模型（KI-048 件④，t260911-05）。
+*
+* 设计样张：notes/discussions/260904-ticket-detail-ui-mock.html A 块状态卡
+* （四件构成：人话主文案 ＋ 挡事文件点名 ＋ 下一步安排 ＋ 原始日志折叠；
+* mock C 原则：翻译层表驱动——引擎术语→人话词条，UI 不翻译它没拿到的信息）。
+*
+* 数据源优先级：
+*   1. detail.meta.blocked_detail（引擎 dev_lane 落的结构化面：
+*      {reason_code, files, next_action}）——文件点名/下一步直接取；
+*   2. detail.blocked_reason（blocked 文案，同一 _classify_main_dirty 真源派生
+*      的人话句）——主文案取它；文件名从文本抽路径 token 兜底；
+*   3. 都缺 → 卡不渲染（返回 null，老票零侵入）。
+*
+* 纯函数无 IO；畸形输入（非对象/字段类型错/列表超长）全部软降级不抛。
+*/
+/** 主文案词条表：引擎 reason 码 → 人话主句（出了什么事）。 */
+const REASON_HEADLINES = {
+	main_staged: "Merge blocked: the main workspace has staged but uncommitted changes",
+	main_dirty: "Merge blocked: the main workspace has uncommitted changes (local-change protection, not a conflict)",
+	untracked_collision: "Merge blocked: untracked files collide with this ticket's merge paths",
+	merge_fault: "Merge did not close: a merge fault occurred (not a conflict)",
+	conflict: "Merge hit conflicts with main"
+};
+/** 文件名兜底抽取：blocked_reason 文本里的路径形 token（含 / 或 . 且非句读）。 */
+const PATH_TOKEN_RE = /[A-Za-z0-9_][A-Za-z0-9_./-]*[/.][A-Za-z0-9_.-]+/g;
+function asStringArray(v) {
+	if (!Array.isArray(v)) return [];
+	return v.filter((x) => typeof x === "string" && x.trim() !== "");
+}
+function extractPathTokens(text) {
+	const seen = /* @__PURE__ */ new Set();
+	const out = [];
+	for (const tok of text.match(PATH_TOKEN_RE) ?? []) {
+		if (!tok.includes("/")) continue;
+		if (!seen.has(tok)) {
+			seen.add(tok);
+			out.push(tok);
+		}
+	}
+	return out;
+}
+/**
+* 构建状态卡视图模型。返回 null = 整卡不渲染（非受阻票/既无结构化面也无
+* blocked 文案——老票零侵入）。
+*/
+function buildStatusCard(detail) {
+	if (detail === null || typeof detail !== "object") return null;
+	const d = detail;
+	const stageState = typeof d.stage_state === "string" ? d.stage_state : "";
+	const blockedReason = typeof d.blocked_reason === "string" ? d.blocked_reason.trim() : "";
+	const meta = d.meta !== null && typeof d.meta === "object" ? d.meta : {};
+	const rawBd = d.blocked_detail !== null && typeof d.blocked_detail === "object" ? d.blocked_detail : meta.blocked_detail;
+	const bd = rawBd !== null && typeof rawBd === "object" ? rawBd : {};
+	const reasonCode = typeof bd.reason_code === "string" ? bd.reason_code : "";
+	const structFiles = asStringArray(bd.files);
+	const structNext = typeof bd.next_action === "string" ? bd.next_action.trim() : "";
+	if (stageState !== "blocked" && !reasonCode && !blockedReason) return null;
+	const headline = (reasonCode ? REASON_HEADLINES[reasonCode] ?? `Merge blocked (${reasonCode})` : "") || blockedReason || (reasonCode ? `Merge blocked (${reasonCode})` : "Ticket is blocked");
+	const filesAll = structFiles.length > 0 ? structFiles : extractPathTokens(blockedReason);
+	const files = filesAll.slice(0, 20);
+	const filesMore = Math.max(0, filesAll.length - files.length);
+	const next = structNext || (stageState === "blocked" ? "Waiting for you: resolve the files above, then trigger retry-qc (or rework). The engine never stashes or commits on its own." : "Follow the reason above; the lane is preserved.");
+	const timeline = Array.isArray(d.timeline) ? d.timeline : [];
+	const rawLog = [];
+	for (const ent of timeline.slice(-8)) {
+		if (ent === null || typeof ent !== "object") continue;
+		const e = ent;
+		const at = typeof e.at === "string" ? e.at : "?";
+		const stage = typeof e.stage === "string" ? e.stage : "?";
+		const state = typeof e.state === "string" ? e.state : "?";
+		const reason = typeof e.reason === "string" ? e.reason : "";
+		rawLog.push(`${at} [${stage}/${state}] ${reason}`.trimEnd());
+	}
+	if (rawLog.length === 0) rawLog.push("(no engine timeline entries)");
+	return {
+		headline,
+		files,
+		filesMore,
+		next,
+		rawLog,
+		severity: stageState === "blocked" ? "red" : "amber"
+	};
+}
+//#endregion
 //#region src/client/approve-note.ts
 /**
 * approve-note.ts —— KI-004（t260901-22）：人审 approve 签字的 note 拼接（纯函数层）。
@@ -49009,6 +49095,21 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-drawer-head{display:flex;align-items:baseline;gap:10px;border-bottom:1px solid var(--dsw-derive-border,#d0d7de);padding-bottom:10px}
 .wb-d2-blocked{margin:8px 0;padding:6px 12px;border:1px solid var(--dsw-derive-danger,#cf222e);border-radius:6px;
   background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e);font-size:12.5px}
+/* KI-048（t260911-05）人话状态卡：红调=blocked / 黄调=其它态带受阻面；主题令牌派生。 */
+.wb-status-card{margin:8px 0;padding:10px 12px;border:1px solid var(--dsw-derive-danger,#cf222e);border-left:4px solid var(--dsw-derive-danger,#cf222e);border-radius:8px;background:var(--dsw-derive-danger-bg,#ffebe9)}
+.wb-status-card[data-sev=amber]{border-color:var(--dsw-derive-warn,#bf8700);border-left-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5)}
+.wb-status-card .sc-head{font-size:13px;font-weight:700;line-height:1.6;color:var(--dsw-derive-danger,#cf222e)}
+.wb-status-card[data-sev=amber] .sc-head{color:var(--dsw-derive-warn-deep,#7d4e00)}
+.wb-status-card .sc-files{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 0}
+.wb-status-card .sc-file{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;padding:1px 6px;border-radius:4px;background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-border,#d0d7de);color:var(--dsw-derive-danger,#cf222e)}
+.wb-status-card .sc-file-more{font-size:11px;color:var(--dsw-derive-muted,#8c959f);align-self:center}
+.wb-status-card .sc-next{margin-top:6px;font-size:12px;line-height:1.6;color:var(--dsw-derive-danger,#7d2222)}
+.wb-status-card[data-sev=amber] .sc-next{color:var(--dsw-derive-warn-deep,#5a4500)}
+.wb-status-card .sc-next b{font-weight:700}
+.wb-status-card .sc-raw{margin-top:6px}
+.wb-status-card .sc-raw>summary{cursor:pointer;font-size:11.5px;color:var(--dsw-derive-muted,#57606a)}
+.wb-status-card .sc-raw[open]>summary{color:var(--dsw-derive-accent,#0969da)}
+.wb-status-card .sc-raw pre{margin:4px 0 0;padding:6px 8px;font-size:11px;line-height:1.5;max-height:200px;overflow:auto;background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;white-space:pre-wrap;word-break:break-all}
 .wb-drawer-id{font-size:12px;color:var(--dsw-derive-muted,#57606a);word-break:break-all}
 .wb-close{position:absolute;top:14px;right:16px;font-size:22px;color:var(--dsw-derive-muted,#57606a);cursor:pointer;background:none;border:none}
 .wb-close:hover{color:var(--dsw-derive-fg,#1f2328)}
@@ -52536,6 +52637,47 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 							className: "wb-d2-blocked",
 							children: ["⛔ 受阻原因：", detail.blocked_reason]
 						}),
+						(() => {
+							const card = buildStatusCard(detail);
+							if (!card) return null;
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "wb-status-card",
+								"data-sev": card.severity,
+								"data-testid": "status-card",
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "sc-head",
+										children: ["⛔ ", card.headline]
+									}),
+									(card.files.length > 0 || card.filesMore > 0) && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "sc-files",
+										children: [card.files.map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", {
+											className: "sc-file",
+											children: f
+										}, f)), card.filesMore > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+											className: "sc-file-more",
+											children: [
+												"+",
+												card.filesMore,
+												" more"
+											]
+										})]
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "sc-next",
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: "Next:" }),
+											" ",
+											card.next
+										]
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
+										className: "sc-raw",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "Raw engine log" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", { children: card.rawLog.join("\n") })]
+									})
+								]
+							});
+						})(),
 						drawerPeerViewers.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							style: {
 								background: "var(--dsw-derive-accent-bg,#ddf4ff)",

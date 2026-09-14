@@ -968,6 +968,13 @@ SCENARIOS = [
      "失控起台循环被保险丝刹停并逐条点名（t260912-02 验收 E，灰盒 L3）：注入小保险丝（SANDBAR_STAGE_MAX_STAGES=4 隔离锁根；生产缺省 100 的不触闸面由 burst 场景与 L1 缺省值断言承担不在此重复）+一口气 200 路并发 up（失控循环样本）：恰≤4 路入位（原子不超售）、其余全部刹停且每路红行点名保险丝并附活租约清单（pid=/lease= 可核对——「点名」是硬断言）、刹停红一律环境档 rc=2；损害有界：全程在跑容器≤4 台规模、风暴结束无孤儿持有腿进程残留（pgrep 公开观测面）、清理后零容器残留；全程零地址池报错。与 t260910-12-full-capacity-queue（小闸 2 路最小形态的语义迁移面）intent 分工：本条锚 200 路风暴的损害有界与逐条点名，是验收 E 本体强度。登记 exclusive。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker/测试镜像缺席=ENV_FAIL exit 2",
      "python3 integration/t260912-02/sc_stage_fuse_runaway_named_stop.py", "exclusive"),
 
+    # ---- t260911-05: KI-048 脏 main 合并门 + 详情人话状态卡 ----
+    ("t260911-05-ki048-dirty-main-merge-gate",
+     "KI-048 脏 main 合并门全链（t260911-05，真 git 临时仓 × merge_check/_squash_merge 接缝，灰盒 L2/L3）：合并前脏检查提前红灯点名文件（staged/未提交相交/未跟踪相撞三形态，验收a/c）且恒非冲突类（conflict=False、conflict_files 空不进自动消解回路）；处置后该检查项红→绿翻转（验收b 闸侧形态）；merge 回执分类脏工作区=action=dirty+协议 reason 码非空（main_dirty）+点名文件+「非冲突」人话文案，真冲突（main 已提交相撞）仍 action=conflict 两类不互吞、干净 main 收口 ok=True merged（验收①/b 对照面）；红线：全部失败路径前后 main 工作区文件字节哈希/HEAD/stash 计数/porcelain 逐项不变（无 auto-stash/auto-commit，260908 事故红线，验收f）；dev_lane 源码契约锁（docker 台外可守的分流面，t05/G 系同族）：dirty/failed→_blocked(\"merge\") 先于 conflict 唯一 _auto_rework(\"merge_check\")、blocked_detail{reason_code,files,next_action} 在位、dict 态回执重建回填 reason/files（R3 回归守卫）。与 developer L1（test_ki048_merge_classify 白盒纯函数电池）不同层、t260910-03 G7（保险丝B 清单缺失面）不同故障面、sc_check_auto_rework_trace（_auto_rework 统一入口锁）不同对象。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio 缺失=行为腿 ENV_FAIL 点名，stdlib 腿恒跑",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260911-05/sc_ki048_dirty_main_merge_gate.py", "ro"),
+    ("t260911-05-ki048-status-card-dom",
+     "KI-048 详情人话状态卡 payload→pixel（t260911-05，隔离台浏览器走查=验收d/e 机械 repeatable 面，mock 260904 A 块四件）：blocked 脏工作区票抽屉内 .wb-status-card 恰 1 个红态卡——人话主文案（非冲突）、挡事文件点名 chip、下一步（retry_qc）、<details> 原始日志折叠四件齐且折叠摘要为英文固定元素（界面固定元素英文口径锚无 CJK 不锚措辞）、blocked_reason 横幅同页可达（验收d）；无 blocked 字段老票整卡不渲染零扰动；畸形 blocked_detail（空对象+无路径 reason）卡退化渲染不崩且绝不凭空捏造文件点名（UI 不翻译它没拿到的信息）；全旅程零 pageerror。与 developer L1（workbench status-card 视图模型纯函数/畸形输入用例）intent 不同层（L1 锁不住 JSX 运行时错/落位/降级渲染），t260904-06 spec-card-dom（spec 卡落位）/t260904-17 行卡面（列表四态）不同面。bundle 陈旧时以「卡不在 DOM」正确变红（归因 bundle_pairs 闸与 t260903-04 bundle-sync）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；隔离台/playwright/chromium 缺席=ENV_FAIL 点名（KI-036）",
+     "node integration/t260911-05/sc_ki048_status_card_dom.mjs", "browser-free"),
     # ---- t260913-03: 每票集测段池排除开关（声明面 apply + 命中被跳池资产强制全跑）----
     # integration 设计段产物（L2/L3 灰盒：真闸 + 真执行器 + mini 注册表夹具，秒级）。
     # 四条 intent 互不重叠：①消费形态矩阵（A/B/E）②例外腿正负锁（D）

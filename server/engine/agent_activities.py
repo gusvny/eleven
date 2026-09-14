@@ -2335,6 +2335,31 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
     except Exception as e:
         checks.append({"item": "UI 截图证据", "green": False, "detail": "证据闸异常: %s" % e})
 
+    # 3.7 KI-048 (t260911-05): pre-merge main-workspace dirty check (active, not
+    #     post-facto). The four original items only inspect the lane side; main-tree
+    #     dirt surfaced only when the merge activity refused (too late: after the
+    #     human sign-off). Verdict source = _classify_main_dirty — the SAME truth the
+    #     merge activity's failure classification uses, and the gate detail derives
+    #     its human phrase from the same _dirty_block_note, so the two faces cannot
+    #     drift. Insertion point pinned BEFORE the rehearsal (the rehearsal must stay
+    #     checks[-1]: the conflict classification treats checks[:-1] as non-conflict
+    #     items — a dirty red is always non-conflict, never enters the auto-resolution
+    #     loop, and blocks for a human; same-position discipline as fuse B).
+    #     RED LINE: this check is read-only — it NEVER stashes and NEVER auto-commits
+    #     (the 260908 auto-stash incident: a session stashed host edits and merged
+    #     half-way, breaking the console loading chain).
+    try:
+        dirty_verdict = _classify_main_dirty(sc["repo"], sc["branch"])
+        dirty_kind = dirty_verdict.get("kind") or ""
+        human = _dirty_block_note(dirty_verdict)
+        checks.append({"item": "main 工作区无未提交改动（合并前脏检查）",
+                       "green": not dirty_kind,
+                       "detail": ("干净（无未提交改动、无与本单收口路径相撞的未跟踪文件）"
+                                  if not dirty_kind else human)})
+    except Exception as e:  # a fault in this read-only pre-check goes red honestly, the activity never raises
+        checks.append({"item": "main 工作区无未提交改动（合并前脏检查）",
+                       "green": False, "detail": "脏检查异常: %s" % e})
+
     # 4. merge-tree 预演无冲突（不落地——只把合并结果写成 tree 对象判冲突，
     #    It changes no workspace/index state; ticket t260826-01: the conflict file
     #    list parsed from the output is carried out for the resolution loop.
@@ -2834,6 +2859,135 @@ def _merge_started(repo: Path) -> bool:
     return bool((lu.stdout or "").strip())
 
 
+# ---------- KI-048 (ticket t260911-05): main-workspace dirt classification ----------
+# A main-workspace dirt rejection is git's local-change protection, NOT a conflict.
+# Misclassifying it as action="conflict" made the workflow auto-bounce the ticket for
+# re-verification and silently consume a human sign-off (KI-048, t260904-14). The
+# classifier is the SINGLE source of truth for both the merge activity's failure
+# classification and merge_check's pre-merge dirty check item — the blocked text and
+# the gate detail derive from the same verdict, so the two faces cannot drift.
+
+# Point-naming cap: the file list in receipts/UI is capped, the count overflow goes
+# into the note (an unbounded list can blow up the ticket face / the gate record).
+MERGE_FILES_CAP = 20
+
+# Classification verdicts (reason codes on the failure-classification protocol's open
+# vocabulary; "" = clean, never a failure code):
+#   main_staged        — staged content in the main tree (would fold into the
+#                        ticket's own commit, breaking one-ticket-one-commit)
+#   main_dirty         — uncommitted tracked changes (overlapping or not: both block,
+#                        fail-closed — the main tree may carry ownerless edits at any
+#                        time, the KI-048 operating root cause; two-tone wording only)
+#   untracked_collision— an untracked file sits on a path this merge would write
+#   conflict           — the merge started and left a conflict scene (real conflict)
+#   merge_fault        — everything else (bad ref, commit fault, race outlet still
+#                        clean, …): never coerced to conflict
+# Non-empty invariant: every failure path carries a non-empty reason — an
+# unclassifiable shape falls to merge_fault, never to "" and never guessed.
+
+
+def _classify_main_dirty(repo: Path, branch: str) -> Dict[str, Any]:
+    """Read-only classifier of the main tree's dirt against the lane branch's merge
+    surface (KI-048; no writes ever — only status/diff, so Temporal retries and the
+    red-line "main workspace byte-identical" assertion are both safe).
+
+    Returns {kind, files, extra, note}:
+      kind  — "" (clean) or one of the verdicts above (main_staged / main_dirty /
+              untracked_collision); conflict/merge_fault are NOT produced here (they
+              belong to the merge attempt itself, not to the pre-read);
+      files — point-named blocking files, capped at MERGE_FILES_CAP;
+      extra — count of capped-away files (0 = none);
+      note  — machine-readable context: overlap flag for main_dirty (重叠/不重叠),
+              diff-fault note, … (never raised, faults degrade to clean+note and the
+              merge attempt itself re-judges).
+
+    Verdict precedence: staged > tracked-dirty > untracked-collision — a staged hit
+    means the merge must refuse regardless of anything else; tracked dirt blocks even
+    when it does not overlap (git only refuses on overlap, but closing out over any
+    uncommitted main-tree change risks folding ownerless edits into the ticket's
+    commit — the conservative reading integration confirmed in plan review gen1).
+    """
+    out: Dict[str, Any] = {"kind": "", "files": [], "extra": 0, "note": ""}
+
+    def _cap(names: List[str]) -> Tuple[List[str], int]:
+        names = sorted({n.strip() for n in names if isinstance(n, str) and n.strip()})
+        return names[:MERGE_FILES_CAP], max(0, len(names) - MERGE_FILES_CAP)
+
+    # Paths this merge would write (three-dot: only what the lane brings; a diff
+    # fault is not a dirt verdict — degrade to clean+note, the merge attempt itself
+    # fails closed on its own).
+    p = _git(["diff", "--name-only", "main...%s" % branch], repo)
+    if p.returncode != 0:
+        out["note"] = "merge 面 diff 失败（不作脏判定）: %s" % ((p.stderr or "")[-150:])
+        merge_paths: set = set()
+    else:
+        merge_paths = {ln.strip() for ln in (p.stdout or "").splitlines() if ln.strip()}
+
+    # 1) staged content (precise list via --cached --name-only)
+    p = _git(["diff", "--cached", "--name-only"], repo)
+    if p.returncode == 0:
+        staged = [ln.strip() for ln in (p.stdout or "").splitlines() if ln.strip()]
+        if staged:
+            files, extra = _cap(staged)
+            out.update(kind="main_staged", files=files, extra=extra)
+            return out
+    else:
+        out["note"] = "diff --cached 失败（不作暂存判定）: %s" % ((p.stderr or "")[-150:])
+
+    # 2) uncommitted tracked changes + 3) untracked collision (one status read)
+    tracked: List[str] = []
+    untracked: List[str] = []
+    p = _git(["status", "--porcelain", "-z"] + SETTLE_PATHSPEC, repo)
+    if p.returncode == 0 and isinstance(p.stdout, str):
+        for ent in p.stdout.split("\0"):
+            if not ent or len(ent) < 4 or ent[2] != " ":
+                continue  # malformed entry: dropped, no guessing (same stance as _dirty_files_from_status_z)
+            xy, path = ent[:2], ent[3:]
+            if not path:
+                continue
+            if xy == "??":
+                untracked.append(path)
+            elif xy.strip("MADRC") or xy[0] in "MADRC" or xy[1] in "MADRC":
+                tracked.append(path)
+    else:
+        out["note"] = "status 失败（不作工作区判定）: %s" % ((p.stderr or "")[-150:])
+    if tracked:
+        overlap = sorted(set(tracked) & merge_paths)
+        files, extra = _cap(tracked)
+        out.update(kind="main_dirty", files=files, extra=extra,
+                   note=("与收口路径重叠：%s" % "、".join(overlap[:5])) if overlap
+                         else "不重叠（仍保守拦：main 侧可能有未提交的无主编辑）")
+        return out
+    colliding = sorted(set(untracked) & merge_paths)
+    if colliding:
+        files, extra = _cap(colliding)
+        out.update(kind="untracked_collision", files=files, extra=extra)
+    return out
+
+
+def _dirty_block_note(verdict: Dict[str, Any]) -> str:
+    """The human phrase shared by the merge blocked text and the merge_check gate
+    detail (same source of truth as _classify_main_dirty — the two faces cannot
+    drift): WHICH file / WHAT reason / WHAT to do. Pure function."""
+    kind = verdict.get("kind") or ""
+    names = list(verdict.get("files") or [])
+    extra = int(verdict.get("extra") or 0)
+    listing = "、".join(names[:MERGE_FILES_CAP]) + (
+        "（另有 %d 个未列）" % extra if extra else "")
+    why = {
+        "main_staged": "main 工作区有未提交的暂存改动（收口会把它卷进本单提交）",
+        "main_dirty": "main 工作区有未提交改动（git 本地改动保护，非冲突）",
+        "untracked_collision": "main 工作区有未跟踪文件与本单收口路径相撞",
+    }.get(kind, "")
+    if not why:
+        return ""
+    tail = ("｜处理：提交或暂存（git stash）这些改动，或在票面说明后发 retry_qc 重验"
+            "；引擎绝不自动 stash/自动提交")
+    if verdict.get("note"):
+        tail = "｜%s%s" % (verdict["note"], tail)
+    return "%s——挡事文件：%s%s" % (why, listing, tail)
+
+
 def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
                   defer_teardown: bool = False, project_key: str = "") -> "MergeResult":
     """The squash close-out implementation (the merge() activity delegates here, so it
@@ -2867,31 +3021,52 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
     #    anything containing "..")
     p = _git(["check-ref-format", "--branch", branch], repo)
     if p.returncode != 0:
-        return MergeResult(ok=False, action="failed",
+        return MergeResult(ok=False, action="failed", reason="merge_fault",
                            error="branch %r 非法（check-ref-format 拒绝）：%s"
                                  % (branch, (p.stderr or "").strip()[-200:]))
 
-    # 0.5) Pre-check the main tree's index: a successful squash would fold any
-    #      pre-staged content into the ticket's own commit, breaking the "one ticket,
-    #      one commit" semantics (reverting this ticket would drag unrelated changes
-    #      with it) — anything staged means refuse, the state is untouched (stricter
-    #      than git itself: even non-overlapping staged content is caught, fail-closed).
-    dq0 = _git(["diff", "--cached", "--quiet"], repo)
-    if dq0.returncode != 0:
-        return MergeResult(ok=False, action="conflict",
-                           error="主树有未提交的暂存改动，收口会把它卷进本单提交"
-                                 "（破坏一单一提交语义）；请先处置（commit/stash/"
-                                 "还原）再收口（主树现场未动）")
+    # 0.5) KI-048 (t260911-05): classify the main tree's dirt BEFORE touching any
+    #      write operation — a dirt rejection is git's local-change protection, not a
+    #      conflict (the old code returned action="conflict" here and on the
+    #      rejected-before-start path below, which made the workflow auto-bounce and
+    #      silently consume a human sign-off). Now: action="dirty" + a protocol
+    #      reason code + the named blocking files; the workflow turns blocked for a
+    #      human instead of bouncing. The read-only classifier returns before the
+    #      merge, so the "failure paths never tear down the lane" trade-off (b) and
+    #      the "main tree untouched" guarantee are structurally preserved — no
+    #      stash/checkout/commit ever happens on this path (the 260908 auto-stash
+    #      incident red line). Covers: staged content (the old 0.5 pre-check,
+    #      subsumed), uncommitted tracked changes (overlapping or not —
+    #      fail-closed), and untracked files colliding with the merge surface.
+    verdict = _classify_main_dirty(repo, branch)
+    if verdict.get("kind"):
+        return MergeResult(ok=False, action="dirty", reason=str(verdict["kind"]),
+                           files=list(verdict.get("files") or []),
+                           error="合并收口被 main 工作区未提交改动挡住（git 本地改动保护，"
+                                 "非冲突；主树现场未动）：%s"
+                                 % _dirty_block_note(verdict))
 
     # 1) squash merge (no automatic commit)
     p = _git(["merge", "--squash", branch], repo, timeout=120)
     out = ((p.stdout or "") + "\n" + (p.stderr or "")).strip()
     if p.returncode != 0:
         if not _merge_started(repo):
-            # The merge never started (overlapping uncommitted changes and the like)
-            # — report honestly, never touch the main tree's state
-            return MergeResult(ok=False, action="conflict",
-                               error="git merge --squash %s 未开始即被拒：%s（主树未提交改动原样保留）"
+            # The merge never started. The pre-read (0.5) judged clean, so this is
+            # either dirt that appeared between the read and the merge (race) or a
+            # git fault — re-classify honestly; if still clean this is a fault, and
+            # it is NEVER coerced to conflict (the reason-non-empty invariant: an
+            # unclassifiable shape falls to merge_fault → failed → blocked for a
+            # human, not an idle resolution loop).
+            race = _classify_main_dirty(repo, branch)
+            if race.get("kind"):
+                return MergeResult(ok=False, action="dirty", reason=str(race["kind"]),
+                                   files=list(race.get("files") or []),
+                                   error="git merge --squash %s 未开始即被拒（读时干净、"
+                                         "merge 时 main 已有未提交改动——竞态出口）：%s（主树原样保留）"
+                                         % (branch, _dirty_block_note(race)))
+            return MergeResult(ok=False, action="failed", reason="merge_fault",
+                               error="git merge --squash %s 未开始即被拒（复判 main 干净，"
+                                     "归故障非冲突）：%s（主树未提交改动原样保留）"
                                      % (branch, out[-400:]))
         # It did start: clean up (--quit clears only MERGE_MSG; reset --merge is what
         # rolls the merge conflict state back out of the index/workspace). --merge
@@ -2925,7 +3100,11 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
         err = "git merge --squash %s 冲突：%s" % (branch, out[-400:])
         if leftover:
             err += "；清理后仍有残留：" + "；".join(leftover)
-        return MergeResult(ok=False, action="conflict", error=err)
+        # A real conflict: the merge started and left a scene (reason code pinned to
+        # the protocol word; the parsed conflict file list rides along when present)
+        return MergeResult(ok=False, action="conflict", reason="conflict",
+                           files=_parse_conflict_files(out)[:MERGE_FILES_CAP],
+                           error=err)
 
     # 2) Close out: nothing collectable in the index (a retry, or the content is
     #    already equivalent) → produce no empty commit, back-fill with the HEAD sha
@@ -2943,7 +3122,7 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
                % (ticket_id, branch))
         c = _git(["commit", "-m", msg], repo, timeout=60)
         if c.returncode != 0:
-            return MergeResult(ok=False, action="failed",
+            return MergeResult(ok=False, action="failed", reason="merge_fault",
                                error="squash 已暂存但 git commit 失败：%s"
                                      "（主树带着暂存改动，需人工处置）"
                                      % ((c.stderr or c.stdout or "")[-300:]))
@@ -3043,6 +3222,11 @@ async def merge(args: MergeArgs) -> MergeResult:
     errs = "\n".join(r.error for r in results if r.error)
     return MergeResult(ok=ok,
                        action=("merged" if ok else (first_bad.action if first_bad else "failed")),
+                       # KI-048: the aggregated multi-repo receipt must carry the first
+                       # failing tree's classification and named files too (the
+                       # workflow's blocked text points its file list at this receipt)
+                       reason=(first_bad.reason if first_bad else ""),
+                       files=list(first_bad.files) if first_bad else [],
                        merge_commit=merged, error=errs)
 
 

@@ -701,6 +701,10 @@ class DevLaneWorkflow(TicketPauseMixin):
     # ---------- blocked wait (retry_qc re-runs this step / rework jumps) ----------
     async def _blocked(self, step_id: str, why: str) -> None:
         self.meta["stage_state"] = "blocked"
+        # KI-048 (t260911-05): the blocked why is pinned on meta so the snapshot can
+        # surface it top-level (blocked_reason / blocked_detail) — the ticket face
+        # and the human gate must see WHY without diving into worker logs.
+        self.meta["blocked_reason"] = why
         self._touch()
         self._log("%s → blocked，等 retry_qc 重跑或 rework 打回" % why)
         self._mark(step_id, "blocked", why)
@@ -2065,7 +2069,40 @@ class DevLaneWorkflow(TicketPauseMixin):
                 mr = raw if isinstance(raw, MergeResult) else MergeResult(
                     ok=bool(raw.get("ok")), action=str(raw.get("action") or ""),
                     merge_commit=str(raw.get("merge_commit") or ""),
-                    error=str(raw.get("error") or ""))
+                    error=str(raw.get("error") or ""),
+                    # KI-048 (t260911-05): the dict-deserialization state (this
+                    # isinstance branch exists for exactly that) must back-fill the
+                    # new classification fields too — otherwise the blocked text's
+                    # point-named file list is lost on the workflow side and the
+                    # ticket face goes blind (review_plan R3)
+                    reason=str(raw.get("reason") or ""),
+                    files=[str(x) for x in (raw.get("files") or [])])
+                if not mr.ok and mr.action in ("dirty", "failed"):
+                    # KI-048: a main-workspace dirt rejection ("dirty") is git's
+                    # local-change protection, NOT a conflict — the verified lane
+                    # code is fine, so auto-bouncing it for re-verification would
+                    # silently consume the human sign-off and churn the ticket
+                    # (t260904-14). Turn blocked for a human with a plain-language
+                    # reason: which file / what / what to do. "failed" (infra/merge
+                    # faults incl. fuse B) also blocks for a human — an unclassified
+                    # fault must not idle the conflict-resolution loop either.
+                    # The receipt's human phrase (mr.error) and the structured
+                    # detail share the same _classify_main_dirty source of truth.
+                    self.meta["blocked_detail"] = {
+                        "reason_code": mr.reason or "merge_fault",
+                        "files": list(mr.files)[:20],
+                        "next_action": ("在 main 提交或暂存（git stash）这些改动，"
+                                        "或票面说明后发 retry_qc 重验；引擎不自动 stash/提交")
+                                       if mr.action == "dirty" else
+                                       "合并执行故障（非冲突），人工处置后发 retry_qc 重验",
+                    }
+                    self._touch()
+                    note = ("merge 未收口（%s/%s）： %s"
+                            % (mr.action, mr.reason or "merge_fault",
+                               (mr.error or "未知")[:400]))
+                    self._log(note)
+                    await self._blocked("merge", note)
+                    continue
                 if not mr.ok:
                     # Merge failure (typically a conflict caused by another lane reaching
                     # main first while we waited for the signature) — automatically send
@@ -2076,6 +2113,8 @@ class DevLaneWorkflow(TicketPauseMixin):
                     # through _auto_rework for the record (not by setting self._rework —
                     # setting it would make the main loop run _apply_rework a second time
                     # and land two timeline entries for one send-back, t260901-04).
+                    # (Post-KI-048 this branch is conflict-only: dirty/failed split
+                    # off above, per the failure-classification protocol.)
                     note = "merge 失败（%s）自动打回重验：%s" \
                            % (mr.action, (mr.error or "未知")[:300])
                     self._log(note)
@@ -2369,6 +2408,14 @@ class DevLaneWorkflow(TicketPauseMixin):
             "results": self.results,
             "human_context": self.human_context,
             "retry_count": self._retry_token,
+            # KI-048 (t260911-05): top-level blocked face — blocked_reason = the last
+            # _blocked why (plain language, same _classify_main_dirty source), 
+            # blocked_detail = the structured {reason_code, files, next_action} the
+            # workflow pins when a merge fails dirty/failed. Empty/absent = never
+            # blocked (the status card on the UI side renders nothing, zero intrusion
+            # for legacy tickets).
+            "blocked_reason": str(self.meta.get("blocked_reason") or ""),
+            "blocked_detail": self.meta.get("blocked_detail"),
             "meta": dict(self.meta),
         }
 

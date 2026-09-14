@@ -22,6 +22,7 @@ SANDBAR_STAGE_LOCK_DIR——与生产调用方（lib_gate/lib_fix15/stage_docker
 验收④），正常路径的显式 down 与兜底 down 幂等叠加无害。
 """
 import json
+import hashlib
 import os
 import socket
 import subprocess
@@ -35,7 +36,22 @@ sys.path.insert(0, os.path.join(REPO, "integration"))
 import stage_docker as sd  # noqa: E402
 
 CLI = os.path.join(REPO, "integration", "stage_docker.py")
-PROJ = "t26090419-contract"
+
+
+def _lane_scoped_proj():
+    """树作用域工程名（260914 仲裁第 11 次进段实锤）：本场景按拓扑纪律走**共享缺省
+    锁根**（见文件头），但工程名若全树固定，多泳道并发全量时同名租约互撞——up 被
+    STAGE_CONFLICT 正当拒收（实测 16:48 全量：本条 10 过 3 红，红腿原文「项目
+    t26090419-contract 已有活租约（state=downing holder pid=… 起租=16:28:00）」，
+    而该拒收本身正是被测契约的正确行为）。后缀只让各泳道各占一个工程名，**锁根与
+    档位互斥面照旧共享**（断言、契约、拓扑纪律一律不变）。形态沿用既有单源约定
+    `stage_tag()`（integration/t260910-12/lib_herd_case.py:27「跨泳道互拆根治」；
+    此处内联同形以免跨票目录 import）。"""
+    return "t26090419-contract-" + hashlib.sha256(
+        os.path.abspath(REPO).encode()).hexdigest()[:8]
+
+
+PROJ = _lane_scoped_proj()
 PROD_PORTS = {3099, 7233, 8233}
 
 # daemon 资源类失败特征（t260905-06 仲裁 tests-fault 迭代）：docker daemon 侧资源
