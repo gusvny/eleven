@@ -960,6 +960,20 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   （本次已实测误导宿主一轮）；②静默性：全链只有一条 WARNING 落在 worker 日志里，**票面与回执面完全看不见**
   「本轮 agent 用的是哪个 provider/model」，事后只能逐一翻 `.sandbar/model_patch_*.yml`；③老进程存活越久
   越容易踩（与 KI-081/KI-082 同族：引擎已改，在跑实例不重载）。
+- **260914 补充（dengzhufpv 项目会话首验移交，与上条同源、互为佐证）**：容器化首验实跑（五条容器场景 85 断言 0 红、
+  A 腿 A3「implement 期容器真在场、会话恢复成功」通过）时，**真 agent 段撞 429**；根因链比上条更深一层——
+  ① 真源（机器级表）是对的；② 但**测试台/隔离场景用隔离注册表**（`SANDBAR_PROJECTS_DIR`，脚本生成的 project.yaml
+  只写 key/name/dirs、**无 `paths` 声明**）→ `resolve_routes_table` 判 `decl_missing` → 按设计**读侧兜底回落仓内
+  `server/model-routes.yaml`**；③ 仓内那份是**迁移前旧口径**（developer/default 仍 `provider: zai` = 主账号余额已尽）
+  → 真 agent 段 429。**影响面不止测试台**：任何未声明 `paths.model_routes` 的项目/隔离环境都会静默捡到过期表，
+  表现成「环境红」，极易误读为配额偶发故障。**一句话判据：表存在但内容过期，比表缺失更毒——缺失会点名，过期只会静默用错。**
+- **未执行完的裁决（本条真根因）**：`notes/discussions/260910-model-routes-relocation.md` 的目标形态表与「实施票必含」
+  已明写三件，**实测均未执行**：①**仓内那份销毁**（「退役（删除）；默认表示例移入 docs 或 installer 内置常量」）；
+  ②**缺表行为绝不静默**（三态可辨 + 票面/日志告警：声明缺失/文件缺失/内容坏）；③**引用点一并改**
+  （`shared.MODEL_ROUTES_FILE` 常量退场、UI `routes.ts` 两处 `join(repo,'server','model-routes.yaml')`、
+  守卫场景、node.ts 注释与「模型」页）。当前状态＝真源已迁机器级且声明在位（做了一半），仓内旧表仍在并仍被兜底消费。
+- 处置方向（按 260910 裁决直接执行，非新设计）：删仓内旧表 + 兜底腿命名化告警（带表路径与内容指纹）+ 引用点退场；
+  另建议测试台基座生成的隔离 project.yaml **声明自己的路由表**（或注入可用模型），使场景与生产口径同源。
 - 处置方向（建议，未实施）：①**把「本轮 agent 实际路由」显示到票面/回执**（provider/model 逐轮留痕），
   让「用错模型」不必靠翻日志；②解析非 ok 的兜底改为**响亮**（现仅 WARNING）——或至少在票面时间线落一条
   可辨事件（「本轮模型来自兜底表，可能非生效路由」）；③`server/model-routes.yaml`（陈旧兜底表）按宿主
