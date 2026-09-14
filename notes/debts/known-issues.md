@@ -916,6 +916,32 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   证据＝`server/engine/data/worker-t260911-05.log`、`worker-t260912-01.log`（260913 11:19 两条）；
   票面证据＝t260912-01 / t260911-05 的 `authorizations` 从空到 3 条的时间线。
 
+## KI-089 池排除由「目录形写集」无条件压制：凡是写自己集测基建的票，排除声明恒定失效（260914 实证）
+- 前言（先纠正一条当日误判）：排除机制**本身是好的**，`t260913-03` 声明对当期新票即刻生效。证据＝
+  `t260913-04` 12:20 那轮报告 `excluded_pools=['engine','exclusive']`、`excluded_count=47`，
+  ran 242→195、wall 1898s→**132.7s**。先前 11:40 那轮之所以「全跑」，是**在跑的工人加载的还是
+  11:05 之前的旧码**（同 KI-081），与排除实现无关。
+- 但真问题在下面，且是设计层口径问题：**写集是「目录前缀」匹配位**。
+  `verify_lane._in_write_set('integration/bench.py', ['integration/'])` ≡ True——于是**任何写集里带
+  `integration/` 的票，都会与被排除池（engine 32 条 / exclusive 13 条）的资产面求交命中** →
+  `_integ_pool_exclude` 判 `forced_by` 非空 → `{'declared': [...], 'applied': False}` →
+  **不下发 `SANDBAR_SCENARIO_EXCLUDE_POOLS`，整轮全跑**。实测：该资产面共 **77 条**，本票写集命中
+  **79 项**（几乎全覆盖，因为 `integration/` 一条就等于整个测试目录）。
+- 危害：①命中条件与「是否真动了那些池的判据」不对等——只改一个无关的测试助手文件也算；②而**引擎票的写集
+  天然带 `integration/`**（引擎票必须自带场景才会写集成测试）：当前四张在跑的维护票 `t260913-01/02/04`、
+  `t260914-01` **写集全都含 `integration/`**，等于这个优化对最需要它的那批票**一批都不生效**；
+  ③每票单轮集测 30~40 分钟（engine+exclusive 占 57%+18% 的机时），这是当前最贵的一笔固定开销；
+  ④表象有欺骗性：排除「看起来已实施」却毫无效果，需要翻 `pool_exclude` 回执才能发现（本次即靠报告键
+  有无 `excluded_pools` 才定位）。
+- 处置方向（建议，未实施；设计定稿权在宿主）：①**把强制面的粒度从「目录前缀」收紧到「被排除池的判据文件」**
+  （即只在真正改了 `engine/`、`exclusive` 两池自己的场景/夹具时才强制全跑），目录形写集不再天然构成命中；
+  ②或反向：写集声明器要求给到**文件粒度**，禁止只给目录；③无论取哪条，都要求在回执里**肉眼可见**地给出
+  `declared / applied / forced_by`——现在「失效」是无提示的。
+- 定位：`server/tools/verify_lane.py:529 _pool_exclude_assets` / `:574 _integ_pool_exclude` / `_in_write_set`；
+  `server/engine/dev_lane.py:1445`（显式置位）；`server/engine/shared.py:267 integ_verify_payload`；
+  证据报告＝`.lane/t260913-04/out/integration-report-260914-122055.json`（生效）与 `…-114004.json`（未生效）；
+  相关＝KI-081（旧码重载）、KI-082（老票贵）。
+
 ## KI-088 provider 瞬断（TRANSPORT Connection error）→ agent 活动失败 → 票 blocked（外部因素；260914 二度实测）
 - 现象：agent 段跑到一半整批失败并 blocked，报「agent 活动故障（已重试）：ActivityError: Activity task failed /
   Activity task timed out」，而 agent 日志尾部只有重复的
