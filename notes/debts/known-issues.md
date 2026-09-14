@@ -916,6 +916,28 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   证据＝`server/engine/data/worker-t260911-05.log`、`worker-t260912-01.log`（260913 11:19 两条）；
   票面证据＝t260912-01 / t260911-05 的 `authorizations` 从空到 3 条的时间线。
 
+## KI-093 并行段（arb_acc_parallel）互相残杀：一条活动的进程组 reap 杀掉另一条在飞 agent（260915 凌晨实证，待复核）
+- 现象：`t260914-04` 在 `acceptance_walkthrough` 连挂 **4 次**（23:46 / 00:18 / 01:29 / 01:35），每次都满足
+  「**agent 活干完了、结果文件也写了**（gen0 38KB / gen1 38KB / gen2 37KB 均在盘上），活动仍被判
+  `agent 活动故障：Activity task failed`」——日志形态：`reap：terminate（进程组），rc=0` 紧跟判失败。
+- 结构性线索（两条独立观察）：
+  ① `dev_lane.py:1507` 的 `arb_acc_parallel` 相位＝**仲裁与验收走查真并行**（两条 agent 活动同时在飞），
+     而两者由**同一个工单专属 worker** 托管、spawn 出的 agent 属**同一进程组**；
+  ② `t260914-05` 更直接的形态：`attempt 2` 于 22:40:24 起跑，22:40:40 的 `reap（attempt=1）` 以
+     「terminate 进程组」收尾 → 把共享同组的 attempt 2 一并杀掉，留下**孤儿 agent**（进程活着、活动已判死）。
+  合起来＝**父活动的进程组级 terminate 会连带杀掉兄弟活动的在飞 agent**。
+- 危害：①「活干完了却判失败」是最费钱的失败形态——每轮重跑都烧一个完整 agent 段，而成果每次作废；
+  ②与心跳超时（`HEARTBEAT_TO=3 分钟`）叠加时更难辨：网络卡顿（心跳缺失）与进程组残杀都表现为
+  「无结果文件 + reap」，需靠「结果文件是否已落盘」区分（本轮四次的文件都在盘上 ⇒ 指向残杀/竞态而非心跳）。
+- 待复核（本条为**候选根因**，未坐实）：需在并行相位下加 agent 进程组身份的实测（spawn 出的 pgid 是否同组、
+  谁发起 terminate）。**在坐实之前不改引擎**。
+- 变通（本轮实证可用）：`retry_qc` 重试——每次重试里通常只有一条活动被残杀，另一条能过；04 的四次重试
+  虽未收敛，但 02/05 在同相位都过过（05 第 1 次即过）。若某票在该相位反复不收敛，处置＝停手留档交人查，
+  不要无脑连试（每次都是整段成本）。
+- 定位：日志＝`server/engine/data/worker-t260914-04.log`（四次 spawn/reap 对）、`worker-t260914-05.log`
+  （attempt 2 被 attempt 1 的 reap 连带）；相位＝`server/engine/dev_lane.py:1507 arb_acc_parallel`；
+  超时常量＝同文件 `AGENT_TO=6h` / `HEARTBEAT_TO=3min`。
+
 ## KI-092 多仓票写集「只写仓名」= 该仓整仓禁写：声明残缺在建票期不拦，到 settle 才炸（dengzhufpv/t260911-07 实证）
 - 现象：`dengzhufpv/t260911-07` 过了 create_plan（settle 三修生效）后，在 implement/design 段落盘时
   `path_gate_reason=write_set_missing`：「段 implement 无写集可判（写集空/缺失），改动 .gitignore、Cargo.lock、
