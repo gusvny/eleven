@@ -245,10 +245,11 @@ def test_trigger_decl_op_offline_real_file():
     # ids=新名两实例+t260910-09 两个占位；占位 enabled=false 不进 schedule_specs
     assert ids == ["integration-tests", "docs-sync", "mechanism-face", "simplify-face"]
     # t260911-02：docs-sync 启用（scan_face=doc）→ 两实例进 specs
+    # 260915 宿主令：simplify-face 启用试跑（scan_face=simplify）→ 三实例进 specs
     assert [s["instance_id"] for s in payload["result"]["schedule_specs"]] == [
-        "integration-tests", "docs-sync"]
+        "integration-tests", "docs-sync", "simplify-face"]
     faces = {s["instance_id"]: s["scan_face"] for s in payload["result"]["schedule_specs"]}
-    assert faces == {"integration-tests": "test", "docs-sync": "doc"}
+    assert faces == {"integration-tests": "test", "docs-sync": "doc", "simplify-face": "simplify"}
 
 
 def test_trigger_decl_op_malformed_file_single_line_error(tmp_path):
