@@ -49730,6 +49730,190 @@ function formatLogTail(d) {
 	return rawLog;
 }
 //#endregion
+//#region src/shared/ticket-time-model.ts
+function isTicketTimeMode(v) {
+	return v === "settle" || v === "base" || v === "current";
+}
+function refSourceLabel(s) {
+	switch (s) {
+		case "branch-tip": return "泳道分支提交（未合并）";
+		case "merge-commit": return "merge 收口提交";
+		case "squash-commit": return "squash 收口提交";
+		case "base-ref": return "开票基点";
+	}
+}
+/**
+* 横幅视图模型（mock D：顶部横幅「🕰 本票时刻 · 只读」，带「跳到当前版」小链）。
+* current 口径返回 null（横幅消失=切到当前版的可见信号，验收口径①锁这点）。
+* refShort 畸形（非字符串/空）返回 null——横幅不渲染假版本号，宁可整条不显。
+*/
+function buildTicketTimeBanner(mode, refSource, refShort) {
+	if (mode === "current") return null;
+	if (mode !== "settle" && mode !== "base") return null;
+	if (typeof refShort !== "string" || refShort.trim() === "") return null;
+	return {
+		text: "🕰 本票时刻 · 只读",
+		version: mode === "settle" ? `收口版 ${refShort} · ${refSourceLabel(refSource)}` : `开票基线版 ${refShort} · ${refSourceLabel(refSource)}`,
+		canJumpCurrent: true
+	};
+}
+//#endregion
+//#region src/client/ticket-time-viewer.tsx
+/**
+* ticket-time-viewer.tsx —— 「本票时刻 · 只读」文件查看器弹层（t260915-17，
+* 260904 详情 mock 标注 D 落地；查看器样张=notes-ui mock 屏②「UI 内查看器（只读）」）。
+*
+* 数据源=宿主半 GET /sandbar-workbench/api/wf/tickets/<id>/file?path=&mode=
+* （node.ts handleTicketTimeFile；settle=收口版 / base=开票基点版 / current=当前版）。
+*
+* 版面（mock D 原话）：顶部横幅「🕰 本票时刻 · 只读」+版本副文案（ref 短哈希+来源标签）
+* +「跳到当前版」小链——点击切 current 口径重取内容且横幅消失（横幅消失=切到当前版的
+* 可见信号，验收口径①）。渲染：.md 走 knowledge renderMarkdown（docs.tsx 同款复用，
+* 转义先行/危险 URL 拒绝随 import 带入），其余文件等宽纯文本。只读刚性：本组件源码
+* 层面不引入任何编辑/保存控件（无 input/textarea/contentEditable/保存钮），集成场景
+* 源码锁直断（sc_ticket_time_file）。
+*
+* 故障模式取舍清单（review C6，对照先例逐项声明带/不带）：
+*   - EvidenceLightbox 的 document 级 keydown + isEditableTarget guard：**带**（详情
+*     抽屉含输入件，Esc 关闭复用同款 guard 防误关；isEditableTarget 在 index.tsx 不
+*     导出且 import 会成环，此处本地复刻同款 8 行并注释互指）。
+*   - EvidenceLightbox 的 evidenceNav 越界兜底：**不带**——查看器单文件无左右导航，
+*     无越界面可兜。
+*   - 单图加载失败占位：**带**（同语义=人话 reason 面板/加载失败条，不拖垮抽屉）。
+*   - handleDocsDoc 的 200+{empty,reason} 人话降级：**带**（同风格——fail-closed 的
+*     reason 面板走正常响应渲染，不 500）。
+*   - t01 临时真 git 仓 fixture 手法：**带**（tests/t260915-17-ticket-time-file.mjs
+*     同款 mkdtemp+rmSync+git timeout）。
+*
+* 资源终态：in-flight fetch 由 AbortController 收口（mode/path/卸载任一变化即 abort
+* 前次）；document keydown 挂载/卸载成对（useEffect cleanup 单点回收）；无定时器/
+* 轮询/长驻句柄，正常、报错、取消三路径都落定。
+*/
+const API_PREFIX = "/sandbar-workbench/api/wf/tickets";
+/** 契约锚（集成场景/UT 断言用；不可移除/改名）。 */
+const TICKET_TIME_VIEWER_TESTID = "ticket-time-viewer";
+/** 与 index.tsx isEditableTarget 同款（C6：复用语义、本地复刻防 import 环）。 */
+function isEditableTarget$1(t) {
+	if (!(t instanceof HTMLElement)) return false;
+	return t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable;
+}
+function TicketTimeViewer({ ticketId, path, initialMode, onClose }) {
+	const [mode, setMode] = (0, react.useState)(initialMode);
+	const [data, setData] = (0, react.useState)(null);
+	const [loadErr, setLoadErr] = (0, react.useState)("");
+	const abortRef = (0, react.useRef)(null);
+	(0, react.useEffect)(() => {
+		const ac = new AbortController();
+		abortRef.current?.abort();
+		abortRef.current = ac;
+		setData(null);
+		setLoadErr("");
+		fetch(`${API_PREFIX}/${encodeURIComponent(ticketId)}/file?path=${encodeURIComponent(path)}&mode=${mode}`, { signal: ac.signal }).then((r) => r.json()).then((d) => {
+			if (!ac.signal.aborted) setData(d?.result ?? null);
+		}).catch((err) => {
+			if (ac.signal.aborted) return;
+			setLoadErr(String(err instanceof Error ? err.message : err));
+		});
+		return () => {
+			ac.abort();
+		};
+	}, [
+		ticketId,
+		path,
+		mode
+	]);
+	(0, react.useEffect)(() => () => {
+		abortRef.current?.abort();
+	}, []);
+	(0, react.useEffect)(() => {
+		const h = (e) => {
+			if (e.key === "Escape" && !isEditableTarget$1(e.target)) {
+				e.preventDefault();
+				onClose();
+			}
+		};
+		document.addEventListener("keydown", h);
+		return () => document.removeEventListener("keydown", h);
+	}, [onClose]);
+	const resOk = data?.ok === true && typeof data.content === "string" && isTicketTimeMode(data.mode);
+	const banner = resOk && data !== null ? buildTicketTimeBanner(mode, data.refSource ?? "base-ref", data.refShort) : null;
+	const isMd = /\.md$/i.test(path);
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+		className: "wb-ttv-mask",
+		onClick: (e) => {
+			if (e.target === e.currentTarget) onClose();
+		},
+		children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: "wb-ttv",
+			"data-testid": TICKET_TIME_VIEWER_TESTID,
+			role: "dialog",
+			"aria-label": `本票时刻只读查看 ${path}`,
+			children: [
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-ttv-head",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", {
+						className: "wb-ttv-path",
+						children: path
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "wb-ttv-close",
+						"aria-label": "关闭查看器",
+						onClick: onClose,
+						children: "✕"
+					})]
+				}),
+				banner !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-ttv-banner",
+					"data-testid": "ticket-time-banner",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "wb-ttv-banner-text",
+							children: banner.text
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "wb-ttv-banner-ver",
+							children: banner.version
+						}),
+						banner.canJumpCurrent && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							className: "wb-ttv-jump",
+							"data-testid": "ticket-time-jump-current",
+							onClick: () => setMode("current"),
+							children: "跳到当前版"
+						})
+					]
+				}),
+				loadErr !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-ttv-fail",
+					"data-testid": "ticket-time-fail",
+					children: ["读取失败：", loadErr]
+				}),
+				loadErr === "" && data === null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-ttv-loading",
+					children: "读取中…"
+				}),
+				loadErr === "" && data !== null && data.ok === false && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-ttv-fail",
+					"data-testid": "ticket-time-fail",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-ttv-fail-ttl",
+						children: "拿不到本票时刻的这个版本"
+					}), data.reason ?? "原因未知"]
+				}),
+				loadErr === "" && resOk && (isMd ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-ttv-body wb-doc-body",
+					dangerouslySetInnerHTML: { __html: renderMarkdown(String(data?.content ?? "")) }
+				}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("pre", {
+					className: "wb-ttv-body wb-ttv-code",
+					children: [data?.content, data?.truncated === true ? "\n\n（内容超封顶已截断——此处不是完整文件，完整内容走 git show）" : ""]
+				})),
+				loadErr === "" && resOk && data?.truncated === true && isMd && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-ttv-trunc",
+					children: "内容超封顶已截断——此处不是完整文件，完整内容走 git show。"
+				})
+			]
+		})
+	});
+}
+//#endregion
 //#region src/client/approve-note.ts
 /**
 * approve-note.ts —— KI-004（t260901-22）：人审 approve 签字的 note 拼接（纯函数层）。
@@ -50570,6 +50754,45 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-al-attempt .sum{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   color:var(--dsw-derive-muted,#57606a);font-size:11.5px}
 .wb-al-attempt .wb-al-body{border-top:1px solid var(--dsw-derive-surface-2,#eef1f4)}
+
+/* ── 本票时刻只读查看器（t260915-17，mock 260904 标注 D：文件行=链接） ── */
+/* button 化的文件行沿用原视觉 + 指针态（sc-file 原为 code；wb-d-fpath 原为 span） */
+button.sc-file{cursor:pointer;text-align:left}
+button.wb-d-flink{cursor:pointer;background:none;border:none;padding:0;font:inherit;color:inherit;text-align:left}
+button.wb-d-flink:hover{color:var(--dsw-derive-accent,#0969da);text-decoration:underline}
+/* 背景引用行组 */
+.wb-refs{margin-top:8px}
+.wb-refs .ttl{font-weight:600;font-size:12.5px;margin-bottom:4px;color:var(--dsw-derive-muted,#57606a)}
+.wb-refs-files{display:flex;flex-wrap:wrap;gap:4px}
+.wb-ref-file{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;padding:1px 6px;border-radius:4px;
+  background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-border,#d0d7de);
+  color:var(--dsw-derive-muted,#57606a);cursor:pointer;text-align:left}
+.wb-ref-file:hover{color:var(--dsw-derive-accent,#0969da);border-color:var(--dsw-derive-accent-border,#54aeff)}
+/* 查看器遮罩与面板（遮罩层先例=EvidenceLightbox/预览弹层） */
+.wb-ttv-mask{position:fixed;inset:0;background:rgba(31,35,40,.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px}
+.wb-ttv{background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:10px;
+  width:min(880px,100%);max-height:88vh;display:flex;flex-direction:column;overflow:hidden;
+  box-shadow:0 8px 32px rgba(31,35,40,.25)}
+.wb-ttv-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--dsw-derive-surface-2,#e8ebef)}
+.wb-ttv-path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all;flex:1}
+.wb-ttv-close{border:none;background:none;font-size:14px;cursor:pointer;color:var(--dsw-derive-muted,#57606a);padding:2px 6px}
+.wb-ttv-close:hover{color:var(--dsw-derive-danger,#cf222e)}
+/* 横幅（mock D 原话：🕰 本票时刻 · 只读 + 跳到当前版小链） */
+.wb-ttv-banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 14px;
+  background:var(--dsw-derive-accent-bg,#ddf4ff);border-bottom:1px solid var(--dsw-derive-accent-border,#54aeff);
+  font-size:12px;color:var(--dsw-derive-accent-deep,#0a3069)}
+.wb-ttv-banner-text{font-weight:700}
+.wb-ttv-banner-ver{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px}
+.wb-ttv-jump{border:1px solid var(--dsw-derive-accent-border,#54aeff);background:var(--dsw-derive-canvas,#fff);
+  color:var(--dsw-derive-accent,#0969da);font-size:11px;padding:1px 8px;border-radius:10px;cursor:pointer;margin-left:auto}
+.wb-ttv-jump:hover{background:var(--dsw-derive-accent-bg,#ddf4ff)}
+/* 正文：.md 复用 docs 的 wb-doc-body 渲染约束；其余等宽纯文本 */
+.wb-ttv-body{flex:1;overflow:auto;padding:14px;font-size:12.5px;line-height:1.7}
+.wb-ttv-code{margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;white-space:pre-wrap;word-break:break-all}
+.wb-ttv-fail{padding:20px 14px;font-size:12.5px;color:var(--dsw-derive-danger,#cf222e);line-height:1.7}
+.wb-ttv-fail-ttl{font-weight:700;margin-bottom:6px}
+.wb-ttv-loading{padding:20px 14px;font-size:12.5px;color:var(--dsw-derive-muted,#57606a)}
+.wb-ttv-trunc{padding:6px 14px;border-top:1px dashed var(--dsw-derive-border,#d0d7de);font-size:11.5px;color:var(--dsw-derive-warn-deep,#7d4e00)}
 `;
 const CSS_TAG_ID = "sandbar-workbench/WorkbenchSection.css";
 if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(CSS_TAG_ID) + "]") === null) {
@@ -52082,7 +52305,7 @@ function unifiedStats(text) {
 		del
 	};
 }
-function ChangesTab({ detail, operator, onMsg }) {
+function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 	const [diff, setDiff] = (0, react.useState)(void 0);
 	const [loading, setLoading] = (0, react.useState)(true);
 	const [loadErr, setLoadErr] = (0, react.useState)("");
@@ -52250,8 +52473,10 @@ function ChangesTab({ detail, operator, onMsg }) {
 						className: "wb-d-type",
 						children: KIND_LABEL[f.kind]
 					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-d-fpath",
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "wb-d-fpath wb-d-flink",
+						title: "以本票时刻的版本只读打开",
+						onClick: () => onOpenFile(f.path, "settle"),
 						children: f.path
 					}),
 					f.kind === "code" && f.unified !== void 0 && (() => {
@@ -53021,6 +53246,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 	const [evInput, setEvInput] = (0, react.useState)({});
 	const [copied, setCopied] = (0, react.useState)(false);
 	const [preview, setPreview] = (0, react.useState)(void 0);
+	const [fileViewer, setFileViewer] = (0, react.useState)(null);
 	const [previewLoading, setPreviewLoading] = (0, react.useState)(false);
 	const [health, setHealth] = (0, react.useState)(void 0);
 	const [drawerTab, setDrawerTab] = (0, react.useState)("detail");
@@ -53957,8 +54183,14 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 									}),
 									(card.files.length > 0 || card.filesMore > 0) && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 										className: "sc-files",
-										children: [card.files.map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", {
+										children: [card.files.map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 											className: "sc-file",
+											title: "以本票时刻的版本只读打开",
+											onClick: () => setFileViewer({
+												ticketId: detail.id,
+												path: f,
+												mode: "settle"
+											}),
 											children: f
 										}, f)), card.filesMore > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 											className: "sc-file-more",
@@ -53982,6 +54214,30 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "原始引擎日志（调试用）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", { children: card.rawLog.join("\n") })]
 									})
 								]
+							});
+						})(),
+						(() => {
+							const refs = Array.isArray(detail.refs) ? detail.refs.filter((x) => typeof x === "string" && x.trim() !== "") : [];
+							if (refs.length === 0) return null;
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "wb-refs",
+								"data-testid": "ticket-refs",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "ttl",
+									children: "背景引用（非本票改动 · 点开看开票基线版）"
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "wb-refs-files",
+									children: refs.map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										className: "wb-ref-file",
+										title: "以开票基线版只读打开",
+										onClick: () => setFileViewer({
+											ticketId: detail.id,
+											path: f,
+											mode: "base"
+										}),
+										children: f
+									}, f))
+								})]
 							});
 						})(),
 						drawerPeerViewers.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -54166,7 +54422,12 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 						drawerTab === "changes" && detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ChangesTab, {
 							detail,
 							operator,
-							onMsg: setOpMsg
+							onMsg: setOpMsg,
+							onOpenFile: (p, m) => setFileViewer({
+								ticketId: detail.id,
+								path: p,
+								mode: m
+							})
 						}),
 						drawerTab === "agent" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AgentLogsTab, {
 							detail,
@@ -54657,6 +54918,12 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 						})
 					]
 				})
+			}),
+			fileViewer !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketTimeViewer, {
+				ticketId: fileViewer.ticketId,
+				path: fileViewer.path,
+				initialMode: fileViewer.mode,
+				onClose: () => setFileViewer(null)
 			})
 		]
 	});

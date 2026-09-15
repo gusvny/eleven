@@ -1158,6 +1158,18 @@ SCENARIOS = [
      "详情观测面 DOM 对拍（t260915-05 验收①②③渲染面，灰盒 L3，隔离台真浏览器+API 桩，3099 零接触）：S0 build contract（twin bundle 同步+泳道图/词条表锚点在 bundle+buildLaneMap 纯模型冒烟）+S1 真 DOM 九腿——L1 真泳道图：拓扑在场时并行双道虚线框×2（implement∥design_integration_tests、arbitrate∥acceptance_walkthrough）+人门虚线圈落在 merge 节点+节点标签全部来自拓扑；L2a/b 红灯翻译层：verify_red 与 main_dirty 两族同组件出不同人话主文案、绝不冒裸引擎码（表驱动断言的用户可感知面）、结构化 files 点名到卡面 chips、files 空不捏造 chip（callout C 原话）、原始日志 <details> 折叠展开见 evidence 原文；L3 人门蓝卡：awaiting-human 卡变蓝列出「签什么」=human_context.merge.context_text+stage_acceptance+绿 gate_runs 三源；L4 轮次带：create_plan 三轮逐轮格 hover 出该轮打回原因、×N 徽章在、节点不因返工重复（单向流）；L5 关单可见（KI-027）：closed 票同组件全图+轮次带仍在（拓扑走模板导出通道）；L6 渲染器通用性：fixture-two-step 线性拓扑同组件渲染、标签来自拓扑、DOM 零 dev-lane 业务词；L7 降级锚：拓扑缺席回落现行步骤条（t260901-09 双亮面零回归）+畸形 topology/gens/timeline 不炸；L8 检查明细区：gate_runs 逐轮逐条 ✓/✗+item+detail、红行点名文件与状态卡文件清单联动、<details> 展开见该轮 detail 原文；P 卫生腿=全旅程零 pageerror/console.error。数据全桩（list/detail/workflows 三路由，契约形状={template,name,nodes[id,label,role,kind,optional?],edges,groups}——契约漂移=红点名）。分工：t260911-05 锁 merge-dirty 族红卡四件 payload→pixel（本条不复断其形状）；t260901-09 锁现行步骤条并行双亮；t260915-01 锁数据面引擎半（本条数据全桩）；developer L1（lane-map-model 纯函数矩阵/status-card 词条表 UT）不同层——L1 锁不住 JSX 运行时错/落位/降级渲染。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；隔离台/playwright/chromium 缺席=ENV_FAIL exit 2（KI-036 点名）",
      "node integration/t260915-05/sc_ticket_detail_lane_map_dom.mjs", "browser-free"),
 
+    # ---- t260915-17: 「文件行=链接」本票时刻只读查看器（mock 260904 标注 D 落地）----
+    # 两条 intent 分工：①读取面契约（时刻口径语义×fail-closed 铁律×定位正确性，真 git
+    # 夹具 micro 回放+真票逐字对照）②查看器/详情链接化契约（横幅锚×零编辑控件×bundle
+    # 一致，离线结构锁档）。与 t260915-05-detail-lane-map-dom（详情渲染面对拍）、
+    # t260901-13 灯箱（图片证据灯箱，本票=文本时刻版查看器）、changes 系 diff 场景
+    # （diff 语义，本票=单文件时刻版语义）intent 不同面。
+    ("t260915-17-ticket-time-file",
+     "本票时刻读取面契约（t260915-17 验收①②③，灰盒 L3，真 git 夹具一仓全形态 micro 回放+真票逐字对照，零 docker 零台面）：settle=收口提交版逐字=git show——squash 形态 lane/<id> 只在 message body（「来源 lane/<id>」；真票 t260915-05 实证 subject 不含 lane/<id>，定位必须匹配完整 message）、merge 形态在 subject、teardown 残留分支形态在分支 tip；短 id 不命中长 id 票收口提交（changes.ts --grep 子串留档缺陷的注入回归：先 settle t260915-1 后 settle t260915-17 的 log 序）；fail-closed 铁律=在飞票（dispatched/rework，分支在场与否不影响）／泳道拆且无收口提交／路径不在该版本一律 200+ok:false 人话点名且响应绝不含工作树诱饵内容（回落=把「现在」冒充「本票时刻」）；base=基点版逐字、未登记/无效 ref 人话、与在飞无关（时刻=定值）；current=唯一工作树口径；畸形路径（../、绝对、反斜杠、空）与未知 mode 人话不抛；二进制不透传 NUL 乱码、大文件 2MB 封顶+truncated 在场；结构锁=host/shared 计算核零写性 git 子命令字面量（worktree 行级 list 白名单）+端点注册 tickets/<id>/file 形态与非 GET 405 分支在场；真票腿=本仓历史真票 t260915-05 settle 读数与 git show 逐字相等（场景独立复算定位作对照真源）。驱动=直 import 方案承诺宿主读面模块（t01 同款），导出面按「恰一个 async 函数」探测+调用形状协商，实现缺席/签名漂移=FAIL 点名。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；git 缺席=ENV_FAIL exit 2",
+     "node integration/t260915-17/sc_ticket_time_file.mjs", "browser-free"),
+    ("t260915-17-ticket-time-viewer",
+     "本票时刻查看器与详情链接化契约（t260915-17 验收①③，灰盒 L3，离线结构锁档，3099 零接触）：横幅契约锚在场（data-testid=\"ticket-time-banner\"+人话文案「🕰 本票时刻 · 只读」+「跳到当前版」小链，mock D 原话）；跳到当前版接线=current 口径与横幅渲染同域（点击切当前版且横幅消失）；零编辑控件=查看器域无 textarea/contentEditable/保存语义（只读刚性，写路径仍归编辑器/agent——mock 边界重申原话）；详情文件行=链接（状态卡 sc-file 邻近可点语义）+「背景引用」行组按 refs 条件渲染（mode=base）；Escape/遮罩关闭接线在场（EvidenceLightbox 资源终态家族）；bundle 重建一致=client 源契约锚同批出现在 lib/client.cjs|js 产物（改源忘重建的静默穿透面，t260903-04 bundle-sync 同族）。分工：真点击/真渲染 DOM 腿留隔离台 stage_docker 手法（同 t260915-05-detail-lane-map-dom 分层），本条红语义=契约锚缺席/接线断/未重建不判环境；与 t260901-13 灯箱 intent 不同面（彼=图片证据灯箱，本=文本时刻版查看器）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "node integration/t260915-17/sc_ticket_time_viewer.mjs", "browser-free"),
 
 ]
 

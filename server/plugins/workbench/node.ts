@@ -26,6 +26,12 @@
  *                                               → 进展行 enrichment（t260904-17）：主响应零 show；
  *                                                 enrich 阶段逐票 show 短超时+并发上限+allSettled
  *   GET  /sandbar-workbench/api/wf/tickets/<id>   → ticket show（详情全文）
+ *   GET  /sandbar-workbench/api/wf/tickets/<id>/file?path=&mode=settle|base|current
+ *                                               → 「本票时刻」只读文件（t260915-17，mock 260904
+ *                                                 标注 D）：settle=收口版（该票的提交版本）/base=
+ *                                                 开票基点版（票面 base_ref）/current=当前版（「跳到
+ *                                                 当前版」小链专用）。fail-closed 人话降级走 200，绝不
+ *                                                 回落工作树冒充本票时刻；只读刚性=非 GET 一律 405
  *   GET  /sandbar-workbench/api/wf/inspection/tickets
  *                                               → 巡检板面（t260915-08）：引擎 ticket-list
  *                                                 {kind:"inspection"} 薄壳；无 project 维度
@@ -165,6 +171,8 @@ function projectRootsFor(projectKey: unknown): string[] {
 }
 
 import { computeTicketDiff, type TicketForDiff } from './src/host/changes.ts'
+import { readTicketTimeFile } from './src/host/ticket-time-file.ts'
+import { isTicketTimeMode } from './src/shared/ticket-time-model.ts'
 import { ticketShowHttpVerdict } from './src/host/ticket-error.ts'
 import { readLatestScanReport } from './src/host/scan-report.ts'
 import { listAgentLogs, resolveAgentBaseDir, _sessionKbFast } from './src/host/agent-logs.ts'
@@ -935,6 +943,60 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
   }
 
   /**
+   * 「本票时刻」只读文件（t260915-17）：GET /wf/tickets/<id>/file?path=<仓内相对路径>&mode=settle|base|current[&project=]。
+   * settle=收口版（该票的提交版本：main 收口提交或残留泳道分支 tip）；base=开票基点版
+   * （票面 base_ref，C4：不做 path→repo 归属）；current=当前版（「跳到当前版」小链专用，
+   * 唯一读工作树的口径，读主树布局不依赖泳道树）。fail-closed：票在飞/泳道拆且无收口
+   * 提交/路径不在该版本/二进制 → 200 + {result:{ok:false,reason}} 人话（路径与时刻问题
+   * 不是服务器错，docs doc 端点同风格），绝不回落工作树版本冒充「本票时刻」。
+   * 只读刚性：本分支非 GET 已在路由处 405；读取计算在 src/host/ticket-time-file.ts
+   * （git 子命令白名单源码锁）。project 锚解析同 handleTicketDiff（query 显式 > 票面
+   * t.project > 默认仓）。
+   */
+  async function handleTicketTimeFile(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> {
+    if (!TICKET_ID_RE.test(id) || /[./]/.test(id)) {
+      sendJson(res, 400, { ok: false, error: `工单 id 不合法：'${id.slice(0, 40)}'` })
+      return
+    }
+    const url = new URL(req.url ?? '/', 'http://x')
+    const p = url.searchParams.get('path')
+    const mode = url.searchParams.get('mode')
+    if (p === null || p === '') {
+      sendJson(res, 400, { ok: false, error: 'path 必传（仓内相对路径）' })
+      return
+    }
+    if (!isTicketTimeMode(mode)) {
+      sendJson(res, 400, { ok: false, error: `mode 必传且只能是 settle|base|current（收到: ${String(mode)}）` })
+      return
+    }
+    try {
+      const s = await callTool('ticket', { op: 'show', id })
+      if (s?.ok !== true) {
+        sendTicketShowError(res, s, id)
+        return
+      }
+      const t = (s.result ?? {}) as Record<string, unknown>
+      const queryKey = url.searchParams.get('project')
+      const a = resolveProjectAnchor(
+        queryKey !== null && queryKey !== '' ? queryKey : (typeof t.project === 'string' ? t.project : ''),
+        repo)
+      const anchor = anchorGuard(res, a)
+      if (anchor === null) return
+      const result = await readTicketTimeFile(anchor.root, {
+        id,
+        status: t.status,
+        lane: t.lane,
+        branch: t.branch,
+        baseRef: t.base_ref,
+        repoWorktrees: t.repo_worktrees,
+      }, mode, p)
+      sendJson(res, 200, { ok: true, result, resolved: resolvedMark(anchor) })
+    } catch (err) {
+      sendJson(res, 502, { ok: false, error: `本票时刻读取失败：${String(err instanceof Error ? err.message : err)}` })
+    }
+  }
+
+  /**
    * 读审批意见：reviews/<工单id>.json（复用 knowledge review-store 的读改写与文件形制）。
    * KI-057：落盘锚 reviewsAnchor=<项目根>/server 直下 reviews/ 按 ?project= 解析（缺省=默认仓，行为不变）。
    */
@@ -1177,6 +1239,17 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       // t260828-07：agent-usage 只读 GET（token 消耗聚合，同一解析通路的第二个端点）。
       if (op === 'agent-usage' && req.method === 'GET') {
         await handleAgentUsage(res, id)
+        return
+      }
+      // t260915-17：「本票时刻」只读文件（mock 260904 标注 D——文件行=链接，点开以
+      // 该票收口版/开票基点版只读打开）。只读刚性：该通道任何写方法一律 405（file
+      // 没有写语义；与 POST 操作面 OPS 白名单互斥）。
+      if (op === 'file') {
+        if (req.method !== 'GET') {
+          sendJson(res, 405, { ok: false, error: '本票时刻文件读取是只读通道，仅支持 GET' })
+          return
+        }
+        await handleTicketTimeFile(req, res, id)
         return
       }
       if (op === 'review') {

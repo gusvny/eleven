@@ -117,6 +117,10 @@ import {
 // t260901-15 多页签共存：在看心跳/写事件广播（tab-presence）+ 不可见页签暂停轮询门。
 import { startTabPresence } from './tab-presence.ts'
 import { buildStatusCard } from '../host/status-card.ts'
+// 「本票时刻 · 只读」文件查看器（t260915-17，mock 260904 标注 D：文件行=链接，
+// 点开以该票收口版/开票基点版只读打开；跳到当前版=内部切 current 口径）。
+import { TicketTimeViewer } from './ticket-time-viewer.tsx'
+import type { TicketTimeMode } from '../shared/ticket-time-model.ts'
 import type { TabPresence, PeerViewer } from './tab-presence.ts'
 import { buildApproveNote } from './approve-note.ts'
 import { startVisibleInterval } from './visibility-poll.ts'
@@ -804,6 +808,45 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-al-attempt .sum{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   color:var(--dsw-derive-muted,#57606a);font-size:11.5px}
 .wb-al-attempt .wb-al-body{border-top:1px solid var(--dsw-derive-surface-2,#eef1f4)}
+
+/* ── 本票时刻只读查看器（t260915-17，mock 260904 标注 D：文件行=链接） ── */
+/* button 化的文件行沿用原视觉 + 指针态（sc-file 原为 code；wb-d-fpath 原为 span） */
+button.sc-file{cursor:pointer;text-align:left}
+button.wb-d-flink{cursor:pointer;background:none;border:none;padding:0;font:inherit;color:inherit;text-align:left}
+button.wb-d-flink:hover{color:var(--dsw-derive-accent,#0969da);text-decoration:underline}
+/* 背景引用行组 */
+.wb-refs{margin-top:8px}
+.wb-refs .ttl{font-weight:600;font-size:12.5px;margin-bottom:4px;color:var(--dsw-derive-muted,#57606a)}
+.wb-refs-files{display:flex;flex-wrap:wrap;gap:4px}
+.wb-ref-file{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;padding:1px 6px;border-radius:4px;
+  background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-border,#d0d7de);
+  color:var(--dsw-derive-muted,#57606a);cursor:pointer;text-align:left}
+.wb-ref-file:hover{color:var(--dsw-derive-accent,#0969da);border-color:var(--dsw-derive-accent-border,#54aeff)}
+/* 查看器遮罩与面板（遮罩层先例=EvidenceLightbox/预览弹层） */
+.wb-ttv-mask{position:fixed;inset:0;background:rgba(31,35,40,.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px}
+.wb-ttv{background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:10px;
+  width:min(880px,100%);max-height:88vh;display:flex;flex-direction:column;overflow:hidden;
+  box-shadow:0 8px 32px rgba(31,35,40,.25)}
+.wb-ttv-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--dsw-derive-surface-2,#e8ebef)}
+.wb-ttv-path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all;flex:1}
+.wb-ttv-close{border:none;background:none;font-size:14px;cursor:pointer;color:var(--dsw-derive-muted,#57606a);padding:2px 6px}
+.wb-ttv-close:hover{color:var(--dsw-derive-danger,#cf222e)}
+/* 横幅（mock D 原话：🕰 本票时刻 · 只读 + 跳到当前版小链） */
+.wb-ttv-banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 14px;
+  background:var(--dsw-derive-accent-bg,#ddf4ff);border-bottom:1px solid var(--dsw-derive-accent-border,#54aeff);
+  font-size:12px;color:var(--dsw-derive-accent-deep,#0a3069)}
+.wb-ttv-banner-text{font-weight:700}
+.wb-ttv-banner-ver{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px}
+.wb-ttv-jump{border:1px solid var(--dsw-derive-accent-border,#54aeff);background:var(--dsw-derive-canvas,#fff);
+  color:var(--dsw-derive-accent,#0969da);font-size:11px;padding:1px 8px;border-radius:10px;cursor:pointer;margin-left:auto}
+.wb-ttv-jump:hover{background:var(--dsw-derive-accent-bg,#ddf4ff)}
+/* 正文：.md 复用 docs 的 wb-doc-body 渲染约束；其余等宽纯文本 */
+.wb-ttv-body{flex:1;overflow:auto;padding:14px;font-size:12.5px;line-height:1.7}
+.wb-ttv-code{margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;white-space:pre-wrap;word-break:break-all}
+.wb-ttv-fail{padding:20px 14px;font-size:12.5px;color:var(--dsw-derive-danger,#cf222e);line-height:1.7}
+.wb-ttv-fail-ttl{font-weight:700;margin-bottom:6px}
+.wb-ttv-loading{padding:20px 14px;font-size:12.5px;color:var(--dsw-derive-muted,#57606a)}
+.wb-ttv-trunc{padding:6px 14px;border-top:1px dashed var(--dsw-derive-border,#d0d7de);font-size:11.5px;color:var(--dsw-derive-warn-deep,#7d4e00)}
 `
 
 const CSS_TAG_ID = 'sandbar-workbench/WorkbenchSection.css'
@@ -1020,6 +1063,10 @@ interface TicketDetail {
   pending?: { ts: number; note: string }[]
   log?: { ts: number; status?: string; note: string }[]
   body?: string
+  /** 背景引用（门①背景文件闸 t260904-18：非本票改动的引用文件清单，开票时引擎已验
+   *  「已提交存在」；t260915-17 起详情渲染成链接，点开=开票基线版只读查看；老票缺省）。
+   *  归属口径（C4）：refs 开票闸只对根仓校验——base 口径按根仓票面 base_ref 读。 */
+  refs?: string[]
   /** 执行规格（t260904-06）：开票会话蒸馏的加工后派发规格，引擎 snapshot 顶层原样透传
    *  （零后端改动），前端只渲染；空/缺省整卡不渲染（老票兼容）。 */
   spec?: string
@@ -2465,10 +2512,12 @@ function unifiedStats(text: string): { add: number; del: number } {
   return { add, del }
 }
 
-function ChangesTab({ detail, operator, onMsg }: {
+function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
   detail: TicketDetail
   operator: string
   onMsg: (m: string) => void
+  /** 文件行 → 本票时刻查看器（t260915-17：文件行=链接，mock 260904 标注 D）。 */
+  onOpenFile: (path: string, mode: TicketTimeMode) => void
 }) {
   const [diff, setDiff] = useState<TicketDiffResult | undefined>(undefined)
   const [loading, setLoading] = useState(true)
@@ -2613,7 +2662,8 @@ function ChangesTab({ detail, operator, onMsg }: {
       <div className="wb-d-fhead">
         <span className="wb-d-badge" data-s={f.status}>{STATUS_LABEL[f.status]}</span>
         <span className="wb-d-type">{KIND_LABEL[f.kind]}</span>
-        <span className="wb-d-fpath">{f.path}</span>
+        <button className="wb-d-fpath wb-d-flink" title="以本票时刻的版本只读打开"
+          onClick={() => onOpenFile(f.path, 'settle')}>{f.path}</button>
         {f.kind === 'code' && f.unified !== undefined && (() => {
           const st = unifiedStats(f.unified)
           return <span className="wb-d-stats"><span className="add">+{st.add}</span>{' '}<span className="del">−{st.del}</span></span>
@@ -3116,6 +3166,9 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   const [evInput, setEvInput] = useState<Record<string, string>>({})
   const [copied, setCopied] = useState(false)
   const [preview, setPreview] = useState<PreviewData | undefined>(undefined)
+  // 「本票时刻」查看器打开态（t260915-17）：文件行链接的落点。ticketId 随打开时快照
+  // （切工单不清除，查看器自洽读打开时那张票；遮罩/Esc 关闭即回收）。
+  const [fileViewer, setFileViewer] = useState<{ ticketId: string; path: string; mode: TicketTimeMode } | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [health, setHealth] = useState<TemporalHealth | undefined>(undefined)
   const [drawerTab, setDrawerTab] = useState<'detail' | 'changes' | 'agent'>('detail')
@@ -3949,7 +4002,12 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                     )}
                     {(card.files.length > 0 || card.filesMore > 0) && (
                       <div className="sc-files">
-                        {card.files.map((f) => <code className="sc-file" key={f}>{f}</code>)}
+                        {/* 文件行=链接（mock 260904 标注 D）：点开以本票时刻（收口版）只读
+                            打开；在飞票收口版不可得 → 查看器人话点名（fail-closed 预期）。 */}
+                        {card.files.map((f) => (
+                          <button className="sc-file" key={f} title="以本票时刻的版本只读打开"
+                            onClick={() => setFileViewer({ ticketId: detail.id, path: f, mode: 'settle' })}>{f}</button>
+                        ))}
                         {card.filesMore > 0 && <span className="sc-file-more">+{card.filesMore} more</span>}
                       </div>
                     )}
@@ -3958,6 +4016,27 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                       <summary>原始引擎日志（调试用）</summary>
                       <pre>{card.rawLog.join('\n')}</pre>
                     </details>
+                  </div>
+                )
+              })()}
+              {/* 背景引用（t260915-17，mock D ②）：非本票改动的引用文件行=链接，点开=
+                  开票基线版只读查看（mode=base）。refs 非空才渲染（老票零侵入）；放详情
+                  公共头部区（状态卡后）——受阻与否都可见，不随状态卡缺席。mock 把背景引用
+                  画在状态卡文件区，但状态卡仅受阻时渲染、refs 是票级事实，故独立行组。 */}
+              {(() => {
+                const refs = Array.isArray(detail.refs)
+                  ? detail.refs.filter((x) => typeof x === 'string' && x.trim() !== '')
+                  : []
+                if (refs.length === 0) return null
+                return (
+                  <div className="wb-refs" data-testid="ticket-refs">
+                    <div className="ttl">背景引用（非本票改动 · 点开看开票基线版）</div>
+                    <div className="wb-refs-files">
+                      {refs.map((f) => (
+                        <button className="wb-ref-file" key={f} title="以开票基线版只读打开"
+                          onClick={() => setFileViewer({ ticketId: detail.id, path: f, mode: 'base' })}>{f}</button>
+                      ))}
+                    </div>
                   </div>
                 )
               })()}
@@ -4081,8 +4160,11 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                 </button>
               </div>
 
+              {/* 合并语义（t260915-17 × t260915-08）：巡检票无变更页签（main 侧条件），
+                  非巡检票的变更文件行仍带本票时刻查看器链接（HEAD 侧 onOpenFile） */}
               {drawerTab === 'changes' && detail.kind !== 'inspection' && (
-                <ChangesTab detail={detail} operator={operator} onMsg={setOpMsg} />
+                <ChangesTab detail={detail} operator={operator} onMsg={setOpMsg}
+                  onOpenFile={(p, m) => setFileViewer({ ticketId: detail.id, path: p, mode: m })} />
               )}
 
               {drawerTab === 'agent' && (
@@ -4328,6 +4410,16 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
             </div>
           </div>
         </div>
+      )}
+      {/* 「本票时刻 · 只读」查看器（t260915-17）：文件行链接的统一落点；只读弹层，
+          无编辑/保存路径（源码锁在 sc_ticket_time_file）。 */}
+      {fileViewer !== null && (
+        <TicketTimeViewer
+          ticketId={fileViewer.ticketId}
+          path={fileViewer.path}
+          initialMode={fileViewer.mode}
+          onClose={() => setFileViewer(null)}
+        />
       )}
     </div>
   )
