@@ -223,6 +223,7 @@ DECL = """schema: v1
 instances:
   - id: integration-tests
     enabled: true
+    project_key: sandbar
     schedule:
       kind: cron
       cron: 30 7 * * *
@@ -230,6 +231,7 @@ instances:
     template: inspection-lite
   - id: mechanism-face
     enabled: false
+    project_key: sandbar
     schedule:
       kind: cron
       cron: 0 7 * * 1

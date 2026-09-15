@@ -206,9 +206,10 @@ def run_trigger(action_args, env=None):
     return proc, parsed
 
 
-def run_client(sub: str, args: dict):
-    """跑 client.py 子命令（JSON 参数），返回 (proc, parsed)。缺 temporalio=ENV_FAIL。"""
-    proc = run_cmd([py_runner(), CLIENT, sub, json.dumps(args, ensure_ascii=False)])
+def run_client(sub: str, args: dict, env=None):
+    """跑 client.py 子命令（JSON 参数），返回 (proc, parsed)。缺 temporalio=ENV_FAIL。
+    env=spawn_env 的 extra（显式覆盖/追加，如 SANDBAR_INSPECTION_DECL 夹具声明缝）。"""
+    proc = run_cmd([py_runner(), CLIENT, sub, json.dumps(args, ensure_ascii=False)], env=env)
     env_fail_if_missing_dep(proc)
     return proc, last_json(proc.stdout)
 

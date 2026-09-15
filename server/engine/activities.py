@@ -527,16 +527,30 @@ async def count_archived_tickets(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @activity.defn
+def inspection_period_identity(args: Dict[str, Any]) -> str:
+    """期票归属项目身份的单一取值点（t260915-20 R2/R3，纯函数单测友好）：
+    **只认** args["instance_project_key"]（实例级身份键）——watcher 计数源
+    project_key 即使混进 args 也不得串用（身份≠计数源，两 key 分叉时票面/SA 必须归
+    身份键；串键=静默错挂，正是本票要杀的族）。缺省空=旧 watcher payload（跨部署
+    过渡窗）——票面 project 空，双空形态在 workflow 侧被无主守卫拦成 blocked。"""
+    return str((args or {}).get("instance_project_key") or "").strip()
+
+
+@activity.defn
 async def trigger_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
     """watcher → 巡检期票（t260911-02）：trigger CLI 的运维语义在 activity 面——
     票号=workflow id（一票一期机械去重），AlreadyStarted=deduped 回执不报错；
     scan_face 由声明（spec.scan_face）透传进票的扫描分派。task_queue 用 activity
-    自身所在队列（watcher 与巡检票同 worker 池）。"""
+    自身所在队列（watcher 与巡检票同 worker 池）。
+    t260915-20：instance_project_key（watcher 透传的实例级身份）→ payload project_key
+    + ProjectKey SA，全链用身份键（inspection_period_identity 单一取值点）。"""
     from inspection_flow import InspectionPeriodicInput, InspectionPeriodicWorkflow, inspection_ticket_id
+    from shared import ticket_search_attributes
     from temporalio.service import RPCError
 
     instance_id = str(args.get("instance_id") or "")
     period = str(args.get("period") or "")
+    project_key = inspection_period_identity(args)
     try:
         ticket_id = inspection_ticket_id(instance_id, period)
     except ValueError as e:
@@ -548,8 +562,10 @@ async def trigger_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
             InspectionPeriodicInput(instance_id=instance_id, period=period,
                                     repo_root=str(args.get("repo_root") or ""),
                                     face=str(args.get("scan_face") or "test"),
-                                    decl_path=str(args.get("decl_path") or "")),
-            id=ticket_id, task_queue=activity.info().task_queue)
+                                    decl_path=str(args.get("decl_path") or ""),
+                                    project_key=project_key),
+            id=ticket_id, task_queue=activity.info().task_queue,
+            search_attributes=ticket_search_attributes(project_key, ""))
         return {"ok": True, "result": {"triggered": True, "ticket_id": ticket_id,
                                        "first_run_id": handle.first_execution_run_id}}
     except Exception as e:  # noqa: BLE001

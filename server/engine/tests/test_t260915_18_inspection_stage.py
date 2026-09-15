@@ -163,6 +163,9 @@ def test_enabled_stage_instance_passes_unwired_face_still_rejected():
                "instances:\n"
                "  - id: stage-on\n"
                "    enabled: true\n"
+               # t260915-20 合并消解：实例级项目身份成为必填字段（占位不豁免），
+               # 正例夹具补键跟上契约——断言语义不变（enabled+stage 面放行、voice 拒收）
+               "    project_key: sandbar\n"
                "    scan_face: stage\n"
                "    schedule:\n"
                "      kind: cron\n"

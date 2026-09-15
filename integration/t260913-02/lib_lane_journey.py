@@ -260,6 +260,10 @@ def write_decl(path, instances) -> str:
     blocks = []
     for iid, keys, sched in instances:
         lines = ["  - id: %s" % iid]
+        # 模板单点注入实例级项目身份（t260915-20：所有实例必填，占位不豁免）——
+        # 调用方 keys 显式给了 project_key 时以调用方为准（不静默覆盖）。
+        if "project_key" not in keys:
+            lines.append("    project_key: sandbar")
         for k, v in keys.items():
             lines.append("    %s: %s" % (k, v))
         lines.append("    schedule:")
@@ -283,6 +287,7 @@ def suite_decl_entry(instance: str, repo_root: str) -> str:
     夹具只给形状与实例名——实例名带进程戳防隔夜残留撞「一票一期」去重）。"""
     return ("  - id: %s\n"
             "    enabled: true\n"
+            "    project_key: sandbar\n"
             "    suite: full\n"
             "    schedule:\n"
             "      kind: cron\n"

@@ -32,6 +32,7 @@ TWO_INSTANCE_DECL = """schema: v1
 instances:
   - id: integration-tests-%05d
     enabled: true
+    project_key: sandbar
     schedule:
       kind: cron
       cron: 0 6 * * 1
@@ -39,6 +40,7 @@ instances:
     template: inspection-lite
   - id: docs-sync-%05d
     enabled: true
+    project_key: sandbar
     schedule:
       kind: cron
       cron: 0 7 * * 1

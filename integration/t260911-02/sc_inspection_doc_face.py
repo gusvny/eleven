@@ -56,6 +56,7 @@ instances:
   # fail-closed 拒「未在声明中」=PID 依赖间歇假红（260911 仲裁实锤）。
   - id: docs-sync-%(stamp)s
     enabled: true
+    project_key: sandbar
     scan_face: doc
     schedule:
       kind: cron

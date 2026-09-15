@@ -46,6 +46,7 @@ FIXTURE_DECL = """schema: v1
 instances:
   - id: integration-tests-%(stamp)s
     enabled: true
+    project_key: sandbar
     schedule:
       kind: cron
       cron: 0 6 * * 1
@@ -53,6 +54,7 @@ instances:
     template: inspection-lite
   - id: cnt-ok-%(stamp)s
     enabled: true
+    project_key: sandbar
     schedule:
       kind: every-n-tickets
       n: 2
@@ -62,6 +64,7 @@ instances:
     template: inspection-lite
   - id: cnt-low-%(stamp)s
     enabled: true
+    project_key: sandbar
     schedule:
       kind: every-n-tickets
       n: 5
@@ -71,6 +74,7 @@ instances:
     template: inspection-lite
   - id: race-%(stamp)s
     enabled: true
+    project_key: sandbar
     schedule:
       kind: race-first
       cron: 0 5 29 2 *

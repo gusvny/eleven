@@ -11,6 +11,7 @@ VALID = """schema: v1
 instances:
   - id: cron-face
     enabled: true
+    project_key: sandbar
     schedule:
       kind: cron
       cron: 0 9 * * 1
@@ -18,6 +19,7 @@ instances:
     template: inspection-lite
   - id: count-face
     enabled: true
+    project_key: sandbar
     schedule:
       kind: every-n-tickets
       n: 20
@@ -43,17 +45,15 @@ def test_count_kind_spec_carries_source_key_face():
 
 
 def test_declared_scan_face_carries_into_spec():
-    text = VALID.replace("  - id: cron-face\n    enabled: true\n    schedule:",
-                         "  - id: cron-face\n    enabled: true\n    scan_face: doc\n    schedule:", 1)
+    text = VALID.replace("  - id: cron-face\n    enabled: true\n    project_key: sandbar\n    schedule:",
+                         "  - id: cron-face\n    enabled: true\n    project_key: sandbar\n    scan_face: doc\n    schedule:", 1)
     specs = decl.build_schedule_specs(decl.parse_decl_text(text))
     assert {s["instance_id"]: s["scan_face"] for s in specs}["cron-face"] == "doc"
 
 
 def test_scan_face_must_be_wired():
-    text = VALID.replace("schedule:", "schedule:", 1).replace(
-        "  - id: cron-face", "  - id: cron-face", 1)
-    text = VALID.replace("    enabled: true\n    schedule:",
-                         "    enabled: true\n    scan_face: mood\n    schedule:", 1)
+    text = VALID.replace("    enabled: true\n    project_key: sandbar\n    schedule:",
+                         "    enabled: true\n    project_key: sandbar\n    scan_face: mood\n    schedule:", 1)
     with pytest.raises(decl.DeclError) as ei:
         decl.parse_decl_text(text)
     assert "scan_face" in str(ei.value)
@@ -74,7 +74,9 @@ def test_count_kind_source_lexicon_checked_even_disabled():
 
 
 def test_project_key_lexicon_blocks_traversal():
-    text = VALID.replace("project_key: sandbar", "project_key: ../../etc")
+    # 锚定 schedule 作用域（6 空格）=计数源 project_key 词法；实例级身份词法
+    # 由 t260915-20 测试面（test_identity_shape_rejected_names_instance）另行钉住
+    text = VALID.replace("      project_key: sandbar", "      project_key: ../../etc")
     with pytest.raises(decl.DeclError) as ei:
         decl.parse_decl_text(text)
     assert "project_key" in str(ei.value)

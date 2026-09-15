@@ -24,6 +24,7 @@ schema: v1
 instances:
   - id: integration-tests
     enabled: true
+    project_key: sandbar
     schedule:
       kind: cron
       cron: 0 9 * * 1
@@ -31,6 +32,7 @@ instances:
     template: inspection-lite
   - id: docs-sync
     enabled: false
+    project_key: sandbar
     schedule:
       kind: cron
       cron: 0 10 * * 1
@@ -190,7 +192,8 @@ def test_malformed_roots():
 
 
 def _instance(**over):
-    base = {"id": "integration-tests", "enabled": "true",
+    # project_key=实例级身份（t260915-20）：正例基线必须带身份（所有实例必填）
+    base = {"id": "integration-tests", "enabled": "true", "project_key": "sandbar",
             "schedule": {"kind": "cron", "cron": "0 9 * * 1"},
             "workflow": "InspectionPeriodicWorkflow", "template": "inspection-lite"}
     base.update(over)

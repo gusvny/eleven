@@ -28,6 +28,7 @@ NORMAL_DECL = """schema: v1
 instances:
   - id: integration-tests
     enabled: true
+    project_key: sandbar
     schedule:
       kind: cron
       cron: 0 6 * * 1
@@ -35,6 +36,7 @@ instances:
     template: inspection-lite
   - id: docs-sync
     enabled: false
+    project_key: sandbar
     schedule:
       kind: cron
       cron: 0 7 * * 1

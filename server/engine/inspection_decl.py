@@ -92,7 +92,15 @@ class DeclError(Exception):
 
 @dataclass
 class InstanceSpec:
-    """One inspection instance (the anchor for everything declaration-driven)."""
+    """One inspection instance (the anchor for everything declaration-driven).
+
+    项目身份两字段分工（t260915-20，全案统一口径）：
+      - instance_project_key = **实例级身份**：本实例巡检票归属哪个项目（声明实例键
+        `project_key`，解析后落本字段；驱动起票 ProjectKey SA 与 repo_root 注册表解析）；
+      - project_key = **schedule 级计数源**（仅计数 kind，schedule 作用域下的
+        `project_key`）：every-n-tickets/race-first 数谁家的票。
+      二者作用域不同不撞键，且绝不互串（串键=静默错挂，t260915-20 R2 的教训）。
+    """
 
     id: str
     enabled: bool
@@ -101,6 +109,9 @@ class InstanceSpec:
     n: int = 0
     source: str = ""
     project_key: str = ""
+    # 实例级项目身份（t260915-20）：声明实例键 project_key → 本字段；所有实例必填
+    # （enabled 与否——身份不是调度细节，无身份的占位实例=无主票预定席）。
+    instance_project_key: str = ""
     scan_face: str = "test"
     # 套件档（t260913-02）：空=不跑套件；"full"=本期在巡检自有泳道里跑集成全集。
     suite: str = ""
@@ -393,10 +404,10 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
         if not isinstance(item, dict):
             raise DeclError("%s：实例必须是映射（got %s）" % (where, type(item).__name__))
         unknown = sorted(set(item) - {"id", "enabled", "schedule", "workflow", "template",
-                                      "scan_face", "suite", "tz"})
+                                      "scan_face", "suite", "tz", "project_key"})
         if unknown:
             raise DeclError("%s：未知实例字段 %s（合法：id/enabled/schedule/workflow/template/"
-                            "scan_face/suite/tz；"
+                            "scan_face/suite/tz/project_key（实例级项目身份，t260915-20）；"
                             "face 已于 260910 巡检校准票 t260910-11 除名——零消费者，旧声明含 face 一律拒收点名）"
                             % (where, unknown))
         inst_id = _req_str(where, item, "id")
@@ -432,9 +443,21 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
             if not TZ_RE.match(tz):
                 raise DeclError("%s：tz %r 形态非法（IANA 名，如 Asia/Shanghai）" % (where, tz))
         kind, cron, n, source, project_key = _validate_schedule(where, item.get("schedule"), enabled)
+        # 实例级项目身份必填（t260915-20）：校验放字段链**最后**——既有负腿事由
+        # （缺 source、未知 kind、face 除名、cron 非法…）照旧先爆，断言语义零偷换；
+        # 「其余全对但缺身份」的正形声明在此点名。占位豁免惯例（schedule.source/n 只在
+        # enabled 必填）不适用：身份不是调度细节，无身份的占位实例=无主票预定席。
+        identity_key = str(item.get("project_key") or "").strip()
+        if not identity_key:
+            raise DeclError("%s：实例 %s 缺必填字段 project_key（实例级项目身份=巡检票归属；"
+                            "无项目身份的巡检=无主票，绝不静默归属引擎仓）" % (where, inst_id))
+        if not INSTANCE_ID_RE.match(identity_key):
+            raise DeclError("%s：实例 %s 的 project_key 非法 %r（实例级项目身份；"
+                            "小写 slug，同实例 id 词法）" % (where, inst_id, identity_key))
         instances.append(InstanceSpec(
             id=inst_id, enabled=enabled, kind=kind, cron=cron, n=n,
-            source=source, project_key=project_key, scan_face=scan_face,
+            source=source, project_key=project_key,
+            instance_project_key=identity_key, scan_face=scan_face,
             suite=suite, tz=tz, workflow=workflow_name, template=template))
     return InspectionDecl(schema=SCHEMA, instances=instances, source=source)
 
@@ -454,6 +477,9 @@ def build_schedule_specs(decl: InspectionDecl) -> List[Dict[str, Any]]:
             "cron": it.cron,
             "n": it.n,
             "source": it.source,
+            # 实例级身份键（t260915-20）：巡检票归属——起票 SA 与 repo_root 注册表解析
+            # 的真源。**不占用/不改**下方 "project_key" 键的计数源语义（下游消费者零惊变）。
+            "instance_project_key": it.instance_project_key,
             "project_key": it.project_key,
             "scan_face": it.scan_face,
             "suite": it.suite,

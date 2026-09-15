@@ -41,7 +41,7 @@ from temporalio.common import RetryPolicy
 # context this import must be passed through per repo convention (same as workflows.py's
 # header), otherwise the sandbox validation goes red.
 with workflow.unsafe.imports_passed_through():
-    from shared import Signature, cross_project_judge
+    from shared import Signature, cross_project_judge, PROJECT_SA_NAME
 
 # t260913-02：复用面（与 base.py/dev_lane.py 同款——imports_passed_through 内引活动函数，
 # 让 dataclass 载荷/回执的类型提示在沙箱里正确解码；活动实现本身全在 agent_activities）。
@@ -81,6 +81,38 @@ DEADMAN_LOOKBACK_DAYS = 7
 # 老票卡死）。repo 先例=base.py 的 PAUSE_PATCH_ID / BREATHE_PATCH_ID；机器化验证=
 # replay_check.py --workflow <老票 id>（本票实测四张在途老票全绿）。
 SUITE_PATCH_ID = "t260913-02-inspection-suite-stage"
+# 版本门 id（t260915-20，replay 安全）：无主票守卫 + sign 闸项目面收紧只在新 run 生效。
+# 老 in-flight 票 history 无此标记 → patched()=False → 走旧路径（恒放行），零影响；
+# 新票双空判据见 run 内守卫（README 迁移步：旧调度 payload 撞守卫=可见 blocked）。
+PROJECT_PATCH_ID = "t260915-20-inspection-project-identity"
+
+
+def unowned_guard_reason(project_key: str, repo_root: str) -> str:
+    """无主票守卫判据（纯函数，t260915-20；单测两腿）：
+    项目身份与 repo_root **双空** → 返回 blocked 事由（点名「无项目身份」与处置入口）；
+    否则返回 ""（放行）。双空=旧调度 payload/旁路起票的残窗形态——有身份的票
+    （repo_root 无论如何都会由起票面解析定死）照常放行；显式 --repo-root 旁路但无
+    身份的票不在此拦（运维显式面，可见性缺口由行 project 空承载，不静默成有主）。
+    repo_root 有值即说明起票面已经走过解析链（引擎仓静默回落被 R1 修复+守卫杀尽）。"""
+    if str(project_key or "").strip():
+        return ""
+    if str(repo_root or "").strip():
+        return ""
+    return ("无项目身份（旧调度 payload/旁路起票，无 project_key 且无 repo_root）——"
+            "票既无归属也无法判扫描仓，绝不静默回落引擎仓扫描；"
+            "处置：重跑 inspection_trigger.py schedule-up --instance <id> --note <…>"
+            "（update 分支重铸 action 即带身份）")
+
+
+def sign_target_project(sa_project: str, payload_project: str) -> str:
+    """sign 闸 target 解析链（纯函数，t260915-20；单测三腿）：
+    本票 SA ProjectKey（起票时刻盖章，调度序无关、重放确定）优先；
+    回退 payload project_key（老 history 无 SA）；双空 → ""（cross_project_judge 对
+    空 target 恒放行=现状语义，代码注释预告的升级路径在这里闭环）。"""
+    sa = str(sa_project or "").strip()
+    if sa:
+        return sa
+    return str(payload_project or "").strip()
 
 
 # ========================================================================================
@@ -400,6 +432,12 @@ class InspectionPeriodicInput:
     # 即改行为」的调度语义不变）。兼容两向皆安全：老 history 无此键→默认值；老 worker 收到
     # 多出的键→dataclass 解码忽略未知键（实测）。
     decl_path: str = ""
+    # 实例级项目身份（t260915-20）：本票归属哪个项目（=起票时刻声明的实例 project_key）。
+    # 起票三路（trigger / schedule-up / watcher activity）一律显式填；SA ProjectKey 与
+    # 本字段是同一事实的两个面（SA=检索面、payload=票面），同值由集成场景钉住。
+    # 缺省空=兼容老 history 重放（face 同款纪律：按字段名解码，缺键取默认不炸）——
+    # 但双空（无身份也无 repo_root）的**新**票会被无主守卫拦成 blocked（PROJECT_PATCH_ID）。
+    project_key: str = ""
 
 
 @workflow.defn
@@ -419,6 +457,7 @@ class InspectionPeriodicWorkflow:
         self._close_sig: Optional[Dict[str, str]] = None
         self._gate_err: str = ""
         self._patched: bool = False      # 版本门结果（老 history 缺标记 → 走票① 旧路径）
+        self._input: Optional[InspectionPeriodicInput] = None  # run 入口钉存（sign 闸 payload 回退链）
 
     def _enter(self, stage: str, state: str = "running", reason: str = "") -> None:
         self.stage = stage
@@ -438,9 +477,22 @@ class InspectionPeriodicWorkflow:
             self._gate_err = "本巡检模板无人授权面，authorize 载荷拒收（不落签字）"
             workflow.logger.warning("拒收 authorize 载荷：本巡检模板无人授权面")
             return
-        # t260915-12 跨项目闸（第二道，统一接闸不留分叉）：本模板无 project 面→judge
-        # 对 target="" 恒放行；未来补项目面时此处自动升级为拒收。
-        g = cross_project_judge(str(getattr(sig, "caller_project", "") or ""), "",
+        # t260915-12 跨项目闸（第二道，统一接闸不留分叉）；t260915-20 升级：target=
+        # 本票项目身份（SA ProjectKey 优先、payload project_key 回退，双空=""恒放行
+        # =老 history 现状不变）——异项目 caller 对已归属巡检票签字即结构化拒收。
+        sa_project = ""
+        try:
+            pairs = workflow.info().typed_search_attributes or []
+            for pair in pairs:
+                if str(getattr(getattr(pair, "key", None), "name", "")) == PROJECT_SA_NAME:
+                    sa_project = str(getattr(pair, "value", "") or "")
+                    break
+        except Exception:  # noqa: BLE001——SA 读面故障回落 payload 链（闸不因读面炸而失效）
+            sa_project = ""
+        # _input 缺席防御：signal 先于 run 的 handler 直调形态（object.__new__ 面）不炸
+        target = sign_target_project(sa_project, str(getattr(getattr(self, "_input", None),
+                                                             "project_key", "") or ""))
+        g = cross_project_judge(str(getattr(sig, "caller_project", "") or ""), target,
                                 str(getattr(sig, "cross_project_note", "") or ""))
         if g["action"] == "refuse":
             self._gate_err = g["why"]
@@ -462,6 +514,9 @@ class InspectionPeriodicWorkflow:
             "id": workflow.info().workflow_id,
             "kind": "inspection",
             "template": "inspection-lite",
+            # 票归属项目（t260915-20）：payload 侧真源（query 加键安全，非记录面）；
+            # 与 SA ProjectKey 同值（起票三路同源写入），ticket_receipt/工单行各自取面
+            "project": str(getattr(self._input, "project_key", "") or ""),
             "stage": self.stage,
             "stage_state": self.stage_state,
             "status": self.status,
@@ -474,9 +529,21 @@ class InspectionPeriodicWorkflow:
     @workflow.run
     async def run(self, inp: InspectionPeriodicInput) -> Dict[str, Any]:
         repo_root = str(inp.repo_root or "")
+        self._input = inp   # sign 闸 payload 回退链 / snapshot project 面的真源钉存
         # 版本门（replay 安全，见 SUITE_PATCH_ID 头注）：老在途票在这里拿到 False，
         # 于是一路走票① 旧路径（scan→report→close），一个新命令都不注入。
         self._patched = workflow.patched(SUITE_PATCH_ID)
+        # 无主票守卫（t260915-20，PROJECT_PATCH_ID 新命令）：项目身份与 repo_root 双空
+        # 的新票 → blocked 终态点名（可见不静默）——杀「静默回落引擎仓扫描」的最后残窗
+        # （旧调度 payload 在 R1 修复+schedule-up 重跑后收敛为零，守卫兜住漏刷的口子）。
+        # 老 in-flight 票：PROJECT_PATCH_ID patched()=False 走旧路径，零影响。
+        if self._patched and workflow.patched(PROJECT_PATCH_ID):
+            guard = unowned_guard_reason(getattr(inp, "project_key", ""), repo_root)
+            if guard:
+                # 期号铸取在守卫之后（守卫票不值得跑 plan 活动）；票号=真实 workflow id，
+                # 期号如实用输入期（调度路为空、手动路为触发期）——blocked 落账可索引。
+                return await self._blocked(
+                    workflow.info().workflow_id, inp, str(inp.period or ""), "guard", guard, None)
         plan: Dict[str, Any] = {}
         plan_raw: Any = None
         if self._patched:
@@ -817,6 +884,13 @@ class InspectionWatcherInput:
     # 腿 g2 实测）。缺省空=worker 侧缺省/env（生产缺省即此形态）。
     decl_path: str = ""
     project_key: str = ""
+    # 实例级项目身份（t260915-20，命名与上方 project_key 计数源键**显式区分**）：
+    # 本 watcher 开的期票归属哪个项目——schedule-up 起票面注入、watcher 开票 args
+    # 透传、activity 写进 InspectionPeriodicInput.project_key + 盖 ProjectKey SA，
+    # 全链用身份键，绝不串计数源键（身份≠计数源，串键=静默错挂）。
+    # 缺省空=老 history 解码安全（face/decl_path 同款纪律）；空身份+空 repo_root 的
+    # 期票会被无主守卫拦成 blocked（跨部署存量旧 watcher 的可见过渡窗，README 迁移步④）。
+    instance_project_key: str = ""
     poll_seconds: float = 60.0
     baseline: int = -1                 # -1 = 基线未立（首轮成功计数即立，不回看历史票）
     cron_anchor: str = ""              # ISO datetime；空=cron 侧未激活
@@ -902,11 +976,15 @@ class InspectionTicketCountWatcherWorkflow:
             if res.get("ok") and self._baseline >= 0:
                 d = decide(self.last_count, self._baseline, inp.n, cron_due, now)
                 if d["trigger"]:
+                    # 开票 args 全链带实例级身份键（t260915-20 R2）：activity 端
+                    # InspectionPeriodicInput.project_key + ProjectKey SA 都取它，
+                    # 与计数源 project_key（上面喂 count 的键）作用域不同不互串。
                     opened: Dict[str, Any] = await workflow.execute_activity(
                         "trigger_inspection_period",
                         args=[{"instance_id": inp.instance_id, "period": d["period"],
                                "repo_root": inp.repo_root, "scan_face": inp.scan_face,
-                               "decl_path": inp.decl_path}],
+                               "decl_path": inp.decl_path,
+                               "instance_project_key": inp.instance_project_key}],
                         start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
                     deduped = bool((opened.get("result") or {}).get("deduped"))
                     self.last_trigger = {"kind": d["trigger"], "period": d["period"],
@@ -920,11 +998,15 @@ class InspectionTicketCountWatcherWorkflow:
                                 % (d["trigger"], d["period"], deduped, self._baseline))
             self.iterations += 1
             if self.iterations >= WATCHER_MAX_ITERATIONS:
+                # 换代显式携带 instance_project_key（t260915-20：换代不丢身份——
+                # 丢了身份，本代之后开的票全部撞无主守卫=blocked）
                 workflow.continue_as_new(InspectionWatcherInput(
                     instance_id=inp.instance_id, n=inp.n, cron=inp.cron,
                     scan_face=inp.scan_face, repo_root=inp.repo_root,
                     decl_path=inp.decl_path,
-                    project_key=inp.project_key, poll_seconds=inp.poll_seconds,
+                    project_key=inp.project_key,
+                    instance_project_key=inp.instance_project_key,
+                    poll_seconds=inp.poll_seconds,
                     baseline=self._baseline,
                     cron_anchor=anchor.isoformat(timespec="seconds"),
                     triggered_total=self._triggered_total))

@@ -384,6 +384,60 @@ spawn、console 插件的 cwd 指向引擎自身，标识「被调用的引擎�
 `t02_client_receipt.py`（client 接线桩测）。
 
 
+## 12. 巡检分项目归属（t260915-20）：声明带项目身份 + 起票盖 ProjectKey SA + repo_root 按项目解析
+
+巡检此前是**引擎级**的：声明实例无项目字段、起票不盖章 ProjectKey SA、repo_root
+缺省空=扫在 worker 自己的仓（引擎仓）——多项目即断（dengzhufpv 零巡检覆盖）。
+本票把「归属」建成巡检的一等身份，全部走声明面：
+
+### 12.1 机制（四个面）
+
+- **声明面**：`inspection.yaml` 实例必填 `project_key`（实例级项目身份=项目注册表
+  key；enabled 与否都不豁免——无身份的占位实例=无主票预定席）。与
+  `schedule.project_key`（every-n-tickets/race-first 的**计数源**键）是两个字段：
+  实例级=归属、schedule 级=计数取数面，绝不互串。解析单点=inspection_decl.py，
+  校验在实例字段链最后（既有负腿事由照旧先爆）；缺身份/形状畸形 → fail-closed
+  点名实例 id，绝不静默回落引擎仓。
+- **起票面（SA 盖章三路）**：手动 `trigger`、cron 调度（`schedule-up` 的 create 与
+  update 两分支）、计数 watcher 开票 activity——三路起票一律
+  `payload.project_key=实例身份` + `typed_search_attributes(ProjectKey=实例身份)`。
+  工单板项目过滤（`AND ProjectKey=`）与巡检行 `project` 字段由此天然成立。
+  cron 调度的 action 由 `_schedule_action` **单点 builder** 铸造，create/update
+  共用——update 分支同样重铸 action（修复前重跑 schedule-up 刷不了已建调度的
+  payload/SA，t260913-02 只修 create 侧的同族坑）。
+- **扫描面（repo_root 解析链）**：`--repo-root` 显式旁路优先（隔离台/运维用）；
+  否则按实例身份经 `shared.resolve_project_root` 解析注册条目主目录（契约
+  「项目根=dirs[0]」，与 resolve_epics_dir 同注册表同取法，但**无空 key 回落腿**）。
+  扫描与套件从此跑在归属项目的仓里。
+- **workflow 面（无主守卫）**：新 patch 门 `PROJECT_PATCH_ID`——项目身份与
+  repo_root **双空**的新票 → blocked 终态点名「无项目身份」+处置入口（重跑
+  schedule-up），杀旁路起票的静默残窗；sign 闸 target=本票 SA ProjectKey（回退
+  payload project_key，双空=老 history 恒放行），异项目 caller 签字即结构化拒收。
+
+### 12.2 迁移四步（运维口径）
+
+1. **cron 调度（现役三实例）**：部署本版后，对三实例各重跑
+   `inspection_trigger.py schedule-up --instance <id> --note <谁/为何/频率>` →
+   update 分支重铸 action（新 payload+SA）→ 自检
+   `inspection_trigger.py describe --instance <id>`（回执 `schedule_action` 摘要带
+   project_key/repo_root/sa_project_key）。**修复前的版本重跑无效**（update 不碰
+   action）——先部署再重跑。
+2. **在途票**：部署时刻在途的票 `patched()=False` 走旧路径跑完，守卫不追杀（重放安全）。
+3. **历史闭环票**：行 project 恒空（SA 是起点真源，不造历史）——UI 侧按「未归属」显示。
+4. **跨部署存量旧 watcher**：现役生产零计数实例（声明计数形态全是注释示例）无存量
+   负担；若旧 watcher 跨部署存活并开票 → 票撞无主守卫=blocked（可见），处置=
+   terminate 旧 watcher（id=`inspection-watcher-<id>` 确定单点）+ schedule-up 复活。
+
+### 12.3 验证面
+
+- 单测：`server/engine/tests/test_t260915_20_inspection_project.py`（声明必填/形状/
+  事由次序、resolve_project_root 三态、resolve_repo_root 三腿、builder payload+SA、
+  watcher 串键回归钉、守卫两腿、sign target 链）。
+- 集成：`t260915-20-decl-project-identity`（离线声明门）+
+  `t260915-20-project-identity-realchain`（docker 台：双项目各起一期票断言 SA/
+  行/payload/扫对仓路径、update 重铸腿、未知项目键负腿、无主守卫腿）。
+
+
 ## 退役账（t260907-04 命名清理①：7 条过渡兼容，撤任何一条前先对表）
 
 t260907-04 把 SANDBAR_* env、suyou-poc 队列、.suyou/ 协调目录改成 sandbar 名。以下 7 条  # naming-compat

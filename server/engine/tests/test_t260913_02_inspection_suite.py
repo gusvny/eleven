@@ -153,6 +153,7 @@ def _decl_text(suite_line: str = "    suite: full\n") -> str:
             "instances:\n"
             "  - id: integration-tests\n"
             "    enabled: true\n"
+            "    project_key: sandbar\n"
             + suite_line +
             "    schedule:\n"
             "      kind: cron\n"
@@ -161,6 +162,7 @@ def _decl_text(suite_line: str = "    suite: full\n") -> str:
             "    template: inspection-lite\n"
             "  - id: docs-sync\n"
             "    enabled: true\n"
+            "    project_key: sandbar\n"
             "    scan_face: doc\n"
             "    schedule:\n"
             "      kind: cron\n"
@@ -169,6 +171,7 @@ def _decl_text(suite_line: str = "    suite: full\n") -> str:
             "    template: inspection-lite\n"
             "  - id: simplify-face\n"
             "    enabled: false\n"
+            "    project_key: sandbar\n"
             "    schedule:\n"
             "      kind: cron\n"
             "      cron: 0 8 * * 1\n"
@@ -477,8 +480,9 @@ def test_input_shape_has_no_suite_switch_field():
     实测 temporalio dataclass 解码忽略未知键）。"""
     import dataclasses
     fields = {f.name for f in dataclasses.fields(flow.InspectionPeriodicInput)}
+    # t260915-20 补键期望：project_key（实例级项目身份）进 payload——开关红线不变
     assert fields == {"instance_id", "face", "period", "repo_root", "scenarios_path",
-                      "decl_path"}
+                      "decl_path", "project_key"}
     assert not {"suite", "run_suite"} & fields      # 开关不在 payload（红线：不进 payload）
     inp = flow.InspectionPeriodicInput(instance_id="i")
     assert inp.face == "test" and inp.period == "" and inp.decl_path == ""
@@ -527,13 +531,18 @@ def test_abs_decl_path_normalization():
 
 
 def test_trigger_paths_propagate_declaration_fields():
-    """声明面必须一路透传：schedule-up 建 cron Schedule 时带 face/repo_root（t260913-02
-    顺手修的原缺陷），且 CLI 提供 deadman / sweep-lanes 两个运维子命令。"""
+    """声明面必须一路透传：schedule-up 铸 cron 调度 action 时带 face/repo_root
+    （t260913-02 顺手修的原缺陷；t260915-20 起铸点收拢进 _schedule_action 单点
+    builder——create/update 两分支同源重铸，透传语义钉在 builder 源面上），
+    且 CLI 提供 deadman / sweep-lanes 两个运维子命令。"""
     import inspect as _inspect
     import inspection_trigger as trig
-    src = _inspect.getsource(trig.cmd_schedule_up)
-    assert "face=str(spec.get(\"scan_face\") or \"test\")" in src
-    assert "repo_root=str(args.repo_root or \"\")" in src
+    src_builder = _inspect.getsource(trig._schedule_action)
+    assert "face=str(spec.get(\"scan_face\") or \"test\")" in src_builder
+    assert "repo_root=resolve_repo_root(spec, explicit_repo_root)" in src_builder
+    # update 分支同样重铸 action（t260915-20 R1：只改 spec/policy 刷不了 payload/SA）
+    src_up = _inspect.getsource(trig.cmd_schedule_up)
+    assert "_schedule_action(spec, TASK_QUEUE, args.repo_root)" in src_up
     for fn in ("cmd_deadman", "cmd_sweep_lanes"):
         assert hasattr(trig, fn)
     assert "deadman" in _inspect.getsource(trig.main)

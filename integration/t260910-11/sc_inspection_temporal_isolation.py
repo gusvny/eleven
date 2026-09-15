@@ -59,6 +59,7 @@ FIXTURE_DECL = """schema: v1
 instances:
   - id: integration-tests-%05d
     enabled: true
+    project_key: sandbar
     schedule:
       kind: cron
       cron: 0 6 * * 1

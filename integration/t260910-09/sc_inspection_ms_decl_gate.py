@@ -39,6 +39,7 @@ FIXTURE_DECL = """schema: v1
 instances:
   - id: test-face
     enabled: true
+    project_key: sandbar
     schedule:
       kind: cron
       cron: 0 6 * * 1
@@ -46,6 +47,7 @@ instances:
     template: inspection-lite
   - id: mechanism-face
     enabled: true
+    project_key: sandbar
     schedule:
       kind: cron
       cron: 0 7 * * 1
@@ -53,6 +55,7 @@ instances:
     template: inspection-lite
   - id: simplify-face
     enabled: false
+    project_key: sandbar
     schedule:
       kind: cron
       cron: 0 8 * * 1

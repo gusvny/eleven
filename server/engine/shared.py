@@ -136,6 +136,25 @@ EPICS_DIR = pathlib.Path(os.environ.get("SANDBAR_EPICS_DIR") or (REPO_ROOT / "no
 EPIC_CODE_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
 
 
+def resolve_project_root(project_key):
+    """项目主目录解析单点（t260915-20：巡检 repo_root 按项目归属解析，不再缺省引擎仓）。
+
+    契约锚=项目接入契约 v1「项目根 = 注册条目 dirs[0]（主目录）」；与
+    resolve_epics_dir 同一注册表、同一取法，但**更严**：无空 key 回落腿——
+      - 空/未给 key → ValueError（巡检票没有项目身份=无主票，绝不静默扫引擎仓——
+        那是 t260915-20 要杀的静默用错仓）；
+      - 未知 key / 隔离条目 → lookup_project 的人话错误原样透传（带注册表根语境与
+        在册 key 清单）。
+    注册表根读法同 lookup_project（env SANDBAR_PROJECTS_DIR 每次现读，隔离台可注入）。
+    """
+    key = str(project_key or "").strip()
+    if not key:
+        raise ValueError("项目身份为空：repo_root 按项目解析需要非空 project_key"
+                         "（无项目身份的巡检=无主票，绝不静默回落引擎仓）")
+    proj = lookup_project(key)
+    return pathlib.Path(str(proj["dirs"][0]))
+
+
 def resolve_epics_dir(project_key):
     """The single resolution point for the epic document directory (ticket t260907-07:
     the CLI validation anchor = the project registry entry's home directory, same
@@ -146,9 +165,10 @@ def resolve_epics_dir(project_key):
     precedent):
       1. env SANDBAR_EPICS_DIR non-empty → use it as read (self-test semantics
          unchanged);
-      2. otherwise lookup_project(project_key)['dirs'][0] / notes/epics (an unknown
+      2. otherwise resolve_project_root(project_key) / notes/epics (an unknown
          key / an isolated entry is a fail-closed ValueError, never a silent retreat to
-         the engine repo);
+         the engine repo; the resolver is shared with t260915-20's inspection
+         repo_root — one registry, one dirs[0] rule);
       3. empty/None project_key → fall back to REPO_ROOT/notes/epics (the engine
          anchor; unreachable in production, kept only for fixture / in-flight ticket
          compatibility — not a semantic promise).
@@ -159,8 +179,7 @@ def resolve_epics_dir(project_key):
     key = str(project_key or "").strip()
     if not key:
         return EPICS_DIR
-    proj = lookup_project(key)
-    return pathlib.Path(str(proj["dirs"][0])) / "notes" / "epics"
+    return resolve_project_root(key) / "notes" / "epics"
 
 
 def validate_epic_code(code: str, epics_dir=None) -> str:

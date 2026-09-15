@@ -11,6 +11,12 @@
 #   schema    声明格式版本（现只认 v1）
 #   instances 巡检实例表（每实例=一个扫描面的调度位；每期一票按实例独立开票）
 #   id        实例标识（小写 slug，作票号组成段；票号形如 inspection-<id>-<期号>）
+#   project_key 实例级项目身份（t260915-20 新增，所有实例必填——enabled 与否都不豁免）：
+#             本实例巡检票归属哪个项目（=项目注册表 key）。起票时盖章 ProjectKey 搜索
+#             属性（工单板项目过滤/行 project 的真源），repo_root 缺省也按它解析注册
+#             条目主目录（dirs[0]）。与 schedule.project_key（计数取数面）是两个字段：
+#             实例级=归属、schedule 级=计数，绝不互串。改归属后重跑 schedule-up 即生效
+#             （update 分支重铸 action——t260915-20 修复后 payload/SA 两分支同源刷新）。
 #   enabled   是否启用（false=占位不调度不触发——声明驱动开关，行为级验收点）
 #   schedule  定时法声明：kind=cron（五字段 cron）| every-n-tickets（每并 N 张票触发）|
 #             race-first（cron 与计数先到者——t260911-02 全接线）。计数 kind 必带：
@@ -33,6 +39,7 @@ schema: v1
 instances:
   - id: integration-tests
     enabled: true
+    project_key: sandbar
     # 260913-02 宿主令「每日调度接真」：每周一 09:00 → 每天 07:30（结果当天上班即读，
     # 与 docs-sync 的周一 10:00 不撞）。改本行即改 cadence，再跑
     #   inspection_trigger.py schedule-up --instance integration-tests --note <谁/为何/频率>
@@ -46,6 +53,7 @@ instances:
     template: inspection-lite
   - id: docs-sync
     enabled: true
+    project_key: sandbar
     scan_face: doc
     tz: Asia/Shanghai
     schedule:
@@ -58,6 +66,7 @@ instances:
   # ---- inspection_trigger.py schedule-up），启用即按 cron 每周自动开票。
   - id: mechanism-face
     enabled: false
+    project_key: sandbar
     schedule:
       kind: cron
       cron: 0 7 * * 1
@@ -67,6 +76,7 @@ instances:
   # 注意：scan_face 缺省会落 test 面（票①行为）——本实例必须显式指 simplify。
   - id: simplify-face
     enabled: true
+    project_key: sandbar
     scan_face: simplify
     schedule:
       kind: cron
@@ -79,6 +89,10 @@ instances:
   # ---- 启用按宿主节奏，先手动 trigger 验产出质量，过了再 schedule-up。
   - id: stage-capacity
     enabled: false
+    # t260915-20 合并消解：18 带进的实例按本票口径补实例级项目身份（占位不豁免——
+    # 无身份的占位实例=无主票预定席）；stage 面扫的是引擎测试台（stage_docker
+    # inventory 只读清点），归属 sandbar 与其余实例同口径。
+    project_key: sandbar
     scan_face: stage
     tz: Asia/Shanghai
     schedule:

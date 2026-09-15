@@ -54,6 +54,7 @@ DECL = """schema: v1
 instances:
   - id: %s
     enabled: true
+    project_key: sandbar
     schedule:
       kind: cron
       cron: 30 7 * * *
