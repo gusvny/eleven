@@ -91,7 +91,9 @@ for (const [p, name] of backendFiles) {
   ok(!art.includes('wb-d2-spec') && !art.includes('执行规格'), `${name}: 无 spec 卡渲染逻辑泄漏（前端可见面只在 client bundle）`)
 }
 const nodeTs = readFileSync(NODE_TS, 'utf8')
-ok(!/spec/i.test(nodeTs), 'node.ts: 无任何 spec 相关新路由/分支（/spec/i 零命中）')
+// t260915-08 收窄为词边界：守卫意图=「无执行规格（spec）路由/分支」；裸子串 /spec/i
+// 会被 in·spec·tion（巡检，t260915-08 起大量出现在 node.ts）误伤——spec 卡守卫照旧。
+ok(!/\bspec\b/i.test(nodeTs), 'node.ts: 无任何 spec 相关新路由/分支（词边界零命中）')
 ok(nodeTs.includes('/sandbar-workbench/api/wf/tickets/<id>') || /wf\/tickets\/\$/.test(nodeTs),
   'node.ts: 详情仍走既有 GET /wf/tickets/<id>（整包透传，无旁路）')
 

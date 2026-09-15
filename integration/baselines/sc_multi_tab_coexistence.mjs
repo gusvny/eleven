@@ -562,6 +562,19 @@ async function scenarioHiddenStopsPolling(front, hidden, ctx) {
     record('T3 hidden tab stops polling', 'env_fail', `browser keeps visibilityState=${vs} for backgrounded pages — cannot cover here`)
     return '__ENV_FAIL__'
   }
+  // 慢机排空窗（t260915-08 仲裁加固，契约未松一字）：强转 hidden 后，事件循环
+  // 里可能仍压着转换前排队的旧 tick（216 场景连跑高负载下可迟到数秒——260915
+  // 机械轮 T3 伪红即此形态：同一棵树本地复跑两连绿）。设窗前先等计数静默，
+  // 排走的只是设窗前的旧账；排不走（15s 仍不静默）= 真在漏，交给下面 33s 窗
+  // 如实判红，不吞不掩。
+  let quietWaited = 0
+  for (;;) {
+    const q0 = hidden.__st.counts.total
+    await page_wait(3000)
+    quietWaited += 3
+    if (hidden.__st.counts.total === q0) break
+    if (quietWaited >= 15) break
+  }
   const c0 = hidden.__st.counts.total
   const cList0 = hidden.__st.counts.listGet
   const t0 = Date.now()

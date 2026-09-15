@@ -109,6 +109,11 @@ import {
   STATE4_LABEL, firstSentenceOf, snapshotDigest, type SnapshotDigest,
   pauseOpOf, type TicketState4,
 } from './ticket-list-model.ts'
+// t260915-08 巡检板面：纯函数层住 host（拓扑=宿主声明面；client 只消费不内置词表）。
+import {
+  INSPECTION_TOPOLOGY, isInspectionRow, inspectionProgressOf,
+  inspectionStageShort, inspectionSummaryOf,
+} from '../host/inspection-face.ts'
 // t260901-15 多页签共存：在看心跳/写事件广播（tab-presence）+ 不可见页签暂停轮询门。
 import { startTabPresence } from './tab-presence.ts'
 import { buildStatusCard } from '../host/status-card.ts'
@@ -173,9 +178,17 @@ const CSS = `${DERIVE_TOKENS_CSS}
   cursor:pointer;font-size:13px;flex-wrap:wrap;box-shadow:0 1px 2px rgba(31,35,40,.05)}
 /* hover 不再改写底色（会盖掉 waiting/blocked 状态行底）——改阴影提层，主题安全 */
 .wb-card:hover{box-shadow:0 1px 4px rgba(31,35,40,.14)}
-/* 状态行底=主题令牌派生（t260905-08 根因修复：原行内写死浅色×主题字色=深色不可读） */
-.wb-card[data-state=waiting]{background:var(--dsw-derive-warn-bg,#fff8c5)}
-.wb-card[data-state=blocked]{background:var(--dsw-derive-danger-bg,#ffebe9)}
+/* 状态行底=主题令牌派生（t260905-08 根因修复：原行内写死浅色×主题字色=深色不可读）。
+ * t260915-08 实证补②：板面卡实际渲染在 .wb-sb-right 内，sidebar 后注入样式表的
+ * .wb-sb .wb-card {background:transparent} 规则（同特异性 0,2,0、后序胜）会把状态底色
+ * 整体压平（先于本票就存在的看板级 bug，dev-lane 等待行同样瞎）——状态行特有规则
+ * 一律提特异性到 .wb-root .wb-card[data-state=…]（0,3,0，顺序无关压制 blanket 规则；
+ * active 行让位 sidebar 的选中底色，设计如此）。
+ * t260915-08 仲裁修复（hex-clean 看守打回项）：老浏览器 color-mix IACVT 的静态回退
+ * 色收编进 theme.ts 令牌声明位（@supports not 分档覆盖令牌值），本消费位只经 var()
+ * fallback 供出（allowlist C 合法位），零裸 hex。 */
+.wb-root .wb-card[data-state=waiting]{background:var(--dsw-derive-warn-bg,#fff8c5)}
+.wb-root .wb-card[data-state=blocked]{background:var(--dsw-derive-danger-bg,#ffebe9)}
 .wb-card[data-active=true]{border-color:var(--dsw-derive-accent,#0969da);box-shadow:inset 0 0 0 1px var(--dsw-derive-accent,#0969da)}
 .wb-card[data-state=done]{color:var(--dsw-derive-muted,#57606a)}
 .wb-card-l1{display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 320px}
@@ -806,6 +819,9 @@ if (typeof document !== 'undefined'
 /* -------------------------------------------------------------- 数据通道 */
 
 const API = '/sandbar-workbench/api/wf'
+/** 巡检板面端点（t260915-08）：全路径字面量单点（S0 bundle 锚点可整串命中；
+ *  与 node.ts 注册路径逐字同源，防 KI-042 漂移）。 */
+const INSPECTION_TICKETS_URL = '/sandbar-workbench/api/wf/inspection/tickets'
 
 interface CallResult {
   ok: boolean
@@ -875,6 +891,16 @@ interface TicketRow {
   agent_alive?: boolean
   exec_status?: string
   blocked_reason?: string
+  /** 巡检票字段（t260915-08 引擎行透传；非巡检票缺省不出现）。 */
+  kind?: string
+  instance_id?: string
+  period?: string
+  findings?: { high?: number; med?: number; low?: number; total?: number }
+  heartbeat?: boolean
+  report_path?: string
+  awaiting_gate?: boolean
+  human_gate?: { who?: string; decision?: string; note?: string } | null
+  gate_error?: string
 }
 
 /** 内容预览（book API 返回；审批前过目用）。 */
@@ -937,6 +963,13 @@ interface Wf {
    *  template_topology topology-v1 契约原样透传）。null/缺省=未声明模板，
    *  泳道图回落线性步骤条。 */
   topology?: unknown
+}
+
+/** 巡检拓扑的 Wf 形态适配（t260915-08）：行卡迷你站道数据源，stages=宿主声明面
+ *  （host/inspection-face.ts 单点；client 不内置阶段词表）。 */
+const INSPECTION_WF: Wf = {
+  id: 'inspection-lite', name: '巡检', lane: 'inspection',
+  stages: INSPECTION_TOPOLOGY as unknown as WfStage[],
 }
 
 interface CheckItem {
@@ -1024,6 +1057,21 @@ interface TicketDetail {
     /** KI-048（t260911-05）：引擎 dev_lane 落的结构化受阻面（人话状态卡数据源）。 */
     blocked_detail?: { reason_code?: string; files?: string[]; next_action?: string } | null
   } | null
+  /** 巡检票字段（t260915-08 ticket-query 巡检分支透传；非巡检票缺省不出现）。
+   *  待签判定消费 stage_state（引擎 R4：human_gate 签字前常态缺键）。 */
+  kind?: string
+  instance_id?: string
+  period?: string
+  template?: string
+  gate_id?: string
+  report_path?: string
+  heartbeat?: boolean
+  summary?: Record<string, unknown>
+  findings?: { severity?: unknown; scan?: unknown; subject?: unknown; evidence?: unknown }[]
+  suggested_fix_tickets?: unknown[]
+  red_line?: string
+  human_gate?: { who?: string; gate?: string; decision?: string; note?: string } | null
+  gate_error?: string
 }
 
 /** Temporal pending activity 心跳（agent_activities.py 每 5s 上报 {stage,gen,polls,session_kb}）。 */
@@ -1967,9 +2015,148 @@ function D2Stages({ detail, wf, usage, durs, nowMs }: {
 
 /** 按 v0.3 §10 矩阵计算可用操作（accept 内嵌在验收清单逐项打勾，不进操作区）。
  *  行式台面（TicketRow）与详情抽屉（TicketDetail）共用：两者都带 status/stage_state/stage。 */
+/* ── t260915-08 巡检票详情面（方案 R6/R7）：既有面板分组风格 + ticket-query 巡检
+   meta 直读（时间线/发现摘要/报告路径/人门「签什么」）。待签判定只读 stage_state
+   （R4：human_gate 签字前常态缺键）；签字走 doSign→sign 通道带 gate_id（零旁路）。 */
+const INSPECTION_FACE_CSS = `
+.wb-insp{display:flex;flex-direction:column;gap:8px;margin:4px 0}
+.wb-insp-head{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:8px 10px;
+  border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px}
+.wb-insp-k{color:var(--dsw-derive-muted,#57606a);font-size:12px}
+.wb-insp-v{font-weight:600;font-size:13px}
+.wb-insp-sev i{font-style:normal;display:inline-block;margin-left:6px;padding:1px 6px;border-radius:9px;font-size:11px}
+.wb-insp-sev i[data-sev=high]{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e)}
+.wb-insp-sev i[data-sev=med]{background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
+.wb-insp-sev i[data-sev=low]{background:var(--dsw-derive-neutral-bg,#f6f8fa);color:var(--dsw-derive-muted,#57606a)}
+.wb-insp-gate{border:1px solid var(--dsw-derive-accent-border,#54aeff);border-radius:8px;padding:8px 10px;
+  background:var(--dsw-derive-accent-bg,#ddf4ff)}
+.wb-insp-gate .ttl{font-weight:600;font-size:13px;margin-bottom:4px}
+.wb-insp-gate-txt{font-size:12px;color:var(--dsw-derive-fg,#1f2328)}
+.wb-insp-gateerr{margin-top:4px;font-size:12px;color:var(--dsw-derive-warn-deep,#7d4e00)}
+.wb-insp-signed{margin-top:6px;font-size:12px;color:var(--dsw-derive-success,#1a7f37)}
+.wb-insp-signrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+.wb-insp-note{flex:1;min-width:160px;padding:5px 8px;border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;font-size:12px}
+.wb-insp-block{border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;padding:6px 10px}
+.wb-insp-block summary{cursor:pointer;font-size:12px;font-weight:600}
+.wb-insp-tl{display:flex;gap:10px;align-items:baseline;padding:3px 0;font-size:12px;border-bottom:1px dashed var(--dsw-derive-border,#eaeef2)}
+.wb-insp-tl code{font-size:11px;color:var(--dsw-derive-muted,#57606a)}
+.wb-insp-f{display:flex;gap:8px;align-items:baseline;padding:4px 0;font-size:12px;border-bottom:1px dashed var(--dsw-derive-border,#eaeef2)}
+.wb-insp-sev-tag{flex:none;display:inline-block;min-width:34px;text-align:center;padding:1px 6px;border-radius:9px;font-size:11px}
+.wb-insp-sev-tag[data-sev=high]{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e)}
+.wb-insp-sev-tag[data-sev=med]{background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
+.wb-insp-sev-tag[data-sev=low]{background:var(--dsw-derive-neutral-bg,#f6f8fa);color:var(--dsw-derive-muted,#57606a)}
+.wb-insp-rep{font-size:12px;padding:2px 0}
+.wb-insp-note-banner{background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-border,#d4a72c);
+  color:var(--dsw-derive-warn-deep,#7d4e00);border-radius:6px;padding:5px 10px;font-size:12px;margin-bottom:6px}
+`
+
+function InspectionDetailFace({ detail, operator, opBusy, onSign }: {
+  detail: TicketDetail
+  operator: string
+  opBusy: boolean
+  onSign: (decision: 'approve' | 'reject', note: string) => void
+}) {
+  const [note, setNote] = useState('')
+  const findings = Array.isArray(detail.findings) ? detail.findings : []
+  const timeline = Array.isArray(detail.timeline) ? detail.timeline : []
+  // 详情面发现数：face.summary 字典优先、findings 清单重计兜底（行/详情数据形状
+  // 不同——行是计数字典，详情是清单+summary；t260915-08 实证：清单直喂
+  // findingsCountOf 会得全 0 假零发现）。
+  const c = inspectionSummaryOf(detail)
+  const awaiting = detail.stage_state === 'awaiting-human'
+  const signed = detail.human_gate ?? null
+  return (
+    <div className="wb-insp" data-kind="inspection">
+      <style>{INSPECTION_FACE_CSS}</style>
+      <div className="wb-insp-head" data-testid="inspection-face">
+        <span className="wb-insp-k">巡检</span>
+        <span className="wb-insp-v">{detail.instance_id || '—'}</span>
+        <span className="wb-insp-k">期号</span>
+        <span className="wb-insp-v">{detail.period || '—'}</span>
+        <span className="wb-insp-k">心跳</span>
+        <span className="wb-insp-v" data-heartbeat={detail.heartbeat ? '1' : '0'}>
+          {detail.heartbeat ? '全绿证明期' : '非心跳期'}
+        </span>
+        <span className="wb-insp-sev" data-testid="inspection-findings">
+          <i data-sev="high">高 {c.high}</i>
+          <i data-sev="med">中 {c.med}</i>
+          <i data-sev="low">低 {c.low}</i>
+        </span>
+      </div>
+      {/* 人门「签什么」+ 签字区——行卡「去签字→」的 review 锚点落点（R6） */}
+      <div className="wb-insp-gate" data-wb-anchor="review" data-testid="inspection-gate">
+        <div className="ttl">人审门（{detail.gate_id || 'inspection-close'}）——签什么</div>
+        <div className="wb-insp-gate-txt">
+          approve=收口（发现转 dev-lane 修复票跟踪）；reject=毙单收口（本期作废留痕）。
+          红线：{detail.red_line || '—'}
+        </div>
+        {detail.gate_error && <div className="wb-insp-gateerr">⚠ 拒收记录：{detail.gate_error}</div>}
+        {signed ? (
+          <div className="wb-insp-signed" data-testid="inspection-signed">
+            已签：{signed.decision}（{signed.who}）{signed.note ? ` · ${signed.note}` : ''}
+          </div>
+        ) : awaiting ? (
+          <div className="wb-insp-signrow">
+            <input className="wb-insp-note" value={note} onChange={e => setNote(e.target.value)}
+              placeholder="签字备注（可空）" data-testid="inspection-sign-note" />
+            <button className="wb-btn wb-btn-green" disabled={opBusy}
+              data-testid="inspection-sign-approve"
+              onClick={() => onSign('approve', note)}>✓ approve 收口</button>
+            <button className="wb-btn wb-btn-danger" disabled={opBusy}
+              data-testid="inspection-sign-reject"
+              onClick={() => onSign('reject', note)}>✗ reject 毙单</button>
+            <span className="wb-sub">签字人：{operator}</span>
+          </div>
+        ) : (
+          <div className="wb-sub">当前不在人审门（阶段：{detail.stage ?? '—'} · {detail.stage_state}）</div>
+        )}
+      </div>
+      <details className="wb-insp-block" open data-testid="inspection-timeline">
+        <summary>阶段时间线（{timeline.length} 条）</summary>
+        <div>
+          {timeline.length === 0 && <div className="wb-sub">暂无时间线条目</div>}
+          {timeline.map((e, i) => (
+            <div className="wb-insp-tl" key={i} data-state={String(e?.state ?? '')}>
+              <code>{String(e?.at ?? '—')}</code>
+              <b>{inspectionStageShort(e?.stage) || String(e?.stage ?? '—')}</b>
+              <span>{String(e?.state ?? '')}</span>
+              <span className="wb-sub">{String(e?.reason ?? '')}</span>
+            </div>
+          ))}
+        </div>
+      </details>
+      <details className="wb-insp-block" open data-testid="inspection-findings-list">
+        <summary>发现清单（{findings.length} 条）</summary>
+        <div>
+          {findings.length === 0 && <div className="wb-sub">零发现（心跳证明期）</div>}
+          {findings.map((f, i) => (
+            <div className="wb-insp-f" key={i}>
+              <span className="wb-insp-sev-tag" data-sev={String(f?.severity ?? '')}>{String(f?.severity ?? '?')}</span>
+              <code>{String(f?.scan ?? '')}</code>
+              <span>{String(f?.subject ?? '')}</span>
+              {f?.evidence ? <span className="wb-sub">{String(f.evidence)}</span> : null}
+            </div>
+          ))}
+        </div>
+      </details>
+      <div className="wb-insp-block">
+        {(detail.report_path ?? '') !== '' && (
+          <div className="wb-insp-rep">报告：<code>{detail.report_path}</code></div>
+        )}
+        {(detail.suggested_fix_tickets?.length ?? 0) > 0 && (
+          <div className="wb-sub">建议修复票 {detail.suggested_fix_tickets!.length} 张（dev-lane，引用本票号溯源）</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function availableOps(t: { status: string; stage_state: string; stage: string | null; engine?: string; paused?: boolean }, wf?: Wf): string[] {
   const s = t.status
   const ss = t.stage_state
+  // t260915-08（坑B）：巡检行零管理操作——没有 advance/rework/pause/retry_qc 信号，
+  // 行卡不得给出会打错信号的操作键；签字唯一住详情巡检面（sign 通道）。
+  if (t.engine === 'inspection') return []
   // M11 v2（模版即代码）：自动推进——无 dispatch-next/逐项 accept；人门=签字（advance 钮），
   // blocked=retry_qc 重跑（unblock 钮），任何进行态可 rework 打回；closed 无操作。
   if (t.engine === 'template-as-code-v2') {
@@ -2904,6 +3091,10 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   const [showDone, setShowDone] = useState(false)
   /** 进展行 enrichment（host /tickets/progress 只读）：仅当前可见页逐票拉取（R5 负载预算）。 */
   const [progressMap, setProgressMap] = useState<Record<string, { state: string; text: string }>>({})
+  // t260915-08 巡检板面：最近一次成功的巡检行快照（拉取失败=保留上次成功快照，
+  // 与主列表「保持上次成功快照」同口径）+ 显式降级 note（非空时台面顶部提示）。
+  const inspectionRowsRef = useRef<TicketRow[]>([])
+  const [inspectionNote, setInspectionNote] = useState('')
   // 无标题票首句映射（t260905-07）：enrichment 通道 title_or_first 的行级缓存。
   const [titleFirstMap, setTitleFirstMap] = useState<Record<string, string>>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -2987,9 +3178,23 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   async function reloadTickets(): Promise<PollOutcome> {
     listInFlight.current = true
     try {
-      const data = await apiGet(`${API}/tickets`)
+      // t260915-08：巡检板面并行拉取（引擎级端点，行合流进同一 tickets 数组——
+      // 巡检票无 ProjectKey SA，项目过滤天然不含它们）。失败=保留上次成功快照 +
+      // 显式降级 note，绝不静默清空；也不把主列表拖成 retryable（主面照常轮询）。
+      const [data, insp] = await Promise.all([
+        apiGet(`${API}/tickets`),
+        apiGet(INSPECTION_TICKETS_URL).catch(() => undefined),
+      ])
       if (data?.ok !== true) throw new Error(data?.error ?? '台面加载失败')
-      setTickets((data.result?.tickets ?? []) as TicketRow[])
+      const baseRows = (data.result?.tickets ?? []) as TicketRow[]
+      if (insp?.ok === true) {
+        inspectionRowsRef.current = (insp.result?.tickets ?? []) as TicketRow[]
+        const f = insp.result?.inspection_filter
+        setInspectionNote(f?.degraded ? String(f.note ?? '巡检板面降级') : '')
+      } else {
+        setInspectionNote('巡检板面拉取失败，显示上次快照（自动重试中）')
+      }
+      setTickets([...baseRows, ...inspectionRowsRef.current])
       setWorkflows((data.workflows ?? []) as Wf[])
       return 'ok'
     } catch (err) {
@@ -3227,8 +3432,10 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     void doOp(id, 'advance', {}, '已推进到下一阶段')
   }
 
-  function doSign(id: string, decision: string, note: string): void {
-    void doOp(id, 'sign', { decision, note, who: operator },
+  function doSign(id: string, decision: string, note: string, gate?: string): void {
+    // t260915-08：gate 可选透传——dev-lane 调用方不传（host 按当前门兜底，零变化）；
+    // 巡检详情面带 detail.gate_id（引擎单点下发），workflow intake 按它放行。
+    void doOp(id, 'sign', gate ? { decision, note, who: operator, gate } : { decision, note, who: operator },
       decision === 'approve' ? '已审批通过并推进' : '已打回（sign reject）')
   }
 
@@ -3594,19 +3801,29 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
         <span className="wb-sub">{openList.length + doneList.length}/{tickets?.length ?? 0} 张</span>
       </div>
 
+      {/* t260915-08 巡检板面降级提示：拉取失败/声明降级=显式横幅（不静默清空） */}
+      {inspectionNote !== '' && (
+        <div className="wb-insp-note-banner" data-testid="inspection-degraded">{inspectionNote}</div>
+      )}
+
       {/* 平铺行卡列表（t260904-17，mock ⑥）：状态配色不分组、epic 彩条、迷你站道、衍生动作位 */}
       {paged.map(t => {
         const ops = availableOps(t, wfById[t.workflow]) as CardOp[]
+        // t260915-08：巡检行——拓扑走宿主声明面、进展行本地纯函数合成（enrich 通道
+        // 只覆盖项目票）；点行开详情，「去签字/看原因」都落进展页签（巡检面住那里）。
+        const insp = isInspectionRow(t)
         return (
-          <TicketRowCard key={t.id} t={{ ...t, title_or_first: t.title_or_first ?? titleFirstMap[t.id] }} wf={wfById[t.workflow]}
-            progress={progressMap[t.id]}
+          <TicketRowCard key={t.id} t={{ ...t, title_or_first: t.title_or_first ?? titleFirstMap[t.id] }}
+            wf={insp ? INSPECTION_WF : wfById[t.workflow]}
+            progress={insp ? inspectionProgressOf(t) : progressMap[t.id]}
             active={t.id === selectedId} busy={opBusy} ops={ops}
             peerViewers={peerViewersByTicket.get(t.id)}
             onOpen={(anchor) => {
               // 衍生动作位=纯导航（R3）：去签字→详情「变更」页签（审批必看 diff 区，本票落点）；
               // 看原因→详情「进展」页签（问题区/阻塞原因）。零写操作。
-              if (anchor === 'review') setDrawerTab('changes')
-              if (anchor === 'blocked' || anchor === undefined) setDrawerTab('detail')
+              // 巡检行（t260915-08）：无变更页签，review/blocked 一律落「进展」（巡检面）。
+              if (anchor === 'review' && !insp) setDrawerTab('changes')
+              if (anchor === 'blocked' || anchor === undefined || insp) setDrawerTab('detail')
               void openDetail(t.id)
             }}
             onAdvance={() => { doAdvance(t.id, t.stage_state, t.epic) }}
@@ -3767,14 +3984,22 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                   <div className="txt">{detail.spec}</div>
                 </div>
               )}
-              <D2Reworks detail={detail} wf={selWf} />
+              {/* t260915-08 巡检票：详情面直接进巡检面（时间线/发现/人门签字，R6）——
+                  dev-lane 专属面板（步骤条/泳道图/变更页签/检查明细）对巡检票零渲染。
+                  合并注（t260915-05 详情 v2 重设计后仍成立）：巡检票无 dev-lane
+                  topology/gate_runs，泳道图与检查明细区同属 dev-lane 面，一并守卫。 */}
+              {detail.kind === 'inspection' && (
+                <InspectionDetailFace detail={detail} operator={operator} opBusy={opBusy}
+                  onSign={(decision, note) => doSign(detail.id, decision, note, detail.gate_id)} />
+              )}
+              {detail.kind !== 'inspection' && <D2Reworks detail={detail} wf={selWf} />}
               {/* t260915-05：拓扑在场=真泳道图（并行虚线框/人门虚线圈/轮次带）；
                   缺席=回落线性步骤条（老 host/未声明拓扑，零回归降级锚）。 */}
-              {laneModel ? <LaneMap model={laneModel} /> : (
+              {detail.kind !== 'inspection' && (laneModel ? <LaneMap model={laneModel} /> : (
                 <D2Stepper detail={detail} wf={selWf} usage={usage} durs={stageDurs.durs} nowMs={stageDurs.nowMs} />
-              )}
+              ))}
               {/* t260915-05：检查明细区（mock ①）——gate_runs 逐轮逐条直译。 */}
-              <ChecksDetail runs={checksRuns} />
+              {detail.kind !== 'inspection' && <ChecksDetail runs={checksRuns} />}
               {(() => { const st = d2StatusLine(detail, selWf); return (
                 <div className="wb-d2-status" data-s={st.s}>{st.text}</div>
               ) })()}
@@ -3808,10 +4033,10 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                     打回
                   </button>
                 )}
-                {detail.stage_state === 'awaiting-human' && (
+                {detail.stage_state === 'awaiting-human' && detail.kind !== 'inspection' && (
                   <span className="wb-d2-hint">审批前请先在「变更」页签过 diff</span>
                 )}
-                {ops.length === 0 && detail.status !== 'closed' && (
+                {ops.length === 0 && detail.status !== 'closed' && detail.kind !== 'inspection' && (
                   <span className="wb-d2-hint">当前状态无可用操作（{detail.status}×{detail.stage_state}）</span>
                 )}
                 <details className="wb-d2-more">
@@ -3843,17 +4068,20 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
               </div>
               {opMsg !== '' && <div className="wb-sub" style={{ marginTop: 6 }}>{opMsg}</div>}
 
+              {/* 巡检票无变更页签（无 diff 面板），进展+Agent 日志两页签足够 */}
               <div className="wb-dtabs">
                 <button className="wb-dtab" data-on={drawerTab === 'detail'} onClick={() => setDrawerTab('detail')}>进展</button>
-                <button className="wb-dtab" data-on={drawerTab === 'changes'} onClick={() => setDrawerTab('changes')}>
-                  变更{detail.stage_state === 'awaiting-human' ? '（审批必看 diff）' : ''}
-                </button>
+                {detail.kind !== 'inspection' && (
+                  <button className="wb-dtab" data-on={drawerTab === 'changes'} onClick={() => setDrawerTab('changes')}>
+                    变更{detail.stage_state === 'awaiting-human' ? '（审批必看 diff）' : ''}
+                  </button>
+                )}
                 <button className="wb-dtab" data-on={drawerTab === 'agent'} onClick={() => setDrawerTab('agent')}>
                   Agent 日志
                 </button>
               </div>
 
-              {drawerTab === 'changes' && (
+              {drawerTab === 'changes' && detail.kind !== 'inspection' && (
                 <ChangesTab detail={detail} operator={operator} onMsg={setOpMsg} />
               )}
 

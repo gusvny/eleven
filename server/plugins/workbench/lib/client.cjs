@@ -3435,6 +3435,18 @@ const DERIVE_TOKENS_CSS = `:root{
 --dsw-derive-dark-border:#2a2f3a;
 --dsw-derive-dark-surface:#21262d;
 --dsw-derive-dark-surface-2:#30363d;
+}
+/* 老浏览器静态回退（t260915-08 仲裁修复，方向①）：warn/danger 底色令牌值为
+ * color-mix(...)——不支持的浏览器（Chrome<111）上 var 替换 IACVT=底色透明，
+ * 「等你=黄调行」在该类浏览器瞎掉。@supports not 分档在**令牌声明位**直接覆盖
+ * 为静态色（hex-clean 看守 allowlist C 合法位），消费位 var() 零改动即两档自适应：
+ * 新浏览器吃上方 color-mix 令牌，老浏览器吃本块静态色。探针用 currentcolor（无 hex）。
+ * 本块随 DERIVE_TOKENS_CSS 多组件各注入一份，同值重复定义无害。 */
+@supports not (background: color-mix(in srgb, currentcolor, currentcolor)) {
+  :root{
+  --dsw-derive-warn-bg:#fff8c5;
+  --dsw-derive-danger-bg:#ffebe9;
+  }
 }`;
 //#endregion
 //#region src/client/project-session-row.tsx
@@ -49007,6 +49019,163 @@ function DocsSection({ projectKey: shellProjectKey }) {
 	});
 }
 //#endregion
+//#region src/host/inspection-face.ts
+/**
+* inspection-face —— 巡检票板面纯函数层（t260915-08，方案 v2 R4/R5/R6）。
+*
+* 零 react / 零平台依赖，node 可裸 import 黑盒单测
+* （tests/t260915-08-inspection-face.mjs，ticket-list-model.ts 同款分层先例）。
+*
+* 为什么住 host/：巡检阶段拓扑（哪些段、短名）是**声明面**——由宿主侧钉死下发，
+* 客户端只消费不内置业务词表（ticket-list-model.ts 头注「UI 不内置任何业务词表」
+* 纪律的让位面，与 dev-lane 拓扑走 workflow list 下发同思想）。client 侧
+* context-fold.ts 已有 import host 模块的先例（session-charter）。
+*
+* 行数据源=引擎 client.py ticket-list {kind:"inspection"} 行（_row_from_inspection_face）：
+*   {id, title, kind:"inspection", instance_id, period, stage, stage_state, status,
+*    findings:{high,med,low,total}, heartbeat, report_path, awaiting_gate,
+*    human_gate, blocked_reason, gate_error, engine:"inspection", ...}
+* 引擎行是**不可信外部输入**：本层所有函数对畸形输入降级（不抛、不编造）。
+*/
+/** 巡检阶段拓扑（宿主声明面；段 id=引擎 _enter 的 stage 值，短名 ≤4 字）。 */
+const INSPECTION_TOPOLOGY = [
+	{
+		id: "setup",
+		name: "泳道准备",
+		short: "备道"
+	},
+	{
+		id: "scan",
+		name: "扫描",
+		short: "扫描"
+	},
+	{
+		id: "suite",
+		name: "巡检泳道套件",
+		short: "套件"
+	},
+	{
+		id: "report",
+		name: "落账",
+		short: "落账"
+	},
+	{
+		id: "close",
+		name: "人审收口",
+		short: "收口"
+	}
+];
+/** 消费外部行=不可信输入的取串助手（非串→''）。 */
+function strOf(v) {
+	return typeof v === "string" ? v : "";
+}
+/** 是否巡检行：kind 或 engine 标记任一命中（引擎行带 kind=inspection）。 */
+function isInspectionRow(t) {
+	return t !== null && typeof t === "object" && (t.kind === "inspection" || t.engine === "inspection");
+}
+/** 发现数计数的最小形状守卫（引擎 summary/findings 畸形时全 0，不编造）。 */
+function findingsCountOf(row) {
+	const f = row?.findings;
+	if (f !== null && typeof f === "object") {
+		const o = f;
+		const num = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
+		return {
+			high: num(o.high),
+			med: num(o.med),
+			low: num(o.low),
+			total: num(o.total)
+		};
+	}
+	return {
+		high: 0,
+		med: 0,
+		low: 0,
+		total: 0
+	};
+}
+/**
+* 详情面发现数计数（t260915-08 实证补）：行（ticket-list）与详情（ticket-query）
+* 的发现数据形状不同——行 findings={high,med,low,total} 计数字典；详情 face.summary=
+* {high,med,low} 计数字典、face.findings=发现清单（列表）。本函数吃详情形状：
+* summary 字典优先（引擎真值），缺/畸形时按 findings 清单逐条 severity 重计，
+* 两者皆缺=全 0（不编造）。行形状请用 findingsCountOf。
+*/
+function inspectionSummaryOf(face) {
+	const src = face !== null && typeof face === "object" ? face : {};
+	const num = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
+	const s = src.summary;
+	if (s !== null && typeof s === "object") {
+		const o = s;
+		const high = num(o.high);
+		const med = num(o.med);
+		const low = num(o.low);
+		const total = num(o.total) || high + med + low;
+		if (high || med || low || total) return {
+			high,
+			med,
+			low,
+			total
+		};
+	}
+	const list = Array.isArray(src.findings) ? src.findings : [];
+	const high = list.filter((f) => f?.severity === "high").length;
+	const med = list.filter((f) => f?.severity === "med").length;
+	const low = list.filter((f) => f?.severity === "low").length;
+	return {
+		high,
+		med,
+		low,
+		total: high + med + low
+	};
+}
+/** 阶段短名：拓扑命中用短名，未命中截断原词（stageShortOf 同口径），畸形→''。 */
+function inspectionStageShort(stage) {
+	const s = strOf(stage);
+	if (s === "") return "";
+	const hit = INSPECTION_TOPOLOGY.find((st) => st.id === s);
+	if (hit) return hit.short;
+	return [...s].length > 4 ? [...s].slice(0, 4).join("") + "…" : s;
+}
+/**
+* 巡检行的一句进展（行卡 progress prop 数据源，t260904-17 同构）。
+* 待签判定**只读 stage_state/awaiting_gate**（引擎 R4：face.human_gate 签字前常态缺键，
+* 不得依赖）；发现数来自 findings 字段（引擎已并好）。畸形行 → undefined
+* （行卡降级只显相对时间）。闭合一律 {state:'done'}（收口折叠吃掉，正常语义）。
+*/
+function inspectionProgressOf(row) {
+	if (row === null || typeof row !== "object") return void 0;
+	const stageState = strOf(row.stage_state);
+	const status = strOf(row.status);
+	const c = findingsCountOf(row);
+	const findingsTxt = `发现 高${c.high}/中${c.med}/低${c.low}`;
+	if (status === "closed") return {
+		state: "done",
+		text: `已收口 · ${findingsTxt}`
+	};
+	if (stageState === "awaiting-human" || row.awaiting_gate === true) return {
+		state: "awaiting-human",
+		text: `等你签字 · ${findingsTxt}`
+	};
+	if (stageState === "blocked") {
+		const reason = strOf(row.blocked_reason);
+		return {
+			state: "blocked",
+			text: `受阻${reason ? "：" + reason : " · 原因见详情"}`
+		};
+	}
+	if (stageState === "running" || stageState === "awaiting" || stageState === "") {
+		const stage = inspectionStageShort(row.stage);
+		return {
+			state: "running",
+			text: `${stage ? stage + "中 · " : ""}${findingsTxt}`
+		};
+	}
+	return {
+		state: stageState,
+		text: findingsTxt
+	};
+}
+//#endregion
 //#region src/client/tab-presence.ts
 /**
 * tab-presence.ts —— 工单台多页签共存：在看心跳 + 写事件广播（t260901-15）。
@@ -49775,9 +49944,17 @@ const CSS = `${DERIVE_TOKENS_CSS}
   cursor:pointer;font-size:13px;flex-wrap:wrap;box-shadow:0 1px 2px rgba(31,35,40,.05)}
 /* hover 不再改写底色（会盖掉 waiting/blocked 状态行底）——改阴影提层，主题安全 */
 .wb-card:hover{box-shadow:0 1px 4px rgba(31,35,40,.14)}
-/* 状态行底=主题令牌派生（t260905-08 根因修复：原行内写死浅色×主题字色=深色不可读） */
-.wb-card[data-state=waiting]{background:var(--dsw-derive-warn-bg,#fff8c5)}
-.wb-card[data-state=blocked]{background:var(--dsw-derive-danger-bg,#ffebe9)}
+/* 状态行底=主题令牌派生（t260905-08 根因修复：原行内写死浅色×主题字色=深色不可读）。
+ * t260915-08 实证补②：板面卡实际渲染在 .wb-sb-right 内，sidebar 后注入样式表的
+ * .wb-sb .wb-card {background:transparent} 规则（同特异性 0,2,0、后序胜）会把状态底色
+ * 整体压平（先于本票就存在的看板级 bug，dev-lane 等待行同样瞎）——状态行特有规则
+ * 一律提特异性到 .wb-root .wb-card[data-state=…]（0,3,0，顺序无关压制 blanket 规则；
+ * active 行让位 sidebar 的选中底色，设计如此）。
+ * t260915-08 仲裁修复（hex-clean 看守打回项）：老浏览器 color-mix IACVT 的静态回退
+ * 色收编进 theme.ts 令牌声明位（@supports not 分档覆盖令牌值），本消费位只经 var()
+ * fallback 供出（allowlist C 合法位），零裸 hex。 */
+.wb-root .wb-card[data-state=waiting]{background:var(--dsw-derive-warn-bg,#fff8c5)}
+.wb-root .wb-card[data-state=blocked]{background:var(--dsw-derive-danger-bg,#ffebe9)}
 .wb-card[data-active=true]{border-color:var(--dsw-derive-accent,#0969da);box-shadow:inset 0 0 0 1px var(--dsw-derive-accent,#0969da)}
 .wb-card[data-state=done]{color:var(--dsw-derive-muted,#57606a)}
 .wb-card-l1{display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 320px}
@@ -50403,6 +50580,9 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 const API = "/sandbar-workbench/api/wf";
+/** 巡检板面端点（t260915-08）：全路径字面量单点（S0 bundle 锚点可整串命中；
+*  与 node.ts 注册路径逐字同源，防 KI-042 漂移）。 */
+const INSPECTION_TICKETS_URL = "/sandbar-workbench/api/wf/inspection/tickets";
 /** 统一拼 ?project=（host 侧工单列表必传；详情/健康/巡检等路由多带的 query 无害——按 path 匹配）。 */
 function withProject(path) {
 	const viewProject = getViewProject();
@@ -50419,6 +50599,14 @@ async function apiPost(path, body) {
 		body: JSON.stringify(body ?? {})
 	})).json();
 }
+/** 巡检拓扑的 Wf 形态适配（t260915-08）：行卡迷你站道数据源，stages=宿主声明面
+*  （host/inspection-face.ts 单点；client 不内置阶段词表）。 */
+const INSPECTION_WF = {
+	id: "inspection-lite",
+	name: "巡检",
+	lane: "inspection",
+	stages: INSPECTION_TOPOLOGY
+};
 /** 状态文字（色板对应：running绿/awaiting黄/awaiting-human蓝/blocked红/done灰）。 */
 const STATE_LABEL = {
 	running: "进行中",
@@ -51399,9 +51587,245 @@ function D2Stages({ detail, wf, usage, durs, nowMs }) {
 }
 /** 按 v0.3 §10 矩阵计算可用操作（accept 内嵌在验收清单逐项打勾，不进操作区）。
 *  行式台面（TicketRow）与详情抽屉（TicketDetail）共用：两者都带 status/stage_state/stage。 */
+const INSPECTION_FACE_CSS = `
+.wb-insp{display:flex;flex-direction:column;gap:8px;margin:4px 0}
+.wb-insp-head{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:8px 10px;
+  border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px}
+.wb-insp-k{color:var(--dsw-derive-muted,#57606a);font-size:12px}
+.wb-insp-v{font-weight:600;font-size:13px}
+.wb-insp-sev i{font-style:normal;display:inline-block;margin-left:6px;padding:1px 6px;border-radius:9px;font-size:11px}
+.wb-insp-sev i[data-sev=high]{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e)}
+.wb-insp-sev i[data-sev=med]{background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
+.wb-insp-sev i[data-sev=low]{background:var(--dsw-derive-neutral-bg,#f6f8fa);color:var(--dsw-derive-muted,#57606a)}
+.wb-insp-gate{border:1px solid var(--dsw-derive-accent-border,#54aeff);border-radius:8px;padding:8px 10px;
+  background:var(--dsw-derive-accent-bg,#ddf4ff)}
+.wb-insp-gate .ttl{font-weight:600;font-size:13px;margin-bottom:4px}
+.wb-insp-gate-txt{font-size:12px;color:var(--dsw-derive-fg,#1f2328)}
+.wb-insp-gateerr{margin-top:4px;font-size:12px;color:var(--dsw-derive-warn-deep,#7d4e00)}
+.wb-insp-signed{margin-top:6px;font-size:12px;color:var(--dsw-derive-success,#1a7f37)}
+.wb-insp-signrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+.wb-insp-note{flex:1;min-width:160px;padding:5px 8px;border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;font-size:12px}
+.wb-insp-block{border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;padding:6px 10px}
+.wb-insp-block summary{cursor:pointer;font-size:12px;font-weight:600}
+.wb-insp-tl{display:flex;gap:10px;align-items:baseline;padding:3px 0;font-size:12px;border-bottom:1px dashed var(--dsw-derive-border,#eaeef2)}
+.wb-insp-tl code{font-size:11px;color:var(--dsw-derive-muted,#57606a)}
+.wb-insp-f{display:flex;gap:8px;align-items:baseline;padding:4px 0;font-size:12px;border-bottom:1px dashed var(--dsw-derive-border,#eaeef2)}
+.wb-insp-sev-tag{flex:none;display:inline-block;min-width:34px;text-align:center;padding:1px 6px;border-radius:9px;font-size:11px}
+.wb-insp-sev-tag[data-sev=high]{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e)}
+.wb-insp-sev-tag[data-sev=med]{background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
+.wb-insp-sev-tag[data-sev=low]{background:var(--dsw-derive-neutral-bg,#f6f8fa);color:var(--dsw-derive-muted,#57606a)}
+.wb-insp-rep{font-size:12px;padding:2px 0}
+.wb-insp-note-banner{background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-border,#d4a72c);
+  color:var(--dsw-derive-warn-deep,#7d4e00);border-radius:6px;padding:5px 10px;font-size:12px;margin-bottom:6px}
+`;
+function InspectionDetailFace({ detail, operator, opBusy, onSign }) {
+	const [note, setNote] = (0, react.useState)("");
+	const findings = Array.isArray(detail.findings) ? detail.findings : [];
+	const timeline = Array.isArray(detail.timeline) ? detail.timeline : [];
+	const c = inspectionSummaryOf(detail);
+	const awaiting = detail.stage_state === "awaiting-human";
+	const signed = detail.human_gate ?? null;
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-insp",
+		"data-kind": "inspection",
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: INSPECTION_FACE_CSS }),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-insp-head",
+				"data-testid": "inspection-face",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-insp-k",
+						children: "巡检"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-insp-v",
+						children: detail.instance_id || "—"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-insp-k",
+						children: "期号"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-insp-v",
+						children: detail.period || "—"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-insp-k",
+						children: "心跳"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-insp-v",
+						"data-heartbeat": detail.heartbeat ? "1" : "0",
+						children: detail.heartbeat ? "全绿证明期" : "非心跳期"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: "wb-insp-sev",
+						"data-testid": "inspection-findings",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("i", {
+								"data-sev": "high",
+								children: ["高 ", c.high]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("i", {
+								"data-sev": "med",
+								children: ["中 ", c.med]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("i", {
+								"data-sev": "low",
+								children: ["低 ", c.low]
+							})
+						]
+					})
+				]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-insp-gate",
+				"data-wb-anchor": "review",
+				"data-testid": "inspection-gate",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "ttl",
+						children: [
+							"人审门（",
+							detail.gate_id || "inspection-close",
+							"）——签什么"
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-insp-gate-txt",
+						children: ["approve=收口（发现转 dev-lane 修复票跟踪）；reject=毙单收口（本期作废留痕）。 红线：", detail.red_line || "—"]
+					}),
+					detail.gate_error && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-insp-gateerr",
+						children: ["⚠ 拒收记录：", detail.gate_error]
+					}),
+					signed ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-insp-signed",
+						"data-testid": "inspection-signed",
+						children: [
+							"已签：",
+							signed.decision,
+							"（",
+							signed.who,
+							"）",
+							signed.note ? ` · ${signed.note}` : ""
+						]
+					}) : awaiting ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-insp-signrow",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+								className: "wb-insp-note",
+								value: note,
+								onChange: (e) => setNote(e.target.value),
+								placeholder: "签字备注（可空）",
+								"data-testid": "inspection-sign-note"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "wb-btn wb-btn-green",
+								disabled: opBusy,
+								"data-testid": "inspection-sign-approve",
+								onClick: () => onSign("approve", note),
+								children: "✓ approve 收口"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "wb-btn wb-btn-danger",
+								disabled: opBusy,
+								"data-testid": "inspection-sign-reject",
+								onClick: () => onSign("reject", note),
+								children: "✗ reject 毙单"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								className: "wb-sub",
+								children: ["签字人：", operator]
+							})
+						]
+					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-sub",
+						children: [
+							"当前不在人审门（阶段：",
+							detail.stage ?? "—",
+							" · ",
+							detail.stage_state,
+							"）"
+						]
+					})
+				]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
+				className: "wb-insp-block",
+				open: true,
+				"data-testid": "inspection-timeline",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("summary", { children: [
+					"阶段时间线（",
+					timeline.length,
+					" 条）"
+				] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [timeline.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-sub",
+					children: "暂无时间线条目"
+				}), timeline.map((e, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-insp-tl",
+					"data-state": String(e?.state ?? ""),
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: String(e?.at ?? "—") }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: inspectionStageShort(e?.stage) || String(e?.stage ?? "—") }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: String(e?.state ?? "") }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "wb-sub",
+							children: String(e?.reason ?? "")
+						})
+					]
+				}, i))] })]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
+				className: "wb-insp-block",
+				open: true,
+				"data-testid": "inspection-findings-list",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("summary", { children: [
+					"发现清单（",
+					findings.length,
+					" 条）"
+				] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [findings.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-sub",
+					children: "零发现（心跳证明期）"
+				}), findings.map((f, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-insp-f",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "wb-insp-sev-tag",
+							"data-sev": String(f?.severity ?? ""),
+							children: String(f?.severity ?? "?")
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: String(f?.scan ?? "") }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: String(f?.subject ?? "") }),
+						f?.evidence ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "wb-sub",
+							children: String(f.evidence)
+						}) : null
+					]
+				}, i))] })]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-insp-block",
+				children: [(detail.report_path ?? "") !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-insp-rep",
+					children: ["报告：", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: detail.report_path })]
+				}), (detail.suggested_fix_tickets?.length ?? 0) > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-sub",
+					children: [
+						"建议修复票 ",
+						detail.suggested_fix_tickets.length,
+						" 张（dev-lane，引用本票号溯源）"
+					]
+				})]
+			})
+		]
+	});
+}
 function availableOps(t, wf) {
 	const s = t.status;
 	const ss = t.stage_state;
+	if (t.engine === "inspection") return [];
 	if (t.engine === "template-as-code-v2") {
 		if (s === "closed") return [];
 		const v2ops = [];
@@ -52575,6 +52999,8 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 	const [showDone, setShowDone] = (0, react.useState)(false);
 	/** 进展行 enrichment（host /tickets/progress 只读）：仅当前可见页逐票拉取（R5 负载预算）。 */
 	const [progressMap, setProgressMap] = (0, react.useState)({});
+	const inspectionRowsRef = (0, react.useRef)([]);
+	const [inspectionNote, setInspectionNote] = (0, react.useState)("");
 	const [titleFirstMap, setTitleFirstMap] = (0, react.useState)({});
 	const [selectedId, setSelectedId] = (0, react.useState)(null);
 	const [detail, setDetail] = (0, react.useState)(void 0);
@@ -52647,9 +53073,15 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 	async function reloadTickets() {
 		listInFlight.current = true;
 		try {
-			const data = await apiGet(`${API}/tickets`);
+			const [data, insp] = await Promise.all([apiGet(`${API}/tickets`), apiGet(INSPECTION_TICKETS_URL).catch(() => void 0)]);
 			if (data?.ok !== true) throw new Error(data?.error ?? "台面加载失败");
-			setTickets(data.result?.tickets ?? []);
+			const baseRows = data.result?.tickets ?? [];
+			if (insp?.ok === true) {
+				inspectionRowsRef.current = insp.result?.tickets ?? [];
+				const f = insp.result?.inspection_filter;
+				setInspectionNote(f?.degraded ? String(f.note ?? "巡检板面降级") : "");
+			} else setInspectionNote("巡检板面拉取失败，显示上次快照（自动重试中）");
+			setTickets([...baseRows, ...inspectionRowsRef.current]);
 			setWorkflows(data.workflows ?? []);
 			return "ok";
 		} catch (err) {
@@ -52833,8 +53265,13 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 		}
 		doOp(id, "advance", {}, "已推进到下一阶段");
 	}
-	function doSign(id, decision, note) {
-		doOp(id, "sign", {
+	function doSign(id, decision, note, gate) {
+		doOp(id, "sign", gate ? {
+			decision,
+			note,
+			who: operator,
+			gate
+		} : {
 			decision,
 			note,
 			who: operator
@@ -53273,22 +53710,28 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 						})
 					]
 				}),
+				inspectionNote !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-insp-note-banner",
+					"data-testid": "inspection-degraded",
+					children: inspectionNote
+				}),
 				paged.map((t) => {
 					const ops = availableOps(t, wfById[t.workflow]);
+					const insp = isInspectionRow(t);
 					return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
 						t: {
 							...t,
 							title_or_first: t.title_or_first ?? titleFirstMap[t.id]
 						},
-						wf: wfById[t.workflow],
-						progress: progressMap[t.id],
+						wf: insp ? INSPECTION_WF : wfById[t.workflow],
+						progress: insp ? inspectionProgressOf(t) : progressMap[t.id],
 						active: t.id === selectedId,
 						busy: opBusy,
 						ops,
 						peerViewers: peerViewersByTicket.get(t.id),
 						onOpen: (anchor) => {
-							if (anchor === "review") setDrawerTab("changes");
-							if (anchor === "blocked" || anchor === void 0) setDrawerTab("detail");
+							if (anchor === "review" && !insp) setDrawerTab("changes");
+							if (anchor === "blocked" || anchor === void 0 || insp) setDrawerTab("detail");
 							openDetail(t.id);
 						},
 						onAdvance: () => {
@@ -53573,18 +54016,24 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								children: detail.spec
 							})]
 						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2Reworks, {
+						detail.kind === "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(InspectionDetailFace, {
+							detail,
+							operator,
+							opBusy,
+							onSign: (decision, note) => doSign(detail.id, decision, note, detail.gate_id)
+						}),
+						detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2Reworks, {
 							detail,
 							wf: selWf
 						}),
-						laneModel ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMap, { model: laneModel }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2Stepper, {
+						detail.kind !== "inspection" && (laneModel ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMap, { model: laneModel }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2Stepper, {
 							detail,
 							wf: selWf,
 							usage,
 							durs: stageDurs.durs,
 							nowMs: stageDurs.nowMs
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ChecksDetail, { runs: checksRuns }),
+						})),
+						detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ChecksDetail, { runs: checksRuns }),
 						(() => {
 							const st = d2StatusLine(detail, selWf);
 							return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -53628,11 +54077,11 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 									},
 									children: "打回"
 								}),
-								detail.stage_state === "awaiting-human" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								detail.stage_state === "awaiting-human" && detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 									className: "wb-d2-hint",
 									children: "审批前请先在「变更」页签过 diff"
 								}),
-								ops.length === 0 && detail.status !== "closed" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								ops.length === 0 && detail.status !== "closed" && detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 									className: "wb-d2-hint",
 									children: [
 										"当前状态无可用操作（",
@@ -53700,7 +54149,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 									onClick: () => setDrawerTab("detail"),
 									children: "进展"
 								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+								detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 									className: "wb-dtab",
 									"data-on": drawerTab === "changes",
 									onClick: () => setDrawerTab("changes"),
@@ -53714,7 +54163,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								})
 							]
 						}),
-						drawerTab === "changes" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ChangesTab, {
+						drawerTab === "changes" && detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ChangesTab, {
 							detail,
 							operator,
 							onMsg: setOpMsg

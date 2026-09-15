@@ -14,6 +14,9 @@
  *      装一次建两次=registry 漂移不混入断言）；
  *   S3 构建后 git status 对 lib/ 为空 = 重建产物与落仓产物一致 + 无 map/gzip
  *      等计划外副产物文件（验收②；porcelain 对 untracked 同样计数）；
+ *      lib/ 整体处于合并未落盘态（UU）时 na 点名不假绿——落仓基准暂缺，
+ *      落盘提交后由 S5 显式 sha 硬腿接管（t260915-08 仲裁口径，与 S5 na 同源）；
+ *      真脏（M/??）照旧红；
  *   S4 mtime 注入：改 src 文件 mtime 不改内容 → 第三次构建 → sha256 仍相等
  *      （门禁/证据类断言的 mtime 干扰面：工具链不得把时间戳带进产物）；
  *   S5 泳道内显式腿（t260911-06/KI-073 验收 a/b）：重建产物 == HEAD committed
@@ -30,7 +33,7 @@
  *      化并先红绿自证（合成不符样必咬、畸形 lockfile/坏 JSON 缺条目 FAIL 点名
  *      不 crash，同 sc_toolchain_pinned「合成锁样必咬」先例）；
  *   S7 终态自证：git status 对 lib/ 仍为空——场景净零副作用，不污染同闸兄弟
- *      场景的判定面。
+ *      场景的判定面（进场前既有的 UU 合并态非本场景副作用，na 点名；真脏照红）。
  *
  * S3 的判红语义：若 HEAD 产物并非锁定工具链可复现（如历史由漂移版本构建），
  * 本腿红=工单要消除的病灶实锤；实施段校准重建（一次性真实 diff）后恒绿。
@@ -89,6 +92,11 @@ function libDirty() {
     { cwd: root, encoding: 'utf8' })
   return out.trim()
 }
+/* porcelain 两位状态码落在 {A,D,U} 组合（DD/AU/UD/UA/DU/AA/UU）= 合并未落盘态：
+ * 索引里存在未解决的合并项，此时「落仓产物」没有可比基准（HEAD 侧与盘上是
+ * 两个世界的半成品）——与 S5 的「输入非同批→na」同一时点口径，na 点名，
+ * 落盘提交后 S5 显式 sha 硬腿接管重建一致性判定；M/?? 等真脏不在此列照旧红。 */
+const isUnmergedLine = (line) => /^[ADU]{2} /.test(line)
 
 /* S1 依赖安装：lockfile 精确装。失败=环境红（网络/缓存），点名尾段 exit 2。 */
 section('S1. npm ci（lockfile 精确装）')
@@ -157,7 +165,16 @@ if (b1 && b2) {
 section('S3. 构建后 git status 对 lib/ 为空（验收②）')
 {
   const dirty = libDirty()
-  ok(dirty === '', `重建不产生 diff、无 map/gzip 等副产物新文件${dirty ? '：\n    ' + dirty.split('\n').join('\n    ') : ''}`)
+  const lines = dirty ? dirty.split('\n').filter(Boolean) : []
+  const unmerged = lines.filter(isUnmergedLine)
+  const realDirt = lines.filter((l) => !isUnmergedLine(l))
+  if (realDirt.length) {
+    ok(false, `重建不产生 diff、无 map/gzip 等副产物新文件：\n    ${realDirt.join('\n    ')}`)
+  } else if (unmerged.length) {
+    na(`lib/ 处于合并未落盘态（UU），落仓基准暂缺无从比对——不假绿；落盘提交后由 S5 显式 sha 硬腿接管：\n    ${unmerged.join('\n    ')}`)
+  } else {
+    ok(true, '重建不产生 diff、无 map/gzip 等副产物新文件')
+  }
 }
 
 /* S4 mtime 注入：改 mtime 不改内容 → 重建 sha 不变 */
@@ -316,7 +333,16 @@ section('S6. 入口唯一性：构建解析版本 ≡ lockfile ≡ node_modules�
 section('S7. 终态：lib/ 回到干净（场景净零副作用）')
 {
   const dirty = libDirty()
-  ok(dirty === '', `场景结束时 lib/ 仍与落仓一致${dirty ? '：\n    ' + dirty.split('\n').join('\n    ') : ''}`)
+  const lines = dirty ? dirty.split('\n').filter(Boolean) : []
+  const unmerged = lines.filter(isUnmergedLine)
+  const realDirt = lines.filter((l) => !isUnmergedLine(l))
+  if (realDirt.length) {
+    ok(false, `场景结束时 lib/ 仍与落仓一致：\n    ${realDirt.join('\n    ')}`)
+  } else if (unmerged.length) {
+    na(`lib/ 的 UU 为进场前既有合并态（非本场景副作用，净零自证照实）；真脏 M/?? 仍红：\n    ${unmerged.join('\n    ')}`)
+  } else {
+    ok(true, '场景结束时 lib/ 仍与落仓一致')
+  }
 }
 
 console.log(`\nSUMMARY pass=${passed} fail=${failed} env_fail=${envFail} na=${naCount}`)

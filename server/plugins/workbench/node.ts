@@ -26,6 +26,10 @@
  *                                               → 进展行 enrichment（t260904-17）：主响应零 show；
  *                                                 enrich 阶段逐票 show 短超时+并发上限+allSettled
  *   GET  /sandbar-workbench/api/wf/tickets/<id>   → ticket show（详情全文）
+ *   GET  /sandbar-workbench/api/wf/inspection/tickets
+ *                                               → 巡检板面（t260915-08）：引擎 ticket-list
+ *                                                 {kind:"inspection"} 薄壳；无 project 维度
+ *                                                 （巡检票无 ProjectKey SA，引擎级面）
  *   POST /sandbar-workbench/api/wf/tickets/<id>/accept|advance|dispatch-next|rework|update
  *                                               → 写操作，走 admin.py call ticket（run-id 审计）
  *   GET  /sandbar-workbench/api/wf/workflows      → workflow list（模板链，泳道图用）
@@ -674,6 +678,38 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     }
   }
 
+  /** 巡检板面（t260915-08）：GET /wf/inspection/tickets —— 引擎 ticket-list
+   *  {kind:"inspection"} 的薄壳（巡检票无 ProjectKey SA，项目板过滤天然不含它们；
+   *  本端点有意**不收 project 参数**——巡检是引擎级面，行合流进每个项目板由客户端做）。
+   *  引擎侧白名单（inspection.yaml 在册且 enabled 实例）+ 闭合行窗口过滤都在引擎，
+   *  本壳零清洗逐键透传（与 handleTickets 同纪律）；ok:false → 502 原文透传（不吞成
+   *  空列表——t260910-04 R3 同款教训）。 */
+  async function handleInspectionTickets(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (req.method !== 'GET') {
+      sendJson(res, 405, { ok: false, error: '巡检板面只支持 GET' })
+      return
+    }
+    try {
+      const t = await runPocCli(cli, ['ticket-list', JSON.stringify({ kind: 'inspection' })],
+        { timeoutMs: 300_000, maxBufferBytes: 16 * 1024 * 1024 })
+      if (t?.ok === false) {
+        sendJson(res, 502, { ok: false, error: `ticket-list(inspection) 失败: ${t.error ?? JSON.stringify(t)}` })
+        return
+      }
+      const tickets = (t?.result?.tickets ?? []).map((r: any) => ({ ...r, close_ts: r.close_ts ?? 0 }))
+      sendJson(res, 200, {
+        ok: true,
+        result: {
+          count: tickets.length,
+          tickets,
+          inspection_filter: t?.result?.inspection_filter ?? null,
+        },
+      })
+    } catch (err) {
+      sendJson(res, 502, { ok: false, error: String(err instanceof Error ? err.message : err) })
+    }
+  }
+
   /** 内容预览（审批前过目）：只读 app/public/data/<path>，path 白名单 books/ 前缀 + 防穿路径。 */
   async function handleBook(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://x')
@@ -1173,14 +1209,19 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       try {
         // sign = 审批签字（awaiting-human 人工审批段）：走 Temporal TicketWorkflow 的签字
         // （decision=approve 放行推进 / reject 打回），不经 admin.py（引擎对 human 门只认 sign）。
+        // t260915-08：gate 改透传 body.gate ?? ''——dev-lane 调用方不传（引擎按当前门
+        // 兜底，零变化）；巡检详情面带 gate=inspection-close（值=引擎 ticket-query
+        // meta.gate_id 单点下发），workflow intake validate_close_signature 按它放行
+        // （gate 不匹配拒收）。与 inspection_trigger.py sign 同义同门，零旁路。
         if (op === 'sign') {
           const decision = body.decision === 'reject' ? 'reject' : 'approve'
           const note = String(body.note ?? '')
           const who = String(body.who ?? 'op-local')
+          const gate = String(body.gate ?? '')
           const pocArgs = {
             op: 'sign',
             ticket_id: id,
-            input: { who, gate: '', decision, note },
+            input: { who, gate, decision, note },
           }
           const r = await runPocCli(cli, ['ticket', JSON.stringify(pocArgs)])
           sendJson(res, 200, r)
@@ -1930,6 +1971,8 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     ctx.effect(() => {
       const disposers = [
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/tickets', handler: handleTickets }),
+        // 巡检板面（t260915-08）：引擎 ticket-list{kind:inspection} 薄壳，无 project 维度。
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/inspection/tickets', handler: handleInspectionTickets }),
         ws.register({ kind: 'prefix', path: TICKETS_PREFIX, handler: handleTicketRoute }),
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/workflows', handler: handleWorkflows }),
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/book', handler: handleBook }),

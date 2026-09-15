@@ -128,4 +128,16 @@ export const DERIVE_TOKENS_CSS = `:root{
 --dsw-derive-dark-border:#2a2f3a;
 --dsw-derive-dark-surface:#21262d;
 --dsw-derive-dark-surface-2:#30363d;
+}
+/* 老浏览器静态回退（t260915-08 仲裁修复，方向①）：warn/danger 底色令牌值为
+ * color-mix(...)——不支持的浏览器（Chrome<111）上 var 替换 IACVT=底色透明，
+ * 「等你=黄调行」在该类浏览器瞎掉。@supports not 分档在**令牌声明位**直接覆盖
+ * 为静态色（hex-clean 看守 allowlist C 合法位），消费位 var() 零改动即两档自适应：
+ * 新浏览器吃上方 color-mix 令牌，老浏览器吃本块静态色。探针用 currentcolor（无 hex）。
+ * 本块随 DERIVE_TOKENS_CSS 多组件各注入一份，同值重复定义无害。 */
+@supports not (background: color-mix(in srgb, currentcolor, currentcolor)) {
+  :root{
+  --dsw-derive-warn-bg:#fff8c5;
+  --dsw-derive-danger-bg:#ffebe9;
+  }
 }`
