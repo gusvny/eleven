@@ -54,5 +54,18 @@ section('S2 契约特征：用户被服务的产物含当前源码行为')
     '既有并行渲染 sanity 锚在案（deriveStageStates / wb-d2-par）')
 }
 
+section('S3 t260915-09 契约特征：立项单数据通道穿 ?project=（KI-057 client 收口）')
+{
+  // 源码锚（方向性误诊防线：源码没实现时红在源头点名，而不是只报产物陈旧）。
+  const epicsModel = await readFile(resolve(WB, 'src', 'client', 'epics-model.ts'), 'utf8')
+  ok(epicsModel.includes('withEpicProject'),
+    'sanity：withEpicProject 在 src/client/epics-model.ts 源码在案（实现改名=有意识同步本锚，KI-051 锚语义纪律）')
+  // 产物锚：bundle 不压缩、函数名存活（withProject 同族先例实测），穿参 helper 在
+  // 用户实际被服务的产物内在案=「改 src 忘重建」的 KI-052 静默穿透在本票面上现形。
+  const count = (js.match(/withEpicProject/g) || []).length
+  ok(count >= 2,
+    `withEpicProject 在 bundle 内在案（actual=${count} 次；0=产物陈旧，epics 真台面仍是裸调串台旧行为）`)
+}
+
 console.log(`\nSUMMARY pass=${pass} fail=${fail} env_fail=0 na=0`)
 process.exit(fail > 0 ? 1 : 0)

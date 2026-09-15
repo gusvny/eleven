@@ -47477,6 +47477,21 @@ function isEpicStatusValue(s) {
 	return EPIC_STATUS_OPTIONS.includes(s);
 }
 /**
+* 立项单 API 调用统一拼 ?project=（t260915-09，KI-057 client 侧收口）：epics 族
+* 端点按项目根取数，裸调=无参回落引擎仓=跨项目立项单串台病灶（宿主 260915 实报）。
+* 语义对齐 index.tsx withProject 家族先例：
+*   - projectKey 非空字符串 → 拼 ?project=<encodeURIComponent>（已有 query 用 &）；
+*   - path 已带 project= → 幂等原样返回（防双拼）；
+*   - 空串/undefined/非字符串（畸形）→ 原样返回不抛——epics 族读端点无参=回落引擎仓
+*     （既有语义保留）；写端点的空 key 守卫在调用侧（建票既有禁用口径、saveStatus
+*     同款守卫），本函数不代拦不静默造参。
+*/
+function withEpicProject(path, projectKey) {
+	if (typeof projectKey !== "string" || projectKey === "") return path;
+	if (/[?&]project=/.test(path)) return path;
+	return path + (path.includes("?") ? "&" : "?") + "project=" + encodeURIComponent(projectKey);
+}
+/**
 * 状态筛选（工单台立项单列表，t260831-05）：status 为空串/undefined = 全部不过滤；
 * 其余按枚举值精确过滤。未知值（防御性）返回空数组并 console.warn 一条——
 * 白名单外状态本不该存在（写入已拒收），出现即迁移漏网，值得看见。
@@ -47605,6 +47620,10 @@ function buildCreatePayload(base, text, allowEmpty) {
 *   - （t260910-14 退役注记：原「继续执行」建议链路——建议 job/预跑缓存卡/
 *     结项建议卡/写集建议预填——随预跑建议段整链退役删除；新建工单弹层为纯手工
 *     通路，写集编辑栏（通用字段）保留。）
+*   - （t260915-09 项目穿参：epics 族六处调用统一经 withEpicProject 拼 ?project=——
+*     裸调=无参回落引擎仓=跨项目立项单串台病灶（KI-057 client 半收口）；列表/
+*     聚合轮询 deps 带项目键，切项目即重拉；建票/状态写空项目=守卫不裸调；
+*     /wf/workflows 模板下拉项目无关，不穿。）
 *   - EpicBadge 同时供 index.tsx 工单列表行/详情头部复用；口径单点=epics-model.ts。
 *
 * 不做（工单红线）：归档按钮/快照 UI（archive API 另单）；立项单编辑 UI（真源=文件，编辑走仓库）。
@@ -47747,7 +47766,7 @@ function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }) {
 		let cancelled = false;
 		async function load() {
 			try {
-				const d = await getJson(EPICS_API);
+				const d = await getJson(withEpicProject(EPICS_API, projectKey));
 				if (!cancelled && d?.ok === true) setList(d.result?.epics ?? []);
 			} catch {}
 		}
@@ -47759,7 +47778,7 @@ function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }) {
 			cancelled = true;
 			stopPoll();
 		};
-	}, []);
+	}, [projectKey]);
 	(0, react.useEffect)(() => {
 		if (!code) {
 			setDetail(void 0);
@@ -47770,7 +47789,7 @@ function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }) {
 		setError("");
 		(async () => {
 			try {
-				const d = await getJson(`${EPICS_API}/${encodeURIComponent(code)}`);
+				const d = await getJson(withEpicProject(`${EPICS_API}/${encodeURIComponent(code)}`, projectKey));
 				if (cancelled) return;
 				if (d?.ok !== true) {
 					setError(d?.error ?? "立项单加载失败");
@@ -47797,6 +47816,10 @@ function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }) {
 	*  自动归位），失败人话报错（后端 422 枚举/备注校验原样透出）。 */
 	const saveStatus = (0, react.useCallback)(async () => {
 		if (saveBusy) return;
+		if (!projectKey) {
+			setSaveMsg("未知当前项目——无法保存状态");
+			return;
+		}
 		if (editStatus === "") {
 			setSaveMsg("保存失败：请先选择一个状态");
 			return;
@@ -47804,7 +47827,7 @@ function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }) {
 		setSaveBusy(true);
 		setSaveMsg("");
 		try {
-			const d = await (await fetch(`${EPICS_API}/${encodeURIComponent(code)}/status`, {
+			const d = await (await fetch(withEpicProject(`${EPICS_API}/${encodeURIComponent(code)}/status`, projectKey), {
 				method: "POST",
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify(noteDirty ? {
@@ -47818,7 +47841,7 @@ function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }) {
 			}
 			setSaveMsg(`已保存：${String(d?.result?.status ?? "")}`);
 			try {
-				const e = await getJson(`${EPICS_API}/${encodeURIComponent(code)}`);
+				const e = await getJson(withEpicProject(`${EPICS_API}/${encodeURIComponent(code)}`, projectKey));
 				if (e?.ok === true) setDetail(e.result);
 			} catch {}
 		} catch (err) {
@@ -47831,7 +47854,8 @@ function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }) {
 		editStatus,
 		noteDirty,
 		editNote,
-		code
+		code,
+		projectKey
 	]);
 	(0, react.useEffect)(() => {
 		if (!code) {
@@ -47841,7 +47865,7 @@ function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }) {
 		let cancelled = false;
 		async function load() {
 			try {
-				const d = await getJson(`${EPICS_API}/${encodeURIComponent(code)}/tickets`);
+				const d = await getJson(withEpicProject(`${EPICS_API}/${encodeURIComponent(code)}/tickets`, projectKey));
 				if (!cancelled && d?.ok === true) setTickets(d.result);
 			} catch {}
 		}
@@ -47853,7 +47877,7 @@ function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }) {
 			cancelled = true;
 			stopPoll();
 		};
-	}, [code]);
+	}, [code, projectKey]);
 	(0, react.useEffect)(() => {
 		if (!createOpen || templates.length > 0) return;
 		(async () => {
@@ -47916,7 +47940,7 @@ function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }) {
 			}
 			const newId = String(d.result?.id ?? "");
 			try {
-				const t = await getJson(`${EPICS_API}/${encodeURIComponent(code)}/tickets`);
+				const t = await getJson(withEpicProject(`${EPICS_API}/${encodeURIComponent(code)}/tickets`, projectKey));
 				if (t?.ok === true) setTickets(t.result);
 			} catch {}
 			setCreateOpen(false);

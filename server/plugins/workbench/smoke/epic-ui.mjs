@@ -25,6 +25,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   bucketOf, epicBadgeOf, epicCreateNote, mergeBuckets, sortBucketKeys, sortEpicTickets,
+  withEpicProject,
 } from '../src/client/epics-model.ts'
 import { apply } from '../node.ts'
 
@@ -99,6 +100,28 @@ try {
       'epicCreateNote：含代号 + 禁手输提示')
   }
 
+  {
+    // withEpicProject（t260915-09）：epics 族调用统一穿参（真值表 + 畸形输入）
+    ok(withEpicProject('/sandbar-workbench/api/epics', 'dengzhufpv')
+      === '/sandbar-workbench/api/epics?project=dengzhufpv',
+      'withEpicProject：基础拼参')
+    ok(withEpicProject('/api/epics/demo-x/tickets?mode=fast', 'fpv-repo-split')
+      === '/api/epics/demo-x/tickets?mode=fast&project=fpv-repo-split',
+      'withEpicProject：已有 query → & 拼接')
+    ok(withEpicProject('/api/epics?project=fpv', 'fpv') === '/api/epics?project=fpv'
+      && withEpicProject('/api/epics?a=1&project=fpv', 'fpv') === '/api/epics?a=1&project=fpv',
+      'withEpicProject：已带 project= → 幂等不双拼')
+    ok(withEpicProject('/api/epics', 'a b&c?d#e=中文')
+      === '/api/epics?project=' + encodeURIComponent('a b&c?d#e=中文'),
+      'withEpicProject：特殊字符 encodeURIComponent')
+    ok(withEpicProject('/api/epics', '') === '/api/epics'
+      && withEpicProject('/api/epics', undefined) === '/api/epics'
+      && withEpicProject('/api/epics', null) === '/api/epics'
+      && withEpicProject('/api/epics', 42) === '/api/epics'
+      && withEpicProject('/api/epics', { key: 'x' }) === '/api/epics',
+      'withEpicProject：空串/undefined/null/非字符串畸形 → 原样返回不抛（回落语义留调用侧）')
+  }
+
   /* ------------------------------------------------------------ B. POST /wf/tickets create route */
   section('B POST /sandbar-workbench/api/wf/tickets（handleTicketCreate）')
   {
@@ -161,6 +184,21 @@ if tool == 'workflow' and args.get('op') == 'list':
 print(json.dumps({"ok": False, "error": "stub unsupported"}))
 sys.exit(1)
 `, 'utf8')
+      // 工单列表/模板链路由委托引擎 CLI（server/engine/client.py ticket-list）——桩此前只盖
+      // admin.py 建票面，B4「GET 列表回归」自路由换道起恒 502（t260915-09 顺手修复：补
+      // engine 副本，让该断言重新盖住真通路）。
+      await mkdir(join(repo, 'server', 'engine'), { recursive: true })
+      await writeFile(join(repo, 'server', 'engine', 'client.py'), `import json, sys
+cmd = sys.argv[1] if len(sys.argv) >= 2 else ''
+if cmd == 'ticket-list':
+    print(json.dumps({"ok": True, "result": {"count": 0, "tickets": []}}))
+    sys.exit(0)
+if cmd == 'workflow-list':
+    print(json.dumps({"ok": True, "result": []}))
+    sys.exit(0)
+print(json.dumps({"ok": False, "error": "stub unsupported"}))
+sys.exit(1)
+`, 'utf8')
     }
 
     /* --- B1 parameter validation: missing project / workflow / title -> 400 (never reaches the engine) --- */
@@ -219,6 +257,28 @@ sys.exit(1)
     r = await call(s2.exactTickets, '/sandbar-workbench/api/wf/tickets?project=suyou')
     ok(r.status === 200 && r.body.ok === true && Array.isArray(r.body.result.tickets),
       'GET 列表回归不受影响')
+  }
+
+  /* ------------------------------------- C. 源级守卫：EPICS_API 零裸调（t260915-09） */
+  section('C epics.tsx 源级守卫')
+  {
+    // 锚不变量不锚实现名（KI-051 纪律）：EPICS_API 不得以常量/模板串形态直接作
+    // fetch/getJson 的 URL 实参（=裸调=无参回落引擎仓=跨项目串台病灶本尊）；
+    // 经任何项目穿参包裹（如 withEpicProject）即不匹配，实现改名不产生假红。
+    // 行级检查（现网调用均单行书写）。
+    const src = await readFile(new URL('../src/client/epics.tsx', import.meta.url), 'utf8')
+    const bareRes = [
+      /getJson\(\s*EPICS_API\b/,
+      /getJson\(\s*`\$\{EPICS_API/,
+      /fetch\(\s*`\$\{EPICS_API/,
+    ]
+    const bareLines = src.split('\n')
+      .map((text, i) => ({ text, no: i + 1 }))
+      .filter(({ text }) => bareRes.some((re) => re.test(text)))
+    ok(bareLines.length === 0,
+      bareLines.length === 0
+        ? 'EPICS_API 零裸调（全部经项目穿参包裹，t260915-09）'
+        : `EPICS_API 裸调残留（行 ${bareLines.map((l) => l.no).join('、')}）——穿参回潮`)
   }
 } finally {
   await rm(tmp, { recursive: true, force: true })

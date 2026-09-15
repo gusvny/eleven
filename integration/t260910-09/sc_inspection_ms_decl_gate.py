@@ -6,14 +6,17 @@
 节奏）」+场景必含「零发现时心跳票语义不变」的声明半边——enabled=false 占位=不进调度
 规格（不调度不触发）；②方案 D6/D7 承诺：decl 零改动（face 自由标量）、新实例走既有
 build_schedule_specs 门；③声明是机器消费的契约（引擎解析器逐期读取），故对仓内
-inspection.yaml 的实例位做契约守卫合法（非快照型文档 pin）。
+inspection.yaml 的实例位做契约守卫合法（非快照型文档 pin）。宿主 260915 令（c946380）
+已令 simplify-face 启用试跑——启用节奏是宿主的开关，不入断言（钉节奏必随开关腐，
+t260915-09 仲裁轮修正）：腿a 改钉声明门一致性不变式（enabled 与 schedule_specs 在场
+恒一致），声明位在场与占位不调度语义仍守。
 
 全部离线腿（trigger decl 子命令=离线声明视图，纯标准库零网络）闸内即验；唯一 server
 腿（enabled 新实例过门真触发）缺 temporalio/共享台=ENV_FAIL 点名不假红（沿票①
 decl-gate 三态分级先例）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
 intent 分工：与 t260905-03-decl-gate 不同面——彼守门行为本身（畸形/未接线 kind/占位/
 未知四类拒绝+test-face 放行，新实例同门不重测，防 intent 级重复）；本条守**新实例的
-声明位在场**（仓内 yaml 两占位 enabled=false）与**新面经门透传的数据面**（enabled 新
+声明位在场**（仓内 yaml 两实例在册）与**新面经门透传的数据面**（enabled 新
 实例进 specs 且 face 原样透传）。与 developer L1（decl 纯函数真值表）不同层。
 """
 import os
@@ -75,9 +78,10 @@ def main() -> int:
     base.require_entry(base.TRIGGER, "巡检触发入口")
     failures = []
 
-    # ── 腿a：仓内 inspection.yaml 声明位契约——两新实例在场（face 对、enabled=false）、
-    #     不进 schedule_specs（enabled=false 不调度=数据面，工单「enabled 按宿主节奏」
-    #     的兑现面；声明是机器消费契约，守卫合法）──
+    # ── 腿a：仓内 inspection.yaml 声明位契约——两新实例在场（face 对）；启用节奏不入
+    #     断言（宿主 260915 令 c946380 已启用 simplify-face 试跑——节奏是宿主开关），
+    #     改钉声明门一致性不变式（enabled 与 schedule_specs 在场恒一致，无静默半态）；
+    #     声明是机器消费契约，守卫合法 ──
     proc, parsed = decl_view(REPO_DECL)
     if not isinstance(parsed, dict) or parsed.get("ok") is not True:
         failures.append("腿a 仓内 decl 视图异常：%r | stderr=%s"
@@ -100,12 +104,16 @@ def main() -> int:
                 if iid.rsplit("-", 1)[0] != face:
                     failures.append("腿a %s 实例 id 与面名派生关系破（期望 -%s 后缀）：%r"
                                     % (iid, face, iid))
-                if it.get("enabled") is not False:
-                    failures.append("腿a %s 应 enabled=false 占位（启用按宿主节奏）：%r"
-                                    % (iid, it.get("enabled")))
-                if iid in spec:
-                    failures.append("腿a 占位实例 %s 进了 schedule_specs（不调度承诺破）：%r"
-                                    % (iid, sorted(spec)))
+                # 启用节奏随宿主令（c946380：simplify-face 启用试跑，宿主 260915 令；
+                # 「enabled 按宿主节奏」——节奏是宿主开关，钉节奏必随开关腐，260915
+                # 仲裁轮修正）：改钉声明门一致性不变式——enabled=false ⇔ 不进
+                # schedule_specs（占位不调度）；enabled=true ⇔ 进 specs（调度经声明面
+                # 可见，无静默半态）。
+                in_spec = iid in spec
+                if (it.get("enabled") is True) != in_spec:
+                    failures.append("腿a %s 声明门一致性破（enabled=%r 而 schedule_specs 在场=%s，"
+                                    "半态=静默拾取风险）：%r"
+                                    % (iid, it.get("enabled"), in_spec, sorted(spec)))
 
     # ── 腿b：夹具声明——enabled 新实例进 specs 且 face 原样透传；enabled=false 不进
     #     （门的数据面：改声明改行为，decl 零改动承诺）──
@@ -140,8 +148,8 @@ def main() -> int:
         for m in failures:
             print("FAIL_REASON: " + m, flush=True)
         return 1
-    print("离线腿全过：仓内 yaml 两新实例占位 enabled=false 且不进调度规格；"
-          "enabled 新实例进 specs 且 face 原样透传（decl 零改动）", flush=True)
+    print("离线腿全过：仓内 yaml 两新实例声明位在场且 enabled 与调度规格在场恒一致"
+          "（门一致性不变式）；enabled 新实例进 specs 且 face 原样透传（decl 零改动）", flush=True)
 
     # ── 腿c（server 腿）：enabled mechanism-face 过声明门真触发——缺 temporalio/
     #     共享台=ENV_FAIL 点名（离线腿已过如实陈述，不假红不假绿）──
@@ -185,7 +193,8 @@ def main() -> int:
         for m in failures:
             print("FAIL_REASON: " + m, flush=True)
         return 1
-    print("PASS: 仓内 yaml 两新实例占位不调度；enabled 新实例进规格（面由 id 承载，声明 face 已除名）+真触发过门",
+    print("PASS: 仓内 yaml 两新实例声明门一致性（enabled 与调度规格在场恒一致，占位不调度；"
+          "面由 id 承载，声明 face 已除名）+真触发过门",
           flush=True)
     return 0
 

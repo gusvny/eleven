@@ -14,6 +14,10 @@
  *   - （t260910-14 退役注记：原「继续执行」建议链路——建议 job/预跑缓存卡/
  *     结项建议卡/写集建议预填——随预跑建议段整链退役删除；新建工单弹层为纯手工
  *     通路，写集编辑栏（通用字段）保留。）
+ *   - （t260915-09 项目穿参：epics 族六处调用统一经 withEpicProject 拼 ?project=——
+ *     裸调=无参回落引擎仓=跨项目立项单串台病灶（KI-057 client 半收口）；列表/
+ *     聚合轮询 deps 带项目键，切项目即重拉；建票/状态写空项目=守卫不裸调；
+ *     /wf/workflows 模板下拉项目无关，不穿。）
  *   - EpicBadge 同时供 index.tsx 工单列表行/详情头部复用；口径单点=epics-model.ts。
  *
  * 不做（工单红线）：归档按钮/快照 UI（archive API 另单）；立项单编辑 UI（真源=文件，编辑走仓库）。
@@ -25,6 +29,7 @@ import { renderMarkdown } from '../../../knowledge/src/client/markdown.ts'
 import {
   buildCreatePayload, createWriteSetBlocked, epicBadgeOf, epicCreateNote,
   filterEpicsByStatus, invalidWriteSetLines, mergeBuckets, sortBucketKeys, sortEpicTickets,
+  withEpicProject,
 } from './epics-model.ts'
 import type { EpicMeta, EpicStatus, EpicTicketsResult } from './epics-model.ts'
 import { EPIC_NOTE_INPUT_MAX, EPIC_STATUS_OPTIONS, isEpicStatusValue } from './epics-model.ts'
@@ -205,11 +210,13 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
   }, [epicCode, epicNonce])
 
   // 立项清单（列表模式 10s 轮询——状态随归档/新立项变化；失败静默留旧数据，同侧栏 load 先例）。
+  // t260915-09 穿参：?project= 按当前视角项目取数（裸调=回落引擎仓=跨项目串台病灶）；
+  // deps 带 projectKey → 切项目即重拉（切换重置语义）。
   useEffect(() => {
     let cancelled = false
     async function load() {
       try {
-        const d = await getJson(EPICS_API)
+        const d = await getJson(withEpicProject(EPICS_API, projectKey))
         if (!cancelled && d?.ok === true) setList((d.result?.epics ?? []) as EpicListRow[])
       } catch { /* 静默：接口不可用（headless）保持旧数据 */ }
     }
@@ -217,7 +224,7 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
     // t260901-15：不可见页签暂停轮询。
     const stopPoll = startVisibleInterval(() => { void load() }, 10_000)
     return () => { cancelled = true; stopPoll() }
-  }, [])
+  }, [projectKey])
 
   // 立项单详情（Markdown 全文）：code 变化即重拉。
   useEffect(() => {
@@ -227,7 +234,7 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
     setError('')
     void (async () => {
       try {
-        const d = await getJson(`${EPICS_API}/${encodeURIComponent(code)}`)
+        const d = await getJson(withEpicProject(`${EPICS_API}/${encodeURIComponent(code)}`, projectKey))
         if (cancelled) return
         if (d?.ok !== true) { setError(d?.error ?? '立项单加载失败'); return }
         setDetail(d.result as EpicMeta & { markdown: string })
@@ -253,11 +260,13 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
    *  自动归位），失败人话报错（后端 422 枚举/备注校验原样透出）。 */
   const saveStatus = useCallback(async () => {
     if (saveBusy) return
+    // t260915-09：写端点空项目=不裸调（与建票禁用口径同款——状态写落错项目=跨项目串写）。
+    if (!projectKey) { setSaveMsg('未知当前项目——无法保存状态'); return }
     if (editStatus === '') { setSaveMsg('保存失败：请先选择一个状态'); return }
     setSaveBusy(true)
     setSaveMsg('')
     try {
-      const res = await fetch(`${EPICS_API}/${encodeURIComponent(code)}/status`, {
+      const res = await fetch(withEpicProject(`${EPICS_API}/${encodeURIComponent(code)}/status`, projectKey), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(noteDirty ? { status: editStatus, note: editNote } : { status: editStatus }),
@@ -269,7 +278,7 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
       }
       setSaveMsg(`已保存：${String(d?.result?.status ?? '')}`)
       try {
-        const e = await getJson(`${EPICS_API}/${encodeURIComponent(code)}`)
+        const e = await getJson(withEpicProject(`${EPICS_API}/${encodeURIComponent(code)}`, projectKey))
         if (e?.ok === true) setDetail(e.result as EpicMeta & { markdown: string })
       } catch { /* 静默：保存已成功，详情留旧值 */ }
     } catch (err) {
@@ -277,7 +286,7 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
     } finally {
       setSaveBusy(false)
     }
-  }, [saveBusy, editStatus, noteDirty, editNote, code])
+  }, [saveBusy, editStatus, noteDirty, editNote, code, projectKey])
 
   // 关联工单实时汇总：详情打开期间 8s 轮询；degraded=true 走黄条人话降级（不静默）。
   useEffect(() => {
@@ -285,7 +294,7 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
     let cancelled = false
     async function load() {
       try {
-        const d = await getJson(`${EPICS_API}/${encodeURIComponent(code)}/tickets`)
+        const d = await getJson(withEpicProject(`${EPICS_API}/${encodeURIComponent(code)}/tickets`, projectKey))
         if (!cancelled && d?.ok === true) setTickets(d.result as EpicTicketsResult)
       } catch { /* 静默：保持旧数据 */ }
     }
@@ -293,7 +302,7 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
     // t260901-15：不可见页签暂停轮询。
     const stopPoll = startVisibleInterval(() => { void load() }, 8_000)
     return () => { cancelled = true; stopPoll() }
-  }, [code])
+  }, [code, projectKey])
 
   // 模板下拉（新建工单弹层首次打开时拉一次；GET /wf/workflows 无 project 强校验，零 host 改动）。
   useEffect(() => {
@@ -355,7 +364,7 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
       const newId = String(d.result?.id ?? '')
       // 立即刷新关联工单汇总（新单落入本立项）；成功横幅显示在详情头部下方。
       try {
-        const t = await getJson(`${EPICS_API}/${encodeURIComponent(code)}/tickets`)
+        const t = await getJson(withEpicProject(`${EPICS_API}/${encodeURIComponent(code)}/tickets`, projectKey))
         if (t?.ok === true) setTickets(t.result as EpicTicketsResult)
       } catch { /* 静默 */ }
       setCreateOpen(false)

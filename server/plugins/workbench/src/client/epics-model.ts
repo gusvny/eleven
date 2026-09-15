@@ -44,6 +44,24 @@ export function isEpicStatusValue(s: string): s is EpicStatus {
 /** 备注输入框长度上限（与 host EPIC_NOTE_MAX 互指，勿单边漂移）。 */
 export const EPIC_NOTE_INPUT_MAX = 200
 
+/* ---------------------------------------------------- 项目穿参（t260915-09） */
+
+/**
+ * 立项单 API 调用统一拼 ?project=（t260915-09，KI-057 client 侧收口）：epics 族
+ * 端点按项目根取数，裸调=无参回落引擎仓=跨项目立项单串台病灶（宿主 260915 实报）。
+ * 语义对齐 index.tsx withProject 家族先例：
+ *   - projectKey 非空字符串 → 拼 ?project=<encodeURIComponent>（已有 query 用 &）；
+ *   - path 已带 project= → 幂等原样返回（防双拼）；
+ *   - 空串/undefined/非字符串（畸形）→ 原样返回不抛——epics 族读端点无参=回落引擎仓
+ *     （既有语义保留）；写端点的空 key 守卫在调用侧（建票既有禁用口径、saveStatus
+ *     同款守卫），本函数不代拦不静默造参。
+ */
+export function withEpicProject(path: string, projectKey?: unknown): string {
+  if (typeof projectKey !== 'string' || projectKey === '') return path
+  if (/[?&]project=/.test(path)) return path
+  return path + (path.includes('?') ? '&' : '?') + 'project=' + encodeURIComponent(projectKey)
+}
+
 /**
  * 状态筛选（工单台立项单列表，t260831-05）：status 为空串/undefined = 全部不过滤；
  * 其余按枚举值精确过滤。未知值（防御性）返回空数组并 console.warn 一条——

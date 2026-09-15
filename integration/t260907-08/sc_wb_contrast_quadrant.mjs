@@ -26,9 +26,10 @@
 //   fail-closed 点名红——防「导航 na 空转绿」。
 //
 // high-level steps：
-//   T0 自举隔离台（10 档 epic 挑码×四态轮换＋无 epic 票，真源 notes/epics/*.md 与 docs/
-//      定稿库=仓树真内容）＋ playwright 探测（缺失=env_fail 有声红 exit 2，三态契约
-//      「闸内无 SKIP」，KI-036/KI-046 口径）。
+//   T0 自举隔离台（10 档 epic 挑码×四态轮换＋无 epic 票；docs=仓树真源 docs/ 定稿库，
+//      立项单=t260915-09 起夹具根自植——client 按项目根取数后夹具根无 notes/epics 即
+//      列表空、弹层链断、coverage 守卫 fail-closed，自植一枚不弱化守卫）＋ playwright
+//      探测（缺失=env_fail 有声红 exit 2，三态契约「闸内无 SKIP」，KI-036/KI-046 口径）。
 //   T1 腿遍历 new-light/new-dark/legacy-light/legacy-dark/fallback：每腿 goto→:root 注入
 //      令牌（legacy 格含 bg-primary knockout，须经忠实注入打到壳层声明点才造得出真缺席
 //      态）→开板忠实注入→逐面导航+扫描：工单列表→「看原因」详情抽屉→侧栏「文档」图标
@@ -59,6 +60,8 @@
 //   env_fail（exit 2）有声红，绝不静默降级；3099/7233 红线：隔离台端口由 freePort 分配，
 //   全程不触碰真控制台。实现落地前红属预期（TDD 信号）；arbitrate/merge 期硬腿必须绿、
 //   legacy-dark 诊断腿保持 na 注记直到宿主确认代表值。
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   makeRegistryRoot, writeProjectEntry, tmpRoot, makeTicketStub,
   bootConsole, teardownOnExit, loadPlaywright, dismissNotice, makeResults,
@@ -117,7 +120,18 @@ if (!pw) {
 let bench;
 try {
   const projectsRoot = makeRegistryRoot('q08-quad-reg-');
-  writeProjectEntry(projectsRoot, 'q08a', '四象限夹具', [tmpRoot('q08-quad-proj-')]);
+  // t260915-09 守卫修正：本票后立项单视图按夹具项目根取数（KI-057 client 穿参收口），
+  // q08a 根无 notes/epics → 列表空 → 「列表→首行→详情→弹层」链断 → coverage 反空转
+  // 守卫（docs/epics/modal 三面全入扫）fail-closed 红。夹具根自植一枚可解析立项单
+  // （状态行给合法枚举供详情链消费），不弱化任何守卫。
+  const q08Root = tmpRoot('q08-quad-proj-');
+  await mkdir(join(q08Root, 'notes', 'epics'), { recursive: true });
+  await writeFile(join(q08Root, 'notes', 'epics', 'q08-fixture-epic.md'), [
+    '# 立项单：q08-fixture-epic', '', '| 字段 | 值 |', '| --- | --- |',
+    '| 代号 | `q08-fixture-epic` |', '| 状态 | 已立项（执行中） |', '| 立项日期 | 2026-09-15 |', '',
+    '四象限夹具立项单（t260915-09 自植；对比度走查链「列表→详情→弹层」数据源）。', '',
+  ].join('\n'));
+  writeProjectEntry(projectsRoot, 'q08a', '四象限夹具', [q08Root]);
   bench = await bootConsole(projectsRoot, stub);
 } catch (e) {
   record('bench/boot', 'env_fail', `隔离台依赖缺失：${String(e?.message ?? e).slice(0, 200)}`);

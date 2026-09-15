@@ -287,6 +287,20 @@ const domSubPainted = (title) => `(() => {
 })()`
 
 async function openMetricsPanel(page) {
+  // Factory notice gate (t260829-07 family): on a FRESH stage DSH_HOME the
+  // harness shell pops an「Internal Testing Notice」modal (Continue button,
+  // full-screen mask, z≈1000) that sits ABOVE the metrics panel (z=95) —
+  // every panel click is then intercepted (260915 donut red diagnosed by
+  // .sandbar/probe_donut_click.mjs: elementFromPoint hits the notice mask;
+  // in-suite greens were stages whose flag an earlier browser had already
+  // set). Dismiss before opening the panel — read-only navigation semantics,
+  // safe to repeat, same pattern as ui-check/capture.mjs and lib_fix17.
+  try {
+    const btn = page.locator('button', { hasText: /continue|继续/i }).first()
+    await btn.waitFor({ state: 'visible', timeout: 4000 })
+    await btn.click({ timeout: 3000 }).catch(() => btn.evaluate((el) => el.click()))
+    await btn.waitFor({ state: 'hidden', timeout: 3000 }).catch(() => { /* 已消失即可 */ })
+  } catch { /* 未弹出，继续 */ }
   await page.evaluate(() => localStorage.removeItem('sandbar-workbench-metrics-panel-v1')).catch(() => {})
   // Entry = the 「📊 度量」 button at the bottom of the sidebar's middle column
   // or the shell overlay button; the panel listens on the METRICS_TOGGLE_EVENT
@@ -361,7 +375,7 @@ async function runBrowser(pw, browser) {
     }
     record('S1 precheck', 'pass', `metrics stub consumed (${metricsRequests} requests: fast+full double-door)`)
 
-    const failWith = async (name, e) => record(name, 'fail', `${String(e).slice(0, 140)}`)
+    const failWith = async (name, e) => record(name, 'fail', `${String(e).slice(0, 400)}`)
     const run = async (name, fn) => {
       try {
         const err = await fn(page)
@@ -422,12 +436,43 @@ async function runBrowser(pw, browser) {
     await run('D5 malformed donut -> blank-state text, no crash', async (p) => {
       malformedMode = true
       if (!(await clickTab(p, '时间'))) return 'time tab missing'
-      const ok2 = await waitFor(async () =>
-        (await p.locator('.wb-m .wb-m-empty').count()) > 0, 10000)
-      const emptyText = ok2 ? await p.locator('.wb-m .wb-m-empty').first().textContent() : ''
-      if (!ok2) return 'malformed donut did not surface blank-state text'
-      if (!String(emptyText).includes('无可绘图数据') && !String(emptyText).includes('无可聚合数据')) {
-        return `blank-state text unexpected: ${JSON.stringify(emptyText)}`
+      // 终态空态判定：metrics 缓存特性下 refreshing 分支横幅（「缓存快照已上台，全量
+      // 刷新中…」）先于空态文案渲染（空态分支互斥、横幅为在途态），套件负载下瞬时
+      // 首文本断言撞横幅=偶发假红（260915 仲裁轮实锤）——改轮询等刷新收敛到终态空态
+      // 文案（横幅允许在途，不弱化：终态必须收敛到空态文案），超时点名所见文本。
+      const blankRe = /无可绘图数据|无可聚合数据/
+      let lastText = ''
+      const ok2 = await waitFor(async () => {
+        lastText = await p.locator('.wb-m .wb-m-empty').first().textContent().catch(() => '')
+        return blankRe.test(lastText)
+      }, 30000)
+      if (!ok2) {
+        return `malformed donut did not reach blank-state text in 30s (last=${JSON.stringify(lastText)})`
+      }
+      return null
+    })
+
+    // D7 terminal mutual exclusion (t260915-09 implement gen2 widening — the
+    // baseline enhancement proposed during acceptance walkthrough, routed here
+    // by the project-session inspection): the refreshing branch copy
+    // 「缓存快照已上台，全量刷新中…」 (metrics.tsx) renders inside the SAME
+    // `.wb-m-empty` container family as the terminal blank text — the four
+    // body-state branches are mutually exclusive by construction, but nothing
+    // asserted that. A regression that strands the panel in the refreshing
+    // state (full response never lands / state not cleared) would show a
+    // permanently「刷新中」fake-progress face next to a rendered empty state.
+    // D5 only requires convergence TO the terminal text; D7 adds the other
+    // half of the contract: at terminal state the in-flight copy must be
+    // retired. Pure widening — D1-D6 untouched.
+    await run('D7 refreshing banner retired at terminal empty state', async (p) => {
+      const blankRe = /无可绘图数据|无可聚合数据/
+      const empties = await p.locator('.wb-m .wb-m-empty').allTextContents().catch(() => [])
+      if (!empties.some((t) => blankRe.test(t))) {
+        return `precondition lost: terminal blank text no longer present (empties=${JSON.stringify(empties).slice(0, 120)})`
+      }
+      const stuck = empties.filter((t) => t.includes('全量刷新中'))
+      if (stuck.length > 0) {
+        return `refreshing copy stuck alongside terminal empty state (count=${stuck.length}) — 空态分支互斥破`
       }
       return null
     })

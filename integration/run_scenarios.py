@@ -458,7 +458,7 @@ SCENARIOS = [
      "动态流静默窗新鲜度契约（KI-024②）：每个 step/start 与 LLM 重试各出一行、🔧 工具行回归不破、静默窗整链（spawn→首句）不再零行、坏行与流式块不上屏、会话缺失 exists:false 人话降级（t260903-04）",
      "node integration/t260903-04/sc_t03_live_round_freshness.mjs", "ro"),
     ("t260903-04-client-bundle-sync",
-     "工单台 shipped bundle 与 src/client 源码同步守卫：lib/client.js≡client.cjs 双产物一致、契约特征词（parallel_stages 等）在用户实际被服务的产物内在案——改 src 忘重建 tsdown 时源码层全绿而真台面仍旧行为的静默穿透面（t260903-04 arbitrate，t260901-22 同族事故常驻化）",
+     "工单台 shipped bundle 与 src/client 源码同步守卫：lib/client.js≡client.cjs 双产物一致、契约特征词（parallel_stages 等）在用户实际被服务的产物内在案——改 src 忘重建 tsdown 时源码层全绿而真台面仍旧行为的静默穿透面（t260903-04 arbitrate，t260901-22 同族事故常驻化；t260915-09 追加当票特征词 withEpicProject=epics 穿参收口的盘上锚）",
      "node integration/t260903-04/sc_t04_client_bundle_sync.mjs", "ro"),
     ("t260903-06-query-kind-no-lie",
      "查询谎报面全链回归（KI-025）：阶段切换窗查询失败时，从 Temporal 抖动经 client.py→ticket.py→tools_registry 的完整回执链路绝不把瞬时/终态/畸形故障文案成「工单不存在」；「不存在」仅由 NotFoundFailure 语义产出；终态票不诱导重试；kind 随分级异常跨层存活、缺 kind 回执绝不产 not_found（t260903-06）",
@@ -542,7 +542,7 @@ SCENARIOS = [
      "node integration/t260905-08/sc_hex_clean.mjs", "ro"),
     # ---- t260907-08 theme sweep 2: docs page tokenization + full sub-surface sweep + two-platform x two-appearance quadrants (KI-055 root fix) ----
     ("t260907-08-wb-contrast-quadrant",
-     "工单台对比度四象限矩阵看守（t260907-08，KI-055 根治面=主题家族第三次「台面绿真机红」的病根是验收矩阵缺平台版本维度）：验收升为 {新版全令牌集, 旧版 bg-base-only（0.1.1-rc.2 无 bg-primary 名，knockout 模拟）}×{深, 浅} 四象限，每格六张用户台面全扫（工单列表→详情抽屉→文档视图→立项单视图→新建工单弹层→metrics——文档/立项单/弹层为本票新扩走查面，宿主实报两症状的落点：症状①=浅色文档页、症状②=深色部分子面）；正文级 4.5:1、收口行卡 3.0:1，色解析收 rgb()/rgba()/color(srgb …) 未知形态 fail-closed 点名红（沿袭 t260905-08 口径）；legacy 浅格带 canvas 精确等值探针（兜底链接住旧令牌名=t260907-03 先例）；legacy 深格=诊断腿：0.1.1-rc.2 深底 bg-base 代表值未经宿主确认前全扫照跑、比值全打印、na 注记入账不计入判定、不选方便假值造绿，宿主确认后填场景内 LEGACY_DARK_BG_BASE 常量自动升硬腿（机械升级路径）；fallback-only 零注入腿=硬腿（兜底链自洽可读）；变异腿低对比注入必咬（守测试本身）；coverage 反空转守卫：三张新走查面全程至少一格真实入扫（扫描区域计数>0，点击成功≠入扫），否则 fail-closed——防「导航 na 空转绿」（KI-052「绿≠真查」同构防御）；不另立 hex 清零场景（t260905-08-hex-clean 即该 intent 唯一看守，本票实现使其红→绿）。夹具跨票 import t260905-08 lib（bootConsole/teardownOnExit/loadPlaywright/TOKEN_SETS/cssVarsBlock），扫描器复制自该看守场景（漂移责任=两侧头注对齐）；文档/立项单内容=仓树真源（docs/ 定稿库＋notes/epics/*.md）。playwright-core/隔离台依赖缺失=env_fail（exit 2，KI-036/KI-046 家族，不写 SKIP）；实现落地前红属预期（TDD 信号），arbitrate/merge 期硬腿必须绿",
+     "工单台对比度四象限矩阵看守（t260907-08，KI-055 根治面=主题家族第三次「台面绿真机红」的病根是验收矩阵缺平台版本维度）：验收升为 {新版全令牌集, 旧版 bg-base-only（0.1.1-rc.2 无 bg-primary 名，knockout 模拟）}×{深, 浅} 四象限，每格六张用户台面全扫（工单列表→详情抽屉→文档视图→立项单视图→新建工单弹层→metrics——文档/立项单/弹层为本票新扩走查面，宿主实报两症状的落点：症状①=浅色文档页、症状②=深色部分子面）；正文级 4.5:1、收口行卡 3.0:1，色解析收 rgb()/rgba()/color(srgb …) 未知形态 fail-closed 点名红（沿袭 t260905-08 口径）；legacy 浅格带 canvas 精确等值探针（兜底链接住旧令牌名=t260907-03 先例）；legacy 深格=诊断腿：0.1.1-rc.2 深底 bg-base 代表值未经宿主确认前全扫照跑、比值全打印、na 注记入账不计入判定、不选方便假值造绿，宿主确认后填场景内 LEGACY_DARK_BG_BASE 常量自动升硬腿（机械升级路径）；fallback-only 零注入腿=硬腿（兜底链自洽可读）；变异腿低对比注入必咬（守测试本身）；coverage 反空转守卫：三张新走查面全程至少一格真实入扫（扫描区域计数>0，点击成功≠入扫），否则 fail-closed——防「导航 na 空转绿」（KI-052「绿≠真查」同构防御）；不另立 hex 清零场景（t260905-08-hex-clean 即该 intent 唯一看守，本票实现使其红→绿）。夹具跨票 import t260905-08 lib（bootConsole/teardownOnExit/loadPlaywright/TOKEN_SETS/cssVarsBlock），扫描器复制自该看守场景（漂移责任=两侧头注对齐）；文档=仓树真源（docs/ 定稿库）；立项单=夹具根自植（t260915-09 守卫修正：client 按项目根取数后夹具根无 epics 即列表空→弹层链断→coverage 守卫 fail-closed，自植一枚不弱化守卫）。playwright-core/隔离台依赖缺失=env_fail（exit 2，KI-036/KI-046 家族，不写 SKIP）；实现落地前红属预期（TDD 信号），arbitrate/merge 期硬腿必须绿",
      "node integration/t260907-08/sc_wb_contrast_quadrant.mjs", "ro"),
     # ---- t260905-07 ticket-detail drill-down panel + plugin staleness banner (KI-052 root fix) ----
     ("t260905-07-ticket-detail-panel",
@@ -1112,6 +1112,11 @@ SCENARIOS = [
      "建票期拒收「整仓根形态」写集条目（t260915-04，KI-092 事故回归面，宿主 260915 口径一律列举，灰盒 L3，真 git 夹具+真实建票双入口，零 docker 零真 Temporal）：多仓混合形态（根仓+成员仓=dengzhufpv 现场）写集条目==成员仓根（'repo_a' 裸仓名与 'repo_a/' 尾斜杠两形态归一同判）→正规入口 ticket.py create 与裸入口 client.py ticket-start 均建票即拒、点名条目且文案含列举式改法关键词（整仓/逐个子目录/.gitignore——锚关键词不锚整串措辞）；仓内子目录/文件/'integration/'（归根仓）照常受理（放行对照腿防判别面失真：拒收与「放行后败于连接」可辨）；单仓项目 '.' 建票拒收（与运行期闸同口径，经保险丝A 归属解析可达）、'*'/'**'/空串/纯空白/含哨兵字符样本建票期不再判合法（拒收并点名）、'..' 段既有拒收不因新判定失序、目录形子目录条目（'server/'）不误伤（存量兼容）；显式 worktree 不能绕过（保险丝A 传播同拒——判据是写集归属不是派生路径）；畸形输入（写集=字符串逐字符假清单形态）拒收点名须为列表；边角=成员仓名恰为 integration 的项目建票不炸（自动化并入撞闸被跳过）；纵深=legacy/手写载荷形态（显式明细在+根形态条目漏进）merge 期保险丝B fail-closed 红灯点名不静默。与 t260910-03-formal-entry-fuses intent 分界：彼守「成员仓子目录写集×明细缺失」双保险丝与正规入口补传（其写集全为仓内条目，新口径不翻红），本守「条目形态==仓根/项目根」的建票期形态闸（明细在也一样拒）；与 t260907-06/t260912（归属三态/嵌套仓 fail-closed）、t260914-01（泳道目录姿态）、notes-write-gate/t260904-18（建票口其它门）不同面；developer L1（resolve/validate 纯函数矩阵）不同层。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；引擎 venv/temporalio 缺席=ENV_FAIL exit 2 点名",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260915-04/sc_t260915_04_write_set_root_entry_gate.py", "ro"),
 
+
+    ("t260915-09-epics-client-project-wire",
+     "立项单视图跨项目取数走客户端真路径（t260915-09，KI-057 client 穿参收口=当年验收矩阵缺 client bundle 真路径维度的补维度，宿主实报 dengzhufpv 界面看得见 sandbar 10 张立项单的 fixture 化，工单验收①）：bootConsole 隔离台 fresh boot 挂泳道树+双项目注册表（fpv 夹具根自植 fpv-repo-split 一枚/sandbar=引擎仓）——点 dengzhufpv 项目行立项单图标列表=仅 fpv-repo-split 单一、切 sandbar=引擎仓全集、再切回=仍单一（切换重拉=列表随项目重取的用户可感知面）；详情/8s 轮询聚合/状态写全链真点走查（状态写「已保存」在场面+落夹具根文件字节在案=写路径真穿参，落引擎仓=串台写现形）；wire 面反空转断言=旅程收集的全部 /api/epics* 请求 project 参数恒非空（零裸调，收集面<4 fail-closed 不许空转咬不住）+状态写 POST 相位点名 project=dengzhufpv+详情态跨 8s 轮询窗聚合至少再一拍；http 前置腿=无参回落引擎仓与 ?project=sandbar 同根同集（回落语义保留的负向证明；性质断言不钉真实仓清单——仓库每票必变钉清单必 rot）。写足迹=场景私有临时夹具根，零 3099/7233/3199 接触，退出全终态回收；playwright-core/浏览器/隔离台依赖缺失=ENV_FAIL exit 2 不写 SKIP（三态契约，KI-036/046 家族）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。与 t260907-11 三场景（进程内 apply+mock req/res 的 host 解析契约面）intent 不同层——彼锁 host 面，本条锁客户端 bundle 真请求路径（当年漏的正是这半）；与 t260903-04-client-bundle-sync（盘上特征词卫生面）不同面；与 t260910-10-docs-project-anchor（文档视图组件）intent 不同面",
+     "node integration/t260915-09/sc_epics_client_project_wire.mjs", "ro"),
+
     # ---- t260915-05: 工单详情观测面重设计（真泳道图+人话状态卡+红灯翻译层，KI-019/027/048 族）----
     # 两条 intent 互不重叠：①engine 池三红旅程（merge 红/人门/关单的数据面+跨组件缝，
     # 路径闸拒绝腿归 t260915-01 journey 防重复）②browser-free 池 DOM 对拍（渲染面九腿，
@@ -1123,6 +1128,7 @@ SCENARIOS = [
     ("t260915-05-detail-lane-map-dom",
      "详情观测面 DOM 对拍（t260915-05 验收①②③渲染面，灰盒 L3，隔离台真浏览器+API 桩，3099 零接触）：S0 build contract（twin bundle 同步+泳道图/词条表锚点在 bundle+buildLaneMap 纯模型冒烟）+S1 真 DOM 九腿——L1 真泳道图：拓扑在场时并行双道虚线框×2（implement∥design_integration_tests、arbitrate∥acceptance_walkthrough）+人门虚线圈落在 merge 节点+节点标签全部来自拓扑；L2a/b 红灯翻译层：verify_red 与 main_dirty 两族同组件出不同人话主文案、绝不冒裸引擎码（表驱动断言的用户可感知面）、结构化 files 点名到卡面 chips、files 空不捏造 chip（callout C 原话）、原始日志 <details> 折叠展开见 evidence 原文；L3 人门蓝卡：awaiting-human 卡变蓝列出「签什么」=human_context.merge.context_text+stage_acceptance+绿 gate_runs 三源；L4 轮次带：create_plan 三轮逐轮格 hover 出该轮打回原因、×N 徽章在、节点不因返工重复（单向流）；L5 关单可见（KI-027）：closed 票同组件全图+轮次带仍在（拓扑走模板导出通道）；L6 渲染器通用性：fixture-two-step 线性拓扑同组件渲染、标签来自拓扑、DOM 零 dev-lane 业务词；L7 降级锚：拓扑缺席回落现行步骤条（t260901-09 双亮面零回归）+畸形 topology/gens/timeline 不炸；L8 检查明细区：gate_runs 逐轮逐条 ✓/✗+item+detail、红行点名文件与状态卡文件清单联动、<details> 展开见该轮 detail 原文；P 卫生腿=全旅程零 pageerror/console.error。数据全桩（list/detail/workflows 三路由，契约形状={template,name,nodes[id,label,role,kind,optional?],edges,groups}——契约漂移=红点名）。分工：t260911-05 锁 merge-dirty 族红卡四件 payload→pixel（本条不复断其形状）；t260901-09 锁现行步骤条并行双亮；t260915-01 锁数据面引擎半（本条数据全桩）；developer L1（lane-map-model 纯函数矩阵/status-card 词条表 UT）不同层——L1 锁不住 JSX 运行时错/落位/降级渲染。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；隔离台/playwright/chromium 缺席=ENV_FAIL exit 2（KI-036 点名）",
      "node integration/t260915-05/sc_ticket_detail_lane_map_dom.mjs", "browser-free"),
+
 
 ]
 

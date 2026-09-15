@@ -151,6 +151,21 @@ if tool == 'ticket' and args.get('op') == 'show':
 print(json.dumps({"ok": False, "error": "temporal unreachable: connection refused"}))
 sys.exit(1)
 `, 'utf8')
+      // 工单列表路由委托引擎 CLI（server/engine/client.py ticket-list）——桩此前只盖
+      // admin.py，「列表行带 epic 字段」断言自路由换道起恒 502（t260915-09 顺手修复：
+      // 补 engine 副本，同分支复用 listBranch，两路同源不造第二份清单形状）。
+      await mkdir(join(repo, 'server', 'engine'), { recursive: true })
+      await writeFile(join(repo, 'server', 'engine', 'client.py'), `import json, sys
+cmd = sys.argv[1] if len(sys.argv) >= 2 else ''
+if cmd == 'ticket-list':
+    ${listBranch}
+    sys.exit(0)
+if cmd == 'workflow-list':
+    print(json.dumps({"ok": True, "result": []}))
+    sys.exit(0)
+print(json.dumps({"ok": False, "error": "temporal unreachable: connection refused"}))
+sys.exit(1)
+`, 'utf8')
     }
 
     /* --- C1 list route: env override / empty dir / default <repo>/notes/epics --- */
