@@ -63,8 +63,11 @@ instances:
       cron: 0 7 * * 1
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
+  # 260915 宿主令先试跑（手动 trigger 验产出质量，过了再 schedule-up 开每周定时）。
+  # 注意：scan_face 缺省会落 test 面（票①行为）——本实例必须显式指 simplify。
   - id: simplify-face
-    enabled: false
+    enabled: true
+    scan_face: simplify
     schedule:
       kind: cron
       cron: 0 8 * * 1
