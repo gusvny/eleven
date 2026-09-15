@@ -380,8 +380,10 @@ async def run_inspection_scan(args: Dict[str, Any]) -> Dict[str, Any]:
     """Inspection scan by declared face (ticket 2, t260910-09; rework r2 semantics):
       - face=test (also the default / missing key) → ticket-1 test-face scan, behavior
         identical to before ticket 2 (existing callers/scenarios unchanged);
-      - face=mechanism/simplify → the ticket-2 scanners;
-      - ANY OTHER face (a declared-but-unwired face like doc, or a typo) → FALLBACK to
+      - face=doc → docs-face scanner (t260911-02); face=stage → stage-capacity
+        scanner (t260915-18, stage_docker inventory read-only); face=mechanism/simplify
+        → the ticket-2 scanners;
+      - ANY OTHER face (a declared-but-unwired face, or a typo) → FALLBACK to
         the test-face scan with an explicit meta annotation (face_fallback naming the
         requested face and the wired scanners). Rationale (arbitrate code-fault 260910):
         ticket-1 treated face as a display-only field, so declared-but-unwired instances
@@ -407,12 +409,18 @@ async def run_inspection_scan(args: Dict[str, Any]) -> Dict[str, Any]:
             # 不再回落 test 面（fallback 名单同步收窄）。
             from inspection_scan_doc import run_doc_face_scan
             result = run_doc_face_scan(root)
+        elif face == "stage":
+            # t260915-18：stage 面接线（stage-capacity 实例）——台面容量可见性，
+            # inventory 只读清点；docker 缺席=响亮未检查（S14 不假绿）。
+            from inspection_scan_stage import run_stage_face_scan
+            result = await asyncio.to_thread(run_stage_face_scan, root)
         elif face in ("mechanism", "simplify"):
             result = run_face_scan(face, root)
         else:
             result = run_test_face_scan(root, None)
-            fallback_note = ("声明面 %r 未接线扫描器（已接线：doc、mechanism、simplify）——回落 "
-                             "test 面扫描（票① 行为）；接线或改名走 dev-lane 工单" % face)
+            fallback_note = ("声明面 %r 未接线扫描器（已接线：doc、stage、mechanism、"
+                             "simplify）——回落 test 面扫描（票① 行为）；接线或改名"
+                             "走 dev-lane 工单" % face)
             result.setdefault("meta", {})["face_fallback"] = fallback_note
             activity.logger.warning("巡检面回落：%s", fallback_note)
         activity.logger.info(

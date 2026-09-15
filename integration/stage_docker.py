@@ -47,6 +47,10 @@ Subcommands:
                               超阈）判定逐条租约，判拆的全拆（容器+网络+卷）并
                               逐条点名；两条安全阀（booting 新鲜 / 泳道在册）
                               一律不碰；stdout 回 JSON 报告
+  inventory                  台面清点（t260915-18，只读）：租约×容器 join 回 JSON——
+                              容量面（容器/工程/活租约/孤儿 vs MAX_STAGES 保险丝）
+                              + 每台归属（ticket/attempt→project 映射、锚、心跳
+                              年龄）；孤儿=本管域容器而无租约文件
   selftest                   white-box self test (never touches docker):
                               forbidden-port exclusion / band locks / lease
                               criteria / malformed input rejection
@@ -270,6 +274,50 @@ def sweep_budget_s():
     return float(os.environ.get("SANDBAR_STAGE_SWEEP_BUDGET_S", 30))
 
 
+def sweep_orphans_enabled(default=True):
+    """孤儿容器清扫开关（t260915-18 C10+对抗发现 F1）：SANDBAR_STAGE_SWEEP_ORPHANS
+    ∈ {0,off,no} 显式关；∈ {1,on,yes} 显式开；**未设=default**——调用方按自身
+    语义给缺省：`sweep` CLI（操作员显式发起）缺省开；up/ensure 挂点钩子缺省
+    **关**（260915 实爆 F1：无半径+缺省开的挂点清扫把宿主存量孤儿当一次普通
+    up 顺手真拆——真拆须宿主点头，挂点只做租约面，孤儿面必须显式点名启用）。
+    畸形值=usage 红点名（不静默归默认）。"""
+    raw = str(os.environ.get("SANDBAR_STAGE_SWEEP_ORPHANS", "")).strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in ("0", "off", "no", "false"):
+        return False
+    if raw in ("1", "on", "yes", "true"):
+        return True
+    raise StageError("SANDBAR_STAGE_SWEEP_ORPHANS 不合法：%r（须 on/off 族）"
+                     % raw, kind="usage")
+
+
+def orphan_prefix():
+    """孤儿清扫半径旋钮（t260915-18 场景② F1 硬契约）：设置后 condemned 仅限
+    命中前缀的工程名——孤儿容器是全机全局可见面，无半径的「在管域+超龄即拆」
+    会让任一次 sweep 波及他票/宿主存量（宿主点头红线）。空/未设=不限半径。"""
+    raw = str(os.environ.get("SANDBAR_STAGE_SWEEP_ORPHAN_PREFIX", "")).strip()
+    return raw or None
+
+
+def orphan_min_age_s():
+    """孤儿容器最短年龄阀（秒，t260915-18 C10）：缺省 1800s。容器年龄不足不拆
+    ——孤儿判定本就要求「无租约文件」，年龄阀是第二道保守阀（防与 hold ③
+    回收窗/极短命场景竞争）。畸形值=usage 红点名（旋钮纪律同 NET_BASE）。"""
+    raw = str(os.environ.get("SANDBAR_STAGE_ORPHAN_MIN_AGE_S", "")).strip()
+    if not raw:
+        return 1800.0
+    try:
+        v = float(raw)
+    except ValueError:
+        raise StageError("SANDBAR_STAGE_ORPHAN_MIN_AGE_S 不合法：%r（必须非负秒数）"
+                         % raw, kind="usage")
+    if v < 0:
+        raise StageError("SANDBAR_STAGE_ORPHAN_MIN_AGE_S 不合法：%r（必须非负秒数）"
+                         % raw, kind="usage")
+    return v
+
+
 def hold_wait_s():
     """双向有界握手预算（秒）：ensure 等 hold 写就绪 pid 文件 / hold 等租约
     出现，都以此为帽（R1'a：Popen 返回 ≠ 子进程真起来了）。"""
@@ -438,6 +486,44 @@ def pid_alive(pid):
         return False
 
 
+def process_start_token(pid):
+    """进程启动令牌（t260915-18 锚身份）：`ps -p <pid> -o lstart=` 的原文串。
+    pid 被重用必然换出不同的启动时间——令牌不匹配=「不是当年那个锚」，治
+    pid_alive 的已知弱点（重用读作活）。取不到（ps 缺席/进程已亡/平台差异）
+    = None，调用方回落纯 pid 判定（兼容面，不引入新启发式）。"""
+    try:
+        p = _run(["ps", "-p", str(int(pid)), "-o", "lstart="], timeout=5, check=False)
+    except (subprocess.SubprocessError, FileNotFoundError, OSError, ValueError):
+        return None
+    tok = (p.stdout or "").strip()
+    return tok or None
+
+
+def anchor_alive(pid, token):
+    """锚身份两段判活（t260915-18）：pid 存在 AND（无令牌=纯 pid 判定；有令牌=
+    启动时间逐字匹配）。锚=起台者的长命调用方进程（hold 腿 ③ 的回收判据面）；
+    令牌不匹配即判「锚已亡」，宁可交 sweep/人工复核也不续跳误活。令牌探针
+    不可得（ps 缺席等）=回落纯 pid 判定——不引入新单点，缺证据时向「不拆」
+    fail-closed（crit_iv 靠令牌在才判，此处只影响 hold ③）。"""
+    if not pid or not pid_alive(pid):
+        return False
+    if not token:
+        return True
+    cur = process_start_token(pid)
+    if cur is None:
+        return True
+    return cur == token
+
+
+def lease_anchor_alive(lease, anchor_pid):
+    """按租约记录判锚活（t260915-18）：新租约带 anchor_token 走两段判活；
+    旧格式无令牌回落纯 pid 判定（兼容面，行为一字不改）。畸形租约（非 dict）
+    =无锚证据可验=保守判亡（与 anchor_alive「无法验证不续跳」同一口径）。"""
+    if not isinstance(lease, dict):
+        return False
+    return anchor_alive(anchor_pid, lease.get("anchor_token"))
+
+
 def holder_pid(lease):
     """Extract holder.pid, tolerating missing/malformed holder blocks (→ None
     = un-judgeable, treated as dead downstream)."""
@@ -449,7 +535,7 @@ def holder_pid(lease):
 
 
 def new_lease(project, holder_pid, services, ticket=None, anchor_pid=None, ttl=None,
-              lease_id=None, owner_root=None):
+              lease_id=None, owner_root=None, anchor_token=None):
     """A complete occupancy granted at claim time (ticket spec ①): holder =
     ticket+pid, state=booting, TTL + fresh heartbeat. Written atomically inside
     the caller's flock critical section. lease_id injectable so the hold leg
@@ -457,7 +543,9 @@ def new_lease(project, holder_pid, services, ticket=None, anchor_pid=None, ttl=N
     owner_root（t260912-02）：起台者的模块仓根（=compose 工作目录，_run 的 cwd），
     残台清扫按主人存在性判拆的锚。旧格式租约无此字段，清扫回落 repo_dir（见
     judge_residue）——回落语义是被测树/挂载源，可能有偏差，故活台+目录在时
-    crit_ii 一律 fail-closed 不拆（C4b，只留报告行）。"""
+    crit_ii 一律 fail-closed 不拆（C4b，只留报告行）。
+    anchor_token（t260915-18）：锚进程的启动时间令牌（process_start_token），
+    治 pid 重用误活——hold ③ 与 sweep crit_iv 据此判「主人已亡 hold 仍续跳」。"""
     now = time.time()
     return {
         "lease_id": lease_id or ("%s-%d-%s" % (project, int(now * 1000), os.urandom(4).hex())),
@@ -465,6 +553,7 @@ def new_lease(project, holder_pid, services, ticket=None, anchor_pid=None, ttl=N
         "holder": {"ticket": ticket or os.environ.get("SANDBAR_STAGE_TICKET") or "unknown",
                    "pid": int(holder_pid)},
         "anchor_pid": int(anchor_pid) if anchor_pid else None,
+        "anchor_token": anchor_token,
         "state": "booting",
         "services": list(services),
         "ports": {},
@@ -852,15 +941,28 @@ def cmd_hold(project, anchor_pid, lease_id=None, keep=False):
     while True:
         if stopping["flag"]:
             return 130                                                       # ⑤
-        if not pid_alive(anchor_pid) and not keep:                           # ③
-            print("[hold] 锚进程 %d 已亡——调用方树消失，回收孤儿台" % anchor_pid,
+        lease = read_lease(project)
+        if not isinstance(lease, dict) or lease.get("lease_id") != lease_id:  # ①
+            # ① 先于 ③（t260915-18 调序对齐 docstring 原语义）：租约消失/易主=
+            # down 拥有拆台权，本腿只退不拆；账外孤儿容器由 sweep 孤儿清扫接管。
+            try:
+                pidfile.unlink()
+            except FileNotFoundError:
+                pass
+            return 0
+        if not lease_anchor_alive(lease, anchor_pid) and not keep:           # ③
+            print("[hold] 锚进程 %d 已亡（%s）——调用方树消失，回收孤儿台" %
+                  (anchor_pid,
+                   "锚令牌不匹配=pid 重用嫌疑" if pid_alive(anchor_pid) else "pid 消失"),
                   file=sys.stderr)
             try:
                 do_down(project, harvest_hold=False)
             except Exception as e:
-                print("[hold] 孤儿台回收失败（%s：%s）——台交判死回收" %
-                      (type(e).__name__, e), file=sys.stderr)
-                release_lease(project)
+                # t260915-18（C4:863）：回收失败**保留租约**——租约是容器唯一账本，
+                # 账先于容器销=孤儿失明根因（KI-077 当日 37 只实证）。心跳随本腿
+                # 退出停更 → sweep crit_iii/孤儿清扫/人工接管，fail-visible 不静默。
+                print("STAGE_FAIL: [hold] 孤儿台回收失败（%s：%s）——租约保留，"
+                      "台交 sweep/人工回收" % (type(e).__name__, e), file=sys.stderr)
             try:
                 pidfile.unlink()
             except FileNotFoundError:
@@ -868,22 +970,15 @@ def cmd_hold(project, anchor_pid, lease_id=None, keep=False):
             return 0
         # keep 台：锚死跳过回收（常驻基建例外）——心跳继续，台交显式 down /
         # ⑥帽 / ⑦崩处置；锚死+心跳停的组合态由 ⑥ 帽封顶损害
-        lease = read_lease(project)
-        if not isinstance(lease, dict) or lease.get("lease_id") != lease_id:  # ①
-            try:
-                pidfile.unlink()
-            except FileNotFoundError:
-                pass
-            return 0
         if lease.get("state") == "booting" and not pid_alive(booter_pid):     # ③'
             print("[hold] 起台进程 %d 已亡而租约仍 booting——起台孤儿，回收" % booter_pid,
                   file=sys.stderr)
             try:
                 do_down(project, harvest_hold=False)
             except Exception as e:
-                print("[hold] 起台孤儿回收失败（%s：%s）——台交判死回收" %
-                      (type(e).__name__, e), file=sys.stderr)
-                release_lease(project)
+                # t260915-18（C4:886）：同 ③ 修法——失败保留租约不销账。
+                print("STAGE_FAIL: [hold] 起台孤儿回收失败（%s：%s）——租约保留，"
+                      "台交 sweep/人工回收" % (type(e).__name__, e), file=sys.stderr)
             return 0
         if lease.get("state") not in ("booting", "up"):                       # ②
             return 0
@@ -1156,6 +1251,184 @@ def residue_containers(project):
 # 「猜别人死没死」启发式的最后一个采样点；存活判断只有租约事实。
 
 
+# --------------------------------------- 台面清点与孤儿清扫（t260915-18）
+
+def _parse_created_ts(text, now=None):
+    """docker CreatedAt（形如 '2026-09-13 20:11:31 +0800 +08'）→ epoch 秒。
+    取本地时间前 19 位按 %Y-%m-%d %H:%M:%S 解析（CreatedAt 本就是本地钟面）；
+    解析失败=None（调用方 fail-closed 不判拆）。纯函数可单测。"""
+    try:
+        st = time.strptime(str(text).strip()[:19], "%Y-%m-%d %H:%M:%S")
+        return time.mktime(st)
+    except (ValueError, TypeError):
+        return None
+
+
+def compose_container_rows():
+    """全机 compose 容器清单（一次 docker ps -a，按 compose 工程标签聚合）：
+    [{project, working_dir, names[], created_ts}]。docker 不可用/解析失败=[]
+    + stderr 留痕（绝不假装查过——「查不了」≠「没有」）。"""
+    try:
+        p = _run(["docker", "ps", "-a", "--filter", "label=com.docker.compose.project",
+                  "--format",
+                  "{{.Label \"com.docker.compose.project\"}}\t"
+                  "{{.Label \"com.docker.compose.project.working_dir\"}}\t"
+                  "{{.CreatedAt}}\t{{.Names}}"],
+                 timeout=20, check=False)
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        print("STAGE_ENV: docker ps 不可用——容器面不可见（孤儿判定本轮缺席）",
+              file=sys.stderr)
+        return []
+    rows = {}
+    for line in (p.stdout or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) != 4 or not parts[0].strip():
+            continue
+        proj, wd, created, name = (x.strip() for x in parts)
+        r = rows.setdefault(proj, {"project": proj, "working_dir": wd or None,
+                                   "names": [], "created_ts": _parse_created_ts(created)})
+        r["names"].append(name)
+        ts = _parse_created_ts(created)
+        if ts and (r["created_ts"] is None or ts < r["created_ts"]):
+            r["created_ts"] = ts   # 工程年龄=最早容器（起台时刻）
+    return sorted(rows.values(), key=lambda r: r["project"])
+
+
+def managed_repo_root(repo_root=None):
+    """本管域根（t260915-18）：泳道 worktree 里跑时 REPO=泳道根，但台面清点的
+    「本管」必须覆盖主仓+全部兄弟泳道（.lane/*）——剥掉路径里的 /.lane/ 段取
+    主仓根；非泳道布局=REPO 原样。纯函数可单测。"""
+    repo = os.path.realpath(str(repo_root) if repo_root else str(REPO))
+    marker = os.sep + ".lane" + os.sep
+    idx = repo.find(marker)
+    return repo[:idx] if idx != -1 else repo
+
+
+def in_managed_domain(working_dir, repo_root=None):
+    """本管域判定（t260915-18，fail-closed）：compose working_dir 落在主仓真实
+    子树（主仓本体或其 .lane/* 全部泳道，经 managed_repo_root 归一）或测试基线
+    临时树（路径含 sandbar-baseline-，场景基线树随用随删）。标签缺失/域外目录=
+    不在本管——只报告绝不拆（防误伤手工台/他项目台）。纯函数可单测。"""
+    if not working_dir or not str(working_dir).strip():
+        return False
+    try:
+        repo = managed_repo_root(repo_root)
+        real = os.path.realpath(str(working_dir))
+    except (OSError, ValueError, TypeError):
+        return False
+    if real == repo or real.startswith(repo + os.sep):
+        return True
+    return "sandbar-baseline-" in real
+
+
+def build_inventory(leases=None, rows=None, now=None, repo_root=None):
+    """台面清点（t260915-18 工单②，纯函数核心，leases/rows/repo_root 可注入=
+    UT 零 docker）：租约×容器 join。孤儿=本管域容器工程而无租约文件（账先于
+    容器销/隔离锁根随 tmp 树删除等形态，KI-077 当日 37 只实证）；域外容器只列
+    不判。容量面=容器数/工程数/活租约数/孤儿数 vs SANDBAR_STAGE_MAX_STAGES——
+    保险丝只数租约不看容器的可见性缺口由此回执补齐。每台带归属（holder.ticket=
+    票号/attempt、pid、锚、owner、心跳年龄）——人工排障不再猜哈希台名。"""
+    now = time.time() if now is None else now
+    live = enumerate_leases(now=now) if leases is None else leases
+    rows = compose_container_rows() if rows is None else rows
+    stages, out_of_domain = [], []
+    container_count = 0
+
+    def _blank_stage(proj):
+        return {"project": proj, "orphan": False, "containers": 0, "names": [],
+                "working_dir": None, "state": None, "services": [],
+                "holder_ticket": "unknown",
+                "holder_pid": None, "anchor_pid": None, "owner_root": None,
+                "heartbeat_age_s": None, "age_s": None}
+
+    for proj, lease in sorted(live.items()):
+        s = _blank_stage(proj)
+        holder = lease.get("holder") or {}
+        s.update({
+            "state": lease.get("state"),
+            "services": list(lease.get("services") or []),
+            # 票号缺省 unknown（不编造归属——报错精确纪律；场景③断言面）
+            "holder_ticket": holder.get("ticket") or "unknown",
+            "holder_pid": holder.get("pid"),
+            "anchor_pid": lease.get("anchor_pid"),
+            "owner_root": lease.get("owner_root"),
+            "heartbeat_age_s": (round(now - float(lease["heartbeat_ts"]), 1)
+                                if lease.get("heartbeat_ts") else None),
+            "age_s": (round(now - float(lease["ts"]), 1) if lease.get("ts") else None),
+        })
+        stages.append(s)
+    by_lease = {s["project"]: s for s in stages}
+    for r in rows:
+        container_count += len(r["names"])
+        s = by_lease.get(r["project"])
+        if s is not None:
+            s["containers"] = len(r["names"])
+            s["names"] = r["names"]
+            s["working_dir"] = r["working_dir"]
+            continue
+        if not in_managed_domain(r["working_dir"], repo_root=repo_root):
+            out_of_domain.append({"project": r["project"],
+                                  "working_dir": r["working_dir"],
+                                  "containers": len(r["names"])})
+            continue
+        s = _blank_stage(r["project"])
+        s.update({"orphan": True, "containers": len(r["names"]), "names": r["names"],
+                  "working_dir": r["working_dir"],
+                  "age_s": (round(now - r["created_ts"], 1)
+                            if r["created_ts"] else None)})
+        stages.append(s)
+    return {
+        "capacity": {"containers": container_count, "projects": len(rows),
+                     "leases": len(live),
+                     "orphans": sum(1 for s in stages if s["orphan"]),
+                     "max_stages": max_stages(),
+                     "out_of_domain_projects": len(out_of_domain)},
+        "stages": sorted(stages, key=lambda s: (not s["orphan"], s["project"])),
+        "out_of_domain": out_of_domain,
+    }
+
+
+def orphan_condemn_projects(inv=None, now=None, enabled=None, prefix=None):
+    """孤儿判拆集合（C10：开关+最短年龄阀双保险+半径前缀，纯函数可注入）。
+    返回 (condemn, skipped)——skipped 逐条带原因供点名，绝不静默：
+    开关关/年龄不足/前缀外/CreatedAt 不可解析（fail-closed）各归各的 why。
+    enabled/prefix 缺省=读旋钮（UT 显式注入，场景经 env 旋钮驱动）。"""
+    inv = inv if inv is not None else build_inventory(now=now)
+    now = time.time() if now is None else now
+    if enabled is None:
+        enabled = sweep_orphans_enabled()
+    if prefix is None:
+        prefix = orphan_prefix()
+    skipped = [{"project": s["project"],
+                "why": "SANDBAR_STAGE_SWEEP_ORPHANS 显式关闭（明示不静默）"}
+               for s in inv["stages"] if s["orphan"]] \
+        if not enabled else []
+    if skipped:
+        return [], skipped
+    min_age = orphan_min_age_s()
+    condemn = []
+    for s in inv["stages"]:
+        if not s["orphan"]:
+            continue
+        proj = s["project"]
+        if prefix and not proj.startswith(prefix):
+            skipped.append({"project": proj,
+                            "why": "前缀外（SANDBAR_STAGE_SWEEP_ORPHAN_PREFIX=%s）"
+                                   "——孤儿是全局可见面，无半径即无授权清场" % prefix})
+            continue
+        age = s.get("age_s")
+        if age is None:
+            skipped.append({"project": proj,
+                            "why": "容器 CreatedAt 不可解析——fail-closed 不拆"})
+        elif age < min_age:
+            skipped.append({"project": proj,
+                            "why": "年龄 %.0fs < 阀 %.0fs（SANDBAR_STAGE_ORPHAN_MIN_AGE_S）"
+                                   % (age, min_age)})
+        else:
+            condemn.append(proj)
+    return condemn, skipped
+
+
 # --------------------------------------- 受管网段与残台清扫（t260912-02）
 
 _NET_DAEMON_CACHE = None      # (ts, subnets) —— daemon 现存网段探针的进程内缓存
@@ -1337,10 +1610,14 @@ def owner_anchor(lease):
 
 
 def judge_residue(lease, now=None, worktree_roots=None, alive=None, stale_s=None,
-                  owner_exists=None):
+                  owner_exists=None, anchor_alive_fn=None):
     """残台判拆谓词（纯函数，全参可注入=单测防恒真的面）。返回 (verdict, why)，
     verdict ∈ condemn（判拆）/ keep（不碰）/ report（C4b 仅报告不拆）。
       阀1：state=booting 且心跳新鲜 → keep（起台进行中一律不碰）；
+      crit_iv：锚已亡（令牌不匹配=pid 重用嫌疑）而 hold 仍续心跳 → condemn
+              （t260915-18：「愿主已结束 hold 腿仍续心跳」形态——KI-077 当日
+              38h 老台同族；在阀2 之前：owner_root 在册+目录在救不了锚已亡的
+              台；令牌缺席的旧格式租约 fail-closed 跳过，不引入纯 pid 误拆面）；
       阀2：主人在 worktree list 且目录在且心跳新鲜 → keep（健康供给台/常驻台）；
       crit_i：主人工作目录已不存在 → condemn（心跳再新鲜也是残台——260912 主形态）；
       crit_ii：主人不在 worktree list → condemn；但「活台（up+心跳新鲜+holder 活）
@@ -1351,6 +1628,7 @@ def judge_residue(lease, now=None, worktree_roots=None, alive=None, stale_s=None
     now = time.time() if now is None else now
     stale_s = sweep_stale_s() if stale_s is None else float(stale_s)
     alive_fn = alive if alive is not None else pid_alive
+    anchor_fn = anchor_alive_fn if anchor_alive_fn is not None else anchor_alive
     if not isinstance(lease, dict) or not lease.get("lease_id"):
         return "keep", "非租约记录（畸形/旧格式由 sweep_stages 按无主处理）"
     hb = lease.get("heartbeat_ts")
@@ -1370,6 +1648,12 @@ def judge_residue(lease, now=None, worktree_roots=None, alive=None, stale_s=None
                        and os.path.realpath(anchor) in worktree_roots)
     if state == "booting" and fresh:                                   # 阀1
         return "keep", "阀1：booting 且心跳新鲜（起台进行中）"
+    anchor_pid_v = lease.get("anchor_pid")
+    anchor_tok = lease.get("anchor_token")
+    if (state == "up" and fresh and holder_alive and anchor_pid_v and anchor_tok
+            and not anchor_fn(anchor_pid_v, anchor_tok)):                # crit_iv
+        return "condemn", ("crit_iv：锚 %s 已亡（令牌不匹配=pid 重用嫌疑）而 hold"
+                           " 仍续心跳——主人已亡的续跳台（t260915-18）" % anchor_pid_v)
     if in_worktree and owner_exists and fresh:                          # 阀2
         return "keep", "阀2：主人在 git worktree list 且目录在且心跳新鲜"
     if anchor and owner_exists is False:
@@ -1388,7 +1672,9 @@ def judge_residue(lease, now=None, worktree_roots=None, alive=None, stale_s=None
 
 
 def sweep_stages(dry_run=False, budget_s=None, now=None, worktree_roots=None,
-                 alive=None, owner_probe=None, do_down_fn=None):
+                 alive=None, owner_probe=None, do_down_fn=None,
+                 anchor_alive_fn=None, rows=None, repo_root=None,
+                 orphan_face="cli"):
     """残台清扫主体（t260912-02）。逐条租约文件判定（含畸形/旧格式/已死——
     它们的容器面可能仍在跑，一并列管），判拆项幂等 do_down（容器+网络+卷）
     并逐条点名；判定与拆台之间复核租约（翻成 booting 新鲜=有新起台者进场，
@@ -1408,6 +1694,8 @@ def sweep_stages(dry_run=False, budget_s=None, now=None, worktree_roots=None,
         git_note = "git worktree list 不可得——crit_ii 本轮 fail-closed"
     stale_s = sweep_stale_s()
     condemned, kept, report_only, errors, skipped = [], [], [], [], []
+    orphans_skipped = []
+    seen_projects = set()
     scanned = 0
     for f in sorted(lock_root().glob("project-*.json")):
         if time.time() - t0 > budget:
@@ -1415,10 +1703,12 @@ def sweep_stages(dry_run=False, budget_s=None, now=None, worktree_roots=None,
             continue
         scanned += 1
         project = f.name[len("project-"):-len(".json")]
+        seen_projects.add(project)
         lease = read_lease(project)
         if isinstance(lease, dict) and lease.get("lease_id"):
             verdict, why = judge_residue(lease, now=now, worktree_roots=worktree_roots,
-                                         alive=alive, stale_s=stale_s)
+                                         alive=alive, stale_s=stale_s,
+                                         anchor_alive_fn=anchor_alive_fn)
             if (owner_probe and not isinstance(lease.get("owner_root"), str)
                     and verdict in ("keep", "report")):
                 # 旧租约（无 owner_root）：repo_dir 回落失真面——上容器 working_dir
@@ -1479,10 +1769,51 @@ def sweep_stages(dry_run=False, budget_s=None, now=None, worktree_roots=None,
             except Exception as e:                          # noqa: BLE001
                 errors.append({"project": project, "why": row["why"],
                                "err": "%s: %s" % (type(e).__name__, e)})
+
+    # ---- 孤儿容器清扫（t260915-18）：无租约文件而容器在本管域=账先于容器销/
+    # 隔离锁根随 tmp 树删除等形态（KI-077 当日 37 只实证的清道夫补刀面）。
+    # 判定（开关+最短年龄阀+半径前缀三保险）→ 复核（判定窗内租约刚出现=新起台
+    # 者进场，让位）→ 幂等 do_down → 逐条点名；skipped/errors 全点名不静默。
+    # 缺省开关：CLI sweep（操作员显式发起）=开；up/ensure 挂点钩子=关（F1：
+    # 260915 实爆——挂点无半径清场=无授权真拆宿主存量；孤儿面须显式启用）。
+    inv = build_inventory(rows=rows if rows is not None else compose_container_rows(),
+                          repo_root=repo_root)
+    condemn, orphan_skipped = orphan_condemn_projects(
+        inv=inv, enabled=sweep_orphans_enabled(default=(orphan_face == "cli")),
+        prefix=orphan_prefix())
+    for s in inv["stages"]:
+        if not s["orphan"] or s["project"] in seen_projects:
+            continue
+        proj = s["project"]
+        if proj not in condemn:
+            continue
+        if time.time() - t0 > budget:
+            orphan_skipped.append({"project": proj,
+                                   "why": "清扫预算超限（SANDBAR_STAGE_SWEEP_BUDGET_S）"})
+            continue
+        cur = read_lease(proj)
+        if isinstance(cur, dict) and cur.get("lease_id"):
+            orphan_skipped.append({"project": proj,
+                                   "why": "判定窗内租约出现——让位（交租约面判定）"})
+            continue
+        row = {"project": proj, "pid_alive": False, "orphan": True,
+               "why": "孤儿容器：无租约文件而容器在本管域（账先于容器销/隔离锁根"
+                      "随 tmp 树删除等形态，t260915-18）"}
+        if dry_run:
+            condemned.append(dict(row, dry_run=True))
+            continue
+        try:
+            teardown(proj)
+            condemned.append(row)
+        except Exception as e:                          # noqa: BLE001 清理失败必须可见
+            errors.append({"project": proj, "why": row["why"],
+                           "err": "%s: %s" % (type(e).__name__, e)})
+    orphans_skipped.extend(orphan_skipped)
     return {
         "scanned": scanned, "files": scanned + len(skipped),
         "condemned": condemned, "kept": kept, "report_only": report_only,
-        "errors": errors, "skipped_budget": skipped, "git_note": git_note,
+        "errors": errors, "skipped_budget": skipped, "orphans_skipped": orphans_skipped,
+        "git_note": git_note,
         "dry_run": bool(dry_run), "duration_s": round(time.time() - t0, 2),
     }
 
@@ -1497,13 +1828,13 @@ def sweep_residues_quiet(budget=None):
               % os.environ["SANDBAR_STAGE_SWEEP"], file=sys.stderr)
         return None
     try:
-        rpt = sweep_stages(budget_s=budget)
+        rpt = sweep_stages(budget_s=budget, orphan_face="hook")
     except Exception as e:                                  # noqa: BLE001
         print("STAGE_SWEEP_WARN: 残台清扫异常（%s: %s）——继续起台，残留交下次清扫"
               % (type(e).__name__, e), file=sys.stderr)
         return None
     noisy = (rpt["condemned"] or rpt["errors"] or rpt["skipped_budget"]
-             or rpt["report_only"] or rpt.get("git_note"))
+             or rpt["report_only"] or rpt.get("git_note") or rpt.get("orphans_skipped"))
     if noisy:
         print("[stage-sweep] 判拆 %d / 仅报告 %d / 失败 %d / 跳过 %d（%.1fs）%s"
               % (len(rpt["condemned"]), len(rpt["report_only"]), len(rpt["errors"]),
@@ -1513,6 +1844,8 @@ def sweep_residues_quiet(budget=None):
             print("[stage-sweep] 判拆 %s：%s" % (c["project"], c["why"]), file=sys.stderr)
         for c in rpt["report_only"]:
             print("[stage-sweep] 仅报告 %s：%s" % (c["project"], c["why"]), file=sys.stderr)
+        for c in rpt.get("orphans_skipped") or []:
+            print("[stage-sweep] 孤儿跳过 %s：%s" % (c["project"], c["why"]), file=sys.stderr)
         for e in rpt["errors"]:
             print("[stage-sweep] 清理失败 %s：%s（%s）" % (e["project"], e["why"], e["err"]),
                   file=sys.stderr)
@@ -1536,20 +1869,36 @@ def cmd_sweep(dry_run=False):
     上抛=非零退出；stdout 末行=JSON 报告（脚本消费面）。"""
     rpt = sweep_stages(dry_run=dry_run)
     print("[stage-sweep] 扫描 %d 条租约：判拆 %d、保留 %d、仅报告 %d、失败 %d、"
-          "预算跳过 %d（%.1fs）" % (rpt["scanned"], len(rpt["condemned"]),
-                                    len(rpt["kept"]), len(rpt["report_only"]),
-                                    len(rpt["errors"]), len(rpt["skipped_budget"]),
-                                    rpt["duration_s"]))
+          "预算跳过 %d、孤儿跳过 %d（%.1fs）" % (
+              rpt["scanned"], len(rpt["condemned"]), len(rpt["kept"]),
+              len(rpt["report_only"]), len(rpt["errors"]), len(rpt["skipped_budget"]),
+              len(rpt.get("orphans_skipped") or []), rpt["duration_s"]))
     for c in rpt["condemned"]:
         print("[stage-sweep] 判拆 %s：%s%s" % (c["project"], c["why"],
                                                "（dry-run 未执行）" if dry_run else ""))
     for c in rpt["report_only"]:
         print("[stage-sweep] 仅报告 %s：%s" % (c["project"], c["why"]))
+    for c in rpt.get("orphans_skipped") or []:
+        print("[stage-sweep] 孤儿跳过 %s：%s" % (c["project"], c["why"]))
     for e in rpt["errors"]:
         print("[stage-sweep] 清理失败 %s：%s（%s）" % (e["project"], e["why"], e["err"]),
               file=sys.stderr)
     print(json.dumps(rpt, ensure_ascii=False))
     return EXIT_FAIL if (rpt["errors"] or rpt["skipped_budget"]) else EXIT_OK
+
+
+def cmd_inventory():
+    """`inventory` 子命令（t260915-18 工单②，只读）：台面清点 JSON 回执——
+    容量面（容器/工程/活租约/孤儿 vs SANDBAR_STAGE_MAX_STAGES）+ 每台归属
+    （holder.ticket=票号/attempt、pid、锚、owner、心跳年龄）+ 工程名全列——
+    人工排障不再猜哈希台名。docker 缺席=ok:false（CLI exit 2），绝不假装查过。"""
+    if not docker_present():
+        return {"ok": False,
+                "error": "docker 不可用（docker info 失败）——容器面不可见，"
+                         "容量/孤儿口径本轮缺席（不假绿）"}
+    inv = build_inventory()
+    inv["ok"] = True
+    return inv
 
 
 # ---------------------------------------------------------------- validation
@@ -1939,10 +2288,17 @@ def _flip_lease_up(project, lease, ports, services_list, env, opts,
                    sa_registered, sa_note):
     """boot 完成 → 翻 state=up（原子写，写前保 lease_id/holder 不变）。CLI 翻面
     自带一拍新鲜心跳，此后心跳由 hold 腿接管；container_ids 在此定格，作为
-    同租约二次 up 幂等复用的证据面（验收④：容器 id 不变=未被重建）。"""
+    同租约二次 up 幂等复用的证据面（验收④：容器 id 不变=未被重建）。
+    翻面兜底 new_lease（租约文件丢失的退化路）同样带 anchor_pid/anchor_token
+    两件套（对抗复核 F2：缺了它们，hold ③ 两段判活在这条退化路上无从谈起
+    ——pid 重用形态的「愿主已亡 hold 仍续跳」判不出来）。"""
     lease = lease if isinstance(lease, dict) and lease.get("lease_id") else (
         read_lease(project) or new_lease(project, holder_pid=os.getpid(),
                                          services=services_list))
+    anchor_pid = lease.get("anchor_pid") or os.getpid()
+    if not lease.get("anchor_token"):
+        lease["anchor_pid"] = anchor_pid
+        lease["anchor_token"] = process_start_token(anchor_pid)
     used = [k for k in ("temporal", "ui", "console") if k in ports
             and ("temporal" in services_list if k in ("temporal", "ui") else "dsh" in services_list)]
     lease.update({
@@ -2074,9 +2430,21 @@ def do_down(project, harvest_hold=True):
                 pass   # downing 翻面失败不阻断拆台：hold 仍会在 unlink 后自退
         if harvest_hold:
             _stop_hold_by_pid(holder_pid(lease))
+    if os.environ.pop("SANDBAR_STAGE_INJECT_DOWN_FAIL", None) is not None:
+        # 测试注入缝（t260915-18 腿 C；R3：**触发即自清**——pop 原子取走，绝不
+        # 跨用例污染；env 注入缝惯例同 SANDBAR_UI_CAPTURE_STUB/SANDBAR_STAGE_LOCK_DIR）。
+        # 模拟「compose down 真失败」：翻面/收割照走，随后失败上抛+租约保留——
+        # 与下方 compose down rc!=0 分支同语义（t260912-02 验收 D 样板）。
+        print("STAGE_FAIL: [inject] SANDBAR_STAGE_INJECT_DOWN_FAIL 触发（已自清）——"
+              "模拟拆台失败，租约保留", file=sys.stderr)
+        raise StageError("[inject] 模拟拆台失败（SANDBAR_STAGE_INJECT_DOWN_FAIL，一次性）"
+                         "——租约保留待重试/人工", kind="fail")
     if not docker_present():
-        release_lease(project)
-        raise StageError("docker 不可用（docker info 失败）——拆台需要 docker", kind="env")
+        # t260915-18（C4:2078）：docker 缺席不再销账——daemon 恢复后容器可能
+        # 还在，租约（state=downing）是它们唯一的账本；保留交 sweep crit_iii/
+        # 孤儿清扫/人工，fail-visible（sweep 拆台失败本就走 errors 响亮上抛）。
+        raise StageError("docker 不可用（docker info 失败）——拆台需要 docker"
+                         "（租约保留 state=downing，不销账）", kind="env")
     env = dict(os.environ)
     env.setdefault("SANDBAR_TEST_TEMPORAL_NAME", "%s-temporal" % project)
     env.setdefault("SANDBAR_TEST_DSH_NAME", "%s-dsh" % project)
@@ -2127,6 +2495,22 @@ def _gates(services_list):
             "重建，再重试" % agent_runtime.agent_image(), kind="env")
 
 
+def _boot_failure_cleanup(project, hold_proc):
+    """起台半途失败的清场（t260915-18 C4:2181 裁决）：先就地尽力拆
+    （harvest_hold=False——hold 若已死也不复活它，只在拆成功后收割进程）；
+    拆成功=租约随 do_down 释放、hold 见 ① 自退；拆失败=**保留租约**（state=
+    booting，hold 见「起台者亡+booting」走 ③' 重试回收；hold 也已死则心跳停更
+    → sweep crit_iii/孤儿清扫接管），且**不收割 hold**。原序（直接 release+
+    收割）会把 do_up 半途建出的容器变成无账孤儿（KI-077 当日 37 只实证的同族
+    形态——账先于容器销=工具链永久失明）。"""
+    try:
+        do_down(project, harvest_hold=False)
+        _harvest_hold(hold_proc)   # 拆成功：租约已释，收割 hold 进程兜底
+    except Exception as e:         # noqa: BLE001 清场失败必须响亮，绝不静默销账
+        print("STAGE_FAIL: 起台半途失败且就地拆台失败（%s：%s）——租约保留，"
+              "台交 hold ③'/sweep/人工回收" % (type(e).__name__, e), file=sys.stderr)
+
+
 def _boot_new_stage(project, services_list, opts, timeout, cold_cleanup=False,
                     keep=False):
     """The full boot sequence, shared by `up` and ensure's cold path:
@@ -2153,8 +2537,10 @@ def _boot_new_stage(project, services_list, opts, timeout, cold_cleanup=False,
     hold_proc = _spawn_hold(project, lease_id, keep=keep)
     try:
         validate_holder_pid(hold_proc.pid)
+        anchor_pid = os.getppid()
         lease = new_lease(project, holder_pid=hold_proc.pid, services=services_list,
-                          anchor_pid=os.getppid(), lease_id=lease_id)
+                          anchor_pid=anchor_pid, lease_id=lease_id,
+                          anchor_token=process_start_token(anchor_pid))
         if keep:
             lease["keep"] = True   # 占位/心跳读改写全链路透传（常驻标记随租约存续）
         capacity_acquire(project, lease, timeout)   # 保险丝判定+占位同临界区（R4 原样）
@@ -2178,7 +2564,9 @@ def _boot_new_stage(project, services_list, opts, timeout, cold_cleanup=False,
                 if lock_fd is not None:
                     os.close(lock_fd)   # daemon 已真绑端口，释放无冲突窗（header trade-off）
         except BaseException:
-            release_lease(project)   # hold 见租约消失 → ①自退；外层收割兜底
+            # t260915-18（C4:2181）：半途失败不再直接销账——就地尽力拆、拆不
+            # 动则保留租约（见 _boot_failure_cleanup：原序=半途容器失明）。
+            _boot_failure_cleanup(project, hold_proc)
             raise
     except BaseException:
         _harvest_hold(hold_proc)
@@ -2569,13 +2957,21 @@ def main(argv):
             if project:
                 raise StageError("sweep 不接受 --project（清扫是全锁根动作）", kind="usage")
             return cmd_sweep(dry_run=bool(opts.get("dry_run")))
+        if cmd == "inventory":
+            if project:
+                raise StageError("inventory 不接受 --project（清点是全锁根+全机动作）",
+                                 kind="usage")
+            rpt = cmd_inventory()
+            print(json.dumps(rpt, ensure_ascii=False))
+            return EXIT_OK if rpt.get("ok") else EXIT_ENV
         if cmd == "down":
             if not project:
                 raise StageError("down 缺 --project <名>", kind="usage")
             result = do_down(project)
             print(json.dumps(result, ensure_ascii=False))
             return EXIT_OK if not result["residue"] else EXIT_FAIL
-        raise StageError("未知子命令：%s（可选 up/ensure/down/hold/sweep/selftest）" % cmd, kind="usage")
+        raise StageError("未知子命令：%s（可选 up/ensure/down/hold/sweep/inventory/selftest）"
+                         % cmd, kind="usage")
     except StageError as e:
         print("STAGE_%s: %s" % (e.kind.upper(), e), file=sys.stderr)
         return e.exit_code

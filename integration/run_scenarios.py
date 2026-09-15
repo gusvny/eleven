@@ -1171,6 +1171,23 @@ SCENARIOS = [
      "本票时刻查看器与详情链接化契约（t260915-17 验收①③，灰盒 L3，离线结构锁档，3099 零接触）：横幅契约锚在场（data-testid=\"ticket-time-banner\"+人话文案「🕰 本票时刻 · 只读」+「跳到当前版」小链，mock D 原话）；跳到当前版接线=current 口径与横幅渲染同域（点击切当前版且横幅消失）；零编辑控件=查看器域无 textarea/contentEditable/保存语义（只读刚性，写路径仍归编辑器/agent——mock 边界重申原话）；详情文件行=链接（状态卡 sc-file 邻近可点语义）+「背景引用」行组按 refs 条件渲染（mode=base）；Escape/遮罩关闭接线在场（EvidenceLightbox 资源终态家族）；bundle 重建一致=client 源契约锚同批出现在 lib/client.cjs|js 产物（改源忘重建的静默穿透面，t260903-04 bundle-sync 同族）。分工：真点击/真渲染 DOM 腿留隔离台 stage_docker 手法（同 t260915-05-detail-lane-map-dom 分层），本条红语义=契约锚缺席/接线断/未重建不判环境；与 t260901-13 灯箱 intent 不同面（彼=图片证据灯箱，本=文本时刻版查看器）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "node integration/t260915-17/sc_ticket_time_viewer.mjs", "browser-free"),
 
+    # ---- t260915-18: 测试台生命周期治理（被砍路径兜底回收/孤儿清扫半径/容量映射可见）----
+    # 三条 intent 互不重叠：①编排层 kill/cancel/失败三路的台回收（工单①）
+    # ②无租约孤儿的清扫判据与半径（工单②自愈+本设计段对抗发现=半径限定）
+    # ③inventory 映射回执可见性（工单②容量可见；工单③热台复用缺省关=无
+    # 用户可感知行为，归 developer L1，不立场景）。与 t260912-02（有租约残台
+    # 判定矩阵/保险丝/网段）与 t260910-12（hold 被杀判死回收）分界见各条 intent。
+    # 实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
+    ("t260915-18-capture-stage-kill-reclaim",
+     "被砍/异常路径的舞台回收（t260915-18 工单①「怎么算好①」，灰盒 L3，真 docker 台）：四路终态显式 down 契约钉在编排公开协程 ui_capture_stage.run_capture_stage（方案 §1b「编排纯函数、capture_cmd 注入可桩」的落地形态；agent_activities 即经它驱动截图流程，其 docstring 明文「场景用 sleep 桩」；260915 gen1 收敛——实现先落原语+活动内联后抽取为此协程，场景随其合流）。腿 A1 主修超时路——capture 桩（sleep 120）+capture_timeout_s=4 → wait_for 先响（超时分支确定性触发）→ 必须显式 down：容器数紧窗口（≤30s，显式 down 级；分钟级 hold ③ 兜底链达不到=备选 A 否决理由）回落到零、回执点名「超时」。腿 A2 取消于捕获窗——租约 state=up 后 task.cancel()，取消语义=先拆台再按 Temporal 惯例重抛，容器紧窗口回落。腿 A3 取消于起台窗——容器一出现（起台腿仍在跑）即取消：落地形态=asyncio.shield 保起台收尾再补拆重抛（「绝不把半起的台丢给兜底链」），断言容器在 down 帽级窗口（≤150s）回落到零；260915 读码实锚过未护形态（CancelledError 直上抛、台活到 hold ⑥ 帽 4h），本腿守该窗不退化。腿 B 硬杀残局守卫——调用方进程 SIGKILL（worker 崩溃/OOM 形态，收割僵尸后判）后既有 hold ③ 锚死回收最终拆台+租约销账（验证对象=兜底非主修，修前应绿守其不退化）。腿 C 回收失败响亮——SANDBAR_STAGE_INJECT_DOWN_FAIL=1 一次性注入：down 非零退出+输出点名+租约保留（账本不先于容器销，C4 裁决）+容器仍在（失败的 down 不得假报成功），撤注入恢复。与 t260910-12-holder-kill-reclaim（hold 被杀判死回收）intent 不同面：本条腿 B 锚「锚进程死而 hold 活」的 ③ 路中间形态，腿 A/C 为本票新增单主人显式 down 契约，不互替；capture 超时/取消分支的编排层单测归 developer L1 不同层。锁根经进程 env SANDBAR_STAGE_LOCK_DIR 隔离（引擎子进程继承）。登记 engine（真台生命周期面，拆台按工程名隔离不碰他台）。cmd 自带引擎 venv 回落（temporalio）；docker 缺席=ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260915-18/sc_capture_stage_kill_reclaim.py", "engine"),
+    ("t260915-18-stage-orphan-sweep-radius",
+     "无租约孤儿的清扫判据与半径（t260915-18 工单②「自愈」+本设计段对抗发现，灰盒 L3，真 docker 台）：正腿——真起台后孤儿化（杀 hold+删租约=「本管域容器而无租约」真实形态，KI-077 当日 37 孤儿最小复现）+孤儿模式 sweep（env 开+年龄阀 0+前缀限定）必须 dry-run 先认领不拆、真跑 condemned 点名+容器清零+rc=0；半径限定（硬契约）——condemned 集合全部命中本票前缀，前缀外在管域容器（含共享供给台 sandbar-test-integ）零接触：孤儿容器是全机全局可见面，无半径的「在管域+超龄即拆」会让任何一次 sweep（含 ensure 挂点/巡检/场景误跑）把宿主存量孤儿一次性真拆（红线「真拆须宿主点头」失守，KI-077 先例=宿主授权清场），故清扫半径必须可限定（本场景锚 SANDBAR_STAGE_SWEEP_ORPHAN_PREFIX，实现可选等效机制但须过本断言）；负锁×3 防判据恒真——租约新鲜台不拆（α 安全阀）、年龄阀内孤儿不拆（β SANDBAR_STAGE_ORPHAN_MIN_AGE_S 生效）、前缀命中但 working_dir 域外不拆（γ in-domain 判定 fail-closed，前缀不越过管域闸）。与 t260912-02-sweep-owner-gone（有租约残台的主人存在性判定矩阵，租约面手术注入）intent 不同面：本条锚无租约孤儿（容器面，租约缺失即失明的 KI-077 家族）与清扫半径，不互替。登记 engine。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker 缺席=ENV_FAIL exit 2",
+     "python3 integration/t260915-18/sc_stage_orphan_sweep.py", "engine"),
+    ("t260915-18-stage-inventory-mapping",
+     "attempt→台名映射回执可查+容量计数面（t260915-18 工单②「怎么算好②」+容量可见半边，灰盒 L3，真 docker 台）：stage_docker.py inventory 只读回执——capacity 计数面（containers/projects/leases/orphans/max_stages 等 ≥五键子集，上限真值同面呈现）+stages 逐台条目（落地形状=扁平 holder_ticket/working_dir/age_s/containers，260915 对齐；语义钉=台属于哪个泳道/票号可核对）；起台挂 SANDBAR_STAGE_TICKET=票号 → 回执 holder_ticket=票号（ticket→project→容器一眼可对，人工排障不再猜哈希台名=病灶四用户面）；未挂票号台 holder_ticket=unknown 缺省（不编造归属——报错精确纪律）；拆台后条目消失（清单跟随真实容器面，当日「锁根 1 租约 vs 38 容器」失明形态在回执层不可再现）。与 t260912-02 系（起台/清扫/网段行为面）intent 不同面：本条锚可见性回执（只读、零 docker 变更动作）；工单③热台复用缺省关无用户可感知行为归 developer L1，不立场景；t260910-12 租约四象限归 L1 不同层。登记 engine。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker 缺席=ENV_FAIL exit 2",
+     "python3 integration/t260915-18/sc_stage_inventory_mapping.py", "engine"),
+
 ]
 
 CMD_TIMEOUT = 900

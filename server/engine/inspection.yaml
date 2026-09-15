@@ -73,6 +73,19 @@ instances:
       cron: 0 8 * * 1
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
+  # ---- t260915-18：stage 面（台面容量可见性）。扫描器=stage_docker inventory
+  # ---- 只读清点（孤儿容器/容量逼近与撞闸/域外在册逐条开票；巡检绝不拆台——
+  # ---- 回收动作只属 stage_docker sweep 与引擎所有者路径）。enabled=false 占位：
+  # ---- 启用按宿主节奏，先手动 trigger 验产出质量，过了再 schedule-up。
+  - id: stage-capacity
+    enabled: false
+    scan_face: stage
+    tz: Asia/Shanghai
+    schedule:
+      kind: cron
+      cron: 30 8 * * 1
+    workflow: InspectionPeriodicWorkflow
+    template: inspection-lite
 # ---- 计数 kind 声明示例（t260911-02 已接线；启用前把 project_key 指向真项目 key，
 # ---- 再 inspection_trigger.py schedule-up --instance <id> --note <谁/为何/频率>
 # ---- 拉起/复活 watcher）----

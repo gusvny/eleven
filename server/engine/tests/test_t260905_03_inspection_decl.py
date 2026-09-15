@@ -246,8 +246,11 @@ def test_trigger_decl_op_offline_real_file():
     assert payload["ok"] is True
     ids = [i["id"] for i in payload["result"]["instances"]]
     # 本票（t260910-11）改名去后缀 + main 侧 t260910-09 新增占位实例，两边语义合取：
-    # ids=新名两实例+t260910-09 两实例；t260913-02 起 simplify-face 启用
-    assert ids == ["integration-tests", "docs-sync", "mechanism-face", "simplify-face"]
+    # ids=新名两实例+t260910-09 两实例；t260913-02 起 simplify-face 启用；
+    # t260915-18 新增 stage-capacity 占位实例（enabled=false 不进 specs，
+    # 实例清单如实同步——R2「清单断言如实同步」口径）。
+    assert ids == ["integration-tests", "docs-sync", "mechanism-face",
+                   "simplify-face", "stage-capacity"]
     # t260911-02：docs-sync 启用（scan_face=doc）；260915 宿主令：simplify-face 启用
     # （scan_face=simplify）→ 三实例进 specs；mechanism-face 停用占位不进
     # （t260915-12 消解轮对齐真源口径）。

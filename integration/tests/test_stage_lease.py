@@ -343,7 +343,8 @@ class SweepJudgeTest(LeaseTestBase):
         def teardown(proj):                   # 桩模仿真 do_down 完整终态：拆面+释放
             sd.release_lease(proj)
             return {"residue": []}
-        rpt = sd.sweep_stages(worktree_roots=self.worktree, do_down_fn=teardown)
+        rpt = sd.sweep_stages(worktree_roots=self.worktree, do_down_fn=teardown,
+                              rows=[])   # t260915-18：容器面显式注入空（密封零 docker）
         self.assertIn("res1", [c["project"] for c in rpt["condemned"]])
         self.assertNotIn("ok1", [c["project"] for c in rpt["condemned"]])
         self.assertNotIn("ok1", [e["project"] for e in rpt["errors"]])
@@ -353,7 +354,7 @@ class SweepJudgeTest(LeaseTestBase):
         sd.write_lease("res2", self.mk("res2",
                                        owner=os.path.join(self.root, "never-was")))
         rpt2 = sd.sweep_stages(dry_run=True, worktree_roots=self.worktree,
-                               do_down_fn=teardown)
+                               do_down_fn=teardown, rows=[])
         hit = [c for c in rpt2["condemned"] if c["project"] == "res2"]
         self.assertTrue(hit and hit[0].get("dry_run"))
         self.assertTrue(sd.lease_path("res2").exists(), "dry-run 不拆不释放")
@@ -369,15 +370,306 @@ class SweepJudgeTest(LeaseTestBase):
         noop = lambda proj: {"residue": []}  # noqa: E731
         dead_lane = os.path.join(self.root, "dead-lane")
         rpt = sd.sweep_stages(owner_probe=lambda p: dead_lane,
-                              worktree_roots=self.worktree, do_down_fn=noop)
+                              worktree_roots=self.worktree, do_down_fn=noop, rows=[])
         hit = [c for c in rpt["condemned"] if c["project"] == "legacy"]
         self.assertTrue(hit and "crit_i" in hit[0]["why"], rpt)
         alive_lane = os.path.join(self.root, "alive-lane"); os.makedirs(alive_lane)
         sd.write_lease("legacy2", dict(legacy, project="legacy2"))
         rpt2 = sd.sweep_stages(owner_probe=lambda p: alive_lane,
-                               worktree_roots=self.worktree, do_down_fn=noop)
+                               worktree_roots=self.worktree, do_down_fn=noop, rows=[])
         self.assertIn("legacy2", [c["project"] for c in rpt2["report_only"]], rpt2)
         self.assertTrue(sd.lease_path("legacy2").exists())
+
+
+class AnchorIdentityTest(LeaseTestBase):
+    """锚身份令牌（t260915-18 R3 治理）：两段判活四象限 + 旧格式回落 +
+    令牌真实性自证（防恒真）。"""
+
+    def test_anchor_alive_quadrants(self):
+        dead = 999999999
+        self.assertFalse(sd.anchor_alive(dead, "Mon Jan  1 00:00:00 2026"),
+                         "pid 亡=亡（令牌无关）")
+        self.assertTrue(sd.anchor_alive(os.getpid(), None), "无令牌=回落纯 pid 判定")
+        orig = sd.process_start_token
+        try:
+            sd.process_start_token = lambda pid: "token-A"   # noqa: E731 注入桩控分支
+            self.assertTrue(sd.anchor_alive(os.getpid(), "token-A"), "pid 活+令牌匹配=活")
+            self.assertFalse(sd.anchor_alive(os.getpid(), "token-B"),
+                             "pid 活+令牌不匹配=重用嫌疑判亡（治 pid_alive 已知弱点）")
+            sd.process_start_token = lambda pid: None   # noqa: E731
+            self.assertTrue(sd.anchor_alive(os.getpid(), "token-A"),
+                            "令牌探针不可得=回落纯 pid（不引入新单点）")
+        finally:
+            sd.process_start_token = orig
+
+    def test_process_start_token_real(self):
+        tok = sd.process_start_token(os.getpid())
+        if tok is None:
+            self.skipTest("ps 探针不可得（沙箱禁执行/无 ps 平台）——回落分支已由"
+                          " anchor_alive 注入桩覆盖；真机路径由集成场景覆盖")
+        self.assertEqual(tok, sd.process_start_token(os.getpid()), "同进程令牌稳定")
+        self.assertIsNone(sd.process_start_token(999999999), "死进程令牌=None")
+
+    def test_lease_anchor_alive_compat(self):
+        lease = {"anchor_pid": os.getpid()}
+        self.assertTrue(sd.lease_anchor_alive(lease, os.getpid()),
+                        "旧格式无令牌=纯 pid 语义（兼容面）")
+        self.assertFalse(sd.lease_anchor_alive(lease, 999999999), "旧格式 pid 亡=亡")
+        self.assertFalse(sd.lease_anchor_alive(None, os.getpid()), "畸形租约=保守判亡")
+
+
+class CritIVResidueTest(LeaseTestBase):
+    """crit_iv（t260915-18）：主人已亡而 hold 仍续心跳——判拆 + 各负锁 +
+    对阀2 的优先级。全参注入（anchor_alive_fn），防恒真。"""
+
+    def setUp(self):
+        super().setUp()
+        self.lane = os.path.join(self.root, "lane")
+        os.makedirs(self.lane)
+
+    def mk(self, project="p", state="up", hb_age=1, holder=os.getpid(),
+           owner="__unset__", anchorless=False):
+        now = time.time()
+        lease = sd.new_lease(project, holder_pid=holder, services=[], ttl=90)
+        lease["state"] = state
+        lease["heartbeat_ts"] = now - hb_age
+        if anchorless:
+            del lease["owner_root"]
+        elif owner != "__unset__":
+            lease["owner_root"] = owner
+        return lease
+
+    def mk_anchored(self, project="cv", token="tok-A", holder=None):
+        lease = self.mk(project, state="up", owner=self.lane,
+                        holder=holder or os.getpid())
+        lease["anchor_pid"] = 42424242
+        lease["anchor_token"] = token
+        return lease
+
+    def test_anchor_pid_reuse_condemned(self):
+        v, why = sd.judge_residue(self.mk_anchored(), worktree_roots={os.path.realpath(self.lane)},
+                                  anchor_alive_fn=lambda p, t: False)
+        self.assertEqual("condemn", v, why)
+        self.assertTrue(why.startswith("crit_iv"), why)
+        self.assertIn("pid 重用", why, "点名重用嫌疑（排障可读）")
+
+    def test_anchor_alive_valve2_keeps(self):
+        v, why = sd.judge_residue(self.mk_anchored(), worktree_roots={os.path.realpath(self.lane)},
+                                  anchor_alive_fn=lambda p, t: True)
+        self.assertEqual("keep", v, "锚活健康台照走阀2 keep（不误拆在用台）：%s" % why)
+
+    def test_old_lease_without_token_fail_closed(self):
+        lease = self.mk_anchored()
+        lease["anchor_token"] = None
+        v, why = sd.judge_residue(lease, worktree_roots={os.path.realpath(self.lane)},
+                                  anchor_alive_fn=lambda p, t: False)
+        self.assertEqual(v, "keep", "令牌缺席（旧格式）fail-closed 不判拆：%s" % why)
+
+    def test_crit_iv_requires_holder_alive(self):
+        lease = self.mk_anchored(holder=999999999)
+        v, why = sd.judge_residue(lease, worktree_roots={os.path.realpath(self.lane)},
+                                  anchor_alive_fn=lambda p, t: False)
+        self.assertEqual(v, "keep", "holder 已亡不属 crit_iv（心跳停更面归 crit_iii）：%s" % why)
+
+    def test_crit_iv_precedes_valve2(self):
+        v, why = sd.judge_residue(self.mk_anchored(), worktree_roots={os.path.realpath(self.lane)},
+                                  anchor_alive_fn=lambda p, t: False)
+        self.assertEqual("condemn", v, "owner 在册+目录在（阀2 条件齐备）也救不了锚已亡：%s" % why)
+
+
+class InventoryOrphanTest(LeaseTestBase):
+    """台面清点与孤儿清扫（t260915-18 工单②/C10）：join 纯函数 + 判拆集合 +
+    sweep 孤儿腿。容器面全注入（rows），零 docker。"""
+
+    MAIN = "/tmp/fake-main"   # 假想主仓根（仅字符串运算，不触盘）
+
+    def row(self, project, wd, age_s, names=("x-temporal",)):
+        return {"project": project, "working_dir": wd, "names": list(names),
+                "created_ts": time.time() - age_s}
+
+    def mk(self, project="p", state="up", hb_age=1, holder=os.getpid()):
+        now = time.time()
+        lease = sd.new_lease(project, holder_pid=holder, services=[], ttl=90)
+        lease["state"] = state
+        lease["heartbeat_ts"] = now - hb_age
+        return lease
+
+    def test_in_managed_domain(self):
+        lane = self.MAIN + "/.lane/t1"
+        self.assertTrue(sd.in_managed_domain(lane + "/server", repo_root=self.MAIN))
+        self.assertTrue(sd.in_managed_domain(self.MAIN + "/server", repo_root=lane),
+                        "泳道跑时域根=主仓（兄弟泳道同管）")
+        self.assertTrue(sd.in_managed_domain("/var/folders/x/sandbar-baseline-abc/server",
+                                             repo_root="/nonexistent"),
+                        "基线临时树在管")
+        self.assertFalse(sd.in_managed_domain("/opt/other-repo/server", repo_root=self.MAIN),
+                         "域外只报告不拆（防误伤他项目台）")
+        self.assertFalse(sd.in_managed_domain(None), "标签缺失=fail-closed 域外")
+        self.assertFalse(sd.in_managed_domain(""), "空标签=域外")
+        self.assertTrue(sd.managed_repo_root(lane) == os.path.realpath(self.MAIN),
+                        "域根剥 .lane 段（macOS /tmp→/private/tmp 已归一）")
+        self.assertTrue(sd.managed_repo_root(self.MAIN) == os.path.realpath(self.MAIN),
+                        "非泳道布局=原样")
+
+    def test_build_inventory_join(self):
+        now = time.time()
+        live = {"has-lease": {"lease_id": "l1", "project": "has-lease", "state": "up",
+                              "holder": {"ticket": "t260915-18/gen0", "pid": os.getpid()},
+                              "anchor_pid": 1, "owner_root": "/x",
+                              "heartbeat_ts": now, "ts": now}}
+        rows = [self.row("has-lease", self.MAIN + "/server", 10, names=("a-temporal", "a-dsh")),
+                self.row("orphan-old", self.MAIN + "/.lane/t9/server", 7200),
+                self.row("outsider", "/opt/other/server", 7200)]
+        inv = sd.build_inventory(leases=live, rows=rows, now=now, repo_root=self.MAIN)
+        cap = inv["capacity"]
+        self.assertEqual(4, cap["containers"])
+        self.assertEqual(3, cap["projects"])
+        self.assertEqual(1, cap["leases"])
+        self.assertEqual(1, cap["orphans"])
+        self.assertEqual(1, cap["out_of_domain_projects"])
+        st = {s["project"]: s for s in inv["stages"]}
+        self.assertFalse(st["has-lease"]["orphan"])
+        self.assertEqual(2, st["has-lease"]["containers"])
+        self.assertEqual("t260915-18/gen0", st["has-lease"]["holder_ticket"],
+                         "attempt→project 映射可查（票号/代号进回执）")
+        self.assertTrue(st["orphan-old"]["orphan"])
+        self.assertEqual("orphan-old", inv["stages"][0]["project"], "孤儿排最前（点名面）")
+
+    def test_orphan_condemn_valves(self):
+        now = time.time()
+        rows = [self.row("young", self.MAIN + "/server", 60),
+                self.row("old", self.MAIN + "/server", 7200),
+                {"project": "noparse", "working_dir": self.MAIN + "/server",
+                 "names": ["n"], "created_ts": None}]
+        inv = sd.build_inventory(leases={}, rows=rows, now=now, repo_root=self.MAIN)
+        condemn, skipped = sd.orphan_condemn_projects(inv=inv, now=now)
+        self.assertEqual(["old"], condemn)
+        whys = {s["project"]: s["why"] for s in skipped}
+        self.assertIn("young", whys)
+        self.assertIn("阀", whys["young"])
+        self.assertIn("noparse", whys)
+        self.assertIn("fail-closed", whys["noparse"])
+        os.environ["SANDBAR_STAGE_SWEEP_ORPHANS"] = "off"
+        try:
+            condemn2, not_condemned2 = sd.orphan_condemn_projects(inv=inv, now=now)
+            self.assertEqual([], condemn2, "开关关=零判拆")
+            self.assertEqual({"young", "old", "noparse"}, {s["project"] for s in not_condemned2})
+            self.assertTrue(all("显式关闭" in s["why"] for s in not_condemned2), "逐条点名不静默")
+        finally:
+            os.environ.pop("SANDBAR_STAGE_SWEEP_ORPHANS", None)
+
+    def test_orphan_min_age_malformed_rejected(self):
+        os.environ["SANDBAR_STAGE_ORPHAN_MIN_AGE_S"] = "abc"
+        try:
+            with self.assertRaises(sd.StageError) as ctx:
+                sd.orphan_min_age_s()
+            self.assertEqual("usage", ctx.exception.kind, "畸形旋钮=usage 红点名")
+        finally:
+            os.environ.pop("SANDBAR_STAGE_ORPHAN_MIN_AGE_S", None)
+
+    def test_sweep_orphan_leg(self):
+        rows = [self.row("orph", self.MAIN + "/server", 7200)]
+        torn = []
+
+        def teardown(proj):
+            torn.append(proj)
+            return {"residue": []}
+
+        rpt = sd.sweep_stages(worktree_roots=set(), do_down_fn=teardown, rows=rows,
+                        repo_root=self.MAIN)
+        self.assertEqual(["orph"], torn, "老孤儿判拆")
+        hit = [c for c in rpt["condemned"] if c["project"] == "orph"]
+        self.assertTrue(hit and hit[0].get("orphan") and "孤儿" in hit[0]["why"])
+        rpt2 = sd.sweep_stages(dry_run=True, worktree_roots=set(), do_down_fn=teardown,
+                               rows=rows, repo_root=self.MAIN)
+        self.assertEqual(["orph"], torn, "dry-run 只认领不拆")
+        self.assertTrue([c for c in rpt2["condemned"] if c["project"] == "orph"][0]["dry_run"])
+        # 判定窗内租约出现（竞态注入：重检点 read_lease 返回真租约=新起台者进场）
+        # ——租约文件在 sweep 开跑后才出现的形态，等价于「glob 已扫、容器 rows
+        # 已取、租约才落盘」窗口；让位=交租约面接管，绝不误拆新起台者。
+        orig_rl = sd.read_lease
+        sd.read_lease = lambda proj: (self.mk(proj) if proj == "orph"
+                                      else orig_rl(proj))   # noqa: E731
+        try:
+            rpt3 = sd.sweep_stages(worktree_roots=set(), do_down_fn=teardown,
+                                   rows=rows, repo_root=self.MAIN)
+        finally:
+            sd.read_lease = orig_rl
+        self.assertEqual(["orph"], torn, "租约出现→让位不拆（防误拆新起台者）")
+        sk = [s for s in rpt3["orphans_skipped"] if s["project"] == "orph"]
+        self.assertTrue(sk and "让位" in sk[0]["why"], rpt3["orphans_skipped"])
+
+    def test_age_valve_guards_young_orphan_in_sweep(self):
+        rows = [self.row("young-p", self.MAIN + "/server", 30)]
+        torn = []
+
+        def teardown(proj):
+            torn.append(proj)
+            return {"residue": []}
+
+        rpt = sd.sweep_stages(worktree_roots=set(), do_down_fn=teardown, rows=rows,
+                        repo_root=self.MAIN)
+        self.assertEqual([], torn, "年龄阀内不拆（C10 双保险）")
+        self.assertTrue(any(s["project"] == "young-p" for s in rpt["orphans_skipped"]),
+                        "跳过逐条点名")
+
+
+class DownFailureLedgerTest(LeaseTestBase):
+    """C4 裁决面（t260915-18）：拆台失败路径账本绝不先销 + 注入缝 R3 自清。
+    docker_present 注入 False——零 docker 依赖纪律不变。"""
+
+    def mk(self, project="p", state="up", hb_age=1, holder=os.getpid()):
+        now = time.time()
+        lease = sd.new_lease(project, holder_pid=holder, services=[], ttl=90)
+        lease["state"] = state
+        lease["heartbeat_ts"] = now - hb_age
+        return lease
+
+    def test_inject_down_fail_self_clears_and_retains(self):
+        sd.write_lease("d1", self.mk("d1"))
+        orig = sd.docker_present
+        sd.docker_present = lambda: False   # noqa: E731 密封：不走真 docker
+        try:
+            os.environ["SANDBAR_STAGE_INJECT_DOWN_FAIL"] = "1"
+            with self.assertRaises(sd.StageError) as ctx:
+                sd.do_down("d1")
+            self.assertEqual("fail", ctx.exception.kind, "注入失败=fail 档上抛")
+            self.assertTrue(sd.lease_path("d1").exists(), "注入失败=租约保留（不销账）")
+            self.assertIsNone(os.environ.get("SANDBAR_STAGE_INJECT_DOWN_FAIL"),
+                              "注入缝触发即自清（R3 防跨用例污染）")
+            with self.assertRaises(sd.StageError) as ctx2:
+                sd.do_down("d1")   # 第二次：缝已清 → 走 docker 缺席分支
+            self.assertEqual("env", ctx2.exception.kind)
+            self.assertIn("租约保留", str(ctx2.exception), "C4:2078 文案点名保留")
+            self.assertTrue(sd.lease_path("d1").exists(), "docker 缺席=租约保留")
+        finally:
+            os.environ.pop("SANDBAR_STAGE_INJECT_DOWN_FAIL", None)
+            sd.docker_present = orig
+
+    def test_boot_failure_cleanup_paths(self):
+        calls = []
+        orig_dd, orig_hh = sd.do_down, sd._harvest_hold
+        try:
+            sd.do_down = lambda project, harvest_hold=True: calls.append(
+                ("down", harvest_hold))   # noqa: E731
+            sd._harvest_hold = lambda proc: calls.append(("harvest", proc))   # noqa: E731
+            sd._boot_failure_cleanup("p", None)
+            self.assertEqual([("down", False), ("harvest", None)], calls,
+                             "拆成功序：do_down(harvest_hold=False)→收割 hold")
+
+            def boom(project, harvest_hold=True):
+                raise sd.StageError("[inject] 模拟", kind="fail")
+
+            sd.do_down = boom
+            def no_harvest(proc):
+                raise AssertionError("拆失败不得收割 hold（③' 要靠它重试回收）")
+            sd._harvest_hold = no_harvest
+            sd.write_lease("d2", self.mk("d2"))
+            sd._boot_failure_cleanup("d2", None)   # 不得 raise（响亮 stderr 即可）
+            self.assertTrue(sd.lease_path("d2").exists(), "拆失败=租约保留")
+        finally:
+            sd.do_down, sd._harvest_hold = orig_dd, orig_hh
+            os.environ.pop("SANDBAR_STAGE_INJECT_DOWN_FAIL", None)
 
 
 class NetAllocTest(LeaseTestBase):
@@ -477,7 +769,8 @@ class NetAllocTest(LeaseTestBase):
 
 class HoldLegTest(LeaseTestBase):
     """hold 腿七路终态：真进程真锁根，PATH 剥离 docker（hold 的孤儿回收腿在
-    UT 环境走「docker 不可用 → 释放租约交人工」分支，语义等价且零 docker）。"""
+    UT 环境走「docker 不可用 → 回收失败 → **保留租约**+响亮 STAGE_FAIL」分支，
+    t260915-18 C4 修法后语义——账本绝不先于容器销；零 docker 纪律不变）。"""
 
     def hold_env(self, **extra):
         e = {"PATH": "/usr/bin:/bin",   # 无 docker：hold 的 do_down 走诚实失败分支
@@ -594,8 +887,10 @@ class HoldLegTest(LeaseTestBase):
                 pass
 
     def test_anchor_death_orphan_reclaim(self):
-        """③锚死：调用方树消失 → 回收孤儿台（UT 无 docker → 释放租约交人工）
-        + exit 0。验收②「持有者被杀→回收且不影响他人」的加速腿。"""
+        """③锚死：调用方树消失 → 回收孤儿台。UT 环境 docker 被剥离 → do_down
+        诚实失败 → t260915-18（C4:863）新契约=**租约保留**+STAGE_FAIL 响亮留痕
+        （账先于容器销=孤儿失明根因）；exit 0 不变。docker 在场的真机回收成功
+        路径（拆成功→租约释放）由集成场景覆盖（sc_capture_stage_kill_reclaim）。"""
         anchor = self.anchor_child()
         try:
             hold = self.spawn_hold("h3", anchor.pid)
@@ -606,14 +901,43 @@ class HoldLegTest(LeaseTestBase):
             time.sleep(0.8)   # 至少一拍心跳，证明确实在持有
             anchor.kill(); anchor.wait(timeout=10)
             self.assertEqual(hold.wait(timeout=10), 0, "锚死 → exit 0")
-            self.assertFalse(sd.lease_path("h3").exists(), "孤儿台租约必须释放")
             log = pathlib.Path(self.root, "hold-h3.log").read_text()
             self.assertIn("锚", log, "回收动作留痕（hold-h3.log）")
+            self.assertTrue(sd.lease_path("h3").exists(),
+                            "docker 缺席→回收失败→租约保留（C4:863 不销账）")
+            self.assertIn("STAGE_FAIL", log, "回收失败必须响亮（不静默）")
+            self.assertIn("租约保留", log)
         finally:
             try:
                 anchor.kill(); anchor.wait(timeout=10)
             except (ProcessLookupError, OSError):
                 pass
+
+    def test_booting_lease_with_live_booter_keeps_holding(self):
+        """③' 前置守卫（t260915-18）：booting 租约且起台者（booter）仍活 →
+        hold 继续持有心跳、绝不提前回收。③' 的「booter 亡+回收失败→保留租约」
+        分支与 ③ 共享同一 except 面（同款修法），真进程驱动由集成场景覆盖
+        （booter=测试进程本身，UT 杀不得——诚实边界）。"""
+        anchor = self.anchor_child()
+        hold = None
+        try:
+            hold = self.spawn_hold("h3b", anchor.pid)
+            lease = sd.new_lease("h3b", holder_pid=hold.pid, services=[], ttl=90,
+                                 lease_id="lease-x")
+            lease["state"] = "booting"   # booter=本测试进程，还活着
+            self.write_lease("h3b", lease)
+            time.sleep(1.2)              # ≥3 拍心跳
+            self.assertIsNone(hold.poll(), "booting 且起台者活→hold 不自退")
+            hb = sd.read_lease("h3b")
+            self.assertEqual("booting", hb.get("state"), "不提前改态不回收")
+        finally:
+            if hold is not None and hold.poll() is None:
+                hold.terminate(); hold.wait(timeout=10)
+            try:
+                anchor.kill(); anchor.wait(timeout=10)
+            except (ProcessLookupError, OSError):
+                pass
+            sd.release_lease("h3b")
 
     def test_max_hold_cap_exit(self):
         """⑥超帽：锚 pid 复用误活的损害上限——超 MAX_HOLD_S 诚实自退（rc 6）
@@ -716,8 +1040,10 @@ class HoldLegTest(LeaseTestBase):
         self.assertFalse(sd.lease_path("h7").exists(), "自退路径绝不起租")
 
     def test_booting_orphan_reclaim(self):
-        """③'起台孤儿：租约 booting + 起台者死 → 起台永不可完成 → 回收+释放。
-        无此腿则死起台者的 booting 租约被人 hold 无限心跳，等待者永远等。"""
+        """③'起台孤儿：租约 booting + 起台者死 → 起台永不可完成 → 回收尝试。
+        无此腿则死起台者的 booting 租约被人 hold 无限心跳，等待者永远等。
+        UT 环境 docker 剥离 → 回收失败 → t260915-18（C4:886）契约=保留租约+
+        STAGE_FAIL 响亮（不销账）。"""
         spawner = textwrap.dedent("""
             import json, os, pathlib, subprocess, sys, time
             root = %r
@@ -749,16 +1075,139 @@ class HoldLegTest(LeaseTestBase):
                                  env=self.hold_env())
         hold_pid = int(inter.stdout.read().split()[0])
         inter.wait(timeout=10)   # 起台者交租约后即死 = 起台孤儿形态
+        # t260915-18（C4:886）新契约：UT 环境 docker 被剥离 → do_down 诚实失败
+        # → **租约保留**+STAGE_FAIL 响亮（不销账，交 sweep crit_iii/人工）；
+        # hold 走完 ③' 后 exit 0。docker 在场的真机「拆成功→释放」路径由集成
+        # 场景覆盖（sc_capture_stage_kill_reclaim 腿 B）。
         deadline = time.time() + 15
-        released = False
         while time.time() < deadline:
-            if not sd.lease_path("h8").exists():
-                released = True
+            log = ""
+            try:
+                log = pathlib.Path(self.root, "hold-h8.log").read_text()
+            except OSError:
+                pass
+            if "STAGE_FAIL" in log:
                 break
             time.sleep(0.2)
-        self.assertTrue(released, "起台孤儿的租约必须被 hold 回收释放")
-        log = pathlib.Path(self.root, "hold-h8.log").read_text()
+        self.assertIn("STAGE_FAIL", log, "回收失败必须响亮（不静默）")
         self.assertIn("起台孤儿", log)
+        self.assertIn("租约保留", log)
+        self.assertTrue(sd.lease_path("h8").exists(), "回收失败=租约保留（不销账）")
+        # hold 走完 ③' 即退（exit 0 语义）：pid 消失自证
+        deadline = time.time() + 10
+        while time.time() < deadline and sd.pid_alive(hold_pid):
+            time.sleep(0.2)
+        self.assertFalse(sd.pid_alive(hold_pid), "③' 完成后 hold exit（进程回收）")
+
+
+class OrphanRadiusKnobTest(LeaseTestBase):
+    """半径/开关旋钮（t260915-18 场景② F1 硬契约的 L1 真值面）：前缀外不判拆、
+    挂点钩子缺省关、CLI 缺省开、畸形开关 usage 红。"""
+
+    def row(self, project, wd, age_s):
+        return {"project": project, "working_dir": wd, "names": ["x-temporal"],
+                "created_ts": time.time() - age_s}
+
+    def test_prefix_restricts_radius(self):
+        rows = [self.row("t26091518-os-a", "/tmp/fake-main/server", 7200),
+                self.row("t26091202-family", "/tmp/fake-main/server", 7200)]
+        inv = sd.build_inventory(leases={}, rows=rows, repo_root="/tmp/fake-main")
+        condemn, skipped = sd.orphan_condemn_projects(inv=inv, prefix="t26091518-os-")
+        self.assertEqual(["t26091518-os-a"], condemn)
+        sk = {s["project"]: s["why"] for s in skipped}
+        self.assertIn("t26091202-family", sk)
+        self.assertIn("前缀外", sk["t26091202-family"])
+
+    def test_hook_default_off_cli_default_on(self):
+        rows = [self.row("t26091518-os-old", "/tmp/fake-main/server", 7200)]
+        torn = []
+        def teardown(proj):
+            torn.append(proj)
+            return {"residue": []}
+        # 挂点钩子（up/ensure 路径）：缺省关——无授权清场红线（F1 实爆面）
+        rpt = sd.sweep_stages(worktree_roots=set(), do_down_fn=teardown, rows=rows,
+                              repo_root="/tmp/fake-main", orphan_face="hook")
+        self.assertEqual([], torn, "挂点缺省不开孤儿面（真拆须显式点名）")
+        self.assertTrue(any(s["project"] == "t26091518-os-old"
+                            for s in rpt["orphans_skipped"]))
+        # CLI（操作员显式发起）：缺省开
+        rpt2 = sd.sweep_stages(worktree_roots=set(), do_down_fn=teardown, rows=rows,
+                               repo_root="/tmp/fake-main", orphan_face="cli")
+        self.assertEqual(["t26091518-os-old"], torn)
+
+    def test_orphan_switch_malformed_usage_red(self):
+        os.environ["SANDBAR_STAGE_SWEEP_ORPHANS"] = "maybe"
+        try:
+            with self.assertRaises(sd.StageError) as ctx:
+                sd.sweep_orphans_enabled()
+            self.assertEqual("usage", ctx.exception.kind)
+        finally:
+            os.environ.pop("SANDBAR_STAGE_SWEEP_ORPHANS", None)
+
+    def mk(self, project="p", state="up", hb_age=1, holder=os.getpid()):
+        now = time.time()
+        lease = sd.new_lease(project, holder_pid=holder, services=[], ttl=90)
+        lease["state"] = state
+        lease["heartbeat_ts"] = now - hb_age
+        return lease
+
+    def test_inventory_ticket_unknown_default_and_services(self):
+        now = time.time()
+        lease = self.mk("nt", holder=os.getpid())
+        lease["holder"]["ticket"] = ""          # 未挂票号
+        lease["services"] = ["temporal", "dsh"]
+        rows = [self.row("nt", "/tmp/fake-main/server", 5)]
+        inv = sd.build_inventory(leases={"nt": lease}, rows=rows, now=now,
+                                 repo_root="/tmp/fake-main")
+        st = {s["project"]: s for s in inv["stages"]}["nt"]
+        self.assertEqual("unknown", st["holder_ticket"],
+                         "未挂票号=unknown 缺省（不编造归属）")
+        self.assertEqual(["temporal", "dsh"], st["services"], "services 在场")
+
+
+class FlipLeaseAnchorTest(LeaseTestBase):
+    """对抗复核 F2：翻面兜底 new_lease（租约丢失退化路）必须带 anchor 两件套
+    ——缺了它们 hold ③ 两段判活在这条退化路上无从谈起。"""
+
+    def mk(self, project="p", state="up", hb_age=1, holder=os.getpid()):
+        now = time.time()
+        lease = sd.new_lease(project, holder_pid=holder, services=[], ttl=90)
+        lease["state"] = state
+        lease["heartbeat_ts"] = now - hb_age
+        return lease
+
+    def test_flip_fallback_carries_anchor_pair(self):
+        from unittest import mock
+        env = {"SANDBAR_TEST_NAMESPACE": "ns-test"}
+        # 探针打桩（沙箱/无 ps 平台取不到真令牌；真探针的回落分支由
+        # AnchorIdentityTest 覆盖）——这里钉「兜底翻面必须把两件套写进租约」。
+        with mock.patch.object(sd, "container_ids", lambda proj: ["cid1"]), \
+                mock.patch.object(sd, "process_start_token",
+                                  lambda pid: "TOK-%d" % pid):
+            sd._flip_lease_up("fp", None, {"temporal": 1}, ["temporal"],
+                              env, {"repo_dir": "/tmp/fake-main"}, True, "")
+        lease = sd.read_lease("fp")
+        self.assertEqual("up", lease["state"])
+        self.assertTrue(lease.get("anchor_pid"), "退化路翻面必须带 anchor_pid")
+        self.assertEqual("TOK-%d" % lease["anchor_pid"], lease.get("anchor_token"),
+                         "退化路翻面必须带 anchor_token（hold③ 两段判活前提）")
+
+    def test_flip_existing_lease_keeps_token(self):
+        from unittest import mock
+        lease = self.mk("fe", holder=os.getpid())
+        lease["anchor_pid"] = 424242
+        lease["anchor_token"] = "2026-01-01 00:00:00 +0800"
+        sd.write_lease("fe", lease)
+        env = {"SANDBAR_TEST_NAMESPACE": "ns-test"}
+        with mock.patch.object(sd, "container_ids", lambda proj: []):
+            sd._flip_lease_up("fe", lease, {"temporal": 1}, ["temporal"],
+                              env, {}, False, "")
+        got = sd.read_lease("fe")
+        self.assertEqual("2026-01-01 00:00:00 +0800", got["anchor_token"],
+                         "既有租约翻面不改写锚令牌（写前保 holder 不变纪律）")
+        self.assertEqual(424242, got["anchor_pid"])
+
+
 
 
 if __name__ == "__main__":

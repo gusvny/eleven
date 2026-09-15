@@ -65,7 +65,8 @@ WIRED_WORKFLOWS = ("InspectionPeriodicWorkflow",)
 TICKET_COUNT_SOURCES = ("archive-dir",)
 # 扫描面词表（t260911-02）：实例可声明 scan_face 指定跑哪个扫描器（「跑哪个巡检面」
 # 由项目声明决定——拍板③原文）；缺省 test（票① 行为兼容，零声明实例不回退不报错）。
-WIRED_FACES = ("test", "doc", "mechanism", "simplify")
+# stage 面接线（t260915-18）：台面容量可见性（stage_docker inventory 只读清点）。
+WIRED_FACES = ("test", "doc", "stage", "mechanism", "simplify")
 # 套件词表（t260913-02）：实例可声明 suite 指定「本期是否在自己的泳道里跑集成全集」。
 # 现在只接 full 一档——全集就是全集，不接受任何「抽稀/跳场景」的值（红线：不得以
 # 跳过或删减场景换取跑通）；缺省空=不跑套件（票① 行为兼容，零声明实例不报错不回退）。

@@ -90,6 +90,35 @@ python3 integration/run_scenarios.py
     一台宿主时兄弟泳道真台常驻 21000 窗，L1 电池（需要全净窗）可重指空闲窗跑；
     畸形或撞生产/缺省台窗=usage 红。
 
+  **舞台生命周期旋钮（t260915-18 续）：锚身份 / 孤儿清扫半径 / 台面清点 / 引擎单所有者**：
+  - 锚身份令牌（两段判活）：起台时 hold 腿在租约记 `anchor_token`（ps lstart
+    逐字串）——「主人已亡但 hold 仍续心跳」的 pid 重用形态由 sweep crit_iv 判拆
+    （当日 38h 老台疑似形态的判据面）；令牌探针不可得（无 ps 平台）=回落纯
+    pid 判定，不引入新单点。
+  - 孤儿容器清扫（「本管域容器而无租约文件」形态，KI-077 当日 37 只实证）：
+    `SANDBAR_STAGE_SWEEP_ORPHANS`（`sweep` CLI 缺省开；**up/ensure 挂点缺省关**
+    ——无半径清场=无授权真拆宿主存量，260915 实爆教训）、
+    `SANDBAR_STAGE_ORPHAN_MIN_AGE_S`（缺省 1800s，第二道保守阀）、
+    `SANDBAR_STAGE_SWEEP_ORPHAN_PREFIX`（半径前缀：设置后 condemned 仅限命中
+    前缀的工程名——孤儿是全机可见面，无半径即无授权清场）。判定窗内租约出现
+    （新起台者进场）自动让位；域外容器（working_dir 出仓且非 `sandbar-baseline-`
+    基线树）只列不判。
+  - 台面清点（只读）：`python3 integration/stage_docker.py inventory`——回执
+    JSON：capacity（containers/projects/leases/orphans/max_stages/
+    out_of_domain_projects）+ stages 逐台（project/services/working_dir/age_s/
+    holder_ticket=attempt 票号或 unknown/holder_pid/anchor_pid/heartbeat_age_s）。
+    起台挂 `SANDBAR_STAGE_TICKET=<票号>/gen<n>` 即进租约（attempt→台名映射，
+    排障不再猜哈希名）。巡检面 scan_face=stage（inspection.yaml
+    `stage-capacity` 占位实例）复用同一回执开票。
+  - 引擎单所有者（UI 截图台）：起/拆所有权归引擎（server/engine/
+    ui_capture_stage.py `run_capture_stage`）——capture-lane 只当无拆权消费者
+    （--stage-json）；起台/拆台/截图三段超时各自有帽：up
+    `SANDBAR_CAPTURE_STAGE_UP_CAP_S`（缺省 180s）、down
+    `SANDBAR_CAPTURE_STAGE_DOWN_CAP_S`（缺省 150s）、截图面由引擎
+    UI_CAPTURE_TIMEOUT_SEC 帽。四条终态路径（成功/超时/取消/异常）全部显式
+    down；拆台失败响亮（绝不静默）；capture 报「外部舞台已死」=拆死台冷重试
+    一次再降级。C2 语义收紧：up 成功后 capture 失败（非死台）=直红不降级。
+
 ## 环境前提
 
 Node >=22.18（type-stripping 直跑，全部测试）；其余按条目按需探测：

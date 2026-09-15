@@ -41,6 +41,13 @@ instances:
 
 # 合并语义（t260910-11 × t260910-09）：本票改名的两个实例 + main 带入的两个占位实例
 # （占位 id 保留 t260910-09 原名，面由 id 承载——声明 face 字段已除名）
+# t260915-18 验收走查修正：腿A 原为 ids 与 NEW_IDS 的**集合相等**断言，把
+# 「声明清单永不增长」冻进了改名契约——stage-capacity 占位实例（enabled=false）
+# 一加入即红（260915 机械轮实爆，归属=本场景断言超出场景 intent）。改名契约的
+# 本意是「新名在案、旧形态拒收」（见文件头 intent），故收紧为子集断言：四个
+# 改名实例必须全部在案（改名复辟/实例被删仍红），新增实例不再误伤；旧形态
+# 拒收仍由腿C 封口。依据=docs/testing-guide.md 测试数据纪律：新增一条真实
+# 数据（声明一项实例）不应让任何测试变红。
 NEW_IDS = {"integration-tests", "docs-sync", "mechanism-face", "simplify-face"}
 
 
@@ -56,8 +63,8 @@ def main() -> int:
     else:
         result = parsed.get("result") or {}
         ids = {str(i.get("id") or "") for i in (result.get("instances") or [])}
-        if ids != NEW_IDS:
-            failures.append("腿A 实例名未完成改名（期望 %s）：%s"
+        if not NEW_IDS.issubset(ids):
+            failures.append("腿A 改名实例未在案（须全部含 %s）：%s"
                             % (sorted(NEW_IDS), sorted(ids)))
         if '"face"' in json.dumps(parsed, ensure_ascii=False):
             failures.append("腿A decl 回执仍含 face 键（字段未退役）：%r"

@@ -67,6 +67,7 @@ import authz_gates
 import failure_protocol
 import path_gates
 import shared
+import ui_capture_stage as uis  # UI 台生命周期原语（t260915-18）：引擎单所有者起/拆台
 from shared import (
     REPO_ROOT,
     STAGE_DISPATCH_KIND,
@@ -3965,6 +3966,117 @@ async def ui_changed_paths(args: UiChangedPathsArgs) -> UiChangedPathsResult:
     return UiChangedPathsResult(ui_paths=ui_paths, detail=detail)
 
 
+# ---- UI 台生命周期：引擎单所有者（t260915-18 工单①） ------------------------
+# 根因：capture-lane「自起隔离台→截图→自拆」的拆台钩子与 node 进程同树，240s
+# 超时 proc.kill() 一并 SIGKILL——钩子从未运行，台泄漏 16→50 只（KI-077 当日
+# 实证）。根治=所有权搬家：引擎 up、引擎 down；capture-lane 只当无拆权消费者
+# （--stage-json，其既有契约=绝不拆外部台）。四条终态路径（成功/超时/取消/异常）
+# 都必须显式 down——回收失败必须响亮，不可见=泄漏复发的同款土壤。
+
+async def _teardown_capture_stage(ticket_id: str, project: str) -> str:
+    """单一拆除函数（t260915-18）：down 幂等且绝不 raise（to_thread 里跑同步
+    subprocess）；失败响亮——返回点名 detail 由调用方落结果详情，日志 error。
+    down 内部超上限/租约保留语义由 stage_docker 兜底（C4:2078），sweep/巡检可接手。"""
+    res = await asyncio.to_thread(uis.down_stage, project, repo_root=str(REPO_ROOT))
+    if res.get("ok"):
+        activity.logger.info("[%s] 引擎台 %s 已拆（单所有者终态回收）", ticket_id, project)
+        return ""
+    note = "引擎台 %s 拆除失败（响亮不静默，交 sweep/巡检接手）：%s" % (
+        project, res.get("detail", ""))
+    activity.logger.error("[%s] %s", ticket_id, note)
+    return note
+
+
+def _ui_evidence_finish_ok(args, wt: Path, shots_dir: Path, pngs: List[str],
+                           label: str) -> UiEvidenceResult:
+    """截图成功收尾（从候选循环提取共用）：镜像到插件旧读面 + 归档主树。"""
+    activity.logger.info("[%s] ui_evidence（%s）：%s", args.ticket_id, label, "、".join(pngs))
+    # Transitional mirror for the plugin face (retirement debt #5): the
+    # plugin / old-chain read side still looks at .sandbar/screenshots.
+    for _n in pngs:
+        try:
+            mirror_to_legacy(wt, Path("screenshots") / _n)
+        except Exception:  # noqa: BLE001  best-effort
+            pass
+    note = _archive_shots(args, shots_dir, pngs)
+    return UiEvidenceResult(ok=True, shots=pngs, shot_lines=_shot_lines(shots_dir, pngs),
+                            detail="%s：截图 %d 张：%s%s" % (label, len(pngs), "、".join(pngs), note))
+
+
+async def _capture_lane_owned(args, wt: Path, shots_dir: Path,
+                              env: Dict[str, str]) -> Dict[str, Any]:
+    """引擎单所有者的 capture-lane 一发：起台→写 stage-json→跑 node→四条终态
+    路径全拆台；死台（capture-lane ENV_FAIL「外部舞台已死」点名词）→ down +
+    同 project 冷重试一次 → 仍死 → 环境面降级。
+
+    返回 dict：
+      fail        空=成功（pngs 非空）；否则失败原因（点名，进 detail）
+      pngs        成功时的截图清单
+      red         True=直红不降级（up 成功后捕获失败：台面已证明工具链在场，
+                  截图仍败值得拦，绝不静默降质——C2 语义表批准稿）
+      env_degrade True=环境面失败，调用方降级下一候选（capture.mjs 直连）
+      note        附加说明（如拆台失败响亮点名），调用方拼进 detail
+    子进程终态纪律与 _run_agent_stage_impl 同款：超时 kill、取消 kill+re-raise、
+    finally backstop terminate/kill 不留孤儿。"""
+    ticket_id = args.ticket_id
+    gen = int(getattr(args, "gen", 0) or 0)
+    project = uis.capture_stage_project(ticket_id, gen)
+    label = "capture-lane（引擎台 %s）" % project
+    lane_script = REPO_ROOT / "server" / "ui-check" / "capture-lane.mjs"
+    note_parts: List[str] = []
+    for attempt in (0, 1):
+        capture_cmd = ["node", str(lane_script), "--lane", str(wt),
+                       "--out", str(shots_dir)]
+        try:
+            r = await uis.run_capture_stage(
+                project=project, services="full", capture_cmd=capture_cmd,
+                capture_timeout_s=UI_CAPTURE_TIMEOUT_SEC,
+                stage_up_timeout_s=uis.up_cap_s(), repo_root=str(REPO_ROOT),
+                env_extra={"SANDBAR_STAGE_TICKET": "%s/gen%s" % (ticket_id, gen)})
+        except uis.UiStageEnvError as e:
+            # C2：up 环境面失败（docker 缺席/ENV_FAIL/超上限）→ 降级继续，
+            # 证据质量降质写明（绝不静默）——R5：up 失败降质证据是未来工单候选。
+            why = str(e)[:300]
+            if attempt:
+                why = "死台冷重试的重新起台仍失败（环境面，降级）：%s" % why
+            return {"fail": "%s 起台失败（环境面，降级 capture.mjs 直连）：%s" % (label, why),
+                    "pngs": [], "red": False, "env_degrade": True, "note": ""}
+        except uis.UiStageError as e:
+            # 契约面（回执畸形/未知 rc）：台面契约坏了=工具链坏，直红不降级
+            # （降级到 capture.mjs 自起台会把坏契约藏进绿证据——驳回静默降质）。
+            return {"fail": "%s 起台契约红（直红不降级）：%s" % (label, str(e)[:300]),
+                    "pngs": [], "red": True, "env_degrade": False, "note": ""}
+        except asyncio.CancelledError:
+            raise   # 取消路拆台已在 run_capture_stage 内完成（终态回收后重抛）
+        if r.get("note"):
+            note_parts.append(r["note"])
+        if r.get("ok"):
+            pngs = sorted(p.name for p in shots_dir.glob("*.png")) if shots_dir.is_dir() else []
+            if pngs:
+                return {"fail": "", "pngs": pngs, "red": False, "env_degrade": False,
+                        "note": "；".join(p for p in note_parts if p)}
+            return {"fail": "%s 报成功但 screenshots 无 png：%s"
+                            % (label, (r.get("capture_out") or "")[-300:]),
+                    "pngs": [], "red": True, "env_degrade": False,
+                    "note": "；".join(p for p in note_parts if p)}
+        err = r.get("capture_err") or ""
+        if uis.stage_dead_marker(err):
+            # 死台（up 回执给了 console 但已不可达）：orchestrator 已把死台拆掉，
+            # 冷重试一次（同 project——down 已释放租约，名字可复用）。
+            note_parts.append("死台一轮：%s" % (r.get("detail") or "")[:160])
+            continue
+        # 超时/非死台失败/无 png → 直红不降级（C2 语义表：台面已证明工具链在场，
+        # 截图仍败值得拦；取消路已在 orchestrator 拆台后重抛）。
+        return {"fail": r.get("detail") or "%s 失败（无点名详情=异常）" % label,
+                "pngs": [], "red": True, "env_degrade": False,
+                "note": "；".join(p for p in note_parts if p)}
+    # 两次 attempt 都是死台 → 环境面降级（台面连续两起不可达=宿主 docker 面
+    # 异常，不是截图工具链坏——照 C2 降级表走）。
+    return {"fail": "%s 死台冷重试一次仍死（环境面，降级 capture.mjs 直连）" % label,
+            "pngs": [], "red": False, "env_degrade": True,
+            "note": "；".join(p for p in note_parts if p)}
+
+
 @activity.defn
 async def prepare_ui_evidence(args: UiEvidenceArgs) -> UiEvidenceResult:
     """UI 票截图证据（t260828-09）：worker（无沙箱）代跑 ui-check/capture.mjs，
@@ -4015,14 +4127,32 @@ async def prepare_ui_evidence(args: UiEvidenceArgs) -> UiEvidenceResult:
         return UiEvidenceResult(ok=False, detail="capture.mjs 不存在（主树）：%s" % script)
     env = dict(os.environ)
     env.setdefault("SANDBAR_CONSOLE_URL", "http://127.0.0.1:3099")
-    candidates = []
-    if lane_script.is_file():
-        candidates.append((["node", str(lane_script), "--lane", str(wt),
-                            "--out", str(shots_dir)], "capture-lane（隔离台）"))
-    candidates.append((["node", str(script), "--url", env["SANDBAR_CONSOLE_URL"],
-                        "--out", str(shots_dir)], "capture.mjs（直连 %s）" % env["SANDBAR_CONSOLE_URL"]))
     detail_tail = ""
     detail_parts: List[str] = []   # ticket t260831-02: accumulate per candidate instead of overwriting each other
+    # ── 候选 0（t260915-18）：引擎单所有者台——引擎起台/引擎拆台，capture-lane
+    # 只当无拆权消费者（--stage-json）。其四条终态路径在 _capture_lane_owned 内
+    # 全部显式 down；直红/降级按 C2 语义表分流。
+    if lane_script.is_file():
+        owned = await _capture_lane_owned(args, wt, shots_dir, env)
+        if not owned["fail"]:
+            return _ui_evidence_finish_ok(args, wt, shots_dir, owned["pngs"],
+                                          "capture-lane（引擎台）")
+        detail_parts.append("capture-lane（引擎台） → %s" % owned["fail"])
+        if owned.get("note"):
+            detail_parts.append(owned["note"])
+        if owned.get("red"):
+            # 直红不降级：台面已证明工具链在场而截图仍败（或台契约坏）——
+            # 证据闸就该红，绝不静默降质（C2 语义表批准稿）。
+            moved, _kept, keep_note = _preserve_failed_shots(args, shots_dir)
+            return UiEvidenceResult(ok=False, shots=moved,
+                                    shot_lines=_shot_lines(shots_dir, moved),
+                                    detail="；".join(detail_parts) + keep_note)
+        activity.logger.info("[%s] ui_evidence capture-lane（引擎台）失败，降级下一候选：%s",
+                             args.ticket_id, owned["fail"][:200])
+    candidates = [
+        (["node", str(script), "--url", env["SANDBAR_CONSOLE_URL"],
+          "--out", str(shots_dir)], "capture.mjs（直连 %s）" % env["SANDBAR_CONSOLE_URL"]),
+    ]
     for i, (cmd, label) in enumerate(candidates):
         proc = None
         try:
@@ -4838,22 +4968,20 @@ async def acceptance_walkthrough(args: AgentStageArgs) -> StageResult:
     # screenshots)
     cap_out = lane_dot_path(cwd, "screenshots", "acceptance", create=True)
     cap_note = ""
-    try:
-        lane = str(args.worktree or cwd)
-        cproc = await asyncio.create_subprocess_exec(  # the same t260903-09 trap, made async (a real browser shoot takes minutes)
-            "node", str(REPO_ROOT / "server" / "ui-check" / "capture-lane.mjs"),
-            "--lane", lane, "--out", str(cap_out),
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        try:
-            co_b, ce_b = await asyncio.wait_for(cproc.communicate(), timeout=UI_CAPTURE_TIMEOUT_SEC)
-            cap_note = co_b.decode("utf-8", "replace")[-1500:] + ce_b.decode("utf-8", "replace")[-500:]
-            if cproc.returncode != 0:
-                cap_note = "capture-lane 退出码 %s：%s" % (cproc.returncode, cap_note)
-        except asyncio.TimeoutError:
-            cproc.kill(); await cproc.wait()
-            cap_note = "capture-lane 超时（>%ss）" % UI_CAPTURE_TIMEOUT_SEC
-    except Exception as e:
-        cap_note = "capture-lane 启动失败：%s: %s" % (type(e).__name__, e)
+    # ── 引擎单所有者台（t260915-18）：走查镜头的起/拆所有权同样归引擎——
+    # 本站点契约仍是 best-effort（失败注入说明文字，agent 当无截图判读），
+    # 但四条终态路径全部显式 down（复用 _capture_lane_owned 的终态纪律）。
+    lane = str(args.worktree or cwd)
+    _owned = await _capture_lane_owned(args, Path(lane), cap_out,
+                                       dict(os.environ))
+    if not _owned["fail"]:
+        cap_note = "capture-lane（引擎台）：%d 张截图（%s）" % (
+            len(_owned["pngs"]), "、".join(_owned["pngs"]))
+    elif _owned.get("red"):
+        cap_note = "capture-lane 直红（引擎台）：%s%s" % (
+            _owned["fail"], ("；%s" % _owned["note"]) if _owned.get("note") else "")
+    else:
+        cap_note = _owned["fail"] + ("；%s" % _owned["note"] if _owned.get("note") else "")
     project = await _fetch_ticket_project(args.ticket_id)
     cmd, env = _prepare_agent_spawn(
         cwd, args.role, "", args.ticket_id, rfile.parent,
