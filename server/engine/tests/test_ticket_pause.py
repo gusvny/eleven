@@ -10,16 +10,20 @@ import dataclasses
 import pytest
 
 import shared
-from base import TicketPauseMixin, TicketWorkflowBase
+from base import TicketCrossProjectMixin, TicketPauseMixin, TicketWorkflowBase
 from dev_lane import DevLaneWorkflow
 
 
 def test_pause_request_shape():
     fields = {f.name: f for f in dataclasses.fields(shared.PauseRequest)}
-    assert set(fields) == {"who", "note"}
+    # t260915-12：pause/resume 纳入跨项目闸盖章面——caller_project/cross_project_note
+    # 带默认值（重放安全，老历史解码兼容）
+    assert set(fields) == {"who", "note", "caller_project", "cross_project_note"}
     assert fields["note"].default == ""
+    assert fields["caller_project"].default == ""
+    assert fields["cross_project_note"].default == ""
     req = shared.PauseRequest(who="op-local")
-    assert req.note == ""
+    assert req.note == "" and req.caller_project == ""
 
 
 def test_pause_constants():
@@ -31,10 +35,13 @@ def test_pause_constants():
 
 def test_mixin_wiring_both_templates():
     assert TicketPauseMixin in TicketWorkflowBase.__mro__
+    assert TicketCrossProjectMixin in TicketWorkflowBase.__mro__
     assert TicketPauseMixin in DevLaneWorkflow.__mro__
-    # dev_lane 零私有暂停逻辑（拍板④机械审计面）
+    assert TicketCrossProjectMixin in DevLaneWorkflow.__mro__
+    # dev_lane 零私有暂停/闸逻辑（拍板④机械审计面）
     own = set(DevLaneWorkflow.__dict__)
-    assert not ({"pause", "resume", "_pause_gate", "_pause_snapshot"} & own)
+    assert not ({"pause", "resume", "_pause_gate", "_pause_snapshot",
+                 "_cross_project_gate"} & own)
 
 
 @pytest.mark.parametrize("paused,at_gate,want", [

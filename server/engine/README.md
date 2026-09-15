@@ -313,6 +313,77 @@ t260821-11 settled 验收 0/5→待补）。留档 `out/demo-M6-scan-expand.txt`
 sign 动作不在验证脚本里——红线：签字只能人。
 
 
+## 11. 跨项目写操作闸（t260915-12）：caller-project gate
+
+写操作（盖章信号/授权/返工/裁决/暂停恢复/update/retry_qc/cancel/ticket-start）在动笔前
+先校验**调用方项目归属**：身份与目标票不符=fail-closed 拒收，宁可拦住合法请求也不放行
+越权写（260915 宿主实报立项；纪律层 charter 已补，本节是机器层契约）。
+
+### 11.1 身份从哪来（出处链，优先级从高到低）
+
+| 来源 | 形态 | identity_src |
+|---|---|---|
+| 显式参数 | `caller_project`（client args / ticket.py 参数） | `arg` |
+| 注入链 env | `SANDBAR_CALLER_PROJECT`（dsh 会话/ticket.py `_poc` spawn 注入） | `env` |
+| cwd 窄兜底 | 真人在注册项目工作区直跑时由 cwd×注册表推导 | `cwd` |
+| 未声明 | 以上皆无 | `none`（identity_class=undeclared） |
+
+规则：值必须过 `PROJECT_KEY_RE`（形状非法=结构化拒收 `kind=cross_project_refused`，
+不静默当未声明）；形状合法但注册表查无=仍按 declared 判（误配显式暴露，回执附
+`caller_project_registered=false`）；**cwd 落在引擎仓树内一律不推导**——dsh 工具链
+spawn、console 插件的 cwd 指向引擎自身，标识「被调用的引擎」而非「调用方会话」
+（review C1 行为红线：排除按整树祖先判定，不是仓根等值）。
+
+### 11.2 判定矩阵（唯一真源 `shared.cross_project_judge`；client 侧薄封装）
+
+| caller 身份 | 目标票 project | 越权旗 | 动作 |
+|---|---|---|---|
+| declared=同项目 | 任意 | — | 放行 |
+| declared=异项目 | 有 | 无旗 | **拒收**（`kind=cross_project_refused`，文案点名双项目+目标票号） |
+| declared=异项目 | 有 | `cross_project={by, reason 必填}` | 放行+记名（by/reason 原文入账） |
+| undeclared（策略 B 现状） | 有 | — | 放行+强制记名（哨兵盖章，回执 `identity_class=undeclared`） |
+| 无比对对象（目标无 ProjectKey SA / 读面） | — | — | 放行（cancel 打在引擎件上=identity_class=engine-internal 照记 admin.log） |
+
+- 目标快照/SA **瞬时读取失败≠越权**（KI-025）：可重试的 `kind=transient` 结构化拒收，
+  绝不 fail-open 放行 terminate；不存在=`kind=not_found`。
+- **undeclared 策略翻 A（拒收）路径**：改 `shared.UNDECLARED_POLICY` 一处常量
+  （`record`→`refuse`），并同步改两处场景（`t260915-12-cross-project-gate` 的策略锁腿、
+  `t260915-12-gate-real-chain` 相七）与本节——**前提=跟进插件票把 dsh 会话/工作台的
+  身份注入收口做完**（否则 console/工具链写面会从放行变硬拒，静默行为反转）。未收口前
+  B 策略是现状契约，被场景钉住。
+
+### 11.3 记名与对账（工单③：越权旗使用记录可查）
+
+- **盖章 op**（sign/authorize/rework/ruling/pause/resume）：调用方身份随载荷下发
+  （`caller_project`/`cross_project_note`，dataclass 带默认=老历史解码兼容），workflow
+  侧第二道复核后写入 `meta['cross_project_uses']`（ts/op/by/caller_project/note 原文）
+  ——`ticket.py op=show` 可对账，按笔累计。
+- **不盖章 op 残留（方案 §8 已声明，非漏记）**：retry_qc（裸 who 契约）、update
+  （`@workflow.update` 同步面）、cancel/ticket-start（无 workflow 侧落点）——Temporal
+  历史无身份落点，记名仅在 admin.log；回执 `cross_project_notice` 按 op 说实话
+  （「查询面 cross_project_uses 列不出」），不谎称可查。
+- **admin.log 行**：每笔调用附 `caller_project/identity_src/identity_class/override`
+  键；越权对账 grep：`override=true`（旗）或 `identity_class=undeclared`（B 策略记名）；
+  拒收行 `override=false` 也是一笔记录。身份键同 source 口径：claimed 值、非身份鉴别。
+- 两道闸的分工：client 侧闸=信号不出手（省一次无效投递）；workflow 侧第二道=复核盖章
+  值（直发 SDK/老 client 兜底面，无盖章=兼容不校验）。拒收在 client 侧截住时
+  snapshot.refused 零新增；直发越权章则落 workflow refused[]。
+
+### 11.4 不进闸的面（明确豁免，防「漏记」误读）
+
+| 面 | 豁免理由 |
+|---|---|
+| `query`/`ticket-list`/`ticket-query`/`running-tickets`/`schedule-list`/`start` | 读/扫描面，零写副作用 |
+| `signal` 子命令（§8.1 权威表：已退役） | 调用一律结构化报错，本就不可达写面 |
+| `ticket-prune`/`ticket-archive-legacy` | 只触 closed+已归档票，自带双 fail-closed（决策记录在案） |
+| 旧模板（content-pipeline/inspection）sign handler | 统一接闸但目标无项目面→判定恒放行（行为零变化，源锁防分叉） |
+
+场景：源码锁+重放=`integration/t260915-12/tests/sc_check_cross_project_gate.py`
+（离线恒可跑）；真链路行为面=`sc_cross_project_gate_realchain.py`（docker 台）。
+实现级单测：`server/engine/tests/test_t260915_12_t01_caller_gate.py`（纯函数矩阵）、
+`t02_client_receipt.py`（client 接线桩测）。
+
+
 ## 退役账（t260907-04 命名清理①：7 条过渡兼容，撤任何一条前先对表）
 
 t260907-04 把 SANDBAR_* env、suyou-poc 队列、.suyou/ 协调目录改成 sandbar 名。以下 7 条  # naming-compat

@@ -179,6 +179,10 @@ t260904-19 起必需；重建=`sh server/build-test-temporal.sh`）、temporalio
   红线自检断言）。隔离台端到端实拍（boot 控制台+浏览器出图）是重环境路径，不进 manifest：
   依赖真机凭据与 `$HOME/.dsh` preset 实体，泛化跑只会恒 ENV_FAIL，该口径由
   `node server/ui-check/capture-lane.mjs --selftest` 与 implement 段端到端验收步骤承担。
+- t260915-12 的场景登记是「同票双场景不同层」的参照样：`t260915-12-cross-project-gate`
+  （离线源码锁+纯函数重放，无 docker/网络依赖恒可跑）与 `t260915-12-gate-real-chain`
+  （真链路行为面，docker 台）——同一契约的两半，intent 分工写在各自登记行与场景 docstring，
+  后续票照此分半时先读这两条。
 
 ## 基线设计红线（审查标准，integration 岗位维护）
 

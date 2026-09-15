@@ -66,6 +66,7 @@ with workflow.unsafe.imports_passed_through():
         Stage,
         StageResult,
         TicketInput,
+        cross_project_judge,
         normalize_files_changed,
         WorkspacePrepResult,
         agent_log_for,
@@ -143,6 +144,11 @@ class TicketPauseMixin:
             self.refused.append({"who": who, "want": "pause",
                                  "why": "已处于暂停（幂等拒绝，重复 pause 不重复置位）"})
             return
+        # t260915-12 跨项目闸（第二道）：受理置位前的项目归属校验（记名/拒收）。
+        if not self._cross_project_gate(str(getattr(req, "caller_project", "") or ""),
+                                        str(getattr(req, "cross_project_note", "") or ""),
+                                        "pause", who, "pause"):
+            return
         self._paused = True
         self._paused_at_gate = False
         self._log("pause 受理（%s）%s——当前段自然跑完，停在段间门口等 resume"
@@ -169,6 +175,11 @@ class TicketPauseMixin:
         if not self._paused:
             self.refused.append({"who": who, "want": "resume",
                                  "why": "未处于暂停（空态拒绝）"})
+            return
+        # t260915-12 跨项目闸（第二道）：同 pause 口径。
+        if not self._cross_project_gate(str(getattr(req, "caller_project", "") or ""),
+                                        str(getattr(req, "cross_project_note", "") or ""),
+                                        "resume", who, "resume"):
             return
         self._paused = False
         self._paused_at_gate = False
@@ -205,7 +216,44 @@ class TicketPauseMixin:
                 "paused_phase": "at_gate" if self._paused_at_gate else "pending"}
 
 
-class TicketWorkflowBase(TicketPauseMixin):
+class TicketCrossProjectMixin:
+    """跨项目写操作闸的 workflow 侧第二道（t260915-12；宿主令 260915 补强的机器面）。
+
+    消费信号载荷盖章值（caller_project：注册表 key | CALLER_UNDECLARED_MARK 哨兵 |
+    ""=老 client 未盖章），按 shared.cross_project_judge 三态动作：
+      refuse        → 本类拒收面（refused[] + _log 人话点名「谁要动谁的票」）+ False
+                      （handler 必须立即 return，不执行该操作——Temporal 事件历史只留拒收）；
+      allow_record  → meta['cross_project_uses'] 记名 + timeline + _log（undeclared 哨兵
+                      或 declared 异项目带越权旗）+ True 放行；
+      allow         → True 零动作（同项目 / 未盖章兼容 / 无项目身份面的引擎件）。
+    宿主契约与 TicketPauseMixin 同一份成员：meta/refused/timeline/_log/_now_epoch/
+    _now_iso。重放安全：盖章字段带默认值 ""，老历史解码→judge 首分支放行零动作。
+    """
+
+    def _cross_project_gate(self, stamped_caller: str, note: str, op: str,
+                            who: str, want: str) -> bool:
+        g = cross_project_judge(stamped_caller, str(self.meta.get("project") or ""), note)
+        if g["action"] == "refuse":
+            self.refused.append({"who": who, "want": want, "why": g["why"]})
+            self._log(g["why"])
+            return False
+        if g["action"] == "allow_record":
+            rec = dict(g["record"] or {})
+            rec.update({"ts": self._now_epoch(), "op": op, "by": who})
+            # 对账面词=reason（场景/README 契约：by/reason 原文在条目）；note 保留
+            # （shared 层词，直发 SDK 载荷字段名同源）
+            rec["reason"] = rec.get("note", "")
+            self.meta.setdefault("cross_project_uses", []).append(rec)
+            self.timeline.append({"at": self._now_iso(),
+                                  "stage": str(self.meta.get("stage") or ""),
+                                  "state": "cross-project-recorded",
+                                  "reason": g["why"] or ("跨项目写操作记名（op=%s）" % op)})
+            self._log(g["why"] or "跨项目写操作记名（op=%s）" % op)
+            self._touch()
+        return True
+
+
+class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
     """Shared mechanisms for the six template subclasses. A subclass only declares:
       STAGES: Tuple[Stage, ...]   — the stage chain (source of truth = code)
       PATCH_ID: str               — this template's own patched id
@@ -712,6 +760,11 @@ class TicketWorkflowBase(TicketPauseMixin):
             self.refused.append({"who": sig.who, "want": "sign(authorize)",
                                  "why": "本模板无人授权面，authorize 载荷拒收（不落签字）"})
             return
+        # t260915-12 跨项目闸（第二道）：不符无旗=refused 不落签字；哨兵/旗=记名放行。
+        if not self._cross_project_gate(str(getattr(sig, "caller_project", "") or ""),
+                                        str(getattr(sig, "cross_project_note", "") or ""),
+                                        "sign", str(sig.who or ""), "sign"):
+            return
         stage = str(self.meta.get("stage") or "")
         st = self.STAGES[self._stage_idx(stage)] if self._stage_idx(stage) >= 0 else None
         if not (st and st.exit == "human"):
@@ -727,6 +780,11 @@ class TicketWorkflowBase(TicketPauseMixin):
     @workflow.signal
     def rework(self, req: ReworkRequest) -> None:
         """Send-back rerun: re-enter the target stage (gen+1 → new result file, the agent really reruns)."""
+        # t260915-12 跨项目闸（第二道）：同 sign 口径。
+        if not self._cross_project_gate(str(getattr(req, "caller_project", "") or ""),
+                                        str(getattr(req, "cross_project_note", "") or ""),
+                                        "rework", str(req.who or ""), "rework"):
+            return
         self._rework = req
         self._log("rework 请求：%s → %s（%s）"
                   % (req.note, req.target_stage or "缺省目标", req.who))

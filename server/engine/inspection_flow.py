@@ -41,7 +41,7 @@ from temporalio.common import RetryPolicy
 # context this import must be passed through per repo convention (same as workflows.py's
 # header), otherwise the sandbox validation goes red.
 with workflow.unsafe.imports_passed_through():
-    from shared import Signature
+    from shared import Signature, cross_project_judge
 
 # t260913-02：复用面（与 base.py/dev_lane.py 同款——imports_passed_through 内引活动函数，
 # 让 dataclass 载荷/回执的类型提示在沙箱里正确解码；活动实现本身全在 agent_activities）。
@@ -437,6 +437,14 @@ class InspectionPeriodicWorkflow:
         if getattr(sig, "authorize", None) is not None:
             self._gate_err = "本巡检模板无人授权面，authorize 载荷拒收（不落签字）"
             workflow.logger.warning("拒收 authorize 载荷：本巡检模板无人授权面")
+            return
+        # t260915-12 跨项目闸（第二道，统一接闸不留分叉）：本模板无 project 面→judge
+        # 对 target="" 恒放行；未来补项目面时此处自动升级为拒收。
+        g = cross_project_judge(str(getattr(sig, "caller_project", "") or ""), "",
+                                str(getattr(sig, "cross_project_note", "") or ""))
+        if g["action"] == "refuse":
+            self._gate_err = g["why"]
+            workflow.logger.warning("%s", g["why"])
             return
         payload, err = validate_close_signature(sig)
         if err:

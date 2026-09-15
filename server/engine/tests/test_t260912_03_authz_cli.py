@@ -36,7 +36,7 @@ def tk(tmp_path, monkeypatch):
     spec.loader.exec_module(mod)
     calls = []
 
-    def fake_poc(subcmd, payload):
+    def fake_poc(subcmd, payload, caller=None):  # t260915-12：+caller 身份注入形参
         calls.append((subcmd, payload))
         return {"ok": True, "result": {"delivered": True}}
 

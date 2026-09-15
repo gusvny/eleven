@@ -45,6 +45,8 @@ from temporalio.common import SearchAttributeKey
 from shared import (
     AUTH_KINDS,
     AUTHZ_SIGNAL_GATE_MARKER,
+    CALLER_PROJECT_ENV,
+    CALLER_UNDECLARED_MARK,
     DISPATCHER_WF_ID,
     ENGINE_V2,
     EPIC_CODE_RE,
@@ -54,6 +56,8 @@ from shared import (
     TARGET_HOST,
     TASK_QUEUE,
     TICKET_QUEUE_PREFIX,
+    REPO_ROOT,
+    load_projects_registry,
     HostRulingRequest,
     HumanAuthorization,
     PauseRequest,
@@ -81,6 +85,8 @@ from workflows_v2 import TEMPLATE_CLASSES
 # main() 每个出口（含 -h/无参/未知子命令/argsJSON 非法/连接失败兜底）都经
 # _emit() 记 admin.log 并按 claimed-source 附回执提醒——连被拒收的调用也记。
 import audit
+# t260915-12：跨项目写操作闸的客户端身份解析/判定矩阵（同目录，import shared 单源）。
+import caller_gate
 
 # ---- Temporal regression runtime: proactive cleanup of closed-ticket history
 #      (ticket t260902-02, M1-3) ----
@@ -131,6 +137,7 @@ KIND_AUTHZ_FACE_UNREACHABLE = "authz_face_unreachable"      # worker 不在/超�
 KIND_AUTHZ_FACE_ERROR = "authz_face_error"                  # 指纹 handler 自身失败（不吞成 absent）
 KIND_AUTHZ_FACE_WRONG_TEMPLATE = "authz_face_wrong_template"  # 非 dev-lane 模板无人授权面
 KIND_AUTHZ_SIGNAL_FAILED = "authz_signal_failed"            # signal 自身投递失败
+KIND_CROSS_PROJECT_REFUSED = "cross_project_refused"        # t260915-12：跨项目写操作闸拒收
 KIND_AUTHZ_LANDING_UNCONFIRMED = "authz_landing_unconfirmed"  # 预算内无落账无拒收
 
 # ---- authorize 落账确认轮询参数（t260913-01）----
@@ -344,18 +351,162 @@ async def cmd_schedule_list(args: Dict[str, Any]) -> Dict[str, Any]:
     return _ok({"count": len(out), "schedules": out})
 
 
+# ---- t260915-12 跨项目写操作闸（客户端单点） ----
+# gate 对象面：ticket 写 op 全集 + ticket-start（创建）+ cancel（终结）。
+# 不设闸：query/ticket-list/ticket-query/running-tickets/schedule-list/start（读/扫描）、
+# signal（260904 已退役=结构化拒收）、ticket-prune/ticket-archive-legacy（只触 closed+已
+# 归档票，自带双 fail-closed，README 决策记录）。
+_GATED_TICKET_OPS = ("sign", "authorize", "rework", "retry_qc", "ruling",
+                     "pause", "resume", "update")
+# 记名分档（review C3）：这些 op 载荷契约不收盖章字段（retry_qc=裸 who 字符串、
+# update=@workflow.update 同步面、cancel/ticket-start=无 workflow 侧落点）——undeclared
+# 记名只在 admin.log，查询面 cross_project_uses 列不出；回执 notice 必须按 op 说实话。
+_UNSTAMPED_NOTICE_OPS = ("retry_qc", "update", "cancel", "ticket-start")
+
+
+def _caller_identity(args: Dict[str, Any]) -> Dict[str, Any]:
+    """调用方身份解析（arg > env > cwd 窄兜底 > none）。cwd 兜底带仓树排除（C1）：
+    本进程被 spawn 于仓树内（dsh 工具链/console 插件）时 cwd 指向引擎自身=不推导；
+    被真人在注册项目工作区直跑时推导（出处=cwd×注册表）。注册表读不到=cwd 兜底
+    缺席（身份退回 arg/env/undeclared），不让注册表故障放大成全写面拒收。"""
+    try:
+        cwd = os.path.realpath(os.getcwd())
+    except Exception:  # noqa: BLE001
+        cwd = ""
+    try:
+        projects, _quarantined = load_projects_registry()  # 二元组：只消费 projects 面
+    except Exception:  # noqa: BLE001
+        projects = None
+    return caller_gate.resolve_identity(
+        str(args.get("caller_project") or ""),
+        os.environ.get(CALLER_PROJECT_ENV, ""),
+        cwd=cwd, exclude_trees=(os.path.realpath(str(REPO_ROOT)),),
+        projects=projects)
+
+
+def _registered_hint(key: str) -> Optional[bool]:
+    """C2② 观测键：形状合法的 declared key 是否在注册表（不在=仍按 declared 判，
+    误配显式暴露；None=undeclared/哨兵，无此键）。"""
+    if not key or key == CALLER_UNDECLARED_MARK:
+        return None
+    try:
+        lookup_project(key)
+        return True
+    except Exception:
+        return False
+
+
+def _gate_refusal(verdict: Dict[str, Any], identity: Dict[str, Any],
+                  context: str = "") -> Dict[str, Any]:
+    r = _err(verdict["why"] + context, KIND_CROSS_PROJECT_REFUSED)
+    r.update(caller_gate.identity_receipt(identity, verdict))
+    # 拒收判定不带 stamp——declared 身份从 identity.value 兜底，误配的注册表外观测键照给
+    reg = _registered_hint(str(verdict.get("stamp") or identity.get("value") or ""))
+    if reg is not None:
+        r["caller_project_registered"] = reg
+    return r
+
+
+async def _write_gate(handle: Any, tid: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    """ticket 写 op 闸前置（唯一入口）：读目标票 project（快照 meta）→ 判定矩阵。
+
+    返回 {"err": 回执|None, "verdict", "keys", "snap", "stamp", "note", "notice"}——
+    err 非 None=调用方直接返回（瞬时读取失败=KIND_TRANSIENT 不判越权（KI-025）、
+    不存在=KIND_NOT_FOUND、身份形状非法/畸形旗/跨项目无旗=KIND_CROSS_PROJECT_REFUSED）。
+    snap 一并带回（authorize 复用作落账 diff 基线，免二次查询）。"""
+    try:
+        identity = _caller_identity(args)
+    except caller_gate.CallerIdentityError as e:
+        return {"err": _err(str(e), KIND_CROSS_PROJECT_REFUSED)}
+    try:
+        snap = await _query_snapshot_with_retry(handle)
+    except Exception as e:
+        if _is_not_found_exc(e):
+            return {"err": _err("工单不存在：%s（Temporal 无此 workflow）" % tid, KIND_NOT_FOUND)}
+        return {"err": _err("目标票快照不可得（%s: %s）——跨项目闸前置读取失败，未执行任何"
+                            "动作（瞬时抖动不判越权）；稍后重试" % (type(e).__name__, e),
+                            KIND_TRANSIENT)}
+    meta = (snap or {}).get("meta") or {}
+    target = str(meta.get("project") or "")
+    override, oerr = caller_gate.validate_override(args)
+    if oerr:
+        return {"err": _err(oerr, KIND_CROSS_PROJECT_REFUSED)}
+    verdict = caller_gate.judge_caller(identity, target, override)
+    if verdict["decision"] == "refuse":
+        # 人话点名带目标票号（值守第一眼就知道动的是哪张票）
+        return {"err": _gate_refusal(verdict, identity,
+                                     context="（目标票 %s，属项目 %s）" % (tid, target or "（无项目面）"))}
+    keys = caller_gate.identity_receipt(identity, verdict)
+    reg = _registered_hint(str(verdict.get("stamp") or ""))
+    if reg is not None:
+        keys["caller_project_registered"] = reg
+    return {"err": None, "verdict": verdict, "keys": keys, "snap": snap,
+            "identity": identity, "stamp": str(verdict.get("stamp") or ""),
+            "note": str((override or {}).get("reason") or ""),
+            "notice": str(verdict.get("notice") or "")}
+
+
+def _gate_receipt(result: Dict[str, Any], gate: Optional[Dict[str, Any]],
+                  op: str) -> Dict[str, Any]:
+    """闸身份键并入成功回执（外层——与拒收回执同层同形状：拒收键在 _err 顶层，成功键
+    也在顶层，消费方一个层级读两种结局）；undeclared 且 op 不盖章→notice 补
+    admin.log-only 口径（C3：回执文案不许超诺——不盖章 op 的记名查询面列不出）。"""
+    if not gate:
+        return result
+    out = dict(result)
+    out.update(gate.get("keys") or {})
+    notice = str(gate.get("notice") or "")
+    if (gate.get("verdict") or {}).get("decision") == "record_undeclared" \
+            and op in _UNSTAMPED_NOTICE_OPS:
+        notice = (notice + "；" if notice else "") + (
+            "本 op=%s 载荷契约不盖章：本次记名仅在 admin.log（identity_class=undeclared），"
+            "查询面 cross_project_uses 列不出" % op)
+    if notice:
+        out["cross_project_notice"] = notice
+    return out
+
+
 async def cmd_cancel(args: Dict[str, Any]) -> Dict[str, Any]:
     wf_id = str(args.get("workflow_id") or "")
     if not wf_id:
         return _err("cancel 需要 workflow_id")
     reason = str(args.get("reason") or "client.py cancel")
+    # t260915-12：cancel 进闸（终结算写操作）。前置读目标 ProjectKey SA——瞬时失败=
+    # 结构化拒收可重试（C2①：绝不 fail-open 静默放行 terminate）；无项目 SA 的引擎件
+    # （dispatcher-scan 等）=不设闸放行，identity_class=engine-internal 照记 admin.log。
+    try:
+        identity = _caller_identity(args)
+    except caller_gate.CallerIdentityError as e:
+        return _err(str(e), KIND_CROSS_PROJECT_REFUSED)
+    override, oerr = caller_gate.validate_override(args)
+    if oerr:
+        return _err(oerr, KIND_CROSS_PROJECT_REFUSED)
     client = await _connect()
     handle = client.get_workflow_handle(wf_id)
+    try:
+        desc = await handle.describe()
+    except Exception as e:
+        if _is_not_found_exc(e):
+            return _err("cancel 目标不存在：%s（%s: %s）" % (wf_id, type(e).__name__, e),
+                        KIND_NOT_FOUND)
+        return _err("cancel 目标读取失败（%s: %s）——跨项目闸前置读取失败，未执行任何动作；"
+                    "稍后重试" % (type(e).__name__, e), KIND_TRANSIENT)
+    target = str(desc.typed_search_attributes.get(
+        SearchAttributeKey.for_keyword(PROJECT_SA_NAME)) or "")
+    verdict = caller_gate.judge_caller(identity, target, override)
+    if verdict["decision"] == "refuse":
+        return _gate_refusal(verdict, identity,
+                             context="（目标 %s，属项目 %s）" % (wf_id, target or "（无项目面）"))
+    gate = {"verdict": verdict, "notice": str(verdict.get("notice") or ""),
+            "keys": caller_gate.identity_receipt(
+                identity, verdict,
+                identity_class="engine-internal" if not target else "")}
     try:
         await handle.terminate(reason=reason)
     except Exception as e:  # already finished / missing etc. always produce a structured receipt, never a stack trace
         return _err(f"terminate 失败：{type(e).__name__}: {e}")
-    return _ok({"workflow_id": wf_id, "terminated": True, "reason": reason})
+    return _gate_receipt(_ok({"workflow_id": wf_id, "terminated": True, "reason": reason}),
+                         gate, "cancel")
 
 
 async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -387,6 +538,14 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
             "pulse": _pulse_from_desc(desc) if running else None,
         })
 
+    # t260915-12：写 op 过跨项目闸（目标 project←快照 meta；stamps 随载荷下发，
+    # workflow 侧消费盖章值做第二道校验+记名）。读 op（query）不设闸。
+    gate = None
+    if op in _GATED_TICKET_OPS:
+        gate = await _write_gate(handle, tid, args)
+        if gate["err"] is not None:
+            return gate["err"]
+
     if op == "sign":
         raw = args.get("input") or {}
         if not isinstance(raw, dict):
@@ -396,10 +555,14 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
             gate=str(raw.get("gate") or ""),
             decision=str(raw.get("decision") or "approve"),
             note=str(raw.get("note") or ""),
+            # t260915-12 盖章：调用方传入的 caller_project 已被解析结果盖写（不许自认）。
+            caller_project=gate["stamp"] if gate else "",
+            cross_project_note=gate["note"] if gate else "",
         )
         await handle.signal("sign", sig)  # a signal with the same name on old and new classes; sending by name serves both
-        return _ok({"ticket_id": tid, "signal": "sign", "gate": sig.gate,
-                    "decision": sig.decision, "who": sig.who, "delivered": True})
+        return _gate_receipt(_ok({"ticket_id": tid, "signal": "sign", "gate": sig.gate,
+                                  "decision": sig.decision, "who": sig.who, "delivered": True}),
+                             gate, op)
 
     if op == "authorize":
         # t260912-03：人授权例外通道（受保护路径 / 仲裁上限）——**唯一入口＝sign 信号面**
@@ -417,13 +580,9 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
 
         # 基线快照：同时供给模板分叉（C2）与落账 diff 的基线。拿不到基线不盲投
         # （无法区分旧账/新账），按其异常类别结构化报错（工单不存在≠瞬时抖动）。
-        try:
-            snap0 = await _query_snapshot_with_retry(handle)
-        except Exception as e:
-            if _is_not_found_exc(e):
-                return _err("工单不存在：%s（Temporal 无此 workflow）" % tid, KIND_NOT_FOUND)
-            return _err("基线快照不可得（%s: %s）——authorize 已拒发未投递，稍后重试"
-                        % (type(e).__name__, e), KIND_TRANSIENT)
+        # t260915-12：基线复用闸前置读取的同一份快照（_write_gate 已含同款
+        # not_found/transient 分级，不二次查询）。
+        snap0 = gate["snap"]
         wf_class = str((snap0 or {}).get("workflow_class") or "")
         template_id = str((snap0 or {}).get("template_id") or "")
 
@@ -436,7 +595,10 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
         baseline_authz = _authz_entries(snap0)
         baseline_refused = _refused_entries(snap0)
         sig = Signature(who=auth.who, gate=AUTHZ_SIGNAL_GATE_MARKER, decision="approve",
-                        authorize=auth)
+                        authorize=auth,
+                        # t260915-12 盖章：授权签发同样过项目归属闸（stamps 由闸解析）。
+                        caller_project=gate["stamp"] if gate else "",
+                        cross_project_note=gate["note"] if gate else "")
         try:
             await handle.signal("sign", sig)  # 同一 sign 信号面（不得新开旁路）
         except Exception as e:
@@ -449,9 +611,11 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
                      "who": auth.who, "scope": list(auth.scope),
                      "expires": auth.expires, "delivered": True}
         if state2 == "landed":
-            return _ok({**face_keys, "landing": "landed", "authorization": payload})
+            return _gate_receipt(_ok({**face_keys, "landing": "landed",
+                                      "authorization": payload}), gate, op)
         if state2 == "refused":
-            return _ok({**face_keys, "landing": "refused", "refused_why": payload})
+            return _gate_receipt(_ok({**face_keys, "landing": "refused",
+                                      "refused_why": payload}), gate, op)
         plain = ""
         for it in _refused_entries(last_snap):
             if str(it.get("want") or "") != "sign(authorize)":
@@ -471,10 +635,14 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
             return _err("rework 需要 note（返工原因）")
         req = ReworkRequest(who=str(args.get("who") or "op-local"),
                             target_stage=str(args.get("to_stage") or ""),
-                            note=note)
+                            note=note,
+                            # t260915-12 盖章（同 sign 家族契约）。
+                            caller_project=gate["stamp"] if gate else "",
+                            cross_project_note=gate["note"] if gate else "")
         await handle.signal("rework", req)
-        return _ok({"ticket_id": tid, "signal": "rework",
-                    "target_stage": req.target_stage, "delivered": True})
+        return _gate_receipt(_ok({"ticket_id": tid, "signal": "rework",
+                                  "target_stage": req.target_stage, "delivered": True}),
+                             gate, op)
 
     if op == "retry_qc":
         # KI-067（t260910-06）：retry_qc 的 CLI 正规通道（signal 子命令退役后唯一
@@ -486,8 +654,10 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
                         "ticket op=update 的 pending_add，或 op=ruling 注入裁决")
         who = str(args.get("who") or "op-local")
         await handle.signal("retry_qc", who)
-        return _ok({"ticket_id": tid, "signal": "retry_qc", "who": who,
-                    "delivered": True})
+        # t260915-12：retry_qc 载荷契约只收裸 who（base.py 契约），不盖章——undeclared
+        # 记名仅 admin.log（_gate_receipt 按档补 notice，C3 不许谎称查询面可列）。
+        return _gate_receipt(_ok({"ticket_id": tid, "signal": "retry_qc", "who": who,
+                                  "delivered": True}), gate, op)
 
     if op == "ruling":
         # KI-053: host ruling injection — the official channel for human opinions,
@@ -498,10 +668,13 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
         note = str(args.get("note") or "")
         if not note.strip():
             return _err("ruling 需要 note（裁决内容，非空）")
-        req = HostRulingRequest(who=str(args.get("who") or "op-local"), note=note)
+        req = HostRulingRequest(who=str(args.get("who") or "op-local"), note=note,
+                                # t260915-12 盖章（同 sign 家族契约）。
+                                caller_project=gate["stamp"] if gate else "",
+                                cross_project_note=gate["note"] if gate else "")
         await handle.signal("host_ruling", req)
-        return _ok({"ticket_id": tid, "signal": "host_ruling", "who": req.who,
-                    "delivered": True})
+        return _gate_receipt(_ok({"ticket_id": tid, "signal": "host_ruling",
+                                  "who": req.who, "delivered": True}), gate, op)
 
     if op in ("pause", "resume"):
         # t260908-01：段间暂停/恢复（与 sign/rework/ruling 同族的信号通道）。
@@ -513,10 +686,13 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
             raw = args
         who = str(raw.get("who") or "op-local")
         note = str(raw.get("note") or "")
-        req = PauseRequest(who=who, note=note)
+        req = PauseRequest(who=who, note=note,
+                           # t260915-12 盖章（同 sign 家族契约）。
+                           caller_project=gate["stamp"] if gate else "",
+                           cross_project_note=gate["note"] if gate else "")
         await handle.signal(op, req)
-        return _ok({"ticket_id": tid, "signal": op, "who": req.who,
-                    "delivered": True})
+        return _gate_receipt(_ok({"ticket_id": tid, "signal": op, "who": req.who,
+                                  "delivered": True}), gate, op)
 
     if op in ("advance", "accept", "dispatch-next"):
         return _err("v2 引擎（模版即代码）已取消 %s：workflow 过门自动推进，"
@@ -531,7 +707,9 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
                                    str(args.get("note") or ""),
                                    str(args.get("pending_add") or ""),
                                    args.get("book_path")])
-        return _ok(r)
+        # t260915-12：update=@workflow.update 同步面，载荷不盖章——undeclared 记名仅
+        # admin.log（_gate_receipt 按档补 notice，C3）。
+        return _gate_receipt(_ok(r), gate, op)
 
     return _err("未知工单操作 %r（可用：rework=打回 / ruling=宿主裁决注入 / "
                 "authorize=人授权签发（sign 信号面） / retry_qc=blocked 重跑 / "
@@ -571,6 +749,24 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
     except ValueError as e:
         return _err("ticket-start 拒收（project 未锚定，开票走正规入口请先注册项目）：%s" % e)
     project_root = str(proj["dirs"][0])
+    # t260915-12：创建面进闸（caller 身份 vs 目标 args.project）。创建载荷（TicketInput）
+    # 不盖章（钉死业务属性面不掺调用方身份）——记名分档=admin.log + 回执（C3）。
+    try:
+        identity = _caller_identity(args)
+    except caller_gate.CallerIdentityError as e:
+        return _err(str(e), KIND_CROSS_PROJECT_REFUSED)
+    override, oerr = caller_gate.validate_override(args)
+    if oerr:
+        return _err(oerr, KIND_CROSS_PROJECT_REFUSED)
+    verdict = caller_gate.judge_caller(identity, project, override)
+    if verdict["decision"] == "refuse":
+        return _gate_refusal(verdict, identity,
+                             context="（目标票 %s，属项目 %s）" % (tid, project))
+    gate = {"verdict": verdict, "notice": str(verdict.get("notice") or ""),
+            "keys": caller_gate.identity_receipt(identity, verdict)}
+    reg = _registered_hint(str(verdict.get("stamp") or ""))
+    if reg is not None:
+        gate["keys"]["caller_project_registered"] = reg
     # Epic linkage (epic-linkage): the single strict-validation point for --epic — a
     # code-shape whitelist + the epic archive existing. The validation directory comes
     # from resolve_epics_dir(project) — anchored to the project registry entry's main
@@ -725,13 +921,13 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
                 % (EPIC_SA_NAME, EPIC_SA_NAME, msg))
         return _err("启动失败：%s" % msg)
     first = cls.STAGES[0]
-    return _ok({
+    return _gate_receipt(_ok({
         "id": tid, "workflow_id": handle.id, "run_id": handle.result_run_id,
         "template": tpl, "workflow_class": cls.__name__,
         "project": project, "epic": epic,
         "stage": first.id, "stage_state": "running", "role": first.role,
         "status": "dispatched", "engine": ENGINE_V2,
-    })
+    }), gate, "ticket-start")
 
 
 def normalize_authorize_args(args: Dict[str, Any]):
@@ -1540,6 +1736,10 @@ USAGE = (
     "  只服务 v1 content-pipeline 人门段，该模板已删）；签字走 ticket op=sign，\n"
     "  blocked 重跑走 ticket op=retry_qc（t260910-06 正规通道）。\n"
     "ticket 子命令（步2）：op=rework|ruling|authorize|retry_qc|pause|resume|update|sign|query。\n"
+    "  写 op 过跨项目闸（t260915-12）：调用方项目身份（env %s 或显式 caller_project）与目标\n"
+    "  票项目不符=fail-closed 拒收（kind=cross_project_refused）；确需跨项目带越权旗\n"
+    "  cross_project={by, reason 必填}（记名留痕可查）；未声明身份按引擎策略记名放行\n"
+    "  （UNDECLARED_POLICY，契约见 server/engine/README.md）。\n"
     "  authorize=人授权签发（t260912-03：受保护路径/仲裁上限的放行钥匙，唯一入口＝\n"
     "  sign 信号面；kind/who/scope/reason/expires 由调用方注入，agent 不得自签）。\n"
     "  v2 引擎（M11 模版即代码）：advance/accept/dispatch-next 已取消（自动推进），\n"
@@ -1562,7 +1762,19 @@ def _emit(sub: str, args: Dict[str, Any], result: Dict[str, Any]) -> None:
     记 admin.log 一行（claimed-source 可辨，连被拒收调用也记）。审计失败不吞回执。"""
     audit.attach_entry_hint(result)
     print(json.dumps(result, ensure_ascii=False))
-    audit.audit_call(sub or "(none)", result)
+    # t260915-12：跨项目闸身份键随行落账（键在外层——拒收/成功同层同形状；兼容读内层）。
+    # override 恒布尔：拒收行 override=false 也是对账面的一笔记录（场景相三判据）。
+    inner = result.get("result") if isinstance(result.get("result"), dict) else {}
+
+    def _pick(name):
+        v = result.get(name)
+        return v if v is not None else inner.get(name)
+
+    audit.audit_call(sub or "(none)", result,
+                     caller_project=_pick("caller_project"),
+                     identity_class=_pick("identity_class"),
+                     identity_src=_pick("identity_src"),
+                     override=bool(_pick("cross_project_used")))
 
 
 def main() -> None:

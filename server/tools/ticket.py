@@ -42,12 +42,24 @@ op:
       who 必填由调用方注入、纯空白在本层拒收（D1：正规入口不落 op-local——
       client.py 的 op-local 缺省只留给裸入口）；note 可选透传，上限不在此抢答
       （单点=workflow intake PAUSE_NOTE_INPUT_LIMIT）。
+  ruling {id, by(who), note}  → 宿主裁决注入（signal；t260915-12 补包装层出口，
+      与 schema 宣告对齐——宣告不支持的 op=对模型面撒谎，KI-079 同族）。who/note
+      必填非空本层 fail-fast（D1 同族）；note 上限单点=workflow intake
+      HOST_RULING_NOTE_INPUT_LIMIT；跨项目闸第二道在 workflow intake。
   accept/advance/dispatch-next  → v2 已取消（workflow 过门自动推进，验收=事后看产物；
                                   blocked 重跑=retry_qc op），保留 op 报结构化错误
 
 全部调用经 admin.log 审计：registry.call 路径=run-id 审计（tools_registry）；
 直 spawn 路径（__main__，t260910-06）=本文件自记 source=ticket.py-direct 一行 +
 client.py 记 source=ticket 一行（call_id 关联）——双行形状是契约不是重复 bug。
+
+跨项目写操作闸（t260915-12，契约详见 server/engine/README.md §11）：写 op（create/
+update/rework/sign/retry_qc/pause/resume/authorize/ruling）带调用方项目身份与越权旗——
+身份推导=显式 caller_project > env SANDBAR_CALLER_PROJECT > cwd 窄兜底（引擎仓树内
+一律不推导，防间接调用凭空造身份）；形状非法/越权旗缺 by|reason/超上限在本层
+fail-fast。declared 身份与目标票项目不符由 client.py 闸拒收（cross_project_refused）；
+确需跨项目带 cross_project={by, reason 必填}（记名留痕，show 出口可对账）。undeclared
+=B 策略放行+记名（翻严条件见 README §11.2）。读 op 不带闸上下文。
 
 直 spawn 形态（KI-067 根因修复）：本文件历史上没有 CLI 入口，任何直接
 `python3 ticket.py '{...}'` 都是空输出+退出 0+admin.log 无痕（260910 两实证）。
@@ -101,7 +113,11 @@ TOOL = {
         'properties': {
             'op': {'type': 'string', 'enum': ['create', 'update', 'list', 'show', 'accept',
                                               'advance', 'dispatch-next', 'rework',
-                                              'sign', 'retry_qc', 'pause', 'resume']},
+                                              'sign', 'retry_qc', 'pause', 'resume',
+                                              'authorize', 'ruling']},
+            'caller_project': {'type': 'string', 'description': '调用方项目身份（t260915-12 跨项目闸）：显式声明优先于 env/cwd 推导；写操作身份与目标票项目不符=拒收（cross_project_refused），确需跨项目带 cross_project 旗。引擎仓树内 cwd 不推导（防间接调用凭空造身份）'},
+            'cross_project': {'type': 'object', 'properties': {'by': {'type': 'string', 'description': '谁在越权（记名）'}, 'reason': {'type': 'string', 'description': '为什么跨项目（理由必填入账）'}}, 'required': ['by', 'reason'], 'description': '越权豁免旗（记名留痕可查）：declared 身份跨项目写操作的显式放行钥匙；缺理由=拒收'},
+            'cross_project_reason': {'type': 'string', 'description': '越权旗扁平形（理由必填；by 缺省取 by|who）——与 cross_project.reason 互斥'},
             'id': {'type': 'string', 'description': '工单 id（update/show/accept/advance/dispatch-next/rework/sign/retry_qc/pause/resume 必填；create 可指定否则自动生成）'},
             'project': {'type': 'string', 'description': '项目 key（机器级注册表 ~/.sandbar/projects/<key>/project.yaml；create 必传、无默认值；list 可选过滤，不传=全部项目）'},
             'epic': {'type': 'string', 'description': '立项代号（epic-linkage 机制，可选）：notes/epics/<代号>.md 必须存在否则 create 拒收；合法则 workflow 打 EpicCode search attribute，可按 EpicCode 查询捞出。list 可按 epic 过滤（先强校验，不存在的代号明确报错而非空表）'},
@@ -214,14 +230,19 @@ def _audit_mod():
 _AUDIT_MOD = None
 
 
-def _poc(subcmd, payload):
+def _poc(subcmd, payload, caller=None):
     """spawn engine/client.py，返回解析后的回执 dict（不判 ok）。
 
     子进程注入自报家门标记 SANDBAR_CLIENT_ENTRY='ticket'（普通 env，非密钥——
     client.py 据此免附 entry_hint、admin.log source 记 'ticket'）与关联键
-    SANDBAR_CLIENT_CALL_ID（__main__ 直调路径生成，使双行审计可关联）。"""
+    SANDBAR_CLIENT_CALL_ID（__main__ 直调路径生成，使双行审计可关联）。
+    t260915-12：caller 非 None（写 op 的调用方项目身份推导结果）时注入
+    SANDBAR_CALLER_PROJECT——client 侧跨项目闸按 env 来源消费（spawn 链注入，
+    身份有出处；空串=未声明身份，不注入、由 client 按策略记名/拒收）。"""
     env = dict(os.environ)
     env['SANDBAR_CLIENT_ENTRY'] = _audit_mod().ENTRY_MARK
+    if caller:
+        env[_shared().CALLER_PROJECT_ENV] = caller
     cid = os.environ.get(_audit_mod().CALL_ID_ENV)
     if cid:
         env[_audit_mod().CALL_ID_ENV] = cid
@@ -249,6 +270,73 @@ def _poc_ok(out):
     if isinstance(result, dict):
         result = {k: v for k, v in result.items() if k != 'ok'}  # 剥内层 ok，返回形状对齐
     return result
+
+
+# ---------- 跨项目写操作闸：包装层身份推导与越权旗（t260915-12） ----------
+# 分工：本层只做「推导+形状/必填 fail-fast」，权威判定在 client.py 闸（判定矩阵）与
+# workflow intake（第二道）；包装层只加审计不加权力（KI-067 以来既定哲学）。
+
+def _resolve_caller(a):
+    """调用方项目身份推导（单一入口，解析顺序=显式 > env 透传 > cwd 窄兜底）。
+
+    - 显式 caller_project / env SANDBAR_CALLER_PROJECT：须过 PROJECT_KEY_RE（形状非法
+      =ValueError 显式暴露，不静默当未声明——review C2② 同口径）；
+    - cwd 窄兜底：真人在项目工作区直跑时 cwd 可推导（出处=cwd×注册表）；**引擎仓树内
+      一律不推导**（review C1：dsh 工具链 spawn cwd=repo、console 插件 cwd=engine 子目录，
+      仓树内 cwd 标识「被调用的引擎」而非「调用方会话」）→ 返回 ''（未声明）。
+    返回 key 或 ''（''=未声明身份，_poc 不注入 env，client 按策略记名/拒收）。"""
+    s = _shared()
+    explicit = str(a.get('caller_project') or '').strip()
+    env_raw = str(os.environ.get(s.CALLER_PROJECT_ENV) or '').strip()
+    if explicit or env_raw:
+        v = explicit or env_raw
+        if not s.PROJECT_KEY_RE.match(v):
+            raise ValueError(
+                '调用方项目身份形状非法：%r（来源=%s；白名单 %s）——修正 caller_project '
+                '或注入链后重试' % (v[:64], 'caller_project' if explicit else s.CALLER_PROJECT_ENV,
+                                    s.PROJECT_KEY_RE.pattern))
+        return v
+    cwd = os.path.realpath(os.getcwd())
+    repo_root = os.path.realpath(str(s.REPO_ROOT))
+    key = s.project_key_for_dir(cwd, _projects(), (repo_root,))
+    return key or ''
+
+
+def _cross_project_flag(a):
+    """越权旗归一与本层校验（review C3/C4：by/reason 必填非空+上限；畸形旗 fail-fast）。
+    接受 cross_project={by,reason}（结构形）或 cross_project_reason（扁平形，by 缺省取
+    by|who）。返回 {'by','reason'} 或 None（无旗）。"""
+    flag = a.get('cross_project')
+    flat = str(a.get('cross_project_reason') or '').strip()
+    if flag is None and not flat:
+        return None
+    if flag is not None and not isinstance(flag, dict):
+        raise ValueError('越权旗 cross_project 需为对象 {by, reason}（收到 %s）'
+                         % type(flag).__name__)
+    by = str((flag or {}).get('by') or '').strip()
+    reason = str((flag or {}).get('reason') or '').strip()
+    if flat:
+        if reason:
+            raise ValueError('越权旗理由重复：cross_project.reason 与 cross_project_reason 只给其一')
+        reason = flat
+    if not by:
+        by = str(a.get('by') or a.get('who') or '').strip()
+    if not by:
+        raise ValueError('越权旗缺 by（谁在越权——旗必须记名）；扁平形可省略（by 取操作人 by|who）')
+    if not reason:
+        raise ValueError('越权旗缺 reason（为什么跨项目——理由必填，记名留痕可查）')
+    s = _shared()
+    if len(by) > s.CROSS_PROJECT_BY_LIMIT:
+        raise ValueError('越权旗 by 超限（%d > %d 字符）' % (len(by), s.CROSS_PROJECT_BY_LIMIT))
+    if len(reason) > s.CROSS_PROJECT_NOTE_LIMIT:
+        raise ValueError('越权旗 reason 超限（%d > %d 字符）——拆条后在目标票 ruling/pending 补充'
+                         % (len(reason), s.CROSS_PROJECT_NOTE_LIMIT))
+    return {'by': by, 'reason': reason}
+
+
+def _write_op_poc(subcmd, payload, a):
+    """写 op 统一出口：推导身份+越权旗（payload 只带旗；身份走 env 注入）→ _poc。"""
+    return _poc(subcmd, payload, caller=_resolve_caller(a))
 
 
 class QueryError(ValueError):
@@ -293,6 +381,10 @@ def _v2_query(tid):
               'human_context', 'engine', 'workflow_class',  # gens=t260915-01 ③ 段→轮次读数
               'topology'):  # t260915-05 ④ 模板拓扑导出（门内 additive 键；缺=旧票回落模板级导出）
         meta[k] = snap.get(k)
+    # t260915-12 越权对账面（工单③）：越权旗/未声明身份的写操作记名（workflow 侧
+    # meta['cross_project_uses']，盖章 op 才有账；retry_qc/update/cancel 的记名只在
+    # admin.log——覆盖口径如实分档，见 server/engine/README.md 闸契约节）。
+    meta['cross_project_uses'] = (snap.get('meta') or {}).get('cross_project_uses') or []
     return meta, snap
 
 
@@ -419,7 +511,8 @@ def _create(a):
     _check_paths_under_project(proj, ws, worktree)
     tpl_acc = list(stage0.get('acceptance') or [])
     extra = [x for x in (a.get('acceptance') or []) if x not in tpl_acc]  # A5.5 实例增项
-    out = _poc('ticket-start', {
+    flag = _cross_project_flag(a)
+    payload = {
         'ticket_id': tid, 'template_id': wid, 'project': proj['key'], 'title': a['title'],
         # epic 只透传：强校验单点在 client.py（validate_epic_code），错误经 _poc_ok 原样上抛
         'epic': a.get('epic') or '',
@@ -441,7 +534,10 @@ def _create(a):
         'spec': a.get('spec') or '',
         'body': a.get('body') or '（无正文）',
         'created': now,
-    })
+    }
+    if flag:
+        payload['cross_project'] = flag
+    out = _write_op_poc('ticket-start', payload, a)
     res = _poc_ok(out)
     # 每工单专属 worker（260824 拍板）：ticket.py 不再 spawn——console 的
     # keepalive ensure 是唯一生产 spawn 点（15s 内补拉；无 console 时工单在
@@ -465,10 +561,14 @@ def _update(a):
         raise ValueError('update 需要 status / note / pending_add / book_path（至少一个）')
     if a.get('stage_state') is not None:
         raise ValueError('stage_state 由 workflow 派生，不得外部设置（无 set-stage 红线）')
-    out = _poc('ticket', {'op': 'update', 'ticket_id': tid,
-                          'status': a.get('status') or '', 'note': a.get('note') or '',
-                          'pending_add': a.get('pending_add') or '',
-                          'book_path': a.get('book_path')})
+    payload = {'op': 'update', 'ticket_id': tid,
+               'status': a.get('status') or '', 'note': a.get('note') or '',
+               'pending_add': a.get('pending_add') or '',
+               'book_path': a.get('book_path')}
+    flag = _cross_project_flag(a)
+    if flag:
+        payload['cross_project'] = flag
+    out = _write_op_poc('ticket', payload, a)
     return _poc_ok(out)
 
 
@@ -609,10 +709,14 @@ def _rework(a):
     if not a.get('note'):
         raise ValueError('rework 需要 note（返工原因）')
     # rework=signal（回目标段重跑）；client.py 内部按引擎分流
-    out = _poc('ticket', {'op': 'rework', 'ticket_id': tid,
-                          'note': a.get('note') or '',
-                          'to_stage': a.get('to_stage') or '',
-                          'who': _who(a)})
+    payload = {'op': 'rework', 'ticket_id': tid,
+               'note': a.get('note') or '',
+               'to_stage': a.get('to_stage') or '',
+               'who': _who(a)}
+    flag = _cross_project_flag(a)
+    if flag:
+        payload['cross_project'] = flag
+    out = _write_op_poc('ticket', payload, a)
     return _poc_ok(out)
 
 
@@ -631,11 +735,15 @@ def _sign(a):
     decision = a.get('decision') or 'approve'
     if decision not in ('approve', 'reject'):
         raise ValueError("sign decision 只收 approve|reject（收到 %r）" % (decision,))
-    out = _poc('ticket', {'op': 'sign', 'ticket_id': tid,
-                          'input': {'who': _who(a),
-                                    'gate': a.get('gate') or '',
-                                    'decision': decision,
-                                    'note': a.get('note') or ''}})
+    payload = {'op': 'sign', 'ticket_id': tid,
+               'input': {'who': _who(a),
+                         'gate': a.get('gate') or '',
+                         'decision': decision,
+                         'note': a.get('note') or ''}}
+    flag = _cross_project_flag(a)
+    if flag:
+        payload['cross_project'] = flag
+    out = _write_op_poc('ticket', payload, a)
     return _poc_ok(out)
 
 
@@ -650,8 +758,35 @@ def _retry_qc(a):
     if str(a.get('note') or '').strip():
         raise ValueError('retry_qc 不收 note（workflow 契约只收 who）——带话走 '
                          'update pending_add，或 ruling 注入裁决')
-    out = _poc('ticket', {'op': 'retry_qc', 'ticket_id': tid,
-                          'who': _who(a) or 'op-local'})
+    payload = {'op': 'retry_qc', 'ticket_id': tid,
+               'who': _who(a) or 'op-local'}
+    flag = _cross_project_flag(a)
+    if flag:
+        payload['cross_project'] = flag
+    out = _write_op_poc('ticket', payload, a)
+    return _poc_ok(out)
+
+
+def _ruling(a):
+    """宿主裁决注入（t260915-12 F2 收口：schema op enum 宣告了 ruling 而分发器无出口
+    ——宣告不支持的工具面=对模型面撒谎，KI-079 同族「说明书与实际入口不符」）。薄壳
+    委托 client.py ticket op=ruling（intake 单点在 workflow：who/note 必填非空、note
+    上限 HOST_RULING_NOTE_INPUT_LIMIT、跨项目闸第二道复核——本层不第二真源）；
+    D1 同族：who 必填由调用方注入、纯空白本层拒收（正规入口不落 op-local）。"""
+    tid = a.get('id') or ''
+    if not tid:
+        raise ValueError('ruling 需要 id')
+    who = _who(a)
+    if not who.strip():
+        raise ValueError('ruling 需要 by|who（裁决人身份由调用方注入，不得留空）')
+    if not str(a.get('note') or '').strip():
+        raise ValueError('ruling 需要 note（裁决内容，非空）')
+    payload = {'op': 'ruling', 'ticket_id': tid, 'who': who,
+               'note': str(a.get('note') or '')}
+    flag = _cross_project_flag(a)
+    if flag:
+        payload['cross_project'] = flag
+    out = _write_op_poc('ticket', payload, a)
     return _poc_ok(out)
 
 
@@ -673,8 +808,12 @@ def _pause_resume(a, op):
     if not who:
         raise ValueError('%s 需要 by|who（操作人身份由调用方注入，不得留空）'
                          '——正规入口不落 op-local' % op)
-    out = _poc('ticket', {'op': op, 'ticket_id': tid, 'who': who,
-                          'note': str(a.get('note') or '')})
+    payload = {'op': op, 'ticket_id': tid, 'who': who,
+               'note': str(a.get('note') or '')}
+    flag = _cross_project_flag(a)
+    if flag:
+        payload['cross_project'] = flag
+    out = _write_op_poc('ticket', payload, a)
     return _poc_ok(out)
 
 
@@ -702,11 +841,15 @@ def _authorize(a):
         raise ValueError('authorize 需要 expires（epoch 秒或 ISO8601——授权必须到期作废）')
     if not str(a.get('reason') or '').strip():
         raise ValueError('authorize 需要 reason（为什么批——授权记录必须能回答此问）')
-    out = _poc('ticket', {'op': 'authorize', 'ticket_id': tid,
-                          'input': {'who': who, 'kind': kind,
-                                    'scope': [str(s).strip() for s in scope],
-                                    'reason': str(a.get('reason') or ''),
-                                    'expires': a.get('expires')}})
+    payload = {'op': 'authorize', 'ticket_id': tid,
+               'input': {'who': who, 'kind': kind,
+                         'scope': [str(s).strip() for s in scope],
+                         'reason': str(a.get('reason') or ''),
+                         'expires': a.get('expires')}}
+    flag = _cross_project_flag(a)
+    if flag:
+        payload['cross_project'] = flag
+    out = _write_op_poc('ticket', payload, a)
     return _poc_ok(out)
 
 
@@ -746,6 +889,8 @@ def run(args):
         return _sign(args)
     if op == 'authorize':
         return _authorize(args)
+    if op == 'ruling':
+        return _ruling(args)
     if op == 'retry_qc':
         return _retry_qc(args)
     if op in ('pause', 'resume'):

@@ -28,7 +28,7 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
 # ---- env naming (bridged by ticket t260907-04, final switch 260908) ----
@@ -378,6 +378,132 @@ AUTHZ_USED_KEY = "path_gate_authz_used="
 # 合法 gate 值（Stage.id 全集 ∪ HUMAN_GATES ∪ CLOSE_GATE_ID）不相交。
 AUTHZ_SIGNAL_GATE_MARKER = "__authorize__"
 
+# ---- 跨项目写操作闸（t260915-12）：调用方项目身份契约 ----
+# 口径：防误操作 + 全程可审计的机器层边界，非对抗性身份鉴别（env 可被有心进程伪造、
+# Temporal 直连可绕过 client.py——宿主 260910 已裁身份鉴别不做，audit.py 模块头在案）。
+# 四件事：身份有出处（spawn 链注入/显式参数）、不匹配 fail-closed 拒收、越权必记名、记录可对账。
+# 身份 env（spawn 链注入位，非密钥；命名对齐 audit.py 的 SANDBAR_CLIENT_ENTRY 家族）：
+# 值=项目注册表 key（PROJECT_KEY_RE 白名单）。注入者=包装层/宿主层代码（ticket.py 推导、
+# 插件票接线 console/泳道），不是任何 agent 的自由文本。
+CALLER_PROJECT_ENV = "SANDBAR_CALLER_PROJECT"
+# undeclared 哨兵（盖章载荷专用，review C3）：与「空串=老 client 未盖章」两态互斥——
+# undeclared 的写操作也要进 workflow 侧记名账（meta['cross_project_uses']），空值继续
+# 承载解码兼容语义（老历史/老 client 解码缺字段→""→不校验不记名）。
+CALLER_UNDECLARED_MARK = "__undeclared__"
+# undeclared 策略常量（review C-0 收口条件②：翻 A=改这一处+场景同步）：
+#   "record" = 放行+强制记名（本期 B 策略：console/node 注入面不在引擎写集，接线由跟进
+#              插件票完成；接线后翻 "refuse" 即终态 fail-closed。依赖与翻严路径登记在
+#              server/engine/README.md 注入契约节）。
+#   "refuse" = 终态：未声明身份一律结构化拒收。
+UNDECLARED_POLICY = "record"
+# 越权旗自由文本上限（review C4，intake 上限家族：与 PAUSE/HOST_RULING_NOTE_INPUT_LIMIT、
+# AUTHZ_WHO_MAX_LEN 同值不同源——独立常量，各自演进不互相绑死）。超限=结构化拒收。
+CROSS_PROJECT_NOTE_LIMIT = 20000
+CROSS_PROJECT_BY_LIMIT = 64
+
+
+def path_under_any(path: str, roots: Sequence[str]) -> bool:
+    """path 是否位于 roots 任一前缀之下（含等值）。双侧各试原文与 realpath 两形
+    （符号链接稳健：调用方一侧可能传 /var 形、另一侧 /private/var 形）；纯字符串
+    前缀判定，零 IO（目录是否存在不在此答——查无此目录=不在任何树下=推导面自然
+    回落 undeclared）。"""
+    p = str(path or "")
+    p_real = os.path.realpath(p) if p else p
+    for r in roots or ():
+        r = str(r or "")
+        if not r:
+            continue
+        try:
+            r_real = os.path.realpath(r)
+        except Exception:  # noqa: BLE001
+            r_real = r
+        for rv in {r, r_real}:
+            for pv in {p, p_real}:
+                if pv == rv or pv.startswith(rv.rstrip("/") + "/"):
+                    return True
+    return False
+
+
+def project_key_for_dir(path: str, projects: Sequence[Dict[str, Any]],
+                        exclude_trees: Sequence[str] = ()) -> str:
+    """目录→项目 key 反查（cwd 窄兜底推导的单一实现，t260915-12）。
+
+    - longest-prefix 命中某注册项目 dir → 返回该 key（出处=cwd×注册表，机器推导非自由文本）；
+    - **引擎仓树排除（review C1，行为级）**：path 位于 exclude_trees 任一前缀之下（含等值
+      与任意深度子目录）→ 一律返回 ""——仓树内的 cwd 可能是 admin.py/tools_registry 进程内
+      调用（dsh 工具链 spawn cwd=repo）或 console 插件（cwd=server/engine 子目录），此时
+      cwd 标识的是「被调用的引擎」而不是「调用方会话」，推导会凭空造出 declared 身份
+      （违反「身份不许凭空自认」），宁可 undeclared 记名；
+    - 未命中任何注册项目 → ""（undeclared）。
+    符号链接稳健性：注册表条目可能写符号链接形态（如 macOS /var/...，bench.write_registry
+    刻意不 deref 以锚定原文），而调用方 cwd 常 realpath（/private/var/...）——比较按
+    「原文前缀」与「双侧 realpath 归一」各试一遍，任一命中即取（排除树同样双形比对）。
+    纯函数：projects/exclude_trees 由调用方注入（load_projects_registry()/REPO_ROOT 的
+    realpath），单测直调零环境依赖。"""
+    if not str(path or "").strip():
+        return ""
+    if path_under_any(path, exclude_trees):
+        return ""
+    path_real = os.path.realpath(str(path))
+    best_key, best_len = "", -1
+    for p in projects or ():
+        for d in (p.get("dirs") or []):
+            d = str(d or "")
+            if not d:
+                continue
+            try:
+                d_real = os.path.realpath(d)
+            except Exception:  # noqa: BLE001
+                d_real = d
+            # 双形比对：原文前缀（注册表条目锚定原文）+ 双侧 realpath（符号链接归一）
+            hit = any(pv == dv or pv.startswith(dv.rstrip("/") + "/")
+                      for dv in {d, d_real} for pv in {str(path), path_real})
+            if hit and len(d) > best_len:
+                best_key, best_len = str(p.get("key") or ""), len(d)
+    return best_key if PROJECT_KEY_RE.match(best_key or "") else ""
+
+
+def cross_project_judge(caller: str, target: str, note: str,
+                        policy: str = UNDECLARED_POLICY) -> Dict[str, Any]:
+    """workflow 侧第二道判定（纯函数，t260915-12；client 侧矩阵在 caller_gate.py，
+    语义同源——两处各自实现原因：workflow 侧只消费盖章值、无身份解析面）。
+
+    caller=信号载荷盖章值（""=老 client 未盖章→兼容放行，KI 兼容口径）；target=本票
+    meta['project']（""=无项目身份面的引擎件→无比对对象，放行）。
+    返回 {"action": "allow"|"allow_record"|"refuse", "record": dict|None, "why": str}：
+    - allow        直接放行（同项目/未盖章/无项目面）；
+    - allow_record 放行+记名（record 由调用方补 ts/op 后落 meta['cross_project_uses']）：
+        undeclared 哨兵（policy="record" 时）或 declared 异项目带越权旗理由；
+    - refuse       declared 异项目无旗（人话点名「谁要动谁的票」）或 undeclared 且
+        policy="refuse"（终态 A）。
+    note 截断进 record（≤300 字符入账，全文不进事件历史——host_ruling 截断同族取舍）。"""
+    caller = str(caller or "")
+    target = str(target or "")
+    note = str(note or "").strip()
+    if not caller or not target:
+        return {"action": "allow", "record": None, "why": ""}
+    if caller == target:
+        return {"action": "allow", "record": None, "why": ""}
+    if caller == CALLER_UNDECLARED_MARK:
+        if policy == "refuse":
+            return {"action": "refuse", "record": None,
+                    "why": "跨项目闸：本票属项目 %s，调用未声明身份且引擎策略=拒收"
+                           "（undeclared-policy=refuse）——请经注入链声明调用方项目后再操作" % target}
+        return {"action": "allow_record",
+                "record": {"caller_project": CALLER_UNDECLARED_MARK, "note": note[:300]},
+                "why": "跨项目闸记名：未声明调用方身份的操作落在项目 %s 的票上"
+                       "%s（策略=记名放行，console/泳道注入接线后翻拒收）"
+                       % (target, "，理由=%s" % note[:120] if note else "")}
+    if note:
+        return {"action": "allow_record",
+                "record": {"caller_project": caller, "note": note[:300]},
+                "why": "跨项目越权记名：调用方项目 %s 操作项目 %s 的票（越权旗理由=%s）"
+                       % (caller, target, note[:120])}
+    return {"action": "refuse", "record": None,
+            "why": "跨项目写操作拒收：调用方项目身份 %s 与本票所属项目 %s 不符，且未带"
+                   "越权旗（cross_project 理由必填）——只操作本项目的票，确需跨项目走"
+                   "越权旗+理由（记名留痕可查）" % (caller, target)}
+
 
 @dataclass
 class HumanAuthorization:
@@ -680,6 +806,12 @@ class Signature:
     # 反序列化缺字段→None，签字语义逐字节不变；带 authorize 的载荷只在 dev_lane
     # 的 sign handler 被接受，其余三个 handler（base/workflows/inspection_flow）显式拒收。
     authorize: Optional[HumanAuthorization] = None
+    # t260915-12 跨项目闸盖章（client.py 过闸后写入，调用方传入值被盖写）：带默认值字段
+    # =老历史/老 client 解码→""→workflow 侧不校验不记名（重放安全，TicketInput 先例同款）。
+    # caller_project 取值=注册表 key | CALLER_UNDECLARED_MARK（undeclared 记名）；
+    # cross_project_note=越权旗理由（空=无旗）。四个写信号载荷同款字段=同族契约。
+    caller_project: str = ""
+    cross_project_note: str = ""
 
 
 def sign_face_fingerprint() -> Dict[str, Any]:
@@ -2135,6 +2267,9 @@ class ReworkRequest:
     who: str
     target_stage: str = ""
     note: str = ""
+    # t260915-12 跨项目闸盖章（同 Signature 家族契约；带默认=重放安全）。
+    caller_project: str = ""
+    cross_project_note: str = ""
 
 
 @dataclass
@@ -2147,6 +2282,9 @@ class HostRulingRequest:
 
     who: str
     note: str
+    # t260915-12 跨项目闸盖章（同 Signature 家族契约；带默认=重放安全）。
+    caller_project: str = ""
+    cross_project_note: str = ""
 
 
 # ---- Ticket pause（工单 t260908-01，设计基准=notes/epics/ticket-pause.md）----
@@ -2186,6 +2324,9 @@ class PauseRequest:
 
     who: str
     note: str = ""
+    # t260915-12 跨项目闸盖章（同 Signature 家族契约；带默认=重放安全）。
+    caller_project: str = ""
+    cross_project_note: str = ""
 
 
 @dataclass

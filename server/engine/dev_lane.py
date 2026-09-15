@@ -42,7 +42,7 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
-    from base import TicketPauseMixin
+    from base import TicketCrossProjectMixin, TicketPauseMixin
     import authz_gates
     import path_gates  # t260915-01 ②：闸拒绝结构化明细的构造/校形（纯函数零 IO）
     # t260915-05：模板拓扑导出面（纯数据零 IO；mock ④「引擎按模板导出 stage 图」，
@@ -401,7 +401,7 @@ def _prompt_next_no(prompt: str) -> int:
 
 
 @workflow.defn
-class DevLaneWorkflow(TicketPauseMixin):
+class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
     """The single workflow for developer-family tickets (dev-lane). Direct activity
     orchestration, no stage machine.
 
@@ -2386,6 +2386,13 @@ class DevLaneWorkflow(TicketPauseMixin):
             self._log("人授权拒收（%s）：authorize 载荷解析失败（gate 标记在场但载荷为空）"
                       % (sig.who or "?"))
             return
+        # t260915-12 跨项目闸（第二道，先于人门语义检查）：盖章值 vs 本票项目——
+        # 不符无旗=refused 不落签字（跨项目拒收优先于「非人审等待中」，两类拒收不混）；
+        # undeclared 哨兵/越权旗=记名放行（meta['cross_project_uses'] + timeline）。
+        if not self._cross_project_gate(str(getattr(sig, "caller_project", "") or ""),
+                                        str(getattr(sig, "cross_project_note", "") or ""),
+                                        "sign", str(sig.who or ""), "sign"):
+            return
         stage = str(self.meta.get("stage") or "")
         if stage != "merge" or self.meta.get("stage_state") != "awaiting-human":
             self.refused.append({"who": sig.who, "want": "sign(%s)" % sig.gate,
@@ -2464,6 +2471,11 @@ class DevLaneWorkflow(TicketPauseMixin):
     def rework(self, req: ReworkRequest) -> None:
         """Send back for a re-run: the target step re-enters (gen+1 → a fresh result
         file, the agent genuinely re-runs)."""
+        # t260915-12 跨项目闸（第二道）：同 sign 口径（先于受理，拒收不置 self._rework）。
+        if not self._cross_project_gate(str(getattr(req, "caller_project", "") or ""),
+                                        str(getattr(req, "cross_project_note", "") or ""),
+                                        "rework", str(req.who or ""), "rework"):
+            return
         self._rework = req
         self._log("rework 请求：%s → %s（%s）"
                   % (req.note, req.target_stage or "缺省目标", req.who))
@@ -2492,6 +2504,11 @@ class DevLaneWorkflow(TicketPauseMixin):
         if not who or not note:
             self.refused.append({"who": who, "want": "host_ruling",
                                  "why": "who/note 均必填非空（空/纯空白拒收）"})
+            return
+        # t260915-12 跨项目闸（第二道）：intake 通过后、落账前的项目归属校验。
+        if not self._cross_project_gate(str(getattr(req, "caller_project", "") or ""),
+                                        str(getattr(req, "cross_project_note", "") or ""),
+                                        "host_ruling", who, "host_ruling"):
             return
         if len(note) > HOST_RULING_NOTE_INPUT_LIMIT:
             self.refused.append({"who": who, "want": "host_ruling",

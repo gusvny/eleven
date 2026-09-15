@@ -28,7 +28,7 @@ def tk(tmp_path, monkeypatch):
     spec.loader.exec_module(mod)
     calls = []
 
-    def fake_poc(subcmd, payload):
+    def fake_poc(subcmd, payload, caller=None):  # t260915-12：+caller 身份注入形参
         calls.append((subcmd, payload))
         return {"ok": True, "result": {"delivered": True, "signal": payload.get("op")}}
 
@@ -195,7 +195,8 @@ def test_cli_success_via_stubbed_spawn(tmp_path, monkeypatch):
     mod = importlib.util.module_from_spec(spec)
     sys.modules["ticket_cli_succ"] = mod
     spec.loader.exec_module(mod)
-    monkeypatch.setattr(mod, "_poc", lambda s, p: {"ok": True, "result": {"delivered": True}})
+    monkeypatch.setattr(mod, "_poc",
+                        lambda s, p, caller=None: {"ok": True, "result": {"delivered": True}})
     import io
     import contextlib
     buf = io.StringIO()
@@ -207,3 +208,37 @@ def test_cli_success_via_stubbed_spawn(tmp_path, monkeypatch):
     rows = [json.loads(x) for x in log.read_text(encoding="utf-8").splitlines()]
     assert len(rows) == 1 and rows[0]["ok"] is True
     assert rows[0]["source"] == "ticket.py-direct"
+
+
+# ---------- ruling 包装层出口（t260915-12 F2 收口：schema 宣告与实现一致） ----------
+
+def test_ruling_forwards_shape(tk):
+    """schema op enum 宣告的 ruling 有真出口：薄壳委托 client.py ticket op=ruling
+    （闸在 client+workflow intake，包装层只做身份注入与本层 fail-fast）。"""
+    r = tk.run({"op": "ruling", "id": "t1", "by": "宿主", "note": "裁决内容"})
+    subcmd, payload = tk._calls[0]
+    assert (subcmd, payload) == ("ticket", {"op": "ruling", "ticket_id": "t1",
+                                            "who": "宿主", "note": "裁决内容"})
+    assert r["signal"] == "ruling" and r["delivered"] is True
+
+
+def test_ruling_rejects_blank_who_note_and_missing_id(tk):
+    """D1 同族：who 空白/缺失、note 空白、缺 id 全在本层拒收，不 spawn（不落 op-local）。"""
+    with pytest.raises(ValueError, match=r"by\|who"):
+        tk.run({"op": "ruling", "id": "t1", "note": "x"})
+    with pytest.raises(ValueError, match="note"):
+        tk.run({"op": "ruling", "id": "t1", "who": "宿主", "note": "   "})
+    with pytest.raises(ValueError, match="需要 id"):
+        tk.run({"op": "ruling", "who": "宿主", "note": "x"})
+    assert tk._calls == []
+
+
+def test_ruling_forwards_cross_project_flag(tk):
+    tk.run({"op": "ruling", "id": "t1", "who": "宿主", "note": "x",
+            "cross_project": {"by": "宿主", "reason": "代管收口"}})
+    _, payload = tk._calls[0]
+    assert payload["cross_project"] == {"by": "宿主", "reason": "代管收口"}
+    # 扁平形同样透传为结构形
+    tk.run({"op": "ruling", "id": "t1", "who": "宿主", "note": "x",
+            "cross_project_reason": "救火"})
+    assert tk._calls[-1][1]["cross_project"] == {"by": "宿主", "reason": "救火"}

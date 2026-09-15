@@ -290,6 +290,21 @@ SCENARIOS = [
      "人授权通道的真信号送达面+接收侧丢失可见化（t260913-01 验收 A 送达半边/C/D-A 腿，灰盒 L3，真 docker 台+真用户 CLI+真专属 worker+真 workflow）：人授权唯一入口（server/tools/ticket.py op=authorize→Signature.authorize→sign 信号）在真实投递链上必须送达并被 intake 落账——本票事故面=载荷在传输/解码一跳静默丢失后回落普通签字；sign_face 指纹 query 在场且自述含 authorize 字段与 marker 保留值（worker 内存 signal 面可被客户端实时核验，陈旧 worker 结构性 absent=重启判据/拒发的根）；A 腿真信号落账字段完整（who/kind/scope/reason/expires/issued/uses）+timeline 签发事件+回执 landing=landed 机读键；负锁矩阵全真信号投递且一律不落账：①过期（refused「已过期」+回执 landing=refused）②arbitration_verdict scope=别票（点名别票票号）③who=agent 角色名（反自签）④marker 保留值直发而无 authorize 载荷（=传输丢失后的解码等价形态）→refused want=sign(authorize) 点名「载荷解析失败」且与「非人审等待中」文案可辨（静默回落普通签字=事故形态）⑤畸形 decode-safe 裸 dict 缺字段→intake 语义拒收；类型不兼容毒载荷（authorize=123）故意不用=value_to_type TypeError 进 workflow task 重试循环。与 t260912-03 三场景不同面：彼锁闸的行为（protected_path）/仲裁回灌消费面（overlimit=本票验收 B 腿与 D 的 B 半边）/用户可查面（cli_queryable），本条锁送达面+丢失可见化；与 developer L1（指纹/分类/落账纯函数单测）不同层。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker/镜像/舞台缺件=ENV_FAIL exit 2 点名",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260913-01/tests/sc_authz_signal_delivery.py", "engine"),
 
+    # ---- t260915-12: 跨项目写操作闸（caller-project gate；260915 宿主实报立项） ----
+    # 260915 虚惊复盘（dengzhufpv 票 t260915-02 合并签字）：签字合法但暴露引擎对写操作
+    # 零项目边界校验。纪律层 charter 260915 已补，本票补机器层。实现段落地前红属预期
+    # （TDD 信号），arbitrate/merge 期必须绿；undeclared=B 策略现状契约被场景相七钉住，
+    # 跟进插件票接线后翻 A（undeclared=拒收）时由翻严票同步改写该相。
+    ("t260915-12-gate-real-chain",
+     "跨项目写操作闸的真链路用户契约面（t260915-12 验收①负腿/②正腿/③越权旗+对账面，灰盒 L3，真 docker 台+真用户 CLI+真专属 worker+真 workflow）：declared 身份（SANDBAR_CALLER_PROJECT/显式参数）与目标票 project 不符→fail-closed 拒收 kind=cross_project_refused+人话点名双项目与票号（ruling/sign/ticket-start 三入口同形状）+admin.log 行 override=false 且信号不出手（snapshot 零变化）；同项目写操作零影响仅回执增身份键（caller_project/identity_src 词汇 arg|env|cwd）；出处优先级显式参数>env（env 不能救显式他项目）；越权旗 cross_project{by,reason}→放行+meta['cross_project_uses'] 按笔记名（by/reason 原文在条目）+ticket.py show 用户出口可对账+admin.log override=true；畸形旗（缺 by/缺 reason/reason 空白）fail-closed 拒收不记名；undeclared=B 策略现状契约（放行+identity_class=undeclared+记名入对账面+admin.log 行）；cwd 兜底两形=仓内子目录必须 undeclared（注册表含 dirs=[引擎仓根] 探测条目，实现只排除仓根等值即行为反转红=review C1 探测器）、cwd 在注册项目 dir 内推导 declared identity_src=cwd；workflow 第二道直发 SDK 真 stamp 解码（review C5 送达面）=带头旗记名放行/不带头旗 refused[] 点名不执行/无盖章兼容不校验；retry_qc 不盖章残留诚实（client 放行+admin.log override=true 但 meta 记名不增=方案 §8 已声明残留非漏记）；读面零闸；cancel 过闸（他项目拒/同项目 terminate 放行）。与 t260912-03 三场景不同面（彼锁人授权 authorize 载荷维，本条锁调用方项目归属维）；与 t260913-01 不同面（彼锁 authorize 嵌套载荷送达，本条锁 stamp 标量字段真投递）；与 t260908-01 不同面（彼锁 pause intake 语义，本条只把 pause/ruling 当任意状态写 op 载体）；与 developer L1（纯函数矩阵/client 桩测）及其源码锁场景不同层。docker/镜像/舞台缺件=ENV_FAIL exit 2 点名",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260915-12/tests/sc_cross_project_gate_realchain.py", "engine"),
+
+    # t260915-12 离线源码锁（实现段交付，方案 §4）：结构锁+真函数重放，无 docker/
+    # 网络/pytest 依赖恒可跑；与 gate-real-chain 不同层（彼真链路行为面）。
+    ("t260915-12-cross-project-gate",
+     "跨项目写操作闸离线源码锁+微型重放（temporalio 不可导入环境既定模式，sc_check_auto_rework_trace 同款）：锁 undeclared 策略单常量（UNDECLARED_POLICY=record——C-0② 翻严锚点：翻 A 时本场景+真链路场景相七+README 三处同步改）、四个写信号载荷盖章字段带默认值（重放安全形状）、判定矩阵单点实现（shared.cross_project_judge 唯一真源，client/workflow 两侧零复制）并直接 import 真函数重放正/负/越权/畸形四腿（畸形腿：旗非对象/缺 by/缺 reason/超上限/身份形状非法/路径前缀混淆/空白声明=视同未声明）、client 八写 op 全接闸+retry_qc/update 不盖章但回执 notice 分档（C3 诚实残留）、cancel 前置快照三态（transient 不判越权 KI-025/not_found/先闸后 terminate）、workflow 第二道落点（base 混入四 handler+dev_lane 三 handler+旧模板 sign 统一接闸不留分叉）、ticket.py 包装层（仓树排除的 cwd 推导=C1、越权旗本层 fail-fast、对账白名单 cross_project_uses、schema caller_project+cross_project+op enum authorize|ruling=M2）",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260915-12/tests/sc_check_cross_project_gate.py", "engine"),
+
     ("auto-rework-trace",
      "---- A1: 五个自动打回场景，各产一条横幅可见记录（用户视角主契约） ---- scenarios = [ ('acceptance', 'implement', '验收",
      "SANDBAR_TARGET_HOST=127.0.0.1:17233 node integration/baselines/sc_auto_rework_trace.mjs"),

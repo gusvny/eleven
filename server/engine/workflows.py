@@ -43,6 +43,7 @@ with workflow.unsafe.imports_passed_through():
         Signature,
         StageAttempt,
         TicketScan,
+        cross_project_judge,
     )
 
 
@@ -166,6 +167,17 @@ class ContentPipelineWorkflow:
                 {"who": sig.who, "want": f"sign({sig.gate})", "why": "非人门，签字无效"})
             workflow.logger.warn("拒绝签字：%s 不是人门", sig.gate)
             return
+        # t260915-12 跨项目闸（第二道，统一接闸不留分叉）：本模板 meta 无 project 面
+        # →judge 对 target="" 恒放行；未来模板补项目面时此处自动升级为拒收/记名。
+        g = cross_project_judge(str(getattr(sig, "caller_project", "") or ""), "",
+                                str(getattr(sig, "cross_project_note", "") or ""))
+        if g["action"] == "refuse":
+            self.refused_attempts.append({"who": sig.who, "want": "sign", "why": g["why"]})
+            workflow.logger.warn("%s", g["why"])
+            return
+        if g["action"] == "allow_record":  # 理论不可达（无项目面）——防御性 log 留痕
+            workflow.logger.warn("跨项目写操作记名（本模板无 meta 记名面，仅此处日志）：%s",
+                                 g["why"])
         self._sigs[sig.gate] = sig
         self.signatures[sig.gate] = {
             "who": sig.who, "decision": sig.decision, "note": sig.note,

@@ -68,13 +68,19 @@ def attach_entry_hint(receipt):
     return receipt
 
 
-def audit_call(sub, receipt, call_id=None, source=None):
+def audit_call(sub, receipt, call_id=None, source=None,
+               caller_project=None, identity_class=None, identity_src=None,
+               override=None):
     """记一行审计到 admin.log，返回本行 call_id。
 
     sub：子命令/操作名（client.py 传 argv[1]；ticket.py 直 spawn 传 'ticket.<op>'）。
     receipt：回执 dict（只读摘要进 summary，不整抄 args——畸形/超长输入在此截断）。
     call_id：缺省取 env SANDBAR_CLIENT_CALL_ID（ticket.py 直调的关联键），再缺省自生成。
     source：调用方覆盖（ticket.py 直 spawn 行用 'ticket.py-direct'；缺省 claimed_source）。
+    caller_project/identity_class/identity_src/override：跨项目闸身份键（t260915-12，
+    client.py _emit 从回执同键提取传入）。None=不落该键；override 由 _emit 恒传布尔
+    （闸面的对账 grep 语义=override=false 也是一笔记录）。caller_project 同样是
+    claimed 值非身份鉴别（口径同 source）。
     写失败只 stderr 留痕，绝不 raise——审计不吞回执（主契约优先，见模块头）。
     """
     if not call_id:
@@ -93,6 +99,15 @@ def audit_call(sub, receipt, call_id=None, source=None):
         'ok': bool(receipt.get('ok')) if isinstance(receipt, dict) else False,
         'summary': summary[:800],
     }
+    # 跨项目闸身份键（可选，缺省不写=旧消费者零感知）：admin.log 的对账观测面。
+    if caller_project is not None:
+        rec['caller_project'] = str(caller_project)[:41]
+    if identity_class is not None:
+        rec['identity_class'] = str(identity_class)[:16]
+    if identity_src is not None:
+        rec['identity_src'] = str(identity_src)[:16]
+    if override is not None:
+        rec['override'] = bool(override)
     line = json.dumps(rec, ensure_ascii=False, default=repr)
     try:
         with _log_path().open('a', encoding='utf-8') as f:

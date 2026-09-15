@@ -66,8 +66,12 @@ def test_real_decl_file_loads_and_test_face_enabled():
     assert d.instance("integration-tests").enabled is True
     assert d.instance("docs-sync").enabled is True
     assert d.instance("docs-sync").scan_face == "doc"
+    # 260915 宿主令：simplify-face 启用试跑（enabled=true，scan_face=simplify）
     assert d.instance("simplify-face").enabled is True
     assert d.instance("simplify-face").scan_face == "simplify"
+    # 真源实例面（t260915-12 消解轮对齐口径）：integration-tests/docs-sync（t260911-02
+    # 启用）+ mechanism-face（t260910-09 占位，enabled=false）+ simplify-face（260915
+    # 宿主令启用）——specs 按声明序出 3 条，mechanism-face 停用不进。
     assert [s["instance_id"] for s in decl.build_schedule_specs(d)] == [
         "integration-tests", "docs-sync", "simplify-face"]
 
@@ -242,14 +246,16 @@ def test_trigger_decl_op_offline_real_file():
     assert payload["ok"] is True
     ids = [i["id"] for i in payload["result"]["instances"]]
     # 本票（t260910-11）改名去后缀 + main 侧 t260910-09 新增占位实例，两边语义合取：
-    # ids=新名两实例+t260910-09 两个占位；占位 enabled=false 不进 schedule_specs
+    # ids=新名两实例+t260910-09 两实例；t260913-02 起 simplify-face 启用
     assert ids == ["integration-tests", "docs-sync", "mechanism-face", "simplify-face"]
-    # t260911-02：docs-sync 启用（scan_face=doc）→ 两实例进 specs
-    # 260915 宿主令：simplify-face 启用试跑（scan_face=simplify）→ 三实例进 specs
+    # t260911-02：docs-sync 启用（scan_face=doc）；260915 宿主令：simplify-face 启用
+    # （scan_face=simplify）→ 三实例进 specs；mechanism-face 停用占位不进
+    # （t260915-12 消解轮对齐真源口径）。
     assert [s["instance_id"] for s in payload["result"]["schedule_specs"]] == [
         "integration-tests", "docs-sync", "simplify-face"]
     faces = {s["instance_id"]: s["scan_face"] for s in payload["result"]["schedule_specs"]}
-    assert faces == {"integration-tests": "test", "docs-sync": "doc", "simplify-face": "simplify"}
+    assert faces == {"integration-tests": "test", "docs-sync": "doc",
+                     "simplify-face": "simplify"}
 
 
 def test_trigger_decl_op_malformed_file_single_line_error(tmp_path):
