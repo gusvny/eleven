@@ -66,6 +66,15 @@ TICKET_COUNT_SOURCES = ("archive-dir",)
 # 扫描面词表（t260911-02）：实例可声明 scan_face 指定跑哪个扫描器（「跑哪个巡检面」
 # 由项目声明决定——拍板③原文）；缺省 test（票① 行为兼容，零声明实例不回退不报错）。
 WIRED_FACES = ("test", "doc", "mechanism", "simplify")
+# 套件词表（t260913-02）：实例可声明 suite 指定「本期是否在自己的泳道里跑集成全集」。
+# 现在只接 full 一档——全集就是全集，不接受任何「抽稀/跳场景」的值（红线：不得以
+# 跳过或删减场景换取跑通）；缺省空=不跑套件（票① 行为兼容，零声明实例不报错不回退）。
+# 词表外值一律 fail-closed 点名，不静默降级成 no-suite。
+WIRED_SUITES = ("full",)
+# 时区词法（t260913-02 实现段）：Temporal Schedule 的 cron 默认按 **UTC** 求值——声明
+# 里的人读钟点（07:30=本地）必须显式带 tz 才成立，否则「每天 07:30」实际落在本地 15:30。
+# 引擎只做词法闸（IANA 名的保守字面），真正的时区存在性由 Temporal 拒绝并点名。
+TZ_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$")
 SCHEMA = "v1"
 INSTANCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 # Five-field cron lexicon: `*` `*/n` `n` `n-m` `n-m/n` `n,m` (comma lists); the month and
@@ -92,6 +101,10 @@ class InstanceSpec:
     source: str = ""
     project_key: str = ""
     scan_face: str = "test"
+    # 套件档（t260913-02）：空=不跑套件；"full"=本期在巡检自有泳道里跑集成全集。
+    suite: str = ""
+    # 调度时区（t260913-02 实现段）：空=Temporal 缺省（UTC）；填 IANA 名（如 Asia/Shanghai）
+    tz: str = ""
     workflow: str = ""
     template: str = ""
 
@@ -379,9 +392,10 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
         if not isinstance(item, dict):
             raise DeclError("%s：实例必须是映射（got %s）" % (where, type(item).__name__))
         unknown = sorted(set(item) - {"id", "enabled", "schedule", "workflow", "template",
-                                      "scan_face"})
+                                      "scan_face", "suite", "tz"})
         if unknown:
-            raise DeclError("%s：未知实例字段 %s（合法：id/enabled/schedule/workflow/template；"
+            raise DeclError("%s：未知实例字段 %s（合法：id/enabled/schedule/workflow/template/"
+                            "scan_face/suite/tz；"
                             "face 已于 260910 巡检校准票 t260910-11 除名——零消费者，旧声明含 face 一律拒收点名）"
                             % (where, unknown))
         inst_id = _req_str(where, item, "id")
@@ -405,11 +419,22 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
             if scan_face not in WIRED_FACES:
                 raise DeclError("%s：scan_face %r 未接线（可指名：%s）——面在项目声明，"
                                 "引擎只提供已接线的扫描器" % (where, scan_face, "、".join(WIRED_FACES)))
+        suite = ""
+        if item.get("suite") is not None:
+            suite = _req_str(where, item, "suite")
+            if suite not in WIRED_SUITES:
+                raise DeclError("%s：suite %r 未接线（可指名：%s）——套件只有全集一档，"
+                                "没有「抽稀/跳场景」的值" % (where, suite, "、".join(WIRED_SUITES)))
+        tz = ""
+        if item.get("tz") is not None:
+            tz = _req_str(where, item, "tz")
+            if not TZ_RE.match(tz):
+                raise DeclError("%s：tz %r 形态非法（IANA 名，如 Asia/Shanghai）" % (where, tz))
         kind, cron, n, source, project_key = _validate_schedule(where, item.get("schedule"), enabled)
         instances.append(InstanceSpec(
             id=inst_id, enabled=enabled, kind=kind, cron=cron, n=n,
             source=source, project_key=project_key, scan_face=scan_face,
-            workflow=workflow_name, template=template))
+            suite=suite, tz=tz, workflow=workflow_name, template=template))
     return InspectionDecl(schema=SCHEMA, instances=instances, source=source)
 
 
@@ -430,6 +455,8 @@ def build_schedule_specs(decl: InspectionDecl) -> List[Dict[str, Any]]:
             "source": it.source,
             "project_key": it.project_key,
             "scan_face": it.scan_face,
+            "suite": it.suite,
+            "tz": it.tz,
             "workflow": it.workflow,
             "template": it.template,
             # overlap semantics (borrowed from trade-off list item 1): repeated triggers of
@@ -439,3 +466,37 @@ def build_schedule_specs(decl: InspectionDecl) -> List[Dict[str, Any]]:
             "overlap": "SKIP",
         })
     return specs
+
+
+def resolve_instance_plan(instance_id: str, decl_path: Any = None) -> Dict[str, Any]:
+    """运行期「本期怎么跑」的单一决议点（t260913-02）：workflow 启动时经 activity 读当前
+    声明，决定是否进 setup/suite 阶段——**开关不进 workflow 输入 payload**（老 worker
+    解新字段的反向兼容面为零；改声明即改行为，不必重跑 schedule-up）。
+
+    三态，逐态闭式（C4）：ok=True 的两种形态也显式区分——
+      - suite 非空（现只认 "full"）：跑套件（setup → scan → suite → report → close）；
+      - suite 空：不跑套件（scan → report → close，票① 行为）；
+      - enabled=false / 实例不在册 / 声明不可解析 → ok=False + 点名 error（**绝不**
+        与「启用但没声明 suite」同形放过：调度器还在触发却声明已停用，是配置漂移
+        事故，必须显式 blocked 让人看见——dead-man 纪律的同一族）。
+    纯函数（IO 只有一次声明读，路径由 decl_path / env / 默认单点决定）。"""
+    try:
+        decl = load_inspection_decl(decl_path)
+    except Exception as e:  # noqa: BLE001——解析/IO 一律闭式点名，不静默当 no-suite
+        return {"ok": False, "instance_id": instance_id,
+                "error": "声明不可用（%s）：%s" % (type(e).__name__, e)}
+    it = decl.instance(instance_id)
+    if it is None:
+        return {"ok": False, "instance_id": instance_id,
+                "error": "实例 %r 不在声明中（在册：%s）——调度器还在触发但声明已除名，"
+                         "配置漂移，人工处置" % (instance_id,
+                                             "、".join(i.id for i in decl.instances) or "无")}
+    if not it.enabled:
+        return {"ok": False, "instance_id": instance_id, "enabled": False,
+                "suite": it.suite,
+                "error": "实例 %r 在声明中已停用（enabled=false），但调度/触发仍在——配置漂移，"
+                         "人工处置（删调度或改回声明）" % instance_id}
+    return {"ok": True, "instance_id": it.id, "enabled": True, "suite": it.suite,
+            "run_suite": bool(it.suite), "scan_face": it.scan_face, "cron": it.cron,
+            "tz": it.tz,
+            "kind": it.kind, "workflow": it.workflow, "template": it.template, "error": ""}

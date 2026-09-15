@@ -134,10 +134,17 @@ MERGE_CHECK_TO = timedelta(minutes=20)   # merge_check includes the in-lane veri
 MERGE_TO = timedelta(minutes=5)
 AGENT_TO = timedelta(hours=6)
 HEARTBEAT_TO = timedelta(minutes=3)
-INTEG_RUN_TO = timedelta(minutes=60)     # mechanical integration tests: batch runner, batch cap
-# 配对不变量（t260913-01 仲裁修）：本值必须 > agent_activities.BATCH_TIMEOUT_SEC + 300s
-# （内层 wait_for 守卫），否则内层的结构化超时回报永远等不到、只剩 Temporal 硬杀 + 3 次重试。
-# 由单测 test_t260913_01_integ_budget_pair.py 机械锁住；一改必查另一侧。
+# 机械集成测试条目的活动超时（配对不变量，t260913-01 仲裁修 + t260913-02 实测合流）：
+# 本值必须 > agent_activities.BATCH_TIMEOUT_SEC + 300s（内层 wait_for 守卫），否则内层
+# 的结构化超时回报永远等不到、只剩 Temporal 硬杀 + 3 次重试（260913 两轮 0 跑无归因；
+# t260913-02 gen1 亦实测同形态）。单测 test_t260913_01_integ_budget_pair.py 机械锁住
+# 「内层 < 外层」与内层缺省上界；一改必查另一侧。
+# 两端各自的实测依据：内层缺省收紧为 3000+300=3300s≈55min（t260913-01：正常套件
+# ≈25min，超窗交结构化回报；exclude_pools 后每票集测实测 wall 179.5s ≪ 60min）；
+# 外层 60min 在此口径下余量充足。**全集（含 engine+exclusive 重池）的长墙钟口径不在
+# 本值**——那走每日巡检的 `inspection_flow.SUITE_TO=120min`（恒全跑、不经池排除，
+# 已按同一不等式钉住 > 5700s），两条预算各守各的面。
+INTEG_RUN_TO = timedelta(minutes=60)
 RETRY = RetryPolicy(maximum_attempts=3)  # infra failures only; business verdicts go via StageResult.status
 # Boolean patch gates (same family as workflows.py's WORKER_RECONCILE_PATCH_ID): a
 # parked old workflow replays down the old branch, so a new gate must not bump

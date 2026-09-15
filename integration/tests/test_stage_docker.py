@@ -31,11 +31,13 @@ import json
 import hashlib
 import os
 import pathlib
+import signal
 import socket
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import textwrap
 import unittest
@@ -572,18 +574,66 @@ class EnsureTest(StageCLIBase):
         self.assertEqual(st2["ports"], st1["ports"])
         self.cli("down", "--project", "utb2")
 
+    def _hold_pid(self, project):
+        """租约里 holder（hold 腿）的 pid——冻结/杀它都走真进程，不做 monkeypatch。"""
+        return json.loads((sd.lock_root() / ("project-%s.json" % project)).read_text())["holder"]["pid"]
+
     def test_ensure_expired_lease_with_live_pid_refuses(self):
-        """过期但 holder pid 仍活（pid 复用族）：不对抗、不硬拆——诚实红点名
-        人工核查（判据唯一化：只有 过期 AND pid 死 才回收）。"""
-        self.up_json("utpid", "--services", "dsh", "--timeout", "30")
-        # 手工把租约 TTL 折到已过期，但 holder（hold 腿）仍活着
-        lease = sd.read_lease("utpid")
-        lease["heartbeat_ts"] = 0
-        sd.write_lease("utpid", lease)
-        p = self.cli("ensure", "--project", "utpid", "--services", "dsh", "--timeout", "30")
+        """真僵死（心跳停更 + holder 进程仍在）：宽限窗到期仍不恢复 → 不对抗、不硬拆，
+        诚实红点名人工核查（判据唯一化：只有 过期 AND pid 死 才回收）。
+        t260913-02 arbitrate gen12 变更：夹具由「伪造 heartbeat_ts=0」改为**真冻结 hold 腿**
+        （SIGSTOP）——伪造时间戳在「活 holder 心跳会自然刷新」的新宽限语义下不再是僵死态
+        （那正是要复用的健康态，见下一条恢复用例）；断言集不变（rc=2 + 点名 pid + 零重建）。"""
+        self.up_json("utpid", "--services", "dsh", "--timeout", "30",
+                     SANDBAR_STAGE_LEASE_TTL_S="2", SANDBAR_STAGE_HEARTBEAT_S="0.5")
+        hold_pid = self._hold_pid("utpid")
+        os.kill(hold_pid, signal.SIGSTOP)
+        try:
+            time.sleep(3.0)      # > TTL=2s：心跳必过期且 holder 进程仍在（真僵死形）
+            p = self.cli("ensure", "--project", "utpid", "--services", "dsh",
+                         "--timeout", "30", SANDBAR_STAGE_STALL_GRACE_S="2")
+        finally:
+            try:
+                os.kill(hold_pid, signal.SIGCONT)
+            except OSError:
+                pass
         self.assertEqual(p.returncode, 2, "过期+pid 活应诚实 env 红：%s" % p.stderr)
         self.assertIn("pid", p.stderr)
+        self.assertIn("心跳停更", p.stderr)
+        self.assertEqual(len(pathlib.Path(self.state, "up-count").read_text().split()), 1,
+                         "拒收路径绝不 compose up")
         self.cli("down", "--project", "utpid")
+
+    def test_ensure_stalled_heartbeat_recovers_within_grace(self):
+        """心跳停更宽限（t260913-02 arbitrate gen12，260914 23:17 闸 17 环境红的根因面）：
+        租约过期而 holder（hold 腿）仍活时，旧行为是**当场**诚实红——一次负载停顿把整族
+        console 场景打成环境红（0.2~1.2s，场景一条没跑）。新语义先给宽限窗等心跳恢复：
+        恢复 → 复用（零重建、同容器集）。注入=真冻结 hold 腿 + 宽限窗内解冻（真进程，非桩）。"""
+        st1 = self.up_json("utstall", "--services", "dsh", "--timeout", "30",
+                           SANDBAR_STAGE_LEASE_TTL_S="2", SANDBAR_STAGE_HEARTBEAT_S="0.5")
+        hold_pid = self._hold_pid("utstall")
+        os.kill(hold_pid, signal.SIGSTOP)
+        timer = threading.Timer(3.0, lambda: os.kill(hold_pid, signal.SIGCONT))
+        timer.start()
+        try:
+            time.sleep(3.0)      # > TTL=2s：进 ensure 时租约必已过期、holder 仍活
+            p = self.cli("ensure", "--project", "utstall", "--services", "dsh",
+                         "--timeout", "60", SANDBAR_STAGE_STALL_GRACE_S="30")
+        finally:
+            timer.cancel()
+            try:
+                os.kill(hold_pid, signal.SIGCONT)
+            except OSError:
+                pass
+        self.assertEqual(p.returncode, 0,
+                         "宽限窗内心跳恢复应复用而非拒收：%s" % p.stderr)
+        st2 = json.loads(p.stdout.strip().splitlines()[-1])
+        self.assertTrue(st2.get("reused"), "心跳恢复后应走复用路径")
+        self.assertEqual(st2["container_ids"], st1["container_ids"], "复用不重建容器")
+        self.assertEqual(st2["ports"], st1["ports"], "复用不换端口")
+        self.assertEqual(len(pathlib.Path(self.state, "up-count").read_text().split()), 1,
+                         "恢复路径零 compose up")
+        self.cli("down", "--project", "utstall")
 
     def test_ensure_waits_booting_then_reuses(self):
         """R5/验收②：state=booting → 等待其完成，绝不并发再起。中间进程模拟

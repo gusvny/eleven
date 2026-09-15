@@ -442,6 +442,65 @@ async def write_inspection_report(face: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @activity.defn
+async def resolve_inspection_plan(args: Dict[str, Any]) -> Dict[str, Any]:
+    """运行期「本期怎么跑」决议（t260913-02）：读**当前**巡检声明 → 是否跑套件 / cron /
+    扫描面。纯实现=inspection_decl.resolve_instance_plan（本壳零业务判断）。
+
+    为什么读声明而不是读输入：套件开关不进 workflow 输入 payload——老 worker 解新字段是
+    反向兼容风险，且「改声明即改行为」纪律下 payload 不该成为第二真源；活动结果进
+    history，replay 用记录值，确定性不破。失败=ok False 点名（workflow 转 blocked，
+    绝不静默当 no-suite 放过去——调度还在触发而声明已停用/除名=配置漂移，必须可见）。"""
+    from inspection_decl import resolve_instance_plan
+
+    try:
+        result = await asyncio.to_thread(
+            resolve_instance_plan, str(args.get("instance_id") or ""),
+            args.get("decl_path") or None)
+    except Exception as e:  # noqa: BLE001——声明面故障显式化（不静默降级）
+        return {"ok": False, "error": "声明决议 activity 故障：%s: %s" % (type(e).__name__, e)}
+    if not result.get("ok"):
+        return {"ok": False, "error": str(result.get("error") or "声明决议失败")}
+    return {"ok": True, "result": result}
+
+
+@activity.defn
+async def run_inspection_deadman(args: Dict[str, Any]) -> Dict[str, Any]:
+    """漏跑核查（t260913-02，票面注入面）：台账目录 × 声明 cron 期望触发日 → 漏跑清单 +
+    发现条目。纯实现=inspection_deadman（本壳只做 IO 与时钟）。
+
+    时间口径：**本地** datetime.now()（与期号 period_key 同一口径；workflow.now() 是 UTC，
+    不用于漏跑判定）。台账目录走 shared.INSPECTION_DIR（env SANDBAR_INSPECTION_DIR 可覆盖
+    ——隔离台/注入演练用）。"""
+    from inspection_deadman import deadman_findings, ledger_periods, missed_periods
+    from shared import INSPECTION_DIR
+
+    instance = str(args.get("instance_id") or "")
+    cron = str(args.get("cron") or "")
+    try:
+        lookback = int(args.get("lookback_days") or 7)
+    except (TypeError, ValueError):
+        lookback = 7
+    ledger_dir = Path(str(args.get("ledger_dir") or INSPECTION_DIR))
+    tz_name = str(args.get("tz") or "")
+    try:
+        ledger = await asyncio.to_thread(ledger_periods, ledger_dir, instance)
+        missed = (missed_periods(cron, ledger["periods"], None, lookback, 0, tz_name)
+                  if cron else [])
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "漏跑核查故障：%s: %s" % (type(e).__name__, e)}
+    findings = deadman_findings(missed, instance, cron, lookback)
+    activity.logger.info("[%s] 漏跑核查（tz=%s）：台账 %d 期（exist=%s）、漏 %d 期、畸形 %d 条",
+                         instance, tz_name or "进程缺省", ledger["count"], ledger["exist"],
+                         len(missed), len(ledger["malformed"]))
+    return {"ok": True, "result": {
+        "instance_id": instance, "cron": cron, "lookback_days": lookback,
+        "tz": tz_name,
+        "ledger_dir": str(ledger_dir), "ledger_exist": ledger["exist"],
+        "ledger_periods": sorted(ledger["periods"]), "missed": missed,
+        "malformed": ledger["malformed"], "findings": findings}}
+
+
+@activity.defn
 async def count_archived_tickets(args: Dict[str, Any]) -> Dict[str, Any]:
     """Ticket-count source for the watcher（t260911-02）：per-key 归档目录计数。
     纯实现=inspection_ticket_count.count_archived_tickets（本壳零业务判断）；
@@ -480,7 +539,8 @@ async def trigger_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
             InspectionPeriodicWorkflow,
             InspectionPeriodicInput(instance_id=instance_id, period=period,
                                     repo_root=str(args.get("repo_root") or ""),
-                                    face=str(args.get("scan_face") or "test")),
+                                    face=str(args.get("scan_face") or "test"),
+                                    decl_path=str(args.get("decl_path") or "")),
             id=ticket_id, task_queue=activity.info().task_queue)
         return {"ok": True, "result": {"triggered": True, "ticket_id": ticket_id,
                                        "first_run_id": handle.first_execution_run_id}}
@@ -510,4 +570,7 @@ ALL_ACTIVITIES = [
     write_inspection_report,
     count_archived_tickets,
     trigger_inspection_period,
+    # t260913-02：运行期声明决议（套件开关）+ 漏跑核查（票面注入面）
+    resolve_inspection_plan,
+    run_inspection_deadman,
 ]

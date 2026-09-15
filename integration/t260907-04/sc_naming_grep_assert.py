@@ -45,6 +45,11 @@ SKIP_DIRS = {".venv", "node_modules", "__pycache__", "bin", ".git", ".dsh",
              "data"}  # server/engine/data/=运行时态（导出档案/日志/pidfile/快照），
                        # 历史数据里的旧队列名/schedule id 是事实记录非代码面，
                        # 与 .suyou/.sandbar 同类豁免（260908 终切后 652 命中主源）
+# out/（仓根与 server/engine 下均有）=运行期/测试生成产物面（gitleignore 全域）：
+# 集成报告把被测进程的 traceback/输出尾逐字转录进来，里面出现的历史绝对路径是
+# **事实记录**而非代码字面量——与 data/、.sandbox、.suyou 同口径豁免（t260913-02
+# arbitrate 实测：server/engine/out/inspection/*-suite.json 的 output_tail 命中）。
+OUT_DIRS = {"out"}
 TEXT_EXT = {".py", ".md", ".mjs", ".sh", ".yaml", ".yml", ".json", ".ts", ".txt"}
 
 MERGE_DEBT_FILES = frozenset((
@@ -96,7 +101,8 @@ def scan():
     for root in SCAN_ROOTS:
         base = os.path.join(REPO, root)
         for dirpath, dirnames, filenames in os.walk(base):
-            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+            # SKIP_DIRS ∪ OUT_DIRS：out/ 是运行期/测试生成产物面（见常量注记）
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and d not in OUT_DIRS]
             for fn in filenames:
                 path = os.path.join(dirpath, fn)
                 ext = os.path.splitext(fn)[1]

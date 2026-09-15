@@ -18,20 +18,36 @@
 #             project_key（归档目录的项目 key，票计数=该 key data/tickets 一级条目数）
 #   scan_face 本实例跑的扫描器（t260911-02 新增：「跑哪个巡检面」由声明决定；可指名
 #             test|doc|mechanism|simplify；缺省 test=票① 行为）
+#   suite     套件档（t260913-02 新增）：空=不跑套件（票① 行为）；full=本期在**巡检自有
+#             泳道**（.lane/inspection-<实例>-<期>，分支 inspection/<实例>/<期>，基点=开跑
+#             时 main HEAD）里跑集成全集（verify.yaml integration.cmd），结果进票面与
+#             发现清单。只有全集一档——没有抽稀/跳场景的值（词法外 fail-closed 点名）。
+#             套件开关在**运行期由 workflow 读本声明**判定（resolve_inspection_plan 活动），
+#             不进调度 payload：改本字段即改行为，不必重跑 schedule-up。
+#   tz        调度时区（t260913-02 实现段新增，IANA 名如 Asia/Shanghai）：Temporal Schedule
+#             的 cron **默认按 UTC 求值**——不写 tz，「每天 07:30」会落在本地 15:30。人读
+#             钟点必须与本字段同口径声明；空=Temporal 缺省（UTC）。
 #   workflow  本实例跑的 workflow 类型名（引擎侧已接线巡检 workflow 白名单校验）
 #   template  巡检票模板标识（票面展示用）
 schema: v1
 instances:
   - id: integration-tests
     enabled: true
+    # 260913-02 宿主令「每日调度接真」：每周一 09:00 → 每天 07:30（结果当天上班即读，
+    # 与 docs-sync 的周一 10:00 不撞）。改本行即改 cadence，再跑
+    #   inspection_trigger.py schedule-up --instance integration-tests --note <谁/为何/频率>
+    # 让 Temporal Schedule 生效（机制在引擎、调度在声明）。
+    suite: full
+    tz: Asia/Shanghai
     schedule:
       kind: cron
-      cron: 0 9 * * 1
+      cron: 30 7 * * *
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
   - id: docs-sync
     enabled: true
     scan_face: doc
+    tz: Asia/Shanghai
     schedule:
       kind: cron
       cron: 0 10 * * 1

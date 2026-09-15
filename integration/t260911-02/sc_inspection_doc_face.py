@@ -62,10 +62,16 @@ instances:
       cron: 0 6 * * 1
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
-""" % {"stamp": STAMP}   # t260913-01 仲裁修：声明与请求的实例 id 必须同源同形
-# （原 %{"pid": PID} 用未补零的原值，请求侧用 STAMP="%05d"%PID——PID<10000 时
-#  二者不等 → 「实例未在声明中」假红，PID>=10000 才碰巧绿。同族 trigger_kinds 与
-#  t260905-03 均为同源写法，此处是唯一不一致点）。
+""" % {"stamp": STAMP}   # 声明 id 与请求实例名**同源同形**（main 侧 t260913-01 修：
+# 模板键 %(stamp)s 吃已补零的 STAMP；请求侧 inst="docs-sync-%s" % STAMP 同源）。
+# 历史（两次独立修法合流，两侧等价）：本票 gen6 曾用 %(pid)05d+整数（与 main 逐字节
+# 等价）；更早原写 %(pid)d 不补零，PID<10000 时声明/请求两处分叉（docs-sync-05175 vs
+# docs-sync-5175）→ trigger fail-closed 假红。合流注记：gen1 字符串 STAMP 撞 main 的
+# %(pid)05d 曾触发 TypeError（类型错配）——现统一 main 形态。
+
+# 同形自检（本票 gen6 引入，改锚 main 形态；本类缺陷两度现形，防任一侧再单独改动分叉）。
+_FIXTURE_ID = "docs-sync-%s" % STAMP
+assert ('- id: %s' % _FIXTURE_ID) in FIXTURE_DECL, "夹具声明与实例名不同形：%s" % _FIXTURE_ID
 
 
 def wait_until(fn, budget, interval=2.0):

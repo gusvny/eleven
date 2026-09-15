@@ -72,6 +72,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 
 SCENARIOS = [
@@ -788,6 +789,36 @@ SCENARIOS = [
     ("t260911-02-doc-face",
      "docs-sync 第二实例：doc 面扫描器契约+真跑一轮出报告（t260911-02 工单②，灰盒 L2/L3）：离线 CLI 腿（同族 stdout 单行 JSON 契约）——脏夹具树必报六类注入（S8 缺登记/幽灵条目双向、S9 无 frontmatter/缺字段/坏 YAML 逐篇降级点名、S10 断链与 ../ 越界引用）且 doc-exempt 豁免篇不报（误报洪泛闸换形态）、静态面只 med 不判 high（方案 R1 甲-9）、全绿树零发现+heartbeat=true（反例不报+心跳）、index.json 坏 JSON 降级点名不崩不静默空转（KI-030 族三态禁静默）、真仓自扫只验发现六键结构不验内容（方案 R5 防 rot——真仓已知 2 条 frontmatter 发现走人审报单，不作场景判据）；在线 L3 全链腿（工单验收 c）——docs-sync 实例 trigger→flow→scan(face=doc)→落账报告含注入命中+doc-lifecycle 依赖占位显式标注（不得静默空转）+人审 sign 收口腿（收口未及让位：收口链由 t260905-03 journey 守，落账报告为验收 c 权威面）。与 t260905-03-scan-contract 分工：彼守测试面扫描器横向契约，本守 doc 面新扫描器同族契约与面分派；与 t260910-11-decl-v2-rename 分工：彼守字段表演进，本守 docs-sync 实例行为本身。S10 锚定=KI-051 族守卫锚点 doc 版常驻化（工单原文）。场景自身一切 spawn 显式钉隔离台 17233，夹具树临时目录退出即拆。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；隔离台/temporalio 缺席=ENV_FAIL 点名（离线腿已验部分如实陈述）",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260911-02/sc_inspection_doc_face.py", "exclusive"),
+    # ---- t260913-02: inspection's own workflow (own lane + full-suite stage) + daily schedule + dead-man ----
+    ("t260913-02-lane-lifecycle",
+     "巡检自有泳道生命周期契约（t260913-02 验收 A 的机械面，灰盒 L2 真 git 仓零 Temporal 零 docker）：命名空间——泳道落 <repo>/.lane/inspection-<实例>-<期>、分支 inspection/<实例>/<期>，同场真建开发泳道邻居对照，两者命名空间零交集；基点——prepare_workspace 用调用方给定 sha 落盘且 worktree HEAD==该 sha（非 HEAD 漂移可判别），既有泳道在场时恒 reused 且基点不移动（stale 残留把当期套件跑在旧代码上=静默假绿，故先清后搭是硬要求）；水位清扫——keep_period=当期时清「早于水位」的残留、水位之后（并发在跑的另一期）让行、别的巡检实例与开发泳道一律不碰，remove_period 定向模式只清指定期（跨仓泳道兜底），畸形 instance fail-closed 不误删；拆除——teardown_lane 零残留且两连拆幂等（不存在=成功不炸）；主树零改动（tracked 内容逐字节一致 + 工作区干净 + HEAD 未动 + worktree 注册表零巡检残留）；畸形实例 id/期号全拒。与 t260905-03 巡检票①场景分工：彼守扫描面与旅程，本条守本票新增的泳道机械面；与 t260913-02-suite-journey 不同层：本条离线直调活动（真 git 终态），彼走真 workflow 编排。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；git 缺席=ENV_FAIL 点名",
+     "python3 integration/t260913-02/sc_inspection_lane_lifecycle.py", "ro"),
+    ("t260913-02-suite-journey",
+     "巡检自有阶段机全链 + 套件证据进票面（t260913-02 验收 A/B/E 的真链路面，灰盒 L3：真 17233 隔离台 + 私有队列自供给 worker + 夹具仓快套件（两条夹具场景+恒红 integration.cmd；编排与票面证据才是本条对象；真规模/真全集的证据面见报告「测试资产变更审查」——不再套一条场景在闸内重跑全集（递归代价实锤 900s 超时，见该节））：阶段机 setup → scan → suite → report → close 且无 dev-lane 段（plan/implement/arbitrate/merge 零在场）；套件在巡检命名空间 worktree 里跑、票面给 worktree 与基点 sha（与夹具 main HEAD 交叉验证）；票面套件摘要 ran/passed/failed/逐场景 cases/墙钟/回执路径齐备且回执文件真在盘（红项点得出是哪几条）；红项=high 发现 + 建议溯源本巡检票号（source_inspection）；心跳不被红污染；人门真拦（未签停在 awaiting-human）且泳道在人门前已拆干净（人审不依赖活泳道）；收口落账保留套件证据；泳道搭不起来（非 git 仓）→ 票面 blocked 且落账带失败原因与时间线（漏跑不静默的 in-workflow 面）；全程夹具主树零改动。与 t260905-03-period-journey 分工：彼守无泳道的扫描/人门两拍，本条只增泳道+套件两阶段与其票面证据；与 t260910-11-ticket-query 分工：彼守查询面契约。一切 spawn 经 lib_inspection.spawn_env 钉隔离台；登记 exclusive（自供给 worker + 真票写共享测试台）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；隔离台/temporalio 缺席=ENV_FAIL 点名",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260913-02/sc_inspection_suite_journey.py", "exclusive"),
+    ("t260913-02-schedule-daily-deadman",
+     "每日调度接真 + 漏跑可见（dead-man）（t260913-02 验收 C/D，灰盒 L2/L3）：声明面＝integration-tests 的 cron 每天一次"
+     "（minute/hour 固定、日/月/周全通配）且 suite=full，其余实例 cadence 未被顺手改动（零回归）；正规入口 schedule-up 在隔离台"
+     "**真建成 Temporal Schedule**（回执 next_action_times 落在次日窗内、cron 原样）且场景自清（不遗留常驻定时器）；生产面现状只读核查"
+     "＝「Temporal 上能查到该实例 schedule 且 NextRunTime 为次日」（查无该 schedule 即红——声明了没建正是工单原文的现状）；漏跑告警两面"
+     "＝deadman 单行 JSON：缺日→missed 精确列出期号、alarmed=true、退出码 1、findings 出 high 且 suggest=false（漏跑不是代码缺陷），"
+     "台账齐→零误报退出码 0，多期漏跑全列不截断、异实例台账不误计、畸形 json 点名不崩、当日不算漏；套件告警硬映射＝红项逐条 high（可点名）、"
+     "ran=0 亦 high（红线「不得删减场景换跑通」的机械面）、环境红 med 且不生成修码建议、心跳只在套件全绿时成立。与 t260905-03-decl-gate"
+     "（触发门行为：谁能跑/谁被拒）intent 不同面不重测；与 t260911-02-trigger-kinds（计数 kind watcher 拉活）不同面。实现段落地前红属预期",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260913-02/sc_inspection_schedule_daily.py"),
+
+    ("t260913-02-integ-run-singleflight",
+     "同泳道集成跑单飞锁契约（t260913-02 arbitrate gen10 根因面，灰盒 L2 纯 CLI+stdlib 秒级）："
+     "两次并发全轮共用泳道级舞台工程名会互相拆台——拆在飞的台（中段连接被拒）、旧 ID 串台（夹具残留"
+     "报成产品红）、console 族瞬时环境红；实况 260914 21:08-21:10 两个 199 条全轮重叠 85s，闸录得"
+     "1 败 + 17 环境红。腿＝无锁发车照跑（不误伤）／有锁发车退出码 2 且点名持有者（pid+锁档+起租时间，"
+     "零场景开跑、无计数行不谎报）／显式 knob SANDBAR_INTEG_ALLOW_CONCURRENT=1 放行且留痕／只读资产"
+     "查询面 --print-pool-assets 不占锁（闸并行查资产面不被挡）。设备=SANDBAR_INTEG_RUN_LOCK_PATH 临时"
+     "锁档（不碰泳道真锁档）+「排除全部在册池」把全轮收成零条目（ran=0 与在册 0 一致、rc=0，秒级零 docker）。"
+     "与 t260904-12-executor-three-state（三态计数/汇总自证）intent 不同面：彼守计数语义，本条守并发发车门。"
+     "实现落地前红属预期（锁缺席=腿2 照跑=红），arbitrate/merge 期必须绿",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260913-02/sc_integ_run_singleflight.py", "ro"),
+
     ("t260910-06-ki067-entry-audit",
      "KI-067 工单操作入口收口（t260910-06，260910 两实证缺陷回归面，灰盒 L2/L3）：静默失败根治——正规入口 ticket.py 任何 op 失败=非零退出+stdout 结构化 {ok:false,error}（绝不空输出：260910 实证病灶=空输出+退出 0+admin.log 无痕；A 段 stdlib 直调现形状，create 缺参/无参/畸形 argsJSON/-h 全非零）；无差别自审计——client.py 每次调用无论来源记 admin.log（含未知子命令拒收/连接失败/-h，拒收不记=盲区），source 记 env SANDBAR_CLIENT_ENTRY 原值（缺省 bare；审计落 SANDBAR_ADMIN_LOG 覆盖 tmp，不污染真账）；回执嵌提醒——裸入口回执（含失败回执）附 entry_hint、env 精确等值 'ticket' 才安静、任意值（'ticket.py'）不获静默且 source 记原值（claimed-source 非身份鉴别，宿主 260910 裁非安全语义）、参数面注入 source 字段不污染标记；双行审计契约——ticket.py 直调一次=admin.log 两行（ticket.py-direct+ticket）call_id 一致（有意双行非重复记 bug，关联键=SANDBAR_CLIENT_CALL_ID）；sign/retry_qc 包进正规入口（who 调用方注入，包装层只加审计不加权力）——retry_qc 贴 workflow 裸串契约（隔离台真票 timeline reason 以 who 开头且无 dict 乱码={who,note} 误转发现形特征）、note 非空 CLI 层显式拒收点名 note、sign 通道 delivered=true 且 Signature payload 形状落 workflow 可观测面（fresh 票非人门→refused 条目 want 含 sign、who 原样，同 pause KI-061 族文档化回执面；人门签字接受面属 workflow 门逻辑 L1 不重复）。与 t260910-03 intent 分界：彼守多仓派生+双保险丝（create 链），本守入口收口面（退出码/审计/entry_hint/sign/retry_qc 包装）；与 t260908-01 分界：彼守 workflow 侧 pause/retry_qc 幂等唤醒语义，本守 CLI 包装与审计/提醒面。实现落地前红属预期（TDD 信号：A 段红即 KI-067 病灶形状复现），arbitrate/merge 期必须绿；三态契约无 SKIP——stdlib A 段恒跑，temporalio 缺失=ENV_FAIL 点名（B/C 段），docker/bench/隔离台库缺席=ENV_FAIL 点名（C 段）；红线：一切被测子进程 Temporal 地址指不可达桩 127.0.0.1:9 或一次性隔离台，真票只发生在一次性 namespace 跑完即拆",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260910-06/sc_ki067_entry_audit.py", "engine"),
@@ -1203,17 +1234,24 @@ def _docker_hygiene():
     直跑/旧期残留），在跑台零接触的边界原样。与 _sweep_residue_stages（残台清扫）
     分工：彼按租约判主人生死、可拆在跑的残台；本只扫无主停止态容器与闲置网络。
     """
+    # t260913-02 arbitrate gen6（并发破坏面修复）：原实现是**全局**清场——
+    # `docker rm -f` 掉全机所有停止态 compose 容器 + `docker network prune -f` 清全机
+    # 闲置网络。单机多泳道并行时这是**破坏性**的：他泳道「建网 → 起容器」之间有一个
+    # 网络短暂无容器的窗口，全局 prune 正好在那个窗口把它删掉 → 对方 `docker compose up`
+    # 报 `network <project>_default not found` 直接红。本泳道实测复现（t260910-12-cwd 与
+    # t260907-07-epic-cli 两条原生此形态），且删掉他泳道停止态容器会打乱其残留断言
+    # （burst 的全机快照腿、sweep-owner-gone 的残留腿同源噪声）。
+    # 口径修正：**只清「够旧」的资源**（until=10m）——新鲜创建期（任何泳道正在起台）
+    # 一律零接触，而本函数的设计意图（函数注：手工直跑/旧期残留的防御面）本就是「旧」
+    # 对象，语义不缩水。容器侧改用 container prune（同带 label 过滤，只碰 compose 台），
+    # 不再枚举后逐个 rm。
     try:
-        stopped = subprocess.run(
-            ["docker", "ps", "-aq", "--filter", "status=exited",
-             "--filter", "status=created",
-             "--filter", "label=com.docker.compose.project"],
-            capture_output=True, text=True, timeout=30)
-        ids = [x for x in (stopped.stdout or "").split() if x.strip()]
-        if ids:
-            subprocess.run(["docker", "rm", "-f", *ids],
-                           capture_output=True, text=True, timeout=120)
-        subprocess.run(["docker", "network", "prune", "-f"],
+        subprocess.run(
+            ["docker", "container", "prune", "-f",
+             "--filter", "label=com.docker.compose.project",
+             "--filter", "until=10m"],
+            capture_output=True, text=True, timeout=120)
+        subprocess.run(["docker", "network", "prune", "-f", "--filter", "until=10m"],
                        capture_output=True, text=True, timeout=60)
     except Exception:  # noqa: BLE001——卫生尽力而为；docker 缺席静默跳过
         pass
@@ -1756,13 +1794,87 @@ def main(exclude_pools=None) -> int:
     return 0
 
 
+# ---- 同泳道单飞锁（t260913-02 arbitrate gen10，闸红 / 17 环境红的根因面）-------
+# 实况（260914 21:08-21:10，本泳道）：两个 199 条全轮**并发**在跑——前一轮（墙钟
+# 7898s）尾巴落地 21:10:07，后一轮 21:08:42 发车、21:10:32 落档，重叠 85s。两轮共用
+# 的是**泳道级**舞台工程名（stage-console-<泳道指纹> / t26090704-sched-<指纹>），
+# 于是并发跑互相拆台，三种伤口同源：
+#   ① 一轮的 ensure/down 拆掉另一轮在飞的台 → 场景三条腿齐齐「连接被拒」（实测复现）；
+#   ② 一轮腿 3 种下的旧 ID 让另一轮腿 1 看到两个 ID → 报出**伪装成产品红的腿 1 红**
+#      （本票闸拦条目 t260907-04-schedule-legacy-retire 即此形）；
+#   ③ console 族 17 条在 0.2~0.6s 内瞬时 ENV_FAIL（同名工程活租约冲突，不是产品面）。
+# 舞台工程名只有「泳道」维度、没有「run」维度——with_stage.sh 记的 t260910-14 跨泳道
+# 同族教训的**下一个面**（同泳道并发）。故并发跑必须机械挡在门外，不靠人记得。
+# 边界：只挡 CLI 入口的真全轮；注入式电池（sc_executor_* 等以 importlib 直调
+# rs.main()）不经过本锁——嵌套调用不会被自锁死（零回归面）。
+RUN_LOCK_OFF_ENV = "SANDBAR_INTEG_ALLOW_CONCURRENT"
+
+
+def _run_lock_path():
+    """锁文件落平台临时区（不脏工作树）：键=本泳道仓根 realpath——同泳道共享一把，
+    跨泳道互不影响。显式覆盖 knob 供回归场景（t260913-02-integ-run-singleflight）
+    与人工演练指定锁档——缺省恒为泳道键。"""
+    override = os.environ.get("SANDBAR_INTEG_RUN_LOCK_PATH")
+    if override:
+        return override
+    root = os.path.realpath(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    key = hashlib.sha256(root.encode("utf-8")).hexdigest()[:12]
+    return os.path.join(tempfile.gettempdir(), "sandbar-integ-run-%s.lock" % key)
+
+
+def _acquire_run_lock():
+    """非阻塞抢「本泳道集成跑」单飞锁：返回 fd（持有到进程结束，flock 随进程消亡自
+    释放）；抢不到返回 -1（调用方以环境红 2 收口——本次**零场景开跑**，按环境面归因）；
+    无 fcntl 平台/显式关闭返回 None（无锁但留痕，不静默）。"""
+    if os.environ.get(RUN_LOCK_OFF_ENV) == "1":
+        print("INTEG_RUN_LOCK 已显式关闭（%s=1）：并发跑的同泳道串台风险由调用方承担"
+              % RUN_LOCK_OFF_ENV, flush=True)
+        return None
+    try:
+        import fcntl
+    except ImportError:                       # 非 POSIX 平台无 flock：退化面留痕
+        print("INTEG_RUN_LOCK 跳过：本平台无 fcntl，无法做同泳道单飞", flush=True)
+        return None
+    path = _run_lock_path()
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                holder = fh.read().strip().replace("\n", "；")
+        except OSError:
+            holder = ""
+        print("ENV_FAIL: 同一泳道的集成跑已在进行中（%s：%s）——两次并发全轮共用泳道级"
+              "舞台工程名会互相拆台（拆在飞的台=连接被拒／旧 ID 串台=产品红误判／console 族"
+              "瞬时环境红）。等它跑完再发车；确需并发时显式 %s=1。本次未开跑任何场景，"
+              "按环境红收口" % (path, holder or "持有者未留痕", RUN_LOCK_OFF_ENV), flush=True)
+        os.close(fd)
+        return -1
+    try:                                      # 持有者留痕：让后一位的点名有内容可读
+        os.ftruncate(fd, 0)
+        os.write(fd, ("pid=%d 起于=%s repo=%s\n"
+                      % (os.getpid(), datetime.datetime.now().isoformat(),
+                         os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+                 .encode("utf-8"))
+        os.fsync(fd)
+    except OSError:
+        pass
+    return fd
+
+
 def _cli(argv):
     """唯一 argv 解析点（t260913-03）：main() 缺省不读 sys.argv——既有注入式电池
     无参直调 rs.main() 必须字节兼容（全树无带参调用者：verify.yaml 的 integration.cmd
-    无参数）。未知 flag 忽略（保持旧调用面宽容）。"""
+    无参数）。未知 flag 忽略（保持旧调用面宽容）。
+
+    t260913-02 arbitrate gen10：真全轮先抢同泳道单飞锁（`--print-pool-assets` 只读
+    查询面不占锁——闸会与在跑的轮并行查资产面，占锁会把它挡出闸）。"""
     if "--print-pool-assets" in argv:
         i = argv.index("--print-pool-assets")
         return print_pool_assets(argv[i + 1] if i + 1 < len(argv) else "")
+    if _acquire_run_lock() == -1:
+        return 2
     if "--exclude-pools" in argv:
         i = argv.index("--exclude-pools")
         return main(exclude_pools=argv[i + 1] if i + 1 < len(argv) else "")

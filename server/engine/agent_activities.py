@@ -4278,6 +4278,197 @@ async def run_integration_tests(args: IntegrationRunArgs) -> IntegrationRunResul
                                 apply_skip_pools=bool(getattr(args, "apply_skip_pools", False)))
 
 
+# ---- t260913-02：巡检自有泳道 + 跑全集（复用面，不新造第二套）----
+#
+# 三件都是薄壳：决策/形状全在纯函数面（inspection_flow / inspection_deadman），
+# 本层只做 git/文件/子进程 IO。与开发泳道的分工照旧：prepare_workspace / teardown_lane /
+# _run_scenarios 都是**同一实现**（同一个跑法、同一个回执形状），巡检只是编排方不同。
+
+def _inspection_call_args(args: Any, kw: Dict[str, Any]) -> Dict[str, Any]:
+    """巡检新活动的入参归一（t260913-02）：容器 dict 与关键字两种调用形态都收，键名别名
+    归一（repo→repo_root、instance→instance_id、keep_path→keep_period）。
+
+    为什么宽容：活动名的调用形态在引擎里有两族（activities.py 家族传容器 dict、
+    agent_activities 家族传 dataclass/关键字），隔离台场景按「语义等价候选形状」逐个试
+    （integration/t260905-03/lib_inspection.call_activity）；归一让任一族都叫得动，
+    而不是让调用方猜实现段的容器名。非映射入参 → TypeError（候选形状试错信号，不吞成
+    假红也不静默当空参）。"""
+    if args is None:
+        out: Dict[str, Any] = {}
+    elif isinstance(args, dict):
+        out = dict(args)
+    else:
+        raise TypeError("入参须为映射或关键字（got %s）" % type(args).__name__)
+    out.update(kw or {})
+    if not out.get("repo_root") and out.get("repo"):
+        out["repo_root"] = out["repo"]
+    if not out.get("instance_id") and out.get("instance"):
+        out["instance_id"] = out["instance"]
+    if not out.get("keep_period") and out.get("keep_path"):
+        out["keep_period"] = out["keep_path"]
+    return out
+
+
+def _abs_repo(raw: Any) -> Path:
+    p = Path(str(raw)) if raw else Path(REPO_ROOT)
+    return p if p.is_absolute() else (REPO_ROOT / p)
+
+
+@activity.defn
+async def resolve_main_head(args: Any = None, **kw: Any) -> Dict[str, Any]:
+    """本期泳道基点：main 的 HEAD（sha + 解析到的人读 ref）。**证据面**——基点进票面，
+    验收 A 要的就是「基点=开跑时 main HEAD」这句话有机械凭据，而不是口头承诺。
+
+    解析次序 refs/heads/<ref> → <ref>（本地分支优先，tag/远端形态也给机会）；
+    失败=ok False 点名（workflow 转 blocked，绝不用「默认 HEAD」糊过去——那可能是
+    开发泳道自己的 HEAD，基点就飘了）。"""
+    return await asyncio.to_thread(resolve_main_head_impl, _inspection_call_args(args, kw))
+
+
+def resolve_main_head_impl(args: Dict[str, Any]) -> Dict[str, Any]:
+    """resolve_main_head 的同步实现（活动/CLI 共用；阻塞 git 一律 to_thread，见
+    notes/diag-query-starvation.md：async 活动里跑阻塞 subprocess 会冻住事件循环）。"""
+    repo = _abs_repo(args.get("repo_root"))
+    ref = str(args.get("ref") or "main")
+    if not repo.is_dir():
+        return {"ok": False, "error": "repo 不存在：%s" % repo}
+    last = ""
+    for candidate in ("refs/heads/" + ref, ref):
+        p = _git(["rev-parse", "--verify", candidate + "^{commit}"], repo, timeout=30)
+        if p.returncode == 0 and (p.stdout or "").strip():
+            return {"ok": True, "result": {"repo": str(repo), "ref": ref,
+                                           "sha": p.stdout.strip().splitlines()[0]}}
+        last = (p.stderr or p.stdout or "").strip()[-200:]
+    return {"ok": False, "error": "无法解析 %s 的 HEAD（repo=%s）：%s" % (ref, repo, last)}
+
+
+def parse_worktree_porcelain(text: str) -> List[Dict[str, Any]]:
+    """`git worktree list --porcelain` → [{"path","branch","detached","prunable"}]（纯解析，
+    单测面：畸形/空/多块都在这里锁）。"""
+    entries: List[Dict[str, Any]] = []
+    cur: Optional[Dict[str, Any]] = None
+    for line in str(text or "").splitlines():
+        if line.startswith("worktree "):
+            if cur:
+                entries.append(cur)
+            cur = {"path": line[len("worktree "):].strip(), "branch": "",
+                   "detached": False, "prunable": False}
+        elif cur is not None and line.startswith("branch "):
+            cur["branch"] = line[len("branch "):].strip()
+        elif cur is not None and line.strip() == "detached":
+            cur["detached"] = True
+        elif cur is not None and line.strip() == "prunable":
+            cur["prunable"] = True
+    if cur:
+        entries.append(cur)
+    return entries
+
+
+@activity.defn
+async def sweep_inspection_lanes(args: Any = None, **kw: Any) -> Dict[str, Any]:
+    """巡检泳道残留清扫（幂等）：只动本实例命名空间、且**早于本期水位**的
+    worktree/分支（决策=inspection_flow.sweep_plan，纯函数面）。
+
+    用途有二：①setup 前置（C2 次序：不清残留就搭，prepare 的 reused 分支会让本期静默
+    建在旧基点）；②人工 CLI sweep-lanes。开发泳道、别的巡检实例、水位之后的条目
+    （可能是并发在跑的另一期）一律不碰——判不准不动。"""
+    return await asyncio.to_thread(sweep_inspection_lanes_impl, _inspection_call_args(args, kw))
+
+
+def sweep_inspection_lanes_impl(args: Dict[str, Any]) -> Dict[str, Any]:
+    """sweep_inspection_lanes 的同步实现（活动/CLI 共用；日志走 stdlib logger，
+    CLI 直接调用时不在 activity 上下文里）。"""
+    import logging
+    from inspection_flow import sweep_plan
+    log = logging.getLogger("sandbar.inspection")
+    repo = _abs_repo(args.get("repo_root"))
+    instance = str(args.get("instance_id") or "")
+    keep = str(args.get("keep_period") or "")
+    target = str(args.get("remove_period") or "")
+    try:
+        sweep_plan([], [], instance, keep, target)   # 输入形状先闭式校验（畸形 instance 直接点名）
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    p = _git(["worktree", "list", "--porcelain"], repo, timeout=60)
+    if p.returncode != 0:
+        return {"ok": False, "error": "git worktree list 失败（repo=%s）：%s"
+                                      % (repo, (p.stderr or "").strip()[-200:])}
+    entries = parse_worktree_porcelain(p.stdout or "")
+    b = _git(["branch", "--list", "--format=%(refname:short)"], repo, timeout=30)
+    branches = ([x.strip() for x in (b.stdout or "").splitlines() if x.strip()]
+                if b.returncode == 0 else [])
+    plan = sweep_plan(entries, branches, instance, keep, target)
+    removed_wt: List[str] = []
+    removed_br: List[str] = []
+    errors: List[str] = []
+    for path in plan["remove_worktrees"]:
+        r = _git(["worktree", "remove", "--force", path], repo, timeout=120)
+        if r.returncode == 0:
+            removed_wt.append(path)
+        else:
+            errors.append("worktree remove %s 失败：%s" % (path, (r.stderr or "").strip()[-160:]))
+    for br in plan["remove_branches"]:
+        r = _git(["branch", "-D", br], repo, timeout=30)
+        if r.returncode == 0:
+            removed_br.append(br)
+        else:
+            errors.append("branch -D %s 失败：%s" % (br, (r.stderr or "").strip()[-160:]))
+    log.info("[inspection-sweep] 实例=%s keep=%s target=%s：worktree %d/%d、分支 %d/%d，"
+             "跳过 %d、让行 %d、失败 %d", instance, keep or "（无水位）",
+             target or "（无定向）", len(removed_wt),
+             len(plan["remove_worktrees"]), len(removed_br), len(plan["remove_branches"]),
+             len(plan["skipped"]), len(plan["deferred"]), len(errors))
+    return {"ok": not errors,
+            "result": {"repo": str(repo), "instance_id": instance, "keep_period": keep,
+                       "remove_period": target,
+                       "removed_worktrees": removed_wt, "removed_branches": removed_br,
+                       "keep": plan["keep"], "deferred": plan["deferred"],
+                       "skipped": plan["skipped"], "errors": errors},
+            "error": "；".join(errors)}
+
+
+@activity.defn
+async def run_inspection_suite(args: Dict[str, Any]) -> Dict[str, Any]:
+    """巡检套件阶段（t260913-02）：在**巡检自有泳道**里跑集成全集——与开发泳道
+    run_integration_tests **同一个跑法、同一个回执形状**（都走 `_run_scenarios` →
+    verify_lane lane=integ → verify.yaml integration.cmd），不新造第二套，避免两处语义漂移。
+
+    回执 = IntegrationRunResult 全字段 + 墙钟 + 基点/泳道证据，并落 `out/inspection/
+    <票号>-suite.json`（票面的聚合红项/漏跑条目指回它下钻）。业务红/环境红都不是
+    本活动的失败（ok=True 照回），只有真基础设施故障才 raise 给 Temporal（workflow
+    侧仍兜成可见的「套件未跑成」发现）。"""
+    ticket_id = str(args.get("ticket_id") or "")
+    wt = _abs_repo(args.get("worktree"))
+    base_ref = str(args.get("base_ref") or "")
+    started = time.monotonic()
+    result = await _run_scenarios(wt, ticket_id)
+    wall = round(time.monotonic() - started, 1)
+    receipt: Dict[str, Any] = {
+        "ticket_id": ticket_id, "worktree": str(wt), "base_ref": base_ref,
+        "ran": result.ran, "passed": result.passed, "failed": result.failed,
+        "env_fail": result.env_fail, "error": result.error,
+        "blockers": list(result.blockers or []),
+        "affiliation_confidence": result.affiliation_confidence,
+        "baseline_ref": result.baseline_ref,
+        "wall_seconds": wall,
+        "details": [dict(d) if isinstance(d, dict) else d for d in (result.details or [])],
+    }
+    try:
+        from inspection_flow import write_inspection_suite_receipt_impl
+        from shared import INSPECTION_DIR
+        written = await asyncio.to_thread(write_inspection_suite_receipt_impl,
+                                          ticket_id, receipt, INSPECTION_DIR)
+        receipt["report_path"] = written.get("path", "")
+    except Exception as e:  # noqa: BLE001——回执落盘失败必须点名（不得让票面指向不存在的文件）
+        receipt["report_path"] = ""
+        receipt["receipt_error"] = "套件回执落盘失败：%s: %s" % (type(e).__name__, e)
+        activity.logger.error("[%s] 套件回执落盘失败：%s", ticket_id, e)
+    activity.logger.info("[%s] 巡检套件：ran=%s pass=%s fail=%s env_fail=%s 墙钟=%.1fs 回执=%s",
+                         ticket_id, receipt["ran"], receipt["passed"], receipt["failed"],
+                         receipt["env_fail"], wall, receipt.get("report_path") or "（无）")
+    return {"ok": True, "result": receipt}
+
+
 def _stub_stage_shortcut(args: AgentStageArgs, settle_on_cache: bool = False) -> Optional[StageResult]:
     """Stub/cache short-circuit for the integration-specific stages (filling the gap in
     arbitrate/acceptance_walkthrough).
@@ -4739,4 +4930,9 @@ ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     # prompt is assembled by the workflow, with session reuse), not in AGENT_STAGE_IDS
     # (custom result judgement).
     settle_lane, run_integration_tests, arbitrate, acceptance_walkthrough,
+    # 巡检自有泳道 + 跑全集（t260913-02）：resolve_main_head=基点证据（main HEAD sha）；
+    # sweep_inspection_lanes=残留清扫（setup 前置 + CLI 兜底）；run_inspection_suite=巡检期
+    # 在自有泳道里跑全集（同一个 _run_scenarios 跑法、同一个回执形状）。
+    # 缺注册=运行时才炸（同上纪律）。
+    resolve_main_head, sweep_inspection_lanes, run_inspection_suite,
 ]

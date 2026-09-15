@@ -43,6 +43,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import re
 import sys
 from datetime import datetime
@@ -63,6 +64,17 @@ USAGE = ("用法：inspection_trigger.py <decl|trigger|sign|describe|schedule-up
 
 def _ok(result: Any) -> Dict[str, Any]:
     return {"ok": True, "result": result}
+
+
+def abs_decl_path(raw: Any) -> str:
+    """声明路径归一（t260913-02 实现段实锤）：--decl-path 由调用方 cwd 解析，而 workflow
+    侧的 plan 活动在 **worker 的 cwd** 里读它——相对路径会读不到（实测：drill 票
+    「声明文件不可读：out/drill/decl.yaml」→ 票被 blocked）。凡随票走的路径一律先转绝对，
+    与泳道路径「payload 里的路径都是绝对形」的既有约定同族（t260903-10）。"""
+    txt = str(raw or "").strip()
+    if not txt:
+        return ""
+    return str(Path(txt).expanduser().resolve())
 
 
 def _err(msg: str) -> Dict[str, Any]:
@@ -143,7 +155,10 @@ async def cmd_trigger(args: argparse.Namespace) -> Dict[str, Any]:
                 instance_id=args.instance, period=period,
                 # 声明驱动：跑哪个巡检面由实例 scan_face 声明决定（缺省 test=票① 行为）
                 face=str(spec.get("scan_face") or "test"),
-                repo_root=args.repo_root or ""),
+                repo_root=args.repo_root or "",
+                # 触发面校验用的声明 == workflow 运行期读的声明（两处同源；缺省空=worker 缺省）
+                # 绝对化：worker 的 cwd 与调用方不同，相对路径会读不到
+                decl_path=abs_decl_path(args.decl_path)),
             id=ticket_id, task_queue=task_queue)
         return _ok({"triggered": True, "ticket_id": ticket_id, "period": period,
                     "workflow": spec["workflow"], "instance": args.instance,
@@ -294,12 +309,14 @@ async def cmd_schedule_up(args: argparse.Namespace) -> Dict[str, Any]:
         schedule_id = "sandbar-inspection-%s" % spec["instance_id"]
         handle = client.get_schedule_handle(schedule_id)
         cron_expr = spec["cron"]
+        tz = str(spec.get("tz") or "")
 
         # Try an update first (idempotent), create only if absent — after changing the
         # declaration's cron, re-running schedule-up makes it take effect.
         def _upd(inp) -> ScheduleUpdate:
             sched = inp.description.schedule
-            sched.spec = ScheduleSpec(cron_expressions=[cron_expr])
+            sched.spec = ScheduleSpec(cron_expressions=[cron_expr],
+                                      time_zone_name=tz or None)
             sched.policy = SchedulePolicy(overlap=ScheduleOverlapPolicy.SKIP)
             return ScheduleUpdate(schedule=sched)
 
@@ -313,17 +330,27 @@ async def cmd_schedule_up(args: argparse.Namespace) -> Dict[str, Any]:
                 Schedule(
                     action=ScheduleActionStartWorkflow(
                         spec["workflow"],
-                        InspectionPeriodicInput(instance_id=spec["instance_id"], period=""),
+                        InspectionPeriodicInput(
+                            instance_id=spec["instance_id"], period="",
+                            # t260913-02 顺手修：原实现不透传 scan_face/repo_root——
+                            # docs-sync 真建调度后会跑错面（test 而非 doc）。声明面
+                            # （scan_face）必须一路透传到票的输入，否则「调度在声明」
+                            # 名不副实。套件开关不在此列：它由 workflow 运行期读声明
+                            # （resolve_inspection_plan 活动）决定，不进 payload。
+                            face=str(spec.get("scan_face") or "test"),
+                            repo_root=str(args.repo_root or "")),
                         id="inspection-%s-period" % spec["instance_id"],
                         task_queue=TASK_QUEUE,
                     ),
-                    spec=ScheduleSpec(cron_expressions=[cron_expr]),
+                    spec=ScheduleSpec(cron_expressions=[cron_expr],
+                                      time_zone_name=tz or None),
                     policy=SchedulePolicy(overlap=ScheduleOverlapPolicy.SKIP),
                 ),
             )
             mode = "created"
         desc = await handle.describe()
         return _ok({"schedule_id": schedule_id, "mode": mode, "cron": cron_expr,
+                    "tz": tz or "UTC（Temporal 缺省）",
                     "overlap": "SKIP", "note": args.note, "instance": spec["instance_id"],
                     "next_action_times": [t.isoformat(timespec="seconds")
                                           for t in (desc.info.next_action_times or [])][:3]})
@@ -365,7 +392,10 @@ async def _schedule_up_watcher(args: argparse.Namespace, spec: Dict[str, Any]) -
                 instance_id=spec["instance_id"], n=spec["n"], cron=spec["cron"],
                 scan_face=str(spec.get("scan_face") or "test"),
                 project_key=str(spec.get("project_key") or ""),
-                repo_root=args.repo_root or ""),
+                repo_root=args.repo_root or "",
+                # 计数形态的「两处同源」：watcher 开票时把本声明路径随票传（cron 形态
+                # **不**钉路径——调度每次触发都读 worker 当前声明，改声明即改行为）
+                decl_path=abs_decl_path(args.decl_path)),
             id=wf_id, task_queue=TASK_QUEUE)
         return _ok({"schedule_id": wf_id, "mode": mode, "note": args.note,
                     "instance": spec["instance_id"], "kind": spec["kind"],
@@ -407,6 +437,109 @@ async def cmd_watcher(args: argparse.Namespace) -> Dict[str, Any]:
         return _err("temporal 不可达（查询 %s 失败）：%s: %s" % (wf_id, type(e).__name__, e))
 
 
+async def cmd_deadman(args: argparse.Namespace) -> Dict[str, Any]:
+    """漏跑（dead-man）查询面（t260913-02 验收 D 的列表可读面）：
+    声明 cron 的期望触发日 × 巡检台账（out/inspection/，SANDBAR_INSPECTION_DIR 可覆盖）
+    → 漏跑期号清单；可达时顺带取 Temporal Schedule 的 next_run（「下次该跑」也要能看见）。
+
+    退出码：漏跑非空 = 1（ops 自动化可踩），否则 0——但 stdout 恒为单行 JSON
+    {ok, result|error}（本通道既有契约不变：ok=False 只表示「查不了」）。
+    离线也可用（--offline 不连 Temporal）：隔离台/注入演练不依赖服务器。"""
+    from inspection_deadman import deadman_findings, ledger_periods, missed_periods
+    try:
+        decl = load_inspection_decl(args.decl_path) if args.decl_path else load_inspection_decl()
+    except Exception as e:  # noqa: BLE001——声明不可用=ok False 点名（不猜）
+        return _err("声明不可用：%s" % e)
+    it = decl.instance(args.instance)
+    if it is None:
+        return _err("实例 %r 未在声明中（在册：%s）"
+                    % (args.instance, "、".join(i.id for i in decl.instances)))
+    if it.kind != "cron":
+        return _err("实例 %r 的调度 kind=%r 不是 cron（漏跑核查只对 cron 期有定义）"
+                    % (args.instance, it.kind))
+    ledger_dir = Path(args.ledger_dir) if args.ledger_dir else _default_ledger_dir()
+    try:
+        ledger = ledger_periods(ledger_dir, args.instance)
+        missed = missed_periods(it.cron, ledger["periods"], None,
+                                int(args.lookback_days), int(args.grace_days),
+                                it.tz)
+    except ValueError as e:            # cron 不可解析 → 点名（不静默当没漏）
+        return _err("漏跑判定失败（实例 %s，cron=%r）：%s" % (args.instance, it.cron, e))
+    except Exception as e:  # noqa: BLE001
+        return _err("漏跑核查异常：%s: %s" % (type(e).__name__, e))
+    result: Dict[str, Any] = {
+        "instance": args.instance, "cron": it.cron, "enabled": it.enabled,
+        "suite": it.suite, "ledger_dir": str(ledger_dir),
+        "ledger_exist": ledger["exist"], "ledger_periods": sorted(ledger["periods"]),
+        "last_ledger_period": max(ledger["periods"]) if ledger["periods"] else "",
+        "lookback_days": int(args.lookback_days), "grace_days": int(args.grace_days),
+        "tz": it.tz,
+        "missed": missed, "alarmed": bool(missed),
+        "malformed": ledger["malformed"],
+        "findings": deadman_findings(missed, args.instance, it.cron, int(args.lookback_days)),
+        "schedule": {"checked": False},
+    }
+    if args.offline:
+        result["schedule"] = {"checked": False, "reason": "--offline"}
+        return _ok(result)
+    try:
+        from temporalio.client import Client
+        from shared import NAMESPACE, TARGET_HOST
+        c = await Client.connect(TARGET_HOST, namespace=NAMESPACE)
+        h = c.get_schedule_handle("sandbar-inspection-%s" % args.instance)
+        try:
+            d = await h.describe()
+        except Exception as e:  # noqa: BLE001——查无此 schedule 要精确点名（≠连不上）
+            result["schedule"] = {"checked": True, "exists": False,
+                                  "error": "schedule 不存在或不可达（RPC %s）——schedule-up 可建"
+                                           % type(e).__name__}
+            return _ok(result)
+        info = d.info
+        result["schedule"] = {
+            "checked": True, "exists": True,
+            "next_action_times": [t.isoformat(timespec="seconds")
+                                  for t in (getattr(info, "next_action_times", None) or [])][:3],
+            "recent_actions": [{"scheduled_at": str(getattr(a, "scheduled_at", "")),
+                                "status": str(getattr(a, "start_workflow_status", ""))}
+                               for a in (getattr(info, "recent_actions", None) or [])][:3],
+            "num_actions": getattr(info, "num_actions", None),
+            "note": getattr(info, "note", ""),
+        }
+    except ImportError as e:
+        result["schedule"] = {"checked": False, "error": "temporalio SDK 缺失：%s" % e}
+    except Exception as e:  # noqa: BLE001——查不了调度面不遮蔽漏跑结论（各自分开报）
+        result["schedule"] = {"checked": False, "error": "%s: %s" % (type(e).__name__, e)}
+    return _ok(result)
+
+
+def _default_ledger_dir() -> Path:
+    """台账目录默认值（与 shared.INSPECTION_DIR 同口径：server/engine/out/inspection，
+    env SANDBAR_INSPECTION_DIR 覆盖）——不 import shared，decl/deadman 子命令保持零
+    temporalio 依赖（既有纪律）；同口径由单测锁（test_deadman_default_ledger_matches_shared）。"""
+    env = os.environ.get("SANDBAR_INSPECTION_DIR") or ""
+    if env:
+        return Path(env)
+    return Path(__file__).resolve().parent / "out" / "inspection"
+
+
+
+def cmd_sweep_lanes(args: argparse.Namespace) -> Dict[str, Any]:
+    """人工清场入口（t260913-02）：删本实例命名空间里**早于水位**的巡检 worktree/分支
+    残留（崩溃/取消路径的兜底；setup 前置也走同一实现，不新造第二套）。
+
+    需 temporalio 环境（复用 agent_activities 的同步实现）；--keep-period 空=无水位（全清，
+    人工显式使用）；开发泳道与别的实例一律不碰（决策在 inspection_flow.sweep_plan）。"""
+    try:
+        from agent_activities import sweep_inspection_lanes_impl
+    except Exception as e:  # noqa: BLE001
+        return _err("清扫实现不可用（需 venv：server/engine/setup.sh）：%s: %s"
+                    % (type(e).__name__, e))
+    return sweep_inspection_lanes_impl(
+        {"instance_id": args.instance, "repo_root": args.repo_root or "",
+         "keep_period": args.keep_period or "",
+         "remove_period": getattr(args, "remove_period", "") or ""})
+
+
 def cmd_decl(args: argparse.Namespace) -> Dict[str, Any]:
     """Offline declaration view (zero temporalio dependency; the declaration-driven,
     parsing-level evidence surface)."""
@@ -420,6 +553,7 @@ def cmd_decl(args: argparse.Namespace) -> Dict[str, Any]:
         "instances": [{"id": i.id, "enabled": i.enabled, "kind": i.kind,
                        "cron": i.cron, "n": i.n, "source": i.source,
                        "project_key": i.project_key, "scan_face": i.scan_face,
+                       "suite": i.suite, "tz": i.tz,
                        "workflow": i.workflow, "template": i.template}
                       for i in decl.instances],
         "schedule_specs": build_schedule_specs(decl),
@@ -458,6 +592,19 @@ def main() -> None:
     p.add_argument("--note", default="")
     p.add_argument("--repo-root", default="")
     p.add_argument("--decl-path", default=None)
+    p = sub.add_parser("deadman", help="漏跑核查（列表可读面；missed 非空 exit=1）")
+    p.add_argument("--instance", required=True)
+    p.add_argument("--ledger-dir", default=None,
+                   help="台账目录（缺省 out/inspection；env SANDBAR_INSPECTION_DIR 覆盖）")
+    p.add_argument("--lookback-days", default=7)
+    p.add_argument("--grace-days", default=0)
+    p.add_argument("--offline", action="store_true", help="不连 Temporal（只查声明+台账）")
+    p.add_argument("--decl-path", default=None)
+    p = sub.add_parser("sweep-lanes", help="人工清巡检泳道残留（早于水位；开发泳道不碰）")
+    p.add_argument("--instance", required=True)
+    p.add_argument("--keep-period", default="", help="水位期号；空=无水位（全清）")
+    p.add_argument("--remove-period", default="", help="定向模式：只清恰好等于该期号的条目（忽略水位）")
+    p.add_argument("--repo-root", default="")
     args = ap.parse_args()
     if not args.op:
         _emit(_err(USAGE))
@@ -465,14 +612,21 @@ def main() -> None:
     try:
         if args.op == "decl":
             result = cmd_decl(args)
+        elif args.op == "sweep-lanes":
+            result = cmd_sweep_lanes(args)
         else:
             result = asyncio.run({"trigger": cmd_trigger, "sign": cmd_sign,
                                   "describe": cmd_describe, "ticket": cmd_ticket,
-                                  "watcher": cmd_watcher,
+                                  "watcher": cmd_watcher, "deadman": cmd_deadman,
                                   "schedule-up": cmd_schedule_up}[args.op](args))
     except Exception as e:  # noqa: BLE001 — channel-level backstop: any exception becomes single-line JSON, never a bare stack
         result = _err("inspection_trigger.%s 异常：%s: %s" % (args.op, type(e).__name__, e))
     _emit(result, exit_code=0 if result.get("ok") else 1)
+    # deadman 的告警语义：missed 非空=exit 1（数据仍在 stdout 单行 JSON 里；与
+    # 「查不了」（ok=False→exit 1）共用退出码 1 但靠 ok 字段区分，不混两个事实）
+    if result.get("ok") and isinstance(result.get("result"), dict) \
+            and result["result"].get("alarmed"):
+        sys.exit(1)
 
 
 if __name__ == "__main__":

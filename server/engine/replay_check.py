@@ -87,15 +87,20 @@ from temporalio.worker import Replayer  # noqa: E402
 sys.path.insert(0, str(POC))  # make sure we import the template code next to this file (inside the lane)
 from shared import NAMESPACE, TARGET_HOST  # noqa: E402
 from workflows_v2 import ALL_WORKFLOWS_V2, TEMPLATE_CLASSES  # noqa: E402
+# t260913-02：巡检 workflow 族也进 replay 面——旧版只注册 v2 模板族，巡检票被重放器
+# 直接判「未注册」（不是非确定），等于巡检的 replay 安全检查是**空的**（本票改巡检阶段机
+# 时实测：四张在途老票全被「not registered」挡回，无法证 replay 安全）。
+from workflows import ALL_WORKFLOWS  # noqa: E402
 
-TEMPLATE_TYPES = {cls.__name__ for cls in ALL_WORKFLOWS_V2}
+TEMPLATE_TYPES = {cls.__name__ for cls in ALL_WORKFLOWS_V2} | {
+    cls.__name__ for cls in ALL_WORKFLOWS}
 
 
 def _replayer() -> Replayer:
     # UnsandboxedWorkflowRunner (Replayer default): replay only checks
     # determinism, so we skip sandbox throttling — this avoids false reds from
     # lane-local module passthrough config drifting from the worker's.
-    return Replayer(workflows=ALL_WORKFLOWS_V2)
+    return Replayer(workflows=list(ALL_WORKFLOWS_V2) + list(ALL_WORKFLOWS))
 
 
 async def _replay_one_history(history: WorkflowHistory, label: str) -> Dict[str, Any]:

@@ -49,6 +49,10 @@ const KNOWN_RESIDUE = new Set([
   'server/engine/README.md',
 ])
 // .sandbar=泳道台面记录（工单原文引用旧路径属历史记录域，与 notes/ 同口径——t260907-10 arbitrate gen1 补排除）
+// out/=运行期/测试生成产物面（仓根 out/ 与 server/engine/out/ 同口径）：集成报告/快照把
+// 被测进程 traceback 与输出尾逐字转录，含历史绝对路径属**事实记录**；out/sandbox-repo 更是
+// 隔离测试自建的沙箱仓副本（非本仓代码）。与 .suyou/.sandbox/data 同类豁免
+// （t260907-01 收口同款理由；t260913-02 arbitrate 实测 out/sandbox-repo/* 命中）
 // out/=运行产物/报告落档域（进程物目录：out/integration-report-*.json 由执行器每轮写，
 //   其 timings.tail 逐字转发场景回执——被转发原文含旧仓绝对路径属事实记录，与 .log/.sandbar
 //   同口径排除；不排除即「执行器自己写的报告把自己判成新病灶」的自污染假红，

@@ -340,9 +340,15 @@ def spawn_daemon_term_stub(tmp, name, env=None):
     deadline = time.time() + 8
     pid = None
     while time.time() < deadline:
-        if os.path.exists(pidout):
-            pid = int(open(pidout).read().strip())
-            break
+        # 同族口径：pidout 由子进程「先建文件后写内容」两拍产出——存在≠可读，
+        # 裸 int() 会在负载下读到空串抛 ValueError（t260913-02 家族排查所至）。
+        try:
+            txt = open(pidout).read().strip()
+            if txt:
+                pid = int(txt)
+                break
+        except (OSError, ValueError):
+            pass
         if not launcher.alive():
             break
         time.sleep(0.05)

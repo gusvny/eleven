@@ -48,7 +48,12 @@ if [ $RC -ne 0 ]; then
   fi
 fi
 if [ $RC -ne 0 ]; then
-  echo "with_stage: 台没起来（ensure exit=$RC）：" >&2
+  # ${RC} 必须带花括号：紧跟其后的全角右括号是多字节字符，裸写法（美元符号+RC+全角
+  # 右括号）会被部分 shell 解析成变量名的一部分 → set -u 下报 unbound variable，**把这条错误
+  # 路径自己打崩**（调用方只见 UnicodeDecodeError，真因「台没起来」被吞）。
+  # t260913-02 arbitrate 实测：t02-t260902-02-archive-legacy-e2e ENV_FAIL 的尾巴
+  # 即为该形态。写集内全 shell 家族复扫仅此一处。
+  echo "with_stage: 台没起来（ensure exit=${RC}）：" >&2
   tail -5 "$INFO_FILE" >&2
   exit 2
 fi

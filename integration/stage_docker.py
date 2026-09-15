@@ -256,6 +256,14 @@ def sweep_stale_s():
     return float(os.environ.get("SANDBAR_STAGE_SWEEP_STALE_S", 600))
 
 
+def stall_grace_s():
+    """心跳停更宽限窗（秒，t260913-02 arbitrate gen12）。缺省 20s：租约过期而 holder
+    仍活时，先把这段时间用来等心跳恢复（负载压住 hold 腿的一次停顿 ≈ 数秒~数十秒），
+    而不是当场把整族场景打成环境红；到期仍不恢复=真僵死，按原语义诚实红点名人工。
+    判据（只有 过期 AND holder 亡 才回收）不动，本窗只区分「瞬时停顿」与「真僵死」。"""
+    return float(os.environ.get("SANDBAR_STAGE_STALL_GRACE_S", 20))
+
+
 def sweep_budget_s():
     """单次清扫的时间预算（秒）：超预算的未处理项逐条点名上抛，绝不静默。
     缺省 30s——零残台时实测扫描 ~0.7s，预算只约束「有残台要拆」的长尾。"""
@@ -2211,6 +2219,41 @@ def _wait_booting(project, lock_fd, deadline):
                 time.sleep(0.5)
 
 
+def _wait_heartbeat_recovery(project, lock_fd, deadline):
+    """心跳停更宽限（t260913-02 arbitrate gen12）：租约已过期但 holder 进程仍在时，轮询
+    等心跳恢复（hold 腿被负载压住的一次停顿，约数秒~数十秒）——恢复即返回新租约
+    （调用方走复用），holder 亡 / 租约消失 / state 翻面也立即返回（调用方按冷路径或
+    精确红收口），宽限到期返回最后读到的租约（调用方按「真僵死」诚实红点名）。
+
+    锁语义：与 _wait_booting 同源——等待期不持项目锁，免得把同项目其它 ensure 排到
+    预算外；hold 腿自身从不取 ensure 项目锁（只写 pidfile + 心跳文件），故释放锁不会
+    与心跳互相阻塞。返回时重新持锁（拿不到也不阻塞收口：判据全在租约读数上）。"""
+    grace = min(stall_grace_s(), max(0.0, deadline - time.time()))
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    except OSError:
+        pass
+    try:
+        end = time.time() + grace
+        st = read_lease(project)
+        while time.time() < end:
+            st = read_lease(project)
+            if lease_reusable(st) or lease_dead(st) or not isinstance(st, dict) \
+                    or st.get("state") != "up":
+                return st
+            time.sleep(1.0)
+        return st
+    finally:
+        while True:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.time() >= end + 5:
+                    break
+                time.sleep(0.5)
+
+
 def do_ensure(project, services_list, opts, timeout, keep=False):
     """Idempotent ensure (ticket spec ②), as a lease state machine:
       快路径（无锁）：state=up + heartbeat fresh + holder alive → 复用，
@@ -2269,11 +2312,31 @@ def do_ensure(project, services_list, opts, timeout, keep=False):
             if adopted is not None:
                 return adopted
         if isinstance(st, dict) and st.get("state") == "up" and not lease_dead(st):
-            # 租约过期但 holder pid 仍在：不对抗（判据唯一化），点名交人工
-            raise StageError(
-                "供给台 %s 租约过期但 holder pid=%s 仍在（心跳停更）——疑似 pid 复用"
-                "或 holder 僵死；绝不硬拆，人工核查后 down（可查 hold-%s.log）"
-                % (project, holder_pid(st), project), kind="env")
+            # 心跳停更（过期）而 holder 进程仍在：先给一段**宽限窗**等心跳恢复，恢复不了
+            # 才按原语义诚实红交人工（t260913-02 arbitrate gen12）。
+            # 为什么必须给宽限：260914 23:17 本泳道闸跑实测 17 条 console 族齐瞬时
+            # ENV_FAIL（0.2~1.2s），根因=共享 console 台的 hold 腿被负载压住 >TTL(90s)
+            # 心跳停更，而**同一个 hold 腿（lease_id/pid 自 21:56 未换）事后仍在正常
+            # 心跳**——即一次调度停顿把整族场景打成环境红，场景一条没跑。判据不变
+            # （只有 过期 AND pid 死 才回收，绝不硬拆活 holder），只是把「瞬时停顿」
+            # 与「真僵死」分开：等到截止仍不恢复=真僵死，文案照旧点名人工。
+            st = _wait_heartbeat_recovery(project, fd, deadline)
+            if lease_reusable(st):
+                return _reused(st)
+            if not lease_dead(st):
+                # 报错必须精确（失败分类协议）：holder 活=心跳停更（僵死嫌疑）；
+                # holder 亡而租约未过期=等待窗内未见恢复（旧文案会误称「holder 仍在」）。
+                hp = holder_pid(st)
+                if hp and pid_alive(hp):
+                    raise StageError(
+                        "供给台 %s 心跳停更（holder pid=%s 仍在，租约已过期，宽限 %ds 内"
+                        "未恢复）——疑似 pid 复用或 holder 僵死；绝不硬拆，人工核查后 down"
+                        "（可查 hold-%s.log）"
+                        % (project, hp, stall_grace_s(), project), kind="env")
+                raise StageError(
+                    "供给台 %s 心跳停更（holder pid=%s 已不存在，租约尚未过期不可回收，"
+                    "宽限 %ds 内未见恢复）——再等一次 ensure 或人工 down（可查 hold-%s.log）"
+                    % (project, hp, stall_grace_s(), project), kind="env")
         if keep and residue_containers(project):
             raise StageError("供给台 %s 有无主容器在跑（租约已死/缺失）——--keep 语义"
                              "不拆在跑台，且认领失败（容器不在跑／端口不服务／半残）；"
