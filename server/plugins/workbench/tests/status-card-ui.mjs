@@ -5,7 +5,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { buildStatusCard, STATUS_CARD_FILES_CAP, STATUS_CARD_LOG_TAIL } from '../src/host/status-card.ts'
+import { buildStatusCard, STATUS_CARD_FILES_CAP, STATUS_CARD_LOG_TAIL, STATUS_CARD_SIGN_WHAT_CAP } from '../src/host/status-card.ts'
+import { REASON_LEXICON, translateReason } from '../src/client/red-light-lexicon.ts'
 
 const repo = (() => {
   let d = dirname(fileURLToPath(import.meta.url))
@@ -40,7 +41,11 @@ section('A. 视图模型真值表')
   const card = buildStatusCard(detail)
   ok(card !== null, 'blocked+结构化面 → 卡渲染')
   ok(card.severity === 'red', 'blocked 态=红调')
-  ok(card.headline.includes('uncommitted changes') && card.headline.includes('not a conflict'), '主文案走词条表（出了什么/非冲突）')
+  // t260915-05：主文案走 red-light-lexicon 词条表（中文人话，表驱动而非硬编码——
+  // 与 REASON_LEXICON 同源断言，改表即改文案）。
+  ok(card.headline === REASON_LEXICON.main_dirty.headline, '主文案=词条表 main_dirty 条目（改表即改文案）')
+  ok(card.headline.includes('未提交的改动') && card.headline.includes('不是冲突'), '主文案人话三问之一：出了什么/非冲突')
+  ok(card.headlineFromTable === true, 'headlineFromTable=true（词条表命中）')
   ok(card.files.length === 1 && card.files[0] === 'server/model-routes.yaml', '文件点名取结构化 files')
   ok(card.next.includes('retry_qc') || card.next.includes('retry-qc'), '下一步取结构化 next_action（谁做什么）')
   ok(card.rawLog.length === 2 && card.rawLog[0].includes('merge/blocked'), '原始日志折叠=timeline 格式化行')
@@ -108,15 +113,62 @@ const libJs = readFileSync(join(repo, 'server/plugins/workbench/lib/client.js'),
 const libCjs = readFileSync(join(repo, 'server/plugins/workbench/lib/client.cjs'), 'utf8')
 for (const [name, art] of [['src', src], ['lib/client.js', libJs], ['lib/client.cjs', libCjs]]) {
   ok(art.includes('wb-status-card'), `${name}: 卡类名 wb-status-card 在场`)
-  ok(art.includes('Raw engine log'), `${name}: 原始日志折叠 summary（固定元素英文）在场`)
-  ok(art.includes('Next:'), `${name}: 下一步安排行（Next:）在场`)
+  ok(art.includes('原始引擎日志'), `${name}: 原始日志折叠 summary 在场`)
+  ok(art.includes('下一步：'), `${name}: 下一步安排行在场`)
   ok(art.includes('sc-file'), `${name}: 文件点名 chip 类名在场`)
+  ok(art.includes("data-sev=blue") || art.includes("'blue'"), `${name}: 蓝卡腿接线在场`)
+  ok(art.includes('sc-signwhat'), `${name}: 「签什么」区在场`)
 }
 ok(src.includes('buildStatusCard(detail)'), 'src: 视图模型经 buildStatusCard 纯函数派生（非内联翻译）')
 ok(src.includes("data-testid=\"status-card\""), 'src: DOM 断言锚点 data-testid=status-card 在场')
 ok(src.includes('.wb-status-card .sc-raw'), 'src: 折叠区样式（details.sc-raw）在场')
+ok(src.includes('.wb-status-card[data-sev=blue]'), 'src: 蓝卡样式在场')
 ok(src.includes('blocked_detail?: { reason_code?: string; files?: string[]; next_action?: string }'),
   'src: TicketDetail.meta.blocked_detail 类型声明在场')
+
+/* ---- C. 翻译层表驱动 + 蓝卡（t260915-05，验收口径②/③蓝腿） ---- */
+section('C. 翻译层表驱动 + 蓝卡「签什么」')
+{
+  // 表驱动：buildStatusCard 主文案必须=词条表同源（改表即改文案，非硬编码）。
+  for (const code of ['main_dirty', 'verify_red', 'unauthorized_path', 'protected_path']) {
+    const c = buildStatusCard({ stage_state: 'blocked', meta: { blocked_detail: { reason_code: code, files: [], next_action: '' } }, timeline: [] })
+    ok(c !== null && c.headline === REASON_LEXICON[code].headline, `词条表同源：${code}`)
+  }
+  // 缺词条降级链（永不空白不猜测）：缺词条→回落原文；缺原文→原因码裸展示；全缺→缺省句。
+  const fb = translateReason('no_such_code_xyz', '引擎原文一句')
+  ok(fb.headline === '引擎原文一句' && fb.fromTable === false, '缺词条回落原文（fromTable=false）')
+  ok(translateReason('no_such_code_xyz', '').headline.includes('no_such_code_xyz'), '缺词条缺原文→原因码裸展示')
+  ok(translateReason('', '').headline.length > 0, '全缺→缺省句不空白')
+  const c2 = buildStatusCard({ stage_state: 'blocked', blocked_reason: '引擎原文一句', timeline: [] })
+  ok(c2.headline === '引擎原文一句' && c2.headlineFromTable === false, '卡面回落原文时 headlineFromTable=false（降级可辨）')
+}
+{
+  // 蓝卡：awaiting-human → 蓝调 +「签什么」三源（人门上下文/验收口径/门结论）。
+  const blue = buildStatusCard({
+    stage_state: 'awaiting-human',
+    human_context: { merge: { context_text: '变更：a.py\n\n验收：见走查报告' } },
+    stage_acceptance: ['人审签字', 'merge 落账'],
+    gate_runs: [{ stage: 'merge_check', green: true, red_count: 0 }],
+    timeline: [{ at: 'T1', stage: 'merge', state: 'awaiting-human', reason: '等人签字' }],
+  })
+  ok(blue !== null && blue.severity === 'blue', 'awaiting-human → 蓝卡')
+  ok(blue.headline === REASON_LEXICON['awaiting-human'].headline, '蓝卡主文案=词条表 awaiting-human 条目')
+  ok(blue.signWhat.some(s => s.includes('变更：a.py')), '签什么收人门上下文（空行跳过）')
+  ok(blue.signWhat.some(s => s.startsWith('验收口径：人审签字')), '签什么收验收口径')
+  ok(blue.signWhat.some(s => s.includes('merge_check') && s.includes('全绿')), '签什么收门结论')
+  ok(blue.signWhat.length <= STATUS_CARD_SIGN_WHAT_CAP, `签什么封顶 ${STATUS_CARD_SIGN_WHAT_CAP}`)
+  ok(blue.files.length === 0, '蓝卡无文件点名（无受阻面）')
+  // 畸形人门上下文：非串/缺 context_text → 逐条跳过不抛
+  const blue2 = buildStatusCard({ stage_state: 'awaiting-human', human_context: { merge: 'junk', x: null }, timeline: [] })
+  ok(blue2 !== null && blue2.severity === 'blue' && blue2.signWhat.length === 0, '畸形 human_context 软降级不抛')
+  // 结构化受阻面在场时蓝卡让位红卡（受阻信息优先于人门提示，不双卡混显）
+  const red = buildStatusCard({
+    stage_state: 'awaiting-human',
+    meta: { blocked_detail: { reason_code: 'main_dirty', files: ['a.txt'], next_action: '' } },
+    timeline: [],
+  })
+  ok(red !== null && red.severity === 'amber', '受阻面挂着的中间态=黄调（沿用 t260911-05 口径）')
+}
 
 console.log(`\nSTATUS_CARD_TESTS pass=${pass} fail=${fail}`)
 process.exit(fail === 0 ? 0 : 1)

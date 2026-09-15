@@ -575,6 +575,502 @@ function stageDurationTitle(d, nowMs) {
 	return parts.join(" · ");
 }
 //#endregion
+//#region src/client/lane-map-model.ts
+/**
+* lane-map-model —— 真泳道图（拓扑驱动）视图模型（t260915-05，mock ③/④）。
+*
+* 设计样张：notes/discussions/260904-ticket-detail-ui-mock.html 屏③/④
+* （并行双道虚线框＋轮次徽章逐轮格 hover 证据＋人门虚线圈＋不画返工弧；
+* callout F/G：渲染器只认「节点+边+kind」，标签全部来自拓扑，零业务词）。
+*
+* 数据源：
+*   - topology：模板拓扑导出契约（引擎 template_topology.py topology-v1，经
+*     workflow.py list / ticket show 投影面透传）。null/畸形 → buildLaneMap 返回
+*     null = 调用方回落现行线性步骤条（零回归降级锚）。
+*   - detail：工单详情（ticket show 投影面）。消费 timeline（gen/phase 键，
+*     t260915-01 ③）、gens、handoffs（gen 键）、results、checks、gate_runs、
+*     meta.parallel_stages/parallel_phase、status/stage/stage_state。
+*
+* 轮次口径（与 lane-durations 的轮窗同族，此处取「轮格」语义）：
+*   - 引擎 timeline 条目带 gen（门开的新票）→ 按 gen 分组，一轮一格；
+*   - 老票无 gen → 回退「每条 running mark 开新轮」的计数口径
+*     （lane-durations 同款真值表），轮内证据无 gen 标注=如实缺省；
+*   - 轮结局=该轮内最后一条显式态（done/blocked/awaiting-human/rework），
+*     无显式态=running；hover title=该轮 at/结局/reason/phase/handoff 摘要。
+*
+* 畸形输入纪律（外部快照不可信，与 lane-states/lane-durations 同款）：
+*   非串 id/state 的条目跳过；拓扑外 stage id 不建视图不泄漏；全程不抛。
+*   消费本模块的渲染器不得出现任何 dev-lane 专属词（fixture-two-step 对拍锚）。
+*/
+/** kind 图标（渲染器唯一认识的视觉词，零业务语义）。 */
+const LANE_KIND_ICON = {
+	agent: "🤖",
+	gate: "✓",
+	human: "👤"
+};
+function asString(v) {
+	return typeof v === "string" ? v : "";
+}
+function asStringArray$1(v) {
+	return Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim() !== "") : [];
+}
+const EXPLICIT_STATES = /* @__PURE__ */ new Set([
+	"done",
+	"blocked",
+	"awaiting-human",
+	"rework"
+]);
+/** 清洗原始拓扑；不可救（非对象/无合法节点）→ null=调用方回落线性步骤条。 */
+function parseTopology(raw) {
+	if (raw === null || typeof raw !== "object") return null;
+	const r = raw;
+	if (!Array.isArray(r.nodes)) return null;
+	const nodes = [];
+	const ids = /* @__PURE__ */ new Set();
+	for (const n of r.nodes) {
+		if (n === null || typeof n !== "object") continue;
+		const o = n;
+		const id = asString(o.id);
+		const label = asString(o.label);
+		const kind = asString(o.kind);
+		if (!id || !label) continue;
+		if (kind !== "agent" && kind !== "gate" && kind !== "human") continue;
+		if (ids.has(id)) continue;
+		ids.add(id);
+		nodes.push({
+			id,
+			label,
+			kind,
+			role: asString(o.role),
+			parts: asStringArray$1(o.parts),
+			...asString(o.optional) ? { optional: asString(o.optional) } : {}
+		});
+	}
+	if (nodes.length === 0) return null;
+	const edges = [];
+	if (Array.isArray(r.edges)) for (const e of r.edges) {
+		if (!Array.isArray(e) || e.length !== 2) continue;
+		const [a, b] = e;
+		if (typeof a === "string" && typeof b === "string" && ids.has(a) && ids.has(b)) edges.push([a, b]);
+	}
+	const groups = [];
+	if (Array.isArray(r.groups)) for (const g of r.groups) {
+		if (g === null || typeof g !== "object") continue;
+		const o = g;
+		const id = asString(o.id);
+		const members = asStringArray$1(o.members).filter((m) => ids.has(m));
+		if (id && members.length >= 2) groups.push({
+			id,
+			members,
+			phase: asString(o.phase)
+		});
+	}
+	return {
+		version: asString(r.version) || void 0,
+		template: asString(r.template) || "unknown",
+		name: asString(r.name) || void 0,
+		nodes,
+		edges,
+		groups
+	};
+}
+function timelineOf(detail) {
+	if (!Array.isArray(detail.timeline)) return [];
+	const out = [];
+	for (const e of detail.timeline) {
+		if (e === null || typeof e !== "object") continue;
+		const o = e;
+		const stage = asString(o.stage);
+		const state = asString(o.state);
+		if (!stage || !state) continue;
+		out.push({
+			stage,
+			state,
+			at: asString(o.at) || void 0,
+			reason: asString(o.reason) || void 0,
+			gen: typeof o.gen === "number" && Number.isFinite(o.gen) ? o.gen : void 0,
+			phase: asString(o.phase) || void 0
+		});
+	}
+	return out;
+}
+function handoffsOf(detail) {
+	if (!Array.isArray(detail.handoffs)) return [];
+	const out = [];
+	for (const h of detail.handoffs) {
+		if (h === null || typeof h !== "object") continue;
+		const o = h;
+		const stage = asString(o.stage);
+		if (!stage) continue;
+		out.push({
+			stage,
+			summary: asString(o.summary) || void 0,
+			gen: typeof o.gen === "number" && Number.isFinite(o.gen) ? o.gen : void 0
+		});
+	}
+	return out;
+}
+/** 段→轮次带。gen 键在场按 gen 分组；缺省回退「running mark 切轮」计数口径。 */
+function deriveRounds(stageId, detail) {
+	const entries = timelineOf(detail).filter((e) => e.stage === stageId);
+	if (entries.length === 0) return [];
+	const hasGen = entries.some((e) => typeof e.gen === "number");
+	const buckets = [];
+	if (hasGen) {
+		const byGen = /* @__PURE__ */ new Map();
+		for (const e of entries) {
+			const g = typeof e.gen === "number" ? e.gen : 1;
+			if (!byGen.has(g)) byGen.set(g, []);
+			byGen.get(g).push(e);
+		}
+		for (const g of [...byGen.keys()].sort((a, b) => a - b)) buckets.push(byGen.get(g));
+	} else {
+		let cur = [];
+		for (const e of entries) {
+			if (e.state === "running" && cur.length > 0) {
+				buckets.push(cur);
+				cur = [];
+			}
+			cur.push(e);
+		}
+		if (cur.length > 0) buckets.push(cur);
+	}
+	const handoffs = handoffsOf(detail).filter((h) => (HANDOFF_KEY_ALIAS[h.stage] || h.stage) === stageId);
+	let handoffCursor = 0;
+	const rounds = [];
+	buckets.forEach((bucket, i) => {
+		let state = "running";
+		let reason;
+		for (const e of bucket) if (EXPLICIT_STATES.has(e.state)) {
+			state = e.state;
+			reason = e.reason;
+		}
+		const first = bucket[0];
+		const gen = typeof first.gen === "number" ? first.gen : i + 1;
+		let handoffSummary;
+		while (handoffCursor < handoffs.length) {
+			const h = handoffs[handoffCursor];
+			if (typeof h.gen === "number" && h.gen !== gen) break;
+			handoffSummary = h.summary;
+			handoffCursor += 1;
+			break;
+		}
+		rounds.push({
+			gen,
+			state,
+			at: first.at,
+			reason,
+			phase: bucket.find((e) => e.phase)?.phase,
+			handoffSummary
+		});
+	});
+	return rounds;
+}
+/** gate_runs → 检查明细区行模型（最新在前）。畸形条目逐条跳过不抛。 */
+function buildChecksDetail(detail) {
+	if (detail === null || typeof detail !== "object") return [];
+	const runs = detail.gate_runs;
+	if (!Array.isArray(runs)) return [];
+	const out = [];
+	for (const run of [...runs].reverse()) {
+		if (run === null || typeof run !== "object") continue;
+		const o = run;
+		const stage = asString(o.stage);
+		if (!stage) continue;
+		const rows = [];
+		if (Array.isArray(o.checks)) for (const c of o.checks) {
+			if (c === null || typeof c !== "object") continue;
+			const co = c;
+			const item = asString(co.item);
+			const green = co.green === true;
+			const checkId = asString(co.id) || void 0;
+			if (green && !item && !checkId) continue;
+			rows.push({
+				green,
+				item: item || checkId || "",
+				detail: asString(co.detail) || void 0,
+				checkId,
+				reasonCode: asString(co.reason_code) || void 0,
+				files: asStringArray$1(co.files),
+				nextAction: asString(co.next_action) || void 0
+			});
+		}
+		out.push({
+			stage,
+			label: asString(o.label) || stage,
+			green: o.green === true,
+			redCount: typeof o.red_count === "number" && Number.isFinite(o.red_count) ? o.red_count : rows.filter((r) => !r.green).length,
+			gen: typeof o.gen === "number" && Number.isFinite(o.gen) ? o.gen : void 0,
+			conflict: o.conflict === true,
+			rows
+		});
+	}
+	return out;
+}
+/**
+* 构建泳道图视图模型。返回 null = 拓扑不可用，调用方回落现行线性步骤条
+* （零回归降级锚：老 host / 未声明拓扑的模板 / 畸形契约面）。
+*/
+function buildLaneMap(topologyRaw, detailRaw) {
+	const topology = parseTopology(topologyRaw);
+	if (!topology) return null;
+	const detail = detailRaw !== null && typeof detailRaw === "object" ? detailRaw : {};
+	const order = topology.nodes.map((n) => n.id);
+	const derived = deriveStageStates({
+		status: detail.status,
+		stage: detail.stage,
+		stage_state: detail.stage_state,
+		timeline: Array.isArray(detail.timeline) ? detail.timeline : null,
+		results: detail.results !== null && typeof detail.results === "object" ? detail.results : void 0,
+		checks: detail.checks !== null && typeof detail.checks === "object" ? detail.checks : void 0,
+		parallel_stages: Array.isArray(detail.parallel_stages) ? detail.parallel_stages : void 0,
+		meta: detail.meta
+	}, order);
+	const nodes = {};
+	for (const n of topology.nodes) {
+		const rounds = deriveRounds(n.id, detail);
+		nodes[n.id] = {
+			node: n,
+			vis: derived.states[n.id] ?? "todo",
+			rounds,
+			badge: rounds.length > 1 ? `×${rounds.length}` : ""
+		};
+	}
+	const groups = {};
+	for (const g of topology.groups) {
+		const members = g.members.map((id) => nodes[id]).filter(Boolean);
+		if (members.length < 2) continue;
+		groups[g.id] = {
+			def: g,
+			members,
+			active: members.some((m) => m.vis === "running"),
+			allDone: members.every((m) => m.vis === "done")
+		};
+	}
+	const groupOf = {};
+	for (const g of Object.values(groups)) for (const m of g.members) groupOf[m.node.id] = g.def.id;
+	const emitted = /* @__PURE__ */ new Set();
+	const items = [];
+	for (const n of topology.nodes) {
+		const gid = groupOf[n.id];
+		if (gid) {
+			if (!emitted.has(gid)) {
+				emitted.add(gid);
+				items.push({
+					kind: "group",
+					id: gid
+				});
+			}
+		} else items.push({
+			kind: "node",
+			id: n.id
+		});
+	}
+	return {
+		topology,
+		items,
+		nodes,
+		groups,
+		humanGateActive: topology.nodes.find((n) => n.kind === "human" && nodes[n.id].vis === "awaiting-human")?.id ?? null,
+		closed: detail.status === "closed"
+	};
+}
+//#endregion
+//#region src/client/lane-map.tsx
+/**
+* lane-map.tsx —— 真泳道图（拓扑驱动）+ 检查明细区组件（t260915-05，mock ①③④）。
+*
+* 渲染器通用性承诺（mock callout G）：本组件只认「节点+边+kind+组」，
+* 标签/顺序/并行/人门全部来自 LaneMapModel（引擎 template_topology 导出契约），
+* 组件内零 dev-lane 业务词——换模板换项目同一组件（fixture-two-step 对拍锚）。
+*
+* 图面语义（mock 屏③）：
+*   - 并行组=虚线框，成员纵排双道，任一成员 running 时框高亮（active）；
+*   - 人门（kind=human）=虚线圈 👤，到站时状态卡变蓝（蓝卡在 status-card）；
+*   - 条件段（optional）=虚节点+条件注记；
+*   - 轮次带=同段多轮逐轮一格，hover title=该轮证据/打回原因（数据=gen/phase）；
+*   - 不画返工弧：返工史归打回横幅与本组件 ×N 徽章，图面单向流
+*     （守卫：组件永不渲染 .wb-lm-arc，DOM 场景断言其恒零）。
+*/
+const LM_ICON = {
+	done: "✓",
+	running: "▶",
+	blocked: "✗",
+	"awaiting-human": "✋",
+	todo: "○",
+	rework: "↺"
+};
+function roundTitle(nv, gen, state) {
+	const r = nv.rounds.find((x) => x.gen === gen);
+	if (!r) return `第${gen}轮`;
+	const bits = [`第${r.gen}轮`];
+	if (r.at) bits.push(r.at);
+	bits.push(state === "rework" ? "被打回" : state);
+	if (r.reason) bits.push(r.reason);
+	if (r.phase) bits.push(`相位 ${r.phase}`);
+	if (r.handoffSummary) bits.push(r.handoffSummary);
+	return bits.join(" · ");
+}
+/** 单个站点（主道与并行道内共用；道内竖排由父级 flex 方向控制）。 */
+function LaneMapNode({ nv, inGroup }) {
+	const n = nv.node;
+	const glyph = n.kind === "human" ? LANE_KIND_ICON.human : LM_ICON[nv.vis] ?? LM_ICON.todo;
+	const title = `${n.label} · ${n.role} · ${n.kind}${n.optional ? ` · ${n.optional}` : ""}`;
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+		className: `wb-lm-node${inGroup ? " wb-lm-node-inlane" : ""}`,
+		"data-id": n.id,
+		"data-kind": n.kind,
+		"data-vis": nv.vis,
+		title,
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {
+				className: "wb-lm-dot",
+				children: glyph
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+				className: "wb-lm-name",
+				children: [
+					n.label,
+					n.optional ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("em", {
+						className: "wb-lm-opt",
+						title: `条件段：${n.optional}`,
+						children: n.optional
+					}) : null,
+					nv.badge ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", {
+						className: "wb-lm-badge",
+						title: `该段共 ${nv.rounds.length} 轮（返工史见打回横幅）`,
+						children: nv.badge
+					}) : null
+				]
+			}),
+			nv.rounds.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				className: "wb-lm-rounds",
+				children: nv.rounds.map((r) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+					className: "wb-lm-round",
+					"data-gen": r.gen,
+					"data-state": r.state,
+					title: roundTitle(nv, r.gen, r.state),
+					children: ["g", r.gen]
+				}, r.gen))
+			})
+		]
+	});
+}
+/** 并行组：虚线框 + 纵排双道（几道都行，mock ④「任意形状」）。 */
+function LaneMapGroup({ model, groupId }) {
+	const g = model.groups[groupId];
+	if (!g) return null;
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+		className: "wb-lm-parallel",
+		"data-group": g.def.id,
+		"data-active": g.active ? "true" : "false",
+		"data-done": g.allDone ? "true" : "false",
+		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+			className: "wb-lm-plabel",
+			children: [
+				"并行 · ",
+				g.members.length,
+				" 道"
+			]
+		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+			className: "wb-lm-branches",
+			children: g.members.map((m) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMapNode, {
+				nv: m,
+				inGroup: true
+			}, m.node.id))
+		})]
+	});
+}
+/**
+* 真泳道图。model=null 时调用方不渲染本组件（回落现行线性步骤条）。
+*/
+function LaneMap({ model }) {
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+		className: "wb-lanemap",
+		"data-template": model.topology.template,
+		children: model.items.map((item) => item.kind === "group" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+			className: "wb-lm-item",
+			children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMapGroup, {
+				model,
+				groupId: item.id
+			})
+		}, item.id) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+			className: "wb-lm-item",
+			children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMapNode, {
+				nv: model.nodes[item.id],
+				inGroup: false
+			})
+		}, item.id))
+	});
+}
+/**
+* 检查明细区（mock ① ck-rows）：gate_runs 逐轮逐条 ✓/✗ + item + detail，
+* 原始输出 details 折叠可展开；红行带文件点名与下一步（与状态卡同一
+* blocked_detail/gate_runs 数据源，天然联动）。最新一轮在最上，最多显 3 轮。
+*/
+function ChecksDetail({ runs, cap = 3 }) {
+	if (!runs || runs.length === 0) return null;
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-checks",
+		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: "wb-checks-ttl",
+			children: [
+				"检查明细 · ",
+				runs.length,
+				" 轮门记录（引擎结构化数据直译，点行展开原始输出）"
+			]
+		}), runs.slice(0, cap).map((run, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: "wb-ck-run",
+			"data-stage": run.stage,
+			"data-green": run.green ? "true" : "false",
+			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-ck-run-head",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: run.label }),
+					run.gen !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: "wb-ck-run-gen",
+						children: [
+							"第 ",
+							run.gen,
+							" 轮"
+						]
+					}) : null,
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-ck-run-verdict",
+						children: run.green ? "全绿" : `${run.redCount} 项红灯`
+					})
+				]
+			}), run.rows.map((row, j) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
+				className: "wb-ck-row",
+				"data-green": row.green ? "true" : "false",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("summary", { children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", {
+						className: `wb-ck-mark ${row.green ? "g" : "r"}`,
+						children: row.green ? "✓" : "✗"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-ck-name",
+						children: row.item || row.checkId || "（未命名检查项）"
+					}),
+					row.detail ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-ck-detail",
+						children: row.detail
+					}) : null
+				] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-ck-more",
+					children: [
+						row.checkId ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: ["check_id：", row.checkId] }) : null,
+						row.reasonCode ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: ["reason_code：", row.reasonCode] }) : null,
+						row.files && row.files.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: ["文件：", row.files.join("、")] }) : null,
+						row.nextAction ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: ["下一步：", row.nextAction] }) : null,
+						row.detail ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", { children: row.detail }) : null
+					]
+				})]
+			}, j))]
+		}, `${run.stage}-${i}`))]
+	});
+}
+//#endregion
 //#region ../providers/src/host/routes-edit.ts
 /** 视图 → 编辑草稿（null 条目 → 空串，UI 显示为「继承 default」）。 */
 function draftFromView(view) {
@@ -48689,31 +49185,139 @@ function startTabPresence(who, opts) {
 	return self;
 }
 //#endregion
+//#region src/client/red-light-lexicon.ts
+/** 引擎术语 → 人话词条表。改文案=改这张表（非硬编码）。 */
+const REASON_LEXICON = {
+	main_staged: {
+		headline: "合并被挡：main 工作区有已暂存未提交的改动（本地改动保护，不是冲突）",
+		next: "在 main 提交或暂存（git stash）这些改动，然后发 retry_qc 重验；引擎绝不自动 stash/提交"
+	},
+	main_dirty: {
+		headline: "合并被挡：main 工作区有未提交的改动（本地改动保护，不是冲突）",
+		next: "在 main 提交或暂存（git stash）这些改动，然后发 retry_qc 重验；引擎绝不自动 stash/提交"
+	},
+	untracked_collision: {
+		headline: "合并被挡：main 工作区有未跟踪文件与本次合并路径相撞",
+		next: "把相撞文件移走或提交，然后发 retry_qc 重验；引擎绝不自动 stash/提交"
+	},
+	merge_fault: {
+		headline: "合并没有收口：合并执行出现故障（不是冲突）",
+		next: "人工处置后发 retry_qc 重验"
+	},
+	conflict: {
+		headline: "合并与 main 有冲突",
+		next: "按冲突文件清单消解后发 retry_qc 重验"
+	},
+	no_commits: {
+		headline: "实现还没落盘：泳道分支还没有提交",
+		next: "发 rework 回实现段补落盘"
+	},
+	worktree_dirty: {
+		headline: "泳道工作区不干净：有未提交的改动",
+		next: "泳道内提交或清理后发 retry_qc 重验"
+	},
+	status_failed: {
+		headline: "git 状态读取失败（环境类）",
+		next: "排查泳道仓后发 retry_qc 重验"
+	},
+	merge_base_failed: {
+		headline: "泳道 merge-base 失败（git 环境类）",
+		next: "排查泳道仓后发 retry_qc 重验"
+	},
+	verify_red: {
+		headline: "泳道自检红灯：改动未通过本票验证",
+		next: "按明细里的红灯项修复后发 retry_qc 重验"
+	},
+	bundle_stale: {
+		headline: "前端构建产物过期：源码与 lib 产物不同步",
+		next: "泳道内重建产物（tsdown）后发 retry_qc 重验"
+	},
+	ui_evidence_malformed: {
+		headline: "UI 截图证据缺失或畸形（验收闸兜底）",
+		next: "重跑 UI 截图（ui-check/capture-lane）后发 retry_qc 重验"
+	},
+	unauthorized_path: {
+		headline: "改动超出本票声明的范围（写集越界）",
+		next: "返工回方案段补报改动清单，或把越界文件移出提交"
+	},
+	protected_path: {
+		headline: "改动碰到受保护路径（本票无权改的真源）",
+		next: "把改动移出受保护路径；确需改动走授权通道（sign authorize）"
+	},
+	unknown_stage: {
+		headline: "闸判定找不到所属段（配置/版本错位）",
+		next: "排查模板规则表后发 retry_qc 重验"
+	},
+	write_set_missing: {
+		headline: "工单没有声明写集（开票缺改动清单）",
+		next: "返工回方案段补报改动清单"
+	},
+	ui_dirs_missing: {
+		headline: "UI 截图目录缺失（闸无法核对截图面）",
+		next: "重跑 UI 截图（ui-check/capture-lane）后发 retry_qc 重验"
+	},
+	gate_refusal_unknown: {
+		headline: "段闸拒绝（原因码缺失）",
+		next: "按 worker 日志核对该拒绝原因后处置"
+	},
+	gate_refusal_malformed: {
+		headline: "段闸拒绝回执畸形（原因码不可读）",
+		next: "按 worker 日志核对该拒绝原因后处置"
+	},
+	"awaiting-human": { headline: "等你审批：流程停在人门，引擎不会自动过" }
+};
+/**
+* reason_code → 人话。表缺词条回落原文（宁显原文不显空白）；
+* 原文也没有 → 可辨的「原因码裸展示」（最后一道锚，仍不空白）。
+*/
+function translateReason(code, fallbackText) {
+	const c = typeof code === "string" ? code.trim() : "";
+	if (c) {
+		const entry = REASON_LEXICON[c];
+		if (entry) return {
+			headline: entry.headline,
+			next: entry.next,
+			fromTable: true
+		};
+	}
+	const fb = typeof fallbackText === "string" ? fallbackText.trim() : "";
+	if (fb) return {
+		headline: fb,
+		fromTable: false
+	};
+	if (c) return {
+		headline: `受阻（原因码 ${c}）`,
+		fromTable: false
+	};
+	return {
+		headline: "工单受阻（引擎未给原因）",
+		fromTable: false
+	};
+}
+//#endregion
 //#region src/host/status-card.ts
 /**
-* status-card.ts —— 工单详情「人话状态卡」视图模型（KI-048 件④，t260911-05）。
+* status-card.ts —— 工单详情「人话状态卡」视图模型（KI-048 件④，t260911-05；
+* t260915-05 扩展：文案迁 red-light-lexicon 词条表 + 新增人门蓝卡腿）。
 *
 * 设计样张：notes/discussions/260904-ticket-detail-ui-mock.html A 块状态卡
 * （四件构成：人话主文案 ＋ 挡事文件点名 ＋ 下一步安排 ＋ 原始日志折叠；
-* mock C 原则：翻译层表驱动——引擎术语→人话词条，UI 不翻译它没拿到的信息）。
+* mock C 原则：翻译层表驱动——引擎术语→人话词条，UI 不翻译它没拿到的信息）
+* ＋ 屏③ callout E（到人门时状态卡变蓝列出「签什么」）。
 *
 * 数据源优先级：
 *   1. detail.meta.blocked_detail（引擎 dev_lane 落的结构化面：
 *      {reason_code, files, next_action}）——文件点名/下一步直接取；
 *   2. detail.blocked_reason（blocked 文案，同一 _classify_main_dirty 真源派生
-*      的人话句）——主文案取它；文件名从文本抽路径 token 兜底；
-*   3. 都缺 → 卡不渲染（返回 null，老票零侵入）。
+*      的人话句）——主文案取它；文件名从文本抽路径 token 兜底（老票 KI-048
+*      降级锚，仅当结构化面缺席时启用，不冒充结构化数据）；
+*   3. 人门蓝卡：stage_state==='awaiting-human' → 「签什么」三源
+*      （human_context[gate].context_text 摘要 + stage_acceptance 清单 +
+*      最近一次 gate_runs 绿结论）；
+*   4. 都缺 → 卡不渲染（返回 null，老票零侵入）。
 *
 * 纯函数无 IO；畸形输入（非对象/字段类型错/列表超长）全部软降级不抛。
 */
-/** 主文案词条表：引擎 reason 码 → 人话主句（出了什么事）。 */
-const REASON_HEADLINES = {
-	main_staged: "Merge blocked: the main workspace has staged but uncommitted changes",
-	main_dirty: "Merge blocked: the main workspace has uncommitted changes (local-change protection, not a conflict)",
-	untracked_collision: "Merge blocked: untracked files collide with this ticket's merge paths",
-	merge_fault: "Merge did not close: a merge fault occurred (not a conflict)",
-	conflict: "Merge hit conflicts with main"
-};
 /** 文件名兜底抽取：blocked_reason 文本里的路径形 token（含 / 或 . 且非句读）。 */
 const PATH_TOKEN_RE = /[A-Za-z0-9_][A-Za-z0-9_./-]*[/.][A-Za-z0-9_.-]+/g;
 function asStringArray(v) {
@@ -48732,9 +49336,38 @@ function extractPathTokens(text) {
 	}
 	return out;
 }
+/** 「签什么」三源汇聚（畸形输入逐条跳过，封顶防爆长）。 */
+function buildSignWhat(detail) {
+	const out = [];
+	const humanContext = detail.human_context !== null && typeof detail.human_context === "object" ? detail.human_context : {};
+	for (const v of Object.values(humanContext)) {
+		if (v === null || typeof v !== "object") continue;
+		const ctx = v.context_text;
+		if (typeof ctx === "string" && ctx.trim()) for (const line of ctx.split("\n")) {
+			const t = line.trim();
+			if (t) out.push(t);
+		}
+	}
+	const acceptance = asStringArray(detail.stage_acceptance);
+	for (const a of acceptance) {
+		if (out.length >= 8) break;
+		if (!out.includes(a)) out.push(`验收口径：${a}`);
+	}
+	const gateRuns = Array.isArray(detail.gate_runs) ? detail.gate_runs : [];
+	for (let i = gateRuns.length - 1; i >= 0; i--) {
+		const g = gateRuns[i];
+		if (g === null || typeof g !== "object") continue;
+		const go = g;
+		if (go.green !== true) continue;
+		const stage = typeof go.stage === "string" ? go.stage : "";
+		out.push(`前置门已全绿：${stage || "程序化检查"}（可签字）`);
+		break;
+	}
+	return out.slice(0, 8);
+}
 /**
-* 构建状态卡视图模型。返回 null = 整卡不渲染（非受阻票/既无结构化面也无
-* blocked 文案——老票零侵入）。
+* 构建状态卡视图模型。返回 null = 整卡不渲染（非受阻票/非人门/既无结构化面
+* 也无 blocked 文案——老票零侵入）。
 */
 function buildStatusCard(detail) {
 	if (detail === null || typeof detail !== "object") return null;
@@ -48747,12 +49380,41 @@ function buildStatusCard(detail) {
 	const reasonCode = typeof bd.reason_code === "string" ? bd.reason_code : "";
 	const structFiles = asStringArray(bd.files);
 	const structNext = typeof bd.next_action === "string" ? bd.next_action.trim() : "";
+	if (stageState === "awaiting-human" && !reasonCode) {
+		const tr = translateReason("awaiting-human", blockedReason);
+		const signWhat = buildSignWhat(d);
+		const rawLog = formatLogTail(d);
+		return {
+			headline: tr.headline,
+			headlineFromTable: tr.fromTable,
+			files: [],
+			filesMore: 0,
+			next: "人工审批：通过=批准签字；有意见=打回并附原因。引擎在你签字前不会动。",
+			rawLog,
+			severity: "blue",
+			signWhat
+		};
+	}
 	if (stageState !== "blocked" && !reasonCode && !blockedReason) return null;
-	const headline = (reasonCode ? REASON_HEADLINES[reasonCode] ?? `Merge blocked (${reasonCode})` : "") || blockedReason || (reasonCode ? `Merge blocked (${reasonCode})` : "Ticket is blocked");
+	const tr = translateReason(reasonCode || null, blockedReason);
+	const headline = tr.headline || (reasonCode ? `Merge blocked (${reasonCode})` : "Ticket is blocked");
 	const filesAll = structFiles.length > 0 ? structFiles : extractPathTokens(blockedReason);
 	const files = filesAll.slice(0, 20);
 	const filesMore = Math.max(0, filesAll.length - files.length);
-	const next = structNext || (stageState === "blocked" ? "Waiting for you: resolve the files above, then trigger retry-qc (or rework). The engine never stashes or commits on its own." : "Follow the reason above; the lane is preserved.");
+	const next = structNext || tr.next || (stageState === "blocked" ? "Waiting for you: resolve the files above, then trigger retry-qc (or rework). The engine never stashes or commits on its own." : "Follow the reason above; the lane is preserved.");
+	return {
+		headline,
+		headlineFromTable: tr.fromTable,
+		files,
+		filesMore,
+		next,
+		rawLog: [...typeof bd.evidence === "string" && bd.evidence.trim() ? [`[evidence] ${bd.evidence.trim()}`] : [], ...formatLogTail(d)],
+		severity: stageState === "blocked" ? "red" : "amber",
+		signWhat: []
+	};
+}
+/** 原始日志折叠：timeline 尾部 N 条（畸形条目逐条跳过；时间线缺省=一行说明）。 */
+function formatLogTail(d) {
 	const timeline = Array.isArray(d.timeline) ? d.timeline : [];
 	const rawLog = [];
 	for (const ent of timeline.slice(-8)) {
@@ -48765,14 +49427,7 @@ function buildStatusCard(detail) {
 		rawLog.push(`${at} [${stage}/${state}] ${reason}`.trimEnd());
 	}
 	if (rawLog.length === 0) rawLog.push("(no engine timeline entries)");
-	return {
-		headline,
-		files,
-		filesMore,
-		next,
-		rawLog,
-		severity: stageState === "blocked" ? "red" : "amber"
-	};
+	return rawLog;
 }
 //#endregion
 //#region src/client/approve-note.ts
@@ -49110,6 +49765,65 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-status-card .sc-raw>summary{cursor:pointer;font-size:11.5px;color:var(--dsw-derive-muted,#57606a)}
 .wb-status-card .sc-raw[open]>summary{color:var(--dsw-derive-accent,#0969da)}
 .wb-status-card .sc-raw pre{margin:4px 0 0;padding:6px 8px;font-size:11px;line-height:1.5;max-height:200px;overflow:auto;background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;white-space:pre-wrap;word-break:break-all}
+/* t260915-05：状态卡蓝调（人门等你签）+「签什么」+ 词条缺失降级锚 */
+.wb-status-card[data-sev=blue]{border-color:var(--dsw-derive-accent,#0969da);border-left-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff)}
+.wb-status-card[data-sev=blue] .sc-head{color:var(--dsw-derive-accent-deep,#0550ae)}
+.wb-status-card[data-sev=blue] .sc-next{color:var(--dsw-derive-accent-deep,#0550ae)}
+.wb-status-card .sc-fallback{margin-top:4px;font-size:11px;color:var(--dsw-derive-muted,#8c959f)}
+.wb-status-card .sc-signwhat{margin-top:8px;padding:6px 10px;background:var(--dsw-derive-canvas,#fff);border:1px dashed var(--dsw-derive-accent,#0969da);border-radius:6px}
+.wb-status-card .sc-signwhat-ttl{font-size:12px;font-weight:700;color:var(--dsw-derive-accent-deep,#0550ae)}
+.wb-status-card .sc-signwhat ul{margin:4px 0 0;padding-left:18px}
+.wb-status-card .sc-signwhat li{font-size:11.5px;line-height:1.7;word-break:break-all}
+/* t260915-05：真泳道图（拓扑驱动）——节点/并行虚线框/人门虚线圈/轮次带/×N 徽章 */
+.wb-lanemap{margin:10px 0 4px;padding:14px 10px;overflow-x:auto;background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;display:flex;align-items:stretch;gap:2px;min-height:96px}
+.wb-lm-item{display:flex;align-items:center}
+.wb-lm-item:not(:first-child)::before{content:'→';color:var(--dsw-derive-border,#d0d7de);margin:0 6px;font-size:14px}
+.wb-lm-node{display:inline-flex;flex-direction:column;align-items:center;gap:3px;padding:4px 8px;border-radius:8px;min-width:72px}
+.wb-lm-dot{width:26px;height:26px;border-radius:50%;border:2px solid var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-canvas,#fff);display:flex;align-items:center;justify-content:center;font-size:12px;font-style:normal}
+.wb-lm-node[data-vis=done] .wb-lm-dot{border-color:var(--dsw-derive-success,#4ac26b);background:var(--dsw-derive-success-bg,#dafbe1);color:var(--dsw-derive-success,#1a7f37)}
+.wb-lm-node[data-vis=running] .wb-lm-dot{border-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff);color:var(--dsw-derive-accent-deep,#0550ae);box-shadow:0 0 0 4px rgba(9,105,218,.12)}
+.wb-lm-node[data-vis=blocked] .wb-lm-dot{border-color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e)}
+.wb-lm-node[data-vis=awaiting-human] .wb-lm-dot{border-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
+/* 人门=虚线圈（mock 屏③ callout E：人门站与机械站形状区分） */
+.wb-lm-node[data-kind=human] .wb-lm-dot{border-style:dashed;border-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5)}
+/* 程序化闸=方点（kind 形状区分：agent 叙述/程序化闸/人门拍板） */
+.wb-lm-node[data-kind=gate] .wb-lm-dot{border-radius:6px}
+.wb-lm-name{font-size:11px;font-weight:600;color:var(--dsw-derive-fg,#1f2328);line-height:1.3;text-align:center;white-space:nowrap}
+.wb-lm-opt{font-style:normal;font-size:9.5px;color:var(--dsw-derive-muted,#8c959f);border:1px dashed var(--dsw-derive-border,#d0d7de);border-radius:6px;padding:0 4px;margin-left:3px}
+.wb-lm-badge{font-size:9.5px;color:var(--dsw-derive-warn-deep,#953800);background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn,#d4a72c);border-radius:8px;padding:0 5px;margin-left:3px}
+.wb-lm-rounds{display:flex;gap:3px;flex-wrap:wrap;justify-content:center}
+.wb-lm-round{font-size:9px;color:var(--dsw-derive-muted,#57606a);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;padding:0 4px;cursor:default}
+.wb-lm-round[data-state=done]{color:var(--dsw-derive-success,#1a7f37);border-color:var(--dsw-derive-success,#4ac26b);background:var(--dsw-derive-success-bg,#dafbe1)}
+.wb-lm-round[data-state=running]{color:var(--dsw-derive-accent-deep,#0550ae);border-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff)}
+.wb-lm-round[data-state=blocked]{color:var(--dsw-derive-danger,#cf222e);border-color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger-bg,#ffebe9)}
+.wb-lm-round[data-state=awaiting-human]{color:var(--dsw-derive-warn-deep,#7d4e00);border-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5)}
+.wb-lm-round[data-state=rework]{color:var(--dsw-derive-warn-deep,#953800);border-style:dashed;border-color:var(--dsw-derive-warn,#d4a72c)}
+/* 并行组：虚线框 + 纵排多道（mock 屏① B：并行双道虚线框，图面单向流） */
+.wb-lm-parallel{position:relative;display:inline-flex;flex-direction:column;justify-content:center;border:1.5px dashed var(--dsw-derive-border,#8c959f);border-radius:10px;background:rgba(140,149,159,.04);padding:14px 10px 8px;margin:0 4px}
+.wb-lm-parallel[data-active=true]{border-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff)}
+.wb-lm-plabel{position:absolute;top:-8px;left:10px;background:var(--dsw-derive-canvas,#fff);padding:0 6px;font-size:9.5px;color:var(--dsw-derive-muted,#57606a)}
+.wb-lm-branches{display:flex;flex-direction:column;gap:2px}
+.wb-lm-node-inlane{flex-direction:row;min-width:0;padding:2px 6px}
+.wb-lm-node-inlane .wb-lm-dot{width:20px;height:20px;font-size:10px;flex:none}
+.wb-lm-node-inlane .wb-lm-name{white-space:normal;text-align:left}
+.wb-lm-node-inlane .wb-lm-rounds{display:none}
+/* t260915-05：检查明细区（mock ① ck-rows） */
+.wb-checks{margin:6px 0 10px}
+.wb-checks-ttl{font-weight:600;font-size:12.5px;margin-bottom:6px;color:var(--dsw-derive-fg,#1f2328)}
+.wb-ck-run{margin-bottom:8px}
+.wb-ck-run-head{display:flex;gap:8px;align-items:baseline;font-size:12px;color:var(--dsw-derive-fg,#1f2328)}
+.wb-ck-run-gen{font-size:11px;color:var(--dsw-derive-muted,#57606a)}
+.wb-ck-run-verdict{font-size:11px;color:var(--dsw-derive-muted,#57606a);margin-left:auto}
+.wb-ck-row{display:block;border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;margin-top:4px;background:var(--dsw-derive-canvas,#fff);font-size:12px}
+.wb-ck-row[data-green=false]{border-color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger-bg,#ffebe9)}
+.wb-ck-row>summary{display:flex;gap:8px;align-items:baseline;padding:5px 10px;cursor:pointer;list-style:none}
+.wb-ck-mark{font-weight:700;width:16px;flex:none}
+.wb-ck-mark.g{color:var(--dsw-derive-success,#116329)}
+.wb-ck-mark.r{color:var(--dsw-derive-danger,#cf222e)}
+.wb-ck-name{font-weight:600;flex:none}
+.wb-ck-detail{color:var(--dsw-derive-muted,#57606a);font-size:11.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-ck-more{padding:4px 10px 8px;font-size:11.5px;color:var(--dsw-derive-muted,#57606a);border-top:1px dashed var(--dsw-derive-border,#d0d7de)}
+.wb-ck-more pre{margin:4px 0 0;padding:6px 8px;font-size:11px;background:var(--dsw-derive-surface,#f6f8fa);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;white-space:pre-wrap;word-break:break-all;max-height:160px;overflow:auto}
 .wb-drawer-id{font-size:12px;color:var(--dsw-derive-muted,#57606a);word-break:break-all}
 .wb-close{position:absolute;top:14px;right:16px;font-size:22px;color:var(--dsw-derive-muted,#57606a);cursor:pointer;background:none;border:none}
 .wb-close:hover{color:var(--dsw-derive-fg,#1f2328)}
@@ -52195,6 +52909,8 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 	const selWf = detail ? wfById[detail.workflow_id] : void 0;
 	/** 节点耗时（t260901-12）：泳道图步骤条与阶段卡共用，一次推导两处传参。 */
 	const stageDurs = useStageDurations(detail, selWf);
+	const laneModel = (0, react.useMemo)(() => buildLaneMap(detail?.topology ?? selWf?.topology ?? null, detail), [detail, selWf]);
+	const checksRuns = (0, react.useMemo)(() => detail ? buildChecksDetail(detail) : [], [detail]);
 	const detailWs = workspaceInfoOf(detail);
 	const instItems = detail?.acceptance?.length ? detail.acceptance : detail?.stage_acceptance?.length ? detail.stage_acceptance : [];
 	const curChecks = detail?.checks?.[detail?.stage ?? ""] ?? [];
@@ -52647,7 +53363,23 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								children: [
 									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 										className: "sc-head",
-										children: ["⛔ ", card.headline]
+										children: [
+											card.severity === "blue" ? "🔑" : "⛔",
+											" ",
+											card.headline
+										]
+									}),
+									!card.headlineFromTable && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: "sc-fallback",
+										children: "以上为引擎原文（词条表缺此原因码，不猜测翻译）"
+									}),
+									card.severity === "blue" && card.signWhat.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "sc-signwhat",
+										"data-testid": "sign-what",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "sc-signwhat-ttl",
+											children: "签什么"
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", { children: card.signWhat.map((s, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("li", { children: s }, i)) })]
 									}),
 									(card.files.length > 0 || card.filesMore > 0) && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 										className: "sc-files",
@@ -52666,14 +53398,14 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 										className: "sc-next",
 										children: [
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: "Next:" }),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: card.severity === "blue" ? "等你：" : "下一步：" }),
 											" ",
 											card.next
 										]
 									}),
 									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
 										className: "sc-raw",
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "Raw engine log" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", { children: card.rawLog.join("\n") })]
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "原始引擎日志（调试用）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", { children: card.rawLog.join("\n") })]
 									})
 								]
 							});
@@ -52714,13 +53446,14 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 							detail,
 							wf: selWf
 						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2Stepper, {
+						laneModel ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMap, { model: laneModel }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2Stepper, {
 							detail,
 							wf: selWf,
 							usage,
 							durs: stageDurs.durs,
 							nowMs: stageDurs.nowMs
 						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ChecksDetail, { runs: checksRuns }),
 						(() => {
 							const st = d2StatusLine(detail, selWf);
 							return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {

@@ -229,7 +229,8 @@ async function browserScenarios() {
       const beforeSnapshots = await contextMsgCount();
       const phaseBefore = phaseStable;
       await rows[0].click();
-      await page.waitForSelector('.wb-d2-steps', { timeout: 8000 }); // middle detail opens as usual (the same drawer anchor as t260901-13)
+      // t260915-05：拓扑在场=真泳道图（.wb-lanemap）替代步骤条——「详情开了」锚渲染器族。
+      await page.waitForSelector('.wb-lanemap, .wb-d2-steps', { timeout: 8000 }); // middle detail opens as usual
       await page.waitForTimeout(4000); // the old path refresh→waitForListed→open→inject takes seconds; give it a full observation window
       const afterSnapshots = await contextMsgCount();
       const phaseAfter = await readPhase();

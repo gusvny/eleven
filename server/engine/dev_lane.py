@@ -45,6 +45,9 @@ with workflow.unsafe.imports_passed_through():
     from base import TicketPauseMixin
     import authz_gates
     import path_gates  # t260915-01 ②：闸拒绝结构化明细的构造/校形（纯函数零 IO）
+    # t260915-05：模板拓扑导出面（纯数据零 IO；mock ④「引擎按模板导出 stage 图」，
+    # 渲染器只认节点+边+kind——KI-019 线性近似泳道图的真拓扑承载）。
+    import template_topology
     from agent_activities import (
         arbitrate,
         acceptance_walkthrough,
@@ -438,6 +441,8 @@ class DevLaneWorkflow(TicketPauseMixin):
         # implement and design_integration_tests really run in parallel (asyncio.gather,
         # see run()'s parallel_impl_design branch; the display chain lines them up
         # adjacently as a linear approximation, the join point commits for both).
+        # t260915-05：真拓扑的导出面=template_topology（节点+边+并行组+人门，含本处
+        # 与 arb_acc_parallel 两分叉）——泳道图消费导出面，不再吃线性近似（KI-019）。
         Stage(id="implement", name="实现", role="developer", next="design_integration_tests",
               desc="按方案开发：写集白名单内；commit 由 worker 代落盘（agent 沙箱写不了真 .git）；"
                    "与 design_integration_tests 并行分叉，两边齐活后汇合统一落盘",
@@ -2580,6 +2585,13 @@ class DevLaneWorkflow(TicketPauseMixin):
             # meta 键上台面）+ timeline 条目的 gen/phase 键。R1 纪律：此处只读
             # _detail_face_on 缓存位——@query 内禁止 SDK 的门判定调用（只读约束）。
             **({"gens": dict(self._gens)}
+               if getattr(self, "_detail_face_on", False) else {}),
+            # t260915-05 ④：模板拓扑导出（门内 additive 键=旧实例重放零新键；纯函数
+            # 查表零 IO；查询体只读缓存位，不触 SDK 门判定——R1 同纪律）。消费双层：
+            # 快照有则用快照＝旧票渲染时点拓扑（mock ④「渲染时点快照的拓扑，不追新」），
+            # 无则回落模板级导出（workflow.py list topology 键）；None=未声明模板，
+            # 渲染器回落线性呈现，绝不猜拓扑。
+            **({"topology": template_topology.export_template_topology(self.TEMPLATE_ID)}
                if getattr(self, "_detail_face_on", False) else {}),
             "meta": dict(self.meta),
         }

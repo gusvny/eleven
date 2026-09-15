@@ -90,6 +90,10 @@ import type { D2Visual } from './lane-states.ts'
 // 轮/五级收口链/单位换算口径见模块头注）。
 import { deriveStageDurations, fmtDur as fmtDurMs, humanWaitTotalMs, stageDurationTitle, stageTotalMs } from './lane-durations.ts'
 import type { StageDuration } from './lane-durations.ts'
+// t260915-05：真泳道图（拓扑驱动）+ 检查明细区（mock ①③④；渲染器只认节点+边+kind，
+// 标签全部来自拓扑，组件零业务词——fixture-two-step 拓扑对拍锚）。
+import { buildLaneMap, buildChecksDetail } from './lane-map-model.ts'
+import { LaneMap, ChecksDetail } from './lane-map.tsx'
 import { ProvidersSection } from '../../../providers/src/client/index.tsx'
 import { WorkbenchSidebar } from './sidebar.tsx'
 import { MetricsFooterButton, markFooterSlot } from './metrics-entry.tsx'
@@ -289,6 +293,65 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-status-card .sc-raw>summary{cursor:pointer;font-size:11.5px;color:var(--dsw-derive-muted,#57606a)}
 .wb-status-card .sc-raw[open]>summary{color:var(--dsw-derive-accent,#0969da)}
 .wb-status-card .sc-raw pre{margin:4px 0 0;padding:6px 8px;font-size:11px;line-height:1.5;max-height:200px;overflow:auto;background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;white-space:pre-wrap;word-break:break-all}
+/* t260915-05：状态卡蓝调（人门等你签）+「签什么」+ 词条缺失降级锚 */
+.wb-status-card[data-sev=blue]{border-color:var(--dsw-derive-accent,#0969da);border-left-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff)}
+.wb-status-card[data-sev=blue] .sc-head{color:var(--dsw-derive-accent-deep,#0550ae)}
+.wb-status-card[data-sev=blue] .sc-next{color:var(--dsw-derive-accent-deep,#0550ae)}
+.wb-status-card .sc-fallback{margin-top:4px;font-size:11px;color:var(--dsw-derive-muted,#8c959f)}
+.wb-status-card .sc-signwhat{margin-top:8px;padding:6px 10px;background:var(--dsw-derive-canvas,#fff);border:1px dashed var(--dsw-derive-accent,#0969da);border-radius:6px}
+.wb-status-card .sc-signwhat-ttl{font-size:12px;font-weight:700;color:var(--dsw-derive-accent-deep,#0550ae)}
+.wb-status-card .sc-signwhat ul{margin:4px 0 0;padding-left:18px}
+.wb-status-card .sc-signwhat li{font-size:11.5px;line-height:1.7;word-break:break-all}
+/* t260915-05：真泳道图（拓扑驱动）——节点/并行虚线框/人门虚线圈/轮次带/×N 徽章 */
+.wb-lanemap{margin:10px 0 4px;padding:14px 10px;overflow-x:auto;background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;display:flex;align-items:stretch;gap:2px;min-height:96px}
+.wb-lm-item{display:flex;align-items:center}
+.wb-lm-item:not(:first-child)::before{content:'→';color:var(--dsw-derive-border,#d0d7de);margin:0 6px;font-size:14px}
+.wb-lm-node{display:inline-flex;flex-direction:column;align-items:center;gap:3px;padding:4px 8px;border-radius:8px;min-width:72px}
+.wb-lm-dot{width:26px;height:26px;border-radius:50%;border:2px solid var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-canvas,#fff);display:flex;align-items:center;justify-content:center;font-size:12px;font-style:normal}
+.wb-lm-node[data-vis=done] .wb-lm-dot{border-color:var(--dsw-derive-success,#4ac26b);background:var(--dsw-derive-success-bg,#dafbe1);color:var(--dsw-derive-success,#1a7f37)}
+.wb-lm-node[data-vis=running] .wb-lm-dot{border-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff);color:var(--dsw-derive-accent-deep,#0550ae);box-shadow:0 0 0 4px rgba(9,105,218,.12)}
+.wb-lm-node[data-vis=blocked] .wb-lm-dot{border-color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e)}
+.wb-lm-node[data-vis=awaiting-human] .wb-lm-dot{border-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
+/* 人门=虚线圈（mock 屏③ callout E：人门站与机械站形状区分） */
+.wb-lm-node[data-kind=human] .wb-lm-dot{border-style:dashed;border-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5)}
+/* 程序化闸=方点（kind 形状区分：agent 叙述/程序化闸/人门拍板） */
+.wb-lm-node[data-kind=gate] .wb-lm-dot{border-radius:6px}
+.wb-lm-name{font-size:11px;font-weight:600;color:var(--dsw-derive-fg,#1f2328);line-height:1.3;text-align:center;white-space:nowrap}
+.wb-lm-opt{font-style:normal;font-size:9.5px;color:var(--dsw-derive-muted,#8c959f);border:1px dashed var(--dsw-derive-border,#d0d7de);border-radius:6px;padding:0 4px;margin-left:3px}
+.wb-lm-badge{font-size:9.5px;color:var(--dsw-derive-warn-deep,#953800);background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn,#d4a72c);border-radius:8px;padding:0 5px;margin-left:3px}
+.wb-lm-rounds{display:flex;gap:3px;flex-wrap:wrap;justify-content:center}
+.wb-lm-round{font-size:9px;color:var(--dsw-derive-muted,#57606a);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;padding:0 4px;cursor:default}
+.wb-lm-round[data-state=done]{color:var(--dsw-derive-success,#1a7f37);border-color:var(--dsw-derive-success,#4ac26b);background:var(--dsw-derive-success-bg,#dafbe1)}
+.wb-lm-round[data-state=running]{color:var(--dsw-derive-accent-deep,#0550ae);border-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff)}
+.wb-lm-round[data-state=blocked]{color:var(--dsw-derive-danger,#cf222e);border-color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger-bg,#ffebe9)}
+.wb-lm-round[data-state=awaiting-human]{color:var(--dsw-derive-warn-deep,#7d4e00);border-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5)}
+.wb-lm-round[data-state=rework]{color:var(--dsw-derive-warn-deep,#953800);border-style:dashed;border-color:var(--dsw-derive-warn,#d4a72c)}
+/* 并行组：虚线框 + 纵排多道（mock 屏① B：并行双道虚线框，图面单向流） */
+.wb-lm-parallel{position:relative;display:inline-flex;flex-direction:column;justify-content:center;border:1.5px dashed var(--dsw-derive-border,#8c959f);border-radius:10px;background:rgba(140,149,159,.04);padding:14px 10px 8px;margin:0 4px}
+.wb-lm-parallel[data-active=true]{border-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff)}
+.wb-lm-plabel{position:absolute;top:-8px;left:10px;background:var(--dsw-derive-canvas,#fff);padding:0 6px;font-size:9.5px;color:var(--dsw-derive-muted,#57606a)}
+.wb-lm-branches{display:flex;flex-direction:column;gap:2px}
+.wb-lm-node-inlane{flex-direction:row;min-width:0;padding:2px 6px}
+.wb-lm-node-inlane .wb-lm-dot{width:20px;height:20px;font-size:10px;flex:none}
+.wb-lm-node-inlane .wb-lm-name{white-space:normal;text-align:left}
+.wb-lm-node-inlane .wb-lm-rounds{display:none}
+/* t260915-05：检查明细区（mock ① ck-rows） */
+.wb-checks{margin:6px 0 10px}
+.wb-checks-ttl{font-weight:600;font-size:12.5px;margin-bottom:6px;color:var(--dsw-derive-fg,#1f2328)}
+.wb-ck-run{margin-bottom:8px}
+.wb-ck-run-head{display:flex;gap:8px;align-items:baseline;font-size:12px;color:var(--dsw-derive-fg,#1f2328)}
+.wb-ck-run-gen{font-size:11px;color:var(--dsw-derive-muted,#57606a)}
+.wb-ck-run-verdict{font-size:11px;color:var(--dsw-derive-muted,#57606a);margin-left:auto}
+.wb-ck-row{display:block;border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;margin-top:4px;background:var(--dsw-derive-canvas,#fff);font-size:12px}
+.wb-ck-row[data-green=false]{border-color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger-bg,#ffebe9)}
+.wb-ck-row>summary{display:flex;gap:8px;align-items:baseline;padding:5px 10px;cursor:pointer;list-style:none}
+.wb-ck-mark{font-weight:700;width:16px;flex:none}
+.wb-ck-mark.g{color:var(--dsw-derive-success,#116329)}
+.wb-ck-mark.r{color:var(--dsw-derive-danger,#cf222e)}
+.wb-ck-name{font-weight:600;flex:none}
+.wb-ck-detail{color:var(--dsw-derive-muted,#57606a);font-size:11.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-ck-more{padding:4px 10px 8px;font-size:11.5px;color:var(--dsw-derive-muted,#57606a);border-top:1px dashed var(--dsw-derive-border,#d0d7de)}
+.wb-ck-more pre{margin:4px 0 0;padding:6px 8px;font-size:11px;background:var(--dsw-derive-surface,#f6f8fa);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;white-space:pre-wrap;word-break:break-all;max-height:160px;overflow:auto}
 .wb-drawer-id{font-size:12px;color:var(--dsw-derive-muted,#57606a);word-break:break-all}
 .wb-close{position:absolute;top:14px;right:16px;font-size:22px;color:var(--dsw-derive-muted,#57606a);cursor:pointer;background:none;border:none}
 .wb-close:hover{color:var(--dsw-derive-fg,#1f2328)}
@@ -869,6 +932,10 @@ interface Wf {
   name: string
   lane: string
   stages: WfStage[]
+  /** t260915-05 ④：模板拓扑导出（workflow.py list additive 键；引擎
+   *  template_topology topology-v1 契约原样透传）。null/缺省=未声明模板，
+   *  泳道图回落线性步骤条。 */
+  topology?: unknown
 }
 
 interface CheckItem {
@@ -934,6 +1001,15 @@ interface TicketDetail {
   gate_runs?: GateRun[]
   timeline?: TimelineEntry[]
   results?: Record<string, StageResultEntry>
+  /** t260915-01 ③：段→第几轮读数（泳道图轮次带/×N 徽章数据源；老票缺省=无键，
+   *  轮次带回退 running 计数口径）。 */
+  gens?: Record<string, number> | null
+  /** t260915-05 ④：模板拓扑导出（快照门内 additive 键=该票渲染时点拓扑；
+   *  旧快照缺省 → 回落 selWf.topology 模板级导出；都缺 → 线性步骤条）。 */
+  topology?: unknown
+  /** 人门上下文（prepare_human_gate 落 human_context[gate].context_text；
+   *  蓝卡「签什么」数据源之一；老票缺省）。 */
+  human_context?: Record<string, { context_text?: string }> | null
   last_rework_note?: string
   signatures?: Record<string, { who: string; decision: string; note: string; at: string }>
   /** 运行脉搏（t260825-03）：RUNNING 工单的 pending activity 心跳（client.py 掏出，
@@ -3359,6 +3435,16 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   const selWf = detail ? wfById[detail.workflow_id] : undefined
   /** 节点耗时（t260901-12）：泳道图步骤条与阶段卡共用，一次推导两处传参。 */
   const stageDurs = useStageDurations(detail, selWf)
+  // t260915-05：真泳道图模型（mock ③④）。拓扑双层取用：详情快照 topology（门内
+  // additive 键=该票渲染时点的拓扑，旧票不追新）优先，缺省回落模板级导出
+  // （selWf.topology，workflow.py list additive 键；KI-027 关单可见的兜底面）；
+  // 两层都缺=null → 泳道图回落现行线性步骤条（零回归降级锚，绝不猜拓扑）。
+  const laneModel = useMemo(
+    () => buildLaneMap(detail?.topology ?? selWf?.topology ?? null, detail),
+    [detail, selWf],
+  )
+  // 检查明细区（mock ① ck-rows）：gate_runs 逐轮逐条直译。
+  const checksRuns = useMemo(() => (detail ? buildChecksDetail(detail) : []), [detail])
   const detailWs = workspaceInfoOf(detail)
   const instItems = detail?.acceptance?.length ? detail.acceptance
     : (detail?.stage_acceptance?.length ? detail.stage_acceptance : [])
@@ -3629,16 +3715,29 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                 if (!card) return null
                 return (
                   <div className="wb-status-card" data-sev={card.severity} data-testid="status-card">
-                    <div className="sc-head">⛔ {card.headline}</div>
+                    <div className="sc-head">
+                      {card.severity === 'blue' ? '🔑' : '⛔'} {card.headline}
+                    </div>
+                    {/* 词条表缺此原因码=回落引擎原文（mock C：不翻译没拿到的信息，宁显原文不猜测）。 */}
+                    {!card.headlineFromTable && (
+                      <div className="sc-fallback">以上为引擎原文（词条表缺此原因码，不猜测翻译）</div>
+                    )}
+                    {/* 蓝卡「签什么」（mock 屏③ callout E）：人门上下文/验收口径/门结论。 */}
+                    {card.severity === 'blue' && card.signWhat.length > 0 && (
+                      <div className="sc-signwhat" data-testid="sign-what">
+                        <div className="sc-signwhat-ttl">签什么</div>
+                        <ul>{card.signWhat.map((s, i) => <li key={i}>{s}</li>)}</ul>
+                      </div>
+                    )}
                     {(card.files.length > 0 || card.filesMore > 0) && (
                       <div className="sc-files">
                         {card.files.map((f) => <code className="sc-file" key={f}>{f}</code>)}
                         {card.filesMore > 0 && <span className="sc-file-more">+{card.filesMore} more</span>}
                       </div>
                     )}
-                    <div className="sc-next"><b>Next:</b> {card.next}</div>
+                    <div className="sc-next"><b>{card.severity === 'blue' ? '等你：' : '下一步：'}</b> {card.next}</div>
                     <details className="sc-raw">
-                      <summary>Raw engine log</summary>
+                      <summary>原始引擎日志（调试用）</summary>
                       <pre>{card.rawLog.join('\n')}</pre>
                     </details>
                   </div>
@@ -3668,7 +3767,13 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                 </div>
               )}
               <D2Reworks detail={detail} wf={selWf} />
-              <D2Stepper detail={detail} wf={selWf} usage={usage} durs={stageDurs.durs} nowMs={stageDurs.nowMs} />
+              {/* t260915-05：拓扑在场=真泳道图（并行虚线框/人门虚线圈/轮次带）；
+                  缺席=回落线性步骤条（老 host/未声明拓扑，零回归降级锚）。 */}
+              {laneModel ? <LaneMap model={laneModel} /> : (
+                <D2Stepper detail={detail} wf={selWf} usage={usage} durs={stageDurs.durs} nowMs={stageDurs.nowMs} />
+              )}
+              {/* t260915-05：检查明细区（mock ①）——gate_runs 逐轮逐条直译。 */}
+              <ChecksDetail runs={checksRuns} />
               {(() => { const st = d2StatusLine(detail, selWf); return (
                 <div className="wb-d2-status" data-s={st.s}>{st.text}</div>
               ) })()}

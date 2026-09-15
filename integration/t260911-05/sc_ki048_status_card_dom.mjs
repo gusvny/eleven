@@ -183,13 +183,18 @@ async function scenarioBlockedCard(page) {
   const c = await page.evaluate(domCard)
   if (!c) return 'status card vanished between count and snapshot'
   // 红/黄两态属 mock 样式细节不锁类名（灰盒：绑定浅）；四件构成才是验收 e 契约。
-  // 主文案必答「是不是冲突」（不冒充冲突=本票核心承诺）；词条主文案英文、
-  // blocked_reason 回落中文——锚语义不锚语言。
-  if (!/not a conflict|非冲突/i.test(c.text)) return `headline must deny conflict semantics (ticket ① core), text: ${JSON.stringify(c.text.slice(0, 200))}`
+  // 主文案必答「是不是冲突」（不冒充冲突=本票核心承诺）。t260915-05 翻译层词条表
+  // 迁移：主文案从英文词条改中文人话词条（「不是冲突」）——锚语义（否认冲突）
+  // 不锚语言，措辞族并存防回退。
+  if (!/not a conflict|非冲突|不是冲突/i.test(c.text)) return `headline must deny conflict semantics (ticket ① core), text: ${JSON.stringify(c.text.slice(0, 200))}`
   if (!c.text.includes(FILE)) return `card must point-name the blocking file ${FILE}`
   if (!/retry[-_]qc/i.test(c.text)) return `card must carry the next-step (retry qc), text: ${JSON.stringify(c.text.slice(0, 220))}`
   if (!c.hasDetails) return 'raw log folding (<details>) missing — card not four-piece'
-  if (c.summaryCJK) return `folding summary must be fixed English copy (no CJK), got ${JSON.stringify(c.summaryText)}`
+  // t260915-05：折叠 summary 固定文案随词条表迁移改中文（「原始引擎日志」）——
+  // 原断言语义=「summary 是固定文案、不随引擎数据漂移」，改锚固定中文串＋
+  // 不得泄漏引擎原文（RAW_ANCHOR 是 timeline 数据，出现在 summary=数据串进文案）。
+  if (!c.summaryText.includes('原始引擎日志')) return `folding summary must be the fixed copy (原始引擎日志), got ${JSON.stringify(c.summaryText)}`
+  if (c.summaryText.includes(RAW_ANCHOR)) return `folding summary leaked engine data (${RAW_ANCHOR})`
   const banner = await page.evaluate(domBanner)
   if (!banner.includes('非冲突')) return `blocked_reason banner must surface the reason on the ticket face (验收d), got ${JSON.stringify(banner.slice(0, 160))}`
   return null

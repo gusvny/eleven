@@ -104,13 +104,15 @@ async function browserScenarios() {
 
   const clickRowAndAssertNoSwitch = async (idx, label) => {
     await page.evaluate((i) => { const el = document.querySelectorAll('.wb-card[data-ticket-id]')[i]; el && el.click(); }, idx);
-    // 中列详情照常开（既有行为回归面；抽屉锚与 t260901-13 同款）。
+    // 中列详情照常开（既有行为回归面）。t260915-05：拓扑在场时抽屉渲染真泳道图
+    // （.wb-lanemap）替代线性步骤条（.wb-d2-steps）——「详情开了」锚渲染器族而非
+    // 单一实现（降级锚仍回到步骤条，两者都算详情开）。
     let drawerOpened = true;
     try {
-      await page.waitForSelector('.wb-d2-steps', { timeout: 8000 });
+      await page.waitForSelector('.wb-lanemap, .wb-d2-steps', { timeout: 8000 });
     } catch { drawerOpened = false; }
     if (!drawerOpened) {
-      record(`${label}/detail-opens`, 'fail', '点工单后中列详情抽屉未出现（.wb-d2-steps 缺席）');
+      record(`${label}/detail-opens`, 'fail', '点工单后中列详情抽屉未出现（.wb-lanemap/.wb-d2-steps 均缺席）');
       return;
     }
     record(`${label}/detail-opens`, 'pass');

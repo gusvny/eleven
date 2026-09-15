@@ -290,7 +290,8 @@ def _v2_query(tid):
     meta['stage_acceptance'] = snap.get('stage_acceptance') or []
     meta['stage_name'] = snap.get('stage_name') or ''
     for k in ('signatures', 'gate_runs', 'gens', 'refused', 'timeline', 'results',
-              'human_context', 'engine', 'workflow_class'):  # gens=t260915-01 ③ 段→轮次读数
+              'human_context', 'engine', 'workflow_class',  # gens=t260915-01 ③ 段→轮次读数
+              'topology'):  # t260915-05 ④ 模板拓扑导出（门内 additive 键；缺=旧票回落模板级导出）
         meta[k] = snap.get(k)
     return meta, snap
 
