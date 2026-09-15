@@ -33,7 +33,7 @@
 //
 // 执行契约：stdout 末行 SUMMARY pass/fail/env_fail/na（三态=闸内无 SKIP 的现行定稿，旧 SKIP 语义退役）。
 import {
-  tmpRoot, makeRegistryRoot, writeProjectEntry, makeTicketStub,
+  REPO_ROOT, makeRegistryRoot, writeProjectEntry, makeTicketStub,
   bootConsole, teardownOnExit, loadPlaywright, dismissNotice, makeResults,
 } from '../t260904-17/lib_fix17.mjs';
 
@@ -50,7 +50,11 @@ if (!pw) {
 let bench;
 try {
   const projectsRoot = makeRegistryRoot('t090506-read-reg-');
-  writeProjectEntry(projectsRoot, 'fixa', '夹具甲', [tmpRoot('t090506-read-fixa-')]);
+  // t260915-10 夹具根变更留痕：旧值=空临时目录，旧文档页语义（无 project= 缺省回落）下
+  // UI 腿靠回落见引擎库；t260915-10 起文档页初值跟随壳层项目（经 fixa 组图标进入=带
+  // project=fixa 请求），空目录会诚实空态断红——夹具根改指引擎仓根（REPO_ROOT，真库
+  // docs/notes committed 内容即本场景「真库即夹具」载体），「单仓阅读链路」intent 不变。
+  writeProjectEntry(projectsRoot, 'fixa', '夹具甲', [REPO_ROOT]);
   bench = await bootConsole(projectsRoot, stub);
 } catch (e) {
   record('bench/boot', 'env_fail', `隔离台依赖缺失：${String(e?.message ?? e).slice(0, 200)}`);

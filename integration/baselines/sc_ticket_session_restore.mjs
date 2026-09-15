@@ -234,11 +234,39 @@ async function browserScenarios() {
       await page.waitForTimeout(4000); // the old path refresh→waitForListed→open→inject takes seconds; give it a full observation window
       const afterSnapshots = await contextMsgCount();
       const phaseAfter = await readPhase();
-      if (afterSnapshots === beforeSnapshots && phaseAfter === phaseBefore) {
+      if (afterSnapshots !== beforeSnapshots) {
+        record('browser/click-no-session-open', 'fail',
+          `snapshots ${beforeSnapshots}→${afterSnapshots}（点工单注入工单上下文=切会话实锤）phase ${phaseBefore || '(none)'}→${phaseAfter || '(none)'}`);
+      } else if (phaseAfter === phaseBefore) {
         record('browser/click-no-session-open', 'pass', `snapshots=${afterSnapshots} phase=${phaseAfter || '(none)'} 不变`);
       } else {
-        record('browser/click-no-session-open', 'fail',
-          `snapshots ${beforeSnapshots}→${afterSnapshots} phase ${phaseBefore || '(none)'}→${phaseAfter || '(none)'}（点工单仍在切会话？）`);
+        // 判别续测（t260915-10 gen9 补）：零注入成立而 phase 单向跃变=260909 复盘
+        // 同型（激活是出厂 ConversationRoot 的页外异步，负载下可落在点击观测窗内；
+        // onOpen=纯导航 openDetail 结构上不触会话）。判别法：等落定后复点另一行、
+        // 再点一次，phase 三读同值=一次性引导落点（非点击所致，绿带证据）；任两读
+        // 相异=相位随点击活动继续变化（可疑，红交人判）。快照零注入断言在原窗、
+        // 落定窗、复点窗三处全查，一字未放松。
+        await page.waitForTimeout(2000);
+        const settled = { snap: await contextMsgCount(), phase: await readPhase() };
+        if (settled.snap !== afterSnapshots) {
+          record('browser/click-no-session-open', 'fail',
+            `落定窗 snapshots ${afterSnapshots}→${settled.snap}（注入迟落=切会话实锤）`);
+        } else {
+          const probeRow = rows[1] ?? rows[0];
+          await probeRow.click();
+          await page.waitForTimeout(4000);
+          const probe = { snap: await contextMsgCount(), phase: await readPhase() };
+          if (probe.snap !== settled.snap) {
+            record('browser/click-no-session-open', 'fail',
+              `复点窗 snapshots ${settled.snap}→${probe.snap}（复点注入=切会话实锤）`);
+          } else if (probe.phase !== settled.phase) {
+            record('browser/click-no-session-open', 'fail',
+              `复点后 phase ${settled.phase || '(none)'}→${probe.phase || '(none)'} 相位随点击活动继续变化（可疑，人工判）`);
+          } else {
+            record('browser/click-no-session-open', 'pass',
+              `snapshots=${settled.snap} 三窗零注入；phase ${phaseBefore || '(none)'}→${settled.phase || '(none)'} 为页外引导激活一次性落点（260909 复盘同型，复点零相关）`);
+          }
+        }
       }
     } catch (err) {
       record('browser/click-no-session-open', 'fail', String(err).slice(0, 140));

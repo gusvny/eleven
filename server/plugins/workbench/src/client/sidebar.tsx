@@ -24,7 +24,7 @@
  *       项目组头行右对齐五个项目级视图入口图标（票③ 11b 统一 SVG 图标族）：工单列表 /
  *       文档 / 模型路由 / 立项单 / 项目设置（第五枚=面D 设置弹层入口）
  *       （t260905-06：旧提法退役，原位换「文档」入口——仓根 docs/ 定稿库人读
- *       视图 + notes/ 观察窗，全仓单例不按项目分流）
+ *       视图 + notes/ 观察窗；t260915-10 起默认跟随本行项目，页内选择器可手动切）
  *       （t260827-01：立项单从「左列可折叠列表区」改为项目级图标，与其他三视图同款；
  *       左列不再显示立项列表，点图标后中列显示立项清单）。
  *       项目组 = server/projects.yaml 注册表（260823 多项目化：project 是逻辑概念，
@@ -136,8 +136,9 @@ interface MiddleViews {
    *  只靠 focusId 传达不到）；listNonce=「点工单列表图标回列表」信号（通知关详情抽屉）。
    *  onOpenEpic=工单徽标点击（t260826-02）：中列切立项单视图并定位代号。 */
   board: ComponentType<{ focusId?: string; focusNonce?: number; listNonce?: number; projectKey?: string; onOpenEpic?: (code: string) => void }>
-  /** 文档视图（t260905-06）：全仓单例——docs/ 定稿库属仓不属项目，不收 projectKey。 */
-  docs: ComponentType<Record<string, never>>
+  /** 文档视图（t260905-06 立；t260915-10 接壳层）：初值/跟随=壳层当前项目，页内选择器
+   *  可手动切且手动优先；''=无项目上下文→缺省引擎仓回落（既有语义不删）。 */
+  docs: ComponentType<{ projectKey?: string }>
   /** 模型/路由（ProvidersSection）。 */
   routes: ComponentType<{ projectKey?: string }>
   /** 立项单（EpicSection，t260826-02）：epicCode/epicNonce=定位信号（同 code 重进靠 nonce，
@@ -650,8 +651,10 @@ export function WorkbenchSidebar(props: SidebarProps) {
                 {/* 视图入口 per 项目（用户拍板 260823：每个项目组头行都有，非全局）——
                     按行项目分流：工单列表=该项目 ProjectKey 过滤、模型路由=该项目主目录
                     model-routes.yaml；立项单（t260827-01）=全量立项清单（跨项目语义单元，
-                    不按项目过滤）；文档（t260905-06）=仓根 docs/ 定稿库（全仓单例，
-                    不按项目分流——点任一组图标开同一库，active 高亮只判 rightView）。 */}
+                    不按项目过滤）；文档（t260905-06 立；t260915-10 接壳层）=点哪组图标
+                    默认开哪组 docs（初值/跟随=本行项目），页内选择器可手动切且手动优先
+                    （重开文档页=重新跟随壳层，收敛口径见 docs.tsx 头注）；
+                    active 高亮只判 rightView（跨组同亮，t260915-10 口径不变）。 */}
                 <span className="wb-view-icons" onClick={e => e.stopPropagation()}>
                   <span
                     className={`wb-view-icon ${rightView === 'board' && viewProject === g.project.key ? 'active' : ''}`}
@@ -758,8 +761,10 @@ export function WorkbenchSidebar(props: SidebarProps) {
             </div>
           )}
           {viewProject && rightView === 'board' && <Board focusId={selectedId || undefined} focusNonce={focusNonce} listNonce={listNonce} projectKey={viewProject} onOpenEpic={openEpic} />}
-          {/* 文档视图（t260905-06）：全仓单例，不要求已选项目（与 per-project 视图判定显式分叉）。 */}
-          {rightView === 'docs' && <Docs />}
+          {/* 文档视图（t260905-06 立；t260915-10 接壳层 projectKey）：与 per-project 视图
+              同通路穿参，但不要求已选项目（''=缺省引擎仓回落）——渲染行不带 viewProject
+              守卫（Board 渲染守卫不带，取舍清单见 t260915-10 方案 §1.6）。 */}
+          {rightView === 'docs' && <Docs projectKey={viewProject} />}
           {viewProject && rightView === 'routes' && <Routes projectKey={viewProject} />}
           {/* 立项单视图（t260826-02 中列第四视图；t260827-01 起空代号=立项清单，由项目行
               立项单图标进入，详情由清单行/工单徽标定位）：点关联工单行 → 复用 handleTicketClick

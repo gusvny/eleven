@@ -16,8 +16,11 @@ t260915-09 仲裁轮修正）：腿a 改钉声明门一致性不变式（enabled
 decl-gate 三态分级先例）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
 intent 分工：与 t260905-03-decl-gate 不同面——彼守门行为本身（畸形/未接线 kind/占位/
 未知四类拒绝+test-face 放行，新实例同门不重测，防 intent 级重复）；本条守**新实例的
-声明位在场**（仓内 yaml 两实例在册）与**新面经门透传的数据面**（enabled 新
-实例进 specs 且 face 原样透传）。与 developer L1（decl 纯函数真值表）不同层。
+声明位在场**（mechanism-face 占位 enabled=false；simplify-face 随宿主 260915 令
+enabled=true+scan_face=simplify 试跑，c946380——占位期「两占位 enabled=false」的旧
+前提随宿主令退役）与**新面经门透传的数据面**（enabled 新实例进 specs 且 face 原样
+透传；门一致性不变式 enabled 与 schedule_specs 在场恒一致，无静默半态）。与
+developer L1（decl 纯函数真值表）不同层。
 """
 import os
 import shutil
@@ -78,9 +81,10 @@ def main() -> int:
     base.require_entry(base.TRIGGER, "巡检触发入口")
     failures = []
 
-    # ── 腿a：仓内 inspection.yaml 声明位契约——两新实例在场（face 对）；启用节奏不入
-    #     断言（宿主 260915 令 c946380 已启用 simplify-face 试跑——节奏是宿主开关），
-    #     改钉声明门一致性不变式（enabled 与 schedule_specs 在场恒一致，无静默半态）；
+    # ── 腿a：仓内 inspection.yaml 声明位契约——两新实例在场（face 对），门一致性
+    #     不变式（t260915-09 仲裁口径）+宿主令真值防呆（t260915-10 仲裁口径）双锁：
+    #     启用节奏随宿主令演进（c946380：simplify-face 启用试跑，宿主 260915 令；
+    #     节奏是宿主开关，钉节奏必随开关腐），断言随真值走、契约只紧不松；
     #     声明是机器消费契约，守卫合法 ──
     proc, parsed = decl_view(REPO_DECL)
     if not isinstance(parsed, dict) or parsed.get("ok") is not True:
@@ -104,16 +108,29 @@ def main() -> int:
                 if iid.rsplit("-", 1)[0] != face:
                     failures.append("腿a %s 实例 id 与面名派生关系破（期望 -%s 后缀）：%r"
                                     % (iid, face, iid))
-                # 启用节奏随宿主令（c946380：simplify-face 启用试跑，宿主 260915 令；
-                # 「enabled 按宿主节奏」——节奏是宿主开关，钉节奏必随开关腐，260915
-                # 仲裁轮修正）：改钉声明门一致性不变式——enabled=false ⇔ 不进
-                # schedule_specs（占位不调度）；enabled=true ⇔ 进 specs（调度经声明面
-                # 可见，无静默半态）。
+                # 门一致性不变式（t260915-09 仲裁口径，main 侧语义保留）：enabled=false ⇔
+                # 不进 schedule_specs（占位不调度）；enabled=true ⇔ 进 specs（调度经声明
+                # 面可见，无静默半态=静默拾取风险）。
                 in_spec = iid in spec
                 if (it.get("enabled") is True) != in_spec:
                     failures.append("腿a %s 声明门一致性破（enabled=%r 而 schedule_specs 在场=%s，"
                                     "半态=静默拾取风险）：%r"
                                     % (iid, it.get("enabled"), in_spec, sorted(spec)))
+                # 宿主令真值防呆（t260915-10 gen0 仲裁口径，泳道侧语义保留）：simplify-face
+                # 应 enabled=true 且显式 scan_face=simplify（宿主令注记防呆：scan_face 缺省
+                # 落 test 面——随令新增强，契约更准）；mechanism-face 仍 enabled=false 占位。
+                # 声明真值随宿主令演进时本段与声明两处同步（断言随真值走）。
+                if iid == "simplify-face":
+                    if it.get("enabled") is not True:
+                        failures.append("腿a simplify-face 应 enabled=true（宿主 260915 令启用试跑=c946380 声明真值）：%r"
+                                        % (it.get("enabled"),))
+                    if it.get("scan_face") != "simplify":
+                        failures.append("腿a simplify-face 应显式 scan_face=simplify（宿主令注记：缺省落 test 面）：%r"
+                                        % (it.get("scan_face"),))
+                elif iid == "mechanism-face":
+                    if it.get("enabled") is not False:
+                        failures.append("腿a %s 应 enabled=false 占位（启用按宿主节奏）：%r"
+                                        % (iid, it.get("enabled")))
 
     # ── 腿b：夹具声明——enabled 新实例进 specs 且 face 原样透传；enabled=false 不进
     #     （门的数据面：改声明改行为，decl 零改动承诺）──
@@ -148,8 +165,10 @@ def main() -> int:
         for m in failures:
             print("FAIL_REASON: " + m, flush=True)
         return 1
-    print("离线腿全过：仓内 yaml 两新实例声明位在场且 enabled 与调度规格在场恒一致"
-          "（门一致性不变式）；enabled 新实例进 specs 且 face 原样透传（decl 零改动）", flush=True)
+    print("离线腿全过：仓内 yaml mechanism-face 占位 enabled=false 不进调度规格、"
+          "simplify-face 宿主 260915 令启用试跑（enabled=true+scan_face=simplify，进 specs），"
+          "enabled 与 schedule_specs 在场恒一致（门一致性不变式）；"
+          "enabled 新实例进 specs 且 face 原样透传（decl 零改动）", flush=True)
 
     # ── 腿c（server 腿）：enabled mechanism-face 过声明门真触发——缺 temporalio/
     #     共享台=ENV_FAIL 点名（离线腿已过如实陈述，不假红不假绿）──
@@ -193,8 +212,9 @@ def main() -> int:
         for m in failures:
             print("FAIL_REASON: " + m, flush=True)
         return 1
-    print("PASS: 仓内 yaml 两新实例声明门一致性（enabled 与调度规格在场恒一致，占位不调度；"
-          "面由 id 承载，声明 face 已除名）+真触发过门",
+    print("PASS: 仓内 yaml mechanism-face 占位不调度+simplify-face 宿主 260915 令启用"
+          "（enabled→specs，与调度规格在场恒一致）；"
+          "enabled 新实例进规格（面由 id 承载，声明 face 已除名）+真触发过门",
           flush=True)
     return 0
 

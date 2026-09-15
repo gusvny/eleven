@@ -97,3 +97,27 @@ export function projectOptions(projects: unknown): ProjectOption[] {
   }
   return opts
 }
+
+/**
+ * 壳层跟随判定（t260915-10）：DocsSection 初值/跟随的单源纯函数（组件侧以 setState
+ * updater 形态消费，本 UT 真值表=生产行为断言）。
+ * touched=false（用户没动过选择器）→ 跟随壳层当前项目；非字符串/缺省 → ''=缺省引擎仓
+ * 回落（既有语义不删）。touched=true（用户手动动过选择器）→ 保持现值，壳层变更不冲掉
+ * （spec ②手动优先）。畸形输入定值分支，不 throw。
+ */
+export function followProjectKey(shellKey: unknown, currentKey: string, touched: boolean): string {
+  if (touched) return currentKey
+  return typeof shellKey === 'string' ? shellKey : ''
+}
+
+/**
+ * 项目语境空目录指引（t260915-10，spec ③）：选择态≠'' 且 scope 目录空诚实降级时，
+ * 给一行指引——点名项目键、scope 目录与「不回落引擎仓」（不许空态冒充有文档）；
+ * 缺省引擎仓语境维持既有文案面（返回 ''，既有「目录为空：reason」行不重复）。畸形输入
+ * 定值 ''，不 throw。
+ */
+export function emptyGuidance(treeEmpty: unknown, projectKey: unknown): string {
+  if (treeEmpty !== true) return ''
+  if (typeof projectKey !== 'string' || projectKey === '') return ''
+  return `该项目（${projectKey}）根下暂无此 scope 目录——在项目根创建 docs/ 或 notes/ 目录后，文档会出现在这里；此处不回落引擎仓。`
+}

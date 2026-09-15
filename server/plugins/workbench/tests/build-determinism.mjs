@@ -42,11 +42,13 @@ function ok(cond, label) {
 function section(t) { console.log(`\n== ${t}`) }
 
 const workbench = dirname(dirname(fileURLToPath(import.meta.url))) // server/plugins/workbench
-const repo = resolve(workbench, '..', '..')
+const repo = resolve(workbench, '..', '..', '..') // 仓根（t260915-10 顺手修：原 '..','..' 算到 server/，B 段 git pathspec 恒落空=假绿）
 const libDir = join(workbench, 'lib')
 const ARTIFACTS = ['client.cjs', 'client.js']
 const PINNED = '0.22.2'
 const DRIFT_LEGACY = '0.22.14'
+
+let skipped = 0
 
 // ---- 纯函数辅助（D 段对它们做畸形输入桩自检）----
 
@@ -136,9 +138,20 @@ for (const name of ARTIFACTS) {
 
 section('B. 重建后 lib 无 git diff（验收②）')
 const relLib = 'server/plugins/workbench/lib'
-const st = spawnSync('git', ['status', '--porcelain', '--', relLib], { cwd: repo, encoding: 'utf8' })
-ok(!st.error && st.status === 0 && (st.stdout || '').trim() === '',
-  `git status --porcelain -- ${relLib} 为空${(st.stdout || '').trim() ? `（实测：${st.stdout.trim().split('\n').join(' | ')}）` : ''}`)
+// 「src 未改时」前置条件补齐（t260915-10 顺手修，头注承诺语义）：src 相对 HEAD 有
+// diff=lane 内有意的产物变更（bundle 随票重建），此时 lib 必有 diff——显式 skip 点名，
+// 不假绿（原实现 repo 算错级恒绿）也不假红；src 无 diff 时才要求 lib 无 diff（零抖动）。
+const relSrc = 'server/plugins/workbench/src'
+const stSrc = spawnSync('git', ['status', '--porcelain', '--', relSrc], { cwd: repo, encoding: 'utf8' })
+const srcDirty = !stSrc.error && stSrc.status === 0 && (stSrc.stdout || '').trim() !== ''
+if (srcDirty) {
+  skipped++
+  console.log('  skip lib 无 git diff：src 有未提交改动（lane 内有意产物变更，随票合并后复验 B 段）')
+} else {
+  const st = spawnSync('git', ['status', '--porcelain', '--', relLib], { cwd: repo, encoding: 'utf8' })
+  ok(!st.error && st.status === 0 && (st.stdout || '').trim() === '',
+    `git status --porcelain -- ${relLib} 为空${(st.stdout || '').trim() ? `（实测：${st.stdout.trim().split('\n').join(' | ')}）` : ''}`)
+}
 
 // ---- C 段：锁定负锁（三处锁定面 + 漂移版本残留扫描）----
 
@@ -161,5 +174,5 @@ for (const f of ['package.json', 'package-lock.json', 'pnpm-lock.yaml']) {
   ok(!text.includes(DRIFT_LEGACY), `${f} 无漂移版本 ${DRIFT_LEGACY} 残留`)
 }
 
-console.log(`\nSUMMARY pass=${passed} skip=0 fail=${failed}`)
+console.log(`\nSUMMARY pass=${passed} skip=${skipped} fail=${failed}`)
 process.exit(failed === 0 ? 0 : 1)

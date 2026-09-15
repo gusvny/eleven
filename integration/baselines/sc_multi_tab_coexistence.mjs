@@ -165,10 +165,14 @@ function sharedFixtures() {
  *  from the SHARED fixture map (so a write on tab D is visible to tab B's
  *  next fetch), passes everything else through to the real test console. */
 async function attachStub(page, shared, counts) {
+  // 取证日志（t260915-10 gen8 补，仲裁令「修前实跑定位泄漏 URL 构成」；只加证据
+  // 不改判定）：每次 API 计数记时间戳+路径+query，T3 败径据此报泄漏构成。
+  counts.log ??= []
   await page.route('**/sandbar-workbench/api/**', async (route) => {
     const req = route.request()
     const url = new URL(req.url())
     counts.total++
+    counts.log.push({ t: Date.now(), u: url.pathname + url.search })
     const m = /^\/sandbar-workbench\/api\/wf\/tickets(?:\/([^/]+)(?:\/([^/]+))?)?$/.exec(url.pathname)
     // fulfill 去险化（t260910-08 arbitrate gen6，tail 点名 :179 'Route is already
     // handled!'）：负载下页面导航会取消在途请求，fetch→fulfill 窗口内路由已被
@@ -560,10 +564,28 @@ async function scenarioHiddenStopsPolling(front, hidden, ctx) {
   }
   const c0 = hidden.__st.counts.total
   const cList0 = hidden.__st.counts.listGet
+  const t0 = Date.now()
   await page_wait(33000) // > 30s scan period: every timer must fire at least once if unpaused
   const leak = hidden.__st.counts.total - c0
   const leakList = hidden.__st.counts.listGet - cList0
-  if (leak !== 0) return `hidden tab issued ${leak} API request(s) in 33s (list polls: ${leakList})`
+  if (leak !== 0) {
+    // 判别探针（t260915-10 gen7 补，只加证据不改判定）：leak>0 时读页面自身状态定归因——
+    // ①emulation 补丁丢失/翻回 visible（defineProperty get 描述符不在、visibilityState
+    //   读回 visible）＝隐藏模拟在负载窗内失效，测试前提面铁证（页签按页面自身认知是
+    //   可见的，轮询照章办事）；
+    // ②补丁在场（get 在、读回 hidden）而 leak 持续＝可见性门在补丁下仍放行，产品面证据
+    //   强化（visibility-poll.ts 停表/门控缺陷）。两种形态下断言阈值一字未动。
+    const trace = await hidden.evaluate(() => {
+      const d = Object.getOwnPropertyDescriptor(document, 'visibilityState')
+      const patched = !!(d && d.get)
+      return `visibilityState=${document.visibilityState} 模拟补丁${patched ? '在场' : '丢失'}`
+    }).catch((e) => `trace 不可得（${String(e).slice(0, 60)}）`)
+    // 泄漏构成（t260915-10 gen8 取证增强）：窗内逐请求 路径+query 与间隔形状，
+    // 供 developer 对位无门取数路径（nudge 强取/兜底链 vs 轮询节拍）。
+    const winLog = (hidden.__st.counts.log ?? []).filter((e) => e.t >= t0)
+    const shape = winLog.map((e) => `${e.u}@${((e.t - t0) / 1000).toFixed(1)}s`).join(', ')
+    return `hidden tab issued ${leak} API request(s) in 33s (list polls: ${leakList})；${trace}；构成=[${shape}]`
+  }
   await hidden.bringToFront()
   if (emulated) {
     // Visible again: flip the emulated state back to visible and dispatch the

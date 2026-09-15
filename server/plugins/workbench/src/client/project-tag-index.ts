@@ -26,7 +26,14 @@
  *   已在方案 v3 声明）。
  * - 纯逻辑（合并/查询）与 IO（fetch）分离：startProjectIndexFallback 接受
  *   fetchImpl 注入，smoke 桩测全路径（含畸形响应不炸）。
+ * - 可见性门（t260915-10 gen7 顺手收口，仲裁判别探针终裁的 multi-tab T3 泄漏面）：
+ *   兜底自取链与 nudge 强取同受 KI-003 族纪律约束——页签不可见即零请求（schedule
+ *   周期照排但取数被门住、nudge 忽略且不耗最小间隔额度），回可见立即补跑一次并恢
+ *   复节拍，语义对齐 visibility-poll.ts startVisibleInterval 契约。document 不可用
+ *   （node/smoke 裸跑）沿用其故障口径：视为可见，取数照常，不静默改语义。
  */
+
+import { pageVisible } from './visibility-state.ts'
 
 /** 发布的项目注册表条目（/wf/projects 行的最小面）。 */
 export interface ProjectIndexEntry {
@@ -196,6 +203,9 @@ export function startProjectIndexFallback(opts: FallbackOptions): FallbackHandle
 
   async function tryOnce(force = false): Promise<void> {
     if (stopped || inFlight) return
+    // 可见性门（纵深防御一道；t260915-10 gen7）：页签不可见即零请求——nudge/补跑
+    // 共用入口，隐藏时在此统一拦下。document 未定义（node/smoke）pageVisible=true 不改语义。
+    if (!pageVisible()) return
     if (!force && (state.externallyPublished || readProjectTagIndex().hasData)) return
     inFlight = true
     if (!force) attempts++
@@ -231,7 +241,28 @@ export function startProjectIndexFallback(opts: FallbackOptions): FallbackHandle
       console.warn('[workbench] chat 项目 tag 索引兜底拉取达上限，停止重试（映射缺失 → tag 不渲染）')
       return
     }
-    timer = setTimeout(() => { void tryOnce().then(schedule) }, attempts === 0 ? initialDelayMs : retryIntervalMs)
+    timer = setTimeout(() => {
+      // tick 内重读门（对齐 startVisibleInterval 双重门语义）：隐藏时本次不取数，
+      // 链照常重排（回可见由 onVisChange 补跑并重排，这里不重复补）。
+      if (!pageVisible()) { schedule(); return }
+      void tryOnce().then(schedule)
+    }, attempts === 0 ? initialDelayMs : retryIntervalMs)
+  }
+
+  // 可见性监听（t260915-10 gen7）：回可见=补跑一次+恢复节拍（对齐 startVisibleInterval
+  // 的 onVis 语义）；隐藏=停表（清当前定时器，防到点取数）。句柄留档供 stop 移除。
+  let visHandler: (() => void) | null = null
+  if (typeof document !== 'undefined') {
+    visHandler = () => {
+      if (stopped) return
+      if (pageVisible()) {
+        void tryOnce().then(schedule)
+      } else if (timer !== null) {
+        clearTimeout(timer)
+        timer = null
+      }
+    }
+    document.addEventListener('visibilitychange', visHandler)
   }
 
   schedule()
@@ -240,9 +271,14 @@ export function startProjectIndexFallback(opts: FallbackOptions): FallbackHandle
       stopped = true
       if (timer !== null) clearTimeout(timer)
       timer = null
+      if (visHandler !== null) {
+        document.removeEventListener('visibilitychange', visHandler)
+        visHandler = null
+      }
     },
     nudge() {
       if (stopped || inFlight) return
+      if (!pageVisible()) return // 隐藏即忽略强取（不耗最小间隔额度——回可见后真需求仍可立即触发）
       const now = Date.now()
       if (now - lastNudgeAt < nudgeMinIntervalMs) return
       lastNudgeAt = now

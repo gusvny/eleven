@@ -2,10 +2,13 @@
  * docs.tsx —— 工单台「文档」视图（t260905-06 起；mock v1 版面重做 + KI-070 项目根解析
  * = t260910-10）：docs/ 定稿库 + notes/ 观察窗人读视图。
  *
- * 语义（KI-070 修复）：docs tree/doc 按 ?project= 项目根解析——组件自带 Project 选择器
- * （初值=synthesized 缺省项 'sandbar / default'，key=''，后端回落引擎仓；**不继承壳层
- * viewProject**——切换器与请求源必须同源，方案 gen1 R1-8 裁定）；请求按本视图选择态
- * 显式拼 project=，不用 withProject 隐式上下文。数据源=宿主半
+ * 语义（KI-070 修复 + t260915-10 接壳层 projectKey）：docs tree/doc 按 ?project= 项目根
+ * 解析——组件自带 Project 选择器，选择态初值=壳层当前项目（props.projectKey；''=缺省
+ * 引擎仓回落，既有语义不删）；mounted 期壳层变更→跟随，但用户手动动过选择器后不再被
+ * 壳层冲掉（userTouched guard，spec ②手动优先；重挂载=重新跟随，收敛口径评审已裁）。
+ * 切换器与请求源仍同源：请求按本视图选择态显式拼 project=，不用 withProject 隐式上下文
+ * （gen1 R1-8 的同源关切保留，仅初值/跟随的来源改为壳层——旧「不继承壳层 viewProject」
+ * 裁定随 t260915-10 推翻）。数据源=宿主半
  * GET /sandbar-workbench/api/wf/docs/tree|doc?scope=…[&project=…]（node.ts
  * handleDocsTree/handleDocsDoc）。
  *
@@ -25,7 +28,8 @@
  *
  * 资源终态（R1 取舍清单 4）：scope/project/选篇切换与组件卸载时 AbortController.abort
  * 收口 in-flight fetch，IntersectionObserver.disconnect 收口观察（正常/报错/取消
- * 三路径都落定）；目录/正文请求分离，正文懒加载（点目录项才取）。
+ * 三路径都落定）；目录/正文请求分离，正文懒加载（点目录项才取）。壳层跟随 effect
+ * （t260915-10）纯 setState 零新资源零新监听，fetch 回收仍归上述 abort cleanup。
  *
  * 窄栏（R2③）：<=720px 单栏流——选中篇时目录收起、显「← Docs」返回钮；无横向溢出
  * 断言由集成场景锚 .wb-doc-root 容器（V1②口径）。
@@ -34,6 +38,7 @@
  * frame / toc / back / item / scope(-docs/-notes) / skipped / article / title / body。
  * 本票新增：data-wb-doc-topbar / breadcrumb / project(-key) / project-error / search /
  * group-head / group(-collapsed) / outline / outline-item / chips / chip。
+ * t260915-10 新增：data-wb-doc-empty-hint（项目语境空目录指引行，spec ③不冒充口径）。
  */
 import { useEffect, useRef, useState } from 'react'
 import { renderMarkdown } from '../../../knowledge/src/client/markdown.ts'
@@ -41,6 +46,7 @@ import { DERIVE_TOKENS_CSS } from './theme'
 import type { DocTreeGroup, DocsScope } from '../shared/docs-model.ts'
 import {
   filterGroups, outlineFromHtml, verifiedChipValue, chipPath, projectOptions,
+  emptyGuidance, followProjectKey,
   HEADING_ID_PREFIX, type OutlineEntry, type ProjectOption,
 } from './docs-view-model.ts'
 
@@ -167,9 +173,16 @@ function onDocCopy(e: React.MouseEvent): void {
   try { void navigator.clipboard?.writeText(decodeURIComponent(code)) } catch { /* 静默 */ }
 }
 
-export function DocsSection(_props: Record<string, never>) {
+export function DocsSection({ projectKey: shellProjectKey }: { projectKey?: string }) {
   const [scope, setScope] = useState<DocsScope>('docs')
-  const [projectKey, setProjectKey] = useState('') // ''=缺省引擎仓（后端 source='default' 回落）
+  // 选择态（t260915-10）：初值=壳层当前项目；''=缺省引擎仓（后端 source='default' 回落，
+  // 既有语义不删）。userTouched=用户手动动过选择器——其后壳层变更不再冲掉手动选择
+  // （跟随 effect 走 followProjectKey 单源判定，docs-view-model UT 真值表=行为断言）。
+  const [projectKey, setProjectKey] = useState(shellProjectKey ?? '')
+  const userTouched = useRef(false)
+  useEffect(() => {
+    setProjectKey((cur) => followProjectKey(shellProjectKey, cur, userTouched.current))
+  }, [shellProjectKey])
   const [projects, setProjects] = useState<ProjectOption[]>([])
   const [projErr, setProjErr] = useState('')
   const [query, setQuery] = useState('')
@@ -253,6 +266,8 @@ export function DocsSection(_props: Record<string, never>) {
   }
 
   const visibleGroups = filterGroups(tree?.groups, query)
+  // 项目语境空目录指引（t260915-10）：emptyGuidance 对缺省语境/非空返回 ''，既有文案不动。
+  const emptyHint = tree?.empty === true ? emptyGuidance(tree.empty, projectKey) : ''
   const docLoaded = doc !== null && !doc.empty
   const crumbTitle = docLoaded && doc.title ? doc.title : selected
   const chips: [string, string, string][] = docLoaded
@@ -284,7 +299,7 @@ export function DocsSection(_props: Record<string, never>) {
           <select
             className="wb-doc-project-select" data-wb-doc-project="" aria-label="Project"
             value={projectKey}
-            onChange={(e) => { setProjectKey(e.target.value) }}
+            onChange={(e) => { userTouched.current = true; setProjectKey(e.target.value) }}
           >
             {projectOptions(projects).map((o) => (
               <option key={o.key} value={o.key}>{o.label}</option>
@@ -312,6 +327,7 @@ export function DocsSection(_props: Record<string, never>) {
             {treeErr !== '' && <div className="wb-doc-empty">目录加载失败：{treeErr}</div>}
             {treeErr === '' && tree === null && <div className="wb-doc-empty">Loading…</div>}
             {tree?.empty === true && <div className="wb-doc-empty">目录为空：{tree.reason}</div>}
+            {emptyHint !== '' && <div className="wb-doc-empty" data-wb-doc-empty-hint="">{emptyHint}</div>}
             {visibleGroups.map((g) => {
               const isCollapsed = collapsed[g.dir] === true
               return (

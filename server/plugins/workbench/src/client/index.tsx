@@ -99,7 +99,8 @@ import { WorkbenchSidebar } from './sidebar.tsx'
 import { MetricsFooterButton, markFooterSlot } from './metrics-entry.tsx'
 // 立项单 Tier 3（t260904-17 保留）：中列第四视图 + 所属立项徽标（口径单点 ./epics-model.ts）。
 import { EpicBadge, EpicSection } from './epics.tsx'
-// 「文档」视图（t260905-06）：docs/ 定稿库人读视图 + notes/ 观察窗（全仓单例）。
+// 「文档」视图（t260905-06 立；t260915-10 接壳层 projectKey）：docs/ 定稿库人读视图 +
+// notes/ 观察窗，默认跟随壳层当前项目（页内选择器可手动切且手动优先）。
 import { DocsSection } from './docs.tsx'
 // t260904-17 工单列表 v5（mock 屏⑤⑥）：平铺行卡（一套 UI，中列+侧栏共用）+ 纯函数模型层。
 import { TicketRowCard, type CardOp } from './ticket-row-card.tsx'

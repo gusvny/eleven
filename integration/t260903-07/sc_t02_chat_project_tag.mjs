@@ -206,6 +206,51 @@ async function browserScenarios(fixtureProjects) {
     }
   }
 
+  // 第三重证据（t260915-10 仲裁段补，260915 实测再发同签名）：前两重探针的残留盲区=
+  // 「带外键源健康 ≠ 页面自身拿到过键数据」——负载敏感窗内页面自己的取数可能失败/未完
+  // 成，chip 无数据可渲（260914 先例：4/3/1 且 t4 env_fail 同窗共现）。
+  // 第四重（t260915-10 gen5 补，gen5 实测暴露第三重设计缺口）：projects 通道**不是
+  // chip 的数据通道**——chip 依赖 tag 索引=侧栏逐项目 `/wf/tickets?project=` 拉取后
+  // publishProjectEntry（catch 不发、保 last-known-good；sidebar.tsx load()），负载敏感
+  // 窗内该重端点超时丢发布=新消息永不装饰而 projects 端点照常健康（gen5 实测：projects
+  // 痕迹 10-13 条全健康、chip 仍缺）。故 fail 路径证据改为：projects 痕迹（中性参照，
+  // 不再标产品面）+tickets 通道带外形态+页面 tickets 取数痕迹。只加证据不改判定：
+  // 判定边界仍归既有键源铁律（源健康而 chip 缺=fail 产品面），通道证据供复发自归因。
+  async function pageResourceProbe(frag) {
+    try {
+      return await page.evaluate((f) => {
+        const es = (performance.getEntriesByType('resource') || [])
+          .filter((e) => (e.name || '').includes(f));
+        if (!es.length) return `${f} 取数痕迹=0 条（页面自身未取得该数据=环境面证据）`;
+        const last = es[es.length - 1];
+        return `${f} 取数痕迹=${es.length} 条（末条 dur=${Math.round(last.duration)}ms transfer=${last.transferSize}B）`;
+      }, frag);
+    } catch (e) {
+      return `${frag} 取数探针不可得（${String(e).slice(0, 60)}）`;
+    }
+  }
+
+  async function pageFetchProbe() {
+    return pageResourceProbe('api/wf/projects');
+  }
+
+  // chip 真数据通道（tag 索引的逐项目工单拉取）带外形态：HTTP 形态+该票 id 是否在册。
+  // 非穷尽判定——仅落证据：通道不可得/缺该票=环境面证据强化（索引无从含该归属）；
+  // 通道健康且含该票而 chip 缺=产品面证据强化（数据在而装饰缺）。
+  async function ticketChannelProbe(key, ticketId) {
+    try {
+      const r = await fetch(`${BASE}/sandbar-workbench/api/wf/tickets?project=${encodeURIComponent(key)}`, { signal: AbortSignal.timeout(5000) });
+      if (!r.ok) return `tickets 通道 HTTP ${r.status}（${key}）=通道不可得，环境面证据`;
+      const data = await r.json();
+      const ids = ((data?.result?.tickets) ?? []).map((t) => t.id);
+      return ids.includes(ticketId)
+        ? `tickets 通道 200 且含 ${ticketId}（共 ${ids.length} 票）=数据在而 chip 缺，产品面证据`
+        : `tickets 通道 200 但不含 ${ticketId}（共 ${ids.length} 票）=索引无从含该归属，环境面证据`;
+    } catch (e) {
+      return `tickets 通道不可达（${String((e && e.name) || e).slice(0, 60)}）=环境面证据`;
+    }
+  }
+
   async function pollSent(text, timeout = 10000) {
     const ta = page.locator('textarea:visible').first();
     const t0 = Date.now();
@@ -237,7 +282,7 @@ async function browserScenarios(fixtureProjects) {
       const detail = `marker 行上未找到文本=「${tag0.key}」的 chip；探得=${JSON.stringify(chips).slice(0, 200)}；${rowProbeText(probe)}`;
       const ks = await keySourceHas(tag0.key);
       if (!ks.ok) record('t1/tag-renders', 'env_fail', `${detail}；键源不可得（${ks.why}）⇒ 无数据可渲该 chip，环境面`);
-      else record('t1/tag-renders', 'fail', detail);
+      else record('t1/tag-renders', 'fail', `${detail}；${await pageFetchProbe()}；${await ticketChannelProbe(tag0.key, tag0.ticket.id)}`);
     }
   }
 
@@ -255,7 +300,7 @@ async function browserScenarios(fixtureProjects) {
         const detail2 = `chip 探得=${JSON.stringify(chips).slice(0, 160)}；${rowProbeText(probe2)}`;
         const ks2 = await keySourceHas(tag0.key);
         if (!ks2.ok) record('t2/same-key-same-color', 'env_fail', `${detail2}；键源不可得（${ks2.why}）⇒ 环境面`);
-        else record('t2/same-key-same-color', 'fail', detail2);
+        else record('t2/same-key-same-color', 'fail', `${detail2}；${await pageFetchProbe()}；${await ticketChannelProbe(tag0.key, tag0.ticket.id)}`);
       }
     } else record('t2/same-key-same-color', 'env_fail', 'second send failed (env)');
   }
@@ -275,7 +320,7 @@ async function browserScenarios(fixtureProjects) {
         const detailB = `chip 探得=${JSON.stringify(chips).slice(0, 160)}；${rowProbeText(probeB)}`;
         const ksB = await keySourceHas(tag1.key);
         if (!ksB.ok) record('t3/different-key-different-color', 'env_fail', `${detailB}；键源不可得（${ksB.why}）⇒ 环境面`);
-        else record('t3/different-key-different-color', 'fail', detailB);
+        else record('t3/different-key-different-color', 'fail', `${detailB}；${await pageFetchProbe()}；${await ticketChannelProbe(tag1.key, tag1.ticket.id)}`);
       }
     } else record('t3/different-key-different-color', 'env_fail', 'send failed (env)');
   } else {

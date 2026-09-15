@@ -3701,6 +3701,22 @@ function ProjectSessionRow(props) {
 	});
 }
 //#endregion
+//#region src/client/visibility-state.ts
+/**
+* visibility-state.ts —— 页面可见性纯读（t260915-10 gen7 从 visibility-poll.ts 拆出）。
+*
+* 拆分原因：visibility-poll.ts 顶上 import react（hook 封装需要），而 react 由宿主
+* dsh 核心供给、不在插件 node_modules——非 React 模块（project-tag-index.ts 等
+* node 裸跑 UT 覆盖面）一旦 import 它即 ERR_MODULE_NOT_FOUND。本模块零依赖，供
+* 「只读可见性、不起定时器」的取数路径共用同一门判定，语义单源不复制。
+*
+* 契约不变（沿 visibility-poll.ts 原实现）：document 不可用（node/smoke 裸跑）→
+* 视为可见——那里没有「隐藏页签」概念，不静默改语义。
+*/
+function pageVisible() {
+	return typeof document === "undefined" || document.visibilityState === "visible";
+}
+//#endregion
 //#region src/client/visibility-poll.ts
 /**
 * visibility-poll.ts —— 不可见页签暂停轮询（t260901-15，多页签共存③）。
@@ -3720,9 +3736,6 @@ function ProjectSessionRow(props) {
 * 一致，不静默改语义——那里没有「隐藏页签」概念）；fn 异常向上抛给宿主 effect
 * 的既有兜底（各 effect 内部已有 try/catch 或静默约定）。
 */
-function pageVisible() {
-	return typeof document === "undefined" || document.visibilityState === "visible";
-}
 /**
 * 启动一个可见性门控的周期任务。返回停表函数（幂等，必调——终态回收纪律）。
 * 立即可见时建表；隐藏时清表；回可见时先补跑一次再建表。
@@ -3909,6 +3922,40 @@ function useStaleBanner() {
 }
 //#endregion
 //#region src/client/project-tag-index.ts
+/**
+* sandbar-workbench · chat 项目 tag 数据索引单态（t260903-07 工单②）。
+*
+* Owner 落明（方案 v3 N2 修正后的规格句）：
+* - 谁写：WorkbenchSidebar.load()（10s 轮询）成功分支调用 publishProjects /
+*   publishProjectEntry；catch 分支**不发**（失败不得顶掉 last-known-good，
+*   KI-018 同族预防）。侧栏窄模式（wide=false）不轮询。
+* - 谁读：chat-project-tag.ts 装饰器（消息文本里的工单 id → 项目归属）。
+* - 变更通知（t260911-06 补缺）：publish* 只在**数据实际变化**时通知订阅者
+*   （onProjectTagIndexChange）——此前外部发布后装饰器不重扫，行是否补装饰
+*   全看「碰巧有无别的 DOM 变动」；新消息行在索引空窗插入即永久裸奔（260911
+*   夜 chat-project-tag 间歇红实证签名：新行无 chip、旧行有）。
+* - 兜底自取：装饰器挂载时若单态为空（侧栏未挂载/窄模式），自行 fetch 一次
+*   /wf/projects + 各项目 /wf/tickets?project=，成功后同样走 publish* 合并语义；
+*   60s 重试直到有数据、或侧栏外部发布（publishProjects 被外部调用即停自取定时器，
+*   绝不出现两条 10s 轮询）。取舍已声明：允许 decorator 侧一条低频（60s）兜底轮询，
+*   换取窄模式下 tag 不死。
+* - 按需强取（t260911-06 补缺，nudge）：scan 发现「带票号引用却未归属」的行时，
+*   兜底 handle 的 nudge() 单次强取一轮（绕过 hasData/外部发布停止条件——那两个
+*   条件防的是**定时轮询双跑**，不防「数据源落后于刚建成的新票」）。有界三闸：
+*   在途去重（同时只一轮）、最小间隔（默认 5s）、按引用去重（同一票号只强取一次）。
+*   取到即 publish → 变更通知 → 装饰器重扫；仍取不到（假票号）不重试。
+* - 失败语义：单态按项目键 last-known-good 合并——新值非空覆盖；新值为空且已有
+*   旧值 → 保留旧值 + warn 一次（「fetch 成功但空列表」与失败在数据上同形，统一
+*   口径不猜服务端；项目工单真清零属低频事件且 tag 缺失不炸，无过期机制的代价
+*   已在方案 v3 声明）。
+* - 纯逻辑（合并/查询）与 IO（fetch）分离：startProjectIndexFallback 接受
+*   fetchImpl 注入，smoke 桩测全路径（含畸形响应不炸）。
+* - 可见性门（t260915-10 gen7 顺手收口，仲裁判别探针终裁的 multi-tab T3 泄漏面）：
+*   兜底自取链与 nudge 强取同受 KI-003 族纪律约束——页签不可见即零请求（schedule
+*   周期照排但取数被门住、nudge 忽略且不耗最小间隔额度），回可见立即补跑一次并恢
+*   复节拍，语义对齐 visibility-poll.ts startVisibleInterval 契约。document 不可用
+*   （node/smoke 裸跑）沿用其故障口径：视为可见，取数照常，不静默改语义。
+*/
 const state$1 = {
 	projectDirs: /* @__PURE__ */ new Map(),
 	projectByTicket: /* @__PURE__ */ new Map(),
@@ -4015,6 +4062,7 @@ function startProjectIndexFallback(opts) {
 	let lastNudgeAt = 0;
 	async function tryOnce(force = false) {
 		if (stopped || inFlight) return;
+		if (!pageVisible()) return;
 		if (!force && (state$1.externallyPublished || readProjectTagIndex().hasData)) return;
 		inFlight = true;
 		if (!force) attempts++;
@@ -4051,8 +4099,24 @@ function startProjectIndexFallback(opts) {
 			return;
 		}
 		timer = setTimeout(() => {
+			if (!pageVisible()) {
+				schedule();
+				return;
+			}
 			tryOnce().then(schedule);
 		}, attempts === 0 ? initialDelayMs : retryIntervalMs);
+	}
+	let visHandler = null;
+	if (typeof document !== "undefined") {
+		visHandler = () => {
+			if (stopped) return;
+			if (pageVisible()) tryOnce().then(schedule);
+			else if (timer !== null) {
+				clearTimeout(timer);
+				timer = null;
+			}
+		};
+		document.addEventListener("visibilitychange", visHandler);
 	}
 	schedule();
 	return {
@@ -4060,9 +4124,14 @@ function startProjectIndexFallback(opts) {
 			stopped = true;
 			if (timer !== null) clearTimeout(timer);
 			timer = null;
+			if (visHandler !== null) {
+				document.removeEventListener("visibilitychange", visHandler);
+				visHandler = null;
+			}
 		},
 		nudge() {
 			if (stopped || inFlight) return;
+			if (!pageVisible()) return;
 			const now = Date.now();
 			if (now - lastNudgeAt < nudgeMinIntervalMs) return;
 			lastNudgeAt = now;
@@ -46759,7 +46828,7 @@ function mountMetricsIntoSettingsRow(root) {
 *       项目组头行右对齐五个项目级视图入口图标（票③ 11b 统一 SVG 图标族）：工单列表 /
 *       文档 / 模型路由 / 立项单 / 项目设置（第五枚=面D 设置弹层入口）
 *       （t260905-06：旧提法退役，原位换「文档」入口——仓根 docs/ 定稿库人读
-*       视图 + notes/ 观察窗，全仓单例不按项目分流）
+*       视图 + notes/ 观察窗；t260915-10 起默认跟随本行项目，页内选择器可手动切）
 *       （t260827-01：立项单从「左列可折叠列表区」改为项目级图标，与其他三视图同款；
 *       左列不再显示立项列表，点图标后中列显示立项清单）。
 *       项目组 = server/projects.yaml 注册表（260823 多项目化：project 是逻辑概念，
@@ -47352,7 +47421,7 @@ function WorkbenchSidebar(props) {
 								projectKey: viewProject,
 								onOpenEpic: openEpic
 							}),
-							rightView === "docs" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Docs, {}),
+							rightView === "docs" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Docs, { projectKey: viewProject }),
 							viewProject && rightView === "routes" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Routes, { projectKey: viewProject }),
 							viewProject && rightView === "epics" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Epics, {
 								epicCode,
@@ -48372,16 +48441,41 @@ function projectOptions(projects) {
 	}
 	return opts;
 }
+/**
+* 壳层跟随判定（t260915-10）：DocsSection 初值/跟随的单源纯函数（组件侧以 setState
+* updater 形态消费，本 UT 真值表=生产行为断言）。
+* touched=false（用户没动过选择器）→ 跟随壳层当前项目；非字符串/缺省 → ''=缺省引擎仓
+* 回落（既有语义不删）。touched=true（用户手动动过选择器）→ 保持现值，壳层变更不冲掉
+* （spec ②手动优先）。畸形输入定值分支，不 throw。
+*/
+function followProjectKey(shellKey, currentKey, touched) {
+	if (touched) return currentKey;
+	return typeof shellKey === "string" ? shellKey : "";
+}
+/**
+* 项目语境空目录指引（t260915-10，spec ③）：选择态≠'' 且 scope 目录空诚实降级时，
+* 给一行指引——点名项目键、scope 目录与「不回落引擎仓」（不许空态冒充有文档）；
+* 缺省引擎仓语境维持既有文案面（返回 ''，既有「目录为空：reason」行不重复）。畸形输入
+* 定值 ''，不 throw。
+*/
+function emptyGuidance(treeEmpty, projectKey) {
+	if (treeEmpty !== true) return "";
+	if (typeof projectKey !== "string" || projectKey === "") return "";
+	return `该项目（${projectKey}）根下暂无此 scope 目录——在项目根创建 docs/ 或 notes/ 目录后，文档会出现在这里；此处不回落引擎仓。`;
+}
 //#endregion
 //#region src/client/docs.tsx
 /**
 * docs.tsx —— 工单台「文档」视图（t260905-06 起；mock v1 版面重做 + KI-070 项目根解析
 * = t260910-10）：docs/ 定稿库 + notes/ 观察窗人读视图。
 *
-* 语义（KI-070 修复）：docs tree/doc 按 ?project= 项目根解析——组件自带 Project 选择器
-* （初值=synthesized 缺省项 'sandbar / default'，key=''，后端回落引擎仓；**不继承壳层
-* viewProject**——切换器与请求源必须同源，方案 gen1 R1-8 裁定）；请求按本视图选择态
-* 显式拼 project=，不用 withProject 隐式上下文。数据源=宿主半
+* 语义（KI-070 修复 + t260915-10 接壳层 projectKey）：docs tree/doc 按 ?project= 项目根
+* 解析——组件自带 Project 选择器，选择态初值=壳层当前项目（props.projectKey；''=缺省
+* 引擎仓回落，既有语义不删）；mounted 期壳层变更→跟随，但用户手动动过选择器后不再被
+* 壳层冲掉（userTouched guard，spec ②手动优先；重挂载=重新跟随，收敛口径评审已裁）。
+* 切换器与请求源仍同源：请求按本视图选择态显式拼 project=，不用 withProject 隐式上下文
+* （gen1 R1-8 的同源关切保留，仅初值/跟随的来源改为壳层——旧「不继承壳层 viewProject」
+* 裁定随 t260915-10 推翻）。数据源=宿主半
 * GET /sandbar-workbench/api/wf/docs/tree|doc?scope=…[&project=…]（node.ts
 * handleDocsTree/handleDocsDoc）。
 *
@@ -48401,7 +48495,8 @@ function projectOptions(projects) {
 *
 * 资源终态（R1 取舍清单 4）：scope/project/选篇切换与组件卸载时 AbortController.abort
 * 收口 in-flight fetch，IntersectionObserver.disconnect 收口观察（正常/报错/取消
-* 三路径都落定）；目录/正文请求分离，正文懒加载（点目录项才取）。
+* 三路径都落定）；目录/正文请求分离，正文懒加载（点目录项才取）。壳层跟随 effect
+* （t260915-10）纯 setState 零新资源零新监听，fetch 回收仍归上述 abort cleanup。
 *
 * 窄栏（R2③）：<=720px 单栏流——选中篇时目录收起、显「← Docs」返回钮；无横向溢出
 * 断言由集成场景锚 .wb-doc-root 容器（V1②口径）。
@@ -48410,6 +48505,7 @@ function projectOptions(projects) {
 * frame / toc / back / item / scope(-docs/-notes) / skipped / article / title / body。
 * 本票新增：data-wb-doc-topbar / breadcrumb / project(-key) / project-error / search /
 * group-head / group(-collapsed) / outline / outline-item / chips / chip。
+* t260915-10 新增：data-wb-doc-empty-hint（项目语境空目录指引行，spec ③不冒充口径）。
 */
 const API$1 = "/sandbar-workbench/api/wf/docs";
 const PROJECTS_API = "/sandbar-workbench/api/wf/projects";
@@ -48518,9 +48614,13 @@ function onDocCopy(e) {
 		navigator.clipboard?.writeText(decodeURIComponent(code));
 	} catch {}
 }
-function DocsSection(_props) {
+function DocsSection({ projectKey: shellProjectKey }) {
 	const [scope, setScope] = (0, react.useState)("docs");
-	const [projectKey, setProjectKey] = (0, react.useState)("");
+	const [projectKey, setProjectKey] = (0, react.useState)(shellProjectKey ?? "");
+	const userTouched = (0, react.useRef)(false);
+	(0, react.useEffect)(() => {
+		setProjectKey((cur) => followProjectKey(shellProjectKey, cur, userTouched.current));
+	}, [shellProjectKey]);
 	const [projects, setProjects] = (0, react.useState)([]);
 	const [projErr, setProjErr] = (0, react.useState)("");
 	const [query, setQuery] = (0, react.useState)("");
@@ -48630,6 +48730,7 @@ function DocsSection(_props) {
 		});
 	};
 	const visibleGroups = filterGroups(tree?.groups, query);
+	const emptyHint = tree?.empty === true ? emptyGuidance(tree.empty, projectKey) : "";
 	const docLoaded = doc !== null && !doc.empty;
 	const crumbTitle = docLoaded && doc.title ? doc.title : selected;
 	const chips = docLoaded ? [
@@ -48704,6 +48805,7 @@ function DocsSection(_props) {
 							"aria-label": "Project",
 							value: projectKey,
 							onChange: (e) => {
+								userTouched.current = true;
 								setProjectKey(e.target.value);
 							},
 							children: projectOptions(projects).map((o) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
@@ -48776,6 +48878,11 @@ function DocsSection(_props) {
 							tree?.empty === true && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 								className: "wb-doc-empty",
 								children: ["目录为空：", tree.reason]
+							}),
+							emptyHint !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "wb-doc-empty",
+								"data-wb-doc-empty-hint": "",
+								children: emptyHint
 							}),
 							visibleGroups.map((g) => {
 								const isCollapsed = collapsed[g.dir] === true;

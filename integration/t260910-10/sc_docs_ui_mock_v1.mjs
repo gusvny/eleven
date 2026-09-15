@@ -1,16 +1,19 @@
 // sc_docs_ui_mock_v1.mjs — t260910-10 场景③：文档视图 mock v1 终态旅程（KI-070 UI 半 + 260910 过稿版式，隔离台浏览器走查）。
 //
 // intent（灰盒，用户可感知行为；工单必含③ + review 条件意见 N1-N4 的终态化）：
-//   用户在文档视图里能完成 mock v1 版式承诺的完整旅程：打开视图即见缺省引擎仓文档
-//   （初值=缺省选择态，不要求用户先选项目）、顶部 Project 切换器换到任一注册项目后
-//   树随所选项目切换（KI-070 的用户可感知面）、固定 UI 元素一律英文、开篇后正文带
-//   五枚元信息 chip（Verified 无数据源=显式 pending 占位不留假值）、On this page 大纲
-//   随选中文档渲染且点击真跳转、分组可折叠、Search 在当前项目内过滤、空 scope 目录
-//   诚实降级不炸。断言锚=公开契约锚 data-wb-docs-root/[data-wb-doc-item]（t260905-06
-//   立下的契约锚，gen1 方案承诺保留可新增不可移除）+ 元素角色/可见文本（select、input、
-//   固定英文词），不锚内部类名。线上证据腿：监听 /api/wf/docs/ 请求 URL——初载无
-//   project= 参数（缺省回落）、切项目后带 ?project=<夹具>（客户端显式传键=反
-//   viewProject 漂移，KI-070 在 wire 层的判据）。
+//   用户在文档视图里能完成 mock v1 版式承诺的完整旅程：打开文档页初值=壳层当前项目
+//   （t260915-10 接壳层语义——经夹具甲组「文档」图标进入=初值夹具甲；语义变更留痕：
+//   t260910-10 旧稿锁「初值=缺省引擎仓、初载无 project=」，那正是 t260915-10 修的病灶
+//   语义，缺省回落旅程移到 T1b 手动腿，跟随初值由 t260915-10 新场景专守）、顶部 Project
+//   切换器换到任一注册项目后树随所选项目切换（KI-070 的用户可感知面）、固定 UI 元素一律
+//   英文、开篇后正文带五枚元信息 chip（Verified 无数据源=显式 pending 占位不留假值）、
+//   On this page 大纲随选中文档渲染且点击真跳转、分组可折叠、Search 在当前项目内过滤、
+//   空 scope 目录诚实降级不炸。断言锚=公开契约锚 data-wb-docs-root/[data-wb-doc-item]
+//   （t260905-06 立下的契约锚，gen1 方案承诺保留可新增不可移除）+ 元素角色/可见文本
+//   （select、input、固定英文词），不锚内部类名。线上证据腿：监听 /api/wf/docs/ 请求
+//   URL——初载带 project=fixa（壳层接线）、手动选缺省后无 project= 参数（缺省回落）、
+//   切项目后带 ?project=<夹具>（客户端显式传键=反 viewProject 漂移，KI-070 在 wire 层
+//   的判据）。
 //   与 t260905-06-doc-read-through intent 不同面：那条锁单仓阅读链路+代码块渲染+窄栏
 //   单栏流+无溢出（本票回归面，既有场景跑，不重复设计）；本条锁 mock v1 新元素与新旅程。
 //   与 t260910-10-docs-project-anchor 不同层：那条锁 API 锚解析契约，本条锁 DOM 终态旅程。
@@ -21,9 +24,12 @@
 //   T0 自举隔离台（lib_fix17：临时注册表 + fixa「夹具甲」docs/mini.md(含 h2 小节甲/乙)
 //      +docs/sub/深篇.md+notes/备忘.md、fixb「夹具乙」docs/单篇.md 无 notes/）+
 //      playwright 探测；监听 docs API 请求；点「文档」入口进视图。
-//   T1 初值与固定元素：Project 选择器（select）在场且选中项=sandbar/default 缺省态、
-//      首屏树=sandbar 篇目（terminology）、初载 tree 请求无 project= 参数、固定英文
-//      元素在场（Project/Docs/Notes/Search 输入框/On this page）。
+//   T1 初值与固定元素（t260915-10 接壳层语义）：经夹具甲组「文档」图标进入=初值夹具甲
+//      （data-wb-doc-project-key='fixa'、选中项含「夹具甲」、首屏树=夹具篇目、初载 tree
+//      请求带 project=fixa）、固定英文元素在场（Project/Docs/Notes/Search 输入框/
+//      On this page）。
+//   T1b 缺省回落旅程（手动腿，t260915-10 留痕：旧稿 T1 的「无 project=」断言移到本腿）：
+//      选择器手动选 sandbar/default → 引擎库篇目回场 + wire 出无 project 请求。
 //   T2 项目切换旅程：选择器选夹具甲 → 请求带 ?project=fixa（wire）→ 树出夹具篇目、
 //      sandbar 篇目退场（DOM 终态）。
 //   T3 开篇+chip+大纲：点「夹具甲指南」→ 正文真渲染（夹具甲正文标题）、五枚 chip 键
@@ -174,9 +180,20 @@ try {
   await docIcon.click();
   await page.waitForTimeout(1400);
 
-  // ---- T1 初值=缺省引擎仓 + 固定英文元素 + wire 无 project ----
-  const initTree = await items.filter({ hasText: /terminology|项目术语表/ }).first().isVisible().catch(() => false);
-  record('ui/init-default-tree', initTree, initTree ? '初值态首屏树=sandbar 篇目（缺省回落旅程）' : '初值态首屏未见 sandbar 篇目（terminology）');
+  // ---- T1 初值=壳层当前项目（t260915-10 接壳层）+ 固定英文元素 + wire 带 project ----
+  // （语义变更留痕：t260905-06/t260910-10 旧稿锁「初值=缺省引擎仓、初载无 project=」——
+  //   那正是 t260915-10 修的病灶语义；本条改锁经组图标进入=初值该组项目，缺省回落旅程
+  //   移到 T1b 手动腿，跟随初值由 t260915-10 新场景专守。）
+  const initKeyOk = await page.waitForFunction(
+    () => document.querySelector('[data-wb-docs-root]')?.getAttribute('data-wb-doc-project-key') === 'fixa',
+    { timeout: 8000 },
+  ).then(() => true).catch(() => false);
+  await page.waitForTimeout(1000);
+  record('ui/init-follow-key', initKeyOk, `初值=壳层当前项目：data-wb-doc-project-key='fixa'=${initKeyOk}（t260915-10 接壳层语义）`);
+
+  const initTree = await items.filter({ hasText: '夹具甲指南' }).first().isVisible().catch(() => false);
+  const sandbarAbsent = !(await items.filter({ hasText: /terminology|项目术语表/ }).first().isVisible().catch(() => false));
+  record('ui/init-follow-tree', initTree && sandbarAbsent, `初值态首屏树=夹具篇目=${initTree} sandbar 篇目退场=${sandbarAbsent}（跟随初值）`);
 
   const selInfo = await page.evaluate(() => {
     const sel = document.querySelector('[data-wb-docs-root] select');
@@ -190,11 +207,11 @@ try {
     };
   });
   record('ui/project-select-present', selInfo.present === true, selInfo.present ? `Project 选择器在场（选项 ${selInfo.optionCount} 个）` : '文档视图内无 select（Project 切换器缺席；实现落地前红属预期）');
-  record('ui/init-default-selected', !!selInfo.present && /sandbar|default/i.test(selInfo.selectedText),
-    `初值选中项=「${String(selInfo.selectedText).slice(0, 40)}」期望含 sandbar/default（mock <option selected>sandbar 同口径；synthesized 选项不依赖注册表真有该条目）`);
+  record('ui/init-follow-selected', !!selInfo.present && /夹具甲/.test(selInfo.selectedText),
+    `初值选中项=「${String(selInfo.selectedText).slice(0, 40)}」期望含夹具甲（synthesized 缺省项仍在选项列，但不再是初值选中态——t260915-10）`);
 
-  const initNoProject = docReqs.some((u) => u.includes('/api/wf/docs/tree') && !u.includes('project='));
-  record('wire/init-no-project', initNoProject, `初载 docs 请求无 project= 参数=${initNoProject}（缺省回落的线上证据；共监听 ${docReqs.length} 条）`);
+  const initWire = docReqs.some((u) => u.includes('/api/wf/docs/tree') && u.includes('project=fixa'));
+  record('wire/init-project-param', initWire, `初载 docs 请求带 project=fixa=${initWire}（壳层入口直开的线上证据；共监听 ${docReqs.length} 条）`);
 
   for (const t of ['Project', 'Docs', 'Notes', 'On this page']) {
     const vis = await rootSel.getByText(t, { exact: true }).first().isVisible().catch(() => false);
@@ -203,6 +220,15 @@ try {
   const searchBox = rootSel.locator('input').first();
   const searchPresent = (await searchBox.count()) > 0 && (await rootSel.locator('input').first().isVisible().catch(() => false));
   record('ui/fixed-en-search', searchPresent, 'Search 输入框在场（input 元素，角色级定位）');
+
+  // ---- T1b 缺省回落旅程（手动腿，t260915-10 留痕：旧稿 T1 的「无 project=」断言移到本腿
+  //      ——缺省回落=显式手动选择态，不再是打开文档页的初值）----
+  await rootSel.locator('select').first().selectOption('').catch(() => {});
+  await page.waitForTimeout(1400);
+  const termBack = await items.filter({ hasText: /terminology|项目术语表/ }).first().isVisible().catch(() => false);
+  const manualNoProject = docReqs.some((u) => u.includes('/api/wf/docs/tree') && !u.includes('project='));
+  record('manual/default-fallback', termBack && manualNoProject,
+    `手动选缺省：引擎库篇目回场=${termBack} wire 出无 project 请求=${manualNoProject}（缺省回落零回归）`);
 
   // ---- T2 项目切换旅程（wire + DOM 终态）----
   const picked = await page.evaluate(() => {

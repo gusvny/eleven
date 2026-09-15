@@ -1,4 +1,10 @@
 import { useEffect, useRef } from 'react'
+import { pageVisible } from './visibility-state.ts'
+
+// pageVisible 于 t260915-10 gen7 拆至 ./visibility-state.ts（零依赖，供非 React
+// 模块复用——本文件顶上 import react 会拖垮 node 裸跑 UT 的 import 链）；此处
+// re-export 保持既有 import 面（含潜在外部 smoke）兼容。
+export { pageVisible } from './visibility-state.ts'
 
 /**
  * visibility-poll.ts —— 不可见页签暂停轮询（t260901-15，多页签共存③）。
@@ -18,10 +24,6 @@ import { useEffect, useRef } from 'react'
  * 一致，不静默改语义——那里没有「隐藏页签」概念）；fn 异常向上抛给宿主 effect
  * 的既有兜底（各 effect 内部已有 try/catch 或静默约定）。
  */
-
-export function pageVisible(): boolean {
-  return typeof document === 'undefined' || document.visibilityState === 'visible'
-}
 
 /**
  * 启动一个可见性门控的周期任务。返回停表函数（幂等，必调——终态回收纪律）。
