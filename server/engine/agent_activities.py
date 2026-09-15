@@ -3748,10 +3748,14 @@ async def verify_review_gate(args: ReviewGateArgs) -> ReviewGateResult:
 # this value is the hard cap on the whole screenshot flow.
 # Mind the relationship with the workflow side's activity timeout: the activity's
 # start_to_close must be **clearly larger** than this value
-# (dev_lane.UI_EVIDENCE_TO=180s vs 120s), otherwise Temporal kills the activity first
+# (dev_lane.UI_EVIDENCE_TO=420s vs 240s), otherwise Temporal kills the activity first
 # and the subprocess-timeout cleanup path below is never reached (no timeout stacking
 # on timeout).
-UI_CAPTURE_TIMEOUT_SEC = 120
+# 260915 宿主令调整（120→240）：本机实测整套流程（自起隔离台 + 起控制台 + 10 张截图 +
+# 自拆台）需 ~167s，旧 120s 上限必然砍在中途——被砍时脚本的自拆台步骤不执行，台子泄漏
+# 累积、机器越跑越挤（当日 4 张票连环受阻的根因）。放宽后自拆台得以完成；根治泄漏仍见
+# 后续票（被 kill 路径的兜底回收）。
+UI_CAPTURE_TIMEOUT_SEC = 240
 
 
 def _shot_lines(shots_dir: Path, names: List[str]) -> List[str]:

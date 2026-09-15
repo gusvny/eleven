@@ -222,9 +222,11 @@ ARB_ACC_PARALLEL_PATCH_ID = "dev-lane-arb-acc-parallel-v1"
 #   缓存位（getattr 防御，UT 壳 object.__new__ 不跑 __init__）。
 DETAIL_FACE_PATCH_ID = "dev-lane-detail-face-v1"
 # prepare_ui_evidence activity timeout: must be **clearly larger** than the subprocess
-# timeout inside the activity (agent_activities.UI_CAPTURE_TIMEOUT_SEC=120s), otherwise
+# timeout inside the activity (agent_activities.UI_CAPTURE_TIMEOUT_SEC=240s), otherwise
 # Temporal kills the activity first and the subprocess's own timeout recovery never runs.
-UI_EVIDENCE_TO = timedelta(seconds=180)
+# 260915 宿主令（180→420）：与截图上限同步放宽（实测整套 ~167s；余量还覆盖一次降级候选
+# 尝试），自检守则 UI_EVIDENCE_TO >= UI_CAPTURE_TIMEOUT_SEC + 30 仍满足。
+UI_EVIDENCE_TO = timedelta(seconds=420)
 
 # MAX_REVIEW_ROUNDS moved to shared.py (t260903-02: the review_plan_route pure function
 # must consume the same value); injected via the import below, no longer defined here.
