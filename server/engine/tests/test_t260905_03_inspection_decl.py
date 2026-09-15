@@ -58,13 +58,18 @@ def test_schedule_specs_only_enabled_instances():
 
 def test_real_decl_file_loads_and_test_face_enabled():
     # t260911-02：docs-sync 收编启用（第二实例，scan_face=doc）——两实例进 specs
+    # 260915 宿主令：simplify-face 启用试跑（enabled=true，scan_face=simplify；
+    # 仅手动 trigger，未 schedule-up 无定时）——三实例进 specs（main 侧统一改口径，
+    # 非泳道就地改断言）。
     d = decl.load_inspection_decl(POC / "inspection.yaml")
     assert d.schema == "v1"
     assert d.instance("integration-tests").enabled is True
     assert d.instance("docs-sync").enabled is True
     assert d.instance("docs-sync").scan_face == "doc"
+    assert d.instance("simplify-face").enabled is True
+    assert d.instance("simplify-face").scan_face == "simplify"
     assert [s["instance_id"] for s in decl.build_schedule_specs(d)] == [
-        "integration-tests", "docs-sync"]
+        "integration-tests", "docs-sync", "simplify-face"]
 
 
 def test_default_decl_path_env_override(monkeypatch, tmp_path):
