@@ -280,6 +280,9 @@ function partsTitle(parts) {
 }
 //#endregion
 //#region src/client/lane-states.ts
+/** 就地段信号（t260912-03 授权通道 authorized / retry_qc 信号 retry-requested）：
+*  引擎 raw append 落当前段、不重进段——显示口径见规则 2 的受阻期判定。 */
+const IN_PLACE_MARKS = /* @__PURE__ */ new Set(["authorized", "retry-requested"]);
 /** 单值指针口径（回退用，逐字节为 t260901-05 之前的现行行为，勿改）。 */
 function pointerStates(detail, order) {
 	const states = {};
@@ -335,29 +338,124 @@ function parallelIdsOf(detail, order) {
 	for (const x of raw) if (typeof x === "string" && known.has(x) && !out.includes(x)) out.push(x);
 	return out;
 }
-function deriveStageStates(detail, order) {
+/** 兄弟段判定（兄弟段干完≠本段推进）：groups 在场（已知拓扑）按同组；缺省按
+*  相位——两条目 phase 均非空且相等=兄弟，一空一非空=不同相位=非兄弟，均空
+*  （老票无相位标注，无法判兄弟）按兄弟保守处理——宁红不漏（t260916-04 ③）。 */
+function siblingOf(s, t, groups, phaseB, phaseE) {
+	if (Array.isArray(groups)) return groups.some((g) => Array.isArray(g) && g.includes(s) && g.includes(t));
+	if (phaseB && phaseE) return phaseB === phaseE;
+	if (!phaseB && !phaseE) return true;
+	return false;
+}
+/** 受阻史与当前性判定（t260916-04）：对每段取最后一次 blocked，按其后的证据判
+*  「是否已解除」（E1 rerun / E2 advanced / E3 closed，口径见模块头注）。纯函数、
+*  全程不抛；只对 order 内的段产出键，模板外 id 不泄漏。 */
+function deriveBlockedHistory(detail, order, opts) {
+	const out = {};
+	if (!Array.isArray(detail.timeline)) return out;
+	const clean = [];
+	for (const t of detail.timeline) {
+		if (!t || typeof t.stage !== "string" || typeof t.state !== "string") continue;
+		if (t.stage === "" || t.state === "") continue;
+		clean.push({
+			stage: t.stage,
+			state: t.state,
+			at: typeof t.at === "string" && t.at ? t.at : void 0,
+			reason: typeof t.reason === "string" && t.reason ? t.reason : void 0,
+			gen: typeof t.gen === "number" && Number.isFinite(t.gen) ? t.gen : void 0,
+			phase: typeof t.phase === "string" && t.phase ? t.phase : void 0
+		});
+	}
+	const byStage = {};
+	clean.forEach((e, pos) => {
+		(byStage[e.stage] ??= []).push(pos);
+	});
+	const idxOf = new Map(order.map((id, i) => [id, i]));
+	const closed = detail.status === "closed";
+	for (const id of order) {
+		const positions = byStage[id];
+		if (!positions || positions.length === 0) continue;
+		const passes = positions.map((pos) => ({
+			e: clean[pos],
+			pos
+		})).filter((x) => x.e.state === "blocked");
+		if (passes.length === 0) continue;
+		const lastB = passes[passes.length - 1];
+		let resolved = false;
+		let resolvedBy;
+		let resolvedAt;
+		if (closed) {
+			resolved = true;
+			resolvedBy = "closed";
+		} else {
+			const donePos = positions.find((p) => p > lastB.pos && clean[p].state === "done");
+			if (donePos !== void 0) {
+				resolved = true;
+				resolvedBy = "rerun";
+				resolvedAt = clean[donePos].at;
+			} else {
+				const sIdx = idxOf.get(id);
+				if (sIdx !== void 0) for (let p = lastB.pos + 1; p < clean.length && !resolved; p++) {
+					const e = clean[p];
+					const tIdx = idxOf.get(e.stage);
+					if (tIdx === void 0 || tIdx <= sIdx) continue;
+					if (siblingOf(id, e.stage, opts?.groups, lastB.e.phase, e.phase)) continue;
+					resolved = true;
+					resolvedBy = "advanced";
+					resolvedAt = e.at;
+				}
+			}
+		}
+		out[id] = {
+			passes: passes.map((x) => ({
+				at: x.e.at,
+				reason: x.e.reason,
+				gen: x.e.gen,
+				phase: x.e.phase
+			})),
+			last: {
+				at: lastB.e.at,
+				reason: lastB.e.reason,
+				gen: lastB.e.gen,
+				phase: lastB.e.phase
+			},
+			resolved,
+			...resolvedBy !== void 0 ? { resolvedBy } : {},
+			...resolvedAt !== void 0 ? { resolvedAt } : {}
+		};
+	}
+	return out;
+}
+function deriveStageStates(detail, order, opts) {
+	const blockedHistory = deriveBlockedHistory(detail, order, opts);
 	if (detail.status === "closed") {
 		const states = {};
 		for (const id of order) states[id] = "done";
 		return {
 			states,
 			active: [],
-			fallback: false
+			fallback: false,
+			blockedHistory
 		};
 	}
 	const tl = detail.timeline;
 	if (!tl || tl.length === 0) return {
 		states: pointerStates(detail, order),
 		active: [],
-		fallback: true
+		fallback: true,
+		blockedHistory
 	};
 	const runningCount = {};
 	const latest = {};
+	const lastPosOf = {};
+	let pos = 0;
 	for (const t of tl) {
 		if (!t || typeof t.stage !== "string" || typeof t.state !== "string") continue;
 		if (t.stage === "" || t.state === "") continue;
 		if (t.state === "running") runningCount[t.stage] = (runningCount[t.stage] ?? 0) + 1;
 		latest[t.stage] = t.state;
+		(lastPosOf[t.stage] ??= {})[t.state] = pos;
+		pos++;
 	}
 	const checks = detail.checks ?? {};
 	const results = detail.results ?? {};
@@ -379,9 +477,34 @@ function deriveStageStates(detail, order) {
 	const active = [];
 	order.forEach((id, idx) => {
 		const last = latest[id];
-		if (last === "blocked" || last === "awaiting-human" || last === "done") {
+		if (last === "blocked") {
+			const h = blockedHistory[id];
+			if (h && h.resolved) {
+				states[id] = "done";
+				return;
+			}
+			states[id] = "blocked";
+			return;
+		}
+		if (last === "awaiting-human" || last === "done") {
 			states[id] = last;
 			return;
+		}
+		if (last !== void 0 && IN_PLACE_MARKS.has(last)) {
+			const bp = lastPosOf[id]?.blocked;
+			if (bp !== void 0) {
+				if (![
+					"running",
+					"done",
+					"awaiting-human"
+				].some((st) => {
+					const p = lastPosOf[id]?.[st];
+					return p !== void 0 && p > bp;
+				})) {
+					states[id] = "blocked";
+					return;
+				}
+			}
 		}
 		if ((runningCount[id] ?? 0) > attemptsOf(id)) {
 			states[id] = "running";
@@ -406,12 +529,14 @@ function deriveStageStates(detail, order) {
 	if (active.length === 0) return {
 		states: pointerStates(detail, order),
 		active: [],
-		fallback: true
+		fallback: true,
+		blockedHistory
 	};
 	return {
 		states,
 		active,
-		fallback: false
+		fallback: false,
+		blockedHistory
 	};
 }
 //#endregion
@@ -589,7 +714,9 @@ function stageDurationTitle(d, nowMs) {
 *     null = 调用方回落现行线性步骤条（零回归降级锚）。
 *   - detail：工单详情（ticket show 投影面）。消费 timeline（gen/phase 键，
 *     t260915-01 ③）、gens、handoffs（gen 键）、results、checks、gate_runs、
-*     meta.parallel_stages/parallel_phase、status/stage/stage_state。
+*     meta.parallel_stages/parallel_phase、status/stage/stage_state；
+*     t260916-04 起并消费受阻史（blockedHistory：解除判定住 lane-states 推导层，
+*     拓扑并行组透传给它做兄弟段判定；节点视图携史供渲染层出「曾受阻」角标）。
 *
 * 轮次口径（与 lane-durations 的轮窗同族，此处取「轮格」语义）：
 *   - 引擎 timeline 条目带 gen（门开的新票）→ 按 gen 分组，一轮一格；
@@ -825,15 +952,17 @@ function buildLaneMap(topologyRaw, detailRaw) {
 		checks: detail.checks !== null && typeof detail.checks === "object" ? detail.checks : void 0,
 		parallel_stages: Array.isArray(detail.parallel_stages) ? detail.parallel_stages : void 0,
 		meta: detail.meta
-	}, order);
+	}, order, { groups: topology.groups.map((g) => g.members) });
 	const nodes = {};
 	for (const n of topology.nodes) {
 		const rounds = deriveRounds(n.id, detail);
+		const bh = derived.blockedHistory[n.id];
 		nodes[n.id] = {
 			node: n,
 			vis: derived.states[n.id] ?? "todo",
 			rounds,
-			badge: rounds.length > 1 ? `×${rounds.length}` : ""
+			badge: rounds.length > 1 ? `×${rounds.length}` : "",
+			...bh ? { blockedHistory: bh } : {}
 		};
 	}
 	const groups = {};
@@ -890,7 +1019,10 @@ function buildLaneMap(topologyRaw, detailRaw) {
 *   - 条件段（optional）=虚节点+条件注记；
 *   - 轮次带=同段多轮逐轮一格，hover title=该轮证据/打回原因（数据=gen/phase）；
 *   - 不画返工弧：返工史归打回横幅与本组件 ×N 徽章，图面单向流
-*     （守卫：组件永不渲染 .wb-lm-arc，DOM 场景断言其恒零）。
+*     （守卫：组件永不渲染 .wb-lm-arc，DOM 场景断言其恒零）；
+*   - 受阻着色（t260916-04）：当前受阻=实心红（data-vis=blocked，CSS 实底）；
+*     历史已解除受阻=完成色+「曾受阻」角标（.wb-lm-ever，黄点），节点/角标
+*     hover 出经过（何时受阻、何因、如何解除；数据=blockedHistory）。
 */
 const LM_ICON = {
 	done: "✓",
@@ -900,6 +1032,21 @@ const LM_ICON = {
 	todo: "○",
 	rework: "↺"
 };
+/** 解除方式人话（hover 经过第三拍「如何解除」；词表=lane-states resolvedBy）。 */
+const RESOLVED_HOW = {
+	rerun: "本段重跑完成",
+	advanced: "工作流已推进至后续段",
+	closed: "工单已收口"
+};
+/** 「曾受阻」经过（何时受阻、何因、如何解除）：角标与节点 hover 共用一段话。 */
+function everBlockedTitle(h) {
+	const bits = [`曾受阻 ${h.passes.length} 次`];
+	if (h.last.at) bits.push(h.last.at);
+	if (h.last.reason) bits.push(h.last.reason);
+	if (h.last.gen !== void 0) bits.push(`第${h.last.gen}轮`);
+	if (h.resolved) bits.push(`已解除（${RESOLVED_HOW[h.resolvedBy ?? ""] || "已解除"}${h.resolvedAt ? `：${h.resolvedAt}` : ""}）`);
+	return bits.join(" · ");
+}
 function roundTitle(nv, gen, state) {
 	const r = nv.rounds.find((x) => x.gen === gen);
 	if (!r) return `第${gen}轮`;
@@ -915,12 +1062,15 @@ function roundTitle(nv, gen, state) {
 function LaneMapNode({ nv, inGroup }) {
 	const n = nv.node;
 	const glyph = n.kind === "human" ? LANE_KIND_ICON.human : LM_ICON[nv.vis] ?? LM_ICON.todo;
-	const title = `${n.label} · ${n.role} · ${n.kind}${n.optional ? ` · ${n.optional}` : ""}`;
+	const ever = nv.blockedHistory?.resolved === true && nv.blockedHistory.passes.length > 0 && nv.vis === "done";
+	const everTitle = ever && nv.blockedHistory ? everBlockedTitle(nv.blockedHistory) : "";
+	const title = `${n.label} · ${n.role} · ${n.kind}${n.optional ? ` · ${n.optional}` : ""}${everTitle ? ` · ${everTitle}` : ""}`;
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 		className: `wb-lm-node${inGroup ? " wb-lm-node-inlane" : ""}`,
 		"data-id": n.id,
 		"data-kind": n.kind,
 		"data-vis": nv.vis,
+		"data-ever-blocked": ever ? "true" : void 0,
 		title,
 		children: [
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {
@@ -940,6 +1090,11 @@ function LaneMapNode({ nv, inGroup }) {
 						className: "wb-lm-badge",
 						title: `该段共 ${nv.rounds.length} 轮（返工史见打回横幅）`,
 						children: nv.badge
+					}) : null,
+					ever && nv.blockedHistory ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {
+						className: "wb-lm-ever",
+						title: everBlockedTitle(nv.blockedHistory),
+						children: "曾受阻"
 					}) : null
 				]
 			}),
@@ -50407,7 +50562,8 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-lm-dot{width:26px;height:26px;border-radius:50%;border:2px solid var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-canvas,#fff);display:flex;align-items:center;justify-content:center;font-size:12px;font-style:normal}
 .wb-lm-node[data-vis=done] .wb-lm-dot{border-color:var(--dsw-derive-success,#4ac26b);background:var(--dsw-derive-success-bg,#dafbe1);color:var(--dsw-derive-success,#1a7f37)}
 .wb-lm-node[data-vis=running] .wb-lm-dot{border-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff);color:var(--dsw-derive-accent-deep,#0550ae);box-shadow:0 0 0 4px rgba(9,105,218,.12)}
-.wb-lm-node[data-vis=blocked] .wb-lm-dot{border-color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e)}
+/* t260916-04：当前受阻=实心红（既有强调收实底，反白 glyph），与「曾受阻=完成色+角标」区分 */
+.wb-lm-node[data-vis=blocked] .wb-lm-dot{border-color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger,#cf222e);color:var(--dsw-derive-canvas,#fff)}
 .wb-lm-node[data-vis=awaiting-human] .wb-lm-dot{border-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
 /* 人门=虚线圈（mock 屏③ callout E：人门站与机械站形状区分） */
 .wb-lm-node[data-kind=human] .wb-lm-dot{border-style:dashed;border-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5)}
@@ -50416,6 +50572,9 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-lm-name{font-size:11px;font-weight:600;color:var(--dsw-derive-fg,#1f2328);line-height:1.3;text-align:center;white-space:nowrap}
 .wb-lm-opt{font-style:normal;font-size:9.5px;color:var(--dsw-derive-muted,#8c959f);border:1px dashed var(--dsw-derive-border,#d0d7de);border-radius:6px;padding:0 4px;margin-left:3px}
 .wb-lm-badge{font-size:9.5px;color:var(--dsw-derive-warn-deep,#953800);background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn,#d4a72c);border-radius:8px;padding:0 5px;margin-left:3px}
+/* t260916-04：历史已解除受阻=完成色+「曾受阻」角标（黄点；hover 出经过，lane-map.tsx） */
+.wb-lm-ever{font-style:normal;font-size:9.5px;color:var(--dsw-derive-warn-deep,#953800);background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn,#d4a72c);border-radius:8px;padding:0 5px;margin-left:3px;cursor:default;white-space:nowrap}
+.wb-lm-ever::before{content:'●';color:var(--dsw-derive-warn,#9a6700);margin-right:2px;font-size:8px;vertical-align:1px}
 .wb-lm-rounds{display:flex;gap:3px;flex-wrap:wrap;justify-content:center}
 .wb-lm-round{font-size:9px;color:var(--dsw-derive-muted,#57606a);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;padding:0 4px;cursor:default}
 .wb-lm-round[data-state=done]{color:var(--dsw-derive-success,#1a7f37);border-color:var(--dsw-derive-success,#4ac26b);background:var(--dsw-derive-success-bg,#dafbe1)}

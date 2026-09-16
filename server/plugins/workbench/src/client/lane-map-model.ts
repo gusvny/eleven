@@ -11,7 +11,9 @@
  *     null = 调用方回落现行线性步骤条（零回归降级锚）。
  *   - detail：工单详情（ticket show 投影面）。消费 timeline（gen/phase 键，
  *     t260915-01 ③）、gens、handoffs（gen 键）、results、checks、gate_runs、
- *     meta.parallel_stages/parallel_phase、status/stage/stage_state。
+ *     meta.parallel_stages/parallel_phase、status/stage/stage_state；
+ *     t260916-04 起并消费受阻史（blockedHistory：解除判定住 lane-states 推导层，
+ *     拓扑并行组透传给它做兄弟段判定；节点视图携史供渲染层出「曾受阻」角标）。
  *
  * 轮次口径（与 lane-durations 的轮窗同族，此处取「轮格」语义）：
  *   - 引擎 timeline 条目带 gen（门开的新票）→ 按 gen 分组，一轮一格；
@@ -25,7 +27,7 @@
  *   消费本模块的渲染器不得出现任何 dev-lane 专属词（fixture-two-step 对拍锚）。
  */
 import { deriveStageStates } from './lane-states.ts'
-import type { D2Visual, LaneDetailLike } from './lane-states.ts'
+import type { D2Visual, LaneDetailLike, LaneBlockedHistory } from './lane-states.ts'
 import { HANDOFF_KEY_ALIAS } from './lane-durations.ts'
 
 /* ── 拓扑契约（引擎 template_topology.py topology-v1） ── */
@@ -90,6 +92,9 @@ export interface LaneNodeView {
   rounds: LaneRound[]
   /** 轮次徽章文案（rounds>1 → ×N；单轮空串）。 */
   badge: string
+  /** 受阻史与当前性判定（t260916-04）：resolved=true 且 vis='done' → 渲染层出
+   *  「曾受阻」角标+hover 经过；无受阻史的段缺省（键不存在）。 */
+  blockedHistory?: LaneBlockedHistory
 }
 
 export interface LaneGroupView {
@@ -391,16 +396,19 @@ export function buildLaneMap(topologyRaw: unknown, detailRaw: unknown): LaneMapM
     parallel_stages: Array.isArray(detail.parallel_stages) ? detail.parallel_stages as string[] : undefined,
     meta: detail.meta as LaneDetailLike['meta'],
   }
-  const derived = deriveStageStates(laneDetail, order)
+  // t260916-04：拓扑并行组透传给受阻解除判定（泳道图面全语义；兄弟段干完≠推进）。
+  const derived = deriveStageStates(laneDetail, order, { groups: topology.groups.map(g => g.members) })
 
   const nodes: Record<string, LaneNodeView> = {}
   for (const n of topology.nodes) {
     const rounds = deriveRounds(n.id, detail)
+    const bh = derived.blockedHistory[n.id]
     nodes[n.id] = {
       node: n,
       vis: derived.states[n.id] ?? 'todo',
       rounds,
       badge: rounds.length > 1 ? `×${rounds.length}` : '',
+      ...(bh ? { blockedHistory: bh } : {}),
     }
   }
 

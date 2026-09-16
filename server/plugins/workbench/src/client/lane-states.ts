@@ -47,6 +47,34 @@
  *    （fork 瞬间 timeline 轮询滞后/启发式误判面，
  *    acceptance_walkthrough 相邻边尤其受益）；
  *  - 畸形条目（非字符串/模板外 id）丢弃，与 timeline 畸形输入同纪律。
+ *
+ * t260916-04（图面受阻着色语义）：blocked 的「当前性」按后续证据判定，不再按
+ * 「该段最后一条流水」永久钉红（t260916-02 实证：implement 同刻 done+blocked，
+ * 解除证据记在相邻后段，该段红永久挂着，读图人误读「实现失败」）。口径：
+ *  - 解除证据（条目位置必须在最后一次 blocked 之后；数组序=追加序=时序——与规则 2
+ *    的 latest 覆盖序是同一契约，本推导不新增乱序暴露面；KI-019 扁平时间线结构性
+ *    失真族同图面，其根修（引擎因果序号+真泳道呈现）不随本票）：
+ *      E1 本段重跑完成：同段其后有 done → rerun；
+ *      E2 工作流已推进：后段（idx 更大）其后有条目且该段非并行兄弟 → advanced
+ *        （后段证据任意条目型均可——引擎在任何后段落条目=工作流已过汇合）；
+ *      E3 工单已收口：status==='closed' → closed（历史受阻随收口解除，工单④）。
+ *  - 同段证据只认 done：authorized/retry-requested（t260912-03 授权通道/请求重验
+ *    留痕）不作解除证据——人放了话≠活干成了（保守③：宁可吓人，不许漏报）。
+ *  - 就地段信号显示口径：authorized/retry-requested 由引擎 raw append 落在当前段、
+ *    不重进段（retry_qc 只是唤醒令牌，真重跑以随后的 running 为准）——最后一次
+ *    受阻之后本段没有再 running/done/awaiting-human 时按 blocked 显示（旧启发式在
+ *    该窗口会误显 ▶「重跑中」），真重跑进段后照常走 ▶/done。
+ *  - 并行兄弟判定（兄弟段干完≠推进；并行 gather 里本段受阻等重试时兄弟可继续跑完）：
+ *    opts.groups 在场（泳道图面，buildLaneMap 透传拓扑 groups）按同组判定；缺省
+ *    （降级步骤条/裸 import 直跑）按相位判定——两条目 phase 均非空且相等=兄弟，
+ *    一空一非空=不同相位=非兄弟，均空（老票无相位标注）按兄弟保守处理（宁红不漏）。
+ *  - 显示态换算：最新显式态=blocked 且已解除 → vis='done'（完成色）；受阻史以
+ *    blockedHistory 正交数据随行（不进 D2Visual 五态词表，零回归锚），渲染层
+ *    （lane-map）据此出「曾受阻」角标+hover 经过。未解除 → 保持 blocked。
+ *  - 同机制面排查（实报即全族）：awaiting-human 豁免——sign 批准路径同段落
+ *    running + _finish('merge') 落 done，无滞留面；awaiting（adopt）不在规则 2
+ *    钉住集 {blocked, awaiting-human, done}；failed/cancelled 终态票的历史受阻
+ *    保持红=诚实留痕（工单④只定 closed，死票观感如需另裁，另立票不扩本票 scope）。
  */
 
 /** 阶段视觉态：done✓ / running▶ / blocked✗ / awaiting-human✋ / todo○。 */
@@ -58,7 +86,7 @@ export interface LaneDetailLike {
   status?: string
   stage?: string | null
   stage_state?: string
-  timeline?: { at?: string; stage?: string; state?: string; reason?: string }[] | null
+  timeline?: { at?: string; stage?: string; state?: string; reason?: string; gen?: number; phase?: string }[] | null
   results?: Record<string, { status?: string; gen?: number }>
   checks?: Record<string, { item: string; done: boolean; by?: string }[]>
   /** KI-024 并行真源：引擎快照放在 meta 全文里（meta.parallel_stages）；顶层
@@ -68,12 +96,47 @@ export interface LaneDetailLike {
 }
 
 /** 推导结果：states 恒覆盖 order 每一步（含回退口径）；active=活跃步数组；
- *  fallback=true 表示本次走了单值指针回退（调用方如需区分新旧口径可用）。 */
+ *  fallback=true 表示本次走了单值指针回退（调用方如需区分新旧口径可用）；
+ *  blockedHistory=受阻史与当前性判定（t260916-04 增键，形状向后兼容）。 */
 export interface LaneStatesResult {
   states: Record<string, D2Visual>
   active: string[]
   fallback: boolean
+  blockedHistory: Record<string, LaneBlockedHistory>
 }
+
+/** 一轮受阻（图面「曾受阻」经过的数据源，t260916-04）。 */
+export interface LaneBlockedPass {
+  at?: string
+  reason?: string
+  gen?: number
+  phase?: string
+}
+
+/** 一段的受阻史与当前性判定（t260916-04）：resolved=true（vis 已换算 done）→
+ *  渲染层出「曾受阻」角标+hover 经过；resolved=false → 保持当前受阻实心红。 */
+export interface LaneBlockedHistory {
+  /** 全部受阻轮（角标计数；逐轮红格留痕归轮次带，这里只做计数+最近一次）。 */
+  passes: LaneBlockedPass[]
+  /** 最近一次受阻（hover 经过主行：何时受阻、何因）。 */
+  last: LaneBlockedPass
+  /** 当前语义：受阻是否已被后续证据解除（口径见模块头注）。 */
+  resolved: boolean
+  /** 解除方式：rerun=本段重跑完成 / advanced=工作流已推进至后续段 / closed=工单已收口。 */
+  resolvedBy?: 'rerun' | 'advanced' | 'closed'
+  /** 解除证据条目时刻（closed 无对应条目=缺省）。 */
+  resolvedAt?: string
+}
+
+/** deriveStageStates/deriveBlockedHistory 可选项：拓扑并行组成员数组（泳道图由
+ *  buildLaneMap 透传 topology.groups；缺省=降级面，按相位保守判定）。 */
+export interface LaneStatesOpts {
+  groups?: string[][]
+}
+
+/** 就地段信号（t260912-03 授权通道 authorized / retry_qc 信号 retry-requested）：
+ *  引擎 raw append 落当前段、不重进段——显示口径见规则 2 的受阻期判定。 */
+const IN_PLACE_MARKS = new Set(['authorized', 'retry-requested'])
 
 /** 单值指针口径（回退用，逐字节为 t260901-05 之前的现行行为，勿改）。 */
 function pointerStates(detail: LaneDetailLike, order: string[]): Record<string, D2Visual> {
@@ -117,24 +180,114 @@ function parallelIdsOf(detail: LaneDetailLike, order: string[]): string[] {
   return out
 }
 
-export function deriveStageStates(detail: LaneDetailLike, order: string[]): LaneStatesResult {
+/** 兄弟段判定（兄弟段干完≠本段推进）：groups 在场（已知拓扑）按同组；缺省按
+ *  相位——两条目 phase 均非空且相等=兄弟，一空一非空=不同相位=非兄弟，均空
+ *  （老票无相位标注，无法判兄弟）按兄弟保守处理——宁红不漏（t260916-04 ③）。 */
+function siblingOf(s: string, t: string, groups: string[][] | undefined,
+  phaseB?: string, phaseE?: string): boolean {
+  if (Array.isArray(groups)) {
+    return groups.some(g => Array.isArray(g) && g.includes(s) && g.includes(t))
+  }
+  if (phaseB && phaseE) return phaseB === phaseE
+  if (!phaseB && !phaseE) return true
+  return false
+}
+
+/** 受阻史与当前性判定（t260916-04）：对每段取最后一次 blocked，按其后的证据判
+ *  「是否已解除」（E1 rerun / E2 advanced / E3 closed，口径见模块头注）。纯函数、
+ *  全程不抛；只对 order 内的段产出键，模板外 id 不泄漏。 */
+export function deriveBlockedHistory(detail: LaneDetailLike, order: string[],
+  opts?: LaneStatesOpts): Record<string, LaneBlockedHistory> {
+  const out: Record<string, LaneBlockedHistory> = {}
+  if (!Array.isArray(detail.timeline)) return out
+  // 清洗一次（与规则 2 同纪律：缺字段条目跳过）；位置=清洗后数组下标=追加时序。
+  const clean: Array<{ stage: string; state: string; at?: string; reason?: string; gen?: number; phase?: string }> = []
+  for (const t of detail.timeline) {
+    if (!t || typeof t.stage !== 'string' || typeof t.state !== 'string') continue
+    if (t.stage === '' || t.state === '') continue
+    clean.push({
+      stage: t.stage,
+      state: t.state,
+      at: typeof t.at === 'string' && t.at ? t.at : undefined,
+      reason: typeof t.reason === 'string' && t.reason ? t.reason : undefined,
+      gen: typeof t.gen === 'number' && Number.isFinite(t.gen) ? t.gen : undefined,
+      phase: typeof t.phase === 'string' && t.phase ? t.phase : undefined,
+    })
+  }
+  const byStage: Record<string, number[]> = {}
+  clean.forEach((e, pos) => { (byStage[e.stage] ??= []).push(pos) })
+  const idxOf = new Map(order.map((id, i) => [id, i]))
+  const closed = detail.status === 'closed'
+  for (const id of order) {
+    const positions = byStage[id]
+    if (!positions || positions.length === 0) continue
+    const passes = positions.map(pos => ({ e: clean[pos], pos })).filter(x => x.e.state === 'blocked')
+    if (passes.length === 0) continue
+    const lastB = passes[passes.length - 1]
+    let resolved = false
+    let resolvedBy: LaneBlockedHistory['resolvedBy']
+    let resolvedAt: string | undefined
+    if (closed) {
+      // E3：收口=历史受阻随收口解除（工单④；收口时刻不对应单条 timeline 条目）。
+      resolved = true
+      resolvedBy = 'closed'
+    } else {
+      // E1：同段证据只认 done（authorized/retry-requested 不算——人放话≠干成）。
+      const donePos = positions.find(p => p > lastB.pos && clean[p].state === 'done')
+      if (donePos !== undefined) {
+        resolved = true
+        resolvedBy = 'rerun'
+        resolvedAt = clean[donePos].at
+      } else {
+        // E2：后段（idx 更大）其后任意条目型=工作流已过汇合；并行兄弟段不算。
+        const sIdx = idxOf.get(id)
+        if (sIdx !== undefined) {
+          for (let p = lastB.pos + 1; p < clean.length && !resolved; p++) {
+            const e = clean[p]
+            const tIdx = idxOf.get(e.stage)
+            if (tIdx === undefined || tIdx <= sIdx) continue
+            if (siblingOf(id, e.stage, opts?.groups, lastB.e.phase, e.phase)) continue
+            resolved = true
+            resolvedBy = 'advanced'
+            resolvedAt = e.at
+          }
+        }
+      }
+    }
+    out[id] = {
+      passes: passes.map(x => ({ at: x.e.at, reason: x.e.reason, gen: x.e.gen, phase: x.e.phase })),
+      last: { at: lastB.e.at, reason: lastB.e.reason, gen: lastB.e.gen, phase: lastB.e.phase },
+      resolved,
+      ...(resolvedBy !== undefined ? { resolvedBy } : {}),
+      ...(resolvedAt !== undefined ? { resolvedAt } : {}),
+    }
+  }
+  return out
+}
+
+export function deriveStageStates(detail: LaneDetailLike, order: string[], opts?: LaneStatesOpts): LaneStatesResult {
+  const blockedHistory = deriveBlockedHistory(detail, order, opts)
   if (detail.status === 'closed') {
     const states: Record<string, D2Visual> = {}
     for (const id of order) states[id] = 'done'
-    return { states, active: [], fallback: false }
+    return { states, active: [], fallback: false, blockedHistory }
   }
   const tl = detail.timeline
   if (!tl || tl.length === 0) {
-    return { states: pointerStates(detail, order), active: [], fallback: true }
+    return { states: pointerStates(detail, order), active: [], fallback: true, blockedHistory }
   }
   // 畸形输入：缺字段的条目跳过；模板外 id 不入统计（不建状态、不进活跃数组）。
   const runningCount: Record<string, number> = {}
   const latest: Record<string, string> = {}
+  const lastPosOf: Record<string, Record<string, number>> = {} // stage→state→最后位置（清洗后序）
+  let pos = 0
   for (const t of tl) {
     if (!t || typeof t.stage !== 'string' || typeof t.state !== 'string') continue
     if (t.stage === '' || t.state === '') continue
     if (t.state === 'running') runningCount[t.stage] = (runningCount[t.stage] ?? 0) + 1
     latest[t.stage] = t.state
+    ;(lastPosOf[t.stage] ??= {})[t.state] = pos
+    pos++
   }
   // attempts：完整跑过的轮数。results 存在 = gen+1（软失败 failed 也计次）；
   // 无 results 而 checks 全 done = 1（merge/merge_check 纯脚本门）；其余 0。
@@ -158,11 +311,30 @@ export function deriveStageStates(detail: LaneDetailLike, order: string[]): Lane
   const states: Record<string, D2Visual> = {}
   const active: string[] = []
   order.forEach((id, idx) => {
-    // 规则 2：timeline 最新显式态优先。
+    // 规则 2：timeline 最新显式态优先。blocked 的「当前性」按解除证据判定
+    //（t260916-04：已解除 → 完成色，受阻史走 blockedHistory 出角标；未解除保守红）。
     const last = latest[id]
-    if (last === 'blocked' || last === 'awaiting-human' || last === 'done') {
+    if (last === 'blocked') {
+      const h = blockedHistory[id]
+      if (h && h.resolved) { states[id] = 'done'; return }
+      states[id] = 'blocked'
+      return
+    }
+    if (last === 'awaiting-human' || last === 'done') {
       states[id] = last
       return
+    }
+    // 就地段信号（authorized/retry-requested）不重进段：最后一次受阻之后本段没有
+    // 再 running/done/awaiting-human → 仍在受阻期内，按 blocked 显示（保守③）。
+    if (last !== undefined && IN_PLACE_MARKS.has(last)) {
+      const bp = lastPosOf[id]?.blocked
+      if (bp !== undefined) {
+        const rejoined = ['running', 'done', 'awaiting-human'].some(st => {
+          const p = lastPosOf[id]?.[st]
+          return p !== undefined && p > bp
+        })
+        if (!rejoined) { states[id] = 'blocked'; return }
+      }
     }
     // 规则 4：inRun 计数（走到这里最新态必是 running 或无条目）。
     // （t260910-14：原预跑段排除条件随该段退役删除。）
@@ -191,7 +363,7 @@ export function deriveStageStates(detail: LaneDetailLike, order: string[]): Lane
   }
   // 回退：活跃数组空 → 单值指针口径（逐字节保持现行为）。
   if (active.length === 0) {
-    return { states: pointerStates(detail, order), active: [], fallback: true }
+    return { states: pointerStates(detail, order), active: [], fallback: true, blockedHistory }
   }
-  return { states, active, fallback: false }
+  return { states, active, fallback: false, blockedHistory }
 }

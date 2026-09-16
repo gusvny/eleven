@@ -182,6 +182,50 @@ ok(parseTopology({ nodes: [{ id: 'a', label: '', kind: 'agent' }] }) === null, '
   ok(buildLaneMap(DEV_LANE_TOPOLOGY, null) !== null, 'B: detail=null 软降级（拓扑半仍可画）')
 }
 
+/* ── B2. 受阻史接线（t260916-04）：groups 透传解除判定，节点视图携史 ── */
+{
+  // 复现腿形态：implement 同刻 done+blocked，解除证据记在相邻后段（run_integration_tests）
+  const detail = {
+    status: 'running', stage: 'run_integration_tests', stage_state: 'running',
+    results: { create_plan: { status: 'ok', gen: 1 }, review_plan: { status: 'ok', gen: 1 } },
+    gens: { create_plan: 1, review_plan: 1, implement: 1, run_integration_tests: 1 },
+    timeline: [
+      { at: 'T1', stage: 'create_plan', state: 'running', reason: '', gen: 1 },
+      { at: 'T2', stage: 'create_plan', state: 'done', reason: '', gen: 1 },
+      { at: 'T3', stage: 'review_plan', state: 'running', reason: '', gen: 1 },
+      { at: 'T4', stage: 'review_plan', state: 'done', reason: '', gen: 1 },
+      { at: 'T5', stage: 'implement', state: 'running', reason: '', gen: 1, phase: 'parallel_impl_design' },
+      { at: 'T6', stage: 'implement', state: 'done', reason: '活干完', gen: 1, phase: 'parallel_impl_design' },
+      { at: 'T7', stage: 'implement', state: 'blocked', reason: '受保护路径闸拒绝落盘', gen: 1, phase: 'parallel_impl_design' },
+      { at: 'T8', stage: 'run_integration_tests', state: 'running', reason: '', gen: 1 },
+    ],
+  }
+  const m = buildLaneMap(DEV_LANE_TOPOLOGY, detail)
+  ok(m !== null && m.nodes['implement'].vis === 'done', 'B2: implement 显完成色（不钉红）')
+  const bh = m.nodes['implement'].blockedHistory
+  ok(!!bh && bh.resolved === true && bh.resolvedBy === 'advanced', 'B2: 节点视图携解除史（advanced）')
+  ok(bh.last.reason === '受保护路径闸拒绝落盘' && bh.passes.length === 1, 'B2: hover 经过数据源（最近受阻+计数）')
+  ok(m.nodes['create_plan'].blockedHistory === undefined, 'B2: 无受阻史的段不带键')
+  // 真当前受阻：无后续证据 → vis=blocked 且史标未解除（渲染层据此不出角标）
+  const m2 = buildLaneMap(DEV_LANE_TOPOLOGY, {
+    status: 'running', stage: 'merge_check', stage_state: 'blocked',
+    timeline: [
+      { at: 'T1', stage: 'create_plan', state: 'done', reason: '', gen: 1 },
+      { at: 'T2', stage: 'merge_check', state: 'running', reason: '', gen: 1 },
+      { at: 'T3', stage: 'merge_check', state: 'blocked', reason: 'verify_red', gen: 1 },
+    ],
+  })
+  ok(m2.nodes['merge_check'].vis === 'blocked', 'B2: 真当前受阻仍红')
+  ok(m2.nodes['merge_check'].blockedHistory.resolved === false, 'B2: 未解除史在场（角标渲染闸）')
+  // closed：历史受阻段随收口解除（工单④）
+  const m3 = buildLaneMap(DEV_LANE_TOPOLOGY, {
+    status: 'closed', stage: 'merge', stage_state: 'done',
+    timeline: [{ at: 'T1', stage: 'create_plan', state: 'blocked', reason: '越界', gen: 1 }],
+  })
+  ok(m3.nodes['create_plan'].vis === 'done' && m3.nodes['create_plan'].blockedHistory.resolvedBy === 'closed',
+    'B2: closed 历史受阻=完成色+closed 解除史')
+}
+
 /* ── C. buildChecksDetail ── */
 {
   const detail = {

@@ -11,13 +11,36 @@
  *   - 条件段（optional）=虚节点+条件注记；
  *   - 轮次带=同段多轮逐轮一格，hover title=该轮证据/打回原因（数据=gen/phase）；
  *   - 不画返工弧：返工史归打回横幅与本组件 ×N 徽章，图面单向流
- *     （守卫：组件永不渲染 .wb-lm-arc，DOM 场景断言其恒零）。
+ *     （守卫：组件永不渲染 .wb-lm-arc，DOM 场景断言其恒零）；
+ *   - 受阻着色（t260916-04）：当前受阻=实心红（data-vis=blocked，CSS 实底）；
+ *     历史已解除受阻=完成色+「曾受阻」角标（.wb-lm-ever，黄点），节点/角标
+ *     hover 出经过（何时受阻、何因、如何解除；数据=blockedHistory）。
  */
 import { LANE_KIND_ICON } from './lane-map-model.ts'
 import type { LaneMapModel, LaneNodeView, GateRunView } from './lane-map-model.ts'
+import type { LaneBlockedHistory } from './lane-states.ts'
 
 const LM_ICON: Record<string, string> = {
   done: '✓', running: '▶', blocked: '✗', 'awaiting-human': '✋', todo: '○', rework: '↺',
+}
+
+/** 解除方式人话（hover 经过第三拍「如何解除」；词表=lane-states resolvedBy）。 */
+const RESOLVED_HOW: Record<string, string> = {
+  rerun: '本段重跑完成',
+  advanced: '工作流已推进至后续段',
+  closed: '工单已收口',
+}
+
+/** 「曾受阻」经过（何时受阻、何因、如何解除）：角标与节点 hover 共用一段话。 */
+function everBlockedTitle(h: LaneBlockedHistory): string {
+  const bits = [`曾受阻 ${h.passes.length} 次`]
+  if (h.last.at) bits.push(h.last.at)
+  if (h.last.reason) bits.push(h.last.reason)
+  if (h.last.gen !== undefined) bits.push(`第${h.last.gen}轮`)
+  if (h.resolved) {
+    bits.push(`已解除（${RESOLVED_HOW[h.resolvedBy ?? ''] || '已解除'}${h.resolvedAt ? `：${h.resolvedAt}` : ''}）`)
+  }
+  return bits.join(' · ')
 }
 
 function roundTitle(nv: LaneNodeView, gen: number, state: string): string {
@@ -36,13 +59,18 @@ function roundTitle(nv: LaneNodeView, gen: number, state: string): string {
 function LaneMapNode({ nv, inGroup }: { nv: LaneNodeView; inGroup: boolean }) {
   const n = nv.node
   const glyph = n.kind === 'human' ? LANE_KIND_ICON.human : (LM_ICON[nv.vis] ?? LM_ICON.todo)
-  const title = `${n.label} · ${n.role} · ${n.kind}${n.optional ? ` · ${n.optional}` : ''}`
+  // t260916-04：历史已解除受阻=完成色+角标；当前受阻（未解除）不带角标（保守红）。
+  const ever = nv.blockedHistory?.resolved === true
+    && nv.blockedHistory.passes.length > 0 && nv.vis === 'done'
+  const everTitle = ever && nv.blockedHistory ? everBlockedTitle(nv.blockedHistory) : ''
+  const title = `${n.label} · ${n.role} · ${n.kind}${n.optional ? ` · ${n.optional}` : ''}${everTitle ? ` · ${everTitle}` : ''}`
   return (
     <span
       className={`wb-lm-node${inGroup ? ' wb-lm-node-inlane' : ''}`}
       data-id={n.id}
       data-kind={n.kind}
       data-vis={nv.vis}
+      data-ever-blocked={ever ? 'true' : undefined}
       title={title}
     >
       <i className="wb-lm-dot">{glyph}</i>
@@ -50,6 +78,9 @@ function LaneMapNode({ nv, inGroup }: { nv: LaneNodeView; inGroup: boolean }) {
         {n.label}
         {n.optional ? <em className="wb-lm-opt" title={`条件段：${n.optional}`}>{n.optional}</em> : null}
         {nv.badge ? <b className="wb-lm-badge" title={`该段共 ${nv.rounds.length} 轮（返工史见打回横幅）`}>{nv.badge}</b> : null}
+        {ever && nv.blockedHistory
+          ? <i className="wb-lm-ever" title={everBlockedTitle(nv.blockedHistory)}>曾受阻</i>
+          : null}
       </span>
       {nv.rounds.length > 0 && (
         <span className="wb-lm-rounds">

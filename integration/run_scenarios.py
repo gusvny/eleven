@@ -1219,6 +1219,12 @@ SCENARIOS = [
      "attempt→台名映射回执可查+容量计数面（t260915-18 工单②「怎么算好②」+容量可见半边，灰盒 L3，真 docker 台）：stage_docker.py inventory 只读回执——capacity 计数面（containers/projects/leases/orphans/max_stages 等 ≥五键子集，上限真值同面呈现）+stages 逐台条目（落地形状=扁平 holder_ticket/working_dir/age_s/containers，260915 对齐；语义钉=台属于哪个泳道/票号可核对）；起台挂 SANDBAR_STAGE_TICKET=票号 → 回执 holder_ticket=票号（ticket→project→容器一眼可对，人工排障不再猜哈希台名=病灶四用户面）；未挂票号台 holder_ticket=unknown 缺省（不编造归属——报错精确纪律）；拆台后条目消失（清单跟随真实容器面，当日「锁根 1 租约 vs 38 容器」失明形态在回执层不可再现）。与 t260912-02 系（起台/清扫/网段行为面）intent 不同面：本条锚可见性回执（只读、零 docker 变更动作）；工单③热台复用缺省关无用户可感知行为归 developer L1，不立场景；t260910-12 租约四象限归 L1 不同层。登记 engine。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker 缺席=ENV_FAIL exit 2",
      "python3 integration/t260915-18/sc_stage_inventory_mapping.py", "engine"),
 
+    # ---- t260916-04: 泳道图受阻着色语义（历史已解除受阻不显当前受阻红，t260916-02 实证）----
+    # 与 t260915-05-detail-lane-map-dom 分工见 intent 末段：彼锁详情渲染面通用契约，
+    # 本条只锁「受阻史的图面投影」新面（着色翻转/角标/hover 经过/保守边界/降级面同推导）。
+    ("t260916-04-lane-map-everblocked-dom",
+     "泳道图受阻着色语义 DOM 对拍（t260916-04 验收①②③④渲染面+验收⑤降级面，灰盒 L3，隔离台真浏览器+API 桩，3099 零接触）：用户可感知契约=段的显示态取当前语义而非最后一条流水——L1 复现腿（t260916-02 实证形态：implement 同刻 done+blocked 双记录、兄弟段 design done 在后不构成证据、工作流推进 run_integration_tests）该段 data-vis=done（绝不当前受阻红）+data-ever-blocked=true 角标+hover 出经过（受阻时刻+受保护路径闸原因+已解除+推进措辞），且无受阻史段零误标；L2 真当前受阻腿未解除保持 data-vis=blocked 且全图零角标；L3 保守兜底三腿（零后续证据保持红/并行兄弟 done 不构成推进——mid-gather parallel_stages 在场实况/authorized 授权条目单独不解除，人放了话≠活干成了，t260912-03 留痕形态当前段无 gen/phase）；L4 关闭票腿 closed 票历史受阻段完成色+角标+已解除经过；L5 重跑解除腿（E1 本段 done）完成色+角标+经过（E1/E2 双证时不锁机制词，只锁已解除必在场）；L6 降级面拓扑缺席回落步骤条吃同一推导（.wb-d2-step[data-s] 不停 blocked——stale 红消除是一处推导两处消费）；S0 twin bundle 同步+ever-blocked 契约新鲜锚（src 已落而 lib 无=响亮点名重建，工单验收⑤）；P 卫生腿全旅程零 pageerror/console.error。数据全桩（tickets/workflows 两路由 page.route，拓扑契约形状同 t260915-05 导出面）。分工：t260915-05-detail-lane-map-dom 锁详情渲染面通用契约（双道/红灯翻译/蓝卡/轮次带/关单可见/通用性/降级回落/检查明细）本条不复断其任何一面；t260901-09 锁步骤条并行双亮（本条 L6 只断降级面吃新推导）；t260911-05 锁红卡四件；developer UT（lane-blocked-history 推导矩阵）锁 L1 函数层，本条锁 JSX 接线/落位/两消费面。L2/L3a/L3b/L3c 保守腿任何时刻不得红（红=把未解除画成完成色，漏报比 stale 红更危险）；L1/L4/L5/L6 实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；隔离台/playwright/chromium 缺席=ENV_FAIL exit 2（KI-036 点名面）",
+     "node integration/t260916-04/sc_ticket_detail_lane_map_everblocked_dom.mjs", "browser-free"),
     # ---- t260916-05: 巡检票上泳道图（登记巡检模板拓扑+阶段声明真源+一致性锁）----
     # 三条 intent 互不重叠：①DOM 渲染面（本票验收①的用户可感知半）②查询回执缝（数据半：
     # 拓扑真从 snapshot 流到 ticket-query 回执，缝断=DOM 桩测不出）③双真源同步锁的闸内
