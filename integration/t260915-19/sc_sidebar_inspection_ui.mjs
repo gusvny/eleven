@@ -3,7 +3,8 @@
 // （灰盒 L3 渲染层，browser-free 池；镜 t260915-08/sc_inspection_board_ui.mjs 两层式。）
 //
 // 用户场景（宿主实报「左边栏也看不见巡检票」）：宿主打开工作台，左栏必须能看见巡检票——
-// 有项目身份的巡检行并进对应项目组尾部（不与 dev 工单混序）；老票/无身份行进显式「巡检」
+// 有项目身份的巡检行并进对应项目组（t260916-15 起组内与 dev 行合并统一口径排序，本场景
+// 只守反沉底全序烟测（等你→在跑三行全序），排序全口径矩阵归 t260916-15 场景）；老票/无身份行进显式「巡检」
 // 兜底组（不静默丢失）；到人审门的巡检行按既有「等你」口径黄调一眼可见（项目 dev 行不上漆=
 // 左栏项目组渲染零变化的对照面）；点行下钻=中列同款巡检详情抽屉；端点失败=左栏显式降级横幅
 // （含错误原文）且快照行保留（不吞成空列表）。
@@ -19,7 +20,7 @@
 // env_fail>0=exit 2。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
 //
 // intent 分界：与 t260915-08-board-ui 不同面——彼守中列板面巡检行/详情/签字通道，本条守
-// 左栏分拣制（项目组归位/尾部追加/兜底组）/左栏等你黄调/左栏降级显式性；与
+// 左栏分拣制（项目组归位/兜底组/反沉底烟测）/左栏等你黄调/左栏降级显式性；与
 // t260903-07-click-no-chat-switch 不同面（彼守点行不切会话，本守左栏巡检行的存在与行为）。
 // KI 对齐：KI-018①（错误文案进横幅不进数据字段=降级腿断言）、KI-051（原文断子串不锚整句、
 // 语义 testid 锚）、KI-055（真机计算样式断言+bundle 锚，防台面绿真机红）、t260910-04 R3/
@@ -89,11 +90,11 @@ const WORKFLOWS = [{
   ],
 }]
 
-function devRow(id, stageState, title) {
+function devRow(id, stageState, title, updatedTs = 1789354800) {
   return {
     id, role: 'developer', status: 'dispatched', title,
     workflow: 'dev-lane', stage: 'implement', stage_state: stageState,
-    handoff_count: 0, pending_count: 0, worktree: '', updated: '—', updated_ts: 1789354800,
+    handoff_count: 0, pending_count: 0, worktree: '', updated: '—', updated_ts: updatedTs,
     created: 1789354800, engine: 'template-as-code-v2', exec_status: 'RUNNING',
   }
 }
@@ -119,6 +120,9 @@ const INS_ROWS = [
     id: INS_A, project: PROJ_A, instance_id: 'fixture-alpha', title: '巡检 fixture-alpha · 期 20260915',
     stage: 'close', stage_state: 'awaiting-human', awaiting_gate: true,
     findings: { high: 1, med: 2, low: 0, total: 3 },
+    // t260916-15 反沉底烟测配套：INS_A updated_ts 拉到最新（引擎单位=秒）——合并口径下
+    // 等你巡检行（tier0+最新 ts）必须排在在跑 dev 行（tier1）之前，恒尾旧序必红。
+    created: 1789362000, updated_ts: 1789362000,
     report_path: 'out/inspection/inspfixa1903a.json',
   }),
   insRow({
@@ -334,21 +338,23 @@ async function runBrowser(pw, browser) {
       okSplit ? `巡检行归位：${INS_A}→${PROJ_A}，${INS_B}→${PROJ_B}`
         : `分拣面未落地或归位错：${INS_A}→${ownerA}，${INS_B}→${ownerB}`)
 
-    // ② 尾部追加：组内 dev 行在前、巡检行在后（t260903-07 点行序安全面=「项目组=工单的家」用户可见序）。
-    const orderOk = await page.evaluate(([proj, dev1, dev2, ins]) => {
+    // ② 反沉底全序烟测（t260916-15 契约变更配套改写，非凑绿；review 意见④：
+    //    断言完整期望序列而非两行相对序——相对序分不出「级内 updated_ts 倒序」
+    //    是否真生效）。夹具 ts 拉开：INS_A(等你, ts+2h) > DEV_A_WAIT(等你, ts+0)
+    //    同 tier0 级内倒序 → 二者先于在跑的 DEV_A_RUN(tier1)，全序三行一次钉死
+    //    tier 边界+级内倒序两面。含收口行/兜底组序的全矩阵归
+    //    t260916-15-sidebar-merged-sort-ui 场景，此处不重复。
+    const orderOk = await page.evaluate(([proj, want]) => {
       const dot = document.querySelector(`.wb-sb .wb-group-dot[title="${proj}"]`)
       if (!dot) return 'no-group'
       let w = dot.parentElement
       while (w && !w.querySelector('.wb-card[data-ticket-id]')) w = w.parentElement
       if (!w) return 'no-wrapper'
       const ids = [...w.querySelectorAll('.wb-card[data-ticket-id]')].map(e => e.getAttribute('data-ticket-id'))
-      const iDev1 = ids.indexOf(dev1), iDev2 = ids.indexOf(dev2), iIns = ids.indexOf(ins)
-      if (iIns < 0) return 'ins-absent:' + ids.join(',')
-      if (iDev1 < 0 || iDev2 < 0) return 'dev-absent:' + ids.join(',')
-      return (iDev1 < iIns && iDev2 < iIns) ? 'tail' : 'order=' + ids.join(',')
-    }, [PROJ_A, DEV_A_RUN, DEV_A_WAIT, INS_A])
-    record('S1 tail-append', orderOk === 'tail' ? 'pass' : 'fail',
-      orderOk === 'tail' ? '组内 dev 行在前巡检行在后（尾部追加）' : `组内行序面异常：${orderOk}`)
+      return ids.join(',') === want ? 'anti-sink' : 'order=' + ids.join(',')
+    }, [PROJ_A, [INS_A, DEV_A_WAIT, DEV_A_RUN].join(',')])
+    record('S1 anti-sink-smoke', orderOk === 'anti-sink' ? 'pass' : 'fail',
+      orderOk === 'anti-sink' ? '组内全序=等你层(级内倒序)→在跑层（反沉底）' : `组内行序面异常：${orderOk}`)
 
     // ③ 行1/行2 字样与端点一致：标题=引擎 title；行2=等你签字 · 发现 高x/中y/低z（face 层既有词表）。
     const insCardA = page.locator(`.wb-sb .wb-card[data-ticket-id="${INS_A}"]`).first()

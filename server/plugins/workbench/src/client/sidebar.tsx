@@ -32,8 +32,11 @@
  *       t260915-19 起左栏收录巡检票：巡检 workflow 因引擎类型过滤隔离进不了
  *       ?project= 通路（client.py cmd_ticket_list 缺省只拼 dev-lane 模板类型），
  *       故左栏并行拉 /wf/inspection/tickets 端点做**客户端分拣**——行 project
- *       （t260915-20 起=ProjectKey SA 真源）命中在册项目并进对应组尾部，空/
- *       不在册（20 之前老票、隔离 key）落「巡检」兜底组（显式不静默丢失）。
+ *       （t260915-20 起=ProjectKey SA 真源）命中在册项目后与该项目 dev 行合并、
+ *       统一口径排序（t260916-15 宿主实报「巡检票恒沉底」：在等你/受阻→在跑→
+ *       已完成，级内 updated_ts 倒序，巡检行不因数据来源沉底），空/不在册
+ *       （20 之前老票、隔离 key）落「巡检」兜底组（显式不静默丢失）；巡检行带
+ *       类别徽标（INSPECTION_ROW_BADGE chip）一眼可辨数据来源。
  * 中列：四视图由 index.tsx 注入（views prop）——工单台 WorkbenchSection（本插件）、
  *       文档 DocsSection（本插件，t260905-06）、模型 ProvidersSection（providers 插件）、
  *       立项单 EpicSection（本插件，t260826-02；空代号=立项清单，带代号=详情）。
@@ -82,13 +85,16 @@ import type { ProjectIconName } from './project-icons.tsx'
 import { ProjectAddModal, ProjectRemoveModal, ProjectSettingsModal, QuarantineModal } from './project-modals.tsx'
 // t260904-17 列表 v5：左栏工单条目=行卡迷你版（一套 UI 裁定，与中列同一组件/模型层）。
 import { TicketRowCard } from './ticket-row-card.tsx'
+// t260916-15 左栏合并排序：纯函数住 ticket-list-model 模型层（复用 deriveTicketState
+// 四态单点投影 tier，不另起状态词表；node 可裸 import UT 直测）。
+import { sortMergedTickets } from './ticket-list-model.ts'
 // t260915-19 左栏收录巡检票：分拣/降级/进展纯函数与端点串单点住 host 层
 // （node 可裸 import 黑盒单测，tests/t260915-19-sidebar-inspection.mjs 看守）。
 // 照搬取舍收拢（review gen2 落实项）：①viewProject 兜底首项目=openEpic 先例；
 // ②降级词表=中列 08 同源不另起；③inspection_filter.degraded 左栏不带横幅
 // （理由见渲染处注释）；④场景范式=08 board-ui 两层式 ENV_FAIL 三态。
 import {
-  INSPECTION_TICKETS_URL, INSPECTION_TOPOLOGY, isInspectionRow, inspectionDegradedNote,
+  INSPECTION_ROW_BADGE, INSPECTION_TICKETS_URL, INSPECTION_TOPOLOGY, isInspectionRow, inspectionDegradedNote,
   inspectionProgressOf, inspectionSplitByProject,
 } from '../host/inspection-face.ts'
 // metrics M2a（t260902-01）：度量面板。t260902-05 起：入口迁出厂侧栏
@@ -128,6 +134,8 @@ interface Ticket {
   created?: number
   /** 收口时间（unix 秒；COMPLETED 执行的 close_time，sandbar 驻留判定用）。 */
   close_ts?: number
+  /** 更新时间（unix 秒；引擎行恒带，t260916-15 组内合并排序的时间源）。 */
+  updated_ts?: number
   blocked_reason?: string
   pending?: { gate: string; reason: string }[]
   session_kb?: number
@@ -296,6 +304,12 @@ const CSS = `${DERIVE_TOKENS_CSS}
  * 等值选择器（review C1：dev-lane 行 data-engine 在场-异值 "template-as-code-v2"，
  * 等值判定天然零命中；测试禁写「属性缺席」断言）。项目组行渲染零变化。 */
 .wb-sb .wb-card[data-engine=inspection][data-state=waiting] { background:var(--dsw-derive-warn-bg,#fff8c5); }
+/* t260916-15 巡检行类别徽标：行1 小 chip（琥珀描边字色=等你黄调族 token，透明底
+ * 不与 data-state 底色语义混写）。作用域 .wb-sb=只有左栏消费 kindBadge（中列板面
+ * 零变化）；任何状态（在跑/收口）都恒带徽标=数据来源可辨不依赖状态/位置。 */
+.wb-sb .wb-card-kind { display:inline-flex; align-items:center; flex:none; padding:0 5px;
+  border:1px solid var(--dsw-derive-warn,#b8860b); border-radius:5px;
+  color:var(--dsw-derive-warn,#b8860b); font-size:10px; line-height:15px; }
 /* t260915-19 巡检降级横幅：色板同 .wb-stale-banner 族（琥珀），不另起色板。 */
 .wb-insp-degraded { padding:6px 10px; font-size:11px; line-height:1.5;
   color:var(--dsw-derive-dark-warn-fg,#ffe9c4); background:var(--dsw-derive-dark-warn-bg,#7a4a06);
@@ -681,14 +695,17 @@ export function WorkbenchSidebar(props: SidebarProps) {
     const nowS = Date.now() / 1000
     return projects.map(p => ({
       project: p,
-      tickets: [
+      // t260916-15 合并排序：dev 行与巡检行拼接后按统一口径排（在等你/受阻→在跑→
+      // 已完成，级内 updated_ts 倒序）——巡检行不因数据来源沉底（宿主 260916 实报）。
+      // 排序纯函数 sortMergedTickets 住 ticket-list-model 层，UT/场景双看守。
+      tickets: sortMergedTickets([
         ...(ticketsByProject[p.key] ?? []).filter(t => inSandbar(t, nowS)),
         // 驻留窗分工（review gen2 意见2 钉一句话）：客户端 sandbarHours 窗只管上面
         // dev-lane 行（inSandbar）；巡检行不经此窗——闭合行窗由引擎 R8 窗承担
         // （超窗/close_ts 缺失不上板，t260915-08 board-rows 场景看守）。
         // 此非「漏过滤」，勿当缺陷误修。
         ...(inspectionSplit.byProject[p.key] ?? []),
-      ],
+      ]),
     }))
   }, [projects, ticketsByProject, inspectionSplit])
 
@@ -809,6 +826,9 @@ export function WorkbenchSidebar(props: SidebarProps) {
                     // 零适配；行2 传本地纯函数合成进展（等你签字 · 发现 高x/中y/低z，
                     // 词表与中列同源）；「等你」黄调由 data-engine=inspection 等值
                     // 选择器接管（见 CSS 注释，项目行零变化）。
+                    // t260916-15：行1 加类别徽标（INSPECTION_ROW_BADGE chip，词表
+                    // 单点在 host 层）——合并排序后巡检行混入组内各位置，数据来源
+                    // 须行随身可辨，不靠「恒在组尾」的旧位置线索。
                     const insp = isInspectionRow(t)
                     return (
                       /* t260904-17 列表 v5（mock 屏⑤）：左栏工单条目=行卡迷你版（一套 UI；
@@ -817,6 +837,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
                       <TicketRowCard key={t.id} t={t} compact
                         wf={insp ? INSPECTION_WF_LIKE : undefined}
                         progress={insp ? inspectionProgressOf(t) : undefined}
+                        kindBadge={insp ? { text: INSPECTION_ROW_BADGE } : undefined}
                         active={selectedId === t.id}
                         updatedTsMs={(isOpen(t) ? t.created : (t.close_ts || t.created)) !== undefined
                           ? (isOpen(t) ? t.created : (t.close_ts || t.created))! * 1000 : undefined}
@@ -830,19 +851,20 @@ export function WorkbenchSidebar(props: SidebarProps) {
           {/* 巡检兜底组（t260915-19）：project 为空（20 之前老票）或不在注册表
               （隔离 key/摘除项目）的巡检票显式落此组——不静默丢失（工单④）。
               无此类行=整组不渲染（不占位不报错，组头计数同款）；行渲染与项目组
-              巡检行同款适配，点击走 handleTicketClick（projectKey 空→兜底首项目，
-              见其注释）。 */}
+              巡检行同款适配（含 t260916-15 类别徽标），组内行序同口径合并排序；
+              点击走 handleTicketClick（projectKey 空→兜底首项目，见其注释）。 */}
           {!loading && inspectionSplit.unowned.length > 0 && (
             <div>
               <div className="wb-group-head" data-testid="sidebar-inspection-head"
                 onClick={() => setInspCollapsed(c => !c)}>
                 <span className="wb-group-caret">{inspCollapsed ? '▸' : '▾'}</span>
-                <span className="wb-group-name">巡检</span>
+                <span className="wb-group-name">{INSPECTION_ROW_BADGE}</span>
                 <span className="wb-group-count">{inspectionSplit.unowned.length}</span>
               </div>
-              {!inspCollapsed && inspectionSplit.unowned.map(t => (
+              {!inspCollapsed && sortMergedTickets(inspectionSplit.unowned).map(t => (
                 <TicketRowCard key={t.id} t={t} compact
                   wf={INSPECTION_WF_LIKE} progress={inspectionProgressOf(t)}
+                  kindBadge={{ text: INSPECTION_ROW_BADGE }}
                   active={selectedId === t.id}
                   updatedTsMs={(isOpen(t) ? t.created : (t.close_ts || t.created)) !== undefined
                     ? (isOpen(t) ? t.created : (t.close_ts || t.created))! * 1000 : undefined}

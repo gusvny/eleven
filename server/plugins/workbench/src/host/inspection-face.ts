@@ -147,6 +147,12 @@ export function inspectionTitleOf(row: InspectionRowLike): string {
 /* ---------------------------------------------------------------- 左栏分拣（t260915-19） */
 
 /**
+ * 左栏巡检行类别徽标词（t260916-15）：行1 小 chip 文本单点——sidebar 项目组行徽标
+ * 与兜底组头共用本常量，防「巡检」字面两处漂移；词面=组头既有叫法（宿主口语）。
+ */
+export const INSPECTION_ROW_BADGE = '巡检'
+
+/**
  * 巡检板面端点（t260915-08 建的引擎 ticket-list{kind:inspection} 薄壳）。左栏
  * 分拣制（t260915-19 方案 v2）与中列合流同吃此端点——URL 串收本单点，防两处
  * 字面量漂移（node.ts 注册路径与本串一致性由 UT 源级锚看守）。

@@ -3,13 +3,14 @@
 // 取台=lib_fix17 bootConsole（同 sc_sidebar_inspection_ui.mjs，非 docker 形态；
 // freePort 拒 3099=红线零接触，teardownOnExit 全终态回收）。数据只桩 API 边界
 // （page.route，与场景同款夹具）。截图三张：
-//   t260915-19-sidebar-inspection.png   常规态：巡检行落组（甲组尾部+乙组）+等你
+//   t260915-19-sidebar-inspection.png   常规态：巡检行落组（甲组合并序+乙组）+等你
 //                                       黄调+「巡检」兜底组（老票显式在册）
 //   t260915-19-sidebar-leftcol.png      左栏聚焦裁剪（.wb-sb-left element shot）
 //   t260915-19-sidebar-degraded.png     降级态：端点 ok:false→左栏横幅显原文+快照行保留
 // 「改动前」对照：无先帧图（工作区不可来回切换基线）；改动前后的左栏项目组渲染
-// 零变化由场景对照腿机械钉死（dev 等你行不上漆 + 行序 dev 前巡检后 + 零 pageerror），
-// 见场景 S1 waiting-yellow-control / tail-append / page-health 三腿。
+// 零变化由场景对照腿机械钉死（dev 等你行不上漆 + 等你巡检行压在跑 dev 行之上 + 零
+// pageerror），见场景 S1 waiting-yellow-control / anti-sink-smoke / page-health 三腿
+// （t260916-15 起组内为合并排序口径，行序全矩阵归 t260916-15 场景）。
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -48,7 +49,9 @@ function insRow(over) {
 const INS_ROWS = [
   insRow({ id: INS_A, project: PROJ_A, instance_id: 'fixture-alpha', title: '巡检 fixture-alpha · 期 20260915',
     stage: 'close', stage_state: 'awaiting-human', awaiting_gate: true,
-    findings: { high: 1, med: 2, low: 0, total: 3 }, report_path: 'out/inspection/inspfixa1903a.json' }),
+    findings: { high: 1, med: 2, low: 0, total: 3 },
+    created: 1789362000, updated_ts: 1789362000, // t260916-15 合并口径：INS_A 最新 ts（截图示新序）
+    report_path: 'out/inspection/inspfixa1903a.json' }),
   insRow({ id: INS_B, project: PROJ_B, instance_id: 'fixture-beta', title: '巡检 fixture-beta · 期 20260915',
     stage: 'scan', stage_state: 'running', findings: { high: 0, med: 0, low: 1, total: 1 },
     report_path: 'out/inspection/inspfixb1904b.json' }),

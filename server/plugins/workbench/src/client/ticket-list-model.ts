@@ -65,6 +65,77 @@ export function pausedBadgeText(phase?: unknown): string {
   return phase === 'at_gate' ? '⏸ 已暂停在段间' : '⏸ 暂停中（待段间生效）'
 }
 
+/* ------------------------------------------------------------- 左栏合并排序（t260916-15） */
+
+/** 排序层消费的行最小字段面：dev-lane 行与巡检行同形（多字段不关心），全键可缺
+ *  （行=引擎不可信外部输入，缺键/畸形由下方函数防御，绝不抛）。 */
+export interface TicketSortRowLike {
+  status?: unknown
+  stage_state?: unknown
+  updated_ts?: unknown
+  created?: unknown
+  close_ts?: unknown
+}
+
+/**
+ * 排序层（t260916-15）：在等你/受阻 → 在跑 → 已完成 三档。tier 是 deriveTicketState
+ * 四态的**纯投影**——状态→四态映射单点仍在 deriveTicketState（全台唯一归并点），
+ * 本函数不另起第二套状态词表；未知/未来 stage_state 继承其「宁显活跃勿假警报」
+ * 缺省 → tier1（'awaiting'=等 agent 段间推进，归在跑档，UT 钉死防悄悄改口径）。
+ */
+export function ticketMergeTierOf(status?: unknown, stageState?: unknown): 0 | 1 | 2 {
+  const s4 = deriveTicketState(
+    typeof status === 'string' ? status : undefined,
+    typeof stageState === 'string' ? stageState : undefined,
+  )
+  switch (s4) {
+    case 'waiting':
+    case 'blocked':
+      return 0
+    case 'done':
+      return 2
+    default:
+      return 1
+  }
+}
+
+/**
+ * 排序时间源：updated_ts 优先，缺/畸形逐级回落 created → close_ts，全缺 → 0。
+ * 单位口径（review 意见钉死）：引擎 updated_ts/created/close_ts 全是**秒**
+ * （base.py _now_epoch 系；toMillis 是消费点显示归一单点，与本排序无关）——
+ * dev-lane 行与巡检行两数据源同单位，直接比原始值安全；若未来单源换单位，
+ * 必须先归一再进本函数，否则会以另一形态复刻「沉底」式静默错序。
+ * 非有限数/≤0（字符串/null/NaN/0/负）不抛不参与、逐级回落；行非对象 → 0。
+ */
+export function ticketSortTsOf(row: TicketSortRowLike | null | undefined): number {
+  if (row === null || typeof row !== 'object') return 0
+  for (const v of [row.updated_ts, row.created, row.close_ts]) {
+    if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v
+  }
+  return 0
+}
+
+/**
+ * 左栏项目组合并排序（t260916-15 宿主实报「巡检票恒沉底」）：dev-lane 行与巡检行
+ * 合并后统一口径——tier 升序（等你/受阻→在跑→已完成）、级内时间源倒序、同 ts 保
+ * 输入序（显式 index 兜底，不依赖引擎 sort 稳定性）。浅拷贝排序不改输入数组；
+ * null/非对象元素不抛（tier 走缺省、ts=0，沉底不崩）。中列板面列表不消费本函数
+ * （排序是左栏项目组的组内呈现口径，工单正文验收①边界）。
+ */
+export function sortMergedTickets<T extends TicketSortRowLike>(rows: readonly T[]): T[] {
+  const keyed = rows.map((row, idx) => ({ row, idx }))
+  keyed.sort((a, b) => {
+    const ra = a.row as TicketSortRowLike | null
+    const rb = b.row as TicketSortRowLike | null
+    const ta = ticketMergeTierOf(ra?.status, ra?.stage_state)
+    const tb = ticketMergeTierOf(rb?.status, rb?.stage_state)
+    if (ta !== tb) return ta - tb
+    const dts = ticketSortTsOf(rb) - ticketSortTsOf(ra)
+    return dts !== 0 ? dts : a.idx - b.idx
+  })
+  return keyed.map(k => k.row)
+}
+
 /* ------------------------------------------------------------- epic 哈希色 */
 
 /**

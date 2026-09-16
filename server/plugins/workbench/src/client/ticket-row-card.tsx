@@ -63,6 +63,10 @@ export interface TicketRowCardProps {
   busy?: boolean
   /** 相对时间备选时间源（unix ms；侧栏 Ticket 只有 created/close_ts 秒级字段时用）。 */
   updatedTsMs?: number
+  /** 类别徽标（t260916-15）：行1 的小 chip，文本由父层给（本组件零业务词表——
+   *  侧栏用它标「巡检」来源行；缺省=不渲染，中列板面零消费零影响）。
+   *  data-kind-badge=值即文本，渲染断言/样式作用域选择器锚。 */
+  kindBadge?: { text: string }
   /** 可用管理动作键集（父层 availableOps 结果原样传入）。 */
   ops?: CardOp[]
   peerViewers?: { who: string }[]
@@ -90,7 +94,7 @@ function cardTitle(t: CardTicket, wf?: WfLike | null): string {
 }
 
 export function TicketRowCard({
-  t, wf, progress, compact = false, active = false, busy = false, updatedTsMs,
+  t, wf, progress, compact = false, active = false, busy = false, updatedTsMs, kindBadge,
   ops = [], peerViewers = [], onOpen, onAdvance, onDispatch, onRework, onUnblock, onClose, onPause, onResume, onOpenEpic,
 }: TicketRowCardProps) {
   const state4 = deriveTicketState(t.status, t.stage_state)
@@ -130,6 +134,14 @@ export function TicketRowCard({
               ? '已停在段间门口：不派下一段，点「恢复」继续'
               : '暂停已受理：当前段（含在飞 agent）自然跑完后停住'}>
             {pausedBadgeText(t.paused_phase)}
+          </span>
+        )}
+        {/* 类别徽标（t260916-15）：父层给的来源类别小 chip（如侧栏巡检行），排状态
+            之后、编号之前=扫视起点区；缺省不渲染（中列板面零变化）。 */}
+        {kindBadge && (
+          <span className="wb-card-kind" data-kind-badge={kindBadge.text}
+            title={`类别：${kindBadge.text}`}>
+            {kindBadge.text}
           </span>
         )}
         <span className="wb-card-id">{t.id}</span>

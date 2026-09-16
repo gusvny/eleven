@@ -5705,6 +5705,60 @@ function pausedBadgeText(phase) {
 	return phase === "at_gate" ? "⏸ 已暂停在段间" : "⏸ 暂停中（待段间生效）";
 }
 /**
+* 排序层（t260916-15）：在等你/受阻 → 在跑 → 已完成 三档。tier 是 deriveTicketState
+* 四态的**纯投影**——状态→四态映射单点仍在 deriveTicketState（全台唯一归并点），
+* 本函数不另起第二套状态词表；未知/未来 stage_state 继承其「宁显活跃勿假警报」
+* 缺省 → tier1（'awaiting'=等 agent 段间推进，归在跑档，UT 钉死防悄悄改口径）。
+*/
+function ticketMergeTierOf(status, stageState) {
+	switch (deriveTicketState(typeof status === "string" ? status : void 0, typeof stageState === "string" ? stageState : void 0)) {
+		case "waiting":
+		case "blocked": return 0;
+		case "done": return 2;
+		default: return 1;
+	}
+}
+/**
+* 排序时间源：updated_ts 优先，缺/畸形逐级回落 created → close_ts，全缺 → 0。
+* 单位口径（review 意见钉死）：引擎 updated_ts/created/close_ts 全是**秒**
+* （base.py _now_epoch 系；toMillis 是消费点显示归一单点，与本排序无关）——
+* dev-lane 行与巡检行两数据源同单位，直接比原始值安全；若未来单源换单位，
+* 必须先归一再进本函数，否则会以另一形态复刻「沉底」式静默错序。
+* 非有限数/≤0（字符串/null/NaN/0/负）不抛不参与、逐级回落；行非对象 → 0。
+*/
+function ticketSortTsOf(row) {
+	if (row === null || typeof row !== "object") return 0;
+	for (const v of [
+		row.updated_ts,
+		row.created,
+		row.close_ts
+	]) if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+	return 0;
+}
+/**
+* 左栏项目组合并排序（t260916-15 宿主实报「巡检票恒沉底」）：dev-lane 行与巡检行
+* 合并后统一口径——tier 升序（等你/受阻→在跑→已完成）、级内时间源倒序、同 ts 保
+* 输入序（显式 index 兜底，不依赖引擎 sort 稳定性）。浅拷贝排序不改输入数组；
+* null/非对象元素不抛（tier 走缺省、ts=0，沉底不崩）。中列板面列表不消费本函数
+* （排序是左栏项目组的组内呈现口径，工单正文验收①边界）。
+*/
+function sortMergedTickets(rows) {
+	const keyed = rows.map((row, idx) => ({
+		row,
+		idx
+	}));
+	keyed.sort((a, b) => {
+		const ra = a.row;
+		const rb = b.row;
+		const ta = ticketMergeTierOf(ra?.status, ra?.stage_state);
+		const tb = ticketMergeTierOf(rb?.status, rb?.stage_state);
+		if (ta !== tb) return ta - tb;
+		const dts = ticketSortTsOf(rb) - ticketSortTsOf(ra);
+		return dts !== 0 ? dts : a.idx - b.idx;
+	});
+	return keyed.map((k) => k.row);
+}
+/**
 * epic 色板：10 色。与项目色板（shared/project-color.ts PROJECT_PALETTE）色相同构
 * 但独立声明——两板语义不同（项目 tag vs epic 彩条/chip），互指防漂移不共用实例。
 * 撞色口径同 project-color：碰撞无害（chip 有名可辨），不作通过/失败断言。
@@ -6015,7 +6069,7 @@ function cardTitle(t, wf) {
 	if (t.updated) parts.push(`更新 ${t.updated}`);
 	return parts.join("\n");
 }
-function TicketRowCard({ t, wf, progress, compact = false, active = false, busy = false, updatedTsMs, ops = [], peerViewers = [], onOpen, onAdvance, onDispatch, onRework, onUnblock, onClose, onPause, onResume, onOpenEpic }) {
+function TicketRowCard({ t, wf, progress, compact = false, active = false, busy = false, updatedTsMs, kindBadge, ops = [], peerViewers = [], onOpen, onAdvance, onDispatch, onRework, onUnblock, onClose, onPause, onResume, onOpenEpic }) {
 	const state4 = deriveTicketState(t.status, t.stage_state);
 	const epicColor = epicColorOf(t.epic);
 	const dots = compact ? [] : laneDots(wf, t);
@@ -6054,6 +6108,12 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 						"data-paused-phase": t.paused_phase || "pending",
 						title: t.paused_phase === "at_gate" ? "已停在段间门口：不派下一段，点「恢复」继续" : "暂停已受理：当前段（含在飞 agent）自然跑完后停住",
 						children: pausedBadgeText(t.paused_phase)
+					}),
+					kindBadge && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-card-kind",
+						"data-kind-badge": kindBadge.text,
+						title: `类别：${kindBadge.text}`,
+						children: kindBadge.text
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-card-id",
@@ -47213,8 +47273,11 @@ function mountMetricsIntoSettingsRow(root) {
 *       t260915-19 起左栏收录巡检票：巡检 workflow 因引擎类型过滤隔离进不了
 *       ?project= 通路（client.py cmd_ticket_list 缺省只拼 dev-lane 模板类型），
 *       故左栏并行拉 /wf/inspection/tickets 端点做**客户端分拣**——行 project
-*       （t260915-20 起=ProjectKey SA 真源）命中在册项目并进对应组尾部，空/
-*       不在册（20 之前老票、隔离 key）落「巡检」兜底组（显式不静默丢失）。
+*       （t260915-20 起=ProjectKey SA 真源）命中在册项目后与该项目 dev 行合并、
+*       统一口径排序（t260916-15 宿主实报「巡检票恒沉底」：在等你/受阻→在跑→
+*       已完成，级内 updated_ts 倒序，巡检行不因数据来源沉底），空/不在册
+*       （20 之前老票、隔离 key）落「巡检」兜底组（显式不静默丢失）；巡检行带
+*       类别徽标（INSPECTION_ROW_BADGE chip）一眼可辨数据来源。
 * 中列：四视图由 index.tsx 注入（views prop）——工单台 WorkbenchSection（本插件）、
 *       文档 DocsSection（本插件，t260905-06）、模型 ProvidersSection（providers 插件）、
 *       立项单 EpicSection（本插件，t260826-02；空代号=立项清单，带代号=详情）。
@@ -47305,6 +47368,12 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
  * 等值选择器（review C1：dev-lane 行 data-engine 在场-异值 "template-as-code-v2"，
  * 等值判定天然零命中；测试禁写「属性缺席」断言）。项目组行渲染零变化。 */
 .wb-sb .wb-card[data-engine=inspection][data-state=waiting] { background:var(--dsw-derive-warn-bg,#fff8c5); }
+/* t260916-15 巡检行类别徽标：行1 小 chip（琥珀描边字色=等你黄调族 token，透明底
+ * 不与 data-state 底色语义混写）。作用域 .wb-sb=只有左栏消费 kindBadge（中列板面
+ * 零变化）；任何状态（在跑/收口）都恒带徽标=数据来源可辨不依赖状态/位置。 */
+.wb-sb .wb-card-kind { display:inline-flex; align-items:center; flex:none; padding:0 5px;
+  border:1px solid var(--dsw-derive-warn,#b8860b); border-radius:5px;
+  color:var(--dsw-derive-warn,#b8860b); font-size:10px; line-height:15px; }
 /* t260915-19 巡检降级横幅：色板同 .wb-stale-banner 族（琥珀），不另起色板。 */
 .wb-insp-degraded { padding:6px 10px; font-size:11px; line-height:1.5;
   color:var(--dsw-derive-dark-warn-fg,#ffe9c4); background:var(--dsw-derive-dark-warn-bg,#7a4a06);
@@ -47610,7 +47679,7 @@ function WorkbenchSidebar(props) {
 		const nowS = Date.now() / 1e3;
 		return projects.map((p) => ({
 			project: p,
-			tickets: [...(ticketsByProject[p.key] ?? []).filter((t) => inSandbar(t, nowS)), ...inspectionSplit.byProject[p.key] ?? []]
+			tickets: sortMergedTickets([...(ticketsByProject[p.key] ?? []).filter((t) => inSandbar(t, nowS)), ...inspectionSplit.byProject[p.key] ?? []])
 		}));
 	}, [
 		projects,
@@ -47774,6 +47843,7 @@ function WorkbenchSidebar(props) {
 								compact: true,
 								wf: insp ? INSPECTION_WF_LIKE : void 0,
 								progress: insp ? inspectionProgressOf(t) : void 0,
+								kindBadge: insp ? { text: "巡检" } : void 0,
 								active: selectedId === t.id,
 								updatedTsMs: (isOpen(t) ? t.created : t.close_ts || t.created) !== void 0 ? (isOpen(t) ? t.created : t.close_ts || t.created) * 1e3 : void 0,
 								onOpen: () => handleTicketClick(t, g.project.key)
@@ -47797,11 +47867,12 @@ function WorkbenchSidebar(props) {
 									children: inspectionSplit.unowned.length
 								})
 							]
-						}), !inspCollapsed && inspectionSplit.unowned.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
+						}), !inspCollapsed && sortMergedTickets(inspectionSplit.unowned).map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
 							t,
 							compact: true,
 							wf: INSPECTION_WF_LIKE,
 							progress: inspectionProgressOf(t),
+							kindBadge: { text: "巡检" },
 							active: selectedId === t.id,
 							updatedTsMs: (isOpen(t) ? t.created : t.close_ts || t.created) !== void 0 ? (isOpen(t) ? t.created : t.close_ts || t.created) * 1e3 : void 0,
 							onOpen: () => handleTicketClick(t, "")
