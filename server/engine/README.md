@@ -438,6 +438,105 @@ spawn、console 插件的 cwd 指向引擎自身，标识「被调用的引擎�
   行/payload/扫对仓路径、update 重铸腿、未知项目键负腿、无主守卫腿）。
 
 
+## 13. 巡检声明落位迁移A（t260916-02）：每项目仓内单文件 + 票号统一工单号形式
+
+### 13.1 机制面（迁移后的世界）
+
+- **声明落位**：每项目一份 `inspection.yaml`，缺省 `<项目主目录 dirs[0]>/inspection.yaml`
+  （单文件，进 git；不做 `inspection.d/` 目录）；注册条目 `project.yaml` 的
+  `paths.inspection_decl` 可指路别处（相对拼 dirs[0] / `~/` 展开 / 绝对，词法校验与
+  `model_routes` 同源；`..` 逃逸 fail-closed）。**回落语义与 model_routes 刻意不同**：
+  声明缺席=该项目无巡检面（absent，不冒充错误、不借用他项目、不回落样例）；
+  坏形/不可读=项目级 error 点名声明路径。真源链：`inspection_decl.py`
+  （`iter_project_decls` / `load_decl_for_instance` / `enabled_instance_whitelist`）。
+- **引擎仓零声明**：`server/engine/inspection.yaml` 已删（迁移交付本体）；引擎只留
+  机制 + `docs/inspection-sample.yaml` 样例模板（样例实例不进任何聚合）。sandbar 自己
+  的五实例迁到**仓根 `inspection.yaml`**（字段逐项不变，只换文件头注）。
+- **票号统一工单号形式**：巡检票号=`t<YYMMDD>-<NN>`（`ticket_id == workflow_id`），
+  走既有票号分配面（`shared.next_ticket_seq_from_ids`，全类型前缀扫描——工单与巡检
+  同天共享序号空间，`server/tools/ticket.py` 的 `_next_seq_v2` 只扫工单店的现成缺陷
+  一并修复）。铸号函数 `inspection_ticket_id` 退役删除；实例/期号**不从票号反解**，
+  改从票面（snapshot/payload）与 SA 读。落账文件名保留 `inspection-<实例>-<期>.json`
+  （键名单点 `inspection_flow.inspection_ledger_name`，与票号是两个名）。
+- **显式去重（每期一票）**：单点 `inspection_ticketing.open_period_ticket`，三路判定——
+  ①SA 快路径（`InspectionInstance`+`InspectionPeriod` 查询，命中任意状态即 deduped，
+  含历史 COMPLETED）；②原子指针三态（见 13.3）；③`AlreadyStarted` 归属判定（本
+  （实例,期）=deduped 收尾清指针；外来撞号=NN+1 让位重试 ≤`MAX_ALLOC_RETRIES`=5）。
+  同期多张票=点名报错（有第二写入方，人工处置），绝不猜。
+- **聚合遍历**：板面白名单 / deadman 漏跑核查 / schedule-up 都遍历注册项目读各自声明；
+  跨项目实例 id 重复=歧义实例剔除+点名两处（trigger 面多命中同样报错）。
+- **spawner**：Temporal Schedule 铸不了 t 形号（建 schedule 时未知当日序号）——调度
+  action 改指 `InspectionPeriodicSpawnWorkflow`（固定 id `inspection-spawn-<实例>`），
+  到点由 activity 走 `open_period_ticket` 铸号开票。旧直发 action 的 schedule 会被
+  `schedule-up` 拒绝点名重跑（`_schedule_action_summary` 认 spawner 才放行）。
+- **板面双腿查询**（client.py `cmd_ticket_list` kind=inspection）：SA 腿
+  （`InspectionInstance` OR 白名单串）+ legacy 腿（`WorkflowType=InspectionPeriodicWorkflow
+  AND WorkflowId STARTS_WITH "inspection-"`）；按 id 去重合并、行带 `match_via`
+  （sa / legacy_id）/ `legacy_unowned`（无 ProjectKey SA=「历史票·无项目身份」徽标，
+  口径⑤显式降级可辨）。R8 闭合窗施加于合并后行集。
+
+### 13.2 迁移步（在跑环境的一次性操作）
+
+1. **重启 dev server**（下一次 `run_server.sh` 自带两个新 SA 启动参）。
+2. 或对在跑 server 手工补注册 SA（见 13.4 三路径）。
+3. **重跑 schedule-up**：`inspection_trigger.py schedule-up --note "t260916-02 迁移"`——
+   旧直发 action 全部换绑 spawner；不重跑则旧调度仍按旧 payload 直发（票号旧形）。
+4. 存量在途旧形票：无需处理——legacy 腿照常上板（`match_via=legacy_id`），
+   resolve 查询面兼容（SA 查无 → legacy 只读探测）。
+
+### 13.3 去重指针生命周期（`<INSPECTION_DIR>/inspection-<实例>-<期>.ticket`）
+
+- 目录接 `SANDBAR_INSPECTION_DIR` 覆盖链（缺省 `server/engine/out/inspection`）；
+  `.ticket` 后缀不进台账扫描（deadman 畸形清单同样豁免）。
+- 语义=「本进程正为该（实例,期）飞行开票」的 O_EXCL 原子 claim；有效指针先
+  `describe()` 验票（NotFound=确定结论，不依赖可见性索引）：
+  - 票在且 SA==指针身份 → deduped（source=pointer）；票在但**无 SA 章**（迁移前旧票）
+    → 可信 deduped（legacy 标记）；票在但 SA 与指针不一致 → **配置事故显式报错，
+    不自动清指针**（防掩盖第二写入方）。
+  - 票不在：年龄=`st_mtime` 基准（R4；单测注入统一 `os.utime`），>
+    `CLAIM_GRACE_SEC`(120s)=陈旧自动清+回执 `stale_pointer_cleared` 留痕后照常开票
+    （绝不永久楔死期号）；≤窗=并发飞行中显式报错（不误杀并发）。
+  - 畸形（空/半截 JSON/缺 ticket_id）：同年龄规则——超窗自动清留痕，窗内显式报错。
+- 失败路径收口：非 dedup 失败删**自建**指针（只删本次 O_EXCL 建的）；SA 未注册、
+  重试耗尽、ES 瞬态都显式报错点名。
+
+### 13.4 SA 注册三路径（InspectionInstance / InspectionPeriod = Keyword）
+
+```bash
+# ① dev server（run_server.sh 已带启动参，重启即注册）
+server/engine/run_server.sh
+# ② 手工对在跑 server（dev 7233 / 测试台 17233 皆此法，幂等容 already）
+bin/temporal operator search-attribute create --address 127.0.0.1:7233 \
+  --name InspectionInstance --type Keyword
+bin/temporal operator search-attribute create --address 127.0.0.1:7233 \
+  --name InspectionPeriod --type Keyword
+# ③ docker 测试栈：integration/stage_docker.py precheck 幂等补建（含 ProjectKey/EpicCode 共四项）
+```
+
+**R3 归因指引**：SA 未注册时，dedup 快路径/板面 SA 腿的查询会显式失败，报错含
+`unknown search attribute`（开票面）或 `InspectionInstance` 字样（查询面）——这是
+**注册步未做**（配置），不是代码故障；先跑上面任一路径注册，再重试触发。
+
+### 13.5 `STARTS_WITH` 算子降级注记（R2）
+
+legacy 腿的 `WorkflowId STARTS_WITH` 是本仓首个该算子使用（此前零先例）。若后端
+（Temporal 版本/ES 可见性配置）拒绝该算子，代码**自动降级**：类型单腿
+（`WorkflowType=InspectionPeriodicWorkflow`）拉回 + 客户端按 id 前缀过滤——过滤仍
+发生在快照查询之前（防僵尸收益不破），回执 `inspection_scan_mode=type_only_fallback`
+可观测；铸号扫描面（`scan_prefix_ticket_ids`）同款降级。降级是**既定取舍非静默换实现**；
+`scan_mode` 三值：`starts_with`（正型）/ `type_only_fallback`（降级）/ `skipped`
+（白名单降级，查询都不发）。
+
+### 13.6 两条命令（样例即文档）
+
+```bash
+# 起一期（每期一票；重复触发返回既有票号）
+server/engine/.venv/bin/python server/engine/inspection_trigger.py trigger \
+  --instance integration-tests --period 20260916
+# 看聚合声明面（逐项目 ok/absent/error + 白名单并集 + 调度意图）
+server/engine/.venv/bin/python server/engine/inspection_trigger.py decl
+```
+
 ## 退役账（t260907-04 命名清理①：7 条过渡兼容，撤任何一条前先对表）
 
 t260907-04 把 SANDBAR_* env、suyou-poc 队列、.suyou/ 协调目录改成 sandbar 名。以下 7 条  # naming-compat

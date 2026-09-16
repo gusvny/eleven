@@ -1,40 +1,48 @@
-# sandbar 巡检声明（inspection epic 票①，t260905-03）——机制在引擎，面在项目声明。
-# 260910 巡检校准（t260910-11）：id 去后缀（test-face→integration-tests、doc-face→docs-sync），
-# 声明字段 face 除名（零消费者，旧声明含 face 一律解析拒收点名；workflow 输入
-# InspectionPeriodicInput.face 保留默认值兼容历史重放）。
-# 引擎只出通用调度器与开票机制（inspection_trigger.py / InspectionPeriodicWorkflow），
-# 「怎么定时、跑哪个 workflow」全部由本文件声明：改声明即改行为，不改引擎码。
-# 解析真源=inspection_decl.py，只认其头注声明的 YAML 子集；子集外形态一律
-# fail-closed 报错点名（不静默降级、不猜）。
+# ══════════════════════════════════════════════════════════════════════════════
+# sandbar 项目的巡检声明（t260916-02 声明落位迁移A：每项目仓内单文件）
 #
-# 字段说明：
+# 【落位】本文件=sandbar 项目（注册表 key=sandbar，主目录=本仓根）的巡检声明，从
+#   server/engine/inspection.yaml 迁来（引擎侧只留机制：解析=inspection_decl.py，
+#   开票=inspection_ticketing.py，运维通道=inspection_trigger.py）。
+#   解析链：项目注册条目 paths.inspection_decl 未声明 → 默认落位 <dirs[0]>/inspection.yaml
+#   =本文件；要指到别处（如机器级 ~/.sandbar/projects/sandbar/inspection.yaml），在
+#   ~/.sandbar/projects/sandbar/project.yaml 加 paths.inspection_decl 声明（样例见
+#   docs/inspection-sample.yaml 头注）。聚合（板面白名单/漏跑核查/schedule-up）遍历注册
+#   项目读各自声明——本文件只管 sandbar 自己的实例。
+#
+# 【票号】巡检票号=工单号同形式 t<YYMMDD>-<NN>（t260916-02 起，走既有票号分配）；
+#   「每期一票」按（实例,期号）显式去重（SA InspectionInstance/InspectionPeriod）。
+#
+# 【改声明即改行为】引擎只出通用调度器与开票机制（inspection_trigger.py /
+#   InspectionPeriodicWorkflow），「怎么定时、跑哪个 workflow」全部由本文件声明：
+#   改声明即改行为，不改引擎码。解析真源=inspection_decl.py，只认其头注声明的 YAML
+#   子集；子集外形态一律 fail-closed 报错点名（不静默降级、不猜）。
+#
+# 【字段说明】（与迁出前逐项一致，t260916-02 未动字段词法）
 #   schema    声明格式版本（现只认 v1）
 #   instances 巡检实例表（每实例=一个扫描面的调度位；每期一票按实例独立开票）
-#   id        实例标识（小写 slug，作票号组成段；票号形如 inspection-<id>-<期号>）
-#   project_key 实例级项目身份（t260915-20 新增，所有实例必填——enabled 与否都不豁免）：
+#   id        实例标识（小写 slug；期号检索面=SA，票号不再由实例 id 组成）
+#   project_key 实例级项目身份（t260915-20 起，所有实例必填——enabled 与否都不豁免）：
 #             本实例巡检票归属哪个项目（=项目注册表 key）。起票时盖章 ProjectKey 搜索
-#             属性（工单板项目过滤/行 project 的真源），repo_root 缺省也按它解析注册
-#             条目主目录（dirs[0]）。与 schedule.project_key（计数取数面）是两个字段：
-#             实例级=归属、schedule 级=计数，绝不互串。改归属后重跑 schedule-up 即生效
-#             （update 分支重铸 action——t260915-20 修复后 payload/SA 两分支同源刷新）。
+#             属性，repo_root 缺省也按它解析注册条目主目录（dirs[0]）。与
+#             schedule.project_key（计数取数面）是两个字段：实例级=归属、schedule 级=计数，
+#             绝不互串。改归属后重跑 schedule-up 即生效（update 分支重铸 action）。
 #   enabled   是否启用（false=占位不调度不触发——声明驱动开关，行为级验收点）
 #   schedule  定时法声明：kind=cron（五字段 cron）| every-n-tickets（每并 N 张票触发）|
-#             race-first（cron 与计数先到者——t260911-02 全接线）。计数 kind 必带：
-#             n（阈值 1–10000）、source（计数源，现只接 archive-dir=ticket 归档目录）、
-#             project_key（归档目录的项目 key，票计数=该 key data/tickets 一级条目数）
-#   scan_face 本实例跑的扫描器（t260911-02 新增：「跑哪个巡检面」由声明决定；可指名
-#             test|doc|mechanism|simplify；缺省 test=票① 行为）
-#   suite     套件档（t260913-02 新增）：空=不跑套件（票① 行为）；full=本期在**巡检自有
-#             泳道**（.lane/inspection-<实例>-<期>，分支 inspection/<实例>/<期>，基点=开跑
-#             时 main HEAD）里跑集成全集（verify.yaml integration.cmd），结果进票面与
-#             发现清单。只有全集一档——没有抽稀/跳场景的值（词法外 fail-closed 点名）。
-#             套件开关在**运行期由 workflow 读本声明**判定（resolve_inspection_plan 活动），
-#             不进调度 payload：改本字段即改行为，不必重跑 schedule-up。
-#   tz        调度时区（t260913-02 实现段新增，IANA 名如 Asia/Shanghai）：Temporal Schedule
-#             的 cron **默认按 UTC 求值**——不写 tz，「每天 07:30」会落在本地 15:30。人读
-#             钟点必须与本字段同口径声明；空=Temporal 缺省（UTC）。
+#             race-first（cron 与计数先到者）。计数 kind 必带：n（阈值 1–10000）、
+#             source（计数源，现只接 archive-dir=ticket 归档目录）、project_key（归档
+#             目录的项目 key，票计数=该 key data/tickets 一级条目数）
+#   scan_face 本实例跑的扫描器（test|doc|mechanism|simplify|stage；缺省 test）
+#   suite     套件档（空=不跑套件；full=本期在巡检自有泳道跑集成全集，结果进票面与
+#             发现清单。只有全集一档；词法外 fail-closed 点名）。套件开关在运行期由
+#             workflow 读本声明判定（resolve_inspection_plan 活动），不进调度 payload：
+#             改本字段即改行为，不必重跑 schedule-up。
+#   tz        调度时区（IANA 名如 Asia/Shanghai）：Temporal Schedule 的 cron 默认按 UTC
+#             求值——不写 tz，「每天 07:30」会落在本地 15:30。人读钟点必须与本字段同口径
+#             声明；空=Temporal 缺省（UTC）。
 #   workflow  本实例跑的 workflow 类型名（引擎侧已接线巡检 workflow 白名单校验）
 #   template  巡检票模板标识（票面展示用）
+# ══════════════════════════════════════════════════════════════════════════════
 schema: v1
 instances:
   - id: integration-tests

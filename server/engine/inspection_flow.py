@@ -154,13 +154,26 @@ def period_key_in_tz(now: datetime, tz_name: str = "") -> str:
     return now_in_tz(now, tz_name).strftime("%Y%m%d")
 
 
-def inspection_ticket_id(instance_id: str, period: str) -> str:
-    """Inspection ticket id = workflow id (a repeated trigger with the same id = the same
-    ticket, the mechanical one-ticket-per-period guarantee)."""
+def validate_period_key(instance_id: str, period: str) -> None:
+    """期号形状闸（t260916-02 起）：票号=workflow id（t 形，起票侧铸号，见
+    inspection_ticketing.open_period_ticket），workflow 体不再铸造票号——但期号仍是
+    去重键/台账键，体内在铸期回落腿后照旧闭式校验（形状非法=ValueError，与旧铸号
+    校验同语义，replay 面对合法期零影响）。"""
     if not instance_id or not PERIOD_RE.match(period or ""):
         raise ValueError("票号组成非法：instance=%r period=%r（期号须 YYYYMMDD 或 "
                          "YYYYMMDD-<bucket>）" % (instance_id, period))
-    return "inspection-%s-%s" % (instance_id, period)
+
+
+def inspection_ledger_name(instance_id: str, period: str) -> str:
+    """台账/套件回执文件名单点（t260916-02）：`inspection-<实例>-<期>[-suite].json`。
+
+    这是**键名约定不是票号**（票号已 t 形化）：deadman 台账扫描按文件名反解实例/期号
+    （inspection_deadman.LEDGER_NAME_RE），键名稳定=漏跑核查零改动。老票重放同名——
+    旧实现恰好就是这个名字（旧票号=旧形 id=实例+期），逐字节不变。"""
+    if not instance_id or not PERIOD_RE.match(str(period or "")):
+        raise ValueError("落账名组成非法：instance=%r period=%r（期号须 YYYYMMDD 或 "
+                         "YYYYMMDD-<bucket>）" % (instance_id, period))
+    return "inspection-%s-%s.json" % (instance_id, period)
 
 
 def watcher_workflow_id(instance_id: str) -> str:
@@ -378,33 +391,49 @@ def validate_close_signature(sig: Any, expected_gate: str = CLOSE_GATE_ID) -> Tu
 
 def write_inspection_report_impl(face: Dict[str, Any], out_dir: Path) -> Dict[str, Any]:
     """Posting (a pure impl; the activity is a thin shell around it):
-    out/inspection/<ticket id>.json, a re-run of the same ticket overwrites that single
-    file."""
-    ticket_id = str(face.get("ticket_id") or "")
-    if not ticket_id:
-        raise ValueError("落账缺 ticket_id")
+    out/inspection/inspection-<实例>-<期>.json（t260916-02：文件名按实例+期派生
+    （inspection_ledger_name 单点）——键名约定不是票号，票号 t 形化后 deadman 台账
+    扫描零改动；同票重跑覆盖同一文件）。"""
+    instance_id = str(face.get("instance_id") or "")
+    period = str(face.get("period") or "")
+    if not instance_id or not period:
+        raise ValueError("落账缺实例/期号（face.instance_id/period）")
+    name = inspection_ledger_name(instance_id, period)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / ("%s.json" % ticket_id)
+    path = out_dir / name
     path.write_text(json.dumps(face, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"file": path.name, "path": str(path), "ticket_id": ticket_id}
+    return {"file": name, "path": str(path),
+            "ticket_id": str(face.get("ticket_id") or "")}
 
 
-def write_inspection_suite_receipt_impl(ticket_id: str, receipt: Dict[str, Any],
-                                        out_dir: Path) -> Dict[str, Any]:
-    """套件回执落盘（t260913-02）：out/inspection/<票号>-suite.json（同票重跑覆盖）。
+def write_inspection_suite_receipt_impl(instance_id: str, period: str,
+                                        receipt: Dict[str, Any], out_dir: Path) -> Dict[str, Any]:
+    """套件回执落盘（t260913-02；t260916-02 文件名按实例+期派生）：
+    out/inspection/inspection-<实例>-<期>-suite.json（同票重跑覆盖）。
 
     票面只放逐场景红绿/摘要（不刷屏），**输出尾与全量明细在这里**——票面里的聚合红项
     与 deadman 条目都指回这个文件（可下钻，验收 B/D 的「可读」面）。文件名以 -suite.json
-    结尾，台账扫描（inspection_deadman.ledger_periods）显式识别为已知非台账件。"""
-    if not ticket_id:
-        raise ValueError("套件回执缺 ticket_id")
+    结尾，台账扫描（inspection_deadman.ledger_periods）显式识别为已知非台账件。
+    instance/period 双缺时回落**legacy 只读解析** receipt.ticket_id（旧形 id 含实例/期；
+    服务老在途票重放——读面，绝不铸造旧形新票）。"""
+    instance_id = str(instance_id or "")
+    period = str(period or "")
+    if not instance_id or not period:
+        m = re.match(r"^inspection-(.+)-(\d{8}(?:-[1-9]\d*)?)$",
+                     str((receipt or {}).get("ticket_id") or ""))
+        if not m:
+            raise ValueError("套件回执缺实例/期号（且 ticket_id 非旧形可解析）")
+        instance_id, period = m.group(1), m.group(2)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / ("%s-suite.json" % ticket_id)
+    path = out_dir / (inspection_ledger_name(instance_id, period)[:-len(".json")]
+                      + "-suite.json")
     path.write_text(json.dumps(dict(receipt or {}), ensure_ascii=False, indent=2),
                     encoding="utf-8")
-    return {"file": path.name, "path": str(path), "ticket_id": ticket_id}
+    return {"file": path.name, "path": str(path),
+            "ticket_id": str((receipt or {}).get("ticket_id") or ""),
+            "instance_id": instance_id, "period": period}
 
 
 # ========================================================================================
@@ -562,7 +591,11 @@ class InspectionPeriodicWorkflow:
         period = inp.period or (
             period_key_in_tz(workflow.now(), str(plan.get("tz") or ""))
             if self._patched else period_key(workflow.now()))
-        ticket_id = inspection_ticket_id(inp.instance_id, period)
+        # 票号 = 真实 workflow id（t260916-02：起票侧经 inspection_ticketing.open_period_ticket
+        # 铸 t 形号并显式去重（实例+期号 SA），id 不再编码实例/期——老在途票（旧形 id）重放
+        # 时该值同样是旧形 id，输出逐字节不变，replay 安全零新 patch 门）。
+        validate_period_key(inp.instance_id, period)
+        ticket_id = workflow.info().workflow_id
         if self._patched and not (plan_raw or {}).get("ok"):
             return await self._blocked(
                 ticket_id, inp, period, "setup",
@@ -593,7 +626,7 @@ class InspectionPeriodicWorkflow:
             self._enter("suite", "running",
                         "巡检自有泳道跑集成全集（lane 基点 %s）" % (lane or {}).get("base_ref", ""))
             suite_section, suite_findings, teardown_note = await self._run_suite(
-                ticket_id, lane or {})
+                ticket_id, inp, period, lane or {})
             extra_findings += suite_findings
             self._enter("suite", "running", "泳道拆除：%s" % teardown_note)
             if teardown_note.startswith("未净"):
@@ -737,19 +770,24 @@ class InspectionPeriodicWorkflow:
         return lane, None
 
     async def _run_suite(
-        self, ticket_id: str, lane: Dict[str, str],
+        self, ticket_id: str, inp: "InspectionPeriodicInput", period: str,
+        lane: Dict[str, str],
     ) -> Tuple[Dict[str, Any], List[Dict[str, Any]], str]:
         """跑全集 + 拆泳道。返回 (票面套件段, 套件发现, 拆除说明)。
 
         套件活动**不 raise 到 workflow 外**：跑不成是一等数据（high 发现 + 回执），
-        由人审/次日消化——绝不让一次套件故障把巡检期票变成不可读的崩。"""
+        由人审/次日消化——绝不让一次套件故障把巡检期票变成不可读的崩。
+        t260916-02：activity args 增 instance_id/period（套件回执文件名按实例+期派生，
+        票号 t 形化后不再能从票号反解；老 history 重放用记录的旧 args，activity 侧对
+        缺键回落 legacy 只读解析，确定性不受影响）。"""
         from inspection_deadman import suite_findings, suite_section
         receipt: Dict[str, Any]
         try:
             raw: Any = await workflow.execute_activity(
                 "run_inspection_suite",
                 args=[{"ticket_id": ticket_id, "worktree": lane.get("worktree", ""),
-                       "base_ref": lane.get("base_ref", "")}],
+                       "base_ref": lane.get("base_ref", ""),
+                       "instance_id": inp.instance_id, "period": period}],
                 start_to_close_timeout=SUITE_TO, retry_policy=RETRY_SUITE)
             if (raw or {}).get("ok"):
                 receipt = dict((raw or {}).get("result") or {})
@@ -1011,3 +1049,65 @@ class InspectionTicketCountWatcherWorkflow:
                     cron_anchor=anchor.isoformat(timespec="seconds"),
                     triggered_total=self._triggered_total))
             await workflow.sleep(timedelta(seconds=inp.poll_seconds))
+
+
+# ========================================================================================
+# spawner：cron 调度 → 真票 的起票薄壳（t260916-02）
+#   Temporal Schedule 的 action 参数是静态的，铸不了「起票瞬间分配」的 t 形号——
+#   故调度目标改为本 workflow（id=inspection-spawn-<实例>，固定，重叠 SKIP 同现状），
+#   体=一个 activity（spawn_inspection_period：期号铸取+铸号去重+盖 SA+起真票）即完。
+#   spawner 是调度器不是票：绝不进 client.INSPECTION_BOARD_TYPES（同 watcher）。
+# ========================================================================================
+
+@dataclass
+class InspectionSpawnInput:
+    """spawner 输入（调度面声明决议的静态部分；期号/票号都由 activity 起票时刻定）。
+
+    decl_path 恒空（cron 调度形态）：spawner 每 fire 都读 worker 当前声明（聚合解析）
+    ——「改声明即改行为」的调度语义不变（与旧 action 直发 InspectionPeriodicWorkflow
+    同一纪律；显式 --decl-path 只属手动/夹具路径）。"""
+
+    instance_id: str
+    face: str = "test"
+    repo_root: str = ""
+    project_key: str = ""
+    decl_path: str = ""
+
+
+SPAWN_WORKFLOW_TYPE_NAME = "InspectionPeriodicSpawnWorkflow"
+
+
+def spawn_workflow_id(instance_id: str) -> str:
+    """spawner workflow id（形状单点，同 watcher_workflow_id 纪律：同声明重跑 schedule-up
+    必命中同一 workflow——幂等 update 的前提）。"""
+    if not instance_id or not re.match(r"^[a-z0-9][a-z0-9-]{0,63}$", instance_id):
+        raise ValueError("spawn id 组成非法：instance=%r（小写 slug）" % instance_id)
+    return "inspection-spawn-%s" % instance_id
+
+
+@workflow.defn
+class InspectionPeriodicSpawnWorkflow:
+    """每期一票的起票薄壳（调度器，非票）。体=单 activity 调用；activity 失败 →
+    ApplicationError(non_retryable) → schedule recent_actions 可见（绝不静默吞火）。"""
+
+    @workflow.query
+    def snapshot(self) -> Dict[str, Any]:
+        return {"id": workflow.info().workflow_id, "kind": "inspection-spawner"}
+
+    @workflow.run
+    async def run(self, inp: InspectionSpawnInput) -> Dict[str, Any]:
+        # 输入形状 fail-closed：无实例名的 spawner 绝不「跑着但什么都不做」
+        if not inp.instance_id:
+            from temporalio.exceptions import ApplicationError
+            raise ApplicationError("spawn 输入非法：instance 空", non_retryable=True)
+        res: Dict[str, Any] = await workflow.execute_activity(
+            "spawn_inspection_period",
+            args=[{"instance_id": inp.instance_id, "face": inp.face,
+                   "repo_root": inp.repo_root, "project_key": inp.project_key,
+                   "decl_path": inp.decl_path}],
+            start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
+        if not (res or {}).get("ok"):
+            from temporalio.exceptions import ApplicationError
+            raise ApplicationError(str((res or {}).get("error") or "起票失败（无事由）"),
+                                   non_retryable=True)
+        return (res or {}).get("result") or {}

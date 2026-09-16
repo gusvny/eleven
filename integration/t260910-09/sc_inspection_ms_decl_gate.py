@@ -31,7 +31,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lib_inspection_ms as lib  # noqa: E402 — 先入本票 lib（其内部补 t260905-03 路径）
 import lib_inspection as base  # noqa: E402
 
-REPO_DECL = os.path.join(base.TP_DIR, "inspection.yaml")
+# t260916-02 声明落位迁移A：仓内交付声明=本仓根 inspection.yaml（口径④），
+# 腿a 随之重指向新落位（断言不变）。
+REPO_DECL = os.path.join(base.REPO, "inspection.yaml")
 
 NEW_FACES = (("mechanism-face", "mechanism"), ("simplify-face", "simplify"))
 

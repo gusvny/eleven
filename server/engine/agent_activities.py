@@ -4572,6 +4572,11 @@ async def run_inspection_suite(args: Dict[str, Any]) -> Dict[str, Any]:
     本活动的失败（ok=True 照回），只有真基础设施故障才 raise 给 Temporal（workflow
     侧仍兜成可见的「套件未跑成」发现）。"""
     ticket_id = str(args.get("ticket_id") or "")
+    # t260916-02：回执文件名按实例+期派生（票号 t 形化后不可反解）；workflow 新 args 带
+    # 这两键；老 history 重放用记录的旧 args（缺键）→ 回落 receipt.ticket_id 的 legacy
+    # 只读解析（写面的文件名兜底，不铸造任何旧形新票）。
+    instance_id = str(args.get("instance_id") or "")
+    period = str(args.get("period") or "")
     wt = _abs_repo(args.get("worktree"))
     base_ref = str(args.get("base_ref") or "")
     started = time.monotonic()
@@ -4591,7 +4596,7 @@ async def run_inspection_suite(args: Dict[str, Any]) -> Dict[str, Any]:
         from inspection_flow import write_inspection_suite_receipt_impl
         from shared import INSPECTION_DIR
         written = await asyncio.to_thread(write_inspection_suite_receipt_impl,
-                                          ticket_id, receipt, INSPECTION_DIR)
+                                          instance_id, period, receipt, INSPECTION_DIR)
         receipt["report_path"] = written.get("path", "")
     except Exception as e:  # noqa: BLE001——回执落盘失败必须点名（不得让票面指向不存在的文件）
         receipt["report_path"] = ""

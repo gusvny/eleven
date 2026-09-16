@@ -2094,7 +2094,9 @@ def register_namespace(ns, addr, timeout=30):
                 ("already exist", "already created"))
     if not ok:
         return False, "namespace create 失败（ns=%s）：%s" % (ns, last_err)
-    for name in ("ProjectKey", "EpicCode"):
+    # t260916-02：巡检票显式去重（实例+期号）的两个新 SA 一并幂等注册（temporalite 无
+    # start-dev 启动参，注册只能走 operator create；已注册=tolerate 已容）。
+    for name in ("ProjectKey", "EpicCode", "InspectionInstance", "InspectionPeriod"):
         if not cli_ok(["operator", "search-attribute", "create", "--namespace", ns,
                        "--name", name, "--type", "Keyword", "--address", addr],
                       ("already exist", "already defined", "already registered")):

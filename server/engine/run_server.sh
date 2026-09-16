@@ -17,6 +17,8 @@ mkdir -p "$POC_DIR/data"
   --ip 127.0.0.1 --port 7233 --ui-port 8233 \
   --search-attribute ProjectKey=Keyword \
   --search-attribute EpicCode=Keyword \
+  --search-attribute InspectionInstance=Keyword \
+  --search-attribute InspectionPeriod=Keyword \
   --log-level warn &
 SERVER_PID=$!
 # 等 gRPC 就绪（最多 60s），把 default namespace 保留期改为 100 年（幂等）

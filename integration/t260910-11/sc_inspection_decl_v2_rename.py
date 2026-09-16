@@ -24,7 +24,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import lib_inspection as lib  # noqa: E402
 
 REPO = lib.REPO
-DELIVERED_YAML = os.path.join(REPO, "server", "engine", "inspection.yaml")
+# t260916-02 声明落位迁移A：交付声明从 server/engine/ 迁本仓根（口径④），
+# 本场景守「交付面可解析」随之重指向新落位（断言不变）。
+DELIVERED_YAML = os.path.join(REPO, "inspection.yaml")
 
 # 旧形态声明样本：与新表唯一差异=实例带 face 行（1:1 复刻工单②点名的合法字段表七键原表）
 OLD_FORM_DECL = """schema: v1
@@ -56,7 +58,9 @@ def main() -> int:
     workdir = None
 
     # ── 腿A：交付 inspection.yaml 解析为 v2——实例名已去后缀、回执零 face 键 ──
-    proc, parsed = lib.run_trigger(["decl"])
+    # t260916-02 迁移A：decl 聚合时代「交付声明解析」显式指交付文件（仓根），
+    # 腿语义不变（守交付面内容形状，解析面另由 t260916-02-decl-gate-aggregate 守）。
+    proc, parsed = lib.run_trigger(["decl", "--decl-path", DELIVERED_YAML])
     if not isinstance(parsed, dict) or parsed.get("ok") is not True:
         failures.append("腿A 交付声明解析失败（新声明必须可解析）：%r | stderr=%s"
                         % ((parsed or (proc.stdout or "")[:160]), (proc.stderr or "")[:200]))

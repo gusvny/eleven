@@ -214,6 +214,36 @@ def run_client(sub: str, args: dict, env=None):
     return proc, last_json(proc.stdout)
 
 
+def ensure_inspection_search_attributes(timeout=20):
+    """t260916-02 迁移步：测试台幂等注册巡检去重两 SA（InspectionInstance/
+    InspectionPeriod=Keyword）。已注册=tolerate（与 stage_docker.register_namespace
+    同口径）；CLI 缺席/注册失败=返回 (False, note) 如实上报——不静默：调用方把 note
+    记进场景日志，SA 真缺时 trigger 会以「SA 未注册」显式报错（R3 归因）二次点名。
+    只对隔离台（TEST_TARGET_HOST/TEST_NAMESPACE）操作，绝不触生产。"""
+    import subprocess as _sp
+    cli = os.environ.get("SANDBAR_TEMPORAL_BIN") or ""
+    if not cli:
+        cand = os.path.join(TP_DIR, "bin", "temporal")
+        cli = cand if os.path.exists(cand) else ""
+    if not cli:
+        return False, "temporal CLI 不可得（server/engine/bin/temporal 缺失，env SANDBAR_TEMPORAL_BIN 可指路）"
+    notes = []
+    for name in ("ProjectKey", "EpicCode", "InspectionInstance", "InspectionPeriod"):
+        try:
+            p = _sp.run([cli, "operator", "search-attribute", "create",
+                         "--namespace", TEST_NAMESPACE, "--name", name,
+                         "--type", "Keyword", "--address", TEST_TARGET_HOST],
+                        capture_output=True, text=True, timeout=timeout)
+        except (OSError, _sp.SubprocessError) as e:
+            return False, "SA %s 注册失败：%s" % (name, e)
+        low = ((p.stdout or "") + (p.stderr or "")).lower()
+        if p.returncode != 0 and not any(t in low for t in
+                                         ("already exist", "already defined", "already registered")):
+            return False, "SA %s 注册失败（rc=%s）：%s" % (name, p.returncode, low.strip()[:160])
+        notes.append(name)
+    return True, "SA 就绪：%s" % ",".join(notes)
+
+
 class StageWorker:
     """场景自供给 worker（仓内先例：ticket-lifecycle 起 worker 起票）。
 
@@ -236,9 +266,16 @@ class StageWorker:
     READY_MARK = "worker 起来了"   # worker.py 就绪日志行
     ENTANGLED = ("SANDBAR_WORKER_META", "SANDBAR_WATCH_WORKFLOW", "SANDBAR_WATCH_PPID")
 
-    def __init__(self, queue: str, ready_timeout: float = 30.0):
+    def __init__(self, queue: str, ready_timeout: float = 30.0,
+                 extra_env: "dict | None" = None):
         self.queue = queue
         self.ready_timeout = ready_timeout
+        # t260916-02（arbitrate gen2 T4 根因）：workflow 运行期决议（resolve_inspection_plan，
+        # 「读当前声明」机制）在 worker 进程重读声明来源——夹具注册表/覆盖层/台账目录若
+        # 只随 trigger 子进程走（TRIGGER_ENV 形态），worker 会按真实注册表解析出
+        # 「实例未在任何项目声明中」fail-closed blocked。extra_env=调用方把同一夹具
+        # env 也喂给 worker（与 trigger 子进程同源，仍经 spawn_env 单点构造）。
+        self.extra_env = dict(extra_env or {})
         self.proc = None
         self.log_path = None
         self._log = None
@@ -252,14 +289,20 @@ class StageWorker:
 
     def __enter__(self):
         import time as _time
+        # t260916-02：起 worker 前先幂等注册巡检去重 SA（失败只记日志不拦 worker——
+        # SA 真缺时 trigger 的 R3 报错会显式点名，不在这里静默也不在这里假红）
+        sa_ok, sa_note = ensure_inspection_search_attributes()
         fd, self.log_path = tempfile.mkstemp(prefix="sandbar-insp-worker-", suffix=".log")
         os.close(fd)
+        self._sa_note = "[%s] %s" % ("ok" if sa_ok else "WARN", sa_note)
         # t260910-11 隔离红线：worker 子进程 env 同样只从 spawn_env 单点出（私有队列
         # 经 extra 显式传入；目标/namespace 白名单自检在 spawn_env 内）
-        env = spawn_env({"SANDBAR_TASK_QUEUE": self.queue})
+        env = spawn_env({"SANDBAR_TASK_QUEUE": self.queue, **self.extra_env})
         for k in self.ENTANGLED:
             env.pop(k, None)
         self._log = open(self.log_path, "a", encoding="utf-8")
+        self._log.write("[lib] %s\n" % getattr(self, "_sa_note", ""))  # SA 注册结果留痕
+        self._log.flush()
         self.proc = subprocess.Popen(
             [py_runner(), WORKER], cwd=TP_DIR, env=env,
             stdout=self._log, stderr=subprocess.STDOUT,

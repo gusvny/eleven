@@ -23,13 +23,20 @@ def test_period_key_format():
     assert flow.period_key(__import__("datetime").datetime(2026, 9, 5, 13, 44)) == "20260905"
 
 
-def test_inspection_ticket_id_shape_and_validation():
-    tid = flow.inspection_ticket_id("integration-tests", "20260905")
-    assert tid == "inspection-integration-tests-20260905"
+def test_validate_period_key_and_ledger_name_shape():
+    """t260916-02：铸号迁起票侧（inspection_ticketing 铸 t 形号），workflow 体只留
+    期号形状闸；台账文件名按实例+期派生（键名约定，不是票号——旧实现恰好同名，
+    老票重放逐字节不变）。"""
+    flow.validate_period_key("integration-tests", "20260905")   # 合法不抛
+    flow.validate_period_key("integration-tests", "20260905-3")
     with pytest.raises(ValueError):
-        flow.inspection_ticket_id("integration-tests", "2026-09-05")
+        flow.validate_period_key("integration-tests", "2026-09-05")
     with pytest.raises(ValueError):
-        flow.inspection_ticket_id("", "20260905")
+        flow.validate_period_key("", "20260905")
+    assert flow.inspection_ledger_name(
+        "integration-tests", "20260905") == "inspection-integration-tests-20260905.json"
+    with pytest.raises(ValueError):
+        flow.inspection_ledger_name("integration-tests", "bad")
 
 
 def test_validate_trigger_args_fail_closed():
@@ -121,16 +128,21 @@ def test_close_signature_accepts_signature_dataclass():
 # ---------- 落账 ----------
 
 def test_write_inspection_report_roundtrip_and_overwrite(tmp_path):
-    face = flow.build_ticket_face("inspection-t-f-20260905", "t", "20260905", _scan_result())
+    # t260916-02：落账文件名=实例+期键名（不是票号——票号已 t 形化，id 任意都不影响
+    # 文件名；同票重跑覆盖同文件）
+    face = flow.build_ticket_face("t060905-01", "t", "20260905", _scan_result())
     out = flow.write_inspection_report_impl(face, tmp_path)
     path = Path(out["path"])
-    assert path.name == "inspection-t-f-20260905.json"
+    assert path.name == "inspection-t-20260905.json"
     assert json.loads(path.read_text(encoding="utf-8"))["kind"] == "inspection"
     face["human_gate"] = {"who": "宿主", "decision": "approve"}          # 收口时再写=覆盖同文件
     flow.write_inspection_report_impl(face, tmp_path)
     assert json.loads(path.read_text(encoding="utf-8"))["human_gate"]["decision"] == "approve"
     with pytest.raises(ValueError):
         flow.write_inspection_report_impl({}, tmp_path)
+    with pytest.raises(ValueError):
+        # 缺期号 face（畸形票面）显式拒收——不落半截文件名
+        flow.write_inspection_report_impl({"instance_id": "t"}, tmp_path)
 
 
 # ---------- workflow 结构面（真链路两拍在验收①手动证据承载） ----------

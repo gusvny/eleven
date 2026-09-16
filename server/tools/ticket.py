@@ -432,18 +432,18 @@ def _uniq_v2(tid):
 
 
 def _next_seq_v2(prefix):
-    """当天短 id 自增序号（t<yymmdd>-<NN>）：扫 Temporal 全项目工单取同前缀最大序号 +1
-    （工单 id 全局唯一——workflow id 就是工单 id，不分项目）。"""
-    out = _poc('ticket-list', {})
+    """当天短 id 自增序号（t<yymmdd>-<NN>）：扫 Temporal 同前缀 id 取最大序号 +1
+    （workflow id 就是票 id，全局唯一、不分项目）。
+    t260916-02：巡检票号统一成工单号形式后，工单与巡检票**共享同一日序号空间**——
+    只扫工单店会让两族各发同一个号、起票撞 workflow id（现成缺陷）。改走
+    ticket-list id_prefix 全类型前缀扫描（巡检票一并入扫），序号判定核心 =
+    shared.next_ticket_seq_from_ids 单点（与 inspection_ticketing 同一份实现）。"""
+    out = _poc('ticket-list', {'id_prefix': prefix})
     if not out.get('ok'):
         raise ValueError('Temporal 不可达，无法分配工单序号: %s' % (out.get('error') or out))
-    best = 0
-    pat = re.compile(r'^%s-(\d{2,})$' % re.escape(prefix))
-    for r in (out.get('result') or {}).get('tickets') or []:
-        m = pat.match(str(r.get('id') or ''))
-        if m:
-            best = max(best, int(m.group(1)))
-    return best + 1
+    ids = [str((r or {}).get('id') or '')
+           for r in (out.get('result') or {}).get('tickets') or []]
+    return _shared().next_ticket_seq_from_ids(prefix, ids)
 
 
 def _check_paths_under_project(proj, ws, worktree):

@@ -122,9 +122,10 @@ class FakeDesc:
 
 
 class FakeClient:
-    def __init__(self, wfs, handles):
+    def __init__(self, wfs, handles, reject_starts_with=False):
         self._wfs = wfs
         self._handles = handles
+        self.reject_starts_with = reject_starts_with
         self.filters: list[str] = []
 
     def get_workflow_handle(self, tid):
@@ -134,9 +135,19 @@ class FakeClient:
         """建模服务端可见性过滤的最小语义（t02 桩的已知缺口——其 fixture 只喂同型
         workflow 所以不需要；本票 R9 断言「缺省列表不得混入巡检行」，桩必须真按
         WorkflowType 过滤，否则测的是假客户端不是板面）。ProjectKey/EpicCode AND
-        段同法substring 匹配 + SA 值比对。"""
+        段同法substring 匹配 + SA 值比对。
+        t260916-02：建模 WorkflowId STARTS_WITH（板面 legacy 腿 + id_prefix 铸号扫描面）；
+        reject_starts_with 注入 R2 降级腿（后端拒绝算子）。"""
         self.filters.append(filter_str)
         import re as _re
+        starts_m = _re.search(r'STARTS_WITH "([^"]*)"', filter_str)
+        if starts_m:
+            if self.reject_starts_with:
+                raise ValueError("could not parse query: unsupported operator STARTS_WITH")
+            for w in self._wfs:
+                if w.id.startswith(starts_m.group(1)):
+                    yield w
+            return
         proj_m = _re.search(r'AND ProjectKey="([^"]*)"', filter_str)
         epic_m = _re.search(r'AND EpicCode="([^"]*)"', filter_str)
         proj_key = str(_K.for_keyword(client_mod.PROJECT_SA_NAME))
@@ -226,17 +237,20 @@ def inspection_snap(stage="close", stage_state="awaiting-human", status="running
     }
 
 
-# ---------------------------------------------------------------- A. 票号解析
+# ---------------------------------------------------------------- A. 票号解析（legacy 只读）
 
 def test_inspection_instance_of_truth_table():
-    f = client_mod._inspection_instance_of
-    assert f("inspection-integration-tests-20260915") == "integration-tests"
-    assert f("inspection-my-ci-20260915-2") == "my-ci"          # bucket 期号
-    assert f("inspection-docs-sync-20260908") == "docs-sync"
-    assert f("inspection-foo") == ""                            # 缺期号段
-    assert f("inspection--20260915") == ""                      # 空实例段
-    assert f("t260915-08") == ""                                # dev-lane 票号
-    assert f("") == "" and f(None) == ""                        # 畸形输入不抛
+    """t260916-02：票号 t 形化后旧形解析只剩只读兼容面（返回 (实例,期) 二元组；
+    新形 id 反解不出=空对——铸造点已删，本面绝不反过来铸造旧形票号）。"""
+    f = client_mod._legacy_inspection_instance_period_of
+    assert f("inspection-integration-tests-20260915") == ("integration-tests", "20260915")
+    assert f("inspection-my-ci-20260915-2") == ("my-ci", "20260915-2")   # bucket 期号
+    assert f("inspection-docs-sync-20260908") == ("docs-sync", "20260908")
+    assert f("inspection-foo") == ("", "")                              # 缺期号段
+    assert f("inspection--20260915") == ("", "")                        # 空实例段
+    assert f("t260915-08") == ("", "")                                  # dev-lane 票号
+    assert f("t260916-01") == ("", "")                                  # 新形巡检票号
+    assert f("") == ("", "") and f(None) == ("", "")                    # 畸形输入不抛
 
 
 # ---------------------------------------------------------------- B. 行分支真值表
@@ -285,13 +299,20 @@ def test_row_degraded_closed_never_closed_status():
 
 def test_row_malformed_face_degrades_per_field():
     snap = inspection_snap(face={"findings": "not-a-list", "summary": "garbage"})
-    row = client_mod._row_from_inspection_face("inspection-weird-20260901", snap, "p", "",
-                                               "RUNNING", 0.0, 0)
+    row = client_mod._row_from_inspection_face(
+        "inspection-weird-20260901", snap, "p", "", "RUNNING", 0.0, 0,
+        instance_id="weird", period="20260901", match_via="legacy_id")
     assert row["findings"] == {"high": 0, "med": 0, "low": 0, "total": 0}
     assert row["heartbeat"] is False
-    # face 缺 instance/period → 票号解析兜底（title/字段不裸空）
+    # face 缺 instance/period → 调用方解析值（SA/legacy 只读）兜底（title/字段不裸空）
     assert row["instance_id"] == "weird"
     assert row["title"] == "巡检 weird · 期 20260901"
+    assert row["match_via"] == "legacy_id"
+    # t260916-02：本函数自身绝不从 id 反解——调用方不给解析值就如实出空（不编造）
+    row2 = client_mod._row_from_inspection_face(
+        "t260916-01", inspection_snap(face={"findings": "x"}), "", "", "RUNNING", 0.0, 0)
+    assert row2["instance_id"] == "" and row2["period"] == ""
+    assert row2["match_via"] == "" and row2["legacy_unowned"] is False
 
 
 def test_row_summary_is_source_of_truth_over_recount():
@@ -307,7 +328,7 @@ def test_row_summary_is_source_of_truth_over_recount():
 
 def test_inspection_mode_rows_whitelist_and_closed_window(monkeypatch):
     monkeypatch.setattr(client_mod, "_inspection_enabled_instances",
-                        lambda: (("docs-sync", "integration-tests"), ""))
+                        lambda: (("docs-sync", "integration-tests"), "", []))
     now = time.time()
     in_win = now - 3600
     beyond = now - (client_mod.CLOSED_HYDRATE_WINDOW_S + 3600)
@@ -346,8 +367,17 @@ def test_inspection_mode_rows_whitelist_and_closed_window(monkeypatch):
     info = res["result"]["inspection_filter"]
     assert info["degraded"] is False and info["enabled_instances"] == [
         "docs-sync", "integration-tests"]
-    # type_filter 单点（R9）：巡检模式只拼 INSPECTION_BOARD_TYPES
-    assert client_obj.filters == ['WorkflowType="InspectionPeriodicWorkflow"']
+    # t260916-02 双腿：SA 腿（白名单 OR 串）+ legacy 腿（STARTS_WITH 前缀）；类型过滤
+    # 仍只拼 INSPECTION_BOARD_TYPES 单点（两腿都含同一 WorkflowType 串）
+    assert len(client_obj.filters) == 2
+    assert 'WorkflowType="InspectionPeriodicWorkflow"' in client_obj.filters[0]
+    assert 'InspectionInstance="docs-sync"' in client_obj.filters[0]
+    assert 'InspectionInstance="integration-tests"' in client_obj.filters[0]
+    assert 'WorkflowId STARTS_WITH "inspection-"' in client_obj.filters[1]
+    assert info["scan_mode"] == "starts_with"
+    rows_by_id = {r["id"]: r for r in tickets_of(res)}
+    assert rows_by_id["inspection-integration-tests-20260915"]["match_via"] == "legacy_id"
+    assert rows_by_id["inspection-integration-tests-20260915"]["legacy_unowned"] is True
     # 窗内闭合行=完整巡检形（非匿名）
     closed = row_of(res, "inspection-docs-sync-20260908")
     assert closed["kind"] == "inspection" and closed["status"] == "closed"
@@ -357,7 +387,7 @@ def test_inspection_mode_rows_whitelist_and_closed_window(monkeypatch):
 
 def test_inspection_mode_decl_degraded_explicit(monkeypatch):
     monkeypatch.setattr(client_mod, "_inspection_enabled_instances",
-                        lambda: ((), "DeclError: 声明不可解析"))
+                        lambda: ((), "DeclError: 声明不可解析", []))
     now = time.time()
     wfs = [InspWf("inspection-integration-tests-20260915", "RUNNING", TASK_QUEUE,
                       SA_EMPTY)]
@@ -369,7 +399,7 @@ def test_inspection_mode_decl_degraded_explicit(monkeypatch):
 
 def test_inspection_mode_running_query_degraded_row(monkeypatch):
     monkeypatch.setattr(client_mod, "_inspection_enabled_instances",
-                        lambda: (("integration-tests",), ""))
+                        lambda: (("integration-tests",), "", []))
     h = FakeHandle(["timeout", "timeout", "timeout"])
     res, _ = run_list(
         {"kind": "inspection"},
@@ -384,7 +414,7 @@ def test_inspection_mode_running_query_degraded_row(monkeypatch):
 
 def test_inspection_mode_closed_result_failure_degraded_visible(monkeypatch):
     monkeypatch.setattr(client_mod, "_inspection_enabled_instances",
-                        lambda: (("docs-sync",), ""))
+                        lambda: (("docs-sync",), "", []))
     now = time.time()
     wf = InspWf("inspection-docs-sync-20260908", "COMPLETED", TASK_QUEUE, SA_EMPTY,
                     close_time=datetime.fromtimestamp(now - 60, tz=timezone.utc))
@@ -398,7 +428,7 @@ def test_inspection_mode_closed_result_failure_degraded_visible(monkeypatch):
 def test_inspection_mode_nondict_snapshot_degrades_not_crashes(monkeypatch):
     # t02 真值表的巡检侧同款腿：snapshot 非 dict（老代码/桩/坏数据）→ 显式降级不崩
     monkeypatch.setattr(client_mod, "_inspection_enabled_instances",
-                        lambda: (("integration-tests",), ""))
+                        lambda: (("integration-tests",), "", []))
     res, _ = run_list(
         {"kind": "inspection"},
         [InspWf("inspection-integration-tests-20260915", "RUNNING", TASK_QUEUE, SA_EMPTY)],
@@ -411,7 +441,7 @@ def test_inspection_mode_nondict_snapshot_degrades_not_crashes(monkeypatch):
 def test_default_mode_row_set_zero_change(monkeypatch):
     # R9：缺省列表（无 kind）行集合零变化——巡检 workflow 即使在 visibility 里也不上板
     monkeypatch.setattr(client_mod, "_inspection_enabled_instances",
-                        lambda: (("integration-tests",), ""))
+                        lambda: (("integration-tests",), "", []))
     snap = {"engine": "v2", "meta": {"id": "t-run", "title": "真票", "project": "suyou",
                                      "role": "developer", "status": "dispatched",
                                      "stage": "implement", "stage_state": "running",
@@ -436,14 +466,14 @@ def test_default_mode_row_set_zero_change(monkeypatch):
 
 
 def test_unknown_kind_fails_closed(monkeypatch):
-    monkeypatch.setattr(client_mod, "_inspection_enabled_instances", lambda: ((), ""))
+    monkeypatch.setattr(client_mod, "_inspection_enabled_instances", lambda: ((), "", []))
     res, _ = run_list({"kind": "inspectionn"}, [], {})
     assert res.get("ok") is False and "kind" in (res.get("error") or "")
 
 
 def test_project_epic_filter_stackable_in_inspection_mode(monkeypatch):
     monkeypatch.setattr(client_mod, "_inspection_enabled_instances",
-                        lambda: (("integration-tests",), ""))
+                        lambda: (("integration-tests",), "", []))
     _K = client_mod.SearchAttributeKey
     sa = {str(_K.for_keyword(client_mod.PROJECT_SA_NAME)): "foo",
           str(_K.for_keyword(client_mod.EPIC_SA_NAME)): "ep1"}
@@ -488,3 +518,78 @@ def test_ticket_query_devlane_snapshot_unchanged():
     assert r["engine"] == "v2"                # 沿用快照 engine 原语义（零变化）
     assert r["ticket"]["id"] == "t-run" and r["ticket"]["title"] == "真票"
     assert "kind" not in r["ticket"] and "gate_id" not in r["ticket"]
+
+
+# ---------------------------------------------------------------- t260916-02 双腿/扫描面
+
+def _ins_sa(inst, per):
+    return {str(_K.for_keyword(client_mod.INSPECTION_INSTANCE_SA_NAME)): inst,
+            str(_K.for_keyword(client_mod.INSPECTION_PERIOD_SA_NAME)): per}
+
+
+def test_inspection_board_sa_leg_rows_match_via_sa(monkeypatch):
+    """新票（t 形 id）靠 InspectionInstance SA 上板：match_via=sa，实例/期不从 id 反解
+    （id 里根本没有）——legacy_unowned 随 ProjectKey SA 缺席=True（口径⑤）。"""
+    monkeypatch.setattr(client_mod, "_inspection_enabled_instances",
+                        lambda: (("integration-tests",), "", []))
+    start = datetime.fromtimestamp(1760000000, tz=timezone.utc)
+    wfs = [InspWf("t260916-01", "RUNNING", TASK_QUEUE, {**_ins_sa("integration-tests", "20260916"),
+                                                        **SA_FOO}, start_time=start)]
+    handles = {"t260916-01": FakeHandle(snapshot=inspection_snap())}
+    res, _c = run_list({"kind": "inspection"}, wfs, handles)
+    rows = tickets_of(res)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["id"] == "t260916-01" and row["match_via"] == "sa"
+    # 期号取 face 镜像（真源优先，20260915）；SA 值用于白名单过滤与 face 缺键兜底
+    assert row["instance_id"] == "integration-tests" and row["period"] == "20260915"
+    assert row["project"] == "foo" and row["legacy_unowned"] is False
+    assert row["title"] == "巡检 integration-tests · 期 20260915"
+
+
+def test_inspection_board_degraded_whitelist_named(monkeypatch):
+    """声明面降级 → 板面显式空 + degraded 标记（查询都不发；R2 纪律不回退）。"""
+    monkeypatch.setattr(client_mod, "_inspection_enabled_instances",
+                        lambda: ((), "decl boom", [("", "/tmp/decl.yaml", "decl boom")]))
+    wfs = [InspWf("inspection-integration-tests-20260915", "RUNNING", TASK_QUEUE, SA_EMPTY)]
+    res, c = run_list({"kind": "inspection"}, wfs, {})
+    assert tickets_of(res) == []
+    info = res["result"]["inspection_filter"]
+    assert info["degraded"] is True and "decl boom" in info["note"]
+    assert info["scan_mode"] == "skipped" and c.filters == []
+
+
+def test_ticket_list_id_prefix_scan_cross_family():
+    """铸号扫描面（ticket.py _next_seq_v2 的序号真源）：id_prefix=全类型前缀直查——
+    dev-lane 工单与巡检票同入（同天序号空间，修 _next_seq_v2 只扫工单店的现成缺陷）；
+    后端拒绝算子 → 类型扫+客户端前缀过滤降级（scan_mode 可辨）；与 kind 并用=显式拒。"""
+    start = datetime.fromtimestamp(1760000000, tz=timezone.utc)
+    wfs = [FakeListWf("t260916-01", "RUNNING", TASK_QUEUE, SA_EMPTY,
+                      workflow_type="DevLaneWorkflow", start_time=start),
+           InspWf("t260916-02", "RUNNING", TASK_QUEUE, SA_EMPTY, start_time=start),
+           FakeListWf("t260916-99", "RUNNING", "self-test-queue", SA_EMPTY,
+                      workflow_type="DevLaneWorkflow", start_time=start),  # 非生产队列不收
+           InspWf("inspection-x-20260916", "RUNNING", TASK_QUEUE, SA_EMPTY, start_time=start)]
+    res, c = run_list({"id_prefix": "t260916"}, wfs, {})
+    ids = [r["id"] for r in tickets_of(res)]
+    assert ids == ["t260916-01", "t260916-02"]            # 跨族同扫
+    assert res["result"]["id_prefix_scan"]["scan_mode"] == "starts_with"
+    assert len(c.filters) == 1 and "STARTS_WITH" in c.filters[0]
+    # kind 并用闸（fail-closed）
+    res_bad = _run_list_raw({"kind": "inspection", "id_prefix": "t"}, wfs, {})
+    assert res_bad["ok"] is False and "不并用" in res_bad["error"]
+    # R2 降级：算子被拒 → 类型扫（工单+巡检两类）+ 客户端前缀过滤
+    c2 = _connect_with(list(wfs), {})
+    c2.reject_starts_with = True
+
+    async def _runner():
+        return await client_mod.cmd_ticket_list({"id_prefix": "t260916"})
+
+    res2 = asyncio.run(_runner())
+    assert res2["result"]["id_prefix_scan"]["scan_mode"] == "type_only_fallback"
+    assert [r["id"] for r in tickets_of(res2)] == ["t260916-01", "t260916-02"]
+
+
+def _run_list_raw(args, wfs, handles):
+    _connect_with(wfs, handles)
+    return asyncio.run(client_mod.cmd_ticket_list(dict(args)))

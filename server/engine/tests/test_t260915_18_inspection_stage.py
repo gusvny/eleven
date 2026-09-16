@@ -135,7 +135,8 @@ def test_wired_faces_contains_stage():
 
 
 def test_real_decl_parses_and_existing_instances_unchanged():
-    d = decl.load_inspection_decl(ENGINE / "inspection.yaml")
+    # t260916-02：真源声明迁仓根 <repo>/inspection.yaml（字段逐字节不变，只换头注）
+    d = decl.load_inspection_decl(REPO / "inspection.yaml")
     by_id = {i.id: i for i in d.instances}
     # 既有实例零变化（字段快照锚，R2）
     it = by_id["integration-tests"]

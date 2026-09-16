@@ -223,6 +223,44 @@ def ticket_search_attributes(project: str, epic: str = ""):
     return TypedSearchAttributes(pairs)
 
 
+# 巡检票实例/期号搜索属性（t260916-02，口径②「建议」项）：Keyword SA，去重判定
+# （实例+期号显式去重）、工单板 SA 腿预过滤、按实例查历史期三面的检索真源。
+# 注册面：dev 台 run_server.sh --search-attribute；docker 测试台 stage_docker precheck
+# 幂等补建；在跑 server 用 `bin/temporal operator search-attribute create`（README §13）。
+INSPECTION_INSTANCE_SA_NAME = "InspectionInstance"
+INSPECTION_PERIOD_SA_NAME = "InspectionPeriod"
+
+
+def inspection_search_attributes(project: str, instance_id: str = "", period: str = ""):
+    """巡检票 typed SA（t260916-02）：ProjectKey（归属，与 dev-lane 同款）+
+    InspectionInstance/InspectionPeriod（实例/期号检索）。instance/period 空则不盖该对
+    （历史票兼容面：老票只可能有 ProjectKey）。temporalio 函数内 import（stdlib-only 纪律）。"""
+    from temporalio.common import SearchAttributeKey, SearchAttributePair, TypedSearchAttributes
+    pairs = [SearchAttributePair(SearchAttributeKey.for_keyword(PROJECT_SA_NAME), project)]
+    if instance_id:
+        pairs.append(SearchAttributePair(
+            SearchAttributeKey.for_keyword(INSPECTION_INSTANCE_SA_NAME), instance_id))
+    if period:
+        pairs.append(SearchAttributePair(
+            SearchAttributeKey.for_keyword(INSPECTION_PERIOD_SA_NAME), period))
+    return TypedSearchAttributes(pairs)
+
+
+def next_ticket_seq_from_ids(prefix: str, ids) -> int:
+    """当天短 id 自增序号**纯核**（t<YYMMDD>-<NN>；t260916-02 自 server/tools/ticket.py
+    _next_seq_v2 抽芯成单一真源——工单与巡检两个铸号面共用，语义漂移即双开号）：
+    同前缀最大序号 +1；`%02d` 起步、≥100 自然进三位（词法 `\\d{2,}`）；畸形/异前缀 id 忽略。
+    调用方负责扫描面 IO（必须覆盖**全部** workflow 类型的 id——工单店与巡检票互见，
+    否则跨族撞号；见 client.py ticket-list 的 id_prefix 扫描参）。"""
+    best = 0
+    pat = re.compile(r"^%s-(\d{2,})$" % re.escape(str(prefix or "")))
+    for tid in (ids or []):
+        m = pat.match(str(tid or ""))
+        if m:
+            best = max(best, int(m.group(1)))
+    return best + 1
+
+
 # ---- Pre-running the next ticket after epic creation (ticket t260828-08): after the merge sign-off, pre-run the integration suggestion and cache it ----
 # The cache's source of truth = <repoRoot>/.sandbar/epic-next/<code>/pre.json; the
 # read side = workbench src/host/epic-next.ts readPrecache (they reference each other
@@ -3491,7 +3529,7 @@ def ticket_data_dir(project_key: str, ticket_id: str) -> pathlib.Path:
 
 DEFAULT_ROLES_DIR = "server/roles"   # the fallback convention: the roles directory (relative to the project root)
 
-PATHS_DECL_KEYS = ("roles_dir", "model_routes")
+PATHS_DECL_KEYS = ("roles_dir", "model_routes", "inspection_decl")
 
 
 class ProjectPathsError(ValueError):
@@ -3623,6 +3661,7 @@ def project_paths(project_key: str, roles_base: str = "",
     key = str(project_key or "").strip()
     info: Dict[str, Any] = {"roles_dir": None, "roles_rel": None,
                             "model_routes": None, "model_routes_rel": None,
+                            "inspection_decl": None, "inspection_decl_rel": None,
                             "main_dir": None, "entry": None}
     if not key or not PROJECT_KEY_RE.match(key):
         return info
@@ -3653,6 +3692,23 @@ def project_paths(project_key: str, roles_base: str = "",
         else:
             info["model_routes"] = pathlib.Path(base) / resolved  # 相对：项目主目录下，语义不变
         info["model_routes_rel"] = raw
+    if "inspection_decl" in paths:
+        # 巡检声明落位指路（t260916-02）：与 model_routes 同一机器级放宽口径（~/…、绝对、
+        # 相对拼项目主目录）；校验词法照抄 _decl_routes_path，但**回落语义不照抄**——
+        # 路由表缺文件是分态软回落+兜底表（KI-030 收窄口径），巡检声明的缺席=「该项目
+        # 无巡检面」（absent 响应语义）、坏形/不可读=消费侧项目级显式降级点名。锚点判定
+        # 归消费方（inspection_decl.resolve_project_decl_path，四态表同款 fail-closed）。
+        base = routes_base or main_dir
+        if not base:
+            raise ProjectPathsError(
+                "%s: paths.inspection_decl 已声明但条目缺可用 dirs 首项，无法定项目主目录（畸形）" % label)
+        raw = _decl_routes_path("inspection_decl", paths["inspection_decl"], label)
+        resolved = _resolve_decl_routes_path(raw)
+        if resolved.is_absolute():
+            info["inspection_decl"] = resolved          # 机器级/绝对形态（同 t260910-14 放宽）
+        else:
+            info["inspection_decl"] = pathlib.Path(base) / resolved  # 相对：项目主目录下
+        info["inspection_decl_rel"] = raw
     if "roles_dir" in paths:
         rel = _decl_rel("roles_dir", paths["roles_dir"], label)
         info["roles_dir"] = pathlib.Path(roles_base or os.getcwd()) / rel
@@ -4124,6 +4180,16 @@ def assert_registry_nonempty(projects, quarantined):
         raise ValueError('注册表没有任何可用项目条目：全部 %d 条被隔离——%s'
                          % (len(quarantined), reasons))
     raise ValueError('注册表没有任何项目条目')
+
+
+def list_registered_projects():
+    """全量注册项目清单（t260916-02 巡检聚合遍历面）：唯一装载器 `load_projects_registry`
+    的薄壳——跳过/隔离/迁移语义**逐字同源**，绝不另造第二套扫描规则（两套规则漂移=遍历面
+    虚增/漏计实例）。返回 (projects, quarantined)：
+      projects 条目 = {key,name,dirs}（可用条目）；quarantined 条目 = {dir,error}
+    （装载失败被隔离的条目——聚合消费方决定如何点名，绝不静默吞）。
+    注册表根不存在且无迁移源 = 上游 loader 的 ValueError 原样上抛（fail-closed）。"""
+    return load_projects_registry()
 
 
 def lookup_project(key):

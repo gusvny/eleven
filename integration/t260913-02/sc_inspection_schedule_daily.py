@@ -139,7 +139,10 @@ def main() -> int:
     import inspection_deadman as dm  # noqa: E402
 
     # ---------------- C1 声明面：每天一次 + suite: full ----------------
-    decl = decl_mod.load_inspection_decl()
+    # t260916-02 声明落位迁移：sandbar 实例声明迁到仓根 inspection.yaml（引擎旧位
+    # server/engine/inspection.yaml 已退役删除）——场景显式指新位，不再吃旧位回退。
+    decl = decl_mod.load_inspection_decl(
+        __import__("pathlib").Path(lj.REPO) / "inspection.yaml")
     it = decl.instance(REAL_INSTANCE)
     if it is None:
         r.check("C1a 生产声明含 integration-tests 实例", False,
@@ -255,7 +258,10 @@ def main() -> int:
         # 17233，读的永远不是生产调度账本 → C3b/C3c 必红（假红）。生产面只读核查走
         # prod_schedule_read（CLI 只读 describe；CLI 缺席=N/A 明示），并保留 deadman
         # 隔离台读面腿（通道可用性，与本红线不冲突）。
+        # t260916-02 迁移A：真实例（integration-tests）现住交付声明（本仓根 inspection.yaml），
+        # C3a「通道可查真实例」随之指交付声明（fixture decl 只含本场景自建实例）。
         proc3, parsed3 = run_trigger(["deadman", "--instance", REAL_INSTANCE,
+                                      "--decl-path", os.path.join(REPO, "inspection.yaml"),
                                       "--ledger-dir", os.path.join(workdir, "ledger2")])
         res3 = lj.lib.scanner_result(parsed3)
         r.check("C3a deadman 通道可查真实例（隔离台读面）", bool(res3), "%r" % parsed3)

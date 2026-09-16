@@ -239,8 +239,10 @@ def test_resolve_instance_plan_three_states(tmp_path):
 
 def test_shipped_declaration_is_daily_and_suite_full():
     """随票声明面锁定：integration-tests = 每日 07:30（Asia/Shanghai）+ suite: full
-    （宿主令 260913 每日调度接真）。"""
-    d = decl.load_inspection_decl()
+    （宿主令 260913 每日调度接真）。t260916-02：真源声明迁仓根 <repo>/inspection.yaml，
+    显式按路径装载（不依赖 env/引擎旧位）。"""
+    d = decl.load_inspection_decl(
+        Path(__file__).resolve().parent.parent.parent.parent / "inspection.yaml")
     it = d.instance("integration-tests")
     assert it.suite == "full"
     assert it.cron == "30 7 * * *"
@@ -357,11 +359,19 @@ def test_face_malformed_scan_result_still_rejected():
 def test_suite_receipt_written_and_not_a_ledger_entry(tmp_path):
     from inspection_deadman import ledger_periods
     out = tmp_path / "inspection"
+    # t260916-02：回执文件名按（实例,期）派生（inspection_ledger_name 单点）；
+    # instance/period 双缺时回落旧形 ticket_id 只读解析（历史票重放兜底）。
     res = flow.write_inspection_suite_receipt_impl(
-        "inspection-integration-tests-20260913", {"ran": 1, "error": ""}, out)
+        "integration-tests", "20260913", {"ran": 1, "error": ""}, out)
     assert res["file"] == "inspection-integration-tests-20260913-suite.json"
+    assert res["instance_id"] == "integration-tests" and res["period"] == "20260913"
+    legacy = flow.write_inspection_suite_receipt_impl(
+        "", "", {"ticket_id": "inspection-integration-tests-20260913",
+                 "ran": 1, "error": ""}, out)
+    assert legacy["file"] == "inspection-integration-tests-20260913-suite.json"
     flow.write_inspection_report_impl(
-        {"ticket_id": "inspection-integration-tests-20260913"}, out)
+        {"ticket_id": "inspection-integration-tests-20260913",
+         "instance_id": "integration-tests", "period": "20260913"}, out)
     led = ledger_periods(out, "integration-tests")
     assert led["periods"] == {"20260913"}       # -suite.json 是已知非台账件
     assert led["malformed"] == []
@@ -369,7 +379,10 @@ def test_suite_receipt_written_and_not_a_ledger_entry(tmp_path):
 
 def test_suite_receipt_impl_rejects_missing_ticket(tmp_path):
     with pytest.raises(ValueError):
-        flow.write_inspection_suite_receipt_impl("", {}, tmp_path)
+        flow.write_inspection_suite_receipt_impl("", "", {}, tmp_path)
+    with pytest.raises(ValueError):
+        # 双缺且 ticket_id 非旧形（不可解析）→ 显式拒收，绝不落怪名文件
+        flow.write_inspection_suite_receipt_impl("", "", {"ticket_id": "t060913-01"}, tmp_path)
 
 
 def test_blocked_face_roundtrip_carries_reason_and_stage(tmp_path):

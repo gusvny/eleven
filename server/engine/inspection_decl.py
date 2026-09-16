@@ -22,8 +22,14 @@ Settled design (preconditions from review_plan conditional-pass comments C1-C3 +
     naming the wired list; disabled instances are allowed (disabled = pure placeholder,
     never triggers; the declaration is documentation). "Parses fine but silently never
     triggers at runtime" is never acceptable.
-  - Path: the SANDBAR_INSPECTION_DECL env var overrides the default declaration path
-    (test isolation; the path constant has its single point in default_decl_path, M4).
+  - Path (t260916-02 声明落位迁移A 后的三层): **生产面=每项目仓内单文件**——默认
+    `<注册条目主目录 dirs[0]>/inspection.yaml`，`project.yaml` 的 `paths.inspection_decl`
+    可指路（绝对/机器级 `~/…`/相对皆可，校验同 paths.model_routes 放宽口径）；聚合消费面
+    遍历注册项目读各自声明（iter_project_decls / load_decl_for_instance）。**测试覆盖层=env
+    SANDBAR_INSPECTION_DECL**（单文件整体替代聚合；巡检场景族夹具全靠它，语义仅限测试——
+    生产禁用，降级路径写进 README §13）；显式 --decl-path（夹具注入）优先级最高。旧「引擎仓
+    单文件缺省」已退役（server/engine/inspection.yaml 迁至 sandbar 项目仓根，样例模板=
+    docs/inspection-sample.yaml）。
 
 YAML subset grammar (each rule pinned by a unit test):
   - Indentation is spaces only, tabs forbidden; fixed levels: root mapping (0) →
@@ -140,12 +146,21 @@ class InspectionDecl:
 
 
 def default_decl_path() -> Path:
-    """Single point for the declaration path (env-overridable; default = inspection.yaml
-    next to this module)."""
+    """**历史兼容缺省路径**（t260916-02 起）：env 覆盖层路径；env 未设=引擎仓旧位（该文件
+    已迁往项目仓根，此缺省仅服务历史调用点/报错信息——生产消费面一律走聚合
+    iter_project_decls / load_decl_for_instance，绝不把本缺省当真源）。"""
     env = os.environ.get("SANDBAR_INSPECTION_DECL")
     if env:
         return Path(env)
     return Path(__file__).resolve().parent / DECL_FILE_NAME
+
+
+def coverage_decl_path() -> str:
+    """测试覆盖层单点（t260916-02）：env `SANDBAR_INSPECTION_DECL` 非空（strip 后）=单文件
+    整体替代聚合遍历——巡检场景族夹具的兼容缝。**仅测试语义**：它让「面」脱离项目注册表
+    落位，生产环境设置它=配置事故（聚合被静默短路成单文件），消费方回执必须带 coverage
+    标记让人看见（见 iter_project_decls）。"""
+    return (os.environ.get("SANDBAR_INSPECTION_DECL") or "").strip()
 
 
 # ========================================================================================
@@ -495,23 +510,8 @@ def build_schedule_specs(decl: InspectionDecl) -> List[Dict[str, Any]]:
     return specs
 
 
-def resolve_instance_plan(instance_id: str, decl_path: Any = None) -> Dict[str, Any]:
-    """运行期「本期怎么跑」的单一决议点（t260913-02）：workflow 启动时经 activity 读当前
-    声明，决定是否进 setup/suite 阶段——**开关不进 workflow 输入 payload**（老 worker
-    解新字段的反向兼容面为零；改声明即改行为，不必重跑 schedule-up）。
-
-    三态，逐态闭式（C4）：ok=True 的两种形态也显式区分——
-      - suite 非空（现只认 "full"）：跑套件（setup → scan → suite → report → close）；
-      - suite 空：不跑套件（scan → report → close，票① 行为）；
-      - enabled=false / 实例不在册 / 声明不可解析 → ok=False + 点名 error（**绝不**
-        与「启用但没声明 suite」同形放过：调度器还在触发却声明已停用，是配置漂移
-        事故，必须显式 blocked 让人看见——dead-man 纪律的同一族）。
-    纯函数（IO 只有一次声明读，路径由 decl_path / env / 默认单点决定）。"""
-    try:
-        decl = load_inspection_decl(decl_path)
-    except Exception as e:  # noqa: BLE001——解析/IO 一律闭式点名，不静默当 no-suite
-        return {"ok": False, "instance_id": instance_id,
-                "error": "声明不可用（%s）：%s" % (type(e).__name__, e)}
+def _plan_from_decl(decl: "InspectionDecl", instance_id: str) -> Dict[str, Any]:
+    """decl + 实例 → plan（resolve_instance_plan 的三态闭式核，纯函数）。"""
     it = decl.instance(instance_id)
     if it is None:
         return {"ok": False, "instance_id": instance_id,
@@ -527,3 +527,207 @@ def resolve_instance_plan(instance_id: str, decl_path: Any = None) -> Dict[str, 
             "run_suite": bool(it.suite), "scan_face": it.scan_face, "cron": it.cron,
             "tz": it.tz,
             "kind": it.kind, "workflow": it.workflow, "template": it.template, "error": ""}
+
+
+def resolve_instance_plan(instance_id: str, decl_path: Any = None) -> Dict[str, Any]:
+    """运行期「本期怎么跑」的单一决议点（t260913-02；t260916-02 接声明落位聚合）：workflow
+    启动时经 activity 读当前声明，决定是否进 setup/suite 阶段——**开关不进 workflow 输入
+    payload**（老 worker 解新字段的反向兼容面为零；改声明即改行为，不必重跑 schedule-up）。
+
+    声明来源（覆盖层优先级，t260916-02）：显式 decl_path（场景注入，绝对路径）> env 测试
+    覆盖层（单文件）> 项目注册表聚合（生产路径——遍历注册项目找到定义本实例的那份声明）。
+
+    三态，逐态闭式（C4）：ok=True 的两种形态也显式区分——
+      - suite 非空（现只认 "full"）：跑套件（setup → scan → suite → report → close）；
+      - suite 空：不跑套件（scan → report → close，票① 行为）；
+      - enabled=false / 实例不在任何项目声明中 / 声明不可解析 → ok=False + 点名 error（**绝不**
+        与「启用但没声明 suite」同形放过：调度器还在触发却声明已停用，是配置漂移事故，
+        必须显式 blocked 让人看见——dead-man 纪律的同一族）。"""
+    explicit = str(decl_path or "").strip() or coverage_decl_path()
+    if explicit:
+        try:
+            decl = load_inspection_decl(Path(explicit))
+        except Exception as e:  # noqa: BLE001——解析/IO 一律闭式点名，不静默当 no-suite
+            return {"ok": False, "instance_id": instance_id,
+                    "error": "声明不可用（%s）：%s" % (type(e).__name__, e)}
+        return _plan_from_decl(decl, instance_id)
+    try:
+        decl, _project_key = load_decl_for_instance(instance_id)
+    except Exception as e:  # noqa: BLE001——聚合解析失败同样闭式点名（含逐项目状态）
+        return {"ok": False, "instance_id": instance_id,
+                "error": "声明聚合解析失败：%s" % e}
+    return _plan_from_decl(decl, instance_id)
+
+
+# ========================================================================================
+# 声明落位（t260916-02 迁移A）：每项目仓内单文件 + paths.inspection_decl 指路 + 聚合遍历
+#   - 生产面：默认 <注册条目主目录 dirs[0]>/inspection.yaml；指路键可落仓外（机器级）。
+#   - 三态逐项目闭式：ok / absent（无声明文件=该项目无巡检面，响应但不报错）/
+#     error（不可读/坏形态——显式点名项目 key+路径+事由，绝不静默吞）。
+#   - 覆盖层：env SANDBAR_INSPECTION_DECL 单文件整体替代聚合（仅测试语义）。
+#   - 跨项目实例 id 重复 = 配置事故 fail-closed（绝不猜）。
+# ========================================================================================
+
+class ProjectDeclState:
+    """一个注册项目的声明装载状态（聚合遍历的逐项目结果，三态闭式可观测）。"""
+
+    __slots__ = ("project_key", "state", "path", "decl", "error", "coverage")
+
+    def __init__(self, project_key: str, state: str, path: str = "",
+                 decl: Optional[InspectionDecl] = None, error: str = "",
+                 coverage: bool = False) -> None:
+        self.project_key = project_key
+        self.state = state          # "ok" | "absent" | "error"
+        self.path = path            # 已解析的声明路径（absent 时=默认落位路径，供点名）
+        self.decl = decl
+        self.error = error          # state=error 时的人读事由
+        self.coverage = coverage    # True=env 测试覆盖层（单文件模式）
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"project_key": self.project_key, "state": self.state, "path": self.path,
+                "error": self.error, "coverage": self.coverage,
+                "instances": [i.id for i in (self.decl.instances if self.decl else [])]}
+
+
+def resolve_project_decl_path(project_key: str) -> Path:
+    """项目 → 声明路径解析链（三腿，t260916-02）：
+      ① paths.inspection_decl 已声明 → 用之（绝对/`~/…` 原样，相对拼 dirs[0]）；
+         declared 锚点缺失/类型错位 fail-closed（契约①d 四态表同款——**声明了就必须在**）；
+      ② 未声明 → <dirs[0]>/inspection.yaml（默认落位；文件在不在=absent 与否，此处不判）；
+      ③ 注册条目不可用（未知 key/主目录缺失/条目文件坏）→ ProjectPathsError/DeclError 语境点名。
+    """
+    from shared import project_paths
+    key = str(project_key or "").strip()
+    info = project_paths(key)
+    main_dir = info.get("main_dir")
+    declared = info.get("inspection_decl")
+    if declared is not None:
+        p = Path(str(declared))
+        if not p.exists():
+            raise DeclError("paths.inspection_decl 声明锚点不存在（fail-closed，契约①d）：%s（项目 %s）"
+                            % (p, key))
+        if not p.is_file():
+            raise DeclError("paths.inspection_decl 声明锚点不是文件（类型错位，fail-closed）：%s（项目 %s）"
+                            % (p, key))
+        return p
+    if not main_dir:
+        raise DeclError("项目 %r 无可用注册条目主目录（dirs[0] 缺失）——巡检声明落位无法解析" % key)
+    return Path(str(main_dir)) / DECL_FILE_NAME
+
+
+def iter_project_decls() -> List[ProjectDeclState]:
+    """遍历注册项目读各自声明（聚合真源，t260916-02 口径④）。
+
+    - 项目清单=shared.list_registered_projects（唯一装载器薄壳：跳过/隔离语义逐字同源）；
+      隔离条目（装载失败）→ error 态点名（目录+事由），绝不静默吞。
+    - env 测试覆盖层生效 → 单文件模式：只出一条 coverage=True 的 ok/absent 态（absent=
+      env 指向的文件不存在——显式点名，不回落聚合）。
+    - 每项目三态：ok（解析成功）/ absent（无声明文件=无巡检面）/ error（点名 key+路径+事由）。"""
+    cov = coverage_decl_path()
+    if cov:
+        p = Path(cov)
+        if not p.is_file():
+            return [ProjectDeclState(project_key="", state="error", path=str(p), coverage=True,
+                                     error="测试覆盖层声明不可读（SANDBAR_INSPECTION_DECL=%s）——"
+                                           "该 env 仅测试语义，生产误设=配置事故" % cov)]
+        try:
+            decl = load_inspection_decl(p)
+        except Exception as e:  # noqa: BLE001——覆盖层坏形态同样显式点名
+            return [ProjectDeclState(project_key="", state="error", path=str(p), coverage=True,
+                                     error="测试覆盖层声明不可解析：%s: %s" % (type(e).__name__, e))]
+        return [ProjectDeclState(project_key="", state="ok", path=str(p), decl=decl, coverage=True)]
+    from shared import list_registered_projects
+    projects, quarantined = list_registered_projects()
+    out: List[ProjectDeclState] = []
+    for q in (quarantined or []):
+        qdir = str((q or {}).get("dir") or "")
+        out.append(ProjectDeclState(
+            project_key=Path(qdir).name if qdir else "",
+            state="error",
+            error="注册条目被隔离（%s）：%s" % (qdir, str((q or {}).get("error") or "未知")))
+        )
+    for proj in (projects or []):
+        key = str((proj or {}).get("key") or "")
+        try:
+            p = resolve_project_decl_path(key)
+        except Exception as e:  # noqa: BLE001——指路坏形/锚点错位/条目不可用 → error 态点名
+            out.append(ProjectDeclState(project_key=key, state="error",
+                                        error="%s: %s" % (type(e).__name__, e)))
+            continue
+        if not p.is_file():
+            out.append(ProjectDeclState(project_key=key, state="absent", path=str(p)))
+            continue
+        try:
+            decl = load_inspection_decl(p)
+        except Exception as e:  # noqa: BLE001——坏形态逐项目点名（不静默、不拖垮他项目）
+            out.append(ProjectDeclState(project_key=key, state="error", path=str(p),
+                                        error="声明不可解析：%s: %s" % (type(e).__name__, e)))
+            continue
+        out.append(ProjectDeclState(project_key=key, state="ok", path=str(p), decl=decl))
+    return out
+
+
+def load_decl_for_instance(instance_id: str):
+    """实例 → (decl, project_key) 聚合解析（t260916-02）。
+
+    覆盖层优先：env 生效 → 只在覆盖层文件里找（absent/error=显式点名，不回落聚合）。
+    生产聚合：遍历各项目声明找实例；命中唯一 → 返回；命中多个 → fail-closed 点名两处
+    （跨项目实例 id 重复=配置事故）；全无 → 显式报错并列出逐项目状态（含 error 项目点名）——
+    **绝不回落他项目声明、绝不回落引擎样例**（口径④ fail-closed 腿）。"""
+    iid = str(instance_id or "").strip()
+    states = iter_project_decls()
+    cov = coverage_decl_path()
+    if cov:
+        st = states[0]
+        if st.state == "ok" and st.decl is not None and st.decl.instance(iid) is not None:
+            return st.decl, ""
+        if st.state != "ok":
+            raise DeclError("实例 %r 不可解析：%s" % (iid, st.error))
+        raise DeclError("实例 %r 不在测试覆盖层声明中（%s，在册：%s）"
+                        % (iid, st.path, "、".join(i.id for i in st.decl.instances) or "无"))
+    hits: List[ProjectDeclState] = []
+    for st in states:
+        if st.state == "ok" and st.decl is not None and st.decl.instance(iid) is not None:
+            hits.append(st)
+    if len(hits) > 1:
+        raise DeclError("实例 %r 在多个项目声明中重复（%s）——跨项目实例 id 重复是配置事故，"
+                        "绝不猜（t260916-02 聚合 fail-closed）"
+                        % (iid, "、".join(st.project_key for st in hits)))
+    if hits:
+        return hits[0].decl, hits[0].project_key
+    scanned = "；".join(
+        "%s=%s%s" % (st.project_key or "（隔离）", st.state,
+                     ("（%s）" % st.error) if st.error else ("（%s）" % st.path if st.path else ""))
+        for st in states) or "注册表为空（无任何注册项目）"
+    raise DeclError("实例 %r 未在任何项目声明中——各项目仓根无 inspection.yaml=该项目无巡检面"
+                    "（逐项目：%s）；绝不回落他项目声明或引擎样例" % (iid, scanned))
+
+
+def enabled_instance_whitelist():
+    """工单板白名单聚合面（t260915-08 的 `_inspection_enabled_instances` 消费；t260916-02
+    改遍历）。返回 (instances, degraded_projects, coverage)：
+      instances = 全项目 enabled 实例 id 并集（排序去重）；
+      degraded_projects = [(project_key, path, error), …]——error 项目实例不收（其声明读不出，
+        收了才是静默编造），但**显式点名**让板面 note 可见；
+      coverage = env 覆盖层是否生效（单文件模式）。"""
+    states = iter_project_decls()
+    ids: Dict[str, list] = {}
+    degraded = []
+    for st in states:
+        if st.state == "ok" and st.decl is not None:
+            for i in st.decl.enabled_instances():
+                ids.setdefault(i.id, []).append((st.project_key, st.path))
+        elif st.state == "error":
+            degraded.append((st.project_key, st.path, st.error))
+    # 跨项目实例 id 重复=身份歧义配置事故（t260916-02 口径①fail-closed 半边）：绝不猜
+    # 归属——歧义实例从并集剔除，degraded 点名两处（项目+声明路径），板面/聚合回执
+    # 可见；trigger 面（load_decl_for_instance）多命中显式报错，两路口径一致。
+    for iid, owners in sorted((k, v) for k, v in ids.items() if len(v) > 1):
+        degraded.append((
+            ",".join(sorted(k for k, _ in owners)),
+            ";".join(str(p) for _, p in owners),
+            "实例 id '%s' 被多个项目声明（跨项目撞名）：%s——身份歧义，从聚合白名单剔除"
+            "（配置事故，人工处置）"
+            % (iid, "、".join("%s@%s" % (k, p) for k, p in owners))))
+    clean = tuple(sorted(k for k, v in ids.items() if len(v) == 1))
+    return clean, degraded, bool(coverage_decl_path())

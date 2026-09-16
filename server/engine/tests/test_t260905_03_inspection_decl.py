@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 POC = Path(__file__).resolve().parent.parent
+REPO = POC.parent.parent          # t260916-02：真源声明迁仓根（<repo>/inspection.yaml）
 sys.path.insert(0, str(POC))
 
 import inspection_decl as decl  # noqa: E402
@@ -63,7 +64,7 @@ def test_real_decl_file_loads_and_test_face_enabled():
     # 260915 宿主令：simplify-face 启用试跑（enabled=true，scan_face=simplify；
     # 仅手动 trigger，未 schedule-up 无定时）——三实例进 specs（main 侧统一改口径，
     # 非泳道就地改断言）。
-    d = decl.load_inspection_decl(POC / "inspection.yaml")
+    d = decl.load_inspection_decl(REPO / "inspection.yaml")
     assert d.schema == "v1"
     assert d.instance("integration-tests").enabled is True
     assert d.instance("docs-sync").enabled is True
@@ -93,7 +94,7 @@ def test_legacy_decl_with_face_field_rejected_and_named():
 
 
 def test_real_decl_file_has_no_face_field():
-    d = decl.load_inspection_decl(POC / "inspection.yaml")
+    d = decl.load_inspection_decl(REPO / "inspection.yaml")
     assert d.instance("integration-tests") is not None and d.instance("docs-sync") is not None
 
 
@@ -241,12 +242,16 @@ def test_inspection_trigger_import_level():
 
 
 def test_trigger_decl_op_offline_real_file():
+    # t260916-02：显式 --decl-path = 单文件视图（mode=single）；聚合视图由
+    # test_t260916_02 声明落位文件专测（SANDBAR_PROJECTS_DIR 夹具双项目腿）。
     proc = subprocess.run(
-        [sys.executable, str(POC / "inspection_trigger.py"), "decl"],
+        [sys.executable, str(POC / "inspection_trigger.py"), "decl",
+         "--decl-path", str(REPO / "inspection.yaml")],
         capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, proc.stderr
     payload = json.loads(proc.stdout.strip().splitlines()[-1])
     assert payload["ok"] is True
+    assert payload["result"]["mode"] == "single"
     ids = [i["id"] for i in payload["result"]["instances"]]
     # 本票（t260910-11）改名去后缀 + main 侧 t260910-09 新增占位实例，两边语义合取：
     # ids=新名两实例+t260910-09 两实例；t260913-02 起 simplify-face 启用；
@@ -278,13 +283,13 @@ def test_trigger_decl_op_malformed_file_single_line_error(tmp_path):
 def test_enabled_spec_helper_offline_gates():
     """触发面 fail-closed 先于网络：未启用实例/未声明实例/畸形期号都就地拒绝。"""
     from inspection_trigger import _enabled_spec, _valid_period
-    spec = _enabled_spec(POC / "inspection.yaml", "integration-tests")
+    spec = _enabled_spec(REPO / "inspection.yaml", "integration-tests")
     assert spec["workflow"] == "InspectionPeriodicWorkflow"
     with pytest.raises(ValueError, match="未启用"):
         # t260910-09 占位实例仍禁用——fail-closed 负例迁移到它
-        _enabled_spec(POC / "inspection.yaml", "mechanism-face")
+        _enabled_spec(REPO / "inspection.yaml", "mechanism-face")
     with pytest.raises(ValueError, match="未在声明"):
-        _enabled_spec(POC / "inspection.yaml", "nope")
+        _enabled_spec(REPO / "inspection.yaml", "nope")
     assert _valid_period("20260905") is None
     assert _valid_period("20260905-2") is None          # t260911-02：计数期形态放行
     assert _valid_period("2026-09-05") is not None

@@ -150,6 +150,19 @@ def scanner_result_or_none(parsed):
     return lib.scanner_result(parsed)
 
 
+def ticket_id_of_ledger(instance, stem):
+    """落账键（inspection-<实例>-<期>.json 去尾）→ 真票号（t260916-02 起票号=t 形工
+    单号，落账键保留 inspection- 前缀——两名分离，经查询面解析拿真 id，绝不从 id
+    反解；解析失败回落 stem（cleanup cancel 报错即忽略，非判定面）。"""
+    period = stem[len("inspection-%s-" % instance):]
+    try:
+        _p, parsed = lib.run_trigger(["ticket", "--instance", instance, "--period", period])
+        res = lib.scanner_result(parsed) or {}
+        return str(res.get("ticket_id") or "") or stem
+    except Exception:  # noqa: BLE001——卫生路径不炸判定面
+        return stem
+
+
 def main() -> int:
     failures = []
     notes = []
@@ -256,9 +269,9 @@ def main() -> int:
                     failures.append("腿d 夹具计数 2/2 达阈值 %ds 内未起票（every-n-tickets 触发缺口）"
                                     % WATCH_BUDGET)
                 else:
-                    tid = os.path.basename(ledgers[0])[:-5]
-                    opened_tickets.append(tid)
-                    period = tid.replace("inspection-%s-" % inst_cnt, "")
+                    led_key = os.path.basename(ledgers[0])[:-5]
+                    period = led_key.replace("inspection-%s-" % inst_cnt, "")
+                    opened_tickets.append(ticket_id_of_ledger(inst_cnt, led_key))
                     import re
                     if not re.match(r"^\d{8}-\d+$", period):
                         failures.append("腿d 计数期号形状非 YYYYMMDD-<bucket>（R2 契约）：%r" % period)
@@ -382,7 +395,8 @@ def main() -> int:
                     failures.append("腿j 复活后再达阈值未起新票（复活链缺口；现有=%s）"
                                     % [os.path.basename(x) for x in all_ledgers])
                 else:
-                    opened_tickets.extend(os.path.basename(x)[:-5] for x in all_ledgers)
+                    opened_tickets.extend(ticket_id_of_ledger(inst_cnt, os.path.basename(x)[:-5])
+                                          for x in all_ledgers)
                     notes.append("腿j terminate→复活→再触发 ok（%s）"
                                  % [os.path.basename(x)[:-5] for x in all_ledgers])
 
@@ -405,7 +419,7 @@ def main() -> int:
         # 与计数/watcher 工作流本体，防隔离台僵尸常驻占队列）
         for inst in (inst_cnt, inst_low, inst_race):
             for path in ledger_glob(inst):
-                lib.note_started_ticket(os.path.basename(path)[:-5])
+                lib.note_started_ticket(ticket_id_of_ledger(inst, os.path.basename(path)[:-5]))
             try:
                 lib.run_client("cancel", {"workflow_id": "inspection-watcher-%s" % inst})
             except Exception:

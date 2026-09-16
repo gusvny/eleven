@@ -54,12 +54,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from inspection_decl import (  # noqa: E402
     build_schedule_specs,
+    coverage_decl_path,
     default_decl_path,
+    enabled_instance_whitelist,
+    iter_project_decls,
+    load_decl_for_instance,
     load_inspection_decl,
 )
+from shared import list_registered_projects  # noqa: E402
 
 USAGE = ("用法：inspection_trigger.py <decl|trigger|sign|describe|schedule-up> …\n"
-         "运维通道（不进模型工具面）；每期一票：票号=inspection-<实例>-<期号>，重复触发即去重。")
+         "运维通道（不进模型工具面）；每期一票：按（实例,期号）显式去重，票号=工单号形式 "
+         "t<YYMMDD>-<NN>，重复触发返回既有票号。")
 
 
 def _ok(result: Any) -> Dict[str, Any]:
@@ -100,12 +106,17 @@ def _valid_period(period: str) -> Optional[str]:
 
 
 def _enabled_spec(decl_path: Optional[Path], instance_id: str) -> Dict[str, Any]:
-    """Declaration → that instance's scheduling intent; not enabled / not declared always
-    errors explicitly (fail-closed before any network)."""
-    decl = load_inspection_decl(decl_path) if decl_path else load_inspection_decl()
-    if decl.instance(instance_id) is None:
-        raise ValueError("实例 %r 未在声明中（在册：%s）"
-                         % (instance_id, "、".join(i.id for i in decl.instances)))
+    """声明 → 该实例的调度意图（t260916-02 起声明来源三层：显式 --decl-path（场景注入）
+    > env 测试覆盖层（单文件）> 项目注册表聚合（生产路径——遍历注册项目找到定义本实例
+    的那份声明）；not enabled / 不在任何项目声明中一律显式报错（网络动作前 fail-closed）。"""
+    explicit = str(decl_path or "").strip() or coverage_decl_path()
+    if explicit:
+        decl = load_inspection_decl(Path(explicit))
+        if decl.instance(instance_id) is None:
+            raise ValueError("实例 %r 未在声明中（在册：%s）"
+                             % (instance_id, "、".join(i.id for i in decl.instances)))
+    else:
+        decl, _project_key = load_decl_for_instance(instance_id)
     spec = next((s for s in build_schedule_specs(decl) if s["instance_id"] == instance_id), None)
     if spec is None:
         raise ValueError("实例 %r 在声明中未启用（enabled=false 不触发）；已启用：%s——改声明即改行为"
@@ -139,14 +150,14 @@ def resolve_repo_root(spec: Dict[str, Any], explicit_repo_root: str) -> str:
 # ========================================================================================
 
 def _lazy_engine():
-    from inspection_flow import CLOSE_GATE_ID, InspectionPeriodicInput, inspection_ticket_id
+    from inspection_flow import CLOSE_GATE_ID, InspectionPeriodicInput
     from shared import NAMESPACE, TARGET_HOST, TASK_QUEUE
-    return InspectionPeriodicInput, inspection_ticket_id, CLOSE_GATE_ID, TARGET_HOST, NAMESPACE, TASK_QUEUE
+    return InspectionPeriodicInput, CLOSE_GATE_ID, TARGET_HOST, NAMESPACE, TASK_QUEUE
 
 
 async def _connect():
     from temporalio.client import Client
-    _, _, _, target, namespace, _tq = _lazy_engine()
+    _, _, target, namespace, _tq = _lazy_engine()
     return await Client.connect(target, namespace=namespace)
 
 
@@ -161,8 +172,6 @@ async def cmd_trigger(args: argparse.Namespace) -> Dict[str, Any]:
         return _err(str(e))
     except Exception as e:  # noqa: BLE001 — declaration parsing fails closed, translated here
         return _err("声明不可用：%s" % e)
-    InspectionPeriodicInput, ticket_id_of, _, _, _, task_queue = _lazy_engine()
-    ticket_id = ticket_id_of(args.instance, period)
     # 实例级项目身份（t260915-20）：起票三真源同值——payload project_key、
     # ProjectKey SA（工单板项目过滤/行 project 的真源）、repo_root 注册表解析。
     project_key = str(spec.get("instance_project_key") or "")
@@ -174,44 +183,26 @@ async def cmd_trigger(args: argparse.Namespace) -> Dict[str, Any]:
         client = await _connect()
     except Exception as e:  # noqa: BLE001 — connection failures are named explicitly (the spirit of trade-off 5, never silent)
         return _err("temporal server 不可达：%s" % e)
-    from temporalio.service import RPCError
-    from shared import ticket_search_attributes
-    try:
-        handle = await client.start_workflow(
-            spec["workflow"],
-            InspectionPeriodicInput(
-                instance_id=args.instance, period=period,
-                # 声明驱动：跑哪个巡检面由实例 scan_face 声明决定（缺省 test=票① 行为）
-                face=str(spec.get("scan_face") or "test"),
-                repo_root=repo_root,
-                # 实例级项目身份随票走（t260915-20）：票面 snapshot/ticket_receipt 的
-                # project 与无主守卫判据的 payload 侧真源（SA 只在起票时刻可读）
-                project_key=project_key,
-                # 触发面校验用的声明 == workflow 运行期读的声明（两处同源；缺省空=worker 缺省）
-                # 绝对化：worker 的 cwd 与调用方不同，相对路径会读不到
-                decl_path=abs_decl_path(args.decl_path)),
-            id=ticket_id, task_queue=task_queue,
-            # ProjectKey SA 盖章（t260915-20）：既有工单板项目过滤（AND ProjectKey=）
-            # 天然收录巡检票——「分项目」在 UI 面自动成立的关键
-            search_attributes=ticket_search_attributes(project_key, ""))
-        return _ok({"triggered": True, "ticket_id": ticket_id, "period": period,
-                    "workflow": spec["workflow"], "instance": args.instance,
-                    "project": project_key, "repo_root": repo_root,
-                    "first_run_id": handle.first_execution_run_id})
-    except Exception as e:  # noqa: BLE001
-        if type(e).__name__ == "WorkflowAlreadyStartedError" or "already started" in str(e).lower():
-            # Trade-off 1: a repeated trigger with the same ticket id = deduped to the same
-            # ticket (the mechanical one-ticket-per-period guarantee)
-            return _ok({"triggered": False, "deduped": True, "ticket_id": ticket_id,
-                        "period": period, "project": project_key, "repo_root": repo_root,
-                        "reason": "同期巡检票已在（每期一票）"})
-        if isinstance(e, RPCError):
-            return _err("workflow %s 启动失败（不存在或不可达）：%s" % (ticket_id, e))
-        return _err("workflow %s 启动失败：%s: %s" % (ticket_id, type(e).__name__, e))
+    # t260916-02：起票收敛到 open_period_ticket 单点——铸 t 形工单号 + 显式去重
+    # （实例+期号 SA 查询 / 指针三态 / AlreadyStarted 归属判定）+ 盖 ProjectKey 与
+    # InspectionInstance/InspectionPeriod SA。本壳只做声明校验与回执拼装。
+    from shared import TASK_QUEUE  # noqa: E402——本函数局部导入（同 _lazy_engine 模式；arbitrate gen2 缺陷①：漏导入=CLI trigger 主路径 NameError）
+    from inspection_ticketing import open_period_ticket
+    res = await open_period_ticket(
+        client, instance_id=args.instance, period=period, project_key=project_key,
+        repo_root=repo_root, scan_face=str(spec.get("scan_face") or "test"),
+        decl_path=abs_decl_path(args.decl_path), task_queue=TASK_QUEUE)
+    if not res.get("ok"):
+        return res
+    r = dict(res["result"] or {})
+    r.update({"period": period, "workflow": spec["workflow"],
+              "instance": args.instance, "project": project_key,
+              "repo_root": repo_root})
+    return _ok(r)
 
 
 async def cmd_sign(args: argparse.Namespace) -> Dict[str, Any]:
-    from inspection_flow import CLOSE_GATE_ID, inspection_ticket_id, validate_close_signature
+    from inspection_flow import CLOSE_GATE_ID, validate_close_signature
     from shared import Signature
     period = args.period or datetime.now().strftime("%Y%m%d")
     err = _valid_period(period)
@@ -222,15 +213,31 @@ async def cmd_sign(args: argparse.Namespace) -> Dict[str, Any]:
         expected_gate=CLOSE_GATE_ID)
     if verr:
         return _err(verr)
-    ticket_id = inspection_ticket_id(args.instance, period)
+    payload, verr = validate_close_signature(
+        {"who": args.who or "", "gate": CLOSE_GATE_ID, "decision": args.decision, "note": args.note or ""},
+        expected_gate=CLOSE_GATE_ID)
+    if verr:
+        return _err(verr)
+    # t260916-02：票号不再由（实例,期）铸造——SA 查询解析既有票号（legacy 只读探测兜
+    # 过渡窗旧形票，见 inspection_ticketing.resolve_period_ticket_id）
+    from inspection_ticketing import resolve_period_ticket_id
     try:
         client = await _connect()
+    except Exception as e:  # noqa: BLE001
+        return _err("temporal server 不可达：%s" % e)
+    found = await resolve_period_ticket_id(client, args.instance, period)
+    if not found.get("ok"):
+        return _err("签字失败：%s" % found.get("error"))
+    ticket_id = str(found["ticket_id"])
+    try:
+        from shared import Signature
         handle = client.get_workflow_handle(ticket_id)
         await handle.signal("sign", Signature(
             who=payload["who"], gate=CLOSE_GATE_ID, decision=payload["decision"], note=payload["note"]))
         snap = await handle.query("snapshot")
         return _ok({"signed": True, "ticket_id": ticket_id, "decision": payload["decision"],
-                    "who": payload["who"], "status": (snap or {}).get("status")})
+                    "who": payload["who"], "ticket_source": found.get("source"),
+                    "status": (snap or {}).get("status")})
     except Exception as e:  # noqa: BLE001
         return _err("巡检票 %s 签字失败（不存在或不可达）：%s: %s" % (ticket_id, type(e).__name__, e))
 
@@ -275,14 +282,20 @@ async def cmd_ticket(args: argparse.Namespace) -> Dict[str, Any]:
     降级口径：工单台（workbench 插件）查询面不在本票写集，工单台侧继续不可查是**已知
     降级**；本子命令是巡检票的唯一查询面（运维通道）。"""
     from temporalio.service import RPCError
-    from inspection_flow import inspection_ticket_id
+    from inspection_ticketing import resolve_period_ticket_id
     period = args.period or datetime.now().strftime("%Y%m%d")
     err = _valid_period(period)
     if err:
         return _err(err)
-    ticket_id = inspection_ticket_id(args.instance, period)
     try:
         client = await _connect()
+    except Exception as e:  # noqa: BLE001——连接失败精确翻译，不谎报票不存在
+        return _err("temporal 不可达：%s: %s" % (type(e).__name__, e))
+    found = await resolve_period_ticket_id(client, args.instance, period)
+    if not found.get("ok"):
+        return _err(str(found.get("error")))
+    ticket_id = str(found["ticket_id"])
+    try:
         handle = client.get_workflow_handle(ticket_id)
         snap = await handle.query("snapshot")
     except RPCError as e:
@@ -292,23 +305,32 @@ async def cmd_ticket(args: argparse.Namespace) -> Dict[str, Any]:
         return _err("temporal 不可达（查询 %s 失败）：%s: %s" % (ticket_id, type(e).__name__, e))
     if not isinstance(snap, dict):
         return _err("巡检票 %s（实例 %s 期 %s）无快照——查无此票≠连不上" % (ticket_id, args.instance, period))
-    return _ok(ticket_receipt(snap, ticket_id))
+    receipt = ticket_receipt(snap, ticket_id)
+    receipt["ticket_source"] = found.get("source")
+    return _ok(receipt)
 
 
 async def cmd_describe(args: argparse.Namespace) -> Dict[str, Any]:
-    from inspection_flow import inspection_ticket_id
+    from inspection_ticketing import resolve_period_ticket_id
     period = args.period or datetime.now().strftime("%Y%m%d")
     err = _valid_period(period)
     if err:
         return _err(err)
-    ticket_id = inspection_ticket_id(args.instance, period)
     try:
         client = await _connect()
+    except Exception as e:  # noqa: BLE001
+        return _err("temporal server 不可达：%s" % e)
+    found = await resolve_period_ticket_id(client, args.instance, period)
+    if not found.get("ok"):
+        return _err(str(found.get("error")))
+    ticket_id = str(found["ticket_id"])
+    try:
         handle = client.get_workflow_handle(ticket_id)
         snap = await handle.query("snapshot")
         if snap is None:
             return _err("巡检票 %s 无快照（不存在或不可达）" % ticket_id)
-        result: Dict[str, Any] = {"ticket_id": ticket_id, "snapshot": snap}
+        result: Dict[str, Any] = {"ticket_id": ticket_id, "ticket_source": found.get("source"),
+                                  "snapshot": snap}
         # 迁移自检面（t260915-20 §5.1）：在册 cron 调度的 action 摘要——payload 的
         # project_key/repo_root 有无 + SA ProjectKey 值。查不到/非 cron 形态=显式
         # error 字段，不阻塞票快照本体（票面真源优先）。
@@ -319,8 +341,10 @@ async def cmd_describe(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 async def _schedule_action_summary(client: Any, instance_id: str) -> Dict[str, Any]:
-    """在册调度 action 摘要（尽力而为面，t260915-20）：无调度/SDK 缺失/形状不合都
-    显式落 error 字段——迁移自检「action 带没带新 payload/SA」靠它可读，绝不静默。"""
+    """在册调度 action 摘要（尽力而为面，t260915-20；t260916-02 认 spawner action）：
+    无调度/SDK 缺失/形状不合都显式落 error 字段——迁移自检「action 指没指 spawner /
+    带没带新 payload/SA」靠它可读，绝不静默。action 仍是旧直发 workflow（未重跑
+    schedule-up）→ error 点名旧形票号残留与刷新入口。"""
     out: Dict[str, Any] = {"schedule_id": "sandbar-inspection-%s" % instance_id}
     try:
         handle = client.get_schedule_handle(out["schedule_id"])
@@ -336,6 +360,10 @@ async def _schedule_action_summary(client: Any, instance_id: str) -> Dict[str, A
             "project_key": str(getattr(inp, "project_key", "") or ""),
             "repo_root": str(getattr(inp, "repo_root", "") or ""),
         })
+        if wf_name != "InspectionPeriodicSpawnWorkflow":
+            out["error"] = ("action 仍直发 %s（旧形固定 id——票号残留旧形状）：重跑 "
+                            "schedule-up --instance %s --note <…> 重铸 action 到 spawner"
+                            % (wf_name or "未知", instance_id))
         sa_val = ""
         for pair in (getattr(action, "typed_search_attributes", None) or []):
             if str(getattr(getattr(pair, "key", None), "name", "")) == "ProjectKey":
@@ -350,30 +378,35 @@ async def _schedule_action_summary(client: Any, instance_id: str) -> Dict[str, A
 
 
 def _schedule_action(spec: Dict[str, Any], task_queue: str, explicit_repo_root: str = ""):
-    """调度 action 单点 builder（t260915-20 R1 修复核心，纯面单测友好）：
-    ScheduleActionStartWorkflow + InspectionPeriodicInput（face/repo_root/project_key
-    全部从声明 spec 决议）+ ProjectKey typed SA。
+    """调度 action 单点 builder（t260915-20 R1 修复核心；t260916-02 改指 spawner）：
+    ScheduleActionStartWorkflow + InspectionPeriodicSpawnWorkflow（face/repo_root/
+    project_key 全部从声明 spec 决议）+ ProjectKey typed SA。
+
+    为什么是 spawner：Schedule 的 action 参数是静态的，铸不了「起票瞬间分配」的
+    t 形工单号——spawner（id=inspection-spawn-<实例>，固定，重叠 SKIP 同现状）每 fire
+    起 activity 铸号+显式去重+起真票。期号/票号/声明决议全部延迟到起票时刻，旧 action
+    的固定 id 撞号去重语义由（实例,期）显式去重承接。
 
     **create 与 update 两分支共用本函数**——update 分支同样重铸 sched.action（旧实现
     只改 spec/policy 不碰 action，重跑 schedule-up 刷不了 payload/SA，t260913-02
     同族坑的一般化：payload 面单点，两分支不再各写一份）。
     explicit_repo_root=schedule-up 的 --repo-root（显式旁路优先，隔离台/运维用）。"""
     from temporalio.client import ScheduleActionStartWorkflow
-    from inspection_flow import InspectionPeriodicInput
+    from inspection_flow import InspectionPeriodicSpawnWorkflow, InspectionSpawnInput, spawn_workflow_id
     from shared import ticket_search_attributes
     identity = str(spec.get("instance_project_key") or "")
     return ScheduleActionStartWorkflow(
-        spec["workflow"],
-        InspectionPeriodicInput(
-            instance_id=spec["instance_id"], period="",
-            # t260913-02：scan_face 声明透传；t260915-20：repo_root 注册表解析
-            # （--repo-root 显式旁路优先）+ 实例级项目身份进 payload
+        InspectionPeriodicSpawnWorkflow,
+        InspectionSpawnInput(
+            instance_id=spec["instance_id"],
+            # scan_face 声明透传（t260913-02）；repo_root 注册表解析（t260915-20，
+            # --repo-root 显式旁路优先）+ 实例级项目身份进 payload（t260915-20）
             face=str(spec.get("scan_face") or "test"),
             repo_root=resolve_repo_root(spec, explicit_repo_root),
             project_key=identity),
-        id="inspection-%s-period" % spec["instance_id"],
+        id=spawn_workflow_id(spec["instance_id"]),
         task_queue=task_queue,
-        # ProjectKey SA（t260915-20）：调度触发的每期票都带归属，工单板项目过滤天然收录
+        # ProjectKey SA（t260915-20）：spawner 本体带归属（真票的 SA 由开票单点盖全套）
         typed_search_attributes=ticket_search_attributes(identity, ""))
 
 
@@ -539,6 +572,17 @@ async def cmd_watcher(args: argparse.Namespace) -> Dict[str, Any]:
         return _err("temporal 不可达（查询 %s 失败）：%s: %s" % (wf_id, type(e).__name__, e))
 
 
+def _resolve_decl(decl_path: Optional[Path], instance_id: str) -> Any:
+    """声明定位三层（t260916-02）：显式 --decl-path > env 测试覆盖层（单文件）> 项目
+    注册表聚合（load_decl_for_instance，返回 (decl, 定义它的项目 key)）。
+    deadman 用它——enabled 只是不该触发，台账口径对 disabled 实例照旧成立，不过滤；
+    trigger/schedule-up 用 _enabled_spec（enabled 闸在它）。"""
+    explicit = str(decl_path or "").strip() or coverage_decl_path()
+    if explicit:
+        return load_inspection_decl(Path(explicit)), ""
+    return load_decl_for_instance(instance_id)
+
+
 async def cmd_deadman(args: argparse.Namespace) -> Dict[str, Any]:
     """漏跑（dead-man）查询面（t260913-02 验收 D 的列表可读面）：
     声明 cron 的期望触发日 × 巡检台账（out/inspection/，SANDBAR_INSPECTION_DIR 可覆盖）
@@ -549,8 +593,10 @@ async def cmd_deadman(args: argparse.Namespace) -> Dict[str, Any]:
     离线也可用（--offline 不连 Temporal）：隔离台/注入演练不依赖服务器。"""
     from inspection_deadman import deadman_findings, ledger_periods, missed_periods
     try:
-        decl = load_inspection_decl(args.decl_path) if args.decl_path else load_inspection_decl()
-    except Exception as e:  # noqa: BLE001——声明不可用=ok False 点名（不猜）
+        decl, decl_project = _resolve_decl(args.decl_path, args.instance)
+    except ValueError as e:  # noqa: BLE001——声明不可用=ok False 点名（不猜）
+        return _err(str(e))
+    except Exception as e:  # noqa: BLE001
         return _err("声明不可用：%s" % e)
     it = decl.instance(args.instance)
     if it is None:
@@ -571,6 +617,7 @@ async def cmd_deadman(args: argparse.Namespace) -> Dict[str, Any]:
         return _err("漏跑核查异常：%s: %s" % (type(e).__name__, e))
     result: Dict[str, Any] = {
         "instance": args.instance, "cron": it.cron, "enabled": it.enabled,
+        "decl_project": decl_project,
         "suite": it.suite, "ledger_dir": str(ledger_dir),
         "ledger_exist": ledger["exist"], "ledger_periods": sorted(ledger["periods"]),
         "last_ledger_period": max(ledger["periods"]) if ledger["periods"] else "",
@@ -644,24 +691,65 @@ def cmd_sweep_lanes(args: argparse.Namespace) -> Dict[str, Any]:
 
 def cmd_decl(args: argparse.Namespace) -> Dict[str, Any]:
     """Offline declaration view (zero temporalio dependency; the declaration-driven,
-    parsing-level evidence surface)."""
+    parsing-level evidence surface).
+
+    t260916-02：显式 --decl-path / env 覆盖层=单文件视图（mode=single）；两者皆无=
+    **聚合视图**（mode=aggregate）——遍历注册项目读各自 inspection.yaml，逐项目
+    ok/absent/error 状态与降级清单进 result（验收 5「聚合可读面」），调度意图附
+    project 来源。"""
+    explicit = str(args.decl_path or "").strip() or coverage_decl_path()
+    if explicit:
+        try:
+            decl = load_inspection_decl(Path(explicit))
+        except Exception as e:  # noqa: BLE001 — DeclError/IO always becomes an explicit single-line JSON error
+            return _err("声明不可用：%s" % e)
+        return _ok({
+            "mode": "single", "source": decl.source, "schema": decl.schema,
+            "instances": [_decl_instance_view(i) for i in decl.instances],
+            "schedule_specs": build_schedule_specs(decl),
+        })
     try:
-        decl = load_inspection_decl(args.decl_path) if args.decl_path else load_inspection_decl()
-    except Exception as e:  # noqa: BLE001 — DeclError/IO always becomes an explicit single-line JSON error
-        return _err("声明不可用：%s" % e)
+        _projects, quarantined = list_registered_projects()
+        enabled, degraded, coverage = enabled_instance_whitelist()
+    except Exception as e:  # noqa: BLE001
+        return _err("项目注册表不可用：%s" % e)
+    items = []
+    for state in iter_project_decls():
+        item: Dict[str, Any] = {"project": state.project_key, "state": state.state,
+                                "decl_path": str(state.path or "")}
+        if state.state == "ok" and state.decl is not None:
+            item["instances"] = [_decl_instance_view(i) for i in state.decl.instances]
+            item["schedule_specs"] = [dict(s, project=state.project_key)
+                                      for s in build_schedule_specs(state.decl)]
+        elif state.state == "error":
+            item["error"] = state.error
+        items.append(item)
+    if not items and not quarantined:
+        # 空注册表=显式报错（t260916-02 口径①：零项目可遍历不许冒充「全绿无巡检面」）
+        return _err("项目注册表为空（%s 下零 project.yaml 条目）——聚合视图无项目可遍历，"
+                    "请检查 SANDBAR_PROJECTS_DIR/注册表落位"
+                    % shared.perkey_projects_root())
+    specs = [it for i in items for it in (i.get("schedule_specs") or [])]
     return _ok({
-        "source": decl.source,
-        "schema": decl.schema,
-        "instances": [{"id": i.id, "enabled": i.enabled, "kind": i.kind,
-                       "cron": i.cron, "n": i.n, "source": i.source,
-                       # 实例级身份（t260915-20）与计数源 project_key 并列出，人读两清
-                       "instance_project_key": i.instance_project_key,
-                       "project_key": i.project_key, "scan_face": i.scan_face,
-                       "suite": i.suite, "tz": i.tz,
-                       "workflow": i.workflow, "template": i.template}
-                      for i in decl.instances],
-        "schedule_specs": build_schedule_specs(decl),
+        "mode": "aggregate",
+        "projects": items,
+        "quarantined": list(quarantined or []),
+        "coverage_overlay": coverage or "",
+        "enabled_instances": sorted(enabled),
+        "degraded": [{"project": d[0], "path": str(d[1] or ""), "error": d[2]} for d in degraded],
+        "schedule_specs": specs,
     })
+
+
+def _decl_instance_view(i: Any) -> Dict[str, Any]:
+    """decl 子命令的实例条目视图（cmd_decl 单/聚合两模式共用）。"""
+    return {"id": i.id, "enabled": i.enabled, "kind": i.kind,
+            "cron": i.cron, "n": i.n, "source": i.source,
+            # 实例级身份（t260915-20）与计数源 project_key 并列出，人读两清
+            "instance_project_key": i.instance_project_key,
+            "project_key": i.project_key, "scan_face": i.scan_face,
+            "suite": i.suite, "tz": i.tz,
+            "workflow": i.workflow, "template": i.template}
 
 
 def main() -> None:

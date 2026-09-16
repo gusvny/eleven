@@ -361,17 +361,25 @@ def row_ids(rows):
 # ---------------------------------------------------------------- 腿
 
 def j1_dual_project(queue: str, decl_path: str, tree_a: RepoTree, tree_b: RepoTree):
-    tid_a = "inspection-%s-%s" % (INST_A, PERIOD)
-    tid_b = "inspection-%s-%s" % (INST_B, PERIOD)
+    # t260916-02：票号=t 形工单号（开票面铸造）——从 trigger 回执取真票号，
+    # 不再硬编 inspection- 旧形（旧形仍可能是历史在途票，由 legacy 只读腿辨认）。
+    tid_a = tid_b = ""
+
+    def tid_of(parsed):
+        res = (parsed or {}).get("result") if isinstance(parsed, dict) else {}
+        return str((res or {}).get("ticket_id") or "")
 
     proc_a, parsed_a = trg(["trigger", "--instance", INST_A, "--period", PERIOD,
                             "--decl-path", decl_path])
+    tid_a = tid_of(parsed_a)
     check("J1a-A trigger(A) 放行且未带 --repo-root（注册表解析路）",
-          (parsed_a or {}).get("ok") is True,
-          "ok=%r out=%s" % ((parsed_a or {}).get("ok"), (proc_a.stdout or "")[-200:]))
+          (parsed_a or {}).get("ok") is True and tid_a,
+          "ok=%r ticket_id=%r out=%s" % ((parsed_a or {}).get("ok"), tid_a,
+                                         (proc_a.stdout or "")[-200:]))
 
     proc_b, parsed_b = trg(["trigger", "--instance", INST_B, "--period", PERIOD,
                             "--decl-path", decl_path])
+    tid_b = tid_of(parsed_b)
     check("J1a-B trigger(B) 放行", (parsed_b or {}).get("ok") is True,
           "ok=%r out=%s" % ((parsed_b or {}).get("ok"), (proc_b.stdout or "")[-200:]))
 
@@ -490,8 +498,10 @@ def j2_update_recast(decl_path: str, tmp: str, tree_a: RepoTree):
 def j4_unowned_guard(queue: str, decl_path: str):
     """旧调度 payload 形态直发（无 project_key 无 repo_root）→ patched worker 判
     blocked 终态并点名「无项目身份」（旁路起票残窗的守卫闸）。"""
-    from inspection_flow import InspectionPeriodicInput, inspection_ticket_id
-    tid = inspection_ticket_id(INST_GUARD, PERIOD)
+    from inspection_flow import InspectionPeriodicInput
+    # t260916-02：inspection_ticket_id 已退役（票号=t 形由开票面铸造）；本腿守卫
+    # 「旁路直发旧 payload」，id 用确定性旧形模拟迁移前形态，不再依赖铸号函数。
+    tid = "inspection-%s-%s" % (INST_GUARD, PERIOD)
     note_started_ticket(tid)
 
     async def _start():

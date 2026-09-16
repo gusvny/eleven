@@ -538,44 +538,71 @@ def inspection_period_identity(args: Dict[str, Any]) -> str:
 
 @activity.defn
 async def trigger_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
-    """watcher → 巡检期票（t260911-02）：trigger CLI 的运维语义在 activity 面——
-    票号=workflow id（一票一期机械去重），AlreadyStarted=deduped 回执不报错；
-    scan_face 由声明（spec.scan_face）透传进票的扫描分派。task_queue 用 activity
-    自身所在队列（watcher 与巡检票同 worker 池）。
+    """watcher → 巡检期票（t260911-02；t260916-02 起票收敛到 inspection_ticketing 单点）：
+    铸 t 形工单号 + 显式去重（实例+期号 SA 查询 / 指针三态 / AlreadyStarted 归属判定）
+    + 盖 ProjectKey 与 InspectionInstance/InspectionPeriod SA——去重与铸号语义全部住在
+    open_period_ticket，本壳零业务判断。task_queue 用 activity 自身所在队列（watcher 与
+    巡检票同 worker 池）。
     t260915-20：instance_project_key（watcher 透传的实例级身份）→ payload project_key
     + ProjectKey SA，全链用身份键（inspection_period_identity 单一取值点）。"""
-    from inspection_flow import InspectionPeriodicInput, InspectionPeriodicWorkflow, inspection_ticket_id
-    from shared import ticket_search_attributes
-    from temporalio.service import RPCError
+    from inspection_ticketing import open_period_ticket
 
     instance_id = str(args.get("instance_id") or "")
     period = str(args.get("period") or "")
+    if not instance_id or not period:
+        return {"ok": False, "error": "watcher 开票缺 instance/period（%r/%r）"
+                % (instance_id, period)}
     project_key = inspection_period_identity(args)
     try:
-        ticket_id = inspection_ticket_id(instance_id, period)
-    except ValueError as e:
-        return {"ok": False, "error": str(e)}
+        client = await Client.connect(TARGET_HOST, namespace=NAMESPACE)
+    except Exception as e:  # noqa: BLE001——连接失败显式点名（不谎报去重/票号）
+        return {"ok": False, "error": "temporal server 不可达：%s" % e}
+    res = await open_period_ticket(
+        client, instance_id=instance_id, period=period, project_key=project_key,
+        repo_root=str(args.get("repo_root") or ""),
+        scan_face=str(args.get("scan_face") or "test"),
+        decl_path=str(args.get("decl_path") or ""),
+        task_queue=activity.info().task_queue)
+    if res.get("ok"):
+        res["result"]["period"] = period
+        res["result"]["instance"] = instance_id
+    return res
+
+
+@activity.defn
+async def spawn_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
+    """spawner → 真票起票薄壳（t260916-02）：cron 调度每 fire 的铸期与开票都在这里——
+    期号按**声明 tz 的日历日**铸（resolve_instance_plan 的 tz 口径，与 deadman 期望键
+    同链；声明 enabled=false/除名 → plan ok=False → spawner action 显式失败可见，延续
+    「调度还在触发而声明已停用=配置漂移」的点名语义）。开票走 open_period_ticket 单点。
+    decl_path 恒空（cron 形态）→ plan 走聚合解析（worker 当前声明），改声明即改行为。"""
+    from datetime import datetime
+    from inspection_decl import resolve_instance_plan
+    from inspection_flow import period_key_in_tz
+    from inspection_ticketing import open_period_ticket
+
+    instance_id = str(args.get("instance_id") or "")
+    if not instance_id:
+        return {"ok": False, "error": "spawn 缺 instance_id"}
+    plan = resolve_instance_plan(instance_id, str(args.get("decl_path") or "") or None)
+    if not plan.get("ok"):
+        return {"ok": False, "error": str(plan.get("error") or "声明决议失败")}
+    period = period_key_in_tz(datetime.now(), str(plan.get("tz") or ""))
     try:
         client = await Client.connect(TARGET_HOST, namespace=NAMESPACE)
-        handle = await client.start_workflow(
-            InspectionPeriodicWorkflow,
-            InspectionPeriodicInput(instance_id=instance_id, period=period,
-                                    repo_root=str(args.get("repo_root") or ""),
-                                    face=str(args.get("scan_face") or "test"),
-                                    decl_path=str(args.get("decl_path") or ""),
-                                    project_key=project_key),
-            id=ticket_id, task_queue=activity.info().task_queue,
-            search_attributes=ticket_search_attributes(project_key, ""))
-        return {"ok": True, "result": {"triggered": True, "ticket_id": ticket_id,
-                                       "first_run_id": handle.first_execution_run_id}}
     except Exception as e:  # noqa: BLE001
-        if type(e).__name__ == "WorkflowAlreadyStartedError" or "already started" in str(e).lower():
-            return {"ok": True, "result": {"triggered": False, "deduped": True,
-                                           "ticket_id": ticket_id,
-                                           "reason": "同期巡检票已在（每期一票）"}}
-        if isinstance(e, RPCError):
-            return {"ok": False, "error": "workflow %s 启动失败（不存在或不可达）：%s" % (ticket_id, e)}
-        return {"ok": False, "error": "workflow %s 启动失败：%s: %s" % (ticket_id, type(e).__name__, e)}
+        return {"ok": False, "error": "temporal server 不可达：%s" % e}
+    res = await open_period_ticket(
+        client, instance_id=instance_id, period=period,
+        project_key=str(args.get("project_key") or ""),
+        repo_root=str(args.get("repo_root") or ""),
+        scan_face=str(args.get("face") or plan.get("scan_face") or "test"),
+        decl_path=str(args.get("decl_path") or ""),
+        task_queue=activity.info().task_queue)
+    if res.get("ok"):
+        res["result"]["period"] = period
+        res["result"]["instance"] = instance_id
+    return res
 
 
 ALL_ACTIVITIES = [
@@ -597,4 +624,6 @@ ALL_ACTIVITIES = [
     # t260913-02：运行期声明决议（套件开关）+ 漏跑核查（票面注入面）
     resolve_inspection_plan,
     run_inspection_deadman,
+    # t260916-02：spawner→真票起票薄壳（cron 调度铸 t 形号的载体）
+    spawn_inspection_period,
 ]

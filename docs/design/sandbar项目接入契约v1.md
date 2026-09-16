@@ -334,11 +334,22 @@ v1.5 裁定：勘误与增量不升 schema 版，不触发 semver 升版义务�
 与绝对路径（含 Windows 盘符）；展开后仍禁 `..` 越界与空/非标量，引号包裹的标量
 剥引号后同判（与 TS 解析器同判，一致性守卫=t260910-14 parity 场景）。
 
+**`inspection_decl`（t260916-02 增量，巡检声明落位指路）**：与 `model_routes`
+同一机器级放宽口径（相对=拼项目主目录 dirs[0]、`~/…` 展开、绝对路径皆可），但
+**回落语义不照抄**——巡检声明缺席=「该项目无巡检面」（absent 响应语义，不冒充
+错误、绝不借用他项目声明）；坏形/不可读/`..` 逃逸/指向不存在=该项目级 error 显式
+点名声明路径（fail-closed，禁静默关掉巡检面）。未声明 `inspection_decl` → 缺省
+落位 `<项目根>/inspection.yaml`（单文件，进 git 受版本管理；不做多文件目录）。
+引擎仓内声明已退役（t260916-02 迁移交付本体）：引擎侧只留机制 + `docs/inspection-sample.yaml`
+样例模板，样例实例不进任何聚合。聚合（板面白名单/漏跑核查/schedule-up）遍历注册
+项目读各自声明；跨项目实例 id 重复=身份歧义配置事故，从聚合白名单剔除且点名两处
+（trigger 面多命中同样报错，两路口径一致）。
+
 **读取器解析子集（引擎侧 stdlib-only 手写，与 ①a 装载器同口径：值不含 `#`、
 行尾 `#` 起截断）**：顶层只认 `schema:`、`project:`、`paths:` 三键；`schema`
 必须存在且为 `v1`（缺失 = 畸形，非 v1 = 版本不支持）；paths 节内只认
-`roles_dir`、`model_routes` 两键，未知键、节本身非映射、键值非标量、嵌套加深
-一律畸形。`project:` 节内的条目字段形状归 ①a 装载器管——读取器只取 `dirs`
+`roles_dir`、`model_routes`、`inspection_decl` 三键，未知键、节本身非映射、
+键值非标量、嵌套加深一律畸形。`project:` 节内的条目字段形状归 ①a 装载器管——读取器只取 `dirs`
 首项作解析基准，不复验条目全形（装载器在建票/注册时已 fail-closed 同一文件；
 两层读者职责不重复）。
 
@@ -669,6 +680,7 @@ sandbar 发版 → 项目跟进；禁止跳过探针直接扩区间（关键决�
 | v2.2 | 2026-09-04 | t260904-18 三门落地：②a 增列合法顶层键 `ui_evidence`（可选映射 `{dirs, supply?}`；缺失=截图证据项按项目声明缺席 green+可见 note，畸形=fail-closed 红点名字段；supply 保留字段本版引擎不消费）——合并闸 UI 截图证据目录改项目声明，退役引擎侧 `UI_WRITE_PREFIXES` 五路径硬编码活路径身份（仅剩旧票重放/冻结分支兼容回落）；同族：建票口背景文件闸（票面 refs 须已提交且干净 HEAD 态，拒收点名）与 create_plan 回执 files_changed 空数组/畸形可见红（KI-049），属引擎机制面不入本契约字段表 | ②a；verify_lane `_validate_cfg`、merge_check 3.6、ui_changed_paths、仓根 verify.yaml |
 | v2.3 | 2026-09-07 | t260907-10 目录重构（宿主令 v6 定稿）路径锚语义变更：①d `paths` 节回落约定旧锚 `server/dsh/roles`、`server/dsh/model-routes.yaml` **退役**，新回落锚=`server/roles`、`server/model-routes.yaml`（引擎仓 server/dsh 包装层退场、五层摊平上移；引擎本体=temporal-poc→`server/engine`）；未显式声明 `paths` 的项目回落语义不变（仅回落目标换新锚）；已显式声明旧锚的项目按 ①d 锚点缺失 fail-closed 红点名；venv 定位回落链=新路径 `server/engine/.venv` 优先、旧路径 `server/dsh/temporal-poc/.venv` 一轮兼容（摘除票落地后单路径）；本文旧锚字样仅存于本变更记录行（历史事实，非活指针） | ①d/回落约定；agent_activities spawn 两消费点、shared.py DEFAULT_ROLES_DIR/MODEL_ROUTES_REL、installer、仓根 verify.yaml（扩权面） |
 | v2.4 | 2026-09-10 | t260910-14 模型路由表迁出 git（真源=项目声明指向的文件）：①d `model_routes` 声明值放宽——相对主目录语义不变，新增 `~/` 展开（建议缺省 `~/.sandbar/projects/<key>/model-routes.yaml`）与绝对路径形态，`..` 逃逸/空值/非标量仍 fail-closed，引号标量剥引号同判；缺表语义从「锚点缺失=fail-closed 红」改**分态软回落**——decl_missing/file_missing/bad_content 三态点名留痕（禁静默回落 profile 默认，KI-030 收窄），读侧分层兜底=仓内 `server/model-routes.yaml`（宿主风险令 260910：迁移窗口不断供，仓内表本票保留，删除延后另票）；引擎查表（`resolve_routes_table` 三态判别）与 UI 读写（TS `resolveRoutesFilePath`）同源同判（一致性守卫=t260910-14 parity 场景）；init 引导退役（新项目按 docs 样例人工填表）。| ①d；shared.py 路由节/agent_activities spawn 消费点、ui routes.ts（view/save/init 退役）、守卫 t260902-07 两件、sc_paths_contract_doc_guard G6 随新语义同步改 |
+| v2.5 | 2026-09-16 | t260916-02 巡检声明落位迁移A：①d `paths` 节新增 `inspection_decl` 指路键（与 model_routes 同机器级放宽口径：相对拼主目录/~/展开/绝对；词法校验同源），**回落语义刻意不照抄**——声明缺席=该项目无巡检面（absent，不借用他项目/引擎样例），坏形/锚点缺失=项目级 error 点名（禁静默）；巡检声明默认落位 `<项目根>/inspection.yaml` 单文件（不做目录），引擎仓内 `server/engine/inspection.yaml` 退役删除（引擎=机制+docs/inspection-sample.yaml 样例）；聚合（板面白名单/漏跑核查/schedule-up）改遍历注册项目读各自声明，跨项目实例 id 重复=歧义剔除+点名两处；巡检票号统一工单号形式 `t<YYMMDD>-<NN>` 走既有分配，「每期一票」按（实例,期号）显式去重（SA InspectionInstance/InspectionPeriod+原子指针三态），实例/期号不从票号反解（票面/SA 读） | ①/①d；shared.py project_paths、inspection_decl.py、inspection_ticketing.py（新）、inspection_trigger.py、client.py 板面双腿、docs/inspection-sample.yaml、仓根 inspection.yaml |
 
 > 来源立项：sandbar
 

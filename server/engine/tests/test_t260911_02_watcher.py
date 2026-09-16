@@ -37,10 +37,17 @@ def test_period_regex_accepts_both_forms():
     assert _valid_period("20261399-2") is not None
 
 
-def test_ticket_id_accepts_count_period():
-    assert flow.inspection_ticket_id("docs-sync", "20260911-3") == "inspection-docs-sync-20260911-3"
+def test_period_validation_accepts_count_period():
+    """t260916-02：旧形铸号删（票号=起票侧铸 t 形工单号），计数期形状闸迁
+    validate_period_key；spawner id 形状单点一并锁（同 watcher 的 C-2 纪律）。"""
+    flow.validate_period_key("docs-sync", "20260911-3")   # 计数期合法不抛
     with pytest.raises(ValueError):
-        flow.inspection_ticket_id("docs-sync", "20260911-0")
+        flow.validate_period_key("docs-sync", "20260911-0")
+    # spawner：cron 调度→真票起票薄壳（id 固定=同声明重跑 schedule-up 幂等的前提）
+    assert flow.spawn_workflow_id("docs-sync") == "inspection-spawn-docs-sync"
+    for bad in ("", "UPPER", "../evil", "-lead"):
+        with pytest.raises(ValueError):
+            flow.spawn_workflow_id(bad)
 
 
 def test_validate_trigger_args_period_message_updated():

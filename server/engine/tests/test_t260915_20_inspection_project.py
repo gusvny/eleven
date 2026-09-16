@@ -143,7 +143,8 @@ def test_error_order_identity_checked_last():
 
 def test_real_decl_all_instances_have_identity():
     # 迁移④：真源四实例显式归属 sandbar（enabled 与否都不豁免）
-    d = decl.load_inspection_decl(POC / "inspection.yaml")
+    # t260916-02：真源声明迁仓根 <repo>/inspection.yaml（路径换，断言照旧=零回归锚）
+    d = decl.load_inspection_decl(POC.parent.parent / "inspection.yaml")
     for it in d.instances:
         assert it.instance_project_key == "sandbar", it.id
     specs = decl.build_schedule_specs(d)
@@ -260,9 +261,12 @@ def test_resolve_repo_root_defense_leg_raises():
 
 
 def test_schedule_action_builder_payload_and_sa():
+    # t260916-02：action 改指 spawner（InspectionPeriodicSpawnWorkflow，id=
+    # inspection-spawn-<实例>）——Schedule 的静态参数铸不了「起票瞬间分配」的 t 形号，
+    # 期号/票号/声明决议全部延迟到起票时刻（spawn_inspection_period activity）。
     from inspection_trigger import _schedule_action
     action = _schedule_action(dict(SPEC), "tq-1", "/explicit/root")
-    assert action.id == "inspection-inst-a-period"
+    assert action.id == "inspection-spawn-inst-a"
     assert action.task_queue == "tq-1"
     assert len(action.args) == 1
     inp = action.args[0]
@@ -270,7 +274,8 @@ def test_schedule_action_builder_payload_and_sa():
     assert inp.face == "doc"                       # 声明透传（t260913-02 语义不变）
     assert inp.repo_root == "/explicit/root"       # explicit 腿
     assert inp.project_key == "proj-a"             # payload 显式填身份（R3）
-    assert inp.period == ""                        # 调度期票期号由触发时刻铸取
+    assert getattr(inp, "period", "") == ""        # spawner 输入无期号（起票时刻铸取）
+    assert getattr(inp, "decl_path", "x") == ""    # cron 形态不钉路径（改声明即改行为）
     pairs = {p.key.name: p.value for p in action.typed_search_attributes}
     assert pairs.get("ProjectKey") == "proj-a"     # SA 盖章（R1/R2 核心）
 
@@ -337,7 +342,7 @@ def test_decl_receipt_reports_identity_fields():
     import subprocess
     proc = subprocess.run(
         [sys.executable, str(POC / "inspection_trigger.py"), "decl",
-         "--decl-path", str(POC / "inspection.yaml")],
+         "--decl-path", str(POC.parent.parent / "inspection.yaml")],
         capture_output=True, text=True, timeout=60, cwd=str(POC))
     assert proc.returncode == 0, proc.stderr
     payload = json.loads(proc.stdout.strip().splitlines()[-1])

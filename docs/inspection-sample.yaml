@@ -1,0 +1,48 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# 巡检声明·样例模板（t260916-02 声明落位迁移A；照 docs/model-routes-sample.yaml 同款做法）
+#
+# 【真源在哪】生效声明 = 每个项目**自己仓内**的单文件 inspection.yaml（进 git 受版本管理）：
+#   默认落位 = <项目主目录（注册条目 dirs[0]）>/inspection.yaml；
+#   要指到别处（绝对/相对皆可，允许落仓外，例如机器级 ~/.sandbar/projects/<key>/），
+#   在 ~/.sandbar/projects/<key>/project.yaml 顶层加：
+#     paths:
+#       inspection_decl: /Users/user/.sandbar/projects/<key>/inspection.yaml
+#   （校验口径同 paths.model_routes：~/… 与绝对路径原样用，相对路径拼项目主目录；
+#   声明了就必须存在——锚点缺失/类型错位 fail-closed。）
+#
+# 【本文件怎么用】新项目接入巡检：把本文件复制到落位处，按注释改字段，然后——
+#     server/engine/inspection_trigger.py schedule-up --instance <id> --note <谁/为何/频率>
+#     server/engine/inspection_trigger.py trigger --instance <id>
+#   声明缺失 = 该项目无巡检面（响应对名单，不报错、绝不借用他项目声明）；文件坏形态/
+#   路径不可读 = 显式点名（板面项目级降级 + 回执 error）。
+#
+# 【字段子集】只认下方出现过的字段（解析真源=server/engine/inspection_decl.py 头注；
+#   子集外形态一律 fail-closed 报错点名，不静默降级、不猜）。
+# ══════════════════════════════════════════════════════════════════════════════
+schema: v1
+instances:
+  # 每实例=一个扫描面的调度位；每期一票按（实例,期号）显式去重（t260916-02 起票号=
+  # 工单号同形式 t<YYMMDD>-<NN>，实例/期号走搜索属性 InspectionInstance/InspectionPeriod）。
+  - id: my-first-face            # 实例标识：小写 slug（a-z0-9-，可含连字符）
+    enabled: true                # false=占位不调度不触发（enabled 与否 project_key 都必填）
+    project_key: <你的项目key>   # 实例归属项目（=项目注册表 key；票盖 ProjectKey SA，
+                                 # 扫描仓=该注册条目主目录 dirs[0]）
+    scan_face: test              # 跑哪个扫描器：test|doc|mechanism|simplify|stage；缺省 test
+    # suite: full                # 可选：套件档（缺省=不跑套件；full=巡检自有泳道跑集成全集）
+    tz: Asia/Shanghai            # 调度时区（不写=UTC——「07:30」会落在本地 15:30）
+    schedule:
+      kind: cron                 # cron | every-n-tickets | race-first
+      cron: 30 7 * * *           # 五字段 cron（Temporal 按本实例 tz 求值）
+    workflow: InspectionPeriodicWorkflow
+    template: inspection-lite
+  # ---- 计数形态示例（每并 N 张票触发；计数源=ticket 归档目录）----
+  # - id: after-n-tickets
+  #   enabled: false
+  #   project_key: <你的项目key>
+  #   schedule:
+  #     kind: every-n-tickets
+  #     n: 20
+  #     source: archive-dir
+  #     project_key: <你的项目key>   # 计数取数面（≠实例归属键，两字段绝不互串）
+  #   workflow: InspectionPeriodicWorkflow
+  #   template: inspection-lite

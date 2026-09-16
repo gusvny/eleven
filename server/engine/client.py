@@ -51,6 +51,8 @@ from shared import (
     ENGINE_V2,
     EPIC_CODE_RE,
     EPIC_SA_NAME,
+    INSPECTION_INSTANCE_SA_NAME,
+    INSPECTION_PERIOD_SA_NAME,
     NAMESPACE,
     PROJECT_SA_NAME,
     TARGET_HOST,
@@ -110,12 +112,12 @@ import caller_gate
 # setting).
 CLOSED_HYDRATE_WINDOW_S = 7 * 86400
 
-# ---- t260915-08 工单板收录巡检票（方案 v2 R1/R4/R8/R9） ----
+# ---- t260915-08 工单板收录巡检票（方案 v2 R1/R4/R8/R9；t260916-02 票号 t 形化改造） ----
 # INSPECTION_BOARD_TYPES：ticket-list 巡检板面的类型过滤单点。刻意**不进**
 # TEMPLATE_CLASSES——那是 ticket-start 模板注册表，ticket-prune/_closed_ticket_entries/
 # epic 计数/sc_template_face_narrowing 收窄守卫/shared.TEMPLATE_CLASS_NAMES 交叉自检
-# 都吃它；巡检票不是可开工单模板，只扩板面不进注册表。watcher workflow
-# （InspectionTicketCountWatcherWorkflow）是调度器不是票，永不上板。
+# 都吃它；巡检票不是可开工单模板，只扩板面不进注册表。watcher（计数）与 spawner
+# （cron 起票薄壳）是调度器不是票，永不上板。
 INSPECTION_BOARD_TYPES = ("InspectionPeriodicWorkflow",)
 
 # 巡检列表行的 engine 标记（≠ENGINE_V2）：UI availableOps 按它早退空操作集——
@@ -124,30 +126,81 @@ INSPECTION_BOARD_TYPES = ("InspectionPeriodicWorkflow",)
 # （server/tools/ticket.py _v2_query 以 ENGINE_V2 判 v2 工单，见该处坑A）。
 INSPECTION_ROW_ENGINE = "inspection"
 
-# 巡检票号形状：inspection-<instance>-<YYYYMMDD>[-<bucket>]（inspection_ticket_id 铸号 +
-# PERIOD_RE 桶段）。实例段贪婪——实例 slug 本身可含连字符与数字，期号取尾部日历段。
-_INSPECTION_ID_RE = re.compile(r"^inspection-(.+)-(\d{8}(?:-[1-9]\d*)?)$")
+# 票号 t 形化（t260916-02）：id 不再编码实例/期——（实例,期号）真源=起票时刻的
+# InspectionInstance/InspectionPeriod SA，票面 face 是镜像。旧形 id
+# （inspection-<实例>-<期>，t260916 之前起的历史票）只剩**只读解析**：板面 legacy 腿
+# 上板 + 行渲染兜底（_legacy_inspection_instance_period_of）。旧形铸造点已删（R1：
+# 全仓零铸造点，见 integration/t260916-02 静态 grep 腿），此处绝不铸造旧形新票。
+_INSPECTION_LEGACY_ID_RE = re.compile(r"^inspection-(.+)-(\d{8}(?:-[1-9]\d*)?)$")
 
 
-def _inspection_instance_of(ticket_id: str) -> str:
-    """票号 → 实例 id；形状不符返回 ''（僵尸/外来 id 统一视为未在册，不上板）。"""
-    m = _INSPECTION_ID_RE.match(str(ticket_id or ""))
-    return m.group(1) if m else ""
+def _legacy_inspection_instance_period_of(ticket_id: str) -> "Tuple[str, str]":
+    """旧形票号只读解析 → (实例, 期号)；新形/外来 id 返回 ("", "")（兼容读面）。"""
+    m = _INSPECTION_LEGACY_ID_RE.match(str(ticket_id or ""))
+    return (m.group(1), m.group(2)) if m else ("", "")
 
 
-def _inspection_enabled_instances() -> "Tuple[Tuple[str, ...], str]":
-    """读声明取 enabled 实例白名单（在册且启用的才上板，方案 R2）。
-
-    声明路径单点=inspection_decl.default_decl_path（env SANDBAR_INSPECTION_DECL 可覆盖）。
-    返回 (实例集, 错误说明)：错误非空 = 声明面降级，调用方必须显式标记
-    （inspection 行全部不上板 + 回执带 inspection_filter_degraded），绝不静默放行
-    全量（僵尸 Flooding 回场）也绝不静默清零不吭声。"""
+def _inspection_instance_period_of(wf: Any, ticket_id: str) -> "Tuple[str, str, str]":
+    """（实例,期号）读取单点（板面行/白名单过滤/上板合并用）：
+    InspectionInstance/InspectionPeriod SA 优先（t260916-02 起票时盖章）→ 旧形 id
+    只读解析兜底（历史票，match_via=legacy_id 可辨）。
+    返回 (instance, period, match_via)：match_via ∈ {"sa", "legacy_id", ""}；
+    SA 读失败（异常/未注册）逐字段回落，不抛。"""
+    inst = per = ""
     try:
-        from inspection_decl import load_inspection_decl
-        decl = load_inspection_decl()
-        return tuple(sorted(i.id for i in decl.enabled_instances())), ""
+        inst = str(wf.typed_search_attributes.get(
+            SearchAttributeKey.for_keyword(INSPECTION_INSTANCE_SA_NAME)) or "")
+        per = str(wf.typed_search_attributes.get(
+            SearchAttributeKey.for_keyword(INSPECTION_PERIOD_SA_NAME)) or "")
+    except Exception:
+        inst = per = ""
+    if inst:
+        return inst, per, "sa"
+    li, lp = _legacy_inspection_instance_period_of(ticket_id)
+    if li:
+        return li, lp, "legacy_id"
+    return "", "", ""
+
+
+def _inspection_enabled_instances() -> "Tuple[Tuple[str, ...], str, list]":
+    """enabled 实例白名单（在册且启用的才上板，t260915-08 R2；t260916-02 起来源=
+    遍历注册项目聚合——enabled_instance_whitelist 单点，多项目各持声明也收全；
+    旧实现只读引擎仓单文件，已随声明落位迁移删除）。
+
+    返回 (实例集, 降级说明, 降级清单)：降级说明非空 = 声明面有降级项（坏覆盖层/
+    坏声明项目/跨项目撞名剔除），调用方必须显式标记进回执（degraded/degraded_projects/
+    note 点名，KI-030 禁静默）；实例集为空且说明非空 = 板面显式空降级（绝不放全量，
+    僵尸 Flooding 回场；也绝不静默清零不吭声——t260916-02 arbitrate 实锤：本包装层
+    曾把 degraded/coverage 丢弃，坏声明时板面静默变空无任何点名）。降级清单=
+    结构化条目（degraded_projects 回执键），与说明同源不双写。"""
+    try:
+        from inspection_decl import enabled_instance_whitelist
+        instances, degraded, _coverage = enabled_instance_whitelist()
+        note = "；".join("%s（%s）：%s" % (proj or "（覆盖层）", path, err)
+                         for proj, path, err in (degraded or []))
+        return tuple(sorted(instances)), note, list(degraded or [])
     except Exception as e:  # noqa: BLE001 — 声明损坏/缺文件是配置事故，翻译成显式降级
-        return (), "%s: %s" % (type(e).__name__, e)
+        return (), "%s: %s" % (type(e).__name__, e), []
+
+
+def _inspection_coverage_overlay() -> str:
+    """覆盖层标记（t260916-02 口径①：env SANDBAR_INSPECTION_DECL 降级为测试覆盖）——
+    生效时回执可见（coverage_overlay 键），不静默。读取失败返回 ""（覆盖层语义归
+    enabled_instance_whitelist 的降级摘要管，这里只做标记面）。"""
+    try:
+        from inspection_decl import coverage_decl_path
+        return str(coverage_decl_path() or "")
+    except Exception:  # noqa: BLE001——标记面绝不因读法翻车带崩板面
+        return ""
+
+
+def _query_operator_unsupported(exc: BaseException) -> bool:
+    """list_workflows 查询被后端拒绝（算子/语法不可用）的归类（R2：STARTS_WITH 全仓
+    零先例，首腿被拒时才允许降级；连接/超时类错误绝不归入——降级只对「后端不认这个
+    查询」，不对「后端暂时够不着」。措辞按 temporal/ES 常见报错形态归一）。"""
+    txt = str(exc).lower()
+    return ("parse" in txt or "syntax" in txt or "invalid" in txt
+            or "operator" in txt or "could not" in txt)
 
 # ---- Query error classification (KI-025, ticket t260903-06) ----
 # kind semantics (produced by client → consumed by ticket.py → merged by tools_registry
@@ -1233,12 +1286,14 @@ def _row_from_meta(tid: str, meta: Dict[str, Any], exec_status: str) -> Dict[str
     }
 
 
-def _inspection_title_of(snap: Dict[str, Any], ticket_id: str) -> str:
-    """巡检行标题（票面优先；face 缺字段回落票号解析——宁显编号不显空）。"""
+def _inspection_title_of(snap: Dict[str, Any], ticket_id: str,
+                         instance_id: str = "", period: str = "") -> str:
+    """巡检行标题（票面优先；face 缺字段回落调用方解析出的（实例,期）——SA 直读或旧形
+    id 只读解析（t260916-02：id 不再编码实例/期，此处绝不从新形 id 反解）。宁显编号
+    不显空）。"""
     face = snap.get("face") if isinstance(snap.get("face"), dict) else {}
-    m = _INSPECTION_ID_RE.match(str(ticket_id or ""))
-    instance = str(face.get("instance_id") or (m.group(1) if m else ""))
-    period = str(face.get("period") or (m.group(2) if m else ""))
+    instance = str(face.get("instance_id") or instance_id or "")
+    period = str(face.get("period") or period or "")
     if instance and period:
         return "巡检 %s · 期 %s" % (instance, period)
     if instance:
@@ -1256,6 +1311,10 @@ def _row_from_inspection_face(
     created_ts: int,
     *,
     degraded: bool = False,
+    instance_id: str = "",
+    period: str = "",
+    match_via: str = "",
+    legacy_unowned: bool = False,
 ) -> Dict[str, Any]:
     """巡检票列表行（方案 R4：独立分支，不套 dev-lane 行形状）。
 
@@ -1263,6 +1322,10 @@ def _row_from_inspection_face(
     build_ticket_face：summary/heartbeat/findings/report_path/human_gate）。键集是
     dev-lane 行的**超集**（通用键全保留——UI 四态/筛选/折叠组件零特判可跑），
     巡检字段额外叠加；engine 用 INSPECTION_ROW_ENGINE（UI availableOps 早退，坑B）。
+
+    t260916-02：instance_id/period 由调用方解析（SA 直读→旧形 id 只读解析）随参进，
+    本函数不再从 id 反解（新形 id 也反解不出）；行带 match_via（sa|legacy_id）与
+    legacy_unowned（无 ProjectKey SA=「历史票无项目身份」，口径⑤显式可辨）。
 
     待签判定（awaiting_gate）**只读 stage_state**，不读 face.human_gate——该键仅在
     签字后写入（inspection_flow.py close 段），签字前常态缺键（方案 R4/打回4）；
@@ -1288,7 +1351,7 @@ def _row_from_inspection_face(
         stage = str(snap.get("stage") or "") or None
         stage_state = str(snap.get("stage_state") or "") or "awaiting"
         status = str(snap.get("status") or "")
-        title = _inspection_title_of(snap, tid)
+        title = _inspection_title_of(snap, tid, instance_id, period)
     sev_counts = {
         "high": int(summary.get("high") or counts["high"]),
         "med": int(summary.get("med") or counts["med"]),
@@ -1296,7 +1359,6 @@ def _row_from_inspection_face(
     }
     updated_txt = time.strftime("%m-%d %H:%M", time.localtime(created_ts)) if created_ts else ""
     human_gate = face.get("human_gate") if isinstance(face.get("human_gate"), dict) else None
-    _m = _INSPECTION_ID_RE.match(str(tid or ""))
     return {
         "id": tid,
         "project": sa_project,
@@ -1316,8 +1378,17 @@ def _row_from_inspection_face(
         "worktree": "",
         "workspace": None,
         "template": str(snap.get("template") or "inspection-lite"),
-        "instance_id": str(face.get("instance_id") or (_m.group(1) if _m else "") or ""),
-        "period": str(face.get("period") or (_m.group(2) if _m else "") or ""),
+        # 实例/期号：face（票面镜像）优先，调用方解析值（SA/legacy 只读）兜底——
+        # 绝不从票号反解（t260916-02 反解点清理；match_via 标注数据来源可辨）
+        "instance_id": str(face.get("instance_id") or instance_id or ""),
+        "period": str(face.get("period") or period or ""),
+        "match_via": match_via,
+        # 口径⑤：无 ProjectKey SA 的历史票显式降级可辨（「历史票无项目身份」），
+        # 不静默丢 project、不误归项目（project 恒如实出 SA 值，空=空）
+        "legacy_unowned": bool(legacy_unowned),
+        # 有主旧形票的布尔标（定稿方案 §2.3；arbitrate gen2 缺陷②）：走 legacy 腿
+        # 且有项目身份（非 unowned）才标——B1 无 SA 历史票仍只标 legacy_unowned
+        "legacy_id": bool(match_via == "legacy_id" and not legacy_unowned),
         # 发现数：face.summary（真源）优先，畸形 summary 逐条重计兜底（两口径互核）
         "findings": {**sev_counts, "total": len(findings)},
         "heartbeat": bool(face.get("heartbeat")),
@@ -1493,12 +1564,14 @@ def _inspection_query_meta(ticket_id: str, snap: Dict[str, Any]) -> Dict[str, An
     from inspection_flow import CLOSE_GATE_ID
     face = snap.get("face") if isinstance(snap.get("face"), dict) else {}
     findings = face.get("findings") if isinstance(face.get("findings"), list) else []
-    _m = _INSPECTION_ID_RE.match(str(ticket_id or ""))
+    # t260916-02：实例/期号=face 镜像优先；face 缺键回落旧形 id 只读解析（历史票，
+    # 兼容读面）——新形 id 反解不出，宁可出空串也不编造（口径②：不从票号反解）。
+    _li, _lp = _legacy_inspection_instance_period_of(str(ticket_id or ""))
     meta: Dict[str, Any] = {
         "id": str(snap.get("id") or ticket_id),
         "kind": "inspection",
         "template": str(snap.get("template") or "inspection-lite"),
-        "title": _inspection_title_of(snap, ticket_id),
+        "title": _inspection_title_of(snap, ticket_id, _li, _lp),
         "stage": snap.get("stage"),
         "stage_state": snap.get("stage_state"),
         "status": snap.get("status"),
@@ -1506,8 +1579,8 @@ def _inspection_query_meta(ticket_id: str, snap: Dict[str, Any]) -> Dict[str, An
         # 签字通道的 gate 单点（引擎常量）：详情面签字按它回带 gate，workflow intake
         # validate_close_signature 才放行（gate 不匹配拒收，零旁路）
         "gate_id": CLOSE_GATE_ID,
-        "instance_id": face.get("instance_id") or (_m.group(1) if _m else ""),
-        "period": face.get("period") or (_m.group(2) if _m else ""),
+        "instance_id": str(face.get("instance_id") or _li or ""),
+        "period": str(face.get("period") or _lp or ""),
         "report_path": face.get("report_path") or "",
         "red_line": face.get("red_line"),
         "heartbeat": bool(face.get("heartbeat")),
@@ -1543,7 +1616,15 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
     Only executions on production task queues are collected (stragglers on the self-test
     dedicated queue are neither queried nor listed — querying them would wait out a
     timeout).
-    260824 起工单走每工单专属队列（LEGACY 旧前缀 <id> 形态），过滤器放行共享队列 + 新旧专属前缀。  # naming-compat"""
+    260824 起工单走每工单专属队列（LEGACY 旧前缀 <id> 形态），过滤器放行共享队列 + 新旧专属前缀。  # naming-compat
+    t260916-02 增两参数面：
+      - args.id_prefix：铸号扫描面（ticket.py _next_seq_v2 的序号真源）——**全类型**前缀
+        扫描（工单 + 巡检票同天共享序号空间，只扫工单店=两族互撞的现成缺陷）。算子
+        WorkflowId STARTS_WITH 后端拒绝时回落「全类型扫 + 客户端前缀过滤」（scan_mode
+        可辨；过滤仍发生在快照查询之前，不产生 snapshot 成本）。与 kind=inspection 不并用。
+      - kind=inspection 的板面改**双腿查询+合并**（F3）：SA 腿（在册实例
+        InspectionInstance OR 串）+ legacy 腿（旧形 id 前缀，20 前历史票——id 不再编码
+        实例，只能前缀捞），合并按 id 去重；行带 match_via 与 legacy_unowned 徽标。"""
     project = str(args.get("project") or "")
     if project and not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,40}", project):
         return _err("project 形状不合法（注册表 key 白名单：小写字母/数字/中划线）")
@@ -1552,38 +1633,117 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
         return _err("epic 形状不合法（立项代号白名单：%s，小写字母/数字/连字符），实际 %r"
                     % (EPIC_CODE_RE.pattern, epic))
     # t260915-08（方案 R9）：缺省列表行集合零变化（仍只 TEMPLATE_CLASSES，dev-lane）；
-    # kind=inspection 才切巡检板面（类型过滤只拼 INSPECTION_BOARD_TYPES，行走巡检分支）。
+    # kind=inspection 才切巡检板面（行走巡检分支）。
     # 工单台巡检端点即走本参数；未知 kind 显式报错（fail-closed，防拼写错静默回落全列表）。
     kind = str(args.get("kind") or "")
     if kind and kind != "inspection":
         return _err("kind 只认 'inspection'（工单板巡检面；缺省=dev-lane 原列表）")
     inspection_mode = kind == "inspection"
+    id_prefix = str(args.get("id_prefix") or "").strip()
+    if id_prefix and inspection_mode:
+        return _err("id_prefix（铸号扫描面）与 kind=inspection（板面）不并用")
+    if id_prefix and not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,60}$", id_prefix):
+        return _err("id_prefix 形状不合法（字母/数字开头，[A-Za-z0-9._-]，≤61 字符）：%r"
+                    % id_prefix)
     client = await _connect()
-    if inspection_mode:
-        type_filter = " OR ".join('WorkflowType="%s"' % t for t in INSPECTION_BOARD_TYPES)
-    else:
-        type_filter = " OR ".join('WorkflowType="%s"' % c.__name__
-                                  for c in TEMPLATE_CLASSES.values())
-    if project:
-        type_filter = '(%s) AND ProjectKey="%s"' % (type_filter, project)
-    if epic:
-        type_filter = '(%s) AND EpicCode="%s"' % (type_filter, epic)
-    rows: List[Dict[str, Any]] = []
-    # Multiple runs with the same id: non-TERMINATED wins — a ticket reopened under the
-    # same id after a terminate must reach the board (a seen-mark-first approach would
-    # let the old TERMINATED run swallow the new reopened run and the board entry would
-    # vanish).
+
+    async def _scan(query: str, prefix_filter: str = "") -> "Tuple[Dict[str, Any], List[str]]":
+        """一遍查询 → (runs, order)。同 id 多 run 合并：非 TERMINATED 胜——terminate 后
+        重开的票必须上板（seen-mark-first 会让旧 TERMINATED run 吞掉新 run，板面条目
+        凭空消失）。prefix_filter 非空=客户端前缀过滤（查询算子被后端拒绝时的降级腿；
+        过滤发生在快照查询之前，不产生 snapshot 成本）。"""
+        runs_l: Dict[str, Any] = {}
+        order_l: List[str] = []
+        async for wf in client.list_workflows(query):
+            tid = wf.id
+            if prefix_filter and not tid.startswith(prefix_filter):
+                continue
+            cur = runs_l.get(tid)
+            if cur is None:
+                runs_l[tid] = wf
+                order_l.append(tid)
+            elif (cur.status.name if cur.status is not None else "") == "TERMINATED" and \
+                    (wf.status.name if wf.status is not None else "") != "TERMINATED":
+                runs_l[tid] = wf
+        return runs_l, order_l
+
+    inspection_note = ""
+    inspection_decl_note = ""          # 声明面降级摘要（部分降级不拦查询，回执点名）
+    inspection_degraded: list = []     # 结构化降级清单（degraded_projects 回执键）
+    inspection_info: Optional[Dict[str, Any]] = None
+    inspection_scan_mode = ""
     runs: Dict[str, Any] = {}
     order: List[str] = []
-    async for wf in client.list_workflows(type_filter):
-        tid = wf.id
-        cur = runs.get(tid)
-        if cur is None:
-            runs[tid] = wf
-            order.append(tid)
-        elif (cur.status.name if cur.status is not None else "") == "TERMINATED" and \
-                (wf.status.name if wf.status is not None else "") != "TERMINATED":
-            runs[tid] = wf
+    if inspection_mode:
+        # 白名单先读（t260915-08 R2；t260916-02 聚合来源）：全降级=板面显式空
+        # （绝不放全量）；部分降级（坏项目/撞名剔除）=好项目照常收，回执点名。
+        whitelist, inspection_decl_note, inspection_degraded = _inspection_enabled_instances()
+        if not whitelist and inspection_decl_note:
+            # 显式全降级（原 R2 行为不变）：声明面读不出白名单 → 不查询、行集合显式空
+            # （绝不放全量，历史僵尸会 Flooding 回场）；回执带 degraded 让调用方
+            # 看得见为什么空（KI-025 纪律：空 ≠ 无声）。
+            runs, order = {}, []
+            inspection_note = "inspection 声明不可读，巡检板面降级为空（%s）" % inspection_decl_note
+            inspection_info = {"kind": "inspection", "enabled_instances": [],
+                               "degraded": True, "note": inspection_note,
+                               "scan_mode": "skipped"}
+    if inspection_mode and inspection_info is None:
+        type_base = " OR ".join('WorkflowType="%s"' % t for t in INSPECTION_BOARD_TYPES)
+        tail = (' AND ProjectKey="%s"' % project if project else "") + \
+               (' AND EpicCode="%s"' % epic if epic else "")
+        # 腿①（SA）：在册实例的 OR 串（新票起票时盖 InspectionInstance/Period）。
+        # 空白名单=没有任何在册实例 → 板面显式空（跳查询，与旧 R2 行为一致）。
+        if whitelist:
+            sa_q = '(%s AND (InspectionInstance="%s"))%s' % (
+                type_base, '" OR InspectionInstance="'.join(whitelist), tail)
+            runs, order = await _scan(sa_q)
+        # 腿②（legacy）：旧形 id 前缀（t260916 之前的历史票）。R2：WorkflowId
+        # STARTS_WITH 全仓零先例——首腿被后端拒绝 → 回落「类型扫 + 客户端前缀过滤」
+        # （inspection- 前缀，防僵尸收益不破；scan_mode/降级原因进回执可辨），
+        # 取舍记录进 README §13，绝不静默换实现。
+        legacy_q = '(%s AND WorkflowId STARTS_WITH "inspection-")%s' % (type_base, tail)
+        try:
+            lruns, lorder = await _scan(legacy_q)
+            inspection_scan_mode = "starts_with"
+        except Exception as e:  # noqa: BLE001——只有「后端不认查询」才允许降级（连接/超时照抛）
+            if not _query_operator_unsupported(e):
+                raise
+            lruns, lorder = await _scan(type_base + tail if (project or epic)
+                                        else type_base, "inspection-")
+            inspection_scan_mode = "type_only_fallback"
+            inspection_note = ("legacy 腿 STARTS_WITH 被后端拒绝，已回落类型扫+客户端前缀"
+                               "过滤（%s: %s）" % (type(e).__name__, str(e)[:80]))
+        for tid in lorder:                     # 两腿合并：同 id 去重，非 TERMINATED 胜
+            cur = runs.get(tid)
+            if cur is None:
+                runs[tid] = lruns[tid]
+                order.append(tid)
+            elif (cur.status.name if cur.status is not None else "") == "TERMINATED" and \
+                    (lruns[tid].status.name if lruns[tid].status is not None else "") != "TERMINATED":
+                runs[tid] = lruns[tid]
+    elif not inspection_mode:
+        if id_prefix:
+            # 铸号扫描面：全类型前缀直查（工单+巡检票同天序号空间）。
+            try:
+                runs, order = await _scan('WorkflowId STARTS_WITH "%s"' % id_prefix)
+                inspection_scan_mode = "starts_with"
+            except Exception as e:  # noqa: BLE001——同 R2：算子被拒才降级
+                if not _query_operator_unsupported(e):
+                    raise
+                type_all = " OR ".join(
+                    ['WorkflowType="%s"' % c.__name__ for c in TEMPLATE_CLASSES.values()]
+                    + ['WorkflowType="%s"' % t for t in INSPECTION_BOARD_TYPES])
+                runs, order = await _scan(type_all, id_prefix + "-")
+                inspection_scan_mode = "type_only_fallback"
+        else:
+            type_filter = " OR ".join('WorkflowType="%s"' % c.__name__
+                                      for c in TEMPLATE_CLASSES.values())
+            if project:
+                type_filter = '(%s) AND ProjectKey="%s"' % (type_filter, project)
+            if epic:
+                type_filter = '(%s) AND EpicCode="%s"' % (type_filter, epic)
+            runs, order = await _scan(type_filter)
+    rows: List[Dict[str, Any]] = []
     entries: List[Dict[str, str]] = []
     for tid in order:
         wf = runs[tid]
@@ -1612,31 +1772,43 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                         "created": int(wf.start_time.timestamp()) if getattr(wf, "start_time", None) else 0,
                         "close_ts": wf.close_time.timestamp() if wf.close_time else 0})
 
-    # t260915-08（方案 R2/R8）：巡检板面的查询前预过滤——僵尸不烧 snapshot 查询，
-    # 闭合行有界（超窗不上板）。仅 inspection_mode 走这段；缺省列表零进入（R9）。
-    inspection_note = ""
-    inspection_info: Optional[Dict[str, Any]] = None
-    if inspection_mode:
-        whitelist, decl_err = _inspection_enabled_instances()
-        if decl_err:
-            # 显式降级：声明面读不出白名单 → inspection 行全不上板（绝不放全量，
-            # 12 条历史僵尸会 Flooding 回场），回执带标记让调用方看得见为什么空。
-            entries = []
-            inspection_note = "inspection 声明不可读，巡检板面降级为空（%s）" % decl_err
-        else:
-            kept: List[Dict[str, Any]] = []
-            for e in entries:
-                inst = _inspection_instance_of(e["id"])
-                if inst not in whitelist:
-                    continue  # 未在册实例（test-face/suite-drill 等历史测试僵尸）不上板
-                if e["exec_status"] == "COMPLETED" and (
-                        not e["close_ts"]
-                        or time.time() - e["close_ts"] >= CLOSED_HYDRATE_WINDOW_S):
-                    continue  # 闭合行只在 hydrate 窗口内上板（R8 有界口径）；close_ts=0 防御不收
-                kept.append(e)
-            entries = kept
+    # t260915-08（方案 R2/R8）预过滤（t260916-02 改双腿合并后的统一行筛选）：
+    # （实例,期）按 SA 直读→旧形 id 只读解析（_inspection_instance_period_of），
+    # 白名单过滤=实例身份判定（僵尸不烧 snapshot 查询），闭合窗（R8）施加于合并后
+    # 行集；match_via/（实例,期）随 entry 记下供行渲染（不再二次反解）。
+    inspection_match_via: Dict[str, str] = {}
+    inspection_inst_period: Dict[str, "Tuple[str, str]"] = {}
+    if inspection_mode and inspection_info is None:
+        # whitelist/降级摘要/降级清单已在查询段单点取得（不二次读声明面）
+        kept: List[Dict[str, Any]] = []
+        dropped_unresolved = 0
+        for e in entries:
+            inst, per, via = _inspection_instance_period_of(runs[e["id"]], e["id"])
+            if not inst:
+                dropped_unresolved += 1
+                continue  # 实例身份不可辨（非旧形又无 SA）——未在册不上板（僵尸纪律不变）
+            inspection_match_via[e["id"]] = via
+            inspection_inst_period[e["id"]] = (inst, per)
+            if inst not in whitelist:
+                continue  # 未在册实例（test-face/suite-drill 等历史测试僵尸）不上板
+            if e["exec_status"] == "COMPLETED" and (
+                    not e["close_ts"]
+                    or time.time() - e["close_ts"] >= CLOSED_HYDRATE_WINDOW_S):
+                continue  # 闭合行只在 hydrate 窗口内上板（R8 有界口径）；close_ts=0 防御不收
+            kept.append(e)
+        entries = kept
+        # 回执聚合：声明面降级（部分/全）与 R2 扫描降级分开记账、合并点名；
+        # coverage 覆盖层标记 additive 可见（t260916-02 arbitrate：丢弃=静默清零缺陷）。
+        merged_note = "；".join(x for x in (inspection_decl_note, inspection_note) if x)
         inspection_info = {"kind": "inspection", "enabled_instances": list(whitelist),
-                           "degraded": bool(decl_err), "note": inspection_note}
+                           "degraded": bool(inspection_decl_note),
+                           "note": merged_note,
+                           "degraded_projects": [
+                               {"project": p, "path": str(pa), "error": err}
+                               for p, pa, err in inspection_degraded],
+                           "coverage_overlay": _inspection_coverage_overlay(),
+                           "scan_mode": inspection_scan_mode or "starts_with",
+                           "dropped_unresolved": dropped_unresolved}
 
     # The snapshot query is issued only for RUNNING executions, and concurrently — a
     # non-RUNNING query lands on the already-exited dedicated worker's queue and waits
@@ -1701,20 +1873,25 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
         tid, sa_project, sa_epic = e["id"], e["sa_project"], e["sa_epic"]
         exec_status = e["exec_status"]
         if inspection_mode:
-            # 巡检行分支（方案 R4/R8）：完整快照行 / 窗内闭合降级行（status≠closed，
-            # 不进收口折叠）/ RUNNING 查询降级行——三种都带巡检标识，永无匿名空行。
+            # 巡检行分支（方案 R4/R8；t260916-02 增 match_via/legacy_unowned）：
+            # 完整快照行 / 窗内闭合降级行（status≠closed，不进收口折叠）/ RUNNING
+            # 查询降级行——三种都带巡检标识，永无匿名空行。
+            inst_p = inspection_inst_period.get(tid) or ("", "")
+            insp_kw = dict(instance_id=inst_p[0], period=inst_p[1],
+                           match_via=inspection_match_via.get(tid, ""),
+                           legacy_unowned=not sa_project)
             if meta.get("_inspection_snap"):
                 rows.append(_row_from_inspection_face(
                     tid, meta["_inspection_snap"], sa_project, sa_epic,
-                    exec_status, e["close_ts"], e.get("created") or 0))
+                    exec_status, e["close_ts"], e.get("created") or 0, **insp_kw))
             elif meta.get("_inspection_closed_degraded"):
                 rows.append(_row_from_inspection_face(
                     tid, {}, sa_project, sa_epic, exec_status, e["close_ts"],
-                    e.get("created") or 0, degraded=True))
+                    e.get("created") or 0, degraded=True, **insp_kw))
             else:
                 row = _row_from_inspection_face(
                     tid, {}, sa_project, sa_epic, exec_status, e["close_ts"],
-                    e.get("created") or 0)
+                    e.get("created") or 0, **insp_kw)
                 row["title"] = "巡检票查询超时，刷新重试"
                 row["stage"] = None
                 row["stage_state"] = "running"
@@ -1762,6 +1939,9 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
     result: Dict[str, Any] = {"count": len(rows), "tickets": rows}
     if inspection_info is not None:
         result["inspection_filter"] = inspection_info
+    if id_prefix:
+        # 铸号扫描面回执（t260916-02）：scan_mode 可辨（starts_with / type_only_fallback）
+        result["id_prefix_scan"] = {"prefix": id_prefix, "scan_mode": inspection_scan_mode}
     return _ok(result)
 
 
