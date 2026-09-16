@@ -4971,7 +4971,10 @@ async def acceptance_walkthrough(args: AgentStageArgs) -> StageResult:
     # ── 引擎单所有者台（t260915-18）：走查镜头的起/拆所有权同样归引擎——
     # 本站点契约仍是 best-effort（失败注入说明文字，agent 当无截图判读），
     # 但四条终态路径全部显式 down（复用 _capture_lane_owned 的终态纪律）。
-    lane = str(args.worktree or cwd)
+    # P0 修复（260916）：此处曾写 args.worktree，但 AgentStageArgs 无该字段——
+    # 每次走查都 AttributeError 直崩（回归源 31aaed3 / t260915-18 收口）。车道
+    # 真源就是上面那条 cwd（_ws_cwd），不再二取。
+    lane = str(cwd)
     _owned = await _capture_lane_owned(args, Path(lane), cap_out,
                                        dict(os.environ))
     if not _owned["fail"]:
