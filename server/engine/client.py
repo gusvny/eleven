@@ -1599,6 +1599,11 @@ def _inspection_query_meta(ticket_id: str, snap: Dict[str, Any]) -> Dict[str, An
     for k in ("suite", "lane", "lane_teardown"):
         if face.get(k) is not None:
             meta[k] = face[k]
+    # t260916-05：模板拓扑导出透传（快照门内 additive 键；workbench detail.topology
+    # → 泳道图唯一图源通道——巡检 detail 无 workflow_id，模板级兜底通道不存在）。
+    # dict 才带键：老实例（_patched=False 无键）与畸形值都省键=渲染器回落，不编造。
+    if isinstance(snap.get("topology"), dict):
+        meta["topology"] = snap["topology"]
     return meta
 
 

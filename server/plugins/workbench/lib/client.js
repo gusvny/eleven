@@ -6034,10 +6034,12 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 * 零 react / 零平台依赖，node 可裸 import 黑盒单测
 * （tests/t260915-08-inspection-face.mjs，ticket-list-model.ts 同款分层先例）。
 *
-* 为什么住 host/：巡检阶段拓扑（哪些段、短名）是**声明面**——由宿主侧钉死下发，
-* 客户端只消费不内置业务词表（ticket-list-model.ts 头注「UI 不内置任何业务词表」
-* 纪律的让位面，与 dev-lane 拓扑走 workflow list 下发同思想）。client 侧
-* context-fold.ts 已有 import host 模块的先例（session-charter）。
+* 为什么住 host/：巡检段的**短名排版映射**住这里（行卡/时间线的 ≤4 字压缩，
+* 宿主 UI 职责）；阶段词表本身自 t260916-05 起真源在引擎（inspection_flow.py
+* STAGES 声明 + template_topology 导出），泳道图吃快照 topology 键（通用渲染器），
+* 本表的词表一致性由同步锁源级锚定（tests/t260916-05-inspection-topology-lock.mjs
+* ——「STAGES 改了不改本表，锁必红」）。client 侧 context-fold.ts 已有 import
+* host 模块的先例（session-charter）。
 *
 * 行数据源=引擎 client.py ticket-list {kind:"inspection"} 行（_row_from_inspection_face）：
 *   {id, title, kind:"inspection", instance_id, period, stage, stage_state, status,
@@ -6045,7 +6047,14 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 *    human_gate, blocked_reason, gate_error, engine:"inspection", ...}
 * 引擎行是**不可信外部输入**：本层所有函数对畸形输入降级（不抛、不编造）。
 */
-/** 巡检阶段拓扑（宿主声明面；段 id=引擎 _enter 的 stage 值，短名 ≤4 字）。 */
+/**
+* 巡检段短名映射（t260916-05 定性收窄）：**宿主排版职责**，不是阶段词表真源。
+* 段词表的编码真源=引擎 inspection_flow.py `InspectionPeriodicWorkflow.STAGES`
+* （机器可读阶段声明）；泳道图面消费引擎拓扑导出（快照 topology 键→lane-map
+* 通用渲染器，本常量零参与）。本表只剩 ≤4 字短名的行卡/时间线排版压缩，与引擎
+* STAGES 的 id 序/name 一致性由同步锁钉死（tests/t260916-05-inspection-topology
+* -lock.mjs 源级锚：STAGES 改了不改本表，锁必红）。
+*/
 const INSPECTION_TOPOLOGY = [
 	{
 		id: "setup",
@@ -54393,6 +54402,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								children: detail.spec
 							})]
 						}),
+						detail.kind === "inspection" && laneModel && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMap, { model: laneModel }),
 						detail.kind === "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(InspectionDetailFace, {
 							detail,
 							operator,

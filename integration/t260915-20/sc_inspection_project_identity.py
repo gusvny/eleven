@@ -148,7 +148,7 @@ def precheck_temporal_cli():
     except Exception:  # noqa: BLE001——git 不可用则主树候选面放弃，走 ENV_FAIL 点名
         main_root = ""
     for src in (os.path.join(main_root, "server", "engine", "bin", "temporal"),
-                os.path.join(main_root, "server", "dsh", "temporal-poc", "bin", "temporal")):
+                os.path.join(main_root, "server", "dsh", "temporal-poc", "bin", "temporal")):  # engine-venv-compat（蓄意兼容回落：迁移窗机器旧布局候选，新路径优先；旧布局退役票落地后随 marker 撤除——t260907-10 行级豁免锚）
         if main_root and os.path.exists(src):
             try:
                 os.makedirs(os.path.dirname(cand), exist_ok=True)

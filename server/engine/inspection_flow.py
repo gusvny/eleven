@@ -469,12 +469,71 @@ class InspectionPeriodicInput:
     project_key: str = ""
 
 
+# ========================================================================================
+# t260916-05：机器可读阶段声明（编码真源=本 workflow 侧代码；展示面=template_topology
+# 的 inspection-lite 导出，一致性锁=tests/test_t260916_05_inspection_topology.py——
+# 「STAGES 改了不改导出面，此处必红」，dev-lane 范式同款）。
+# 最小字段（派单规格）：id/name/next/人门标记（exit）/套件档开关（suite_only）；
+# parts 是展示用执行器组合（shared.PART_KINDS 子集，巡检段全程序化、close 带人签）。
+# 与 flow 实际调用点对齐：setup/suite 只在声明 run_suite=full 的期出现（run() 两处
+# `if run_suite:` 守卫）→ suite_only=True，展示面画条件段（optional 虚节点注记）；
+# scan/report/close 每期必经。
+# ========================================================================================
+
+@dataclass(frozen=True)
+class InspectionStage:
+    """One inspection stage (an element of InspectionPeriodicWorkflow.STAGES).
+    kind projects like shared.Stage: exit='human' → a human-gate stage; otherwise a
+    programmatic (script/gate) stage — inspection has no agent-narration stages."""
+
+    id: str
+    name: str
+    next: str = ""                    # 展示/快照面；驱动跟 STAGES 声明序（末段空=收口）
+    exit: str = ""                    # 'human' = 人门段（sign 信号 + wait_condition）
+    suite_only: bool = False          # 套件档开关：仅声明 run_suite=full 的期出现
+    parts: Tuple[str, ...] = ()       # 执行器组合（shared.PART_KINDS 子集；展示面）
+
+    @property
+    def kind(self) -> str:
+        if self.exit == "human":
+            return "human"
+        return "gate"
+
+
+#: 前置终态段位标签（不是流程段、不入拓扑图）：无主票守卫的 blocked 落点。
+#: 单列登记而不塞进 STAGES——图面节点必须是真实阶段链；源码锁把 `_enter`/`_blocked`
+#: 的段位字面量全集对齐 STAGES∪PRE_FLOW_STAGES，防未来新增标签静默绕锁。
+PRE_FLOW_STAGES: Tuple[str, ...] = ("guard",)
+
+
+def _inspection_topology() -> Dict[str, Any]:
+    """本模板的展示面拓扑导出（t260916-05；snapshot query 消费）。懒 import
+    template_topology：workflow 沙箱里按需加载（build_ticket_face 懒 import
+    inspection_deadman 同款）；被导模块零 IO 零 temporalio 依赖，纯查表安全。
+    未声明模板返回 None=消费方回落，绝不猜拓扑。"""
+    from template_topology import export_template_topology
+    return export_template_topology("inspection-lite")
+
+
 @workflow.defn
 class InspectionPeriodicWorkflow:
     """One inspection-period ticket. State machine: scan → report → close (human gate) →
     a terminal closed state.
     Business refusals do not raise: a scan/posting failure → a blocked terminal ticket
     (visible, queryable), never a fake green."""
+
+    #: t260916-05 阶段声明（编码真源）：声明序=执行序；展示面（template_topology
+    #: inspection-lite 导出）与一致性锁都以它为对齐锚。
+    STAGES = (
+        InspectionStage(id="setup", name="泳道准备", next="scan",
+                        suite_only=True, parts=("script",)),
+        InspectionStage(id="scan", name="扫描", next="suite", parts=("script",)),
+        InspectionStage(id="suite", name="巡检泳道套件", next="report",
+                        suite_only=True, parts=("script",)),
+        InspectionStage(id="report", name="落账", next="close", parts=("script",)),
+        InspectionStage(id="close", name="人审收口", next="", exit="human",
+                        parts=("human", "script")),
+    )
 
     def __init__(self) -> None:
         self.stage: str = ""
@@ -553,6 +612,13 @@ class InspectionPeriodicWorkflow:
             "face": self.face,
             "timeline": self.timeline,
             "gate_error": self._gate_err,
+            # t260916-05：模板拓扑导出（门内 additive 键=旧实例重放零新键；纯函数查表
+            # 零 IO；查询体只读缓存位 _patched，不触 SDK 门判定——R1 同纪律，dev_lane
+            # snapshot 的 _detail_face_on 同款）。消费链：client.py _inspection_query_meta
+            # 透传 → workbench detail.topology → 泳道图（buildLaneMap；None=未声明模板
+            # 回落，绝不猜拓扑）。
+            **({"topology": _inspection_topology()}
+               if getattr(self, "_patched", False) else {}),
         }
 
     @workflow.run

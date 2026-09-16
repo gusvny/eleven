@@ -31,7 +31,9 @@ STAGES（编码真源）物理分离——原因是 tools 侧（workflow.py）�
 temporalio 在场，不能 import dev_lane。分离的漂移风险由一致性锁 UT 承接：
 test_template_topology.py 逐字段比对导出面 ↔ DevLaneWorkflow.STAGES（id/label/
 role/kind/parts），并源码锁 run() 两个真分叉的成员集合——STAGES 改了不导出面，
-UT 必红。fixture-two-step 同款锁。
+UT 必红。fixture-two-step 同款锁。t260916-05：inspection-lite 同范式——编码真源=
+inspection_flow.InspectionPeriodicWorkflow.STAGES（含 suite_only 套件档开关），
+一致性锁=tests/test_t260916_05_inspection_topology.py（逐字段+源码锁+变异自证）。
 
 本模块零 IO、零 temporalio 依赖：workflow.py / 测试 / 渲染器 UT 都可直接 import。
 不登记进 workflows 注册表、不受 SANDBAR_FIXTURE_TEMPLATES 门约束（本表只是
@@ -50,6 +52,9 @@ _KINDS: Tuple[str, ...] = (KIND_AGENT, KIND_GATE, KIND_HUMAN)
 
 # 条件段注记值：现仅 ui_evidence（dev_lane.py:456 注释自认「UI 票只跑」）。
 OPT_UI_TICKETS = "仅 UI 票"
+# t260916-05：巡检套件档条件段注记——setup/suite 只在声明 run_suite=full 的期出现
+# （inspection_flow.py run() 两处 `if run_suite:` 守卫；阶段声明 suite_only=True）。
+OPT_SUITE_TIER = "仅套件档"
 
 
 def _node(node_id: str, label: str, role: str, kind: str,
@@ -97,8 +102,25 @@ _FIXTURE_TWO_STEP_NODES: Tuple[Dict[str, Any], ...] = (
     _node("fx_step_two", "夹具段二", "integration", KIND_AGENT),
 )
 
+# t260916-05：巡检模板（inspection-lite）——编码真源=inspection_flow.py
+# InspectionPeriodicWorkflow.STAGES（机器可读阶段声明），本表是展示面导出数据；
+# 逐字段一致性锁=tests/test_t260916_05_inspection_topology.py B 段（「STAGES 改了
+# 不改本表，此处必红」，dev-lane 同款范式）。线性五段、无并行组；setup/suite 为
+# 套件档条件段（optional 虚节点注记，同 ui_evidence 形）；close=人门（虚线圈，
+# 巡检票唯一汇）。
+_INSPECTION_NODES: Tuple[Dict[str, Any], ...] = (
+    _node("setup", "泳道准备", "", KIND_GATE, ("script",), optional=OPT_SUITE_TIER),
+    _node("scan", "扫描", "", KIND_GATE, ("script",)),
+    _node("suite", "巡检泳道套件", "", KIND_GATE, ("script",), optional=OPT_SUITE_TIER),
+    _node("report", "落账", "", KIND_GATE, ("script",)),
+    _node("close", "人审收口", "", KIND_HUMAN, ("human", "script")),
+)
+
 _TOPOLOGIES: Dict[str, Dict[str, Any]] = {
     "dev-lane": {"name": "开发泳道", "nodes": _DEV_LANE_NODES, "groups": _DEV_LANE_GROUPS},
+    # 巡检期票模板（inspection_flow.InspectionPeriodicWorkflow；非 dev-lane 票面，
+    # 工作台详情经快照 topology 键消费本导出）。
+    "inspection-lite": {"name": "巡检", "nodes": _INSPECTION_NODES, "groups": ()},
     # 测试夹具模板（SANDBAR_FIXTURE_TEMPLATES=1 才注册为 workflow；这里是它的
     # 拓扑导出数据，渲染器通用性对拍=「另一 workflow 类拓扑同组件」的载体）。
     "fixture-two-step": {"name": "夹具两段", "nodes": _FIXTURE_TWO_STEP_NODES, "groups": ()},

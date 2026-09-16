@@ -4064,9 +4064,12 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                 </div>
               )}
               {/* t260915-08 巡检票：详情面直接进巡检面（时间线/发现/人门签字，R6）——
-                  dev-lane 专属面板（步骤条/泳道图/变更页签/检查明细）对巡检票零渲染。
-                  合并注（t260915-05 详情 v2 重设计后仍成立）：巡检票无 dev-lane
-                  topology/gate_runs，泳道图与检查明细区同属 dev-lane 面，一并守卫。 */}
+                  dev-lane 专属面板（步骤条/变更页签/检查明细）对巡检票零渲染。
+                  t260916-05：泳道图不再随巡检一并守卫——引擎已登记 inspection-lite
+                  拓扑（快照 topology 键→laneModel），拓扑在场即画（渲染器通用口径，
+                  零渲染器改动）；缺席=不画不回落（老票 _patched=False 无键，维持
+                  t260915-08 现状降级，绝不猜拓扑）。 */}
+              {detail.kind === 'inspection' && laneModel && <LaneMap model={laneModel} />}
               {detail.kind === 'inspection' && (
                 <InspectionDetailFace detail={detail} operator={operator} opBusy={opBusy}
                   onSign={(decision, note) => doSign(detail.id, decision, note, detail.gate_id)} />

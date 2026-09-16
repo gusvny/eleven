@@ -1219,6 +1219,22 @@ SCENARIOS = [
      "attempt→台名映射回执可查+容量计数面（t260915-18 工单②「怎么算好②」+容量可见半边，灰盒 L3，真 docker 台）：stage_docker.py inventory 只读回执——capacity 计数面（containers/projects/leases/orphans/max_stages 等 ≥五键子集，上限真值同面呈现）+stages 逐台条目（落地形状=扁平 holder_ticket/working_dir/age_s/containers，260915 对齐；语义钉=台属于哪个泳道/票号可核对）；起台挂 SANDBAR_STAGE_TICKET=票号 → 回执 holder_ticket=票号（ticket→project→容器一眼可对，人工排障不再猜哈希台名=病灶四用户面）；未挂票号台 holder_ticket=unknown 缺省（不编造归属——报错精确纪律）；拆台后条目消失（清单跟随真实容器面，当日「锁根 1 租约 vs 38 容器」失明形态在回执层不可再现）。与 t260912-02 系（起台/清扫/网段行为面）intent 不同面：本条锚可见性回执（只读、零 docker 变更动作）；工单③热台复用缺省关无用户可感知行为归 developer L1，不立场景；t260910-12 租约四象限归 L1 不同层。登记 engine。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker 缺席=ENV_FAIL exit 2",
      "python3 integration/t260915-18/sc_stage_inventory_mapping.py", "engine"),
 
+    # ---- t260916-05: 巡检票上泳道图（登记巡检模板拓扑+阶段声明真源+一致性锁）----
+    # 三条 intent 互不重叠：①DOM 渲染面（本票验收①的用户可感知半）②查询回执缝（数据半：
+    # 拓扑真从 snapshot 流到 ticket-query 回执，缝断=DOM 桩测不出）③双真源同步锁的闸内
+    # 活性（验收③；锁本体=developer workbench UT，本条守「锁在集成闸内被真实执行」）。
+    # 引擎 workflow 侧（snapshot 门两态/逐字段一致性锁/变异自证）归 developer L1
+    # （server/engine/tests/test_t260916_05_inspection_topology.py）不同层。
+    ("t260916-05-inspection-detail-lane-map-dom",
+     "巡检票详情泳道图 DOM 对拍（t260916-05 验收①③，灰盒 L3，隔离台真浏览器+API 桩，3099 零接触）：S0 build-contract（twin bundle 同步+泳道图锚在 bundle+buildLaneMap 巡检夹具冒烟：5 节点/human/仅套件档注记）+S1 真 DOM 四腿——L1 在飞票：引擎登记 inspection-lite 拓扑后泳道图自动在场（渲染器零改动=被测前提），节点集==阶段声明全集 {setup,scan,suite,report,close}、标签全部来自拓扑（零 dev-lane 业务词）、人门虚线圈恰落 close（data-kind=human）、条件段注记恰 setup+suite（wb-lm-opt 恰 2，「仅套件档」泄漏=图面撒谎形态）、在飞状态如实投影（已进入段 running/未进入段 todo——巡检 timeline 无逐段 done，多节点同显 running 是引擎现状的诚实投影）；L2 待签票：close data-vis=awaiting-human（人门到站）；L3 关闭票：全段 done 且图仍在（KI-027 关单可见同族）；L4 降级锚：详情无 topology 键（老实例重放常态）→零泳道图且零 dev-lane 步骤条回落（维持 t260915-08 现状降级，绝不拿步骤条冒充巡检图），巡检面时间线照常。数据全桩（list/detail/workflows 三路由；workflows 桩不带 topology=泳道图唯一图源是详情快照键的证明面），浏览器/bundle/React 全真。分工：t260915-05-detail-lane-map-dom 守 dev-lane 泳道图本体/渲染器通用性/畸形拓扑（本条不重复其面）；t260915-08-board-ui 守板面巡检行/签字通道。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；隔离台/playwright/chromium 缺席=ENV_FAIL exit 2",
+     "node integration/t260916-05/sc_inspection_detail_lane_map_dom.mjs", "browser-free"),
+    ("t260916-05-topology-receipt",
+     "巡检查询回执携带拓扑导出的缝契约（t260916-05 验收①数据半，灰盒 L2，stub temporalio 离线，镜 t260915-08-board-rows 黑盒口径）：T1 新实例常态（snapshot 带 topology）→ticket-query 回执 ticket 面 topology 原样透传（逐键相等不重形：version=topology-v1/template=inspection-lite/5 节点/线性 4 边/close kind=human/setup·suite optional=仅套件档）+snapshot 通道同在（双通道互证）+face 既有字段不因加键丢失（findings/summary/report_path/gate_id/instance_id/period 照常——加键挤掉既有面=立即红）；T2 老实例重放常态（snapshot 无 topology，_patched 门关）→回执无 topology 键且 face 照常（省键降级契约，绝不编造）；T3 topology 畸形三态（非 dict：123/'garbage'/[]）→无键不炸、face 照常（查询边界绝不抛——KI-025 族谎报温床）。分工：渲染面归 t260916-05-inspection-detail-lane-map-dom；snapshot 门两态 workflow 侧归 developer L1（test_template_topology F 腿同款）；t260915-08-board-rows G 组守巡检分支 engine 标记+dev-lane 键集 parity（本条不重复）。纯离线无 ENV_FAIL 腿——环境红捂不住本面。实现落地前红属预期（TDD 信号：T1 红=透传缝未接），arbitrate/merge 期必须绿",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260916-05/sc_inspection_topology_receipt.py", "browser-free"),
+    ("t260916-05-dual-source-lock",
+     "双真源同步锁的闸内活性（t260916-05 验收③，灰盒 L2 离线）：验收③「保留则同步锁在场，两者择一并以源码锁钉住」的机械执行点——锁的断言内容（引擎 inspection_flow.py STAGES 声明 ↔ workbench INSPECTION_TOPOLOGY 短名表逐位比对+变异自证）由 developer UT 交付（server/plugins/workbench/tests/t260916-05-inspection-topology-lock.mjs），本条守锁在集成闸内被真实执行且绿：锁文件缺席=fail 点名交付约定路径（文件缺失=产品面缺失非环境）；执行非零=fail 带 stdout/stderr 尾部（锁红=双真源漂移已发生，恰是本票要抓的形态）；exit 0=pass。没有本条，锁只活在 developer 自检里——merge 后改声明忘改词表没有任何机械闸会红（KI-046/049「测试在场≠测试生效/机制活性」家族；t260913 golden-freeze 补「唯一自动比对点」同族先例）。路径解析走爬根 helper（KI-075 族）。纯离线无 ENV_FAIL 腿。实现落地前红属预期（TDD 信号：锁文件未交付=fail），arbitrate/merge 期必须绿",
+     "node integration/t260916-05/sc_inspection_dual_source_lock.mjs", "browser-free"),
+
 ]
 
 CMD_TIMEOUT = 900
