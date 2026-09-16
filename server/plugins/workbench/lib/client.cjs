@@ -5875,6 +5875,7 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 		"data-state": state4,
 		"data-active": active,
 		"data-compact": compact,
+		"data-engine": t.engine,
 		style: { borderLeftColor: epicColor },
 		title: cardTitle(t, wf),
 		onClick: () => onOpen(),
@@ -6024,6 +6025,206 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 			})
 		]
 	});
+}
+//#endregion
+//#region src/host/inspection-face.ts
+/**
+* inspection-face —— 巡检票板面纯函数层（t260915-08，方案 v2 R4/R5/R6）。
+*
+* 零 react / 零平台依赖，node 可裸 import 黑盒单测
+* （tests/t260915-08-inspection-face.mjs，ticket-list-model.ts 同款分层先例）。
+*
+* 为什么住 host/：巡检阶段拓扑（哪些段、短名）是**声明面**——由宿主侧钉死下发，
+* 客户端只消费不内置业务词表（ticket-list-model.ts 头注「UI 不内置任何业务词表」
+* 纪律的让位面，与 dev-lane 拓扑走 workflow list 下发同思想）。client 侧
+* context-fold.ts 已有 import host 模块的先例（session-charter）。
+*
+* 行数据源=引擎 client.py ticket-list {kind:"inspection"} 行（_row_from_inspection_face）：
+*   {id, title, kind:"inspection", instance_id, period, stage, stage_state, status,
+*    findings:{high,med,low,total}, heartbeat, report_path, awaiting_gate,
+*    human_gate, blocked_reason, gate_error, engine:"inspection", ...}
+* 引擎行是**不可信外部输入**：本层所有函数对畸形输入降级（不抛、不编造）。
+*/
+/** 巡检阶段拓扑（宿主声明面；段 id=引擎 _enter 的 stage 值，短名 ≤4 字）。 */
+const INSPECTION_TOPOLOGY = [
+	{
+		id: "setup",
+		name: "泳道准备",
+		short: "备道"
+	},
+	{
+		id: "scan",
+		name: "扫描",
+		short: "扫描"
+	},
+	{
+		id: "suite",
+		name: "巡检泳道套件",
+		short: "套件"
+	},
+	{
+		id: "report",
+		name: "落账",
+		short: "落账"
+	},
+	{
+		id: "close",
+		name: "人审收口",
+		short: "收口"
+	}
+];
+/** 消费外部行=不可信输入的取串助手（非串→''）。 */
+function strOf(v) {
+	return typeof v === "string" ? v : "";
+}
+/** 是否巡检行：kind 或 engine 标记任一命中（引擎行带 kind=inspection）。 */
+function isInspectionRow(t) {
+	return t !== null && typeof t === "object" && (t.kind === "inspection" || t.engine === "inspection");
+}
+/** 发现数计数的最小形状守卫（引擎 summary/findings 畸形时全 0，不编造）。 */
+function findingsCountOf(row) {
+	const f = row?.findings;
+	if (f !== null && typeof f === "object") {
+		const o = f;
+		const num = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
+		return {
+			high: num(o.high),
+			med: num(o.med),
+			low: num(o.low),
+			total: num(o.total)
+		};
+	}
+	return {
+		high: 0,
+		med: 0,
+		low: 0,
+		total: 0
+	};
+}
+/**
+* 详情面发现数计数（t260915-08 实证补）：行（ticket-list）与详情（ticket-query）
+* 的发现数据形状不同——行 findings={high,med,low,total} 计数字典；详情 face.summary=
+* {high,med,low} 计数字典、face.findings=发现清单（列表）。本函数吃详情形状：
+* summary 字典优先（引擎真值），缺/畸形时按 findings 清单逐条 severity 重计，
+* 两者皆缺=全 0（不编造）。行形状请用 findingsCountOf。
+*/
+function inspectionSummaryOf(face) {
+	const src = face !== null && typeof face === "object" ? face : {};
+	const num = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
+	const s = src.summary;
+	if (s !== null && typeof s === "object") {
+		const o = s;
+		const high = num(o.high);
+		const med = num(o.med);
+		const low = num(o.low);
+		const total = num(o.total) || high + med + low;
+		if (high || med || low || total) return {
+			high,
+			med,
+			low,
+			total
+		};
+	}
+	const list = Array.isArray(src.findings) ? src.findings : [];
+	const high = list.filter((f) => f?.severity === "high").length;
+	const med = list.filter((f) => f?.severity === "med").length;
+	const low = list.filter((f) => f?.severity === "low").length;
+	return {
+		high,
+		med,
+		low,
+		total: high + med + low
+	};
+}
+/** 阶段短名：拓扑命中用短名，未命中截断原词（stageShortOf 同口径），畸形→''。 */
+function inspectionStageShort(stage) {
+	const s = strOf(stage);
+	if (s === "") return "";
+	const hit = INSPECTION_TOPOLOGY.find((st) => st.id === s);
+	if (hit) return hit.short;
+	return [...s].length > 4 ? [...s].slice(0, 4).join("") + "…" : s;
+}
+/**
+* 巡检行的一句进展（行卡 progress prop 数据源，t260904-17 同构）。
+* 待签判定**只读 stage_state/awaiting_gate**（引擎 R4：face.human_gate 签字前常态缺键，
+* 不得依赖）；发现数来自 findings 字段（引擎已并好）。畸形行 → undefined
+* （行卡降级只显相对时间）。闭合一律 {state:'done'}（收口折叠吃掉，正常语义）。
+*/
+function inspectionProgressOf(row) {
+	if (row === null || typeof row !== "object") return void 0;
+	const stageState = strOf(row.stage_state);
+	const status = strOf(row.status);
+	const c = findingsCountOf(row);
+	const findingsTxt = `发现 高${c.high}/中${c.med}/低${c.low}`;
+	if (status === "closed") return {
+		state: "done",
+		text: `已收口 · ${findingsTxt}`
+	};
+	if (stageState === "awaiting-human" || row.awaiting_gate === true) return {
+		state: "awaiting-human",
+		text: `等你签字 · ${findingsTxt}`
+	};
+	if (stageState === "blocked") {
+		const reason = strOf(row.blocked_reason);
+		return {
+			state: "blocked",
+			text: `受阻${reason ? "：" + reason : " · 原因见详情"}`
+		};
+	}
+	if (stageState === "running" || stageState === "awaiting" || stageState === "") {
+		const stage = inspectionStageShort(row.stage);
+		return {
+			state: "running",
+			text: `${stage ? stage + "中 · " : ""}${findingsTxt}`
+		};
+	}
+	return {
+		state: stageState,
+		text: findingsTxt
+	};
+}
+/**
+* 巡检板面端点（t260915-08 建的引擎 ticket-list{kind:inspection} 薄壳）。左栏
+* 分拣制（t260915-19 方案 v2）与中列合流同吃此端点——URL 串收本单点，防两处
+* 字面量漂移（node.ts 注册路径与本串一致性由 UT 源级锚看守）。
+*/
+const INSPECTION_TICKETS_URL = "/sandbar-workbench/api/wf/inspection/tickets";
+/**
+* 左栏分拣的行防御过滤（端点行=不可信外部输入，与引擎行同纪律）：非数组→[]、
+* 元素非对象或非巡检行（kind/engine 都不标）剔除，其余保序。绝不抛、绝不编造。
+*/
+function inspectionSidebarRows(rows) {
+	if (!Array.isArray(rows)) return [];
+	return rows.filter((r) => isInspectionRow(r));
+}
+/**
+* 左栏分拣（t260915-19 方案 v2）：巡检行按行 project（t260915-20 起=ProjectKey
+* SA 直读）归位——命中在册项目 key → byProject[key]；project 空/非串/不在册
+* （20 之前老票、注册表隔离 key、摘除项目）→ unowned（兜底组显式呈现，绝不
+* 静默丢失）。registeredKeys 畸形（非数组）按空集处理；行序输入输出保持端点原序。
+*/
+function inspectionSplitByProject(rows, registeredKeys) {
+	const keySet = new Set((Array.isArray(registeredKeys) ? registeredKeys : []).filter((k) => typeof k === "string" && k !== ""));
+	const byProject = {};
+	const unowned = [];
+	for (const row of inspectionSidebarRows(rows)) {
+		const p = strOf(row.project);
+		if (p !== "" && keySet.has(p)) (byProject[p] ??= []).push(row);
+		else unowned.push(row);
+	}
+	return {
+		byProject,
+		unowned
+	};
+}
+/**
+* 左栏巡检降级文案单点：失败=保上次成功快照 + 显式原文提示，绝不吞成空列表
+* （KI-008/t260910-04 R3 同纪律；KI-018① 合规面——错误文案进横幅，不进数据字段）。
+* 词表与中列同源（index.tsx「巡检板面拉取失败，显示上次快照（自动重试中）」同族），
+* 非串 err 走 String() 兜底不抛。
+*/
+function inspectionDegradedNote(err) {
+	return `巡检板面拉取失败（显示上次快照，自动重试中）：${typeof err === "string" ? err : String(err ?? "")}`;
 }
 //#endregion
 //#region src/client/metrics-model.ts
@@ -46845,6 +47046,11 @@ function mountMetricsIntoSettingsRow(root) {
 *       左列不再显示立项列表，点图标后中列显示立项清单）。
 *       项目组 = server/projects.yaml 注册表（260823 多项目化：project 是逻辑概念，
 *       1:N 对应目录）；每组工单按 ?project=<key> 单独拉取（Temporal ProjectKey SA 过滤）。
+*       t260915-19 起左栏收录巡检票：巡检 workflow 因引擎类型过滤隔离进不了
+*       ?project= 通路（client.py cmd_ticket_list 缺省只拼 dev-lane 模板类型），
+*       故左栏并行拉 /wf/inspection/tickets 端点做**客户端分拣**——行 project
+*       （t260915-20 起=ProjectKey SA 真源）命中在册项目并进对应组尾部，空/
+*       不在册（20 之前老票、隔离 key）落「巡检」兜底组（显式不静默丢失）。
 * 中列：四视图由 index.tsx 注入（views prop）——工单台 WorkbenchSection（本插件）、
 *       文档 DocsSection（本插件，t260905-06）、模型 ProvidersSection（providers 插件）、
 *       立项单 EpicSection（本插件，t260826-02；空代号=立项清单，带代号=详情）。
@@ -46852,6 +47058,9 @@ function mountMetricsIntoSettingsRow(root) {
 *       右栏 chat 恒为单全局会话不再切换（每工单会话联动下线，数据留存）。
 *       未选项目时中列显占位（不自动选第一个项目——不造隐形缺省）。
 */
+/** 巡检行卡的 wf 形状（t260915-19）：compact 无站道点，仅喂悬停阶段短名；
+*  拓扑=宿主声明面单点（host/inspection-face.ts），不 import index.tsx 防循环。 */
+const INSPECTION_WF_LIKE = { stages: INSPECTION_TOPOLOGY };
 /**
 * 状态色（用户拍板口径）：红=有问题（blocked/rework）、黄=待审核（awaiting-human/settled）、
 * 蓝=运行中（running）、绿=完成（verified/closed）、灰=等待（awaiting）。
@@ -46927,6 +47136,15 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
 .wb-sb .wb-card-state { color:inherit; }
 /* t260905-08：原深档固定蓝字——平台浅档下失读（宿主实报同病），归主规则令牌 */
 .wb-sb .wb-card-id { color:var(--dsw-derive-accent,#0969da); }
+/* t260915-19 左栏「等你」黄调（巡检行）：与中列同 token（index.tsx
+ * .wb-root .wb-card[data-state=waiting] 同源色板）——作用域=data-engine=inspection
+ * 等值选择器（review C1：dev-lane 行 data-engine 在场-异值 "template-as-code-v2"，
+ * 等值判定天然零命中；测试禁写「属性缺席」断言）。项目组行渲染零变化。 */
+.wb-sb .wb-card[data-engine=inspection][data-state=waiting] { background:var(--dsw-derive-warn-bg,#fff8c5); }
+/* t260915-19 巡检降级横幅：色板同 .wb-stale-banner 族（琥珀），不另起色板。 */
+.wb-insp-degraded { padding:6px 10px; font-size:11px; line-height:1.5;
+  color:var(--dsw-derive-dark-warn-fg,#ffe9c4); background:var(--dsw-derive-dark-warn-bg,#7a4a06);
+  border-bottom:1px solid var(--dsw-derive-warn,#b8860b); }
 /* 视图入口图标：右对齐放在每个项目组头行内（用户拍板 260823：per-project，不占独立行；
    t260827-01 起四个：工单/文档/模型/立项单；t260905-06 旧提法退役换文档） */
 .wb-view-icons { display:flex; gap:2px; }
@@ -47011,6 +47229,10 @@ function WorkbenchSidebar(props) {
 	const [projects, setProjects] = (0, react.useState)([]);
 	/** 项目 key → 该项目的工单行（按 ?project= 逐组拉取，来源即归属，不做路径猜测）。 */
 	const [ticketsByProject, setTicketsByProject] = (0, react.useState)({});
+	const [inspectionRows, setInspectionRows] = (0, react.useState)([]);
+	const [inspectionNote, setInspectionNote] = (0, react.useState)("");
+	const inspectionRowsRef = (0, react.useRef)([]);
+	const [inspCollapsed, setInspCollapsed] = (0, react.useState)(false);
 	const [selectedId, setSelectedId] = (0, react.useState)("");
 	const [rightView, setRightView] = (0, react.useState)("board");
 	/** 当前中列视图所属项目（左列图标点击行）；空=未选（中列显占位）。 */
@@ -47149,6 +47371,10 @@ function WorkbenchSidebar(props) {
 		if (!wide) return;
 		let cancelled = false;
 		async function load() {
+			const inspPromise = fetch(INSPECTION_TICKETS_URL).then((r) => r.json()).catch((err) => ({
+				ok: false,
+				error: err instanceof Error ? err.message : String(err)
+			}));
 			try {
 				const pr = await fetch("/sandbar-workbench/api/wf/projects").then((r) => r.json());
 				const list = pr?.result?.projects ?? [];
@@ -47170,7 +47396,19 @@ function WorkbenchSidebar(props) {
 				}));
 				if (cancelled) return;
 				setTicketsByProject(Object.fromEntries(entries));
-			} catch {} finally {
+			} catch {}
+			try {
+				const ir = await inspPromise;
+				if (cancelled) return;
+				if (ir?.ok === true) {
+					inspectionRowsRef.current = ir.result?.tickets ?? [];
+					setInspectionRows(inspectionRowsRef.current);
+					setInspectionNote("");
+				} else setInspectionNote(inspectionDegradedNote(ir?.error !== void 0 ? ir.error : `HTTP 无 JSON 回执：${JSON.stringify(ir).slice(0, 120)}`));
+			} catch (err) {
+				if (cancelled) return;
+				setInspectionNote(inspectionDegradedNote(err instanceof Error ? err.message : String(err)));
+			} finally {
 				if (!cancelled) setLoading(false);
 			}
 		}
@@ -47185,10 +47423,10 @@ function WorkbenchSidebar(props) {
 	}, [wide]);
 	const handleTicketClick = (0, react.useCallback)((t, projectKey) => {
 		setSelectedId(t.id);
-		setViewProject(projectKey);
+		setViewProject((p) => projectKey || p || (projects.length > 0 ? projects[0].key : ""));
 		setRightView("board");
 		setFocusNonce((n) => n + 1);
-	}, []);
+	}, [projects]);
 	(0, react.useEffect)(() => startChatProjectTagEffect({ fetchImpl: fetch.bind(globalThis) }), []);
 	const handleViewIcon = (0, react.useCallback)((projectKey, view) => {
 		if (view === "board") {
@@ -47203,13 +47441,18 @@ function WorkbenchSidebar(props) {
 		setRightView(view);
 	}, []);
 	/** 项目组：注册表顺序。进行中工单常列；已完成工单在 sandbar 驻留窗口内也列（灰绿标记）。 */
+	const inspectionSplit = (0, react.useMemo)(() => inspectionSplitByProject(inspectionRows, projects.map((p) => p.key)), [inspectionRows, projects]);
 	const groups = (0, react.useMemo)(() => {
 		const nowS = Date.now() / 1e3;
 		return projects.map((p) => ({
 			project: p,
-			tickets: (ticketsByProject[p.key] ?? []).filter((t) => inSandbar(t, nowS))
+			tickets: [...(ticketsByProject[p.key] ?? []).filter((t) => inSandbar(t, nowS)), ...inspectionSplit.byProject[p.key] ?? []]
 		}));
-	}, [projects, ticketsByProject]);
+	}, [
+		projects,
+		ticketsByProject,
+		inspectionSplit
+	]);
 	const Board = views.board;
 	const Docs = views.docs;
 	const Routes = views.routes;
@@ -47240,6 +47483,12 @@ function WorkbenchSidebar(props) {
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-ticket-list",
 					children: [
+						inspectionNote !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "wb-insp-degraded",
+							"data-testid": "sidebar-inspection-degraded",
+							role: "alert",
+							children: inspectionNote
+						}),
 						loading ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 							style: {
 								padding: 16,
@@ -47354,13 +47603,45 @@ function WorkbenchSidebar(props) {
 						}), g.tickets.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 							className: "wb-group-empty",
 							children: "无进行中工单"
-						}) : g.tickets.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
+						}) : g.tickets.map((t) => {
+							const insp = isInspectionRow(t);
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
+								t,
+								compact: true,
+								wf: insp ? INSPECTION_WF_LIKE : void 0,
+								progress: insp ? inspectionProgressOf(t) : void 0,
+								active: selectedId === t.id,
+								updatedTsMs: (isOpen(t) ? t.created : t.close_ts || t.created) !== void 0 ? (isOpen(t) ? t.created : t.close_ts || t.created) * 1e3 : void 0,
+								onOpen: () => handleTicketClick(t, g.project.key)
+							}, t.id);
+						})] })] }, g.project.key)),
+						!loading && inspectionSplit.unowned.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "wb-group-head",
+							"data-testid": "sidebar-inspection-head",
+							onClick: () => setInspCollapsed((c) => !c),
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "wb-group-caret",
+									children: inspCollapsed ? "▸" : "▾"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "wb-group-name",
+									children: "巡检"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "wb-group-count",
+									children: inspectionSplit.unowned.length
+								})
+							]
+						}), !inspCollapsed && inspectionSplit.unowned.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
 							t,
 							compact: true,
+							wf: INSPECTION_WF_LIKE,
+							progress: inspectionProgressOf(t),
 							active: selectedId === t.id,
 							updatedTsMs: (isOpen(t) ? t.created : t.close_ts || t.created) !== void 0 ? (isOpen(t) ? t.created : t.close_ts || t.created) * 1e3 : void 0,
-							onOpen: () => handleTicketClick(t, g.project.key)
-						}, t.id))] })] }, g.project.key)),
+							onOpen: () => handleTicketClick(t, "")
+						}, t.id))] }),
 						quarantined.map((q) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-quar-row",
 							"data-wb-quarantine-row": "",
@@ -49019,163 +49300,6 @@ function DocsSection({ projectKey: shellProjectKey }) {
 	});
 }
 //#endregion
-//#region src/host/inspection-face.ts
-/**
-* inspection-face —— 巡检票板面纯函数层（t260915-08，方案 v2 R4/R5/R6）。
-*
-* 零 react / 零平台依赖，node 可裸 import 黑盒单测
-* （tests/t260915-08-inspection-face.mjs，ticket-list-model.ts 同款分层先例）。
-*
-* 为什么住 host/：巡检阶段拓扑（哪些段、短名）是**声明面**——由宿主侧钉死下发，
-* 客户端只消费不内置业务词表（ticket-list-model.ts 头注「UI 不内置任何业务词表」
-* 纪律的让位面，与 dev-lane 拓扑走 workflow list 下发同思想）。client 侧
-* context-fold.ts 已有 import host 模块的先例（session-charter）。
-*
-* 行数据源=引擎 client.py ticket-list {kind:"inspection"} 行（_row_from_inspection_face）：
-*   {id, title, kind:"inspection", instance_id, period, stage, stage_state, status,
-*    findings:{high,med,low,total}, heartbeat, report_path, awaiting_gate,
-*    human_gate, blocked_reason, gate_error, engine:"inspection", ...}
-* 引擎行是**不可信外部输入**：本层所有函数对畸形输入降级（不抛、不编造）。
-*/
-/** 巡检阶段拓扑（宿主声明面；段 id=引擎 _enter 的 stage 值，短名 ≤4 字）。 */
-const INSPECTION_TOPOLOGY = [
-	{
-		id: "setup",
-		name: "泳道准备",
-		short: "备道"
-	},
-	{
-		id: "scan",
-		name: "扫描",
-		short: "扫描"
-	},
-	{
-		id: "suite",
-		name: "巡检泳道套件",
-		short: "套件"
-	},
-	{
-		id: "report",
-		name: "落账",
-		short: "落账"
-	},
-	{
-		id: "close",
-		name: "人审收口",
-		short: "收口"
-	}
-];
-/** 消费外部行=不可信输入的取串助手（非串→''）。 */
-function strOf(v) {
-	return typeof v === "string" ? v : "";
-}
-/** 是否巡检行：kind 或 engine 标记任一命中（引擎行带 kind=inspection）。 */
-function isInspectionRow(t) {
-	return t !== null && typeof t === "object" && (t.kind === "inspection" || t.engine === "inspection");
-}
-/** 发现数计数的最小形状守卫（引擎 summary/findings 畸形时全 0，不编造）。 */
-function findingsCountOf(row) {
-	const f = row?.findings;
-	if (f !== null && typeof f === "object") {
-		const o = f;
-		const num = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
-		return {
-			high: num(o.high),
-			med: num(o.med),
-			low: num(o.low),
-			total: num(o.total)
-		};
-	}
-	return {
-		high: 0,
-		med: 0,
-		low: 0,
-		total: 0
-	};
-}
-/**
-* 详情面发现数计数（t260915-08 实证补）：行（ticket-list）与详情（ticket-query）
-* 的发现数据形状不同——行 findings={high,med,low,total} 计数字典；详情 face.summary=
-* {high,med,low} 计数字典、face.findings=发现清单（列表）。本函数吃详情形状：
-* summary 字典优先（引擎真值），缺/畸形时按 findings 清单逐条 severity 重计，
-* 两者皆缺=全 0（不编造）。行形状请用 findingsCountOf。
-*/
-function inspectionSummaryOf(face) {
-	const src = face !== null && typeof face === "object" ? face : {};
-	const num = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
-	const s = src.summary;
-	if (s !== null && typeof s === "object") {
-		const o = s;
-		const high = num(o.high);
-		const med = num(o.med);
-		const low = num(o.low);
-		const total = num(o.total) || high + med + low;
-		if (high || med || low || total) return {
-			high,
-			med,
-			low,
-			total
-		};
-	}
-	const list = Array.isArray(src.findings) ? src.findings : [];
-	const high = list.filter((f) => f?.severity === "high").length;
-	const med = list.filter((f) => f?.severity === "med").length;
-	const low = list.filter((f) => f?.severity === "low").length;
-	return {
-		high,
-		med,
-		low,
-		total: high + med + low
-	};
-}
-/** 阶段短名：拓扑命中用短名，未命中截断原词（stageShortOf 同口径），畸形→''。 */
-function inspectionStageShort(stage) {
-	const s = strOf(stage);
-	if (s === "") return "";
-	const hit = INSPECTION_TOPOLOGY.find((st) => st.id === s);
-	if (hit) return hit.short;
-	return [...s].length > 4 ? [...s].slice(0, 4).join("") + "…" : s;
-}
-/**
-* 巡检行的一句进展（行卡 progress prop 数据源，t260904-17 同构）。
-* 待签判定**只读 stage_state/awaiting_gate**（引擎 R4：face.human_gate 签字前常态缺键，
-* 不得依赖）；发现数来自 findings 字段（引擎已并好）。畸形行 → undefined
-* （行卡降级只显相对时间）。闭合一律 {state:'done'}（收口折叠吃掉，正常语义）。
-*/
-function inspectionProgressOf(row) {
-	if (row === null || typeof row !== "object") return void 0;
-	const stageState = strOf(row.stage_state);
-	const status = strOf(row.status);
-	const c = findingsCountOf(row);
-	const findingsTxt = `发现 高${c.high}/中${c.med}/低${c.low}`;
-	if (status === "closed") return {
-		state: "done",
-		text: `已收口 · ${findingsTxt}`
-	};
-	if (stageState === "awaiting-human" || row.awaiting_gate === true) return {
-		state: "awaiting-human",
-		text: `等你签字 · ${findingsTxt}`
-	};
-	if (stageState === "blocked") {
-		const reason = strOf(row.blocked_reason);
-		return {
-			state: "blocked",
-			text: `受阻${reason ? "：" + reason : " · 原因见详情"}`
-		};
-	}
-	if (stageState === "running" || stageState === "awaiting" || stageState === "") {
-		const stage = inspectionStageShort(row.stage);
-		return {
-			state: "running",
-			text: `${stage ? stage + "中 · " : ""}${findingsTxt}`
-		};
-	}
-	return {
-		state: stageState,
-		text: findingsTxt
-	};
-}
-//#endregion
 //#region src/client/tab-presence.ts
 /**
 * tab-presence.ts —— 工单台多页签共存：在看心跳 + 写事件广播（t260901-15）。
@@ -50803,9 +50927,6 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	document.head.appendChild(tag);
 }
 const API = "/sandbar-workbench/api/wf";
-/** 巡检板面端点（t260915-08）：全路径字面量单点（S0 bundle 锚点可整串命中；
-*  与 node.ts 注册路径逐字同源，防 KI-042 漂移）。 */
-const INSPECTION_TICKETS_URL = "/sandbar-workbench/api/wf/inspection/tickets";
 /** 统一拼 ?project=（host 侧工单列表必传；详情/健康/巡检等路由多带的 query 无害——按 path 匹配）。 */
 function withProject(path) {
 	const viewProject = getViewProject();

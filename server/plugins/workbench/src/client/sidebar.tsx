@@ -29,6 +29,11 @@
  *       左列不再显示立项列表，点图标后中列显示立项清单）。
  *       项目组 = server/projects.yaml 注册表（260823 多项目化：project 是逻辑概念，
  *       1:N 对应目录）；每组工单按 ?project=<key> 单独拉取（Temporal ProjectKey SA 过滤）。
+ *       t260915-19 起左栏收录巡检票：巡检 workflow 因引擎类型过滤隔离进不了
+ *       ?project= 通路（client.py cmd_ticket_list 缺省只拼 dev-lane 模板类型），
+ *       故左栏并行拉 /wf/inspection/tickets 端点做**客户端分拣**——行 project
+ *       （t260915-20 起=ProjectKey SA 真源）命中在册项目并进对应组尾部，空/
+ *       不在册（20 之前老票、隔离 key）落「巡检」兜底组（显式不静默丢失）。
  * 中列：四视图由 index.tsx 注入（views prop）——工单台 WorkbenchSection（本插件）、
  *       文档 DocsSection（本插件，t260905-06）、模型 ProvidersSection（providers 插件）、
  *       立项单 EpicSection（本插件，t260826-02；空代号=立项清单，带代号=详情）。
@@ -77,6 +82,15 @@ import type { ProjectIconName } from './project-icons.tsx'
 import { ProjectAddModal, ProjectRemoveModal, ProjectSettingsModal, QuarantineModal } from './project-modals.tsx'
 // t260904-17 列表 v5：左栏工单条目=行卡迷你版（一套 UI 裁定，与中列同一组件/模型层）。
 import { TicketRowCard } from './ticket-row-card.tsx'
+// t260915-19 左栏收录巡检票：分拣/降级/进展纯函数与端点串单点住 host 层
+// （node 可裸 import 黑盒单测，tests/t260915-19-sidebar-inspection.mjs 看守）。
+// 照搬取舍收拢（review gen2 落实项）：①viewProject 兜底首项目=openEpic 先例；
+// ②降级词表=中列 08 同源不另起；③inspection_filter.degraded 左栏不带横幅
+// （理由见渲染处注释）；④场景范式=08 board-ui 两层式 ENV_FAIL 三态。
+import {
+  INSPECTION_TICKETS_URL, INSPECTION_TOPOLOGY, isInspectionRow, inspectionDegradedNote,
+  inspectionProgressOf, inspectionSplitByProject,
+} from '../host/inspection-face.ts'
 // metrics M2a（t260902-01）：度量面板。t260902-05 起：入口迁出厂侧栏
 // footer.action 槽（与 dsh settings 同排，用户反馈①），面板中 pane 化挂进
 // .wb-sb-right（反馈②）。槽注册失败软退化回 .wb-sb-foot 兜底钮（console.warn）。
@@ -118,6 +132,14 @@ interface Ticket {
   pending?: { gate: string; reason: string }[]
   session_kb?: number
   agent_alive?: boolean
+}
+
+/** 巡检端点行的左栏消费形状（t260915-19；引擎行超集投影，多字段不关心）。 */
+interface InspectionTicket extends Ticket {
+  /** 引擎标记：巡检行="inspection"（行卡 data-engine 发射源，等你黄调作用域键）。 */
+  engine?: string
+  /** 待签标记（引擎行常带；判定以 stage_state 为准——inspectionProgressOf 单点）。 */
+  awaiting_gate?: boolean
 }
 
 /** 项目注册表条目（GET /wf/projects）。 */
@@ -180,6 +202,10 @@ interface SidebarProps {
 }
 
 type RightView = 'board' | 'docs' | 'routes' | 'epics'
+
+/** 巡检行卡的 wf 形状（t260915-19）：compact 无站道点，仅喂悬停阶段短名；
+ *  拓扑=宿主声明面单点（host/inspection-face.ts），不 import index.tsx 防循环。 */
+const INSPECTION_WF_LIKE = { stages: INSPECTION_TOPOLOGY }
 
 /* ---------------------------------------------------------------- 口径 */
 
@@ -265,6 +291,15 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-sb .wb-card-state { color:inherit; }
 /* t260905-08：原深档固定蓝字——平台浅档下失读（宿主实报同病），归主规则令牌 */
 .wb-sb .wb-card-id { color:var(--dsw-derive-accent,#0969da); }
+/* t260915-19 左栏「等你」黄调（巡检行）：与中列同 token（index.tsx
+ * .wb-root .wb-card[data-state=waiting] 同源色板）——作用域=data-engine=inspection
+ * 等值选择器（review C1：dev-lane 行 data-engine 在场-异值 "template-as-code-v2"，
+ * 等值判定天然零命中；测试禁写「属性缺席」断言）。项目组行渲染零变化。 */
+.wb-sb .wb-card[data-engine=inspection][data-state=waiting] { background:var(--dsw-derive-warn-bg,#fff8c5); }
+/* t260915-19 巡检降级横幅：色板同 .wb-stale-banner 族（琥珀），不另起色板。 */
+.wb-insp-degraded { padding:6px 10px; font-size:11px; line-height:1.5;
+  color:var(--dsw-derive-dark-warn-fg,#ffe9c4); background:var(--dsw-derive-dark-warn-bg,#7a4a06);
+  border-bottom:1px solid var(--dsw-derive-warn,#b8860b); }
 /* 视图入口图标：右对齐放在每个项目组头行内（用户拍板 260823：per-project，不占独立行；
    t260827-01 起四个：工单/文档/模型/立项单；t260905-06 旧提法退役换文档） */
 .wb-view-icons { display:flex; gap:2px; }
@@ -351,6 +386,13 @@ export function WorkbenchSidebar(props: SidebarProps) {
   const [projects, setProjects] = useState<Project[]>([])
   /** 项目 key → 该项目的工单行（按 ?project= 逐组拉取，来源即归属，不做路径猜测）。 */
   const [ticketsByProject, setTicketsByProject] = useState<Record<string, Ticket[]>>({})
+  // t260915-19 巡检腿：最近一次成功的巡检行快照（端点失败=保快照+显式降级横幅，
+  // 绝不静默清空——KI-008/t260910-04 R3 同纪律，与中列 reloadTickets 同款）。
+  const [inspectionRows, setInspectionRows] = useState<InspectionTicket[]>([])
+  const [inspectionNote, setInspectionNote] = useState('')
+  const inspectionRowsRef = useRef<InspectionTicket[]>([])
+  // 兜底组折叠态：独立布尔——collapsed 的键是项目注册表 key，不与它混用（防撞名）。
+  const [inspCollapsed, setInspCollapsed] = useState(false)
   const [selectedId, setSelectedId] = useState<string>('')
   const [rightView, setRightView] = useState<RightView>('board')
   /** 当前中列视图所属项目（左列图标点击行）；空=未选（中列显占位）。 */
@@ -526,6 +568,11 @@ export function WorkbenchSidebar(props: SidebarProps) {
     if (!wide) return
     let cancelled = false
     async function load() {
+      // t260915-19：巡检板面并行拉取（先发车，项目组加载完再收口）——独立 try
+      // 不拖垮项目组渲染；失败=保快照+显式降级横幅（原文透传），成功=清 note。
+      const inspPromise = fetch(INSPECTION_TICKETS_URL)
+        .then(r => r.json())
+        .catch((err: unknown) => ({ ok: false, error: err instanceof Error ? err.message : String(err) }))
       try {
         const pr = await fetch('/sandbar-workbench/api/wf/projects').then(r => r.json())
         const list: Project[] = pr?.result?.projects ?? []
@@ -542,6 +589,8 @@ export function WorkbenchSidebar(props: SidebarProps) {
             const tr = await fetch(`/sandbar-workbench/api/wf/tickets?project=${encodeURIComponent(p.key)}`).then(r => r.json())
             const tickets = (tr?.result?.tickets ?? []) as Ticket[]
             // t260903-07：逐项目成功分支才发布工单→项目映射（catch 分支不发，见上方 import 注释）。
+            // t260915-19 取舍：映射只含 dev-lane 行——巡检行不进 chat 项目 tag 装饰器
+            // （其语义=工单会话归属，巡检票无会话；行仍在左栏组内可见，非静默丢失）。
             publishProjectEntry(p.key, tickets.map(t => t.id))
             return [p.key, tickets] as const
           } catch {
@@ -551,6 +600,24 @@ export function WorkbenchSidebar(props: SidebarProps) {
         if (cancelled) return
         setTicketsByProject(Object.fromEntries(entries))
       } catch { /* 静默 */ }
+      // 巡检腿收口（独立于项目组 try：项目组失败不影响巡检，反之亦然）。
+      try {
+        const ir = await inspPromise as { ok?: boolean; error?: unknown; result?: { tickets?: unknown } } | undefined
+        if (cancelled) return
+        if (ir?.ok === true) {
+          inspectionRowsRef.current = (ir.result?.tickets ?? []) as InspectionTicket[]
+          setInspectionRows(inspectionRowsRef.current)
+          setInspectionNote('')
+        } else {
+          // ok:false（host 502 body 原文）或网络错：原文进横幅不进数据（KI-018①），
+          // 快照保持不动（不吞成空列表——review gen0 意见与 t260910-04 R3 同纪律）。
+          setInspectionNote(inspectionDegradedNote(
+            ir?.error !== undefined ? ir.error : `HTTP 无 JSON 回执：${JSON.stringify(ir).slice(0, 120)}`))
+        }
+      } catch (err) {
+        if (cancelled) return
+        setInspectionNote(inspectionDegradedNote(err instanceof Error ? err.message : String(err)))
+      }
       finally { if (!cancelled) setLoading(false) }
     }
     load()
@@ -563,10 +630,14 @@ export function WorkbenchSidebar(props: SidebarProps) {
   // 不切换（联动下线口径见本文件头部注释）。左列行/立项单关联行/度量下钻三入口共用。
   const handleTicketClick = useCallback((t: Ticket, projectKey: string) => {
     setSelectedId(t.id)
-    setViewProject(projectKey)
+    // t260915-19：projectKey 空（巡检兜底组行，无项目身份）时保持现值、无现值
+    // 兜底首项目（openEpic 同款先例）——Board 挂载门（index.tsx !projectKey 早退）
+    // 需要非空 projectKey 才能开详情抽屉；零注册项目时选中态在、中列保持占位
+    // （既有边界交回，本票不做 index.tsx 结构手术）。项目组行传非空 key=原行为。
+    setViewProject(p => projectKey || p || (projects.length > 0 ? projects[0].key : ''))
     setRightView('board')
     setFocusNonce(n => n + 1)
-  }, [])
+  }, [projects])
 
   // chat 项目 tag 装饰器（t260903-07 工单②）：挂/卸随本组件（插件在装即挂，
   // 卸载=全终态回收，见 chat-project-tag.ts teardown 清单）。
@@ -596,13 +667,30 @@ export function WorkbenchSidebar(props: SidebarProps) {
   }, [])
 
   /** 项目组：注册表顺序。进行中工单常列；已完成工单在 sandbar 驻留窗口内也列（灰绿标记）。 */
+  // 巡检行分拣（t260915-19 方案 v2）：按行 project（t260915-20 起=ProjectKey SA
+  // 真源）归位——命中在册项目进对应组、空/不在册（20 之前老票、注册表隔离 key、
+  // 摘除项目）进 unowned 兜底组。纯查表零请求；分拣纯函数在 host 层有 UT 看守。
+  const inspectionSplit = useMemo(
+    () => inspectionSplitByProject(inspectionRows, projects.map(p => p.key)) as {
+      byProject: Record<string, InspectionTicket[]>
+      unowned: InspectionTicket[]
+    },
+    [inspectionRows, projects],
+  )
   const groups = useMemo(() => {
     const nowS = Date.now() / 1000
     return projects.map(p => ({
       project: p,
-      tickets: (ticketsByProject[p.key] ?? []).filter(t => inSandbar(t, nowS)),
+      tickets: [
+        ...(ticketsByProject[p.key] ?? []).filter(t => inSandbar(t, nowS)),
+        // 驻留窗分工（review gen2 意见2 钉一句话）：客户端 sandbarHours 窗只管上面
+        // dev-lane 行（inSandbar）；巡检行不经此窗——闭合行窗由引擎 R8 窗承担
+        // （超窗/close_ts 缺失不上板，t260915-08 board-rows 场景看守）。
+        // 此非「漏过滤」，勿当缺陷误修。
+        ...(inspectionSplit.byProject[p.key] ?? []),
+      ],
     }))
-  }, [projects, ticketsByProject])
+  }, [projects, ticketsByProject, inspectionSplit])
 
   const Board = views.board
   const Docs = views.docs
@@ -638,6 +726,17 @@ export function WorkbenchSidebar(props: SidebarProps) {
           （t260904-05）：入口收口为各组的项目内会话区，出厂全局钮由注入 effect 压制。 */}
       <div className="wb-sb-left">
         <div className="wb-ticket-list">
+          {/* t260915-19 巡检板面降级横幅：端点 ok:false/网络失败=保快照+显式原文
+              （不吞成空列表，KI-008/t260910-04 R3）。单点挂左栏顶部——巡检行分散
+              进各组后无统一组头可挂。inspection_filter.degraded（引擎白名单声明
+              降级）左栏**不带**横幅：行级显式降级已由引擎 degraded 行形状保证不
+              静默（「巡检收口快照读取失败，刷新重试」行正常进分拣呈现），中列
+              横幅仍在，左栏不重复（review gen0 意见②要求的取舍声明）。 */}
+          {inspectionNote !== '' && (
+            <div className="wb-insp-degraded" data-testid="sidebar-inspection-degraded" role="alert">
+              {inspectionNote}
+            </div>
+          )}
           {loading ? (
             <div style={{padding:16,color:'var(--dsw-derive-fg,#888)'}}>加载中…</div>
           ) : groups.map(g => (
@@ -704,20 +803,53 @@ export function WorkbenchSidebar(props: SidebarProps) {
                   />
                   {g.tickets.length === 0 ? (
                     <div className="wb-group-empty">无进行中工单</div>
-                  ) : g.tickets.map(t => (
-                    /* t260904-17 列表 v5（mock 屏⑤）：左栏工单条目=行卡迷你版（一套 UI；
-                     * compact 省略站道/管理动作位）。stateColor/ageOf 旧两行式渲染退役，
-                     * 状态短名/配色由四态枚举驱动（与中列同一模型层口径）。 */
-                    <TicketRowCard key={t.id} t={t} compact
-                      active={selectedId === t.id}
-                      updatedTsMs={(isOpen(t) ? t.created : (t.close_ts || t.created)) !== undefined
-                        ? (isOpen(t) ? t.created : (t.close_ts || t.created))! * 1000 : undefined}
-                      onOpen={() => handleTicketClick(t, g.project.key)} />
-                  ))}
+                  ) : g.tickets.map(t => {
+                    // t260915-19：组内巡检行（t260915-20 起带项目身份，ProjectKey SA
+                    // 归组）走最小适配——行1 标题引擎已给「巡检 <实例> · 期 <期号>」
+                    // 零适配；行2 传本地纯函数合成进展（等你签字 · 发现 高x/中y/低z，
+                    // 词表与中列同源）；「等你」黄调由 data-engine=inspection 等值
+                    // 选择器接管（见 CSS 注释，项目行零变化）。
+                    const insp = isInspectionRow(t)
+                    return (
+                      /* t260904-17 列表 v5（mock 屏⑤）：左栏工单条目=行卡迷你版（一套 UI；
+                       * compact 省略站道/管理动作位）。状态短名/配色由四态枚举驱动
+                       * （与中列同一模型层口径）。 */
+                      <TicketRowCard key={t.id} t={t} compact
+                        wf={insp ? INSPECTION_WF_LIKE : undefined}
+                        progress={insp ? inspectionProgressOf(t) : undefined}
+                        active={selectedId === t.id}
+                        updatedTsMs={(isOpen(t) ? t.created : (t.close_ts || t.created)) !== undefined
+                          ? (isOpen(t) ? t.created : (t.close_ts || t.created))! * 1000 : undefined}
+                        onOpen={() => handleTicketClick(t, g.project.key)} />
+                    )
+                  })}
                 </>
               )}
             </div>
           ))}
+          {/* 巡检兜底组（t260915-19）：project 为空（20 之前老票）或不在注册表
+              （隔离 key/摘除项目）的巡检票显式落此组——不静默丢失（工单④）。
+              无此类行=整组不渲染（不占位不报错，组头计数同款）；行渲染与项目组
+              巡检行同款适配，点击走 handleTicketClick（projectKey 空→兜底首项目，
+              见其注释）。 */}
+          {!loading && inspectionSplit.unowned.length > 0 && (
+            <div>
+              <div className="wb-group-head" data-testid="sidebar-inspection-head"
+                onClick={() => setInspCollapsed(c => !c)}>
+                <span className="wb-group-caret">{inspCollapsed ? '▸' : '▾'}</span>
+                <span className="wb-group-name">巡检</span>
+                <span className="wb-group-count">{inspectionSplit.unowned.length}</span>
+              </div>
+              {!inspCollapsed && inspectionSplit.unowned.map(t => (
+                <TicketRowCard key={t.id} t={t} compact
+                  wf={INSPECTION_WF_LIKE} progress={inspectionProgressOf(t)}
+                  active={selectedId === t.id}
+                  updatedTsMs={(isOpen(t) ? t.created : (t.close_ts || t.created)) !== undefined
+                    ? (isOpen(t) ? t.created : (t.close_ts || t.created))! * 1000 : undefined}
+                  onOpen={() => handleTicketClick(t, '')} />
+              ))}
+            </div>
+          )}
           {/* 隔离行（票③验收 11）：装载器隔离的 key 红色一行，点击看原因与修复指路；
               隔离期间无组头无项目设置入口（无装载条目可设置）。 */}
           {quarantined.map(q => (

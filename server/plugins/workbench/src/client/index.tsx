@@ -110,8 +110,9 @@ import {
   pauseOpOf, type TicketState4,
 } from './ticket-list-model.ts'
 // t260915-08 巡检板面：纯函数层住 host（拓扑=宿主声明面；client 只消费不内置词表）。
+// t260915-19：端点串迁 host 单点（左栏分拣同吃此端点，URL 字面量不再两处维护）。
 import {
-  INSPECTION_TOPOLOGY, isInspectionRow, inspectionProgressOf,
+  INSPECTION_TICKETS_URL, INSPECTION_TOPOLOGY, isInspectionRow, inspectionProgressOf,
   inspectionStageShort, inspectionSummaryOf,
 } from '../host/inspection-face.ts'
 // t260901-15 多页签共存：在看心跳/写事件广播（tab-presence）+ 不可见页签暂停轮询门。
@@ -862,9 +863,8 @@ if (typeof document !== 'undefined'
 /* -------------------------------------------------------------- 数据通道 */
 
 const API = '/sandbar-workbench/api/wf'
-/** 巡检板面端点（t260915-08）：全路径字面量单点（S0 bundle 锚点可整串命中；
- *  与 node.ts 注册路径逐字同源，防 KI-042 漂移）。 */
-const INSPECTION_TICKETS_URL = '/sandbar-workbench/api/wf/inspection/tickets'
+// 巡检板面端点已迁 host/inspection-face.ts 单点（t260915-19）；此处仅 import
+// 消费——全路径字面量仍在 bundle（S0 bundle 锚可整串命中，08 锚不丢）。
 
 interface CallResult {
   ok: boolean

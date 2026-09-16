@@ -92,6 +92,21 @@ export async function ensureStageConsole({ services = 'full', project = TREE_PRO
   if (process.env.SANDBAR_TEST_CONSOLE) {
     return { base: process.env.SANDBAR_TEST_CONSOLE.replace(/\/$/, ''), project: '(external)', teardown: () => {} };
   }
+  // daemon 预检（260916 仲裁归因修正，t260915-19）：容器运行时未起/ socket 激活挂死时
+  // （OrbStack 装了 socket-activation，连 socket 会触发惰性拉起，起不来=CLI 无限等），
+  // docker CLI 挂到自身超时——供给帽内烧满 600-900s 才落诚实环境红（run_scenarios 供给
+  // 面 ran=0 超时的同族根因）。此处 5s 探针先行：daemon 无响应=立即环境红点名，
+  // 判定语义零变化（仍是三态 env_fail），只把「烧帽等死」收敛为「秒级点名」。
+  {
+    const probe = spawnSync('docker', ['version', '--format', '{{.Server.Version}}'],
+      { encoding: 'utf8', timeout: 5000 });
+    if (probe.error || probe.status !== 0) {
+      console.error('[ENV_FAIL] stage-console — docker 守护进程不可达（5s 预检无响应/失败：'
+        + `${probe.error?.code ?? probe.status ?? 'rc=' + probe.status}）。`
+        + '先起容器运行时（OrbStack/Docker Desktop）再重跑；宿主 3099 红线不碰。');
+      process.exit(2);
+    }
+  }
   // Fixture host directory: one per stage (= per tree), lives and dies with
   // the stage; mounted into the container as /fixtures (rw).
   const FIXTURES_HOST = path.join('/tmp', `sandbar-fixtures-${TREE_PROJECT.slice(-8)}`);

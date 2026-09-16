@@ -37,6 +37,10 @@ export interface CardTicket {
    *  paused_phase=pending（待段间生效）/ at_gate（已停在段间门口）。 */
   paused?: boolean
   paused_phase?: string
+  /** 引擎标记（t260915-19 左栏黄调作用域数据源）：值由引擎行下发（dev-lane=
+   *  "template-as-code-v2"；巡检族行=另一标记串）——本组件保持通用零业务词表
+   *  （t260915-08 守卫），左栏以该值等值选择器作用域「等你」黄调，异值零命中。 */
+  engine?: string
 }
 
 /** 进展行（host enrichment 透传；缺省=行卡降级只显相对时间）。 */
@@ -106,6 +110,7 @@ export function TicketRowCard({
     <div
       className="wb-card" data-ticket-id={t.id}
       data-state={state4} data-active={active} data-compact={compact}
+      data-engine={t.engine}
       style={{ borderLeftColor: epicColor }}
       title={cardTitle(t, wf)}
       onClick={() => onOpen()}

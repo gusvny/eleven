@@ -35,6 +35,8 @@ export interface InspectionRowLike {
   kind?: unknown
   engine?: unknown
   title?: unknown
+  /** 项目身份（t260915-20 起=ProjectKey SA 直读；20 之前老票为空串/缺键）。 */
+  project?: unknown
   stage?: unknown
   stage_state?: unknown
   status?: unknown
@@ -131,4 +133,57 @@ export function inspectionTitleOf(row: InspectionRowLike): string {
   if (title !== '') return title
   const id = strOf(row?.id)
   return id !== '' ? id : ''
+}
+
+/* ---------------------------------------------------------------- 左栏分拣（t260915-19） */
+
+/**
+ * 巡检板面端点（t260915-08 建的引擎 ticket-list{kind:inspection} 薄壳）。左栏
+ * 分拣制（t260915-19 方案 v2）与中列合流同吃此端点——URL 串收本单点，防两处
+ * 字面量漂移（node.ts 注册路径与本串一致性由 UT 源级锚看守）。
+ */
+export const INSPECTION_TICKETS_URL = '/sandbar-workbench/api/wf/inspection/tickets'
+
+/**
+ * 左栏分拣的行防御过滤（端点行=不可信外部输入，与引擎行同纪律）：非数组→[]、
+ * 元素非对象或非巡检行（kind/engine 都不标）剔除，其余保序。绝不抛、绝不编造。
+ */
+export function inspectionSidebarRows(rows: unknown): InspectionRowLike[] {
+  if (!Array.isArray(rows)) return []
+  return rows.filter((r) => isInspectionRow(r as { kind?: unknown; engine?: unknown }))
+}
+
+/**
+ * 左栏分拣（t260915-19 方案 v2）：巡检行按行 project（t260915-20 起=ProjectKey
+ * SA 直读）归位——命中在册项目 key → byProject[key]；project 空/非串/不在册
+ * （20 之前老票、注册表隔离 key、摘除项目）→ unowned（兜底组显式呈现，绝不
+ * 静默丢失）。registeredKeys 畸形（非数组）按空集处理；行序输入输出保持端点原序。
+ */
+export function inspectionSplitByProject(
+  rows: unknown,
+  registeredKeys: readonly unknown[],
+): { byProject: Record<string, InspectionRowLike[]>; unowned: InspectionRowLike[] } {
+  const keySet = new Set(
+    (Array.isArray(registeredKeys) ? registeredKeys : [])
+      .filter((k): k is string => typeof k === 'string' && k !== ''),
+  )
+  const byProject: Record<string, InspectionRowLike[]> = {}
+  const unowned: InspectionRowLike[] = []
+  for (const row of inspectionSidebarRows(rows)) {
+    const p = strOf((row as { project?: unknown }).project)
+    if (p !== '' && keySet.has(p)) (byProject[p] ??= []).push(row)
+    else unowned.push(row)
+  }
+  return { byProject, unowned }
+}
+
+/**
+ * 左栏巡检降级文案单点：失败=保上次成功快照 + 显式原文提示，绝不吞成空列表
+ * （KI-008/t260910-04 R3 同纪律；KI-018① 合规面——错误文案进横幅，不进数据字段）。
+ * 词表与中列同源（index.tsx「巡检板面拉取失败，显示上次快照（自动重试中）」同族），
+ * 非串 err 走 String() 兜底不抛。
+ */
+export function inspectionDegradedNote(err: unknown): string {
+  const msg = typeof err === 'string' ? err : String(err ?? '')
+  return `巡检板面拉取失败（显示上次快照，自动重试中）：${msg}`
 }
