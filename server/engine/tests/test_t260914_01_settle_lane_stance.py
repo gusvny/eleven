@@ -122,7 +122,7 @@ def test_legacy_only_lane_coordination_artifact_settles_clean(single_lane):
     art.write_text('{"status":"ok","summary":"agent 产物完好"}\n', encoding="utf-8")
     before = _head_count(lane)
 
-    note = aa._settle_worktree_lane(lane, TICKET, "create_plan", 0, repo=root)
+    note = aa._settle_worktree_lane(lane, TICKET, "create_plan", 0, repo=root, face="agent")
 
     assert note == CLEAN_NOTE, note            # 老名目录不再被算脏改（260907 改名漏网面）
     assert _head_count(lane) == before         # 零 commit：没有空提交异常，也没有假落盘
@@ -135,14 +135,14 @@ def test_new_name_lane_coordination_artifact_settles_clean(single_lane):
     art = lane / NEW / "stage_create_plan_gen0.json"
     art.parent.mkdir(parents=True)
     art.write_text("{}\n", encoding="utf-8")
-    assert aa._settle_worktree_lane(lane, TICKET, "create_plan", 0, repo=root) == CLEAN_NOTE
+    assert aa._settle_worktree_lane(lane, TICKET, "create_plan", 0, repo=root, face="agent") == CLEAN_NOTE
 
 
 def test_real_change_still_lands_a_commit(single_lane):
     """正向对照：真改动照旧代落盘（修复不得把正常落盘也吞掉）。"""
     root, lane = single_lane
     (lane / "code.py").write_text("print(1)\n", encoding="utf-8")
-    note = aa._settle_worktree_lane(lane, TICKET, "implement", 0, repo=root)
+    note = aa._settle_worktree_lane(lane, TICKET, "implement", 0, repo=root, face="agent")
     assert "worker 代落盘 commit" in note, note
     assert "code.py" in _git(lane, "show", "--name-only", "--format=", "HEAD")
 
@@ -174,7 +174,7 @@ def test_empty_staged_after_add_reset_returns_distinguishable_note(single_lane, 
     _stub_git(monkeypatch, status_out="?? .dsh/agent.log\0?? .sandbar/x.json\0",
               diff_rc=0, calls=calls)
 
-    note = aa._settle_worktree_lane(lane, TICKET, "create_plan", 0, repo=root)
+    note = aa._settle_worktree_lane(lane, TICKET, "create_plan", 0, repo=root, face="agent")
 
     assert note != CLEAN_NOTE                          # ① 与「判脏为空」两态可区分
     assert "暂存区为空" in note and "2" in note         # ② 要素：判脏项数（2 项）
@@ -187,7 +187,7 @@ def test_add_failure_still_loud(single_lane, monkeypatch):
     root, lane = single_lane
     _stub_git(monkeypatch, status_out="?? code.py\0", add_rc=1)
     with pytest.raises(RuntimeError, match="git add 失败"):
-        aa._settle_worktree_lane(lane, TICKET, "implement", 0, repo=root)
+        aa._settle_worktree_lane(lane, TICKET, "implement", 0, repo=root, face="agent")
 
 
 def test_commit_failure_with_nonempty_staging_still_loud(single_lane, monkeypatch):
@@ -198,7 +198,7 @@ def test_commit_failure_with_nonempty_staging_still_loud(single_lane, monkeypatc
     hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
     hook.chmod(0o755)
     with pytest.raises(RuntimeError, match="git commit 失败"):
-        aa._settle_worktree_lane(lane, TICKET, "implement", 0, repo=root)
+        aa._settle_worktree_lane(lane, TICKET, "implement", 0, repo=root, face="agent")
 
 
 def test_staged_probe_git_trouble_still_loud(single_lane, monkeypatch):
@@ -206,13 +206,13 @@ def test_staged_probe_git_trouble_still_loud(single_lane, monkeypatch):
     root, lane = single_lane
     _stub_git(monkeypatch, status_out="?? code.py\0", diff_rc=2)
     with pytest.raises(RuntimeError, match="暂存区检查失败"):
-        aa._settle_worktree_lane(lane, TICKET, "implement", 0, repo=root)
+        aa._settle_worktree_lane(lane, TICKET, "implement", 0, repo=root, face="agent")
 
 
 def test_clean_lane_note_unchanged(single_lane):
     """既有干净态文案不变（两态可区分的前提）。"""
     root, lane = single_lane
-    assert aa._settle_worktree_lane(lane, TICKET, "implement", 0, repo=root) == CLEAN_NOTE
+    assert aa._settle_worktree_lane(lane, TICKET, "implement", 0, repo=root, face="agent") == CLEAN_NOTE
 
 
 # ---------- D. 多仓清单走真源 ----------
@@ -298,5 +298,5 @@ def test_malformed_status_entry_dropped_without_raising(single_lane, monkeypatch
     """畸形 status 流（缺 XY 前缀的条目）＝既有解析器丢弃、绝不猜（KI-009 口径不变）。"""
     root, lane = single_lane
     _stub_git(monkeypatch, status_out="garbage-entry\0?? .dsh/a.log\0", diff_rc=0)
-    note = aa._settle_worktree_lane(lane, TICKET, "create_plan", 0, repo=root)
+    note = aa._settle_worktree_lane(lane, TICKET, "create_plan", 0, repo=root, face="agent")
     assert "暂存区为空" in note and "1" in note

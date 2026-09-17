@@ -6,6 +6,12 @@ worker 代落盘（settle）必须拒绝——不 commit、工作区原样保留
 拒绝回执点名「段 X 不允许改 Y」且带机读原因码 path_gate_reason=unauthorized_path；
 仅 .sandbar/ 结果文件则照常落盘（闸不误伤结果文件面）。
 
+契约修订注记（t260916-19 B）：越权件 ??（未跟踪新建）/M（tracked 修改）两态改自动处置
+（挪档/回滚留档）后复判，不再产生终态拒绝——拒绝终态只保留在删除型（D）/暂存型/
+protected 上。本场景越权腿相应改用删除型注入（A1/A2 泳道内删除 tracked 产品文件），
+「拒绝+0 commit+点名+工作区原样保留」断言面在新旧契约下同形；??/M 处置旅程守卫归
+t260916-19 场景（t26091619-unauth-disposal-matrix）。
+
 依据：工单验收 a（走查段改产品代码→拒绝落盘+点名）＋宿主 260910 明令
 「凡事不应该有代码变化的阶段，不允许改代码」。与 notes-write-gate（notes 禁写
 合并闸面）、ki044 patch 门（merge 面）、t260904-18 背景文件闸（建单面）intent
@@ -66,6 +72,11 @@ def load_engine():
 BASE = {
     "verify.yaml": "schema: v1\nlanes:\n  code:\n    write_allow:\n      - server/engine/\n      - integration/\n    checks: []\n",
     "server/engine/keep.py": "# engine anchor\n",
+    # t260916-19 B 起 ??/M 态越权改自动处置（挪档/回滚留档）不再终态拒绝——
+    # 本场景越权腿改用删除型（D 态）注入以保持「拒绝+保留」终态的可测性，
+    # 故产品代码越权件先落分叉点基线（tracked），A1/A2 在泳道内删除。
+    "server/engine/feature.py": "x = 0\n",
+    "server/engine/feature2.py": "y = 0\n",
     "docs/design/contract-v1.md": "# contract v1\n",
     "integration/baselines/sc_battery.py": "# shared battery\n",
     "integration/t260902-07/tests/test_route_table.py": "# shared guard\n",
@@ -105,7 +116,9 @@ def dirty(repo):
 
 def main():
     aa = load_engine()
-    has_gate = "path_gate" in inspect.signature(aa._settle_worktree_lane).parameters
+    sig = inspect.signature(aa._settle_worktree_lane)
+    has_gate = "path_gate" in sig.parameters
+    has_face = "face" in sig.parameters
 
     def settle(lane, mainrepo, stage, gen=0, gate=True, write_set=None, base=""):
         kwargs = {"repo": mainrepo}
@@ -114,6 +127,8 @@ def main():
                 return None, "settle 未接闸参数（path_gate 不在签名）——闸未接线，契约未兑现"
             kwargs.update(path_gate=True, write_set=list(write_set or []),
                           base_ref=str(base))
+            if has_face:
+                kwargs.update(face="join")  # t260916-19 D：settle 分层标签（本场景模拟 join 点收口）
         try:
             return aa._settle_worktree_lane(lane, TICKET, stage, gen, **kwargs), None
         except Exception as e:  # noqa: BLE001 — 场景层任何异常都算该腿红
@@ -123,8 +138,7 @@ def main():
     section("A1 acceptance_walkthrough 注入产品代码 → 拒+点名+0 commit")
     tmp, mainrepo, lane, fork = mk_lane()
     inject = "server/engine/feature.py"
-    (lane / inject).parent.mkdir(parents=True, exist_ok=True)
-    (lane / inject).write_text("x = 1\n", encoding="utf-8")
+    (lane / inject).unlink()  # 删除型注入（D 态）：拒绝终态在新旧契约下都成立（t260916-19 B）
     (lane / ".sandbar").mkdir(exist_ok=True)
     (lane / ".sandbar" / "stage_acceptance_walkthrough_gen0.json").write_text(
         '{"status":"ok"}\n', encoding="utf-8")
@@ -143,7 +157,7 @@ def main():
     # ---- A2 审方案段同拒（review_plan 键真实命中，R1 正例面）----
     section("A2 review_plan 注入产品代码 → 拒")
     inject2 = "server/engine/feature2.py"
-    (lane / inject2).write_text("y = 2\n", encoding="utf-8")
+    (lane / inject2).unlink()  # 同 A1：删除型注入（t260916-19 B 契约修订）
     note, err = settle(lane, mainrepo, "review_plan", gen=1, base=fork)
     if note is not None:
         ok("path_gate_reason=unauthorized_path" in note and "review_plan" in note,

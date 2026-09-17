@@ -413,11 +413,13 @@ def test_source_wiring_locks_apply_settle_note_chain():
     assert "def _apply_settle_note(res: StageResult, note: str," in aa
     assert "refusal: Optional[Dict[str, Any]] = None" in aa
     assert aa.count("_apply_settle_note(") >= 5         # 定义 + 四调用点
-    assert "refusal=refusal)" in aa                      # _settle_with_gate 内透传
-    for token in ("refusal=refusal)", "refusal=refusal2)", "refusal=refusal3)", "refusal=refusal4)"):
+    # t260916-19 ④：_settle_with_gate 内透传带 face="agent"（ refusal 后置逗号）
+    assert "refusal=refusal,\n        face=\"agent\")" in aa
+    for token in ("refusal=refusal2)", "refusal=refusal3)", "refusal=refusal4)"):
         assert token in aa, f"调用点缺接线：{token}"
     assert aa.count("_settle_worktree_lane(") >= 4
-    assert "refusal=sc_refusal)" in aa                   # settle_lane 收集口
+    assert "refusal=sc_refusal,\n                                        face=\"join\")" in aa  # settle_lane 收集口
+    assert "refusal=heal_refusal,\n                        face=\"heal\")" in aa              # merge_check 自愈
     assert "gate_refusal=(dict(sc_refusal) or None)" in aa
     assert "res.gate_refusal = dict(refusal)" in aa      # 挂载点
 

@@ -5,6 +5,10 @@
 段只改 integration/、仲裁段只改本票场景（tests/ 测试面）＝全部放行且 commit
 落地、回执零原因码；仲裁段碰产品代码（宿主 260910 实证另一半）仍拒。
 
+契约修订注记（t260916-19 B）：C4 负腿改删除型（D 态）注入——??/M 态越权改自动
+处置（挪档/回滚留档）后复判不再终态拒绝，删除型保持「拒绝+点名+0 commit」可测；
+??/M 处置旅程守卫归 t260916-19 场景（t26091619-unauth-disposal-matrix）。
+
 依据：工单验收 c（反例三连全放行）＋「机械闸门检查」不得把正常流堵死的
 误伤面。与 notes-write-gate 的「写集内普通文件不误伤」腿 intent 不同面
 （本条是 settle 时刻阶段闸的三段正例+仲裁负例，非合并闸 notes 面）。
@@ -63,6 +67,9 @@ def load_engine():
 BASE = {
     "verify.yaml": "schema: v1\nlanes:\n  code:\n    write_allow:\n      - server/engine/\n      - integration/\n    checks: []\n",
     "server/engine/keep.py": "# engine anchor\n",
+    # t260916-19 B 起 ??/M 态越权改自动处置不再终态拒绝——C4 负腿改删除型（D 态）注入，
+    # 故产品代码越权件先落分叉点基线（tracked），C4 在泳道内删除。
+    "server/engine/arbitral_patch.py": "z = 0\n",
     "docs/design/contract-v1.md": "# contract v1\n",
     "integration/baselines/sc_battery.py": "# shared battery\n",
     "integration/t260902-07/tests/test_route_table.py": "# shared guard\n",
@@ -108,16 +115,20 @@ def inject(lane, rel, content="x = 1\n"):
 
 def main():
     aa = load_engine()
-    has_gate = "path_gate" in inspect.signature(aa._settle_worktree_lane).parameters
+    sig = inspect.signature(aa._settle_worktree_lane)
+    has_gate = "path_gate" in sig.parameters
+    has_face = "face" in sig.parameters
 
     def settle(lane, mainrepo, stage, gen=0, write_set=None, base=""):
         if not has_gate:
             return None, "settle 未接闸参数（path_gate 不在签名）——闸未接线，契约未兑现"
         try:
-            return aa._settle_worktree_lane(lane, TICKET, stage, gen, repo=mainrepo,
-                                            path_gate=True,
-                                            write_set=list(write_set or []),
-                                            base_ref=str(base)), None
+            kwargs = dict(repo=mainrepo, path_gate=True,
+                          write_set=list(write_set or []),
+                          base_ref=str(base))
+            if has_face:
+                kwargs["face"] = "join"  # t260916-19 D：settle 分层标签（本场景模拟 join 点收口）
+            return aa._settle_worktree_lane(lane, TICKET, stage, gen, **kwargs), None
         except Exception as e:  # noqa: BLE001
             return None, "settle 调用异常：%s" % e
 
@@ -167,7 +178,8 @@ def main():
     # ---- C4 仲裁段负腿：碰产品代码 → 拒（260910 实证另一半回归）----
     section("C4 arbitrate 碰产品代码 → 拒+点名（code-fault 只许打回 implement）")
     before = head(lane)
-    inject(lane, "server/engine/arbitral_patch.py")
+    # 删除型注入（D 态）：拒绝终态在新旧契约下都成立（t260916-19 B 起 ??/M 态改自动处置）
+    (lane / "server/engine/arbitral_patch.py").unlink()
     note, err = settle(lane, mainrepo, "arbitrate", gen=2, base=fork)
     if note is not None:
         ok("path_gate_reason=unauthorized_path" in note, "仲裁段产品代码被拒")

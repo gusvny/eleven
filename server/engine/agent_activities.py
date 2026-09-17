@@ -891,7 +891,7 @@ def _restore_gitfile(cwd: Path, ticket_id: str, stage_id: str, gen: int,
             dst = qdir / ("%s-gitdir-%s-gen%d-%d" % (fake.name, stage_id, gen, n))
         shutil.move(str(fake), str(dst))
         note += "；假仓库 %s 已隔离到 %s" % (fake.name, dst.relative_to(cwd))
-    activity.logger.warning("[%s/%s] settle：%s", ticket_id, stage_id, note)
+    activity.logger.warning("[%s/%s] gitfile-repair：%s", ticket_id, stage_id, note)
     return note
 
 # The git pathspec exclusion stance shared by settle/merge_check: .dsh (agent
@@ -947,6 +947,120 @@ def _dirty_files_from_status_z(raw: str) -> List[str]:
             continue
         out.append(path)
     return out
+
+
+def _status_entries_from_z(raw: str) -> List[Tuple[str, str]]:
+    """Parse `git status --porcelain -z` output into (XY, path) pairs（t260916-19 ②：
+    越权处置的状态面——按 porcelain 状态分流处置，新建挪档/未暂存修改回滚留档/
+    删除与暂存态留人工）。
+
+    与 _dirty_files_from_status_z 同款容错立场（该解析器有行为测试守着：
+    test_t260914_01 畸形 status 流丢弃不猜——既有解析器不动，本函数为新增面）：
+    非串/空串 → []；条目不足 2 字符 XY 或无路径 → 丢弃不抛；rename/copy 的两字段
+    形状同样只取 new（当前工作区路径）。XY 两字符原样保留（第一列=index vs HEAD、
+    第二列=worktree vs index），调用方据此分流：
+      `??`        未跟踪新建 → 挪档；
+      ` M` 等     未 staged 的 worktree 修改（第一列空格）→ diff 留档 + checkout 恢复；
+      其余        删除/rename 对/任何 staged 态 → 不自动动，交人工（意图不可机判，
+                  fail-closed 不猜）。
+    """
+    if not isinstance(raw, str) or not raw:
+        return []
+    out: List[Tuple[str, str]] = []
+    for ent in raw.split("\0"):
+        if not ent:
+            continue
+        if len(ent) < 4 or not ent[2] == " ":
+            continue  # the XY<space>path shape doesn't hold: drop the malformed entry, no guessing
+        path = ent[3:]
+        if not path:
+            continue
+        out.append((ent[:2], path))
+    return out
+
+
+def _remediate_unauthorized_violations(
+        cwd: Path, stage_id: str, gen: int, violations: List[str],
+        entries: List[Tuple[str, str]]) -> Tuple[List[str], List[str]]:
+    """t260916-19 ②：阶段路径闸 unauthorized_path 判红后按状态自动处置越权文件，
+    使下一次 settle 不再被同批文件复判（v2 方案 review C1 定稿的状态分流矩阵；
+    protected_path 与其它原因码不进本函数——人审放行通道需要文件原地保留）。
+
+    处置矩阵：
+      - `??`（未跟踪新建）→ 挪档 <cwd>/.sandbar/quarantine/unauth-<stage>-gen<N>[-k]/
+        （保留相对路径；挪走即从 status 消失，与 FAKE_GIT_DIRS 先例同机制——
+        挪不删，留档可追溯）；
+      - 未 staged 的 `M`（XY 第一列空格）→ `git diff` 留档 + `git checkout -- <path>`
+        自 index 恢复（=HEAD 版：闸判定先于任何 add，index 未被本流程触碰）——
+        分支零删除落盘，agent 修改以 diff 留档、`git apply` 可还原；
+      - 其余（`D` 删除、rename 对、任何 staged 态 XY 第一列非空格）→ 不自动动，
+        交人工（删除/暂存意图不可机判，fail-closed 不猜；仓库纪律「引擎不自动
+        stash/提交」同理）。
+    批次目录内附 manifest.json（XY/原路径/动作/ts），补 merge_check 自愈 gen 恒 0
+    的审计排序弱点。返回 (handled_notes, unhandled_paths)；动作幂等——活动重试时
+    源已不在/已干净自然跳过。
+
+    全部 IO 限于工作区文件与 .sandbar 隔离区（git 只读 diff + checkout 单文件恢复，
+    无 add/commit/stash）。"""
+    xy_map: Dict[str, str] = {path: xy for xy, path in entries}
+    qroot = lane_dot_path(cwd, "quarantine", create=True)
+    batch = qroot / ("unauth-%s-gen%d" % (stage_id, gen))
+    n = 1
+    while batch.exists():
+        n += 1
+        batch = qroot / ("unauth-%s-gen%d-%d" % (stage_id, gen, n))
+    batch.mkdir(parents=True, exist_ok=True)
+    ts = int(time.time())
+    manifest: List[Dict[str, Any]] = []
+    handled: List[str] = []
+    unhandled: List[str] = []
+    for f in violations:
+        xy = xy_map.get(str(f), "")
+        try:
+            if xy == "??":
+                src = cwd / f
+                if not (src.is_file() or src.is_dir()):
+                    unhandled.append(str(f))  # 已不在（并发/重试窗口）：不猜，留人工核
+                    continue
+                dst = batch / str(f)
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(dst))
+                manifest.append({"path": str(f), "xy": xy, "action": "moved",
+                                 "archive": str(dst.relative_to(cwd)), "ts": ts})
+                handled.append("?? %s 已挪档 %s" % (f, dst.relative_to(cwd)))
+            elif len(xy) == 2 and xy[0] == " " and xy[1] == "M":
+                d = _git(["diff", "--", str(f)], cwd)
+                if d.returncode != 0 or not d.stdout:
+                    unhandled.append(str(f))  # diff 拿不到=状态不可知，fail-closed 不猜
+                    continue
+                diff_name = str(f).replace("/", "__") + ".diff"
+                (batch / diff_name).write_text(d.stdout, encoding="utf-8")
+                ck = _git(["checkout", "--", str(f)], cwd)
+                if ck.returncode != 0:
+                    unhandled.append(str(f))
+                    continue
+                manifest.append({"path": str(f), "xy": xy, "action": "reverted",
+                                 "diff": diff_name, "ts": ts})
+                handled.append("M %s 已回滚（diff 留档 %s，git apply 可还原）"
+                               % (f, (batch / diff_name).relative_to(cwd)))
+            else:
+                # D / rename 对 / staged 态（含 xy 未知）：删除与暂存意图不可机判
+                unhandled.append(str(f))
+        except (OSError, ValueError):
+            # ValueError = path 不在 cwd 下（relative_to 失败）等畸形形态：不抛，
+            # 留人工（处置失败绝不能静默吞成「已处置」）
+            unhandled.append(str(f))
+    if manifest:
+        (batch / "manifest.json").write_text(
+            json.dumps({"ticket_stage": stage_id, "gen": gen, "ts": ts,
+                        "items": manifest}, ensure_ascii=False, indent=2),
+            encoding="utf-8")
+    else:
+        try:
+            batch.rmdir()  # 无可归档项不产空目录
+        except OSError:
+            pass
+    return handled, unhandled
 
 
 def _dirty_within_write_set(files: List[str], write_set: Any) -> bool:
@@ -1074,17 +1188,20 @@ def _gitlink_refusal_note(names: List[str]) -> str:
 
 
 def _gitlink_refuse(ticket_id: str, stage_id: str, names: List[str],
-                    refusal: Optional[Dict[str, Any]]) -> str:
+                    refusal: Optional[Dict[str, Any]], *, face: str) -> str:
     """嵌套仓拒绝的统一出口（t260916-20）：人话 note + 结构化 refusal（键形对齐
     gate_red_detail：reason_code/files/next_action/evidence）+ worker 日志点名；
-    返回 note（settle 契约=返回字符串，拒绝语义靠 note 内嵌键值兑现）。"""
+    返回 note（settle 契约=返回字符串，拒绝语义靠 note 内嵌键值兑现）。
+    t260916-19 ④：face 为 keyword-only 无缺省（调用点在 _settle_worktree_lane
+    体内，face 在作用域内随手可得）——D 修「全族日志层标签」的漏网点（验收
+    走查 gen5 清单项 2）：嵌套仓拒绝日志也要带 agent/heal/join 层标签。"""
     note = _gitlink_refusal_note(names)
     if refusal is not None:
         refusal.update({"reason_code": "gitlink_nested_repo",
                         "files": [str(n) for n in names],
                         "next_action": _GITLINK_NEXT_ACTION,
                         "evidence": note})
-    activity.logger.warning("[%s/%s] settle：%s", ticket_id, stage_id, note)
+    activity.logger.warning("[%s/%s] %s-settle：%s", ticket_id, stage_id, face, note)
     return note
 
 
@@ -1171,7 +1288,8 @@ def _settle_with_gate(args: AgentStageArgs, cwd: Path,
         path_gate=bool(args.path_gate),
         base_ref=str(args.base_ref or ""),
         authorizations=list(getattr(args, "authorizations", None) or []),
-        refusal=refusal)
+        refusal=refusal,
+        face="agent")
 
 
 def _apply_settle_note(res: StageResult, note: str,
@@ -1201,9 +1319,16 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
                           repo: Optional[Path] = None, write_set: Optional[List[str]] = None,
                           path_gate: bool = False, base_ref: str = "",
                           authorizations: Optional[List[Dict[str, Any]]] = None,
-                          refusal: Optional[Dict[str, Any]] = None) -> str:
+                          refusal: Optional[Dict[str, Any]] = None,
+                          *, face: str) -> str:
     """Settle a worktree lane on the agent's behalf (deterministic, never trusting
     the agent to behave): called once the agent has delivered its result file.
+
+    face（t260916-19 ④，keyword-only **无缺省值**——新调用点漏传=TypeError 响亮，
+    防再添第四入口时静默共用歧义标签）：日志层标签来源，取值 agent（generic 段
+    _settle_with_gate）/ heal（merge_check 自愈）/ join（settle_lane 汇合统一落盘），
+    日志打 `agent-settle：/heal-settle：/join-settle：`——同秒两条 settle 日志无法
+    分辨哪层判定是 dengzhufpv t260916-11 误诊「读旧记录」的直接根源。
 
     Background: the headless agent's sandbox cannot write the real .git (a worktree's
     .git is a gitfile pointing at the main repo's .git/worktrees/<id>, outside the
@@ -1239,6 +1364,13 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
     物理写不了 .git），D 条目保留旧路径、受保护闸可拦；该前提是闸判 rename 盲区
     不可达的根据。git status 失败 = 改动清单未知 = fail-closed 拒绝落盘
     （reason=status_failed，环境类），不留给实现猜。
+
+    越权自动处置（t260916-19 ②：仅 unauthorized_path 判红、仅 path_gate=True 生效）：
+    判红先按 porcelain 状态分流处置（?? 挪档 / 未 staged M 回滚+diff 留档 / 其余
+    留人工，见 _remediate_unauthorized_violations），再复判一轮——转干净照常落盘
+    （合法产物不丢），仍红则拒绝 note 分节「已自动处置/未处置」。protected_path
+    一律不动（人审放行通道需要文件原地保留）。滞留复判（每轮 settle 复判同一红、
+    信号空转）是 t260916-11 死结的另一半，本处置使其可自愈。
     """
     if not _is_worktree_of(cwd, repo if repo is not None else _lane_repo_root(cwd)):
         # Ticket B (t260907-06): repo given = a multi-repo tree, ownership judged by
@@ -1247,7 +1379,7 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
     p = _git(["rev-parse", "--verify", "MERGE_HEAD"], cwd)
     if p.returncode == 0:
         note = "合并进行中（MERGE_HEAD 在场），代落盘跳过——合并提交由 settle_conflict_resolution 收口"
-        activity.logger.info("[%s/%s] settle：%s", ticket_id, stage_id, note)
+        activity.logger.info("[%s/%s] %s-settle：%s", ticket_id, stage_id, face, note)
         return note
     notes: List[str] = []
     # 0) gitfile identity check: if an agent rewrote it to point at a fake repo (the
@@ -1283,41 +1415,86 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
             if refusal is not None:
                 refusal.update(path_gates.gate_red_detail(
                     stage_id, [], "status_failed", note))
-            activity.logger.warning("[%s/%s] settle：%s", ticket_id, stage_id, note)
+            activity.logger.warning("[%s/%s] %s-settle：%s", ticket_id, stage_id, face, note)
             return note
         raise RuntimeError("settle: git status 失败: %s" % (p.stderr or "")[-300:])
     dirty = _dirty_files_from_status_z(p.stdout)
+    entries = _status_entries_from_z(p.stdout)
+    # t260916-19 ②：处置摘要（函数级作用域——落盘成功路径的回执也要拼它）
+    remediation: List[str] = []
     if path_gate and dirty:
-        # 闸①：段 × 允许面（纯路径白名单，零猜测）
-        allowed, violations, reason = path_gates.judge_stage_paths(
-            stage_id, dirty, write_set=write_set, ticket_id=ticket_id)
-        # 闸②：受保护路径（真源与期望值，「存在才拦」，锚=泳道分叉点 base_ref）
-        # t260912-03：定性仍走 judge_protected_paths 单点（判定严格先于任何 git add），
-        # 随后按本票生效中的人授权做「豁免摘除」——无授权/不匹配时 violations 与
-        # 旧版逐字节相同（零回归面）。豁免命中＝记名点名 + 机读键（谁批/何时/批哪条）。
-        passed: List[Dict[str, Any]] = []
-        if allowed:
+        # 闸①：段 × 允许面（纯路径白名单，零猜测）。t260916-19 ②：unauthorized_path
+        # 判红先按状态自动处置（??挪档/M回滚留档，只此一轮）再复判；protected/删除/
+        # 暂存态不经处置、原样拒绝留人工。
+        remediated = False
+        while True:
+            allowed, violations, reason = path_gates.judge_stage_paths(
+                stage_id, dirty, write_set=write_set, ticket_id=ticket_id)
+            # 闸②：受保护路径（真源与期望值，「存在才拦」，锚=泳道分叉点 base_ref）
+            # t260912-03：定性仍走 judge_protected_paths 单点（判定严格先于任何 git add），
+            # 随后按本票生效中的人授权做「豁免摘除」——无授权/不匹配时 violations 与
+            # 旧版逐字节相同（零回归面）。豁免命中＝记名点名 + 机读键（谁批/何时/批哪条）。
+            # t260916-19 ②：protected 判定不再以闸①通过为前提——处置分支前必须先
+            # 知道本批是否含受保护命中（命中=一律不动：回滚/挪档会破坏人审放行通道，
+            # 实测 M verify.yaml 若不先排除会被误回滚）；note 文案仍按闸①优先的
+            # 原语义（stage 先红=unauthorized 文案），protected 判定只用于处置决策。
             anchor = repo if repo is not None else _lane_repo_root(cwd)
             pv, preason = path_gates.judge_protected_paths(
                 dirty, exists_at_base=lambda path: _path_exists_at_ref(anchor, base_ref, path))
             pv, passed = authz_gates.exempt_authorized(
                 pv, authorizations=list(authorizations or []))
-            if pv:
-                allowed, violations, reason = False, pv, preason
-        if not allowed:
+            if allowed and not pv:
+                break
+            if (not allowed and reason == "unauthorized_path"
+                    and not remediated and not pv):
+                # t260916-19 ②：状态分流自动处置（一轮封顶）——处置后重拉 status，
+                # 转干净=正常工作态出口；仍有脏=复判一轮（未处置项/新形态原样判）。
+                remediated = True
+                handled, _unhandled = _remediate_unauthorized_violations(
+                    cwd, stage_id, gen, [str(v) for v in violations], entries)
+                remediation.extend(handled)
+                p = _git(["status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, cwd)
+                if p.returncode != 0:
+                    note = path_gates.gate_refusal_note(stage_id, [], "status_failed")
+                    if refusal is not None:
+                        refusal.update(path_gates.gate_red_detail(
+                            stage_id, [], "status_failed", note))
+                    activity.logger.warning("[%s/%s] %s-settle：%s",
+                                            ticket_id, stage_id, face, note)
+                    return note
+                dirty = _dirty_files_from_status_z(p.stdout)
+                entries = _status_entries_from_z(p.stdout)
+                if not dirty:
+                    note = ("越权改动已自动处置（%s），工作区已干净——本段无需代落盘"
+                            % "；".join(remediation)) if remediation \
+                        else "工作区已干净，无需代落盘"
+                    activity.logger.info("[%s/%s] %s-settle：%s",
+                                         ticket_id, stage_id, face, note)
+                    return note
+                continue
+            # 拒绝出口：protected / 处置后仍红 / 不可处置原因码。stage 绿而 protected
+            # 命中 → violations/reason 换成受保护项（protected 文案优先的原语义）；
+            # stage 红且 protected 也命中 → 保持 unauthorized 文案（闸①优先原语义），
+            # 但工作区同样原样保留（不处置）。
+            if not violations or reason != "unauthorized_path":
+                violations, reason = (list(pv), preason) if pv else (violations, reason)
             note = path_gates.gate_refusal_note(stage_id, violations, reason)
+            if remediation:
+                note += "；本轮已自动处置：%s" % "；".join(remediation)
             # t260915-01 ②：结构化明细随拒绝收集（files=闸已判定的全量清单，不走
-            # 文本解析——_fmt_files 的 cap 只作用于 note 文本，结构化面保真）
+            # 文本解析——_fmt_files 的 cap 只作用于 note 文本，结构化面保真）；
+            # t260916-19 ④：judged_files=本次实际判定清单（含未违规项，判定面可核对）
             if refusal is not None:
                 refusal.update(path_gates.gate_red_detail(
-                    stage_id, violations, reason, note))
-            activity.logger.warning("[%s/%s] settle：%s", ticket_id, stage_id, note)
+                    stage_id, violations, reason, note, judged_files=list(dirty)))
+            activity.logger.warning("[%s/%s] %s-settle：%s",
+                                    ticket_id, stage_id, face, note)
             return note
         if passed:
             # 记名点名 + 机读键（谁批、何时、批的哪条路径）——进回执/时间线，审计可回溯
             authz_note = authz_gates.authorized_passage_note(passed)
             notes.append(authz_note)
-            activity.logger.info("[%s/%s] settle：%s", ticket_id, stage_id, authz_note)
+            activity.logger.info("[%s/%s] %s-settle：%s", ticket_id, stage_id, face, authz_note)
     if dirty:
         # Observed on Apple Git 2.50: an exclusion pathspec (:!.dsh) does not stop
         # the "explicitly named ignored directory" error (rc=1 even on a clean repo,
@@ -1333,7 +1510,7 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
         hazards = gitlink_risk_from_dirty(dirty, cwd)
         if hazards:
             return _gitlink_refuse(ticket_id, stage_id,
-                                   [h["name"] for h in hazards], refusal)
+                                   [h["name"] for h in hazards], refusal, face=face)
         p = _git(["add", "-A", "--", "."], cwd)
         if p.returncode != 0:
             raise RuntimeError("settle: git add 失败: %s" % (p.stderr or "")[-300:])
@@ -1347,7 +1524,7 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
                                % (p.returncode, (p.stderr or "")[-200:]))
         links = staged_gitlinks(p.stdout)
         if links:
-            return _gitlink_refuse(ticket_id, stage_id, links, refusal)
+            return _gitlink_refuse(ticket_id, stage_id, links, refusal, face=face)
         # t260914-01（dengzhufpv/t260911-07 根因之二）：判脏非空但撤下协调目录后暂存区
         # 可能为空——该段只产出协调目录产物时就是这种形态，「无改动可提交」是正常工作态，
         # 不是基础设施故障（旧版在此让 commit rc≠0 上抛 RuntimeError，被 Temporal 表现成
@@ -1360,7 +1537,7 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
                     "（空提交=正常工作态，非故障；判脏=%s）"
                     % (len(dirty), "、".join(_SETTLE_RESET_PATHS),
                        "、".join(dirty[:5]) + ("…" if len(dirty) > 5 else "")))
-            activity.logger.info("[%s/%s] settle：%s", ticket_id, stage_id, note)
+            activity.logger.info("[%s/%s] %s-settle：%s", ticket_id, stage_id, face, note)
             notes.append(note)
         else:
             if st.returncode != 1:
@@ -1380,8 +1557,13 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
                             len(dirty), "、".join(dirty[:5])))
     else:
         notes.append("工作区已干净，无需代落盘")
+    # t260916-19 ②：处置摘要无论拒绝（进 gate_refusal_note）还是放行（落盘成功）
+    # 都随回执上台面——审计可回溯：票面看见「合法产物照常落盘」时同步看见哪些
+    # 越权件被自动处置（去向=隔离档 manifest，与 note 互相印证）。
+    if remediation:
+        notes.append("本轮已自动处置：%s" % "；".join(remediation))
     note = "；".join(notes)
-    activity.logger.info("[%s/%s] settle：%s", ticket_id, stage_id, note)
+    activity.logger.info("[%s/%s] %s-settle：%s", ticket_id, stage_id, face, note)
     return note
 
 
@@ -2684,7 +2866,8 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                         path_gate=bool(getattr(args, "path_gate", False)),
                         base_ref=str(sc.get("base_ref") or getattr(args, "base_ref", "") or ""),
                         authorizations=list(getattr(args, "authorizations", None) or []),
-                        refusal=heal_refusal)
+                        refusal=heal_refusal,
+                        face="heal")
                     if heal_refusal:
                         clean_gate_refusal = dict(heal_refusal)
                     auto_settle_note = "[auto-settle] %s" % (note or "settle 返回空（见后续复查）")
@@ -4917,7 +5100,8 @@ async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
                                         path_gate=bool(args.path_gate),
                                         base_ref=str(sc.get("base_ref") or args.base_ref or ""),
                                         authorizations=list(getattr(args, "authorizations", None) or []),
-                                        refusal=sc_refusal)
+                                        refusal=sc_refusal,
+                                        face="join")
         # t260911-03：闸拒绝随 error 上抛给 workflow（join 点点名段/文件转 blocked，
         # 不静默吞成一条 note——否则违规改动不落盘、0-commit 预检只会给一句含糊红）。
         # t260915-01 ②：结构化明细随回执（首个拒绝 scope 的 gate_red_detail 产出；

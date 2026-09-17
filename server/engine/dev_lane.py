@@ -36,7 +36,7 @@ import json
 import os
 import re
 from datetime import timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -226,6 +226,27 @@ ARB_ACC_PARALLEL_PATCH_ID = "dev-lane-arb-acc-parallel-v1"
 #   硬约束：query handler 整段 read-only）——snapshot 等读 self._detail_face_on
 #   缓存位（getattr 防御，UT 壳 object.__new__ 不跑 __init__）。
 DETAIL_FACE_PATCH_ID = "dev-lane-detail-face-v1"
+# t260916-19 ①：rework 打回出路的可达性（blocked 死结修复，实案=dengzhufpv
+# t260916-11）。门纪律同 DETAIL_FACE_PATCH_ID：唯一求值点=_init()，使用点读
+# self._rework_escape_on 缓存位（getattr 防御，UT 壳不跑 __init__）。
+REWORK_ESCAPE_PATCH_ID = "dev-lane-rework-escape-v1"
+# rework 打回目标的 STAGES-only 别名映射：blocked 文案的出路点名「打回目标段」，
+# 但 design_integration_tests 是 STAGES 段 id 而非 PHASE_MAIN_CHAIN 值（词表有意
+# 区别，见上方 PHASE_MAIN_CHAIN 注释）——操作员按文案发
+# rework(to_stage=design_integration_tests) 被 _auto_rework 静默回落当前相位，
+# join 已置位的边标记让重进只重跑 settle → 复判同一红 → 死结。
+# 取舍：不往 PHASE_MAIN_CHAIN 加值（词表纪律 + 主循环尾「未知阶段」raise 防线），
+# 在消费点把别名翻译成「落点相位 + 边重置」，复用既有 parallel_impl_design 编排
+# （design 边真重跑、实现边结果保留）。键必须 ⊆ STAGES id（UT 源码锁）；值 =
+# (落点相位, 边重置标记)。
+REWORK_STAGE_ALIASES: Dict[str, Tuple[str, str]] = {
+    "design_integration_tests": ("parallel_impl_design", "design"),
+}
+# selfcheck 两相法开关（selfcheck_ki061_wake_reset 的 SANDBAR_TEST_DISABLE_KI061
+# 同款 pattern）：worker 沙箱在自己的 import 里读模块属性，monkeypatch 够不着——
+# 唯一通道=环境变量（worker 构造时生效）。置 1 = 旧静默回落行为（复现 t260916-11
+# 死结的相一）；不置 = 修后行为。
+SANDBAR_TEST_DISABLE_REWORK_ESCAPE = bool(os.environ.get("SANDBAR_TEST_DISABLE_REWORK_ESCAPE"))
 # t260916-28: a failed StageResult carrying a lane_dsh_* gate_refusal（spawn 前的
 # 泳道 .dsh 自洽预检拒绝）必须在全部 agent 段消费点直落 blocked「agent 报失败」——
 # arbitrate 的 verdict 循环、acceptance 打回循环与 parallel_impl_design 汇合边的
@@ -611,6 +632,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
         # 逐字不变；新实例：首评 live→True+marker→重放同判定。所有使用点（含
         # snapshot）只读本布尔位，不再触碰 SDK 门判定调用。
         self._detail_face_on = workflow.patched(DETAIL_FACE_PATCH_ID)
+        # t260916-19 ①：rework 出路可达门（唯一求值点，同上纪律；UT 壳走 getattr
+        # 防御读缺省 False=旧回落路径，与在途重放同形）。
+        self._rework_escape_on = (workflow.patched(REWORK_ESCAPE_PATCH_ID)
+                                  and not SANDBAR_TEST_DISABLE_REWORK_ESCAPE)
         first = self.STAGES[0]
         acc = list(first.acceptance) + [x for x in inp.acceptance_extra
                                         if x not in first.acceptance]
@@ -1082,6 +1107,77 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
             return fallback
         return self._auto_rework(target, req.note, req.who, fallback)
 
+    # ---------- rework 消费（t260916-19 ①：门内新路径，别名直达 + 显式拒收） ----------
+    def _consume_rework(self, fallback: str) -> Tuple[str, Optional[str], str]:
+        """rework 信号的消费与落地（门=REWORK_ESCAPE_PATCH_ID；门关走 _apply_rework
+        旧路径逐字不变，本方法不触达）。
+
+        返回 (phase, edge, refusal_note)：
+          - 正常：phase=落点相位、edge=None（词表内目标）或边名（别名落点，调用方
+            重置对应边标记）、refusal_note=""；
+          - 拒收：("", None, 拒收文案)——调用方必须显式 blocked 点名，绝不静默回落
+            fallback 原地复判（「信号回执成功 + 原地空转」正是 t260916-11 死结的
+            观感根因）。
+
+        信号消费纪律与 _apply_rework 同款：先消费（refused 也消费，不残留），再判定。
+        留痕保原始目标（review C3）：别名落点的 _mark/_log/last_rework_note 全部
+        内嵌 rework(to_stage=<原始目标>)，role 写原始目标本职角色（design 边重跑的
+        执行 agent 本就按该段派 integration role；落点相位的 developer role 不适合
+        本场景的审计语义）。"""
+        req = self._rework
+        self._rework = None
+        target = req.target_stage or fallback
+        if target in ("ui_evidence",):
+            why = "%s 非主链步，不接受 rework" % target
+            self.refused.append({"who": req.who, "want": "rework(%s)" % target,
+                                 "why": why})
+            self._log("【rework 拒收】%s 非主链步（%s）" % (target, req.who))
+            return "", None, ("【rework 拒收】目标 %s 不可打回：%s" % (target, why))
+        alias = REWORK_STAGE_ALIASES.get(target)
+        if alias is not None:
+            landing, edge = alias
+            orig = "rework(to_stage=%s)" % target
+            self.meta["stage"] = landing
+            self.meta["role"] = self._step(target).role
+            self.meta["status"] = "rework"
+            self.meta["stage_state"] = "awaiting"
+            self.meta["last_rework_note"] = "%s——%s（%s）" % (orig, req.note, req.who)
+            self._touch()
+            self._log("rework: %s——%s（%s）→ 落点 %s（%s 边重跑，另一边结果保留）"
+                      % (orig, req.note, req.who, landing, edge))
+            self._mark(landing, "rework", "%s——%s（%s）" % (orig, req.note, req.who))
+            return landing, edge, ""
+        if target == "done" or target not in PHASE_MAIN_CHAIN:
+            why = ("终态不可为打回目标" if target == "done"
+                   else "目标步不在打回词表（可打回=%s；integration/ 段可用别名 "
+                        "to_stage=design_integration_tests）"
+                        % "、".join(sorted(PHASE_MAIN_CHAIN - {"done"})))
+            self.refused.append({"who": req.who, "want": "rework(%s)" % target,
+                                 "why": why})
+            self._log("【rework 拒收】%s（%s）" % (why, req.who))
+            return "", None, ("【rework 拒收】目标 %s 不可打回：%s" % (target, why))
+        new_phase = self._auto_rework(target, req.note, req.who, fallback)
+        if new_phase != target:
+            # 防御：_auto_rework 拒绝（fallback 非法等内部形态）——同款显式拒收，
+            # 拒收记录已由 _auto_rework 落账。
+            return "", None, ("【rework 拒收】目标 %s 不可打回（落地校验未过，"
+                              "见 refused 记录）" % target)
+        return target, None, ""
+
+    def _gate_refusal_repeat_suffix(self, files: Any) -> str:
+        """t260916-19 A 尾巴：同批闸拒文件第 N 次复判的点名后缀（retry_qc 无变化
+        重跑不改变结果——每次信号空转一轮 settle 正是实案观感；首次判红返回 ""）。"""
+        key = tuple(str(f) for f in files) if isinstance(files, (list, tuple)) else ()
+        if key and key == getattr(self, "_last_gate_refusal_files", None):
+            self._gate_refusal_repeat = getattr(self, "_gate_refusal_repeat", 1) + 1
+        else:
+            self._last_gate_refusal_files = key
+            self._gate_refusal_repeat = 1
+        if self._gate_refusal_repeat > 1:
+            return ("（第 %d 次同批复判：工作区无变化，retry_qc 不会改变结果——"
+                    "按回执出路处置越权文件或回 main 侧走票）" % self._gate_refusal_repeat)
+        return ""
+
     # ---------- main flow (direct activity orchestration) ----------
     @workflow.run
     async def run(self, inp: TicketInput) -> Dict[str, Any]:
@@ -1191,7 +1287,18 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 # failure-edge comments of each parallel branch).
                 if phase in ("parallel_impl_design", "arb_acc_parallel"):
                     set_parallel_stages(self.meta, [])
-                phase = self._apply_rework(fb)
+                if getattr(self, "_rework_escape_on", False):
+                    # t260916-19 ①（门内新路径）：别名直达目标段 / 显式拒收——拒绝
+                    # 信号已被消费（不残留），blocked 点名后等 retry_qc 或新 rework，
+                    # 绝不静默回落 fb 原地复判（t260916-11 死结观感根因）。
+                    phase, edge, refusal_note = self._consume_rework(fb)
+                    if refusal_note:
+                        await self._blocked(fb, refusal_note)
+                        continue
+                    if edge == "design":
+                        design_done = False  # 只重跑设计边（实现边结果保留在内存）
+                else:
+                    phase = self._apply_rework(fb)
                 # KI-003: yield once after the rework bookkeeping burst (_auto_rework's
                 # _log/_mark/_touch) so a queued snapshot query sees the post-rework state.
                 await self._breathe()
@@ -1494,7 +1601,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     # t260915-01 ②（A3）：新回执带结构化明细→上台面；老回执无键→
                     # 既有文本 why 逐字不变。
                     self._pin_settle_refusal(s)
-                    await self._blocked("implement", s.error)
+                    # t260916-19 A：同批复判点名（retry_qc 无变化重跑不改变结果）
+                    rep = self._gate_refusal_repeat_suffix(
+                        (getattr(s, "gate_refusal", None) or {}).get("files"))
+                    await self._blocked("implement", s.error + rep)
                     continue
                 self._log("汇合统一落盘：%s（泳道 commit 数 %s）"
                           % (s.note or "干净", s.lane_commits))
@@ -1944,7 +2054,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     if s.error and "path_gate_reason=" in s.error:
                         # t260915-01 ②（A3）：同 integ_join——结构化明细上台面
                         self._pin_settle_refusal(s)
-                        await self._blocked("arbitrate", s.error)
+                        # t260916-19 A：同批闸拒复判点名（retry_qc 无变化重跑不改变结果）
+                        rep = self._gate_refusal_repeat_suffix(
+                            (getattr(s, "gate_refusal", None) or {}).get("files"))
+                        await self._blocked("arbitrate", s.error + rep)
                         continue
                     self._log("并行分叉统一落盘：%s（泳道 commit 数 %s）"
                               % (s.note or "干净", s.lane_commits))

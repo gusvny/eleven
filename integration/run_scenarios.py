@@ -266,14 +266,26 @@ SCENARIOS = [
     # 实现段落地前闸腿红属预期（TDD 验收门，先例见 t260905-05/t260904-08 族），arbitrate/merge 期必须绿；
     # sc_pathgate_legacy_compat D1 腿（老票零干扰）现状即绿。
     ("t260911-03-walkthrough-settle-reject",
-     "阶段路径闸·零代码改动段拒绝落盘（t260911-03 验收 a，灰盒 L3）：真实 settle 单点（tmp 主仓+真注册泳道 worktree 直调，零 Temporal）——acceptance_walkthrough/review_plan 注入产品代码改动→拒绝落盘终态三件套（0 新 commit+回执点名段 id 与文件+机读 path_gate_reason=unauthorized_path）、工作区原样保留（agent 产物不丢，.sandbar 结果文件伴脏不救场）；对照腿=仅 .sandbar/ 结果文件照常落地（闸不误伤结果文件面）。与 notes-write-gate（合并闸 notes 面）/ki044 patch 门（merge 面）/t260904-18 背景文件闸（建单面）intent 不同面：本条执法点=settle 时刻阶段白名单；与 developer L1 judge 矩阵不同层（本条锁接线与回执传播）",
+     "阶段路径闸·零代码改动段拒绝落盘（t260911-03 验收 a，灰盒 L3）：真实 settle 单点（tmp 主仓+真注册泳道 worktree 直调，零 Temporal）——acceptance_walkthrough/review_plan 注入产品代码改动→拒绝落盘终态三件套（0 新 commit+回执点名段 id 与文件+机读 path_gate_reason=unauthorized_path）、工作区原样保留（agent 产物不丢，.sandbar 结果文件伴脏不救场）；对照腿=仅 .sandbar/ 结果文件照常落地（闸不误伤结果文件面）。与 notes-write-gate（合并闸 notes 面）/ki044 patch 门（merge 面）/t260904-18 背景文件闸（建单面）intent 不同面：本条执法点=settle 时刻阶段白名单；与 developer L1 judge 矩阵不同层（本条锁接线与回执传播）。t260916-19 B 契约修订：越权腿改删除型（D 态）注入——??/M 态改自动处置不再终态拒绝，处置旅程归 t26091619-unauth-disposal-matrix",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260911-03/tests/sc_pathgate_walkthrough_reject.py", "ro"),
     ("t260911-03-protected-settle-reject",
      "受保护路径闸·真源与期望值文件（t260911-03 验收 b，灰盒 L3，260910 实证①回归）：共享电池（design_integration_tests 段、integration/ 阶段面内→非 unauthorized_path，双闸独立性证明）、共享守卫 test_route_table（arbitrate 段、测试面内——泳道改守卫期望值给自己发免红令的事故原样重放）均被拒+path_gate_reason=protected_path+点名+0 commit；「存在才拦」分叉点语义三腿=闸自身出生放行、本票同泳道 rework 再改放行（base=分叉点非 HEAD，防每轮人审死锁）、落地 main 后新分叉泳道改它即拦（改共享守卫须 main 侧走票）",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260911-03/tests/sc_pathgate_protected_reject.py", "ro"),
     ("t260911-03-normal-faces-land",
-     "阶段路径闸·正常面不误伤（t260911-03 验收 c 反例三连，灰盒 L3）：implement 写集内两文件、design_integration_tests 只改 integration/、arbitrate 只改本票 tests/ 测试面——三腿全部放行且回执零原因码、commit 真落地（git show 逐文件点名在 HEAD）；仲裁段碰产品代码负腿仍拒+点名（code-fault 只许打回 implement，260910 实证另一半回归）。机械闸不得堵死正常流；与 developer L1 judge 矩阵不同层（本条锁「放行=真落地」终态）",
+     "阶段路径闸·正常面不误伤（t260911-03 验收 c 反例三连，灰盒 L3）：implement 写集内两文件、design_integration_tests 只改 integration/、arbitrate 只改本票 tests/ 测试面——三腿全部放行且回执零原因码、commit 真落地（git show 逐文件点名在 HEAD）；仲裁段碰产品代码负腿仍拒+点名（code-fault 只许打回 implement，260910 实证另一半回归）。机械闸不得堵死正常流；与 developer L1 judge 矩阵不同层（本条锁「放行=真落地」终态）。t260916-19 B 契约修订：C4 负腿改删除型（D 态）注入——??/M 态改自动处置，处置旅程归 t26091619-unauth-disposal-matrix",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260911-03/tests/sc_pathgate_normal_faces_land.py", "ro"),
+
+    # ---- t260916-19 路径闸 blocked 死结三修（B 越权状态分流处置 / C 声明=执法 / D 证据面）----
+    # 实案=dengzhufpv t260916-11：并行 join 闸拒后越权件滞留工作区每轮复判同一红、
+    # 出路（打回目标段）不可达。本族守 activity 级公开回执与 git 磁盘终态（A 的
+    # workflow 级 escape 旅程归 developer selfcheck_t260916_19_join_escape，不同层）。
+    # 实现落地前新契约腿红属预期（TDD 信号），arbitrate/merge 期必须绿。
+    ("t26091619-unauth-disposal-matrix",
+     "越权处置按 porcelain 状态分流（t260916-19 修向 B＝滞留复判解除+D＝证据面，灰盒 L2 真 git 直调 settle_lane @arbitrate）：?? 未跟踪越权自动挪档（工作区消失+dot 目录 quarantine 留档含 manifest 审计+回执点名去向+二次 settle 复绿零新 commit）；M tracked 修改越权回滚+diff 留档可 git apply 还原（工作区回基线=分支零删除，agent 修改零丢失）；D 删除型/staged 暂存型 fail-closed 拒绝+人处不自动动（待删/暂存态原样保留）；protected 拒绝一律不动（文件原地=授权消费面前提）；混合批次（合法+??+M）一次处置后代落盘内容恰为合法清单（越权件与其留档件绝不入库，二次 settle 收口零循环）；拒绝回执 judged_files=本次判定脏清单全量（含合法项，实案④证据面歧义的结构化解除）。与 t260911-03 系不同面（彼守拒绝终态三件套、越权腿=删除型，本条守处置后转绿与留档可还原）；与 t26091619-incident-replay 不同面（彼锁实案混合形态收口+C 合法化旅程，本条分态逐态终态）；与 developer L1 逐态白盒腿不同层（本条锁 activity 级公开回执+git 磁盘终态+留档可还原性）。实现落地前新契约腿红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260916-19/sc_t26091619_disposal_matrix.py", "ro"),
+    ("t26091619-incident-replay",
+     "dengzhufpv t260916-11 实案形态重演（t260916-19 修向 C 旅程+B/M 态解除，灰盒 L2 真 git 直调 settle_lane @arbitrate）：工作区同批=顶层 integration/sc_*.py 新建（agent 自救场景）+integration/README.md 修改（登记表）+integration/lint_tests.py tracked 修改（共享工具，实案第二轮自救件）——修复后一次收口：顶层场景与登记表合法落盘（C 的用户可感知面：仲裁改顶层场景/登记不再被拦，本职可完成）、lint_tests.py 回基线且修改以 diff 留档可 git apply 还原（B/M 态：分支零删除、自救产物零丢失）、代落盘内容恰为两个合法件、回执点名共享工具处置去向；负腿=lint_tests.py 删除型（D 态）仍拒+点名+零 commit（C 边界：共享工具面出路=rework 打回 design_integration_tests 或建票写集列名，不随顶层放宽连带放行）。与 t26091619-unauth-disposal-matrix 不同面（彼分态矩阵，本条实案混合形态+C 合法化旅程）；与 t260911-03-normal-faces-land 不同面（彼守正常面放行反例三连，本条守修复后实案形态闭环）；零源码解析全行为面（与 sc_check_auto_rework_trace 源码锁不同层）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260916-19/sc_t26091619_incident_replay.py", "ro"),
     ("t260911-03-legacy-compat-closed",
      "双闸兼容面（t260911-03 验收 d+R1②闭环，灰盒 L3）：老调用形状（不传闸参数=存量序列化缺字段形态）走查段改产品代码照常落盘——老在途票按 patch 门保护不追溯、行为零变化（该腿现状即绿，兼当本套 fixture 机械证明）；显式 path_gate=False 同放行（开关语义）；path_gate=True 未知段 brand_new_stage→拒+path_gate_reason=unknown_stage+出路文案（补配规则/人审放行），新段忘配规则被堵出来而非自动免检（review_plan R1② fail-closed 裁决的链路级回归）",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260911-03/tests/sc_pathgate_legacy_compat.py", "ro"),

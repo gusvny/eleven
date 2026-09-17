@@ -155,13 +155,19 @@ def authz_records(scope, kind="protected_path", who=AUTH_WHO, reason=AUTH_REASON
 
 def settle(aa, lane, mainrepo, stage, gen=0, write_set=None, base="", authz=None):
     """直调 settle 单点；返回 (note, err)。authz=None=不传授权形参（老调用形状）。"""
+    try:
+        sig = inspect.signature(aa._settle_worktree_lane).parameters
+    except (TypeError, ValueError):
+        sig = {}
+    has_face = "face" in sig  # t260916-19 D：face 必填分层标签——新老树两侧可跑
     if authz_param_name(aa) is None and authz is None:
         # 老形状：完全不传授权参数（等价存量调用）——用于 A1 零回归腿。
         try:
-            return aa._settle_worktree_lane(lane, TICKET, stage, gen, repo=mainrepo,
-                                            path_gate=True,
-                                            write_set=list(write_set or []),
-                                            base_ref=str(base)), None
+            kw = dict(repo=mainrepo, path_gate=True,
+                      write_set=list(write_set or []), base_ref=str(base))
+            if has_face:
+                kw["face"] = "join"  # 「老形状」锁的是授权参数缺省语义，非标签形参
+            return aa._settle_worktree_lane(lane, TICKET, stage, gen, **kw), None
         except Exception as e:  # noqa: BLE001
             return None, "settle 调用异常：%s" % e
     if authz is not None and authz_param_name(aa) is None:
@@ -170,6 +176,8 @@ def settle(aa, lane, mainrepo, stage, gen=0, write_set=None, base="", authz=None
           "write_set": list(write_set or []), "base_ref": str(base)}
     if authz is not None:
         kw[authz_param_name(aa)] = authz
+    if has_face:
+        kw["face"] = "join"
     try:
         return aa._settle_worktree_lane(lane, TICKET, stage, gen, **kw), None
     except Exception as e:  # noqa: BLE001

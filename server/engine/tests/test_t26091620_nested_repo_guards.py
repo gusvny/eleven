@@ -187,7 +187,7 @@ def test_settle_refuses_untracked_nested_repo(lane_repo):
     head_before = _head(lane)  # 泳道分支尖（settle 的 commit 落泳道分支，不落 main）
     refusal = {}
     note = aa._settle_worktree_lane(lane, "t26091620ut", "implement", 0,
-                                    repo=root, refusal=refusal)
+                                    repo=root, refusal=refusal, face="agent")
     assert "path_gate_reason=gitlink_nested_repo" in note and "content" in note
     assert refusal.get("reason_code") == "gitlink_nested_repo"
     assert refusal.get("files") == ["content"]
@@ -201,7 +201,8 @@ def test_settle_refuses_staged_gitlink(lane_repo):
     _git("add", "content", cwd=lane)  # 预暂存 gitlink（(a) 的判脏清单不再有尾斜杠条目）
     (lane / "code.py").write_text("work\n", encoding="utf-8")
     head_before = _head(lane)
-    note = aa._settle_worktree_lane(lane, "t26091620ut", "implement", 0, repo=root)
+    note = aa._settle_worktree_lane(lane, "t26091620ut", "implement", 0, repo=root,
+                                    face="agent")
     assert "gitlink_nested_repo" in note and "content" in note
     assert _head(lane) == head_before
     # 现场保留：gitlink 仍在暂存区（不 reset）
@@ -214,7 +215,8 @@ def test_settle_normal_path_still_commits(lane_repo):
     root, lane = lane_repo
     (lane / "code.py").write_text("work\n", encoding="utf-8")
     head_before = _head(lane)
-    note = aa._settle_worktree_lane(lane, "t26091620ut", "implement", 0, repo=root)
+    note = aa._settle_worktree_lane(lane, "t26091620ut", "implement", 0, repo=root,
+                                    face="agent")
     assert "代落盘" in note
     assert _head(lane) != head_before
 
@@ -419,8 +421,10 @@ def test_settle_refusal_idempotent_on_retry(lane_repo):
     root, lane = lane_repo
     _make_nested_repo(lane / "content", committed=False)
     (lane / "code.py").write_text("work\n", encoding="utf-8")
-    note1 = aa._settle_worktree_lane(lane, "t26091620ut", "implement", 0, repo=root)
-    note2 = aa._settle_worktree_lane(lane, "t26091620ut", "implement", 0, repo=root)
+    note1 = aa._settle_worktree_lane(lane, "t26091620ut", "implement", 0, repo=root,
+                                     face="agent")
+    note2 = aa._settle_worktree_lane(lane, "t26091620ut", "implement", 0, repo=root,
+                                     face="agent")
     assert note1 == note2 and "gitlink_nested_repo" in note2
 
 

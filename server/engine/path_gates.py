@@ -33,6 +33,10 @@
   - suggest_next/acceptance_walkthrough/ui_evidence 三个段不走 _settle_worktree_lane
     （walkthrough 报告落 .sandbar、suggest_next 只读分析、ui_evidence 截图归档）——
     规则键仍配置（fail-closed 防未来接线漏配），当前链路为防御性键。
+  日志层标签（t260916-19 ④）：_settle_worktree_lane 的 face 形参区分三个入口——
+  agent（_settle_with_gate，generic 段自 settle）／heal（merge_check 自愈）／join
+  （settle_lane 汇合统一落盘）——日志打 `agent-settle：/heal-settle：/join-settle：`，
+  免「同秒两条 settle 日志无法分辨哪层判定」的歧义（dengzhufpv t260916-11 实案）。
   未知段（键不在规则表）对 path_gate=True 一律 fail-closed 拒绝（reason=unknown_stage）；
   老在途票保护由 path_gate 缺省 False 承担（TicketInput 无此字段 → 永远 False，不追溯）。
 
@@ -107,13 +111,19 @@ _STAGE_FACE_DESC = {
     "join": "写集内文件 ∪ integration/ + 结果文件（并行汇合段）",
     "ui_dirs": "ui_evidence 声明目录 + 结果文件",
     "ticket_receipts": "本票场景回执（integration/<ticket_id>/）+ 结果文件",
-    "test_face": "测试面（tests/ 目录、test_*.py、integration/ 场景脚本）∪ 本票场景 + 结果文件",
+    "test_face": "测试面（tests/ 目录、test_*.py、integration/ 下场景脚本 sc_*.py/.mjs、"
+                 "场景登记表 integration/README.md 与 integration/run_scenarios.py）"
+                 "∪ 本票场景 + 结果文件",
     "self_heal": "写集内文件 ∪ 本票场景 + 结果文件（自愈收场）",
     "prefixes": None,  # prefixes 用规则里的前缀拼
 }
 
-# 出路文案（按原因码分派）。
-_OUT_Unauthorized = "合法出路：打回目标段或回 main 侧走票"
+# 出路文案（按原因码分派）。t260916-19 ③A 联动：出路点名可达动作——rework 打回
+# design_integration_tests 只对 integration/ 面内容成立（design 段允许面=
+# prefixes("integration",)）；其它面内容（如 server/ 文件在仲裁段被改）的出路是
+# 建票把文件列入写集。保持限定语，不让泛化读法误导操作员。
+_OUT_Unauthorized = ("合法出路：rework 打回 design_integration_tests 修 integration/ 面内容"
+                     "（场景/登记表/共享测试工具），或建票把文件列入写集，或回 main 侧走票")
 _OUT_PROTECTED = "合法出路：人审放行或回 main 侧走票"
 _OUT_CONFIG = "合法出路：补配后重跑，或回 main 侧走票"
 
@@ -171,16 +181,23 @@ def _is_result_file(path: str) -> bool:
 
 
 def _is_scenario_script(path: str) -> bool:
-    """integration/ 下已登记场景脚本与登记表本身（t260911-03 CF2）：tests-fault 时
-    仲裁直接迭代 integration/ 测试集——sc_*.py / sc_*.mjs 场景脚本与
-    integration/run_scenarios.py（场景登记=正常工作面，不受保护）都属测试面。
-    共享资产仍由受保护闸兜底（如 t260902-07 守卫、integration/baselines）。"""
+    """integration/ 下已登记场景脚本与登记表本身（t260911-03 CF2；t260916-19 ③
+    声明=执法）：场景脚本=integration/ 下任意深度的 sc_*.py / sc_*.mjs——顶层场景
+    （sc_check_auto_rework_trace / sc_scenarios_guard_* 等四条，均在
+    run_scenarios.py SCENARIOS 登记内）与子目录场景同属测试集，仲裁 tests-fault
+    直接迭代测试集是本职；integration/README.md=场景登记表（t260916-19 ③：仲裁
+    改登记是本职，与 run_scenarios.py 同款「登记=正常工作面」特例）。
+    integration/run_scenarios.py（场景登记=正常工作面，不受保护）同放行。
+    共享资产仍由受保护闸兜底（如 t260902-07 守卫、integration/baselines）。
+    integration/lint_tests.py 是共享 lint 工具，非场景非登记，不放行——内容修改
+    的合法出路：rework 打回 design_integration_tests（integration/ 前缀面）或
+    建票把文件列入写集。"""
     if not _is_safe_path(path):
         return False
-    if path == "integration/run_scenarios.py":
+    if path in ("integration/run_scenarios.py", "integration/README.md"):
         return True
     segs = path.split("/")
-    if len(segs) < 3 or segs[0] != "integration":
+    if segs[0] != "integration" or len(segs) < 2:
         return False
     base = segs[-1]
     return base.startswith("sc_") and (base.endswith(".py") or base.endswith(".mjs"))
@@ -343,7 +360,9 @@ def is_gate_refusal(note: str) -> bool:
 # ---------------- 结构化红灯明细（t260915-01；只结构化既有结论，零新判定） ----------------
 
 _NEXT_ACTION_HINTS = {
-    "unauthorized_path": "把改动收回本段允许面/写集内，或拆票走正式流程；越权文件不落盘",
+    "unauthorized_path": "越权文件由引擎按状态自动处置（新建挪档/未暂存修改回滚并留档，"
+                         "删除与暂存态留人工）；内容确需改动：integration/ 面走 rework "
+                         "打回 design_integration_tests，其余面建票把文件列入写集",
     "protected_path": "共享真源与守卫的改动走 main 侧专用票；本票只读不写",
     "unknown_stage": "给该段配置允许改动面（fail-closed 缺省=拒），或改用已配置段",
     "write_set_missing": "工单写集为空/缺失——回 create_plan 补结构化回执后再实现",
@@ -359,18 +378,25 @@ def next_action_hint(reason_code: str) -> str:
 
 
 def gate_red_detail(stage_id: str, violations: Sequence[str],
-                    reason_code: str, note: str) -> Dict[str, Any]:
-    """闸拒绝的结构化检查项明细（t260915-01 ②），供详情页「人话红灯卡」。
+                    reason_code: str, note: str,
+                    judged_files: Optional[Sequence[str]] = None) -> Dict[str, Any]:
+    """闸拒绝的结构化检查项明细（t260915-01 ②；t260916-19 ④ 加 judged_files），供
+    详情页「人话红灯卡」。
 
     纯函数、零判定：输入=闸已算出的 violations/reason_code 与**原样** note。
     files 全量不截断——_fmt_files 的 cap 只作用于人读 note 文本，结构化面必须保真
-    （「不得丢文件」验收口径）。evidence=note 原文（与 worker 日志同一字符串，
-    满足「与 worker 日志原文一致」）。畸形输入 fail-visible 不抛：violations 非
-    字符串序列→files=[]；reason_code 空→gate_refusal_unknown（消费侧还有
-    sanitize_gate_refusal 兜底）。"""
+    （「不得丢文件」验收口径）。judged_files=本次实际判定的脏文件全量清单（含未
+    违规项）——拒绝回执只有违规清单时，操作员无法核对「判定面是否一致」（同秒两条
+    settle 日志歧义的根源之一，t260916-11 实案）；None/畸形 → 空列表。evidence=note
+    原文（与 worker 日志同一字符串，满足「与 worker 日志原文一致」）。畸形输入
+    fail-visible 不抛：violations 非字符串序列→files=[]；reason_code 空→
+    gate_refusal_unknown（消费侧还有 sanitize_gate_refusal 兜底）。"""
     files: List[str] = []
     if isinstance(violations, (list, tuple)):
         files = [str(v) for v in violations if isinstance(v, str) and v]
+    jf: List[str] = []
+    if isinstance(judged_files, (list, tuple)):
+        jf = [str(f) for f in judged_files if isinstance(f, str) and f]
     rc = str(reason_code or "").strip() or "gate_refusal_unknown"
     return {
         "check_id": "path_gate@%s" % (str(stage_id or "") or "unknown_stage"),
@@ -378,6 +404,7 @@ def gate_red_detail(stage_id: str, violations: Sequence[str],
         "red": True,
         "reason_code": rc,
         "files": files,
+        "judged_files": jf,
         "next_action": next_action_hint(rc),
         "evidence": str(note or ""),
     }

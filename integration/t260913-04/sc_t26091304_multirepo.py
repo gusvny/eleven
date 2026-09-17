@@ -19,6 +19,7 @@ git status 断言预期失败形态 → 宿主逐树直调 settle 断言 commit 
 arbitrate/merge 期必须绿。engine 池（宽 1）。
 """
 import asyncio
+import inspect
 import os
 import shutil
 import sys
@@ -151,9 +152,13 @@ def main():
         for m in ("alpha", "beta"):
             mmain, mtree = members[m]
             fname = "proof-%s.txt" % m
-            note = aa._settle_worktree_lane(
-                mtree, TICKET, "implement", 0, repo=mmain,
-                write_set=[fname], path_gate=False)
+            _kw = dict(repo=mmain, write_set=[fname], path_gate=False)
+            try:  # t260916-19 D：face 必填分层标签——新老树两侧可跑（c184e62 同款）
+                if "face" in inspect.signature(aa._settle_worktree_lane).parameters:
+                    _kw["face"] = "agent"
+            except (TypeError, ValueError):
+                pass
+            note = aa._settle_worktree_lane(mtree, TICKET, "implement", 0, **_kw)
             branch = "lane/%s-%s" % (TICKET, m)
             sha = _sp.run(["git", "-C", str(mmain), "log", "-1", "--format=%H", branch],
                           capture_output=True, text=True).stdout.strip()

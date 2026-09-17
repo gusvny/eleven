@@ -109,6 +109,7 @@ def main():
     aa = load_engine()
     sig = inspect.signature(aa._settle_worktree_lane).parameters
     has_gate = "path_gate" in sig
+    has_face = "face" in sig  # t260916-19 D：face 必填分层标签——新老树两侧可跑
 
     # ---- D1 老票闸关（老调用形状，缺省不传闸参数）→ 行为零变化 ----
     section("D1 老调用形状（无闸参数）走查段改产品代码 → 照常落盘（现状基线）")
@@ -116,8 +117,11 @@ def main():
     before = head(lane)
     inject(lane, "server/engine/legacy_change.py")
     try:
+        d1kw = {"repo": mainrepo}
+        if has_face:
+            d1kw["face"] = "join"  # 「老形状」锁的是闸参数缺省语义，非标签形参
         note = aa._settle_worktree_lane(lane, TICKET, "acceptance_walkthrough", 0,
-                                        repo=mainrepo)
+                                        **d1kw)
     except Exception as e:  # noqa: BLE001
         ok(False, "D1 腿异常（fixture 机械面破）：%s" % e)
     else:
@@ -133,7 +137,8 @@ def main():
         try:
             note = aa._settle_worktree_lane(lane, TICKET, "acceptance_walkthrough", 1,
                                             repo=mainrepo, path_gate=False,
-                                            write_set=[])
+                                            write_set=[],
+                                            **({"face": "join"} if has_face else {}))
         except Exception as e:  # noqa: BLE001
             note = None
             ok(False, "D2 腿异常：%s" % e)
@@ -149,10 +154,12 @@ def main():
         before2 = head(lane2)
         inject(lane2, "server/engine/future_feature.py")
         try:
+            d3kw = dict(repo=main2, path_gate=True,
+                        write_set=["server/engine/"], base_ref=str(fork2))
+            if has_face:
+                d3kw["face"] = "join"
             note = aa._settle_worktree_lane(lane2, TICKET, "brand_new_stage", 0,
-                                            repo=main2, path_gate=True,
-                                            write_set=["server/engine/"],
-                                            base_ref=str(fork2))
+                                            **d3kw)
         except Exception as e:  # noqa: BLE001
             note = None
             ok(False, "D3 腿异常：%s" % e)

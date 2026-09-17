@@ -147,12 +147,15 @@ def test_arbitrate_scenario_scripts_in_face_cf2():
     vio, reason = pg.judge_protected_paths(
         ["integration/t260902-07/tests/test_route_table.py"], exists_at_base=lambda p: True)
     assert vio and reason == "protected_path"
-    # _is_scenario_script 口径边界
+    # _is_scenario_script 口径边界（t260916-19 ③：执法放宽收 integration/ 顶层
+    # sc_*.py——顶层四条场景均在 SCENARIOS 登记、仲裁本职工作面）
     assert pg._is_scenario_script("integration/t1/sc_x.py")
     assert pg._is_scenario_script("integration/t1/sub/sc_x.mjs")
-    assert not pg._is_scenario_script("integration/sc_x.py")        # 缺场景目录段
+    assert pg._is_scenario_script("integration/sc_x.py")            # 顶层场景（260916-19 放宽）
+    assert pg._is_scenario_script("integration/README.md")          # 场景登记表（仲裁本职）
     assert not pg._is_scenario_script("integration/t1/sc_x.txt")
     assert not pg._is_scenario_script("server/engine/sc_x.py")      # 非 integration/ 前缀
+    assert not pg._is_scenario_script("integration/lint_tests.py")  # 共享 lint 工具不放行
     assert not pg._is_scenario_script("../integration/t1/sc_x.py")  # 不安全路径
 
 
@@ -400,9 +403,10 @@ def test_source_lock_dev_lane_wiring():
     # （suggest_next 段已随 t260910-14 在 main 侧退役，其闸参数随之移除，
     #  path_gates 的 suggest_next 规则键保留为防御性键）
     assert src.count('path_gate=bool(self.meta.get("path_gate"))') >= 4
-    # arb_acc 汇合与 integ_join 汇合的闸拒绝都转 blocked（不吞成日志）
-    assert src.count('await self._blocked("arbitrate", s.error)') == 1
-    assert src.count('await self._blocked("implement", s.error)') == 1
+    # arb_acc 汇合与 integ_join 汇合的闸拒绝都转 blocked（不吞成日志）；
+    # t260916-19 A：blocked 文案追加同批复判点名后缀（s.error + rep）
+    assert src.count('await self._blocked("arbitrate", s.error + rep)') == 1
+    assert src.count('await self._blocked("implement", s.error + rep)') == 1
 
 
 def test_source_lock_client_dispatch_pins_gate():

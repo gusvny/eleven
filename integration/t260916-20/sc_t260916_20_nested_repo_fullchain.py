@@ -31,12 +31,26 @@ intent（守护的用户可感知行为/合同；nusuyou t260916-08 实案=600 �
 引擎 venv/temporalio 缺席 = ENV_FAIL exit 2 点名（本场景无 stdlib 替代腿：直调 activity）。
 """
 import asyncio
+import inspect
 import os
 import subprocess
 import sys
 import tempfile
 import shutil
 from pathlib import Path
+
+
+def _settle(lane, *a, **kw):
+    """settle 直调单点（c184e62 同款防御）：t260916-19 D 把 face 定为 keyword-only
+    必填分层标签——探测签名，有则传（新树），无则不传（老树两侧可跑）。"""
+    import agent_activities as _aa
+    try:
+        params = inspect.signature(_aa._settle_worktree_lane).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if "face" in params:
+        kw.setdefault("face", "agent")
+    return _aa._settle_worktree_lane(lane, *a, **kw)
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -137,8 +151,8 @@ def leg_settle_untracked(tmp):
     (lane / "code.py").write_text("work\n", encoding="utf-8")
     head0 = _lane_head(lane)
     refusal = {}
-    note = aa._settle_worktree_lane(lane, "t26091620sc", "implement", 0,
-                                    repo=root, refusal=refusal)
+    note = _settle(lane, "t26091620sc", "implement", 0,
+                   repo=root, refusal=refusal)
     check("SA1 拒绝回执人话点名嵌套仓（机器键内嵌）",
           "path_gate_reason=gitlink_nested_repo" in note and "content" in note, note[:200])
     check("SA2 结构化 refusal（reason_code/files）",
@@ -151,7 +165,7 @@ def leg_settle_untracked(tmp):
     check("SA6 现场保留：脏态原样（未 reset 未吞文件）",
           "content/" in dirty_after and "code.py" in dirty_after,
           repr(dirty_after)[:160])
-    note2 = aa._settle_worktree_lane(lane, "t26091620sc", "implement", 0, repo=root)
+    note2 = _settle(lane, "t26091620sc", "implement", 0, repo=root)
     check("SA5 幂等红灯：重试同拒", note2 == note, note2[:120])
 
 
@@ -164,7 +178,7 @@ def leg_settle_staged_gitlink(tmp):
     _git("add", "content", cwd=lane)
     (lane / "code.py").write_text("work\n", encoding="utf-8")
     head0 = _lane_head(lane)
-    note = aa._settle_worktree_lane(lane, "t26091620sc", "implement", 0, repo=root)
+    note = _settle(lane, "t26091620sc", "implement", 0, repo=root)
     check("SB1 暂存 gitlink 被拒（人话点名）",
           "gitlink_nested_repo" in note and "content" in note, note[:200])
     check("SB2 现场保留：无 commit 且 gitlink 仍在暂存区",
@@ -360,7 +374,7 @@ def leg_clean_lane_regression(tmp):
     root = _init_repo(tmp / "cl")
     lane = _make_lane(root)
     (lane / "code.py").write_text("work\n", encoding="utf-8")
-    note = aa._settle_worktree_lane(lane, "t26091620sc", "implement", 0, repo=root)
+    note = _settle(lane, "t26091620sc", "implement", 0, repo=root)
     check("CL1 无嵌套仓 settle 照常代落盘（不误伤）", "代落盘" in note, note[:160])
     res = asyncio.run(aa.teardown_lane(MergeArgs(ticket_id="t26091620sc", worktree=str(lane),
                                      branch="lane/t26091620sc")))

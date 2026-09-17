@@ -101,16 +101,19 @@ def head(repo):
 
 def main():
     aa = load_engine()
-    has_gate = "path_gate" in inspect.signature(aa._settle_worktree_lane).parameters
+    sig = inspect.signature(aa._settle_worktree_lane).parameters
+    has_gate = "path_gate" in sig
+    has_face = "face" in sig  # t260916-19 D：face 必填分层标签（新树）——新老树两侧可跑
 
     def settle(lane, mainrepo, stage, gen=0, write_set=None, base=""):
         if not has_gate:
             return None, "settle 未接闸参数（path_gate 不在签名）——闸未接线，契约未兑现"
         try:
-            return aa._settle_worktree_lane(lane, TICKET, stage, gen, repo=mainrepo,
-                                            path_gate=True,
-                                            write_set=list(write_set or []),
-                                            base_ref=str(base)), None
+            kw = dict(repo=mainrepo, path_gate=True,
+                      write_set=list(write_set or []), base_ref=str(base))
+            if has_face:
+                kw["face"] = "join"  # 本场景模拟 join 点收口
+            return aa._settle_worktree_lane(lane, TICKET, stage, gen, **kw), None
         except Exception as e:  # noqa: BLE001
             return None, "settle 调用异常：%s" % e
 

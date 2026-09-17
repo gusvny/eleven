@@ -62,6 +62,13 @@ BASE = {
     "server/engine/keep.py": "# engine anchor\n",
     "docs/design/contract-v1.md": "# contract v1\n",
     "integration/t260915-01/tests/.keep": "",
+    # t260916-19 B 契约修订：??/M 态越权改自动处置不再拒绝，L1 探针改删除型（D 态）
+    # 注入以保持「拒绝+结构化全量 files」可测——探针先落分叉点基线（tracked）。
+    "server/engine/rogue_0.py": "x = 0\n",
+    "server/engine/rogue_1.py": "x = 1\n",
+    "server/engine/rogue_2.py": "x = 2\n",
+    "server/engine/rogue_3.py": "x = 3\n",
+    "server/engine/rogue_4.py": "x = 4\n",
 }
 
 
@@ -107,14 +114,16 @@ def main():
     section("L1 acceptance_walkthrough 越权（5 探针） → 回执 gate_refusal 与判定/note 一致")
     tmp, mainrepo, lane, fork = mk_lane()
     rogues = ["server/engine/rogue_%d.py" % i for i in range(5)]
+    # 删除型注入（D 态）：t260916-19 B 起 ??/M 态越权自动处置不再拒绝（本腿锁的是
+    # 结构化拒绝回执保真，D 态在新旧契约下都产生拒绝终态）——探针已落分叉点基线。
     for rel in rogues:
-        (lane / rel).parent.mkdir(parents=True, exist_ok=True)
-        (lane / rel).write_text("x = %d\n" % rogues.index(rel), encoding="utf-8")
+        (lane / rel).unlink()
     refusal = {}
     before = head(lane)
     note = aa._settle_worktree_lane(lane, TICKET, "acceptance_walkthrough", 0,
                                     repo=mainrepo, path_gate=True, write_set=[],
-                                    base_ref=fork, refusal=refusal)
+                                    base_ref=fork, refusal=refusal,
+                                    face="join")  # t260916-19 D：face 必填分层标签
     ok("path_gate_reason=unauthorized_path" in str(note), "note 带机读原因码")
     ok(bool(refusal), "结构化明细已收集（refusal dict 非空）")
     if refusal:
@@ -142,7 +151,8 @@ def main():
     refusal2 = {}
     note2 = aa._settle_worktree_lane(lane2, TICKET, "implement", 0,
                                      repo=main2, path_gate=True,
-                                     write_set=[allowed], base_ref=fork2, refusal=refusal2)
+                                     write_set=[allowed], base_ref=fork2, refusal=refusal2,
+                                     face="join")
     ok(not refusal2, "正常落盘：refusal 空收集（负腿）")
     ok("path_gate_reason" not in str(note2), "回执零原因码")
     ok(head(lane2) != fork2, "commit 真落地")
@@ -155,7 +165,8 @@ def main():
     refusal3 = {}
     note3 = aa._settle_worktree_lane(lane3, TICKET, "implement", 1,
                                      repo=main3, path_gate=True,
-                                     write_set=["verify.yaml"], base_ref=fork3, refusal=refusal3)
+                                     write_set=["verify.yaml"], base_ref=fork3, refusal=refusal3,
+                                     face="join")
     ok("path_gate_reason=protected_path" in str(note3), "note 带受保护原因码")
     ok(refusal3.get("reason_code") == "protected_path", "结构化 reason_code=protected_path")
     ok(refusal3.get("item") == "受保护路径闸", "人话名=受保护路径闸")
