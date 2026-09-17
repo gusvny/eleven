@@ -33,6 +33,9 @@ import time
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "t260905-03"))
 sys.path.insert(0, os.path.join(BASE, "t260910-11"))
+# t260916-22：scan 段退役 → inspect 段（桩 agent）；真链腿的发现注入走桩缝（方案 §3）
+sys.path.insert(0, os.path.join(BASE, "t260916-22"))
+import lib_inspect as inspect_lib  # noqa: E402  # 桩伪造器（空发现桩即可：计数/去重/心跳面不消费发现内容）
 import lib_inspection as lib  # noqa: E402
 
 PID = os.getpid()
@@ -255,7 +258,14 @@ def main() -> int:
 
         queue = "suyou-insp-kinds-%s" % STAMP
         os.environ["SANDBAR_TASK_QUEUE"] = queue
-        with lib.StageWorker(queue):
+        # t260916-22：起票会进 inspect 段——空发现桩喂上（本条守触发形态/去重/心跳面，
+        # 不消费发现内容；无桩则 inspect 真走 agent 链必然不可达）
+        stub_path = inspect_lib.write_stub_file(
+            tempfile.mkdtemp(prefix="sandbar-kinds-stub-%s-" % STAMP), "stub-message.txt",
+            inspect_lib.fenced_message([]))
+        with lib.StageWorker(queue, extra_env={
+                "SANDBAR_INSPECT_STUB": "1",
+                "SANDBAR_INSPECT_STUB_FILE": stub_path}):
             # ── 腿d：every-n-tickets 达阈值→schedule-up（计数形态）拉起 watcher→起票 ──
             proc, parsed = lib.run_trigger(["schedule-up", "--instance", inst_cnt,
                                             "--decl-path", decl_path, "--note", "t260911-02"])

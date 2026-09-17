@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """inspection_scan_stage — stage 面巡检扫描器（t260915-18 工单②：容量可见性）。
 
+------------------------------------------------------------------------
+【退役留档（t260916-22，宿主令「不需要这个静态扫描，我们巡检要用 agent 来做」）】
+本模块已从生产路径摘除：InspectionPeriodicWorkflow 新票走 inspect 段
+（agent 审查，见 inspection_inspect.py / agent_activities.run_inspection_inspect）。
+本文件保留一版只服务老在途票 replay（Temporal 重放历史里的 run_inspection_scan
+调用必须仍能匹配）——新代码禁接线本模块；S1~S4 静态发现自此不再产出，274 条旧
+发现整体作废不迁移（宿主裁定④）。deadman/suite 机械面不受影响。
+------------------------------------------------------------------------
+
 ## 为什么要有这个面
 台面泄漏（KI-077 当日 38 容器/1 租约/37 孤儿/最旧 45h）此前**没有任何周期性
 可见面**——stage_docker 的保险丝只数租约不看容器，泄漏要到「起台起不来/端口

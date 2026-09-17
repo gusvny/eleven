@@ -3,7 +3,7 @@
 //
 // Intent (black-box, user perspective)：宿主打开一张巡检票详情抽屉——
 //   L1 在飞票：引擎拓扑在场即泳道图自动在——节点集==阶段声明全集
-//      {setup,scan,suite,report,close}、节点标签全部来自拓扑（零硬编码业务词）、
+//      {setup,suite,inspect,report,close}、节点标签全部来自拓扑（零硬编码业务词）、
 //      人门虚线圈恰落 close（data-kind=human）、条件段注记恰 setup+suite
 //      （wb-lm-opt=「仅套件档」，条件段泄漏=图面撒谎）、在飞状态如实投影
 //      （已进入段 data-vis=running、未进入段 todo——巡检 timeline 无逐段 done，
@@ -81,23 +81,23 @@ const TOPO_INSP = {
   template: 'inspection-lite', name: '巡检',
   nodes: [
     { id: 'setup', label: '泳道准备', role: '', kind: 'gate', parts: ['script'], optional: OPT_SUITE },
-    { id: 'scan', label: '扫描', role: '', kind: 'gate', parts: ['script'] },
+    { id: 'inspect', label: '巡检审查', role: '', kind: 'gate', parts: ['script'] },
     { id: 'suite', label: '巡检泳道套件', role: '', kind: 'gate', parts: ['script'], optional: OPT_SUITE },
     { id: 'report', label: '落账', role: '', kind: 'gate', parts: ['script'] },
     { id: 'close', label: '人审收口', role: '', kind: 'human', parts: ['human', 'script'] },
   ],
-  edges: [['setup', 'scan'], ['scan', 'suite'], ['suite', 'report'], ['report', 'close']],
+  edges: [['setup', 'suite'], ['suite', 'inspect'], ['inspect', 'report'], ['report', 'close']],
   groups: [],
 }
-const INSPECTION_IDS = ['setup', 'scan', 'suite', 'report', 'close']
-const INSPECTION_LABELS = ['泳道准备', '扫描', '巡检泳道套件', '落账', '人审收口']
+const INSPECTION_IDS = ['setup', 'suite', 'inspect', 'report', 'close']
+const INSPECTION_LABELS = ['泳道准备', '巡检审查', '巡检泳道套件', '落账', '人审收口']
 
 // ---------------------------------------------------------------- S1 fixtures
 // 巡检详情契约形状（t260915-08 insDetail 同源）+ 本票 additive 键 topology。
 const ROW = {
   id: FID, kind: 'inspection', engine: 'inspection', project: '', epic: '',
   title: '巡检 DOM 桩 · 期 20260916', template: 'inspection-lite',
-  instance_id: 'fixture', period: '20260916', stage: 'scan', stage_state: 'running',
+  instance_id: 'fixture', period: '20260916', stage: 'inspect', stage_state: 'running',
   status: 'running', decision: '', findings: { high: 0, med: 1, low: 1, total: 2 },
   heartbeat: true, report_path: 'out/inspection/fixture-20260916.json',
   awaiting_gate: false, human_gate: null, blocked_reason: '', gate_error: '',
@@ -113,7 +113,7 @@ const tle = (stage, state, reason = '') => ({ at: T, stage, state, reason })
 function insDetail(over) {
   return {
     id: FID, kind: 'inspection', engine: 'inspection', template: 'inspection-lite',
-    title: ROW.title, stage: 'scan', stage_state: 'running', status: 'running',
+    title: ROW.title, stage: 'inspect', stage_state: 'running', status: 'running',
     decision: '', gate_id: 'inspection-close', instance_id: 'fixture', period: '20260916',
     report_path: ROW.report_path, red_line: '巡检只出报告与开票建议，绝不直接改码。',
     heartbeat: true, summary: { high: 0, med: 1, low: 1 },
@@ -123,24 +123,24 @@ function insDetail(over) {
     ],
     suggested_fix_tickets: [], blocked_reason: '', human_gate: null, gate_error: '',
     worktree: '', workspace: null, results: {},
-    timeline: [tle('setup', 'running', '泳道准备'), tle('scan', 'running', '扫描')],
+    timeline: [tle('setup', 'running', '泳道准备'), tle('inspect', 'running', '巡检审查')],
     topology: TOPO_INSP,
     ...over,
   }
 }
 
-// L1 在飞票：setup+scan 已进入（running）、suite/report/close 未进入（todo）
+// L1 在飞票：setup+inspect 已进入（running）、suite/report/close 未进入（todo）
 const DETAIL_INFLIGHT = insDetail()
 // L2 待签：close 人门到站
 const DETAIL_AWAITING = insDetail({
   stage: 'close', stage_state: 'awaiting-human',
-  timeline: [tle('setup', 'running'), tle('scan', 'running'), tle('report', 'running'),
+  timeline: [tle('setup', 'running'), tle('inspect', 'running'), tle('report', 'running'),
     tle('close', 'awaiting-human', '人审发现清单：sign(gate=inspection-close)')],
 })
 // L3 关闭票：全段 done、图仍在（KI-027 关单可见同族）
 const DETAIL_CLOSED = insDetail({
   status: 'closed', stage: 'close', stage_state: 'done',
-  timeline: [tle('setup', 'running'), tle('scan', 'running'), tle('report', 'running'),
+  timeline: [tle('setup', 'running'), tle('inspect', 'running'), tle('report', 'running'),
     tle('close', 'awaiting-human'), tle('close', 'done', '巡检票收口')],
 })
 // L4 降级锚：无 topology 键（老实例重放常态）→零图零回落
@@ -331,7 +331,7 @@ async function scenarioInflight(page) {
         return `条件段注记缺席：${id} 应带「${OPT_SUITE}」（套件档开关的展示面）`
       }
     }
-    for (const id of ['scan', 'report', 'close']) {
+    for (const id of ['inspect', 'report', 'close']) {
       if (nodes.some(n => n.dataId === id && n.text.includes(OPT_SUITE))) {
         return `条件段注记泄漏：${id} 不应带「${OPT_SUITE}」（图面撒谎形态）`
       }
@@ -339,7 +339,7 @@ async function scenarioInflight(page) {
     const optN = await page.evaluate(domOptCount)
     if (optN !== 2) return `wb-lm-opt 注记数=${optN}（期望恰 2：setup/suite）`
     const vis = Object.fromEntries(nodes.map(n => [n.dataId, n.dataVis]))
-    for (const id of ['setup', 'scan']) {
+    for (const id of ['setup', 'inspect']) {
       if (vis[id] !== 'running') return `已进入段 ${id} 应显 running，实得 ${vis[id]}（在飞如实投影）`
     }
     for (const id of ['suite', 'report', 'close']) {

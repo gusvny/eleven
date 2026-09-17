@@ -21,13 +21,22 @@
 # ══════════════════════════════════════════════════════════════════════════════
 schema: v1
 instances:
-  # 每实例=一个扫描面的调度位；每期一票按（实例,期号）显式去重（t260916-02 起票号=
+  # 每实例=一个巡检分面的调度位；每期一票按（实例,期号）显式去重（t260916-02 起票号=
   # 工单号同形式 t<YYMMDD>-<NN>，实例/期号走搜索属性 InspectionInstance/InspectionPeriod）。
   - id: my-first-face            # 实例标识：小写 slug（a-z0-9-，可含连字符）
     enabled: true                # false=占位不调度不触发（enabled 与否 project_key 都必填）
     project_key: <你的项目key>   # 实例归属项目（=项目注册表 key；票盖 ProjectKey SA，
-                                 # 扫描仓=该注册条目主目录 dirs[0]）
-    scan_face: test              # 跑哪个扫描器：test|doc|mechanism|simplify|stage；缺省 test
+                                 # 巡检仓=该注册条目主目录 dirs[0]）
+    scan_face: test              # 巡检分面缺省来源：test|doc|mechanism|simplify|stage；缺省 test
+                                 # （t260916-22 起静态扫描器退役：本键不再选扫描器，语义=
+                                 # inspect_profile 未声明时的分面回落值；老声明零改动照跑）
+    # ---- inspect 段三键（t260916-22，宿主裁定③：预算可配置，起步 40 条/30 分钟）----
+    # max_findings: 40           # 可选：本期新发现条数上限（正整数 1~10000，缺省 40；
+                                 #   超出按 severity 截断并注明；重复项/假报不占预算）
+    # inspect_timeout_min: 30    # 可选：inspect 段只读 agent 预算（分钟，1~720，缺省 30；
+                                 #   超时=票面 blocked 点名「agent 未完成」，不假绿）
+    # inspect_profile: test      # 可选：agent 审查分面清单（test|doc|stage|mechanism|simplify，
+                                 #   缺省回落 scan_face 值；分面清单真源在引擎）
     # suite: full                # 可选：套件档（缺省=不跑套件；full=巡检自有泳道跑集成全集）
     tz: Asia/Shanghai            # 调度时区（不写=UTC——「07:30」会落在本地 15:30）
     schedule:

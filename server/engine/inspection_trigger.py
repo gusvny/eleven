@@ -242,6 +242,104 @@ async def cmd_sign(args: argparse.Namespace) -> Dict[str, Any]:
         return _err("巡检票 %s 签字失败（不存在或不可达）：%s: %s" % (ticket_id, type(e).__name__, e))
 
 
+def _verdict_ledger_face(ledger_dir: Path, instance: str, period: str) -> Path:
+    """台账票面文件路径（与 write_inspection_report_impl 同名约定，只读复算）。"""
+    from inspection_flow import inspection_ledger_name
+    return ledger_dir / inspection_ledger_name(instance, period)
+
+
+async def cmd_verdict(args: argparse.Namespace) -> Dict[str, Any]:
+    """发现级裁定（t260916-22 要点⑥）：人对单条发现标 假报/待修/存疑。
+
+    两腿（回执带 mode 供场景断言）：
+      - signal：票在途（running）→ workflow signal finding_verdict（票内面：timeline
+        + findings[].verdict；verdicts 台账由收口段一次写齐）；
+      - ledger：票已收口（closed/blocked）或查无在途票或显式 --offline → 直改台账
+        票面 JSON（findings[].verdict 原位改写）+ verdicts 台账追加（dedupe 幂等，
+        跨期假报压制消费的就是它）。
+    载荷校验复用票面闸纯函数（who 非空/≤64/agent 名拒收/gate/verdict 词表含中文
+    别名）——两腿同一套校验，机器不得裁定。"""
+    from inspection_flow import (CLOSE_GATE_ID, MAX_WHO_LEN, validate_finding_verdict_payload)
+    from inspection_inspect import (append_verdict_entry, verdicts_ledger_name)
+    period = args.period or datetime.now().strftime("%Y%m%d")
+    err = _valid_period(period)
+    if err:
+        return _err(err)
+    payload, verr = validate_finding_verdict_payload(
+        {"gate": CLOSE_GATE_ID, "finding_id": args.finding_id or "",
+         "verdict": args.verdict or "", "who": args.who or "", "note": args.note or ""},
+        expected_gate=CLOSE_GATE_ID)
+    if verr:
+        return _err(verr)
+
+    ledger_dir = _default_ledger_dir()
+    ticket_id = ""
+    snap: Dict[str, Any] = {}
+    if not args.offline:
+        from inspection_ticketing import resolve_period_ticket_id
+        try:
+            client = await _connect()
+        except Exception as e:  # noqa: BLE001
+            return _err("temporal server 不可达（--offline 可直改台账）：%s" % e)
+        found = await resolve_period_ticket_id(client, args.instance, period)
+        if found.get("ok"):
+            ticket_id = str(found["ticket_id"])
+            try:
+                snap = await client.get_workflow_handle(ticket_id).query("snapshot") or {}
+            except Exception as e:  # noqa: BLE001
+                return _err("巡检票 %s 快照不可读：%s: %s" % (ticket_id, type(e).__name__, e))
+
+    status = str(snap.get("status") or "")
+    if status == "running":
+        # ---- 票在途：signal（票内面；台账收口时写齐） ----
+        try:
+            from inspection_flow import FindingVerdict
+            handle = client.get_workflow_handle(ticket_id)
+            await handle.signal("finding_verdict", FindingVerdict(
+                gate=CLOSE_GATE_ID, finding_id=payload["finding_id"],
+                verdict=payload["verdict"], who=payload["who"], note=payload["note"]))
+            snap2 = await handle.query("snapshot") or {}
+            face2 = snap2.get("face") if isinstance(snap2.get("face"), dict) else {}
+            findings2 = face2.get("findings") if isinstance(face2.get("findings"), list) else []
+            hit = next((f for f in findings2 if isinstance(f, dict)
+                        and str(f.get("id") or "") == payload["finding_id"]), None)
+            if hit is None or hit.get("verdict") != payload["verdict"]:
+                return _err("裁定未落票（finding-id 不在清单或载荷被拒）：%s｜gate_error=%s"
+                            % (payload["finding_id"], face2.get("human_gate") is not None
+                               and snap2.get("gate_error") or snap2.get("gate_error")))
+            return _ok({"verdicted": True, "mode": "signal", "ticket_id": ticket_id,
+                        "finding_id": payload["finding_id"],
+                        "verdict": payload["verdict"], "who": payload["who"]})
+        except Exception as e:  # noqa: BLE001
+            return _err("巡检票 %s 裁定 signal 失败：%s: %s" % (ticket_id, type(e).__name__, e))
+
+    # ---- 台账腿（已收口 / 查无在途票 / --offline） ----
+    face_path = _verdict_ledger_face(ledger_dir, args.instance, period)
+    if not face_path.is_file():
+        return _err("台账票面不存在：%s（无票可裁定；期号/实例核对）" % face_path)
+    try:
+        doc = json.loads(face_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        return _err("台账票面不可读（%s）：%s: %s" % (face_path, type(e).__name__, e))
+    if not isinstance(doc, dict) or not isinstance(doc.get("findings"), list):
+        return _err("台账票面形状坏（缺 findings 列表）：%s" % face_path)
+    from inspection_inspect import apply_verdict_to_face
+    err = apply_verdict_to_face(doc, payload["finding_id"], payload["verdict"],
+                                payload["who"], payload["note"])
+    if err:
+        return _err("裁定未落：%s" % err)
+    face_path.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    vpath = ledger_dir / verdicts_ledger_name(args.instance, period)
+    append_verdict_entry(vpath, {
+        "finding_id": payload["finding_id"], "verdict": payload["verdict"],
+        "who": payload["who"], "note": payload["note"],
+        "source_ticket": str(doc.get("ticket_id") or ticket_id or ""),
+        "mode": "ledger"}, dedupe=True)
+    return _ok({"verdicted": True, "mode": "ledger", "face_path": str(face_path),
+                "verdicts_path": str(vpath), "finding_id": payload["finding_id"],
+                "verdict": payload["verdict"], "who": payload["who"]})
+
+
 def ticket_receipt(snap: Dict[str, Any], ticket_id: str) -> Dict[str, Any]:
     """workflow snapshot 查询 → 工单详情同构回执（纯函数；畸形快照逐字段降级不崩，
     畸形≠缺省：缺键如实出 None/空，不编造值）。"""
@@ -812,6 +910,17 @@ def main() -> None:
     p.add_argument("--grace-days", default=0)
     p.add_argument("--offline", action="store_true", help="不连 Temporal（只查声明+台账）")
     p.add_argument("--decl-path", default=None)
+    p = sub.add_parser("verdict", help="发现级裁定：--finding-id --verdict 假报|待修|存疑（逐条；假报跨期压制）")
+    p.add_argument("--instance", required=True)
+    p.add_argument("--finding-id", required=True)
+    p.add_argument("--verdict", required=True,
+                   help="false-positive|to-fix|doubt 或中文别名 假报|待修|存疑")
+    p.add_argument("--who", required=True, help="裁定人（agent 角色名拒收）")
+    p.add_argument("--note", default="")
+    p.add_argument("--period", default=None)
+    p.add_argument("--decl-path", default=None)
+    p.add_argument("--offline", action="store_true",
+                   help="不连 Temporal，直改台账票面+verdicts 台账")
     p = sub.add_parser("sweep-lanes", help="人工清巡检泳道残留（早于水位；开发泳道不碰）")
     p.add_argument("--instance", required=True)
     p.add_argument("--keep-period", default="", help="水位期号；空=无水位（全清）")
@@ -830,7 +939,8 @@ def main() -> None:
             result = asyncio.run({"trigger": cmd_trigger, "sign": cmd_sign,
                                   "describe": cmd_describe, "ticket": cmd_ticket,
                                   "watcher": cmd_watcher, "deadman": cmd_deadman,
-                                  "schedule-up": cmd_schedule_up}[args.op](args))
+                                  "schedule-up": cmd_schedule_up,
+                                  "verdict": cmd_verdict}[args.op](args))
     except Exception as e:  # noqa: BLE001 — channel-level backstop: any exception becomes single-line JSON, never a bare stack
         result = _err("inspection_trigger.%s 异常：%s: %s" % (args.op, type(e).__name__, e))
     _emit(result, exit_code=0 if result.get("ok") else 1)

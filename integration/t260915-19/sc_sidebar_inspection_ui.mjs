@@ -104,7 +104,7 @@ function insRow(over) {
   return {
     id: '', kind: 'inspection', engine: 'inspection', project: '', epic: '',
     title: '', template: 'inspection-lite',
-    instance_id: '', period: '20260915', stage: 'scan', stage_state: 'running',
+    instance_id: '', period: '20260915', stage: 'inspect', stage_state: 'running',
     status: 'running', decision: '', findings: { high: 0, med: 0, low: 0, total: 0 },
     heartbeat: true, report_path: '', awaiting_gate: false, human_gate: null,
     blocked_reason: '', gate_error: '', created: 1789354800, updated: '09-15 07:30',
@@ -127,7 +127,7 @@ const INS_ROWS = [
   }),
   insRow({
     id: INS_B, project: PROJ_B, instance_id: 'fixture-beta', title: '巡检 fixture-beta · 期 20260915',
-    stage: 'scan', stage_state: 'running',
+    stage: 'inspect', stage_state: 'running',
     findings: { high: 0, med: 0, low: 1, total: 1 },
     report_path: 'out/inspection/inspfixb1904b.json',
   }),
@@ -153,7 +153,7 @@ const INS_A_DETAIL = {
   ],
   suggested_fix_tickets: [], blocked_reason: '', human_gate: null, gate_error: '',
   worktree: '', workspace: null,
-  timeline: [tle('scan', 'done'), tle('report', 'done'), tle('close', 'running', '人审发现清单')],
+  timeline: [tle('inspect', 'done'), tle('report', 'done'), tle('close', 'running', '人审发现清单')],
 }
 
 // ---------------------------------------------------------------- S0 build-contract

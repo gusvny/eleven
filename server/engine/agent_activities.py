@@ -1364,7 +1364,8 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
 
 def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
                          artifacts_dir: Path, tag: str, project: str = "",
-                         session_key: str = ""):
+                         session_key: str = "",
+                         agent_home: Optional[Path] = None):
     """Shared pre-spawn preparation (extracted from _run_agent_stage_impl in ticket
     t260828-08): create the local .dsh directory + _copy_profile/_copy_creds/
     _copy_settings + the role preset patch + pinning the model route into
@@ -1377,11 +1378,16 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
     Returns (cmd prefix including the patches but not the prompt, env). One-shot
     patch files land in artifacts_dir, named with a tag to tell callers apart
     (generic step = stage_gen<N>).
-    """
+
+    agent_home（t260916-22 巡检 inspect 段）：DSH_HOME 落点覆盖——缺省 None=cwd/.dsh
+    （既有调用点逐字节不变，零回归断言在 test_t260916_22_inspect_activity）。巡检
+    agent 的 cwd=审查基座（suite 期=泳道 / 非 suite 期=repo_root），不覆盖会把本地
+    .dsh（profile/creds/session）写进真仓工作区；钉到 out/inspection/agent-home/
+    <实例>-<期>/ 让写面与基座解耦（.gitignore out/ 已兜底）。"""
     # Sandbox isolation: the worker process may lack permission to write ~/.dsh, so
     # the headless agent uses a workspace-local .dsh directory (via a DSH_HOME
     # override), with the profile's symlinks copied along.
-    local_dsh = cwd / ".dsh"
+    local_dsh = Path(agent_home) if agent_home is not None else cwd / ".dsh"
     local_dsh.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env["DSH_HOME"] = str(local_dsh)
@@ -5706,6 +5712,203 @@ async def _acceptance_walkthrough_body(args: AgentStageArgs) -> StageResult:
 
 
 
+# ========================================================================================
+# 巡检 inspect 段（t260916-22）：spawn 只读 agent（role=inspection）产出结构化发现。
+# 契约/机械复核纯函数全在 inspection_inspect.py；本活动只管「跑 agent + 捕获输出 +
+# 全终态回收」。静态扫描（run_inspection_scan，activities.py）已退役留档，仅服务
+# 老在途票 replay——新票不再进入。
+# ========================================================================================
+
+def _read_file_tail(path: Path, limit: int = 400_000) -> str:
+    """读文件尾部 ≤limit 字节（UTF-8 容错）——agent 最终消息从 stdout 日志解析用。"""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return ""
+    return data[-limit:].decode("utf-8", errors="replace")
+
+
+@activity.defn
+async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
+    """巡检 inspect 段：spawn 只读 agent（role=inspection）产出强 schema 发现清单。
+
+    只读红线三层（方案 §2.2）：①spawn 追加 read-only 预设一次性 patch（晚于既有
+    pin 追加=覆盖生效）；②审查基座=suite 期泳道快照 / 非 suite 期 repo_root（meta
+    记 base_dir+基点）；③场景对被审查树逐字节校验。产出=agent 最终消息末尾恰一块
+    ```json 围栏（强 schema 由 inspection_inspect.parse_agent_findings fail-closed）。
+
+    超时=「agent 未完成」不假绿（工单要点⑤）：活动内 deadline=timeout−60s margin
+    （workflow 侧 start_to_close 用同 timeout，不等式 UT 锁定），到点组粒度 reap。
+    不自动重试（Temporal 侧 maximum_attempts=1，workflow 定）——烧 LLM 配额，失败=
+    blocked 可见，下期再来。
+
+    桩：SANDBAR_INSPECT_STUB=1 + SANDBAR_INSPECT_STUB_FILE=<夹具 JSON 路径> → 不起
+    进程零模型调用（场景/UT 专用；夹具缺失=点名失败，不静默空过）。
+    """
+    from inspection_inspect import (  # 懒 import：防 activities↔inspection 模块环（同 run_inspection_scan 先例）
+        DEFAULT_INSPECT_TIMEOUT_MIN, DEFAULT_MAX_FINDINGS, INSPECT_DEADLINE_MARGIN_SEC,
+        InspectParseError, build_inspect_prompt, build_persona_patch,
+        parse_agent_findings, readonly_pin_patch, with_ids)
+
+    def _err(msg: str) -> Dict[str, Any]:
+        return {"ok": False, "error": msg}
+
+    instance_id = str(args.get("instance_id") or "")
+    period = str(args.get("period") or "")
+    ticket_id = str(args.get("ticket_id") or "")
+    face = str(args.get("face") or "test")
+    profile = str(args.get("inspect_profile") or "") or face
+    base_dir = str(args.get("base_dir") or "")
+    base_head = str(args.get("base_head") or "")
+    suite_receipt = str(args.get("suite_receipt") or "")
+    prev_summary = str(args.get("prev_summary") or "")
+    project = str(args.get("project_key") or "")
+    agent_home_raw = str(args.get("agent_home") or "")
+    max_findings = int(args.get("max_findings") or DEFAULT_MAX_FINDINGS)
+    timeout_sec = float(args.get("timeout_sec") or 0) or float(
+        DEFAULT_INSPECT_TIMEOUT_MIN * 60)
+
+    if not instance_id or not period or not base_dir:
+        return _err("inspect 输入缺 instance/period/base_dir（fail-closed，不跑空巡检）")
+    base = Path(base_dir)
+    if not base.is_dir():
+        return _err("审查基座目录不存在：%s" % base_dir)
+    # 台账目录/套件回执/agent-home 路径按 INSPECTION_DIR 派生（workflow 体零路径计算；
+    # agent_home 钉 out/ 下，绝不写审查基座——真仓工作区零 .dsh 残留的落点保证）。
+    from shared import INSPECTION_DIR
+    from inspection_deadman import SUITE_RECEIPT_SUFFIX
+    # 台账目录三优先（同 verify 活动）：显式 args > 进程 env（场景运行时注入）> 常量。
+    ledger_dir = Path(str(args.get("ledger_dir")
+                          or os.environ.get("SANDBAR_INSPECTION_DIR")
+                          or INSPECTION_DIR))
+    if not agent_home_raw:
+        agent_home_raw = str(ledger_dir / "agent-home" / ("%s-%s" % (instance_id, period)))
+    if not suite_receipt:
+        suite_receipt = str(ledger_dir / ("inspection-%s-%s%s"
+                                          % (instance_id, period, SUITE_RECEIPT_SUFFIX)))
+    # 上期发现摘要（prompt 的跨期对照参考；IO 在活动侧，读不出=显式 note 进 prompt，
+    # 「无对照」对 agent 可见——绝不静默当空）。裁定台账坏文件只记 note。
+    from inspection_inspect import collect_fake_ids, read_prev_ledger_doc
+    prev_doc, prev_note = read_prev_ledger_doc(ledger_dir, instance_id, period)
+    _, fake_notes = collect_fake_ids(ledger_dir, instance_id, period)
+    if prev_doc is None:
+        prev_summary = "（无对照：%s）" % prev_note
+    else:
+        rows = ["- %s (id=%s, sev=%s)" % (str(f.get("subject"))[:80],
+                                          str(f.get("id"))[:8], str(f.get("severity")))
+                for f in (prev_doc.get("findings") or [])[:20] if isinstance(f, dict)]
+        prev_summary = "\n".join(rows) or "（上期台账零发现）"
+    if fake_notes:
+        prev_summary += "\n（裁定台账注意：%s）" % "；".join(fake_notes[:5])
+    try:
+        prompt = build_inspect_prompt(instance_id, period, profile, base_dir, base_head,
+                                      max_findings, suite_receipt=suite_receipt,
+                                      prev_summary=prev_summary)
+    except ValueError as e:
+        return _err("inspect prompt 构建失败：%s" % e)
+
+    home = Path(agent_home_raw)
+    home.mkdir(parents=True, exist_ok=True)
+
+    # ---- 桩捷径（场景/UT；夹具=与真 agent 同一份围栏 JSON 契约，桩-复核不同源防假绿
+    #      由场景侧「夹具证据锚真实仓文件」承担） ----
+    if os.environ.get("SANDBAR_INSPECT_STUB") == "1":
+        stub_file = os.environ.get("SANDBAR_INSPECT_STUB_FILE") or ""
+        if not stub_file or not Path(stub_file).is_file():
+            return _err("inspect 桩已声明（SANDBAR_INSPECT_STUB=1）但夹具缺失：%r"
+                        % stub_file)
+        try:
+            text = Path(stub_file).read_text(encoding="utf-8")
+            findings = with_ids(parse_agent_findings(text))
+        except (OSError, InspectParseError) as e:
+            return _err("inspect 桩夹具解析失败（与真 agent 同契约 fail-closed）：%s"
+                        % e)
+        activity.heartbeat("inspect stub 完成（%d 条）" % len(findings))
+        return {"ok": True, "result": {"findings": findings, "meta": {
+            "stub": True, "face": face, "profile": profile, "base_dir": base_dir}}}
+
+    # ---- 真 spawn（host 形态显式钉死；模型路由 miss=profile 默认+warning，meta 点名
+    #      由 _prepare_agent_spawn 的 warning 面承担） ----
+    try:
+        _, env = _prepare_agent_spawn(
+            base, "inspection", "", ticket_id, home, "inspect", project=project,
+            agent_home=home)
+    except Exception as e:  # noqa: BLE001——预备失败=本期 inspect 不可跑（workflow→blocked）
+        return _err("inspect spawn 预备失败：%s: %s" % (type(e).__name__, e))
+    persona_f = home / "patch_inspect_persona.yml"
+    persona_f.write_text(build_persona_patch(), encoding="utf-8")
+    pin_f = home / "patch_inspect_readonly.yml"
+    pin_f.write_text(readonly_pin_patch(), encoding="utf-8")
+    # SANDBAR_INSPECT_CMD（t260916-22）：UT/场景注入假 dsh 脚本的缝——真进程链
+    # （Popen/日志/超时/reap）与生产逐字节同路，只换可执行体；缺省=通用 dsh 命令。
+    cmd = (shlex.split(os.environ.get("SANDBAR_INSPECT_CMD") or "") or list(DSH_CMD)) \
+        + ["--patch", str(persona_f), "--patch", str(pin_f), prompt]
+    # 本轮实际模型路由进 meta（方案 §2.1；观察期查准率核对的对账面）：只读复算同一张
+    # 表（与 _prepare_agent_spawn 同源 helpers，零副作用零 patch）。表非 ok/无表/无命中
+    # =defaulted+人读 reason（与 spawn 侧 warning 双口径同源），复算异常=meta 点名降级，
+    # 绝不影响 spawn 主链。
+    route_meta: Dict[str, Any]
+    try:
+        _resolved = routes_file_for_spawn(project)
+        if _resolved.get("table") is not None:
+            _r = model_route_for("inspection", "", table=_resolved["table"],
+                                 routes_file=_resolved["path"])
+            route_meta = ({"provider": _r["provider"], "model": _r["model"]} if _r else
+                          {"defaulted": True,
+                           "reason": "路由表无命中 role=inspection（本轮=profile 默认）"})
+        else:
+            route_meta = {"defaulted": True, "reason": "无路由表可查（state=%s）"
+                          % _resolved.get("state")}
+    except Exception as e:  # noqa: BLE001——meta 复算面永不弄挂 inspect
+        route_meta = {"defaulted": True, "reason": "路由复算失败 %s: %s"
+                      % (type(e).__name__, e)}
+    out_f = home / "inspect_agent_output.log"
+    activity.logger.info("[inspection/%s] spawn 只读 agent（face=%s profile=%s 基座=%s 路由=%s）",
+                         instance_id, face, profile, base_dir,
+                         route_meta.get("model") or route_meta.get("reason") or "?")
+    logf = open(out_f, "a", buffering=1)
+    proc = agent_runtime.spawn_agent(cmd, cwd=base, env=env, logf=logf,
+                                     ticket_id=ticket_id, stage_tag="inspect",
+                                     project=project, lane=base,
+                                     log=activity.logger.info, force_host=True)
+    # 内部 deadline = 预算 − 复核余量（须 < workflow 侧 start_to_close，不等式 UT 锁定；
+    # 预算误配成 ≤ 余量 = deadline 即时到期，「agent 未完成」显性化，不静默放宽）。
+    deadline = time.monotonic() + timeout_sec - INSPECT_DEADLINE_MARGIN_SEC
+    t0 = time.monotonic()
+    try:
+        while True:
+            rc = proc.poll()
+            if rc is not None:
+                break
+            if time.monotonic() > deadline:
+                proc.reap(ticket_id, "inspect")
+                return _err("agent 未完成（超时：预算 %.0fs−复核余量 %.0fs 已到；"
+                            "进程组已回收，本期不假绿——下期再来或调大 "
+                            "inspect_timeout_min）" % (timeout_sec, INSPECT_DEADLINE_MARGIN_SEC))
+            activity.heartbeat("inspect agent 运行中（%.0fs/%.0fs）"
+                               % (time.monotonic() - t0, timeout_sec))
+            await asyncio.sleep(min(float(POLL_SEC), 5.0))
+        text = _read_file_tail(out_f)
+        if rc != 0:
+            return _err("agent 退出码 %s（未完成）；输出尾：%s" % (rc, text[-400:]))
+        try:
+            findings = with_ids(parse_agent_findings(text))
+        except InspectParseError as e:
+            return _err("agent 输出解析失败：%s；输出尾：%s" % (e, text[-400:]))
+        return {"ok": True, "result": {"findings": findings, "meta": {
+            "face": face, "profile": profile, "base_dir": base_dir,
+            "base_head": base_head, "agent_home": str(home),
+            "model_route": route_meta,
+            "output_log": str(out_f)}}}
+    finally:
+        # 全终态回收：正常/报错/超时/取消四路都走到（KI-009 组粒度；reap 绝不外抛）
+        try:
+            proc.reap(ticket_id, "inspect")
+        except Exception:  # noqa: BLE001
+            pass
+        logf.close()
+
+
 ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     prepare_human_gate, prepare_workspace, merge_check, merge,
     prepare_conflict_resolution, settle_conflict_resolution,
@@ -5737,4 +5940,6 @@ ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     # 在自有泳道里跑全集（同一个 _run_scenarios 跑法、同一个回执形状）。
     # 缺注册=运行时才炸（同上纪律）。
     resolve_main_head, sweep_inspection_lanes, run_inspection_suite,
+    # 巡检 inspect 段（t260916-22）：只读 agent 产出发现。缺注册=运行时才炸（同上纪律）。
+    run_inspection_inspect,
 ]

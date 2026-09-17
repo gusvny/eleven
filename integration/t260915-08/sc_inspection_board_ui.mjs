@@ -104,7 +104,7 @@ function insDetail(over) {
     ],
     suggested_fix_tickets: [], blocked_reason: '', human_gate: null, gate_error: '',
     worktree: '', workspace: null,
-    timeline: [tle('scan', 'done'), tle('report', 'done'), tle('close', 'running', '人审发现清单')],
+    timeline: [tle('inspect', 'done'), tle('report', 'done'), tle('close', 'running', '人审发现清单')],
     ...over,
   }
 }
@@ -337,7 +337,7 @@ async function runBrowser(pw, browser) {
       return
     }
     const dText = await drawer.innerText().catch(() => '')
-    const missDetail = [['阶段时间线', /scan|report|close|时间线|阶段/.test(dText)],
+    const missDetail = [['阶段时间线', /inspect|report|close|时间线|阶段/.test(dText)],
     ['发现摘要', /发现/.test(dText) && dText.includes('1')],
     ['报告路径', dText.includes('out/inspection/')],
     ['签什么', /签什么|签字/.test(dText)]]

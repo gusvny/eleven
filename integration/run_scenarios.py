@@ -802,9 +802,6 @@ SCENARIOS = [
     ("t260910-11-decl-v2-rename",
      "声明 v2 演进契约（t260910-11 工单①②，灰盒 L2，纯离线）：交付 inspection.yaml 解析为新名 integration-tests/docs-sync 且 decl 回执零 face 键、yaml 文本零 face 行；含 face: 的旧形态声明被解析面拒收且报错点名 face 字段（旧声明拒收点名=工单验收原文，报错精确纪律）；兼容红线半边（InspectionPeriodicInput.face 默认值防历史重放解码报错）是数据类契约归 developer L1 重放锁，本条不复写。与 t260905-03-decl-gate intent 分工：彼守声明门「谁能跑/谁被拒」的门行为（畸形/未接线/占位/未知实例），本守字段表翻转后新旧声明的命运=schema 演进面。纯 stdlib 闸内即验；实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "python3 integration/t260910-11/sc_inspection_decl_v2_rename.py", "ro"),
-    ("t260910-11-scan-misreport-calibration",
-     "扫描误报校准三面（t260910-11 工单③，灰盒 L2，仓形夹具纯离线）：S3 模块加载形态（裸名 index.mjs，无 slash）不产 stale-ref、真路径形态缺席引用仍必报（校准≠剁手对照腿）；S2 泳道/过程目录（.lane/<票>/…）不进扫描根——零 finding 证据指向 .lane/ 且夹具全树零 high（泳道副本锚与运行时拼装/DOM 形锚不得撑 high）；S1 重复检测三级复核——intent+断言对象（cmd）+选择器全符对照对仍必报（对照腿防复核吞真重复）、断言对象分歧对不判重（首期 t18-* 互配对误报形态）；扫描全程被扫树逐字节不变（红线判定化）。断言只钉夹具可判定行为翻转；「真仓 ≤30 条+抽样判读」是验收证据面随仓变化，不进断言防 rot（由 implement 交付报告承载）。与 t260905-03-ki051-anchor-replay 分工：彼守锚×生产方漂移必抓（检测半），本守误报校准（排除/降级/复核半）；与 t260905-03-scan-contract 分工：彼守扫描器横向契约与必报下界，本守校准语义（步骤共享 lib 夹具构造器，intent 不同面不互替）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
-     "python3 integration/t260910-11/sc_inspection_scan_misreport_calibration.py", "ro"),
     ("t260910-11-temporal-isolation-guard",
      "测试腿隔离生产 Temporal 红线守卫（t260910-11 工单④，「测试写生产 Temporal」事故回归，灰盒 L2/L3）：fail-closed 行为腿——ambient 目标=生产 7233 时 lib 注入路径拒跑且报错点名生产台（离线 decl 探针零网络）；静态腿——lib_inspection 子进程 env 构造钉 127.0.0.1:17233+suyou-test 且 SANDBAR_TARGET_HOST 注入点覆盖 worker/trigger 双 spawn 路径；隔离台真跑腿——私有队列自供给 worker 开票成功、票号带进程戳；退出自清腿——with 退出后本进程开的票非 RUNNING 或查询点名不存在（僵尸票事故形态防线）；生产零写入条件腿——7233 可达且 temporal CLI 在位时全程前后只读计数零新增（不可得按 N/A 折算，动态对照权威面在 implement 验收证据）。场景自身一切 spawn 显式钉隔离台（pre-implement 状态也绝不写生产）。与 t260905-03-period-journey intent 分工：彼守巡检全链旅程质量，本守测试腿的平台归属红线。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；隔离台缺席=ENV_FAIL 点名（离线腿已验部分如实陈述）",
      "python3 integration/t260910-11/sc_inspection_temporal_isolation.py", "exclusive"),
@@ -1262,6 +1259,24 @@ SCENARIOS = [
      "左栏合并排序与巡检徽标 UI 面（t260916-15 验收①②③渲染面，灰盒 L3 browser-free，镜 t260915-19 两层式）：S0 build-contract=双 bundle 同步+合并排序/徽标锚在 shipped bundle（wb-card-kind 类字面+data-kind-badge 属性字面——字符串字面过压缩器存活，函数名不锚=压缩器改名面；盘上 bundle 新鲜锚=KI-052 防改源忘重建静默穿透）；S1 真浏览器 API 桩（自带 /wf/projects 桩=项目组确定性渲染，数据只桩 API 边界，浏览器/bundle/React 全真，宿主 3099 零接触）——①合并排序全矩阵：甲组四行（dev 在跑 ts 中+dev 等你 ts 次新+巡检等你 ts 最新+巡检已收口 ts 最老，输入序=拼接序与期望序刻意错排防断言自我失效）DOM 行序==[巡检等你,dev 等你,dev 在跑,巡检收口]，一面同钉 tier 边界（在等你→在跑→已完成）+级内 updated_ts 倒序+反沉底核心（等你巡检行压在跑 dev 行之上=用户实报「恒沉底」的逆否）+已完成沉组底但仍可见不丢失；②兜底组同口径：unowned 两行（等你 ts 新+在跑 ts 老，输入序相反）序==[等你,在跑]（合并口径不分组）；③徽标可辨：巡检行卡内 [data-kind-badge] 恰一、可见、文本=巡检；④dev 零徽标对照（左栏 dev 行渲染零变化反断言）：dev 行卡内徽标元素数=0+甲组徽标总数==巡检行数；⑤行1 标题原样：巡检行文本含引擎标题「巡检 <实例> · 期 <期号>」（排序不得改行内容）；⑥行唯一性：组内 id 数==去重数==4（排序不得丢行/重复键）；⑦卫生腿全旅程零 pageerror。分工：t260915-19-sidebar-inspection-ui 守分拣制（项目组归位/兜底组存在性/等你黄调/降级显式性）+反沉底烟测，本条不复断其任何一面；排序纯函数真值表（状态×来源×畸形 ts/缺键/null 元素/未知状态缺省行）归 developer L1 UT 不同层；t260903-07-click-no-chat-switch 守点行不切会话不同面。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；stage console/playwright-core/chromium 缺席=ENV_FAIL exit 2 点名（不假红不假绿）",
      "node integration/t260916-15/sc_sidebar_merged_sort_ui.mjs", "browser-free"),
 
+    # ---- t260916-22: 巡检 agent 化（scan 段退役→inspect 段+发现级裁定）----
+    # 分工三层：contract（灰盒 L2，活动级公开契约，桩缝全腿矩阵）→ journey（L3 真台
+    # 真票全链旅程，验收①主证据）→ verdict-cli（L3 发现级裁定+假报跨期压制，验收④
+    # 主证据）。与 developer 四件 UT（inspect_core/activity/flow/verdict）intent 分工：
+    # UT 白盒随实现可重构，本组灰盒只钉公开缝名与用户可感知行为（缝契约留档见
+    # integration/t260916-22/design.md Part3）。静态扫描退役致 t260910-11
+    # -scan-misreport-calibration 整体退役（扫描器 S1 校准语义随 inspection_scan 退役
+    # 作废，宿主令「不需要静态扫描」；检测半 ki051-anchor-replay/scan-contract 留守
+    # ——旧票重放链仍在），登记与场景文件一并摘除。
+    ("t260916-22-inspect-contract",
+     "巡检 inspect 段活动级契约面（t260916-22 验收②③④的集成侧，灰盒 L2 纯离线，桩缝驱动 run_inspection_inspect/verify_inspection_findings 真活动）：①输出解析纪律——零围栏块/双围栏块/围栏外坏 JSON/findings 非清单/缺 evidence/severity 词表外/confidence 越界 → ok=false 且 reason 可读点名「哪个检查失败」（报错精确纪律）；②合法输出 → ok=true 且 meta 带 base_dir（复核基座=审查根承诺）；③证据机械复核八态——真引文/空白差异（缩进改版）→ verified；坏路径/../越界/绝对路径/行号超界/行号 0/引文不符 → unverified 且 reason 非空点名，verified 条目零 reason（降级必点名不静默丢，验收②）；④id=内容哈希——8 位 hex、同内容幂等、内容变 id 变（跨期去重键的机械铸造面）；⑤跨期三对照——上期同 id 标 recurring、裁定台账 false-positive 标 suppressed、纯压制票 summary 零计且 heartbeat=true（「假报跨期不再重复计数」契约半，验收④压制半）；⑥预算 41 条截断 ≤40 且带截断标记不静默丢（验收③截断半）；⑦零新发现且套件绿=heartbeat true、有新发现=heartbeat false（心跳=心跳证明不假绿）；⑧建议门 mix——verified&&conf≥0.6&&severity≥med 才进建议面（低置信/low/坏证据三反例）；⑨上期清单坏 JSON → 容错降级不 crash 且 reason 点名上期不可读（输入三态：畸形）；⑩红线判定化——全程被审查树逐字节不变+审查基座零 .dsh 残留（DSH_HOME 与基座解耦面，agent-home 目录语义容忍桩短路；真 spawn 面归 inspect-journey）。环境语义：temporalio 缺席=ENV_FAIL exit 2（离线活动驱动需 SDK 桩）。与 t260916-22-inspect-journey 分工：彼守真台真票全链旅程（真 spawn/CMD 链+超时+人门+落账），本守桩缝下活动级契约全矩阵（离线快、可进每轮基点）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260916-22/sc_inspection_inspect_contract.py", "ro"),
+    ("t260916-22-inspect-journey",
+     "巡检 inspect 段全链用户旅程（t260916-22 验收①主证据，灰盒 L3 真台真票，exclusive）：宿主手动触发一期巡检——agent 产出发现清单、证据机械复核、人门签字收口、发现落账、建议修复票只从「agent 判真」的发现出。混合桩腿五类发现同票：verified（真引文锚夹具树真实文件行）/unverified（行号越界→降级+reason 点名）/低置信（不进建议）/low severity（不进建议）——建议门只收 verified&&conf≥0.6&&severity≥med；用户可见段名=inspect（scan 段退役的旅程面证据）；发现来源标记 scan==agent（schema 面）；人门两拍真拦（未签不终态/签后收口）；收口后落账留存（审计链=落账承诺面）。零发现桩腿：空 findings 心跳票照开照收（heartbeat=true，全绿期=心跳证明）。真进程链超时腿（SANDBAR_INSPECT_CMD 挂起脚本+inspect_timeout_min=2）：票到 blocked 点名「agent 未完成」不假绿+落账在+heartbeat 非真+agent-home 落台账目录（DSH_HOME 与审查基座解耦的运行时面）+进程 reap 干净（pgrep 零残留，资源生命周期纪律）。红线判定化：被审查树逐字节不变+基座零 .dsh。与 t260905-03-period-journey 分工：彼守单期全链旅程质量的通用面（旧签名链/心跳），本守 inspect 段新语义（段名/复核降级/建议门/超时不假绿/agent-home），journey_one 步骤共享 lib 夹具。环境语义：docker 测试台/venv 缺席=ENV_FAIL exit 2。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260916-22/sc_inspection_inspect_journey.py", "exclusive"),
+    ("t260916-22-verdict-cli",
+     "发现级裁定（verdict）落账与假报跨期压制（t260916-22 验收④主证据，灰盒 L3 真台真票，exclusive）：宿主对 agent 发现逐条裁定「假报/待修/存疑」——在途票 signal 通道（回执带 ticket_id、裁定落 face）与收口票直改台账两通道；who 闸 fail-closed（空 who/agent 角色名/超长 who/词表外 verdict/查无此 finding → 拒收且点名失败的检查项，报错精确纪律）；verdicts 台账 append 全留痕（同 finding 重复裁定 entries 不覆盖、票面取最新）；假报跨期压制——P1 裁假报 → P2 同内容发现（同机械 id=内容哈希跨期键）被压制点名、summary 零计、heartbeat 不破（「假报跨期不再重复计数」用户可感知行为，验收④）；deadman 词法腿——-verdicts.json 非台账件不进漏跑/畸形清单（离线 deadman 纯查声明+台账，词法误报形态防线）。与 t260916-22-inspect-contract 分工：彼守活动级压制语义（纯 [dup] 票），本守 CLI 面+真票跨期全链（signal/直改/两期真票+裁定台账）。环境语义：docker 测试台缺席=ENV_FAIL exit 2。verdict 子命令未落地=FAIL（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260916-22/sc_inspection_verdict_cli.py", "exclusive"),
     # ---- t260916-21: admin.log 按天轮转 + 保留窗（默认 14 天）+ 同日过大顺切 + 审计写失败点名 ----
     # 与 t260910-06-ki067-entry-audit 分工见 intent：彼守入口收口/审计行形状/entry_hint，
     # 本条守日志文件生命周期面（轮转/归档/保留窗/同日过大顺切/写失败可感）；轮转原语纯函数矩阵

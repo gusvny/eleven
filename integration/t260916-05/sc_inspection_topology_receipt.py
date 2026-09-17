@@ -149,18 +149,18 @@ TOPO = {
     "nodes": [
         {"id": "setup", "label": "泳道准备", "role": "", "kind": "gate",
          "parts": ["script"], "optional": "仅套件档"},
-        {"id": "scan", "label": "扫描", "role": "", "kind": "gate", "parts": ["script"]},
         {"id": "suite", "label": "巡检泳道套件", "role": "", "kind": "gate",
          "parts": ["script"], "optional": "仅套件档"},
+        {"id": "inspect", "label": "巡检审查", "role": "", "kind": "gate", "parts": ["script"]},
         {"id": "report", "label": "落账", "role": "", "kind": "gate", "parts": ["script"]},
         {"id": "close", "label": "人审收口", "role": "", "kind": "human",
          "parts": ["human", "script"]},
     ],
-    "edges": [["setup", "scan"], ["scan", "suite"], ["suite", "report"], ["report", "close"]],
+    "edges": [["setup", "suite"], ["suite", "inspect"], ["inspect", "report"], ["report", "close"]],
     "groups": [],
 }
 
-INSPECTION_IDS = ["setup", "scan", "suite", "report", "close"]
+INSPECTION_IDS = ["setup", "suite", "inspect", "report", "close"]
 
 
 def ins_snap(topology="present"):
@@ -171,7 +171,7 @@ def ins_snap(topology="present"):
         "kind": "inspection",
         "template": "inspection-lite",
         "project": "sandbar",
-        "stage": "scan",
+        "stage": "inspect",
         "stage_state": "running",
         "status": "running",
         "decision": "",
@@ -191,7 +191,7 @@ def ins_snap(topology="present"):
         },
         "timeline": [
             {"at": "2026-09-16T08:00:00", "stage": "setup", "state": "running", "reason": "泳道准备"},
-            {"at": "2026-09-16T08:01:00", "stage": "scan", "state": "running", "reason": "扫描"},
+            {"at": "2026-09-16T08:01:00", "stage": "inspect", "state": "running", "reason": "巡检审查"},
         ],
         "gate_error": "",
     }
@@ -245,7 +245,7 @@ def main():
                "T1：节点集==阶段声明全集且有序：%r" % (ids,))
             edges = topo.get("edges") if isinstance(topo.get("edges"), list) else []
             ok(len(edges) == 4,
-               "T1：线性 4 边（setup→scan→suite→report→close）：%r" % (edges,))
+               "T1：线性 4 边（setup→suite→inspect→report→close）：%r" % (edges,))
             human = [n for n in nodes if isinstance(n, dict) and n.get("kind") == "human"]
             ok(len(human) == 1 and human[0].get("id") == "close",
                "T1：人门标记恰落 close（kind=human）：%r"

@@ -66,6 +66,10 @@ sys.path.insert(0, os.path.join(REPO, "integration", "t260916-02"))
 sys.path.insert(0, os.path.join(REPO, "server", "engine"))
 
 import lib_relocation as lr  # noqa: E402
+# t260916-22：scan 段退役 → inspect 段（桩 agent）；发现注入走桩缝（方案 §3），
+# 伪造器/复核态访问器单点在 t260916-22/lib_inspect。
+sys.path.insert(0, os.path.join(REPO, "integration", "t260916-22"))
+import lib_inspect as inspect_lib  # noqa: E402
 from lib_inspection import (  # noqa: E402
     RepoTree, StageWorker, cleanup_tickets, die_env, die_fail, note_started_ticket,
     run_client, run_trigger,
@@ -195,20 +199,35 @@ def row_of(rows, tid):
 
 # ---------------------------------------------------------------- 腿
 
-def t1_shape_and_open():
-    """T1 起票×3：t 形号 + 日期段==期号日期段（票号形状腿）。返回 {实例: 票号}。"""
-    out = {}
-    for inst, period in ((INST_A, PERIOD), (INST_B1, PERIOD), (INST_B2, PERIOD)):
-        proc, parsed = trg(["trigger", "--instance", inst, "--period", period])
-        res = (parsed or {}).get("result") if isinstance(parsed, dict) else {}
-        tid = str((res or {}).get("ticket_id") or "")
-        out[inst] = tid
-        check("T1-%s trigger 放行且票号 t 形（日期段=期号段）" % inst,
-              (parsed or {}).get("ok") is True and ticket_date_ok(tid, period),
-              "ok=%r ticket_id=%r out=%s"
-              % ((parsed or {}).get("ok"), tid, (proc.stdout or "")[-160:]))
-        note_started_ticket(tid)
-    return out
+GUARD_REL = "integration/sc_rl_guard.mjs"
+GUARD_ANCHOR_LINE = 5   # assert(label.includes("<token>"), "守卫锚缺失")
+
+
+def guard_anchor_line(token: str) -> str:
+    """守卫文件第 5 行原文（inspect 桩发现的 evidence 引文锚：只可能在本仓对上）。"""
+    return 'assert(label.includes("%s"), "守卫锚缺失");' % token
+
+
+def write_stub_anchor(stub_path: str, token: str):
+    """按仓写桩消息（A/B 时序隔离：inspect 在 spawn 时刻读桩文件）。token 空串=空发现桩。"""
+    fs = [] if not token else [inspect_lib.finding(
+        "%s 仓独特锚漂移" % ("A" if token == TOKEN_A else "B"), GUARD_REL,
+        GUARD_ANCHOR_LINE, guard_anchor_line(token), severity="high", confidence=0.9)]
+    with open(stub_path, "w", encoding="utf-8") as f:
+        f.write(inspect_lib.fenced_message(fs))
+
+
+def t1_open_one(inst: str, period: str) -> str:
+    """T1 起票（单实例）：t 形号 + 日期段==期号日期段（票号形状腿）。"""
+    proc, parsed = trg(["trigger", "--instance", inst, "--period", period])
+    res = (parsed or {}).get("result") if isinstance(parsed, dict) else {}
+    tid = str((res or {}).get("ticket_id") or "")
+    check("T1-%s trigger 放行且票号 t 形（日期段=期号段）" % inst,
+          (parsed or {}).get("ok") is True and ticket_date_ok(tid, period),
+          "ok=%r ticket_id=%r out=%s"
+          % ((parsed or {}).get("ok"), tid, (proc.stdout or "")[-160:]))
+    note_started_ticket(tid)
+    return tid
 
 
 def t2_dedup():
@@ -283,6 +302,14 @@ def t4_scan_own_repo(snap_a, snap_b, tree_a, tree_b):
     check("T4b B 票发现命中 B 仓独特锚且不串 A",
           TOKEN_B in txt_b and TOKEN_A not in txt_b,
           "含B锚=%s 含A锚=%s" % (TOKEN_B in txt_b, TOKEN_A in txt_b))
+    def _states(snap):
+        face = (snap or {}).get("face") if isinstance(snap, dict) else {}
+        fs = (face or {}).get("findings") if isinstance(face, dict) else []
+        return [inspect_lib.finding_state(f) for f in (fs or []) if isinstance(f, dict)]
+    check("T4a2 A 票发现证据复核 verified（基座=A 仓内容级证明）",
+          bool(txt_a.strip()) and "verified" in _states(snap_a), "states=%r" % _states(snap_a))
+    check("T4b2 B 票发现证据复核 verified（基座=B 仓内容级证明）",
+          bool(txt_b.strip()) and "verified" in _states(snap_b), "states=%r" % _states(snap_b))
     bad = [t.label for t in (tree_a, tree_b) if t.tree_unchanged()]
     check("T4c 被扫树逐字节不变（巡检不改码红线）", not bad, "被改树=%s" % bad)
 
@@ -474,13 +501,22 @@ def main() -> int:
             # extra_env=夹具 env 同喂 worker：运行期决议（resolve_inspection_plan）在
             # worker 进程重读声明来源——worker 拿不到夹具注册表就会按真实注册表解析出
             # 「实例未在任何项目声明中」blocked（T4 根因，arbitrate gen2 闭环）
+            stub_path = os.path.join(tmp, "inspect-stub-message.txt")
+            TRIGGER_ENV.update({"SANDBAR_INSPECT_STUB": "1",
+                                "SANDBAR_INSPECT_STUB_FILE": stub_path})
             with StageWorker(queue, extra_env=TRIGGER_ENV):
-                ids = t1_shape_and_open()
-                tid_a, tid_b1, tid_b2 = ids[INST_A], ids[INST_B1], ids[INST_B2]
-                t2_dedup()
-                t3_sa_payload()
+                # t260916-22 桩缝时序：A 锚桩→A 票→落面后换 B 锚桩→B1 票→空桩→B2 票
+                # （inspect 在 spawn 时刻读桩文件；同相对路径两仓都在，引文只可能对上
+                # 本仓内容=引擎 base_dir 正确性的内容级证明）
+                write_stub_anchor(stub_path, TOKEN_A)
+                tid_a = t1_open_one(INST_A, PERIOD)
                 snap_a = poll_snapshot(INST_A, PERIOD, 150, want_findings=True)
+                write_stub_anchor(stub_path, TOKEN_B)
+                tid_b1 = t1_open_one(INST_B1, PERIOD)
                 snap_b = poll_snapshot(INST_B1, PERIOD, 150, want_findings=True)
+                write_stub_anchor(stub_path, "")
+                tid_b2 = t1_open_one(INST_B2, PERIOD)
+                tid_b2 = tid_b2 or ""
                 check("T4前置 两票发现均落面",
                       bool(findings_text(snap_a).strip()) and bool(findings_text(snap_b).strip()),
                       "A=%s B=%s" % (bool(findings_text(snap_a).strip()),

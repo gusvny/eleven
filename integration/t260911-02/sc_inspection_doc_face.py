@@ -28,6 +28,9 @@ import time
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "t260905-03"))
 import lib_inspection as lib  # noqa: E402
+# t260916-22：scan 段退役 → inspect 段（桩 agent）；在线腿发现注入走桩缝（方案 §3）
+sys.path.insert(0, os.path.join(BASE, "t260916-22"))
+import lib_inspect as inspect_lib  # noqa: E402
 
 PID = os.getpid()
 STAMP = "%05d" % PID
@@ -152,6 +155,13 @@ def main() -> int:
     dirty = make_dirty_tree()
     clean = make_clean_tree()
     workdir = tempfile.mkdtemp(prefix="sandbar-docsync-%s-" % STAMP)
+    # t260916-22：在线腿证据锚（夹具树内真实文件行）+ 桩消息文件
+    ANCHOR_REL = "integration/sc_doc_face_anchor.mjs"
+    ANCHOR_L2 = 'assert(label.includes("文档面锚『+ 新建』"), "锚缺失");'
+    dirty.write(ANCHOR_REL,
+                "// 文档面证据锚（t260916-22）\n" + ANCHOR_L2 + "\n")
+    stub_path = inspect_lib.write_stub_file(workdir, "stub-message.txt",
+                                            inspect_lib.fenced_message([]))
     decl_path = os.path.join(workdir, "docs.yaml")
     with open(decl_path, "w", encoding="utf-8") as f:
         f.write(FIXTURE_DECL)
@@ -242,7 +252,16 @@ def main() -> int:
         #      trigger→flow→scan(face=doc)→落账报告（含腿a 注入的命中）→人审收口 ──
         queue = "suyou-insp-docsync-%s" % STAMP
         os.environ["SANDBAR_TASK_QUEUE"] = queue
-        with lib.StageWorker(queue):
+        with lib.StageWorker(queue, extra_env={
+                "SANDBAR_INSPECT_STUB": "1",
+                "SANDBAR_INSPECT_STUB_FILE": stub_path}):
+            with open(stub_path, "w", encoding="utf-8") as f:
+                f.write(inspect_lib.fenced_message([
+                    inspect_lib.finding("文档面幽灵条目（锚真实文件行）", ANCHOR_REL, 2,
+                                        ANCHOR_L2, severity="high", confidence=0.9),
+                    inspect_lib.finding("越界行号（复核必降级）", ANCHOR_REL, 9999, "x",
+                                        severity="med", confidence=0.9),
+                ]))
             proc, parsed = lib.run_trigger(["trigger", "--instance", inst,
                                             "--period", TODAY,
                                             "--repo-root", dirty.root,
@@ -258,14 +277,13 @@ def main() -> int:
                 if led is None:
                     failures.append("腿e 真跑一轮 %ds 内未出落账报告（docs 面扫描链缺口）" % 90)
                 else:
+                    # t260916-22：在线腿改守 inspect 桩发现链（静态扫描退役）——doc 扫描器
+                    # 语义面由离线 CLI 腿 a-d + developer UT 守，本腿不再断 S8/S10 命中
                     blob = json.dumps(led, ensure_ascii=False)
-                    if "ghost-entry.md" not in blob or "unregistered.md" not in blob:
-                        failures.append("腿e 报告缺 S8 注入命中（幽灵/缺登记）——扫描面或面分派缺口")
-                    if "absent-path.md" not in blob:
-                        failures.append("腿e 报告缺 S10 断链命中")
-                    # doc-lifecycle 依赖占位显式标注（不得静默空转）
-                    if "doc-lifecycle" not in blob and "占位" not in blob:
-                        failures.append("腿e 报告无 doc-lifecycle 依赖占位标注（静默空转形态）")
+                    if "文档面幽灵条目" not in blob:
+                        failures.append("腿e 落账缺桩发现（verified 锚真文件行）——inspect→落账链缺口")
+                    if "越界行号" not in blob:
+                        failures.append("腿e 落账缺 unverified 点名条——复核降级不静默丢破")
                     notes.append("腿e 真跑报告 ok（键=%s）" % sorted(led.keys()))
                 # 人审收口：sign approve → gate inspection-close（人不能代 agent 签字的反向：人签）
                 signed = False

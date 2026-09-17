@@ -24,8 +24,8 @@ function ok(cond, msg) {
   if (!cond) { console.error(`FAIL ${msg}`); process.exit(1) }
 }
 
-// ---- 拓扑声明面：段 id 与引擎 _enter 的 stage 值同源（scan/suite/report/close + setup）
-ok(INSPECTION_TOPOLOGY.some(s => s.id === 'scan') && INSPECTION_TOPOLOGY.some(s => s.id === 'close')
+// ---- 拓扑声明面：段 id 与引擎 _enter 的 stage 值同源（t260916-22 起=inspect/suite/report/close + setup）
+ok(INSPECTION_TOPOLOGY.some(s => s.id === 'inspect') && INSPECTION_TOPOLOGY.some(s => s.id === 'close')
   && INSPECTION_TOPOLOGY.some(s => s.id === 'suite') && INSPECTION_TOPOLOGY.some(s => s.id === 'report')
   && INSPECTION_TOPOLOGY.some(s => s.id === 'setup'), '拓扑覆盖引擎全部 stage 值')
 ok(INSPECTION_TOPOLOGY.every(s => typeof s.short === 'string' && s.short !== ''), '每段带短名')
@@ -44,7 +44,7 @@ ok(JSON.stringify(findingsCountOf({ findings: 'garbage' })) === JSON.stringify({
 ok(findingsCountOf({ findings: { high: 'x', med: NaN } }).high === 0, '非数值降 0 不抛')
 
 // ---- inspectionStageShort（拓扑短名 + 未命中截断 + 畸形）
-ok(inspectionStageShort('scan') === '扫描', '拓扑短名命中')
+ok(inspectionStageShort('inspect') === '审查', '拓扑短名命中')
 ok(inspectionStageShort('close') === '收口', 'close 短名')
 ok(inspectionStageShort('mystery') === 'myst…', '未命中阶段截断')
 ok(inspectionStageShort('') === '' && inspectionStageShort(null) === '' && inspectionStageShort(7) === '', '畸形→空串')

@@ -3,7 +3,7 @@
 （灰盒 L3，真 Temporal 私有队列真工作流；suite 腿用快夹具，免 10 分钟套件拖死）。
 
 intent（守护的用户可感知行为/契约）：
-  B1 巡检票自带「跑全集」阶段且顺序为 setup → scan → suite → report → close
+  B1 巡检票自带「跑全集」阶段且顺序为 setup → suite → inspect → report → close
      （宿主令「巡检要有自己的工作流程」的机械面：阶段机不得套用 dev-lane 序列）；
   B2 跑套件发生在**巡检自己的 worktree** 里：票面证据给出 worktree 路径（巡检
      命名空间）与基点 sha，两者真落盘可交叉验证（`git -C <worktree> rev-parse
@@ -236,11 +236,11 @@ def main() -> int:
             # 应停在人门，workflow 仍在，query 可达）
             live_snap = ticket_snapshot(tid, live=True) or {}
             stages = lj.stage_names(live_snap if live_snap.get("timeline") else snap)
-            r.check("B1a 阶段机含巡检自有阶段（setup/scan/suite）",
-                    all(s in stages for s in ("setup", "scan", "suite")),
+            r.check("B1a 阶段机含巡检自有阶段（setup/suite/inspect）",
+                    all(s in stages for s in ("setup", "suite", "inspect")),
                     "实得阶段序列：%s（状态 %r）" % (stages, snap.get("status")))
-            r.check("B1b 阶段顺序 setup → scan → suite → report → close",
-                    stages[:5] == ["setup", "scan", "suite", "report", "close"],
+            r.check("B1b 阶段顺序 setup → suite → inspect → report → close",
+                    stages[:5] == ["setup", "suite", "inspect", "report", "close"],
                     "实得：%s" % stages)
             r.check("B1c 未套用 dev-lane 阶段序列（无 plan/implement/arbitrate/merge 段）",
                     not [s for s in stages if s in ("create_plan", "review_plan", "implement",

@@ -351,16 +351,36 @@ class StageWorker:
 
 
 def inspection_ledger(ticket_id: str):
-    """读巡检票落账（out/inspection/<票号>.json，顶格=face dict：findings/summary/
-    heartbeat/…直挂）。收口后 workflow 已关闭、query 随之不可达——**留存面=落账**
-    （write_inspection_report 收口时再写终态，同票覆盖）。缺文件/坏 JSON 返回 None。"""
+    """读巡检票落账（out/inspection/ 下，顶格=face dict：findings/summary/heartbeat/…直挂）。
+    收口后 workflow 已关闭、query 随之不可达——**留存面=落账**（write_inspection_report
+    收口时再写终态，同票覆盖）。缺文件/坏 JSON 返回 None。
+
+    t260916-22 适配：落账文件名已改按 **实例+期**（inspection-<实例>-<期>.json，
+    t260916-02 落位迁移改名，票号 t 形化后 deadman 台账扫描零改动）——故先按旧约定
+    直读 <票号>.json（旧票重放链兼容），未中则扫描目录按 face.ticket_id 匹配
+    （face 内票号字段是票↔账的承诺关联面）。两形都未中=None。"""
     base = os.environ.get("SANDBAR_INSPECTION_DIR") or os.path.join(TP_DIR, "out", "inspection")
-    path = os.path.join(base, "%s.json" % ticket_id)
+    legacy = os.path.join(base, "%s.json" % ticket_id)
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(legacy, "r", encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
-        return None
+        pass
+    try:
+        for name in sorted(os.listdir(base)):
+            if not name.endswith(".json") or name.endswith("-verdicts.json"):
+                continue
+            path = os.path.join(base, name)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    face = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if isinstance(face, dict) and str(face.get("ticket_id") or "") == ticket_id:
+                return face
+    except OSError:
+        pass
+    return None
 
 
 def scanner_result(parsed):

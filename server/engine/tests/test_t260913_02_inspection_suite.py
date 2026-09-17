@@ -408,12 +408,19 @@ def test_replay_gate_locks_new_commands():
     这条单测锁「三个新命令点都在门后」的结构，防日后有人把 gate 挪掉。"""
     import inspect as _inspect
     assert flow.SUITE_PATCH_ID == "t260913-02-inspection-suite-stage"
+    # t260916-22：run=薄分派（双版本门：SUITE 且 INSPECT → inspect 轨；否则 legacy 轨），
+    # 主体外提两条轨道方法——锁随锚点更新：门在 run、声明决议在两轨道方法内且门后。
     src = _inspect.getsource(flow.InspectionPeriodicWorkflow.run)
     assert "workflow.patched(SUITE_PATCH_ID)" in src
-    # 声明决议活动 + 人门落账，必须在门后
-    assert "if self._patched:" in src and '"resolve_inspection_plan"' in src
+    assert 'workflow.patched(INSPECT_PATCH_ID)' in src, "分派门必须双门"
+    # 新轨道整体在双门之后（run 分派保证），方法内无需再判门；legacy 轨内部混收
+    # 新旧行为（SUITE 门 False 的老票），必须逐点判门——两条都锁。
+    src_new = _inspect.getsource(flow.InspectionPeriodicWorkflow._run_inspect_period_flow)
+    src_old = _inspect.getsource(flow._run_legacy_period_flow)
+    assert '"resolve_inspection_plan"' in src_new
+    assert "if wf._patched:" in src_old      # legacy 外提后 self→wf（模块级函数）
     idx_gate = src.index("self._patched = workflow.patched(SUITE_PATCH_ID)")
-    assert idx_gate < src.index('"resolve_inspection_plan"')
+    assert idx_gate < src.index("_run_inspect_period_flow")
     blk = _inspect.getsource(flow.InspectionPeriodicWorkflow._blocked)
     # t260917-02（R7）：_blocked 增 write_ledger 开关（重定向失败路径不落账）——
     # 落账仍严格在 patched 门内，只是多了显式开关
@@ -440,10 +447,12 @@ def test_ledger_doc_carries_stage_machine_evidence():
     for key in ("stage", "stage_state", "status", "timeline"):
         assert '"%s"' % key in src, key
     # 四处落账点都走 _ledger_doc（report 段 / 人门落点 / 收口 / blocked），不留裸 self.face 落账
+    # t260916-22：落账点集中在 _finalize_and_close（两轨道共用；run 已薄分派）。
+    fin_src = _inspect.getsource(flow.InspectionPeriodicWorkflow._finalize_and_close)
     run_src = _inspect.getsource(flow.InspectionPeriodicWorkflow.run)
-    assert 'args=[self.face]' not in run_src
-    assert run_src.count("_ledger_doc()") == 2      # report 段 + 收口
-    assert "_write_ledger()" in run_src             # 人门落点
+    assert 'args=[self.face]' not in run_src and 'args=[self.face]' not in fin_src
+    assert fin_src.count("_ledger_doc()") == 2      # report 段 + 收口
+    assert "_write_ledger()" in fin_src             # 人门落点
     blk = _inspect.getsource(flow.InspectionPeriodicWorkflow._blocked)
     assert "_write_ledger()" in blk                 # blocked 落账（dead-man 列表可读面）
 
@@ -528,8 +537,10 @@ def test_decl_path_travels_with_trigger_but_not_schedule():
     assert "decl_path" not in cron_block
     wsrc = _inspect.getsource(trig._schedule_up_watcher)
     assert "decl_path=abs_decl_path(args.decl_path)" in wsrc
-    rsrc = _inspect.getsource(flow.InspectionPeriodicWorkflow.run)
-    assert '\"decl_path\": inp.decl_path' in rsrc
+    # t260916-22：run 薄分派后，声明路径透传锚定两条轨道方法（两轨道都读声明）。
+    for track_src in (_inspect.getsource(flow.InspectionPeriodicWorkflow._run_inspect_period_flow),
+                      _inspect.getsource(flow._run_legacy_period_flow)):
+        assert '"decl_path": inp.decl_path' in track_src
 
 
 def test_abs_decl_path_normalization():

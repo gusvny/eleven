@@ -255,9 +255,14 @@ def exec_agent(container: str, cwd: Path, cmd: List[str], env_source: Dict[str, 
 def spawn_agent(cmd: List[str], cwd: Path, env: Dict[str, str], logf,
                 ticket_id: str, stage_tag: str, project: str = "",
                 workspace_kind: str = "", lane: Optional[Path] = None,
-                log: Optional[Callable[[str], None]] = None) -> AgentProc:
-    """三分叉点唯一的 agent 进程启动口。host=旧路径逐字节保真；docker=每票一容器。"""
-    mode = runtime_mode()
+                log: Optional[Callable[[str], None]] = None,
+                force_host: bool = False) -> AgentProc:
+    """三分叉点唯一的 agent 进程启动口。host=旧路径逐字节保真；docker=每票一容器。
+
+    force_host（t260916-22 巡检 inspect 段）：显式钉 host 形态——巡检 agent 只读
+    （read-only 预设 pin），docker 容器反而让非 suite 期的真仓审查基座不可见（红线 2
+    不挂工作区以外宿主路径）；host+read-only pin=最小动面。其它调用点缺省 False=不变。"""
+    mode = "host" if force_host else runtime_mode()
     if mode == "host":
         if log:
             log("[agent-runtime] host 形态 spawn（%s，cwd=%s）" % (stage_tag, cwd))

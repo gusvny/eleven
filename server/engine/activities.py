@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import time
@@ -373,11 +374,19 @@ async def write_scan_report(report: ScanReport) -> Dict[str, Any]:
 # Thin shell — the pure functions live in inspection_scan.py / inspection_flow.py;
 # business refusals return ok=False for the workflow to decide, and only true
 # infrastructure failures raise so Temporal retries.
+#
+# 【退役注记（t260916-22，宿主令「不需要这个静态扫描，巡检要用 agent 来做」）】
+# 本活动已从生产路径摘除：InspectionPeriodicWorkflow 的新票走 inspect 段
+# （run_inspection_inspect，agent_activities.py，INSPECT_PATCH_ID 门内）。本活动与
+# 四个静态扫描器文件**保留一版**，唯一消费者=老在途票 replay（Temporal 重放历史里
+# 已记录的 run_inspection_scan 调用必须仍能匹配）——新代码禁接线（退役票号
+# t260916-22）。S1~S4 自此不再产出；274 条旧发现整体作废不迁移（宿主裁定④）。
 # ========================================================================================
 
 @activity.defn
 async def run_inspection_scan(args: Dict[str, Any]) -> Dict[str, Any]:
-    """Inspection scan by declared face (ticket 2, t260910-09; rework r2 semantics):
+    """【已退役（t260916-22）】Inspection scan by declared face (ticket 2, t260910-09;
+    rework r2 semantics):
       - face=test (also the default / missing key) → ticket-1 test-face scan, behavior
         identical to before ticket 2 (existing callers/scenarios unchanged);
       - face=doc → docs-face scanner (t260911-02); face=stage → stage-capacity
@@ -433,6 +442,107 @@ async def run_inspection_scan(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": True, "result": result}
     except ScanError as e:
         return {"ok": False, "error": str(e)}
+
+
+@activity.defn
+async def verify_inspection_findings(args: Dict[str, Any]) -> Dict[str, Any]:
+    """report 段机械复核链的 IO 壳（t260916-22）：铸 id 后的 agent 发现 → 证据复核 →
+    跨期去重/假报压制 → 预算截断 → 汇总/心跳。判定全部在 inspection_inspect 纯函数
+    （UT 主面）；本活动只做台账 IO（读上期台账+裁定台账），失败=ok=False 点名。
+
+    上期台账/裁定台账读不出 → 对应去重腿缺席但 meta 点名（不静默当空集，R7②）。
+    复核不过的发现**保留**（降级 unverified 并逐项点名，不静默丢——工单要点②）。"""
+    from inspection_inspect import (  # 懒 import：同 run_inspection_scan 防环先例
+        apply_budget, collect_fake_ids, dedupe_and_suppress, heartbeat_of,
+        read_prev_ledger_ids, recheck_evidence, summarize_counts)
+
+    instance_id = str(args.get("instance_id") or "")
+    period = str(args.get("period") or "")
+    base_dir = str(args.get("base_dir") or "")
+    findings = args.get("findings")
+    max_findings = int(args.get("max_findings") or 0)
+    # 台账目录三优先：显式 args > 进程 env（场景/UT 运行时注入）> shared 常量
+    # （import 时刻固化——env 注入晚于 import 的形态必须活，故每次调用重读 env）。
+    from shared import INSPECTION_DIR
+    ledger_dir = Path(str(args.get("ledger_dir")
+                          or os.environ.get("SANDBAR_INSPECTION_DIR")
+                          or INSPECTION_DIR))
+
+    if not instance_id or not period or not base_dir:
+        return {"ok": False, "error": "verify 输入缺 instance/period/base_dir（fail-closed）"}
+    if not isinstance(findings, list) or not all(isinstance(f, dict) for f in findings):
+        return {"ok": False, "error": "verify 输入 findings 畸形（缺列表或条目非对象）"}
+    if not Path(base_dir).is_dir():
+        return {"ok": False, "error": "审查基座目录不存在：%s（证据复核无从做起）" % base_dir}
+
+    prev_ids, prev_note = read_prev_ledger_ids(ledger_dir, instance_id, period)
+    fake_ids, fake_notes = collect_fake_ids(ledger_dir, instance_id, period)
+    findings = recheck_evidence(findings, base_dir)
+    dedupe_and_suppress(findings, prev_ids or set(), fake_ids)
+    if max_findings > 0:
+        findings, budget_meta = apply_budget(findings, max_findings)
+    else:
+        budget_meta = {"truncated": 0}
+    counts = summarize_counts(findings)
+    n_unverified = sum(1 for f in findings if f.get("verified") == "unverified")
+    meta = {
+        "base_dir": base_dir,
+        "prev_ledger": prev_note,
+        "fake_notes": fake_notes,
+        "fake_pool": len(fake_ids),
+        "deduped": sum(1 for f in findings if f.get("recurring")),
+        "suppressed": sum(1 for f in findings if f.get("suppressed")),
+        "unverified": n_unverified,
+        **budget_meta,
+    }
+    activity.logger.info(
+        "巡检发现复核完成：%d 条（verified=%d unverified=%d recurring=%d suppressed=%d "
+        "truncated=%s）heartbeat=%s", len(findings),
+        len(findings) - n_unverified - int(meta["deduped"]) - int(meta["suppressed"]),
+        n_unverified, meta["deduped"], meta["suppressed"], budget_meta["truncated"],
+        heartbeat_of(findings))
+    return {"ok": True, "result": {"findings": findings, "summary": counts,
+                                   "heartbeat": heartbeat_of(findings), "meta": meta}}
+
+
+@activity.defn
+async def write_inspection_verdicts(args: Dict[str, Any]) -> Dict[str, Any]:
+    """收口段把票面裁定批量落 verdicts 台账（t260916-22 要点⑥的持久面）。
+
+    票内 signal（finding_verdict）只改内存票面（回放安全零活动）；跨期假报压制
+    消费的是 verdicts 台账（collect_fake_ids），所以在收口时一次写齐。幂等=同
+    (finding_id, source_ticket) 已在册跳过（Temporal 活动至少一次语义，重试不
+    重复落账）；坏台账=ValueError（Temporal 重试同败→可见不静默）。"""
+    from datetime import datetime, timezone
+    from inspection_inspect import append_verdict_entry, verdicts_ledger_name
+
+    instance_id = str(args.get("instance_id") or "")
+    period = str(args.get("period") or "")
+    entries = args.get("entries")
+    if not instance_id or not period:
+        return {"ok": False, "error": "verdicts 落账缺 instance/period（fail-closed）"}
+    if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+        return {"ok": False, "error": "verdicts 落账 entries 畸形（缺列表或条目非对象）"}
+    path = Path(str(args.get("ledger_dir") or INSPECTION_DIR)) / verdicts_ledger_name(
+        instance_id, period)
+    written, skipped = 0, 0
+    for e in entries:
+        entry = {"finding_id": str(e.get("finding_id") or ""),
+                 "verdict": str(e.get("verdict") or ""),
+                 "who": str(e.get("who") or ""),
+                 "note": str(e.get("note") or ""),
+                 "source_ticket": str(e.get("source_ticket") or ""),
+                 "booked_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        if not entry["finding_id"] or not entry["verdict"]:
+            return {"ok": False,
+                    "error": "verdicts 落账条目缺 finding_id/verdict：%r" % (e,)}
+        if append_verdict_entry(path, entry, dedupe=True):
+            written += 1
+        else:
+            skipped += 1
+    activity.logger.info("巡检裁定落账 %s（新 %d / 幂等跳过 %d）", path, written, skipped)
+    return {"ok": True, "result": {"path": str(path), "written": written,
+                                   "skipped": skipped}}
 
 
 @activity.defn
@@ -662,4 +772,9 @@ ALL_ACTIVITIES = [
     run_inspection_deadman,
     # t260916-02：spawner→真票起票薄壳（cron 调度铸 t 形号的载体）
     spawn_inspection_period,
+    # t260916-22：inspect 段 report 面机械复核（证据复核/去重压制/预算/汇总）；
+    # run_inspection_scan 已退役（保留服务老票 replay，见其退役注记）。
+    verify_inspection_findings,
+    # t260916-22：发现级裁定的持久面（收口一次写齐；票内 signal 只改内存）。
+    write_inspection_verdicts,
 ]

@@ -33,8 +33,11 @@ LEDGER_NAME_RE = re.compile(
 
 #: 台账文件名：inspection-<实例>-<期号>.json（期号=YYYYMMDD 或 YYYYMMDD-<bucket>）。
 #: 套件回执 = inspection-<实例>-<期号>-suite.json（已知非台账件，显式忽略，不进畸形桶）。
+#: 裁定台账 = inspection-<实例>-<期号>-verdicts.json（t260916-22 发现级裁定；同上忽略——
+#: 后缀常量单源=inspection_inspect，两模块各持同名值=双真源锁由 UT 钉）。
 LEDGER_SUFFIX = ".json"
 SUITE_RECEIPT_SUFFIX = "-suite.json"
+VERDICTS_RECEIPT_SUFFIX = "-verdicts.json"
 
 #: 套件红项单列上限（防票面洪泛）：超出部分聚合成一条**可下钻**的发现（带回执文件路径，
 #: 逐场景明细在回执 JSON 里）——聚合条不是「吃掉红项」，是换承载面（验收 B/D）。
@@ -135,8 +138,9 @@ def ledger_periods(ledger_dir: Any, instance_id: str) -> Dict[str, Any]:
         name = p.name
         if not name.endswith(LEDGER_SUFFIX) or not name.startswith("inspection-"):
             continue
-        if name.endswith(SUITE_RECEIPT_SUFFIX):
-            continue  # 已知非台账件（套件回执）
+        if name.endswith(SUITE_RECEIPT_SUFFIX) \
+                or name.endswith(VERDICTS_RECEIPT_SUFFIX):
+            continue  # 已知非台账件（套件回执 / t260916-22 裁定台账）
         m = LEDGER_NAME_RE.match(name)
         if m is not None:
             if m.group("inst") == inst:

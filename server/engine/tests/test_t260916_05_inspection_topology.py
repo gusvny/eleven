@@ -165,7 +165,8 @@ def test_export_inspection_contract_shape():
     assert optional == {"setup": tt.OPT_SUITE_TIER, "suite": tt.OPT_SUITE_TIER}
     # kind 投影：close=human，其余 gate（巡检无 agent 段）
     kinds = {n["id"]: n["kind"] for n in topo["nodes"]}
-    assert kinds == {"setup": "gate", "scan": "gate", "suite": "gate",
+    # t260916-22 段序：scan 段退役、inspect 段（只读 agent 审查）接位
+    assert kinds == {"setup": "gate", "suite": "gate", "inspect": "gate",
                      "report": "gate", "close": "human"}
 
 
@@ -217,13 +218,16 @@ def test_source_lock_suite_tier_short_circuit():
     `_setup_lane(` 调用每次出现都在 `if run_suite:` 块内——档位关=段不存在。"""
     block = _workflow_class_block()
     blocks = _run_suite_blocks(block)
-    assert len(blocks) >= 2, "run() 至少两处 if run_suite: 守卫（搭道/跑套件）"
+    # t260916-22：新轨道把搭道与跑套件合进同一个守卫块（旧轨道的两处守卫已随
+    # legacy 外提出类块）——守卫块 ≥1 且段位调用全部在块内即锁住短路形态。
+    assert len(blocks) >= 1, "类块内至少一处 if run_suite: 守卫（新轨道 setup/suite）"
     for needle in ('_enter("suite"', "._setup_lane("):
         assert _occurrence_in_any(block, needle, blocks), \
             "%s 出现在 if run_suite: 守卫之外（套件档短路形态被破坏）" % needle
-    # 反向自证：必经段 scan 不得被锁进守卫块（守卫块提取没有吞掉整段 run()）
-    assert not _occurrence_in_any(block, '_enter("scan"', blocks), \
-        "scan 是必经段，不得位于 if run_suite: 块内（块提取口径自检）"
+    # 反向自证：必经段 inspect 不得被锁进守卫块（守卫块提取没有吞掉整段流程；
+    # t260916-22 起 scan 段退役——旧轨道整体外提为模块级函数，不在类块内）
+    assert not _occurrence_in_any(block, '_enter("inspect"', blocks), \
+        "inspect 是必经段，不得位于 if run_suite: 块内（块提取口径自检）"
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +252,7 @@ def _dropped_stage():
 def test_mutation_legs_lock_turns_red():
     topo = tt.export_template_topology("inspection-lite")
     cases = [
-        ("改 name", _mutated_stages(idx=1, field="name", value="改过的扫描")),
+        ("改 name", _mutated_stages(idx=2, field="name", value="改过的审查")),
         ("变 kind（close 降为程序段）", _mutated_stages(idx=4, field="exit", value="")),
         ("翻 suite_only（setup 变必经）", _mutated_stages(idx=0, field="suite_only", value=False)),
         ("断 next 链", _mutated_stages(idx=2, field="next", value="close")),

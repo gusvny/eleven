@@ -54,6 +54,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from inspection_inspect import (DEFAULT_INSPECT_TIMEOUT_MIN, DEFAULT_MAX_FINDINGS,
+                                PROFILE_FACES)
+
 DECL_FILE_NAME = "inspection.yaml"
 
 # kind vocabulary: KNOWN = the full documented set (legal to appear in a declaration),
@@ -72,7 +75,15 @@ TICKET_COUNT_SOURCES = ("archive-dir",)
 # 扫描面词表（t260911-02）：实例可声明 scan_face 指定跑哪个扫描器（「跑哪个巡检面」
 # 由项目声明决定——拍板③原文）；缺省 test（票① 行为兼容，零声明实例不回退不报错）。
 # stage 面接线（t260915-18）：台面容量可见性（stage_docker inventory 只读清点）。
+# t260916-22：静态扫描器退役后，本表语义延续为「巡检面」词表（scan_face 声明键保留，
+# inspect_profile 缺省回落它）；与 inspect 分面词表 PROFILE_FACES 的同集锁在下方。
 WIRED_FACES = ("test", "doc", "stage", "mechanism", "simplify")
+# 同集锁（t260916-22）：WIRED_FACES（声明侧面词表）与 PROFILE_FACES（prompt 分面清单
+# 键集，真源=inspection_inspect）此刻必须同集——扩面两表同扩，漂移=import 即炸
+# （t260916-05 双真源锁同款纪律；这里是纯模块级断言，零成本）。
+if set(WIRED_FACES) != set(PROFILE_FACES):
+    raise AssertionError("WIRED_FACES %s 与 inspect 分面词表 PROFILE_FACES %s 漂移——"
+                         "扩面须两表同扩（t260916-22）" % (WIRED_FACES, PROFILE_FACES))
 # 套件词表（t260913-02）：实例可声明 suite 指定「本期是否在自己的泳道里跑集成全集」。
 # 现在只接 full 一档——全集就是全集，不接受任何「抽稀/跳场景」的值（红线：不得以
 # 跳过或删减场景换取跑通）；缺省空=不跑套件（票① 行为兼容，零声明实例不报错不回退）。
@@ -121,6 +132,13 @@ class InstanceSpec:
     scan_face: str = "test"
     # 套件档（t260913-02）：空=不跑套件；"full"=本期在巡检自有泳道里跑集成全集。
     suite: str = ""
+    # 巡检预算三键（t260916-22，宿主裁定③：预算可配置起步 40 条/30 分钟 + 分面清单）：
+    #   - max_findings：本期新发现条数上限（超截并注明，recurring/压制不占预算）；
+    #   - inspect_timeout_min：inspect 段 agent 预算（分钟；超时=「agent 未完成」不假绿）；
+    #   - inspect_profile：prompt 分面清单（PROFILE_FACES 词表；空=回落 scan_face）。
+    max_findings: int = DEFAULT_MAX_FINDINGS
+    inspect_timeout_min: int = DEFAULT_INSPECT_TIMEOUT_MIN
+    inspect_profile: str = ""
     # 调度时区（t260913-02 实现段）：空=Temporal 缺省（UTC）；填 IANA 名（如 Asia/Shanghai）
     tz: str = ""
     workflow: str = ""
@@ -419,10 +437,14 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
         if not isinstance(item, dict):
             raise DeclError("%s：实例必须是映射（got %s）" % (where, type(item).__name__))
         unknown = sorted(set(item) - {"id", "enabled", "schedule", "workflow", "template",
-                                      "scan_face", "suite", "tz", "project_key"})
+                                      "scan_face", "suite", "tz", "project_key",
+                                      "max_findings", "inspect_timeout_min",
+                                      "inspect_profile"})
         if unknown:
             raise DeclError("%s：未知实例字段 %s（合法：id/enabled/schedule/workflow/template/"
-                            "scan_face/suite/tz/project_key（实例级项目身份，t260915-20）；"
+                            "scan_face/suite/tz/project_key（实例级项目身份，t260915-20）/"
+                            "max_findings/inspect_timeout_min/inspect_profile（inspect 段预算三键，"
+                            "t260916-22）；"
                             "face 已于 260910 巡检校准票 t260910-11 除名——零消费者，旧声明含 face 一律拒收点名）"
                             % (where, unknown))
         inst_id = _req_str(where, item, "id")
@@ -457,6 +479,29 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
             tz = _req_str(where, item, "tz")
             if not TZ_RE.match(tz):
                 raise DeclError("%s：tz %r 形态非法（IANA 名，如 Asia/Shanghai）" % (where, tz))
+        # inspect 段预算三键（t260916-22）。YAML subset 无类型推断（scalar 逐字取 str），
+        # 数字键走词法+范围校验（bool 是 int 子类，一并排除）。
+        max_findings = DEFAULT_MAX_FINDINGS
+        if item.get("max_findings") is not None:
+            raw_mf = _req_str(where, item, "max_findings")
+            if not re.match(r"^\d+$", raw_mf) or not (1 <= int(raw_mf) <= 10000):
+                raise DeclError("%s：max_findings %r 非法（正整数 1~10000；本项=本期新发现"
+                                "条数上限，超出按 severity 截断并注明）" % (where, raw_mf))
+            max_findings = int(raw_mf)
+        inspect_timeout_min = DEFAULT_INSPECT_TIMEOUT_MIN
+        if item.get("inspect_timeout_min") is not None:
+            raw_to = _req_str(where, item, "inspect_timeout_min")
+            if not re.match(r"^\d+$", raw_to) or not (1 <= int(raw_to) <= 720):
+                raise DeclError("%s：inspect_timeout_min %r 非法（分钟，1~720；本项=inspect"
+                                " 段 agent 预算，超时=「agent 未完成」不假绿）" % (where, raw_to))
+            inspect_timeout_min = int(raw_to)
+        inspect_profile = ""
+        if item.get("inspect_profile") is not None:
+            inspect_profile = _req_str(where, item, "inspect_profile")
+            if inspect_profile not in PROFILE_FACES:
+                raise DeclError("%s：inspect_profile %r 未接线（可指名：%s）——分面清单真源"
+                                "在引擎（inspection_inspect.PROFILE_TEXTS）" %
+                                (where, inspect_profile, "、".join(PROFILE_FACES)))
         kind, cron, n, source, project_key = _validate_schedule(where, item.get("schedule"), enabled)
         # 实例级项目身份必填（t260915-20）：校验放字段链**最后**——既有负腿事由
         # （缺 source、未知 kind、face 除名、cron 非法…）照旧先爆，断言语义零偷换；
@@ -473,7 +518,9 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
             id=inst_id, enabled=enabled, kind=kind, cron=cron, n=n,
             source=source, project_key=project_key,
             instance_project_key=identity_key, scan_face=scan_face,
-            suite=suite, tz=tz, workflow=workflow_name, template=template))
+            suite=suite, tz=tz, workflow=workflow_name, template=template,
+            max_findings=max_findings, inspect_timeout_min=inspect_timeout_min,
+            inspect_profile=inspect_profile))
     return InspectionDecl(schema=SCHEMA, instances=instances, source=source)
 
 
@@ -526,6 +573,11 @@ def _plan_from_decl(decl: "InspectionDecl", instance_id: str) -> Dict[str, Any]:
     return {"ok": True, "instance_id": it.id, "enabled": True, "suite": it.suite,
             "run_suite": bool(it.suite), "scan_face": it.scan_face, "cron": it.cron,
             "tz": it.tz,
+            # inspect 段预算三键（t260916-22）：profile 空=回落 scan_face（consume 侧
+            # workflow 定，声明零重复）。
+            "inspect": {"max_findings": it.max_findings,
+                        "timeout_min": it.inspect_timeout_min,
+                        "profile": it.inspect_profile},
             "kind": it.kind, "workflow": it.workflow, "template": it.template,
             # t260917-02（R2 身份回退链）：实例级项目身份随 plan 出——旧调度 payload 缺
             # project_key 时（260917 实况），spawn 活动按本键回退决议归属，起票 SA

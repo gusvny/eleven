@@ -6277,14 +6277,14 @@ const INSPECTION_TOPOLOGY = [
 		short: "备道"
 	},
 	{
-		id: "scan",
-		name: "扫描",
-		short: "扫描"
-	},
-	{
 		id: "suite",
 		name: "巡检泳道套件",
 		short: "套件"
+	},
+	{
+		id: "inspect",
+		name: "巡检审查",
+		short: "审查"
 	},
 	{
 		id: "report",

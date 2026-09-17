@@ -103,7 +103,7 @@ ok(INSPECTION_TOPOLOGY.every(s => typeof s.short === 'string' && s.short !== '')
 // ---- 变异自证腿：改声明不改宿主表 → 锁必红 ----
 
 {
-  const renamed = engineStages.map(s => (s.id === 'scan' ? { ...s, name: '改过的扫描' } : s))
+  const renamed = engineStages.map(s => (s.id === 'inspect' ? { ...s, name: '改过的审查' } : s))
   ok(lockStagesToTopology(renamed, INSPECTION_TOPOLOGY).length > 0, '变异：改引擎 name → 红')
   const inserted = [...engineStages.slice(0, 1),
     { id: 'ghost', name: '幽灵段' }, ...engineStages.slice(1)]

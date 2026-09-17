@@ -375,10 +375,11 @@ def test_agent_activities_接线守卫():
     """传输层收口的机械防漂移：三点走 spawn_agent；agent 进程零直 Popen；
     reap 全走 AgentProc（_reap_agent_proc 仅剩定义与 host 迟 import）。"""
     src = (HERE.parent / "agent_activities.py").read_text()
-    assert src.count("agent_runtime.spawn_agent(") == 3
+    # t260916-22：第四点=巡检 inspect 段（run_inspection_inspect，force_host 只读）。
+    assert src.count("agent_runtime.spawn_agent(") == 4
     assert "subprocess.Popen(cmd" not in src
     assert "_reap_agent_proc(proc," not in src   # 调用形态清零（定义行签名不算）
-    assert src.count("proc.reap(") == 6
+    assert src.count("proc.reap(") == 8          # +inspect 段（超时腿 + finally 兜底）
     assert "agent_runtime.sandbox_pin_yaml()" in src
     assert src.count("agent_runtime.remove_container(") == 2   # teardown_lane + 内联清理
     assert "agent_runtime.gc_stale_containers(" in src          # prepare_workspace 扫尾

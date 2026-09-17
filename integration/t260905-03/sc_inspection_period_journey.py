@@ -23,6 +23,10 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lib_inspection as lib
+# t260916-22：scan 段退役 → inspect 段（桩 agent）。真链旅程的发现注入走桩缝
+# （SANDBAR_INSPECT_STUB=1+STUB_FILE，方案 §3 缝名）；伪造器单点在 t260916-22/lib_inspect。
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "t260916-22"))
+import lib_inspect as inspect_lib  # noqa: E402
 
 # 实例 id 带进程级唯一戳：每期一票按「实例 id+期号」去重——共享台上重跑旅程/与
 # decl-gate 的 integration-tests 同实例同日会撞去重回执（拿到已收口旧票=假门误报），
@@ -74,7 +78,8 @@ def poll(fn, timeout, interval):
     return False, last
 
 
-def journey_one(tag, instance, scan_root, workdir, failures, expect_findings):
+def journey_one(tag, instance, scan_root, workdir, failures, expect_findings,
+                expect_unverified=False):
     """单实例全链：trigger(--decl-path/--repo-root 注入)→开票→清单落票面→人门两拍→收口。"""
     decl = os.path.join(workdir, "two.yaml")
     proc, parsed = lib.run_trigger(
@@ -129,6 +134,20 @@ def journey_one(tag, instance, scan_root, workdir, failures, expect_findings):
         if face.get("heartbeat") is not True:
             failures.append("%s 零发现票 heartbeat 非 true（心跳证明面破）：%r"
                             % (tag, face.get("heartbeat")))
+
+    # t260916-22：用户可见段名=inspect（scan 段退役面）；坏证据发现降级 unverified+点名
+    stages = [str(e.get("stage") or "") for e in (snap.get("timeline") or [])
+              if isinstance(e, dict)]
+    if stages and "inspect" not in stages:
+        failures.append("%s timeline 无 inspect 段（scan 退役后段名可见面破）：%r" % (tag, stages))
+    if expect_unverified:
+        unv = [f for f in (findings or []) if isinstance(f, dict)
+               and inspect_lib.finding_state(f) == "unverified"]
+        if not unv:
+            failures.append("%s 混合桩的坏证据发现未降级 unverified（证据复核面缺席）：%r"
+                            % (tag, [f.get("subject") for f in findings if isinstance(f, dict)]))
+        elif not any(inspect_lib.entry_reason(f) for f in unv):
+            failures.append("%s unverified 条目零 reason（逐项点名面缺席，静默丢）" % tag)
 
     # 人门两拍·第①拍：未签字不终态（假门=自动放行在此现形）
     def is_terminal():
@@ -192,15 +211,36 @@ def main() -> int:
         f.write(TWO_INSTANCE_DECL)
     drift = lib.ki051_high_tree("journey-drift")
     clean = lib.clean_tree("journey-clean")
+    # t260916-22：inspect 段发现注入=桩消息文件（内容在每腿触发前重写——inspect 活动
+    # 在 spawn 时刻读取）；证据锚=夹具树内真实文件行（复核才有真过/真不过两腿）。
+    stub_path = inspect_lib.write_stub_file(workdir, "stub-message.txt",
+                                            inspect_lib.fenced_message([]))
+    _ANCHOR_REL = "integration/sc_inspect_anchor.mjs"
+    _ANCHOR_L2 = "const guardLabel = await page.locator('.session-create').innerText();"
+    drift.write(_ANCHOR_REL,
+                "// 巡检证据锚夹具（t260916-22）\n" + _ANCHOR_L2 + "\n")
+    inspect_stub_env = {"SANDBAR_INSPECT_STUB": "1",
+                        "SANDBAR_INSPECT_STUB_FILE": stub_path}
     try:
         # 自供给 worker（tests-fault 供给缺口自补）：本票 workflow 未合并前台上常驻
         # worker 不认识它——票开得出但 query/收口无人执行；仓内先例=ticket-lifecycle
         # 起 worker 起票。__exit__ 必回收（TERM→KILL）。合并后主仓 worker 承接，仍兼容。
-        with lib.StageWorker(private_queue):
+        with lib.StageWorker(private_queue, extra_env=inspect_stub_env):
             # 全链·种漂移实例：开票→发现落面（high+溯源建议）→人门两拍→收口→发现留存
+            with open(stub_path, "w", encoding="utf-8") as f:
+                f.write(inspect_lib.fenced_message([
+                    inspect_lib.finding("锚漂移高危（建议合格）", _ANCHOR_REL, 2, _ANCHOR_L2,
+                                        severity="high", confidence=0.9),
+                    inspect_lib.finding("低置信观察（不建议）", _ANCHOR_REL, 2, "const guardLabel",
+                                        severity="med", confidence=0.3),
+                    inspect_lib.finding("越界行号（复核必降级）", _ANCHOR_REL, 9999, "x",
+                                        severity="high", confidence=0.9),
+                ]))
             tid_a = journey_one("journey[integration-tests]", "integration-tests-%05d" % _STAMP, drift.root,
-                                workdir, failures, expect_findings=True)
+                                workdir, failures, expect_findings=True, expect_unverified=True)
             # 全链·干净实例：零发现心跳票照开照收（全绿期=心跳证明）
+            with open(stub_path, "w", encoding="utf-8") as f:
+                f.write(inspect_lib.fenced_message([]))
             tid_b = journey_one("journey[docs-sync]", "docs-sync-%05d" % _STAMP, clean.root,
                                 workdir, failures, expect_findings=False)
             if tid_a and tid_b and tid_a == tid_b:

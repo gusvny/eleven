@@ -32,8 +32,10 @@ export const INSPECTION_TOPOLOGY: {
   short: string
 }[] = [
   { id: 'setup', name: '泳道准备', short: '备道' },
-  { id: 'scan', name: '扫描', short: '扫描' },
   { id: 'suite', name: '巡检泳道套件', short: '套件' },
+  // t260916-22：scan 段退役、inspect 段（只读 agent 审查）接位——本表随引擎
+  // STAGES 同步改（一致性锁=t260916-05-inspection-topology-lock.mjs）。
+  { id: 'inspect', name: '巡检审查', short: '审查' },
   { id: 'report', name: '落账', short: '落账' },
   { id: 'close', name: '人审收口', short: '收口' },
 ]

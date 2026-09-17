@@ -43,8 +43,8 @@ ok(sig is not None and re.search(r"project\s*[:=]", sig.group(1)) is not None,
    "_prepare_agent_spawn 签名含 project 参数")
 
 # 2/3 逐调用点接线：函数体内先 fetch 再传 project=project
-ok(src.count("_prepare_agent_spawn(") == 4,  # 1 定义 + 3 调用（t260910-14：suggest_next 退役后 4→3）
-   "调用点数 = 3（实际 _prepare_agent_spawn( 出现 %d 次，含定义）" % src.count("_prepare_agent_spawn("))
+ok(src.count("_prepare_agent_spawn(") == 5,  # 1 定义 + 4 调用（t260916-22：巡检 inspect 段 run_inspection_inspect 新增第 4 调用点）
+   "调用点数 = 4（实际 _prepare_agent_spawn( 出现 %d 次，含定义）" % src.count("_prepare_agent_spawn("))
 
 # 按函数切块（顶层 async def 边界），逐块查接线
 funcs = re.split(r"\n(?=async def |def )", src)
@@ -82,6 +82,18 @@ if fetch:
     ok("except" in fetch and "return \"\"" in fetch.replace("'", '"'),
        "_fetch_ticket_project 异常降级返回空串（软失败，不弄挂 spawn）")
     ok("timeout" in fetch, "_fetch_ticket_project 查询带超时")
+
+# 5 巡检 inspect 段（t260916-22）第 4 调用点：project 不走 _fetch_ticket_project——
+# 巡检票身份=起票时刻声明的实例 project_key（t260915-20），由 workflow 输入透传进活动
+# args；接线语义同守：spawn 必须带 project=project，且来源钉死在活动 args（防静默回落
+# legacy 全局凭据）。
+insp_body = next((f for f in funcs if f.startswith("async def run_inspection_inspect(")), None)
+ok(insp_body is not None, "run_inspection_inspect：函数在位（第 4 调用点 host）")
+if insp_body:
+    ok('args.get("project_key")' in insp_body,
+       "inspect：project 源=活动 args.project_key（巡检票身份语义，t260915-20）")
+    ok(re.search(r"_prepare_agent_spawn\([^)]*project\s*=\s*project", insp_body, re.S) is not None,
+       "inspect：_prepare_agent_spawn 传 project=project")
 
 print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

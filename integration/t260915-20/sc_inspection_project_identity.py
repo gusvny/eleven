@@ -67,6 +67,10 @@ from lib_inspection import (  # noqa: E402
     RepoTree, StageWorker, cleanup_tickets, die_env, die_fail, note_started_ticket,
     run_client, run_trigger,
 )
+# t260916-22：scan 段退役 → inspect 段（桩 agent）；发现注入走桩缝（方案 §3），
+# 伪造器/复核态访问器单点在 t260916-22/lib_inspect。
+sys.path.insert(0, os.path.join(REPO, "integration", "t260916-22"))
+import lib_inspect as inspect_lib  # noqa: E402
 
 try:
     import temporalio  # noqa: F401——J4 直发 SDK 需要；缺席=环境红
@@ -223,12 +227,22 @@ def precheck_namespace():
 
 # ---------------------------------------------------------------- 夹具
 
+GUARD_REL = "integration/sc_pk20_guard.mjs"
+GUARD_ANCHOR_LINE = 5   # assert(label.includes("<token>"), "守卫锚缺失")
+
+
+def guard_anchor_line(token: str) -> str:
+    """守卫文件第 5 行原文（inspect 桩发现的 evidence 引文锚：只可能在本仓对上）。"""
+    return 'assert(label.includes("%s"), "守卫锚缺失");' % token
+
+
 def drifty_tree(label: str, token: str) -> RepoTree:
     """仓形漂移夹具：KI-051 high 形态（守卫断言锚字面、生产方纯重写不含锚）——
-    必产 high 发现且证据带本仓独特锚（token 只在守卫侧，发现的 evidence 必点名）。"""
+    必产 high 发现且证据带本仓独特锚（token 只在守卫侧，发现的 evidence 必点名）。
+    t260916-22 后：夹具改作 inspect 桩发现的证据锚底座（引文锚=本行）。"""
     t = RepoTree(label)
     t.write_scenarios([("t-pk20-guard", "分项目巡检夹具守卫（%s）" % label, "true")])
-    t.write("integration/sc_pk20_guard.mjs",
+    t.write(GUARD_REL,
             "// 守卫：分项目巡检夹具锚（t260915-20 场景夹具，capture-chat 形态）\n"
             "// 守卫对象生产方: %s\n"
             "const label = await page.locator('.session-create').innerText();\n"
@@ -360,7 +374,8 @@ def row_ids(rows):
 
 # ---------------------------------------------------------------- 腿
 
-def j1_dual_project(queue: str, decl_path: str, tree_a: RepoTree, tree_b: RepoTree):
+def j1_dual_project(queue: str, decl_path: str, tree_a: RepoTree, tree_b: RepoTree,
+                    stub_path: str = ""):
     # t260916-02：票号=t 形工单号（开票面铸造）——从 trigger 回执取真票号，
     # 不再硬编 inspection- 旧形（旧形仍可能是历史在途票，由 legacy 只读腿辨认）。
     tid_a = tid_b = ""
@@ -377,6 +392,17 @@ def j1_dual_project(queue: str, decl_path: str, tree_a: RepoTree, tree_b: RepoTr
           "ok=%r ticket_id=%r out=%s" % ((parsed_a or {}).get("ok"), tid_a,
                                          (proc_a.stdout or "")[-200:]))
 
+    # t260916-22 桩缝：A 票用 A 锚引文桩（同相对路径在两仓都在，引文只可能对上 A 仓
+    # 内容=引擎 base_dir 正确性的内容级证明）；inspect 在 spawn 时刻读桩文件，A 票发现
+    # 落面后再重写桩为 B 锚，才触发 B 票（时序隔离防桩互染）。
+    if stub_path:
+        with open(stub_path, "w", encoding="utf-8") as f:
+            f.write(inspect_lib.fenced_message([
+                inspect_lib.finding("A 仓独特锚漂移", GUARD_REL, GUARD_ANCHOR_LINE,
+                                    guard_anchor_line(TOKEN_A), severity="high",
+                                    confidence=0.9),
+            ]))
+
     proc_b, parsed_b = trg(["trigger", "--instance", INST_B, "--period", PERIOD,
                             "--decl-path", decl_path])
     tid_b = tid_of(parsed_b)
@@ -384,6 +410,13 @@ def j1_dual_project(queue: str, decl_path: str, tree_a: RepoTree, tree_b: RepoTr
           "ok=%r out=%s" % ((parsed_b or {}).get("ok"), (proc_b.stdout or "")[-200:]))
 
     snap_a = poll_snapshot(INST_A, PERIOD, 150, want_findings=True)
+    if stub_path:
+        with open(stub_path, "w", encoding="utf-8") as f:
+            f.write(inspect_lib.fenced_message([
+                inspect_lib.finding("B 仓独特锚漂移", GUARD_REL, GUARD_ANCHOR_LINE,
+                                    guard_anchor_line(TOKEN_B), severity="high",
+                                    confidence=0.9),
+            ]))
     snap_b = poll_snapshot(INST_B, PERIOD, 150, want_findings=True)
     check("J1b-A 发现落面（worker 扫描完成）",
           isinstance(snap_a, dict) and bool(findings_text(snap_a).strip()),
@@ -425,7 +458,8 @@ def j1_dual_project(queue: str, decl_path: str, tree_a: RepoTree, tree_b: RepoTr
           str((row_b or {}).get("project") or "") == KEY_B,
           "row.project=%r" % (row_b or {}).get("project"))
 
-    # ①c 扫对仓：发现内容与本仓独特锚互斥匹配
+    # ①c 扫对仓：发现内容与本仓独特锚互斥匹配 + 证据复核 verified（引文只可能在
+    # 本仓对上=引擎 base_dir 正确性的内容级证明；串仓即引文不符→unverified）
     txt_a, txt_b = findings_text(snap_a), findings_text(snap_b)
     check("J1g-A 发现命中 A 仓独特锚",
           TOKEN_A in txt_a and TOKEN_B not in txt_a,
@@ -433,6 +467,21 @@ def j1_dual_project(queue: str, decl_path: str, tree_a: RepoTree, tree_b: RepoTr
     check("J1g-B 发现命中 B 仓独特锚",
           TOKEN_B in txt_b and TOKEN_A not in txt_b,
           "含B锚=%s 含A锚=%s" % (TOKEN_B in txt_b, TOKEN_A in txt_b))
+
+    def _face_states(snap):
+        face = (snap or {}).get("face") if isinstance(snap, dict) else None
+        fs = (face or {}).get("findings") if isinstance(face, dict) else None
+        return [(lib_inspect_state(f)) for f in (fs or []) if isinstance(f, dict)]
+
+    def lib_inspect_state(f):
+        return inspect_lib.finding_state(f)
+
+    check("J1g2-A A 票发现证据复核 verified（基座=A 仓内容级证明）",
+          bool(txt_a.strip()) and "verified" in _face_states(snap_a),
+          "states=%r" % _face_states(snap_a))
+    check("J1g2-B B 票发现证据复核 verified（基座=B 仓内容级证明）",
+          bool(txt_b.strip()) and "verified" in _face_states(snap_b),
+          "states=%r" % _face_states(snap_b))
     check("J1h 被扫树逐字节不变（巡检不改码红线）",
           not tree_a.tree_unchanged() and not tree_b.tree_unchanged(),
           "%s %s" % (tree_a.tree_unchanged(), tree_b.tree_unchanged()))
@@ -540,6 +589,9 @@ def main() -> int:
     os.makedirs(reg_root, exist_ok=True)
     tree_a = drifty_tree("sbxa-%d" % PID, TOKEN_A)
     tree_b = drifty_tree("sbxb-%d" % PID, TOKEN_B)
+    stub_path = os.path.join(tmp, "inspect-stub-message.txt")
+    with open(stub_path, "w", encoding="utf-8") as f:
+        f.write(inspect_lib.fenced_message([]))
     try:
         write_registry(reg_root, KEY_A, "Fixture A", [tree_a.root])
         write_registry(reg_root, KEY_B, "Fixture B", [tree_b.root])
@@ -553,8 +605,10 @@ def main() -> int:
                             "SANDBAR_TASK_QUEUE": queue,
                             "DECL_PATH": decl_path})   # list_rows 的白名单声明 env 取这里
         try:
-            with StageWorker(queue):
-                j1_dual_project(queue, decl_path, tree_a, tree_b)
+            with StageWorker(queue, extra_env={
+                    "SANDBAR_INSPECT_STUB": "1",
+                    "SANDBAR_INSPECT_STUB_FILE": stub_path}):
+                j1_dual_project(queue, decl_path, tree_a, tree_b, stub_path)
                 j3_unknown_key(decl_path)
                 j2_update_recast(decl_path, tmp, tree_a)
                 j4_unowned_guard(queue, decl_path)

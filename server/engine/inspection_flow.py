@@ -21,8 +21,10 @@ is unreachable before approval (stage_state=awaiting-human really blocks) and ha
 only after it.
 
 Determinism discipline: the workflow body does zero IO and zero wall-clock (only
-workflow.now()); every side effect lives in an activity (run_inspection_scan /
-write_inspection_report, thin shells in activities.py).
+workflow.now()); every side effect lives in an activity (run_inspection_inspect /
+verify_inspection_findings / write_inspection_report / write_inspection_verdicts, thin
+shells in activities.py / agent_activities.py; the retired static scan
+run_inspection_scan remains only on the legacy replay path — t260916-22).
 """
 
 from __future__ import annotations
@@ -73,6 +75,9 @@ SUITE_TO = timedelta(minutes=120)
 # 套件活动不自动重试：整轮全集重跑代价高（小时级），且「跑不成/跑红」本身就是票面数据
 # （进发现清单+回执，人审/次日再跑），Temporal 重试只会把同一份失败重复烧一遍墙钟。
 RETRY_SUITE = RetryPolicy(maximum_attempts=1)
+# inspect 段不自动重试（t260916-22）：重试=重烧一次 LLM 配额，且「agent 未完成/输出
+# 不合格」本身就是票面数据（blocked 可见、下期再来）——同 RETRY_SUITE 纪律。
+RETRY_INSPECT = RetryPolicy(maximum_attempts=1)
 # 漏跑核查回看窗口（天）：每日 cron 一周内应有 7 期；窗口外不追历史（漏报的收敛靠每期
 # 滚动核查，靠窗口覆盖，不靠一次翻旧账）。
 DEADMAN_LOOKBACK_DAYS = 7
@@ -87,6 +92,19 @@ SUITE_PATCH_ID = "t260913-02-inspection-suite-stage"
 # 老 in-flight 票 history 无此标记 → patched()=False → 走旧路径（恒放行），零影响；
 # 新票双空判据见 run 内守卫（README 迁移步：旧调度 payload 撞守卫=可见 blocked）。
 PROJECT_PATCH_ID = "t260915-20-inspection-project-identity"
+# 版本门 id（t260916-22，replay 安全）：inspect 段（agent 审查）替代 scan 段（静态扫描）
+# 只在新 run 生效——run() 的分派判据=SUITE 门 **且** INSPECT 门（本票上线瞬间在途的
+# SUITE 票 history 无 INSPECT 标记，继续走旧路径重放到收口，绝不中途换轨）。
+INSPECT_PATCH_ID = "t260916-22-inspection-inspect-stage"
+# inspect 段 start_to_close = 声明预算 + 双闸余量：活动内部 deadline=预算−60s（先超时
+# 并把进程组收干净、回执「agent 未完成」），Temporal 侧再给 120s 兜底余量——Temporal
+# 必须晚于内部闸死（SUITE_TO 头注同款纪律；不等式 UT 锁定）。
+INSPECT_TO_EXTRA_SEC = 120.0
+
+
+def inspect_start_to_close(timeout_sec: float) -> timedelta:
+    """inspect 段活动 start_to_close（预算 + 兜底余量）。"""
+    return timedelta(seconds=float(timeout_sec) + INSPECT_TO_EXTRA_SEC)
 # 版本门 id（t260917-02，replay 安全）：旧调度 action 直发的非 t 形 fire 自愈重定向
 # （spawn_inspection_period → open_period_ticket 铸 t 形票承接）只在新 run 生效。老
 # in-flight 票（含 260917 的 awaiting-human 旧形壳）history 无此标记 → patched()=False
@@ -336,7 +354,15 @@ def build_ticket_face(
 
     t260913-02 扩展（两个 defaulted 参数，老调用点逐字段不变=零回归）：
       - extra_findings：套件/漏跑等**非扫描器**来源的发现，进发现清单并重计摘要；
-      - suite：套件证据段（face["suite"]），并参与心跳合成（套件不绿=不是心跳期）。"""
+      - suite：套件证据段（face["suite"]），并参与心跳合成（套件不绿=不是心跳期）。
+
+    t260916-22 扩展（建议门/摘要口径；对旧发现逐字节兼容）：
+      - 建议门：带 verified 字段的发现（agent 产出）必须 verified && confidence≥0.6
+        才进 suggested_fix_tickets（工单要点③），unverified（证据复核不过）与假报压制
+        同斩——票面可见但不开票；legacy 静态扫描发现无 verified 字段=原门逐字节不变；
+      - 摘要重计口径排除 recurring/假报压制（宿主裁定④「重复项不累计」；legacy 发现
+        无这些键 → 循环结果与旧实现同值）。"""
+    from inspection_inspect import SUGGEST_CONFIDENCE, is_counted
     if not ticket_id or not instance_id:
         raise ValueError("票面缺票号/实例")
     if not isinstance(scan_result, dict) or not isinstance(scan_result.get("findings"), list):
@@ -348,12 +374,12 @@ def build_ticket_face(
         findings = findings + extra
     counts = scan_result.get("summary") or {"high": 0, "med": 0, "low": 0}
     if extra:
-        # 重计口径与 inspection_scan.summarize 同形（追加发现的严重度必须进摘要，
-        # 否则票面摘要与发现清单互斥——「红的是哪几条」在摘要里数不出来）
+        # 重计口径与 inspection_inspect.summarize_counts 同形（追加发现的严重度必须进
+        # 摘要，否则票面摘要与发现清单互斥——「红的是哪几条」在摘要里数不出来）。
         counts = {"high": 0, "med": 0, "low": 0}
         for f in findings:
             sev = str(f.get("severity") or "")
-            if sev in counts:
+            if sev in counts and is_counted(f):
                 counts[sev] += 1
     heartbeat = bool(scan_result.get("heartbeat"))
     if suite is not None:
@@ -368,6 +394,16 @@ def build_ticket_face(
             continue
         if not f.get("suggest", True):
             continue          # 漏跑/环境红/未跑成不是「开一张修码票」能解的（显式开关）
+        if f.get("verified") is not None:
+            # agent 发现的建议门（t260916-22 要点③④）：机械复核过 + 置信达阈；
+            # recurring（上期已在册）不重复开票——修码票应从首期那份修起。
+            if f.get("verified") != "verified" or f.get("suppressed") or f.get("recurring"):
+                continue
+            try:
+                if float(f.get("confidence") or 0.0) < SUGGEST_CONFIDENCE:
+                    continue
+            except (TypeError, ValueError):
+                continue
         suggestions.append({
             "template": "dev-lane",
             "title": "修:%s %s" % (f.get("scan", ""), str(f.get("subject", ""))[:60]),
@@ -605,9 +641,10 @@ class InspectionPeriodicInput:
 # 「STAGES 改了不改导出面，此处必红」，dev-lane 范式同款）。
 # 最小字段（派单规格）：id/name/next/人门标记（exit）/套件档开关（suite_only）；
 # parts 是展示用执行器组合（shared.PART_KINDS 子集，巡检段全程序化、close 带人签）。
-# 与 flow 实际调用点对齐：setup/suite 只在声明 run_suite=full 的期出现（run() 两处
+# 与 flow 实际调用点对齐：setup/suite 只在声明 run_suite=full 的期出现（run() 的
 # `if run_suite:` 守卫）→ suite_only=True，展示面画条件段（optional 虚节点注记）；
-# scan/report/close 每期必经。
+# inspect/report/close 每期必经（t260916-22：scan 段退役、inspect 段接位——旧路径
+# 只剩老在途票 replay，其 timeline 里的 scan 字样来自 history，不来自 STAGES）。
 # ========================================================================================
 
 @dataclass(frozen=True)
@@ -636,6 +673,58 @@ class InspectionStage:
 PRE_FLOW_STAGES: Tuple[str, ...] = ("guard",)
 
 
+@dataclass
+class FindingVerdict:
+    """发现级裁定信号载荷（t260916-22 要点⑥）：人门签字附或签后 CLI 逐条标注。
+
+    gate 语义与 sign 相同（gate 不匹配=忽略+点名，绝不误收）；who 必须是人（agent
+    角色名拒收，validate_close_signature 同语义）。verdict 收英文 token 与中文别名
+    （假报/待修/存疑，normalize_verdict 归一）。signal 只改内存票面+timeline（零
+    活动调用=回放安全）；verdicts 台账由收口段一次写齐（_finalize_and_close），
+    收口后的裁定走 CLI 直写台账。"""
+
+    gate: str = CLOSE_GATE_ID
+    finding_id: str = ""
+    verdict: str = ""          # false-positive / to-fix / doubt（或中文别名）
+    who: str = ""
+    note: str = ""
+
+
+def validate_finding_verdict_payload(
+    sig: Any, expected_gate: str = CLOSE_GATE_ID,
+) -> Tuple[Dict[str, str], str]:
+    """裁定信号载荷校验（纯函数，单测主面；sign 闸同语义）：
+    who 非空/≤64/非 agent 角色名、gate 匹配、finding_id 非空、verdict 归一。
+    返回 (归一 payload, 错误信息)；err 非空=拒收（signal 面只记 _gate_err 不炸）。"""
+    if isinstance(sig, FindingVerdict):
+        raw = {"finding_id": sig.finding_id, "verdict": sig.verdict,
+               "who": sig.who, "note": sig.note or "", "gate": sig.gate}
+    elif isinstance(sig, dict):
+        raw = {"finding_id": str(sig.get("finding_id") or ""),
+               "verdict": str(sig.get("verdict") or ""),
+               "who": str(sig.get("who") or ""),
+               "note": str(sig.get("note") or ""),
+               "gate": str(sig.get("gate") or "")}
+    else:
+        return {}, "裁定载荷类型非法：%s" % type(sig).__name__
+    if not raw["who"].strip():
+        return {}, "裁定缺 who（裁定身份由调用方注入）"
+    if len(raw["who"]) > MAX_WHO_LEN:
+        return {}, "who 超长（>%d）" % MAX_WHO_LEN
+    if raw["who"].strip().lower() in AGENT_ROLE_NAMES:
+        return {}, "agent 不得裁定（who=%r 是 agent 角色名；裁定只能人）" % raw["who"]
+    if raw["gate"] != expected_gate:
+        return {}, "裁定 gate 不匹配：%r（本门=%r）" % (raw["gate"], expected_gate)
+    if not raw["finding_id"].strip():
+        return {}, "裁定缺 finding-id（逐条标注，绝不整票批改）"
+    from inspection_inspect import normalize_verdict
+    try:
+        raw["verdict"] = normalize_verdict(raw["verdict"])
+    except ValueError as e:
+        return {}, str(e)
+    return raw, ""
+
+
 def _inspection_topology() -> Dict[str, Any]:
     """本模板的展示面拓扑导出（t260916-05；snapshot query 消费）。懒 import
     template_topology：workflow 沙箱里按需加载（build_ticket_face 懒 import
@@ -654,12 +743,16 @@ class InspectionPeriodicWorkflow:
 
     #: t260916-05 阶段声明（编码真源）：声明序=执行序；展示面（template_topology
     #: inspection-lite 导出）与一致性锁都以它为对齐锚。
+    #: t260916-22 段序（INSPECT_PATCH_ID 门内）：setup → suite → inspect → report →
+    #: close——scan 段（静态扫描）退役，inspect 段（只读 agent 审查）接位；suite 提到
+    #: inspect 前（inspect 的 prompt 引用当期套件回执）。老在途票 replay 走旧路径，
+    #: STAGES 只服务新票+展示面（replay 快照面不重算 STAGES——timeline 在 history）。
     STAGES = (
-        InspectionStage(id="setup", name="泳道准备", next="scan",
+        InspectionStage(id="setup", name="泳道准备", next="suite",
                         suite_only=True, parts=("script",)),
-        InspectionStage(id="scan", name="扫描", next="suite", parts=("script",)),
-        InspectionStage(id="suite", name="巡检泳道套件", next="report",
+        InspectionStage(id="suite", name="巡检泳道套件", next="inspect",
                         suite_only=True, parts=("script",)),
+        InspectionStage(id="inspect", name="巡检审查", next="report", parts=("script",)),
         InspectionStage(id="report", name="落账", next="close", parts=("script",)),
         InspectionStage(id="close", name="人审收口", next="", exit="human",
                         parts=("human", "script")),
@@ -724,6 +817,33 @@ class InspectionPeriodicWorkflow:
         if self._close_sig is None:
             self._close_sig = payload
 
+    @workflow.signal
+    def finding_verdict(self, sig: FindingVerdict) -> None:
+        """发现级裁定（t260916-22 要点⑥）：人对单条发现标 假报/待修/存疑。
+
+        纯内存改 face + timeline，零活动调用=回放安全；verdicts 台账在收口段一次
+        写齐（跨期压制消费），收口后的裁定走 CLI 直写台账。拒收（载荷坏/门不匹配/
+        agent 名）只记 _gate_err 不炸不误收——sign 闸同语义。"""
+        if not getattr(self, "_patched", False):
+            self._gate_err = "finding_verdict 为 t260916-22 新命令：老票重放不注入（拒收）"
+            return
+        payload, err = validate_finding_verdict_payload(sig)
+        if err:
+            self._gate_err = err
+            workflow.logger.warning("拒收裁定：%s", err)
+            return
+        from inspection_inspect import apply_verdict_to_face
+        err = apply_verdict_to_face(self.face, payload["finding_id"], payload["verdict"],
+                                    payload["who"], payload["note"])
+        if err:
+            self._gate_err = "裁定未落：%s" % err
+            workflow.logger.warning("裁定未落：%s", err)
+            return
+        self._enter("close", self.stage_state or "running",
+                    "发现裁定：%s → %s（who=%s%s）"
+                    % (payload["finding_id"], payload["verdict"], payload["who"],
+                       "，note=%s" % payload["note"] if payload["note"] else ""))
+
     @workflow.query
     def snapshot(self) -> Dict[str, Any]:
         """Ticket-face snapshot (consumed by the workbench / ops channel; shape = a
@@ -756,43 +876,44 @@ class InspectionPeriodicWorkflow:
         repo_root = str(inp.repo_root or "")
         self._input = inp   # sign 闸 payload 回退链 / snapshot project 面的真源钉存
         # 版本门（replay 安全，见 SUITE_PATCH_ID 头注）：老在途票在这里拿到 False，
-        # 于是一路走票① 旧路径（scan→report→close），一个新命令都不注入。
+        # 于是一路走票① 旧路径，一个新命令都不注入。
         self._patched = workflow.patched(SUITE_PATCH_ID)
-        # 无主票守卫（t260915-20，PROJECT_PATCH_ID 新命令）：项目身份与 repo_root 双空
-        # 的新票 → blocked 终态点名（可见不静默）——杀「静默回落引擎仓扫描」的最后残窗
-        # （旧调度 payload 在 R1 修复+schedule-up 重跑后收敛为零，守卫兜住漏刷的口子）。
-        # 老 in-flight 票：PROJECT_PATCH_ID patched()=False 走旧路径，零影响。
-        if self._patched and workflow.patched(PROJECT_PATCH_ID):
+        # 轨道分派（t260916-22）：SUITE 门且 INSPECT 门都开 = inspect 轨（agent 审查）；
+        # 只开 SUITE 门的过渡窗在途票（本票上线瞬间在途）继续走旧路径重放到收口——
+        # 中途换轨=history 注入新命令=非确定（replay 红线），门判据是「双门」不是新门。
+        if self._patched and workflow.patched(INSPECT_PATCH_ID):
+            return await self._run_inspect_period_flow(inp, repo_root)
+        return await _run_legacy_period_flow(self, inp, repo_root)
+
+    # ---- t260916-22：inspect 轨道（setup → suite → inspect → report → close）----
+
+    async def _run_inspect_period_flow(
+        self, inp: InspectionPeriodicInput, repo_root: str,
+    ) -> Dict[str, Any]:
+        """agent 审查轨道：静态扫描退役（run_inspection_scan 调用点=0），scan 段换成
+        inspect 段（只读 agent 产出强 schema 发现 → report 段机械复核）。
+
+        与旧轨道同构复用：声明决议/期号铸取/setup/suite/deadman/收口人门全部同源；
+        差异只有两段——inspect 段活动（替代 run_inspection_scan）与 verify 段活动
+        （机械复核链，report 段内）。审查基座=repo_root（suite 期泳道在 suite 段内
+        已拆，review 裁定：不为审查专搭只读泳道；meta 记 base_dir 可见）。"""
+        ticket_id = workflow.info().workflow_id
+        # 无主票守卫（t260915-20）：两轨道同守——项目身份与 repo_root 双空 → blocked
+        # 终态点名，绝不静默回落引擎仓审查（新轨道审查基座=repo_root，更不能无主）。
+        if workflow.patched(PROJECT_PATCH_ID):
             guard = unowned_guard_reason(getattr(inp, "project_key", ""), repo_root)
             if guard:
-                # 期号铸取在守卫之后（守卫票不值得跑 plan 活动）；票号=真实 workflow id，
-                # 期号如实用输入期（调度路为空、手动路为触发期）——blocked 落账可索引。
                 return await self._blocked(
-                    workflow.info().workflow_id, inp, str(inp.period or ""), "guard", guard, None)
-        plan: Dict[str, Any] = {}
-        plan_raw: Any = None
-        if self._patched:
-            # ---- 声明决议（t260913-02）：本期跑不跑套件由**当前声明**说了算，不进输入 payload。
-            #      先于期号铸取：期号要按声明 tz 的日历日取（见 period_key_in_tz，P1）----
-            plan_raw = await workflow.execute_activity(
-                "resolve_inspection_plan",
-                args=[{"instance_id": inp.instance_id, "decl_path": inp.decl_path}],
-                start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
-            plan = (plan_raw or {}).get("result") or {}
-        # ---- 期号铸取（t260913-02 验收 P1）：声明 tz 的日历日。workflow.now() 是 UTC，
-        # 声明 tz 后的触发时刻会落在 UTC 前一日（07:30 Asia/Shanghai = 前一日 23:30Z）——
-        # 不换算则调度票期号恒比本地日历早一天，dead-man 期望键（同口径核算）恒等于
-        # 「当期自己」→ 每张日报票一条 high 假漏跑 + CLI 每天 exit=1。旧口径（tz 空 /
-        # 未 patched 的老票）= UTC/进程日历不变；两侧（铸号/漏跑核算）走同一条回落链。
-        period = inp.period or (
-            period_key_in_tz(workflow.now(), str(plan.get("tz") or ""))
-            if self._patched else period_key(workflow.now()))
-        # 票号 = 真实 workflow id（t260916-02：起票侧经 inspection_ticketing.open_period_ticket
-        # 铸 t 形号并显式去重（实例+期号 SA），id 不再编码实例/期——老在途票（旧形 id）重放
-        # 时该值同样是旧形 id，输出逐字节不变，replay 安全零新 patch 门）。
+                    ticket_id, inp, str(inp.period or ""), "guard", guard, None)
+        # ---- 声明决议 + 期号铸取（与旧轨道同源同序） ----
+        plan_raw: Any = await workflow.execute_activity(
+            "resolve_inspection_plan",
+            args=[{"instance_id": inp.instance_id, "decl_path": inp.decl_path}],
+            start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
+        plan: Dict[str, Any] = (plan_raw or {}).get("result") or {}
+        period = inp.period or period_key_in_tz(workflow.now(), str(plan.get("tz") or ""))
         validate_period_key(inp.instance_id, period)
-        ticket_id = workflow.info().workflow_id
-        if self._patched and not (plan_raw or {}).get("ok"):
+        if not (plan_raw or {}).get("ok"):
             return await self._blocked(
                 ticket_id, inp, period, "setup",
                 "声明决议失败：%s" % ((plan_raw or {}).get("error") or "未知"), None)
@@ -804,6 +925,18 @@ class InspectionPeriodicWorkflow:
             redirect_reason = legacy_fire_redirect_reason(ticket_id)
             if redirect_reason:
                 return await self._redirect_and_finish(ticket_id, inp, period, redirect_reason)
+        # inspect 段预算（声明实例段可配；缺省=宿主裁定③起步 40 条/30 分钟；分面空=
+        # 回落 scan_face）。懒 import：stdlib-only 模块，workflow 沙箱内按需加载
+        # （build_ticket_face 懒 import inspection_deadman 同款纪律）。
+        from inspection_inspect import (DEFAULT_INSPECT_TIMEOUT_MIN,
+                                        DEFAULT_MAX_FINDINGS)
+        ins_cfg = dict(plan.get("inspect") or {})
+        max_findings = int(ins_cfg.get("max_findings") or DEFAULT_MAX_FINDINGS)
+        timeout_min = int(ins_cfg.get("timeout_min") or DEFAULT_INSPECT_TIMEOUT_MIN)
+        inspect_profile = str(ins_cfg.get("profile") or "") or str(
+            plan.get("scan_face") or "test")
+        inspect_budget_sec = float(timeout_min) * 60.0
+        # ---- setup / suite（suite 段在 inspect 前：inspect prompt 引用当期回执） ----
         run_suite = bool(plan.get("run_suite"))
         lane: Optional[Dict[str, str]] = None
         suite_section: Optional[Dict[str, Any]] = None
@@ -812,21 +945,6 @@ class InspectionPeriodicWorkflow:
             lane, blocked = await self._setup_lane(ticket_id, inp, period, repo_root)
             if blocked is not None:
                 return blocked
-        # C4（t260910-09 review）：时间线文案带 face 值——新面票不再误写「测试面」；face 字段透传进 activity 分派
-        self._enter("scan", "running", "%s 面扫描（实例 %s 期 %s）" % (inp.face, inp.instance_id, period))
-        scan_result: Dict[str, Any] = await workflow.execute_activity(
-            "run_inspection_scan",
-            args=[{"repo_root": inp.repo_root, "scenarios_path": inp.scenarios_path,
-                   "face": inp.face}],
-            start_to_close_timeout=SCAN_TO, retry_policy=RETRY)
-        if not scan_result.get("ok"):
-            return await self._blocked(
-                ticket_id, inp, period, "scan",
-                str(scan_result.get("error") or "扫描失败"), lane)
-        if run_suite:
-            # 漏跑核查（dead-man 面①：进本期票面；面②=inspection_trigger.py deadman）
-            extra_findings += await self._deadman_findings(inp, plan)
-        if run_suite:
             self._enter("suite", "running",
                         "巡检自有泳道跑集成全集（lane 基点 %s）" % (lane or {}).get("base_ref", ""))
             suite_section, suite_findings, teardown_note = await self._run_suite(
@@ -834,23 +952,73 @@ class InspectionPeriodicWorkflow:
             extra_findings += suite_findings
             self._enter("suite", "running", "泳道拆除：%s" % teardown_note)
             if teardown_note.startswith("未净"):
-                # 残留=可恢复垃圾（既有 teardown 语义：不拦收口），但要可见（验收 D 的
-                # 「不得静默」）；不进开票建议——它不是代码缺陷，清场入口=sweep/CLI。
                 from inspection_deadman import make_finding
                 extra_findings.append(make_finding(
                     "suite", "med", "泳道拆除未净",
                     "%s ｜ 清场入口：inspection_trigger.py sweep-lanes --instance %s"
                     % (teardown_note, inp.instance_id), suggest=False))
-        # 时间线文案：无追加发现时与票①逐字一致（零回归面）；有追加才展开两段计数
-        scan_n = len(scan_result["result"].get("findings") or [])
+            # 漏跑核查（dead-man 面①）仍在 suite 块内、不占段位（与旧轨道同源）
+            extra_findings += await self._deadman_findings(inp, plan)
+        # ---- inspect 段：只读 agent 审查（预算双闸：内部 deadline=预算−60s） ----
+        # （无套件档的期不进 suite 段——suite_only 语义由源码锁钉死；档位状态并入
+        # inspect 段文案可见，不静默）
+        self._enter("inspect", "running",
+                    "只读 agent 审查（分面 %s，预算 %d 条 / %d 分钟%s）"
+                    % (inspect_profile, max_findings, timeout_min,
+                       "" if run_suite else "；本期无套件档（声明未开），无套件回执可读"))
+        base_dir = repo_root or "."
+        # 套件回执/agent_home/台账目录路径由活动侧按 INSPECTION_DIR 派生（worker 进程
+        # 无沙箱面；workflow 体零路径计算零模块级属性读——头注纪律）。
+        inspect_raw: Any = await workflow.execute_activity(
+            "run_inspection_inspect",
+            args=[{"instance_id": inp.instance_id, "period": period,
+                   "ticket_id": ticket_id, "face": str(plan.get("scan_face") or "test"),
+                   "inspect_profile": inspect_profile, "base_dir": base_dir,
+                   "base_head": (lane or {}).get("base_ref", ""),
+                   "project_key": getattr(inp, "project_key", ""),
+                   "max_findings": max_findings, "timeout_sec": inspect_budget_sec}],
+            start_to_close_timeout=inspect_start_to_close(inspect_budget_sec),
+            retry_policy=RETRY_INSPECT)
+        if not (inspect_raw or {}).get("ok"):
+            return await self._blocked(
+                ticket_id, inp, period, "inspect",
+                str((inspect_raw or {}).get("error") or "inspect 段失败"), lane)
+        ins_result = (inspect_raw or {}).get("result") or {}
+        # ---- report 段：机械复核（证据复核/去重压制/预算/汇总——纯函数链在活动内） ----
         self._enter("report", "running",
-                    ("发现清单落票面（扫描 %d + 追加 %d 条）" % (scan_n, len(extra_findings)))
-                    if extra_findings else ("发现清单落票面（%d 条）" % scan_n))
-        self.face = build_ticket_face(ticket_id, inp.instance_id, period, scan_result["result"],
+                    "证据机械复核（agent 发现 %d 条）" % len(ins_result.get("findings") or []))
+        verify_raw: Any = await workflow.execute_activity(
+            "verify_inspection_findings",
+            args=[{"instance_id": inp.instance_id, "period": period,
+                   "base_dir": base_dir, "findings": ins_result.get("findings") or [],
+                   "max_findings": max_findings}],
+            start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
+        if not (verify_raw or {}).get("ok"):
+            return await self._blocked(
+                ticket_id, inp, period, "report",
+                str((verify_raw or {}).get("error") or "复核失败"), lane)
+        result = (verify_raw or {}).get("result") or {}
+        vmeta = dict(result.get("meta") or {})
+        ins_meta = dict(ins_result.get("meta") or {})
+        ins_meta.pop("output_log", None)   # agent 原始日志路径进 meta 太吵，落 agent-home 留档即可
+        vmeta["inspect"] = ins_meta
+        self._enter("report", "running",
+                    "复核完成（unverified %d / 去重 %d / 假报压制 %d / 截断 %s）"
+                    % (vmeta.get("unverified", 0), vmeta.get("deduped", 0),
+                       vmeta.get("suppressed", 0), vmeta.get("truncated", 0)))
+        self.face = build_ticket_face(ticket_id, inp.instance_id, period, result,
                                       extra_findings=extra_findings, suite=suite_section)
+        self.face["scan_meta"] = vmeta
         if lane:
-            # 跨项目/隔离台的基点证据进票面（验收 A：基点=开跑时 main HEAD）
             self.face["lane"] = dict(lane)
+        return await self._finalize_and_close(ticket_id, inp, period, lane)
+
+    async def _finalize_and_close(
+        self, ticket_id: str, inp: InspectionPeriodicInput, period: str,
+        lane: Optional[Dict[str, str]],
+    ) -> Dict[str, Any]:
+        """落账 → 人门 → 收口（两条轨道共用的尾段；旧轨道搬移自 run() 主体，语句序
+        不变——老票重放逐字节等价由既有 UT+场景锁）。"""
         written: Dict[str, Any] = await workflow.execute_activity(
             "write_inspection_report", args=[self._ledger_doc()],
             start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
@@ -867,6 +1035,19 @@ class InspectionPeriodicWorkflow:
         self.status = "closed"
         self.face["human_gate"] = dict(self._close_sig or {})
         self._enter("close", "running", "收口：人门决策=%s（who=%s）" % (self.decision, (self._close_sig or {}).get("who", "")))
+        # 票面裁定落 verdicts 台账（t260916-22 要点⑥：签内 signal 只改内存票面（回放
+        # 安全零活动），跨期压制消费的台账在收口时一次写齐；已收口后的裁定走 CLI 直写）。
+        entries = [{"finding_id": str(f.get("id") or ""), "verdict": str(f.get("verdict")),
+                    "who": str(f.get("verdict_who") or ""), "note": str(f.get("verdict_note") or ""),
+                    "source_ticket": ticket_id}
+                   for f in (self.face.get("findings") or [])
+                   if isinstance(f, dict) and f.get("verdict")]
+        if entries:
+            await workflow.execute_activity(
+                "write_inspection_verdicts",
+                args=[{"instance_id": inp.instance_id, "period": period,
+                       "entries": entries}],
+                start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
         final: Dict[str, Any] = await workflow.execute_activity(
             "write_inspection_report", args=[self._ledger_doc()],
             start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
@@ -1362,3 +1543,103 @@ class InspectionPeriodicSpawnWorkflow:
             raise ApplicationError(str((res or {}).get("error") or "起票失败（无事由）"),
                                    non_retryable=True)
         return (res or {}).get("result") or {}
+
+
+# ========================================================================================
+# t260916-22：旧轨道（静态扫描）——scan 段已退役（run_inspection_scan 调用点=0），本
+# 函数从 run() 主体**原样外提**（语句序不变，self→wf）：唯一消费者=老在途票 replay
+# （SUITE 门开而 INSPECT 门未开的过渡窗票、SUITE 门未开的老票）。外提同时让 "scan"
+# 段位字面离开 InspectionPeriodicWorkflow 类块——源码锁（test_t260916_05）的类块
+# _enter 字面量全集只认新轨道段位，legacy 不进锁面（新票不可能再走进该段）。
+# ========================================================================================
+
+async def _run_legacy_period_flow(wf: "InspectionPeriodicWorkflow",
+                                  inp: InspectionPeriodicInput, repo_root: str,
+                                  ) -> Dict[str, Any]:
+    """票① 旧路径（scan → report → close）：【已退役（t260916-22），仅存服务 replay】。"""
+    # 无主票守卫（t260915-20，PROJECT_PATCH_ID 新命令）：项目身份与 repo_root 双空
+    # 的新票 → blocked 终态点名（可见不静默）——杀「静默回落引擎仓扫描」的最后残窗
+    # （旧调度 payload 在 R1 修复+schedule-up 重跑后收敛为零，守卫兜住漏刷的口子）。
+    # 老 in-flight 票：PROJECT_PATCH_ID patched()=False 走旧路径，零影响。
+    if wf._patched and workflow.patched(PROJECT_PATCH_ID):
+        guard = unowned_guard_reason(getattr(inp, "project_key", ""), repo_root)
+        if guard:
+            # 期号铸取在守卫之后（守卫票不值得跑 plan 活动）；票号=真实 workflow id，
+            # 期号如实用输入期（调度路为空、手动路为触发期）——blocked 落账可索引。
+            return await wf._blocked(
+                workflow.info().workflow_id, inp, str(inp.period or ""), "guard", guard, None)
+    plan: Dict[str, Any] = {}
+    plan_raw: Any = None
+    if wf._patched:
+        # ---- 声明决议（t260913-02）：本期跑不跑套件由**当前声明**说了算，不进输入 payload。
+        #      先于期号铸取：期号要按声明 tz 的日历日取（见 period_key_in_tz，P1）----
+        plan_raw = await workflow.execute_activity(
+            "resolve_inspection_plan",
+            args=[{"instance_id": inp.instance_id, "decl_path": inp.decl_path}],
+            start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
+        plan = (plan_raw or {}).get("result") or {}
+    # ---- 期号铸取（t260913-02 验收 P1）：声明 tz 的日历日。workflow.now() 是 UTC，
+    # 声明 tz 后的触发时刻会落在 UTC 前一日（07:30 Asia/Shanghai = 前一日 23:30Z）——
+    # 不换算则调度票期号恒比本地日历早一天，dead-man 期望键（同口径核算）恒等于
+    # 「当期自己」→ 每张日报票一条 high 假漏跑 + CLI 每天 exit=1。旧口径（tz 空 /
+    # 未 patched 的老票）= UTC/进程日历不变；两侧（铸号/漏跑核算）走同一条回落链。
+    period = inp.period or (
+        period_key_in_tz(workflow.now(), str(plan.get("tz") or ""))
+        if wf._patched else period_key(workflow.now()))
+    # 票号 = 真实 workflow id（t260916-02：起票侧经 inspection_ticketing.open_period_ticket
+    # 铸 t 形号并显式去重（实例+期号 SA），id 不再编码实例/期——老在途票（旧形 id）重放
+    # 时该值同样是旧形 id，输出逐字节不变，replay 安全零新 patch 门）。
+    validate_period_key(inp.instance_id, period)
+    ticket_id = workflow.info().workflow_id
+    if wf._patched and not (plan_raw or {}).get("ok"):
+        return await wf._blocked(
+            ticket_id, inp, period, "setup",
+            "声明决议失败：%s" % ((plan_raw or {}).get("error") or "未知"), None)
+    run_suite = bool(plan.get("run_suite"))
+    lane: Optional[Dict[str, str]] = None
+    suite_section: Optional[Dict[str, Any]] = None
+    extra_findings: List[Dict[str, Any]] = []
+    if run_suite:
+        lane, blocked = await wf._setup_lane(ticket_id, inp, period, repo_root)
+        if blocked is not None:
+            return blocked
+    # C4（t260910-09 review）：时间线文案带 face 值——新面票不再误写「测试面」；face 字段透传进 activity 分派
+    wf._enter("scan", "running", "%s 面扫描（实例 %s 期 %s）" % (inp.face, inp.instance_id, period))
+    scan_result: Dict[str, Any] = await workflow.execute_activity(
+        "run_inspection_scan",
+        args=[{"repo_root": inp.repo_root, "scenarios_path": inp.scenarios_path,
+               "face": inp.face}],
+        start_to_close_timeout=SCAN_TO, retry_policy=RETRY)
+    if not scan_result.get("ok"):
+        return await wf._blocked(
+            ticket_id, inp, period, "scan",
+            str(scan_result.get("error") or "扫描失败"), lane)
+    if run_suite:
+        # 漏跑核查（dead-man 面①：进本期票面；面②=inspection_trigger.py deadman）
+        extra_findings += await wf._deadman_findings(inp, plan)
+    if run_suite:
+        wf._enter("suite", "running",
+                  "巡检自有泳道跑集成全集（lane 基点 %s）" % (lane or {}).get("base_ref", ""))
+        suite_section, suite_findings, teardown_note = await wf._run_suite(
+            ticket_id, inp, period, lane or {})
+        extra_findings += suite_findings
+        wf._enter("suite", "running", "泳道拆除：%s" % teardown_note)
+        if teardown_note.startswith("未净"):
+            # 残留=可恢复垃圾（既有 teardown 语义：不拦收口），但要可见（验收 D 的
+            # 「不得静默」）；不进开票建议——它不是代码缺陷，清场入口=sweep/CLI。
+            from inspection_deadman import make_finding
+            extra_findings.append(make_finding(
+                "suite", "med", "泳道拆除未净",
+                "%s ｜ 清场入口：inspection_trigger.py sweep-lanes --instance %s"
+                % (teardown_note, inp.instance_id), suggest=False))
+    # 时间线文案：无追加发现时与票①逐字一致（零回归面）；有追加才展开两段计数
+    scan_n = len(scan_result["result"].get("findings") or [])
+    wf._enter("report", "running",
+              ("发现清单落票面（扫描 %d + 追加 %d 条）" % (scan_n, len(extra_findings)))
+              if extra_findings else ("发现清单落票面（%d 条）" % scan_n))
+    wf.face = build_ticket_face(ticket_id, inp.instance_id, period, scan_result["result"],
+                                extra_findings=extra_findings, suite=suite_section)
+    if lane:
+        # 跨项目/隔离台的基点证据进票面（验收 A：基点=开跑时 main HEAD）
+        wf.face["lane"] = dict(lane)
+    return await wf._finalize_and_close(ticket_id, inp, period, lane)

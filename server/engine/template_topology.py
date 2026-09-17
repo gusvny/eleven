@@ -110,8 +110,10 @@ _FIXTURE_TWO_STEP_NODES: Tuple[Dict[str, Any], ...] = (
 # 巡检票唯一汇）。
 _INSPECTION_NODES: Tuple[Dict[str, Any], ...] = (
     _node("setup", "泳道准备", "", KIND_GATE, ("script",), optional=OPT_SUITE_TIER),
-    _node("scan", "扫描", "", KIND_GATE, ("script",)),
     _node("suite", "巡检泳道套件", "", KIND_GATE, ("script",), optional=OPT_SUITE_TIER),
+    # t260916-22：scan 段退役、inspect 段（只读 agent 审查）接位——与
+    # inspection_flow.STAGES 同序同步（一致性锁两件必随改）。
+    _node("inspect", "巡检审查", "", KIND_GATE, ("script",)),
     _node("report", "落账", "", KIND_GATE, ("script",)),
     _node("close", "人审收口", "", KIND_HUMAN, ("human", "script")),
 )
