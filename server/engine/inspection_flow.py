@@ -28,11 +28,13 @@ write_inspection_report, thin shells in activities.py).
 from __future__ import annotations
 
 import json
+import os
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -85,6 +87,32 @@ SUITE_PATCH_ID = "t260913-02-inspection-suite-stage"
 # 老 in-flight 票 history 无此标记 → patched()=False → 走旧路径（恒放行），零影响；
 # 新票双空判据见 run 内守卫（README 迁移步：旧调度 payload 撞守卫=可见 blocked）。
 PROJECT_PATCH_ID = "t260915-20-inspection-project-identity"
+# 版本门 id（t260917-02，replay 安全）：旧调度 action 直发的非 t 形 fire 自愈重定向
+# （spawn_inspection_period → open_period_ticket 铸 t 形票承接）只在新 run 生效。老
+# in-flight 票（含 260917 的 awaiting-human 旧形壳）history 无此标记 → patched()=False
+# 走旧路径收口，零影响。机器化验证=replay_check.py --workflow <老票 id>（S4 自测实测）。
+REDIRECT_PATCH_ID = "t260917-02-inspection-legacy-fire-redirect"
+
+with workflow.unsafe.imports_passed_through():
+    from inspection_ticketing import has_ticket_id_shape
+
+
+def legacy_fire_redirect_reason(ticket_id: str) -> str:
+    """重定向守卫判据（纯函数，t260917-02 修复①）：workflow id 非 t 形 → 返回可读事由；
+    t 形 → ""（正常票零影响）。
+
+    260917 实况：旧调度 action（t260916-02 迁移前代 schedule-up 所铸）直发长跑
+    workflow，服务端给 fire id 追加 `-<fire时刻UTC>` 后缀——票面 ticket_id=workflow id
+    本身、无实例/期 SA，票形双缺陷全占。守卫认出「非 t 形 fire」即改道起票单点
+    （open_period_ticket）铸 t 形票承接，本壳即返——消除双形（与手动路径同一入口）。
+
+    判别单点=has_ticket_id_shape（**形状**判别，全工单票共形，非巡检票身份判别——
+    语义圈死见该函数 docstring）。"""
+    if has_ticket_id_shape(ticket_id):
+        return ""
+    return ("票号非 t 形（workflow id=%s 直当票号）——调度 action 未指向 spawner"
+            "（t260916-02 接线未生效：重跑 schedule-up 刷新 action）；本票改由"
+            " open_period_ticket 铸 t 形票承接" % (str(ticket_id or "") or "<空>"))
 
 
 def unowned_guard_reason(project_key: str, repo_root: str) -> str:
@@ -389,11 +417,104 @@ def validate_close_signature(sig: Any, expected_gate: str = CLOSE_GATE_ID) -> Tu
     return payload, ""
 
 
-def write_inspection_report_impl(face: Dict[str, Any], out_dir: Path) -> Dict[str, Any]:
+# 台账留史目录名（t260917-02）：canonical 文件同目录下的 archive/ 子目录——
+# inspection_deadman.ledger_periods 用 iterdir 顶层扫 *.json，子目录天然不进漏跑扫描；
+# 用可见的非隐藏名（不用 .archive），运维人工清理时看得见（README 注记：不自动清理）。
+LEDGER_ARCHIVE_DIRNAME = "archive"
+
+
+def _archive_ticket_token(old_ticket_id: str) -> str:
+    """归档名里的被归档票号 token（t260917-02）：只留文件名安全字符，其余压 '-'——
+    t 形号/旧形号/服务端后缀形（含冒号、T/Z）都能安全落名；空/不可判 → 'corrupt'
+    （旧内容不可解析或无 ticket_id 时的诚实标记，绝不冒充可判票号）。"""
+    token = re.sub(r"[^A-Za-z0-9._-]+", "-", str(old_ticket_id or "").strip())
+    return token.strip("-") or "corrupt"
+
+
+def _archive_if_other_run(path: Path, incoming_ticket_id: str,
+                          now_fn: Callable[[], float] = time.time) -> Dict[str, Any]:
+    """跨票覆盖前把旧台账/回执搬进 archive/（t260917-02 修复③；纯 impl，activity 侧用）。
+
+    判定：旧文件存在且其 ticket_id != 本次 incoming ticket_id → 归档；相等（含双空）
+    → 同票自身重写（一次 run 落三次账：report 段/人门段/收口段），绝不归档——否则
+    每张票自产三件假「留史」。旧内容不可解析为 JSON 或无 ticket_id → 仍归档（token=
+    corrupt，原字节整体搬移），防畸形旧件被新跑静默清掉。
+
+    无静默覆盖（review R3）：归档目标 = `<stem>-<token>-<HHMMSS>[-N].json`，用
+    exclusive create（open 'xb'）——目标已存在（同秒同 token 的极端残撞）→ N+1 重试，
+    绝不覆写任何已有归档件；重试耗尽 → 放弃归档但把事由记进 archive_error（canonical
+    新写照常进行=最新态优先，丢史可归责）。原文件只在归档字节落定后才移除。
+
+    返回（additive，activity 回执透传）：{"archived": bool, "archive_path": str,
+    "archive_error": str}——失败不 raise（落账主流程绝不因留史失败而断）。"""
+    out: Dict[str, Any] = {"archived": False, "archive_path": "", "archive_error": ""}
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return out                                  # 首次落账：无旧件可归档
+    except OSError as e:
+        out["archive_error"] = "旧件不可读（不归档，新写照常）：%s: %s" % (type(e).__name__, e)
+        return out
+    old_ticket_id = ""
+    old_corrupt = False
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+        if isinstance(parsed, dict):
+            old_ticket_id = str(parsed.get("ticket_id") or "")
+    except Exception:                          # noqa: BLE001——畸形旧件：仍归档留证
+        old_ticket_id = ""
+        old_corrupt = True
+    if not old_corrupt and old_ticket_id == str(incoming_ticket_id or ""):
+        return out                             # 同票自身重写：不是「另一跑」，不归档
+                                               # （含双空=老 face 无 ticket_id 的幂等重写面；
+                                               #  可解析但无票号的旧件在 incoming 非空时
+                                               #  照常归档，token=corrupt）
+    token = _archive_ticket_token(old_ticket_id)
+    stamp = datetime.fromtimestamp(now_fn()).strftime("%H%M%S")
+    archive_dir = path.parent / LEDGER_ARCHIVE_DIRNAME
+    try:
+        archive_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        out["archive_error"] = "归档目录不可建（不归档，新写照常）：%s: %s" % (type(e).__name__, e)
+        return out
+    base = "%s-%s-%s" % (path.stem, token, stamp)
+    for n in range(1, 100):                         # 无静默覆盖：存在即换号，绝不覆写
+        candidate = archive_dir / ("%s%s%s" % (base, ("" if n == 1 else "-%d" % n),
+                                               path.suffix))
+        try:
+            with open(candidate, "xb") as fh:
+                fh.write(raw)
+            break
+        except FileExistsError:
+            continue                                # 同秒同 token 残撞 → -2/-3…
+        except OSError as e:
+            out["archive_error"] = "归档写入失败（不归档，新写照常）：%s: %s" % (type(e).__name__, e)
+            return out
+    else:
+        out["archive_error"] = ("归档重试耗尽（%s-*.%s 已有 99 件，不归档不覆写，新写照常）"
+                                % (base, path.suffix.lstrip(".")))
+        return out
+    try:
+        path.unlink()
+    except OSError as e:
+        # 归档已落定但原件移除失败：canonical 新写将覆盖同名原件——留史不丢（archive 已有），
+        # 事由仍要点名（「归档了但 canonical 写入前的原件删除失败」是异常形态）。
+        out["archive_error"] = "归档后原件移除失败：%s: %s" % (type(e).__name__, e)
+    out["archived"] = True
+    out["archive_path"] = str(candidate)
+    return out
+
+
+def write_inspection_report_impl(face: Dict[str, Any], out_dir: Path,
+                                 now_fn: Callable[[], float] = time.time) -> Dict[str, Any]:
     """Posting (a pure impl; the activity is a thin shell around it):
     out/inspection/inspection-<实例>-<期>.json（t260916-02：文件名按实例+期派生
     （inspection_ledger_name 单点）——键名约定不是票号，票号 t 形化后 deadman 台账
-    扫描零改动；同票重跑覆盖同一文件）。"""
+    扫描零改动；同票重跑覆盖同一文件）。
+
+    t260917-02 修复③：跨票覆盖前旧件自动搬 archive/ 留史（_archive_if_other_run 单点；
+    同票自身重写不归档）——canonical=每期最新一份，archive/=每跑一份。回执键 additive
+    （archived/archive_path/archive_error），老 worker/老调用零破坏。"""
     instance_id = str(face.get("instance_id") or "")
     period = str(face.get("period") or "")
     if not instance_id or not period:
@@ -402,13 +523,18 @@ def write_inspection_report_impl(face: Dict[str, Any], out_dir: Path) -> Dict[st
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / name
+    archived = _archive_if_other_run(path, str(face.get("ticket_id") or ""), now_fn=now_fn)
     path.write_text(json.dumps(face, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"file": name, "path": str(path),
-            "ticket_id": str(face.get("ticket_id") or "")}
+            "ticket_id": str(face.get("ticket_id") or ""),
+            "archived": archived["archived"],
+            "archive_path": archived["archive_path"],
+            "archive_error": archived["archive_error"]}
 
 
 def write_inspection_suite_receipt_impl(instance_id: str, period: str,
-                                        receipt: Dict[str, Any], out_dir: Path) -> Dict[str, Any]:
+                                        receipt: Dict[str, Any], out_dir: Path,
+                                        now_fn: Callable[[], float] = time.time) -> Dict[str, Any]:
     """套件回执落盘（t260913-02；t260916-02 文件名按实例+期派生）：
     out/inspection/inspection-<实例>-<期>-suite.json（同票重跑覆盖）。
 
@@ -429,11 +555,15 @@ def write_inspection_suite_receipt_impl(instance_id: str, period: str,
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / (inspection_ledger_name(instance_id, period)[:-len(".json")]
                       + "-suite.json")
+    archived = _archive_if_other_run(path, str((receipt or {}).get("ticket_id") or ""), now_fn=now_fn)
     path.write_text(json.dumps(dict(receipt or {}), ensure_ascii=False, indent=2),
                     encoding="utf-8")
     return {"file": path.name, "path": str(path),
             "ticket_id": str((receipt or {}).get("ticket_id") or ""),
-            "instance_id": instance_id, "period": period}
+            "instance_id": instance_id, "period": period,
+            "archived": archived["archived"],
+            "archive_path": archived["archive_path"],
+            "archive_error": archived["archive_error"]}
 
 
 # ========================================================================================
@@ -666,6 +796,14 @@ class InspectionPeriodicWorkflow:
             return await self._blocked(
                 ticket_id, inp, period, "setup",
                 "声明决议失败：%s" % ((plan_raw or {}).get("error") or "未知"), None)
+        # ---- 重定向守卫（t260917-02，REDIRECT_PATCH_ID 新命令；replay 安全不变量：
+        # 本分支内的新 activity 调用对老 history 永不可达——patched()=False 时零新命令）。
+        # 非 t 形 fire（旧调度 action 直发）在此改道起票单点铸 t 形票承接，本壳即返：
+        # 不跑扫描、不写台账、不进人门——扫描与人门只属于承接票，一期一跑不双份。
+        if self._patched and workflow.patched(REDIRECT_PATCH_ID):
+            redirect_reason = legacy_fire_redirect_reason(ticket_id)
+            if redirect_reason:
+                return await self._redirect_and_finish(ticket_id, inp, period, redirect_reason)
         run_suite = bool(plan.get("run_suite"))
         lane: Optional[Dict[str, str]] = None
         suite_section: Optional[Dict[str, Any]] = None
@@ -939,8 +1077,52 @@ class InspectionPeriodicWorkflow:
                 % "、".join(str(x) for x in res["malformed"][:10]), suggest=False)]
         return findings
 
+    async def _redirect_and_finish(self, ticket_id: str, inp: "InspectionPeriodicInput",
+                                   period: str, redirect_reason: str) -> Dict[str, Any]:
+        """旧形 fire 自愈重定向（t260917-02 修复①核心）。
+
+        借用清单（review R1-A 落地版）：spawn_inspection_period → open_period_ticket 的
+        语义**全数继承**（并发去重全链/指针三态/验票不可判让位/无 SA 可信 dedup/SA 三件套
+        盖章），本方法零重实现；dedup_source 三值（sa_query|pointer|already_started）逐字
+        透传进 face.redirect + timeline（可辨不混装）。
+        输入面取舍：face 不采信旧 payload（空传 → 活动按当前声明决议 scan_face，守「改
+        声明即改行为」）；身份缺项由活动侧回退链补齐（args → plan.instance_project_key →
+        fail-closed 显式失败）。
+        终态两态：成功=redirected（face.redirect 结构化回执；本壳不跑扫描/不写台账/
+        不进人门）；失败=blocked（**不落账**——该期无本壳台账，deadman 漏跑是唯一绊线，
+        与 deadman 跳火点名成链）。"""
+        self._enter("setup", "running", redirect_reason)
+        spawn_res: Dict[str, Any] = await workflow.execute_activity(
+            "spawn_inspection_period",
+            args=[{"instance_id": inp.instance_id,
+                   "face": "",
+                   "repo_root": str(getattr(inp, "repo_root", "") or ""),
+                   "project_key": str(getattr(inp, "project_key", "") or ""),
+                   "decl_path": str(getattr(inp, "decl_path", "") or ""),
+                   "period": period}],
+            start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
+        if (spawn_res or {}).get("ok"):
+            result = (spawn_res or {}).get("result") or {}
+            target = str(result.get("ticket_id") or "")
+            deduped = bool(result.get("deduped"))
+            source = str(result.get("dedup_source") or "-")
+            self._enter("setup", "redirected",
+                        "旧形 fire 重定向完成：本期由 t 形票 %s 承接（%s；dedup_source=%s）"
+                        % (target or "?",
+                           "deduped 复用既有票" if deduped else "新起票", source))
+            self.face["redirect"] = {"from": ticket_id, "to": target, "deduped": deduped,
+                                     "dedup_source": source, "period": period,
+                                     "instance": inp.instance_id, "reason": redirect_reason}
+            return self.snapshot()
+        return await self._blocked(
+            ticket_id, inp, period, "setup",
+            "重定向失败：%s ｜ spawn 回执：%s ｜ 本壳不落账——该期 deadman 漏跑是唯一绊线"
+            % (redirect_reason, str((spawn_res or {}).get("error") or "未知")),
+            None, write_ledger=False)
+
     async def _blocked(self, ticket_id: str, inp: "InspectionPeriodicInput", period: str,
-                       stage: str, reason: str, lane: Optional[Dict[str, str]]) -> Dict[str, Any]:
+                       stage: str, reason: str, lane: Optional[Dict[str, str]],
+                       write_ledger: bool = True) -> Dict[str, Any]:
         """终态收口：blocked 票面 + **落账**（dead-man 面：不落账的 blocked 在列表面不可见）
         + 泳道拆除（幂等；搭不起来的那条路径只尝试不报警）。"""
         self.status = "blocked"
@@ -957,7 +1139,10 @@ class InspectionPeriodicWorkflow:
             self._enter(stage, "blocked", "泳道拆除：%s" % note)
         # blocked 也落账（dead-man 面：不落账的 blocked 在列表面不可见），并带阶段机证据；
         # 老在途票不注入该新命令（replay 安全；它们的 blocked 面仍走票① 的纯快照语义）。
-        if self._patched:
+        # write_ledger=False（t260917-02 重定向失败路径）：本壳名下不落账——它的台账名
+        # （实例,期）与承接票相同，落了会把真票账盖成 blocked 面）；该期可见性交给
+        # deadman 漏跑绊线（与 deadman 跳火点名成链）。
+        if self._patched and write_ledger:
             await self._write_ledger()
         return self.snapshot()
 

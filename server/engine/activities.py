@@ -569,13 +569,44 @@ async def trigger_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
     return res
 
 
+def _resolve_spawn_identity(args: Dict[str, Any], plan: Dict[str, Any]) -> Dict[str, str]:
+    """起票身份决议（t260917-02 R2 身份回退链，纯函数）。
+
+    project_key = args 显式 → plan.instance_project_key（声明面真源）→ ""；
+    repo_root  = args 显式 → 按决议身份 resolve_project_root（注册表 dirs[0]）。
+
+    为何必须在起票前点名（fail-closed）：无主守卫只拦「双空」票——260917 实况的旧
+    action payload 恰是「repo_root 单腿非空、无 project_key」，若原样透传会铸出
+    ProjectKey 空的票（SA 三件套缺一=本票要消的缺陷族新形态）。身份与 repo_root 都
+    决议不出（无身份/未知 key）→ ValueError，调用方显式失败可见，绝不静默回落引擎仓。
+
+    face 不在本函数：旧 payload 的 face 一律不采信（scan_face 恒由调用处
+    `args.face or plan.scan_face` 决议——重定向路径 face 空传即走当前声明，「改声明即
+    改行为」纪律不变）。"""
+    from shared import resolve_project_root
+    project_key = str(args.get("project_key") or "").strip() \
+        or str(plan.get("instance_project_key") or "").strip()
+    repo_root = str(args.get("repo_root") or "").strip()
+    if not repo_root:
+        repo_root = str(resolve_project_root(project_key))
+    return {"project_key": project_key, "repo_root": repo_root}
+
+
 @activity.defn
 async def spawn_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
-    """spawner → 真票起票薄壳（t260916-02）：cron 调度每 fire 的铸期与开票都在这里——
-    期号按**声明 tz 的日历日**铸（resolve_instance_plan 的 tz 口径，与 deadman 期望键
-    同链；声明 enabled=false/除名 → plan ok=False → spawner action 显式失败可见，延续
-    「调度还在触发而声明已停用=配置漂移」的点名语义）。开票走 open_period_ticket 单点。
-    decl_path 恒空（cron 形态）→ plan 走聚合解析（worker 当前声明），改声明即改行为。"""
+    """spawner → 真票起票薄壳（t260916-02；t260917-02 扩重定向复用面）：cron 调度每
+    fire 的铸期与开票都在这里——期号按**声明 tz 的日历日**铸（resolve_instance_plan 的
+    tz 口径，与 deadman 期望键同链；声明 enabled=false/除名 → plan ok=False → spawner
+    action 显式失败可见，延续「调度还在触发而声明已停用=配置漂移」的点名语义）。开票走
+    open_period_ticket 单点（并发去重全链/指针三态/SA 三件套全数继承，零重实现）。
+    decl_path 恒空（cron 形态）→ plan 走聚合解析（worker 当前声明），改声明即改行为。
+
+    t260917-02 新增两腿（存量 spawner 调用零变化）：
+    - args.period 可选透传：空=按声明 tz 现铸（原行为）；非空=workflow 侧重定向守卫
+      把**自己已铸的期号**传下来（防双决议在 tz 边界漂移出两个期）。
+    - 身份回退链 _resolve_spawn_identity：args 缺 project_key（旧 action payload 的
+      260917 实况）→ 按 plan.instance_project_key 回退；repo_root 缺 → 按身份解析
+      注册表。都决议不出=显式失败（见该函数 docstring）。"""
     from datetime import datetime
     from inspection_decl import resolve_instance_plan
     from inspection_flow import period_key_in_tz
@@ -587,15 +618,20 @@ async def spawn_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
     plan = resolve_instance_plan(instance_id, str(args.get("decl_path") or "") or None)
     if not plan.get("ok"):
         return {"ok": False, "error": str(plan.get("error") or "声明决议失败")}
-    period = period_key_in_tz(datetime.now(), str(plan.get("tz") or ""))
+    period = str(args.get("period") or "") \
+        or period_key_in_tz(datetime.now(), str(plan.get("tz") or ""))
+    try:
+        ident = _resolve_spawn_identity(args, plan)
+    except ValueError as e:  # noqa: BLE001——身份决议不出=显式失败（fail-closed 点名）
+        return {"ok": False, "error": "spawn 身份决议失败：%s" % e}
     try:
         client = await Client.connect(TARGET_HOST, namespace=NAMESPACE)
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": "temporal server 不可达：%s" % e}
     res = await open_period_ticket(
         client, instance_id=instance_id, period=period,
-        project_key=str(args.get("project_key") or ""),
-        repo_root=str(args.get("repo_root") or ""),
+        project_key=ident["project_key"],
+        repo_root=ident["repo_root"],
         scan_face=str(args.get("face") or plan.get("scan_face") or "test"),
         decl_path=str(args.get("decl_path") or ""),
         task_queue=activity.info().task_queue)

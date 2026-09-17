@@ -305,3 +305,46 @@ def test_read_suite_receipt_missing_and_malformed(tmp_path):
     good.write_text(json.dumps({"ran": 1}), "utf-8")
     r = dm.read_suite_receipt(good)
     assert r["ok"] and r["receipt"]["ran"] == 1
+
+
+# ========================================================================================
+# t260917-02（C1）：跳火 finding 两腿（observed 实锤 / inferred 兜底，leg 可辨不混装）
+# ========================================================================================
+
+STALE = {"workflow": "InspectionPeriodicWorkflow"}
+FRESH = {"workflow": "InspectionPeriodicSpawnWorkflow"}
+
+
+def test_skip_observed_leg_namesskip_count_and_running():
+    fs = dm.skip_findings(2, 1, STALE, [])
+    assert len(fs) == 1
+    f = fs[0]
+    assert f["leg"] == "observed" and f["severity"] == "high" and f["suggest"] is False
+    assert "跳火实锤" in f["evidence"] and "skip 计数 2" in f["evidence"]
+    assert "仍在 Running" in f["evidence"] and "schedule-up" in f["evidence"]
+
+
+def test_skip_observed_suppresses_inferred():
+    # observed 命中（即使 action 陈旧+missed 非空）→ 只出一条，不混装
+    fs = dm.skip_findings(1, 1, STALE, ["20260915"])
+    assert len(fs) == 1 and fs[0]["leg"] == "observed"
+
+
+def test_skip_needs_both_count_and_running():
+    # 计数非零但当前无 Running（历史跳火痕迹）→ 不出 finding（回执键承载可见性）
+    assert dm.skip_findings(2, 0, STALE, []) == []
+    assert dm.skip_findings(0, 3, STALE, []) == []
+
+
+def test_skip_inferred_only_when_counters_unknown():
+    fs = dm.skip_findings(None, None, STALE, ["20260914", "20260915"])
+    assert len(fs) == 1 and fs[0]["leg"] == "inferred" and fs[0]["severity"] == "med"
+    assert "20260914" in fs[0]["evidence"] and "兜底" in fs[0]["subject"]
+    # 计数可得且全零 → 不推断（报错必须精确：无实锤不出疑似）
+    assert dm.skip_findings(0, 0, STALE, ["20260914"]) == []
+
+
+def test_skip_no_finding_when_action_points_spawner():
+    assert dm.skip_findings(None, None, FRESH, ["20260914"]) == []   # action 已指 spawner
+    assert dm.skip_findings(None, None, None, ["20260914"]) == []    # action 摘要不可得
+    assert dm.skip_findings(0, 0, FRESH, []) == []                   # 全净

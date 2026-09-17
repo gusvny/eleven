@@ -591,7 +591,8 @@ async def cmd_deadman(args: argparse.Namespace) -> Dict[str, Any]:
     退出码：漏跑非空 = 1（ops 自动化可踩），否则 0——但 stdout 恒为单行 JSON
     {ok, result|error}（本通道既有契约不变：ok=False 只表示「查不了」）。
     离线也可用（--offline 不连 Temporal）：隔离台/注入演练不依赖服务器。"""
-    from inspection_deadman import deadman_findings, ledger_periods, missed_periods
+    from inspection_deadman import (deadman_findings, ledger_periods, missed_periods,
+                                    skip_findings)
     try:
         decl, decl_project = _resolve_decl(args.decl_path, args.instance)
     except ValueError as e:  # noqa: BLE001——声明不可用=ok False 点名（不猜）
@@ -626,6 +627,9 @@ async def cmd_deadman(args: argparse.Namespace) -> Dict[str, Any]:
         "missed": missed, "alarmed": bool(missed),
         "malformed": ledger["malformed"],
         "findings": deadman_findings(missed, args.instance, it.cron, int(args.lookback_days)),
+        # t260917-02（C1）：跳火回执两键——None=未查（在线面才有真值），非 None=调度面
+        # 直接计数在案（1.18.2 ScheduleInfo 字段实证；跳火可观测，不再推断为准）。
+        "skip_count": None, "running_actions": None,
         "schedule": {"checked": False},
     }
     if args.offline:
@@ -644,6 +648,9 @@ async def cmd_deadman(args: argparse.Namespace) -> Dict[str, Any]:
                                            % type(e).__name__}
             return _ok(result)
         info = d.info
+        skip_count = getattr(info, "num_actions_skipped_overlap", None)
+        running_actions = list(getattr(info, "running_actions", None) or [])
+        action_summary = await _schedule_action_summary(c, args.instance)
         result["schedule"] = {
             "checked": True, "exists": True,
             "next_action_times": [t.isoformat(timespec="seconds")
@@ -652,8 +659,21 @@ async def cmd_deadman(args: argparse.Namespace) -> Dict[str, Any]:
                                 "status": str(getattr(a, "start_workflow_status", ""))}
                                for a in (getattr(info, "recent_actions", None) or [])][:3],
             "num_actions": getattr(info, "num_actions", None),
+            # t260917-02（C1）：skip 计数/Running action/补窗错失三键并回执（additive）
+            "skip_count": skip_count, "running_actions": len(running_actions),
+            "missed_catchup_window": getattr(info, "num_actions_missed_catchup_window", None),
             "note": getattr(info, "note", ""),
         }
+        result["skip_count"] = skip_count
+        result["running_actions"] = len(running_actions)
+        if action_summary is not None:
+            result["schedule_action"] = action_summary
+        # 跳火 finding（C1 两腿：observed 实锤优先 / inferred 兜底，leg 键可辨不混装）
+        skip_f = skip_findings(skip_count, len(running_actions), action_summary, missed)
+        if skip_f:
+            result["findings"] = list(result["findings"]) + skip_f
+            if any((f or {}).get("leg") == "observed" for f in skip_f):
+                result["alarmed"] = True   # 此刻就在跳火=每天可见的告警（ops 退出码可踩）
     except ImportError as e:
         result["schedule"] = {"checked": False, "error": "temporalio SDK 缺失：%s" % e}
     except Exception as e:  # noqa: BLE001——查不了调度面不遮蔽漏跑结论（各自分开报）

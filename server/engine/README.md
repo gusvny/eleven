@@ -590,6 +590,74 @@ server/engine/.venv/bin/python server/engine/inspection_trigger.py trigger \
 server/engine/.venv/bin/python server/engine/inspection_trigger.py decl
 ```
 
+## 14. 调度路自愈重定向 + 板面降级可见 + 台账留史（t260917-02）
+
+260917 首次自动巡检实测暴露三缺口（票形双缺陷/板面吞在跑票/台账无归档覆盖），本节
+是三修复 + 一复核的机制注记。
+
+### 14.1 调度路径票形统一：非 t 形 fire 自愈重定向（修复①）
+
+- **根因**：260916-02 的「重跑 schedule-up」在过渡窗没跑，旧代 schedule-up 铸的
+  action 仍直发 `InspectionPeriodicWorkflow`（服务端给 fire id 追加 `-<fire时刻UTC>`
+  后缀）——票面 ticket_id=workflow id 本身、无实例/期 SA。
+- **机制**：workflow 侧守卫（`legacy_fire_redirect_reason`，纯函数）认出「非 t 形
+  fire」→ 起票单点 `spawn_inspection_period` → `open_period_ticket` 铸 t 形票承接；
+  壳即返（不扫描/不落账/不进人门——扫描与人门只属于承接票）。patch 门
+  `REDIRECT_PATCH_ID`：老 in-flight 票零新命令（replay 安全，`replay_check.py
+  --workflow <票 id>` 机械验证）。
+- **身份回退链**（`activities._resolve_spawn_identity`）：旧 payload 缺 project_key
+  → 按 plan 的 `instance_project_key`（decl 实例级身份）回退；repo_root 缺 → 注册表
+  解析；都决议不出 → 显式失败（fail-closed，绝不静默回落引擎仓）。face 不采信旧
+  payload（空传 → 按当前声明 scan_face 决议）。
+- **运维边界**：重定向是**过渡窗自愈**，不是对「不重跑 schedule-up」的豁免——action
+  不刷新，每期都要多走一次重定向；`schedule-up --note "..."` 重跑仍是一劳永逸解。
+
+### 14.2 板面降级可见（修复②）：不可辨「在跑」不再静默吞
+
+- 不可辨（无实例/期 SA 且 id 非旧形词法）**且在跑** → 显式降级行上板：行带
+  `identity_note`（假设语气点名「疑似旧调度 action 直发或演练残留」+核查入口），
+  回执 `kept_unresolved` 计数；**且已闭合** → 维持不上板（僵尸纪律半边不动），
+  `dropped_unresolved` 计数——两个计数分账可辨。
+- 同期并存：同 (实例,期) 的 open 行带 `same_period_closed=<闭合票号>` 注（不合并行、
+  不隐藏任何一张——每期一票语义下的双行只注不并）。
+
+### 14.3 台账留史（修复③）：跨票同名覆盖前归档
+
+- `write_inspection_report` / 套件回执落盘前经 `_archive_if_other_run`：同
+  `ticket_id` 重写不归档（每跑一份以票为界）；**跨票**同名 → 旧件先搬
+  `archive/<stem>-<sanitize(票号)>-<HHMMSS>[-N].json`（exclusive create，同秒自撞
+  -N 递增），原字节保留可读；畸形旧件按 corrupt 整体搬移；归档失败不拦新写
+  （canonical 恒保最新）。`archive/` 不进 deadman 期号集合。
+- **保留口径（宿主已裁决默认）**：archive/ **不自动清理**，无 TTL——磁盘面人工或
+  工具处置；语义=每期一份 canonical + 每跨票覆盖留一份史。
+
+### 14.4 跳火可观测（复核④）：OverlapPolicy=SKIP 与人门长挂解耦
+
+- **口径更正（review C1）**：跳火**可直接观测**——`ScheduleInfo` 携带
+  `num_actions_skipped_overlap` / `running_actions` / `num_actions_missed_catchup_window`
+  （temporalio 1.18.2 字段实证）。「SDK 无 skip 观测字段」的旧断言只对
+  `ScheduleActionResult` 成立，不得再引用。
+- **结构解耦**：schedule action 指向 spawner（秒进秒出）后，人门长挂的是**真票**而
+  非 action 的 Running 位——下一期 fire 不再被人门挡住。旧直发 action 形态下人门长挂
+  仍会占 Running 位（重定向守卫是承接种，不是占位者）。
+- **deadman 回执**（`inspection_trigger.py deadman`）：`skip_count` /
+  `running_actions` 两键（None=未查）；finding 两腿——observed（skip>0 且
+  Running>0 →「跳火实锤：skip 计数 N、上期 action 仍在 Running」high）优先，
+  inferred（计数不可得 + missed 非空 + action 未指 spawner → med 兜底）可辨不混装；
+  observed 命中即 `alarmed=true`（每天可见的告警，ops 退出码可踩）。
+
+### 14.5 相关面索引
+
+- 真值表/纯函数面单测：`server/engine/tests/test_t260917_02_inspection_redirect.py`
+  （形状判别/身份回退/重定向判据/period 透传）、`test_t260913_02_inspection_deadman.py`
+  （跳火两腿）、`test_t260917_02_inspection_ledger_archive.py`（归档真值表）、
+  `test_t260915_08_inspection_board.py`（降级可见/同期同注/部分 SA 真值表）。
+- 集成场景：`integration/t260917-02/`（legacy-fire-redirect / board-unresolved-running /
+  ledger-archive-regression，登记于 run_scenarios.py）。
+- N1 运维加急（合入后宿主/main 尽快执行）：`schedule-up` 重跑（action 指向 spawner）
+  + terminate 挂门旧壳（id=inspection-integration-tests-period-2026-09-16T23:30:00Z）；
+  deadman 落 14.4 后该风险每天自动点名。
+
 ## 退役账（t260907-04 命名清理①：7 条过渡兼容，撤任何一条前先对表）
 
 t260907-04 把 SANDBAR_* env、suyou-poc 队列、.suyou/ 协调目录改成 sandbar 名。以下 7 条  # naming-compat

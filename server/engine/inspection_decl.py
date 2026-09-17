@@ -526,7 +526,12 @@ def _plan_from_decl(decl: "InspectionDecl", instance_id: str) -> Dict[str, Any]:
     return {"ok": True, "instance_id": it.id, "enabled": True, "suite": it.suite,
             "run_suite": bool(it.suite), "scan_face": it.scan_face, "cron": it.cron,
             "tz": it.tz,
-            "kind": it.kind, "workflow": it.workflow, "template": it.template, "error": ""}
+            "kind": it.kind, "workflow": it.workflow, "template": it.template,
+            # t260917-02（R2 身份回退链）：实例级项目身份随 plan 出——旧调度 payload 缺
+            # project_key 时（260917 实况），spawn 活动按本键回退决议归属，起票 SA
+            # 三件套在生产过渡窗也齐。键名沿用 decl 本名（防与 schedule 级 project_key
+            # 计数源语义混串，见本文件 :104 注）。
+            "instance_project_key": it.instance_project_key, "error": ""}
 
 
 def resolve_instance_plan(instance_id: str, decl_path: Any = None) -> Dict[str, Any]:

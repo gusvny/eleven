@@ -100,7 +100,7 @@ def reexec_venv_if_missing(mods=("temporalio",)) -> None:
 # ambient 指生产 7233 或任何第三方值→die_fail 点名失败的检查项；ambient 的
 # SANDBAR_* 不得静默穿透进子进程（构造时显式覆盖/剔除）。
 TEST_TARGET_HOST = "127.0.0.1:17233"
-TEST_NAMESPACE = "suyou-test"  # naming-compat：绑定存量 docker 测试台命名空间（docker-compose.test.yml 定义；改名随专门迁移票）
+TEST_NAMESPACE = "sandbar-test"  # 绑定存量 docker 测试台命名空间（docker-compose.test.yml 定义）。t260917-02 勘误：终切 d342b46 已把台命名空间改 sandbar-test，此处漏改残留 suyou-test——旧持久卷里恰好有死命名空间故今晨前未暴露，新卷台（无 suyou-test）一律 ENV_FAIL「Namespace suyou-test is not found」；对齐存量台定义（宿主令 260908 suyou 退役同向），如需回摆随专门迁移票
 _ENV_OVERRIDES = ("SANDBAR_TARGET_HOST", "SANDBAR_NAMESPACE")  # 红线键：绝不穿透
 
 

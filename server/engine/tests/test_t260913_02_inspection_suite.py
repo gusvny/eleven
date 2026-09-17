@@ -415,7 +415,9 @@ def test_replay_gate_locks_new_commands():
     idx_gate = src.index("self._patched = workflow.patched(SUITE_PATCH_ID)")
     assert idx_gate < src.index('"resolve_inspection_plan"')
     blk = _inspect.getsource(flow.InspectionPeriodicWorkflow._blocked)
-    assert "if self._patched:" in blk
+    # t260917-02（R7）：_blocked 增 write_ledger 开关（重定向失败路径不落账）——
+    # 落账仍严格在 patched 门内，只是多了显式开关
+    assert "if self._patched and write_ledger:" in blk
     assert _inspect.getsource(flow.InspectionPeriodicWorkflow.__init__).count("_patched") == 1
 
 

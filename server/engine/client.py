@@ -1783,15 +1783,29 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
     # 行集；match_via/（实例,期）随 entry 记下供行渲染（不再二次反解）。
     inspection_match_via: Dict[str, str] = {}
     inspection_inst_period: Dict[str, "Tuple[str, str]"] = {}
+    inspection_unresolved: set = set()   # 在跑且实例身份不可辨的票 id（修复②降级可见腿）
     if inspection_mode and inspection_info is None:
         # whitelist/降级摘要/降级清单已在查询段单点取得（不二次读声明面）
         kept: List[Dict[str, Any]] = []
         dropped_unresolved = 0
+        kept_unresolved = 0
         for e in entries:
             inst, per, via = _inspection_instance_period_of(runs[e["id"]], e["id"])
             if not inst:
-                dropped_unresolved += 1
-                continue  # 实例身份不可辨（非旧形又无 SA）——未在册不上板（僵尸纪律不变）
+                # t260917-02 修复②：不可辨「且在跑」的巡检型运行不再静默丢——260917
+                # 实况：旧调度 action 直发的 awaiting-human 票（无 SA 且 id 非旧形词法）
+                # 被本分支吞掉，正在等人的巡检在 UI 上不存在。降级可见（identity_note
+                # 假设语气：疑似旧 action 直发或演练残留，不写死处方）；不可辨「且已
+                # 闭合」仍不上板——僵尸纪律半边不动（test-face/suite-drill 历史残件
+                # 不借修复复活；t260916-02-board-legacy-three-state 守的「可辨但不在
+                # 册→不上板」口径对可辨实例原样保留，与本条不矛盾）。
+                if e["exec_status"] != "RUNNING":
+                    dropped_unresolved += 1
+                    continue
+                kept_unresolved += 1
+                inspection_unresolved.add(e["id"])
+                kept.append(e)
+                continue
             inspection_match_via[e["id"]] = via
             inspection_inst_period[e["id"]] = (inst, per)
             if inst not in whitelist:
@@ -1813,7 +1827,9 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                                for p, pa, err in inspection_degraded],
                            "coverage_overlay": _inspection_coverage_overlay(),
                            "scan_mode": inspection_scan_mode or "starts_with",
-                           "dropped_unresolved": dropped_unresolved}
+                           "dropped_unresolved": dropped_unresolved,
+                           # t260917-02 修复②：在跑不可辨行计数（降级可见，不再与丢弃混装）
+                           "kept_unresolved": kept_unresolved}
 
     # The snapshot query is issued only for RUNNING executions, and concurrently — a
     # non-RUNNING query lands on the already-exited dedicated worker's queue and waits
@@ -1940,6 +1956,32 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                          "close_ts": e["close_ts"],
                          "engine": ENGINE_V2, "exec_status": exec_status,
                          "authz_active": 0})  # t260912-03 降级/极简行同形（无快照=无授权面可读）
+    # t260917-02 修复②收尾 pass（巡检板面专用）：
+    # ① identity_note：不可辨且在跑的行（kept_unresolved 腿）带假设语气注记——疑似
+    #   旧调度 action 直发或演练残留，给核查入口不写死处方（报错必须精确纪律）。
+    # ② same_period_closed：同 (实例,期) 下 open 行与 closed 行并存时，open 行标注
+    #   同期已有收口票（方案②「未收口运行单独成行并标注同期已有收口票」的承接；
+    #   不合并行、不隐藏任何一张——每期一票语义下的双行只注不并）。
+    if inspection_mode:
+        closed_by_ip: Dict[Tuple[str, str], str] = {}
+        for r in rows:
+            if r.get("engine") != INSPECTION_ROW_ENGINE or r.get("status") != "closed":
+                continue
+            ip = (str(r.get("instance_id") or ""), str(r.get("period") or ""))
+            if ip[0] and ip not in closed_by_ip:
+                closed_by_ip[ip] = str(r.get("id") or "")
+        for r in rows:
+            if r.get("engine") != INSPECTION_ROW_ENGINE:
+                continue
+            if r.get("id") in inspection_unresolved:
+                r["identity_note"] = ("巡检在跑但实例身份不可辨（无实例/期 SA 且 id 非旧形）"
+                                      "——疑似旧调度 action 直发或演练残留；核查入口："
+                                      "inspection_trigger.py describe（schedule_action 段）")
+            if r.get("status") == "closed":
+                continue
+            ip = (str(r.get("instance_id") or ""), str(r.get("period") or ""))
+            if ip[0] and ip in closed_by_ip and closed_by_ip[ip] != str(r.get("id") or ""):
+                r["same_period_closed"] = closed_by_ip[ip]
     rows.sort(key=lambda r: -(r.get("created") or 0))
     result: Dict[str, Any] = {"count": len(rows), "tickets": rows}
     if inspection_info is not None:

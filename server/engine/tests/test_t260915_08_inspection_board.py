@@ -237,6 +237,120 @@ def inspection_snap(stage="close", stage_state="awaiting-human", status="running
     }
 
 
+# ---------------------------------------------- C2. t260917-02 修复②：不可辨/同期同注/R6
+
+def test_unresolved_running_visible_and_closed_dropped(monkeypatch):
+    """修复②两态：不可辨 RUNNING 降级可见（identity_note+kept_unresolved 计数）；
+    不可辨 COMPLETED 仍不上板（僵尸纪律半边不动，dropped_unresolved 计数）。"""
+    monkeypatch.setattr(client_mod, "_inspection_enabled_instances",
+                        lambda: (("integration-tests",), "", []))
+    now = time.time()
+    start = datetime.fromtimestamp(1760000000, tz=timezone.utc)
+    wfs = [
+        InspWf("inspection-integration-tests-period-2026-09-16T23:30:00Z", "RUNNING",
+               TASK_QUEUE, SA_EMPTY, start_time=start),   # 不可辨在跑（服务端后缀形 id）
+        InspWf("inspection-nobody-period-2026-09-10T00:00:00Z", "COMPLETED", TASK_QUEUE, SA_EMPTY,
+               close_time=datetime.fromtimestamp(now - 60, tz=timezone.utc),
+               start_time=start),                          # 不可辨已闭合（僵尸残件）
+    ]
+    handles = {"inspection-integration-tests-period-2026-09-16T23:30:00Z":
+               FakeHandle(snapshot=inspection_snap(
+                   face={"ticket_id": "inspection-integration-tests-period-2026-09-16T23:30:00Z",
+                         "kind": "inspection", "instance_id": "integration-tests",
+                         "period": "20260916", "summary": {}, "findings": []}))}
+    res, _ = run_list({"kind": "inspection"}, wfs, handles)
+    ids = [r["id"] for r in tickets_of(res)]
+    assert "inspection-integration-tests-period-2026-09-16T23:30:00Z" in ids   # 在跑可见
+    assert "inspection-nobody-period-2026-09-10T00:00:00Z" not in ids           # 闭合不复活
+    info = res["result"]["inspection_filter"]
+    assert info["kept_unresolved"] == 1 and info["dropped_unresolved"] == 1
+    row = row_of(res, "inspection-integration-tests-period-2026-09-16T23:30:00Z")
+    assert row["awaiting_gate"] is True                       # 真快照行：等人状态可读
+    assert "疑似" in row["identity_note"] and "describe" in row["identity_note"]
+
+
+def test_same_period_open_row_annotated_with_closed(monkeypatch):
+    """同期 closed+awaiting-human 并存：双行都在板，open 行带 same_period_closed 注；
+    异期 closed 行不误注（生产 260916 实况的板面等价形态）。"""
+    monkeypatch.setattr(client_mod, "_inspection_enabled_instances",
+                        lambda: (("integration-tests",), "", []))
+    now = time.time()
+    start = datetime.fromtimestamp(1760000000, tz=timezone.utc)
+    sa_ip = {str(_K.for_keyword(client_mod.INSPECTION_INSTANCE_SA_NAME)): "integration-tests",
+             str(_K.for_keyword(client_mod.INSPECTION_PERIOD_SA_NAME)): "20260916"}
+    sa_ip15 = dict(sa_ip)
+    sa_ip15[str(_K.for_keyword(client_mod.INSPECTION_PERIOD_SA_NAME))] = "20260915"
+    wfs = [
+        InspWf("t260916-13", "COMPLETED", TASK_QUEUE, sa_ip,
+               close_time=datetime.fromtimestamp(now - 60, tz=timezone.utc), start_time=start),
+        InspWf("t260916-99", "COMPLETED", TASK_QUEUE, sa_ip15,
+               close_time=datetime.fromtimestamp(now - 60, tz=timezone.utc), start_time=start),
+        InspWf("inspection-integration-tests-period-2026-09-16T23:30:00Z", "RUNNING",
+               TASK_QUEUE, SA_EMPTY, start_time=start),
+    ]
+    handles = {
+        "t260916-13": FakeHandle(result_value=inspection_snap(stage="close", stage_state="done",
+                                                              status="closed",
+                                                              face={"ticket_id": "t260916-13",
+                                                                    "instance_id": "integration-tests",
+                                                                    "period": "20260916",
+                                                                    "summary": {}, "findings": []})),
+        "t260916-99": FakeHandle(result_value=inspection_snap(stage="close", stage_state="done",
+                                                              status="closed",
+                                                              face={"ticket_id": "t260916-99",
+                                                                    "instance_id": "integration-tests",
+                                                                    "period": "20260915",
+                                                                    "summary": {}, "findings": []})),
+        "inspection-integration-tests-period-2026-09-16T23:30:00Z":
+            FakeHandle(snapshot=inspection_snap(
+                face={"ticket_id": "inspection-integration-tests-period-2026-09-16T23:30:00Z",
+                      "instance_id": "integration-tests", "period": "20260916",
+                      "summary": {}, "findings": []})),
+    }
+    res, _ = run_list({"kind": "inspection"}, wfs, handles)
+    open_row = row_of(res, "inspection-integration-tests-period-2026-09-16T23:30:00Z")
+    assert open_row is not None and open_row["awaiting_gate"] is True   # 修复②可见性半边
+    assert open_row["same_period_closed"] == "t260916-13"               # 同期注精确到票号
+    assert "same_period_closed" not in {k: v for k, v in open_row.items() if v == "t260916-99"}
+    closed_row = row_of(res, "t260916-13")
+    assert closed_row is not None and closed_row["status"] == "closed"  # closed 行照常在板
+    assert "same_period_closed" not in closed_row
+
+
+def test_partial_sa_truth_table_and_board_legs(monkeypatch):
+    """R6：部分 SA 畸形态真值表（解析单点四态）+ 板面腿（有实例无期上板 period 空；
+    有期无实例走不可辨在跑腿）。"""
+    # —— 解析单点真值表 ——
+    def wf_with(kv):
+        return FakeListWf("x", "RUNNING", TASK_QUEUE, kv)
+    inst_only = {str(_K.for_keyword(client_mod.INSPECTION_INSTANCE_SA_NAME)): "inst-a"}
+    per_only = {str(_K.for_keyword(client_mod.INSPECTION_PERIOD_SA_NAME)): "20260916"}
+    both = dict(inst_only)
+    both[str(_K.for_keyword(client_mod.INSPECTION_PERIOD_SA_NAME))] = "20260916"
+    assert client_mod._inspection_instance_period_of(wf_with(inst_only), "x") == ("inst-a", "", "sa")
+    assert client_mod._inspection_instance_period_of(wf_with(per_only), "x") == ("", "", "")
+    assert client_mod._inspection_instance_period_of(wf_with(both), "x") == ("inst-a", "20260916", "sa")
+    # 无 SA 但旧形 id → legacy 只读解析兜底（既有口径回归钉）
+    assert client_mod._inspection_instance_period_of(wf_with(SA_EMPTY), "inspection-docs-sync-20260908") \
+        == ("docs-sync", "20260908", "legacy_id")
+    # —— 板面腿 ——
+    monkeypatch.setattr(client_mod, "_inspection_enabled_instances",
+                        lambda: (("inst-a",), "", []))
+    start = datetime.fromtimestamp(1760000000, tz=timezone.utc)
+    wfs = [
+        InspWf("inspection-a-no-period", "RUNNING", TASK_QUEUE, inst_only, start_time=start),
+        InspWf("inspection-period-only-2026-09-16T00:00:00Z", "RUNNING", TASK_QUEUE, per_only, start_time=start),
+    ]
+    handles = {"inspection-a-no-period": FakeHandle(snapshot=inspection_snap(
+        face={"instance_id": "inst-a", "period": "", "summary": {}, "findings": []}))}
+    res, _ = run_list({"kind": "inspection"}, wfs, handles)
+    r1 = row_of(res, "inspection-a-no-period")
+    assert r1 is not None and r1["instance_id"] == "inst-a" and r1["period"] == ""
+    r2 = row_of(res, "inspection-period-only-2026-09-16T00:00:00Z")
+    assert r2 is not None and "identity_note" in r2          # 有期无实例=不可辨在跑→降级可见
+    assert res["result"]["inspection_filter"]["kept_unresolved"] == 1
+
+
 # ---------------------------------------------------------------- A. 票号解析（legacy 只读）
 
 def test_inspection_instance_of_truth_table():
@@ -363,8 +477,15 @@ def test_inspection_mode_rows_whitelist_and_closed_window(monkeypatch):
     assert "inspection-test-face-20260910" not in ids          # 僵尸不上板（R2）
     assert "inspection-mechanism-face-20260910" not in ids
     assert "inspection-suite-drill-20260913" not in ids
-    assert "inspection-foo" not in ids                         # 解析不出实例=不上板
+    # t260917-02 修复②（契约翻转，R5 对账）：不可辨「且在跑」降级可见——
+    # 260917 实况（旧 action 直发的 awaiting-human 票被静默吞）修复后的新契约；
+    # 不可辨「且已闭合」仍不上板（下一测试的负腿）。僵尸三行是「可辨但不在册」
+    # （t260916-02-board-legacy-three-state 守的口径），本条不碰。
+    assert "inspection-foo" in ids
+    foo_row = row_of(res, "inspection-foo")
+    assert "identity_note" in foo_row and "疑似" in foo_row["identity_note"]
     info = res["result"]["inspection_filter"]
+    assert info["kept_unresolved"] == 1 and info["dropped_unresolved"] == 0
     assert info["degraded"] is False and info["enabled_instances"] == [
         "docs-sync", "integration-tests"]
     # t260916-02 双腿：SA 腿（白名单 OR 串）+ legacy 腿（STARTS_WITH 前缀）；类型过滤

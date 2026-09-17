@@ -80,6 +80,20 @@ def ticket_id_from_seq(prefix: str, seq: int) -> str:
     return "%s-%02d" % (prefix, seq)
 
 
+# t 形工单号形状（全工单票共形：dev-lane 工单与巡检票同一词法）
+TICKET_ID_SHAPE_RE = re.compile(r"^t\d{6}-\d{2,}$")
+
+
+def has_ticket_id_shape(ticket_id: str) -> bool:
+    """t 形**形状**判别单点（t260917-02：workflow 侧重定向守卫用它认「非 t 形 fire」）。
+
+    ⚠ 语义圈死：这是**形状判别**，不是**巡检票身份判别**——本词法全工单票共形
+    （dev-lane 工单票号同样匹配，本票自己的票号也匹配）；巡检票身份判别的唯一真源
+    =SA (InspectionInstance, InspectionPeriod)（find_period_ticket_ids /
+    resolve_period_ticket_id 链），绝不许拿本函数当「是不是巡检票」用。"""
+    return bool(TICKET_ID_SHAPE_RE.match(str(ticket_id or "").strip()))
+
+
 # ========================================================================================
 # 指针文件（并发窗兜底；目录接 SANDBAR_INSPECTION_DIR 覆盖链）
 # ========================================================================================

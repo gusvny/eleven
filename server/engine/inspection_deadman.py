@@ -61,6 +61,51 @@ def make_finding(scan: str, severity: str, subject: str, evidence: str,
             "suggest": suggest}
 
 
+# spawner 工作流类型名（t260917-02：调度 action 应指向的 workflow；与
+# inspection_trigger._schedule_action 的 builder 同一事实，这里只作判别读面）
+SPAWNER_WORKFLOW_TYPE = "InspectionPeriodicSpawnWorkflow"
+
+
+def skip_findings(skip_count, running_actions, action_summary, missed):
+    """跳火 finding 两腿（t260917-02 C1：跳火**可观测**，不再推断为准）。
+
+    observed（可观测腿，实锤）：skip_count>0 且 running_actions>0——调度面直接计数
+    在案（ScheduleInfo.num_actions_skipped_overlap / running_actions，temporalio
+    1.18.2 字段实证），点名「跳火实锤：skip 计数 N、上期 action 仍在 Running」+
+    处方（schedule-up / terminate）。仅计数非零但当前无 Running → 只算历史跳火痕迹，
+    不出 finding（回执键已可见）——「此刻就在跳火」才升级。
+    inferred（兜底腿，可辨不混装）：仅当计数不可得（None——counter 不可得/SDK 差异
+    形态）且 missed 非空且 action 未指 spawner（旧直发形）→ 疑似点名（med；置信度
+    降级故 med，漏跑本身的 high 由 deadman_findings 承担）。计数可得时即使非零+陈旧
+    action 也走 observed，不混装。observed 命中即不再出 inferred（同因不双报）。
+    每条带 leg 键（observed|inferred）。suggest=False：运维处置（schedule-up/terminate），
+    开修码票是错配（同 make_finding 的漏跑口径）。"""
+    wf = str((action_summary or {}).get("workflow") or "")
+    stale = bool(wf) and wf != SPAWNER_WORKFLOW_TYPE
+    counters_known = skip_count is not None and running_actions is not None
+    if counters_known and int(skip_count) > 0 and int(running_actions) > 0:
+        f = make_finding(
+            DEADMAN_SCAN, "high", "调度跳火实锤（OverlapPolicy=SKIP）",
+            "跳火实锤：skip 计数 %d、上期 action 仍在 Running×%d（人门长挂占 Running 位，"
+            "下期被静默跳）｜调度 action=%s%s｜处置：重跑 schedule-up（action 指向 "
+            "spawner）+ terminate 挂门旧票（id 见 schedule_action）"
+            % (int(skip_count), int(running_actions), wf or "未知",
+               "；action 陈旧未指 spawner" if stale else ""),
+            suggest=False)
+        f["leg"] = "observed"
+        return [f]
+    if not counters_known and missed and stale:
+        f = make_finding(
+            DEADMAN_SCAN, "med", "调度跳火疑似（兜底腿）",
+            "跳火计数不可得，但漏跑期 %s 与旧直发 action（%s，未指 spawner）并存——疑似"
+            "上期挂门被 SKIP；重跑 schedule-up 后以 observed 腿实锤" % (
+                "、".join(missed[:3]), wf),
+            suggest=False)
+        f["leg"] = "inferred"
+        return [f]
+    return []
+
+
 # ========================================================================================
 # 台账（out/inspection/）读取
 # ========================================================================================
