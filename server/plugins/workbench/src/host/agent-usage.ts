@@ -27,6 +27,7 @@ import { readdir, stat } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import { SessionError, decompressSession } from './agent-live.ts'
 import { resolveAgentBaseDir } from './agent-logs.ts'
+import { existingSessionFilesIn, pickNewestSessionFile } from './session-discovery.ts'
 
 interface Sum { input: number; output: number; cacheRead: number }
 
@@ -137,20 +138,20 @@ export async function resolveAllSessionFiles(
     } catch { continue }
     for (const s of subs) {
       if (s !== ticketId && !s.startsWith(ticketId + '-')) continue
-      const fp = join(sessRoot, slug, s, 'session.jsonl.zstd')
+      // 双名发现（t260916-23 session-name-compat）：同一会话目录两代并存取 mtime 最新
+      // 一份（防双代并计翻倍）；半径钉死既有两层布局内，不扩（review C2）。
+      const picked = await pickNewestSessionFile(await existingSessionFilesIn(join(sessRoot, slug, s)))
+      if (picked === null) continue
       // 双保险：最终落点必须在工作空间内（防穿，同 resolveSessionFile 的 isWithin）
       const wr = resolve(wsRoot)
-      if (!(resolve(fp) === wr || resolve(fp).startsWith(wr + sep))) {
-        return { refused: true, wsRoot, reason: `会话路径越界（拒绝读取）: ${fp}` }
+      if (!(resolve(picked) === wr || resolve(picked).startsWith(wr + sep))) {
+        return { refused: true, wsRoot, reason: `会话路径越界（拒绝读取）: ${picked}` }
       }
-      try {
-        await stat(fp)
-        paths.push(fp)
-      } catch { /* 无 session.jsonl.zstd，跳过 */ }
+      paths.push(picked)
     }
   }
   if (paths.length === 0) {
-    return { paths: [], wsRoot, reason: `无本工单会话文件（${sessRoot} 下无 ${ticketId}-*/session.jsonl.zstd）` }
+    return { paths: [], wsRoot, reason: `无本工单会话文件（${sessRoot} 下无 ${ticketId}-*/ 的会话文件 session.jsonl.zstd / session.v3.jsonl.zstd）` }
   }
   return { paths, wsRoot }
 }
@@ -221,8 +222,8 @@ async function aggregateOneFile(path: string, windows: StageWindow[], out: Agent
  * 泳道拆除后 `.dsh/sessions` 陪葬，token 维唯一存活希望=引擎侧在 merge 时刻把
  * usage 出仓到项目级账本（agent_activities.py，本票写集外——登记
  * notes/debts/known-issues.md KI-017③）。本函数只做探测：
- *   约定路径 = $SANDBAR_USAGE_LEDGER_DIR/<工单id>/*.jsonl.zstd（格式与
- *   session.jsonl.zstd 同构，复用同一聚合通路；env 亦为测试缝）。
+ *   约定路径 = $SANDBAR_USAGE_LEDGER_DIR/<工单id>/*.jsonl.zstd（格式与两代会话文件
+ *   session.jsonl.zstd / session.v3.jsonl.zstd 同构，复用同一聚合通路；env 亦为测试缝）。
  * 未配置/无目录/无文件 → paths=[] + 人话 reason（不静默，不做假 0）。
  */
 export async function resolveLedgerSessionFiles(ticketId: string): Promise<{ paths: string[]; reason?: string }> {
@@ -257,7 +258,7 @@ export async function aggregateTicketUsage(
   if (paths === undefined || paths === null || paths.length === 0) {
     return {
       exists: false, files: 0, total: zero(), byStage: {}, models: [],
-      reason: '无会话文件可聚合（resolveAllSessionFiles 未定位到 session.jsonl.zstd）',
+      reason: '无会话文件可聚合（resolveAllSessionFiles 未定位到会话文件 session.jsonl.zstd / session.v3.jsonl.zstd）',
     }
   }
   const out: AgentUsageResult = { exists: false, files: paths.length, total: zero(), byStage: {}, models: [] }

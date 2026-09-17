@@ -22,6 +22,7 @@ import { readFile, readdir, stat } from 'node:fs/promises'
 import { join, resolve, sep, dirname } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { SESSION_FILE_NAMES } from './session-discovery.ts'
 
 const execFileP = promisify(execFile)
 
@@ -240,7 +241,8 @@ async function _readSessionKb(sessDir: string): Promise<{ kb: number; alive: boo
 
 /** 轻量版：只 stat 不解压，供工单列表批量查询（每票 ~0.1ms）。
  *  布局兼容（t260825-03 修复）：dsh 现行三层布局 sessions/<cwd-slug>/<session-id>/
- *  session.jsonl.zstd（dsh-session-persistence-jsonl），旧扁平布局 sessions/<slug>/
+ *  会话文件（session.jsonl.zstd / session.v3.jsonl.zstd 双名，t260916-23 走
+ *  session-discovery 单点，dsh-session-persistence-jsonl），旧扁平布局 sessions/<slug>/
  *  session-*.zstd 兜底——旧版扫描只认后者，dsh 升级后静默恒 0（260825 实测）。
  *  选中语义（t260825-03 返工）：按 **mtime 最新** 选中「当前活跃会话」——多角色
  *  接力泳道里旧角色会话 size 更大但已死，按 size 选会显示死会话 KB 并误报停涨
@@ -274,7 +276,9 @@ export async function _sessionKbFast(sessDir: string): Promise<{ kb: number; ali
         if (!f.isDirectory() && f.name.startsWith('session-') && f.name.endsWith('.zstd')) {
           await consider(join(slugDir, f.name))  // 旧扁平布局
         } else if (f.isDirectory()) {
-          await consider(join(slugDir, f.name, 'session.jsonl.zstd'))  // 现行三层布局
+          // session-name-compat（t260916-23）：三层布局两代名都 consider，全局 mtime
+          // 最大天然落在活跃代；旧扁平兜底分支保持原样
+          for (const name of SESSION_FILE_NAMES) await consider(join(slugDir, f.name, name))
         }
       }
     }

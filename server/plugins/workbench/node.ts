@@ -77,7 +77,7 @@
  *   GET  /sandbar-workbench/api/wf/tickets/<id>/agent-live?n=30
  *                                               → agent 实时动态（只读，t260825-03）：泳道
  *                                                 .dsh/sessions/<cwd-slug>/<工单id>-<角色>/
- *                                                 session.jsonl.zstd 整解（zstd -dc，多帧拼接
+ *                                                 会话文件（session.jsonl.zstd / session.v3.jsonl.zstd 双名）整解（zstd -dc，多帧拼接
  *                                                 直接解）取尾部 n 条事件摘要（assistant 文本截断 /
  *                                                 工具调用名+目标路径）；无会话文件/解压失败走
  *                                                 {exists:false,reason} 降级；工单字段 ../ 逃逸 → 400

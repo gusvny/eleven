@@ -198,6 +198,44 @@ def _quarantine_session_file(local_dsh: Path, f: Path, reason: str) -> None:
         pass
 
 
+# session-name-compat（t260916-23，epic dsh-upgrade T1）：dsh 0.1.5 会话文件换名
+# session.jsonl.zstd → session.v3.jsonl.zstd（zstd 压缩；格式 v3）。引擎读侧名字层
+# 发现对两代同时兼容；旧名退役前本常量是引擎侧唯一字面锚点（workbench 侧对称物=
+# server/plugins/workbench/src/host/session-discovery.ts，行为须一致：mtime 最新、
+# 平局旧名优先）。只做名字层发现与路径返回，不读内容、不引压缩依赖（内容解析归
+# dsh/既有 zstd CLI 通路，本票零行为变更：只有旧名文件时发现集与改前逐字节一致）。
+SESSION_FILE_NAMES: Tuple[str, ...] = ("session.jsonl.zstd", "session.v3.jsonl.zstd")
+
+
+def _iter_session_files(root: Path) -> List[Path]:
+    """All session files of BOTH generations under root, any depth (quarantine sweep
+    keeps the old rglob semantics, ticket t260916-23). is_file()-guarded (a directory
+    merely named like a session file never enters), sorted for deterministic order;
+    name-level discovery only — contents are never read here."""
+    found: List[Path] = []
+    for name in SESSION_FILE_NAMES:
+        found.extend(f for f in root.rglob(name) if f.is_file())
+    return sorted(found)
+
+
+def _pick_newest_session(candidates: List[Path]) -> Optional[Path]:
+    """Pick ONE session file when both generations coexist in the same session
+    directory (ticket t260916-23): newest mtime wins; on an mtime tie the OLD name
+    wins (index order in SESSION_FILE_NAMES = old first — aligned with the old-only
+    status quo); candidates whose stat fails are skipped. None when nothing readable."""
+    best: Optional[Tuple[Tuple[float, int, str], Path]] = None
+    for f in candidates:
+        try:
+            mtime = f.stat().st_mtime
+        except OSError:
+            continue
+        gen = SESSION_FILE_NAMES.index(f.name) if f.name in SESSION_FILE_NAMES else len(SESSION_FILE_NAMES)
+        key = (mtime, -gen, str(f))
+        if best is None or key > best[0]:
+            best = (key, f)
+    return best[1] if best is not None else None
+
+
 def _quarantine_torn_sessions(local_dsh: Path) -> None:
     """Quarantine torn session files before spawn (ticket t260829-06: an agent killed
     mid-write leaves torn zstd frames behind, and both resume and a same-id create
@@ -210,11 +248,18 @@ def _quarantine_torn_sessions(local_dsh: Path) -> None:
        **intact frames ≠ intact content**: a truncated JSONL record (ticket
        t260906-05, same shape of wedge) is invisible to zstd -t and dies on JSON
        parsing after decompression. Bad files take the same quarantine path
-       (_quarantine_session_file); only the reason text differs."""
+       (_quarantine_session_file); only the reason text differs.
+
+    Dual-name sweep (ticket t260916-23  # session-name-compat): dsh 0.1.5 renames
+    the session file (session.jsonl.zstd → session.v3.jsonl.zstd), so the sweep
+    discovers BOTH generations at any depth. Unlike the usage-aggregation side there
+    is deliberately NO newest-generation picking here: a torn old-generation file
+    would wedge exactly the rollback this epic is designed to allow, so every
+    generation present gets integrity-checked."""
     sessions = local_dsh / "sessions"
     if not sessions.is_dir():
         return
-    for f in sessions.rglob("session.jsonl.zstd"):
+    for f in _iter_session_files(sessions):
         r = subprocess.run(["zstd", "-t", str(f)], capture_output=True)
         if r.returncode == 0:
             if _session_jsonl_torn(f):
@@ -3268,9 +3313,11 @@ def _settle_snapshot_dir(project_key: str) -> Optional[Path]:
 def _aggregate_lane_usage(wt: Path, ticket_id: str) -> Tuple[Dict[str, Any], str]:
     """Aggregate the lane sessions' usage (the Python equivalent of the TS
     agent-usage path, aligned item by item):
-    - walk <wt>/.dsh/sessions/<slug>/<sub>/session.jsonl.zstd where sub == the ticket
-      id or starts with "<ticket id>-" (same as the TS resolveAllSessionFiles); a
-      missing directory = an empty set + note, nothing enters the aggregation.
+    - walk <wt>/.dsh/sessions/<slug>/<sub>/{session.jsonl.zstd,session.v3.jsonl.zstd}
+      (dual-name discovery, newest mtime per directory — ticket t260916-23) where
+      sub == the ticket id or starts with "<ticket id>-" (same as the TS
+      resolveAllSessionFiles); a missing directory = an empty set + note, nothing
+      enters the aggregation.
     - Only assistant/message's data.usage is summed — the same-named usage inside
       assistant/chunk is the same one, and counting both would double it (a red line
       pinned on the TS side, and equally binding here).
@@ -3294,13 +3341,29 @@ def _aggregate_lane_usage(wt: Path, ticket_id: str) -> Tuple[Dict[str, Any], str
     sess = wt / ".dsh" / "sessions"
     if not sess.is_dir():
         return dict(zero, tokens_zero=True), "无泳道会话目录: %s" % sess
-    files: List[Path] = []
-    for f in sorted(sess.glob("*/*/session.jsonl.zstd")):
-        sub = f.parent.name
-        if sub == ticket_id or sub.startswith(ticket_id + "-"):
-            files.append(f)
+    # 双名发现（t260916-23 session-name-compat）：半径钉死在既有两层布局 <slug>/<sub>/
+    # 的本票匹配目录内（review C2：不借任意深度发现扩半径，两层以外的同名档不入统计集）；
+    # 同一会话目录两代并存取 mtime 最新一份（防同一会话双代并计翻倍；平局旧名优先）。
+    # 只有旧名文件时 picked 集与改前 glob 集逐元素一致、顺序一致（sorted 同路径序）。
+    def _subdirs(d: Path) -> List[Path]:
+        try:
+            return sorted(p for p in d.iterdir() if p.is_dir())
+        except OSError:
+            return []
+
+    picked: Dict[Path, Path] = {}
+    for slug_dir in _subdirs(sess):
+        for sub_dir in _subdirs(slug_dir):
+            if sub_dir.name != ticket_id and not sub_dir.name.startswith(ticket_id + "-"):
+                continue
+            cands = [f for f in (sub_dir / name for name in SESSION_FILE_NAMES) if f.is_file()]
+            best = _pick_newest_session(cands)
+            if best is not None:
+                picked[sub_dir] = best
+    files: List[Path] = [picked[d] for d in sorted(picked)]
     if not files:
-        return dict(zero, tokens_zero=True), "无本票会话文件（%s 下无 %s-*/session.jsonl.zstd）" % (sess, ticket_id)
+        return dict(zero, tokens_zero=True), ("无本票会话文件（%s 下无 %s-*/ 的会话文件 "
+                                              "session.jsonl.zstd / session.v3.jsonl.zstd）" % (sess, ticket_id))
     total = {"in": 0, "out": 0, "cacheRead": 0}
     by_model: Dict[str, int] = {}
     notes: List[str] = []

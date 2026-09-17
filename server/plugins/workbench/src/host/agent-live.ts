@@ -4,7 +4,7 @@
  * 数据源：泳道/隔离目录的 dsh 会话落盘文件（headless agent 全部消息/工具调用实时落盘，
  * agent_activities.py spawn 时 DSH_HOME=<cwd>/.dsh、DSH_HEADLESS_SESSION=<工单id>-<角色>）：
  *
- *   <工作空间根>/.dsh/sessions/<projectKey(cwd)>/<工单id>-<角色>/session.jsonl.zstd
+ *   <工作空间根>/.dsh/sessions/<projectKey(cwd)>/<工单id>-<角色>/{session.jsonl.zstd,session.v3.jsonl.zstd}
  *
  * 多帧拼接 zstd，整文件 `zstd -dc` 直接解（行式 JSONL 事件流；只读，严禁整文件重写）。
  * cwd-slug（projectKey）规则与 dsh 侧一致——逐行移植自
@@ -18,9 +18,10 @@
 
 import { execFile } from 'node:child_process'
 import { readdir, stat } from 'node:fs/promises'
-import { dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { resolveAgentBaseDir, _describeAction, _parseArgs } from './agent-logs.ts'
+import { SESSION_FILE_NAMES, type SessionFileName } from './session-discovery.ts'
 
 const execFileP = promisify(execFile)
 
@@ -80,7 +81,7 @@ function isWithin(root: string, target: string): boolean {
  * 按工单定会话文件（只读，防穿仿 resolveAgentBaseDir）：
  *  1. resolveAgentBaseDir 定工作空间根（泳道必须在 repo 内；越界 → refused）；
  *  2. sessRoot = <wsRoot>/.dsh/sessions，遍历其下 slug 目录，收集目录名以
- *     `<工单id>-` 开头（或恰等于工单 id）的会话目录里的 session.jsonl.zstd；
+ *     `<工单id>-` 开头（或恰等于工单 id）的会话目录里的会话文件（两代名，session-discovery 单点）；
  *  3. ticket.role 非空时优先精确匹配 `<工单id>-<角色>`，否则取 mtime 最新
  *     （角色接力场景：同一工单的 developer/integration 各有一个会话目录）。
  * 目录不存在/无候选 → reason 人话降级，不抛错。
@@ -121,24 +122,33 @@ export async function resolveSessionFile(
     } catch { continue /* 子目录读失败跳过 */ }
     for (const s of subs) {
       if (s !== ticketId && !s.startsWith(ticketId + '-')) continue
-      const fp = join(slugDir, s, 'session.jsonl.zstd')
-      // 双保险：最终落点必须在工作空间内（ticketId 上游已过白名单，正常到不了这里）
-      if (!isWithin(wsRoot, fp)) {
-        return { refused: true, wsRoot, reason: `会话路径越界（拒绝读取）: ${fp}` }
+      // 双名发现（t260916-23 session-name-compat）：两代文件名都进候选池；既有
+      // exact/mtime 排序不动，同 mtime 平局旧名优先（与 py 侧 _pick_newest_session 口径一致）
+      for (const name of SESSION_FILE_NAMES) {
+        const fp = join(slugDir, s, name)
+        // 双保险：最终落点必须在工作空间内（ticketId 上游已过白名单，正常到不了这里）
+        if (!isWithin(wsRoot, fp)) {
+          return { refused: true, wsRoot, reason: `会话路径越界（拒绝读取）: ${fp}` }
+        }
+        try {
+          const st = await stat(fp)
+          cands.push({ path: fp, mtime: st.mtimeMs, exact: role !== '' && s === `${ticketId}-${role}` })
+        } catch { /* 无此代文件，跳过 */ }
       }
-      try {
-        const st = await stat(fp)
-        cands.push({ path: fp, mtime: st.mtimeMs, exact: role !== '' && s === `${ticketId}-${role}` })
-      } catch { /* 无 session.jsonl.zstd，跳过 */ }
     }
   }
   if (cands.length === 0) {
     return {
       wsRoot,
-      reason: `无本工单会话文件（${sessRoot} 下无 ${ticketId}-*/session.jsonl.zstd；agent 尚未启动或角色目录未落盘）`,
+      reason: `无本工单会话文件（${sessRoot} 下无 ${ticketId}-*/ 的会话文件 session.jsonl.zstd / session.v3.jsonl.zstd；agent 尚未启动或角色目录未落盘）`,
     }
   }
-  cands.sort((a, b) => (Number(b.exact) - Number(a.exact)) || (b.mtime - a.mtime))
+  // 平局第三键：同 mtime 时旧代名排前（genIdx 小者在前；未知名字排最后）
+  const genIdx = (p: string): number => {
+    const i = SESSION_FILE_NAMES.indexOf(basename(p) as SessionFileName)
+    return i < 0 ? SESSION_FILE_NAMES.length : i
+  }
+  cands.sort((a, b) => (Number(b.exact) - Number(a.exact)) || (b.mtime - a.mtime) || (genIdx(a.path) - genIdx(b.path)))
   return { path: cands[0].path, wsRoot }
 }
 
