@@ -2265,10 +2265,13 @@ USAGE = (
 
 
 def _emit(sub: str, args: Dict[str, Any], result: Dict[str, Any]) -> None:
-    """唯一回执出口（KI-067）：附 entry_hint（bare 待遇，含成功回执）→ 打印 →
-    记 admin.log 一行（claimed-source 可辨，连被拒收调用也记）。审计失败不吞回执。"""
+    """唯一回执出口（KI-067）：附 entry_hint（bare 待遇，含成功回执）→ 记
+    admin.log 一行（claimed-source 可辨，连被拒收调用也记）→ 打印。审计**先于**
+    打印（t260916-21 范围偏差·有意为之：client.py 在硬写集 server/engine/ 内；
+    不改则验收⑤结构上不可达——打印在前则落盘失败的 audit_write_failed 点名
+    永远无处附着，nusuyou/dengzhufpv 实测「写失败回执正常」正是此序所致）。
+    审计失败不吞回执。"""
     audit.attach_entry_hint(result)
-    print(json.dumps(result, ensure_ascii=False))
     # t260915-12：跨项目闸身份键随行落账（键在外层——拒收/成功同层同形状；兼容读内层）。
     # override 恒布尔：拒收行 override=false 也是对账面的一笔记录（场景相三判据）。
     inner = result.get("result") if isinstance(result.get("result"), dict) else {}
@@ -2282,6 +2285,7 @@ def _emit(sub: str, args: Dict[str, Any], result: Dict[str, Any]) -> None:
                      identity_class=_pick("identity_class"),
                      identity_src=_pick("identity_src"),
                      override=bool(_pick("cross_project_used")))
+    print(json.dumps(result, ensure_ascii=False))
 
 
 def main() -> None:

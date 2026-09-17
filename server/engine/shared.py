@@ -3987,12 +3987,18 @@ def parse_project_file(text, label):
             dirs:
               - /abs/path
 
+    Top-level tolerance (additive fields, t260916-21): paths: and admin_log: sections
+    pass through unparsed — old readers never break when a new field lands (the admin_log
+    block's semantics live in engine audit.py's config reader; this loader only tolerates
+    its presence).
+
     The key whitelist check happens here; verifying that the key equals the directory
     name is the loader's job."""
     cur = None
     in_dirs = False
     saw_project = False
     in_paths = False   # ①d: the top-level paths: section passes through the loader unparsed (semantics / anchors are fail-closed in
+    in_admin_log = False  # t260916-21: the top-level admin_log: section (admin.log 轮转面配置，additive 字段)
     schema = None      # shared.project_paths's ①d reader)
     for i, raw in enumerate(text.split('\n'), 1):  # the shape of fields inside project: belongs to the loader
         line = strip_registry_line(raw)
@@ -4002,11 +4008,18 @@ def parse_project_file(text, label):
             if raw[:1].isspace():
                 continue    # a line inside the paths section: pass through (the ①d reader owns shape and anchors)
             in_paths = False    # a non-indented line = the paths section is over, back to normal top-level handling
+        if in_admin_log:
+            if raw[:1].isspace():
+                continue    # a line inside the admin_log section: pass through (audit.py 的配置读面 owns shape——engine 读「引擎所属项目」条目，宿主 260916 定稿)
+            in_admin_log = False
         if line == 'paths:':
             in_paths = True
             continue
+        if line == 'admin_log:':
+            in_admin_log = True
+            continue
         if not raw[:1].isspace() and line != 'project:' and not line.startswith('schema:') and i > 1:
-            raise ValueError('%s:%d 顶层只认 schema:/project:/paths:' % (label, i))
+            raise ValueError('%s:%d 顶层只认 schema:/project:/paths:/admin_log:' % (label, i))
         if line == 'project:':
             if saw_project:
                 raise ValueError('%s:%d project: 重复' % (label, i))

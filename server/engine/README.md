@@ -590,12 +590,68 @@ server/engine/.venv/bin/python server/engine/inspection_trigger.py trigger \
 server/engine/.venv/bin/python server/engine/inspection_trigger.py decl
 ```
 
-## 14. 调度路自愈重定向 + 板面降级可见 + 台账留史（t260917-02）
+## 14. admin.log 文件生命周期（t260916-21）：按天轮转 + 保留窗 + 同日过大顺切 + 写失败点名
+
+admin.log（`server/admin.log`，已 gitignore）此前纯 O_APPEND 单文件增长
+（260916 实测 1.74GB/12.8 天，日均约 135MB，无任何轮转）。本票把文件生命周期
+收口进 `server/engine/audit.py` 单点（写路径唯一收口=`_append_line`），其余
+写者零改动——admin.log 全部已知写者共 4 个（review C1 普查）：
+`audit.py`（client.py/ticket.py 行）、`tools_registry.py`、
+workbench `node.ts`、knowledge `review_store.py`（后三个在 engine 写集外），
+同语义=每次调用按路径 append、不持 fd，轮转后自然续写新文件，无分叉面。
+
+### 14.1 轮转/顺切/保留窗契约（验收①-④）
+
+- **按天轮转（惰性）**：本地日界（`time.localtime` 口径，勿混 UTC）首个跨日
+  写入时把活跃文件原样改名 `admin.log.YYYYMMDD`（归档名=文件**关闭日**，取其
+  mtime 日；存量多日大文件整体落单日名下属预期），后续写新文件。
+- **恰好一次**：两步原子挪移——先 rename 到唯一私有名
+  `<logname>.rolling.<pid>.<uuid6>`（赢家唯一，输家 FileNotFoundError=别人已
+  轮转），赢家再经 `_publish`（硬链原子 no-clobber）发布归档名；目标名已存在
+  自动去重后缀，**永不覆盖**。rename 前后做 inode 身份复核（防 stat→rename
+  窗口内误抓别人重建的新文件——原样还原不算本进程轮转）。
+- **存量迁移**：现存文件原样改名归档，不删不截断（跨两代 schema 行留考古）。
+- **同日过大顺切**（宿主 260916 定稿措辞：无「熔断」语义——同日文件过大就顺切
+  下一个文件，纯拆分无告警）：同日文件 ≥512MB（`admin_log.max_mb`；≤0=关顺切，
+  值畸形=该键回落内置缺省）当日再切 `admin.log.YYYYMMDD-HHMMSS`。
+- **保留窗**：默认保留 **14 天**（宿主 260916 定稿；`admin_log.keep_days` 可调；
+  ≤0=永不删，值畸形=该键回落内置缺省），仅归档赢家进程跑一次清扫；删除面
+  **仅限**归档命名面 `<logname>.<8位日>[-<6位时>[-<去重后缀>]]`（logname 从
+  `SANDBAR_ADMIN_LOG` 派生——隔离语义不变），面外文件（.bak/非法日期）不碰。
+  rolling 孤儿（轮转中途崩溃残）**先按其 mtime 日收编入归档面，不静默删**；
+  收编失败才降级删除并 stderr 点名。清扫删除失败一律 stderr 留痕不 raise
+  （不破坏写路径）。
+- **配置面（宿主 260916 定稿：project metadata，不用环境变量）**：两个旋钮读
+  「引擎所属项目」条目 `~/.sandbar/projects/<key>/project.yaml` 顶层
+  `admin_log: {keep_days, max_mb}`（additive 字段；shared 装载器已同步容忍该块
+  ——旧读取方零感知，先例=`paths.model_routes` 指路键）。引擎所属项目=条目
+  dirs 覆盖引擎仓根（等值或祖先，主仓/worktree 两态命中）。内置缺省兜底
+  14 天/512MB：注册表缺席/条目未命中/解析失败/值畸形一律回落（fail-open 显式
+  口径：配置读不到不阻断审计写）；读取带缓存（键=注册表根+文件 mtime，每写一行
+  只多两次 stat）。env 侧只保留既有的 `SANDBAR_ADMIN_LOG` 路径覆盖（测试隔离
+  语义不变）；`SANDBAR_PROJECTS_DIR` 沿用 shared 注册表隔离面（测试桩同入口）。
+- **KI-010 边界**：轮转是 containment（防失控+保考古），日均增长根因
+  （workbench 轮询+读操作通胀，known-issues KI-010）未除。
+
+### 14.2 写失败点名（验收⑤）
+
+admin.log 不可写（权限/只读 fs/路径为目录等）时三通道留痕，绝不吞回执、绝不
+raise：stderr（既有）+ `logging.getLogger('audit').warning`（已配 logging 的
+宿主进程自动出 WARN）+ 回执 dict 就地点名 `audit_write_failed`。为此
+`client.py _emit` 改为**审计先于打印**（t260916-21，范围偏差·有意：不改则
+marker 结构上不可达 stdout 回执——nusuyou/dengzhufpv 实测「写失败回执正常」
+病灶）；ticket.py 直 spawn 路径本就先审计后打印，零改动受益。
+
+测试：`server/engine/tests/test_t260916_21_admin_log_rotation.py`（L1）；
+场景：`integration/t260916-21/sc_admin_log_rotation.py`（灰盒 L3，
+`t260916-21-admin-log-rotation`）。
+
+## 15. 调度路自愈重定向 + 板面降级可见 + 台账留史（t260917-02）
 
 260917 首次自动巡检实测暴露三缺口（票形双缺陷/板面吞在跑票/台账无归档覆盖），本节
 是三修复 + 一复核的机制注记。
 
-### 14.1 调度路径票形统一：非 t 形 fire 自愈重定向（修复①）
+### 15.1 调度路径票形统一：非 t 形 fire 自愈重定向（修复①）
 
 - **根因**：260916-02 的「重跑 schedule-up」在过渡窗没跑，旧代 schedule-up 铸的
   action 仍直发 `InspectionPeriodicWorkflow`（服务端给 fire id 追加 `-<fire时刻UTC>`
@@ -612,7 +668,7 @@ server/engine/.venv/bin/python server/engine/inspection_trigger.py decl
 - **运维边界**：重定向是**过渡窗自愈**，不是对「不重跑 schedule-up」的豁免——action
   不刷新，每期都要多走一次重定向；`schedule-up --note "..."` 重跑仍是一劳永逸解。
 
-### 14.2 板面降级可见（修复②）：不可辨「在跑」不再静默吞
+### 15.2 板面降级可见（修复②）：不可辨「在跑」不再静默吞
 
 - 不可辨（无实例/期 SA 且 id 非旧形词法）**且在跑** → 显式降级行上板：行带
   `identity_note`（假设语气点名「疑似旧调度 action 直发或演练残留」+核查入口），
@@ -621,7 +677,7 @@ server/engine/.venv/bin/python server/engine/inspection_trigger.py decl
 - 同期并存：同 (实例,期) 的 open 行带 `same_period_closed=<闭合票号>` 注（不合并行、
   不隐藏任何一张——每期一票语义下的双行只注不并）。
 
-### 14.3 台账留史（修复③）：跨票同名覆盖前归档
+### 15.3 台账留史（修复③）：跨票同名覆盖前归档
 
 - `write_inspection_report` / 套件回执落盘前经 `_archive_if_other_run`：同
   `ticket_id` 重写不归档（每跑一份以票为界）；**跨票**同名 → 旧件先搬
@@ -631,7 +687,7 @@ server/engine/.venv/bin/python server/engine/inspection_trigger.py decl
 - **保留口径（宿主已裁决默认）**：archive/ **不自动清理**，无 TTL——磁盘面人工或
   工具处置；语义=每期一份 canonical + 每跨票覆盖留一份史。
 
-### 14.4 跳火可观测（复核④）：OverlapPolicy=SKIP 与人门长挂解耦
+### 15.4 跳火可观测（复核④）：OverlapPolicy=SKIP 与人门长挂解耦
 
 - **口径更正（review C1）**：跳火**可直接观测**——`ScheduleInfo` 携带
   `num_actions_skipped_overlap` / `running_actions` / `num_actions_missed_catchup_window`
@@ -646,7 +702,7 @@ server/engine/.venv/bin/python server/engine/inspection_trigger.py decl
   inferred（计数不可得 + missed 非空 + action 未指 spawner → med 兜底）可辨不混装；
   observed 命中即 `alarmed=true`（每天可见的告警，ops 退出码可踩）。
 
-### 14.5 相关面索引
+### 15.5 相关面索引
 
 - 真值表/纯函数面单测：`server/engine/tests/test_t260917_02_inspection_redirect.py`
   （形状判别/身份回退/重定向判据/period 透传）、`test_t260913_02_inspection_deadman.py`
@@ -656,7 +712,7 @@ server/engine/.venv/bin/python server/engine/inspection_trigger.py decl
   ledger-archive-regression，登记于 run_scenarios.py）。
 - N1 运维加急（合入后宿主/main 尽快执行）：`schedule-up` 重跑（action 指向 spawner）
   + terminate 挂门旧壳（id=inspection-integration-tests-period-2026-09-16T23:30:00Z）；
-  deadman 落 14.4 后该风险每天自动点名。
+  deadman 落 15.4 后该风险每天自动点名。
 
 ## 退役账（t260907-04 命名清理①：7 条过渡兼容，撤任何一条前先对表）
 
