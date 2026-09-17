@@ -1255,6 +1255,18 @@ SCENARIOS = [
      "左栏合并排序与巡检徽标 UI 面（t260916-15 验收①②③渲染面，灰盒 L3 browser-free，镜 t260915-19 两层式）：S0 build-contract=双 bundle 同步+合并排序/徽标锚在 shipped bundle（wb-card-kind 类字面+data-kind-badge 属性字面——字符串字面过压缩器存活，函数名不锚=压缩器改名面；盘上 bundle 新鲜锚=KI-052 防改源忘重建静默穿透）；S1 真浏览器 API 桩（自带 /wf/projects 桩=项目组确定性渲染，数据只桩 API 边界，浏览器/bundle/React 全真，宿主 3099 零接触）——①合并排序全矩阵：甲组四行（dev 在跑 ts 中+dev 等你 ts 次新+巡检等你 ts 最新+巡检已收口 ts 最老，输入序=拼接序与期望序刻意错排防断言自我失效）DOM 行序==[巡检等你,dev 等你,dev 在跑,巡检收口]，一面同钉 tier 边界（在等你→在跑→已完成）+级内 updated_ts 倒序+反沉底核心（等你巡检行压在跑 dev 行之上=用户实报「恒沉底」的逆否）+已完成沉组底但仍可见不丢失；②兜底组同口径：unowned 两行（等你 ts 新+在跑 ts 老，输入序相反）序==[等你,在跑]（合并口径不分组）；③徽标可辨：巡检行卡内 [data-kind-badge] 恰一、可见、文本=巡检；④dev 零徽标对照（左栏 dev 行渲染零变化反断言）：dev 行卡内徽标元素数=0+甲组徽标总数==巡检行数；⑤行1 标题原样：巡检行文本含引擎标题「巡检 <实例> · 期 <期号>」（排序不得改行内容）；⑥行唯一性：组内 id 数==去重数==4（排序不得丢行/重复键）；⑦卫生腿全旅程零 pageerror。分工：t260915-19-sidebar-inspection-ui 守分拣制（项目组归位/兜底组存在性/等你黄调/降级显式性）+反沉底烟测，本条不复断其任何一面；排序纯函数真值表（状态×来源×畸形 ts/缺键/null 元素/未知状态缺省行）归 developer L1 UT 不同层；t260903-07-click-no-chat-switch 守点行不切会话不同面。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；stage console/playwright-core/chromium 缺席=ENV_FAIL exit 2 点名（不假红不假绿）",
      "node integration/t260916-15/sc_sidebar_merged_sort_ui.mjs", "browser-free"),
 
+    # ---- t260916-29: worker 停机 grace 契约（引擎 P1：优雅停实为立即取消）----
+    # 与 developer 引擎侧 selfcheck（进程内桩 activity：grace 对在飞活动的收尾效果/
+    # 取消归因/重跑兜底）分层——零模型 L3 起不了真 agent 段，彼面归引擎侧台；本组钉
+    # 真实 worker.py 进程面的公开契约（旋钮取值/容错/透传接线、console 崩溃收养路
+    # 语义）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
+    ("t260916-29-worker-stop-grace-knob",
+     "worker 停机 grace 旋钮契约经真实 worker.py 进程面（t260916-29 要求①，灰盒 L3 docker 舞台）：停机宽限不再是无旋钮硬编码 0（=立即取消在飞活动，260916 两轮全票假「agent 活动故障」第一现场）——腿1 缺省=不设旋钮 SIGTERM 后 SDK 停机日志 will-wait 非 0（钉「非 0」不钉具体秒数，调参不破测试）+停机点名行在文（在飞活动点名面的空表形态）；腿2 显式 0=逃生门（will wait 0:00:00，立即取消保留为运维显式选择）；腿3 畸形三值（abc/-5/NaN）=不炸启动不采信畸形回缺省非 0（消费外部输入三态纪律，解析矩阵归 developer UT 不同层）；腿4 显式 2=值透传 SDK（will wait 0:00:02，旋钮→Worker 接线的端到端证明——helper 级 UT 断言不了调用点真展开，恰是本票缺陷原始形态：helper 在接线缺）。每腿附带 TERM 限期干净退（exit 0）守卫。分工：t260905-02-worker-lifecycle=进程生命周期（起/退/meta/异常输入）不涉 grace 取值；t260916-29-console-crash-graceful-stop=崩溃收养路语义，本条=直接信号路旋钮矩阵；developer selfcheck（方案场景A/B 进程内桩 activity）=grace 对在飞活动的实际效果（收尾/归因/重跑），零模型 L3 起不了真 agent 段归引擎侧台。旋钮名 SANDBAR_WORKER_GRACEFUL_SHUTDOWN_SEC=本票方案定稿公开契约；SDK 停机日志=工单取证逐字来源（KI-051 正则锚）。被测子进程零连生产（审计钩子+自证腿）；docker 台缺席=ENV_FAIL exit 2",
+     "python3 integration/t260916-29/sc_worker_stop_grace_knob.py", "engine"),
+    ("t260916-29-console-crash-graceful-stop",
+     "console 崩溃收养路必经优雅停（t260916-29 要求①③的崩溃形态面，灰盒 L3 docker 舞台）：260916 事故形态②——console 被 SIGKILL/崩溃（dispose 跑不到）→票 worker 被 launchd 收养（ppid=1）→ppid 守卫自退；修复前自退路径同样 will wait 0:00:00（立即取消在飞段），崩溃路=烧段第二现场。腿A 收养路缺省 grace=短命父拉起真 worker（watch 两 env 同置、监视不存在的 workflow id=查询失败不误退、票队列指空队列零活动领取面）→收养→限期自退（进程消失+自退语义日志在文）+will wait 非 0；腿B 收养路旋钮=2→will wait 0:00:02（旋钮贯通崩溃路）；腿C 直接信号对照（同 watch 形态、父存活、直跑子进程）→SIGTERM→grace 非 0+exit 0——保证场景不全腿 N/A（三态契约），并钉生产票 worker 形态下信号路同样优雅。N/A 仅给「收养目标 ppid」系统状态条件（macOS=launchd(1)；Linux subreaper 可≠1），恒不全腿 N/A；收养观测 ps 主通道+pgrep -P 1 回落双通道（ps 被拒沙箱可真判），双通道皆盲才 N/A；收养腿被测进程非直跑子拿不到 returncode，终态=进程消失+自退日志（rc 面由腿C 同形态承载）。分工：t260905-02-ticket-worker-watch-exit=自退三态（收口/收养/查询失败不误退）+meta 自清（清理面），本条不复断其任何一面，只钉自退那一刻的 grace 语义与旋钮贯通；developer selfcheck=grace 对在飞活动实际效果归引擎侧台。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；被测子进程零连生产（审计钩子+自证腿）；docker 台缺席=ENV_FAIL exit 2",
+     "python3 integration/t260916-29/sc_console_crash_graceful_stop.py", "engine"),
+
 ]
 
 CMD_TIMEOUT = 900

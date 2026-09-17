@@ -48,6 +48,19 @@ def fn_body(text, header):
     return text[i: i + len(header) + (m.start() + 1 if m else len(text))]
 
 
+def resolve_body(text, header):
+    """t260916-29：长活动外包了 worker_termination_guard 薄壳（worker 停机取消归因），
+    spawn/reap 本体移到 _<name>_body——本锁跟随薄壳找本体（壳无 spawn/reap 面），
+    锁语义不变。"""
+    body = fn_body(text, header)
+    if body and "worker_termination_guard" in body:
+        name = header.split("def ", 1)[1]
+        inner = fn_body(text, "async def _%s_body" % name)
+        if inner:
+            return inner
+    return body
+
+
 def main():
     text = SRC.read_text("utf-8")
     # t260913-04（agent 执行面容器化）：三处 spawn/reap 的实现形态迁入传输层
@@ -96,7 +109,7 @@ def main():
             ("async def _run_agent_stage_impl", True),
             ("async def arbitrate", True),
             ("async def acceptance_walkthrough", False)):
-        body = fn_body(text, header)
+        body = resolve_body(text, header)
         if not body:
             ok(False, "%s：函数体不可定位" % header)
             continue

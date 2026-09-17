@@ -18,19 +18,23 @@ TARGET = Path(__file__).resolve().parents[2] / "server/engine/agent_activities.p
 
 
 def find_arbitrate_call():
+    # t260916-29 走查段重施（gen2；同款修复 gen1 曾两度被并行代落盘/合并的树操作
+    # 冲掉）：锚从「函数名 == arbitrate」放宽为「全模块恰一处」。缘由：t260916-29
+    # 把 arbitrate 本体包进 worker_termination_guard 薄壳（_arbitrate_body，本体
+    # 逐字零改动），spawn 打点行原样迁入薄壳——公开契约（打点恰一处、实参≥3、
+    # 渲染含 cwd、无 Logging error）未变，函数名是实现细节，灰盒纪律=契约不变的
+    # 重构不得打破测试。全模块扫保住「恰 1 处」的防重复意图（重复打点照样红），
+    # 只去掉脆弱的名字锚。
     tree = ast.parse(TARGET.read_text(encoding="utf-8"))
     hits = []
-    for fn in ast.walk(tree):
-        if not (isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and fn.name == "arbitrate"):
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
             continue
-        for node in ast.walk(fn):
-            if not isinstance(node, ast.Call):
-                continue
-            f = node.func
-            if isinstance(f, ast.Attribute) and f.attr == "info" \
-                    and isinstance(node.args[0], ast.Constant) \
-                    and "arbitrate] spawn" in str(node.args[0].value):
-                hits.append(node)
+        f = node.func
+        if isinstance(f, ast.Attribute) and f.attr == "info" \
+                and isinstance(node.args[0], ast.Constant) \
+                and "arbitrate] spawn" in str(node.args[0].value):
+            hits.append(node)
     return hits
 
 

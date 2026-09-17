@@ -4309,3 +4309,85 @@ def engine_venv_python(repo_root) -> Optional[pathlib.Path]:
         except OSError:
             continue
     return None
+
+
+# ---- worker 停机取消的归因面（t260916-29）----
+# 缺陷链：票专属 worker 是 console 子进程；修复前 Worker 未设 graceful_shutdown_timeout
+# （SDK 缺省 0=立即取消），console 重启/重载 → 全部子 worker SIGTERM → 在飞 agent 活动
+# 被立即取消，阶段机把取消统一报成无信息的「agent 活动故障（已重试）」。本节是工作流侧
+# 的归因/文案/重跑纯函数（stdlib-only）；活动侧「取消→ApplicationError」转换在
+# agent_activities.worker_termination_guard，worker 侧宽限配置在
+# worker.graceful_shutdown_timeout_sec。
+
+WORKER_TERMINATED_ERROR_TYPE = "worker_terminated"
+"""activity 侧把「worker 停机/重载致取消」转成的 ApplicationError.type。工作流侧
+classify_worker_termination 只认这个 type；其余一切失败（限流/传输/代码故障/心跳超时/
+兄弟边被杀等）都不得落此类。"""
+
+WORKER_SHUTDOWN_RETRY_PATCH_ID = "agent-stage-worker-shutdown-retry"
+"""重跑兜底的 boolean patched 门（家族规则见 dev_lane 第一个 PATCH_ID 注）：在途老
+history 重放恒 False，控制流变更（重跑一次）对老实例不可见，否则重放命令序歧变。"""
+
+
+def classify_worker_termination(exc) -> bool:
+    """判断工作流侧捕到的异常是否「worker 停机（停机/重载）致取消」。
+
+    判据：沿 ActivityError.cause / __cause__ 链找 type==WORKER_TERMINATED_ERROR_TYPE
+    的 ApplicationError。鸭子类型只认 `.type` 属性——本模块不 import temporalio
+    （shared.py 须保持 stdlib-only：ticket_worker.py 在无 SDK 的系统 python 下按
+    文件路径直载本文件）。畸形输入（None、非异常对象、cause 挂野对象、cause 成环、
+    超深链）一律 False 不炸——归因只在证据充分时成立，宁可归「活动故障」也不冒认
+    「worker 终止」（KI-093「兄弟边被杀」症状是普通活动失败，不得被洗成 worker 停机）。
+    """
+    seen = set()
+    depth = 0
+    cur = exc
+    while cur is not None and depth < 8:
+        key = id(cur)
+        if key in seen:
+            return False  # cause 成环=证据不充分，不归因
+        seen.add(key)
+        if getattr(cur, "type", None) == WORKER_TERMINATED_ERROR_TYPE:
+            return True
+        nxt = getattr(cur, "cause", None)
+        if nxt is None:
+            nxt = getattr(cur, "__cause__", None)
+        cur = nxt
+        depth += 1
+    return False
+
+
+def format_agent_stage_failure(ticket_id, stage_id, exc, gen=None) -> str:
+    """agent 段活动异常 → 票面 blocked 文案（全部 catch 位的唯一出口）。
+
+    worker 停机致取消 → 「worker 被外部终止（停机/重载），活动已取消（票 X 段 Y
+    第 N 次）」——绝不与限流/传输/代码故障混淆（t260916-29 要求②）；其余逐字维持
+    旧文案「agent 活动故障（已重试）：<类型>: <信息>」。本函数只改文案不改控制流，
+    对在途实例 replay 安全；改控制流的重跑兜底走 retry_once_on_worker_termination
+    （patched 门内）。gen=None 省略次数字段（并行边等不便取代数的点位）。
+    """
+    if classify_worker_termination(exc):
+        gen_part = "" if gen is None else "，第 %s 次" % gen
+        return ("worker 被外部终止（停机/重载），活动已取消（票 %s 段 %s%s）"
+                % (ticket_id, stage_id, gen_part))
+    return "agent 活动故障（已重试）：%s: %s" % (type(exc).__name__, exc)
+
+
+async def retry_once_on_worker_termination(run_once, *, gate, on_retry=None):
+    """在飞 agent 活动被 worker 停机取消 → 自动重跑一次（t260916-29 要求④）。
+
+    run_once：零参异步 callable（封好一次 execute_activity 及其超时/重试策略）；
+    gate：调用方传入 workflow.patched(WORKER_SHUTDOWN_RETRY_PATCH_ID) 的结果——
+    控制流变更必须在 patched 门内，老 history 重放恒 False 永不重跑。仅当
+    「gate 开 且 classify_worker_termination 为真」才重跑一次；第二次仍失败或任何
+    其它异常原样抛出（调用方 catch 位落 blocked 文案）。工作流自身的取消
+    （CancelledError 是 BaseException）不进 except Exception，取消语义不吞。
+    """
+    try:
+        return await run_once()
+    except Exception as e:
+        if not gate or not classify_worker_termination(e):
+            raise
+        if on_retry is not None:
+            on_retry(e)
+        return await run_once()

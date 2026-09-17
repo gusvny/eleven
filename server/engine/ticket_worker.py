@@ -126,7 +126,7 @@ def reap_ticket_worker(tid: str) -> str:
     if not pid:
         return 'none'
     try:
-        os.kill(pid, signal.SIGTERM)  # graceful stop: running activities finish first (worker.py contract)
+        os.kill(pid, signal.SIGTERM)  # graceful stop: worker.py gives in-flight activities a grace period (env SANDBAR_WORKER_GRACEFUL_SHUTDOWN_SEC, default 1800s); expiry-cancels are named on the ticket face (t260916-29, README §8.3.1)
     except ProcessLookupError:
         pass
     try:

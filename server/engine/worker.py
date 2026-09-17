@@ -29,9 +29,18 @@ How to start:
 
 Graceful stop:
     kill -TERM $(cat data/worker.pid)      # SIGTERM / Ctrl-C (SIGINT) same idea
-    → worker.shutdown(): finish in-flight activities, stop claiming new work,
-    then exit cleanly. (Workflows on the server stay RUNNING while the worker is
-    down; queued work resumes automatically after restart.)
+    → worker.shutdown(): stop claiming new work, then give in-flight activities a
+    grace period (graceful_shutdown_timeout) to finish before cancelling whatever
+    is still running. Grace comes from env SANDBAR_WORKER_GRACEFUL_SHUTDOWN_SEC
+    (default 1800s; explicit "0" = the old cancel-immediately behavior; malformed
+    values fall back to the default). At shutdown the worker names every in-flight
+    agent activity (ticket/stage/gen/attempt) in the log, and after shutdown it
+    logs the final disposition (finished vs interrupted) — a cancelled activity is
+    converted by agent_activities.worker_termination_guard into a typed
+    ApplicationError so the ticket face says "worker 被外部终止（停机/重载）" instead
+    of a generic activity fault (t260916-29; ops runbook: server/engine/README.md
+    §8.3.1). (Workflows on the server stay RUNNING while the worker is down; queued
+    work resumes automatically after restart.)
 """
 
 from __future__ import annotations
@@ -43,12 +52,15 @@ import os
 import pathlib
 import signal
 import sys
+import time
+from datetime import timedelta
 
 from temporalio.client import Client
 from temporalio.worker import Worker
 
 from activities import ALL_ACTIVITIES
 from agent_activities import ALL_AGENT_ACTIVITIES
+from agent_activities import inflight_stage_snapshot, recent_stage_outcomes
 from shared import NAMESPACE, POC_DIR, REPO_ROOT, TARGET_HOST, TASK_QUEUE, configured_task_queues
 from shared import write_worker_meta
 from workflows import ALL_WORKFLOWS
@@ -58,6 +70,104 @@ LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
 WATCH_INTERVAL_DEFAULT_SEC = 30.0  # production default: one poll round per 30s (settle-sensing delay cap ≈ one round)
 WATCH_INTERVAL_MIN_SEC = 1.0       # floor clamp: guards against 0/negative busy-loop hammering describe
+
+GRACEFUL_SHUTDOWN_ENV = "SANDBAR_WORKER_GRACEFUL_SHUTDOWN_SEC"
+GRACEFUL_SHUTDOWN_DEFAULT_SEC = 1800.0  # 30min: covers the typical 10~40min agent stage tail; longer runs get the named-cancel path (README §8.3.1)
+
+
+def graceful_shutdown_timeout_sec(raw: "str | None" = None) -> float:
+    """Grace period for in-flight activities after shutdown is requested, in
+    seconds. Env SANDBAR_WORKER_GRACEFUL_SHUTDOWN_SEC overrides; fault tolerance
+    mirrors watch_interval_sec: unset/blank/malformed/NaN/Inf/negative all fall
+    back to the default (a negative must NOT mean "cancel immediately" by
+    accident — the immediate-cancel escape hatch is an explicit "0"). No upper
+    clamp on purpose: the operator owns the linger trade-off (a shutting-down
+    worker stays alive up to this long to let in-flight activities finish;
+    documented in README §8.3.1)."""
+    if raw is None:
+        raw = os.environ.get(GRACEFUL_SHUTDOWN_ENV) or ""
+    raw = str(raw).strip()
+    if not raw:
+        return GRACEFUL_SHUTDOWN_DEFAULT_SEC
+    try:
+        val = float(raw)
+    except ValueError:
+        return GRACEFUL_SHUTDOWN_DEFAULT_SEC
+    if val != val or val in (float("inf"), float("-inf")) or val < 0:
+        return GRACEFUL_SHUTDOWN_DEFAULT_SEC
+    return val
+
+
+def _worker_extra_kwargs() -> dict:
+    """Single source of the Worker(...) kwargs this ticket owns (t260916-29):
+    the explicit graceful shutdown timeout. Both the production constructor and
+    the self-check build their workers from here, so the wiring cannot drift
+    (UT test_t260916_29_worker_graceful_stop pins the shape)."""
+    return {"graceful_shutdown_timeout":
+            timedelta(seconds=graceful_shutdown_timeout_sec())}
+
+
+def install_stop_signal_handlers() -> asyncio.Event:
+    """SIGTERM/SIGINT → the returned stop event (same wiring run_worker has used
+    since step 1; extracted so the graceful-stop self-check can exercise the real
+    handler path). Degrades to no signal handling on unsupported platforms
+    (non-main thread / Windows): foreground Ctrl-C is still handled by asyncio's
+    default."""
+    loop = asyncio.get_running_loop()
+    stop = asyncio.Event()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except (NotImplementedError, RuntimeError):
+            pass  # non-main thread / unsupported platform: degrade to no signal handling
+    return stop
+
+
+def _log_shutdown_disposition() -> None:
+    """停机点名与终态清单（t260916-29 要求①）：signal 时点在飞 agent 活动逐个点名
+    （票/段/gen/attempt/已运行时长），shutdown 完成后按 outcome 汇总（在飞快照来自
+    agent_activities 的注册表——只有走 worker_termination_guard 的四个长活动汇聚点
+    在册；merge_check 等短活动不在册，见 README §8.3.1 已知边界）。"""
+    inflight = inflight_stage_snapshot()
+    grace = graceful_shutdown_timeout_sec()
+    if inflight:
+        for e in inflight:
+            logging.info("停机点名：在飞 agent 活动 票 %s 段 %s gen %s attempt %s（已运行 %ds）",
+                         e.get("ticket"), e.get("stage"), e.get("gen"), e.get("attempt"),
+                         int(time.monotonic() - e.get("started_monotonic", time.monotonic())))
+        logging.info("停机点名：在飞 agent 活动 %d 个，graceful_shutdown_timeout=%ss"
+                     "——期内未收尾的将被取消并在票面点名「worker 被外部终止」", len(inflight), grace)
+    else:
+        logging.info("停机点名：无在飞 agent 活动（graceful_shutdown_timeout=%ss）", grace)
+
+
+def _log_shutdown_outcome() -> None:
+    outcomes = recent_stage_outcomes()
+    if not outcomes:
+        return
+    finished = [e for e in outcomes if e.get("outcome") == "completed"]
+    interrupted = [e for e in outcomes if e.get("outcome") != "completed"]
+    logging.info("停机终态：本轮收尾 agent 活动 %d 个（完成 %d / 中断 %d）",
+                 len(outcomes), len(finished), len(interrupted))
+    for e in interrupted:
+        logging.info("停机终态：被中断 票 %s 段 %s gen %s（outcome=%s）——票面将点名「worker 被外部终止」",
+                     e.get("ticket"), e.get("stage"), e.get("gen"), e.get("outcome"))
+
+
+async def _graceful_shutdown(workers, run_tasks, watch_task) -> None:
+    """停机收尾（run_worker 的尾部原样抽出）：点名在飞 → 各 Worker.shutdown()
+    （SDK 按 graceful_shutdown_timeout 等在飞 activity）→ 收 runner/watch 任务 →
+    打终态清单。selfcheck_worker_graceful_stop 走同一函数，测的是真停机路径。"""
+    _log_shutdown_disposition()
+    await asyncio.gather(*(w.shutdown() for w in workers))
+    if watch_task is not None:
+        watch_task.cancel()
+    try:
+        await asyncio.gather(*run_tasks)
+    except asyncio.CancelledError:
+        pass
+    _log_shutdown_outcome()
+    logging.info("worker 已优雅停止")
 
 
 def verify_signal_transport() -> list:
@@ -201,18 +311,13 @@ async def run_worker(args: argparse.Namespace) -> None:
             task_queue=_q,
             workflows=ALL_WORKFLOWS + ALL_WORKFLOWS_V2,
             activities=ALL_ACTIVITIES + ALL_AGENT_ACTIVITIES,
+            **_worker_extra_kwargs(),  # t260916-29：显式宽限（缺省 1800s，env 可调）
         ))
     logging.info("worker polling queues: %s", ", ".join(configured_task_queues()))
 
-    # Graceful stop: SIGTERM/SIGINT → worker.shutdown() (finish in-flight
-    # activities, stop claiming new work)
-    loop = asyncio.get_running_loop()
-    stop = asyncio.Event()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        try:
-            loop.add_signal_handler(sig, stop.set)
-        except (NotImplementedError, RuntimeError):
-            pass  # non-main thread / unsupported platform: degrade to no signal handling (foreground Ctrl-C is still handled by asyncio's default)
+    # Graceful stop: SIGTERM/SIGINT → stop event → _graceful_shutdown（宽限期内
+    # 在跑 activity 收尾，超宽限才取消；见模块头 Graceful stop 与 README §8.3.1）
+    stop = install_stop_signal_handlers()
 
     # Per-ticket mode: with SANDBAR_WATCH_WORKFLOW=<ticket-id>, poll the workflow
     # status periodically and exit gracefully once it settles (no longer RUNNING)
@@ -254,15 +359,7 @@ async def run_worker(args: argparse.Namespace) -> None:
                      ",".join(configured_task_queues()), TARGET_HOST)
     run_tasks = [asyncio.create_task(w.run()) for w in workers]
     await stop.wait()
-    logging.info("收到停止信号，优雅停：在跑 activity 完成后停领新活 …")
-    await asyncio.gather(*(w.shutdown() for w in workers))
-    if watch_task is not None:
-        watch_task.cancel()
-    try:
-        await asyncio.gather(*run_tasks)
-    except asyncio.CancelledError:
-        pass
-    logging.info("worker 已优雅停止")
+    await _graceful_shutdown(workers, run_tasks, watch_task)
 
 
 def main() -> None:

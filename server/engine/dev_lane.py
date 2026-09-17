@@ -109,6 +109,7 @@ with workflow.unsafe.imports_passed_through():
         UiEvidenceDeclArgs,
         UiEvidenceDeclResult,
         UiEvidenceResult,
+        WORKER_SHUTDOWN_RETRY_PATCH_ID,
         WorkspacePrepResult,
         UI_EVIDENCE_DIR,
         active_authorizations,
@@ -116,6 +117,7 @@ with workflow.unsafe.imports_passed_through():
         arbitration_cap_route,
         build_stage_prompt,
         build_workspace_prep,
+        format_agent_stage_failure,
         integration_route,
         is_ui_write_set,
         lane_workspace_gate_error,
@@ -124,6 +126,7 @@ with workflow.unsafe.imports_passed_through():
         parse_authz_used,
         parse_review_plan_verdict,
         refresh_write_set,
+        retry_once_on_worker_termination,
         review_gate_verdict,
         review_plan_route,
         result_file_for,
@@ -911,10 +914,20 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
             # t260912-03：生效中的受保护授权结构化记录（who/issued/reason/scope 逐条
             # 下传，activity 据此豁免+记名点名；时效判定只在此处用 workflow.now()）
             authorizations=self._protected_authz_records())
-        raw = await workflow.execute_activity(
-            step_id, args,
-            start_to_close_timeout=AGENT_TO, heartbeat_timeout=HEARTBEAT_TO,
-            retry_policy=RETRY)
+        def _exec_once():
+            return workflow.execute_activity(
+                step_id, args,
+                start_to_close_timeout=AGENT_TO, heartbeat_timeout=HEARTBEAT_TO,
+                retry_policy=RETRY)
+
+        # t260916-29 要求④：worker 停机把在飞活动取消 → 自动重跑一次（patched 门内，
+        # 老 history 重放恒走旧分支；重跑仍失败则由各 catch 位落 blocked 文案）。
+        raw = await retry_once_on_worker_termination(
+            _exec_once,
+            gate=workflow.patched(WORKER_SHUTDOWN_RETRY_PATCH_ID),
+            on_retry=lambda e: self._log(
+                "%s 段活动被 worker 停机取消，自动重跑一次（第 %d 次）"
+                % (step_id, gen + 1)))
         # t260904-18 KI-049 gate 2: shape-preserving normalization of files_changed (the
         # shape travels with the receipt into the results dict, consumed by
         # _refresh_write_set_after_plan reading that dict).
@@ -1128,8 +1141,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 try:
                     res = await self._run_agent_step("create_plan", prev_ctx)
                 except Exception as e:
-                    await self._blocked("create_plan", "agent 活动故障（已重试）：%s: %s"
-                                        % (type(e).__name__, e))
+                    await self._blocked("create_plan", format_agent_stage_failure(
+                        self.ticket_id, "create_plan", e, gen=self._gen("create_plan")))
                     continue
                 prev_ctx = ""
                 if res.status != "ok":
@@ -1146,8 +1159,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 try:
                     res = await self._run_agent_step("review_plan")
                 except Exception as e:
-                    await self._blocked("review_plan", "agent 活动故障（已重试）：%s: %s"
-                                        % (type(e).__name__, e))
+                    await self._blocked("review_plan", format_agent_stage_failure(
+                        self.ticket_id, "review_plan", e, gen=self._gen("review_plan")))
                     continue
                 # t260903-02 speedup 3: three-verdict routing (a conditional pass
                 # verdict=conditional does not count a send-back round, comments go
@@ -1223,8 +1236,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 try:
                     res = await self._run_agent_step("implement", prev_ctx, settle=False)
                 except Exception as e:
-                    await self._blocked("implement", "agent 活动故障（已重试）：%s: %s"
-                                        % (type(e).__name__, e))
+                    await self._blocked("implement", format_agent_stage_failure(
+                        self.ticket_id, "implement", e, gen=self._gen("implement")))
                     continue
                 prev_ctx = ""
                 if res.status != "ok":
@@ -1280,8 +1293,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     res = await self._run_agent_step("integration_review",
                                                      (prev_ctx + "\n" + ui_ctx).strip())
                 except Exception as e:
-                    await self._blocked("integration_review", "agent 活动故障（已重试）：%s: %s"
-                                        % (type(e).__name__, e))
+                    await self._blocked("integration_review", format_agent_stage_failure(
+                        self.ticket_id, "integration_review", e,
+                        gen=self._gen("integration_review")))
                     continue
                 prev_ctx = ""
                 ui_ctx = ""
@@ -1374,8 +1388,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 try:
                     res = await self._run_agent_step("implement", prev_ctx, settle=False)
                 except Exception as e:
-                    await self._blocked("implement", "agent 活动故障（已重试）：%s: %s"
-                                        % (type(e).__name__, e))
+                    await self._blocked("implement", format_agent_stage_failure(
+                        self.ticket_id, "implement", e, gen=self._gen("implement")))
                     continue
                 prev_ctx = ""
                 if res.status != "ok":
@@ -1528,8 +1542,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                             # _blocked).
                             set_parallel_stages(
                                 self.meta, [n for n in pend if n != name])
-                            await self._blocked(name, "agent 活动故障（已重试）：%s: %s"
-                                                % (type(r).__name__, r))
+                            await self._blocked(name, format_agent_stage_failure(
+                                self.ticket_id, name, r, gen=self._gen(name)))
                             break  # _blocked waits for retry_qc/rework; after waking, recompute pend and retry only the failed edge
                     if failed:
                         continue
@@ -1667,8 +1681,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 try:
                     res = await self._run_agent_step("arbitrate", arb_ctx)
                 except Exception as e:
-                    await self._blocked("arbitrate", "agent 活动故障（已重试）：%s: %s"
-                                        % (type(e).__name__, e))
+                    await self._blocked("arbitrate", format_agent_stage_failure(
+                        self.ticket_id, "arbitrate", e, gen=self._gen("arbitrate")))
                     continue
                 verdict = parse_arbitration_summary(res.summary)
                 if not verdict:
@@ -1789,8 +1803,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                             # edge shows ✗ through its timeline blocked entry).
                             set_parallel_stages(
                                 self.meta, [n for n in pend if n != name])
-                            await self._blocked(name, "agent 活动故障（已重试）：%s: %s"
-                                                % (type(r).__name__, r))
+                            await self._blocked(name, format_agent_stage_failure(
+                                self.ticket_id, name, r, gen=self._gen(name)))
                             break  # _blocked waits for retry_qc/rework; after waking, recompute pend and retry only the failed edge
                     if failed:
                         continue
@@ -1872,8 +1886,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     try:
                         rraw = await self._run_agent_step("arbitrate", arb_ctx, settle=True)
                     except Exception as e:
-                        await self._blocked("arbitrate", "agent 活动故障（已重试）：%s: %s"
-                                            % (type(e).__name__, e))
+                        await self._blocked("arbitrate", format_agent_stage_failure(
+                            self.ticket_id, "arbitrate", e, gen=self._gen("arbitrate")))
                         continue
                     arb_done = True
                     arb_res = rraw
@@ -1992,8 +2006,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 try:
                     res = await self._run_agent_step("acceptance_walkthrough", acc_ctx)
                 except Exception as e:
-                    await self._blocked("acceptance", "agent 活动故障（已重试）：%s: %s"
-                                        % (type(e).__name__, e))
+                    await self._blocked("acceptance", format_agent_stage_failure(
+                        self.ticket_id, "acceptance", e,
+                        gen=self._gen("acceptance_walkthrough")))
                     continue
                 if res.status == "ok":
                     self._finish("acceptance_walkthrough", by="integration-agent",
@@ -2133,8 +2148,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 try:
                     res = await self._run_agent_step("implement", solve_ctx)
                 except Exception as e:
-                    await self._blocked("implement", "冲突消解轮 agent 活动故障（已重试）：%s: %s"
-                                        % (type(e).__name__, e))
+                    await self._blocked("implement", format_agent_stage_failure(
+                        self.ticket_id, "implement", e, gen=self._gen("implement")))
                     continue
                 prev_ctx = ""
                 if res.status != "ok":

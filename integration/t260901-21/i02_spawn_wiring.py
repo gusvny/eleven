@@ -49,8 +49,22 @@ ok(src.count("_prepare_agent_spawn(") == 4,  # 1 定义 + 3 调用（t260910-14�
 # 按函数切块（顶层 async def 边界），逐块查接线
 funcs = re.split(r"\n(?=async def |def )", src)
 hosts = ["_run_agent_stage_impl", "arbitrate", "acceptance_walkthrough"]
-for host in hosts:
+
+
+def resolve(host):
+    """t260916-29：长活动外包了 worker_termination_guard 薄壳（worker 停机取消归因），
+    spawn 接线本体移到 _<host>_body——本检查跟随薄壳找本体（壳无 spawn 面）。"""
     body = next((f for f in funcs if f.startswith("async def %s(" % host)), None)
+    if body and "worker_termination_guard" in body:
+        inner = next((f for f in funcs
+                      if f.startswith("async def _%s_body(" % host)), None)
+        if inner:
+            return inner
+    return body
+
+
+for host in hosts:
+    body = resolve(host)
     if body is None:
         ok(False, "%s：函数未找到" % host)
         continue

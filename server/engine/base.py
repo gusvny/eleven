@@ -66,8 +66,11 @@ with workflow.unsafe.imports_passed_through():
         Stage,
         StageResult,
         TicketInput,
+        WORKER_SHUTDOWN_RETRY_PATCH_ID,
         cross_project_judge,
+        format_agent_stage_failure,
         normalize_files_changed,
+        retry_once_on_worker_termination,
         WorkspacePrepResult,
         agent_log_for,
         build_stage_prompt,
@@ -470,10 +473,18 @@ class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
             gen=gen,
             workflow_id=str(self.meta.get("workflow_id") or ""),
             previous_context=previous_context)
-        raw = await workflow.execute_activity(
-            st.id, args,                       # activity name = stage name (stage as activity)
-            start_to_close_timeout=AGENT_TO, heartbeat_timeout=HEARTBEAT_TO,
-            retry_policy=RETRY)
+        def _exec_once():
+            return workflow.execute_activity(
+                st.id, args,                    # activity name = stage name (stage as activity)
+                start_to_close_timeout=AGENT_TO, heartbeat_timeout=HEARTBEAT_TO,
+                retry_policy=RETRY)
+
+        # t260916-29 要求④：worker 停机取消 → 自动重跑一次（patched 门内，老实例重放恒旧分支）
+        raw = await retry_once_on_worker_termination(
+            _exec_once,
+            gate=workflow.patched(WORKER_SHUTDOWN_RETRY_PATCH_ID),
+            on_retry=lambda e: self._log(
+                "%s 段活动被 worker 停机取消，自动重跑一次（第 %d 次）" % (st.id, gen + 1)))
         # A by-name call has no return type annotation; the dataclass comes back
         # as a dict — normalize it into a StageResult. files_changed keeps its
         # shape normalized (ticket t260904-18 KI-049 gate ②): the shape travels
@@ -708,7 +719,8 @@ class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
                     try:
                         res = await self._run_agent_stage(st)
                     except Exception as e:  # activity retries exhausted: infrastructure failure
-                        failure = "agent 活动故障（已重试）：%s: %s" % (type(e).__name__, e)
+                        failure = format_agent_stage_failure(self.ticket_id, st.id, e,
+                                                             gen=self._gen(st.id))
                         res = None
                     if res is not None and res.status != "ok":
                         failure = "agent 报失败：%s" % (res.summary or res.status)

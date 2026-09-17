@@ -168,23 +168,76 @@ stdout 一律单行 JSON `{ok, result|error}`，供 node.ts 插件解析。审�
 .venv/bin/python worker.py                                      # 前台（看日志）
 .venv/bin/python worker.py --daemon --pidfile data/worker.pid \
                              --logfile data/worker.log          # 后台（常驻）
-kill -TERM "$(cat data/worker.pid)"                             # 优雅停（在跑 activity 做完，停领新活）
+kill -TERM "$(cat data/worker.pid)"                             # 优雅停：停领新活 + 宽限期内跑完在飞 activity（§8.3.1）
+SANDBAR_WORKER_GRACEFUL_SHUTDOWN_SEC=600 .venv/bin/python worker.py …   # 宽限可调（缺省 1800s；显式 "0"=立即取消旧行为）
 ```
 
 worker 是「肌肉」，服务端是「骨架与记忆」：worker 挂了/换新进程，服务端里的 workflow
-状态与历史不丢，停机期间攒的活等重启后自动补跑（POC 证明点 D）。
+状态与历史不丢，停机期间攒的活等重启后自动补跑（POC 证明点 D）。优雅停的宽限语义、
+在飞点名与运维口径见 §8.3.1（t260916-29）。
 
 ### 8.3 server / worker / 插件 三者启动与生命周期
 
 | 组件 | 启动 | 生命周期 | 挂了会怎样 |
 |---|---|---|---|
 | temporal dev server | `./run_server.sh` | 常驻；SQLite 落盘 `data/temporal.db`（gitignore） | workflow 状态/历史都在它这；不删 data/ 不丢 |
-| worker | `worker.py [--daemon]` | 常驻；`kill -TERM` 优雅停 | 可随时换/重启；停机期间 workflow 仍 RUNNING，重启自动续 |
+| worker | `worker.py [--daemon]` | 常驻；`kill -TERM` 优雅停（宽限期 §8.3.1） | 可随时换/重启；停机期间 workflow 仍 RUNNING，重启自动续 |
 | dsh 插件 `sandbar-temporal-tools` | profile `cordis.patch.yml` 的 `- insert` 行 | 随 dsh 进程加载；每次工具调用 spawn `client.py` | 无状态；server/worker 不在线时工具调用结构化报错 |
 
 插件加载：`server/profile/node_modules/sandbar-temporal-tools → ../../temporal-tools`
 （与 sandbar-workbench 同款裸包名软链；profile-headless 有同款软链）。默认 python 取
 `engine/.venv/bin/python`（temporalio SDK 装在仓库内 venv，不碰系统 python）。
+
+### 8.3.1 运维口径：console(3099) 与票 worker 生命周期（t260916-29）
+
+**核心事实：重启/重载 console（3099）会波及全部在飞 agent 阶段。** 票专属 worker 是
+console 的子进程（console ensure 负责补拉，260824 宿主决策，设计如此）；console 退出
+时对它们全数 SIGTERM。260916 两轮事故实证：修复前 `Worker(...)` 未设
+`graceful_shutdown_timeout`（SDK 缺省 0=立即取消），在飞 agent 段（动辄 10~40 分钟）
+被秒杀且票面只显无信息的「agent 活动故障」，与真实限流/传输故障不可辨。
+
+**worker 收到 SIGTERM 后的语义（修复后）**：停领新活 → 宽限期
+`SANDBAR_WORKER_GRACEFUL_SHUTDOWN_SEC`（缺省 **1800s**；显式 `"0"`=旧「立即取消」
+逃生门；畸形值回落缺省；无上限封顶——设多大=接受 worker 滞留多久）内等在飞 activity
+收尾并回报；停机时日志**逐个点名在飞 agent 活动**（票/段/gen/attempt），收尾后打
+终态清单。宽限耗尽仍被取消的：activity 侧转成 `type=worker_terminated` 的
+ApplicationError → 票面 blocked 原因写作**「worker 被外部终止（停机/重载），活动已
+取消（票 X 段 Y 第 N 次）」**，绝不与限流/传输/代码故障混淆；且 dev-lane/基类 agent 段
+（`agent-stage-worker-shutdown-retry` patched 门内）**自动重跑一次**，无需人工逐票
+retry_qc（再失败才 blocked 等人）。
+
+**三路停机口径（谁能享受宽限）**：
+
+| 路 | 触发 | 在飞 agent 段结局 |
+|---|---|---|
+| ① console 正常退出/插件重载 | dispose → 票 worker 全数 SIGTERM | 立即进宽限期：期内收尾（最常见路径） |
+| ② console 崩溃/被 SIGKILL | 子 worker 被 launchd 收养（ppid=1），watch（缺省 30s 一轮）发现后自退 | ≤一个 watch 周期后**同样进宽限期**（ppid 守卫走的就是同一条优雅停路径） |
+| ③ 宿主机断电/死机 | 什么都不跑 | 无宽限可言：服务端 heartbeat_timeout（3min）+ 重试是唯一兜底，票面呈 timeout 形文案 |
+
+**生效窗口（KI-081 教训：代码落地≠行为生效）**：本修复**按 worker 进程生效**——已
+在跑的存量票 worker 仍是旧码（grace=0、无归因），直到各自重启（console 重载 /
+reap+spawn）才受益。在飞 workflow 收口后被新 worker 续跑时自动获得重跑门
+（patched 门对老 history 恒 False：老实例重放走旧分支，行为一致、不歧变）。
+
+**已知边界**：①在飞点名/归因只覆盖四个长活动汇聚点（AGENT_STAGE_IDS 全族 +
+arbitrate + acceptance_walkthrough + run_integration_tests）——merge_check（20min）、
+merge、巡检套件等非 agent 长活动停机取消仍走旧文案，通用化留专门票；②
+`inspection_flow.py` 的「套件活动故障/teardown 活动故障」是巡检回执内部字样，不属票面
+blocked 故障族；③SIGKILL 单个 worker 进程（绕过信号面）同③路：无宽限，靠心跳兜底。
+
+**KI-093 纪律声明**：本票只做「记账 + 停机取消归因 + 重跑门」，**不触碰 spawn/reap
+粒度与进程组逻辑**（`_run_agent_stage_impl` 内 KI-009 的 finally 全路径 reap 原样
+保留）；「兄弟边被杀」是普通活动失败、无 worker_shutdown 取消细节，归因面绝不把它
+洗成 worker 停机（UT 场景级负例锁定）。
+
+**故障模式取舍清单**（借用实现逐项声明，C5）：
+
+| 借用源 | 带过来什么 | 明确不带/例外 |
+|---|---|---|
+| selfcheck_ki061_wake_reset 台架 | start_local 本地测试 server（随机端口，零碰 3099/7233）、零模型零真 agent、exit-code 契约、无墙钟断言、async-with 全终态回收 | 本票场景 B 故意 grace=0 复现旧行为（台架多相 worker 切换改「停 worker 起新 worker」） |
+| dev_lane PATCH_ID 家族（INTEG_LOOP_PATCH_ID 先例） | 重跑门走 `workflow.patched`：老 history 重放恒 False，控制流变更不歧变 | 文案变更不走门——只改文案不改控制流，replay 天然安全 |
+| worker.watch_interval_sec 容错范式 | env 解析容错矩阵（缺省/畸形/NaN/Inf/负→缺省） | 不设上限封顶：宽限=运维自认的滞留上界，封顶会替运维做错决定（显式 "0" 保留逃生门） |
+| agent_activities 取消清理先例（ui_evidence 段） | 「清理后 re-raise」保取消语义：非停机取消（工作流取消/心跳错）原样重抛 | 只对「SDK 细节=worker_shutdown」的取消改道；细节拿不到一律 fail-closed 走旧语义 |
 
 ### 8.4 端到端演示（步1，260904 起演示面已断——属预期）
 

@@ -58,6 +58,8 @@ import subprocess
 import shutil
 import tempfile
 import time
+from collections import deque
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -71,6 +73,7 @@ import ui_capture_stage as uis  # UI 台生命周期原语（t260915-18）：引
 from shared import (
     REPO_ROOT,
     STAGE_DISPATCH_KIND,
+    WORKER_TERMINATED_ERROR_TYPE,
     WORKSPACE_TYPES,
     AgentStageArgs,
     ArchiveArgs,
@@ -1538,12 +1541,110 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
         proc.reap(args.ticket_id, args.stage_id)
 
 
+# ---- worker 停机取消：在飞注册表 + 归因守卫（t260916-29）----
+# KI-093 纪律声明：本节只做「记账 + 把 worker 停机（停机/重载）致取消转成可辨的
+# ApplicationError」，**不触碰 spawn/reap 粒度与进程组逻辑**——_run_agent_stage_impl
+# 内部的 KI-009 finally 全路径 reap 原样保留（取消展开时先于本守卫完成清理，顺序
+# 不变）；「兄弟边被杀」是普通活动失败，不经本守卫改道，归因只认 SDK 的
+# worker_shutdown 取消细节（宁可归「活动故障」，不冒认「worker 终止」）。
+
+_INFLIGHT: Dict[str, Dict[str, Any]] = {}
+_RECENT_OUTCOMES: deque = deque(maxlen=200)  # 已收尾活动的近端结局（停机终态清单消费）
+
+
+def _activity_info():
+    """activity.info() 间接层：UT 以假 info 注入，不必起真 activity 上下文。"""
+    return activity.info()
+
+
+def _application_error_cls():
+    """ApplicationError 延迟取用：模块顶层只依赖 temporalio.activity 桩（t260901-21 /
+    t260902-02 等场景夹具以无 SDK 的 temporalio 桩直载本文件）；真转换只发生在真
+    worker 进程里，那里必有完整 SDK。"""
+    from temporalio.exceptions import ApplicationError
+    return ApplicationError
+
+
+def _cancel_is_worker_shutdown() -> bool:
+    """取消细节是否「worker 停机」（SDK activity.cancellation_details().worker_shutdown，
+    temporalio 1.18.2 在场）。拿不到细节（SDK 漂移/上下文异常）一律 False——宁可走
+    旧取消语义，不冒认停机。"""
+    try:
+        det = activity.cancellation_details()
+    except Exception:  # noqa: BLE001——fail-closed 到「非停机取消」
+        return False
+    return bool(det is not None and getattr(det, "worker_shutdown", False))
+
+
+def inflight_stage_snapshot() -> List[Dict[str, Any]]:
+    """在飞 agent 活动快照（拷贝）。worker.py 停机点名（要求①）消费。"""
+    return [dict(e) for e in _INFLIGHT.values()]
+
+
+def recent_stage_outcomes() -> List[Dict[str, Any]]:
+    """已收尾 agent 活动的近端结局（新→旧，拷贝，有界）。worker.py 停机终态清单消费。"""
+    return [dict(e) for e in _RECENT_OUTCOMES]
+
+
+@asynccontextmanager
+async def worker_termination_guard(ticket_id, stage_id, gen):
+    """长活动汇聚点的统一守卫：在飞记账 + 停机取消→可辨失败。
+
+    - 正常完成 / 普通异常：outcome=completed/failed，异常原样传播；
+    - CancelledError 且 SDK 细节=worker_shutdown：转 ApplicationError
+      （type=WORKER_TERMINATED_ERROR_TYPE，non_retryable=True——不进服务端重试，
+      由工作流侧 patched 门决定是否重跑一次），票面据此点名「worker 被外部终止」；
+    - 其余 CancelledError（工作流主动取消/心跳错误）：原样 re-raise（同
+      ui_evidence 的「清理后重抛」先例——取消语义不吞）。
+    覆盖点=_make_stage_activity（AGENT_STAGE_IDS 全族）+ arbitrate +
+    acceptance_walkthrough + run_integration_tests 四个长活动汇聚点；merge_check 等
+    短活动不在册=已知边界（README §8.3.1）。
+    """
+    try:
+        info = _activity_info()
+    except Exception:  # noqa: BLE001——无 activity 上下文（防御性记账，不炸）
+        info = None
+    key = "%s/%s#%s" % (getattr(info, "workflow_id", "?"),
+                        getattr(info, "activity_id", "?"),
+                        getattr(info, "attempt", "?"))
+    entry: Dict[str, Any] = {"ticket": ticket_id, "stage": stage_id, "gen": gen,
+                             "attempt": getattr(info, "attempt", None),
+                             "workflow_id": getattr(info, "workflow_id", ""),
+                             "started_monotonic": time.monotonic(),
+                             "outcome": "running"}
+    _INFLIGHT[key] = entry
+    try:
+        yield
+    except asyncio.CancelledError:
+        entry["outcome"] = ("worker_terminated" if _cancel_is_worker_shutdown()
+                            else "cancelled")
+        _INFLIGHT.pop(key, None)
+        _RECENT_OUTCOMES.appendleft(dict(entry))
+        if entry["outcome"] == "worker_terminated":
+            raise _application_error_cls()(
+                "worker 被外部终止（停机/重载），活动已取消：%s/%s gen=%s attempt=%s"
+                % (ticket_id, stage_id, gen, entry.get("attempt")),
+                type=WORKER_TERMINATED_ERROR_TYPE, non_retryable=True)
+        raise
+    except Exception:
+        entry["outcome"] = "failed"
+        _INFLIGHT.pop(key, None)
+        _RECENT_OUTCOMES.appendleft(dict(entry))
+        raise
+    else:
+        entry["outcome"] = "completed"
+        _INFLIGHT.pop(key, None)
+        _RECENT_OUTCOMES.appendleft(dict(entry))
+
+
 def _make_stage_activity(stage_id: str):
     """Register one activity per stage name (same implementation, name = stage name).
     The wrapper keeps activity.defn from overwriting its defn name on one function
-    object."""
+    object. t260916-29：外面包 worker_termination_guard（停机取消→点名+可辨失败），
+    内部 _run_agent_stage_impl 的 KI-009 reap 顺序原样不动。"""
     async def _impl(args: AgentStageArgs) -> StageResult:
-        return await _run_agent_stage_impl(args)
+        async with worker_termination_guard(args.ticket_id, args.stage_id, args.gen):
+            return await _run_agent_stage_impl(args)
     _impl.__name__ = "stage_" + stage_id.replace("-", "_")
     return activity.defn(_impl, name=stage_id)
 
@@ -4721,6 +4822,14 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
 
 @activity.defn
 async def run_integration_tests(args: IntegrationRunArgs) -> IntegrationRunResult:
+    """run_integration_tests（t260916-29：worker_termination_guard 包裹——worker 停机
+    取消→在飞点名+可辨失败；gen 取 IntegrationRunArgs.attempt=工单代数口径）"""
+    async with worker_termination_guard(args.ticket_id, "run_integration_tests",
+                                        getattr(args, "attempt", None)):
+        return await _run_integration_tests_body(args)
+
+
+async def _run_integration_tests_body(args: IntegrationRunArgs) -> IntegrationRunResult:
     """Mechanical integration-test step (follow-on to t260829-07): runs the project's
     declared scenario executor (integration/run_scenarios.py), pure subprocess with
     zero LLM. The result goes to arbitrate (integration) for its three-state verdict —
@@ -4985,6 +5094,13 @@ def _stub_stage_shortcut(args: AgentStageArgs, settle_on_cache: bool = False) ->
 
 @activity.defn
 async def arbitrate(args: AgentStageArgs) -> StageResult:
+    """arbitrate（t260916-29：worker_termination_guard 包裹——worker 停机取消→在飞
+    点名+可辨失败；本体见 _arbitrate_body，零改动）"""
+    async with worker_termination_guard(args.ticket_id, "arbitrate", args.gen):
+        return await _arbitrate_body(args)
+
+
+async def _arbitrate_body(args: AgentStageArgs) -> StageResult:
     """The arbitration step (follow-on to t260829-07): integration reads the mechanical
     test results and issues a three-state verdict — pass / tests-fault (iterate the
     test set itself, the changes landing with this step's settle) / code-fault (the
@@ -5273,6 +5389,14 @@ def apply_doc_gate(res: StageResult, rfile: Path, cwd: Path, ticket_id: str) -> 
 
 @activity.defn
 async def acceptance_walkthrough(args: AgentStageArgs) -> StageResult:
+    """acceptance_walkthrough（t260916-29：worker_termination_guard 包裹——worker 停机
+    取消→在飞点名+可辨失败；本体见 _acceptance_walkthrough_body，零改动）"""
+    async with worker_termination_guard(args.ticket_id, "acceptance_walkthrough",
+                                        args.gen):
+        return await _acceptance_walkthrough_body(args)
+
+
+async def _acceptance_walkthrough_body(args: AgentStageArgs) -> StageResult:
     """The acceptance walkthrough step (follow-on to t260829-07): once the tests pass,
     integration walks the new feature from the user's point of view and writes the
     acceptance report (for the human review gate to consult). The walkthrough evidence
