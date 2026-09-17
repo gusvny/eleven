@@ -224,6 +224,12 @@ ARB_ACC_PARALLEL_PATCH_ID = "dev-lane-arb-acc-parallel-v1"
 #   硬约束：query handler 整段 read-only）——snapshot 等读 self._detail_face_on
 #   缓存位（getattr 防御，UT 壳 object.__new__ 不跑 __init__）。
 DETAIL_FACE_PATCH_ID = "dev-lane-detail-face-v1"
+# t260916-28: a failed StageResult carrying a lane_dsh_* gate_refusal（spawn 前的
+# 泳道 .dsh 自洽预检拒绝）必须在全部 agent 段消费点直落 blocked「agent 报失败」——
+# arbitrate 的 verdict 循环、acceptance 打回循环与 parallel_impl_design 汇合边的
+# 既有处理会把它误读成「缺 verdict= 标记」/「走查发现代码问题」/无声吞成假完成。
+# Same-shaped boolean gate (see the first PATCH_ID note).
+LANE_DSH_BLOCK_PATCH_ID = "dev-lane-lane-dsh-block-v1"
 # prepare_ui_evidence activity timeout: must be **clearly larger** than the subprocess
 # timeout inside the activity (agent_activities.UI_CAPTURE_TIMEOUT_SEC=240s), otherwise
 # Temporal kills the activity first and the subprocess's own timeout recovery never runs.
@@ -824,6 +830,27 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
         detail = path_gates.sanitize_gate_refusal(refusal)
         if detail:
             self.meta["blocked_detail"] = detail
+
+    # ---------- lane-dsh preflight refusal routing (t260916-28) ----------
+    def _lane_dsh_refusal(self, res: Any) -> bool:
+        """True = 本回执是泳道 .dsh 预检拒绝（failed + lane_dsh_* 命名空间的
+        gate_refusal）。纯判定：绝不调 workflow.patched（@query 只读硬约束），
+        门在各使用点。"""
+        if str(getattr(res, "status", "")) != "failed":
+            return False
+        refusal = getattr(res, "gate_refusal", None)
+        if not isinstance(refusal, dict):
+            return False
+        return str(refusal.get("reason_code") or "").startswith("lane_dsh_")
+
+    async def _block_agent_failed(self, step_id: str, res: Any) -> None:
+        """agent 报失败（业务裁决失败）在非 generic 站点的统一 blocked 落点
+        （t260916-28）：文案与 generic 站既有两分同款「agent 报失败：」；结构化
+        明细已由 _pin_agent_refusal 在 _run_agent_step 单点钉上 meta.blocked_detail，
+        此处不重复写。"""
+        await self._blocked(step_id, "agent 报失败：%s"
+                            % (str(getattr(res, "summary", "") or "")
+                               or str(getattr(res, "status", "") or "")))
 
     def _pin_settle_refusal(self, result: Any) -> None:
         """settle_lane join 点的闸拒绝明细（A3）：SettleLaneResult.gate_refusal 经
@@ -1545,6 +1572,17 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                             await self._blocked(name, format_agent_stage_failure(
                                 self.ticket_id, name, r, gen=self._gen(name)))
                             break  # _blocked waits for retry_qc/rework; after waking, recompute pend and retry only the failed edge
+                        if workflow.patched(LANE_DSH_BLOCK_PATCH_ID) and self._lane_dsh_refusal(r):
+                            # t260916-28: 与上方 Exception 分支同形簿记（置 failed+
+                            # 剔边+blocked+break）——泳道 .dsh 缺件的环境故障绝不能落进
+                            # 下方消费循环被无条件记成假完成；failed 让 `if failed:
+                            # continue` 跳过消费循环，醒来重算 pend 重跑未消费边
+                            # （与 Exception 分支的重跑面语义一致）。
+                            failed = True
+                            set_parallel_stages(
+                                self.meta, [n for n in pend if n != name])
+                            await self._block_agent_failed(name, r)
+                            break
                     if failed:
                         continue
                     for name, r in zip(pend, rs):
@@ -1683,6 +1721,11 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 except Exception as e:
                     await self._blocked("arbitrate", format_agent_stage_failure(
                         self.ticket_id, "arbitrate", e, gen=self._gen("arbitrate")))
+                    continue
+                if workflow.patched(LANE_DSH_BLOCK_PATCH_ID) and self._lane_dsh_refusal(res):
+                    # t260916-28: 环境（泳道 .dsh 缺件）故障不是格式违约——带人话
+                    # 直落 blocked，不烧格式纠正计数、不虚报「缺 verdict= 标记」。
+                    await self._block_agent_failed("arbitrate", res)
                     continue
                 verdict = parse_arbitration_summary(res.summary)
                 if not verdict:
@@ -1856,6 +1899,14 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                               % (s.note or "干净", s.lane_commits))
                 except Exception as e:  # settle failure: noted, main chain unaffected; the run's 0-commit pre-check catches it
                     self._log("settle_lane 故障（不拦主链）：%s: %s" % (type(e).__name__, e))
+                if workflow.patched(LANE_DSH_BLOCK_PATCH_ID) and self._lane_dsh_refusal(arb_res):
+                    # t260916-28: 环境缺件故障直落 blocked；复位 fork 簿记（对齐下方
+                    # 格式纠正段的既有复位形态），retry_qc 醒来后 arbitrate 边真重跑
+                    # 而不是吃滞留的 failed 回执（KI-061 同款 no-op 坑）。
+                    await self._block_agent_failed("arbitrate", arb_res)
+                    arb_done = False
+                    arb_res = None
+                    continue
                 verdict = parse_arbitration_summary(arb_res.summary)
                 if not verdict:
                     arb_format_rounds += 1
@@ -1888,6 +1939,12 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     except Exception as e:
                         await self._blocked("arbitrate", format_agent_stage_failure(
                             self.ticket_id, "arbitrate", e, gen=self._gen("arbitrate")))
+                        continue
+                    if workflow.patched(LANE_DSH_BLOCK_PATCH_ID) and self._lane_dsh_refusal(rraw):
+                        # t260916-28: 环境缺件故障直落 blocked（进入本段前 arb_done/
+                        # arb_res 已复位，此处尚未置 True——无需再动簿记，醒来后本边
+                        # 真重跑）。
+                        await self._block_agent_failed("arbitrate", rraw)
                         continue
                     arb_done = True
                     arb_res = rraw
@@ -1939,6 +1996,14 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                         await self._breathe()
                         continue
                     if acc_res is not None:
+                        if workflow.patched(LANE_DSH_BLOCK_PATCH_ID) and self._lane_dsh_refusal(acc_res):
+                            # t260916-28: 环境缺件故障直落 blocked——不打回 implement、
+                            # 不污染 acc_rounds；复位 walkthrough 簿记（blocked 返回后
+                            # 再复位，醒来的主循环重算 pend 时 acceptance 边真重跑）。
+                            await self._block_agent_failed("acceptance_walkthrough", acc_res)
+                            acc_done = False
+                            acc_res = None
+                            continue
                         # Walkthrough edge reported failure: the existing acceptance
                         # send-back loop (same contract as the old acceptance branch)
                         acc_rounds += 1
@@ -2016,6 +2081,12 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     self._handoff("acceptance", "验收报告：" + (res.summary or ""),
                                   artifacts=res.deliverables, report=res.report)
                     phase = "merge_check"
+                    continue
+                if workflow.patched(LANE_DSH_BLOCK_PATCH_ID) and self._lane_dsh_refusal(res):
+                    # t260916-28: 环境缺件故障直落 blocked——「走查发现代码问题」的
+                    # 打回叙事为假、acc_rounds 不被环境故障污染、不白烧一轮 implement
+                    # 重入。
+                    await self._block_agent_failed("acceptance_walkthrough", res)
                     continue
                 acc_rounds += 1
                 prev_ctx = ("【验收走查打回（第 %d 轮）】走查发现代码问题：\n%s"

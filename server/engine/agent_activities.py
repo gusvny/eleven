@@ -130,15 +130,24 @@ INTEG_CMD_TIMEOUT_SEC = int(os.environ.get("SANDBAR_INTEG_CMD_TIMEOUT_SEC") or 9
 DSH_CMD = shlex.split(os.environ.get("SANDBAR_AGENT_CMD") or "dsh --profile sandbar-headless")
 
 
-def _src_dsh_home() -> Path:
-    """Copy-source home for profiles/credentials/settings: prefer the DSH_HOME the
-    worker inherited; if that directory is missing (the console sandbox's temp home
-    got wiped, ticket t260828-05) fall back to the real home — otherwise the profile
-    is silently copied empty and dsh starts up reporting the profile missing."""
+def _dsh_home_candidates() -> List[Path]:
+    """Copy-source candidates for profiles/settings, ordered and deduped; the first
+    candidate that actually holds the wanted file wins (ticket t260916-28). Prefers
+    the DSH_HOME the worker inherited, then falls back to the real home: a DSH_HOME
+    that exists but lacks the headless profile is exactly the t260916-26 incident
+    shape, and dsh 0.1.1 hard-fails on a missing profile instead of falling back to
+    any built-in default — so the copy source must be probed per candidate, not
+    picked by directory existence alone (the old one-shot home semantics)."""
+    out: List[Path] = []
     env_home = os.environ.get("DSH_HOME")
     if env_home and Path(env_home).is_dir():
-        return Path(env_home)
-    return Path.home() / ".dsh"
+        out.append(Path(env_home))
+    out.append(Path.home() / ".dsh")
+    deduped: List[Path] = []
+    for cand in out:
+        if cand not in deduped:
+            deduped.append(cand)
+    return deduped
 
 
 def _session_jsonl_torn(path: Path) -> bool:
@@ -498,9 +507,15 @@ def _copy_settings(dst_dsh: Path) -> None:
     apiKeyEnv / the credentials seam); what gets copied is the provider registry
     config. Re-copied on every spawn: settings changes (new provider / ordering) take
     effect for the very next agent."""
-    src = _src_dsh_home() / "settings.yaml"
-    if src.is_file():
-        shutil.copy2(str(src), str(dst_dsh / "settings.yaml"))
+    candidates = _dsh_home_candidates()
+    selected = next((c for c in candidates if (c / "settings.yaml").is_file()), None)
+    if selected is None:
+        activity.logger.warning(
+            "[lane-dsh] 无任何候选源含 settings.yaml（候选链=%s）；跳过拷贝——"
+            "缺 settings 即 providers 全灭（NO_ADAPTER 白跑），spawn 前预检将拦截"
+            "（t260916-28）", " → ".join(str(c) for c in candidates))
+        return
+    shutil.copy2(str(selected / "settings.yaml"), str(dst_dsh / "settings.yaml"))
 
 
 def _pin_default_model(dst_dsh: Path, route: Dict[str, str]) -> None:
@@ -534,14 +549,85 @@ def _pin_default_model(dst_dsh: Path, route: Dict[str, str]) -> None:
 
 def _copy_profile(dst_dsh: Path) -> None:
     """Copy the sandbar-headless profile (symlinks included) into the workspace-local
-    .dsh (sandbox isolation)."""
-    src = _src_dsh_home() / "profiles" / "sandbar-headless"
-    if not src.exists():
-        return  # no profile to copy — headless falls back to dsh's built-in default
+    .dsh (sandbox isolation). Copy source walks the candidate chain (worker-inherited
+    DSH_HOME → real home), first candidate that actually HAS the profile wins —
+    not the first directory that exists (ticket t260916-26/t260916-28: dsh 0.1.1
+    does not fall back to a built-in default profile, a missing profile kills every
+    agent at startup). When no candidate has it we log loudly and skip: this helper
+    stays non-raising (direct-call fixture contract: sc_it02 S4 / selfcheck G) —
+    the spawn-time preflight in the stage activity is what blocks the ticket with
+    the human-readable candidate chain."""
+    profile = "sandbar-headless"
+    candidates = _dsh_home_candidates()
+    selected = next(
+        (c for c in candidates if (c / "profiles" / profile).exists()), None)
+    chain = " → ".join(str(c) for c in candidates)
+    if selected is None:
+        activity.logger.warning(
+            "[lane-dsh] 无任何候选源含 %s profile（候选链=%s）；跳过拷贝——"
+            "dsh 0.1.1 不回落内建 profile，spawn 前预检将拦截本段并给出修复指引"
+            "（t260916-28）", profile, chain)
+        return
+    activity.logger.info("[lane-dsh] profile 拷贝源=%s（候选链=%s）",
+                         selected / "profiles" / profile, chain)
     dst = dst_dsh / "profiles"
     dst.mkdir(parents=True, exist_ok=True)
-    if not (dst / "sandbar-headless").exists():
-        shutil.copytree(str(src), str(dst / "sandbar-headless"), symlinks=True)
+    if not (dst / profile).exists():
+        shutil.copytree(str(selected / "profiles" / profile), str(dst / profile),
+                        symlinks=True)
+
+
+LANE_DSH_REFUSAL_NS = "lane_dsh_"
+
+
+def _lane_dsh_preflight(cmd: List[str], lane_dsh: Path,
+                        candidates: List[Path]) -> Optional[Dict[str, Any]]:
+    """Spawn-time self-check of the lane-local .dsh (ticket t260916-28, invariant:
+    the lane .dsh an agent is about to run from must be self-consistent). Only fires
+    when this spawn actually runs the dsh headless runner (cmd starts with "dsh") —
+    recorder/selftest stub commands and the SANDBAR_AGENT_STUB=1 short-circuit never
+    reach the call site. Checks profile dir + settings.yaml; credentials are
+    deliberately NOT checked (contract pin sc_it02 S4: spawn prep never fails on
+    missing credential sources — MISSING_CREDENTIAL is reported engine/agent-side).
+    Returns a structured refusal (dict, sanitize_gate_refusal-compatible: reason_code
+    namespaced lane_dsh_*) or None when the spawn may proceed. Pure: existence probes
+    only, no StageResult coupling — unit-testable."""
+    if not cmd or cmd[0] != "dsh":
+        return None
+    profile = "sandbar-headless"
+    if "--profile" in cmd:
+        idx = cmd.index("--profile")
+        if idx + 1 < len(cmd) and str(cmd[idx + 1]).strip():
+            profile = str(cmd[idx + 1]).strip()
+    lane_profile = lane_dsh / "profiles" / profile
+    lane_settings = lane_dsh / "settings.yaml"
+    missing_profile = not lane_profile.exists()
+    missing_settings = not lane_settings.is_file()
+    if not (missing_profile or missing_settings):
+        return None
+    chain = [str(c) for c in candidates]
+    problems = []
+    if missing_profile:
+        problems.append("profile 目录缺失（%s）" % lane_profile)
+    if missing_settings:
+        problems.append("settings.yaml 缺失（%s，缺 settings 即 providers 全灭"
+                        " NO_ADAPTER）" % lane_settings)
+    human = ("泳道 .dsh 缺 %s：%s。候选源链=%s。修复：在 worker 的 DSH_HOME 执行 "
+             "'dsh plugin --profile %s add <package>'，或把 ~/.dsh/profiles/%s 补进 "
+             "DSH_HOME 后 retry_qc 自愈。"
+             % (profile, "；".join(problems), " → ".join(chain), profile, profile))
+    return {
+        "reason_code": (LANE_DSH_REFUSAL_NS + "profile_missing" if missing_profile
+                        else LANE_DSH_REFUSAL_NS + "settings_missing"),
+        "files": [str(lane_dsh), str(lane_profile), str(lane_settings)]
+                 + [str(c / "profiles" / profile) for c in candidates],
+        "candidates": chain,
+        "profile": profile,
+        "next_action": ("补 %s profile 后 retry_qc 自愈（dsh plugin --profile %s add "
+                        "<package>，或把 ~/.dsh/profiles/%s 补进 worker 的 DSH_HOME）"
+                        % (profile, profile, profile)),
+        "evidence": human,
+    }
 
 # Every agent-stage stage id (activity name = stage name; the pure-gate stage
 # machine-qc and the human-gate stages approve/final-review/merge are not in here).
@@ -1477,6 +1563,30 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
     cmd, env = _prepare_agent_spawn(
         cwd, args.role, kind, args.ticket_id, rfile.parent,
         "%s_gen%d" % (args.stage_id, args.gen), project=project)
+    # t260916-28: lane .dsh self-check BEFORE spawning. A refusal becomes a
+    # business-verdict failed StageResult — never a raise (RETRY is for infra
+    # failures only, see dev_lane RETRY) and never a result file (no idempotency
+    # -anchor pollution; retry_qc re-enters with gen+1 and the preflight re-runs;
+    # refilling the profile heals the ticket). Stub-mode already returned via the
+    # stub short-circuit above; non-dsh commands (recorder stubs) are skipped inside
+    # the preflight itself.
+    refusal = _lane_dsh_preflight(cmd, cwd / ".dsh", _dsh_home_candidates())
+    if refusal is not None:
+        activity.logger.warning("[%s/%s] lane .dsh 预检拦截（gen%d）：%s",
+                                args.ticket_id, args.stage_id, args.gen,
+                                refusal.get("evidence") or "")
+        return StageResult(
+            status="failed",
+            # 裸人话，不带「agent 报失败：」前缀——generic 站既有两分与六使用点
+            # 落点（_block_agent_failed）都统一拼前缀，activity 侧再拼会双前缀。
+            summary=(refusal.get("evidence") or "泳道 .dsh 缺件"),
+            report=("泳道 .dsh 预检拒绝（t260916-28）\n\n候选链=%s\n\n修复=%s\n\n"
+                    "明细=%s" % (" → ".join(refusal.get("candidates") or []),
+                                 refusal.get("next_action") or "",
+                                 refusal.get("evidence") or "")),
+            deliverables=[], files_changed=[], files_changed_shape="ok",
+            evidence=json.dumps(refusal, ensure_ascii=False),
+            gate_refusal=refusal)
     cmd.append(args.prompt)
     logf = open(args.log_file, "a", buffering=1) if args.log_file else subprocess.DEVNULL
     activity.logger.info("[%s/%s] spawn headless agent（gen%d，cwd=%s）：%s …",
@@ -5123,6 +5233,24 @@ async def _arbitrate_body(args: AgentStageArgs) -> StageResult:
     cmd, env = _prepare_agent_spawn(
         cwd, args.role, "", args.ticket_id, rfile.parent,
         "arbitrate_gen%d" % args.gen, project=project)
+    # t260916-28: arbitrate 是独立 activity 实现（不走 _run_agent_stage_impl）——
+    # 预检在此同款接线：缺件=业务 failed 回执（不 raise、不写结果文件，retry_qc
+    # 后 gen+1 重进时预检重跑；补源即自愈）。桩态已在上面的 stub 短路返回。
+    refusal = _lane_dsh_preflight(cmd, cwd / ".dsh", _dsh_home_candidates())
+    if refusal is not None:
+        activity.logger.warning("[%s/arbitrate] lane .dsh 预检拦截（gen%d）：%s",
+                                args.ticket_id, args.gen,
+                                refusal.get("evidence") or "")
+        return StageResult(
+            status="failed",
+            summary=(refusal.get("evidence") or "泳道 .dsh 缺件"),
+            report=("泳道 .dsh 预检拒绝（t260916-28）\n\n候选链=%s\n\n修复=%s\n\n"
+                    "明细=%s" % (" → ".join(refusal.get("candidates") or []),
+                                 refusal.get("next_action") or "",
+                                 refusal.get("evidence") or "")),
+            deliverables=[], files_changed=[], files_changed_shape="ok",
+            evidence=json.dumps(refusal, ensure_ascii=False),
+            gate_refusal=refusal)
     cmd.append(args.prompt)
     logf = open(args.log_file, "a", buffering=1) if args.log_file else subprocess.DEVNULL
     activity.logger.info("[%s/arbitrate] spawn integration 仲裁（gen%d，cwd=%s）",
@@ -5448,6 +5576,24 @@ async def _acceptance_walkthrough_body(args: AgentStageArgs) -> StageResult:
         # agent-live / agent-usage's ticket-role locator, and its content is still
         # reachable from the result file / logs).
         session_key="%s-acceptance" % args.ticket_id)
+    # t260916-28: acceptance_walkthrough 同为独立 activity 实现——预检在此同款接线
+    # （缺件=业务 failed 回执；滞留的 failed 仲裁回执由 workflow 门 5 消费为
+    # blocked(acceptance)，不 raise、不写结果文件）。桩态已在上面的 stub 短路返回。
+    refusal = _lane_dsh_preflight(cmd, cwd / ".dsh", _dsh_home_candidates())
+    if refusal is not None:
+        activity.logger.warning("[%s/acceptance_walkthrough] lane .dsh 预检拦截（gen%d）：%s",
+                                args.ticket_id, args.gen,
+                                refusal.get("evidence") or "")
+        return StageResult(
+            status="failed",
+            summary=(refusal.get("evidence") or "泳道 .dsh 缺件"),
+            report=("泳道 .dsh 预检拒绝（t260916-28）\n\n候选链=%s\n\n修复=%s\n\n"
+                    "明细=%s" % (" → ".join(refusal.get("candidates") or []),
+                                 refusal.get("next_action") or "",
+                                 refusal.get("evidence") or "")),
+            deliverables=[], files_changed=[], files_changed_shape="ok",
+            evidence=json.dumps(refusal, ensure_ascii=False),
+            gate_refusal=refusal)
     cmd.append(args.prompt)
     logf = open(args.log_file, "a", buffering=1) if args.log_file else subprocess.DEVNULL
     activity.logger.info("[%s/acceptance_walkthrough] spawn integration 验收走查（gen%d）",

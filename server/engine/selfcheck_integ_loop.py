@@ -116,9 +116,10 @@ ok(r.error == "" and r.ran == 2 and r.passed == 1 and r.failed == 1,
    "计数：2 跑 1 过 1 败")
 
 
-ok(len(r.details) == 2 and r.details[0]["exit"] == 0 and r.details[1]["exit"] == 1
-   and "输出尾段" in r.details[1]["output_tail"],
-   "明细逐条带 exit 与尾段")
+ok(len(r.details) == 3 and r.details[0]["exit"] == 0 and r.details[1]["exit"] == 1
+   and "输出尾段" in r.details[1]["output_tail"]
+   and r.details[2]["name"] == "__pool_exclude__",
+   "明细逐条带 exit 与尾段（t260913-03 起末条恒为 __pool_exclude__ 少跑点名条）")
 
 # t260904-12 three-state window wording: before the section-2 change (verify_lane
 # counting env_fail), an ENV_FAIL (exit 2) showed up as an err state (verify_lane
@@ -219,7 +220,7 @@ ok("integration_route(verdict, tests_rounds, code_rounds)" in src,
 ok('phase = "parallel_impl_design"' in src and 'if phase == "integ_join":' in src,
    "新链并行分叉与汇合分支在")
 ok("if not workflow.patched(INTEG_LOOP_PATCH_ID):" in src
-   and "旧链尾（仅存量 workflow 重放可达" in src,
+   and "old chain tail (reachable only by replaying existing" in src,
    "旧链尾仅存量重放可达（双路径，重放安全）")
 
 # t260903-02 lane-speed items 2 and 3: new-branch structure and replay-safety assertions
