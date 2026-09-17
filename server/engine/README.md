@@ -239,6 +239,72 @@ blocked 故障族；③SIGKILL 单个 worker 进程（绕过信号面）同③�
 | worker.watch_interval_sec 容错范式 | env 解析容错矩阵（缺省/畸形/NaN/Inf/负→缺省） | 不设上限封顶：宽限=运维自认的滞留上界，封顶会替运维做错决定（显式 "0" 保留逃生门） |
 | agent_activities 取消清理先例（ui_evidence 段） | 「清理后 re-raise」保取消语义：非停机取消（工作流取消/心跳错）原样重抛 | 只对「SDK 细节=worker_shutdown」的取消改道；细节拿不到一律 fail-closed 走旧语义 |
 
+### 8.3.2 运维口径：worker 代码漂移与在飞回放兼容（t260917-04）
+
+**核心事实：换代码重启 worker 之前，先确认在飞票回放兼容；工作流体（dev_lane.py /
+base.py / workflows*.py）新增或变更命令面控制流必须过 `workflow.patched` 门。**
+260917 实证（t260917-01，373741c）：仲裁段新增分支未过门 → 在飞票重放报
+NondeterminismError（TMPRL1100）→ snapshot 查询与 retry_qc 全被拒，t260916-19/-21
+当场卡死；同族前科 044c692（99809，t260908-01 留证）。纪律早有成文（dev_lane
+PATCH_ID 家族注释、base.py 头注、机制主档「同构布尔门」节）仍被踩——现已有机械门
+（见下「源码锁」），纪律从人记变成测试红。
+
+**症状识别**：worker 日志 `Failing workflow task ... [TMPRL1100] Nondeterminism
+error: No command scheduled for event HistoryEvent(id: N, ActivityTaskScheduled)`；
+票面 snapshot 查询报 `WorkflowQueryFailedError: [TMPRL1100]`（工作台显「快照不可
+得」）；retry_qc 等 signal 同拒。票没坏，是**代码与历史错位**——不要反复重启
+worker（无用且刷新失败现场）。
+
+**前置检查（重启/换代码 worker 之前必做）**：
+
+    server/engine/.venv/bin/python server/engine/replay_check.py              # 全量 RUNNING
+    server/engine/.venv/bin/python server/engine/replay_check.py --workflow <ticket_id>
+
+replay_check 只读（list_workflows / fetch_history，与工单台查询同级；不写信号、
+不启 worker、零碰 3099）。stdout 单行 JSON 判读三分：①`results` 非空且逐票
+`ok:true`＝通过，才重启 worker；②`results` 空＋`error` 在场＝replay_check 自身
+基建面（连接/取历史失败），按环境处置后重跑，既不是票绿也不是票分歧；③逐票
+`ok:false` 且 error 含 Nondeterminism＝真分歧＝新代码会在该票上炸，先修代码（补
+patched 门）或按下面处置该票。本口径与 dev_lane.py 头注的 drain 核验同源（RUNNING
+集只读回放零分歧是 cutover 安全前提）。260917-04 实测：修前 t260916-19（event
+201）/ t260916-21（event 139）两红，补门后 16 张 RUNNING 全绿。
+
+**卡死票标准处置（二选一，A 优先）**：
+
+- A. Temporal reset（保历史）：把票 reset 回分歧事件**之前**最近的
+  WorkflowTaskCompleted，票从该点用新代码续跑：
+
+      bin/temporal workflow show -w <ticket_id> --address 127.0.0.1:7233 -o json   # 定位分歧点
+      bin/temporal workflow reset -w <ticket_id> --event_id <N> --address 127.0.0.1:7233 --reason "回放兼容卡死，reset 续跑"
+
+  `<N>` = 报错 `HistoryEvent(id: N, ...)` 之前最近的 WorkflowTaskCompleted 事件号；
+  旗标名以 `bin/temporal workflow reset --help` 为准。reset 前先
+  `replay_check.py --workflow` 确认新代码确实仍会在该点炸（补丁已落地的票不需要
+  reset——直接重放就绿）；历史已被 continue-as-new 压缩的票 A 路不可用，走 B。
+- B. terminate + 泳道重建（丢历史，兜底）：
+
+      python server/engine/client.py cancel '{"workflow_id":"<ticket_id>","reason":"回放兼容卡死，B 路重建"}'
+
+  然后工单台 rework/重建泳道（merge 已签的账本事实在仓里，不随 terminate 丢）。
+
+**源码锁（纪律靠门不靠人记）**：`server/engine/tests/test_t260917_04_replay_gate_lock.py`
+扫描工作流体中「If/While/IfExp 测试位 await 命令面方法而未过 patched 门」的分支：
+未过门且未在 BRANCH_REGISTRY 登记回放兼容说明即红。命令面方法集从 AST 自推导
+（种子=体含 SDK 命令调用，await self._x 边闭包传导）——新包装方法自动入集，不会再
+靠名单记住。A 组并钉死：本门恰 3 使用点（复位点+两守门分支）、注释不得出现门调用
+文本。新增工作流侧分支/命令的正确动作：先跑这把锁，红了就补门或登记。
+
+**已知缺陷：唤醒不激活（常量 id 门 + SDK memo 固化，-19/-21 形态）**：本门用常量
+id（`dev-lane-arb-refusal-v1`）直呼三门位——在飞票门首评落在重放段（旧历史无
+marker）→ SDK memo 固化 False（temporalio workflow_patch 语义：同 id 跨次复用共享
+同一判定）→ 该票换修复 worker 唤醒后的活执行仍拿 False → 停在仲裁环内的票继续走
+旧语义：闸拒被当「N 次缺 verdict=」计数，**真因（path_gate_reason）永不上票面**。
+边界：回放安全（本票 P1）已解、新票即时新语义、停在仲裁段**之前**的在飞票活穿门时
+也是新语义；受影响的只有门首评已落重放段的在飞票。规避形态＝KI-061
+`base#seq` per-entry（每次进入新鲜 id，活评即 True；t260907-10 固定 id 热修同族
+失败在案）；锁文件 b2 反例已机械钉住该机理。登记：KI-094（回放兼容故障族专条，
+merge 关卡落 notes/debts/known-issues.md）；处置＝follow-up 票门升级 per-entry。
+
 ### 8.4 端到端演示（步1，260904 起演示面已断——属预期）
 
 `./demo_cli.sh`（输出落 `out/demo-step1-cli.txt`）：start content-pipeline → query 读 stage
