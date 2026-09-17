@@ -828,6 +828,109 @@ def _dirty_within_write_set(files: List[str], write_set: Any) -> bool:
     return True
 
 
+# ---- 嵌套仓守卫纯判定（t260916-20）：泳道内从零建成员仓的丢失形态，闸前置 ----
+# 背景（nusuyou t260916-08 实案：600 文件不可恢复）：泳道内 git init 的子仓，带提交
+# 会被 add -A 暂存成 gitlink(160000) 落进泳道分支——squash 只搬树内条目，gitlink 内容
+# 无处可搬（静默丢）；0 提交子仓更被 add -A 整目录吞成普通文件错形入库（子仓未提交
+# 工作与 .git 身份丢失）。本组纯函数供 _settle_worktree_lane 与
+# settle_conflict_resolution（两个 add -A 站点，R2 旁路洞）与合并/拆道闸共用同一判定
+# 源，不造第二真源。
+
+
+def staged_gitlinks(raw: Any) -> List[str]:
+    """`git diff --raw` 输出里的 gitlink（模式 160000）条目名清单（纯函数）。
+
+    行形 `:000000 160000 0000000 <sha> A\\tcontent`（第 2 列=dstmode，制表符后=路径）。
+    畸形行丢弃不猜：非串/空输入、非 `:` 开头、列数不足、路径段为空 → 跳过。
+    quotePath 由调用方以 `-c core.quotepath=false` 关掉（与 verify_lane 同立场，
+    非 ASCII 路径不吃八进制转义）。"""
+    if not isinstance(raw, str) or not raw:
+        return []
+    out: List[str] = []
+    for ln in raw.splitlines():
+        ln = ln.strip()
+        if not ln.startswith(":"):
+            continue
+        head, _sep, path = ln.partition("\t")
+        cols = head.split(" ")
+        if len(cols) < 5 or not path.strip():
+            continue  # 行形不成立：丢弃不猜
+        if cols[1] == "160000":
+            out.append(path.strip())
+    return out
+
+
+def gitlink_risk_from_dirty(files: List[Any], tree: Path) -> List[Dict[str, str]]:
+    """判脏清单里的嵌套仓风险：untracked 目录折叠形态（尾 `/`）× 目录内存在 `.git`
+    （纯函数；porcelain -z 把整个未跟踪目录折叠成 `dir/` 一条，已跟踪路径恒为文件
+    形无尾斜杠，故只看尾斜杠条目）。
+
+    命中返回 [{"name": "content", "form": "repo"|"worktree"}]：form=repo 表示 .git
+    是目录（对象库在泳道内，随容器拆除不可恢复——事故形态）；form=worktree 表示
+    .git 是文件（worktree 形态，对象库在外，同样未注册不可拆）。
+    立场：条目畸形（非串/绝对路径/反斜杠/`..` 段/glob 哨兵）跳过不猜（与
+    _dirty_within_write_set 同款 fail-closed 清洗）；目录探测 OSError → 视为无命中
+    （本判定不放大环境故障，(b) 段暂存区判定仍在，两道互为纵深）。"""
+    if not files or not isinstance(tree, Path):
+        return []
+    out: List[Dict[str, str]] = []
+    for f in files:
+        if not isinstance(f, str) or not f.endswith("/"):
+            continue
+        name = f.rstrip("/")
+        if not name or name.startswith("/") or "\\" in name or name == ".." \
+                or name.startswith("../") or "/../" in name or name.endswith("/.."):
+            continue
+        if any(ch in name for ch in "?!*[]"):  # git 哨兵/glob 形：跳过不猜
+            continue
+        d = tree / name
+        gitp = d / ".git"
+        try:
+            if not (d.is_dir() and gitp.exists()):
+                continue
+            form = "repo" if gitp.is_dir() else "worktree"
+        except OSError:
+            continue
+        out.append({"name": name, "form": form})
+    return out
+
+
+_GITLINK_NEXT_ACTION = (
+    "把嵌套仓搬到项目根（复制保留对象库）后按普通多仓票登记 meta.repo_worktrees，"
+    "或人工确认删除；勿摘 gitlink 绕行（nusuyou t260916-08 实案：摘掉后 600 文件"
+    "随拆道不可恢复）")
+
+
+def _gitlink_refusal_note(names: List[str]) -> str:
+    """嵌套仓拒绝人话（t260916-20）：settle 两站点/合并闸/拆道守卫共用一段文案。
+
+    内嵌 path_gate_reason= 键值（is_gate_refusal 据此把 settle 回执改判 failed →
+    workflow blocked——机器口径沿用既有闸拒绝通道，不另造第二回执面；
+    reason_code=gitlink_nested_repo 为本票新码）。"""
+    return ("嵌套仓守卫拒绝（%sgitlink_nested_repo）：泳道内出现嵌套仓（gitlink）：%s"
+            "——引擎不支持在泳道内从零建成员仓：squash 只搬树内条目（gitlink 内容无处"
+            "可搬），拆道还会连带销毁其对象库（nusuyou t260916-08 实案：600 文件不可"
+            "恢复）。成员仓必须在项目根下诞生：把该仓搬到项目根（保留对象库）后按普通"
+            "多仓票登记 meta.repo_worktrees；勿摘 gitlink 绕行。本次拒绝代落盘/合并/"
+            "拆除，现场保留交人工。" % (path_gates.PATH_GATE_REASON_KEY,
+                                       "、".join(str(n) for n in names)))
+
+
+def _gitlink_refuse(ticket_id: str, stage_id: str, names: List[str],
+                    refusal: Optional[Dict[str, Any]]) -> str:
+    """嵌套仓拒绝的统一出口（t260916-20）：人话 note + 结构化 refusal（键形对齐
+    gate_red_detail：reason_code/files/next_action/evidence）+ worker 日志点名；
+    返回 note（settle 契约=返回字符串，拒绝语义靠 note 内嵌键值兑现）。"""
+    note = _gitlink_refusal_note(names)
+    if refusal is not None:
+        refusal.update({"reason_code": "gitlink_nested_repo",
+                        "files": [str(n) for n in names],
+                        "next_action": _GITLINK_NEXT_ACTION,
+                        "evidence": note})
+    activity.logger.warning("[%s/%s] settle：%s", ticket_id, stage_id, note)
+    return note
+
+
 # ---- KI-009 (ticket t260901-25): full terminal-state reaping of the agent process (draining closes the late-write race window) ----
 
 # Bounded reap window: after terminate, wait at most this long before escalating to
@@ -1060,10 +1163,29 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
         # are gitignored and would never be staged anyway), then reset them back as
         # belt and braces (for lanes with an old .gitignore; rc=0 silently when
         # nothing matches).
+        # 嵌套仓早期闸 (a)（t260916-20）：untracked 目录折叠形态（尾 /）× 目录内存在
+        # .git = 泳道内从零建了成员仓。不挡则下一行 add -A 把带提交子仓暂存成
+        # gitlink(160000) 落进泳道分支（squash 无处可搬），0 提交子仓更被整目录吞成
+        # 普通文件错形入库（子仓未提交工作与 .git 身份丢失）。拒绝落盘、现场保留
+        # （不 reset 不删除，家规），人话点名交人工；重试同拒（幂等红灯）。
+        hazards = gitlink_risk_from_dirty(dirty, cwd)
+        if hazards:
+            return _gitlink_refuse(ticket_id, stage_id,
+                                   [h["name"] for h in hazards], refusal)
         p = _git(["add", "-A", "--", "."], cwd)
         if p.returncode != 0:
             raise RuntimeError("settle: git add 失败: %s" % (p.stderr or "")[-300:])
         _git(["reset", "-q", "--", *_SETTLE_RESET_PATHS], cwd)
+        # 嵌套仓早期闸 (b)（t260916-20）：暂存区出现 160000=gitlink——子仓在票中后段
+        # 才建成/已被更早轮次暂存等形态下，(a) 的判脏清单里不再有尾斜杠条目，此处补
+        # 第二道（判定同源 staged_gitlinks，两道互为纵深）。同样拒绝落盘、现场保留。
+        p = _git(["-c", "core.quotepath=false", "diff", "--cached", "--raw"], cwd)
+        if p.returncode != 0:
+            raise RuntimeError("settle: 暂存区检查失败（diff --cached --raw rc=%d）: %s"
+                               % (p.returncode, (p.stderr or "")[-200:]))
+        links = staged_gitlinks(p.stdout)
+        if links:
+            return _gitlink_refuse(ticket_id, stage_id, links, refusal)
         # t260914-01（dengzhufpv/t260911-07 根因之二）：判脏非空但撤下协调目录后暂存区
         # 可能为空——该段只产出协调目录产物时就是这种形态，「无改动可提交」是正常工作态，
         # 不是基础设施故障（旧版在此让 commit rc≠0 上抛 RuntimeError，被 Temporal 表现成
@@ -1555,6 +1677,76 @@ def _is_worktree_of(p: Path, repo: Optional[Path] = None) -> bool:
     except Exception:
         return False
     return False
+
+
+def unregistered_nested_repos(lane_root: Path,
+                              registered_trees: Optional[List[Path]]) -> List[Dict[str, str]]:
+    """泳道树内未注册嵌套仓扫描（t260916-20 拆除守卫判定核心，只读盘上结构）。
+
+    语义：从泳道容器起 BFS，遇到含 `.git`（目录或文件）的目录且不在 registered_trees
+    （在册 scope 树，整树跳过含其内部）→ 记录 {"path"(相对容器), "form"}：
+      - form="repo"：.git 是目录=对象库在泳道内，随容器拆除**不可恢复**（事故形态）；
+      - form="worktree"：.git 是文件=worktree 形态（对象库在外），同样未注册不可拆。
+    立场：
+      - 命中仓内部不再深入（那是该仓自己的业务，不重复点名仓内嵌套）；
+      - 协调目录（_SETTLE_RESET_PATHS 同一真源元组）与符号链接目录跳过（链接目标
+        在外，拆泳道只拆链接不拆对象库）；
+      - 泳道容器不存在/不是目录 → []（幂等重跑语义，维持 teardown 既有重跑安全）；
+      - 扫描中途 IO 错误（目录不可读/探测失败）→ RuntimeError，由调用方按「守卫
+        自身故障」fail-closed blocked 点名——绝不静默放拆（守卫失效=放大面，不降级）。
+    UT 免 git 子进程依赖（tmp 目录即可构形）。"""
+    root = Path(lane_root)
+    if not root.is_dir():
+        return []
+    root_resolved = root.resolve()
+    reg: List[Path] = []
+    for r in (registered_trees or []):
+        try:
+            rp = Path(str(r)).resolve()
+        except Exception:
+            continue
+        # 只有容器内的**真子树**（成员树）才整树跳过。容器自身不算：根树条目的
+        # tree=容器本身，若按前缀跳过会把容器内一切全判「在册」→ 守卫空转（UT
+        # test_scan_flags_unregistered… 实测抓出，恰是 t260916-08 事故形态）。
+        if rp == root_resolved or not str(rp).startswith(str(root_resolved) + os.sep):
+            continue
+        reg.append(rp)
+
+    def _in_registered(p: Path) -> bool:
+        try:
+            rp = p.resolve()
+        except Exception:
+            rp = p
+        return any(rp == r or str(rp).startswith(str(r) + os.sep) for r in reg)
+
+    found: List[Dict[str, str]] = []
+    stack = [root]
+    while stack:
+        d = stack.pop()
+        try:
+            children = sorted(d.iterdir())
+        except OSError as e:
+            raise RuntimeError("目录不可读（%s: %s）——扫描不完整，绝不放拆" % (d, e))
+        for c in children:
+            if not c.is_dir() or c.is_symlink():
+                continue
+            if c.name in _SETTLE_RESET_PATHS:  # 协调目录（.dsh/.sandbar/老名），与 settle 撤下清单同真源
+                continue
+            if _in_registered(c):
+                continue
+            gitp = c / ".git"
+            try:
+                exists = gitp.exists()
+                is_dir = gitp.is_dir()
+            except OSError as e:
+                raise RuntimeError(".git 探测失败（%s: %s）——扫描不完整，绝不放拆" % (gitp, e))
+            if exists:
+                found.append({"path": c.relative_to(root).as_posix(),
+                              "form": "repo" if is_dir else "worktree"})
+                continue  # 仓内部不深入
+            stack.append(c)
+    found.sort(key=lambda x: x["path"])
+    return found
 
 
 def multirepo_materialization_error(lane_root: Path, write_set: Optional[List[str]],
@@ -2093,6 +2285,38 @@ def _parse_bundle_pairs(text: str) -> List[tuple]:
     return [(p["src"], p["out"]) for p in pairs if p["src"] and p["out"]]
 
 
+def _gitlink_check_item(base_ref: str, branch: str, repo: Path) -> Dict[str, Any]:
+    """merge_check 的 gitlink 检查项（t260916-20）：泳道分支差集（merge-base 三点）
+    含 160000=泳道内从零建了成员仓。只读判定；红灯不抛（本活动契约）——git 故障转
+    红项点名（reason_code=gitlink_check_failed），绝不静默跳过；base_ref 缺失=不可判
+    （红项 skip 码，第 1 项已因基线缺失红点名，不新增分类面）。
+    位次契约（调用方保证）：插在 verify_lane 项之前 → 落 checks[:-1] → other_red=True
+    → conflict=False → 红=blocked 交人工，绝不进自动消解回路（KI-047 教训）。"""
+    item = {"item": "泳道差集无 gitlink（嵌套仓）", "id": "no_gitlink"}
+    if not base_ref:
+        return {**item, "green": False,
+                "detail": "base_ref 缺失，gitlink 判定未跑（第 1 项已因基线缺失红点名）",
+                "reason_code": "gitlink_check_skipped"}
+    base_sha, base_err = _merge_base_ref(branch, repo)
+    if not base_sha:
+        return {**item, "green": False,
+                "detail": "merge-base 失败，gitlink 判定不可判（fail-closed）：%s" % base_err,
+                "reason_code": "gitlink_check_failed"}
+    p = _git(["-c", "core.quotepath=false", "diff", "--raw",
+              "%s...%s" % (base_sha, branch)], repo)
+    if p.returncode != 0:
+        return {**item, "green": False,
+                "detail": "git diff --raw 失败（fail-closed）：%s"
+                          % (p.stderr or p.stdout or "").strip()[-200:],
+                "reason_code": "gitlink_check_failed"}
+    links = staged_gitlinks(p.stdout)
+    if links:
+        return {**item, "green": False, "detail": _gitlink_refusal_note(links),
+                "reason_code": "gitlink_present", "files": links,
+                "next_action": _GITLINK_NEXT_ACTION}
+    return {**item, "green": True, "detail": "泳道差集无 gitlink（嵌套仓）"}
+
+
 async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                                  lane_root: Path, multi: bool) -> Dict[str, Any]:
     """Single-scope merge_check core (extracted from merge_check in ticket B
@@ -2222,6 +2446,13 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
     except Exception as e:
         checks.append({"item": "工作区干净", "green": False, "detail": "git status 异常: %s" % e,
                        "id": "worktree_clean", "reason_code": "status_failed"})
+
+    # 2.5) 泳道差集 gitlink 红灯（t260916-20）：泳道分支含 160000（嵌套仓）=泳道内从零
+    #      建了成员仓。位次刻意在 verify_lane 项（下一项）之前：落 checks[:-1] →
+    #      other_red=True → conflict=False → blocked 交人工，绝不进自动消解回路
+    #      （KI-047 教训）；也让 gitlink 权威红先于 verify_lane 的「越界写」误诊文案
+    #      （其 ==腿未归一，在 server/tools/ 本票不修）出现。
+    checks.append(_gitlink_check_item(str(sc.get("base_ref") or ""), sc["branch"], sc["repo"]))
 
     # 3. verify_lane code inside the lane (runs the lane's own admin.py copy: lane
     # code + lane tools)
@@ -2720,6 +2951,20 @@ async def settle_conflict_resolution(args: ConflictSettleArgs) -> ConflictSettle
     p = _git(["diff", "--name-only", "HEAD", "MERGE_HEAD"], wt)
     merge_files = [ln.strip() for ln in p.stdout.splitlines() if ln.strip()] \
         if p.returncode == 0 else []
+    # 嵌套仓早期闸 (a)（t260916-20，R2 旁路洞补闸）：冲突消解是独立 add -A 站点
+    # （MERGE_HEAD 在场时主 settle 在 _settle_worktree_lane 整体跳过），0 提交嵌套仓
+    # 会在此被吞成普通文件错形入库、带提交子仓被记成 gitlink——同判据前置，命中即
+    # 拒绝（既有 failed 通道），MERGE_HEAD/暂存现场保留交人工；重试同拒（幂等红灯）。
+    p = _git(["status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, wt)
+    if p.returncode != 0:
+        return ConflictSettleResult(ok=False,
+                                    error="冲突消解 settle：git status 失败（改动清单未知，"
+                                          "fail-closed 不落盘）: %s" % (p.stderr or "")[-200:])
+    hazards = gitlink_risk_from_dirty(_dirty_files_from_status_z(p.stdout), wt)
+    if hazards:
+        return ConflictSettleResult(ok=False,
+                                    error="冲突消解拒绝落盘：%s"
+                                          % _gitlink_refusal_note([h["name"] for h in hazards]))
     p = _git(["add", "-A", "--", "."], wt)
     if p.returncode != 0:
         return ConflictSettleResult(ok=False, error="git add 失败: %s"
@@ -2727,6 +2972,17 @@ async def settle_conflict_resolution(args: ConflictSettleArgs) -> ConflictSettle
     # .dsh 与两个协调目录名都没被暂存（协同目录被 .gitignore 兜住时本就进不了暂存）；
     # reset 目标从 shared 真源派生（与 _settle_worktree_lane 同一元组，不再各抄一份）。
     _git(["reset", "-q", "--", *_SETTLE_RESET_PATHS], wt)
+    # 嵌套仓早期闸 (b)（t260916-20）：暂存区 160000=gitlink 第二形态（(a) 之后仍可能：
+    # 子仓已在更早轮次被暂存）。命中即拒绝，暂存现场保留交人工。
+    p = _git(["-c", "core.quotepath=false", "diff", "--cached", "--raw"], wt)
+    if p.returncode != 0:
+        return ConflictSettleResult(ok=False,
+                                    error="冲突消解 settle：暂存区检查失败（fail-closed）: %s"
+                                          % (p.stderr or "")[-200:])
+    links = staged_gitlinks(p.stdout)
+    if links:
+        return ConflictSettleResult(ok=False,
+                                    error="冲突消解拒绝落盘：%s" % _gitlink_refusal_note(links))
     remaining = []
     for f in merge_files:
         fp = wt / f
@@ -3185,6 +3441,28 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
                                  "非冲突；主树现场未动）：%s"
                                  % _dirty_block_note(verdict))
 
+    # 0.6) gitlink 红灯（t260916-20）：泳道分支差集含 160000（嵌套仓）=引擎不支持其
+    #      合并——squash 只搬树内条目，gitlink 内容无处可搬（静默丢=nusuyou t260916-08
+    #      实案）。位次在 merge --squash 之前，把静默丢变成响亮红灯。只读判定、无写
+    #      操作 → Temporal 重试安全（取舍 d）；红灯 failed：主树未动、泳道不拆（取舍
+    #      b）；merge-base/diff 自身故障也 failed（fail-closed，绝不静默跳闸）。
+    base_sha, base_err = _merge_base_ref(branch, repo)
+    if not base_sha:
+        return MergeResult(ok=False, action="failed", reason="merge_fault",
+                           error="gitlink 前置判定的 merge-base 失败（fail-closed 不静默"
+                                 "跳闸）：%s" % base_err)
+    p = _git(["-c", "core.quotepath=false", "diff", "--raw",
+              "%s...%s" % (base_sha, branch)], repo)
+    if p.returncode != 0:
+        return MergeResult(ok=False, action="failed", reason="merge_fault",
+                           error="gitlink 前置判定失败（diff --raw rc=%d，fail-closed）：%s"
+                                 % (p.returncode, (p.stderr or p.stdout or "").strip()[-200:]))
+    links = staged_gitlinks(p.stdout)
+    if links:
+        return MergeResult(ok=False, action="failed", reason="gitlink_present",
+                           files=links,
+                           error="合并红灯（t260916-20）：%s" % _gitlink_refusal_note(links))
+
     # 1) squash merge (no automatic commit)
     p = _git(["merge", "--squash", branch], repo, timeout=120)
     out = ((p.stdout or "") + "\n" + (p.stderr or "")).strip()
@@ -3286,6 +3564,30 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
     #    A cleanup failure only warns and never overturns the completed close-out
     #    (carrying over trade-offs d) idempotence and e) naming the failing step).
     if not defer_teardown:
+        # 拆除守卫（t260916-20）：内联清理是老票（defer_teardown=False）的唯一拆道
+        # 通道，同口径先扫未注册嵌套仓再拆。守卫只锚容器趟（wt 的父目录是泳道目录
+        # =根树条目；成员树趟的仓内结构归 teardown_lane 的容器扫描统一守，不在本趟
+        # 重复判）。发现即 failed（ok=False）：落账虽已完成，但泳道保留=对象库可抢
+        # 救，回执 failed → workflow blocked 交人工——对象库不可恢复性 > 收口回执
+        # 整洁（与「清理失败只 warn」不同腿：残留=可回收垃圾，嵌套仓对象库=不可回
+        # 收）；重复 merge 幂等安全（取舍 d），补账无双重落账面。守卫自身 IO 故障
+        # → 同样 failed 点名，绝不静默放拆。
+        if wt.parent.name in (".lane", ".worktrees") and wt.is_dir():
+            try:
+                hazards = unregistered_nested_repos(wt, [wt])
+            except RuntimeError as e:
+                return MergeResult(ok=False, action="failed", reason="teardown_guard_fault",
+                                   error="拆除守卫自身故障（t260916-20，fail-closed 不放拆）：%s"
+                                         % str(e)[-300:])
+            if hazards:
+                names = [h["path"] for h in hazards]
+                return MergeResult(ok=False, action="failed", reason="teardown_guard",
+                                   files=names,
+                                   error="拆除守卫（t260916-20，绝不静默销毁）：落账已完成，"
+                                         "但泳道内发现未注册嵌套仓 %s——内联清理将连带销毁其对象库"
+                                         "（不可恢复），已停手：泳道保留待人工抢救（把仓搬出后手工"
+                                         "收尾，或确认后重跑 merge 补走清尾）。%s"
+                                         % ("、".join(names), _GITLINK_NEXT_ACTION))
         p = _git(["worktree", "remove", "--force", str(wt)], repo, timeout=60)
         if p.returncode != 0:
             warns.append("worktree remove 失败: %s" % (p.stderr or "").strip()[-200:])
@@ -3633,8 +3935,30 @@ async def teardown_lane(args: MergeArgs) -> MergeResult:
                                error=_tagged(_scope_tag(sc),
                                              "branch %r 非法（check-ref-format 拒绝）：%s"
                                              % (br, (p.stderr or "").strip()[-200:])))
+    # 拆除守卫（t260916-20）：任何破坏性命令前，扫泳道树内未注册嵌套仓——发现即
+    # 整体 failed（blocked 交人工，一物不拆）。根树条目的 worktree remove --force
+    # 对容器是整树带走，未注册嵌套仓（含其 .git 对象库）被连带销毁且不可恢复
+    # （nusuyou t260916-08 实案：600 文件静默丢失）。与「明细损坏→failed」同腿
+    # （人工处置，绝不静默），与「git 清理失败→ok+点名」不同腿（残留=可回收垃圾；
+    # 嵌套仓对象库=不可回收）。守卫自身 IO 故障 → 同样 failed 点名（守卫失效=放大
+    # 面，绝不静默放拆）；容器已不在盘上 → 空清单放行（幂等重跑语义维持）。
+    registered_trees = [Path(str(sc["tree"])) for sc in scopes]
+    try:
+        hazards = unregistered_nested_repos(wt, registered_trees)
+    except RuntimeError as e:
+        return MergeResult(ok=False, action="failed",
+                           error="拆除守卫自身故障（t260916-20，fail-closed 不放拆）：%s"
+                                 % str(e)[-300:])
+    if hazards:
+        detail = "；".join("%s（%s）" % (h["path"], "对象库在泳道内，拆除不可恢复"
+                                        if h["form"] == "repo" else "worktree 形态")
+                           for h in hazards)
+        return MergeResult(ok=False, action="failed",
+                           error="拆除守卫（t260916-20，绝不静默销毁）：泳道树内发现未注册"
+                                 "嵌套仓 %s——不在 repo_worktrees 在册清单，强拆将连带销毁其"
+                                 "对象库。%s" % (detail, _gitlink_refusal_note(
+                                     [h["path"] for h in hazards])))
     warns: List[str] = []
-    # 成员树先删、根树（泳道容器）最后：移除容器会把整个目录树带走（成员树的目录就
     # 在容器里）。实测 git 2.x 对「目录已不在但注册还在」的 worktree remove 仍 rc=0
     # （草拟补丁担心的注册残留不成立），此处保持成员先行的确定性序：每次 remove 都锚
     # 在活目录上，不依赖 dangling 注册那条路径。

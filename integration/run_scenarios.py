@@ -785,6 +785,12 @@ SCENARIOS = [
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260913-05/sc_t260913_05_teardown_residue_visible.py", "engine"),
 
 
+    # ---- t260916-20: 嵌套仓守卫四道闸（泳道内从零建成员仓的静默丢失防复发） ----
+    ("t260916-20-nested-repo-fullchain",
+     "泳道内从零建成员仓的四道守卫（t260916-20，nusuyou t260916-08 实案=600 文件静默丢失的防复发面，灰盒 L2，真 git 夹具+直调 activity，零 docker 零 Temporal，秒级）：主 settle 双形态拒绝——0 提交嵌套仓（untracked 目录折叠×.git 在场，防被 add -A 吞成普通文件错形入库）与暂存区 gitlink(160000)（防 squash 无处可搬）→ fail-closed 拒绝代落盘、人话点名（内嵌 path_gate_reason=gitlink_nested_repo 机器键+结构化 refusal）、现场保留（不 commit 不 reset 不删除）、重试同拒（幂等红灯）；冲突消解旁路站点（MERGE_HEAD 在场=主 settle 整体跳过时的唯一 settle 通道）同拒且 MERGE_HEAD 原样（R2 覆盖洞回归形态）；merge_check 红灯点名 gitlink（reason_code=gitlink_present）且 conflict=False（blocked 交人工不进自动消解回路，KI-047 位置契约）、位次落 checks[:-1]；squash 前置红灯 failed(gitlink_present) 主树未动（merge --squash 前判 160000）；拆道守卫——teardown 前扫出未注册嵌套仓即 blocked 点名、一物不拆、对象库完好（git -C 嵌套仓 rev-parse HEAD 前后一致）、守卫自身 IO 故障=同样 failed 点名（绝不静默放拆）；内联清理（defer_teardown=False 老票唯一拆道通道）落账后停拆、泳道保留=对象库可抢救；零回归腿=无嵌套仓的干净泳道 settle 照常代落盘、拆道照旧三清。intent 分界：与 t260911-04-multirepo-fullchain-landing（全链 L3 回归锚）差在成功/失败路径与层（彼真链全链守成功路径零残留；本条守失败路径四道闸行为）；与 t260913-05-teardown-scope-contract 差在守卫对象（彼守多仓拆道回执契约与三态取源；本条守拆道前嵌套仓扫描，单仓形态即可触发=事故现场形态）；桩级真值/畸形输入面归 UT server/engine/tests/test_t26091620_nested_repo_guards.py 不带。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；引擎 venv/temporalio 缺席=ENV_FAIL exit 2 点名（直调 activity 无 stdlib 替代）",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260916-20/sc_t260916_20_nested_repo_fullchain.py", "ro"),
+
+
     # ---- t260910-11: 巡检校准五事（改名去face / 扫描误报校准 / 测试腿隔离红线 / 票面可查询） ----
     ("t260910-11-decl-v2-rename",
      "声明 v2 演进契约（t260910-11 工单①②，灰盒 L2，纯离线）：交付 inspection.yaml 解析为新名 integration-tests/docs-sync 且 decl 回执零 face 键、yaml 文本零 face 行；含 face: 的旧形态声明被解析面拒收且报错点名 face 字段（旧声明拒收点名=工单验收原文，报错精确纪律）；兼容红线半边（InspectionPeriodicInput.face 默认值防历史重放解码报错）是数据类契约归 developer L1 重放锁，本条不复写。与 t260905-03-decl-gate intent 分工：彼守声明门「谁能跑/谁被拒」的门行为（畸形/未接线/占位/未知实例），本守字段表翻转后新旧声明的命运=schema 演进面。纯 stdlib 闸内即验；实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
