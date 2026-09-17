@@ -29,6 +29,10 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+# 注意：shared.py 会被单文件加载面消费（ticket.py spec_from_file_location、
+# 场景播种链 lib_stage_console.mjs）——仓库内兄弟模块（如 path_gates）不得
+# 顶层 import（t260917-01 仲裁 gen1 code-fault 实锤：ModuleNotFoundError 连累
+# 14 条场景）；需要处一律函数内延迟 import。
 
 
 # ---- env naming (bridged by ticket t260907-04, final switch 260908) ----
@@ -397,6 +401,67 @@ def integration_route(verdict: str, tests_rounds: int, code_rounds: int) -> str:
             "blocked:打回 developer %d 轮超限（上限 %d），转人工判读" % (
                 code_rounds, MAX_CODE_FAULT_ROUNDS)
     return "blocked:仲裁结论未知 verdict=%r，转人工判读" % verdict
+
+
+# ---- 仲裁段 settle 闸拒可辨（工单 t260917-01）----
+# 病灶：settle 被路径闸拒绝时 _apply_settle_note 把回执 status 改 failed、summary
+# 换成拒绝回执——仲裁结论被吞，dev_lane 的格式计数器曾把「落盘被拦」当「没写
+# verdict」（t260916-19/-21 误判 blocked 的根因）。本组纯函数把两态分开：
+# 闸拒可辨 → blocked 主因=闸拒（不计格式轮次）；否则照旧走格式计数。
+
+def arbitrate_settle_refusal(summary: str, gate_refusal: Any) -> Optional[Dict[str, Any]]:
+    """仲裁段回执的 settle 闸拒可辨（t260917-01 ①判定核，唯一守门点的被调纯函数）。
+
+    判序：
+      1. 结构化 gate_refusal（经 path_gates.sanitize_gate_refusal 校形）在场=权威
+         （新回执，t260915-01 起）；
+      2. 否则回执文本含 path_gate_reason= 键（老回执/无结构化明细）且**解析不出
+         合法 verdict= 判定** → 文本可辨兜底（agent 在 summary 里原样引用机读键
+         不劫持正常路由——quoted 键围栏，UT 显式覆盖）；
+      3. 两者皆无 → None（调用方照旧走格式计数路径）。
+    返回 {reason_code, note, next_action, files}；畸形输入不抛（fail-visible：
+    可辨则辨、不可辨则 None，绝不猜）。纯函数零 IO，UT 与守门点直调。"""
+    import path_gates  # 延迟 import：单文件加载面（见文件头注）不牵连仓库兄弟模块
+    s = summary if isinstance(summary, str) else ""
+    d = path_gates.sanitize_gate_refusal(gate_refusal) if isinstance(gate_refusal, dict) else None
+    if d is not None:
+        rc = str(d.get("reason_code") or "gate_refusal_unknown")
+        return {
+            "reason_code": rc,
+            "note": s.strip() or str(d.get("evidence") or ""),
+            "next_action": str(d.get("next_action") or "").strip()
+                           or path_gates.next_action_hint(rc),
+            "files": [str(f) for f in (d.get("files") or []) if isinstance(f, str) and f],
+        }
+    if parse_arbitration_summary(s):
+        return None  # 结论可解析：文本里的机读键只是引用，不劫持路由
+    if path_gates.is_gate_refusal(s):
+        m = re.search(r"path_gate_reason=([\w-]+)", s)
+        rc = m.group(1) if m else "gate_refusal_unknown"
+        return {"reason_code": rc, "note": s.strip(),
+                "next_action": path_gates.next_action_hint(rc), "files": []}
+    return None
+
+
+def arbitrate_blocked_reason(refusal: Dict[str, Any], verdict_missing: bool = True) -> str:
+    """仲裁段闸拒 blocked 的票面文案（t260917-01 ②③）：主因=闸拒（拒绝回执原文
+    含点名文件与合法出路），「缺 verdict」只作双因从句且明示不计格式轮次；出路
+    指向真实解法（还原越界改动 / 回 main 侧走票 / retry_qc 重跑本段），绝不指向
+    「补 verdict 标记」，也不发明「自动改共享资产」类假出路（受保护名单必拦——
+    C5 口径：tests-fault 对共享资产红项的诚实归宿=轮次上限转人工）。单行
+    （blocked_reason 票面口径；拒绝回执本身行内无换行）。畸形 refusal（缺键）
+    仍有可读主因文案，不抛。"""
+    import path_gates  # 延迟 import：同上（单文件加载面不牵连仓库兄弟模块）
+    r = refusal if isinstance(refusal, dict) else {}
+    rc = str(r.get("reason_code") or "gate_refusal_unknown")
+    note = str(r.get("note") or "").strip()
+    act = str(r.get("next_action") or "").strip() or path_gates.next_action_hint(rc)
+    parts = ["仲裁段落盘被闸拒（主因）：%s" % (note or "路径闸拒绝（%s）" % rc),
+             "下一步：%s" % act]
+    if verdict_missing:
+        parts.append("仲裁结论未能落盘（不计「缺 verdict=」格式轮次）——出路：还原越界改动/"
+                     "回 main 侧走票后 retry_qc 重跑本段，无需补 verdict 标记")
+    return "；".join(parts)
 
 
 # ---- 人授权例外通道（工单 t260912-03）----

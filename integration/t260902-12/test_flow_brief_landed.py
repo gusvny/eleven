@@ -69,9 +69,15 @@ check("lead 无「黑盒」残留", "黑盒" not in d)
 # 裁决注释行落在源码里
 check("裁决注释行存在", "用例设计依据第三项=组件对外契约与行为规格" in source and "# t260902-12" in source)
 
-# 既有条目不动（裁定二：既有段归票④，本票不得顺手改）
+# 既有条目不动（裁定二：既有段归票④，本票不得顺手改）。
+# t260917-01 修向④（工单派发规格授权）：arbitrate 条目的 tests-fault 迭代邀请由
+# 「直接迭代 integration/ 里的测试集」收窄为「红项落在测试面内才就地迭代；共享资产/
+# 受保护真源等不允许面如实出 verdict 点名转人工」——原逐字锚「integration/里的」随
+# 授权变更退役，守卫改锁不变契约：三态 verdict= 标记仍在 + 收窄语义「不允许面」仍在
+# （若有人回退收窄或删三态契约，此处照红=防悄悄回退语义保留）。
 arb = strip(brief.get("arbitrate", "")) if brief else ""
-check("既有 arbitrate 三态契约不动", "verdict=" in arb and "integration/里的" in arb)
+check("arbitrate 三态契约在 + 迭代面收窄语义在（t260917-01 修向④授权收窄）",
+      "verdict=" in arb and "不允许面" in arb)
 cp = strip(brief.get("create_plan", "")) if brief else ""
 check("既有 create_plan 条目不动", "本步只出方案" in cp)
 

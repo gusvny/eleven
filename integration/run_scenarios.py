@@ -158,6 +158,13 @@ SCENARIOS = [
     ("t260904-02-worker-fingerprint-gate",
      "worker 归属指纹 ensure 闸真执行路径（epic 验收2，KI-033 修复回归；断言落公开行为输出非源级 grep——契约不变的实现重构不得打破本场景；t260904-19 起 temporal 台=docker 测试台单实例）：隔离台内真 worker 自报 meta（pid/repo_root/ts，起跑早写）；node.ts 对外契约 export readWorkerMeta/judgeTicketWorkerMeta 三态真值（same/foreign/unknown）+ensureTicketWorkersOnce 依赖注入真调——同仓照旧不重复拉、异仓拒接不 spawn+告警记录含对方仓根/pid/tid 可断言（绝不 kill 别人进程，杀进程归人）、畸形 meta 兼容跳过+reason 可辨不哑巴；TERM 后 worker 退出且自报 meta 清理（资源回收）",
      "python3 integration/t260904-02/sc_worker_fingerprint_gate.py", "engine"),  # engine: one docker stage + real worker
+    # Delisted (t260904-12 §7.3, same ruling as ticket-lifecycle): the t260917-01 scene
+    # self-guards nested runs (nestedGuard -> ENV_FAIL exit 2 inside any lane's
+    # mechanical step), so a registered entry could never reach PASS in-gate — a
+    # deliberate environment red must stay out of the gate registry. The file stays in
+    # the tree (coverage-evaporation guard) for top-level/manual runs against the docker
+    # test Temporal; lint DEREGISTERED whitelists it (L5).
+    # Original cmd: node integration/t260917-01/sc_t260917_01_arb_gate_refusal.mjs
     ("t260904-19-stage-docker",
      "docker 测试舞台 L1（t260904-19：全仓唯一搭台方式回归锚，假 docker shim 真跑编排面零 docker 依赖）：档位 flock 原子预留（并发双起各得独立档=验收①回归锚、外部持锁滑档、锁释放复抢=崩溃自释语义）；禁区端口面（生产 3099/7233/8233+缺省台 3199/17233/18233）与内核临时区间构造性排除；畸形输入全电池（project 白名单/端口旋钮非数字越界禁区被占/目录缺失/半指定）逐条点名检查项零副作用；诚实环境红三态（docker 缺席=ENV_FAIL exit 2 点名、镜像缺席点名 build-test-temporal.sh、compose 半途死就地 down 清场零残留）；ensure 幂等（健康复用/半残拆重起）；up→down 零残留+端口释放+幂等二连；bench.py 守卫回归（槽位制退役后保留面）",
      "python3 integration/tests/test_stage_docker.py", "exclusive"),  # engine 池仍不够：电池含 flock/端口禁区/up-down 零残留，任何并发起台都扰动（套件 573s 挂 1，隔离三连绿 121/125s）——独占先跑=搭台 L1 先验台面（t260910-05 仲裁 gen2）

@@ -114,6 +114,8 @@ with workflow.unsafe.imports_passed_through():
         UI_EVIDENCE_DIR,
         active_authorizations,
         agent_log_for,
+        arbitrate_blocked_reason,
+        arbitrate_settle_refusal,
         arbitration_cap_route,
         build_stage_prompt,
         build_workspace_prep,
@@ -362,8 +364,13 @@ FLOW_BRIEF = {
         "你是 integration 仲裁。机械集成测试已跑完，结果见上下文。三态判定（summary "
         "**必须以 verdict= 开头标明**，如「verdict=code-fault …」）："
         "verdict=pass 全部通过 → 进入验收；"
-        "verdict=tests-fault 测试集自身问题（环境/前提/断言错）→ **你直接迭代 integration/ 里的"
-        "测试集修正**（改动随本步落盘），summary 写清改了什么、为什么是测试的问题；"
+        "verdict=tests-fault 测试集自身问题（环境/前提/断言错）→ 红项落在测试面内"
+        "（tests/ 目录、test_*.py、sc_* 场景脚本、场景登记表、本票场景目录）才**你直接迭代修正**"
+        "（改动随本步落盘），summary 写清改了什么、为什么是测试的问题；红项属共享资产/受保护真源"
+        "（共享电池、场景库等仓库级受保护资产）或其它本段不允许面 → **不要改它**：如实出 "
+        "verdict=tests-fault 并在 summary 点名红项路径，交引擎按轮次上限转人工判读"
+        "（越权改动会被路径闸拒绝落盘——t260916-19/-21 病灶；诚实阻塞到转人工是合法归宿，"
+        "不是让你换法子再写）；"
         "verdict=code-fault 实现问题 → report 写**集成测试报告**（失败场景、复现要点、"
         "期望 vs 实际），打回 developer 修改。除三态外不许发明其它结论。"
         "归因纪律（t260904-12 三态判据）：先固定问句「环境面还是产品面？」——"
@@ -905,6 +912,28 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
         if safe:
             self.meta["blocked_detail"] = safe
 
+    # ---------- arbitrate settle-refusal guard (t260917-01) ----------
+    async def _arbitrate_refusal_blocked(self, res: Any) -> bool:
+        """仲裁段回执的 settle 闸拒唯一守门点（t260917-01 ①②③）。
+
+        闸拒可辨 → blocked（主因=闸拒、「缺 verdict」只作双因从句、**不计格式
+        轮次**）并返回 True；False = 非闸拒，调用方照旧走既有格式计数路径。
+
+        为什么是单点方法而非两计数点就地 if：本票病根就是两计数点判据漂移
+        （t260916-21 的「第 4 次」正是第二处形态），单点守门防再犯；「计数不增」
+        由结构保证（守门 continue 先于计数语句）+ 源码锁钉死。
+        判据与文案全部出自 shared.arbitrate_settle_refusal / arbitrate_blocked_reason
+        纯函数（UT 直调）。结构化明细已由 _run_agent_step 内 _pin_agent_refusal 上
+        meta['blocked_detail']；老回执无结构化键时文案自带 next_action 兜底。
+        并行叉首轮汇合 settle 的闸拒不走本方法（下方 settle_lane 分支已直接
+        blocked，语义相同、不计数）。"""
+        refusal = arbitrate_settle_refusal(
+            str(getattr(res, "summary", "") or ""), getattr(res, "gate_refusal", None))
+        if refusal is None:
+            return False
+        await self._blocked("arbitrate", arbitrate_blocked_reason(refusal))
+        return True
+
     # ---------- agent steps ----------
     async def _run_agent_step(self, step_id: str, previous_context: str = "",
                               settle: bool = True) -> Optional[StageResult]:
@@ -1121,7 +1150,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
         code_rounds = 0                           # arbitrate code-fault send-backs to developer, cumulative
         tests_rounds = 0                          # arbitrate tests-fault suite iterations, cumulative
         acc_rounds = 0                            # acceptance-walkthrough send-backs, cumulative
-        arb_format_rounds = 0                     # consecutive arbitrate outputs missing the verdict= marker
+        arb_format_rounds = 0                     # in-section consecutive arbitrate outputs missing the
+                                                  # verdict= marker（t260917-01：进 run_integration_tests
+                                                  # 段复位，不跨 rework 累积——复位点见该段入口）
         # t260903-02 speedup 2: in-memory state for the arbitrate ∥ acceptance_walkthrough
         # parallel fork. Invariant: entering the run_integration_tests section resets all
         # of it in one place (each mechanical test run produces a fresh arbitration and a
@@ -1623,6 +1654,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 acc_done = False
                 arb_res = None
                 acc_res = None
+                # t260917-01：格式轮次同口径复位——「连续缺 verdict」的连续性以本段
+                # 为界（旧代码跨 rework 累积，是 t260916-21「计数变 4 次」的机制
+                # 之一；与 1084 行 consecutive 注释语义自此真正对齐）。
+                arb_format_rounds = 0
                 # Pre-check, mechanical: the lane has been committed (guaranteed after
                 # the unified settle; tickets with no_file_changes are exempt)
                 if workflow.patched(REVIEW_GATE_PATCH_ID) and not self.meta.get("no_file_changes"):
@@ -1698,7 +1733,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                                         "failed": ir.failed, "error": ir.error,
                                         "details": ir.details}, ensure_ascii=False)
                 arb_ctx = ("【机械集成测试结果】\n%s\n【测试集】仓库 integration/ 目录"
-                           "（integration/ 场景文件与清单为准；你是其作者，tests-fault 时直接迭代它）"
+                           "（场景清单为准；你是其作者。tests-fault 只迭代本段允许面内的测试资产（tests/、test_*.py、sc_* 场景、登记表、本票场景），共享资产/受保护真源如实出 verdict 并点名红项，勿直接改——闸会拒）"
                            % _arb_json[-4000:])
                 # t260903-02 (2): the walkthrough edge consumes the same test result as
                 # the arbitration (the user-view walkthrough is independent and does not
@@ -1726,6 +1761,12 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     # t260916-28: 环境（泳道 .dsh 缺件）故障不是格式违约——带人话
                     # 直落 blocked，不烧格式纠正计数、不虚报「缺 verdict= 标记」。
                     await self._block_agent_failed("arbitrate", res)
+                    continue
+                # t260917-01：闸拒可辨优先于格式计数——settle 被路径闸拒绝时回执
+                # summary 已被拒绝文案改写，「缺 verdict」是闸拒的影子，不得计入
+                # 格式轮次（真因主因化、出路真实化；结构化明细 _pin_agent_refusal
+                # 已在 _run_agent_step 内上台面）。
+                if await self._arbitrate_refusal_blocked(res):
                     continue
                 verdict = parse_arbitration_summary(res.summary)
                 if not verdict:
@@ -1945,6 +1986,12 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                         # arb_res 已复位，此处尚未置 True——无需再动簿记，醒来后本边
                         # 真重跑）。
                         await self._block_agent_failed("arbitrate", rraw)
+                        continue
+                    # t260917-01：同串行分支——纠正腿的 settle 闸拒不进格式计数
+                    # （t260916-19/-21 的误判正是本腿三连计数后 blocked）。此处置
+                    # False 时 arb_done 已在上方置 False：唤醒后 pend 重算、仲裁边
+                    # 真重跑（acc_res 保留不重跑，KI-024 语义）。
+                    if await self._arbitrate_refusal_blocked(rraw):
                         continue
                     arb_done = True
                     arb_res = rraw

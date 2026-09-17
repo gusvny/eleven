@@ -1117,6 +1117,11 @@ def _apply_settle_note(res: StageResult, note: str,
         return res
     res.evidence = (res.evidence + "\n[worker settle] " + note).strip()
     if path_gates.is_gate_refusal(note):
+        # t260917-01：改写前把 agent 结论原文存证进 evidence——仲裁结论不再随回执
+        # 丢失（人审可直接看到被闸拒吞掉前 agent 判了什么）。其余语义逐字不变
+        # （四条既有故障模式的取舍清单与回归锚：
+        # tests/test_t260917_01_arb_gate_refusal.py 模块 docstring C1）。
+        res.evidence = (res.evidence + "\n[settle 拒绝前 summary] " + res.summary).strip()
         res.status = "failed"
         res.summary = note
         if refusal:

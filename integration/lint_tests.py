@@ -166,7 +166,8 @@ def lint_registry():
     # gate" channel; the file stays in the repo for the main-repo manual list
     # and is not in SCENARIOS — see the ticket-lifecycle entry under
     # "Known limitations" in README)
-    DEREGISTERED = {INTEG / "baselines" / "sc_ticket_lifecycle.mjs"}
+    DEREGISTERED = {INTEG / "baselines" / "sc_ticket_lifecycle.mjs",
+                    INTEG / "t260917-01" / "sc_t260917_01_arb_gate_refusal.mjs"}
     orphans = [str(f.relative_to(REPO)) for f in INTEG.rglob("sc_*")
                if f.is_file() and f.resolve() not in registered
                and f.resolve() not in DEREGISTERED]
