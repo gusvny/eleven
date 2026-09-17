@@ -213,7 +213,8 @@ async function main() {
       stUp = stMod.stageUp({
         project: STAGE_PROJECT,
         services: 'full',
-        namespace: 'suyou-test',  // naming-compat：历史 namespace 名随台（引擎客户端同值）
+        // namespace 不显式传：随台缺省（=compose 契约缺省，t260917-07 补完终切后为
+        // sandbar-test），消费面一律用 stUp.namespace 回报值，绝不硬编码台名。
         fixturesDir,
         profileDir,
         projectsDir: '/fixtures/projects',
@@ -228,7 +229,7 @@ async function main() {
   G.base = `http://127.0.0.1:${stUp.ports.console}`;
   // temporal 宿主端口：stageUp 返回体现分端口（不再 docker inspect 反解）。
   G.target = `127.0.0.1:${stUp.ports.temporal}`;         // L0 写守卫锚：恒钉本台，绝不缺省回落生产 7233
-  G.namespace = stUp.namespace || 'suyou-test';          // naming-compat：namespace 名随台
+  G.namespace = stUp.namespace || 'sandbar-test';        // 台回报值优先；回落=契约缺省值（形状防御，t260917-07 对齐终切）
   // 禁区端口表（gen2 验收补缺）：真源在 stage_docker.py（.mjs 不导出该面）——
   // ESM 缺席时回落 python 模块读取；两路皆缺席=写守卫空转（断言恒真≠守卫），
   // 必须 env_fail 点名拒绝装饰性守卫。

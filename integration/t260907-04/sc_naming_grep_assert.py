@@ -71,6 +71,10 @@ def allowed(rel, line):
     """单行白名单判定（处置册四类 + review 附条件意见的 fixture 类）。"""
     if rel in (SELF, UT):
         return True
+    if rel == "integration/t260917-07/sc_test_ns_consistency.py":
+        return True  # t260917-07 一致性看守自身（头注叙述+自证红绿夹具以旧名为被测
+                     # 对象内容，同 SELF/场景族豁免先例；其消费面设防由其自身 ALLOW
+                     # 双锁承担，与本守卫全树零容忍不冲突）
     if rel.startswith("integration/t260907-04/"):
         return True  # 命名场景族自身（fixture 面自证旧名是契约内容）
     if ("/t260907-06/" in rel or "/t260907-07/" in rel

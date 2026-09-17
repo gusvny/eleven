@@ -140,7 +140,7 @@ t260904-19 起必需；重建=`sh server/build-test-temporal.sh`）、temporalio
 - `localhost:3099`（生产控制台）不碰；生产 Temporal 只读（仅 `operator namespace describe`），
   8233 Web UI 与一切写命令不碰。
 - **建票类测试永远指向测试环境**：显式 `SANDBAR_TARGET_HOST=127.0.0.1:17233` +
-  `SANDBAR_NAMESPACE=suyou-test`；内置硬断言——该变量未显式设置或精确等于生产缺省  # naming-compat
+  `SANDBAR_NAMESPACE=sandbar-test`；内置硬断言——该变量未显式设置或精确等于生产缺省
   `127.0.0.1:7233` 时拒绝执行（宁可 FAIL/ENV_FAIL 自家测试，绝不静默连生产）。
 
 ## 已知限制（覆盖诚实声明，非哑 guard）
@@ -253,9 +253,10 @@ t260904-19 起必需；重建=`sh server/build-test-temporal.sh`）、temporalio
 
 ## 第 5 组（ticket-lifecycle）—— t260831-04 已落地
 
-本组不再是空壳：`baselines/ticket-lifecycle.mjs`（总入口，内部分场景）+
+本组不再是空壳：`baselines/sc_ticket_lifecycle.mjs`（总入口，内部分场景；文件名勘误
+t260917-07——旧文档写 `ticket-lifecycle.mjs` 系笔误，树上从未存在该文件）+
 `baselines/ticket-lifecycle-scenes.mjs`（脚手架与场景库）。链路全真：Docker 测试 Temporal
-（17233/suyou-test，不可达则幂等 `docker compose up -d`，仍不可用 ENV_FAIL exit 2）+ 每票专属  # naming-compat
+（17233/sandbar-test，不可达则幂等 `docker compose up -d`，仍不可用 ENV_FAIL exit 2）+ 每票专属
 worker（`SANDBAR_TASK_QUEUE`/`SANDBAR_WATCH_WORKFLOW`，WATCH 收口自退 + 看门狗 kill）+ 真实
 引擎链（prepare_workspace→create_plan⇄review_plan→implement∥design_integration_tests→
 run_integration_tests→arbitrate→acceptance_walkthrough→merge_check→merge 人门→suggest_next

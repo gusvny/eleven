@@ -24,7 +24,7 @@
 | 17233 | **测试 Temporal gRPC** | Docker 测试环境（容器内 7233） |
 | 18233 | **测试 Temporal Web UI** | Docker 测试环境（容器内 8233） |
 
-测试 Temporal 使用独立 namespace `suyou-test`，数据落独立卷（`temporal-data` / `dsh-home`）。
+测试 Temporal 使用独立 namespace `sandbar-test`，数据落独立卷（`temporal-data` / `dsh-home`）。
 
 ## 快速启动测试环境
 
@@ -38,17 +38,17 @@ docker compose -f server/docker-compose.test.yml up -d
 `npm i` 全局装、每台 ~2 分钟，260908 起烤进镜像）。之后 `up`/`restart` 走缓存
 与数据卷，秒级。启动后两个容器：
 
-- `suyou-test-temporal`：独立 Temporal（temporalite dev server，SQLite 落盘）
-- `suyou-test-dsh`：独立 dsh 测试控制台（3199）
+- `sandbar-test-temporal`：独立 Temporal（temporalite dev server，SQLite 落盘）
+- `sandbar-test-dsh`：独立 dsh 测试控制台（3199）
 
 **新数据卷首次 up 后补一步**：注册多项目化的 ProjectKey 与立项关联的 EpicCode
 两个 search attribute（temporalite 无启动参数；注册落数据卷，之后重启自带）：
 
 ```bash
 server/engine/bin/temporal operator search-attribute create \
-  --name ProjectKey --type Keyword --namespace suyou-test --address 127.0.0.1:17233
+  --name ProjectKey --type Keyword --namespace sandbar-test --address 127.0.0.1:17233
 server/engine/bin/temporal operator search-attribute create \
-  --name EpicCode --type Keyword --namespace suyou-test --address 127.0.0.1:17233
+  --name EpicCode --type Keyword --namespace sandbar-test --address 127.0.0.1:17233
 ```
 
 漏注册 EpicCode 时，带 `--epic` 开工单会大声报错（不静默丢标），按上文补注册即可。
@@ -58,7 +58,7 @@ server/engine/bin/temporal operator search-attribute create \
 
 ```bash
 server/engine/bin/temporal operator namespace update \
-  --retention 876000h --namespace suyou-test --address 127.0.0.1:17233
+  --retention 876000h --namespace sandbar-test --address 127.0.0.1:17233
 ```
 
 > 来源立项：epic-linkage（决策缘由见 notes/epics/epic-linkage.md）
@@ -68,10 +68,10 @@ server/engine/bin/temporal operator namespace update \
 ```bash
 docker compose -f server/docker-compose.test.yml ps
 
-# 测试 Temporal：Web UI（浏览器打开，namespace=suyou-test）
+# 测试 Temporal：Web UI（浏览器打开，namespace=sandbar-test）
 open http://localhost:18233
 # 或命令行核对（用仓库内 temporal CLI）
-server/engine/bin/temporal --address 127.0.0.1:17233 operator namespace describe -n suyou-test
+server/engine/bin/temporal --address 127.0.0.1:17233 operator namespace describe -n sandbar-test
 
 # 测试 dsh 控制台
 open http://localhost:3199
@@ -87,8 +87,8 @@ Temporal SDK 工具（`engine/.venv`）不装进容器；在本机用仓库内 v
 `SANDBAR_TARGET_HOST` / `SANDBAR_NAMESPACE` 覆盖（缺省仍是生产 7233/default）。
 
 ```bash
-# 测试 worker：连测试 Temporal（17233 / suyou-test）
-SANDBAR_TARGET_HOST=127.0.0.1:17233 SANDBAR_NAMESPACE=suyou-test \
+# 测试 worker：连测试 Temporal（17233 / sandbar-test）
+SANDBAR_TARGET_HOST=127.0.0.1:17233 SANDBAR_NAMESPACE=sandbar-test \
   server/engine/.venv/bin/python server/engine/worker.py --daemon
 
 ```
@@ -113,7 +113,7 @@ Temporal 上，与生产零交集。
 
 ```bash
 server/engine/bin/temporal server start-dev --ip 127.0.0.1 --port 17233 \
-  --ui-port 18233 --db-filename /tmp/suyou-test.db \
+  --ui-port 18233 --db-filename /tmp/sandbar-test.db \
   --search-attribute ProjectKey=Keyword --search-attribute EpicCode=Keyword
 # namespace 用 default 即可（SANDBAR_NAMESPACE 缺省），测完 pkill 掉、删 db 文件
 ```
@@ -123,7 +123,7 @@ server/engine/bin/temporal server start-dev --ip 127.0.0.1 --port 17233 \
 ## 测试控制台里看不到生产工单？
 
 正常。260823 起工单真源恒为 Temporal workflow（旧 tickets/ JSON 投影目录已删）——
-测试控制台连的是测试 Temporal（17233 / suyou-test），与生产（7233 / default）完全隔离。
+测试控制台连的是测试 Temporal（17233 / sandbar-test），与生产（7233 / default）完全隔离。
 
 ## 停止 / 清场
 
@@ -138,7 +138,7 @@ docker compose -f server/docker-compose.test.yml down -v   # 连测试数据卷�
   `entrypoint`/`command` 两行退回镜像默认（namespace 变 default、数据不落盘），或换成任意
   dev 模式 Temporal（官方 temporal CLI `temporal server start-dev`，同 engine 路径）。
 - **3199 打不开**：容器首次启动要装依赖，`docker compose logs dsh` 看进度；装完才 `exec dsh`。
-- **worker 连不上测试 Temporal**：确认 `docker compose ps` 里 `suyou-test-temporal` 在跑；
+- **worker 连不上测试 Temporal**：确认 `docker compose ps` 里 `sandbar-test-temporal` 在跑；
   宿主侧地址是 `127.0.0.1:17233`（不是 7233）。
 
 ## 测试数据纪律（260904 宿主裁定）

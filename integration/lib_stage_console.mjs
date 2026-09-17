@@ -332,13 +332,13 @@ async function seedFixturesLocked(st, fixturesHost) {
   const py = process.env.SANDBAR_ENGINE_PY
     || path.join(WANT_REPO, 'server', 'engine', '.venv', 'bin', 'python');
   if (!existsSync(py)) throw new Error(`host engine venv missing: ${py}`);
-  // naming-compat: suyou-test is the existing test-stage namespace name
-  // (same as the compose default); this repo does not change it.
+  // namespace fallback = the compose contract default (sandbar-test; t260917-07
+  // finished the d342b46 rename). st.namespace from the stage JSON is authoritative.
   const toolEnv = {
     ...process.env,
     SANDBAR_PROJECTS_YAML: legacyYaml,
     SANDBAR_TARGET_HOST: `127.0.0.1:${st.ports.temporal}`,
-    SANDBAR_NAMESPACE: st.namespace || 'suyou-test',  // naming-compat: namespace name stays with the stage
+    SANDBAR_NAMESPACE: st.namespace || 'sandbar-test',  // 台回报值优先；回落=契约缺省（t260917-07）
   };
   const runTool = (argsJson) => spawnSync(py, ['-c',
     'import sys, json; sys.path.insert(0, "server/tools"); import ticket;'
@@ -424,7 +424,7 @@ async function seedFixturesLocked(st, fixturesHost) {
     '        except Exception as e:',
     '            print("skipped", tid, type(e).__name__)',
     'asyncio.run(main())',
-  ].join('\n'), `127.0.0.1:${st.ports.temporal}`, st.namespace || 'suyou-test', LEGACY_FIXTURE_IDS.join(',')],
+  ].join('\n'), `127.0.0.1:${st.ports.temporal}`, st.namespace || 'sandbar-test', LEGACY_FIXTURE_IDS.join(',')],
     { encoding: 'utf8', env: toolEnv, cwd: WANT_REPO, timeout: 60_000 });
   // 2b. Closing drain: fixture tickets are driven to COMPLETED by a fake
   // DevLaneWorkflow (the no-worker direct-read precondition of
@@ -433,7 +433,7 @@ async function seedFixturesLocked(st, fixturesHost) {
   const allIds = seedProjects.flatMap((sp) => sp.ids);
   const drain = () => {
     const drainOut = spawnSync(py, [path.join(HERE, 'fixture_ticket_worker.py'),
-      `127.0.0.1:${st.ports.temporal}`, st.namespace || 'suyou-test',  // naming-compat: namespace name stays with the stage
+      `127.0.0.1:${st.ports.temporal}`, st.namespace || 'sandbar-test',  // 台回报值优先；回落=契约缺省
       allIds.join(','), '120'],
       { encoding: 'utf8', env: toolEnv, cwd: WANT_REPO, timeout: 150_000 });
     if (drainOut.status !== 0) {
@@ -460,7 +460,7 @@ async function seedFixturesLocked(st, fixturesHost) {
       '            open_ids.append(tid)',
       '    print(json.dumps(open_ids))',
       'asyncio.run(main())',
-    ].join('\n'), `127.0.0.1:${st.ports.temporal}`, st.namespace || 'suyou-test', allIds.join(',')],  // naming-compat: namespace 名随台走（见 toolEnv 同款）
+    ].join('\n'), `127.0.0.1:${st.ports.temporal}`, st.namespace || 'sandbar-test', allIds.join(',')],  // 台回报值优先；回落=契约缺省（见 toolEnv 同款）
       { encoding: 'utf8', env: toolEnv, cwd: WANT_REPO, timeout: 60_000 });
     if (out.status !== 0) throw new Error(`fixture post-drain describe failed: ${(out.stderr || '').slice(-200)}`);
     return JSON.parse(String(out.stdout).trim() || '[]');
@@ -512,8 +512,8 @@ async function seedFixturesLocked(st, fixturesHost) {
     '            continue',
     '    print(json.dumps(killed))',
     'asyncio.run(main())',
-  ].join('\n'), `127.0.0.1:${st.ports.temporal}`, st.namespace || 'suyou-test',  // naming-compat: namespace 名随台走（见 toolEnv 同款）
-    allIds.join(','), FIXTURE_TITLE_PREFIX, markerEsc],  // naming-compat: namespace 名随台走（见 toolEnv 同款）
+  ].join('\n'), `127.0.0.1:${st.ports.temporal}`, st.namespace || 'sandbar-test',  // 台回报值优先；回落=契约缺省（见 toolEnv 同款）
+    allIds.join(','), FIXTURE_TITLE_PREFIX, markerEsc],
     { encoding: 'utf8', env: toolEnv, cwd: WANT_REPO, timeout: 120_000 });
   if (sweepOut.status === 0) {
     const killed = JSON.parse(String(sweepOut.stdout).trim() || '[]');

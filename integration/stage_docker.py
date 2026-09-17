@@ -1126,7 +1126,7 @@ def compose_env(project, services, ports, opts):
     env = dict(os.environ)
     env["SANDBAR_TEST_TEMPORAL_NAME"] = "%s-temporal" % project
     env["SANDBAR_TEST_DSH_NAME"] = "%s-dsh" % project
-    env["SANDBAR_TEST_NAMESPACE"] = opts.get("namespace") or "suyou-test"  # naming-compat
+    env["SANDBAR_TEST_NAMESPACE"] = opts.get("namespace") or "sandbar-test"  # 契约缺省值随 server/docker-compose.test.yml 声明（t260917-07 补完 d342b46 终切；原 naming-compat 旧名欠账随本票清，看守=t260917-07/sc_test_ns_consistency）
     env["SANDBAR_TEST_TEMPORAL_PORT"] = str(ports["temporal"])
     env["SANDBAR_TEST_TEMPORAL_UI_PORT"] = str(ports["ui"])
     env["SANDBAR_TEST_CONSOLE_PORT"] = str(ports["console"])
@@ -2138,8 +2138,16 @@ def _bootstrap_lane_nm():
         for pkg, d in farm:
             link = nm / pkg
             if not link.is_symlink():
-                link.symlink_to("../../plugins/%s" % d)
-                made += 1
+                try:
+                    link.symlink_to("../../plugins/%s" % d)
+                    made += 1
+                except FileExistsError:
+                    # 并发 up 竞态吸收（t260917-07 实锤：场景 A/B 双台并发起 +
+                    # 多泳道同宿主同起时，双方同时通过 is_symlink() 检查，后到者
+                    # EEXIST——check-then-act 非并发幂等）。对方已建同链=照 no-op；
+                    # 二次确认仍非 symlink（半残形态）才如实上抛。
+                    if not link.is_symlink():
+                        raise
     if made:
         print("注：泳道 profile*/node_modules 农场链自举 %d 条（两变体同款五链，"
               "sandbar-* → ../../plugins/*，运行期工件不入库）" % made)
@@ -2274,7 +2282,7 @@ def adopt_live_residue(project, services_list, opts):
         if not c_port or not http_ok("http://127.0.0.1:%d" % c_port):
             return None
         ports["console"] = c_port
-    ns = opts.get("namespace") or "suyou-test"  # naming-compat: 台 namespace 名沿用既有值
+    ns = opts.get("namespace") or "sandbar-test"  # 契约缺省值随 compose 声明（t260917-07 补完终切）；认领旧台时对新名幂等补注册（register_namespace）
     sa_ok, sa_note = register_namespace(ns, "127.0.0.1:%d" % t_port)   # 幂等；失败则如实记账
     lease = _flip_lease_up(project, None, ports, services_list,
                            {"SANDBAR_TEST_NAMESPACE": ns}, opts, sa_ok, sa_note)

@@ -12,8 +12,8 @@ lib 从不注入 SANDBAR_TARGET_HOST，子进程全落 shared.py 默认 127.0.0.
 7233 可达且 temporal CLI 在位才跑，缺席按 N/A 折算不假绿不假红——动态对照的权威
 面在 implement 验收证据，本条是常驻回归网）。
 
-安全自证：本场景自身一切 spawn 显式钉 17233 隔离台（命名空间=TEST_NAMESPACE 存量
-台名；import 后立刻钉 ambient），
+安全自证：本场景自身一切 spawn 显式钉 17233 隔离台（命名空间=lib.TEST_NAMESPACE 台现值，
+t260917-07 收口后=契约缺省 sandbar-test；import 后立刻钉 ambient），
 pre-implement 代码状态下也绝不向生产台开票；腿a 的拒跑探针子进程只跑离线 decl
 （零网络），生产 env 只用来验证「被拒」。
 
@@ -140,7 +140,7 @@ def main() -> int:
         # ── 腿b（静态腿）：lib 子进程 env 构造钉非生产台（守卫的耐久形态）──
         with open(LIB_TEXT_PATH, "r", encoding="utf-8") as f:
             lib_text = f.read()
-        EXPECTED_NS = "suyou-test"  # naming-compat：存量 docker 测试台命名空间（断言期望值，非新标识）
+        EXPECTED_NS = lib.TEST_NAMESPACE  # 断言期望值派生自被测单点（t260917-07：此前硬编码旧名致看守与 lib 脱钩漏报，永不复钉字面量）
         for token in ("SANDBAR_TARGET_HOST", TEST_HOST, EXPECTED_NS):
             if token not in lib_text:
                 failures.append("腿b lib_inspection 未钉隔离台契约：缺 %s（测试腿隔离未落地）"

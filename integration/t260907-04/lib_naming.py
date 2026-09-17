@@ -153,8 +153,8 @@ def stage_endpoint(info):
     """从 ensure 回报 JSON 取 (host, namespace)。
     回报形状={project, services, namespace, ports:{temporal,ui}, ...}
     （ports.temporal 是数字端口，host 固定 127.0.0.1；namespace 是台注册好的
-    缺省 namespace——本仓台缺省 suyou-test（测试基建面，naming-compat 在册），
-    场景必须用台回报值，不得硬编码 'default'）。形状不符返回 (None, 原因)。"""
+    缺省 namespace——本仓台缺省=契约缺省 sandbar-test（t260917-07 补完终切，随
+    docker-compose.test.yml 声明），场景必须用台回报值，不得硬编码 'default'）。形状不符返回 (None, 原因)。"""
     if not isinstance(info, dict):
         return None, "ensure 回报非 dict"
     port = (info.get("ports") or {}).get("temporal")
