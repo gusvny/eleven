@@ -59,7 +59,9 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from activities import ALL_ACTIVITIES
+import agent_runtime
 from agent_activities import ALL_AGENT_ACTIVITIES
+from dsh_pin import dsh_face_payload, enforce_expected
 from agent_activities import inflight_stage_snapshot, recent_stage_outcomes
 from shared import NAMESPACE, POC_DIR, REPO_ROOT, TARGET_HOST, TASK_QUEUE, configured_task_queues
 from shared import write_worker_meta
@@ -288,12 +290,27 @@ async def run_worker(args: argparse.Namespace) -> None:
     # Best-effort — a write failure must not block startup (the ensure side
     # tolerates a missing meta as unknown).
     meta_path = worker_meta_path(args)
+    # dsh 版本面（t260916-24）：启动即算即记——本 worker 用的 dsh 版本/来源/路径
+    # （host=实证 `<dsh> --version`；docker=镜像 tag 提取，tag-derived 非实证）。
+    # 期望版本不符（SANDBAR_DSH_EXPECTED_VERSION）→ 响亮 warning；
+    # SANDBAR_DSH_STRICT=1 → enforce_expected 在此 raise 拒绝上线（硬闸）。
+    # 坏 SANDBAR_AGENT_CMD → dsh_face_payload 响亮抛（对齐旧 DSH_CMD import 时炸的
+    # 行为，文案带旋钮名）。
+    face = dsh_face_payload(mode=agent_runtime.runtime_mode(),
+                            default_image=agent_runtime.DEFAULT_AGENT_IMAGE)
+    face_note = enforce_expected(face)
     if meta_path:
-        payload = write_worker_meta(meta_path, repo_root=str(REPO_ROOT), pid=os.getpid())
+        payload = write_worker_meta(meta_path, repo_root=str(REPO_ROOT), pid=os.getpid(),
+                                    dsh_face=face)
         logging.info("worker 归属指纹：repo_root=%s pid=%d meta=%s",
                      payload.get("repo_root"), payload.get("pid"), meta_path)
     else:
         logging.info("worker 归属指纹：前台模式不落 meta（repo_root=%s）", REPO_ROOT)
+    if face["expected_state"] == "mismatch":
+        logging.warning("%s（已随 worker meta 落盘可查：%s）", face_note,
+                        meta_path or "前台模式无 meta")
+    else:
+        logging.info("%s", face_note)
     client = await Client.connect(TARGET_HOST, namespace=NAMESPACE)
     # The old TicketWorkflow is retired (ticket t260823, all tickets closed).
     # Workflow list = the two step-1 classes (compat) + the six template

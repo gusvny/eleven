@@ -1,0 +1,4 @@
+{"type": "request/context", "data": {"provider": "probe-provider", "model": "probe-model-X"}}
+{"type": "request/header", "data": {"header": {"config": {"provider": "probe-provider", "model": "probe-model-X"}}}}
+{"type": "assistant/message", "data": {"usage": {"inputTokens": 11, "outputTokens": 7, "cacheReadTokens": 3}}}
+{"type": "assistant/chunk", "data": {"text": "好"}}

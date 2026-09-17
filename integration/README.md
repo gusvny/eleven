@@ -451,3 +451,33 @@ staleness.ts、i03 bundle 无横幅锚点。
 已知限制：i03 的「JSX 在容器之上」是源码序静态锚点，真实跨视图常驻由浏览器走查
 F3 承担。设计阶段基线曾按扁平信封/钉名 staleness.ts 初钉，calibration 时对齐屋风
 {ok,result} 信封与 stale-check.ts 落点（分类逻辑 React-free 的验收面不变，矩阵只增不减）。
+
+## 第 9 组（t260916-24）—— dsh 升级接缝探针 + 版本钉路径三场景（epic dsh-upgrade T4）
+
+`integration/t260916-24/` 一探针两场景一夹具（契约=主检出 notes/epics/dsh-upgrade.md
+§接缝矩阵 + 方案 gen1）：把「dsh 升级会不会 break」变成可重跑的可判定判据。
+
+- **probe_dsh_seam.py**（探针本体，无 sc_ 前缀=不入 registry）：
+  - `--selftest`：离线正负双自检（金样本 3 档绿——vN 无 cacheReadTokens 档必须恰出
+    WARN，锁「可选键缺席告警不拦停」语义；篡改 7 档逐项按预期断言名红，含坏 JSON 行/
+    截断半行/zstd 坏帧=KI-059 撕裂族）。已包装为场景 t260916-24-dsh-probe-selftest（ro 池）。
+  - `--version <候选版本>`：**live 档不入默认跑分面（验收④）**，升级门槛时显式调用——
+    隔离前缀 npm 显式钉版安装（装后核 package.json 防 dist-tag 漂移）+ 隔离 DSH_HOME
+    一次性真会话 → 断言 a 文件名口径（必录实际文件名→匹配代际，两代均不匹配才红）/
+    b 解析面必填（provider/model+in/out 整型；cacheReadTokens 缺席=WARN 不拦停，矩阵 #2
+    开放问号）/ b+ 记录类型族清单（矩阵 #10 底册交 T5）/ c 沙箱不变量（泳道内写成功+
+    主库 .git 模拟位越界写被拒）/ d 钉模型生效 / e resume 同 id 续写。退出码 0/1/2 三态
+    （lib_env 同款，环境缺=2 点名不假绿）。
+  - `--rounds N`：延伸腿，同 home 连跑 N 轮汇总 cacheRead 观测（非门槛判据）。
+  - zstd 依赖=CLI（引擎读侧同款硬依赖）；zstd v1.5.7+ 缺省压缩产物后缀是 `.zst` 而非
+    `.zstd`——fixtures 一律 `-o` 显式钉名（坑已填，重造夹具时注意）。
+- **t260916-24-dsh-face-meta**（engine 池）：真 worker 起跑链上归属 meta 的 `dsh` 版本面
+  四腿（缺省=宿主实测/钉路径=桩自报/预期不符可查/探测失败不挡启动）——验收②③的记录面。
+- **t260916-24-dsh-expected-loud**（engine 池）：真工单链上「版本与预期不符→响亮」双腿
+  （缺省=带病跑但日志点名两版本；STRICT=1=宁可停不悄悄跑错版本）——验收③的执行面。
+- **lib_t26091624.py**：版本桩（--version/agent 双形态记账）+ 舞台装配 + worker 拉起收尾。
+- **RUNBOOK_GATE.md**：升级回归门槛文本（写集外交接件，integration 粘贴进 runbook §1）。
+
+引擎侧配套（server/engine/）：`dsh_pin.py` 版本面解析器 + worker meta 增 `dsh` 键 +
+spawn 落票面 `dsh_pin_<tag>.json` + 四旋钮（SANDBAR_AGENT_CMD / SANDBAR_AGENT_IMAGE /
+SANDBAR_DSH_EXPECTED_VERSION / SANDBAR_DSH_STRICT，缺省=现行为）。

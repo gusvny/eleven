@@ -66,6 +66,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from temporalio import activity
 import agent_runtime  # 容器执行面传输层（t260913-04）：stdlib-only；其内不得 import 本包避免环
 import authz_gates
+import dsh_pin  # dsh 版本面/钉路径（t260916-24）：stdlib-only 零仓内依赖
 import failure_protocol
 import path_gates
 import shared
@@ -128,6 +129,28 @@ from shared import (
 POLL_SEC = 5
 INTEG_CMD_TIMEOUT_SEC = int(os.environ.get("SANDBAR_INTEG_CMD_TIMEOUT_SEC") or 900)
 DSH_CMD = shlex.split(os.environ.get("SANDBAR_AGENT_CMD") or "dsh --profile sandbar-headless")
+# ^ 缺省别名保留（import 行为逐字节不变，坏 shlex 依旧 import 时响亮死）。运行期真实
+# 解析改走 dsh_pin.resolve_dsh_cmd（t260916-24 版本面单点）——同锚 SANDBAR_AGENT_CMD
+# env，t260913-04 的 importlib.reload 切片语义不变（reload 后 env 即切片值，现场解析
+# 结果与常量一致）。
+_DSH_FACE_ONCE: Dict[str, Any] = {}
+
+
+def _dsh_face_once() -> Dict[str, Any]:
+    """worker 进程级一次的 dsh 版本面（t260916-24）：首票 spawn 计算后复用——
+    probe_dsh_version 是子进程（≤10s 超时），不必每次 spawn 重跑。坏 SANDBAR_AGENT_CMD
+    不在这里挡（cmd 组装处的 resolve_dsh_cmd 已响亮抛）；这里把异常降级为 error face，
+    保观测面照记、不挡 spawn 的其余准备步骤。"""
+    if not _DSH_FACE_ONCE:
+        try:
+            face = dsh_pin.dsh_face_payload(
+                mode=agent_runtime.runtime_mode(),
+                default_image=agent_runtime.DEFAULT_AGENT_IMAGE)
+        except dsh_pin.DshPinError as e:
+            face = {"mode": agent_runtime.runtime_mode(), "version_state": "error",
+                    "version_detail": str(e), "expected_state": "unset"}
+        _DSH_FACE_ONCE.update(face)
+    return _DSH_FACE_ONCE
 
 
 def _dsh_home_candidates() -> List[Path]:
@@ -1409,7 +1432,11 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
     # settings.yaml is re-copied every time (llm-pi-ai providers registry; a change takes effect for the next agent)
     _copy_settings(local_dsh)
 
-    cmd = list(DSH_CMD)
+    # dsh 命令解析走 dsh_pin.resolve_dsh_cmd（t260916-24 版本面单点）：与旧 DSH_CMD
+    # 常量同锚 SANDBAR_AGENT_CMD，缺省输出逐元素等值（不破现状）；坏 shlex 在此响亮
+    # 抛（文案带旋钮名与原文）。
+    resolved_dsh = dsh_pin.resolve_dsh_cmd()
+    cmd = list(resolved_dsh["cmd"])
     # Role preset patch (contract ①d, ticket t260903-03: the directory base comes
     # from the registered entry's declared paths.roles_dir, falling back to
     # <cwd>/server/roles when undeclared — the in-worktree copy keeps the ticket
@@ -1547,6 +1574,21 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
         sandbox_pin = artifacts_dir / ("sandbox_pin_%s.yml" % tag)
         sandbox_pin.write_text(agent_runtime.sandbox_pin_yaml(), "utf-8")
         cmd += ["--patch", str(sandbox_pin)]
+    # 版本面落票面 + 日志（t260916-24 验收③「版本自检落票面/日志可查」）：每次 spawn
+    # 写一份 dsh_pin_<tag>.json（票面 artifacts 可查）；期望版本不符=每次 spawn warning
+    # 响亮（不静默吞），SANDBAR_DSH_STRICT=1 升格硬闸在此拒绝 spawn。
+    face = _dsh_face_once()
+    pin_file = artifacts_dir / ("dsh_pin_%s.json" % tag)
+    try:
+        pin_file.write_text(json.dumps(face, ensure_ascii=False, indent=1) + "\n", "utf-8")
+    except OSError:
+        pass  # 票面留痕失败不挡 spawn（观测增强，同 worker meta 的 best-effort 语义）
+    note = dsh_pin.face_note(face)
+    if face.get("expected_state") == "mismatch":
+        dsh_pin.enforce_expected(face)  # STRICT=1 且 mismatch → raise（硬闸）
+        activity.logger.warning("[dsh_pin] %s（票面 %s）", note, pin_file)
+    else:
+        activity.logger.info("[dsh_pin] %s（票面 %s）", note, pin_file)
     return cmd, env
 
 

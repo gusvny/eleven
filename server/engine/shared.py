@@ -4311,26 +4311,33 @@ def check_paths_under_project(proj, ws, worktree):
 WORKER_META_VERSION = 1
 
 
-def worker_meta_payload(repo_root=None, pid=None) -> Dict[str, Any]:
+def worker_meta_payload(repo_root=None, pid=None, dsh_face=None) -> Dict[str, Any]:
     """The meta JSON contents: {version, pid, repo_root, ts} (ts = epoch seconds; the
     field names are the ticket-scenario contract). repo_root goes through realpath (both
     sides of the comparison use the same normalization, so symlink differences cannot
-    produce a fake foreign repo)."""
+    produce a fake foreign repo).
+
+    dsh_face（t260916-24 版本面）：调用方传入时增列 'dsh' 键（dsh_pin.dsh_face_payload
+    的产物，记录本 worker 用的 dsh 版本与来源）；None = 不写该键（既有形状逐字节不变，
+    读侧 read_worker_meta_state 只按需取键，增列向后兼容）。"""
     root = os.path.realpath(str(repo_root if repo_root is not None else REPO_ROOT))
-    return {
+    payload = {
         'version': WORKER_META_VERSION,
         'pid': int(pid if pid is not None else os.getpid()),
         'repo_root': root,
         'ts': int(_time.time()),
     }
+    if dsh_face is not None:
+        payload['dsh'] = dsh_face
+    return payload
 
 
-def write_worker_meta(path, repo_root=None, pid=None) -> Optional[Dict[str, Any]]:
+def write_worker_meta(path, repo_root=None, pid=None, dsh_face=None) -> Optional[Dict[str, Any]]:
     """Best-effort meta write (the ownership fingerprint is an observability enhancement;
     a write failure never blocks the worker from starting — the ensure side handles the
     missing state as unknown and cannot misjudge a foreign repo because of it). Returns
     the payload."""
-    payload = worker_meta_payload(repo_root=repo_root, pid=pid)
+    payload = worker_meta_payload(repo_root=repo_root, pid=pid, dsh_face=dsh_face)
     try:
         p = pathlib.Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
