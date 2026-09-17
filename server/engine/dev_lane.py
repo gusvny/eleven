@@ -232,6 +232,12 @@ DETAIL_FACE_PATCH_ID = "dev-lane-detail-face-v1"
 # 既有处理会把它误读成「缺 verdict= 标记」/「走查发现代码问题」/无声吞成假完成。
 # Same-shaped boolean gate (see the first PATCH_ID note).
 LANE_DSH_BLOCK_PATCH_ID = "dev-lane-lane-dsh-block-v1"
+# t260917-04（紧急收口）：t260917-01 在仲裁路径新增的三处 workflow 侧变更（闸拒守门
+# 方法的两处调用 + 进 run_integration_tests 段的格式轮次复位）未过 patched 门，落 main
+# 后挂起中的旧 workflow 重放即 NondeterminismError（t260916-19/-21 实证）。按既有同构
+# 布尔门先例补门：旧历史走旧串行分支（不复位、不调守门），新历史走新分支；不 bump
+# 既有 PATCH_ID。
+ARBITRATE_REFUSAL_PATCH_ID = "dev-lane-arb-refusal-v1"
 # prepare_ui_evidence activity timeout: must be **clearly larger** than the subprocess
 # timeout inside the activity (agent_activities.UI_CAPTURE_TIMEOUT_SEC=240s), otherwise
 # Temporal kills the activity first and the subprocess's own timeout recovery never runs.
@@ -1657,7 +1663,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 # t260917-01：格式轮次同口径复位——「连续缺 verdict」的连续性以本段
                 # 为界（旧代码跨 rework 累积，是 t260916-21「计数变 4 次」的机制
                 # 之一；与 1084 行 consecutive 注释语义自此真正对齐）。
-                arb_format_rounds = 0
+                # t260917-04：过 patched 门——旧历史（无本 marker）保持旧行为（不复位）。
+                if workflow.patched(ARBITRATE_REFUSAL_PATCH_ID):
+                    arb_format_rounds = 0
                 # Pre-check, mechanical: the lane has been committed (guaranteed after
                 # the unified settle; tickets with no_file_changes are exempt)
                 if workflow.patched(REVIEW_GATE_PATCH_ID) and not self.meta.get("no_file_changes"):
@@ -1766,7 +1774,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 # summary 已被拒绝文案改写，「缺 verdict」是闸拒的影子，不得计入
                 # 格式轮次（真因主因化、出路真实化；结构化明细 _pin_agent_refusal
                 # 已在 _run_agent_step 内上台面）。
-                if await self._arbitrate_refusal_blocked(res):
+                # t260917-04：过 patched 门（短路——旧历史不调用新方法、不产生命令）。
+                if workflow.patched(ARBITRATE_REFUSAL_PATCH_ID) \
+                        and await self._arbitrate_refusal_blocked(res):
                     continue
                 verdict = parse_arbitration_summary(res.summary)
                 if not verdict:
@@ -1991,7 +2001,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     # （t260916-19/-21 的误判正是本腿三连计数后 blocked）。此处置
                     # False 时 arb_done 已在上方置 False：唤醒后 pend 重算、仲裁边
                     # 真重跑（acc_res 保留不重跑，KI-024 语义）。
-                    if await self._arbitrate_refusal_blocked(rraw):
+                    # t260917-04：过 patched 门（同串行分支，短路语义一致）。
+                    if workflow.patched(ARBITRATE_REFUSAL_PATCH_ID) \
+                            and await self._arbitrate_refusal_blocked(rraw):
                         continue
                     arb_done = True
                     arb_res = rraw
