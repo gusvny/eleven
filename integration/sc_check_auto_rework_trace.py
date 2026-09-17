@@ -136,7 +136,10 @@ total_calls = len(re.findall(r"phase = self\._auto_rework\(", src))
 # Lock rule: count of internal automatic rework points (shell delegation not
 # counted). t260903-02 added the arb_acc_parallel branch with 2 more
 # (acceptance walkthrough rework + code-fault rework) -> 7 points.
-ok(total_calls == 7, "自动打回点恰好 7 处（实测 %d）" % total_calls)
+# t260916-19 落地期过渡双态（宿主 260917 令 a′）：该票在 dev_lane 主循环新增 rework
+# 逃逸消费点（_consume_rework）→ 自动打回点 7→8。共享守卫期望值由 main 侧统一改一次
+# （本处），泳道不得就地改；待 t260916-19 合入 main 后收敛为 8（届时删去 7）。
+ok(total_calls in (7, 8), "自动打回点 7 处（t260916-19 落地期为 8 处）（实测 %d）" % total_calls)
 # The merge point no longer stuffs self._rework (one rework must not land two timeline records)
 merge_block = src[src.find('if not mr.ok:'):src.find('if not mr.ok:') + 2000]
 ok("self._rework = ReworkRequest(" not in merge_block,
