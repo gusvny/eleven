@@ -70,6 +70,8 @@ with workflow.unsafe.imports_passed_through():
         cross_project_judge,
         format_agent_stage_failure,
         normalize_files_changed,
+        normalize_handover_runs,
+        env_note_for,
         retry_once_on_worker_termination,
         WorkspacePrepResult,
         agent_log_for,
@@ -494,6 +496,10 @@ class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
             res = raw
         else:
             _fc, _fc_shape = normalize_files_changed(raw.get("files_changed"))
+            # t260917-08：环境信号位随回执归一（第三解析点，normalize_files_changed
+            # docstring 自证的解析点纪律；缺省=老回执零改动）。generic 模板只透传
+            # 上台面，不做债表簿记/文案路由——那是 dev-lane 的消费面。
+            _legs, _hshape, _hdrop = normalize_handover_runs(raw.get("handover_runs"))
             res = StageResult(
                 status=str(raw.get("status") or "ok"),
                 summary=str(raw.get("summary") or ""),
@@ -501,13 +507,22 @@ class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
                 deliverables=[str(x) for x in (raw.get("deliverables") or [])],
                 files_changed=_fc,
                 files_changed_shape=_fc_shape,
-                evidence=str(raw.get("evidence") or ""))
+                evidence=str(raw.get("evidence") or ""),
+                env_fail=bool(raw.get("env_fail") or False),
+                env_reason=str(raw.get("env_reason") or ""),
+                handover_runs=_legs,
+                handover_dropped=_hdrop)
         self.results[st.id] = {
             "status": res.status, "summary": res.summary, "report": res.report,
             "deliverables": list(res.deliverables),
             "files_changed": list(res.files_changed),
             "files_changed_shape": res.files_changed_shape,
-            "evidence": res.evidence, "gen": gen}
+            "evidence": res.evidence, "gen": gen,
+            # t260917-08：环境信号上台面（snapshot 可见；env_note 单源注记）
+            "env_fail": bool(res.env_fail), "env_reason": str(res.env_reason or ""),
+            "env_note": env_note_for(res),
+            "handover_runs": [dict(l) for l in (res.handover_runs or [])],
+            "handover_dropped": list(res.handover_dropped or [])}
         return res
 
     # ---------- Stage execution: script gate ----------

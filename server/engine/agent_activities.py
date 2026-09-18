@@ -108,6 +108,8 @@ from shared import (
     EVIDENCE_DIR,
     load_ui_evidence,
     normalize_files_changed,
+    normalize_handover_runs,
+    env_note_for,
     UiChangedPathsArgs,
     UiChangedPathsResult,
     UiEvidenceArgs,
@@ -743,6 +745,14 @@ def _read_result(path: Path) -> Optional[StageResult]:
     # slip past the gate silently; normalize_files_changed assigns the shape
     # (absent/ok/malformed) so consumers can go visibly red on that basis.
     fc, fc_shape = normalize_files_changed(raw.get("files_changed"))
+    legs, leg_shape, leg_dropped = normalize_handover_runs(raw.get("handover_runs"))
+    # t260917-08（review N2）：回执若自带弃单名单（stub 路径成套落盘），读回时并集
+    # 保留（保序去重）——重读路径的 normalize 只会再见到合法腿（dropped=[]），
+    # 不并=名单蒸发；两源并存也不丢任一侧。
+    _raw_dropped = raw.get("handover_dropped")
+    if isinstance(_raw_dropped, list):
+        leg_dropped = list(dict.fromkeys(
+            [str(x) for x in _raw_dropped] + list(leg_dropped)))
     return StageResult(
         status=str(raw.get("status") or "ok"),
         summary=str(raw.get("summary") or ""),
@@ -751,7 +761,62 @@ def _read_result(path: Path) -> Optional[StageResult]:
         files_changed=fc,
         files_changed_shape=fc_shape,
         evidence=str(raw.get("evidence") or ""),
+        # t260917-08：环境信号位随回执（缺省 False/""/[] —— 老回执无键零改动；
+        # handover_runs 经 normalize 单点校形，畸形条目逐条记名不静默丢）
+        env_fail=bool(raw.get("env_fail") or False),
+        env_reason=str(raw.get("env_reason") or ""),
+        handover_runs=legs,
+        handover_dropped=leg_dropped,
     )
+
+
+# ---- t260917-08：agent 执行面环境受限的机器归类（KI-083 取证词表） ----
+# 词表来源=已实证的故障形态（notes/debts/known-issues.md KI-083：本机无可用沙箱
+# 后端 → dsh fail-closed，探针实测 exit 71）与 t260917-05 日志原话。归类是**可见
+# 性补位**不是判定：env 信号永不翻转红绿（红线④），只改变「谁来跑验证」与真因
+# 是否上票面。
+ENV_BLOCK_MARKERS = (
+    "no sandbox backend is usable",
+    "sandbox_apply: operation not permitted",
+    "sandbox_unavailable",
+)
+
+
+def classify_env_block(log_text: str) -> str:
+    """agent 输出日志文本 → 环境受限原因串（命中词表时）；未命中/空 → ""。
+    纯函数零 IO（文本由调用方读）；大小写不敏感（spawn 输出大小写不定）；
+    畸形（None/非串）按空处理，不抛。"""
+    if not isinstance(log_text, str) or not log_text:
+        return ""
+    low = log_text.lower()
+    for marker in ENV_BLOCK_MARKERS:
+        if marker in low:
+            return "agent bash 沙箱不可用（%s）" % marker
+    return ""
+
+
+def _apply_env_signal(res: StageResult, log_file: str, ticket_id: str = "",
+                      stage_id: str = "") -> StageResult:
+    """回执的环境信号归位（t260917-08，双源归因）：
+    - agent 自报（回执已带 env_fail=true）优先，原样保留（不改写 agent 的 reason）；
+    - 自报缺失时用 spawn 输出日志扫描补位（env_reason 加 [worker 归因] 前缀，
+      与 agent 自报可分辨）；无信号零改动。
+    挂点=M1 四路中的「幂等缓存」与「真 spawn」两条返回点；stub 路径由旋钮直注
+    （无日志面），lane_dsh 预检拒绝路径**有意不挂**——拒绝证据文案可能含 sandbox
+    字样，误挂会污染归因，且其 gate_refusal 已是结构化真因。日志读不到=跳过
+    （fail 方向=回退现状，不硬造）。"""
+    try:
+        if getattr(res, "env_fail", False):
+            return res
+        reason = classify_env_block(_log_tail(log_file, 20000))
+        if reason:
+            res.env_fail = True
+            res.env_reason = "[worker 归因] " + reason
+            activity.logger.info("[%s/%s] 环境信号补位（日志扫描）：%s",
+                                 ticket_id, stage_id, reason)
+        return res
+    except Exception:  # 归类失败绝不拦交付链：无信号回落现状
+        return res
 
 
 def _patch_result_prompt(rfile: Path, prompt: str) -> None:
@@ -1797,7 +1862,10 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
                 refusal: Dict[str, Any] = {}
                 note = _settle_with_gate(args, cwd, refusal=refusal)
                 _apply_settle_note(cached, note, refusal=refusal or None)
-            return cached
+            # t260917-08（M1 挂点①幂等缓存）：缓存命中仍做日志扫描补位——上次
+            # worker 可能死在「agent 交付后、归位前」，日志文件仍在原处。
+            return _apply_env_signal(cached, args.log_file,
+                                     args.ticket_id, args.stage_id)
 
     if os.environ.get("SANDBAR_AGENT_STUB") == "1":
         # Self-test / demo stub: write our own result file and return (no agent
@@ -1819,6 +1887,26 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
         stub_files = [x.strip() for x in
                       os.environ.get("SANDBAR_AGENT_STUB_FILES", "").split(",")
                       if x.strip()]
+        # t260917-08：桩回执的环境信号注入（三旋钮∈shared.TEST_STUB_ENV_KNOBS，
+        # 随机械闸/被测子进程剥除）。HANDOVER 值=JSON 文件路径（首选，避超长 env）
+        # 或内联 JSON 数组（测试便利）；解析失败=记 dropped 不静默丢。桩路径无
+        # spawn 日志，_apply_env_signal 的日志扫描有意不挂本路径（M1）。
+        _stub_env_fail = os.environ.get("SANDBAR_AGENT_STUB_ENV_FAIL", "") == "1"
+        _stub_env_reason = os.environ.get("SANDBAR_AGENT_STUB_ENV_REASON", "")
+        _stub_legs: list = []
+        _stub_dropped: list = []
+        _hv_raw = os.environ.get("SANDBAR_AGENT_STUB_HANDOVER", "")
+        if _hv_raw:
+            _hv_val: Any = None
+            try:
+                _hv_path = Path(_hv_raw)
+                _hv_val = json.loads(
+                    _hv_path.read_text("utf-8") if _hv_path.is_file() else _hv_raw)
+            except Exception as e:
+                _stub_dropped.append("handover 旋钮解析失败:%s" % type(e).__name__)
+            if _hv_val is not None:
+                _stub_legs, _hs, _stub_dropped = normalize_handover_runs(_hv_val)
+                _stub_dropped = list(_stub_dropped)
         stub = StageResult(
             status="ok",
             summary="[stub] %s 段完成（SANDBAR_AGENT_STUB=1，第 %d 次进段）"
@@ -1826,11 +1914,18 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
             report="[stub] 做了什么：无（stub 演示）\n\n怎么验证的：无",
             deliverables=[], files_changed=stub_files,
             files_changed_shape="ok",  # always a legal shape; the empty-list emptiness call belongs to the consumer
-            evidence="stub evidence: prompt %d 字" % len(args.prompt))
+            evidence="stub evidence: prompt %d 字" % len(args.prompt),
+            env_fail=_stub_env_fail, env_reason=_stub_env_reason,
+            handover_runs=_stub_legs, handover_dropped=_stub_dropped)
         rfile.write_text(json.dumps({
             "status": stub.status, "summary": stub.summary, "report": stub.report,
             "deliverables": stub.deliverables, "files_changed": stub.files_changed,
             "evidence": stub.evidence, "prompt": args.prompt,
+            # t260917-08（review N2）：新字段随桩回执落盘——幂等缓存路径走
+            # _read_result 读回，不写=缓存命中丢信号（env 位+腿+弃单名单成套）。
+            "env_fail": stub.env_fail, "env_reason": stub.env_reason,
+            "handover_runs": stub.handover_runs,
+            "handover_dropped": stub.handover_dropped,
         }, ensure_ascii=False, indent=1) + "\n", "utf-8")
         activity.heartbeat("stub done")
         return stub
@@ -1908,7 +2003,11 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
                         refusal2: Dict[str, Any] = {}
                         note = _settle_with_gate(args, cwd, refusal=refusal2)
                         _apply_settle_note(res, note, refusal=refusal2 or None)
-                    return res
+                    # t260917-08（M1 挂点④真 spawn）：环境信号归位（自报优先，
+                    # 日志扫描补位）。lane_dsh 预检拒绝路径（上方独立 return）
+                    # 与 stub 路径（旋钮直注）有意不挂——见 _apply_env_signal。
+                    return _apply_env_signal(res, args.log_file,
+                                             args.ticket_id, args.stage_id)
             rc = proc.poll()
             if rc is not None:
                 # The agent process exited without writing a result file = an
@@ -5128,8 +5227,84 @@ async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
 BATCH_TIMEOUT_SEC = int(os.environ.get("SANDBAR_INTEG_BATCH_TIMEOUT_SEC") or 3000)
 
 
+# t260917-08：交接腿单腿超时=场景单命令同款容量参数（INTEG_CMD_TIMEOUT_SEC，缺省
+# 900s——执行面容量而非判定放宽，sandbox_pin 注记同口径）。
+HANDOVER_LEG_TIMEOUT_SEC = INTEG_CMD_TIMEOUT_SEC
+
+
+async def run_handover_leg(leg: Dict[str, str], cwd: Path,
+                           timeout: float = HANDOVER_LEG_TIMEOUT_SEC) -> Dict[str, Any]:
+    """单条交接腿执行（t260917-08）：worker 执行面代跑 agent 沙箱受限期间交接的
+    验证命令。三路全终态（工程惯例：正常/报错/超时每条路径都到清理）——过
+    （exit 0）/ 败（exit≠0）/ 超时（kill 后 wait 排空再报告，KI-009 同款纪律，
+    不留僵尸）。env 剥除 TEST_STUB_ENV_KNOBS + WORKER_ROUTING_ENV_KNOBS：桩旋钮
+    不得漏进腿进程换假行为（review R2/L4 的机械面，与 :2773 verify_lane 剥除同款）。
+    cmd 用 shlex.split 直接 exec（无 shell：无 &&/> 展开面，引号由 shlex 处理）；
+    畸形命令（解析失败/空）→ exit=None 记名**不执行**（fail-closed：宁可腿报败
+    交给仲裁处置，不猜着跑）。cwd=泳道根（与场景执行同口径，写集信任域）；
+    output_tail 截断 800 字符（防超长输出拖垮回执/票面）。"""
+    name = str(leg.get("name") or "")
+    cmd_s = str(leg.get("cmd") or "")
+    try:
+        argv = shlex.split(cmd_s)
+    except ValueError as e:
+        return {"name": name, "cmd": cmd_s, "exit": None,
+                "output_tail": "交接腿命令解析失败（不执行）：%s" % e}
+    if not argv:
+        return {"name": name, "cmd": cmd_s, "exit": None,
+                "output_tail": "交接腿空命令（不执行）"}
+    env = {k: v for k, v in os.environ.items()
+           if k not in TEST_STUB_ENV_KNOBS and k not in WORKER_ROUTING_ENV_KNOBS}
+    p = await asyncio.create_subprocess_exec(
+        *argv, cwd=str(cwd), stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT, env=env)
+    try:
+        out_b, _ = await asyncio.wait_for(p.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        try:
+            p.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            await p.wait()
+        except Exception:
+            pass
+        return {"name": name, "cmd": cmd_s, "exit": p.returncode,
+                "output_tail": "交接腿超时（>%ds，已 kill 排空）" % int(timeout)}
+    tail = (out_b or b"").decode("utf-8", "replace")[-800:].strip()
+    return {"name": name, "cmd": cmd_s, "exit": p.returncode, "output_tail": tail}
+
+
+async def run_handover_legs(handover_runs, cwd: Path) -> Dict[str, Any]:
+    """交接腿整单执行（t260917-08）：_run_scenarios 尾部的消费路径抽成独立函数——
+    验收②「交接清单被后续段消费并执行」的离线桩/场景可直调真实现，不必起真
+    verify_lane。返回 {ran, passed, failed, details}（details 条目 name 带
+    handover: 前缀，与场景明细同形状，供 arb_ctx/票面单源消费）；
+    非 dict 腿=记名不执行（红腿计数，fail-closed）。"""
+    ran = passed = failed = 0
+    details: List[Dict[str, Any]] = []
+    for leg in (handover_runs or []):
+        if not isinstance(leg, dict):
+            details.append({"name": "handover:<畸形腿>", "cmd": "", "exit": -1,
+                            "output_tail": "交接腿非对象（记名不执行）"})
+            ran += 1
+            failed += 1
+            continue
+        r = await run_handover_leg(leg, cwd)
+        ran += 1
+        if r["exit"] == 0:
+            passed += 1
+        else:
+            failed += 1
+        details.append({"name": "handover:%s" % r["name"], "cmd": r["cmd"],
+                        "exit": r["exit"] if r["exit"] is not None else -1,
+                        "output_tail": r["output_tail"]})
+    return {"ran": ran, "passed": passed, "failed": failed, "details": details}
+
+
 async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
-                         apply_skip_pools: bool = False) -> IntegrationRunResult:
+                         apply_skip_pools: bool = False,
+                         handover_runs=None) -> IntegrationRunResult:
     """A thin shell (thinned by host order t260902): declaration reading, command
     execution and contract parsing all live in verify_lane lane=integ (one
     implementation + one parser); this function only places the order and translates
@@ -5227,6 +5402,23 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
                          out.blockers or "无", out.baseline_ref or "n/a")
     activity.logger.info("[%s] 场景汇总：ran=%s pass=%s fail=%s env_fail=%s",
                          ticket_id, out.ran, out.passed, out.failed, out.env_fail)
+    # ---- t260917-08 交接腿：worker 执行面承接 ----
+    # 前序 agent 段沙箱受限期间交接的验证腿，本段逐腿代跑（整单执行器
+    # run_handover_legs 单独成函数：离线桩/场景可直调真消费路径）。红线④的机械面：
+    # 腿结果**单列计数**（handover_*），不进 ran/passed/failed 主口径——闸判定
+    # 零改动；腿明细进 details（name=handover:<name>）随 arb_ctx 上仲裁，红腿
+    # 处置语义由仲裁契约句承接（dev_lane FLOW_BRIEF['arbitrate']），不在本层
+    # 改判任何红绿。
+    out.handover_ran = out.handover_passed = out.handover_failed = 0
+    _hv = await run_handover_legs(handover_runs, wt)
+    out.handover_ran = _hv["ran"]
+    out.handover_passed = _hv["passed"]
+    out.handover_failed = _hv["failed"]
+    out.details.extend(_hv["details"])
+    if out.handover_ran:
+        activity.logger.info("[%s] 交接腿：ran=%s pass=%s fail=%s",
+                             ticket_id, out.handover_ran, out.handover_passed,
+                             out.handover_failed)
     return out
 
 
@@ -5252,7 +5444,9 @@ async def _run_integration_tests_body(args: IntegrationRunArgs) -> IntegrationRu
     # 策略值只透传，activity 不回填策略。
     return await _run_scenarios(wt, args.ticket_id,
                                 write_set=list(getattr(args, "write_set", None) or []),
-                                apply_skip_pools=bool(getattr(args, "apply_skip_pools", False)))
+                                apply_skip_pools=bool(getattr(args, "apply_skip_pools", False)),
+                                # t260917-08：交接腿随派单下发（缺省空=老载荷/巡检零改动）
+                                handover_runs=list(getattr(args, "handover_runs", None) or []))
 
 
 # ---- t260913-02：巡检自有泳道 + 跑全集（复用面，不新造第二套）----

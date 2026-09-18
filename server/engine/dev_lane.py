@@ -123,7 +123,10 @@ with workflow.unsafe.imports_passed_through():
         integration_route,
         is_ui_write_set,
         lane_workspace_gate_error,
+        agent_env_failed_reason,
+        env_note_for,
         normalize_files_changed,
+        normalize_handover_runs,
         parse_arbitration_summary,
         parse_authz_used,
         parse_review_plan_verdict,
@@ -361,7 +364,13 @@ FLOW_BRIEF = {
         "相关 smoke/自测跑绿，证据写进 evidence。"
         "本票改动以 UT 交付行为断言（落项目声明的测试目录），verify code 道跑绿。"
         "UI 票（写集命中 UI 口径）交付证据须含改动前后截图"
-        "（.sandbar/screenshots/，ui-check/capture.mjs 产出）或说明为何无视觉差异。"),
+        "（.sandbar/screenshots/，ui-check/capture.mjs 产出）或说明为何无视觉差异。"
+        "环境不可用契约（t260917-08）：bash 沙箱不可用（sandbox_apply: Operation not "
+        "permitted / no sandbox backend is usable）时**文件面产物照常交付**，结果文件加 "
+        '"env_fail":true 与 "env_reason"（日志原文摘录），没能亲自跑的验证逐条写 '
+        '"handover_runs":[{"name":"…","cmd":"…"}]（≤20 条，cmd 为泳道根可独立执行）——'
+        "验证由集测段 worker 执行面代跑，票不停摆；不许谎报 status=failed（非实现缺位），"
+        "也不许用 status=ok 掩盖「验证未运行」。"),
     "design_integration_tests": (
         # t260902-12（票）：用例设计依据第三项=组件对外契约与行为规格（以修订二为准）
         "你是 integration，负责从**用户使用场景**出发为本次工单设计集成测试集（灰盒视角："
@@ -409,7 +418,12 @@ FLOW_BRIEF = {
         "发现新故障模式在结果文件上报（描述+定位+复现），不直接写已知问题清单——登记由 integration 岗位统一做。"
         "打回轮回审查令：若本轮回打中单测（UT）或集成测试文件发生任何变更（含你自己的 tests-fault 迭代），"
         "逐条核对变更是否弱化了断言/收窄了覆盖面——测试改动必须让契约更准而非让红灯变绿，"
-        "summary 单列「测试资产变更审查」小节列出每处测试变更与理由。"),
+        "summary 单列「测试资产变更审查」小节列出每处测试变更与理由。"
+        "交接与环境受限段契约（t260917-08）：details 内 name=handover:* 是前序 agent 段"
+        "沙箱受限期间交接、由 worker 执行面代跑的验证腿（单列计数，不进主口径）——"
+        "红腿=验证未过：按既有三态归因处置（rework），不得因腿单列计数而放行；"
+        "上下文存在环境受限段（env_fail/环境注记）=验证未闭环，verdict 必须处置，"
+        "不得当已验证。"),
     "acceptance_walkthrough": (
         "你是 integration 验收。本步与仲裁（arbitrate）**并行**执行：机械集成测试结果已随"
         "上下文注入（与仲裁同源），走查以**用户视角**独立进行，不预设「测试已全部通过」——"
@@ -881,14 +895,68 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
             return False
         return str(refusal.get("reason_code") or "").startswith("lane_dsh_")
 
+    def _agent_failed_why(self, res: Any, default: str = "") -> str:
+        """agent 报失败的 blocked 文案单点路由（t260917-08 要求②）：环境型失败
+        （status=failed + env_fail=true）→ 点名「agent 沙箱不可用（环境）」+
+        env_reason 摘要 + 后续出路（worker 执行面承接，票不停摆）；其余回落既有
+        「agent 报失败：」文案（逐字保留，零回归）。gate_refusal/lane_dsh/仲裁闸拒
+        专道文案优先于 env：那些回执不挂 env 日志扫描（activity 侧 M1 裁定），
+        env_fail 恒 False，结构上无竞争。畸形 res 不抛。"""
+        why = agent_env_failed_reason(res)
+        if why:
+            return why
+        return default or ("agent 报失败：%s"
+                           % (str(getattr(res, "summary", "") or "")
+                              or str(getattr(res, "status", "") or "")))
+
     async def _block_agent_failed(self, step_id: str, res: Any) -> None:
         """agent 报失败（业务裁决失败）在非 generic 站点的统一 blocked 落点
-        （t260916-28）：文案与 generic 站既有两分同款「agent 报失败：」；结构化
-        明细已由 _pin_agent_refusal 在 _run_agent_step 单点钉上 meta.blocked_detail，
+        （t260916-28）：文案经 _agent_failed_why 路由（t260917-08：环境型失败
+        点名环境原因+出路，其余同款「agent 报失败：」逐字保留）；结构化明细
+        已由 _pin_agent_refusal 在 _run_agent_step 单点钉上 meta.blocked_detail，
         此处不重复写。"""
-        await self._blocked(step_id, "agent 报失败：%s"
-                            % (str(getattr(res, "summary", "") or "")
-                               or str(getattr(res, "status", "") or "")))
+        await self._blocked(step_id, self._agent_failed_why(res))
+
+    # ---------- t260917-08：交接腿债表（meta['env_handover_pending']） ----------
+    # agent 段沙箱受限期间交接的验证腿，等后续机械段（run_integration_tests 的
+    # worker 执行面）代跑。单源消费面：put 在 _run_agent_step 回执归一后，take/clear
+    # 在集测段派单/销账点——防重复执行 + 债不静默蒸发（review C1 裁定①，方法化
+    # 是为离线行为断言可直调，UT-G）。
+    def _handover_debt_put(self, step_id: str, res: Any) -> None:
+        """回执的交接腿入债表（_run_agent_step 单点调用）：
+        - 有效腿 >0 → 同段旧债作废（同 stage 回执重写，防跨代重复累积），新腿替换入表；
+        - 有效腿 =0 且本回执**无** env 信号 → 同段旧债销账：该段本轮亲自跑了验证
+          （信号已消），旧腿再代跑=过期腿，红腿会误伤仲裁；
+        - 有效腿 =0 且 env_fail=True → 旧债保留（验证仍欠着，旧腿是唯一在册记录，
+          清了=验证轨迹静默蒸发，违背 M4「不静默丢」）。
+        畸形条目（非 dict）丢弃不记名——入表面只有 normalize 之后的合法回执可到，
+        防御性丢弃不构成静默丢（源头上 dropped 已三面落面）。"""
+        pending = [p for p in (self.meta.get("env_handover_pending") or [])
+                   if isinstance(p, dict)]
+        legs = list(getattr(res, "handover_runs", None) or [])
+        if legs:
+            kept = [p for p in pending if p.get("stage") != step_id]
+            kept.extend({"stage": step_id, "name": str(l.get("name") or ""),
+                         "cmd": str(l.get("cmd") or "")} for l in legs)
+            self.meta["env_handover_pending"] = kept
+            return
+        if not getattr(res, "env_fail", False) and \
+                any(p.get("stage") == step_id for p in pending):
+            self.meta["env_handover_pending"] = [
+                p for p in pending if p.get("stage") != step_id]
+            self._log("%s 本轮亲自完成验证（无环境信号）→ 本段旧交接腿销账"
+                      % step_id)
+
+    def _handover_debt_legs(self) -> List[Dict[str, str]]:
+        """集测段派单面的在册腿（只读，不销账——销账必须等腿真跑过：activity
+        error 早退=腿没跑，留债下轮）。无 cmd 的残条不入单（执行面无法执行）。"""
+        return [dict(p) for p in (self.meta.get("env_handover_pending") or [])
+                if isinstance(p, dict) and p.get("cmd")]
+
+    def _handover_debt_clear(self) -> None:
+        """腿已真跑后的销账（集测段回执无 error 时调用）。腿败≠没跑——结果交
+        仲裁/票面处置，此处只管「执行过」的账（防下一轮重复执行）。"""
+        self.meta["env_handover_pending"] = []
 
     def _pin_settle_refusal(self, result: Any) -> None:
         """settle_lane join 点的闸拒绝明细（A3）：SettleLaneResult.gate_refusal 经
@@ -1022,6 +1090,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
             res = raw
         else:
             _fc, _fc_shape = normalize_files_changed(raw.get("files_changed"))
+            _legs, _hshape, _hdrop = normalize_handover_runs(raw.get("handover_runs"))
             res = StageResult(
                 status=str(raw.get("status") or "ok"),
                 summary=str(raw.get("summary") or ""),
@@ -1031,13 +1100,33 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 files_changed_shape=_fc_shape,
                 evidence=str(raw.get("evidence") or ""),
                 # t260915-01 ②：结构化闸拒绝明细随回执（缺省 None=老回执/在途重放安全）
-                gate_refusal=raw.get("gate_refusal"))
+                gate_refusal=raw.get("gate_refusal"),
+                # t260917-08：环境信号位随回执归一（第二解析点；缺省=老回执零改动）
+                env_fail=bool(raw.get("env_fail") or False),
+                env_reason=str(raw.get("env_reason") or ""),
+                handover_runs=_legs,
+                handover_dropped=_hdrop)
         self.results[step_id] = {
             "status": res.status, "summary": res.summary, "report": res.report,
             "deliverables": list(res.deliverables),
             "files_changed": list(res.files_changed),
             "files_changed_shape": res.files_changed_shape,
-            "evidence": res.evidence, "gen": gen}
+            "evidence": res.evidence, "gen": gen,
+            # t260917-08：环境信号上台面（票面可见，不依赖开日志）；env_note=
+            # env_note_for 单源注记（R4 空腿点名/M4 弃单摘要同源措辞）
+            "env_fail": bool(res.env_fail), "env_reason": str(res.env_reason or ""),
+            "env_note": env_note_for(res),
+            "handover_runs": [dict(l) for l in (res.handover_runs or [])],
+            "handover_dropped": list(res.handover_dropped or [])}
+        # t260917-08（review C1 裁定①）：交接腿入 meta['env_handover_pending'] 债表
+        # ——单源消费面（集测段拾取后销账，防重复执行）；put 内含同段回执重写替换
+        # 与「本轮亲自完成验证→旧腿销账」两支（方法体见 _handover_debt_put）。
+        self._handover_debt_put(step_id, res)
+        if self.results[step_id]["env_note"]:
+            self._log("%s 环境注记：%s" % (step_id, self.results[step_id]["env_note"]))
+        if res.handover_dropped:
+            self._log("%s 交接腿弃单（畸形记名不执行）：%s"
+                      % (step_id, "; ".join(res.handover_dropped)))
         # t260915-01 ②（A2）：闸拒绝的结构化明细随回执上台面——单点覆盖全部
         # 「agent 报失败」blocked 调用点（~15 处零改动）；清点=_blocked wake（①）+
         # _enter（②）双保险（R2 生命周期：非 blocked 期恒空）。
@@ -1317,7 +1406,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     continue
                 prev_ctx = ""
                 if res.status != "ok":
-                    await self._blocked("create_plan", "agent 报失败：%s" % (res.summary or res.status))
+                    await self._blocked("create_plan", self._agent_failed_why(res))
                     continue
                 self._finish("create_plan", by="developer-agent",
                              evidence=res.evidence or res.summary)
@@ -1412,7 +1501,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     continue
                 prev_ctx = ""
                 if res.status != "ok":
-                    await self._blocked("implement", "agent 报失败：%s" % (res.summary or res.status))
+                    await self._blocked("implement", self._agent_failed_why(res))
                     continue
                 self._finish("implement", by="developer-agent",
                              evidence=res.evidence or res.summary)
@@ -1564,7 +1653,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     continue
                 prev_ctx = ""
                 if res.status != "ok":
-                    await self._blocked("implement", "agent 报失败：%s" % (res.summary or res.status))
+                    await self._blocked("implement", self._agent_failed_why(res))
                     continue
                 impl_done = True
                 self._finish("implement", by="developer-agent",
@@ -1801,6 +1890,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     except Exception as e:
                         self._log("落盘前置检查故障（不拦主链）：%s: %s" % (type(e).__name__, e))
                 try:
+                    # t260917-08（review C1 裁定①）：交接腿消费面=meta['env_handover_pending']
+                    # 债表单源（含集测后段遗留债——rework 回 implement 的下一轮集测
+                    # 自然拾取）；销账在回执无 error 时（_run_scenarios 的腿执行块在
+                    # 场景执行器成功之后，error 早退=腿没跑，留债下轮）。
                     rraw = await workflow.execute_activity(
                         run_integration_tests,
                         IntegrationRunArgs(ticket_id=self.ticket_id,
@@ -1809,17 +1902,27 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                                            # t260913-03：每票段唯一 true 站（策略面只在
                                            # 调用点显式置位；write_set 供例外腿求交）
                                            write_set=list(self.meta.get("write_set") or []),
-                                           apply_skip_pools=True),
+                                           apply_skip_pools=True,
+                                           handover_runs=self._handover_debt_legs()),
                         start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
                     ir = rraw if isinstance(rraw, IntegrationRunResult) else IntegrationRunResult(
                         ran=int(rraw.get("ran") or 0), passed=int(rraw.get("passed") or 0),
                         failed=int(rraw.get("failed") or 0),
                         env_fail=int(rraw.get("env_fail") or 0),
                         details=[dict(d) for d in (rraw.get("details") or [])],
-                        error=str(rraw.get("error") or ""))
+                        error=str(rraw.get("error") or ""),
+                        # t260917-08（review R3）：dict 回退重建点——新计数键漏写=
+                        # 腿跑了回执仍显 0（报文与事实相反），与上述键同批补齐
+                        handover_ran=int(rraw.get("handover_ran") or 0),
+                        handover_passed=int(rraw.get("handover_passed") or 0),
+                        handover_failed=int(rraw.get("handover_failed") or 0))
                 except Exception as e:
                     ir = IntegrationRunResult(error="集成测试 activity 故障：%s: %s"
                                               % (type(e).__name__, e))
+                # t260917-08：腿已真跑（回执无 error）→ 债表销账（防重复执行；
+                # 腿败≠没跑，结果交仲裁/票面处置，此处只管「执行过」的账）
+                if not ir.error:
+                    self._handover_debt_clear()
                 # t260904-12: the headline carries the environment-red dimension — a
                 # mixed suite can no longer tell a fake "all green" story.
                 # t260913-03: the exclusion face is named on the ticket face.
@@ -1829,11 +1932,24 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 if ir.excluded_pools:
                     _pe_note = "｜本轮跳过池=%s（少 %d 条）" % (
                         "、".join(ir.excluded_pools), ir.excluded_count)
+                # t260917-08（review N3）：红腿点名进票面——前 3 个红腿名+剩余计数，
+                # 「｜」注记风格与既有面一致；单列计数不进 status 判定（闸口径零改动）
+                _hv_note = ""
+                if ir.handover_ran:
+                    _red_legs = [str(d.get("name") or "")[len("handover:"):]
+                                 for d in ir.details
+                                 if str(d.get("name") or "").startswith("handover:")
+                                 and d.get("exit") != 0]
+                    _hv_note = "｜交接腿 %d 跑 / %d 过 / %d 败" % (
+                        ir.handover_ran, ir.handover_passed, ir.handover_failed)
+                    if _red_legs:
+                        _hv_note += "（红腿：%s%s）" % (
+                            "、".join(_red_legs[:3]), "等" if len(_red_legs) > 3 else "")
                 self.results["run_integration_tests"] = {
                     "status": "failed" if (ir.error or ir.failed or ir.env_fail) else "ok",
-                    "summary": "集成测试：%d 跑 / %d 过 / %d 败 / %d 环境红%s%s"
+                    "summary": "集成测试：%d 跑 / %d 过 / %d 败 / %d 环境红%s%s%s"
                                % (ir.ran, ir.passed, ir.failed, ir.env_fail,
-                                  ("｜" + ir.error) if ir.error else "", _pe_note),
+                                  ("｜" + ir.error) if ir.error else "", _pe_note, _hv_note),
                     "report": "", "deliverables": [], "files_changed": [],
                     "evidence": json.dumps(ir.details, ensure_ascii=False)[:4000], "gen": 0}
                 self._finish("run_integration_tests", by="run_integration_tests",
@@ -1841,9 +1957,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                                                     "过" if d.get("exit") == 0 else "败")
                                                 for d in ir.details))
                 self._handoff("run_integration_tests",
-                              "集成测试 %d 跑 / %d 过 / %d 败 / %d 环境红%s%s"
+                              "集成测试 %d 跑 / %d 过 / %d 败 / %d 环境红%s%s%s"
                               % (ir.ran, ir.passed, ir.failed, ir.env_fail,
-                                 ("｜" + ir.error) if ir.error else "", _pe_note))
+                                 ("｜" + ir.error) if ir.error else "", _pe_note, _hv_note))
                 # t260901-19: budget 6000→4000 with tail-keeping ([-4000:]) — details sit
                 # at the end of the JSON, so a head slice would squeeze out the failure
                 # details; keeping the tail keeps them
@@ -1859,6 +1975,25 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 acc_ctx = ("【机械集成测试结果】\n%s\n" % _arb_json[-4000:]) + \
                     (("【UI 截图/走查实证（.sandbar/screenshots/）】\n%s\n" % ui_ctx)
                      if ui_ctx else "")
+                # t260917-08（R4/R5）：交接说明行进仲裁与走查上下文——红腿处置契约+
+                # 未验证段点名（env_note 单源措辞），防「红腿绿票/空腿洗白」。装配在
+                # 两处上下文语句之后追加（不挤进 [-4000:] 尾保装配块——t260901-19
+                # T2 静态 pin 以装配行 ±8 行窗锚 json 载荷完整性，勿动装配块结构）。
+                _hv_ctx = ""
+                if ir.handover_ran:
+                    _hv_ctx += ("【交接验证腿（t260917-08）】前序段沙箱受限期间交接的验证已由 "
+                                "worker 代跑：%d 跑 / %d 过 / %d 败（details 内 name=handover:* "
+                                "腿）。红腿=验证未过，须按三态归因处置（rework），"
+                                "不得因单列计数放行。" % (ir.handover_ran, ir.handover_passed,
+                                                      ir.handover_failed))
+                _env_notes = ["%s：%s" % (sid, r["env_note"]) for sid, r in self.results.items()
+                              if isinstance(r, dict) and r.get("env_note")]
+                if _env_notes:
+                    _hv_ctx += ("\n【环境受限段（未验证声明）】%s——不得当已验证，"
+                                "verdict 必须处置。" % "；".join(_env_notes))
+                if _hv_ctx:
+                    arb_ctx += "\n" + _hv_ctx
+                    acc_ctx += _hv_ctx + "\n"
                 if workflow.patched(ARB_ACC_PARALLEL_PATCH_ID):
                     # Speedup 2: arbitration ∥ acceptance walkthrough as a parallel fork
                     # (no data dependency, saves one serial stretch)
@@ -2396,8 +2531,12 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     continue
                 prev_ctx = ""
                 if res.status != "ok":
-                    await self._blocked("implement", "冲突消解第 %d 轮 agent 报失败：%s"
-                                        % (conflict_rounds, (res.summary or res.status)[:200]))
+                    # t260917-08（review M3）：前缀变体一并路由——轮次前缀保留，
+                    # 后半经 _agent_failed_why 单点路由（env 归因不缺、轮次上下文不丢）
+                    await self._blocked("implement", "冲突消解第 %d 轮：%s"
+                                        % (conflict_rounds, self._agent_failed_why(
+                                            res, default="agent 报失败：%s"
+                                            % ((res.summary or res.status)[:200]))))
                     continue
                 # (3) the worker commits the merge on the agent's behalf (verifying no
                 #     unresolved files remain; the worktree is necessarily dirty during

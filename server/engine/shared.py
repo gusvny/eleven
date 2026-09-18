@@ -302,6 +302,10 @@ class IntegrationRunArgs:
     attempt: int = 0                            # t260910-13：rework 代数（0=未声明；闸按此盖写规范行 attempt——K4 单写者=引擎侧）
     write_set: List[str] = field(default_factory=list)  # t260913-03：票面声明写集（integ 道例外腿求交判据；缺省空=老载荷回放）
     apply_skip_pools: bool = False              # t260913-03：每票段显式置位才消费声明（缺省=恒全跑，验收 E 机械锁）
+    # t260917-08：交接运行清单（前序 agent 段沙箱受限期间交接的验证腿），集测段
+    # worker 执行面逐腿代跑。缺省空=老载荷/巡检/老回放零改动。腿来源=dev_lane 的
+    # collect_handover_runs（results + meta['env_handover_pending'] 债表，消费后销账）。
+    handover_runs: List[Dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -315,6 +319,9 @@ class IntegrationRunResult:
     ran: int = 0
     passed: int = 0
     failed: int = 0
+    # ticket t260904-12: the environment-red dimension (the translation layer no longer
+    # drops it)。命名互指（t260917-08）：本字段是 **int 计数**（场景环境红，入闸口径）；
+    # StageResult.env_fail 是 **bool 位**（段回执层，不入闸口径）——同名异型，勿混读。
     env_fail: int = 0            # ticket t260904-12: the environment-red dimension (the translation layer no longer drops it)
     details: List[Dict[str, Any]] = field(default_factory=list)  # [{name,cmd,exit,output_tail}]
     error: str = ""
@@ -326,6 +333,11 @@ class IntegrationRunResult:
     excluded_pools: List[str] = field(default_factory=list)  # 实际排除的池名（applied 时）
     excluded_count: int = 0                                  # 被排除条目数（本轮不在册）
     forced_by: List[str] = field(default_factory=list)       # 旧口径例外腿命中面（宿主管 260914 撤除例外腿：不再拦，仅留痕）
+    # t260917-08 交接腿单列计数（不进 ran/passed/failed 主口径=闸判定零改动，红线④）：
+    # 前序 agent 段沙箱受限期间交接的验证腿，本段 worker 执行面逐腿代跑的结果。
+    handover_ran: int = 0
+    handover_passed: int = 0
+    handover_failed: int = 0
 
 
 def integ_verify_payload(lane_root, write_set=None, apply_skip_pools=False):
@@ -2350,6 +2362,124 @@ class StageResult:
     # _apply_settle_note 挂载）。None = 非闸拒绝/老回执（缺省值保证在途实例重放
     # 历史事件不破，演进安全惯例）；消费侧必经 sanitize_gate_refusal 校形。
     gate_refusal: Optional[Dict[str, Any]] = None
+    # t260917-08：段回执的环境信号位（一等形式，与产品红/测试红/实现缺位正交）。
+    # env_fail=True = 「验证未运行，原因是 agent 执行面环境受限」（如 bash 沙箱
+    # fail-closed，KI-083），**不是**交付失败、不翻转任何红绿判定；它只改变
+    # 「谁来跑验证」（交接腿由后续机械段 worker 执行面承接）与真因可见性。
+    # 命名互指（同名异型防混读）：IntegrationRunResult.env_fail 是 **int 计数**
+    # （t260904-12 场景环境红维度，入闸口径）；本字段是 **bool 位**（段回执层，
+    # 不入闸口径）。缺省 False/""/[] = 老回执重放安全（gate_refusal 先例）。
+    env_fail: bool = False
+    env_reason: str = ""                       # 缺什么（原文摘录）；环境红必须点名缺什么（失败分类协议纪律）
+    # 交接运行清单（normalize_handover_runs 校形后的有效腿）：agent 执行面受限期间
+    # 没能亲自跑的验证，由后续机械段（dev-lane=run_integration_tests）的 worker
+    # 执行面承接执行；无机械段的模板=腿留债票面（meta['env_handover_pending']）
+    # 人审处置。条目={name,cmd}；畸形条目进 handover_dropped 逐条记名，不静默丢。
+    handover_runs: List[Dict[str, str]] = field(default_factory=list)
+    # 被 normalize 丢弃/截断的条目名单（透明面：dropped 摘要进票面注记/活动日志/
+    # 仲裁上下文，「不静默丢」三处可查——review M4）。
+    handover_dropped: List[str] = field(default_factory=list)
+
+
+# handover_runs 的形状上限（t260917-08：防御面非功能面——条数/长度上限在 normalize
+# 单点收紧，防超长清单拖垮机械段执行与票面）。
+HANDOVER_MAX_LEGS = 20
+HANDOVER_CMD_MAX = 500
+HANDOVER_NAME_MAX = 120
+
+
+def normalize_handover_runs(raw: Any):
+    """交接运行清单的形状保持规范化（t260917-08；镜像 normalize_files_changed 的
+    三态纪律，KI-049 gate ②同源教训）。
+
+    Returns (legs, shape, dropped):
+      - raw is None → ([], "absent", [])：老回执无此键（按无交接处理）；
+      - raw 是列表 → 逐条校验：条目须为 dict 且 name/cmd 为非空 str；name 超
+        HANDOVER_NAME_MAX 截断保留（名字无害），cmd 超 HANDOVER_CMD_MAX **整条
+        丢弃记名**（半条命令可能误执行——fail-closed，绝不截断执行）；条数超
+        HANDOVER_MAX_LEGS 的尾部记名丢弃。有合法条目，或空列表（显式「无可交接」）
+        → shape="ok"（丢弃面进 dropped 名单）；列表在但条目无一合法 → "malformed"；
+      - 其它类型（字符串/数字/dict）→ ([], "malformed", ["handover_runs 非列表"])。
+
+    「不静默丢」落面：dropped 名单由解析点存进 StageResult.handover_dropped，
+    经 env_note_for 进票面注记/活动日志/仲裁上下文。空列表形状合法；空腿的语义
+    裁定（env_fail=true 且有效腿 0 = 未验证且无交接腿，不得当已验证）在
+    env_note_for（R4 语义层），不在本函数沉默跳过。"""
+    if raw is None:
+        return [], "absent", []
+    if not isinstance(raw, list):
+        return [], "malformed", ["handover_runs 非列表"]
+    legs: List[Dict[str, str]] = []
+    dropped: List[str] = []
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            dropped.append("条目%d:非对象" % i)
+            continue
+        name = item.get("name")
+        cmd = item.get("cmd")
+        if not isinstance(name, str) or not name.strip() \
+                or not isinstance(cmd, str) or not cmd.strip():
+            dropped.append("条目%d:name/cmd 缺失或非字符串" % i)
+            continue
+        if len(cmd) > HANDOVER_CMD_MAX:
+            dropped.append("条目%d:cmd 超 %d 字符整条丢弃（不截断执行）"
+                           % (i, HANDOVER_CMD_MAX))
+            continue
+        if len(name) > HANDOVER_NAME_MAX:
+            dropped.append("条目%d:name 超 %d 字符截断保留" % (i, HANDOVER_NAME_MAX))
+            name = name[:HANDOVER_NAME_MAX]
+        if len(legs) >= HANDOVER_MAX_LEGS:
+            dropped.append("条目%d:超上限 %d 条丢弃" % (i, HANDOVER_MAX_LEGS))
+            continue
+        legs.append({"name": name.strip(), "cmd": cmd.strip()})
+    # 形状判定：空列表=合法形状（agent 显式声明「无可交接」，与缺键 absent 相区分；
+    # 「空腿当不当已验证」的语义裁定在 env_note_for——R4 语义层，不在本函数沉默
+    # 跳过也不误标 malformed）；列表在但条目全非法 → "malformed"（丢弃面进 dropped）。
+    return legs, ("ok" if (legs or not dropped) else "malformed"), dropped
+
+
+def agent_env_failed_reason(res: Any) -> str:
+    """agent 段回执的环境型失败 → blocked 票面文案（t260917-08 要求②）。
+
+    仅 status=failed 且 env_fail=True 时返回单行文案：点名「agent 沙箱不可用
+    （环境）」+ env_reason 摘要 + 后续出路（验证交由后续段 worker 执行面承接、
+    票不停摆）。其余形态（ok+env_fail / failed 无 env 信号 / 畸形对象）返回 ""
+    ——调用方回落既有「agent 报失败：」文案（零改动）。畸形不抛（getattr 防御，
+    纯函数，UT 直调）。与闸拒专道的优先级：gate_refusal/lane_dsh/仲裁闸拒路径
+    的回执不挂 env 日志扫描（activity 侧 M1 裁定），env_fail 恒 False，结构上
+    无竞争——env 文案永不遮更具体的真因。"""
+    if not getattr(res, "env_fail", False):
+        return ""
+    if str(getattr(res, "status", "")) != "failed":
+        return ""
+    reason = str(getattr(res, "env_reason", "") or "").replace("\n", " ")[:160]
+    return ("agent 沙箱不可用（环境）：%s。该段验证未运行，非实现缺位；"
+            "验证交由后续段 worker 执行面承接（交接腿），票不停摆。"
+            "出路：retry_qc 重跑 / rework 打回 / 修复执行面（容器形态）"
+            % (reason or "原因未声明"))
+
+
+def env_note_for(res: Any) -> str:
+    """段回执的环境注记单源（t260917-08 R4/M4）：票面 results[step]['env_note']、
+    活动日志、仲裁/走查上下文三处共用此措辞，防各处漂移。
+
+    - 非 env_fail → ""（零注记，零回归）；
+    - env_fail 且有效交接腿 >0 → 「环境受限未验证；交接 N 腿待执行：<前 3 名>」；
+    - env_fail 且有效腿 =0 → 「环境受限未验证且无交接腿（不当作已验证）」+ 弃单
+      摘要（R4 fail-closed：空腿不许把「未验证」洗成合规；仲裁契约要求 verdict
+      必须处置）。"""
+    if not getattr(res, "env_fail", False):
+        return ""
+    legs = getattr(res, "handover_runs", None) or []
+    dropped = getattr(res, "handover_dropped", None) or []
+    if legs:
+        names = [str(l.get("name") or "") for l in legs[:3]]
+        more = "等" if len(legs) > 3 else ""
+        return "环境受限未验证；交接 %d 腿待执行：%s%s" % (len(legs), "、".join(names), more)
+    note = "环境受限未验证且无交接腿（不当作已验证）"
+    if dropped:
+        note += "；弃 %d 条：%s" % (len(dropped), "; ".join(dropped[:2]))
+    return note
 
 
 def normalize_files_changed(raw: Any):
@@ -2425,7 +2555,12 @@ PAUSE_NOTE_INPUT_LIMIT = 20000
 # 生产 worker 从不设置它们，剥除对生产是恒等操作。
 TEST_STUB_ENV_KNOBS = ("SANDBAR_AGENT_STUB", "SANDBAR_AGENT_STUB_FILES",
                        "SANDBAR_AGENT_STUB_DELAY_SEC",
-                       "SANDBAR_UI_CAPTURE_STUB", "SANDBAR_FIXTURE_TEMPLATES")
+                       "SANDBAR_UI_CAPTURE_STUB", "SANDBAR_FIXTURE_TEMPLATES",
+                       # t260917-08：桩回执的环境信号注入旋钮（env_fail/env_reason/
+                       # handover 清单 JSON 文件路径）——同族纪律：随机械闸与被测
+                       # 子进程剥除，桩行为不得漏进被测进程换假行为。
+                       "SANDBAR_AGENT_STUB_ENV_FAIL", "SANDBAR_AGENT_STUB_ENV_REASON",
+                       "SANDBAR_AGENT_STUB_HANDOVER")
 
 # worker 路由旋钮族（t260908-01 r10 实证追加）：这些 env 指挥 worker 进程自身
 # （poll 哪些队列/watch 哪张票/退出口径），verify_lane 的 pytest 子进程不是
@@ -3484,6 +3619,14 @@ def build_stage_prompt(ticket_id: str, meta: Dict[str, Any], stage: Stage,
         "%d. 交付契约（硬性）：干完把结果写到 %s，JSON 格式：" % (n + 1, result_file),
         '   {"status":"ok|failed","summary":"台面一句话","report":"人读进展报告",'
         '"deliverables":["产物路径…"],"files_changed":["改动文件…"],"evidence":"原始证据"}',
+        "   环境不可用契约（t260917-08）：agent bash 沙箱不可用（命令工具报 sandbox_apply denied /"
+        " no sandbox backend / SANDBOX_UNAVAILABLE）时：**文件面产物照常交付**，结果文件加"
+        ' "env_fail":true 与 "env_reason":"<缺什么，日志原文摘录>"；没能亲自跑的验证逐条写'
+        ' "handover_runs":[{"name":"<≤120字符>","cmd":"<≤500字符，泳道根可独立执行>"}]（≤20 条），'
+        "由后续机械段 worker 执行面承接——票不停摆。不许谎报 status=failed（交付并未失败），"
+        "也不许用 status=ok 掩盖「验证未运行」——env_fail 位就是「未验证」的显式声明；"
+        "env_fail=true 而不交清单=票面点名「未验证且无交接腿」，仲裁不当已验证。"
+        "无机械段的工作流模板：腿留债票面，人审处置。",
         "   三层口径（各喂各的读者，别混）：",
         "   - summary：≤40 字，结论+对象（如「入轨三处防呆纪律，自测全绿」）。给工单台列表行。",
         "   - report：给人看的进展报告，markdown，短。固定小节「做了什么 / 怎么验证的 /"
