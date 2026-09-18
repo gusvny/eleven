@@ -1367,6 +1367,19 @@ SCENARIOS = [
      "测试台命名空间一致性看守（t260917-07，主树不一致「一仓两个现役台名」事故回归，灰盒 L1 离线）：契约真源=server/docker-compose.test.yml 的 SANDBAR_TEST_NAMESPACE 缺省插值（恰 2 处且相等，记 C），四层锚定 fail-closed——integration/stage_docker.py 全部 opts.get(\"namespace\") 回落（恰 2 处）==C（起台入口显式覆盖 compose 声明=本票事故真源形态）、integration/baselines/ticket-lifecycle-scenes.mjs TEST_NS（恰 1 处）==C（保护文件只读断言，收口随人审放行或 main 直修）、integration 树 .py/.mjs 引号旧名字面量必须行含 naming-compat 且锚在 ALLOW 册（file→最大出现数→逐条理由）双锁内（单 marker 注释不得洗白——旧名漂移存活通道即此）、docs/testing-guide.md 与 integration/README.md 旧名表述零残留；锚缺失/数量≠预期/值不可解析一律红（vacuous pass 即本票钉死的静默漂移反面，KI-051 同族）；自证红绿=tmp 合成样本（干净样本绿/漂移样本红/锚缺失红/锚数异常红/双锁语义红绿/扫描器不误伤无引号注释）。与 t260910-11-temporal-isolation-guard 分工：彼守测试腿不写生产台（目标面红线），本守测试台命名空间名全仓一致（名字面漂移）；与 t260907-04 命名看守分工见场景头注（契约值一致性 vs 全树旧标识零容忍，注释/文案面归彼不重复设防）。纯 stdlib 秒级零网络；实现落地前红属预期（TDD 信号，baselines 收口前 c 条+字面量条红=如实记账），arbitrate/merge 期必须绿",
      "python3 integration/t260917-07/sc_test_ns_consistency.py", "ro"),
 
+    # ---- t260917-09: tests_rounds 上限连续语义 + 假封防护（260917 三票假封实证） ----
+    # 三票共性=产品面干净、余红为环境/负载/存量第三方问题，但累计计数已达 6 → 一律
+    # 转人工。本组两场景分层：streak_reset 锁「连续语义复位边」（code-fault/rework
+    # 重入清零 + 上限对照），false_escalation_guard 锁「不计轮豁免面」（抖动/环境红
+    # 不计入、不在册保守计轮、豁免超限面 authorize 真消费）。实现落地前红属预期
+    # （TDD 信号），arbitrate/merge 期必须绿；docker/镜像/舞台缺件=ENV_FAIL exit 2。
+    ("t260917-09-tests-streak-reset",
+     "tests-fault 上限连续语义端到端（t260917-09 要求①②/验收①④，灰盒 L3，真 docker 台+桩脑序列桩+工单专属 worker）：shared.py:287 注释口径「连续 tests-fault 轮」兑现为行为——任何非 tests-fault 边后计数清零，长票不再被陈年轮次假封（260917 三票 t260916-19/-21、t260917-04 共性机制），上限本体不拆。相一 code-fault 复位边：桩判决序列 tf,tf,code-fault,tf×5+耗尽回落 pass（耗尽回落=主腿确定性终态，防第 N+1 判决撞上限致场景自身假红）→ 打回 implement 后计数清零，后续 5 轮计 1..5 恒迭代、第 9 判决回落 pass 进 acceptance 全程不 blocked，handoff「测试集迭代（第 1 轮）」≥2 次（复位签名）+code-fault 打回边在场；旧累计语义第 8 判决必 blocked（语义反转强断言）。相二对照腿：恒 tests-fault 第 7 判决 blocked，回执含「超限」且 authorize/rework/ruling/pause 出路关键词全在（要求④出路可执行，不许只写「转人工判读」）。相三 rework 重入复位边：tf×5 邻界（预增判定恒不封）→人 op=rework 打回 implement→重进测试段清零→再 2 轮 tf 计 1..2+回落 pass 推进不 blocked，「第 1 轮」≥2+implement 段重入证据在桩账本；旧语义重入不清零第 7 判决必 blocked——「被外部打断的长票必然累积到上限」的直击面。验收①矩阵 [tf,tf,pass,tf×4] 在 L1 纯函数层（developer 交付）：pass 判决直接路由 acceptance，复位只在重入时可观测，故 L3 钉 code-fault/rework 复位边（与 pass/authz 复位共用单点收口）。分工：t260908-01 sc_ki061_* 锁超限唤醒复活（KI-061）；t260912-03 sc_authz_* 锁 cap 面 authorize 通道；同票 sc_tests_false_escalation_guard 锁豁免面——不同面不互替。序列桩为本票自有（lib_ki061 桩是常量 verdict）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker/镜像/舞台缺件=ENV_FAIL exit 2 点名",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260917-09/tests/sc_tests_streak_reset.py", "engine"),
+    ("t260917-09-tests-false-escalation-guard",
+     "假封防护面（t260917-09 要求③④/验收②③，灰盒 L3，真 docker 台+真 verify_lane integ 道+夹具迷你执行器+工单专属 worker）：tests-fault 但红属「负载抖动」（红项当轮串行复跑全绿，KI-072 同族：并发假红单跑绿=t260916-21「6 闸拦复跑 6/6 全绿」形态）或「环境面红」（env_fail>0 且产品红=0 且闸拦=0，=t260916-19/-04 形态）时该轮不计入上限。抖动腿：夹具案首跑造记并红、复跑绿（marker 确定性形）→首轮不计入（票面留痕「不计入」+点名红项），其后红项已绿照计→第 8 判决才封（计 6>5；无豁免第 7 判决即封=计数算术强断言）。不在册腿：陈旧红项名（刻意不在注册表，基线改名/闸拦面遗留形态）→探针 fail-closed 保守计轮并票面点名「不在册」→第 7 判决封（计数与旧语义同形=回归稳定面；点名=新行为钉子，封死死源静默当全绿）。环境红腿：确定性环境红（not-checked+external 经真闸归属 record 不拦）→每轮豁免→第 6 轮连续豁免撞独立上限 blocked（出路文案在）→人 op=authorize 接受本判决+retry_qc 唤醒→复位计数推进 acceptance（uses≥1+handoff 点名接受与豁免面）——authorize 在豁免超限封面必须真消费（C2 新消费点；t260912-03 锁的是 cap 面通道，本条锁豁免面消费，不同面）。夹具链=真闸契约（规范行+INTEG_SUMMARY 五键+红面 rc≠0），mini 执行器为场景自有资产随夹具仓落库；闸拦面红项（真回归基线拦）的并集半边由 developer L1 钉（L3 强造基线竞态会引入不定性，诚实不造）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker/镜像/舞台缺件=ENV_FAIL exit 2 点名",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260917-09/tests/sc_tests_false_escalation_guard.py", "engine"),
+
 ]
 
 CMD_TIMEOUT = 900
@@ -1768,6 +1781,69 @@ def print_pool_assets(pool_arg):
     return 0
 
 
+def reprobe_main(names) -> int:
+    """--reprobe：只复跑点名条目，串行逐条（t260917-09 探针出口，证据面非闸面）。
+
+    消费方=引擎 activity reprobe_red_scenarios（仲裁判 tests-fault 后，对红项串行
+    复跑一轮取证「负载抖动」：全绿→该轮不计入 tests-fault 轮次）。设计纪律：
+    - name→cmd 单一真源=本文件 SCENARIOS 注册表；调用方只报名单，绝不携带 cmd
+      （activity 侧另立执行语义=双实现，禁）。
+    - 执行语义与全量跑**同一实现**（复用 _run_entry：/bin/sh -c＋仓根 cwd＋
+      CMD_TIMEOUT，超时/OSError 分类落红不穿透）。
+    - 占同泳道单飞锁（真执行≠--print-pool-assets 的纯读免锁）；锁忙=fail-closed。
+    - fail-closed 两态统一打 REPROBE_SUMMARY 行（R1 定案）：任一名字不在册→**一条
+      都不跑**、error 点名 missing（保守计轮的机械信号）；请求名单空→同 fail-closed
+      （探针无名单=调用方 bug，不静默当全绿）。
+    - 缺省路径（无 flag）逐字节不变；本出口独立进程可注入 mini 注册表（既有电池
+      先例）。
+    """
+    req = []
+    for n in (names or []):
+        n = str(n).strip()
+        if n and n not in req:
+            req.append(n)
+    by_name = {e[0]: e for e in SCENARIOS}
+    found = [by_name[n] for n in req if n in by_name]
+    missing = [n for n in req if n not in by_name]
+
+    def _summary(ran, passed, failed, env_failed, missing_, error, entries):
+        print("REPROBE_SUMMARY %s" % json.dumps(
+            {"ran": ran, "passed": passed, "failed": failed,
+             "env_fail": env_failed, "missing": missing_, "error": error,
+             "entries": entries}, ensure_ascii=False), flush=True)
+
+    if not req or missing:
+        _summary(0, 0, 0, 0, missing,
+                 "reprobe 名单非法（空名单/含不在册名）——一条都未跑" if not req
+                 else "红项不在册：%s——一条都未跑（保守计轮信号）" % ",".join(missing),
+                 [])
+        return 2
+    fd = _acquire_run_lock()
+    if fd == -1:
+        _summary(0, 0, 0, 0, [], "同泳道单飞锁忙（有全量跑在途）——本轮未复跑", [])
+        return 2
+    ran = passed = failed = env_failed = 0
+    entries = []
+    try:
+        for e in found:
+            name, code, tail, dur, _t0, _full = _run_entry(e)
+            ran += 1
+            if code == 0:
+                passed += 1
+            elif code == 1:
+                failed += 1
+            else:
+                env_failed += 1
+            entries.append({"name": name, "exit": int(code), "dur_s": round(dur, 1)})
+            mark = "过" if code == 0 else ("败" if code == 1 else "环境红")
+            print("  复跑 [%s] %s（exit=%s，%.0fs）%s"
+                  % (name, mark, code, dur, tail.strip().replace("\n", " ⏎ ")[:200]),
+                  flush=True)
+    finally:
+        _summary(ran, passed, failed, env_failed, [], "", entries)
+    return 0 if (ran == len(found) and failed == 0 and env_failed == 0) else 1
+
+
 def main(exclude_pools=None) -> int:
     """Run the registry as pools (host-ordered t260902 pool split): an entry
     may carry an optional fourth element — None/absent = the "main" pool;
@@ -2128,6 +2204,12 @@ def _cli(argv):
     if "--print-pool-assets" in argv:
         i = argv.index("--print-pool-assets")
         return print_pool_assets(argv[i + 1] if i + 1 < len(argv) else "")
+    # --reprobe（t260917-09）：探针出口自带单飞锁获取（reprobe_main 内），故在
+    # 通用锁获取之前分流；名单 CSV 逗号分隔（注册表名=[a-z0-9-] 族 slug）。
+    if "--reprobe" in argv:
+        i = argv.index("--reprobe")
+        raw = argv[i + 1] if i + 1 < len(argv) else ""
+        return reprobe_main([x for x in raw.split(",") if x.strip()])
     if _acquire_run_lock() == -1:
         return 2
     if "--exclude-pools" in argv:

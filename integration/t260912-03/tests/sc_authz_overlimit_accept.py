@@ -272,6 +272,11 @@ def main():
               and snap.get("stage") in OVER_LIMIT_STAGES,
               "B① 无授权 tests-fault 超限 → 仍 blocked（stage=%s state=%s；含「超限」）"
               % (snap.get("stage"), snap.get("stage_state")))
+        # t260917-09 扩展（出路文案，同帧零成本）：超限封面必须给可执行出路，
+        # 不许只写「转人工判读」（t260917-09 要求④；blocked 前缀逐字兼容由引擎
+        # 单测钉，此处锚用户可读关键词）。实现落地前红属预期（TDD 信号）。
+        check("authorize" in snap_text(snap) and "rework" in snap_text(snap),
+              "B①+t260917-09 超限回执含出路关键词 authorize/rework（出路文案）")
         check(rounds1 >= 6, "B① arb 桩已驱动到超限（arbitrate 账本 %d 轮 ≥ 6）" % rounds1)
         check(not authz_items(snap),
               "B① 无授权：meta['authorizations'] 不存在或为空（%d 条）"

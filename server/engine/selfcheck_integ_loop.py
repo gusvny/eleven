@@ -243,6 +243,17 @@ ok("review_plan_route(" in src and "parse_review_plan_verdict(" in src,
    "review_plan 三态判定与路由走 shared 纯函数")
 ok('"arb_acc_parallel"' in src and '"arb_acc_parallel": "integration"' in src,
    "arb_acc_parallel 进 PHASE_MAIN_CHAIN/ROLES（fb 回落与词表校验可吃）")
+# t260917-09：tests 连续计数结构面（patch 门/单写者转移/豁免封面/探针接线）
+ok("TESTS_STREAK_PATCH_ID = " in src,
+   "t260917-09 新 patch 门已声明（同构布尔门，重放安全）")
+ok("tests_round_step(" in src and src.count("tests_rounds += 1") == 2,
+   "tests 计数转移走纯函数（门内），旧路径两处 +=1 保留（重放可达）")
+ok("tests_exempt_cap_blocked_text(" in src and "_blocked_over_limit(" in src,
+   "连续豁免超限封面出路文案＋KI-061 复活守卫在场")
+ok("reprobe_red_scenarios," in src and "_tests_round_account(" in src,
+   "探针活动接线＋两分支共用计轮判定（单写者）")
+ok("cur_integ = ir" in src and "cur_integ = None" in src,
+   "本轮机械回执快照赋值（翻译处）与段入口清零（R3）")
 
 section("F parse_review_plan_verdict / review_plan_route（t260903-02 三态附条件放行）")
 from shared import parse_review_plan_verdict, review_plan_route  # noqa: E402

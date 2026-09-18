@@ -275,17 +275,22 @@ def next_ticket_seq_from_ids(prefix: str, ids) -> int:
 # ---- Integration-test machinery (follow-on to ticket t260829-07, dev-lane development ∥ test design) ----
 # The test set = the repo root's integration/ directory (**committed code assets**,
 # entering main through the lane like everything else);
-# manifest contract: integration/manifest.json = [{"name": str, "cmd": str, "cwd": str?}],
-# each cmd is executed with the lane root as cwd (shell semantics: the worker shlex
-# splits it and runs the pieces one by one).
+# declaration surface = integration/run_scenarios.py's SCENARIOS registry
+# [(name, intent, cmd[, pool][, "serial"?])]; each cmd runs with the repo root as
+# cwd via /bin/sh -c, 900s per entry (single execution semantic — callers never
+# shlex-split). The long-retired JSON manifest contract must NOT come back
+# (integration/t260902-12 pins the file's absence; t260917-09 rewrote this stale
+# note that had misled design work back to the dead contract).
 # Confidentiality deferred (ticket t260831-02): the agent has no read sandbox and no
 # physical isolation for now — it is enough that the developer prompt/handoffs neither
 # steer toward nor display the test set's contents; sandbox-level limits come later.
 
 INTEG_DIR_NAME = "integration"
-INTEG_MANIFEST = "manifest.json"
-MAX_TESTS_FAULT_ROUNDS = 5     # test-set iteration cap (consecutive tests-fault rounds judged by arbitrate)
-MAX_CODE_FAULT_ROUNDS = 5      # bounce-to-developer cap (cumulative code-fault rounds judged by arbitrate)
+# t260917-09 定语义：两个上限**有意分叉**——tests 面是「连续」（收敛即清零，复位点
+# 全表见 tests_round_step），code-fault 面保持「累计」（打回修码成本更高）。
+MAX_TESTS_FAULT_ROUNDS = 5     # test-set iteration cap (CONSECUTIVE tests-fault rounds judged by arbitrate)
+MAX_CODE_FAULT_ROUNDS = 5      # bounce-to-developer cap (CUMULATIVE code-fault rounds judged by arbitrate)
+MAX_TESTS_EXEMPT_ROUNDS = 5    # consecutive exempted (not-counted) tests-fault rounds — env-side red (scenario env_fail / supply-assembly fail) / jitter re-run green; anti-live-loop cap (t260917-09)
 MAX_ACCEPTANCE_ROUNDS = 2      # acceptance-report rewrite cap (an inadequate report → bounce back to acceptance)
 MAX_REVIEW_ROUNDS = 5          # plan-review bounce cap (the review_plan reject loop; consumed by review_plan_route)
 
@@ -294,8 +299,8 @@ ARBITRATION_VERDICTS = ("pass", "tests-fault", "code-fault")
 
 @dataclass
 class IntegrationRunArgs:
-    """Inputs of run_integration_tests: run each entry of integration/manifest.json
-    inside the lane."""
+    """Inputs of run_integration_tests: run the lane's SCENARIOS registry entries
+    (integration/run_scenarios.py) inside the lane."""
 
     ticket_id: str
     worktree: str                               # the lane root (the cmds' cwd, where the test set lives)
@@ -338,6 +343,75 @@ class IntegrationRunResult:
     handover_ran: int = 0
     handover_passed: int = 0
     handover_failed: int = 0
+
+
+@dataclass
+class ReprobeRedArgs:
+    """t260917-09 探针入参：红项**名单**（name→cmd 解析=执行器 SCENARIOS 单一真源，
+    调用方绝不携带 cmd——activity 侧另立执行语义=双实现，禁）。"""
+
+    ticket_id: str
+    worktree: str
+    names: List[str] = field(default_factory=list)
+
+
+@dataclass
+class ReprobeRedResult:
+    """t260917-09 探针回执。定位=**证据活动，非闸面**：只决定该轮是否计入
+    tests-fault 轮次上限，永不推进票面。error 非空（解析失败/不在册/超时/锁忙/
+    非零退出）=探针未证全绿=调用方**保守计轮**，绝不因探针缺席放行。"""
+
+    ran: int = 0
+    passed: int = 0
+    failed: int = 0
+    env_fail: int = 0
+    missing: List[str] = field(default_factory=list)
+    entries: List[Dict[str, Any]] = field(default_factory=list)  # [{name,exit,dur_s}]
+    error: str = ""
+
+    def all_green(self) -> bool:
+        """抖动判定（纯函数面，UT 直驱）：有真跑、零产品红、零环境红、零不在册、
+        零 error——五条同时成立才算「红项串行复跑全绿」。"""
+        return (self.error == "" and self.ran >= 1 and self.failed == 0
+                and self.env_fail == 0 and not self.missing)
+
+
+REPROBE_SUMMARY_MARK = "REPROBE_SUMMARY "
+
+
+def parse_reprobe_summary(stdout_text: str, returncode: int) -> ReprobeRedResult:
+    """解析 --reprobe stdout 的末行 REPROBE_SUMMARY（纯函数，UT 直驱四态：良/缺行/
+    畸形/exit≠0）。R1 定案：fail-closed 也打汇总行——先解析行（missing/error 得以
+    点名上票面），再按 returncode/行内 error/missing 补判保守计轮信号。"""
+    out = ReprobeRedResult()
+    line = ""
+    for ln in str(stdout_text or "").splitlines():
+        if ln.startswith(REPROBE_SUMMARY_MARK):
+            line = ln[len(REPROBE_SUMMARY_MARK):].strip()
+    if not line:
+        out.error = "探针回执缺 REPROBE_SUMMARY 行（执行器提前退出？）rc=%s" % returncode
+        return out
+    import json as _json  # 函数内延迟 import（单文件加载面纪律，见文件头注）
+    try:
+        doc = _json.loads(line)
+    except ValueError:  # JSONDecodeError ⊂ ValueError（单文件加载面不引 json 全名）
+        out.error = "探针回执 REPROBE_SUMMARY 非法 JSON：%s" % line[:160]
+        return out
+    if not isinstance(doc, dict):
+        out.error = "探针回执 REPROBE_SUMMARY 非对象：%s" % line[:160]
+        return out
+    out.ran = int(doc.get("ran") or 0)
+    out.passed = int(doc.get("passed") or 0)
+    out.failed = int(doc.get("failed") or 0)
+    out.env_fail = int(doc.get("env_fail") or 0)
+    out.missing = [str(x) for x in (doc.get("missing") or [])]
+    out.entries = [dict(x) for x in (doc.get("entries") or [])
+                   if isinstance(x, dict)]
+    row_error = str(doc.get("error") or "")
+    if returncode != 0 or row_error or out.missing:
+        out.error = row_error or ("探针 exit=%s（missing=%s）"
+                                  % (returncode, ",".join(out.missing) or "无"))
+    return out
 
 
 def integ_verify_payload(lane_root, write_set=None, apply_skip_pools=False):
@@ -397,22 +471,102 @@ def parse_arbitration_summary(summary: str) -> str:
     return hits[0] if len(hits) == 1 else ""
 
 
+# 人工出路四条（t260917-09 要求④：超限封面不许只写「转人工判读」）。全部是
+# server/tools/ticket.py 真实存在的 op（authorize/ruling/rework/pause；无 terminate，
+# 不发明出口）；前缀文案逐字保持既有断言兼容（test_integration_route / KI-061
+# startswith / 场景关键词「测试集迭代」「超限」）。
+_ARBITRATION_CAP_EXITS = (
+    "。出路：① op=authorize（kind=arbitration_verdict，scope=[本票票号]）"
+    "接受本判决→推进验收（判据：产品面已收口、余红属环境/负载抖动）；"
+    "② op=ruling 宿主终裁改判；③ op=rework 打回 implement/create_plan 修正；"
+    "④ op=pause 暂停交人工处置")
+
+
 def integration_route(verdict: str, tests_rounds: int, code_rounds: int) -> str:
     """The arbitrate three-state route (pure function, tested directly by the
     selfcheck). Returns the next phase name or "blocked:<reason>".
     Caps (ticket t260831-02): test-set iteration and bounce-to-developer each 5 rounds;
-    past the cap, blocked and handed to a human."""
+    past the cap, blocked and handed to a human — with executable human exits named
+    (t260917-09; the authorize consumption lives in arbitration_cap_route).
+    NOTE the deliberate semantic fork (t260917-09): the tests cap counts CONSECUTIVE
+    tests-fault rounds (reset per tests_round_step), the code-fault cap stays
+    CUMULATIVE."""
     if verdict == "pass":
         return "acceptance"
     if verdict == "tests-fault":
         return "run_integration_tests" if tests_rounds <= MAX_TESTS_FAULT_ROUNDS else \
-            "blocked:测试集迭代 %d 轮超限（上限 %d），转人工判读" % (
-                tests_rounds, MAX_TESTS_FAULT_ROUNDS)
+            "blocked:测试集迭代 %d 轮超限（上限 %d），转人工判读%s" % (
+                tests_rounds, MAX_TESTS_FAULT_ROUNDS, _ARBITRATION_CAP_EXITS)
     if verdict == "code-fault":
         return "implement" if code_rounds <= MAX_CODE_FAULT_ROUNDS else \
-            "blocked:打回 developer %d 轮超限（上限 %d），转人工判读" % (
-                code_rounds, MAX_CODE_FAULT_ROUNDS)
+            "blocked:打回 developer %d 轮超限（上限 %d），转人工判读%s" % (
+                code_rounds, MAX_CODE_FAULT_ROUNDS, _ARBITRATION_CAP_EXITS)
     return "blocked:仲裁结论未知 verdict=%r，转人工判读" % verdict
+
+
+def tests_round_step(verdict: str, tests_rounds: int, exempt_rounds: int, *,
+                     env_side_red: bool = False, jitter_green: bool = False):
+    """连续 tests-fault 轮计数器转移（纯函数，t260917-09；UT 直接驱动矩阵）。
+
+    定案语义=**连续**：上限 MAX_TESTS_FAULT_ROUNDS 只数「连续被判 tests-fault 的仲裁
+    轮」——任一轮非 tests-fault（pass / code-fault / 非法 verdict / 人工接受判决，
+    调用方传伪 verdict="accept-reset" 复用本分支，R2 单写者纪律）即复位清零。与
+    MAX_CODE_FAULT_ROUNDS 的累计语义有意分叉（打回修码成本更高，见常量区注释）。
+
+    假封防护（260917 三票实证）：tests-fault 但该轮红项全在环境面（env_side_red=
+    机械口径来自 IntegrationRunResult，两形态——场景级=产品红 0＋闸拦 0＋环境红≥1；
+    装配级=零跑＋error 命中供给装配签名，见 tests_supply_assembly_error）或红项串行
+    复跑全绿（jitter_green=负载抖动，KI-072 同族）→ 本轮**不计入**，改记连续豁免轮；
+    连续豁免到 MAX_TESTS_EXEMPT_ROUNDS 由调用方转 tests_exempt_cap_blocked_text
+    封面（防活循环）。
+
+    返回 (tests_rounds, exempt_rounds, counted, note)。畸形入参（负数/非 int 轮次、
+    非布尔信号）fail-closed：不抛、不静默清零成「复位」，按普通计轮处理——保守侧
+    多计不少计（消费外部输入的纪律）。
+    """
+    if not isinstance(env_side_red, bool):
+        env_side_red = False
+    if not isinstance(jitter_green, bool):
+        jitter_green = False
+    if verdict != "tests-fault":
+        return 0, 0, False, "streak-reset"
+    if not isinstance(tests_rounds, int) or isinstance(tests_rounds, bool) \
+            or tests_rounds < 0:
+        tests_rounds = 0          # 畸形归零后照常走计轮面（保守侧，不当复位用）
+    if not isinstance(exempt_rounds, int) or isinstance(exempt_rounds, bool) \
+            or exempt_rounds < 0:
+        exempt_rounds = 0
+    if env_side_red or jitter_green:
+        return tests_rounds, exempt_rounds + 1, False, (
+            "env-side-red" if env_side_red else "jitter-green")
+    return tests_rounds + 1, 0, True, "counted"
+
+
+# 供给装配失败的机械签名（t260917-09 gen11 打回补）。真源唯一=verify_lane 乙段
+# supply 装配（server/tools/verify_lane.py）两态文案：「supply 装配超时」「supply
+# 装配失败」，尾巴皆带「供给面红点名，不静默」。签名取**双标记合取**——窄而准：
+# 其他启动级 error（执行器整体超时/无有效输出/声明未知键）不命中、照旧保守计轮；
+# 单标记误命中面（如「supply 装配好了」）被另一标记兜住。
+SUPPLY_ASSEMBLY_ERROR_MARKS = ("supply 装配", "供给面红")
+
+
+def tests_supply_assembly_error(error: Any) -> bool:
+    """回执 error 是否命中「供给装配失败」机械签名（纯函数，t260917-09 gen11；
+    UT 直驱）。命中=该轮 tests-fault 属环境面豁免（供给波动，工单要求③字面兑现，
+    不计入 tests-fault 轮次）；畸形/不命中=False（保守计轮——绝不因签名解析不出
+    放行，消费外部输入的 fail-closed 纪律）。"""
+    if not isinstance(error, str) or not error:
+        return False
+    return all(m in error for m in SUPPLY_ASSEMBLY_ERROR_MARKS)
+
+
+def tests_exempt_cap_blocked_text(exempt_rounds: int) -> str:
+    """连续豁免轮超限的 blocked 文案（纯函数，t260917-09）：与 cap 超限同族——
+    含「超限」关键词供场景/快照判据，出路四条全是 ticket.py 真实 op。authorize 的
+    消费点在 dev_lane 豁免超限分支（授权在场=接受本判决复位推进，不落本封面）。"""
+    return ("测试集连续 %d 轮红项均属环境面/负载抖动（连续豁免超限，上限 %d），"
+            "转人工判读%s" % (exempt_rounds, MAX_TESTS_EXEMPT_ROUNDS,
+                              _ARBITRATION_CAP_EXITS))
 
 
 # ---- 仲裁段 settle 闸拒可辨（工单 t260917-01）----

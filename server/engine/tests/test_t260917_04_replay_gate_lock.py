@@ -331,6 +331,17 @@ BRANCH_REGISTRY = {
         "每次进入换 id，memo 不毒化）自守重放，分支选择本身零新命令形态；串行仲裁侧。",
     "dev_lane.py#run#await self._blocked_over_limit(route.split(':', 1)[1])#1":
         "同上（并行汇合侧同形分支，KI-061 同款自守机制）。",
+    # t260917-09 豁免超限封面两处（串行/并行汇合侧）：外层已处
+    # workflow.patched(TESTS_STREAK_PATCH_ID) 门内（AST 祖先链核实，自证钉在
+    # test_t260917_09_tests_streak.py::test_j_exempt_cap_sites_inside_tests_streak_gate
+    # ——分支挪出门外该钉先红）。旧 history（无 marker）重放整块缺席=分支不可达；
+    # _blocked_over_limit 体内另有 KI-061 unique-per-entry 门自守（同上两款）。
+    "dev_lane.py#run#await self._blocked_over_limit(tests_exempt_cap_blocked_text(tests_exempt_rounds))#0":
+        "t260917-09：外层 workflow.patched(TESTS_STREAK_PATCH_ID) 门内（旧 history "
+        "重放走旧分支，分支不可达=重放安全）；体内 KI-061 unique-per-entry 自守。"
+        "串行仲裁侧连续豁免超限封面。",
+    "dev_lane.py#run#await self._blocked_over_limit(tests_exempt_cap_blocked_text(tests_exempt_rounds))#1":
+        "同上（并行汇合侧 arb_acc_parallel 同形分支，t260917-09 连续豁免超限封面）。",
 }
 
 

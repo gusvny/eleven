@@ -85,9 +85,11 @@ from shared import (
     ConflictSettleResult,
     HumanGateContext,
     HumanGatePrep,
-    INTEG_MANIFEST,
     IntegrationRunArgs,
     IntegrationRunResult,
+    ReprobeRedArgs,
+    ReprobeRedResult,
+    parse_reprobe_summary,
     MergeArgs,
     MergeCheckArgs,
     MergeCheckResult,
@@ -5449,6 +5451,56 @@ async def _run_integration_tests_body(args: IntegrationRunArgs) -> IntegrationRu
                                 handover_runs=list(getattr(args, "handover_runs", None) or []))
 
 
+@activity.defn
+async def reprobe_red_scenarios(args: ReprobeRedArgs) -> ReprobeRedResult:
+    """t260917-09 探针：红项串行复跑一轮（证据活动，**非闸面**）。
+
+    仲裁判 tests-fault 后，对红项名单串行复跑取证「负载抖动」（KI-072 同族：并发
+    假红、单跑全绿）——全绿→该轮不计入 tests-fault 轮次。三条纪律：
+    - cmd 解析与执行语义全在执行器侧（run_scenarios.py --reprobe，SCENARIOS 单一
+      真源＋复用 _run_entry）；本活动只下单名单，绝不解析/携带 cmd。
+    - error 非空=探针未证全绿=调用方**保守计轮**（名单空/泳道无执行器/超时/锁忙/
+      不在册/回执非法——fail-closed 方向恒为「多计不少计」，绝不因探针缺席放行）。
+    - 全终态回收：wait_for 超时先 kill 再 wait（diag-query-starvation 教训：异步
+      活动禁阻塞 subprocess）；worker 停机取消由 worker_termination_guard 点名。
+    """
+    async with worker_termination_guard(args.ticket_id, "reprobe_red_scenarios", None):
+        return await _reprobe_red_body(args)
+
+
+async def _reprobe_red_body(args: ReprobeRedArgs) -> ReprobeRedResult:
+    names = [str(n).strip() for n in (getattr(args, "names", None) or [])
+             if str(n).strip()]
+    if not names:
+        return ReprobeRedResult(error="探针名单为空（红项名单组装失败）——保守计轮信号")
+    wt = Path(args.worktree) if args.worktree else REPO_ROOT
+    if not wt.is_absolute():
+        wt = REPO_ROOT / wt
+    runner = wt / "integration" / "run_scenarios.py"
+    if not runner.is_file():
+        # 泳道无执行器（夹具票/非常规泳道形态）——真源缺席=fail-closed，不是「全绿」
+        return ReprobeRedResult(
+            error="泳道无 run_scenarios.py（%s）——探针真源缺席，保守计轮" % runner)
+    p = await asyncio.create_subprocess_exec(
+        "python3", str(runner), "--reprobe", ",".join(names),
+        cwd=str(wt), stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE)
+    try:
+        p_out_b, p_err_b = await asyncio.wait_for(
+            p.communicate(), timeout=BATCH_TIMEOUT_SEC + 300)
+    except asyncio.TimeoutError:
+        p.kill()
+        await p.wait()
+        return ReprobeRedResult(
+            error="探针整体超时（>%ds）——进程已回收，保守计轮"
+                  % (BATCH_TIMEOUT_SEC + 300))
+    res = parse_reprobe_summary(p_out_b.decode("utf-8", "replace"), p.returncode or 0)
+    if not res.error and (p.returncode or 0) != 0:
+        res.error = "探针 exit=%s（stderr 尾=%s）" % (
+            p.returncode, (p_err_b.decode("utf-8", "replace") or "")[-160:])
+    return res
+
+
 # ---- t260913-02：巡检自有泳道 + 跑全集（复用面，不新造第二套）----
 #
 # 三件都是薄壳：决策/形状全在纯函数面（inspection_flow / inspection_deadman），
@@ -6355,6 +6407,9 @@ ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     # prompt is assembled by the workflow, with session reuse), not in AGENT_STAGE_IDS
     # (custom result judgement).
     settle_lane, run_integration_tests, arbitrate, acceptance_walkthrough,
+    # t260917-09 探针（证据活动非闸面）：仲裁判 tests-fault 后对红项串行复跑取证
+    # 「负载抖动」；缺注册=仲裁期运行时才炸（同上纪律）。
+    reprobe_red_scenarios,
     # 巡检自有泳道 + 跑全集（t260913-02）：resolve_main_head=基点证据（main HEAD sha）；
     # sweep_inspection_lanes=残留清扫（setup 前置 + CLI 兜底）；run_inspection_suite=巡检期
     # 在自有泳道里跑全集（同一个 _run_scenarios 跑法、同一个回执形状）。

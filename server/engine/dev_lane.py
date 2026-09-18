@@ -58,6 +58,7 @@ with workflow.unsafe.imports_passed_through():
         prepare_human_gate,
         prepare_ui_evidence,
         prepare_workspace,
+        reprobe_red_scenarios,
         run_integration_tests,
         settle_conflict_resolution,
         settle_lane,
@@ -74,7 +75,13 @@ with workflow.unsafe.imports_passed_through():
         MAX_ACCEPTANCE_ROUNDS,
         MAX_CODE_FAULT_ROUNDS,
         MAX_REVIEW_ROUNDS,
+        MAX_TESTS_EXEMPT_ROUNDS,
         MAX_TESTS_FAULT_ROUNDS,
+        ReprobeRedArgs,
+        ReprobeRedResult,
+        tests_exempt_cap_blocked_text,
+        tests_round_step,
+        tests_supply_assembly_error,
         TICKET_STATUSES,
         AUTH_ARBITRATION_VERDICT,
         AUTH_PROTECTED_PATH,
@@ -156,6 +163,9 @@ HEARTBEAT_TO = timedelta(minutes=3)
 # 本值**——那走每日巡检的 `inspection_flow.SUITE_TO=120min`（恒全跑、不经池排除，
 # 已按同一不等式钉住 > 5700s），两条预算各守各的面。
 INTEG_RUN_TO = timedelta(minutes=60)
+# t260917-09：探针活动 start_to_close——红项子集串行复跑（每条执行器侧 900s 帽），
+# 预算沿用全量跑同档（子集恒 ≤ 全量；activity 内另有 wait_for 兜底 kill→wait 回收）。
+REPROBE_TO = INTEG_RUN_TO
 RETRY = RetryPolicy(maximum_attempts=3)  # infra failures only; business verdicts go via StageResult.status
 # Boolean patch gates (same family as workflows.py's WORKER_RECONCILE_PATCH_ID): a
 # parked old workflow replays down the old branch, so a new gate must not bump
@@ -262,6 +272,16 @@ LANE_DSH_BLOCK_PATCH_ID = "dev-lane-lane-dsh-block-v1"
 # 布尔门先例补门：旧历史走旧串行分支（不复位、不调守门），新历史走新分支；不 bump
 # 既有 PATCH_ID。
 ARBITRATE_REFUSAL_PATCH_ID = "dev-lane-arb-refusal-v1"
+# t260917-09：tests_rounds 上限定语义「连续」——计数转移/复位点全走 shared 纯函数
+# tests_round_step（pass / code-fault / 非法 verdict / 人工接受判决即复位），tests-fault
+# 但红项属环境面或抖动复跑全绿则该轮豁免不计（连续豁免独立上限）；环境面含两形态
+# （gen11 打回补）：场景级 env_fail 与装配级供给装配失败（零跑+供给签名，留痕点名
+# 供给面）。同构布尔门：旧历史
+# （无本 marker）逐字旧行为（累计口径、无复位、无探针），在途票不追溯。
+# 门不需要 KI-061 式 #seq 后缀：本门全部求值点都在主循环直线段（不在 wait_condition
+# 唤醒路径上），不存在「重放期先评 False、活唤醒须翻 True」的路径；实现后若发现绕行
+# 路径再按 _blocked_over_limit 同形补后缀。
+TESTS_STREAK_PATCH_ID = "dev-lane-tests-streak-v1"
 # prepare_ui_evidence activity timeout: must be **clearly larger** than the subprocess
 # timeout inside the activity (agent_activities.UI_CAPTURE_TIMEOUT_SEC=240s), otherwise
 # Temporal kills the activity first and the subprocess's own timeout recovery never runs.
@@ -867,6 +887,124 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
             return False
         return workflow.patched("%s#%d" % (KI061_WAKE_RESET_PATCH_ID, n))
 
+    # ---------- t260917-09：tests 连续计数（串行/平行两分支共用） ----------
+    def _tests_supply_assembly_fail(self, cur_integ) -> bool:
+        """装配级供给失败形态（机械口径，t260917-09 gen11 打回补）：零跑＋零产品
+        红＋零闸拦＋零环境红＋error 命中供给装配签名（verify_lane 乙段 supply 装
+        配超时/失败两态，签名单写者=shared.tests_supply_assembly_error）。docker
+        长离线类宿主事实在仓内无修复面，保守计轮只会把票推假封（工单正文要掐断的
+        「环境红→计轮→假封→人工判读」链的供给形态）；形态判定宁窄勿宽——签名不
+        命中/字段畸形=False 照旧保守计轮，绝不因豁免口径扩大放走产品红。"""
+        if cur_integ is None:
+            return False
+        try:
+            ran = int(getattr(cur_integ, "ran", 0) or 0)
+            failed = int(getattr(cur_integ, "failed", 0) or 0)
+            env_fail = int(getattr(cur_integ, "env_fail", 0) or 0)
+        except (TypeError, ValueError):
+            return False
+        if ran != 0 or failed != 0 or env_fail != 0:
+            return False
+        if getattr(cur_integ, "blockers", None):
+            return False
+        return tests_supply_assembly_error(getattr(cur_integ, "error", "") or "")
+
+    def _tests_env_side_red(self, cur_integ) -> bool:
+        """本轮红项是否全在环境面（机械口径，t260910-13；t260917-09 gen11 扩口径）：
+        场景级=产品红 0＋闸拦 0＋环境红 ≥1；装配级=供给装配失败（见
+        _tests_supply_assembly_fail）。cur_integ 缺席（旧回放/异常路径）=False
+        （保守计轮）。"""
+        if cur_integ is None:
+            return False
+        try:
+            failed = int(getattr(cur_integ, "failed", 0) or 0)
+            env_fail = int(getattr(cur_integ, "env_fail", 0) or 0)
+        except (TypeError, ValueError):
+            return False
+        blockers = getattr(cur_integ, "blockers", None) or []
+        if failed == 0 and not blockers and env_fail > 0:
+            return True
+        return self._tests_supply_assembly_fail(cur_integ)
+
+    def _tests_red_names(self, cur_integ):
+        """红项名单（C4 单一来源）：details exit≠0 逐案名 ∪ blockers 闸拦名单，
+        剔除 __pool_exclude__/__gate_blockers__ 合成条目（前缀 __ 识别）。两源皆缺
+        或畸形=空名单（调用方保守计轮，不发探针——绝不把「解析不出」当「无红」）。"""
+        if cur_integ is None:
+            return []
+        names = []
+        for d in (getattr(cur_integ, "details", None) or []):
+            if not isinstance(d, dict):
+                continue
+            try:
+                ex = int(d.get("exit", 0) or 0)
+            except (TypeError, ValueError):
+                ex = 0
+            nm = str(d.get("name") or "")
+            if nm and ex != 0 and not nm.startswith("__") and nm not in names:
+                names.append(nm)
+        for b in (getattr(cur_integ, "blockers", None) or []):
+            b = str(b)
+            if b and not b.startswith("__") and b not in names:
+                names.append(b)
+        return names
+
+    async def _tests_round_account(self, tests_rounds, tests_exempt_rounds,
+                                   cur_integ):
+        """tests-fault 轮的计轮/豁免判定（串行与平行分支共用，单写者=纯函数
+        tests_round_step）。返回 (tests_rounds, tests_exempt_rounds, counted, note)。
+
+        - 环境面红（机械口径，两形态：场景级 env_fail / 装配级供给装配失败）→
+          豁免不计，不发探针；装配级留痕点名供给面（gen11 打回③，报错精确纪律：
+          不许把宿主供给事实说成「测试集连红」）；
+        - 否则红项名单非空 → 发探针（串行复跑一轮）取证负载抖动；全绿=豁免；
+        - 名单空 / 探针 error / 未证全绿 → 保守计轮（fail-closed 方向=多计不少计，
+          绝不因探针缺席放行）。门关（旧历史）时调用方不进本方法，行为逐字同旧。
+        """
+        env_side_red = self._tests_env_side_red(cur_integ)
+        jitter_green = False
+        probe_note = ""
+        if not env_side_red:
+            red_names = self._tests_red_names(cur_integ)
+            if red_names and workflow.patched(TESTS_STREAK_PATCH_ID):
+                try:
+                    rraw = await workflow.execute_activity(
+                        reprobe_red_scenarios,
+                        ReprobeRedArgs(ticket_id=self.ticket_id,
+                                       worktree=str(self.meta.get("worktree") or ""),
+                                       names=red_names),
+                        start_to_close_timeout=REPROBE_TO, retry_policy=RETRY)
+                    probe = rraw if isinstance(rraw, ReprobeRedResult) \
+                        else ReprobeRedResult(error="探针回执形状未知（旧 worker？）")
+                except Exception as e:  # noqa: BLE001 —— 探针故障=保守计轮，不拦主链
+                    probe = ReprobeRedResult(
+                        error="探针活动故障：%s: %s" % (type(e).__name__, e))
+                jitter_green = probe.all_green()
+                probe_note = ("抖动复跑全绿（红项=%s；%d 跑全过）"
+                              % (",".join(red_names), probe.ran)
+                              if jitter_green else
+                              "复跑未证全绿（%s）" % (probe.error or "有红"))
+        nr, ne, counted, step_note = tests_round_step(
+            "tests-fault", tests_rounds, tests_exempt_rounds,
+            env_side_red=env_side_red, jitter_green=jitter_green)
+        note = probe_note
+        if not counted and env_side_red:
+            if self._tests_supply_assembly_fail(cur_integ):
+                # 装配级形态留痕点名供给面（要求③）：出路封面同族豁免面已带四条
+                # 真出路；本条只负责把「红因=供给装配」写进票面可读面。
+                note = ("供给面装配失败（零跑，error 命中供给装配签名：%s）"
+                        "——不计入 tests-fault 轮次"
+                        % (str(getattr(cur_integ, "error", "") or "")[:120]))
+            else:
+                note = "环境面红（产品红 0/闸拦 0/环境红 %d）" % (
+                    int(getattr(cur_integ, "env_fail", 0) or 0))
+        if counted:
+            # 保守计轮也要把探针发现随留痕带上（红项不在册/复跑有红点名）——
+            # 「不在册」假绿是本票 C1 钉的死源形态，票面必须可读。
+            note = ("计轮（%s；%s）" % (step_note, probe_note)
+                    if probe_note else "计轮（%s）" % step_note)
+        return nr, ne, counted, note
+
     # ---------- structured red-light detail pins (t260915-01 ②) ----------
     def _pin_agent_refusal(self, res: StageResult) -> None:
         """agent 段闸拒绝的结构化明细 → meta['blocked_detail']（当前受阻明细）。
@@ -1339,7 +1477,15 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
         impl_done = False                         # parallel fork: implement edge finished
         design_done = False                       # parallel fork: design_integration_tests edge finished
         code_rounds = 0                           # arbitrate code-fault send-backs to developer, cumulative
-        tests_rounds = 0                          # arbitrate tests-fault suite iterations, cumulative
+        # t260917-09：tests 上限=连续语义（定案，纠正本行旧「cumulative」孤例——注释与
+        # shared.py 一致）。转移/复位单写者=tests_round_step 纯函数：
+        #   复位点=verdict∈{pass, code-fault, 非法}/人工接受判决（伪 verdict="accept-reset"）
+        #   /非迭代来源重进 run_integration_tests 段（tests_streak=False 时段入口）；
+        #   豁免轮=tests-fault 但红项属环境面（cur_integ 机械口径）或抖动复跑全绿（探针）。
+        tests_rounds = 0                          # consecutive tests-fault rounds judged by arbitrate
+        tests_exempt_rounds = 0                   # consecutive exempted (not-counted) rounds（防活循环上限=MAX_TESTS_EXEMPT_ROUNDS）
+        tests_streak = False                      # 本段是否由 tests-fault 迭代来源进入（段入口消费：False→复位计数）
+        cur_integ = None                          # 本轮 IntegrationRunResult 快照（env_side_red/红项名单判据；段入口清）
         acc_rounds = 0                            # acceptance-walkthrough send-backs, cumulative
         arb_format_rounds = 0                     # in-section consecutive arbitrate outputs missing the
                                                   # verdict= marker（t260917-01：进 run_integration_tests
@@ -1392,6 +1538,12 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 # _log/_mark/_touch) so a queued snapshot query sees the post-rework state.
                 await self._breathe()
                 prev_ctx = str(self.meta.get("last_rework_note") or "")
+                if workflow.patched(TESTS_STREAK_PATCH_ID):
+                    # t260917-09：rework=非迭代来源边（方案 §2.4.3「rework 后重进复位」
+                    # ——人审打回/验收打回都经此分支）。只翻 streak 标记：计数转移与
+                    # 留痕仍归 run_integration_tests 段入口单点（下一拍 tests_streak
+                    # 已 False → 那里复位并 _log「计数复位」）。
+                    tests_streak = False
                 if phase == "implement":
                     impl_done = False  # re-implement: the join point will commit for both again
                 continue
@@ -1865,6 +2017,20 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 # t260917-04：过 patched 门——旧历史（无本 marker）保持旧行为（不复位）。
                 if workflow.patched(ARBITRATE_REFUSAL_PATCH_ID):
                     arb_format_rounds = 0
+                # t260917-09：tests 连续计数的段入口复位——**唯一行为分叉点**：本段
+                # 由 tests-fault 迭代来源进入（tests_streak=True）时不清零（否则上限
+                # 永不触发），其余来源（新实现轮/验收打回/rework 后重进）复位并留痕。
+                # 与上一行 t260917-01 簇同一 patched 门族；cur_integ 每段入口清
+                # （本轮回执在本段尾部重赋值，串行/平行两支共用同一 ir）。
+                cur_integ = None
+                if workflow.patched(TESTS_STREAK_PATCH_ID):
+                    if not tests_streak:
+                        tests_rounds, tests_exempt_rounds, _, _ = \
+                            tests_round_step("streak-reset", tests_rounds,
+                                             tests_exempt_rounds)
+                        self._log("tests_rounds 计数复位（非 tests-fault 迭代来源重进，"
+                                  "连续语义）")
+                    tests_streak = False
                 # Pre-check, mechanical: the lane has been committed (guaranteed after
                 # the unified settle; tickets with no_file_changes are exempt)
                 if workflow.patched(REVIEW_GATE_PATCH_ID) and not self.meta.get("no_file_changes"):
@@ -1963,8 +2129,18 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 # t260901-19: budget 6000→4000 with tail-keeping ([-4000:]) — details sit
                 # at the end of the JSON, so a head slice would squeeze out the failure
                 # details; keeping the tail keeps them
+                # t260917-09（R3）：本轮机械回执快照落点=翻译处（串行/平行两支共用
+                # 同一 ir）——env_side_red 与红项名单判据都从 cur_integ 取。
+                cur_integ = ir
+                # t260917-09：_arb_json 补机械环境面三键（env_fail/闸拦/归属置信）——
+                # 仲裁 agent 首次直接看到 t260910-13 归属判定，不再只从 details 尾巴猜；
+                # 只读既有字段，与 t260917-08（环境信号一等化）零耦合。
                 _arb_json = json.dumps({"ran": ir.ran, "passed": ir.passed,
                                         "failed": ir.failed, "error": ir.error,
+                                        "env_fail": ir.env_fail,
+                                        "blockers": ir.blockers,
+                                        "affiliation_confidence":
+                                            ir.affiliation_confidence,
                                         "details": ir.details}, ensure_ascii=False)
                 arb_ctx = ("【机械集成测试结果】\n%s\n【测试集】仓库 integration/ 目录"
                            "（场景清单为准；你是其作者。tests-fault 只迭代本段允许面内的测试资产（tests/、test_*.py、sc_* 场景、登记表、本票场景），共享资产/受保护真源如实出 verdict 并点名红项，勿直接改——闸会拒）"
@@ -2039,6 +2215,13 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 route = arbitration_cap_route(verdict, tests_rounds, code_rounds,
                                               arb_authz is not None)
                 if verdict == "pass":
+                    # t260917-09：连续语义复位点——pass=收敛，tests-fault 连续计数清零
+                    # （留痕要求②）；门关=旧历史逐字旧行为。
+                    if workflow.patched(TESTS_STREAK_PATCH_ID):
+                        tests_rounds, tests_exempt_rounds, _, _ = \
+                            tests_round_step("accept-reset", tests_rounds,
+                                             tests_exempt_rounds)
+                        self._log("tests_rounds 计数复位（仲裁 pass，连续语义）")
                     self._finish("arbitrate", by="integration-agent",
                                  evidence=res.evidence or res.summary)
                     self._handoff("arbitrate", "仲裁通过：" + (res.summary or ""),
@@ -2053,6 +2236,13 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     # 人读文案里不得漏进路由内部标记。
                     cap_reason = integration_route(verdict, tests_rounds, code_rounds) \
                         .split(":", 1)[-1]
+                    # t260917-09：人工接受判决=收敛（要求①「人工接受即复位」）——连续
+                    # 计数清零；R2 单写者纪律=伪 verdict 复用 tests_round_step。
+                    if workflow.patched(TESTS_STREAK_PATCH_ID):
+                        tests_rounds, tests_exempt_rounds, _, _ = \
+                            tests_round_step("accept-reset", tests_rounds,
+                                             tests_exempt_rounds)
+                        self._log("tests_rounds 计数复位（人工接受判决，连续语义）")
                     self._append_authz_use(
                         arb_authz, "arbitrate",
                         "接受仲裁判决：verdict=%s（%s）→ acceptance_walkthrough"
@@ -2061,7 +2251,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                                  evidence=res.evidence or res.summary)
                     self._handoff(
                         "arbitrate",
-                        "仲裁超限经人授权接受判决 → acceptance_walkthrough：verdict=%s，%s"
+                        "仲裁超限封面经人授权接受判决（接受仲裁判决）→ acceptance_walkthrough：verdict=%s，%s"
                         "（授权人 %s，签发 %s，到期 %s，理由 %s）"
                         % (verdict, cap_reason,
                            arb_authz.get("who"), arb_authz.get("issued"),
@@ -2083,13 +2273,80 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                         arb_res = None
                     continue
                 if verdict == "tests-fault":
-                    tests_rounds += 1
-                    self._handoff("arbitrate", "测试集迭代（第 %d 轮）：%s"
-                                  % (tests_rounds, (res.summary or "")[:120]), report=res.report)
+                    if workflow.patched(TESTS_STREAK_PATCH_ID):
+                        # t260917-09：连续计数转移（计轮/环境红豁免/抖动复跑全绿豁免，
+                        # 单写者=tests_round_step；探针只在名单非空时发）。
+                        tests_rounds, tests_exempt_rounds, counted, note = \
+                            await self._tests_round_account(
+                                tests_rounds, tests_exempt_rounds, cur_integ)
+                        if tests_exempt_rounds > MAX_TESTS_EXEMPT_ROUNDS:
+                            # 连续豁免也超限（防活循环）——封面出路必须真实（要求④）：
+                            # 授权在场=接受本判决→复位推进（C2 闭环，与 cap 面同构三件套）；
+                            # 无授权=blocked（文案四条出路全部可执行）＋ KI-061 复活守卫。
+                            arb_authz = self._arbitration_authz()
+                            if arb_authz is not None:
+                                self._append_authz_use(
+                                    arb_authz, "arbitrate",
+                                    "接受仲裁判决：verdict=tests-fault（连续豁免超限面，%s）"
+                                    "→ acceptance_walkthrough" % note)
+                                tests_rounds, tests_exempt_rounds, _, _ = \
+                                    tests_round_step("accept-reset", tests_rounds,
+                                                     tests_exempt_rounds)
+                                self._finish("arbitrate", by="integration-agent",
+                                             evidence=res.evidence or res.summary)
+                                self._handoff(
+                                    "arbitrate",
+                                    "连续豁免超限封面经人授权接受判决（豁免面，"
+                                    "接受仲裁判决）→ "
+                                    "acceptance_walkthrough：verdict=tests-fault，%s"
+                                    "（授权人 %s，签发 %s，到期 %s，理由 %s）"
+                                    % (note, arb_authz.get("who"),
+                                       arb_authz.get("issued"),
+                                       arb_authz.get("expires"),
+                                       arb_authz.get("reason")),
+                                    report=res.report)
+                                self._log("仲裁连续豁免超限经人授权接受判决（%s）→ "
+                                          "acceptance_walkthrough"
+                                          % arb_authz.get("who"))
+                                phase = "acceptance"
+                                continue
+                            if await self._blocked_over_limit(
+                                    tests_exempt_cap_blocked_text(
+                                        tests_exempt_rounds)):
+                                arb_done = False
+                                arb_res = None
+                            continue
+                        if not counted:
+                            # 假封防护（要求③）：该轮不计入——留痕点名原因，直接重跑
+                            # 集成测试（上限不吃这一轮，但套件仍要重新收敛）。
+                            self._handoff("arbitrate",
+                                          "本轮不计入 tests-fault 轮次（%s）：%s"
+                                          % (note, (res.summary or "")[:120]),
+                                          report=res.report)
+                            self._log("tests-fault 豁免不计轮（%s；连续豁免 %d/%d）"
+                                      % (note, tests_exempt_rounds,
+                                         MAX_TESTS_EXEMPT_ROUNDS))
+                            tests_streak = True
+                            phase = "run_integration_tests"
+                            continue
+                        tests_streak = True
+                        acct_note = "（%s）" % note
+                    else:
+                        tests_rounds += 1
+                        acct_note = ""
+                    self._handoff("arbitrate", "测试集迭代（第 %d 轮）%s：%s"
+                                  % (tests_rounds, acct_note,
+                                     (res.summary or "")[:120]), report=res.report)
                     self._log("tests-fault → 重跑集成测试（第 %d 轮）" % tests_rounds)
                     phase = "run_integration_tests"
                     continue
                 code_rounds += 1
+                # t260917-09：code-fault=非 tests-fault 轮 → 连续计数复位（留痕要求②）
+                if workflow.patched(TESTS_STREAK_PATCH_ID):
+                    tests_rounds, tests_exempt_rounds, _, _ = \
+                        tests_round_step("streak-reset", tests_rounds,
+                                         tests_exempt_rounds)
+                    self._log("tests_rounds 计数复位（仲裁 code-fault，连续语义）")
                 prev_ctx = ("【集成测试报告（第 %d 轮）】verdict=code-fault\n%s\n%s"
                             % (code_rounds, res.report or res.summary or "",
                                res.evidence or "")).strip()
@@ -2268,6 +2525,15 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 authz_advance = bool(verdict != "pass" and arb_authz is not None
                                      and route == "acceptance")
                 if verdict == "pass" or authz_advance:
+                    # t260917-09：连续语义复位点——pass=收敛、人工接受判决=收敛
+                    # （authz_advance 两面都复位；R2 伪 verdict 复用 tests_round_step）。
+                    if workflow.patched(TESTS_STREAK_PATCH_ID):
+                        tests_rounds, tests_exempt_rounds, _, _ = \
+                            tests_round_step("accept-reset", tests_rounds,
+                                             tests_exempt_rounds)
+                        self._log("tests_rounds 计数复位（%s，连续语义）"
+                                  % ("仲裁 pass" if verdict == "pass"
+                                     else "人工接受判决"))
                     if authz_advance:
                         reason_txt = integration_route(verdict, tests_rounds,
                                                        code_rounds).split(":", 1)[-1]
@@ -2276,7 +2542,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                             "接受仲裁判决：verdict=%s（%s）→ acceptance_walkthrough"
                             % (verdict, reason_txt))
                         arb_note = (
-                            "仲裁超限经人授权接受判决 → acceptance_walkthrough：verdict=%s，%s"
+                            "仲裁超限封面经人授权接受判决（接受仲裁判决）→ acceptance_walkthrough：verdict=%s，%s"
                             "（授权人 %s，签发 %s，到期 %s，理由 %s）"
                             % (verdict, reason_txt, arb_authz.get("who"),
                                arb_authz.get("issued"), arb_authz.get("expires"),
@@ -2351,14 +2617,77 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 acc_res = None
                 acc_done = False
                 if verdict == "tests-fault":
-                    tests_rounds += 1
-                    self._handoff("arbitrate", "测试集迭代（第 %d 轮）：%s"
-                                  % (tests_rounds, (arb_res.summary or "")[:120]),
+                    if workflow.patched(TESTS_STREAK_PATCH_ID):
+                        # t260917-09：连续计数转移（与串行分支同构，共用
+                        # _tests_round_account；豁免超限封面出路=授权接受/blocked＋
+                        # KI-061 复活守卫，见串行分支注）。
+                        tests_rounds, tests_exempt_rounds, counted, note = \
+                            await self._tests_round_account(
+                                tests_rounds, tests_exempt_rounds, cur_integ)
+                        if tests_exempt_rounds > MAX_TESTS_EXEMPT_ROUNDS:
+                            arb_authz = self._arbitration_authz()
+                            if arb_authz is not None:
+                                self._append_authz_use(
+                                    arb_authz, "arbitrate",
+                                    "接受仲裁判决：verdict=tests-fault（连续豁免超限面，%s）"
+                                    "→ acceptance_walkthrough" % note)
+                                tests_rounds, tests_exempt_rounds, _, _ = \
+                                    tests_round_step("accept-reset", tests_rounds,
+                                                     tests_exempt_rounds)
+                                self._finish("arbitrate", by="integration-agent",
+                                             evidence=arb_res.evidence or arb_res.summary)
+                                self._handoff(
+                                    "arbitrate",
+                                    "连续豁免超限封面经人授权接受判决（豁免面，"
+                                    "接受仲裁判决）→ "
+                                    "acceptance_walkthrough：verdict=tests-fault，%s"
+                                    "（授权人 %s，签发 %s，到期 %s，理由 %s）"
+                                    % (note, arb_authz.get("who"),
+                                       arb_authz.get("issued"),
+                                       arb_authz.get("expires"),
+                                       arb_authz.get("reason")),
+                                    report=arb_res.report)
+                                self._log("仲裁连续豁免超限经人授权接受判决（%s）→ "
+                                          "acceptance_walkthrough"
+                                          % arb_authz.get("who"))
+                                phase = "acceptance"
+                                continue
+                            if await self._blocked_over_limit(
+                                    tests_exempt_cap_blocked_text(
+                                        tests_exempt_rounds)):
+                                arb_done = False
+                                arb_res = None
+                            continue
+                        if not counted:
+                            self._handoff("arbitrate",
+                                          "本轮不计入 tests-fault 轮次（%s）：%s"
+                                          % (note, (arb_res.summary or "")[:120]),
+                                          report=arb_res.report)
+                            self._log("tests-fault 豁免不计轮（%s；连续豁免 %d/%d）"
+                                      % (note, tests_exempt_rounds,
+                                         MAX_TESTS_EXEMPT_ROUNDS))
+                            tests_streak = True
+                            phase = "run_integration_tests"
+                            continue
+                        tests_streak = True
+                        acct_note = "（%s）" % note
+                    else:
+                        tests_rounds += 1
+                        acct_note = ""
+                    self._handoff("arbitrate", "测试集迭代（第 %d 轮）%s：%s"
+                                  % (tests_rounds, acct_note,
+                                     (arb_res.summary or "")[:120]),
                                   report=arb_res.report)
                     self._log("tests-fault → 重跑集成测试（第 %d 轮）" % tests_rounds)
                     phase = "run_integration_tests"
                     continue
                 code_rounds += 1
+                # t260917-09：code-fault=非 tests-fault 轮 → 连续计数复位（留痕要求②）
+                if workflow.patched(TESTS_STREAK_PATCH_ID):
+                    tests_rounds, tests_exempt_rounds, _, _ = \
+                        tests_round_step("streak-reset", tests_rounds,
+                                         tests_exempt_rounds)
+                    self._log("tests_rounds 计数复位（仲裁 code-fault，连续语义）")
                 prev_ctx = ("【集成测试报告（第 %d 轮）】verdict=code-fault\n%s\n%s"
                             % (code_rounds, arb_res.report or arb_res.summary or "",
                                arb_res.evidence or "")).strip()
