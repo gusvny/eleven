@@ -21,11 +21,18 @@
  *
  * 降级：无会话文件/解压失败/0 条 usage → {exists:false, reason 人话}，不抛错；
  * 路径越界 → refused=true，由路由层回 4xx（防穿同 agent-live 验收硬项）。
+ * 解析面（t260917-05 零静默降级）：「格式不认识」不再混入普通 0 值——S1 响亮
+ * 文案 + suspect/suspectFiles/suspectDetail 独立浮出；发现集空但目录有未入统计
+ * 的会话样文件 → reason 按类点名 + suspectFiles（混合态 totals 来自好文件时坏
+ * 文件照样浮出，绝不静默）。
  */
 
 import { readdir, stat } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
-import { SessionError, decompressSession } from './agent-live.ts'
+import {
+  SessionError, decompressSession, judgeSessionLines, sessionFaceS1Text,
+  scanSuspectSessionFiles, formatSuspectGroups, SESSION_NOTE_CAP,
+} from './agent-live.ts'
 import { resolveAgentBaseDir } from './agent-logs.ts'
 import { existingSessionFilesIn, pickNewestSessionFile } from './session-discovery.ts'
 
@@ -67,6 +74,13 @@ export interface AgentUsageResult {
   models: ModelSum[]
   /** 人话降级原因，非错误。 */
   reason?: string
+  /** 任一会话文件命中 S1「格式不认识」（t260917-05）——结果级置位：混合态下
+   *  totals 照常来自好文件，坏文件经 suspect/suspectDetail 浮出，绝不静默。 */
+  suspect?: boolean
+  /** S1 命中文件的绝对路径清单。 */
+  suspectFiles?: string[]
+  /** S1 逐文件人话明细（封顶 SESSION_NOTE_CAP 条）。 */
+  suspectDetail?: string
 }
 
 /** timeline 的 `at`（ISO，base.py _now_iso）→ ms epoch；非法值返回 NaN 由调用方过滤。 */
@@ -110,7 +124,7 @@ export async function resolveAllSessionFiles(
   ticketId: string,
   ticket: { worktree?: string; workspace?: { type?: string; path?: string } | null; role?: string } | null,
   extraRoots: readonly string[] = [],
-): Promise<{ paths?: string[]; wsRoot?: string; reason?: string; refused?: boolean }> {
+): Promise<{ paths?: string[]; wsRoot?: string; reason?: string; refused?: boolean; suspectFiles?: string[] }> {
   const { base, reason } = resolveAgentBaseDir(repo, ticketId, ticket, extraRoots)
   if (base === '') {
     return { refused: true, reason: reason ?? '工单工作区定位失败（拒绝读取）' }
@@ -151,7 +165,19 @@ export async function resolveAllSessionFiles(
     }
   }
   if (paths.length === 0) {
-    return { paths: [], wsRoot, reason: `无本工单会话文件（${sessRoot} 下无 ${ticketId}-*/ 的会话文件 session.jsonl.zstd / session.v3.jsonl.zstd）` }
+    // S3（t260917-05）：发现集空 ≠ 目录空——按类点名（他票会话/旧代布局/名布局
+    // 双不识=疑似 dsh 版本不匹配），绝不静默 0；目录真空才维持既有 reason。
+    const base = `无本工单会话文件（${sessRoot} 下无 ${ticketId}-*/ 的会话文件 session.jsonl.zstd / session.v3.jsonl.zstd）`
+    const suspects = await scanSuspectSessionFiles(sessRoot, ticketId)
+    if (suspects.length > 0) {
+      return {
+        paths: [],
+        wsRoot,
+        suspectFiles: suspects.map(s => s.rel),
+        reason: `${base}；发现未入统计的会话样文件：${formatSuspectGroups(suspects)}`,
+      }
+    }
+    return { paths: [], wsRoot, reason: base }
   }
   return { paths, wsRoot }
 }
@@ -159,6 +185,8 @@ export async function resolveAllSessionFiles(
 /**
  * 聚合一个会话文件（只读）。解压失败/文件不存在按「跳过并记原因」处理：
  * 多角色多文件时一份坏不应毁掉整体加总（原因拼进 reason）。
+ * 解析面判定（t260917-05）：S1「格式不认识」先响亮（结果级 suspect 置位+文件
+ * 入 suspectFiles+返回 S1 文案），金额累加复用判定的解析结果（一次解析两用）。
  */
 async function aggregateOneFile(path: string, windows: StageWindow[], out: AgentUsageResult): Promise<string | null> {
   let text: string
@@ -167,14 +195,17 @@ async function aggregateOneFile(path: string, windows: StageWindow[], out: Agent
   } catch (err: any) {
     return String(err instanceof SessionError ? err.message : err)
   }
+  const j = judgeSessionLines(text.split('\n'))
+  const s1 = sessionFaceS1Text(path, j)
+  if (s1 !== null) {
+    out.suspect = true
+    ;(out.suspectFiles ??= []).push(path)
+    return s1
+  }
   // 当前模型（顺序扫描维护）；provider/model 任一缺失记 '未知'
   let cur = { provider: '', model: '' }
   let sawUsage = false
-  for (const rawLine of text.split('\n')) {
-    const line = rawLine.trim()
-    if (line === '') continue
-    let obj: any
-    try { obj = JSON.parse(line) } catch { continue /* 坏行跳过（畸形输入/文件尾正在写） */ }
+  for (const obj of j.objs) {
     const t = obj?.type
     const d = obj?.data ?? {}
     if (t === 'request/context' && d.provider !== undefined) {
@@ -214,7 +245,9 @@ async function aggregateOneFile(path: string, windows: StageWindow[], out: Agent
       }
     }
   }
-  return sawUsage ? null : '会话文件里没有 usage 事件（agent 可能刚启动，尚无完整 assistant 消息）'
+  // S2 兜底文案与 engine _aggregate_lane_usage 镜像同措辞（py:「会话无 usage 事件」），
+  // 两侧判据/文案同构纪律（改动必须同步）。
+  return sawUsage ? null : '会话无 usage 事件（agent 可能刚启动，尚无完整 assistant 消息）'
 }
 
 /**
@@ -270,6 +303,13 @@ export async function aggregateTicketUsage(
   out.exists = out.total.input > 0 || out.total.output > 0 || out.total.cacheRead > 0
   if (!out.exists) {
     out.reason = reasons[0] ?? '无 usage 事件'
+  }
+  if (out.suspect) {
+    // 混合态合成（t260917-05 review 意见2）：totals 可能来自好文件，S1 明细必须
+    // 独立浮出——exists:true 也要能看见坏文件清单，绝不静默。
+    const s1s = reasons.filter(r => r.startsWith('会话记录格式不认识'))
+    out.suspectDetail = s1s.slice(0, SESSION_NOTE_CAP).join('；')
+      + (s1s.length > SESSION_NOTE_CAP ? `（等共 ${s1s.length} 条）` : '')
   }
   out.models.sort((a, b) => (b.input + b.output) - (a.input + a.output))
   return out

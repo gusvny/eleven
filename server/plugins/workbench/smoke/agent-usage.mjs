@@ -91,6 +91,12 @@ try {
       { stage: 'implement', fromMs: T1, toMs: T2 },
       { stage: 'review_plan', fromMs: T2, toMs: null },
     ]
+    // 压原始文本（不经过 JSON 事件拼接）——S1 乱文本桩用（t260917-05）
+    const zpackRaw = async (raw, outPath) => {
+      const plain = join(tmp, `raw-${Math.random().toString(36).slice(2)}.txt`)
+      await writeFile(plain, raw, 'utf8')
+      await execFileP('zstd', ['-q', '-f', plain, '-o', outPath])
+    }
     const ev1 = [
       // Model attribution source: request/context
       { type: 'request/context', seq: 1, time: T0 + 1000, data: { provider: 'deepseek', model: 'm-alpha' } },
@@ -172,6 +178,38 @@ try {
     ok(rNull.exists === false && rNull.files === 0, 'paths=null → exists=false 不炸')
     const rNone = await aggregateTicketUsage([], [])
     ok(rNone.exists === false && rNone.files === 0 && (rNone.reason ?? '') !== '', 'paths=[] → exists=false + reason')
+
+    // ---- t260917-05 零静默降级：解析面判据（S1 真值表 / 混合态）----
+    // 真值表②：解压成功且全文空白 → 合法非 S1（既有 S2 兜底文案，不挂版本不匹配）
+    const fBlank = join(tmp, 'blank.zstd')
+    await zpackRaw('\n\n  \n', fBlank)
+    const rBlank = await aggregateTicketUsage([fBlank], windows)
+    ok(rBlank.exists === false && (rBlank.suspect ?? false) === false
+      && (rBlank.reason ?? '').includes('无 usage 事件')
+      && !(rBlank.reason ?? '').includes('格式不认识'),
+      '解压成功全文空白 → 非 S1（S2 兜底文案，不误诊）')
+    // 真值表③：有非空白内容但零可解析行（乱文本）→ S1 响亮 + suspect 置位
+    const fGarbage = join(tmp, 'garbage.zstd')
+    await zpackRaw('这不是会话记录\n一行都不合法\n', fGarbage)
+    const rGarb = await aggregateTicketUsage([fGarbage], windows)
+    ok(rGarb.exists === false && rGarb.suspect === true
+      && (rGarb.reason ?? '').includes('格式不认识')
+      && (rGarb.reason ?? '').includes('疑似 dsh 版本不匹配')
+      && (rGarb.suspectFiles ?? [])[0] === fGarbage,
+      '文件在内容不可解析 → S1 响亮 + suspect（绝不静默 0，验收①态A）')
+    // S1 判据③：usage 对象在但已知键全缺（新版本改字段名形态）
+    const fNewKeys = join(tmp, 'newkeys.zstd')
+    await zpack([{ type: 'assistant/message', seq: 1, data: { usage: { tokensTotal: 9 } } }], fNewKeys)
+    const rNewKeys = await aggregateTicketUsage([fNewKeys], windows)
+    ok(rNewKeys.suspect === true && (rNewKeys.reason ?? '').includes('格式不认识'),
+      'usage 缺全部已知键 → S1（疑似版本不匹配）')
+    // 混合态（review 意见2）：totals 来自好文件，坏文件 suspect/明细独立浮出
+    const rMixS1 = await aggregateTicketUsage([file1, fGarbage], windows)
+    ok(rMixS1.exists === true && rMixS1.total.input === 305, '混合态：totals 来自好文件（坏文件不毁加总）')
+    ok(rMixS1.suspect === true && (rMixS1.suspectFiles ?? []).includes(fGarbage)
+      && (rMixS1.suspectDetail ?? '').includes('格式不认识')
+      && (rMixS1.suspectDetail ?? '').includes(fGarbage),
+      '混合态：坏文件 suspect/明细独立浮出（绝不静默）')
   }
 
   /* ---------------------------------------------------- C. resolveAll + route */
@@ -206,6 +244,9 @@ try {
 
   const rNone = await resolveAllSessionFiles(repo, 't-absent', { worktree: '.worktrees/wt' })
   ok(rNone.paths.length === 0 && (rNone.reason ?? '').includes('无本工单会话'), '无会话 → reason 降级')
+  // t260917-05 S3：发现集空但目录有他票会话 → 按类点名 + suspectFiles（绝不静默）
+  ok((rNone.reason ?? '').includes('他票会话') && (rNone.suspectFiles ?? []).length === 2,
+    '发现集空+他票会话在场 → reason 点名 + suspectFiles（验收①态B）')
 
   if (hasZstd) {
     await mkdir(join(repo, 'server'), { recursive: true })
@@ -271,6 +312,17 @@ sys.exit(1)
     r = await call(`${pre}/t-no-session/agent-usage`)
     ok(r.status === 200 && r.body.result.exists === false && r.body.result.reason !== undefined,
       '无会话文件 → 200 {exists:false,reason} 软降级（验收 4）')
+    ok((r.body.result.suspectFiles ?? []).length === 2
+      && (r.body.result.reason ?? '').includes('他票会话'),
+      'S3 端点透传：suspectFiles + reason 点名（t260917-05）')
+    // 点名清单封顶（review 意见4）：前 20 条 + 「等共 N 个」，大目录不整份进台面
+    for (let i = 0; i < 25; i++) {
+      await writeFile(join(sessDir, `bulk${i}.session.bin`), 'x', 'utf8')
+    }
+    const rCap = await resolveAllSessionFiles(repo, 't-cap', { worktree: '.worktrees/wt' })
+    ok((rCap.reason ?? '').includes('等共 27 个')
+      && (rCap.suspectFiles ?? []).length === 27,
+      '点名清单封顶：等共 N 个尾注（27=25 bulk + 2 他票会话档）')
     // Read-only endpoint, no write branch: POST does not enter the agent-usage branch (it lands
     // on some other whitelisted route path — not examined here; write protection is guarded by
     // the OPS operation whitelist in node.ts).

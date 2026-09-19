@@ -186,7 +186,18 @@ def _session_jsonl_torn(path: Path) -> bool:
     no trailing newline) means healthy, False.
     Blank lines are skipped, not judged (avoid false quarantines — the reverse
     accident is more routine than a miss; valid JSONL contains no bare blank lines,
-    so skipping only loosens the check, never tightens it)."""
+    so skipping only loosens the check, never tightens it).
+
+    dsh 判据对照（t260917-05 要求②「判据对齐」）：dsh 侧会话校验真源在仓外
+    （dsh CLI 的 resume/读侧；dsh-session-persistence-jsonl）。本探针的判据 = 帧
+    完整（zstd -t 层）+ 逐行 JSON 合法（本函数层）。**差异核验状态：未核验**——
+    票面所引 t260916-28「dsh 判 torn 而引擎探针判干净」的原始记录不在本仓，且本票
+    实现段无真 dsh CLI 观测通道（差异待证）。已知立场：本探针刻意偏宽（只判「机器
+    层合法性」，不校会话 schema）——误隔离=反向事故（t260905-10 对照组纪律），格式
+    层的「认识不认识」由 _judge_session_lines 在统计面响亮，不在检疫面收紧。后续
+    接手者补核验时：用真 dsh resume/read 对「帧裂 / 帧好内截断行 / 空档 / 无尾换
+    行完整行」四类夹具样本观测其对端判据，把差异结论补进本注记（UT 以固定文件桩
+    复现，不依赖真 dsh）。"""
     proc = subprocess.Popen(["zstd", "-dc", str(path)],
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     out = proc.stdout
@@ -277,6 +288,13 @@ def _quarantine_torn_sessions(local_dsh: Path) -> None:
        parsing after decompression. Bad files take the same quarantine path
        (_quarantine_session_file); only the reason text differs.
 
+    Blind-spot roll call (ticket t260917-05「零静默降级」): after the two layers,
+    scan for session-shaped files whose name/layout neither layer covers
+    (_session_quarantine_blindspots) — a next-generation dsh writing a different
+    filename would otherwise make the whole quarantine face silently blind. The
+    roll call only NAMES them (logger.warning, capped list): unknown formats are
+    never moved and never parsed (touching what you don't understand is how the
+    reverse accident happens).
     Dual-name sweep (ticket t260916-23  # session-name-compat): dsh 0.1.5 renames
     the session file (session.jsonl.zstd → session.v3.jsonl.zstd), so the sweep
     discovers BOTH generations at any depth. Unlike the usage-aggregation side there
@@ -293,6 +311,196 @@ def _quarantine_torn_sessions(local_dsh: Path) -> None:
                 _quarantine_session_file(local_dsh, f, "torn-jsonl")
             continue
         _quarantine_session_file(local_dsh, f, "torn-frame")
+    blind = _session_quarantine_blindspots(local_dsh)
+    if blind:
+        activity.logger.warning(
+            "[sessions] 检疫面盲区点名：以下文件疑似会话档但隔离面未覆盖（不属已知布局，"
+            "未隔离未解析——不懂的格式不动；若为新代 dsh 产物请升级引擎解析面）：%s",
+            _format_capped(blind))
+
+
+# ---- 会话记录解析面判定（t260917-05 会话发现面「零静默降级」）----
+# 背景：dsh 升级换事件词表/usage 键名/文件名布局时，统计面曾会静默归 0、检疫面
+# 静默失明。本组函数给「文件在、但名字/格式对不上本版本解析面」一个响亮的出口。
+# 真源分层：会话档格式真源在 dsh 侧（dsh-session-persistence-jsonl，仓外）；事件
+# 词表/usage 键名的消费面真源 = 本文件 _aggregate_lane_usage 与 workbench
+# src/host/agent-usage.ts（两侧常量/判据同构、注释互指，改动必须同步）——本组
+# 定义是只读消费方的冻结镜像（KI-046 外部调用形状纪律）。
+SESSION_KNOWN_TYPES = frozenset({
+    "request/context", "request/header", "assistant/message",
+    "assistant/chunk", "session", "tool/call",
+})
+SESSION_USAGE_KEYS = ("inputTokens", "outputTokens", "cacheReadTokens")
+# 点名清单封顶（先例 MERGE_FILES_CAP：无上限清单会撑爆票据台面/闸记录/账本——
+# settle note 进不可变账本与 merge warns，同纪律适用）。
+SESSION_NOTE_CAP = 20
+
+
+def _format_capped(items: Any) -> str:
+    """点名清单 → 人话（纯函数）：前 SESSION_NOTE_CAP 条 + 「等共 N 个」封顶。"""
+    if not isinstance(items, (list, tuple)):
+        return ""
+    clean = [str(x) for x in items if str(x)]
+    if not clean:
+        return ""
+    shown = clean[:SESSION_NOTE_CAP]
+    tail = "" if len(clean) <= SESSION_NOTE_CAP else "（等共 %d 个）" % len(clean)
+    return "、".join(shown) + tail
+
+
+def _judge_session_lines(lines: Any) -> Dict[str, Any]:
+    """会话解压文本的行集合 → 解析面判定（纯函数，t260917-05）。
+
+    返回 {blank, parsed, known_types, usage_records, usage_without_known_keys,
+    objs}：
+    - blank: 全部行皆空白（合法非 S1——与 _session_jsonl_torn 的 blank-skip 同
+      立场，空档/纯空行不是格式违约）；
+    - parsed: JSON 可解析且为映射的行数（畸形行只计数不抛）；
+    - known_types: 命中 SESSION_KNOWN_TYPES 的行数；
+    - usage_records: assistant/message 且 data.usage 为映射的条数——
+      **assistant/chunk 的同名 usage 不数不加**（防翻倍红线从聚合面平移到判据面）；
+    - usage_without_known_keys: usage 为映射但 SESSION_USAGE_KEYS 全缺的条数
+      （新版本改字段名的形态，S1 判据③）；
+    - objs: 可解析的映射行对象（保持原序）——聚合面金额累加复用，避免二次解析。
+    畸形输入：非 list/条目非串 → 按空白行处理，不抛。"""
+    out: Dict[str, Any] = {"blank": True, "parsed": 0, "known_types": 0,
+                           "usage_records": 0, "usage_without_known_keys": 0,
+                           "objs": []}
+    if not isinstance(lines, (list, tuple)):
+        return out
+    for ln in lines:
+        if not isinstance(ln, str):
+            continue
+        line = ln.strip()
+        if not line:
+            continue
+        out["blank"] = False
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        out["parsed"] += 1
+        out["objs"].append(obj)
+        t = obj.get("type")
+        if t in SESSION_KNOWN_TYPES:
+            out["known_types"] += 1
+        if t == "assistant/message":
+            d = obj.get("data")
+            u = d.get("usage") if isinstance(d, dict) else None
+            if isinstance(u, dict):
+                out["usage_records"] += 1
+                if not any(k in u for k in SESSION_USAGE_KEYS):
+                    out["usage_without_known_keys"] += 1
+    return out
+
+
+def _session_face_s1_text(name: str, j: Dict[str, Any]) -> Optional[str]:
+    """判据结果 → S1「格式不认识」响亮文案；None=非 S1（纯函数）。
+
+    真值表（review 钉死，三段互斥）：
+      ①解压失败 → 不入本函数（调用方走既有解压失败注记路径，非 S1）；
+      ②blank（解压成功且全文空白）→ None（合法，空档不是格式违约）；
+      ③非 blank 且命中任一 → S1 响亮：parsed==0（有内容但零可解析行，含二进制
+      乱文本）/ known_types==0（行可解析但事件词表全不识）/
+      usage_without_known_keys>0（usage 对象在但三个已知键全缺）。"""
+    if j.get("blank"):
+        return None
+    if j.get("parsed", 0) == 0 or j.get("known_types", 0) == 0 \
+            or j.get("usage_without_known_keys", 0) > 0:
+        return ("会话记录格式不认识（疑似 dsh 版本不匹配），统计值不可信（文件：%s）"
+                % name)
+    return None
+
+
+# S3 分类标签（review 意见：文案按类分流——已知布局不误诊「版本不匹配」，
+# 名/布局双不识才挂疑似；元组序=人话呈现序，unknown 最要紧排前。
+# 「未入统计」由 note 前缀统一说明，条目标签只给分类名）。
+_SESSION_SUSPECT_KIND_LABELS: Tuple[Tuple[str, str], ...] = (
+    ("unknown", "名字/布局不认识（疑似 dsh 版本不匹配）"),
+    ("other_ticket", "他票会话"),
+    ("legacy_flat", "旧代布局"),
+)
+_SESSION_SUSPECT_KIND_MAP = dict(_SESSION_SUSPECT_KIND_LABELS)
+
+
+def _session_suspect_unmatched(sess: Path, ticket_id: str) -> Dict[str, List[str]]:
+    """发现集为空时，sessions 树下「会话样文件但未入统计」的分类清单（纯函数）。
+
+    分类（对齐 workbench scanSuspectSessionFiles，review 意见3 文案分流）：
+    - other_ticket: 三层布局 <slug>/<sub>/ 会话档（session.jsonl.zstd / session.v3.jsonl.zstd，SESSION_FILE_NAMES 双名）且 sub 不匹配本票
+      tie 规则（恰等或 <ticket_id>- 前缀）——他票会话，不是格式违约；
+    - legacy_flat: <slug>/session-*.zstd 旧扁平布局——已知旧代格式，不误诊；
+    - unknown: 其余「名字含 session 或后缀 .zst/.zstd」的文件——名/布局双不识，
+      疑似 dsh 版本不匹配。
+    目录不存在/条目探测 OSError → 各类为空（不放大环境故障）。"""
+    groups: Dict[str, List[str]] = {"unknown": [], "other_ticket": [], "legacy_flat": []}
+    try:
+        entries = sorted(sess.rglob("*"))
+    except OSError:
+        return groups
+    for f in entries:
+        try:
+            if not f.is_file():
+                continue
+            rel = f.relative_to(sess).as_posix()
+        except OSError:
+            continue
+        parts = rel.split("/")
+        if len(parts) == 3 and parts[2] in SESSION_FILE_NAMES:
+            sub = parts[1]
+            if sub == ticket_id or sub.startswith(ticket_id + "-"):
+                continue  # 本票会话（发现集非空时到不了本函数；兜底豁免防误点名）
+            groups["other_ticket"].append(rel)
+            continue
+        if len(parts) == 2 and f.name.startswith("session-") and f.name.endswith(".zstd"):
+            groups["legacy_flat"].append(rel)
+            continue
+        low = f.name.lower()
+        if "session" in low or low.endswith((".zst", ".zstd")):
+            groups["unknown"].append(rel)
+    return groups
+
+
+def _format_suspect_groups(groups: Dict[str, List[str]]) -> str:
+    """分类清单 → 人话（纯函数；封顶对齐 _format_capped，跨类共享配额）。"""
+    lines: List[str] = []
+    for kind, _label in _SESSION_SUSPECT_KIND_LABELS:
+        for rel in groups.get(kind) or []:
+            lines.append("%s: %s" % (_SESSION_SUSPECT_KIND_MAP.get(kind, kind), rel))
+    return _format_capped(lines)
+
+
+def _session_quarantine_blindspots(local_dsh: Path) -> List[str]:
+    """sessions 树下「疑似会话档但不属两种已知布局」的相对路径清单（纯函数）。
+
+    已知布局 = 现行三层双名（session.jsonl.zstd / session.v3.jsonl.zstd，取自
+    SESSION_FILE_NAMES；与 workbench _sessionKbFast 的兼容位同源）+ 旧扁平 session-*.zstd。旧扁平是已知旧代格式：不点名不检疫（dsh 现行
+    版本不再产生；检疫面只为「撕坏的本代格式」服务，动旧代格式才是风险）。"""
+    sessions = local_dsh / "sessions"
+    out: List[str] = []
+    if not sessions.is_dir():
+        return out
+    try:
+        entries = sorted(sessions.rglob("*"))
+    except OSError:
+        return out
+    for f in entries:
+        try:
+            if not f.is_file():
+                continue
+            rel = f.relative_to(sessions).as_posix()
+        except OSError:
+            continue
+        if f.name in SESSION_FILE_NAMES:
+            continue  # 现行三层双名布局（session.jsonl.zstd / session.v3.jsonl.zstd）：已知格式，豁免
+        if f.name.startswith("session-") and f.name.endswith(".zstd"):
+            continue  # 旧扁平布局：已知旧代，豁免
+        low = f.name.lower()
+        if "session" in low or low.endswith((".zst", ".zstd")):
+            out.append(rel)
+    return out
 
 
 # Project key whitelist (credential exit, M1-2): same character set as PROJECT_KEY_RE
@@ -3656,6 +3864,14 @@ def _aggregate_lane_usage(wt: Path, ticket_id: str) -> Tuple[Dict[str, Any], str
     - Model attribution: the sequential scan keeps the current model (data.{provider,
       model} of request/context, with request/header's
       data.header.config.{provider,model} as the fallback); a miss records 「?」.
+    - Face verdict (t260917-05「零静默降级」): every discovered file goes through
+      _judge_session_lines/_session_face_s1_text first — S1「格式不认识」loudly
+      names the file (never a silent 0) and sets tokens["format_suspect"]; an
+      empty discovery set is NOT silently accepted either: _session_suspect_unmatched
+      classifies session-shaped files that exist in the tree but matched nothing
+      (他票会话/旧代布局/名字布局双不识) into the note and sets
+      tokens["suspect_unmatched"]. S2 (known events but no usage yet = agent just
+      started) keeps the old mild note; the healthy path keeps note == "".
     - Bad lines are skipped; a single file's decompression failure never destroys the
       overall total (the reason is appended to the note).
     - The 0-usage case is a deliberate trade-off: the snapshot is still written, with
@@ -3694,12 +3910,21 @@ def _aggregate_lane_usage(wt: Path, ticket_id: str) -> Tuple[Dict[str, Any], str
                 picked[sub_dir] = best
     files: List[Path] = [picked[d] for d in sorted(picked)]
     if not files:
-        return dict(zero, tokens_zero=True), ("无本票会话文件（%s 下无 %s-*/ 的会话文件 "
-                                              "session.jsonl.zstd / session.v3.jsonl.zstd）" % (sess, ticket_id))
+        # S3（t260917-05）：发现集空 ≠ 目录空——树里有会话样文件却一个都没入统计，
+        # 必须按类点名（他票会话/旧代布局/名字布局双不识=疑似 dsh 版本不匹配），
+        # 绝不静默 0；目录真空才维持既有 note。
+        base = ("无本票会话文件（%s 下无 %s-*/ 的会话文件 "
+                "session.jsonl.zstd / session.v3.jsonl.zstd）" % (sess, ticket_id))
+        groups = _session_suspect_unmatched(sess, ticket_id)
+        if any(groups.values()):
+            return (dict(zero, tokens_zero=True, suspect_unmatched=True),
+                    base + "；发现未入统计的会话样文件：" + _format_suspect_groups(groups))
+        return dict(zero, tokens_zero=True), base
     total = {"in": 0, "out": 0, "cacheRead": 0}
     by_model: Dict[str, int] = {}
     notes: List[str] = []
     saw_usage = False
+    face_suspect = False  # 任一文件 S1「格式不认识」→ 结果级置位（review 意见2 混合态）
 
     def _num(x: Any) -> int:
         return int(x) if isinstance(x, (int, float)) and not isinstance(x, bool) else 0
@@ -3711,15 +3936,16 @@ def _aggregate_lane_usage(wt: Path, ticket_id: str) -> Tuple[Dict[str, Any], str
             if p.returncode != 0:
                 notes.append("%s 解压失败: %s" % (f.name, (p.stderr or "")[-120:]))
                 continue
+            j = _judge_session_lines((p.stdout or "").split("\n"))
+            # S1 响亮（真值表见 _session_face_s1_text）：解压失败≠S1、全文空白≠S1、
+            # 有内容但零可解析行/零已知事件/usage 缺全部已知键 → 响亮点名。
+            # 点名用相对 sessions 根的路径：多角色同名会话档（session.jsonl.zstd / session.v3.jsonl.zstd 双名）才分得清谁坏。
+            s1 = _session_face_s1_text(f.relative_to(sess).as_posix(), j)
+            if s1:
+                notes.append(s1)
+                face_suspect = True
             cur = {"provider": "", "model": ""}
-            for raw in (p.stdout or "").split("\n"):
-                line = raw.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except ValueError:
-                    continue  # skip bad lines (malformed input / the tail is still being written)
+            for obj in j["objs"]:  # 金额累加复用判定面的解析结果（一次解析，两不误）
                 t = obj.get("type")
                 d = obj.get("data") or {}
                 if t == "request/context" and "provider" in d:
@@ -3748,7 +3974,11 @@ def _aggregate_lane_usage(wt: Path, ticket_id: str) -> Tuple[Dict[str, Any], str
     tokens = {"in": total["in"], "out": total["out"], "cacheRead": total["cacheRead"],
               "by_stage": {}, "by_model": by_model, "by_stage_available": False,
               "tokens_zero": not saw_usage}
-    note = "；".join(notes)
+    if face_suspect:
+        tokens["format_suspect"] = True  # 注记键=加法（既有按键断言/幂等比较不受扰）
+    note = "；".join(notes[:SESSION_NOTE_CAP])  # S1 逐文件文案同样封顶（点名纪律）
+    if len(notes) > SESSION_NOTE_CAP:
+        note += "（等共 %d 条）" % len(notes)
     if not saw_usage:
         note = (note + "；" if note else "") + "会话无 usage 事件（tokens 记零）"
     return tokens, note

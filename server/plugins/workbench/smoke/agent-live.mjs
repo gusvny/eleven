@@ -86,6 +86,10 @@ try {
     const r5 = await resolveSessionFile(repo, 't-nope', { worktree: '.worktrees/wt' })
     ok(r5.path === undefined && r5.refused === undefined && (r5.reason ?? '').includes('无本工单会话'),
       '无本工单会话 → reason 人话降级')
+    // t260917-05 S3：发现集空但目录有他票会话 → 按类点名 + suspectFiles（绝不静默）
+    ok((r5.reason ?? '').includes('他票会话')
+      && (r5.suspectFiles ?? []).some(f => f.endsWith('other-ticket-developer/session.jsonl.zstd')),
+      '发现集空+他票会话在场 → reason 点名 + suspectFiles（验收①态B）')
 
     const r6 = await resolveSessionFile(repo, 't-x', { worktree: '.worktrees/wt-missing' })
     ok(r6.path === undefined && (r6.reason ?? '').includes('不存在'), 'sessions 目录不存在 → reason 降级')

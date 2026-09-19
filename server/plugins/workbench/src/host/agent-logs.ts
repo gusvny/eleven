@@ -22,6 +22,7 @@ import { readFile, readdir, stat } from 'node:fs/promises'
 import { join, resolve, sep, dirname } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { judgeSessionLines, sessionFaceS1Text } from './agent-live.ts'
 import { SESSION_FILE_NAMES } from './session-discovery.ts'
 
 const execFileP = promisify(execFile)
@@ -69,6 +70,9 @@ export interface AgentLogsResult {
   agentAlive: boolean
   /** agent 最近一次操作的人话描述（如 "读取 server/plugins/providers/.../index.tsx"）。 */
   lastActivity: string
+  /** 会话档不可解析的显式注记（t260917-05「可辨」：解压失败/格式不认识时给出，
+   *  而非把「最近操作」静默留空）。 */
+  sessionNote?: string
 }
 
 function isWithin(root: string, target: string): boolean {
@@ -81,8 +85,8 @@ function isWithin(root: string, target: string): boolean {
  * 从工单字段定 agent 日志目录（纯函数）。返回 {base, reason?}：
  *  - worktree 非空 → <repo>/<worktree>/.suyou（必须在 repo 内，越界 → reason 拒绝）；
  *  - workspace.type=worktree 且 path 在 repo 内 → 同上（worktree 字段缺失时兜底）；
- *  - workspace.type=dir 且 path 是 /tmp/suyou-ws/ 前缀（agent 隔离目录，M4）→ path/.suyou；
- *  - 全无 → /tmp/suyou-ws/<id>/.suyou 兜底（主树道 v2 工单的默认隔离目录），附 reason 说明。
+ *  - workspace.type=dir 且 path 是 /tmp/sandbar-ws/ 前缀（agent 隔离目录，M4；与 engine shared.py WS_DIR_BASE 同源）→ path/.suyou；
+ *  - 全无 → /tmp/sandbar-ws/<id>/.suyou 兜底（主树道 v2 工单的默认隔离目录），附 reason 说明。
  */
 export function resolveAgentBaseDir(
   repo: string,
@@ -109,14 +113,14 @@ export function resolveAgentBaseDir(
     if (ws.type === 'worktree' && withinAny(resolve(repo, ws.path))) {
       return { base: join(resolve(repo, ws.path), '.suyou') }
     }
-    if (ws.type === 'dir' && ws.path.startsWith('/tmp/suyou-ws/')) {
+    if (ws.type === 'dir' && ws.path.startsWith('/tmp/sandbar-ws/')) {
       return { base: join(ws.path, '.suyou') }
     }
   }
   // 主树道工单（无泳道/无显式 workspace）：agent 默认隔离目录（shared.py WS_DIR_BASE）。
   return {
-    base: join('/tmp/suyou-ws', ticketId, '.suyou'),
-    reason: '主树道工单无泳道——agent 日志在 /tmp/suyou-ws/<工单id>/.suyou（若存在）',
+    base: join('/tmp/sandbar-ws', ticketId, '.suyou'),
+    reason: '主树道工单无泳道——agent 日志在 /tmp/sandbar-ws/<工单id>/.suyou（若存在）',
   }
 }
 
@@ -131,6 +135,7 @@ export async function listAgentLogs(base: string): Promise<AgentLogsResult> {
     result.sessionKb = sessInfo.kb
     result.agentAlive = sessInfo.alive
     result.lastActivity = sessInfo.lastActivity
+    result.sessionNote = sessInfo.note
   } catch { /* .dsh 不存在=agent 尚未启动，静默 */ }
   let names: string[]
   try {
@@ -208,34 +213,39 @@ export async function listAgentLogs(base: string): Promise<AgentLogsResult> {
   return result
 }
 
-/** 扫描 .dsh/sessions/ 下最新的 session 文件，返回 KB 数、存活判定与最近操作。 */
-async function _readSessionKb(sessDir: string): Promise<{ kb: number; alive: boolean; lastActivity: string }> {
+/** 扫描 .dsh/sessions/ 下最新的 session 文件，返回 KB 数、存活判定与最近操作。
+ *  note（t260917-05「可辨」）：会话档解压失败/格式不认识时的显式注记——日志面
+ *  遇到不可解析会话不再静默吞掉（原 catch {} 行为）。 */
+async function _readSessionKb(sessDir: string): Promise<{ kb: number; alive: boolean; lastActivity: string; note?: string }> {
   const info = await _sessionKbFast(sessDir)
-  if (info.kb === 0) return { kb: 0, alive: false, lastActivity: '' }
-  let lastActivity = ''
+  if (info.bytes === 0) return { kb: 0, alive: false, lastActivity: '' } // bytes 判空：kb 是取整值，<1KB 档不为 0
+  let text: string
   try {
     const { stdout } = await execFileP('zstd', ['-d', '-c', info.path], { maxBuffer: 16 * 1024 * 1024, timeout: 5000 })
-    const lines = stdout.split('\n')
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim()
-      if (!line) continue
-      try {
-        const obj = JSON.parse(line)
-        if (obj.type === 'tool/call') {
-          const d = obj.data || {}
-          lastActivity = _describeAction(d.name || '', _parseArgs(d.arguments))
-          break
-        }
-        if (obj.type === 'assistant/message' || obj.type === 'assistant/chunk') {
-          const content = typeof (obj.data || {}).content === 'string' ? (obj.data || {}).content : ''
-          if (content.length > 0) {
-            lastActivity = '输出中: ' + content.slice(0, 80).replace(/\n/g, ' ')
-            break
-          }
-        }
-      } catch { /* 解析失败跳过 */ }
+    text = stdout
+  } catch {
+    return { ...info, lastActivity: '', note: '会话文件解压失败（疑似损坏或 dsh 版本不匹配），「最近操作」不可读' }
+  }
+  const j = judgeSessionLines(text.split('\n'))
+  if (sessionFaceS1Text(info.path, j) !== null) {
+    return { ...info, lastActivity: '', note: '会话记录格式不认识（疑似 dsh 版本不匹配），「最近操作」不可读' }
+  }
+  let lastActivity = ''
+  for (let i = j.objs.length - 1; i >= 0; i--) {
+    const obj = j.objs[i]
+    const d = obj.data || {}
+    if (obj.type === 'tool/call') {
+      lastActivity = _describeAction(d.name || '', _parseArgs(d.arguments))
+      break
     }
-  } catch { /* zstd 解压失败 */ }
+    if (obj.type === 'assistant/message' || obj.type === 'assistant/chunk') {
+      const content = typeof d.content === 'string' ? d.content : ''
+      if (content.length > 0) {
+        lastActivity = '输出中: ' + content.slice(0, 80).replace(/\n/g, ' ')
+        break
+      }
+    }
+  }
   return { ...info, lastActivity }
 }
 
@@ -247,7 +257,7 @@ async function _readSessionKb(sessDir: string): Promise<{ kb: number; alive: boo
  *  选中语义（t260825-03 返工）：按 **mtime 最新** 选中「当前活跃会话」——多角色
  *  接力泳道里旧角色会话 size 更大但已死，按 size 选会显示死会话 KB 并误报停涨
  *  （integration_review 实测：developer 1472KB 死会话挤掉 integration 457KB 活会话）。 */
-export async function _sessionKbFast(sessDir: string): Promise<{ kb: number; alive: boolean; path: string }> {
+export async function _sessionKbFast(sessDir: string): Promise<{ kb: number; bytes: number; alive: boolean; path: string }> {
   let bestKb = 0
   let bestMtime = 0
   let bestPath = ''
@@ -284,7 +294,9 @@ export async function _sessionKbFast(sessDir: string): Promise<{ kb: number; ali
     }
   } catch { /* 目录不存在 */ }
   const now = Math.floor(Date.now() / 1000)
-  return { kb: Math.floor(bestKb / 1024), alive: bestKb > 0 && (now - bestMtime) < 60, path: bestPath }
+  // bytes=取整前的原始字节数：<1KB 的小档（刚落盘/撕裂尾档常见）kb 会取整成 0，
+  // 不可解析注记面必须用 bytes 判空，否则注记被取整吞掉（t260917-05 零静默降级）。
+  return { kb: Math.floor(bestKb / 1024), bytes: bestKb, alive: bestKb > 0 && (now - bestMtime) < 60, path: bestPath }
 }
 
 /** 安全解析 tool call arguments（JSON 字符串）。 */

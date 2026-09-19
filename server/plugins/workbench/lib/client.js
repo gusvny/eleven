@@ -50300,6 +50300,27 @@ function buildApproveNote(summary, remark) {
 	if (r === "") return s;
 	return `${s}\n\n${r}`;
 }
+//#endregion
+//#region src/client/usage-model.ts
+/**
+* 用量区可见警示文案（非 hover-only）；null=维持既有呈现（tokens — / 正常行）。
+* - exists:true 且 suspect → S1 混合态：totals 来自好文件，坏文件也必须可见；
+* - exists:false 且 suspect → S1 全灭：统计值不可信；
+* - exists:false 且 suspectFiles 非空 → S3：发现集空但目录有未入统计的会话样文件；
+* - 其余（普通没跑过/历史单）→ null，不虚报。
+*/
+function usageSuspectHint(usage) {
+	if (!usage || typeof usage !== "object") return null;
+	if (usage.exists === true) return usage.suspect === true ? "⚠ 部分会话记录格式不认识（疑似 dsh 版本不匹配），该部分未计入" : null;
+	if (usage.suspect === true) return "⚠ 会话记录格式不认识（疑似 dsh 版本不匹配），统计值不可信";
+	if (Array.isArray(usage.suspectFiles) && usage.suspectFiles.length > 0) return "⚠ 发现未入统计的会话文件（名字/布局与本版本解析面对不上，疑似 dsh 版本不匹配）";
+	return null;
+}
+/** 悬停明细：S1 逐文件人话（suspectDetail）优先，其次端点 reason。 */
+function usageSuspectTitle(usage) {
+	if (!usage || typeof usage !== "object") return void 0;
+	return usage.suspectDetail ?? usage.reason;
+}
 /**
 * API 回执 → 轮询分类。ok:true → ok；kind=not_found/terminal → 对应致命类；
 * 其余（transient/internal/kind 缺失/非对象/网络异常路径传 null）→ retryable。
@@ -51904,7 +51925,8 @@ function useAgentUsage(ticketId, enabled) {
 	}, [enabled, ticketId]);
 	return usage;
 }
-/** 头部一行合计（验收 3）：agent 段数 + 输入/输出总量 + 模型；cacheRead 收悬停。 */
+/** 头部一行合计（验收 3）：agent 段数 + 输入/输出总量 + 模型；cacheRead 收悬停。
+*  t260917-05「可辨」：会话格式不认识/目录有未入统计会话 → 可见警示（非 hover-only）。 */
 function UsageSummaryLine({ detail, wf, usage }) {
 	if (usage === void 0) {
 		if (detail.status === "closed") return null;
@@ -51916,6 +51938,14 @@ function UsageSummaryLine({ detail, wf, usage }) {
 	}
 	if (!usage.exists) {
 		if (detail.status === "closed") return null;
+		const hint = usageSuspectHint(usage);
+		if (hint !== null) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+			className: "wb-usage",
+			"data-s": "suspect",
+			style: { color: "var(--dsw-derive-danger,#cf222e)" },
+			title: usageSuspectTitle(usage),
+			children: hint
+		});
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 			className: "wb-usage",
 			"data-s": "none",
@@ -51925,20 +51955,27 @@ function UsageSummaryLine({ detail, wf, usage }) {
 	}
 	const segs = agentSegmentCount(detail, wf);
 	const names = usageModelNames(usage.models);
+	const suspectHint = usageSuspectHint(usage);
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 		className: "wb-usage",
 		title: [
 			`agent 段数 ${segs}`,
 			`in ${usage.total.input} / out ${usage.total.output} / cacheRead ${usage.total.cacheRead}`,
 			names !== "" ? `模型：${names}` : `模型：${usage.models[0]?.model ?? "—"}（单模型不显示模型名）`,
-			`会话文件 ${usage.files} 份（多角色加总）`
-		].join(" · "),
+			`会话文件 ${usage.files} 份（多角色加总）`,
+			suspectHint !== null ? usage.suspectDetail ?? suspectHint : ""
+		].filter(Boolean).join(" · "),
 		children: [
 			"🤖 ",
 			segs,
 			" 段 · ",
 			usageSum(usage.total),
-			names !== "" ? ` · ${names}` : ""
+			names !== "" ? ` · ${names}` : "",
+			suspectHint !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				style: { color: "var(--dsw-derive-danger,#cf222e)" },
+				title: usage.suspectDetail ?? suspectHint,
+				children: " · ⚠"
+			})
 		]
 	});
 }
@@ -53275,6 +53312,10 @@ function AgentLogsTab({ detail, wf, onMsg }) {
 							"KB",
 							logs.lastActivity ? " · " + logs.lastActivity : ""
 						]
+					}) : null,
+					logs.sessionNote ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						style: { color: "var(--dsw-derive-danger,#cf222e)" },
+						children: ["⚠ ", logs.sessionNote]
 					}) : null,
 					logs.exists ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
 						logs.files.length,

@@ -124,6 +124,7 @@ import { TicketTimeViewer } from './ticket-time-viewer.tsx'
 import type { TicketTimeMode } from '../shared/ticket-time-model.ts'
 import type { TabPresence, PeerViewer } from './tab-presence.ts'
 import { buildApproveNote } from './approve-note.ts'
+import { usageSuspectHint, usageSuspectTitle } from './usage-model.ts'
 import { startVisibleInterval } from './visibility-poll.ts'
 // t260903-06 KI-003③：轮询健康度状态机（连续失败阈值/分类/快照保留的纯函数半）。
 import {
@@ -1836,6 +1837,10 @@ interface AgentUsageResult {
   models: { provider: string; model: string; input: number; output: number; cacheRead: number }[]
   reason?: string
   ws_root?: string
+  /* t260917-05 零静默降级：格式不认识（suspect）与未入统计会话（suspectFiles）浮出 */
+  suspect?: boolean
+  suspectFiles?: string[]
+  suspectDetail?: string
 }
 
 /** token 数人话格式：≥1M 显 x.xxM、≥1k 显 x.xk，否则原值（悬停有精确值）。 */
@@ -1894,7 +1899,8 @@ function useAgentUsage(ticketId: string, enabled: boolean): AgentUsageResult | u
   return usage
 }
 
-/** 头部一行合计（验收 3）：agent 段数 + 输入/输出总量 + 模型；cacheRead 收悬停。 */
+/** 头部一行合计（验收 3）：agent 段数 + 输入/输出总量 + 模型；cacheRead 收悬停。
+ *  t260917-05「可辨」：会话格式不认识/目录有未入统计会话 → 可见警示（非 hover-only）。 */
 function UsageSummaryLine({ detail, wf, usage }: { detail: TicketDetail; wf?: Wf; usage: AgentUsageResult | undefined }) {
   if (usage === undefined) {
     if (detail.status === 'closed') return null // 历史已合并单：泳道已清，连「—」都可省
@@ -1903,6 +1909,15 @@ function UsageSummaryLine({ detail, wf, usage }: { detail: TicketDetail; wf?: Wf
   if (!usage.exists) {
     // 历史已合并工单：泳道清理后无会话文件，只有图标没有数字（验收 5，用户拍板不固化）
     if (detail.status === 'closed') return null
+    const hint = usageSuspectHint(usage)
+    if (hint !== null) {
+      // 统计不可信态：可见警示取代「tokens —」的零值观感（t260917-05 要求③）
+      return (
+        <span className="wb-usage" data-s="suspect"
+              style={{color: 'var(--dsw-derive-danger,#cf222e)'}}
+              title={usageSuspectTitle(usage)}>{hint}</span>
+      )
+    }
     return (
       <span className="wb-usage" data-s="none" title={usage.reason ?? '无会话数据'}>
         tokens —
@@ -1911,15 +1926,21 @@ function UsageSummaryLine({ detail, wf, usage }: { detail: TicketDetail; wf?: Wf
   }
   const segs = agentSegmentCount(detail, wf)
   const names = usageModelNames(usage.models)
+  const suspectHint = usageSuspectHint(usage)
   const title = [
     `agent 段数 ${segs}`,
     `in ${usage.total.input} / out ${usage.total.output} / cacheRead ${usage.total.cacheRead}`,
     names !== '' ? `模型：${names}` : `模型：${usage.models[0]?.model ?? '—'}（单模型不显示模型名）`,
     `会话文件 ${usage.files} 份（多角色加总）`,
-  ].join(' · ')
+    suspectHint !== null ? (usage.suspectDetail ?? suspectHint) : '',
+  ].filter(Boolean).join(' · ')
   return (
     <span className="wb-usage" title={title}>
       🤖 {segs} 段 · {usageSum(usage.total)}{names !== '' ? ` · ${names}` : ''}
+      {suspectHint !== null && (
+        <span style={{color: 'var(--dsw-derive-danger,#cf222e)'}}
+              title={usage.suspectDetail ?? suspectHint}> · ⚠</span>
+      )}
     </span>
   )
 }
@@ -2862,6 +2883,8 @@ interface AgentLogsResult {
   sessionKb: number
   agentAlive: boolean
   lastActivity: string
+  /** 会话档不可解析的显式注记（t260917-05：解压失败/格式不认识时可见警示）。 */
+  sessionNote?: string
 }
 
 function fmtBytes(n: number): string {
@@ -2937,6 +2960,10 @@ function AgentLogsTab({ detail, wf, onMsg }: { detail: TicketDetail; wf?: Wf; on
           <span className="wb-meta-k">{logs.base}</span>
           {logs.agentAlive && logs.sessionKb > 0 ? (
             <span style={{color: 'var(--dsw-derive-accent,#0969da)'}}>agent 运行中 · 已读 {logs.sessionKb}KB{logs.lastActivity ? ' · ' + logs.lastActivity : ''}</span>
+          ) : null}
+          {logs.sessionNote ? (
+            // t260917-05「可辨」：会话档不可解析 → 可见警示而非「最近操作」静默留空
+            <span style={{color: 'var(--dsw-derive-danger,#cf222e)'}}>⚠ {logs.sessionNote}</span>
           ) : null}
           {logs.exists ? (
             <span>{logs.files.length} 个文件{logs.truncated ? `（超出封顶，截断显示）` : ''}</span>

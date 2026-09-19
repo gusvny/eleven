@@ -1690,7 +1690,12 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       if (ref.path === undefined) {
         sendJson(res, 200, {
           ok: true,
-          result: { exists: false, events: [], truncated: false, ws_root: ref.wsRoot ?? '', reason: ref.reason ?? '会话文件未定位' },
+          result: {
+            exists: false, events: [], truncated: false, ws_root: ref.wsRoot ?? '',
+            reason: ref.reason ?? '会话文件未定位',
+            // t260917-05 S3：发现集空但目录有未入统计的会话样文件 → 清单透传（UI 可辨）
+            ...(ref.suspectFiles?.length ? { suspect_files: ref.suspectFiles } : {}),
+          },
         })
         return
       }
@@ -1728,6 +1733,8 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
           result: {
             exists: false, files: 0, total: { input: 0, output: 0, cacheRead: 0 },
             byStage: {}, models: [], ws_root: ref.wsRoot ?? '', reason: ref.reason ?? '会话文件未定位',
+            // t260917-05 S3：发现集空但目录有未入统计的会话样文件 → 清单透传（UI 可辨）
+            ...(ref.suspectFiles?.length ? { suspectFiles: ref.suspectFiles } : {}),
           },
         })
         return

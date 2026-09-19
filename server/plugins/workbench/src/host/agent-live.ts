@@ -69,12 +69,170 @@ export interface SessionFileRef {
   refused?: boolean
   /** 定位到的工作空间根（诊断展示用）。 */
   wsRoot?: string
+  /** 发现集空但目录内存在未入统计的会话样文件时的相对路径清单（t260917-05 S3）。 */
+  suspectFiles?: string[]
 }
 
 function isWithin(root: string, target: string): boolean {
   const abs = resolve(root)
   const t = resolve(target)
   return t === abs || t.startsWith(abs + sep)
+}
+
+// ---- 会话记录解析面判据（t260917-05 会话发现面「零静默降级」）----
+// 真源分层：会话档格式真源在 dsh 侧（dsh-session-persistence-jsonl，仓外）；
+// 事件词表/usage 键名的消费面真源 = engine server/engine/agent_activities.py 的
+// SESSION_KNOWN_TYPES/SESSION_USAGE_KEYS 与本组常量（两侧同构、注释互指，改动
+// 必须同步）——本组定义是只读消费方的冻结镜像（KI-046 外部调用形状纪律）。
+export const SESSION_KNOWN_TYPES: ReadonlySet<string> = new Set([
+  'request/context', 'request/header', 'assistant/message',
+  'assistant/chunk', 'session', 'tool/call',
+])
+export const SESSION_USAGE_KEYS = ['inputTokens', 'outputTokens', 'cacheReadTokens'] as const
+/** 点名清单封顶（对齐 engine SESSION_NOTE_CAP / MERGE_FILES_CAP 先例）。 */
+export const SESSION_NOTE_CAP = 20
+
+/** 一份会话解压文本的解析面判定（engine _judge_session_lines 的 TS 同构）。 */
+export interface SessionLineVerdict {
+  /** 全部行皆空白（合法非 S1，与引擎检疫 blank-skip 同立场）。 */
+  blank: boolean
+  /** JSON 可解析且为映射对象的行数（畸形行只计数不抛）。 */
+  parsed: number
+  /** 命中已知事件词表的行数。 */
+  knownTypes: number
+  /** assistant/message 且 data.usage 为对象的条数——assistant/chunk 同名 usage 不数（防翻倍）。 */
+  usageRecords: number
+  /** usage 对象存在但三个已知键全缺的条数（新版本改字段名的形态）。 */
+  usageWithoutKnownKeys: number
+  /** 可解析的映射行对象（保持原序）——聚合面金额累加复用，避免二次解析。 */
+  objs: any[]
+}
+
+export function judgeSessionLines(lines: readonly unknown[]): SessionLineVerdict {
+  const out: SessionLineVerdict = {
+    blank: true, parsed: 0, knownTypes: 0, usageRecords: 0, usageWithoutKnownKeys: 0, objs: [],
+  }
+  if (!Array.isArray(lines)) return out
+  for (const ln of lines) {
+    if (typeof ln !== 'string') continue
+    const line = ln.trim()
+    if (line === '') continue
+    out.blank = false
+    let obj: any
+    try { obj = JSON.parse(line) } catch { continue }
+    if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) continue
+    out.parsed += 1
+    out.objs.push(obj)
+    const t = obj.type
+    if (typeof t === 'string' && SESSION_KNOWN_TYPES.has(t)) out.knownTypes += 1
+    if (t === 'assistant/message') {
+      const u = (obj.data ?? {}).usage
+      if (u !== null && typeof u === 'object' && !Array.isArray(u)) {
+        out.usageRecords += 1
+        if (!SESSION_USAGE_KEYS.some(k => k in u)) out.usageWithoutKnownKeys += 1
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * 判据结果 → S1「格式不认识」响亮文案；null=非 S1（engine _session_face_s1_text 同构）。
+ * 真值表三段互斥：①解压失败不入本函数（调用方既有解压失败注记路径）；②blank→null；
+ * ③非 blank 且 parsed==0 / knownTypes==0 / usageWithoutKnownKeys>0 → 响亮。
+ */
+export function sessionFaceS1Text(name: string, j: SessionLineVerdict): string | null {
+  if (j.blank) return null
+  if (j.parsed === 0 || j.knownTypes === 0 || j.usageWithoutKnownKeys > 0) {
+    return `会话记录格式不认识（疑似 dsh 版本不匹配），统计值不可信（文件：${name}）`
+  }
+  return null
+}
+
+/** S3 疑似文件分类（engine _session_suspect_unmatched 同构；review 意见3 文案分流）。 */
+export type SuspectKind = 'unknown' | 'other_ticket' | 'legacy_flat'
+
+export interface SuspectFile {
+  /** 相对 sessions 根的路径。 */
+  rel: string
+  kind: SuspectKind
+}
+
+/** 分类标签（与 engine _SESSION_SUSPECT_KIND_LABELS 同构；序=人话呈现序）。 */
+const SUSPECT_KIND_LABELS: ReadonlyArray<readonly [SuspectKind, string]> = [
+  ['unknown', '名字/布局不认识（疑似 dsh 版本不匹配）'],
+  ['other_ticket', '他票会话'],
+  ['legacy_flat', '旧代布局'],
+]
+
+/** 分类清单 → 人话（封顶：前 SESSION_NOTE_CAP 条 + 「等共 N 个」）。 */
+export function formatSuspectGroups(items: readonly SuspectFile[]): string {
+  const lines: string[] = []
+  for (const [kind, label] of SUSPECT_KIND_LABELS) {
+    for (const it of items) {
+      if (it.kind === kind) lines.push(`${label}: ${it.rel}`)
+    }
+  }
+  if (lines.length === 0) return ''
+  const tail = lines.length <= SESSION_NOTE_CAP ? '' : `（等共 ${lines.length} 个）`
+  return lines.slice(0, SESSION_NOTE_CAP).join('、') + tail
+}
+
+/**
+ * S3 扫描（发现集为空时调用）：sessions 树下「会话样文件但未入统计」的分类清单
+ * （engine _session_suspect_unmatched 的 TS 同构，review 意见3 分类一致）：
+ * - other_ticket：三层布局 <slug>/<sub>/ 会话档（session.jsonl.zstd / session.v3.jsonl.zstd 双名）且 sub 不匹配本票 tie 规则；
+ * - legacy_flat：<slug>/session-*.zstd 旧扁平布局（已知旧代，不误诊）；
+ * - unknown：其余「名字含 session 或后缀 .zst/.zstd」——名/布局双不识，疑似 dsh 版本不匹配。
+ * 目录读取失败 → 空清单（不放大环境故障）。
+ */
+export async function scanSuspectSessionFiles(sessRoot: string, ticketId: string): Promise<SuspectFile[]> {
+  const out: SuspectFile[] = []
+  const consider = (rel: string, name: string): void => {
+    const parts = rel.split('/')
+    if (parts.length === 3 && SESSION_FILE_NAMES.includes(name as SessionFileName)) {
+      const sub = parts[1]
+      if (sub === ticketId || sub.startsWith(ticketId + '-')) return // 本票会话（正常入集路径）
+      out.push({ rel, kind: 'other_ticket' })
+      return
+    }
+    if (parts.length === 2 && name.startsWith('session-') && name.endsWith('.zstd')) {
+      out.push({ rel, kind: 'legacy_flat' })
+      return
+    }
+    const low = name.toLowerCase()
+    if (low.includes('session') || low.endsWith('.zst') || low.endsWith('.zstd')) {
+      out.push({ rel, kind: 'unknown' })
+    }
+  }
+  let slugs: { name: string; isDir: boolean }[] = []
+  try {
+    slugs = (await readdir(sessRoot, { withFileTypes: true }))
+      .map(e => ({ name: e.name, isDir: e.isDirectory() }))
+  } catch {
+    return out
+  }
+  for (const slug of slugs) {
+    if (!slug.isDir) {
+      consider(slug.name, slug.name) // sessions 根下散文件
+      continue
+    }
+    let subs: { name: string; isDir: boolean }[] = []
+    try {
+      subs = (await readdir(join(sessRoot, slug.name), { withFileTypes: true }))
+        .map(e => ({ name: e.name, isDir: e.isDirectory() }))
+    } catch { continue /* 子目录读失败跳过 */ }
+    for (const s of subs) {
+      if (!s.isDir) {
+        consider(`${slug.name}/${s.name}`, s.name)
+        continue
+      }
+      let files: string[] = []
+      try { files = await readdir(join(sessRoot, slug.name, s.name)) } catch { continue }
+      for (const fn of files) consider(`${slug.name}/${s.name}/${fn}`, fn)
+    }
+  }
+  return out
 }
 
 /**
@@ -138,10 +296,18 @@ export async function resolveSessionFile(
     }
   }
   if (cands.length === 0) {
-    return {
-      wsRoot,
-      reason: `无本工单会话文件（${sessRoot} 下无 ${ticketId}-*/ 的会话文件 session.jsonl.zstd / session.v3.jsonl.zstd；agent 尚未启动或角色目录未落盘）`,
+    // S3（t260917-05）：发现集空 ≠ 目录空——树里有会话样文件却一个都不匹配本票
+    // 名，按类点名（他票会话/旧代布局/名布局双不识=疑似 dsh 版本不匹配），不静默。
+    const base = `无本工单会话文件（${sessRoot} 下无 ${ticketId}-*/ 的会话文件 session.jsonl.zstd / session.v3.jsonl.zstd；agent 尚未启动或角色目录未落盘）`
+    const suspects = await scanSuspectSessionFiles(sessRoot, ticketId)
+    if (suspects.length > 0) {
+      return {
+        wsRoot,
+        suspectFiles: suspects.map(s => s.rel),
+        reason: `${base}；发现未入统计的会话样文件：${formatSuspectGroups(suspects)}`,
+      }
     }
+    return { wsRoot, reason: base }
   }
   // 平局第三键：同 mtime 时旧代名排前（genIdx 小者在前；未知名字排最后）
   const genIdx = (p: string): number => {

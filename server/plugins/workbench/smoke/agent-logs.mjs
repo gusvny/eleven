@@ -18,8 +18,12 @@
 import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { listAgentLogs, resolveAgentBaseDir, _sessionKbFast } from '../src/host/agent-logs.ts'
 import { apply } from '../node.ts'
+
+const execFileP = promisify(execFile)
 
 let passed = 0
 let failed = 0
@@ -205,6 +209,40 @@ sys.exit(1)
     await writeFile(join(flatRoot, slug, 'session-abc123.zstd'), 'z'.repeat(2048), 'utf8')
     const rf = await _sessionKbFast(flatRoot)
     ok(rf.kb === 2 && rf.path.endsWith('session-abc123.zstd'), '旧扁平布局 session-*.zstd 兜底')
+  }
+
+  /* ------------------------------- E. sessionNote 不可解析注记 (t260917-05 零静默降级) */
+  section('E sessionNote：会话档不可解析 → 显式注记（绝不静默留空）')
+  {
+    // 腿1 解压失败：.dsh/sessions 下有会话样档但内容不是 zstd 流
+    const badRoot = join(tmp, 'ws', 't-e1')
+    const laneDir = join(badRoot, '.suyou')
+    const sessRoot = join(badRoot, '.dsh', 'sessions')
+    await mkdir(join(sessRoot, 'anydir', 'sub'), { recursive: true })
+    await writeFile(join(sessRoot, 'anydir', 'sub', 'session.jsonl.zstd'), 'not-a-zstd-stream', 'utf8')
+    await mkdir(laneDir, { recursive: true })
+    await writeFile(join(laneDir, 'agent_develop_gen1.log'), 'log line\n', 'utf8')
+    const rBad = await listAgentLogs(laneDir)
+    ok((rBad.sessionNote ?? '').includes('解压失败') && (rBad.sessionNote ?? '').includes('疑似'),
+      'E1: 会话档解压失败 → sessionNote 显式注记（原先 catch{} 静默吞）')
+
+    // 腿2 格式不认识：合法 zstd 帧但内容乱文本（S1 形态）
+    let hasZstd = true
+    try { await execFileP('zstd', ['--version']) } catch { hasZstd = false }
+    if (hasZstd) {
+      const s1Root = join(tmp, 'ws', 't-e2')
+      const s1Sess = join(s1Root, '.dsh', 'sessions', 'anydir', 'sub')
+      await mkdir(s1Sess, { recursive: true })
+      const plain = join(tmp, 'e2-raw.txt')
+      await writeFile(plain, '乱文本不是会话记录\n', 'utf8')
+      await execFileP('zstd', ['-q', '-f', plain, '-o', join(s1Sess, 'session.jsonl.zstd')])
+      await mkdir(join(s1Root, '.suyou'), { recursive: true })
+      const rS1 = await listAgentLogs(join(s1Root, '.suyou'))
+      ok((rS1.sessionNote ?? '').includes('格式不认识'),
+        'E2: 会话档格式不认识 → sessionNote 注记（疑似 dsh 版本不匹配）')
+    } else {
+      console.log('  （跳过 E2 腿：zstd 不在 PATH）')
+    }
   }
 } finally {
   await rm(tmp, { recursive: true, force: true })

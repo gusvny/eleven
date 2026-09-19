@@ -4,7 +4,7 @@
  * 数据模型（M4/M5 ticket.py，见 docs/design/工单工作流台设计.md §3）：
  *   - workspace: {type: 'worktree'|'dir', path} | null   —— M4 新字段：
  *     type=worktree → 代码泳道（.worktrees/<短slug>）；type=dir → 非 git 工单的
- *     隔离目录（/tmp/suyou-ws/<工单id>，cleanup 类模板约定）；null=未登记。
+ *     隔离目录（/tmp/sandbar-ws/<工单id>，cleanup 类模板约定）；null=未登记。
  *   - worktree: string                                   —— 旧字段：泳道路径（''=无泳道）。
  *
  * 本文件统一「工作区」的显示语义（列表「工作区」列 + 详情抽屉基本信息 + 行悬停
