@@ -5672,21 +5672,46 @@ function QuarantineModal(props) {
 *  - 本文件（及 ticket-row-card.tsx）不得出现 dev-lane 段名常量串（守卫测试看住）；
 *    引擎通用状态词（running/awaiting-human/blocked/closed…）不属禁列。
 */
-/** 四态人话短名（状态圆点旁文字，不占块）。 */
+/** 五态人话短名（状态圆点旁文字，不占块）。 */
 const STATE4_LABEL = {
 	active: "在飞",
 	done: "收口",
 	waiting: "等你",
-	blocked: "受阻"
+	blocked: "受阻",
+	failed: "已失败"
 };
 /**
-* 引擎现值 → 四态。closed 优先（迁移把 closed 票 stage_state 置成了 awaiting，
-* 语义上已完成，沿用台面 ticketState 既有口径）；未知/未来新增 stage_state →
-* active（宁显活跃勿假警报——不作受阻/等你误报，UT 真值表钉此缺省行）。
+* 终态「活/成」执行状态白名单（与引擎 client.py _EXEC_ALIVE_OK 同一词表的 UI 侧
+* 镜像，t260919-02；改任一侧必须同步另一侧并跑两侧 UT）。白名单内的 exec_status
+* 沿用既有四态推导；白名单外的一切非空字符串（FAILED/CANCELED/TIMED_OUT/未知新
+* 终态）→ failed（补集口径：终态非成功即失败类，未知新终态宁可显失败不显在跑；
+* TERMINATED 不上板故板面不可达）。畸形/缺失 exec_status 不参与判别（不 throw）。
 */
-function deriveTicketState(status, stageState) {
-	if (status === "closed") return "done";
-	switch (stageState) {
+const EXEC_STATUS_ALIVE_OK = /* @__PURE__ */ new Set([
+	"RUNNING",
+	"COMPLETED",
+	"CONTINUED_AS_NEW"
+]);
+/**
+* 引擎现值 → 五态（t260919-02 增第三参 execStatus 与 failed 态）。
+*
+* 判别顺序：
+*  1. exec_status 非空字符串且不在活/成白名单 → failed（失败类终态优先：死票绝不
+*     显在飞，也不得被快照遗留的 closed 词面误归收口）；
+*  2. status/stage_state 词面 'failed' → failed（断链防御，review①：引擎失败行已
+*     带 failed 词面而 exec_status 键在 host 透传丢键/旧行缓存时仍失败可见，不落
+*     default active 复发病灶）；
+*  3. 沿用既有四态推导：closed 优先（迁移把 closed 票 stage_state 置成了 awaiting，
+*     语义上已完成，沿用台面 ticketState 既有口径）；未知/未来 stage_state →
+*     active（宁显活跃勿假警报——不作受阻/等你误报，UT 真值表钉此缺省行）。
+*/
+function deriveTicketState(status, stageState, execStatus) {
+	if (typeof execStatus === "string" && execStatus !== "" && !EXEC_STATUS_ALIVE_OK.has(execStatus)) return "failed";
+	if (status === "failed" || stageState === "failed") return "failed";
+	const st = typeof status === "string" ? status : void 0;
+	const ss = typeof stageState === "string" ? stageState : void 0;
+	if (st === "closed") return "done";
+	switch (ss) {
 		case "blocked": return "blocked";
 		case "awaiting-human": return "waiting";
 		case "running":
@@ -5710,15 +5735,18 @@ function pausedBadgeText(phase) {
 	return phase === "at_gate" ? "⏸ 已暂停在段间" : "⏸ 暂停中（待段间生效）";
 }
 /**
-* 排序层（t260916-15）：在等你/受阻 → 在跑 → 已完成 三档。tier 是 deriveTicketState
-* 四态的**纯投影**——状态→四态映射单点仍在 deriveTicketState（全台唯一归并点），
-* 本函数不另起第二套状态词表；未知/未来 stage_state 继承其「宁显活跃勿假警报」
-* 缺省 → tier1（'awaiting'=等 agent 段间推进，归在跑档，UT 钉死防悄悄改口径）。
+* 排序层（t260916-15；t260919-02 增第三参 execStatus 与 failed 档）：在等你/受阻/
+* 已失败 → 在跑 → 已完成 三档。tier 是 deriveTicketState 五态的**纯投影**——状态→
+* 五态映射单点仍在 deriveTicketState（全台唯一归并点），本函数不另起第二套状态词表；
+* 未知/未来 stage_state 继承其「宁显活跃勿假警报」缺省 → tier1（'awaiting'=等 agent
+* 段间推进，归在跑档，UT 钉死防悄悄改口径）；失败票 tier0（死票置顶可见，不许沉底
+* 复活「永远在跑」的隐形形态）。
 */
-function ticketMergeTierOf(status, stageState) {
-	switch (deriveTicketState(typeof status === "string" ? status : void 0, typeof stageState === "string" ? stageState : void 0)) {
+function ticketMergeTierOf(status, stageState, execStatus) {
+	switch (deriveTicketState(status, stageState, execStatus)) {
 		case "waiting":
-		case "blocked": return 0;
+		case "blocked":
+		case "failed": return 0;
 		case "done": return 2;
 		default: return 1;
 	}
@@ -5755,8 +5783,8 @@ function sortMergedTickets(rows) {
 	keyed.sort((a, b) => {
 		const ra = a.row;
 		const rb = b.row;
-		const ta = ticketMergeTierOf(ra?.status, ra?.stage_state);
-		const tb = ticketMergeTierOf(rb?.status, rb?.stage_state);
+		const ta = ticketMergeTierOf(ra?.status, ra?.stage_state, ra?.exec_status);
+		const tb = ticketMergeTierOf(rb?.status, rb?.stage_state, rb?.exec_status);
 		if (ta !== tb) return ta - tb;
 		const dts = ticketSortTsOf(rb) - ticketSortTsOf(ra);
 		return dts !== 0 ? dts : a.idx - b.idx;
@@ -5856,13 +5884,13 @@ function laneDots(wf, ticket) {
 	return stages.map((_, i) => i < idx ? "done" : i === idx ? "current" : "todo");
 }
 /**
-* chips=过滤非分组：四态按 deriveTicketState 归并后比对（与行卡同源，不按
+* chips=过滤非分组：五态按 deriveTicketState 归并后比对（与行卡同源，不按
 * status/stage_state 原词各筛各的）；epic 精确匹配；q 大小写不敏感匹配 id+标题。
 */
 function filterRows(rows, f) {
 	const q = (f.q ?? "").trim().toLowerCase();
 	return rows.filter((r) => {
-		if (f.state && deriveTicketState(r.status, r.stage_state) !== f.state) return false;
+		if (f.state && deriveTicketState(r.status, r.stage_state, r.exec_status) !== f.state) return false;
 		if (f.epic && (r.epic ?? "") !== f.epic) return false;
 		if (q !== "") {
 			if (!`${r.id} ${r.title ?? ""}`.toLowerCase().includes(q)) return false;
@@ -5870,15 +5898,16 @@ function filterRows(rows, f) {
 		return true;
 	});
 }
-/** 四态 chips 计数（含 done——收口折叠计数行的数字来源；'' 全部计数由调用方取 rows.length）。 */
+/** 五态 chips 计数（含 done——收口折叠计数行的数字来源；'' 全部计数由调用方取 rows.length）。 */
 function countByState(rows) {
 	const out = {
 		active: 0,
 		done: 0,
 		waiting: 0,
-		blocked: 0
+		blocked: 0,
+		failed: 0
 	};
-	for (const r of rows) out[deriveTicketState(r.status, r.stage_state)] += 1;
+	for (const r of rows) out[deriveTicketState(r.status, r.stage_state, r.exec_status)] += 1;
 	return out;
 }
 /** 消费点接线的单位归一（F2 回归点）：引擎 updated_ts=**秒**（base.py _now_epoch），
@@ -6065,17 +6094,19 @@ function snapshotDigest(detail) {
 }
 //#endregion
 //#region src/client/ticket-row-card.tsx
-/** 悬停 title：id＋阶段语境（C2 消费点：阶段短名拓扑驱动）＋阻塞原因。 */
+/** 悬停 title：id＋阶段语境（C2 消费点：阶段短名拓扑驱动）＋阻塞原因＋执行状态原文
+*  （t260919-02：失败行在悬停里可辨 Temporal 终态词，与状态标签「已失败」互证）。 */
 function cardTitle(t, wf) {
 	const parts = [t.id];
 	const short = stageShortOf((wf?.stages ?? []).find((s) => s?.id === t.stage));
 	if (short !== "") parts.push(`阶段：${short}`);
 	if (t.blocked_reason) parts.push(`阻塞原因：${t.blocked_reason}`);
+	if (t.exec_status) parts.push(`执行状态：${t.exec_status}`);
 	if (t.updated) parts.push(`更新 ${t.updated}`);
 	return parts.join("\n");
 }
 function TicketRowCard({ t, wf, progress, compact = false, active = false, busy = false, updatedTsMs, kindBadge, ops = [], peerViewers = [], onOpen, onAdvance, onDispatch, onRework, onUnblock, onClose, onPause, onResume, onOpenEpic }) {
-	const state4 = deriveTicketState(t.status, t.stage_state);
+	const state4 = deriveTicketState(t.status, t.stage_state, t.exec_status);
 	const epicColor = epicColorOf(t.epic);
 	const dots = compact ? [] : laneDots(wf, t);
 	const rel = relativeTime(toMillis(t.updated_ts ?? updatedTsMs));
@@ -6303,7 +6334,7 @@ const INSPECTION_TOPOLOGY = [
 	}
 ];
 /** 消费外部行=不可信输入的取串助手（非串→''）。 */
-function strOf(v) {
+function strOf$1(v) {
 	return typeof v === "string" ? v : "";
 }
 /** 是否巡检行：kind 或 engine 标记任一命中（引擎行带 kind=inspection）。 */
@@ -6367,7 +6398,7 @@ function inspectionSummaryOf(face) {
 }
 /** 阶段短名：拓扑命中用短名，未命中截断原词（stageShortOf 同口径），畸形→''。 */
 function inspectionStageShort(stage) {
-	const s = strOf(stage);
+	const s = strOf$1(stage);
 	if (s === "") return "";
 	const hit = INSPECTION_TOPOLOGY.find((st) => st.id === s);
 	if (hit) return hit.short;
@@ -6381,8 +6412,8 @@ function inspectionStageShort(stage) {
 */
 function inspectionProgressOf(row) {
 	if (row === null || typeof row !== "object") return void 0;
-	const stageState = strOf(row.stage_state);
-	const status = strOf(row.status);
+	const stageState = strOf$1(row.stage_state);
+	const status = strOf$1(row.status);
 	const c = findingsCountOf(row);
 	const findingsTxt = `发现 高${c.high}/中${c.med}/低${c.low}`;
 	if (status === "closed") return {
@@ -6394,7 +6425,7 @@ function inspectionProgressOf(row) {
 		text: `等你签字 · ${findingsTxt}`
 	};
 	if (stageState === "blocked") {
-		const reason = strOf(row.blocked_reason);
+		const reason = strOf$1(row.blocked_reason);
 		return {
 			state: "blocked",
 			text: `受阻${reason ? "：" + reason : " · 原因见详情"}`
@@ -6437,7 +6468,7 @@ function inspectionSplitByProject(rows, registeredKeys) {
 	const byProject = {};
 	const unowned = [];
 	for (const row of inspectionSidebarRows(rows)) {
-		const p = strOf(row.project);
+		const p = strOf$1(row.project);
 		if (p !== "" && keySet.has(p)) (byProject[p] ??= []).push(row);
 		else unowned.push(row);
 	}
@@ -49540,6 +49571,64 @@ function DocsSection({ projectKey: shellProjectKey }) {
 	});
 }
 //#endregion
+//#region src/client/terminal-face.ts
+/** 恒定兜底文案（与引擎 face 面语义一致；face 缺失时 UI 侧唯一免责声明源）。 */
+const TERMINAL_FACE_FALLBACKS = {
+	execStatus: "未知",
+	reasonNote: "原因不可得：失败面数据缺失或形态异常——不编造原因",
+	snapshotNote: "无快照：终态工作流不再运行，snapshot 查询没有执行方承接（终态的确定性结论，不是瞬时故障，刷新无效）",
+	lastStageNote: "最后已知阶段不可得：宁缺不猜"
+};
+/** str 消费：非字符串 → ''（畸形降级，不抛）。 */
+function strOf(v) {
+	return typeof v === "string" ? v : "";
+}
+/**
+* 引擎终态回执 face（unknown，可能 null/非对象/半残）+ 回执错误原文 → 可渲染视图。
+* 纯函数：不抛、不编造；缺什么显式写什么。
+*/
+function terminalFaceView(face, receiptError) {
+	const errTxt = strOf(receiptError);
+	if (face === null || typeof face !== "object" || Array.isArray(face)) return {
+		execStatus: TERMINAL_FACE_FALLBACKS.execStatus,
+		reason: "",
+		reasonAvailable: false,
+		reasonNote: TERMINAL_FACE_FALLBACKS.reasonNote,
+		receiptError: errTxt,
+		snapshotNote: TERMINAL_FACE_FALLBACKS.snapshotNote,
+		lastStage: "",
+		lastStageNote: TERMINAL_FACE_FALLBACKS.lastStageNote,
+		ticketId: "",
+		project: "",
+		epic: "",
+		instanceId: "",
+		period: "",
+		startTimeTxt: "",
+		closeTimeTxt: ""
+	};
+	const f = face;
+	const reason = strOf(f.reason);
+	const reasonAvailable = f.reason_available === true && reason !== "";
+	const lastStage = strOf(f.last_stage);
+	return {
+		execStatus: strOf(f.exec_status) || TERMINAL_FACE_FALLBACKS.execStatus,
+		reason,
+		reasonAvailable,
+		reasonNote: reasonAvailable ? strOf(f.reason_source) || "来源：Temporal 工作流执行失败信息" : strOf(f.reason_source) || strOf(f.reason_unavailable_note) || TERMINAL_FACE_FALLBACKS.reasonNote,
+		receiptError: errTxt,
+		snapshotNote: strOf(f.snapshot_note) || TERMINAL_FACE_FALLBACKS.snapshotNote,
+		lastStage,
+		lastStageNote: strOf(f.last_stage_note) || TERMINAL_FACE_FALLBACKS.lastStageNote,
+		ticketId: strOf(f.ticket_id),
+		project: strOf(f.project),
+		epic: strOf(f.epic),
+		instanceId: strOf(f.instance_id),
+		period: strOf(f.period),
+		startTimeTxt: strOf(f.start_time_txt),
+		closeTimeTxt: strOf(f.close_time_txt)
+	};
+}
+//#endregion
 //#region src/client/tab-presence.ts
 /**
 * tab-presence.ts —— 工单台多页签共存：在看心跳 + 写事件广播（t260901-15）。
@@ -50503,6 +50592,11 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-chip-btn[data-on=true]{border-color:var(--dsw-derive-accent,#0969da);color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff);font-weight:600}
 .wb-chip-btn[data-state=waiting]{border-color:var(--dsw-derive-warn-border,#d4a72c)}
 .wb-chip-btn[data-state=waiting][data-on=false]{background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
+/* t260919-02「已失败」chip：红系（与 blocked 同 danger 令牌族，文案「已失败」可辨）。
+ * hex-clean 纪律（KI-055 家族）：复用 theme.ts 既有 danger 令牌声明位，消费位只经
+ * var() fallback 供出，零新增裸 hex（本票未新增令牌=无新声明位需求）。 */
+.wb-chip-btn[data-state=failed]{border-color:var(--dsw-derive-danger-border,#ff9b9b)}
+.wb-chip-btn[data-state=failed][data-on=false]{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e)}
 .wb-chip-epic{border-style:dashed;border-width:1.5px}
 /* 搜索框 */
 .wb-search{font-size:12px;padding:3px 10px;border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;width:180px}
@@ -50524,6 +50618,9 @@ const CSS = `${DERIVE_TOKENS_CSS}
  * fallback 供出（allowlist C 合法位），零裸 hex。 */
 .wb-root .wb-card[data-state=waiting]{background:var(--dsw-derive-warn-bg,#fff8c5)}
 .wb-root .wb-card[data-state=blocked]{background:var(--dsw-derive-danger-bg,#ffebe9)}
+/* t260919-02「已失败」行卡：红系行底+实红点/状态字（与 blocked 同令牌族不同文案，
+ * 与 done 灰/active 蓝可辨；特异性 0,3,0 与 waiting/blocked 同档，压 sidebar blanket）。 */
+.wb-root .wb-card[data-state=failed]{background:var(--dsw-derive-danger-bg,#ffebe9)}
 .wb-card[data-active=true]{border-color:var(--dsw-derive-accent,#0969da);box-shadow:inset 0 0 0 1px var(--dsw-derive-accent,#0969da)}
 .wb-card[data-state=done]{color:var(--dsw-derive-muted,#57606a)}
 .wb-card-l1{display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 320px}
@@ -50531,11 +50628,13 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-card-dot::before{content:'';position:absolute;inset:0;border-radius:50%;background:var(--dsw-derive-muted,#8c959f)}
 .wb-card-dot[data-state=waiting]::before{background:var(--dsw-derive-warn,#bf8700)}
 .wb-card-dot[data-state=blocked]::before{background:var(--dsw-derive-danger,#cf222e)}
+.wb-card-dot[data-state=failed]::before{background:var(--dsw-derive-danger-solid,#d1242f)}
 .wb-card-dot[data-state=active]::before{background:var(--dsw-derive-accent,#0969da)}
 .wb-card-dot[data-state=done]::before{background:var(--dsw-derive-muted,#8c959f)}
 .wb-card-state{font-size:11px;font-weight:600;flex:none}
 .wb-card-state[data-state=waiting]{color:var(--dsw-derive-warn,#9a6700)}
 .wb-card-state[data-state=blocked]{color:var(--dsw-derive-danger,#cf222e)}
+.wb-card-state[data-state=failed]{color:var(--dsw-derive-danger,#cf222e)}
 .wb-card-state[data-state=active]{color:var(--dsw-derive-accent,#0969da)}
 .wb-card-state[data-state=done]{color:var(--dsw-derive-muted,#57606a)}
 /* 段间暂停徽标（t260908-01）：主题令牌着色（warm 系=注意但非故障），
@@ -50558,6 +50657,7 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-card-lane-dot[data-visual=done]{background:var(--dsw-derive-success-solid,#2da44e)}
 .wb-card-lane-dot[data-visual=current][data-state=waiting]{background:var(--dsw-derive-warn-border,#d4a72c)}
 .wb-card-lane-dot[data-visual=current][data-state=blocked]{background:var(--dsw-derive-danger,#cf222e)}
+.wb-card-lane-dot[data-visual=current][data-state=failed]{background:var(--dsw-derive-danger-solid,#d1242f)}
 .wb-card-lane-dot[data-visual=current][data-state=active]{background:var(--dsw-derive-accent,#0969da)}
 /* 行卡动作位（右侧）：衍生动作（去签字/看原因）+ 管理动作 */
 .wb-card-ops{display:flex;gap:6px;align-items:center;flex:none;margin-left:auto}
@@ -50706,6 +50806,26 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-ck-more{padding:4px 10px 8px;font-size:11.5px;color:var(--dsw-derive-muted,#57606a);border-top:1px dashed var(--dsw-derive-border,#d0d7de)}
 .wb-ck-more pre{margin:4px 0 0;padding:6px 8px;font-size:11px;background:var(--dsw-derive-surface,#f6f8fa);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;white-space:pre-wrap;word-break:break-all;max-height:160px;overflow:auto}
 .wb-drawer-id{font-size:12px;color:var(--dsw-derive-muted,#57606a);word-break:break-all}
+/* 终态失败票详情面板（t260919-02）：红系结构件——色全部走 theme.ts 既有 danger
+ * 令牌声明位（消费位 var() fallback，hex-clean/KI-055 家族纪律，零新增裸 hex）。 */
+.wb-tf-panel{border:1px solid var(--dsw-derive-danger-border,#ff9b9b);border-radius:8px;
+  background:var(--dsw-derive-danger-bg,#ffebe9);padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.wb-tf-head{display:flex;align-items:center;gap:8px}
+.wb-tf-mark{font-size:16px}
+.wb-tf-title{font-size:15px;font-weight:700;color:var(--dsw-derive-danger,#cf222e)}
+.wb-tf-exec{font-size:11px;font-weight:700;font-family:ui-monospace,Menlo,monospace;color:var(--dsw-derive-danger,#cf222e);
+  background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-danger-border,#ff9b9b);border-radius:10px;padding:1px 8px}
+.wb-tf-receipt{font-size:12px;color:var(--dsw-derive-fg,#1f2328);white-space:pre-wrap;
+  background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-danger-border,#ff9b9b);border-radius:6px;padding:6px 10px}
+.wb-tf-k{font-size:11px;font-weight:600;color:var(--dsw-derive-danger,#cf222e)}
+.wb-tf-reason-txt{font-size:13px;color:var(--dsw-derive-fg,#1f2328);white-space:pre-wrap;word-break:break-word}
+.wb-tf-reason-txt.wb-tf-unavailable{color:var(--dsw-derive-muted,#57606a)}
+.wb-tf-src{font-size:11px;color:var(--dsw-derive-muted,#57606a)}
+.wb-tf-grid{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;align-items:baseline}
+.wb-tf-grid .wb-tf-k{color:var(--dsw-derive-muted,#57606a)}
+.wb-tf-v{font-size:12px;color:var(--dsw-derive-fg,#1f2328);word-break:break-all}
+.wb-tf-snapshot{font-size:11px;color:var(--dsw-derive-muted,#57606a);border-top:1px dashed var(--dsw-derive-danger-border,#ff9b9b);padding-top:8px}
+.wb-tf-honesty{font-size:11px;font-weight:600;color:var(--dsw-derive-danger,#cf222e)}
 .wb-close{position:absolute;top:14px;right:16px;font-size:22px;color:var(--dsw-derive-muted,#57606a);cursor:pointer;background:none;border:none}
 .wb-close:hover{color:var(--dsw-derive-fg,#1f2328)}
 .wb-section{border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;background:var(--dsw-derive-canvas,#ffffff);padding:12px 14px;display:flex;
@@ -51267,6 +51387,136 @@ function fmtSnapshotTs(v) {
 		return new Date(ms).toLocaleString("zh-CN", { hour12: false });
 	}
 	return v;
+}
+/**
+* 终态失败票详情面板（t260919-02）：终态回执 kind=terminal 时详情抽屉的唯一详情面
+* ——「已失败 + 原因」结构化呈现，绝不出现空面板。
+*
+* 硬纪律（本组件契约，UT 源级钉死）：
+*  - **零操作入口**：组件体内不得出现任何 onClick/apiPost/按钮语义——终态票不再
+*    推进，set-stage/force/resume 一概不给（票面边界）；
+*  - 诚实口径：视图模型（terminal-face.ts）缺什么显什么（「原因不可得」「最后已知
+*    阶段不可得」「无快照及为何无」），绝不编造；「刷新无效」随面板常驻可见，
+*    不只闪在操作提示条里。
+*/
+function TerminalFailurePanel({ view }) {
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-tf-panel",
+		"data-testid": "terminal-failure-panel",
+		"data-exec": view.execStatus,
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-tf-head",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-mark",
+						children: "⛔"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-title",
+						children: "工单已终态失败"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-exec",
+						title: "Temporal 执行状态",
+						children: view.execStatus
+					})
+				]
+			}),
+			view.receiptError !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-tf-receipt",
+				children: view.receiptError
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-tf-reason",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-tf-k",
+						children: "失败原因"
+					}),
+					view.reasonAvailable ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-tf-reason-txt",
+						children: view.reason
+					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-tf-reason-txt wb-tf-unavailable",
+						children: ["原因不可得", view.reasonNote ? `——${view.reasonNote}` : ""]
+					}),
+					view.reasonAvailable && view.reasonNote !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-tf-src",
+						children: view.reasonNote
+					})
+				]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-tf-grid",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-k",
+						children: "票号"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-v",
+						children: view.ticketId || "不可得"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-k",
+						children: "项目"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-v",
+						children: view.project || "—"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-k",
+						children: "立项"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-v",
+						children: view.epic || "未归档"
+					}),
+					view.instanceId !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-k",
+						children: "巡检实例"
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: "wb-tf-v",
+						children: [view.instanceId, view.period !== "" ? ` · 期 ${view.period}` : ""]
+					})] }),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-k",
+						children: "最后已知阶段"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-v",
+						children: view.lastStage !== "" ? view.lastStage : view.lastStageNote
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-k",
+						children: "起跑时间"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-v",
+						children: view.startTimeTxt !== "" ? view.startTimeTxt : "不可得"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-k",
+						children: "终态时间"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-v",
+						children: view.closeTimeTxt !== "" ? view.closeTimeTxt : "不可得"
+					})
+				]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-tf-snapshot",
+				children: view.snapshotNote
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-tf-honesty",
+				children: "终态票不再推进，刷新无效；本面板只读，无任何推进/重试入口。"
+			})
+		]
+	});
 }
 /** 基本信息网格条目：键（灰）值（黑），超长省略悬停全文。 */
 function MetaItem({ k, children, title }) {
@@ -52451,6 +52701,7 @@ function availableOps(t, wf) {
 	const s = t.status;
 	const ss = t.stage_state;
 	if (t.engine === "inspection") return [];
+	if (deriveTicketState(t.status, t.stage_state, t.exec_status) === "failed") return [];
 	if (t.engine === "template-as-code-v2") {
 		if (s === "closed") return [];
 		const v2ops = [];
@@ -53638,6 +53889,9 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 	const [detailLoading, setDetailLoading] = (0, react.useState)(false);
 	const [opBusy, setOpBusy] = (0, react.useState)(false);
 	const [opMsg, setOpMsg] = (0, react.useState)("");
+	/** t260919-02 终态失败面视图：openDetail 捕获 terminal 回执的 face 后装配；
+	*  切单/重开/关抽屉即清（openDetail 开头 + 关闭钮兜底），绝不串票。 */
+	const [terminalFace, setTerminalFace] = (0, react.useState)(null);
 	const [promptBox, setPromptBox] = (0, react.useState)(null);
 	const [reworkId, setReworkId] = (0, react.useState)(null);
 	const [reworkHuman, setReworkHuman] = (0, react.useState)(false);
@@ -53798,11 +54052,13 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 		setDrawerTab("detail");
 		setDetailLoading(true);
 		setOpMsg("");
+		setTerminalFace(null);
 		try {
 			const data = await apiGet(`${API}/tickets/${encodeURIComponent(id)}`);
 			if (data?.ok !== true) {
 				const e = new Error(data?.error ?? "详情加载失败");
 				e.kind = data?.kind;
+				e.face = data?.face;
 				throw e;
 			}
 			if (selectedIdRef.current !== id) return;
@@ -53811,8 +54067,10 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 			if (selectedIdRef.current === id) {
 				const kind = err?.kind;
 				if (kind === "not_found") setOpMsg(`工单不存在：${id}（Temporal 无此 workflow）`);
-				else if (kind === "terminal") setOpMsg(String(err instanceof Error ? err.message : err));
-				else setOpMsg(`详情加载失败（查询瞬时故障），自动重试中：${String(err instanceof Error ? err.message : err)}`);
+				else if (kind === "terminal") {
+					setTerminalFace(terminalFaceView(err?.face, err instanceof Error ? err.message : String(err)));
+					setOpMsg(String(err instanceof Error ? err.message : err));
+				} else setOpMsg(`详情加载失败（查询瞬时故障），自动重试中：${String(err instanceof Error ? err.message : err)}`);
 			}
 		} finally {
 			if (selectedIdRef.current === id) setDetailLoading(false);
@@ -54067,8 +54325,8 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 		sortKey,
 		sortAsc
 	]);
-	const openList = (0, react.useMemo)(() => sorted.filter((t) => deriveTicketState(t.status, t.stage_state) !== "done"), [sorted]);
-	const doneList = (0, react.useMemo)(() => sorted.filter((t) => deriveTicketState(t.status, t.stage_state) === "done"), [sorted]);
+	const openList = (0, react.useMemo)(() => sorted.filter((t) => deriveTicketState(t.status, t.stage_state, t.exec_status) !== "done"), [sorted]);
+	const doneList = (0, react.useMemo)(() => sorted.filter((t) => deriveTicketState(t.status, t.stage_state, t.exec_status) === "done"), [sorted]);
 	const pageCount = Math.max(1, Math.ceil(openList.length / PAGE_SIZE));
 	const paged = (0, react.useMemo)(() => openList.slice((pageNo - 1) * PAGE_SIZE, pageNo * PAGE_SIZE), [openList, pageNo]);
 	(0, react.useEffect)(() => {
@@ -54081,7 +54339,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 		sortAsc
 	]);
 	(0, react.useEffect)(() => {
-		const ids = paged.filter((t) => deriveTicketState(t.status, t.stage_state) !== "done").map((t) => t.id);
+		const ids = paged.filter((t) => deriveTicketState(t.status, t.stage_state, t.exec_status) !== "done").map((t) => t.id);
 		if (ids.length === 0) return;
 		let alive = true;
 		apiGet(`${API}/tickets?project=${encodeURIComponent(projectKey ?? "")}&enrich=progress&ids=${encodeURIComponent(ids.join(","))}`).then((data) => {
@@ -54262,6 +54520,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 							"waiting",
 							"blocked",
 							"active",
+							"failed",
 							"done"
 						].map((s) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 							className: "wb-chip-btn",
@@ -54486,6 +54745,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 							selectedIdRef.current = null;
 							setSelectedId(null);
 							setDetail(void 0);
+							setTerminalFace(null);
 						},
 						children: "×"
 					}),
@@ -54517,6 +54777,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 						className: "wb-empty",
 						children: "加载详情…"
 					}),
+					!detailLoading && terminalFace !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TerminalFailurePanel, { view: terminalFace }),
 					!detailLoading && detail !== void 0 && detail.id === selectedId && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-drawer-head",
@@ -55371,6 +55632,7 @@ function apply(ctx) {
 	});
 }
 //#endregion
+exports.TerminalFailurePanel = TerminalFailurePanel;
 exports.apply = apply;
 exports.evidenceImgSrc = evidenceImgSrc;
 exports.evidenceLightboxKeys = evidenceLightboxKeys;

@@ -41,6 +41,8 @@ export interface CardTicket {
    *  "template-as-code-v2"；巡检族行=另一标记串）——本组件保持通用零业务词表
    *  （t260915-08 守卫），左栏以该值等值选择器作用域「等你」黄调，异值零命中。 */
   engine?: string
+  /** Temporal 执行状态（t260919-02：五态推导第三参；失败类终态行显「已失败」）。 */
+  exec_status?: string
 }
 
 /** 进展行（host enrichment 透传；缺省=行卡降级只显相对时间）。 */
@@ -82,13 +84,15 @@ export interface TicketRowCardProps {
   onOpenEpic?: (code: string) => void
 }
 
-/** 悬停 title：id＋阶段语境（C2 消费点：阶段短名拓扑驱动）＋阻塞原因。 */
+/** 悬停 title：id＋阶段语境（C2 消费点：阶段短名拓扑驱动）＋阻塞原因＋执行状态原文
+ *  （t260919-02：失败行在悬停里可辨 Temporal 终态词，与状态标签「已失败」互证）。 */
 function cardTitle(t: CardTicket, wf?: WfLike | null): string {
   const parts = [t.id]
   const stage = (wf?.stages ?? []).find(s => s?.id === t.stage)
   const short = stageShortOf(stage)
   if (short !== '') parts.push(`阶段：${short}`)
   if (t.blocked_reason) parts.push(`阻塞原因：${t.blocked_reason}`)
+  if (t.exec_status) parts.push(`执行状态：${t.exec_status}`)
   if (t.updated) parts.push(`更新 ${t.updated}`)
   return parts.join('\n')
 }
@@ -97,7 +101,8 @@ export function TicketRowCard({
   t, wf, progress, compact = false, active = false, busy = false, updatedTsMs, kindBadge,
   ops = [], peerViewers = [], onOpen, onAdvance, onDispatch, onRework, onUnblock, onClose, onPause, onResume, onOpenEpic,
 }: TicketRowCardProps) {
-  const state4 = deriveTicketState(t.status, t.stage_state)
+  // t260919-02：exec_status 进五态推导（失败类终态行 → 'failed'「已失败」红标）。
+  const state4 = deriveTicketState(t.status, t.stage_state, t.exec_status)
   const epicColor = epicColorOf(t.epic)
   const dots = compact ? [] : laneDots(wf, t)
   const rel = relativeTime(toMillis(t.updated_ts ?? updatedTsMs))

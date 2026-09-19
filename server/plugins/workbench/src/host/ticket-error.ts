@@ -22,3 +22,45 @@ export function ticketShowHttpVerdict(kind: unknown): TicketShowHttpVerdict {
   if (kind === 'transient') return { status: 503, retryable: true }
   return { status: 500, retryable: false }
 }
+
+/** ticket show 失败响应的装配产物：HTTP 状态 + JSON body（形状固定，face 可缺席）。 */
+export interface TicketShowErrorReply {
+  status: number
+  body: {
+    ok: false
+    error: string
+    kind: string
+    retryable?: true
+    face?: Record<string, unknown>
+  }
+}
+
+/**
+ * ticket show 失败响应的统一装配（t260919-02 在 KI-025 分级上只加 face 键）：
+ *  - HTTP 级裁定仍走 ticketShowHttpVerdict 单点（terminal 恒 410、刷新无效口径
+ *    零退化——face 只加载荷不改级别，绝不把终态伪装成可重试）；
+ *  - face 仅「plain dict」且 kind=terminal 才附带：直读桥失败/超时/畸形（null/
+ *    非对象/数组）→ 回执**无 face 键**，UI 按纯错误提示降级（不渲染失败面板）；
+ *    非终态 kind 一律不附带（失败面是终态专属语义，不随错误扩散）。
+ */
+export function ticketShowErrorReply(
+  s: { error?: unknown; kind?: unknown } | null,
+  id: string,
+  face?: unknown,
+): TicketShowErrorReply {
+  const kind = typeof s?.kind === 'string' ? s.kind : ''
+  const msg = String(s?.error ?? (id ? `工单读取失败：${id}` : '工单读取失败'))
+  const v = ticketShowHttpVerdict(kind)
+  const faceOk = kind === 'terminal'
+    && face !== null && typeof face === 'object' && !Array.isArray(face)
+  return {
+    status: v.status,
+    body: {
+      ok: false,
+      error: msg,
+      kind: kind || 'internal',
+      ...(v.retryable ? { retryable: true } : {}),
+      ...(faceOk ? { face: face as Record<string, unknown> } : {}),
+    },
+  }
+}

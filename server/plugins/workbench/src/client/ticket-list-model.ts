@@ -17,27 +17,52 @@
 
 import { fnv1a } from '../shared/project-color.ts'
 
-/* ------------------------------------------------------------- 四态枚举 */
+/* ------------------------------------------------------------- 五态枚举 */
 
-/** 引擎通用四态：在飞/收口/等你/受阻（短名沿 mock ⑥ chips 词表）。 */
-export type TicketState4 = 'active' | 'done' | 'waiting' | 'blocked'
+/** 引擎通用五态：在飞/收口/等你/受阻/已失败（t260919-02 增 failed；短名沿 mock ⑥
+ *  chips 词表 + 本票「已失败」）。 */
+export type TicketState4 = 'active' | 'done' | 'waiting' | 'blocked' | 'failed'
 
-/** 四态人话短名（状态圆点旁文字，不占块）。 */
+/** 五态人话短名（状态圆点旁文字，不占块）。 */
 export const STATE4_LABEL: Record<TicketState4, string> = {
   active: '在飞',
   done: '收口',
   waiting: '等你',
   blocked: '受阻',
+  failed: '已失败',
 }
 
 /**
- * 引擎现值 → 四态。closed 优先（迁移把 closed 票 stage_state 置成了 awaiting，
- * 语义上已完成，沿用台面 ticketState 既有口径）；未知/未来新增 stage_state →
- * active（宁显活跃勿假警报——不作受阻/等你误报，UT 真值表钉此缺省行）。
+ * 终态「活/成」执行状态白名单（与引擎 client.py _EXEC_ALIVE_OK 同一词表的 UI 侧
+ * 镜像，t260919-02；改任一侧必须同步另一侧并跑两侧 UT）。白名单内的 exec_status
+ * 沿用既有四态推导；白名单外的一切非空字符串（FAILED/CANCELED/TIMED_OUT/未知新
+ * 终态）→ failed（补集口径：终态非成功即失败类，未知新终态宁可显失败不显在跑；
+ * TERMINATED 不上板故板面不可达）。畸形/缺失 exec_status 不参与判别（不 throw）。
  */
-export function deriveTicketState(status?: string, stageState?: string): TicketState4 {
-  if (status === 'closed') return 'done'
-  switch (stageState) {
+const EXEC_STATUS_ALIVE_OK = new Set(['RUNNING', 'COMPLETED', 'CONTINUED_AS_NEW'])
+
+/**
+ * 引擎现值 → 五态（t260919-02 增第三参 execStatus 与 failed 态）。
+ *
+ * 判别顺序：
+ *  1. exec_status 非空字符串且不在活/成白名单 → failed（失败类终态优先：死票绝不
+ *     显在飞，也不得被快照遗留的 closed 词面误归收口）；
+ *  2. status/stage_state 词面 'failed' → failed（断链防御，review①：引擎失败行已
+ *     带 failed 词面而 exec_status 键在 host 透传丢键/旧行缓存时仍失败可见，不落
+ *     default active 复发病灶）；
+ *  3. 沿用既有四态推导：closed 优先（迁移把 closed 票 stage_state 置成了 awaiting，
+ *     语义上已完成，沿用台面 ticketState 既有口径）；未知/未来 stage_state →
+ *     active（宁显活跃勿假警报——不作受阻/等你误报，UT 真值表钉此缺省行）。
+ */
+export function deriveTicketState(status?: unknown, stageState?: unknown, execStatus?: unknown): TicketState4 {
+  if (typeof execStatus === 'string' && execStatus !== '' && !EXEC_STATUS_ALIVE_OK.has(execStatus)) {
+    return 'failed'
+  }
+  if (status === 'failed' || stageState === 'failed') return 'failed'
+  const st = typeof status === 'string' ? status : undefined
+  const ss = typeof stageState === 'string' ? stageState : undefined
+  if (st === 'closed') return 'done'
+  switch (ss) {
     case 'blocked': return 'blocked'
     case 'awaiting-human': return 'waiting'
     case 'running':
@@ -72,25 +97,27 @@ export function pausedBadgeText(phase?: unknown): string {
 export interface TicketSortRowLike {
   status?: unknown
   stage_state?: unknown
+  /** Temporal 执行状态（t260919-02：失败类终态行置顶可 attention 的数据源）。 */
+  exec_status?: unknown
   updated_ts?: unknown
   created?: unknown
   close_ts?: unknown
 }
 
 /**
- * 排序层（t260916-15）：在等你/受阻 → 在跑 → 已完成 三档。tier 是 deriveTicketState
- * 四态的**纯投影**——状态→四态映射单点仍在 deriveTicketState（全台唯一归并点），
- * 本函数不另起第二套状态词表；未知/未来 stage_state 继承其「宁显活跃勿假警报」
- * 缺省 → tier1（'awaiting'=等 agent 段间推进，归在跑档，UT 钉死防悄悄改口径）。
+ * 排序层（t260916-15；t260919-02 增第三参 execStatus 与 failed 档）：在等你/受阻/
+ * 已失败 → 在跑 → 已完成 三档。tier 是 deriveTicketState 五态的**纯投影**——状态→
+ * 五态映射单点仍在 deriveTicketState（全台唯一归并点），本函数不另起第二套状态词表；
+ * 未知/未来 stage_state 继承其「宁显活跃勿假警报」缺省 → tier1（'awaiting'=等 agent
+ * 段间推进，归在跑档，UT 钉死防悄悄改口径）；失败票 tier0（死票置顶可见，不许沉底
+ * 复活「永远在跑」的隐形形态）。
  */
-export function ticketMergeTierOf(status?: unknown, stageState?: unknown): 0 | 1 | 2 {
-  const s4 = deriveTicketState(
-    typeof status === 'string' ? status : undefined,
-    typeof stageState === 'string' ? stageState : undefined,
-  )
+export function ticketMergeTierOf(status?: unknown, stageState?: unknown, execStatus?: unknown): 0 | 1 | 2 {
+  const s4 = deriveTicketState(status, stageState, execStatus)
   switch (s4) {
     case 'waiting':
     case 'blocked':
+    case 'failed':
       return 0
     case 'done':
       return 2
@@ -127,8 +154,10 @@ export function sortMergedTickets<T extends TicketSortRowLike>(rows: readonly T[
   keyed.sort((a, b) => {
     const ra = a.row as TicketSortRowLike | null
     const rb = b.row as TicketSortRowLike | null
-    const ta = ticketMergeTierOf(ra?.status, ra?.stage_state)
-    const tb = ticketMergeTierOf(rb?.status, rb?.stage_state)
+    // t260919-02：exec_status 进 tier 投影（失败类终态行 tier0 置顶，左栏不再
+    // 把死票混在在跑档里隐形）。
+    const ta = ticketMergeTierOf(ra?.status, ra?.stage_state, ra?.exec_status)
+    const tb = ticketMergeTierOf(rb?.status, rb?.stage_state, rb?.exec_status)
     if (ta !== tb) return ta - tb
     const dts = ticketSortTsOf(rb) - ticketSortTsOf(ra)
     return dts !== 0 ? dts : a.idx - b.idx
@@ -286,6 +315,8 @@ export interface FilterableRow {
   epic?: string
   status?: string
   stage_state?: string
+  /** Temporal 执行状态（t260919-02：五态推导第三参的数据源，缺省=四态旧行为）。 */
+  exec_status?: string
 }
 
 /** 筛选 chips 输入：四态（''=不过滤）、epic 代号（''=不过滤）、搜索词（''=不过滤）。 */
@@ -296,13 +327,13 @@ export interface FilterInput {
 }
 
 /**
- * chips=过滤非分组：四态按 deriveTicketState 归并后比对（与行卡同源，不按
+ * chips=过滤非分组：五态按 deriveTicketState 归并后比对（与行卡同源，不按
  * status/stage_state 原词各筛各的）；epic 精确匹配；q 大小写不敏感匹配 id+标题。
  */
 export function filterRows<T extends FilterableRow>(rows: T[], f: FilterInput): T[] {
   const q = (f.q ?? '').trim().toLowerCase()
   return rows.filter(r => {
-    if (f.state && deriveTicketState(r.status, r.stage_state) !== f.state) return false
+    if (f.state && deriveTicketState(r.status, r.stage_state, r.exec_status) !== f.state) return false
     if (f.epic && (r.epic ?? '') !== f.epic) return false
     if (q !== '') {
       const hay = `${r.id} ${r.title ?? ''}`.toLowerCase()
@@ -312,10 +343,10 @@ export function filterRows<T extends FilterableRow>(rows: T[], f: FilterInput): 
   })
 }
 
-/** 四态 chips 计数（含 done——收口折叠计数行的数字来源；'' 全部计数由调用方取 rows.length）。 */
+/** 五态 chips 计数（含 done——收口折叠计数行的数字来源；'' 全部计数由调用方取 rows.length）。 */
 export function countByState(rows: FilterableRow[]): Record<TicketState4, number> {
-  const out: Record<TicketState4, number> = { active: 0, done: 0, waiting: 0, blocked: 0 }
-  for (const r of rows) out[deriveTicketState(r.status, r.stage_state)] += 1
+  const out: Record<TicketState4, number> = { active: 0, done: 0, waiting: 0, blocked: 0, failed: 0 }
+  for (const r of rows) out[deriveTicketState(r.status, r.stage_state, r.exec_status)] += 1
   return out
 }
 

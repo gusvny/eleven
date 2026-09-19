@@ -109,6 +109,8 @@ import {
   STATE4_LABEL, firstSentenceOf, snapshotDigest, type SnapshotDigest,
   pauseOpOf, type TicketState4,
 } from './ticket-list-model.ts'
+// t260919-02 终态失败票详情面：视图模型纯函数（畸形 face 全降级不编造，单测直跑）。
+import { terminalFaceView, type TerminalFaceView } from './terminal-face.ts'
 // t260915-08 巡检板面：纯函数层住 host（拓扑=宿主声明面；client 只消费不内置词表）。
 // t260915-19：端点串迁 host 单点（左栏分拣同吃此端点，URL 字面量不再两处维护）。
 import {
@@ -174,6 +176,11 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-chip-btn[data-on=true]{border-color:var(--dsw-derive-accent,#0969da);color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff);font-weight:600}
 .wb-chip-btn[data-state=waiting]{border-color:var(--dsw-derive-warn-border,#d4a72c)}
 .wb-chip-btn[data-state=waiting][data-on=false]{background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
+/* t260919-02「已失败」chip：红系（与 blocked 同 danger 令牌族，文案「已失败」可辨）。
+ * hex-clean 纪律（KI-055 家族）：复用 theme.ts 既有 danger 令牌声明位，消费位只经
+ * var() fallback 供出，零新增裸 hex（本票未新增令牌=无新声明位需求）。 */
+.wb-chip-btn[data-state=failed]{border-color:var(--dsw-derive-danger-border,#ff9b9b)}
+.wb-chip-btn[data-state=failed][data-on=false]{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e)}
 .wb-chip-epic{border-style:dashed;border-width:1.5px}
 /* 搜索框 */
 .wb-search{font-size:12px;padding:3px 10px;border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;width:180px}
@@ -195,6 +202,9 @@ const CSS = `${DERIVE_TOKENS_CSS}
  * fallback 供出（allowlist C 合法位），零裸 hex。 */
 .wb-root .wb-card[data-state=waiting]{background:var(--dsw-derive-warn-bg,#fff8c5)}
 .wb-root .wb-card[data-state=blocked]{background:var(--dsw-derive-danger-bg,#ffebe9)}
+/* t260919-02「已失败」行卡：红系行底+实红点/状态字（与 blocked 同令牌族不同文案，
+ * 与 done 灰/active 蓝可辨；特异性 0,3,0 与 waiting/blocked 同档，压 sidebar blanket）。 */
+.wb-root .wb-card[data-state=failed]{background:var(--dsw-derive-danger-bg,#ffebe9)}
 .wb-card[data-active=true]{border-color:var(--dsw-derive-accent,#0969da);box-shadow:inset 0 0 0 1px var(--dsw-derive-accent,#0969da)}
 .wb-card[data-state=done]{color:var(--dsw-derive-muted,#57606a)}
 .wb-card-l1{display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 320px}
@@ -202,11 +212,13 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-card-dot::before{content:'';position:absolute;inset:0;border-radius:50%;background:var(--dsw-derive-muted,#8c959f)}
 .wb-card-dot[data-state=waiting]::before{background:var(--dsw-derive-warn,#bf8700)}
 .wb-card-dot[data-state=blocked]::before{background:var(--dsw-derive-danger,#cf222e)}
+.wb-card-dot[data-state=failed]::before{background:var(--dsw-derive-danger-solid,#d1242f)}
 .wb-card-dot[data-state=active]::before{background:var(--dsw-derive-accent,#0969da)}
 .wb-card-dot[data-state=done]::before{background:var(--dsw-derive-muted,#8c959f)}
 .wb-card-state{font-size:11px;font-weight:600;flex:none}
 .wb-card-state[data-state=waiting]{color:var(--dsw-derive-warn,#9a6700)}
 .wb-card-state[data-state=blocked]{color:var(--dsw-derive-danger,#cf222e)}
+.wb-card-state[data-state=failed]{color:var(--dsw-derive-danger,#cf222e)}
 .wb-card-state[data-state=active]{color:var(--dsw-derive-accent,#0969da)}
 .wb-card-state[data-state=done]{color:var(--dsw-derive-muted,#57606a)}
 /* 段间暂停徽标（t260908-01）：主题令牌着色（warm 系=注意但非故障），
@@ -229,6 +241,7 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-card-lane-dot[data-visual=done]{background:var(--dsw-derive-success-solid,#2da44e)}
 .wb-card-lane-dot[data-visual=current][data-state=waiting]{background:var(--dsw-derive-warn-border,#d4a72c)}
 .wb-card-lane-dot[data-visual=current][data-state=blocked]{background:var(--dsw-derive-danger,#cf222e)}
+.wb-card-lane-dot[data-visual=current][data-state=failed]{background:var(--dsw-derive-danger-solid,#d1242f)}
 .wb-card-lane-dot[data-visual=current][data-state=active]{background:var(--dsw-derive-accent,#0969da)}
 /* 行卡动作位（右侧）：衍生动作（去签字/看原因）+ 管理动作 */
 .wb-card-ops{display:flex;gap:6px;align-items:center;flex:none;margin-left:auto}
@@ -377,6 +390,26 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-ck-more{padding:4px 10px 8px;font-size:11.5px;color:var(--dsw-derive-muted,#57606a);border-top:1px dashed var(--dsw-derive-border,#d0d7de)}
 .wb-ck-more pre{margin:4px 0 0;padding:6px 8px;font-size:11px;background:var(--dsw-derive-surface,#f6f8fa);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;white-space:pre-wrap;word-break:break-all;max-height:160px;overflow:auto}
 .wb-drawer-id{font-size:12px;color:var(--dsw-derive-muted,#57606a);word-break:break-all}
+/* 终态失败票详情面板（t260919-02）：红系结构件——色全部走 theme.ts 既有 danger
+ * 令牌声明位（消费位 var() fallback，hex-clean/KI-055 家族纪律，零新增裸 hex）。 */
+.wb-tf-panel{border:1px solid var(--dsw-derive-danger-border,#ff9b9b);border-radius:8px;
+  background:var(--dsw-derive-danger-bg,#ffebe9);padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.wb-tf-head{display:flex;align-items:center;gap:8px}
+.wb-tf-mark{font-size:16px}
+.wb-tf-title{font-size:15px;font-weight:700;color:var(--dsw-derive-danger,#cf222e)}
+.wb-tf-exec{font-size:11px;font-weight:700;font-family:ui-monospace,Menlo,monospace;color:var(--dsw-derive-danger,#cf222e);
+  background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-danger-border,#ff9b9b);border-radius:10px;padding:1px 8px}
+.wb-tf-receipt{font-size:12px;color:var(--dsw-derive-fg,#1f2328);white-space:pre-wrap;
+  background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-danger-border,#ff9b9b);border-radius:6px;padding:6px 10px}
+.wb-tf-k{font-size:11px;font-weight:600;color:var(--dsw-derive-danger,#cf222e)}
+.wb-tf-reason-txt{font-size:13px;color:var(--dsw-derive-fg,#1f2328);white-space:pre-wrap;word-break:break-word}
+.wb-tf-reason-txt.wb-tf-unavailable{color:var(--dsw-derive-muted,#57606a)}
+.wb-tf-src{font-size:11px;color:var(--dsw-derive-muted,#57606a)}
+.wb-tf-grid{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;align-items:baseline}
+.wb-tf-grid .wb-tf-k{color:var(--dsw-derive-muted,#57606a)}
+.wb-tf-v{font-size:12px;color:var(--dsw-derive-fg,#1f2328);word-break:break-all}
+.wb-tf-snapshot{font-size:11px;color:var(--dsw-derive-muted,#57606a);border-top:1px dashed var(--dsw-derive-danger-border,#ff9b9b);padding-top:8px}
+.wb-tf-honesty{font-size:11px;font-weight:600;color:var(--dsw-derive-danger,#cf222e)}
 .wb-close{position:absolute;top:14px;right:16px;font-size:22px;color:var(--dsw-derive-muted,#57606a);cursor:pointer;background:none;border:none}
 .wb-close:hover{color:var(--dsw-derive-fg,#1f2328)}
 .wb-section{border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;background:var(--dsw-derive-canvas,#ffffff);padding:12px 14px;display:flex;
@@ -1309,6 +1342,58 @@ function fmtSnapshotTs(v: string | null): string {
 
 /* ------------------------------------------------- M14 详情五分组（层次化 section） */
 
+/**
+ * 终态失败票详情面板（t260919-02）：终态回执 kind=terminal 时详情抽屉的唯一详情面
+ * ——「已失败 + 原因」结构化呈现，绝不出现空面板。
+ *
+ * 硬纪律（本组件契约，UT 源级钉死）：
+ *  - **零操作入口**：组件体内不得出现任何 onClick/apiPost/按钮语义——终态票不再
+ *    推进，set-stage/force/resume 一概不给（票面边界）；
+ *  - 诚实口径：视图模型（terminal-face.ts）缺什么显什么（「原因不可得」「最后已知
+ *    阶段不可得」「无快照及为何无」），绝不编造；「刷新无效」随面板常驻可见，
+ *    不只闪在操作提示条里。
+ */
+export function TerminalFailurePanel({ view }: { view: TerminalFaceView }) {
+  return (
+    <div className="wb-tf-panel" data-testid="terminal-failure-panel" data-exec={view.execStatus}>
+      <div className="wb-tf-head">
+        <span className="wb-tf-mark">⛔</span>
+        <span className="wb-tf-title">工单已终态失败</span>
+        <span className="wb-tf-exec" title="Temporal 执行状态">{view.execStatus}</span>
+      </div>
+      {view.receiptError !== '' && <div className="wb-tf-receipt">{view.receiptError}</div>}
+      <div className="wb-tf-reason">
+        <div className="wb-tf-k">失败原因</div>
+        {view.reasonAvailable
+          ? <div className="wb-tf-reason-txt">{view.reason}</div>
+          : <div className="wb-tf-reason-txt wb-tf-unavailable">原因不可得{view.reasonNote ? `——${view.reasonNote}` : ''}</div>}
+        {view.reasonAvailable && view.reasonNote !== '' && (
+          <div className="wb-tf-src">{view.reasonNote}</div>
+        )}
+      </div>
+      <div className="wb-tf-grid">
+        <span className="wb-tf-k">票号</span><span className="wb-tf-v">{view.ticketId || '不可得'}</span>
+        <span className="wb-tf-k">项目</span><span className="wb-tf-v">{view.project || '—'}</span>
+        <span className="wb-tf-k">立项</span><span className="wb-tf-v">{view.epic || '未归档'}</span>
+        {view.instanceId !== '' && (
+          <>
+            <span className="wb-tf-k">巡检实例</span>
+            <span className="wb-tf-v">{view.instanceId}{view.period !== '' ? ` · 期 ${view.period}` : ''}</span>
+          </>
+        )}
+        <span className="wb-tf-k">最后已知阶段</span>
+        <span className="wb-tf-v">{view.lastStage !== '' ? view.lastStage : view.lastStageNote}</span>
+        <span className="wb-tf-k">起跑时间</span>
+        <span className="wb-tf-v">{view.startTimeTxt !== '' ? view.startTimeTxt : '不可得'}</span>
+        <span className="wb-tf-k">终态时间</span>
+        <span className="wb-tf-v">{view.closeTimeTxt !== '' ? view.closeTimeTxt : '不可得'}</span>
+      </div>
+      <div className="wb-tf-snapshot">{view.snapshotNote}</div>
+      <div className="wb-tf-honesty">终态票不再推进，刷新无效；本面板只读，无任何推进/重试入口。</div>
+    </div>
+  )
+}
+
 /** 编号 section 标题：01/02/… 蓝色编号徽标 + 标题 + 灰色说明（详情分组层次分明）。 */
 function SectionTitle({ num, title, desc }: { num: string; title: string; desc?: string }) {
   return (
@@ -2223,12 +2308,16 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }: {
   )
 }
 
-function availableOps(t: { status: string; stage_state: string; stage: string | null; engine?: string; paused?: boolean }, wf?: Wf): string[] {
+function availableOps(t: { status: string; stage_state: string; stage: string | null; engine?: string; paused?: boolean; exec_status?: string }, wf?: Wf): string[] {
   const s = t.status
   const ss = t.stage_state
   // t260915-08（坑B）：巡检行零管理操作——没有 advance/rework/pause/retry_qc 信号，
   // 行卡不得给出会打错信号的操作键；签字唯一住详情巡检面（sign 通道）。
   if (t.engine === 'inspection') return []
+  // t260919-02：失败类终态行零管理操作——终态票不再推进，行卡不得给打回/暂停/
+  // 恢复等会打错信号的入口（票面边界「不给终态票任何推进入口」；判定走五态推导
+  // 单点，exec_status 与 status/stage_state 失败词面双保险）。
+  if (deriveTicketState(t.status, t.stage_state, t.exec_status) === 'failed') return []
   // M11 v2（模版即代码）：自动推进——无 dispatch-next/逐项 accept；人门=签字（advance 钮），
   // blocked=retry_qc 重跑（unblock 钮），任何进行态可 rework 打回；closed 无操作。
   if (t.engine === 'template-as-code-v2') {
@@ -3183,6 +3272,9 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   const [detailLoading, setDetailLoading] = useState(false)
   const [opBusy, setOpBusy] = useState(false)
   const [opMsg, setOpMsg] = useState('')
+  /** t260919-02 终态失败面视图：openDetail 捕获 terminal 回执的 face 后装配；
+   *  切单/重开/关抽屉即清（openDetail 开头 + 关闭钮兜底），绝不串票。 */
+  const [terminalFace, setTerminalFace] = useState<TerminalFaceView | null>(null)
   const [promptBox, setPromptBox] = useState<{ role: string; stage: string; prompt: string } | null>(null)
   const [reworkId, setReworkId] = useState<string | null>(null)
   const [reworkHuman, setReworkHuman] = useState(false)
@@ -3396,13 +3488,17 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     setDrawerTab('detail')
     setDetailLoading(true)
     setOpMsg('')
+    setTerminalFace(null)  // t260919-02：切单/重开先清失败面，绝不串票
     try {
       const data = await apiGet(`${API}/tickets/${encodeURIComponent(id)}`)
       if (data?.ok !== true) {
         // KI-025：错误体带 kind（分级产出贯穿 host 503/410/404 分流）——致命类
         // 精确报「不存在/已终态」，瞬时类引导「自动重试中」而非手动刷新。
-        const e = new Error(data?.error ?? '详情加载失败') as Error & { kind?: unknown }
+        // t260919-02：terminal 回执 body 可带 face（host 直读桥附带）——随错误对象
+        // 带起，终态失败票在详情抽屉渲染结构化失败面，不再是空面板。
+        const e = new Error(data?.error ?? '详情加载失败') as Error & { kind?: unknown; face?: unknown }
         e.kind = data?.kind
+        e.face = data?.face
         throw e
       }
       // t260901-15 跳单守卫：响应到达时若用户已改看别单，丢弃过期结果（防「点 13 跳 11」）。
@@ -3414,6 +3510,11 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
         if (kind === 'not_found') {
           setOpMsg(`工单不存在：${id}（Temporal 无此 workflow）`)
         } else if (kind === 'terminal') {
+          // t260919-02：终态不再是「只闪一句错误」——装配失败面视图（face 缺失/
+          // 畸形由 terminalFaceView 显式降级为「原因不可得」，绝不空面板、绝不把
+          // 终态当瞬时故障）；410 分级与「刷新无效」口径原样保留。
+          setTerminalFace(terminalFaceView((err as { face?: unknown } | null)?.face,
+            err instanceof Error ? err.message : String(err)))
           setOpMsg(String(err instanceof Error ? err.message : err))
         } else {
           // 瞬时故障（超时/连接/取消）：不弹窗打断——保留占位提示，轮询自动补拉。
@@ -3687,8 +3788,9 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   }), [filtered, sortKey, sortAsc])
 
   // 收口折叠（mock ⑥）：收口票折成计数行，展开才铺卡；分页只算未收口票。
-  const openList = useMemo(() => sorted.filter(t => deriveTicketState(t.status, t.stage_state) !== 'done'), [sorted])
-  const doneList = useMemo(() => sorted.filter(t => deriveTicketState(t.status, t.stage_state) === 'done'), [sorted])
+  // t260919-02：exec_status 进五态推导（失败类终态≠done，不进收口折叠吃掉）。
+  const openList = useMemo(() => sorted.filter(t => deriveTicketState(t.status, t.stage_state, t.exec_status) !== 'done'), [sorted])
+  const doneList = useMemo(() => sorted.filter(t => deriveTicketState(t.status, t.stage_state, t.exec_status) === 'done'), [sorted])
 
   // 分页（260824 用户拍板⑥）：筛选/排序一变回第 1 页。
   const pageCount = Math.max(1, Math.ceil(openList.length / PAGE_SIZE))
@@ -3699,7 +3801,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   // 单票一次/轮询周期）；host 契约=?enrich=progress（主列表零 show，show 只在此阶段）。
   // 失败/缺数据=该票行卡降级只显相对时间，不重试不打错条。
   useEffect(() => {
-    const ids = paged.filter(t => deriveTicketState(t.status, t.stage_state) !== 'done').map(t => t.id)
+    const ids = paged.filter(t => deriveTicketState(t.status, t.stage_state, t.exec_status) !== 'done').map(t => t.id)
     if (ids.length === 0) return
     let alive = true
     apiGet(`${API}/tickets?project=${encodeURIComponent(projectKey ?? '')}`
@@ -3847,8 +3949,9 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 
       {page === 'tickets' && (<>
       <div className="wb-filters">
-        {/* 状态 chips=过滤非分组（t260904-17，mock J）：四态+计数；「等你」chip 恒显，>0 强调 */}
-        {(['waiting', 'blocked', 'active', 'done'] as TicketState4[]).map(s => (
+        {/* 状态 chips=过滤非分组（t260904-17，mock J；t260919-02 增「已失败」）：
+            五态+计数；「等你」chip 恒显，>0 强调；「已失败」红系可辨 */}
+        {(['waiting', 'blocked', 'active', 'failed', 'done'] as TicketState4[]).map(s => (
           <button key={s} className="wb-chip-btn" data-state={s} data-on={filterState4 === s}
             onClick={() => setFilterState4(filterState4 === s ? '' : s)}>
             {STATE4_LABEL[s]} {stateCounts[s]}
@@ -3970,7 +4073,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 
       {selectedId !== null && (
         <div className="wb-drawer">
-          <button className="wb-close" onClick={() => { selectedIdRef.current = null; setSelectedId(null); setDetail(undefined) }}>×</button>
+          <button className="wb-close" onClick={() => { selectedIdRef.current = null; setSelectedId(null); setDetail(undefined); setTerminalFace(null) }}>×</button>
           {peerNote !== '' && (
             <div style={{ background: 'var(--dsw-derive-warn-bg,#fff8c5)', border: '1px solid var(--dsw-derive-warn-border,#d4a72c)', borderRadius: 6,
               padding: '6px 10px', fontSize: 12, color: 'var(--dsw-derive-warn-deep,#7d4e00)', display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -3980,6 +4083,11 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
             </div>
           )}
           {detailLoading && <div className="wb-empty">加载详情…</div>}
+          {/* t260919-02：终态失败票详情面——kind=terminal 时 detail 恒 undefined，
+              本面板是抽屉唯一详情体（绝不空面板）；零操作入口（组件契约见定义处）。 */}
+          {!detailLoading && terminalFace !== null && (
+            <TerminalFailurePanel view={terminalFace} />
+          )}
           {/* t260901-15 跳单守卫：详情与当前选中不一致不渲染（防在途旧响应顶替新详情）。 */}
           {!detailLoading && detail !== undefined && detail.id === selectedId && (
             <>

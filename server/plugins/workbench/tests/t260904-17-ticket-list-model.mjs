@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import {
   deriveTicketState, STATE4_LABEL, epicColorOf, EPIC_PALETTE, EPIC_FALLBACK_COLOR,
   stageShortOf, progressLineOf, laneDots, filterRows, countByState, relativeTime, toMillis,
+  ticketMergeTierOf,
 } from '../src/client/ticket-list-model.ts'
 
 const repo = resolveRepo()
@@ -38,8 +39,57 @@ ok('四态映射：未知/新增 stage_state → active 缺省（宁显活跃勿
   assert.equal(deriveTicketState(123, {}), 'active')
 })
 
-ok('四态短名表齐备（等你/受阻/在飞/收口，mock ⑥ chips 词表）', () => {
-  assert.deepEqual(STATE4_LABEL, { active: '在飞', done: '收口', waiting: '等你', blocked: '受阻' })
+// t260919-02 伴生改（只增不放宽，票面点名）：STATE4_LABEL 词表增 failed:'已失败'。
+ok('五态短名表齐备（等你/受阻/在飞/收口/已失败，mock ⑥ chips 词表 + t260919-02）', () => {
+  assert.deepEqual(STATE4_LABEL, {
+    active: '在飞', done: '收口', waiting: '等你', blocked: '受阻', failed: '已失败',
+  })
+})
+
+ok('五态短名两两互异（「已失败」不与在飞/收口/受阻/等你混同，t260919-02 验收①）', () => {
+  const labels = Object.values(STATE4_LABEL)
+  assert.equal(new Set(labels).size, labels.length)
+})
+
+/* ---------------------------------------- 五态推导真值表（t260919-02，验收①UI 面） */
+
+ok('五态：失败类终态 exec_status → failed（FAILED/CANCELED/TIMED_OUT/未知新终态补集口径）', () => {
+  assert.equal(deriveTicketState('dispatched', 'running', 'FAILED'), 'failed')
+  assert.equal(deriveTicketState('dispatched', 'running', 'CANCELED'), 'failed')
+  assert.equal(deriveTicketState('dispatched', 'running', 'TIMED_OUT'), 'failed')
+  assert.equal(deriveTicketState('open', 'awaiting', 'SOME_NEW_TERMINAL_STATE'), 'failed')
+  // 死票不被快照遗留 closed 词面误归收口（失败类终态 > 词面 closed）
+  assert.equal(deriveTicketState('closed', 'awaiting', 'FAILED'), 'failed')
+  // 与 running 可区分、且不与 done 混同
+  assert.notEqual(deriveTicketState('failed', 'failed', 'FAILED'), 'active')
+  assert.notEqual(deriveTicketState('failed', 'failed', 'FAILED'), 'done')
+})
+
+ok('五态：活/成白名单 exec_status → 沿用四态旧值（逐条不变，零回归）', () => {
+  assert.equal(deriveTicketState('open', 'running', 'RUNNING'), 'active')
+  assert.equal(deriveTicketState('closed', 'awaiting', 'COMPLETED'), 'done')
+  assert.equal(deriveTicketState('open', 'blocked', 'RUNNING'), 'blocked')
+  assert.equal(deriveTicketState('open', 'awaiting-human', 'RUNNING'), 'waiting')
+  assert.equal(deriveTicketState('open', 'running', 'CONTINUED_AS_NEW'), 'active')
+})
+
+ok('五态：exec_status 缺失/空/畸形 → 四态旧值逐条不变（畸形按缺失处理不 throw）', () => {
+  assert.equal(deriveTicketState('open', 'running'), 'active')
+  assert.equal(deriveTicketState('open', 'running', undefined), 'active')
+  assert.equal(deriveTicketState('open', 'running', ''), 'active')
+  assert.equal(deriveTicketState('closed', 'awaiting', ''), 'done')
+  assert.equal(deriveTicketState('open', 'running', null), 'active')
+  assert.equal(deriveTicketState('open', 'running', 42), 'active')
+  assert.equal(deriveTicketState('open', 'running', {}), 'active')
+})
+
+ok('五态断链防御（review①）：status/stage_state 词面 failed → failed（exec_status 键断链不复发在飞）', () => {
+  assert.equal(deriveTicketState('failed', 'failed'), 'failed')
+  assert.equal(deriveTicketState('dispatched', 'failed'), 'failed')
+  assert.equal(deriveTicketState('failed', 'running'), 'failed')
+  // 非失败词面零误伤（旧值逐条不变）
+  assert.equal(deriveTicketState('dispatched', 'running'), 'active')
+  assert.equal(deriveTicketState('open', 'blocked'), 'blocked')
 })
 
 /* ------------------------------------------------ epic 哈希色（R7：确定性 + F2 教训） */
@@ -164,10 +214,38 @@ ok('chips：epic 精确筛 + 搜索大小写不敏感匹配 id+标题', () => {
   assert.deepEqual(filterRows(ROWS, { epic: 'session-entry', q: '不存在' }), [])
 })
 
+// t260919-02 伴生改（只增不放宽，票面点名）：countByState 返回形状增 failed 键。
 ok('chips 计数：countByState Σ=行数（收口折叠计数行数据源）', () => {
   const c = countByState(ROWS)
-  assert.deepEqual(c, { active: 1, done: 1, waiting: 1, blocked: 1 })
-  assert.equal(c.active + c.done + c.waiting + c.blocked, ROWS.length)
+  assert.deepEqual(c, { active: 1, done: 1, waiting: 1, blocked: 1, failed: 0 })
+  assert.equal(c.active + c.done + c.waiting + c.blocked + c.failed, ROWS.length)
+})
+
+// t260919-02：失败票进 failed 桶（不进 active/done 的显式失败态，验收①对照面）。
+const ROWS5 = [
+  ...ROWS,
+  { id: 't-5', title: '终态失败票', epic: 'engine-hardening', status: 'failed', stage_state: 'failed', exec_status: 'FAILED' },
+]
+
+ok('五态 chips：失败票过滤进 failed 桶、计数五键齐全（t260919-02）', () => {
+  assert.deepEqual(filterRows(ROWS5, { state: 'failed' }).map(r => r.id), ['t-5'])
+  assert.deepEqual(filterRows(ROWS5, { state: 'active' }).map(r => r.id), ['t-3'])
+  assert.deepEqual(filterRows(ROWS5, { state: 'done' }).map(r => r.id), ['t-4'])
+  const c = countByState(ROWS5)
+  assert.deepEqual(c, { active: 1, done: 1, waiting: 1, blocked: 1, failed: 1 })
+  assert.equal(c.active + c.done + c.waiting + c.blocked + c.failed, ROWS5.length)
+})
+
+ok('五态 tier 投影：失败票 tier0 置顶（等你/受阻同档）、活/成不误伤（t260919-02）', () => {
+  assert.equal(ticketMergeTierOf('dispatched', 'running', 'FAILED'), 0)
+  assert.equal(ticketMergeTierOf('dispatched', 'running', 'CANCELED'), 0)
+  assert.equal(ticketMergeTierOf('failed', 'failed'), 0)
+  // exec_status 键断链时词面 failed 同样 tier0（与推导断链防御同源）
+  assert.equal(ticketMergeTierOf('dispatched', 'failed', undefined), 0)
+  // 活/成/收口不误伤（t260916-15 旧值逐条不变）
+  assert.equal(ticketMergeTierOf('dispatched', 'running', 'RUNNING'), 1)
+  assert.equal(ticketMergeTierOf('closed', 'awaiting', 'COMPLETED'), 2)
+  assert.equal(ticketMergeTierOf('closed', 'awaiting', 'FAILED'), 0)
 })
 
 /* ------------------------------------------------ 相对时间（R8④ 畸形 → null） */

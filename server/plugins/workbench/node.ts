@@ -173,7 +173,7 @@ function projectRootsFor(projectKey: unknown): string[] {
 import { computeTicketDiff, type TicketForDiff } from './src/host/changes.ts'
 import { readTicketTimeFile } from './src/host/ticket-time-file.ts'
 import { isTicketTimeMode } from './src/shared/ticket-time-model.ts'
-import { ticketShowHttpVerdict } from './src/host/ticket-error.ts'
+import { ticketShowErrorReply } from './src/host/ticket-error.ts'
 import { readLatestScanReport } from './src/host/scan-report.ts'
 import { listAgentLogs, resolveAgentBaseDir, _sessionKbFast } from './src/host/agent-logs.ts'
 import { readAgentLiveTail, resolveSessionFile } from './src/host/agent-live.ts'
@@ -498,19 +498,32 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
 
   /** ticket show 失败的统一分流（KI-025，t260903-06）：判据=body 的 kind 机器字段
    *  （client.py 五出口分级产出 → ticket.py QueryError → tools_registry 并入），
-   *  HTTP 裁定收口在 src/host/ticket-error.ts（单测直跑）。kind 缺失/未知一律 500
-   *  非 404——「工单不存在」只能由明确 NotFound 语义触发，谎报是本票消灭对象。 */
-  function sendTicketShowError(res: ServerResponse, s: unknown, id = ''): void {
-    const body = s as { error?: unknown; kind?: unknown } | null
-    const kind = typeof body?.kind === 'string' ? body.kind : ''
-    const msg = String(body?.error ?? (id ? `工单读取失败：${id}` : '工单读取失败'))
-    const v = ticketShowHttpVerdict(kind)
-    sendJson(res, v.status, {
-      ok: false,
-      error: msg,
-      kind: kind || 'internal',
-      ...(v.retryable ? { retryable: true } : {}),
-    })
+   *  HTTP 裁定与 body 装配收口在 src/host/ticket-error.ts（单测直跑）。kind 缺失/
+   *  未知一律 500 非 404——「工单不存在」只能由明确 NotFound 语义触发，谎报是本票
+   *  消灭对象。t260919-02：可选 face（终态失败面）——只加键不改级（terminal 仍
+   *  410 仍「刷新无效」）；face 仅 plain dict 且 terminal 才附带（直读失败/超时/
+   *  畸形 → 无 face 键，UI 按纯错误提示降级，绝不渲染半残假面）。 */
+  function sendTicketShowError(res: ServerResponse, s: unknown, id = '', face?: unknown): void {
+    const reply = ticketShowErrorReply(s as { error?: unknown; kind?: unknown } | null, id, face)
+    sendJson(res, reply.status, reply.body)
+  }
+
+  // t260919-02 终态失败面直读桥：tools_registry/ticket.py 的 QueryError 只带 kind
+  // 不带 face（server/tools/ 写集外），terminal 回执要对 UI 附失败面就直读引擎
+  // ticket-query（client.py 终态分支 face 键的正源）。超时纪律（review④）：显著
+  // 小于 UI 详情加载体验阈值——详情请求已在 tools_registry 通道等过一轮，这里再等
+  // 就把 410 兜底拖成二次卡顿；5s 读不到=照旧 410 无 face（诚实降级，不重试）。
+  const TERMINAL_FACE_TIMEOUT_MS = 5_000
+
+  /** 直读引擎终态回执的 face；失败/超时/畸形回执 → undefined（调用方不附带）。 */
+  async function fetchTerminalFace(id: string): Promise<unknown> {
+    try {
+      const r = await runPocCli(cli, ['ticket-query', JSON.stringify({ ticket_id: id })],
+        { timeoutMs: TERMINAL_FACE_TIMEOUT_MS })
+      return (r !== null && typeof r === 'object' && !Array.isArray(r)) ? (r as any).face : undefined
+    } catch {
+      return undefined
+    }
   }
 
   /**
@@ -1188,7 +1201,15 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         if (r?.ok !== true) {
           // KI-025 分级分流：详情不再 200 透传 ok:false——按 kind 定 HTTP
           // （404/410/503+retryable/500），UI 据此「真不存在报错 / 瞬时保留快照静默重试」。
-          sendTicketShowError(res, r, parts[0])
+          // t260919-02：终态回执补直读引擎把 face 带进 410 body（只加键不改级：
+          // 仍 410 仍「刷新无效」；直读失败/超时/畸形 → 照旧 410 无 face，UI 降级
+          // 纯错误提示不渲染失败面板）。仅详情 GET 桥接，写操作通道零变化。
+          if ((r as any)?.kind === 'terminal') {
+            const face = await fetchTerminalFace(parts[0])
+            sendTicketShowError(res, r, parts[0], face)
+          } else {
+            sendTicketShowError(res, r, parts[0])
+          }
           return
         }
         // 补充 agent 进度（轻量 stat）

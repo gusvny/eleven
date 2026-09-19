@@ -93,6 +93,23 @@ ok(JSON.stringify(sortMergedTickets([])) === '[]', '空数组→空数组')
 const one = sortMergedTickets([ins('solo', 'dispatched', 'running', T)])
 ok(one.length === 1 && one[0].id === 'solo', '单行→原样')
 
+/* ---- t260919-02：失败票 tier0 置顶（不与在跑混档=不复活「永远在跑」隐形） ---- */
+ok(ticketMergeTierOf('dispatched', 'running', 'FAILED') === 0, '失败类终态（FAILED）→tier0')
+ok(ticketMergeTierOf('dispatched', 'running', 'CANCELED') === 0, '失败类终态（CANCELED）→tier0')
+ok(ticketMergeTierOf('failed', 'failed') === 0, '词面 failed（exec_status 断链防御）→tier0')
+ok(ticketMergeTierOf('closed', 'awaiting', 'COMPLETED') === 2 && ticketMergeTierOf('closed', 'awaiting', 'FAILED') === 0,
+  'closed×COMPLETED→tier2 收口；closed×FAILED→tier0（死票不被词面误归收口）')
+const withFailed = sortMergedTickets([
+  dev('dev-run', 'dispatched', 'running', T),
+  dev('dev-fail', 'failed', 'failed', T + 60, { exec_status: 'FAILED' }),
+  ins('ins-wait', 'dispatched', 'awaiting-human', T + 7200),
+  dev('dev-done', 'closed', 'awaiting', T + 999_999),
+])
+ok(withFailed.map(r => r.id).join(',') === 'ins-wait,dev-fail,dev-run,dev-done',
+  `失败票进 tier0 置顶档（与等你同档按时间倒序），全序=等你→failed→在跑→收口，实得 ${withFailed.map(r => r.id).join(',')}`)
+ok(withFailed.findIndex(r => r.id === 'dev-fail') < withFailed.findIndex(r => r.id === 'dev-run'),
+  '反隐形核心面：失败票排在在跑票之前（不再复活「永远在跑」形态）')
+
 /* ---- 源级锚（KI-051：语义锚；防接线被静默拆除） ---- */
 const sbSrc = readFileSync(join(repo, 'server/plugins/workbench/src/client/sidebar.tsx'), 'utf8')
 ok(/tickets:\s*sortMergedTickets\(/.test(sbSrc), 'groups memo 拼接后过 sortMergedTickets（合并排序接线在源）')

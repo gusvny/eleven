@@ -260,11 +260,20 @@ def _ok(result: Any) -> Dict[str, Any]:
     return {"ok": True, "result": result}
 
 
-def _err(msg: str, kind: str = KIND_INTERNAL) -> Dict[str, Any]:
+def _err(msg: str, kind: str = KIND_INTERNAL,
+         face: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Structured error receipt. kind = the error class (see the table above); consumers
     route 404/503/410 from it. The "ticket does not exist" wording may only be produced
-    with kind=not_found."""
-    return {"ok": False, "error": msg, "kind": kind}
+    with kind=not_found.
+
+    face（t260919-02）：可选的可渲染失败面载荷（dict），当前仅 kind=terminal 的终态
+    分支附带——**只加键不改级**：kind 与文案原样，HTTP 分级（host 侧 terminal→410）
+    与诚实口径（刷新无效）零退化。face 取不到/畸形 → 不带键（消费方按纯错误降级），
+    绝不带半残假面。"""
+    out: Dict[str, Any] = {"ok": False, "error": msg, "kind": kind}
+    if face is not None:
+        out["face"] = face
+    return out
 
 
 def _is_not_found_exc(e: BaseException) -> bool:
@@ -1456,6 +1465,156 @@ async def _describe_with_retry(handle: Any, attempts: int = DESCRIBE_RETRY_ATTEM
     raise last
 
 
+# ---- 终态失败票两面可见（t260919-02）：判别/原因提取/失败面 ----
+# 终态「活/成」白名单（UI deriveTicketState 的 EXEC_STATUS_ALIVE 同一词表的双侧
+# 镜像；改这里必须同步改 UI 侧并跑两侧 UT）。口径=补集：显式在跑（RUNNING）与
+# 显式成功收口（COMPLETED，含 CONTINUED_AS_NEW 换代继续）之外的一切非空执行状态
+# （FAILED/CANCELED/TIMED_OUT/TERMINATED/未知新终态）都按失败类处置——未知新终态
+# 宁可显失败不可显在跑（诚实缺省）。空串=describe 缺 status 的畸形形态，不判失败
+# （保持既有行形状，不新增谎报面）。
+_EXEC_ALIVE_OK = ("RUNNING", "COMPLETED", "CONTINUED_AS_NEW")
+# face 原因提取上限：__cause__ 链最多下钻 3 级、消息截 500 字（Temporal 的
+# WorkflowFailureError→ActivityError→ApplicationError 链实测 ≤3 级见到人话）。
+TERMINAL_FACE_CAUSE_DEPTH = 3
+TERMINAL_FACE_REASON_MAX_CHARS = 500
+# 终态执行 result() 历史回放的单次等待上限（秒）：服务端直读历史，正常亚秒；
+# 超时=读不到原因（显式「原因不可得」），绝不为一张死票拖住详情回执。
+TERMINAL_FACE_RESULT_TIMEOUT_S = 8.0
+
+
+def _is_failed_exec(exec_status: str) -> bool:
+    """失败类终态判别单点（板面行组装与详情 face 共用）：非空且不在活/成白名单
+    即失败类。纯函数；词表口径见 _EXEC_ALIVE_OK 注。"""
+    return bool(exec_status) and exec_status not in _EXEC_ALIVE_OK
+
+
+def _failure_reason_of(exc: Optional[BaseException]) -> str:
+    """从 result() 异常链提取失败原因（正源=Temporal 工作流执行失败信息）。
+
+    沿 __cause__ 向下最多 TERMINAL_FACE_CAUSE_DEPTH 级，取能走到的最深一层消息、
+    截 TERMINAL_FACE_REASON_MAX_CHARS 字；__cause__ 是非异常对象（畸形/桩）就地停；
+    全链零消息 → ''（调用方显式写「原因不可得」，绝不编造）。纯函数零 IO。"""
+    cur = exc
+    depth = 0
+    while cur is not None and depth < TERMINAL_FACE_CAUSE_DEPTH:
+        nxt = cur.__cause__
+        if not isinstance(nxt, BaseException):
+            break
+        cur = nxt
+        depth += 1
+    if cur is None:
+        return ""
+    return str(cur).strip()[:TERMINAL_FACE_REASON_MAX_CHARS]
+
+
+def _terminal_face_ts_of(v: Any) -> int:
+    """终态时刻字段归一 → epoch 秒（0=不可得）。SDK describe 的 start/close 是 proto
+    Timestamp（ToSeconds()），list 扫描行/测试桩常给 datetime 或 epoch 数值——只读
+    展示字段宽容读取三形通吃，畸形一律 0（绝不因时刻形态翻车带崩失败面）。"""
+    if v is None:
+        return 0
+    ts = _ts_epoch(v)
+    if ts:
+        return ts
+    try:
+        return int(v.timestamp())          # datetime 形（naive/aware 均可）
+    except Exception:
+        pass
+    try:
+        n = int(v)                          # epoch 数值形
+        return n if n > 0 else 0
+    except Exception:
+        return 0
+
+
+def _terminal_face_ts_txt(ts: int) -> str:
+    """face 时刻展示串（引擎本地时区，与板面行 updated 同口径）；0=不可得 → ''。"""
+    return time.strftime("%m-%d %H:%M:%S", time.localtime(ts)) if ts else ""
+
+
+async def _terminal_failure_face(tid: str, handle: Any, desc: Any,
+                                 exec_status: str) -> Dict[str, Any]:
+    """终态票可渲染失败面（ticket-query kind=terminal 回执的 face 键，t260919-02）。
+
+    消费面：workbench host 对 terminal 回执补一次引擎直读把 face 带进 410 body →
+    UI 详情失败面板（结构化、零操作入口）。ticket.py QueryError 不带 face（写集外），
+    CLI ticket show 维持旧样诚实错误——host 直读是桥。
+
+    诚实纪律（KI-025 家族红线）：
+      - kind/文案/HTTP 级一字不改（face 只加载荷不换语义；终态仍「刷新无效」）；
+      - 拿不到的字段显式「不可得」（reason_available=false + *_note 说明为何），
+        绝不编造、绝不给推进/重试入口语义；
+      - 快照为何无：终态工作流不再运行，snapshot query 无执行方承接——确定性结论，
+        不是瞬时故障。
+    """
+    # 原因：终态执行 handle.result() 走服务端历史回放（不需要 worker 在场），
+    # FAILED 抛 WorkflowFailureError 且 __cause__ 链携带失败消息（正源）。
+    reason = ""
+    reason_note = ""
+    try:
+        await asyncio.wait_for(handle.result(), timeout=TERMINAL_FACE_RESULT_TIMEOUT_S)
+        # 未抛=「状态说终态失败、结果却读成功」的矛盾形态（桩/版本错位）：不编造。
+        reason_note = ("原因不可得：终态执行的结果读取未报失败（与执行状态 %s 矛盾，"
+                       "疑似数据/版本错位）——不编造原因" % (exec_status or "未知"))
+    except asyncio.TimeoutError:
+        reason_note = ("原因不可得：执行结果读取超时（%ds）——终态历史回放未在限时内"
+                       "返回，不编造原因" % int(TERMINAL_FACE_RESULT_TIMEOUT_S))
+    except Exception as e:  # noqa: BLE001 —— 任何失败异常都只取消息链，绝不外抛
+        reason = _failure_reason_of(e)
+        if reason:
+            reason_note = "来源：Temporal 工作流执行失败信息（终态执行历史回放异常链）"
+        else:
+            reason_note = ("原因不可得：失败异常链（%s）未携带可读消息——不编造原因"
+                           % type(e).__name__)
+    # 时刻：describe 的 start/close（proto Timestamp/datetime/epoch 数值三形通吃；
+    # 桩/缺字段降级 0=不可得）。
+    start_ts = _terminal_face_ts_of(getattr(desc, "start_time", None))
+    close_ts = _terminal_face_ts_of(getattr(desc, "close_time", None))
+    # 票身份：project/epic/实例/期 全走 SA 直读（try/except 降级空串），
+    # 实例/期再以旧形 id 只读解析兜底（历史票）——绝不从新形 id 反解（t260916-02 口径）。
+    project = epic = ""
+    inst = per = ""
+    try:
+        tsa = getattr(desc, "typed_search_attributes", None)
+        project = str(tsa.get(SearchAttributeKey.for_keyword(PROJECT_SA_NAME)) or "")
+    except Exception:  # noqa: BLE001
+        project = ""
+    try:
+        tsa = getattr(desc, "typed_search_attributes", None)
+        epic = str(tsa.get(SearchAttributeKey.for_keyword(EPIC_SA_NAME)) or "")
+    except Exception:  # noqa: BLE001
+        epic = ""
+    try:
+        tsa = getattr(desc, "typed_search_attributes", None)
+        inst = str(tsa.get(SearchAttributeKey.for_keyword(INSPECTION_INSTANCE_SA_NAME)) or "")
+        per = str(tsa.get(SearchAttributeKey.for_keyword(INSPECTION_PERIOD_SA_NAME)) or "")
+    except Exception:  # noqa: BLE001
+        inst = per = ""
+    if not inst:
+        inst, per = _legacy_inspection_instance_period_of(tid)
+    return {
+        "exec_status": exec_status or "未知",
+        "ticket_id": tid,
+        "project": project,
+        "epic": epic,
+        "instance_id": inst,
+        "period": per,
+        "reason": reason,
+        "reason_available": bool(reason),
+        "reason_source": reason_note,
+        "snapshot_available": False,
+        "snapshot_note": ("无快照：终态工作流不再运行，snapshot 查询没有执行方承接"
+                          "（终态的确定性结论，不是瞬时故障，刷新无效）"),
+        "last_stage": None,
+        "last_stage_note": ("最后已知阶段不可得：引擎未在阶段迁移时把阶段写入 Temporal "
+                            "memo，终态后快照亦不可查询——宁缺不猜"),
+        "start_ts": start_ts,
+        "close_ts": close_ts,
+        "start_time_txt": _terminal_face_ts_txt(start_ts),
+        "close_time_txt": _terminal_face_ts_txt(close_ts),
+    }
+
+
 async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
     """Single-ticket query (v2): the full snapshot + meta (a JSON-compatible ticket
     shape, consumed directly by ticket.py show).
@@ -1506,8 +1665,11 @@ async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
         # a dedicated kind=terminal whose wording states plainly that refreshing is
         # useless — never transient (retrying a dead ticket forever is the opposite lie,
         # KI-025 review C2).
+        # t260919-02：文案与 kind 一字不改（410 分级/诚实口径零退化），只**加** face
+        # 载荷——结构化失败面让终端能把「为什么失败」渲染出来，而不是一面空白。
         return _err("工单已终态（%s），快照不可得——终态票不再推进，刷新无效"
-                    % (exec_status or "未知"), KIND_TERMINAL)
+                    % (exec_status or "未知"), KIND_TERMINAL,
+                    face=await _terminal_failure_face(tid, handle, desc, exec_status))
     # Malformed-input defense (t260901-23): a non-dict query result (old code/stub/bad
     # data) → an explicit _err, never a bare AttributeError at the command boundary.
     if not isinstance(snap, dict):
@@ -1887,6 +2049,12 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                 return m
             except Exception:
                 return {"_inspection_closed_degraded": True} if inspection_mode else {}
+        if _is_failed_exec(exec_status):
+            # t260919-02：失败类终态（FAILED/CANCELED/TIMED_OUT/未知新终态）显式标记
+            # ——行组装按它出「已失败」行。绝不落入后续「查询超时，刷新重试」降级
+            # 形状（对死票既显在跑又诱导刷新=双重不诚实，本票病灶），也不落匿名
+            # 极简行（exec_status 在行上，UI 依它/词面显失败态）。
+            return {"_terminal_failed": True}
         return {}
 
     metas = await asyncio.gather(*(_meta_of(e["id"], e["exec_status"], e["close_ts"]) for e in entries))
@@ -1909,6 +2077,24 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                 rows.append(_row_from_inspection_face(
                     tid, {}, sa_project, sa_epic, exec_status, e["close_ts"],
                     e.get("created") or 0, degraded=True, **insp_kw))
+            elif meta.get("_terminal_failed"):
+                # t260919-02：失败类终态巡检行——标题=正常巡检标题（身份保留，实例/期
+                # 可辨），status/stage_state=failed（UI 显「已失败」红标），绝不落
+                # 「巡检票查询超时，刷新重试」降级形状（死票不诱导刷新）。updated 取
+                # 终态时刻（close_ts，板上最后已知时间），无窗=永驻板面（本票要求
+                # 失败可见；闭合窗是否对齐另议不擅动）。
+                row = _row_from_inspection_face(
+                    tid, {}, sa_project, sa_epic, exec_status, e["close_ts"],
+                    e.get("created") or 0, **insp_kw)
+                row["title"] = _inspection_title_of({}, tid, inst_p[0], inst_p[1])
+                row["stage"] = None
+                row["stage_state"] = "failed"
+                row["status"] = "failed"
+                row["awaiting_gate"] = False
+                if e["close_ts"]:
+                    row["updated_ts"] = int(e["close_ts"])
+                    row["updated"] = time.strftime("%m-%d %H:%M", time.localtime(e["close_ts"]))
+                rows.append(row)
             else:
                 row = _row_from_inspection_face(
                     tid, {}, sa_project, sa_epic, exec_status, e["close_ts"],
@@ -1920,7 +2106,26 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                 row["awaiting_gate"] = False
                 rows.append(row)
             continue
-        if meta.get("_query_degraded"):
+        if meta.get("_terminal_failed"):
+            # t260919-02：失败类终态显式失败行（dev-lane 极简形）——键集与极简行逐键
+            # 同形（t260915-08 parity，不加新键），只有值诚实化：status/stage_state=
+            # failed（UI 五态显「已失败」红标，不与在跑/收口混同）、标题点名执行失败
+            # 且不带「刷新重试」（死票不诱导重试）、updated=终态时刻。
+            rows.append({"id": tid, "project": sa_project, "epic": sa_epic,
+                         "role": None,
+                         "status": "failed",
+                         "title": "工单执行失败（%s）" % (exec_status or "未知"),
+                         "workflow": "", "proposal_id": "",
+                         "stage": None, "stage_state": "failed",
+                         "handoff_count": 0, "pending_count": 0, "worktree": "",
+                         "workspace": None, "created": None,
+                         "updated": (time.strftime("%m-%d %H:%M", time.localtime(e["close_ts"]))
+                                     if e["close_ts"] else ""),
+                         "updated_ts": int(e["close_ts"]) if e["close_ts"] else 0,
+                         "close_ts": e["close_ts"],
+                         "engine": ENGINE_V2, "exec_status": exec_status,
+                         "authz_active": 0})  # 降级/极简/失败行同形（无快照=无授权面可读）
+        elif meta.get("_query_degraded"):
             # KI-008: a RUNNING query still failing after retries → an explicit degraded
             # row. id/project/epic come straight from the SA and are unaffected;
             # stage_state/status keep the running-state reading (not the anonymous row's
