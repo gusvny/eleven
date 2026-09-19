@@ -2,6 +2,39 @@ window.__ModuleLoader__.load({ id: "sandbar-knowledge", factory: (require) => { 
 Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 let react = require("react");
 let react_jsx_runtime = require("react/jsx-runtime");
+//#region src/client/inject-contract.ts
+/**
+* sandbar-knowledge · client entry inject 契约（单一真源）。
+*
+* 【为什么收窄到 ['slots']（工单 t260916-26，dsh 升级 epic T6）】
+* dsh 0.1.1（现生产）的浏览器半由 dsh-client-runtime 提供 `conversationViews`
+* 服务（0.1.1 lib/client.js：super(ctx, 「conversationViews」)）；0.1.5 起
+* dsh-client-runtime 整包移除，会话视图扩展面迁到 dsh-client-ui-conversation 的
+* `uiConversation.views.register`，且 0.1.5 全包已无任何服务注册在
+* 「conversationViews」键下。宿主（与浏览器 web boot）按 entry 的 `inject`
+* 声明等待服务注入——声明了不存在的服务 = 永久 pending = UI 顶部
+* 「Failed to load plugins / web boot: N entries did not activate」。
+*
+* 双版本容错口径：inject 只声明两版皆存在的服务，同一份 bundle 在 0.1.1 与
+* 0.1.5 下都能激活（零运行时分支、零构建期二选一）。白名单取证：
+*   - `slots`：0.1.1/0.1.5 皆在（0.1.5 实台活证=workbench 注入
+*     ['slots','sessions','workspaces'] 正常激活）；
+*   - `sessions`/`workspaces`：同上双版皆在，本插件当前不消费，不声明。
+* 本插件 apply 为空操作（260823 起视图由 sandbar-workbench 侧栏承载），
+* 对 `uiConversation`/`conversationViews` 均零消费——收窄不改变任何行为。
+*
+* 【白名单纪律】未来若要恢复插件自持页签：0.1.5 用
+* `uiConversation.views.register`、0.1.1 用 `conversationViews.register`
+* 双轨探测实现，且必须先核实目标服务在两版都真实存在（宿主 stage +
+* 生产各一条活证）再进白名单；同步更新 index.tsx 与 smoke/client-contract.mjs
+* 的产物断言。
+*
+* validateInject 仅供测试与未来装载前校验调用——严禁放进 entry 激活路径
+* （浏览器半抛错 = 激活失败 = 恰好炸出本票要避免的整屏横幅）。
+*/
+/** 双版本（dsh 0.1.x 生产/stage）皆存在的客户端服务白名单——本 entry 消费的子集。 */
+const CLIENT_INJECT = ["slots"];
+//#endregion
 //#region src/client/markdown.ts
 /**
 * markdown.ts — 无依赖的轻量 Markdown 渲染器（供 sandbar-knowledge 知识库插件用）。
@@ -218,13 +251,12 @@ function splitCells(line) {
 //#endregion
 //#region src/client/index.tsx
 /**
-* sandbar-knowledge —— docs 知识库 · 浏览器半（主视图页签版）。
+* sandbar-knowledge —— docs 知识库 · 浏览器半。
 *
-* 槽位契约：向会话视图环 `conversation.view` 注册一个页签（id 'knowledge'，
-* 标签「知识库」，与 chat/trajectory/workbench 平级，order 30 排最后），用户在主
-* 会话视图顶部页签切换即见。配套注册 `conversationViews.register`（target
-* 'knowledge'）：本视图数据来自 /sandbar-knowledge/api/* 而非会话事件，builder 为
-* 空实现（empty/replace/apply 均返回 null），仅为满足引擎的 per-session view 契约。
+* 槽位契约沿革：本插件曾向会话视图环注册页签 + `conversationViews.register`
+* （260823 前）；260823 起知识库 UI 移到工单台侧栏中栏、由 sandbar-workbench
+* 直接 import 本插件的 KnowledgeSection 渲染，apply 改为空操作——插件对
+* conversationViews/uiConversation 零消费、零注册。
 *
 * 功能（工单 t260821-09 → t260821-10 M2/M3）：
 *   ① 列表按分类（design/content/ops/reference）/标签/状态过滤；
@@ -242,9 +274,15 @@ function splitCells(line) {
 * 数据通道：同源 fetch 打宿主半（../node.ts）挂在 dsh webServer 上的
 * /sandbar-knowledge/api/*；写操作只有 review/save（宿主半落 docs/reviews/ +
 * server/admin.log 审计）。
+*
+* 【inject 收窄史（t260916-26）】曾声明 `inject = ['slots','conversationViews']`；
+* dsh 0.1.5 起 conversationViews 服务随 dsh-client-runtime 整包移除，声明即
+* 永久 pending（UI 报 Failed to load plugins）。现改从 ./inject-contract 导入
+* CLIENT_INJECT（=['slots']，双版本稳定白名单），同一 bundle 在 0.1.1/0.1.5
+* 都能激活；本插件无页签注册行为（apply 空操作），收窄零行为差异。
 */
 const name = "sandbar-knowledge/client";
-const inject = ["slots", "conversationViews"];
+const inject = CLIENT_INJECT;
 const CSS = `
 .kb-root{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   background:#f6f8fa;color:#1f2328;min-height:100%;box-sizing:border-box;padding:20px 24px 32px;
@@ -1327,6 +1365,9 @@ function KnowledgeSection({ projectKey }) {
 * 260823 起知识库 UI 不再占 chat 顶部页签——移到工单台侧栏中栏，
 * 由 sandbar-workbench 的侧栏直接 import KnowledgeSection 渲染（用户拍板：chat 页签只留 chat/trajectory）。
 * apply 保留为空操作（宿主装载契约要求导出）。
+* t260916-26 注：0.1.5 的会话视图扩展面若将来恢复插件自持页签，走
+* uiConversation.views.register（0.1.5）/ conversationViews.register（0.1.1）
+* 双轨探测——见 ./inject-contract 白名单纪律。
 */
 function apply(_ctx) {}
 //#endregion

@@ -51,9 +51,19 @@ Subcommands:
                               容量面（容器/工程/活租约/孤儿 vs MAX_STAGES 保险丝）
                               + 每台归属（ticket/attempt→project 映射、锚、心跳
                               年龄）；孤儿=本管域容器而无租约文件
+  plugins                    宿主半插件装载断言（t260916-26，只读）：POST
+                              /api/pluginInventory/list 取 entry 纤维态投影，
+                              断言「enabled 全 active、零 pending 零 failed」——
+                              --assert 断言失败 exit 2（缺省只回执不拦）；
+                              定位 --project <名>（活租约 + docker logs 提
+                              token）或 --console <url> [--token <t>]（手工台）；
+                              覆盖面=宿主半 loader entry（client 半 web boot
+                              在浏览器内跑、不在此投影——客户端半断言走
+                              integration/stage_client_boot.mjs 浏览器探针）
   selftest                   white-box self test (never touches docker):
                               forbidden-port exclusion / band locks / lease
-                              criteria / malformed input rejection
+                              criteria / malformed input rejection / plugins
+                              断言纯函数（t260916-26）
 
 Exit codes (three-state contract, integration/README.md):
   0=ok; 2=ENV_FAIL (docker absent / image absent / unhealthy boot / port band
@@ -140,7 +150,10 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
+import uuid
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 COMPOSE_FILE = REPO / "server" / "docker-compose.test.yml"
@@ -1901,6 +1914,249 @@ def cmd_inventory():
     return inv
 
 
+# ---------------------------------------------------------------- plugins probe (t260916-26)
+
+PLUGIN_INVENTORY_METHOD = "pluginInventory/list"
+PLUGIN_FIBER_STATES = ("pending", "loading", "active", "failed", "unloading")
+PLUGINS_COVERAGE_NOTE = ("host-half loader entries only; the client-half web boot "
+                         "runs in the browser and is NOT projected here —— 用 "
+                         "integration/stage_client_boot.mjs 浏览器探针断言 client 半")
+PLUGINS_TOKEN_RE = re.compile(r"[?&]token=([A-Za-z0-9_-]{20,})")
+
+
+def assess_plugin_entries(entries):
+    """纯函数：PluginInventorySnapshot.entries → 归一化分桶 + 判定（绝不抛）。
+
+    判定口径：enabled entry 的 fiberPhase 全部 active、零 pending、零 failed、
+    零 inactive（loading/unloading/null）、零 malformed → ok=true。
+    disabled entry 是合法配置态，跳过不参与判定但计数可见；entries=[]（台面上
+    没装载任何插件）按「全称量词空真」计 ok=true——缺席检测是上层（期望集）
+    的事，本函数只对在册 entry 说事实（三态声明见 cmd_plugins docstring ③）。
+    """
+    buckets = {"pending": [], "failed": [], "inactive": [], "malformed": []}
+    counts = {"total": 0, "enabled": 0, "disabled": 0, "active": 0}
+    if isinstance(entries, list):
+        counts["total"] = len(entries)
+        for i, e in enumerate(entries):
+            label = "<entry#%d>" % i
+            if isinstance(e, dict):
+                label = str(e.get("moduleName") or e.get("entryId") or label)
+            if not isinstance(e, dict):
+                buckets["malformed"].append(
+                    {"entry": label, "reason": "entry 不是对象（收到 %s）" % type(e).__name__})
+                continue
+            phase = e.get("fiberPhase")
+            enabled = e.get("enabled")
+            reasons = []
+            if not isinstance(enabled, bool):
+                reasons.append("enabled 缺失或非布尔（%r）" % (enabled,))
+            if phase is not None and phase not in PLUGIN_FIBER_STATES:
+                reasons.append("fiberPhase 未知值（%r）" % (phase,))
+            if reasons:
+                buckets["malformed"].append({"entry": label, "reason": "；".join(reasons)})
+                continue
+            if not enabled:
+                counts["disabled"] += 1
+                continue
+            counts["enabled"] += 1
+            if phase == "active":
+                counts["active"] += 1
+            elif phase == "pending":
+                buckets["pending"].append({"entry": label, "fiberPhase": phase})
+            elif phase == "failed":
+                buckets["failed"].append({"entry": label, "fiberPhase": phase})
+            else:  # loading / unloading / null —— 在册但不在稳态
+                buckets["inactive"].append({"entry": label, "fiberPhase": phase})
+    else:
+        buckets["malformed"].append(
+            {"entry": "<entries>", "reason": "entries 不是数组（收到 %s）" % type(entries).__name__})
+    return {
+        "ok": not any(buckets.values()),
+        "counts": counts,
+        "pending": buckets["pending"],
+        "failed": buckets["failed"],
+        "inactive": buckets["inactive"],
+        "malformed": buckets["malformed"],
+    }
+
+
+def _plugins_token_exchange(console_url, token, timeout):
+    """dsh web 进程令牌 → 浏览器会话 cookie（GET /?token= 的 303+set-cookie
+    兑换，0.1.1/0.1.5 同款流程；返回「name=value」或 None）。token 不对/过期
+    = 拿不到 set-cookie，返回 None 由调用方如实报 unauthorized。"""
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+    url = console_url.rstrip("/") + "/?token=" + urllib.parse.quote(token, safe="")
+    req = urllib.request.Request(url, headers={"User-Agent": "stage_docker-plugins"})
+    try:
+        opener = urllib.request.build_opener(_NoRedirect)
+        resp = opener.open(req, timeout=timeout)
+        cookies = resp.headers.get_all("Set-Cookie") or []
+        try:
+            resp.close()
+        except Exception:
+            pass
+    except urllib.error.HTTPError as e:
+        cookies = e.headers.get_all("Set-Cookie") or []
+        try:
+            e.close()
+        except Exception:
+            pass
+    except (urllib.error.URLError, OSError):
+        return None
+    if not cookies:
+        return None
+    return cookies[0].split(";", 1)[0].strip() or None
+
+
+def fetch_plugin_inventory(console_url, token=None, timeout=6):
+    """只读查询宿主半插件清单（typert wire：POST /api/<ns>/<method>，信封
+    {type:"client-request",rpcId,method,payload} → {type:"server-response",
+    rpcId,result}；dsh 0.1.1 与 0.1.5 同一线格式，两版实测一致）。永不抛：
+    查询面问题全部折进回执（reason + detail），由 --assert 决定是否升格退出码。"""
+    base = console_url.rstrip("/")
+    cookie = None
+    if token:
+        cookie = _plugins_token_exchange(base, token, timeout=timeout)
+    body = {"type": "client-request",
+            "rpcId": "stage-plugins-%s" % uuid.uuid4(),
+            "method": PLUGIN_INVENTORY_METHOD,
+            "payload": {"args": {}}}
+    req = urllib.request.Request(
+        base + "/api/" + PLUGIN_INVENTORY_METHOD,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json",
+                 "User-Agent": "stage_docker-plugins"},
+        method="POST")
+    if cookie:
+        req.add_header("Cookie", cookie)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+    except urllib.error.HTTPError as e:
+        try:
+            detail = (e.read() or b"").decode("utf-8", "replace")[:120].strip()
+        except Exception:
+            detail = ""
+        if e.code == 401:
+            return {"ok": False, "reason": "unauthorized", "detail": detail,
+                    "hint": "console 需要 token 兑换的会话 cookie——传 --token=<t>"
+                            "（dsh web 启动输出行里的 ?token=…）；token 过期/不对"
+                            "也报本态"}
+        return {"ok": False, "reason": "http_%d" % e.code, "detail": detail}
+    except (urllib.error.URLError, OSError) as e:
+        return {"ok": False, "reason": "unreachable", "detail": str(e)[:160]}
+    # 解析面与网络面分桶（t260916-26 arbitrate 打回项重落地）：JSONDecodeError 是
+    # ValueError 子类，此前与 urlopen 同 try 会被网络桶兜走——台回话了但回话不是
+    # JSON（walkthrough 20260918 实锤）被误报成 unreachable，把诊断引向网络面、
+    # 畸形回执的真因被埋。报错必须精确：解析错=malformed_response（对齐
+    # cmd_plugins docstring ② 的既有声明），连不上=unreachable，两态各回各家。
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except ValueError as e:
+        return {"ok": False, "reason": "malformed_response",
+                "detail": "非 JSON 回执：%s" % str(e)[:140]}
+    if not isinstance(data, dict) or data.get("type") != "server-response":
+        return {"ok": False, "reason": "malformed_response",
+                "detail": json.dumps(data, ensure_ascii=False)[:160]}
+    result = data.get("result")
+    if not isinstance(result, dict) or result.get("ok") is not True:
+        return {"ok": False, "reason": "rpc_error",
+                "detail": json.dumps(result, ensure_ascii=False)[:160]}
+    receipt = assess_plugin_entries((result.get("value") or {}).get("entries"))
+    receipt["query"] = "ok"
+    return receipt
+
+
+def _plugins_token_from_logs(project):
+    """stage 自管台：dsh 容器启动输出含 `dsh web: http://…?token=…`——
+    docker logs 提取（容器名=compose_env 的确定性命名 <project>-dsh）。
+    docker 缺席/容器未在跑 → None（上层如实走未授权路径）。"""
+    try:
+        p = _run(["docker", "logs", "--tail", "200", "%s-dsh" % project],
+                 timeout=15, check=False)
+    except (subprocess.SubprocessError, OSError):
+        return None
+    m = PLUGINS_TOKEN_RE.search((p.stdout or "") + (p.stderr or ""))
+    return m.group(1) if m else None
+
+
+def plugins_postboot_probe(project, ports, check=False):
+    """up/ensure 挂钩（review C1）：console HTTP 就绪后的只读插件断言——
+    观测位不是闸。预算：settle 等待 ≤10s（entry 纤维从 loading 翻 active 的
+    窗口）+ 单次查询 6s；查询面问题（401/不可达）不重试，如实进回执。
+    断言未过：stderr 打告警行（含 pending/failed 清单）+ 回执进租约 plugins
+    字段，**不阻断不拆台**；check=True（--check-plugins）才升格 StageError
+    （CI/演练闸），且在拆台路径之外抛（台留着供排查）。"""
+    console = "http://127.0.0.1:%d" % ports["console"]
+    token = _plugins_token_from_logs(project)
+    deadline = time.time() + 10.0
+    while True:
+        receipt = fetch_plugin_inventory(console, token=token)
+        if receipt.get("query") != "ok" or receipt.get("ok") or time.time() >= deadline:
+            break
+        time.sleep(1.0)
+    receipt["console"] = console
+    receipt["token_source"] = "docker-logs" if token else "none"
+    receipt["coverage"] = PLUGINS_COVERAGE_NOTE
+    if not receipt.get("ok"):
+        bad = (receipt.get("pending", []) + receipt.get("failed", [])
+               + receipt.get("inactive", []) + receipt.get("malformed", []))
+        names = sorted({str(x.get("entry") or x.get("reason")) for x in bad})
+        print("[stage_docker][plugins] ⚠ 插件装载断言未过（query=%s）：%s"
+              % (receipt.get("query", "?"), "；".join(names)[:200]), file=sys.stderr)
+        if check:
+            raise StageError("--check-plugins：插件装载断言未过（pending/failed/"
+                             "malformed 清单见上方告警行与租约 plugins 字段）",
+                             kind="env")
+    return receipt
+
+
+def cmd_plugins(project=None, console=None, token=None, assert_mode=False):
+    """`plugins` 子命令（t260916-26，只读）：宿主半插件装载投影 + 断言。
+
+    三态处置声明（review C6，逐项对照 inventory 先例）：
+      ① 定位失败（--project/--console 双缺或双给；租约缺失/非 up 台；docker
+        缺席致 token 不可提）→ StageError（usage/env），不产回执——对齐
+        inventory 对 --project 的拒收先例：定位是命令前置，不是被观测对象。
+      ② 回执畸形（非 JSON/信封形状不对/result.ok≠true/entries 非数组/条目缺
+        字段/enabled 非布尔/fiberPhase 未知值）→ 绝不炸栈：折进回执
+        （reason=malformed_response/rpc_error，或 malformed 桶逐条点名），
+        ok=false；--assert 时 exit 2（KI-046：畸形=红，不 SKI=过）。
+      ③ 部分 entry 缺席（期望中的插件根本不在清单）→ 不带期望集匹配
+        （与 inventory 对齐：本命令是宿主版本无关的通用投影，期望集是
+        profile 层关注点）；断言只对在册 enabled entry 生效，缺席通过
+        counts.{total,enabled,disabled} 事实面暴露给上层比对。
+    退出码：0=查询成功（无论断言过否——观测模式）；2=--assert 且断言未过，
+    或查询面 hard fail（unauthorized/unreachable/malformed）在 --assert 下
+    同样升格；usage/env 错误走 StageError 各自退出码。"""
+    if bool(project) == bool(console):
+        raise StageError("plugins 需要 --project <名> 或 --console <url> 二选一"
+                         "（双给=定位歧义，双缺=无定位）", kind="usage")
+    if project:
+        validate_project(project)
+        st = read_lease(project)
+        port = ((st or {}).get("ports") or {}).get("console")
+        if not port or (st or {}).get("state") != "up":
+            raise StageError(
+                "项目 %s 不是可查询的 up 台（租约 state=%s，console 端口=%s）——"
+                "plugins 只读活台" % (project, (st or {}).get("state"), port),
+                kind="env")
+        console = "http://127.0.0.1:%d" % port
+        token = token or _plugins_token_from_logs(project)
+    receipt = fetch_plugin_inventory(console, token=token)
+    receipt["console"] = console
+    receipt["token_source"] = ("cli" if token and not project
+                               else "docker-logs" if token else "none")
+    receipt["coverage"] = PLUGINS_COVERAGE_NOTE
+    receipt["assert"] = bool(assert_mode)
+    if assert_mode:
+        if receipt.get("query") != "ok" or not receipt.get("ok"):
+            receipt["assert_failed"] = True
+    return receipt
+
+
 # ---------------------------------------------------------------- validation
 
 def validate_project(project):
@@ -2323,6 +2579,10 @@ def _flip_lease_up(project, lease, ports, services_list, env, opts,
         "booted_ts": int(time.time()),
         "heartbeat_ts": time.time(),
     })
+    # t260916-26 C1：起台后的只读插件断言回执进租约（观测位不是闸；
+    # --check-plugins 的升格退出在 plugins_postboot_probe 内已抛）。
+    if opts.get("_plugins_receipt") is not None:
+        lease["plugins"] = opts["_plugins_receipt"]
     write_lease(project, lease)
     return lease
 
@@ -2399,6 +2659,13 @@ def do_up(project, services_list, opts, timeout, lock_fd=None, lease=None):
             _do_down(project, env, quiet=True)
             raise StageError("起台端口 %s=%d 落在生产端口面——红线自检失败，已就地清场"
                              % (name, p), kind="env")
+    # t260916-26 C1：console 就绪后的只读插件断言（观测位不是闸）。放红线之后、
+    # 翻面之前：安全红线优先清场；本探针任何失败只告警/升格退出，不拆台
+    # （--check-plugins 的 StageError 在探针内抛——此处已出拆台 try 块，台留着
+    # 供排查，退出码非零由异常语义带给调用方）。
+    if "dsh" in services_list:
+        opts["_plugins_receipt"] = plugins_postboot_probe(
+            project, ports, check=bool(opts.get("check_plugins")))
     return _flip_lease_up(project, lease, ports, services_list, env, opts,
                           sa_registered, sa_note)
 
@@ -2881,6 +3148,50 @@ def selftest():
     finally:
         stub.close()
 
+    # 15. t260916-26 plugins 断言纯函数：畸形 payload 全收编（不抛、ok=false、
+    #     桶位正确）+ 黄金路径。KI-046 纪律：畸形=红不是 SKI=过。
+    a = assess_plugin_entries(None)
+    ok(a["ok"] is False and len(a["malformed"]) == 1,
+       "entries=None → 不抛，malformed 桶点名（KI-046：畸形=红）")
+    a = assess_plugin_entries("garbage")
+    ok(a["ok"] is False and a["counts"]["total"] == 0,
+       "entries 非数组 → ok=false 且 total=0")
+    a = assess_plugin_entries([])
+    ok(a["ok"] is True and a["counts"] == {"total": 0, "enabled": 0, "disabled": 0,
+                                           "active": 0},
+       "entries=[] → 空真 ok=true（缺席检测属期望集，三态声明③）")
+    a = assess_plugin_entries([
+        {"entryId": "1", "moduleName": "a", "enabled": True, "fiberPhase": "active"},
+        {"entryId": "2", "moduleName": "b", "enabled": False, "fiberPhase": None},
+    ])
+    ok(a["ok"] is True and a["counts"]["active"] == 1 and a["counts"]["disabled"] == 1,
+       "黄金路径：enabled active + disabled null → ok=true（disabled 跳过计数可见）")
+    a = assess_plugin_entries([
+        {"entryId": "1", "moduleName": "sandbar-knowledge", "enabled": True, "fiberPhase": "pending"},
+        {"entryId": "2", "moduleName": "sandbar-providers", "enabled": True, "fiberPhase": "failed"},
+        {"entryId": "3", "moduleName": "c", "enabled": True, "fiberPhase": "active"},
+    ])
+    ok(a["ok"] is False and [x["entry"] for x in a["pending"]] == ["sandbar-knowledge"]
+       and [x["entry"] for x in a["failed"]] == ["sandbar-providers"]
+       and a["counts"]["active"] == 1,
+       "pending/failed 分桶点名（本票事故形态断言面）")
+    a = assess_plugin_entries([
+        {"entryId": "1", "moduleName": "c", "enabled": True, "fiberPhase": "loading"},
+        {"entryId": "2", "moduleName": "d", "enabled": True, "fiberPhase": None},
+        {"entryId": "3", "moduleName": "e", "enabled": True, "fiberPhase": "unloading"},
+    ])
+    ok(a["ok"] is False and len(a["inactive"]) == 3,
+       "loading/unloading/null → inactive 桶（在册未稳态，ok=false）")
+    a = assess_plugin_entries([
+        {"entryId": "1", "moduleName": "x", "fiberPhase": "active"},
+        {"entryId": "2", "moduleName": "y", "enabled": "yes", "fiberPhase": "active"},
+        {"entryId": "3", "moduleName": "z", "enabled": True, "fiberPhase": "zombie"},
+        "not-a-dict",
+    ])
+    ok(a["ok"] is False and len(a["malformed"]) == 4
+       and all("reason" in m for m in a["malformed"]),
+       "缺 enabled/非布尔 enabled/未知 state/非对象条目 → malformed 逐条点名")
+
     print(("SELFTEST 全绿" if not fails else "SELFTEST %d 项红" % len(fails)))
     return EXIT_FAIL if fails else EXIT_OK
 
@@ -2892,7 +3203,7 @@ def _parse_opts(argv, i, opts):
              "--profile-dir": "profile_dir", "--profile-name": "profile_name",
              "--repo-dir": "repo_dir", "--nm-repo-dir": "nm_repo_dir",
              "--services": "_services", "--anchor-pid": "anchor_pid",
-             "--lease-id": "lease_id"}
+             "--lease-id": "lease_id", "--console": "console", "--token": "token"}
     while i < len(argv):
         a = argv[i]
         if a in flags:
@@ -2909,6 +3220,12 @@ def _parse_opts(argv, i, opts):
             i += 1
         elif a == "--dry-run":
             opts["dry_run"] = True
+            i += 1
+        elif a == "--assert":
+            opts["assert_plugins"] = True
+            i += 1
+        elif a == "--check-plugins":
+            opts["check_plugins"] = True
             i += 1
         elif a.startswith("--"):
             raise StageError("未知旗标：%s" % a, kind="usage")
@@ -2938,6 +3255,10 @@ def main(argv):
         if cmd in ("up", "ensure"):
             if not project:
                 raise StageError("%s 缺 --project <名>" % cmd, kind="usage")
+            for stray in ("console", "token", "assert_plugins"):
+                if stray in opts:
+                    raise StageError("%s 不接受 --console/--token/--assert"
+                                     "（plugins 专属旗标）" % cmd, kind="usage")
             services = validate_service_set(opts.get("_services") or "temporal")
             timeout = opts.get("timeout") or DEFAULT_TIMEOUT
             clean_opts = {
@@ -2974,14 +3295,29 @@ def main(argv):
             rpt = cmd_inventory()
             print(json.dumps(rpt, ensure_ascii=False))
             return EXIT_OK if rpt.get("ok") else EXIT_ENV
+        if cmd == "plugins":
+            for stray in ("keep", "dry_run", "namespace", "fixtures_dir",
+                          "profile_dir", "profile_name", "repo_dir",
+                          "nm_repo_dir", "_services", "timeout"):
+                if stray in opts:
+                    raise StageError("plugins 不接受起台类旗标 --%s（只读观测位，"
+                                     "不起台不持有）" % stray.replace("_", "-"),
+                                     kind="usage")
+            rpt = cmd_plugins(project=project, console=opts.get("console"),
+                              token=opts.get("token"),
+                              assert_mode=bool(opts.get("assert_plugins")))
+            print(json.dumps(rpt, ensure_ascii=False))
+            if rpt.get("assert_failed") or rpt.get("query") != "ok":
+                return EXIT_ENV
+            return EXIT_OK
         if cmd == "down":
             if not project:
                 raise StageError("down 缺 --project <名>", kind="usage")
             result = do_down(project)
             print(json.dumps(result, ensure_ascii=False))
             return EXIT_OK if not result["residue"] else EXIT_FAIL
-        raise StageError("未知子命令：%s（可选 up/ensure/down/hold/sweep/inventory/selftest）"
-                         % cmd, kind="usage")
+        raise StageError("未知子命令：%s（可选 up/ensure/down/hold/sweep/inventory/"
+                         "plugins/selftest）" % cmd, kind="usage")
     except StageError as e:
         print("STAGE_%s: %s" % (e.kind.upper(), e), file=sys.stderr)
         return e.exit_code

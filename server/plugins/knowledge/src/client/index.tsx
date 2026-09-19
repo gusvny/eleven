@@ -1,11 +1,10 @@
 /**
- * sandbar-knowledge —— docs 知识库 · 浏览器半（主视图页签版）。
+ * sandbar-knowledge —— docs 知识库 · 浏览器半。
  *
- * 槽位契约：向会话视图环 `conversation.view` 注册一个页签（id 'knowledge'，
- * 标签「知识库」，与 chat/trajectory/workbench 平级，order 30 排最后），用户在主
- * 会话视图顶部页签切换即见。配套注册 `conversationViews.register`（target
- * 'knowledge'）：本视图数据来自 /sandbar-knowledge/api/* 而非会话事件，builder 为
- * 空实现（empty/replace/apply 均返回 null），仅为满足引擎的 per-session view 契约。
+ * 槽位契约沿革：本插件曾向会话视图环注册页签 + `conversationViews.register`
+ * （260823 前）；260823 起知识库 UI 移到工单台侧栏中栏、由 sandbar-workbench
+ * 直接 import 本插件的 KnowledgeSection 渲染，apply 改为空操作——插件对
+ * conversationViews/uiConversation 零消费、零注册。
  *
  * 功能（工单 t260821-09 → t260821-10 M2/M3）：
  *   ① 列表按分类（design/content/ops/reference）/标签/状态过滤；
@@ -23,18 +22,25 @@
  * 数据通道：同源 fetch 打宿主半（../node.ts）挂在 dsh webServer 上的
  * /sandbar-knowledge/api/*；写操作只有 review/save（宿主半落 docs/reviews/ +
  * server/admin.log 审计）。
+ *
+ * 【inject 收窄史（t260916-26）】曾声明 `inject = ['slots','conversationViews']`；
+ * dsh 0.1.5 起 conversationViews 服务随 dsh-client-runtime 整包移除，声明即
+ * 永久 pending（UI 报 Failed to load plugins）。现改从 ./inject-contract 导入
+ * CLIENT_INJECT（=['slots']，双版本稳定白名单），同一 bundle 在 0.1.1/0.1.5
+ * 都能激活；本插件无页签注册行为（apply 空操作），收窄零行为差异。
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import type { ClientContext, ConversationViewDefinition } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 // 空具名 type import：把 dsh-client-ui-conversation 的 SlotMap 扩展（conversation.view 槽声明）
 // 带进 tsc 检查环境；纯类型副作用，构建时被剥离，不进 bundle。
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { CLIENT_INJECT } from './inject-contract'
 import { renderMarkdown } from './markdown'
 import { splitCells } from '../shared/blocks'
 
 export const name = 'sandbar-knowledge/client'
-export const inject = ['slots', 'conversationViews']
+export const inject = CLIENT_INJECT
 
 /* ---------------------------------------------------------------- 样式 */
 
@@ -894,6 +900,9 @@ export function KnowledgeSection({ projectKey }: { projectKey?: string }) {
  * 260823 起知识库 UI 不再占 chat 顶部页签——移到工单台侧栏中栏，
  * 由 sandbar-workbench 的侧栏直接 import KnowledgeSection 渲染（用户拍板：chat 页签只留 chat/trajectory）。
  * apply 保留为空操作（宿主装载契约要求导出）。
+ * t260916-26 注：0.1.5 的会话视图扩展面若将来恢复插件自持页签，走
+ * uiConversation.views.register（0.1.5）/ conversationViews.register（0.1.1）
+ * 双轨探测——见 ./inject-contract 白名单纪律。
  */
 export function apply(_ctx: ClientContext): void {
   /* 无注册：视图经 sandbar-workbench 侧栏中栏承载 */

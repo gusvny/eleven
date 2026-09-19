@@ -2,6 +2,42 @@ window.__ModuleLoader__.load({ id: "sandbar-providers", factory: (require) => { 
 Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 let react = require("react");
 let react_jsx_runtime = require("react/jsx-runtime");
+//#region src/client/inject-contract.ts
+/**
+* sandbar-providers · client entry inject 契约（单一真源）。
+*
+* 【为什么收窄到 ['slots']（工单 t260916-26，dsh 升级 epic T6）】
+* dsh 0.1.1（现生产）的浏览器半由 dsh-client-runtime 提供 `conversationViews`
+* 服务（0.1.1 lib/client.js：super(ctx, 「conversationViews」)）；0.1.5 起
+* dsh-client-runtime 整包移除，会话视图扩展面迁到 dsh-client-ui-conversation 的
+* `uiConversation.views.register`，且 0.1.5 全包已无任何服务注册在
+* 「conversationViews」键下。宿主（与浏览器 web boot）按 entry 的 `inject`
+* 声明等待服务注入——声明了不存在的服务 = 永久 pending = UI 顶部
+* 「Failed to load plugins / web boot: N entries did not activate」。
+*
+* 双版本容错口径：inject 只声明两版皆存在的服务，同一份 bundle 在 0.1.1 与
+* 0.1.5 下都能激活（零运行时分支、零构建期二选一）。白名单取证：
+*   - `slots`：0.1.1/0.1.5 皆在（0.1.5 实台活证=workbench 注入
+*     ['slots','sessions','workspaces'] 正常激活）；
+*   - `sessions`/`workspaces`：同上双版皆在，本插件当前不消费，不声明。
+* 本插件 apply 为空操作（260823 起视图由 sandbar-workbench 侧栏承载），
+* 对 `uiConversation`/`conversationViews` 均零消费——收窄不改变任何行为。
+*
+* 【白名单纪律】未来若要恢复插件自持页签：0.1.5 用
+* `uiConversation.views.register`、0.1.1 用 `conversationViews.register`
+* 双轨探测实现，且必须先核实目标服务在两版都真实存在（宿主 stage +
+* 生产各一条活证）再进白名单；同步更新 index.tsx 与 smoke/client-contract.mjs
+* 的产物断言。
+*
+* validateInject 仅供测试与未来装载前校验调用——严禁放进 entry 激活路径
+* （浏览器半抛错 = 激活失败 = 恰好炸出本票要避免的整屏横幅）。
+*
+* 与 sandbar-knowledge/src/client/inject-contract.ts 同构（插件独立可装载，
+* 不跨插件 import 契约模块）；两处必须同步修改，smoke 断言双份兜底。
+*/
+/** 双版本（dsh 0.1.x 生产/stage）皆存在的客户端服务白名单——本 entry 消费的子集。 */
+const CLIENT_INJECT = ["slots"];
+//#endregion
 //#region src/host/routes-edit.ts
 /** 视图 → 编辑草稿（null 条目 → 空串，UI 显示为「继承 default」）。 */
 function draftFromView(view) {
@@ -67,13 +103,12 @@ function draftToPayload(d) {
 //#endregion
 //#region src/client/index.tsx
 /**
-* sandbar-providers —— LLM provider 管理与优先级 · 浏览器半（会话主视图「模型」页签版）。
+* sandbar-providers —— LLM provider 管理与优先级 · 浏览器半。
 *
-* 槽位契约（t260821-11 ①：从 settings 分区迁来，制式照抄 workbench）：向会话视图环
-* `conversation.view` 注册一个页签（id 'sandbar-providers'，标签「模型」，order 15，
-* 与 chat(0)/trajectory(10)/工单台(20) 平级），用户在主会话视图顶部页签切换即见。
-* 配套注册 `conversationViews.register`（target 'sandbar-providers'）：本视图数据来自
-* /sandbar-providers/api/* 而非会话事件，builder 为空实现，仅为满足 per-session 契约。
+* 槽位契约沿革：本插件曾向会话视图环注册「模型」页签 + `conversationViews.register`
+* （t260821-11 ①，260823 前）；260823 起「模型」UI 移到工单台侧栏中栏、由
+* sandbar-workbench 直接 import 本插件的 ProvidersSection 渲染，apply 改为
+* 空操作——插件对 conversationViews/uiConversation 零消费、零注册。
 *
 * 功能（t260821-08 B 版 + t260821-11 ②③ + M13 路由表）：
 *   ① 列出 provider（deepseek-official/kimi-coding/zai/scnet…）+ 上下移/拖拽排序；
@@ -90,9 +125,15 @@ function draftToPayload(d) {
 *      /tmp；保存即生效——运行时查表，下一个工单 agent spawn 用新表）。
 * 所有写操作走宿主半（../node.ts）挂在 dsh webServer 上的 /sandbar-providers/api/*；
 * 路由表读写走 sandbar-admin-ui 的 /sandbar-admin/api/routes（同源，M13① 保留的 API）。
+*
+* 【inject 收窄史（t260916-26）】曾声明 `inject = ['slots','conversationViews']`；
+* dsh 0.1.5 起 conversationViews 服务随 dsh-client-runtime 整包移除，声明即
+* 永久 pending（UI 报 Failed to load plugins）。现改从 ./inject-contract 导入
+* CLIENT_INJECT（=['slots']，双版本稳定白名单），同一 bundle 在 0.1.1/0.1.5
+* 都能激活；本插件无页签注册行为（apply 空操作），收窄零行为差异。
 */
 const name = "sandbar-providers/client";
-const inject = ["slots", "conversationViews"];
+const inject = CLIENT_INJECT;
 const CSS = `
 .syp-root{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   background:#f6f8fa;color:#1f2328;min-height:100%;box-sizing:border-box;padding:20px 24px 32px;
@@ -863,7 +904,7 @@ function RoutesTableSection({ providers, projectKey }) {
 	}
 	async function save() {
 		if (draft === void 0) return;
-		if (!window.confirm("保存将改写 server/model-routes.yaml（真源，写前备份 /tmp）。\n保存即生效：路由表是运行时查表，下一个工单 agent spawn 时就按新表走，无需任何生成/重启步骤。\n确认保存路由表？")) return;
+		if (!window.confirm("保存将改写项目声明 paths.model_routes 指向的路由表（真源；未声明时落仓内 server/model-routes.yaml，写前备份 /tmp）。\n保存即生效：路由表是运行时查表，下一个工单 agent spawn 时就按新表走，无需任何生成/重启步骤。\n确认保存路由表？")) return;
 		setBusy(true);
 		setMsg("");
 		setSaved(false);
@@ -903,7 +944,7 @@ function RoutesTableSection({ providers, projectKey }) {
 			children: [
 				error,
 				"\n",
-				"（/sandbar-admin/api/routes 返回错误——按上面文案排查：缺参/未知项目=调用问题；表缺失/解析失败=该项目主目录的 model-routes.yaml 问题。）"
+				"（/sandbar-admin/api/routes 返回错误——按上面文案排查：缺参/未知项目=调用问题；表缺失/解析失败=声明指向的路由表（或仓内兜底表）问题。）"
 			]
 		})]
 	});
@@ -961,7 +1002,7 @@ function RoutesTableSection({ providers, projectKey }) {
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "syp-route-redline",
 				children: [
-					"改表红线：保存直接改写 model-routes.yaml（写前备份 /tmp）；模型 ref 不许发明——只用下方 provider 下拉里实证存在的 provider 及其模型 id。保存后",
+					"改表红线：保存直接改写声明指向的路由表（未声明时落仓内兜底表；写前备份 /tmp）；模型 ref 不许发明——只用下方 provider 下拉里实证存在的 provider 及其模型 id。保存后",
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: "下一个工单 agent 启动即生效" }),
 					"，无需任何生成/重启步骤。"
 				]
@@ -1252,6 +1293,9 @@ function RoutesTableSection({ providers, projectKey }) {
 * 260823 起「模型」UI 不再占 chat 顶部页签——移到工单台侧栏中栏，
 * 由 sandbar-workbench 的侧栏直接 import ProvidersSection 渲染（用户拍板：chat 页签只留 chat/trajectory）。
 * apply 保留为空操作（宿主装载契约要求导出）。
+* t260916-26 注：0.1.5 的会话视图扩展面若将来恢复插件自持页签，走
+* uiConversation.views.register（0.1.5）/ conversationViews.register（0.1.1）
+* 双轨探测——见 ./inject-contract 白名单纪律。
 */
 function apply(_ctx) {}
 //#endregion

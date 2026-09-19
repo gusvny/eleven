@@ -1291,13 +1291,12 @@ function draftToPayload(d) {
 //#endregion
 //#region ../providers/src/client/index.tsx
 /**
-* sandbar-providers —— LLM provider 管理与优先级 · 浏览器半（会话主视图「模型」页签版）。
+* sandbar-providers —— LLM provider 管理与优先级 · 浏览器半。
 *
-* 槽位契约（t260821-11 ①：从 settings 分区迁来，制式照抄 workbench）：向会话视图环
-* `conversation.view` 注册一个页签（id 'sandbar-providers'，标签「模型」，order 15，
-* 与 chat(0)/trajectory(10)/工单台(20) 平级），用户在主会话视图顶部页签切换即见。
-* 配套注册 `conversationViews.register`（target 'sandbar-providers'）：本视图数据来自
-* /sandbar-providers/api/* 而非会话事件，builder 为空实现，仅为满足 per-session 契约。
+* 槽位契约沿革：本插件曾向会话视图环注册「模型」页签 + `conversationViews.register`
+* （t260821-11 ①，260823 前）；260823 起「模型」UI 移到工单台侧栏中栏、由
+* sandbar-workbench 直接 import 本插件的 ProvidersSection 渲染，apply 改为
+* 空操作——插件对 conversationViews/uiConversation 零消费、零注册。
 *
 * 功能（t260821-08 B 版 + t260821-11 ②③ + M13 路由表）：
 *   ① 列出 provider（deepseek-official/kimi-coding/zai/scnet…）+ 上下移/拖拽排序；
@@ -1314,6 +1313,12 @@ function draftToPayload(d) {
 *      /tmp；保存即生效——运行时查表，下一个工单 agent spawn 用新表）。
 * 所有写操作走宿主半（../node.ts）挂在 dsh webServer 上的 /sandbar-providers/api/*；
 * 路由表读写走 sandbar-admin-ui 的 /sandbar-admin/api/routes（同源，M13① 保留的 API）。
+*
+* 【inject 收窄史（t260916-26）】曾声明 `inject = ['slots','conversationViews']`；
+* dsh 0.1.5 起 conversationViews 服务随 dsh-client-runtime 整包移除，声明即
+* 永久 pending（UI 报 Failed to load plugins）。现改从 ./inject-contract 导入
+* CLIENT_INJECT（=['slots']，双版本稳定白名单），同一 bundle 在 0.1.1/0.1.5
+* 都能激活；本插件无页签注册行为（apply 空操作），收窄零行为差异。
 */
 const CSS$4 = `
 .syp-root{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
