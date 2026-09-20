@@ -14,7 +14,7 @@
   E. 边界与畸形：未知模板 None；build_topology 对畸形声明逐条 ValueError
      （岗位说明书纪律：消费/产出面的畸形输入必测）。
   F. snapshot 门两态：门开=顶层 topology 键（additive）；门关=无键（旧实例
-     重放零新键）；UT 壳未置位 getattr 防御不炸（t260915-01 同款三腿）。
+     重放零新键）；UT 壳未置位 getattr 防御不炸（t260915-01 同款三分支）。
 
 UT 全程禁网络/真 Temporal/真 git（conftest 只加 sys.path）。
 运行：主树 venv `.../engine/.venv/bin/python -m pytest server/engine/tests/test_template_topology.py -q`。

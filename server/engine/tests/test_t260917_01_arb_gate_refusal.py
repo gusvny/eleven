@@ -234,14 +234,14 @@ def test_d1_exactly_two_counting_sites_each_guarded_before_counting():
     src = _src()
     assert src.count("arb_format_rounds += 1") == 2, "格式计数点恰两处（串行/并行叉）"
     assert src.count("await self._arbitrate_refusal_blocked(") == 2, \
-        "守门调用恰两处（串行 res / 纠正腿 rraw）"
+        "守门调用恰两处（串行 res / 纠正用例 rraw）"
     g1 = src.find("await self._arbitrate_refusal_blocked(res)")
     c1 = src.find("arb_format_rounds += 1")
     assert 0 < g1 < c1, "串行分支：守门必须先于计数（闸拒不计入的结构保证）"
     g2 = src.find("await self._arbitrate_refusal_blocked(rraw)")
-    assert g2 > c1, "纠正腿守门在串行计数点之后（源序）"
+    assert g2 > c1, "纠正用例守门在串行计数点之后（源序）"
     m2 = src.find("arb_res = rraw", g2)
-    assert 0 < g2 < m2, "纠正腿：守门先于纠正结果记忆（闸拒不进 arb_res）"
+    assert 0 < g2 < m2, "纠正用例：守门先于纠正结果记忆（闸拒不进 arb_res）"
 
 
 def test_d2_reset_lives_in_run_integration_tests_entry_cluster_c4():

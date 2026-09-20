@@ -304,7 +304,7 @@ def _lock_off(monkeypatch):
 
 
 def test_g_real_registry_missing_name_fail_closed():
-    """真注册表负腿（独立进程读真 SCENARIOS）：不在册→exit 2、missing 点名、
+    """真注册表反用例（独立进程读真 SCENARIOS）：不在册→exit 2、missing 点名、
     零条目执行、汇总行恰一条（R1：fail-closed 也打 REPROBE_SUMMARY）。"""
     p = subprocess.run(
         [sys.executable, "integration/run_scenarios.py", "--reprobe",

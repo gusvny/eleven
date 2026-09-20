@@ -125,7 +125,7 @@ def _enabled_spec(decl_path: Optional[Path], instance_id: str) -> Dict[str, Any]
 
 
 def resolve_repo_root(spec: Dict[str, Any], explicit_repo_root: str) -> str:
-    """巡检 repo_root 解析（t260915-20，三腿 precedence，纯面单测友好）：
+    """巡检 repo_root 解析（t260915-20，三分支 precedence，纯面单测友好）：
       ① explicit 非空 → 原样（--repo-root 显式旁路：隔离台/运维场景夹具全靠它，不触注册表）；
       ② 否则按实例级身份 spec["instance_project_key"] 经 shared.resolve_project_root
          解析注册条目主目录（dirs[0]）——未知 key 在此显式爆（错误点名注册表语境）；

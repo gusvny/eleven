@@ -1,7 +1,7 @@
 """t260916-02 声明落位迁移（A）单测：每项目仓内单文件 inspection.yaml + 聚合遍历
 + 指路 + env 覆盖层降级语义。
 
-覆盖口径（=plan-t260916-02.md §5 验收映射的 S1/S2 单测半边；真台双腿由场景承载）：
+覆盖口径（=plan-t260916-02.md §5 验收映射的 S1/S2 单测半边；真台两分支由场景承载）：
   A. 布局：默认落位 <dirs[0]>/inspection.yaml；paths.inspection_decl 指路（相对拼
      主目录 / 绝对 / ~/…）；指路锚点缺失/类型错位 fail-closed（契约①d 四态表同款）。
   B. 聚合（口径④）：SANDBAR_PROJECTS_DIR 隔离夹具双项目——enabled_instance_whitelist

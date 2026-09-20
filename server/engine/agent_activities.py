@@ -5459,14 +5459,14 @@ async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
 BATCH_TIMEOUT_SEC = int(os.environ.get("SANDBAR_INTEG_BATCH_TIMEOUT_SEC") or 3000)
 
 
-# t260917-08：交接腿单腿超时=场景单命令同款容量参数（INTEG_CMD_TIMEOUT_SEC，缺省
+# t260917-08：移交命令单腿超时=场景单命令同款容量参数（INTEG_CMD_TIMEOUT_SEC，缺省
 # 900s——执行面容量而非判定放宽，sandbox_pin 注记同口径）。
 HANDOVER_LEG_TIMEOUT_SEC = INTEG_CMD_TIMEOUT_SEC
 
 
 async def run_handover_leg(leg: Dict[str, str], cwd: Path,
                            timeout: float = HANDOVER_LEG_TIMEOUT_SEC) -> Dict[str, Any]:
-    """单条交接腿执行（t260917-08）：worker 执行面代跑 agent 沙箱受限期间交接的
+    """单条移交命令执行（t260917-08）：worker 执行面代跑 agent 沙箱受限期间交接的
     验证命令。三路全终态（工程惯例：正常/报错/超时每条路径都到清理）——过
     （exit 0）/ 败（exit≠0）/ 超时（kill 后 wait 排空再报告，KI-009 同款纪律，
     不留僵尸）。env 剥除 TEST_STUB_ENV_KNOBS + WORKER_ROUTING_ENV_KNOBS：桩旋钮
@@ -5481,10 +5481,10 @@ async def run_handover_leg(leg: Dict[str, str], cwd: Path,
         argv = shlex.split(cmd_s)
     except ValueError as e:
         return {"name": name, "cmd": cmd_s, "exit": None,
-                "output_tail": "交接腿命令解析失败（不执行）：%s" % e}
+                "output_tail": "移交命令命令解析失败（不执行）：%s" % e}
     if not argv:
         return {"name": name, "cmd": cmd_s, "exit": None,
-                "output_tail": "交接腿空命令（不执行）"}
+                "output_tail": "移交命令空命令（不执行）"}
     env = {k: v for k, v in os.environ.items()
            if k not in TEST_STUB_ENV_KNOBS and k not in WORKER_ROUTING_ENV_KNOBS}
     p = await asyncio.create_subprocess_exec(
@@ -5502,23 +5502,23 @@ async def run_handover_leg(leg: Dict[str, str], cwd: Path,
         except Exception:
             pass
         return {"name": name, "cmd": cmd_s, "exit": p.returncode,
-                "output_tail": "交接腿超时（>%ds，已 kill 排空）" % int(timeout)}
+                "output_tail": "移交命令超时（>%ds，已 kill 排空）" % int(timeout)}
     tail = (out_b or b"").decode("utf-8", "replace")[-800:].strip()
     return {"name": name, "cmd": cmd_s, "exit": p.returncode, "output_tail": tail}
 
 
 async def run_handover_legs(handover_runs, cwd: Path) -> Dict[str, Any]:
-    """交接腿整单执行（t260917-08）：_run_scenarios 尾部的消费路径抽成独立函数——
+    """移交命令整单执行（t260917-08）：_run_scenarios 尾部的消费路径抽成独立函数——
     验收②「交接清单被后续段消费并执行」的离线桩/场景可直调真实现，不必起真
     verify_lane。返回 {ran, passed, failed, details}（details 条目 name 带
     handover: 前缀，与场景明细同形状，供 arb_ctx/票面单源消费）；
-    非 dict 腿=记名不执行（红腿计数，fail-closed）。"""
+    非 dict 腿=记名不执行（失败分支计数，fail-closed）。"""
     ran = passed = failed = 0
     details: List[Dict[str, Any]] = []
     for leg in (handover_runs or []):
         if not isinstance(leg, dict):
-            details.append({"name": "handover:<畸形腿>", "cmd": "", "exit": -1,
-                            "output_tail": "交接腿非对象（记名不执行）"})
+            details.append({"name": "handover:<畸形分支>", "cmd": "", "exit": -1,
+                            "output_tail": "移交命令非对象（记名不执行）"})
             ran += 1
             failed += 1
             continue
@@ -5590,7 +5590,7 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
                     "output_tail": s.get("output_tail") or ""}
                    for s in (res.get("scenarios") or [])]
     # ---- t260913-03 池排除回执面：applied（跳过面点名）与旧口径命中面留痕两态
-    # 都进 details——红线「少跑必须点名」；宿主管 260914 起例外腿已撤除，
+    # 都进 details——红线「少跑必须点名」；宿主管 260914 起例外分支已撤除，
     # former_force_assets 只作迁移期可见性（说明这些资产在旧口径下会触发全跑）----
     _pe = res.get("pool_exclude") or {}
     out.excluded_pools = [str(x) for x in (_pe.get("excluded_pools") or [])]
@@ -5634,11 +5634,11 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
                          out.blockers or "无", out.baseline_ref or "n/a")
     activity.logger.info("[%s] 场景汇总：ran=%s pass=%s fail=%s env_fail=%s",
                          ticket_id, out.ran, out.passed, out.failed, out.env_fail)
-    # ---- t260917-08 交接腿：worker 执行面承接 ----
+    # ---- t260917-08 移交命令：worker 执行面承接 ----
     # 前序 agent 段沙箱受限期间交接的验证腿，本段逐腿代跑（整单执行器
     # run_handover_legs 单独成函数：离线桩/场景可直调真消费路径）。红线④的机械面：
     # 腿结果**单列计数**（handover_*），不进 ran/passed/failed 主口径——闸判定
-    # 零改动；腿明细进 details（name=handover:<name>）随 arb_ctx 上仲裁，红腿
+    # 零改动；腿明细进 details（name=handover:<name>）随 arb_ctx 上仲裁，失败分支
     # 处置语义由仲裁契约句承接（dev_lane FLOW_BRIEF['arbitrate']），不在本层
     # 改判任何红绿。
     out.handover_ran = out.handover_passed = out.handover_failed = 0
@@ -5648,7 +5648,7 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     out.handover_failed = _hv["failed"]
     out.details.extend(_hv["details"])
     if out.handover_ran:
-        activity.logger.info("[%s] 交接腿：ran=%s pass=%s fail=%s",
+        activity.logger.info("[%s] 移交命令：ran=%s pass=%s fail=%s",
                              ticket_id, out.handover_ran, out.handover_passed,
                              out.handover_failed)
     return out
@@ -5672,12 +5672,12 @@ async def _run_integration_tests_body(args: IntegrationRunArgs) -> IntegrationRu
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
     # t260913-03：每票段是全仓唯一显式打开「按声明排除池」的调用点——宿主管 260914
-    # 口径为「声明即跳过」（例外腿已撤除），write_set 只余旧口径命中面留痕用途。
+    # 口径为「声明即跳过」（例外分支已撤除），write_set 只余旧口径命中面留痕用途。
     # 策略值只透传，activity 不回填策略。
     return await _run_scenarios(wt, args.ticket_id,
                                 write_set=list(getattr(args, "write_set", None) or []),
                                 apply_skip_pools=bool(getattr(args, "apply_skip_pools", False)),
-                                # t260917-08：交接腿随派单下发（缺省空=老载荷/巡检零改动）
+                                # t260917-08：移交命令随派单下发（缺省空=老载荷/巡检零改动）
                                 handover_runs=list(getattr(args, "handover_runs", None) or []))
 
 

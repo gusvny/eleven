@@ -251,7 +251,7 @@ ok('五态 tier 投影：失败票 tier0 置顶（等你/受阻同档）、活/�
 /* ------------------------------------------------ 相对时间（R8④ 畸形 → null） */
 
 const NOW = Date.parse('2026-09-04T12:00:00Z')
-ok('toMillis 接线归一（F2 回归腿）：秒→×1000 / 毫秒原样 / 畸形透传', () => {
+ok('toMillis 接线归一（F2 回归用例）：秒→×1000 / 毫秒原样 / 畸形透传', () => {
   const nowS = Math.floor(Date.now() / 1000)
   assert.equal(toMillis(nowS), nowS * 1000)                    // 引擎 updated_ts=秒（F2 错显根因）
   assert.equal(toMillis(nowS * 1000), nowS * 1000)             // 侧栏已 ×1000 的毫秒不动

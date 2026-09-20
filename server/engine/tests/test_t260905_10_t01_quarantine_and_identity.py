@@ -74,7 +74,7 @@ def _quarantine_dir(dsh: Path) -> Path:
     return dsh.parent / ".sandbar" / "quarantine"
 
 
-# ---------- 面②：帧好内撕裂（核心回归腿，t260906-05 同型） ----------
+# ---------- 面②：帧好内撕裂（核心回归用例，t260906-05 同型） ----------
 
 
 def test_torn_jsonl_record_quarantined(tmp_path):

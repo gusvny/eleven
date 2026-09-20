@@ -1789,7 +1789,7 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
         扫描（工单 + 巡检票同天共享序号空间，只扫工单店=两族互撞的现成缺陷）。算子
         WorkflowId STARTS_WITH 后端拒绝时回落「全类型扫 + 客户端前缀过滤」（scan_mode
         可辨；过滤仍发生在快照查询之前，不产生 snapshot 成本）。与 kind=inspection 不并用。
-      - kind=inspection 的板面改**双腿查询+合并**（F3）：SA 腿（在册实例
+      - kind=inspection 的板面改**两分支查询+合并**（F3）：SA 腿（在册实例
         InspectionInstance OR 串）+ legacy 腿（旧形 id 前缀，20 前历史票——id 不再编码
         实例，只能前缀捞），合并按 id 去重；行带 match_via 与 legacy_unowned 徽标。"""
     project = str(args.get("project") or "")
@@ -1939,7 +1939,7 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                         "created": int(wf.start_time.timestamp()) if getattr(wf, "start_time", None) else 0,
                         "close_ts": wf.close_time.timestamp() if wf.close_time else 0})
 
-    # t260915-08（方案 R2/R8）预过滤（t260916-02 改双腿合并后的统一行筛选）：
+    # t260915-08（方案 R2/R8）预过滤（t260916-02 改两分支合并后的统一行筛选）：
     # （实例,期）按 SA 直读→旧形 id 只读解析（_inspection_instance_period_of），
     # 白名单过滤=实例身份判定（僵尸不烧 snapshot 查询），闭合窗（R8）施加于合并后
     # 行集；match_via/（实例,期）随 entry 记下供行渲染（不再二次反解）。

@@ -56,7 +56,7 @@ TOOL = {
                     'require_base=true 供合并闸——base 为空即白名单 fail-closed 判红）。'
                     '或 lane="integ"（跑泳道声明 integration.cmd 并解析三态输出契约；'
                     'apply_skip_pools=true 时按 integration.exclude_pools 声明排除池，'
-                    '声明即跳过——例外腿已按宿主 260914 口径撤除）。'
+                    '声明即跳过——例外分支已按宿主 260914 口径撤除）。'
                     '返回 {lane, green, red_count, checks}（integ 道为 {lane, green, ran, pass, fail, scenarios, err[, pool_exclude]}）。'),
     'parameters': {
         'type': 'object',
@@ -66,9 +66,9 @@ TOOL = {
             'path': {'type': 'string', 'description': 'code 道：泳道根目录（缺省主树）'},
             'base': {'type': 'string', 'description': 'code 道：diff 对比的 git ref（三点口径 base...HEAD；合并闸必传当前 main tip；手动调用缺省=跳过白名单并注明）'},
             'write_set': {'type': 'array', 'items': {'type': 'string'},
-                          'description': 'code 道：当前工单声明写集（文件或目录前缀）；提供时优先于 verify.yaml write_allow，空列表=零写集。integ 道：票面写集——宿主 260914 口径下**不再**参与排除例外腿判定，仅用于旧口径命中面留痕（回执 pool_exclude.former_force_assets）'},
+                          'description': 'code 道：当前工单声明写集（文件或目录前缀）；提供时优先于 verify.yaml write_allow，空列表=零写集。integ 道：票面写集——宿主 260914 口径下**不再**参与排除例外分支判定，仅用于旧口径命中面留痕（回执 pool_exclude.former_force_assets）'},
             'apply_skip_pools': {'type': 'boolean',
-                                 'description': 'integ 道：true=按泳道 verify.yaml integration.exclude_pools 声明排除池（每票段由引擎显式置位，**声明即跳过**）；缺省 false/不传=恒全跑（巡检、手动、老回放形态不受声明影响，被跳池只由这一路覆盖）。资产派生仍跑，用于未知池/非法池名单点判红；旧例外腿命中面写进回执 pool_exclude.former_force_assets 但不再拦'},
+                                 'description': 'integ 道：true=按泳道 verify.yaml integration.exclude_pools 声明排除池（每票段由引擎显式置位，**声明即跳过**）；缺省 false/不传=恒全跑（巡检、手动、老回放形态不受声明影响，被跳池只由这一路覆盖）。资产派生仍跑，用于未知池/非法池名单点判红；旧例外分支命中面写进回执 pool_exclude.former_force_assets 但不再拦'},
             'require_base': {'type': 'boolean',
                              'description': 'code 道：合并闸调用置 true——base 为空/未传时写集白名单 fail-closed 判红（不许静默跳过）'},
             'skip_slow': {'type': 'boolean', 'description': 'code 道：跳过全部命令检查（只验白名单与装配面）'},
@@ -528,14 +528,14 @@ def _code(a):
 def _pool_exclude_assets(root, pools, declared):
     """被排除池资产面 = 声明固定资产 ∪ 泳道执行器 --print-pool-assets 派生面（t260913-03）。
 
-    返回 (assets, err)。派生入口缺席/超时/非零/坏 JSON = 红点名（fail-closed：例外腿
+    返回 (assets, err)。派生入口缺席/超时/非零/坏 JSON = 红点名（fail-closed：例外分支
     判据不可得时不得静默放行，也不得静默少跑）。未知池名由执行器资产入口单点判红
     （独立进程读真注册表，进程内注入假表够不到）。"""
     assets = set(str(x).strip() for x in (declared or []) if str(x).strip())
     runner = Path(root) / 'integration' / 'run_scenarios.py'
     if not runner.is_file():
         return [], ('池排除资产派生失败：泳道缺 integration/run_scenarios.py（%s）'
-                    '——例外腿判据不可得，fail-closed' % runner)
+                    '——例外分支判据不可得，fail-closed' % runner)
     try:
         p = subprocess.run(['python3', str(runner), '--print-pool-assets',
                             ','.join(pools)],
@@ -565,11 +565,11 @@ def _integ_pool_exclude(root, integ_cfg, args):
     - apply 参数缺省/False（巡检、手动、老回放形态）→ (None, None)：一个分支都不进，
       行为与加旋钮前逐字节一致（验收 B/E 的机械锁）；**巡检/手动轮由此恒全跑**；
     - apply=True 且声明在场 → 注入 SANDBAR_SCENARIO_EXCLUDE_POOLS（cmd 与基线子进程
-      同 env），**声明即跳过、不再设例外腿**；
+      同 env），**声明即跳过、不再设例外分支**；
     - 资产派生失败 → 回执带 err（调用方整道红点名，不静默）。
 
-    宿主 260914 口径（取代 t260913-03 的「碰了就得全跑」例外腿）：**每票段一律跳过
-    声明池；被跳池只由项目级全量轮（巡检/手动/回放）覆盖**。原例外腿的判据是「票面
+    宿主 260914 口径（取代 t260913-03 的「碰了就得全跑」例外分支）：**每票段一律跳过
+    声明池；被跳池只由项目级全量轮（巡检/手动/回放）覆盖**。原例外分支的判据是「票面
     write_set 与被排除池资产面求交」（_in_write_set 前缀语义），而写集带目录形条目
     （如 integration/）即命中整个测试目录——实测四张在跑票写集全含 integration/、
     逐票命中 77~78 项，导致排除声明对**全部**在跑票恒定失效（KI-089）。
@@ -814,7 +814,7 @@ def _integ(args):
             'deprecation': (sorted(set(dupes)) and
                             ['重复规范行（一行=一个用例被破坏）：%s' % ', '.join(sorted(set(dupes)))] or [])}
     if pool_exclude is not None:
-        # t260913-03：排除面/例外腿必须点名到消费面（红线：少跑不得静默）
+        # t260913-03：排除面/例外分支必须点名到消费面（红线：少跑不得静默）
         if pool_exclude.get('applied') and executor_summary is not None:
             pool_exclude['excluded_count'] = executor_summary.get('excluded_count')
             pool_exclude['excluded_pools'] = \

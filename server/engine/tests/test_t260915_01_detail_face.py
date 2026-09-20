@@ -5,7 +5,7 @@
      timeline 的 blocked 历史条目仍在（审计留痕机械断言）；门 False（在途重放态）→
      字段原样；_enter 清 detail（清点②）；无键防御。
   B. ②结构化明细：path_gates 三纯函数矩阵（含畸形输入必测——岗位说明书纪律）、
-     _apply_settle_note 挂载/负腿、三个 _pin 消费点、dataclass 缺省（重放安全）。
+     _apply_settle_note 挂载/反用例、三个 _pin 消费点、dataclass 缺省（重放安全）。
   C. ③gen/phase：set_parallel_stages 三态（C5 写死）、_mark/_handoff 门两态、
      snapshot.gens 拷贝+门关无键、@query 内零 workflow.patched（R1 源码锁）。
   D. 门语义：FakeMemoGate 镜像 temporalio SDK 三条语义（_patches_memoized 首评固化/
@@ -204,7 +204,7 @@ def test_apply_settle_note_mounts_refusal_and_negative_leg():
     out2 = _apply_settle_note(res2, note)              # 缺省 None：不挂（老直调逐字）
     assert out2.status == "failed" and out2.gate_refusal is None
     res3 = StageResult(status="ok", summary="s")
-    out3 = _apply_settle_note(res3, "普通 note")       # 负腿：非闸拒绝不挂
+    out3 = _apply_settle_note(res3, "普通 note")       # 反用例：非闸拒绝不挂
     assert out3.status == "ok" and out3.gate_refusal is None
     assert "[worker settle] 普通 note" in out3.evidence
     res4 = StageResult(status="ok", summary="s")

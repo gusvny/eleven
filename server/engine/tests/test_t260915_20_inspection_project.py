@@ -3,13 +3,13 @@
 
 覆盖（对应方案 §2.9）：
   - decl：实例身份必填（enabled+disabled 两腿）/形状/未知键仍拒/计数源 project_key
-    不受影响/身份×计数源双键并存不串键/负腿事由次序（校验链位次钉死）；
+    不受影响/身份×计数源双键并存不串键/反用例事由次序（校验链位次钉死）；
   - shared.resolve_project_root：空 key/未知 key/env SANDBAR_PROJECTS_DIR 注册表根/
     resolve_epics_dir 复用回归；
-  - trigger.resolve_repo_root 三腿 precedence + _schedule_action builder 纯面
+  - trigger.resolve_repo_root 三分支 precedence + _schedule_action builder 纯面
     （payload 含 project_key/repo_root、typed_search_attributes 含 ProjectKey）；
   - watcher 串键回归钉（身份 A≠计数源 B → 归 A）；
-  - flow：无主守卫两腿、sign target 解析链三腿、input 缺省兼容（老 payload 解码安全）；
+  - flow：无主守卫两腿、sign target 解析链三分支、input 缺省兼容（老 payload 解码安全）；
   - 真源 inspection.yaml 迁移自检（四实例全带身份=sandbar）。
 全程禁网络/真 Temporal；temporalio 类型只走 builder 纯构造（venv 内可跑）。
 """
@@ -121,7 +121,7 @@ def test_cron_identity_and_no_count_key_mixup():
 
 
 def test_error_order_identity_checked_last():
-    # 负腿事由次序钉位：project_key 校验在字段链**最后**——既有事由照旧先爆，
+    # 反用例事由次序钉位：project_key 校验在字段链**最后**——既有事由照旧先爆，
     # 断言语义零偷换（R4）
     base = _no_identity("true")
     # ① 缺身份 + 缺计数 source（计数 kind）→ 报 source 不报身份
@@ -225,7 +225,7 @@ def test_resolve_epics_dir_regression_via_shared_resolver(fixture_registry, monk
     assert str(resolve_epics_dir("proj-a")) == "/tmp/epics-override"
 
 
-# ---------- trigger：resolve_repo_root 三腿 + _schedule_action builder ----------
+# ---------- trigger：resolve_repo_root 三分支 + _schedule_action builder ----------
 
 SPEC = {"instance_id": "inst-a", "workflow": "InspectionPeriodicWorkflow",
         "scan_face": "doc", "cron": "0 9 * * 1", "n": 0, "source": "",

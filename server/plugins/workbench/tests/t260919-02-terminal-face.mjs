@@ -5,7 +5,7 @@
 // 覆盖（对应票面验收②③与 review 意见①②④）：
 //   A. terminalFaceView 全字段装配（face 全键 → 面板字段逐一可渲染）。
 //   B. 畸形 face（null/非对象/数组）全降级：不 throw、显式「原因不可得」、绝不编造。
-//   C. 负腿：终态但原因不可得（reason_available=false / reason=''）→ 显式
+//   C. 反用例：终态但原因不可得（reason_available=false / reason=''）→ 显式
 //      「原因不可得」文案 + 执行状态原文保留（绝不把「查不到原因」渲染成没失败）。
 //   D. 诚实口径：回执错误原文（含「刷新无效」）随视图可达；快照/阶段说明缺省兜底。
 //   E. host 装配（ticketShowErrorReply）：terminal+face → 410 且附 face；
@@ -87,13 +87,13 @@ console.log('\n== B 畸形 face 全降级（不 throw 不编造） ==')
   }
 }
 
-console.log('\n== C 负腿：终态但原因不可得（显式文案 + 执行状态保留） ==')
+console.log('\n== C 反用例：终态但原因不可得（显式文案 + 执行状态保留） ==')
 {
   const noReason = { ...GOOD_FACE, reason: '', reason_available: false, reason_source: '原因不可得：失败异常链（WorkflowFailureError）未携带可读消息——不编造原因' }
   const v = terminalFaceView(noReason, '')
-  ok(v.reasonAvailable === false && v.reason === '', '负腿：原因空')
-  ok(v.reasonNote.includes('原因不可得') && v.reasonNote.includes('不编造'), '负腿：显式「原因不可得」+ 为何')
-  ok(v.execStatus === 'FAILED', '负腿：执行状态原文保留（绝不当成没失败）')
+  ok(v.reasonAvailable === false && v.reason === '', '反用例：原因空')
+  ok(v.reasonNote.includes('原因不可得') && v.reasonNote.includes('不编造'), '反用例：显式「原因不可得」+ 为何')
+  ok(v.execStatus === 'FAILED', '反用例：执行状态原文保留（绝不当成没失败）')
   // 半残 face（缺键逐个）→ 逐键兜底不抛
   const v2 = terminalFaceView({ exec_status: 'CANCELED' }, '')
   ok(v2.execStatus === 'CANCELED' && v2.reasonAvailable === false && v2.ticketId === '', '半残 face：有键用键、缺键兜底')

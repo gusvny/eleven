@@ -106,25 +106,25 @@ const MERGE_META = { id: 't260915-17', status: 'closed', lane: 'worktree', branc
   const { root, baseRef, mergeCommit } = makeMergeRepo('merge-del', false)
   console.log('# A merge 收口仓（分支已删）')
 
-  // 正腿①：改动文件 settle 与 git show 逐字（且工作树是另一内容——逐字命中即证明未回落）
+  // 正用例①：改动文件 settle 与 git show 逐字（且工作树是另一内容——逐字命中即证明未回落）
   const r1 = await readTicketTimeFile(root, MERGE_META, 'settle', 'docs/ref.md')
   ok(r1.ok === true && r1.content === SETTLE_REF && r1.content !== WORKTREE_REF,
     'A1: settle 改动文件=收口版逐字（工作树另有人改未提交，未回落）')
   ok(r1.ref === mergeCommit && r1.refSource === 'merge-commit', 'A1: ref=收口提交+来源=merge')
   ok(gitShow(root, mergeCommit, 'docs/ref.md') === r1.content, 'A1: 与 git show 逐字对照')
 
-  // 正腿②：收口新增文件
+  // 正用例②：收口新增文件
   const r2 = await readTicketTimeFile(root, MERGE_META, 'settle', 'src/feat.ts')
   ok(r2.ok === true && r2.content === FEAT && gitShow(root, mergeCommit, 'src/feat.ts') === r2.content,
     'A2: settle 收口新增文件=git show 逐字')
 
-  // 正腿③：背景文件 base 与 git show 逐字
+  // 正用例③：背景文件 base 与 git show 逐字
   const r3 = await readTicketTimeFile(root, { ...MERGE_META, baseRef }, 'base', 'docs/ref.md')
   ok(r3.ok === true && r3.content === BASE_REF && gitShow(root, baseRef, 'docs/ref.md') === r3.content,
     'A3: base 背景文件=基点版逐字')
   ok(r3.refSource === 'base-ref', 'A3: refSource=base-ref')
 
-  // 负腿：路径不在该版本
+  // 反用例：路径不在该版本
   const r4 = await readTicketTimeFile(root, MERGE_META, 'settle', 'src/nope.ts')
   ok(r4.ok === false && r4.content === undefined && /不在该版本/.test(r4.reason ?? ''),
     'A4: settle 路径不在该版本 → 人话且无内容（不回落）')

@@ -503,7 +503,7 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
                                 "在引擎（inspection_inspect.PROFILE_TEXTS）" %
                                 (where, inspect_profile, "、".join(PROFILE_FACES)))
         kind, cron, n, source, project_key = _validate_schedule(where, item.get("schedule"), enabled)
-        # 实例级项目身份必填（t260915-20）：校验放字段链**最后**——既有负腿事由
+        # 实例级项目身份必填（t260915-20）：校验放字段链**最后**——既有反用例事由
         # （缺 source、未知 kind、face 除名、cron 非法…）照旧先爆，断言语义零偷换；
         # 「其余全对但缺身份」的正形声明在此点名。占位豁免惯例（schedule.source/n 只在
         # enabled 必填）不适用：身份不是调度细节，无身份的占位实例=无主票预定席。
@@ -647,7 +647,7 @@ class ProjectDeclState:
 
 
 def resolve_project_decl_path(project_key: str) -> Path:
-    """项目 → 声明路径解析链（三腿，t260916-02）：
+    """项目 → 声明路径解析链（三分支，t260916-02）：
       ① paths.inspection_decl 已声明 → 用之（绝对/`~/…` 原样，相对拼 dirs[0]）；
          declared 锚点缺失/类型错位 fail-closed（契约①d 四态表同款——**声明了就必须在**）；
       ② 未声明 → <dirs[0]>/inspection.yaml（默认落位；文件在不在=absent 与否，此处不判）；

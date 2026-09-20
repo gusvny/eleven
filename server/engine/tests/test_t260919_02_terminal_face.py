@@ -7,12 +7,12 @@
   B. _failure_reason_of 异常链提取（__cause__ 下钻/深度上限/畸形 cause/全链无消息）。
   C. 详情失败面（cmd_ticket_query 终态分支）：FAILED → kind=terminal、文案一字不改
      （「刷新无效」在、绝不「刷新重试/瞬时/工单不存在」）、face 结构化载荷
-     （原因串/票身份实例期号/无快照说明/终态时刻）；负腿=原因不可得显式文案；
+     （原因串/票身份实例期号/无快照说明/终态时刻）；反用例=原因不可得显式文案；
      超时腿；矛盾腿（终态但 result 未抛）；畸形 desc 降级。
   D. 板面失败行（cmd_ticket_list）：巡检形（SA 白名单桩）与 dev-lane 形各一腿——
      行 status/stage_state=failed、标题诚实不含「查询超时/刷新重试」、
      行键集与既有极简/降级行逐键同形（t260915-08 parity）。
-  E. 回归腿：RUNNING 三败降级行、COMPLETED 窗内 meta 行、COMPLETED 超窗匿名最小行、
+  E. 回归用例：RUNNING 三败降级行、COMPLETED 窗内 meta 行、COMPLETED 超窗匿名最小行、
      TERMINATED 不上板、RUNNING/COMPLETED 详情通路原样。
 """
 import asyncio
@@ -258,7 +258,7 @@ def test_c_terminal_face_full():
 
 
 def test_c_terminal_face_reason_unavailable():
-    # 负腿：失败异常链无消息 → 显式「原因不可得」，执行状态保留（绝不编造）。
+    # 反用例：失败异常链无消息 → 显式「原因不可得」，执行状态保留（绝不编造）。
     def _silent():
         raise WorkflowFailureError("")
     h = _failed_handle(result_fn=_silent)
@@ -428,7 +428,7 @@ def test_d_devlane_failed_row_key_parity():
 
 
 def test_d_regression_running_completed_terminated_rows():
-    # 回归腿：RUNNING 三败降级行 / COMPLETED 窗内 meta 行 / TERMINATED 不上板。
+    # 回归用例：RUNNING 三败降级行 / COMPLETED 窗内 meta 行 / TERMINATED 不上板。
     client_mod._inspection_enabled_instances = lambda: (("integration-tests",), "", [])
     w_run = FakeListWf("t-run", "RUNNING", Q, sa_kv=_sa_kv(project="sandbar"))
     h_run = FakeHandle("RUNNING", desc=_Desc("RUNNING"),

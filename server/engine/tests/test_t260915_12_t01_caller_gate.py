@@ -5,7 +5,7 @@
   不凭空造身份）+ longest-prefix 反查 + 未命中/空路径；
 - C2②：形状合法但注册表查无的 declared 值——判定矩阵不查注册表（declared 照判），
   registered 观测键由 client 侧负责（t02）；
-- C4：越权旗 by/reason 必填非空 + 上限（超长=畸形腿）；
+- C4：越权旗 by/reason 必填非空 + 上限（超长=畸形分支）；
 - 判定矩阵全腿：老 client 未盖章兼容、同项目、异项目无旗拒收、异项目带旗记名、
   undeclared 哨兵 record/refuse 两策略、note 入账截断；
 - C-0②：UNDECLARED_POLICY 单常量值锁（"record"）；

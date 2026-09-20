@@ -9,7 +9,7 @@
   - active_authorizations/authorization_scopes：过期/畸形/别票过滤；
   - parse_authz_used：多段/畸形/缺键；
   - split_protected vs judge_protected_paths：无授权逐字节一致（零回归机械锁）；
-    豁免归属（issued 最新者胜）、scope 前缀语义（baselines2 负腿）、时效纵深防线、
+    豁免归属（issued 最新者胜）、scope 前缀语义（baselines2 反用例）、时效纵深防线、
     畸形记录不炸；authorized_passage_note 的记名与机读键（含换行净化/截断）。
 """
 import dataclasses
@@ -274,7 +274,7 @@ def test_split_protected_exact_and_prefix():
 
 
 def test_scope_prefix_does_not_overmatch():
-    """RC9 负腿：`integration/baselines` 不命中 `integration/baselines2/...`（_within 语义）。"""
+    """RC9 反用例：`integration/baselines` 不命中 `integration/baselines2/...`（_within 语义）。"""
     files = ["integration/baselines2/sc_x.py"]
     rec = {"kind": AUTH_PROTECTED_PATH, "who": "宿主", "scope": ["integration/baselines"],
            "reason": "r", "issued": NOW, "expires": NOW + 10}

@@ -1,7 +1,7 @@
 """t260917-04：仲裁闸拒回放兼容门源码锁 + 工作流体命令面分支机械强制。
 
 锁的目标形态＝main（2c1b4ee 起）：`ARBITRATE_REFUSAL_PATCH_ID`（常量 id）短路式门 ×3
-（run_integration_tests 段入口格式轮次复位点、串行仲裁守门分支、并行纠正腿守门分支）。
+（run_integration_tests 段入口格式轮次复位点、串行仲裁守门分支、并行纠正用例守门分支）。
 本 worktree 的 dev_lane.py 须与 main 同步（implement gen1 S1）后本锁才绿；base(373741c)
 树上跑＝红（这正是验收①的无门红演示）。
 
@@ -65,7 +65,7 @@ GATE_CALL = "workflow.patched(ARBITRATE_REFUSAL_PATCH_ID)"
 
 def test_a1_constant_and_exactly_three_gated_sites():
     assert 'ARBITRATE_REFUSAL_PATCH_ID = "dev-lane-arb-refusal-v1"' in SRC_DL
-    # 恰三使用点：段入口格式轮次复位点、串行仲裁守门分支、并行纠正腿守门分支。
+    # 恰三使用点：段入口格式轮次复位点、串行仲裁守门分支、并行纠正用例守门分支。
     # ⑤注释纪律：dev_lane.py 任何注释/文档串出现该调用文本即计数变多自红。
     assert SRC_DL.count(GATE_CALL) == 3, (
         "门使用点恰应 3 处（复位点+两守门分支）；多=注释违规或新分支未登记预期，少=门被拆")
@@ -92,7 +92,7 @@ def test_a3_correction_leg_window_keeps_old_path():
     until = SRC_DL.index("arb_done = True", a)
     window = SRC_DL[head:until]
     assert "continue" in window
-    # 门 False 时落回同段既有格式计数路径（向前最近一次格式计数=本纠正腿的计数器）
+    # 门 False 时落回同段既有格式计数路径（向前最近一次格式计数=本纠正用例的计数器）
     assert SRC_DL.rindex("arb_format_rounds += 1", 0, a) < a
 
 

@@ -10,8 +10,8 @@
   逐腿 + legacy 发现（无 verified 键）原门逐字节不变 + 新字段透传 + 摘要排除
   recurring/压制；
 - FindingVerdict 载荷校验纯函数（gate/who/verdict 词表/finding-id/载荷类型）；
-- decl 预算三键（max_findings/inspect_timeout_min/inspect_profile）：正腿解析 +
-  plan["inspect"] 透传 + 负腿越域点名 + WIRED_FACES↔PROFILE_FACES 同集锁。
+- decl 预算三键（max_findings/inspect_timeout_min/inspect_profile）：正用例解析 +
+  plan["inspect"] 透传 + 反用例越域点名 + WIRED_FACES↔PROFILE_FACES 同集锁。
 """
 import json
 import sys

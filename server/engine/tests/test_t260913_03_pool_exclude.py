@@ -1,4 +1,4 @@
-"""t260913-03 池排除旋钮：verify_lane integ 道消费/例外腿/缺省零回归（L1 电池）。
+"""t260913-03 池排除旋钮：verify_lane integ 道消费/例外分支/缺省零回归（L1 电池）。
 
 fixture 泳道（tmp_path）= 迷你 verify.yaml + 迷你注册表 + 桩执行器（桩把所见 env
 写进 env_probe.txt，隔离注入有无可断言）：
@@ -11,7 +11,7 @@ fixture 泳道（tmp_path）= 迷你 verify.yaml + 迷你注册表 + 桩执行�
 - f write_set 目录前缀（KI-089 形态）→ 仍跳过 + 留痕；
 - g 派生入口失败/泳道缺执行器 → 红 fail-closed 点名、cmd 未跑；
 - h 声明畸形 → 整道红 fail-closed；
-- i 基线子进程同注 env（红腿时基线口径与泳道一致）；
+- i 基线子进程同注 env（失败分支时基线口径与泳道一致）；
 - j 引擎载荷缺省不透传策略 + dev_lane 唯一 true 站（验收 E 机械锁）；
 - k TOOL schema 面暴露 apply_skip_pools（additionalProperties: False 面）。
 
@@ -139,7 +139,7 @@ def test_b_declaration_without_apply_runs_everything(tmp_path):
 
 
 # ---------------- c/d/e/f 过滤与旧口径命中面留痕 ----------------
-# 宿主 260914 口径变更：例外腿（write_set 命中被跳池资产 → 强制全跑）**已撤除**——
+# 宿主 260914 口径变更：例外分支（write_set 命中被跳池资产 → 强制全跑）**已撤除**——
 # 每票段一律跳过声明池，被跳池只由项目级全量轮（巡检/手动/回放）覆盖。原 d/e/f 四条
 # 由「命中即强制全跑」改写为「命中仍跳过 + 旧口径命中面留痕」，判定面机械可查。
 
@@ -156,7 +156,7 @@ def test_c_disjoint_write_set_injects_declaration(tmp_path):
 
 
 def test_d_declared_force_asset_hit_still_skips(tmp_path):
-    """旧口径例外腿正腿 → 新口径：命中仍跳过，命中面只进 former_force_assets 留痕。"""
+    """旧口径例外分支正用例 → 新口径：命中仍跳过，命中面只进 former_force_assets 留痕。"""
     lane = build_lane(tmp_path, DECL)
     res = run_lane(lane, apply_skip_pools=True,
                    write_set=["integration/stage_docker.py"])

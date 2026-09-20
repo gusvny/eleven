@@ -283,7 +283,7 @@ export function resolveBoardBudgetMs(raw) {
 
 /** 板面就绪断言：轮询至「筛选条在场 且（行卡 ≥1 或 人话空态在场）」，超时 loud 抛错
  *  （附三锚计数诊断，沿用 chat 态诊断写法）。探针异常（locator.count 炸）即刻 loud，
- *  不静默不重试吞掉。budgetMs 显式传参优先（场景红腿钉极小值用），否则读 env。
+ *  不静默不重试吞掉。budgetMs 显式传参优先（场景失败分支钉极小值用），否则读 env。
  *  桩 page 契约（sc_capture_board_assert 依赖）：只需 locator(sel).count()。 */
 export async function assertBoardReady(page, budgetMs) {
   const { ms, defaulted } = resolveBoardBudgetMs(budgetMs ?? process.env.SANDBAR_UI_CAPTURE_BOARD_MS);

@@ -479,7 +479,7 @@ def test_inspection_mode_rows_whitelist_and_closed_window(monkeypatch):
     assert "inspection-suite-drill-20260913" not in ids
     # t260917-02 修复②（契约翻转，R5 对账）：不可辨「且在跑」降级可见——
     # 260917 实况（旧 action 直发的 awaiting-human 票被静默吞）修复后的新契约；
-    # 不可辨「且已闭合」仍不上板（下一测试的负腿）。僵尸三行是「可辨但不在册」
+    # 不可辨「且已闭合」仍不上板（下一测试的反用例）。僵尸三行是「可辨但不在册」
     # （t260916-02-board-legacy-three-state 守的口径），本条不碰。
     assert "inspection-foo" in ids
     foo_row = row_of(res, "inspection-foo")
@@ -488,7 +488,7 @@ def test_inspection_mode_rows_whitelist_and_closed_window(monkeypatch):
     assert info["kept_unresolved"] == 1 and info["dropped_unresolved"] == 0
     assert info["degraded"] is False and info["enabled_instances"] == [
         "docs-sync", "integration-tests"]
-    # t260916-02 双腿：SA 腿（白名单 OR 串）+ legacy 腿（STARTS_WITH 前缀）；类型过滤
+    # t260916-02 两分支：SA 腿（白名单 OR 串）+ legacy 腿（STARTS_WITH 前缀）；类型过滤
     # 仍只拼 INSPECTION_BOARD_TYPES 单点（两腿都含同一 WorkflowType 串）
     assert len(client_obj.filters) == 2
     assert 'WorkflowType="InspectionPeriodicWorkflow"' in client_obj.filters[0]
@@ -641,7 +641,7 @@ def test_ticket_query_devlane_snapshot_unchanged():
     assert "kind" not in r["ticket"] and "gate_id" not in r["ticket"]
 
 
-# ---------------------------------------------------------------- t260916-02 双腿/扫描面
+# ---------------------------------------------------------------- t260916-02 两分支/扫描面
 
 def _ins_sa(inst, per):
     return {str(_K.for_keyword(client_mod.INSPECTION_INSTANCE_SA_NAME)): inst,

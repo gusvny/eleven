@@ -1,7 +1,7 @@
 """t260916-22：inspect 段活动层单测（run_inspection_inspect / _prepare_agent_spawn）。
 
 覆盖（方案 §4 步骤2 验证清单 + review C3 条款）：
-- C3：_prepare_agent_spawn 缺省腿（不传 agent_home）与显式 agent_home=None 逐字节相等
+- C3：_prepare_agent_spawn 缺省分支（不传 agent_home）与显式 agent_home=None 逐字节相等
   （cmd 列表与 env dict 全等），且 DSH_HOME 仍=cwd/.dsh——dev-lane 全体 spawn 热路径
   零回归的显式断言；
 - agent_home 覆盖腿：DSH_HOME 钉到指定目录、cwd/.dsh 不落任何文件；
@@ -52,7 +52,7 @@ def _args(base: Path, tmp: Path, **kw) -> dict:
     return a
 
 
-# ---------- C3：缺省腿逐字节不变 ----------
+# ---------- C3：缺省分支逐字节不变 ----------
 
 def test_prepare_agent_spawn_default_leg_byte_identical(tmp_path):
     cwd = tmp_path / "ws"

@@ -318,9 +318,9 @@ async def main() -> int:
             design0 = CTRL["design"][1]
             settle0 = CTRL["settle"][1]
 
-            # 负腿（验收①）：非词表非别名的目标 → 显式拒收，不回落、不空转
+            # 反用例（验收①）：非词表非别名的目标 → 显式拒收，不回落、不空转
             await handle.signal("rework", dev_lane.ReworkRequest(
-                who="selfcheck", note="负腿：词表外目标",
+                who="selfcheck", note="反用例：词表外目标",
                 target_stage="acceptance_walkthrough"))
             ok(await wait_for(handle, lambda s: "【rework 拒收】" in str(s.get("blocked_reason") or ""),
                               30, "相二非法目标显式拒收"),
@@ -333,7 +333,7 @@ async def main() -> int:
             ok(CTRL["design"][1] == design0,
                "相二：拒收零副作用（design 边不动 %d 次）" % CTRL["design"][1])
 
-            # 正腿：别名直达——design 边真重跑，主链推进到 merge 人审门
+            # 正用例：别名直达——design 边真重跑，主链推进到 merge 人审门
             await handle.signal("rework", dev_lane.ReworkRequest(
                 who="selfcheck", note="按出路打回设计集成测试段（修后）",
                 target_stage="design_integration_tests"))

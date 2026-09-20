@@ -17,7 +17,7 @@
 
 降级声明（t260915-01 C-4 同款口径）：run() 主循环壳驱动仓内无先例——「不进格式纠正
 计数 / 不触发打回 implement / 不置 done 假完成」以 U11 叶级行为 + U13 源码锁机械等价，
-真链路由 L2 场景（integration/t260916-28，真起 workflow 三腿）兜底；U9 activity 级桩测
+真链路由 L2 场景（integration/t260916-28，真起 workflow 三分支）兜底；U9 activity 级桩测
 降级为纯函数主面（U3/U5/U6/U7）+ L2 覆盖（activity.logger/heartbeat 的 Temporal 活动
 上下文依赖在 UT 进程内不可靠，不硬造）。
 

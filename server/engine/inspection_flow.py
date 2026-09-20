@@ -151,7 +151,7 @@ def unowned_guard_reason(project_key: str, repo_root: str) -> str:
 
 
 def sign_target_project(sa_project: str, payload_project: str) -> str:
-    """sign 闸 target 解析链（纯函数，t260915-20；单测三腿）：
+    """sign 闸 target 解析链（纯函数，t260915-20；单测三分支）：
     本票 SA ProjectKey（起票时刻盖章，调度序无关、重放确定）优先；
     回退 payload project_key（老 history 无 SA）；双空 → ""（cross_project_judge 对
     空 target 恒放行=现状语义，代码注释预告的升级路径在这里闭环）。"""
