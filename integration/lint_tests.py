@@ -18,6 +18,7 @@ practice:
 
 Usage: python3 integration/lint_tests.py (cwd = repo root; exit 0 = pass)
 """
+import json
 import py_compile
 import re
 import subprocess
@@ -241,12 +242,71 @@ def lint_three_state():
         ok("L6 summarize 退出码形状合规")
 
 
+def lint_terminology():
+    """L7 术语废止看守（宿主令 260920）：行话「腿」不得新增。
+
+    判据=**按文件的出现次数基线**（integration/terminology-baseline.json，随本规则
+    一起落盘）：① 基线里没有的文件出现该词 → 红；② 基线里有的文件超出记录次数
+    （=在既有文件里新增用法）→ 红；③ 基线 allowlist（值 -1，如 docs/terminology.md
+    本身必须能写出被禁词）不受限。红行点名文件与实际/上限，方便定位。
+
+    为什么是「次数上限」而不是「零容忍」：存量 260920 实测约 3170 处 / 405 文件
+    （integration 2664／server 442／docs 34／notes 30），一次清空会让闸全红；次数上限
+    让**新增立刻红**、同时随替换批次自然收缩（基线只许下调，下调随替换票一起改）。
+    """
+    baseline_f = INTEG / "terminology-baseline.json"
+    if not baseline_f.is_file():
+        err("L7 术语基线缺失：%s（看守无法判定，fail-closed）" % baseline_f.name)
+        return
+    try:
+        base = json.loads(baseline_f.read_text(encoding="utf-8"))
+        counts = base.get("counts") or {}
+        term = str(base.get("term") or "")
+    except Exception as e:                       # noqa: BLE001 —— 畸形基线=红不猜
+        err("L7 术语基线畸形（%s: %s）" % (type(e).__name__, e))
+        return
+    if not term or not isinstance(counts, dict):
+        err("L7 术语基线缺 term/counts 键")
+        return
+    exts = {".py", ".mjs", ".js", ".ts", ".tsx", ".md", ".yaml", ".yml",
+            ".json", ".sh", ".txt", ".cjs"}
+    skip_dirs = {".git", ".lane", ".sandbox", ".sandbar", "node_modules",
+                 "__pycache__", ".venv", "out", "data", ".pytest_cache"}
+    hits, total = [], 0
+    for p in REPO.rglob("*"):
+        if not p.is_file() or p.suffix not in exts:
+            continue
+        rel_parts = set(p.relative_to(REPO).parts[:-1])
+        if rel_parts & skip_dirs:
+            continue
+        rel = str(p.relative_to(REPO))
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except Exception:                        # noqa: BLE001 —— 读不动=不判它，不改判
+            continue
+        n = text.count(term)
+        if not n:
+            continue
+        total += n
+        cap = counts.get(rel)
+        if cap is None:
+            hits.append("%s：%d 处（不在基线内）" % (rel, n))
+        elif cap != -1 and n > cap:
+            hits.append("%s：%d 处 > 基线 %d 处（新增用法）" % (rel, n, cap))
+    if hits:
+        err("L7 术语废止：「%s」不得新增——%s；替换词见 docs/terminology.md 禁用对照"
+            % (term, "；".join(hits[:8]) + ("…" if len(hits) > 8 else "")))
+    else:
+        ok("L7 术语废止看守：无新增「%s」（存量 %d 处，随替换批次下调基线）" % (term, total))
+
+
 def main():
     lint_syntax()
     lint_collect()
     lint_mjs_imports()
     lint_registry()
     lint_three_state()
+    lint_terminology()
     n_e, n_w = len(errors), len(warns)
     print("LINT done: %d error / %d warn" % (n_e, n_w))
     return 1 if n_e else 0
