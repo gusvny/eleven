@@ -8,10 +8,11 @@
 | 中文 | English | 定义 |
 |---|---|---|
 | 测试用例 | test case | 可判定通过/失败的最小验证单元；必须声明意图与高层步骤 |
-| 验证路径 | test path | 同一用例内一条可独立判定通过/失败的验证分支（如正例路径、反例路径）。**旧行话「腿」已废止，见「旧词废止」一节** |
-| 正例路径 | positive path | 该成功的必须成功 |
-| 反例路径 | negative path | 该拒绝的必须拒绝、该报错的必须报错 |
-| 环境路径 | environment path | 需要特定外部条件（docker／真实台）才能执行的分支；条件缺件时该路径报「环境不可用」，不计产品红 |
+| 子用例 | sub-case | 同一用例内一条可独立判定通过/失败的验证分支（如正例、反例）。**旧行话「腿」已废止，见「三、禁用对照」** |
+| 正用例 | positive case | 该成功的必须成功 |
+| 反用例 | negative case | 该拒绝的必须拒绝、该报错的必须报错 |
+| 环境用例 | environment case | 需要特定外部条件（docker／真实台）才能执行的分支；条件缺件时该分支报「环境不可用」，不计产品红 |
+| 平台用例 | platform case | 按运行平台分出的分支（macOS／Linux／容器） |
 | 移交命令 | handover command | 前段 agent 因执行面受限未能运行的验证命令，移交（handover）到集测段由 worker 代跑 |
 | 意图 | intent | 本用例验证哪条契约或行为承诺 |
 | 高层步骤 | high-level steps | 到达被测行为并完成断言的步骤序列 |
@@ -71,7 +72,7 @@
 
 | 中文（禁用） | 规范中文 | 规范 English |
 |---|---|---|
-| **腿**（含 正腿／负腿／回归腿／环境腿／三态腿／全腿 N/A／缺腿） | 验证路径／正例路径／反例路径／回归用例／环境路径／三态路径／全部路径不适用／漏一条路径 | test path（compounds as listed） |
+| **腿**（含 正腿／负腿／回归腿／环境腿／docker 腿／mac 腿／Linux 腿／三态腿／全腿 N/A／缺腿／断腿） | 子用例／正用例／反用例／回归用例／环境用例／docker 用例／macOS 用例／Linux 用例／三态用例／全部用例不适用／漏一条用例 | sub-case（compounds as listed） |
 | **交接腿** | 移交命令 | handover command |
 | delta | 本票改动 / 泳道改动 | lane diff |
 | 出题 / 题源 | 用例设计 / 用例设计依据 | test case design / test design inputs |
