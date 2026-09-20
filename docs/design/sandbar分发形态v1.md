@@ -3,7 +3,7 @@ title: sandbar 分发形态 v1
 category: design
 tags: [分发, 安装器, docker, 设计]
 status: draft
-updated: 2026-09-07
+updated: 2026-09-20
 ---
 
 # sandbar 分发形态 v1（提案稿，待宿主审定稿）
@@ -34,7 +34,7 @@ updated: 2026-09-07
 
 - R1 **形态一（仓＋init 脚本，开发者/贡献者档）**：`install.sh` 按行为契约成文（见 Proposal §形态一），七项规格每一项对「缺失 / 冲突 / 畸形态」三种输入态都有定义的人话行为，畸形态一律显式报错不静默降级。
 - R2 **形态二（容器整栈，最终用户档）**：三服务拓扑（console 唯一对外口 3099 ＋ engine=temporal+worker ＋ agent 容器内跑）；up 前预检宿主端口占用，已占报错不抢；数据落 named volume，升级不丢数据；**不提供 `down -v` 等价物**（删数据必须走显式卸载＋确认）。
-- R3 **fresh-home 验收场景成文**：全新家目录 → 起栈 → 三探全绿 → 从控制台开一张真实工单 → 落地出结果，全程无人工干预；每步有预期输出与失败报错位置；先做 mac 腿。
+- R3 **fresh-home 验收场景成文**：全新家目录 → 起栈 → 三探全绿 → 从控制台开一张真实工单 → 落地出结果，全程无人工干预；每步有预期输出与失败报错位置；先做 macOS 用例。
 - R4 **共享 init 真源结构图**：两形态共用同一套装栈逻辑，只看图能讲清单真源关系。
 - R5 版本与兼容面沿用既有口径（[接入契约 v1](sandbar项目接入契约v1.md) ⑧节：VERSION 单源、dsh 版本区间、兼容矩阵），不另造一套。
 - R6 **收件人视角（宿主令 v2）**：fresh-home 剧本以**收件人自己的项目**为主角（空注册表起步 → 引导登记收件人项目 → 在其上开票 → 七段落地），「sandbar 作为 project」全程零出场；发行包含 example-project 样例项目（教学沙盒兼验收夹具）；三处自指有拆除清单（见 §收件人视角）。
@@ -45,7 +45,7 @@ updated: 2026-09-07
 **前置限制**（宿主裁定＋仓纪律，逐条写死）：
 
 1. npm 包**不做**（宿主裁定 260907）。
-2. 首发支持＝**mac 优先**（fresh-home 验收场景先做 mac 腿），Linux 跟进，Windows 后进（WSL2/NTFS 边角记录在案不承诺）。
+2. 首发支持＝**mac 优先**（fresh-home 验收场景先做 macOS 用例），Linux 跟进，Windows 后进（WSL2/NTFS 边角记录在案不承诺）。
 3. 密钥＝**用户的不进包**：任何安装/分发产物不生成、不搬运、不打印用户密钥。
 4. 存量 `SANDBAR_*` env 与 `/suyou-workbench/` 前缀迁移＝**发布前置债**（见 Proposal §发布前置债），随专门迁移票处置。
 5. console（3099）永属用户操作面：任何安装路径**只探测只提示**，不得 spawn/start/kill/重启 3099（CLAUDE.md 硬规则 1；既有安装器同纪律）。
@@ -60,7 +60,7 @@ updated: 2026-09-07
 - **存量命名迁移实施**：目标命名表与迁移顺序在本篇成章（§目标命名表），但迁移动作只随专门迁移票（每步独立票独立闸），本篇不实施。
 - **installer.cli 容器后端接口定稿**：本文只声明「需要新增」与验收方向，接口留给实现票。
 - **安装器域设计面收编**：既有安装器（init/up/down/status/doctor/upgrade）的完整设计文档不在本篇展开（是否收编见 §待宿主裁定项 3）。
-- **Linux fresh-home 腿交付**：成文为跟进项，本期不做腿。
+- **Linux fresh-home 用例交付**：成文为跟进项，本期不做该用例。
 - **回头改测试台**：19 号 docker 台（测试台 compose 面，现 `server/docker-compose.test.yml` ＋ `integration/stage_docker.py`）只读复用其机制，不因发行版改动测试台行为（目录随命名表迁 `server/sandbar/` 属迁移票，不属发行版改测试台）。
 
 ## Proposal
@@ -156,14 +156,14 @@ updated: 2026-09-07
 1. **项目目录 bind mount 同路径**：用户项目目录按**宿主同绝对路径**挂进容器（如 `~/Documents/foo` → 容器内同路径）。原因：profile/工单面以绝对路径记录项目，跨路径挂载＝落地路径漂移。mac 上 Docker Desktop 需用户首次授权目录共享，install 流程显式提示这一步。
 2. **git 身份与密钥走 .env，不进镜像**：镜像内零身份零密钥（可分发）；git 身份、密钥面引用、引擎地址/namespace 全部运行时经 .env 注入。镜像可公开、`.env` 留宿主、不进 git 不进镜像层。
 3. **数据 named volume 保升级**：引擎落盘数据、控制台数据全部落 named volume；升级＝换镜像换容器，卷不动。**删数据只有显式 uninstall＋两步确认一条路**（取舍表 #3）。
-4. **init 复用为 entrypoint（单真源）**：容器 entrypoint 复用 install.sh 的同一套装栈步骤（容器腿：预检→接线→三探→交棒生命周期），不造第三套装栈逻辑（见结构图）。
+4. **init 复用为 entrypoint（单真源）**：容器 entrypoint 复用 install.sh 的同一套装栈步骤（容器用例：预检→接线→三探→交棒生命周期），不造第三套装栈逻辑（见结构图）。
 
 #### 成本账
 
-- **uid 映射**：mac——容器经 Docker Desktop 文件共享读写 bind mount，文件属主自动映射为宿主用户，无痛；Linux——容器内 root 写宿主 bind mount 会留下 root 属主文件，跟进腿需容器进程以宿主 uid 运行（或等价映射），此项是 Linux 腿的主要工作量。
-- **属主验收口径**：容器跑完工单后，项目目录新落文件属主＝宿主用户（mac 腿即时成立）。
+- **uid 映射**：mac——容器经 Docker Desktop 文件共享读写 bind mount，文件属主自动映射为宿主用户，无痛；Linux——容器内 root 写宿主 bind mount 会留下 root 属主文件，跟进的用例需容器进程以宿主 uid 运行（或等价映射），此项是 Linux 用例的主要工作量。
+- **属主验收口径**：容器跑完工单后，项目目录新落文件属主＝宿主用户（macOS 用例即时成立）。
 - **用户重启习惯**：重启机/重启 Docker Desktop 后 `up -d` 即恢复（数据在卷）；日常停栈＝down（保卷）；**没有需要用户手杀容器的场景**——文档与 CLI 文案引导「down/upgrade/uninstall」三个动词，不教 kill。
-- **Windows/WSL2 边角（记录在案不承诺）**：NTFS 无 POSIX 权限位、/home 跨界 bind mount 性能与属主问题，后进腿另评估。
+- **Windows/WSL2 边角（记录在案不承诺）**：NTFS 无 POSIX 权限位、/home 跨界 bind mount 性能与属主问题，后进的用例另评估。
 
 ### 收件人视角与自指拆除（宿主令 v2/v5）
 
@@ -229,7 +229,7 @@ install.sh / entrypoint
 
 
 
-### fresh-home 场景规格（R3/R6，mac 腿先做，收件人视角）
+### fresh-home 场景规格（R3/R6，macOS 用例先做，收件人视角）
 
 **主角＝收件人**：剧本全程以收件人自己的项目为第一主角，example-project 只作首启教学；「sandbar 作为 project」零出场。
 
@@ -249,7 +249,7 @@ install.sh / entrypoint
 - 冲突：3099 已被开发栈占用 → 预检报错指路（人工二选一），不抢占；
 - 畸形态：坏 .env → 红字点名坏行；半残 venv（形态一）→ 红＋重建指令；装一半重跑 → 幂等走到绿。
 
-Linux 腿＝同场景在 Linux 复跑（属主映射为变重点）；Windows 腿不承诺（见 Nongoal）。
+Linux 用例＝同场景在 Linux 复跑（属主映射为变重点）；Windows 用例不承诺（见 Nongoal）。
 
 ### 发布前置债（宿主裁定列债，随专门迁移票处置）
 

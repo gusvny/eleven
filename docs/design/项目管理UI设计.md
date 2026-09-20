@@ -7,7 +7,7 @@ tags:
   - 项目管理
   - UI
 status: active
-updated: 2026-09-04
+updated: 2026-09-20
 ---
 
 # 项目管理 UI 设计（左栏内嵌）
@@ -88,7 +88,7 @@ stdout，超时=SIGTERM+await exit 转 504，取消=AbortSignal 转 499（均不
 JSON 错误体（FailClosed 机器口径）→ 409 原体透传；exit 1 且人话非 JSON → 409+原文转述（用户输入拒收≠
 上游故障；票① add 拒收现状输出 `[红]` 人话，JSON 化为跨票契约缺口已上报）；exit 2 → 502「参数错误」
 （argparse 用法错=路由 argv 拼装与 CLI 契约不符，是路由自己的 bug）；旗标断言锚真 CLI `--help`
-（UT A0 腿实跑，防 stub 把错误 argv 钉成期望——arbitrate gen1 UT 盲区教训）。
+（UT A0 用例实跑，防 stub 把错误 argv 钉成期望——arbitrate gen1 UT 盲区教训）。
 
 ### 交互与确认口径
 

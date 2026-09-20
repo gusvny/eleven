@@ -7,7 +7,7 @@ tags:
   - 接入
   - schema版本
 status: active
-updated: 2026-09-04
+updated: 2026-09-20
 ---
 
 <!-- 真源声明（260904 宿主裁定）：本文件即契约真源——sandbar 仓下文档一律以本仓
@@ -447,13 +447,13 @@ fail-closed，不静默过滤。`ui_evidence` 为 t260904-18 增列的合法顶�
    必带 `exit=2`；格式不符（缺 `exit=`/未知行首词组合）沿 FAIL 行畸形惯例按
    name=整行、exit=-1 计——畸形输出不静默吞；
 4. 末行 `SCENARIOS ran=N pass=N fail=N env_fail=N na=N` —— 汇总行，五计数逐字入约；
-   `na` 为腿级 N/A 状态的场景级占位（N/A 已在场景内折算进 pass/fail，执行器级恒 0）；
+   `na` 为子用例级 N/A 状态的场景级占位（N/A 已在场景内折算进 pass/fail，执行器级恒 0）；
    **双向净判据：ran=pass+fail+env_fail 必须成立，任一不一致=汇总谎报，按产品红
    exit 1**（执行器自校验；引擎侧读取与校验随乙段票落地，落地前引擎以「exit 非零
    必不绿」承载红语义）。
 
-场景内部腿级语义（执行器判据的项目侧实现约定）：N/A 仅给以**系统状态**为条件的腿
-（不以测试环境为条件）；环境缺失一律 ENV_FAIL；**全腿 N/A 的场景=产品红**（无可验
+场景内部子用例级语义（执行器判据的项目侧实现约定）：N/A 仅给以**系统状态**为条件的子用例
+（不以测试环境为条件）；环境缺失一律 ENV_FAIL；**全部子用例 N/A 的场景=产品红**（无可验
 对象=场景设计/覆盖问题，修场景而非补环境）。
 
 红绿判据（引擎机械执行，零项目策略）：
@@ -673,14 +673,14 @@ sandbar 发版 → 项目跟进；禁止跳过探针直接扩区间（关键决�
 | v1.5 | 2026-09-03 | t260903-01 声明制对齐：②a 按引擎实现重写为 v2 列表命令制（`checks=[{id,cmd,cwd?,timeout?}]`、`integration.cmd`；v1.1 五类型字段表系文档失真——引擎从未实现，勘误不升 schema 版，裁定随 ②a 入文）；② 缺失态勘误（integration 道 fail-closed，「空转口径」作废）；新增 ②b 输出契约（三行协议+分道返回形状+err 语义+零场景绿关闭惯用法）、②c 手写解析器语法子集=可写域、②d 薄壳执行拓扑=工具单源、②e 复用三级+rule of three | ②/②a/②b/②c/②d/②e；verify_lane code/integ 道 |
 | v1.6 | 2026-09-03 | t260903-03 路径契约化落地：新增 ①d——project.yaml 顶层可选 `paths` 节声明项目内路径（`roles_dir` 角色目录相对 spawn cwd 泳道快照解析、`model_routes` 路由表相对主目录解析），引擎 spawn 取角色目录/路由表、prompt 装配 role_doc 改经声明取值；四态判定（回落四类零回归 / 声明值畸形 / 条目文件畸形 / 声明锚点缺失或错位=fail-closed 红点名文件）、锚点 vs 内容边界（per-role 缺失软跳过、表内容损坏继承查表容错）、过渡状态（现行装载器顶层白名单未放开 paths，声明即被 ①a 隔离——①d 以放开工单落地为生效前提）；schema 保 v1（增量可选字段） | ①/①d；agent_activities spawn 两消费点、shared.py prompt 装配与模型路由查表；注册表装载器（TS/Python）待放开工单 |
 | v1.7 | 2026-09-03 | t260903-08 dsh 兼容区间成文：新增 ⑧——dsh 平台兼容区间声明（已验证点列举制，当前唯一点=0.1.1-rc.2，扩点须探针绿后 append）、升版必查项四条转正（touchpoints 汇总节 A3/A4+A5/B1+C1+C2/D1）、兼容矩阵三轴机制（sandbar 版本×dsh 已验证点×项目 schema 版本，append 制）、引擎版本自报口径（`sandbar_version` semver 自 0.1.0 起；历史 `temporal_engine_version` int 原值保留不造映射，畸形 fail-closed）、升版执行序（探针绿→扩区间→发版→项目跟进）；「升级解耦与兼容矩阵」节两轴表述补 v1.7 三轴衔接（IDE 轴=sandbar+dsh 复合）。安装器/探针/VERSION 代码面=sandbar 仓 M2-C 代码票承接（交接单 notes/debts/sandbar-m2-c-installer-handoff.md） | ⑧（新增）；「升级解耦与兼容矩阵」节；消费方=安装器 upgrade/doctor 探针集（代码票待落地） |
-| v2.0 | 2026-09-04 | t260904-12 集成闸无 SKIP 化（版本号合并时点由 v1.8 顺延：main 侧 v1.8 真源转正/v1.9 摘除面已先占用）（定稿=notes/discussions/260904-charter-injection-invalid-payload.md §7.3/§7.4）：②b-1 三行协议升三态协议——场景级 PASS/FAIL/ENV_FAIL、`ENV_FAIL [场景名] exit=2` 行字符级格式（畸形沿 FAIL 惯例 name=整行 exit=-1）、汇总行五计数 `SCENARIOS ran=N pass=N fail=N env_fail=N na=N` 逐字入约+双向净判据（谎报=产品红）、绿判据加 env_fail=0、退出码分家 0/1/2（产品红优先；全腿 N/A=产品红，N/A 仅给系统状态条件腿）；②a integration 段新增 `supply` 供给声明（`[{need,cmd,cwd?,timeout?}]`，幂等装配命令先于 cmd 执行、失败=红点名 need、键缺失=零声明合法空）；②b-2 integ 形状增 `env_fail`（乙段票落地前可缺席）。同族 KI-036/044/046；引擎侧 env/product 归因机械化与 supply 执行=乙段票（verify_lane/仓根 verify.yaml，待宿主扩写集） | ②a/②b-1/②b-2；integration 执行器与场景集、引擎 verify_lane（乙段） |
+| v2.0 | 2026-09-04 | t260904-12 集成闸无 SKIP 化（版本号合并时点由 v1.8 顺延：main 侧 v1.8 真源转正/v1.9 摘除面已先占用）（定稿=notes/discussions/260904-charter-injection-invalid-payload.md §7.3/§7.4）：②b-1 三行协议升三态协议——场景级 PASS/FAIL/ENV_FAIL、`ENV_FAIL [场景名] exit=2` 行字符级格式（畸形沿 FAIL 惯例 name=整行 exit=-1）、汇总行五计数 `SCENARIOS ran=N pass=N fail=N env_fail=N na=N` 逐字入约+双向净判据（谎报=产品红）、绿判据加 env_fail=0、退出码分家 0/1/2（产品红优先；全部子用例 N/A=产品红，N/A 仅给系统状态条件子用例）；②a integration 段新增 `supply` 供给声明（`[{need,cmd,cwd?,timeout?}]`，幂等装配命令先于 cmd 执行、失败=红点名 need、键缺失=零声明合法空）；②b-2 integ 形状增 `env_fail`（乙段票落地前可缺席）。同族 KI-036/044/046；引擎侧 env/product 归因机械化与 supply 执行=乙段票（verify_lane/仓根 verify.yaml，待宿主扩写集） | ②a/②b-1/②b-2；integration 执行器与场景集、引擎 verify_lane（乙段） |
 | v2.1 | 2026-09-04 | t260904-12 乙段落地：verify_lane integ 道实现三态解析（ENV_FAIL 行/env_fail 计数入返回形状、绿判据含 env_fail=0、畸形沿 FAIL 惯例）与 supply 装配执行（先于 cmd、失败/超时=红点名 need）；②b-2 env_fail 转「必含」；ticket-lifecycle 场景移册依据=定稿 §7.3「真跑不进闸的（红线禁区/破坏性）不进闸清单」（worker 机械步内恒触发防递归护栏=设计性环境红，闸内不可达 PASS；真实覆盖承接=主库人工清单；第二次口径逆转，依据链见 integration/README 已知限制） | ②a/②b-2；verify_lane integ 道、仓根 verify.yaml、integration 场景清单 |
 | v1.8 | 2026-09-04 | 真源转正（宿主裁定 260904）：本文件由「suyou 仓 v1.7 只读同源副本」升为契约真源，头部声明改写；suyou 侧同名文件降为历史冻结件（不再演进、不作修改目标）。正文语义零变更；①a 增补节（摘除/再接入、单根目录工具口径）随 project-lifecycle 立项票②落地，届时另行记行 | 文档治理面；消费方指引（upgrade/doctor 以本份为准） |
 | v1.9 | 2026-09-04 | t260904-14 摘除面落地：新增 ①a-1——摘除/再接入/数据处置三态成文（条目退役=project.yaml 原子改名 retired-<UTC ISO8601> 零 schema 改动可逆，再接入=同 key re-add 归档链连续；模式闸[legacy 拒收]/在飞闸[不可达 fail-closed 无绕过旗]/最后条目确认闸/closed 全归档闸[purge 前置：未归档差集=Temporal COMPLETED 票号集合−fs archive.json 三态判定集合，畸形 manifest=fail-closed 点名文件]；purge 双旗显式分离、dry-run 全闸预演、摘除报告只报不删项目根 .lane/ 泳道）；单根目录口径工具面落字（工具恰写一条 dirs，多条=装载容忍/工具不产的遗留形状） | ①/①a；安装器 project remove 子命令、摘除报告消费方（ops 手册/将来 UI 面） |
 | v2.2 | 2026-09-04 | t260904-18 三门落地：②a 增列合法顶层键 `ui_evidence`（可选映射 `{dirs, supply?}`；缺失=截图证据项按项目声明缺席 green+可见 note，畸形=fail-closed 红点名字段；supply 保留字段本版引擎不消费）——合并闸 UI 截图证据目录改项目声明，退役引擎侧 `UI_WRITE_PREFIXES` 五路径硬编码活路径身份（仅剩旧票重放/冻结分支兼容回落）；同族：建票口背景文件闸（票面 refs 须已提交且干净 HEAD 态，拒收点名）与 create_plan 回执 files_changed 空数组/畸形可见红（KI-049），属引擎机制面不入本契约字段表 | ②a；verify_lane `_validate_cfg`、merge_check 3.6、ui_changed_paths、仓根 verify.yaml |
 | v2.3 | 2026-09-07 | t260907-10 目录重构（宿主令 v6 定稿）路径锚语义变更：①d `paths` 节回落约定旧锚 `server/dsh/roles`、`server/dsh/model-routes.yaml` **退役**，新回落锚=`server/roles`、`server/model-routes.yaml`（引擎仓 server/dsh 包装层退场、五层摊平上移；引擎本体=temporal-poc→`server/engine`）；未显式声明 `paths` 的项目回落语义不变（仅回落目标换新锚）；已显式声明旧锚的项目按 ①d 锚点缺失 fail-closed 红点名；venv 定位回落链=新路径 `server/engine/.venv` 优先、旧路径 `server/dsh/temporal-poc/.venv` 一轮兼容（摘除票落地后单路径）；本文旧锚字样仅存于本变更记录行（历史事实，非活指针） | ①d/回落约定；agent_activities spawn 两消费点、shared.py DEFAULT_ROLES_DIR/MODEL_ROUTES_REL、installer、仓根 verify.yaml（扩权面） |
 | v2.4 | 2026-09-10 | t260910-14 模型路由表迁出 git（真源=项目声明指向的文件）：①d `model_routes` 声明值放宽——相对主目录语义不变，新增 `~/` 展开（建议缺省 `~/.sandbar/projects/<key>/model-routes.yaml`）与绝对路径形态，`..` 逃逸/空值/非标量仍 fail-closed，引号标量剥引号同判；缺表语义从「锚点缺失=fail-closed 红」改**分态软回落**——decl_missing/file_missing/bad_content 三态点名留痕（禁静默回落 profile 默认，KI-030 收窄），读侧分层兜底=仓内 `server/model-routes.yaml`（宿主风险令 260910：迁移窗口不断供，仓内表本票保留，删除延后另票）；引擎查表（`resolve_routes_table` 三态判别）与 UI 读写（TS `resolveRoutesFilePath`）同源同判（一致性守卫=t260910-14 parity 场景）；init 引导退役（新项目按 docs 样例人工填表）。| ①d；shared.py 路由节/agent_activities spawn 消费点、ui routes.ts（view/save/init 退役）、守卫 t260902-07 两件、sc_paths_contract_doc_guard G6 随新语义同步改 |
-| v2.5 | 2026-09-16 | t260916-02 巡检声明落位迁移A：①d `paths` 节新增 `inspection_decl` 指路键（与 model_routes 同机器级放宽口径：相对拼主目录/~/展开/绝对；词法校验同源），**回落语义刻意不照抄**——声明缺席=该项目无巡检面（absent，不借用他项目/引擎样例），坏形/锚点缺失=项目级 error 点名（禁静默）；巡检声明默认落位 `<项目根>/inspection.yaml` 单文件（不做目录），引擎仓内 `server/engine/inspection.yaml` 退役删除（引擎=机制+docs/inspection-sample.yaml 样例）；聚合（板面白名单/漏跑核查/schedule-up）改遍历注册项目读各自声明，跨项目实例 id 重复=歧义剔除+点名两处；巡检票号统一工单号形式 `t<YYMMDD>-<NN>` 走既有分配，「每期一票」按（实例,期号）显式去重（SA InspectionInstance/InspectionPeriod+原子指针三态），实例/期号不从票号反解（票面/SA 读） | ①/①d；shared.py project_paths、inspection_decl.py、inspection_ticketing.py（新）、inspection_trigger.py、client.py 板面双腿、docs/inspection-sample.yaml、仓根 inspection.yaml |
+| v2.5 | 2026-09-16 | t260916-02 巡检声明落位迁移A：①d `paths` 节新增 `inspection_decl` 指路键（与 model_routes 同机器级放宽口径：相对拼主目录/~/展开/绝对；词法校验同源），**回落语义刻意不照抄**——声明缺席=该项目无巡检面（absent，不借用他项目/引擎样例），坏形/锚点缺失=项目级 error 点名（禁静默）；巡检声明默认落位 `<项目根>/inspection.yaml` 单文件（不做目录），引擎仓内 `server/engine/inspection.yaml` 退役删除（引擎=机制+docs/inspection-sample.yaml 样例）；聚合（板面白名单/漏跑核查/schedule-up）改遍历注册项目读各自声明，跨项目实例 id 重复=歧义剔除+点名两处；巡检票号统一工单号形式 `t<YYMMDD>-<NN>` 走既有分配，「每期一票」按（实例,期号）显式去重（SA InspectionInstance/InspectionPeriod+原子指针三态），实例/期号不从票号反解（票面/SA 读） | ①/①d；shared.py project_paths、inspection_decl.py、inspection_ticketing.py（新）、inspection_trigger.py、client.py 板面两路子用例、docs/inspection-sample.yaml、仓根 inspection.yaml |
 
 > 来源立项：sandbar
 
