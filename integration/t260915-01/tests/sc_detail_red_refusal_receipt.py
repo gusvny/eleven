@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""t260915-01 ②端到端腿：路径闸拒绝的结构化明细从真实判定点走到票面（灰盒 L2）。
+"""t260915-01 ②端到端子用例：路径闸拒绝的结构化明细从真实判定点走到票面（灰盒 L2）。
 
 用户可感知契约（R3 验收缝闭合）：worker 代落盘（settle）被路径闸拒绝时，**活动回执**
 除人读 note 外还带结构化明细 gate_refusal——files 与 path_gates 判定清单全量相等
 （不经 _fmt_files cap，不丢文件）、reason_code 与 note 内嵌码一致、evidence 与 note
 逐字相同（=worker 日志原文）；workflow 侧消费（sanitize）后 blocked_detail 结构键齐。
-负腿=非闸拒绝/正常落盘不挂明细。这是「测试在场≠接线生效」（KI-046/049）的反面：
+反用例=非闸拒绝/正常落盘不挂明细。这是「测试在场≠接线生效」（KI-046/049）的反面：
 本场景从**真实 settle 判定点**驱动，任何接线断裂（dict 建了没传/传了没挂）都会红。
 
 跑法：PY=server/engine/.venv/bin/python; [ -x "$PY" ] || PY=python3; "$PY" -B
@@ -99,8 +99,8 @@ def head(repo):
 def main():
     aa, pg = load_engine()
 
-    # ---- L0 兼容腿：新参数缺省 None（既有直调场景逐字不变）----
-    section("L0 兼容腿：refusal 形参缺省 None、gate_refusal dataclass 字段缺省 None")
+    # ---- L0 兼容子用例：新参数缺省 None（既有直调场景逐字不变）----
+    section("L0 兼容子用例：refusal 形参缺省 None、gate_refusal dataclass 字段缺省 None")
     for fn in ("_settle_worktree_lane", "_settle_with_gate", "_apply_settle_note"):
         sig = inspect.signature(getattr(aa, fn)).parameters
         ok("refusal" in sig and sig["refusal"].default is None,
@@ -114,7 +114,7 @@ def main():
     section("L1 acceptance_walkthrough 越权（5 探针） → 回执 gate_refusal 与判定/note 一致")
     tmp, mainrepo, lane, fork = mk_lane()
     rogues = ["server/engine/rogue_%d.py" % i for i in range(5)]
-    # 删除型注入（D 态）：t260916-19 B 起 ??/M 态越权自动处置不再拒绝（本腿锁的是
+    # 删除型注入（D 态）：t260916-19 B 起 ??/M 态越权自动处置不再拒绝（本子用例锁的是
     # 结构化拒绝回执保真，D 态在新旧契约下都产生拒绝终态）——探针已落分叉点基线。
     for rel in rogues:
         (lane / rel).unlink()
@@ -143,7 +143,7 @@ def main():
         ok(refusal.get("red") is True and bool(refusal.get("next_action")), "red 标记+next_action 在场")
     ok(head(lane) == before, "0 新 commit（拒绝落盘）")
 
-    # ---- L2 负腿：写集内正常落盘 → refusal 空收集（不误挂）----
+    # ---- L2 反用例：写集内正常落盘 → refusal 空收集（不误挂）----
     section("L2 implement 写集内改动 → 落盘+零明细收集")
     tmp2, main2, lane2, fork2 = mk_lane()
     allowed = "server/engine/allowed.py"
@@ -153,11 +153,11 @@ def main():
                                      repo=main2, path_gate=True,
                                      write_set=[allowed], base_ref=fork2, refusal=refusal2,
                                      face="join")
-    ok(not refusal2, "正常落盘：refusal 空收集（负腿）")
+    ok(not refusal2, "正常落盘：refusal 空收集（反用例）")
     ok("path_gate_reason" not in str(note2), "回执零原因码")
     ok(head(lane2) != fork2, "commit 真落地")
 
-    # ---- L3 受保护路径腿：改 base 已存在的真源 → protected_path+点名 ----
+    # ---- L3 受保护路径子用例：改 base 已存在的真源 → protected_path+点名 ----
     # （干净泳道：受保护闸只在阶段闸放行后判——脏泳道会先撞 unauthorized_path）
     section("L3 改受保护真源 verify.yaml → protected_path 结构化")
     tmp3, main3, lane3, fork3 = mk_lane()
@@ -172,7 +172,7 @@ def main():
     ok(refusal3.get("item") == "受保护路径闸", "人话名=受保护路径闸")
     ok(refusal3.get("evidence") == note3, "evidence 与 note 逐字相同")
 
-    # ---- L4 接线腿：真回执+真 refusal 喂 _apply_settle_note → 挂载 ----
+    # ---- L4 接线子用例：真回执+真 refusal 喂 _apply_settle_note → 挂载 ----
     section("L4 _apply_settle_note 真 refusal 挂载（接线在场，非自造 dict）")
     res = aa.StageResult(status="ok", summary="s", evidence="e")
     out = aa._apply_settle_note(res, note, refusal=dict(refusal))
@@ -180,9 +180,9 @@ def main():
     ok(out.gate_refusal == refusal, "gate_refusal 逐字挂载（结构三件不走样）")
     res_neg = aa.StageResult(status="ok", summary="s")
     out_neg = aa._apply_settle_note(res_neg, note2, refusal=dict(refusal2))
-    ok(out_neg.status == "ok" and out_neg.gate_refusal is None, "非闸拒绝不挂（负腿）")
+    ok(out_neg.status == "ok" and out_neg.gate_refusal is None, "非闸拒绝不挂（反用例）")
 
-    # ---- L5 消费腿：workflow 侧 _pin 经 sanitize 上 blocked_detail（结构键齐）----
+    # ---- L5 消费子用例：workflow 侧 _pin 经 sanitize 上 blocked_detail（结构键齐）----
     section("L5 dev_lane._pin_agent_refusal 消费真回执 → blocked_detail 键齐")
     import dev_lane
     from types import SimpleNamespace

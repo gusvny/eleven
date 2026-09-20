@@ -134,7 +134,7 @@ def main():
             C.check(all(not s.startswith(str(tmp / "main-")) for s in srcs),
                     "成员仓主树零暴露")
         else:
-            C.na("容器不在场，inspect 挂载面无可验对象（容器面未接线的伴生腿）")
+            C.na("容器不在场，inspect 挂载面无可验对象（容器面未接线的伴生子用例）")
 
         print("\n== git 读降级：预期失败形态可辨（D2）==")
         for m in ("alpha", "beta"):

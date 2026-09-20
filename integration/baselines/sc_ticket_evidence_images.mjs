@@ -44,10 +44,10 @@ import { join } from 'node:path'
 const BASE = (await ensureStageConsole()).base;
 const LANE = process.cwd();
 const STAGE_ID = 't26083108evtest'; // must satisfy TICKET_ID_RE (alphanumeric, no / no .)
-const STAGE_DIR = join(LANE, '.sandbar', 'evidence', STAGE_ID); // 新名主腿（t260910-05 读侧迁移；naming-compat：旧名只读回落）
+const STAGE_DIR = join(LANE, '.sandbar', 'evidence', STAGE_ID); // 新名主子用例（t260910-05 读侧迁移；naming-compat：旧名只读回落）
 const OLD_BASE = join(LANE, '.suyou', 'evidence'); // 旧名归档基目录（回落候选；naming-compat）
-const OLD_ID = 't260910evold';   // 仅旧名回落腿（独立 id，腿间正交）
-const BOTH_ID = 't260910evboth'; // 新旧并存去重腿
+const OLD_ID = 't260910evold';   // 仅旧名回落子用例（独立 id，子用例间正交）
+const BOTH_ID = 't260910evboth'; // 新旧并存去重子用例
 const PNG_1x1 = Buffer.from(
   '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489' +
   '0000000d4944415478da63fcffff3f030005fe02fea72d1f240000000049454e44ae426082', 'hex');
@@ -168,11 +168,11 @@ async function withStagedEvidence() {
   await rm(join(OLD_BASE, STAGE_ID), { recursive: true, force: true }); // canary 清理
 }
 
-// ── t260910-05 路径新名迁移回归腿（本票唯一的闸上路径回归面）──
+// ── t260910-05 路径新名迁移回归用例（本票唯一的闸上路径回归面）──
 // 归属裁定：本场景 intent 就是 evidence 端点黑盒契约，路径迁移是同一契约的
-// 候选目录面变化——扩腿不拆新场景（防 intent 级重复+双闸点看同一面）。
-// 前置：rootVisible 由主腿的旧名 canary 充能；canary 不可见=console 根非本
-// 泳道根 → 全腿 env_fail（环境事实，不假红不假绿）。
+// 候选目录面变化——扩子用例不拆新场景（防 intent 级重复+双闸点看同一面）。
+// 前置：rootVisible 由主子用例的旧名 canary 充能；canary 不可见=console 根非本
+// 泳道根 → 全部子用例 env_fail（环境事实，不假红不假绿）。
 async function pathMigrationLegs() {
   if (!rootVisible) {
     record('server/old-fallback-list', 'env_fail', 'console 根非本泳道根（环境探针不可见）');
@@ -182,7 +182,7 @@ async function pathMigrationLegs() {
     return;
   }
 
-  // 腿 A：仅旧名回落——只种旧名归档目录，读侧必须仍可读可列（naming-compat
+  // 子用例 A：仅旧名回落——只种旧名归档目录，读侧必须仍可读可列（naming-compat
   // 回落是承诺面；断了它=迁移把存量泳道证据全部变死链）。
   {
     const dir = join(OLD_BASE, OLD_ID);
@@ -206,7 +206,7 @@ async function pathMigrationLegs() {
     await rm(dir, { recursive: true, force: true });
   }
 
-  // 腿 B：新旧并存去重——同名 png 落新/旧两处，list 恰 1 条（不双计），旧名
+  // 子用例 B：新旧并存去重——同名 png 落新/旧两处，list 恰 1 条（不双计），旧名
   // 独有文件并入列表；取图 200 且字节原样。
   {
     const newDir = join(LANE, '.sandbar', 'evidence', BOTH_ID);

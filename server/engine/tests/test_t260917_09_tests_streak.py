@@ -15,7 +15,7 @@
   启动级 error 不豁免）；留痕点名供给面；豁免上限与出路封面不回退。
 - integration_route 超限文案：前缀逐字节兼容既有断言 + 出路关键词在场。
 - 探针回执 parse_reprobe_summary 五态 + all_green；--reprobe 执行器面（真注册表
-  不在册 fail-closed 腿 + mini 注册表注入的执行语义/串行/三态/超时回收腿）。
+  不在册 fail-closed 子用例 + mini 注册表注入的执行语义/串行/三态/超时回收子用例）。
 - C6：INTEG_MANIFEST 死常量已摘除（消费外部输入纪律：畸形入参 fail-closed 用例
   分布在 B/C/F 各节）。
 - J 节（merge 后 gen3 补）：豁免超限封面两分支的登记自证——仍在 TESTS_STREAK 门内
@@ -174,7 +174,7 @@ def test_c2_supply_shape_exempt_judgement():
     assert not wf._tests_env_side_red(_supply_receipt(blockers=["gate-x"]))
     assert not wf._tests_env_side_red(_supply_receipt(failed="oops"))
     assert not wf._tests_env_side_red(None)
-    # 对照腿不回退：场景级环境红形态照旧豁免（gen0 行为零回归）
+    # 对照子用例不回退：场景级环境红形态照旧豁免（gen0 行为零回归）
     assert wf._tests_env_side_red(
         shared.IntegrationRunResult(ran=3, passed=2, failed=0, env_fail=1))
 
@@ -299,7 +299,7 @@ def _rs_mod():
 def _lock_off(monkeypatch):
     # 锁契约=「持有到进程结束，flock 随进程消亡自释放」（生产路径探针是独立子进程，
     # 退出即释放）；UT 同进程多次直调 reprobe_main 会互相持锁——进程内测试显式关锁，
-    # 锁忙腿单独 monkeypatch（test_g_run_lock_busy_fail_closed）。
+    # 锁忙子用例单独 monkeypatch（test_g_run_lock_busy_fail_closed）。
     monkeypatch.setenv(_rs_mod().RUN_LOCK_OFF_ENV, "1")
 
 
@@ -338,7 +338,7 @@ def test_g_mini_registry_execution_semantics(monkeypatch):
 
 
 def test_g_mini_registry_timeout_reaped(monkeypatch):
-    """超时腿：执行器侧 CMD_TIMEOUT 到点 → exit -9 分类环境红，进程被回收
+    """超时子用例：执行器侧 CMD_TIMEOUT 到点 → exit -9 分类环境红，进程被回收
     （subprocess.run(timeout=) 内建回收），reprobe 计数诚实。"""
     rs = _rs_mod()
     _lock_off(monkeypatch)
@@ -354,7 +354,7 @@ def test_g_mini_registry_timeout_reaped(monkeypatch):
 
 
 def test_g_run_lock_busy_fail_closed(monkeypatch):
-    """锁忙腿（R1 定案：fail-closed 也打汇总行）：单飞锁抢不到 → 零跑＋error 点名
+    """锁忙子用例（R1 定案：fail-closed 也打汇总行）：单飞锁抢不到 → 零跑＋error 点名
     ＝保守计轮信号（生产上锁随探针子进程消亡自释放，同 main() 契约）。"""
     rs = _rs_mod()
     monkeypatch.setattr(rs, "SCENARIOS", [("probe-x", "t", "true", "main")])

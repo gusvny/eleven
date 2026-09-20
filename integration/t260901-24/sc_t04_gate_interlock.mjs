@@ -18,12 +18,12 @@
  *
  * t260904-07 仲裁迭代（tests-fault 修正）：capture-lane selftest 段补环境前提卫兵——
  * <repo>/server/profile/node_modules 软链族是环境工件不入 git，fresh worktree 泳道
- * 布局缺失时该段三腿曾假红（违反 t260904-12 三态「缺环境=ENV_FAIL，绝不 exit 0」执行契约）；缺失→ENV_FAIL+归因，
+ * 布局缺失时该段三子用例曾假红（违反 t260904-12 三态「缺环境=ENV_FAIL，绝不 exit 0」执行契约）；缺失→ENV_FAIL+归因，
  * 前提在位环境断言面逐条不变。
  *
  * t260904-11 仲裁 gen1（tests-fault 修正②）：capture-lane 容差修复镜像合入+验收段
  * 供给升级（泳道残留「断链」sandbar-workbench 软链）后，existsSync 复刻谓词与工具实际
- * 就绪脱钩（链断而工具全绿），选错分支三腿假红。教训=前提判定不得复刻被测物内部
+ * 就绪脱钩（链断而工具全绿），选错分支三子用例假红。教训=前提判定不得复刻被测物内部
  * 谓词，只认可观测行为：分支依据改为本 run 退出码，两套契约断言逐字保留。
  */
 
@@ -115,7 +115,7 @@ try {
   // t260904-11 仲裁 gen1（tests-fault 修正②）：容差修复镜像合入 + 验收段供给升级
   // （泳道出现「断链」的 sandbar-workbench 软链——验收残留物，指向 ../workbench 解析
   // 到不存在的 profile/workbench）后，existsSync 复刻谓词与工具实际就绪脱钩：软链
-  // 断链 → 旧判定取 fail-closed 分支，工具实际按容差语义全绿 → 三腿全假红。改按
+  // 断链 → 旧判定取 fail-closed 分支，工具实际按容差语义全绿 → 三子用例全假红。改按
   // 每次 run 自身退出码分支；全绿形态与 fail-closed 形态两套断言逐字保留（谁在位
   // 验谁），断言强度零变化。laneProfileWb 仅余诊断用途。
   const laneLinkState = existsSync(laneProfileWb) ? '在'

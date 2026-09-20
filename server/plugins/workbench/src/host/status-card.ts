@@ -1,6 +1,6 @@
 /**
  * status-card.ts —— 工单详情「人话状态卡」视图模型（KI-048 件④，t260911-05；
- * t260915-05 扩展：文案迁 red-light-lexicon 词条表 + 新增人门蓝卡腿）。
+ * t260915-05 扩展：文案迁 red-light-lexicon 词条表 + 新增人门蓝卡分支）。
  *
  * 设计样张：notes/discussions/260904-ticket-detail-ui-mock.html A 块状态卡
  * （四件构成：人话主文案 ＋ 挡事文件点名 ＋ 下一步安排 ＋ 原始日志折叠；
@@ -125,7 +125,7 @@ export function buildStatusCard(detail: unknown): StatusCardView | null {
   const structFiles = asStringArray(bd.files)
   const structNext = typeof bd.next_action === 'string' ? bd.next_action.trim() : ''
 
-  // ── 蓝卡腿：人门等你签（mock 屏③ callout E）──
+  // ── 蓝卡分支：人门等你签（mock 屏③ callout E）──
   if (stageState === 'awaiting-human' && !reasonCode) {
     const tr = translateReason('awaiting-human', blockedReason)
     const signWhat = buildSignWhat(d)

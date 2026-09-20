@@ -3,7 +3,7 @@
 
 提供：
 - T09_STUB：arbitrate 可控**判决序列**桩（lib_ki061.ARB_STUB 是常量 verdict，
-  序列能力本票自建——R4 结论）；判决序列耗尽后确定性回落 verdict=pass（主腿
+  序列能力本票自建——R4 结论）；判决序列耗尽后确定性回落 verdict=pass（主子用例
   确定性终态，防第 N+1 判决撞上限造成场景自身假红）。
 - make_fixture_repo：夹具项目仓（裸仓或带 integration 声明面：verify.yaml +
   mini 执行器，供机械链真跑三态回执）。
@@ -210,7 +210,7 @@ FIXTURE_VERIFY_YAML = (
     "# t260917-09 夹具声明面（场景自有；integration 道=迷你执行器单点）\n"
     # schema: v1 与 lanes.code.write_allow 均必备——_validate_cfg 对缺 schema/
     # write_allow 各层 fail-closed（实测 260918：缺失时闸「版本不支持/write_allow
-    # 结构不合法」拒绝 → cur_integ 恒空 → 三腿零豁免全退化成普通计轮）
+    # 结构不合法」拒绝 → cur_integ 恒空 → 三子用例零豁免全退化成普通计轮）
     "schema: v1\n"
     "lanes:\n"
     "  code:\n"

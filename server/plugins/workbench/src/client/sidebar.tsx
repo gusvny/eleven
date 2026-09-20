@@ -400,7 +400,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
   const [projects, setProjects] = useState<Project[]>([])
   /** 项目 key → 该项目的工单行（按 ?project= 逐组拉取，来源即归属，不做路径猜测）。 */
   const [ticketsByProject, setTicketsByProject] = useState<Record<string, Ticket[]>>({})
-  // t260915-19 巡检腿：最近一次成功的巡检行快照（端点失败=保快照+显式降级横幅，
+  // t260915-19 巡检分支：最近一次成功的巡检行快照（端点失败=保快照+显式降级横幅，
   // 绝不静默清空——KI-008/t260910-04 R3 同纪律，与中列 reloadTickets 同款）。
   const [inspectionRows, setInspectionRows] = useState<InspectionTicket[]>([])
   const [inspectionNote, setInspectionNote] = useState('')
@@ -614,7 +614,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
         if (cancelled) return
         setTicketsByProject(Object.fromEntries(entries))
       } catch { /* 静默 */ }
-      // 巡检腿收口（独立于项目组 try：项目组失败不影响巡检，反之亦然）。
+      // 巡检分支收口（独立于项目组 try：项目组失败不影响巡检，反之亦然）。
       try {
         const ir = await inspPromise as { ok?: boolean; error?: unknown; result?: { tickets?: unknown } } | undefined
         if (cancelled) return

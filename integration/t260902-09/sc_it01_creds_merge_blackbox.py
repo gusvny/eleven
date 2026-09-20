@@ -12,7 +12,7 @@
 venv 的解释器上记 ENV_FAIL（三态契约定稿 §7.3「闸内无 SKIP」：缺依赖=环境红）。
 跑法：PY=server/engine/.venv/bin/python; "$PY" integration/t260902-09/it01_creds_merge_blackbox.py
 末行 SUMMARY pass=N fail=N env_fail=N na=N；退出码 0=PASS、1=FAIL（产品红，
-含全腿 N/A）、2=ENV_FAIL（环境红）。
+含全部子用例 N/A）、2=ENV_FAIL（环境红）。
 """
 import os
 import subprocess

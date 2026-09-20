@@ -251,14 +251,14 @@ def _verdict_ledger_face(ledger_dir: Path, instance: str, period: str) -> Path:
 async def cmd_verdict(args: argparse.Namespace) -> Dict[str, Any]:
     """发现级裁定（t260916-22 要点⑥）：人对单条发现标 假报/待修/存疑。
 
-    两腿（回执带 mode 供场景断言）：
+    两分支（回执带 mode 供场景断言）：
       - signal：票在途（running）→ workflow signal finding_verdict（票内面：timeline
         + findings[].verdict；verdicts 台账由收口段一次写齐）；
       - ledger：票已收口（closed/blocked）或查无在途票或显式 --offline → 直改台账
         票面 JSON（findings[].verdict 原位改写）+ verdicts 台账追加（dedupe 幂等，
         跨期假报压制消费的就是它）。
     载荷校验复用票面闸纯函数（who 非空/≤64/agent 名拒收/gate/verdict 词表含中文
-    别名）——两腿同一套校验，机器不得裁定。"""
+    别名）——两分支同一套校验，机器不得裁定。"""
     from inspection_flow import (CLOSE_GATE_ID, MAX_WHO_LEN, validate_finding_verdict_payload)
     from inspection_inspect import (append_verdict_entry, verdicts_ledger_name)
     period = args.period or datetime.now().strftime("%Y%m%d")
@@ -313,7 +313,7 @@ async def cmd_verdict(args: argparse.Namespace) -> Dict[str, Any]:
         except Exception as e:  # noqa: BLE001
             return _err("巡检票 %s 裁定 signal 失败：%s: %s" % (ticket_id, type(e).__name__, e))
 
-    # ---- 台账腿（已收口 / 查无在途票 / --offline） ----
+    # ---- 台账分支（已收口 / 查无在途票 / --offline） ----
     face_path = _verdict_ledger_face(ledger_dir, args.instance, period)
     if not face_path.is_file():
         return _err("台账票面不存在：%s（无票可裁定；期号/实例核对）" % face_path)
@@ -766,7 +766,7 @@ async def cmd_deadman(args: argparse.Namespace) -> Dict[str, Any]:
         result["running_actions"] = len(running_actions)
         if action_summary is not None:
             result["schedule_action"] = action_summary
-        # 跳火 finding（C1 两腿：observed 实锤优先 / inferred 兜底，leg 键可辨不混装）
+        # 跳火 finding（C1 两分支：observed 实锤优先 / inferred 兜底，leg 键可辨不混装）
         skip_f = skip_findings(skip_count, len(running_actions), action_summary, missed)
         if skip_f:
             result["findings"] = list(result["findings"]) + skip_f

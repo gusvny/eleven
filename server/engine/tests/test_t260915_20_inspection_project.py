@@ -2,14 +2,14 @@
 按项目注册表解析 + 无主守卫 + sign 闸项目面）。
 
 覆盖（对应方案 §2.9）：
-  - decl：实例身份必填（enabled+disabled 两腿）/形状/未知键仍拒/计数源 project_key
+  - decl：实例身份必填（enabled+disabled 两分支）/形状/未知键仍拒/计数源 project_key
     不受影响/身份×计数源双键并存不串键/反用例事由次序（校验链位次钉死）；
   - shared.resolve_project_root：空 key/未知 key/env SANDBAR_PROJECTS_DIR 注册表根/
     resolve_epics_dir 复用回归；
   - trigger.resolve_repo_root 三分支 precedence + _schedule_action builder 纯面
     （payload 含 project_key/repo_root、typed_search_attributes 含 ProjectKey）；
   - watcher 串键回归钉（身份 A≠计数源 B → 归 A）；
-  - flow：无主守卫两腿、sign target 解析链三分支、input 缺省兼容（老 payload 解码安全）；
+  - flow：无主守卫两分支、sign target 解析链三分支、input 缺省兼容（老 payload 解码安全）；
   - 真源 inspection.yaml 迁移自检（四实例全带身份=sandbar）。
 全程禁网络/真 Temporal；temporalio 类型只走 builder 纯构造（venv 内可跑）。
 """
@@ -180,7 +180,7 @@ def fixture_registry(tmp_path, monkeypatch):
 # ---------- shared.resolve_project_root ----------
 
 def test_resolve_project_root_empty_key_raises(fixture_registry):
-    # 比先例 resolve_epics_dir 更严：**无空 key 回落腿**（静默回落引擎仓=本票要杀的族）
+    # 比先例 resolve_epics_dir 更严：**无空 key 回落分支**（静默回落引擎仓=本票要杀的族）
     from shared import resolve_project_root
     with pytest.raises(ValueError, match="项目身份为空"):
         resolve_project_root("")
@@ -215,12 +215,12 @@ def test_resolve_project_root_env_read_fresh(fixture_registry, monkeypatch, tmp_
 
 def test_resolve_epics_dir_regression_via_shared_resolver(fixture_registry, monkeypatch):
     # resolve_epics_dir 重构为消费 resolve_project_root：key 面同一 dirs[0] 取法；
-    # env/空 key 回落腿行为不变（t260907-07 既有钉住）
+    # env/空 key 回落分支行为不变（t260907-07 既有钉住）
     from shared import resolve_epics_dir, EPICS_DIR
     monkeypatch.delenv("SANDBAR_EPICS_DIR", raising=False)
     assert str(resolve_epics_dir("proj-a")) == \
         str(fixture_registry["homes"]["proj-a"] / "notes" / "epics")
-    assert resolve_epics_dir("") == EPICS_DIR          # 空 key 引擎锚回落腿（epic 侧既有语义）
+    assert resolve_epics_dir("") == EPICS_DIR          # 空 key 引擎锚回落分支（epic 侧既有语义）
     monkeypatch.setenv("SANDBAR_EPICS_DIR", "/tmp/epics-override")
     assert str(resolve_epics_dir("proj-a")) == "/tmp/epics-override"
 
@@ -254,7 +254,7 @@ def test_resolve_repo_root_identity_leg_unknown_key_named(fixture_registry):
 
 
 def test_resolve_repo_root_defense_leg_raises():
-    # ③ 防御腿：解析层已必填身份，正常不可达；可达即旁路绕过声明面——绝不静默回落
+    # ③ 防御子用例：解析层已必填身份，正常不可达；可达即旁路绕过声明面——绝不静默回落
     from inspection_trigger import resolve_repo_root
     with pytest.raises(ValueError, match="无项目身份"):
         resolve_repo_root({"instance_id": "x", "instance_project_key": ""}, "")
@@ -272,7 +272,7 @@ def test_schedule_action_builder_payload_and_sa():
     inp = action.args[0]
     assert inp.instance_id == "inst-a"
     assert inp.face == "doc"                       # 声明透传（t260913-02 语义不变）
-    assert inp.repo_root == "/explicit/root"       # explicit 腿
+    assert inp.repo_root == "/explicit/root"       # explicit 分支
     assert inp.project_key == "proj-a"             # payload 显式填身份（R3）
     assert getattr(inp, "period", "") == ""        # spawner 输入无期号（起票时刻铸取）
     assert getattr(inp, "decl_path", "x") == ""    # cron 形态不钉路径（改声明即改行为）

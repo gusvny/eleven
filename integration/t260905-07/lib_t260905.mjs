@@ -108,7 +108,7 @@ export async function makeFixtureConsole() {
   // capture-lane 必须与被测代码同树解析（t260907-05 仲裁归因）：物化器以插件名声明
   // fixture profile（patch id/node_modules 链），被测 bundle 以同一插件名注册模块——
   // 跨树错窗（主树旧版物化器写旧名 × 泳道新 bundle 注册新名）= dsh 加载器
-  // 「loaded without registering …」客户端半挂载失败，横幅不出（M5「不在场」腿
+  // 「loaded without registering …」客户端半挂载失败，横幅不出（M5「不在场」子用例
   // 被环境错配捂成假绿，KI-051/046 同族）。泳道 profile/node_modules 五链在位后
   // （t260907-05 步5），本树 capture-lane 即可物化全量 temp profile——不再依赖主树。
   const captureLane = await import(pathToFileURL(join(

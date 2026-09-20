@@ -6,10 +6,10 @@ intent（守护的用户可感知行为/合同，dengzhufpv 260910 缺陷回归�
 - 正规入口创建链补传：ticket.py 同款 derive 调用（repo_write_set=写集）→ 多仓
   项目产出逐仓 repo_worktrees 明细（缺陷复现形态修复后必须双仓）；明细经
   ticket-start 二跳（dict workspace 转发）不丢（缺陷根因=此通道被堵死）；漏传=
-  单仓明细缺失（旧病灶形状对照腿）；单仓项目零回归（不激活）；
+  单仓明细缺失（旧病灶形状对照子用例）；单仓项目零回归（不激活）；
 - 保险丝A（开票拒收，fail-closed）：显式 worktree+成员仓写集 → ticket-start
   创建即拒收且红字**点名条目**（连接前拒收，零 Temporal 依赖；只锚「拒+点名」
-  不锚措辞）；对照腿不误伤——纯根仓写集放行、多仓写集合法派生（明细在）放行
+  不锚措辞）；对照子用例不误伤——纯根仓写集放行、多仓写集合法派生（明细在）放行
   （显式 worktree 不是绕过闸的通道，看写集归属不看派生路径）；
 - 逐仓物化落成（L1 硬断言）：prepare_workspace → 双仓树均为所属仓已注册
   worktree（git worktree list 绝对路径可验）+ 清单落盘两仓条目；
@@ -27,8 +27,8 @@ intent（守护的用户可感知行为/合同，dengzhufpv 260910 缺陷回归�
 只守「正规入口补传 + 双保险丝 + 裸入口不回归」缺陷回归面，不重复彼处 intent。
 
 环境口径（三态契约）：stdlib 面（shared 纯函数/git 夹具）系统 python3 可跑；
-temporalio 面（prepare/merge_check/merge 行为腿）缺失=ENV_FAIL exit 2 点名；
-docker/隔离台库缺席=ENV_FAIL 点名（台面腿），stdlib+temporalio 腿照跑。
+temporalio 面（prepare/merge_check/merge 行为子用例）缺失=ENV_FAIL exit 2 点名；
+docker/隔离台库缺席=ENV_FAIL 点名（台面子用例），stdlib+temporalio 子用例照跑。
 红线：一切被测子进程/模块的 Temporal 地址显式指隔离台或不可达桩（127.0.0.1:9），
 绝不触生产 7233/8233，绝不在生产 Temporal 上真建票（真建票只发生在一次性隔离
 台 namespace，跑完即拆——t260907-07 同款纪律）。
@@ -145,7 +145,7 @@ def member_repos(entries):
 
 def call_with_supported_fields(cls, **kwargs):
     """容错调参工厂：只传该 dataclass 实际支持的字段（通道字段未落地时被过滤，
-    行为腿自然红=TDD 信号，不因签名漂移假绿/崩溃）。"""
+    行为子用例自然红=TDD 信号，不因签名漂移假绿/崩溃）。"""
     import dataclasses
     names = {f.name for f in dataclasses.fields(cls)}
     return cls(**{k: v for k, v in kwargs.items() if k in names})
@@ -218,7 +218,7 @@ try:
     # ---------- 混合形态夹具（缺陷现场形态；L2/L3/台面项目共用） ----------
     mixed = build_mixed_project(tmp)
 
-    # 项目注册表夹具（L2 子进程腿与隔离台腿共用；utmr → 混合形态项目）
+    # 项目注册表夹具（L2 子进程命令与隔离台子用例共用；utmr → 混合形态项目）
     regroot = Path(tmp) / "reg"
     regdir = regroot / "utmr"
     regdir.mkdir(parents=True)
@@ -229,7 +229,7 @@ try:
     # ---------- temporalio 面：保险丝A/B + 逐仓物化硬断言 ----------
     if not temporalio_available():
         env_fail("temporalio 缺失——保险丝A（ticket-start 拒收面）/保险丝B（红灯面）"
-                 "/prepare 逐仓物化行为腿全靠真链路，无 stdlib 替代")
+                 "/prepare 逐仓物化行为子用例全靠真链路，无 stdlib 替代")
     else:
         import asyncio
         import agent_activities as aa  # noqa: E402
@@ -358,7 +358,7 @@ try:
                       "异常: %s: %s" % (type(e).__name__, e))
 
         # ---------- 保险丝A（子进程真入口，连接前拒收零 Temporal 依赖） ----------
-        # 注册表指夹具；TARGET 指不可达桩（拒收腿根本连不上；对照腿连不上=
+        # 注册表指夹具；TARGET 指不可达桩（拒收子用例根本连不上；对照子用例连不上=
         # 闸放行的判别面）——绝不触生产 7233/8233。
         env_stub = dict(os.environ)
         env_stub["SANDBAR_PROJECTS_DIR"] = str(regroot)
@@ -492,11 +492,11 @@ try:
     except SystemExit as e:
         stage_rc = e.code or 2
     except Exception as e:
-        env_fail("台面腿异常中断：%s: %s" % (type(e).__name__, e))
+        env_fail("台面子用例异常中断：%s: %s" % (type(e).__name__, e))
         stage_rc = 2
     if stage_rc == 2:
-        env_fail("docker/隔离台缺席：正规入口 CLI 全链腿与裸入口持久化腿不可执行——"
-                 "创建链形状/保险丝/物化腿已在本场跑完；arbitrate/merge 期 docker 环境必须全绿")
+        env_fail("docker/隔离台缺席：正规入口 CLI 全链子用例与裸入口持久化子用例不可执行——"
+                 "创建链形状/保险丝/物化子用例已在本场跑完；arbitrate/merge 期 docker 环境必须全绿")
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 sys.exit(summary())

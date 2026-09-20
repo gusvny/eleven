@@ -51,7 +51,7 @@ def check(name, cond, detail=""):
 
 
 def env_fail(reason):
-    """环境缺失：一律 ENV_FAIL exit 2（本套场景无 stdlib 替代腿——直调 activity）。"""
+    """环境缺失：一律 ENV_FAIL exit 2（本套场景无 stdlib 替代子用例——直调 activity）。"""
     global env_fail_n
     env_fail_n += 1
     print("ENV_FAIL " + reason, flush=True)

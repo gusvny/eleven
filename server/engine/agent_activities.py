@@ -957,7 +957,7 @@ def _read_result(path: Path) -> Optional[StageResult]:
     fc, fc_shape = normalize_files_changed(raw.get("files_changed"))
     legs, leg_shape, leg_dropped = normalize_handover_runs(raw.get("handover_runs"))
     # t260917-08（review N2）：回执若自带弃单名单（stub 路径成套落盘），读回时并集
-    # 保留（保序去重）——重读路径的 normalize 只会再见到合法腿（dropped=[]），
+    # 保留（保序去重）——重读路径的 normalize 只会再见到合法条目（dropped=[]），
     # 不并=名单蒸发；两源并存也不丢任一侧。
     _raw_dropped = raw.get("handover_dropped")
     if isinstance(_raw_dropped, list):
@@ -1912,7 +1912,7 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
     # STAGE_DISPATCH_KIND mapped by (workflow, stage) (e.g. ai-review → the
     # proofread reviewer's model). No hit = don't pass one — the agent uses the
     # profile's default model, no hard failure. The table path comes from the
-    # contract ①d paths.model_routes declaration (t260910-14 重构；t260914-05 兜底腿
+    # contract ①d paths.model_routes declaration (t260910-14 重构；t260914-05 兜底分支
     # 退役)：resolve_routes_table 单点解析（真源=声明指向文件；**不再回落任何仓内表**）。
     # 任何非 ok 态在此点名留痕（state+path+指纹+error）；无表可查时不打模型 patch，
     # 并**再点名一条「本轮模型=profile 默认」**——agent 仍可跑，但绝不静默回落（KI-030 收窄）。
@@ -1965,7 +1965,7 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
     if os.environ.get("SANDBAR_AGENT_RESUME", "1") != "0" and role:
         runner = cwd / "server" / "headless-resume" / "node.ts"
         if not runner.is_file() and agent_runtime.runtime_mode() == "docker":
-            # 容器执行面（t260913-04，A 腿真链实测缺陷修复）：runner 缺泳道内副本时会回落到
+            # 容器执行面（t260913-04，A 子用例真链实测缺陷修复）：runner 缺泳道内副本时会回落到
             # REPO_ROOT（引擎主树=宿主路径），该路径在容器里**不可见**（红线 2：不挂工作区
             # 以外宿主路径）→ dsh boot 直接 ERR_MODULE_NOT_FOUND「…/server/headless-resume/
             # node.ts」而整段全灭（实测：真 worker+docker runtime 的 implement 段容器内
@@ -2021,7 +2021,7 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
         # 一次性钉死 patch（内容单点=agent_runtime.sandbox_pin_yaml；每次 spawn 重写）：
         # ① sandbox-policy.mode 字面量 'danger-full-access'（宿主 260914 A 案：容器内
         #    全权，隔离由挂载面承担——容器只见本票泳道，宿主边界守卫=neglock 场景的
-        #    「宿主边界不可达」腿；字面量仍压掉 dsh-base 的 !!js env 表达式与 env 面
+        #    「宿主边界不可达」子用例；字面量仍压掉 dsh-base 的 !!js env 表达式与 env 面
         #    DSH_PERMISSION_MODE 任何值，「模式不被篡改」这层机械保障不变）+
         #    workspaceRoot 一并写（C1：防整段替换丢授予面）+ 入口级 disabled:false
         #    （压 profile 层 disabled 注入）；
@@ -2087,7 +2087,7 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
         # stub chain that needs to demo the write-set refresh passes the list
         # explicitly, and the gate's own judgement is never loosened.
         # t260908-01：可注入的桩段时长 SANDBAR_AGENT_STUB_DELAY_SEC（秒，缺省 0=
-        # 即时回执，既有语义不变）——段间暂停集成腿需要确定性的「段在飞」窗口
+        # 即时回执，既有语义不变）——段间暂停集成子用例需要确定性的「段在飞」窗口
         #（在飞中发 pause、断言段自然跑完才停门口）；无此旋钮桩段秒过，信号永远
         # 落在段外，在飞粒度不可验。睡眠在写结果文件之前=在飞窗真实拉长。
         _stub_delay = float(os.environ.get("SANDBAR_AGENT_STUB_DELAY_SEC") or 0)
@@ -2132,7 +2132,7 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
             "deliverables": stub.deliverables, "files_changed": stub.files_changed,
             "evidence": stub.evidence, "prompt": args.prompt,
             # t260917-08（review N2）：新字段随桩回执落盘——幂等缓存路径走
-            # _read_result 读回，不写=缓存命中丢信号（env 位+腿+弃单名单成套）。
+            # _read_result 读回，不写=缓存命中丢信号（env 位+命令+弃单名单成套）。
             "env_fail": stub.env_fail, "env_reason": stub.env_reason,
             "handover_runs": stub.handover_runs,
             "handover_dropped": stub.handover_dropped,
@@ -3252,7 +3252,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
     #      建了成员仓。位次刻意在 verify_lane 项（下一项）之前：落 checks[:-1] →
     #      other_red=True → conflict=False → blocked 交人工，绝不进自动消解回路
     #      （KI-047 教训）；也让 gitlink 权威红先于 verify_lane 的「越界写」误诊文案
-    #      （其 ==腿未归一，在 server/tools/ 本票不修）出现。
+    #      （其 ==分支未归一，在 server/tools/ 本票不修）出现。
     checks.append(_gitlink_check_item(str(sc.get("base_ref") or ""), sc["branch"], sc["repo"]))
 
     # 3. verify_lane code inside the lane (runs the lane's own admin.py copy: lane
@@ -4410,7 +4410,7 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
         # =根树条目；成员树趟的仓内结构归 teardown_lane 的容器扫描统一守，不在本趟
         # 重复判）。发现即 failed（ok=False）：落账虽已完成，但泳道保留=对象库可抢
         # 救，回执 failed → workflow blocked 交人工——对象库不可恢复性 > 收口回执
-        # 整洁（与「清理失败只 warn」不同腿：残留=可回收垃圾，嵌套仓对象库=不可回
+        # 整洁（与「清理失败只 warn」不同分支：残留=可回收垃圾，嵌套仓对象库=不可回
         # 收）；重复 merge 幂等安全（取舍 d），补账无双重落账面。守卫自身 IO 故障
         # → 同样 failed 点名，绝不静默放拆。
         if wt.parent.name in (".lane", ".worktrees") and wt.is_dir():
@@ -4779,8 +4779,8 @@ async def teardown_lane(args: MergeArgs) -> MergeResult:
     # 拆除守卫（t260916-20）：任何破坏性命令前，扫泳道树内未注册嵌套仓——发现即
     # 整体 failed（blocked 交人工，一物不拆）。根树条目的 worktree remove --force
     # 对容器是整树带走，未注册嵌套仓（含其 .git 对象库）被连带销毁且不可恢复
-    # （nusuyou t260916-08 实案：600 文件静默丢失）。与「明细损坏→failed」同腿
-    # （人工处置，绝不静默），与「git 清理失败→ok+点名」不同腿（残留=可回收垃圾；
+    # （nusuyou t260916-08 实案：600 文件静默丢失）。与「明细损坏→failed」同分支
+    # （人工处置，绝不静默），与「git 清理失败→ok+点名」不同分支（残留=可回收垃圾；
     # 嵌套仓对象库=不可回收）。守卫自身 IO 故障 → 同样 failed 点名（守卫失效=放大
     # 面，绝不静默放拆）；容器已不在盘上 → 空清单放行（幂等重跑语义维持）。
     registered_trees = [Path(str(sc["tree"])) for sc in scopes]
@@ -5459,7 +5459,7 @@ async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
 BATCH_TIMEOUT_SEC = int(os.environ.get("SANDBAR_INTEG_BATCH_TIMEOUT_SEC") or 3000)
 
 
-# t260917-08：移交命令单腿超时=场景单命令同款容量参数（INTEG_CMD_TIMEOUT_SEC，缺省
+# t260917-08：移交命令单条超时=场景单命令同款容量参数（INTEG_CMD_TIMEOUT_SEC，缺省
 # 900s——执行面容量而非判定放宽，sandbox_pin 注记同口径）。
 HANDOVER_LEG_TIMEOUT_SEC = INTEG_CMD_TIMEOUT_SEC
 
@@ -5518,7 +5518,7 @@ async def run_handover_legs(handover_runs, cwd: Path) -> Dict[str, Any]:
     验收②「移交清单被后续段消费并执行」的离线桩/场景可直调真实现，不必起真
     verify_lane。返回 {ran, passed, failed, details}（details 条目 name 带
     handover: 前缀，与场景明细同形状，供 arb_ctx/票面单源消费）；
-    非 dict 腿=记名不执行（失败分支计数，fail-closed）。
+    非 dict 条目=记名不执行（失败分支计数，fail-closed）。
 
     260920（宿主令「A」）：单条起飞异常（命令进程起不来/环境异常等）就地记名**失败
     分支**，绝不外抛——实案 t260920-01：一条命令的 FileNotFoundError 把整个集测活动
@@ -5657,10 +5657,10 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     activity.logger.info("[%s] 场景汇总：ran=%s pass=%s fail=%s env_fail=%s",
                          ticket_id, out.ran, out.passed, out.failed, out.env_fail)
     # ---- t260917-08 移交命令：worker 执行面承接 ----
-    # 前序 agent 段沙箱受限期间交接的验证腿，本段逐腿代跑（整单执行器
+    # 前序 agent 段沙箱受限期间移交的验证命令，本段逐条代跑（整单执行器
     # run_handover_legs 单独成函数：离线桩/场景可直调真消费路径）。红线④的机械面：
-    # 腿结果**单列计数**（handover_*），不进 ran/passed/failed 主口径——闸判定
-    # 零改动；腿明细进 details（name=handover:<name>）随 arb_ctx 上仲裁，失败分支
+    # 命令结果**单列计数**（handover_*），不进 ran/passed/failed 主口径——闸判定
+    # 零改动；命令明细进 details（name=handover:<name>）随 arb_ctx 上仲裁，失败分支
     # 处置语义由仲裁契约句承接（dev_lane FLOW_BRIEF['arbitrate']），不在本层
     # 改判任何红绿。
     out.handover_ran = out.handover_passed = out.handover_failed = 0

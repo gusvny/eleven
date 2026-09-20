@@ -4,9 +4,9 @@
 - C3：_prepare_agent_spawn 缺省分支（不传 agent_home）与显式 agent_home=None 逐字节相等
   （cmd 列表与 env dict 全等），且 DSH_HOME 仍=cwd/.dsh——dev-lane 全体 spawn 热路径
   零回归的显式断言；
-- agent_home 覆盖腿：DSH_HOME 钉到指定目录、cwd/.dsh 不落任何文件；
+- agent_home 覆盖子用例：DSH_HOME 钉到指定目录、cwd/.dsh 不落任何文件；
 - 活动输入闸 fail-closed（缺 instance/period/base_dir/base 不存在/缺 agent_home）；
-- 桩腿：合法夹具→铸 id 返回；畸形夹具/夹具缺失→点名失败（与真 agent 同契约）；
+- 桩子用例：合法夹具→铸 id 返回；畸形夹具/夹具缺失→点名失败（与真 agent 同契约）；
 - 真 spawn 链（SANDBAR_INSPECT_CMD 注入假脚本）：Popen→日志→围栏解析→铸 id 全绿；
   argv 末尾=persona/read-only 两 patch + prompt；DSH_HOME=agent_home；退出码非零/
   无围栏输出→点名失败；超时→「agent 未完成」不假绿 + 进程组回收干净。
@@ -98,7 +98,7 @@ def test_inspect_input_gates_fail_closed(tmp_path, base_dir, monkeypatch, beats)
 
 def test_inspect_paths_derived_when_unsupplied(base_dir, tmp_path, monkeypatch, beats):
     """agent_home/suite_receipt 缺省=活动侧按 INSPECTION_DIR 派生（workflow 体零路径
-    计算、缺省传参兼容）；桩腿下派生路径不影响结果。"""
+    计算、缺省传参兼容）；桩子用例下派生路径不影响结果。"""
     monkeypatch.setenv("SANDBAR_INSPECT_STUB", "1")
     fixture = tmp_path / "fixture.json"
     fixture.write_text("```json\n%s\n```\n" % json.dumps(
@@ -110,7 +110,7 @@ def test_inspect_paths_derived_when_unsupplied(base_dir, tmp_path, monkeypatch, 
     assert res["ok"] is True, res
 
 
-# ---------- 桩腿 ----------
+# ---------- 桩子用例 ----------
 
 def _fixture_findings(base: Path) -> list:
     return [{"subject": "src.py 值未使用", "severity": "low",
@@ -130,7 +130,7 @@ def test_inspect_stub_ok_path(base_dir, tmp_path, monkeypatch, beats):
     assert len(fs) == 1 and fs[0]["id"] and fs[0]["scan"] == "agent"
     assert res["result"]["meta"]["stub"] is True
     assert beats and "stub" in beats[-1][0]
-    assert not (base_dir / ".dsh").exists()      # 桩腿同样不碰基座
+    assert not (base_dir / ".dsh").exists()      # 桩子用例同样不碰基座
 
 
 def test_inspect_stub_malformed_and_missing_named(base_dir, tmp_path, monkeypatch, beats):
@@ -251,7 +251,7 @@ def test_inspect_timeout_not_green_and_reaped(base_dir, tmp_path, monkeypatch, b
     sleeper.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
     monkeypatch.setenv("SANDBAR_INSPECT_CMD", "%s %s" % (sys.executable, sleeper))
     # 预算 0.5s < 复核余量 60s → 内部 deadline 即时到期（预算误配显性化路径，
-    # 同时覆盖超时腿的 reap/不假绿语义；生产缺省 1800s 不受影响）
+    # 同时覆盖超时子用例的 reap/不假绿语义；生产缺省 1800s 不受影响）
     res = asyncio.run(aa.run_inspection_inspect(
         _args(base_dir, tmp_path, timeout_sec=0.5)))
     assert res["ok"] is False

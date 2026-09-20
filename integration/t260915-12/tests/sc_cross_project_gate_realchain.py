@@ -14,7 +14,7 @@ intent（登记于 run_scenarios.py，名 t260915-12-gate-real-chain）：
   ④ 身份出处可审计：显式参数 > env(SANDBAR_CALLER_PROJECT) > cwd 窄兜底 > undeclared，
     回执 identity_src 落词汇表 arg|env|cwd|none；
   ⑤ undeclared（B 策略）→ 放行 + 强制记名（回执 identity_class=undeclared + 入越权
-    对账面）——**本腿钉的是 B 策略现状契约**；跟进插件票接线后翻 A（undeclared=拒收）
+    对账面）——**本子用例钉的是 B 策略现状契约**；跟进插件票接线后翻 A（undeclared=拒收）
     时由翻严票同步改写本相，不属本票回归面；
   ⑥ cwd 兜底仓树排除（review C1 探测器）：cwd=引擎仓内子目录必须 undeclared，不得按
     注册目录前缀误判成 declared（注册表里专门放了 dirs=[引擎仓根] 的探测条目）；
@@ -73,7 +73,7 @@ REPO_KEY = "sc12repo"              # dirs=[引擎仓根] 的探测条目（相�
 WHO = "宿主"                       # 写 op 操作人（人名语义，由调用方注入）
 CLIENT_PY = os.path.join(REPO, "server", "engine", "client.py")
 TICKET_PY = os.path.join(REPO, "server", "tools", "ticket.py")
-ENGINE_SUBDIR = os.path.join(REPO, "server", "engine")  # 仓树内子目录（C1 探测腿 cwd）
+ENGINE_SUBDIR = os.path.join(REPO, "server", "engine")  # 仓树内子目录（C1 探测子用例 cwd）
 FIXTURE_REPO_DIR = "fixture-repo"  # make_fixture_repo 在 tmp 下建的目录名
 
 STATS = {"ok": 0, "fail": 0}
@@ -82,7 +82,7 @@ STATS = {"ok": 0, "fail": 0}
 # ---------- 入口封装（client.py 可控 cwd 版；run_poc_client 钉死 cwd=REPO 不够用） ----------
 
 def client(py, sub, args, env, cwd=None, timeout=180):
-    """spawn <py> client.py <sub> <argsJSON>，cwd 可调（身份 cwd 兜底腿的探测面）。"""
+    """spawn <py> client.py <sub> <argsJSON>，cwd 可调（身份 cwd 兜底分支的探测面）。"""
     p = subprocess.run([py, CLIENT_PY, sub, json.dumps(args, ensure_ascii=False)],
                        env=env, cwd=cwd or REPO, capture_output=True, text=True,
                        timeout=timeout)
@@ -221,7 +221,7 @@ def main():
                               stub_log, disable_ki061=False, arb_verdict="pass")
         check(worker.poll() is None, "worker 已拉起 pid=%s" % worker.pid)
         # 建票走 undeclared（无 env、cwd=仓根=仓树内）——B 策略下放行；建票面闸的
-        # 负腿在相三专门打。
+        # 反用例在相三专门打。
         rc, out = run_poc_client(py, "ticket-start", {
             "ticket_id": TID, "template_id": "dev-lane", "project": PROJ_KEY,
             "title": "t260915-12 跨项目写闸真链路面", "write_set": ["docs/"]}, env)
@@ -232,7 +232,7 @@ def main():
             return s if isinstance(s, dict) and s.get("ticket_id") == TID else None
         if poll(_alive, 120) is None:
             wait_worker_alive(fail, worker, os.path.join(tmp, "worker.log"))
-            fail.bail("workflow snapshot 不可读（票未起或 worker 未认领），后续腿全跑不真")
+            fail.bail("workflow snapshot 不可读（票未起或 worker 未认领），后续子用例全跑不真")
         snap0 = query_snapshot(py, env, TID)
         base_uses = len(cpu_uses(snap0))
         base_refused = len(refused_rows(snap0))
@@ -240,7 +240,7 @@ def main():
         print("  · 基线：uses=%d refused=%d paused=%s" % (base_uses, base_refused, base_paused),
               flush=True)
 
-        # ---------------- 相二：正腿 declared 同项目零影响 + 身份键 ----------------
+        # ---------------- 相二：正用例 declared 同项目零影响 + 身份键 ----------------
         n0 = len(audit_rows(admin_log))
         env_p = env_with(env, "SANDBAR_CALLER_PROJECT", PROJ_KEY)
         rc, out = client(py, "ticket", {"op": "pause", "id": TID, "who": WHO}, env_p)
@@ -259,11 +259,11 @@ def main():
         check(rc == 0 and receipt(out).get("ok") is True, "同项目 resume 放行")
         check(wait_paused(py, env, False), "resume 行为真生效（paused=False）")
 
-        # ---------------- 相三：负腿 declared 不匹配 fail-closed（ruling/sign/ticket-start） ----------------
+        # ---------------- 相三：反用例 declared 不匹配 fail-closed（ruling/sign/ticket-start） ----------------
         env_o = env_with(env, "SANDBAR_CALLER_PROJECT", OTHER_KEY)
         n0 = len(audit_rows(admin_log))
         rc, out = client(py, "ticket", {"op": "ruling", "id": TID, "who": WHO,
-                                        "note": "相三负腿：他项目身份不得注入裁决"}, env_o)
+                                        "note": "相三反用例：他项目身份不得注入裁决"}, env_o)
         doc = receipt(out)
         check(doc.get("ok") is False, "他项目 ruling 拒收（doc=%s）"
               % json.dumps(doc, ensure_ascii=False)[:160])
@@ -279,7 +279,7 @@ def main():
               "他项目 sign 同形状拒收（kind=%r）" % doc2.get("kind"))
         rc3, out3 = run_poc_client(py, "ticket-start", {
             "ticket_id": "t26091512b-x", "template_id": "dev-lane", "project": PROJ_KEY,
-            "title": "相三负腿：他项目建票"}, env_o)
+            "title": "相三反用例：他项目建票"}, env_o)
         doc3 = receipt(out3)
         check(doc3.get("ok") is False and doc3.get("kind") == "cross_project_refused",
               "他项目 ticket-start 建他项目票拒收（kind=%r）" % doc3.get("kind"))
@@ -299,10 +299,10 @@ def main():
         doc = receipt(out)
         check(rc == 0 and doc.get("ok") is True and doc.get("identity_src") == "arg",
               "显式参数压过 env（identity_src=arg，本票项目放行）")
-        check(wait_paused(py, env, True), "arg 腿 pause 生效")
+        check(wait_paused(py, env, True), "arg 子用例 pause 生效")
         rc, out = client(py, "ticket", {"op": "resume", "id": TID, "who": WHO}, env_p)
-        check(rc == 0 and receipt(out).get("ok") is True, "arg 腿 resume 放行")
-        check(wait_paused(py, env, False), "arg 腿状态可逆")
+        check(rc == 0 and receipt(out).get("ok") is True, "arg 子用例 resume 放行")
+        check(wait_paused(py, env, False), "arg 子用例状态可逆")
         rc, out = client(py, "ticket", {"op": "pause", "id": TID, "who": WHO,
                                         "caller_project": OTHER_KEY},
                          env_with(env, "SANDBAR_CALLER_PROJECT", PROJ_KEY))
@@ -313,7 +313,7 @@ def main():
 
         # ---------------- 相五：越权旗 → 放行+记名+可对账（工单 ③） ----------------
         by = "宿主"
-        reason = "t260915-12 场景：宿主本人跨项目处置（越权旗腿）"
+        reason = "t260915-12 场景：宿主本人跨项目处置（越权旗子用例）"
         n0 = len(audit_rows(admin_log))
         rc, out = client(py, "ticket", {"op": "pause", "id": TID, "who": WHO,
                                         "cross_project": {"by": by, "reason": reason}},
@@ -339,8 +339,8 @@ def main():
         check(any(r.get("override") is True for r in rows), "admin.log override=true 行在")
         check(wait_paused(py, env, True), "旗放行 pause 真生效")
         rc, out = client(py, "ticket", {"op": "resume", "id": TID, "who": WHO}, env_p)
-        check(rc == 0 and receipt(out).get("ok") is True, "旗腿后 resume 放行")
-        check(wait_paused(py, env, False), "旗腿后 resume 复位")
+        check(rc == 0 and receipt(out).get("ok") is True, "旗子用例后 resume 放行")
+        check(wait_paused(py, env, False), "旗子用例后 resume 复位")
         # 第二笔：重发=按笔记名（对账口径以笔计）
         rc, out = client(py, "ticket", {"op": "ruling", "id": TID, "who": WHO,
                                         "note": "相五第二笔：旗放行裁决注入",
@@ -395,11 +395,11 @@ def main():
               % len(cpu_uses(query_snapshot(py, env, TID))))
         check(wait_paused(py, env, True), "undeclared pause 生效")
         rc, out = client(py, "ticket", {"op": "resume", "id": TID, "who": WHO}, env_p)
-        check(rc == 0 and receipt(out).get("ok") is True, "undeclared 腿 resume 放行")
-        check(wait_paused(py, env, False), "undeclared 腿状态可逆")
+        check(rc == 0 and receipt(out).get("ok") is True, "undeclared 子用例 resume 放行")
+        check(wait_paused(py, env, False), "undeclared 子用例状态可逆")
 
         # ---------------- 相八：cwd 兜底两形（C1 探测器 + 正形） ----------------
-        # 实现段勘误（t260915-12 implement）：本相第一条腿（仓内子目录 undeclared pause）
+        # 实现段勘误（t260915-12 implement）：本相第一条子用例（仓内子目录 undeclared pause）
         # 按 B 策略契约照常**记名 +1**——相九/相十的 uses 计数基线据此从 base+3 起算
         # （原稿按 base+3 钉相九/相十，漏计这一笔，属场景计数漂移非实现偏差）。
         rc, out = client(py, "ticket", {"op": "pause", "id": TID, "who": WHO},
@@ -415,7 +415,7 @@ def main():
               and doc.get("caller_project") == PROJ_KEY,
               "cwd 在注册项目 dir 内=推导 declared（identity_src=cwd，%r/%r）"
               % (doc.get("caller_project"), doc.get("identity_src")))
-        check(wait_paused(py, env, False), "cwd 正形腿 resume 生效")
+        check(wait_paused(py, env, False), "cwd 正形子用例 resume 生效")
 
         # ---------------- 相九：workflow 第二道直发 SDK（C5 真 stamp 解码） ----------------
         rc, out = direct_pause_stamp(py, state, TID, WHO, "相九：直发他项目章无旗",
@@ -435,7 +435,7 @@ def main():
         check(paused_flag(s) is False, "第二道拒收不执行（paused 不变）")
         check(len(cpu_uses(s)) == base_uses + 4, "第二道拒收不记名（基线含相八 undeclared 记名笔）")
         rc, out = direct_pause_stamp(py, state, TID, WHO, "相九：直发他项目章带旗",
-                                     OTHER_KEY, "相九越权旗理由（直发 SDK 送达腿）")
+                                     OTHER_KEY, "相九越权旗理由（直发 SDK 送达子用例）")
 
         def _uses4():
             s = query_snapshot(py, env, TID)
@@ -444,11 +444,11 @@ def main():
         check(s is not None, "带头旗直发=记名放行且 pause 生效（uses=%d paused=%s）"
               % (len(cpu_uses(query_snapshot(py, env, TID))),
                  paused_flag(query_snapshot(py, env, TID))))
-        # 兼容腿须在未暂停态发（paused 时会被「重复 pause」拒收掩护，验不到无章面）
+        # 兼容子用例须在未暂停态发（paused 时会被「重复 pause」拒收掩护，验不到无章面）
         rc, out = client(py, "ticket", {"op": "resume", "id": TID, "who": WHO}, env_p)
-        check(rc == 0 and receipt(out).get("ok") is True, "兼容腿前 resume 放行")
-        check(wait_paused(py, env, False), "兼容腿前复位（paused=False）")
-        rc, out = direct_pause_stamp(py, state, TID, WHO, "相九：无章兼容腿", None, None)
+        check(rc == 0 and receipt(out).get("ok") is True, "兼容子用例前 resume 放行")
+        check(wait_paused(py, env, False), "兼容子用例前复位（paused=False）")
+        rc, out = direct_pause_stamp(py, state, TID, WHO, "相九：无章兼容子用例", None, None)
 
         def _compat():
             s = query_snapshot(py, env, TID)
@@ -477,7 +477,7 @@ def main():
         rc, out = client(py, "ticket", {"op": "query", "ticket_id": TID}, env_o)
         check(rc == 0 and receipt(out).get("ok") is True, "读面零闸（他项目身份 query 放行）")
         n0 = len(audit_rows(admin_log))
-        rc, out = run_poc_client(py, "cancel", {"workflow_id": TID, "reason": "相十一负腿"},
+        rc, out = run_poc_client(py, "cancel", {"workflow_id": TID, "reason": "相十一反用例"},
                                  env_o)
         doc = receipt(out)
         check(doc.get("ok") is False and doc.get("kind") == "cross_project_refused",
@@ -485,7 +485,7 @@ def main():
         rows = audit_rows(admin_log)[n0:]
         check(any(r.get("override") is False for r in rows), "cancel 拒收 admin.log 行在")
         rc, out = run_poc_client(py, "cancel",
-                                 {"workflow_id": TID, "reason": "相十一正腿收尾"},
+                                 {"workflow_id": TID, "reason": "相十一正用例收尾"},
                                  env_with(env, "SANDBAR_CALLER_PROJECT", PROJ_KEY))
         doc = receipt(out)
         # terminated 是业务结果字段：在 result 内层（README §8.1 既有契约 {ok, result}——

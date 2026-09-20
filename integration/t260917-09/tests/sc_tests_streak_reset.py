@@ -7,19 +7,19 @@ intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：
   dev_lane.py:1157 旧注释 cumulative 是矛盾孤例）——任何非 tests-fault 边
   （code-fault 打回 / 人工接受 / 打回重验等重入）之后计数必须清零，长票不再被
   陈年轮次假封（260917 三票 t260916-19/-21、t260917-04 的「迭代超限转人工」
-  共性机制）。上限本体不拆：连续 tests-fault 撞上限仍 blocked（对照腿）。
+  共性机制）。上限本体不拆：连续 tests-fault 撞上限仍 blocked（对照子用例）。
   与工单验收①的映射：[tf,tf,pass,tf×4] 矩阵在 L1 纯函数层（developer 交付）；
   本场景锁 L3 可观测的复位边——pass 判决直接路由 acceptance（复位只在重入时
   可观测），故 L3 钉 code-fault 复位边 + rework 重入复位边（与 pass/authz 复位
   共用同一单点收口），这是用户请求里「被外部打断的长票必然累积到上限」的直击面。
 
-三腿（顺序执行，各腿单票单 worker 单舞台）：
+三子用例（顺序执行，各子用例单票单 worker 单舞台）：
   相一（code-fault 复位边）：桩判决序列 tf,tf,code-fault,tf,tf,tf,tf,tf（耗尽
         回落 pass）→ 连续语义下第 3 判决打回 implement 后计数清零，后续 5 轮
         tests-fault 计 1..5 恒迭代，第 9 判决回落 pass 进 acceptance——全程
         不 blocked；handoff「测试集迭代（第 1 轮）」出现 ≥2 次（复位签名）。
         旧累计语义下第 8 判决必 blocked（语义反转强断言）。
-  相二（对照腿，上限仍在）：恒 tests-fault → 第 7 判决 blocked，回执含「超限」
+  相二（对照子用例，上限仍在）：恒 tests-fault → 第 7 判决 blocked，回执含「超限」
         且出路关键词 authorize/rework/ruling/pause 全在（要求④：出路可执行，
         不许只写「转人工判读」）。
   相三（rework 重入复位边）：tf×5（计到上限邻界）→ 人 op=rework 打回 implement
@@ -32,7 +32,7 @@ intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：
   · 本票 sc_tests_false_escalation_guard 锁「假封防护」（抖动/环境红不计轮、
     不在册保守计轮、豁免超限面出路）——与本条（连续语义复位边）不同面不互替。
 驱动形态：lib_ki061 台架同形 + 本票自有**序列桩**（lib_ki061.ARB_STUB 是常量
-  verdict，序列耗尽确定性回落 pass——主腿确定性终态，防第 N+1 判决撞上限造成
+  verdict，序列耗尽确定性回落 pass——主子用例确定性终态，防第 N+1 判决撞上限造成
   场景自身假红）。
 三态：PASS exit 0 / FAIL exit 1 / ENV_FAIL exit 2（docker/镜像/舞台缺件=环境红
   点名，不写 SKIP）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
@@ -64,11 +64,11 @@ PHASES = [
              "tests-fault", "tests-fault"],
      "title": "t260917-09 相一：code-fault 复位边连续语义"},
     {"tid": "t26091709b-cap", "key": "t26091709b",
-     # 恒 tests-fault=长序列表达（桩「耗尽回落 pass」是主腿确定性终态机制；单元素
+     # 恒 tests-fault=长序列表达（桩「耗尽回落 pass」是主子用例确定性终态机制；单元素
      # 序列第 2 判决即耗尽回落，恒 tf 必须用远超判决数的长度表达——blocked 会在
      # 第 7 判决停住，40 远够）
      "seq": ["tests-fault"] * 40,
-     "title": "t260917-09 相二：上限仍在对照腿"},
+     "title": "t260917-09 相二：上限仍在对照子用例"},
     {"tid": "t26091709c-rework", "key": "t26091709c",
      "seq": ["tests-fault"] * 7,
      "title": "t260917-09 相三：rework 重入复位边"},
@@ -118,7 +118,7 @@ def wait_terminal(py, env, tid, worker, wlog, stub_log, fail, budget):
 def run_phase(py, bench, fail, check, stage, audit_env, tmp, ph):
     tid, key, seq = ph["tid"], ph["key"], ph["seq"]
     # 每相独立桩账本（tag=key）：桩判决序号=账本行数，跨相共享会串相
-    # （相二首判读到相一行数 → 直接回落 pass，恒 tf 腿全废）。
+    # （相二首判读到相一行数 → 直接回落 pass，恒 tf 子用例全废）。
     stub_path, stub_log = t09.write_stub(tmp, key)
     wlog = os.path.join(tmp, "%s-worker.log" % tid)
     reg_dir = bench.write_registry(os.path.join(tmp, "reg-%s" % key), key,
@@ -143,7 +143,7 @@ def run_phase(py, bench, fail, check, stage, audit_env, tmp, ph):
 
 
 def phase_drive(py, env, tid, worker, wlog, stub_log, fail, check):
-    """相一/相二共用驱动：等终态并按腿断言。"""
+    """相一/相二共用驱动：等终态并按子用例断言。"""
     is_control = tid.endswith("-cap")
     kind, snap = wait_terminal(py, env, tid, worker, wlog, stub_log, fail,
                                POLL_DRIVE)

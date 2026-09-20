@@ -14,10 +14,10 @@ dev_lane（A：_consume_rework 别名直达 + 显式拒收 + 留痕保原始目�
   B. A 行为：_consume_rework 三分支（别名/词表/拒收，_mk_wf 壳族先例，run() 主循环
      壳驱动仓内无先例——叶级不变式 + 结构性源码锁，真链路由 selfcheck 守）；
      别名留痕保原始目标（review C3）；_gate_refusal_repeat_suffix 同批复判点名。
-  C. B 行为（真 git 临时仓，tmp 自足）：M 腿（回滚+diff 留档+二次 settle 绿+分支零
-     删除+diff 可 apply）、M+换段腿（design 面无 D 出现）、?? 腿（挪档转绿）、
-     D 腿（拒绝+人处不动工作区）、rename 对腿、protected 腿（一律不动）、staged 腿
-     （拒绝+人处）、畸形输入腿、judged_files 腿。
+  C. B 行为（真 git 临时仓，tmp 自足）：M 子用例（回滚+diff 留档+二次 settle 绿+分支零
+     删除+diff 可 apply）、M+换段子用例（design 面无 D 出现）、?? 子用例（挪档转绿）、
+     D 子用例（拒绝+人处不动工作区）、rename 对子用例、protected 子用例（一律不动）、staged 子用例
+     （拒绝+人处）、畸形输入子用例、judged_files 子用例。
   D. 源码锁：REWORK_STAGE_ALIASES 键 ⊆ STAGES id 且落点 ∈ PHASE_MAIN_CHAIN；
      _settle_worktree_lane face 无缺省 + 三调用点接线；函数内无裸 settle 标签；
      消费点门内路径 refusal_note→_blocked。
@@ -179,7 +179,7 @@ def test_c_note_wording_matches_judged_face():
 
 
 def test_c_malformed_inputs_fail_closed():
-    # 畸形输入腿（岗位纪律）：不安全路径不进判定面、非串丢弃
+    # 畸形输入子用例（岗位纪律）：不安全路径不进判定面、非串丢弃
     for bad in (None, 123, "", "../integration/sc_x.py", "/abs/sc_x.py",
                 "integration/sc_x?.py"):
         assert not pg._is_scenario_script(bad), repr(bad)
@@ -295,7 +295,7 @@ def test_a_source_locks():
     assert src.count('self._gate_refusal_repeat_suffix(') == 2
 
 
-# ================= C. B 行为：真 git 临时仓腿矩阵 =================
+# ================= C. B 行为：真 git 临时仓子用例矩阵 =================
 
 def _settle(wt: Path, stage_id: str, **kw):
     kw.setdefault("write_set", ["integration"])
@@ -306,7 +306,7 @@ def _settle(wt: Path, stage_id: str, **kw):
 
 
 def test_b_modified_unauthorized_is_reverted_with_diff(lane):
-    """M 腿（实案形态）：tracked 越权修改 → 回滚+diff 留档 → 二次 settle 绿，
+    """M 子用例（实案形态）：tracked 越权修改 → 回滚+diff 留档 → 二次 settle 绿，
     分支零删除落盘，agent 修改可从 diff 还原。"""
     root, wt = lane
     f = wt / "integration" / "lint_tests.py"
@@ -338,7 +338,7 @@ def test_b_modified_unauthorized_is_reverted_with_diff(lane):
 
 
 def test_b_reverted_no_deletion_reaches_design_stage(lane):
-    """M+换段腿：处置后换 design_integration_tests 面（prefixes integration），
+    """M+换段子用例：处置后换 design_integration_tests 面（prefixes integration），
     无 D 出现、无删除可落盘——v1 挪档方案的外漏险被状态分流堵死。"""
     root, wt = lane
     (wt / "integration" / "lint_tests.py").write_text("HACKED=1\n", encoding="utf-8")
@@ -351,7 +351,7 @@ def test_b_reverted_no_deletion_reaches_design_stage(lane):
 
 
 def test_b_untracked_moved_to_quarantine(lane):
-    """?? 腿：未跟踪越权新建 → 挪档转绿（目录树保留、manifest 在档）。"""
+    """?? 子用例：未跟踪越权新建 → 挪档转绿（目录树保留、manifest 在档）。"""
     root, wt = lane
     rogue = wt / "integration" / "rogue.py"
     rogue.parent.mkdir(parents=True, exist_ok=True)
@@ -369,7 +369,7 @@ def test_b_untracked_moved_to_quarantine(lane):
 
 
 def test_b_deleted_and_staged_left_to_human(lane):
-    """D 腿 + staged 腿：删除与暂存态越权不自动动（fail-closed 留人工），
+    """D 子用例 + staged 子用例：删除与暂存态越权不自动动（fail-closed 留人工），
     拒绝 note 不含「已自动处置」。"""
     root, wt = lane
     (wt / "integration" / "lib_env.py").unlink()  # D 态越权
@@ -378,7 +378,7 @@ def test_b_deleted_and_staged_left_to_human(lane):
     assert "本轮已自动处置" not in note
     assert " D integration/lib_env.py" in _status(wt)  # 原样保留
     assert _head_count(wt) == int(_git(root, "rev-list", "--count", "main").stdout.strip())
-    # staged 腿：正常流程闸判定先于 add，此处人为构造 staged 新增（A 态）
+    # staged 子用例：正常流程闸判定先于 add，此处人为构造 staged 新增（A 态）
     (wt / "integration" / "staged_rogue.py").write_text("S=1\n", encoding="utf-8")
     _git(wt, "add", "integration/staged_rogue.py")
     note2 = _settle(wt, "arbitrate")
@@ -388,7 +388,7 @@ def test_b_deleted_and_staged_left_to_human(lane):
 
 
 def test_b_rename_pair_half_remediated(lane):
-    """rename 对腿（D+??）：?? 半被挪档、D 半留人工——两态分流互不吞。"""
+    """rename 对子用例（D+??）：?? 半被挪档、D 半留人工——两态分流互不吞。"""
     root, wt = lane
     (wt / "integration" / "lib_env.py").unlink()               # D（旧路径）
     new = wt / "integration" / "renamed_rogue.py"              # ??（新路径）
@@ -401,7 +401,7 @@ def test_b_rename_pair_half_remediated(lane):
 
 
 def test_b_protected_refusal_never_touched(lane):
-    """protected 腿：受保护闸拒绝一律不动（人审放行通道需文件原地）。
+    """protected 子用例：受保护闸拒绝一律不动（人审放行通道需文件原地）。
 
     两形态：stage 红在先 → note 沿用 unauthorized 文案（闸①优先原语义）但处置被
     抑制（protected 命中不得回滚/挪档——否则人审放行时文件已被动过）；stage 绿而
@@ -421,7 +421,7 @@ def test_b_protected_refusal_never_touched(lane):
 
 
 def test_b_legal_change_still_lands_after_remediation(lane):
-    """混合腿：?? 越权 + 写集内合法改动同批 → 越权挪档后合法产物照常落盘。"""
+    """混合子用例：?? 越权 + 写集内合法改动同批 → 越权挪档后合法产物照常落盘。"""
     root, wt = lane
     (wt / "integration" / "rogue.py").write_text("ROGUE=1\n", encoding="utf-8")
     (wt / "integration" / "sc_good.py").write_text("GOOD=1\n", encoding="utf-8")
@@ -456,7 +456,7 @@ def test_b_judged_files_in_structured_refusal(lane):
 
 
 def test_b_status_parser_and_remediation_malformed_inputs():
-    """畸形输入腿（岗位纪律）：解析器与处置函数对畸形/缺失形态不抛不猜。"""
+    """畸形输入子用例（岗位纪律）：解析器与处置函数对畸形/缺失形态不抛不猜。"""
     assert aa._status_entries_from_z("") == []
     assert aa._status_entries_from_z(None) == []
     assert aa._status_entries_from_z("short") == []

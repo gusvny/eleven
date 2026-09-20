@@ -31,7 +31,7 @@ intent（守护的用户可感知行为/契约）：
 ⑥ 注入非空转负锁 → T2b。
 
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
-引擎 venv/temporalio 缺席 = ENV_FAIL exit 2 点名（本场景无 stdlib 替代腿：直调 activity）。
+引擎 venv/temporalio 缺席 = ENV_FAIL exit 2 点名（本场景无 stdlib 替代子用例：直调 activity）。
 """
 import os
 import sys
@@ -74,7 +74,7 @@ def _lane(shared, tag, gitignore=()):
 def main():
     (mods, why) = engine_modules()
     if mods is None:
-        env_fail("引擎模块不可用（%s）——直调 activity 无 stdlib 替代腿" % why)
+        env_fail("引擎模块不可用（%s）——直调 activity 无 stdlib 替代子用例" % why)
     shared, aa = mods
 
     # ---- T1 干净泳道：干净回执（三态分界的锚） ----

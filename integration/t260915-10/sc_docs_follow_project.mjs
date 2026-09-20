@@ -12,7 +12,7 @@
 //   与 t260910-10-docs-ui-mock-v1 不同面：那条锁 mock v1 版面旅程（chip/大纲/折叠/Search，
 //   本票回归归它）；与 t260910-10-docs-project-anchor 不同层：那条锁 API 锚解析契约；
 //   本条锁「壳层接线」语义（初值跟随/手动优先/重挂载重跟/空态不冒充）——guard 是本票
-//   新语义里唯一无既有场景可兜底的行为面，腿二必须真变化点击（点另一组图标，
+//   新语义里唯一无既有场景可兜底的行为面，子用例二必须真变化点击（点另一组图标，
 //   同组同值点击=React bail out 空转，review_plan R1 教训）。
 //   playwright-core/浏览器缺失=env_fail（KI-036 家族）；实现落地前红属预期（TDD 信号），
 //   arbitrate/merge 期必须绿。
@@ -23,8 +23,8 @@
 //      组序自检（夹具甲在夹具乙前，nth 定位的排序前提）。
 //   T1 跟随初值：点夹具甲组「文档」图标 → 选择器值=fixa（data-wb-doc-project-key）+
 //      选中项文本含「夹具甲」+ 树=夹具篇目（sandbar 篇目退场）+ wire 带 project=fixa。
-//   T2 手动优先：腿一 选择器手动选 sandbar/default → 引擎库篇目在场 + wire 出无 project
-//      请求（缺省回落零回归）；腿二 点夹具乙组「文档」图标（viewProject fixa→fixb 真变化、
+//   T2 手动优先：子用例一 选择器手动选 sandbar/default → 引擎库篇目在场 + wire 出无 project
+//      请求（缺省回落零回归）；子用例二 点夹具乙组「文档」图标（viewProject fixa→fixb 真变化、
 //      同挂载、touched=true）→ 选择器仍=default + 无新 project=fixb 请求 + 树仍引擎库
 //      篇目（判别力：无 guard → 选择器跳 fixb+请求发出+树变空，两态可辨）。
 //   T3 空态不冒充（承接 T2 壳层已=fixb）：点夹具乙「工单列表」图标（中列切 board，
@@ -48,7 +48,7 @@ const stub = makeTicketStub();
 
 const pw = await loadPlaywright();
 if (!pw) {
-  record('playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器走查腿环境红');
+  record('playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器走查子用例环境红');
   summarize();
 }
 
@@ -88,7 +88,7 @@ const regRoot = makeRegistryRoot('t260915-10-reg-');
 const fixaRoot = tmpRoot('t260915-10-fixa-');
 writeFxa(fixaRoot);
 writeProjectEntry(regRoot, 'fixa', '夹具甲', [fixaRoot]);
-const fixbRoot = tmpRoot('t260915-10-fixb-'); // 空根：不建 docs/ 与 notes/（空态腿载体）
+const fixbRoot = tmpRoot('t260915-10-fixb-'); // 空根：不建 docs/ 与 notes/（空态子用例载体）
 writeProjectEntry(regRoot, 'fixb', '夹具乙', [fixbRoot]);
 
 let bench;
@@ -183,14 +183,14 @@ try {
 
   // ---- T2 手动优先 ----
   {
-    // 腿一：手动选缺省 sandbar/default → 引擎库 + wire 无 project 请求（缺省回落零回归）
+    // 子用例一：手动选缺省 sandbar/default → 引擎库 + wire 无 project 请求（缺省回落零回归）
     await rootSel.locator('select').first().selectOption('').catch(() => {});
     await page.waitForTimeout(1400);
     const termBack = await items.filter({ hasText: /terminology|项目术语表/ }).first().isVisible().catch(() => false);
     const noProjWire = docReqs.some((u) => u.includes('/api/wf/docs/tree') && !u.includes('project='));
     record('manual/default-fallback', termBack && noProjWire,
       `手动选缺省：引擎库篇目回场=${termBack} wire 出无 project 请求=${noProjWire}（缺省回落零回归）`);
-    // 腿二：点夹具乙组图标（viewProject fixa→fixb 真变化、同挂载、touched=true）→ 不被冲掉
+    // 子用例二：点夹具乙组图标（viewProject fixa→fixb 真变化、同挂载、touched=true）→ 不被冲掉
     const fixbCntBefore = docReqs.filter((u) => u.includes('project=fixb')).length;
     await docsIconOf("夹具乙").click();
     await page.waitForTimeout(1600);
@@ -200,7 +200,7 @@ try {
     const alive = await rootSel.isVisible().catch(() => false);
     record('manual/touched-guard', alive && keyAfter === '' && fixbCntAfter === fixbCntBefore && termStill,
       `壳层真变化（fixa→fixb）手动选择不被冲掉：选择器仍=''（实际=${String(keyAfter)}） 无新 project=fixb 请求（${fixbCntBefore}→${fixbCntAfter}） 树仍引擎库=${termStill}`
-      + `（判别力：无 guard 实现下此处=选择器跳 fixb+请求发出+树变空——review_plan R1 空转腿教训的反面）`);
+      + `（判别力：无 guard 实现下此处=选择器跳 fixb+请求发出+树变空——review_plan R1 空转子用例教训的反面）`);
   }
 
   // ---- T3 空态不冒充（承接 T2 壳层已=fixb；经 board 卸载重挂载=touched 重置重新跟随）----
@@ -208,7 +208,7 @@ try {
     await boardIconOf("夹具乙").click();
     await page.waitForTimeout(800);
     const docsUnmounted = !(await rootSel.isVisible().catch(() => false));
-    record('remount/docs-unmounted', docsUnmounted, `切 board 后文档视图卸载=${docsUnmounted}（重挂载腿前提）`);
+    record('remount/docs-unmounted', docsUnmounted, `切 board 后文档视图卸载=${docsUnmounted}（重挂载子用例前提）`);
     await docsIconOf("夹具乙").click();
     const keyOk = await waitProjKey('fixb');
     await page.waitForTimeout(1400);
@@ -229,7 +229,7 @@ try {
     // Notes 页签：同构诚实空态 + 指引仍在
     const notesTab = rootSel.getByText('Notes', { exact: true }).first();
     if (!(await notesTab.isVisible().catch(() => false))) {
-      record('empty/notes-scope', 'fail', 'Notes 页签不在场（空态 Notes 腿无从走起）');
+      record('empty/notes-scope', 'fail', 'Notes 页签不在场（空态 Notes 子用例无从走起）');
     } else {
       await notesTab.click();
       await page.waitForTimeout(1200);
@@ -240,7 +240,7 @@ try {
   }
 
   // ---- T4 既有面回归：选择器手动选回夹具甲 → 树随切（t260910-10 面不破）----
-  // （先复位回 Docs 页签：T3 腿把 scope 留在了 Notes——不复位则选 fixa 后树=fixa 的
+  // （先复位回 Docs 页签：T3 子用例把 scope 留在了 Notes——不复位则选 fixa 后树=fixa 的
   //   notes 树，「夹具甲指南」恒不在场，对正确实现误报红=测试写错。锚=data-wb-docs-scope-docs
   //   公开契约锚，read_through 同款定位。）
   {

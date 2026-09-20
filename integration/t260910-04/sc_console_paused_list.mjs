@@ -1,4 +1,4 @@
-// sc_console_paused_list.mjs —— t260910-04 console 接口面场景（R1(a) 真链腿）。
+// sc_console_paused_list.mjs —— t260910-04 console 接口面场景（R1(a) 真链子用例）。
 //
 // 直跑：node integration/t260910-04/sc_console_paused_list.mjs（exit 0=过 / 1=红 / 2=ENV_FAIL）。
 //
@@ -12,12 +12,12 @@
 // 拓扑与护栏声明：
 // - 台面（260910 gen2 仲裁改造）：**私有台**——stage_docker 直起（services=full，
 //   docker/镜像缺席=ENV_FAIL exit 2 点名，绝不回落生产端口），逐跑唯一项目名、
-//   现分空闲端口、退出钩子 stageDown 零残留（L7 有断言腿）。共享树台（lib_stage_console
+//   现分空闲端口、退出钩子 stageDown 零残留（L7 有断言子用例）。共享树台（lib_stage_console
 //   ensureStageConsole）两大连坐退场：restart 掐断并发场景在飞流式请求（multi-tab
 //   T7 ERR_INCOMPLETE_CHUNKED_ENCODING）、跨泳道 churn 吃 900s 执行器 SIGKILL。
 // - 台面代码新鲜（附条件②，KI-058 同族「安装态≠代码态」）：私有台 fresh boot 挂当前
 //   树 /repo——新鮮 by construction，无 restart 需求；就绪以 /wf/projects 200 探测。
-// - 活 worker 腿（附条件①）：pause 生效/快照可查/恢复续派三者都要 worker 在场答题
+// - 活 worker 子用例（附条件①）：pause 生效/快照可查/恢复续派三者都要 worker 在场答题
 //   （stage_docker services 全集无 worker 服务；lib 的 fixture_ticket_worker 是 drain
 //   即退形态不作驻留）。形态照 sc_ticket_pause_gate.py 现成声明：夹具仓（本仓
 //   --depth 1 clone，泳道/settle/merge 全在夹具仓内，真仓零接触）+ 真引擎 worker.py +
@@ -57,7 +57,7 @@ function resolveHostPy() {
 }
 const PY = resolveHostPy();
 const PROJECT_KEY = 'p91004c';
-const RUN_TAG_SUFFIX = Date.now().toString(36);         // 每跑唯一（未知 key 400 腿用，避免撞历史注册）
+const RUN_TAG_SUFFIX = Date.now().toString(36);         // 每跑唯一（未知 key 400 子用例用，避免撞历史注册）
 const STUB_DELAY_SEC = 6;                               // 桩段时长（引擎旋钮，sc_ticket_pause_gate 同值）
 const LANE_MARKERS = ['SANDBAR_TASK_QUEUE', 'SANDBAR_TASK_QUEUES', 'SANDBAR_WATCH_WORKFLOW'];
 
@@ -241,7 +241,7 @@ async function main() {
   if (forbidden.length === 0) envFail('禁区端口表不可得（stage_docker.mjs/.py 均未产出 FORBIDDEN_PORTS）——L0 写守卫拒绝空转');
   const tPort = Number(G.target.split(':')[1] ?? 0);     // 守卫对象=temporal 端口（写守卫钉的地址）
   // 进程退出兜底回收（资源生命周期纪律）：任何出口（含各 process.exit 路径）都拆
-  // 私有台——exit 钩子同步段可 spawnSync；正常流另有 L7 零残留断言腿。
+  // 私有台——exit 钩子同步段可 spawnSync；正常流另有 L7 零残留断言子用例。
   process.on('exit', () => { try { stMod.stageDown(STAGE_PROJECT); } catch { /* 尽力回收 */ } });
 
   // ---- 附条件②（私有台形态）：代码新鲜 by construction + 就绪探测 ----
@@ -320,7 +320,7 @@ async function main() {
     // ②L3b 趁门口预置 stage_arbitrate verdict=pass（幂等缓存路径），resume 后照收口。
     const start = cli('ticket-start', {
       ticket_id: tid, template_id: 'dev-lane', project: PROJECT_KEY,
-      title: '[e2e] t260910-04 console 腿暂停透传', user_request: 't260910-04 console paused list',
+      title: '[e2e] t260910-04 console 子用例暂停透传', user_request: 't260910-04 console paused list',
       write_set: [`integration/e2e-probe-${tid}.txt`],
     }, fixture);
     ok(start.body?.ok === true, `L2 dev-lane 开票 RUNNING（${tid}，实得 ok=${start.body?.ok} ${String(start.body?.error ?? '').slice(0, 120)}）`);
@@ -360,8 +360,8 @@ async function main() {
     const inflight = await waitSnap(tid, (s) => s.stage_state === 'running',
       'L2b 首段在飞（pause 时机锚）', 240);
     if (!inflight) { stopWorker('main-worker'); process.exit(1); }
-    // 列表在场核验（advanced-visibility 传播滞后本身是已知形态，只记腿不卡流程：
-    // pause 已生效、票停在门口，列表何时可见由本腿观察，超时只计红不断链）。
+    // 列表在场核验（advanced-visibility 传播滞后本身是已知形态，只记子用例不卡流程：
+    // pause 已生效、票停在门口，列表何时可见由本子用例观察，超时只计红不断链）。
     const seen = await (async () => {
       const t0 = Date.now();
       while (Date.now() - t0 < 90_000) {
@@ -371,10 +371,10 @@ async function main() {
       }
       return false;
     })();
-    ok(seen, 'L2c 票在引擎 ticket-list 在场（传播核验，观察腿）');
+    ok(seen, 'L2c 票在引擎 ticket-list 在场（传播核验，观察子用例）');
 
     console.log('== L3 pause → console 行与 snapshot 逐键一致');
-    const pause = cli('ticket', { op: 'pause', ticket_id: tid, input: { who: 'e2e-host', note: 'console 腿暂停' } }, fixture);
+    const pause = cli('ticket', { op: 'pause', ticket_id: tid, input: { who: 'e2e-host', note: 'console 子用例暂停' } }, fixture);
     ok(pause.body?.ok === true, 'L3 pause 信号回执 ok');
     const snapGate = await waitSnap(tid, (s) => s.paused === true && s.paused_phase === 'at_gate',
       'L3 引擎停段间门口（at_gate）', 240);
@@ -386,7 +386,7 @@ async function main() {
        `L3 console 行与 snapshot 逐键一致（paused=${snapGate.paused} paused_phase=${snapGate.paused_phase}）`);
     ok(rowGate.stage === snapGate.stage && rowGate.stage_state === snapGate.stage_state,
        'L3 同步核验 stage/stage_state 一致（行=引擎投影非独立真源）');
-    // 行形状不变量全行扫（设计段补腿）：任意行的 paused 缺席或布尔、paused_phase 缺席
+    // 行形状不变量全行扫（设计段补子用例）：任意行的 paused 缺席或布尔、paused_phase 缺席
     // 或字符串——KI-008 降级行/closed 超窗极简行不带 paused 键是合法形状，缺键不
     // throw、键形非法（null/字符串布尔等）=红。锁「引擎行逐键透传不清洗」的契约面。
     {
@@ -442,7 +442,7 @@ async function main() {
     }
 
     console.log('== L4 resume → 行回 false → 续派到收口');
-    const resume = cli('ticket', { op: 'resume', ticket_id: tid, input: { who: 'e2e-host', note: 'console 腿恢复' } }, fixture);
+    const resume = cli('ticket', { op: 'resume', ticket_id: tid, input: { who: 'e2e-host', note: 'console 子用例恢复' } }, fixture);
     ok(resume.body?.ok === true, 'L4 resume 信号回执 ok');
     const snapFin = await waitSnap(tid, (s) => s.paused === false, 'L4 引擎恢复（paused=false）', 240);
     if (!snapFin) { stopWorker('main-worker'); process.exit(1); }
@@ -474,7 +474,7 @@ async function main() {
       }
     }
     stopWorker('main-worker');
-    // host 白名单回归（设计段补腿）：列表主数据下放引擎后，缺 project/未知 key 的
+    // host 白名单回归（设计段补子用例）：列表主数据下放引擎后，缺 project/未知 key 的
     // 400 面必须原样保住（host 层 findProject 校验不随取数通路切换而丢）。
     console.log('== L5 host 白名单回归（400 面不丢）');
     {
@@ -483,7 +483,7 @@ async function main() {
       const r1 = await fetchJson(`${G.base}/sandbar-workbench/api/wf/tickets?project=no-such-key-${RUN_TAG_SUFFIX}`).catch(() => null);
       ok(r1?.status === 400, `L5 未知 key → 400（实得 ${r1?.status}）`);
     }
-    // 台面回收腿（资源生命周期纪律）：私有台 stageDown 零残留断言；异常出口由
+    // 台面回收子用例（资源生命周期纪律）：私有台 stageDown 零残留断言；异常出口由
     // exit 钩子兜底同款回收（见 L0b）。
     console.log('== L7 私有台回收（stageDown 零残留）');
     {

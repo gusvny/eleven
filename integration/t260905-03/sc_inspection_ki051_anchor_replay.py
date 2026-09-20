@@ -34,73 +34,73 @@ def anchor_findings(parsed, severity=None):
 def main() -> int:
     failures = []
 
-    # ── 腿1：纯重写漂移（核心片段全缺）——必报 high，证据双点名守卫与生产方 ──
+    # ── 子用例1：纯重写漂移（核心片段全缺）——必报 high，证据双点名守卫与生产方 ──
     t = lib.ki051_high_tree()
     try:
         t.keep_checksums()
         proc, parsed = lib.run_scanner(t.root)
         highs = anchor_findings(parsed, "high")
         if highs is None or not isinstance(parsed, dict) or parsed.get("ok") is not True:
-            failures.append("腿1 扫描器回执异常：%r | stderr=%s"
+            failures.append("子用例1 扫描器回执异常：%r | stderr=%s"
                             % (str(parsed)[:160], (proc.stderr or "")[:160]))
         elif not highs:
-            failures.append("腿1 KI-051 纯重写形态（生产方在位+锚字面与核心片段全缺）"
+            failures.append("子用例1 KI-051 纯重写形态（生产方在位+锚字面与核心片段全缺）"
                             "未报任何 high——验收②失真")
         else:
             ev = "".join(str(h.get("evidence", "")) + str(h.get("subject", ""))
                          for h in highs)
             if "sc_guard_sample" not in ev:
-                failures.append("腿1 high 证据未点名守卫文件 sc_guard_sample：%r" % ev[:300])
+                failures.append("子用例1 high 证据未点名守卫文件 sc_guard_sample：%r" % ev[:300])
             if "capture.mjs" not in ev:
-                failures.append("腿1 high 证据未点名生产方 capture.mjs：%r" % ev[:300])
+                failures.append("子用例1 high 证据未点名生产方 capture.mjs：%r" % ev[:300])
         red = t.tree_unchanged()
         if red:
-            failures.append("腿1 " + red + "（巡检零直接改码红线）")
+            failures.append("子用例1 " + red + "（巡检零直接改码红线）")
     finally:
         t.cleanup()
 
-    # ── 腿2：真实 capture.mjs 案形态（留共享前缀「隔离台」、模板拼接换措辞）——
+    # ── 子用例2：真实 capture.mjs 案形态（留共享前缀「隔离台」、模板拼接换措辞）——
     #    相似度悬置=med 必报不静默，且不得误判成 high 确证漂移 ──
     t = lib.ki051_med_tree()
     try:
         proc, parsed = lib.run_scanner(t.root)
         if not isinstance(parsed, dict) or parsed.get("ok") is not True:
-            failures.append("腿2 扫描器回执异常：%r" % str(parsed)[:160])
+            failures.append("子用例2 扫描器回执异常：%r" % str(parsed)[:160])
         else:
             meds = anchor_findings(parsed, "med")
             highs = anchor_findings(parsed, "high")
             if not meds:
-                failures.append("腿2 真实 KI-051 形态（共享前缀+措辞已换）零 med=静默放行"
+                failures.append("子用例2 真实 KI-051 形态（共享前缀+措辞已换）零 med=静默放行"
                                 "（悬置必须交人审）")
             if highs:
-                failures.append("腿2 悬置形态被误判 high 确证漂移：%r" % (highs,))
+                failures.append("子用例2 悬置形态被误判 high 确证漂移：%r" % (highs,))
     finally:
         t.cleanup()
 
-    # ── 腿3：健康对照（锚措辞字面在场）——零发现+heartbeat true（防误报满屏逼死守卫） ──
+    # ── 子用例3：健康对照（锚措辞字面在场）——零发现+heartbeat true（防误报满屏逼死守卫） ──
     t = lib.ki051_healthy_tree()
     try:
         proc, parsed = lib.run_scanner(t.root)
         fs = lib.scanner_findings(parsed)
         res = lib.scanner_result(parsed)
         if fs is None:
-            failures.append("腿3 扫描器回执异常：%r" % str(parsed)[:160])
+            failures.append("子用例3 扫描器回执异常：%r" % str(parsed)[:160])
         else:
             if fs != []:
-                failures.append("腿3 健康对照（字面在场）非零发现：%r" % (fs,))
+                failures.append("子用例3 健康对照（字面在场）非零发现：%r" % (fs,))
             if res.get("heartbeat") is not True:
-                failures.append("腿3 健康对照 heartbeat 非 true（全绿期心跳语义破）：%r" % res.get("heartbeat"))
+                failures.append("子用例3 健康对照 heartbeat 非 true（全绿期心跳语义破）：%r" % res.get("heartbeat"))
     finally:
         t.cleanup()
 
-    # ── 腿4：生产方上下文定位不到（引用缺席）——锚让位不出锚发现，只出 stale 面 ──
+    # ── 子用例4：生产方上下文定位不到（引用缺席）——锚让位不出锚发现，只出 stale 面 ──
     t = lib.ki051_orphan_tree()
     try:
         proc, parsed = lib.run_scanner(t.root)
         if not isinstance(parsed, dict) or parsed.get("ok") is not True:
-            failures.append("腿4 扫描器回执异常：%r" % str(parsed)[:160])
+            failures.append("子用例4 扫描器回执异常：%r" % str(parsed)[:160])
         elif anchor_findings(parsed):
-            failures.append("腿4 定位不到生产方仍出锚发现（防误报满屏口径破）：%r"
+            failures.append("子用例4 定位不到生产方仍出锚发现（防误报满屏口径破）：%r"
                             % (anchor_findings(parsed),))
     finally:
         t.cleanup()

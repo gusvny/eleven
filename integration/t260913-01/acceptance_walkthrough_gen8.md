@@ -17,16 +17,16 @@
   `t260913-01-authz-signal-delivery` **ENV_FAIL**（`temporal 180s 内未就绪`）、`-authz-overlimit-accept`
   **ENV_FAIL**（`docker compose up 失败`）——均为起台面，非断言面。
 - **本段亲跑（01:31–01:38，同窗 47 个容器、跨泳道抢端口）**：lint 0/0；本票新场景 `pass=37 fail=0`；
-  在册 A 消费面 `pass=37 fail=0`；本票+在册 UT **129 passed**；在册 B 腿/可查面本轮被**端口 21121 竞态**
+  在册 A 消费面 `pass=37 fail=0`；本票+在册 UT **129 passed**；在册 B 子用例/可查面本轮被**端口 21121 竞态**
   挡下（见下，环境面，根因点名到别泳道台）。
 - **本轮零代码 / 零测试资产改动**：新增提交仅我上轮的走查报告。
 
 | # | 项 | 结论 | 本轮依据 |
 |---|----|------|----------|
-| A | 正腿·受保护路径（送达+消费） | 通过 | 本段亲跑 37/0（送达）+ 37/0（消费）；机械同轮 `-authz-protected-path` PASS 8.2s |
-| B | 正腿·仲裁超限 | 通过 | 机械同轮该条 ENV_FAIL（compose up）；本段复跑被 21121 端口竞态挡下；**判定依据=此前多轮真跑全绿**（19:53 轮 93.0s、更早 86–88s、gen1 独立 30/0）+ 该判定的 F 生产实证（t260911-05 已解扣） |
+| A | 正用例·受保护路径（送达+消费） | 通过 | 本段亲跑 37/0（送达）+ 37/0（消费）；机械同轮 `-authz-protected-path` PASS 8.2s |
+| B | 正用例·仲裁超限 | 通过 | 机械同轮该条 ENV_FAIL（compose up）；本段复跑被 21121 端口竞态挡下；**判定依据=此前多轮真跑全绿**（19:53 轮 93.0s、更早 86–88s、gen1 独立 30/0）+ 该判定的 F 生产实证（t260911-05 已解扣） |
 | C | 负锁四条（本票覆盖 5 条） | 通过 | 本段亲跑新场景 `pass=37 fail=0`（含「载荷解析失败」vs「非人审等待中」可辨断言） |
-| D | 真往返守卫 | 通过（合成口径） | 两腿真信号、均在册；本段亲跑真 CLI→真信号→真 worker→真 workflow |
+| D | 真往返守卫 | 通过（合成口径） | 两子用例真信号、均在册；本段亲跑真 CLI→真信号→真 worker→真 workflow |
 | E | 零回归 | 通过 | 引擎三 handler 源码零 diff；本段亲跑 UT **129 passed**（本票两套 + t260912-03 三套） |
 | F | 实票验证 | **通过（最强形态）** | t260912-01 **COMPLETED/关单**（23:12）；t260911-05 `used=1` |
 | — | 测试资产变更审查 | 本轮无变更 | `git diff`（仅我上轮报告）；仲裁本轮 `files_changed=[]` |
@@ -46,14 +46,14 @@
 ```
 python3 integration/lint_tests.py                                   → 0 error / 0 warn (exit 0)
 sc_authz_signal_delivery.py（本票新场景，A 送达 + C 五负锁）        → pass=37 fail=0 (exit 0)；拆台 residue=[]
-sc_authz_protected_path.py（在册 A 消费腿）                          → pass=37 fail=0 (exit 0)
-sc_authz_overlimit_accept.py（在册 B 腿）                            → pass=24 fail=6 (exit 1) ← 端口竞态，见下
+sc_authz_protected_path.py（在册 A 消费子用例）                          → pass=37 fail=0 (exit 0)
+sc_authz_overlimit_accept.py（在册 B 子用例）                            → pass=24 fail=6 (exit 1) ← 端口竞态，见下
 sc_authz_cli_queryable.py（在册可查面）                              → exit 2（Bind 21121 already allocated）
 pytest 本票两套 + t260912-03 三套 UT                                 → 129 passed in 0.56s
 同窗环境：docker ps -q = 47 ；跨泳道台 t26090419-par-b-95045-temporal Up（占 127.0.0.1:21121）
 ```
 
-**B 腿本轮红项的根因（点名到持有者，非本票面）**：`sc_authz_overlimit_accept` 的失败首因是
+**B 子用例本轮红项的根因（点名到持有者，非本票面）**：`sc_authz_overlimit_accept` 的失败首因是
 `RuntimeError: Failed client connect … tcp connect error 127.0.0.1:21121`，紧随其后的可查面场景直接报
 `Bind for 127.0.0.1:21121 failed: port is already allocated`。本段只读定位：**21121 被别泳道的台
 `t26090419-par-b-95045-temporal` 持有**（`lsof` 显示 OrbStack 监听，`docker ps` 见该容器 `Up 18s`，
@@ -67,7 +67,7 @@ ran=233 pass=224 fail=3 env_fail=6 wall_s=2116 generated=2026-09-14T01:06:13
       t260913-01-authz-signal-delivery ENV_FAIL 186.3（「docker 舞台 up 失败（env）：temporal 180s 内未就绪」）
       -authz-overlimit-accept ENV_FAIL 6.0（compose up 失败）
 3 条 FAIL（全属别票/UI 证据链面，与本票写集零交集）：
-  · t260912-02-fuse-headroom-resident 200.4s —— 批量起台腿 `16/16 全绿（实得 11，非零 [(b01,2),(b02,2),(b07,2)]）`：
+  · t260912-02-fuse-headroom-resident 200.4s —— 批量起台子用例 `16/16 全绿（实得 11，非零 [(b01,2),(b02,2),(b07,2)]）`：
     三个非零全是 **rc=2=env 档**，却被记成产品 FAIL（**同族缺陷的又一实例**，见「全族」节）
   · capture-chat-active 71.8s / capture-chat-e2e 81.0s —— 内层 capture-lane `assertDistinct` 失败：
     「截图同帧假成功：console-board-light.png 与 console-board.png 字节级完全相同」，内层 exit=1
@@ -86,11 +86,11 @@ ran=233 pass=224 fail=3 env_fail=6 wall_s=2116 generated=2026-09-14T01:06:13
 
 ### 全族线索（本轮新增量化实例）
 
-- `t260912-02-fuse-headroom-resident` 的**批量起台腿**把 rc=2（env 档）记成产品 FAIL（16/16 实得 11）。
+- `t260912-02-fuse-headroom-resident` 的**批量起台子用例**把 rc=2（env 档）记成产品 FAIL（16/16 实得 11）。
   而 lib 里**已存在**通用助手 `up_batch_env_only`（implement gen2 新增、因授权面只覆盖 lib+net_table 两处
   而未被接线；其同族补丁曾被预置又按红线回滚）。⇒ 建议**一次补授修全族**：
-  `sc_stage_sweep_owner_gone.py:240`、`acc_g_cleanup.py:55`、`sc_stage_fuse_headroom_resident.py` 的批量腿
-  （必要时含 `sc_stage_burst_managed_subnets.py` 的阈值腿）。
+  `sc_stage_sweep_owner_gone.py:240`、`acc_g_cleanup.py:55`、`sc_stage_fuse_headroom_resident.py` 的批量子用例
+  （必要时含 `sc_stage_burst_managed_subnets.py` 的阈值子用例）。
 
 ### F 实票验证（本轮复证）
 
@@ -117,9 +117,9 @@ $ snapshot（22:52 gen7 轮）t260912-01 stage=acceptance_walkthrough/running us
    ①以现有证据合并（把「最近无干净全绿轮」显式记为已知空档）；②或先开「隔离台/供给面硬化」票
    （仲裁已建议：`up` bind 冲突自动换档/退避、ensure 判死条件补 container_ids 不存在、泄漏台回收与端口档位治理）。
 2. **合并面**：main 仍为 `b614392`（t260913-03 声明 `exclude_pools: engine,exclusive`），本 worktree 基于
-   `9c102d7` → 合并需先对齐；engine 池被每票段跳过 → 本票新场景与 t260912-03 三条正腿只由每日巡检覆盖。
+   `9c102d7` → 合并需先对齐；engine 池被每票段跳过 → 本票新场景与 t260912-03 三条正用例只由每日巡检覆盖。
 3. **全族未修点（见上，附本轮量化实例）**：建议一次补授修全族。
-4. **同轮 3 条 FAIL 属别票面**（fuse-headroom 批量腿 / capture 双胞胎 UI 断言）→ 与本票零交集；
+4. **同轮 3 条 FAIL 属别票面**（fuse-headroom 批量子用例 / capture 双胞胎 UI 断言）→ 与本票零交集；
    但它们会卡 merge 闸，需对应票或台位治理处置。
 5. **合并冲突线索**：本票累计改了 6 个测试资产文件（capture×3 / doc_face / t260912-02 lib + net_table 场景），
    其中 `sc_capture_chat_active.mjs` 与并行票 t260912-01 的授权面重叠（其 `uses` 为证）——请在合并记录点名。
@@ -132,8 +132,8 @@ $ snapshot（22:52 gen7 轮）t260912-01 stage=acceptance_walkthrough/running us
 9. **运维面（设计固有）**：合并后 CLI 对未含 `sign_face` 的 worker 拒发 authorize（fail-closed）→ 现网 worker
    需按 runbook §S0→§S6 再重启一次才能继续用人授权。
 10. KI 候选待 main 侧 integration 落册（本段写集不含 `notes/`）：implement gen0 三条 + 走查新增六条
-    （④机读键无断言锁；⑤两条轻微实现缺陷；⑥供给台/console 台生命周期不一致四形态；⑦同族起台腿直判未清
-    （本轮新增 fuse-headroom 批量腿实例）；⑧F 判据口径未入模板（曾致仲裁多轮误判，本轮起事实已自证）；
+    （④机读键无断言锁；⑤两条轻微实现缺陷；⑥供给台/console 台生命周期不一致四形态；⑦同族起台子用例直判未清
+    （本轮新增 fuse-headroom 批量子用例实例）；⑧F 判据口径未入模板（曾致仲裁多轮误判，本轮起事实已自证）；
     ⑨闸执行面连续故障致机械绿灯缺失；⑩跨泳道端口抢用（本轮 21121 被别台持有，直接吃掉本票两条在册场景的复跑））。
 
 ## 收口两问

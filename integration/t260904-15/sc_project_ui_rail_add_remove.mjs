@@ -48,7 +48,7 @@ try {
   record('bench/boot', 'env_fail', `隔离台依赖缺失：${String(e?.message ?? e).slice(0, 200)}`);
   summarize();
 }
-// 泳道 client build 陈旧守卫：lib/client.js 缺失/早于 src → 浏览器腿拒跑（防拍旧 UI 假绿，
+// 泳道 client build 陈旧守卫：lib/client.js 缺失/早于 src → 浏览器子用例拒跑（防拍旧 UI 假绿，
 // laneBuildRejectReason 同口径）；合并后主树重建 build 自动生效。
 {
   const stale = await clientBuildStalenessReason();
@@ -227,7 +227,7 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
     `fail-closed 文案=${errTxt.slice(0, 150)} | 停在gate=${stillGate}`);
 }
 
-// T4b 四步流后段真台腿（260908 补：原占位 ENV_FAIL「随隔离台真 Temporal 供给另补」——
+// T4b 四步流后段真台子用例（260908 补：原占位 ENV_FAIL「随隔离台真 Temporal 供给另补」——
 // 供给=stage_docker services:'full'，dsh+temporal 健康 wiring，SA 随台注册）。
 // 死端口台上在飞闸恒拒，后段（dispose→dry 清单→确认执行）只能在真台走真。
 {

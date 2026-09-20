@@ -4,7 +4,7 @@
 处理（钥匙插不进去），受保护路径闸与仲裁超限两条判定无出口。
 
 走查立场：用户视角独立走查，不预设「测试已全部通过」；机械口径（233 跑 / 213 过 / 0 败 / 20 环境红）
-仅作输入，关键腿自己重跑/自己复现。与仲裁并行执行，本报告不为仲裁下结论。
+仅作输入，关键子用例自己重跑/自己复现。与仲裁并行执行，本报告不为仲裁下结论。
 
 ## 结论：通过（status=ok）
 
@@ -18,10 +18,10 @@
 
 | # | 项 | 结论 | 本轮依据 |
 |---|----|------|----------|
-| A | 正腿·受保护路径（送达+消费） | 通过 | 机械口径 PASS（1.9s 消费面 / 15.1s 送达面）；gen1 独立复跑 37/0 双半 |
-| B | 正腿·仲裁超限 | 通过 | 机械口径 `t260912-03-authz-overlimit-accept` PASS 86.5s；gen1 独立复跑 30/0 |
+| A | 正用例·受保护路径（送达+消费） | 通过 | 机械口径 PASS（1.9s 消费面 / 15.1s 送达面）；gen1 独立复跑 37/0 双半 |
+| B | 正用例·仲裁超限 | 通过 | 机械口径 `t260912-03-authz-overlimit-accept` PASS 86.5s；gen1 独立复跑 30/0 |
 | C | 负锁四条（本票覆盖 5 条） | 通过 | 机械口径 PASS + 本轮独立复跑新场景 37/0（含「载荷解析失败」与「非人审等待中」可辨断言） |
-| D | 真往返守卫 | 通过（合成口径） | 两腿真信号、均在册；字面读法偏离沿用 review C6 裁定（gen1 已标注） |
+| D | 真往返守卫 | 通过（合成口径） | 两子用例真信号、均在册；字面读法偏离沿用 review C6 裁定（gen1 已标注） |
 | E | 零回归 | 通过 | 三个其它 handler 源码零 diff；普通签字逐字节锁 + 103 UT 绿；engine UT 722 passed（gen1 亲跑，本轮引擎零改动） |
 | F | 实票验证 | 通过 | 13:10 只读取证：t260911-05 `merge_check/blocked`（已离 arbitrate）+ `uses` 含判决原文；t260912-01 `run_integration_tests/running` + `uses` 含受保护路径豁免明细 |
 | — | 本轮测试资产变更审查 | 通过 | doc_face 潜伏 bug 修复：机制独立复现 + 同族三处同源自证 + 修后独立复跑绿 |
@@ -34,7 +34,7 @@
 2. 审查该测试资产修复：读 diff、独立复现缺陷机制（字符串推导，零时空成本）、核对「同族全量排查」
    自称（三处同族逐处亲核）、独立复跑该场景确认修后绿。
 3. 读本轮机械报告原件 `out/integration-report-260913-124150.json`（233/213/0/20），逐条归类 20 条非绿。
-4. 复跑本票关键腿（lint / 新场景）+ 线上 F 只读取证（真 Temporal 7233，query 零副作用）。
+4. 复跑本票关键子用例（lint / 新场景）+ 线上 F 只读取证（真 Temporal 7233，query 零副作用）。
 
 ## 怎么验证的（证据引用）
 
@@ -43,8 +43,8 @@
 ```
 python3 integration/lint_tests.py                                   → 0 error / 0 warn (exit 0)
 server/engine/.venv/bin/python integration/t260911-02/sc_inspection_doc_face.py → EXIT=0
-    PASS: 腿a 脏树命中 ok(findings=10); 腿b 全绿树零发现+heartbeat ok; 腿c 坏 index 降级点名 ok(findings=3);
-          腿d 真仓观测 ok(findings=140); 腿e 真跑报告 ok(键齐)
+    PASS: 子用例a 脏树命中 ok(findings=10); 子用例b 全绿树零发现+heartbeat ok; 子用例c 坏 index 降级点名 ok(findings=3);
+          子用例d 真仓观测 ok(findings=140); 子用例e 真跑报告 ok(键齐)
 sc_authz_signal_delivery.py                                         → pass=37 fail=0 (exit 0)
 ```
 
@@ -87,7 +87,7 @@ gen1 已记录的生产根因实证（03:19 授权未被消费 vs 03:20:56 重�
 ### 本轮变更：`integration/t260911-02/sc_inspection_doc_face.py`（+5/−2）
 
 - **改动内容**：声明模板键 `%(pid)s`（填未补零原值 `PID`）→ `%(stamp)s`（填 `STAMP="%05d" % PID`），
-  并加注释说明同源要求。**断言面（腿 a–e 的判定表达式）一行未动**。
+  并加注释说明同源要求。**断言面（子用例 a–e 的判定表达式）一行未动**。
 - **缺陷机制独立复现**（本段亲跑，纯推导）：
   ```
   PID=4619   old: decl=docs-sync-4619  req=docs-sync-04619  相等=False   ← 假红
@@ -100,7 +100,7 @@ gen1 已记录的生产根因实证（03:19 授权未被消费 vs 03:20:56 重�
   （声明 `docs-sync-%05d` 填 `_STAMP`，请求 `"docs-sync-%05d" % _STAMP` = 同源 ✓）、
   `t260911-02/sc_inspection_trigger_kinds.py`（`STAMP="%05d"%PID` + `%(stamp)s` + `% {"stamp": STAMP}` = 同源 ✓）、
   `t260911-02/sc_inspection_doc_face.py`（修后同源 ✓）→ **doc_face 确为唯一不一致点**，排查结论属实。
-- **修后独立复跑**：`EXIT=0`，腿 a–e 全 ok（findings=10 / 零发现+heartbeat / 坏 index 降级 3 / 真仓 140 / 报告键齐）。
+- **修后独立复跑**：`EXIT=0`，子用例 a–e 全 ok（findings=10 / 零发现+heartbeat / 坏 index 降级 3 / 真仓 140 / 报告键齐）。
 - **授权与写集**：文件在 `integration/`（本票写集）内；该场景属**已闭票 t260911-02**（09-11 merged）
   的测试资产 → 交叉改动需在合并记录中留痕（见遗留 1）；无其它泳道并发改它的风险（该票已闭）。
 
@@ -128,7 +128,7 @@ gen1 已记录的生产根因实证（03:19 授权未被消费 vs 03:20:56 重�
    裁定下修复）。合并记录/交接里请点名，避免后人追「谁动了已闭票的资产」时失去线索。
 2. **合并面**：main 已前进到 `b614392`（t260913-03 声明落 main），本 worktree 基于 `9c102d7` →
    合并需先对齐 main。该声明 `exclude_pools: engine,exclusive` 使**每票集测段跳过 engine 池**，
-   本票新场景与 t260912-03 三条正腿都在该池 → 只靠**每日巡检**覆盖；而巡检票 **t260913-02 当前
+   本票新场景与 t260912-03 三条正用例都在该池 → 只靠**每日巡检**覆盖；而巡检票 **t260913-02 当前
    blocked**（acceptance_walkthrough/blocked）。建议人审裁定：engine 池（含引擎源码被测面）是否应
    随写集命中 `server/engine/` 强制全跑——本段只报观察，不改别票声明。
 3. **合并冲突风险（线索）**：并行票 t260912-01 获授权改 `integration/baselines/sc_capture_chat_active.mjs`

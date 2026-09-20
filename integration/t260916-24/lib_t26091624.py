@@ -29,7 +29,7 @@ WORKER_PY = os.path.join(ENGINE, "worker.py")
 # 的对账锚——实现改缺省必须同步改这里，改动本身就是要人审的契约变化）。
 DEFAULT_DSH_CMD_STR = "dsh --profile sandbar-headless"
 
-# 桩自报的假版本（与真 dsh 版本 0.1.1-rc.2 可辨；expected 不符腿用 0.1.1-rc.2）。
+# 桩自报的假版本（与真 dsh 版本 0.1.1-rc.2 可辨；expected 不符子用例用 0.1.1-rc.2）。
 STUB_VERSION = "9.9.9-stub"
 
 # dsh 版本桩（SANDBAR_AGENT_CMD 指向本脚本）：

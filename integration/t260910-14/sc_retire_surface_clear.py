@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""t260910-14 场景④：suggest_next / epic-next 退役面功能引用清零扫（验收 G 的机械腿）。
+"""t260910-14 场景④：suggest_next / epic-next 退役面功能引用清零扫（验收 G 的机械子用例）。
 
 intent（登记于 run_scenarios.py，本文件为其执行体）：
 全票落地后，退役标识在**活功能面**必须清零：

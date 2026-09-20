@@ -144,7 +144,7 @@ def resolve_project_root(project_key):
     """项目主目录解析单点（t260915-20：巡检 repo_root 按项目归属解析，不再缺省引擎仓）。
 
     契约锚=项目接入契约 v1「项目根 = 注册条目 dirs[0]（主目录）」；与
-    resolve_epics_dir 同一注册表、同一取法，但**更严**：无空 key 回落腿——
+    resolve_epics_dir 同一注册表、同一取法，但**更严**：无空 key 回落分支——
       - 空/未给 key → ValueError（巡检票没有项目身份=无主票，绝不静默扫引擎仓——
         那是 t260915-20 要杀的静默用错仓）；
       - 未知 key / 隔离条目 → lookup_project 的人话错误原样透传（带注册表根语境与
@@ -228,7 +228,7 @@ def ticket_search_attributes(project: str, epic: str = ""):
 
 
 # 巡检票实例/期号搜索属性（t260916-02，口径②「建议」项）：Keyword SA，去重判定
-# （实例+期号显式去重）、工单板 SA 腿预过滤、按实例查历史期三面的检索真源。
+# （实例+期号显式去重）、工单板 SA 查询路径预过滤、按实例查历史期三面的检索真源。
 # 注册面：dev 台 run_server.sh --search-attribute；docker 测试台 stage_docker precheck
 # 幂等补建；在跑 server 用 `bin/temporal operator search-attribute create`（README §13）。
 INSPECTION_INSTANCE_SA_NAME = "InspectionInstance"
@@ -305,10 +305,10 @@ class IntegrationRunArgs:
     ticket_id: str
     worktree: str                               # the lane root (the cmds' cwd, where the test set lives)
     attempt: int = 0                            # t260910-13：rework 代数（0=未声明；闸按此盖写规范行 attempt——K4 单写者=引擎侧）
-    write_set: List[str] = field(default_factory=list)  # t260913-03：票面声明写集（integ 道例外腿求交判据；缺省空=老载荷回放）
+    write_set: List[str] = field(default_factory=list)  # t260913-03：票面声明写集（integ 道例外分支求交判据；缺省空=老载荷回放）
     apply_skip_pools: bool = False              # t260913-03：每票段显式置位才消费声明（缺省=恒全跑，验收 E 机械锁）
-    # t260917-08：交接运行清单（前序 agent 段沙箱受限期间交接的验证腿），集测段
-    # worker 执行面逐腿代跑。缺省空=老载荷/巡检/老回放零改动。腿来源=dev_lane 的
+    # t260917-08：交接运行清单（前序 agent 段沙箱受限期间移交的验证命令），集测段
+    # worker 执行面逐条代跑。缺省空=老载荷/巡检/老回放零改动。命令来源=dev_lane 的
     # collect_handover_runs（results + meta['env_handover_pending'] 债表，消费后销账）。
     handover_runs: List[Dict[str, str]] = field(default_factory=list)
 
@@ -337,9 +337,9 @@ class IntegrationRunResult:
     # t260913-03 池排除回执面（少跑必须点名到回执；缺省空=未启用）
     excluded_pools: List[str] = field(default_factory=list)  # 实际排除的池名（applied 时）
     excluded_count: int = 0                                  # 被排除条目数（本轮不在册）
-    forced_by: List[str] = field(default_factory=list)       # 旧口径例外腿命中面（宿主管 260914 撤除例外腿：不再拦，仅留痕）
-    # t260917-08 交接腿单列计数（不进 ran/passed/failed 主口径=闸判定零改动，红线④）：
-    # 前序 agent 段沙箱受限期间交接的验证腿，本段 worker 执行面逐腿代跑的结果。
+    forced_by: List[str] = field(default_factory=list)       # 旧口径例外分支命中面（宿主管 260914 撤除例外分支：不再拦，仅留痕）
+    # t260917-08 移交命令单列计数（不进 ran/passed/failed 主口径=闸判定零改动，红线④）：
+    # 前序 agent 段沙箱受限期间移交的验证命令，本段 worker 执行面逐条代跑的结果。
     handover_ran: int = 0
     handover_passed: int = 0
     handover_failed: int = 0
@@ -419,7 +419,7 @@ def integ_verify_payload(lane_root, write_set=None, apply_skip_pools=False):
 
     策略面（是否按泳道 verify.yaml 声明排除池）只由调用方显式置位——本函数只透传：
     缺省 apply_skip_pools=False = 巡检/手动/老载荷回放恒全跑（验收 E 的机械锁面）；
-    置位 True（每票段）= 按声明一律跳过（宿主管 260914 口径：例外腿已撤除），
+    置位 True（每票段）= 按声明一律跳过（宿主管 260914 口径：例外分支已撤除），
     write_set 只剩旧口径命中面留痕用途。"""
     return {'lane': 'integ', 'path': str(lane_root), 'baseline': True,
             'write_set': [str(x) for x in (write_set or [])],
@@ -2083,7 +2083,7 @@ KIND_MODELS: Dict[str, str] = {"proofread": "zai/glm-5.2", "qa": "zai/glm-5.2", 
 # is worse than having no table at all — a missing table gets named loudly, a stale one
 # gets used silently (260914 live incidents A/B both pinned agents to a dead account).
 
-# 路由表解析四态（t260910-14 三态化；t260914-05 兜底腿退役）：state ∈
+# 路由表解析四态（t260910-14 三态化；t260914-05 兜底分支退役）：state ∈
 #   ok           —— 声明指向文件存在且可解析（真源生效）
 #   decl_missing —— 条目未声明 paths.model_routes（无表，不回落任何仓内文件）
 #   file_missing —— 声明存在但文件缺失
@@ -2146,7 +2146,7 @@ def resolve_routes_table(project_key: str) -> Dict[str, Any]:
       path        —— 声明指向的文件（未声明=""；不再回落任何仓内表）
       table       —— 解析成功的表（dict）或 None（非 ok 态一律 None）
       error       —— 非 ok 态的人话原因（ok 态为空串）
-      fingerprint —— 本腿实际读到字节的 sha256 前 12（"sha256:<12hex>"）；无字节可读=""
+      fingerprint —— 本分支实际读到字节的 sha256 前 12（"sha256:<12hex>"）；无字节可读=""
     非 ok 态在本函数内单点 WARNING 点名（state+path+指纹+原因）；条目文件本身解析不了
     仍照旧 fail-closed（ProjectPathsError 传播）。"""
     import yaml  # pyyaml（engine venv）
@@ -2519,15 +2519,15 @@ class StageResult:
     # t260917-08：段回执的环境信号位（一等形式，与产品红/测试红/实现缺位正交）。
     # env_fail=True = 「验证未运行，原因是 agent 执行面环境受限」（如 bash 沙箱
     # fail-closed，KI-083），**不是**交付失败、不翻转任何红绿判定；它只改变
-    # 「谁来跑验证」（交接腿由后续机械段 worker 执行面承接）与真因可见性。
+    # 「谁来跑验证」（移交命令由后续机械段 worker 执行面承接）与真因可见性。
     # 命名互指（同名异型防混读）：IntegrationRunResult.env_fail 是 **int 计数**
     # （t260904-12 场景环境红维度，入闸口径）；本字段是 **bool 位**（段回执层，
     # 不入闸口径）。缺省 False/""/[] = 老回执重放安全（gate_refusal 先例）。
     env_fail: bool = False
     env_reason: str = ""                       # 缺什么（原文摘录）；环境红必须点名缺什么（失败分类协议纪律）
-    # 交接运行清单（normalize_handover_runs 校形后的有效腿）：agent 执行面受限期间
+    # 交接运行清单（normalize_handover_runs 校形后的有效命令）：agent 执行面受限期间
     # 没能亲自跑的验证，由后续机械段（dev-lane=run_integration_tests）的 worker
-    # 执行面承接执行；无机械段的模板=腿留债票面（meta['env_handover_pending']）
+    # 执行面承接执行；无机械段的模板=移交命令留债票面（meta['env_handover_pending']）
     # 人审处置。条目={name,cmd}；畸形条目进 handover_dropped 逐条记名，不静默丢。
     handover_runs: List[Dict[str, str]] = field(default_factory=list)
     # 被 normalize 丢弃/截断的条目名单（透明面：dropped 摘要进票面注记/活动日志/
@@ -2556,8 +2556,8 @@ def normalize_handover_runs(raw: Any):
       - 其它类型（字符串/数字/dict）→ ([], "malformed", ["handover_runs 非列表"])。
 
     「不静默丢」落面：dropped 名单由解析点存进 StageResult.handover_dropped，
-    经 env_note_for 进票面注记/活动日志/仲裁上下文。空列表形状合法；空腿的语义
-    裁定（env_fail=true 且有效腿 0 = 未验证且无交接腿，不得当已验证）在
+    经 env_note_for 进票面注记/活动日志/仲裁上下文。空列表形状合法；空清单的语义
+    裁定（env_fail=true 且有效命令 0 = 未验证且无移交命令，不得当已验证）在
     env_note_for（R4 语义层），不在本函数沉默跳过。"""
     if raw is None:
         return [], "absent", []
@@ -2587,7 +2587,7 @@ def normalize_handover_runs(raw: Any):
             continue
         legs.append({"name": name.strip(), "cmd": cmd.strip()})
     # 形状判定：空列表=合法形状（agent 显式声明「无可交接」，与缺键 absent 相区分；
-    # 「空腿当不当已验证」的语义裁定在 env_note_for——R4 语义层，不在本函数沉默
+    # 「空清单当不当已验证」的语义裁定在 env_note_for——R4 语义层，不在本函数沉默
     # 跳过也不误标 malformed）；列表在但条目全非法 → "malformed"（丢弃面进 dropped）。
     return legs, ("ok" if (legs or not dropped) else "malformed"), dropped
 
@@ -2608,7 +2608,7 @@ def agent_env_failed_reason(res: Any) -> str:
         return ""
     reason = str(getattr(res, "env_reason", "") or "").replace("\n", " ")[:160]
     return ("agent 沙箱不可用（环境）：%s。该段验证未运行，非实现缺位；"
-            "验证交由后续段 worker 执行面承接（交接腿），票不停摆。"
+            "验证交由后续段 worker 执行面承接（移交命令），票不停摆。"
             "出路：retry_qc 重跑 / rework 打回 / 修复执行面（容器形态）"
             % (reason or "原因未声明"))
 
@@ -2618,9 +2618,9 @@ def env_note_for(res: Any) -> str:
     活动日志、仲裁/走查上下文三处共用此措辞，防各处漂移。
 
     - 非 env_fail → ""（零注记，零回归）；
-    - env_fail 且有效交接腿 >0 → 「环境受限未验证；交接 N 腿待执行：<前 3 名>」；
-    - env_fail 且有效腿 =0 → 「环境受限未验证且无交接腿（不当作已验证）」+ 弃单
-      摘要（R4 fail-closed：空腿不许把「未验证」洗成合规；仲裁契约要求 verdict
+    - env_fail 且有效移交命令 >0 → 「环境受限未验证；移交 N 条命令待执行：<前 3 名>」；
+    - env_fail 且有效命令 =0 → 「环境受限未验证且无移交命令（不当作已验证）」+ 弃单
+      摘要（R4 fail-closed：空清单不许把「未验证」洗成合规；仲裁契约要求 verdict
       必须处置）。"""
     if not getattr(res, "env_fail", False):
         return ""
@@ -2629,8 +2629,8 @@ def env_note_for(res: Any) -> str:
     if legs:
         names = [str(l.get("name") or "") for l in legs[:3]]
         more = "等" if len(legs) > 3 else ""
-        return "环境受限未验证；交接 %d 腿待执行：%s%s" % (len(legs), "、".join(names), more)
-    note = "环境受限未验证且无交接腿（不当作已验证）"
+        return "环境受限未验证；移交 %d 条命令待执行：%s%s" % (len(legs), "、".join(names), more)
+    note = "环境受限未验证且无移交命令（不当作已验证）"
     if dropped:
         note += "；弃 %d 条：%s" % (len(dropped), "; ".join(dropped[:2]))
     return note
@@ -3779,8 +3779,8 @@ def build_stage_prompt(ticket_id: str, meta: Dict[str, Any], stage: Stage,
         ' "handover_runs":[{"name":"<≤120字符>","cmd":"<≤500字符，泳道根可独立执行>"}]（≤20 条），'
         "由后续机械段 worker 执行面承接——票不停摆。不许谎报 status=failed（交付并未失败），"
         "也不许用 status=ok 掩盖「验证未运行」——env_fail 位就是「未验证」的显式声明；"
-        "env_fail=true 而不交清单=票面点名「未验证且无交接腿」，仲裁不当已验证。"
-        "无机械段的工作流模板：腿留债票面，人审处置。",
+        "env_fail=true 而不交清单=票面点名「未验证且无移交命令」，仲裁不当已验证。"
+        "无机械段的工作流模板：移交命令留债票面，人审处置。",
         "   三层口径（各喂各的读者，别混）：",
         "   - summary：≤40 字，结论+对象（如「入轨三处防呆纪律，自测全绿」）。给工单台列表行。",
         "   - report：给人看的进展报告，markdown，短。固定小节「做了什么 / 怎么验证的 /"
@@ -4108,7 +4108,7 @@ def roles_dir_for_spawn(project_key: str, cwd) -> pathlib.Path:
 
 
 def routes_file_for_spawn(project_key: str) -> Dict[str, Any]:
-    """Spawn consumer ②（t260910-14 重构；t260914-05 兜底腿退役）：路由表解析（真源=
+    """Spawn consumer ②（t260910-14 重构；t260914-05 兜底分支退役）：路由表解析（真源=
     声明指向文件）。声明缺失/文件缺失/内容坏三态分别可辨且**点名告警**（解析层单点
     WARNING 含 state+path+指纹，消费方再点名「本轮模型=profile 默认」）——agent 仍可跑，
     但绝不静默回落任何仓内兜底表。返回 resolve_routes_table 的判别 dict

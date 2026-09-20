@@ -7,7 +7,7 @@
   覆盖语义（env 每次现读）；
 - lookup_project：命中 / 未知 key / 隔离条目 / key 白名单畸形输入；
 - check_paths_under_project：注册目录内放行 / 越界拒收 / 相对路径不拦；
-- client.cmd_ticket_start 硬闸（真函数级，stub _connect）：成功腿 workspace 绝对
+- client.cmd_ticket_start 硬闸（真函数级，stub _connect）：成功子用例 workspace 绝对
   路径锚 project_root（TicketInput 落参断言）；缺 project / 未知 project /
   显式路径越界三态各自可辨拒收。
 """
@@ -95,7 +95,7 @@ class LoaderTest(unittest.TestCase):
     def test_empty_registry_rejected(self):
         root = os.path.join(self.tmp, "empty-root")
         os.makedirs(root)
-        # 空根 + 迁移源在场 = 走迁移（合法路径）；fail-closed 报错腿需要「无迁移源」——
+        # 空根 + 迁移源在场 = 走迁移（合法路径）；fail-closed 报错子用例需要「无迁移源」——
         # monkeypatch 掉 shared.PROJECTS_YAML（真源在 lane 内真实存在，不能动仓文件）。
         real_seed = shared.PROJECTS_YAML
         shared.PROJECTS_YAML = Path(self.tmp) / "no-such-seed.yaml"
@@ -212,7 +212,7 @@ class _FakeHandle:
 
 class TicketStartGateTest(unittest.TestCase):
     """KI-032 硬闸行为级：真调 client.cmd_ticket_start（stub _connect，
-    拒收腿在 connect 之前就返回，成功腿断言 TicketInput 落参）。"""
+    拒收子用例在 connect 之前就返回，成功子用例断言 TicketInput 落参）。"""
 
     def setUp(self):
         import tempfile

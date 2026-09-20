@@ -48,7 +48,7 @@ def main():
         print("SUMMARY pass=0 fail=1 env_fail=0 na=0", flush=True)
         return 1
     eng_name, ext_name = "engine", "external"
-    # 负例代号：任何桶都不存在的档案（跨项目拒绝腿用引擎桶异名，另配全缺失档）
+    # 负例代号：任何桶都不存在的档案（跨项目拒绝子用例用引擎桶异名，另配全缺失档）
     with fx.RegistryEnv() as reg:
         eng = fx.make_project(reg.root, eng_name)
         ext = fx.make_project(reg.root, ext_name)

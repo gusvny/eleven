@@ -13,7 +13,7 @@ import { ensureStageConsole } from '../lib_stage_console.mjs';
 export const BASE = (await ensureStageConsole()).base;
 
 // 台身份探针（t260906-01 仲裁实锤故障面的机械归因缝）：台服务的 client bundle 与
-// 本仓 lib/client.js 逐字节比对，PROVENANCE 行只记录不断言（不改任何场景的腿/计数）。
+// 本仓 lib/client.js 逐字节比对，PROVENANCE 行只记录不断言（不改任何场景的子用例/计数）。
 // 背景：共享常驻台绑定创建泳道的 /repo 且 ensure 健康复用（t260906-01 机械跑实录=
 // 台上是别泳道 t260905-09 的构建），且泳道台缺 node_modules 时 /repo 回落挂主树
 // （stage_docker 供给语义）——浏览器面测的树与本泳道交付物可以不同源，此前归因
@@ -95,7 +95,7 @@ export async function fetchProjects() {
 
 /** 执行契约（integration/README.md「执行契约」，t260904-12 三态化）：状态词表只认
  *  pass / fail / env_fail / na——环境缺失一律 env_fail（绝不 exit 0 假绿）；na 仅给
- *  以系统状态为条件的腿。退出码：fail>0 或全腿 na → 1（产品红优先，C7/C9）；
+ *  以系统状态为条件的子用例。退出码：fail>0 或全部子用例 na → 1（产品红优先，C7/C9）；
  *  env_fail>0 → 2；全过 → 0。SUMMARY 末行 pass= fail= env_fail= na=（skip= 退役）。 */
 export function makeResults() {
   const results = [];

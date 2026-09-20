@@ -2395,7 +2395,7 @@ interface TicketDiffResult {
   filesTruncated: boolean
   /** 泳道道被排除的引擎过程物条数（.sandbar/ .dsh/ out/ __pycache__/ 等）；没有该计数时不显示。 */
   excludedEngineFiles?: number
-  /** 被剔除过程物点名（上限 20 条，t260911-01 验收 d 的「点名」腿）。 */
+  /** 被剔除过程物点名（上限 20 条，t260911-01 验收 d 的「点名」子用例）。 */
   excludedPaths?: string[]
   /** 多仓票逐仓汇总（t260911-01 2a）；单仓票恒 undefined，渲染路径不变。 */
   repos?: RepoDiffSummary[]

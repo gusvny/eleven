@@ -1,8 +1,8 @@
 """t260913-01 dev_lane sign 的 marker 分支（authorize 丢失可见化）+ 三模板 marker
 fail-closed 锁（零 Temporal，stub dev_lane.workflow 同 t260912-03 套路）。
 
-覆盖（方案 v2 L4 + review C-负锁/R7/R8b 的机械腿）：
-  - marker 分支四腿：
+覆盖（方案 v2 L4 + review C-负锁/R7/R8b 的机械子用例）：
+  - marker 分支四子用例：
     ① authorize 在场 + gate=marker → intake 正常（gate 被标记占用也不比对 merge）；
     ② authorize 缺失 + gate=marker → refused want=sign(authorize)、why 点名
       「载荷解析失败」（与「非人审等待中」可辨）、不落账、不进 _sigs、log 记名；
@@ -75,7 +75,7 @@ def _auth(**kw):
 BLOCKED = {"stage": "arbitrate", "stage_state": "blocked", "ticket_id": "t-ut"}
 
 
-# ---------- marker 分支四腿 ----------
+# ---------- marker 分支四子用例 ----------
 
 def test_marker_gate_without_authorize_is_named_parse_failure():
     wf = _mk_wf(BLOCKED)

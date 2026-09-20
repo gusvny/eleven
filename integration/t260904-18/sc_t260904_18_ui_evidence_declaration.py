@@ -12,7 +12,7 @@ intent（守护的用户可感知行为/合同）：
   ①声明在场+diff 命中=现状红绿判定（闸没松，无 png 仍红）；
   ②声明在场+diff 未命中=不出项（拓扑级缺席）；
   ③声明缺省+diff 健康=出项 green+可见 note「ui_evidence 未声明」（缺席可见非静默，不是假绿）；
-  ④diff 故障=红 fail-closed——机制故障不因缺省豁免（对照腿：缺省不松闸）；
+  ④diff 故障=红 fail-closed——机制故障不因缺省豁免（对照子用例：缺省不松闸）；
 - load_ui_evidence 三态（缺失/畸形/ok）；
 - sandbar 自身五路径迁入仓根 verify.yaml（数据迁移=行为等价 rod：声明集合≡旧
   UI_WRITE_PREFIXES 五路径）；
@@ -20,10 +20,10 @@ intent（守护的用户可感知行为/合同）：
   ui_evidence_dirs，activity 读盘 workflow 只读 meta=重放安全）源码锁。
 
 与相邻场景 intent 分界：t260904-13 三场景守判定源/闸输出/patched 接线编排
-（KI-044 面），本条守**声明制新契约面**（KI-050）；本条 3.6 四分支腿经真 merge_check
+（KI-044 面），本条守**声明制新契约面**（KI-050）；本条 3.6 四分支子用例经真 merge_check
 驱动（真 git 夹具仓，复用 lib_ki044 共享夹具+桩 admin 隔离 verify_lane 语义面）。
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；
-temporalio 缺失=ENV_FAIL 点名（merge_check 行为腿），verify_lane/声明/源码锁腿照跑。
+temporalio 缺失=ENV_FAIL 点名（merge_check 行为子用例），verify_lane/声明/源码锁子用例照跑。
 """
 import json
 import shutil
@@ -66,7 +66,7 @@ def run_code_lane(tmpdir):
     return verify_lane.run({"lane": "code", "path": str(tmpdir)})
 
 
-# ---------- verify_lane 白名单/形态腿（stdlib 处处可跑；真解析器） ----------
+# ---------- verify_lane 白名单/形态子用例（stdlib 处处可跑；真解析器） ----------
 d1 = Path(tempfile.mkdtemp(prefix="t260904-18-vy-ok-"))
 try:
     (d1 / "verify.yaml").write_text(ui_evidence_yaml(["web/ui/"]), encoding="utf-8")
@@ -118,10 +118,10 @@ if lue is not None:
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
-# ---------- merge_check 3.6 四分支行为腿（temporalio 面；真 merge_check + 真 git 夹具） ----------
+# ---------- merge_check 3.6 四分支行为子用例（temporalio 面；真 merge_check + 真 git 夹具） ----------
 if not temporalio_available():
-    env_fail("temporalio 不可用（本泳道无 venv）：merge_check 3.6 四分支行为腿不可执行——"
-             "verify_lane/声明/源码锁腿已在本场跑完；arbitrate/merge 期 venv 环境必须全绿")
+    env_fail("temporalio 不可用（本泳道无 venv）：merge_check 3.6 四分支行为子用例不可执行——"
+             "verify_lane/声明/源码锁子用例已在本场跑完；arbitrate/merge 期 venv 环境必须全绿")
 else:
     import asyncio  # noqa: E402
     import agent_activities  # noqa: E402
@@ -170,7 +170,7 @@ else:
           and "ui_evidence" in str(items[0].get("detail", "")),
           "items=%r" % (items,))
 
-    # ④diff 故障（机制故障）：缺省不豁免，仍红 fail-closed（对照腿：闸没松）
+    # ④diff 故障（机制故障）：缺省不豁免，仍红 fail-closed（对照子用例：闸没松）
     items = run_merge({
         "web/ui/a.ts": "export {}\n",
         "verify.yaml": ui_evidence_yaml(None),

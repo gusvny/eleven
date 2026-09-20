@@ -20,13 +20,13 @@ intent 分工（防 intent 级重复）：
   （同仓/异仓/未知，spawn 可注入）；本条＝apply 全真路径的双 console 防重
   （端口探测/pidfile 存活探测/真 spawnTicketWorker 的 'wx' 互斥与辨析文案）——
   纯决策面不含 'wx' 互斥分支，彼场景替代不了本条；
-- 本条异常腿经真 apply→ensureTicketWorkers→spawnTicketWorker 走真 child 路径，
+- 本条异常子用例经真 apply→ensureTicketWorkers→spawnTicketWorker 走真 child 路径，
   pidfile 位以目录占位使 'wx' 确定性必败（readPid 对目录返回 null→按缺位推进
   →写注必撞）——故障注入不靠时序竞态。
 
 三态契约：docker 台缺席=ENV_FAIL exit 2；node 缺席=ENV_FAIL 点名；被测 python
 子进程（cli 的 client.py、被 spawn 的 worker.py）零连生产（审计钩子经 env 继承
-护体+自证腿）；日志锚兼容正则锚语义不锁措辞（KI-051）。
+护体+自证子用例）；日志锚兼容正则锚语义不锁措辞（KI-051）。
 """
 import json
 import os
@@ -163,7 +163,7 @@ def main():
             e.update(audit_env or {})
             return e
 
-        # ---------- ② 正常腿：双 console 静默认领（server 单例+worker 单例） ----------
+        # ---------- ② 正常子用例：双 console 静默认领（server 单例+worker 单例） ----------
         rc1, out1, npid1 = run_node(node_env("dup", 8000))
         if rc1 == 4:
             fail.check(False, "node.ts 契约 export 缺失：%s"
@@ -193,7 +193,7 @@ def main():
                 fail.check(f.read().strip() == str(sleeper.pid),
                            "在册 worker pidfile 内容原样（归属未被篡改）")
 
-        # ---------- ③ 异常腿：工单 worker pidfile 抢注互斥 + 辨析文案 ----------
+        # ---------- ③ 异常子用例：工单 worker pidfile 抢注互斥 + 辨析文案 ----------
         rc_t, out_t = run_poc_client(py, "ticket-start", {
             "ticket_id": TID, "template_id": "dev-lane", "project": PROJ_KEY,
             "title": "防重辨析场景票", "write_set": ["docs/"]}, env0)
@@ -244,7 +244,7 @@ def main():
                        "apply 返回 dispose（实得 %s）" % out2.get("disposeType"))
         if holders is None:
             print("N/A  重复 child 回收观测：lsof 文件持有者查询在本环境不可用"
-                  "（观测面缺失，非被测行为红；互斥分支本身已由辨析文案腿判定）", flush=True)
+                  "（观测面缺失，非被测行为红；互斥分支本身已由辨析文案子用例判定）", flush=True)
         else:
             fail.check(holders == [],
                        "重复拉起的 child 已被 SIGTERM 回收（日志文件零存活持有者；实得 %s）"

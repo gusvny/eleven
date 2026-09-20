@@ -7,27 +7,27 @@ intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：
 工单验收①的**入口面**：信号位（env_fail/env_reason/handover_runs/handover_dropped）
 必须在「活动边界」真实在位——不是内部函数直调可见，而是从真实活动入口进（桩旋钮
 注入）、经幂等缓存重放不丢、缓存命中时日志扫描补位、且归因不被陈旧日志污染。
-与同票 sc_t260917_08_env_fail_handover.py 分工：彼守离线消费面（腿执行器/债表/文案/
-R4 空腿语义），本条守**装配面**（M1 四挂点中「幂等缓存①/桩旋钮②」两条的行为面 +
+与同票 sc_t260917_08_env_fail_handover.py 分工：彼守离线消费面（命令执行器/债表/文案/
+R4 空清单语义），本条守**装配面**（M1 四挂点中「幂等缓存①/桩旋钮②」两条的行为面 +
 N2 重放不丢 + 污染对抗）——内部函数单测过≠入口接线在。
 
-四腿（离线桩，零网络零 docker；temporalio.testing.ActivityEnvironment 驱动共享段
+四条子用例（离线桩，零网络零 docker；temporalio.testing.ActivityEnvironment 驱动共享段
 实现——全部 agent 段活动的唯一入口，输出=段回执公开契约 StageResult）：
 
-- 腿1 桩旋钮注入→活动边界（验收①入口面+结果契约层）：SANDBAR_AGENT_STUB_ENV_FAIL/
+- 子用例1 桩旋钮注入→活动边界（验收①入口面+结果契约层）：SANDBAR_AGENT_STUB_ENV_FAIL/
   _ENV_REASON/_HANDOVER（JSON 文件路径形式）→ 段回执 status=ok（信号不翻转红绿，
-  红线④正面）、env_fail=true、env_reason 自报原文保真、合法腿归一保留、畸形腿记名
+  红线④正面）、env_fail=true、env_reason 自报原文保真、合法条目归一保留、畸形条目记名
   dropped（不静默丢）；**磁盘结果文件**四新键成套在位（结果契约层=幂等锚点）。
-- 腿2 幂等缓存重放不丢信号（t260917-05 实证承接面：worker 死在「交付后、归位前」→
-  重放）：同 result_file 二次调用走缓存命中 → env_fail/腿/dropped 全数存活（N2
+- 子用例2 幂等缓存重放不丢信号（t260917-05 实证承接面：worker 死在「交付后、归位前」→
+  重放）：同 result_file 二次调用走缓存命中 → env_fail/命令/dropped 全数存活（N2
   并集保留），status 仍 ok。
-- 腿3 缓存命中+日志扫描补位（M1 挂点①行为面）：**旧格式回执**（无任何 env 键）+
+- 子用例3 缓存命中+日志扫描补位（M1 挂点①行为面）：**旧格式回执**（无任何 env 键）+
   spawn 日志含 t260917-05 原话 → env_fail=true 补位、env_reason 带「[worker 归因]」
   前缀（与 agent 自报可分辨）并点名 sandbox_apply；对照=同回执+日志读不到 → 零改动
   （无信号不硬造）。
-- 腿4 归因不污染（对抗面，M1 裁定②）：桩路径**有意不挂**日志扫描——桩回执（无
-  env 旋钮）+ 陈旧日志含 sandbox 字样 → env_fail 恒 False、腿/弃单均空（老载荷
-  零改动面）。若有人为「归一化」把扫描挂上桩路径，陈旧日志会伪造环境归因——本腿
+- 子用例4 归因不污染（对抗面，M1 裁定②）：桩路径**有意不挂**日志扫描——桩回执（无
+  env 旋钮）+ 陈旧日志含 sandbox 字样 → env_fail 恒 False、命令/弃单均空（老载荷
+  零改动面）。若有人为「归一化」把扫描挂上桩路径，陈旧日志会伪造环境归因——本子用例
   即钉死该回归。
 
 驱动：引擎模块进程内直调（cmd 用 venv python；temporalio/venv 缺席=import 失败 →
@@ -91,10 +91,10 @@ def _args(tmp, result_file, log_file, gen=0):
 
 
 async def leg1_stub_knobs_to_activity_boundary(tmp):
-    """腿1：桩旋钮注入 → 活动边界（验收①入口面 + 磁盘结果契约层）。"""
-    print("—— 腿1 桩旋钮注入→活动边界")
+    """子用例1：桩旋钮注入 → 活动边界（验收①入口面 + 磁盘结果契约层）。"""
+    print("—— 子用例1 桩旋钮注入→活动边界")
     hv_file = os.path.join(tmp, "handover.json")
-    # 2 合法腿（名字带首尾空白=剥除面）+ 1 畸形腿（cmd 全空白）+ 1 非对象条目
+    # 2 合法条目（名字带首尾空白=剥除面）+ 1 畸形条目（cmd 全空白）+ 1 非对象条目
     with open(hv_file, "w", encoding="utf-8") as f:
         json.dump([{"name": " pytest-engine ", "cmd": " python3 -m pytest -q "},
                    {"name": "lint", "cmd": "python3 integration/lint_tests.py"},
@@ -108,17 +108,17 @@ async def leg1_stub_knobs_to_activity_boundary(tmp):
     rf = os.path.join(tmp, "result.json")
     res = await env.run(agent_activities._run_agent_stage_impl,
                         _args(tmp, rf, os.path.join(tmp, "agent.log")))
-    check("腿1：信号不翻转红绿（env_fail=true 段仍 status=ok，红线④正面）",
+    check("子用例1：信号不翻转红绿（env_fail=true 段仍 status=ok，红线④正面）",
           res.status == "ok", res.status)
-    check("腿1：env_fail 一等位在位（活动边界可见，不靠开日志）",
+    check("子用例1：env_fail 一等位在位（活动边界可见，不靠开日志）",
           res.env_fail is True, res.env_fail)
-    check("腿1：env_reason 自报原文保真（旋钮直注不改写）",
+    check("子用例1：env_reason 自报原文保真（旋钮直注不改写）",
           res.env_reason == T0505_LOG, res.env_reason)
     names = [l.get("name") for l in (res.handover_runs or [])]
-    check("腿1：合法腿归一保留（name 剥空白、保序）",
+    check("子用例1：合法条目归一保留（name 剥空白、保序）",
           names == ["pytest-engine", "lint"], res.handover_runs)
     dropped = res.handover_dropped or []
-    check("腿1：畸形腿逐条记名不静默丢（空白 cmd + 非对象）",
+    check("子用例1：畸形条目逐条记名不静默丢（空白 cmd + 非对象）",
           any("条目2" in d and "name/cmd" in d for d in dropped)
           and any("非对象" in d for d in dropped),
           dropped)
@@ -126,7 +126,7 @@ async def leg1_stub_knobs_to_activity_boundary(tmp):
         raw = json.loads(Path(rf).read_text("utf-8"))
     except Exception as e:
         raw = {"_err": "%s: %s" % (type(e).__name__, e)}
-    check("腿1：磁盘结果文件四新键成套在位（结果契约层=幂等锚点）",
+    check("子用例1：磁盘结果文件四新键成套在位（结果契约层=幂等锚点）",
           raw.get("env_fail") is True and raw.get("env_reason") == T0505_LOG
           and len(raw.get("handover_runs") or []) == 2
           and len(raw.get("handover_dropped") or []) == 2,
@@ -136,21 +136,21 @@ async def leg1_stub_knobs_to_activity_boundary(tmp):
 
 
 async def leg2_cache_replay_keeps_signal(tmp, rf):
-    """腿2：幂等缓存重放不丢信号（-05 实证：worker 死在交付后归位前 → 重放）。"""
-    print("—— 腿2 幂等缓存重放不丢信号（N2）")
+    """子用例2：幂等缓存重放不丢信号（-05 实证：worker 死在交付后归位前 → 重放）。"""
+    print("—— 子用例2 幂等缓存重放不丢信号（N2）")
     env = ActivityEnvironment()
     res = await env.run(agent_activities._run_agent_stage_impl,
                         _args(tmp, rf, os.path.join(tmp, "agent.log"), gen=0))
-    check("腿2：缓存重放 env_fail/腿/弃单全数存活（重放不丢信号）",
+    check("子用例2：缓存重放 env_fail/命令/弃单全数存活（重放不丢信号）",
           res.env_fail is True and len(res.handover_runs or []) == 2
           and len(res.handover_dropped or []) == 2,
           (res.env_fail, res.handover_runs, res.handover_dropped))
-    check("腿2：重放路径 status 仍 ok（缓存不改判定）", res.status == "ok", res.status)
+    check("子用例2：重放路径 status 仍 ok（缓存不改判定）", res.status == "ok", res.status)
 
 
 async def leg3_cache_hit_log_scan_fills(tmp):
-    """腿3：缓存命中+日志扫描补位（M1 挂点①）+ 日志读不到对照零改动。"""
-    print("—— 腿3 缓存命中日志扫描补位（M1 挂点①）")
+    """子用例3：缓存命中+日志扫描补位（M1 挂点①）+ 日志读不到对照零改动。"""
+    print("—— 子用例3 缓存命中日志扫描补位（M1 挂点①）")
     env = ActivityEnvironment()
     rf = os.path.join(tmp, "old_receipt.json")
     with open(rf, "w", encoding="utf-8") as f:
@@ -162,21 +162,21 @@ async def leg3_cache_hit_log_scan_fills(tmp):
         f.write("…agent 输出…%s…" % T0505_LOG)
     res = await env.run(agent_activities._run_agent_stage_impl,
                         _args(tmp, rf, log, gen=1))
-    check("腿3：旧格式回执+日志原话 → env_fail 补位=true（死在归位前的实证形态）",
+    check("子用例3：旧格式回执+日志原话 → env_fail 补位=true（死在归位前的实证形态）",
           res.env_fail is True, (res.env_fail, res.env_reason))
-    check("腿3：补位归因带 [worker 归因] 前缀（与 agent 自报可分辨）且点名 sandbox_apply",
+    check("子用例3：补位归因带 [worker 归因] 前缀（与 agent 自报可分辨）且点名 sandbox_apply",
           str(res.env_reason or "").startswith("[worker 归因] ")
           and "sandbox_apply" in str(res.env_reason or ""), res.env_reason)
     res2 = await env.run(agent_activities._run_agent_stage_impl,
                          _args(tmp, rf, os.path.join(tmp, "absent.log"), gen=1))
-    check("腿3：对照=日志读不到 → 零改动不硬造（env_fail=False）",
+    check("子用例3：对照=日志读不到 → 零改动不硬造（env_fail=False）",
           res2.env_fail is False and res2.env_reason == "",
           (res2.env_fail, res2.env_reason))
 
 
 async def leg4_stub_path_not_polluted_by_stale_log(tmp):
-    """腿4：归因不污染（对抗面）——桩路径有意不挂日志扫描（M1 裁定②）。"""
-    print("—— 腿4 归因不污染（陈旧日志假信号对抗）")
+    """子用例4：归因不污染（对抗面）——桩路径有意不挂日志扫描（M1 裁定②）。"""
+    print("—— 子用例4 归因不污染（陈旧日志假信号对抗）")
     env = ActivityEnvironment()
     log = os.path.join(tmp, "stale.log")
     with open(log, "w", encoding="utf-8") as f:
@@ -187,10 +187,10 @@ async def leg4_stub_path_not_polluted_by_stale_log(tmp):
         os.environ.pop(k, None)
     res = await env.run(agent_activities._run_agent_stage_impl,
                         _args(tmp, os.path.join(tmp, "r4.json"), log, gen=2))
-    check("腿4：桩路径不吞陈旧日志假信号（env_fail 恒 False，归因不被污染）",
+    check("子用例4：桩路径不吞陈旧日志假信号（env_fail 恒 False，归因不被污染）",
           res.env_fail is False and res.env_reason == "",
           (res.env_fail, res.env_reason))
-    check("腿4：无旋钮老载荷零改动面（腿/弃单均空）",
+    check("子用例4：无旋钮老载荷零改动面（命令/弃单均空）",
           res.handover_runs == [] and res.handover_dropped == [],
           (res.handover_runs, res.handover_dropped))
 
@@ -204,7 +204,7 @@ async def _run_all(tmp):
 
 
 def main():
-    print("t260917-08 env 一等信号·活动边界装配（离线桩四腿）")
+    print("t260917-08 env 一等信号·活动边界装配（离线桩四条子用例）")
     tmp = tempfile.mkdtemp(prefix="t26091708-sig-")
     saved = {k: os.environ.get(k) for k in KNOBS}
     try:

@@ -22,7 +22,7 @@ intent（守护的用户可感知行为，灰盒 L3；dsh-upgrade T1——dsh 0.
 - S3 仅新名 → 计新名（升级后新会话可统计）；
 - S4 两层以外的同名旧名档（一层/三层深）不入集（发现半径保持现状两层——纯名字层
   加宽不改发现深度，验收「当前树行为逐字节不变」的半径钉子）；
-- S5 零会话 → tokens_zero=True 且 reason 含新名字面（文案与实现一致，验收④运行时腿）；
+- S5 零会话 → tokens_zero=True 且 reason 含新名字面（文案与实现一致，验收④运行时子用例）；
 - S6 v3 名是目录 → 统计不崩、不计其值、旧名档照常入集。
 
 断言面=文件系统结果+聚合返回值——用户可感知面就是「坏档被清走好档原样、token 账
@@ -140,7 +140,7 @@ def main() -> int:
         f.check(v3_dir.is_dir(), "Q4 v3 名目录不被当会话档清走（不崩不误挪）")
         f.check(q4_old.exists(), "Q4 同目录旧名健康档原位")
 
-        # ---- 统计面（每腿独立 wt 夹具，互不污染）----
+        # ---- 统计面（每子用例独立 wt 夹具，互不污染）----
         def stat(wt: Path, ticket=TICKET):
             return agent_activities._aggregate_lane_usage(wt, ticket)
 

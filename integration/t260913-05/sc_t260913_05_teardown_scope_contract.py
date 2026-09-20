@@ -28,7 +28,7 @@ intent（守护的用户可感知行为/合同）：
 ⑧ 两源分歧时跟盘上清单（与 merge 同源，防两套判定漂移）。
 
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
-引擎 venv/temporalio 缺席 = ENV_FAIL exit 2 点名（本场景无 stdlib 替代腿：直调 activity）。
+引擎 venv/temporalio 缺席 = ENV_FAIL exit 2 点名（本场景无 stdlib 替代子用例：直调 activity）。
 """
 import os
 import shutil
@@ -242,8 +242,8 @@ def main():
         for leg in (leg_a, leg_b, leg_c, leg_d, leg_e, leg_f, leg_g, leg_h):
             try:
                 leg(tmp)
-            except Exception as e:  # 单腿自身炸掉=该腿红，不拖垮其余腿
-                check("%s 腿自身异常收敛（不得以 traceback 炸掉场景）" % leg.__name__,
+            except Exception as e:  # 单子用例自身炸掉=该子用例红，不拖垮其余子用例
+                check("%s 子用例自身异常收敛（不得以 traceback 炸掉场景）" % leg.__name__,
                       False, "%s: %s" % (type(e).__name__, str(e)[:240]))
     finally:
         rmtree(tmp)

@@ -11,7 +11,7 @@ inspect 段专属面——围栏 JSON 伪造器、证据锚夹具树、上期台
 桩缝契约（方案 §3 明文，场景↔实现接缝）：
 - SANDBAR_INSPECT_STUB=1 + SANDBAR_INSPECT_STUB_FILE=<文件>：桩文件内容=agent 最终
   消息全文，末尾恰一块 ```json 围栏 {"findings":[…]}——走引擎真解析纪律，不旁路。
-- SANDBAR_INSPECT_CMD=<脚本>：真进程链腿（假脚本 echo 围栏 JSON）。
+- SANDBAR_INSPECT_CMD=<脚本>：真进程链子用例（假脚本 echo 围栏 JSON）。
 - 发现条目 schema（设计稿 §4.2 + 方案 §2.3）：subject/severity(high|med|low)/
   evidence[{path,line,quote≤200字}]（非空）/why/suggestion/confidence(0~1)；
   id 不由 agent 提供（机械按内容哈希铸造，agent 报的 id 一律忽略）。
@@ -55,7 +55,7 @@ def finding(subject, path, line, quote, *, severity="med", why="语义审查判�
 def fenced_message(findings, *, n_blocks=1, outer_json_valid=True, preamble="审查完成。"):
     """造 agent 最终消息文本：末尾恰 n_blocks 块 ```json 围栏。
 
-    n_blocks=0/≥2 与 outer_json_valid=False 用于畸形解析腿（0/≥2 围栏块、坏 JSON）。
+    n_blocks=0/≥2 与 outer_json_valid=False 用于畸形解析子用例（0/≥2 围栏块、坏 JSON）。
     """
     import json as _json
     body = ""
@@ -107,7 +107,7 @@ _PRODUCER_LINES = [
 
 class InspectTree(RepoTree):
     """仓形夹具树 + 固定行号访问器：evidence 的 path/line/quote 全部锚真实文件行，
-    机械复核（文件存在/行号在范围/引文匹配）才有「真过」与「真不过」两腿可断。"""
+    机械复核（文件存在/行号在范围/引文匹配）才有「真过」与「真不过」两子用例可断。"""
 
     def line_text(self, rel, lineno):
         path = os.path.join(self.root, rel)
@@ -169,7 +169,7 @@ def seed_verdicts(ledger_dir, instance, period, entries):
 
 
 def seed_prev_ledger_raw(ledger_dir, instance, period, raw_text):
-    """播坏台账（坏 JSON/缺 findings/非列表→prev_ledger_error 点名腿用）。"""
+    """播坏台账（坏 JSON/缺 findings/非列表→prev_ledger_error 点名子用例用）。"""
     os.makedirs(ledger_dir, exist_ok=True)
     path = os.path.join(ledger_dir, ledger_name(instance, period))
     with open(path, "w", encoding="utf-8") as f:
@@ -321,7 +321,7 @@ def verify_args(instance, period, base, inspect_payload, **extra):
     d.update({
         "inspect": inspect_payload, "inspect_result": inspect_payload,
         "findings": findings,
-        "suite_green": True,   # 非 suite 期无套件面，心跳合成的套件腿缺省绿
+        "suite_green": True,   # 非 suite 期无套件面，心跳合成的套件子用例缺省绿
     })
     d.update(extra)
     return d

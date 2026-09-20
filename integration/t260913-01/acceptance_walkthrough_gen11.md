@@ -19,15 +19,15 @@
   `-authz-cli-queryable` **24/0**、`t260913-01-authz-signal-delivery` **37/0**（首跑撞 docker 建网竞态 exit 2，
   随后**连续两次 37/0 绿**）；lint **0/0**；UT **760 passed**。
 - **闸唯一 FAIL 非本票面**：`t260913-03-executor-pool-exclude-l1`（别票 ro 池），本段复跑 **32/0 exit 0**（H1 绿）→ 瞬态。
-- **家族起台腿归档本轮再补两例**（fuse_headroom / fuse_runaway），审计通过；残点见遗留。
+- **家族起台子用例归档本轮再补两例**（fuse_headroom / fuse_runaway），审计通过；残点见遗留。
 - **F**：`t260912-01` closed；`t260911-05` `used=1`。
 
 | # | 项 | 结论 | 本轮依据 |
 |---|----|------|----------|
-| A | 正腿·受保护路径（送达+消费） | 通过 | 本段手跑 `sc_authz_signal_delivery` **37/0**（送达）、`-authz-protected-path` **37/0**（消费） |
-| B | 正腿·仲裁超限 | 通过 | 本段手跑 `-authz-overlimit-accept` **30/0**（merged 树上，判决原文+`uses≥1`+推进） |
+| A | 正用例·受保护路径（送达+消费） | 通过 | 本段手跑 `sc_authz_signal_delivery` **37/0**（送达）、`-authz-protected-path` **37/0**（消费） |
+| B | 正用例·仲裁超限 | 通过 | 本段手跑 `-authz-overlimit-accept` **30/0**（merged 树上，判决原文+`uses≥1`+推进） |
 | C | 负锁四条（本票覆盖 5 条） | 通过 | 本段手跑新场景 37/0（含「载荷解析失败」vs「非人审等待中」可辨断言） |
-| D | 真往返守卫 | 通过（合成口径） | 两腿真信号、均在册；本段手跑两条真信号链 |
+| D | 真往返守卫 | 通过（合成口径） | 两子用例真信号、均在册；本段手跑两条真信号链 |
 | E | 零回归 | 通过 | 引擎三 handler 语义未变；合并树 UT **760 passed** |
 | F | 实票验证 | 通过 | `t260912-01` closed；`t260911-05` `used=1` |
 | — | 测试资产/合并审查 | 通过（残点已列） | 合并正确性三方圆核 + 家族归档两例审计 |
@@ -42,7 +42,7 @@
 3. **本段手跑**：lint、合并树全量 UT、本票四条场景（因为 engine 池被跳过，机械口径本轮不含它们）。
 4. 读本轮机械结果，定性唯一 FAIL；复跑该 FAIL 对应的 ro 池用例（32/0 绿）。
 5. 审计本轮新增的两例家族归档（fuse_headroom / fuse_runaway）diff。
-6. 家族残留扫描（全仓 grep 起台腿直判形态）+ 线上 F 只读取证。
+6. 家族残留扫描（全仓 grep 起台子用例直判形态）+ 线上 F 只读取证。
 
 ## 怎么验证的（证据引用）
 
@@ -77,7 +77,7 @@ sc_authz_signal_delivery.py                            → 首跑 exit 2（docke
 | 待删两文件方向是否正确 | **正确** | `git ls-tree -r main -- .sandbar/routes-migration-260911/` = **0** ⇒ 删除后与 main 对齐（KI-090 同源欠账） |
 | 合并树是否健康 | **是** | UT **760 passed**（本 lane 724 + main 36）、lint 0/0、本票四条场景手跑全绿 |
 
-### 家族起台腿归档（本轮新增两例，审计通过）
+### 家族起台子用例归档（本轮新增两例，审计通过）
 
 ```
 sc_stage_fuse_headroom_resident.py（arbitrate gen6 落）：
@@ -93,8 +93,8 @@ sc_stage_fuse_runaway_named_stop.py：
 
 ### 覆盖口径变化（重要，需人审知晓）
 
-- main 现行 `verify.yaml` 声明 `exclude_pools: engine,exclusive`（例外腿已由宿主撤除），**每票集测段不再跑
-  engine 池** → 本票自带的真信号守卫（`t260913-01-authz-signal-delivery`）与 t260912-03 三条正腿**都不在每票段**，
+- main 现行 `verify.yaml` 声明 `exclude_pools: engine,exclusive`（例外分支已由宿主撤除），**每票集测段不再跑
+  engine 池** → 本票自带的真信号守卫（`t260913-01-authz-signal-delivery`）与 t260912-03 三条正用例**都不在每票段**，
   改由每日巡检（`t260913-02`，当前 `acceptance_walkthrough/running`）或人工跑覆盖。
 - 本轮即为实证：197 跑里没有本票任何场景；本段以手跑四种补足。**建议**：本票合并后把「authz 四场景纳入巡检
   显式清单/或纳入强制面」作为已知覆盖口径记录（本段只报观察，不改 main 声明）。
@@ -130,7 +130,7 @@ main 侧 UI 改动（chat-project-tag 等）属别票面，其场景在本轮 19
 8. **运维面（设计固有）**：合并后 CLI 对未含 `sign_face` 的 worker 拒发 authorize（fail-closed）→ 现网 worker
    需按 runbook §S0→§S6 再重启一次才能继续用人授权。
 9. KI 候选待 main 侧 integration 落册（本段写集不含 `notes/`）：implement gen0 三条 + 走查累计六条
-   （④机读键无断言锁；⑤两条轻微实现缺陷；⑥供给台/console 台生命周期不一致族；⑦家族起台腿直判
+   （④机读键无断言锁；⑤两条轻微实现缺陷；⑥供给台/console 台生命周期不一致族；⑦家族起台子用例直判
    ——本轮已修至第五例（lib/net_table/sweep/herd/fuse×2），余 burst/acc_g_cleanup/cwd_independence/holder_kill_reclaim；
    ⑧F 判据口径；⑨闸执行面空轮根因＝预算对死代码（本票已修）；**⑩新增：engine 池被每票段排除 → 本票守卫场景
    仅由日巡覆盖**）。
@@ -138,10 +138,10 @@ main 侧 UI 改动（chat-project-tag 等）属别票面，其场景在本轮 19
 ## 收口两问
 
 - **沉淀一问（doc_sediment）**：want=true。target=`docs/design/deepseek_harness_and_temporal_based_multi-agent_mechanism.md`
-  新增小节「集成测试道预算对 + 起台腿三态归档 + sign 信号载荷演进纪律」（备用落点 `docs/testing-guide.md` 同族节）。
+  新增小节「集成测试道预算对 + 起台子用例三态归档 + sign 信号载荷演进纪律」（备用落点 `docs/testing-guide.md` 同族节）。
   理由（本轮新增第 4 件跨票事实，前三件见 gen10）：①**预算对不变量**（内层 `BATCH_TIMEOUT_SEC+300` 必须严格
   小于外层 `INTEG_RUN_TO`，否则结构化超时回报是死代码→硬杀→`ran=0` 无归因 + RETRY 白烧；本票修并单测锁死）；
-  ②**起台腿三态归档单源**（prepare 型 rc=2/3 记 ENV_FAIL 带证据、rc=1/64 仍 FAIL、环境拒跑时下游腿 not-checked；
+  ②**起台子用例三态归档单源**（prepare 型 rc=2/3 记 ENV_FAIL 带证据、rc=1/64 仍 FAIL、环境拒跑时下游子用例 not-checked；
   本票已在 t260912-02 与 t260910-12 两族落地 `up_ok`/`up_batch_env_only`/`ensure_leg` 三处同口径实现）；③**sign
   信号载荷演进纪律**（worker 内存码可早于磁盘码、temporalio 静默丢未知字段 ⇒「marker 可见化 + sign_face 指纹
   先验 + 三态回执」，新字段上线必须重启在途票 worker）；④**每票集测段覆盖口径**——`verify.yaml exclude_pools`

@@ -1,7 +1,7 @@
 # t260907-08 宿主真机走查清单（验收③：两症状复查＋截图证据）
 
 执行人=宿主（3099 真控制台属用户操作面，agent 与测试一律不占用/重启/停止 console——
-仓库硬规则 1）。执行时点=merge 关卡（implement 完成且四象限场景硬腿绿之后）。
+仓库硬规则 1）。执行时点=merge 关卡（implement 完成且四象限场景硬子用例绿之后）。
 截图归档：`.suyou/screenshots/q08-*`（或工单台附件），每步一张，命名见各步。
 
 ## 前置
@@ -32,12 +32,12 @@
 | B5 | metrics 面板 | 文字面可读（图表数据色按豁免口径不计） | q08-B5-metrics.png |
 | B6 | 文档视图（深色档下重复 A2-A4） | 同 A 组判定 | q08-B6-docs-dark.png |
 
-## 旧平台腿（如可布点；真值待宿主确认项在此收口）
+## 旧平台子用例（如可布点；真值待宿主确认项在此收口）
 
 | 步 | 操作 | 判定 | 截图 |
 |---|---|---|---|
 | C1 | 0.1.1-rc.2 平台壳（或等价 bg-base-only 环境）浅档打开工单台 | 画布落 bg-base、文字可读 | q08-C1-legacy-light.png |
-| C2 | 同环境深档 | 深底 bg-base 真值记录：`bg-base(dark)=________`（填入 sc_wb_contrast_quadrant.mjs 的 LEGACY_DARK_BG_BASE 常量＝诊断腿摘 na 升硬腿） | q08-C2-legacy-dark.png |
+| C2 | 同环境深档 | 深底 bg-base 真值记录：`bg-base(dark)=________`（填入 sc_wb_contrast_quadrant.mjs 的 LEGACY_DARK_BG_BASE 常量＝诊断子用例摘 na 升硬子用例） | q08-C2-legacy-dark.png |
 
 ## 收口
 
@@ -45,4 +45,4 @@
 - 任一步不可读 → 打回，点名步号与面（对照 sc_wb_contrast_quadrant 的违例输出格式：
   台面/元素/色值/比值）。
 - C2 的真值一经确认：由 integration 岗位落进场景常量并知会工单台（legacy×深格从
-  诊断腿转硬腿，「四象限全绿」才算完整兑现）。
+  诊断子用例转硬子用例，「四象限全绿」才算完整兑现）。

@@ -5,7 +5,7 @@
 
 环境口径（三态契约，闸内环境缺失一律显式环境红）：
   stdlib 面（shared / 源码契约锁 / tmp 桩目录）——系统 python3 可跑；
-  temporalio 面（agent_activities 的行为驱动腿）——环境缺失时记 ENV_FAIL 点名
+  temporalio 面（agent_activities 的行为驱动子用例）——环境缺失时记 ENV_FAIL 点名
   并以 exit 2 收场，绝不静默略过；arbitrate/merge 期（venv 在位）必须全绿。
 """
 import sys

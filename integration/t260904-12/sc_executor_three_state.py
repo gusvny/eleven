@@ -12,7 +12,7 @@ intent：集成闸的机械语义钉在执行器出口——场景级只有 PASS
 - FAIL 与 ENV_FAIL 并存 → 产品红优先 exit 1（C7：环境红不稀释产品红）；
 - 未定义退出码（如 exit 3）→ 落 FAIL 不放行、不归环境（退出码封闭性，防新
   码被静默吞成 pass/env）；
-- 全腿 N/A 场景经 lib_env.fail_if_all_na 折算为产品红 exit 1（C9：无可验对象
+- 全部子用例 N/A 场景经 lib_env.fail_if_all_na 折算为产品红 exit 1（C9：无可验对象
   =设计/覆盖问题，修场景不补环境）；
 - SUMMARY 五计数形状 + 双向净不变式 ran=pass+fail+env_fail；
 - lib_env 共享助手契约：env_fail()=exit 2、fail_if_all_na()=exit 1。
@@ -70,8 +70,8 @@ ENV_SCRIPT = ("import sys; sys.path.insert(0, %r); import lib_env; "
               "print('playwright-core 未装配（隔离台缺位）'); "
               "lib_env.env_fail('playwright-core 未装配')" % str(REPO / "integration"))
 ALL_NA_SCRIPT = ("import sys; sys.path.insert(0, %r); import lib_env; "
-                 "lib_env.na('feature flag 未启用，该腿无对象'); "
-                 "lib_env.na('系统态无该功能，该腿无对象'); "
+                 "lib_env.na('feature flag 未启用，该子用例无对象'); "
+                 "lib_env.na('系统态无该功能，该子用例无对象'); "
                  "lib_env.fail_if_all_na(2, 2)" % str(REPO / "integration"))
 
 SUMMARY_RE = re.compile(
@@ -142,9 +142,9 @@ ok("FAIL [t12-野码] exit=3" in out and "ENV_FAIL [t12-野码]" not in out,
    "E2 野码落 FAIL 行而非 ENV_FAIL/PASS（封闭性归产品红）")
 check_invariant("E3", out)
 
-# ---- F. 全腿 N/A → 产品红（C9，经 lib_env 折算） ----
+# ---- F. 全部子用例 N/A → 产品红（C9，经 lib_env 折算） ----
 rc, out = drive([("t12-全NA", ALL_NA_SCRIPT)])
-ok(rc == 1, "F1 全腿 N/A 场景 → exit 1（产品红：无可验对象=设计/覆盖问题，C9）")
+ok(rc == 1, "F1 全部子用例 N/A 场景 → exit 1（产品红：无可验对象=设计/覆盖问题，C9）")
 ok("FAIL [t12-全NA] exit=1" in out, "F2 全 N/A 落 FAIL 行（不假绿不归环境）")
 check_invariant("F3", out)
 
@@ -165,14 +165,14 @@ with contextlib.redirect_stdout(buf):
         got = None
     except SystemExit as e:
         got = e.code
-ok(got == 1, "G2 lib_env.fail_if_all_na 全腿 N/A exit 1（产品红收口）")
+ok(got == 1, "G2 lib_env.fail_if_all_na 全部子用例 N/A exit 1（产品红收口）")
 with contextlib.redirect_stdout(buf):
     try:
         lib_env.fail_if_all_na(2, 1)
         got = None
     except SystemExit as e:
         got = e.code
-ok(got is None, "G3 部分腿 N/A 不触发全 N/A 红（na 仅系统状态腿的合法形态）")
+ok(got is None, "G3 部分子用例 N/A 不触发全 N/A 红（na 仅系统状态子用例的合法形态）")
 
 # ---- 执行契约：SUMMARY + FAIL>0 → exit 1 ----
 env_fail_n = _results.count("env_fail")

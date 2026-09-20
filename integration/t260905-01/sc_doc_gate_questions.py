@@ -7,7 +7,7 @@
 - 验收②：矛盾登记可查——债条目落泳道 pending-doc-sync.jsonl，且回执携带条目
   本体全量（doc/claim/actual）+ 转正纪律句（债登记纪律进流程的落点）；
 - 验收③：触发器/闸各带防回退——触发器被拆（acceptance 分支无判读调用/增项缝
-  文案缺失）=源码锁红；闸失灵（矛盾声明但不登记/畸形即崩/改 status）=行为腿红。
+  文案缺失）=源码锁红；闸失灵（矛盾声明但不登记/畸形即崩/改 status）=行为子用例红。
 
 结构：扫描器自证半（stage_block 切块器干净/注入样本红绿）→ 源码契约锁半
 （shared 增项缝文案 / apply_doc_gate 三件套定义与 acceptance 调用位 / 常量 /
@@ -84,8 +84,8 @@ if temporalio_available():
     except Exception as e:  # 依赖不齐（KI-039 同族）=环境红，不假绿
         env_fail("agent_activities 导入失败：%s: %s" % (type(e).__name__, e))
 else:
-    env_fail("temporalio 缺失：行为腿（parse/register/apply）无法驱动——"
-             "stdlib 源码锁腿已照跑；arbitrate/merge 期（venv 在位）必须全绿")
+    env_fail("temporalio 缺失：行为子用例（parse/register/apply）无法驱动——"
+             "stdlib 源码锁子用例已照跑；arbitrate/merge 期（venv 在位）必须全绿")
 
 if aa is not None:
     parse = getattr(aa, "parse_doc_gate", None)

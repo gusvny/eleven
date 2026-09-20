@@ -1,6 +1,6 @@
 """t260916-29 worker 真·优雅停 + 取消可辨 + 重跑兜底（纯函数面 + 守卫面 + 接线锚，零 Temporal）。
 
-覆盖（对齐工单验收①② UT 腿；端到端场景在 selfcheck_worker_graceful_stop.py）：
+覆盖（对齐工单验收①② UT 子用例；端到端场景在 selfcheck_worker_graceful_stop.py）：
   - worker.graceful_shutdown_timeout_sec：env 容错矩阵（缺省/畸形/NaN/Inf/负/显式 0 逃生门）；
   - worker._worker_extra_kwargs：Worker(...) 接线单一真源（timedelta 形状 + env 敏感）；
   - shared.classify_worker_termination：沿 .cause / __cause__ 链认 worker_terminated

@@ -41,7 +41,7 @@ CLI = os.path.join(REPO, "integration", "stage_docker.py")
 def _lane_scoped_proj():
     """树作用域工程名（260914 仲裁第 11 次进段实锤）：本场景按拓扑纪律走**共享缺省
     锁根**（见文件头），但工程名若全树固定，多泳道并发全量时同名租约互撞——up 被
-    STAGE_CONFLICT 正当拒收（实测 16:48 全量：本条 10 过 3 红，红腿原文「项目
+    STAGE_CONFLICT 正当拒收（实测 16:48 全量：本条 10 过 3 红，失败分支原文「项目
     t26090419-contract 已有活租约（state=downing holder pid=… 起租=16:28:00）」，
     而该拒收本身正是被测契约的正确行为）。后缀只让各泳道各占一个工程名，**锁根与
     档位互斥面照旧共享**（断言、契约、拓扑纪律一律不变）。形态沿用既有单源约定
@@ -56,9 +56,9 @@ PROD_PORTS = {3099, 7233, 8233}
 
 # daemon 资源类失败特征（t260905-06 仲裁 tests-fault 迭代）：docker daemon 侧资源
 # 耗尽/不可达属环境缺件（t260904-12 归因纪律：环境红记成产品红=假红——实锤：宿主
-# 残留网络耗尽地址池，本场景起台腿被记 FAIL exit 1）。特征窄列三类，不吞任意失败。
+# 残留网络耗尽地址池，本场景起台子用例被记 FAIL exit 1）。特征窄列三类，不吞任意失败。
 # t260912-02 注：fully subnetted 一支自受管网段落地起不再是活路径（建网显式带
-# 子网，回归锚在 sc_stage_docker_parallel_zero_residue 的受管网段腿），保留为
+# 子网，回归锚在 sc_stage_docker_parallel_zero_residue 的受管网段子用例），保留为
 # 防御性归因（手工直跑/旧期残留仍可能撞池），命中照归环境红。
 DAEMON_ENV_PAT = re.compile(
     r"address pools have been fully subnetted"
@@ -69,7 +69,7 @@ DAEMON_ENV_PAT = re.compile(
 def env_guard(err):
     """cli up stderr 命中 daemon 资源类失败 → 记 env_fail 并 exit 2（点名特征）。"""
     if err and DAEMON_ENV_PAT.search(err):
-        envfail("docker daemon 资源类失败（%s…）：CLI 契约腿没验成——归环境供给，清残留容器/网络后自动生效"
+        envfail("docker daemon 资源类失败（%s…）：CLI 契约子用例没验成——归环境供给，清残留容器/网络后自动生效"
                 % " ".join((err or "").strip().split())[:150])
         finish()  # finish 内按 failed/env_failed 分家退出码
     return False
@@ -121,7 +121,7 @@ def main():
     s2 = socket.socket(); s2.bind(("127.0.0.1", 0)); free = s2.getsockname()[1]; s2.close()
     check(sd.bind_free(free) is True, "bind 探测器：释放后端口判闲（%d）" % free)
 
-    # ---- docker 缺席腿（验收③三态：诚实环境红点名；本机无 docker=整段环境红）----
+    # ---- docker 缺席子用例（验收③三态：诚实环境红点名；本机无 docker=整段环境红）----
     if not docker_present():
         p = cli("up", "--project", PROJ, "--services", "temporal")
         check(p.returncode == 2, "docker 缺席 up=exit 2（实得 %s）" % p.returncode)
@@ -132,10 +132,10 @@ def main():
               "docker 缺席 down 同样点名（exit %s）" % d.returncode)
         if failed:
             finish()
-        envfail("docker 缺席：JSON 形状/拆台复用/镜像缺席可辨腿没验成（装有 docker 的宿主自动生效）")
+        envfail("docker 缺席：JSON 形状/拆台复用/镜像缺席可辨子用例没验成（装有 docker 的宿主自动生效）")
         finish()
 
-    # ---- 起台腿（①~⑤）：finally 兜底拆台——up 成功后任何异常（JSON 撕裂/超时/
+    # ---- 起台子用例（①~⑤）：finally 兜底拆台——up 成功后任何异常（JSON 撕裂/超时/
     #      断言崩溃）都不得残留自家台（验收④的崩溃路径半边）----
     try:
         # ---- ① up JSON 形状 ----

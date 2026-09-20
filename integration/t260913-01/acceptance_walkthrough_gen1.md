@@ -4,7 +4,7 @@
 签字处理（钥匙插不进去），受保护路径闸与仲裁超限两条判定无出口。
 
 走查立场：用户视角独立走查，不预设「测试已全部通过」；机械口径（233 跑 / 226 过 / 4 败 / 3 环境红）
-仅作输入，本段关键腿**自己重跑/自己复现**。与仲裁并行执行，本报告不为仲裁下结论。
+仅作输入，本段关键子用例**自己重跑/自己复现**。与仲裁并行执行，本报告不为仲裁下结论。
 
 ## 结论：通过（status=ok）
 
@@ -15,10 +15,10 @@
 
 | # | 项 | 结论 | 关键证据 |
 |---|----|------|----------|
-| A | 正腿·受保护路径（送达 + 消费） | 通过 | 送达：落账六要素 + timeline 签发事件 + 回执 `landing=landed`（37/0）；消费：settle 回执带 `path_gate_authz_used=宿主@1789261882:integration/baselines/sc_battery.py`（37/0） |
-| B | 正腿·仲裁超限 | 通过 | 无授权仍 blocked → 授权接受判决 → 不阻断推进 `acceptance_walkthrough`，`uses≥1` + 判决原文 + 授权人（30/0） |
+| A | 正用例·受保护路径（送达 + 消费） | 通过 | 送达：落账六要素 + timeline 签发事件 + 回执 `landing=landed`（37/0）；消费：settle 回执带 `path_gate_authz_used=宿主@1789261882:integration/baselines/sc_battery.py`（37/0） |
+| B | 正用例·仲裁超限 | 通过 | 无授权仍 blocked → 授权接受判决 → 不阻断推进 `acceptance_walkthrough`，`uses≥1` + 判决原文 + 授权人（30/0） |
 | C | 负锁四条（本票覆盖 5 条） | 通过 | 过期 / 别票 scope / agent 自签 / marker 载荷丢失 / 畸形裸 dict，全真信号投递、全部 refused 点名、全部不落账；「载荷解析失败」与「非人审等待中」机械可辨 |
-| D | 真往返守卫 | 通过（合成口径） | 两腿各自在册且真信号（A=新场景、B=在册 overlimit）；「单场景跑通 A+B」字面读法未满足，依 review C6 合成裁定 |
+| D | 真往返守卫 | 通过（合成口径） | 两子用例各自在册且真信号（A=新场景、B=在册 overlimit）；「单场景跑通 A+B」字面读法未满足，依 review C6 合成裁定 |
 | E | 零回归 | 通过 | 三个其它 handler 源码零 diff；普通签字逐字节锁 + t260912-03 三套 103 UT 绿；三个在册 authz 场景在新三态回执下不翻红 |
 | F | 实票验证 | **通过** | t260911-05：arbitrate 超限 blocked → 推进到 `merge_check`；t260912-01：受保护路径拒绝 blocked → 推进到 `run_integration_tests/running`；两票 `uses≥1` |
 | — | gen1 测试资产变更审查 | 通过（1 条残差面已标注） | 3 文件逐行 diff + 三态语义复现 + README/失败分类协议对照，见专节 |
@@ -27,7 +27,7 @@
 
 1. 复核 gen1 提交（`e4a5e2f`，4 文件）与整票累计 diff（`9c102d7..HEAD`）：引擎五文件本轮零改动，
    gen1 全部落在 `integration/baselines/` 三个共享文件（=宿主授权 scope 点名面）。
-2. **独立复跑**本票全部验收腿（lint / 全量 UT / 三条 L3 场景），不复用注入的机械结果。
+2. **独立复跑**本票全部验收子用例（lint / 全量 UT / 三条 L3 场景），不复用注入的机械结果。
 3. **逐行审查 gen1 三处测试资产改动**并按 `docs/design/失败分类协议v1.md` + `integration/README.md`
    对照其「三态归属」主张，另跑三条针对性复现（工具链解析真跑、env_fail 通道真跑、e2e 顶层真跑）。
 4. **线上只读取证 F**：真 Temporal 7233 上读两票 snapshot，取授权消费留痕（`uses`）与时间线，
@@ -41,9 +41,9 @@
 ```
 python3 integration/lint_tests.py                    → LINT done: 0 error / 0 warn, exit 0
 server/engine/.venv/bin/python -m pytest server/engine/tests -q → 722 passed in 30.42s
-sc_authz_signal_delivery.py    → pass=37 fail=0 exit=0   （A 腿送达 + 5 负锁 + 收口）
-sc_authz_protected_path.py     → pass=37 fail=0 exit=0   （A 腿消费：settle 放行 + 记名点名 + 普通签字零回归）
-sc_authz_overlimit_accept.py   → pass=30 fail=0 exit=0   （B 腿全链：授权接受判决 → 推进 → uses≥1）
+sc_authz_signal_delivery.py    → pass=37 fail=0 exit=0   （A 子用例送达 + 5 负锁 + 收口）
+sc_authz_protected_path.py     → pass=37 fail=0 exit=0   （A 子用例消费：settle 放行 + 记名点名 + 普通签字零回归）
+sc_authz_overlimit_accept.py   → pass=30 fail=0 exit=0   （B 子用例全链：授权接受判决 → 推进 → uses≥1）
 ```
 
 ### F 实票验证（本轮闭合项，生产只读取证）
@@ -61,7 +61,7 @@ sc_authz_overlimit_accept.py   → pass=30 fail=0 exit=0   （B 腿全链：授�
 
 诚实边界：线上 worker 跑的是 main（`9c102d7`）代码，**不含本票的 `sign_face`/marker 防线**（防线只在
 本 worktree）——所以线上这次证明的是「根因+重启疗法+授权消费通路（t260912-03 面）成立」，本票新增的
-防线代码则由 docker 台场景证明（A/C 腿）。两半合起来才是完整闭环，本报告分开标注、不混。
+防线代码则由 docker 台场景证明（A/C 子用例）。两半合起来才是完整闭环，本报告分开标注、不混。
 
 ### A/B/C/D/E（本轮复跑，与 gen0 结论一致）
 
@@ -70,7 +70,7 @@ sc_authz_overlimit_accept.py   → pass=30 fail=0 exit=0   （B 腿全链：授�
   回执 `landing=landed` + `authorization` 记名块。**消费半边**：在册 protected-path 场景真跑 37/37，
   settle 回执真文本 `…path_gate_authz_used=宿主@1789261882:integration/baselines/sc_battery.py；worker
   代落盘 commit 5e26a78`，记名点名（授权人/路径/签发时间/理由）断言全绿。
-- **B 腿**：无授权超限仍 blocked → 生效授权（`arbitration_verdict`，scope=本票票号）→ `retry_qc` →
+- **B 子用例**：无授权超限仍 blocked → 生效授权（`arbitration_verdict`，scope=本票票号）→ `retry_qc` →
   不阻断、推进 `acceptance_walkthrough` 或更后，handoff 含判决原文 + `verdict=tests-fault` + 授权人，`uses≥1`。
 - **C 负锁**：五条全真信号投递，均 `want=sign(authorize)` + why 点名 + 不落账；相位④（marker 在场而
   载荷缺失）同时断言 `"载荷解析失败" in why` **且** `"非人审等待中" not in why` ——旧事故形态
@@ -81,7 +81,7 @@ sc_authz_overlimit_accept.py   → pass=30 fail=0 exit=0   （B 腿全链：授�
   （含 260913 生产复现的原始形态 `{"want":"sign()","why":"当前步 arbitrate 非人审等待中，签字无效"}`）；
   t260912-03 三套 UT 103 条全绿；三个在册 authz 场景在新回执（新增 `landing`/`refused_why`、保留
   `ok:true`+`delivered`）下不翻红。
-- **D**：两腿均真信号、均在册（`run_scenarios.py` 登记，lint L4 清单三元组完整），无一条以直调纯函数
+- **D**：两子用例均真信号、均在册（`run_scenarios.py` 登记，lint L4 清单三元组完整），无一条以直调纯函数
   代替。**偏离如实标注**：验收 D 字面「至少一条集成场景跑通 A 与 B」未满足，由 review_plan C6 裁定的
   合成口径承担（A=新场景、B=在册 overlimit）。若人审取字面读法，应回流并票另开「A+B 同场景」用例，
   本段不扩场景（避免 intent 级重复）。
@@ -143,7 +143,7 @@ exit 1）」，与仲裁台账（内层 exit 2、A1 红、A2–A8 下游）不�
   与 `ticket-session-restore` 的 grep 对 `authz/authorize/sign_face/client.py/dev_lane` 命中数=**0**；
   `capture-ensure-build.mjs` 的引用者只有两条 capture 基线。四个 blocker 分属别票面（t260911-02 的
   docs-sync 实例、t260912-02 的残台清扫/网段契约、既有 session 基线）。
-- 两条 t260912-02 红是**起台失败**（`挂点腿新台 up 成功（rc=2）`／`A 台起台 rc=0`）→ 属环境/端口
+- 两条 t260912-02 红是**起台失败**（`挂点子用例新台 up 成功（rc=2）`／`A 台起台 rc=0`）→ 属环境/端口
   争抢类（与 KI-072 负载敏感、供给台跨泳道争抢同族）。
 - `ticket-session-restore` 的一条**线索**（不构成结论）：并行票 **t260912-01 的授权 uses 明细恰好点名
   `integration/baselines/sc_ticket_session_restore.mjs`**，其授权 reason=「本票要修八处界面场景的路径
@@ -163,7 +163,7 @@ e2e 顶层真跑 8/8 绿间接复证（该链无回归）。
 1. **合并面（需人审/merge 执行人注意）**：main 已前进到 `b614392`（t260913-03 声明落 main），本
    worktree 基于 `9c102d7` → 合并需先对齐 main。另外 t260913-03 声明 `exclude_pools: engine,exclusive`
    使**每票集测段跳过 engine 池**，而本票新增的 L3 守卫场景（`t260913-01-authz-signal-delivery`）与
-   t260912-03 三条正腿都在 engine 池 → **只由每天一次的集成测试巡检覆盖**，不进每票段。本票写集恰恰
+   t260912-03 三条正用例都在 engine 池 → **只由每天一次的集成测试巡检覆盖**，不进每票段。本票写集恰恰
    命中 `server/engine/`（被跳池场景的真实被测面），是否应把引擎源码纳入 `exclude_pools_force_assets`
    的强制面，建议人审顺带裁定（本段只报观察，不改别票声明）。
 2. **合并冲突风险（实证线索）**：并行票 t260912-01 获授权修改 `integration/baselines/

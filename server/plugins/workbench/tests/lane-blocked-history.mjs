@@ -5,19 +5,19 @@
  * 规则 2 的「受阻已解除 → 完成色」换算。直跑：node
  * server/plugins/workbench/tests/lane-blocked-history.mjs（node>=22 type-stripping）。
  *
- * 覆盖（对齐工单四腿验收 + review_plan 附条件意见）：
- *   T1 复现腿：t260916-02 实证形态——implement 同刻 done+blocked（受保护路径闸拒绝落盘），
+ * 覆盖（对齐工单四条子用例验收 + review_plan 附条件意见）：
+ *   T1 复现子用例：t260916-02 实证形态——implement 同刻 done+blocked（受保护路径闸拒绝落盘），
  *      解除证据记在相邻后段（run_integration_tests running，后段证据任意条目型均可）
  *      → vis=done、resolvedBy=advanced；变体：同段重跑 done → resolvedBy=rerun。
- *   T2 真当前受阻腿：blocked 后无任何后续 → 仍 blocked、无解除（③保守兜底）。
- *   T3 疑难腿：
+ *   T2 真当前受阻子用例：blocked 后无任何后续 → 仍 blocked、无解除（③保守兜底）。
+ *   T3 疑难子用例：
  *     3a 并行兄弟陷阱——兄弟段（同 phase/同 groups）done 不算本段推进证据；
  *     3b authorized/retry-requested 不作同段解除证据（人放了话≠活干成了，review 意见 2）；
  *     3c 老票（无 gen/phase）+ 无 groups（线性步骤条降级面）：后段条目按兄弟保守处理不解除；
  *        同夹具带 groups（泳道图面）→ 解除（advanced）——groups 在场即全语义。
- *   T4 关闭票腿：closed → 全 done + 历史受阻 resolvedBy=closed（工单④）。
- *   T5 畸形输入腿：非串字段/模板外 id/空 state/groups 非数组——不抛、不泄漏键。
- *   T6 兼容腿：两参调用（既有消费方签名）返回形状 .states/.active/.fallback 不变，
+ *   T4 关闭票子用例：closed → 全 done + 历史受阻 resolvedBy=closed（工单④）。
+ *   T5 畸形输入子用例：非串字段/模板外 id/空 state/groups 非数组——不抛、不泄漏键。
+ *   T6 兼容子用例：两参调用（既有消费方签名）返回形状 .states/.active/.fallback 不变，
  *      .blockedHistory 增键在场；并行双亮夹具行为不变。
  *
  * 全 hermetic：纯本地 fixture，零 Docker 零网络，3099 零接触。
@@ -47,7 +47,7 @@ const tle = (stage, state, reason = '', gen, phase) => ({
 })
 const okRes = (gen = 0) => ({ status: 'ok', gen })
 
-section('T1 复现腿（t260916-02 实证形态：同刻 done+blocked，解除证据在相邻后段）')
+section('T1 复现子用例（t260916-02 实证形态：同刻 done+blocked，解除证据在相邻后段）')
 {
   const d = {
     status: 'dispatched', stage: 'run_integration_tests', stage_state: 'running',
@@ -97,7 +97,7 @@ section('T1b 同段重跑解除（rerun）')
   ok(r.states.implement === 'done', 'T1b.1 重跑完成后 vis=done')
   ok(r.blockedHistory.implement.resolvedBy === 'rerun', 'T1b.2 解除方式=rerun（本段重跑完成）')
 }
-section('T2 真当前受阻腿（blocked 后无任何后续 → 保守红）')
+section('T2 真当前受阻子用例（blocked 后无任何后续 → 保守红）')
 {
   const d = {
     status: 'dispatched', stage: 'merge_check', stage_state: 'blocked',
@@ -114,7 +114,7 @@ section('T2 真当前受阻腿（blocked 后无任何后续 → 保守红）')
   ok(r.blockedHistory.merge_check.resolved === false, 'T2.2 无解除（resolved=false）')
   ok(r.blockedHistory.merge_check.resolvedBy === undefined, 'T2.3 无解除方式（角标不渲染的依据）')
 }
-section('T3 疑难腿')
+section('T3 疑难子用例')
 {
   // 3a 并行兄弟陷阱：兄弟段 done（同 phase）不是本段推进证据
   const d3a = {
@@ -179,7 +179,7 @@ section('T3 疑难腿')
   ok(r3cMap.states.create_plan === 'done' && r3cMap.blockedHistory.create_plan.resolvedBy === 'advanced',
     'T3c.2 groups 在场 → 非兄弟后段=推进解除（泳道图面全语义）')
 }
-section('T4 关闭票腿（closed → 全 done + 历史受阻 resolvedBy=closed）')
+section('T4 关闭票子用例（closed → 全 done + 历史受阻 resolvedBy=closed）')
 {
   const d = {
     status: 'closed', stage: 'merge', stage_state: 'done',
@@ -203,7 +203,7 @@ section('T4 关闭票腿（closed → 全 done + 历史受阻 resolvedBy=closed�
   const r2 = deriveStageStates(d2, ORDER)
   ok(r2.blockedHistory.review_plan.resolvedBy === 'closed', 'T4.3 收口解除不依赖同段后续条目')
 }
-section('T5 畸形输入腿（外部快照不可信）')
+section('T5 畸形输入子用例（外部快照不可信）')
 {
   const d = {
     status: 'dispatched', stage: 'create_plan', stage_state: 'blocked',
@@ -227,7 +227,7 @@ section('T5 畸形输入腿（外部快照不可信）')
   ok(deriveStageStates(d, ORDER).blockedHistory && deriveStageStates(d, ORDER).fallback !== undefined,
     'T5.5 无 opts 调用（既有消费方形状）不抛')
 }
-section('T6 兼容腿（返回形状增键不破既有消费）')
+section('T6 兼容子用例（返回形状增键不破既有消费）')
 {
   const d = {
     status: 'dispatched', stage: 'design_integration_tests', stage_state: 'running',

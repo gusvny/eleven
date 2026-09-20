@@ -1,4 +1,4 @@
-"""t260914-05 模型路由表兜底腿退役（L1 单测）：三态可辨 + 点名告警 + 指纹 + 畸形输入。
+"""t260914-05 模型路由表兜底分支退役（L1 单测）：三态可辨 + 点名告警 + 指纹 + 畸形输入。
 
 被测：shared.resolve_routes_table / routes_fingerprint。t260914-05 起仓内兜底表
 （server/model-routes.yaml）退役：非 ok 态一律无表（table=None），由解析层单点

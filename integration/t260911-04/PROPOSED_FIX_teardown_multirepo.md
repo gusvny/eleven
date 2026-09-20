@@ -36,4 +36,4 @@ server/engine/.venv/bin/python integration/t260911-04/sc_t260911_04_multirepo_fu
 
 预期 SUMMARY **pass=27 fail=0 env_fail=0**（T3a' 成员仓 lane 分支已删、T3d 两仓 worktree
 list 无 lane 路径、T3d' 根仓 lane 分支已删、T3d-目录 泳道目录不存在四红转绿——目录面断言由
-仲裁段 gen2 补回；单仓零回归面由既有单仓对照腿守卫）。
+仲裁段 gen2 补回；单仓零回归面由既有单仓对照子用例守卫）。

@@ -127,7 +127,7 @@ def test_malformed_ruling_entries_no_crash(bad):
 
 
 def test_arbitrate_mechanical_stage_sees_ruling():
-    """验收① UT 腿：arbitrate（只吃机械结果的段）prompt 同样可见裁决。"""
+    """验收① UT 子用例：arbitrate（只吃机械结果的段）prompt 同样可见裁决。"""
     p = _prompt(stage=ST, rulings=[{"ts": "T", "who": "宿主", "note": "仲裁意见：看 UI 证据"}])
     assert "仲裁意见：看 UI 证据" in p
     assert "宿主裁决注入" in p

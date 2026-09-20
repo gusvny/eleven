@@ -140,7 +140,7 @@ def main():
         pass
     if node is None:
         env_failed += 1
-        print("ENV_FAIL node 不可用——mjs 薄包装腿没验成（环境缺件，exit 2）")
+        print("ENV_FAIL node 不可用——mjs 薄包装子用例没验成（环境缺件，exit 2）")
         print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (passed, failed, env_failed))
         sys.exit(2)
     if not os.path.exists(LIB_MJS):

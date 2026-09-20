@@ -7,7 +7,7 @@ intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）—�
 清扫（「本管域容器而无租约」= KI-077 当日 37 孤儿形态）必须拆得掉、点得了名，
 且**半径可限定、绝不波及前缀外/他票的容器**：
 
-- 正腿：真起台后孤儿化（杀 hold + 删租约=真孤儿，非合成），sweep（孤儿模式
+- 正用例：真起台后孤儿化（杀 hold + 删租约=真孤儿，非合成），sweep（孤儿模式
   开 + 年龄阀 0 + 前缀限定本票）必须 dry-run 先认领不拆、真跑 condemned
   点名 + 容器清零 + rc=0；
 - 半径限定（本设计段新增的硬契约，理由见下方「为什么」）：condemned 集合
@@ -69,7 +69,7 @@ from lib_case import (  # noqa: E402
     wait_until,
 )
 
-PRI = "t26091518-os-"             # 半径旋钮断言面（本票正腿工程名全部命中它）
+PRI = "t26091518-os-"             # 半径旋钮断言面（本票正用例工程名全部命中它）
 
 
 def _sweep(root, valve, extra=None):
@@ -86,7 +86,7 @@ def main():
         finish()
     tag = "%d" % (int(time.time()) % 100000)
     root = iso_root18("orphan-sweep-" + tag)
-    p_orph = stage_tag("t26091518-os-orph-" + tag)      # 正腿孤儿（前缀命中）
+    p_orph = stage_tag("t26091518-os-orph-" + tag)      # 正用例孤儿（前缀命中）
     p_keep = stage_tag("t26091518-os-keep-" + tag)      # 负锁α：租约新鲜
     p_valve = stage_tag("t26091518-os-valve-" + tag)    # 负锁β：年龄阀内孤儿
     p_nopfx = stage_tag("t26091518-osx-nopfx-" + tag)   # 半径对照：前缀不匹配
@@ -95,13 +95,13 @@ def main():
     cid_f = outside = None
     try:
         # ---- 注入：四台真台 + 一只域外容器 ----
-        for proj, label in ((p_orph, "正腿孤儿台"), (p_keep, "负锁α 台"),
+        for proj, label in ((p_orph, "正用例孤儿台"), (p_keep, "负锁α 台"),
                             (p_valve, "负锁β 台"), (p_nopfx, "半径对照台")):
             proc, _ = up_stage(root, proj)
             if not up_ok(proc, "%s起台" % label):
                 return
         if not orphanize(root, p_orph):
-            envfail("正腿孤儿化失败（租约文件删不掉）")
+            envfail("正用例孤儿化失败（租约文件删不掉）")
             return
         if not orphanize(root, p_nopfx):
             envfail("半径对照台孤儿化失败（租约文件删不掉）")
@@ -121,13 +121,13 @@ def main():
               % p_orph)
         check(len(compose_containers(p_orph)) > 0, "dry-run 不拆：孤儿台容器仍在")
 
-        # ---- sweep#1（阀=0）：正腿 + 半径 + α/γ 负锁 ----
+        # ---- sweep#1（阀=0）：正用例 + 半径 + α/γ 负锁 ----
         rproc, rpt = _sweep(root, 0)
         cond = [c.get("project") for c in ((rpt or {}).get("condemned") or [])]
         check(rproc.returncode == 0,
               "真 sweep rc=0（拆台动作全部成功，失败须上抛非零）｜rc=%s"
               % rproc.returncode)
-        check(p_orph in cond, "正腿：孤儿台被判拆并逐条点名（condemned 含 %s）"
+        check(p_orph in cond, "正用例：孤儿台被判拆并逐条点名（condemned 含 %s）"
               % p_orph)
         check(all(str(c).startswith(PRI) for c in cond),
               "半径限定：condemned 全部命中前缀 %s（前缀外零判拆）｜%s" % (PRI, cond))
@@ -135,7 +135,7 @@ def main():
               "半径限定：前缀不匹配的同域孤儿不在 condemned（%s 不得被无半径"
               "清扫波及）" % p_nopfx)
         check(wait_until(lambda: len(compose_containers(p_orph)) == 0, 60),
-              "正腿：孤儿台容器清零（容器+网络+卷随 down 回收）")
+              "正用例：孤儿台容器清零（容器+网络+卷随 down 回收）")
         check(len(compose_containers(p_keep)) > 0,
               "负锁α：租约在册且新鲜的台零接触（租约安全阀）")
         check(len(compose_containers(p_valve)) > 0,
@@ -168,7 +168,7 @@ def main():
         fcond = [c.get("project") for c in ((frpt or {}).get("condemned") or [])]
         check(p_valve in fcond and wait_until(
             lambda: len(compose_containers(p_valve)) == 0, 60),
-            "正腿补强：阀=0 时同一孤儿被拆（年龄阀是唯一保护者，不是恒不拆）")
+            "正用例补强：阀=0 时同一孤儿被拆（年龄阀是唯一保护者，不是恒不拆）")
     finally:
         guarded_down(mine, root)
         rm_foreign_container(cid_f)

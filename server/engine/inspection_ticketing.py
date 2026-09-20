@@ -30,7 +30,7 @@ spawn_inspection_period activity）/ 计数 watcher（trigger_inspection_period 
 全部走本模块 `open_period_ticket`——铸号、去重、SA 盖章、启动只有一份实现。
 
 `STARTS_WITH` 算子说明（R2）：铸号扫描用 `WorkflowId STARTS_WITH "<prefix>-"`——本仓
-零先例，测试台首跑腿先证；后端拒绝时回落「WorkflowType=巡检 + 客户端前缀过滤」
+零先例，测试台首跑子用例先证；后端拒绝时回落「WorkflowType=巡检 + 客户端前缀过滤」
 （漏 dev-lane 工单号，由 AlreadyStarted 归属判定+NN+1 重试兜住跨族撞号；回执带
 scan_mode 可辨），取舍与原因记录进 README §13，绝不静默换实现。
 """

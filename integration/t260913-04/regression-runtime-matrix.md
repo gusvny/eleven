@@ -26,7 +26,7 @@
 | 5 | `t260910-06/sc_ki067_entry_audit.py:350` | host | 同上 | 不改 |
 | 6 | `t260905-02/lib_t26090502.py:43` | host | 同上 | 不改 |
 | 7 | `t260905-03/lib_inspection.py:41` | host | 同上 | 不改 |
-| 8 | D9 验收 lane worker（本票 Step 6 A 腿） | **docker** | `run_real_ticket_e2e.py --leg a` 显式注入 `SANDBAR_AGENT_RUNTIME=docker` | 新增（本票交付） |
+| 8 | D9 验收 lane worker（本票 Step 6 A 子用例） | **docker** | `run_real_ticket_e2e.py --leg a` 显式注入 `SANDBAR_AGENT_RUNTIME=docker` | 新增（本票交付） |
 
 **注**：`SANDBAR_AGENT_STUB=1` 在 `_prepare_agent_spawn` 之前 return（`agent_activities.py:1194` 一带）
 → 桩路径**根本不经过 spawn**，因此桩族场景（#2–#7）的绿**只是读侧零回归证据，不是容器执行面证据**（C2 措辞纪律）。
@@ -50,10 +50,10 @@
 | `sc_t26091304_image_supervisor.py` | engine | G + KI-009 收割前置（镜像内 dsh/node/py 依赖、非 root 可执行 supervisor、pgid 落盘→组 TERM→清档、坏参 fail-closed） | 16 pass / 0 fail；**本票实锤**：0711 权限导致所有容器内 spawn rc=2，`chmod 755` 修复后转绿 |
 | `sc_t26091304_lifecycle_gc.py` | engine | D/G + 红线 3（spawn 即 ensure、容器内桩真跑、结果/日志落泳道原位、迟写按组收割、孤儿 gc 不误杀、收口零残留） | 19 pass / 0 fail |
 | `sc_t26091304_multirepo.py` | engine | E + 红线 2 + D2（两棵成员仓树容器内可写、宿主可见、属主=worker uid、挂载源仅泳道根、git 降级形态、逐树代落盘） | 16 pass / 0 fail |
-| `sc_t26091304_sandbox_neglock.py` | engine（门控 `SANDBAR_E2E_REAL=1`） | **B/C 核心 + 红线 2 + 宿主 260914 A 案**（真 dsh agent：正锁工作区内写成功、负锁宿主边界不可达（主树/他票路径不存在、/usr/local uid 权限拒）零落盘、正腿容器本地 /tmp 可写（容器内无沙箱拦截）、>65s 命令跑完、git 降级、证据面 mode=danger-full-access+真实拒绝；对抗轮 env 注入 workspace-write 与 profile 注入 disabled——pin 字面量都必须仍赢） | 13 pass / 0 fail / 2 na（设计段实跑：基线轮 6/6 绿；profilepatch 轮 5/5 绿=入口级 `disabled:false` 压制注入；envleak 轮 dsh **fail-closed 拒启**（rc=1）→ 正锁如实 N/A、负锁仍成立）。实现段独立探针轮复现：`sleep 65` 前台跑完并写盘 ✓、工作区内写 ✓、两处越界 `Permission denied` ✓ |
+| `sc_t26091304_sandbox_neglock.py` | engine（门控 `SANDBAR_E2E_REAL=1`） | **B/C 核心 + 红线 2 + 宿主 260914 A 案**（真 dsh agent：正锁工作区内写成功、负锁宿主边界不可达（主树/他票路径不存在、/usr/local uid 权限拒）零落盘、正用例容器本地 /tmp 可写（容器内无沙箱拦截）、>65s 命令跑完、git 降级、证据面 mode=danger-full-access+真实拒绝；对抗轮 env 注入 workspace-write 与 profile 注入 disabled——pin 字面量都必须仍赢） | 13 pass / 0 fail / 2 na（设计段实跑：基线轮 6/6 绿；profilepatch 轮 5/5 绿=入口级 `disabled:false` 压制注入；envleak 轮 dsh **fail-closed 拒启**（rc=1）→ 正锁如实 N/A、负锁仍成立）。实现段独立探针轮复现：`sleep 65` 前台跑完并写盘 ✓、工作区内写 ✓、两处越界 `Permission denied` ✓ |
 | `run_real_ticket_e2e.py --leg f` | 驱动（零模型成本） | F | 见 §4 |
 
-## 4. F 成本腿实测（R6 判据两条臂各自出结论）
+## 4. F 成本子用例实测（R6 判据两条臂各自出结论）
 
 本机（OrbStack linux/arm64 29.4.0，镜像 `sandbar-agent:dsh-0.1.1-rc.2-s1`）：
 

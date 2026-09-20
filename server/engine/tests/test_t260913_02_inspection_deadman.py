@@ -308,7 +308,7 @@ def test_read_suite_receipt_missing_and_malformed(tmp_path):
 
 
 # ========================================================================================
-# t260917-02（C1）：跳火 finding 两腿（observed 实锤 / inferred 兜底，leg 可辨不混装）
+# t260917-02（C1）：跳火 finding 两分支（observed 实锤 / inferred 兜底，leg 可辨不混装）
 # ========================================================================================
 
 STALE = {"workflow": "InspectionPeriodicWorkflow"}

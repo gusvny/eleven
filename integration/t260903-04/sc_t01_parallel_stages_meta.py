@@ -13,7 +13,7 @@ arbitrate∥acceptance_walkthrough 各边同写 meta["stage"]，后写者赢—�
      重复去重、空列表删键不残留、幂等稳定。
 
 跑法：python3 -B integration/t260903-04/sc_t01_parallel_stages_meta.py
-（纯 stdlib + temporalio 导入桩 _stub_temporalio，零 Temporal/网络依赖；恒跑无环境腿。）
+（纯 stdlib + temporalio 导入桩 _stub_temporalio，零 Temporal/网络依赖；恒跑无环境用例。）
 """
 import re
 import sys

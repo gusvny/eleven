@@ -1,4 +1,4 @@
-# fixture_holder_fake.py —— t260904-14 真票腿的「占位 DevLaneWorkflow」（260908）。
+# fixture_holder_fake.py —— t260904-14 真票子用例的「占位 DevLaneWorkflow」（260908）。
 #
 # 为什么存在：remove 在飞闸（projects.py 闸3）要按 ProjectKey 列出在飞票并报名号。
 # ticket-list 对 RUNNING 的票发快照 query（client.py _meta_of）：真 workflow 无

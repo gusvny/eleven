@@ -6,11 +6,11 @@
 //
 // high-level steps：
 //   1. 隔离根 fixture：.migrated 预置 + 手写条目 seedalpha + 隔离条目 qbad（schema v9 畸形），
-//      快照基线；此后每条拒收腿断言根快照逐字节不变、无 .tmp. 泄漏；
+//      快照基线；此后每条拒收子用例断言根快照逐字节不变、无 .tmp. 泄漏；
 //   2. key 白名单：大写/下划线/首字符中划线/42 字符拒；41 字符（正则上界）收；
 //   3. 根目录形态：缺参（usage）/相对路径/是文件非目录/多目录输入（epic 验收2：
-//      语义化拒收须点名单根模型——裸用法错不算，此腿红=方案窄化发现交仲裁）；
-//      「不存在」腿已随 t260906-01 容器代建翻转为成功旅程（移册 t260906-01 场景承接）；
+//      语义化拒收须点名单根模型——裸用法错不算，此子用例红=方案窄化发现交仲裁）；
+//      「不存在」子用例已随 t260906-01 容器代建翻转为成功旅程（移册 t260906-01 场景承接）；
 //   4. 已注册重跑同判：两次输出与出口码全等；隔离同名 qbad 拒收；
 //   5. 根交叉与互为父子：新根=既有根父目录 / 子目录 / 恰等——均拒且报两个 key；
 //   6. legacy：SANDBAR_PROJECTS_YAML 在位 → 拒收指路（文案含 env 名），per-key 根与 legacy 文件不动；
@@ -49,7 +49,7 @@ const fixtureArea = path.dirname(root); // 同一临时区，绝对路径
   writeFileSync(path.join(q, 'project.yaml'), 'schema: v9\nproject:\n  - key: qbad\n');
 }
 const add = (key, name, dirs, extraEnv = {}) => cliAdd(root, key, name, dirs, extraEnv);
-// 拒收腿的零残留基线比对（成功腿推进基线；详见各腿注释）
+// 拒收子用例的零残留基线比对（成功子用例推进基线；详见各子用例注释）
 let baseline = snapshotRoot(root);
 function checkClean(label) {
   const now = snapshotRoot(root);
@@ -70,7 +70,7 @@ for (const [label, key] of [
   checkClean(label);
 }
 {
-  const boundDir = tmpRoot('fix10-bound-'); // 上界成功腿：根必须真实存在，隔离长度闸
+  const boundDir = tmpRoot('fix10-bound-'); // 上界成功子用例：根必须真实存在，隔离长度闸
   const r = add('a'.repeat(41), 'Boundary Max', [boundDir]);
   c.check('白名单上界 41 字符收（正则 {0,40}+首字符）', r.code === 0,
     `exit=${r.code}\n${r.out.slice(-400)}`);
@@ -91,7 +91,7 @@ for (const [label, key] of [
 }
 {
   // t260906-01 容器代建：根目录「不存在」由拒收翻转为「代建+脚手架」成功旅程，
-  // 本腿移册承接=integration/t260906-01/（sc_add_creates_container 成功面 /
+  // 本子用例移册承接=integration/t260906-01/（sc_add_creates_container 成功面 /
   // sc_add_scaffold_faultlines 源表两态红+回滚面）；此处不再钉拒收（钉了=与新契约
   // 对撞，且 /nonexistent 形路径会触发根部 mkdir 副作用）。
 }
@@ -105,7 +105,7 @@ for (const [label, key] of [
 {
   // epic 验收2 明文：多条输入是独立拒收路径且「文案点名原因（单根模型）」——
   // 裸 argparse 用法错（unrecognized arguments）不点名单根模型，不算语义化拒收。
-  // 此腿红=方案窄化发现（单位置旗标面下多目录不可表达），交仲裁：扩面 or 修约。
+  // 此子用例红=方案窄化发现（单位置旗标面下多目录不可表达），交仲裁：扩面 or 修约。
   const d1 = tmpRoot('fix10-md1-');
   const d2 = tmpRoot('fix10-md2-');
   const r = cliAdd(root, 'zfixmulti', 'Multi', [d1, d2]);

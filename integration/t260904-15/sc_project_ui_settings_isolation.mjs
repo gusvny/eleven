@@ -74,7 +74,7 @@ try {
   record('bench/boot-A', 'env_fail', `隔离台依赖缺失：${String(e?.message ?? e).slice(0, 200)}`);
   summarize();
 }
-// 泳道 client build 陈旧守卫：lib/client.js 缺失/早于 src → 浏览器腿拒跑（防拍旧 UI 假绿，
+// 泳道 client build 陈旧守卫：lib/client.js 缺失/早于 src → 浏览器子用例拒跑（防拍旧 UI 假绿，
 // laneBuildRejectReason 同口径）；合并后主树重建 build 自动生效。
 {
   const stale = await clientBuildStalenessReason();

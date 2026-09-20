@@ -418,7 +418,7 @@ section('H POST /sandbar-admin/api/routes/save（mock webServer + 临时 repo）
     ok(route !== undefined, 'save exact 路由已挂')
 
     // 注册表夹具（t260910-14 同源化）：per-key 注册表 + 声明 paths.model_routes 指向
-    // 临时表——保存落点=声明指向文件（真源）；nodecl 条目不声明（拒写腿用）。
+    // 临时表——保存落点=声明指向文件（真源）；nodecl 条目不声明（拒写子用例用）。
     const reg = await fixtureRegistry(tmp, {
       demo: entryYaml('demo', repo, routesFile),
       nodecl: entryYaml('nodecl', join(tmp, 'repo2'), null),

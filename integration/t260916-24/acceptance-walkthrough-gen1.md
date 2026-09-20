@@ -30,8 +30,8 @@ tests-fault 并自修三处、merge 将 main（t260917-01/t260917-04 等）合�
 
 | 对象 | 结论 | 证据 |
 | --- | --- | --- |
-| sc_t260916_24_dsh_face_meta（engine 池） | **PASS exit 0** | /tmp/g1_scA.log：四腿全 ok（缺省=宿主实测 0.1.1-rc.2 探测非抄配置 / 钉桩=env 来源+版本实测于被钉二进制 / mismatch 可查不拦 / 探测失败 error 点名不挡启动），审计账本 0 条 |
-| sc_t260916_24_dsh_expected_loud（engine 池） | **PASS exit 0** | /tmp/g1_scB.log：双腿全 ok（缺省响亮不拦 + STRICT 硬闸调用恒 0）——单前缀改动功能等价实证，审计账本 0 条 |
+| sc_t260916_24_dsh_face_meta（engine 池） | **PASS exit 0** | /tmp/g1_scA.log：四子用例全 ok（缺省=宿主实测 0.1.1-rc.2 探测非抄配置 / 钉桩=env 来源+版本实测于被钉二进制 / mismatch 可查不拦 / 探测失败 error 点名不挡启动），审计账本 0 条 |
+| sc_t260916_24_dsh_expected_loud（engine 池） | **PASS exit 0** | /tmp/g1_scB.log：两子用例全 ok（缺省响亮不拦 + STRICT 硬闸调用恒 0）——单前缀改动功能等价实证，审计账本 0 条 |
 | t260916-24-dsh-probe-selftest（ro 池） | **PASS exit 0** | 金样本 3 档绿（含无 cacheReadTokens 档恰出 WARN 的可选键语义自锁）+ 篡改 7 档逐项红命中预期断言名 |
 | L1 UT test_t260916_24_dsh_pin.py | **25 passed** | 引擎 venv pytest；merge 后 worker.py（main 侧优雅停+本票 dsh face 共存）下 25 用例仍全绿——merge 冲突解决未丢本票接线（worker.py:299-313 dsh face 计算与 meta 落盘逐行在位） |
 | t260904-12-no-skip-guard | **归零 exit 0** | pass=7 fail=0（gen0 引入的 5 处 skip_install 已随改名消失） |
@@ -40,7 +40,7 @@ tests-fault 并自修三处、merge 将 main（t260917-01/t260917-04 等）合�
 | auto-rework-trace（机械轮新面孔败项） | **复跑绿 exit 0** | 干净 env 下 pass=10 fail=0 env_fail=0；机械轮败因「workflow disappeared（Temporal 无此 workflow）」=共享 17233 docker 测试台的瞬时状态（场景打容器台、不加载本 worktree 代码，与本票零交集）；复跑即绿同仲裁对 3 条 browser 的处置口径（瞬时抖动不动）。附带发现：本场景对「嵌套于 lane 集成步」有显式 ENV_FAIL 自护（检测 SANDBAR_TASK_QUEUE/WATCH_WORKFLOW 在场即拒跑环境半）——三态纪律落地良好 |
 
 验收清单对照（gen1 终态）：①探针正负自检满足；②钉路径 UT（显式生效+缺省不破
-现状）满足；③版本自检落票面/日志可查满足（真启动链 meta `dsh` 键四腿 + 真票链
+现状）满足；③版本自检落票面/日志可查满足（真启动链 meta `dsh` 键四子用例 + 真票链
 日志响亮行）；④既有场景零回归**满足**（gen0 的 2 条守卫红已归零；机械轮残余
 2 败分别归零/复跑绿；探针 live 档不入默认跑分面维持——registry 仅登记 3 条）。
 UI 呈现检查项**不适用**（本票改动面=engine spawn 解析/观测面 + integration

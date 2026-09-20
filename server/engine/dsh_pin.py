@@ -22,7 +22,7 @@
 - SANDBAR_DSH_STRICT          "1"=mismatch 升格硬闸（raise）；缺省只告警
 
 docker 形态版本自镜像 tag 按 `dsh-<version>-s<seq>` 约定提取，标注 tag-derived
-非实证；TODO(T3/Q3)：镜像升版票落地时补「容器内实测 dsh --version」实证腿，
+非实证；TODO(T3/Q3)：镜像升版票落地时补「容器内实测 dsh --version」实证子用例，
 防约定漂移无人知。
 
 fail-closed 边界（与调用方的分工）：
@@ -158,13 +158,13 @@ def image_tag_version(image: str) -> Dict[str, Any]:
     if not m:
         return {"version": None, "state": "unknown",
                 "detail": "镜像 tag %r 不含 dsh-<version>-s<seq> 约定，无法从 tag 判版"
-                          "（tag-derived 非实证；TODO(T3/Q3)：补容器内实测 --version 实证腿）" % image}
+                          "（tag-derived 非实证；TODO(T3/Q3)：补容器内实测 --version 实证子用例）" % image}
     ver = m.group(1)
     if not _VERSION_RE.match(ver):
         return {"version": None, "state": "unknown",
                 "detail": "镜像 tag %r 提取段 %r 非版本样" % (image, ver)}
     return {"version": ver, "state": "ok",
-            "detail": "镜像 tag 提取 %s（tag-derived 非实证；TODO(T3/Q3)：补容器内实测实证腿）" % ver}
+            "detail": "镜像 tag 提取 %s（tag-derived 非实证；TODO(T3/Q3)：补容器内实测实证子用例）" % ver}
 
 
 def expected_state_of(version: Optional[str], env: Optional[Dict[str, str]] = None) -> str:

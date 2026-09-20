@@ -6,7 +6,7 @@
 夹具红线（沿 t260907-06 lib 口径）：假项目只在测试 tmp 目录自建，
 不代用户建仓/搬码，不碰真实项目数据。
 环境口径（三态契约）：stdlib 面（shared 纯函数/git 夹具）系统 python3 可跑；
-temporalio 面（prepare/settle 行为腿）缺失=ENV_FAIL exit 2，不写 SKIP。
+temporalio 面（prepare/settle 行为子用例）缺失=ENV_FAIL exit 2，不写 SKIP。
 
 复用纪律：通用 helpers（check/summary/env_fail/三态口径/git/容错调用工厂）
 跨票 import t260907-06 lib（夹具跨票复用先例：t260905-08→t260907-08），

@@ -167,7 +167,7 @@ async function legGateRefusal(t, api, sdkPython, fixture) {
     const gate = await waitFor(api, tid, (x) => x?.stage === 'merge' && x?.stage_state === 'awaiting-human',
       'revived ticket reaches merge gate', SCENE_DEADLINE_MS, t)
     if (!gate) return
-    t.ok(api.sign(tid, 'e2e-human', 'approve', 'E2E 闸拒腿收口').body?.ok === true, 'sign approve')
+    t.ok(api.sign(tid, 'e2e-human', 'approve', 'E2E 闸拒子用例收口').body?.ok === true, 'sign approve')
     const fin = await waitFor(api, tid, (x) => x?.status === 'closed', 'ticket closed', SCENE_DEADLINE_MS, t)
     t.ok(fin?.status === 'closed', 'following the ticket-face way out ends closed (ticket self-recovers)')
   } finally {

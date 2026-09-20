@@ -214,7 +214,7 @@ sys.exit(1)
   /* ------------------------------- E. sessionNote 不可解析注记 (t260917-05 零静默降级) */
   section('E sessionNote：会话档不可解析 → 显式注记（绝不静默留空）')
   {
-    // 腿1 解压失败：.dsh/sessions 下有会话样档但内容不是 zstd 流
+    // 子用例1 解压失败：.dsh/sessions 下有会话样档但内容不是 zstd 流
     const badRoot = join(tmp, 'ws', 't-e1')
     const laneDir = join(badRoot, '.suyou')
     const sessRoot = join(badRoot, '.dsh', 'sessions')
@@ -226,7 +226,7 @@ sys.exit(1)
     ok((rBad.sessionNote ?? '').includes('解压失败') && (rBad.sessionNote ?? '').includes('疑似'),
       'E1: 会话档解压失败 → sessionNote 显式注记（原先 catch{} 静默吞）')
 
-    // 腿2 格式不认识：合法 zstd 帧但内容乱文本（S1 形态）
+    // 子用例2 格式不认识：合法 zstd 帧但内容乱文本（S1 形态）
     let hasZstd = true
     try { await execFileP('zstd', ['--version']) } catch { hasZstd = false }
     if (hasZstd) {
@@ -241,7 +241,7 @@ sys.exit(1)
       ok((rS1.sessionNote ?? '').includes('格式不认识'),
         'E2: 会话档格式不认识 → sessionNote 注记（疑似 dsh 版本不匹配）')
     } else {
-      console.log('  （跳过 E2 腿：zstd 不在 PATH）')
+      console.log('  （跳过 E2 子用例：zstd 不在 PATH）')
     }
   }
 } finally {

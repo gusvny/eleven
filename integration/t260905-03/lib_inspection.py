@@ -12,7 +12,7 @@
 - 触发面 CLI（已交付，运维通道）：`inspection_trigger.py trigger --instance <id>
   [--period P] [--repo-root R] [--decl-path F]` / `sign --instance <id> --who <人>
   [--decision approve|reject]` / `describe` / `decl` / `schedule-up --note …`，
-  stdout 单行 JSON {ok, result|error}；校验先于网络（拒绝腿可离线）。
+  stdout 单行 JSON {ok, result|error}；校验先于网络（拒绝子用例可离线）。
 - 声明覆盖 env：SANDBAR_INSPECTION_DECL / SANDBAR_INSPECTION_DIR（implement 段已按
   宿主令 5「suyou 之名退役」以 sandbar 前缀命名新变量；场景不经 env 注入，用
   --decl-path/--repo-root 显式传参，此处仅登记绑定名备查）。
@@ -91,7 +91,7 @@ def reexec_venv_if_missing(mods=("temporalio",)) -> None:
     die_env("python 三方依赖缺席：%s（server/engine/.venv 缺席或不可用）" % ",".join(missing))
 
 
-# ── 测试腿隔离生产 Temporal（t260910-11 红线）──
+# ── 测试子用例隔离生产 Temporal（t260910-11 红线）──
 # 事故形态（260910 实证）：本 lib 从不注入 SANDBAR_TARGET_HOST，trigger/worker/client
 # 子进程全落 shared.py 默认 127.0.0.1:7233 生产台——全套件每跑一次即向生产写两张巡检
 # 票，私有 worker 死亡后票永久 RUNNING，真实期次号被「一票一期」锁占住。
@@ -109,7 +109,7 @@ def spawn_env(extra=None):
     ambient = os.environ.get("SANDBAR_TARGET_HOST")
     if ambient:
         if ":7233" in ambient:
-            die_fail("测试腿目标指向生产 Temporal（SANDBAR_TARGET_HOST=%s）——拒跑："
+            die_fail("测试子用例目标指向生产 Temporal（SANDBAR_TARGET_HOST=%s）——拒跑："
                      "巡检测试禁止写生产台 7233（260910 事故回归；请用 docker 隔离台 %s，"
                      "sh server/docker-compose.test.yml up -d）" % (ambient, TEST_TARGET_HOST))
         if ambient != TEST_TARGET_HOST:
@@ -172,7 +172,7 @@ def run_cmd(cmd, env=None, timeout=180):
 def env_fail_if_missing_dep(proc) -> None:
     mod = _missing_third_party((proc.stdout or "") + (proc.stderr or ""))
     if mod:
-        die_env("被测入口缺三方依赖 %s（装配腿环境红，本场景无法验到产品行为）" % mod)
+        die_env("被测入口缺三方依赖 %s（装配子用例环境红，本场景无法验到产品行为）" % mod)
 
 
 def last_json(text: str):
@@ -252,7 +252,7 @@ class StageWorker:
     worker）但 query/sign 后的收口无人执行。理由二（队列赛跑，arbitrate 实证）：
     常驻生产 worker 与本 worker 若共队列，新 workflow/activity 类对生产 worker 未
     注册，谁先领活谁打回（历史事件 WF_TASK_FAIL/ACT_FAIL「not registered」铁证，
-    同套件两腿一成一败=非确定竞态）——故必须**私有队列**：queue 由调用方给定，
+    同套件两子用例一成一败=非确定竞态）——故必须**私有队列**：queue 由调用方给定，
     trigger 子进程与 worker 同队列（activities 跟随 workflow 启动队列），生产
     worker 永不沾手。同时剥离 supervisor 缠绕变量（SANDBAR_WORKER_META 指向主仓
     data 目录会跨仓写指纹；SANDBAR_WATCH_* 会让 worker 收口自退/被宿主生命周期绑走）。

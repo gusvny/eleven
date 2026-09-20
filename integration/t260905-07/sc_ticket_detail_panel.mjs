@@ -102,7 +102,7 @@ stub.setCtrl({
 
 const pw = await loadPlaywright();
 if (!pw) {
-  record('dp/playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：真点腿环境红');
+  record('dp/playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：真点子用例环境红');
   summarize();
 }
 
@@ -240,7 +240,7 @@ try {
         '工作流快照要点含工单号、当前段与修订轮数');
     }
   } else {
-    record('dp/digest-blocks', false, '抽屉未开，四区块渲染腿无法执行（T4 已红）');
+    record('dp/digest-blocks', false, '抽屉未开，四区块渲染子用例无法执行（T4 已红）');
   }
 
   // T6 零写 API（行导航纯导航；「没看过就签了」危害面）

@@ -53,8 +53,8 @@ DOCKER_SOCK = "/var/run/docker.sock"
 
 
 class Checker:
-    """腿级三态记账：pass/fail/env_fail/na + SUMMARY 行 + 退出码优先级（fail>env>pass；
-    全腿 N/A=产品红 exit 1）。词表只认 pass/fail/env_fail/na 三态四值（无第四态）。"""
+    """子用例级三态记账：pass/fail/env_fail/na + SUMMARY 行 + 退出码优先级（fail>env>pass；
+    全部子用例 N/A=产品红 exit 1）。词表只认 pass/fail/env_fail/na 三态四值（无第四态）。"""
 
     def __init__(self, title):
         self.title = title
@@ -81,7 +81,7 @@ class Checker:
         if self.c["fail"] > 0:
             sys.exit(EXIT_FAIL)
         if total > 0 and self.c["na"] >= total:
-            print("FAIL: 全腿 N/A——场景无可验对象（设计/覆盖问题）")
+            print("FAIL: 全部子用例 N/A——场景无可验对象（设计/覆盖问题）")
             sys.exit(EXIT_FAIL)
         if self.c["env_fail"] > 0:
             sys.exit(EXIT_ENV_FAIL)

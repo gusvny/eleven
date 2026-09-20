@@ -6,7 +6,7 @@
 - Sandbox：SANDBAR_PROJECTS_DIR / DSH_HOME / HOME 三个 env 全指 mkdtemp，
   绝不触真 ~/.sandbar、真 ~/.dsh、真凭据（测试安全红线）；
 - Ledger：stdout 末行 SUMMARY pass/fail/env_fail/na（三态契约定稿 §7.3：0=PASS、
-  1=FAIL 含全腿 N/A、2=ENV_FAIL；skip 计数退役，缺依赖的用例计入 env_fail）；
+  1=FAIL 含全部子用例 N/A、2=ENV_FAIL；skip 计数退役，缺依赖的用例计入 env_fail）；
 - ensure_yaml：PyYAML 缺失时优先 re-exec 进 engine venv（ensure_sdk 同款
   制式）；仍无则返回 False，调用方对依赖 yaml 的用例 env_fail（缺依赖=环境红）；
 - creds_text / insertion_only：真实嵌套格式凭据夹具构造与「仅追加」断言件
@@ -82,7 +82,7 @@ def load_agent_activities():
 
 # ---------------------------------------------------------------- 执行契约
 class Ledger:
-    """三态账本（定稿 §7.3）：退出码优先级 fail(1，含全腿 N/A) > env_fail(2) > pass(0)——
+    """三态账本（定稿 §7.3）：退出码优先级 fail(1，含全部子用例 N/A) > env_fail(2) > pass(0)——
     产品红优先（C7），环境红不稀释产品红。"""
 
     def __init__(self):
@@ -102,7 +102,7 @@ class Ledger:
         print("  ENV_FAIL: %s | %s" % (label, reason))
 
     def na1(self, label, reason):
-        """以系统状态为条件的腿无对象：记 N/A（全腿 N/A 场景红由调用方收口）。"""
+        """以系统状态为条件的子用例无对象：记 N/A（全部子用例 N/A 场景红由调用方收口）。"""
         self.n += 1
         print("  N/A: %s | %s" % (label, reason))
 
@@ -111,7 +111,7 @@ class Ledger:
         if self.f:
             return 1                       # 产品红优先（C7）：环境红不得稀释产品红
         total = self.p + self.f + self.e + self.n
-        if total > 0 and self.n >= total:  # 全腿 N/A=产品红（C9：修场景不补环境）
+        if total > 0 and self.n >= total:  # 全部子用例 N/A=产品红（C9：修场景不补环境）
             return 1
         if self.e:
             return 2

@@ -4,7 +4,7 @@
 签字处理（钥匙插不进去），受保护路径闸与仲裁超限两条判定无出口。
 
 走查立场：用户视角独立走查，不预设「测试已全部通过」；机械口径（233 跑 / 227 过 / 3 败 / 3 环境红，
-闸拦 capture-chat-active、capture-chat-e2e、t260903-07-chat-project-tag）仅作输入，本段全部关键腿
+闸拦 capture-chat-active、capture-chat-e2e、t260903-07-chat-project-tag）仅作输入，本段全部关键子用例
 **自己重跑/自己复现**。与仲裁并行执行，本报告不为仲裁下结论。
 
 ## 结论：不通过（status=failed）
@@ -22,10 +22,10 @@
 
 | # | 项 | 结论 | 关键证据 |
 |---|----|------|----------|
-| A | 正腿·受保护路径（送达 + 消费） | 通过 | 落账字段全 + timeline 签发事件 + `landing=landed`；消费面 settle 回执真文本带 `path_gate_authz_used=宿主@1789261882:integration/baselines/sc_battery.py` 且 37/37 |
-| B | 正腿·仲裁超限 | 通过 | 无授权仍 blocked → 授权接受判决 → 不阻断推进 `acceptance_walkthrough`，`uses≥1` + 判决原文 + 授权人（30/30） |
+| A | 正用例·受保护路径（送达 + 消费） | 通过 | 落账字段全 + timeline 签发事件 + `landing=landed`；消费面 settle 回执真文本带 `path_gate_authz_used=宿主@1789261882:integration/baselines/sc_battery.py` 且 37/37 |
+| B | 正用例·仲裁超限 | 通过 | 无授权仍 blocked → 授权接受判决 → 不阻断推进 `acceptance_walkthrough`，`uses≥1` + 判决原文 + 授权人（30/30） |
 | C | 负锁四条（本票覆盖 5 条） | 通过 | 过期 / 别票 scope / agent 自签 / marker 载荷丢失 / 畸形裸 dict —— 全真信号投递、全部 refused 点名、全部不落账；「载荷解析失败」与「非人审等待中」机械可辨 |
-| D | 真往返守卫 | 通过（合成口径） | 两腿各自在册且真信号；「单场景跑通 A+B」的字面读法未满足 → 依 review C6 合成裁定（见下） |
+| D | 真往返守卫 | 通过（合成口径） | 两子用例各自在册且真信号；「单场景跑通 A+B」的字面读法未满足 → 依 review C6 合成裁定（见下） |
 | E | 零回归 | 通过 | base/workflows/inspection_flow 三 handler 源码零 diff；普通签字逐字节锁 + t260912-03 三套 103 UT 绿；三个在册 authz 场景在新三态回执下不翻红 |
 | F | 实票验证 | **不通过** | 两票仍 blocked + `sign_face` absent（只读取证，见下） |
 
@@ -33,7 +33,7 @@
 
 1. **通读本票全部 8 个改动文件**（diff 逐行），核对写集边界、fail-closed 方向、既有语义保全。
 2. **独立复跑**（不复用注入的机械结果）：`lint_tests.py`、全量 `server/engine/tests`、三条相关 L3 场景
-  （新场景 + A 消费面 + B 腿）。
+  （新场景 + A 消费面 + B 子用例）。
 3. **独立复现事故根因**（不采信方案自述）：用 temporalio `DefaultPayloadConverter` 直调，
   以「旧形 Signature（无 authorize 字段）」解码新载荷，验证未知字段是否静默丢弃、marker 标量是否存活。
 4. **线上只读取证**：真 Temporal 7233 上只读 query 两票 `snapshot`/`sign_face`，并用本票新 CLI 对
@@ -55,7 +55,7 @@ sc_authz_protected_path.py         → SC ... pass=37 fail=0 (exit=0)
 sc_authz_overlimit_accept.py       → SC ... pass=30 fail=0 (exit=0)
 ```
 
-### A 正腿（受保护路径）
+### A 正用例（受保护路径）
 
 - **送达半边（新场景，真 CLI → 真 sign 信号 → 真专属 worker → 真 workflow）**：`authorizations 0→1`，
   尾条 `{"who":"宿主","kind":"protected_path","scope":["integration/baselines"],"reason":…,
@@ -69,7 +69,7 @@ sc_authz_overlimit_accept.py       → SC ... pass=30 fail=0 (exit=0)
   （全仓 grep：仅引擎侧生产/消费该键，integration 侧无断言）。键被静默改名时该场景不会翻红，
   只会掉到「记名点名」的宽断言上。建议下一轮 integration 迭代补一条断言（本票不改他人资产）。
 
-### B 正腿（仲裁超限）
+### B 正用例（仲裁超限）
 
 在册 `t260912-03-authz-overlimit-accept` 本段真跑 30/30：B① 无授权超限 → 仍 `blocked`（含「超限」）；
 B③ 过期授权 → 回执 `ok`+`landing=refused`+`refused_why="expires 已过期(…)"`、不落账、不推进；
@@ -93,11 +93,11 @@ B② 生效授权（`arbitration_verdict` scope=本票票号）→ `retry_qc` �
 
 ### D 真往返守卫
 
-- 两腿都是**真信号投递**（真 CLI / 真 SDK → 真 Temporal → 真 worker → 真 workflow），无一条以直调纯函数代替；
-  两腿都已在 `integration/run_scenarios.py` 在册、按登记制命名（`t260913-01-authz-signal-delivery` 登记于
+- 两子用例都是**真信号投递**（真 CLI / 真 SDK → 真 Temporal → 真 worker → 真 workflow），无一条以直调纯函数代替；
+  两子用例都已在 `integration/run_scenarios.py` 在册、按登记制命名（`t260913-01-authz-signal-delivery` 登记于
   engine 池，本段在册条目在场核对通过，lint L4 清单 233 条三元组完整）。
-- **偏离（如实标注）**：验收 D 字面「至少一条集成场景跑通 A 与 B」未满足——A 腿在新场景、B 腿在在册
-  `t260912-03-authz-overlimit-accept`，是**合成口径**（review_plan C6 裁定：两腿均有真信号在册场景即满足
+- **偏离（如实标注）**：验收 D 字面「至少一条集成场景跑通 A 与 B」未满足——A 子用例在新场景、B 子用例在在册
+  `t260912-03-authz-overlimit-accept`，是**合成口径**（review_plan C6 裁定：两子用例均有真信号在册场景即满足
   D 的意图＝「不得用直调纯函数冒充真往返」）。本段不为凑字面扩场景（会造 intent 级重复）；若人审要字面读法，
   应回流并票，再单开一条「A+B 同场景」用例。
 
@@ -171,8 +171,8 @@ runbook 已在 `.sandbar/runbook_t260913_01_live_rollout.md`，本段已把 S0 �
   `server/tools/ticket.py` 零改动（实现走的是 `client.py` op 面，ticket.py 只透传）。
 - `git diff --numstat`：**无任何既有测试文件被修改**（改动 = 4 个引擎文件 + 2 个新 UT + 1 个新场景 +
   `run_scenarios.py` +6/−1，那 1 行是空行移位——**在册场景条目的 intent 文案与命令逐字节未动**）。
-- 新增断言审读（三个文件逐行过）：A 腿锁「字段六要素 + timeline 事件 + 回执 landing」；
-  负锁锁「want=sign(authorize) + why 点名要素 + 不落账」；marker 腿锁「与『非人审等待中』可辨」；
+- 新增断言审读（三个文件逐行过）：A 子用例锁「字段六要素 + timeline 事件 + 回执 landing」；
+  负锁锁「want=sign(authorize) + why 点名要素 + 不落账」；marker 子用例锁「与『非人审等待中』可辨」；
   L1 锁「普通签字文案逐字节」。无恒真断言、无 `assert True`、无把断言面让给实现细节（拒收文案只锁点名要素，
   不锁整句）。**事故形态（静默回落 → `want="sign()"`）在负锁④会被判红**，即防回归网真的能兜住本票事故。
 - **唯一轻微宽松（建议收紧，非阻塞）**：新场景负锁② 的谓词是

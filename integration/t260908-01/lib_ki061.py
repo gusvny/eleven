@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(REPO, "integration", "t260904-02"))
 from lib_gate import (Fail, parse_out_json, poc_python, read_audit_jsonl,  # noqa: E402,F401
                       require_bench, require_stage, run_poc_client, stage_down)
 
-# 引擎目录定位（t260907-10 摊平后=server/engine；回落旧路径一轮，摘除票删旧腿）
+# 引擎目录定位（t260907-10 摊平后=server/engine；回落旧路径一轮，摘除票删旧子用例）
 POC_DIR = os.path.join(REPO, "server", "engine")
 if not os.path.isdir(POC_DIR):
     POC_DIR = os.path.join(REPO, "server", "dsh", "temporal-poc")  # engine-venv-compat

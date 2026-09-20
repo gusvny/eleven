@@ -12,7 +12,7 @@ UI_CAPTURE_TIMEOUT 到点 `proc.kill()` 只杀 node 进程——stage_docker 的
 
 ## 契约
 - up_stage：`stage_docker.py up --project <p> --services full --timeout <cap>`，
-  幕后 stage_docker 自起 hold 保持腿（租约+心跳），本进程退出后台不死；
+  幕后 stage_docker 自起 hold 保持分支（租约+心跳），本进程退出后台不死；
   回执取 stdout 末行 JSON（project/ports.console），写盘前先本地校验
   （capture-lane 对畸形 stage-json 是 ENV_FAIL 退出 2，不回落——交付畸形回执
   只会把失败后移且更难排查）。
@@ -171,7 +171,7 @@ def up_stage(project: str, *, repo_root: Optional[str] = None,
              runner: Optional[Runner] = None) -> Dict[str, Any]:
     """起台并回校验回执。成功→回执 dict；env 面→UiStageEnvError（降级）；
     契约面→UiStageError（直红）。超上限被杀=UiStageEnvError（stage_docker
-    自身的起台失败清理腿负责就地拆；外部击杀的残面交 down_stage 幂等补刀
+    自身的起台失败清理分支负责就地拆；外部击杀的残面交 down_stage 幂等补刀
     + sweep crit_iii 兜底——三层都响亮，不静默）。"""
     if not project or not str(project).strip():
         raise UiStageError("usage 红：project 为空")
@@ -245,7 +245,7 @@ async def run_capture_stage(*, project: str, services: str = "temporal",
     capture-lane）；本协程把 up 回执落 stage-json 临时文件并追加 `--stage-json`
     参数——消费者按既有契约读它（不读=多一个无害参数），生命周期全归本协程。
 
-    起台腿经 asyncio.shield 保护：取消若落在起台进行中，等起台线程收尾（有
+    起台分支经 asyncio.shield 保护：取消若落在起台进行中，等起台线程收尾（有
     stage_up_timeout_s 帽）再拆台——半途 down 会跟在飞 compose up 互踩（账号
     与容器面互斥窗），宁可慢不可撕账。
 
@@ -262,7 +262,7 @@ async def run_capture_stage(*, project: str, services: str = "temporal",
         # （up 成功后校验才失败）：幂等补一刀 down 再重抛（台不在场时 down
         # 是无害 no-op）。260915 实证：这条缝漏拆会留孤儿台（services 校验
         # 红那次，80202 台在场无人认领）。env 面错误不在此补刀（up 进程自身
-        # 失败腿已清 + docker 不可用时 down 只会添噪音）。
+        # 失败分支已清 + docker 不可用时 down 只会添噪音）。
         await asyncio.to_thread(down_stage, project, repo_root=repo_root,
                                 down_cap=down_cap)
         raise

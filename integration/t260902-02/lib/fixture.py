@@ -9,7 +9,7 @@
 - invoke_*：对 activity 入参 dataclass 名做候选适配（只桥接命名，不碰语义），
   断言全部落在文件系统/CLI 行为上；
 - Ledger：stdout 末行 SUMMARY pass/fail/env_fail/na（三态契约定稿 §7.3：0=PASS、
-  1=FAIL 含全腿 N/A、2=ENV_FAIL；skip 计数退役，缺依赖计入 env_fail）；
+  1=FAIL 含全部子用例 N/A、2=ENV_FAIL；skip 计数退役，缺依赖计入 env_fail）；
 """
 import dataclasses
 import inspect
@@ -66,7 +66,7 @@ def load_module(name):
 
 # ---------------------------------------------------------------- 执行契约
 class Ledger:
-    """三态账本（定稿 §7.3）：0=PASS、1=FAIL（产品红，含全腿 N/A）、2=ENV_FAIL（环境红）。
+    """三态账本（定稿 §7.3）：0=PASS、1=FAIL（产品红，含全部子用例 N/A）、2=ENV_FAIL（环境红）。
     skip 计数退役——缺依赖的用例计入 env_fail；skip1 保留为 env1 的兼容别名。"""
 
     def __init__(self):
@@ -86,7 +86,7 @@ class Ledger:
         print("  ENV_FAIL: %s | %s" % (label, reason))
 
     def na1(self, label, reason):
-        """以系统状态为条件的腿无对象：记 N/A（全腿 N/A 场景红由调用方收口）。"""
+        """以系统状态为条件的子用例无对象：记 N/A（全部子用例 N/A 场景红由调用方收口）。"""
         self.n += 1
         print("  N/A: %s | %s" % (label, reason))
 
@@ -98,7 +98,7 @@ class Ledger:
         if self.f:
             return 1                       # 产品红优先（C7）：环境红不得稀释产品红
         total = self.p + self.f + self.e + self.n
-        if total > 0 and self.n >= total:  # 全腿 N/A=产品红（C9：修场景不补环境）
+        if total > 0 and self.n >= total:  # 全部子用例 N/A=产品红（C9：修场景不补环境）
             return 1
         if self.e:
             return 2

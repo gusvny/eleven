@@ -3,20 +3,20 @@
 """t260916-02 集成场景（板面半张）：历史票三态降级可见性契约（真 docker 台）。
 
 intent（登记于 run_scenarios.py，名 t260916-02-board-legacy-three-state）：
-  票号 t 形化 + 板面白名单改双腿查询（SA 腿 + legacy 腿）之后，工单板面对三代票的
+  票号 t 形化 + 板面白名单改两路查询（SA 查询路径 + legacy 查询路径）之后，工单板面对三代票的
   用户可感知契约（口径⑤：老票显式降级可辨，不许静默丢失或误归项目）：
-  ① 20 前老票（旧形 id，无任何项目 SA）：经 legacy 腿仍上板——行 project 空且显式
+  ① 20 前老票（旧形 id，无任何项目 SA）：经 legacy 查询路径仍上板——行 project 空且显式
     点名「历史票·无项目身份」（legacy_unowned 面），绝不静默丢弃；
-  ② 20 后迁移前旧形票（旧形 id，有 ProjectKey 无实例/期 SA）：legacy 腿收进，行标
+  ② 20 后迁移前旧形票（旧形 id，有 ProjectKey 无实例/期 SA）：legacy 查询路径收进，行标
     legacy_id 面、project==SA 值（不误归他项目）、match_via=legacy_id 可观测；
   ③ 白名单判定走聚合声明（零 env 覆盖层）：旧形票实例在册才上板——不在册旧形 id
-    （僵尸形态）两腿都不上板（R2 防僵尸收益在 legacy 腿保持）；
-  ④ 合并可观测：行带 match_via（sa|legacy_id），SA 腿新票与 legacy 腿旧票在同一板面
-    合并呈现（双腿查询+合并的承接面）。
+    （僵尸形态）两种形态都不上板（R2 防僵尸收益在 legacy 查询路径保持）；
+  ④ 合并可观测：行带 match_via（sa|legacy_id），SA 查询路径新票与 legacy 查询路径旧票在同一板面
+    合并呈现（两路查询+合并的承接面）。
 
 分工（防 intent 级重复）：
   · t260915-08-board-rows 守巡检行形状契约（快照注入对拍、R8 闭合窗）——彼时票全旧
-    形无 SA、行 project 恒空，不在其断言面；本条守三态降级与双腿合并可见性；
+    形无 SA、行 project 恒空，不在其断言面；本条守三态降级与两路合并可见性；
   · t260916-02-relocation-realchain 守新票（t 形+全 SA）链路与板面归板；本条只造历史
     票夹具（直发旧形 id），不重测新票链路；
   · 真值表全组合（新/20后/20前 × 在册/僵尸 × 窗口）的离线对拍归 developer L1；本条
@@ -55,7 +55,7 @@ from lib_inspection import (  # noqa: E402
 try:
     import temporalio  # noqa: F401——SDK 直发需要；缺席=环境红
 except Exception:  # noqa: BLE001
-    die_env("temporalio SDK 缺席（server/engine/.venv 不可用）——真链路腿无法执行")
+    die_env("temporalio SDK 缺席（server/engine/.venv 不可用）——真链路子用例无法执行")
 
 STATS = {"pass": 0, "fail": 0}
 FAILS = []
@@ -173,7 +173,7 @@ def main() -> int:
                   str((row1 or {}).get("project") or "") == "",
                   "project=%r" % (row1 or {}).get("project"))
 
-            check("B2a 20 后旧形票（有 ProjectKey）legacy 腿上板",
+            check("B2a 20 后旧形票（有 ProjectKey）legacy 查询路径上板",
                   ok2 and row2 is not None,
                   "夹具=%s 行在场=%s" % (ok2, row2 is not None))
             check("B2b 20 后旧形票标 legacy_id 且 project==SA 值（不误归）",
@@ -185,7 +185,7 @@ def main() -> int:
                   str((row2 or {}).get("match_via") or "") == "legacy_id",
                   "match_via=%r" % (row2 or {}).get("match_via"))
 
-            check("B3 僵尸旧形 id（实例不在册）不上板（R2 两腿都保）",
+            check("B3 僵尸旧形 id（实例不在册）不上板（R2 两路都保）",
                   ok3 and row3 is None, "夹具=%s 行在场=%s" % (ok3, row3 is not None))
             check("B4 白名单真源=聚合声明（零 env 覆盖层可得）",
                   parsed.get("ok") is True and row1 is not None and row3 is None,

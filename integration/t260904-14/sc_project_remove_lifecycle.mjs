@@ -10,7 +10,7 @@
 // --dry-run 全闸预演、注册表根字节级零变更。
 //
 // high-level steps：全程桩 poc_dir（--root 指桩树，假 client.py 票通道经 FIX14_CTRL
-// 可控注入），零真 Temporal（C3 表：本场景全腿零环境依赖，不涉 env_fail 豁免）：
+// 可控注入），零真 Temporal（C3 表：本场景全部子用例零环境依赖，不涉 env_fail 豁免）：
 //   1. 隔离注册表根（.migrated 预置 + fixture 条目 rmmain/rmkeep/rmjs/rmdry，各带
 //      data/tickets 合法归档 + metrics + credentials.yaml + 项目根 .lane 残骸）；
 //   2. rmmain 默认摘除（人读）：exit 0、退役两态、data/credentials 字节不变、
@@ -18,7 +18,7 @@
 //   3. 双侧装载：rmmain 消失、rmkeep 在列且条目字节不动、零隔离；
 //   4. re-add rmmain：exit 0、Python 装载复列、归档链连续（archive.json 仍在）；
 //   5. rmjs --json：差集黄牌列票号 tx9（manifest 缺=未归档）；prune 票 tj1 的假阴
-//      判别在场景② purge 拒腿与本票单测 prune 注入（负向字符串断言易被合法报告
+//      判别在场景② purge 拒子用例与本票单测 prune 注入（负向字符串断言易被合法报告
 //      词汇误伤，不在此钉）；
 //   6. rmdry --dry-run：exit 0、注册表根字节级快照逐键全等、条目未退役；
 //   7. RUNNING 非空：exit 1、报票号、注册表根字节级零变更。
@@ -120,7 +120,7 @@ c.check('归档链连续：ta1/ta2 归档 manifest 原样在位',
 
 // ---- 5. rmjs --json：差集黄牌列票号（C1：manifest 缺=未归档）----
 stub.setCtrl({ mode: 'ok', tickets: [
-  // tj1 已归档但被 prune（通道不返回）——它的假阴判别在场景② purge 拒腿，不在此钉
+  // tj1 已归档但被 prune（通道不返回）——它的假阴判别在场景② purge 拒子用例，不在此钉
   { id: 'tx9', exec_status: 'COMPLETED', close_ts: 9, sa_project: 'rmjs', sa_epic: '' },
 ] });
 const remJs = stub.remove(root, 'rmjs', ['--json']);

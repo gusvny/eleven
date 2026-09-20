@@ -7,8 +7,8 @@ intent（用户可感知行为）：外部项目 ticket-start 关联**其自己�
 负路径连接前拒收——epic 确缺时红因文案带该项目实际查询目录（诊断信息）、
 未知/缺 project 拒收文案互辨（KI-032 硬闸面回归）。
 
-负路径腿零 Temporal 依赖可真跑（校验单点在 connect 之前——client.py:418 在
-_connect 之前的既定闸序）；正路径腿经 docker 测试台（t260904-19 单点搭台纪律，
+负路径子用例零 Temporal 依赖可真跑（校验单点在 connect 之前——client.py:418 在
+_connect 之前的既定闸序）；正路径子用例经 docker 测试台（t260904-19 单点搭台纪律，
 复用 t260904-02/lib_gate）：被测 env 显式清 SANDBAR_EPICS_DIR（防宿主 env 泄漏
 改判锚点），显式 SANDBAR_TARGET_HOST 指台（建票类测试绝不连生产，README 红线）。
 

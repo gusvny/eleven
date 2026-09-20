@@ -17,7 +17,7 @@
 //   T1 GET /wf/projects：fixa 在列；quarantined 数组含 badkey 且原因含 project.yaml 定位字面。
 //   T2 add dry-run：422 能力应答（CLI 无 --dry-run 旗，预检降档=弹层本地形状检查，
 //      裁定项上浮）+ 文案指路 + 注册表根字节级零变更（不 spawn）。
-//   T3 拒收透传（逐腿 4xx + 错误体点名原因）：key 白名单 / key 已存在 / dirs 缺失 /
+//   T3 拒收透传（逐子用例 4xx + 错误体点名原因）：key 白名单 / key 已存在 / dirs 缺失 /
 //      dirs 相对路径 / 根交叉（与 fixa 根嵌套）/ 畸形 JSON 请求体（精确文案不裸抛堆栈）。
 //   T4 add 成功：2xx；GET /wf/projects 即时出现新条目（左栏读回=装载器消费方，验收12）。
 //   T5 remove fail-closed：dry-run 与真跑皆 4xx、文案含 sandbar up 指路；注册表零变更。
@@ -118,7 +118,7 @@ const errText = (r) => (typeof r.body === 'string' ? r.body : JSON.stringify(r.b
   for (const [name, payload, reasonNeedle] of cases) {
     const r = await api(B, 'POST', `${API}/add`, payload);
     // 契约锚：路由自诺「CLI 拒收 → 4xx 原体透传」（就地显示数据源）——拒收不是上游故障，
-    // 不得落 5xx；错误文本必须点名该腿的精确原因（不谎报）。
+    // 不得落 5xx；错误文本必须点名该子用例的精确原因（不谎报）。
     const txt = errText(r);
     const passed = r.status >= 400 && r.status < 500 && !txt.includes('Traceback')
       && (!reasonNeedle || txt.includes(reasonNeedle));

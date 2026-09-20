@@ -4,18 +4,18 @@
 
 intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：
 工单验收③「版本与预期不符→响亮」的执行半边（用户承诺=「升级切错版本不可能
-悄悄跑」）。真 docker 台+真工单链（dsh 版本桩作 agent 脑，秒回合法回执）双腿：
-- 缺省不拦腿（SANDBAR_DSH_STRICT 缺省 off）：桩版本(9.9.9-stub)≠
+悄悄跑」）。真 docker 台+真工单链（dsh 版本桩作 agent 脑，秒回合法回执）两子用例：
+- 缺省不拦子用例（SANDBAR_DSH_STRICT 缺省 off）：桩版本(9.9.9-stub)≠
   SANDBAR_DSH_EXPECTED_VERSION(0.1.1-rc.2) → spawn 照走（桩被真调 ≥1 次）、
   段照常完成（回执合法 → create_plan 出结果），且 worker 日志出现同时点名
   actual/expected 两个版本字面量的响亮行——「带病跑但喊得出来」；
-- STRICT 硬闸腿（SANDBAR_DSH_STRICT=1）：同 mismatch → 版本桩的 agent 形态
+- STRICT 硬闸子用例（SANDBAR_DSH_STRICT=1）：同 mismatch → 版本桩的 agent 形态
   调用恒为 0（spawn 在执行被钉二进制前被拒）+ 日志出现点名两版本的硬闸红
-  ——「宁可停也不悄悄跑错版本」。不另设 snapshot「不出结果」腿：闸挂点在
+  ——「宁可停也不悄悄跑错版本」。不另设 snapshot「不出结果」子用例：闸挂点在
   worker 启动时票队列即无人服务，查询通道随 worker 一起死，该观测结构性
-  不可达；闸语义由「响亮红+调用恒 0」双腿完备证明。
+  不可达；闸语义由「响亮红+调用恒 0」两子用例完备证明。
 判定不锚 boot/spawn 哪个挂点（实现在任一挂点响都算兑现用户承诺），锚的是
-组合语义：缺省=跑+点名；STRICT=不跑+点名。两腿合取才能同时抓住
+组合语义：缺省=跑+点名；STRICT=不跑+点名。两子用例合取才能同时抓住
 「静默跑错版本」与「静默拒跑」两个方向的腐烂。
 
 intent 分工（防 intent 级重复）：
@@ -53,7 +53,7 @@ EXPECTED_OK = "0.1.1-rc.2"   # expected（宿主现装版）
 TID_LOUD = "t26091624-loud"
 TID_STRICT = "t26091624-strict"
 PROJ_KEY = "t26091624-loud"
-STAGE_BUDGET = 300           # 真票链每腿轮询上限（秒）
+STAGE_BUDGET = 300           # 真票链每子用例轮询上限（秒）
 
 
 def query_snapshot(py, env, tid):
@@ -107,7 +107,7 @@ def main():
                 "title": "dsh 版本预期不符执行面", "write_set": ["docs/"]}, env)
             return rc == 0 and tid in out, "ticket-start 受理（rc=%s out尾=%s）" % (rc, out[-160:])
 
-        # ---------- 腿① 缺省 off：带病跑但喊得出来 ----------
+        # ---------- 子用例① 缺省 off：带病跑但喊得出来 ----------
         # 计数只认 agent 形态调用（worker 启动的 face 探测也会记 version 行，
         # 不过滤会把「探测了桩」误当「spawn 走了桩」）
         def agent_rows():
@@ -115,16 +115,16 @@ def main():
         n0 = len(agent_rows())
         w1, log1 = boot_worker(TID_LOUD, None)
         ok, msg = start_ticket(TID_LOUD)
-        fail.check(ok, "腿①：%s" % msg)
+        fail.check(ok, "子用例①：%s" % msg)
 
         def _spawned():
             return agent_rows()[n0:] or None
         spawned = poll(_spawned, STAGE_BUDGET)
         if spawned is None and w1.poll() is not None:
-            fail.check(False, "腿①：worker 提前退出（rc=%s）——日志尾：%s"
+            fail.check(False, "子用例①：worker 提前退出（rc=%s）——日志尾：%s"
                        % (w1.returncode, ""))
         fail.check(spawned is not None,
-                   "腿①：expected 不符（缺省 off）spawn 照走——版本桩被真调（新增 %d 次调用）"
+                   "子用例①：expected 不符（缺省 off）spawn 照走——版本桩被真调（新增 %d 次调用）"
                    % len(spawned or []))
 
         def _stage_done():
@@ -132,33 +132,33 @@ def main():
             return s if "create_plan" in (s.get("results") or {}) else None
         done = poll(_stage_done, STAGE_BUDGET)
         fail.check(done is not None,
-                   "腿①：段照常完成（create_plan 出结果）——缺省不拦的正面证据")
+                   "子用例①：段照常完成（create_plan 出结果）——缺省不拦的正面证据")
 
         hits = log_hits_literal_pair(log1, STUB_VERSION, EXPECTED_OK)
         fail.check(bool(hits),
-                   "腿①：worker 日志有同时点名 actual(%s)/expected(%s) 的响亮行（实得 %d 行）"
+                   "子用例①：worker 日志有同时点名 actual(%s)/expected(%s) 的响亮行（实得 %d 行）"
                    "——版本与预期不符喊得出来" % (STUB_VERSION, EXPECTED_OK, len(hits)))
         terminate_worker(w1)
 
-        # ---------- 腿② STRICT=1：宁可停也不悄悄跑错版本 ----------
+        # ---------- 子用例② STRICT=1：宁可停也不悄悄跑错版本 ----------
         n1 = len(agent_rows())
         w2, log2 = boot_worker(TID_STRICT, {"SANDBAR_DSH_STRICT": "1"})
         ok, msg = start_ticket(TID_STRICT)
-        fail.check(ok, "腿②：%s" % msg)
+        fail.check(ok, "子用例②：%s" % msg)
 
         def _strict_named():
             return log_hits_literal_pair(log2, STUB_VERSION, EXPECTED_OK) or None
         named = poll(_strict_named, STAGE_BUDGET)
         fail.check(named is not None,
-                   "腿②：STRICT 硬闸红点名两版本字面量（日志 %d 行）——响亮语义在闸上"
+                   "子用例②：STRICT 硬闸红点名两版本字面量（日志 %d 行）——响亮语义在闸上"
                    % len(named or []))
         n2 = len(agent_rows())
         fail.check(n2 == n1,
-                   "腿②：版本桩 agent 形态调用恒 0（%d→%d）——spawn 在执行被钉二进制前被拒，"
+                   "子用例②：版本桩 agent 形态调用恒 0（%d→%d）——spawn 在执行被钉二进制前被拒，"
                    "不悄悄跑错版本" % (n1, n2))
-        # 注：不另设「snapshot 无 create_plan 结果」腿——闸挂点在 worker 启动时
+        # 注：不另设「snapshot 无 create_plan 结果」子用例——闸挂点在 worker 启动时
         # （实现取 boot 拒启），票队列从此无人服务，snapshot 查询通道随 worker
-        # 一起死，该观测结构性不可达；闸语义已由「响亮红 + agent 调用恒 0」双腿
+        # 一起死，该观测结构性不可达；闸语义已由「响亮红 + agent 调用恒 0」两子用例
         # 完备证明（STRICT 只告警不拒的腐烂会被「调用恒 0」当场抓住）。
 
         terminate_worker(w2)

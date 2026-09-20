@@ -50,7 +50,7 @@ def main():
     try:
         poc_marker = os.path.join("server", "engine")
         fake_foreign_root = os.path.join(tmp, "fake-frozen-engine")  # 模拟冻结仓
-        # ---------- ① 红腿：注入异仓引擎形态 census ----------
+        # ---------- ① 失败分支：注入异仓引擎形态 census ----------
         bad = os.path.join(tmp, "census_bad.json")
         write_census(bad, [
             {"pid": FAKE_ZOMBIE_PID, "command": "node server/plugins/temporal-tools/node.ts",
@@ -67,7 +67,7 @@ def main():
         fail.check(str(SAME_OK_PID) not in out,
                    "同仓引擎进程不误报（pid %d 不在红行）" % SAME_OK_PID)
 
-        # ---------- ② 绿腿：干净 census → exit0 + 矩阵 5 行 + 幂等 ----------
+        # ---------- ② 通过子用例：干净 census → exit0 + 矩阵 5 行 + 幂等 ----------
         good = os.path.join(tmp, "census_good.json")
         write_census(good, [
             {"pid": 410250, "command": "node", "cwd": os.path.join(REPO, poc_marker)},
@@ -91,14 +91,14 @@ def main():
         fail.check(rc2b == 0 and json.dumps(rows_b, sort_keys=True) == before,
                    "重复 doctor 幂等：行集合不变（%d 行）" % len(rows_b))
 
-        # ---------- ③ 畸形腿：坏 JSON census → 显式红不假绿 ----------
+        # ---------- ③ 畸形子用例：坏 JSON census → 显式红不假绿 ----------
         malformed = os.path.join(tmp, "census_malformed.json")
         with open(malformed, "w", encoding="utf-8") as f:
             f.write("{not-json-at-all")
         rc3, out3 = doctor_with(entry, env, malformed)
         fail.check(rc3 != 0, "坏 JSON census 显式红（rc=%s）——畸形输入不静默绿" % rc3)
 
-        # ---------- ④ 文案自辨腿（review C2） ----------
+        # ---------- ④ 文案自辨子用例（review C2） ----------
         rc4, out4 = doctor_with(entry, env, good)
         fail.check("--live" in out4,
                    "僵尸面输出自辨 sample 档并指 --live 真扫（防「跑过=无僵尸」误读）")

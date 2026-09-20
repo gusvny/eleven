@@ -8,8 +8,8 @@ intent（守护的用户可感知行为）：
   留常驻 worker 尾巴（260824 A 案契约：专属 worker 生命周期跟工单走）；
 - 孤儿收养自退：宿主 console 死亡（worker 被 init/launchd 收养、ppid=1）→
   worker 自退——宿主被 SIGKILL、dispose 跑不到时也不留无主 worker（85222
-  版本投毒教训）。系统状态条件腿：收养目标 ppid 随环境（Linux subreaper），
-  本环境收养不到 ppid=1 时该腿按 N/A 折算（不算被测红）；
+  版本投毒教训）。系统状态条件子用例：收养目标 ppid 随环境（Linux subreaper），
+  本环境收养不到 ppid=1 时该子用例按 N/A 折算（不算被测红）；
 - 查询失败不误退：watch 指向不存在/查不到的 workflow → worker **不自退**、
   持续存活并留下「查询失败下一轮再试」痕迹——宁可多守一轮，不许「票没守到
   人先走」（误退=工单没人伺候）。
@@ -19,10 +19,10 @@ intent 分工（防 intent 级重复）：
   被守 workflow 的生命周期联动（worker 自己决定走）；
 - t260905-02-worker-lifecycle＝外部信号主动停；本条＝自退三态（收口/收养/
   查询失败不退）。watch 生效前提：SANDBAR_WATCH_WORKFLOW 置时 watch 循环才
-  存在（ppid 守护在循环体内），收养腿两 env 同置。
+  存在（ppid 守护在循环体内），收养子用例两 env 同置。
 
 三态契约：docker 台缺席=ENV_FAIL exit 2；被测子进程零连生产（审计钩子+自证
-腿）；watch 间隔旋钮 SANDBAR_WATCH_INTERVAL_SEC 提速（「≥两轮」按日志实际
+子用例）；watch 间隔旋钮 SANDBAR_WATCH_INTERVAL_SEC 提速（「≥两轮」按日志实际
 轮次判：旋钮生效 ~4s 收工、失效自然回落 30s 慢档 90s 窗内同判——语义不弱化）；
 日志锚兼容正则锚语义（KI-051）。
 """
@@ -109,7 +109,7 @@ def main():
             time.sleep(1.0)
         fail.check(bool(queue), "running-tickets 在册（tid=%s queue=%s）" % (TID, queue))
 
-        # ---------- ③ 正常腿 A：票收口（非 RUNNING）→ watch worker 限期自退 ----------
+        # ---------- ③ 正常子用例 A：票收口（非 RUNNING）→ watch worker 限期自退 ----------
         rc_c, out_c = run_poc_client(py, "cancel", {"workflow_id": TID}, env0)
         jc = parse_out_json(out_c)
         fail.check(rc_c == 0 and jc.get("ok") is True,
@@ -139,9 +139,9 @@ def main():
         fail.check(not os.path.exists(meta_a), "自退后 meta 自清")
         close_logf(w_a)
 
-        # ---------- ④ 正常腿 B：宿主死（孤儿收养 ppid=1）→ 自退 ----------
+        # ---------- ④ 正常子用例 B：宿主死（孤儿收养 ppid=1）→ 自退 ----------
         # watch 指向不存在的 workflow（describe 恒失败）→ 唯一退出路径=ppid 收养，
-        # 收养腿与收口腿判定互不掺和。两 env 同置（watch 循环存在的前提）。
+        # 收养子用例与收口子用例判定互不掺和。两 env 同置（watch 循环存在的前提）。
         missing_wf = "t26090502-nothing-%s" % TAG
         meta_b = os.path.join(tmp, "worker-b.meta")
         log_b = os.path.join(tmp, "worker-b.log")
@@ -179,8 +179,8 @@ def main():
                            "自退痕迹在文：收养语义日志（worker 自报退出原因=ppid=1 被收养）")
                 fail.check(not os.path.exists(meta_b), "收养自退后 meta 自清")
             else:
-                print("N/A  孤儿收养腿：孤儿 worker 90s 内未自退（best-effort ppid=%s）"
-                      "——本环境未按 ppid=1 收养（系统状态条件腿），收养自退在此不可判"
+                print("N/A  孤儿收养子用例：孤儿 worker 90s 内未自退（best-effort ppid=%s）"
+                      "——本环境未按 ppid=1 收养（系统状态条件子用例），收养自退在此不可判"
                       % ppid_of(wpid), flush=True)
             # 两种分支都兜底 TERM（N/A 时不留 watch 常驻进程）
         if wpid and pid_alive(wpid):
@@ -189,7 +189,7 @@ def main():
             except OSError:
                 pass
 
-        # ---------- ⑤ 异常腿：查询失败不误退（持续存活 ≥ 两轮） ----------
+        # ---------- ⑤ 异常子用例：查询失败不误退（持续存活 ≥ 两轮） ----------
         missing_wf2 = "t26090502-nothing2-%s" % TAG
         meta_c = os.path.join(tmp, "worker-c.meta")
         log_c = os.path.join(tmp, "worker-c.log")

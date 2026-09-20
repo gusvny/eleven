@@ -4,7 +4,7 @@
 处理（钥匙插不进去），受保护路径闸与仲裁超限两条判定无出口。
 
 走查立场：用户视角独立走查，不预设「测试已全部通过」；机械口径（233 跑 / 213 过 / 1 败 / 19 环境红）
-仅作输入，关键腿自己重跑。与仲裁并行执行，本报告不为仲裁下结论。
+仅作输入，关键子用例自己重跑。与仲裁并行执行，本报告不为仲裁下结论。
 
 ## 结论：通过（status=ok）
 
@@ -17,14 +17,14 @@
 - **本轮测试资产改动审计通过**（重点小节）：档位判据**读源亲核**与引擎自报退出码一致，
   且 `rc=1/64` 仍判 FAIL（**不可能掩盖产品红**）；断言语义零改动；独立复跑绿。
 - **闸唯一 FAIL（`t260912-02-burst-managed-subnets`）与本票零交集**：别票场景、前四轮均 PASS、
-  本轮 99 腿中 6 腿红且在 18 条 console 环境红 + 端口占用的高载窗口内 → 归因属仲裁。
+  本轮 99 子用例中 6 子用例红且在 18 条 console 环境红 + 端口占用的高载窗口内 → 归因属仲裁。
 
 | # | 项 | 结论 | 本轮依据 |
 |---|----|------|----------|
-| A | 正腿·受保护路径（送达+消费） | 通过 | `t260913-01-authz-signal-delivery` PASS 15.4s；`t260912-03-authz-protected-path` PASS 5.3s |
-| B | 正腿·仲裁超限 | 通过 | `t260912-03-authz-overlimit-accept` PASS 93.0s（判决原文 + `uses≥1` + 推进） |
+| A | 正用例·受保护路径（送达+消费） | 通过 | `t260913-01-authz-signal-delivery` PASS 15.4s；`t260912-03-authz-protected-path` PASS 5.3s |
+| B | 正用例·仲裁超限 | 通过 | `t260912-03-authz-overlimit-accept` PASS 93.0s（判决原文 + `uses≥1` + 推进） |
 | C | 负锁四条（本票覆盖 5 条） | 通过 | 本段亲跑新场景 `pass=37 fail=0`（含可辨文案断言）；机械口径 PASS |
-| D | 真往返守卫 | 通过（合成口径） | 两腿真信号、均在册（字面读法偏离沿用 review C6 裁定） |
+| D | 真往返守卫 | 通过（合成口径） | 两子用例真信号、均在册（字面读法偏离沿用 review C6 裁定） |
 | E | 零回归 | 通过 | 引擎三 handler 源码零 diff；本段亲跑 UT 722 passed；`-authz-cli-queryable` PASS 15.4s |
 | F | 实票验证 | 通过 | 20:23 只读取证：两票各 `used=1`；t260912-01 `run_integration_tests/running`，t260911-05 已远离 `arbitrate/blocked` |
 | — | 测试资产变更审查 | 通过（含 1 条全族线索） | 见专节 |
@@ -42,7 +42,7 @@
    （256 槽/表内/互异/幂等 reused/还槽/渲染/usage 拒收）逐字未动；lib 为纯新增，既有函数零改动。
 4. 本段亲跑：lint、本票新场景、**本轮被修的别票场景（net-table）独立复跑**、`up_ok` 五档确定性 smoke、
    引擎全量 UT。
-5. 线上 F 只读取证 + 全族（同形态起台腿）静态排查。
+5. 线上 F 只读取证 + 全族（同形态起台子用例）静态排查。
 
 ## 怎么验证的（证据引用）
 
@@ -77,10 +77,10 @@ pytest server/engine/tests -q                                      → 722 passe
 
 ### 全族线索（本段静态排查，实报即全族）
 
-同形态「起台腿直接 `check(rc == 0)`」仍有在册未修点（本票授权面未覆盖）：
+同形态「起台子用例直接 `check(rc == 0)`」仍有在册未修点（本票授权面未覆盖）：
 
-- `integration/t260912-02/sc_stage_sweep_owner_gone.py:240` —— `check(proc_n.returncode == 0, "挂点腿新台 up 成功（rc=%s）")`；
-  **历史实录**：本轮之前的机械跑曾出现 `FAIL 挂点腿新台 up 成功（rc=2）`——rc=2 恰是 env 档，
+- `integration/t260912-02/sc_stage_sweep_owner_gone.py:240` —— `check(proc_n.returncode == 0, "挂点子用例新台 up 成功（rc=%s）")`；
+  **历史实录**：本轮之前的机械跑曾出现 `FAIL 挂点子用例新台 up 成功（rc=2）`——rc=2 恰是 env 档，
   即本轮修法针对的**同一形态**（该文件的同族修法曾被预置进场、又按授权红线回滚，diff 留痕在 implement evidence）。
 - `integration/t260912-02/acc_g_cleanup.py:55` —— `check(p.returncode == 0, "起 1 台成功（rc=%s）")`。
 - `sc_stage_burst_managed_subnets.py:158/211` 走既有 `env_guard`（stderr 特征面），不属该形态。
@@ -96,7 +96,7 @@ ran=233 pass=213 fail=1 env_fail=19 wall_s=1464.7 generated=2026-09-13T19:53:48
                 -authz-cli-queryable 15.4 / -authz-protected-path 5.3
 capture 双胞胎：capture-chat-active PASS 44.6 / capture-chat-e2e PASS 47.5
 本轮被修项：t260912-02-net-table-contract **PASS 16.1s**（修法见效）
-唯一 FAIL：t260912-02-burst-managed-subnets 109.2s —— SUMMARY pass=93 fail=6（99 腿 6 红；前四轮 86.3/86.5/98.9s 均 PASS）
+唯一 FAIL：t260912-02-burst-managed-subnets 109.2s —— SUMMARY pass=93 fail=6（99 子用例 6 红；前四轮 86.3/86.5/98.9s 均 PASS）
 19 条环境红归类（逐条读 tail；共 20 条非绿=19 env_fail + 1 FAIL）：
    17 × console 台不可达（`test console not reachable at http://127.0.0.1:21020`，browser/browser-free/main 系场景连坐）
   ＋1 × t260904-19-stage-docker（共享锁根内有新鲜外来工程状态 stage-console-33d3151d）
@@ -108,9 +108,9 @@ capture 双胞胎：capture-chat-active PASS 44.6 / capture-chat-e2e PASS 47.5
 - 高载窗口旁证：同轮 18 条 console 台不可达 + 端口 21061 占用（本段 `docker ps` 见
   `stage-console-4bba26a2-temporal` 自数小时前就发布 21061 → 与 `t260908-01-ticket-pause-gate` 的
   `Bind 21061 failed` 同源）——环境面，非任何产品红。
-- **artifact 局限（如实记录）**：机械报告只保留每条 tail 末 1200 字，burst 的 6 条失败腿身份在
+- **artifact 局限（如实记录）**：机械报告只保留每条 tail 末 1200 字，burst 的 6 条失败子用例身份在
   artifact 内不可得 → 本段**不据 artifact 猜**；归因留仲裁/复跑。建议（非本票面）闸报告对 FAIL 条目
-  保留失败腿身份，便于事后归因。
+  保留失败子用例身份，便于事后归因。
 
 ### F 实票验证（本轮复证 20:23:27）
 
@@ -131,11 +131,11 @@ capture 双胞胎：capture-chat-active PASS 44.6 / capture-chat-e2e PASS 47.5
 
 1. **全族未修点**（见上「全族线索」）：`sweep_owner_gone:240`、`acc_g_cleanup:55` 仍是「起台 rc==0 直判」
    形态 → 同类假产品红会复现；建议一次补授修全族（本段不代改）。
-2. **闸 blocker 环境面**：`burst-managed-subnets` 6/99 腿红 + 18 条 console 台不可达 + 端口 21061 占用，
+2. **闸 blocker 环境面**：`burst-managed-subnets` 6/99 子用例红 + 18 条 console 台不可达 + 端口 21061 占用，
    同属供给面（多泳道共用台位/端口）；与本票零交集，但会持续卡 merge 闸，需台位治理（含 5 小时龄的
    `stage-console-4bba26a2` 等旧台归谁处置）。
 3. **合并面**：main 仍为 `b614392`（t260913-03 声明 `exclude_pools: engine,exclusive`），本 worktree 基于
-   `9c102d7` → 合并需先对齐；engine 池被每票段跳过 → 本票新场景与 t260912-03 三条正腿只由每日巡检覆盖，
+   `9c102d7` → 合并需先对齐；engine 池被每票段跳过 → 本票新场景与 t260912-03 三条正用例只由每日巡检覆盖，
    而巡检票 t260913-02 当前 `acceptance_walkthrough/blocked`（建议人审裁定「写集命中 server/engine/ 时是否强制全跑」）。
 4. **合并冲突线索**：并行票 t260912-01 获授权改 `integration/baselines/sc_capture_chat_active.mjs`（`uses` 为证），
    与本票 gen1 同文件；本票累计还改了已闭票 t260911-02 的场景文件与 t260912-02 的两个测试资产文件——
@@ -149,7 +149,7 @@ capture 双胞胎：capture-chat-active PASS 44.6 / capture-chat-e2e PASS 47.5
 8. **运维面（设计固有）**：合并后 CLI 对未含 `sign_face` 的 worker 拒发 authorize（fail-closed）→ 现网 worker
    需按 runbook §S0→§S6 再重启一次才能继续用人授权。
 9. KI 候选待 main 侧 integration 落册（本段写集不含 `notes/`）：implement gen0 三条 + 走查新增四条
-   （④机读键无断言锁；⑤两条轻微实现缺陷；⑥供给台 hold/锁根半态连坐；⑦同族起台腿直判未清）。
+   （④机读键无断言锁；⑤两条轻微实现缺陷；⑥供给台 hold/锁根半态连坐；⑦同族起台子用例直判未清）。
 
 ## 收口两问
 

@@ -178,7 +178,7 @@ export function makeChecker() {
     envFail(label, reason = '') {
       envFail++; console.log(`  ENV_FAIL ${label}${reason ? ' — ' + reason : ''}`)
     },
-    /** 系统状态条件腿 N/A（不以测试环境为条件）；全腿 N/A 视同产品红。 */
+    /** 系统状态条件子用例 N/A（不以测试环境为条件）；全部子用例 N/A 视同产品红。 */
     na(label) {
       na++; console.log(`  N/A ${label}`)
     },

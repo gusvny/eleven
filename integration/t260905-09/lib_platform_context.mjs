@@ -4,7 +4,7 @@
 //   ✅ 带 3199 隔离台基址 + 拒 3099 红线 + t260904-12 三态 makeResults（pass/fail/
 //      env_fail/na，exit 0/1/2，绝不假绿放行）。
 //   ✅ 带 隔离台健康检查。
-//   ❌ 不带 charter 端点/项目清单 helpers——本票场景不消费（charter 腿由 16 号
+//   ❌ 不带 charter 端点/项目清单 helpers——本票场景不消费（charter 子用例由 16 号
 //      既有场景族守，intent 级不重复；本票 stacked 场景只把 charter 小条在场当
 //      前置卫兵，不重断 charter 契约）。
 // 自足精简（同 lib_charter 对 t260904-05 的先例）：不跨票目录 import——已收口
@@ -19,7 +19,7 @@ import { ensureStageConsole } from '../lib_stage_console.mjs';
 /**
  * 隔离台基址懒取（不顶层 await）：ro 契约场景是纯静态面，不得被供给台健康度
  * 绑架（顶层 ensureStageConsole 会让 ENV_FAIL 抢在场景逻辑之前=静态契约多了
- * 环境依赖腿）；browser 场景在自己的 T0 卫兵链里显式取台。
+ * 环境依赖子用例）；browser 场景在自己的 T0 卫兵链里显式取台。
  */
 let _base = null;
 export async function stageBase() {
@@ -93,7 +93,7 @@ export function loadFixtures() {
  * 注入结构=滚动体直接子层（平台消息列表最常见形态）；每条带 data-fx-id 供
  * 场景定位（场景自有属性，非平台结构赌注）。
  * 返回注入的元素 id 清单。归因纪律（review 意见⑥）：注入后 React 重渲染若
- * 触发 removeChild 类异常，pageerror 卫兵腿会捕到并 fail 留证——夹具手法≠
+ * 触发 removeChild 类异常，pageerror 卫兵子用例会捕到并 fail 留证——夹具手法≠
  * 产品缺陷，证据必须随 detail 上报，不许静默。
  */
 export async function injectPlatformBubbles(page, fixtures) {

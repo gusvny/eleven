@@ -5,7 +5,7 @@
 intent（守护的用户可感知行为，灰盒 L3，260906 worker-02·03·05 settle 身份崩）：
 - git 身份全缺（user.name/user.email 都没有）→ prepare_workspace 开工前 fail-fast：
   ok=False/action=failed，红字点名缺的是哪个键（报错必须精确）；
-- 半缺（只有 user.name）→ 红字点名 user.email——「点名缺哪个」的精确性用半缺腿钉死；
+- 半缺（只有 user.name）→ 红字点名 user.email——「点名缺哪个」的精确性用半缺子用例钉死；
 - 身份在位（GLOBAL 提供）→ 复用不受扰（reused 正常）；
 - repo 级补救：GLOBAL 空、身份在仓库 local config → 照样放行（探针锚在泳道
   worktree，天然覆盖 worktree 共享主仓 config 的补救承诺）；
@@ -16,11 +16,11 @@ intent（守护的用户可感知行为，灰盒 L3，260906 worker-02·03·05 s
   260824-12 依赖盲区闭合的陪伴断言）。
 
 夹具：全部在 tmp 仓（git init + worktree add），身份用 GIT_CONFIG_GLOBAL/
-GIT_CONFIG_NOSYSTEM 环境隔离（不碰真 HOME/系统配置）；deps 腿把引擎模块的
+GIT_CONFIG_NOSYSTEM 环境隔离（不碰真 HOME/系统配置）；deps 子用例把引擎模块的
 REPO_ROOT 指向 tmp 主仓（模拟「泳道属于本仓」，断言面仍是 prepare_workspace
 回执与文件系统结果）。断言面=活动回执（ok/action/error）+ 泳道文件系统结果。
 
-实现段落地前红属预期（TDD 信号）：守卫缺席 → 缺失腿照旧放行 → 场景红；
+实现段落地前红属预期（TDD 信号）：守卫缺席 → 缺失子用例照旧放行 → 场景红；
 arbitrate/merge 期必须绿。
 
 直跑：python3 integration/t260905-10/sc_lane_identity_guard.py（cwd=仓库根；
@@ -114,7 +114,7 @@ def main() -> int:
 
         repoA = setup_main_repo(work, "mainA")
         laneA = repoA / ".lane" / "sc3"
-        add_worktree(repoA, laneA)  # 复用腿的既有泳道
+        add_worktree(repoA, laneA)  # 复用子用例的既有泳道
 
         # ---- A 全缺：fail-fast 红字点名两个键 ----
         with env_guard(**missing):

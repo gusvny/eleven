@@ -136,7 +136,7 @@ section('P1. 归因判定器红绿自证（合成样，守判定器非守产品�
     '畸形输入自证：非 hex/undefined 指纹 → BAD_INPUT 点名不 crash')
 }
 
-/* ===== P2 真树腿：票型触发才付重建成本 ===== */
+/* ===== P2 真树子用例：票型触发才付重建成本 ===== */
 function gitSha(rel) {
   const r = spawnSync('git', ['show', `HEAD:${rel}`],
     { cwd: root, encoding: 'buffer', timeout: 60000, maxBuffer: 64 * 1024 * 1024 })
@@ -171,7 +171,7 @@ function diff40(headBytesBuf, diskPath) {
   }
 }
 
-section('P2. 真树腿：票型触发 → 唯一入口重建 → 四态归因')
+section('P2. 真树子用例：票型触发 → 唯一入口重建 → 四态归因')
 const entryDirty = libDirtyPaths()
 {
   const head = gitSha(LIB_RELS[0])
@@ -221,7 +221,7 @@ const entryDirty = libDirtyPaths()
       }
       if (ciEnvFail) {
         envFail++
-        console.log(`ENV_FAIL: 唯一入口内 npm ci 失败（离线/缓存不可用）——重建取不到锁定依赖树，归因腿环境红不诬产品；尾段：\n${tail(buildLog)}`)
+        console.log(`ENV_FAIL: 唯一入口内 npm ci 失败（离线/缓存不可用）——重建取不到锁定依赖树，归因子用例环境红不诬产品；尾段：\n${tail(buildLog)}`)
       } else {
         const inputsDirty = inputsDirtyNow()
         const v = classify({ head, lib, rebuild, inputsDirty })

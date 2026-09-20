@@ -4,13 +4,13 @@
 //   用户在文档视图里能完成 mock v1 版式承诺的完整旅程：打开文档页初值=壳层当前项目
 //   （t260915-10 接壳层语义——经夹具甲组「文档」图标进入=初值夹具甲；语义变更留痕：
 //   t260910-10 旧稿锁「初值=缺省引擎仓、初载无 project=」，那正是 t260915-10 修的病灶
-//   语义，缺省回落旅程移到 T1b 手动腿，跟随初值由 t260915-10 新场景专守）、顶部 Project
+//   语义，缺省回落旅程移到 T1b 手动子用例，跟随初值由 t260915-10 新场景专守）、顶部 Project
 //   切换器换到任一注册项目后树随所选项目切换（KI-070 的用户可感知面）、固定 UI 元素一律
 //   英文、开篇后正文带五枚元信息 chip（Verified 无数据源=显式 pending 占位不留假值）、
 //   On this page 大纲随选中文档渲染且点击真跳转、分组可折叠、Search 在当前项目内过滤、
 //   空 scope 目录诚实降级不炸。断言锚=公开契约锚 data-wb-docs-root/[data-wb-doc-item]
 //   （t260905-06 立下的契约锚，gen1 方案承诺保留可新增不可移除）+ 元素角色/可见文本
-//   （select、input、固定英文词），不锚内部类名。线上证据腿：监听 /api/wf/docs/ 请求
+//   （select、input、固定英文词），不锚内部类名。线上证据子用例：监听 /api/wf/docs/ 请求
 //   URL——初载带 project=fixa（壳层接线）、手动选缺省后无 project= 参数（缺省回落）、
 //   切项目后带 ?project=<夹具>（客户端显式传键=反 viewProject 漂移，KI-070 在 wire 层
 //   的判据）。
@@ -28,7 +28,7 @@
 //      （data-wb-doc-project-key='fixa'、选中项含「夹具甲」、首屏树=夹具篇目、初载 tree
 //      请求带 project=fixa）、固定英文元素在场（Project/Docs/Notes/Search 输入框/
 //      On this page）。
-//   T1b 缺省回落旅程（手动腿，t260915-10 留痕：旧稿 T1 的「无 project=」断言移到本腿）：
+//   T1b 缺省回落旅程（手动子用例，t260915-10 留痕：旧稿 T1 的「无 project=」断言移到本子用例）：
 //      选择器手动选 sandbar/default → 引擎库篇目回场 + wire 出无 project 请求。
 //   T2 项目切换旅程：选择器选夹具甲 → 请求带 ?project=fixa（wire）→ 树出夹具篇目、
 //      sandbar 篇目退场（DOM 终态）。
@@ -57,11 +57,11 @@ const stub = makeTicketStub();
 
 const pw = await loadPlaywright();
 if (!pw) {
-  record('playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器走查腿环境红');
+  record('playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器走查子用例环境红');
   summarize();
 }
 
-// ---- 夹具（与 sc_docs_project_anchor 同构：真目录真文件；mini.md 含双 h2 供大纲腿）----
+// ---- 夹具（与 sc_docs_project_anchor 同构：真目录真文件；mini.md 含双 h2 供大纲子用例）----
 function writeFxa(root) {
   const docs = path.join(root, 'docs');
   mkdirSync(path.join(docs, 'sub'), { recursive: true });
@@ -183,7 +183,7 @@ try {
   // ---- T1 初值=壳层当前项目（t260915-10 接壳层）+ 固定英文元素 + wire 带 project ----
   // （语义变更留痕：t260905-06/t260910-10 旧稿锁「初值=缺省引擎仓、初载无 project=」——
   //   那正是 t260915-10 修的病灶语义；本条改锁经组图标进入=初值该组项目，缺省回落旅程
-  //   移到 T1b 手动腿，跟随初值由 t260915-10 新场景专守。）
+  //   移到 T1b 手动子用例，跟随初值由 t260915-10 新场景专守。）
   const initKeyOk = await page.waitForFunction(
     () => document.querySelector('[data-wb-docs-root]')?.getAttribute('data-wb-doc-project-key') === 'fixa',
     { timeout: 8000 },
@@ -221,7 +221,7 @@ try {
   const searchPresent = (await searchBox.count()) > 0 && (await rootSel.locator('input').first().isVisible().catch(() => false));
   record('ui/fixed-en-search', searchPresent, 'Search 输入框在场（input 元素，角色级定位）');
 
-  // ---- T1b 缺省回落旅程（手动腿，t260915-10 留痕：旧稿 T1 的「无 project=」断言移到本腿
+  // ---- T1b 缺省回落旅程（手动子用例，t260915-10 留痕：旧稿 T1 的「无 project=」断言移到本子用例
   //      ——缺省回落=显式手动选择态，不再是打开文档页的初值）----
   await rootSel.locator('select').first().selectOption('').catch(() => {});
   await page.waitForTimeout(1400);
@@ -357,14 +357,14 @@ try {
     return null;
   });
   if (!pickedB) {
-    record('ui/empty-notes-degraded', 'fail', '选择器中无夹具乙选项（空态腿无载体）');
+    record('ui/empty-notes-degraded', 'fail', '选择器中无夹具乙选项（空态子用例无载体）');
   } else {
     await rootSel.locator('select').first().selectOption(pickedB.value);
     await page.waitForTimeout(1400);
     const fxbShown = await items.filter({ hasText: '夹具乙单篇' }).first().isVisible().catch(() => false);
     const notesTab = rootSel.getByText('Notes', { exact: true }).first();
     if (!(await notesTab.isVisible().catch(() => false))) {
-      record('ui/empty-notes-degraded', 'fail', 'Notes 页签不在场（空态腿无从走起）');
+      record('ui/empty-notes-degraded', 'fail', 'Notes 页签不在场（空态子用例无从走起）');
     } else {
       await notesTab.click();
       await page.waitForTimeout(1200);

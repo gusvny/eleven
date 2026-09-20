@@ -16,7 +16,7 @@
 # → {type:"server-response",rpcId,result:{ok,value:{entries:[{moduleName,fiberPhase,
 # enabled}]}}}（dsh 0.1.1/0.1.5 同一线格式，真台活证=本场景 B2）。本文件按其自身维护
 # 契约（「S0 钉死真端点后若真形不同，改本文件假回执常量即可，判定语义不变」）对齐夹
-# 具——**判定语义逐腿保持，不改任何判定口径**：
+# 具——**判定语义逐子用例保持，不改任何判定口径**：
 #   健康→exit0+回执双空；pending/failed→非零且点名 id 与状态词；畸形→绝不许全绿；
 #   拒连→exit2 环境红；只读→方法白名单（typert RPC 本质只读，读「只准清单查询这一
 #   条方法、零其它路径」——字面 GET-only 是 S0 前假设的形态残留）；部分清单→判定所据
@@ -45,7 +45,7 @@
 #         已跑**（C1 挂接活性观测——探针随冷启动运行、回执随租约 JSON 打印；健康复用
 #         的热 ensure 回显同一回执，观测不灭），热复用台 `ensure --check-plugins`
 #         exit 0（升格旗标健康台不误伤），`plugins --project <own> --assert` exit 0
-#         零 pending 零 failed（真台活体腿=验收②实锤，自含不依赖共享台）。锚「跑过
+#         零 pending 零 failed（真台活体子用例=验收②实锤，自含不依赖共享台）。锚「跑过
 #         且可见」非措辞。为什么不在共享供给台上 ensure：共享台租约/心跳属于启动它的
 #         进程，台面归属别的泳道（arbitrate 20260918 实录：租约 owner_root=邻票泳道），
 #         对共享台项目名跑 ensure 有收容/重启动别人台面的风险——共享台只做只读查询。
@@ -60,7 +60,7 @@
 #         implement gen3 实测：owner=t260917-09 的旧租约在、容器零在册）；台面
 #         **回话之后**的红（pending/failed/malformed/rpc_error）才是产品 FAIL，
 #         不回答≠回答得红，两态不互冒；
-#      B3 无独立腿：升格旗标负形由 A2/A3 同一判定路径守（--check-plugins 健康台腿
+#      B3 无独立子用例：升格旗标负形由 A2/A3 同一判定路径守（--check-plugins 健康台子用例
 #         并入 B1 热复用段）。
 #
 # 三态（t260904-12）：末行 SUMMARY pass/fail/env_fail/na；fail>0 或全 na=exit 1；
@@ -80,7 +80,7 @@ REPO = Path(__file__).resolve().parents[2]
 # 锁根与供给契约对齐（t260916-26 arbitrate 20260918）：verify.yaml integration.supply
 # 的搭台/查台同一锁根（${SANDBAR_STAGE_LOCK_DIR:-/tmp/sandbar-test-stages}）。场景不
 # 显式对齐时 stage_docker 落到降级默认锁根，共享台租约永远不可见——B2「真台活体加演」
-# 腿结构性 env_fail（arbitrate 实锤：同机同台在跑，对齐锁根后探针 exit0 零 pending 零
+# 子用例结构性 env_fail（arbitrate 实锤：同机同台在跑，对齐锁根后探针 exit0 零 pending 零
 # failed，此前 walkthrough 把这误归因为「锁根互不可见」）。显式 env 仍优先（setdefault）。
 os.environ.setdefault("SANDBAR_STAGE_LOCK_DIR", "/tmp/sandbar-test-stages")
 STAGE_CLI = ["python3", str(REPO / "integration" / "stage_docker.py")]
@@ -153,7 +153,7 @@ def extract_json(text):
 class FakeConsole:
     """注入式假 console：POST typert 线型（S0 对齐，见头注）——对
     /api/pluginInventory/list 回 {type:"server-response",rpcId,result} 信封；raw_body=True
-    时回 200 + 非 JSON 体（A4 畸形腿）。记录 (method, path, body) 供只读性断言。"""
+    时回 200 + 非 JSON 体（A4 畸形子用例）。记录 (method, path, body) 供只读性断言。"""
 
     def __init__(self, entries, raw_body=False):
         self.entries = entries
@@ -245,7 +245,7 @@ def main():
     rc0, out0, err0 = run_cli(["plugins"], timeout=60)
     present = not plugins_missing(rc0, out0, err0)
     check("A0 plugins 子命令在场（stage_docker.py）", present,
-          "子命令未落地——A 面各腿显式点名红" if not present else "")
+          "子命令未落地——A 面各子用例显式点名红" if not present else "")
     present = present and "未知旗标" not in (out0 + err0)  # 裸探针不应报旗标错
 
     def absent(label):
@@ -281,7 +281,7 @@ def main():
 
     # A4 回执畸形（200 + 非 JSON 体）→ 非零 + 点名解析/畸形
     # 报错精确纪律：畸形回执若被归因为 unreachable（不可达），把诊断引向网络面——
-    # 本腿红 = 落地实现的归因缺陷（walkthrough 20260918 实锤，见验收报告）。
+    # 本子用例红 = 落地实现的归因缺陷（walkthrough 20260918 实锤，见验收报告）。
     for fc, url in with_server(None, raw_body=True):
         if not present:
             absent("A4 非 JSON 回执→非零且点名畸形")
@@ -412,7 +412,7 @@ def main():
     elif isinstance(receipt, dict) and receipt.get("reason") == "unreachable":
         # 租约写 up 但拒连=台面进程真不在场（容器带外回收/owner 换泳道后旧租约
         # 残留——arbitrate 20260918 KI 候选③实锤：本轮实测租约 owner 已从
-        # t260916-25 换到 t260917-09 而容器零在册）。归位本腿头注声明的环境面：
+        # t260916-25 换到 t260917-09 而容器零在册）。归位本子用例头注声明的环境面：
         # 拒连=ENV_FAIL 点名；台面**回话之后**的任何红（pending/failed/malformed
         # /rpc_error）仍走下方产品 FAIL——不回答≠回答得红，两态不互冒。
         env_fail("B2 共享供给台拒连（租约 up 而台面不在——环境面：台真缺席/租约陈旧，不假红不假绿）",

@@ -376,7 +376,7 @@ async function runBrowser(pw, browser) {
         gateOk && /签什么/.test(dText2) ? '去签字→落人门「签什么」段（review 锚点衔接）'
           : `去签字→未落签什么段：${anchorEvidence || `gate=${gateOk} text=${dText2.slice(0, 100)}`}`)
     } else {
-      record('S1 review-anchor', 'na', '无「去签字→」钮可点（前腿已红）')
+      record('S1 review-anchor', 'na', '无「去签字→」钮可点（前子用例已红）')
     }
 
     // ⑦ 签字 POST 带 gate（工作台同款通道零旁路的数据面）
@@ -398,10 +398,10 @@ async function runBrowser(pw, browser) {
       record('S1 sign-post-gate', gateOk ? 'pass' : 'fail',
         gateOk ? `签字 POST 带 gate=inspection-close&decision=approve（${detailMsg}）` : `签字 POST 未按契约带 gate/decision：${detailMsg}`)
     } else {
-      record('S1 sign-post-gate', 'na', '详情内未见可点的签字钮（前腿面缺失）')
+      record('S1 sign-post-gate', 'na', '详情内未见可点的签字钮（前子用例面缺失）')
     }
 
-    // ⑧ 畸形详情回执不崩（消费外部输入=不可信，畸形腿必带）
+    // ⑧ 畸形详情回执不崩（消费外部输入=不可信，畸形子用例必带）
     await page.locator('.wb-drawer .wb-close').first().click({ timeout: 3000 }).catch(() => {})
     await waitFor(async () => (await page.locator('.wb-drawer').count()) === 0, 5000)
     detailPayload = INS_DETAIL_MALFORMED
@@ -437,7 +437,7 @@ if (!consoleHealthy()) {
       try {
         await runBrowser(pw, browser)
       } catch (e) {
-        // 三态纪律：任何腿的意外异常=FAIL 落账 + SUMMARY 收口，绝不裸异常逃逸
+        // 三态纪律：任何子用例的意外异常=FAIL 落账 + SUMMARY 收口，绝不裸异常逃逸
         // （逃逸=无 SUMMARY 行，闸侧计数失真）。
         record('S1 run-browser', 'fail', `未捕获异常：${String(e).slice(0, 300)}`)
       } finally {

@@ -78,7 +78,7 @@ const DOCS_STYLE = `${DERIVE_TOKENS_CSS}
 .wb-doc-topbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--dsw-derive-border,#d0d7de); min-width:0; }
 .wb-doc-crumb { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--dsw-derive-muted,#57606a); min-width:0; overflow:hidden; }
 .wb-doc-crumb b { color:var(--dsw-derive-fg,#1f2328); font-weight:600; overflow-wrap:anywhere; }
-/* 对比度纪律（t260910-10 rework）：分隔符/键名不透明度稀释前景被 contrast 四腿扫描判红
+/* 对比度纪律（t260910-10 rework）：分隔符/键名不透明度稀释前景被 contrast 四分支扫描判红
  * （2.16–2.92 < 4.5）——改全强度主题令牌前景，不写死浅灰。 */
 .wb-doc-crumb .sep { color:var(--dsw-derive-fg,#1f2328); }
 .wb-doc-crumb-root { color:var(--dsw-derive-fg,#1f2328); font-weight:600; }

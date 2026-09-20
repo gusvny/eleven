@@ -97,10 +97,10 @@ def main():
             results = list(ex.map(_one, BURST))
         wall = time.time() - t0
         for proj, _rc, _out, err in results:
-            env_guard(err, "16 台起台腿 %s" % proj)
+            env_guard(err, "16 台起台子用例 %s" % proj)
         oks = [(p, rc) for p, rc, _o, _e in results if rc == 0]
         nonzero = [(p, rc) for p, rc, _o, _e in results if rc != 0]
-        # t260913-01 仲裁修（同族第 5 例，与 up_ok 同口径单源）：起台腿 rc 档位归类——
+        # t260913-01 仲裁修（同族第 5 例，与 up_ok 同口径单源）：起台子用例 rc 档位归类——
         # 非零全为 env(2)/conflict(3) ⇒ ENV_FAIL（prepare 型环境/并发面，not-checked，
         # 点名每台 rc）；含 fail(1)/usage(64)/执行器杀(-1) ⇒ FAIL（产品/契约面）。
         # 原实现一律 check(len(oks)==N) ⇒ 环境拒跑被记产品红（260914 实测 16 台里 2 台 rc=2）。

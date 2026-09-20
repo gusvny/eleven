@@ -216,7 +216,7 @@ function entryOf(e: Record<string, unknown> | null): { provider: string | null; 
   }
 }
 
-/** 路由表解析结果（t260910-14 读写同源；t260914-05 兜底腿退役）。 */
+/** 路由表解析结果（t260910-14 读写同源；t260914-05 兜底分支退役）。 */
 export interface ResolvedRoutesFile {
   /** ok=声明指向文件在用；decl_missing=未声明（无表）；file_missing=声明文件缺失
    *  （无表）；bad_content=声明文件解析失败（无表）。与 python
@@ -303,7 +303,7 @@ function findKeyByPrimaryDir(projectsDir: string | undefined, primaryDir: string
 }
 
 /** 路由表文件解析——UI 读写与引擎查表的同一入口（t260910-14 读写同源；
- *  t260914-05 兜底腿退役）：唯一真源=注册条目 paths.model_routes 声明指向的文件
+ *  t260914-05 兜底分支退役）：唯一真源=注册条目 paths.model_routes 声明指向的文件
  *  （~/展开/绝对路径/相对项目主目录，`..` 逃逸 fail-closed 拒收）。未声明=decl_missing
  *  无表（path=""，不回落任何仓内文件）；声明面存在性/内容缺陷由读面分态点名。 */
 export function resolveRoutesFilePath(primaryDir: string, opts: RoutesResolveOpts = {}): ResolvedRoutesFile {
@@ -337,7 +337,7 @@ export function resolveRoutesFilePath(primaryDir: string, opts: RoutesResolveOpt
 }
 
 /** 组装视图：读「声明指向的路由表」（唯一真源，t260910-14 读写同源；t260914-05
- *  兜底腿退役——未声明/声明文件缺失=无表引导态，解析失败=bad_content 点名+指纹）。 */
+ *  兜底分支退役——未声明/声明文件缺失=无表引导态，解析失败=bad_content 点名+指纹）。 */
 export async function buildRoutesView(primaryDir: string, opts: RoutesResolveOpts = {}): Promise<RoutesView> {
   const resolved = resolveRoutesFilePath(primaryDir, opts)
   const view: RoutesView = {

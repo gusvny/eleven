@@ -33,7 +33,7 @@ intent（登记于 run_scenarios.py，名 t260915-20-project-identity-realchain�
     不在其断言面；
   · t260915-12-gate-real-chain 守**调用方**项目身份闸（写操作维度），本条守**票
     归属**项目身份（SA/扫描仓维度），不同维；
-  · developer L1（resolve 三腿/守卫两腿/串键回归单测）不同层。
+  · developer L1（resolve 三子用例/守卫两子用例/串键回归单测）不同层。
 
 三态：PASS exit 0 / FAIL exit 1（产品红，缺什么点名什么）/ ENV_FAIL exit 2
 （docker 测试台/temporal CLI/temporalio 缺件=环境红点名，不假红不假绿）。
@@ -75,7 +75,7 @@ import lib_inspect as inspect_lib  # noqa: E402
 try:
     import temporalio  # noqa: F401——J4 直发 SDK 需要；缺席=环境红
 except Exception:  # noqa: BLE001
-    die_env("temporalio SDK 缺席（server/engine/.venv 不可用）——真链路腿无法执行")
+    die_env("temporalio SDK 缺席（server/engine/.venv 不可用）——真链路子用例无法执行")
 
 PRODUCER_REL = lib.PRODUCER_REL
 STATS = {"pass": 0, "fail": 0}
@@ -161,7 +161,7 @@ def precheck_temporal_cli():
                 return cand
             except OSError as e:
                 die_env("temporal CLI 软链补建失败（%s → %s）：%s" % (src, cand, e))
-    die_env("temporal CLI 缺席（%s 或 PATH，主树候选也无）——迁移重铸腿的调度自检无法执行"
+    die_env("temporal CLI 缺席（%s 或 PATH，主树候选也无）——迁移重铸子用例的调度自检无法执行"
             % cand)
 
 
@@ -372,12 +372,12 @@ def row_ids(rows):
     return [str(r.get("id") or "") for r in rows if isinstance(r, dict)]
 
 
-# ---------------------------------------------------------------- 腿
+# ---------------------------------------------------------------- 子用例
 
 def j1_dual_project(queue: str, decl_path: str, tree_a: RepoTree, tree_b: RepoTree,
                     stub_path: str = ""):
     # t260916-02：票号=t 形工单号（开票面铸造）——从 trigger 回执取真票号，
-    # 不再硬编 inspection- 旧形（旧形仍可能是历史在途票，由 legacy 只读腿辨认）。
+    # 不再硬编 inspection- 旧形（旧形仍可能是历史在途票，由 legacy 只读子用例辨认）。
     tid_a = tid_b = ""
 
     def tid_of(parsed):
@@ -548,7 +548,7 @@ def j4_unowned_guard(queue: str, decl_path: str):
     """旧调度 payload 形态直发（无 project_key 无 repo_root）→ patched worker 判
     blocked 终态并点名「无项目身份」（旁路起票残窗的守卫闸）。"""
     from inspection_flow import InspectionPeriodicInput
-    # t260916-02：inspection_ticket_id 已退役（票号=t 形由开票面铸造）；本腿守卫
+    # t260916-02：inspection_ticket_id 已退役（票号=t 形由开票面铸造）；本子用例守卫
     # 「旁路直发旧 payload」，id 用确定性旧形模拟迁移前形态，不再依赖铸号函数。
     tid = "inspection-%s-%s" % (INST_GUARD, PERIOD)
     note_started_ticket(tid)

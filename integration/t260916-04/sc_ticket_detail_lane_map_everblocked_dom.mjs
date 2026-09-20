@@ -3,30 +3,30 @@
 //
 // Intent (black-box, user perspective)：宿主打开工单详情泳道图，对「曾受阻」的段读到的是
 // **当前语义**而非「最后一条流水」——
-//   L1 复现腿（t260916-02 实证形态）：implement 段同刻双记录 done＋blocked（受保护路径闸
+//   L1 复现子用例（t260916-02 实证形态）：implement 段同刻双记录 done＋blocked（受保护路径闸
 //      拒绝落盘），其后兄弟段 design_integration_tests done（不构成推进证据）、工作流推进到
 //      run_integration_tests——该段必须画完成色（data-vis=done，绝不是当前受阻红），节点挂
 //      「曾受阻」角标（data-ever-blocked=true），悬停出经过：何时受阻（受阻条目 at）＋何因
 //      （blocked reason）＋如何解除（已解除＋推进措辞）；
-//   L2 真当前受阻腿：受阻未解除（其后无任何证据）→ 实心红语义（data-vis=blocked）且**无**
+//   L2 真当前受阻子用例：受阻未解除（其后无任何证据）→ 实心红语义（data-vis=blocked）且**无**
 //      角标；全图零误标角标（无受阻史的段绝不带 data-ever-blocked）；
-//   L3 疑难腿（保守兜底③「宁可吓人，不许漏报」）：
+//   L3 疑难子用例（保守兜底③「宁可吓人，不许漏报」）：
 //      L3a 受阻后零后续证据 → 保持当前受阻、无角标；
 //      L3b 并行兄弟陷阱：gather 里 implement 受阻后同组兄弟 design_integration_tests done
 //          ——兄弟的 done **不是** implement 的解除证据 → implement 保持红且无角标
 //          （兄弟段自身颜色走既有回退语义，非本票契约，不断言）；
 //      L3c authorized 授权条目单独不构成解除（人放了话≠活干成了，t260912-03 通道留痕）
 //          → 不亮完成色、不出角标；
-//   L4 关闭票腿（④）：closed 票的历史受阻段 → 完成色＋角标（hover 出「已解除」）；
-//   L5 重跑解除腿（E1）：本段受阻后重跑 done → 完成色＋角标（解除措辞出「重跑」或「推进」，
+//   L4 关闭票子用例（④）：closed 票的历史受阻段 → 完成色＋角标（hover 出「已解除」）；
+//   L5 重跑解除子用例（E1）：本段受阻后重跑 done → 完成色＋角标（解除措辞出「重跑」或「推进」，
 //      E1/E2 双证时不锁机制词选择，只锁「已解除」必在场）；
 //   L6 降级面：拓扑缺席回落线性步骤条时吃**同一推导**——t260916-02 实证形态在该面同样不得
 //      停留 blocked 态（stale 红消除是一处推导两处消费，不是泳道图私有）。
 //
 // 高层步骤（high-level steps）：S0 build-contract（纯 node：twin bundle 同步＋ever-blocked
 // 契约新鲜锚）→ S1 隔离测试台＋API 边界桩（page.route 拦 tickets/workflows 两路由，数据全
-// 夹具）→ 逐腿换桩（applyLeg：关抽屉→reload→进板→开抽屉）→ 断言 DOM 公开契约（wb-lm-node
-// 的 data-vis / data-ever-blocked / title；步骤条 .wb-d2-step[data-s]）→ P 卫生腿（全旅程零
+// 夹具）→ 逐子用例换桩（applyLeg：关抽屉→reload→进板→开抽屉）→ 断言 DOM 公开契约（wb-lm-node
+// 的 data-vis / data-ever-blocked / title；步骤条 .wb-d2-step[data-s]）→ P 卫生子用例（全旅程零
 // pageerror/console.error）。
 //
 // DOM 契约锚（方案 §改动清单 3 的公开 data-* 面，非内部实现）：节点 span 挂
@@ -52,7 +52,7 @@
 //   不带：t260915-05 的红灯翻译/状态卡四件/蓝卡/检查明细区断言面——非本票语义，复制即
 //   双维护（其正确性由该票自身场景守）。
 //
-// 用例设计依据（三依据穷尽）：①工单验收①②③④⑤逐条↔腿映射见 Intent；②KI-019（open，
+// 用例设计依据（三依据穷尽）：①工单验收①②③④⑤逐条↔子用例映射见 Intent；②KI-019（open，
 // 泳道图呈现失真族）：夹具 timeline 全按引擎真留痕形态编码（数组序=时序、同刻双记录、
 // phase 并行相位），本推导与既有规则 2 同一顺序契约，不新增乱序暴露面；③对外契约=泳道图
 // DOM data-* 契约＋方案 §语义口径（E1 同段 done／E2 后段非兄弟条目／E3 closed）。
@@ -60,7 +60,7 @@
 // Execution contract (t260904-12 three-state)：stdout 末行
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`；FAIL>0 或全 na → exit 1；
 // env_fail>0 → exit 2。实现段落地前 L1/L4/L5/L6/S0 新鲜锚红属预期（TDD 信号），
-// arbitrate/merge 期必须绿；**L2/L3a/L3b/L3c 保守腿任何时刻都不得红**（红=把未解除的受阻
+// arbitrate/merge 期必须绿；**L2/L3a/L3b/L3c 保守子用例任何时刻都不得红**（红=把未解除的受阻
 // 画成完成色，比 stale 红更危险——漏报）。隔离台/playwright/chromium 缺席=ENV_FAIL exit 2
 // （KI-036 点名面）。Node >= 22.18。
 
@@ -73,7 +73,7 @@ import { pathToFileURL } from 'node:url'
 const REPO = process.cwd()
 const BASE = (await ensureStageConsole()).base;
 const FID = 't26091604dom' // fixture ticket id (alnum only; never a real ticket)
-// 每腿截图落 .sandbar/screenshots/（t260916-04 UI 证据面：改动前后可对比；implement 段加，
+// 每子用例截图落 .sandbar/screenshots/（t260916-04 UI 证据面：改动前后可对比；implement 段加，
 // 截图失败不拦断言——证据尽力而为，断言面不受影响）。SANDBAR_SHOT_TAG=before|after
 // 区分改动前后两摄（同名覆盖防混淆）。
 const SHOT_TAG = process.env.SANDBAR_SHOT_TAG ? `${process.env.SANDBAR_SHOT_TAG}-` : ''
@@ -169,7 +169,7 @@ function buildContract() {
   }
   record('S0 build-contract', 'pass',
     srcFresh ? 'twin bundles in sync, ever-blocked contract fresh in bundle'
-             : 'twin bundles in sync（src 未落 ever-blocked——TDD 前段，行为腿红属预期）')
+             : 'twin bundles in sync（src 未落 ever-blocked——TDD 前段，行为子用例红属预期）')
   return true
 }
 
@@ -211,7 +211,7 @@ function detailBase(over) {
 
 const resultsThrough = (ids, gen = 1) => Object.fromEntries(ids.map(id => [id, { status: 'ok', gen }]))
 
-// L1 复现腿：t260916-02 实证形态——done＋blocked 同刻相邻，兄弟 done 在后（不构成证据），
+// L1 复现子用例：t260916-02 实证形态——done＋blocked 同刻相邻，兄弟 done 在后（不构成证据），
 // 工作流推进到 run_integration_tests（真推进证据）。
 const DETAIL_ADVANCED = detailBase({
   stage: 'run_integration_tests', stage_name: '跑集成测试', stage_state: 'running',
@@ -228,7 +228,7 @@ const DETAIL_ADVANCED = detailBase({
   gens: { create_plan: 1, review_plan: 1, implement: 1, design_integration_tests: 1, run_integration_tests: 1 },
 })
 
-// L2 真当前受阻腿：merge_check 受阻，其后无任何证据。
+// L2 真当前受阻子用例：merge_check 受阻，其后无任何证据。
 const DETAIL_REAL_BLOCKED = detailBase({
   stage: 'merge_check', stage_name: '合并检查', stage_state: 'blocked',
   blocked_reason: 'merge_check 红灯：泳道内 verify_lane code 绿灯: exit=1 red=1',
@@ -245,7 +245,7 @@ const DETAIL_REAL_BLOCKED = detailBase({
   gens: { create_plan: 1, review_plan: 1, implement: 1, design_integration_tests: 1, run_integration_tests: 1, merge_check: 1 },
 })
 
-// L3a 疑难腿·零后续：implement 受阻后无任何条目（本段无 done、无后段推进）。
+// L3a 疑难子用例·零后续：implement 受阻后无任何条目（本段无 done、无后段推进）。
 const DETAIL_NO_EVIDENCE = detailBase({
   stage: 'implement', stage_name: '实现', stage_state: 'blocked',
   blocked_reason: REASON_PROTECTED,
@@ -260,7 +260,7 @@ const DETAIL_NO_EVIDENCE = detailBase({
   gens: { create_plan: 1, review_plan: 1, implement: 1 },
 })
 
-// L3b 疑难腿·并行兄弟陷阱：implement 受阻后**同组**兄弟 design_integration_tests done
+// L3b 疑难子用例·并行兄弟陷阱：implement 受阻后**同组**兄弟 design_integration_tests done
 // （mid-gather 实况：parallel_stages 在场）——兄弟 done 不是 implement 的解除证据。
 const DETAIL_SIBLING_TRAP = detailBase({
   stage: 'implement', stage_name: '实现', stage_state: 'blocked',
@@ -279,7 +279,7 @@ const DETAIL_SIBLING_TRAP = detailBase({
   gens: { create_plan: 1, review_plan: 1, implement: 1, design_integration_tests: 1 },
 })
 
-// L3c 疑难腿·授权非解除：authorized 条目（t260912-03 引擎留痕形态：当前段、无 gen/phase）
+// L3c 疑难子用例·授权非解除：authorized 条目（t260912-03 引擎留痕形态：当前段、无 gen/phase）
 // 单独不构成解除——不亮完成色、不出角标（人放了话≠活干成了）。
 const DETAIL_AUTHORIZED_ONLY = detailBase({
   stage: 'implement', stage_name: '实现', stage_state: 'blocked',
@@ -297,7 +297,7 @@ const DETAIL_AUTHORIZED_ONLY = detailBase({
   gens: { create_plan: 1, review_plan: 1, implement: 1 },
 })
 
-// L4 关闭票腿：closed 票 + create_plan 受阻史（blocked 后本段重跑 done、全链收口）。
+// L4 关闭票子用例：closed 票 + create_plan 受阻史（blocked 后本段重跑 done、全链收口）。
 const DETAIL_CLOSED = detailBase({
   status: 'closed', stage: 'merge', stage_name: '合并', stage_state: 'done',
   results: { ...resultsThrough(['create_plan'], 2), ...resultsThrough(
@@ -317,7 +317,7 @@ const DETAIL_CLOSED = detailBase({
   gens: { create_plan: 2, review_plan: 2, implement: 1, design_integration_tests: 1, run_integration_tests: 1, merge_check: 1, merge: 1 },
 })
 
-// L5 重跑解除腿（E1）：create_plan 受阻后本段重跑 done（g2），票仍在途（非 closed）。
+// L5 重跑解除子用例（E1）：create_plan 受阻后本段重跑 done（g2），票仍在途（非 closed）。
 const DETAIL_RERUN = detailBase({
   stage: 'implement', stage_name: '实现', stage_state: 'running',
   results: { create_plan: { status: 'ok', gen: 2 }, review_plan: { status: 'ok', gen: 1 } },
@@ -450,7 +450,7 @@ function hoverHasStory(inv, id, { at, reasonFragment, mustWord, altWord }) {
   return miss.length ? `hover 经过不全（title="${story.slice(0, 160)}"，缺 ${miss.join('、')}）` : null
 }
 
-/** 换腿：改桩→reload（路由桩跨 reload 存活）→进板→开抽屉→等泳道图或步骤条渲染。 */
+/** 换子用例：改桩→reload（路由桩跨 reload 存活）→进板→开抽屉→等泳道图或步骤条渲染。 */
 async function applyLeg(page, boardIcon, detail, workflows) {
   currentDetail = detail
   currentWorkflows = workflows
@@ -469,7 +469,7 @@ async function applyLeg(page, boardIcon, detail, workflows) {
   if (!ok) throw new Error('neither lane map nor stepper rendered after row click')
 }
 
-// ---------------------------------------------------------------- 断言腿
+// ---------------------------------------------------------------- 断言子用例
 
 async function scenarioAdvanced(page) {
   return await (async () => {
@@ -637,13 +637,13 @@ async function runBrowser(pw, browser) {
       } catch (e) { await failWith(name, e) }
     }
 
-    await leg('L1 复现腿：同刻 done+blocked 已推进解除（完成色+角标+经过）', 'L1-advanced', DETAIL_ADVANCED, [WF_DEVLANE], scenarioAdvanced)
+    await leg('L1 复现子用例：同刻 done+blocked 已推进解除（完成色+角标+经过）', 'L1-advanced', DETAIL_ADVANCED, [WF_DEVLANE], scenarioAdvanced)
     await leg('L2 真当前受阻：未解除保持受阻语义且全图零角标', 'L2-real-blocked', DETAIL_REAL_BLOCKED, [WF_DEVLANE], scenarioRealBlocked)
-    await leg('L3a 疑难腿：受阻后零后续证据保持受阻（保守③）', 'L3a-no-evidence', DETAIL_NO_EVIDENCE, [WF_DEVLANE], scenarioNoEvidence)
-    await leg('L3b 疑难腿：并行兄弟 done 不构成推进证据', 'L3b-sibling-trap', DETAIL_SIBLING_TRAP, [WF_DEVLANE], scenarioSiblingTrap)
-    await leg('L3c 疑难腿：authorized 单独不构成解除', 'L3c-authorized', DETAIL_AUTHORIZED_ONLY, [WF_DEVLANE], scenarioAuthorizedOnly)
-    await leg('L4 关闭票腿：closed 票历史受阻段完成色+角标', 'L4-closed', DETAIL_CLOSED, [WF_DEVLANE], scenarioClosed)
-    await leg('L5 重跑解除腿：本段 done 解除（E1）角标+经过', 'L5-rerun', DETAIL_RERUN, [WF_DEVLANE], scenarioRerun)
+    await leg('L3a 疑难子用例：受阻后零后续证据保持受阻（保守③）', 'L3a-no-evidence', DETAIL_NO_EVIDENCE, [WF_DEVLANE], scenarioNoEvidence)
+    await leg('L3b 疑难子用例：并行兄弟 done 不构成推进证据', 'L3b-sibling-trap', DETAIL_SIBLING_TRAP, [WF_DEVLANE], scenarioSiblingTrap)
+    await leg('L3c 疑难子用例：authorized 单独不构成解除', 'L3c-authorized', DETAIL_AUTHORIZED_ONLY, [WF_DEVLANE], scenarioAuthorizedOnly)
+    await leg('L4 关闭票子用例：closed 票历史受阻段完成色+角标', 'L4-closed', DETAIL_CLOSED, [WF_DEVLANE], scenarioClosed)
+    await leg('L5 重跑解除子用例：本段 done 解除（E1）角标+经过', 'L5-rerun', DETAIL_RERUN, [WF_DEVLANE], scenarioRerun)
     await leg('L6 降级面：拓扑缺席步骤条吃同一推导（stale 红消除）', 'L6-fallback', DETAIL_NO_TOPO, [WF_NO_TOPO], scenarioFallbackNoTopo)
 
     const hygieneDetail = `pageerrors=${pageErrors.length} consoleErrors=${consoleErrors.length}` +

@@ -24,7 +24,7 @@ const fx = await makeFixture()
 try {
   const call = fx.drive(fx.repoA)
 
-  // ── 腿A 无参回落：默认仓链，resolved.source='default' ──
+  // ── 子用例A 无参回落：默认仓链，resolved.source='default' ──
   let noParamRoot = null
   {
     const r = await call(EPICS_PREFIX, EPICS_PREFIX)
@@ -36,7 +36,7 @@ try {
     j.ok(noParamRoot === fx.repoA, `resolved.root=默认仓根（实得 ${JSON.stringify(noParamRoot)}）`)
   }
 
-  // ── 腿B sandbar key 等价：注册表路径 root 与回落链逐字节一致（零回归闸） ──
+  // ── 子用例B sandbar key 等价：注册表路径 root 与回落链逐字节一致（零回归闸） ──
   {
     const r = await call(EPICS_PREFIX, `${EPICS_PREFIX}?project=sandbar`)
     j.ok(r.status === 200, `?project=sandbar → 200（实得 ${r.status}）`)
@@ -44,7 +44,7 @@ try {
     j.ok(r.body?.resolved?.root === noParamRoot, `注册表解析根与无参回落根逐字节一致（实得 ${JSON.stringify(r.body?.resolved?.root)} vs ${JSON.stringify(noParamRoot)}）`)
   }
 
-  // ── 腿C 未知 key：显式 400 且 error 点名项目键（报错精确，非「越出仓库根」） ──
+  // ── 子用例C 未知 key：显式 400 且 error 点名项目键（报错精确，非「越出仓库根」） ──
   {
     const r = await call(EPICS_PREFIX, `${EPICS_PREFIX}?project=nope`)
     j.ok(r.status === 400, `未知 key → 400（实得 ${r.status}）`)
@@ -52,14 +52,14 @@ try {
     j.ok(!(r.body?.error ?? '').includes('越出'), 'error 不伪装成穿越语义')
   }
 
-  // ── 腿D 隔离条目：显式 502 透传注册表文案（不回落默认仓=不违隔离语义） ──
+  // ── 子用例D 隔离条目：显式 502 透传注册表文案（不回落默认仓=不违隔离语义） ──
   {
     const r = await call(EPICS_PREFIX, `${EPICS_PREFIX}?project=badproj`)
     j.ok(r.status === 502, `隔离条目 → 502（实得 ${r.status}）`)
     j.ok(typeof r.body?.error === 'string' && r.body.error.includes('badproj'), 'error 透传注册表隔离文案（点名条目）')
   }
 
-  // ── 腿E env 收窄：SANDBAR_EPICS_DIR 仅回落默认仓生效，不串 per-project ──
+  // ── 子用例E env 收窄：SANDBAR_EPICS_DIR 仅回落默认仓生效，不串 per-project ──
   await fx.withEnv({ SANDBAR_EPICS_DIR: null }, async () => {
     const envEpics = join(fx.root, 'env-epics')
     await mkdir(envEpics, { recursive: true })

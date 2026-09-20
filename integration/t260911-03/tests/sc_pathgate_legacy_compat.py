@@ -4,7 +4,7 @@
 用户可感知契约：
   d 老在途票兼容——不传闸参数（老调用形状=path_gate 缺省 False，等价存量序列化
     事件缺字段）时，任何段的行为与装闸前逐字节一致：产品代码照常落盘（老票按
-    patch 门保护，不追溯）；显式 path_gate=False 同样全放行。D1 腿实现落地前
+    patch 门保护，不追溯）；显式 path_gate=False 同样全放行。D1 子用例实现落地前
     即应绿（现状行为基线，兼当本套 fixture 机械证明）。
   R1② 未知段 fail-closed——path_gate=True 而段 id 不在规则表＝拒绝落盘+
     path_gate_reason=unknown_stage+出路文案（合法出路前缀在场），绝不静默放行
@@ -123,7 +123,7 @@ def main():
         note = aa._settle_worktree_lane(lane, TICKET, "acceptance_walkthrough", 0,
                                         **d1kw)
     except Exception as e:  # noqa: BLE001
-        ok(False, "D1 腿异常（fixture 机械面破）：%s" % e)
+        ok(False, "D1 子用例异常（fixture 机械面破）：%s" % e)
     else:
         ok(note is not None and "path_gate_reason" not in note,
            "老票零干扰、回执零原因码")
@@ -141,7 +141,7 @@ def main():
                                             **({"face": "join"} if has_face else {}))
         except Exception as e:  # noqa: BLE001
             note = None
-            ok(False, "D2 腿异常：%s" % e)
+            ok(False, "D2 子用例异常：%s" % e)
         ok(note is not None and "path_gate_reason" not in note and head(lane) != before,
            "开关关=闸不存在，commit 落地")
     else:
@@ -162,7 +162,7 @@ def main():
                                             **d3kw)
         except Exception as e:  # noqa: BLE001
             note = None
-            ok(False, "D3 腿异常：%s" % e)
+            ok(False, "D3 子用例异常：%s" % e)
         if note is not None:
             ok("path_gate_reason=unknown_stage" in note, "未知段拒绝+机读原因码")
             ok("合法出路" in note, "出路文案在场（合法出路前缀）")

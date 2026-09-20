@@ -28,8 +28,8 @@ REPO = HERE.parent.parent
 POC = REPO / "server" / "engine"
 
 # —— SDK 面（t260904-12 乙段）：顶层无 temporalio 则 re-exec 进 poc venv（同 t05
-# ensure_sdk 制式），让「MergeArgs 缺字段解码」真 temporalio 腿在本机可跑，
-# 消掉此前恒 ENV_FAIL 的环境红。venv 也没有 SDK 时 _SDK_ERR 非空，腿 4 记
+# ensure_sdk 制式），让「MergeArgs 缺字段解码」真 temporalio 子用例在本机可跑，
+# 消掉此前恒 ENV_FAIL 的环境红。venv 也没有 SDK 时 _SDK_ERR 非空，子用例 4 记
 # ENV_FAIL（环境红），文案精确到两面：无模型面，纯 SDK/工具面缺失。
 sys.path.insert(0, str(HERE / "lib"))
 import fixture as fx  # noqa: E402

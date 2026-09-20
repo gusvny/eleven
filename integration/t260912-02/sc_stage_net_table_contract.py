@@ -169,7 +169,7 @@ def main():
             if slot not in used_now and slot != rendered:
                 free_slot = slot
                 break
-        if check(free_slot is not None, "找到自由槽做注入渲染腿（%s）" % free_slot):
+        if check(free_slot is not None, "找到自由槽做注入渲染子用例（%s）" % free_slot):
             rendered2, why2 = render_subnet({"SANDBAR_TEST_SUBNET": free_slot})
             check(rendered2 == free_slot,
                   "显式注入自由槽后渲染=注入值（实得 %r%s）"

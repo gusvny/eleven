@@ -4,7 +4,7 @@
 处理（钥匙插不进去），受保护路径闸与仲裁超限两条判定无出口。
 
 走查立场：用户视角独立走查，不预设「测试已全部通过」；机械口径（233 跑 / 231 过 / 1 败 / 1 环境红）
-仅作输入，关键腿自己重跑。与仲裁并行执行，本报告不为仲裁下结论。
+仅作输入，关键子用例自己重跑。与仲裁并行执行，本报告不为仲裁下结论。
 
 ## 结论：通过（status=ok）
 
@@ -12,7 +12,7 @@
   `files_changed=[]`，动作全在**供给面（docker 容器/临时锁根清理）**。累计 diff 与前两轮逐字节相同。
 - **A–F 全部满足**：机械口径本票四条在册场景**全 PASS**（16.1s / 88.5s / 14.6s / 2.5s）；本段亲跑
   lint 0/0、新场景 `pass=37 fail=0 exit=0`、引擎 UT 722 passed；F 两票 `used=1` 且 t260912-01 仍在推进。
-- **闸唯一 FAIL 已定性为起台瞬态**：`t260912-02-net-table-contract`（别票场景，engine 池）失败腿是
+- **闸唯一 FAIL 已定性为起台瞬态**：`t260912-02-net-table-contract`（别票场景，engine 池）失败子用例是
   `A 台起台 rc=0`（`up_stage` 返回非零=起台失败），本段独立复跑 **19/0 exit 0** → 瞬态，与本票零交集。
 - **环境面显著改善**：上轮 19 条环境红 → 本轮 1 条（多泳道起台窗）。上轮由死供给台连坐的 17 条
   console 依赖场景**本轮全部转绿**（`t260903-07-chat-project-tag` 9.2s、`ticket-session-restore` 19.6s、
@@ -20,10 +20,10 @@
 
 | # | 项 | 结论 | 本轮依据 |
 |---|----|------|----------|
-| A | 正腿·受保护路径（送达+消费） | 通过 | `t260913-01-authz-signal-delivery` PASS 16.1s（送达面）；`t260912-03-authz-protected-path` PASS 2.5s（消费面含 `path_gate_authz_used` 记名） |
-| B | 正腿·仲裁超限 | 通过 | `t260912-03-authz-overlimit-accept` PASS 88.5s（判决原文 + `uses≥1` + 推进 acceptance_walkthrough） |
+| A | 正用例·受保护路径（送达+消费） | 通过 | `t260913-01-authz-signal-delivery` PASS 16.1s（送达面）；`t260912-03-authz-protected-path` PASS 2.5s（消费面含 `path_gate_authz_used` 记名） |
+| B | 正用例·仲裁超限 | 通过 | `t260912-03-authz-overlimit-accept` PASS 88.5s（判决原文 + `uses≥1` + 推进 acceptance_walkthrough） |
 | C | 负锁四条（本票覆盖 5 条） | 通过 | 本段亲跑新场景 `pass=37 fail=0 exit=0`（含「载荷解析失败」与「非人审等待中」机械可辨断言）；机械口径 PASS |
-| D | 真往返守卫 | 通过（合成口径） | 两腿真信号、均在册（字面读法偏离沿用 review C6 裁定，gen1–gen3 已标注） |
+| D | 真往返守卫 | 通过（合成口径） | 两子用例真信号、均在册（字面读法偏离沿用 review C6 裁定，gen1–gen3 已标注） |
 | E | 零回归 | 通过 | 引擎三 handler 源码零 diff（累计 diff 未变）；本段亲跑 UT 722 passed；`t260912-03-authz-cli-queryable` PASS 14.6s |
 | F | 实票验证 | 通过 | 17:41 只读取证：两票各 `used=1`；t260912-01 `run_integration_tests/running`（持续推进），t260911-05 已远离 `arbitrate/blocked`（现 `implement/blocked`，历史推进由授权消费留痕锁定） |
 | — | 测试资产变更审查 | 本轮无变更 | `git diff` 与仲裁 `files_changed=[]` 双向确认为零；累计四文件保持审计后形态且机械口径全绿 |
@@ -63,10 +63,10 @@ console 族（上轮 17 连坐的全部）本轮 PASS：t260903-07-chat-project-
 
 ### 闸 blocker 定性（独立复跑）
 
-- 失败腿读源：`sc_stage_net_table_contract.py:126` `if not check(proca.returncode == 0, "A 台起台 rc=0")`
+- 失败子用例读源：`sc_stage_net_table_contract.py:126` `if not check(proca.returncode == 0, "A 台起台 rc=0")`
   —— 即 `up_stage(...services="temporal")` **起台进程返回非零**，属起台/环境面，不是断言面回归。
 - 本段同码独立复跑：`SUMMARY pass=19 fail=0 env_fail=0 na=0`，`exit 0`（含受管网段表 256 槽、两台真台
-  分配互异、归还池、畸形底座拒收等全腿）→ **该 FAIL 判为瞬态**（KI-072 同族：负载/并发下起台假红）。
+  分配互异、归还池、畸形底座拒收等全部子用例）→ **该 FAIL 判为瞬态**（KI-072 同族：负载/并发下起台假红）。
 - 与本票交集：**零**——该场景属 t260912-02 面（残台清扫/网段契约），本票 diff 未触碰 `stage_docker.py`、
   网段表或该场景；本票四条场景同轮全 PASS。
 - 唯一 ENV_FAIL 同为环境面：共享锁根 120s 内有并行泳道（t26091004-sc-4826）起台活动，闸自带「多泳道起台
@@ -102,7 +102,7 @@ console 族（上轮 17 连坐的全部）本轮 PASS：t260903-07-chat-project-
 ## 遗留与风险
 
 1. **合并面**：main 仍为 `b614392`（t260913-03 声明 `exclude_pools: engine,exclusive`），本 worktree 基于
-   `9c102d7` → 合并需先对齐。该声明使每票集测段跳过 engine 池，本票新场景与 t260912-03 三条正腿只由
+   `9c102d7` → 合并需先对齐。该声明使每票集测段跳过 engine 池，本票新场景与 t260912-03 三条正用例只由
    **每日巡检**覆盖，而巡检票 **t260913-02 当前 `acceptance_walkthrough/blocked`**；建议人审裁定「写集命中
    `server/engine/` 时是否强制全跑」——本段只报观察。
 2. **合并冲突线索**：并行票 t260912-01 获授权改 `integration/baselines/sc_capture_chat_active.mjs`（其 `uses`

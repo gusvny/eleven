@@ -87,7 +87,7 @@ export function writeQuarantinedDir(root, key) {
 }
 
 /** 宿主侧 CLI 子进程 env（t260904-19 起控制台在容器里，本 env 只管场景自己 spawn
- *  的 sandbar CLI 降级腿：Temporal=死端口锚）。 */
+ *  的 sandbar CLI 降级子用例：Temporal=死端口锚）。 */
 export function benchEnv(tmpHome, projectsRoot) {
   const env = { ...process.env, DSH_HOME: tmpHome, SANDBAR_PROJECTS_DIR: projectsRoot };
   delete env.SANDBAR_PROJECTS_YAML;
@@ -129,7 +129,7 @@ async function buildProfile(tmpHome, laneWorkbenchDir) {
   });
 }
 
-/** 浏览器腿守卫：泳道 client build（lib/client.js）缺失或陈旧 → 拒跑（防拍旧 UI 假绿，
+/** 浏览器子用例守卫：泳道 client build（lib/client.js）缺失或陈旧 → 拒跑（防拍旧 UI 假绿，
  * capture-lane.laneBuildRejectReason 同口径）。返回 null=可跑，否则人话拒因。 */
 export async function clientBuildStalenessReason() {
   const mod = await import(pathToFileURL(path.join(REPO_ROOT, 'server', 'ui-check', 'capture-lane.mjs')).href);
@@ -140,7 +140,7 @@ export async function clientBuildStalenessReason() {
  * 自举隔离台（bench-shot bootConsole 同款 + 本票 env 注入）。
  * 返回 { port, tmpHome, projectsRoot }；失败抛错由调用方转 ENV_FAIL（缺环境=环境红，不 exit 0 假绿）。
  * opts.services：'dsh'（默认，容器内引擎地址钉死不可达回环口=降级断言面）|
- *   'full'（dsh+temporal 健康 wiring——真 Temporal 语义腿用，260908 补供给）。
+ *   'full'（dsh+temporal 健康 wiring——真 Temporal 语义子用例用，260908 补供给）。
  */
 export async function bootConsole(fixturesRoot, opts = {}) {
   // t260904-19：docker 舞台（dsh-only：容器内引擎地址钉死不可达回环口=降级断言面）。

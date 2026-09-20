@@ -163,7 +163,7 @@ def main():
         C.check(delivered, "迟写轮结果已交付（收割发生在交付之后——KI-009 时序）",
                 "err=%s" % ((err or "")[:200]))
         if not delivered:
-            C.na("迟写轮未交付（容器内 spawn 未跑通）——收割腿无被测对象，避免真空假绿")
+            C.na("迟写轮未交付（容器内 spawn 未跑通）——收割子用例无被测对象，避免真空假绿")
         else:
             gone = wait_until(lambda: F.exec_in(
                 name_l, "pgrep", "-f", "sleep 180", timeout=20).stdout.strip() == "",

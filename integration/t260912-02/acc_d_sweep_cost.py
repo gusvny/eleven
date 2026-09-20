@@ -3,11 +3,11 @@
 """t260912-02 验收 D + C4(a)：清理成本（无残台单跑 ≤5s）；清理失败上抛可见；
 存量租约 sweep --dry-run 逐条分类落证据（review C4a——260912 存量 legacy 台）。
 
-三腿：
-1. 计时腿：隔离锁根空扫 + 真拆路径 rc0，duration_s ≤5；
-2. C4(a) 证据腿：生产共享锁根 --dry-run（只判不拆），每条租约归类
-   condemned/kept/report_only/skipped/errors 之一并打印（本腿只读零副作用）；
-3. 失败可见腿：坏 docker shim（PATH 前置）+ 一条判拆租约 → sweep 非零退出、
+三子用例：
+1. 计时子用例：隔离锁根空扫 + 真拆路径 rc0，duration_s ≤5；
+2. C4(a) 证据子用例：生产共享锁根 --dry-run（只判不拆），每条租约归类
+   condemned/kept/report_only/skipped/errors 之一并打印（本子用例只读零副作用）；
+3. 失败可见子用例：坏 docker shim（PATH 前置）+ 一条判拆租约 → sweep 非零退出、
    errors 点名工程与错误原文（不得静默）。
 """
 import json
@@ -33,11 +33,11 @@ TAG = stage_tag("t26091202-d")
 
 def main():
     if not docker_present():
-        envfail("docker 缺席——清扫计时/失败可见腿不可验（C4a 证据腿仍可跑）")
+        envfail("docker 缺席——清扫计时/失败可见子用例不可验（C4a 证据子用例仍可跑）")
     root = tempfile.mkdtemp(prefix="t26091202-d-")
     ENV = {"SANDBAR_STAGE_LOCK_DIR": root}
     try:
-        # 腿1：空锁根全链计时（扫+拆零项）
+        # 子用例1：空锁根全链计时（扫+拆零项）
         t0 = time.time()
         p = cli("sweep", env_extra=ENV, timeout=120)
         dur = time.time() - t0
@@ -48,7 +48,7 @@ def main():
               % rpt["duration_s"])
         check(dur < 30, "墙钟 sanity（%.1fs）" % dur)
 
-        # 腿2：生产共享锁根 --dry-run 分类证据（C4a，只读）
+        # 子用例2：生产共享锁根 --dry-run 分类证据（C4a，只读）
         if docker_present():
             p2 = cli("sweep", "--dry-run", timeout=300)
             check(p2.returncode == 0, "存量 dry-run rc=0（rc=%s）%s"
@@ -67,7 +67,7 @@ def main():
             check(rpt2["duration_s"] <= 5.0, "存量 dry-run 扫描 ≤5s（实得 %.2fs）"
                   % rpt2["duration_s"])
 
-        # 腿3：坏 docker shim + 判拆租约 → 失败上抛可见（租约必须真落在隔离根——
+        # 子用例3：坏 docker shim + 判拆租约 → 失败上抛可见（租约必须真落在隔离根——
         # sd 原语按进程 env 解析锁根，先设 env 再写）
         saved_lock = os.environ.get("SANDBAR_STAGE_LOCK_DIR")
         os.environ["SANDBAR_STAGE_LOCK_DIR"] = root

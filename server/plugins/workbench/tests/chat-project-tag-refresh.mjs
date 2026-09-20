@@ -153,7 +153,7 @@ section('R2 装饰器订阅：外部发布 → 无 DOM 变动 → 行即刻补�
   ok(row.getAttribute(PROJTAG_ATTR) === null, 'stop：自铸属性摘除（出厂树恢复）')
 }
 
-/* ---- R3 nudge 腿：新票映射滞后 → 单次强取 → 补装 ---- */
+/* ---- R3 nudge 子用例：新票映射滞后 → 单次强取 → 补装 ---- */
 section('R3 nudge：带票号未归属 → 强取一轮 → 发布通知 → 补装')
 {
   _resetProjectTagIndex()
@@ -223,7 +223,7 @@ section('R4 nudge 有界：在途去重 / 最小间隔 / 间隔期满放行 / st
   await tick(30)
   ok(calls === afterStop, 'stop 后 nudge 不取（全终态回收）')
 
-  // 间隔期满放行腿：1ms 间隔句柄
+  // 间隔期满放行分支：1ms 间隔句柄
   _resetProjectTagIndex()
   let calls2 = 0
   const fb2 = startProjectIndexFallback({

@@ -26,7 +26,7 @@ Intent（用户可感知面，验收 1/2/3 的一张真票旅程）：
 恒 True、对在途实例恒 False——本条的 blocked→唤醒清态断言只在新建票上成立（C8 前提）。
 
 执行契约（t260910-13 三态）：stdlib 契约锁恒跑；docker/镜像/舞台/隔离台库缺供=exit 2
-ENV_FAIL（旅程腿不跑，锁已跑）；被测行为破面=exit 1。pool=engine（真起台+真 workflow）。
+ENV_FAIL（旅程子用例不跑，锁已跑）；被测行为破面=exit 1。pool=engine（真起台+真 workflow）。
 红线：一切 git/票写入只发生在 tempfile 夹具与一次性隔离台；对仓库工作区零写入；
 被测子进程 Temporal 地址只指一次性舞台；审计钩子自证零生产面接触（7233/8233/3099）。
 """
@@ -118,7 +118,7 @@ def stdlib_locks(fail):
                "契约锁：ticket.py 投影白名单带 gens（引擎→台面跨组件缝）")
 
 
-# ---------------- docker 旅程腿（真台真票真 worker） ----------------
+# ---------------- docker 旅程子用例（真台真票真 worker） ----------------
 
 def journey(fail, bench):
     py = poc_python(bench)
@@ -154,11 +154,11 @@ def journey(fail, bench):
         snap0 = wait_stage_running(py, env, TID, worker, wlog, fail,
                                    "create_plan", 240)
         fail.check((snap0.get("meta") or {}).get("path_gate") is True,
-                   "本票 path_gate 开（dev-lane 模板默认）——闸腿前提")
+                   "本票 path_gate 开（dev-lane 模板默认）——闸子用例前提")
         rel, reason, _v = judge_violation_probe("create_plan", WRITE_SET, ticket_id=TID)
         fail.check(bool(rel), "真判定器给出必拒探针（reason=%s）" % reason)
         if not rel:
-            fail.bail("无必拒探针可造，闸腿无法成立")
+            fail.bail("无必拒探针可造，闸子用例无法成立")
         # M4 workspace 字段={type,path} dict——探针落点=path（原实现直传 dict=TypeError）
         ws0 = snap0.get("workspace")
         ws_root = ws0.get("path") if isinstance(ws0, dict) else ws0
@@ -306,7 +306,7 @@ def main():
     except SystemExit as e:
         code = e.code if isinstance(e.code, int) else 1
         if code in (2, 3):
-            print("ENV_FAIL 隔离台/镜像/台库缺供（exit %s）——旅程腿不跑，stdlib 契约锁已跑"
+            print("ENV_FAIL 隔离台/镜像/台库缺供（exit %s）——旅程子用例不跑，stdlib 契约锁已跑"
                   % code, flush=True)
         raise
     fail.finish()

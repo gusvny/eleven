@@ -1,6 +1,6 @@
 """t260913-01 sign 信号面指纹 / authorize 端到端三态（纯函数面 + boot 自检，零 Temporal）。
 
-覆盖（方案 v2 L1/L2/L3 + review C1/C2/C4/R3 的机械腿）：
+覆盖（方案 v2 L1/L2/L3 + review C1/C2/C4/R3 的机械子用例）：
   - shared.sign_face_fingerprint：形状稳定 / 幂等 / marker 在场（单一实现两端各算）；
   - marker 常量卫生：与全部模板合法 gate 值（Stage.id 全集 ∪ HUMAN_GATES ∪
     CLOSE_GATE_ID）不相交；
@@ -14,7 +14,7 @@
     refused（新 sign(authorize) 拒收）/ 基线去重 / 畸形快照（None、缺 meta、meta 非 dict、
     authorizations 非 list、条目非 dict）一律 pending 不炸（R3 读面）；
   - worker.verify_signal_transport：当前代码零问题（boot 自检绿，C4 窄效力口径）；
-  - 事故机制文档腿：旧形 Signature（无 authorize 字段）解码同载荷 → authorize 静默
+  - 事故机制文档子用例：旧形 Signature（无 authorize 字段）解码同载荷 → authorize 静默
     丢弃（属性不存在）——L1/L3 存在的理由，防后人误删防线。
 
 UT 零网络/零 Temporal/零 git；SDK 转换器经进程内 DefaultPayloadConverter 直调。
@@ -225,7 +225,7 @@ def test_verify_signal_transport_green_on_current_code():
 
 
 def test_incident_mechanism_documented_by_old_class_drop():
-    """事故机制文档腿：t260912-03 之前的旧 Signature（无 authorize 字段）解码同一
+    """事故机制文档子用例：t260912-03 之前的旧 Signature（无 authorize 字段）解码同一
     载荷 → authorize 被静默丢弃（属性不存在）→ handler getattr 默认 None → 普通签字
     路径。这是 marker/gate 标记 + boot 自检 + face 指纹三层防线存在的根据。"""
     import temporalio.converter as conv

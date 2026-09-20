@@ -20,7 +20,7 @@ auto-rework-trace 做根因级定位（namespace suyou-test 缺失 + ensureTestT
 1. **第二次 main merge（444137d）**：本票核心四文件（dsh_pin.py / worker.py /
    场景①② / 探针与夹具）**零触碰**；main 侧带入的 agent_activities.py 变更
    （85 行，inspection 族）未伤本票接线——dsh_pin 引用 15 处在位、
-   _prepare_agent_spawn@1388 在位、**UT 25 passed**（含 ⑨源码锚防接线漂移腿）。
+   _prepare_agent_spawn@1388 在位、**UT 25 passed**（含 ⑨源码锚防接线漂移子用例）。
 2. **仲裁 gen3 声称的两处测试修复未落库（显著上报）**：HEAD 提交 44956b5 仅含
    gen3 走查报告入库；`ticket-lifecycle-scenes.mjs` ensureTestTemporal 仍为
    `portOpen → return true` 单验端口（:130，报告所述 namespace describe 验真+

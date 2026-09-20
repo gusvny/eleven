@@ -16,7 +16,7 @@ intent（守护的用户可感知行为/合同，fail-closed=创建即拒收、�
 注入与异常路径。写集条目畸形形态（非串/绝对路径/../）属建票写集契约既有面
 （存量场景已守，intent 重复不另起）。
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；
-temporalio 缺失=ENV_FAIL 点名（prepare 行为腿 F4/F5），stdlib 拒收腿 F1-F3 照跑。
+temporalio 缺失=ENV_FAIL 点名（prepare 行为子用例 F4/F5），stdlib 拒收子用例 F1-F3 照跑。
 """
 import shutil
 import sys
@@ -76,8 +76,8 @@ else:
 
 # ---------- F4/F5：prepare 异常路径（temporalio 面） ----------
 if not temporalio_available():
-    env_fail("temporalio 不可用（本泳道无 venv）：prepare 异常路径腿（F4/F5）不可执行——"
-             "stdlib 拒收腿已在本场跑完；arbitrate/merge 期 venv 环境必须全绿")
+    env_fail("temporalio 不可用（本泳道无 venv）：prepare 异常路径子用例（F4/F5）不可执行——"
+             "stdlib 拒收子用例已在本场跑完；arbitrate/merge 期 venv 环境必须全绿")
 else:
     # F4 删仓后 prepare：failed 点名、不静默重建
     root, repos = build_multirepo_project(prefix="t260907-06-fc4-")

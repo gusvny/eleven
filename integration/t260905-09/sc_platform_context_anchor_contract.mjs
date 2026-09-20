@@ -24,8 +24,8 @@
 //   S4 每平台夹具取证来源注在文（%%% 尾注非空——取证来源可追溯）。
 //
 // Execution contract (t260904-12 三态): stdout last line
-// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`；fail>0 或全腿 na → exit 1。
-// 本条为纯静态面，无环境依赖腿（env_fail 不适用）。
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`；fail>0 或全部子用例 na → exit 1。
+// 本条为纯静态面，无环境依赖子用例（env_fail 不适用）。
 
 import { readFileSync, existsSync } from 'node:fs';
 import { loadFixtures, ANCHORS_MODULE, FOLD_MODULE, makeResults } from './lib_platform_context.mjs';
@@ -76,7 +76,7 @@ const anchorTexts = [...anchorsSrc.matchAll(/text: '([^']+)'/g)].map(m => m[1]);
     leaked ? '普通消息首行归了锚——中段提及误折防线在真源层失守' : '普通消息首行不归任何锚（误折防线在位）');
   const declared = prefixPaste && prefixPaste.anchor && anchorTexts.some(t => prefixPaste.anchor.startsWith(t));
   record('s2/prefix-paste-declared', declared ? 'pass' : 'fail',
-    declared ? '前缀粘贴声明腿：粘贴首行恰归在册锚（设计内不可分辨限制有夹具背书）'
+    declared ? '前缀粘贴声明子用例：粘贴首行恰归在册锚（设计内不可分辨限制有夹具背书）'
              : 'fx-92 首行与锚清单脱钩——声明性夹具失去锚定，前缀误折限制声明失效');
 }
 

@@ -22,7 +22,7 @@
 //
 // Execution contract (t260904-12 三态): stdout last line
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; missing deps → env_fail
-// (exit 2); FAIL>0 或全腿 na → exit 1. Isolated console
+// (exit 2); FAIL>0 或全部子用例 na → exit 1. Isolated console
 // SANDBAR_TEST_CONSOLE (default: lib_stage_console 共享台); hard guard: never 3099.
 
 import { STAGE_SEED_ROW_SEL } from '../lib_stage_console.mjs';
@@ -99,7 +99,7 @@ try {
     record('t2/new-tab-appears', 'pass');
   } catch {
     record('t2/new-tab-appears', 'fail', '点 + 后 20s 内项目行未出现新 tab');
-    record('t2/band-appears', 'env_fail', '前置失败（前腿失败连带，环境/夹具面）');
+    record('t2/band-appears', 'env_fail', '前置失败（前子用例失败连带，环境/夹具面）');
   }
   if (expectKey === null) {
     record('t2/band-appears', 'env_fail', `组头「${groupName}」无法映射到 projects API key（映射面变异）`);

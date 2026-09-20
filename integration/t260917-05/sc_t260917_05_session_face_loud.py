@@ -16,7 +16,7 @@ root logger 捕获；零网络零 docker）：
  C 混合态（好+坏各一）→ 金额只来自好文件，format_suspect 与坏文件点名仍在场
    （部分降级不静默）；
  D 刚启动边界（有事件无 usage / 空档 / 纯空行）→ 保留既有「无 usage 事件」人话、
-   不冤枉格式（防误报方向的对抗腿）；
+   不冤枉格式（防误报方向的对抗子用例）；
  E 发现集空而目录有他票三层/旧扁平/未知名三样 → 三类分流点名（他票与旧代=未入
    统计、未知名=疑似 dsh 版本不匹配）+ suspect_unmatched 注记；
  F 点名单封顶（30 个未知名档）→ 名单有界不膨胀（settle note 进不可变账本，
@@ -89,7 +89,7 @@ def main() -> int:
         return EXIT_ENV
     work = tmp_dir("sc-t26091705-face-")
 
-    # ---- 腿 A：双名+健康样本（T1 双名回归锚：金额并、他票不混、note 干净）----
+    # ---- 子用例 A：双名+健康样本（T1 双名回归锚：金额并、他票不混、note 干净）----
     wt = work / "wtA"
     sess_put(wt, ("slugA", TICKET, "session.jsonl.zstd"), zstd_bytes(healthy_lines(10, 20, 5)))
     sess_put(wt, ("slugA", TICKET + "-developer", "session.jsonl.zstd"), zstd_bytes(healthy_lines(1, 2, 3)))
@@ -101,7 +101,7 @@ def main() -> int:
     f.check(not tokens.get("format_suspect") and not tokens.get("suspect_unmatched"),
             "A3 健康聚合无任何 suspect 注记")
 
-    # ---- 腿 B：坏格式（解压成功、内容不可解析）→ 票面例句响亮 ----
+    # ---- 子用例 B：坏格式（解压成功、内容不可解析）→ 票面例句响亮 ----
     wt = work / "wtB"
     sess_put(wt, ("slugB", TICKET, "session.jsonl.zstd"),
              zstd_bytes([b"ce n'est pas json\nnope neither is this\n"]))
@@ -113,7 +113,7 @@ def main() -> int:
     f.check(tokens["in"] == 0 and tokens.get("tokens_zero") is True,
             "B4 tokens 记零但注记在场（0 但非静默 0）")
 
-    # ---- 腿 C：混合态（好+坏）→ 部分降级不静默 ----
+    # ---- 子用例 C：混合态（好+坏）→ 部分降级不静默 ----
     wt = work / "wtC"
     sess_put(wt, ("slugC", TICKET, "session.jsonl.zstd"), zstd_bytes(healthy_lines(7, 0, 0)))
     sess_put(wt, ("slugC", TICKET + "-badsoup", "session.jsonl.zstd"), zstd_bytes([b"garbage line\n"]))
@@ -123,7 +123,7 @@ def main() -> int:
     f.check("badsoup" in note and "格式不认识" in note, "C3 note 仍点名坏文件（坏档不因好档有数被吞）")
     f.check(tokens.get("tokens_zero") is False, "C4 好文件 usage 在场 → 非零态保持")
 
-    # ---- 腿 D：刚启动边界（有事件无 usage/空档/纯空行）→ 不冤枉格式 ----
+    # ---- 子用例 D：刚启动边界（有事件无 usage/空档/纯空行）→ 不冤枉格式 ----
     wt = work / "wtD"
     sess_put(wt, ("slugD", TICKET, "session.jsonl.zstd"),
              zstd_bytes([line({"type": "session", "version": 0, "id": "s", "createdAt": 1}),
@@ -136,7 +136,7 @@ def main() -> int:
     f.check(tokens.get("tokens_zero") is True, "D3 tokens_zero 注记照旧")
     f.check(not tokens.get("format_suspect"), "D4 无 format_suspect（非格式违约）")
 
-    # ---- 腿 E：发现集空而目录有会话样文件 → 三类分流点名 ----
+    # ---- 子用例 E：发现集空而目录有会话样文件 → 三类分流点名 ----
     wt = work / "wtE"
     sess_put(wt, ("eslug-other", "t9999-99", "session.jsonl.zstd"), zstd_bytes(healthy_lines()))
     sess_put(wt, ("eslug-old", "session-0425.zstd"), zstd_bytes(healthy_lines()))
@@ -150,7 +150,7 @@ def main() -> int:
     f.check(tokens["in"] == 0 and tokens.get("tokens_zero") is True,
             "E5 统计仍零但点名在场（非静默）")
 
-    # ---- 腿 F：点名单封顶（30 个未知名档）→ 名单有界不膨胀 ----
+    # ---- 子用例 F：点名单封顶（30 个未知名档）→ 名单有界不膨胀 ----
     wt = work / "wtF"
     names = ["fcap-%02d" % i for i in range(30)]
     for i, nm in enumerate(names):
@@ -160,7 +160,7 @@ def main() -> int:
     f.check(tokens.get("suspect_unmatched") is True, "F1 suspect_unmatched 在位")
     f.check(0 < hit < 30, "F2 点名单有界（30 个未知名只列部分、hit=%d；全列=撑爆不可变账本）" % hit)
 
-    # ---- 腿 G：检疫盲区 → 未知名 warning 点名、不挪不解析 ----
+    # ---- 子用例 G：检疫盲区 → 未知名 warning 点名、不挪不解析 ----
     dsh = work / "dshhome"
     good = put(dsh, ("sessions", "gslug", TICKET, "session.jsonl.zstd"), zstd_bytes(healthy_lines()))
     newg = put(dsh, ("sessions", "gslug-new", "x9", "session.jsonl.zst"), zstd_bytes([b"whatever\n"]))
@@ -194,7 +194,7 @@ def main() -> int:
     f.check(all("gslug-old" not in m for m in msgs),
             "G4 旧扁平=已知旧代不被点名（不喊狼）")
 
-    # ---- 腿 H：TS 半（workbench 用量/发现面）同构判据——node 子进程直调 ----
+    # ---- 子用例 H：TS 半（workbench 用量/发现面）同构判据——node 子进程直调 ----
     if shutil.which("node") is None:
         print("ENV_FAIL: node 缺席（TS 半直调需要 node>=22.18 type-stripping，环境缺供）")
         return EXIT_ENV

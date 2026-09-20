@@ -62,7 +62,7 @@ def load_rs():
 def run_main(rs, scenarios):
     """被测面=执行器结算计数；docker 卫生与本票无关，桩掉（隔离 + 秒级）。
     260913 merge 后执行器起跑有**两处** preflight（t260910-14 `_docker_hygiene` +
-    t260912-02 `_sweep_residue_stages`）——一并桩掉，否则 docker 完备宿主上每腿
+    t260912-02 `_sweep_residue_stages`）——一并桩掉，否则 docker 完备宿主上每子用例
     真跑 sweep（单次超时上限 300s）会把本回归拖爆。"""
     rs.SCENARIOS = list(scenarios)
     rs._docker_hygiene = lambda: None
@@ -169,7 +169,7 @@ ok(bool(smry) and scen is not None and smry.get("ran") == scen["ran"]
    and smry.get("pass") == scen["pass"],
    "S1h 畸形行不计数、两行一致", (scen, smry))
 
-# ---------------- S2 闸同款解析腿：闸候选=本层综合行，无嵌套名 ----------------
+# ---------------- S2 闸同款解析子用例：闸候选=本层综合行，无嵌套名 ----------------
 rs = load_rs()
 code, out = run_main(rs, [LEAK_FAIL])
 cands, malformed = gate_candidates(out)
@@ -208,7 +208,7 @@ ok(code == 1, "S3a 灌水（明细多 1ran+1pass）→ rc=1 谎报必红", "rc=%
 ok("FAIL [__executor__]" in out, "S3a' 分叉点名 FAIL [__executor__]（不静默）", out[-300:])
 
 # S3b 漏收：首条综合行解析丢弃 → 明细 ran<rc ran（双桩：单条目漏收落在声明的
-# 降级路径里，明细空=回落旧计数，机械不可检出——故本腿必须 ≥2 条目）
+# 降级路径里，明细空=回落旧计数，机械不可检出——故本子用例必须 ≥2 条目）
 rs = load_rs()
 _orig_parse = fp.parse_spec_line
 _state = {"n": 0}
@@ -268,7 +268,7 @@ ok("FAIL [__executor__]" in out,
    "S3d 行翻转 pass×退出1 → 明细与计数分叉必被点名（产品红在场）", out[-300:])
 
 # ---------------- S3e _counts_mismatch 纯函数单元三态（t260912-01 方案 #3） ----------------
-# 与 S3a/b/c/d 的全管线腿互补：helper 直调三态锁「分叉识别」本身，不依赖管线组装。
+# 与 S3a/b/c/d 的全管线子用例互补：helper 直调三态锁「分叉识别」本身，不依赖管线组装。
 # K3 降级边界在案：明细为空（含单条目独苗被漏收）= 声明降级面——INTEG_SUMMARY 走
 # rc 回落支路、helper 返 None 不判红；此时执行器 stdout 上的综合行仍在、闸侧独立
 # recount 与 rc 计数一致，不构成谎报面。故漏收可机械检出的前提=明细非空且 ran<rc

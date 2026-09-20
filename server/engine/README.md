@@ -466,7 +466,7 @@ spawn、console 插件的 cwd 指向引擎自身，标识「被调用的引擎�
 - 目标快照/SA **瞬时读取失败≠越权**（KI-025）：可重试的 `kind=transient` 结构化拒收，
   绝不 fail-open 放行 terminate；不存在=`kind=not_found`。
 - **undeclared 策略翻 A（拒收）路径**：改 `shared.UNDECLARED_POLICY` 一处常量
-  （`record`→`refuse`），并同步改两处场景（`t260915-12-cross-project-gate` 的策略锁腿、
+  （`record`→`refuse`），并同步改两处场景（`t260915-12-cross-project-gate` 的策略锁子用例、
   `t260915-12-gate-real-chain` 相七）与本节——**前提=跟进插件票把 dsh 会话/工作台的
   身份注入收口做完**（否则 console/工具链写面会从放行变硬拒，静默行为反转）。未收口前
   B 策略是现状契约，被场景钉住。
@@ -515,7 +515,7 @@ spawn、console 插件的 cwd 指向引擎自身，标识「被调用的引擎�
   key；enabled 与否都不豁免——无身份的占位实例=无主票预定席）。与
   `schedule.project_key`（every-n-tickets/race-first 的**计数源**键）是两个字段：
   实例级=归属、schedule 级=计数取数面，绝不互串。解析单点=inspection_decl.py，
-  校验在实例字段链最后（既有负腿事由照旧先爆）；缺身份/形状畸形 → fail-closed
+  校验在实例字段链最后（既有反用例事由照旧先爆）；缺身份/形状畸形 → fail-closed
   点名实例 id，绝不静默回落引擎仓。
 - **起票面（SA 盖章三路）**：手动 `trigger`、cron 调度（`schedule-up` 的 create 与
   update 两分支）、计数 watcher 开票 activity——三路起票一律
@@ -526,7 +526,7 @@ spawn、console 插件的 cwd 指向引擎自身，标识「被调用的引擎�
   payload/SA，t260913-02 只修 create 侧的同族坑）。
 - **扫描面（repo_root 解析链）**：`--repo-root` 显式旁路优先（隔离台/运维用）；
   否则按实例身份经 `shared.resolve_project_root` 解析注册条目主目录（契约
-  「项目根=dirs[0]」，与 resolve_epics_dir 同注册表同取法，但**无空 key 回落腿**）。
+  「项目根=dirs[0]」，与 resolve_epics_dir 同注册表同取法，但**无空 key 回落分支**）。
   扫描与套件从此跑在归属项目的仓里。
 - **workflow 面（无主守卫）**：新 patch 门 `PROJECT_PATCH_ID`——项目身份与
   repo_root **双空**的新票 → blocked 终态点名「无项目身份」+处置入口（重跑
@@ -550,11 +550,11 @@ spawn、console 插件的 cwd 指向引擎自身，标识「被调用的引擎�
 ### 12.3 验证面
 
 - 单测：`server/engine/tests/test_t260915_20_inspection_project.py`（声明必填/形状/
-  事由次序、resolve_project_root 三态、resolve_repo_root 三腿、builder payload+SA、
-  watcher 串键回归钉、守卫两腿、sign target 链）。
+  事由次序、resolve_project_root 三态、resolve_repo_root 三分支、builder payload+SA、
+  watcher 串键回归钉、守卫两分支、sign target 链）。
 - 集成：`t260915-20-decl-project-identity`（离线声明门）+
   `t260915-20-project-identity-realchain`（docker 台：双项目各起一期票断言 SA/
-  行/payload/扫对仓路径、update 重铸腿、未知项目键负腿、无主守卫腿）。
+  行/payload/扫对仓路径、update 重铸子用例、未知项目键反用例、无主守卫子用例）。
 
 
 ## 13. 巡检声明落位迁移A（t260916-02）：每项目仓内单文件 + 票号统一工单号形式
@@ -588,8 +588,8 @@ spawn、console 插件的 cwd 指向引擎自身，标识「被调用的引擎�
   action 改指 `InspectionPeriodicSpawnWorkflow`（固定 id `inspection-spawn-<实例>`），
   到点由 activity 走 `open_period_ticket` 铸号开票。旧直发 action 的 schedule 会被
   `schedule-up` 拒绝点名重跑（`_schedule_action_summary` 认 spawner 才放行）。
-- **板面双腿查询**（client.py `cmd_ticket_list` kind=inspection）：SA 腿
-  （`InspectionInstance` OR 白名单串）+ legacy 腿（`WorkflowType=InspectionPeriodicWorkflow
+- **板面两路查询**（client.py `cmd_ticket_list` kind=inspection）：SA 查询路径
+  （`InspectionInstance` OR 白名单串）+ legacy 查询路径（`WorkflowType=InspectionPeriodicWorkflow
   AND WorkflowId STARTS_WITH "inspection-"`）；按 id 去重合并、行带 `match_via`
   （sa / legacy_id）/ `legacy_unowned`（无 ProjectKey SA=「历史票·无项目身份」徽标，
   口径⑤显式降级可辨）。R8 闭合窗施加于合并后行集。
@@ -600,7 +600,7 @@ spawn、console 插件的 cwd 指向引擎自身，标识「被调用的引擎�
 2. 或对在跑 server 手工补注册 SA（见 13.4 三路径）。
 3. **重跑 schedule-up**：`inspection_trigger.py schedule-up --note "t260916-02 迁移"`——
    旧直发 action 全部换绑 spawner；不重跑则旧调度仍按旧 payload 直发（票号旧形）。
-4. 存量在途旧形票：无需处理——legacy 腿照常上板（`match_via=legacy_id`），
+4. 存量在途旧形票：无需处理——legacy 查询路径照常上板（`match_via=legacy_id`），
    resolve 查询面兼容（SA 查无 → legacy 只读探测）。
 
 ### 13.3 去重指针生命周期（`<INSPECTION_DIR>/inspection-<实例>-<期>.ticket`）
@@ -632,14 +632,14 @@ bin/temporal operator search-attribute create --address 127.0.0.1:7233 \
 # ③ docker 测试栈：integration/stage_docker.py precheck 幂等补建（含 ProjectKey/EpicCode 共四项）
 ```
 
-**R3 归因指引**：SA 未注册时，dedup 快路径/板面 SA 腿的查询会显式失败，报错含
+**R3 归因指引**：SA 未注册时，dedup 快路径/板面 SA 查询路径的查询会显式失败，报错含
 `unknown search attribute`（开票面）或 `InspectionInstance` 字样（查询面）——这是
 **注册步未做**（配置），不是代码故障；先跑上面任一路径注册，再重试触发。
 
 ### 13.5 `STARTS_WITH` 算子降级注记（R2）
 
-legacy 腿的 `WorkflowId STARTS_WITH` 是本仓首个该算子使用（此前零先例）。若后端
-（Temporal 版本/ES 可见性配置）拒绝该算子，代码**自动降级**：类型单腿
+legacy 查询路径的 `WorkflowId STARTS_WITH` 是本仓首个该算子使用（此前零先例）。若后端
+（Temporal 版本/ES 可见性配置）拒绝该算子，代码**自动降级**：类型单路
 （`WorkflowType=InspectionPeriodicWorkflow`）拉回 + 客户端按 id 前缀过滤——过滤仍
 发生在快照查询之前（防僵尸收益不破），回执 `inspection_scan_mode=type_only_fallback`
 可观测；铸号扫描面（`scan_prefix_ticket_ids`）同款降级。降级是**既定取舍非静默换实现**；
@@ -763,7 +763,7 @@ marker 结构上不可达 stdout 回执——nusuyou/dengzhufpv 实测「写失�
   非 action 的 Running 位——下一期 fire 不再被人门挡住。旧直发 action 形态下人门长挂
   仍会占 Running 位（重定向守卫是承接种，不是占位者）。
 - **deadman 回执**（`inspection_trigger.py deadman`）：`skip_count` /
-  `running_actions` 两键（None=未查）；finding 两腿——observed（skip>0 且
+  `running_actions` 两键（None=未查）；finding 两分支——observed（skip>0 且
   Running>0 →「跳火实锤：skip 计数 N、上期 action 仍在 Running」high）优先，
   inferred（计数不可得 + missed 非空 + action 未指 spawner → med 兜底）可辨不混装；
   observed 命中即 `alarmed=true`（每天可见的告警，ops 退出码可踩）。
@@ -772,7 +772,7 @@ marker 结构上不可达 stdout 回执——nusuyou/dengzhufpv 实测「写失�
 
 - 真值表/纯函数面单测：`server/engine/tests/test_t260917_02_inspection_redirect.py`
   （形状判别/身份回退/重定向判据/period 透传）、`test_t260913_02_inspection_deadman.py`
-  （跳火两腿）、`test_t260917_02_inspection_ledger_archive.py`（归档真值表）、
+  （跳火两分支）、`test_t260917_02_inspection_ledger_archive.py`（归档真值表）、
   `test_t260915_08_inspection_board.py`（降级可见/同期同注/部分 SA 真值表）。
 - 集成场景：`integration/t260917-02/`（legacy-fire-redirect / board-unresolved-running /
   ledger-archive-regression，登记于 run_scenarios.py）。

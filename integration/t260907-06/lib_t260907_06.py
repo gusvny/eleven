@@ -5,7 +5,7 @@
 
 环境口径（三态契约，闸内环境缺失一律显式环境红）：
   stdlib 面（shared 纯函数 / git 夹具）——系统 python3 可跑，本泳道即可执行与判红绿；
-  temporalio 面（prepare_workspace / settle_lane / merge_check / merge 行为腿）——
+  temporalio 面（prepare_workspace / settle_lane / merge_check / merge 行为子用例）——
   环境缺失记 ENV_FAIL 点名并以 exit 2 收场，绝不静默略过；arbitrate/merge 期必须全绿。
 
 夹具红线：假多仓项目只在测试 tmp 目录自建（父目录 + 两个真 git init 子仓），
@@ -80,7 +80,7 @@ def _init_repo(path, message):
     git("config", "user.email", "itest@example.com", cwd=path)
     git("config", "user.name", "itest", cwd=path)
     (path / "README.md").write_text("baseline of %s\n" % path.name, encoding="utf-8")
-    # 项目声明随仓基线提交（合并闸腿要 lanes.code 在位=道开放；声明是已提交文件，
+    # 项目声明随仓基线提交（合并闸子用例要 lanes.code 在位=道开放；声明是已提交文件，
     # 不是工作区脏改——脏的写集外文件会污染白名单判定）
     (path / "verify.yaml").write_text(verify_yaml_text(), encoding="utf-8")
     git("add", "-A", cwd=path)
@@ -141,7 +141,7 @@ def verify_yaml_text():
 def call_with_supported_fields(cls, **kwargs):
     """容错调参工厂：只传该 dataclass 实际支持的字段（多仓改造会扩字段——
     断言锚行为不锚通道；通道字段（如 write_set/repo_worktrees/project_root）
-    未落地时被过滤，行为腿自然红（TDD 信号），不因签名漂移假绿/误报崩溃。"""
+    未落地时被过滤，行为子用例自然红（TDD 信号），不因签名漂移假绿/误报崩溃。"""
     import dataclasses
     names = {f.name for f in dataclasses.fields(cls)}
     return cls(**{k: v for k, v in kwargs.items() if k in names})

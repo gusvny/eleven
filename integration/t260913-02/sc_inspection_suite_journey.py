@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """t260913-02 场景②：巡检「搭泳道 → 跑全集 → 拆泳道 → 落票面」全链旅程
-（灰盒 L3，真 Temporal 私有队列真工作流；suite 腿用快夹具，免 10 分钟套件拖死）。
+（灰盒 L3，真 Temporal 私有队列真工作流；suite 子用例用快夹具，免 10 分钟套件拖死）。
 
 intent（守护的用户可感知行为/契约）：
   B1 巡检票自带「跑全集」阶段且顺序为 setup → suite → inspect → report → close
@@ -36,8 +36,8 @@ intent 分工（防 intent 级重复）：与 t260905-03-period-journey（手动
 真 workflow 编排（阶段机/票面/时序只有真链路可见）。
 
 环境：真 docker 隔离台（17233）+ 私有队列自供给 worker；缺台/缺 temporalio=ENV_FAIL
-exit 2 点名（不假绿不静默）。suite 腿走**夹具仓**（integration.cmd 恒红一行）——
-真链编排与票面证据面全验，10 分钟真套件由场景③在真仓上跑（同 intent 两腿分家：
+exit 2 点名（不假绿不静默）。suite 子用例走**夹具仓**（integration.cmd 恒红一行）——
+真链编排与票面证据面全验，10 分钟真套件由场景③在真仓上跑（同 intent 两子用例分家：
 本条验编排，③验「真全集」）。
 实现段落地前红属预期（TDD 验收门），arbitrate/merge 期必须绿。
 """
@@ -58,7 +58,7 @@ INSTANCE = "suite-journey-%05d" % STAMP
 PERIOD = "20260913"
 SIGN_WHO = "human-scenario"          # 非 agent 角色名（agent 不得自签）
 
-POLL_FACE = 180                      # 等票面成形（含套件腿）
+POLL_FACE = 180                      # 等票面成形（含套件子用例）
 POLL_GATE = 20                       # 未签不终态的观察窗（人门真拦）
 POLL_CLOSE = 180                     # 签字后等收口
 TERMINAL = "COMPLETED"
@@ -83,7 +83,7 @@ FIXTURE_SUITE_CMDS = {
 
 
 def build_fixture_repo() -> str:
-    """建夹具仓：两条夹具场景 + 恒红的 integration.cmd（suite 腿跑得快且必红）。"""
+    """建夹具仓：两条夹具场景 + 恒红的 integration.cmd（suite 子用例跑得快且必红）。"""
     root = os.path.realpath(lj.fixture_repo("suite"))
     for rel, text in FIXTURE_SUITE_CMDS.items():
         p = os.path.join(root, rel)
@@ -105,8 +105,8 @@ def build_fixture_repo() -> str:
                 "  cmd: python3 integration/sc_suite_green.py; python3 integration/sc_suite_red.py; true\n")
     with open(os.path.join(root, "integration", "run_scenarios.py"), "w", encoding="utf-8") as f:
         f.write("SCENARIOS = [\n"
-                "    ('fixture-green', '夹具绿场景（编排腿）', 'python3 integration/sc_suite_green.py', 'exclusive'),\n"
-                "    ('fixture-red', '夹具红场景（红项→发现腿）', 'python3 integration/sc_suite_red.py', 'exclusive'),\n"
+                "    ('fixture-green', '夹具绿场景（编排子用例）', 'python3 integration/sc_suite_green.py', 'exclusive'),\n"
+                "    ('fixture-red', '夹具红场景（红项→发现子用例）', 'python3 integration/sc_suite_red.py', 'exclusive'),\n"
                 "]\n")
     # 夹具仓在 fixture_repo 的「init」提交之后重写文件——再落一个提交把它收进 HEAD，
     # 使「基点=开跑时 main HEAD」与工作区干净两条断言同源（不制造部署后脏工作区）。
@@ -170,7 +170,7 @@ def main() -> int:
     lib = lj.lib
     lib.require_entry(lib.TRIGGER, "巡检触发入口")
     lib.require_entry(lib.CLIENT, "client 工单面")
-    # 隔离台探活（真链路腿无 stdlib 替代）
+    # 隔离台探活（真链路子用例无 stdlib 替代）
     _p, parsed = lib.run_client("schedule-list", {})
     if not (isinstance(parsed, dict) and parsed.get("ok") is True):
         r.env_fail("隔离台/依赖缺席", "schedule-list 未 ok：%r（docker 台 %s + temporalio；"
@@ -331,10 +331,10 @@ def main() -> int:
         os.makedirs(bad_root, exist_ok=True)
         bad_instance = "suite-badlane-%05d" % STAMP
         lj.write_decl_block(bad_decl, lj.suite_decl_entry(bad_instance, bad_root))
-        os.environ["SANDBAR_INSPECTION_DECL"] = bad_decl   # B7 腿同样：两处同源
+        os.environ["SANDBAR_INSPECTION_DECL"] = bad_decl   # B7 子用例同样：两处同源
         with lib.StageWorker(queue + "-b"):
             # implement 段实锤（探针 out/probe_badlane.py）：worker 起在 queue+"-b"，
-            # 而 trigger 子进程继承 ambient 的 SANDBAR_TASK_QUEUE=queue（上一腿的队列，
+            # 而 trigger 子进程继承 ambient 的 SANDBAR_TASK_QUEUE=queue（上一子用例的队列，
             # worker 已退出）→ 票起在无人服务的队列上 → 查询超时 → B7 假红（票面与落账
             # 其实都对，探针实测 blocked+blocked_reason 齐备）。两处必须同队列。
             os.environ["SANDBAR_TASK_QUEUE"] = queue + "-b"

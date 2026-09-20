@@ -13,7 +13,7 @@
       装后核对 package.json 版本防 dist-tag 漂移）+ 隔离 DSH_HOME 跑一次性真会话
       → 五断言。需网络 + npm + 模型凭据 + zstd CLI；分钟级。**不入默认跑分面**
       （验收④），升级门槛时显式调用。
-  --rounds N    延伸腿：同一隔离 home 连跑 N 轮会话，汇总 cacheReadTokens 观测
+  --rounds N    延伸子用例：同一隔离 home 连跑 N 轮会话，汇总 cacheReadTokens 观测
                 （矩阵 #2 开放问号）。**非门槛判据**——缓存命中是否发生依赖 provider
                 行为，观测不确定，不拦停；结论行供人工回填矩阵 #2。
   --keep        保留临时目录取证（打印路径）
@@ -35,7 +35,7 @@
   完整性：dsh 进程已退出后样本仍含坏 JSON 行/截断半行/zstd 坏帧=红（C1b，KI-059
      「撕裂→resume 必炸」族第一道网）。与引擎读侧「跳坏行」的边界：引擎容的是
      **写中尾帧**（active append），本探针验的是**已收口成品**。
-  c  沙箱不变量（矩阵 #4）：行为腿=泳道内写必须成功 + 主库 .git 模拟位越界写必须
+  c  沙箱不变量（矩阵 #4）：行为子用例=泳道内写必须成功 + 主库 .git 模拟位越界写必须
      被拒（与现状 workspace-write/ask 基线一致）；辅证=安装包内缺省策略字面
      （INVENTORY 级，minified 打包字面观测脆，不作主裁）。
   d  钉模型生效（矩阵 #3）：会话实际 provider/model == 期望路由（隔离 home 的
@@ -257,7 +257,7 @@ def check_parse_face(records, rows):
     else:
         rows.add("WARN", "b 可选面 cacheReadTokens",
                  "全样本缺席（0.1.5 该字段可选；矩阵 #2 开放问号：缓存读计数是否仍上报"
-                 "待缓存命中样本实证）——不拦停，结论供回填矩阵 #2；延伸腿 --rounds N 可深查")
+                 "待缓存命中样本实证）——不拦停，结论供回填矩阵 #2；延伸子用例 --rounds N 可深查")
 
 
 def check_record_family(records, rows):
@@ -474,7 +474,7 @@ def probe_live(version, rounds, keep, reuse_install):
             return finish(rows, tmp, keep)
         exp_provider, exp_model = route
 
-        # 延伸腿 --rounds N：同一 home 连跑 N 轮（无 resume），汇总 cacheRead 观测（不拦停）
+        # 延伸子用例 --rounds N：同一 home 连跑 N 轮（无 resume），汇总 cacheRead 观测（不拦停）
         total_rounds = max(1, rounds)
         cache_seen = []
         for i in range(total_rounds):
@@ -484,12 +484,12 @@ def probe_live(version, rounds, keep, reuse_install):
                                                  tmp / "escape-main-repo" / ".git" / "probe_escape.txt"),
                                   tmp / ("session_round%d.log" % (i + 1)))
             if err:
-                rows.fail("c 行为腿会话", "第 %d 轮：%s" % (i + 1, err))
+                rows.fail("c 行为子用例会话", "第 %d 轮：%s" % (i + 1, err))
                 continue
             if rc != 0:
-                rows.fail("c 行为腿会话", "第 %d 轮 agent 退出码 %s≠0（日志 %s）" % (i + 1, rc, tmp / ("session_round%d.log" % (i + 1))))
+                rows.fail("c 行为子用例会话", "第 %d 轮 agent 退出码 %s≠0（日志 %s）" % (i + 1, rc, tmp / ("session_round%d.log" % (i + 1))))
             check_session_bundle(home_dir / "sessions", exp_provider, exp_model, rows)
-            # 行为腿只对第 1 轮判（后续轮会重复写同文件，判据失真）
+            # 行为子用例只对第 1 轮判（后续轮会重复写同文件，判据失真）
             if i == 0:
                 check_sandbox_behavior(lane_dir, tmp / "escape-main-repo", prefix_dir, rows)
             for u in (usage_of(r) for r in parse_session_bundle(home_dir / "sessions")[0]):
@@ -499,10 +499,10 @@ def probe_live(version, rounds, keep, reuse_install):
                 break  # 首轮已红：后续轮只会在红面上重复，省时退出
         if total_rounds >= 2:
             if cache_seen:
-                rows.add("INVENTORY", "延伸腿 cacheRead 实证", "%d 轮中出现正值 %r → 缓存读计数仍上报（矩阵 #2 问号可闭合）"
+                rows.add("INVENTORY", "延伸子用例 cacheRead 实证", "%d 轮中出现正值 %r → 缓存读计数仍上报（矩阵 #2 问号可闭合）"
                          % (total_rounds, cache_seen[:5]))
             else:
-                rows.add("INVENTORY", "延伸腿 cacheRead 实证",
+                rows.add("INVENTORY", "延伸子用例 cacheRead 实证",
                          "%d 轮均未观察到 cacheReadTokens>0 → 问号保持（可能无缓存命中；非破法证据，回填矩阵 #2）" % total_rounds)
         # 断言 e：resume 插件路径（同 DSH_HEADLESS_SESSION 续写同一会话文件集）
         check_resume(dsh_bin, home_dir, lane_dir, tmp, rows)
@@ -513,25 +513,25 @@ def probe_live(version, rounds, keep, reuse_install):
 
 
 def check_sandbox_behavior(lane_dir, escape_root, prefix_dir, rows):
-    """断言 c：泳道内写成功 + 主库 .git 模拟位越界写被拒（行为腿主裁）+
+    """断言 c：泳道内写成功 + 主库 .git 模拟位越界写被拒（行为子用例主裁）+
     安装包缺省策略字面（INVENTORY 辅证）。"""
     here = lane_dir / "probe_write_here.txt"
     escape = escape_root / ".git" / "probe_escape.txt"
     if here.is_file():
-        rows.add("PASS", "c 行为腿 泳道内写", "%s 落盘成功（workspace-write 授予面在）" % here.name)
+        rows.add("PASS", "c 行为子用例 泳道内写", "%s 落盘成功（workspace-write 授予面在）" % here.name)
     else:
-        rows.fail("c 行为腿 泳道内写", "%s 未落盘——比现状更严（阶段产物会写不出，矩阵 #4 破法）" % here)
+        rows.fail("c 行为子用例 泳道内写", "%s 未落盘——比现状更严（阶段产物会写不出，矩阵 #4 破法）" % here)
     if escape.exists():
-        rows.fail("c 行为腿 主库 .git 越界写", "%s 竟然可写——比现状更松（「worker 代落盘」前提失效，"
+        rows.fail("c 行为子用例 主库 .git 越界写", "%s 竟然可写——比现状更松（「worker 代落盘」前提失效，"
                   "settle 语义可能重复提交，矩阵 #4 最隐蔽破法）" % escape)
     else:
-        rows.add("PASS", "c 行为腿 主库 .git 越界写", "%s 不可写（与现状基线一致）" % escape.parent.name + "/")
+        rows.add("PASS", "c 行为子用例 主库 .git 越界写", "%s 不可写（与现状基线一致）" % escape.parent.name + "/")
     hits = subprocess.run(["grep", "-rl", "workspace-write", str(prefix_dir / "node_modules" / "@deepseek-ai")],
                           capture_output=True)
     if hits.returncode == 0:
         rows.add("INVENTORY", "c 辅证 策略字面", "安装包内出现 workspace-write 字面（缺省策略面字面在场）")
     else:
-        rows.add("INVENTORY", "c 辅证 策略字面", "安装包内未见 workspace-write 字面（可能打包形态不同；以行为腿为准）")
+        rows.add("INVENTORY", "c 辅证 策略字面", "安装包内未见 workspace-write 字面（可能打包形态不同；以行为子用例为准）")
 
 
 def check_resume(dsh_bin, home_dir, lane_dir, tmp, rows):
@@ -661,7 +661,7 @@ def main():
     ap = argparse.ArgumentParser(description="dsh 升级接缝探针（t260916-24）")
     ap.add_argument("--selftest", action="store_true", help="离线自检（金样本绿+篡改档红）")
     ap.add_argument("--version", help="live：被测 dsh 版本（必须显式钉，如 0.1.5-rc.2）")
-    ap.add_argument("--rounds", type=int, default=1, help="延伸腿：会话轮数（≥2 汇总 cacheRead 观测）")
+    ap.add_argument("--rounds", type=int, default=1, help="延伸子用例：会话轮数（≥2 汇总 cacheRead 观测）")
     ap.add_argument("--keep", action="store_true", help="保留临时目录取证")
     ap.add_argument("--reuse-install", action="store_true", help="跳过 npm 安装（复用已装前缀，调试用）")
     args = ap.parse_args()

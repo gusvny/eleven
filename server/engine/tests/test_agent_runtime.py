@@ -379,7 +379,7 @@ def test_agent_activities_接线守卫():
     assert src.count("agent_runtime.spawn_agent(") == 4
     assert "subprocess.Popen(cmd" not in src
     assert "_reap_agent_proc(proc," not in src   # 调用形态清零（定义行签名不算）
-    assert src.count("proc.reap(") == 8          # +inspect 段（超时腿 + finally 兜底）
+    assert src.count("proc.reap(") == 8          # +inspect 段（超时分支 + finally 兜底）
     assert "agent_runtime.sandbox_pin_yaml()" in src
     assert src.count("agent_runtime.remove_container(") == 2   # teardown_lane + 内联清理
     assert "agent_runtime.gc_stale_containers(" in src          # prepare_workspace 扫尾

@@ -23,7 +23,7 @@ import lib_env  # noqa: E402
 
 
 class Rec(object):
-    """腿级计数与退出收口：SUMMARY 行 + 退出码（0 全过 / 1 产品红 / 2 环境红）。"""
+    """子用例级计数与退出收口：SUMMARY 行 + 退出码（0 全过 / 1 产品红 / 2 环境红）。"""
 
     def __init__(self):
         self.passed = self.failed = self.env_failed = self.na = 0

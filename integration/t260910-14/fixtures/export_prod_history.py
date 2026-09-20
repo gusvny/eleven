@@ -65,7 +65,7 @@ async def main():
         print("PASS 夹具已落 %s（%d 字节，源=%s 生产 COMPLETED 导出）"
               % (os.path.relpath(OUT, REPO), os.path.getsize(OUT), tid))
         return 0
-    print("FAIL 三张候选票均不可用（不落夹具=场景腿三保持显式红点名）")
+    print("FAIL 三张候选票均不可用（不落夹具=场景子用例三保持显式红点名）")
     return 1
 
 

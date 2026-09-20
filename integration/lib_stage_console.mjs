@@ -246,7 +246,7 @@ export async function ensureStageConsole({ services = 'full', project = TREE_PRO
   // 260909 提速战役③终验 run K 实锤：冷台首跑时 seedFixtures 曾 fire-and-
   // forget——播种在途（未失败）而场景已开跑，先手的链头场景断言夹具票行
   // 必 env_fail（11 连ENV_FAIL即此族；热台被存量掩住，冷暴露随锁根归一
-  // 首次现形）。语义不变（播种失败仍不阻断供给、由各场景 fixture 腿点名
+  // 首次现形）。语义不变（播种失败仍不阻断供给、由各场景 fixture 子用例点名
   // env_fail），只把「在途竞态」收敛为「完成才放行」。并发 ensure 下同票
   // 竞建由 create 后的重列兜底：对方建成=本方顶补成功（幂等口径不变）。
   try {

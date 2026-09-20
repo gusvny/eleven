@@ -77,7 +77,7 @@ export interface RepoDiffSummary {
   filesTruncated: boolean
   /** 该仓被过滤掉的过程物总条数。 */
   excludedCount?: number
-  /** 该仓被过滤掉的过程物点名（上限 MAX_EXCLUDED_PATHS 条，验收 d 的「点名」腿）。 */
+  /** 该仓被过滤掉的过程物点名（上限 MAX_EXCLUDED_PATHS 条，验收 d 的「点名」子用例）。 */
   excludedPaths?: string[]
   emptyReason?: string
 }

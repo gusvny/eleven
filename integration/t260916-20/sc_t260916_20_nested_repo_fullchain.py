@@ -14,7 +14,7 @@ intent（守护的用户可感知行为/合同；nusuyou t260916-08 实案=600 �
 - 拆道守卫：teardown 前扫出未注册嵌套仓 → blocked 点名，一物不拆，对象库完好
   （`git -C <嵌套仓> rev-parse HEAD` 前后一致）；守卫自身 IO 故障 → 同样 failed
   点名（绝不静默放拆）；无嵌套仓的干净泳道拆道照旧（旧语义零回归）；
-- 负控腿：无嵌套仓的正常冲突消解照常落合并提交（守卫不误伤冲突流）；
+- 负控子用例：无嵌套仓的正常冲突消解照常落合并提交（守卫不误伤冲突流）；
   `.git` 为文件（worktree 形态）的嵌套仓同样 blocked 点名（两形态一个立场）。
 - 内联清理（defer_teardown=False 老票唯一拆道通道）同口径：落账完成后停拆、
   泳道保留=对象库可抢救。
@@ -28,7 +28,7 @@ intent（守护的用户可感知行为/合同；nusuyou t260916-08 实案=600 �
   真值/畸形输入面；本条是活动级行为面（真 git 全站点点火）。
 
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
-引擎 venv/temporalio 缺席 = ENV_FAIL exit 2 点名（本场景无 stdlib 替代腿：直调 activity）。
+引擎 venv/temporalio 缺席 = ENV_FAIL exit 2 点名（本场景无 stdlib 替代子用例：直调 activity）。
 """
 import asyncio
 import inspect
@@ -217,7 +217,7 @@ def leg_conflict_bypass(tmp):
 
 
 def leg_conflict_clean(tmp):
-    """负控腿（守卫不误伤）：无嵌套仓的正常冲突消解照常落合并提交——若守卫把
+    """负控子用例（守卫不误伤）：无嵌套仓的正常冲突消解照常落合并提交——若守卫把
     正常冲突流也拒掉，等于堵死消解回路（KI-047 家族反面）。"""
     import agent_activities as aa
     from shared import ConflictSettleArgs
@@ -323,12 +323,12 @@ def leg_teardown_blocked(tmp):
         os.chmod(dark, 0o755)
     check("TD5 守卫自身故障=fail-closed failed 点名",
           res2.ok is False and "守卫自身故障" in (res2.error or ""), repr(res2.error)[:200])
-    check("TD6 故障腿同样零拆除", lane.is_dir())
+    check("TD6 故障子用例同样零拆除", lane.is_dir())
 
 
 def leg_teardown_worktree_form(tmp):
     """.git 为**文件**的嵌套仓（worktree 形态，对象库在外部仓）→ 拆道守卫同样
-    blocked 点名（未注册=不可拆，两形态一个立场；一物不拆同腿）。"""
+    blocked 点名（未注册=不可拆，两形态一个立场；一物不拆同子用例）。"""
     import agent_activities as aa
     from shared import MergeArgs
     root = _init_repo(tmp / "tw")
@@ -368,7 +368,7 @@ def leg_inline_teardown_stop(tmp):
 
 
 def leg_clean_lane_regression(tmp):
-    """零回归腿：无嵌套仓的干净泳道，settle/merge/squash/teardown 照旧。"""
+    """零回归用例：无嵌套仓的干净泳道，settle/merge/squash/teardown 照旧。"""
     import agent_activities as aa
     from shared import MergeArgs
     root = _init_repo(tmp / "cl")
@@ -396,8 +396,8 @@ def main():
         for leg in legs:
             try:
                 leg(tmp)
-            except Exception as e:  # 单腿自身炸掉=该腿红，不拖垮其余腿
-                check("%s 腿自身异常收敛（不得以 traceback 炸掉场景）" % leg.__name__,
+            except Exception as e:  # 单子用例自身炸掉=该子用例红，不拖垮其余子用例
+                check("%s 子用例自身异常收敛（不得以 traceback 炸掉场景）" % leg.__name__,
                       False, "%s: %s" % (type(e).__name__, str(e)[:240]))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

@@ -70,12 +70,12 @@ EXIT_ENV, EXIT_CONFLICT = 2, 3
 
 
 def ensure_leg(project, rc, tail):
-    """起台腿三态归属（t260913-01 仲裁修，与 t260912-02 up_ok 同口径；单源可测）：
+    """起台子用例三态归属（t260913-01 仲裁修，与 t260912-02 up_ok 同口径；单源可测）：
     rc=0=pass；rc=2(env)/3(conflict)=ENV_FAIL（prepare 型环境/并发面，点名档位+证据）；
-    其余=FAIL（产品/契约面）。返回 'ok'|'env'|'fail'（调用方据 env 决定下游腿是否可评）。
+    其余=FAIL（产品/契约面）。返回 'ok'|'env'|'fail'（调用方据 env 决定下游子用例是否可评）。
 
     为什么：起台是 prepare 型前置面——环境拒跑记 FAIL 属三态协议违约（260914 实测：
-    6 台里 1 台 rc=2「docker compose up 失败」，被记 FAIL 并连坐下游「全部交付」腿）。
+    6 台里 1 台 rc=2「docker compose up 失败」，被记 FAIL 并连坐下游「全部交付」子用例）。
     """
     if rc == 0:
         check(True, "%s ensure 双绿（rc=0，%s）" % (project, tail))
@@ -95,7 +95,7 @@ def finish():
     sys.exit(2 if _env_failed and not _failed else (1 if _failed else 0))
 
 
-def env_guard(err, leg="腿"):
+def env_guard(err, leg="子用例"):
     """stderr 命中 daemon 资源类失败 → ENV_FAIL exit 2（点名特征），不吞产品红。"""
     if err and DAEMON_ENV_PAT.search(err):
         envfail("docker daemon 资源类失败（%s…）：%s没验成——归环境供给，清残留容器/网络后自动生效"
@@ -165,7 +165,7 @@ def can_bind(port):
 
 
 def hold_pids(project):
-    """持有腿进程观测（pgrep -f 匹配 CLI 子命令名——CLI 面是公开契约，
+    """持有子用例进程观测（pgrep -f 匹配 CLI 子命令名——CLI 面是公开契约，
     不读任何实现内部文件）。无 pgrep 或无命中返回空表。"""
     try:
         p = subprocess.run(["pgrep", "-f",
@@ -180,7 +180,7 @@ def ensure_up(project, services="temporal", timeout=600, **kw):
     """ensure 起台并归因 daemon 环境红。返回 (proc, state_json)。"""
     proc = cli("ensure", "--project", project, "--services", services,
                timeout=timeout, **kw)
-    env_guard(proc.stderr, "起台腿")
+    env_guard(proc.stderr, "起台子用例")
     return proc, last_json(proc)
 
 

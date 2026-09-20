@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """t260902-07 集成测试 ①：路由表静态校验（stdlib，无 PyYAML 依赖）。
 
-t260914-05 重写（兜底腿退役后的守卫自足化）：
+t260914-05 重写（兜底分支退役后的守卫自足化）：
 - 主判据：T07_PROJECT_KEY（缺省 "sandbar"）经 shared.resolve_routes_table 单点解析
   （真源=注册条目 paths.model_routes 声明指向的表；**不再回落仓内表**）。非 ok 态 →
   ENV_FAIL(2) 点名 state/path/error——无表环境显式红，绝不静默改读仓内表
   （「表在场但过期被静默用错」= t260914-05 要杀的毒面）；
-- 夹具自足腿：内置最小表自带 ref 清单，跑同一套性质断言——断言体系非空转的自证，
+- 夹具自足子用例：内置最小表自带 ref 清单，跑同一套性质断言——断言体系非空转的自证，
   真源缺席（ENV_FAIL）时也能单独证明本守卫的性质断言有效；
-- 真源腿（state=ok）与替代表腿（T07_TABLE_OVERRIDE）额外跑生产表专属三条
+- 真源子用例（state=ok）与替代表子用例（T07_TABLE_OVERRIDE）额外跑生产表专属三条
   （ref 清单含 zai-coding-cn / 标注 ZAI_CODING_CN_API_KEY / M10 让位于配额急救记录）。
 
 口径（260910 宿主拍板）：**路由表是运行期可调的配置——谁跑哪个模型不钉死**。
@@ -31,7 +31,7 @@ import shared  # noqa: E402
 
 # 夹具自足表：ref 清单覆盖本表全部取值（同构于生产表的「表头清单」纪律）。
 FIXTURE_TABLE = """\
-# 夹具表（t260914-05 守卫自足腿：自带 ref 清单，不依赖任何真源/仓内表）
+# 夹具表（t260914-05 守卫自足子用例：自带 ref 清单，不依赖任何真源/仓内表）
 # 【可用 ref 核实清单】（夹具实证集合，仅本夹具内有效）
 #   fx-prov / fx-model-a / fx-model-b / fx-int / fx-int-m / fx-po / fx-po-m / fx-t1 / fx-t2
 default:
@@ -137,10 +137,10 @@ def _check_table(text, label, production_extras=False):
 
 
 def main():
-    # 腿1 夹具自足（零环境依赖）：真源缺席被 ENV_FAIL 短路前，先证明断言体系有效。
+    # 子用例1 夹具自足（零环境依赖）：真源缺席被 ENV_FAIL 短路前，先证明断言体系有效。
     _check_table(FIXTURE_TABLE, "[夹具表]")
 
-    # 腿2 主判据：替代表（变异自证钩子）或真源表（声明解析，禁回落仓内表）。
+    # 子用例2 主判据：替代表（变异自证钩子）或真源表（声明解析，禁回落仓内表）。
     override = os.environ.get("T07_TABLE_OVERRIDE")
     if override:
         _check_table(Path(override).read_text("utf-8"),

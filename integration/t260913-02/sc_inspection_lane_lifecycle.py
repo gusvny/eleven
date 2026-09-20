@@ -33,7 +33,7 @@ intent 分工（防 intent 级重复）：与 t260905-03-period-journey（手动
 纯本地：tmp 真 git 仓 + 直调通用活动（零 Temporal server 零端口零 docker）。
 **零三方依赖**：闸内该条按 ro 池跑、解释器由 verify.yaml 声明（可能不是 engine venv），
 故 temporalio 缺席时走 stdlib 等价驱动（git worktree add/remove 等价实现 + 角色门谓词典面
-锁在 integration_flow 纯函数上），不因环境缺依赖把离线腿整条判死（KI-036 口径：缺环境点名
+锁在 integration_flow 纯函数上），不因环境缺依赖把离线子用例整条判死（KI-036 口径：缺环境点名
 而不假红——但本条的断言面本身不需要该依赖）。
 三态：PASS exit 0 / FAIL exit 1 / ENV_FAIL exit 2（无第四态）。
 实现段落地前红属预期（TDD 验收门），arbitrate/merge 期必须绿。
@@ -212,7 +212,7 @@ def main() -> int:
         r.env_fail("git 缺席", "本场景全程真 git 仓")
         return r.finish()
     # 三方依赖（temporalio）不是本条的断言前提：有则用真活动驱动（最接近生产的驱动面），
-    # 缺则退化到 stdlib 等价驱动并**逐腿标注**（不静默降级、不因环境缺依赖整条判死）。
+    # 缺则退化到 stdlib 等价驱动并**逐子用例标注**（不静默降级、不因环境缺依赖整条判死）。
     aa = None
     try:
         sys.path.insert(0, lj.TP_DIR)
@@ -274,7 +274,7 @@ def main() -> int:
                     "%r" % (getattr(res, "error", "") or getattr(res, "action", "")))
         else:
             ok, action, err = drive_prepare(root, wt, br, base0)
-            r.check("A2a 等价驱动（stdlib）真建 worktree（temporalio 缺席腿）",
+            r.check("A2a 等价驱动（stdlib）真建 worktree（temporalio 缺席子用例）",
                     ok and action.startswith(("created", "reused")), "%r/%r" % (action, err))
         r.check("A2b 泳道磁盘在位（.git 锚）",
                 os.path.exists(os.path.join(wt, ".git")), wt)
@@ -294,7 +294,7 @@ def main() -> int:
         r.check("A6a2 主树工作区干净且 HEAD 未移动（检出的工作副本在 .lane/，不脏主区）",
                 before_st == after_st, "%r → %r" % (before_st, after_st))
 
-        # ---------------- A3 复用语义 vs 先清后搭（对抗腿） ----------------
+        # ---------------- A3 复用语义 vs 先清后搭（对抗子用例） ----------------
         if aa is not None:
             res2 = asyncio.run(aa.prepare_workspace(WorkspacePrep(
                 ticket_id="inspection-%s-%s" % (INSTANCE, PERIOD),
@@ -361,7 +361,7 @@ def main() -> int:
             ok_t2, err_t2 = drive_teardown(root, wt, br)
         r.check("A4d 二连拆幂等（不存在＝成功，不炸不假红）", ok_t2, "%r" % err_t2)
 
-        # ---------------- A4e-腿⑤ 机器外残留 + 水位清扫（对抗：崩/取消留下的残骸） ----------------
+        # ---------------- A4e-子用例⑤ 机器外残留 + 水位清扫（对抗：崩/取消留下的残骸） ----------------
         # 造三条残留：上期（应被水位清）、同实例另一期=并发在跑（水位之后须让行）、
         # 别的实例（一律不碰）；开发泳道邻居已在场（A5 的反向观测点）。
         wt_old, br_old, _e = lane_paths(root, INSTANCE, "20260910")
@@ -442,8 +442,8 @@ def main() -> int:
         r.check("A6d 主树 worktree 注册表零巡检残留（开发泳道邻居原样）",
                 not lj.lane_worktrees(root), str(lj.lane_worktrees(root)))
 
-        # ---------------- 畸形输入腿（外部输入三态纪律） ----------------
-        # 走与 lane_paths 同一条取值路径（缺依赖时按契约形状推），保证本腿在 ro 池
+        # ---------------- 畸形输入子用例（外部输入三态纪律） ----------------
+        # 走与 lane_paths 同一条取值路径（缺依赖时按契约形状推），保证本子用例在 ro 池
         # （可能非 engine venv）也真跑；断言面=「畸形一律拿不到泳道坐标」。
         flow_fn = None
         try:

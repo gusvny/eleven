@@ -78,7 +78,7 @@ record('sb/anchor-constants', texts !== null,
 
 const pw = await loadPlaywright();
 if (!pw) {
-  record('sb/playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：真点腿环境红');
+  record('sb/playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：真点子用例环境红');
   summarize();
 }
 const { chromium } = pw;

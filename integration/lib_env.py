@@ -50,5 +50,5 @@ def fail_if_all_na(total_legs, na_legs, scenario=""):
     nothing to verify is a scenario design/coverage problem.
     total_legs = total legs in the scenario; na_legs = how many are N/A."""
     if total_legs > 0 and na_legs >= total_legs:
-        print("FAIL: 全腿 N/A——场景无可验对象（设计/覆盖问题，修场景而非补环境）%s" % scenario)
+        print("FAIL: 全部子用例 N/A——场景无可验对象（设计/覆盖问题，修场景而非补环境）%s" % scenario)
         sys.exit(1)

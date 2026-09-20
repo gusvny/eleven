@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// t260912-01 八条界面场景依赖解析统一守卫（集成 L2/L3，读源断言 + 位置无关真跑腿）。
+// t260912-01 八条界面场景依赖解析统一守卫（集成 L2/L3，读源断言 + 位置无关真跑子用例）。
 //
 // 用户可感知契约（被钉面）：八条浏览器场景在**任意泳道布局**（含 /private/tmp/<任意>
 // 这类不在 <主仓>/.lane/<票>/ 下的副本）都不得再把「布局算错」谎报成
@@ -7,7 +7,7 @@
 // lib_pw_deps.mjs 单源（git-common-dir 口径，位置无关），探测失败只许**事实点名**
 // （列出探过的候选路径），归因不得引向环境。
 //
-// 腿面：
+// 子用例面：
 //   G0  前置：git 在场（缺席=ENV_FAIL，git-common-dir 口径无处落地）；
 //   G1  读源断言：八文件逐个引用 lib_pw_deps + 禁主树位置算术/候选字面量 +
 //       禁谎言文案（措辞级禁令；泳道根 `HERE/../..` 形态是位置无关合法面，豁免）；
@@ -17,10 +17,10 @@
 //   G2  守卫自证防恒真：变异样本（主树算术/候选字面量/谎言文案）必咬、
 //       合法泳道根样本与干净样本必过；
 //   G3  双算互证：lib.mainRoot() === 直接 git rev-parse --git-common-dir 的 dirname；
-//   G4  位置无关组合路径腿（临时主仓 A + git worktree B + lib 副本）：副本的
+//   G4  位置无关组合路径子用例（临时主仓 A + git worktree B + lib 副本）：副本的
 //       mainRoot() 必指 A，loadPlaywright() 必真装载（A 软链真 playwright-core 包，
 //       旧 `../..` 算术在此布局指错目录=负面对照打印）；终态回收零残留；
-//   G5  本泳道腿：mainRoot()==主树 且 loadPlaywright() 可装载（缺席=ENV_FAIL
+//   G5  本泳道子用例：mainRoot()==主树 且 loadPlaywright() 可装载（缺席=ENV_FAIL
 //       点名真实路径——环境缺件归环境，不谎报布局）。
 //
 // 与既有 intent 分界：与 t260907-01-migration-path-hygiene（suyou 旧字面量卫生）、
@@ -160,8 +160,8 @@ if (lib && MAIN_TREE) {
   ok(got === MAIN_TREE, "G3 lib.mainRoot() === git-common-dir 双算互证", `lib=${got} git=${MAIN_TREE}`);
 }
 
-// ---------------- G4 位置无关组合路径腿（临时主仓 A + worktree B + lib 副本） ----------------
-let tmp = null, A = "", B = "";   // 预置外层：finally 回收腿在任何抛点都可达（终态纪律）
+// ---------------- G4 位置无关组合路径子用例（临时主仓 A + worktree B + lib 副本） ----------------
+let tmp = null, A = "", B = "";   // 预置外层：finally 回收子用例在任何抛点都可达（终态纪律）
 if (lib && MAIN_TREE) {
   tmp = mkdtempSync(join(tmpdir(), "t260912-01-pw-"));
   A = join(tmp, "A-main");
@@ -173,7 +173,7 @@ if (lib && MAIN_TREE) {
     (await import("node:fs")).writeFileSync(join(A, "seed.txt"), "seed\n");
     sh(["-c", "user.email=t@t.local", "-c", "user.name=t", "add", "-A"], A);
     sh(["-c", "user.email=t@t.local", "-c", "user.name=t", "commit", "-qm", "seed"], A);
-    // 真包软链进临时主仓：组合路径腿才有真依赖可装载（只读主树，不写主树）
+    // 真包软链进临时主仓：组合路径子用例才有真依赖可装载（只读主树，不写主树）
     const realPw = join(MAIN_TREE, "server", "ui-check", "node_modules", "playwright-core");
     const havePw = existsSync(realPw);
     if (havePw) {
@@ -214,7 +214,7 @@ if (lib && MAIN_TREE) {
             "G4d 组合路径真装载：loadPlaywright() 非 null（④路经 A 软链包）",
             `pwLoaded=${payload.pwLoaded} faces=${JSON.stringify(payload.faces)}`);
         } else {
-          envFail(`主树 playwright-core 缺席：${realPw}（组合路径腿无真包可链）`);
+          envFail(`主树 playwright-core 缺席：${realPw}（组合路径子用例无真包可链）`);
         }
       }
     }
@@ -235,7 +235,7 @@ if (lib && MAIN_TREE) {
   }
 }
 
-// ---------------- G5 本泳道腿 ----------------
+// ---------------- G5 本泳道子用例 ----------------
 if (lib && MAIN_TREE) {
   const mr = (() => { try { return lib.mainRoot(); } catch { return null; } })();
   ok(mr === MAIN_TREE, "G5a 本泳道 mainRoot()==主树", `mr=${mr}`);

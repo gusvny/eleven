@@ -8,20 +8,20 @@ t260917-01（373741c）在 dev_lane 仲裁段新增的 settle 闸拒直落分支
 None、worker 日志 Failing legacy query request）。main 侧紧急收口 2c1b4ee 补了常量 id
 门。本场景在 docker 测试台**精确复刻事故旅程**再用现行树断言修复契约——不依赖任何测试
 开关（main 形态无 DISABLE 开关；pre-fix 形态由更早历史代码直接构造）：
-  腿一（事故 history 形态 × 现行代码的重放＝回归闸）：`git archive 1bf8d15`（分支尚不
+  子用例一（事故 history 形态 × 现行代码的重放＝回归闸）：`git archive 1bf8d15`（分支尚不
     存在的历史代码）起 worker A 驱动票连收闸拒回执 → 旧路径把闸拒计入格式轮次（「N 次
     verdict= 标记」误导脸 blocked——这正是 -19/-21 的旅程与现形态：他们的 history 早于
     分支存在，格式脸只属于这类老历史票；373741c 出生的票当场走诚实脸，v3 试跑实证）
     → replay_check 用**现行树代码**只读回放该 history 断言 ok=true。
     机制注记（v4 实证取证）：本 history 走并行汇合路径（fork memo=True），373741c 未落
-    门时纠正腿分支（:1994）在重放中**命令巧合**——分支 continue 后重排的下一命令与旧
+    门时纠正用例分支（:1994）在重放中**命令巧合**——分支 continue 后重排的下一命令与旧
     路径重合、终局双方皆零命令 wait 任务，重放只核命令流 → 未落门树回放同样 ok=true；
     事故的命令可见分歧面在**串行仲裁分支**（fork memo=False 老票的 :1769：分支跳过本
     应发生的纠正活动命令＝事故报错「No command scheduled for event 201」形态），该面
     由 implement 段 S4（真票 -19/-21 replay_check）与 L1 源码锁承接——本条不构造上古
     ref 的串行票（老引擎兼容面过宽，脆）。落门后（main 形态：老历史无 marker→门恒
-    False→旧路径逐字）语义不变，本腿两态皆绿。
-  腿二（换代码唤醒＝事故痛点面）：换现行树 worker B → retry_qc 发信被受理（不再被
+    False→旧路径逐字）语义不变，本子用例两态皆绿。
+  子用例二（换代码唤醒＝事故痛点面）：换现行树 worker B → retry_qc 发信被受理（不再被
     Temporal 拒绝）→ 唤醒穿越老 history＋（树上已带门时）patched 求值，仲裁边真重跑 →
     票仍可查且回到连贯 blocked → replay_check 回放全 history（老历史＋换码续段）再断
     ok=true——在飞票跨代码边界的完整形态。
@@ -30,7 +30,7 @@ None、worker 日志 Failing legacy query request）。main 侧紧急收口 2c1b
 本场景断言**——main 常量 id 形态存在已知「唤醒不激活」缺陷（KI-094：在飞票首评落重放
 段 memo 固化 False，救治语义对停环票未达，follow-up 票门升级 `base#seq` per-entry），
 钉住＝把缺陷行为写进契约；patched marker 只作诊断不作断言锚（SDK 事件形态防漂移）。
-本票收敛范围（gen3 方案 S1-S5＋review R1-R5）的回放证据由腿一/腿二与 implement 段 S4
+本票收敛范围（gen3 方案 S1-S5＋review R1-R5）的回放证据由子用例一/子用例二与 implement 段 S4
 （真票 -19/-21 replay_check）双路承担。
 
 造拒刺激（披露）：桩回执 summary 直带机读键 path_gate_reason=unauthorized_path——
@@ -49,7 +49,7 @@ t260917-01 场景已除名（nestedGuard 自守），本条承接其「闸拒≠
 三态：docker/镜像/舞台缺件、git archive 归档失败＝ENV_FAIL exit 2（require_bench/
 require_stage/归档校验单点出口）；replay_check 自身基建面（results 空且 error 在场＝
 连接/取历史失败）同 ENV_FAIL exit 2（R1 三态细则：不记票红也不记票过）；回放分歧/断言
-破面＝exit 1。两腿核心对「树未落门/已落门」两态皆绿（机制见上），arb/merge 期必须绿。
+破面＝exit 1。两子用例核心对「树未落门/已落门」两态皆绿（机制见上），arb/merge 期必须绿。
 零碰 3099/7233/8233（舞台＝本场景专属一次性 docker 工程）。pool=engine。
 """
 import json
@@ -68,7 +68,7 @@ for p in (os.path.join(REPO, "integration"),
           os.path.join(REPO, "integration", "t260908-01")):
     if p not in sys.path:
         sys.path.insert(0, p)
-import lib_ki061 as lk  # noqa: E402  （spawn_worker 的 POC_DIR 走模块全局，按腿切换）
+import lib_ki061 as lk  # noqa: E402  （spawn_worker 的 POC_DIR 走模块全局，按子用例切换）
 from lib_gate import (Fail, poc_python, require_bench, require_stage,  # noqa: E402
                       run_poc_client, stage_down)
 from lib_ki061 import (arb_gens, make_fixture_repo, poll,  # noqa: E402
@@ -207,7 +207,7 @@ def main():
             f.write(ARB04_STUB)
         stub_log = os.path.join(tmp, "stub.jsonl")
 
-        # ---------- 腿一：分支尚不存在的历史代码 worker → 事故 history → 现行树只读回放
+        # ---------- 子用例一：分支尚不存在的历史代码 worker → 事故 history → 现行树只读回放
         pre_engine = _unpack_history_tree(fail, tmp, PRE_BRANCH_REF)
         lk.POC_DIR = pre_engine  # worker A 用归档树（分支不存在的历史代码；调用点读模块全局）
         wlog_a = os.path.join(tmp, "workerA.log")
@@ -215,7 +215,7 @@ def main():
                                    disable_ki061=False, arb_verdict="refusal")
         lk.POC_DIR = lane_poc  # 客户端/回放器恢复现行树（回放器带被测树的新代码＝契约另一半）
         fail.check(worker_a.poll() is None,
-                   "腿一 worker（%s 归档树＝闸拒分支尚不存在的历史代码，零开关依赖）已拉起"
+                   "子用例一 worker（%s 归档树＝闸拒分支尚不存在的历史代码，零开关依赖）已拉起"
                    " pid=%s" % (PRE_BRANCH_REF, worker_a.pid))
 
         rc, out = run_poc_client(py, "ticket-start", {
@@ -237,16 +237,16 @@ def main():
         if snap1 is None:
             wait_worker_alive(fail, worker_a, wlog_a)
             s = query_snapshot(py, env, TID)
-            fail.bail("腿一未在 420s 内到达仲裁边 blocked（现 stage=%s state=%s）——"
+            fail.bail("子用例一未在 420s 内到达仲裁边 blocked（现 stage=%s state=%s）——"
                       "历史代码 worker 未复刻事故旅程或驱动链断"
                       % (s.get("stage"), s.get("stage_state")))
         why1 = str(snap1.get("blocked_reason") or "")
         fail.check("次缺 verdict= 标记" in why1,
-                   "腿一前提：闸拒按旧路径计入格式轮次（-19/-21 现形态误导脸留证）：%s"
+                   "子用例一前提：闸拒按旧路径计入格式轮次（-19/-21 现形态误导脸留证）：%s"
                    % why1[:120])
         gens1 = arb_gens(read_stub_log(stub_log))
         fail.check(len(gens1) >= 2,
-                   "腿一前提：格式纠正真迭代过（arbitrate 派单数=%d）" % len(gens1))
+                   "子用例一前提：格式纠正真迭代过（arbitrate 派单数=%d）" % len(gens1))
 
         rc, payload = run_replay_check(py, state, TID)
         if _replay_infra_fail(payload):
@@ -255,12 +255,12 @@ def main():
         r = (payload.get("results") or [{}])
         r0 = r[0] if r else {}
         fail.check(rc == 0 and payload.get("ok") is True and r0.get("ok") is True,
-                   "腿一核心：现行树代码只读回放事故 history 零分歧 ok=true（rc=%s ok=%s "
+                   "子用例一核心：现行树代码只读回放事故 history 零分歧 ok=true（rc=%s ok=%s "
                    "r0=%s；未落门/已落门两态皆绿：join 路径分支重放命令巧合，见 docstring "
                    "机制注记）"
                    % (rc, payload.get("ok"), json.dumps(r0, ensure_ascii=False)[:300]))
 
-        # ---------- 腿二：换现行树 worker → retry_qc 唤醒（事故痛点面）→ 全 history 回放
+        # ---------- 子用例二：换现行树 worker → retry_qc 唤醒（事故痛点面）→ 全 history 回放
         worker_a.terminate()
         try:
             worker_a.wait(timeout=15)
@@ -270,10 +270,10 @@ def main():
         worker_b = lk.spawn_worker(py, TID, env, wlog_b, stub_path, stub_log,
                                    disable_ki061=False, arb_verdict="refusal")
         fail.check(worker_b.poll() is None,
-                   "腿二 worker（现行树代码）已拉起 pid=%s" % worker_b.pid)
+                   "子用例二 worker（现行树代码）已拉起 pid=%s" % worker_b.pid)
 
         rc, out = send_signal(py, state, TID, "retry_qc", "宿主")
-        fail.check(rc == 0, "腿二 retry_qc 发信被受理（rc=%s）——事故痛点面：唤醒不再被 "
+        fail.check(rc == 0, "子用例二 retry_qc 发信被受理（rc=%s）——事故痛点面：唤醒不再被 "
                             "Temporal 拒绝" % rc)
         gens_before_wake = len(gens1)
 
@@ -282,10 +282,10 @@ def main():
             return rows if len(arb_gens(rows)) > gens_before_wake else None
         if poll(_woke, 300) is None:
             wait_worker_alive(fail, worker_b, wlog_b)
-            fail.bail("腿二 300s 未见 retry_qc 后仲裁重派——换码 worker 穿越老 history 的"
+            fail.bail("子用例二 300s 未见 retry_qc 后仲裁重派——换码 worker 穿越老 history 的"
                       "任务失败或唤醒未被消费（见 workerB.log；若树上刚落门，核对门的"
                       "重放语义）")
-        fail.check(True, "腿二事故痛点面：换代码后老票仍可唤醒且仲裁边真重跑"
+        fail.check(True, "子用例二事故痛点面：换代码后老票仍可唤醒且仲裁边真重跑"
                          "（唤醒穿越老 history＋patched 求值）")
 
         def _blocked_again():
@@ -294,7 +294,7 @@ def main():
         if poll(_blocked_again, 300) is None:
             wait_worker_alive(fail, worker_b, wlog_b)
             s = query_snapshot(py, env, TID)
-            fail.bail("腿二唤醒后未在 300s 内回到连贯 blocked（现 stage=%s state=%s）"
+            fail.bail("子用例二唤醒后未在 300s 内回到连贯 blocked（现 stage=%s state=%s）"
                       % (s.get("stage"), s.get("stage_state")))
         time.sleep(10)  # 事件落定窗
 
@@ -305,7 +305,7 @@ def main():
         r = (payload.get("results") or [{}])
         r0 = r[0] if r else {}
         fail.check(rc == 0 and payload.get("ok") is True and r0.get("ok") is True,
-                   "腿二核心：全 history（老历史＋换码续段）回放零分歧 ok=true"
+                   "子用例二核心：全 history（老历史＋换码续段）回放零分歧 ok=true"
                    "（rc=%s ok=%s r0=%s）"
                    % (rc, payload.get("ok"), json.dumps(r0, ensure_ascii=False)[:300]))
 

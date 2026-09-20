@@ -4,7 +4,7 @@
 处理（钥匙插不进去），受保护路径闸与仲裁超限两条判定无出口。
 
 走查立场：用户视角独立走查，不预设「测试已全部通过」；机械口径（233 跑 / 211 过 / 1 败 / 21 环境红）
-仅作输入，关键腿自己重跑、新改动自己读源 + 变异复核。与仲裁并行执行，本报告不为仲裁下结论。
+仅作输入，关键子用例自己重跑、新改动自己读源 + 变异复核。与仲裁并行执行，本报告不为仲裁下结论。
 
 ## 结论：通过（status=ok）
 
@@ -14,7 +14,7 @@
   3300s），严格小于外层 `dev_lane.INTEG_RUN_TO`（60min=3600s）。旧值 5400+300=5700s **晚于外层**，
   导致内层的结构化超时回报是**死代码**——套件只会被 Temporal 硬杀成 `Activity task timed out
   （ran=0，无归因）`，再叠 `RETRY(3)` 白烧。这正好解释我在 gen6–gen8 连续记录的「空机械轮」。
-- **②同族起台腿归档补齐**：`integration/t260912-02/sc_stage_sweep_owner_gone.py` 起台腿改按引擎
+- **②同族起台子用例归档补齐**：`integration/t260912-02/sc_stage_sweep_owner_gone.py` 起台子用例改按引擎
   自报档位归档（rc 2/3→ENV_FAIL 带每台证据；rc 1/64→FAIL）——机械实证已由 FAIL 转 ENV_FAIL。
 - **③工作树复位**：本票 HEAD 复位（未偷渡 main 侧文件、verify.yaml 未改、写集外零改动、本票 7 项增量全在）。
 - **机械口径本票四条全 PASS**（19.1 / 92.8 / 14.9 / 3.4s），**本段亲跑全量 UT 724 passed**、lint 0/0。
@@ -22,10 +22,10 @@
 
 | # | 项 | 结论 | 本轮依据 |
 |---|----|------|----------|
-| A | 正腿·受保护路径（送达+消费） | 通过 | 机械：`t260913-01-authz-signal-delivery` PASS 19.1s + `-authz-protected-path` PASS 3.4s |
-| B | 正腿·仲裁超限 | 通过 | 机械：`-authz-overlimit-accept` PASS 92.8s（判决原文 + `uses≥1` + 推进） |
+| A | 正用例·受保护路径（送达+消费） | 通过 | 机械：`t260913-01-authz-signal-delivery` PASS 19.1s + `-authz-protected-path` PASS 3.4s |
+| B | 正用例·仲裁超限 | 通过 | 机械：`-authz-overlimit-accept` PASS 92.8s（判决原文 + `uses≥1` + 推进） |
 | C | 负锁四条（本票覆盖 5 条） | 通过 | 机械 PASS 19.1s（含「载荷解析失败」vs「非人审等待中」可辨断言） |
-| D | 真往返守卫 | 通过（合成口径） | 两腿真信号、均在册；本轮机械两条均真跑 PASS |
+| D | 真往返守卫 | 通过（合成口径） | 两子用例真信号、均在册；本轮机械两条均真跑 PASS |
 | E | 零回归 | 通过 | 引擎三 handler 语义未变；**本段亲跑 UT 724 passed**（含新预算对守卫 2 条） |
 | F | 实票验证 | 通过 | 22 只读：`t260912-01` closed（09-13 23:12）、`t260911-05` `used=1` |
 | — | 测试资产/引擎改动审查 | 通过（含 2 条残留） | 见下「改动审计」 |
@@ -37,7 +37,7 @@
 2. **复位审计**：`git status`（除 `.sandbar/` 外干净）、`git diff --stat … -- verify.yaml`（空）、
    `git diff --name-only 9c102d7 HEAD` 过滤写集外（空）、7 项本票增量逐个 grep 在场（7/7）。
 3. **预算对审计**：读源定位真实守卫点，做算术核对 + **内存变异检查**（不改文件）验证新单测非恒真。
-4. **同族修法审计**：逐行 diff 核 sweep 场景（只有起台腿两处改归档 + import；其余断言未动）。
+4. **同族修法审计**：逐行 diff 核 sweep 场景（只有起台子用例两处改归档 + import；其余断言未动）。
 5. **本段亲跑**：lint、本票新场景、net-table、全量 UT。
 6. 读本轮机械报告（`out/integration-report-260914-111726.json`），逐条读非绿 tail 定性。
 7. 线上 F 只读取证（用户级 `ticket list`）。
@@ -73,17 +73,17 @@ $ grep -n BATCH_TIMEOUT_SEC server/engine/agent_activities.py
   也是红），不放宽任何断言、不碰 fail-closed、不涉及自签；`SANDBAR_INTEG_BATCH_TIMEOUT_SEC` 覆盖仍生效
   （注释要求同步抬外层，由单测兜住默认面）。
 
-### 同族修法审计（sweep 起台腿）
+### 同族修法审计（sweep 起台子用例）
 
 ```
 $ git diff 9b70d02 HEAD -- integration/t260912-02/sc_stage_sweep_owner_gone.py
 + 批量起台失败：rcs = {台: rc}; if up_batch_env_only(rcs) → envfail(点名每台 rc)；否则 check(False, "含非 env/conflict 档＝产品/契约面")
-+ 挂点腿：check(proc_n.returncode == 0, …) → up_ok(proc_n, …)
++ 挂点子用例：check(proc_n.returncode == 0, …) → up_ok(proc_n, …)
 其余断言（残台形态/清扫/零残留/端口…）逐字未动
 机械实证：本轮该场景 `ENV_FAIL 7 台真台全部起好：3 台起台失败（rc 档位全为 env/conflict＝prepare 型环境/
           并发面，非产品红）：{…live: 2, …legit: 2, …hook: 2}` —— 原口径下这会是一条**假产品 FAIL**
 ```
-**家族残留（如实列出，未修）**：`sc_stage_fuse_headroom_resident.py:100-102` 批量腿仍是
+**家族残留（如实列出，未修）**：`sc_stage_fuse_headroom_resident.py:100-102` 批量子用例仍是
 `oks=[rc==0]` + `check(16/16)`（gen8 实测三个 rc=2 被记 FAIL）、`acc_g_cleanup.py:55` 仍
 `check(rc==0)`（burst 走 stderr 特征 `env_guard`）。建议一次补授修全族。
 
@@ -105,7 +105,7 @@ ran=233 pass=211 fail=1 env_fail=21 wall_s=1774.2 generated=2026-09-14T11:17:26
 本票四条全 PASS：t260913-01-authz-signal-delivery 19.1 / -authz-overlimit-accept 92.8 /
                 -authz-cli-queryable 14.9 / -authz-protected-path 3.4
 capture-chat-active PASS 43.4（上一轮高载下的 FAIL 已自愈，佐证那轮是并发窗）
-唯一 FAIL：t260910-12-herd-no-crosstalk 33.5s（别票；其 ensure 腿拿 rc=2 + STAGE_ENV compose up 失败
+唯一 FAIL：t260910-12-herd-no-crosstalk 33.5s（别票；其 ensure 子用例拿 rc=2 + STAGE_ENV compose up 失败
           却被记 FAIL —— **同一「prepare 型记产品红」家族**，属该票面）
 21 环境红：18 × console/台面（stage-console 不可达/共享锁根外来工程）+ 2 × net（Pool overlaps / network
           not found）+ 1 × t260912-02-sweep-owner-gone（**新归档生效：ENV_FAIL 点名三台 rc=2**）
@@ -128,13 +128,13 @@ $ ticket list：t260912-01 closed merge/awaiting（updated 09-13 23:12）｜t260
 ## 遗留与风险
 
 1. **合并建议（本段核心建议）**：产品面已收口——①传输修复（gen0）②空机械轮根因修复（本轮预算对）
-   ③测试资产族修（capture/doc_face/net_table/sweep）；四条验收腿机械全 PASS、UT 724 绿、F 超额满足。
+   ③测试资产族修（capture/doc_face/net_table/sweep）；四条验收子用例机械全 PASS、UT 724 绿、F 超额满足。
    建议人审在现有证据上签字合并；合并前需处理下面第 2 条（main 对齐）。
 2. **main 对齐**：main 已到 `8ab007c`（含 KI-087/KI-088 notes），本 lane 基 `9c102d7`；宿主曾令
    「把泳道 merge main」，implement 段尝试后按阶段闸反馈**复位**（并入的 main 侧文件被算成本段改动而拒收）。
    ⇒ 合并需由 merge 执行人在 main 侧对齐（本 lane 的 verify.yaml 是分叉点形态、无 `exclude_pools`，
    与 main 现行声明不同，属预期）。
-3. **家族残留（建议一次补授）**：`sc_stage_fuse_headroom_resident.py:100-102` 批量腿、
+3. **家族残留（建议一次补授）**：`sc_stage_fuse_headroom_resident.py:100-102` 批量子用例、
    `acc_g_cleanup.py:55`；另本轮 mechanical 里别票 `t260910-12-herd-no-crosstalk` 也是同一形态。
 4. **残差面（本段接受）**：`真实字节漂移`（源码改了未重建 bundle）从 FAIL 收进 not-checked；若要保留该产品信号，
    应显式断言「committed bundle == 源码重建产物」。
@@ -145,8 +145,8 @@ $ ticket list：t260912-01 closed merge/awaiting（updated 09-13 23:12）｜t260
 7. **运维面（设计固有）**：合并后 CLI 对未含 `sign_face` 的 worker 拒发 authorize（fail-closed）→ 现网 worker
    需按 runbook §S0→§S6 再重启一次才能继续用人授权。
 8. KI 候选待 main 侧 integration 落册（本段写集不含 `notes/`）：implement gen0 三条 + 走查累计六条
-   （④机读键无断言锁；⑤两条轻微实现缺陷；⑥供给台/console 台生命周期不一致族；⑦同族起台腿直判未清
-   （本轮已修 lib/net_table/sweep，余 fuse-headroom 批量腿与 acc_g_cleanup）；⑧F 判据口径（本轮已自证）；
+   （④机读键无断言锁；⑤两条轻微实现缺陷；⑥供给台/console 台生命周期不一致族；⑦同族起台子用例直判未清
+   （本轮已修 lib/net_table/sweep，余 fuse-headroom 批量子用例与 acc_g_cleanup）；⑧F 判据口径（本轮已自证）；
    ⑨闸执行面故障——**其根因（预算对死代码）已在票内修复**，可转为已闭项上报）。
 
 ## 收口两问

@@ -20,7 +20,7 @@ intent 分工（防 intent 级重复）：
   本条＝外部信号停（被叫走）。
 
 三态契约：docker 台缺席=ENV_FAIL exit 2（require_stage 直译）；被测子进程零连
-生产（审计钩子先记后抛+自证腿证明钩子活着）；断言全落公开行为输出（meta 文件/
+生产（审计钩子先记后抛+自证子用例证明钩子活着）；断言全落公开行为输出（meta 文件/
 进程终态/stderr 日志行），日志锚兼容正则锚语义不锁措辞（KI-051）。
 """
 import json
@@ -65,7 +65,7 @@ def main():
         meta = os.path.join(tmp, "worker-lc.meta")
         log1 = os.path.join(tmp, "worker-lc.log")
 
-        # ---------- ② 起腿：meta 限期可读 + 形状可辨 ----------
+        # ---------- ② 起子用例：meta 限期可读 + 形状可辨 ----------
         env1 = child_env(host, state["namespace"], audit_env,
                          {"SANDBAR_TASK_QUEUE": QUEUE, "SANDBAR_WORKER_META": meta,
                           KNOB: KNOB_FAST})
@@ -101,7 +101,7 @@ def main():
         fail.check(wait_marker(log1, r"归属指纹", 10),
                    "起跑痕迹在文：stderr 含归属指纹行（语义锚）")
 
-        # ---------- ③ 退腿：TERM 二连幂等 → 优雅退 + meta 自清 ----------
+        # ---------- ③ 退子用例：TERM 二连幂等 → 优雅退 + meta 自清 ----------
         fail.check(wait_marker(log1, r"worker 起来了", 40),
                    "worker 就绪在文（起来了标记，≤40s）再发信号——防信号早于处理装配")
         w1.terminate()
@@ -117,7 +117,7 @@ def main():
                    "优雅停痕迹在文（stderr 语义锚）")
         close_logf(w1)
 
-        # ---------- ④ 异常输入腿：meta 指向不可写路径（父路径是文件） ----------
+        # ---------- ④ 异常输入子用例：meta 指向不可写路径（父路径是文件） ----------
         blocker = os.path.join(tmp, "blocker")
         with open(blocker, "w") as f:
             f.write("占用父路径的普通文件\n")
@@ -138,7 +138,7 @@ def main():
                    "不可写路径上不冒出 meta（%s 不在）" % bad_meta)
         w2.terminate()
         fail.check(wait_exit(w2, 60) and w2.returncode == 0,
-                   "异常输入腿 TERM 后照常干净退（rc=%s）" % w2.returncode)
+                   "异常输入子用例 TERM 后照常干净退（rc=%s）" % w2.returncode)
         close_logf(w2)
 
         # ---------- ⑤ 红线：被测子进程零连生产 + 审计钩子自证 ----------

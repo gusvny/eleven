@@ -1,6 +1,6 @@
 // lib_fix10.mjs — t260904-10 场景共享脚手架（非 sc_ 前缀 = 共享代码，不登记、不报警）。
 // 只用 node stdlib；零真台零 3099/7233（Temporal 降级注入用死端口 127.0.0.1:1，
-// 可达腿探测只连测试台 17233）。断言锚公开契约（CLI 旗标面/装载器/env 契约），不锚实现。
+// 可达子用例探测只连测试台 17233）。断言锚公开契约（CLI 旗标面/装载器/env 契约），不锚实现。
 import { spawnSync, spawn } from 'node:child_process';
 import {
   mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync,
@@ -25,8 +25,8 @@ export function tmpRoot(prefix) {
 //   python3 sandbar project remove --key <key> [--json]
 export function sbEnv(root, extra = {}) {
   const env = { ...process.env, SANDBAR_PROJECTS_DIR: root };
-  delete env.SANDBAR_PROJECTS_YAML; // legacy env 只在 legacy 腿显式注入，绝不 ambient 泄漏
-  return Object.assign(env, extra); // extra 在清理之后注入（legacy 腿靠它）
+  delete env.SANDBAR_PROJECTS_YAML; // legacy env 只在 legacy 查询路径显式注入，绝不 ambient 泄漏
+  return Object.assign(env, extra); // extra 在清理之后注入（legacy 查询路径靠它）
 }
 
 export function runCli(args, env) {

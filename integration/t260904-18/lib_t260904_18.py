@@ -6,7 +6,7 @@ ui_evidence 声明制）。不带 sc_ 前缀 = 共享夹具代码，不进 SCENA
 环境口径（三态契约，闸内环境缺失一律显式环境红）：
   stdlib 面（shared / verify_lane / git 夹具 / 源码契约锁）——系统 python3 可跑，
   本泳道（无 venv）即可执行与判红绿；
-  temporalio 面（dev_lane / agent_activities / client 的行为驱动腿）——环境缺失时
+  temporalio 面（dev_lane / agent_activities / client 的行为驱动子用例）——环境缺失时
   记 ENV_FAIL 点名并以 exit 2 收场，绝不静默略过；arbitrate/merge 期（venv 在位）
   必须全绿。
 """
@@ -130,7 +130,7 @@ def ui_evidence_yaml(dirs=None, with_lanes=True):
       dirs=["web/ui/"]     → 合法声明
       dirs="web/ui"        → 畸形声明（dirs 标量，非列表）
     with_lanes=True 附 lanes.code.write_allow（verify_lane 存量口径：有文件而无
-    lanes.code 走 write_allow 畸形红，非关闭态——W 腿须锚 honored 形态隔离 ui_evidence 面）。"""
+    lanes.code 走 write_allow 畸形红，非关闭态——W 子用例须锚 honored 形态隔离 ui_evidence 面）。"""
     lines = ["schema: v1"]
     if dirs is not None:
         lines.append("ui_evidence:")

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """t260912-02 验收 F：名额不再自我挤压。在册 6 条常驻租约（形态=在飞票控制台台/
-供给台）存在的前提下，并发 16 台仍 16/16 绿。负锁腿（证明修复有意义）：同拓扑下
+供给台）存在的前提下，并发 16 台仍 16/16 绿。负锁子用例（证明修复有意义）：同拓扑下
 把 SANDBAR_STAGE_MAX_STAGES 压回旧缺省 12 → 16 路中恰 12-6=6 路入位、其余刹停
 点名保险丝（旧行为会自我挤压，新缺省不挤）。
 
@@ -77,18 +77,18 @@ def main():
                              "out": out, "err": err})
             return recs
 
-        print("== 主腿：缺省保险丝（100）下并发 16 ==", flush=True)
+        print("== 主子用例：缺省保险丝（100）下并发 16 ==", flush=True)
         recs = burst(BURST, {}, "d16")
         ok = [r for r in recs if r["rc"] == 0]
         check(len(ok) == BURST, "F 16/16 绿（实得 %d/16）" % len(ok))
         check(all("起台保险丝" not in (r["err"] or "") for r in recs),
-              "主腿零保险丝红（缺省 100 不触）")
+              "主子用例零保险丝红（缺省 100 不触）")
         alive = sum(1 for i in range(RESIDENT)
                     if os.path.exists(os.path.join(ROOT, "project-%s-res%d.json" % (TAG, i))))
         check(alive == RESIDENT, "常驻租约全程在场（%d/%d，未被清扫未被动）"
               % (alive, RESIDENT))
-        # 负锁腿前置：先拆净主腿 16 台（否则它们的活租约本身就把 12 槽占满，
-        # 负锁腿变成 16 自挤 16，测不到「常驻挤掉场景台」的旧语义形态）
+        # 负锁子用例前置：先拆净主子用例 16 台（否则它们的活租约本身就把 12 槽占满，
+        # 负锁子用例变成 16 自挤 16，测不到「常驻挤掉场景台」的旧语义形态）
         winners_main = [r["project"] for r in ok]
         for proj in winners_main:
             cli_down(proj)
@@ -99,9 +99,9 @@ def main():
             time.sleep(0.5)
         left_main = [p for p in winners_main
                      if os.path.exists(os.path.join(ROOT, "project-%s.json" % p))]
-        check(not left_main, "主腿 16 台拆净释放（剩租约=%s）" % (left_main or "无"))
+        check(not left_main, "主子用例 16 台拆净释放（剩租约=%s）" % (left_main or "无"))
 
-        print("== 负锁腿：压回旧缺省 12 → 恰 6 入位其余刹停 ==", flush=True)
+        print("== 负锁子用例：压回旧缺省 12 → 恰 6 入位其余刹停 ==", flush=True)
         recs12 = burst(BURST, {"SANDBAR_STAGE_MAX_STAGES": "12"}, "d12")
         ok12 = [r for r in recs12 if r["rc"] == 0]
         stopped = [r for r in recs12 if r["rc"] == 2]

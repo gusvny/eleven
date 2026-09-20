@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // sc_console_boot_no_plugin_banner.mjs —— t260916-26 场景③：真宿主装载本票两插件的
-// 活体回归腿（灰盒 L3，browser-free 池，隔离台=本泳道 worktree 直起 dsh 台）。
+// 活体回归用例（灰盒 L3，browser-free 池，隔离台=本泳道 worktree 直起 dsh 台）。
 //
 // 用户故事（工单验收①④的生产版本半边）：升级期混版窗口里，同一份 knowledge/providers
 // 装机包在生产版本（0.1.1-rc.2，本机 dsh 即该版本）上必须照常激活——用户打开控制台
 // 不看到「Failed to load plugins / … did not activate」顶部报错，工单台壳与「模型」
-// 视图照常可用。本台宿主=0.1.1-rc.2（conversationViews 服务在场），故本腿**实现前后
+// 视图照常可用。本台宿主=0.1.1-rc.2（conversationViews 服务在场），故本子用例**实现前后
 // 都应绿**（纯零回归守卫）；对修复的判别力由场景①（装机包注入契约）承担，两面合起来
-// 才是验收①的全谱。0.1.5 stage 活体腿不可本地机械复现（本机无 0.1.5 宿主），归宿主
+// 才是验收①的全谱。0.1.5 stage 活体子用例不可本地机械复现（本机无 0.1.5 宿主），归宿主
 // stage 3199 走查（方案 S5）。
 //
 // 台面通道（t260915-19 实测定案的先例）：lib_fix17 bootConsole 骨架的泳道三插件覆盖
@@ -16,7 +16,7 @@
 // 旧产物（KI-052「盘上×别树」同族假绿）。本台随机高端口（拒 3099=红线零接触）、
 // Temporal 钉死端口、票源走 FIX17 桩，四路径回收。
 //
-// 腿：
+// 子用例：
 //   T0 防错树夹具自检（t260906-01 根除面）：台面 profile 三条覆盖链 realpath 全部落在
 //      本泳道仓内——台加载的不是本票产物=本场景所有绿都作废；
 //   T1 隔离台起台就绪（workbench API 200）；
@@ -104,7 +104,7 @@ try {
     shellVisible = true
   } catch { /* 落到判定 */ }
   record('T2 壳层渲染正向控制（夹具甲项目行可见）', shellVisible,
-    shellVisible ? '台面已渲染' : '等 15s 未见「夹具甲」——台面未渲染，absence 腿作废')
+    shellVisible ? '台面已渲染' : '等 15s 未见「夹具甲」——台面未渲染，absence 子用例作废')
 
   if (shellVisible) {
     // T3 事故文案零残留
@@ -126,7 +126,7 @@ try {
     // 点击预算 20s（t260916-26 implement gen3 加固）：图标在 workbench 板面数据
     // 加载后才渲染，闸内并发 herd（concurrency=4）下 8s 预算两度超时（单跑同树
     // 两跑全绿=负载抖动非语义红，registry load-flake 家族同型）。预算不是断言
-    // 语义：本腿锚的仍是「点击后 ProvidersSection 显式状态在 DOM」，正向控制
+    // 语义：本子用例锚的仍是「点击后 ProvidersSection 显式状态在 DOM」，正向控制
     // T2 的等待预算（15s）本就按负载口径给，此处对齐。
     await routesIcon.click({ timeout: 20000 })
     await page.waitForTimeout(1500)

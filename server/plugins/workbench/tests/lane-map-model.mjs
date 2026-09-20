@@ -184,7 +184,7 @@ ok(parseTopology({ nodes: [{ id: 'a', label: '', kind: 'agent' }] }) === null, '
 
 /* ── B2. 受阻史接线（t260916-04）：groups 透传解除判定，节点视图携史 ── */
 {
-  // 复现腿形态：implement 同刻 done+blocked，解除证据记在相邻后段（run_integration_tests）
+  // 复现子用例形态：implement 同刻 done+blocked，解除证据记在相邻后段（run_integration_tests）
   const detail = {
     status: 'running', stage: 'run_integration_tests', stage_state: 'running',
     results: { create_plan: { status: 'ok', gen: 1 }, review_plan: { status: 'ok', gen: 1 } },

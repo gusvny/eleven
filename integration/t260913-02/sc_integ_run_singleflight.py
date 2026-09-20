@@ -8,16 +8,16 @@ intent（用户可感知契约，锚 CLI 行为不锚实现；灰盒 L2）：
   （中段「连接被拒」）、旧 ID 串台（把夹具残留报成产品红）、console 族瞬时环境红。
   实况 260914 21:08-21:10：两个 199 条全轮重叠 85s，闸录得 1 败 + 17 环境红。
   故第二次发车必须在**开跑任何场景之前**收口：
-    腿1 无锁发车照跑（不误伤——今天唯一发车姿态）；
-    腿2 有锁时 CLI 退出码=2（环境红，零场景开跑）且**点名持有者**（pid/起租时间可读）；
-    腿3 显式 knob SANDBAR_INTEG_ALLOW_CONCURRENT=1 时放行并留痕（人可承担风险）；
-    腿4 只读资产查询面 --print-pool-assets 不占锁（闸会与在跑的轮并行查资产面，
+    子用例1 无锁发车照跑（不误伤——今天唯一发车姿态）；
+    子用例2 有锁时 CLI 退出码=2（环境红，零场景开跑）且**点名持有者**（pid/起租时间可读）；
+    子用例3 显式 knob SANDBAR_INTEG_ALLOW_CONCURRENT=1 时放行并留痕（人可承担风险）；
+    子用例4 只读资产查询面 --print-pool-assets 不占锁（闸会与在跑的轮并行查资产面，
          把它挡出去=闸自己瞎）。
   与 t260904-12-executor-three-state（三态计数/汇总自证）intent 不同面：彼守执行器
   计数语义，本条守「并发发车门」。设备：SANDBAR_INTEG_RUN_LOCK_PATH 指向临时锁档
-  （缺省锁档=泳道键，本场景**不碰它**——免得与在跑的轮互扰）；「照跑」腿用「排除
+  （缺省锁档=泳道键，本场景**不碰它**——免得与在跑的轮互扰）；「照跑」子用例用「排除
   全部在册池」把全轮收成零条目（ran=0 与在册 0 一致，三态 rc=0），秒级、零 docker。
-  实现段落地前红属预期（锁缺席=腿2 照跑=红），arbitrate/merge 期必须绿。
+  实现段落地前红属预期（锁缺席=子用例2 照跑=红），arbitrate/merge 期必须绿。
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ import lib_env  # noqa: E402
 
 
 class Rec(object):
-    """腿级计数与退出收口（三态：0 全过 / 1 产品红 / 2 环境红）。"""
+    """子用例级计数与退出收口（三态：0 全过 / 1 产品红 / 2 环境红）。"""
 
     def __init__(self):
         self.passed = self.failed = self.env_failed = 0
@@ -94,13 +94,13 @@ def main():
     lock_path = os.path.join(tmpd, "run.lock")
     hold_fd = None
     try:
-        print("== 腿1 无锁发车 → 照跑（零条目全轮收成 rc=0，不误伤正常发车）")
+        print("== 子用例1 无锁发车 → 照跑（零条目全轮收成 rc=0，不误伤正常发车）")
         p = _cli(lock_path, args=["--exclude-pools", zero])
         r.check(p.returncode == 0,
                 "无锁时 CLI 正常收口（rc=%s｜尾：%s）"
                 % (p.returncode, (p.stdout or p.stderr).strip().splitlines()[-1:]))
 
-        print("== 腿2 有锁发车 → 环境红收口且点名持有者（零场景开跑）")
+        print("== 子用例2 有锁发车 → 环境红收口且点名持有者（零场景开跑）")
         # 持锁方=本进程（走同一条 _acquire_run_lock——锁档格式与生产同源）
         os.environ["SANDBAR_INTEG_RUN_LOCK_PATH"] = lock_path
         spec = importlib.util.spec_from_file_location("rs_lock", RUNNER)
@@ -117,7 +117,7 @@ def main():
         r.check("本次未开跑任何场景" in out, "文案声明零场景开跑（不谎报已跑）")
         r.check("ran=" not in out, "拒收面零场景计数行（不开跑就无计数）")
 
-        print("== 腿3 显式 knob 放行 → 照跑且留痕（风险由调用方承担）")
+        print("== 子用例3 显式 knob 放行 → 照跑且留痕（风险由调用方承担）")
         p = _cli(lock_path, args=["--exclude-pools", zero],
                  extra_env={"SANDBAR_INTEG_ALLOW_CONCURRENT": "1"})
         out = (p.stdout or "") + (p.stderr or "")
@@ -125,7 +125,7 @@ def main():
         r.check("已显式关闭" in out, "放行留痕在文（显式关闭行）")
         r.check("已在进行中" not in out, "放行面不再报并发拒收")
 
-        print("== 腿4 只读资产查询面不占锁（闸并行查资产面不被挡）")
+        print("== 子用例4 只读资产查询面不占锁（闸并行查资产面不被挡）")
         p = _cli(lock_path, args=["--print-pool-assets", "main"])
         r.check(p.returncode == 0,
                 "持锁时资产查询照常（rc=%s）" % p.returncode)

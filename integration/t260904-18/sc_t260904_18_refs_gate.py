@@ -18,7 +18,7 @@ intent（守护的用户可感知行为/合同）：
 本条含 cmd_ticket_start 入口装配面与真 git HEAD 态分类。
 
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；
-temporalio 缺失=ENV_FAIL 点名（入口装配腿），stdlib 闸行为腿照跑。
+temporalio 缺失=ENV_FAIL 点名（入口装配子用例），stdlib 闸行为子用例照跑。
 """
 import asyncio
 import json
@@ -65,7 +65,7 @@ try:
     check("S3 建单入口带 refs 参数（cmd_ticket_start 取 args refs）",
           i_val >= 0 and 'args.get("refs")' in src_client[i_def:i_conn0])
 
-    # ---------- 闸函数行为腿（真 git HEAD 态；stdlib 处处可跑） ----------
+    # ---------- 闸函数行为子用例（真 git HEAD 态；stdlib 处处可跑） ----------
     vb = getattr(shared, "validate_background_refs", None)
     check("P0 被测承诺面在场（shared.validate_background_refs）", vb is not None)
     if vb is not None:
@@ -90,13 +90,13 @@ try:
         ok, msg = call_gate(vb, "notes/bg.md", str(tmp_repo))
         check("P8 非列表（字符串会被迭代成假护栏）→ 拒", ok is False, "msg=%r" % msg[:200])
 
-    # ---------- 入口装配腿（temporalio 面） ----------
+    # ---------- 入口装配子用例（temporalio 面） ----------
     if not temporalio_available():
-        env_fail("temporalio 不可用（本泳道无 venv）：cmd_ticket_start 入口装配腿不可执行"
-                 "——stdlib 闸行为腿与源码序锁已在本场跑完；arbitrate/merge 期 venv 环境必须全绿")
+        env_fail("temporalio 不可用（本泳道无 venv）：cmd_ticket_start 入口装配子用例不可执行"
+                 "——stdlib 闸行为子用例与源码序锁已在本场跑完；arbitrate/merge 期 venv 环境必须全绿")
     else:
         import client  # noqa: E402  temporalio 依赖面
-        # 保险丝：入口腿一律指向死端口——即使实现把校验错接到 _connect 之后，
+        # 保险丝：入口子用例一律指向死端口——即使实现把校验错接到 _connect 之后，
         # 也绝无真 Temporal 接触/真工单落引擎（对抗面自保护）
         client.TARGET_HOST = "127.0.0.1:1"
         HAVE_GATE = ("validate_background_refs" in src_client)
@@ -124,10 +124,10 @@ try:
             check("L3 越界引用建单被拒且点名", res.get("ok") is False and "escape.md" in err,
                   "err=%r" % err[:200])
         else:
-            check("L0 被测承诺面在场（client refs 闸接线）→ 入口腿可跑", False,
+            check("L0 被测承诺面在场（client refs 闸接线）→ 入口子用例可跑", False,
                   "client.py 未接 validate_background_refs（TDD 红属预期）")
 
-    # 缺省不追溯（存量在飞票无 refs 照常）不设独立拒收腿：无 refs 时流程越过闸继续，
+    # 缺省不追溯（存量在飞票无 refs 照常）不设独立拒收子用例：无 refs 时流程越过闸继续，
     # 行为在真票面验证——本场景不为此制造真工单（对抗面不落引擎副作用）。
 finally:
     shutil.rmtree(tmp_repo, ignore_errors=True)

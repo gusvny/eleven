@@ -9,12 +9,12 @@ intent（守护的用户可感知行为）：
 - 缺 project / 未知 project key = 创建即拒收，两条红因文案互辨（不静默相对路径）；
 - 双 docker 舞台两路并发开票（时间重叠）：ticket-list 互不见对方工单、跨台 describe
   not_found —— 零数据串台（宿主红线①）；
-- 被测子进程零连生产 7233/8233（审计钩子先记后抛=连接被阻断；含自证拦截腿证明
+- 被测子进程零连生产 7233/8233（审计钩子先记后抛=连接被阻断；含自证拦截子用例证明
   钩子活着）+ 舞台端口面显式核验（端口互异、不在禁区面）——绝不影响生产
   temporal（宿主红线②）；
 - teardown：down 零残留（docker ps 无本工程容器）、端口释放、down 幂等二连、
   同工程名可立即 re-up（资源可复用——t260904-19 起 docker 台语义，替代原
-  槽位制 flock 复抢/kill-9 崩溃腿：容器由 daemon 持有，无锁可崩，取舍见
+  槽位制 flock 复抢/kill-9 崩溃子用例：容器由 daemon 持有，无锁可崩，取舍见
   stage_docker.py 头注对照表）。
 
 t260904-19：temporal 引擎台从 bench.py 槽位制迁移到 docker 测试台
@@ -161,14 +161,14 @@ def main():
         # ---------- ⑥ 负向：缺 project / 未知 key 拒收且红因互辨 ----------
         rc_u, out_u = run_poc_client(py, "ticket-start", {
             "ticket_id": "t26090402-anchor-u", "template_id": "dev-lane",
-            "project": "bench-nope", "title": "未知 key 腿", "write_set": ["docs/"]}, env_a)
+            "project": "bench-nope", "title": "未知 key 子用例", "write_set": ["docs/"]}, env_a)
         j_u = parse_out_json(out_u)
         fail.check(j_u.get("ok") is not True and "未知项目" in out_u,
                    "未知 project key 拒收且回执点名「未知项目」（rc=%s out=%s）"
                    % (rc_u, out_u.strip()[:100]))
         rc_m, out_m = run_poc_client(py, "ticket-start", {
             "ticket_id": "t26090402-anchor-m", "template_id": "dev-lane",
-            "title": "缺 project 腿", "write_set": ["docs/"]}, env_a)
+            "title": "缺 project 子用例", "write_set": ["docs/"]}, env_a)
         j_m = parse_out_json(out_m)
         fail.check(j_m.get("ok") is not True and "project" in out_m,
                    "缺 project 拒收且回执点名 project（rc=%s out=%s）"
@@ -193,8 +193,8 @@ def main():
                    "台B 上 describe 台A 工单=not found（零数据串台，reason=%s）"
                    % cross.get("reason"))
 
-        # ---------- ⑧ 审计断言：零连生产 + 自证拦截腿 ----------
-        for log_path, label in ((log_a, "台A腿"), (log_b, "台B腿")):
+        # ---------- ⑧ 审计断言：零连生产 + 自证拦截子用例 ----------
+        for log_path, label in ((log_a, "台A子用例"), (log_b, "台B子用例")):
             hits = read_audit_jsonl(log_path)
             fail.check(not hits,
                        "%s 被测子进程零生产连接尝试（审计记录 %d 条：%s）"
@@ -225,7 +225,7 @@ def main():
             fail.check(True, "down 幂等二连不抛")
         except Exception as e:
             fail.check(False, "down 幂等二连不抛（实得异常：%s）" % e)
-        # 同工程名+同 namespace 立即可 re-up（替代槽位制 flock 复抢/kill-9 腿：
+        # 同工程名+同 namespace 立即可 re-up（替代槽位制 flock 复抢/kill-9 子用例：
         # docker 台无锁可崩——容器由 daemon 持有，取舍见 stage_docker 头注对照表）
         _, sa2 = require_stage(fail, proj_a_name, ns_a)
         fail.check(sa2["ports"]["temporal"] not in pb.values(),

@@ -7,7 +7,7 @@
  * 代码是干什么的」）。用户可感知承诺：同一份 src、经组件公开构建入口
  * （npm run build → 仓内唯一构建脚本）连续构建，产物逐字节稳定、与落仓产物
  * 一致、无计划外副产物文件、mtime 不入产物——review 看到的 lib diff 就是真实
- * 改动。断言腿：
+ * 改动。断言子用例：
  *   S1 依赖安装走 lockfile（npm ci）；安装因网络/缓存失败=ENV_FAIL（exit 2）
  *      点名尾段，不假红——环境红不诬产品；
  *   S2 同一 node_modules 连续两次构建 → lib 两产物 sha256 逐字节相等（验收①；
@@ -15,18 +15,18 @@
  *   S3 构建后 git status 对 lib/ 为空 = 重建产物与落仓产物一致 + 无 map/gzip
  *      等计划外副产物文件（验收②；porcelain 对 untracked 同样计数）；
  *      lib/ 整体处于合并未落盘态（UU）时 na 点名不假绿——落仓基准暂缺，
- *      落盘提交后由 S5 显式 sha 硬腿接管（t260915-08 仲裁口径，与 S5 na 同源）；
+ *      落盘提交后由 S5 显式 sha 硬子用例接管（t260915-08 仲裁口径，与 S5 na 同源）；
  *      真脏（M/??）照旧红；
  *   S4 mtime 注入：改 src 文件 mtime 不改内容 → 第三次构建 → sha256 仍相等
  *      （门禁/证据类断言的 mtime 干扰面：工具链不得把时间戳带进产物）；
- *   S5 泳道内显式腿（t260911-06/KI-073 验收 a/b）：重建产物 == HEAD committed
+ *   S5 泳道内显式子用例（t260911-06/KI-073 验收 a/b）：重建产物 == HEAD committed
  *      产物（显式 sha256 对比 + 失败时 diff 首 40 行点名）。判定前提=构建输入
  *      （src/config/双 lock/构建脚本/兄弟包 knowledge|providers 的 src）全部与
  *      HEAD 同批；implement 期工作树输入常带票内未落盘改动 → na 属预期时点
  *      （arbitrate/merge 期输入已落盘必可判）；na 记入 na=W 不假绿，全 na →
  *      exit 1（t260904-12 exit contract）。套件跑在泳道时 root 即泳道树，
- *      本腿即「泳道内」重建一致性；
- *   S6 入口唯一性腿（t260911-06/KI-073）：构建实际解析的 tsdown/rolldown 版本
+ *      本子用例即「泳道内」重建一致性；
+ *   S6 入口唯一性子用例（t260911-06/KI-073）：构建实际解析的 tsdown/rolldown 版本
  *      （构建 stdout 版本留痕）≡ lockfile 锁定版本 ≡ node_modules 安装版本
  *      ——绕开 npm ci 的入口（npx 回落/陈旧 node_modules/别的全局 tsdown）
  *      在此点名，而不是以 4 行压缩器写法抖动的形式漏进 diff。判定核心纯函数
@@ -36,7 +36,7 @@
  *      场景的判定面（进场前既有的 UU 合并态非本场景副作用，na 点名；真脏照红）。
  *
  * S3 的判红语义：若 HEAD 产物并非锁定工具链可复现（如历史由漂移版本构建），
- * 本腿红=工单要消除的病灶实锤；实施段校准重建（一次性真实 diff）后恒绿。
+ * 本子用例红=工单要消除的病灶实锤；实施段校准重建（一次性真实 diff）后恒绿。
  *
  * 与 developer L1（workbench/tests/build-determinism.mjs）intent 分工：L1 随
  * 实现交付、不作契约网；本场景是闸内常驻契约网，断言只落在公开接口（npm run
@@ -95,7 +95,7 @@ function libDirty() {
 /* porcelain 两位状态码落在 {A,D,U} 组合（DD/AU/UD/UA/DU/AA/UU）= 合并未落盘态：
  * 索引里存在未解决的合并项，此时「落仓产物」没有可比基准（HEAD 侧与盘上是
  * 两个世界的半成品）——与 S5 的「输入非同批→na」同一时点口径，na 点名，
- * 落盘提交后 S5 显式 sha 硬腿接管重建一致性判定；M/?? 等真脏不在此列照旧红。 */
+ * 落盘提交后 S5 显式 sha 硬子用例接管重建一致性判定；M/?? 等真脏不在此列照旧红。 */
 const isUnmergedLine = (line) => /^[ADU]{2} /.test(line)
 
 /* S1 依赖安装：lockfile 精确装。失败=环境红（网络/缓存），点名尾段 exit 2。 */
@@ -161,7 +161,7 @@ if (b1 && b2) {
 
 /* S3 重建后落仓干净（验收②）＝与落仓产物一致 + 无计划外副产物
  * （两意图并锚一条 porcelain：porcelain 对 untracked 同样计数，副产物新文件
- * 与「产物 ≠ 落仓」都表现为非空；显式 sha 对比在 S5 分腿）。 */
+ * 与「产物 ≠ 落仓」都表现为非空；显式 sha 对比在 S5 拆分子用例）。 */
 section('S3. 构建后 git status 对 lib/ 为空（验收②）')
 {
   const dirty = libDirty()
@@ -171,7 +171,7 @@ section('S3. 构建后 git status 对 lib/ 为空（验收②）')
   if (realDirt.length) {
     ok(false, `重建不产生 diff、无 map/gzip 等副产物新文件：\n    ${realDirt.join('\n    ')}`)
   } else if (unmerged.length) {
-    na(`lib/ 处于合并未落盘态（UU），落仓基准暂缺无从比对——不假绿；落盘提交后由 S5 显式 sha 硬腿接管：\n    ${unmerged.join('\n    ')}`)
+    na(`lib/ 处于合并未落盘态（UU），落仓基准暂缺无从比对——不假绿；落盘提交后由 S5 显式 sha 硬子用例接管：\n    ${unmerged.join('\n    ')}`)
   } else {
     ok(true, '重建不产生 diff、无 map/gzip 等副产物新文件')
   }
@@ -180,7 +180,7 @@ section('S3. 构建后 git status 对 lib/ 为空（验收②）')
 /* S4 mtime 注入：改 mtime 不改内容 → 重建 sha 不变 */
 section('S4. mtime 注入：时间戳不入产物')
 if (!b1) {
-  console.log('  -- 前置双构建未完成，mtime 腿不重复计分（根因已在 S2 点名）')
+  console.log('  -- 前置双构建未完成，mtime 子用例不重复计分（根因已在 S2 点名）')
 } else if (!existsSync(entrySrc)) {
   ok(false, `mtime 注入对象缺失：src/client/index.tsx 不在场`)
 } else {
@@ -192,11 +192,11 @@ if (!b1) {
     ok(b3.cjs === before.cjs && b3.js === before.js,
       'mtime 变更后重建 sha256 不变（工具链不把时间戳带进产物）')
   } else {
-    ok(false, 'mtime 注入腿构建未完成（见上点名）')
+    ok(false, 'mtime 注入子用例构建未完成（见上点名）')
   }
 }
 
-/* S5 泳道内显式腿（KI-073 验收 a/b）：重建 == HEAD committed（显式 sha 对比）。
+/* S5 泳道内显式子用例（KI-073 验收 a/b）：重建 == HEAD committed（显式 sha 对比）。
  * na 时点口径见文件头注：构建输入与 HEAD 非同批（implement 期常态）→ na，
  * arbitrate/merge 期必可判；产物不在 HEAD=FAIL（产物未入版本库是产品红）。 */
 const BUILD_INPUT_PATHS = [
@@ -289,7 +289,7 @@ section('S6. 入口唯一性：构建解析版本 ≡ lockfile ≡ node_modules�
     installed: { tsdown: '0.22.2', rolldown: '1.1.5' },
     actual: { tsdown: '0.22.14', rolldown: '1.2.0' },
   })
-  ok(bite.length === 2, `判定器负腿自证：实际解析漂移必咬恰 2 处（实际 ${bite.length} 处）`)
+  ok(bite.length === 2, `判定器反用例自证：实际解析漂移必咬恰 2 处（实际 ${bite.length} 处）`)
   const malformed = chainMismatch({
     lock: { tsdown: null, rolldown: undefined },
     installed: {},

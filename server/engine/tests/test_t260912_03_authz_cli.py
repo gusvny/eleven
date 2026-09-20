@@ -1,10 +1,10 @@
 """t260912-03 CLI/可查面单测（ticket.py op=authorize 包装、list/show 可读面、client.py 归一）。
 
 覆盖（方案 S5 + review RC6/RC9）：
-  - ticket.py _authorize：payload 形状（经 sign 信号面／审计面）、scope 双形、参数校验各腿；
+  - ticket.py _authorize：payload 形状（经 sign 信号面／审计面）、scope 双形、参数校验各子用例；
   - ticket.py _list：authz_active 透传（缺键补 0，不炸）；
   - ticket.py _show/_authz_view：全量条目 + 逐条状态（生效中/已过期）+ uses 计数；
-  - client.py normalize_authorize_args：ISO8601/epoch/数字串/畸形/缺失各腿；
+  - client.py normalize_authorize_args：ISO8601/epoch/数字串/畸形/缺失各子用例；
   - client.py _row_from_meta：authz_active 只数生效中（过期/坏 kind 不计）。
 
 Temporal 面一律桩掉 `_poc`/`_v2_query`，零网络零 Temporal。
@@ -146,7 +146,7 @@ def test_authz_view_status_and_uses(tk):
     assert [v["status"] for v in view] == ["生效中", "已过期"]
     assert view[0]["used_count"] == 1 and view[0]["scope"] == ["integration/baselines"]
     assert view[1]["used_count"] == 0
-    # 嵌套形状兼容腿（snapshot 形状）
+    # 嵌套形状兼容子用例（snapshot 形状）
     view2 = tk._authz_view({"meta": {"authorizations": items}})
     assert [v["status"] for v in view2] == ["生效中", "已过期"]
     # 老票无该键 → 不加展示层键（两种形状都判 None）

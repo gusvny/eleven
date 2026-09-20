@@ -8,11 +8,11 @@
 build_schedule_specs 门；③声明是机器消费的契约（引擎解析器逐期读取），故对仓内
 inspection.yaml 的实例位做契约守卫合法（非快照型文档 pin）。宿主 260915 令（c946380）
 已令 simplify-face 启用试跑——启用节奏是宿主的开关，不入断言（钉节奏必随开关腐，
-t260915-09 仲裁轮修正）：腿a 改钉声明门一致性不变式（enabled 与 schedule_specs 在场
+t260915-09 仲裁轮修正）：子用例a 改钉声明门一致性不变式（enabled 与 schedule_specs 在场
 恒一致），声明位在场与占位不调度语义仍守。
 
-全部离线腿（trigger decl 子命令=离线声明视图，纯标准库零网络）闸内即验；唯一 server
-腿（enabled 新实例过门真触发）缺 temporalio/共享台=ENV_FAIL 点名不假红（沿票①
+全部离线子用例（trigger decl 子命令=离线声明视图，纯标准库零网络）闸内即验；唯一 server
+子用例（enabled 新实例过门真触发）缺 temporalio/共享台=ENV_FAIL 点名不假红（沿票①
 decl-gate 三态分级先例）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
 intent 分工：与 t260905-03-decl-gate 不同面——彼守门行为本身（畸形/未接线 kind/占位/
 未知四类拒绝+test-face 放行，新实例同门不重测，防 intent 级重复）；本条守**新实例的
@@ -32,7 +32,7 @@ import lib_inspection_ms as lib  # noqa: E402 — 先入本票 lib（其内部�
 import lib_inspection as base  # noqa: E402
 
 # t260916-02 声明落位迁移A：仓内交付声明=本仓根 inspection.yaml（口径④），
-# 腿a 随之重指向新落位（断言不变）。
+# 子用例a 随之重指向新落位（断言不变）。
 REPO_DECL = os.path.join(base.REPO, "inspection.yaml")
 
 NEW_FACES = (("mechanism-face", "mechanism"), ("simplify-face", "simplify"))
@@ -86,39 +86,39 @@ def main() -> int:
     base.require_entry(base.TRIGGER, "巡检触发入口")
     failures = []
 
-    # ── 腿a：仓内 inspection.yaml 声明位契约——两新实例在场（face 对），门一致性
+    # ── 子用例a：仓内 inspection.yaml 声明位契约——两新实例在场（face 对），门一致性
     #     不变式（t260915-09 仲裁口径）+宿主令真值防呆（t260915-10 仲裁口径）双锁：
     #     启用节奏随宿主令演进（c946380：simplify-face 启用试跑，宿主 260915 令；
     #     节奏是宿主开关，钉节奏必随开关腐），断言随真值走、契约只紧不松；
     #     声明是机器消费契约，守卫合法 ──
     proc, parsed = decl_view(REPO_DECL)
     if not isinstance(parsed, dict) or parsed.get("ok") is not True:
-        failures.append("腿a 仓内 decl 视图异常：%r | stderr=%s"
+        failures.append("子用例a 仓内 decl 视图异常：%r | stderr=%s"
                         % (str(parsed)[:160], (proc.stderr or "")[:200]))
     else:
         got = spec_ids(parsed)
         if got is None:
-            failures.append("腿a decl 回执缺 instances/schedule_specs 列表：%r"
+            failures.append("子用例a decl 回执缺 instances/schedule_specs 列表：%r"
                             % (str(parsed.get("result"))[:200],))
         else:
             inst, spec = got
             for iid, face in NEW_FACES:
                 it = inst.get(iid)
                 if it is None:
-                    failures.append("腿a 仓内声明缺新实例 %s（工单声明位验收）：%r"
+                    failures.append("子用例a 仓内声明缺新实例 %s（工单声明位验收）：%r"
                                     % (iid, sorted(inst)))
                     continue
                 # 声明 face 字段已随 t260910-11 除名（零消费者）；面由实例 id 承载
                 # （mechanism-face → mechanism 可派生），改锁 id 派生关系不弱化断言
                 if iid.rsplit("-", 1)[0] != face:
-                    failures.append("腿a %s 实例 id 与面名派生关系破（期望 -%s 后缀）：%r"
+                    failures.append("子用例a %s 实例 id 与面名派生关系破（期望 -%s 后缀）：%r"
                                     % (iid, face, iid))
                 # 门一致性不变式（t260915-09 仲裁口径，main 侧语义保留）：enabled=false ⇔
                 # 不进 schedule_specs（占位不调度）；enabled=true ⇔ 进 specs（调度经声明
                 # 面可见，无静默半态=静默拾取风险）。
                 in_spec = iid in spec
                 if (it.get("enabled") is True) != in_spec:
-                    failures.append("腿a %s 声明门一致性破（enabled=%r 而 schedule_specs 在场=%s，"
+                    failures.append("子用例a %s 声明门一致性破（enabled=%r 而 schedule_specs 在场=%s，"
                                     "半态=静默拾取风险）：%r"
                                     % (iid, it.get("enabled"), in_spec, sorted(spec)))
                 # 宿主令真值防呆（t260915-10 gen0 仲裁口径，泳道侧语义保留）：simplify-face
@@ -127,17 +127,17 @@ def main() -> int:
                 # 声明真值随宿主令演进时本段与声明两处同步（断言随真值走）。
                 if iid == "simplify-face":
                     if it.get("enabled") is not True:
-                        failures.append("腿a simplify-face 应 enabled=true（宿主 260915 令启用试跑=c946380 声明真值）：%r"
+                        failures.append("子用例a simplify-face 应 enabled=true（宿主 260915 令启用试跑=c946380 声明真值）：%r"
                                         % (it.get("enabled"),))
                     if it.get("scan_face") != "simplify":
-                        failures.append("腿a simplify-face 应显式 scan_face=simplify（宿主令注记：缺省落 test 面）：%r"
+                        failures.append("子用例a simplify-face 应显式 scan_face=simplify（宿主令注记：缺省落 test 面）：%r"
                                         % (it.get("scan_face"),))
                 elif iid == "mechanism-face":
                     if it.get("enabled") is not False:
-                        failures.append("腿a %s 应 enabled=false 占位（启用按宿主节奏）：%r"
+                        failures.append("子用例a %s 应 enabled=false 占位（启用按宿主节奏）：%r"
                                         % (iid, it.get("enabled")))
 
-    # ── 腿b：夹具声明——enabled 新实例进 specs 且 face 原样透传；enabled=false 不进
+    # ── 子用例b：夹具声明——enabled 新实例进 specs 且 face 原样透传；enabled=false 不进
     #     （门的数据面：改声明改行为，decl 零改动承诺）──
     workdir = tempfile.mkdtemp(prefix="sandbar-insp-ms-decl-")
     try:
@@ -147,21 +147,21 @@ def main() -> int:
         proc, parsed = decl_view(fixture)
         got = spec_ids(parsed) if isinstance(parsed, dict) and parsed.get("ok") is True else None
         if got is None:
-            failures.append("腿b 夹具 decl 视图异常（解析应零改动支持新面标量）：%r | stderr=%s"
+            failures.append("子用例b 夹具 decl 视图异常（解析应零改动支持新面标量）：%r | stderr=%s"
                             % (str(parsed)[:160], (proc.stderr or "")[:200]))
         else:
             inst, spec = got
             if "mechanism-face" not in spec:
-                failures.append("腿b enabled mechanism-face 未进 schedule_specs（应调度）：%r"
+                failures.append("子用例b enabled mechanism-face 未进 schedule_specs（应调度）：%r"
                                 % (sorted(spec),))
             elif "face" in spec["mechanism-face"]:
-                failures.append("腿b specs 仍透传已除名的 face 字段（t260910-11 schema）：%r"
+                failures.append("子用例b specs 仍透传已除名的 face 字段（t260910-11 schema）：%r"
                                 % (spec["mechanism-face"],))
             if "simplify-face" in spec:
-                failures.append("腿b disabled simplify-face 进了 specs（不调度破）：%r"
+                failures.append("子用例b disabled simplify-face 进了 specs（不调度破）：%r"
                                 % (sorted(spec),))
             if inst.get("simplify-face", {}).get("id") != "simplify-face":
-                failures.append("腿b instances 缺 simplify-face 实例（id 承载面名）：%r"
+                failures.append("子用例b instances 缺 simplify-face 实例（id 承载面名）：%r"
                                 % (inst.get("simplify-face"),))
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
@@ -170,13 +170,13 @@ def main() -> int:
         for m in failures:
             print("FAIL_REASON: " + m, flush=True)
         return 1
-    print("离线腿全过：仓内 yaml mechanism-face 占位 enabled=false 不进调度规格、"
+    print("离线子用例全过：仓内 yaml mechanism-face 占位 enabled=false 不进调度规格、"
           "simplify-face 宿主 260915 令启用试跑（enabled=true+scan_face=simplify，进 specs），"
           "enabled 与 schedule_specs 在场恒一致（门一致性不变式）；"
           "enabled 新实例进 specs 且 face 原样透传（decl 零改动）", flush=True)
 
-    # ── 腿c（server 腿）：enabled mechanism-face 过声明门真触发——缺 temporalio/
-    #     共享台=ENV_FAIL 点名（离线腿已过如实陈述，不假红不假绿）──
+    # ── 子用例c（server 子用例）：enabled mechanism-face 过声明门真触发——缺 temporalio/
+    #     共享台=ENV_FAIL 点名（离线子用例已过如实陈述，不假红不假绿）──
     def stage_up() -> bool:
         try:
             _proc, p = base.run_client("schedule-list", {})
@@ -185,8 +185,8 @@ def main() -> int:
         return bool(isinstance(p, dict) and p.get("ok") is True)
 
     if not stage_up():
-        base.die_env("腿c 不可验：temporalio 缺席或共享测试台不可达（schedule-list 未 ok）"
-                     "——离线腿已全过；enabled 新实例放行腿需 temporalio+共享台，不假红不假绿")
+        base.die_env("子用例c 不可验：temporalio 缺席或共享测试台不可达（schedule-list 未 ok）"
+                     "——离线子用例已全过；enabled 新实例放行子用例需 temporalio+共享台，不假红不假绿")
     workdir = tempfile.mkdtemp(prefix="sandbar-insp-ms-decl2-")
     try:
         fixture = os.path.join(workdir, "fixture.yaml")
@@ -195,21 +195,21 @@ def main() -> int:
         proc, parsed = base.run_trigger(["trigger", "--instance", "mechanism-face",
                                          "--decl-path", fixture])
         if not isinstance(parsed, dict):
-            failures.append("腿c 触发回执非单行 JSON：%r | stderr=%s"
+            failures.append("子用例c 触发回执非单行 JSON：%r | stderr=%s"
                             % ((proc.stdout or "")[:160], (proc.stderr or "")[:200]))
         elif parsed.get("ok") is not True:
             err = str(parsed.get("error") or "")
             if "声明" in err:
-                failures.append("腿c enabled 新实例被声明门误拒（应放行，报错错向）：%r" % err[:240])
+                failures.append("子用例c enabled 新实例被声明门误拒（应放行，报错错向）：%r" % err[:240])
             else:
-                failures.append("腿c enabled mechanism-face 触发放行失败（非声明门理由）：%r"
+                failures.append("子用例c enabled mechanism-face 触发放行失败（非声明门理由）：%r"
                                 % err[:240])
         else:
             tid = str(((parsed.get("result") or {}).get("ticket_id")) or "")
             if not tid:
-                failures.append("腿c 放行回执未带 ticket_id：%r" % (parsed.get("result"),))
+                failures.append("子用例c 放行回执未带 ticket_id：%r" % (parsed.get("result"),))
             else:
-                print("腿c 放行回执带票号 %s（新 face 过声明门）" % tid, flush=True)
+                print("子用例c 放行回执带票号 %s（新 face 过声明门）" % tid, flush=True)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 

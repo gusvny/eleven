@@ -10,7 +10,7 @@
 //   D. 诚实口径：回执错误原文（含「刷新无效」）随视图可达；快照/阶段说明缺省兜底。
 //   E. host 装配（ticketShowErrorReply）：terminal+face → 410 且附 face；
 //      直读失败/超时/畸形（face 缺失/null/数组/标量）→ 仍 410 且**无 face 键**
-//      （review② 降级腿，UI 降纯错误提示不渲染失败面板）；非 terminal kind 不附带；
+//      （review② 降级分支，UI 降纯错误提示不渲染失败面板）；非 terminal kind 不附带；
 //      transient 仍 503+retryable（KI-025 分级零回归）。
 //   F. 源级锚：TerminalFailurePanel 零操作入口；抽屉接线（terminalFace 渲染/清态）；
 //      openDetail 捕获 face；node.ts 直读桥（terminal → 直读 ticket-query、超时小于
@@ -103,7 +103,7 @@ console.log('\n== C 反用例：终态但原因不可得（显式文案 + 执行
     '畸形键值（数字/布尔/字符串布尔）→ 全按缺失降级')
 }
 
-/* ---- E. host 装配（review② 降级腿行为断言） ---- */
+/* ---- E. host 装配（review② 降级分支行为断言） ---- */
 console.log('\n== E ticketShowErrorReply：410 分级零回归 + face 只加键不改级 ==')
 {
   const good = ticketShowErrorReply({ ok: false, error: '工单已终态（FAILED），快照不可得——终态票不再推进，刷新无效', kind: 'terminal' }, 't-1', GOOD_FACE)

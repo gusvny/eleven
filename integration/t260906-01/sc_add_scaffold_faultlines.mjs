@@ -82,8 +82,8 @@ const add = (root, key, name, dir, extra = []) => runCli(
   c.check('源表畸形=红', r2.code !== 0, `exit=${r2.code}\n${r2.out.slice(-400)}`);
   c.check('报错点名「畸形」+源路径', r2.out.includes('畸形') && r2.out.includes('model-routes.yaml'),
     r2.out.slice(-400));
-  c.check('畸形腿注册表零残留', !existsSync(path.join(regRoot2, 'badk')), regRoot2);
-  c.check('畸形腿新建根被回滚', !existsSync(newRoot2), newRoot2);
+  c.check('畸形子用例注册表零残留', !existsSync(path.join(regRoot2, 'badk')), regRoot2);
+  c.check('畸形子用例新建根被回滚', !existsSync(newRoot2), newRoot2);
 }
 
 // ---- D：代建×闸 d 交互（新根=已注册根的「尚不存在」祖先 → 拒且零代建）----

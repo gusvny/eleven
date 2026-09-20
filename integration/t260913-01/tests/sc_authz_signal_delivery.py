@@ -6,20 +6,20 @@ intent（登记于 run_scenarios.py，名 t260913-01-authz-signal-delivery）：
   人授权唯一入口（server/tools/ticket.py op=authorize → Signature.authorize → sign 信号）
   在**真实投递链**（真用户 CLI → 真 Temporal 信号 → 真专属 worker → 真 workflow）上必须
   送达并被 intake 落账——本票事故面正是「载荷在传输/解码一跳静默丢失后回落普通签字，
-  回执 delivered=true 只证送达」（integration 侧 260913 三条实锤复现）。故本场景全部腿
+  回执 delivered=true 只证送达」（integration 侧 260913 三条实锤复现）。故本场景全部子用例
   走真信号投递，不以直调纯函数代替：
 
   相一  sign_face 指纹 query 在场（新公开契约）：worker 内存 signal 面自述可被客户端实时
         核验——陈旧 worker（无此 query）结构性 absent，是「重启判据/拒发」的根。
-  相二  A 腿：protected_path 授权真信号 → meta.authorizations 落条且 who/issued/expires/
+  相二  A 子用例：protected_path 授权真信号 → meta.authorizations 落条且 who/issued/expires/
         scope/reason/uses 完整 + timeline 签发事件 + 回执 landing 机读键（验收 A 送达半边；
         消费半边=settle 放行+path_gate_authz_used，由在册 sc_authz_protected_path 锁定）。
   相三  负锁①过期授权（真 CLI）→ refused「已过期」、不落账、回执 landing="refused"。
   相四  负锁②arbitration_verdict scope=别票（真 CLI）→ refused 点名别票票号、不落账。
   相五  负锁③who=agent 角色名（真 CLI）→ 反自签拒收、不落账。
-  相六  负锁④marker 保留值真往返腿（直发 SDK 信号：gate=marker 而 authorize 缺失=传输
+  相六  负锁④marker 保留值真往返子用例（直发 SDK 信号：gate=marker 而 authorize 缺失=传输
         丢失后的解码等价形态）→ refused want=sign(authorize)、why 点名「载荷解析失败」
-        且与「非人审等待中」可辨、不落账（验收 C 的可辨文案由此腿机械锁定）。
+        且与「非人审等待中」可辨、不落账（验收 C 的可辨文案由此子用例机械锁定）。
   相七  负锁⑤畸形 decode-safe 载荷（直发 SDK：authorize=裸 dict 缺字段）→ intake 语义
         拒收、不落账。类型不兼容毒载荷（如 authorize=123）**故意不用**：它会让
         value_to_type 抛 TypeError 进 workflow task 重试循环（毒消息，KI 候选③），
@@ -28,7 +28,7 @@ intent（登记于 run_scenarios.py，名 t260913-01-authz-signal-delivery）：
 与其他场景的 intent 分工（防重复）：
   · t260912-03-authz-protected-path 锁「闸的行为」（无授权红/有授权 settle 放行+记名）；
   · t260912-03-authz-overlimit-accept 锁「仲裁超限回灌消费面」（uses≥1/推进/判决原文）
-    ——即本票验收 B 腿与 D 的「B 有真信号场景」由它承担，本场景不重复烧；
+    ——即本票验收 B 子用例与 D 的「B 有真信号场景」由它承担，本场景不重复烧；
   · t260912-03-authz-cli-queryable 锁「用户可查面管道」（show/list）；
   · 本条锁「送达面 + 接收侧丢失可见化 + 真信号负锁矩阵」。与 developer L1（指纹/分类/
     落账纯函数单测）不同层。
@@ -64,7 +64,7 @@ from lib_ki061 import (ARB_STUB, make_fixture_repo, poll, query_snapshot,  # noq
                        wait_worker_alive)
 
 # marker 保留值：优先取引擎单一真源（implement 落地后在场）；缺位时回落方案钉死的
-# wire 字面值——两条腿都只锁「线上的这个 token」，不锁常量名。
+# wire 字面值——两条子用例都只锁「线上的这个 token」，不锁常量名。
 try:
     from shared import AUTHZ_SIGNAL_GATE_MARKER as _MARKER  # noqa: E402
     MARKER, MARKER_SRC = _MARKER, "shared.AUTHZ_SIGNAL_GATE_MARKER"
@@ -73,9 +73,9 @@ except Exception:  # noqa: BLE001  实现段落地前：常量不在场，用方
 
 TID = "t26091301a-authz-d"
 PROJ_KEY = "t26091301a"
-WHO = "宿主"                       # CLI 腿的授权人（人名，非 agent 角色名）
-WHO_DIRECT = "host-operator"       # 直发 SDK 腿的 who（ASCII，规避 locale 面）
-REASON = "t260913-01 场景：批准本票改共享电池期望值（送达面腿）"
+WHO = "宿主"                       # CLI 子用例的授权人（人名，非 agent 角色名）
+WHO_DIRECT = "host-operator"       # 直发 SDK 子用例的 who（ASCII，规避 locale 面）
+REASON = "t260913-01 场景：批准本票改共享电池期望值（送达面子用例）"
 SCOPE = "integration/baselines"
 OTHER_TID = "t26099999-99"         # 别票票号（负锁②）
 TICKET_PY = os.path.join(REPO, "server", "tools", "ticket.py")
@@ -284,7 +284,7 @@ def main():
             return s if isinstance(s, dict) and s.get("ticket_id") == TID else None
         if poll(_alive, 120) is None:
             wait_worker_alive(fail, worker, os.path.join(tmp, "worker.log"))
-            fail.bail("workflow snapshot 不可读（票未起或 worker 未认领），后续腿全跑不真")
+            fail.bail("workflow snapshot 不可读（票未起或 worker 未认领），后续子用例全跑不真")
         base0 = snapshot_state(py, env)
         print("  · 基线：authorizations=%d refused=%d authorized 事件=%d"
               % (base0[0], base0[1], base0[2]), flush=True)
@@ -305,13 +305,13 @@ def main():
             check(isinstance(v, dict) and bool(str(v.get("marker") or "").strip()),
                   "sign_face 带 marker 保留值（接收侧丢失可见化的对端凭据）")
 
-        # ---------------- 相二：A 腿——protected_path 授权真信号送达+落账 ----------------
+        # ---------------- 相二：A 子用例——protected_path 授权真信号送达+落账 ----------------
         exp_future = int(time.time()) + 3600
         rc, out = cli(py, env, {"op": "authorize", "id": TID, "who": WHO,
                                 "kind": "protected_path", "scope": [SCOPE],
                                 "reason": REASON, "expires": exp_future})
         doc = cli_json(out)
-        check(doc.get("ok") is True, "A 腿 CLI op=authorize 受理（rc=%s out尾=%s）"
+        check(doc.get("ok") is True, "A 子用例 CLI op=authorize 受理（rc=%s out尾=%s）"
               % (rc, out[-160:]))
 
         def _landed():
@@ -321,15 +321,15 @@ def main():
         if s is None:
             wait_worker_alive(fail, worker, os.path.join(tmp, "worker.log"))
             s = query_snapshot(py, env, TID)
-            fail.bail("A 腿授权未落账（authorizations=%d；refused尾=%s）——载荷在投递/解码"
+            fail.bail("A 子用例授权未落账（authorizations=%d；refused尾=%s）——载荷在投递/解码"
                       "一跳丢失或 intake 未生效（本票事故形态）"
                       % (len(authz_items(s)),
                          json.dumps(refused_items(s)[-1:], ensure_ascii=False)[:260]))
         items = authz_items(s)
         it = items[-1]
-        print("  · A 腿证据：authorizations 尾条=%s" % json.dumps(it, ensure_ascii=False)[:300],
+        print("  · A 子用例证据：authorizations 尾条=%s" % json.dumps(it, ensure_ascii=False)[:300],
               flush=True)
-        check(len(items) == base0[0] + 1, "A 腿落账恰 +1 条（%d→%d）" % (base0[0], len(items)))
+        check(len(items) == base0[0] + 1, "A 子用例落账恰 +1 条（%d→%d）" % (base0[0], len(items)))
         check(str(it.get("who") or "") == WHO, "落账 who 记名=%r" % it.get("who"))
         check(str(it.get("kind") or "") == "protected_path", "落账 kind=%r" % it.get("kind"))
         check([str(x) for x in (it.get("scope") or [])] == [SCOPE],
@@ -402,7 +402,7 @@ def main():
         check(len(authz_items(s)) == base3[0],
               "负锁③ 自签不落账（authorizations=%d）" % len(authz_items(s)))
 
-        # ---------------- 相六：负锁④ marker 真往返腿（直发 SDK=传输丢失等价形态） ----------------
+        # ---------------- 相六：负锁④ marker 真往返子用例（直发 SDK=传输丢失等价形态） ----------------
         base4 = snapshot_state(py, env)
         rc, out = send_signal(py, state, TID, "sign",
                               {"who": WHO_DIRECT, "gate": MARKER,

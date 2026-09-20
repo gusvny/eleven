@@ -22,7 +22,7 @@
 // intent 分界：与 t260915-08-board-ui 不同面——彼守中列板面巡检行/详情/签字通道，本条守
 // 左栏分拣制（项目组归位/兜底组/反沉底烟测）/左栏等你黄调/左栏降级显式性；与
 // t260903-07-click-no-chat-switch 不同面（彼守点行不切会话，本守左栏巡检行的存在与行为）。
-// KI 对齐：KI-018①（错误文案进横幅不进数据字段=降级腿断言）、KI-051（原文断子串不锚整句、
+// KI 对齐：KI-018①（错误文案进横幅不进数据字段=降级子用例断言）、KI-051（原文断子串不锚整句、
 // 语义 testid 锚）、KI-055（真机计算样式断言+bundle 锚，防台面绿真机红）、t260910-04 R3/
 // KI-008（失败保快照不吞空列表）。
 
@@ -275,7 +275,7 @@ async function runBrowser(pw, browser) {
     await page.waitForTimeout(3000)
     await dismissOverlays(page)
 
-    // 数据只在 API 边界打桩；inspection 载荷可变（降级腿换 ok:false）。
+    // 数据只在 API 边界打桩；inspection 载荷可变（降级子用例换 ok:false）。
     let insPayload = { ok: true, result: { tickets: INS_ROWS, count: INS_ROWS.length } }
     const DEGRADE = { ok: false, error: 'ticket-list(inspection) 失败: fixture 降级注入 0x519' }
     await page.route('**/sandbar-workbench/api/wf/**', (route) => {
@@ -322,7 +322,7 @@ async function runBrowser(pw, browser) {
     record('S1 precheck', 'pass', `左栏项目组渲染（${PROJ_A}/${PROJ_B}）`)
 
     // 等第一拍 load 完成：侧栏 setProjects 先落账（组头先出）、逐组拉取与巡检行
-    // 分拣后到——不候行落组，①②腿会跑在渲染前（ownerOf 读到 absent 的时序假红）。
+    // 分拣后到——不候行落组，①②子用例会跑在渲染前（ownerOf 读到 absent 的时序假红）。
     const insCardProbe = page.locator(`.wb-sb .wb-card[data-ticket-id="${INS_A}"]`).first()
     if (!(await waitFor(async () => (await insCardProbe.count()) > 0, 15000))) {
       record('S1 rows-landed', 'fail', `巡检行未落组（${INS_A} 缺席）——分拣面未落地或轮询未完成`)
@@ -426,7 +426,7 @@ async function runBrowser(pw, browser) {
     await page.keyboard.press('Escape').catch(() => {})
     await waitFor(async () => (await page.locator('.wb-drawer, [role="dialog"]').count()) === 0, 5000)
 
-    // ⑧ 降级腿（KI-018①/051/t260910-04 R3）：端点 ok:false → 横幅显原文子串；快照行保留；
+    // ⑧ 降级子用例（KI-018①/051/t260910-04 R3）：端点 ok:false → 横幅显原文子串；快照行保留；
     //    错误文案不写进行数据（行文本不含「拉取失败」）。
     insPayload = DEGRADE
     const banner = page.locator('.wb-sb [data-testid="sidebar-inspection-degraded"]').first()
@@ -444,7 +444,7 @@ async function runBrowser(pw, browser) {
       degradeOk ? `降级横幅显原文子串（…${bannerText.slice(-40).trim()}），快照行保留，错误文案未进行数据`
         : `降级面异常：banner=${bannerOk}（text=${bannerText.slice(0, 80)}）snapA=${snapA} snapUn=${snapUn} noLeak=${noLeak}`)
 
-    // ⑨ 卫生腿：全旅程零 pageerror。
+    // ⑨ 卫生子用例：全旅程零 pageerror。
     record('S1 page-health', pageErrors.length ? 'fail' : 'pass',
       pageErrors.length ? `pageerror 计 ${pageErrors.length}：${pageErrors.slice(0, 3).join(' | ')}` : '全程零 pageerror')
   } finally {
@@ -456,7 +456,7 @@ async function runBrowser(pw, browser) {
 
 buildContract()
 // consoleHealthy 是 async——不 await 则恒真值（promise 对象），ensure 成功后台面中途
-// 死掉的场景会漏进浏览器腿拿「未捕获异常=FAIL」而非诚实 env_fail（三态误报修正，
+// 死掉的场景会漏进浏览器子用例拿「未捕获异常=FAIL」而非诚实 env_fail（三态误报修正，
 // 260916 仲裁归因轮；08 同形不在本票写集，随岗位置另议）。
 if (!(await consoleHealthy())) {
   record('S1 console', 'env_fail', `测试控制台不可达：${BASE}（supply 台未起？宿主 3099 红线不碰）`)

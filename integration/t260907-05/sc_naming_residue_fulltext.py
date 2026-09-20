@@ -7,7 +7,7 @@ intent（守护的用户可感知契约 / 工单验收①的独立机器重演�
   =文档/脚本指向一个已死的名字（用户按残留走必 404），且意味着替换有漏网面。
 - 不动面守卫：非本票面的既有标识（/sandbar-admin/ 前缀、project-registry.ts、
   dsh-profile-suyou 包名）必须原样在位——机械替换最常见的对抗事故是「顺手多改」，
-  把后续票的面提前污染。按 doc-guard G6 先例钉现状语义：后续票落地时随其语义同步改本腿。
+  把后续票的面提前污染。按 doc-guard G6 先例钉现状语义：后续票落地时随其语义同步改本子用例。
 - docs/ 定稿库已知漂移清单封口：本票不改 docs/（写集外），但 docs 命中必须 ⊆ 已声明
   的遗留票清单（工单工作流台设计.md / 知识库设计.md / README.md / build_index.py）——
   清单外新命中=替换面外溢或新写文件带病，红。
@@ -160,7 +160,7 @@ def main():
         check(top == want and inner == want,
               "%s lock name 顶=%s/内=%s 均 %s" % (plug, top, inner, want))
 
-    print("== 5. 不动面原样在位（现状语义钉死，后续票随其语义同步改本腿）")
+    print("== 5. 不动面原样在位（现状语义钉死，后续票随其语义同步改本子用例）")
     ui_node = os.path.join(REPO, "server", "plugins", "ui", "node.ts")
     try:
         with open(ui_node, "r", encoding="utf-8") as f:

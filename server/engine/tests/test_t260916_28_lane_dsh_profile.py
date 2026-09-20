@@ -172,7 +172,7 @@ def test_u3_all_candidates_empty_helper_silent_preflight_loud(tmp_path, monkeypa
     assert str(empty1) in ev and str(empty2) in ev          # 候选链逐候选在文案
     assert str(lane_dsh / "profiles" / PROFILE) in ev       # 解析出的 lane 路径
     assert "retry_qc" in refusal["next_action"]
-    # warning 留痕（caplog 经 root logger 传播；temporalio logger 不可达时此腿降级为
+    # warning 留痕（caplog 经 root logger 传播；temporalio logger 不可达时此分支降级为
     # 行为断言，上面的行为断言已独立成立）
     assert any("候选链" in r.message or "sandbar-headless" in r.getMessage()
                for r in caplog.records)

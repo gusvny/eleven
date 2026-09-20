@@ -4,7 +4,7 @@
   A. has_ticket_id_shape 真值表：形状判别（全工单票共形），非巡检票身份判别（R7①
      圈死语义——t 形/三位序号/服务端后缀形/旧形 id/空串）。
   B. _resolve_spawn_identity 身份回退链（R2b）：args 显式优先 → plan.instance_project_key
-     回退（缺 project_key 的 260917 实况腿）→ 双缺 repo_root 可解析；都决议不出=
+     回退（缺 project_key 的 260917 实况子用例）→ 双缺 repo_root 可解析；都决议不出=
      fail-closed ValueError。
   C. spawn_inspection_period 活动面（桩注入）：args.period 透传（重定向把已铸期传下）；
      身份回退链在活动里生效；身份决议失败显式 ok=False；face 空传走声明 scan_face。
@@ -60,7 +60,7 @@ def test_identity_args_explicit_wins(monkeypatch):
 
 
 def test_identity_falls_back_to_decl_when_args_missing(monkeypatch):
-    """260917 实况腿：旧 action payload 无 project_key、repo_root 非空——声明回退补齐
+    """260917 实况子用例：旧 action payload 无 project_key、repo_root 非空——声明回退补齐
     身份；repo_root 显式保留（resolve_project_root 不触）。"""
     ident = acts._resolve_spawn_identity({"repo_root": "/Users/x/Documents/sandbar"}, PLAN)
     assert ident["project_key"] == "sandbar"
@@ -119,13 +119,13 @@ def _patch_env(monkeypatch, plan, open_spy):
     monkeypatch.setattr(tick, "open_period_ticket", open_spy)
     monkeypatch.setattr(acts, "activity", SimpleNamespace(
         info=lambda: SimpleNamespace(task_queue="q-t")))
-    # 身份回退链的注册表腿桩（活动内部 from shared import → 读模块属性，可注）
+    # 身份回退链的注册表桩（活动内部 from shared import → 读模块属性，可注）
     monkeypatch.setattr(shared, "resolve_project_root",
                         lambda k: "/registry/%s" % k)
 
 
 def test_spawn_period_override_and_identity_fallback(monkeypatch):
-    """重定向复用腿：args.period 透传（不按 tz 现铸）+ 缺 project_key 走声明回退；
+    """重定向复用子用例：args.period 透传（不按 tz 现铸）+ 缺 project_key 走声明回退；
     face 空传 → scan_face 走声明（doc）。"""
     spy = _OpenSpy()
     _patch_env(monkeypatch, PLAN, spy)

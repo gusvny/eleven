@@ -360,7 +360,7 @@ def test_run_capture_stage_up_envfail_propagates_no_down(monkeypatch, tmp_path):
         asyncio.run(uis.run_capture_stage(
             project="p", capture_cmd=[sys.executable, "-c", "pass"],
             capture_timeout_s=5, stage_up_timeout_s=5, repo_root=str(tmp_path)))
-    assert down_calls == [], "起台失败无台可拆（清理归 stage_docker 自身失败腿）"
+    assert down_calls == [], "起台失败无台可拆（清理归 stage_docker 自身失败分支）"
     assert up_calls and up_calls[0]["project"] == "p"
 
 
@@ -372,7 +372,7 @@ def test_run_capture_stage_up_contract_red_propagates(monkeypatch, tmp_path):
             capture_timeout_s=5, stage_up_timeout_s=5, repo_root=str(tmp_path)))
 
 
-# ---- services 感知回执校验（场景①腿 A 实证：temporal 精简台无 console） ------
+# ---- services 感知回执校验（场景①子用例 A 实证：temporal 精简台无 console） ------
 
 def test_receipt_temporal_only_passes_without_console():
     r = uis.validate_stage_receipt(json.dumps({

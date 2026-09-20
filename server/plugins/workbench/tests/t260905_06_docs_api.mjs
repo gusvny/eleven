@@ -100,7 +100,7 @@ test('readDoc：根内符号链接不拦（只读面，非本票威胁模型）�
   const root = fresh()
   const outside = fresh()
   writeFileSync(join(outside, 'target.md'), '外泄')
-  try { symlinkSync(join(outside, 'target.md'), join(root, 'link.md')) } catch { /* 平台无权限=该腿退化为只验穿路径 */ }
+  try { symlinkSync(join(outside, 'target.md'), join(root, 'link.md')) } catch { /* 平台无权限=该子用例退化为只验穿路径 */ }
   assert.equal((await listDocs(root, 'docs')).empty, false)
   const r = await readDoc(root, '../' + outside.split('/').pop() + '/target.md')
   assert.equal(r.empty, true)

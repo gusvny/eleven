@@ -9,7 +9,7 @@ intent（登记于 run_scenarios.py）：
   签发落不可变事件（timeline `state=authorized`）；死授权（已过期）与反自签（who=agent
   角色名）在 CLI 层被 workflow intake 拒收后**不出现在可查面**，生效中计数不虚增。
 
-  为什么单开一条腿：本票另外两条 L3 场景（sc_authz_protected_path /
+  为什么单开一条子用例：本票另外两条 L3 场景（sc_authz_protected_path /
   sc_authz_overlimit_accept）读的都是引擎 snapshot 原始 meta；而验收口径 C 说的是
   **ticket show / 工单列表**这一层——它是 CLI → client.py ticket-query/ticket-list →
   Temporal query 的整条管道（KI-076 同族故障模式：管道断在中间时原始 meta 绿而用户面白）。
@@ -54,7 +54,7 @@ from lib_ki061 import (ARB_STUB, make_fixture_repo, poll, read_stub_log,  # noqa
 TID = "t26091203c-authz-q"
 PROJ_KEY = "t26091203c"
 WHO = "宿主"
-REASON = "t260912-03 场景：批准本票改共享电池期望值（可查面腿）"
+REASON = "t260912-03 场景：批准本票改共享电池期望值（可查面子用例）"
 SCOPE = "integration/baselines"
 TICKET_PY = os.path.join(REPO, "server", "tools", "ticket.py")
 

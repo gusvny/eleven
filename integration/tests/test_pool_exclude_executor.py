@@ -18,7 +18,7 @@ intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：�
 - G 资产面负锁：ro/browser 池场景文件不被误收（方向=宁可多跑，不得漏跑被排除池面）；
 - H 缺省路径与改前执行器（git HEAD 快照）在假表上逐字节一致（验收 B 的源码级 A/B）。
 
-安全红线：假场景脚本全部落 TemporaryDirectory（真仓零触碰）；每腿显式 env 桩
+安全红线：假场景脚本全部落 TemporaryDirectory（真仓零触碰）；每子用例显式 env 桩
 save/restore（既有先例无 os.environ 隔离，排除环境下会自我污染）；rs.SCENARIOS
 替换 try/finally 还原；运行时卫生钩子置空（本电池不测 docker 面）。零端口零
 docker 零控制台，秒级。
@@ -61,7 +61,7 @@ def ok(cond, label, detail=""):
 
 @contextlib.contextmanager
 def env_stub(value, extra=None):
-    """显式 env 桩：save/restore；value=None 表示清除该键（缺省形态腿必须清）。
+    """显式 env 桩：save/restore；value=None 表示清除该键（缺省形态子用例必须清）。
     extra=额外键值（如 SANDBAR_POOL_CONC=1 求确定序），出块一律还原。"""
     keys = [ENV_KEY] + list((extra or {}).keys())
     saved = {k: os.environ.get(k) for k in keys}
@@ -87,7 +87,7 @@ def drive(entries, exclude_env, mod=None, extra_env=None):
     entries=(名, 池, 脚本文本)，池为 None=main。假脚本落临时目录并把 cwd 移进去
     （main 的 out/ 报告落档不污染真仓）；SCENARIOS 替换 try/finally 还原；卫生
     钩子置空（sweep/docker hygiene 属真 docker 面，本电池不测）。mod=被测模块
-    （缺省=本仓执行器；H 腿用改前快照）。
+    （缺省=本仓执行器；H 子用例用改前快照）。
     """
     mod = mod or rs
     with tempfile.TemporaryDirectory(prefix="t913ex-") as td:
@@ -187,7 +187,7 @@ ok("EXCLUDE_POOLS_WARN [Engine]" in out and "EXCLUDE_POOLS_WARN [bad token]" in 
 ok("本轮跳过池=engine（少 1 条）" in out and "PASS [t913-engine]" not in out,
    "D3 合法部分照常生效")
 
-# ---- E 既有电池在排除 env 继承下照常绿（R2 机械回归腿）----
+# ---- E 既有电池在排除 env 继承下照常绿（R2 机械回归用例）----
 for _path, _label in ((REPO / "integration/t260904-12/sc_executor_three_state.py",
                        "三态出口电池"),
                       (REPO / "integration/t260910-13/sc_t260910_13_executor_fail_closed.py",

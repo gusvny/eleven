@@ -124,7 +124,7 @@ def main():
                 check(py.get("path") == ts.get("path"),
                       "%s：path 一致（%s）" % (name, py.get("path")))
 
-        # 拒收腿：.. 逃逸（py=ProjectPathsError，ts=throw）
+        # 拒收子用例：.. 逃逸（py=ProjectPathsError，ts=throw）
         reg = tmp / "reg-reject"
         primary = mk_registry(reg, "parity", "  model_routes: ../escape.yaml\n")
         py = py_resolve(reg, "parity", primary)

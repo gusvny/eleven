@@ -38,7 +38,7 @@ intent（用户可感知契约 = 工单验收①-⑥ 的集成层兑现）：
 并发与公共入口回执。
 
 环境口径（三态契约：PASS/FAIL/环境红，无跳过语义）：A/B/C/D2 段纯 stdlib 恒跑（audit 模块仅
-stdlib）；D1 段（client.py 真子进程腿）需 temporalio 可导入，缺失=ENV_FAIL exit 2
+stdlib）；D1 段（client.py 真子进程命令）需 temporalio 可导入，缺失=ENV_FAIL exit 2
 点名（其余段照跑）；无 docker/真 Temporal/真 git 依赖。
 红线：模块级先钉 SANDBAR_TARGET_HOST=127.0.0.1:9（不可达桩）；一切审计写经
 SANDBAR_ADMIN_LOG 指向 mkdtemp，被测子进程同 env；注册表桩经 SANDBAR_PROJECTS_DIR
@@ -456,7 +456,7 @@ check("C3b max_mb 畸形回落缺省 512（不炸不误切）",
 
 # ============ D 段：审计写失败可感（真子进程 stdout/stderr） ============
 print("---- D 段：审计写失败可感（真子进程 stdout/stderr） ----")
-fresh_registry("seg-d-reg")  # 干净空桩：D 腿子进程不掺配置变量
+fresh_registry("seg-d-reg")  # 干净空桩：D 命令子进程不掺配置变量
 blocker = fresh_dir("seg-d-blocker")  # 目录本身 = open('a') 的 OSError 桩（跨平台稳定）
 env_d = stub_env({"SANDBAR_ADMIN_LOG": str(blocker)})
 
@@ -470,7 +470,7 @@ def temporalio_available():
 
 
 if not temporalio_available():
-    env_fail("temporalio 缺失——D1（client.py 裸入口真子进程腿）无 stdlib 替代；"
+    env_fail("temporalio 缺失——D1（client.py 裸入口真子进程命令）无 stdlib 替代；"
              "A/B/C/D2 照跑")
 else:
     p = subprocess.run([sys.executable, str(POC / "client.py"), "no-such-sub"],
@@ -486,7 +486,7 @@ else:
     check("D1c stderr 留痕非空", bool((p.stderr or "").strip()),
           "stderr=%r" % (p.stderr or "")[:120])
 
-# D2 ticket.py 直 spawn（stdlib 拒收腿，恒跑）：marker 跨第二公共入口传播
+# D2 ticket.py 直 spawn（stdlib 拒收子用例，恒跑）：marker 跨第二公共入口传播
 p = subprocess.run([sys.executable, str(TICKET_PY),
                     json.dumps({"op": "create", "title": "x"})],
                    env=env_d, cwd=str(REPO), capture_output=True, text=True,

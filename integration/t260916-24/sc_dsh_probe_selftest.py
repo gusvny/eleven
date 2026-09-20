@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""探针离线自检腿（t260916-24，dsh-upgrade epic T4）。
+"""探针离线自检子用例（t260916-24，dsh-upgrade epic T4）。
 
 场景包装只跑 probe_dsh_seam.py --selftest（零网络/零 npm/秒级），防探针断言语义
 腐烂；live 档（隔离 npm 安装 + 真凭据 + 分钟级五断言对账）按验收④**不入**默认跑分

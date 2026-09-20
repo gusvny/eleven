@@ -9,7 +9,7 @@ intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：
   并发 up（失控循环样本）：恰 ≤4 路入位、其余全部被刹停且每路红行点名保险丝
   并附活租约清单（holder pid/票号/lease 可核对——「点名」是硬断言不是措辞
   偏好）、刹停红一律环境档 rc=2（不放大不重试）；
-- 损害有界：全程在跑容器 ≤4 台规模、风暴结束后无孤儿持有腿进程残留
+- 损害有界：全程在跑容器 ≤4 台规模、风暴结束后无孤儿持有子用例进程残留
   （pgrep 公开观测面）、清理后零容器残留——「不得无声吃满机器」的机械面；
 - 全程零地址池报错（失控样本也不得撞池）。
 
@@ -146,13 +146,13 @@ def main():
         check(not (set(ports) & (PROD_PORTS | FORBIDDEN_PORTS)),
               "入位者端口 ∉ 生产/禁区面")
 
-        # 清场 + 孤儿持有腿清点
+        # 清场 + 孤儿持有子用例清点
         downs = guarded_down([p for p, _rc, _o, _e in oks], ROOT)
         check(all(rc == 0 for rc in downs.values()), "入位台终态拆台全 rc=0")
         residue = [p for p in STORM if compose_containers(p)]
         check(not residue, "风暴终态零容器残留（残留 %s）" % residue[:3])
         orphans = hold_pids_prefix(TAG)
-        check(not orphans, "无孤儿持有腿残留（pgrep 命中 %s）" % orphans[:5])
+        check(not orphans, "无孤儿持有子用例残留（pgrep 命中 %s）" % orphans[:5])
     finally:
         guarded_down(STORM, ROOT)
     finish()

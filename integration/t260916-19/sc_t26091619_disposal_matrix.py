@@ -18,13 +18,13 @@ intent（守护的用户可感知行为/契约，工单修向 B＝滞留复判�
 与相邻场景 intent 分界（防 intent 级重复）：
 - sc_t26091619_incident_replay（本票场景②）：彼锁**实案形态重演**（顶层 sc_*/README 合法化
   =修向 C 旅程 + lint_tests.py M 态回滚），本条锁**处置矩阵逐态终态**（含 D/staged/protected
-  拒绝腿与 judged_files 证据面），分态不分家；
-- t260911-03 系（路径闸拒绝面）：彼守**拒绝终态三件套**（0 commit+点名+原因码；越权腿=删除
+  拒绝子用例与 judged_files 证据面），分态不分家；
+- t260911-03 系（路径闸拒绝面）：彼守**拒绝终态三件套**（0 commit+点名+原因码；越权子用例=删除
   型 D 态——t260916-19 起 ??/M 态改自动处置不再终态拒绝），本条守**处置后的二次 settle 转绿**
   与留档可还原，彼不碰处置、本条不重复拒绝面枚举；
 - t260914-01 系（settle 姿态）：彼守协调目录产物收口/空提交可辨，本条零协调目录面。
 
-与 developer L1（test_t260914_01 形态真 git fixture 逐态腿）分工：L1 白盒逐态可随实现重写，
+与 developer L1（test_t260914_01 形态真 git fixture 逐态子用例）分工：L1 白盒逐态可随实现重写，
 本条锁 **activity 级公开回执 + git 磁盘终态 + 留档可还原性**（契约不变的实现重构不得打破）。
 
 故障面清单（覆盖对应用例）：
@@ -35,13 +35,13 @@ intent（守护的用户可感知行为/契约，工单修向 B＝滞留复判�
    保护名单优先于状态分流，工作区原地保留＝人处/授权前提 → L5a/L5b；
 ⑤ 合法与越权混合批次：只落合法清单、越权与留档件绝不入库 → L6；
 ⑥ judged_files 全量判定清单（证据面歧义解除）→ L3；
-⑦ 留档件对后续 settle 不可见（dot 目录排除口径，处置不制造新脏）→ L1/L2 二次 settle 腿。
+⑦ 留档件对后续 settle 不可见（dot 目录排除口径，处置不制造新脏）→ L1/L2 二次 settle 子用例。
 
 跑法：PY=server/engine/.venv/bin/python; [ -x "$PY" ] || PY=python3; "$PY" -B
       integration/t260916-19/sc_t26091619_disposal_matrix.py（cwd=仓根）
 纯本地：tmp 主仓+真注册泳道 worktree+直调 settle 单点，零 Temporal server 零端口。
 三态：PASS exit 0 / FAIL exit 1 / ENV_FAIL exit 2（三态契约，无第四态）。
-实现落地前新契约腿红属预期（TDD 信号），arbitrate/merge 期必须绿。
+实现落地前新契约子用例红属预期（TDD 信号），arbitrate/merge 期必须绿。
 """
 import os
 import sys
@@ -65,7 +65,7 @@ TID = "t26091619a"
 def main():
     (mods, why) = engine_modules()
     if mods is None:
-        env_fail("引擎模块不可用（%s）——直调 activity 无 stdlib 替代腿" % why)
+        env_fail("引擎模块不可用（%s）——直调 activity 无 stdlib 替代子用例" % why)
     shared, aa = mods
 
     # ---- L1 ?? 态（未跟踪新建越权）→ 挪档＋回执点名去向＋二次 settle 复绿 ----

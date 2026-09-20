@@ -149,7 +149,7 @@ function makeStubPage(domMap, opts = {}) {
   };
   // 汇合修正（t260910-05 implement）：本场景调用点统一取 `.page` 手柄
   // （entry.run(stub.page) / assertBoardReady(stub.page)），桩以 { page } 暴露——
-  // 裸返回 api 会让 stub.page=undefined，死板面腿因错误原因「假绿」、就绪腿假红。
+  // 裸返回 api 会让 stub.page=undefined，死板面子用例因错误原因「假绿」、就绪子用例假红。
   return { page };
 }
 
@@ -197,7 +197,7 @@ async function findViewEntries(mod) {
 
 const mod = await import(CAPTURE_URL).catch((e) => ({ __importError: e }));
 
-// ── 腿 1：导出面（TDD 闸门腿）──
+// ── 子用例 1：导出面（TDD 闸门子用例）──
 const missing = [];
 if (mod.__importError) missing.push(`capture.mjs 动态导入失败：${String(mod.__importError).slice(0, 120)}`);
 if (!mod.__importError) {
@@ -294,9 +294,9 @@ if (!tdd) {
       record('assert/empty-state', 'fail', `空态锚在场却被拒：${String(e?.message ?? e).slice(0, 100)}`);
     }
   } else {
-    // 系统状态条件腿：实现未声明空态锚（方案允许的降级口径：筛选条在场+加载指示
-    // 消失）→ 本腿不适用；非全腿 na，不影响三态判定。
-    record('assert/empty-state', 'na', '实现未声明空态锚（降级口径：筛选条+加载指示消失）——腿不适用');
+    // 系统状态条件子用例：实现未声明空态锚（方案允许的降级口径：筛选条在场+加载指示
+    // 消失）→ 本子用例不适用；非全部子用例 na，不影响三态判定。
+    record('assert/empty-state', 'na', '实现未声明空态锚（降级口径：筛选条+加载指示消失）——子用例不适用');
   }
 
   try {

@@ -15,7 +15,7 @@
 - 本目录文件零 dot 目录名字面量（命名守卫 t260907-04 扫描面纪律），dot 名一律取 shared 真源。
 
 三态契约（t260904-12）：只有 pass/fail/env_fail；环境缺失一律 ENV_FAIL exit 2。
-实现落地前新契约腿红属预期（TDD 信号），arbitrate/merge 期必须绿。
+实现落地前新契约子用例红属预期（TDD 信号），arbitrate/merge 期必须绿。
 """
 from __future__ import annotations
 

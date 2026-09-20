@@ -36,7 +36,7 @@ let gitBits = null
 try {
   gitBits = makeGitWorktree(fx.repoB)
 
-  // ── 腿A epics 取数：同代号撞码，两项目各见各库 ──
+  // ── 子用例A epics 取数：同代号撞码，两项目各见各库 ──
   {
     const rFpv = await fx.drive(fx.repoA)(EPICS_PREFIX, `${EPICS_PREFIX}?project=fpv`)
     j.ok(rFpv.status === 200 && rFpv.body?.ok === true, `epics 列表 ?project=fpv → 200（实得 ${rFpv.status}）`)
@@ -50,9 +50,9 @@ try {
       'fpv 视图详情读 fpv 仓全文')
   }
 
-  // ── 腿B next-hint 面退役（t260910-14 主题一收口重写）：预跑缓存与 dismiss 动作
+  // ── 子用例B next-hint 面退役（t260910-14 主题一收口重写）：预跑缓存与 dismiss 动作
   // 随 epic-next 整链退役——视图不再产出 nextHintCached 字段、dismiss 路由退场、
-  // 项目根零缓存写入（撞码不互串的意图由「无缓存可串」天然承担）。原腿钉缓存
+  // 项目根零缓存写入（撞码不互串的意图由「无缓存可串」天然承担）。原子用例钉缓存
   // 项目化取数，其宿主功能已整链退役，旧钉=过期基准。 ──
   {
     const preB = join(fx.repoB, '.suyou', 'epic-next', EPIC_CODE)  // naming-compat：旧名目录粘滞读点
@@ -69,7 +69,7 @@ try {
       '两项目根零缓存写入（无缓存可串=撞码不互串的退役形态）')
   }
 
-  // ── 腿C 审批面：写落 fpv 仓 reviews/，sandbar 视图读不到 ──
+  // ── 子用例C 审批面：写落 fpv 仓 reviews/，sandbar 视图读不到 ──
   {
     const call = fx.drive(fx.repoA)
     const rPost = await call(TICKETS_PREFIX, `${TICKETS_PREFIX}/t-fpv-1/review?project=fpv`, 'POST', {
@@ -88,7 +88,7 @@ try {
     j.ok(rGetB.body?.result?.rounds?.length === 1, 'fpv 视图 GET 回读一轮')
   }
 
-  // ── 腿D diff 判界：闸语义不变、基准随项目根走（红线面） ──
+  // ── 子用例D diff 判界：闸语义不变、基准随项目根走（红线面） ──
   {
     const { base, absWt } = gitBits
     const dFpv = await computeTicketDiff(fx.repoB, { id: 't-fpv-1', worktree: absWt, base_ref: base })

@@ -13,7 +13,7 @@
      出现——只锁 _enter 则 PRE_FLOW_STAGES 防漏声明落空）。全集==STAGES∪PRE_FLOW_
      STAGES（双向：声明必被 flow 使用、flow 标签必已声明）。另锁套件档短路形态：
      `_enter("suite"` 与 `_setup_lane(` 调用都在 `if run_suite:` 块内。
-  D. 变异自证腿：B/C 锁体因子成纯函数——真实对→[]；改 name/加段/翻转 suite_only/
+  D. 变异自证子用例：B/C 锁体因子成纯函数——真实对→[]；改 name/加段/翻转 suite_only/
      变 kind/断 next 链/混入未声明标签 → 问题清单非空（锁有牙齿，不改文件）。
   E. 边界：未知模板 None 不回归；dev-lane/fixture-two-step 声明零扰动；
      declared_templates 含 inspection-lite。
@@ -43,11 +43,11 @@ DECL_IDS = [s.id for s in STAGES]
 
 
 # ---------------------------------------------------------------------------
-# 锁体（纯函数）：真实对返回 []；任何漂移返回人读问题清单。D 腿直接喂变异对。
+# 锁体（纯函数）：真实对返回 []；任何漂移返回人读问题清单。D 子用例直接喂变异对。
 # ---------------------------------------------------------------------------
 
 def lock_problems(stages, topo) -> list:
-    """B 段逐字段锁的纯函数体（t260916-05 D 腿变异自证的载体）。"""
+    """B 段逐字段锁的纯函数体（t260916-05 D 子用例变异自证的载体）。"""
     problems: list = []
     ids = [s.id for s in stages]
     if len(ids) != len(set(ids)):
@@ -231,7 +231,7 @@ def test_source_lock_suite_tier_short_circuit():
 
 
 # ---------------------------------------------------------------------------
-# D. 变异自证腿（锁有牙齿：改声明不改展示面 → 红）
+# D. 变异自证子用例（锁有牙齿：改声明不改展示面 → 红）
 # ---------------------------------------------------------------------------
 
 def _mutated_stages(**changes):
@@ -261,12 +261,12 @@ def test_mutation_legs_lock_turns_red():
     ]
     for label, stages in cases:
         problems = lock_problems(stages, topo)
-        assert problems, "变异腿未红（锁无牙）：%s" % label
+        assert problems, "变异子用例未红（锁无牙）：%s" % label
     # C 锁变异：混入未声明标签（如 watcher 的 poll）→ 红
     block = _workflow_class_block()
     assert source_label_problems(block + '\n        self._enter("poll", "running", "x")\n',
                                  set(DECL_IDS) | set(inf.PRE_FLOW_STAGES)), \
-        "源码锁变异腿未红（混入未声明标签必须被点名）"
+        "源码锁变异子用例未红（混入未声明标签必须被点名）"
 
 
 # ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@
 起台，SANDBAR_STAGE_MAX_STAGES=4 代理）必须刹停并逐条点名，损害有界：
 容器 ≤ 保险丝值、失败路零租约零容器、无孤儿 hold、终态清零。
 
-隔离锁根 + SANDBAR_STAGE_SWEEP=off（E 只测保险丝面，不让清扫腿掺和计时）。
+隔离锁根 + SANDBAR_STAGE_SWEEP=off（E 只测保险丝面，不让清扫子用例掺和计时）。
 200 路的失败输出全量落盘 out/ 目录（逐条点名证据，不截断）。
 """
 import json
@@ -34,7 +34,7 @@ N = 200
 
 
 def main():
-    # 腿0（C7 显式断言）：缺省值=100（独立净 env 进程内断言，防回落 12）
+    # 子用例0（C7 显式断言）：缺省值=100（独立净 env 进程内断言，防回落 12）
     probe = subprocess.run(
         [sys.executable, "-c",
          "import sys; sys.path.insert(0, %r); import stage_docker as sd; "

@@ -152,7 +152,7 @@ def test_recheck_whitespace_tolerance(tree):
 
 
 def test_parse_line_zero_is_structural_ok_recheck_degrades():
-    """line=0 是复核语义不是结构畸形（场景腿3 八态契约）：解析层放行、复核必降级。"""
+    """line=0 是复核语义不是结构畸形（场景子用例3 八态契约）：解析层放行、复核必降级。"""
     fs = ins.parse_agent_findings(
         fenced([good_finding(evidence=[{"path": "src/a.py", "line": 0, "quote": "x"}])]))
     assert fs[0]["evidence"][0]["line"] == 0
@@ -279,7 +279,7 @@ def test_read_prev_ledger_ids_malformed_named(tmp_path: Path):
     d.mkdir()
     (d / "inspection-inst-20260915.json").write_text("{bad json", encoding="utf-8")
     ids, note = ins.read_prev_ledger_ids(d, "inst", "20260916")
-    assert ids is None and "跨期去重腿缺席" in note
+    assert ids is None and "跨期去重分支缺席" in note
     (d / "inspection-inst-20260915.json").write_text('{"findings": "x"}', encoding="utf-8")
     ids, note = ins.read_prev_ledger_ids(d, "inst", "20260916")
     assert ids is None and "缺 findings" in note

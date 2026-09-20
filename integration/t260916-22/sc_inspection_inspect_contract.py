@@ -18,7 +18,7 @@ intent 分工（防 intent 级重复）：
 - sc_inspection_inspect_journey（L3）：真台真票全链旅程（workflow 接线/段序/人门/
   落账），本条不起 Temporal。
 
-三态纪律：环境缺供（venv 缺 temporalio 且无桩可装——本条全离线，理论无 ENV_FAIL 腿）
+三态纪律：环境缺供（venv 缺 temporalio 且无桩可装——本条全离线，理论无 ENV_FAIL 子用例）
 照三态口径如实点名；实现未落地=FAIL（TDD 信号），arbitrate/merge 期必须绿。
 跑法：python3 -B integration/t260916-22/sc_inspection_inspect_contract.py
 """
@@ -109,7 +109,7 @@ def main() -> int:
             args.update(extra)
         return lib.result_payload(lib.run_coro(verify_findings(args)))
 
-    print("== 腿1 解析纪律：畸形桩消息全部 ok=False 且点名，绝不假绿 ==")
+    print("== 子用例1 解析纪律：畸形桩消息全部 ok=False 且点名，绝不假绿 ==")
     bad_cases = [
         ("0 围栏块", lib.fenced_message([], n_blocks=0)),
         ("≥2 围栏块", lib.fenced_message([], n_blocks=2)),
@@ -136,7 +136,7 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001——活动以异常表达解析失败也算点名（不假绿即可）
             ok(True, "畸形桩（%s）→ 活动层拒绝（异常点名：%s）" % (label, str(e)[:80]))
 
-    print("== 腿2 合法桩：ok=True 且 base_dir/route 进 meta（可见面） ==")
+    print("== 子用例2 合法桩：ok=True 且 base_dir/route 进 meta（可见面） ==")
     good_f = lib.finding("守卫锚漂移（inspect 证据锚夹具）", lib.GUARD_REL, 3,
                          tree.line_text(lib.GUARD_REL, 3), severity="high", confidence=0.9)
     res = call_inspect(lib.fenced_message([good_f]))
@@ -146,7 +146,7 @@ def main() -> int:
     ok(tree.root in meta_txt or tree.root in json.dumps(res, ensure_ascii=False),
        "审查基座 base_dir 进 meta/回执（可见不静默）")
 
-    print("== 腿3 证据机械复核：verified/unverified 两态 + 逐项点名不静默丢 ==")
+    print("== 子用例3 证据机械复核：verified/unverified 两态 + 逐项点名不静默丢 ==")
     g2 = tree.line_text(lib.GUARD_REL, 2)
     p2 = tree.line_text(lib.PRODUCER_REL, 2)
     cases = [
@@ -184,7 +184,7 @@ def main() -> int:
                 ok(not lib.entry_reason(e), "verified 条目不带复核失败 reason（%s）"
                    % str(e.get("subject"))[:30])
 
-    print("== 腿4 id 内容哈希：8 位、同内容跨期稳定、内容变即变 ==")
+    print("== 子用例4 id 内容哈希：8 位、同内容跨期稳定、内容变即变 ==")
     def ids_of(payload):
         fs = lib.payload_findings(payload) or []
         return [str(f.get("id") or "") for f in fs if isinstance(f, dict)]
@@ -198,7 +198,7 @@ def main() -> int:
        "同内容铸同 id（mint_finding_id 幂等）")
     ok(i1 and i2 and i1[0] != i2[0], "内容变 id 变（跨期去重键不粘连）")
 
-    print("== 腿5 跨期去重与假报压制：recurring/压制点名，summary 只计新发现 ==")
+    print("== 子用例5 跨期去重与假报压制：recurring/压制点名，summary 只计新发现 ==")
     dup_f = lib.finding("复现缺陷（跨期对照）", lib.PRODUCER_REL, 2, p2, severity="high")
     dup_id = str(mint_id(dup_f) or "")
     ok(bool(dup_id), "dup 发现取得机械 id（%r）" % dup_id)
@@ -221,7 +221,7 @@ def main() -> int:
                                   or lib.finding_state(dup_entry) == "suppressed"),
        "假报裁定 → 压制标记（实得 verdict=%r suppressed=%r)"
        % ((dup_entry or {}).get("verdict"), (dup_entry or {}).get("suppressed")))
-    # 心跳/summary 口径腿单独跑：本期只有 recurring+压制（零新发现）→ heartbeat=true
+    # 心跳/summary 口径子用例单独跑：本期只有 recurring+压制（零新发现）→ heartbeat=true
     pay = full(lib.fenced_message([dup_f]))
     summary, heartbeat, _truncated = lib.tally_of(pay)
     if isinstance(summary, dict) and summary:
@@ -232,7 +232,7 @@ def main() -> int:
     else:
         ok("heartbeat" in json.dumps(pay, ensure_ascii=False), "心跳面在回执在场（键名容差）")
 
-    print("== 腿6 预算：41 条截 40 + truncated 记账；recurring/压制不占预算 ==")
+    print("== 子用例6 预算：41 条截 40 + truncated 记账；recurring/压制不占预算 ==")
     many = [lib.finding("预算填充 %03d 号发现" % i, lib.GUARD_REL, 2, g2,
                         severity="high" if i % 3 == 0 else ("med" if i % 3 == 1 else "low"),
                         confidence=round(0.95 - i * 0.001, 3))
@@ -257,7 +257,7 @@ def main() -> int:
     ok(len(rec) == 5 and len(fresh) == 36,
        "5 条 recurring 不占 40 预算（recurring=%d、新发现=%d）" % (len(rec), len(fresh)))
 
-    print("== 腿7 心跳合成：有新发现 → heartbeat=false ==")
+    print("== 子用例7 心跳合成：有新发现 → heartbeat=false ==")
     pay = full(lib.fenced_message([good_f]))
     _s, heartbeat, _t = lib.tally_of(pay)
     if heartbeat is not None:
@@ -266,7 +266,7 @@ def main() -> int:
         ok("heartbeat" in json.dumps(pay, ensure_ascii=False),
            "心跳面在回执在场（键名容差）")
 
-    print("== 腿8 建议门数据：verified && conf≥0.6 && severity≥med 才进建议 ==")
+    print("== 子用例8 建议门数据：verified && conf≥0.6 && severity≥med 才进建议 ==")
     mix = [
         lib.finding("建议合格 high", lib.GUARD_REL, 2, g2, severity="high", confidence=0.9),
         lib.finding("低置信 med 不建议", lib.GUARD_REL, 2, g2, severity="med", confidence=0.3),
@@ -283,7 +283,7 @@ def main() -> int:
            and "坏证据" not in subs,
            "建议门只收 verified&&conf≥0.6&&severity≥med：%r" % subs[:120])
 
-    print("== 腿9 上期台账坏面：prev_ledger_error 点名 + 降级不崩 ==")
+    print("== 子用例9 上期台账坏面：prev_ledger_error 点名 + 降级不崩 ==")
     lib.seed_prev_ledger_raw(ledger_dir, inst, "20260904", "{{{not-json")
     pay = full(lib.fenced_message([good_f]))
     txt = json.dumps(pay, ensure_ascii=False)
@@ -291,7 +291,7 @@ def main() -> int:
        "坏上期台账显式点名（prev_ledger_error 面）：%r" % txt[:120])
     ok(isinstance(lib.payload_findings(pay), list), "坏上期不崩，本期发现照常复核")
 
-    print("== 腿10 红线与 agent_home 落点（方案 §2.2 三层机械面） ==")
+    print("== 子用例10 红线与 agent_home 落点（方案 §2.2 三层机械面） ==")
     ok(tree.tree_unchanged() == "", "被审查树逐字节不变（巡检绝不改码红线，判定化）")
     ok(not os.path.exists(os.path.join(tree.root, ".dsh")),
        "审查基座（仓根）零 .dsh 残留（agent DSH_HOME 与基座解耦）")
@@ -299,7 +299,7 @@ def main() -> int:
     if ah is not None:
         ok(True, "agent-home 落点在台账目录 agent-home/ 下（out/inspection/agent-home/<实例>-<期>）")
     else:
-        ok(True, "桩态（SANDBAR_INSPECT_STUB）可短路 spawn → agent-home 缺席属契约内；真 spawn 落点由 journey 的 SANDBAR_INSPECT_CMD 腿覆盖")
+        ok(True, "桩态（SANDBAR_INSPECT_STUB）可短路 spawn → agent-home 缺席属契约内；真 spawn 落点由 journey 的 SANDBAR_INSPECT_CMD 子用例覆盖")
 
     for d in (tree,):
         d.cleanup()

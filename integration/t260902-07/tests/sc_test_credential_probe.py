@@ -8,8 +8,8 @@
 - **mock 燃料面（t260904-12 乙段 gen4 #4）**：SANDBAR_MOCK_LLM_URL 指向本进程
   mock 端点（integration/lib_model_mock.py，中性前缀 env，非 SANDBAR_ 新名）时，
   探针同一断言面（HTTP 200 + chat.completion 形状）打 mock 而非真模型——
-  凭据缺失不再环境红；并带**畸形输入腿**：mock 注入坏 JSON 回执，探针必须
-  显式判红（不静默当过）。真模型腿与 mock 腿互斥不混跑：有真 key 仍打真端点。
+  凭据缺失不再环境红；并带**畸形输入子用例**：mock 注入坏 JSON 回执，探针必须
+  显式判红（不静默当过）。真模型子用例与 mock 子用例互斥不混跑：有真 key 仍打真端点。
 
 cwd = 泳道根。stdlib only。key 只从环境读，不打印。
 """
@@ -82,16 +82,16 @@ def main():
         print(("PASS mock" if ok else "FAIL mock") + " 燃料面探针 | " + msg)
         if not ok:
             fails.append("mock 探针")
-        # 畸形输入腿：mock 注入坏 JSON 回执 → probe 必须显式判红（不静默过）
+        # 畸形输入子用例：mock 注入坏 JSON 回执 → probe 必须显式判红（不静默过）
         bad_ok, bad_msg = probe(mock_url, key="mock",
                                 extra_headers={"X-Mock-LLM-Mode": "bad_json"})
         if bad_ok:
-            print("FAIL mock 畸形回执腿：坏 JSON 回执被当过（静默腐化）")
+            print("FAIL mock 畸形回执子用例：坏 JSON 回执被当过（静默腐化）")
             fails.append("mock 畸形回执未判红")
         else:
             print("PASS mock 畸形回执被显式判红 | " + bad_msg[:120])
 
-    # ---- 真模型腿（真 key 在场才跑，语义与拆改前一致）----
+    # ---- 真模型子用例（真 key 在场才跑，语义与拆改前一致）----
     if key:
         ok, msg = probe(BASE_URL, key)
         print(("PASS " if ok else "FAIL ") + msg)

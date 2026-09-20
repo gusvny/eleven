@@ -77,7 +77,7 @@ async function selfcheck() {
     check(existsSync(dst) && !existsSync(join(tmpHome, 'settings.yaml')),
       '凭据只拷 .credentials.yaml（settings.yaml 不在场——3099 钉死防线）')
   } else {
-    envFail(`凭据源不在场（${credSrc}）——拷贝腿环境缺件（本机无 dsh 凭据不影响骨架自检）`)
+    envFail(`凭据源不在场（${credSrc}）——拷贝子用例环境缺件（本机无 dsh 凭据不影响骨架自检）`)
   }
 
   // 2. Kernel port-0 allocation x2: both valid and distinct
@@ -108,8 +108,8 @@ async function selfcheck() {
       check(false, `buildTempProfile 失败：${err?.message ?? err}`)
     }
   } else {
-    envFail(`buildTempProfile 腿：泳道 profile/node_modules 不在场（${profileNm}）——` +
-      `骨架逻辑在真源 capture-lane.mjs 未动，主树合并后本腿自然全量`)
+    envFail(`buildTempProfile 子用例：泳道 profile/node_modules 不在场（${profileNm}）——` +
+      `骨架逻辑在真源 capture-lane.mjs 未动，主树合并后本子用例自然全量`)
   }
 
   // 5. Teardown idempotent twice
@@ -122,10 +122,10 @@ async function selfcheck() {
     process.exit(1)
   }
   if (envFails > 0) {
-    console.log(`SELFCHECK ENV_FAIL：${envFails} 腿环境缺件未验成（已显式说明，非静默）——t260904-12 三态记环境红`)
+    console.log(`SELFCHECK ENV_FAIL：${envFails} 子用例环境缺件未验成（已显式说明，非静默）——t260904-12 三态记环境红`)
     process.exit(2)
   }
-  console.log('SELFCHECK PASS（console boot 骨架全腿验成）')
+  console.log('SELFCHECK PASS（console boot 骨架全部子用例验成）')
 }
 
 const mode = process.argv[2] || ''

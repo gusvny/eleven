@@ -8,29 +8,29 @@
 //   降权设计意图，红线不动信息架构，豁免理由在此；口径已随 96c699c 热修正——板面
 //   done 卡降权由整行 opacity:.72 改 muted 静音色（深底可读），侧栏 done 卡仍
 //   opacity:.72，两处同按 3.0 卡）。epic 色板
-//   10 档全播入（fnv1a 槽位确定性挑码，防「只测种子色」采样盲区）。变异腿故意注入
+//   10 档全播入（fnv1a 槽位确定性挑码，防「只测种子色」采样盲区）。变异子用例故意注入
 //   低对比正文色断言看守必咬（变异测试守测试本身；改造前经侧栏 alias 消费面咬合）。
-//   病灶本质声明：改造前主区写死浅色自洽、注入无效，三腿全绿=KI-052 同构（场景绿
+//   病灶本质声明：改造前主区写死浅色自洽、注入无效，三子用例全绿=KI-052 同构（场景绿
 //   真台红）；本场景的守护价值在实现落地后（令牌消费面）与宿主真值确认后兑现。
 //
 // high-level steps：
 //   T0 自举隔离台（FIX17 桩：10 档 epic 挑码×四态轮换＋无 epic 票）＋ playwright 探测
 //      （缺失=env_fail 有声红，三态契约「闸内无 SKIP」，KI-036/KI-046 口径）。
-//   T1 腿遍历 light/dark/fallback-only/legacy（t260907-03 增旧平台腿：knockout
+//   T1 子用例遍历 light/dark/fallback-only/legacy（t260907-03 增旧平台子用例：knockout
 //   bg-primary 模拟 0.1.1-rc.2 无此名，bg-base=可辨识代表值，断言 --dsw-derive-canvas
-//   精确等值——兜底链接住旧平台令牌名的契约看守）：每腿 goto→:root 注入令牌
+//   精确等值——兜底链接住旧平台令牌名的契约看守）：每子用例 goto→:root 注入令牌
 //   （addStyleTag）→
 //   开板后忠实注入（壳层在 BODY 级祖先声明 label 覆盖值=真实换档作用域，:root 翻不动；
 //   探针实锤「底翻了字没翻」裂脑态——忠实注入=自 .wb-card 向上找最高 label≠:root 值
 //   祖先，inline+important 打整套令牌，保证被测态=令牌组真实生效态）
 //      →导航工单列表→全文档可见文字扫描（板面/行卡/侧栏）→点「看原因」开详情
-//      （受阻横幅面）→扫描→关详情→开 metrics 面板（事件总线，不可达=na 条件腿）→
-//      扫描。每腿「违例=0 且未知色形=0」才过；违例/未知色形打印 区域/元素/色值/比值
+//      （受阻横幅面）→扫描→关详情→开 metrics 面板（事件总线，不可达=na 条件子用例）→
+//      扫描。每子用例「违例=0 且未知色形=0」才过；违例/未知色形打印 区域/元素/色值/比值
 //      （数值化取证）。色解析收 rgb()/rgba() 与 color(srgb …)——后者是 color-mix 派生色
 //      的 computed 序列化形态（gen0 验收探针实锤：旧解析只认 rgb 曾静默漏检 73% 表面，
-//      epic chip 就在漏检面里）；其余未知 computed 色形态=fail-closed 点名该腿红，
+//      epic chip 就在漏检面里）；其余未知 computed 色形态=fail-closed 点名该子用例红，
 //      绝不静默计入达标（防「绿≠全台面真查」KI-052 同构在看守自身复发）。
-//   T2 变异腿：浅档＋label-primary:#7a7a85（on #fff≈3.4:1）→断言违例>0（看守咬合）。
+//   T2 变异子用例：浅档＋label-primary:#7a7a85（on #fff≈3.4:1）→断言违例>0（看守咬合）。
 //   T3 红线：端口≠3099/7233；finally 回收进程树/浏览器/临时目录。
 //
 // 执行契约：stdout 末行 SUMMARY pass/fail/env_fail/na；playwright-core/隔离台依赖
@@ -85,7 +85,7 @@ stub.setCtrl({
 
 const pw = await loadPlaywright();
 if (!pw) {
-  record('playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器走查腿环境红（三态契约「闸内无 SKIP」）');
+  record('playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器走查子用例环境红（三态契约「闸内无 SKIP」）');
   summarize();
 }
 
@@ -152,7 +152,7 @@ const SCAN_FN = () => {
     // 行的 label 色被平台壳在挂载区容器级局部覆盖（实测覆盖值=#0f1115，:root 注入被
     // 子树自有声明隔断）——底色随壳层换档联动（真实部署配对归壳层；bench 深档注入×
     // 浅壳的混合态下该钮 1.05:1 不可读，但该混合态真实部署不可达）。非工单台可修面，
-    // 注入腿硬翻会制造假配对；壳层真值待宿主确认（看守头注既有交接项）。
+    // 注入子用例硬翻会制造假配对；壳层真值待宿主确认（看守头注既有交接项）。
     if (el.closest('.wb-sb-foot')) continue;
     const r = el.getBoundingClientRect();
     if (r.width < 2 || r.height < 2) continue;
@@ -233,7 +233,7 @@ const FAITHFUL_FN = (vars) => {
 try {
   const page = await browser.newPage();
 
-  // T1 腿：light / dark / fallback-only（零注入）/ legacy（旧平台 bg-base 兜底链，t260907-03）
+  // T1 子用例：light / dark / fallback-only（零注入）/ legacy（旧平台 bg-base 兜底链，t260907-03）
   for (const leg of ['light', 'dark', 'fallback', 'legacy']) {
     await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
     const set = TOKEN_SETS[leg];
@@ -243,7 +243,7 @@ try {
     if (set) {
       const fp = await page.evaluate(FAITHFUL_FN, set).catch(() => ({ patched: false }));
       await page.waitForTimeout(300); // inline patch 生效静置（探针同参）
-      // legacy 腿核心断言（C5 精确等值）：knockout 生效且兜底链接住时，
+      // legacy 查询路径核心断言（C5 精确等值）：knockout 生效且兜底链接住时，
       // --dsw-derive-canvas（纯 var 链）的 computed 值必须精确等于 bg-base 代表值
       // #f5f8fa——链被拆/名被删 → 落 #fff；knockout 失效（平台 bg-primary 现值穿透）
       // → 落平台现值。都不是 #f5f8fa，fail-closed 点名红，绝不静默计绿。
@@ -290,8 +290,8 @@ try {
       }
     }
     record(`surface/drawer-open/${leg}`, drawerOpened ? true : 'na',
-      drawerOpened ? '详情面（含受阻横幅）入扫' : '详情面未开（导航结构变化时由 fix17 场景守其可达性，本腿条件豁免）');
-    // metrics 面板：事件总线开面板（不可达=na 条件腿，非全腿 na 不红）
+      drawerOpened ? '详情面（含受阻横幅）入扫' : '详情面未开（导航结构变化时由 fix17 场景守其可达性，本子用例条件豁免）');
+    // metrics 面板：事件总线开面板（不可达=na 条件子用例，非全部子用例 na 不红）
     await page.evaluate(() => {
       document.dispatchEvent(new CustomEvent('wb-metrics-toggle'));
       window.dispatchEvent(new CustomEvent('wb-metrics-toggle'));
@@ -303,7 +303,7 @@ try {
       scan = { violations: scan.violations.concat(s3.violations), regions: mergeRegions(scan.regions, s3.regions), total: scan.total + s3.total, transparent: scan.transparent + s3.transparent, unchecked: (scan.unchecked || []).concat(s3.unchecked || []) };
     }
     record(`surface/metrics-open/${leg}`, metricsOpened ? true : 'na',
-      metricsOpened ? 'metrics 文字面入扫（宿主裁定④全台面）' : 'metrics 面板未开（入口结构变化，条件豁免腿）');
+      metricsOpened ? 'metrics 文字面入扫（宿主裁定④全台面）' : 'metrics 面板未开（入口结构变化，条件豁免子用例）');
     const unchecked = scan.unchecked || [];
     const legOk = scan.violations.length === 0 && unchecked.length === 0;
     record(`contrast/${leg}`, legOk,
@@ -313,7 +313,7 @@ try {
           + (unchecked.length ? `；未知色形 ${unchecked.length}（fail-closed 点名）：${fmtUnchecked(unchecked)}` : ''));
   }
 
-  // T2 变异腿：浅档＋故意低对比正文色——看守必须咬（违例>0=断言在咬）
+  // T2 变异子用例：浅档＋故意低对比正文色——看守必须咬（违例>0=断言在咬）
   await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
   await page.addStyleTag({ content: cssVarsBlock(TOKEN_SETS.mutation) });
   await dismissNotice(page);

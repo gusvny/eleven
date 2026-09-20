@@ -4,24 +4,24 @@
 
 intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：
 工单验收③+②（缺省半）的用户可感知面——真 worker 起跑链（docker 台 temporal-only，
-非夹具注入）上，归属 meta 落 dsh 版本面，四腿：
-- 缺省腿：不设任何 dsh 旋钮 → face source=default、cmd 与文档化缺省口径逐元素
+非夹具注入）上，归属 meta 落 dsh 版本面，四子用例：
+- 缺省子用例：不设任何 dsh 旋钮 → face source=default、cmd 与文档化缺省口径逐元素
   等值、version 与宿主 `dsh --version` 实测一致（版本是探测来的不是抄配置的）
   ——「缺省不破现状」在真启动链上可查证（验收②）；
-- 钉路径腿：SANDBAR_AGENT_CMD 指版本桩 → face source=env、version=桩自报版本、
+- 钉路径子用例：SANDBAR_AGENT_CMD 指版本桩 → face source=env、version=桩自报版本、
   二进制路径解析到桩本体——「显式钉路径生效」，版本从被钉二进制实测（KI-058
   「机器层安装态≠代码态」的对症观测：机器实际在跑什么，meta 说什么）；
-- 预期不符可查腿：桩版本≠SANDBAR_DSH_EXPECTED_VERSION → face expected/
+- 预期不符可查子用例：桩版本≠SANDBAR_DSH_EXPECTED_VERSION → face expected/
   expected_state=mismatch 可查、worker 仍起（缺省 off 仅记录不拦）——验收③
   「可查」半边；
-- 探测失败不挡启动腿：SANDBAR_AGENT_CMD 指不存在路径 → meta 照落、face
+- 探测失败不挡启动子用例：SANDBAR_AGENT_CMD 指不存在路径 → meta 照落、face
   version_state=error 且 detail 点名（不静默）、worker 仍起——best-effort 契约
   （探测失败不挡启动），坏机器态显形而非静默或启动炸（KI-058 族）。
 
 intent 分工（防 intent 级重复）：
 - t260905-02-worker-lifecycle＝归属指纹 meta 的生命周期面（起/退/异常输入）；
   本条＝meta 里 dsh 版本面的内容契约（版本/路径/来源/预期态），同表面不同字段族；
-- sc_dsh_probe_selftest（本票探针离线自检腿，implement 段交付）＝探针工具自身
+- sc_dsh_probe_selftest（本票探针离线自检子用例，implement 段交付）＝探针工具自身
   的正负自检；本条＝引擎启动链对版本面的记录行为，被测对象不同；
 - t260913-04-image-supervisor＝镜像内 dsh 本体在场；本条＝引擎对「用的是哪个
   dsh」的自报面。钉路径 UT（developer L1）锚解析函数，本条锚真启动链接线。
@@ -54,7 +54,7 @@ from lib_t26091624 import (DEFAULT_DSH_CMD_STR, STUB_VERSION, make_stub,  # noqa
                            spawn_worker, stage_env, terminate_worker, wait_meta)
 
 QUEUE = "t26091624-face"
-EXPECTED_OK = "0.1.1-rc.2"  # 宿主现装版本（expected 不符腿的预期值）
+EXPECTED_OK = "0.1.1-rc.2"  # 宿主现装版本（expected 不符子用例的预期值）
 DSH_KNOBS = ("SANDBAR_AGENT_CMD", "SANDBAR_DSH_EXPECTED_VERSION", "SANDBAR_DSH_STRICT")
 
 
@@ -81,7 +81,7 @@ def get_face(fail, meta, tag):
 
 
 def main():
-    fail = Fail("t260916-24 ①dsh 版本面启动可观测（缺省/钉路径/预期不符/探测失败四腿）")
+    fail = Fail("t260916-24 ①dsh 版本面启动可观测（缺省/钉路径/预期不符/探测失败四子用例）")
     bench = require_bench(fail)
     py = poc_python(bench)
     host_ver = real_dsh_version(fail)
@@ -99,7 +99,7 @@ def main():
                                          "t26091624-face")
 
         def boot(tag, extra):
-            """起一个 worker（meta/日志各腿独立），返回 (proc, meta_path, log_path)。"""
+            """起一个 worker（meta/日志各子用例独立），返回 (proc, meta_path, log_path)。"""
             meta_path = os.path.join(tmp, "%s.meta" % tag)
             log_path = os.path.join(tmp, "%s.log" % tag)
             env = stage_env(stage, audit_env=audit_env, extra={
@@ -107,7 +107,7 @@ def main():
                 "SANDBAR_WORKER_META": meta_path,
                 "DSH_STUB_LOG": stub_log,  # 版本桩两种调用都记账（--version 也记）
             })
-            for k in DSH_KNOBS:  # 防外部环境泄入：先剥再按腿注入
+            for k in DSH_KNOBS:  # 防外部环境泄入：先剥再按子用例注入
                 env.pop(k, None)
             env.update(extra or {})
             w = spawn_worker(py, env, log_path)
@@ -119,71 +119,71 @@ def main():
             语义同为 env|default）。"""
             return face.get("source") or face.get("cmd_source")
 
-        # ---------- 腿① 缺省：来源=default、cmd 等值、version=宿主实测 ----------
+        # ---------- 子用例① 缺省：来源=default、cmd 等值、version=宿主实测 ----------
         w, meta_path, _ = boot("leg1-default", None)
         meta = wait_meta(meta_path)
-        face = get_face(fail, meta, "腿①缺省")
+        face = get_face(fail, meta, "子用例①缺省")
         if face is not None:
             fail.check(src_of(face) == "default",
-                       "腿①：无旋钮时来源=default（实得 %r）" % src_of(face))
+                       "子用例①：无旋钮时来源=default（实得 %r）" % src_of(face))
             fail.check(face.get("cmd") == default_cmd,
-                       "腿①：缺省 cmd 与文档化口径逐元素等值 %r（实得 %r）——缺省不破现状"
+                       "子用例①：缺省 cmd 与文档化口径逐元素等值 %r（实得 %r）——缺省不破现状"
                        % (default_cmd, face.get("cmd")))
             fail.check(face.get("version") == host_ver,
-                       "腿①：version 与宿主 `dsh --version` 实测一致（meta=%r 实测=%r）"
+                       "子用例①：version 与宿主 `dsh --version` 实测一致（meta=%r 实测=%r）"
                        "——版本是探测来的不是抄配置" % (face.get("version"), host_ver))
         terminate_worker(w)
 
-        # ---------- 腿② 钉路径：stub 生效、版本从被钉二进制实测 ----------
+        # ---------- 子用例② 钉路径：stub 生效、版本从被钉二进制实测 ----------
         # （stub 自执行单 token：引擎以 cmd[0] 为被钉二进制做 real_bin 解析与
         #   `<dsh> --version` 实证——wrapper 形态会探到解释器而非桩）
         w, meta_path, _ = boot("leg2-pin", {"SANDBAR_AGENT_CMD": stub})
         meta = wait_meta(meta_path)
-        face = get_face(fail, meta, "腿②钉路径")
+        face = get_face(fail, meta, "子用例②钉路径")
         if face is not None:
             fail.check(src_of(face) == "env",
-                       "腿②：显式 SANDBAR_AGENT_CMD 时来源=env（实得 %r）" % src_of(face))
+                       "子用例②：显式 SANDBAR_AGENT_CMD 时来源=env（实得 %r）" % src_of(face))
             fail.check(face.get("version") == STUB_VERSION,
-                       "腿②：version=桩自报 %s（实得 %r）——显式钉路径生效且版本实测于被钉二进制"
+                       "子用例②：version=桩自报 %s（实得 %r）——显式钉路径生效且版本实测于被钉二进制"
                        % (STUB_VERSION, face.get("version")))
             pinned = os.path.realpath(face.get("real_bin") or face.get("bin") or "")
             fail.check(pinned == os.path.realpath(stub),
-                       "腿②：二进制路径解析到桩本体（实得 %r）——「用的哪个 dsh」可查"
+                       "子用例②：二进制路径解析到桩本体（实得 %r）——「用的哪个 dsh」可查"
                        % (face.get("real_bin") or face.get("bin")))
         terminate_worker(w)
 
-        # ---------- 腿③ 预期不符可查：expected/expected_state=mismatch 且不拦 ----------
+        # ---------- 子用例③ 预期不符可查：expected/expected_state=mismatch 且不拦 ----------
         w, meta_path, log_path = boot("leg3-mismatch", {
             "SANDBAR_AGENT_CMD": stub,
             "SANDBAR_DSH_EXPECTED_VERSION": EXPECTED_OK})
         meta = wait_meta(meta_path)
-        face = get_face(fail, meta, "腿③预期不符")
+        face = get_face(fail, meta, "子用例③预期不符")
         if face is not None:
             fail.check(face.get("expected") == EXPECTED_OK,
-                       "腿③：expected 记录在案 %s（实得 %r）" % (EXPECTED_OK, face.get("expected")))
+                       "子用例③：expected 记录在案 %s（实得 %r）" % (EXPECTED_OK, face.get("expected")))
             fail.check(face.get("expected_state") == "mismatch",
-                       "腿③：expected_state=mismatch 可查（实得 %r）——版本与预期不符有账"
+                       "子用例③：expected_state=mismatch 可查（实得 %r）——版本与预期不符有账"
                        % face.get("expected_state"))
         time.sleep(2.0)
         fail.check(w.poll() is None,
-                   "腿③：缺省（STRICT off）不符仅记录不拦——worker 仍起（rc=%s）" % w.returncode)
+                   "子用例③：缺省（STRICT off）不符仅记录不拦——worker 仍起（rc=%s）" % w.returncode)
         terminate_worker(w)
 
-        # ---------- 腿④ 探测失败不挡启动：state=error 点名 + meta 照落 + 仍起 ----------
+        # ---------- 子用例④ 探测失败不挡启动：state=error 点名 + meta 照落 + 仍起 ----------
         bogus = os.path.join(tmp, "no-such-dsh")
         w, meta_path, log_path = boot("leg4-broken", {"SANDBAR_AGENT_CMD": bogus})
         meta = wait_meta(meta_path)
-        face = get_face(fail, meta, "腿④探测失败")
+        face = get_face(fail, meta, "子用例④探测失败")
         if face is not None:
             fail.check(face.get("version_state") == "error",
-                       "腿④：二进制不存在 → version_state=error（实得 %r）——坏机器态显形不静默"
+                       "子用例④：二进制不存在 → version_state=error（实得 %r）——坏机器态显形不静默"
                        % face.get("version_state"))
             fail.check(bool(face.get("version_state") == "error") and
                        bool(str(face.get("version_detail") or face.get("detail") or "").strip()),
-                       "腿④：error 附 detail 点名（非裸 error）——报错精确纪律")
+                       "子用例④：error 附 detail 点名（非裸 error）——报错精确纪律")
         time.sleep(2.0)
         fail.check(w.poll() is None,
-                   "腿④：探测失败不挡启动（best-effort 契约）——worker 仍起（rc=%s）" % w.returncode)
+                   "子用例④：探测失败不挡启动（best-effort 契约）——worker 仍起（rc=%s）" % w.returncode)
         terminate_worker(w)
 
         # ---------- 红线：被测子进程零触碰生产端口 ----------

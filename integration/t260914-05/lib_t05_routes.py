@@ -4,7 +4,7 @@
 职责只含前置/基础步骤（各场景自持断言；步骤级复用不构成 intent 重复）：
   ① 路径与解释器解析；② 临时注册表（SANDBAR_PROJECTS_DIR）+ 路由表桩；
   ③ spawn 缝隙直调 + 告警捕获（引擎单点告警与消费方点名同缝捕获）；
-  ④ 三态出口（PASS/FAIL 计数、ENV_FAIL 退 2、N/A 只留给系统状态腿）。
+  ④ 三态出口（PASS/FAIL 计数、ENV_FAIL 退 2、N/A 只留给系统状态子用例）。
 
 为何自持而不复用 integration/t260903-03/paths_fixture.py：本票 implement 段要重写那份夹具
 （PatchedRoutesFile 随 MODEL_ROUTES_FILE 常量退场），契约网不能被夹具重构带倒——灰盒纪律
@@ -180,7 +180,7 @@ def capture(fn):
 
 
 class Checks:
-    """三态出口：fail 优先（产品红不被环境红稀释）、env 退 2、na 仅系统状态腿。"""
+    """三态出口：fail 优先（产品红不被环境红稀释）、env 退 2、na 仅系统状态子用例。"""
 
     def __init__(self, name):
         self.name = name

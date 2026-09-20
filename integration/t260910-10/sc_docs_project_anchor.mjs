@@ -15,7 +15,7 @@
 //   可观测契约：200 体挂 resolved={source,key,root}（project-anchor resolvedMark 六面路由
 //   统一口径）；root=夹具注册主目录逐字节相等=「服务端把 root 解析到项目根」的 KI-070 终态
 //   判据。端口红线 ≠3099/7233；lib_fix17 自举（临时注册表+双夹具项目），零浏览器依赖
-//   （不探 playwright，纯 API 场景无 KI-036 家族环境腿）。
+//   （不探 playwright，纯 API 场景无 KI-036 家族环境用例）。
 //   与 t260905-06-doc-read-through intent 不同面：那条锁缺省锚（单仓）阅读旅程+穿路径白名单
 //   +窄栏 UI，本条锁多项目锚解析/回落/注入——穿路径白名单不重复设计（既有 T1 已覆盖）。
 //   实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
@@ -104,7 +104,7 @@ function writeFxb(root) {
     '# 夹具乙单篇正文',
     '',
   ].join('\n'));
-  // 有意不建 notes/ ——T6 空 scope 诚实降级腿的载体
+  // 有意不建 notes/ ——T6 空 scope 诚实降级子用例的载体
 }
 
 const regRoot = makeRegistryRoot('t260910-10-anchor-reg-');
@@ -202,7 +202,7 @@ const t4raw = JSON.stringify(t4b.body ?? {});
 record('default/doc-sandbar', t4b.status === 200 && t4raw.includes('项目术语表') && !t4raw.includes('夹具甲'),
   `缺省 doc 读真库：含「项目术语表」=${t4raw.includes('项目术语表')} 夹具不串=${!t4raw.includes('夹具甲')}（status=${t4b.status}）`);
 
-// ---- T5 未注册 key 注入（本票新增外部输入的畸形腿；防静默回落）----
+// ---- T5 未注册 key 注入（本票新增外部输入的畸形子用例；防静默回落）----
 const t5 = await getJson(`${DOC_API}/tree?project=no-such-key-9x&scope=docs`);
 const t5raw = JSON.stringify(t5.body ?? {});
 record('inject/unknown-key-400', t5.status === 400,

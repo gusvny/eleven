@@ -78,7 +78,7 @@ const OUT_DIR = path.join(process.cwd(), '.suyou', 'screenshots', 't260904-17');
 
 const pw = await loadPlaywright();
 if (!pw) {
-  record('wt/playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：走查腿环境红');
+  record('wt/playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：走查子用例环境红');
   summarize();
 }
 
@@ -181,7 +181,7 @@ try {
     `展开前收口卡=${before}（折叠态），折叠行文案=「${foldTxt.trim().slice(0, 24)}」，点击后收口卡=${after}`);
 
   // WT2b F2 回归（验收①时间语义）：引擎秒级 updated_ts → toMillis 归一 → 人话相对时间。
-  // UT 只锁 relativeTime∘toMillis 组合，本腿锁行卡消费点全链（回归前此位显「2 万天前」）。
+  // UT 只锁 relativeTime∘toMillis 组合，本子用例锁行卡消费点全链（回归前此位显「2 万天前」）。
   {
     const t = (await boardCard(page, 'twait').locator('.wb-card-time').innerText().catch(() => '')).trim();
     record('wt/reltime-unit-fix', /^(刚刚|\d+ 分钟前)$/.test(t),

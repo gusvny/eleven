@@ -1,5 +1,5 @@
 // sc_ticket_detail_lane_map_dom.mjs — t260915-05 详情观测面重设计的 DOM 级对拍基线
-// （真泳道图＋人话状态卡蓝腿＋检查明细区＋红灯翻译层＋渲染器通用性，验收①②③）。
+// （真泳道图＋人话状态卡蓝子用例＋检查明细区＋红灯翻译层＋渲染器通用性，验收①②③）。
 //
 // Intent (black-box, user perspective)：宿主打开工单详情抽屉时，按 mock ①②③④
 // （260904-ticket-detail-ui-mock.html 宿主过稿）可感知到的新观测面：
@@ -444,7 +444,7 @@ async function snap(p) {
   } catch { return '(snapshot unavailable)' }
 }
 
-/** 换腿：改桩→reload（路由桩跨 reload 存活）→进板→开抽屉→等泳道图或步骤条渲染。 */
+/** 换子用例：改桩→reload（路由桩跨 reload 存活）→进板→开抽屉→等泳道图或步骤条渲染。 */
 async function applyLeg(page, boardIcon, detail, workflows) {
   currentDetail = detail
   currentWorkflows = workflows
@@ -463,7 +463,7 @@ async function applyLeg(page, boardIcon, detail, workflows) {
   if (!ok) throw new Error('neither lane map nor stepper rendered after row click')
 }
 
-/** 泳道图在场的腿断言跑法：先确认 wb-lanemap- 元素在场（缺席=fail 带诊断）。 */
+/** 泳道图在场的子用例断言跑法：先确认 wb-lanemap- 元素在场（缺席=fail 带诊断）。 */
 async function withMap(page, name, fn) {
   const inv = await page.evaluate(domMapInventory)
   if (!inv.length) return `泳道图未渲染（wb-lanemap-* 元素=0，拓扑缺席或组件未接线）@ ${await snap(page)}`
@@ -557,7 +557,7 @@ async function scenarioRedCardDirtyFiles(page) {
 
 async function scenarioBlueCard(page) {
   const card = await cardOf(page)
-  if (!card) return '状态卡未渲染（awaiting-human 腿）'
+  if (!card) return '状态卡未渲染（awaiting-human 子用例）'
   if (!/blue|awaiting/i.test(card.cls) && !/等你审批|人门/.test(card.text)) {
     return `蓝卡语义缺席（cls=${card.cls.slice(0, 80)}）`
   }
@@ -720,7 +720,7 @@ async function runBrowser(pw, browser) {
     await leg('L7b 畸形拓扑/轮次数据不炸', DETAIL_MALFORMED, [WF_DEVLANE], async () => {
       const mapN = await page.evaluate(domMapInventory).then(x => x.length).catch(() => -1)
       if (mapN < 0) return '页面在畸形数据下不可评估（疑似崩溃）'
-      return null // 不炸＋零 pageerror 由 P 卫生腿统一判
+      return null // 不炸＋零 pageerror 由 P 卫生子用例统一判
     })
     await leg('L8 检查明细区（gate_runs 逐轮逐条+联动）', DETAIL_CHECKS, [WF_DEVLANE], scenarioChecksArea)
 

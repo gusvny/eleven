@@ -108,7 +108,7 @@ section('J1 存量升级迁移（旧账册 → 稳定编号）')
 
 /* ── J2 编号生命周期：新建登记 → 关闭不回收 → 新建续号（↺ 重开已随 R8 退役，
  *      稳定身份语义由「blank 换绑保号」同口径看守）── */
-section('J2 编号生命周期（拍板 1：不回收、续号；重开腿已随 R8 退役）')
+section('J2 编号生命周期（拍板 1：不回收、续号；重开子用例已随 R8 退役）')
 {
   let ledger = baseLedger()
 
@@ -127,7 +127,7 @@ section('J2 编号生命周期（拍板 1：不回收、续号；重开腿已随
   const n2 = S.nextProjectSeq(closed, 'sandbar')
   ok(n2 === 5, `关闭后新会话续号 5 而非回收 2（实得 ${n2}）`)
 
-  // （↺ 重开腿已随票② R8 顶部行退役，t260904-05。blank 换绑保号语义与
+  // （↺ 重开子用例已随票② R8 顶部行退役，t260904-05。blank 换绑保号语义与
   //   touchEntry 带原 seq 重登同链，已由 smoke/project-sessions.mjs C1 看守。）
 
   // 关闭不碰计数器：计数器值（client 侧持有，此处直喂）不被关闭动作回退
@@ -137,7 +137,7 @@ section('J2 编号生命周期（拍板 1：不回收、续号；重开腿已随
     '再关 2 号且不带计数器 → 按账册兜底续 5（仍不回收 2）')
 }
 
-/* ── J3 项目行消费面（票② R8 后账册唯一渲染面；顶部行腿已退役）── */
+/* ── J3 项目行消费面（票② R8 后账册唯一渲染面；顶部行子用例已退役）── */
 section('J3 项目行消费面（pickProjectTabs 过滤/升序/兜底/唯一）')
 {
   const ledger = baseLedger()
@@ -160,7 +160,7 @@ section('J3 项目行消费面（pickProjectTabs 过滤/升序/兜底/唯一）'
   ok(S.pickProjectTabs(ledger, { project: 'sandbar', current: 'ticket-t9', byId }).every(t => !t.active),
     'current 是工单会话 → 全不亮')
 
-  // （顶部行 pickSwitchTargets 腿已随票② R8 退役：被测面删除，
+  // （顶部行 pickSwitchTargets 子用例已随票② R8 退役：被测面删除，
   //   反转看守在 smoke/hero.mjs / project-sessions.mjs S6。）
 }
 

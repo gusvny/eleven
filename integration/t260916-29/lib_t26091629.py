@@ -69,7 +69,7 @@ def wait_ppid_one(pid, timeout_s, interval=0.5):
     """等 worker 被收养（ppid==1）。返回 (达到与否, 末次观测描述)。
 
     收养目标 ppid 随环境（macOS=launchd(1)；Linux 容器内 subreaper 可≠1）——
-    达不到时调用方按 N/A 条件腿处置，不算被测行为红（沿 t260905-02 口径）。"""
+    达不到时调用方按 N/A 条件子用例处置，不算被测行为红（沿 t260905-02 口径）。"""
     deadline = time.time() + timeout_s
     last = None
     while time.time() < deadline:

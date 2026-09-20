@@ -2,8 +2,8 @@
 // 最后项目/legacy/未注册/隔离同名）。
 //
 // intent（用户可感知行为，立项验收5/7/8/9 + gen2 方案 C3 表）：remove 的 fail-closed
-// 闸逐道可辨且语义腿零环境依赖——
-//   真票腿（唯一 env_fail 豁免，C3 表）：隔离台起真 running 票 → 拒摘报票号 →
+// 闸逐道可辨且语义子用例零环境依赖——
+//   真票子用例（唯一 env_fail 豁免，C3 表）：隔离台起真 running 票 → 拒摘报票号 →
 //     收口（cancel）→ 重跑 remove 成功（验收5 全段，含 M3 续步）；
 //   Temporal 不可达 → fail-closed 拒摘，文案含可达性诊断指路（先 sandbar up）（验收7）；
 //   sdk-missing 与不可达两态输出可辨（KI-039）；通道坏 JSON=拒摘；
@@ -15,11 +15,11 @@
 //   legacy env（SANDBAR_PROJECTS_YAML）在位=拒收点名存量 env（gen1 R4 模式闸）；
 //   key 未注册=拒且零现场变更；隔离条目同名=拒且与未注册区分报（含 project.yaml 定位）。
 //
-// 台别（C3 表逐腿钉死）：真票腿=temporalite 自举真台（依赖缺席=env_fail（exit 2）
-//   并打印缺什么，唯一豁免腿）；其余全部腿=桩 poc_dir（--root 指桩树，假 client.py 经
+// 台别（C3 表逐子用例钉死）：真票子用例=temporalite 自举真台（依赖缺席=env_fail（exit 2）
+//   并打印缺什么，唯一豁免子用例）；其余全部子用例=桩 poc_dir（--root 指桩树，假 client.py 经
 //   FIX14_CTRL 注入），零环境依赖——注入缝在桩侧，环境缺失假绿被三态契约堵死（KI-046）。
 // 安全红线：零 3099 接触；自举台只在随机高端口+临时 db，finally 必杀（资源回收）；
-//   env 逐腿显式钉死防缺省外溢生产 7233。实现段落地前本场景红属预期（TDD 信号），
+//   env 逐子用例显式钉死防缺省外溢生产 7233。实现段落地前本场景红属预期（TDD 信号），
 //   arbitrate/merge 期必须绿。
 import { spawnSync, spawn } from 'node:child_process';
 import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
@@ -55,9 +55,9 @@ const mkEntry = (root, key, ids) => {
   return projDir;
 };
 
-// client.py 直呼（真通道，仅真票腿用；cwd=仓根，消费 SANDBAR_TARGET_HOST/NAMESPACE env）。
+// client.py 直呼（真通道，仅真票子用例用；cwd=仓根，消费 SANDBAR_TARGET_HOST/NAMESPACE env）。
 // 解释器与 provisionRealRig 的依赖①同款解析（enginePy）——系统 python3 无 SDK 时
-// 直呼必炸，260908 前此腿恒 env_fail。
+// 直呼必炸，260908 前此子用例恒 env_fail。
 function pyTicket(clientArgs, env) {
   const py = enginePy() || 'python3';
   const r = spawnSync(py, ['server/engine/client.py', ...clientArgs],
@@ -66,12 +66,12 @@ function pyTicket(clientArgs, env) {
 }
 
 // =====================================================================
-// 腿 A（真票腿，唯一 env_fail 豁免）：真台起 running 票 → 拒摘报票号 → cancel → remove 成功
+// 子用例 A（真票子用例，唯一 env_fail 豁免）：真台起 running 票 → 拒摘报票号 → cancel → remove 成功
 // =====================================================================
 {
   const rig = await provisionRealRig();
   if (!rig.ok) {
-    c.envFail('真票腿（验收5 全段）', `${rig.reason}——C3 唯一 env_fail 豁免腿（隔离台环境补真跑）`);
+    c.envFail('真票子用例（验收5 全段）', `${rig.reason}——C3 唯一 env_fail 豁免子用例（隔离台环境补真跑）`);
   } else {
     try {
       const root = newRoot('fix14-gate-real-');
@@ -89,7 +89,7 @@ function pyTicket(clientArgs, env) {
       // 拒收后 remove 一路绿灯，在飞闸形同虚设）。
       const stBody = extractJson(st.out);
       if (st.code !== 0 || !stBody || stBody.ok !== true) {
-        c.envFail('真票腿（验收5 全段）',
+        c.envFail('真票子用例（验收5 全段）',
           `ticket-start 未成（隔离台参数/锚定口径差异）：${st.out.slice(-200)}`);
       } else {
         // 占位 worker：让在飞票的 query 快速失败（见 fixture_holder_fake.py 头注），
@@ -117,7 +117,7 @@ function pyTicket(clientArgs, env) {
           JSON.stringify({ workflow_id: tid, reason: 't260904-14 场景收口' })], env);
         const ccBody = extractJson(cc.out);
         if (cc.code !== 0 || !ccBody || ccBody.ok !== true) {
-          c.envFail('真票腿收口后半', `cancel 未成：${cc.out.slice(-200)}`);
+          c.envFail('真票子用例收口后半', `cancel 未成：${cc.out.slice(-200)}`);
         } else {
           const rem2 = runCli(['project', 'remove', '--key', 'rmgate'], env);
           c.check('收口后 remove 成功（验收5 后半/M3 续步）', rem2.code === 0,
@@ -133,11 +133,11 @@ function pyTicket(clientArgs, env) {
 }
 
 // =====================================================================
-// 腿 B（桩 poc_dir，零环境依赖腿）：不可达 / sdk-missing / 坏 JSON 三态 fail-closed
+// 子用例 B（桩 poc_dir，零环境依赖子用例）：不可达 / sdk-missing / 坏 JSON 三态 fail-closed
 // =====================================================================
 {
   const root = newRoot('fix14-gate-unreach-');
-  mkEntry(root, 'keeper', []); // 防撞「最后项目闸」：本腿断言面不在 confirm-last
+  mkEntry(root, 'keeper', []); // 防撞「最后项目闸」：本子用例断言面不在 confirm-last
   mkEntry(root, 'rmun', []);
   stub.setCtrl({ mode: 'exit', stderr: 'dial tcp 127.0.0.1:1: connect: connection refused' });
   const dead = stub.remove(root, 'rmun');
@@ -162,12 +162,12 @@ function pyTicket(clientArgs, env) {
 }
 
 // =====================================================================
-// 腿 C（桩 poc_dir，零环境依赖腿）：purge 双旗 + C1 三态 + dry-run 清单
+// 子用例 C（桩 poc_dir，零环境依赖子用例）：purge 双旗 + C1 三态 + dry-run 清单
 // =====================================================================
 {
   // C1 缺失态：目录在/manifest 缺 → 差集含该票 → purge 拒并列票号、data/ 不动
   const root = newRoot('fix14-gate-purge1-');
-  mkEntry(root, 'keeper', []); // 防撞「最后项目闸」：本腿断言面不在 confirm-last
+  mkEntry(root, 'keeper', []); // 防撞「最后项目闸」：本子用例断言面不在 confirm-last
   mkEntry(root, 'rmpg', [['tp1', 'valid'], ['tp9', 'missing']]);
   stub.setCtrl({ mode: 'ok', tickets: [
     { id: 'tp1', exec_status: 'COMPLETED', close_ts: 1, sa_project: 'rmpg', sa_epic: '' },
@@ -252,7 +252,7 @@ function pyTicket(clientArgs, env) {
 }
 
 // =====================================================================
-// 腿 D（桩 poc_dir，零环境依赖腿）：最后项目 --confirm-last（验收9）
+// 子用例 D（桩 poc_dir，零环境依赖子用例）：最后项目 --confirm-last（验收9）
 // =====================================================================
 {
   const root = newRoot('fix14-gate-last-');
@@ -278,11 +278,11 @@ function pyTicket(clientArgs, env) {
 }
 
 // =====================================================================
-// 腿 E（桩 poc_dir，零环境依赖腿）：legacy 模式闸 / key 未注册 / 隔离同名
+// 子用例 E（桩 poc_dir，零环境依赖子用例）：legacy 模式闸 / key 未注册 / 隔离同名
 // =====================================================================
 {
   const root = newRoot('fix14-gate-misc-');
-  mkEntry(root, 'keeper', []); // 防撞「最后项目闸」：本腿断言面不在 confirm-last
+  mkEntry(root, 'keeper', []); // 防撞「最后项目闸」：本子用例断言面不在 confirm-last
   mkEntry(root, 'rmleg', []);
   const legacyFile = path.join(tmpRoot('fix14-legacy-'), 'projects.yaml');
   writeFileSync(legacyFile, 'projects: []\n');

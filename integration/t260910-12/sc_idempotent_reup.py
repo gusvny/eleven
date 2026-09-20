@@ -65,7 +65,7 @@ def main():
 
         # 二次 ensure：幂等复用
         proc, st2 = ensure_up(TAG, timeout=300)
-        env_guard(proc.stderr, "二次 ensure 腿")
+        env_guard(proc.stderr, "二次 ensure 子用例")
         check(proc.returncode == 0 and st2 is not None,
               "二次 ensure 成功（rc=%s）" % proc.returncode)
         check(bool((st2 or {}).get("reused")), "二次 ensure 标记 reused=true")

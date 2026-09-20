@@ -134,7 +134,7 @@ def legacy_fire_redirect_reason(ticket_id: str) -> str:
 
 
 def unowned_guard_reason(project_key: str, repo_root: str) -> str:
-    """无主票守卫判据（纯函数，t260915-20；单测两腿）：
+    """无主票守卫判据（纯函数，t260915-20；单测两分支）：
     项目身份与 repo_root **双空** → 返回 blocked 事由（点名「无项目身份」与处置入口）；
     否则返回 ""（放行）。双空=旧调度 payload/旁路起票的残窗形态——有身份的票
     （repo_root 无论如何都会由起票面解析定死）照常放行；显式 --repo-root 旁路但无
@@ -203,7 +203,7 @@ def period_key_in_tz(now: datetime, tz_name: str = "") -> str:
 def validate_period_key(instance_id: str, period: str) -> None:
     """期号形状闸（t260916-02 起）：票号=workflow id（t 形，起票侧铸号，见
     inspection_ticketing.open_period_ticket），workflow 体不再铸造票号——但期号仍是
-    去重键/台账键，体内在铸期回落腿后照旧闭式校验（形状非法=ValueError，与旧铸号
+    去重键/台账键，体内在铸期回落分支后照旧闭式校验（形状非法=ValueError，与旧铸号
     校验同语义，replay 面对合法期零影响）。"""
     if not instance_id or not PERIOD_RE.match(period or ""):
         raise ValueError("票号组成非法：instance=%r period=%r（期号须 YYYYMMDD 或 "
@@ -1065,7 +1065,7 @@ class InspectionPeriodicWorkflow:
 
         为什么落账要带 timeline：`out/inspection/<票号>.json` 是本期对**离线读者**（人 /
         CLI / 运维脚本）唯一的完整面——没有阶段机证据，读者答不出「这期跑到哪、卡在哪段、
-        人门过没过」（t260913-02 场景② 的 B1 腿正是按这个口径读落账的）。workflow snapshot
+        人门过没过」（t260913-02 场景② 的 B1 子用例正是按这个口径读落账的）。workflow snapshot
         不塞 timeline：快照自己有实时 timeline，重复塞只会让每次 query 的载荷翻倍。"""
         doc: Dict[str, Any] = dict(self.face)
         doc["stage"] = self.stage
@@ -1351,7 +1351,7 @@ class InspectionWatcherInput:
     # 声明来源（t260913-02）：watcher 是计数 kind 的开票拉起点，它开的票同样要让
     # 「调度/触发用的声明」与「workflow 运行期读的声明」同源（否则隔离台夹具实例
     # 在 worker 缺省声明里不存在 → 票被 blocked → 同桶重复触发不去重，t260911-02
-    # 腿 g2 实测）。缺省空=worker 侧缺省/env（生产缺省即此形态）。
+    # 子用例 g2 实测）。缺省空=worker 侧缺省/env（生产缺省即此形态）。
     decl_path: str = ""
     project_key: str = ""
     # 实例级项目身份（t260915-20，命名与上方 project_key 计数源键**显式区分**）：

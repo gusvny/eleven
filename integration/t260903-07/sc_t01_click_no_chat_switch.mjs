@@ -21,7 +21,7 @@ import { loadPlaywright, pwMissingDetail } from '../lib_pw_deps.mjs';
 //
 // Execution contract (t260904-12 三态): stdout last line
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; missing deps → env_fail
-// (exit 2); FAIL>0 或全腿 na → exit 1. Isolated console
+// (exit 2); FAIL>0 或全部子用例 na → exit 1. Isolated console
 // SANDBAR_TEST_CONSOLE (default: lib_stage_console 共享台); hard guard: never 3099.
 
 const BASE = (await ensureStageConsole()).base;

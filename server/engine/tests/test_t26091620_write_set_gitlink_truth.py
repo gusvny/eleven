@@ -6,7 +6,7 @@
 已对条目 `rstrip("/")` 归一——本表把该语义钉死防漂移（漂移=闸误判返场）。
 
 已知残缺口（本票不修，交宿主）：server/tools/verify_lane.py `_in_write_set` 的
-`path == e` 腿用原始条目未剥尾斜杠——`content` × `content/` 在该处判假，即事故里
+`path == e` 分支用原始条目未剥尾斜杠——`content` × `content/` 在该处判假，即事故里
 「越界写: content」误诊文案的真源；该文件在 server/tools/，不在本票写集
 （server/engine/; integration/）。
 
@@ -29,7 +29,7 @@ from agent_activities import _dirty_within_write_set  # noqa: E402
     # 事故形态：gitlink 路径（无尾斜杠）× 写集条目（带尾斜杠）→ 必须判真
     ("content", ["content/"], True),
     ("content", ["content"], True),
-    ("content/x.py", ["content/"], True),   # 前缀腿
+    ("content/x.py", ["content/"], True),   # 前缀分支
     ("content", ["content//"], True),       # rstrip 剥掉全部尾斜杠
     ("content", ["content/x"], False),      # 条目更深 → 不覆盖目录名本身
     ("content", ["other/"], False),

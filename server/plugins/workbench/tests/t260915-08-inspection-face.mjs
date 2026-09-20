@@ -1,4 +1,4 @@
-// t260915-08 巡检板面纯函数层 UT（src/host/inspection-face.ts 真值表 + review 执行项1 UI 腿）。
+// t260915-08 巡检板面纯函数层 UT（src/host/inspection-face.ts 真值表 + review 执行项1 UI 子用例）。
 // 独立可执行（node ≥22 type-stripping，cwd=仓库根；exit 0 = 过）。
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -84,7 +84,7 @@ ok(inspectionTitleOf({ title: '巡检 a · 期 b', id: 'x' }) === '巡检 a · �
 ok(inspectionTitleOf({ id: 'inspection-x-20260915' }) === 'inspection-x-20260915', '标题缺失兜底 id（宁显编号不显空）')
 ok(inspectionTitleOf({}) === '', '全空→空串不抛')
 
-// ---- review 执行项1 UI 腿：降级闭合行（引擎钉 status='running'）四态≠done，保持可见
+// ---- review 执行项1 UI 子用例：降级闭合行（引擎钉 status='running'）四态≠done，保持可见
 ok(deriveTicketState('running', 'running') !== 'done', '降级闭合行（status=running）不得被收口折叠吃掉')
 ok(deriveTicketState('closed', 'done') === 'done', '真闭合行仍是 done（收口折叠正常面）')
 ok(deriveTicketState('running', 'awaiting-human') === 'waiting', '人门行=waiting（黄调行数据源）')

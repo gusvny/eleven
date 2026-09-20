@@ -17,7 +17,7 @@ intent（守护的用户可感知行为/合同）：
 fail-closed 拒收面。白名单门的工具语义另有专测（verify_lane 族），本条只守
 **多仓重基后调用侧组装**的两向行为。
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；
-temporalio 缺失=ENV_FAIL 点名（全链行为腿），无 stdlib 替代腿（本场全靠真链路）。
+temporalio 缺失=ENV_FAIL 点名（全链行为子用例），无 stdlib 替代子用例（本场全靠真链路）。
 """
 import shutil
 import sys
@@ -84,7 +84,7 @@ def details_of(res):
 
 
 if not temporalio_available():
-    env_fail("temporalio 不可用（本泳道无 venv）：合并闸/逐仓收口/重入行为腿不可执行——"
+    env_fail("temporalio 不可用（本泳道无 venv）：合并闸/逐仓收口/重入行为子用例不可执行——"
              "arbitrate/merge 期 venv 环境必须全绿")
     sys.exit(summary())
 

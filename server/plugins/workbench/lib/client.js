@@ -3535,7 +3535,7 @@ function startChatProjectBand(opts = {}) {
 //#endregion
 //#region src/client/theme.ts
 /**
-* epic 徽标文字色：哈希装饰色向主题前景色方向调和（45%——acceptance 实测 65% 在 fallback 腿半透底链 4.21 压线、忠实深态最低槽 4.43 压线；45% 后全档双腿 ≥4.5），深浅两档下
+* epic 徽标文字色：哈希装饰色向主题前景色方向调和（45%——acceptance 实测 65% 在 fallback 分支半透底链 4.21 压线、忠实深态最低槽 4.43 压线；45% 后全档两分支 ≥4.5），深浅两档下
 * EPIC_PALETTE 全 10 档对比度达标（看守场景逐档断言）。`--epic-c` 由消费点
 * 行内注入（epicColorOf 结果，纯函数不动）。
 */
@@ -49083,7 +49083,7 @@ const DOCS_STYLE = `${DERIVE_TOKENS_CSS}
 .wb-doc-topbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--dsw-derive-border,#d0d7de); min-width:0; }
 .wb-doc-crumb { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--dsw-derive-muted,#57606a); min-width:0; overflow:hidden; }
 .wb-doc-crumb b { color:var(--dsw-derive-fg,#1f2328); font-weight:600; overflow-wrap:anywhere; }
-/* 对比度纪律（t260910-10 rework）：分隔符/键名不透明度稀释前景被 contrast 四腿扫描判红
+/* 对比度纪律（t260910-10 rework）：分隔符/键名不透明度稀释前景被 contrast 四分支扫描判红
  * （2.16–2.92 < 4.5）——改全强度主题令牌前景，不写死浅灰。 */
 .wb-doc-crumb .sep { color:var(--dsw-derive-fg,#1f2328); }
 .wb-doc-crumb-root { color:var(--dsw-derive-fg,#1f2328); font-weight:600; }
@@ -50051,7 +50051,7 @@ function translateReason(code, fallbackText) {
 //#region src/host/status-card.ts
 /**
 * status-card.ts —— 工单详情「人话状态卡」视图模型（KI-048 件④，t260911-05；
-* t260915-05 扩展：文案迁 red-light-lexicon 词条表 + 新增人门蓝卡腿）。
+* t260915-05 扩展：文案迁 red-light-lexicon 词条表 + 新增人门蓝卡分支）。
 *
 * 设计样张：notes/discussions/260904-ticket-detail-ui-mock.html A 块状态卡
 * （四件构成：人话主文案 ＋ 挡事文件点名 ＋ 下一步安排 ＋ 原始日志折叠；

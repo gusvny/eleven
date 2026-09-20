@@ -10,7 +10,7 @@
 //      点击通路——T5b 的取证口径（force 只放宽到达手段，行为断言不变）；
 //   G3 三态执行契约：SUMMARY 四计数行 + 退出码分家（fail>0→1 / env_fail>0→2）——
 //      t260904-12 词汇表守卫的载体面，弱化=闸内红绿语义失真；
-//   G4 T1-T7 族腿清点：七腿 record 名零缺失（新增腿不拦；缺腿=族覆盖收缩，须走票）。
+//   G4 T1-T7 族子用例清点：七子用例 record 名零缺失（新增子用例不拦；缺子用例=族覆盖收缩，须走票）。
 // 与 multi-tab-coexistence 场景 intent 不同面：那边守运行时行为（跨页签语义），
 // 本场景守守卫资产在册（豁免体系/取证口径/执行契约），纯 fs 零台面。
 // 检测器红绿自证（扫描器纪律，同 installer-console-line 先例）：对真实源先证绿，
@@ -60,7 +60,7 @@ function detect(src) {
   const violations = {}
 
   // G1 诚实红定性标签：定义在册 + T2/T5 fail 分支与 failWith catch 路径三处引用。
-  // 注意腿名在 env_fail 分支也出现（先于 fail 分支），必须钉「'fail' 分支行 + 标签
+  // 注意子用例名在 env_fail 分支也出现（先于 fail 分支），必须钉「'fail' 分支行 + 标签
   // 同行共现」，不能 find 首个同名行（gen0 自证实锤的误报形态）。
   const tag = []
   if (!/const PRE_EXISTING_TAG = /.test(src)) tag.push('PRE_EXISTING_TAG 定义缺失')
@@ -85,10 +85,10 @@ function detect(src) {
   if (!/f > 0 \|\| allNa \? 1 : e > 0 \? 2 : 0/.test(src)) contract.push('退出码分家（1=产品红/2=环境红）缺失或变形')
   violations['G3 三态执行契约'] = contract
 
-  // G4 族腿清点：T1-T7 record 名零缺失（新增不拦、缺腿即红）。
-  violations['G4 T1-T7 族腿清点'] = FAMILY_LEGS
+  // G4 族子用例清点：T1-T7 record 名零缺失（新增不拦、缺子用例即红）。
+  violations['G4 T1-T7 族子用例清点'] = FAMILY_LEGS
     .filter(leg => !src.includes(`record('${leg}'`))
-    .map(leg => `族腿缺失：${leg}`)
+    .map(leg => `族子用例缺失：${leg}`)
   return violations
 }
 
@@ -97,7 +97,7 @@ const flat = (v) => Object.values(v).flat()
 // ------------------------------------------------------------- main
 
 let src = null
-try { src = readFileSync(TARGET, 'utf8') } catch { /* 恒红由下方 G 腿报 */ }
+try { src = readFileSync(TARGET, 'utf8') } catch { /* 恒红由下方 G 子用例报 */ }
 if (src === null) {
   record('G0 target readable', 'fail', `基线文件不可读：${TARGET}（19 号资产被移走？）`)
   summarize()
@@ -110,7 +110,7 @@ const mutations = [
   ['G1 诚实红定性标签', src => src.replace(/const PRE_EXISTING_TAG = [^\n]+/, 'const __TAG_REMOVED = ""')],
   ['G2 force 取证守卫', src => src.replace('still does not open after force, that is a real product red', '（注释占位）')],
   ['G3 三态执行契约', src => src.replace(/SUMMARY pass=\$\{p\}[^\n]*/, 'console.log("SUMMARY done")')],
-  ['G4 T1-T7 族腿清点', src => src.replaceAll('T7 zero pageerror/console.error', 'T7 hygiene')],
+  ['G4 T1-T7 族子用例清点', src => src.replaceAll('T7 zero pageerror/console.error', 'T7 hygiene')],
 ]
 for (const [rule, mutate] of mutations) {
   const v = detect(mutate(src))
@@ -123,8 +123,8 @@ if (selfProof.length === 0) {
   record('G0 detector self-proof', 'fail', selfProof.join('；').slice(0, 200))
 }
 
-// G1-G4 对真实源逐规则出腿（违规明细精确到哪条资产缺）。
-for (const rule of ['G1 诚实红定性标签', 'G2 force 取证守卫', 'G3 三态执行契约', 'G4 T1-T7 族腿清点']) {
+// G1-G4 对真实源逐规则出子用例（违规明细精确到哪条资产缺）。
+for (const rule of ['G1 诚实红定性标签', 'G2 force 取证守卫', 'G3 三态执行契约', 'G4 T1-T7 族子用例清点']) {
   const v = realV[rule]
   if (v.length === 0) record(rule, 'pass', '在册')
   else record(rule, 'fail', v.join('；').slice(0, 220))

@@ -1,4 +1,4 @@
-// shot_docs_views.mjs — t260907-08 走查证据腿：docs 视图浅/深两档截图（隔离台）。
+// shot_docs_views.mjs — t260907-08 走查证据子用例：docs 视图浅/深两档截图（隔离台）。
 //
 // 用途：UI 票验收证据（工单契约：改动前后截图落 .suyou/screenshots/）。改前/改后
 //   各跑一遍（同一脚本、同一导航路径），产出 docs 视图浅档+深档两张截图，供
@@ -68,7 +68,7 @@ try {
   }
 } catch (e) {
   fail = 1;
-  console.error(`FAIL 截图腿：${String(e?.message ?? e).slice(0, 300)}`);
+  console.error(`FAIL 截图子用例：${String(e?.message ?? e).slice(0, 300)}`);
 } finally {
   await browser.close().catch(() => {});
 }

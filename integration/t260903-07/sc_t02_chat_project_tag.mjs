@@ -20,7 +20,7 @@ import { loadPlaywright, pwMissingDetail } from '../lib_pw_deps.mjs';
 //
 // Execution contract (t260904-12 三态): stdout last line
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; missing deps → env_fail
-// (exit 2); FAIL>0 或全腿 na → exit 1. Isolated console
+// (exit 2); FAIL>0 或全部子用例 na → exit 1. Isolated console
 // SANDBAR_TEST_CONSOLE (default: lib_stage_console 共享台); hard guard: never 3099.
 
 const BASE = (await ensureStageConsole()).base;
@@ -189,7 +189,7 @@ async function browserScenarios(fixtureProjects) {
   // 是控制台项目注册表 API；该源不可得时（请求失败/列表空/不含该 key）页面**没有任何数据**能渲出
   // 该 chip——此时「行在场但无 chip」是环境面（与 t4「session not restored」同窗共现，实测 260914
   // 全量窗：本场景 4/3/1 且 t4 env_fail，而同一代码相邻窗与隔离复跑 8/0 全绿）。
-  // 只在键源**明确不可得**时把该腿降为 env_fail；键源健康而 chip 仍未渲染 ⇒ 照旧 FAIL（产品面），
+  // 只在键源**明确不可得**时把该子用例降为 env_fail；键源健康而 chip 仍未渲染 ⇒ 照旧 FAIL（产品面），
   // 断言强度一字未放。fetch 直打本场景自己的 BASE（不引 lib_charter，避免跨台 BASE 混淆）。
   async function keySourceHas(key) {
     try {

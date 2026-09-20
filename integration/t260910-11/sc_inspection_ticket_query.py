@@ -48,10 +48,10 @@ def main() -> int:
     os.environ["SANDBAR_TARGET_HOST"] = TEST_HOST
     os.environ["SANDBAR_NAMESPACE"] = lib.TEST_NAMESPACE  # naming-compat：存量测试台命名空间
 
-    # 隔离台探活：缺=ENV_FAIL（本条无离线腿，整条环境红不假绿）
+    # 隔离台探活：缺=ENV_FAIL（本条无离线子用例，整条环境红不假绿）
     proc, parsed = lib.run_client("schedule-list", {})
     if not (isinstance(parsed, dict) and parsed.get("ok") is True):
-        lib.die_env("查询腿不可验：docker 测试台 %s 不可达或 temporalio 缺席"
+        lib.die_env("查询子用例不可验：docker 测试台 %s 不可达或 temporalio 缺席"
                     "（schedule-list 未 ok，sh server/docker-compose.test.yml up -d）"
                     % TEST_HOST)
 
@@ -75,13 +75,13 @@ def main() -> int:
                                             "--period", period,
                                             "--decl-path", decl_path])
             if not (isinstance(parsed, dict) and parsed.get("ok") is True):
-                failures.append("腿a 隔离台开票未放行（查询面前置）：%r | stderr=%s"
+                failures.append("子用例a 隔离台开票未放行（查询面前置）：%r | stderr=%s"
                                 % ((parsed or (proc.stdout or "")[:200]),
                                    (proc.stderr or "")[:200]))
             else:
                 opened = True
                 ticket_id = str(((parsed.get("result") or {}).get("ticket_id")) or "")
-                # ── 腿b：ticket 子命令可查、形状与工单详情同构（短轮询：快照查询
+                # ── 子用例b：ticket 子命令可查、形状与工单详情同构（短轮询：快照查询
                 # 早于 workflow 首个事件时 NotFound 属正常可见性延迟，非产品缺陷）──
                 parsed = None
                 for _ in range(8):
@@ -91,35 +91,35 @@ def main() -> int:
                         break
                     time.sleep(1)
                 if not isinstance(parsed, dict):
-                    failures.append("腿b ticket 回执非单行 JSON（子命令缺席或回执形状破）：%r | "
+                    failures.append("子用例b ticket 回执非单行 JSON（子命令缺席或回执形状破）：%r | "
                                     "stderr=%s" % ((proc.stdout or "")[:200], (proc.stderr or "")[:200]))
                 elif parsed.get("ok") is not True:
-                    failures.append("腿b 查询存活票失败：%r" % parsed)
+                    failures.append("子用例b 查询存活票失败：%r" % parsed)
                 else:
                     result = parsed.get("result") or {}
                     missing = [k for k in QUERY_REQUIRED_KEYS if k not in result]
                     if missing:
-                        failures.append("腿b 回执缺工单详情同构键 %s（契约面 "
+                        failures.append("子用例b 回执缺工单详情同构键 %s（契约面 "
                                         "stage/stage_state/status/face/timeline）：%r"
                                         % (missing, sorted(result.keys())))
                     face = result.get("face")
                     if not isinstance(face, dict):
-                        failures.append("腿b face 键非 dict（发现清单摘要面缺席）：%r"
+                        failures.append("子用例b face 键非 dict（发现清单摘要面缺席）：%r"
                                         % (face,))
-                notes.append("腿b 查询回执键=%s" % sorted(((parsed.get("result") or {}) if parsed else {}).keys()))
+                notes.append("子用例b 查询回执键=%s" % sorted(((parsed.get("result") or {}) if parsed else {}).keys()))
 
-            # ── 腿c：查不存在→精确点名，不许笼统网络话术 ──
+            # ── 子用例c：查不存在→精确点名，不许笼统网络话术 ──
             ghost = "integration-tests-99999"
             proc, parsed = lib.run_trigger(["ticket", "--instance", ghost,
                                             "--period", period])
             if not isinstance(parsed, dict):
-                failures.append("腿c 查不存在回执非单行 JSON：%r" % (proc.stdout or "")[:160])
+                failures.append("子用例c 查不存在回执非单行 JSON：%r" % (proc.stdout or "")[:160])
             elif parsed.get("ok") is not False:
-                failures.append("腿c 查不存在竟放行：%r" % parsed)
+                failures.append("子用例c 查不存在竟放行：%r" % parsed)
             else:
                 err = str(parsed.get("error") or "")
                 if ghost not in err and instance not in err:
-                    failures.append("腿c 查不到的报错未点名实例/票号（笼统网络话术会把诊断"
+                    failures.append("子用例c 查不到的报错未点名实例/票号（笼统网络话术会把诊断"
                                     "引向错误方向）：%r" % err[:240])
     finally:
         import shutil

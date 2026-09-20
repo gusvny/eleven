@@ -1,14 +1,14 @@
 """t260916-22：发现级裁定面单测（inspection_trigger.cmd_verdict / deadman 排除）。
 
 覆盖（工单验收④ + 方案 §4 步骤4）：
-- CLI verdict 台账腿（--offline，零 Temporal）：载荷校验（词表/别名/who agent 拒收）、
+- CLI verdict 台账分支（--offline，零 Temporal）：载荷校验（词表/别名/who agent 拒收）、
   台账票面 findings[].verdict 原位改写、verdicts 台账追加、dedupe 幂等（重跑不重复
   落账）、finding-id 不在清单点名、坏台账不覆盖重建；
 - 收口活动 write_inspection_verdicts：批量落账 + 幂等 + 畸形输入 fail-closed；
-- signal 腿结构锁（票在途走 finding_verdict signal，回读校验）；
+- signal 分支结构锁（票在途走 finding_verdict signal，回读校验）；
 - deadman ledger_periods：verdicts/套件回执不进畸形桶（词法排除），periods 口径不变；
 - 跨期压制闭环：verdict(假报) → 下期 collect_fake_ids 命中 → dedupe_and_suppress
-  suppressed（组合腿）。
+  suppressed（组合子用例）。
 """
 import asyncio
 import json
@@ -66,7 +66,7 @@ class argparse_ns:
         self.__dict__.update(d)
 
 
-# ---------- CLI verdict：台账腿 ----------
+# ---------- CLI verdict：台账分支 ----------
 
 def test_verdict_ledger_leg_books_face_and_receipts(ledger: Path):
     res = asyncio.run(trig.cmd_verdict(_args()))
@@ -181,7 +181,7 @@ def test_deadman_excludes_verdicts_and_suite_receipts(ledger: Path, monkeypatch)
     assert deadman.VERDICTS_RECEIPT_SUFFIX == ins.VERDICTS_RECEIPT_SUFFIX
 
 
-# ---------- 跨期压制闭环（组合腿） ----------
+# ---------- 跨期压制闭环（组合子用例） ----------
 
 def test_fake_verdict_suppresses_next_period(ledger: Path):
     (ledger / "inspection-inst-20260915-verdicts.json").write_text(

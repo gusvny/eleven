@@ -800,7 +800,7 @@ def _pause_resume(a, op):
     注入、纯空白在本层拒收——_authorize 同族先例；client.py 的 'op-local' 缺省
     从此只留给裸入口，正规入口机械保证不产生 op-local。note 可选透传，上限不在此
     抢答（单点=workflow intake PAUSE_NOTE_INPUT_LIMIT，不造第二真源）；「who 空白
-    → workflow refused」语义仍由裸入口承载（场景 L3.1 腿，不重复设防）。"""
+    → workflow refused」语义仍由裸入口承载（场景 L3.1 子用例，不重复设防）。"""
     tid = a.get('id') or ''
     if not tid:
         raise ValueError('%s 需要 id' % op)

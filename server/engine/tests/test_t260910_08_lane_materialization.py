@@ -6,7 +6,7 @@
     WorkspacePrep 构造收敛单点 shared.build_workspace_prep（绑定锚=getsource：
     任一 workflow 族回退内联 WorkspacePrep(...) 该 UT 即红——t260910-07 实案的
     「构造点静默缺喂」缺陷形态由结构钉死）；
-  - 磁盘终态（进程内快腿）：_init 后的 meta 三环齐全、闸放行；泳道磁盘逐仓物化
+  - 磁盘终态（进程内快速子用例）：_init 后的 meta 三环齐全、闸放行；泳道磁盘逐仓物化
     的完整断言（逐仓目录/分支名/清单/meta 非空）在 L3 真开票场景
     integration/t260910-08/sc_t260910_08_lane_materialization.py（真 ticket.py
     create → 真 worker → 磁盘），本文件不重复其 intent；
@@ -192,7 +192,7 @@ def test_build_workspace_prep_feeds_three_rings_and_replay_safe():
     assert p0.repo_worktrees == [] and p0.write_set == [] and p0.project_root == ""
 
 
-# ---------- ③ CWD 敏感红收口：fuse A project_root 缺失腿 ----------
+# ---------- ③ CWD 敏感红收口：fuse A project_root 缺失子用例 ----------
 
 def test_fuse_a_empty_project_root_cwd_invariant(tmp_path, monkeypatch):
     """同输入在不同 cwd 下结果逐字节一致（环境依赖即缺陷，t260910-03 票红根因）。"""

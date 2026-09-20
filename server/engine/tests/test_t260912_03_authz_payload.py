@@ -1,6 +1,6 @@
 """t260912-03 人授权载荷与纯函数矩阵（shared.py / authz_gates.py 的纯面，离线零 Temporal）。
 
-覆盖（方案 S1/S2 + review RC1-RC3/RC9 的机械腿）：
+覆盖（方案 S1/S2 + review RC1-RC3/RC9 的机械子用例）：
   - 常量与上限：who 64 / reason 20000 / scope 16×256 / expires ≤ 签发+30 天；
   - 反自签：全域五角色名（源码锁定对齐 inspection_flow.AGENT_ROLE_NAMES）+ strip/lower
     归一 + 大小写/空白变体 + `-agent` 显示名后缀；

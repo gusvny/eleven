@@ -334,7 +334,7 @@ def call_activity(fn, *shapes):
 
     适配面：本票新活动的入参容器（dict / dataclass / 关键字）由实现段定名——场景
     不发明契约，只按「语义等价的候选形状」逐个试；全部不匹配时如实上报错因
-    （不把签名不匹配伪装成产品红，也不静默跳过该腿）。
+    （不把签名不匹配伪装成产品红，也不静默跳过该子用例）。
     """
     import asyncio
     import dataclasses

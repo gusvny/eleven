@@ -19,7 +19,7 @@ ki044 写集 patch 门（merge 面）intent 不同面：本条执法点=settle �
       integration/t260911-03/tests/sc_pathgate_protected_reject.py（cwd=仓根）
 纯本地：tmp 主仓+真注册泳道 worktree+直调 settle 单点，零 Temporal server 零端口。
 三态：PASS exit 0 / FAIL exit 1 / ENV_FAIL exit 2（三态契约，无第四态）。
-实现段落地前闸腿红属预期（TDD 验收门），arbitrate/merge 期必须绿。
+实现段落地前闸子用例红属预期（TDD 验收门），arbitrate/merge 期必须绿。
 """
 import inspect
 import shutil
@@ -134,7 +134,7 @@ def main():
 
     # ---- B2 事故重放：仲裁段改共享守卫期望值（260910 实证①）----
     # 干净泳道单脏文件（B1 的 battery 编辑会以 unauthorized_path 先拒、屏蔽受保护
-    # 闸的裁定——两闸串行 surface，本腿只验受保护闸，故独立 fixture）。
+    # 闸的裁定——两闸串行 surface，本子用例只验受保护闸，故独立 fixture）。
     section("B2 arbitrate 改共享守卫 test_route_table → 拒（测试面内，受保护闸拦）")
     tmpB, mainB, laneB, forkB = mk_lane("pathgate-s2c-")
     guard = "integration/t260902-07/tests/test_route_table.py"

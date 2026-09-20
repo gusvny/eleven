@@ -5,7 +5,7 @@
     lane/<id>-root；二次执行 reused（复用幂等=M4 转移接力契约对根树形态在案）；
   - _lane_scopes：repo="" 条目产出正确 scope（tree=泳道容器、repo=项目根、
     write_set=rebase 全量透传）；真畸形条目（branch 缺失）照旧 RuntimeError；
-  - prepare_workspace 通道腿：混合夹具直调 → 推导出含根树明细；单仓夹具 →
+  - prepare_workspace 通道子用例：混合夹具直调 → 推导出含根树明细；单仓夹具 →
     rws=None 走旧单仓路径（零回归）。
 """
 import subprocess
@@ -116,7 +116,7 @@ def test_lane_scopes_still_rejects_missing_branch(mixed):
 
 
 def test_prepare_workspace_channel_mixed_vs_single():
-    # 混合夹具：通道腿推导出含根树明细
+    # 混合夹具：通道子用例推导出含根树明细
     root = _init_repo(Path(tempfile.mkdtemp(prefix="t260907-12-ch-")))
     a = _init_repo(root / "repo_a")
     prep = WorkspacePrep(ticket_id="t26090712ut", write_set=["README.md"],

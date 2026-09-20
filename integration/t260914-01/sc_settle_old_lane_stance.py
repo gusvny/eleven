@@ -31,7 +31,7 @@ intent（守护的用户可感知行为/契约）：
 ⑥ 产物零丢失/资源面（结果文件 settle 前后逐字节在场）→ T1d、T3b。
 
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
-引擎 venv/temporalio 缺席 = ENV_FAIL exit 2 点名（本场景无 stdlib 替代腿：直调 activity）。
+引擎 venv/temporalio 缺席 = ENV_FAIL exit 2 点名（本场景无 stdlib 替代子用例：直调 activity）。
 """
 import json
 import os
@@ -59,7 +59,7 @@ TID_M = "t26091401am"
 def main():
     (mods, why) = engine_modules()
     if mods is None:
-        env_fail("引擎模块不可用（%s）——直调 activity 无 stdlib 替代腿" % why)
+        env_fail("引擎模块不可用（%s）——直调 activity 无 stdlib 替代子用例" % why)
     shared, aa = mods
 
     root = init_repo(tmpdir("t260914-01a-"), files={"docs/kb.md": "kb\n"})

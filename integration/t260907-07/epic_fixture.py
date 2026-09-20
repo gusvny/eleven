@@ -45,7 +45,7 @@ class RegistryEnv(object):
     """把 SANDBAR_PROJECTS_DIR 指向临时注册表根（with 语法）；守卫键进出逐键还原。
 
     SANDBAR_PROJECTS_YAML 一律摘除（legacy 单文件模式优先级最高，在位会让 per-key
-    夹具整个不可见）；SANDBAR_EPICS_DIR 摘除给场景一块干净底板（env 语义腿自行显式设）。
+    夹具整个不可见）；SANDBAR_EPICS_DIR 摘除给场景一块干净底板（env 语义子用例自行显式设）。
     """
 
     def __init__(self):

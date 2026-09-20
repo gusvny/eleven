@@ -11,8 +11,8 @@
   逐条一致（锚两实现不漂移——R9）。
 
 跑法：python3 integration/tests/test_transient_retry.py（node 缺席时 mjs 一致性
-腿不可跑——三态契约闸内不设跳过态：本用例退守 py judge 单源契约腿自证，mjs 加载
-腿的环境红面由 L2 场景 sc_transient_retry_contract 守，node 缺席=ENV_FAIL exit 2）。
+子用例不可跑——三态契约闸内不设跳过态：本用例退守 py judge 单源契约子用例自证，mjs 加载
+子用例的环境红面由 L2 场景 sc_transient_retry_contract 守，node 缺席=ENV_FAIL exit 2）。
 """
 import json
 import pathlib
@@ -118,7 +118,7 @@ class MjsConsistencyTest(unittest.TestCase):
         node = node_path()
         if not node:
             # 三态契约（t260904-12）：闸内不设跳过态，环境缺件不得以跳过掩盖。
-            # node 缺席时退守 py 单源契约腿（judge 子命令，真实断言面非空过）；
+            # node 缺席时退守 py 单源契约子用例（judge 子命令，真实断言面非空过）；
             # mjs 薄包装加载一致性的环境红面由 L2 场景守（node 缺席=ENV_FAIL）。
             p = subprocess.run(
                 [sys.executable, str(INTEG / "lib_transient_retry.py"), "judge",
@@ -127,7 +127,7 @@ class MjsConsistencyTest(unittest.TestCase):
             self.assertEqual(p.returncode, 0, "py judge 子命令应可跑：%s" % p.stderr)
             want_word = "transient" if FIXTURES[0][1] else "fatal"
             self.assertIn(want_word, p.stdout, "judge 单源判定锚（py 侧自证）")
-            print("ENV_FAIL(notes): node 缺席——mjs 一致性腿由 L2 场景守，本用例以 py judge 单源腿自证")
+            print("ENV_FAIL(notes): node 缺席——mjs 一致性子用例由 L2 场景守，本用例以 py judge 单源子用例自证")
             return
         script = (
             "const { isTransient } = await import(%r);\n"

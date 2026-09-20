@@ -12,7 +12,7 @@ intent（用户可感知契约：既有在飞泳道不炸、新泳道落新名�
   4. 解析重复调用稳定（同 base 十次同结果）。
 
 灰盒：经方案 gen2 定稿的公开帮手 resolve_dot_dir(base) 断言（实现细节重构不得
-改契约名；改名须连本场景与方案一起动）。腿 3 即 R-1 缺陷的回归钉。
+改契约名；改名须连本场景与方案一起动）。子用例 3 即 R-1 缺陷的回归钉。
 Hermetic：temp 目录自建自拆，零网络零舞台。
 **implement 落地前红属预期（TDD 信号），arbitrate/merge 期必须全绿。**
 """
@@ -55,7 +55,7 @@ def fresh_base(make_old=False, make_new=False):
 def main():
     r = lib_naming.Rec()
 
-    print("== 腿1 纯 .suyou 在飞泳道 → 恒旧名，且不造新名目录（粘滞+读侧回落）")
+    print("== 子用例1 纯 .suyou 在飞泳道 → 恒旧名，且不造新名目录（粘滞+读侧回落）")
     base = fresh_base(make_old=True)
     v1, err = resolve(base)
     if v1 is None:
@@ -67,7 +67,7 @@ def main():
         r.check(ok and v2 == v1 and no_new_dir,
                 "两次解析均旧名且无新名目录产生（得 %s / %s）" % (v1, v2))
 
-    print("== 腿2 全新 base → 落 .sandbar（创建侧换新名）")
+    print("== 子用例2 全新 base → 落 .sandbar（创建侧换新名）")
     base = fresh_base()
     v1, err = resolve(base)
     if v1 is None:
@@ -75,7 +75,7 @@ def main():
     else:
         r.check(v1.endswith("/.sandbar"), "新 base 解析为新名（得 %s）" % v1)
 
-    print("== 腿3 两名并存 → 恒新名（镜像目录不参与解析——R-1 回归钉）")
+    print("== 子用例3 两名并存 → 恒新名（镜像目录不参与解析——R-1 回归钉）")
     base = fresh_base(make_old=True, make_new=True)
     v1, err = resolve(base)
     if v1 is None:
@@ -85,7 +85,7 @@ def main():
         r.check(v1.endswith("/.sandbar") and v2 == v1,
                 "并存 base 恒新名不翻转（得 %s / %s）" % (v1, v2))
 
-    print("== 腿4 R-1 全链：新 base 首写后（镜像造出 .suyou）解析仍新名")
+    print("== 子用例4 R-1 全链：新 base 首写后（镜像造出 .suyou）解析仍新名")
     base = fresh_base()
     v1, err = resolve(base)
     if v1 is None:
@@ -97,7 +97,7 @@ def main():
         stable = all(resolve(base)[0].endswith("/.sandbar") for _ in range(3))
         r.check(stable, "镜像目录出现后三次解析恒新名")
 
-    print("== 腿5 解析稳定性（同 base 十次同结果，无隐状态漂移）")
+    print("== 子用例5 解析稳定性（同 base 十次同结果，无隐状态漂移）")
     base = fresh_base(make_old=True)
     vs = {resolve(base)[0] for _ in range(10)}
     r.check(len(vs) == 1 and (list(vs)[0].endswith("/.suyou")),

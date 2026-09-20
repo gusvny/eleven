@@ -9,7 +9,7 @@
 - B 层①：spawn OSError 在 _run_entry 内按协议分类落红（not-checked×external，
   evidence 点名 spawn 失败原文），条目不丢、ran==在册数、rc=2；
 - C 层③：ran==在册数是唯一机械不变式（complete 自校验；INTEG_SUMMARY 带
-  expected 供闸复核——闸侧腿见 sc_..._gate.py S9c）。
+  expected 供闸复核——闸侧子用例见 sc_..._gate.py S9c）。
 
 与 t260910-13-failure-protocol-gate intent 分界：彼守闸的规范行解析与归属判定，
 本条守执行器自身的 fail-closed（条目完整性），同票两面不互替。
@@ -18,7 +18,7 @@ subprocess.run」改锚「条目面 spawn 调用点」（argv=[…, "/bin/sh", "
 与起跑前两处 preflight 解耦——t260910-14 `_docker_hygiene`（docker 三连+except 吞面）
 与 t260912-02 `_sweep_residue_stages`（sweep 子进程，响亮留痕不中止；旧注入被它们
 先行消费、hygiene 还吞异常 → B 层假红守门狗自身失效）；双桩注册为 serial（池内严格
-串行）使注入顺序由构造确定；B0 双腿=注入点命中条目 spawn 调用点 + 顺序归属首条目
+串行）使注入顺序由构造确定；B0 两子用例=注入点命中条目 spawn 调用点 + 顺序归属首条目
 （解耦证据）。
 退出契约：末行 SUMMARY；exit 1 iff fail>0。
 """
@@ -97,7 +97,7 @@ ok("FAIL [__executor__]" in out and "池级异常" in out,
 # subprocess.run」注入被它们先行消费（hygiene 还吞异常）→ B 层假红守门狗自身失效
 # （单跑稳定 pass=5 fail=2 实锤；260913 首轮套件实测 B1 rc=0/B2 缺原文）。
 # preflight 面调用只计数不注入；计数仅观测打印（不作断言——防 preflight 未来退役
-# 造成假红）。解耦证据=B0 双腿：注入点命中条目 spawn 调用点 + 故障顺序归属首条目。
+# 造成假红）。解耦证据=B0 两子用例：注入点命中条目 spawn 调用点 + 故障顺序归属首条目。
 rs = load_rs()
 rs.SCENARIOS = [STUB_OK, STUB2_OK]
 _real_subprocess_run = rs.subprocess.run

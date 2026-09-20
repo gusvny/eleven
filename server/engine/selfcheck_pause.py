@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""selfcheck_pause — 工单段间暂停（t260908-01）的离线契约腿。
+"""selfcheck_pause — 工单段间暂停（t260908-01）的离线契约子用例。
 
 分层定位：行为级旅程（真 Temporal 台+桩脑链：暂停→不派段→恢复→走完、refused
 反馈、pause×rework、通用性夹具模板）归 integration/t260908-01/sc_ticket_pause_gate.py；
@@ -10,7 +10,7 @@
   2. mixin 接线：TicketWorkflowBase 与 DevLaneWorkflow 的 MRO 均含 TicketPauseMixin；
      DevLaneWorkflow.__dict__ 无自有 pause/resume/_pause_gate（零私有逻辑=逻辑全在
      通用层，拍板④的机械审计面）；
-  3. paused 二态快照纯函数腿：_pause_snapshot 三态（未暂停/pending/at_gate）；
+  3. paused 二态快照纯函数子用例：_pause_snapshot 三态（未暂停/pending/at_gate）；
   4. 反馈文案源码锁（KI-051 语义词锚）：refused 五笔文案在场——R4 老实例拒收
      （「启动于暂停功能上线前」）、who 非空、note 超限、已暂停幂等、未暂停空态；
   5. 人门通道锁：pause/resume 只出现在 client.py 信号通道与 base 通用层——grep 引擎
@@ -20,7 +20,7 @@
 
 退出码 0=全绿；非 0=有红（细节在 stdout）。
 用法（引擎目录）：.venv/bin/python selfcheck_pause.py（temporalio 缺失时退化为
-仅 1/4/5/6 腿——2/3 腿需要 import 引擎模块，标注降级原因，不静默假绿）。
+仅 1/4/5/6 子用例——2/3 子用例需要 import 引擎模块，标注降级原因，不静默假绿）。
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ def main():
         import_ok = True
     except Exception as e:
         import_ok = False
-        print("  降级：引擎模块不可导入（%s: %s）——2/3 腿跳过（非假绿，venv 在场时必须过）"
+        print("  降级：引擎模块不可导入（%s: %s）——2/3 子用例跳过（非假绿，venv 在场时必须过）"
               % (type(e).__name__, e))
     if import_ok:
         mixin = engine_base.TicketPauseMixin

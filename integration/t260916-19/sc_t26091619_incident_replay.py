@@ -17,8 +17,8 @@ intent（守护的用户可感知行为/契约，工单修向 C＝声明=执法 
   证据面），本条锁**实案混合形态的一次收口闭环与 C 合法化旅程**，混合形态本身（三件同批、
   两合法一越权）不在彼断言面；
 - t260911-03-normal-faces-land：彼守「正常面放行=commit 落地」的反例三连（实现段/设计段/本票
-  tests 面），本条守修复后**实案特定形态**（顶层 sc+README+共享工具 M 态），彼负腿=产品代码
-  面已随 t260916-19 改删除型，与本条 lint_tests.py 面（C 边界负腿）不同路径不同因；
+  tests 面），本条守修复后**实案特定形态**（顶层 sc+README+共享工具 M 态），彼反用例=产品代码
+  面已随 t260916-19 改删除型，与本条 lint_tests.py 面（C 边界反用例）不同路径不同因；
 - sc_check_auto_rework_trace（顶层源码锁）：彼锁 PHASE_MAIN_CHAIN 常量形状（A 的词表纪律），
   本条零源码解析、全行为面。
 
@@ -61,7 +61,7 @@ LINT = "integration/lint_tests.py"
 def main():
     (mods, why) = engine_modules()
     if mods is None:
-        env_fail("引擎模块不可用（%s）——直调 activity 无 stdlib 替代腿" % why)
+        env_fail("引擎模块不可用（%s）——直调 activity 无 stdlib 替代子用例" % why)
     shared, aa = mods
 
     # ---- I 实案形态：顶层 sc 新建＋README 修改（C 后合法）＋lint_tests.py 修改（M 态越权）----
@@ -105,7 +105,7 @@ def main():
           LINT in note1, "note=%r" % note1[:200])
     after_i = head_count(lane)
 
-    # ---- II C 边界负腿：共享工具删除型（D 态）仍拒（C 有意不放行 lint_tests.py）----
+    # ---- II C 边界反用例：共享工具删除型（D 态）仍拒（C 有意不放行 lint_tests.py）----
     print("\n== II C 边界：共享工具删除型仍拒（合法出路在打回/写集，不在仲裁段）")
     (lane / LINT).unlink()
     r2 = settle(shared, aa, lane, TID, "arbitrate", 4, fork)

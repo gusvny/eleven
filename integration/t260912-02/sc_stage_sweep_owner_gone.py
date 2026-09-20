@@ -85,7 +85,7 @@ P_LIVE = "%s-live" % TAG         # (β)   真台·在册健康（阀2 负锁）
 P_LEGIT = "%s-legit" % TAG       # (iv)  真台·legacy+repo_dir 在但非工作树（C4b 负锁）
 P_LEGIT_SYNTH = "%s-legsyn" % TAG  # (iv-b) 合成·新格式活台 C4b 负锁
 P_HOOK = "%s-hook" % TAG         # 起台时挂点用残台
-P_NEW = "%s-new" % TAG           # 挂点腿的正常新台
+P_NEW = "%s-new" % TAG           # 挂点子用例的正常新台
 
 REAL_PROJS = [P_DEL, P_LANE, P_LEGACY, P_BOOT, P_LIVE, P_LEGIT, P_HOOK]
 CONDEMNED = [P_DEL, P_DEL_SYNTH, P_LANE, P_STALE, P_LEGACY]
@@ -131,7 +131,7 @@ def assert_intact(root, proj, ports, leg, want_state=None, want_hold=False):
         check(st == want_state, "%s：%s 租约 state 保持 %s（实得 %r）"
               % (leg, proj, want_state, st))
     if want_hold:
-        check(len(hold_pids(proj)) >= 1, "%s：%s 持有腿仍在跑（零接触）"
+        check(len(hold_pids(proj)) >= 1, "%s：%s 持有子用例仍在跑（零接触）"
               % (leg, proj))
 
 
@@ -142,7 +142,7 @@ def main():
 
     gone_i = make_gone_dir()            # 已删目录（(i)/(i-a) 用）
     gone_v = make_gone_dir()            # 已删目录（(v) 用）
-    gone_hook = make_gone_dir()         # 已删目录（挂点腿用）
+    gone_hook = make_gone_dir()         # 已删目录（挂点子用例用）
     foreign_lane = make_foreign_dir()   # 存在但非工作树（(ii) 用）
     foreign_legit = make_foreign_dir()  # 存在但非工作树（(iv) 用）
     foreign_live = make_foreign_dir()   # 存在但非工作树（(iv-b) 用）
@@ -251,18 +251,18 @@ def main():
         # ---- 起台时挂点：新台 up 顺手拆掉再造残台 ----
         edit_lease(ROOT, P_HOOK, lambda d: {**d, "owner_root": gone_hook})
         proc_n, st_n = up_stage(ROOT, P_NEW, services="temporal", timeout=600)
-        if not up_ok(proc_n, "挂点腿新台 up 成功（rc=%s）"
+        if not up_ok(proc_n, "挂点子用例新台 up 成功（rc=%s）"
                      % proc_n.returncode):
             finish()
         check(not compose_containers(P_HOOK) and not compose_networks(P_HOOK),
               "起台时扫一遍：%s 残台被顺手拆掉" % P_HOOK)
-        check(read_lease_file(ROOT, P_HOOK) is None, "挂点腿残台租约已释放")
+        check(read_lease_file(ROOT, P_HOOK) is None, "挂点子用例残台租约已释放")
         port_new = (st_n or {}).get("ports", {}).get("temporal")
-        check(port_new and tcp_open(port_new), "挂点腿新台可服务（%s）" % port_new)
-        assert_intact(ROOT, P_LIVE, ports.get(P_LIVE), "挂点腿不误伤健康台")
+        check(port_new and tcp_open(port_new), "挂点子用例新台可服务（%s）" % port_new)
+        assert_intact(ROOT, P_LIVE, ports.get(P_LIVE), "挂点子用例不误伤健康台")
         check(len(compose_containers(P_BOOT)) >= 1
               and read_lease_file(ROOT, P_BOOT) is not None,
-              "挂点腿不误伤 booting 对照台")
+              "挂点子用例不误伤 booting 对照台")
 
         # ---- 幂等二扫 ----
         proc_s2, _r2 = sweep(ROOT, timeout=180)

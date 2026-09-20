@@ -87,7 +87,7 @@ Exit codes (three-state contract, integration/README.md):
 | accidental production connect, fail-closed | hard forbidden set {3099,3199,7233,8233,17233,18233} + a post-boot self-check that the JSON ports are outside the production set |
 | preset missing refuses to run | it does not: stay on the capture lane (stage and evidence semantics stay layered) |
 | five-path terminal reclamation | CLI side: normal/error/timeout/SIGINT/SIGTERM all run the down -v cleanup |
-| 残台白占名额/内存（t260912-02 病灶二：hold 腿活着→租约永新鲜，工作目录删了也判不死）| 主人存在性清扫 sweep：compose 工作目录已删 / 泳道不在 git worktree list / 心跳陈旧超阈 三判据 + booting 新鲜、泳道在册两条安全阀；挂套件前与起台时两处；判拆全拆并逐条点名，清理失败响亮不静默 |
+| 残台白占名额/内存（t260912-02 病灶二：hold 分支活着→租约永新鲜，工作目录删了也判不死）| 主人存在性清扫 sweep：compose 工作目录已删 / 泳道不在 git worktree list / 心跳陈旧超阈 三判据 + booting 新鲜、泳道在册两条安全阀；挂套件前与起台时两处；判拆全拆并逐条点名，清理失败响亮不静默 |
 | 爆发建网撞 docker 地址池（t260912-02 病灶三：fully subnetted 纯瞬时头寸）| 受管网段表（10.213.0.0/16 切 /24）：每台 compose 建网显式指定子网（ipam subnet 注入），分配对照在册租约+daemon 现存网段防撞、随机选槽不可猜；建网不再走分配器库存 |
 
 State and locks (t260910-12 lease semantics):
@@ -109,7 +109,7 @@ State and locks (t260910-12 lease semantics):
   该判据管的是「复用/判死」语义（ensure 状态机），一字未动（t260912-02）。
   残台清扫是**附加清道夫**，判据按主人存在性（owner_root 目录已删 / 泳道
   不在 git worktree list / 心跳陈旧超阈），只做全拆不参与复用判定——
-  260912 实测病灶：hold 腿活着心跳就新鲜，工作目录删了也永判不死，白占
+  260912 实测病灶：hold 分支活着心跳就新鲜，工作目录删了也永判不死，白占
   名额/内存/网络。
 
   Who keeps the lease alive: the `hold` subcommand — a detached child spawned
@@ -228,7 +228,7 @@ NET_NAME_FMT = "%s_default"              # compose 默认网络名（确定性�
 
 
 def lease_ttl_s():
-    """租约 TTL（秒）：过期判据的第一条腿。缺省 90s >> 心跳 5s——心跳线程
+    """租约 TTL（秒）：过期判据的第一条分支。缺省 90s >> 心跳 5s——心跳线程
     被调度/GC 停顿一两个周期不致误判死。"""
     return float(os.environ.get("SANDBAR_STAGE_LEASE_TTL_S", 90))
 
@@ -269,13 +269,13 @@ def net_base():
 
 def sweep_stale_s():
     """残台清扫的心跳陈旧阈（秒，t260912-02）。缺省 600 = 6.7×TTL（90s）：
-    必须 ≫ TTL，否则 hold 腿一次 GC/调度停顿就可能被误判残台拆掉活台。"""
+    必须 ≫ TTL，否则 hold 分支一次 GC/调度停顿就可能被误判残台拆掉活台。"""
     return float(os.environ.get("SANDBAR_STAGE_SWEEP_STALE_S", 600))
 
 
 def stall_grace_s():
     """心跳停更宽限窗（秒，t260913-02 arbitrate gen12）。缺省 20s：租约过期而 holder
-    仍活时，先把这段时间用来等心跳恢复（负载压住 hold 腿的一次停顿 ≈ 数秒~数十秒），
+    仍活时，先把这段时间用来等心跳恢复（负载压住 hold 分支的一次停顿 ≈ 数秒~数十秒），
     而不是当场把整族场景打成环境红；到期仍不恢复=真僵死，按原语义诚实红点名人工。
     判据（只有 过期 AND holder 亡 才回收）不动，本窗只区分「瞬时停顿」与「真僵死」。"""
     return float(os.environ.get("SANDBAR_STAGE_STALL_GRACE_S", 20))
@@ -514,7 +514,7 @@ def process_start_token(pid):
 
 def anchor_alive(pid, token):
     """锚身份两段判活（t260915-18）：pid 存在 AND（无令牌=纯 pid 判定；有令牌=
-    启动时间逐字匹配）。锚=起台者的长命调用方进程（hold 腿 ③ 的回收判据面）；
+    启动时间逐字匹配）。锚=起台者的长命调用方进程（hold 分支 ③ 的回收判据面）；
     令牌不匹配即判「锚已亡」，宁可交 sweep/人工复核也不续跳误活。令牌探针
     不可得（ps 缺席等）=回落纯 pid 判定——不引入新单点，缺证据时向「不拆」
     fail-closed（crit_iv 靠令牌在才判，此处只影响 hold ③）。"""
@@ -582,7 +582,7 @@ def validate_holder_pid(pid):
     """holder pid 入口校验（R1'a：绝不把空/0/负数记进租约——记空=租约永可判
     死，回到 R1 的交付即拆）。非法=usage 红点名。"""
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
-        raise StageError("holder pid 非法：%r（必须正整数——hold 腿 pid 缺失时"
+        raise StageError("holder pid 非法：%r（必须正整数——hold 分支 pid 缺失时"
                          "绝不起台）" % (pid,), kind="usage")
     return pid
 
@@ -621,7 +621,7 @@ def release_lease(project):
 
 
 def lease_expired(lease, now=None):
-    """过期判据第一条腿：heartbeat 停更超过 TTL。"""
+    """过期判据第一条分支：heartbeat 停更超过 TTL。"""
     if not isinstance(lease, dict):
         return True
     try:
@@ -783,7 +783,7 @@ def _spawn_hold(project, lease_id, keep=False):
     t0 = time.time()
     while time.time() - t0 < hold_wait_s():
         if proc.poll() is not None:
-            raise StageError("hold 腿启动即退（rc=%s，日志 %s）"
+            raise StageError("hold 分支启动即退（rc=%s，日志 %s）"
                              % (proc.returncode, lock_root() / ("hold-%s.log" % project)),
                              kind="env")
         try:
@@ -794,7 +794,7 @@ def _spawn_hold(project, lease_id, keep=False):
             pass
         time.sleep(0.2)
     _harvest_hold(proc)
-    raise StageError("hold 腿未在 %ds 内就绪（pid 文件未落/不匹配）——起台放弃，"
+    raise StageError("hold 分支未在 %ds 内就绪（pid 文件未落/不匹配）——起台放弃，"
                      "绝不带空 holder pid 起台" % hold_wait_s(), kind="env")
 
 
@@ -858,7 +858,7 @@ def cmd_hold(project, anchor_pid, lease_id=None, keep=False):
          ONLY reclaim criterion stays "expired AND holder pid gone");
          **keep 租约例外（arbitrate 打回修复）**：常驻基建台（--keep，verify.yaml
          supply 语义「闸后有意常驻不拆」）的锚=短命调用方 shell，锚死≠弃台——
-         跳过本腿继续心跳，台由租约+hold 持有直至显式 down / ⑥帽 / ⑦崩
+         跳过本分支继续心跳，台由租约+hold 持有直至显式 down / ⑥帽 / ⑦崩
          （帽后心跳停=过期 AND holder 死=同一判据交判死回收，无启发式）;
       ③' booting-orphan: lease still booting AND the booting CLI (this hold's
          original parent, captured at spawn) is dead → the boot can never
@@ -910,7 +910,7 @@ def cmd_hold(project, anchor_pid, lease_id=None, keep=False):
     # ——起台前的残台清扫与保险丝临界区都控制在秒级（t260912-02 起无排队），
     # 但共机慢化/清扫长尾仍可能拖过固定秒数，预算保守取起台者存活期，hold
     # 不得提前自退。先读租约再判起台者死：租约已落即算数（主循环的 ③' 起台
-    # 孤儿腿接管后续），只有「租约确实未落且起台者已死」才为一具尸体自退。
+    # 孤儿分支接管后续），只有「租约确实未落且起台者已死」才为一具尸体自退。
     # t260912-02（验收 E 教训）：等待期所有自退路径必须回收 pid 文件——保险丝
     # 刹停 196 路的 hold 全走本阶段退出，不清=锁根堆孤儿 holder-*.pid。
     def _cleanup_pidfile():
@@ -957,7 +957,7 @@ def cmd_hold(project, anchor_pid, lease_id=None, keep=False):
         lease = read_lease(project)
         if not isinstance(lease, dict) or lease.get("lease_id") != lease_id:  # ①
             # ① 先于 ③（t260915-18 调序对齐 docstring 原语义）：租约消失/易主=
-            # down 拥有拆台权，本腿只退不拆；账外孤儿容器由 sweep 孤儿清扫接管。
+            # down 拥有拆台权，本分支只退不拆；账外孤儿容器由 sweep 孤儿清扫接管。
             try:
                 pidfile.unlink()
             except FileNotFoundError:
@@ -972,7 +972,7 @@ def cmd_hold(project, anchor_pid, lease_id=None, keep=False):
                 do_down(project, harvest_hold=False)
             except Exception as e:
                 # t260915-18（C4:863）：回收失败**保留租约**——租约是容器唯一账本，
-                # 账先于容器销=孤儿失明根因（KI-077 当日 37 只实证）。心跳随本腿
+                # 账先于容器销=孤儿失明根因（KI-077 当日 37 只实证）。心跳随本分支
                 # 退出停更 → sweep crit_iii/孤儿清扫/人工接管，fail-visible 不静默。
                 print("STAGE_FAIL: [hold] 孤儿台回收失败（%s：%s）——租约保留，"
                       "台交 sweep/人工回收" % (type(e).__name__, e), file=sys.stderr)
@@ -1628,7 +1628,7 @@ def judge_residue(lease, now=None, worktree_roots=None, alive=None, stale_s=None
     verdict ∈ condemn（判拆）/ keep（不碰）/ report（C4b 仅报告不拆）。
       阀1：state=booting 且心跳新鲜 → keep（起台进行中一律不碰）；
       crit_iv：锚已亡（令牌不匹配=pid 重用嫌疑）而 hold 仍续心跳 → condemn
-              （t260915-18：「愿主已结束 hold 腿仍续心跳」形态——KI-077 当日
+              （t260915-18：「愿主已结束 hold 分支仍续心跳」形态——KI-077 当日
               38h 老台同族；在阀2 之前：owner_root 在册+目录在救不了锚已亡的
               台；令牌缺席的旧格式租约 fail-closed 跳过，不引入纯 pid 误拆面）；
       阀2：主人在 worktree list 且目录在且心跳新鲜 → keep（健康供给台/常驻台）；
@@ -1769,7 +1769,7 @@ def sweep_stages(dry_run=False, budget_s=None, now=None, worktree_roots=None,
                 errors.append({"project": project, "why": why,
                                "err": "%s: %s" % (type(e).__name__, e)})
         else:
-            # 畸形/旧格式（t260904-19 前格式，无租约契约无 hold 腿）→ 无主面全拆
+            # 畸形/旧格式（t260904-19 前格式，无租约契约无 hold 分支）→ 无主面全拆
             row = {"project": project,
                    "why": "租约文件不可读或旧格式（无 lease_id）——按无主处理全拆",
                    "pid_alive": False}
@@ -1867,7 +1867,7 @@ def sweep_residues_quiet(budget=None):
 
 def fuse_precheck():
     """保险丝只读预检（C6a）：权威判定在 capacity_acquire 临界区，这里只在
-    生成 hold 腿之前做廉价早停——失控循环（一次起 200 台）不必先孵 200 个
+    生成 hold 分支之前做廉价早停——失控循环（一次起 200 台）不必先孵 200 个
     hold 进程再刹停。预检与临界区之间的 TOCTOU 由权威判定兜底。"""
     live = enumerate_leases()
     if len(live) >= max_stages():
@@ -2514,7 +2514,7 @@ def adopt_live_residue(project, services_list, opts):
     且因沙箱不可写宿主根而长期无法复现）。
 
     本函数**不拆任何容器**：容器在跑 + 端口真在服务 ⇒ 幂等补注册 namespace/SA ⇒ 本根落一份
-    state=up 的租约（并接一条 hold 腿维持心跳）；任一判据不成立（容器不在跑 / 端口不服务 /
+    state=up 的租约（并接一条 hold 分支维持心跳）；任一判据不成立（容器不在跑 / 端口不服务 /
     半残形态）⇒ 返回 None，调用方照旧诚实拒收——「不拆在跑台」的安全语义一字未动。
     """
     names = residue_containers(project)
@@ -2553,7 +2553,7 @@ def adopt_live_residue(project, services_list, opts):
 def _flip_lease_up(project, lease, ports, services_list, env, opts,
                    sa_registered, sa_note):
     """boot 完成 → 翻 state=up（原子写，写前保 lease_id/holder 不变）。CLI 翻面
-    自带一拍新鲜心跳，此后心跳由 hold 腿接管；container_ids 在此定格，作为
+    自带一拍新鲜心跳，此后心跳由 hold 分支接管；container_ids 在此定格，作为
     同租约二次 up 幂等复用的证据面（验收④：容器 id 不变=未被重建）。
     翻面兜底 new_lease（租约文件丢失的退化路）同样带 anchor_pid/anchor_token
     两件套（对抗复核 F2：缺了它们，hold ③ 两段判活在这条退化路上无从谈起
@@ -2708,7 +2708,7 @@ def do_down(project, harvest_hold=True):
         if harvest_hold:
             _stop_hold_by_pid(holder_pid(lease))
     if os.environ.pop("SANDBAR_STAGE_INJECT_DOWN_FAIL", None) is not None:
-        # 测试注入缝（t260915-18 腿 C；R3：**触发即自清**——pop 原子取走，绝不
+        # 测试注入缝（t260915-18 子用例 C；R3：**触发即自清**——pop 原子取走，绝不
         # 跨用例污染；env 注入缝惯例同 SANDBAR_UI_CAPTURE_STUB/SANDBAR_STAGE_LOCK_DIR）。
         # 模拟「compose down 真失败」：翻面/收割照走，随后失败上抛+租约保留——
         # 与下方 compose down rc!=0 分支同语义（t260912-02 验收 D 样板）。
@@ -2797,7 +2797,7 @@ def _boot_new_stage(project, services_list, opts, timeout, cold_cleanup=False,
     boot → flip state=up. Every failure path releases the lease and reaps the
     hold — no half-claimed occupancy is ever left (R1'a; the hold also
     self-exits via its bounded lease-wait as a backstop).
-    keep=True：常驻基建台——租约记 keep 标，hold 腿据此禁③锚死回收（锚=
+    keep=True：常驻基建台——租约记 keep 标，hold 分支据此禁③锚死回收（锚=
     短命调用方 shell）；其余终态与判死回收判据原样，绝不引入存活启发式。"""
     _gates(services_list)
     sweep_residues_quiet()      # 起台时扫一遍（t260912-02 清理挂点②；失败响亮不阻断）
@@ -2886,12 +2886,12 @@ def _wait_booting(project, lock_fd, deadline):
 
 def _wait_heartbeat_recovery(project, lock_fd, deadline):
     """心跳停更宽限（t260913-02 arbitrate gen12）：租约已过期但 holder 进程仍在时，轮询
-    等心跳恢复（hold 腿被负载压住的一次停顿，约数秒~数十秒）——恢复即返回新租约
+    等心跳恢复（hold 分支被负载压住的一次停顿，约数秒~数十秒）——恢复即返回新租约
     （调用方走复用），holder 亡 / 租约消失 / state 翻面也立即返回（调用方按冷路径或
     精确红收口），宽限到期返回最后读到的租约（调用方按「真僵死」诚实红点名）。
 
     锁语义：与 _wait_booting 同源——等待期不持项目锁，免得把同项目其它 ensure 排到
-    预算外；hold 腿自身从不取 ensure 项目锁（只写 pidfile + 心跳文件），故释放锁不会
+    预算外；hold 分支自身从不取 ensure 项目锁（只写 pidfile + 心跳文件），故释放锁不会
     与心跳互相阻塞。返回时重新持锁（拿不到也不阻塞收口：判据全在租约读数上）。"""
     grace = min(stall_grace_s(), max(0.0, deadline - time.time()))
     try:
@@ -2925,7 +2925,7 @@ def do_ensure(project, services_list, opts, timeout, keep=False):
       零 docker 查询（R3 主信号——docker ps 采样空窗绝进不了本判定）；
       state=booting 且租约活 → 不持锁等待其翻面（R5），绝不并发再起；
       state=downing / 缺失 / 过期死（租约过期 AND holder 不存在）/ 旧格式 →
-      冷路径：幂等清残留 → hold 腿 → 满员占位 → 择带 → 起台；
+      冷路径：幂等清残留 → hold 分支 → 满员占位 → 择带 → 起台；
       租约过期但 holder pid 仍在 → 拒收诚实红（疑似 pid 复用/僵死，不对抗）。
     --keep：在跑面（活租约已在上面复用返回；无主容器在跑的孤儿台）一律不拆，
     诚实环境红交人工。冷/半残路径按项目串行化（run K 雷群回归锚保留）。"""
@@ -2970,7 +2970,7 @@ def do_ensure(project, services_list, opts, timeout, keep=False):
             #   ③租约在册但已不可用（心跳停更 + holder pid 僵死/被复用）而容器仍在服务
             #     ——旧行为在此先抛「不对抗，人工核查后 down」，于是同一堵死面换个签名复发。
             # 认领不拆任何容器、不与僵死 holder 对抗：只在活体判据（容器 Running + 端口真在
-            # 服务）全过时，把本根租约刷成一份带新 lease_id 的活租约并接 hold 腿——旧 hold
+            # 服务）全过时，把本根租约刷成一份带新 lease_id 的活租约并接 hold 分支——旧 hold
             # 见 lease_id 更换即自退（其终止态之一）。认领不成 ⇒ 落到下面两条原有拒收分支，
             # 「不拆在跑台」的安全语义与文案一字未动。
             adopted = adopt_live_residue(project, services_list, opts)
@@ -2980,8 +2980,8 @@ def do_ensure(project, services_list, opts, timeout, keep=False):
             # 心跳停更（过期）而 holder 进程仍在：先给一段**宽限窗**等心跳恢复，恢复不了
             # 才按原语义诚实红交人工（t260913-02 arbitrate gen12）。
             # 为什么必须给宽限：260914 23:17 本泳道闸跑实测 17 条 console 族齐瞬时
-            # ENV_FAIL（0.2~1.2s），根因=共享 console 台的 hold 腿被负载压住 >TTL(90s)
-            # 心跳停更，而**同一个 hold 腿（lease_id/pid 自 21:56 未换）事后仍在正常
+            # ENV_FAIL（0.2~1.2s），根因=共享 console 台的 hold 分支被负载压住 >TTL(90s)
+            # 心跳停更，而**同一个 hold 分支（lease_id/pid 自 21:56 未换）事后仍在正常
             # 心跳**——即一次调度停顿把整族场景打成环境红，场景一条没跑。判据不变
             # （只有 过期 AND pid 死 才回收，绝不硬拆活 holder），只是把「瞬时停顿」
             # 与「真僵死」分开：等到截止仍不恢复=真僵死，文案照旧点名人工。

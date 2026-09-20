@@ -1,15 +1,15 @@
-// check_contrast_offline.mjs — t260905-08 对比度看守的数值核心（离线腿）。
+// check_contrast_offline.mjs — t260905-08 对比度看守的数值核心（离线子用例）。
 //
 // 从 theme.ts 的 DERIVE_TOKENS_CSS 解析派生令牌定义，按平台两档 alias 代表值
 // （浅档/深档）解析 var 链与 color-mix（srgb 伽马域混合，同 CSS 语义），
 // 逐关键前/背景对实算 WCAG 相对亮度比值，双档断言 ≥4.5（AA 正文）。
 // 另输出浅档解析值 vs fallback 原值的逐项 diff（R7 浅色回归数值化口径）。
 //
-// 边界（如实声明）：本腿验证**令牌公式**的两档可读性；DOM 级逐表面实算
-// （挂载路径/继承链/hover）由 sc_wb_contrast_guard.mjs 浏览器腿承担
+// 边界（如实声明）：本子用例验证**令牌公式**的两档可读性；DOM 级逐表面实算
+// （挂载路径/继承链/hover）由 sc_wb_contrast_guard.mjs 浏览器子用例承担
 // （KI-036：缺 playwright=env_fail 有声红，「闸内无 SKIP」，arbitrate/merge 期必须真跑）。
 // 代表值为模拟值（平台定义侧不在本仓）：深档代表值若与平台真值偏差大，
-// 本腿结论需随真值复跑（merge 关卡观测点）。
+// 本子用例结论需随真值复跑（merge 关卡观测点）。
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
@@ -28,7 +28,7 @@ for (const dm of m[1].replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/(--dsw-derive-[
 // ---- 平台两档 alias 代表值（模拟；来源与风险见头注）----
 const LIGHT = { '--dsw-alias-bg-primary': '#ffffff', '--dsw-alias-border-l': '#d0d7de', '--dsw-alias-brand-primary': '#0969da', '--dsw-alias-label-primary': '#1f2328', '--dsw-alias-label-secondary': '#57606a' };
 const DARK = { '--dsw-alias-bg-primary': '#16181d', '--dsw-alias-border-l': '#30363d', '--dsw-alias-brand-primary': '#4493f8', '--dsw-alias-label-primary': '#e6e6e9', '--dsw-alias-label-secondary': '#9ea2ad' };
-// 旧平台档（t260907-03 腿①）：0.1.1-rc.2 无 bg-primary 名（'initial'=knockout 哨兵，
+// 旧平台档（t260907-03 子用例①）：0.1.1-rc.2 无 bg-primary 名（'initial'=knockout 哨兵，
 // 解析器视同「名不存在」走下一级 fallback）、只有 bg-base=可辨识代表值 #f5f8fa（近白平台底，选值约束见 lib_t260905_08 头注）。
 const LEGACY = { '--dsw-alias-bg-primary': 'initial', '--dsw-alias-bg-base': '#f5f8fa', '--dsw-alias-border-l': '#d0d7de', '--dsw-alias-brand-primary': '#0969da', '--dsw-alias-label-primary': '#1f2328', '--dsw-alias-label-secondary': '#57606a' };
 
@@ -96,8 +96,8 @@ check('警告 warn × 警告底', 'warn', 'warn-bg');
 check('警告深 warn-deep × 警告底', 'warn-deep', 'warn-bg');
 check('警告深 warn-deep × 画布', 'warn-deep', 'canvas');
 
-// ---- 旧平台档（t260907-03 腿①，LEGACY）：验「兜底链接得住旧平台 bg-base」----
-// ① 精确等值（核心，对应浏览器腿 contrast/legacy-canvas-eq-bg-base）：
+// ---- 旧平台档（t260907-03 子用例①，LEGACY）：验「兜底链接得住旧平台 bg-base」----
+// ① 精确等值（核心，对应浏览器子用例 contrast/legacy-canvas-eq-bg-base）：
 //    --dsw-derive-canvas（纯 var 链）在 bg-primary knockout 下必须精确解析到
 //    bg-base 代表值 #f5f8fa——链被拆/名被删 → 落 #fff；值写错 → 别的色，都可辨。
 {
@@ -109,7 +109,7 @@ check('警告深 warn-deep × 画布', 'warn-deep', 'canvas');
 }
 // ② 画布锚定的关键文字对在 legacy 档仍须 AA（knockout 后 canvas/surface 系全部
 //    偏移到 bg-base 代表值，正文/次级/强调对的可读性不可因换档塌陷）；
-//    状态底/accent 混色对的账本由 light/dark 腿全量承担，legacy 只加链关键面。
+//    状态底/accent 混色对的账本由 light/dark 子用例全量承担，legacy 只加链关键面。
 for (const [n, f, b] of [['legacy 正文 fg × 画布', 'fg', 'canvas'], ['legacy 次级 muted × 画布', 'muted', 'canvas'],
   ['legacy 正文 fg × 次级表面', 'fg', 'surface'], ['legacy 正文 fg × 次级表面2', 'fg', 'surface-2'],
   ['legacy 强调 accent × 画布', 'accent', 'canvas']]) {

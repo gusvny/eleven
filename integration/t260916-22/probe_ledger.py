@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""诊断探针（临时，不入册）：复现 journey 混合腿的最小链，落账目录保留现场。"""
+"""诊断探针（临时，不入册）：复现 journey 混合子用例的最小链，落账目录保留现场。"""
 import json
 import os
 import shutil

@@ -2,7 +2,7 @@
 
 面②（_quarantine_torn_sessions 两层检疫）：
   - 旧口径回归：帧裂（zstd -t 红）仍隔离；
-  - 新口径核心腿：帧好但 JSONL record 中截断（t260906-05 两次卡死同型）→ 隔离；
+  - 新口径核心子用例：帧好但 JSONL record 中截断（t260906-05 两次卡死同型）→ 隔离；
   - 新口径变体：好帧内非 JSON 行 → 隔离；
   - 对照组（防「见档就隔离」反向事故）：多行合法 JSONL + 多帧 zstd 拼接、
     含裸空行、无尾换行的完整末行 → 一律**不**隔离；
@@ -222,7 +222,7 @@ def _fake_main_and_lane(tmp_path, with_venv=True, with_node_modules=True):
 
 
 def test_ensure_lane_deps_links_venv(tmp_path, monkeypatch):
-    """验收④ UT 腿：主仓 .venv 在位 → 泳道自动软链，action 报 +deps。"""
+    """验收④ UT 子用例：主仓 .venv 在位 → 泳道自动软链，action 报 +deps。"""
     main, lane = _fake_main_and_lane(tmp_path)
     monkeypatch.setattr(agent_activities, "REPO_ROOT", main)
     suffix = _ensure_lane_deps(lane)
@@ -246,7 +246,7 @@ def _run(coro):
 
 
 def test_prepare_workspace_identity_missing_fails_fast(tmp_path, ident_env, monkeypatch):
-    """验收③ UT 腿：身份缺失 → worktree 分支开工前 failed 红字点名（不到 worktree add）。"""
+    """验收③ UT 子用例：身份缺失 → worktree 分支开工前 failed 红字点名（不到 worktree add）。"""
     ident_env({})
     main, lane = _fake_main_and_lane(tmp_path)
     monkeypatch.setattr(agent_activities, "REPO_ROOT", main)

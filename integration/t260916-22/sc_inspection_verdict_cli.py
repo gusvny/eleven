@@ -5,16 +5,16 @@
 （inspection_trigger.py verdict 子命令，工单要点⑥明文签名）逐条标、落台账；**假报跨期
 不再重复计数**（裁定④⑤：下期同内容发现被压制点名，不进 summary、不占预算、不破心跳）。
 
-腿面：
+子用例面：
 - who 闸（错 gate/agent 自签同族语义，镜 sign）：空 who/agent 角色名/超长 who → 拒收
   且点名失败的检查项；词表外 verdict → 拒收点名；
-- 在途 signal 腿：票 awaiting-human 时 verdict → 信号落 face+timeline（回执带 ticket_id），
+- 在途 signal 子用例：票 awaiting-human 时 verdict → 信号落 face+timeline（回执带 ticket_id），
   签字收口后落账 face 带裁定；
-- 收口直改腿：已收口票 verdict → 台账直改 + verdicts 文件 append（entries 全留痕，
+- 收口直改子用例：已收口票 verdict → 台账直改 + verdicts 文件 append（entries 全留痕，
   同 finding 重复裁定 face 取最新）；
-- 跨期压制腿：P1 裁假报 → P2 同内容发现（同机械 id）被压制点名、summary 零计、
+- 跨期压制子用例：P1 裁假报 → P2 同内容发现（同机械 id）被压制点名、summary 零计、
   heartbeat 不破——「假报跨期不再重复计数」的行为证据；
-- deadman 词法腿：-verdicts.json 不进漏跑/畸形清单（--offline 纯查声明+台账）。
+- deadman 词法子用例：-verdicts.json 不进漏跑/畸形清单（--offline 纯查声明+台账）。
 
 依据：工单要点⑥+宿主裁定⑤；KI-030 家族反面教训（静默降级不可有——本条守显式点名）。
 环境语义：docker 测试台缺席=ENV_FAIL exit 2；实现未落地=FAIL（TDD 信号），
@@ -155,7 +155,7 @@ def main() -> int:
         with lib.StageWorker(queue, extra_env={
                 "SANDBAR_INSPECT_STUB": "1",
                 "SANDBAR_INSPECT_STUB_FILE": stub}):
-            # ── P1：起票→发现落面→在途裁定（signal 腿）→人门→收口→落账带裁定
+            # ── P1：起票→发现落面→在途裁定（signal 子用例）→人门→收口→落账带裁定
             tid1 = trigger_period(P1)
             if not tid1:
                 _finish(failures, tree, workdir, ledger_dir)
@@ -173,7 +173,7 @@ def main() -> int:
                 _finish(failures, tree, workdir, ledger_dir)
                 return 1
 
-            # who 闸/词表闸（fail-closed 拒收腿，在途票上即可验）
+            # who 闸/词表闸（fail-closed 拒收子用例，在途票上即可验）
             for label, args in (
                 ("空 who", ["--period", P1, "--finding-id", fid, "--verdict", "假报", "--who", ""]),
                 ("agent 角色名 who", ["--period", P1, "--finding-id", fid, "--verdict", "假报",
@@ -189,10 +189,10 @@ def main() -> int:
                 if err:
                     failures.append(err)
 
-            # 在途 signal 腿：中文别名「假报」→ signal 落 face，回执带 ticket_id
+            # 在途 signal 子用例：中文别名「假报」→ signal 落 face，回执带 ticket_id
             proc, parsed = run_verdict("--period", P1, "--finding-id", fid,
                                        "--verdict", "假报", "--who", SIGN_WHO,
-                                       "--note", "复核为误报（在途 signal 腿）")
+                                       "--note", "复核为误报（在途 signal 子用例）")
             res = (parsed or {}).get("result") or {}
             if not (isinstance(parsed, dict) and parsed.get("ok") is True):
                 failures.append("在途裁定被拒：%r | stderr=%s" % (parsed, (proc.stderr or "")[:200]))
@@ -226,10 +226,10 @@ def main() -> int:
                 if str(lf.get("verdict") or "") not in ("false-positive", "假报"):
                     failures.append("P1 落账 face 未带裁定（verdict=%r）——裁定落账面破" % lf.get("verdict"))
 
-            # 收口直改腿：再裁「存疑」→ verdicts append（entries=2）+ 台账 face 取最新
+            # 收口直改子用例：再裁「存疑」→ verdicts append（entries=2）+ 台账 face 取最新
             proc, parsed = run_verdict("--period", P1, "--finding-id", fid,
                                        "--verdict", "存疑", "--who", SIGN_WHO,
-                                       "--note", "复核改口（收口直改腿）")
+                                       "--note", "复核改口（收口直改子用例）")
             if not (isinstance(parsed, dict) and parsed.get("ok") is True):
                 failures.append("收口裁定被拒：%r | stderr=%s" % (parsed, (proc.stderr or "")[:200]))
             vpath = os.path.join(ledger_dir, lib.ledger_name(INST, P1, lib.VERDICTS_SUFFIX))
@@ -287,8 +287,8 @@ def main() -> int:
                         poll(closed2, POLL_CLOSE, 3)
                         if isinstance(ledger2, dict) and ledger2.get("heartbeat") is True \
                                 and (ledger2.get("findings") in ([], None)):
-                            pass  # 收口落账的心跳面与 journey 零发现腿同口径（此处压制票不另断）
-            # ── deadman 词法腿：-verdicts.json 不进漏跑/畸形清单
+                            pass  # 收口落账的心跳面与 journey 零发现子用例同口径（此处压制票不另断）
+            # ── deadman 词法子用例：-verdicts.json 不进漏跑/畸形清单
             proc, parsed = lib.run_trigger(
                 ["deadman", "--instance", INST, "--ledger-dir", ledger_dir, "--offline",
                  "--decl-path", DECL, "--lookback-days", "14", "--grace-days", "2"])

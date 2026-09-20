@@ -2,13 +2,13 @@
 
 覆盖（方案 S3/S4 + review RC2/RC7/RC8/C2）：
   - dev_lane.sign 的 authorize 分支：合法投递落 meta['authorizations'] + 时间线签发事件 +
-    log 记名；refused 各腿（反自签/上限/过期/别票/坏 kind）不进 meta；
+    log 记名；refused 各分支（反自签/上限/过期/别票/坏 kind）不进 meta；
   - 不带 authorize 的 sign：既有 merge 人门语义逐字节不变（非 merge 段照旧拒收）；
   - _protected_authz_records / _arbitration_authz 的生效过滤；
   - _record_authz_uses：机读键在场才记（and 只记匹配的 who@issued），缺键/畸形不记；
   - 三个非 dev_lane handler（base/workflows/inspection_flow）的 authorize 卫兵：
     误投不产生任何放行（RC7）；
-  - 源码锁：两处仲裁判定点走 arbitration_cap_route、授权推进腿与 pass 同形 _finish（C2）、
+  - 源码锁：两处仲裁判定点走 arbitration_cap_route、授权推进分支与 pass 同形 _finish（C2）、
     三处 args 带 authorizations、settle 走 exempt_authorized+记名、CLI/节点白名单收口。
 
 UT 零 Temporal 运行时（stub dev_lane.workflow）/零网络/零 git。
@@ -77,7 +77,7 @@ def _authz_sig(auth):
     return Signature(who=auth.who, gate="", decision="approve", authorize=auth)
 
 
-# ---------- intake 接受腿 ----------
+# ---------- intake 接受子用例 ----------
 
 def test_intake_accepts_and_records():
     wf = _mk_wf(meta={"stage": "implement", "stage_state": "blocked", "status": "dispatched"})
@@ -252,13 +252,13 @@ def test_source_lock_arbitration_sites_use_cap_route():
 
 
 def test_source_lock_authorized_advance_same_shape_as_pass():
-    """C2：授权推进腿与 verdict=pass 同形（_finish 落 arbitrate 终态 + _handoff）。"""
+    """C2：授权推进分支与 verdict=pass 同形（_finish 落 arbitrate 终态 + _handoff）。"""
     src = _src("server/engine/dev_lane.py")
     idx = src.find("authz_advance")
     assert idx > 0
     block = src[idx:idx + 2600]
-    assert '_finish("arbitrate"' in block, "授权推进腿必须 _finish 落终态（C2）"
-    assert '_handoff("arbitrate"' in block, "授权推进腿必须 _handoff 记判决原文+授权"
+    assert '_finish("arbitrate"' in block, "授权推进分支必须 _finish 落终态（C2）"
+    assert '_handoff("arbitrate"' in block, "授权推进分支必须 _handoff 记判决原文+授权"
     assert "acceptance_walkthrough" in block
     assert src.count("authz_advance") >= 3
 

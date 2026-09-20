@@ -19,7 +19,7 @@
  *   W4 请求面反空转（本票新维度）：旅程收集的全部 /sandbar-workbench/api/epics* 请求
  *      project 参数恒非空（零裸调）；状态写 POST 单点按相位点名断言 project=dengzhufpv；
  *      聚合轮询在详情态至少再打一拍（跨过 8s 轮询窗）。
- *   W5 http 前置腿（host 契约自检，回落语义保留的负向证明）：无参=引擎仓（与
+ *   W5 http 前置子用例（host 契约自检，回落语义保留的负向证明）：无参=引擎仓（与
  *      ?project=sandbar 同根同集，性质断言不钉真实仓清单——仓库每票必变，钉清单必 rot）；
  *      ?project=dengzhufpv=恰一枚 fpv-repo-split。
  *   W6 console 卫生：全旅程零 pageerror。
@@ -91,7 +91,7 @@ teardownOnExit(bench.teardown)
 record('redline/ports', bench.port !== 3099 && bench.port !== 7233 && bench.port !== 3199,
   `port=${bench.port}（freePort 分配，禁区外）`)
 
-/* ---- W5 http 前置腿：host 契约自检（回落保留+按项目分流；host 本票零改动） ---- */
+/* ---- W5 http 前置子用例：host 契约自检（回落保留+按项目分流；host 本票零改动） ---- */
 const EPICS = '/sandbar-workbench/api/epics'
 const codesOf = (body) => (Array.isArray(body?.result?.epics) ? body.result.epics.map((e) => e.code) : null)
 const fallback = await api(bench.base, 'GET', EPICS)
@@ -112,10 +112,10 @@ record('http/project-fpv-single',
   fpv.body?.ok === true && Array.isArray(fpvCodes) && fpvCodes.length === 1 && fpvCodes[0] === FPV_CODE,
   `?project=${FPV_KEY}=${JSON.stringify(fpvCodes)}（对照 API 实测，工单验收①对照面）`)
 
-/* ---- 浏览器腿 ---- */
+/* ---- 浏览器子用例 ---- */
 const pw = await loadPlaywright()
 if (!pw) {
-  record('browser/playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器真路径腿环境红，无干净放行出口')
+  record('browser/playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器真路径子用例环境红，无干净放行出口')
   summarize()
 }
 let browser
@@ -190,10 +190,10 @@ try {
     && headerCode === FPV_CODE
   record('walk/detail-renders', detailOk, `详情面在场+头部代号=${headerCode}（期望 ${FPV_CODE}）`)
 
-  /* W3/W4 写路径腿（安全闸）：仅当详情头部=夹具代号才触发保存——夹具代号文件只在
+  /* W3/W4 写路径子用例（安全闸）：仅当详情头部=夹具代号才触发保存——夹具代号文件只在
    * 场景私有夹具根存在，任何回归态（裸调/错参）下 POST 都落 404，永不触真仓数据；
-   * 头部非夹具代号=读路径已串台的回归态，写腿条件豁免 na（三态契约：N/A 仅给系统
-   * 状态条件腿；场景仍由 W1 读腿硬红，不产生「豁免出绿」）。 */
+   * 头部非夹具代号=读路径已串台的回归态，写子用例条件豁免 na（三态契约：N/A 仅给系统
+   * 状态条件子用例；场景仍由 W1 读子用例硬红，不产生「豁免出绿」）。 */
   let savedMsg = null
   if (headerCode === FPV_CODE) {
     await page.locator('[data-testid="epic-status-edit"]').selectOption('已完结')
@@ -212,22 +212,22 @@ try {
     record('write/status-file-updated', written,
       `状态写落点=${join(fpvRoot, 'notes', 'epics', FPV_CODE)} 已含「已完结」（落夹具根=写真穿参；落引擎仓=串台写）`)
   } else {
-    record('write/status-save-ok', 'na', `详情头部=${headerCode}≠${FPV_CODE}（读路径串台回归态）——写腿条件豁免，防串台写触真仓数据；读腿已硬红`)
-    record('write/status-file-updated', 'na', '写腿未触发（同上豁免原因）')
+    record('write/status-save-ok', 'na', `详情头部=${headerCode}≠${FPV_CODE}（读路径串台回归态）——写子用例条件豁免，防串台写触真仓数据；读子用例已硬红`)
+    record('write/status-file-updated', 'na', '写子用例未触发（同上豁免原因）')
   }
 
   /* W4 轮询拍：详情态跨过 8s 轮询窗，聚合请求至少再打一拍（GET 面无写副作用，不设闸） */
   await page.waitForTimeout(9000)
   const ticketGets = wire.filter((w) => /\/tickets$/.test(w.path))
   record('wire/poll-tickets-refresh', ticketGets.length >= 2,
-    `聚合请求收集 ${ticketGets.length} 次（首拉+至少一拍 8s 轮询；参数面归 zero-bare 腿统一判）`)
+    `聚合请求收集 ${ticketGets.length} 次（首拉+至少一拍 8s 轮询；参数面归 zero-bare 子用例统一判）`)
 
   /* W4 状态写 POST 单点相位断言（点击发起、相位无歧义，可点名判 project 值；随安全闸豁免） */
   const statusPost = wire.find((w) => w.path.endsWith('/status'))
   record('wire/status-post-carries-project',
     headerCode !== FPV_CODE ? 'na' : (statusPost !== undefined && statusPost.project === FPV_KEY),
     headerCode !== FPV_CODE
-      ? '写腿未触发（安全闸豁免）'
+      ? '写子用例未触发（安全闸豁免）'
       : `状态写 POST project=${statusPost?.project ?? '（无请求）'}（期望 ${FPV_KEY}）`)
 
   /* W4 请求面反空转：全部 /api/epics* 请求零裸调（本票病灶的正向判据） */

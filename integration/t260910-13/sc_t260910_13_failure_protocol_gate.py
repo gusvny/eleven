@@ -21,7 +21,7 @@ intent：260910 三次误判（t260910-05/08/10）的根治面——失败信息
     pool_config/env_fingerprint/baseline_ref，旧回执字段（green/ran/...）不动。
   - 闸不认识场景名（机械判定对抗探针）：同名异 payload 同判、异名同 payload 同判。
 
-真基线腿（C10）：fixture 为真 git 仓（main 提交桩 + 泳道工作树脏改桩），闸真跑
+真基线子用例（C10）：fixture 为真 git 仓（main 提交桩 + 泳道工作树脏改桩），闸真跑
 `git worktree add --detach` 取基线红名单，全程真 git 真进程；终态回收经
 `git worktree list` 断言零残留。git 缺席=ENV_FAIL exit 2 点名（三态契约，环境缺失红不假绿）。
 
@@ -93,7 +93,7 @@ def row(status=None, cause=None, reason=None, evidence=None, name="case-x",
 
 
 def make_fixture(body, git=False, stub_name="integ_stub.py"):
-    """临时仓：verify.yaml 声明 integration.cmd → 桩；git=True 时提交 main（真基线腿）。"""
+    """临时仓：verify.yaml 声明 integration.cmd → 桩；git=True 时提交 main（真基线子用例）。"""
     td = tempfile.mkdtemp(prefix="t26091013-")
     repo = Path(td)
     (repo / "verify.yaml").write_text(
@@ -186,8 +186,8 @@ if isinstance(s, dict):
 
 print("== S2 真红必拦（t260910-10 型）：lane 断言红 × 基线绿 → 拦（真 git 基线）")
 if subprocess.run(["git", "--version"], capture_output=True).returncode != 0:
-    ok(False, "S2 git 缺失=ENV_FAIL 面（基线腿不可验）")
-    print("ENV_FAIL: git 缺失，基线归属腿不可验（exit 2）")
+    ok(False, "S2 git 缺失=ENV_FAIL 面（基线子用例不可验）")
+    print("ENV_FAIL: git 缺失，基线归属子用例不可验（exit 2）")
     sys.exit(2)
 repo = make_fixture(STUB_PASS, git=True)
 (repo / "integ_stub.py").write_text(STUB_ASSERT_FAIL)  # 泳道脏改=断言红
@@ -227,7 +227,7 @@ ok(inner.get("green") is False, "S5 无证据 not-checked → 改判 FAIL（拦�
 ok_judged(inner, "S5 判定面")
 ok(has_string(inner, "evidence"), "S5 改判理由点名证据缺失（报错精确）")
 
-print("== S6 决策表 not-checked 双腿：self×main绿拦 / external×main绿记录不堵")
+print("== S6 决策表 not-checked 两子用例：self×main绿拦 / external×main绿记录不堵")
 repo = make_fixture(STUB_PASS, git=True)
 (repo / "integ_stub.py").write_text(STUB_SELF_EVID)
 res = call_gate(repo)
@@ -303,7 +303,7 @@ ok(res9a.get("green") is False, "S9a 崩溃面（rc!=0+汇总缺席）→ 红（
 ok_judged(res9a, "S9a 判定面")
 ok(has_string(res9a, "残缺") or has_string(res9a, "异常退出"),
    "S9a 红因点名用例集可能残缺（报错精确）")
-# 对照腿：同样 pass 规范行 + 汇总在场 + rc=0 → 绿（区分「场景级红」与「崩溃面」）
+# 对照子用例：同样 pass 规范行 + 汇总在场 + rc=0 → 绿（区分「场景级红」与「崩溃面」）
 ok_body = stub_src(row("pass", evidence="ok"), 0).replace(
     "import json\n", "import json\nprint('PASS [case-x] (0.1s)')\n", 1)
 repo = make_fixture(ok_body)

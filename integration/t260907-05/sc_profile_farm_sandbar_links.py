@@ -157,7 +157,7 @@ def main():
         check(False, "server/docker-compose.test.yml 可读")
     elif patch is not None:
         # 动态锚：patch 里 name 指向 ../../workbench 的插件 id（不写死字面——未来再
-        # 改名时本腿自动跟随声明侧，只验「compose 与 patch 同 token」的结构性契约）。
+        # 改名时本子用例自动跟随声明侧，只验「compose 与 patch 同 token」的结构性契约）。
         wb_ids = [i for i, n in pairs if "workbench" in n]
         wb_id = wb_ids[0] if len(wb_ids) == 1 else None
         check(wb_id is not None,
@@ -173,7 +173,7 @@ def main():
         # 顶层拷贝清单契约：注释声明的 tools 文件名完整名锚定（cordis 顶层文件装载——
         # 拷错了=容器台起不了，同样被 ENV_FAIL 捂着）。注：patch 顶层 tools 条目是
         # config 型（无 name、不在插件面 pairs 内）——其 id 已由第 5 节「零 suyou-* 残留」
-        # 与场景 1 全文扫守住；本腿直接锚 compose 注释的完整文件名。
+        # 与场景 1 全文扫守住；本子用例直接锚 compose 注释的完整文件名。
         check("sandbar-tools.ts" in compose,
               "compose 顶层拷贝清单注释含 sandbar-tools.ts（完整名锚定）")
         check("suyou-workbench" not in compose and "suyou-tools" not in compose,

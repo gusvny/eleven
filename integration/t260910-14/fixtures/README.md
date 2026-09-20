@@ -1,4 +1,4 @@
-# 负向重放夹具（腿三）生成程序——integration 在 acceptance 段执行（一次性）
+# 负向重放夹具（子用例三）生成程序——integration 在 acceptance 段执行（一次性）
 
 目标：拿到一份**含 prepare_epic_next / suggest_next 活动命令**的旧形态 dev-lane history
 JSON（`temporal workflow show -o json` 形状，replay_check --history 可消费），
@@ -23,7 +23,7 @@ COMPLETED 票永不重放，导出纯读（replay_check 同级只读口径）：
 `temporal --address $SANDBAR_TARGET_HOST --namespace $SANDBAR_NAMESPACE workflow show ...`。
 择看板空闲窗（宿主令⑤精神），不与任何在飞操作并发。
 
-## 夹具消费语义（场景③腿三）
+## 夹具消费语义（场景③子用例三）
 退役后代码回放该 history **必须响亮红**（活动命令序分歧）=「含 suggestion 命令 history
 与删除后代码不可重放」边界 + drain 必要性的机械证据。夹具是静态语料（非现状 pin），
 未来删除票亦不使其失效。

@@ -185,7 +185,7 @@ def sa_triple(wid: str) -> dict:
 
 
 def list_ids_by_instance(instance: str) -> list:
-    """按实例 SA 列 workflow id（SA 腿公开查询面；数量断言用）。"""
+    """按实例 SA 列 workflow id（SA 查询路径公开查询面；数量断言用）。"""
 
     async def _one():
         c = await _connect()

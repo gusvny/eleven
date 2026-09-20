@@ -37,16 +37,16 @@ nusuyou t260916-08：票在泳道内从零 `git init` 成员仓 `content/`（600
 - ① settle 早期闸（两站点）fail-closed 人话可断言——建票时刻无判据（写集新目录与
   「打算建仓」不可区分，gen0/gen1 已论证），落点后移到开工后第一次落盘；
 - ② 真值表 UT：`test_t26091620_write_set_gitlink_truth.py`（43 用例）；
-- ③ 拆道 blocked 点名不销毁：UT + 场景 TD 腿；
-- ④ merge_check gitlink 红灯点名：UT + 场景 MD 腿（真 merge_check 全调用）；
+- ③ 拆道 blocked 点名不销毁：UT + 场景 TD 子用例；
+- ④ merge_check gitlink 红灯点名：UT + 场景 MD 子用例（真 merge_check 全调用）；
 - ⑤ 既有 multirepo 全链场景零回归：server/engine/tests 全量 1266 passed（260916 实测）
   + t260913-05 / t260910-03 场景复跑。
 
 ## 已知残缺口（本票写集外，交宿主）
 
-1. `server/tools/verify_lane.py` `_in_write_set` 的 `==` 腿未剥条目尾斜杠——gitlink
+1. `server/tools/verify_lane.py` `_in_write_set` 的 `==` 子用例未剥条目尾斜杠——gitlink
    路径 × 带尾斜杠写集条目在该处判假，即事故「越界写: content」误诊文案真源。闸 3
    的权威红灯位次在其之前，误诊文案已降级为并存噪声；一行归一 + UT 建议另票/扩权。
 2. KI 候选（按纪律由 integration 岗位登记）：FM-1 冲突消解 settle 吞 0 提交嵌套仓
-   （本票步骤 2 已修引擎侧）；FM-2 verify_lane == 腿误诊（写集外待宿主）。
+   （本票步骤 2 已修引擎侧）；FM-2 verify_lane == 子用例误诊（写集外待宿主）。
 3. 引擎机制主档守卫语义段：待宿主授权另票/扩权落档。

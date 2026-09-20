@@ -5,7 +5,7 @@
 注解是 Optional[Dict[str, str]] → Temporal dataclass payload 解码 TypeError，
 workflow 启动失败。t260907-06 族 UT 只夹具直调 prepare_workspace，绕过了 Temporal
 编解码缝才漏网（KI-049③ 缝契约同族）——本文件一律走真 DataConverter 编解码往返
-做「启动面」代理断言，直调通道只作回落兼容腿。
+做「启动面」代理断言，直调通道只作回落兼容分支。
 
 断言分层（报错必须精确纪律）：
   - 类型毁形（repo_worktrees 含非 dict 条目等）→ Temporal 编解码层拒（roundtrip 抛

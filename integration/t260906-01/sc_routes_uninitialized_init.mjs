@@ -1,6 +1,6 @@
 // sc_routes_uninitialized_init.mjs — t260906-01 场景③：路由无表引导态 + init 退役终态。
 //
-// intent（t260914-05 兜底腿退役后的重写版；t260910-14 已退役 init 动作）：
+// intent（t260914-05 兜底分支退役后的重写版；t260910-14 已退役 init 动作）：
 //   A. 无声明项目 → 无表引导态：视图/API state=decl_missing、uninitialized=true、
 //      default=null、routes_file=""（无落点），resolution_error 点名「未声明」+建表
 //      模板指引；**反毒断言**：仓内 server/model-routes.yaml 即使仍在位也不被读、
@@ -149,7 +149,7 @@ writeProjectEntry(regRoot, 'rtk', 'RT', [emptyRepo]) // 已注册项目、未声
 
 // ---- D2：声明指向「可解析但非映射」表（标量/列表）→ 同 bad_content（260915 P5：py/TS 同判）----
 // py 侧此形曾判 ok 而消费方 AttributeError（t260914-05 走查 P5，已收紧）；UI 半行式解析器
-// 一直拒收此形。本腿把 UI 判定钉住，与引擎 UT（test_non_mapping_table_is_bad_content）互为两岸。
+// 一直拒收此形。本子用例把 UI 判定钉住，与引擎 UT（test_non_mapping_table_is_bad_content）互为两岸。
 {
   const repo4 = await mktempRepo('t260906-nonmap-')
   writeEntry('nonmapk', [repo4], [['model_routes', 'scalar-table.yaml']])
@@ -167,7 +167,7 @@ writeProjectEntry(regRoot, 'rtk', 'RT', [emptyRepo]) // 已注册项目、未声
 
 // ---- D3：形状坏表（roles/条目/tasks 值非映射）→ 与引擎同判 bad_content（260915 gen2）----
 // 引擎侧此形曾 state=ok 而消费方 AttributeError（260915 独立探针，已收口）；UI 半 asMap
-// 曾静默吞非映射值→视图对坏表出「默认路由」假象。本腿钉住 TS 判定（引擎 UT
+// 曾静默吞非映射值→视图对坏表出「默认路由」假象。本子用例钉住 TS 判定（引擎 UT
 // test_shape_broken_table_is_bad_content 互为两岸）。
 {
   const repo5 = await mktempRepo('t260906-shapebad-')

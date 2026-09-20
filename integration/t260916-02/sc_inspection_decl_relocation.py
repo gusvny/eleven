@@ -76,9 +76,9 @@ from lib_inspection import (  # noqa: E402
 )
 
 try:
-    import temporalio  # noqa: F401——SDK 直发/查询腿需要；缺席=环境红
+    import temporalio  # noqa: F401——SDK 直发/查询子用例需要；缺席=环境红
 except Exception:  # noqa: BLE001
-    die_env("temporalio SDK 缺席（server/engine/.venv 不可用）——真链路腿无法执行")
+    die_env("temporalio SDK 缺席（server/engine/.venv 不可用）——真链路子用例无法执行")
 
 PRODUCER_REL = "server/plugins/workbench/src/client/capture.mjs"
 STATS = {"pass": 0, "fail": 0}
@@ -87,13 +87,13 @@ FAILS = []
 PID = os.getpid()
 KEY_A = "rla%d" % PID
 KEY_B = "rlb%d" % PID
-KEY_D = "rld%d" % PID          # 坏声明项目（分项目降级腿）
+KEY_D = "rld%d" % PID          # 坏声明项目（分项目降级子用例）
 INST_A = "rla-ins-%d" % PID
 INST_B1 = "rlb-one-%d" % PID
 INST_B2 = "rlb-two-%d" % PID
 PERIOD = datetime.datetime.now().strftime("%Y%m%d")
-P2 = "19990102"                # 陈旧指针腿用过去期号（无在先票，SA 查询必空）
-P3 = "19990103"                # 畸形指针腿用另一过去期号
+P2 = "19990102"                # 陈旧指针子用例用过去期号（无在先票，SA 查询必空）
+P3 = "19990103"                # 畸形指针子用例用另一过去期号
 TICKET_RE = re.compile(r"^t\d{6}-\d{2,}$")
 TOKEN_A = "『甲仓落位迁移锚%d』" % PID
 TOKEN_B = "『乙仓落位迁移锚%d』" % PID
@@ -102,7 +102,7 @@ TOKEN_B = "『乙仓落位迁移锚%d』" % PID
 # 锚清单空=零发现。带全角装饰 『』 才是「UI 文案字面」形态（与真仓锚『+ 新建』同形），
 # 且不含括号内嵌 ascii 的排除形——断言锚必须过判据，发现证据才带得上本仓独特 token。
 # 互异且年年命中（1/31 07:00、3/30 08:30）——远离测试窗保隔离；2/31 形永伪 cron
-# 已被 deadman 守卫拒收（arbitrate gen2 调整），聚合调度腿按结构化日历断言各归各。
+# 已被 deadman 守卫拒收（arbitrate gen2 调整），聚合调度子用例按结构化日历断言各归各。
 CRON_A = "0 7 31 1 *"
 CRON_B = "30 8 30 3 *"
 TRIGGER_ENV = {}
@@ -197,7 +197,7 @@ def row_of(rows, tid):
     return next((r for r in (rows or []) if isinstance(r, dict) and r.get("id") == tid), {})
 
 
-# ---------------------------------------------------------------- 腿
+# ---------------------------------------------------------------- 子用例
 
 GUARD_REL = "integration/sc_rl_guard.mjs"
 GUARD_ANCHOR_LINE = 5   # assert(label.includes("<token>"), "守卫锚缺失")
@@ -218,7 +218,7 @@ def write_stub_anchor(stub_path: str, token: str):
 
 
 def t1_open_one(inst: str, period: str) -> str:
-    """T1 起票（单实例）：t 形号 + 日期段==期号日期段（票号形状腿）。"""
+    """T1 起票（单实例）：t 形号 + 日期段==期号日期段（票号形状子用例）。"""
     proc, parsed = trg(["trigger", "--instance", inst, "--period", period])
     res = (parsed or {}).get("result") if isinstance(parsed, dict) else {}
     tid = str((res or {}).get("ticket_id") or "")
@@ -322,7 +322,7 @@ def t5_board(tid_a, tid_b1, tid_b2):
     check("T5a 聚合白名单收全 A/B 两项目三实例（零 env 覆盖层）",
           rows is not None and all(t in ids for t in (tid_a, tid_b1, tid_b2)),
           "ids=%s parsed=%s" % (ids[:6], blob[:160]))
-    check("T5b 新票行零旧形前缀（inspection- 前缀零残留·运行时腿）",
+    check("T5b 新票行零旧形前缀（inspection- 前缀零残留·运行时子用例）",
           rows is not None and not any(i.startswith("inspection-") for i in ids),
           "ids=%s" % ids[:6])
     row_a = row_of(rows, tid_a)
@@ -394,7 +394,7 @@ def t8_malformed_pointer():
 
 
 def t9_deadman_pointer_clean():
-    """T9 指针不污染 deadman：台账目录里的 .ticket 不进畸形清单（离线腿）。"""
+    """T9 指针不污染 deadman：台账目录里的 .ticket 不进畸形清单（离线子用例）。"""
     for inst in (INST_A, INST_B1):
         proc, parsed = trg(["deadman", "--instance", inst, "--offline"])
         blob = json.dumps(parsed, ensure_ascii=False) if isinstance(parsed, dict) else (proc.stdout or "")
@@ -477,7 +477,7 @@ def main() -> int:
     tid_a = tid_b1 = tid_b2 = ""
     try:
         # A/B 项目：声明在各**自己仓根**（默认落位 <dirs[0]>/inspection.yaml），
-        # 实例集不同（聚合腿）；注册表缝另含一个坏声明项目 D（分项目降级腿）。
+        # 实例集不同（聚合子用例）；注册表缝另含一个坏声明项目 D（分项目降级子用例）。
         lr.write_registry(reg_root, KEY_A, "RelocA", [tree_a.root])
         lr.write_registry(reg_root, KEY_B, "RelocB", [tree_b.root])
         lr.write_registry(reg_root, KEY_D, "RelocD", [os.path.join(tmp, "d-empty")])

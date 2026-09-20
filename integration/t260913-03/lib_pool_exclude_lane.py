@@ -99,7 +99,7 @@ def build_lane(root, spec, exclude_pools=EXCLUDE_VALUE,
 
 def _env(extra=None):
     env = dict(os.environ)
-    env.pop("SANDBAR_SCENARIO_EXCLUDE_POOLS", None)   # 夹具不继承外层开关，腿级显式注入
+    env.pop("SANDBAR_SCENARIO_EXCLUDE_POOLS", None)   # 夹具不继承外层开关，子用例级显式注入
     env["SANDBAR_GATE_BASELINE"] = "0"                # 零基线开销 + 判定确定性（不拉 worktree）
     env.update(extra or {})
     return env

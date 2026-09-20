@@ -12,7 +12,7 @@ Intent（黑盒用户视角）：合并被 main 工作区未提交改动挡住�
      （无 auto-commit）、stash 条目数不变（无 auto-stash）、porcelain 不变（验收 f，
      260908 auto-stash 事故红线）；
   D. 工作流分流契约（dev_lane 源码结构锁，t260910-03 G 系/t05 同族——dev_lane 全工作
-     流行为腿需 docker 台，池内以源码契约锁承接口）：dirty/failed 分流到
+     流行为子用例需 docker 台，池内以源码契约锁承接口）：dirty/failed 分流到
      _blocked("merge",…) 且写 blocked_detail{reason_code,files,next_action}（文件来自
      merge 回执——R3 回填回归守卫），conflict 才走 _auto_rework("merge_check")。
 
@@ -21,8 +21,8 @@ py，白盒纯函数六形态电池随实现重写）之下、t260910-03 G7/G7b�
 仓写集红灯，conflict=False）不同故障面、sc_check_auto_rework_trace（_auto_rework 统一
 入口结构锁）不同对象、t260901-16 t05（检查项位次锁）不同面——本场景守「真 git 临时仓
 上脏 main × 真实 merge_check/merge activity 接缝」的跨组件行为与红线。实现落地前红属
-预期（TDD 信号），arbitrate/merge 期必须绿；temporalio 缺失=行为腿 ENV_FAIL 点名
-（exit 2），stdlib 腿（夹具自检+源码契约锁）恒跑。
+预期（TDD 信号），arbitrate/merge 期必须绿；temporalio 缺失=行为子用例 ENV_FAIL 点名
+（exit 2），stdlib 子用例（夹具自检+源码契约锁）恒跑。
 
 执行契约（t260910-13 三态）：stdout 末行 SUMMARY pass=N fail=K env_fail=E na=0；
 fail>0 → exit 1；env_fail>0 → exit 2。cwd=仓库根，stdlib+temporalio（venv），零端口，
@@ -194,7 +194,7 @@ def behavior_legs():
         import asyncio
         mc0 = asyncio.run(run_merge_check(repo, lane_wt))
         base_items = dirty_items(mc0)
-        check("G0b 干净基线：脏检查项在场且绿（对照腿，不误伤）",
+        check("G0b 干净基线：脏检查项在场且绿（对照子用例，不误伤）",
               len(base_items) == 1 and base_items[0].get("green") is True,
               "items=%r" % (base_items,))
 
@@ -325,11 +325,11 @@ def main():
         try:
             behavior_legs()
         except Exception as e:
-            check("行为腿整体（异常即红不崩场）", False,
+            check("行为子用例整体（异常即红不崩场）", False,
                   "%s: %s" % (type(e).__name__, str(e)[:200]))
     else:
-        env_fail("temporalio 不可导入——merge_check/_squash_merge 行为腿 ENV_FAIL 点名"
-                 "（KI-036 同族依赖面）；stdlib 夹具/源码锁腿已照跑")
+        env_fail("temporalio 不可导入——merge_check/_squash_merge 行为子用例 ENV_FAIL 点名"
+                 "（KI-036 同族依赖面）；stdlib 夹具/源码锁子用例已照跑")
     sys.exit(summary())
 
 

@@ -19,7 +19,7 @@ intent（守护的用户可感知行为/合同，用户手册多 repo 模型=项
 拒收面（逃逸/嵌套仓/删仓/来历不明占位）。单仓零回归不另起用例——存量
 integration 场景族即单仓回归面（intent 相同，不重复造）。
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；
-temporalio 缺失=ENV_FAIL 点名（prepare/settle 行为腿），stdlib 归属契约腿照跑。
+temporalio 缺失=ENV_FAIL 点名（prepare/settle 行为子用例），stdlib 归属契约子用例照跑。
 """
 import shutil
 import sys
@@ -75,8 +75,8 @@ else:
 
 # ---------- temporalio 面：prepare 两树并存 + 复用幂等 + settle 各归其仓 ----------
 if not temporalio_available():
-    env_fail("temporalio 不可用（本泳道无 venv）：prepare/settle 行为腿不可执行——"
-             "stdlib 归属契约腿已在本场跑完；arbitrate/merge 期 venv 环境必须全绿")
+    env_fail("temporalio 不可用（本泳道无 venv）：prepare/settle 行为子用例不可执行——"
+             "stdlib 归属契约子用例已在本场跑完；arbitrate/merge 期 venv 环境必须全绿")
 else:
     try:
         res = call_prepare(container, TICKET, WS, root)

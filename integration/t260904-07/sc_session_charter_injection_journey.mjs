@@ -25,7 +25,7 @@
 //   T2 切换零注入：切到相邻 tab 再切回 → 「的项目会话」特征串出现次数不变（无第二条
 //      charter）、tab 集合不变（守卫没把切换当新建）；切换目标会话的小条在场性必须
 //      与该会话是否含 charter 一致——无 charter 会话不留幽灵小条（t260905-04 review
-//      条件 A③：React 不移除外部节点，锚定失效须摘除）。单 tab 环境该腿 ENV_FAIL。
+//      条件 A③：React 不移除外部节点，锚定失效须摘除）。单 tab 环境该子用例 ENV_FAIL。
 //   T3 恢复零注入：reload → 过模态网 → 点原 tab → 特征串次数仍不变、tab 集合不变、
 //      小条恢复在场且在场性与特征串一致（折叠件重启全树兜底扫描兑现——恢复路径
 //      折叠面不丢）。
@@ -33,7 +33,7 @@
 //
 // Execution contract (t260904-12 三态): stdout last line
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; 依赖缺失一律 env_fail (exit 2，
-// 含「未上屏且仅凭据类错误」——凭据缺失归环境)；FAIL>0 或全腿 na → exit 1。
+// 含「未上屏且仅凭据类错误」——凭据缺失归环境)；FAIL>0 或全部子用例 na → exit 1。
 // 隔离台 SANDBAR_TEST_CONSOLE
 // （默认 127.0.0.1:3199）；硬守卫：绝不 3099。
 

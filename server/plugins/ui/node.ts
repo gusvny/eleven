@@ -199,7 +199,7 @@ export function apply(ctx: Context, config?: SuyouAdminUiConfig): void {
     return { key, primary: primaryDir(proj) }
   }
 
-  /** 模型路由视图（M12，只读；t260910-14 读写同源化；t260914-05 兜底腿退役）：
+  /** 模型路由视图（M12，只读；t260910-14 读写同源化；t260914-05 兜底分支退役）：
    *  解析「声明 paths.model_routes 指向的路由表」（未声明/声明文件缺失=无表）+
    *  扫生成 preset 烘焙实例。解析失败/读取故障 → 200 {ok:false, error}（UI 显示
    *  原因不渲染空表），不抛 500；无表 → 200 {ok:true, result.uninitialized:true}

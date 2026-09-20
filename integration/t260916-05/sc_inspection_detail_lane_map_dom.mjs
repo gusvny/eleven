@@ -13,7 +13,7 @@
 //   L4 降级锚：详情无 topology 键（老实例重放常态）→零泳道图且零 dev-lane
 //      步骤条回落——维持 t260915-08 以来巡检详情的现状降级，绝不拿 dev-lane
 //      步骤条冒充巡检图，巡检面时间线照常；
-//   P 卫生腿：全旅程零 pageerror / console.error。
+//   P 卫生子用例：全旅程零 pageerror / console.error。
 //
 // 分工（防 intent 级重复）：t260915-05-detail-lane-map-dom 守 dev-lane 泳道图本体
 // +渲染器通用性+畸形拓扑不炸（本条不重复其面，渲染器零改动是被测前提）；
@@ -281,7 +281,7 @@ function snapOf(inv) {
   return `mapEls=${inv.length} nodes=${JSON.stringify(nodes.map(n => `${n.dataId}:${n.dataVis || '?'}`))}`
 }
 
-/** 换腿：改桩→reload（路由桩跨 reload 存活）→进板→开抽屉→等巡检详情面渲染。 */
+/** 换子用例：改桩→reload（路由桩跨 reload 存活）→进板→开抽屉→等巡检详情面渲染。 */
 async function applyLeg(page, boardIcon, detail) {
   currentDetail = detail
   await page.locator('.wb-drawer .wb-close, .wb-close').first().click({ timeout: 3000 }).catch(() => {})
@@ -299,7 +299,7 @@ async function applyLeg(page, boardIcon, detail) {
   if (!ok) throw new Error('巡检详情面未渲染（inspection-timeline 缺席——组合闸或详情链断了）')
 }
 
-/** 泳道图在场的腿跑法：图缺席=fail 带诊断快照（不给静默通过）。 */
+/** 泳道图在场的子用例跑法：图缺席=fail 带诊断快照（不给静默通过）。 */
 async function withMap(page, fn) {
   const inv = await page.evaluate(domInventory)
   if (!inv.filter(x => x.dataId).length) {

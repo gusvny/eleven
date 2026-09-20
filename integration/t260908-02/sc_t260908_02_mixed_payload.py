@@ -7,21 +7,21 @@ intent（守护的用户可感知行为/合同）：混合形态项目（根 git
 （dataclass 显形注解）穿越 Temporal payload 编解码两跳——workflow 启动输入
 （TicketInput）与工作区准备 activity 入参（WorkspacePrep）——不再以 list 藏在
 workspace dict 值里撞类型注解（t260907-13 实锤：worker「Failed converting field
-workspace」，workflow 起不来=dengzhufpv T2 停摆）。分腿：
+workspace」，workflow 起不来=dengzhufpv T2 停摆）。拆分子用例：
 
-- 形状契约腿（stdlib）：TicketInput/WorkspacePrep 均有 repo_worktrees 字段、
+- 形状契约子用例（stdlib）：TicketInput/WorkspacePrep 均有 repo_worktrees 字段、
   带 default_factory=list 缺省（存量 RUNNING 实例重放缺键不破回放面）；derive
   产物可无痕拆分——pop 掉 repo_worktrees 后 workspace 只剩 {type, path}；
-- 编解码缝腿（temporalio）：拆分链产物 TicketInput(workspace=纯形状,
+- 编解码缝子用例（temporalio）：拆分链产物 TicketInput(workspace=纯形状,
   repo_worktrees=明细) 经 DataConverter 默认 payload converter 编解码往返全等
   （=workflow 启动面不再 TypeError）；WorkspacePrep 第二跳同款往返全等（=activity
-  入参面）；单仓对照腿往返绿且 repo_worktrees 恒 []（单仓/纯容器零回归）；
-- 畸形分层腿（报错必须精确）：类型毁形（repo_worktrees 条目非对象）在**编解码层**
+  入参面）；单仓对照子用例往返绿且 repo_worktrees 恒 []（单仓/纯容器零回归）；
+- 畸形分层子用例（报错必须精确）：类型毁形（repo_worktrees 条目非对象）在**编解码层**
   拒（from_payloads 抛错=启动面拒绝）；形状合法但语义非法（branch 碰撞/条目缺
   name）在**闸层**拒（lane_workspace_gate_error 文案可辨），两层断言互不冒充；
-- 闸新位/旧位腿（stdlib）：新位 meta 顶层 repo_worktrees 畸形照拒（fail-closed
+- 闸新位/旧位子用例（stdlib）：新位 meta 顶层 repo_worktrees 畸形照拒（fail-closed
   不弱化）；旧位 workspace 内嵌回落兼容同样照拒（存量直调通道不逃检）；
-- 行为通道腿（temporalio，夹具直调 prepare_workspace 公开 activity 入口）：
+- 行为通道子用例（temporalio，夹具直调 prepare_workspace 公开 activity 入口）：
   一等字段通道端到端生效——prep.repo_worktrees 到达 prepare 即逐仓挂树 created、
   清单落盘；旧形状（ws 内嵌）回落通道仍工作（修复不得破坏既有直调兼容面）。
 
@@ -30,7 +30,7 @@ fail-closed 全链（经 write_set+project_root 推导通道）；t260907-12 守
 derive 激活与逐仓挂载全链——两者均不触 payload 编解码缝（当年夹具直调绕过该缝
 正是本 bug 漏网根因，KI-049③缝契约同族教训）。本场景只守「多仓明细穿越 Temporal
 编解码两跳+畸形分层拒绝」这一缝。实现落地前红属预期（TDD 信号），arbitrate/merge
-期必须绿；temporalio 缺失=ENV_FAIL 点名（编解码/行为腿），stdlib 形状/闸契约腿照跑。
+期必须绿；temporalio 缺失=ENV_FAIL 点名（编解码/行为子用例），stdlib 形状/闸契约子用例照跑。
 """
 import sys
 import typing
@@ -49,7 +49,7 @@ from lib_t260912 import (  # noqa: E402
 sys.path.insert(0, str(POC))
 import shared  # noqa: E402  纯标准库依赖面
 
-TICKET_MX = "t260908mx"   # 混合形态主腿
+TICKET_MX = "t260908mx"   # 混合形态主子用例
 TICKET_SG = "t260908sg"   # 单仓对照
 WS_MX = ["docs/kb.md", "repo_a/src/a.py"]   # 双命中：根树+repo_a 子树
 WS_SG = ["src/main.py"]
@@ -75,7 +75,7 @@ def ticket_input(**kw):
     import shared
     return call_with_supported_fields(shared.TicketInput, template_id="dev-lane", **kw)
 
-# ---------- M1 形状契约腿（stdlib，系统 python3 可跑） ----------
+# ---------- M1 形状契约子用例（stdlib，系统 python3 可跑） ----------
 def _fields_with_default(cls):
     import dataclasses
     return {f.name: f for f in dataclasses.fields(cls)}
@@ -115,7 +115,7 @@ check("M1d 单仓对照：derive 产物无内嵌键、拆分恒空（零回归�
       set(ws_sg) == {"type", "path"} and not rws_sg,
       "ws=%r rws=%r" % (ws_sg, rws_sg))
 
-# ---------- 闸腿（stdlib）：畸形分层之「闸层」+ 新位/旧位 ----------
+# ---------- 闸子用例（stdlib）：畸形分层之「闸层」+ 新位/旧位 ----------
 def _good_entry(name, branch):
     return {"repo": "repo_a", "name": name, "branch": branch}
 
@@ -140,9 +140,9 @@ check("M2b 闸旧位回落：workspace 内嵌旧形状畸形 → 仍拒（回落
       bool(err_old) and "碰撞" in err_old,
       "err=%r" % (err_old,))
 
-# ---------- M3 编解码缝腿（temporalio 面） ----------
+# ---------- M3 编解码缝子用例（temporalio 面） ----------
 if not temporalio_available():
-    env_fail("temporalio 缺失：M3 编解码缝腿与 M4 行为通道腿无法执行（pip install temporalio）")
+    env_fail("temporalio 缺失：M3 编解码缝子用例与 M4 行为通道子用例无法执行（pip install temporalio）")
 else:
     from temporalio.converter import DataConverter
     pc = DataConverter.default.payload_converter
@@ -154,7 +154,7 @@ else:
         (back,) = pc.from_payloads(payload, [cls])
         return back
 
-    # M3a 主腿（=t260907-13 启动面）：拆分链产物过编解码，一等字段往返存活
+    # M3a 主子用例（=t260907-13 启动面）：拆分链产物过编解码，一等字段往返存活
     try:
         inp = ticket_input(ticket_id=TICKET_MX, workspace=ws_mx, repo_worktrees=rws_mx or [])
     except CapabilityMissing:
@@ -229,7 +229,7 @@ else:
             check("M3d 单仓对照编解码往返：repo_worktrees 恒 []、workspace 纯形状", False,
                   "%s: %s" % (type(e).__name__, e))
 
-    # ---------- M4 行为通道腿（直调 prepare_workspace 公开 activity 入口） ----------
+    # ---------- M4 行为通道子用例（直调 prepare_workspace 公开 activity 入口） ----------
     import asyncio
     import agent_activities  # noqa: E402
 

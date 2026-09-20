@@ -5,7 +5,7 @@
 intent（用户可感知契约，260908 终切后语义——空库重建窗口零兼容负担）：
   Temporal schedule 是服务端持久对象。终切撤掉了「引擎走廊幂等删旧 schedule id」
   的退役面（dc5f8cc）——引擎只建/幂等维护**新名单 ID（sandbar-dispatcher-scan）**，
-  旧 ID 的清理是运维操作（人工/专门工具），引擎走廊绝不隐式删用户数据。腿：
+  旧 ID 的清理是运维操作（人工/专门工具），引擎走廊绝不隐式删用户数据。子用例：
   1. 首次跑创建走廊 → 台上恰 sandbar-dispatcher-scan 一个（不种旧 ID）；
   2. 再跑一次 → 幂等（仍恰新 ID 一个、不炸）；
   3. 负向守卫：人工种下旧 ID（模拟遗留残留）→ 走廊照跑 → 旧 ID **原样在**
@@ -13,7 +13,7 @@ intent（用户可感知契约，260908 终切后语义——空库重建窗口�
   创建走廊=仓内唯一在树创建点 demo_schedule.demo_schedule(client)（scan_schedule
   只有 describe/pause/resume/trigger 运维面，无 create）。
 舞台：stage_docker 单点；SDK 走 poc venv；缺=ENV_FAIL。
-**本场景自过渡退役契约翻面（260908 撤退役面）；腿1 红=种了旧 ID，腿3 红=引擎隐式删旧。**
+**本场景自过渡退役契约翻面（260908 撤退役面）；子用例1 红=种了旧 ID，子用例3 红=引擎隐式删旧。**
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ REPO = os.path.dirname(INTEG)
 # 项目名原先只有「泳道」维度，于是**同一泳道内两次并发跑**（闸跑 + 手跑／上一轮
 # 长跑的尾巴；21:10 实况：两个 199 条全轮重叠 85s，本场景即闸拦条目）会 ensure 到
 # 同一个台，三种伤口同源——一方 down 拆掉另一方在飞的台（中段「连接被拒」）、一方
-# 腿3 种下的旧 ID 让另一方腿1 看到两个 ID（**伪装成产品红的腿1 红**）、瞬时冲突
+# 子用例3 种下的旧 ID 让另一方子用例1 看到两个 ID（**伪装成产品红的子用例1 红**）、瞬时冲突
 # 环境红。加 pid 后缀后同泳道并发跑各持自己的台（跨跑复用台不是本场景的语义需求，
 # 冷启代价约 20s）。跨泳道面保持原语义（泳道 hash 仍在）。
 PROJECT = ("t26090704-sched-%s-r%d"
@@ -137,7 +137,7 @@ def env_for(host, ns):
 # env_replace=True。worker 用 env_for() 起（整份环境=已净化），而 tp_json 缺省是 **overlay**
 # ——被剥掉的键会从 os.environ 复活：泳道内直跑时父环境带 SANDBAR_TASK_QUEUE=
 # sandbar-ticket-<票>，走廊便到那个队列建 workflow，而 worker 只 poll 缺省 "sandbar"
-# → 巡检工作流永不执行 → scan_handle.result() 挂死 → 三条腿齐报「timeout 180s」
+# → 巡检工作流永不执行 → scan_handle.result() 挂死 → 三条子用例齐报「timeout 180s」
 # （方向错误的报错）。lib_naming.tp_eval 的文档早点名这条口径，本场景补齐调用面。
 
 
@@ -145,7 +145,7 @@ def _worker_tail(path, n=300):
     """worker 进程输出的尾巴（诊断面）：原实现把 worker.py 的 stdout/stderr 接进一个
     从不读的 PIPE——走廊超时时只剩一句『timeout 180s』，真因（worker 起不来／连不上台／
     领不到活）全被吞掉，报错指错方向（t260913-02 arbitrate gen10 实测：同一形态在
-    两条并发跑的腿上都只报 timeout）。落临时文件后 ENV_FAIL 能带上 worker 自己的话。"""
+    两条并发跑的子用例上都只报 timeout）。落临时文件后 ENV_FAIL 能带上 worker 自己的话。"""
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
             return fh.read()[-n:].replace("\n", " / ").strip()
@@ -168,9 +168,9 @@ def main():
 
     wpath = None
     try:
-        print("== 腿1 首次创建走廊 → 恰 sandbar-dispatcher-scan 一个（不种旧 ID）")
+        print("== 子用例1 首次创建走廊 → 恰 sandbar-dispatcher-scan 一个（不种旧 ID）")
         # 走廊 demo_schedule 会 trigger 巡检工作流并等它跑完（scan_handle.result()），
-        # 空台没有 worker 时这一步永远阻塞——三条腿共用一台随场景生死的短命 worker
+        # 空台没有 worker 时这一步永远阻塞——三条子用例共用一台随场景生死的短命 worker
         # 接住巡检（activity 是只读票列表，空台即空清单）。
         wp = None
         py = lib_naming.poc_python()
@@ -178,10 +178,10 @@ def main():
             r.env_fail("poc venv/SDK 缺失，worker 起不来")
             r.finish()
             return
-        # 预置清场（t260913-02 arbitrate gen10，**不是**放宽腿1 判据）：前一次跑被打断
+        # 预置清场（t260913-02 arbitrate gen10，**不是**放宽子用例1 判据）：前一次跑被打断
         # （或在飞的另一条同形跑）留下的旧 ID 是**夹具残留**，不是被测引擎的行为——原样
-        # 留下会让腿1 在「引擎跑完该恰新 ID 一个」的判据上红成产品红（闸拦实证形态）。
-        # 清场后腿1 的判据反而更纯：起手两 ID 皆无 → 引擎跑完仍须恰新 ID 一个。
+        # 留下会让子用例1 在「引擎跑完该恰新 ID 一个」的判据上红成产品红（闸拦实证形态）。
+        # 清场后子用例1 的判据反而更纯：起手两 ID 皆无 → 引擎跑完仍须恰新 ID 一个。
         obj, rc, out, err = lib_naming.tp_json(PURGE_RESIDUE, env_extra=env_for(host, ns),
                                      env_replace=True)
         if obj is None or not obj.get("purged"):
@@ -237,7 +237,7 @@ def main():
                 r.check(got == ["sandbar-dispatcher-scan"],
                         "新 ID 独苗、无旧 ID（ids=%s）" % got)
 
-        print("== 腿2 再跑一次 → 幂等（仍恰新 ID 一个、不炸）")
+        print("== 子用例2 再跑一次 → 幂等（仍恰新 ID 一个、不炸）")
         obj = _corridor("二次创建走廊跑不动")
         if obj is None:
             pass
@@ -251,7 +251,7 @@ def main():
                 r.check(got == ["sandbar-dispatcher-scan"],
                         "幂等重跑后仍是新 ID 唯一（ids=%s）" % got)
 
-        print("== 腿3 负向守卫：人工种旧 ID → 引擎走廊不隐式删（退役面撤的契约边界）")
+        print("== 子用例3 负向守卫：人工种旧 ID → 引擎走廊不隐式删（退役面撤的契约边界）")
         obj, rc, out, err = lib_naming.tp_json(SEED, env_extra=env_for(host, ns), env_replace=True)
         if obj is None or not obj.get("seeded"):
             r.env_fail("种旧 ID 失败（舞台/SDK 面）：%s" % (err or out)[-200:])

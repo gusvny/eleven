@@ -15,7 +15,7 @@
  * 三依据：①工单验收①③；②KI 触及面=无未闭合项直接触及；③组件对外契约=上列
  * 1-6（文案与 testid 是 mock/方案钉的用户契约锚，不锚内部函数名/文件名）。
  *
- * 档位声明（灰盒）：本场景是离线结构锁档（S0）；浏览器级 DOM 腿（真点击、真渲染）
+ * 档位声明（灰盒）：本场景是离线结构锁档（S0）；浏览器级 DOM 子用例（真点击、真渲染）
  * 按项目惯例留隔离台 stage_docker 手法（sc_ticket_detail_lane_map_dom 同族），本场景
  * 红的语义=契约锚缺席/接线断/未重建，不判环境。
  *
@@ -66,7 +66,7 @@ ok(hitJump.length > 0, '「跳到当前版」小链在场')
 const anchorFiles = [...new Map([...hitTestid, ...hitBanner, ...hitJump].map(f => [f.file, f])).values()]
 
 section('S2 跳到当前版接线（点击 → mode=current + 横幅消失语义）')
-/* 静态档只钉「current 口径在锚域被消费」；点击→清横幅的行为面留隔离台 DOM 腿
+/* 静态档只钉「current 口径在锚域被消费」；点击→清横幅的行为面留隔离台 DOM 子用例
  * （t260915-05-detail-lane-map-dom 同族分层），静态钉不动的不断言。 */
 for (const f of anchorFiles) {
   ok(/['"`]current['"`]|\bcurrent\b/.test(stripComments(f.text)), f.file + '：current 口径在锚域被消费（跳转切换证据）')

@@ -25,7 +25,7 @@ t260911-04、t260913-05 等真链场景守各自旅程终态（本修只让它�
 ⑤ 无形单仓回落 → T5a；⑥ 清单损坏 fail-closed 不放宽 → T5b；⑦ 读动作零副作用 → T4c。
 
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
-引擎 venv/temporalio 缺席 = ENV_FAIL exit 2 点名（本场景无 stdlib 替代腿：直调 activity）。
+引擎 venv/temporalio 缺席 = ENV_FAIL exit 2 点名（本场景无 stdlib 替代子用例：直调 activity）。
 """
 import json
 import os
@@ -66,7 +66,7 @@ def _read(p):
 def main():
     (mods, why) = engine_modules()
     if mods is None:
-        env_fail("引擎模块不可用（%s）——直调 activity 无 stdlib 替代腿" % why)
+        env_fail("引擎模块不可用（%s）——直调 activity 无 stdlib 替代子用例" % why)
     shared, aa = mods
     tmp_roots = []
 

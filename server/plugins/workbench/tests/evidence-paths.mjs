@@ -9,8 +9,8 @@
  * sc_ticket_evidence_images.mjs（闸上黑盒三态）。
  *
  * 覆盖（对照方案验收口径）：
- *   A. 新名主腿：.lane/<id>/.sandbar/screenshots 可读可列，怪名/非 png 滤除。
- *   B. 旧名回落腿：仅 .lane/<id>/.suyou/screenshots 时仍命中（naming-compat）。
+ *   A. 新名主子用例：.lane/<id>/.sandbar/screenshots 可读可列，怪名/非 png 滤除。
+ *   B. 旧名回落子用例：仅 .lane/<id>/.suyou/screenshots 时仍命中（naming-compat）。
  *   C. 新旧并存去重：同名文件两代点目录并存只计一次；异名并集。
  *   D. 归档两代并存：.sandbar/evidence 与 .suyou/evidence 并存去重。
  *   E. env 独占替换（C1）：SANDBAR_EVIDENCE_DIR 在场=归档仅 env 一处，不枚举默认目录。
@@ -39,7 +39,7 @@ function seed(...segs) {
   writeFileSync(file, Buffer.from('89504e470d0a1a0a', 'hex')) // PNG 魔数头即可（列表端点只滤名不验字节）
 }
 
-// A. 新名泳道主腿
+// A. 新名泳道主子用例
 {
   const root = makeRoot()
   const id = 't26091005a'
@@ -132,7 +132,7 @@ function seed(...segs) {
     && !cEnv.some(c => c.dir.startsWith(join(root, '.sandbar')) || c.dir.startsWith(join(root, '.suyou'))),
     'G4 env 在场候选面=5（归档仅 env 一处+泳道4），默认归档目录不进候选')
   ok(cEnv.slice(1).every(c => c.dir.startsWith(root)),
-    'G5 env 只换归档腿，泳道/老泳道腿仍随项目根（不受 env 影响）')
+    'G5 env 只换归档子用例，泳道/老泳道子用例仍随项目根（不受 env 影响）')
   rmSync(root, { recursive: true, force: true })
 }
 

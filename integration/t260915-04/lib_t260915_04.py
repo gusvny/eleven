@@ -10,7 +10,7 @@
 - 一切 git 仓/项目注册表在测试 tmp 目录自建，不代用户建仓、不碰真实项目数据；
 - 注入优先「真实入口」（ticket.py 库装载 / client.py 子进程），不 mock 引擎函数；
 - 红线：Temporal 地址钉不可达桩（127.0.0.1:9），绝不触生产 7233/8233/3099；
-  拒收腿发生在连接之前＝零 Temporal 依赖；过闸腿以「连接失败而非拒收」为判别面。
+  拒收子用例发生在连接之前＝零 Temporal 依赖；过闸子用例以「连接失败而非拒收」为判别面。
 
 三态契约（t260904-12）：只有 pass/fail/env_fail；环境缺失一律 ENV_FAIL exit 2。
 """
@@ -48,7 +48,7 @@ def check(name, cond, detail=""):
 
 
 def env_fail(reason):
-    """环境缺失：一律 ENV_FAIL exit 2（本场景无 stdlib 替代腿——真入口子进程/直调）。"""
+    """环境缺失：一律 ENV_FAIL exit 2（本场景无 stdlib 替代子用例——真入口子进程/直调）。"""
     global env_fail_n
     env_fail_n += 1
     print("ENV_FAIL " + reason, flush=True)

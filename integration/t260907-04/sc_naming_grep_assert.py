@@ -55,7 +55,7 @@ TEXT_EXT = {".py", ".md", ".mjs", ".sh", ".yaml", ".yml", ".json", ".ts", ".txt"
 MERGE_DEBT_FILES = frozenset((
     # main 树并入（t260907-04 merge 轮）仍在用旧名的引擎/清单面：t260907-06 多仓
     # manifest 写 .suyou/repo_worktrees.json、t260907-07 epic 锚钉 SANDBAR_EPICS_DIR
-    # 语义（其场景/UT 为契约锚）。属跨票旧名债，登记不豁免监督（C 腿自证仍在）。
+    # 语义（其场景/UT 为契约锚）。属跨票旧名债，登记不豁免监督（C 子用例自证仍在）。
     "server/engine/agent_activities.py",
     "server/engine/shared.py",
     "server/engine/client.py",

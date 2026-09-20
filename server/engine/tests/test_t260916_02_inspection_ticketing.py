@@ -76,7 +76,7 @@ class FakeWf:
 
 class FakeClient:
     """最小 Temporal 客户端桩：list_workflows 按 query 形态建模（SA dedup / STARTS_WITH /
-    纯类型扫）；reject_starts_with 注入 R2 降级腿；sa_unregistered 注入 R3 报错腿。"""
+    纯类型扫）；reject_starts_with 注入 R2 降级分支；sa_unregistered 注入 R3 报错分支。"""
 
     def __init__(self, wfs=None, reject_starts_with=False, sa_unregistered=False):
         self.wfs = {w.id: w for w in (wfs or [])}
@@ -196,7 +196,7 @@ def test_scan_prefix_cross_type_and_fallback():
         client2 = FakeClient([FakeWf("t260916-01"), FakeWf("inspection-x-20260916")],
                              reject_starts_with=True)
         ids2, mode2 = await tick.scan_prefix_ticket_ids(client2, "t260916")
-        assert ids2 == ["t260916-01"] and mode2 == "type_only_fallback"   # R2 降级腿
+        assert ids2 == ["t260916-01"] and mode2 == "type_only_fallback"   # R2 降级分支
         client3 = FakeClient()
         async def dead(query):
             raise RuntimeError("visibility store down")

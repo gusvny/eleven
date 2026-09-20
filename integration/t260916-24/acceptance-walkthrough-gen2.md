@@ -32,7 +32,7 @@ injection-journey、lane-parallel-dom）。gen2 走查三件事：①核实 gen1
 | --- | --- | --- |
 | 守卫三条（no-skip / naming / engine-layout） | **全部 exit 0 维持绿** | pass=7/7/39 fail=0 |
 | t260916-24-dsh-probe-selftest | **exit 0 维持绿** | 金样本 3 档绿+篡改 7 档逐项红 |
-| 本票场景①②+L1 UT | **gen1 复跑结论延续有效** | git diff e6f6137..HEAD 对被测文件零变更；gen1 实测=场景① exit 0（四腿 17 断言）/ 场景② exit 0（双腿 8 断言，单前缀改动等价实证）/ UT 25 passed |
+| 本票场景①②+L1 UT | **gen1 复跑结论延续有效** | git diff e6f6137..HEAD 对被测文件零变更；gen1 实测=场景① exit 0（四子用例 17 断言）/ 场景② exit 0（两子用例 8 断言，单前缀改动等价实证）/ UT 25 passed |
 | lane-parallel-dom（本轮闸拦败项，代表性复跑） | **复跑 exit 0**（pass=8 fail=0 env_fail=0） | 机械轮败因 P5/P6 伴随 `WebSocket ws://127.0.0.1:21020/api/events.mux ERR_CONNECTION_REFUSED`、consoleErrors=75——动态端口临时 console 台的连接层瞬时故障；复跑即绿=抖动而非产品缺陷 |
 
 机械 6 败归因（只定位不修复）：闸拦 3 条 + t260915-05-detail-lane-map-dom

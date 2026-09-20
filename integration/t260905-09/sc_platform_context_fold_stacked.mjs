@@ -2,7 +2,7 @@
 //
 // Intent (gray-box, user perspective, L3 场景层):
 //   真控制台新会话开头的刷屏墙=两层叠加：平台自启上下文×N + 工单台 charter 注入×1。
-//   16 号（t260905-04/t260904-07）只折了自己的注入腿——台面无平台叠加=假绿（宿主
+//   16 号（t260905-04/t260904-07）只折了自己的注入子用例——台面无平台叠加=假绿（宿主
 //   260906 实报「还是显示了一堆，只折叠了开头一小部分」）。本场景=工单「怎么算好」
 //   原话的可执行化：夹具把平台启动上下文消息×N + 工单台注入×1 叠进同一会话，断言
 //   恰好一个小条、全部候选正文收折、点开全见、点回收折；普通用户消息零误折（负向）；
@@ -28,7 +28,7 @@
 //      夹具手法≠产品缺陷，崩溃证据随 detail 留痕上报归因，不许静默）。
 //
 // Execution contract (t260904-12 三态): stdout last line
-// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`；fail>0 或全腿 na → exit 1；
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`；fail>0 或全部子用例 na → exit 1；
 // env_fail>0 → 2；全过 → 0。隔离台默认 127.0.0.1:3199，硬守卫绝不 3099。
 // 折叠面断言 pre-implement 红属预期（TDD 信号，沿 t260905-04 先例）。
 
@@ -53,7 +53,7 @@ try {
 const { record, summarize } = makeResults();
 const pageErrors = [];
 
-// 浏览器启动（模块级：T0 探测腿与主旅程共用；同 journey 手法——优先本机 Chrome
+// 浏览器启动（模块级：T0 探测子用例与主旅程共用；同 journey 手法——优先本机 Chrome
 // channel 免 playwright 下载二进制，回落纯 chromium）
 const launchBrowser = async () => {
   try { return await pw.chromium.launch({ channel: 'chrome', headless: true }); }
@@ -75,8 +75,8 @@ if (!(await consoleHealthy(BASE))) {
     summarize();
   }
   record('t0/anchors-module', 'pass', ANCHORS_MODULE);
-  // bundle 部署归因腿（na 仅给系统状态条件腿）：源在而 served bundle 无锚样本
-  // =实现已落地但 bundle 未重建/未部署——本场景行为腿对其余腿无意义，归 na。
+  // bundle 部署归因子用例（na 仅给系统状态条件子用例）：源在而 served bundle 无锚样本
+  // =实现已落地但 bundle 未重建/未部署——本场景行为子用例对其余子用例无意义，归 na。
   try {
     const browser = await launchBrowser();
     const page = await browser.newPage();
@@ -131,7 +131,7 @@ try {
     await browser.close();
     summarize();
   }
-  record('t1/charter-chip-precondition', 'pass', 'charter 小条在场（工单台注入腿正常）');
+  record('t1/charter-chip-precondition', 'pass', 'charter 小条在场（工单台注入子用例正常）');
 }
 
 // ---- T2 叠台主断言（验收①）----
@@ -144,7 +144,7 @@ try {
   const all = Object.fromEntries(probe.bubbles.map(b => [b.id, b.state]));
   const foldedAll = probe.bubbles.every(b => b.state === 'hidden');
   record('t2/one-chip', probe.chipCount === 1 ? 'pass' : 'fail',
-    `小条数=${probe.chipCount}（聚合语义=恰 1 条；>1=平台上下文另起小条违背「同一折叠件」原话；0=叠加腿未折=宿主实报复现）`);
+    `小条数=${probe.chipCount}（聚合语义=恰 1 条；>1=平台上下文另起小条违背「同一折叠件」原话；0=叠加子用例未折=宿主实报复现）`);
   record('t2/all-folded', foldedAll ? 'pass' : 'fail',
     foldedAll ? `平台气泡 ${probe.bubbles.length} 条全部收折（含 fx-02 同气泡双锚去重样本）`
               : `未收折：${probe.bubbles.filter(b => b.state !== 'hidden').map(b => `${b.id}=${b.state}`).join(', ')}`);
@@ -169,7 +169,7 @@ try {
     await clickChip(page);
     await page.waitForTimeout(300);
     await page.screenshot({ path: '.suyou/screenshots/t260905-09-stacked-open.png', fullPage: true });  // naming-compat
-    await clickChip(page); // 回到收折态，不污染后续腿
+    await clickChip(page); // 回到收折态，不污染后续子用例
     await page.waitForTimeout(300);
     record('t2/screenshot-evidence', 'pass', '.suyou/screenshots/t260905-09-stacked-{folded,open}.png（折叠态/展开态对比）');  // naming-compat
   } catch (e) {
@@ -199,7 +199,7 @@ try {
   const after = await foldProbe(page);
   record('t4/no-ghost-chip', after.bubbles.length === 0 && after.chipCount === 1 ? 'pass' : 'fail',
     after.bubbles.length === 0 && after.chipCount === 1
-      ? '夹具气泡移除后小条回落 charter 配对（chips=1：charter 腿仍在）——幽灵检查通过'
+      ? '夹具气泡移除后小条回落 charter 配对（chips=1：charter 子用例仍在）——幽灵检查通过'
       : `气泡残留=${after.bubbles.length}，chips=${after.chipCount}（0=叠加组小条未随气泡消失=幽灵；>1=残留叠加小条=幽灵）`);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2500);

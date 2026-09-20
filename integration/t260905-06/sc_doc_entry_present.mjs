@@ -17,7 +17,7 @@
 //      [aria-label="知识库"] 不在场（旧提法退役的入口面）。
 //   T2 键盘可达：图标 .focus() 成功（可聚焦性）→ keyboard Enter →
 //      中列发起 GET /api/wf/docs/tree?scope=docs 且 200（目录加载的用户可感知面）。
-//      并发载荷下该腿曾间歇红（260911 仲裁实证：空闲 6/6 绿/请求 105ms，争抢下 1/3 红）
+//      并发载荷下该子用例曾间歇红（260911 仲裁实证：空闲 6/6 绿/请求 105ms，争抢下 1/3 红）
 //      ——按 KI-072 处置方向②加**有界重试 ≤3 轮**（断言不变：三轮全无=真红；证据记命中轮次
 //      与焦点归属，不掩盖竞态频率）。
 //   T3 active 态：切换后图标 class 含 active（方案承诺排他视图高亮语言）。
@@ -35,7 +35,7 @@ const stub = makeTicketStub(); // 本票不消费票数据，bootConsole 形参�
 
 const pw = await loadPlaywright();
 if (!pw) {
-  record('playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器走查腿环境红');
+  record('playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器走查子用例环境红');
   summarize();
 }
 
@@ -90,7 +90,7 @@ try {
     const focused = await docIcon.evaluate((el) => el === document.activeElement);
     record('entry/focusable', focused, focused ? '图标可键盘聚焦' : '图标 focus() 后非 activeElement（不可聚焦/被吞）');
     // 有界重试（≤3 轮）=KI-072 处置方向②「这些检查需加时序容忍/重试」的落地点：
-    // 260911 仲裁实证该腿在并发载荷下间歇红（单跑 3 连 2 绿 1 红、套件内 1 红；
+    // 260911 仲裁实证该子用例在并发载荷下间歇红（单跑 3 连 2 绿 1 红、套件内 1 红；
     // 空闲诊断 6/6 绿、请求 105ms 到达、焦点始终在手——产品行为健康，红=墙钟窗口
     // 在争抢下不够）。**契约不变**：focus+Enter 必须触发 200 目录加载，三轮全无=真红；
     // 证据面记录命中轮次与每轮焦点归属，使重试不掩盖竞态频率（报错必须精确）。

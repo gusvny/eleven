@@ -97,7 +97,7 @@ def sandbox_pin_yaml() -> str:
     """容器执行面一次性钉死 patch 内容单点（D5+D8；引擎 spawn 与场景/单测同源）。
 
     口径＝宿主 260914 A 案：**容器内全权（danger-full-access），隔离由挂载面承担**
-    （容器只见本票泳道一项；挂载面守卫见 neglock 场景的「宿主边界不可达」腿）。pin
+    （容器只见本票泳道一项；挂载面守卫见 neglock 场景的「宿主边界不可达」子用例）。pin
     的其余防线全部保留：入口级 disabled: false（压 profile 层篡改）、workspaceRoot、
     bash 超时面、exec env 白名单（第二层防线，见 test_agent_runtime 红线 C）。
 

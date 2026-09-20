@@ -450,7 +450,7 @@ async def verify_inspection_findings(args: Dict[str, Any]) -> Dict[str, Any]:
     跨期去重/假报压制 → 预算截断 → 汇总/心跳。判定全部在 inspection_inspect 纯函数
     （UT 主面）；本活动只做台账 IO（读上期台账+裁定台账），失败=ok=False 点名。
 
-    上期台账/裁定台账读不出 → 对应去重腿缺席但 meta 点名（不静默当空集，R7②）。
+    上期台账/裁定台账读不出 → 对应去重分支缺席但 meta 点名（不静默当空集，R7②）。
     复核不过的发现**保留**（降级 unverified 并逐项点名，不静默丢——工单要点②）。"""
     from inspection_inspect import (  # 懒 import：同 run_inspection_scan 防环先例
         apply_budget, collect_fake_ids, dedupe_and_suppress, heartbeat_of,
@@ -686,7 +686,7 @@ def _resolve_spawn_identity(args: Dict[str, Any], plan: Dict[str, Any]) -> Dict[
     repo_root  = args 显式 → 按决议身份 resolve_project_root（注册表 dirs[0]）。
 
     为何必须在起票前点名（fail-closed）：无主守卫只拦「双空」票——260917 实况的旧
-    action payload 恰是「repo_root 单腿非空、无 project_key」，若原样透传会铸出
+    action payload 恰是「repo_root 单键非空、无 project_key」，若原样透传会铸出
     ProjectKey 空的票（SA 三件套缺一=本票要消的缺陷族新形态）。身份与 repo_root 都
     决议不出（无身份/未知 key）→ ValueError，调用方显式失败可见，绝不静默回落引擎仓。
 
@@ -711,7 +711,7 @@ async def spawn_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
     open_period_ticket 单点（并发去重全链/指针三态/SA 三件套全数继承，零重实现）。
     decl_path 恒空（cron 形态）→ plan 走聚合解析（worker 当前声明），改声明即改行为。
 
-    t260917-02 新增两腿（存量 spawner 调用零变化）：
+    t260917-02 新增两分支（存量 spawner 调用零变化）：
     - args.period 可选透传：空=按声明 tz 现铸（原行为）；非空=workflow 侧重定向守卫
       把**自己已铸的期号**传下来（防双决议在 tz 边界漂移出两个期）。
     - 身份回退链 _resolve_spawn_identity：args 缺 project_key（旧 action payload 的

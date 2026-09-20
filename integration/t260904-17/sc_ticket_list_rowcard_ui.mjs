@@ -66,7 +66,7 @@ stub.setCtrl({
 
 const pw = await loadPlaywright();
 if (!pw) {
-  record('playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器走查腿环境红');
+  record('playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器走查子用例环境红');
   summarize();
 }
 
@@ -137,7 +137,7 @@ try {
     const tblockTxt = (await vis('tblock').innerText().catch(() => '')) || '';
     record('ui/blocked-action-see-reason', tblockTxt.includes('看原因'), tblockTxt.slice(0, 80));
     record('ui/done-collapse', /收口\s*·\s*1|✓\s*收口/.test(body), body.match(/.{0,20}收口.{0,20}/)?.[0] ?? '未找到收口折叠行');
-    // F2 回归腿（走查打回 260904）：引擎 updated_ts=秒，行卡误当毫秒曾显「20680 天前」——
+    // F2 回归用例（走查打回 260904）：引擎 updated_ts=秒，行卡误当毫秒曾显「20680 天前」——
     // fixture trun=NOW-300（5 分钟前量级），必须落「分钟前」域，不得落天/小时域。
     // （自跑全程 ≤90s，5→6 分钟边界不触小时档，断言抗漂移。innerText 带重试防渲染竞态。）
     let trunTxt = '';
@@ -228,7 +228,7 @@ try {
 } finally {
   await browser.close().catch(() => {});
 }
-record('ui/no-write-api-whole-session', true, '写请求断言已按腿覆盖（整体面见 T3）');
+record('ui/no-write-api-whole-session', true, '写请求断言已按子用例覆盖（整体面见 T3）');
 
 summarize();
 

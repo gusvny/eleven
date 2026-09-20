@@ -7,7 +7,7 @@ fixture 泳道（tmp_path）= 迷你 verify.yaml + 迷你注册表 + 桩执行�
 - b 声明在场 + 不传 apply（巡检/手动形态）→ 恒全跑（验收 E 负锁）；
 - c 声明 + apply + write_set 不相交 → env 注入、回执 applied/excluded_count；
 - d write_set 命中声明 force_assets → **仍跳过**，命中面进 former_force_assets 留痕；
-- e write_set 命中泳道派生资产（import 面）→ 仍跳过 + 留痕（R5 闭包腿）；
+- e write_set 命中泳道派生资产（import 面）→ 仍跳过 + 留痕（R5 闭包分支）；
 - f write_set 目录前缀（KI-089 形态）→ 仍跳过 + 留痕；
 - g 派生入口失败/泳道缺执行器 → 红 fail-closed 点名、cmd 未跑；
 - h 声明畸形 → 整道红 fail-closed；

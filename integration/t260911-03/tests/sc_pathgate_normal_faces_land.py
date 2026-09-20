@@ -5,12 +5,12 @@
 段只改 integration/、仲裁段只改本票场景（tests/ 测试面）＝全部放行且 commit
 落地、回执零原因码；仲裁段碰产品代码（宿主 260910 实证另一半）仍拒。
 
-契约修订注记（t260916-19 B）：C4 负腿改删除型（D 态）注入——??/M 态越权改自动
+契约修订注记（t260916-19 B）：C4 反用例改删除型（D 态）注入——??/M 态越权改自动
 处置（挪档/回滚留档）后复判不再终态拒绝，删除型保持「拒绝+点名+0 commit」可测；
 ??/M 处置旅程守卫归 t260916-19 场景（t26091619-unauth-disposal-matrix）。
 
 依据：工单验收 c（反例三连全放行）＋「机械闸门检查」不得把正常流堵死的
-误伤面。与 notes-write-gate 的「写集内普通文件不误伤」腿 intent 不同面
+误伤面。与 notes-write-gate 的「写集内普通文件不误伤」子用例 intent 不同面
 （本条是 settle 时刻阶段闸的三段正例+仲裁负例，非合并闸 notes 面）。
 与 developer L1（judge 矩阵正反例）intent 分工：本条锁真实 settle 链路上
 「放行=真 commit 落地」的终态，L1 锁不住接线。
@@ -19,7 +19,7 @@
       integration/t260911-03/tests/sc_pathgate_normal_faces_land.py（cwd=仓根）
 纯本地：tmp 主仓+真注册泳道 worktree+直调 settle 单点，零 Temporal server 零端口。
 三态：PASS exit 0 / FAIL exit 1 / ENV_FAIL exit 2（三态契约，无第四态）。
-实现段落地前闸腿红属预期（TDD 验收门），arbitrate/merge 期必须绿。
+实现段落地前闸子用例红属预期（TDD 验收门），arbitrate/merge 期必须绿。
 """
 import inspect
 import shutil
@@ -67,7 +67,7 @@ def load_engine():
 BASE = {
     "verify.yaml": "schema: v1\nlanes:\n  code:\n    write_allow:\n      - server/engine/\n      - integration/\n    checks: []\n",
     "server/engine/keep.py": "# engine anchor\n",
-    # t260916-19 B 起 ??/M 态越权改自动处置不再终态拒绝——C4 负腿改删除型（D 态）注入，
+    # t260916-19 B 起 ??/M 态越权改自动处置不再终态拒绝——C4 反用例改删除型（D 态）注入，
     # 故产品代码越权件先落分叉点基线（tracked），C4 在泳道内删除。
     "server/engine/arbitral_patch.py": "z = 0\n",
     "docs/design/contract-v1.md": "# contract v1\n",
@@ -162,7 +162,7 @@ def main():
     else:
         ok(False, "C2 驱动失败：%s" % (err or "note 缺失"))
 
-    # ---- C3 仲裁段正腿：只改本票场景（测试面）→ 放行落地 ----
+    # ---- C3 仲裁段正用例：只改本票场景（测试面）→ 放行落地 ----
     section("C3 arbitrate 只改本票 tests/ 测试面 → 落地")
     before = head(lane)
     inject(lane, "integration/t260911-03/tests/sc_own_fix.py")
@@ -175,7 +175,7 @@ def main():
     else:
         ok(False, "C3 驱动失败：%s" % (err or "note 缺失"))
 
-    # ---- C4 仲裁段负腿：碰产品代码 → 拒（260910 实证另一半回归）----
+    # ---- C4 仲裁段反用例：碰产品代码 → 拒（260910 实证另一半回归）----
     section("C4 arbitrate 碰产品代码 → 拒+点名（code-fault 只许打回 implement）")
     before = head(lane)
     # 删除型注入（D 态）：拒绝终态在新旧契约下都成立（t260916-19 B 起 ??/M 态改自动处置）

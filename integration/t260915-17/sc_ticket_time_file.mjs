@@ -16,7 +16,7 @@
  *   6) 畸形输入（../、绝对路径、反斜杠、空、未知 mode）→ 人话不抛不 500 不回落；
  *   7) 二进制不透传乱码冒充内容；大文件封顶+truncated 标记不静默截断；
  *   8) 只读刚性：宿主计算核（src/host、src/shared）零写性 git 子命令字面量；
- *      端点非 GET 拒绝分支在场（405 源码锁，动态腿留浏览器台）。
+ *      端点非 GET 拒绝分支在场（405 源码锁，动态子用例留浏览器台）。
  *
  * 三依据：①工单原始验收口径四条；②KI 触及面=无未闭合项直接触及（KI-070 项目锚
  * 链按其修复方向走 query>票面>默认仓，ki057-project-anchor.mjs 管既有端点锚，
@@ -52,9 +52,9 @@ function git(repo, ...args) {
   return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' })
 }
 
-/* ---------------- G0 环境腿（缺 git = ENV_FAIL exit 2） ---------------- */
+/* ---------------- G0 环境用例（缺 git = ENV_FAIL exit 2） ---------------- */
 section('G0 环境')
-try { execFileSync('git', ['--version'], { encoding: 'utf8' }); ok(true, 'git 在场') } catch { envFail('git 不可用——本场景全部腿依赖本地 git fixture'); console.log('SUMMARY pass=' + PASS + ' fail=' + FAIL + ' env_fail=' + ENVFAIL + ' na=' + NA); process.exit(2) }
+try { execFileSync('git', ['--version'], { encoding: 'utf8' }); ok(true, 'git 在场') } catch { envFail('git 不可用——本场景全部子用例依赖本地 git fixture'); console.log('SUMMARY pass=' + PASS + ' fail=' + FAIL + ' env_fail=' + ENVFAIL + ' na=' + NA); process.exit(2) }
 
 /* ---------------- G1 结构锁：宿主只读刚性 + 端点形态（离线源码级） ---------------- */
 section('G1 结构锁（宿主计算核零写动词 / 端点注册+405 形态）')
@@ -192,7 +192,7 @@ if (reader) {
   else ok(false, '读面签名/正例协商全灭（签名漂移或 current 面断）——' + errs.join(' | '))
 }
 if (reader && shape.name) {
-  section('G2a settle 正腿（squash body 匹配 / merge subject / 残留分支）')
+  section('G2a settle 正用例（squash body 匹配 / merge subject / 残留分支）')
   let r = await drive(tk({ id: 't260915-17', status: 'closed', branch: 'lane/t260915-17' }), 'seventeen.md', 'settle')
   ok(r.ok === true && r.content === 'SEVENTEEN-SETTLED\n', 'squash 形态：settle 读数=收口提交版本（message body 定位，C2）')
   r = await drive(tk({ id: 't260915-1', status: 'closed', branch: 'lane/t260915-1' }), 'one.md', 'settle')
@@ -240,7 +240,7 @@ if (reader && shape.name) {
   r = await drive(tk({ id: 't260915-17', status: 'closed' }), 'seventeen.md', 'bogus-mode')
   ok(isHumanReason(r), '未知 mode → 人话 fail-closed（mode 词表判定）')
 
-  section('G3 真票腿（t260915-05，独立复算对照）')
+  section('G3 真票子用例（t260915-05，独立复算对照）')
   try {
     const log = git(REPO_ROOT, 'log', '--first-parent', '--format=%H%x00%B%x1e', 'main')
     const entries = log.split('\x1e').map(s => s.trim()).filter(Boolean)
@@ -253,9 +253,9 @@ if (reader && shape.name) {
       r = await drive(tk({ id: 't260915-05', status: 'closed', branch: 'lane/t260915-05' }), 'server/engine/dev_lane.py', 'settle', REPO_ROOT)
       ok(r.ok === true && r.content === expect, '真票 settle 读数与 git show 逐字相等（' + c05.slice(0, 8) + '，body 匹配定位）')
     }
-  } catch (e) { ok(false, '真票腿异常：' + String(e).slice(0, 120)) }
+  } catch (e) { ok(false, '真票子用例异常：' + String(e).slice(0, 120)) }
 } else if (reader) {
-  section('G2/G3 回放腿随形状协商失败全部未跑（FAIL 已计入，无 N/A 腿）')
+  section('G2/G3 回放子用例随形状协商失败全部未跑（FAIL 已计入，无 N/A 子用例）')
 }
 
 rmSync(fx.repo, { recursive: true, force: true })

@@ -7,7 +7,7 @@
   仍 5 段、setup 起 close 收、suite_only 恰 setup+suite）；
 - 轨道分派结构锁：run=薄分派（双版本门），新命令全部在 INSPECT_PATCH_ID 门后；
 - build_ticket_face 扩展：建议门三条件（verified && confidence≥0.6 && severity≥med）
-  逐腿 + legacy 发现（无 verified 键）原门逐字节不变 + 新字段透传 + 摘要排除
+  逐条子用例 + legacy 发现（无 verified 键）原门逐字节不变 + 新字段透传 + 摘要排除
   recurring/压制；
 - FindingVerdict 载荷校验纯函数（gate/who/verdict 词表/finding-id/载荷类型）；
 - decl 预算三键（max_findings/inspect_timeout_min/inspect_profile）：正用例解析 +

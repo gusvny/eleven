@@ -12,7 +12,7 @@
  *   S1 deriveTicketState 真值表：失败族（FAILED/CANCELED/TIMED_OUT/未知新终态）→ failed；
  *      现四态全保持（缺 exec_status 逐条旧值不变——存量行零扰动）；CONTINUED_AS_NEW
  *      沿用现四态（转场态不显失败）；畸形 exec_status（数字/对象）不 throw；
- *      断链防御腿（review 附条件①）：exec_status 缺失但 status/stage_state 词面
+ *      断链防御子用例（review 附条件①）：exec_status 缺失但 status/stage_state 词面
  *      'failed' → failed（失败行不得因键断链回退显在跑）。
  *   S2 失败文案可辨：failed 态人话短名=「已失败」，五态文案互异（与 running/done 可区分）。
  *   S3 chips 接线：countByState 认 failed 键；filterRows 按 failed 过滤。
@@ -97,7 +97,7 @@ if (model.err) {
       ok(!threw && STATES.includes(got),
          `畸形 exec_status=${JSON.stringify(bad)} 不 throw 且落五态内（got=${got}）`)
     }
-    // 断链防御腿（review 附条件①）：exec_status 缺失但行词面已是 failed → 不得回退在跑
+    // 断链防御子用例（review 附条件①）：exec_status 缺失但行词面已是 failed → 不得回退在跑
     ok(d('failed', 'failed') === 'failed',
        `断链防御：exec_status 缺失+status/stage_state='failed' → failed（got=${d('failed', 'failed')}）`)
     ok(d(undefined, 'failed', undefined) === 'failed',

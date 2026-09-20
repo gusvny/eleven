@@ -61,7 +61,7 @@ import stage_docker as sd  # noqa: E402  （共享缺省锁根定位：档位锁
 # 空载/受控 11 连绿——繁忙面上「产品坏」判定不成立。开跑前探测两信号：
 # ①新鲜外来工程状态（120s 内 mtime 的 project-*.json 且非本电池自家工程名）；
 # ②被持有的档位锁（band-N.lock 非阻塞 flock 抢不到=有活进程正持锁起台）。
-# 命中即诚实三态 exit 2 点名理由（环境面），不作产品判定；安静面照常 17 腿全判。
+# 命中即诚实三态 exit 2 点名理由（环境面），不作产品判定；安静面照常 17 子用例全判。
 _OWN_PROJECTS = ("uta", "utb", "utc", "utd", "ute", "utx")
 _BUSY_WINDOW_S = 120
 
@@ -141,7 +141,7 @@ def main():
     if cmd[:1] == ["network"]:
         # 受管网段面（t260912-02）：daemon 现存网段=空（净态宿主语义，ls -q/
         # --format 均空输出）、rm/inspect/prune 幂等成功——分配排除集为空、
-        # 撞号清网腿（compose up 撞子网后 docker network rm）可走通。
+        # 撞号清网子用例（compose up 撞子网后 docker network rm）可走通。
         return 0
     if cmd[:2] == ["image", "inspect"]:
         return 0 if pathlib.Path(STATE, "image-ok").exists() else 1
@@ -432,7 +432,7 @@ class BandAllocationTest(StageCLIBase):
 
     def test_dead_lease_recycled_holder_pid_gone(self):
         """回收判据唯一化回归锚：租约过期 AND holder 进程不存在 → 就地回收。
-        对照腿：过期但 holder pid 仍活（pid 复用族）→ 不回收（宁可占死档位，
+        对照子用例：过期但 holder pid 仍活（pid 复用族）→ 不回收（宁可占死档位，
         满员闸诚实红暴露，绝不误拆）。"""
         root = sd.lock_root()
         dead = root / "project-deadlease.json"
@@ -532,7 +532,7 @@ class MalformedInputTest(StageCLIBase):
 
 class EnsureTest(StageCLIBase):
     def test_ensure_reuses_healthy_then_replaces_dead_lease(self):
-        """租约语义幂等 ensure：健康租约复用（零重建）；holder（hold 腿）被杀 →
+        """租约语义幂等 ensure：健康租约复用（零重建）；holder（hold 子用例）被杀 →
         过期+pid 死 → 冷路径拆重起（验收②，kill 对象=hold pid）。"""
         st1 = self.up_json("ute", "--services", "dsh", "--timeout", "30",
                            SANDBAR_STAGE_LEASE_TTL_S="2", SANDBAR_STAGE_HEARTBEAT_S="0.5")
@@ -545,7 +545,7 @@ class EnsureTest(StageCLIBase):
                          "复用返回同一容器 id 集（幂等证据面）")
         self.assertEqual(len(pathlib.Path(self.state, "up-count").read_text().split()),
                          1, "复用路径绝不二次 compose up")
-        # 半残新语义：holder=hold 腿进程被杀 → 心跳停 → 过期 + pid 死 → 回收重建
+        # 半残新语义：holder=hold 子用例进程被杀 → 心跳停 → 过期 + pid 死 → 回收重建
         hold_pid = json.loads((sd.lock_root() / "project-ute.json").read_text())["holder"]["pid"]
         os.kill(hold_pid, 9)
         time.sleep(3.0)   # > TTL=2s：租约必过期且 holder 必死
@@ -575,13 +575,13 @@ class EnsureTest(StageCLIBase):
         self.cli("down", "--project", "utb2")
 
     def _hold_pid(self, project):
-        """租约里 holder（hold 腿）的 pid——冻结/杀它都走真进程，不做 monkeypatch。"""
+        """租约里 holder（hold 子用例）的 pid——冻结/杀它都走真进程，不做 monkeypatch。"""
         return json.loads((sd.lock_root() / ("project-%s.json" % project)).read_text())["holder"]["pid"]
 
     def test_ensure_expired_lease_with_live_pid_refuses(self):
         """真僵死（心跳停更 + holder 进程仍在）：宽限窗到期仍不恢复 → 不对抗、不硬拆，
         诚实红点名人工核查（判据唯一化：只有 过期 AND pid 死 才回收）。
-        t260913-02 arbitrate gen12 变更：夹具由「伪造 heartbeat_ts=0」改为**真冻结 hold 腿**
+        t260913-02 arbitrate gen12 变更：夹具由「伪造 heartbeat_ts=0」改为**真冻结 hold 子用例**
         （SIGSTOP）——伪造时间戳在「活 holder 心跳会自然刷新」的新宽限语义下不再是僵死态
         （那正是要复用的健康态，见下一条恢复用例）；断言集不变（rc=2 + 点名 pid + 零重建）。"""
         self.up_json("utpid", "--services", "dsh", "--timeout", "30",
@@ -606,9 +606,9 @@ class EnsureTest(StageCLIBase):
 
     def test_ensure_stalled_heartbeat_recovers_within_grace(self):
         """心跳停更宽限（t260913-02 arbitrate gen12，260914 23:17 闸 17 环境红的根因面）：
-        租约过期而 holder（hold 腿）仍活时，旧行为是**当场**诚实红——一次负载停顿把整族
+        租约过期而 holder（hold 子用例）仍活时，旧行为是**当场**诚实红——一次负载停顿把整族
         console 场景打成环境红（0.2~1.2s，场景一条没跑）。新语义先给宽限窗等心跳恢复：
-        恢复 → 复用（零重建、同容器集）。注入=真冻结 hold 腿 + 宽限窗内解冻（真进程，非桩）。"""
+        恢复 → 复用（零重建、同容器集）。注入=真冻结 hold 子用例 + 宽限窗内解冻（真进程，非桩）。"""
         st1 = self.up_json("utstall", "--services", "dsh", "--timeout", "30",
                            SANDBAR_STAGE_LEASE_TTL_S="2", SANDBAR_STAGE_HEARTBEAT_S="0.5")
         hold_pid = self._hold_pid("utstall")

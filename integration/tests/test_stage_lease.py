@@ -334,7 +334,7 @@ class SweepJudgeTest(LeaseTestBase):
         shutil.rmtree(d)
 
     def test_sweep_full_cycle_tears_down_and_releases(self):
-        """sweep_stages 全链（真锁根真租约，docker 腿注入为 no-op）：判拆项走
+        """sweep_stages 全链（真锁根真租约，docker 用例注入为 no-op）：判拆项走
         teardown 并逐条点名；保留/报告项租约原地不动；dry_run 不落任何动作。"""
         deleted = os.path.join(self.root, "gone-lane")
         sd.write_lease("res1", self.mk("res1", owner=deleted))   # 目录从未存在=crit_i
@@ -479,7 +479,7 @@ class CritIVResidueTest(LeaseTestBase):
 
 class InventoryOrphanTest(LeaseTestBase):
     """台面清点与孤儿清扫（t260915-18 工单②/C10）：join 纯函数 + 判拆集合 +
-    sweep 孤儿腿。容器面全注入（rows），零 docker。"""
+    sweep 孤儿子用例。容器面全注入（rows），零 docker。"""
 
     MAIN = "/tmp/fake-main"   # 假想主仓根（仅字符串运算，不触盘）
 
@@ -768,7 +768,7 @@ class NetAllocTest(LeaseTestBase):
 
 
 class HoldLegTest(LeaseTestBase):
-    """hold 腿七路终态：真进程真锁根，PATH 剥离 docker（hold 的孤儿回收腿在
+    """hold 子用例七路终态：真进程真锁根，PATH 剥离 docker（hold 的孤儿回收子用例在
     UT 环境走「docker 不可用 → 回收失败 → **保留租约**+响亮 STAGE_FAIL」分支，
     t260915-18 C4 修法后语义——账本绝不先于容器销；零 docker 纪律不变）。"""
 
@@ -827,7 +827,7 @@ class HoldLegTest(LeaseTestBase):
             hb0 = self.read_lease("h1")["heartbeat_ts"]
             time.sleep(1.2)
             hb1 = self.read_lease("h1")["heartbeat_ts"]
-            self.assertGreater(hb1, hb0, "心跳必须推进（hold 腿=心跳宿主）")
+            self.assertGreater(hb1, hb0, "心跳必须推进（hold 子用例=心跳宿主）")
             sd.release_lease("h1")   # down 的最后一步
             self.assertEqual(hold.wait(timeout=8), 0, "租约消失 → ① exit 0")
         finally:
@@ -1041,7 +1041,7 @@ class HoldLegTest(LeaseTestBase):
 
     def test_booting_orphan_reclaim(self):
         """③'起台孤儿：租约 booting + 起台者死 → 起台永不可完成 → 回收尝试。
-        无此腿则死起台者的 booting 租约被人 hold 无限心跳，等待者永远等。
+        无此子用例则死起台者的 booting 租约被人 hold 无限心跳，等待者永远等。
         UT 环境 docker 剥离 → 回收失败 → t260915-18（C4:886）契约=保留租约+
         STAGE_FAIL 响亮（不销账）。"""
         spawner = textwrap.dedent("""
@@ -1078,7 +1078,7 @@ class HoldLegTest(LeaseTestBase):
         # t260915-18（C4:886）新契约：UT 环境 docker 被剥离 → do_down 诚实失败
         # → **租约保留**+STAGE_FAIL 响亮（不销账，交 sweep crit_iii/人工）；
         # hold 走完 ③' 后 exit 0。docker 在场的真机「拆成功→释放」路径由集成
-        # 场景覆盖（sc_capture_stage_kill_reclaim 腿 B）。
+        # 场景覆盖（sc_capture_stage_kill_reclaim 子用例 B）。
         deadline = time.time() + 15
         while time.time() < deadline:
             log = ""

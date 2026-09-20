@@ -39,7 +39,7 @@ TRANSIENT_PATTERNS = [
     (re.compile(r"(?:connection|connect)\s+refused", re.IGNORECASE), "TCP 连接被拒"),
     # 实证补族（t260910-12 arbitrate gen2）：两条不带空格的拒连文案形态——
     # Rust tonic 驼峰 ConnectionRefused、temporalio python SDK 的 tcp connect
-    # error（schedule 场景三腿实测红文案；与 refused 族同根：端口就绪缝隙/
+    # error（schedule 场景三子用例实测红文案；与 refused 族同根：端口就绪缝隙/
     # 台瞬断），不入列则该消费面的瞬态重试永不命中。
     (re.compile(r"connectionrefused", re.IGNORECASE), "Rust/OS 层连接被拒（驼峰形态）"),
     (re.compile(r"tcp\s+connect\s+error", re.IGNORECASE), "temporalio SDK 连接失败"),

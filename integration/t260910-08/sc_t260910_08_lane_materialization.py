@@ -30,7 +30,7 @@ prepare+payload 持久化），t260907-06/-12 守多仓泳道本体/混合形态
 不经过 dev_lane._init 的第二跳（KI-063 同构盲区，t260910-07 真机单仓即实证）；
 本场景唯一守「TicketInput→_init→meta→WorkspacePrep→activity 全跳真码 + 磁盘终态」。
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；
-docker/隔离台库/temporalio 缺席 = ENV_FAIL exit 2 点名（真链腿无 stdlib 替代）。
+docker/隔离台库/temporalio 缺席 = ENV_FAIL exit 2 点名（真链子用例无 stdlib 替代）。
 """
 import json
 import os
@@ -47,15 +47,15 @@ INTEG = REPO / "integration"
 POC = REPO / "server" / "engine"
 
 # 红线桩：绝不触生产 7233/8233/3099——shared 在 import 期读 TARGET_HOST，先钉
-# 不可达桩再 import（stdlib 腿零连接；台面腿由隔离台 env 覆盖）。
+# 不可达桩再 import（stdlib 子用例零连接；台面子用例由隔离台 env 覆盖）。
 os.environ["SANDBAR_TARGET_HOST"] = "127.0.0.1:9"
 os.environ.pop("SANDBAR_NAMESPACE", None)
 sys.path.insert(0, str(POC))
 import shared  # noqa: E402  纯标准库依赖面（TARGET_HOST 已被上方 env 桩钉死）
 
-TICKET = "t26091008lm"          # 多仓主腿（混合形态：根树+repo_a 树）
-TICKET_SINGLE = "t26091008sg"   # 单仓对照腿
-TICKET_BAD = "t26091008bd"      # 畸形明细腿（ty=类型毁形 / sm=语义毁形）
+TICKET = "t26091008lm"          # 多仓主子用例（混合形态：根树+repo_a 树）
+TICKET_SINGLE = "t26091008sg"   # 单仓对照子用例
+TICKET_BAD = "t26091008bd"      # 畸形明细子用例（ty=类型毁形 / sm=语义毁形）
 WS = ["docs/root.md", "repo_a/src/a.py"]   # dengzhufpv 形态：根仓+子仓各一条
 PROJ_MULTI = "utmr08"
 PROJ_SINGLE = "utsg08"
@@ -171,7 +171,7 @@ def member_repos(entries):
 
 
 def repo_seq(entries):
-    """明细条目的 repo 有序列表（**含空串根树条目**）——主腿断言用全序比对，
+    """明细条目的 repo 有序列表（**含空串根树条目**）——主子用例断言用全序比对，
     不用 member_repos（它滤掉空串根树条目，混形态对照会假红）。"""
     return [str(e.get("repo") or "") for e in (entries or []) if isinstance(e, dict)]
 
@@ -303,7 +303,7 @@ def run_probe(py, probe, tid, proj, rws, ws_path):
 
 tmp = tempfile.mkdtemp(prefix="t260910-08-mat-")
 try:
-    # ---------- stdlib 腿：夹具自证（夹具漂移=假红/假绿防线，恒跑） ----------
+    # ---------- stdlib 子用例：夹具自证（夹具漂移=假红/假绿防线，恒跑） ----------
     mixed = build_mixed_project(tmp)
     single = build_single_project(tmp)
     check("S1 夹具自证：混合形态=根仓+子仓并存（dengzhufpv 形态）",
@@ -313,7 +313,7 @@ try:
     check("S2 夹具自证：单仓项目不激活多仓形态",
           not shared.is_multi_repo_layout(single), "single=%s" % single)
 
-    # 项目注册表夹具（台面腿与 ticket.py create 共用）
+    # 项目注册表夹具（台面子用例与 ticket.py create 共用）
     regroot = Path(tmp) / "reg"
     for key, name, root in ((PROJ_MULTI, "UT 多仓 08", mixed),
                             (PROJ_SINGLE, "UT 单仓 08", single)):
@@ -324,7 +324,7 @@ try:
             % (key, name, root), "utf-8")
 
     if not temporalio_available():
-        env_exit("temporalio 缺失——真链腿（ticket.py create→worker→磁盘终态）"
+        env_exit("temporalio 缺失——真链子用例（ticket.py create→worker→磁盘终态）"
                  "无 stdlib 替代；arbitrate/merge 期 venv 环境必须实跑")
 
     def stage_legs():
@@ -380,7 +380,7 @@ try:
                     time.sleep(2.0)
                 return None if not isinstance(last, str) else last
 
-            # ---------- T1/T2/T3 多仓主腿：真开票→真 worker→磁盘终态四件套 ----------
+            # ---------- T1/T2/T3 多仓主子用例：真开票→真 worker→磁盘终态四件套 ----------
             create_res, create_err = None, ""
             try:
                 create_res = tk.run({"op": "create", "project": PROJ_MULTI,
@@ -452,7 +452,7 @@ try:
                       and repo_seq(inp.get("repo_worktrees")) == repo_seq(detail),
                       "probe=%r repo_seq=%r" % (str(pj)[:400], repo_seq(inp.get("repo_worktrees"))))
 
-            # ---------- T5 单仓对照腿：同链真开票零回归 ----------
+            # ---------- T5 单仓对照子用例：同链真开票零回归 ----------
             s_res, s_err = None, ""
             try:
                 s_res = tk.run({"op": "create", "project": PROJ_SINGLE,
@@ -462,7 +462,7 @@ try:
                 s_err = "%s: %s" % (type(e).__name__, str(e)[:200])
             lane_s_rel, _ = shared.default_lane_paths(TICKET_SINGLE)
             lane_s = single / lane_s_rel
-            mf_s = shared.multi_manifest_path(lane_s)  # 单仓对照腿：真写点无清单（不该有）
+            mf_s = shared.multi_manifest_path(lane_s)  # 单仓对照子用例：真写点无清单（不该有）
             if (not isinstance(s_res, dict)) or s_err:
                 for nm in ("T5a", "T5b", "T5c"):
                     check(nm + "（依赖 create 受理）", False, "create 失败：%s" % (s_err or s_res))
@@ -489,7 +489,7 @@ try:
                       isinstance(s_meta, dict) and not s_meta.get("repo_worktrees"),
                       "mr=%r" % ((s_meta or {}).get("repo_worktrees"),))
 
-            # ---------- T6 畸形腿 a：类型毁形 → worker 解码面拒收（workflow 代码不执行） ----------
+            # ---------- T6 畸形子用例 a：类型毁形 → worker 解码面拒收（workflow 代码不执行） ----------
             probe = write_probe(tmp)
             ty_id = TICKET + "ty"
             ty_lane_rel, _ = shared.default_lane_paths(ty_id)
@@ -526,7 +526,7 @@ try:
             check("T6d 磁盘零落仓（workflow 代码不执行=不进闸不物化，绝不静默单仓）",
                   not ty_lane.exists(), "lane_exists=%s" % (ty_lane.exists(),))
 
-            # ---------- T7 畸形腿 b：语义毁形 → 闸拒收 blocked（不崩不落单仓） ----------
+            # ---------- T7 畸形子用例 b：语义毁形 → 闸拒收 blocked（不崩不落单仓） ----------
             sm_id = TICKET + "sm"
             sm_lane_rel, _ = shared.default_lane_paths(sm_id)
             lane_sm = mixed / sm_lane_rel
@@ -579,11 +579,11 @@ try:
     except SystemExit as e:
         stage_rc = e.code or 2
     except Exception as e:
-        env_fail("台面腿异常中断：%s: %s" % (type(e).__name__, str(e)[:200]))
+        env_fail("台面子用例异常中断：%s: %s" % (type(e).__name__, str(e)[:200]))
         stage_rc = 2
     if stage_rc == 2:
-        env_fail("docker/隔离台缺席：真链腿（正规入口 create→worker→磁盘终态/单仓对照/"
-                 "畸形两层）不可执行——本场景全靠真链路无 stdlib 替代腿；"
+        env_fail("docker/隔离台缺席：真链子用例（正规入口 create→worker→磁盘终态/单仓对照/"
+                 "畸形两层）不可执行——本场景全靠真链路无 stdlib 替代子用例；"
                  "arbitrate/merge 期隔离台必须全绿")
 finally:
     shutil.rmtree(tmp, ignore_errors=True)

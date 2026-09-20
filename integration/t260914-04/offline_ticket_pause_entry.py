@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""offline_ticket_pause_entry —— ticket.py pause/resume 正规入口的离线契约腿
+"""offline_ticket_pause_entry —— ticket.py pause/resume 正规入口的离线契约子用例
 （t260914-04，KI-079 收口）。
 
 定位：单组件 UT（run_scenarios 分层规则不进 SCENARIOS；非 sc_ 前缀=共享代码，
-lint L5 不拦）。闸内执行由 sc_ticket_pause_gate.py 的 L0b 腿前置调用；平时可单独
+lint L5 不拦）。闸内执行由 sc_ticket_pause_gate.py 的 L0b 子用例前置调用；平时可单独
 秒跑（零 Temporal、零 docker、纯 stdlib）：
 
     python3 integration/t260914-04/offline_ticket_pause_entry.py   # exit 0=全绿
@@ -23,7 +23,7 @@ lint L5 不拦）。闸内执行由 sc_ticket_pause_gate.py 的 L0b 腿前置调
      绝不空输出（-h/无参/非 JSON/非对象的通用形状归 t260910-06 A 段守——同入口
      同断言已登记在册，此处不重复锁，intent 不重复纪律）。
 
-「who 空白 → workflow refused」语义不在此重复设防（由既有裸入口腿 L3.1 承载，
+「who 空白 → workflow refused」语义不在此重复设防（由既有裸入口子用例 L3.1 承载，
 review_plan C5 分工）。
 """
 import importlib.util

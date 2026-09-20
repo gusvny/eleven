@@ -14,7 +14,7 @@
  *    （部分降级不静默）；
  *  D usage 对象缺全部已知键 → suspect=true（dsh 升级改字段名形态）；
  *  E 刚启动边界（有事件无 usage / 空内容）→ 既有「刚启动」人话保留、suspect 不置位
- *    （防误报方向的对抗腿）；
+ *    （防误报方向的对抗子用例）；
  *  F 发现集空而目录有他票三层/旧扁平/未知名 → reason 三类分流点名（他票与旧代=未入
  *    统计、未知名=疑似 dsh 版本不匹配）+ suspectFiles 机器可读面含未知名。
  *
@@ -74,7 +74,7 @@ async function putZ(root, parts, lines) {
 }
 const sess = (wtName, ...rest) => ['.worktrees', wtName, '.dsh', 'sessions', ...rest]
 
-// ---- 腿 A：双名回归锚（T1 现状锚）----
+// ---- 子用例 A：双名回归锚（T1 现状锚）----
 {
   const repo = join(tmp, 'repoA')
   await putZ(repo, sess('wtA', 'slugA', TICKET, 'session.jsonl.zstd'), healthy(10, 20, 5))
@@ -87,7 +87,7 @@ const sess = (wtName, ...rest) => ['.worktrees', wtName, '.dsh', 'sessions', ...
   ok(!agg.suspect, 'A3 健康态无 suspect')
 }
 
-// ---- 腿 B：坏格式（解压成功、内容不可解析）----
+// ---- 子用例 B：坏格式（解压成功、内容不可解析）----
 {
   const repo = join(tmp, 'repoB')
   const fp = await putZ(repo, sess('wtB', 'slugB', TICKET, 'session.jsonl.zstd'),
@@ -99,7 +99,7 @@ const sess = (wtName, ...rest) => ['.worktrees', wtName, '.dsh', 'sessions', ...
   ok(agg.suspect === true, 'B3 suspect=true')
 }
 
-// ---- 腿 C：混合态（好+坏）→ 部分降级不静默 ----
+// ---- 子用例 C：混合态（好+坏）→ 部分降级不静默 ----
 {
   const repo = join(tmp, 'repoC')
   const good = await putZ(repo, sess('wtC', 'slugC', TICKET, 'session.jsonl.zstd'), healthy(7, 0, 0))
@@ -117,7 +117,7 @@ const sess = (wtName, ...rest) => ['.worktrees', wtName, '.dsh', 'sessions', ...
   }
 }
 
-// ---- 腿 D：usage 对象缺全部已知键（dsh 改字段名形态）----
+// ---- 子用例 D：usage 对象缺全部已知键（dsh 改字段名形态）----
 {
   const repo = join(tmp, 'repoD')
   const fp = await putZ(repo, sess('wtD', 'slugD', TICKET, 'session.jsonl.zstd'),
@@ -127,7 +127,7 @@ const sess = (wtName, ...rest) => ['.worktrees', wtName, '.dsh', 'sessions', ...
     'D usage 三键全缺 → suspect（usage 形状不认识）')
 }
 
-// ---- 腿 E：刚启动边界 → 不冤枉格式 ----
+// ---- 子用例 E：刚启动边界 → 不冤枉格式 ----
 {
   const repo = join(tmp, 'repoE')
   const noUsage = await putZ(repo, sess('wtE', 'slugE', TICKET, 'session.jsonl.zstd'),
@@ -142,7 +142,7 @@ const sess = (wtName, ...rest) => ['.worktrees', wtName, '.dsh', 'sessions', ...
     'E2 空内容合法非格式违约')
 }
 
-// ---- 腿 F：发现集空而目录有会话样文件 → 三类分流点名 + suspectFiles ----
+// ---- 子用例 F：发现集空而目录有会话样文件 → 三类分流点名 + suspectFiles ----
 {
   const repo = join(tmp, 'repoF')
   await putZ(repo, sess('wtF', 'fslug-other', 't9999-99', 'session.jsonl.zstd'), healthy())

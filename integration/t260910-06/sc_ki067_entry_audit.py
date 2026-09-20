@@ -30,7 +30,7 @@ t260908-01 守 pause/retry_qc 的 workflow 幂等与唤醒语义，本场景只�
 
 环境口径（三态契约 t260904-12：PASS/FAIL/ENV_FAIL 三态判定，无跳过语义）：A 段（stdlib）系统 python3 直跑
 恒跑；temporalio 缺失 = B/C 段 ENV_FAIL exit 2 点名；docker/bench/隔离台库缺席
-= C 段 ENV_FAIL 点名（A/B 照跑）。全腿 N/A 不可能出现（A 段无条件跑）。
+= C 段 ENV_FAIL 点名（A/B 照跑）。全部子用例 N/A 不可能出现（A 段无条件跑）。
 红线：一切被测子进程的 Temporal 地址显式指不可达桩（127.0.0.1:9）或一次性
 隔离台 namespace，绝不触生产 7233/8233/3099；审计观察走 env SANDBAR_ADMIN_LOG
 覆盖的 tmp 文件，不污染仓内真 admin.log。
@@ -180,8 +180,8 @@ check("A4 ticket.py -h：非零退出（用法输出在，退出码非 0）",
 # ============ B 段（temporalio+不可达桩）：无差别审计 + entry_hint 面 ============
 print("---- B 段：client.py 无差别审计/entry_hint（不可达桩，拒收也记） ----")
 if not temporalio_available():
-    env_fail("temporalio 缺失——B 段（client.py 回执/审计真进程腿）与 C 段（隔离台腿）"
-             "全靠真链路，无 stdlib 替代；A 段 stdlib 腿已照跑")
+    env_fail("temporalio 缺失——B 段（client.py 回执/审计真进程子用例）与 C 段（隔离台子用例）"
+             "全靠真链路，无 stdlib 替代；A 段 stdlib 子用例已照跑")
 else:
     n0 = len(read_audit(AUDIT_LOG))
 
@@ -286,7 +286,7 @@ try:
             sys.exit(code)
 
     if not temporalio_available():
-        env_fail("temporalio 缺失——C 段真票腿无法跑（B/A 腿已照跑）")
+        env_fail("temporalio 缺失——C 段真票子用例无法跑（B/A 子用例已照跑）")
     else:
         bench = require_bench(_Fail())
         stage_mod, stage = require_stage(_Fail(), stage_project,
@@ -330,7 +330,7 @@ try:
         p = subprocess.run([py, str(POC / "client.py"), "ticket-start",
                             json.dumps({"ticket_id": TID, "template_id": "dev-lane",
                                         "project": "ki067",
-                                        "title": "KI-067 入口收口台面腿",
+                                        "title": "KI-067 入口收口台面子用例",
                                         "write_set": ["docs/"]})],
                            env=stage_env_, cwd=str(REPO),
                            capture_output=True, text=True, timeout=180)
@@ -351,7 +351,7 @@ try:
                                   cwd=str(POC), stdout=wlog, stderr=subprocess.STDOUT)
         try:
             worker.wait(timeout=3)
-            env_fail("ticket worker 提前退出（rc=%s，日志尾=%r）——C 段真票腿无法跑"
+            env_fail("ticket worker 提前退出（rc=%s，日志尾=%r）——C 段真票子用例无法跑"
                      % (worker.returncode, (Path(tmp) / "worker.log").read_text()[-300:]))
         except subprocess.TimeoutExpired:
             pass  # 3s 仍存活=worker 正常拉起

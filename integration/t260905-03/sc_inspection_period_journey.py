@@ -203,7 +203,7 @@ def main() -> int:
     # 私有队列（tests-fault 供给隔离）：trigger 子进程与 StageWorker 同队列——
     # activities 跟随 workflow 启动队列，生产 worker（对本票 workflow/activity 类
     # 未注册，抢活即打回 not-registered）永不在私有队列上，竞态消除（arbitrate 实证：
-    # 共队列时同套件两腿一成一败=非确定）。
+    # 共队列时同套件两子用例一成一败=非确定）。
     private_queue = "suyou-insp-journey-%05d" % _STAMP
     os.environ["SANDBAR_TASK_QUEUE"] = private_queue   # lib 子进程（trigger/sign）经 os.environ 继承
     workdir = tempfile.mkdtemp(prefix="sandbar-insp-journey-")
@@ -211,8 +211,8 @@ def main() -> int:
         f.write(TWO_INSTANCE_DECL)
     drift = lib.ki051_high_tree("journey-drift")
     clean = lib.clean_tree("journey-clean")
-    # t260916-22：inspect 段发现注入=桩消息文件（内容在每腿触发前重写——inspect 活动
-    # 在 spawn 时刻读取）；证据锚=夹具树内真实文件行（复核才有真过/真不过两腿）。
+    # t260916-22：inspect 段发现注入=桩消息文件（内容在每子用例触发前重写——inspect 活动
+    # 在 spawn 时刻读取）；证据锚=夹具树内真实文件行（复核才有真过/真不过两子用例）。
     stub_path = inspect_lib.write_stub_file(workdir, "stub-message.txt",
                                             inspect_lib.fenced_message([]))
     _ANCHOR_REL = "integration/sc_inspect_anchor.mjs"

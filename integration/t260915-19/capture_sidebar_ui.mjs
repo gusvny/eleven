@@ -8,8 +8,8 @@
 //   t260915-19-sidebar-leftcol.png      左栏聚焦裁剪（.wb-sb-left element shot）
 //   t260915-19-sidebar-degraded.png     降级态：端点 ok:false→左栏横幅显原文+快照行保留
 // 「改动前」对照：无先帧图（工作区不可来回切换基线）；改动前后的左栏项目组渲染
-// 零变化由场景对照腿机械钉死（dev 等你行不上漆 + 等你巡检行压在跑 dev 行之上 + 零
-// pageerror），见场景 S1 waiting-yellow-control / anti-sink-smoke / page-health 三腿
+// 零变化由场景对照子用例机械钉死（dev 等你行不上漆 + 等你巡检行压在跑 dev 行之上 + 零
+// pageerror），见场景 S1 waiting-yellow-control / anti-sink-smoke / page-health 三子用例
 // （t260916-15 起组内为合并排序口径，行序全矩阵归 t260916-15 场景）。
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'

@@ -21,7 +21,7 @@
 ## 1. 总体形态（新票，INSPECT_PATCH_ID="t260916-22-inspection-inspect-stage" 门内）
 schedule（不动）→ InspectionPeriodicWorkflow：setup（不动，套件档）→ suite（不动，套件档）→ deadman 漏跑核查（不占段位，挂 suite 块）→ **inspect【新】** spawn 只读 agent（role=inspection、kimi-coding/k3；输入=审查基座（suite 期=当期泳道 worktree；非 suite 期=repo_root）+当期 suite 回执+上期发现摘要（只给 id+subject 防照抄）+预算；输出=stdout 末块围栏 JSON 强 schema）→ **report【扩】** 机械复核链（id 铸造→证据复核→跨期去重/假报压制→预算截断→汇总/心跳→票面→落账）→ close 人门（不动）。
 老在途票（patched=False）逐字走现路径；legacy 路径外提为 inspection_flow 模块级函数（类块外，保拓扑源码锁「类块内 _enter 字面量全集==STAGES∪PRE_FLOW」纯度）。
-STAGES（编码真源）改为 setup→suite→inspect→report→close（setup/suite 仍 suite_only；仍 5 段、setup 起 close 收——锁形状自检不动）；inspect name="巡检审查"。**双真源同步责任（R1）**：template_topology._INSPECTION_NODES、workbench INSPECTION_TOPOLOGY（name 同值+short="审查"）、topology-lock.mjs 变异腿字面、inspection-face.mjs 断言四处同票改齐；闸内 dual-source-lock 场景即机械验收。
+STAGES（编码真源）改为 setup→suite→inspect→report→close（setup/suite 仍 suite_only；仍 5 段、setup 起 close 收——锁形状自检不动）；inspect name="巡检审查"。**双真源同步责任（R1）**：template_topology._INSPECTION_NODES、workbench INSPECTION_TOPOLOGY（name 同值+short="审查"）、topology-lock.mjs 变异子用例字面、inspection-face.mjs 断言四处同票改齐；闸内 dual-source-lock 场景即机械验收。
 
 ## 2. 关键设计点
 ### 2.1 role 与模型
@@ -52,25 +52,25 @@ inspection_scan*.py+selfcheck_scan.py 头注退役条（宿主令引文+票号�
 - engine 新件：inspection_inspect.py（§2.3/2.4 纯函数+PERSONA+五分面清单+verdict 纯面）；UT 四件 test_t260916_22_inspect_{core,activity,flow,verdict}.py。
 - engine 改件：agent_activities.py（run_inspection_inspect：桩 SANDBAR_INSPECT_STUB=1+SANDBAR_INSPECT_STUB_FILE / 真 spawn 双态、stdout 捕获、轮询心跳、全终态 reap、超时；_prepare_agent_spawn 加 agent_home）；activities.py（verify_inspection_findings 壳：读上期台账+verdicts→纯函数链；run_inspection_scan 退役注记；ALL_ACTIVITIES 注册）；inspection_flow.py（INSPECT_PATCH_ID 门+新段序+legacy 外提+STAGES+build_ticket_face 扩展+finding_verdict signal）；agent_runtime.py（force_host）；inspection_decl.py（max_findings/inspect_timeout_min/inspect_profile 三可选键）；inspection_trigger.py（verdict 子命令）；inspection_deadman.py（排除 -verdicts.json）；template_topology.py（scan→inspect 同步）；inspection_scan{,_doc,_ms,_stage}.py+selfcheck_scan.py（头注退役条）。
 - engine UT 改件：test_t260916_05_inspection_topology.py（新段名/段序）；test_t260910_09_inspection_flow_face.py、test_t260913_02_inspection_deadman.py（若锁面受影响则连带，申报在册防越界）。
-- workbench 三件：inspection-face.ts（INSPECTION_TOPOLOGY scan→inspect，name=巡检审查，short=审查）；topology-lock.mjs（变异腿字面改 inspect 且按 id 动态取，防再改名）；inspection-face.mjs（some(id==='inspect')+short('inspect')==='审查'）。
+- workbench 三件：inspection-face.ts（INSPECTION_TOPOLOGY scan→inspect，name=巡检审查，short=审查）；topology-lock.mjs（变异子用例字面改 inspect 且按 id 动态取，防再改名）；inspection-face.mjs（some(id==='inspect')+short('inspect')==='审查'）。
 - integration：新四件（lib_inspect.py 场景共享夹具：inspect 桩 helper+真实仓形树+围栏 JSON 伪造器；sc_inspection_inspect_contract.py 桩链横向契约+红线字节不变+畸形点名；sc_inspection_inspect_journey.py 端到端；sc_inspection_verdict_cli.py 裁定落账+跨期压制）+run_scenarios.py 登记/摘除+既有 12 件按 §8 处置表。
 - docs 两件：inspection-sample.yaml（三新键样例+scan_face 语义注记改为「分面缺省来源」）+index.json（build_index.py 重跑产物）。
 
 ## 4. 实施步骤（每步带验证；实现段每变更一 commit）
 1 契约纯函数层（inspection_inspect.py+test_core）：畸形输入全覆盖（0/2 围栏块、坏 JSON、缺/空 evidence、severity/confidence 越域、subject 空、quote>200、../ 越界、绝对路径、行号 0/负/超行数、引文不符、空白差异应过、id 跨期稳定+内容变即变、41→40 截断+truncated 记账、recurring/压制不占预算、心跳合成、建议门边界、**上期台账坏 JSON/缺 findings/非列表→prev_ledger_error 点名（R7②）**）。
-2 活动层（run_inspection_inspect+verify 壳+force_host+agent_home+test_activity）：桩合法/畸形两腿；SANDBAR_INSPECT_CMD 假脚本走真进程链；假脚本超时腿断言「agent 未完成」+reap 干净（pgrep 零残留）；路由 miss 点名进 meta（夹具表传参不依赖机器表）；agent_home 落点断言（真仓/泳道零 .dsh 残留）。
-3 workflow 接线（flow+decl+template_topology+workbench 三件+test_flow+test_t260916_05 更新）：INSPECT_TO≥deadline+margin 不等式锁；patched 两腿路径选择纯面；build_ticket_face 新字段+建议门；decl 三新键正/负腿+plan 透传（含 inspect_profile 缺省回落 scan_face）；**node server/plugins/workbench/tests/t260916-05-inspection-topology-lock.mjs 绿（双真源改齐的机械证明）+inspection-face.mjs 绿**；test_t260905_03_inspection_flow/test_t260913_02_inspection_suite 零回归。
+2 活动层（run_inspection_inspect+verify 壳+force_host+agent_home+test_activity）：桩合法/畸形两子用例；SANDBAR_INSPECT_CMD 假脚本走真进程链；假脚本超时子用例断言「agent 未完成」+reap 干净（pgrep 零残留）；路由 miss 点名进 meta（夹具表传参不依赖机器表）；agent_home 落点断言（真仓/泳道零 .dsh 残留）。
+3 workflow 接线（flow+decl+template_topology+workbench 三件+test_flow+test_t260916_05 更新）：INSPECT_TO≥deadline+margin 不等式锁；patched 两子用例路径选择纯面；build_ticket_face 新字段+建议门；decl 三新键正/反用例+plan 透传（含 inspect_profile 缺省回落 scan_face）；**node server/plugins/workbench/tests/t260916-05-inspection-topology-lock.mjs 绿（双真源改齐的机械证明）+inspection-face.mjs 绿**；test_t260905_03_inspection_flow/test_t260913_02_inspection_suite 零回归。
 4 裁定面（trigger+deadman+signal+test_verdict）：词表/别名、who 闸、apply_verdict 纯面、verdicts 文件读写畸形输入、deadman 词法排除 -verdicts.json、压制消费。
 5 退役面：头注退役条+misreport_calibration 删登记；grep 断言 workflow 新路径零 run_inspection_scan 调用点；run_scenarios lint 无孤儿。
 6 场景面（三新+§8 表更新件+registry）：三新场景绿；更新场景绿；python3 integration/run_scenarios.py 全量基点照常（288 基点净 -1+3 显式说明）；lint/hex-clean 照常。
 7 留档+运维：integration/t260916-22/design.md 落盘本方案全文+回填实测（read-only 探针结论、路由生效证据、agent-home 名单）；docs 两件落盘+build_index 重跑。
 
 ## 5. 验收口径（工单六条↔落点）
-1 端到端 → sc_inspection_inspect_journey：真实仓快照（仓形真树+真实文件锚）上桩 agent 产出发现（evidence 锚快照内真实文件行，R7①）→证据复核（含一条坏行号→unverified 点名腿，R7①）→人门 sign→落账→建议门→预算截断面全链绿。CI 桩链（确定性零配额）；真模型按观察期（§6）。
-2 证据复核 UT → test_core（坏路径/坏行号/引文不符逐项降级 unverified+reason 点名；空白容差正腿）。
-3 预算 UT → test_core 41→40 截断；test_activity 超时腿 heartbeat「agent 未完成」不假绿。
+1 端到端 → sc_inspection_inspect_journey：真实仓快照（仓形真树+真实文件锚）上桩 agent 产出发现（evidence 锚快照内真实文件行，R7①）→证据复核（含一条坏行号→unverified 点名子用例，R7①）→人门 sign→落账→建议门→预算截断面全链绿。CI 桩链（确定性零配额）；真模型按观察期（§6）。
+2 证据复核 UT → test_core（坏路径/坏行号/引文不符逐项降级 unverified+reason 点名；空白容差正用例）。
+3 预算 UT → test_core 41→40 截断；test_activity 超时子用例 heartbeat「agent 未完成」不假绿。
 4 裁定 UT → test_verdict+sc_inspection_verdict_cli（落账+假报跨期压制）。
-5 既有巡检场景 → **显式更新**：test face（workbench inspection-face.mjs）、topology 锁（workbench topology-lock.mjs+闸内 dual-source-lock 场景+引擎 test_t260916_05）、detail_lane_map_dom、topology_receipt、suite_journey、board_ui、sidebar 两件、period_journey、doc_face、trigger_kinds、project_identity、decl_relocation（真链腿桩注入）；**显式删除**：misreport_calibration；**零更新仍绿**（逐件理由见 §8）：ticketing/decl 词表/deadman/suite 机械/扫描器 CLI 契约四件。
+5 既有巡检场景 → **显式更新**：test face（workbench inspection-face.mjs）、topology 锁（workbench topology-lock.mjs+闸内 dual-source-lock 场景+引擎 test_t260916_05）、detail_lane_map_dom、topology_receipt、suite_journey、board_ui、sidebar 两件、period_journey、doc_face、trigger_kinds、project_identity、decl_relocation（真链子用例桩注入）；**显式删除**：misreport_calibration；**零更新仍绿**（逐件理由见 §8）：ticketing/decl 词表/deadman/suite 机械/扫描器 CLI 契约四件。
 6 288 场景基点 lint/hex-clean 照常 → 步骤 6。
 
 ## 6. 仓外运维步骤（不静默）
@@ -84,28 +84,28 @@ inspection_scan*.py+selfcheck_scan.py 头注退役条（宿主令引文+票号�
 【显式更新 12】
 1 integration/t260916-05/sc_inspection_topology_receipt.py——:152/:159/:163/:174/:194/:248 节点/边/ID 集/stage/timeline/边序硬编码旧段名段序→按新段序改。
 2 integration/t260916-05/sc_inspection_detail_lane_map_dom.mjs——:84/:89/:92/:93/:100/:116/:126/:132/:137/:143/:334/:342 节点/标签/边/stage/timeline/循环 id 集→新段名段序。
-3 integration/t260913-02/sc_inspection_suite_journey.py——:239-243 阶段机序断言 setup/scan/suite→新序；journey 真链腿注入 inspect 桩。
+3 integration/t260913-02/sc_inspection_suite_journey.py——:239-243 阶段机序断言 setup/scan/suite→新序；journey 真链子用例注入 inspect 桩。
 4 integration/t260915-08/sc_inspection_board_ui.mjs——:107 tle('scan','done')、:340 /scan|report|close/ 正则→段名+正则补 inspect。
 5 integration/t260915-19/sc_sidebar_inspection_ui.mjs——:107/:130 stage:'scan'、:156 tle('scan',…)→'inspect'（宿主短名表改后 scan 走未命中截断，UI 字样断言会红）。
 6 integration/t260915-19/capture_sidebar_ui.mjs——:42/:56 stage:'scan'→'inspect'。
 7 integration/t260905-03/sc_inspection_period_journey.py（+lib_inspection.py 加桩 helper）——真链 journey：inspect 桩注入+夹具发现断言+段名。
-8 integration/t260911-02/sc_inspection_doc_face.py——头注自述「报告断言一律走 trigger→flow→scan→落账真链」→真链腿改桩注入 inspect；离线 doc 扫描器 CLI 腿零改动保留。
-9 integration/t260911-02/sc_inspection_trigger_kinds.py——计数触发真链腿（票会进 inspect 段）→桩注入；触发/去重断言本体零改动。
-10 integration/t260915-20/sc_inspection_project_identity.py——J1b「发现落面（worker 扫描完成）」真链腿→桩注入；声明/SA 腿零改动。
-11 integration/t260916-02/sc_inspection_decl_relocation.py——T4 t4_scan_own_repo 真链腿（断言发现锚各自仓根）→桩注入+桩发现锚各仓真实夹具文件（R7① 同法）；lib_relocation.py 仅 scan_face 声明样例行零改动（连带申报在册）。
+8 integration/t260911-02/sc_inspection_doc_face.py——头注自述「报告断言一律走 trigger→flow→scan→落账真链」→真链子用例改桩注入 inspect；离线 doc 扫描器 CLI 子用例零改动保留。
+9 integration/t260911-02/sc_inspection_trigger_kinds.py——计数触发真链子用例（票会进 inspect 段）→桩注入；触发/去重断言本体零改动。
+10 integration/t260915-20/sc_inspection_project_identity.py——J1b「发现落面（worker 扫描完成）」真链子用例→桩注入；声明/SA 查询路径零改动。
+11 integration/t260916-02/sc_inspection_decl_relocation.py——T4 t4_scan_own_repo 真链子用例（断言发现锚各自仓根）→桩注入+桩发现锚各仓真实夹具文件（R7① 同法）；lib_relocation.py 仅 scan_face 声明样例行零改动（连带申报在册）。
 12 integration/t260916-05/sc_inspection_dual_source_lock.mjs——执行面零改动预期（锁文件改齐自动绿）；申报在册防实现段需调执行断言。
 【删除+登记摘除 1】
 13 integration/t260910-11/sc_inspection_scan_misreport_calibration.py——intent=静态扫描假报校准，随扫描退役整体消亡；该关切由验收②UT（证据复核降级）+新 contract 场景承接。run_scenarios.py 同步摘条目。
 【零更新仍绿 11（逐件理由）】
 14 t260905-03/sc_inspection_scan_contract.py——锁 inspection_scan.py CLI 契约；扫描器文件留档保留、活动 legacy replay 保留 → CLI 面零改动（R7③：理由在案非沉默）。
 15 t260905-03/lib_inspection.py——扫描器 CLI helper；留档 CLI 在 → 绿（本票仅追加 inspect 桩 helper=连带改动已列更新件 7）。
-16 t260905-03/sc_inspection_ki051_anchor_replay.py——黑盒 CLI 消费扫描器四腿 → 留档 CLI 在 → 绿。
+16 t260905-03/sc_inspection_ki051_anchor_replay.py——黑盒 CLI 消费扫描器四子用例 → 留档 CLI 在 → 绿。
 17 t260910-09/lib_inspection_ms.py+sc_inspection_ms_scan_contract.py——ms 扫描器 CLI 契约 → 留档在 → 绿。
 18 t260910-09/sc_inspection_ms_decl_gate.py——scan_face=simplify 声明词表断言；scan_face 词表保留 → 绿。
 19 t260913-02/sc_inspection_schedule_daily.py——scanner_result 是 lib 通用 CLI 解析助手（此处解析 deadman 输出）；段名无关 → 绿。
 20 t260913-02/lib_lane_journey.py+sc_inspection_lane_lifecycle.py——「扫描」字面=夹具守卫文本/头注（KI-051 形态扫描对象），非段名 → 绿。
 21 t260915-08/sc_inspection_board_rows.py——findings fixture 的 scan:"test" 是 finding 来源标记值（非段名），行渲染不消费该值语义 → 绿（实现段跑绿确认）。
-22 t260915-20/sc_inspection_project_identity.py 声明腿——scan_face 词表保留 → 声明/SA 腿绿（真链腿已列更新件 10）。
+22 t260915-20/sc_inspection_project_identity.py 声明子用例——scan_face 词表保留 → 声明/SA 查询路径绿（真链子用例已列更新件 10）。
 23 t260916-02/lib_relocation.py——scan_face 声明样例行 → 词表保留 → 绿。
 24 engine 侧 scanner UT 四件（test_t260905_03_inspection_scan/test_t260910_09_inspection_scan_ms/test_t260911_02_scan_doc/test_t260911_02_ticket_count）——锁留档文件本体 → 零改动照跑。
 
@@ -133,11 +133,11 @@ integration/t260916-22/ 三场景文件头注；登记见 integration/run_scenar
    上期台账/verdicts 文件畸形→prev_ledger_error 点名不崩。
 2. sc_inspection_inspect_journey.py（L3 真台真票 exclusive）：全链用户旅程——trigger
    起票→inspect 段（桩 agent，SANDBAR_INSPECT_STUB=1+STUB_FILE 注入）产出发现锚
-   真实仓形夹具的真实文件行→证据复核 verified/unverified 两腿落面→人门两拍
-   （未签不终态/签后收口）→落账 findings 留存→建议门只收合门发现→零发现心跳腿
+   真实仓形夹具的真实文件行→证据复核 verified/unverified 两子用例落面→人门两拍
+   （未签不终态/签后收口）→落账 findings 留存→建议门只收合门发现→零发现心跳子用例
    （空桩）→用户可见段名=inspect（timeline 无 scan，段名退役旅程面）+发现来源标记
    scan==agent→被审查树逐字节不变（红线判定化）→仓根零 .dsh 残留（agent_home 解耦）；
-   真进程链超时腿（独立 StageWorker，SANDBAR_INSPECT_CMD=挂起脚本+decl
+   真进程链超时子用例（独立 StageWorker，SANDBAR_INSPECT_CMD=挂起脚本+decl
    inspect_timeout_min=2）：票到 blocked 点名「agent 未完成」不假绿、落账在且
    heartbeat 非真、agent-home 落台账目录、进程 reap 干净（pgrep 零残留）。
 3. sc_inspection_verdict_cli.py（L3 真台真票 exclusive）：发现级裁定——verdict 子命令
@@ -150,15 +150,15 @@ integration/t260916-22/ 三场景文件头注；登记见 integration/run_scenar
 随静态扫描退役整体摘除（登记+文件；S1 校准语义不再有可执行面），检测半
 （ki051-anchor-replay / scan-contract）留守——旧票重放链仍在。真链场景更新口径：
 发现注入一律走桩缝（t260916-22/lib_inspect 单点伪造器），被更新文件=period_journey
-（桩按腿切换混桩/空桩+unverified 点名断言）、doc_face 在线腿（改守桩发现链，doc 扫描
-器语义面由离线 CLI 腿+developer UT 守）、trigger_kinds（空桩）、project_identity/
+（桩按子用例切换混桩/空桩+unverified 点名断言）、doc_face 在线子用例（改守桩发现链，doc 扫描
+器语义面由离线 CLI 子用例+developer UT 守）、trigger_kinds（空桩）、project_identity/
 decl_relocation（A/B 锚桩时序切换+复核 verified 态=引擎 base_dir 正确性的内容级证明）、
 六件段名字面件（scan→inspect 段名/「扫描」→「巡检审查」标签；finding 标记值
 scan:"test" 全保留；t260916-15 两件按 C1 零更新仍绿，且不在本票写集内不动）。
 
 桩注入契约（场景与实现的接缝，方案 §3 明文）：SANDBAR_INSPECT_STUB=1 +
 SANDBAR_INSPECT_STUB_FILE=<最终消息文本文件>——桩文件内容=agent 最终消息全文，
-末尾恰一块 ```json 围栏 {"findings":[…]}（走真解析纪律，不旁路）。真进程链腿用
+末尾恰一块 ```json 围栏 {"findings":[…]}（走真解析纪律，不旁路）。真进程链子用例用
 SANDBAR_INSPECT_CMD=<假脚本>。场景对「实现段的桩缝名」以此为准；落地名若有出入，
 在 run_integration_tests 红灯归因后由仲裁段对齐（接口缝属方案明文承诺面）。
 
@@ -171,7 +171,7 @@ SANDBAR_INSPECT_CMD=<假脚本>。场景对「实现段的桩缝名」以此为�
 - t260916-22-inspect-contract（离线）→ **PASS 51/0**（解析纪律 7 态、复核 8 态、id 铸号、
   recurring/压制/预算截断/心跳、红线+agent-home，缝名全对齐）；
 - t260916-22-inspect-journey（真台真票）→ **PASS**（混合桩五类发现/段名 inspect/零发现
-  心跳/人门两拍/落账留存/超时腿 blocked「agent 未完成」不假绿+agent-home+reap 干净/
+  心跳/人门两拍/落账留存/超时子用例 blocked「agent 未完成」不假绿+agent-home+reap 干净/
   树不变+零 .dsh）；
 - t260916-22-verdict-cli（真台真票）→ **PASS**（who 闸五拒收、在途 signal 回执带票号、
   收口直改+verdicts append 取最新、P1 假报→P2 同 id 压制不计数不破心跳、deadman 词法）；
@@ -204,7 +204,7 @@ SANDBAR_INSPECT_CMD=<假脚本>。场景对「实现段的桩缝名」以此为�
       product-operation/default）——宿主裁定 kimi-coding/k3 的人审依据=本工单，运维按方案 §6
       落表后下个 spawn 即生效。未落表期间=**可见降级不假绿**：spawn 侧双 warning 点名
       （表非 ok / 无命中）+ 活动回执 meta.model_route 记录本轮实际路由
-      （命中={provider,model}；无表/无命中/复算失败={defaulted:true, reason:人读}，UT 双腿覆盖）。
+      （命中={provider,model}；无表/无命中/复算失败={defaulted:true, reason:人读}，UT 两子用例覆盖）。
       观察期查准率核对以 meta.model_route 对账。
 - [ ] agent-home 名单与清理策略：out/inspection/agent-home/<实例>-<期>/ 体量观测，
       清理策略观察期（连续 2 期人工核对查准率）后定。（名单机制已落实：路径=活动侧派生、
@@ -224,7 +224,7 @@ SANDBAR_INSPECT_CMD=<假脚本>。场景对「实现段的桩缝名」以此为�
    守卫意图（每个 spawn 调用点都拿到本票项目凭据源）不变且覆盖面扩容。
 2. **meta.model_route 落地**（方案 §2.1 承诺补齐）：run_inspection_inspect 真链回执 meta
    记录本轮实际模型路由（只读复算生效表，零副作用；复算异常=meta 点名降级绝不弄挂
-   spawn 主链），UT 双腿（形态断言 + 复算炸降级）在 test_t260916_22_inspect_activity。
+   spawn 主链），UT 两子用例（形态断言 + 复算炸降级）在 test_t260916_22_inspect_activity。
 3. **docs/inspection-sample.yaml**：inspect 段三键样例（max_findings/inspect_timeout_min/
    inspect_profile，注释带词表与缺省）+ scan_face 语义注记改「分面缺省来源」（R6）。
 4. **docs/index.json**：重跑 build_index.py 实证**内容零漂移**（仅 generated_at 时间戳
@@ -239,6 +239,6 @@ SANDBAR_INSPECT_CMD=<假脚本>。场景对「实现段的桩缝名」以此为�
 
 另有测试面归因两件（本段实测）：
 - **i02 守卫红=本票连带**（新调用点普查过期待更新），已修（见上 1）；
-- **t260901_25_t03 reap 幂等腿**在全量套件并发负载下偶发红（单跑 3/3 绿、
+- **t260901_25_t03 reap 幂等子用例**在全量套件并发负载下偶发红（单跑 3/3 绿、
   _reap_agent_proc 本票零改动）——归因=既有时序敏感测试的负载 flake，非本票回归；
   留观，若闸内复现按超预留时重跑处置。

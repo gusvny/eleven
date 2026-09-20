@@ -19,14 +19,14 @@ T4 应兑的面（#1 文件名 / #2 schema / #3 钉模型 / #4 沙箱 / #5 resum
 
 | # | 对象 | 结论 | 证据 |
 | --- | --- | --- | --- |
-| 1 | sc_t260916_24_dsh_face_meta（engine 池，真 docker 台+真 worker 起跑链） | **PASS exit 0**，17 断言全绿 | 四腿实证：缺省腿（来源=default、cmd 与文档化缺省逐元素等值、version=宿主 `dsh --version` 实测 0.1.1-rc.2=探测非抄配置）；钉路径腿（SANDBAR_AGENT_CMD 指版本桩→来源=env、version=桩自报 9.9.9-stub、二进制解析到桩本体）；预期不符可查腿（expected_state=mismatch 在案且不拦）；探测失败腿（version_state=error 附 detail 点名、不挡启动）。红线：审计账本 0 条（被测子进程零连生产端口） |
-| 2 | sc_t260916_24_dsh_expected_loud（engine 池，真工单链） | **PASS exit 0**，8 断言全绿 | 缺省腿=mismatch 时 spawn 照走+create_plan 出结果+日志响亮行同点 actual(9.9.9-stub)/expected(0.1.1-rc.2)；STRICT 硬闸腿=桩 agent 形态调用恒 0（2→2）+硬闸红点名两版本。组合语义「带病跑但喊得出来 / 宁停不悄悄跑错」双向钉死。红线：审计账本 0 条 |
+| 1 | sc_t260916_24_dsh_face_meta（engine 池，真 docker 台+真 worker 起跑链） | **PASS exit 0**，17 断言全绿 | 四子用例实证：缺省子用例（来源=default、cmd 与文档化缺省逐元素等值、version=宿主 `dsh --version` 实测 0.1.1-rc.2=探测非抄配置）；钉路径子用例（SANDBAR_AGENT_CMD 指版本桩→来源=env、version=桩自报 9.9.9-stub、二进制解析到桩本体）；预期不符可查子用例（expected_state=mismatch 在案且不拦）；探测失败子用例（version_state=error 附 detail 点名、不挡启动）。红线：审计账本 0 条（被测子进程零连生产端口） |
+| 2 | sc_t260916_24_dsh_expected_loud（engine 池，真工单链） | **PASS exit 0**，8 断言全绿 | 缺省子用例=mismatch 时 spawn 照走+create_plan 出结果+日志响亮行同点 actual(9.9.9-stub)/expected(0.1.1-rc.2)；STRICT 硬闸子用例=桩 agent 形态调用恒 0（2→2）+硬闸红点名两版本。组合语义「带病跑但喊得出来 / 宁停不悄悄跑错」双向钉死。红线：审计账本 0 条 |
 | 3 | t260916-24-dsh-probe-selftest（ro 池） | **PASS exit 0** | 金样本 3 档全绿（v0 全键 / vN 全键+压缩 / vN 无 cacheReadTokens 恰出 WARN=可选键「缺席告警不拦停」语义自锁）；篡改 7 档逐项红且红必命中预期断言名（bad-filename→断言 a / missing-required、cacheread-nonint→断言 b / model-mispin→断言 d / bad-json-line、truncated-half-line、zstd-bad-frame→完整性，KI-059 撕裂族） |
 | 4 | L1 UT server/engine/tests/test_t260916_24_dsh_pin.py | **25 passed**（引擎 venv pytest） | 显式路径生效 / 缺省不破现状（与 agent_activities 旧常量逐元素等值）/ 期望三态 / STRICT 硬闸 / 探测失败四态全终态回收 / meta 增列读侧兼容 / 畸形 env 点名 / docker tag 提取 / face 形状+源码锚 |
 | 5 | integration/lint_tests.py | **0 error / 0 warn** | 终态复跑 |
 
 验收清单对照：①探针可重跑+正负自检 **满足**；②钉路径 UT（显式生效+缺省不破）
-**满足**；③版本自检落票面/日志可查 **满足**（真启动链 meta `dsh` 键四腿 + 真票链
+**满足**；③版本自检落票面/日志可查 **满足**（真启动链 meta `dsh` 键四子用例 + 真票链
 日志响亮行实证；票面 `dsh_pin_<tag>.json` 由 UT 源码锚防接线漂移，见遗留 3）；
 ④既有场景零回归 **不满足**（§归因定位）。探针 live 档不入默认跑分面 **满足**
 （registry 仅登记 3 条，live 探针无 sc_ 前缀不入册，diff 核实 run_scenarios.py
@@ -37,7 +37,7 @@ T4 应兑的面（#1 文件名 / #2 schema / #3 钉模型 / #4 沙箱 / #5 resum
 - 本段=acceptance_walkthrough **gen0（首进）**，无打回轮次可对照；
 - 本票测试资产（场景①②、共享夹具 lib_t26091624.py、探针、UT）与前段
   design_integration_tests gen1 交接一致：实跑断言数 17/8 与交接记录吻合，
-  场景关键结构（agent_rows 形态过滤、审计账本终局断言、STRICT 腿「不设
+  场景关键结构（agent_rows 形态过滤、审计账本终局断言、STRICT 子用例「不设
   snapshot 不可达观测」闸挂点注记）逐项在位，无 implement 收尾写入冲掉、
   无绿灯捷径式弱化；
 - 场景断言全部锚公开产物（meta JSON / 进程终态 / 桩调用账本 / 日志字面量同现），

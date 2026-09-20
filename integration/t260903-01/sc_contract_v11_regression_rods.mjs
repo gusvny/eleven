@@ -63,8 +63,8 @@ if (contract === null) {
     'B4 汇总与明细双向净判据已明文（F2 参考性语义 v1.8 退役）')
   ok(contract.split('\n').some(l => /ENV_FAIL \[场景名\] exit=2/.test(l)),
     'B5 ENV_FAIL 行字符级格式已入约（三态协议）')
-  ok(contract.split('\n').some(l => /全腿 N\/A/.test(l) && /产品红/.test(l)),
-    'B6 全腿 N/A=产品红已明文（N/A 仅系统状态条件腿）')
+  ok(contract.split('\n').some(l => /全部子用例 N\/A/.test(l) && /产品红/.test(l)),
+    'B6 全部子用例 N/A=产品红已明文（N/A 仅系统状态条件子用例）')
 }
 
 section('C. verify.yaml 头注指向契约 ②a~②e（commit④ 落点锁定）')

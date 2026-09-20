@@ -29,7 +29,7 @@
 //
 // 降级路径（工单验收③）在本场景的结构形态：inject 零声明脆弱服务 ⇒ 宿主无从等待 ⇒
 // pending 结构性不可能 ⇒「两服务都不存在」时插件照常激活、UI 不报 Failed to load
-// plugins。real-host 0.1.5 活体腿不可本地机械复现（本机无 0.1.5 宿主、无 docker 台），
+// plugins。real-host 0.1.5 活体子用例不可本地机械复现（本机无 0.1.5 宿主、无 docker 台），
 // 归宿主 stage 3199 走查（方案 S5）；本场景是它在闸内的机械等价锚。
 //
 // 边界与异常输入（自证红绿先行，先证尺子再量布）：inject 缺导出/非数组/非字符串元素/
@@ -49,7 +49,7 @@
 // 先例把它守的面升格闸内可见。
 //
 // 三态（t260904-12）：末行 SUMMARY pass/fail/env_fail/na；fail>0 或全 na=exit 1；
-// env_fail>0=exit 2。本票实现落地前 ③腿红属预期（TDD 信号），arbitrate/merge 期必须绿。
+// env_fail>0=exit 2。本票实现落地前 ③子用例红属预期（TDD 信号），arbitrate/merge 期必须绿。
 import { readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { join, resolve } from 'node:path'

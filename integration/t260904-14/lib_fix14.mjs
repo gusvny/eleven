@@ -7,10 +7,10 @@
 // 1. 桩 poc_dir：`--root <stub>` 全局旗标 → InstallPaths.poc_dir=<stub>/server/
 //    engine（runtime.py L54 缝）。桩内放真身 shared.py（复制，注册表根仍走
 //    SANDBAR_PROJECTS_DIR env）+ 假 client.py（票号级 ticket-list 通道替身，行为由
-//    FIX14_CTRL 控制文件驱动：ok/exit/badjson/sdk 四模）。在飞闸语义腿全部走此缝，
+//    FIX14_CTRL 控制文件驱动：ok/exit/badjson/sdk 四模）。在飞闸语义子用例全部走此缝，
 //    无环境依赖（C3 表）。
-// 2. 真票腿：本库提供 temporalite 自举探测（provisionRealRig），任一依赖缺席=
-//    env_fail（三态契约 §7.3：缺测试环境绝不 exit 0 假绿，exit 2；C3 表唯一豁免腿）。
+// 2. 真票子用例：本库提供 temporalite 自举探测（provisionRealRig），任一依赖缺席=
+//    env_fail（三态契约 §7.3：缺测试环境绝不 exit 0 假绿，exit 2；C3 表唯一豁免子用例）。
 import { spawnSync, spawn } from 'node:child_process';
 import {
   mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync,
@@ -31,11 +31,11 @@ export function tmpRoot(prefix) {
   return mkdtempSync(path.join(tmpdir(), prefix));
 }
 
-// 注册表根隔离（env 契约）+ legacy env 只在 legacy 腿显式注入（沿 lib_fix10 语义）
+// 注册表根隔离（env 契约）+ legacy env 只在 legacy 查询路径显式注入（沿 lib_fix10 语义）
 export function sbEnv(root, extra = {}) {
   const env = { ...process.env, SANDBAR_PROJECTS_DIR: root };
   delete env.SANDBAR_PROJECTS_YAML;
-  delete env.SANDBAR_TARGET_HOST;   // 票计数通道 env 只逐腿显式注入，防 ambient 外溢生产 7233
+  delete env.SANDBAR_TARGET_HOST;   // 票计数通道 env 只逐子用例显式注入，防 ambient 外溢生产 7233
   delete env.SANDBAR_NAMESPACE;
   return Object.assign(env, extra);
 }
@@ -43,7 +43,7 @@ export function sbEnv(root, extra = {}) {
 // CLI 真跑。args 里调用方自行放 '--root'（全局旗标必须在子命令前——argparse 语义）。
 // 解释器必须用带 temporalio 的那支（enginePy：venv 优先）——installer 内部用
 // sys.executable 起票号通道（projects.py L404/518），系统 python3 无 SDK 时
-// CLI 腿会假报 sdk-missing（260908 实锤）。
+// CLI 子用例会假报 sdk-missing（260908 实锤）。
 export function runCli(args, env) {
   const r = spawnSync(enginePy() || 'python3', [SANDBAR, ...args], {
     cwd: REPO_ROOT, env, encoding: 'utf8', timeout: 120000,
@@ -178,7 +178,7 @@ export function writeLaneDebris(projectDir, tid) {
   writeFileSync(path.join(projectDir, '.lane', tid, 'note.txt'), 'lane debris fixture\n');
 }
 
-// ---------- 桩 poc_dir（在飞闸语义腿的注入缝，C3 表：零环境依赖语义腿全走这里） ----------
+// ---------- 桩 poc_dir（在飞闸语义子用例的注入缝，C3 表：零环境依赖语义子用例全走这里） ----------
 
 const CLIENT_SHIM = `# t260904-14 场景桩：client.py ticket-list 通道替身（行为由 FIX14_CTRL 控制文件驱动）
 import json, os, sys
@@ -226,7 +226,7 @@ export function makeStubRoot() {
   };
 }
 
-// ---------- 真票腿自举（C3 唯一 env_fail 豁免腿）：依赖齐才跑，缺什么报什么 ----------
+// ---------- 真票子用例自举（C3 唯一 env_fail 豁免子用例）：依赖齐才跑，缺什么报什么 ----------
 
 function probeTcp(port, host = '127.0.0.1', timeoutMs = 800) {
   return new Promise((resolve) => {
@@ -249,7 +249,7 @@ export function freePort() {
 }
 
 /** 引擎解释器解析：优先仓内 venv（temporalio 真源），回落 PATH python3。
- *  返回可执行路径或 null（两路都缺 SDK）。真票腿与 client.py 直呼必须用同一个。 */
+ *  返回可执行路径或 null（两路都缺 SDK）。真票子用例与 client.py 直呼必须用同一个。 */
 export function enginePy() {
   const candidates = [
     path.join(POC_REAL, '.venv', 'bin', 'python'),
@@ -265,11 +265,11 @@ export function enginePy() {
 // 返回 { ok, reason?, target?, namespace?, child? }——调用方负责 finally 里 kill child。
 export async function provisionRealRig() {
   // 依赖①：解释器可 import temporalio——优先引擎 venv（仓内真源），回落 python3
-  // （260908 修：此前只探 python3，宿主系统解释器无 SDK 时真票腿恒 env_fail）。
+  // （260908 修：此前只探 python3，宿主系统解释器无 SDK 时真票子用例恒 env_fail）。
   const py = enginePy();
   if (!py) return { ok: false, reason: '无可用 temporalio SDK（引擎 venv 与 python3 均缺）' };
   // 依赖②：temporal 二进制（env 显式指路 > 仓内 bin/（引擎同款 dev server 真源）
-  // > PATH）——260908 修：此前只探 PATH，仓内自带二进制被漏探，真票腿恒 env_fail。
+  // > PATH）——260908 修：此前只探 PATH，仓内自带二进制被漏探，真票子用例恒 env_fail。
   const bin = process.env.SANDBAR_TEST_TEMPORAL_BIN
     || [path.join(POC_REAL, 'bin', 'temporal'), 'temporal']
       .find((c) => spawnSync(c, ['--version'], { encoding: 'utf8' }).status === 0);

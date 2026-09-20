@@ -24,7 +24,7 @@
 //      touches production console (3099) nor real tickets.
 //
 // Execution contract (t260904-12 三态): stdout last line
-// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 或全腿 na -> exit 1;
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 或全部子用例 na -> exit 1;
 // env_fail>0 -> exit 2. Node >= 22.18.
 
 import { ensureStageConsole } from '../lib_stage_console.mjs';

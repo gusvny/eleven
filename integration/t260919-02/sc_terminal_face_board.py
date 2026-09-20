@@ -17,15 +17,15 @@ stage_state=running，用户看到一张永远在跑、永不动弹的票）；(
      （绝不诱导刷新/绝不谎报瞬时/绝不谎报不存在），并带可渲染失败面 face：
      执行状态、失败原因串、终态时刻、票身份（巡检含实例与期号）、「无快照及为何无」
      显式说明——绝不空面、绝不编造；
-  D. 负腿：终态但原因不可得 → face 显式「原因不可得」并保留执行状态（票面验收②原文）；
+  D. 反用例：终态但原因不可得 → face 显式「原因不可得」并保留执行状态（票面验收②原文）；
      畸形 desc（无 close_time / SA 读炸）→ face 显式降级不崩、kind 仍 terminal；
   E. 资源纪律：失败行不发注定失败的 snapshot 查询（终态快照永不可查询，KI-003 族
      超时窗白烧=0）；
   F. 回归：混合板各行其形不串行（RUNNING=在跑原样 / COMPLETED 窗内=closed 原样 /
      FAILED=失败形），TERMINATED 不上板且零查询（僵尸纪律半边原样）。
 
-依据三支：①工单验收口径原文（列表失败态可辨/详情失败面含原因串/负腿原因不可得/
-回归腿 RUNNING、COMPLETED、TERMINATED 与 KI-025 家族零回归）；②KI 账本
+依据三支：①工单验收口径原文（列表失败态可辨/详情失败面含原因串/反用例原因不可得/
+回归用例 RUNNING、COMPLETED、TERMINATED 与 KI-025 家族零回归）；②KI 账本
 （notes/debts/known-issues.md）：KI-025（fixed——kind 分级与「刷新无效」文案是本票
 红线，face 加键不得破）、KI-018①（open——「占位符文案被当作数据写进 title」正是本票
 病灶实例，失败行注入用例对应之）、KI-003/008（查询降级显式性——失败票零白烧查询）；
@@ -37,7 +37,7 @@ kind=terminal 与 410 分级一字不改）。
 是被测面，桩必须忠实）；SA 桩两态通吃（真 SDK str(key)==键名原词 / 桩 tuple key 取
 第二元）。face 内容断言走宽容多落点 helper（镜 t260915-08 findings_count_of 手法：
 任一契约落点在位且语义相符即可，全不在=FAIL 并点名键集——报错精确纪律）。
-纯离线（stub temporalio+纯 stdlib 声明夹具），无 ENV_FAIL 腿——环境红捂不住本面。
+纯离线（stub temporalio+纯 stdlib 声明夹具），无 ENV_FAIL 子用例——环境红捂不住本面。
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
 
 跑法：python3 -B integration/t260919-02/sc_terminal_face_board.py
@@ -102,7 +102,7 @@ class FakeSA:
 
 
 class FakeSABroken:
-    """SA 读炸桩（D2 畸形腿）：读取即抛——face 构造必须 try/except 降级，不崩。"""
+    """SA 读炸桩（D2 畸形子用例）：读取即抛——face 构造必须 try/except 降级，不崩。"""
 
     @property
     def typed_search_attributes(self):
@@ -111,7 +111,7 @@ class FakeSABroken:
 
 class FakeDesc:
     """cmd_ticket_query 的 describe 桩。close_time 显式传 None=「终态但无闭合时刻」
-    畸形腿；缺属性形态由 Broken 变体覆盖（实现须 getattr/try 防御）。"""
+    畸形子用例；缺属性形态由 Broken 变体覆盖（实现须 getattr/try 防御）。"""
 
     def __init__(self, status_name, close_time=None, start_time=None, broken=False):
         self.status = FakeStatus(status_name)
@@ -279,7 +279,7 @@ KV_DEV = {"ProjectKey": "sandbar", "EpicCode": ""}
 
 def insp_closed_snap(tid, close_note=""):
     """窗内闭合巡检票的完整终态快照（result() 返回值=run() 返回 _snapshot() 形状）——
-    F 组 COMPLETED 回归腿用（t260915-08 C 组同款：完整形非降级非匿名）。"""
+    F 组 COMPLETED 回归用例用（t260915-08 C 组同款：完整形非降级非匿名）。"""
     return {"id": tid, "kind": "inspection", "template": "inspection-lite",
             "stage": "close", "stage_state": "awaiting-human", "status": "closed",
             "decision": "", "face": {"ticket_id": tid, "kind": "inspection",
@@ -293,7 +293,7 @@ def insp_closed_snap(tid, close_note=""):
 def failed_result_exc(cause_msg="套件 boom: step close failed", top_msg="workflow 执行失败"):
     """终态 result() 异常桩：异常链（__cause__）携带失败消息——方案考证的正源形态
     （WorkflowFailureError.__cause__ 链；桩用 RuntimeError 等价形）。cause_msg=None
-    =「原因不可得」负腿（链上无任何消息）。"""
+    =「原因不可得」反用例（链上无任何消息）。"""
     e = RuntimeError(top_msg)
     if cause_msg is not None:
         e.__cause__ = RuntimeError(cause_msg)
@@ -383,7 +383,7 @@ def main() -> int:
     if hasattr(client_mod, "QUERY_RETRY_JITTER"):
         client_mod.QUERY_RETRY_JITTER = 0.0
     try:
-        # ---- A 组：巡检形失败行（验收①巡检腿）----
+        # ---- A 组：巡检形失败行（验收①巡检子用例）----
         print("== A 组：FAILED 巡检票列表失败行（不再显在跑+身份不丢）==")
         res = run_list({"kind": "inspection"}, [ins_wf()], {TID_F: FakeHandle("FAILED")})
         rows = rows_of(res)
@@ -411,7 +411,7 @@ def main() -> int:
         else:
             check_failed_row_shape(row, "A2 CANCELED 失败行", exec_status="CANCELED")
 
-        # ---- B 组：dev-lane 形失败行（验收① dev-lane 腿）----
+        # ---- B 组：dev-lane 形失败行（验收① dev-lane 子用例）----
         print("== B 组：FAILED dev-lane 票极简失败行（不再推在跑+键集 parity）==")
         res = run_list({}, [dev_wf()], {"t-dev-failed": FakeHandle("FAILED")})
         row = row_of(res, "t-dev-failed")
@@ -482,16 +482,16 @@ def main() -> int:
                    "失败面含执行状态+原因串（FAILED / dev boom）")
                 ok("快照" in ft, "失败面含无快照说明（ft 摘=%r）" % ft[:100])
 
-        # ---- D 组：负腿——原因不可得（验收②负腿+红线「绝不编造」）----
+        # ---- D 组：反用例——原因不可得（验收②反用例+红线「绝不编造」）----
         print("== D 组：终态但原因不可得 → 显式「原因不可得」并保留执行状态 ==")
         res = run_query(TID_F, [ins_wf()], {TID_F: failed_handle("FAILED", result_raises=True,
                                                                  raise_exc=failed_result_exc(
                                                                      cause_msg=None, top_msg=""))})
         if res.get("_scenario_error"):
-            ok(False, "原因不可得腿崩溃：%r" % res.get("_scenario_error"))
+            ok(False, "原因不可得子用例崩溃：%r" % res.get("_scenario_error"))
         else:
             face = face_of(res)
-            ok(face is not None, "负腿仍带失败面（绝不空面；键集=%s）" % sorted(res))
+            ok(face is not None, "反用例仍带失败面（绝不空面；键集=%s）" % sorted(res))
             if face is not None:
                 ft = face_text(face)
                 ok("原因不可得" in ft,
@@ -533,7 +533,7 @@ def main() -> int:
            "FAILED 票 snapshot 查询数=0（终态快照永不可查询，白烧=超时窗风险；"
            "query_count=%d）" % h.query_count)
 
-        # ---- F 组：混合板各行其形 + TERMINATED 不上板（回归腿）----
+        # ---- F 组：混合板各行其形 + TERMINATED 不上板（回归用例）----
         print("== F 组：RUNNING/COMPLETED/FAILED/TERMINATED 混合板零串行 ==")
         tid_run = "inspection-integration-tests-20260921"
         tid_done = "inspection-integration-tests-20260914"

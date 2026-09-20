@@ -29,7 +29,7 @@ try {
   await writeFile(join(wtB, 'shot-c.png'), 'png-bytes-c', 'utf8')
   const call = fx.drive(fx.repoA)
 
-  // ── 腿A 证据列表项目化：fpv 视图见 fpv 根两候选；sandbar 视图同 id 为空 ──
+  // ── 子用例A 证据列表项目化：fpv 视图见 fpv 根两候选；sandbar 视图同 id 为空 ──
   {
     const rFpv = await call(TICKETS_PREFIX, `${TICKETS_PREFIX}/${TID}/evidence?project=fpv`)
     const files = rFpv.body?.result?.files ?? []
@@ -40,7 +40,7 @@ try {
     j.ok(Array.isArray(filesA) && filesA.length === 0, `sandbar 视图同 id 证据为空不串项目（实得 ${JSON.stringify(filesA)}）`)
   }
 
-  // ── 腿B 取图项目化：按 ?project= 从 fpv 根读字节 ──
+  // ── 子用例B 取图项目化：按 ?project= 从 fpv 根读字节 ──
   {
     const rImg = await call(TICKETS_PREFIX, `${TICKETS_PREFIX}/${TID}/evidence/shot-a.png?project=fpv`)
     j.ok(rImg.status === 200 && String(rImg.raw) === 'png-bytes-a', `取图 ?project=fpv → 200 字节一致（实得 ${rImg.status}）`)
@@ -48,7 +48,7 @@ try {
     j.ok(rMiss.status === 404, `sandbar 视图取图 → 404 不串项目（实得 ${rMiss.status}）`)
   }
 
-  // ── 腿C env 收窄：SANDBAR_EVIDENCE_DIR 仅无参回落生效，per-project 不被串 ──
+  // ── 子用例C env 收窄：SANDBAR_EVIDENCE_DIR 仅无参回落生效，per-project 不被串 ──
   await fx.withEnv({ SANDBAR_EVIDENCE_DIR: null }, async () => {
     const envEv = join(fx.root, 'env-evidence')
     await mkdir(join(envEv, TID), { recursive: true })

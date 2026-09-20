@@ -116,7 +116,7 @@ for (const [name, art] of [['src', src], ['lib/client.js', libJs], ['lib/client.
   ok(art.includes('原始引擎日志'), `${name}: 原始日志折叠 summary 在场`)
   ok(art.includes('下一步：'), `${name}: 下一步安排行在场`)
   ok(art.includes('sc-file'), `${name}: 文件点名 chip 类名在场`)
-  ok(art.includes("data-sev=blue") || art.includes("'blue'"), `${name}: 蓝卡腿接线在场`)
+  ok(art.includes("data-sev=blue") || art.includes("'blue'"), `${name}: 蓝卡分支接线在场`)
   ok(art.includes('sc-signwhat'), `${name}: 「签什么」区在场`)
 }
 ok(src.includes('buildStatusCard(detail)'), 'src: 视图模型经 buildStatusCard 纯函数派生（非内联翻译）')
@@ -126,7 +126,7 @@ ok(src.includes('.wb-status-card[data-sev=blue]'), 'src: 蓝卡样式在场')
 ok(src.includes('blocked_detail?: { reason_code?: string; files?: string[]; next_action?: string }'),
   'src: TicketDetail.meta.blocked_detail 类型声明在场')
 
-/* ---- C. 翻译层表驱动 + 蓝卡（t260915-05，验收口径②/③蓝腿） ---- */
+/* ---- C. 翻译层表驱动 + 蓝卡（t260915-05，验收口径②/③蓝分支） ---- */
 section('C. 翻译层表驱动 + 蓝卡「签什么」')
 {
   // 表驱动：buildStatusCard 主文案必须=词条表同源（改表即改文案，非硬编码）。

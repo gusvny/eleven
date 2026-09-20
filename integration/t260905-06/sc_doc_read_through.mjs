@@ -8,7 +8,7 @@
 //   嵌套子目录形状，且不向仓根写夹具文件（防污染真源）。API 契约面顺链守：tree 200
 //   含锚篇目、skipped 可见性字段在场（人读视图完整性可判定）、畸形 path fail-closed
 //   不外泄正文；notes 观察窗页签切换后 notes 树真出内容（scope=notes 200 含 epics/ 篇目）。
-//   窄栏腿按 review V1①基线对照口径，落地=容器级（@container 360px 压缩）：壳在窄视口
+//   窄栏子用例按 review V1①基线对照口径，落地=容器级（@container 360px 压缩）：壳在窄视口
 //   会卸载本插件槽（探针实证），容器级响应才对「中列被压缩」这一真实窄形态成立；宽栏
 //   先量全局溢出基线，窄容器走通目录→返回→再开篇后断言不新增全局溢出
 //   视图完成同链路后断言「不新增全局溢出」——不锚内部类名，存量布局欠账不误伤。
@@ -43,7 +43,7 @@ const stub = makeTicketStub();
 
 const pw = await loadPlaywright();
 if (!pw) {
-  record('playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器走查腿环境红');
+  record('playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器走查子用例环境红');
   summarize();
 }
 
@@ -51,7 +51,7 @@ let bench;
 try {
   const projectsRoot = makeRegistryRoot('t090506-read-reg-');
   // t260915-10 夹具根变更留痕：旧值=空临时目录，旧文档页语义（无 project= 缺省回落）下
-  // UI 腿靠回落见引擎库；t260915-10 起文档页初值跟随壳层项目（经 fixa 组图标进入=带
+  // UI 子用例靠回落见引擎库；t260915-10 起文档页初值跟随壳层项目（经 fixa 组图标进入=带
   // project=fixa 请求），空目录会诚实空态断红——夹具根改指引擎仓根（REPO_ROOT，真库
   // docs/notes committed 内容即本场景「真库即夹具」载体），「单仓阅读链路」intent 不变。
   writeProjectEntry(projectsRoot, 'fixa', '夹具甲', [REPO_ROOT]);
@@ -110,7 +110,7 @@ const escBody = JSON.stringify(docEscape.body ?? {});
 record('api/doc-path-traversal-failclosed', (docEscape.status !== 200 || docEscape.body?.result?.empty === true) && !escBody.includes('"type"') && !escBody.includes('"private"'),
   `穿路径 ../package.json → ${docEscape.status} result.empty=${docEscape.body?.result?.empty}（fail-closed；文件内容泄漏=${escBody.includes('"private"')}`);
 
-// ---- 浏览器腿（T2/T3/T4）----
+// ---- 浏览器子用例（T2/T3/T4）----
 const { chromium } = pw;
 let browser;
 try {
@@ -123,7 +123,7 @@ try {
 
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-  // 剪贴板权限（复制回归腿）：Chromium 剪贴板 API 需授权；拒绝=该腿 env_fail 由下方 catch 兜
+  // 剪贴板权限（复制回归用例）：Chromium 剪贴板 API 需授权；拒绝=该子用例 env_fail 由下方 catch 兜
   await browser.contexts()[0].grantPermissions(['clipboard-read', 'clipboard-write'], { origin: bench.base })
     .catch(() => {});
   await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
@@ -159,7 +159,7 @@ try {
         return getComputedStyle(code).fontFamily;
       });
       record('ui/code-mono', mono !== null && /mono/i.test(mono), `pre code font-family=${String(mono).slice(0, 80)}`);
-      // 复制按钮行为回归（验收走查打回项 A 防回退腿）：出厂按钮无委托曾是死控件——
+      // 复制按钮行为回归（验收走查打回项 A 防回退子用例）：出厂按钮无委托曾是死控件——
       // 点击后剪贴板必须含该代码块原文（data-code 解码语义）。
       try {
         await page.evaluate(() => navigator.clipboard.writeText('SENTINEL-t26090506'));
@@ -179,7 +179,7 @@ try {
             `点击后剪贴板=「${String(clip).slice(0, 40)}」期望=代码块原文（哨兵被覆写=${clip !== 'SENTINEL-t26090506'}，A 死控件复现判据=哨兵原样）`);
         }
       } catch (e) {
-        record('ui/copy-button-works', 'env_fail', `剪贴板腿环境不可用（权限拒绝等）：${String(e?.message ?? e).slice(0, 120)}`);
+        record('ui/copy-button-works', 'env_fail', `剪贴板子用例环境不可用（权限拒绝等）：${String(e?.message ?? e).slice(0, 120)}`);
       }
     } else {
       record('ui/code-mono', 'fail', '目录未见 testing-guide 条目（代码块等宽断言无载体）');

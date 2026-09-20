@@ -8,28 +8,28 @@ t260905-02-ticket-worker-watch-exit（本条不复断其任何一面）；本条
 「自退那一刻走的是优雅停」——修复前自退路径同样 will wait 0:00:00（立即取消
 在飞段），崩溃路=今晚烧段的第二现场；修复后崩路与信号路同等享受 grace。
 
-- 腿A（收养路，缺省 grace）：短命父拉起真 worker（watch 两 env 同置：监视一个
+- 子用例A（收养路，缺省 grace）：短命父拉起真 worker（watch 两 env 同置：监视一个
   不存在的 workflow id——查询失败不误退，自退只能由收养触发；票队列指空队列，
   零活动领取面）→ 中间父即退 → 收养（系统状态条件：收养目标 ppid 随环境，
   达不到 1 按环境折 N/A；ps 被拒的沙箱回落 pgrep -P 1 观测，双通道皆盲才 N/A）→
   限期自退（进程消失 + 自退语义日志在文）+ will wait 非 0；
-- 腿B（收养路，旋钮=2）：同 A 但 SANDBAR_WORKER_GRACEFUL_SHUTDOWN_SEC=2 →
-  will wait 0:00:02——旋钮贯通崩溃路（运维在崩路也有收敛时间旋钮）；N/A 条件同腿A；
-- 腿C（直接信号对照，永不 N/A）：同 watch 形态 worker（父存活，直跑子进程）→
-  SIGTERM → grace 非 0 + exit 0——保证场景不全腿 N/A（三态契约：全腿 N/A=红），
+- 子用例B（收养路，旋钮=2）：同 A 但 SANDBAR_WORKER_GRACEFUL_SHUTDOWN_SEC=2 →
+  will wait 0:00:02——旋钮贯通崩溃路（运维在崩路也有收敛时间旋钮）；N/A 条件同子用例A；
+- 子用例C（直接信号对照，永不 N/A）：同 watch 形态 worker（父存活，直跑子进程）→
+  SIGTERM → grace 非 0 + exit 0——保证场景不全部子用例 N/A（三态契约：全部子用例 N/A=红），
   并钉生产票 worker 形态（watch env 在置）下信号路同样优雅。
 
 分工（防 intent 级重复）：t260905-02-ticket-worker-watch-exit＝自退三态（收口/
 收养/查询失败不误退）+meta 自清；本条只钉收养自退与 watch 形态信号路的 grace
 语义、旋钮贯通崩溃路。N/A 仅给「收养目标 ppid」这一系统状态条件（macOS=
-launchd(1)；Linux subreaper 可≠1），腿C 恒可判，永不全腿 N/A。收养腿的被测
+launchd(1)；Linux subreaper 可≠1），子用例C 恒可判，永不全部子用例 N/A。收养子用例的被测
 进程非本场景直跑子（拿不到 returncode），终态判定=进程消失+自退日志（rc 面
-由腿C 以同形态直跑子进程承载）。developer 侧 selfcheck＝grace 对「在飞活动」
+由子用例C 以同形态直跑子进程承载）。developer 侧 selfcheck＝grace 对「在飞活动」
 的实际效果（收尾/归因），零模型 L3 起不了真 agent 段，彼面归引擎侧台。
 
 三态契约：docker 台缺席/测试镜像缺席/起台不健康=ENV_FAIL exit 2（require_stage
 直译）。实现落地前红属预期（TDD 信号：现码自退路径恒 will wait 0:00:00），
-arbitrate/merge 期必须绿。被测子进程零连生产（审计钩子护体+自证腿）；
+arbitrate/merge 期必须绿。被测子进程零连生产（审计钩子护体+自证子用例）；
 日志锚兼容正则锚语义（KI-051）。
 """
 import json
@@ -76,9 +76,9 @@ def crash_env(host, namespace, audit_env, tmp, tag, grace_knob=None):
 
 
 def adopted_leg(fail, py, tmp, host, namespace, audit_env, tag, grace_knob, raw_pids):
-    """收养腿：短命父拉起 → 收养（N/A 折算）→ 限期自退 → grace 值返回。
+    """收养子用例：短命父拉起 → 收养（N/A 折算）→ 限期自退 → grace 值返回。
 
-    返回：秒数（已判）/ "na"（系统状态条件腿）/ None（腿内已有 FAIL 记账）。"""
+    返回：秒数（已判）/ "na"（系统状态条件子用例）/ None（子用例内已有 FAIL 记账）。"""
     log = os.path.join(tmp, "log-%s.txt" % tag)
     env = crash_env(host, namespace, audit_env, tmp, tag, grace_knob)
     mid = spawn_via_shortlived_parent(py, env, log)
@@ -91,19 +91,19 @@ def adopted_leg(fail, py, tmp, host, namespace, audit_env, tag, grace_knob, raw_
             mid.stderr.close()
         except Exception:
             pass
-    if not fail.check(pid_line.isdigit(), "腿%s：worker pid 自短命父 stdout 可读（%r）"
+    if not fail.check(pid_line.isdigit(), "子用例%s：worker pid 自短命父 stdout 可读（%r）"
                       % (tag, pid_line[:40])):
         return None
     pid = int(pid_line)
     raw_pids.append(pid)  # 收归场景回收清单（自退失败时 TERM→KILL 兜底）
     if not fail.check(wait_marker(log, BOOT_RX, 60),
-                      "腿%s：worker 起跑（起跑日志在文）" % tag):
+                      "子用例%s：worker 起跑（起跑日志在文）" % tag):
         return None
     adopted, last = wait_ppid_one(pid, 30)
     if not adopted:
-        # 系统状态条件腿：收养目标 ppid 随环境（macOS=launchd(1)；Linux subreaper 可≠1）；
+        # 系统状态条件子用例：收养目标 ppid 随环境（macOS=launchd(1)；Linux subreaper 可≠1）；
         # ps 被拒的沙箱回落 pgrep -P 1 观测（lib_t26091629 双通道），双通道皆盲才 N/A。
-        print("N/A: 腿%s 收养不可达（%s）——非被测行为红" % (tag, last), flush=True)
+        print("N/A: 子用例%s 收养不可达（%s）——非被测行为红" % (tag, last), flush=True)
         return "na"
     gone = False
     deadline = time.time() + 60
@@ -112,17 +112,17 @@ def adopted_leg(fail, py, tmp, host, namespace, audit_env, tag, grace_knob, raw_
             gone = True
             break
         time.sleep(0.5)
-    if not fail.check(gone, "腿%s：收养后限期自退（进程消失）" % tag):
+    if not fail.check(gone, "子用例%s：收养后限期自退（进程消失）" % tag):
         return None
     text = stderr_text(log)
     m = GRACE_RX.search(text)
     g = grace_seconds(text)
     if not fail.check(g is not None,
-                      "腿%s：SDK 停机日志 will-wait 在文（%s）"
+                      "子用例%s：SDK 停机日志 will-wait 在文（%s）"
                       % (tag, m.group(1) if m else "缺")):
         return None
     fail.check(SELF_EXIT_RX.search(text) is not None,
-               "腿%s：自退语义日志在文（收养自退非崩溃形态）" % tag)
+               "子用例%s：自退语义日志在文（收养自退非崩溃形态）" % tag)
     return g
 
 
@@ -145,47 +145,47 @@ def main():
                    "舞台端口不在生产禁区面（%d）" % state["ports"]["temporal"])
         audit_env, audit_log = bench.audit_hook_env(os.path.join(tmp, "audit"))
 
-        # ---------- ② 腿A 收养路（缺省 grace）----------
+        # ---------- ② 子用例A 收养路（缺省 grace）----------
         ga = adopted_leg(fail, py, tmp, host, state["namespace"], audit_env,
                          "adopt-default", None, raw_pids)
         if ga == "na":
             na_legs += 1
         elif ga is not None:
             fail.check(ga > 0,
-                       "腿A：收养自退走优雅停，缺省 grace 非 0（实得 %ss）" % ga)
+                       "子用例A：收养自退走优雅停，缺省 grace 非 0（实得 %ss）" % ga)
 
-        # ---------- ③ 腿B 收养路（旋钮=2）----------
+        # ---------- ③ 子用例B 收养路（旋钮=2）----------
         gb = adopted_leg(fail, py, tmp, host, state["namespace"], audit_env,
                          "adopt-two", 2, raw_pids)
         if gb == "na":
             na_legs += 1
         elif gb is not None:
             fail.check(gb == 2,
-                       "腿B：旋钮=2 贯通崩溃路（实得 %ss）——崩路也有收敛时间旋钮" % gb)
+                       "子用例B：旋钮=2 贯通崩溃路（实得 %ss）——崩路也有收敛时间旋钮" % gb)
 
-        # ---------- ④ 腿C 直接信号对照（永不 N/A）----------
+        # ---------- ④ 子用例C 直接信号对照（永不 N/A）----------
         log_c = os.path.join(tmp, "log-direct.txt")
         env_c = crash_env(host, state["namespace"], audit_env, tmp, "direct", None)
         w_c = spawn_worker(py, log_c, env_c)
         procs.append(w_c)
-        if fail.check(wait_marker(log_c, BOOT_RX, 60), "腿C：worker 起跑（起跑日志在文）"):
+        if fail.check(wait_marker(log_c, BOOT_RX, 60), "子用例C：worker 起跑（起跑日志在文）"):
             w_c.terminate()
             ok = wait_exit(w_c, 60)
             if fail.check(ok and w_c.returncode == 0,
-                          "腿C：TERM 限期干净退（rc=%s）" % w_c.returncode):
+                          "子用例C：TERM 限期干净退（rc=%s）" % w_c.returncode):
                 text_c = stderr_text(log_c)
                 gc = grace_seconds(text_c)
                 m = GRACE_RX.search(text_c)
                 if fail.check(gc is not None,
-                              "腿C：SDK 停机日志 will-wait 在文（%s）"
+                              "子用例C：SDK 停机日志 will-wait 在文（%s）"
                               % (m.group(1) if m else "缺")):
                     fail.check(gc > 0,
-                               "腿C：watch 形态下信号路同样优雅（实得 %ss）" % gc)
+                               "子用例C：watch 形态下信号路同样优雅（实得 %ss）" % gc)
         close_logf(w_c)
 
-        # 三态契约「全腿 N/A=红」由构造保证：腿C 恒可判（直跑子进程终态断言），
-        # 收养腿 N/A 只折算不免责。此处仅记账可见，不做恒真假断言。
-        print("N/A 记账：%d 条收养腿按系统状态折算（腿C 恒判，场景不属全腿 N/A）" % na_legs,
+        # 三态契约「全部子用例 N/A=红」由构造保证：子用例C 恒可判（直跑子进程终态断言），
+        # 收养子用例 N/A 只折算不免责。此处仅记账可见，不做恒真假断言。
+        print("N/A 记账：%d 条收养子用例按系统状态折算（子用例C 恒判，场景不属全部子用例 N/A）" % na_legs,
               flush=True)
 
         # ---------- ⑤ 红线：零连生产 + 审计钩子自证 ----------

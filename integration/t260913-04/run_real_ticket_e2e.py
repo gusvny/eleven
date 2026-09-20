@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""t260913-04 实现段 Step 6 驱动：F 成本腿（恒跑）+ A 真票端到端腿（门控）。
+"""t260913-04 实现段 Step 6 驱动：F 成本子用例（恒跑）+ A 真票端到端子用例（门控）。
 
 设计段把 A/F 判据钉死、留给实现段（见 `.sandbar/stage_design_integration_tests_gen0.json`
 「A/F 判据钉死」节）。本脚本是那条判据的唯一落点，防落地时被削弱。
@@ -24,12 +24,12 @@ A（端到端，验收 A，门控 SANDBAR_E2E_REAL=1）：
   文件（验收 A 收口）/ agent 日志含 docker spawn 行（可审计）/ 收尾零残留（验收 G）。
   模型成本=一个真 agent 段。
   260915 加固（本票 t260914-05 顺手修，走查 P2）：结果文件改「连续两次解析同值」的
-  稳定读（防半写撕裂误崩）；读不出=点名 FAIL（附原始字节头）不吃掉后续腿；中途异常=
-  记账+traceback+夹具 tmp 保全不删（证据可取证），仍走 SUMMARY 出口码。S0 自检腿
+  稳定读（防半写撕裂误崩）；读不出=点名 FAIL（附原始字节头）不吃掉后续子用例；中途异常=
+  记账+traceback+夹具 tmp 保全不删（证据可取证），仍走 SUMMARY 出口码。S0 自检子用例
   （零依赖恒跑）先自证稳定读判定可靠。
 
 用法：
-  python3 integration/t260913-04/run_real_ticket_e2e.py                # F 腿（默认，零模型成本）
+  python3 integration/t260913-04/run_real_ticket_e2e.py                # F 子用例（默认，零模型成本）
   SANDBAR_E2E_REAL=1 python3 integration/t260913-04/run_real_ticket_e2e.py --leg a
 出口码三态：0=PASS / 1=FAIL（产品红） / 2=ENV_FAIL（环境红，点名）。
 """
@@ -109,10 +109,10 @@ def git(*args, cwd):
     return subprocess.run(["git"] + list(args), cwd=str(cwd), capture_output=True, text=True)
 
 
-# ---------------- F：成本腿 ----------------
+# ---------------- F：成本子用例 ----------------
 
 def f_leg():
-    print("\n== F 成本腿（验收 F）==", flush=True)
+    print("\n== F 成本子用例（验收 F）==", flush=True)
     sys.path.insert(0, str(POC))
     import agent_runtime as ar
     lane = Path(tempfile.mkdtemp(prefix="t26091304-f-leg-"))
@@ -167,7 +167,7 @@ def f_leg():
         shutil.rmtree(lane, ignore_errors=True)
 
 
-# ---------------- A：真票端到端腿 ----------------
+# ---------------- A：真票端到端子用例 ----------------
 
 # 隔离台自声明路由表（t260914-05 验收 4）：260914 生产机器表镜像快照（同构值，非同
 # 文件），让隔离场景与生产口径同源——否则隔离注册表未声明时将无表可用（迁表前则是
@@ -279,12 +279,12 @@ def _read_result_stable(path, attempts=5, delay=3.0):
 
 
 def a_leg():
-    print("\n== A 真票端到端腿（验收 A；前段桩 + 暂停门 + implement 段真 agent）==", flush=True)
+    print("\n== A 真票端到端子用例（验收 A；前段桩 + 暂停门 + implement 段真 agent）==", flush=True)
     if os.environ.get("SANDBAR_E2E_REAL") != "1":
-        env_fail("SANDBAR_E2E_REAL=1 未设——真模型腿按成本纪律门控")
+        env_fail("SANDBAR_E2E_REAL=1 未设——真模型子用例按成本纪律门控")
         return
     if not (Path.home() / ".dsh" / ".credentials.yaml").exists():
-        env_fail("凭据缺席（~/.dsh/.credentials.yaml）——真 agent 腿无法认证")
+        env_fail("凭据缺席（~/.dsh/.credentials.yaml）——真 agent 子用例无法认证")
         return
     sys.path.insert(0, str(POC))
     import agent_runtime as ar
@@ -346,11 +346,11 @@ def a_leg():
 
         def pause(who="e2e"):
             return cli("ticket", {"op": "pause", "ticket_id": TID,
-                                  "input": {"who": who, "note": "A 腿暂停门"}})
+                                  "input": {"who": who, "note": "A 子用例暂停门"}})
 
         def resume(who="e2e"):
             return cli("ticket", {"op": "resume", "ticket_id": TID,
-                                  "input": {"who": who, "note": "A 腿放行"}})
+                                  "input": {"who": who, "note": "A 子用例放行"}})
 
         def wait(pred, deadline_s, label, poll=3.0):
             end = time.monotonic() + deadline_s
@@ -399,7 +399,7 @@ def a_leg():
 
         # ---- ③ 门口发 rework（暂停中压在门口不执行；恢复后先打回目标段）----
         rw = tk.run({"op": "rework", "id": TID, "to_stage": "implement",
-                     "note": "t260913-04 A 腿：implement 段改由真 agent 在容器内跑",
+                     "note": "t260913-04 A 子用例：implement 段改由真 agent 在容器内跑",
                      "by": "e2e"})
         ok(isinstance(rw, dict), "A2b 门口注入 rework(to_stage=implement)（引擎正规通道）",
            str(rw)[:200])
@@ -492,7 +492,7 @@ def a_leg():
     except Exception as e:  # noqa: BLE001 — 崩溃路径必须留证据（260915 P2）：点名+保全 tmp，仍走 SUMMARY 响亮红
         keep_evidence = True
         traceback.print_exc()
-        ok(False, "A 腿中途异常（证据保全：tmp 保留不删，路径见下）",
+        ok(False, "A 子用例中途异常（证据保全：tmp 保留不删，路径见下）",
            "%s: %s" % (type(e).__name__, str(e)[:200]))
     finally:
         if worker is not None:
@@ -525,8 +525,8 @@ def a_leg():
 def harness_selfcheck():
     """S0 验收台自检（零依赖恒跑，260915 P2 收紧的回归网）：结果文件稳定读先自证可靠。
 
-    腿：好文件两次解析同值→认数；半写后补全→重试内恢复；恒坏→(None, 原因含原始字节头)。
-    验收台自己先站得住，A 腿判据才有资格当「唯一口径」。"""
+    子用例：好文件两次解析同值→认数；半写后补全→重试内恢复；恒坏→(None, 原因含原始字节头)。
+    验收台自己先站得住，A 子用例判据才有资格当「唯一口径」。"""
     print("\n== S0 验收台自检（结果文件稳定读，零依赖）==", flush=True)
     tmp = Path(tempfile.mkdtemp(prefix="t26091304-selfcheck-"))
     try:

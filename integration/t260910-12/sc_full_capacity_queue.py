@@ -9,13 +9,13 @@
 - 注入 SANDBAR_STAGE_MAX_STAGES=1（env 旋钮=方案注入口，只影响本场景子进程）
   做最小可观测形态；
 - 先到者 A 占满唯一额度后正常起台、全程可服务（**先到者不受扰**——原场景
-  「A 不受扰」腿保留）；
-- 后到者 B 在 A 持有期内发起 ensure **立即刹停退出**（原「排队不退出」腿按新
+  「A 不受扰」子用例保留）；
+- 后到者 B 在 A 持有期内发起 ensure **立即刹停退出**（原「排队不退出」子用例按新
   语义翻转）：rc=2、stderr 点名「起台保险丝」并附活租约清单（holder pid/票号/
   lease id）、期间零容器（不硬挤不假红）、红行**不含「满员」字样**（瞬态白名单
   按字样自动重试，失控红不得被重试放大）；
-- A down 释放额度后 C 预算内成功入位且端口可服务（**释放准入**腿保留）；
-- 终态零残留、持有腿收割。docker 缺席=ENV_FAIL exit 2。
+- A down 释放额度后 C 预算内成功入位且端口可服务（**释放准入**子用例保留）；
+- 终态零残留、持有子用例收割。docker 缺席=ENV_FAIL exit 2。
 
 intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体；原排队语义退役
 已在注册行注明）。
@@ -76,7 +76,7 @@ def main():
         except subprocess.TimeoutExpired:
             check(False, "A 起台 600s 超时（保险丝不应拦第一台——隔离根上不应发生）")
             finish()
-        env_guard(proc.stderr, "A 起台腿")
+        env_guard(proc.stderr, "A 起台子用例")
         if not check(proc.returncode == 0, "A 台起好（额度占满，rc=%s）"
                      % proc.returncode):
             finish()
@@ -103,14 +103,14 @@ def main():
         check("满员" not in err_b, "B 红行不含「满员」字样（瞬态白名单不得重试失控红）")
         check(not compose_containers(PROJ_B), "B 期间零容器（不硬挤起台）")
 
-        # A down 释放 → C 预算内入位（释放准入腿保留）
+        # A down 释放 → C 预算内入位（释放准入子用例保留）
         d_proc = cli("down", "--project", PROJ_A, timeout=300, env_extra=ENV)
-        env_guard(d_proc.stderr, "A 拆台腿")
+        env_guard(d_proc.stderr, "A 拆台子用例")
         check(d_proc.returncode == 0, "A down 释放额度（rc=%s）" % d_proc.returncode)
         t0 = time.time()
         proc_c = cli("ensure", "--project", PROJ_C, "--services", "temporal",
                      timeout=600, env_extra=ENV)
-        env_guard(proc_c.stderr, "C 入位腿")
+        env_guard(proc_c.stderr, "C 入位子用例")
         check(proc_c.returncode == 0, "C 释放后预算内入位（rc=%s，用时 %.0fs）"
               % (proc_c.returncode, time.time() - t0))
         port_c = ((last_json(proc_c) or {}).get("ports") or {}).get("temporal")

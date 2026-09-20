@@ -49,8 +49,8 @@ export function pickEpicCodes() {
 }
 
 // 平台两档令牌代表值（gen2 方案钉死；来源=宿主裁定④「模拟平台深/浅两档令牌」授权，
-// 定义侧在平台壳不在本仓——代表值与平台真值若有偏差，深档腿可能假绿/假红，交接宿主
-// 确认真值或认可代表值；变异腿值=故意低对比，用于证明对比度断言真的在咬）。
+// 定义侧在平台壳不在本仓——代表值与平台真值若有偏差，深档子用例可能假绿/假红，交接宿主
+// 确认真值或认可代表值；变异子用例值=故意低对比，用于证明对比度断言真的在咬）。
 export const TOKEN_SETS = {
   light: {
     '--dsw-alias-bg-primary': '#ffffff',
@@ -68,7 +68,7 @@ export const TOKEN_SETS = {
     '--dsw-alias-brand-primary': '#4493f8',
     '--dsw-specific-sidebar-fill': '#1a1a2e',
   },
-  // 变异腿 = 浅档 + 故意低对比的正文色（on #fff ≈ 3.4:1 < 4.5，稳定可咬）
+  // 变异子用例 = 浅档 + 故意低对比的正文色（on #fff ≈ 3.4:1 < 4.5，稳定可咬）
   mutation: {
     '--dsw-alias-bg-primary': '#ffffff',
     '--dsw-alias-label-primary': '#7a7a85',
@@ -77,17 +77,17 @@ export const TOKEN_SETS = {
     '--dsw-alias-brand-primary': '#0969da',
     '--dsw-specific-sidebar-fill': '#f9fafb',
   },
-  // 旧平台腿（t260907-03 腿①，17b673f 热修 commit message「看守场景补旧平台令牌集
+  // 旧平台子用例（t260907-03 子用例①，17b673f 热修 commit message「看守场景补旧平台令牌集
   // 随后立案」的立案兑现）：宿主平台 0.1.1-rc.2 无 bg-primary 名、只有 bg-base。
   // 模拟「名不存在」用 knockout——`initial` 对 custom property 是 guaranteed-invalid
   // 态，var() 链在该作用域走下一级 fallback；测试台平台壳自带 bg-primary（且在
-  // BODY 级祖先声明，:root 注入穿不透），故浏览器腿必须经 FAITHFUL_FN 把含
+  // BODY 级祖先声明，:root 注入穿不透），故浏览器子用例必须经 FAITHFUL_FN 把含
   // knockout 的整套令牌打到壳层声明点才造得出真缺席态。bg-base 注入可辨识代表值
   // #f5f8fa（近白平台底，字符串级可辨）：兜底链没接住（链被拆/名被删/值改错）时
   // canvas 落回 #fff 或平台 bg-primary 现值，都不是 #f5f8fa——精确等值断言可辨。
   // 选值约束（gen0 实测边界）：+ 钮文字=45% 项目色混平台前景，其 AA 线在 canvas
   // ≈#f3f6f8（更深的旧平台底会破 4.5，#eef3f8 实测 4.46）——该脆弱面如实交接宿主
-  // 确认 0.1.1-rc.2 bg-base 真值，不为本腿绿而虚报深底档可用。
+  // 确认 0.1.1-rc.2 bg-base 真值，不为本子用例绿而虚报深底档可用。
   legacy: {
     '--dsw-alias-bg-primary': 'initial',
     '--dsw-alias-bg-base': '#f5f8fa',
@@ -100,6 +100,6 @@ export const TOKEN_SETS = {
 };
 
 // !important：平台壳可能以元素内联/后置样式注入同名令牌（实测隔离台
-// --dsw-specific-sidebar-fill 即如此），注入腿必须压过平台现值才能模拟指定档位。
+// --dsw-specific-sidebar-fill 即如此），注入子用例必须压过平台现值才能模拟指定档位。
 export const cssVarsBlock = (set) =>
   `:root{${Object.entries(set).map(([k, v]) => `${k}:${v} !important`).join(';')}}`;

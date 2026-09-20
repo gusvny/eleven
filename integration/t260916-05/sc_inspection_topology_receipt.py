@@ -22,11 +22,11 @@ ticket 面——缝断了（snapshot 有、回执没有）则图永远出不来�
 本条即查询缝的独立锁定面）；③契约=方案承诺「_inspection_query_meta 透传 topology
 （dict 才带键，缺省/畸形省键）」。黑盒口径镜 t260915-08-board-rows（_connect 打桩+
 假 handle，过滤桩不适用本条——查询不走 visibility）。纯离线（stub temporalio+纯
-stdlib 夹具），无 ENV_FAIL 腿——环境红捂不住本面。
+stdlib 夹具），无 ENV_FAIL 子用例——环境红捂不住本面。
 
 分工（防 intent 级重复）：t260915-08-board-rows G 组守巡检分支 engine 标记+face
 可达+dev-lane 查询键集 parity（本条不重复）；snapshot 门两态的 workflow 侧归
-developer L1（镜 test_template_topology F 腿）；t260916-05-detail-lane-map-dom 守
+developer L1（镜 test_template_topology F 子用例）；t260916-05-detail-lane-map-dom 守
 消费端渲染；t260916-05-dual-source-lock 守双真源同步锁活性。
 实现段落地前红属预期（TDD 信号：T1 红=透传缝未接；T2/T3 应即绿），arbitrate/merge
 期必须绿。
@@ -255,7 +255,7 @@ def main():
             ok(opts == {"setup": "仅套件档", "suite": "仅套件档"},
                "T1：条件段注记恰 setup+suite=仅套件档：%r" % (opts,))
         else:
-            ok(False, "T1：topology 非 dict——形状五腿随缝接通转绿：%r" % (topo,))
+            ok(False, "T1：topology 非 dict——形状五子用例随缝接通转绿：%r" % (topo,))
         ok(isinstance(raw, dict) and isinstance(raw.get("topology"), dict),
            "T1：snapshot 通道 topology 同在（双通道互证）")
         face_ok(tk, "T1")

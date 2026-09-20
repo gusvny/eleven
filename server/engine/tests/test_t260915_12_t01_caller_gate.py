@@ -6,7 +6,7 @@
 - C2②：形状合法但注册表查无的 declared 值——判定矩阵不查注册表（declared 照判），
   registered 观测键由 client 侧负责（t02）；
 - C4：越权旗 by/reason 必填非空 + 上限（超长=畸形分支）；
-- 判定矩阵全腿：老 client 未盖章兼容、同项目、异项目无旗拒收、异项目带旗记名、
+- 判定矩阵全部子用例：老 client 未盖章兼容、同项目、异项目无旗拒收、异项目带旗记名、
   undeclared 哨兵 record/refuse 两策略、note 入账截断；
 - C-0②：UNDECLARED_POLICY 单常量值锁（"record"）；
 - 四个写信号载荷的盖章字段带默认值（重放安全形状）。
@@ -66,7 +66,7 @@ def test_key_for_dir_basic_and_longest_prefix():
 
 
 def test_key_for_dir_repo_tree_excluded_whole_subtree():
-    """C1 行为腿：仓根等值与仓内任意深度子目录一律不推导（console 插件 cwd=仓内
+    """C1 行为子用例：仓根等值与仓内任意深度子目录一律不推导（console 插件 cwd=仓内
     子目录不得被判成 declared sandbar——否则 console 跨项目写被静默硬拒）。"""
     assert shared.project_key_for_dir("/repo", PROJ, REPO_TREE) == ""
     assert shared.project_key_for_dir("/repo/", PROJ, REPO_TREE) == ""
@@ -76,14 +76,14 @@ def test_key_for_dir_repo_tree_excluded_whole_subtree():
 
 
 def test_key_for_dir_symlink_dual_form():
-    """符号链接稳健腿：注册表条目锚定原文（/var 形），cwd realpath（/private/var 形）
+    """符号链接稳健子用例：注册表条目锚定原文（/var 形），cwd realpath（/private/var 形）
     ——双侧 realpath 归一后仍要命中（bench.write_registry 刻意不 deref 的对侧）。"""
     assert shared.project_key_for_dir(
         "/private/var/folders/x/repo-sub", PROJ2, ("/Users/repo",)) == "dengzhufpv"
 
 
 def test_key_for_dir_empty_and_prefix_confusion():
-    """前缀混淆腿：/repoX 不得因 /repo 前缀误命中（必须按路径段比对）。"""
+    """前缀混淆子用例：/repoX 不得因 /repo 前缀误命中（必须按路径段比对）。"""
     assert shared.project_key_for_dir("/repository", PROJ, REPO_TREE) == ""
     assert shared.project_key_for_dir("", PROJ, REPO_TREE) == ""
 
@@ -145,7 +145,7 @@ def test_override_struct_ok_and_flat_ok():
 
 @pytest.mark.parametrize("args,frag", [
     ({"cross_project": {"reason": "r"}}, "缺 by"),
-    ({"who": "宿主", "cross_project": {"reason": "r"}}, "缺 by"),  # 结构形缺 by 不从 who 兜底（真链路相六腿）
+    ({"who": "宿主", "cross_project": {"reason": "r"}}, "缺 by"),  # 结构形缺 by 不从 who 兜底（真链路相六子用例）
     ({"cross_project": {"by": "x"}}, "缺 reason"),
     ({"cross_project_reason": "r"}, "缺 by"),
     ({"who": "w", "cross_project_reason": ""}, ""),  # 空扁平理由=无旗（非错误）

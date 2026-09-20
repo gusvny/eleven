@@ -24,15 +24,15 @@ KI-067 辅证纪律：create/show 输出只作辅证，真值锚磁盘与 git）
 - T3c 根仓 main 同样恰+1、docs/root.md 落位；
 - T3d 泳道拆除零残留：git worktree list 两仓均无 lane 路径 + .lane 目录不存在；
 - T3e ticket show 终态非 blocked（收口链未断，辅证）；
-- T4 反向腿（保险丝B 终态咬合）：同链真开票，merge 人审挂起时删泳道内
+- T4 反向子用例（保险丝B 终态咬合）：同链真开票，merge 人审挂起时删泳道内
   清单 repo_worktrees.json（落点＝引擎真写点 shared.multi_manifest_path；夹具级磁盘注入=缺明细形态，
   不改产品，注入前置带在场/已删双断言防空转）→ 签字后
   merge/merge_check 红灯拦住（点名「未逐物化/保险丝B」）、workflow blocked，
   **三仓 main 提交数全部不变**——绝不静默单仓收口。
 
 被借实现故障模式取舍清单（t260910-08 手法）：①KI-067 辅证纪律【带】；②worker
-全终态回收（TERM 20s→kill 兜底计红，holder+finally 全腿覆盖）【带】；③ENV_FAIL
-三态（temporalio/隔离台缺失=exit 2 点名，真链腿无 stdlib 替代）【带】；④CWD/env
+全终态回收（TERM 20s→kill 兜底计红，holder+finally 全部子用例覆盖）【带】；③ENV_FAIL
+三态（temporalio/隔离台缺失=exit 2 点名，真链子用例无 stdlib 替代）【带】；④CWD/env
 敏感收口（env_for 剥 SANDBAR_*、台面 env 进程内钉入 finally 恢复）【带】；
 ⑤畸形明细两层互不冒充【不带，见 intent 分界】。
 
@@ -64,14 +64,14 @@ from lib_t260911_04 import (  # noqa: E402
 )
 
 # 红线桩：绝不触生产 7233/8233/3099——shared 在 import 期读 TARGET_HOST，先钉
-# 不可达桩再 import（stdlib 腿零连接；台面腿由隔离台 env 覆盖）。
+# 不可达桩再 import（stdlib 子用例零连接；台面子用例由隔离台 env 覆盖）。
 os.environ["SANDBAR_TARGET_HOST"] = "127.0.0.1:9"
 os.environ.pop("SANDBAR_NAMESPACE", None)
 sys.path.insert(0, str(POC))
 import shared  # noqa: E402
 
-TICKET_MAIN = "t26091104fl"     # 主腿：全链到 merge 落仓
-TICKET_FUSE = "t26091104fb"     # 反向腿：清单缺失注入（保险丝B 咬合）
+TICKET_MAIN = "t26091104fl"     # 主子用例：全链到 merge 落仓
+TICKET_FUSE = "t26091104fb"     # 反向子用例：清单缺失注入（保险丝B 咬合）
 WS = ["docs/root.md", "repo_a/src/a.py"]
 PROJ = "utfl11"
 PROJ_FUSE = "utfl11b"
@@ -272,7 +272,7 @@ def git_show_main(repo, rel):
 
 
 def run_leg(py, tk, tid, mixed, holder, fuse=False, proj=PROJ):
-    """一条全链腿：开票→真 worker→物化→票内文件→驱动到门→（注入）→签字→终态。
+    """一条全链子用例：开票→真 worker→物化→票内文件→驱动到门→（注入）→签字→终态。
     返回 dict(meta/lane/基线计数)。"""
     root = mixed
     lane_rel, _ = shared.default_lane_paths(tid)
@@ -321,7 +321,7 @@ def run_leg(py, tk, tid, mixed, holder, fuse=False, proj=PROJ):
     if fuse and at_gate:
         # merge 时点夹具注入：删泳道逐仓清单（缺明细形态=单仓回落）——不改产品，
         # 保险丝B 应在 merge/merge_check 红灯拦住。清单路径=引擎真写点（t260914-01），
-        # 注入前置带非空转负锁：删前确在场、删后确不在（否则注入空转=保险丝腿失效）。
+        # 注入前置带非空转负锁：删前确在场、删后确不在（否则注入空转=保险丝子用例失效）。
         check("%s T4 注入前置：清单确在场" % tid, manifest.is_file(),
               "manifest=%s" % manifest)
         try:
@@ -427,7 +427,7 @@ def run_leg(py, tk, tid, mixed, holder, fuse=False, proj=PROJ):
 
 
 def stage_legs():
-    """台面腿：隔离台一次起台两腿复用（900s 预算），全程 holder+finally 回收。"""
+    """台面子用例：隔离台一次起台两子用例复用（900s 预算），全程 holder+finally 回收。"""
 
     class _Fail:
         def bail(self, msg, code):
@@ -445,9 +445,9 @@ def stage_legs():
     saved = {k: os.environ.get(k) for k in
              ("SANDBAR_PROJECTS_DIR", "SANDBAR_TARGET_HOST", "SANDBAR_NAMESPACE")}
 
-    # 常驻租约台（keep=True）：hold 腿不随锚/沙箱束死——受限沙箱曾实证短命 hold
-    # 心跳被回收、宿主端口被他台重绑；常驻租约=舞台在整个两腿窗口内确定存活，
-    # 用毕显式 do_down（finally）。TTL 同步给足（两腿约 8–10 分钟）。
+    # 常驻租约台（keep=True）：hold 子用例不随锚/沙箱束死——受限沙箱曾实证短命 hold
+    # 心跳被回收、宿主端口被他台重绑；常驻租约=舞台在整个两子用例窗口内确定存活，
+    # 用毕显式 do_down（finally）。TTL 同步给足（两子用例约 8–10 分钟）。
     os.environ["SANDBAR_STAGE_LEASE_TTL_S"] = "1800"
     sys.path.insert(0, str(INTEG))
     import stage_docker as _sd
@@ -480,9 +480,9 @@ def stage_legs():
             os.environ["SANDBAR_PROJECTS_DIR"] = FIXTURES["regroot"]
 
             tk = load_ticket_module()
-            # 主腿 T1–T3：全链到 merge → main 落仓 → 拆道零残留
+            # 主子用例 T1–T3：全链到 merge → main 落仓 → 拆道零残留
             run_leg(py, tk, TICKET_MAIN, mixed_main, holder, fuse=False)
-            # 反向腿 T4：merge 时点删清单注入 → 保险丝B 红灯咬合、绝不静默收口
+            # 反向子用例 T4：merge 时点删清单注入 → 保险丝B 红灯咬合、绝不静默收口
             run_leg(py, tk, TICKET_FUSE, mixed_fuse, holder, fuse=True, proj=PROJ_FUSE)
             return 0
     finally:
@@ -500,10 +500,10 @@ def stage_legs():
 
 
 try:
-    # ---------- stdlib 腿：夹具自证（恒跑，隔离台缺席也可判夹具漂移） ----------
+    # ---------- stdlib 子用例：夹具自证（恒跑，隔离台缺席也可判夹具漂移） ----------
     # 夹具只建一次（同一 tmp 二次 build=重复 commit 落空，S0/S1 共用同一份）
     mixed = build_mixed_project(tmp)
-    check("S0 夹具自证（stdlib 腿）：混合形态检出、子仓齐全",
+    check("S0 夹具自证（stdlib 子用例）：混合形态检出、子仓齐全",
           shared.is_multi_repo_layout(mixed)
           and (mixed / "repo_a" / ".git").exists()
           and (mixed / "repo_b" / ".git").exists(),
@@ -514,10 +514,10 @@ try:
     except ImportError:
         has_temporalio = False
     if not has_temporalio:
-        env_fail("temporalio 缺失——真链腿（正规入口 create→真 worker→merge→main 落仓）"
+        env_fail("temporalio 缺失——真链子用例（正规入口 create→真 worker→merge→main 落仓）"
                  "无 stdlib 替代；arbitrate/merge 期 venv 环境必须实跑")
-    # 夹具已在 S0 台前建好一份；两腿各一份独立夹具 + 各自项目键（前腿 merge 落
-    # main 后，共用仓会让后腿基线内容恰好相同 → settle「已干净」0-commit 假象）
+    # 夹具已在 S0 台前建好一份；两子用例各一份独立夹具 + 各自项目键（前子用例 merge 落
+    # main 后，共用仓会让后子用例基线内容恰好相同 → settle「已干净」0-commit 假象）
     mixed_fuse = build_mixed_project(tmp, name="mixed-fuse")
     regroot = Path(tmp) / "reg"
     for key, mroot in ((PROJ, mixed), (PROJ_FUSE, mixed_fuse)):
@@ -532,7 +532,7 @@ try:
     if has_temporalio:
         stage_rc = stage_legs()
     if stage_rc == 2:
-        env_fail("docker/隔离台缺席：全链腿不可执行——本场景全靠真链路无 stdlib 替代腿；"
+        env_fail("docker/隔离台缺席：全链子用例不可执行——本场景全靠真链路无 stdlib 替代子用例；"
                  "arbitrate/merge 期隔离台必须全绿")
 finally:
     if not os.environ.get("SANDBAR_UT_DEBUG"):

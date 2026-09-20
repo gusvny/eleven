@@ -26,7 +26,7 @@ working tree）且**不删目录**，注入非破坏性、可回收（finally �
 
 断言全部落磁盘/git 终态与公开读面（KI-067 辅证纪律）；worker holder+finally 全终态回收
 （TERM 20s→kill 兜底计红）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；
-docker/隔离台/temporalio 缺席 = ENV_FAIL exit 2 点名（真链无 stdlib 替代腿）。
+docker/隔离台/temporalio 缺席 = ENV_FAIL exit 2 点名（真链无 stdlib 替代子用例）。
 """
 import json
 import os
@@ -51,7 +51,7 @@ from lib_t260913_05 import (  # noqa: E402
 sys.path.insert(0, str(POC))
 import shared  # noqa: E402
 
-TICKET = "t26091305rv"          # 本场景唯一票（拆道失败注入腿）
+TICKET = "t26091305rv"          # 本场景唯一票（拆道失败注入子用例）
 PROJ = "utrv13"                 # 夹具项目键（隔离台内，project.yaml 注册）
 # 自测避撞旋钮（缺省=规范 id，闸内不受影响）：并发两次同 id 会撞 workflow id/队列名
 # （实测：两个 agent 同时跑本文件 → 同队列任务互吃、落盘看到的是别人的夹具）。手工
@@ -247,7 +247,7 @@ def teardown_warn_row(meta):
 
 
 def run_leg(py, tk):
-    """唯一腿：开票→真 worker→物化→驱动到 merge 门→注入成员仓 lock→签字→收口终态。"""
+    """唯一子用例：开票→真 worker→物化→驱动到 merge 门→注入成员仓 lock→签字→收口终态。"""
     root = Path(FIX["mixed"])
     lane_rel, _ = shared.default_lane_paths(TICKET)
     lane = root / lane_rel
@@ -339,7 +339,7 @@ def run_leg(py, tk):
 
 
 def stage_legs():
-    """台面腿：隔离台一次起台（两腿复用同款预算；本场景单腿，台面生命周期覆盖全程）。"""
+    """台面子用例：隔离台一次起台（两子用例复用同款预算；本场景单子用例，台面生命周期覆盖全程）。"""
 
     class _Fail:
         def bail(self, msg, code):
@@ -391,9 +391,9 @@ def stage_legs():
 
 
 try:
-    # ---------- stdlib 腿：夹具自证（恒跑，隔离台缺席也可判夹具漂移） ----------
+    # ---------- stdlib 子用例：夹具自证（恒跑，隔离台缺席也可判夹具漂移） ----------
     proj_root = build_project(tmp, "mixed")["root"]
-    check("S0 夹具自证（stdlib 腿）：混合形态检出、子仓齐全",
+    check("S0 夹具自证（stdlib 子用例）：混合形态检出、子仓齐全",
           shared.is_multi_repo_layout(proj_root)
           and (proj_root / "repo_a" / ".git").exists()
           and (proj_root / "repo_b" / ".git").exists(),
@@ -404,7 +404,7 @@ try:
     except ImportError:
         has_temporalio = False
     if not has_temporalio:
-        env_fail("temporalio 缺失——真链腿（create→真 worker→merge→拆道→残留可见性）"
+        env_fail("temporalio 缺失——真链子用例（create→真 worker→merge→拆道→残留可见性）"
                  "无 stdlib 替代；arbitrate/merge 期 venv 环境必须实跑")
     regroot = Path(tmp) / "reg"
     regdir = regroot / PROJ

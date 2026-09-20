@@ -29,7 +29,7 @@
  *
  * 口径钉死（review C1/C4/C5/N1）：
  *   - C1：settle 梯子把「在飞判定」前置——status∈{dispatched,rework} 一律人话
- *     拒绝（在飞票的泳道分支必然在场，分支存在性不可反证已收口）；分支 tip 腿
+ *     拒绝（在飞票的泳道分支必然在场，分支存在性不可反证已收口）；分支 tip 检查
  *     仅对 settled/verified/closed 生效（真实对应面=teardown `branch -D` 失败
  *     残留分支的已收口票）。
  *   - C4：base 口径不做 path→repo 归属（背景引用开票闸只对根仓校验）——一律按
@@ -178,7 +178,7 @@ export interface TicketTimeMetaInput {
   status: unknown
   /** 票面 lane（worktree|main|dir…；主树道专门文案，N1）。 */
   lane?: unknown
-  /** 票面泳道分支（单仓定位腿；多仓走 repoWorktrees 条目）。 */
+  /** 票面泳道分支（单仓定位分支；多仓走 repoWorktrees 条目）。 */
   branch?: unknown
   /** 票面开票基点（base 口径唯一 ref 源，C4①）。 */
   baseRef?: unknown

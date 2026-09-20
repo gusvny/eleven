@@ -31,7 +31,7 @@ R4/R8/R9 行面承诺（.sandbar/plan-t260915-08.md）。
 「过滤扩展收 InspectionPeriodicWorkflow」本身就是被测行为，桩必须忠实模拟 visibility
 侧过滤，否则测的是桩不是引擎。SA 经 typed_search_attributes 假对象直取；重试延迟归零
 配置面带过来（t02 先例）。纯离线（stub temporalio+纯 stdlib 声明夹具），无 ENV_FAIL
-腿——环境红捂不住本面。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
+子用例——环境红捂不住本面。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
 
 跑法：python3 -B integration/t260915-08/sc_inspection_board_rows.py
 """
@@ -436,7 +436,7 @@ def main() -> int:
                        {fail_id: FakeHandle(result_raises=True)})
         row = row_of(res, fail_id)
         if res.get("_scenario_error"):
-            ok(False, "result() 失败腿调用崩溃：%r" % res.get("_scenario_error"))
+            ok(False, "result() 失败子用例调用崩溃：%r" % res.get("_scenario_error"))
         elif row is None:
             ok(False, "窗内 result() 失败=行整行消失（丢票比降级更糟）")
         else:
@@ -508,7 +508,7 @@ def main() -> int:
         res = run_query(tid, [ins_wf(tid)], {tid: FakeHandle(snapshot=insp_snap(tid=tid))})
         q = res.get("result") if isinstance(res.get("result"), dict) else {}
         if res.get("_scenario_error") or not q:
-            ok(False, "ticket-query 巡检腿崩溃/空回执：%r" % (res.get("_scenario_error"),))
+            ok(False, "ticket-query 巡检子用例崩溃/空回执：%r" % (res.get("_scenario_error"),))
         else:
             ok(q.get("engine") == client_mod.ENGINE_V2,
                "查询回执 engine 标记在位（空值=被 _v2_query 谎报「工单不存在」，KI-025 族）got=%r"

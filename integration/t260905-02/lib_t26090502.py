@@ -141,7 +141,7 @@ def wait_ppid(pid, want, timeout_s, interval=0.5):
     """等进程 ppid 变为 want（孤儿收养观测）。返回 (达到与否, 最后观测值)。
 
     孤儿被谁收养是系统状态条件（macOS=launchd(1)；Linux 容器内 subreaper 可使
-    ppid≠1）——达不到时调用方按 N/A 条件腿处置，不算被测行为红。"""
+    ppid≠1）——达不到时调用方按 N/A 条件子用例处置，不算被测行为红。"""
     deadline = time.time() + timeout_s
     last = None
     while time.time() < deadline:

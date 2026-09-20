@@ -18,8 +18,8 @@ intent（登记于 run_scenarios.py，名 t260917-02-board-unresolved-running）
     ①放宽）。
 
 分工（防 intent 级重复，与 t260916-02-board-legacy-three-state 对账）：
-  · 彼守「可辨但不在册 → 不上板」与旧形三代票的降级读面（legacy 腿）；本条守
-    「不可辨但在跑 → 降级可见」的翻转半边 + 同期同注 + 两枚负腿钉死新边界（不同分支
+  · 彼守「可辨但不在册 → 不上板」与旧形三代票的降级读面（legacy 查询路径）；本条守
+    「不可辨但在跑 → 降级可见」的翻转半边 + 同期同注 + 两枚反用例钉死新边界（不同分支
     不矛盾）；
   · t260915-08-board-rows 守行形状契约（快照对拍/R8 闭合窗）不同面；
   · 本条 ③ 的构造=真实触发票挂人门 + SDK 直发同期 SA 票即取即闭（板面只读列表面，
@@ -56,14 +56,14 @@ from lib_inspection import (  # noqa: E402
 try:
     import temporalio  # noqa: F401——SDK 直发需要；缺席=环境红
 except Exception:  # noqa: BLE001
-    die_env("temporalio SDK 缺席（server/engine/.venv 不可用）——真链路腿无法执行")
+    die_env("temporalio SDK 缺席（server/engine/.venv 不可用）——真链路子用例无法执行")
 
 STATS = {"pass": 0, "fail": 0}
 FAILS = []
 PID = os.getpid()
 KEY_B = "bur%d" % PID
 INST_B = "bur-ins-%d" % PID            # 在册实例（板面白名单真源=聚合声明）
-INST_X = "bur-zzz-%d" % PID            # 不在册实例（僵尸纪律负腿）
+INST_X = "bur-zzz-%d" % PID            # 不在册实例（僵尸纪律反用例）
 UNRES_PREFIX = "inspection-%s-period-" % INST_B   # 今晨事故形态的不可辨 id 前缀
 ENV = {}
 
@@ -223,7 +223,7 @@ def main() -> int:
             t_shaped_id() + "x", queue, INST_X, "20260101",
             sa_project=KEY_B, sa_instance=INST_X, sa_period="20260101")
         parsed4, _blob4 = lb.board_blob(ENV)
-        check("B4 可辨但不在册实例 RUNNING 仍不上板（僵尸纪律 SA 腿维持）",
+        check("B4 可辨但不在册实例 RUNNING 仍不上板（僵尸纪律 SA 查询路径维持）",
               lb.row_of(parsed4, u4) is None,
               "行在场=%s" % (lb.row_of(parsed4, u4) is not None))
     finally:

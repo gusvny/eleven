@@ -796,7 +796,7 @@ async function runBrowser(pw, browser) {
     const clientFaults = pageErrors.length + real.length
     if (clientFaults === 0 && serverFaults.length > 0) {
       record('T7 zero pageerror/console.error', 'env_fail',
-        `后端瞬断混入卫生断言：${serverFaults.length} 条 5xx 资源加载错（first=${serverFaults[0]}）——客户端 pageerror=0、行为腿全过；多泳道争抢窗，重跑定判`)
+        `后端瞬断混入卫生断言：${serverFaults.length} 条 5xx 资源加载错（first=${serverFaults[0]}）——客户端 pageerror=0、行为子用例全过；多泳道争抢窗，重跑定判`)
     } else if (clientFaults === 0) {
       record('T7 zero pageerror/console.error', 'pass',
         transportNoise.length ? `豁免传输层噪声 ${transportNoise.length} 条（并发窗共享台重启）` : '')

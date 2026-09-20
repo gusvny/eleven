@@ -154,7 +154,7 @@ def validate_finding(raw: Any, idx: int) -> Dict[str, Any]:
             raise InspectParseError("%s：path 缺失或空" % ew)
         line = ev.get("line")
         # line=0 结构合法（agent 报 0 行=可疑证据，复核层必降级 unverified 点名）；
-        # 负数/非整数=结构畸形，解析层拒（场景腿3 八态契约：行号 0 归复核不归解析）。
+        # 负数/非整数=结构畸形，解析层拒（场景子用例3 八态契约：行号 0 归复核不归解析）。
         if isinstance(line, bool) or not isinstance(line, int) or line < 0:
             raise InspectParseError("%s：line 必须是 ≥0 的整数（got %r）" % (ew, line))
         quote = str(ev.get("quote") or "")
@@ -370,9 +370,9 @@ def read_prev_ledger_doc(ledger_dir: Any, instance_id: str,
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
-        return None, "上期台账 %s 不可读（%s: %s）——跨期去重腿缺席" % (path.name, type(e).__name__, e)
+        return None, "上期台账 %s 不可读（%s: %s）——跨期去重分支缺席" % (path.name, type(e).__name__, e)
     if not isinstance(doc, dict) or not isinstance(doc.get("findings"), list):
-        return None, "上期台账 %s 缺 findings 列表——跨期去重腿缺席" % path.name
+        return None, "上期台账 %s 缺 findings 列表——跨期去重分支缺席" % path.name
     return doc, "对照上期 %s" % period
 
 
@@ -381,7 +381,7 @@ def read_prev_ledger_ids(ledger_dir: Any, instance_id: str,
     """最近一个更早期台账的发现 id 集（跨期去重的对照面）。
 
     返回 (ids 或 None, 人读 note)：无更早期=(set(), "无更早期台账")；读不出（坏 JSON/
-    缺 findings/非列表）=(None, 点名原因)——调用方必须把 note 进 meta 点名（去重腿
+    缺 findings/非列表）=(None, 点名原因)——调用方必须把 note 进 meta 点名（去重分支
     缺席可见，绝不静默当空集）。"""
     inst = str(instance_id or "")
     if not inst:
@@ -456,7 +456,7 @@ def collect_fake_ids(ledger_dir: Any, instance_id: str,
             continue
         res = read_verdicts_file(path)
         if res["error"]:
-            notes.append("裁定台账 %s 不可读（%s）——该期压制腿缺席" % (path.name, res["error"]))
+            notes.append("裁定台账 %s 不可读（%s）——该期压制分支缺席" % (path.name, res["error"]))
             continue
         for e in res["entries"]:
             if str(e.get("verdict") or "") == VERDICT_FAKE and str(e.get("finding_id") or ""):

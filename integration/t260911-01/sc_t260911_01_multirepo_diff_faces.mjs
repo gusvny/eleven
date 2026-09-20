@@ -11,7 +11,7 @@
  *      不再全局截断，2a 修复不得被 60 条全局 cap 在旗舰场景复活）。
  *   c/d. 泳道内引擎过程物（.sandbar/ .dsh/ out/ __pycache__/ node_modules/ .venv/，含嵌套
  *      a/b/__pycache__/x 与成员仓内形态）不进改动清单，且被剔除路径**点名可见**
- *      （excludedPaths 到具体路径，不只聚合计数——验收 d「或点名」腿；「不落盘」腿=engine
+ *      （excludedPaths 到具体路径，不只聚合计数——验收 d「或点名」子用例；「不落盘」子用例=engine
  *      侧根修另票挂账，见场景②）。
  *   b. 单仓票零回归：repo_worktrees 缺省/空 → 今日单仓路径原样（无 repos、路径无前缀、
  *      过滤仍生效）——多仓字段不改变单仓票的呈现。
@@ -20,7 +20,7 @@
  *
  * 分层（灰盒，防 intent 重复）：与 developer L1（tests/t260911_01_*.mjs 真值表/封顶常量）
  * 分层——本条锁「多仓泳道夹具上的人审可见性」组合行为；与 t260907-11（项目锚判界/跨项目
- * 取数）不同面；单仓 diff 形状回归归既有 diff 族场景（t01/i02/i03）+ 本条 b 腿只锁
+ * 取数）不同面；单仓 diff 形状回归归既有 diff 族场景（t01/i02/i03）+ 本条 b 子用例只锁
  * 「多仓字段在场时的退化不改变单仓行为」这一新缝，不重复彼处。
  *
  * 舞台：临时目录 git 夹具（假多仓项目：根仓+泳道 worktree+成员仓 worktree，零真实项目
@@ -114,7 +114,7 @@ try {
     { repo: 'member', name: 'member', branch: 'lane/t1-member', base_ref: t1.baseM },
   ]
 
-  // ── 腿A 多仓逐仓可见（验收 a：成员仓文件在清单、可展开、base 各自对照） ──
+  // ── 子用例A 多仓逐仓可见（验收 a：成员仓文件在清单、可展开、base 各自对照） ──
   {
     const r = await computeTicketDiff(t1.proj, { id: 't1', worktree: t1.lane, base_ref: t1.baseR, repo_worktrees: rwsT1 })
     ok(Array.isArray(r.repos) && r.repos.length === 2, `A1 逐仓汇总 repos[] 两仓（实得 ${r.repos?.length}）`)
@@ -132,7 +132,7 @@ try {
     ok(r.changed === true, 'A11 多仓票 changed=true（人审面不再空转——2a 缺陷的反面）')
   }
 
-  // ── 腿B 过程物过滤 + 点名（验收 c + d「点名」腿，含嵌套/成员仓内形态） ──
+  // ── 子用例B 过程物过滤 + 点名（验收 c + d「点名」子用例，含嵌套/成员仓内形态） ──
   {
     const r = await computeTicketDiff(t1.proj, { id: 't1', worktree: t1.lane, base_ref: t1.baseR, repo_worktrees: rwsT1 })
     const bad = ['\\.sandbar/', '\\.dsh/', 'out/', '__pycache__', 'node_modules/', '\\.venv/'].map((p) => new RegExp(p))
@@ -149,7 +149,7 @@ try {
     ok(names.length <= 20, 'B8 点名列表有上限封顶（≤20，防大噪声刷屏）')
   }
 
-  // ── 腿C 单仓退化零回归（验收 b 的新缝：多仓字段缺省不改变单仓行为） ──
+  // ── 子用例C 单仓退化零回归（验收 b 的新缝：多仓字段缺省不改变单仓行为） ──
   {
     const r = await computeTicketDiff(t1.proj, { id: 't1', worktree: t1.lane, base_ref: t1.baseR })
     ok(r.repos === undefined, 'C1 无 repo_worktrees → 无 repos（单仓呈现路径原样）')
@@ -160,7 +160,7 @@ try {
     ok(rEmpty.repos === undefined && rEmpty.files.some((f) => f.path === 'root-new.ts'), 'C5 空列表同退化（不误入多仓道）')
   }
 
-  // ── 腿D 畸形 repo_worktrees（M1：整体视同单仓，不炸不部分采纳） ──
+  // ── 子用例D 畸形 repo_worktrees（M1：整体视同单仓，不炸不部分采纳） ──
   {
     const shapes = [
       ['非列表', 'not-a-list'],
@@ -178,7 +178,7 @@ try {
     }
   }
 
-  // ── 腿E 成员仓未物化（点名不静默，他仓照常） ──
+  // ── 子用例E 成员仓未物化（点名不静默，他仓照常） ──
   {
     const rws = [...rwsT1, { repo: 'ghost', name: 'ghost', branch: 'lane/ghost', base_ref: t1.baseM }]
     const r = await computeTicketDiff(t1.proj, { id: 't1', worktree: t1.lane, base_ref: t1.baseR, repo_worktrees: rws })
@@ -189,7 +189,7 @@ try {
     ok(r.files.some((f) => f.path === 'member/m-feature.py'), 'E3 顶层清单不受缺席仓影响')
   }
 
-  // ── 腿F 成员仓 >60 文件：按仓封顶、不全局互挤（R3 回归：2a 不得被全局 cap 复活） ──
+  // ── 子用例F 成员仓 >60 文件：按仓封顶、不全局互挤（R3 回归：2a 不得被全局 cap 复活） ──
   {
     const many = Array.from({ length: 70 }, (_, i) => [`gen/f${String(i).padStart(3, '0')}.py`, `def f${i}():\n    pass\n`])
     const t2 = makeProject(TMP, 't2', {

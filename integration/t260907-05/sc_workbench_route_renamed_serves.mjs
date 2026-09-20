@@ -120,7 +120,7 @@ try {
   const s2 = await statusOf('/suyou-workbench/api/wf/temporal-health')
   check(s2 === 404, '旧前缀 temporal-health → 404（实得 %s）', s2)
   const s3 = await statusOf('/suyou-workbench/api/wf/tickets')
-  check(s3 === 404, '旧前缀 tickets → 404（实得 %s；此腿不 fetch 新 tickets——spawn 面归隔离台）', s3)
+  check(s3 === 404, '旧前缀 tickets → 404（实得 %s；此子用例不 fetch 新 tickets——spawn 面归隔离台）', s3)
 
   console.log('== 3. 注册面收口：全部路由 path 只认新前缀')
   const staleRoutes = routes.filter((r) => r.path.includes('/suyou-workbench/'))

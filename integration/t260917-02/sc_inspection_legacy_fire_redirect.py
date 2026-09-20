@@ -4,18 +4,18 @@
 
 intent（登记于 run_scenarios.py，名 t260917-02-legacy-fire-redirect）：
   调度路径（旧 action 直发形态）的用户可感知契约——线上 260917 实况的压缩复刻：
-  ①重定向腿：直发「旧 action 形」壳（非 t 形 id、payload 无 project_key——线上原始
+  ①重定向子用例：直发「旧 action 形」壳（非 t 形 id、payload 无 project_key——线上原始
     字节逐字复刻）→ 壳秒级终（不扫描、不落账、不进人门）→ 真票承接：票号 t 形
     ^t\\d{6}-\\d{2,}$、SA 三件套齐且 **ProjectKey==声明实例级身份**（payload 缺
     project_key 时身份回退链闭合——验收①「或复用已有票且三件套齐」+ R2c 假绿防波堤：
     夹具若按 payload 齐全构造，单测全绿而生产红）；
-  ②未跳腿（验收④主证据，review R4/C2）：真票挂人门（长挂等价物=interval ~10s 步长，
+  ②未跳子用例（验收④主证据，review R4/C2）：真票挂人门（长挂等价物=interval ~10s 步长，
     OverlapPolicy=SKIP 只判上一 action 是否 Running，与墙钟时长无关）→ 连续多次 fire 照常发生：
     num_actions 递增 **且 num_actions_skipped_overlap 保持基线不变**（skip 以服务端
     计数直接断言，不由行为反推）+ 同期仍恰好一张 t 票（壳 deduped 复用）；
-  ③dedup-closed 腿（验收①「或复用已有票」半边）：真票收口（cancel→闭合）后再来一枚
+  ③dedup-closed 子用例（验收①「或复用已有票」半边）：真票收口（cancel→闭合）后再来一枚
     旧壳 → deduped：不起第二张 t 票、（实例,期) 计数不增、台账不增；
-  ④deadman 回执腿（review C1）：漏跑核查回执并 skip_count/running_actions 两键
+  ④deadman 回执子用例（review C1）：漏跑核查回执并 skip_count/running_actions 两键
     （additive；「此刻就在跳火」每天可见）——missed 空时 ok=true。
 
 分工（防 intent 级重复）：
@@ -25,7 +25,7 @@ intent（登记于 run_scenarios.py，名 t260917-02-legacy-fire-redirect）：
     旧壳重定向+身份回退链+未跳，不同面；
   · t260916-02-board-legacy-three-state 守板面三态降级读面——本条守起票链写面；
   · dedup 细粒度真值表（指针三态/撞号让位/grace 窗）归 developer L1 与既有场景
-    （t260916-02 ⑦腿），本条只守「同期已关票 → deduped 不起第二张」的调度路承接；
+    （t260916-02 ⑦子用例），本条只守「同期已关票 → deduped 不起第二张」的调度路承接；
   · 台账归档留史归 t260917-02-ledger-archive-regression，本条只断言「壳不落账」
     （台账计数不增）。
 
@@ -61,7 +61,7 @@ from lib_inspection import (  # noqa: E402
 try:
     import temporalio  # noqa: F401——SDK 直发需要；缺席=环境红
 except Exception:  # noqa: BLE001
-    die_env("temporalio SDK 缺席（server/engine/.venv 不可用）——真链路腿无法执行")
+    die_env("temporalio SDK 缺席（server/engine/.venv 不可用）——真链路子用例无法执行")
 
 STATS = {"pass": 0, "fail": 0}
 FAILS = []
@@ -123,7 +123,7 @@ def main() -> int:
                 "SANDBAR_PROJECTS_DIR": reg_root, "SANDBAR_INSPECTION_DIR": ledger_dir}) as w:
             del w  # worker 就绪即可；workflow/activity 全走该私有队列
 
-            # ---- ① 重定向腿：旧壳秒级终，真 t 票承接且三件套齐（身份回退链闭合）----
+            # ---- ① 重定向子用例：旧壳秒级终，真 t 票承接且三件套齐（身份回退链闭合）----
             t0 = time.time()
             shell1 = lb.start_old_action_shell(INST_A, queue, repo.root, tag="s%d" % PID)
             st1 = lb.wait_terminal(shell1, budget_s=120.0)
@@ -147,7 +147,7 @@ def main() -> int:
                   bool(period_p) and tid[1:7] == period_p[2:8],
                   "ticket=%r period=%r" % (tid, period_p))
 
-            # 真票挂人门（未跳腿的前置：人门长挂形态在案）
+            # 真票挂人门（未跳子用例的前置：人门长挂形态在案）
             def hung():
                 _, parsed = run_trigger(["describe", "--instance", INST_A,
                                          "--period", period_p], env=ENV)
@@ -168,7 +168,7 @@ def main() -> int:
                   len(top) == 1 and bool(tid) and ledger_tid == tid,
                   "台账=%s tid=%r 账内ticket_id=%r" % (top, tid, ledger_tid))
 
-            # ---- ② 未跳腿：interval 调度连续 fire，skip 计数不动（R4/C2）----
+            # ---- ② 未跳子用例：interval 调度连续 fire，skip 计数不动（R4/C2）----
             schedule_id = lb.create_interval_schedule(INST_A, queue, repo.root, every_s=10)
             base = lb.schedule_counters(schedule_id)
             grew = lb.poll(lambda: lb.schedule_counters(schedule_id)["num_actions"]
@@ -193,7 +193,7 @@ def main() -> int:
                   "窗口内 running_actions 迟终不归零（末值=%s）"
                   % lb.schedule_counters(schedule_id)["running_actions"])
 
-            # ---- ③ dedup-closed 腿：真票收口后，旧壳 deduped 不起第二张 ----
+            # ---- ③ dedup-closed 子用例：真票收口后，旧壳 deduped 不起第二张 ----
             lb_note = ""
             try:
                 lb.run_client("cancel", {"workflow_id": tid}, env=ENV)
@@ -213,7 +213,7 @@ def main() -> int:
                   len(top_after) == len(top_before) == 1,
                   "前=%s 后=%s" % (top_before, top_after))
 
-            # ---- ④ deadman 回执腿：跳火观测两键 additive（review C1）----
+            # ---- ④ deadman 回执子用例：跳火观测两键 additive（review C1）----
             _, dm = run_trigger(["deadman", "--instance", INST_A,
                                  "--decl-path", decl_path,
                                  "--ledger-dir", ledger_dir], env=ENV)

@@ -6,21 +6,21 @@
 //   版本维度缺失。本场景把验收升为四象限矩阵：{新版全令牌集, 旧版 bg-base-only}×{深, 浅}，
 //   每格在六张用户台面（工单列表→详情抽屉→文档视图→立项单视图→新建工单弹层→metrics）
 //   对全部可见文字实算 WCAG 对比度（正文级 4.5:1，收口行卡 3.0:1——口径沿袭 t260905-08），
-//   另有 fallback-only 腿（零注入，兜底链自洽可读）与变异腿（低对比注入必咬，守测试本身）。
+//   另有 fallback-only 子用例（零注入，兜底链自洽可读）与变异子用例（低对比注入必咬，守测试本身）。
 //   两症状与本矩阵的映射：症状①（浅色文档页不可读）=new-light 格 docs 面；症状②（深色
 //   部分子面仍浅色）=new-dark 格各面。hex 看守（t260905-08 场景②，已登记）守「零裸 hex」
 //   静态面，本场景守「真渲染可读」动态面——intent 不重叠。
 //
 // 格与判定（代表值纪律，KI-055 同款「代表值造绿」防御）：
-//   new-light / new-dark / legacy-light=硬腿（违例=0 且未知色形=0 才过）；
+//   new-light / new-dark / legacy-light=硬子用例（违例=0 且未知色形=0 才过）；
 //   legacy-light 格带 canvas 精确等值探针（--dsw-derive-canvas===bg-base 代表值 #f5f8fa，
 //   沿袭 t260907-03 先例：兜底链接不住旧令牌名=点名红）；
-//   legacy-dark=诊断腿：0.1.1-rc.2 深底 bg-base 代表值**未经宿主确认**，不选方便假值造绿
-//   （lib_t260905_08.mjs legacy 腿选值约束同源纪律）——本腿全扫照跑、比值全打印、na 注记
-//   入账，不计入四象限判定；宿主确认真值后填入下方 LEGACY_DARK_BG_BASE 常量，本腿自动
-//   升为硬腿（merge 关卡执行，机械升级路径）；
-//   fallback=硬腿（零注入下兜底链自洽可读——不可失败的腿是装饰，与 t260905-08 同判）；
-//   mutation=变异腿（浅档＋label-primary:#7a7a85≈3.4:1 → 违例>0 才过）。
+//   legacy-dark=诊断子用例：0.1.1-rc.2 深底 bg-base 代表值**未经宿主确认**，不选方便假值造绿
+//   （lib_t260905_08.mjs legacy 查询路径选值约束同源纪律）——本子用例全扫照跑、比值全打印、na 注记
+//   入账，不计入四象限判定；宿主确认真值后填入下方 LEGACY_DARK_BG_BASE 常量，本子用例自动
+//   升为硬子用例（merge 关卡执行，机械升级路径）；
+//   fallback=硬子用例（零注入下兜底链自洽可读——不可失败的子用例是装饰，与 t260905-08 同判）；
+//   mutation=变异子用例（浅档＋label-primary:#7a7a85≈3.4:1 → 违例>0 才过）。
 //   反空转守卫（KI-052「绿≠真查」教训）：文档/立项单/新建工单弹层三张本票新走查面，
 //   若全程一格都没真正入扫（扫描区域计数=0，点击成功≠入扫），coverage/novel-surfaces
 //   fail-closed 点名红——防「导航 na 空转绿」。
@@ -30,15 +30,15 @@
 //      立项单=t260915-09 起夹具根自植——client 按项目根取数后夹具根无 notes/epics 即
 //      列表空、弹层链断、coverage 守卫 fail-closed，自植一枚不弱化守卫）＋ playwright
 //      探测（缺失=env_fail 有声红 exit 2，三态契约「闸内无 SKIP」，KI-036/KI-046 口径）。
-//   T1 腿遍历 new-light/new-dark/legacy-light/legacy-dark/fallback：每腿 goto→:root 注入
+//   T1 子用例遍历 new-light/new-dark/legacy-light/legacy-dark/fallback：每子用例 goto→:root 注入
 //      令牌（legacy 格含 bg-primary knockout，须经忠实注入打到壳层声明点才造得出真缺席
 //      态）→开板忠实注入→逐面导航+扫描：工单列表→「看原因」详情抽屉→侧栏「文档」图标
 //      开文档视图（点首篇树项载正文）→侧栏「立项单」图标开立项单视图（点首行进详情→
-//      「＋ 新建工单」开弹层）→回板面→事件总线开 metrics。每腿「违例=0 且未知色形=0」
-//      硬腿才过；违例/未知色形打印 台面/元素/色值/比值（数值化取证）。色解析收 rgb()/
+//      「＋ 新建工单」开弹层）→回板面→事件总线开 metrics。每子用例「违例=0 且未知色形=0」
+//      硬子用例才过；违例/未知色形打印 台面/元素/色值/比值（数值化取证）。色解析收 rgb()/
 //      rgba()/color(srgb …)（fail-closed：未知 computed 形态=点名红，绝不静默计绿——
 //      gen0 验收探针实锤旧解析只认 rgb 曾静默漏检 73% 表面，KI-052 同构防复发）。
-//   T2 变异腿＋coverage 反空转守卫＋SUMMARY 末行。
+//   T2 变异子用例＋coverage 反空转守卫＋SUMMARY 末行。
 //
 // 复用取舍（对 review_plan gen1 意见 A 的交代）：
 //   带过来（import ../t260905-08/lib_t260905_08.mjs，跨票 import 先例=该 lib 本身）：
@@ -47,7 +47,7 @@
 //   自 sc_wb_contrast_guard.mjs（该场景未导出；复制先例=lib 对 fnv1a 的处理，漂移责任=
 //   两侧头注对齐，后改方同步）；本票扩展仅两处：区域分类加 docs/modal/epics 标签（阈值
 //   逻辑零改动）、coverage 反空转守卫（新增）。
-//   不带：t260905-08 走查腿的行为断言（写监控/T 系）——本场景只做对比度与可达入扫，
+//   不带：t260905-08 走查子用例的行为断言（写监控/T 系）——本场景只做对比度与可达入扫，
 //   行为语义归 17 号场景族与 t260905-07。
 //   不另立 hex 清零场景：t260905-08-hex-clean（已登记）即「客户端零裸 hex」intent 的
 //   唯一看守，本票实现落地使其红→绿即工单验收②，另立薄壳=intent 级重复（设计纪律）。
@@ -58,8 +58,8 @@
 //
 // 执行契约：stdout 末行 SUMMARY pass/fail/env_fail/na；playwright-core/隔离台依赖缺失=
 //   env_fail（exit 2）有声红，绝不静默降级；3099/7233 红线：隔离台端口由 freePort 分配，
-//   全程不触碰真控制台。实现落地前红属预期（TDD 信号）；arbitrate/merge 期硬腿必须绿、
-//   legacy-dark 诊断腿保持 na 注记直到宿主确认代表值。
+//   全程不触碰真控制台。实现落地前红属预期（TDD 信号）；arbitrate/merge 期硬子用例必须绿、
+//   legacy-dark 诊断子用例保持 na 注记直到宿主确认代表值。
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
@@ -71,7 +71,7 @@ import {
 const { record, summarize } = makeResults();
 
 // 升级契约：宿主确认 0.1.1-rc.2 深底 bg-base 代表值后把 null 换成代表值字符串
-// （merge 关卡执行）；填入前 legacy-dark 为诊断腿（na 注记），填入后自动升硬腿。
+// （merge 关卡执行）；填入前 legacy-dark 为诊断子用例（na 注记），填入后自动升硬子用例。
 const LEGACY_DARK_BG_BASE = null;
 
 const NOW = Math.floor(Date.now() / 1000);
@@ -113,7 +113,7 @@ stub.setCtrl({
 
 const pw = await loadPlaywright();
 if (!pw) {
-  record('playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器走查腿环境红（三态契约「闸内无 SKIP」）');
+  record('playwright', 'env_fail', 'playwright-core 不可用（KI-036 家族）：浏览器走查子用例环境红（三态契约「闸内无 SKIP」）');
   summarize();
 }
 
@@ -314,14 +314,14 @@ try {
     record(`nav/rowcards/${leg}`, boardOk,
       boardOk ? '板面行卡在场' : `板面行卡未达 url=${page.url()}`);
     if (!boardOk) {
-      record(`contrast/${leg}`, 'na', `行卡面未达，本腿无法扫描（区域计数空）`);
+      record(`contrast/${leg}`, 'na', `行卡面未达，本子用例无法扫描（区域计数空）`);
       continue;
     }
     if (set) {
       await page.evaluate(FAITHFUL_FN, set).catch(() => {});
       await page.waitForTimeout(300);
     }
-    // legacy 格 canvas 精确等值探针（硬腿断言；legacy-dark 值仅入诊断账）
+    // legacy 格 canvas 精确等值探针（硬子用例断言；legacy-dark 值仅入诊断账）
     if (leg === 'legacy-light' || leg === 'legacy-dark') {
       const canvas = await canvasProbe(page);
       if (leg === 'legacy-light') {
@@ -331,7 +331,7 @@ try {
             : `兜底链未接住旧平台令牌：--dsw-derive-canvas=${canvas || '(unreadable)'} ≠ #f5f8fa`);
       } else {
         record(`canvas-eq/${leg}`, 'na',
-          `诊断腿不判等值：canvas=${canvas || '(unreadable)'}（代表值${LEGACY_DARK_BG_BASE ? '已确认=' + LEGACY_DARK_BG_BASE : '未经宿主确认'}）`);
+          `诊断子用例不判等值：canvas=${canvas || '(unreadable)'}（代表值${LEGACY_DARK_BG_BASE ? '已确认=' + LEGACY_DARK_BG_BASE : '未经宿主确认'}）`);
       }
     }
 
@@ -354,7 +354,7 @@ try {
       }
     }
     record(`surface/drawer-open/${leg}`, drawerOpened ? true : 'na',
-      drawerOpened ? '详情面入扫' : '详情面未开（可达性由 t260905-07 场景守，本腿条件豁免）');
+      drawerOpened ? '详情面入扫' : '详情面未开（可达性由 t260905-07 场景守，本子用例条件豁免）');
 
     // 文档视图：侧栏「文档」图标 → 树载入（等待树项，盲等 1200ms 实锤竞态）→点首篇
     // 载正文（懒加载契约：等正文元素在场再扫，正文文字正是症状①的违例源）
@@ -428,12 +428,12 @@ try {
       window.dispatchEvent(new CustomEvent('wb-metrics-toggle'));
     });
     // 数据就绪等待替代盲等：固定 1200ms 实锤 na/pass 跨轮抖动（验收走查轮 na=3 vs 设计轮 na=2），
-    // 面板挂载即判（上限 6s）；条件腿语义不变（不可达仍 na，不假红不假绿）
+    // 面板挂载即判（上限 6s）；条件子用例语义不变（不可达仍 na，不假红不假绿）
     const metricsOpened = await page.locator('.wb-m').waitFor({ state: 'visible', timeout: 6000 })
       .then(() => true).catch(() => false);
     if (metricsOpened) scan = mergeScan(scan, await page.evaluate(SCAN_FN));
     record(`surface/metrics-open/${leg}`, metricsOpened ? true : 'na',
-      metricsOpened ? 'metrics 文字面入扫' : 'metrics 面板未开（条件豁免腿）');
+      metricsOpened ? 'metrics 文字面入扫' : 'metrics 面板未开（条件豁免子用例）');
 
     // 反空转账本：点击成功≠入扫，以扫描区域计数为准
     if ((scan.regions.docs || 0) > 0) seen.docs = true;
@@ -444,11 +444,11 @@ try {
     if (leg === 'legacy-dark' && !LEGACY_DARK_BG_BASE) {
       const canvas = await canvasProbe(page);
       record(`contrast/${leg}`, 'na',
-        `诊断腿（不计入四象限判定）：0.1.1-rc.2 深底 bg-base 代表值未经宿主确认，不选方便假值造绿`
-        + `（KI-055 同款「代表值造绿」防御）。本腿以浅底代表值×深字运行，仅为证明该格扫描可运行：`
+        `诊断子用例（不计入四象限判定）：0.1.1-rc.2 深底 bg-base 代表值未经宿主确认，不选方便假值造绿`
+        + `（KI-055 同款「代表值造绿」防御）。本子用例以浅底代表值×深字运行，仅为证明该格扫描可运行：`
         + `违例=${scan.violations.length}（首例=${fmtViolations(scan.violations) || '无'}）`
         + `未知色形=${unchecked.length} canvas=${canvas || '(unreadable)'}。`
-        + `宿主确认代表值后填入 LEGACY_DARK_BG_BASE 常量，本腿自动升硬腿`);
+        + `宿主确认代表值后填入 LEGACY_DARK_BG_BASE 常量，本子用例自动升硬子用例`);
     } else {
       const legOk = scan.violations.length === 0 && unchecked.length === 0;
       record(`contrast/${leg}`, legOk,
@@ -459,7 +459,7 @@ try {
     }
   }
 
-  // 变异腿：浅档＋故意低对比正文色——看守必须咬（违例>0=断言在咬）
+  // 变异子用例：浅档＋故意低对比正文色——看守必须咬（违例>0=断言在咬）
   await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
   await page.addStyleTag({ content: cssVarsBlock(TOKEN_SETS.mutation) });
   await dismissNotice(page);
@@ -472,7 +472,7 @@ try {
       ? `低对比变异被咬（违例 ${mut.violations.length}，首例=${fmtViolations(mut.violations)}）——对比度断言真实生效`
       : '低对比变异未被咬：看守失效（主区/侧栏均未消费 label-primary？实现未落地或断言失效）');
 
-  // coverage 反空转守卫：本票三张新走查面全程（所有腿合计）必须至少真正入扫一次
+  // coverage 反空转守卫：本票三张新走查面全程（所有子用例合计）必须至少真正入扫一次
   const novelOk = seen.docs && seen.epics && seen.modal;
   record('coverage/novel-surfaces', novelOk,
     novelOk

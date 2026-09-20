@@ -64,7 +64,7 @@ TAG = stage_tag("t26091202-burst")
 ROOT = iso_root("burst")
 N_DSH, N_TEMP = 32, 48
 BURST_WALL_BUDGET_S = 60.0
-UP_TIMEOUT = 55             # 单台预算 < 整批墙钟帽：超时即「零超时」腿红
+UP_TIMEOUT = 55             # 单台预算 < 整批墙钟帽：超时即「零超时」子用例红
 TEMP_TIMEOUT = 150
 DSH_PROJS = ["%s-d%02d" % (TAG, i) for i in range(N_DSH)]
 TEMP_PROJS = ["%s-t%02d" % (TAG, i) for i in range(N_TEMP)]
@@ -91,7 +91,7 @@ def fire_batch(projects, services, timeout):
 
 
 def assert_subnet_face(projects, table, manual_default, leg):
-    """B 腿公共面：逐台网络存在、网段∈受管表、跨台互异、≠手工缺省网段。"""
+    """B 子用例公共面：逐台网络存在、网段∈受管表、跨台互异、≠手工缺省网段。"""
     nets = {p: compose_networks(p) for p in projects}
     check(all(len(v) >= 1 for v in nets.values()),
           "%s：每台恰有 compose 建网（%d 台全有）" % (leg, len(projects)))
@@ -150,12 +150,12 @@ def main():
         events = subprocess.Popen(
             ["docker", "events", "--filter", "type=network"],
             stdout=open(events_f.name, "wb"), stderr=subprocess.DEVNULL)
-        time.sleep(1.0)   # 事件流就绪窗（事件腿是 B 的证据面 belt-and-braces）
+        time.sleep(1.0)   # 事件流就绪窗（事件子用例是 B 的证据面 belt-and-braces）
 
-        # ---- A 腿：32×dsh 同一瞬爆发 ----
+        # ---- A 子用例：32×dsh 同一瞬爆发 ----
         results, wall = fire_batch(DSH_PROJS, "dsh", UP_TIMEOUT)
         for proj, _rc, _out, err in results:
-            env_guard(err, "32 台起台腿 %s" % proj)
+            env_guard(err, "32 台起台子用例 %s" % proj)
         bad = [(p, rc) for p, rc, _o, _e in results if rc != 0]
         check(not bad, "32/32 起台成功（非零 %d 台：%s）" % (len(bad), bad[:3]))
         check(wall <= BURST_WALL_BUDGET_S,
@@ -205,10 +205,10 @@ def main():
                    if compose_containers(p) or compose_networks(p) or compose_volumes(p)]
         check(not residue, "32 台拆台零残留（容器/网络/卷逐项空，残留 %s）" % residue[:3])
 
-        # ---- A 腿第二阶：48×temporal，只许成功或环境红 ----
+        # ---- A 子用例第二阶：48×temporal，只许成功或环境红 ----
         results_t, wall_t = fire_batch(TEMP_PROJS, "temporal", TEMP_TIMEOUT)
         for proj, _rc, _out, err in results_t:
-            env_guard(err, "48 台起台腿 %s" % proj)
+            env_guard(err, "48 台起台子用例 %s" % proj)
         oks_t = [(p, rc) for p, rc, _o, _e in results_t if rc == 0]
         env_reds = [(p, rc) for p, rc, _o, e in results_t
                     if rc == 2 and "STAGE_ENV" in (e or "")]
@@ -282,7 +282,7 @@ def main():
             check("fully subnetted" not in ev_text,
                   "B：docker network 事件流零地址池报错（事件 %d 字节）" % len(ev_text))
         else:
-            na("docker network 事件流采样（捕获为空——观测面缺席，主断言在子进程输出腿）")
+            na("docker network 事件流采样（捕获为空——观测面缺席，主断言在子进程输出子用例）")
     finally:
         guarded_down(ALL_PROJS, ROOT)   # 兜底（幂等）：崩溃路径也零残留
         if events is not None and events.poll() is None:
@@ -297,7 +297,7 @@ def json_loads_last(text):
 
 
 def machine_snapshot():
-    """全机容器/网络的「名 → compose 工程」快照（G 腿归因用）。
+    """全机容器/网络的「名 → compose 工程」快照（G 子用例归因用）。
 
     裸计数相等断言在共机多泳道窗内会被外部增量打假红（260913 首轮套件实测：
     跑前 7/7 → 跑后 10/9，增量全属他泳道工程，单跑本场景 11→11/9→9 全绿）。

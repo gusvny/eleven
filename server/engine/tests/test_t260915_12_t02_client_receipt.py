@@ -306,7 +306,7 @@ def test_emit_success_receipt_nested_keys(monkeypatch, tmp_path):
         rows[-1].get("caller_project") in (None, "")
 
 
-# ---------- cwd 窄兜底（真链路场景相八的进程内等价腿） ----------
+# ---------- cwd 窄兜底（真链路场景相八的进程内等价子用例） ----------
 
 def test_cwd_under_registered_dir_derives_declared(monkeypatch, tmp_path):
     ws = tmp_path / "myproj"

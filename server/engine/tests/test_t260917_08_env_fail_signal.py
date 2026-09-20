@@ -9,21 +9,21 @@
      乱码——岗位纪律：外部输入畸形用例用固定桩串复现，不靠真外部源）。
   D. _apply_env_signal 双源归因（自报优先/扫描补位/无信号零改动/读败不拦交付链）
      + 四路挂点源码锁（M1）+ N2 桩回执读回不丢信号 + N1 复用 _log_tail 源码锁。
-  E. agent_env_failed_reason / env_note_for 文案矩阵（畸形不抛，R4 空腿不洗白）。
+  E. agent_env_failed_reason / env_note_for 文案矩阵（畸形不抛，R4 空清单不洗白）。
   F. dev_lane._agent_failed_why / _block_agent_failed 路由（_mk_wf 壳族先例，免
      Temporal）+ 源码锁（内联字面量恰 2 处、M3 冲突消解变体接线）。
-  G. 交接腿债表行为断言（review C1 裁定①）：put/take/clear——产腿→拾取→销账不
-     重复执行；集测后段产腿留债到下一轮集测；同段回执重写替换；本轮亲自完成验证
-     →旧腿销账；env_fail 空腿不蒸发旧债；畸形债条容忍。
+  G. 移交命令债表行为断言（review C1 裁定①）：put/take/clear——产出命令→拾取→销账不
+     重复执行；集测后段产出命令留债到下一轮集测；同段回执重写替换；本轮亲自完成验证
+     →旧命令销账；env_fail 空清单不蒸发旧债；畸形债条容忍。
   H. run_handover_leg 三路全终态（过/败/超时 kill 排空——KI-009 同款纪律）+ 畸形
-     命令不执行（fail-closed）+ 桩旋钮不漏进腿子进程（L4）+ 输出截断 + R3 dict
+     命令不执行（fail-closed）+ 桩旋钮不漏进命令子进程（L4）+ 输出截断 + R3 dict
      重建点源码锁。
-  I. 旋钮入族源码锁（三新旋钮∈TEST_STUB_ENV_KNOBS；腿/verify_lane 剥除面同源；
-     腿超时=执行面容量参数非判定放宽）。
+  I. 旋钮入族源码锁（三新旋钮∈TEST_STUB_ENV_KNOBS；命令/verify_lane 剥除面同源；
+     命令超时=执行面容量参数非判定放宽）。
   J. 契约块与义务句在场（build_stage_prompt 行为断言 + FLOW_BRIEF['implement']/
      ['arbitrate'] C2 义务句源码锁 + 仲裁/走查上下文接线源码锁）。
 
-UT 全程禁网络/真 Temporal/真 git（conftest 只加 sys.path）；H 的子进程腿只跑
+UT 全程禁网络/真 Temporal/真 git（conftest 只加 sys.path）；H 的子进程命令只跑
 python3 -c 短命令，cwd=tempfile 目录，超时路 kill+wait 排空（不留僵尸）。
 运行：主树 venv `.../engine/.venv/bin/python -m pytest server/engine/tests/test_t260917_08_env_fail_signal.py -q`。
 """
@@ -335,17 +335,17 @@ def test_e4_env_note_single_source_matrix():
     legs = [{"name": "n%d" % i, "cmd": "c%d" % i} for i in range(4)]
     # 非 env_fail → 零注记零回归
     assert shared.env_note_for(StageResult(status="ok")) == ""
-    # 有腿 → 交接语义 + 前 3 名
+    # 有命令 → 交接语义 + 前 3 名
     note = shared.env_note_for(StageResult(status="ok", env_fail=True,
                                            handover_runs=legs[:2]))
-    assert "交接 2 腿待执行" in note and "n0" in note and "n1" in note and "等" not in note
+    assert "移交 2 条命令待执行" in note and "n0" in note and "n1" in note and "等" not in note
     note = shared.env_note_for(StageResult(status="ok", env_fail=True,
                                            handover_runs=legs))
-    assert "交接 4 腿待执行" in note and note.endswith("等") and "n3" not in note
-    # 空腿 → R4 fail-closed：不当已验证
+    assert "移交 4 条命令待执行" in note and note.endswith("等") and "n3" not in note
+    # 空清单 → R4 fail-closed：不当已验证
     note = shared.env_note_for(StageResult(status="ok", env_fail=True))
-    assert "未验证且无交接腿" in note and "不当作已验证" in note
-    # 空腿 + 弃单 → 弃 N 条记名（M4 三面落面的单源措辞）
+    assert "未验证且无移交命令" in note and "不当作已验证" in note
+    # 空清单 + 弃单 → 弃 N 条记名（M4 三面落面的单源措辞）
     note = shared.env_note_for(StageResult(
         status="ok", env_fail=True,
         handover_dropped=["条目0:非对象", "条目1:cmd 缺失", "条目2:非对象"]))
@@ -394,7 +394,7 @@ def test_f4_source_locks_routing_sites_and_m3_variant():
     assert '"冲突消解第 %d 轮 agent 报失败' not in src
 
 
-# ---------- G. 交接腿债表（review C1 行为断言） ----------
+# ---------- G. 移交命令债表（review C1 行为断言） ----------
 
 LEGS_IMPL = [{"name": "impl-ut", "cmd": "python3 -c 'print(1)'"},
              {"name": "impl-lint", "cmd": "python3 integration/lint_tests.py"}]
@@ -422,7 +422,7 @@ def test_g1_put_take_clear_no_double_execution():
 
 
 def test_g2_post_integ_stage_debt_survives_to_next_integ_round():
-    # C1 场景：集测之后的段（design_integration_tests）产腿 → 留债可见 → rework 回
+    # C1 场景：集测之后的段（design_integration_tests）产出命令 → 留债可见 → rework 回
     # implement → 下一轮集测自然拾取（债在销账前恒在册）。
     wf = _mk_wf()
     wf._handover_debt_put("design_integration_tests",
@@ -442,7 +442,7 @@ def test_g3_same_stage_receipt_rewrite_replaces_not_accumulates():
 
 
 def test_g4_own_verification_clears_own_stale_legs():
-    # 本段重进且亲自跑完验证（无 env 信号）→ 本段旧腿销账：过期腿再代跑=红腿误伤仲裁
+    # 本段重进且亲自跑完验证（无 env 信号）→ 本段旧命令销账：过期命令再代跑=失败命令误伤仲裁
     wf = _mk_wf()
     wf._handover_debt_put("implement", _env_res(handover_runs=LEGS_IMPL))
     wf._handover_debt_put("design_integration_tests",
@@ -453,7 +453,7 @@ def test_g4_own_verification_clears_own_stale_legs():
 
 
 def test_g5_env_fail_zero_legs_keeps_old_debt_visible():
-    # R4：env_fail=true 且空腿=未验证——旧腿是唯一在册验证记录，清了=轨迹蒸发
+    # R4：env_fail=true 且空清单=未验证——旧命令是唯一在册验证记录，清了=轨迹蒸发
     wf = _mk_wf()
     wf._handover_debt_put("implement", _env_res(handover_runs=LEGS_IMPL))
     wf._handover_debt_put("implement", _env_res(handover_runs=[]))
@@ -558,7 +558,7 @@ def test_h9_one_bad_command_does_not_kill_the_batch():
 
 
 def test_h5_stub_knobs_stripped_from_leg_subprocess_l4():
-    # 桩旋钮不得漏进腿进程换假行为（R2/L4 机械面）；对照组普通变量正常透传。
+    # 桩旋钮不得漏进命令进程换假行为（R2/L4 机械面）；对照组普通变量正常透传。
     saved = {k: os.environ.get(k) for k in ("SANDBAR_AGENT_STUB",
                                             "SANDBAR_AGENT_STUB_ENV_FAIL",
                                             "SANDBAR_WATCH_INTERVAL_SEC",
@@ -594,7 +594,7 @@ def test_h6_output_tail_truncated_to_800():
 
 
 def test_h7_r3_dict_rebuild_point_source_lock():
-    # R3：dict 回退重建点漏写新键=腿跑了回执仍显 0（报文与事实相反）
+    # R3：dict 回退重建点漏写新键=命令跑了回执仍显 0（报文与事实相反）
     src = _src("dev_lane.py")
     for key in ("handover_ran", "handover_passed", "handover_failed"):
         assert '%s=int(rraw.get("%s") or 0)' % (key, key) in src
@@ -609,7 +609,7 @@ def test_i1_new_knobs_in_test_stub_family():
 
 
 def test_i2_strip_face_single_discipline_source_lock():
-    # verify_lane 子进程 env 与交接腿子进程 env 同一句剥除判据（两处，不多不少）
+    # verify_lane 子进程 env 与移交命令子进程 env 同一句剥除判据（两处，不多不少）
     src = _src("agent_activities.py")
     assert src.count("if k not in TEST_STUB_ENV_KNOBS and "
                      "k not in WORKER_ROUTING_ENV_KNOBS") == 2
@@ -640,16 +640,16 @@ def test_j2_flow_brief_implement_carries_env_contract():
 
 def test_j3_flow_brief_arbitrate_duty_sentences_c2():
     b = dev_lane.FLOW_BRIEF["arbitrate"]
-    # R5②：红腿不得因单列计数放行
-    assert "红腿=验证未过" in b and "不得因腿单列计数而放行" in b
+    # R5②：失败命令不得因单列计数放行
+    assert "失败命令=验证未过" in b and "不得因命令单列计数而放行" in b
     # R4：env_fail 段=验证未闭环，不得当已验证
     assert "验证未闭环" in b and "不得当已验证" in b
 
 
 def test_j4_arb_acc_context_wiring_source_lock():
-    # R4/R5 接线：仲裁/走查上下文都注入交接腿结果行 + 环境受限段点名行
+    # R4/R5 接线：仲裁/走查上下文都注入移交命令结果行 + 环境受限段点名行
     src = _src("dev_lane.py")
-    assert "【交接验证腿（t260917-08）】" in src
+    assert "【移交验证命令（t260917-08）】" in src
     assert "【环境受限段（未验证声明）】" in src
     assert 'arb_ctx += "\\n" + _hv_ctx' in src
     assert "_hv_ctx" in src.split("acc_ctx = ")[1].split("if workflow.patched")[0]

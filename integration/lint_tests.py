@@ -243,7 +243,7 @@ def lint_three_state():
 
 
 def lint_terminology():
-    """L7 术语废止看守（宿主令 260920）：行话「腿」不得新增。
+    """L7 术语废止看守（宿主令 260920）：行话旧称（被禁词，真源=docs/terminology.md「禁用对照」）不得新增。
 
     判据=**按文件的出现次数基线**（integration/terminology-baseline.json，随本规则
     一起落盘）：① 基线里没有的文件出现该词 → 红；② 基线里有的文件超出记录次数

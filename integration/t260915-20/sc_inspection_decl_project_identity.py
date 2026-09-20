@@ -19,7 +19,7 @@ intent（登记于 run_scenarios.py，名 t260915-20-decl-project-identity）：
 分工（防 intent 级重复）：
   · t260905-03-decl-gate 守声明门**通用**行为（畸形声明/未接线 kind/占位与未知实
     例拒绝/enabled 放行回执带票号）——其夹具不含 project_key 字段；本条只守**新
-    身份字段**的门行为，与彼四类拒绝腿互不覆盖；
+    身份字段**的门行为，与彼四类拒绝子用例互不覆盖；
   · 真链路半张（t260915-20-project-identity-realchain，exclusive）守 SA 盖章／
     项目板行可见／扫对仓／调度 update 重铸——身份进起票面之后的行为；本条止于
     解析门；
@@ -77,7 +77,7 @@ def err_text(parsed, raw):
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="sandbar-t26091520-decl-")
 
-    # ---- 腿①：启用实例缺 project_key → 拒收点名实例与身份事由 ----
+    # ---- 子用例①：启用实例缺 project_key → 拒收点名实例与身份事由 ----
     d1 = os.path.join(tmp, "d1.yaml")
     with open(d1, "w", encoding="utf-8") as f:
         f.write(decl_text(
@@ -95,7 +95,7 @@ def main() -> int:
           and "nopk-inst" in err and any(t in err for t in IDENTITY_TOKENS),
           "ok=%r error=%r" % ((parsed or {}).get("ok"), err[:200]))
 
-    # ---- 腿②：enabled=false 占位实例缺 project_key → 同样拒收（身份不豁免） ----
+    # ---- 子用例②：enabled=false 占位实例缺 project_key → 同样拒收（身份不豁免） ----
     d2 = os.path.join(tmp, "d2.yaml")
     with open(d2, "w", encoding="utf-8") as f:
         f.write(decl_text(
@@ -113,7 +113,7 @@ def main() -> int:
           and "nopk-placeholder" in err and any(t in err for t in IDENTITY_TOKENS),
           "ok=%r error=%r" % ((parsed or {}).get("ok"), err[:200]))
 
-    # ---- 腿③：project_key 形状畸形 → 拒收点名实例 ----
+    # ---- 子用例③：project_key 形状畸形 → 拒收点名实例 ----
     d3 = os.path.join(tmp, "d3.yaml")
     with open(d3, "w", encoding="utf-8") as f:
         f.write(decl_text(
@@ -132,7 +132,7 @@ def main() -> int:
           and "badshape-inst" in err and any(t in err for t in IDENTITY_TOKENS),
           "ok=%r error=%r" % ((parsed or {}).get("ok"), err[:200]))
 
-    # ---- 腿④：正形双实例 → 过门，specs 面身份各归各位 ----
+    # ---- 子用例④：正形双实例 → 过门，specs 面身份各归各位 ----
     key_a, key_b = "declkey-a", "declkey-b"
     d4 = os.path.join(tmp, "d4.yaml")
     with open(d4, "w", encoding="utf-8") as f:
@@ -167,7 +167,7 @@ def main() -> int:
           and str(sb.get("instance_project_key") or "") == key_b,
           "a=%r b=%r" % (sa.get("instance_project_key"), sb.get("instance_project_key")))
 
-    # ---- 腿⑤：实例身份 × 计数源两键并存（race-first）→ 不串键 ----
+    # ---- 子用例⑤：实例身份 × 计数源两键并存（race-first）→ 不串键 ----
     count_src = "countsrc-a"
     d5 = os.path.join(tmp, "d5.yaml")
     with open(d5, "w", encoding="utf-8") as f:

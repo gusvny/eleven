@@ -4,7 +4,7 @@
 对抗口径（用户视角：错配置必须得到「红工单 + 点名文件」，绝不静默拿错 persona/模型猜着跑）：
   F1 条目 project.yaml 损坏（存在但解析不了）→ 红，报错点名条目文件——即使现行约定
      位置有同名角色文件，也绝不静默回落（三态总纲：不得按缺失跳过）。
-  F2 无表族（t260914-05 兜底腿退役）：model_routes 指向缺失文件（file_missing）/
+  F2 无表族（t260914-05 兜底分支退役）：model_routes 指向缺失文件（file_missing）/
      未声明（decl_missing）→ spawn 不红、agent 照跑，但**不打模型 patch**（=本轮模型
      来 profile 默认，消费方另点名），且引擎面单点点名留痕（state+路径+指纹）——
      绝不静默取任何仓内表。roles_dir 锚点缺失仍红（roles/persona 契约未放宽，F2b 不变）。
@@ -60,7 +60,7 @@ def must_raise(label, frag, **kw):
 
 
 def must_no_table(label, expect_state, **kw):
-    """t260914-05 无表腿：model_routes 非 ok 态 → spawn 不红、不打模型 patch
+    """t260914-05 无表子用例：model_routes 非 ok 态 → spawn 不红、不打模型 patch
     （agent 继承 profile 默认，绝不静默取任何仓内表），且引擎面**点名留痕**
     （[model_route] state=<态> + 指纹段）。三态各自可辨（expect_state 由调用方钉）。"""
     with fx.capture_route_warnings() as warns:

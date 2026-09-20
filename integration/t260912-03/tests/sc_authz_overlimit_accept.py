@@ -29,7 +29,7 @@ intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：
   spawn_worker(disable_ki061=False, arb_verdict="tests-fault") + ticket-start +
   poll 到超限 blocked。
 
-三条腿（顺序执行，单票单 worker 单舞台）：
+三条子用例（顺序执行，单票单 worker 单舞台）：
   相一（B① 无授权负锁）：tests-fault 桩 6 轮超限 → stage_state=="blocked" 且回执含
         「超限」，meta['authorizations'] 不存在或为空；
   相二（B③ 过期授权负锁）：CLI 投 expires=当前时间-10 的授权 → workflow 拒收

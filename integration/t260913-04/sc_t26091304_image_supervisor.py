@@ -12,7 +12,7 @@ intent（用户可感知）：工单票一进容器就能干活——镜像预�
 
 high-level steps：docker 在场探针 → 镜像在场探针（Dockerfile.agent 在场而镜像缺席=
 ENV_FAIL 点名构建命令；声明面整体缺席=FAIL 验收棒）→ 起契约形容器 → 逐项探镜像依赖
-版本 → sandbar-exec 协议三腿（pgid 落盘/按组 TERM 收割/退出清档/坏参非零）→ 清理零残留。
+版本 → sandbar-exec 协议三子用例（pgid 落盘/按组 TERM 收割/退出清档/坏参非零）→ 清理零残留。
 
 三态：PASS 0 / FAIL 1 / ENV_FAIL 2。实现段落地前红属预期（TDD 验收棒）；
 arbitrate/merge 期必须绿。engine 池（docker 舞台，宽 1；本票写集命中
@@ -100,7 +100,7 @@ def main():
                     "err=%s" % d.stderr[:120])
             C.check(started, "pgid 文件落盘（收割协议的寻址面）", "path=%s" % pgid)
             if not started:
-                C.na("supervisor 未成功拉起长命命令——后续收割腿无被测对象（避免真空假绿）")
+                C.na("supervisor 未成功拉起长命命令——后续收割子用例无被测对象（避免真空假绿）")
             else:
                 pg = F.exec_in(CONT, "cat", pgid).stdout.strip()
                 C.check(pg.isdigit(), "pgid 是数字进程组 id", "pgid=%r" % pg[:20])

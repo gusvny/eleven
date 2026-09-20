@@ -11,7 +11,7 @@
 // 与既有场景 intent 不同面（防 intent 级重复）：
 //   - t260901-22 approve-modal-ui 钉「弹层出现 + 内容在册」（UI 在场面），
 //     本场景钉「弹层以 dialog 语义暴露且可经语义通路关闭」（a11y 契约面）；
-//   - t260903-04 bundle-sync 钉 src≡lib 构建卫生（特征词面），本场景产物腿钉
+//   - t260903-04 bundle-sync 钉 src≡lib 构建卫生（特征词面），本场景产物子用例钉
 //     「服务产物内每处 wb-modal 皆带 role」（产物完备面），互不替代；
 //   - multi-tab-coexistence 钉跨页签行为（族行为面）。
 // 三态分级（gen0 实锤后定稿；本票仲裁补「假一致」一课）：页面发现不了 role 时先分清
@@ -23,14 +23,14 @@
 //   台面服务产物 wb-modal/role 覆盖与仓内一致而页面仍发现不了 = 产品红 fail（真契约破）；
 //   【假一致实锤】「台面产物含 role:"dialog" 子串」≠「供给新鲜」：别的树重建过的
 //     lib 天然带别的 role:"dialog"（灯箱等），子串探测曾把错树供给（共享台 /repo 挂着
-//     别票的树）判成「一致」→ 页面腿被错归类成产品红。故供给判定必须【覆盖计数
+//     别票的树）判成「一致」→ 页面子用例被错归类成产品红。故供给判定必须【覆盖计数
 //     对齐】（wb-modal 总数与带 role 数双双对齐仓内产物），不认子串。
 // 实现段落地前「产品红」形态属预期（S0 build-contract 先例）；arbitrate/merge 期必须绿。
 //
 // 台面：共享隔离台（lib_stage_console 供给，绝不触 3099 生产台）+ 每页 API 桩
 // （/sandbar-workbench/api/wf/tickets* 供夹具、写操作只落桩内计数，零真写；其余
 // 路由透传真台）。执行契约（t260904-12 三态）：SUMMARY 末行 + 退出码 0/1/2，
-// （三态=闸内无跳过态的现行定稿，旧跳过语义退役）；本场景无 N/A 腿（夹具恒提供 awaiting-human 票，弹层必可达）。
+// （三态=闸内无跳过态的现行定稿，旧跳过语义退役）；本场景无 N/A 子用例（夹具恒提供 awaiting-human 票，弹层必可达）。
 
 import {
   BASE,
@@ -242,7 +242,7 @@ async function main() {
     return results.summarize()
   }
 
-  // 产物面先判（决定页面腿红的三态归类）：
+  // 产物面先判（决定页面子用例红的三态归类）：
   //   repoBundle=仓内被测真源；served=台面实际服务产物的 wb-modal/role 覆盖计数。
   //   供给新鲜 = served 覆盖计数与仓内产物双双对齐（不认子串，见头注「假一致实锤」）。
   const bundle = repoBundleCoverage()
@@ -250,7 +250,7 @@ async function main() {
   const served = await servedBundleCoverage()
   const servedFresh = !!bundle && !!served &&
     served.total === bundle.total && served.covered === bundle.covered
-  // 页面腿归因：仓内真源齐而台面供给不对齐/探测不到 = 环境红（供给面）；
+  // 页面子用例归因：仓内真源齐而台面供给不对齐/探测不到 = 环境红（供给面）；
   //   供给对齐而页面仍发现不了 = 产品红（真契约破）。报错精确到「哪个检查失败」。
   const classifyPageLeg = () =>
     (repoHasRole && !servedFresh) ? 'env_fail' : 'fail'
@@ -318,7 +318,7 @@ async function main() {
     }
 
     // L4 台面供给一致性：served 覆盖计数与仓内产物对齐才算新鲜（不认子串——
-    // 错树供给的 lib 天然带别的 role:"dialog"，假一致曾把页面腿错归产品红）。
+    // 错树供给的 lib 天然带别的 role:"dialog"，假一致曾把页面子用例错归产品红）。
     if (served === null) {
       results.record('L4 served-asset freshness', 'env_fail', `台面服务产物不可达/探测失败：${BASE}${SERVED_CLIENT}`)
     } else if (!servedFresh) {

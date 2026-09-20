@@ -6,8 +6,8 @@ _quarantine_torn_sessions（双名全量清扫）、_aggregate_lane_usage（两�
 
 票面验收①五态矩阵：仅旧名 / 仅新名 / 双名并存（mtime 双方向 + 平局）/ 皆无 /
 损坏半行文件（发现层照常返回——名字层不读内容；检疫层隔离）。
-review C2 负向腿：两层布局以外（一层 / 三层）的同名档不入统计集。
-review C3 守卫腿：src 面旧名字面必须双名配对 / 落常量 / 带标记（取舍清单见
+review C2 负向子用例：两层布局以外（一层 / 三层）的同名档不入统计集。
+review C3 守卫子用例：src 面旧名字面必须双名配对 / 落常量 / 带标记（取舍清单见
 test_src_tree_session_literal_paired docstring；合成样本自证红绿随守卫交付）。
 零回归锚：只造旧名文件的用例结果与改前语义一致（既有 test_t260905_10_t01 /
 test_t260904_09 套件不改一字并行跑绿）。
@@ -264,7 +264,7 @@ def test_aggregate_dual_generation_tie_prefers_old(tmp_path):
 
 
 def test_aggregate_radius_two_levels_only(tmp_path):
-    """review C2 负向腿：两层布局以外（一层 / 三层）的同名档不入统计集；
+    """review C2 负向子用例：两层布局以外（一层 / 三层）的同名档不入统计集；
     本票匹配前缀过滤（别票不混入）与改前一致。"""
     wt = tmp_path / "wt"
     sess = wt / ".dsh" / "sessions"
@@ -285,7 +285,7 @@ def test_aggregate_zero_note_dual_name(tmp_path):
     assert OLD in note and NEW in note and "/" in note
 
 
-# ---------- 守卫腿（review C3：仿 t260907-04 naming-grep-assert 的轻量版） ----------
+# ---------- 守卫子用例（review C3：仿 t260907-04 naming-grep-assert 的轻量版） ----------
 
 # 取舍清单（先例=t260907-04 sc_naming_grep_assert 的白名单纪律）：
 # - 带：常量行豁免（SESSION_FILE_NAMES 字样——常量定义/消费行允许单侧出现）；

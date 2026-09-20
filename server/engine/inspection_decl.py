@@ -730,7 +730,7 @@ def load_decl_for_instance(instance_id: str):
     覆盖层优先：env 生效 → 只在覆盖层文件里找（absent/error=显式点名，不回落聚合）。
     生产聚合：遍历各项目声明找实例；命中唯一 → 返回；命中多个 → fail-closed 点名两处
     （跨项目实例 id 重复=配置事故）；全无 → 显式报错并列出逐项目状态（含 error 项目点名）——
-    **绝不回落他项目声明、绝不回落引擎样例**（口径④ fail-closed 腿）。"""
+    **绝不回落他项目声明、绝不回落引擎样例**（口径④ fail-closed 分支）。"""
     iid = str(instance_id or "").strip()
     states = iter_project_decls()
     cov = coverage_decl_path()

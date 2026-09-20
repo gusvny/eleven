@@ -19,14 +19,14 @@
 
 分层与依据（防 intent 级重复）：
   · 与 t260911-03-protected-settle-reject（无授权面的 settle 执法终态）**同台架不同 intent**：
-    彼锁「无授权一律拒」（本条腿 A1 复用它守零回归），本条新增「有授权＝真落地 + 记名点名」
+    彼锁「无授权一律拒」（本条子用例 A1 复用它守零回归），本条新增「有授权＝真落地 + 记名点名」
     与授权负锁；两条都不锚实现内部结构。
   · 与 developer L1（judge 纯函数/载荷矩阵/上限）不同层：本条锁真实链路（真 git 泳道 +
     真 settle 单点 + 真 sign 信号 handler）下的用户可感知终态。scope 前缀相邻串语义
     （`integration/baselines` 不得命中 `integration/baselines2`）归 L1 的 `_within` 矩阵，
     本条不重复（L3 拿不到「名单内 + 相邻名」的可执法样本）。
-  · 授权入参形状（结构化记录 / 裸 scope 串）由校准腿自适应两种实现，但**行为要求不变**：
-    放行 + 回执点名 who/issued/理由（裸串形状点不出人＝A2 腿红，对应 review C1）。
+  · 授权入参形状（结构化记录 / 裸 scope 串）由校准子用例自适应两种实现，但**行为要求不变**：
+    放行 + 回执点名 who/issued/理由（裸串形状点不出人＝A2 子用例红，对应 review C1）。
   · 依据：工单验收 A①②③④、C（可查性）、D（t260912-01 真实形态）；KI-074 未闭合项不属本条范围
     （名单仍为引擎内声明，本场景不替它背书）。
 
@@ -51,7 +51,7 @@ REPO = Path(__file__).resolve().parents[3]
 TICKET = "t260912-03"
 TARGET = "integration/baselines/sc_battery.py"      # 受保护名单内的共享电池
 TARGET_DIR = "integration/baselines"                # 目录前缀形态 scope
-OTHER_PATH = "docs/design/contract-v1.md"           # 另一条受保护路径（scope 不匹配腿用）
+OTHER_PATH = "docs/design/contract-v1.md"           # 另一条受保护路径（scope 不匹配子用例用）
 BATTERY_V2 = "# authorized expectation edit\n"
 AUTH_WHO = "宿主"
 AUTH_REASON = "t260912-03 场景：批准本票改共享电池期望值（八文件路径探测修法的一部分）"
@@ -132,7 +132,7 @@ def mk_lane(prefix):
 # ---------------- 授权载荷适配（对 args 形状容忍，但要求行为：放行 + 点名） ----------------
 
 def authz_param_name(aa):
-    """settle 签名里的授权形参名（未接线 → None，腿内点名）。"""
+    """settle 签名里的授权形参名（未接线 → None，子用例内点名）。"""
     try:
         params = inspect.signature(aa._settle_worktree_lane).parameters
     except (TypeError, ValueError):
@@ -161,7 +161,7 @@ def settle(aa, lane, mainrepo, stage, gen=0, write_set=None, base="", authz=None
         sig = {}
     has_face = "face" in sig  # t260916-19 D：face 必填分层标签——新老树两侧可跑
     if authz_param_name(aa) is None and authz is None:
-        # 老形状：完全不传授权参数（等价存量调用）——用于 A1 零回归腿。
+        # 老形状：完全不传授权参数（等价存量调用）——用于 A1 零回归用例。
         try:
             kw = dict(repo=mainrepo, path_gate=True,
                       write_set=list(write_set or []), base_ref=str(base))
@@ -314,7 +314,7 @@ def main():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     if authz_param_name(aa) is None:
-        print("  · 授权形参未接线：显式空授权表腿（workflow 传空过滤集）待实现段落地后生效")
+        print("  · 授权形参未接线：显式空授权表子用例（workflow 传空过滤集）待实现段落地后生效")
     else:
         section("A1b 无授权（显式空授权表）→ 照旧拒（零回归第二形状）")
         tmp, mainrepo, lane, fork = mk_lane("authz-a1b-")

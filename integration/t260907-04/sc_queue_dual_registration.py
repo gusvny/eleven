@@ -13,7 +13,7 @@ intent（用户可感知契约，260908 终切后语义——空库重建窗口�
 舞台：stage_docker 单点搭台（docker 缺席/镜像缺席/起台不健康=ENV_FAIL exit 2，
 点名缺什么）；temporalio SDK 走 poc venv（缺=ENV_FAIL，KI-020③ 族）。
 红线：只连舞台 temporal，不触 3099/生产 7233。
-**本场景自过渡双注册契约翻面（260908 终切撤双 poll）；腿1 红=双 poll 复活。**
+**本场景自过渡双注册契约翻面（260908 终切撤双 poll）；子用例1 红=双 poll 复活。**
 """
 from __future__ import annotations
 
@@ -83,7 +83,7 @@ def main():
         r.finish()
         return
 
-    print("== 腿1 缺省启动 → 单名 poll sandbar，suyou-poc 不双 poll（终切负向守卫）")
+    print("== 子用例1 缺省启动 → 单名 poll sandbar，suyou-poc 不双 poll（终切负向守卫）")
     out, rc = boot_worker(stage_env(host, ns))
     started = "worker 起来了" in out
     if not started and ("connect" in out.lower() or "rpc" in out.lower()):
@@ -93,7 +93,7 @@ def main():
                 "启动行在且单名 sandbar（sandbar=%s suyou-poc 不 poll=%s）"
                 % ("sandbar" in out, "suyou-poc" not in out))
 
-    print("== 腿2 工单专属 worker 显式列表 env → 声明队列名照单全收")
+    print("== 子用例2 工单专属 worker 显式列表 env → 声明队列名照单全收")
     out, rc = boot_worker(stage_env(
         host, ns,
         SANDBAR_TASK_QUEUES="sandbar-ticket-t26090704a,suyou-ticket-t26090704a"))
@@ -101,7 +101,7 @@ def main():
             "日志含双前缀队列（显式声明面；new=%s legacy=%s）"
             % ("sandbar-ticket-t26090704a" in out, "suyou-ticket-t26090704a" in out))
 
-    print("== 腿3 旧名单值 env（显式声明旧名队列）→ 服务旧前缀队列")
+    print("== 子用例3 旧名单值 env（显式声明旧名队列）→ 服务旧前缀队列")
     out, rc = boot_worker(stage_env(
         host, ns, SANDBAR_TASK_QUEUE="suyou-ticket-t26090704old"))
     r.check("suyou-ticket-t26090704old" in out,

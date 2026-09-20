@@ -11,7 +11,7 @@
  *      「工作树放不同内容」证明 settle 不回落工作树、current=工作树当前版、
  *      二进制拒渲染、路径不在该版本、畸形路径/畸形 meta、截断、主树道 N1、base 无效
  *   A2 merge 收口仓（分支残留）：leg① branch-tip 对已收口票生效（teardown 残留面）
- *   B  squash 收口仓（C2 主腿）：subject 不含 lane/<id>、只 body 含——只取 subject
+ *   B  squash 收口仓（C2 主子用例）：subject 不含 lane/<id>、只 body 含——只取 subject
  *      的实现会假 fail-closed，此仓锁「完整 message 匹配」
  *   C  撞库仓：main 上只有长 id 票（lane/t260915-17）的收口提交，查短 id 不命中
  *   D  在飞仓（C1 配套：泳道分支在场）：dispatched/rework 一律拒绝（分支在场也拒）
@@ -187,7 +187,7 @@ const MERGE_META = { id: 't260915-17', status: 'closed', lane: 'worktree', branc
     'A2: 已收口+分支残留 → branch tip=该票提交版本（逐字收口内容）')
 }
 
-/* ── B：squash 收口仓（C2 主腿：subject 无 lane/<id>，只在 body） ── */
+/* ── B：squash 收口仓（C2 主子用例：subject 无 lane/<id>，只在 body） ── */
 {
   const root = newRepo('squash')
   writeFileSync(join(root, 'docs/ref.md'), BASE_REF)

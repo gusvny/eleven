@@ -44,7 +44,7 @@ PASSED = FAILED = ENV_FAILED = 0
 # 实锤：宿主 28 条残留网络耗尽地址池，本场景双 up 被记 FAIL exit 1）。特征窄列
 # 三类，不吞任意 up 失败——产品缺陷导致的 up 失败仍走 FAIL 断言面。
 # t260912-02 注：fully subnetted 一支自受管网段落地起**不再是活路径**（起台建网
-# 显式带子网，不走分配器库存；本场景新增受管网段腿=其回归锚），保留为防御性
+# 显式带子网，不走分配器库存；本场景新增受管网段子用例=其回归锚），保留为防御性
 # 归因（手工直跑 compose/旧期残留仍可能撞池），命中照归环境红不诬产品。
 DAEMON_ENV_PAT = re.compile(
     r"address pools have been fully subnetted"
@@ -55,7 +55,7 @@ DAEMON_ENV_PAT = re.compile(
 def env_guard(err):
     """up stderr 命中 daemon 资源类失败 → 记 env_fail 并 exit 2（点名特征）。"""
     if err and DAEMON_ENV_PAT.search(err):
-        envfail("docker daemon 资源类失败（%s…）：并发/零残留/爆炸半径腿没验成——归环境供给，清残留容器/网络后自动生效"
+        envfail("docker daemon 资源类失败（%s…）：并发/零残留/爆炸半径子用例没验成——归环境供给，清残留容器/网络后自动生效"
                 % " ".join((err or "").strip().split())[:150])
         print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (PASSED, FAILED, ENV_FAILED))
         sys.exit(2)
@@ -142,7 +142,7 @@ def main():
         if FAILED:
             print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (PASSED, FAILED, ENV_FAILED))
             sys.exit(1)
-        envfail("docker 缺席：真并发双起/零残留/爆炸半径腿没验成（装有 docker 的宿主自动生效）")
+        envfail("docker 缺席：真并发双起/零残留/爆炸半径子用例没验成（装有 docker 的宿主自动生效）")
         print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (PASSED, FAILED, ENV_FAILED))
         sys.exit(2)
 
@@ -213,7 +213,7 @@ def main():
                     sys.exit(2)
                 check(False, "full 台起台（rc=%s %s）" % (pf_out.returncode, pf_out.stderr.strip()[-160:]))
 
-            # 受管网段腿（t260912-02，验收 B 的常跑回归网）：每台网络的子网必来自
+            # 受管网段子用例（t260912-02，验收 B 的常跑回归网）：每台网络的子网必来自
             # 受管网段表——建网不再走 docker 分配器库存，「fully subnetted」病灶
             # （260912 实测 32 台走池 23/32）的回归锚落常跑套件，不只活在票内脚本。
             managed = set(sd.net_table())

@@ -17,9 +17,9 @@
 //      三词汇（体检报告三类黄牌的契约词汇面）；
 //   5. Python 侧重装载：新条目在案零隔离、种子条目字节不变、无 .tmp. 泄漏、dirs=单根恰一条；
 //   6. TS 侧 loadRegistry：同一隔离根装出相同 key 集合，逐条 key/name/dirs 与 Python 侧全等；
-//   7. 尾腿（契约①b 排他性钉，独立结算）：先布置 per-key 目录+credentials.yaml 再 add
+//   7. 尾子用例（契约①b 排他性钉，独立结算）：先布置 per-key 目录+credentials.yaml 再 add
 //      应成功——排他性锚 project.yaml 文件而非条目目录。若实现把独占闸架在目录 mkdir 上，
-//      此腿红=契约对（体检②「credentials 在位」态在 add 时点由此才可达）；该腿独立失败
+//      此子用例红=契约对（体检②「credentials 在位」态在 add 时点由此才可达）；该子用例独立失败
 //      不连坐主流程断言，交仲裁裁决（改闸实现 or 修约①b）。
 //
 // 安全红线：零 3099/7233/8233 接触；本场景不连任何 Temporal；只写自建临时目录。
@@ -101,7 +101,7 @@ for (const k of ['zfix10a', 'zfix10b']) {
     `py=${JSON.stringify(py)} ts=${JSON.stringify(t)}`);
 }
 
-// ---- 7. 尾腿（独立结算）：契约①b 排他性钉——先布置 credentials 再 add 应成功 ----
+// ---- 7. 尾子用例（独立结算）：契约①b 排他性钉——先布置 credentials 再 add 应成功 ----
 {
   const dirC = tmpRoot('fix10-proj-c-');
   const preDir = path.join(root, 'zfix10c');

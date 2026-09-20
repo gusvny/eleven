@@ -51,7 +51,7 @@ def main():
     try:
         p = cli("up", "--project", TAG, "--services", "temporal", "--timeout", "900",
                 env_extra=env)
-        env_guard(p.stderr, "起台腿")
+        env_guard(p.stderr, "起台子用例")
         check(p.returncode == 0, "起 1 台成功（rc=%s）" % p.returncode)
         import json as _json
         st = _json.loads((p.stdout or "").strip().splitlines()[-1])

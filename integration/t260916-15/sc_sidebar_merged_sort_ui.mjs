@@ -20,7 +20,7 @@
 // 三态（t260904-12）：stdout 末行 SUMMARY pass/fail/env_fail/na；fail>0 或全 na=exit 1；
 // env_fail>0=exit 2。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
 // 红的分层（TDD 信号质量）：S0 bundle-anchors/①②③④ 在实现落地前红（新行为面）；
-// precheck/rows-landed/⑤行1 标题/⑥行唯一性/⑦卫生腿不依赖新行为（现状即应绿）——
+// precheck/rows-landed/⑤行1 标题/⑥行唯一性/⑦卫生子用例不依赖新行为（现状即应绿）——
 // 若后者也红，红因在夹具/台面而非本票实现，先查场景自身。
 //
 // intent 分界：与 t260915-19-sidebar-inspection-ui 不同面——彼守左栏分拣制（项目组归位/
@@ -279,7 +279,7 @@ async function runBrowser(pw, browser) {
     await page.waitForTimeout(3000)
     await dismissOverlays(page)
 
-    // 数据只在 API 边界打桩；inspection 载荷固定（降级腿归 0915-19，本条不重复）。
+    // 数据只在 API 边界打桩；inspection 载荷固定（降级子用例归 0915-19，本条不重复）。
     await page.route('**/sandbar-workbench/api/wf/**', (route) => {
       const url = new URL(route.request().url())
       const path = url.pathname.replace(/\/+$/, '')
@@ -316,7 +316,7 @@ async function runBrowser(pw, browser) {
     }
     record('S1 precheck', 'pass', `左栏项目组渲染（${PROJ_A}）`)
 
-    // 等全量行落组（4+2）：不候齐，①②腿会跑在渲染前读到残缺序（时序假红）。
+    // 等全量行落组（4+2）：不候齐，①②子用例会跑在渲染前读到残缺序（时序假红）。
     const allLanded = await waitFor(async () => {
       const a = await groupIdsOf(page, PROJ_A, false)
       const u = await groupIdsOf(page, '', true)
@@ -391,7 +391,7 @@ async function runBrowser(pw, browser) {
     record('S1 rows-unique', uniqOk ? 'pass' : 'fail',
       uniqOk ? '甲组 4 行无重复无丢失' : `行唯一性异常：${JSON.stringify(idsA)}`)
 
-    // ⑦ 卫生腿：全旅程零 pageerror。
+    // ⑦ 卫生子用例：全旅程零 pageerror。
     record('S1 page-health', pageErrors.length ? 'fail' : 'pass',
       pageErrors.length ? `pageerror 计 ${pageErrors.length}：${pageErrors.slice(0, 3).join(' | ')}` : '全程零 pageerror')
   } finally {
@@ -403,7 +403,7 @@ async function runBrowser(pw, browser) {
 
 buildContract()
 // consoleHealthy 是 async——不 await 则恒真值（promise 对象），ensure 成功后台面中途
-// 死掉的场景会漏进浏览器腿拿「未捕获异常=FAIL」而非诚实 env_fail（三态误报修正，
+// 死掉的场景会漏进浏览器子用例拿「未捕获异常=FAIL」而非诚实 env_fail（三态误报修正，
 // 260916 仲裁归因轮，0915-19 同款）。
 if (!(await consoleHealthy())) {
   record('S1 console', 'env_fail', `测试控制台不可达：${BASE}（supply 台未起？宿主 3099 红线不碰）`)

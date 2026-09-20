@@ -78,7 +78,7 @@ def iso_root(slug):
     return root
 
 
-# ---- 三态框架（环境缺件=ENV_FAIL exit 2；na 仅限系统状态条件腿；无第四态状态值）----
+# ---- 三态框架（环境缺件=ENV_FAIL exit 2；na 仅限系统状态条件子用例；无第四态状态值）----
 
 _passed = _failed = _env_failed = _na = 0
 
@@ -100,10 +100,10 @@ def envfail(label):
 
 
 def na(label):
-    """系统状态条件腿没验成（观测工具缺席等）：计 na 不计 fail——全腿 na=场景红。"""
+    """系统状态条件子用例没验成（观测工具缺席等）：计 na 不计 fail——全部子用例 na=场景红。"""
     global _na
     _na += 1
-    print("NA    %s（系统状态条件腿：观测工具缺席，非产品非环境）" % label, flush=True)
+    print("NA    %s（系统状态条件子用例：观测工具缺席，非产品非环境）" % label, flush=True)
 
 
 def finish():
@@ -114,7 +114,7 @@ def finish():
     if _env_failed:
         sys.exit(2)
     if _na >= _passed and _passed == 0:
-        sys.exit(1)   # 全腿 na=没验成任何东西，按场景红处理
+        sys.exit(1)   # 全部子用例 na=没验成任何东西，按场景红处理
     sys.exit(0)
 
 
@@ -122,7 +122,7 @@ EXIT_ENV, EXIT_CONFLICT = 2, 3   # stage_docker 档位：EXIT_OK,EXIT_ENV,EXIT_C
 
 
 def up_ok(proc, label):
-    """起台腿三态归属（t260913-01 仲裁修）：rc=0=pass；rc=2(env)/3(conflict)=ENV_FAIL
+    """起台子用例三态归属（t260913-01 仲裁修）：rc=0=pass；rc=2(env)/3(conflict)=ENV_FAIL
     （not-checked，点名档位+docker 输出证据）；其余=FAIL（产品/契约面）。
 
     为什么：起台是 **prepare 型前置面**——环境/并发窗内的 rc≠0 被记 FAIL 属三态协议
@@ -150,7 +150,7 @@ def up_batch_env_only(rcs):
     return bool(rcs) and all(rc in (EXIT_ENV, EXIT_CONFLICT) for rc in rcs.values())
 
 
-def env_guard(err, leg="腿"):
+def env_guard(err, leg="子用例"):
     """stderr 命中 daemon 资源类失败 → ENV_FAIL exit 2（点名特征），不吞产品红。"""
     if err and _daemon_env_pat().search(err):
         envfail("docker daemon 资源类失败（%s…）：%s 没验成"
@@ -265,7 +265,7 @@ def compose_volumes(project):
 
 
 def network_subnets(names):
-    """逐网络 inspect IPAM 子网（B 验收腿：网段必须落在受管表内）。"""
+    """逐网络 inspect IPAM 子网（B 验收子用例：网段必须落在受管表内）。"""
     out = {}
     for n in names:
         p = _docker(["network", "inspect", n, "--format",
@@ -284,7 +284,7 @@ def network_subnets(names):
 
 
 def global_counts():
-    """全机容器数 / 网络数（G 腿：跑前跑后回落基线）。"""
+    """全机容器数 / 网络数（G 子用例：跑前跑后回落基线）。"""
     pc = _docker(["ps", "-aq"], timeout=30)
     pn = _docker(["network", "ls", "-q"], timeout=30)
     return (len([x for x in (pc.stdout or "").split() if x.strip()]),
@@ -324,7 +324,7 @@ def hold_pids(project):
 
 
 def hold_pids_prefix(tag_prefix):
-    """前缀匹配（失控样本的孤儿持有腿清点——损害有界断言面）。"""
+    """前缀匹配（失控样本的孤儿持有子用例清点——损害有界断言面）。"""
     try:
         p = subprocess.run(["pgrep", "-f",
                             "stage_docker.py hold --project %s" % tag_prefix],
@@ -334,11 +334,11 @@ def hold_pids_prefix(tag_prefix):
         return []
 
 
-# ---- 受管网段表（B 腿断言基准；场景不设 NET_BASE env = 测缺省路径）----
+# ---- 受管网段表（B 子用例断言基准；场景不设 NET_BASE env = 测缺省路径）----
 
 def net_table():
     """base /16 切出的全部 /24 槽（含保留尾槽——保留槽的「不被分配」由
-    「≠手工缺省网段」腿覆盖，此处不复制实现的保留逻辑）。"""
+    「≠手工缺省网段」子用例覆盖，此处不复制实现的保留逻辑）。"""
     try:
         base = ipaddress.ip_network(
             os.environ.get("SANDBAR_STAGE_NET_BASE", NET_BASE_DEFAULT).strip())
@@ -514,7 +514,7 @@ def kill_pid(pid, timeout=10):
 
 
 def kill_holds(project, timeout=10):
-    """杀掉某工程的持有腿（真实残台手术前置：hold 活着会以内存副本回写租约，
+    """杀掉某工程的持有子用例（真实残台手术前置：hold 活着会以内存副本回写租约，
     冲掉场景手术——先杀再改，形态才立得住）。"""
     pids = hold_pids(project)
     for pid in pids:
@@ -553,11 +553,11 @@ def up_stage(root, project, services="temporal", timeout=600, **kw):
     """起一台真台并归因 daemon 环境红。返回 (proc, state_json)。"""
     proc = cli(root, "up", "--project", project, "--services", services,
                timeout=timeout, **kw)
-    env_guard(proc.stderr, "起台腿 %s" % project)
+    env_guard(proc.stderr, "起台子用例 %s" % project)
     return proc, last_json(proc)
 
 
-# ---- 坏 docker 桩（D 验收腿：清理失败必须响亮上抛）----
+# ---- 坏 docker 桩（D 验收子用例：清理失败必须响亮上抛）----
 
 def docker_shim_dir():
     """返回一个置前 PATH 后 docker 必失败的临时目录（只遮蔽 docker，不动 git）。"""
@@ -576,7 +576,7 @@ def rm_rf(path):
 
 
 def rand_slot(table, taken):
-    """从受管表挑一个未被占用的槽（compose 渲染腿注入用）。"""
+    """从受管表挑一个未被占用的槽（compose 渲染子用例注入用）。"""
     for s in random.sample(table, min(len(table), 32)):
         if s not in taken:
             return s

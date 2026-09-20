@@ -8,7 +8,7 @@
      - 已签回执行（human_gate 透传）；
      - 畸形 face 逐字段降级（不抛不编造）；
      - **降级闭合行 status≠'closed'**（review 执行项1：deriveTicketState 首判
-       closed→done 会被收口折叠吃掉，错误行必须保持可见；UI 侧四态腿在
+       closed→done 会被收口折叠吃掉，错误行必须保持可见；UI 侧四态子用例在
        workbench tests/t260915-08-inspection-face.mjs 补）。
   C. `cmd_ticket_list` 黑盒（FakeClient，镜 t260901-23/t02 注入面——取舍清单见方案
      §3.5 镜A）：白名单挡僵尸/R9 默认列表行集合零变化/R8 闭合窗口过滤/声明降级
@@ -136,8 +136,8 @@ class FakeClient:
         workflow 所以不需要；本票 R9 断言「缺省列表不得混入巡检行」，桩必须真按
         WorkflowType 过滤，否则测的是假客户端不是板面）。ProjectKey/EpicCode AND
         段同法substring 匹配 + SA 值比对。
-        t260916-02：建模 WorkflowId STARTS_WITH（板面 legacy 腿 + id_prefix 铸号扫描面）；
-        reject_starts_with 注入 R2 降级腿（后端拒绝算子）。"""
+        t260916-02：建模 WorkflowId STARTS_WITH（板面 legacy 查询路径 + id_prefix 铸号扫描面）；
+        reject_starts_with 注入 R2 降级分支（后端拒绝算子）。"""
         self.filters.append(filter_str)
         import re as _re
         starts_m = _re.search(r'STARTS_WITH "([^"]*)"', filter_str)
@@ -318,8 +318,8 @@ def test_same_period_open_row_annotated_with_closed(monkeypatch):
 
 
 def test_partial_sa_truth_table_and_board_legs(monkeypatch):
-    """R6：部分 SA 畸形态真值表（解析单点四态）+ 板面腿（有实例无期上板 period 空；
-    有期无实例走不可辨在跑腿）。"""
+    """R6：部分 SA 畸形态真值表（解析单点四态）+ 板面子用例（有实例无期上板 period 空；
+    有期无实例走不可辨在跑子用例）。"""
     # —— 解析单点真值表 ——
     def wf_with(kv):
         return FakeListWf("x", "RUNNING", TASK_QUEUE, kv)
@@ -333,7 +333,7 @@ def test_partial_sa_truth_table_and_board_legs(monkeypatch):
     # 无 SA 但旧形 id → legacy 只读解析兜底（既有口径回归钉）
     assert client_mod._inspection_instance_period_of(wf_with(SA_EMPTY), "inspection-docs-sync-20260908") \
         == ("docs-sync", "20260908", "legacy_id")
-    # —— 板面腿 ——
+    # —— 板面子用例 ——
     monkeypatch.setattr(client_mod, "_inspection_enabled_instances",
                         lambda: (("inst-a",), "", []))
     start = datetime.fromtimestamp(1760000000, tz=timezone.utc)
@@ -488,8 +488,8 @@ def test_inspection_mode_rows_whitelist_and_closed_window(monkeypatch):
     assert info["kept_unresolved"] == 1 and info["dropped_unresolved"] == 0
     assert info["degraded"] is False and info["enabled_instances"] == [
         "docs-sync", "integration-tests"]
-    # t260916-02 两分支：SA 腿（白名单 OR 串）+ legacy 腿（STARTS_WITH 前缀）；类型过滤
-    # 仍只拼 INSPECTION_BOARD_TYPES 单点（两腿都含同一 WorkflowType 串）
+    # t260916-02 两分支：SA 查询路径（白名单 OR 串）+ legacy 查询路径（STARTS_WITH 前缀）；类型过滤
+    # 仍只拼 INSPECTION_BOARD_TYPES 单点（两路都含同一 WorkflowType 串）
     assert len(client_obj.filters) == 2
     assert 'WorkflowType="InspectionPeriodicWorkflow"' in client_obj.filters[0]
     assert 'InspectionInstance="docs-sync"' in client_obj.filters[0]
@@ -547,7 +547,7 @@ def test_inspection_mode_closed_result_failure_degraded_visible(monkeypatch):
 
 
 def test_inspection_mode_nondict_snapshot_degrades_not_crashes(monkeypatch):
-    # t02 真值表的巡检侧同款腿：snapshot 非 dict（老代码/桩/坏数据）→ 显式降级不崩
+    # t02 真值表的巡检侧同款子用例：snapshot 非 dict（老代码/桩/坏数据）→ 显式降级不崩
     monkeypatch.setattr(client_mod, "_inspection_enabled_instances",
                         lambda: (("integration-tests",), "", []))
     res, _ = run_list(

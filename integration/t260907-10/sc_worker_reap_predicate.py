@@ -6,7 +6,7 @@ intent（用户可感知契约）：目录重构改了 worker 的落盘路径（
 stop-console 的 pgrep 谓词若仍只认旧路径 cmdline，迁移后 stop 停不掉 worker——
 僵尸进程吃资源、占 Temporal 任务槽，用户看到的是「停了控制台机器还在响」。
 本条守资源回收契约：谓词必须命中从 server/engine/worker.py 起的 worker 命令行；
-temporal dev server 谓词腿必须在场（两条收尸线不互替）。
+temporal dev server 谓词子用例必须在场（两条收尸线不互替）。
 
 对抗面（developer 最易犯的错）：改了引擎路径漏改收尸脚本（收尸脚本属仓根扩权面，
 review gen0 A1 申报——本条同时是该扩权债的监督信号：扩权未落地则本条红）；

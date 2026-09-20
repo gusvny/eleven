@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """t260916-28 场景：泳道 .dsh 缺 headless profile 的静默失效 → spawn 前预检响亮 +
-failed 回执六站分流 + 补件自愈（TDD 端到端，一票串三腿）。
+failed 回执六站分流 + 补件自愈（TDD 端到端，一票串三子用例）。
 
 intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：
 真起 workflow（docker 测试台 temporal-only + 真工单专属 worker + 假 dsh 桩），复现
 t260916-26 的用户实报形态（泳道 .dsh 缺 profile → 票 blocked 且真因可辨，绝不压成
 「agent 活动故障」），并钉住方案 v3 的两条新契约：
 
-- 腿 A（generic 站 + 自愈）：开票时候选链全空 → create_plan blocked，blocked_reason
+- 子用例 A（generic 站 + 自愈）：开票时候选链全空 → create_plan blocked，blocked_reason
   点名「泳道 .dsh 缺 + sandbar-headless」、绝不含「agent 活动故障」；
   blocked_detail.reason_code == lane_dsh_profile_missing；桩账本零 create_plan 记录
   （=预检拦在 spawn 之前，没白烧一次 agent）。补源 profile + retry_qc → 自愈推进。
-- 腿 B（parallel_impl_design 汇合边，方案 D3' 第 6 使用点）：review_plan 桩执行
+- 子用例 B（parallel_impl_design 汇合边，方案 D3' 第 6 使用点）：review_plan 桩执行
   prune（删候选链源 profile 与泳道 .dsh profile 两处）→ fork 两边均撞预检 →
   blocked 点名（含「agent 报失败」+「泳道 .dsh 缺」）；绝无「实现完成」假 handoff、
   绝无 rework 条目、被拦轮桩账本零 implement/design 记录。补源 + retry → 两边重跑
   （implement/design 账本各恰 1 条）推进。
-- 腿 C（arbitrate/acceptance 门）：design 重跑桩再删 → arb_acc fork 双拦 →
+- 子用例 C（arbitrate/acceptance 门）：design 重跑桩再删 → arb_acc fork 双拦 →
   blocked(arbitrate) 点名且绝无「缺 verdict= 标记」虚报、无「格式纠正」账 →
   补源 + retry → arbitrate verdict=pass 重跑 → 滞留 failed 的 acceptance 回执被
   门消费 blocked(acceptance) 点名、绝无「验收走查打回」假叙事、无 rework →
@@ -33,12 +33,12 @@ t260916-26 的用户实报形态（泳道 .dsh 缺 profile → 票 blocked 且�
   profile（worker env DSH_HOME 指向的源 home）」与「泳道 .dsh profile（桩进程 env
   DSH_HOME=prep 覆盖后的泳道面）」两处——host 形态泳道 profile 跨段持久、prep 有
   exists 守卫，只删一处无法使下一 spawn 的泳道面缺件（评审 R2 的核心修正）。
-- 候选链全空前提（全腿继承）：worker DSH_HOME=夹具源 home、HOME=无 .dsh 的 tmp
+- 候选链全空前提（全部子用例继承）：worker DSH_HOME=夹具源 home、HOME=无 .dsh 的 tmp
   home——两候选都无 profile 时预检才会拦，宿主真 home 不参与（可复现、不靠运气）。
 - 补件自愈：场景往源 home 补 profile 目录 + retry_qc 信号 → 下一次 spawn 的 prep
   重拷 → 预检过 → 推进。t260916-26 的「手工补 profile 即愈」旅程成为一等公民。
-- 轮次判定：snapshot.retry_count（=_retry_token 读数）随每次 retry_qc 递增，各腿
-  blocked 的识别用 token 阈值防「上一腿的旧 blocked 态」串台。
+- 轮次判定：snapshot.retry_count（=_retry_token 读数）随每次 retry_qc 递增，各子用例
+  blocked 的识别用 token 阈值防「上一子用例的旧 blocked 态」串台。
 
 断言面=snapshot 顶层 blocked_reason/blocked_detail/timeline/handoffs/meta.log/
 results 与桩账本，不锚 prompt/文案整句（子串断言）。红线（testing-guide）：绝不
@@ -64,9 +64,9 @@ from lib_gate import (Fail, read_audit_jsonl, require_bench, require_stage,  # n
 TID = "t26091628-lanedsh"
 PROJ_KEY = "t26091628-lanedsh"
 
-# 各腿 blocked 的 retry token 阈值（retry_qc 每次唤醒 _retry_token +1）。
-TOK_A = 0   # 腿 A：开票后第一次 blocked
-TOK_B = 1   # 腿 B：腿 A retry 之后
+# 各子用例 blocked 的 retry token 阈值（retry_qc 每次唤醒 _retry_token +1）。
+TOK_A = 0   # 子用例 A：开票后第一次 blocked
+TOK_B = 1   # 子用例 B：子用例 A retry 之后
 TOK_C_ARB = 2
 TOK_C_ACC = 3
 
@@ -76,7 +76,7 @@ STUB = r"""
 # 职责：①prompt 与动作落账本（STUB_LOG，JSONL，供场景断言「spawn 了没有/几次」）；
 # ②control（SANDBAR_TEST_STUB_CONTROL）的 prune 列表含本 stage → 先删候选链源
 # profile（SANDBAR_TEST_SRC_DSH_HOME）与泳道 .dsh profile（env DSH_HOME）两处
-# （t260916-28 腿 B/C 缺件触发=两处删机械，只删一处无法使泳道面缺件）；
+# （t260916-28 子用例 B/C 缺件触发=两处删机械，只删一处无法使泳道面缺件）；
 # ③按交付契约写回执（status=ok；arbitrate 的 summary 带 verdict=pass）。rc=0。
 import json, os, re, shutil, sys, time
 prompt = sys.argv[-1] if len(sys.argv) > 1 else ""
@@ -288,7 +288,7 @@ def main():
         worker = spawn_worker(py, TID, env, os.path.join(tmp, "worker.log"), stub_path)
         fail.check(worker.poll() is None, "专属 worker 已拉起（pid=%s）" % worker.pid)
 
-        # ---------- ② 开票：腿 A create_plan 预检拦 ----------
+        # ---------- ② 开票：子用例 A create_plan 预检拦 ----------
         rc, out = run_poc_client(py, "ticket-start", {
             "ticket_id": TID, "template_id": "dev-lane", "project": PROJ_KEY,
             "title": "泳道缺 profile 静默失效端到端", "write_set": ["docs/"]}, env)
@@ -319,7 +319,7 @@ def main():
                        % (worker.returncode, tail))
         _ls = last["snap"]
         fail.check(snap is not None,
-                   "腿A：到达 blocked（180s 末见 stage=%s state=%s reason=%s）"
+                   "子用例A：到达 blocked（180s 末见 stage=%s state=%s reason=%s）"
                    % (_ls.get("stage"), _ls.get("stage_state"),
                       str(_ls.get("blocked_reason") or "")[:120]))
         if snap is None:
@@ -327,20 +327,20 @@ def main():
             return
         reason = str(snap.get("blocked_reason") or "")
         fail.check("泳道 .dsh 缺" in reason and "sandbar-headless" in reason,
-                   "腿A：blocked_reason 点名（含「泳道 .dsh 缺」+「sandbar-headless」）")
+                   "子用例A：blocked_reason 点名（含「泳道 .dsh 缺」+「sandbar-headless」）")
         fail.check("agent 活动故障" not in reason,
-                   "腿A：绝不压成「agent 活动故障」（本票要杀的形态）")
+                   "子用例A：绝不压成「agent 活动故障」（本票要杀的形态）")
         bd = snap.get("blocked_detail")
         fail.check(isinstance(bd, dict) and bd.get("reason_code") == "lane_dsh_profile_missing",
-                   "腿A：blocked_detail.reason_code==lane_dsh_profile_missing（机读可辨）")
+                   "子用例A：blocked_detail.reason_code==lane_dsh_profile_missing（机读可辨）")
         rows = read_stub_log(stub_log)
         fail.check(stub_count(rows, "create_plan") == 0,
-                   "腿A：桩账本零 create_plan 记录（=预检拦在 spawn 前，没白烧 agent）")
+                   "子用例A：桩账本零 create_plan 记录（=预检拦在 spawn 前，没白烧 agent）")
 
-        # ---------- ③ 腿 A 自愈：补源 profile + retry_qc ----------
+        # ---------- ③ 子用例 A 自愈：补源 profile + retry_qc ----------
         ensure_source_profile(src_dsh)
         rc, out = send_retry_qc(py, stage, TID)
-        fail.check(rc == 0, "腿A：补源 profile + retry_qc 唤醒（rc=%s）" % rc)
+        fail.check(rc == 0, "子用例A：补源 profile + retry_qc 唤醒（rc=%s）" % rc)
 
         def _plan_done():
             s = query_snapshot(py, env, TID)
@@ -355,82 +355,82 @@ def main():
             return None
         snap = poll(_plan_done, 150)
         fail.check(snap is not None,
-                   "腿A：补件后 create_plan 真跑完成（150s 末 results=%s）"
+                   "子用例A：补件后 create_plan 真跑完成（150s 末 results=%s）"
                    % sorted((last["snap"].get("results") or {}).keys()))
         rows = read_stub_log(stub_log)
         fail.check(stub_count(rows, "create_plan") >= 1,
-                   "腿A：自愈后桩账本有 create_plan 记录（=spawn 真发生，旅程闭环）")
+                   "子用例A：自愈后桩账本有 create_plan 记录（=spawn 真发生，旅程闭环）")
 
-        # ---------- ④ 腿 B：impl fork 汇合边（D3' 第 6 使用点） ----------
+        # ---------- ④ 子用例 B：impl fork 汇合边（D3' 第 6 使用点） ----------
         # review_plan 桩 prune（删两处）→ fork 两边均撞预检 → blocked 点名
         snap = poll(_blocked("泳道 .dsh 缺", TOK_B), 240)
         _ls = last["snap"]
         fail.check(snap is not None,
-                   "腿B：到达 fork 拦截 blocked（240s 末见 stage=%s state=%s）"
+                   "子用例B：到达 fork 拦截 blocked（240s 末见 stage=%s state=%s）"
                    % (_ls.get("stage"), _ls.get("stage_state")))
         if snap is None:
             fail.finish()
             return
         reason = str(snap.get("blocked_reason") or "")
         fail.check("agent 报失败" in reason and "泳道 .dsh 缺" in reason,
-                   "腿B：blocked_reason 含「agent 报失败」+「泳道 .dsh 缺」（六站分流同族文案）")
+                   "子用例B：blocked_reason 含「agent 报失败」+「泳道 .dsh 缺」（六站分流同族文案）")
         bd = snap.get("blocked_detail")
         fail.check(isinstance(bd, dict) and bd.get("reason_code") == "lane_dsh_profile_missing",
-                   "腿B：blocked_detail.reason_code==lane_dsh_profile_missing")
+                   "子用例B：blocked_detail.reason_code==lane_dsh_profile_missing")
         blocked_tl = [e for e in (snap.get("timeline") or []) if e.get("state") == "blocked"]
         fail.check(any(e.get("stage") in ("implement", "design_integration_tests")
                        for e in blocked_tl),
-                   "腿B：timeline 有 fork 边的 blocked 条目（stage=implement/design_integration_tests）")
+                   "子用例B：timeline 有 fork 边的 blocked 条目（stage=implement/design_integration_tests）")
         handoffs = snap.get("handoffs") or []
         fail.check(not [h for h in handoffs
                         if "实现完成" in str(h.get("summary") or "")
                         or "集成测试集就绪" in str(h.get("summary") or "")],
-                   "腿B：绝无「实现完成/集成测试集就绪」假 handoff（failed 回执不被吞成完成）")
+                   "子用例B：绝无「实现完成/集成测试集就绪」假 handoff（failed 回执不被吞成完成）")
         fail.check(not [e for e in (snap.get("timeline") or []) if e.get("state") == "rework"],
-                   "腿B：绝无 rework 条目（不白烧打回轮）")
+                   "子用例B：绝无 rework 条目（不白烧打回轮）")
         rows = read_stub_log(stub_log)
         fail.check(stub_count(rows, "implement") == 0 and stub_count(rows, "design_integration_tests") == 0,
-                   "腿B：被拦轮桩账本零 implement/design 记录（=拦在 spawn 前；汇合边不吞回执）")
+                   "子用例B：被拦轮桩账本零 implement/design 记录（=拦在 spawn 前；汇合边不吞回执）")
 
-        # ---------- ⑤ 腿 B 自愈 → 腿 C 第一次 blocked(arbitrate) ----------
+        # ---------- ⑤ 子用例 B 自愈 → 子用例 C 第一次 blocked(arbitrate) ----------
         ensure_source_profile(src_dsh)
         rc, out = send_retry_qc(py, stage, TID)
-        fail.check(rc == 0, "腿B：补源 profile + retry_qc 唤醒（rc=%s）" % rc)
+        fail.check(rc == 0, "子用例B：补源 profile + retry_qc 唤醒（rc=%s）" % rc)
 
         # design 重跑桩 prune（两处删）→ integ_join/机械段照常 → arb_acc fork 双拦
         snap = poll(_blocked("泳道 .dsh 缺", TOK_C_ARB), 300)
         _ls = last["snap"]
         fail.check(snap is not None,
-                   "腿C：到达 blocked（300s 末见 stage=%s state=%s reason=%s）"
+                   "子用例C：到达 blocked（300s 末见 stage=%s state=%s reason=%s）"
                    % (_ls.get("stage"), _ls.get("stage_state"),
                       str(_ls.get("blocked_reason") or "")[:120]))
         if snap is None:
             fail.finish()
             return
         fail.check(snap.get("stage") in ("arbitrate", "acceptance_walkthrough"),
-                   "腿C：第一次 blocked 落在 arb_acc fork 双站之一（stage=%s；fork 双边均"
+                   "子用例C：第一次 blocked 落在 arb_acc fork 双站之一（stage=%s；fork 双边均"
                    "撞预检——门 2 先拦 arbitrate、门 5 随后消费滞留回执拦 acceptance，"
                    "poll 相位决定先抓到哪站，两站都在被测面内）" % snap.get("stage"))
         reason = str(snap.get("blocked_reason") or "")
         fail.check("agent 报失败" in reason and "泳道 .dsh 缺" in reason,
-                   "腿C：blocked_reason 含「agent 报失败」+「泳道 .dsh 缺」")
+                   "子用例C：blocked_reason 含「agent 报失败」+「泳道 .dsh 缺」")
         fail.check("缺 verdict= 标记" not in reason,
-                   "腿C：绝无「缺 verdict= 标记」虚报（failed 回执不进格式纠正循环）")
+                   "子用例C：绝无「缺 verdict= 标记」虚报（failed 回执不进格式纠正循环）")
         log_notes = "｜".join(str(e.get("note") or "") for e in ((snap.get("meta") or {}).get("log") or []))
         fail.check("格式纠正" not in log_notes,
-                   "腿C：meta.log 无「格式纠正」账（计数不被污染）")
+                   "子用例C：meta.log 无「格式纠正」账（计数不被污染）")
         rows = read_stub_log(stub_log)
         n_arb_now = stub_count(rows, "arbitrate")
         fail.check(n_arb_now in (0, 1),
-                   "腿C：arbitrate 桩账本 ∈{0,1}（抓到双拦初态=0；抓到滞留消费态=重跑恰 1；"
+                   "子用例C：arbitrate 桩账本 ∈{0,1}（抓到双拦初态=0；抓到滞留消费态=重跑恰 1；"
                    "实得 %d）" % n_arb_now)
         fail.check(stub_count(rows, "implement") == 1 and stub_count(rows, "design_integration_tests") == 1,
-                   "腿B自愈证据：重跑后 implement/design 账本各恰 1 条（ done 标志未置、真重跑）")
+                   "子用例B自愈证据：重跑后 implement/design 账本各恰 1 条（ done 标志未置、真重跑）")
 
-        # ---------- ⑥ 腿 C 自愈 1：arbitrate verdict=pass 重跑 → acceptance 拦截 ----------
+        # ---------- ⑥ 子用例 C 自愈 1：arbitrate verdict=pass 重跑 → acceptance 拦截 ----------
         ensure_source_profile(src_dsh)
         rc, out = send_retry_qc(py, stage, TID)
-        fail.check(rc == 0, "腿C：补源 + retry_qc（第 2 次，rc=%s）" % rc)
+        fail.check(rc == 0, "子用例C：补源 + retry_qc（第 2 次，rc=%s）" % rc)
 
         def _acc_blocked():
             s = query_snapshot(py, env, TID)
@@ -447,7 +447,7 @@ def main():
         snap = poll(_acc_blocked, 240)
         _ls = last["snap"]
         fail.check(snap is not None,
-                   "腿C：arbitrate 重跑后 acceptance blocked 到达（240s 末见 stage=%s state=%s reason=%s）"
+                   "子用例C：arbitrate 重跑后 acceptance blocked 到达（240s 末见 stage=%s state=%s reason=%s）"
                    % (_ls.get("stage"), _ls.get("stage_state"),
                       str(_ls.get("blocked_reason") or "")[:120]))
         if snap is None:
@@ -455,21 +455,21 @@ def main():
             return
         reason = str(snap.get("blocked_reason") or "")
         fail.check("agent 报失败" in reason,
-                   "腿C：acceptance blocked 点名（含「agent 报失败」，滞留 failed 回执被门消费）")
+                   "子用例C：acceptance blocked 点名（含「agent 报失败」，滞留 failed 回执被门消费）")
         fail.check("验收走查打回" not in reason,
-                   "腿C：绝无「验收走查打回」假叙事（不污染 acc_rounds、不白烧 implement）")
+                   "子用例C：绝无「验收走查打回」假叙事（不污染 acc_rounds、不白烧 implement）")
         fail.check(not [e for e in (snap.get("timeline") or []) if e.get("state") == "rework"],
-                   "腿C：全程绝无 rework 条目")
+                   "子用例C：全程绝无 rework 条目")
         rows = read_stub_log(stub_log)
         fail.check(stub_count(rows, "arbitrate") == 1,
-                   "腿C：arbitrate 恰重跑 1 次（verdict=pass 回执，桩账本为证）")
+                   "子用例C：arbitrate 恰重跑 1 次（verdict=pass 回执，桩账本为证）")
         fail.check(stub_count(rows, "acceptance") == 0,
-                   "腿C：桩账本零 acceptance 记录（=拦在 spawn 前）")
+                   "子用例C：桩账本零 acceptance 记录（=拦在 spawn 前）")
 
-        # ---------- ⑦ 腿 C 自愈 2：acceptance 重跑 ok → merge_check 到达 ----------
+        # ---------- ⑦ 子用例 C 自愈 2：acceptance 重跑 ok → merge_check 到达 ----------
         ensure_source_profile(src_dsh)
         rc, out = send_retry_qc(py, stage, TID)
-        fail.check(rc == 0, "腿C：补源 + retry_qc（第 3 次，rc=%s）" % rc)
+        fail.check(rc == 0, "子用例C：补源 + retry_qc（第 3 次，rc=%s）" % rc)
 
         def _merge_check():
             s = query_snapshot(py, env, TID)
@@ -478,12 +478,12 @@ def main():
             return s if s.get("stage") == "merge_check" else None
         snap = poll(_merge_check, 240)
         fail.check(snap is not None,
-                   "腿C：全链自愈终点——票到达 merge_check（240s 末见 stage=%s state=%s；"
+                   "子用例C：全链自愈终点——票到达 merge_check（240s 末见 stage=%s state=%s；"
                    "其后终态不判，与 t260912-03 同口径）"
                    % (last["snap"].get("stage"), last["snap"].get("stage_state")))
         rows = read_stub_log(stub_log)
         fail.check(stub_count(rows, "acceptance") == 1,
-                   "腿C：acceptance 重跑 ok（账本恰 1 条，全链闭环）")
+                   "子用例C：acceptance 重跑 ok（账本恰 1 条，全链闭环）")
 
         # ---------- ⑧ 红线：被测子进程零触碰生产端口 ----------
         arows = read_audit_jsonl(audit_log)

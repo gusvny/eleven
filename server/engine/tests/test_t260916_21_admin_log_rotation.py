@@ -352,7 +352,7 @@ def test_orphan_rolling_adopted_then_policy_deleted(tmp_path, capsys):
 def test_orphan_adopt_failure_degrades_named(tmp_path, capsys):
     if getattr(os, "geteuid", lambda: 1)() == 0:
         pytest.skip("root 下只读目录仍可改名，无法注错")
-    _stub_registry(Path(os.environ["SANDBAR_PROJECTS_DIR"]), keep=0)  # 关删除面，单测收编降级腿
+    _stub_registry(Path(os.environ["SANDBAR_PROJECTS_DIR"]), keep=0)  # 关删除面，单测收编降级分支
     audit._reset_config()
     orphan = tmp_path / "admin.log.rolling.998.cafe12"
     orphan.write_text('{"orphan": 1}\n', encoding="utf-8")

@@ -11,7 +11,7 @@
 //   D. 接入弹层预检口径退役「存在性」措辞、改「将自动创建」（代建口径同步）。
 //
 // 台别：src+lib 双锚灰盒（同 project-sessions.mjs S3 守卫手法）；真 DOM 呈现由合并闸
-// ui_evidence 截图证据面覆盖（KI-036/044 家族），本场景不重复 browser 腿。
+// ui_evidence 截图证据面覆盖（KI-036/044 家族），本场景不重复 browser 子用例。
 // 实现落地前本场景红属预期（TDD 信号），arbitrate/merge 期必须绿。
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';

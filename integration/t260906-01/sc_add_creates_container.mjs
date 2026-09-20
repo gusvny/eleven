@@ -99,9 +99,9 @@ const EXPECTED_FILES = [
     r.out.includes('container-no-git') && r.out.includes('未含 git 仓库'), r.out.slice(-500));
 }
 
-// ---- E 补充：假 git 桩在场时注册表侧同样零 git 调用（第二条腿共用同一桩）----
+// ---- E 补充：假 git 桩在场时注册表侧同样零 git 调用（第二条子用例共用同一桩）----
 {
-  c.check('两腿累计零 git 调用', !existsSync(gitCalls),
+  c.check('两子用例累计零 git 调用', !existsSync(gitCalls),
     existsSync(gitCalls) ? readFileSync(gitCalls, 'utf8').slice(-300) : '');
 }
 

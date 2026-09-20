@@ -15,7 +15,7 @@
 | ④ | 文档更新（运维口径落 server/engine/README.md） | **过** | README §8.3.1 新增：核心事实（重启/重载 console 会波及全部在飞 agent 阶段）+SIGTERM 后语义（宽限旋钮/点名/终态清单/票面点名文案/自动重跑一次）+三路停机口径表（dispose 路/崩溃收养路/断电 SIGKILL 路）+生效窗口（按 worker 进程生效，存量票 worker 重启前仍是旧码）+已知边界（merge_check 等不在册、SIGKILL 无宽限）+故障模式取舍清单（C5 纪律）。未写 notes/，符合写集 |
 
 ### 集成场景②（console 崩溃收养路）实跑 PASS
-腿A 收养路（console 崩溃→票 worker 被 launchd 收养 ppid=1→watch 发现自退）缺省 grace 实得 1800s+自退语义日志在文；腿B 旋钮=2 贯通崩溃路；腿C 直接信号对照恒判（防全腿 N/A）。收养观测 ps+pgrep 双通道，被测子进程零生产连接（审计钩子自证）。
+子用例A 收养路（console 崩溃→票 worker 被 launchd 收养 ppid=1→watch 发现自退）缺省 grace 实得 1800s+自退语义日志在文；子用例B 旋钮=2 贯通崩溃路；子用例C 直接信号对照恒判（防全部子用例 N/A）。收养观测 ps+pgrep 双通道，被测子进程零生产连接（审计钩子自证）。
 
 ## 测试资产变更审查（对照打回轮次）
 

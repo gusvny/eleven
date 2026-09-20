@@ -6,7 +6,7 @@
 
 铁律（沿 t260903-10 lib_installer 纪律）：
 - 绝不向真环境（3099/7233/8233 现有占用者）发任何信号；场景对生产端口只允许
-  「审计钩子自证腿」里被钩子拦截的连接尝试（先记后抛，内核建连前被阻断）；
+  「审计钩子自证子用例」里被钩子拦截的连接尝试（先记后抛，内核建连前被阻断）；
 - 一切状态写临时目录/槽位目录；spawn 的进程收尾 TERM→KILL 兜底；
 - 依赖未就位=exit 2 MISSING（环境缺失，可辨于被测红）；端口被外来者占=exit 3。
 
@@ -130,7 +130,7 @@ def require_stage(fail, project, namespace):
     退出码直译：env（docker 缺席/镜像缺席/不健康/端口段耗尽）→ exit 2 环境红；
     conflict → exit 3；usage → 场景代码 bug 按 1 红处理（不该发生，发生了就是场景错）。
     sa_registered=False（temporal CLI 不可得，KI-020③ 同源）→ exit 2 点名——
-    本族场景的 ticket-start 带 project 需要 ProjectKey SA，没注册=后续腿全跑不真。"""
+    本族场景的 ticket-start 带 project 需要 ProjectKey SA，没注册=后续子用例全跑不真。"""
     sys.path.insert(0, os.path.join(REPO, "integration"))
     import stage_docker  # noqa: E402
     try:

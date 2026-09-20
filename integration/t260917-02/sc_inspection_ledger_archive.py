@@ -5,7 +5,7 @@
 intent（登记于 run_scenarios.py，名 t260917-02-ledger-archive-regression）：
   260917 台账同名覆盖事故（91 条发现覆盖 89 条、无归档不可找回）的闸内回归——用户
   可感知契约：**任何跨票同名覆盖前，旧记录必须先归档且归档件可读**；归档不污染
-  deadman 期号核查。六条断言腿：
+  deadman 期号核查。六条断言子用例：
   ①跨票覆盖 → 归档产生、旧记录 json 可读且内容==旧跑、canonical==新跑（验收③主断言）；
   ②同票自身重写 → 不归档（每跑一份的「跑」以票为界，不稀释成每写一份）；
   ③畸形旧件（坏字节）→ 原字节整体搬移留痕（corrupt 标记），新写不拦；
@@ -74,7 +74,7 @@ def check(name, cond, detail=""):
 
 
 def check_na(name, cond, detail=""):
-    """系统态条件腿（环境不给力=N/A，非产品非环境红；全腿 N/A 才算场景红）。"""
+    """系统态条件子用例（环境不给力=N/A，非产品非环境红；全部子用例 N/A 才算场景红）。"""
     if cond:
         STATS["na"] += 1
         print("N/A %s" % name, flush=True)
@@ -227,7 +227,7 @@ def main() -> int:
         check("A6b 中间跑（ticket_e）归档件仍在（逐跑留史不断代）",
               e_kept, "归档件=%s" % seq)
 
-        # ---- ⑦ 归档失败不拦新写（系统态条件腿：root 下 chmod 可能无效 → N/A）----
+        # ---- ⑦ 归档失败不拦新写（系统态条件子用例：root 下 chmod 可能无效 → N/A）----
         arc_dir = os.path.join(out_dir, ARCHIVE_DIR)
         try:
             os.chmod(arc_dir, 0o500)
@@ -246,7 +246,7 @@ def main() -> int:
                 os.chmod(arc_dir, 0o755)
         else:
             check_na("A7 归档失败不拦新写（本环境 chmod 不可扰——root/管理员态，"
-                     "系统态条件腿 N/A）", True)
+                     "系统态条件子用例 N/A）", True)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

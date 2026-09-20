@@ -26,7 +26,7 @@
 //
 // Execution contract (t260904-12 三态): stdout last line
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; missing deps → env_fail
-// (exit 2); FAIL>0 或全腿 na → exit 1. Isolated console
+// (exit 2); FAIL>0 或全部子用例 na → exit 1. Isolated console
 // SANDBAR_TEST_CONSOLE (default: lib_stage_console 共享台); hard guard: never 3099.
 
 import { STAGE_SEED_ROW_SEL } from '../lib_stage_console.mjs';
@@ -113,7 +113,7 @@ try {
   record('t2/factory-new-suppressed', factoryVisible === 0 ? 'pass' : 'fail',
     factoryVisible === 0 ? '' : `出厂新建钮可见 ${factoryVisible} 个（应被压制）`);
 
-  // T3 项目色三处同源（t260907-03 腿②重基线——判定结论：原逐位相等断言不成立，
+  // T3 项目色三处同源（t260907-03 子用例②重基线——判定结论：原逐位相等断言不成立，
   // 重基线为「同源派生」语义，不回退）。
   // 判定依据：+ 钮边框/文字自 t260905-08 收口（029a15f）起为 color-mix(55%/45%
   // 项目色混平台令牌链) 的对比度自适应派生（55% 纯色在深底下边框对比不足），
@@ -158,14 +158,14 @@ try {
   } else {
     const varRgb = hexToRgbString(colors.varColor);
     const inPalette = PROJECT_PALETTE.includes(colors.varColor);
-    // 色点腿（原语义保留）：色点 background == var == 确定性色板值（纯色，不放宽）
+    // 色点子用例（原语义保留）：色点 background == var == 确定性色板值（纯色，不放宽）
     const dotSame = varRgb !== null && varRgb === colors.dotColor;
     record('t3/dot-is-palette-value', dotSame && inPalette ? 'pass' : 'fail',
       dotSame && inPalette ? '' : `var=${colors.varColor}(palette=${inPalette}) dotBg=${colors.dotColor}`);
-    // + 钮边框腿（重基线）：== 同色板值经锁定派生公式（55% 混）的 computed 期望值
+    // + 钮边框子用例（重基线）：== 同色板值经锁定派生公式（55% 混）的 computed 期望值
     record('t3/plus-border-derived-same-source', colors.plusBorder === colors.expectBorder ? 'pass' : 'fail',
       colors.plusBorder === colors.expectBorder ? '' : `plusBorder=${colors.plusBorder} expected(55% mix of ${colors.varColor})=${colors.expectBorder}`);
-    // + 钮文字腿（重基线）：== 45% 混平台前景的 computed 期望值
+    // + 钮文字子用例（重基线）：== 45% 混平台前景的 computed 期望值
     record('t3/plus-text-derived-same-source', colors.plusColorText === colors.expectText ? 'pass' : 'fail',
       colors.plusColorText === colors.expectText ? '' : `plusText=${colors.plusColorText} expected(45% mix)=${colors.expectText}`);
   }

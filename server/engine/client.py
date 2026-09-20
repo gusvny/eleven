@@ -128,9 +128,9 @@ INSPECTION_ROW_ENGINE = "inspection"
 
 # 票号 t 形化（t260916-02）：id 不再编码实例/期——（实例,期号）真源=起票时刻的
 # InspectionInstance/InspectionPeriod SA，票面 face 是镜像。旧形 id
-# （inspection-<实例>-<期>，t260916 之前起的历史票）只剩**只读解析**：板面 legacy 腿
+# （inspection-<实例>-<期>，t260916 之前起的历史票）只剩**只读解析**：板面 legacy 查询路径
 # 上板 + 行渲染兜底（_legacy_inspection_instance_period_of）。旧形铸造点已删（R1：
-# 全仓零铸造点，见 integration/t260916-02 静态 grep 腿），此处绝不铸造旧形新票。
+# 全仓零铸造点，见 integration/t260916-02 静态 grep 子用例），此处绝不铸造旧形新票。
 _INSPECTION_LEGACY_ID_RE = re.compile(r"^inspection-(.+)-(\d{8}(?:-[1-9]\d*)?)$")
 
 
@@ -196,7 +196,7 @@ def _inspection_coverage_overlay() -> str:
 
 def _query_operator_unsupported(exc: BaseException) -> bool:
     """list_workflows 查询被后端拒绝（算子/语法不可用）的归类（R2：STARTS_WITH 全仓
-    零先例，首腿被拒时才允许降级；连接/超时类错误绝不归入——降级只对「后端不认这个
+    零先例，首条路径被拒时才允许降级；连接/超时类错误绝不归入——降级只对「后端不认这个
     查询」，不对「后端暂时够不着」。措辞按 temporal/ES 常见报错形态归一）。"""
     txt = str(exc).lower()
     return ("parse" in txt or "syntax" in txt or "invalid" in txt
@@ -1395,7 +1395,7 @@ def _row_from_inspection_face(
         # 口径⑤：无 ProjectKey SA 的历史票显式降级可辨（「历史票无项目身份」），
         # 不静默丢 project、不误归项目（project 恒如实出 SA 值，空=空）
         "legacy_unowned": bool(legacy_unowned),
-        # 有主旧形票的布尔标（定稿方案 §2.3；arbitrate gen2 缺陷②）：走 legacy 腿
+        # 有主旧形票的布尔标（定稿方案 §2.3；arbitrate gen2 缺陷②）：走 legacy 查询路径
         # 且有项目身份（非 unowned）才标——B1 无 SA 历史票仍只标 legacy_unowned
         "legacy_id": bool(match_via == "legacy_id" and not legacy_unowned),
         # 发现数：face.summary（真源）优先，畸形 summary 逐条重计兜底（两口径互核）
@@ -1789,8 +1789,8 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
         扫描（工单 + 巡检票同天共享序号空间，只扫工单店=两族互撞的现成缺陷）。算子
         WorkflowId STARTS_WITH 后端拒绝时回落「全类型扫 + 客户端前缀过滤」（scan_mode
         可辨；过滤仍发生在快照查询之前，不产生 snapshot 成本）。与 kind=inspection 不并用。
-      - kind=inspection 的板面改**两分支查询+合并**（F3）：SA 腿（在册实例
-        InspectionInstance OR 串）+ legacy 腿（旧形 id 前缀，20 前历史票——id 不再编码
+      - kind=inspection 的板面改**两分支查询+合并**（F3）：SA 查询路径（在册实例
+        InspectionInstance OR 串）+ legacy 查询路径（旧形 id 前缀，20 前历史票——id 不再编码
         实例，只能前缀捞），合并按 id 去重；行带 match_via 与 legacy_unowned 徽标。"""
     project = str(args.get("project") or "")
     if project and not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,40}", project):
@@ -1817,7 +1817,7 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
     async def _scan(query: str, prefix_filter: str = "") -> "Tuple[Dict[str, Any], List[str]]":
         """一遍查询 → (runs, order)。同 id 多 run 合并：非 TERMINATED 胜——terminate 后
         重开的票必须上板（seen-mark-first 会让旧 TERMINATED run 吞掉新 run，板面条目
-        凭空消失）。prefix_filter 非空=客户端前缀过滤（查询算子被后端拒绝时的降级腿；
+        凭空消失）。prefix_filter 非空=客户端前缀过滤（查询算子被后端拒绝时的降级分支；
         过滤发生在快照查询之前，不产生 snapshot 成本）。"""
         runs_l: Dict[str, Any] = {}
         order_l: List[str] = []
@@ -1858,14 +1858,14 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
         type_base = " OR ".join('WorkflowType="%s"' % t for t in INSPECTION_BOARD_TYPES)
         tail = (' AND ProjectKey="%s"' % project if project else "") + \
                (' AND EpicCode="%s"' % epic if epic else "")
-        # 腿①（SA）：在册实例的 OR 串（新票起票时盖 InspectionInstance/Period）。
+        # 查询路径①（SA）：在册实例的 OR 串（新票起票时盖 InspectionInstance/Period）。
         # 空白名单=没有任何在册实例 → 板面显式空（跳查询，与旧 R2 行为一致）。
         if whitelist:
             sa_q = '(%s AND (InspectionInstance="%s"))%s' % (
                 type_base, '" OR InspectionInstance="'.join(whitelist), tail)
             runs, order = await _scan(sa_q)
-        # 腿②（legacy）：旧形 id 前缀（t260916 之前的历史票）。R2：WorkflowId
-        # STARTS_WITH 全仓零先例——首腿被后端拒绝 → 回落「类型扫 + 客户端前缀过滤」
+        # 查询路径②（legacy）：旧形 id 前缀（t260916 之前的历史票）。R2：WorkflowId
+        # STARTS_WITH 全仓零先例——首条路径被后端拒绝 → 回落「类型扫 + 客户端前缀过滤」
         # （inspection- 前缀，防僵尸收益不破；scan_mode/降级原因进回执可辨），
         # 取舍记录进 README §13，绝不静默换实现。
         legacy_q = '(%s AND WorkflowId STARTS_WITH "inspection-")%s' % (type_base, tail)
@@ -1878,9 +1878,9 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
             lruns, lorder = await _scan(type_base + tail if (project or epic)
                                         else type_base, "inspection-")
             inspection_scan_mode = "type_only_fallback"
-            inspection_note = ("legacy 腿 STARTS_WITH 被后端拒绝，已回落类型扫+客户端前缀"
+            inspection_note = ("legacy 查询路径 STARTS_WITH 被后端拒绝，已回落类型扫+客户端前缀"
                                "过滤（%s: %s）" % (type(e).__name__, str(e)[:80]))
-        for tid in lorder:                     # 两腿合并：同 id 去重，非 TERMINATED 胜
+        for tid in lorder:                     # 两条查询路径合并：同 id 去重，非 TERMINATED 胜
             cur = runs.get(tid)
             if cur is None:
                 runs[tid] = lruns[tid]
@@ -1945,7 +1945,7 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
     # 行集；match_via/（实例,期）随 entry 记下供行渲染（不再二次反解）。
     inspection_match_via: Dict[str, str] = {}
     inspection_inst_period: Dict[str, "Tuple[str, str]"] = {}
-    inspection_unresolved: set = set()   # 在跑且实例身份不可辨的票 id（修复②降级可见腿）
+    inspection_unresolved: set = set()   # 在跑且实例身份不可辨的票 id（修复②降级可见分支）
     if inspection_mode and inspection_info is None:
         # whitelist/降级摘要/降级清单已在查询段单点取得（不二次读声明面）
         kept: List[Dict[str, Any]] = []
@@ -2162,7 +2162,7 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                          "engine": ENGINE_V2, "exec_status": exec_status,
                          "authz_active": 0})  # t260912-03 降级/极简行同形（无快照=无授权面可读）
     # t260917-02 修复②收尾 pass（巡检板面专用）：
-    # ① identity_note：不可辨且在跑的行（kept_unresolved 腿）带假设语气注记——疑似
+    # ① identity_note：不可辨且在跑的行（kept_unresolved 分支）带假设语气注记——疑似
     #   旧调度 action 直发或演练残留，给核查入口不写死处方（报错必须精确纪律）。
     # ② same_period_closed：同 (实例,期) 下 open 行与 closed 行并存时，open 行标注
     #   同期已有收口票（方案②「未收口运行单独成行并标注同期已有收口票」的承接；

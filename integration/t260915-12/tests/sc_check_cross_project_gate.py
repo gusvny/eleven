@@ -12,7 +12,7 @@
 （模块级零 temporalio 依赖，temporalio 全部函数内延迟导入），可安全真 import：
   A. 常量与形状锁（undeclared 策略单常量=C-0② 翻严锚点、盖章字段带默认=重放安全）
   B. 判定矩阵单点实现源码锁（shared 唯一真源；caller_gate/client/workflow 侧零复制）
-  C. 真函数重放正/负/越权/畸形四腿（含畸形输入腿——消费外部输入的既定纪律）
+  C. 真函数重放正/负/越权/畸形四子用例（含畸形输入子用例——消费外部输入的既定纪律）
   D. client 接闸结构锁（八 op 全闸/retry_qc+update 不盖章分档/cancel 先闸后 terminate）
   E. workflow 第二道落点锁（base 混入+dev_lane 三 handler+旧模板 sign 统一接闸）
   F. ticket.py 包装层锁（仓树排除 cwd 推导=C1/越权旗本层 fail-fast/对账白名单/M2 schema）
@@ -97,8 +97,8 @@ for name, src in (("client.py", CLIENT), ("base.py", BASE), ("dev_lane.py", DEVL
        "%s 接闸点引用单点实现（无本地矩阵）" % name)
 
 # ---------- C. 真函数重放：正 / 负 / 越权 / 畸形 ----------
-section("C 真函数重放（正/负/越权/畸形四腿）")
-# C1 正腿：同项目 / 老未盖章 / 无项目面
+section("C 真函数重放（正/负/越权/畸形四子用例）")
+# C1 正用例：同项目 / 老未盖章 / 无项目面
 ok(shared.cross_project_judge("sandbar", "sandbar", "")["action"] == "allow",
    "正：同项目放行")
 ok(shared.cross_project_judge("", "sandbar", "")["action"] == "allow",
@@ -109,7 +109,7 @@ ident_same = caller_gate.resolve_identity("sandbar", "", projects=[])
 v_same = caller_gate.judge_caller(ident_same, "sandbar", None)
 ok(v_same["decision"] == "pass" and v_same["stamp"] == "sandbar", "正：client 侧同项目 pass")
 
-# C2 负腿：异项目无旗=两层一致拒收+人话点名
+# C2 反用例：异项目无旗=两层一致拒收+人话点名
 g_neg = shared.cross_project_judge("dengzhufpv", "sandbar", "")
 ok(g_neg["action"] == "refuse" and "dengzhufpv" in g_neg["why"]
    and "sandbar" in g_neg["why"], "负：workflow 侧拒收点名双项目")
@@ -125,7 +125,7 @@ ok(shared.cross_project_judge(shared.CALLER_UNDECLARED_MARK, "sandbar", "",
                               policy="refuse")["action"] == "refuse",
    "翻 A 路径真实存在：policy=refuse 时哨兵即拒（单常量可翻）")
 
-# C3 越权腿：旗→放行+记名（by/reason 原文入账；note 截断 300）
+# C3 越权子用例：旗→放行+记名（by/reason 原文入账；note 截断 300）
 g_flag = shared.cross_project_judge("dengzhufpv", "sandbar", "宿主代管收口")
 ok(g_flag["action"] == "allow_record" and g_flag["record"]["caller_project"] == "dengzhufpv"
    and g_flag["record"]["note"] == "宿主代管收口", "越权：workflow 侧记名放行且原文入账")
@@ -138,7 +138,7 @@ g_big = shared.cross_project_judge("dengzhufpv", "sandbar", "x" * 5000)
 ok(g_big["action"] == "allow_record" and len(g_big["record"]["note"]) == 300,
    "越权：note 入账截断 300（防巨物进 meta）")
 
-# C4 畸形腿（消费外部输入的畸形用例纪律）
+# C4 畸形子用例（消费外部输入的畸形用例纪律）
 ok(caller_gate.validate_override({}) == (None, ""), "畸形：无旗=无旗（非错误）")
 for bad, frag in (({"cross_project": {"reason": "r"}}, "by"),
                   ({"cross_project": {"by": "x"}}, "reason"),

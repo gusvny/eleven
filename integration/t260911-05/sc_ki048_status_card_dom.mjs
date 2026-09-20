@@ -27,7 +27,7 @@
 // GET /sandbar-workbench/api/wf/tickets[/<id>] intercepted. Never touches 3099.
 //
 // Execution contract (t260904-12 三态): stdout last line
-// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 或全腿 na -> exit 1;
+// `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 或全部子用例 na -> exit 1;
 // env_fail>0 -> exit 2. Precedent: t260904-06/sc_spec_card_dom.mjs.
 
 import { ensureStageConsole } from '../lib_stage_console.mjs';

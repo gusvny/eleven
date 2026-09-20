@@ -3,13 +3,13 @@
 """sc_detail_lane_reds.py — 详情观测面三红旅程（t260915-05 验收①③，灰盒 L3＋契约锁）。
 
 Intent（用户可感知面，一张真票走完 mock ①③ 的完整旅程）：
-  ① merge_check 红灯票面（验收①「合并检查红」腿）：越写集探针提交进泳道分支（场景
+  ① merge_check 红灯票面（验收①「合并检查红」子用例）：越写集探针提交进泳道分支（场景
      直构探针路径；真判定=merge_check 的 verify_lane_code 全量在场）→ merge_check
      第 1 轮 verify_lane_code 红（reason_code=verify_red）→
      非冲突红不自动返工、转 blocked——blocked_detail={check_id=verify_lane_code, red,
      reason_code=verify_red, files 列表, next_action, evidence 点名越界文件}＋gate_runs
      尾轮红（轮次带数据源）＋正规入口 ticket.py show 投影面同可达（跨组件缝）。
-  ② 人门等待（验收①「人门等待」腿＋蓝卡数据源）：人清探针（revert）+retry_qc →
+  ② 人门等待（验收①「人门等待」子用例＋蓝卡数据源）：人清探针（revert）+retry_qc →
      merge_check 第 2 轮全绿（gate_runs 红→绿两轮留痕＝逐轮格真实数据）→ merge 人门
      awaiting-human：human_context.merge.context_text＋stage_acceptance 在场（蓝卡
      「签什么」数据源）；blocked_detail 已清（R2 生命周期）。
@@ -17,11 +17,11 @@ Intent（用户可感知面，一张真票走完 mock ①③ 的完整旅程）�
      ticket.py show 经 result() 终态快照仍可读 timeline/gens/gate_runs/topology 全套，
      topology 过投影白名单可达（引擎→ticket.py 跨组件缝——快照半到不了 UI 则本断言红）
      且 merge kind=human（泳道图人门虚线圈数据源不灭）。
-  路径闸拒绝腿**不在此造**：t260915-01 journey 已真构造并逐字段断言 blocked_detail
+  路径闸拒绝子用例**不在此造**：t260915-01 journey 已真构造并逐字段断言 blocked_detail
   全字段（intent 本体属彼），本条零重复断言。
 
 分工（防 intent 级重复）：t260915-01 journey＝blocked 唤醒清态/结构化明细回执/轮次维度
-（本条不复断其字段，只在 merge/人门/关单三腿上补观测面）；t260911-05＝merge 分类
+（本条不复断其字段，只在 merge/人门/关单三子用例上补观测面）；t260911-05＝merge 分类
 （conflict/脏工作区）与 KI-048 红卡 DOM 呈现（本条的 verify_red 族非其分类面，DOM 呈现
 归彼与同票 DOM 场景）；t260908-01 系＝仲裁超限/暂停语义；t260912-03＝authorize 例外
 通道（本条只用 plain sign 正规入口）；developer L1（纯函数/源码锁矩阵）不同层。
@@ -36,7 +36,7 @@ ticket.py 投影白名单带 topology（跨组件缝：缺=快照半到不了 UI
 ≠缝接通」形状的正向锁）。
 
 执行契约（t260910-13 三态）：stdlib 锁恒跑；docker/镜像/舞台/venv 缺供=exit 2
-ENV_FAIL（旅程腿不跑，锁已跑）；被测行为破面=exit 1。pool=engine（真起台+真票）。
+ENV_FAIL（旅程子用例不跑，锁已跑）；被测行为破面=exit 1。pool=engine（真起台+真票）。
 实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
 红线：一切 git/票写入只发生在 tempfile 夹具仓与一次性隔离台；对仓库工作区零写入
 （ticket.py show 的 admin.log 钉场景临时目录）；被测子进程 Temporal 地址只指一次性
@@ -49,7 +49,7 @@ ENV_FAIL（旅程腿不跑，锁已跑）；被测行为破面=exit 1。pool=eng
     路径闸 blocked→唤醒清态断言（intent 本体属彼，防重复）。
   - 借 t260912-03 正规入口 op=sign 先例——带：input 载荷形状（who/gate/decision/note）
     与审计同源；不带：authorize 例外通道（本票无受保护路径/超限场景）。降级锚：若
-    隔离台 sign 面行为有出入，该腿断言到 awaiting-human 为止并在输出点名，不造假绿。
+    隔离台 sign 面行为有出入，该子用例断言到 awaiting-human 为止并在输出点名，不造假绿。
   - 夹具仓分支名归一 main：_merge_base_ref 硬编码 `merge-base main <branch>`
     （agent_activities._merge_base_ref）——不归一＝merge_base_failed 环境性假红。
 """
@@ -238,7 +238,7 @@ def stdlib_locks(fail, py):
                    "到不了 UI，「快照有则用快照」成死代码）")
 
 
-# ---------------- docker 旅程腿（真台真票真 worker） ----------------
+# ---------------- docker 旅程子用例（真台真票真 worker） ----------------
 
 def journey(fail, bench):
     py = poc_python(bench)
@@ -263,9 +263,9 @@ def journey(fail, bench):
                                check=True, capture_output=True, text=True)
             except subprocess.CalledProcessError as e:
                 fail.bail("夹具仓分支归一 main 失败（现分支=%s stderr尾=%s）——"
-                          "merge 腿的环境前提立不住" % (_cur, (e.stderr or "")[-140:]))
+                          "merge 子用例的环境前提立不住" % (_cur, (e.stderr or "")[-140:]))
         # 最小 verify.yaml（t260907-06 lib 先例）：lanes.code 在场=道开放——缺失态
-        # 关闭会让写集白名单检查整个跳过，越写集探针畅通无阻，merge 红腿不成立
+        # 关闭会让写集白名单检查整个跳过，越写集探针畅通无阻，merge 失败分支不成立
         # （260915 implement 段自测首跑实证：probe 提交后 merge_check 全绿直进人门）。
         # write_allow=docs/（桩 settle 的 docs/ticket-notes.md 合法）；checks 带 sanity 恒绿命令（空列表=verify fail-closed「须非空」；
         # 命令制检查，快的）。须在 ticket-start 前落 main——泳道从 base 分叉时带上。
@@ -300,8 +300,8 @@ def journey(fail, bench):
         fail.check(bool(snap0), "create_plan running（桩脑链启动）")
         # 越写集探针路径：场景直构（docs/ 写集之外、且不触 create_plan 段的
         # 「仅结果/回执文件」路径闸——真判定在 merge_check 的 verify_lane_code，
-        # 本场景不借 judge_violation_probe（那是 t260915-01 拒绝腿的机制：把越界
-        # 路径写进结果文件会在 settle 期把票挡死在 create_plan，merge 红腿不成立）。
+        # 本场景不借 judge_violation_probe（那是 t260915-01 拒绝子用例的机制：把越界
+        # 路径写进结果文件会在 settle 期把票挡死在 create_plan，merge 失败分支不成立）。
         rel = "server/zz_t26091505_probe.py"
         fail.check(True, "探针路径构造（%s，越 %r 写集；判定器=merge_check 全量在场）"
                    % (rel, WRITE_SET))
@@ -483,7 +483,7 @@ def main():
     except SystemExit as e:
         code = e.code if isinstance(e.code, int) else 1
         if code in (2, 3):
-            print("ENV_FAIL 隔离台/镜像/台库缺供（exit %s）——旅程腿不跑，stdlib 契约锁已跑"
+            print("ENV_FAIL 隔离台/镜像/台库缺供（exit %s）——旅程子用例不跑，stdlib 契约锁已跑"
                   % code, flush=True)
         raise
     fail.finish()

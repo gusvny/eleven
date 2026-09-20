@@ -108,7 +108,7 @@ def main():
         print("boot 挂点清扫行（首 3 条）：%s"
               % (sweep_lines[:3] or ["（本轮无判拆/报告项——安静）"]), flush=True)
 
-        print("== B 腿：fully subnetted 零复发 + 网段 ∈ 受管表 ==", flush=True)
+        print("== B 子用例：fully subnetted 零复发 + 网段 ∈ 受管表 ==", flush=True)
         merged = "\n".join((r["out"] or "") + (r["err"] or "") for r in res32)
         check("fully subnetted" not in merged, "A 轮 stdout/stderr 无 fully subnetted")
         ev = subprocess.run(["docker", "events", "--since",

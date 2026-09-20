@@ -8,9 +8,9 @@ kind 清单，不许解析通过后运行时静默不触发；③报错精确纪
 诊断引向错误方向（KI-051「环境红捂真红」同族的反向教训）——交付触发面的校验先于任何
 网络动作，拒绝理由点名 decl/kind/instance 本身。
 
-三态分级：拒绝腿（畸形声明/未接线 kind/占位实例/未知实例）走交付触发面的离线校验
-（--decl-path，纯标准库、零网络零依赖）——闸内即可验；放行腿（enabled 实例真触发+
-同期一票）需要 temporalio+共享台，缺供=ENV_FAIL exit 2 点名（拒绝腿已验部分如实
+三态分级：拒绝子用例（畸形声明/未接线 kind/占位实例/未知实例）走交付触发面的离线校验
+（--decl-path，纯标准库、零网络零依赖）——闸内即可验；放行子用例（enabled 实例真触发+
+同期一票）需要 temporalio+共享台，缺供=ENV_FAIL exit 2 点名（拒绝子用例已验部分如实
 陈述，不假红不假绿）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
 与 developer L1（decl 纯函数解析真值表）不同层：本条黑盒锁触发面的门行为；与场景④
 不同面：④守全链旅程质量，本条守「谁能跑、谁被拒、同期只一票」。声明方言按交付
@@ -103,31 +103,31 @@ def main() -> int:
         return True
 
     try:
-        # ── 离线拒绝腿（纯标准库可验，闸内即跑）──
-        # 腿a：畸形声明——拒绝且理由指向声明本身，不指向连接/命名空间
-        ok_a = expect_refuse("腿a(畸形声明)", malformed, "integration-tests", ["声明"])
-        # 腿b（t260911-02 更新）：启用计数 kind 缺 source——拒绝并点名 source 与已接线
+        # ── 离线拒绝子用例（纯标准库可验，闸内即跑）──
+        # 子用例a：畸形声明——拒绝且理由指向声明本身，不指向连接/命名空间
+        ok_a = expect_refuse("子用例a(畸形声明)", malformed, "integration-tests", ["声明"])
+        # 子用例b（t260911-02 更新）：启用计数 kind 缺 source——拒绝并点名 source 与已接线
         # 计数源清单（fail-closed 语义不随接线扩大而松动；未接线 kind 词表负例已随
         # 三 kind 全接线迁移至源词表）
-        ok_b = expect_refuse("腿b(计数缺source)", unwired, "integration-tests", ["source", "archive-dir"])
-        # 腿c：enabled=false 实例——拒绝并点名实例（声明门行为级核心）
-        ok_c = expect_refuse("腿c(占位实例)", normal, "docs-sync", ["docs-sync"])
-        # 腿d：未知实例——拒绝并点名实例
-        ok_d = expect_refuse("腿d(未知实例)", normal, "nope", ["nope"])
+        ok_b = expect_refuse("子用例b(计数缺source)", unwired, "integration-tests", ["source", "archive-dir"])
+        # 子用例c：enabled=false 实例——拒绝并点名实例（声明门行为级核心）
+        ok_c = expect_refuse("子用例c(占位实例)", normal, "docs-sync", ["docs-sync"])
+        # 子用例d：未知实例——拒绝并点名实例
+        ok_d = expect_refuse("子用例d(未知实例)", normal, "nope", ["nope"])
 
         refusal_ok = ok_a and ok_b and ok_c and ok_d
         if failures:
             for m in failures:
                 print("FAIL_REASON: " + m, flush=True)
             return 1
-        print("离线拒绝腿 4/4 通过（畸形声明/计数缺source/占位实例/未知实例）", flush=True)
+        print("离线拒绝子用例 4/4 通过（畸形声明/计数缺source/占位实例/未知实例）", flush=True)
 
-        # ── 放行腿（server 腿）：缺 temporalio/共享台=ENV_FAIL，拒绝腿已验部分如实陈述 ──
+        # ── 放行子用例（server 子用例）：缺 temporalio/共享台=ENV_FAIL，拒绝子用例已验部分如实陈述 ──
         # （主进程零 temporalio 依赖：client/trigger 子进程自选 venv python；探活失败
         #  统一归因「依赖或台缺席」，不猜不谎报）
         if not stage_up():
-            lib.die_env("放行腿不可验：temporalio 缺席或共享测试台不可达（schedule-list 未 ok）"
-                        "——拒绝腿四类已全过；放行腿需 temporalio+共享台，不假红不假绿")
+            lib.die_env("放行子用例不可验：temporalio 缺席或共享测试台不可达（schedule-list 未 ok）"
+                        "——拒绝子用例四类已全过；放行子用例需 temporalio+共享台，不假红不假绿")
 
         # 私有队列+自供给 worker（与 journey 同理由，arbitrate 实证）：本票 workflow
         # 未合并前生产 worker 不认识它（抢活即打回 not-registered），私有队列消除竞态、
@@ -138,23 +138,23 @@ def main() -> int:
             proc, parsed = lib.run_trigger(["trigger", "--instance", "integration-tests",
                                             "--decl-path", normal])
             if not isinstance(parsed, dict) or parsed.get("ok") is not True:
-                failures.append("腿e enabled 实例触发未放行：%r | stderr=%s"
+                failures.append("子用例e enabled 实例触发未放行：%r | stderr=%s"
                                 % (parsed, (proc.stderr or "")[:200]))
             else:
                 result = parsed.get("result") or {}
                 tid = str(result.get("ticket_id") or "")
                 if not tid:
-                    failures.append("腿e 放行回执未带 ticket_id（场景侧裁定 result.ticket_id）：%r"
+                    failures.append("子用例e 放行回执未带 ticket_id（场景侧裁定 result.ticket_id）：%r"
                                     % (result,))
                 else:
-                    # 腿f：同期重复触发——每期一票：回执仍指同一张票，不得开出第二张
+                    # 子用例f：同期重复触发——每期一票：回执仍指同一张票，不得开出第二张
                     proc2, parsed2 = lib.run_trigger(["trigger", "--instance", "integration-tests",
                                                       "--decl-path", normal])
                     r2 = (parsed2 or {}).get("result") or {}
                     tid2 = str(r2.get("ticket_id") or "")
                     merged = tid2 == tid or bool(r2.get("deduped")) or bool(r2.get("merged"))
                     if not ((parsed2 or {}).get("ok") is True and merged):
-                        failures.append("腿f 同期重复触发开出新票（每期一票破）：首=%r 次=%r"
+                        failures.append("子用例f 同期重复触发开出新票（每期一票破）：首=%r 次=%r"
                                         % (tid, parsed2))
     finally:
         shutil.rmtree(workdir, ignore_errors=True)

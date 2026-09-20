@@ -35,7 +35,7 @@ cron 形态的接真与漏跑核算；与 t260913-02 场景②（真 workflow �
 不同层——本条守调度/告警两条运维可读面。
 
 环境：C2 需要在**隔离台**（17233）上真建 schedule（不写生产调度账本），缺台=ENV_FAIL；
-C1/C4/C5/C6 为离线腿（纯 stdlib + 台账夹具），不受台面影响。三态：0/1/2。
+C1/C4/C5/C6 为离线子用例（纯 stdlib + 台账夹具），不受台面影响。三态：0/1/2。
 实现段落地前红属预期（TDD 验收门），arbitrate/merge 期必须绿。
 """
 from __future__ import annotations
@@ -62,7 +62,7 @@ def prod_schedule_read(instance: str):
 
     为什么不能走 run_trigger/spawn_env：那会把目标钉在隔离台 17233，读到的永远不是生产
     调度账本——工单验收 C 前半（「Temporal 上能查到该实例的 schedule」）就不可判。口径与
-    t260910-11「生产零写入条件腿」/ t260911-02 find_temporal_cli 同一族：用 temporal CLI
+    t260910-11「生产零写入条件子用例」/ t260911-02 find_temporal_cli 同一族：用 temporal CLI
     **只读** describe（不建不删不改），CLI 缺席=N/A（明示，不假红不假绿）。
     返回 {available, exists, next_action_times, raw|error}。"""
     import shutil
@@ -230,7 +230,7 @@ def main() -> int:
                 proc2, parsed2 = run_trigger(["deadman", "--instance", INSTANCE,
                                               "--decl-path", decl_file, "--offline",
                                               "--ledger-dir", os.path.join(workdir, "ledger")])
-                r.check("C2e deadman 通道可跑（离线腿零 Temporal）",
+                r.check("C2e deadman 通道可跑（离线子用例零 Temporal）",
                         isinstance(parsed2, dict) and parsed2.get("ok") is True, "%r" % parsed2)
             # 清场：拆掉本场景建的 schedule（不遗留常驻定时器）
             clean = os.path.join(workdir, "cleanup.py")
@@ -257,7 +257,7 @@ def main() -> int:
         # implement 段修正（实锤）：原实现走 run_trigger → spawn_env 把目标钉到隔离台
         # 17233，读的永远不是生产调度账本 → C3b/C3c 必红（假红）。生产面只读核查走
         # prod_schedule_read（CLI 只读 describe；CLI 缺席=N/A 明示），并保留 deadman
-        # 隔离台读面腿（通道可用性，与本红线不冲突）。
+        # 隔离台读面子用例（通道可用性，与本红线不冲突）。
         # t260916-02 迁移A：真实例（integration-tests）现住交付声明（本仓根 inspection.yaml），
         # C3a「通道可查真实例」随之指交付声明（fixture decl 只含本场景自建实例）。
         proc3, parsed3 = run_trigger(["deadman", "--instance", REAL_INSTANCE,
@@ -281,7 +281,7 @@ def main() -> int:
                         _within_hours(str(nats[0]), 36.0),
                         "next=%r" % (nats[0],))
 
-        # ---------------- C4/C5 漏跑可见（台账夹具，离线腿） ----------------
+        # ---------------- C4/C5 漏跑可见（台账夹具，离线子用例） ----------------
         ledger_dir = os.path.join(workdir, "ledger3")
         os.makedirs(ledger_dir, exist_ok=True)
         cron = it.cron

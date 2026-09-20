@@ -20,13 +20,13 @@ python3 integration/run_scenarios.py
 ## 执行契约（每条测试一致，t260904-12 三态化——闸内无 SKIP）
 
 - 场景级状态只有 PASS / FAIL / ENV_FAIL；退出码分家：**0=全过；1=有 FAIL（产品红，
-  含全腿 N/A）；2=有 ENV_FAIL（环境红）**。旧「依赖缺失一律干净 SKIP（exit 0）」（退役）
+  含全部子用例 N/A）；2=有 ENV_FAIL（环境红）**。旧「依赖缺失一律干净 SKIP（exit 0）」（退役）
   与 `SUMMARY pass/skip/fail` 语义**退役**（定稿=notes/discussions/
   260904-charter-injection-invalid-payload.md §7.3：没验成且原因归环境≠通过）。
 - 环境缺失（依赖、隔离台、凭据、playwright 等）一律：打印 `ENV_FAIL: <缺什么>` 且
   exit 2——不假红也不假绿，依赖恢复后自动生效。
-- N/A 仅给以**系统状态**为条件的腿（不以测试环境为条件，如「该 feature flag 未开时
-  该腿无对象」），打印 `N/A: <原因>`；**全腿 N/A 的场景=产品红 exit 1**（无可验对象
+- N/A 仅给以**系统状态**为条件的子用例（不以测试环境为条件，如「该 feature flag 未开时
+  该子用例无对象」），打印 `N/A: <原因>`；**全部子用例 N/A 的场景=产品红 exit 1**（无可验对象
   是场景设计/覆盖问题，修场景而非补环境）。python 侧共享助手=integration/lib_env.py；
   mjs 侧=t260904-05/lib_browser.mjs makeResults()（状态词表 pass/fail/env_fail/na）。
 - 场景内部 SUMMARY 行格式 `SUMMARY pass=X fail=Y env_fail=Z na=W`（skip 计数退役）；
@@ -44,11 +44,11 @@ python3 integration/run_scenarios.py
   不能与注入假场景表的既有电池冲突），未知池判红单点在
   `python3 integration/run_scenarios.py --print-pool-assets <池名>`（读真注册表、不跑
   套件，非零=红；池词汇表取模块导入期快照，与注入式 mini 注册表解耦）。
-  **例外腿已撤除（宿主管 260914，起因＝KI-089）**：旧口径为「票面 write_set ∩（声明
-  `exclude_pools_force_assets` ∪ 执行器机械派生面）非空 → 本票集测段强制全跑」。实测该腿
+  **例外分支已撤除（宿主管 260914，起因＝KI-089）**：旧口径为「票面 write_set ∩（声明
+  `exclude_pools_force_assets` ∪ 执行器机械派生面）非空 → 本票集测段强制全跑」。实测该子用例
   对**全部**在跑票恒命中——写集只要带目录形条目（如 `integration/`）即命中整个测试目录，
   四张在跑票逐票命中 77~78 项，排除声明一次都没生效。现口径：**apply=true（每票段）时
-  声明即跳过，不设例外腿**；被跳池只由项目级全量轮（巡检/手动/回放——均不传 apply）覆盖。
+  声明即跳过，不设例外分支**；被跳池只由项目级全量轮（巡检/手动/回放——均不传 apply）覆盖。
   旧命中面仍在回执 `pool_exclude.former_force_assets` 里逐项点名（少跑必须可见），但不再
   据此放行。资产派生面（被排除条目 cmd token ∪ 其 import/require 传递闭包 ∪ `integration/`
   根共享基建面，sc_ 场景文件除外）保留，用于未知池/非法池名单点判红。已知缺口（动态导入、
@@ -91,7 +91,7 @@ python3 integration/run_scenarios.py
     畸形或撞生产/缺省台窗=usage 红。
 
   **舞台生命周期旋钮（t260915-18 续）：锚身份 / 孤儿清扫半径 / 台面清点 / 引擎单所有者**：
-  - 锚身份令牌（两段判活）：起台时 hold 腿在租约记 `anchor_token`（ps lstart
+  - 锚身份令牌（两段判活）：起台时 hold 分支在租约记 `anchor_token`（ps lstart
     逐字串）——「主人已亡但 hold 仍续心跳」的 pid 重用形态由 sweep crit_iv 判拆
     （当日 38h 老台疑似形态的判据面）；令牌探针不可得（无 ps 平台）=回落纯
     pid 判定，不引入新单点。
@@ -377,9 +377,9 @@ host agent-usage）均按具体 state 过滤或只数 running，不受新增 don
   同名重复参数、epic 非法字符/超长、project 未知、隔离条目带「隔离」定位）；
   200 信封逐字段对契约块 2（kpis 恒冻结四字段、cache.status 枚举、ChartSpec 形状、
   四枚举 view 全绿）；并发 3 路同请求形状一致。
-- **t02_cache_lifecycle**：缓存目录不可写→200 直算不 5xx（root 下为系统态条件腿，N/A 口径）；
+- **t02_cache_lifecycle**：缓存目录不可写→200 直算不 5xx（root 下为系统态条件子用例，N/A 口径）；
   legacy SANDBAR_PROJECTS_YAML 模式缓存禁用零落盘；缓存目录整体 rm 后惰性重建 200；
-  缓存记录 block-3 键集全等 + 二次请求 hit（无票环境为系统态条件腿，N/A 口径）。
+  缓存记录 block-3 键集全等 + 二次请求 hit（无票环境为系统态条件子用例，N/A 口径）。
 - **t03_health_degrade**：view=health 回冻结信封不设视图变体键；本机独立探测
   7233，不可达时 200+reason 人话必带（不可达=ENV_FAIL 口径）；health 请求零缓存写入。
 - **t04_cli_door**：argv 畸形（缺参/坏 JSON/非对象/非法值）exit 2+stderr 人话；
@@ -391,7 +391,7 @@ host agent-usage）均按具体 state 过滤或只数 running，不受新增 don
 
 - **数字级正确性不在本集**：泳道无 Temporal，聚合数字（窗口/token/LOC）只能以
   降级形状覆盖；数字对账=developer 单测（方案步 1/2）+ M3 三票人工核对。t02 末段
-  与 t05 在有票环境（Docker 测试台/真票）自动升级为数据级断言，无票时为系统态条件腿（N/A 口径）。
+  与 t05 在有票环境（Docker 测试台/真票）自动升级为数据级断言，无票时为系统态条件子用例（N/A 口径）。
 - **双前门一致基线带预热约定（acceptance P1 定稿）**：cache.status 按契约块 2 字面
   语义（惰性生成=computed / 命中=hit，实现 gen1 已回归字面），冷缓存下两门天然
   一 computed 一 hit——那是契约语义本身。双门比对基线在两门前预热缓存（同请求先跑
@@ -469,12 +469,12 @@ F3 承担。设计阶段基线曾按扁平信封/钉名 staleness.ts 初钉，ca
     开放问号）/ b+ 记录类型族清单（矩阵 #10 底册交 T5）/ c 沙箱不变量（泳道内写成功+
     主库 .git 模拟位越界写被拒）/ d 钉模型生效 / e resume 同 id 续写。退出码 0/1/2 三态
     （lib_env 同款，环境缺=2 点名不假绿）。
-  - `--rounds N`：延伸腿，同 home 连跑 N 轮汇总 cacheRead 观测（非门槛判据）。
+  - `--rounds N`：延伸子用例，同 home 连跑 N 轮汇总 cacheRead 观测（非门槛判据）。
   - zstd 依赖=CLI（引擎读侧同款硬依赖）；zstd v1.5.7+ 缺省压缩产物后缀是 `.zst` 而非
     `.zstd`——fixtures 一律 `-o` 显式钉名（坑已填，重造夹具时注意）。
 - **t260916-24-dsh-face-meta**（engine 池）：真 worker 起跑链上归属 meta 的 `dsh` 版本面
-  四腿（缺省=宿主实测/钉路径=桩自报/预期不符可查/探测失败不挡启动）——验收②③的记录面。
-- **t260916-24-dsh-expected-loud**（engine 池）：真工单链上「版本与预期不符→响亮」双腿
+  四子用例（缺省=宿主实测/钉路径=桩自报/预期不符可查/探测失败不挡启动）——验收②③的记录面。
+- **t260916-24-dsh-expected-loud**（engine 池）：真工单链上「版本与预期不符→响亮」两子用例
   （缺省=带病跑但日志点名两版本；STRICT=1=宁可停不悄悄跑错版本）——验收③的执行面。
 - **lib_t26091624.py**：版本桩（--version/agent 双形态记账）+ 舞台装配 + worker 拉起收尾。
 - **RUNBOOK_GATE.md**：升级回归门槛文本（写集外交接件，integration 粘贴进 runbook §1）。

@@ -22,7 +22,7 @@ intent（守护的用户可感知行为/合同）：
 与 developer L1（engine/tests 纯函数白盒）不同层：本条驱动真实解析函数与
 真实消费点方法（monkeypatch temporalio 上下文门），L1 不覆盖缝契约。
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；
-temporalio 缺失=ENV_FAIL 点名（解析/消费点行为腿），stdlib 链腿与源码锁照跑。
+temporalio 缺失=ENV_FAIL 点名（解析/消费点行为子用例），stdlib 链子用例与源码锁照跑。
 """
 import json
 import shutil
@@ -57,7 +57,7 @@ check("R5 解析点毁形强转退役（agent_activities）", COERCE not in AA_S
 check("R6 解析点毁形强转退役（base.py）", COERCE not in BASE_SRC)
 check("R7 解析点毁形强转退役（dev_lane.py）", COERCE not in DL_SRC)
 
-# ---------- 解析层 normalize（stdlib 行为腿；真实回执 JSON 值直喂） ----------
+# ---------- 解析层 normalize（stdlib 行为子用例；真实回执 JSON 值直喂） ----------
 norm = getattr(shared, "normalize_files_changed", None)
 check("N0 被测承诺面在场（shared.normalize_files_changed）", norm is not None)
 if norm is not None:
@@ -76,7 +76,7 @@ if norm is not None:
                   "got=%r expect=%r" % (got, expect))
         except Exception as e:
             check("N %s" % label, False, "%s: %s" % (type(e).__name__, e))
-    # 零污染链腿（stdlib 可跑）：畸形形状根本不该产出可并集条目——
+    # 零污染链子用例（stdlib 可跑）：畸形形状根本不该产出可并集条目——
     # normalize 输出空清单 ⇒ 即便误调 refresh_write_set 也并不进任何路径
     for label, raw in [("字符串", "server/a.py"), ("数字", 42), ("含非串元素", ["a.py", None])]:
         try:
@@ -88,10 +88,10 @@ if norm is not None:
         except Exception as e:
             check("C 零污染链：%s" % label, False, "%s: %s" % (type(e).__name__, e))
 
-# ---------- 行为腿（temporalio 面）：真解析函数 + 真消费点方法 ----------
+# ---------- 行为子用例（temporalio 面）：真解析函数 + 真消费点方法 ----------
 if not temporalio_available():
-    env_fail("temporalio 不可用（本泳道无 venv）：_read_result 解析缝与消费点四分支行为腿"
-             "不可执行——stdlib normalize/零污染链腿与源码锁已在本场跑完；"
+    env_fail("temporalio 不可用（本泳道无 venv）：_read_result 解析缝与消费点四分支行为子用例"
+             "不可执行——stdlib normalize/零污染链子用例与源码锁已在本场跑完；"
              "arbitrate/merge 期 venv 环境必须全绿")
 else:
     import dev_lane          # noqa: E402

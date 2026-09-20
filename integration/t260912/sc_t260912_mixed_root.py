@@ -20,10 +20,10 @@ intent（守护的用户可感知行为/合同）：项目根=知识库 git 仓�
 与相邻场景 intent 分界：t260907-06 三场景守「父目录作根」形态（根无 .git）的
 归属/合并闸/拒收面；本场景守根亦 git 仓的**混合形态**新面。通用路径逃逸、
 写集条目畸形形态属建票写集契约既有面（t260907-06 场景③在册），intent 级
-重复不另起。单仓零变化另设对照腿（存量场景族项目根=仓根，无「根含 .git 且
+重复不另起。单仓零变化另设对照子用例（存量场景族项目根=仓根，无「根含 .git 且
 旁边有子仓」的对照形态）。
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；
-temporalio 缺失=ENV_FAIL 点名（prepare/settle 行为腿），stdlib 契约腿照跑。
+temporalio 缺失=ENV_FAIL 点名（prepare/settle 行为子用例），stdlib 契约子用例照跑。
 """
 import sys
 from pathlib import Path
@@ -118,10 +118,10 @@ else:
         check("M1e 集合外嵌套仓（根仓名下二层）路径拒收", False,
               "异常类型错: %s: %s" % (type(e).__name__, e))
 
-# ---------- stdlib 面 M2：workflow 闸腿（repo="" 合法放行、真畸形照旧拒） ----------
+# ---------- stdlib 面 M2：workflow 闸子用例（repo="" 合法放行、真畸形照旧拒） ----------
 gate = getattr(shared, "lane_workspace_gate_error", None)
 if gate is None:
-    check("M2 闸腿：lane_workspace_gate_error 已落地", False, "shared.lane_workspace_gate_error 缺失")
+    check("M2 闸子用例：lane_workspace_gate_error 已落地", False, "shared.lane_workspace_gate_error 缺失")
 else:
     ws_ok = {"type": "worktree", "path": str(container_rt),
              "repo_worktrees": [
@@ -148,8 +148,8 @@ else:
 
 # ---------- temporalio 面 M3-M5：prepare 三态/复用幂等/settle 逐树 ----------
 if not temporalio_available():
-    env_fail("temporalio 不可用（本泳道无 venv）：prepare/settle 行为腿不可执行——"
-             "stdlib 仓集合/归属/闸契约腿已在本场跑完；arbitrate/merge 期 venv 环境必须全绿")
+    env_fail("temporalio 不可用（本泳道无 venv）：prepare/settle 行为子用例不可执行——"
+             "stdlib 仓集合/归属/闸契约子用例已在本场跑完；arbitrate/merge 期 venv 环境必须全绿")
 else:
     # M3 态1：根仓路径票——根树=泳道容器本身
     res = None
@@ -210,7 +210,7 @@ else:
               git("rev-parse", "HEAD", cwd=container_db).strip() == ref_root
               and git("rev-parse", "HEAD", cwd=tree_a_db).strip() == ref_a)
 
-        # M5 下游读腿：清单镜像 + settle 逐树各归其仓（间接覆盖清单读取消费方）
+        # M5 下游读子用例：清单镜像 + settle 逐树各归其仓（间接覆盖清单读取消费方）
         mf = read_manifest(container_db)
         check("M5a 双命中清单：repo=\"\" 与子仓条目并存（机械真源镜像）",
               isinstance(mf, list)
@@ -241,7 +241,7 @@ else:
             check("M5f 根仓 status 干净（子仓树/清单被 advisory④ .gitignore 兜住）",
                   dirty == "", "porcelain=%r" % (dirty,))
         except Exception as e:
-            check("M5 settle/落账腿（双命中逐树）", False,
+            check("M5 settle/落账子用例（双命中逐树）", False,
                   "异常: %s: %s（repo=\"\" 读侧未放行即在此断，红属 TDD 预期）"
                   % (type(e).__name__, e))
 

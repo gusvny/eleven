@@ -6,15 +6,15 @@
 `ticket op=sign` → Temporal sign 信号），gate 必须对（inspection-close），agent 不得
 自签；收口后 decision/human_gate 落票面、落账在（审计链不断）。
 
-断言面（五腿）：
-  ① 常态腿：票到 close/awaiting-human 时 face **无 human_gate 键**（签字前常态缺席，
+断言面（五子用例）：
+  ① 常态子用例：票到 close/awaiting-human 时 face **无 human_gate 键**（签字前常态缺席，
      待签判定走 stage_state——review 打回4 的行为面）；
-  ② 拒收腿·错 gate：用错 gate 签 → workflow 拒收（gate_error 可读、票仍 awaiting-human
+  ② 拒收子用例·错 gate：用错 gate 签 → workflow 拒收（gate_error 可读、票仍 awaiting-human
      不终态）——「gate 不匹配拒收」契约的注入回归；
-  ③ 拒收腿·agent 自签：who=agent 角色名 + 对的 gate → 仍拒收（自签禁令契约）；
-  ④ 收口腿：对 gate 真签 → status=closed、decision=approve、face.human_gate 落面、
+  ③ 拒收子用例·agent 自签：who=agent 角色名 + 对的 gate → 仍拒收（自签禁令契约）；
+  ④ 收口子用例：对 gate 真签 → status=closed、decision=approve、face.human_gate 落面、
      落账文件在（out/inspection/<票号>.json）；
-  ⑤ 板面收录腿：收口票进 ticket-list{kind:"inspection"} 板面（完整巡检形+白名单回执，
+  ⑤ 板面收录子用例：收口票进 ticket-list{kind:"inspection"} 板面（完整巡检形+白名单回执，
       SANDBAR_INSPECTION_DECL 注入声明，规格① 真台端到端）。
   附带：签字前 ticket-query 读回（坑A 活体半边）——engine 标记非空 + ticket 面带
   gate_id/instance_id/period/report_path（详情下钻数据源在真台可读）。
@@ -145,7 +145,7 @@ def main() -> int:
             if tid:
                 lib.note_started_ticket(tid)
 
-                # ① 常态腿：票到 close/awaiting-human 且 face 无 human_gate 键（签字前常态）
+                # ① 常态子用例：票到 close/awaiting-human 且 face 无 human_gate 键（签字前常态）
                 def at_gate():
                     _r, snap = ticket_state(tid)
                     if not snap:
@@ -188,7 +188,7 @@ def main() -> int:
                     if became:
                         failures.append("人门假门：未签字票 %ds 内已终态（收口必须被人门真拦）" % POLL_GATE)
 
-                    # ② 拒收腿·错 gate
+                    # ② 拒收子用例·错 gate
                     parsed_bad = sign_via_client_channel(tid, SIGN_WHO, "not-the-inspection-gate")
                     if not (isinstance(parsed_bad, dict) and parsed_bad.get("ok") is True):
                         failures.append("错 gate 签字在通道层即失败（通道应投递、workflow 拒收）：%r"
@@ -210,7 +210,7 @@ def main() -> int:
                                 failures.append("错 gate 被拒后票竟离门（state=%r）——拒收必须留在门内"
                                                 % (s4.get("stage_state"),))
 
-                        # ③ 拒收腿·agent 自签（对的 gate、agent 身份）
+                        # ③ 拒收子用例·agent 自签（对的 gate、agent 身份）
                         parsed_agent = sign_via_client_channel(tid, "developer", "inspection-close")
                         if not (isinstance(parsed_agent, dict) and parsed_agent.get("ok") is True):
                             failures.append("agent 自签在通道层即失败（应投递、workflow 拒收）：%r"
@@ -227,7 +227,7 @@ def main() -> int:
                                 failures.append("agent 自签未被点名拒收（gate_error=%r）——自签禁令失守"
                                                 % err2)
 
-                    # ④ 收口腿：对 gate 真签（gate 取自 ticket-query 面契约单点 gate_id）
+                    # ④ 收口子用例：对 gate 真签（gate 取自 ticket-query 面契约单点 gate_id）
                     q = ticket_query_v2(tid)
                     gate_id = ((q or {}).get("ticket") or {}).get("gate_id") or "inspection-close"
                     parsed_ok = sign_via_client_channel(tid, SIGN_WHO, gate_id,
@@ -256,7 +256,7 @@ def main() -> int:
                                     failures.append("收口票面 human_gate 回执缺席或 who 不符（%r）"
                                                     % (hg,))
 
-                # ⑤ 板面收录腿（规格① 真台端到端）：声明经 SANDBAR_INSPECTION_DECL 注入
+                # ⑤ 板面收录子用例（规格① 真台端到端）：声明经 SANDBAR_INSPECTION_DECL 注入
                 # client 子进程（_inspection_enabled_instances 读的是它）→
                 # ticket-list{kind:"inspection"} 必须收录本收口票（窗内闭合=完整巡检形，
                 # R8），行带 kind/engine/status=closed/instance_id/period/human_gate 回执，

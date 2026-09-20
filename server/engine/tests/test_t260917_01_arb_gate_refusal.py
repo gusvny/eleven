@@ -19,7 +19,7 @@ C1【附条件｜照搬取舍清单】——改动 3 触碰 t260915-01 定稿函
   ② 闸拒改判 failed + summary 替换：E2 断言 status="failed"、summary==拒绝回执原文
     （替换语义逐字保留）；
   ③ 结构化 refusal 挂载 res.gate_refusal：E3 断言 dict 原样挂载（t260915-01 语义）；
-  ④ refusal=None 直调场景逐字不变：E2/E3 对照腿 + 既有 tests/test_t260915_01_detail_face.py
+  ④ refusal=None 直调场景逐字不变：E2/E3 对照子用例 + 既有 tests/test_t260915_01_detail_face.py
     全量回归（其 :195 test_apply_settle_note_mounts_refusal_and_negative_leg 不改一字仍绿）。
   改动 3 的唯一增量=改写前把原 summary 存证进 evidence（新行「[settle 拒绝前 summary] 」，
   E2 断言）——只增不改，四条既有模式零触碰。

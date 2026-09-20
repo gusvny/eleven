@@ -7,17 +7,17 @@ trigger 起票→setup→suite（非套件档缺席）→inspect（桩 agent）�
 人门。三拍纪律（镜 t260905-03-period-journey）：人门假门两拍（未签不终态/签后收口）+
 发现留存面=落账（收口后 query 不可达，落账是唯一留存承诺面）。
 
-腿面分工（与兄弟场景 intent 不互替）：
-- 混合桩腿：verified（真引文锚夹具树真实文件行）/unverified（行号越界→降级+reason
+子用例面分工（与兄弟场景 intent 不互替）：
+- 混合桩子用例：verified（真引文锚夹具树真实文件行）/unverified（行号越界→降级+reason
   点名）/低置信/low 四类发现同票落面——建议门只收 verified&&conf≥0.6&&severity≥med；
   timeline 用户可见段名=inspect（scan 段退役的旅程面证据）；
-- 零发现桩腿：空 findings → heartbeat=true 心跳票照开照收（全绿期=心跳证明）；
-- 真进程链超时腿（SANDBAR_INSPECT_CMD 挂起脚本 + inspect_timeout_min=2）：票到
+- 零发现桩子用例：空 findings → heartbeat=true 心跳票照开照收（全绿期=心跳证明）；
+- 真进程链超时子用例（SANDBAR_INSPECT_CMD 挂起脚本 + inspect_timeout_min=2）：票到
   blocked 点名「agent 未完成」不假绿 + 落账在 + agent-home 落台账目录（DSH_HOME 与
   基座解耦）+ 进程 reap 干净（pgrep 面零残留）；
 - 红线判定化：被审查树逐字节校验和前后不变；审查基座（仓根）零 .dsh 残留。
 
-依据：工单要点①②③⑤⑧+验收①③；KI-002（被借面轮询无超时保护——超时腿守「可见失败
+依据：工单要点①②③⑤⑧+验收①③；KI-002（被借面轮询无超时保护——超时子用例守「可见失败
 不假绿」的用户面）；KI-047/049（失败必须可见可归因）。环境语义：docker 测试台/venv
 缺席=ENV_FAIL exit 2；实现未落地=FAIL（TDD 信号），arbitrate/merge 期必须绿。
 登记 exclusive：往共享台写真票，防与兄弟场景互染。私有队列自供给 worker（t260910-11
@@ -110,7 +110,7 @@ def face_stage_ids(r):
 
 
 def journey_mixed(tag, tid, failures):
-    """混合桩腿：五类发现同票——复核两态落面+点名、建议门过滤、段名可见、人门两拍、落账。"""
+    """混合桩子用例：五类发现同票——复核两态落面+点名、建议门过滤、段名可见、人门两拍、落账。"""
     def face_ready():
         r = ticket_query(tid)
         if not (r and isinstance(r.get("snapshot"), dict)):
@@ -165,7 +165,7 @@ def journey_mixed(tag, tid, failures):
 
 
 def journey_heartbeat(tag, tid, failures):
-    """零发现桩腿：空 findings 心跳票照开照收（全绿期=心跳证明）。"""
+    """零发现桩子用例：空 findings 心跳票照开照收（全绿期=心跳证明）。"""
     def face_ready():
         r = ticket_query(tid)
         if not (r and isinstance(r.get("snapshot"), dict)):
@@ -258,7 +258,7 @@ def main() -> int:
         with lib.StageWorker(queue, extra_env={
                 "SANDBAR_INSPECT_STUB": "1",
                 "SANDBAR_INSPECT_STUB_FILE": stub}):
-            # 腿A 混合桩：verified/unverified/低置信/低危四态同票
+            # 子用例A 混合桩：verified/unverified/低置信/低危四态同票
             mixed = [
                 lib.finding("建议合格高危：守卫锚漂移", lib.GUARD_REL, 3,
                             tree.line_text(lib.GUARD_REL, 3), severity="high", confidence=0.9),
@@ -276,7 +276,7 @@ def main() -> int:
             tid_a = trigger_one("mixed", inst_a, decl_a, tree.root, failures)
             if tid_a:
                 journey_mixed("mixed", tid_a, failures)
-            # 腿B 空桩：零发现心跳票（同一桩文件换内容——inspect 在 spawn 时刻读文件）
+            # 子用例B 空桩：零发现心跳票（同一桩文件换内容——inspect 在 spawn 时刻读文件）
             with open(stub, "w", encoding="utf-8") as f:
                 f.write(lib.fenced_message([]))
             tid_b = trigger_one("heartbeat", inst_b, decl_b, tree.root, failures)
@@ -342,7 +342,7 @@ def main() -> int:
         return 1
     print("PASS: inspect 段全链旅程——混合桩五类发现（verified/unverified+reason 点名/建议门"
           "只收合门发现）、段名 inspect 用户可见、零发现心跳票照开照收、人门两拍真拦、"
-          "落账留存、超时腿 blocked「agent 未完成」不假绿+agent-home 落台账目录+reap 干净、"
+          "落账留存、超时子用例 blocked「agent 未完成」不假绿+agent-home 落台账目录+reap 干净、"
           "被审查树逐字节不变、基座零 .dsh 残留", flush=True)
     return 0
 

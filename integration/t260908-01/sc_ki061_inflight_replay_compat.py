@@ -6,11 +6,11 @@ intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：
 在 docker 测试台上先**制造修复前形态的在飞 history**（DISABLE=1 worker 驱动 6 轮超限
 blocked → retry_qc 唤醒一次 → settle→再 blocked＝t260907-10 现形态），然后用
 replay_check（只读 list/fetch history → temporalio Replayer 用**当前修复后代码**回放）
-断言两腿：
-  腿一（唤醒穿越点回放）：blocked 等待中的在飞票回放 ok=true——修复代码对「含历史唤醒
+断言两子用例：
+  子用例一（唤醒穿越点回放）：blocked 等待中的在飞票回放 ok=true——修复代码对「含历史唤醒
   穿越＋patched 求值」的旧形态 history 命令序列零分歧，workflow task 不 failing
   （044c692 裸改重放炸 99809 的同族故障回归闸）；
-  腿二（marker 消费回放）：修复 worker 复活票（retry → arbitrate 真 respawn、KI-061
+  子用例二（marker 消费回放）：修复 worker 复活票（retry → arbitrate 真 respawn、KI-061
   marker 写入 history）后再回放 ok=true——marker 在 history 的重放消费路径（notify 先行
   →同位 True）确定性稳定。
 
@@ -71,7 +71,7 @@ def main():
         workerA, env, stub_log = drive_to_overlimit_blocked(
             py, fail, tmp, TID, stage, PROJ_KEY, None)
 
-        # ---------- 腿一：pre-fix 形态在飞 history 的重放 ----------
+        # ---------- 子用例一：pre-fix 形态在飞 history 的重放 ----------
         def _retry_count():
             s = query_snapshot(py, env, TID)
             tl = s.get("timeline") or []
@@ -98,10 +98,10 @@ def main():
         r = (payload.get("results") or [{}])
         r0 = r[0] if r else {}
         fail.check(rc == 0 and payload.get("ok") is True and r0.get("ok") is True,
-                   "腿一：修复代码回放 pre-fix 形态 history ok（rc=%s ok=%s r0=%s）"
+                   "子用例一：修复代码回放 pre-fix 形态 history ok（rc=%s ok=%s r0=%s）"
                    % (rc, payload.get("ok"), json.dumps(r0, ensure_ascii=False)[:200]))
 
-        # ---------- 腿二：复活（marker 入 history）后再回放 ----------
+        # ---------- 子用例二：复活（marker 入 history）后再回放 ----------
         workerA.terminate()
         try:
             workerA.wait(timeout=15)
@@ -121,7 +121,7 @@ def main():
                 len(arb_gens(read_stub_log(stub_log))) > len(gens_before) else None
         if poll(_respawned, 300) is None:
             wait_worker_alive(fail, workerB, os.path.join(tmp, "workerB.log"))
-            fail.bail("相二 300s 未见 arbitrate respawn（marker 未入 history，腿二前提缺失）")
+            fail.bail("相二 300s 未见 arbitrate respawn（marker 未入 history，子用例二前提缺失）")
         fail.check(True, "相二 arbitrate respawn（KI-061 marker 已入 history）")
         time.sleep(15)  # 事件落定窗：marker/arbitrate activity 事件入 history
 
@@ -129,7 +129,7 @@ def main():
         r = (payload.get("results") or [{}])
         r0 = r[0] if r else {}
         fail.check(rc == 0 and payload.get("ok") is True and r0.get("ok") is True,
-                   "腿二：含 marker 的 post-fix history 回放 ok（rc=%s ok=%s r0=%s）"
+                   "子用例二：含 marker 的 post-fix history 回放 ok（rc=%s ok=%s r0=%s）"
                    % (rc, payload.get("ok"), json.dumps(r0, ensure_ascii=False)[:200]))
     finally:
         for w in (workerA, workerB):

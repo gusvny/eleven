@@ -7,7 +7,7 @@
  * 实时面板/KB 徽标齐齐「找不到会话」——agent-logs.ts:243 旧扁平布局前科同族的第二代）：
  *   T1 用量页 resolveAllSessionFiles：双名并存逐 <sub> 目录恰取 mtime 最新一份、
  *      多 sub 全收、别工单不混入（防双计/防漏）；
- *   T2 两代方向各一腿：仅新名收新名、仅旧名收旧名（对照）；
+ *   T2 两代方向各一子用例：仅新名收新名、仅旧名收旧名（对照）；
  *   T3 实时面板 resolveSessionFile：exact 角色优先不破 + exact sub 内取最新代
  *      （升级后活水面的选中语义不断）；
  *   T4 KB 徽标 _sessionKbFast：取全局 mtime 最新代（升级后徽标跟着新档走）+
@@ -55,7 +55,7 @@ const envBad = []
 if (nodeMajor < 22) envBad.push(`node ${process.versions.node} 过旧（原生 type-stripping 需 ≥22.18）`)
 if (!zstdOk) envBad.push('zstd 不在 PATH（会话桩依赖真 zstd 帧）')
 
-/** 会话桩：事件列表压成 zstd 会话档；pad=不可压填充（KB 徽标腿要用可感知体积）。 */
+/** 会话桩：事件列表压成 zstd 会话档；pad=不可压填充（KB 徽标子用例要用可感知体积）。 */
 async function zpack(events, dst, pad = 0) {
   const payload = pad
     ? [{ type: 'assistant/message', data: { note: randomBytes(pad).toString('hex') } }, ...events]
@@ -110,7 +110,7 @@ try {
     const devPick = (r.paths ?? []).find(p => p.includes(`${TICKET}-developer`))
     ok(devPick !== undefined && devPick.endsWith(NEW), 'dev sub 双名并存取 mtime 最新（新名胜出）')
     const intPick = (r.paths ?? []).find(p => p.includes(`${TICKET}-integration`))
-    ok(intPick !== undefined && intPick.endsWith(OLD), '仅旧名 sub 收旧名（两代方向对照腿）')
+    ok(intPick !== undefined && intPick.endsWith(OLD), '仅旧名 sub 收旧名（两代方向对照子用例）')
     const soloPick = (r.paths ?? []).find(p => p.includes(`${TICKET}-solo`))
     ok(soloPick !== undefined && soloPick.endsWith(NEW), '仅新名 sub 收新名（升级后新会话可发现）')
     ok((r.paths ?? []).every(p => p.includes(TICKET)), '别工单会话不混入')

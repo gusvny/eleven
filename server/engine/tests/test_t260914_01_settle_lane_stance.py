@@ -130,7 +130,7 @@ def test_legacy_only_lane_coordination_artifact_settles_clean(single_lane):
 
 
 def test_new_name_lane_coordination_artifact_settles_clean(single_lane):
-    """对照腿：新名泳道（本修前已正确排除）行为不变。"""
+    """对照子用例：新名泳道（本修前已正确排除）行为不变。"""
     root, lane = single_lane
     art = lane / NEW / "stage_create_plan_gen0.json"
     art.parent.mkdir(parents=True)

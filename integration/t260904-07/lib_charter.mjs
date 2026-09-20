@@ -22,7 +22,7 @@ export function refuseProductionConsole() {
 
 /** 执行契约（t260904-12 三态，同 t260904-05/lib_browser.makeResults 口径）：状态词表只认
  *  pass / fail / env_fail / na——环境缺失一律 env_fail（绝不 exit 0 假绿）；na 仅给以
- *  系统状态为条件的腿。退出码：fail>0 或全腿 na → 1（产品红优先）；env_fail>0 → 2；
+ *  系统状态为条件的子用例。退出码：fail>0 或全部子用例 na → 1（产品红优先）；env_fail>0 → 2；
  *  全过 → 0。SUMMARY 末行 pass= fail= env_fail= na=。 */
 export function makeResults() {
   const results = [];

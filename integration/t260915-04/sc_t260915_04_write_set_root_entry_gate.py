@@ -7,7 +7,7 @@ intent（守护的用户可感知行为/契约，KI-092 事故回归面，宿主
   归一同判；正规入口（ticket.py create）与裸入口（client.py ticket-start）都拒；拒收
   文案含**列举式改法**关键词（整仓/逐个子目录/.gitignore——锚关键词不锚整串措辞）并
   点名条目（dengzhufpv/t260911-07 事故形态：畸形声明曾一路跑到 settle 才炸、整票作废）；
-- **仓内条目照常受理**——子目录/具体文件/'integration/'（归根仓）放行过闸（放行对照腿
+- **仓内条目照常受理**——子目录/具体文件/'integration/'（归根仓）放行过闸（放行对照子用例
   防判别面失真：拒收与「放行后败于连接」必须可辨）；
 - **单仓项目口径统一**——'.' 建票拒收（与运行期闸同口径，经保险丝A 归属解析可达）；
   '*'/'**'/空串/纯空白/含哨兵字符样本建票期不再判合法（拒收并点名，不锚措辞）；
@@ -31,8 +31,8 @@ t260912 守归属三态/嵌套仓 fail-closed（本票归属逻辑零改动，�
 ⑦ 既有 '..' 拒收次序 → B9；⑧ 纵深（merge 期 fail-closed 可见）→ B12。
 
 环境口径（三态契约）：引擎 venv/temporalio 缺席 = ENV_FAIL exit 2（真入口子进程无
-stdlib 替代腿）；无 docker、无真 Temporal——SANDBAR_TARGET_HOST 钉不可达桩，拒收腿
-发生在连接之前＝零 Temporal 依赖，过闸腿以「连接失败而非拒收」为放行判别面。
+stdlib 替代子用例）；无 docker、无真 Temporal——SANDBAR_TARGET_HOST 钉不可达桩，拒收子用例
+发生在连接之前＝零 Temporal 依赖，过闸子用例以「连接失败而非拒收」为放行判别面。
 红线：绝不触生产 7233/8233/3099；夹具全在测试 tmp 目录自建。
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
 """
@@ -97,7 +97,7 @@ def _is_pass_through(err):
 def main():
     if not temporalio_available():
         env_fail("temporalio 缺失——真入口（ticket.py create / client.py ticket-start）"
-                 "子进程无 stdlib 替代腿；engine venv 在位后重跑")
+                 "子进程无 stdlib 替代子用例；engine venv 在位后重跑")
     tmp = tempfile.mkdtemp(prefix="t260915-04-")
     try:
         mixed = build_mixed_project(tmp)                      # 根仓 + repo_a/repo_b
@@ -115,7 +115,7 @@ def main():
             with stage_env(SANDBAR_PROJECTS_DIR=str(regdir)):
                 return try_create(tk, {
                     "op": "create", "project": project, "workflow": "dev-lane",
-                    "title": "t260915-04 场景腿", "write_set": list(write_set),
+                    "title": "t260915-04 场景子用例", "write_set": list(write_set),
                     "id": payload_tid})
 
         # ---- A 正规入口（ticket.py create，拒收发生在连接之前，零 Temporal 依赖） ----
@@ -149,7 +149,7 @@ def main():
         # ---- B 裸入口（client.py ticket-start 子进程；连接桩=过闸判别面） ----
         def start(tid, project, write_set, worktree=None):
             args = {"ticket_id": tid, "template_id": "dev-lane", "project": project,
-                    "title": "t260915-04 B 腿", "write_set": write_set}
+                    "title": "t260915-04 B 子用例", "write_set": write_set}
             if worktree:
                 args["worktree"] = str(worktree)
             return run_client(py, "ticket-start", args, env_client)
@@ -186,7 +186,7 @@ def main():
               refused(out, "写集", "src/x?.txt"), "out=%r" % out[-240:])
         # 测试资产变更审查（arbitrate tests-fault 修正）：逃逸条目值改由 join 构造——
         # 连续字面量（目录名、两点、文件名直拼）会被 inspection_scan 的路径引用提取
-        # 命中，其归一化分支存在未守卫解包，真仓扫描整体崩溃（t260905-03 腿8 机械轮
+        # 命中，其归一化分支存在未守卫解包，真仓扫描整体崩溃（t260905-03 子用例8 机械轮
         # 红）。运行期值与原字面量逐字节一致，断言强度不变。
         escape_entry = "/".join(["repo_a", "..", "escape.md"])
         rc, out = start("t26091504b9", "utmr", [escape_entry])

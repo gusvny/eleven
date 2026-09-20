@@ -12,7 +12,7 @@
 //   - 读引擎 inspection_flow.py 源码，**只在 InspectionPeriodicWorkflow 类块内**截取
 //     STAGES 声明（review 意见 1 同款作用域纪律：同文件还有 watcher 类，不限定类块
 //     会把 poll/trigger 混入），解析 InspectionStage(id=…, name=…) 声明序。
-//   - 变异自证腿：锁体=纯函数，喂变异副本（改名/插段/换序）必出问题清单——证明锁
+//   - 变异自证子用例：锁体=纯函数，喂变异副本（改名/插段/换序）必出问题清单——证明锁
 //     有牙齿，不靠真改文件。
 //
 // 仓库根解析（KI-075 族卫生，review 意见 2）：爬根找 CLAUDE.md（t260915-08 同款
@@ -62,7 +62,7 @@ function parseEngineStages(src) {
   return stages.map(m => ({ id: m[1], name: m[2] }))
 }
 
-// ---- 锁体（纯函数，变异腿的载体） ----
+// ---- 锁体（纯函数，变异子用例的载体） ----
 
 export function lockStagesToTopology(engineStages, hostTopology) {
   const problems = []
@@ -100,7 +100,7 @@ ok(INSPECTION_TOPOLOGY.every(s => typeof s.short === 'string' && s.short !== '')
     `真实对零漂移（误报即锁坏）${problems.length ? '：' + problems.join('；') : ''}`)
 }
 
-// ---- 变异自证腿：改声明不改宿主表 → 锁必红 ----
+// ---- 变异自证子用例：改声明不改宿主表 → 锁必红 ----
 
 {
   const renamed = engineStages.map(s => (s.id === 'inspect' ? { ...s, name: '改过的审查' } : s))

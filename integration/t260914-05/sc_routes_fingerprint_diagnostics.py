@@ -18,7 +18,7 @@ sha256 前 12 位是实现选择，不是票面承诺；换算法不该打破本
 intent 去重：t260910-14-routes-truth-fallback / t260902-07 守卫（随本票改写）钉「三态可辨 +
 告警含指纹」的**在场性**；本条钉指纹的**诊断效力**（内容敏感/跨进程稳定/日志一致/坏表可定位），
 属既有场景不覆盖的新面。与 developer L1（pytest 的 fingerprint 形状断言）不同层：本条含跨进程
-子进程腿与日志比对腿。
+子进程命令与日志比对子用例。
 
 夹具全 tmp（SANDBAR_PROJECTS_DIR 注入，退出还原）；只读仓库、零真环境写、零 3099/7233。
 PyYAML 缺席=ENV_FAIL exit 2（点名），不写 SKIP。实现段落地前红属预期（TDD 信号），
@@ -37,7 +37,7 @@ NAME = "sc_routes_fingerprint_diagnostics"
 
 
 def _resolve_in_subprocess(project_key, reg_root):
-    """跨进程腿：子进程（引擎 venv python）解析同一夹具注册表，返回 dict。"""
+    """跨进程子用例：子进程（引擎 venv python）解析同一夹具注册表，返回 dict。"""
     script = (
         "import json,sys;"
         "sys.path.insert(0, %r);"
@@ -91,7 +91,7 @@ def main():
             fp_cur = shared.resolve_routes_table("proj").get("fingerprint")
             sub, sub_err = _resolve_in_subprocess("proj", reg.root)
             if sub is None:
-                c.ok(False, "F3 跨进程腿自坏（脚本/环境问题，不冤产品）：%s" % sub_err)
+                c.ok(False, "F3 跨进程子用例自坏（脚本/环境问题，不冤产品）：%s" % sub_err)
             else:
                 c.ok(sub.get("state") == "ok" and sub.get("fp") == fp_cur,
                      "F3 子进程与父进程解析同一份字节指纹一致（子=%r 父=%r）" % (sub.get("fp"), fp_cur))

@@ -8,7 +8,7 @@ worker 代落盘（settle）必须拒绝——不 commit、工作区原样保留
 
 契约修订注记（t260916-19 B）：越权件 ??（未跟踪新建）/M（tracked 修改）两态改自动处置
 （挪档/回滚留档）后复判，不再产生终态拒绝——拒绝终态只保留在删除型（D）/暂存型/
-protected 上。本场景越权腿相应改用删除型注入（A1/A2 泳道内删除 tracked 产品文件），
+protected 上。本场景越权子用例相应改用删除型注入（A1/A2 泳道内删除 tracked 产品文件），
 「拒绝+0 commit+点名+工作区原样保留」断言面在新旧契约下同形；??/M 处置旅程守卫归
 t260916-19 场景（t26091619-unauth-disposal-matrix）。
 
@@ -23,7 +23,7 @@ t260916-19 场景（t26091619-unauth-disposal-matrix）。
       integration/t260911-03/tests/sc_pathgate_walkthrough_reject.py（cwd=仓根）
 纯本地：tmp 主仓+真注册泳道 worktree+直调 settle 单点，零 Temporal server 零端口。
 三态：PASS exit 0 / FAIL exit 1 / ENV_FAIL exit 2（三态契约，无第四态）。
-实现段落地前闸腿红属预期（TDD 验收门），arbitrate/merge 期必须绿。
+实现段落地前闸子用例红属预期（TDD 验收门），arbitrate/merge 期必须绿。
 """
 import inspect
 import shutil
@@ -73,7 +73,7 @@ BASE = {
     "verify.yaml": "schema: v1\nlanes:\n  code:\n    write_allow:\n      - server/engine/\n      - integration/\n    checks: []\n",
     "server/engine/keep.py": "# engine anchor\n",
     # t260916-19 B 起 ??/M 态越权改自动处置（挪档/回滚留档）不再终态拒绝——
-    # 本场景越权腿改用删除型（D 态）注入以保持「拒绝+保留」终态的可测性，
+    # 本场景越权子用例改用删除型（D 态）注入以保持「拒绝+保留」终态的可测性，
     # 故产品代码越权件先落分叉点基线（tracked），A1/A2 在泳道内删除。
     "server/engine/feature.py": "x = 0\n",
     "server/engine/feature2.py": "y = 0\n",
@@ -131,7 +131,7 @@ def main():
                 kwargs.update(face="join")  # t260916-19 D：settle 分层标签（本场景模拟 join 点收口）
         try:
             return aa._settle_worktree_lane(lane, TICKET, stage, gen, **kwargs), None
-        except Exception as e:  # noqa: BLE001 — 场景层任何异常都算该腿红
+        except Exception as e:  # noqa: BLE001 — 场景层任何异常都算该子用例红
             return None, "settle 调用异常：%s" % e
 
     # ---- A1 验收走查段注入产品代码改动 → 拒绝落盘（验收 a 正例）----
@@ -166,7 +166,7 @@ def main():
     else:
         ok(False, "A2 驱动失败：%s" % (err or "note 缺失"))
 
-    # ---- A3 对照腿：仅 .sandbar/ 结果文件 → settle 零动作、零拒绝 ----
+    # ---- A3 对照子用例：仅 .sandbar/ 结果文件 → settle 零动作、零拒绝 ----
     # （结果文件被 SETTLE_PATHSPEC 排除、从不进 commit——「放行」的真实形状=
     #   回执零原因码+结果文件原样保留+历史零扰动，并非产生新 commit。）
     section("A3 仅 .sandbar/ 结果文件 → 零动作不误伤")

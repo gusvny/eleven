@@ -243,7 +243,7 @@ def test_inspection_trigger_import_level():
 
 def test_trigger_decl_op_offline_real_file():
     # t260916-02：显式 --decl-path = 单文件视图（mode=single）；聚合视图由
-    # test_t260916_02 声明落位文件专测（SANDBAR_PROJECTS_DIR 夹具双项目腿）。
+    # test_t260916_02 声明落位文件专测（SANDBAR_PROJECTS_DIR 夹具双项目子用例）。
     proc = subprocess.run(
         [sys.executable, str(POC / "inspection_trigger.py"), "decl",
          "--decl-path", str(REPO / "inspection.yaml")],

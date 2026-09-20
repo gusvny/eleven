@@ -7,13 +7,13 @@ intent（用户可感知）：容器形态下 agent 的命令面**能用**、**�
   ② 负锁（宿主边界不可达，挂载面守卫）：宿主主树/他票路径在容器里**不存在**、
      /usr/local 写被拒（uid OS 权限）——零落盘（红线 2 / 验收 B）；
   ③ git 预期失败形态（D2 降级面）；
-  ④ 正腿（宿主 260914 A 案）：容器本地路径（/tmp）**可写**——容器内已无 dsh 沙箱
+  ④ 正用例（宿主 260914 A 案）：容器本地路径（/tmp）**可写**——容器内已无 dsh 沙箱
      拦截，「隔离靠挂载面」不误伤容器内正常干活；
   ⑤ 证据面（泳道 DSH_HOME 本轮新档）记录 sandbox mode=danger-full-access 与真实拒绝。
-**默认跑法（闸内可跑）= 单轮基线**：真 agent 在契约形容器里跑一轮，四腿全判——于是
+**默认跑法（闸内可跑）= 单轮基线**：真 agent 在契约形容器里跑一轮，四子用例全判——于是
 每票强制全跑都能拿到 B/C 的机械实证，而不是留一条恒环境红（环境红=供给缺口，见
 arbitrate gen1 的判定）。
-**深跑法（SANDBAR_E2E_REAL=1 追加）**：>65 秒长命令腿（D8：bash-sandbox 900000ms；
+**深跑法（SANDBAR_E2E_REAL=1 追加）**：>65 秒长命令子用例（D8：bash-sandbox 900000ms；
 工单源事故附带发现②=60s 硬顶掐断分钟级命令）＋两个对抗轮（宿主 260914 A 案下对抗面
 =「模式字面量不被篡改」：env 注入 DSH_PERMISSION_MODE=workspace-write、泳道 profile
 patch 注入 disabled——两条路都必须**仍钉在 danger-full-access**且同一轮正锁仍成立）。
@@ -21,15 +21,15 @@ patch 注入 disabled——两条路都必须**仍钉在 danger-full-access**且
 
 依据：工单验收 B/C、红线 1/2、工单源事故（sandbox-exec fail-closed 病灶＋容器内原型
 已验证沙箱在生效）＋方案 gen1 D5/D8（review gen1 C1 正负双锁收编）。与 developer L1
-分工：沙箱策略是 dsh 运行期行为，单测锁不住，只有真 agent 腿能锁。
+分工：沙箱策略是 dsh 运行期行为，单测锁不住，只有真 agent 子用例能锁。
 
 high-level steps：docker+镜像+凭据三道供给门（缺任一=ENV_FAIL 点名）→ 泳道 .dsh 注入链
 （profile/凭据/settings 拷贝 + pin patch 含入口级 disabled:false 压制位）→ 契约形容器里跑
 真 dsh headless 一轮（工作区内写 + 工作区外写尝试 + git status）→ 机械断言 ①②③④；
-SANDBAR_E2E_REAL=1 时追加长命令腿与 env 泄漏轮、profile 注入轮（断言 ⑤）。
+SANDBAR_E2E_REAL=1 时追加长命令子用例与 env 泄漏轮、profile 注入轮（断言 ⑤）。
 
 三态：PASS 0 / FAIL 1 / ENV_FAIL 2。settings.yaml 层注入键名待实现段 config 回读证据
-落地后补腿（本条不猜 dsh 内部键——env 面+profile patch 面先行，已覆盖 D5 的两条主线）。
+落地后补子用例（本条不猜 dsh 内部键——env 面+profile patch 面先行，已覆盖 D5 的两条主线）。
 engine 池（宽 1；默认 1 轮 ≈ 分钟级，深跑 3 轮）。
 """
 import os
@@ -56,7 +56,7 @@ def require_supply():
     F.require_docker(C)
     tag = F.agent_image_tag(C)
     if not (HOME_DSH / ".credentials.yaml").exists():
-        C.env("凭据缺席（%s）——真 agent 腿无法认证" % (HOME_DSH / ".credentials.yaml"))
+        C.env("凭据缺席（%s）——真 agent 子用例无法认证" % (HOME_DSH / ".credentials.yaml"))
         C.finish()
     return tag
 
@@ -114,7 +114,7 @@ def container_alive():
 def run_container(lane, tag, prompt, extra_env=None):
     """契约形容器 + 真 dsh headless 一轮；返回 (rc, tail)。
     稳健性（实测守护进程抖动面）：拆旧带确认、名字冲突重试一次；容器在段中死亡不是
-    产品判定（归 ENV_FAIL 腿，见 one_round）。"""
+    产品判定（归 ENV_FAIL 子用例，见 one_round）。"""
     F.sh("docker", "rm", "-f", NAME, timeout=60)
     for i in range(6):
         if F.sh("docker", "inspect", NAME, timeout=20).returncode != 0:
@@ -208,7 +208,7 @@ def one_round(tag, main_repo, lane, round_tag, extra_env=None, git_probe=False,
     if any(m in (tail or "") for m in QUOTA_MARKERS):
         # 模型账户配额耗尽（429）＝环境红，不是产品红（与 e2e 驱动同口径）：agent 每次
         # 模型调用都被拒，段永远产不出文件；若按产品红计会把供给缺口记成代码问题。
-        C.env("[%s] 模型账户配额耗尽（%s）——真 agent 腿无法跑完，环境红非产品红"
+        C.env("[%s] 模型账户配额耗尽（%s）——真 agent 子用例无法跑完，环境红非产品红"
               "（tail=%s）" % (round_tag, [m for m in QUOTA_MARKERS if m in tail][:1],
                                tail[:160]))
         return
@@ -233,7 +233,7 @@ def one_round(tag, main_repo, lane, round_tag, extra_env=None, git_probe=False,
     C.check(outside_absent(lane, main_repo),
             "[%s] 负锁：宿主边界不可达（宿主主树/他票路径在容器里不存在；/usr/local "
             "uid OS 权限拒）零落盘" % round_tag)
-    # 宿主 260914 A 案正腿：容器本地路径（/tmp）可写——容器内已无 dsh 沙箱拦截，
+    # 宿主 260914 A 案正用例：容器本地路径（/tmp）可写——容器内已无 dsh 沙箱拦截，
     # 「隔离靠挂载面」不误伤容器内正常干活。首选 agent 亲手写（强证明）；agent 漏步时
     # 以 exec 直写兜底判定（判定对象=容器执行面，不是 agent 服从性），并如实登记走哪条。
     tmp_agent = F.exec_in(NAME, "test", "-e", "/tmp/sb_probe_in.txt", timeout=20).returncode == 0
@@ -245,7 +245,7 @@ def one_round(tag, main_repo, lane, round_tag, extra_env=None, git_probe=False,
                                    timeout=20).returncode == 0)
         tmp_how = "exec 直写兜底"
     C.check(tmp_agent,
-            "[%s] 正腿：容器本地路径（/tmp）可写——容器内无沙箱拦截（宿主 A 案）" % round_tag,
+            "[%s] 正用例：容器本地路径（/tmp）可写——容器内无沙箱拦截（宿主 A 案）" % round_tag,
             "how=%s" % tmp_how)
     if not boot_fail:
         if long_cmd:
@@ -254,7 +254,7 @@ def one_round(tag, main_repo, lane, round_tag, extra_env=None, git_probe=False,
                     % (round_tag, LONG_SEC),
                     "long.txt 存在=%s | tail=%s" % (longf.exists(), tail[:200]))
         else:
-            C.na("[%s] >%ds 长命令腿在深跑（SANDBAR_E2E_REAL=1）中判——权威判据=实现段 "
+            C.na("[%s] >%ds 长命令子用例在深跑（SANDBAR_E2E_REAL=1）中判——权威判据=实现段 "
                  "Step 6 e2e 的实测耗时+退出码（方案 §4 Step 6）" % (round_tag, LONG_SEC))
     if git_probe:
         g = F.exec_in(NAME, "git", "-C", str(lane), "status", timeout=30)
@@ -265,7 +265,7 @@ def one_round(tag, main_repo, lane, round_tag, extra_env=None, git_probe=False,
                                        "not a git repository"], since=t0)
     if hits is None:
         C.na("[%s] 本轮泳道 DSH_HOME 无可读新证据档（one-shot headless 形态不落会话档）"
-             "——关键词腿无可验对象" % round_tag)
+             "——关键词子用例无可验对象" % round_tag)
     else:
         C.check(hits.get("danger-full-access", False),
                 "[%s] 证据面记录 sandbox mode=danger-full-access（宿主 A 案口径）" % round_tag,
@@ -300,9 +300,9 @@ def main():
             F.sh("docker", "exec", NAME, "rm", "-rf", str(lane / "proof"), timeout=20)
             one_round(tag, main_repo, lane, "profilepatch", long_cmd=True)
         else:
-            print("\n[门控] 深跑轮（env 泄漏 / profile patch 注入）与 >65s 长命令腿："
+            print("\n[门控] 深跑轮（env 泄漏 / profile patch 注入）与 >65s 长命令子用例："
                   "设 SANDBAR_E2E_REAL=1 追加；本轮已判正负双锁+git 降级+证据面，"
-                  "长命令腿如实记 N/A（权威判据=实现段 Step 6 e2e）")
+                  "长命令子用例如实记 N/A（权威判据=实现段 Step 6 e2e）")
     finally:
         F.exec_in(NAME, "rm", "-f", "/tmp/sb_probe_exec.txt", timeout=20)
         F.sh("docker", "rm", "-f", NAME, timeout=60)
