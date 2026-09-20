@@ -5466,53 +5466,63 @@ HANDOVER_LEG_TIMEOUT_SEC = INTEG_CMD_TIMEOUT_SEC
 
 async def run_handover_leg(leg: Dict[str, str], cwd: Path,
                            timeout: float = HANDOVER_LEG_TIMEOUT_SEC) -> Dict[str, Any]:
-    """单条移交命令执行（t260917-08）：worker 执行面代跑 agent 沙箱受限期间交接的
-    验证命令。三路全终态（工程惯例：正常/报错/超时每条路径都到清理）——过
-    （exit 0）/ 败（exit≠0）/ 超时（kill 后 wait 排空再报告，KI-009 同款纪律，
-    不留僵尸）。env 剥除 TEST_STUB_ENV_KNOBS + WORKER_ROUTING_ENV_KNOBS：桩旋钮
-    不得漏进腿进程换假行为（review R2/L4 的机械面，与 :2773 verify_lane 剥除同款）。
-    cmd 用 shlex.split 直接 exec（无 shell：无 &&/> 展开面，引号由 shlex 处理）；
-    畸形命令（解析失败/空）→ exit=None 记名**不执行**（fail-closed：宁可腿报败
-    交给仲裁处置，不猜着跑）。cwd=泳道根（与场景执行同口径，写集信任域）；
-    output_tail 截断 800 字符（防超长输出拖垮回执/票面）。"""
+    """单条移交命令执行（t260917-08；260920 改走 shell，宿主令「A」）：worker 执行面
+    代跑 agent 沙箱受限期间移交的验证命令。三路全终态（工程惯例：正常/报错/超时每条
+    路径都到清理）——过（exit 0）/ 败（exit≠0）/ 超时（按**进程组**回收，start_new_session
+    起的 shell 会派生孙进程，只 kill shell 会留孤儿 → killpg + wait 排空再报告，KI-009
+    同款纪律）。env 剥除 TEST_STUB_ENV_KNOBS + WORKER_ROUTING_ENV_KNOBS：桩旋钮不得漏进
+    命令进程换假行为（review R2/L4 的机械面，与 verify_lane 剥除同款）。
+
+    260920 为什么改走 shell（实案 t260920-01，连续两次崩）：
+      移交过来的命令是 agent 写的 shell 命令（如
+      `PYTHONPYCACHEPREFIX=out/pycache python3 -m py_compile …`＝环境变量前缀 + 命令）。
+      旧实现 shlex.split 后直接 exec（无 shell），把 `PYTHONPYCACHEPREFIX=out/pycache`
+      当成可执行文件名 → FileNotFoundError → **整段集测活动被打死**（票面报「活动故障」，
+      指向错误方向）。而同一批 verify.yaml 检查命令在 verify_lane 侧本就走 `/bin/sh -c`
+      ——改 shell 是**与既有口径对齐**，不是放宽权限面。
+      空命令仍 fail-closed 不执行；shell 语法错误=命令自己非零退出（记败交仲裁，不猜）。
+    cwd=泳道根（与场景执行同口径，写集信任域）；output_tail 截断 800 字符（防超长输出
+    拖垮回执/票面）。"""
     name = str(leg.get("name") or "")
     cmd_s = str(leg.get("cmd") or "")
-    try:
-        argv = shlex.split(cmd_s)
-    except ValueError as e:
+    if not cmd_s.strip():
         return {"name": name, "cmd": cmd_s, "exit": None,
-                "output_tail": "移交命令命令解析失败（不执行）：%s" % e}
-    if not argv:
-        return {"name": name, "cmd": cmd_s, "exit": None,
-                "output_tail": "移交命令空命令（不执行）"}
+                "output_tail": "移交命令为空（不执行）"}
     env = {k: v for k, v in os.environ.items()
            if k not in TEST_STUB_ENV_KNOBS and k not in WORKER_ROUTING_ENV_KNOBS}
     p = await asyncio.create_subprocess_exec(
-        *argv, cwd=str(cwd), stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT, env=env)
+        "/bin/sh", "-c", cmd_s, cwd=str(cwd), stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT, env=env, start_new_session=True)
     try:
         out_b, _ = await asyncio.wait_for(p.communicate(), timeout=timeout)
     except asyncio.TimeoutError:
         try:
-            p.kill()
-        except ProcessLookupError:
-            pass
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            try:
+                p.kill()
+            except ProcessLookupError:
+                pass
         try:
             await p.wait()
         except Exception:
             pass
         return {"name": name, "cmd": cmd_s, "exit": p.returncode,
-                "output_tail": "移交命令超时（>%ds，已 kill 排空）" % int(timeout)}
+                "output_tail": "移交命令超时（>%ds，已按进程组 kill 排空）" % int(timeout)}
     tail = (out_b or b"").decode("utf-8", "replace")[-800:].strip()
     return {"name": name, "cmd": cmd_s, "exit": p.returncode, "output_tail": tail}
 
 
 async def run_handover_legs(handover_runs, cwd: Path) -> Dict[str, Any]:
     """移交命令整单执行（t260917-08）：_run_scenarios 尾部的消费路径抽成独立函数——
-    验收②「交接清单被后续段消费并执行」的离线桩/场景可直调真实现，不必起真
+    验收②「移交清单被后续段消费并执行」的离线桩/场景可直调真实现，不必起真
     verify_lane。返回 {ran, passed, failed, details}（details 条目 name 带
     handover: 前缀，与场景明细同形状，供 arb_ctx/票面单源消费）；
-    非 dict 腿=记名不执行（失败分支计数，fail-closed）。"""
+    非 dict 腿=记名不执行（失败分支计数，fail-closed）。
+
+    260920（宿主令「A」）：单条起飞异常（命令进程起不来/环境异常等）就地记名**失败
+    分支**，绝不外抛——实案 t260920-01：一条命令的 FileNotFoundError 把整个集测活动
+    打死、票面报成「活动故障」，一条命令的毛病不该毁掉整段证据面。"""
     ran = passed = failed = 0
     details: List[Dict[str, Any]] = []
     for leg in (handover_runs or []):
@@ -5522,7 +5532,19 @@ async def run_handover_legs(handover_runs, cwd: Path) -> Dict[str, Any]:
             ran += 1
             failed += 1
             continue
-        r = await run_handover_leg(leg, cwd)
+        try:
+            r = await run_handover_leg(leg, cwd)
+        except Exception as e:                     # noqa: BLE001 —— 单条不毁整段（见 docstring）
+            def _safe(v: Any) -> str:
+                """畸形成员读不动也不许再抛（例外分支自己再炸=白兜）。"""
+                try:
+                    return str(v or "")
+                except Exception:                  # noqa: BLE001
+                    return "<不可读>"
+            r = {"name": _safe(leg.get("name")), "cmd": _safe(leg.get("cmd")),
+                 "exit": None,
+                 "output_tail": "移交命令起飞异常（记名失败，不影响其余命令）：%s: %s"
+                                % (type(e).__name__, e)}
         ran += 1
         if r["exit"] == 0:
             passed += 1

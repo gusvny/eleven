@@ -504,13 +504,57 @@ def test_h3_timeout_killed_and_drained_no_zombie():
     assert "超时" in r["output_tail"]
 
 
-def test_h4_malformed_cmd_not_executed_fail_closed():
+def test_h4_malformed_cmd_fails_as_command_not_refused():
+    # 260920 改走 shell（宿主令「A」）：shell 语法错误不再「拒执行」，而是命令自己非零退出
+    # ——记败交仲裁，仍 fail-closed（不猜着放过）；空命令仍不执行。
     r1 = asyncio.run(agent_activities.run_handover_leg(
         {"name": "bad", "cmd": "echo 'unbalanced"}, cwd=Path(tempfile.gettempdir())))
-    assert r1["exit"] is None and "解析失败" in r1["output_tail"]
+    assert r1["exit"] not in (0, None) and r1["output_tail"]     # shell 报的语法错在尾串里
     r2 = asyncio.run(agent_activities.run_handover_leg(
         {"name": "empty", "cmd": "   "}, cwd=Path(tempfile.gettempdir())))
-    assert r2["exit"] is None and "空命令" in r2["output_tail"]
+    assert r2["exit"] is None and "为空" in r2["output_tail"]
+
+
+def test_h6_env_prefixed_shell_command_runs_regression():
+    # 实案 t260920-01 回归：环境变量前缀的 shell 命令必须能跑（旧实现把前缀当程序名 →
+    # FileNotFoundError → 打死整段集测）。
+    r = asyncio.run(agent_activities.run_handover_leg(
+        {"name": "env-prefix",
+         "cmd": "PYTHONPYCACHEPREFIX=/tmp/ut-pycache %s -c \"print('env-prefix-ok')\"" % PY},
+        cwd=Path(tempfile.gettempdir())))
+    assert r["exit"] == 0 and "env-prefix-ok" in r["output_tail"]
+
+
+def test_h7_shell_metachars_and_pipeline_supported():
+    r = asyncio.run(agent_activities.run_handover_leg(
+        {"name": "meta", "cmd": "echo aa && echo bb | tr a-z A-Z"},
+        cwd=Path(tempfile.gettempdir())))
+    assert r["exit"] == 0 and "aa" in r["output_tail"] and "BB" in r["output_tail"]
+
+
+def test_h8_timeout_reaped_by_process_group_no_orphan():
+    # 进程组回收：shell 派生的孙进程也必须被收走（只 kill shell 会留孤儿）。
+    r = asyncio.run(agent_activities.run_handover_leg(
+        {"name": "slow-group", "cmd": "sleep 30 & sleep 30"},
+        cwd=Path(tempfile.gettempdir()), timeout=1.0))
+    assert r["exit"] not in (0, None)
+    assert "超时" in r["output_tail"] and "进程组" in r["output_tail"]
+
+
+def test_h9_one_bad_command_does_not_kill_the_batch():
+    # 260920：单条起飞异常只记名失败，其余命令照跑（一条命令的毛病不得毁整段证据面）。
+    class Boom:
+        def __str__(self):
+            raise RuntimeError("boom-str")
+    res = asyncio.run(agent_activities.run_handover_legs(
+        [{"name": "boom", "cmd": Boom()},
+         {"name": "good", "cmd": "echo still-alive"}],
+        cwd=Path(tempfile.gettempdir())))
+    assert res["ran"] == 2 and res["passed"] == 1 and res["failed"] == 1
+    boom = [d for d in res["details"] if "boom" in d["name"]][0]
+    assert boom["exit"] == -1 and "起飞异常" in boom["output_tail"]
+    good = [d for d in res["details"] if "good" in d["name"]][0]
+    assert good["exit"] == 0 and "still-alive" in good["output_tail"]
 
 
 def test_h5_stub_knobs_stripped_from_leg_subprocess_l4():
