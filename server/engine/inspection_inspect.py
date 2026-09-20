@@ -613,12 +613,23 @@ def build_persona_patch() -> str:
 
 def readonly_pin_patch() -> str:
     """inspect agent 的只读 pin patch（晚于 profile/docker pin 追加=覆盖生效）：
-    sandbox-policy.mode: read-only + permission defaultPreset: read-only。
-    dsh 预设表实证：read-only=(sandbox: read-only, approval: ask)；headless one-shot
-    无应答面 ⇒ 写操作走不通（实现探针结论见 integration/t260916-22/design.md）。"""
+    sandbox-policy.mode: read-only + permission defaultPreset: workspace-write。
+
+    260920 修正（宿主令「直接修」，巡检每日必失败实案 t260920-02）：
+    `permission.defaultPreset: 'read-only'` **在本机生产 dsh（0.1.1-rc.2）不存在**——
+    实测报错原文 `permission: unknown preset "read-only" (known: workspace-write,
+    danger-full-access)`，巡检 inspect 段因此起不来、每期巡检必卡（09-18/09-19 FAILED、
+    09-20 blocked）。`read-only` 只作为 **sandbox 的模式取值**存在（该取值实测在
+    sandbox 插件内），不是 permission 预设名。
+    只读红线不改判据、只换承载体：**文件系统级硬闸= sandbox-policy.mode: read-only**
+    （与 t260916-22 方案 §2.2「叠加 sandbox:read-only 的文件系统级硬闸」同义，本函数
+    原来就依赖它）；permission 侧回归受支持的名字，避免 dsh boot 直接拒启。
+    design.md:18/194 记的「预设表含 read-only（--dump-default-config 实证）」与本机
+    版本不符，属设计假设与生产 dsh 版本的口径冲突（那半边的实证面另案）。"""
     return (
-        "# 本文件由 run_inspection_inspect 每次 spawn 生成（t260916-22 只读红线："
-        "sandbox read-only + permission read-only 预设；晚于 docker pin 追加=覆盖生效）。\n"
+        "# 本文件由 run_inspection_inspect 每次 spawn 生成（t260916-22 只读红线 / "
+        "260920 预设名修正：sandbox read-only 承担只读，permission 用受支持的 "
+        "workspace-write；晚于 docker pin 追加=覆盖生效）。\n"
         "- id: sandbox-policy\n"
         "  disabled: false\n"
         "  config:\n"
@@ -626,4 +637,4 @@ def readonly_pin_patch() -> str:
         "- id: permission\n"
         "  disabled: false\n"
         "  config:\n"
-        "    defaultPreset: 'read-only'\n")
+        "    defaultPreset: 'workspace-write'\n")

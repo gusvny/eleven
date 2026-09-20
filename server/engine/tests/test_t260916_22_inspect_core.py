@@ -373,5 +373,9 @@ def test_persona_and_readonly_pin_patch_shape():
     persona = ins.build_persona_patch()
     assert "id: system-prompt" in persona and "只读审查员" in persona
     pin = ins.readonly_pin_patch()
-    assert "mode: 'read-only'" in pin and "defaultPreset: 'read-only'" in pin
+    # 260920 修正（宿主令「直接修」，实案 t260920-02）：permission 预设名回归受支持值——
+    # 生产 dsh 0.1.1-rc.2 的预设表只有 workspace-write/danger-full-access，写死 'read-only'
+    # 会让巡检 inspect 段 boot 即拒启（unknown preset）。只读红线由 sandbox 模式承担。
+    assert "mode: 'read-only'" in pin and "defaultPreset: 'workspace-write'" in pin
+    assert "defaultPreset: 'read-only'" not in pin
     assert "- id: sandbox-policy" in pin and "- id: permission" in pin
