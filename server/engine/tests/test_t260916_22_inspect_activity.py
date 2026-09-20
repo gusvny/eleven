@@ -221,10 +221,11 @@ def test_inspect_route_meta_recompute_failure_degrades_not_breaks(
     patches = [Path(argv[i + 1]) for i, v in enumerate(argv) if v == "--patch"]
     assert len(patches) == 2 and all(p.is_file() for p in patches)
     pin = [p for p in patches if "read-only" in p.read_text(encoding="utf-8")]
-    # 260920 修正（宿主令「直接修」）：pin 里 permission 预设名=受支持的 workspace-write，
-    # 只读由 sandbox-policy.mode: read-only 承担（'read-only' 预设名在 dsh 0.1.1-rc.2 不存在，
-    # 实案 t260920-02：巡检 inspect 段 boot 即拒启）。
-    assert pin and "defaultPreset: 'workspace-write'" in pin[0].read_text(encoding="utf-8")
+    # 260920 修正（宿主令「直接修」）：补丁自带 read-only 预设表项（sandbox read-only +
+    # approval ask）+ defaultPreset 选它——dsh 0.1.1-rc.2 表里没有 'read-only'，直接引用会
+    # boot 拒启（实案 t260920-02）；换 workspace-write 会把只读沙箱改写成可写，故补表项。
+    assert pin and "defaultPreset: 'read-only'" in pin[0].read_text(encoding="utf-8")
+    assert "        sandbox: 'read-only'" in pin[0].read_text(encoding="utf-8")
     assert ("DSH_HOME=%s" % (tmp_path / "agent-home")) in raw
     assert "CWD=%s" % base_dir in raw                   # cwd=审查基座
     # 退场干净：日志含进程输出；agent-home 里无 .dsh 泄漏到基座

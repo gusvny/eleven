@@ -613,23 +613,25 @@ def build_persona_patch() -> str:
 
 def readonly_pin_patch() -> str:
     """inspect agent 的只读 pin patch（晚于 profile/docker pin 追加=覆盖生效）：
-    sandbox-policy.mode: read-only + permission defaultPreset: workspace-write。
+    sandbox-policy.mode: read-only + permission 表内自带 read-only 预设、defaultPreset
+    选它（read-only = sandbox: read-only + approval: ask）。
 
     260920 修正（宿主令「直接修」，巡检每日必失败实案 t260920-02）：
-    `permission.defaultPreset: 'read-only'` **在本机生产 dsh（0.1.1-rc.2）不存在**——
-    实测报错原文 `permission: unknown preset "read-only" (known: workspace-write,
-    danger-full-access)`，巡检 inspect 段因此起不来、每期巡检必卡（09-18/09-19 FAILED、
-    09-20 blocked）。`read-only` 只作为 **sandbox 的模式取值**存在（该取值实测在
-    sandbox 插件内），不是 permission 预设名。
-    只读红线不改判据、只换承载体：**文件系统级硬闸= sandbox-policy.mode: read-only**
-    （与 t260916-22 方案 §2.2「叠加 sandbox:read-only 的文件系统级硬闸」同义，本函数
-    原来就依赖它）；permission 侧回归受支持的名字，避免 dsh boot 直接拒启。
-    design.md:18/194 记的「预设表含 read-only（--dump-default-config 实证）」与本机
-    版本不符，属设计假设与生产 dsh 版本的口径冲突（那半边的实证面另案）。"""
+    本机生产 dsh（0.1.1-rc.2）的**权限预设表缺省只有 workspace-write / danger-full-access**
+    ——原实现直接引用 `defaultPreset: 'read-only'` 会在 PermissionPresetService 构造期抛
+    `permission: unknown preset "read-only"`，巡检 inspect 段起不来、每期巡检查红
+    （09-18/09-19 FAILED、09-20 blocked）。
+    **不可**简单换成 workspace-write：`dsh-permission-presets` 的预设**自带 sandbox 模式**
+    （apply() 会把会话 sandbox 设成预设的 sandbox），换名等于把只读沙箱改写成可写——
+    等于悄悄废掉只读红线。故本补丁**自带一条 read-only 预设**（保留全部三条表项），
+    语义与 t260916-22 方案 §2.2「read-only=(sandbox: read-only, approval: ask)」逐字一致，
+    只是把「假设表里已有」改成「自己写进表里」。
+    design.md:18/194 记的「预设表含 read-only（--dump-default-config 实证）」与本机版本
+    不符，属设计假设与生产 dsh 版本的口径冲突（实证面另案）。"""
     return (
         "# 本文件由 run_inspection_inspect 每次 spawn 生成（t260916-22 只读红线 / "
-        "260920 预设名修正：sandbox read-only 承担只读，permission 用受支持的 "
-        "workspace-write；晚于 docker pin 追加=覆盖生效）。\n"
+        "260920 修正：permission 表内自带 read-only 预设，语义不变只补表项；"
+        "晚于 docker pin 追加=覆盖生效）。\n"
         "- id: sandbox-policy\n"
         "  disabled: false\n"
         "  config:\n"
@@ -637,4 +639,20 @@ def readonly_pin_patch() -> str:
         "- id: permission\n"
         "  disabled: false\n"
         "  config:\n"
-        "    defaultPreset: 'workspace-write'\n")
+        "    presets:\n"
+        "      read-only:\n"
+        "        sandbox: 'read-only'\n"
+        "        approval: 'ask'\n"
+        "        name: 'read-only'\n"
+        "        description: '巡检只读：文件系统级只读沙箱 + 有问必拒（headless 无应答面，写操作走不通）'\n"
+        "      workspace-write:\n"
+        "        sandbox: 'workspace-write'\n"
+        "        approval: 'ask'\n"
+        "        name: 'workspace-write'\n"
+        "        description: 'Write inside the workspace and permitted temporary directories'\n"
+        "      danger-full-access:\n"
+        "        sandbox: 'danger-full-access'\n"
+        "        approval: 'never'\n"
+        "        name: 'danger-full-access'\n"
+        "        description: 'Full file access without approval prompts'\n"
+        "    defaultPreset: 'read-only'\n")
