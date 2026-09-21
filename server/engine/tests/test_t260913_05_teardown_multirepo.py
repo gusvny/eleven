@@ -376,3 +376,50 @@ def test_source_lock_teardown_uses_lane_scopes_single_source():
     body = src[at:src.find("\n# ---------- dev-lane:", at)]
     assert "_lane_scopes(" in body, body[:400]
     assert "repo = REPO_ROOT" not in body, "单仓硬编码不得回潮"
+
+
+# ---------- 容器拆/扫模式闸接线子用例（t260921-05：单测去 docker 依赖） ----------
+
+def test_teardown_host模式_零docker调用(mixed, tmp_path, monkeypatch):
+    """验收②（接线级）：host 模式（缺省）下 teardown_lane 全链零 docker 调用——
+    注入只记录快败桩（recording wrapper），拆道照常干净收口、日志零行。"""
+    log = tmp_path / "rec.log"
+    wrapper = tmp_path / "recorder"
+    wrapper.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        "open(os.environ['REC_LOG'], 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        "sys.stderr.write('recorder: hit %r\\n' % (sys.argv[1:],)); sys.exit(72)\n")
+    wrapper.chmod(0o755)
+    monkeypatch.setenv("SANDBAR_DOCKER_BIN", str(wrapper))
+    monkeypatch.setenv("REC_LOG", str(log))
+    monkeypatch.delenv("SANDBAR_AGENT_RUNTIME", raising=False)   # host=缺省形态
+    lane, entries = _make_mixed_lane(mixed, "utt05z")
+    res = _run(MergeArgs(ticket_id="utt05z", worktree=str(lane),
+                         branch="lane/utt05z-root", repo_worktrees=entries))
+    assert res.ok and res.action == "teardown"
+    assert res.error == "", res.error        # 拆道照常干净（无容器可拆≠异常面）
+    assert not log.exists(), "host 模式 teardown 全链必须零 docker 调用"
+
+
+def test_teardown_docker模式_调用形状与失败容忍(mixed, fake_docker):
+    """验收②③（接线级）：docker 模式下 teardown 走桩——调用形状 argv 落日志范式
+    （rm -f sandbar-agent-<ticket>）；rm 失败态（rm-garbage）收口不被拦、留痕点名、
+    不得吞成「已拆」。"""
+    # 成功子用例：容器档在场 → 拆掉，「已拆」前缀不进 warns（teardown 空 warns 契约）
+    fake_docker.set("running-sandbar-agent-utt05w")
+    lane, entries = _make_mixed_lane(mixed, "utt05w")
+    res = _run(MergeArgs(ticket_id="utt05w", worktree=str(lane),
+                         branch="lane/utt05w-root", repo_worktrees=entries))
+    assert res.ok and res.error == "", res.error
+    rms = [a for a in fake_docker.argvs() if a[:2] == ["rm", "-f"]]
+    assert ["rm", "-f", "sandbar-agent-utt05w"] in rms, fake_docker.argvs()
+    assert not (fake_docker.state / "running-sandbar-agent-utt05w").exists()
+    # 失败容忍子用例：桩注入 rm 炸点 → 收口仍 ok，warns 点名「agent 容器回收」，不吞成已拆
+    fake_docker.set("rm-garbage")
+    lane2, entries2 = _make_mixed_lane(mixed, "utt05v")
+    res2 = _run(MergeArgs(ticket_id="utt05v", worktree=str(lane2),
+                          branch="lane/utt05v-root", repo_worktrees=entries2))
+    assert res2.ok, (res2.ok, res2.error)
+    assert "agent 容器回收" in res2.error, res2.error
+    assert "已拆" not in res2.error, res2.error

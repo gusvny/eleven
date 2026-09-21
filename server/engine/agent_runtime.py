@@ -43,6 +43,12 @@ DEFAULT_AGENT_IMAGE = "sandbar-agent:dsh-0.1.1-rc.2-s1"   # 与 build_agent_imag
 BASH_TIMEOUT_MS_ENV = "SANDBAR_AGENT_BASH_TIMEOUT_MS"
 BASH_TIMEOUT_MS_DEFAULT = 900000  # D8：对齐引擎 SANDBAR_INTEG_CMD_TIMEOUT_SEC 缺省 900s（有界有源）
 
+# docker CLI 调用超时（t260921-05 常量化：缺省=历史字面量逐字节不变，生产语义零变化；
+# 提为常量只为单测悬挂子用例可 monkeypatch 收紧快测，不必真等 30s）
+DOCKER_INFO_TIMEOUT_SEC = 15
+DOCKER_RM_TIMEOUT_SEC = 30
+DOCKER_PS_TIMEOUT_SEC = 30
+
 CONTAINER_PREFIX = "sandbar-agent-"
 LBL_TICKET = "sandbar.agent.ticket"
 LBL_LANE = "sandbar.agent.lane"
@@ -139,7 +145,7 @@ def _docker(args: List[str], timeout: float = 60) -> subprocess.CompletedProcess
 
 def _docker_present() -> bool:
     try:
-        return _docker(["info"], timeout=15).returncode == 0
+        return _docker(["info"], timeout=DOCKER_INFO_TIMEOUT_SEC).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -290,10 +296,26 @@ def spawn_agent(cmd: List[str], cwd: Path, env: Dict[str, str], logf,
 
 
 def remove_container(ticket_id: str, log: Optional[Callable[[str], None]] = None) -> str:
-    """收口即拆（幂等，不外抛——与邻位 git 清理同口径：失败留痕不拦收口）。"""
+    """收口即拆（幂等，不外抛——与邻位 git 清理同口径：失败留痕不拦收口）。
+
+    模式闸（t260921-05）：容器拆/扫是 docker 形态专属原语——host 形态 spawn 分支根本
+    不起容器，无容器可拆=直接返回空串（零 docker 调用、零开销；这是语义正名，不是
+    降级）。运行模式非法值：容忍转 note 留痕不外抛（保「幂等不外抛」契约，同时点名
+    不吞配置错误；spawn 侧 fail-closed 点名由 spawn_agent 的 runtime_mode 承担）。
+    docker 形态下走 docker_bin()（SANDBAR_DOCKER_BIN 可注入，单测注桩不连真 daemon）。
+    """
+    try:
+        gated = runtime_mode() == "docker"
+    except AgentRuntimeError as e:
+        note = "运行模式判定异常（容忍留痕）：%s" % e
+        if log:
+            log("[agent-runtime] %s" % note)
+        return note
+    if not gated:
+        return ""  # host 形态无容器（spawn host 分支不起容器），零 docker 调用
     name = container_name_for(ticket_id)
     try:
-        p = _docker(["rm", "-f", name], timeout=30)
+        p = _docker(["rm", "-f", name], timeout=DOCKER_RM_TIMEOUT_SEC)
     except (OSError, subprocess.TimeoutExpired) as e:
         note = "docker rm 异常（容忍）：%s" % e
         if log:
@@ -313,14 +335,25 @@ def remove_container(ticket_id: str, log: Optional[Callable[[str], None]] = None
 
 def gc_stale_containers(log: Optional[Callable[[str], None]] = None) -> List[str]:
     """孤儿扫尾（D7③）：label 过滤列出 agent 容器，泳道目录已不存在=票已终 → 拆。
-    一切异常容忍（返回 note 列表，绝不外抛——挂在 prepare_workspace 首活动，不拦工作流）。"""
+    一切异常容忍（返回 note 列表，绝不外抛——挂在 prepare_workspace 首活动，不拦工作流）。
+
+    模式闸（t260921-05）：host 形态无容器面，直接返回空列表（零 docker 调用、零开销；
+    语义正名非降级）。运行模式非法值：容忍转 note 进列表（绝不外抛契约不变）。
+    docker 形态下走 docker_bin()（SANDBAR_DOCKER_BIN 可注入）。
+    """
     notes: List[str] = []
+    try:
+        gated = runtime_mode() == "docker"
+    except AgentRuntimeError as e:
+        return ["运行模式判定异常（容忍留痕）：%s" % e]
+    if not gated:
+        return notes  # host 形态无容器面，零 docker 调用
     if not _docker_present():
         return ["docker 不可用，跳过容器扫尾"]
     fmt = "{{.Names}}\\t{{.Label \"%s\"}}" % LBL_LANE
     try:
         p = _docker(["ps", "-a", "--filter", "label=%s" % LBL_TICKET,
-                     "--format", fmt], timeout=30)
+                     "--format", fmt], timeout=DOCKER_PS_TIMEOUT_SEC)
     except (OSError, subprocess.TimeoutExpired) as e:
         return ["容器扫尾探测异常（容忍）：%s" % e]
     if p.returncode != 0:
@@ -333,7 +366,7 @@ def gc_stale_containers(log: Optional[Callable[[str], None]] = None) -> List[str
             continue
         if lane and Path(lane).is_dir():
             continue  # 活票：保留
-        rp = _docker(["rm", "-f", name], timeout=30)
+        rp = _docker(["rm", "-f", name], timeout=DOCKER_RM_TIMEOUT_SEC)
         if rp.returncode == 0:
             notes.append("gc 拆孤儿容器 %s（泳道已不存在：%s）" % (name, lane or "?"))
         else:

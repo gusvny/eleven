@@ -1096,6 +1096,21 @@ SCENARIOS = [
      "容器执行面锁：容器形态下 agent 命令面能用、宿主边界不可达、容器本地可干活（t260913-04 验收 B/C 核心+红线 2，灰盒 L3，真 dsh agent，门控）：正锁=工作区内写成功（不是全拒）；负锁（挂载面守卫）=宿主主树/他票路径在容器里不存在、/usr/local（uid OS 权限）零落盘；正用例（宿主 260914 A 案）=容器本地 /tmp 可写（容器内无 dsh 沙箱拦截）；>60s 命令跑完（D8：bash-sandbox 900000ms；工单源事故附带发现②）；会话档记录 sandbox mode=danger-full-access 与真实拒绝（pin 同时钉 permission defaultPreset，缺位时 dsh boot 拒启）；对抗轮=env 注入 DSH_PERMISSION_MODE=workspace-write、泳道 profile patch 注入 disabled，两条路 pin 字面量都必须仍钉在 danger-full-access 且正锁仍成立；git 预期失败形态（D2）。判据全机械落盘（文件存在性+证据档关键词），不读 agent 自我报告。跑法：缺省=单轮真 agent 基线（闸内默认真验 B/C，分钟级）；SANDBAR_E2E_REAL=1 追加 >65s 长命令子用例（D8）与两个对抗轮；缺 docker/镜像/凭据=ENV_FAIL exit 2 点名（供给面，非产品红）",
      "python3 integration/t260913-04/sc_t26091304_sandbox_neglock.py", "engine"),
 
+    # ---- t260921-05: 单测去 Docker 依赖（host 拆/扫模式闸 + 容器行为全桩化）----
+    # integration 设计段产物（L2/L3 灰盒，hermetic 零 docker 零网络）。两条 intent 互不
+    # 重叠，与 t260913-04 族分工：wiring-contract 的 host 零调用锁 spawn 执行面（G），
+    # lifecycle-gc 锁真 docker 健康路径回收终态；本族锁「拆/扫收口链」的 host 零依赖与
+    # docker 形态故障容忍。merge 内联清理收口与 teardown 同走 remove_container 原语，
+    # intent 同源不另造链。悬挂超时（daemon 假死 30s）形态归 developer L1 的 0.3s 快测
+    # 用例，本族用快败注入（场景秒级纪律+t260920-01 等待预算化精神）。宿主令 260921。
+    # 模式闸已随 implement 落地，两条当前即应全绿（红=回归，非预期红）。
+    ("t260921-05-host-closeout-zero-docker",
+     "host 形态收口/扫尾链零 docker 依赖（宿主令 260921，灰盒 L3，hermetic）：机器无 docker/daemon 假死时跑工单，票首容器扫尾（prepare_workspace 首活动 gc）与票尾收口拆容器（teardown_lane）不敲 docker CLI——SANDBAR_DOCKER_BIN 记录桩日志 0 行（零调用即零 30 秒等待）、拆道回执 ok 且 error 干净（不留「agent 容器回收」脏 warn，收口语义=warns 只装异常面）、拆道+扫尾全程墙钟有界；PATH 屏蔽 docker 变体重跑拆道链同样干净（零调用不依赖桩在场）。与 t260913-04-wiring-contract 分工：彼锁 spawn 执行面 host 零调用，本条锁拆/扫收口链；merge 内联清理与 teardown 同走 remove_container 原语不另造链。断言面=记录桩日志+回执 error，不锚引擎内部函数。模式闸已随 implement 落地，本条当前即应全绿（红=宿主令回归，非预期红）",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260921-05/sc_t26092105_host_closeout_zero_docker.py", "ro"),
+    ("t260921-05-docker-closeout-fault-tolerate",
+     "docker 形态收口/扫尾故障容忍与语义冻结（t260921-05，灰盒 L3，hermetic 全桩）：daemon 故障（rm/ps/info 快败注入）时 teardown 回执 ok=True 收口不被拦、「agent 容器回收」点名异常面、绝不吞成「已拆」、remove/gc 幂等不外抛；docker 模式下 SANDBAR_DOCKER_BIN 可注入且调用形状含 rm -f sandbar-agent-<ticket>（模式闸不得误伤 docker 形态）；daemon 缺席时 gc 诚实降级留痕（「docker 不可用，跳过容器扫尾」容忍 note）；桩切成功态后收口回执干净（成功=零 warn 的 warns 契约）。与 t260913-04-lifecycle-gc 分工：彼锁真 docker 健康路径回收终态与安全阀，本条锁故障注入容忍语义；悬挂超时形态归 developer L1 0.3s 快测，不真等 30 秒。容忍语义已存在当前即绿；模式闸落地后必须仍绿（冻结守卫）",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260921-05/sc_t26092105_docker_closeout_fault_tolerate.py", "ro"),
+
     # ---- t260914-01: 结算面三修（判脏含老名协调目录 / 空提交正常收口 / 多仓清单走真源）----
     # 三条 intent 互不重叠：①老名泳道正常收口终态与产物不丢 ②异常/边界态的可辨性与
     # 响亮性（空提交 vs 真失败）③多仓泳道协调目录名的写读姿态（新泳道不生老名、存量

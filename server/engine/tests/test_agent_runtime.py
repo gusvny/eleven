@@ -22,103 +22,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import agent_runtime as ar  # noqa: E402
+from _fake_docker import FakeDocker  # noqa: E402  # 桩单源（t260921-05）
 
 PY = sys.executable
 HERE = Path(__file__).resolve().parent
 
-FAKE_DOCKER = r'''#!/usr/bin/env python3
-import json, os, signal, subprocess, sys, time
-STATE = os.environ["FAKE_DOCKER_STATE"]; LOG = os.environ["FAKE_DOCKER_LOG"]
-def sf(n): return os.path.join(STATE, n)
-def has(n): return os.path.exists(sf(n))
-def sread(n, d=""):
-    try: return open(sf(n)).read().strip()
-    except OSError: return d
-with open(LOG, "a") as f: f.write(json.dumps(sys.argv[1:]) + "\n")
-a = sys.argv[1:]
-if a == ["info"]:
-    sys.exit(1 if has("docker-down") else 0)
-if a[:2] == ["image", "inspect"]:
-    sys.exit(1 if has("image-missing") else 0)
-if a[:2] == ["ps", "-a"]:
-    out = sread("containers.tsv")
-    sys.stdout.write(out + ("\n" if out else "")); sys.exit(0)
-if a[:2] == ["inspect", "-f"]:
-    name = a[3]
-    if has("inspect-error"): sys.stderr.write("explosive daemon boom"); sys.exit(1)
-    if not has("running-" + name):
-        sys.stderr.write("Error: No such container: %s" % name); sys.exit(1)
-    sys.stdout.write(sread("running-" + name, "true")); sys.exit(0)
-if a[0] == "run":
-    if has("run-fails"): sys.stderr.write("run exploded"); sys.exit(1)
-    name = a[a.index("--name") + 1]
-    open(sf("running-" + name), "w").write("true")
-    print("fakeid-" + name); sys.exit(0)
-if a[:2] == ["rm", "-f"]:
-    name = a[2]
-    if has("rm-garbage"): sys.stderr.write("rm daemon volcano"); sys.exit(1)
-    if not has("running-" + name):
-        sys.stderr.write("Error: No such container: %s" % name); sys.exit(1)
-    os.unlink(sf("running-" + name)); sys.exit(0)
-if a[0] == "exec":
-    if has("exec-hang"): time.sleep(600); sys.exit(9)
-    if len(a) > 2 and a[2] == "kill":
-        sig = signal.SIGKILL if "KILL" in a[3] else signal.SIGTERM
-        try: os.killpg(int(a[5].lstrip("-")), sig)
-        except OSError: pass
-        sys.exit(0)
-    i = a.index("/bin/sh")
-    rest = a[i + 3:]                       # $0(sandbar-exec) 之后的真参
-    pgid_file, cmd = rest[1], rest[2:]
-    cwd, envp, j = None, {}, 0
-    while j < i:
-        if a[j] == "-w": cwd = a[j + 1]; j += 2
-        elif a[j] == "-e":
-            k, _, v = a[j + 1].partition("="); envp[k] = v; j += 2
-        else: j += 1
-    # 真 docker exec 的 env 语义=镜像 ENV + (-e 参数)，不透传 docker CLI 客户端自己的
-    # 进程 env——fake 基线只保留 PATH（≈镜像 ENV），红线 C 的白名单断言才有真实含义。
-    env = {"PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")}
-    env.update(envp)
-    rc = subprocess.run([sys.executable, os.environ["FAKE_SANDBAR_EXEC"], pgid_file] + cmd,
-                        cwd=cwd, env=env).returncode
-    sys.exit(rc)
-sys.stderr.write("fake docker: unsupported %r" % (a[:2],)); sys.exit(64)
-'''
-
-
-class FakeDocker:
-    def __init__(self, tmp_path, monkeypatch):
-        self.state = tmp_path / "state"
-        self.state.mkdir()
-        self.log = tmp_path / "docker.log"
-        self.bin = tmp_path / "fake-docker"
-        self.bin.write_text(FAKE_DOCKER)
-        self.bin.chmod(0o755)
-        self.sandbox_exec = str(HERE.parent / "sandbar_exec.py")
-        monkeypatch.setenv("SANDBAR_DOCKER_BIN", str(self.bin))
-        monkeypatch.setenv("FAKE_DOCKER_STATE", str(self.state))
-        monkeypatch.setenv("FAKE_DOCKER_LOG", str(self.log))
-        monkeypatch.setenv("FAKE_SANDBAR_EXEC", self.sandbox_exec)
-        monkeypatch.delenv("SANDBAR_AGENT_RUNTIME", raising=False)
-
-    def set(self, name, val="1"):
-        (self.state / name).write_text(val)
-
-    def clear(self, name):
-        try:
-            (self.state / name).unlink()
-        except OSError:
-            pass
-
-    def argvs(self):
-        out = []
-        for line in self.log.read_text().splitlines():
-            out.append(json.loads(line))
-        return out
-
-    def runs(self):
-        return [a for a in self.argvs() if a and a[0] == "run"]
 
 
 @pytest.fixture
@@ -335,9 +243,91 @@ def test_gc_只拆泳道已亡的孤儿(tmp_path, fake):
 
 
 def test_gc_docker缺_容忍note(tmp_path, monkeypatch):
+    monkeypatch.setenv("SANDBAR_AGENT_RUNTIME", "docker")   # 模式闸（t260921-05）：docker 模式才探测 docker
     monkeypatch.setenv("SANDBAR_DOCKER_BIN", "/nonexistent/docker-bin")
     notes = ar.gc_stale_containers()
     assert notes == ["docker 不可用，跳过容器扫尾"]
+
+
+# ---- 模式闸与容器原语新增子用例（t260921-05：单测去 docker 依赖） ----
+
+def test_host模式_容器拆扫零docker调用(tmp_path, monkeypatch):
+    """验收①②：host 模式（缺省运行模式）下 remove/gc 零 docker 调用、零开销——
+    注入只记录快败桩（recording wrapper），断言 remove==""、gc==[]、日志零行。"""
+    log = tmp_path / "rec.log"
+    wrapper = tmp_path / "recorder"
+    wrapper.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        "open(os.environ['REC_LOG'], 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        "sys.stderr.write('recorder: hit %r\\n' % (sys.argv[1:],)); sys.exit(72)\n")
+    wrapper.chmod(0o755)
+    monkeypatch.setenv("SANDBAR_DOCKER_BIN", str(wrapper))
+    monkeypatch.setenv("REC_LOG", str(log))
+    monkeypatch.delenv("SANDBAR_AGENT_RUNTIME", raising=False)   # host=缺省形态
+    assert ar.remove_container("t1") == ""
+    assert ar.gc_stale_containers() == []
+    assert not log.exists(), "host 模式必须零 docker 调用（wrapper 日志须为空）"
+
+
+def test_remove_悬挂_有界留痕不外抛(tmp_path, fake, monkeypatch):
+    """验收③悬挂态：daemon 无响应（rm 悬挂）→ 有界（超时常量收紧 0.3s 快测）留痕
+    容忍，绝不外抛，也不得吞成「已拆」。"""
+    fake.set("rm-hang")
+    monkeypatch.setattr(ar, "DOCKER_RM_TIMEOUT_SEC", 0.3)
+    t0 = time.monotonic()
+    note = ar.remove_container("t-hang")
+    assert time.monotonic() - t0 < 12, "remove 必须有界（不阻塞收口路径）"
+    assert "异常（容忍）" in note
+    assert "已拆" not in note
+
+
+def test_gc_悬挂_容忍note(tmp_path, fake, monkeypatch):
+    """验收③悬挂态（gc 侧）：ps 悬挂 → 有界返回容忍 note，不外抛。"""
+    fake.set("ps-hang")
+    monkeypatch.setattr(ar, "DOCKER_PS_TIMEOUT_SEC", 0.3)
+    notes = ar.gc_stale_containers()
+    assert len(notes) == 1 and "容器扫尾探测异常（容忍）" in notes[0]
+
+
+def test_运行模式非法_拆扫容忍留痕不外抛(monkeypatch):
+    """模式闸边界：运行模式非法值 → remove/gc 不外抛，note 点名（不吞配置错误；
+    fail-closed 的硬点名由 spawn_agent 侧 runtime_mode 承担）。"""
+    monkeypatch.setenv("SANDBAR_AGENT_RUNTIME", "full-access")
+    note = ar.remove_container("t1")
+    assert "运行模式判定异常（容忍留痕）" in note and "full-access" in note
+    notes = ar.gc_stale_containers()
+    assert len(notes) == 1 and "运行模式判定异常（容忍留痕）" in notes[0]
+
+
+def test_gc_畸形ps行_不外抛不误拆(tmp_path, fake):
+    """验收③畸形输入子用例（消费外部输入必带畸形用例）：gc 解析 `docker ps --format`
+    的 stdout——无 tab 行 / tab 后空 lane / 空行 / 纯空白行四类 + 活票对照。并钉死
+    现存语义防漂移：无 tab 行按孤儿拆；空名行跳过；活票不误拆；全程不外抛。"""
+    live_lane = _lane(tmp_path)
+    fake.set("running-sandbar-agent-live")
+    fake.set("running-garbage-no-tab")      # 无 tab 整行 → name 吞整行 → 按孤儿
+    fake.set("running-orphan-empty-lane")   # tab 后空 lane → 同按孤儿
+    (fake.state / "containers.tsv").write_text(
+        "garbage-no-tab\n"
+        "orphan-empty-lane\t\n"
+        "\n"
+        "   \n"
+        "sandbar-agent-live\t%s" % live_lane)
+    notes = ar.gc_stale_containers()        # 第一关：不外抛
+    assert isinstance(notes, list)
+    # a) 无 tab 行：现存语义=按孤儿拆（钉死防漂移）
+    assert any("gc 拆孤儿容器 garbage-no-tab" in n for n in notes), notes
+    assert not (fake.state / "running-garbage-no-tab").exists()
+    # b) tab 后空 lane：同按孤儿
+    assert any("gc 拆孤儿容器 orphan-empty-lane" in n for n in notes), notes
+    assert not (fake.state / "running-orphan-empty-lane").exists()
+    # c) 空行/纯空白行：strip 后空名 → 跳过（rm 调用恰=两个孤儿，无空名调用）
+    rms = [a for a in fake.argvs() if a[:2] == ["rm", "-f"]]
+    assert sorted(a[2] for a in rms) == ["garbage-no-tab", "orphan-empty-lane"]
+    # d) 活票对照：不误拆
+    assert (fake.state / "running-sandbar-agent-live").exists()
+    assert not any("live" in n for n in notes)
 
 
 # ---- 内容单点与防漂移 ----
