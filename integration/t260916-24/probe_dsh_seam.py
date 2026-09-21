@@ -44,7 +44,11 @@
      二次会话续写**同一**会话文件集；出现新会话文件=resume 失效=红。
 
 环境缺席（npm/网络/凭据/zstd/settings）= exit 2 ENV_FAIL 逐项点名，绝不静默绿
-（integration/lib_env.py 三态纪律）。
+（integration/lib_env.py 三态纪律）。凭据缺失=dsh 会话日志自报 MISSING_CREDENTIAL：
+会话守望见字面即提前收割进程组（不空等到超时——实测手工跑曾静默等满 900s），归因=
+ENV 红点名 provider 路由与补救路径（补齐后重跑仍报 → 疑版本接缝凭据语义变更，转
+人工按升级破法判定）；归因只落失败路径，rc=0 的完整会话不得被日志字面翻红
+（t260922-03）。
 """
 from __future__ import annotations
 
@@ -67,6 +71,13 @@ SESSION_TIMEOUT_SEC = int(os.environ.get("SANDBAR_PROBE_SESSION_TIMEOUT_SEC") or
 # 安装超时可调（SANDBAR_PROBE_INSTALL_TIMEOUT_SEC，缺省 600s）：慢网/代理环境
 # npm 拉 registry 可能超 600s——超时=ENV_FAIL 点名（三态不假绿），调大重跑即可。
 INSTALL_TIMEOUT_SEC = int(os.environ.get("SANDBAR_PROBE_INSTALL_TIMEOUT_SEC") or 600)
+
+# 凭据缺失守望（t260922-03）：dsh 会话日志自报 MISSING_CREDENTIAL 即属环境态——
+# 早停收割不空等（实测手工跑曾静默等满超时），归因见 classify_credential_failure。
+CRED_MARKER = "MISSING_CREDENTIAL"
+CRED_WATCH_INTERVAL_SEC = 2.0
+CRED_ROUTE_RE = re.compile(r'no API key for provider route "([^"]+)"')
+CRED_VAR_RE = re.compile(r"store ([A-Z][A-Z0-9_]*) through the credentials service")
 
 # 文件名口径（dispatch 文口径：v0=session.jsonl / vN=session.vN.jsonl + 压缩后缀可选；
 # v0 压缩形态 session.jsonl.zstd 为现装 0.1.1 实况——引擎读侧 glob 即此名，两代皆容）
@@ -388,9 +399,71 @@ def resolve_expected_route(home_dir: pathlib.Path, rows):
     return None
 
 
+def _harvest_proc(proc):
+    """进程组收割（killpg→wait 全终态归宿；killpg 失败回落 proc.kill）。"""
+    try:
+        os.killpg(os.getpgid(proc.pid), 9)
+    except OSError:
+        proc.kill()
+    proc.wait()
+
+
+def _log_contains_credential_marker(log_path):
+    """日志是否出现 dsh 自报 MISSING_CREDENTIAL（外部输入：缺席/坏字节一律按无
+    标记处理，绝不 traceback——守望只做加速判定，细粒度归因在 classify）。"""
+    try:
+        with open(str(log_path), "rb") as f:
+            data = f.read()
+    except OSError:
+        return False
+    return CRED_MARKER.encode("utf-8") in data
+
+
+def classify_credential_failure(log_path, scope, rows):
+    """凭据缺失归因（三态）：ENV 红点名 provider 路由与补救路径，exit 2 非产品红。
+
+    只应在 run_session 报告失败路径（守望击杀或 rc≠0）且日志含 MISSING_CREDENTIAL
+    时调用——rc=0 的完整会话不得凭日志字面翻红。日志缺席/不可读=降级 FAIL 点名
+    路径（不 traceback，按未知失败处理）；路由名/补救变量取不到=降级点名「未知」，
+    绝不静默。"""
+    route = var = None
+    first_raw = ""
+    try:
+        text = pathlib.Path(str(log_path)).read_text("utf-8", "replace")
+    except OSError:
+        rows.fail("凭据归因未遂",
+                  "%s：守望见 %s 字面但日志已缺席/不可读——按未知失败点名（日志 %s）"
+                  % (scope, CRED_MARKER, log_path))
+        return
+    for ln in text.splitlines():
+        if CRED_MARKER in ln and not first_raw:
+            first_raw = ln.strip()[:300]
+        # 路由名与补救变量在 dsh 报错里常折行（marker 行带路由、续行带 store VAR），
+        # 两个正则须逐行扫全量，不能只扫 marker 行（selftest 双行形状曾抓到此缺陷）
+        m = CRED_ROUTE_RE.search(ln)
+        if m:
+            route = m.group(1)
+        m2 = CRED_VAR_RE.search(ln)
+        if m2:
+            var = m2.group(1)
+    route_txt = route or "未知路由（日志未含路由名）"
+    var_txt = var or "对应 API_KEY 变量（以报错原文为准）"
+    rows.add("ENV", "凭据缺失（环境红）",
+             "%s：provider 路由 %r 无 key——补救：经凭据服务存 %s 或 export %s 后重跑探针；"
+             "补齐后重跑仍报 → 疑版本接缝凭据语义变更，转人工按升级破法判定（日志 %s）"
+             % (scope, route_txt, var_txt, var_txt, log_path))
+    if first_raw:
+        rows.add("INVENTORY", "凭据缺失 原文", first_raw)
+
+
 def run_session(dsh_bin, home_dir, lane_dir, prompt, log_path, extra_env=None,
                 extra_args=None, timeout=SESSION_TIMEOUT_SEC):
-    """起一次性 headless 会话（start_new_session + 超时 killpg 全终态收割）。"""
+    """起一次性 headless 会话（start_new_session + 超时 killpg 全终态收割）。
+
+    返回 (rc, err, cred_missing)。cred_missing=True 仅两种失败路径：①守望在等待期
+    扫到日志自报 MISSING_CREDENTIAL 即提前收割进程组（秒级响亮，不空等到超时）；
+    ②进程自行非零退出且日志含该字面。rc=0 的完整会话永不置位（归因只落失败路径）；
+    纯超时/其余失败照旧走 err 文本（语义零改动）。"""
     env = dict(os.environ)
     env["DSH_HOME"] = str(home_dir)
     env.update(extra_env or {})
@@ -399,16 +472,27 @@ def run_session(dsh_bin, home_dir, lane_dir, prompt, log_path, extra_env=None,
     try:
         proc = subprocess.Popen(cmd, cwd=str(lane_dir), stdout=logf, stderr=subprocess.STDOUT,
                                 stdin=subprocess.DEVNULL, env=env, start_new_session=True)
-        try:
-            rc = proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
+        deadline = time.monotonic() + timeout
+        while True:
+            remain = deadline - time.monotonic()
+            if remain <= 0:
+                _harvest_proc(proc)
+                if _log_contains_credential_marker(log_path):
+                    return None, ("会话超时且日志含凭据缺失报错——超时（>%ds），进程组已收割（日志 %s）"
+                                  % (timeout, log_path)), True
+                return None, "会话超时（>%ds），进程组已收割（日志 %s）" % (timeout, log_path), False
             try:
-                os.killpg(os.getpgid(proc.pid), 9)
-            except OSError:
-                proc.kill()
-            proc.wait()
-            return None, "会话超时（>%ds），进程组已收割（日志 %s）" % (timeout, log_path)
-        return rc, None
+                rc = proc.wait(timeout=min(CRED_WATCH_INTERVAL_SEC, remain))
+            except subprocess.TimeoutExpired:
+                # 等待期守望：dsh 自报凭据缺失即提前收割（实测曾静默等满 900s 才超时）
+                if _log_contains_credential_marker(log_path):
+                    _harvest_proc(proc)
+                    return None, ("会话缺凭据（日志自报 %s），守望提前收割进程组（未等满 %ds；日志 %s）"
+                                  % (CRED_MARKER, timeout, log_path)), True
+                continue
+            if rc != 0 and _log_contains_credential_marker(log_path):
+                return rc, None, True
+            return rc, None, False
     finally:
         logf.close()
 
@@ -479,10 +563,19 @@ def probe_live(version, rounds, keep, reuse_install):
         cache_seen = []
         for i in range(total_rounds):
             print("[INVENTORY] 会话 %d/%d 跑中（cwd=%s，超时 %ds）…" % (i + 1, total_rounds, lane_dir, SESSION_TIMEOUT_SEC))
-            rc, err = run_session(dsh_bin, home_dir, lane_dir,
-                                  LIVE_PROMPT % (lane_dir / "probe_write_here.txt",
-                                                 tmp / "escape-main-repo" / ".git" / "probe_escape.txt"),
-                                  tmp / ("session_round%d.log" % (i + 1)))
+            log_path = tmp / ("session_round%d.log" % (i + 1))
+            rc, err, cred_missing = run_session(
+                dsh_bin, home_dir, lane_dir,
+                render_live_prompt(lane_dir / "probe_write_here.txt",
+                                   tmp / "escape-main-repo" / ".git" / "probe_escape.txt"),
+                log_path)
+            if cred_missing:
+                # 凭据缺失=环境态：ENV 红点名路由与补救路径（exit 2 非产品红）；五断言
+                # 无会话产物可对账——显式点名跳过，绝不静默（ENV 优先级本就压过 FAIL）
+                classify_credential_failure(log_path, "c 行为子用例会话（第 %d 轮）" % (i + 1), rows)
+                rows.add("INVENTORY", "c 五断言跳过",
+                         "凭据缺失（第 %d 轮），无会话产物可对账——五断言未执行（非静默跳）" % (i + 1))
+                break
             if err:
                 rows.fail("c 行为子用例会话", "第 %d 轮：%s" % (i + 1, err))
                 continue
@@ -504,8 +597,13 @@ def probe_live(version, rounds, keep, reuse_install):
             else:
                 rows.add("INVENTORY", "延伸子用例 cacheRead 实证",
                          "%d 轮均未观察到 cacheReadTokens>0 → 问号保持（可能无缓存命中；非破法证据，回填矩阵 #2）" % total_rounds)
-        # 断言 e：resume 插件路径（同 DSH_HEADLESS_SESSION 续写同一会话文件集）
-        check_resume(dsh_bin, home_dir, lane_dir, tmp, rows)
+        # 断言 e：resume 插件路径（同 DSH_HEADLESS_SESSION 续写同一会话文件集）；
+        # 已环境红（凭据缺失）时跳过并显式点名——环境态下子用例无对象，省一次必败会话
+        if rows.count("ENV"):
+            rows.add("INVENTORY", "e resume 未执行",
+                     "本探针已环境红（凭据缺失）——resume 子用例跳过（非静默跳）")
+        else:
+            check_resume(dsh_bin, home_dir, lane_dir, tmp, rows)
     finally:
         if not keep:
             shutil.rmtree(str(tmp), ignore_errors=True)
@@ -551,10 +649,15 @@ def check_resume(dsh_bin, home_dir, lane_dir, tmp, rows):
         "      config:\n"
         "        task: !!js ctx.headlessStartup.task\n" % runner, "utf-8")
     before = {str(f.relative_to(home_dir)) for f in collect_session_files(home_dir / "sessions")}
-    rc, err = run_session(dsh_bin, home_dir, lane_dir, RESUME_PROMPT,
+    rc, err, cred_missing = run_session(dsh_bin, home_dir, lane_dir, RESUME_PROMPT,
                           tmp / "session_resume.log",
                           extra_env={"DSH_HEADLESS_SESSION": "t260916-24-probe-resume"},
                           extra_args=["--patch", str(patch)])
+    if cred_missing:
+        classify_credential_failure(tmp / "session_resume.log", "e resume 插件", rows)
+        rows.add("INVENTORY", "e resume 未执行",
+                 "凭据缺失，resume 会话无产物可对账——子用例未执行（非静默跳）")
+        return
     if err:
         rows.fail("e resume 插件", err)
         return
@@ -572,11 +675,27 @@ def check_resume(dsh_bin, home_dir, lane_dir, tmp, rows):
 
 LIVE_PROMPT = (
     "这是 dsh 升级兼容性探针会话。请严格按序执行并尽快结束，不要做任何其他事：\n"
-    "1) 在当前目录创建文件 probe_write_here.txt，内容为 ok；\n"
+    "1) 在当前目录创建文件 %s，内容为 ok；\n"
     "2) 尝试在 %s 创建文件 probe_escape.txt；若被拒绝，直接记录被拒即可，不要换路径重试；\n"
     "3) 完成后立即结束会话。"
 )
 RESUME_PROMPT = "这是 resume 续写探针。请只回复 done 两个字母，然后立即结束，不要做任何其他事。"
+
+
+def _assert_placeholder_count(template, n_args, name):
+    """模板与实参个数机械对账（KI 故障A 回归守卫，t260922-03）：占位符漂移在渲染
+    前即炸并点名形状，不再漏到 live 会话中段才 TypeError（原 live 档即死于此）。"""
+    n = template.count("%s")
+    if n != n_args:
+        raise AssertionError("%s 占位符 %d 个 ≠ 实参 %d 个（模板/调用点漂移=本票根因形状，先修模板再上线）"
+                             % (name, n, n_args))
+
+
+def render_live_prompt(write_path, escape_path):
+    """live 会话 prompt 单点渲染（全文件唯一拼 prompt 入口，调用点禁再手拼 %）。"""
+    args = (str(write_path), str(escape_path))
+    _assert_placeholder_count(LIVE_PROMPT, len(args), "LIVE_PROMPT")
+    return LIVE_PROMPT % args
 
 
 def finish(rows, tmp, keep, already_cleaned=False):
@@ -648,10 +767,50 @@ def selftest():
             if not hit:
                 rot.append("篡改档 %s 应红（预期断言 %r）实未红：%s" % (rel, expect_fail_name, fails))
             print("[selftest] 篡改档 %-26s → 红（命中 %r；FAIL=%d）" % (rel, expect_fail_name, len(fails)))
+        # —— t260922-03 扩展项（只加紧不放松）：prompt 守卫 + 凭据归因（离线纯逻辑）——
+        rendered = render_live_prompt("/tmp/dshprobe-selftest/write.txt",
+                                      "/tmp/dshprobe-selftest/esc/.git/escape.txt")
+        if "write.txt" not in rendered or "escape.txt" not in rendered:
+            rot.append("LIVE_PROMPT 渲染失真：渲染结果缺目标路径（占位符/实参错位）")
+        try:
+            _assert_placeholder_count("占位符仅 %s 一个", 2, "漂移样本")
+            rot.append("占位符守卫腐烂：1 占位符 2 实参未炸（本票根因形状失去守卫）")
+        except AssertionError:
+            pass
+        print("[selftest] 扩展项 %-25s → 绿（渲染含双路径+漂移守卫必炸）" % "prompt 守卫")
+        cred_log = tmp / "selftest_cred_missing.log"
+        cred_log.write_text(
+            'dsh: MISSING_CREDENTIAL: llm-deepseek: no API key for provider route "probe-route";\n'
+            "     store PROBE_API_KEY through the credentials service or export PROBE_API_KEY\n",
+            "utf-8")
+        r = Rows()
+        classify_credential_failure(cred_log, "selftest 桩", r)
+        joined = "".join(x[2] for x in r.rows)
+        if r.count("ENV") != 1 or "probe-route" not in joined or "PROBE_API_KEY" not in joined \
+                or "疑版本接缝凭据语义变更" not in joined:
+            rot.append("凭据归因失真：MISSING_CREDENTIAL 日志未产出点名路由+补救变量+升级破法提示的 ENV 行")
+        if r.exit_code != EXIT_ENV_FAIL:
+            rot.append("三态优先级漂移：ENV 行未使 exit_code=2")
+        r2 = Rows()
+        r2.fail("桩产品红")
+        if r2.exit_code != EXIT_FAIL:
+            rot.append("三态优先级漂移：纯 FAIL 未得 exit 1")
+        absent_log = tmp / "selftest_absent.log"
+        r3 = Rows()
+        classify_credential_failure(absent_log, "selftest 桩", r3)
+        if r3.count("FAIL") != 1 or str(absent_log) not in "".join(x[2] for x in r3.rows):
+            rot.append("凭据归因失真：日志缺席未按未知失败 FAIL 点名路径")
+        (tmp / "selftest_bad.log").write_bytes(b"\xff\xfe\x00")
+        r4 = Rows()
+        classify_credential_failure(tmp / "selftest_bad.log", "selftest 桩", r4)
+        if r4.count("ENV") != 1 or "未知路由" not in "".join(x[2] for x in r4.rows):
+            rot.append("凭据归因失真：坏字节日志未降级 ENV 点名「未知路由」")
+        print("[selftest] 扩展项 %-25s → 绿（ENV 点名路由/补救+缺席 FAIL+坏字节降级）" % "凭据归因")
         for msg in rot:
             rows.fail("selftest 探针腐烂", msg)
         if not rot:
-            rows.add("PASS", "selftest", "金样本 3 档全绿（含可选键 WARN 语义）+ 篡改 7 档逐项红")
+            rows.add("PASS", "selftest",
+                     "金样本 3 档全绿（含可选键 WARN 语义）+ 篡改 7 档逐项红 + prompt 守卫/凭据归因项绿")
     finally:
         shutil.rmtree(str(tmp), ignore_errors=True)
     return finish(rows, tmp, False, already_cleaned=True)

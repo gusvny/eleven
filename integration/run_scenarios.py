@@ -1338,6 +1338,19 @@ SCENARIOS = [
     ("t260916-24-dsh-expected-loud",
      "dsh 版本与预期不符的执行面（t260916-24 验收③执行半边「版本与预期不符→响亮」，灰盒 L3，真 docker 台+真工单链+版本桩作 agent 脑秒回合法回执）：两子用例合取锚「响 + 不静默跑/不静默拦」组合语义，判定不锚 boot/spawn 哪个挂点（实现任一挂点响都算兑现用户承诺）——①缺省不拦子用例：桩版本(9.9.9-stub)≠expected(0.1.1-rc.2) → spawn 照走（桩被真调）+create_plan 出结果+worker 日志出现同时点名 actual/expected 两版本字面量的响亮行（KI-051 锚字面量同现不锁措辞）=「带病跑但喊得出来」；②STRICT 硬闸子用例（SANDBAR_DSH_STRICT=1）→ 版本桩 agent 形态调用恒 0（spawn 在执行被钉二进制前被拒）+日志硬闸红点名两版本=「宁可停也不悄悄跑错版本」（不另设 snapshot「不出结果」子用例：闸挂点在 worker 启动时票队列即无人服务、查询通道随之而死，该观测结构性不可达；闸腐烂由「调用恒 0」当场抓住）。两子用例合取同时抓住「静默跑错版本」与「静默拒跑」两个方向的腐烂。intent 分工：t260916-24-dsh-face-meta 守启动记录面（同旋钮不同行为面）；t260905-10-host-ruling-injection 只借其真票链手法（fixture 仓+专属 worker+snapshot 轮询），彼守裁决注入面；developer L1 UT 锚 check_expected 函数语义，本条锚真工作流链上的用户可感知终态（日志行/桩账本/票进度）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker/bench 缺席=ENV_FAIL exit 2 点名",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260916-24/sc_t260916_24_dsh_expected_loud.py", "engine"),
+    # ---- t260922-03: 探针 live 档修复票——live 入口对账面 + 失败归因面（epic dsh-upgrade 前置）----
+    # 两场景三面（绿档 journey / 失败归因三态），共享夹具 lib_t26092203.py（无 sc_ 前缀
+    # 不登记）。桩走 PATH 缝（npm 桩对 install --prefix 形状落假前缀 + .bin/dsh 桩；
+    # 零真 npm 安装/零真网/秒级，不违反 T4 验收④「真版本分钟级 live 档不入 registry」
+    # ——该约束指 npm 隔离安装+真凭据档，升级门槛仍按 RUNBOOK_GATE 显式调用）。
+    # 不锚 --reuse-install（该旗标现况结构性失灵：探针每次 mkdtemp 新 tmp，prefix 恒在
+    # 自己的空目录——t260922-03 结果文件缺陷上报，修不修由票面裁决）。
+    ("t260922-03-dsh-probe-live-green",
+     "探针 live 档绿档对账 journey（t260922-03 验收①②⑤的离线机械半，灰盒 L3，dsh 桩零真网零真 npm 安装秒级，全程 /tmp 不触宿主全局 dsh/console 3099）：对 integration/t260916-24/probe_dsh_seam.py 以 PATH 缝注入 npm 桩+dsh 桩（npm 桩只实现探针调用形状 install --prefix <p> @deepseek-ai/dsh@<ver>：落 package.json 钉同版本过 verify_install + .bin/dsh 桩只演用户可感知面：落 vN 会话产物 request/context+request/header 主备合一与 assistant/message usage 全键含整型 cacheReadTokens、cwd 泳道内写 probe_write_here.txt、主库 .git 模拟位不写=沙箱拒写形状、DSH_HEADLESS_SESSION 续写零新文件；其余 npm 形状 fail-closed 报错），SANDBAR_PROBE_EXPECTED_ROUTE 文档化旋钮钉期望路由 → 探针必须：①不再崩在会话 prompt 拼装（本票根因形状「not all arguments converted during string formatting」绝迹——实装前 :483 即炸，票面复现栈同形）；②五断言+沙箱行为+resume 全 PASS（文件名口径 session.v3.jsonl→vN 代、钉模型 stub-provider/stub-model、泳道内写成功、越界拒写、resume 会话文件集不变）；③退出码 0 结论「全绿」、墙钟秒级、零 traceback、退出后探针工作目录面无桩孤儿进程（spawn 资源回收全终态）。判据全落公开契约面（CLI 旗标/退出码/台账行字面/期望路由旋钮），探针内部实现重构不得破。intent 分工：本条守 live 入口绿档对账+可重跑性（runbook §1 门槛第 1 项的离线机械代理；真版本分钟级档按 T4 验收④不入 registry）；t260916-24-dsh-probe-selftest 守探针断言逻辑 fixture 正负自检（含本票新增守卫子用例）；t260922-03-dsh-probe-live-cred-env 守失败归因面（三面不互替）。修复已落本工单树，三档语义经直驱等价实证（探针 live 档直跑面），arbitrate/merge 期必须保持绿（回归锁）；探针/桩前置（探针本体/zstd/~/.dsh profile+settings+credentials）缺席=ENV_FAIL exit 2 点名",
+     "python3 integration/t260922-03/sc_t260922_03_probe_live_green.py", "ro"),
+    ("t260922-03-dsh-probe-live-cred-env",
+     "探针 live 档失败归因三态（t260922-03 验收③，灰盒 L3，dsh 桩秒级零网络）：①凭据缺失子用例：桩自报 MISSING_CREDENTIAL（路由 stub-route-alpha、补救变量 STUB_API_KEY——即 0.1.5 实测报错形状的路由/变量位）后挂住不退 → 探针必须秒级早停收割（墙钟有上界，绝不复现「静默空等到会话超时 900s」的挂死形状）、ENV 红退出码 2、台账点名桩自报的路由与补救变量、零 traceback、收割后无桩孤儿进程（spawn 资源回收全终态）；②产品红保全子用例：桩退出码 3 且日志无 MISSING_CREDENTIAL 字面 → 探针维持拦停级 FAIL（退出码 1、FAIL 台账行在场）且零 ENV 行——「环境红不吞产品红、产品红不冒充环境红」双向锁（lib_env 三态契约 + RUNBOOK_GATE「环境缺=exit 2 补环境重跑」承诺的探针侧兑现；余失败语义零改动=验收④不放松的失败面）。判据不锚守望实现（轮询周期/字面量提取方式/文案措辞均可变），只锚用户可感知终态（退出码+点名字面+墙钟上界 30s+回收；守望若退化到只靠会话超时兜底，墙钟判据即红）。intent 分工：本条守 live 会话失败的归因面；t260916-24-dsh-probe-selftest 守断言逻辑自检、t260922-03-dsh-probe-live-green 守绿档对账面（三面不互替）。修复已落本工单树，语义经直驱等价实证（探针 live 档直跑面），arbitrate/merge 期必须保持绿（回归锁）；前置缺席=ENV_FAIL exit 2 点名",
+     "python3 integration/t260922-03/sc_t260922_03_probe_live_cred_env.py", "ro"),
     # ---- t260916-22: 巡检 agent 化（scan 段退役→inspect 段+发现级裁定）----
     # 分工三层：contract（灰盒 L2，活动级公开契约，桩缝全部子用例矩阵）→ journey（L3 真台
     # 真票全链旅程，验收①主证据）→ verdict-cli（L3 发现级裁定+假报跨期压制，验收④
