@@ -8,6 +8,9 @@
  * ＋ 屏③ callout E（到人门时状态卡变蓝列出「签什么」）。
  *
  * 数据源优先级：
+ *   0. 终态收口卡（t260921-03）：close_health ∈ {abnormal, unreadable} → 已结束
+ *      对账卡（已结束+结束方式+异常原因+缺了什么；amber 调、零操作）——先于一切
+ *      受阻/人门分支，已结束票不得再渲染成「受阻等你处置」；
  *   1. detail.meta.blocked_detail（引擎 dev_lane 落的结构化面：
  *      {reason_code, files, next_action}）——文件点名/下一步直接取；
  *   2. detail.blocked_reason（blocked 文案，同一 _classify_main_dirty 真源派生
@@ -63,10 +66,16 @@ export interface StatusCardView {
   next: string
   /** 原始日志折叠（timeline 尾部 N 条，已格式化为一行一条）。 */
   rawLog: string[]
-  /** 红调（blocked）｜黄调（挂着受阻面的中间态）｜蓝调（人门等你签）。 */
+  /** 红调（blocked）｜黄调（挂着受阻面的中间态、终态异常收口）｜蓝调（人门等你签）。 */
   severity: 'red' | 'amber' | 'blue'
   /** 蓝卡专属：「签什么」清单（人门上下文摘要/验收清单/门结论）；红/黄卡为空。 */
   signWhat: string[]
+  /** 终态收口卡（t260921-03）：true=已结束票的对账卡——渲染不用受阻 ⛔/「下一步」
+   *  框架（「已结束」措辞），且跳过词条表降级注记；false=既有三态卡（键只加）。 */
+  terminal: boolean
+  /** 终态收口事实行（已结束+结束方式+异常原因+缺了什么，逐行可渲染；非终态卡为空）。
+   *  只放事实（KI-018①：「刷新重试」类占位语不进数据字段）。 */
+  closeFacts: string[]
 }
 
 /** 「签什么」三源汇聚（畸形输入逐条跳过，封顶防爆长）。 */
@@ -125,6 +134,56 @@ export function buildStatusCard(detail: unknown): StatusCardView | null {
   const structFiles = asStringArray(bd.files)
   const structNext = typeof bd.next_action === 'string' ? bd.next_action.trim() : ''
 
+  // ── 终态收口分支（t260921-03）：工作流已结束的票必须给「已结束+结束方式+异常
+  // 原因+缺了什么」——blocked 词面不得再把已结束票渲染成「受阻等你处置」（实案
+  // t260920-02/t260921-01：COMPLETED 巡检票详情曾出红 blocked 卡+retry-qc 话术）。
+  // 数据源=引擎详情面（exec_status/close_health/close_health_reason，键只加）；
+  // 触发=close_health ∈ {abnormal, unreadable}（引擎只对终态行下这两值，在跑票
+  // 无健康度）。正常收口（ok/''）→ 不走本分支（落到底部 null，零侵入，反用例③
+  // 防反向撒谎）。零操作语义：文案不给任何推进入口（重跑走既有通道，本卡不给键）。
+  const strOf = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
+  const execStatus = strOf(d.exec_status) || strOf(meta.exec_status)
+  const closeHealth = strOf(d.close_health) || strOf(meta.close_health)
+  if (closeHealth === 'abnormal' || closeHealth === 'unreadable') {
+    const reason = strOf(d.close_health_reason) || strOf(meta.close_health_reason)
+    // 缺了什么：与引擎 reason 同口径的事实行（gen1 修订，验收走查问题1）——
+    // abnormal 形态下 report_path 在场=落账镜像（t260917-02 起 blocked 收口也落账
+    // 同名文件），不是「报告已在」；旧防线措辞与异常原因行自相矛盾，删除。
+    const reportPath = strOf(d.report_path) || strOf(meta.report_path)
+    const findingsObj = (d.findings !== null && typeof d.findings === 'object')
+      ? d.findings as Record<string, unknown> : {}
+    const findingsTotal = typeof findingsObj.total === 'number' && Number.isFinite(findingsObj.total)
+      ? findingsObj.total : null
+    const missingTxt = reportPath !== ''
+      ? '本期报告未落盘（落账文件为受阻面镜像）'
+      : (findingsTotal !== null ? `本期报告未落盘（发现 ${findingsTotal} 条）` : '本期报告未落盘')
+    const closeWay = `结束方式：工作流${execStatus ? ` ${execStatus}` : '已结束（终态）'}（Temporal 终态，不再推进）` +
+      (strOf(d.close_time_txt) ? `，终态时刻 ${strOf(d.close_time_txt)}` : '')
+    const closeFacts = [
+      closeWay,
+      ...(reason ? [`异常原因：${reason}`] : []),
+      // 终态前的受阻记录原样带出（blocked_reason 链可达——实案根因往往只在这里，
+      // 如 dsh unknown preset；与健康度原因重复时省略，不编造不清洗）。
+      ...(blockedReason && !reason.includes(blockedReason)
+        ? [`受阻记录（终态前）：${blockedReason}`] : []),
+      ...(closeHealth === 'abnormal' ? [`缺了什么：${missingTxt}`] : ['缺了什么：收口面不可读，产物待核']),
+    ]
+    return {
+      headline: closeHealth === 'abnormal' ? '已结束（异常收口）' : '已结束（快照未读到，待核）',
+      headlineFromTable: true,
+      files: [],
+      filesMore: 0,
+      next: closeHealth === 'abnormal'
+        ? '终态票零推进入口：本卡不提供推进/重跑操作；下期巡检按计划再跑，需要重跑走既有通道。'
+        : '终态票零推进入口：工作流已结束；刷新只可能读出面快照（不改变终态结论）。',
+      rawLog: formatLogTail(d),
+      severity: 'amber',
+      signWhat: [],
+      terminal: true,
+      closeFacts,
+    }
+  }
+
   // ── 蓝卡分支：人门等你签（mock 屏③ callout E）──
   if (stageState === 'awaiting-human' && !reasonCode) {
     const tr = translateReason('awaiting-human', blockedReason)
@@ -139,6 +198,8 @@ export function buildStatusCard(detail: unknown): StatusCardView | null {
       rawLog,
       severity: 'blue',
       signWhat,
+      terminal: false,
+      closeFacts: [],
     }
   }
 
@@ -176,6 +237,8 @@ export function buildStatusCard(detail: unknown): StatusCardView | null {
     ],
     severity: stageState === 'blocked' ? 'red' : 'amber',
     signWhat: [],
+    terminal: false,
+    closeFacts: [],
   }
 }
 

@@ -15,7 +15,8 @@ import type { MouseEvent } from 'react'
 import { epicChipColor } from './theme'
 import {
   deriveTicketState, STATE4_LABEL, epicColorOf, stageShortOf, relativeTime,
-  laneDots, toMillis, ticketDisplayTitle, pausedBadgeText, type WfLike,
+  laneDots, toMillis, ticketDisplayTitle, pausedBadgeText, closeHealthOf, closeHealthBadgeOf,
+  type WfLike,
 } from './ticket-list-model.ts'
 
 /** 行卡消费的工单最小字段面（对齐 index.tsx TicketRow，多字段不关心）。 */
@@ -43,6 +44,12 @@ export interface CardTicket {
   engine?: string
   /** Temporal 执行状态（t260919-02：五态推导第三参；失败类终态行显「已失败」）。 */
   exec_status?: string
+  /** 收口健康度判定面（t260921-03：异常收口徽标数据源；全可缺=兜底推导）。 */
+  kind?: string
+  report_path?: string
+  close_health?: string
+  /** 收口健康度事实原因（引擎下发；悬停 title 透传，绝不编造）。 */
+  close_health_reason?: string
 }
 
 /** 进展行（host enrichment 透传；缺省=行卡降级只显相对时间）。 */
@@ -85,7 +92,8 @@ export interface TicketRowCardProps {
 }
 
 /** 悬停 title：id＋阶段语境（C2 消费点：阶段短名拓扑驱动）＋阻塞原因＋执行状态原文
- *  （t260919-02：失败行在悬停里可辨 Temporal 终态词，与状态标签「已失败」互证）。 */
+ *  （t260919-02：失败行在悬停里可辨 Temporal 终态词，与状态标签「已失败」互证）＋
+ *  收口健康原因（t260921-03：异常收口行悬停即得事实原因，不许无因异常）。 */
 function cardTitle(t: CardTicket, wf?: WfLike | null): string {
   const parts = [t.id]
   const stage = (wf?.stages ?? []).find(s => s?.id === t.stage)
@@ -93,6 +101,7 @@ function cardTitle(t: CardTicket, wf?: WfLike | null): string {
   if (short !== '') parts.push(`阶段：${short}`)
   if (t.blocked_reason) parts.push(`阻塞原因：${t.blocked_reason}`)
   if (t.exec_status) parts.push(`执行状态：${t.exec_status}`)
+  if (t.close_health_reason) parts.push(`收口：${t.close_health_reason}`)
   if (t.updated) parts.push(`更新 ${t.updated}`)
   return parts.join('\n')
 }
@@ -149,6 +158,18 @@ export function TicketRowCard({
             {kindBadge.text}
           </span>
         )}
+        {/* 收口健康徽标（t260921-03）：异常收口/待核行可扫读（正常收口不贴徽标=
+            既有收口行零变化，失败行已有「已失败」态字不重复贴）。判定走模型层
+            closeHealthOf 单点（引擎键优先、缺键兜底），data-close-health=渲染断言锚。 */}
+        {(() => {
+          const badge = closeHealthBadgeOf(t)
+          return badge !== '' && (
+            <span className="wb-card-health" data-close-health={closeHealthOf(t)}
+              title={t.close_health_reason || badge}>
+              {badge}
+            </span>
+          )
+        })()}
         <span className="wb-card-id">{t.id}</span>
         {(peerViewers?.length ?? 0) > 0 && (
           <span title={`另一页签正在查看：${(peerViewers ?? []).map(v => v.who).join('、')}`}>👀</span>

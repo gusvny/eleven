@@ -46,6 +46,10 @@ DEVLANE_ROW_KEYS = {
     "stage", "stage_state", "paused", "paused_phase", "handoff_count", "pending_count",
     "worktree", "workspace", "created", "updated", "updated_ts", "engine",
     "exec_status", "authz_active", "close_ts",
+    # t260921-03 有意扩（键只加；meta/失败/降级/极简四形同批加，parity 纪律本身不破）：
+    # 收口健康度+事实原因——要求②「每行带一个可判定字段」dev-lane 行同名单；
+    # 推导=引擎 _close_health_of（COMPLETED→ok / 失败族→failed / 在飞→''）。
+    "close_health", "close_health_reason",
 }
 
 

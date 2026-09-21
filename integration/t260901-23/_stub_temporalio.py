@@ -42,6 +42,17 @@ class _WorkflowModule(types.ModuleType):
 def install():
     if "temporalio" in sys.modules:
         return
+    # t260921-03 顺便修复：真包可导入时绝不装桩（本文档字符串原意是「装了真
+    # temporalio 的环境本桩不生效」，但原判据只查 sys.modules——引擎 venv 里真包
+    # 在场却仍被塞桩，同一次 pytest 里先跑桩文件再跑用真包语义的测试文件
+    # （如 t260916-02 ticketing）就被污染假红。改为先尝试真导入，失败才落桩；
+    # 无 temporalio 的裸解释器行为不变。
+    try:
+        import importlib
+        importlib.import_module("temporalio")
+        return
+    except ImportError:
+        pass
     pkg = types.ModuleType("temporalio")
     pkg.__path__ = []  # 允许 from temporalio.<sub> import … 形式
     sys.modules["temporalio"] = pkg

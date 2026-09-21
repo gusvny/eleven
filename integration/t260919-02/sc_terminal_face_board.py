@@ -85,14 +85,20 @@ class FakeStatus:
 
 
 class FakeSAKeys:
-    """SA 桩两态通吃：真 SDK str(key)==键名原词；共享桩 for_keyword 返回
-    ("kw", name) 二元组——取第二元对上键名原词，两种形态都不丢。"""
+    """SA 桩三态通吃（t260921-03 顺便修复）：真 SDK 键对象取 .name（_stub_temporalio
+    改为「真包可导入即不装桩」后，引擎 venv 下本场景跑的是真 temporalio 的
+    SearchAttributeKey，真键对象 str() 未必等于键名原词，假 SA 表（字符串键）取不到
+    → 行 project 恒空假红）；共享桩 for_keyword 返回 ("kw", name) 二元组取第二元；
+    字符串键原样——三种形态都不丢。"""
 
     def __init__(self, kv):
         self.kv = kv
 
     def get(self, key):
-        name = key[1] if isinstance(key, tuple) and len(key) == 2 else str(key)
+        if isinstance(key, tuple) and len(key) == 2:
+            name = key[1]
+        else:
+            name = getattr(key, "name", None) or str(key)
         return self.kv.get(name)
 
 
@@ -327,10 +333,15 @@ def dev_snap():
 
 # dev-lane 极简行旧形状键集（client.py else 分支原样：无 paused/paused_phase——那是
 # meta 分支才并的键）。失败行 parity 守的是「极简行键集不加新键」。
+# t260921-03 有意更新（键集随四形状同步扩展，parity 纪律不破）：收口健康度键
+# close_health/close_health_reason 进 dev-lane 全部四形状（meta/极简/失败/降级）——
+# 票面要求②「每行都必须能判定收口健康度」覆盖 dev-lane；引擎 UT
+# test_t260915_08_inspection_board.py 的 DEVLANE_ROW_KEYS 钉同一键集。
 DEV_ROW_KEYS = {"id", "project", "epic", "role", "status", "title", "workflow", "proposal_id",
                 "stage", "stage_state", "handoff_count",
                 "pending_count", "worktree", "workspace", "created", "updated",
-                "updated_ts", "close_ts", "engine", "exec_status", "authz_active"}
+                "updated_ts", "close_ts", "engine", "exec_status", "authz_active",
+                "close_health", "close_health_reason"}
 
 
 # ---------------------------------------------------------------- face 宽容读取（灰盒浅绑定）

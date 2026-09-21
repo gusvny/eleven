@@ -37,7 +37,9 @@ ok(ticketMergeTierOf('dispatched', 'running') === 1, '在跑（running）→tier
 ok(ticketMergeTierOf('dispatched', 'awaiting') === 1, '缺省钉死：awaiting（等段间推进）→tier1')
 ok(ticketMergeTierOf('dispatched', 'some-future-state') === 1, '缺省钉死：未知/未来 stage_state→tier1（宁显活跃）')
 ok(ticketMergeTierOf('dispatched', undefined) === 1 && ticketMergeTierOf('dispatched', '') === 1, '缺省钉死：stage_state 缺/空→tier1')
-ok(ticketMergeTierOf('closed', 'awaiting') === 2 && ticketMergeTierOf('closed', 'running') === 2, 'closed 优先→tier2（收口层，stage_state 不翻案）')
+// t260921-03 有意更新（2→3）：done 档拆两层——异常收口 tier2 插在在跑与正常收口
+// 之间，正常收口沉 tier3；既有类相对序不变（收口仍居末档），见下方 t260919-02 段。
+ok(ticketMergeTierOf('closed', 'awaiting') === 3 && ticketMergeTierOf('closed', 'running') === 3, 'closed 优先→tier3 正常收口（t260921-03 拆档后；stage_state 不翻案）')
 ok(ticketMergeTierOf('running', 'running') === 1, '降级闭合行（引擎钉 status=running）→tier1 不进收口层（08 UT 同口径）')
 ok(ticketMergeTierOf(123, null) === 1 && ticketMergeTierOf(undefined, undefined) === 1, '畸形/缺参→tier1 缺省不抛')
 
@@ -97,8 +99,11 @@ ok(one.length === 1 && one[0].id === 'solo', '单行→原样')
 ok(ticketMergeTierOf('dispatched', 'running', 'FAILED') === 0, '失败类终态（FAILED）→tier0')
 ok(ticketMergeTierOf('dispatched', 'running', 'CANCELED') === 0, '失败类终态（CANCELED）→tier0')
 ok(ticketMergeTierOf('failed', 'failed') === 0, '词面 failed（exec_status 断链防御）→tier0')
-ok(ticketMergeTierOf('closed', 'awaiting', 'COMPLETED') === 2 && ticketMergeTierOf('closed', 'awaiting', 'FAILED') === 0,
-  'closed×COMPLETED→tier2 收口；closed×FAILED→tier0（死票不被词面误归收口）')
+// t260921-03 有意更新（2→3）：done 档拆两层——异常收口 tier2 插在在跑与正常收口
+// 之间（不沉底、不并入「看起来正常」的收口组，票面要求③）；正常收口 tier3；
+// 既有四类相对序不变。改钉值=验收行为本身，非凑绿（根因同注释，下同不赘）。
+ok(ticketMergeTierOf('closed', 'awaiting', 'COMPLETED') === 3 && ticketMergeTierOf('closed', 'awaiting', 'FAILED') === 0,
+  'closed×COMPLETED→tier3 正常收口；closed×FAILED→tier0（死票不被词面误归收口）')
 const withFailed = sortMergedTickets([
   dev('dev-run', 'dispatched', 'running', T),
   dev('dev-fail', 'failed', 'failed', T + 60, { exec_status: 'FAILED' }),
@@ -109,6 +114,25 @@ ok(withFailed.map(r => r.id).join(',') === 'ins-wait,dev-fail,dev-run,dev-done',
   `失败票进 tier0 置顶档（与等你同档按时间倒序），全序=等你→failed→在跑→收口，实得 ${withFailed.map(r => r.id).join(',')}`)
 ok(withFailed.findIndex(r => r.id === 'dev-fail') < withFailed.findIndex(r => r.id === 'dev-run'),
   '反隐形核心面：失败票排在在跑票之前（不再复活「永远在跑」形态）')
+
+/* ---- t260921-03：异常收口 tier2 插层（不沉底、不并入正常收口档） ---- */
+ok(ticketMergeTierOf('blocked', 'blocked', 'COMPLETED',
+  { status: 'blocked', stage_state: 'blocked', exec_status: 'COMPLETED', kind: 'inspection', report_path: '' }) === 2,
+  '实案形态（面快照 blocked + COMPLETED + 无报告）→tier2 异常收口档')
+ok(ticketMergeTierOf('closed', 'awaiting', 'COMPLETED',
+  { status: 'closed', exec_status: 'COMPLETED', kind: 'inspection', report_path: 'out/x.json' }) === 3,
+  '正常收口（有报告）→tier3，不陪异常档')
+const withAbn = sortMergedTickets([
+  dev('dev-run', 'dispatched', 'running', T),
+  ins('ins-abn', 'blocked', 'blocked', T + 120, { exec_status: 'COMPLETED', report_path: '' }),
+  ins('ins-ok', 'closed', 'done', T + 240, { exec_status: 'COMPLETED', report_path: 'out/x.json' }),
+  dev('dev-wait', 'dispatched', 'awaiting-human', T + 360),
+])
+ok(withAbn.map(r => r.id).join(',') === 'dev-wait,dev-run,ins-abn,ins-ok',
+  `四档全序=等你→在跑→异常收口→正常收口（异常不沉底不混正常档），实得 ${withAbn.map(r => r.id).join(',')}`)
+ok(withAbn.findIndex(r => r.id === 'ins-abn') > withAbn.findIndex(r => r.id === 'dev-run')
+  && withAbn.findIndex(r => r.id === 'ins-abn') < withAbn.findIndex(r => r.id === 'ins-ok'),
+  '异常收口行在跑档之后、正常收口之前（插层位置钉死）')
 
 /* ---- 源级锚（KI-051：语义锚；防接线被静默拆除） ---- */
 const sbSrc = readFileSync(join(repo, 'server/plugins/workbench/src/client/sidebar.tsx'), 'utf8')

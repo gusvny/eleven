@@ -148,6 +148,12 @@ interface InspectionTicket extends Ticket {
   engine?: string
   /** 待签标记（引擎行常带；判定以 stage_state 为准——inspectionProgressOf 单点）。 */
   awaiting_gate?: boolean
+  /** 收口健康度判定面（t260921-03 键只加）：行卡健康徽标与合并排序插层（tier2）
+   *  经共享模型 closeHealthOf 生效——左栏零新词表，字段只是透传。 */
+  kind?: string
+  report_path?: string
+  close_health?: string
+  close_health_reason?: string
 }
 
 /** 项目注册表条目（GET /wf/projects）。 */

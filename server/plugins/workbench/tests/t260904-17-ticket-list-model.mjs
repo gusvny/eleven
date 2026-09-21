@@ -73,6 +73,18 @@ ok('五态：活/成白名单 exec_status → 沿用四态旧值（逐条不变�
   assert.equal(deriveTicketState('open', 'running', 'CONTINUED_AS_NEW'), 'active')
 })
 
+/* ---------------------------------------- 终态对账（t260921-03，实案 t260920-02/t260921-01） */
+
+ok('终态对账：COMPLETED → done 先于一切词面（快照遗留 blocked/running 词面永不胜出）', () => {
+  // 实案复现用例②：面快照 blocked + 工作流 COMPLETED → 行不得显 blocked
+  assert.equal(deriveTicketState('blocked', 'blocked', 'COMPLETED'), 'done')
+  // 陈旧在跑词面同查抹平（已完成≠在跑）
+  assert.equal(deriveTicketState('dispatched', 'running', 'COMPLETED'), 'done')
+  assert.equal(deriveTicketState('settled', 'awaiting-human', 'COMPLETED'), 'done')
+  // 真 closed 行为不变（旧值零回归）
+  assert.equal(deriveTicketState('closed', 'done', 'COMPLETED'), 'done')
+})
+
 ok('五态：exec_status 缺失/空/畸形 → 四态旧值逐条不变（畸形按缺失处理不 throw）', () => {
   assert.equal(deriveTicketState('open', 'running'), 'active')
   assert.equal(deriveTicketState('open', 'running', undefined), 'active')
@@ -242,9 +254,10 @@ ok('五态 tier 投影：失败票 tier0 置顶（等你/受阻同档）、活/�
   assert.equal(ticketMergeTierOf('failed', 'failed'), 0)
   // exec_status 键断链时词面 failed 同样 tier0（与推导断链防御同源）
   assert.equal(ticketMergeTierOf('dispatched', 'failed', undefined), 0)
-  // 活/成/收口不误伤（t260916-15 旧值逐条不变）
+  // 活/成/收口不误伤（t260916-15 旧值逐条不变；t260921-03 拆档：正常收口 2→3，
+  // 异常收口插层 tier2——有意更新，根因见 t260916-15 UT 同名注释）
   assert.equal(ticketMergeTierOf('dispatched', 'running', 'RUNNING'), 1)
-  assert.equal(ticketMergeTierOf('closed', 'awaiting', 'COMPLETED'), 2)
+  assert.equal(ticketMergeTierOf('closed', 'awaiting', 'COMPLETED'), 3)
   assert.equal(ticketMergeTierOf('closed', 'awaiting', 'FAILED'), 0)
 })
 

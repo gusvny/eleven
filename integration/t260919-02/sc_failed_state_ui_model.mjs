@@ -147,8 +147,16 @@ if (model.err) {
      `failed → tier0（置顶；got=${ticketMergeTierOf('dispatched', 'running', 'FAILED')}）`)
   ok(ticketMergeTierOf('dispatched', 'running', 'RUNNING') === 1,
      'RUNNING → tier1（在跑档零回归）')
-  ok(ticketMergeTierOf('closed', 'awaiting', 'COMPLETED') === 2,
-     'COMPLETED → tier2（收口档零回归）')
+  // t260921-03 有意更新（根因见该函数注释与 t260916-15 UT 同名块）：收口档拆二——
+  // 正常收口 2→3，异常收口插层 tier2（不沉底不并入「看起来正常」组）；失败档 0
+  // 与在跑档 1 零回归。三参形态（无行参）回落实正常收口=3。
+  ok(ticketMergeTierOf('closed', 'awaiting', 'COMPLETED') === 3,
+     'COMPLETED → tier3（正常收口档；t260921-03 拆档后）')
+  ok(ticketMergeTierOf('closed', 'awaiting', 'COMPLETED', { exec_status: 'COMPLETED' }) === 3,
+     'COMPLETED 健康行（四参）→ tier3')
+  ok(ticketMergeTierOf('blocked', 'blocked', 'COMPLETED',
+    { exec_status: 'COMPLETED', close_health: 'abnormal' }) === 2,
+     'COMPLETED×异常收口（四参行参）→ tier2（不沉底不并入正常收口组）')
 }
 
 console.log('== S5/S6 组：terminalFaceView 失败面视图（降级不抛/原因不可得/纯数据）==')

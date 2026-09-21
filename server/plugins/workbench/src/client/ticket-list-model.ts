@@ -33,30 +33,38 @@ export const STATE4_LABEL: Record<TicketState4, string> = {
 }
 
 /**
- * 终态「活/成」执行状态白名单（与引擎 client.py _EXEC_ALIVE_OK 同一词表的 UI 侧
- * 镜像，t260919-02；改任一侧必须同步另一侧并跑两侧 UT）。白名单内的 exec_status
- * 沿用既有四态推导；白名单外的一切非空字符串（FAILED/CANCELED/TIMED_OUT/未知新
- * 终态）→ failed（补集口径：终态非成功即失败类，未知新终态宁可显失败不显在跑；
- * TERMINATED 不上板故板面不可达）。畸形/缺失 exec_status 不参与判别（不 throw）。
+ * 终态「成功收口」与「在飞」执行状态词表（t260921-03 从 t260919-02 的活/成混称
+ * 拆出——COMPLETED 是终态对账的正源：已结束的票绝不再显示在跑/阻塞，快照遗留
+ * 词面不得胜出；CONTINUED_AS_NEW 是换代继续的转场态，沿用词面推导）。
+ * 与引擎 client.py _EXEC_DONE_OK/_EXEC_ALIVE_OK 同一词表的 UI 侧镜像，改任一侧
+ * 必须同步另一侧并跑两侧 UT。在飞词表外的一切非空字符串（FAILED/CANCELED/
+ * TIMED_OUT/未知新终态）→ failed（补集口径：终态非成功即失败类，未知新终态宁可
+ * 显失败不显在跑；TERMINATED 不上板故板面不可达）。畸形/缺失 exec_status 不参与
+ * 判别（不 throw）。
  */
-const EXEC_STATUS_ALIVE_OK = new Set(['RUNNING', 'COMPLETED', 'CONTINUED_AS_NEW'])
+const EXEC_STATUS_DONE_OK = new Set(['COMPLETED'])
+const EXEC_STATUS_ALIVE = new Set(['RUNNING', 'CONTINUED_AS_NEW'])
 
 /**
- * 引擎现值 → 五态（t260919-02 增第三参 execStatus 与 failed 态）。
+ * 引擎现值 → 五态（t260919-02 增第三参 execStatus 与 failed 态；t260921-03 终态对账）。
  *
  * 判别顺序：
- *  1. exec_status 非空字符串且不在活/成白名单 → failed（失败类终态优先：死票绝不
- *     显在飞，也不得被快照遗留的 closed 词面误归收口）；
- *  2. status/stage_state 词面 'failed' → failed（断链防御，review①：引擎失败行已
+ *  1. exec_status=COMPLETED → done（终态对账：exec 在手即权威，先于一切词面——
+ *     快照遗留的 blocked/running 词面永不胜出，t260920-02/t260921-01 实案「工作流
+ *     已完成却显阻塞」的直接根治点）；
+ *  2. exec_status 非空且不在在飞词表 → failed（失败类终态优先：死票绝不显在飞，
+ *     也不得被快照遗留的 closed 词面误归收口；t260919-02 口径零回归）；
+ *  3. status/stage_state 词面 'failed' → failed（断链防御，review①：引擎失败行已
  *     带 failed 词面而 exec_status 键在 host 透传丢键/旧行缓存时仍失败可见，不落
  *     default active 复发病灶）；
- *  3. 沿用既有四态推导：closed 优先（迁移把 closed 票 stage_state 置成了 awaiting，
+ *  4. 沿用既有四态推导：closed 优先（迁移把 closed 票 stage_state 置成了 awaiting，
  *     语义上已完成，沿用台面 ticketState 既有口径）；未知/未来 stage_state →
  *     active（宁显活跃勿假警报——不作受阻/等你误报，UT 真值表钉此缺省行）。
  */
 export function deriveTicketState(status?: unknown, stageState?: unknown, execStatus?: unknown): TicketState4 {
-  if (typeof execStatus === 'string' && execStatus !== '' && !EXEC_STATUS_ALIVE_OK.has(execStatus)) {
-    return 'failed'
+  if (typeof execStatus === 'string' && execStatus !== '') {
+    if (EXEC_STATUS_DONE_OK.has(execStatus)) return 'done'
+    if (!EXEC_STATUS_ALIVE.has(execStatus)) return 'failed'
   }
   if (status === 'failed' || stageState === 'failed') return 'failed'
   const st = typeof status === 'string' ? status : undefined
@@ -71,6 +79,97 @@ export function deriveTicketState(status?: unknown, stageState?: unknown, execSt
     default:
       return 'active'
   }
+}
+
+/* ------------------------------------------------------------- 收口健康度（t260921-03） */
+
+/**
+ * 收口健康度（行可判定字段：「已结束的票必须同时表达结束了与怎么结束的」）：
+ *   ok=正常收口 / failed=失败终态 / abnormal=异常收口（已完成但没跑成实质工作，
+ *   巡检=面快照 blocked——无论 report_path 是否在，blocked 收口也落账同名文件，
+ *   路径在场≠报告在；或面无受阻但报告缺失） / unreadable=已结束·待核（面读取
+ *   失败，显式存疑不冒充 ok——review 意见⑥裁定接受第 5 值） / ''=未收口（在飞
+ *   无健康度可言）。
+ * 与引擎 client.py _close_health_of 同一判定语义的双侧镜像（引擎是正源，本层是
+ * UI 单点+部署窗旧行的兜底推导），改任一侧必须同步另一侧并跑两侧 UT。
+ */
+export type CloseHealth = 'ok' | 'failed' | 'abnormal' | 'unreadable' | ''
+
+const CLOSE_HEALTH_ENUM = new Set<string>(['ok', 'failed', 'abnormal', 'unreadable'])
+
+/** 收口健康度消费的最小行字段面（全键可缺=引擎行是不可信外部输入）。 */
+export interface CloseHealthRowLike {
+  status?: unknown
+  stage_state?: unknown
+  exec_status?: unknown
+  /** 引擎标记/类别标记：巡检行识别用（缺产物判定只属巡检，不泛化到 dev-lane）。 */
+  engine?: unknown
+  kind?: unknown
+  report_path?: unknown
+  /** 受阻事实（实案 t260920-02 形：面快照 blocked——受阻面=没跑成实质工作）。 */
+  blocked_reason?: unknown
+  /** 引擎下发的收口健康度（t260921-03 起随行）；缺省=本地兜底推导。 */
+  close_health?: unknown
+}
+
+/** 巡检行识别（引擎行自报家门，两标记任一命中；畸形值按非巡检处理）。 */
+function isInspectionRowLike(row: CloseHealthRowLike | null | undefined): boolean {
+  if (row === null || typeof row !== 'object') return false
+  return row.kind === 'inspection' || row.engine === 'inspection'
+}
+
+/**
+ * 行收口健康度：行键合法 → 透传（引擎单点判定的结果）；键缺/畸形 → 本地兜底推导。
+ *
+ * 兜底口径（引擎 _close_health_of 镜像）：只对「已知终态」下结论——
+ *  - exec=COMPLETED：巡检行受阻词面优先（blocked_reason 在=面快照 blocked=没跑成
+ *    实质工作 → abnormal；无论 report_path 是否在——t260917-02 起 blocked 收口也
+ *    落账，落账走 report 同名约定，路径在场≠报告在，实案「报告」即受阻面镜像）；
+ *    无受阻再按 report_path 判 ok/abnormal（无报告=异常收口）；dev-lane 无产物
+ *    契约恒 ok；
+ *  - exec 非空不在在飞词表 → failed（t260919-02 补集口径）；
+ *  - exec 断链（host 丢键）：词面防御 failed 词→failed、closed 词→ok（无 exec
+ *    无法核产物，绝不给 abnormal——在跑巡检面本来就没报告，宁可少标不撒谎）。
+ * 已知偏差（review 意见②，UT 夹具钉死）：部署窗老 degraded 行（引擎尚未带
+ * unreadable 键、面读取失败）在兜底下判 abnormal——徽标「已结束·异常（无报告）」
+ * 而非「待核」；仍在异常收口族、不撒谎终态，可接受。
+ */
+export function closeHealthOf(row: CloseHealthRowLike | null | undefined): CloseHealth {
+  const carried = row === null || typeof row !== 'object' ? undefined : row.close_health
+  if (typeof carried === 'string' && CLOSE_HEALTH_ENUM.has(carried)) return carried as CloseHealth
+  const exec = row !== null && typeof row === 'object' && typeof row.exec_status === 'string'
+    ? row.exec_status : ''
+  if (exec !== '') {
+    if (EXEC_STATUS_DONE_OK.has(exec)) {
+      if (isInspectionRowLike(row)) {
+        const r = row as CloseHealthRowLike
+        const blocked = r.blocked_reason
+        if (typeof blocked === 'string' && blocked.trim() !== '') return 'abnormal'
+        const rp = r.report_path
+        return typeof rp === 'string' && rp.trim() !== '' ? 'ok' : 'abnormal'
+      }
+      return 'ok'
+    }
+    if (!EXEC_STATUS_ALIVE.has(exec)) return 'failed'
+    return ''
+  }
+  const status = row !== null && typeof row === 'object' ? row.status : undefined
+  const stageState = row !== null && typeof row === 'object' ? row.stage_state : undefined
+  if (status === 'failed' || stageState === 'failed') return 'failed'
+  if (status === 'closed') return 'ok'
+  return ''
+}
+
+/**
+ * 收口健康度徽标文案（''=不渲染——正常收口不贴徽标=既有收口行零变化，failed 行
+ * 已有「已失败」态字不重复贴）。abnormal 文案带「无报告」：当前 abnormal 只从
+ * 巡检缺报告产生（引擎判定同源），未来新产物域接入时随词表一起扩。
+ */
+export function closeHealthBadgeOf(row: CloseHealthRowLike | null | undefined): string {
+  const h = closeHealthOf(row)
+  if (h === 'abnormal') return '已结束·异常（无报告）'
+  if (h === 'unreadable') return '已结束·待核'
+  return ''
 }
 
 /**
@@ -99,28 +198,39 @@ export interface TicketSortRowLike {
   stage_state?: unknown
   /** Temporal 执行状态（t260919-02：失败类终态行置顶可 attention 的数据源）。 */
   exec_status?: unknown
+  /** 收口健康度判定面（t260921-03：done 档拆异常/正常两层的数据源，全可缺）。 */
+  engine?: unknown
+  kind?: unknown
+  report_path?: unknown
+  close_health?: unknown
   updated_ts?: unknown
   created?: unknown
   close_ts?: unknown
 }
 
 /**
- * 排序层（t260916-15；t260919-02 增第三参 execStatus 与 failed 档）：在等你/受阻/
- * 已失败 → 在跑 → 已完成 三档。tier 是 deriveTicketState 五态的**纯投影**——状态→
- * 五态映射单点仍在 deriveTicketState（全台唯一归并点），本函数不另起第二套状态词表；
- * 未知/未来 stage_state 继承其「宁显活跃勿假警报」缺省 → tier1（'awaiting'=等 agent
- * 段间推进，归在跑档，UT 钉死防悄悄改口径）；失败票 tier0（死票置顶可见，不许沉底
- * 复活「永远在跑」的隐形形态）。
+ * 排序层（t260916-15；t260919-02 增第三参 execStatus 与 failed 档；t260921-03 done
+ * 拆两层成四档）：等你/受阻/已失败 → 在跑 → **已结束·异常** → 已结束·正常。
+ * tier 是 deriveTicketState 五态+收口健康度的**纯投影**——状态→五态映射单点仍在
+ * deriveTicketState（全台唯一归并点），健康度单点在 closeHealthOf，本函数不另起
+ * 第二套词表；异常收口行 tier2（在跑之上？否——在跑之下、正常收口之上）：不沉底、
+ * 不被并入「看起来正常」的收口组，既有四类相对序不变（t260916-15 口径零回归）；
+ * 未知/未来 stage_state 继承「宁显活跃勿假警报」缺省 → tier1；失败票 tier0。
+ * 第四参 row 供健康度判定（缺省=旧三参形态，done 一律按正常收口 tier3 兜底——
+ * 老调用点/无行面语境不下异常结论）。
  */
-export function ticketMergeTierOf(status?: unknown, stageState?: unknown, execStatus?: unknown): 0 | 1 | 2 {
+export function ticketMergeTierOf(status?: unknown, stageState?: unknown, execStatus?: unknown,
+                                  row?: CloseHealthRowLike | null): 0 | 1 | 2 | 3 {
   const s4 = deriveTicketState(status, stageState, execStatus)
   switch (s4) {
     case 'waiting':
     case 'blocked':
     case 'failed':
       return 0
-    case 'done':
-      return 2
+    case 'done': {
+      const h = closeHealthOf(row ?? { status, stage_state: stageState, exec_status: execStatus })
+      return h === 'abnormal' || h === 'unreadable' ? 2 : 3
+    }
     default:
       return 1
   }
@@ -155,9 +265,10 @@ export function sortMergedTickets<T extends TicketSortRowLike>(rows: readonly T[
     const ra = a.row as TicketSortRowLike | null
     const rb = b.row as TicketSortRowLike | null
     // t260919-02：exec_status 进 tier 投影（失败类终态行 tier0 置顶，左栏不再
-    // 把死票混在在跑档里隐形）。
-    const ta = ticketMergeTierOf(ra?.status, ra?.stage_state, ra?.exec_status)
-    const tb = ticketMergeTierOf(rb?.status, rb?.stage_state, rb?.exec_status)
+    // 把死票混在在跑档里隐形）。t260921-03：整行进 tier 投影（异常收口行 tier2，
+    // 不沉底不并入正常收口档）。
+    const ta = ticketMergeTierOf(ra?.status, ra?.stage_state, ra?.exec_status, ra ?? undefined)
+    const tb = ticketMergeTierOf(rb?.status, rb?.stage_state, rb?.exec_status, rb ?? undefined)
     if (ta !== tb) return ta - tb
     const dts = ticketSortTsOf(rb) - ticketSortTsOf(ra)
     return dts !== 0 ? dts : a.idx - b.idx
@@ -317,23 +428,36 @@ export interface FilterableRow {
   stage_state?: string
   /** Temporal 执行状态（t260919-02：五态推导第三参的数据源，缺省=四态旧行为）。 */
   exec_status?: string
+  /** 收口健康度判定面（t260921-03：异常收口筛选与徽标数据源，全可缺）。 */
+  engine?: string
+  kind?: string
+  report_path?: string
+  close_health?: string
 }
 
-/** 筛选 chips 输入：四态（''=不过滤）、epic 代号（''=不过滤）、搜索词（''=不过滤）。 */
+/** 筛选 chips 输入：四态（''=不过滤）、epic 代号（''=不过滤）、搜索词（''=不过滤）、
+ *  异常收口（t260921-03：'abnormal'=只看异常收口族〔abnormal+unreadable〕）。 */
 export interface FilterInput {
   state?: string
   epic?: string
   q?: string
+  health?: string
 }
 
 /**
  * chips=过滤非分组：五态按 deriveTicketState 归并后比对（与行卡同源，不按
- * status/stage_state 原词各筛各的）；epic 精确匹配；q 大小写不敏感匹配 id+标题。
+ * status/stage_state 原词各筛各的）；epic 精确匹配；q 大小写不敏感匹配 id+标题；
+ * health='abnormal' 筛异常收口族（closeHealthOf 单点，failed 行有自己的「已失败」
+ * chip 不混入；与 state/epic/q 全部 AND 叠加）。
  */
 export function filterRows<T extends FilterableRow>(rows: T[], f: FilterInput): T[] {
   const q = (f.q ?? '').trim().toLowerCase()
   return rows.filter(r => {
     if (f.state && deriveTicketState(r.status, r.stage_state, r.exec_status) !== f.state) return false
+    if (f.health === 'abnormal') {
+      const h = closeHealthOf(r)
+      if (h !== 'abnormal' && h !== 'unreadable') return false
+    }
     if (f.epic && (r.epic ?? '') !== f.epic) return false
     if (q !== '') {
       const hay = `${r.id} ${r.title ?? ''}`.toLowerCase()

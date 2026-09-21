@@ -85,7 +85,12 @@ ok(inspectionTitleOf({ id: 'inspection-x-20260915' }) === 'inspection-x-20260915
 ok(inspectionTitleOf({}) === '', '全空→空串不抛')
 
 // ---- review 执行项1 UI 子用例：降级闭合行（引擎钉 status='running'）四态≠done，保持可见
-ok(deriveTicketState('running', 'running') !== 'done', '降级闭合行（status=running）不得被收口折叠吃掉')
+ok(deriveTicketState('running', 'running') !== 'done', '降级闭合行（status=running，exec 断链旧行）不得被收口折叠吃掉')
+// t260921-03 有意扩展：降级闭合行带 exec_status=COMPLETED（现引擎行形状）时终态
+// 对账判 done——可见性承接方从「running 词面」改为「异常收口段不折叠」（引擎行带
+// close_health=unreadable，board 拆桶承接），「已完成却显在跑」的谎言面随之消灭。
+ok(deriveTicketState('running', 'running', 'COMPLETED') === 'done',
+  '降级闭合行 exec=COMPLETED → done（终态对账优先于可见性词面；可见性由异常收口段承接）')
 ok(deriveTicketState('closed', 'done') === 'done', '真闭合行仍是 done（收口折叠正常面）')
 ok(deriveTicketState('running', 'awaiting-human') === 'waiting', '人门行=waiting（黄调行数据源）')
 

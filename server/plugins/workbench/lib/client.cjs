@@ -5681,32 +5681,38 @@ const STATE4_LABEL = {
 	failed: "已失败"
 };
 /**
-* 终态「活/成」执行状态白名单（与引擎 client.py _EXEC_ALIVE_OK 同一词表的 UI 侧
-* 镜像，t260919-02；改任一侧必须同步另一侧并跑两侧 UT）。白名单内的 exec_status
-* 沿用既有四态推导；白名单外的一切非空字符串（FAILED/CANCELED/TIMED_OUT/未知新
-* 终态）→ failed（补集口径：终态非成功即失败类，未知新终态宁可显失败不显在跑；
-* TERMINATED 不上板故板面不可达）。畸形/缺失 exec_status 不参与判别（不 throw）。
+* 终态「成功收口」与「在飞」执行状态词表（t260921-03 从 t260919-02 的活/成混称
+* 拆出——COMPLETED 是终态对账的正源：已结束的票绝不再显示在跑/阻塞，快照遗留
+* 词面不得胜出；CONTINUED_AS_NEW 是换代继续的转场态，沿用词面推导）。
+* 与引擎 client.py _EXEC_DONE_OK/_EXEC_ALIVE_OK 同一词表的 UI 侧镜像，改任一侧
+* 必须同步另一侧并跑两侧 UT。在飞词表外的一切非空字符串（FAILED/CANCELED/
+* TIMED_OUT/未知新终态）→ failed（补集口径：终态非成功即失败类，未知新终态宁可
+* 显失败不显在跑；TERMINATED 不上板故板面不可达）。畸形/缺失 exec_status 不参与
+* 判别（不 throw）。
 */
-const EXEC_STATUS_ALIVE_OK = /* @__PURE__ */ new Set([
-	"RUNNING",
-	"COMPLETED",
-	"CONTINUED_AS_NEW"
-]);
+const EXEC_STATUS_DONE_OK = /* @__PURE__ */ new Set(["COMPLETED"]);
+const EXEC_STATUS_ALIVE = /* @__PURE__ */ new Set(["RUNNING", "CONTINUED_AS_NEW"]);
 /**
-* 引擎现值 → 五态（t260919-02 增第三参 execStatus 与 failed 态）。
+* 引擎现值 → 五态（t260919-02 增第三参 execStatus 与 failed 态；t260921-03 终态对账）。
 *
 * 判别顺序：
-*  1. exec_status 非空字符串且不在活/成白名单 → failed（失败类终态优先：死票绝不
-*     显在飞，也不得被快照遗留的 closed 词面误归收口）；
-*  2. status/stage_state 词面 'failed' → failed（断链防御，review①：引擎失败行已
+*  1. exec_status=COMPLETED → done（终态对账：exec 在手即权威，先于一切词面——
+*     快照遗留的 blocked/running 词面永不胜出，t260920-02/t260921-01 实案「工作流
+*     已完成却显阻塞」的直接根治点）；
+*  2. exec_status 非空且不在在飞词表 → failed（失败类终态优先：死票绝不显在飞，
+*     也不得被快照遗留的 closed 词面误归收口；t260919-02 口径零回归）；
+*  3. status/stage_state 词面 'failed' → failed（断链防御，review①：引擎失败行已
 *     带 failed 词面而 exec_status 键在 host 透传丢键/旧行缓存时仍失败可见，不落
 *     default active 复发病灶）；
-*  3. 沿用既有四态推导：closed 优先（迁移把 closed 票 stage_state 置成了 awaiting，
+*  4. 沿用既有四态推导：closed 优先（迁移把 closed 票 stage_state 置成了 awaiting，
 *     语义上已完成，沿用台面 ticketState 既有口径）；未知/未来 stage_state →
 *     active（宁显活跃勿假警报——不作受阻/等你误报，UT 真值表钉此缺省行）。
 */
 function deriveTicketState(status, stageState, execStatus) {
-	if (typeof execStatus === "string" && execStatus !== "" && !EXEC_STATUS_ALIVE_OK.has(execStatus)) return "failed";
+	if (typeof execStatus === "string" && execStatus !== "") {
+		if (EXEC_STATUS_DONE_OK.has(execStatus)) return "done";
+		if (!EXEC_STATUS_ALIVE.has(execStatus)) return "failed";
+	}
 	if (status === "failed" || stageState === "failed") return "failed";
 	const st = typeof status === "string" ? status : void 0;
 	const ss = typeof stageState === "string" ? stageState : void 0;
@@ -5718,6 +5724,68 @@ function deriveTicketState(status, stageState, execStatus) {
 		case "awaiting": return "active";
 		default: return "active";
 	}
+}
+const CLOSE_HEALTH_ENUM = /* @__PURE__ */ new Set([
+	"ok",
+	"failed",
+	"abnormal",
+	"unreadable"
+]);
+/** 巡检行识别（引擎行自报家门，两标记任一命中；畸形值按非巡检处理）。 */
+function isInspectionRowLike(row) {
+	if (row === null || typeof row !== "object") return false;
+	return row.kind === "inspection" || row.engine === "inspection";
+}
+/**
+* 行收口健康度：行键合法 → 透传（引擎单点判定的结果）；键缺/畸形 → 本地兜底推导。
+*
+* 兜底口径（引擎 _close_health_of 镜像）：只对「已知终态」下结论——
+*  - exec=COMPLETED：巡检行受阻词面优先（blocked_reason 在=面快照 blocked=没跑成
+*    实质工作 → abnormal；无论 report_path 是否在——t260917-02 起 blocked 收口也
+*    落账，落账走 report 同名约定，路径在场≠报告在，实案「报告」即受阻面镜像）；
+*    无受阻再按 report_path 判 ok/abnormal（无报告=异常收口）；dev-lane 无产物
+*    契约恒 ok；
+*  - exec 非空不在在飞词表 → failed（t260919-02 补集口径）；
+*  - exec 断链（host 丢键）：词面防御 failed 词→failed、closed 词→ok（无 exec
+*    无法核产物，绝不给 abnormal——在跑巡检面本来就没报告，宁可少标不撒谎）。
+* 已知偏差（review 意见②，UT 夹具钉死）：部署窗老 degraded 行（引擎尚未带
+* unreadable 键、面读取失败）在兜底下判 abnormal——徽标「已结束·异常（无报告）」
+* 而非「待核」；仍在异常收口族、不撒谎终态，可接受。
+*/
+function closeHealthOf(row) {
+	const carried = row === null || typeof row !== "object" ? void 0 : row.close_health;
+	if (typeof carried === "string" && CLOSE_HEALTH_ENUM.has(carried)) return carried;
+	const exec = row !== null && typeof row === "object" && typeof row.exec_status === "string" ? row.exec_status : "";
+	if (exec !== "") {
+		if (EXEC_STATUS_DONE_OK.has(exec)) {
+			if (isInspectionRowLike(row)) {
+				const r = row;
+				const blocked = r.blocked_reason;
+				if (typeof blocked === "string" && blocked.trim() !== "") return "abnormal";
+				const rp = r.report_path;
+				return typeof rp === "string" && rp.trim() !== "" ? "ok" : "abnormal";
+			}
+			return "ok";
+		}
+		if (!EXEC_STATUS_ALIVE.has(exec)) return "failed";
+		return "";
+	}
+	const status = row !== null && typeof row === "object" ? row.status : void 0;
+	const stageState = row !== null && typeof row === "object" ? row.stage_state : void 0;
+	if (status === "failed" || stageState === "failed") return "failed";
+	if (status === "closed") return "ok";
+	return "";
+}
+/**
+* 收口健康度徽标文案（''=不渲染——正常收口不贴徽标=既有收口行零变化，failed 行
+* 已有「已失败」态字不重复贴）。abnormal 文案带「无报告」：当前 abnormal 只从
+* 巡检缺报告产生（引擎判定同源），未来新产物域接入时随词表一起扩。
+*/
+function closeHealthBadgeOf(row) {
+	const h = closeHealthOf(row);
+	if (h === "abnormal") return "已结束·异常（无报告）";
+	if (h === "unreadable") return "已结束·待核";
+	return "";
 }
 /**
 * 段间暂停操作键推导（t260908-01）：未暂停 → 'pause'，已暂停 → 'resume'。
@@ -5735,19 +5803,29 @@ function pausedBadgeText(phase) {
 	return phase === "at_gate" ? "⏸ 已暂停在段间" : "⏸ 暂停中（待段间生效）";
 }
 /**
-* 排序层（t260916-15；t260919-02 增第三参 execStatus 与 failed 档）：在等你/受阻/
-* 已失败 → 在跑 → 已完成 三档。tier 是 deriveTicketState 五态的**纯投影**——状态→
-* 五态映射单点仍在 deriveTicketState（全台唯一归并点），本函数不另起第二套状态词表；
-* 未知/未来 stage_state 继承其「宁显活跃勿假警报」缺省 → tier1（'awaiting'=等 agent
-* 段间推进，归在跑档，UT 钉死防悄悄改口径）；失败票 tier0（死票置顶可见，不许沉底
-* 复活「永远在跑」的隐形形态）。
+* 排序层（t260916-15；t260919-02 增第三参 execStatus 与 failed 档；t260921-03 done
+* 拆两层成四档）：等你/受阻/已失败 → 在跑 → **已结束·异常** → 已结束·正常。
+* tier 是 deriveTicketState 五态+收口健康度的**纯投影**——状态→五态映射单点仍在
+* deriveTicketState（全台唯一归并点），健康度单点在 closeHealthOf，本函数不另起
+* 第二套词表；异常收口行 tier2（在跑之上？否——在跑之下、正常收口之上）：不沉底、
+* 不被并入「看起来正常」的收口组，既有四类相对序不变（t260916-15 口径零回归）；
+* 未知/未来 stage_state 继承「宁显活跃勿假警报」缺省 → tier1；失败票 tier0。
+* 第四参 row 供健康度判定（缺省=旧三参形态，done 一律按正常收口 tier3 兜底——
+* 老调用点/无行面语境不下异常结论）。
 */
-function ticketMergeTierOf(status, stageState, execStatus) {
+function ticketMergeTierOf(status, stageState, execStatus, row) {
 	switch (deriveTicketState(status, stageState, execStatus)) {
 		case "waiting":
 		case "blocked":
 		case "failed": return 0;
-		case "done": return 2;
+		case "done": {
+			const h = closeHealthOf(row ?? {
+				status,
+				stage_state: stageState,
+				exec_status: execStatus
+			});
+			return h === "abnormal" || h === "unreadable" ? 2 : 3;
+		}
 		default: return 1;
 	}
 }
@@ -5783,8 +5861,8 @@ function sortMergedTickets(rows) {
 	keyed.sort((a, b) => {
 		const ra = a.row;
 		const rb = b.row;
-		const ta = ticketMergeTierOf(ra?.status, ra?.stage_state, ra?.exec_status);
-		const tb = ticketMergeTierOf(rb?.status, rb?.stage_state, rb?.exec_status);
+		const ta = ticketMergeTierOf(ra?.status, ra?.stage_state, ra?.exec_status, ra ?? void 0);
+		const tb = ticketMergeTierOf(rb?.status, rb?.stage_state, rb?.exec_status, rb ?? void 0);
 		if (ta !== tb) return ta - tb;
 		const dts = ticketSortTsOf(rb) - ticketSortTsOf(ra);
 		return dts !== 0 ? dts : a.idx - b.idx;
@@ -5885,12 +5963,18 @@ function laneDots(wf, ticket) {
 }
 /**
 * chips=过滤非分组：五态按 deriveTicketState 归并后比对（与行卡同源，不按
-* status/stage_state 原词各筛各的）；epic 精确匹配；q 大小写不敏感匹配 id+标题。
+* status/stage_state 原词各筛各的）；epic 精确匹配；q 大小写不敏感匹配 id+标题；
+* health='abnormal' 筛异常收口族（closeHealthOf 单点，failed 行有自己的「已失败」
+* chip 不混入；与 state/epic/q 全部 AND 叠加）。
 */
 function filterRows(rows, f) {
 	const q = (f.q ?? "").trim().toLowerCase();
 	return rows.filter((r) => {
 		if (f.state && deriveTicketState(r.status, r.stage_state, r.exec_status) !== f.state) return false;
+		if (f.health === "abnormal") {
+			const h = closeHealthOf(r);
+			if (h !== "abnormal" && h !== "unreadable") return false;
+		}
 		if (f.epic && (r.epic ?? "") !== f.epic) return false;
 		if (q !== "") {
 			if (!`${r.id} ${r.title ?? ""}`.toLowerCase().includes(q)) return false;
@@ -6095,13 +6179,15 @@ function snapshotDigest(detail) {
 //#endregion
 //#region src/client/ticket-row-card.tsx
 /** 悬停 title：id＋阶段语境（C2 消费点：阶段短名拓扑驱动）＋阻塞原因＋执行状态原文
-*  （t260919-02：失败行在悬停里可辨 Temporal 终态词，与状态标签「已失败」互证）。 */
+*  （t260919-02：失败行在悬停里可辨 Temporal 终态词，与状态标签「已失败」互证）＋
+*  收口健康原因（t260921-03：异常收口行悬停即得事实原因，不许无因异常）。 */
 function cardTitle(t, wf) {
 	const parts = [t.id];
 	const short = stageShortOf((wf?.stages ?? []).find((s) => s?.id === t.stage));
 	if (short !== "") parts.push(`阶段：${short}`);
 	if (t.blocked_reason) parts.push(`阻塞原因：${t.blocked_reason}`);
 	if (t.exec_status) parts.push(`执行状态：${t.exec_status}`);
+	if (t.close_health_reason) parts.push(`收口：${t.close_health_reason}`);
 	if (t.updated) parts.push(`更新 ${t.updated}`);
 	return parts.join("\n");
 }
@@ -6151,6 +6237,15 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 						title: `类别：${kindBadge.text}`,
 						children: kindBadge.text
 					}),
+					(() => {
+						const badge = closeHealthBadgeOf(t);
+						return badge !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "wb-card-health",
+							"data-close-health": closeHealthOf(t),
+							title: t.close_health_reason || badge,
+							children: badge
+						});
+					})(),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-card-id",
 						children: t.id
@@ -50059,6 +50154,9 @@ function translateReason(code, fallbackText) {
 * ＋ 屏③ callout E（到人门时状态卡变蓝列出「签什么」）。
 *
 * 数据源优先级：
+*   0. 终态收口卡（t260921-03）：close_health ∈ {abnormal, unreadable} → 已结束
+*      对账卡（已结束+结束方式+异常原因+缺了什么；amber 调、零操作）——先于一切
+*      受阻/人门分支，已结束票不得再渲染成「受阻等你处置」；
 *   1. detail.meta.blocked_detail（引擎 dev_lane 落的结构化面：
 *      {reason_code, files, next_action}）——文件点名/下一步直接取；
 *   2. detail.blocked_reason（blocked 文案，同一 _classify_main_dirty 真源派生
@@ -50133,6 +50231,34 @@ function buildStatusCard(detail) {
 	const reasonCode = typeof bd.reason_code === "string" ? bd.reason_code : "";
 	const structFiles = asStringArray(bd.files);
 	const structNext = typeof bd.next_action === "string" ? bd.next_action.trim() : "";
+	const strOf = (v) => typeof v === "string" ? v.trim() : "";
+	const execStatus = strOf(d.exec_status) || strOf(meta.exec_status);
+	const closeHealth = strOf(d.close_health) || strOf(meta.close_health);
+	if (closeHealth === "abnormal" || closeHealth === "unreadable") {
+		const reason = strOf(d.close_health_reason) || strOf(meta.close_health_reason);
+		const reportPath = strOf(d.report_path) || strOf(meta.report_path);
+		const findingsObj = d.findings !== null && typeof d.findings === "object" ? d.findings : {};
+		const findingsTotal = typeof findingsObj.total === "number" && Number.isFinite(findingsObj.total) ? findingsObj.total : null;
+		const missingTxt = reportPath !== "" ? "本期报告未落盘（落账文件为受阻面镜像）" : findingsTotal !== null ? `本期报告未落盘（发现 ${findingsTotal} 条）` : "本期报告未落盘";
+		const closeFacts = [
+			`结束方式：工作流${execStatus ? ` ${execStatus}` : "已结束（终态）"}（Temporal 终态，不再推进）` + (strOf(d.close_time_txt) ? `，终态时刻 ${strOf(d.close_time_txt)}` : ""),
+			...reason ? [`异常原因：${reason}`] : [],
+			...blockedReason && !reason.includes(blockedReason) ? [`受阻记录（终态前）：${blockedReason}`] : [],
+			...closeHealth === "abnormal" ? [`缺了什么：${missingTxt}`] : ["缺了什么：收口面不可读，产物待核"]
+		];
+		return {
+			headline: closeHealth === "abnormal" ? "已结束（异常收口）" : "已结束（快照未读到，待核）",
+			headlineFromTable: true,
+			files: [],
+			filesMore: 0,
+			next: closeHealth === "abnormal" ? "终态票零推进入口：本卡不提供推进/重跑操作；下期巡检按计划再跑，需要重跑走既有通道。" : "终态票零推进入口：工作流已结束；刷新只可能读出面快照（不改变终态结论）。",
+			rawLog: formatLogTail(d),
+			severity: "amber",
+			signWhat: [],
+			terminal: true,
+			closeFacts
+		};
+	}
 	if (stageState === "awaiting-human" && !reasonCode) {
 		const tr = translateReason("awaiting-human", blockedReason);
 		const signWhat = buildSignWhat(d);
@@ -50145,7 +50271,9 @@ function buildStatusCard(detail) {
 			next: "人工审批：通过=批准签字；有意见=打回并附原因。引擎在你签字前不会动。",
 			rawLog,
 			severity: "blue",
-			signWhat
+			signWhat,
+			terminal: false,
+			closeFacts: []
 		};
 	}
 	if (stageState !== "blocked" && !reasonCode && !blockedReason) return null;
@@ -50163,7 +50291,9 @@ function buildStatusCard(detail) {
 		next,
 		rawLog: [...typeof bd.evidence === "string" && bd.evidence.trim() ? [`[evidence] ${bd.evidence.trim()}`] : [], ...formatLogTail(d)],
 		severity: stageState === "blocked" ? "red" : "amber",
-		signWhat: []
+		signWhat: [],
+		terminal: false,
+		closeFacts: []
 	};
 }
 /** 原始日志折叠：timeline 尾部 N 条（畸形条目逐条跳过；时间线缺省=一行说明）。 */
@@ -50597,6 +50727,16 @@ const CSS = `${DERIVE_TOKENS_CSS}
  * var() fallback 供出，零新增裸 hex（本票未新增令牌=无新声明位需求）。 */
 .wb-chip-btn[data-state=failed]{border-color:var(--dsw-derive-danger-border,#ff9b9b)}
 .wb-chip-btn[data-state=failed][data-on=false]{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e)}
+/* t260921-03「异常收口」chip：黄系（注意但非受阻——异常收口=已结束，不动 danger 族）。
+ * hex-clean 纪律同上：warn 令牌既有声明位，零新增裸 hex。 */
+.wb-chip-health{border-color:var(--dsw-derive-warn-border,#d4a72c)}
+.wb-chip-health[data-on=false]{background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
+/* t260921-03 收口健康徽标（行1 状态字后，中列与左栏共用行卡全局类）：琥珀描边深字
+ * =可扫读的「已结束但有问题」，不用受阻红（已结束≠受阻等你处置）。
+ * data-close-health=健康度值锚（渲染断言/样式作用域选择器）。 */
+.wb-card-health{display:inline-flex;align-items:center;flex:none;padding:0 5px;
+  border:1px solid var(--dsw-derive-warn-border,#d4a72c);border-radius:5px;
+  color:var(--dsw-derive-warn-deep,#7d4e00);font-size:10px;line-height:15px;font-weight:600}
 .wb-chip-epic{border-style:dashed;border-width:1.5px}
 /* 搜索框 */
 .wb-search{font-size:12px;padding:3px 10px;border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;width:180px}
@@ -50736,6 +50876,11 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-status-card .sc-file{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;padding:1px 6px;border-radius:4px;background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-border,#d0d7de);color:var(--dsw-derive-danger,#cf222e)}
 .wb-status-card .sc-file-more{font-size:11px;color:var(--dsw-derive-muted,#8c959f);align-self:center}
 .wb-status-card .sc-next{margin-top:6px;font-size:12px;line-height:1.6;color:var(--dsw-derive-danger,#7d2222)}
+/* t260921-03：终态收口事实行（已结束+结束方式+异常原因+缺了什么）——黄调系、
+ * 等宽弱化为普通行重；data-terminal 在卡上供渲染断言/样式作用域。 */
+.wb-status-card[data-terminal] .sc-head{color:var(--dsw-derive-warn-deep,#7d4e00)}
+.wb-status-card[data-terminal] .sc-next{color:var(--dsw-derive-warn-deep,#5a4500)}
+.wb-status-card .sc-fact{margin-top:5px;font-size:11.5px;line-height:1.7;color:var(--dsw-derive-warn-deep,#7d4e00);word-break:break-all}
 .wb-status-card[data-sev=amber] .sc-next{color:var(--dsw-derive-warn-deep,#5a4500)}
 .wb-status-card .sc-next b{font-weight:700}
 .wb-status-card .sc-raw{margin-top:6px}
@@ -52697,11 +52842,17 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }) {
 		]
 	});
 }
+/** 异常收口族判定（t260921-03 板面拆桶/chip 计数共用单点；判定住模型层 closeHealthOf）。 */
+function isAbnormalCloseOf(t) {
+	const h = closeHealthOf(t);
+	return h === "abnormal" || h === "unreadable";
+}
 function availableOps(t, wf) {
 	const s = t.status;
 	const ss = t.stage_state;
 	if (t.engine === "inspection") return [];
 	if (deriveTicketState(t.status, t.stage_state, t.exec_status) === "failed") return [];
+	if (deriveTicketState(t.status, t.stage_state, t.exec_status) === "done") return [];
 	if (t.engine === "template-as-code-v2") {
 		if (s === "closed") return [];
 		const v2ops = [];
@@ -53877,6 +54028,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 	const [filterState4, setFilterState4] = (0, react.useState)("");
 	const [filterEpic, setFilterEpic] = (0, react.useState)("");
 	const [q, setQ] = (0, react.useState)("");
+	const [filterHealth, setFilterHealth] = (0, react.useState)("");
 	/** 收口折叠（mock ⑥）：缺省折叠成「✓ 收口 · N」计数行。 */
 	const [showDone, setShowDone] = (0, react.useState)(false);
 	/** 进展行 enrichment（host /tickets/progress 只读）：仅当前可见页逐票拉取（R5 负载预算）。 */
@@ -54295,12 +54447,14 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 	const filtered = (0, react.useMemo)(() => filterRows(tickets ?? [], {
 		state: filterState4 || void 0,
 		epic: filterEpic || void 0,
-		q
+		q,
+		health: filterHealth || void 0
 	}), [
 		tickets,
 		filterState4,
 		filterEpic,
-		q
+		q,
+		filterHealth
 	]);
 	const stateCounts = (0, react.useMemo)(() => countByState(tickets ?? []), [tickets]);
 	const epicList = (0, react.useMemo)(() => {
@@ -54327,6 +54481,13 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 	]);
 	const openList = (0, react.useMemo)(() => sorted.filter((t) => deriveTicketState(t.status, t.stage_state, t.exec_status) !== "done"), [sorted]);
 	const doneList = (0, react.useMemo)(() => sorted.filter((t) => deriveTicketState(t.status, t.stage_state, t.exec_status) === "done"), [sorted]);
+	const [doneAbn, doneOk] = (0, react.useMemo)(() => {
+		const abn = [];
+		const okRows = [];
+		for (const t of doneList) (isAbnormalCloseOf(t) ? abn : okRows).push(t);
+		return [abn, okRows];
+	}, [doneList]);
+	const abnormalCloseCount = (0, react.useMemo)(() => (tickets ?? []).filter(isAbnormalCloseOf).length, [tickets]);
 	const pageCount = Math.max(1, Math.ceil(openList.length / PAGE_SIZE));
 	const paged = (0, react.useMemo)(() => openList.slice((pageNo - 1) * PAGE_SIZE, pageNo * PAGE_SIZE), [openList, pageNo]);
 	(0, react.useEffect)(() => {
@@ -54336,7 +54497,8 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 		filterEpic,
 		q,
 		sortKey,
-		sortAsc
+		sortAsc,
+		filterHealth
 	]);
 	(0, react.useEffect)(() => {
 		const ids = paged.filter((t) => deriveTicketState(t.status, t.stage_state, t.exec_status) !== "done").map((t) => t.id);
@@ -54374,6 +54536,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 	const curChecks = detail?.checks?.[detail?.stage ?? ""] ?? [];
 	const ops = detail ? availableOps(detail, selWf) : [];
 	const reworkStages = selWf?.stages.map((s) => s.id) ?? [];
+	const detailCloseHealth = detail ? closeHealthOf(detail) : "";
 	const peerViewersByTicket = /* @__PURE__ */ new Map();
 	if (presenceRef.current !== null) for (const t of tickets ?? []) {
 		const v = presenceRef.current.viewersOf(t.id);
@@ -54534,9 +54697,20 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 							]
 						}, s)),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+							className: "wb-chip-btn wb-chip-health",
+							"data-health": "abnormal",
+							"data-on": filterHealth === "abnormal",
+							title: "只看已结束但异常收口的票（本期无报告/收口面不可读）",
+							onClick: () => setFilterHealth(filterHealth === "abnormal" ? "" : "abnormal"),
+							children: ["异常收口 ", abnormalCloseCount]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 							className: "wb-chip-btn",
-							"data-on": filterState4 === "",
-							onClick: () => setFilterState4(""),
+							"data-on": filterState4 === "" && filterHealth === "",
+							onClick: () => {
+								setFilterState4("");
+								setFilterHealth("");
+							},
 							children: ["全部 ", tickets?.length ?? 0]
 						}),
 						epicList.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
@@ -54660,15 +54834,31 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 					className: "wb-empty",
 					children: "没有符合筛选的工单。"
 				}),
-				doneList.length > 0 && (showDone ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+				doneAbn.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
+					t: {
+						...t,
+						title_or_first: t.title_or_first ?? titleFirstMap[t.id]
+					},
+					wf: wfById[t.workflow],
+					compact: false,
+					active: t.id === selectedId,
+					busy: opBusy,
+					ops: [],
+					onOpen: () => {
+						setDrawerTab("detail");
+						openDetail(t.id);
+					},
+					onOpenEpic
+				}, t.id)),
+				doneOk.length > 0 && (showDone ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 					className: "wb-done-row",
 					onClick: () => setShowDone(false),
 					children: [
 						"▾ 收口 · ",
-						doneList.length,
+						doneOk.length,
 						"（点击折叠）"
 					]
-				}), doneList.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
+				}), doneOk.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
 					t: {
 						...t,
 						title_or_first: t.title_or_first ?? titleFirstMap[t.id]
@@ -54688,7 +54878,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 					onClick: () => setShowDone(true),
 					children: [
 						"✓ 收口 · ",
-						doneList.length,
+						doneOk.length,
 						"（点击展开）"
 					]
 				})),
@@ -54796,7 +54986,12 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 									"data-kind": "status",
 									children: detail.status
 								}),
-								detail.status !== "closed" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								detail.close_health === "abnormal" || detail.close_health === "unreadable" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "wb-badge",
+									"data-state": "done",
+									"data-close-health": detailCloseHealth,
+									children: detailCloseHealth === "unreadable" ? "已结束·待核" : "已结束·异常"
+								}) : detail.status !== "closed" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 									className: "wb-badge",
 									"data-state": detail.stage_state,
 									children: STATE_LABEL[detail.stage_state] ?? detail.stage_state
@@ -54816,7 +55011,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								})
 							]
 						}),
-						detail.blocked_reason && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						detail.blocked_reason && detail.close_health !== "abnormal" && detail.close_health !== "unreadable" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-d2-blocked",
 							children: ["⛔ 受阻原因：", detail.blocked_reason]
 						}),
@@ -54827,16 +55022,22 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								className: "wb-status-card",
 								"data-sev": card.severity,
 								"data-testid": "status-card",
+								"data-terminal": card.terminal || void 0,
 								children: [
 									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 										className: "sc-head",
 										children: [
-											card.severity === "blue" ? "🔑" : "⛔",
+											card.terminal ? "⏹" : card.severity === "blue" ? "🔑" : "⛔",
 											" ",
 											card.headline
 										]
 									}),
-									!card.headlineFromTable && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									card.terminal && card.closeFacts.map((f, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: "sc-fact",
+										"data-testid": "close-fact",
+										children: f
+									}, i)),
+									!card.headlineFromTable && !card.terminal && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 										className: "sc-fallback",
 										children: "以上为引擎原文（词条表缺此原因码，不猜测翻译）"
 									}),
@@ -54871,7 +55072,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 										className: "sc-next",
 										children: [
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: card.severity === "blue" ? "等你：" : "下一步：" }),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: card.severity === "blue" ? "等你：" : card.terminal ? "说明：" : "下一步：" }),
 											" ",
 											card.next
 										]
@@ -55130,7 +55331,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 											}),
 											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(MetaItem, {
 												k: "状态",
-												children: [detail.status, detail.status !== "closed" && detail.stage_state ? ` · ${STATE_LABEL[detail.stage_state] ?? detail.stage_state}` : ""]
+												children: [detail.status, detail.close_health === "abnormal" || detail.close_health === "unreadable" ? ` · 已结束（${detailCloseHealth === "unreadable" ? "待核" : "异常收口"}）` : detail.status !== "closed" && detail.stage_state ? ` · ${STATE_LABEL[detail.stage_state] ?? detail.stage_state}` : ""]
 											}),
 											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
 												k: "当前阶段",

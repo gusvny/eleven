@@ -1267,6 +1267,8 @@ def _row_from_meta(tid: str, meta: Dict[str, Any], exec_status: str) -> Dict[str
               if isinstance(a, dict)
               and str(a.get("kind") or "") in ("protected_path", "arbitration_verdict")
               and int(a.get("expires") or 0) > _now]
+    # t260921-03：收口健康度单次推导（推导单点=_close_health_of）
+    _health, _health_reason = _close_health_of(exec_status)
     return {
         "id": tid,
         "project": meta.get("project") or "",
@@ -1289,6 +1291,10 @@ def _row_from_meta(tid: str, meta: Dict[str, Any], exec_status: str) -> Dict[str
         "updated_ts": meta.get("updated"),
         "engine": ENGINE_V2,
         "exec_status": exec_status,
+        # t260921-03：收口健康度（键只加，与巡检行同名单）。dev-lane 无产物契约——
+        # 终态成功即 ok，缺产物判定不泛化到 dev-lane；失败类终态带事实原因。
+        "close_health": _health,
+        "close_health_reason": _health_reason,
         # t260912-03：本票生效中的人授权（类型/范围/授权人/到期在 ticket show 的
         # meta.authorizations 全量可读；列表行只给计数徽标数据源）
         "authz_active": len(_authz),
@@ -1368,6 +1374,12 @@ def _row_from_inspection_face(
     }
     updated_txt = time.strftime("%m-%d %H:%M", time.localtime(created_ts)) if created_ts else ""
     human_gate = face.get("human_gate") if isinstance(face.get("human_gate"), dict) else None
+    # t260921-03 收口健康度（键只加）：行自带可判定字段——exec 终态对账在 UI 判序
+    # 单点落地，本行键是其数据源（status/stage_state 词面**原样保留**：面快照是事实，
+    # 对账不改写历史面，只增量表达「怎么结束的」）。巡检侧 require_artifacts=True：
+    # 终态成功但无面可核 → unreadable（存疑显式，不冒充 ok）。
+    close_health, close_health_reason = _close_health_of(exec_status, face, degraded,
+                                                         require_artifacts=True)
     return {
         "id": tid,
         "project": sa_project,
@@ -1412,6 +1424,10 @@ def _row_from_inspection_face(
         "updated_ts": created_ts or 0,
         "engine": INSPECTION_ROW_ENGINE,
         "exec_status": exec_status,
+        # t260921-03：收口健康度（ok/failed/abnormal/unreadable/''=未收口）+ 事实原因
+        # （badge 与详情终态卡数据源；''=未收口无健康度可言）
+        "close_health": close_health,
+        "close_health_reason": close_health_reason,
         "authz_active": 0,
         "close_ts": close_ts,
     }
@@ -1486,6 +1502,71 @@ def _is_failed_exec(exec_status: str) -> bool:
     """失败类终态判别单点（板面行组装与详情 face 共用）：非空且不在活/成白名单
     即失败类。纯函数；词表口径见 _EXEC_ALIVE_OK 注。"""
     return bool(exec_status) and exec_status not in _EXEC_ALIVE_OK
+
+
+# ---- 收口健康度（t260921-03）：已结束的票必须同时表达「结束了」与「怎么结束的」----
+# 终态成功执行状态（UI 侧 ticket-list-model.ts EXEC_STATUS_DONE_OK 同一词表的引擎侧
+# 正源；改任一侧必须同步另一侧并跑两侧 UT）。_EXEC_ALIVE_OK 语义不变（服务
+# _is_failed_exec 补集口径），本表只服务收口健康度推导——COMPLETED 从「活/成」
+# 混称里拆出来，是本票对账的第一步。
+_EXEC_DONE_OK = ("COMPLETED",)
+
+
+def _close_health_of(exec_status: str, face: Optional[Dict[str, Any]] = None,
+                     degraded: bool = False, require_artifacts: bool = False) -> Tuple[str, str]:
+    """收口健康度推导单点（板面行与详情面共用；t260921-03）。
+
+    返回 (close_health, close_health_reason)：
+      ''           未收口（RUNNING/CONTINUED_AS_NEW/空畸形）——健康度不可判，不给；
+      'ok'         正常收口（终态成功且应有产物在；巡检=面无受阻记录且 report_path
+                   在。dev-lane 无产物契约（require_artifacts=False），终态成功即
+                   ok——缺产物判定不泛化）；
+      'failed'     失败类终态（FAILED/CANCELED/TIMED_OUT/未知新终态——_is_failed_exec
+                   补集口径，t260919-02 行形状零回归）；
+      'abnormal'   异常收口（终态成功但没跑成实质工作：巡检=面带受阻记录——无论
+                   report_path 是否在，t260917-02 起 blocked 收口也落账，落账文件走
+                   report 同名约定，report_path 在场≠报告在（实案 t260920-02/
+                   t260921-01 的「报告」即受阻面镜像）；或面无受阻但 report_path
+                   缺失。findings/summary 空只作 reason 佐证。有产物且无受阻不判
+                   异常，反用例防对账反向撒谎）；
+      'unreadable' 已结束·待核（面读取失败/无面可核——KI-008 显式降级纪律：存疑
+                   显式化，绝不冒充 ok，也绝不冒充异常下结论）。
+    require_artifacts=True 供巡检侧调用（行组装与详情面）：终态成功但无面可核
+    （face 缺失/非字典）→ unreadable；dev-lane 缺省 False，face 参数不参与推导。
+    TERMINATED 维持既有「不上板」纪律，板面不产生本推导的行。纯函数：face 畸形
+    （非 dict/键值畸形）逐键按缺失降级，不抛；reason 只放事实（KI-018①：「刷新重试」
+    类占位语绝不进数据字段）。"""
+    if degraded:
+        return ("unreadable", "收口面读取失败：已结束但票面不可读（显式存疑，未判定产物）")
+    if not exec_status:
+        return ("", "")
+    if exec_status in _EXEC_DONE_OK:
+        f = face if isinstance(face, dict) else {}
+        if not f:
+            if require_artifacts:
+                return ("unreadable", "收口面不可读：已结束但无票面可核产物（显式存疑）")
+            return ("ok", "")
+        if not require_artifacts:
+            return ("ok", "")  # dev-lane：无产物契约，face 不参与推导
+        blocked = f.get("blocked_reason")
+        has_blocked = isinstance(blocked, str) and bool(blocked.strip())
+        report_path = f.get("report_path")
+        has_report = isinstance(report_path, str) and bool(report_path.strip())
+        if has_blocked:
+            # 受阻面=没跑成实质工作（实案 t260920-02/t260921-01）。t260917-02 起
+            # blocked 收口也落账（dead-man 面），落账走 report 同名约定——文件在
+            # 场只是受阻面镜像，不构成「报告在」：健康度看面不看文件名。
+            findings = f.get("findings") if isinstance(f.get("findings"), list) else []
+            tail = ("落账文件为受阻面镜像" if has_report else "本期无报告")
+            return ("abnormal", "面快照 blocked：%s；发现 %d 条（%s）"
+                    % (blocked.strip(), len(findings), tail))
+        if has_report:
+            return ("ok", "")
+        return ("abnormal", "本期无报告（report_path 缺失，发现 %d 条）"
+                % len(f.get("findings") if isinstance(f.get("findings"), list) else []))
+    if _is_failed_exec(exec_status):
+        return ("failed", "工作流终态 %s" % exec_status)
+    return ("", "")
 
 
 def _failure_reason_of(exc: Optional[BaseException]) -> str:
@@ -1693,13 +1774,21 @@ async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
     # 巡检票谎报「工单不存在」（ticket.py _v2_query 以 engine==ENGINE_V2 判 v2）。
     # 显式回 ENGINE_V2（v2 执行是真）+ meta 走巡检组装面（face 可达）。
     if isinstance(snap, dict) and snap.get("kind") == "inspection":
+        # t260921-03：终态时刻随 meta 下发（详情终态卡「结束方式」数据源）；
+        # desc.close_time 畸形/缺失 → ''（不可得显式，不编造）。
+        _close_txt = ""
+        if exec_status == "COMPLETED" and getattr(desc, "close_time", None):
+            try:
+                _close_txt = _terminal_face_ts_txt(int(desc.close_time.timestamp()))
+            except Exception:
+                _close_txt = ""
         return _ok({
             "ticket_id": tid,
             "run_id": handle.result_run_id or handle.run_id,
             "exec_status": exec_status or None,
             "engine": ENGINE_V2,
             "snapshot": snap,
-            "ticket": _inspection_query_meta(tid, snap),
+            "ticket": _inspection_query_meta(tid, snap, exec_status, _close_txt),
             "pulse": _pulse_from_desc(desc) if exec_status == "RUNNING" else None,
         })
     return _ok({
@@ -1716,13 +1805,20 @@ async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
     })
 
 
-def _inspection_query_meta(ticket_id: str, snap: Dict[str, Any]) -> Dict[str, Any]:
+def _inspection_query_meta(ticket_id: str, snap: Dict[str, Any],
+                           exec_status: str = "",
+                           close_time_txt: str = "") -> Dict[str, Any]:
     """巡检票详情面（ticket.py `_show` 消费的 meta 同构，方案 R6 + 实证11）。
 
     ticket.py `_v2_query` 只从 snapshot 投影白名单键（signatures/gate_runs/timeline…），
     **不含 face**——face 必须由这里并进 meta，否则详情下钻拿不到发现摘要/报告路径/
     人门回执。待签判定同 R4：消费方从 stage_state 推导；human_gate 仅已签回执，
-    缺键不编造（None）。畸形 face 逐字段降级（不抛、不编造）。"""
+    缺键不编造（None）。畸形 face 逐字段降级（不抛、不编造）。
+
+    t260921-03（键只加）：exec_status/close_health/close_health_reason/close_time_txt
+    ——详情头与状态卡的终态对账数据源（COMPLETED 巡检票详情必须可判「怎么结束的」，
+    blocked 词面不得再裸奔成「受阻」；dev-lane 详情侧 ticket.py 写集外不带 exec_status，
+    终态卡仅巡检面落地）。"""
     from inspection_flow import CLOSE_GATE_ID
     face = snap.get("face") if isinstance(snap.get("face"), dict) else {}
     findings = face.get("findings") if isinstance(face.get("findings"), list) else []
@@ -1761,6 +1857,13 @@ def _inspection_query_meta(ticket_id: str, snap: Dict[str, Any]) -> Dict[str, An
     for k in ("suite", "lane", "lane_teardown"):
         if face.get(k) is not None:
             meta[k] = face[k]
+    # t260921-03：收口健康度四键（键只加）——行/详情同一推导单点（_close_health_of），
+    # reason 只放事实不放占位语（KI-018①）。巡检侧 require_artifacts=True。
+    _chealth, _cheason = _close_health_of(exec_status, face, require_artifacts=True)
+    meta["exec_status"] = exec_status or None
+    meta["close_health"] = _chealth
+    meta["close_health_reason"] = _cheason
+    meta["close_time_txt"] = close_time_txt
     # t260916-05：模板拓扑导出透传（快照门内 additive 键；workbench detail.topology
     # → 泳道图唯一图源通道——巡检 detail 无 workflow_id，模板级兜底通道不存在）。
     # dict 才带键：老实例（_patched=False 无键）与畸形值都省键=渲染器回落，不编造。
@@ -2124,6 +2227,8 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                          "updated_ts": int(e["close_ts"]) if e["close_ts"] else 0,
                          "close_ts": e["close_ts"],
                          "engine": ENGINE_V2, "exec_status": exec_status,
+                         "close_health": _close_health_of(exec_status)[0],
+                         "close_health_reason": _close_health_of(exec_status)[1],
                          "authz_active": 0})  # 降级/极简/失败行同形（无快照=无授权面可读）
         elif meta.get("_query_degraded"):
             # KI-008: a RUNNING query still failing after retries → an explicit degraded
@@ -2140,6 +2245,8 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                          "workspace": None, "created": None, "updated": "", "updated_ts": 0,
                          "close_ts": e["close_ts"],
                          "engine": ENGINE_V2, "exec_status": exec_status,
+                         "close_health": _close_health_of(exec_status)[0],
+                         "close_health_reason": _close_health_of(exec_status)[1],
                          "authz_active": 0})  # t260912-03 降级/极简行同形（无快照=无授权面可读）
         elif meta:
             meta.setdefault("project", sa_project)
@@ -2160,6 +2267,8 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                          "workspace": None, "created": None, "updated": "", "updated_ts": 0,
                          "close_ts": e["close_ts"],
                          "engine": ENGINE_V2, "exec_status": exec_status,
+                         "close_health": _close_health_of(exec_status)[0],
+                         "close_health_reason": _close_health_of(exec_status)[1],
                          "authz_active": 0})  # t260912-03 降级/极简行同形（无快照=无授权面可读）
     # t260917-02 修复②收尾 pass（巡检板面专用）：
     # ① identity_note：不可辨且在跑的行（kept_unresolved 分支）带假设语气注记——疑似

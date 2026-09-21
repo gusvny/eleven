@@ -216,6 +216,11 @@ def row_of(res, tid):
 # ---------------------------------------------------------------- 夹具
 
 NOW = datetime(2026, 9, 15, 7, 30, 0, tzinfo=timezone.utc)
+# R8 hydrate 窗判据在引擎侧用真实钟（client.py 的 time.time()-close_ts），夹具闭合时刻
+# 必须锚**真实现在**：冻结 NOW 派生的 close_time 会随墙钟老化出窗（t260921-03 gen8 实锤：
+# NOW-1d 的窗内夹具恰在 2026-09-21 15:30(+0800) 越过 7 天窗被引擎正确判超窗，两断言
+# 从此永红=假警且失效）。窗成员断言一律用 REAL_NOW；start_time/回显类冻结值不动。
+REAL_NOW = datetime.now(timezone.utc)
 DAY = 86400.0
 Q = client_mod.TASK_QUEUE if hasattr(client_mod, "TASK_QUEUE") else "suyou-tickets"  # naming-compat
 
@@ -395,9 +400,9 @@ def main() -> int:
         print("== C 组：闭合行 Flooding 有界（R8）==")
         old_id = "inspection-integration-tests-20260908"
         wfs = [ins_wf(tid), ins_wf(old_id, status_name="COMPLETED",
-                                   close_time=datetime.fromtimestamp(NOW.timestamp() - 8 * DAY, tz=timezone.utc)),
+                                   close_time=datetime.fromtimestamp(REAL_NOW.timestamp() - 8 * DAY, tz=timezone.utc)),
                ins_wf("inspection-integration-tests-20260914", status_name="COMPLETED",
-                      close_time=datetime.fromtimestamp(NOW.timestamp() - 1 * DAY, tz=timezone.utc)),
+                      close_time=datetime.fromtimestamp(REAL_NOW.timestamp() - 1 * DAY, tz=timezone.utc)),
                ins_wf("inspection-integration-tests-20260913", status_name="COMPLETED",
                       close_time=None)]
         handles = {tid: FakeHandle(snapshot=insp_snap(tid=tid)),
@@ -432,7 +437,7 @@ def main() -> int:
         fail_id = "inspection-integration-tests-20260912"
         res = run_list({"kind": "inspection"},
                        [ins_wf(fail_id, status_name="COMPLETED",
-                               close_time=datetime.fromtimestamp(NOW.timestamp() - 0.5 * DAY, tz=timezone.utc))],
+                               close_time=datetime.fromtimestamp(REAL_NOW.timestamp() - 0.5 * DAY, tz=timezone.utc))],
                        {fail_id: FakeHandle(result_raises=True)})
         row = row_of(res, fail_id)
         if res.get("_scenario_error"):
@@ -455,10 +460,15 @@ def main() -> int:
                "无 kind 参数时巡检票不进默认板、dev-lane 照常（got=%r）" % sorted(got))
         res = run_list({}, [dev_wf()], {"t-dev": FakeHandle(snapshot=dev_snap())})
         row = row_of(res, "t-dev")
+        # t260921-03 有意更新（键集随四形状同步扩展，parity 纪律不破）：收口健康度
+        # 键 close_health/close_health_reason 进 dev-lane 全部四形状——票面要求②
+        # 「每行都必须能判定收口健康度」覆盖 dev-lane；与引擎 UT DEVLANE_ROW_KEYS、
+        # t260919-02 场景 DEV_ROW_KEYS 钉同一键集。
         pinned = {"id", "project", "epic", "role", "status", "title", "workflow", "proposal_id",
                   "stage", "stage_state", "paused", "paused_phase", "handoff_count",
                   "pending_count", "worktree", "workspace", "created", "updated",
-                  "updated_ts", "close_ts", "engine", "exec_status", "authz_active"}
+                  "updated_ts", "close_ts", "engine", "exec_status", "authz_active",
+                  "close_health", "close_health_reason"}
         if row is None:
             ok(False, "dev-lane 行 parity 无行可验")
         else:
