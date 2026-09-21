@@ -772,7 +772,7 @@ def capacity_acquire(project, lease, timeout):
                     # 「保险丝」裸词——t260912-02 burst 场景以 FUSE_MARK=「保险丝」
                     # 判别保险丝**刹停红**（真触发），本条是锁超预算的**环境红**
                     # （kind=env），共用词根=环境红被吞成刹停红假红+归因污染。
-                    # 「名额」与下方点名面同族；守卫腿：UT F 节 StageError 扫描。
+                    # 「名额」与下方点名面同族；守卫用例：UT F 节 StageError 扫描。
                     raise StageError("ENV_FAIL: 起台名额锁等待超时（已等 %.0fs，"
                                      "等待预算 %.0fs）：capacity-0.lock 被长期持有"
                                      "——不硬等，收诚实红；查残留进程"
@@ -782,7 +782,7 @@ def capacity_acquire(project, lease, timeout):
                     # 措辞纪律（t260920-01 gen1 打回修复）：等待点名文案避开
                     # 「保险丝」裸词——t260912-02 burst 场景以 FUSE_MARK=「保险丝」
                     # 判别保险丝**刹停红**（真触发），并发争用的常态点名不得共用
-                    # 该词根（否则判别失效=假红）。守卫腿：UT F 节 AST 扫全部
+                    # 该词根（否则判别失效=假红）。守卫用例：UT F 节 AST 扫全部
                     # _stage_wait_ping 字面量（防回潮）。
                     _stage_wait_ping(" capacity-0.lock（起台名额临界区）",
                                      "另有起台者持锁在判定/占位", waited, lock_budget)
@@ -2981,7 +2981,7 @@ def _wait_heartbeat_recovery(project, lock_fd, deadline):
             now = time.time()
             if now - last_ping >= STAGE_WAIT_PING_EVERY_S:
                 last_ping = now
-                _stage_wait_ping(" holder 心跳恢复（hold 腿被负载压住的一次停顿）",
+                _stage_wait_ping(" holder 心跳恢复（hold 用例被负载压住的一次停顿）",
                                  "心跳停更但 holder 仍在，宽限窗内等待恢复",
                                  now - (end - grace), grace,
                                  extra="project=%s" % project)
@@ -3328,7 +3328,7 @@ def _parse_opts(argv, i, opts):
 
 # ------------------------------------------------- daemon probe & wait naming (t260920-01)
 
-DOCKER_INFO_CMD = ("docker", "info")   # 注入缝：UT 以 PATH 假 docker 驱动超预算腿（不走生产旋钮）
+DOCKER_INFO_CMD = ("docker", "info")   # 注入缝：UT 以 PATH 假 docker 驱动超预算用例（不走生产旋钮）
 
 
 def _stage_wait_ping(what, why, waited, budget, extra=""):

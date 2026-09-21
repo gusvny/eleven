@@ -3,19 +3,19 @@
 """t260920-01（stage-ops 票①）：供给面判据接线回归锁 + 供给段等待预算 UT。
 
 覆盖（工单验收①②③④ + review_plan 条件②③④）：
-- ① 供给失败腿（真实出口形态贯通）：tmp 泳道 verify.yaml supply → 真进程
+- ① 供给失败用例（真实出口形态贯通）：tmp 泳道 verify.yaml supply → 真进程
   stage_docker daemon-probe（PATH 假 docker）→ verify_lane._integ 真实包装
   err（「supply 装配失败（need=…，exit=2）…供给面红点名」）→ IntegrationRunResult
   → _tests_supply_assembly_fail → _tests_round_account：不计轮 + 留痕含
-  「不计入」+ 点名供给面（review 条件④：贯通腿用真实输出形态，不用手工串）。
-- ② 等待超预算腿：daemon-probe（预算内未就绪 exit 2 + STAGE_WAIT 点名）、
+  「不计入」+ 点名供给面（review 条件④：贯通用例用真实输出形态，不用手工串）。
+- ② 等待超预算用例：daemon-probe（预算内未就绪 exit 2 + STAGE_WAIT 点名）、
   do_ensure 同项目互斥锁被占（sleeper 持 flock，预算内诚实红）、
   _wait_booting 超预算上抛（绝不落回冷路径并发再起）、capacity-0.lock 被占。
-- ③ 等待点名腿：STAGE_WAIT 行含「在等谁/已等多久/为何未就绪」（节流常量收紧
+- ③ 等待点名用例：STAGE_WAIT 行含「在等谁/已等多久/为何未就绪」（节流常量收紧
   后逐轮可断言）。
-- ④ 负腿不退化（review 条件③：只补 C2 未覆盖形态）：ran="3"/env_fail="2"
+- ④ 反用例不退化（review 条件③：只补 C2 未覆盖形态）：ran="3"/env_fail="2"
   字段畸形、activity 故障文案（H2 家族）、半标记 error、真产品红照计轮。
-- review 条件②负腿：预算压缩不触及自家冷起 boot 健康窗（do_ensure 顶层
+- review 条件②反用例：预算压缩不触及自家冷起 boot 健康窗（do_ensure 顶层
   timeout 原样透传 _boot_new_stage）。
 - 签名↔闸出口漂移锁：读 server/tools/verify_lane.py 活台词，两态包装格式串
   在场且格式化后命中 shared 签名（「签名措辞与闸出口不一致」的永久防漂钉）。
@@ -79,7 +79,7 @@ def _fake_docker_bin(tmp_path, body: str) -> Path:
 
 
 def _hold_lock(lockroot, name: str, hold_s: int = 30) -> subprocess.Popen:
-    """sleeper 持锁腿：独立进程 flock 持 <lockroot>/<name>，打印 held 后沉睡；
+    """sleeper 持锁用例：独立进程 flock 持 <lockroot>/<name>，打印 held 后沉睡；
     调用方负责 kill（全终态回收）。"""
     path = lockroot / name
     src = ("import fcntl,sys,time\n"
@@ -114,7 +114,7 @@ def _supply_lane(tmp_path, cmd: str) -> Path:
 
 
 def _run_e2e_supply_exit2(tmp_path, monkeypatch) -> str:
-    """真出口形态贯通腿（review 条件④）：daemon-probe 真进程 + 假 docker
+    """真出口形态贯通用例（review 条件④）：daemon-probe 真进程 + 假 docker
     （睡 1s 失败）→ verify_lane 真实两态包装 err。返回 err 原文。"""
     fakebin = _fake_docker_bin(tmp_path, "sleep 1; exit 1")
     monkeypatch.setenv("PATH", str(fakebin) + os.pathsep + os.environ["PATH"])
@@ -133,7 +133,7 @@ def _devlane_wf():
     return object.__new__(dev_lane.DevLaneWorkflow)
 
 
-# ---------- A. 供给失败腿：真实出口形态 → 豁免不计轮 + 留痕点名（验收①） ----------
+# ---------- A. 供给失败用例：真实出口形态 → 豁免不计轮 + 留痕点名（验收①） ----------
 
 def test_a_e2e_exit2_receipt_exempt_and_named(tmp_path, monkeypatch):
     err = _run_e2e_supply_exit2(tmp_path, monkeypatch)
@@ -196,12 +196,12 @@ def test_a_supply_note_single_writer_and_malformed():
 
 def test_a_dev_lane_note_sites_intact():
     """两处「本轮不计入 tests-fault 轮次」handoff 站点仍在（串行+平行）——
-    留痕上台面的结构腿（t260917-04 守卫锚的同族轻量自证）。"""
+    留痕上台面的结构用例（t260917-04 守卫锚的同族轻量自证）。"""
     src = (REPO / "server" / "engine" / "dev_lane.py").read_text("utf-8")
     assert src.count("本轮不计入 tests-fault 轮次") == 2
 
 
-# ---------- B. 等待超预算腿（验收②）+ 点名（验收③） ----------
+# ---------- B. 等待超预算用例（验收②）+ 点名（验收③） ----------
 
 def test_b_daemon_probe_overbudget_exit2_and_naming(tmp_path, monkeypatch):
     fakebin = _fake_docker_bin(tmp_path, "exec sleep 30")   # daemon 假死形态
@@ -222,7 +222,7 @@ def test_b_daemon_probe_overbudget_exit2_and_naming(tmp_path, monkeypatch):
 
 
 def test_b_daemon_probe_progress_naming(tmp_path, monkeypatch, capsys):
-    """点名腿（验收③）：等 daemon 时 stderr 周期点名（在等谁/已等多久/为何）。"""
+    """点名用例（验收③）：等 daemon 时 stderr 周期点名（在等谁/已等多久/为何）。"""
     fakebin = _fake_docker_bin(tmp_path, "sleep 0.2; exit 1")  # 快败→多轮探
     monkeypatch.setenv("PATH", str(fakebin) + os.pathsep + os.environ["PATH"])
     monkeypatch.setenv("SANDBAR_STAGE_WAIT_BUDGET_S", "2")
@@ -266,7 +266,7 @@ def test_b_ensure_lock_busy_overbudget(lockroot, tmp_path, monkeypatch, capsys):
 
 def test_b_wait_booting_overbudget_raises_never_double_boot(lockroot, monkeypatch,
                                                             capsys):
-    """booting 等待超预算：诚实红上抛（绝不落回冷路径并发再起——不变式腿）。"""
+    """booting 等待超预算：诚实红上抛（绝不落回冷路径并发再起——不变式用例）。"""
     lease = sd.new_lease("bootproj", os.getpid(), ["temporal"])
     lease["state"] = "booting"
     sd.write_lease("bootproj", lease)
@@ -341,7 +341,7 @@ def test_c_wait_budget_reader_malformed_fallback(monkeypatch, raw, expect):
     assert sd.wait_budget_s() == expect
 
 
-# ---------- D. review 条件②负腿：预算不误伤自家 boot 健康窗 ----------
+# ---------- D. review 条件②反用例：预算不误伤自家 boot 健康窗 ----------
 
 def test_d_budget_never_caps_own_boot_window(lockroot, monkeypatch):
     captured = {}
@@ -360,7 +360,7 @@ def test_d_budget_never_caps_own_boot_window(lockroot, monkeypatch):
     assert captured["cold_cleanup"] is True
 
 
-# ---------- E. 负腿不退化（验收④；review 条件③：只补 C2 未覆盖形态） ----------
+# ---------- E. 反用例不退化（验收④；review 条件③：只补 C2 未覆盖形态） ----------
 
 def _supply_ir(**kw):
     d = dict(ran=0, passed=0, failed=0, env_fail=0,
@@ -403,14 +403,14 @@ def test_e_exempt_cap_cover_family_untouched():
 # ---------- F. 等待点名/红文案措辞守卫：不与保险丝刹停红判别词表相撞（gen1 打回修复，gen8 扩面） ----------
 
 def test_f_wait_ping_copy_never_matches_fuse_mark():
-    """仲裁 gen7 打回守卫腿（防回潮）：t260912-02 burst 场景以 FUSE_MARK=「保险丝」
+    """仲裁 gen7 打回守卫用例（防回潮）：t260912-02 burst 场景以 FUSE_MARK=「保险丝」
     （integration/t260912-02/lib_lifecycle_case.py:49，assertIn 语义的反面）判别
     保险丝**刹停红真触发**；等待点名是并发争用的**常态输出**，文案共用该词根=
-    判别失效假红（gen0 实锤：32/48 台腿两断言败）。守卫=AST 扫全部
+    判别失效假红（gen0 实锤：32/48 台用例两断言败）。守卫=AST 扫全部
     _stage_wait_ping 调用点的字符串字面量（位置参+关键字参+格式串左侧），
     断言不含「保险丝」与刹停红正文词根 SANDBAR_STAGE_MAX_STAGES——未来加等待点/
     改文案都会过这道门。正向对照：真刹停红正文仍含两词根（FUSE_MARK 判别力不
-    回退）。范围注：StageError 运行时红文案面由下方 test_f2 单独守卫——本腿
+    回退）。范围注：StageError 运行时红文案面由下方 test_f2 单独守卫——本用例
     旧范围注称 StageError「真红时场景本就红、判别混淆无害」不成立（gen8 打回
     实锤：环境红共用「保险丝」词根会被 burst 场景 FUSE_MARK 断言吞成刹停红
     假红+归因污染，且 :771 红是本票新增非既有家族）。"""
@@ -445,7 +445,7 @@ def test_f_wait_ping_copy_never_matches_fuse_mark():
 
 
 def test_f2_stage_error_copy_fuse_word_must_anchor_trip_red():
-    """仲裁 gen8 打回扩面腿（防回潮）：F 节点名扫描只覆盖 _stage_wait_ping，
+    """仲裁 gen8 打回扩面用例（防回潮）：F 节点名扫描只覆盖 _stage_wait_ping，
     StageError 运行时红文案不在范围——gen8 同族全量排查实锤 ：771 锁超预算
     ENV_FAIL（本票新增）含「保险丝」裸词：锁被残留进程长期持有时收环境红
     （kind=env），文案进 burst 场景 subprocess stderr 被 FUSE_MARK 断言吞成

@@ -13,7 +13,7 @@
      且点名 need——引擎签名判据命中；
   B. 该回执形态（ran=0+零产品红+零闸拦+零环境红+签名 error）→ 该轮不计入
      tests-fault 轮次，留痕含「不计入」且点名供给面（不静默）；
-  C. 负腿（宁窄勿宽）：非签名启动级文案（场景执行器整体超时=t260916-25 事故
+  C. 反用例（宁窄勿宽）：非签名启动级文案（场景执行器整体超时=t260916-25 事故
      H2 形态）→ 签名不命中 → 该轮照旧保守计轮；
   D. 对照组：PASS 桩 → 闸绿（夹具与调用链有效性自证，红绿差异归因于供给面）。
 
@@ -24,12 +24,12 @@
     消费 × 计轮账本三环贯通（机制在彼票已锁，接缝漂移只有真跑才暴露）；
   · t260917-09 sc_tests_false_escalation_guard 锁**场景级**环境红豁免
     （env_fail>0）与抖动复跑豁免、不在册保守计轮（真 docker 台）——本条锁
-    **装配级**（ran=0）供给形态，彼场景无此腿；
+    **装配级**（ran=0）供给形态，彼场景无此用例；
   · developer L1（test_t260920_01_supply_wait_budget.py 等）锁判据函数行为
     （构造串直驱）——本条喂的是**真进程跑出来的 err**，出口实况不可手工构造。
 驱动形态：admin.py call verify_lane 真入口（t260904-12 同款）+ tmp 夹具仓；
 判据消费跳=真 dev_lane 模块（temporalio 缺席环境装 _stub_temporalio 桩，与
-t260919-02 同款手法）。纯离线秒级，无 docker 依赖，无 ENV_FAIL 腿。
+t260919-02 同款手法）。纯离线秒级，无 docker 依赖，无 环境用例。
 现状注记：判据接线 HEAD 代码面已通（t260917-09），本场景现在就应全绿——红了=
 接线回归（真病灶复现），不是 TDD 预期红。
 跑法：python3 -B integration/t260920-01/sc_supply_assembly_seam.py
@@ -174,7 +174,7 @@ else:
     ok(False, "A2 调用失败: " + str(res.get("stderr")))
 shutil.rmtree(repo, ignore_errors=True)
 
-# ---- C 非签名启动级腿（H2 形态=执行器整体超时）：保守计轮不豁免 ----
+# ---- C 非签名启动级用例（H2 形态=执行器整体超时）：保守计轮不豁免 ----
 repo = make_fixture(
     "integration:\n  cmd: python3 integ_slow.py\n",
     {"integ_slow.py": "import time\ntime.sleep(30)\n"})

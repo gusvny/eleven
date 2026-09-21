@@ -25,7 +25,7 @@
     化与点名），彼两处无此对象；
   · developer L1 锁 wait_budget_s 纯函数数值与回退方向——本条锁进程级契约。
 注入形态：PATH 前置假 docker 脚本（sleep 挂住=daemon 假死模拟 / exit 0=健康 /
-exit 1=立即失败）+ 预算 env 旋钮调小；纯离线零 docker 依赖、无 ENV_FAIL 腿。
+exit 1=立即失败）+ 预算 env 旋钮调小；纯离线零 docker 依赖、无 环境用例。
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
 跑法：python3 -B integration/t260920-01/sc_supply_wait_budget_probe.py
 """
@@ -81,13 +81,13 @@ def no_leftover_sleep(td):
         ps = subprocess.run(["ps", "-eo", "command"], capture_output=True,
                             text=True, timeout=15).stdout
     except Exception:
-        return True  # 进程表不可读时不误红（该腿由退出与墙钟锚兜底）
+        return True  # 进程表不可读时不误红（该用例由退出与墙钟锚兜底）
     return str(td) not in ps
 
 
 td = Path(tempfile.mkdtemp(prefix="t26092001-probe-"))
 try:
-    # ---- P1 daemon 假死腿：挂住命令 + 预算 2s → 预算内 exit 2 + 进度点名 ----
+    # ---- P1 daemon 假死用例：挂住命令 + 预算 2s → 预算内 exit 2 + 进度点名 ----
     env = make_fake_docker(td, "sleep 30")
     env["SANDBAR_STAGE_WAIT_BUDGET_S"] = "2"
     p, wall = run_probe(env)
@@ -98,10 +98,10 @@ try:
        "P1d stderr 点名已等时长（秒数在场）")
     ok(no_leftover_sleep(td), "P1e 无残留子进程（超时即回收，资源纪律）")
 
-    # ---- P2 docker 缺席腿：PATH 无 docker → 预算内红点名 ----
+    # ---- P2 docker 缺席用例：PATH 无 docker → 预算内红点名 ----
     # 契约口径：缺席形态（docker 命令不存在=FileNotFoundError）由实现按「未就绪」
     # 反复探到预算收口（预算内收口=契约内）；「缺席秒级快速红」是体验级改进点，
-    # 上报不作为契约断言——本腿注入小预算，断言预算内收口+点名。
+    # 上报不作为契约断言——本用例注入小预算，断言预算内收口+点名。
     env = dict(os.environ)
     env["PATH"] = os.pathsep.join(
         d for d in env.get("PATH", "").split(os.pathsep)
@@ -112,14 +112,14 @@ try:
     ok(wall < 15, "P2b 预算内收口不挂（wall=%.1fs，注入预算 2s）" % wall)
     ok("docker" in (p.stderr or ""), "P2c 点名 docker（缺什么说什么）")
 
-    # ---- P3 健康腿：假 docker 正常 → exit 0 无红 ----
+    # ---- P3 健康用例：假 docker 正常 → exit 0 无红 ----
     env = make_fake_docker(td, "exit 0")
     p, wall = run_probe(env)
     ok(p.returncode == 0, "P3 健康形态 exit 0（got rc=%s）" % p.returncode)
     ok("ENV_FAIL" not in (p.stdout or "") + (p.stderr or ""),
        "P3b 健康路径零 ENV_FAIL（预算不误伤好形态）")
 
-    # ---- P4 立即失败腿：快速红点名，不重试风暴 ----
+    # ---- P4 立即失败用例：快速红点名，不重试风暴 ----
     env = make_fake_docker(td, "echo cannot connect >&2\nexit 1")
     env["SANDBAR_STAGE_WAIT_BUDGET_S"] = "5"
     p, wall = run_probe(env)
@@ -128,13 +128,13 @@ try:
     ok("docker" in (p.stderr or "") + (p.stdout or ""),
        "P4b 点名 docker（失败原因可读）")
 
-    # ---- P5 预算 env 畸形腿：不崩，健康路径照常通过 ----
+    # ---- P5 预算 env 畸形用例：不崩，健康路径照常通过 ----
     # （畸形回退缺省值后的红面墙钟行为归 developer L1 数值锁；本场景锁「畸形
     # 不炸 + 契约不破」——健康桩下进程正常完成三态生命周期。）
     env = make_fake_docker(td, "exit 0")
     env["SANDBAR_STAGE_WAIT_BUDGET_S"] = "abc"
     p, wall = run_probe(env)
-    ok(p.returncode == 0, "P5 畸形预算不崩且健康腿照常 exit 0（got rc=%s）" % p.returncode)
+    ok(p.returncode == 0, "P5 畸形预算不崩且健康用例照常 exit 0（got rc=%s）" % p.returncode)
     ok(wall < 15, "P5b 畸形预算不挂（wall=%.1fs）" % wall)
 finally:
     shutil.rmtree(td, ignore_errors=True)

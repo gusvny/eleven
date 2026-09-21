@@ -26,8 +26,8 @@ ensure 锁/翻面/心跳等待上硬等（界=CLI timeout 缺省 600s），等�
 注入形态：SANDBAR_STAGE_LOCK_DIR 指 tmp 隔离锁根（绝不触真 /tmp/sandbar-test-
 stages）+ python 子进程 fcntl.flock 持 ensure-<project>.lock（真持有者语义）+
 预算 env 旋钮调小 + --timeout 8 兜底（实现前防卡 600s）。纯离线零 docker 依赖、
-无 ENV_FAIL 腿（争用红是被测行为，不是环境缺失）。
-实现落地前红属预期（TDD 信号：W1 墙钟腿红=W2 既有行为绿），arbitrate/merge 期
+无 环境用例（争用红是被测行为，不是环境缺失）。
+实现落地前红属预期（TDD 信号：W1 墙钟用例红=W2 既有行为绿），arbitrate/merge 期
 必须绿。
 跑法：python3 -B integration/t260920-01/sc_supply_ensure_wait_cap.py
 """
@@ -101,7 +101,7 @@ lock_root_unused[0] = lock_root
 lock_path = lock_root / LOCK_NAME
 sleeper = None
 try:
-    # ---- W1 争用腿：真持有者持锁 → 预算内 exit 2 + 点名 + 持有者零波及 ----
+    # ---- W1 争用用例：真持有者持锁 → 预算内 exit 2 + 点名 + 持有者零波及 ----
     sleeper_src = lock_root / "sleeper.py"
     sleeper_src.write_text(
         "import fcntl, sys, time\n"
@@ -138,7 +138,7 @@ try:
        "W3 释放后锁可复抢：无争用路径快速到下一道门（wall=%.1fs，rc=%s）"
        % (wall2, p2.returncode))
 
-    # ---- W2 无争用腿（回归锚）：行为不变，预算不误伤无争用路径 ----
+    # ---- W2 无争用用例（回归锚）：行为不变，预算不误伤无争用路径 ----
     p3, wall3 = run_ensure(lock_root, extra_env=inject_dead_docker({}))
     combined3 = (p3.stdout or "") + (p3.stderr or "")
     ok(p3.returncode == 2,

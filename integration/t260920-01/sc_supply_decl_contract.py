@@ -5,7 +5,7 @@
 
 用户场景（工单边界与病灶）：供给声明是 verify_lane 每轮集测**必经的机器消费面**
 ——它怎么写，用户每一轮都实际承受。本票病灶的声明面实况：裸 `docker info`/
-`docker image inspect` 无界接触（daemon 假死挂满 900s 兜底）、失败腿 `exit 1`
+`docker image inspect` 无界接触（daemon 假死挂满 900s 兜底）、失败用例 `exit 1`
 （三态口径外的退出码，环境红无法被判据面识别为可豁免形态）。
 
 收口后用户可感知行为（工单要求②③ + 边界红线「不许放宽 ENV_FAIL 三态语义」）：
@@ -27,7 +27,7 @@ supply 步天然承担（同一条命令每票必跑），本场景不冗余起�
 断言锚 intent 而非字面排版：无界接触按「裸 docker info / docker image inspect
 命令在场」判（有界封装的新形态不受影响——若未来票把门改回声明侧的有界形态，
 本场景红=提示人审更新契约口径，属声明契约变更的预期流程）。
-实现落地前红属预期（TDD 信号：现声明裸 docker 在场且失败腿 exit 1），
+实现落地前红属预期（TDD 信号：现声明裸 docker 在场且失败用例 exit 1），
 arbitrate/merge 期必须绿。
 跑法：python3 -B integration/t260920-01/sc_supply_decl_contract.py
 """
@@ -81,16 +81,16 @@ if cfg is not None:
 if cfg is not None and supply:
     env = dict(os.environ)
     # 受限 PATH：剔除**所有** docker 所在目录（多路径安装形态——只剔第一个会让
-    # daemon 健康机器上的缺席腿调到真 docker，前提构造失效，260920 仲裁实锤）；
+    # daemon 健康机器上的缺席用例调到真 docker，前提构造失效，260920 仲裁实锤）；
     # 无 docker 机器天然满足。保留系统命令。
     env["PATH"] = os.pathsep.join(
         d for d in env.get("PATH", "").split(os.pathsep)
         if d and not os.path.exists(os.path.join(d, "docker")))
-    # 自清卫兵：实现后声明若把无 docker 接触的段排前（软链腿），不能往仓里
+    # 自清卫兵：实现后声明若把无 docker 接触的段排前（软链用例），不能往仓里
     # 留新文件——记录软链目标存在性，跑后新建则删（幂等声明不应有净写入）。
     link = REPO / "server" / "engine" / "bin" / "temporal"
     link_before = link.exists()
-    # 缺席形态由实现按「未就绪」反复探到预算收口（契约内）——注入小预算使本腿
+    # 缺席形态由实现按「未就绪」反复探到预算收口（契约内）——注入小预算使本用例
     # 墙钟可断言（预算内收口），不依赖缺省 120s。
     env["SANDBAR_STAGE_WAIT_BUDGET_S"] = "2"
     t0 = time.time()
@@ -114,7 +114,7 @@ if cfg is not None and supply:
        % out[:80].replace("\n", " "))
     ok("docker" in out, "D2d 点名 docker（缺什么说什么，不静默）")
 else:
-    ok(False, "D2 声明不可读，缺席腿未执行（D1/D0 已红归因）")
+    ok(False, "D2 声明不可读，缺席用例未执行（D1/D0 已红归因）")
 
 print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (pass_n, fail_n))
 sys.exit(1 if fail_n > 0 else 0)
