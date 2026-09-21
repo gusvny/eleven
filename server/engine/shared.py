@@ -560,6 +560,16 @@ def tests_supply_assembly_error(error: Any) -> bool:
     return all(m in error for m in SUPPLY_ASSEMBLY_ERROR_MARKS)
 
 
+def tests_supply_assembly_note(error: Any) -> str:
+    """装配级供给失败的票面留痕文案（单写者，t260920-01 票①要求①「留痕含
+    「不计入」+ 点名供给面，不得静默」）：dev_lane._tests_round_account 与 UT
+    共同消费本函数，文案只此一份。畸形 error（非 str/空）不抛：保守截断为可读
+    前缀，绝不静默丢证据（消费外部输入的 fail-closed 纪律）。"""
+    e = error if isinstance(error, str) else ""
+    return ("供给面装配失败（零跑，error 命中供给装配签名：%s）——不计入 tests-fault 轮次"
+            % ((e or "<空>")[:120]))
+
+
 def tests_exempt_cap_blocked_text(exempt_rounds: int) -> str:
     """连续豁免轮超限的 blocked 文案（纯函数，t260917-09）：与 cap 超限同族——
     含「超限」关键词供场景/快照判据，出路四条全是 ticket.py 真实 op。authorize 的

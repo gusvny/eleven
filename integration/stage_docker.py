@@ -34,6 +34,13 @@ Subcommands:
                               常驻不拆); the stage lives until explicit down /
                               the MAX_HOLD_S cap / a crash, all folding into
                               the single expiry+holder-dead reclaim criterion
+  daemon-probe               bounded docker daemon probe (t260920-01): `docker
+                              info` under the contention-wait budget
+                              (SANDBAR_STAGE_WAIT_BUDGET_S, default 120s) with
+                              periodic STAGE_WAIT naming lines (在等谁/已等多久/
+                              为何未就绪); budget exhaustion = honest ENV_FAIL
+                              exit 2, never a 900s hard wait (supply-chain
+                              fake-block root fix, stage-ops ticket ①)
   down --project <name>      tear the stage down (state→downing → hold harvest
                               → down -v → lease release); idempotent, exits 0
                               when absent too
@@ -337,9 +344,31 @@ def hold_wait_s():
     return float(os.environ.get("SANDBAR_STAGE_HOLD_WAIT_S", 10))
 
 
+def wait_budget_s():
+    """争用等待预算（秒，t260920-01 stage-ops 票① B5-c）：只封顶「等别人」的
+    窗口——docker daemon 探针、同项目 ensure 互斥锁、他人 booting 翻面、holder
+    心跳宽限、capacity-0.lock 获取。自家冷起 boot 健康窗（--timeout/
+    DEFAULT_TIMEOUT）**不在本预算内**（那是干活不是等别人，review 条件②）。
+    缺省 120s；畸形（缺/非数/≤0）一律回退缺省——预算面宁可多等有界上限，
+    也绝不无界硬等（供给段 900s 兜底不变，预算在其内）。"""
+    raw = (os.environ.get("SANDBAR_STAGE_WAIT_BUDGET_S") or "").strip()
+    try:
+        v = float(raw) if raw else DEFAULT_WAIT_BUDGET_S
+    except ValueError:
+        return float(DEFAULT_WAIT_BUDGET_S)
+    return v if v > 0 else float(DEFAULT_WAIT_BUDGET_S)
+
+
 PROJECT_RE = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
 DEFAULT_TIMEOUT = 600          # health-wait ceiling (covers the measured dsh container first-boot npm i + apt budget)
 _STOP_TIMEOUT = 120            # compose down ceiling
+# 争用等待预算缺省（t260920-01 stage-ops 票①，B5-c）：只封顶「等别人」的窗口
+# （daemon 探针 / 同项目 ensure 互斥 / 他人 booting 翻面 / holder 心跳宽限 /
+# capacity-0.lock 获取）；自家冷起 boot 健康窗（DEFAULT_TIMEOUT 族）不在预算内。
+DEFAULT_WAIT_BUDGET_S = 120
+# STAGE_WAIT 点名节流（秒）：同一等待点约每 10s 一行，不静默也不刷屏；
+# 模块常量便于 UT 收紧节流断言点名行（生产面零感知）。
+STAGE_WAIT_PING_EVERY_S = 10.0
 
 EXIT_OK, EXIT_ENV, EXIT_CONFLICT, EXIT_FAIL, EXIT_USAGE = 0, 2, 3, 1, 64
 
@@ -726,6 +755,10 @@ def capacity_acquire(project, lease, timeout):
     path = lock_root() / "capacity-0.lock"
     fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o644)
     t0 = time.time()
+    # 争用等待预算（t260920-01）：锁获取等待=「等别人退出临界区」，入预算帽；
+    # 临界区内的判定/占位工作本身不封顶（review 条件②：逐等待点封顶）。
+    lock_budget = min(float(timeout), wait_budget_s())
+    last_ping = 0.0
     try:
         while True:
             try:
@@ -733,9 +766,26 @@ def capacity_acquire(project, lease, timeout):
             except OSError as e:
                 if e.errno not in (errno.EACCES, errno.EAGAIN):
                     raise
-                if time.time() - t0 >= timeout:
-                    raise StageError("起台保险丝锁等待超时（%ds）：capacity-0.lock 被"
-                                     "长期持有——查残留进程" % timeout, kind="env")
+                waited = time.time() - t0
+                if waited >= lock_budget:
+                    # 措辞纪律（t260920-01 gen8 打回修复）：超预算红文案同避
+                    # 「保险丝」裸词——t260912-02 burst 场景以 FUSE_MARK=「保险丝」
+                    # 判别保险丝**刹停红**（真触发），本条是锁超预算的**环境红**
+                    # （kind=env），共用词根=环境红被吞成刹停红假红+归因污染。
+                    # 「名额」与下方点名面同族；守卫腿：UT F 节 StageError 扫描。
+                    raise StageError("ENV_FAIL: 起台名额锁等待超时（已等 %.0fs，"
+                                     "等待预算 %.0fs）：capacity-0.lock 被长期持有"
+                                     "——不硬等，收诚实红；查残留进程"
+                                     % (waited, lock_budget), kind="env")
+                if time.time() - last_ping >= STAGE_WAIT_PING_EVERY_S:
+                    last_ping = time.time()
+                    # 措辞纪律（t260920-01 gen1 打回修复）：等待点名文案避开
+                    # 「保险丝」裸词——t260912-02 burst 场景以 FUSE_MARK=「保险丝」
+                    # 判别保险丝**刹停红**（真触发），并发争用的常态点名不得共用
+                    # 该词根（否则判别失效=假红）。守卫腿：UT F 节 AST 扫全部
+                    # _stage_wait_ping 字面量（防回潮）。
+                    _stage_wait_ping(" capacity-0.lock（起台名额临界区）",
+                                     "另有起台者持锁在判定/占位", waited, lock_budget)
                 time.sleep(0.5)
                 continue
             try:
@@ -2859,17 +2909,37 @@ def _reused(st):
 def _wait_booting(project, lock_fd, deadline):
     """booting 等待（ticket ② state=booting → 等待其完成；review R5）：轮询
     时不持项目锁（os.replace 原子写保证无锁读安全；持锁轮询会让起台者永远拿
-    不到锁=自锁死）。预算=调用方剩余 timeout。返回时已重新持锁。"""
+    不到锁=自锁死）。预算=min(调用方剩余 timeout, 争用等待预算)（t260920-01：
+    等「别人的冷起」属争用等待）——超预算收诚实红上抛，**绝不落回冷路径并发
+    再起**（旧语义等满界后返回会让 do_ensure 走到冷起；预算化后那条路=双起，
+    破坏「绝不并发再起」不变式）。返回时已重新持锁。"""
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
     except OSError:
         pass
+    t0 = time.time()
+    wait_deadline = min(deadline, t0 + wait_budget_s())
+    last_ping = 0.0
     try:
-        while time.time() < deadline:
+        while time.time() < wait_deadline:
             st = read_lease(project)
             if not isinstance(st, dict) or st.get("state") != "booting":
                 return st   # 翻 up / downing / 被回收 / 消失 → 回锁终判
+            now = time.time()
+            if now - last_ping >= STAGE_WAIT_PING_EVERY_S:
+                last_ping = now
+                _stage_wait_ping(" 同项目另一次冷起翻面（state=booting）",
+                                 "对方 boot 未完成，绝不并发再起",
+                                 now - t0, wait_deadline - t0,
+                                 extra="project=%s" % project)
             time.sleep(1.0)
+        if time.time() < deadline:
+            raise StageError(
+                "ENV_FAIL: 供给台 %s booting 等待超预算（已等 %.0fs，预算 %.0fs）："
+                "同项目起台者未在等待预算内交付——不硬等也不并发再起，按等待预算收"
+                "诚实红（下轮供给自动重试；查 docker 与 hold-%s.log）"
+                % (project, time.time() - t0, wait_deadline - t0, project),
+                kind="env")
         return read_lease(project)
     finally:
         while True:
@@ -2893,7 +2963,9 @@ def _wait_heartbeat_recovery(project, lock_fd, deadline):
     锁语义：与 _wait_booting 同源——等待期不持项目锁，免得把同项目其它 ensure 排到
     预算外；hold 分支自身从不取 ensure 项目锁（只写 pidfile + 心跳文件），故释放锁不会
     与心跳互相阻塞。返回时重新持锁（拿不到也不阻塞收口：判据全在租约读数上）。"""
-    grace = min(stall_grace_s(), max(0.0, deadline - time.time()))
+    grace = min(stall_grace_s(), max(0.0, deadline - time.time()),
+                wait_budget_s())   # t260920-01：等 holder 心跳恢复=争用等待，入预算
+    last_ping = 0.0
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
     except OSError:
@@ -2906,6 +2978,13 @@ def _wait_heartbeat_recovery(project, lock_fd, deadline):
             if lease_reusable(st) or lease_dead(st) or not isinstance(st, dict) \
                     or st.get("state") != "up":
                 return st
+            now = time.time()
+            if now - last_ping >= STAGE_WAIT_PING_EVERY_S:
+                last_ping = now
+                _stage_wait_ping(" holder 心跳恢复（hold 腿被负载压住的一次停顿）",
+                                 "心跳停更但 holder 仍在，宽限窗内等待恢复",
+                                 now - (end - grace), grace,
+                                 extra="project=%s" % project)
             time.sleep(1.0)
         return st
     finally:
@@ -2936,17 +3015,30 @@ def do_ensure(project, services_list, opts, timeout, keep=False):
     lock_path = lock_root() / ("ensure-%s.lock" % project)
     fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
     t0 = time.time()
+    # 争用等待预算（t260920-01，review 条件②）：只封顶「等同项目别人起台」的
+    # 这一个等待点（min(原界, 预算)），下方冷起 boot 健康窗（deadline/timeout）
+    # 原样不动——预算不缩自家干活窗口。
+    lock_budget = min(float(timeout), wait_budget_s())
+    last_ping = 0.0
     try:
         while True:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except BlockingIOError:
-                if time.time() - t0 >= timeout:
+                waited = time.time() - t0
+                if waited >= lock_budget:
                     raise StageError(
-                        "供给台 %s ensure 互斥等待超时（%ds）：同项目并发 ensure 未在"
-                        "预算内完成——疑似起台卡死，查 docker 后重试" % (project, timeout),
+                        "ENV_FAIL: 供给台 %s ensure 互斥等待超时（已等 %.0fs，等待"
+                        "预算 %.0fs）：同项目并发 ensure 未在等待预算内交付——不硬等，"
+                        "按等待预算收诚实红（下轮供给自动重试）；疑似起台卡死查 "
+                        "docker 与 hold-%s.log" % (project, waited, lock_budget, project),
                         kind="env")
+                if time.time() - last_ping >= STAGE_WAIT_PING_EVERY_S:
+                    last_ping = time.time()
+                    _stage_wait_ping(" 同项目 ensure 互斥锁（另一 ensure 在起台）",
+                                     "对方未交付也未消亡", waited, lock_budget,
+                                     extra="project=%s" % project)
                 time.sleep(1.0)
         # 持锁终判：等待窗口里先到者可能已完成起台。
         deadline = t0 + timeout
@@ -3234,6 +3326,53 @@ def _parse_opts(argv, i, opts):
     return opts
 
 
+# ------------------------------------------------- daemon probe & wait naming (t260920-01)
+
+DOCKER_INFO_CMD = ("docker", "info")   # 注入缝：UT 以 PATH 假 docker 驱动超预算腿（不走生产旋钮）
+
+
+def _stage_wait_ping(what, why, waited, budget, extra=""):
+    """争用等待进度点名（STAGE_WAIT 行 → stderr）：「在等谁/已等多久/为何未就绪」
+    （工单 t260920-01 要求②）。节流由调用方持上次打印时刻——每处等待点约 10s 一行，
+    不静默也不刷屏；失败时 stderr 尾段经 verify_lane 包装进回执 error → 票面可见。"""
+    print("STAGE_WAIT: 仍在等%s（已等 %ds/%.0fs 预算）——%s%s"
+          % (what, int(waited), budget, why,
+             ("；%s" % extra) if extra else ""), file=sys.stderr)
+
+
+def cmd_daemon_probe():
+    """daemon-probe 子命令（t260920-01）：有界 docker daemon 探针。等待期按预算
+    反复 `docker info` 并打 STAGE_WAIT 点名；预算内未就绪 = ENV_FAIL（exit 2）
+    诚实红收尾——绝不硬等到供给段 900s 兜底（t260916-25 假封链的等待形态根治点，
+    工单要求③）。成功面 stdout 回 JSON。"""
+    budget = wait_budget_s()
+    t0 = time.time()
+    deadline = t0 + budget
+    attempt = 0
+    while True:
+        attempt += 1
+        left = deadline - time.time()
+        try:
+            _run(list(DOCKER_INFO_CMD), timeout=max(1.0, min(15.0, left)))
+            print(json.dumps({"daemon": "ok", "waited_s": round(time.time() - t0, 1),
+                              "budget_s": budget, "attempts": attempt},
+                             ensure_ascii=False))
+            return EXIT_OK
+        except (subprocess.SubprocessError, FileNotFoundError) as e:
+            waited = time.time() - t0
+            if time.time() >= deadline:
+                raise StageError(
+                    "ENV_FAIL: docker daemon 等待超预算（已等 %.0fs/%.0fs）：daemon "
+                    "未就绪（docker info 反复失败：%s: %s）——测试台一律走 docker，"
+                    "启动 Docker/OrbStack 后重试；本条按等待预算收诚实红，不硬等"
+                    % (waited, budget, type(e).__name__, str(e)[:200]), kind="env")
+            pause = max(0.5, min(5.0, deadline - time.time()))
+            _stage_wait_ping(" docker daemon", "docker info 未回包/未就绪（%s: %s）"
+                             % (type(e).__name__, str(e)[:120]), waited, budget,
+                             extra="%.0fs 后再探（第 %d 次）" % (pause, attempt))
+            time.sleep(pause)
+
+
 def main(argv):
     if not argv:
         print(__doc__)
@@ -3242,6 +3381,8 @@ def main(argv):
     try:
         if cmd == "selftest":
             return selftest()
+        if cmd == "daemon-probe":
+            return cmd_daemon_probe()
         opts = {}
         i = 0
         if rest and not rest[0].startswith("--"):
@@ -3317,7 +3458,7 @@ def main(argv):
             print(json.dumps(result, ensure_ascii=False))
             return EXIT_OK if not result["residue"] else EXIT_FAIL
         raise StageError("未知子命令：%s（可选 up/ensure/down/hold/sweep/inventory/"
-                         "plugins/selftest）" % cmd, kind="usage")
+                         "plugins/daemon-probe/selftest）" % cmd, kind="usage")
     except StageError as e:
         print("STAGE_%s: %s" % (e.kind.upper(), e), file=sys.stderr)
         return e.exit_code

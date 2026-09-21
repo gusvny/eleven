@@ -82,6 +82,7 @@ with workflow.unsafe.imports_passed_through():
         tests_exempt_cap_blocked_text,
         tests_round_step,
         tests_supply_assembly_error,
+        tests_supply_assembly_note,
         TICKET_STATUSES,
         AUTH_ARBITRATION_VERDICT,
         AUTH_PROTECTED_PATH,
@@ -990,11 +991,11 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
         note = probe_note
         if not counted and env_side_red:
             if self._tests_supply_assembly_fail(cur_integ):
-                # 装配级形态留痕点名供给面（要求③）：出路封面同族豁免面已带四条
-                # 真出路；本条只负责把「红因=供给装配」写进票面可读面。
-                note = ("供给面装配失败（零跑，error 命中供给装配签名：%s）"
-                        "——不计入 tests-fault 轮次"
-                        % (str(getattr(cur_integ, "error", "") or "")[:120]))
+                # 装配级形态留痕点名供给面（要求③→票①要求①）：文案单写者=
+                # shared.tests_supply_assembly_note（t260920-01，票面/UT 同源，
+                # 防「留痕措辞」多写者漂移）；出路封面同族豁免面已带四条真出路。
+                note = tests_supply_assembly_note(
+                    getattr(cur_integ, "error", ""))
             else:
                 note = "环境面红（产品红 0/闸拦 0/环境红 %d）" % (
                     int(getattr(cur_integ, "env_fail", 0) or 0))
