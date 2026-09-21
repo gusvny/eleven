@@ -11,8 +11,12 @@
 
 三条硬契约（工单要点逐条落位）：
   ① 输出强 schema：agent 最终消息**末尾恰一块** ```json 围栏 {"findings":[…]}；
-     条目=subject/severity/evidence[{path,line,quote≤200}]/why/suggestion/confidence；
+     条目=subject/severity/evidence[{path,line,quote}]/why/suggestion/confidence；
      **id 不由 agent 提供**——机械侧按内容铸（mint_finding_id，同内容跨期稳定）。
+     引文超长是**软提醒不判红**（宿主令 260921；t260922-01 实案：227 字擦边超限曾
+     整份报废六条发现）：截断保留原文前缀 + 逐条人话点名 + 报告计数位
+     quote_overlong_warn；判红只留「无法定位/不可复核」形态（evidence 缺空、
+     quote 缺空、path/line 畸形、围栏缺失/多块/坏 JSON、findings 非列表）。
   ② 证据机械复核：文件存在、行号在范围、引文匹配（容空白差异）；不过者降级
      unverified 并逐项点名（不静默丢）。
   ③ 建议门/预算：suggested_fix_tickets 只从 verified && confidence≥阈值 &&
@@ -57,7 +61,11 @@ DEFAULT_INSPECT_TIMEOUT_MIN = 30
 #: 预算双闸 margin（活动内 deadline = workflow start_to_close − margin；不等式由
 #: test_t260916_22_inspect_flow 锁定，SUITE_TO 纪律同款）
 INSPECT_DEADLINE_MARGIN_SEC = 60
-#: 引文长度上限（设计稿 4.2：quote ≤200 字；机械侧超限=畸形 fail-closed）
+#: 引文长度软提醒线（设计稿 4.2 原口径=「quote ≤200 字」仅 prompt 引导语；宿主令
+#: 260921「软提醒不判红」：超限不判红——截断保留原文前缀（复核仍可按子串校验）+
+#: 逐条人话点名 + 报告计数位 quote_overlong_warn（apply_budget 记账面，口径=保留集
+#: 在册条目）。阈值改这里单点生效（prompt 插值 build_inspect_prompt 同源读本常量）；
+#: 「无法定位/不可复核」形态（quote 缺空、path/line 畸形等）仍 fail-closed，与本线无关。
 MAX_QUOTE_CHARS = 200
 #: 裁定台账文件名后缀（deadman ledger_periods 的「已知非台账件」排除表消费本常量）
 VERDICTS_RECEIPT_SUFFIX = "-verdicts.json"
@@ -123,7 +131,9 @@ def _norm_rel_path(s: Any) -> str:
 def validate_finding(raw: Any, idx: int) -> Dict[str, Any]:
     """单条发现的强 schema 校验+规范化（白名单字段，多余键丢弃——票面不收垃圾）。
 
-    畸形一律 InspectParseError 点名条目序号（idx 从 1 起，人可对回 agent 输出）。"""
+    畸形一律 InspectParseError 点名条目序号（idx 从 1 起，人可对回 agent 输出）。
+    唯一软面=引文超长（宿主令 260921）：不判红，截断保原文前缀 + quote_truncated/
+    quote_original_chars 标注 + quote_warns 人话点名；不超长条目零新键（逐字节兼容）。"""
     where = "findings[%d]" % idx
     if not isinstance(raw, dict):
         raise InspectParseError("%s：条目必须是对象（got %s）" % (where, type(raw).__name__))
@@ -145,6 +155,7 @@ def validate_finding(raw: Any, idx: int) -> Dict[str, Any]:
     if not isinstance(evidence_raw, list) or not evidence_raw:
         raise InspectParseError("%s：evidence 必填且非空列表（发现必须可证伪）" % where)
     evidence: List[Dict[str, Any]] = []
+    warns: List[str] = []      # 引文超长软提醒点名（宿主令 260921；空=条目零新键）
     for j, ev in enumerate(evidence_raw):
         ew = "%s.evidence[%d]" % (where, j)
         if not isinstance(ev, dict):
@@ -160,11 +171,20 @@ def validate_finding(raw: Any, idx: int) -> Dict[str, Any]:
         quote = str(ev.get("quote") or "")
         if not quote.strip():
             raise InspectParseError("%s：quote 缺失或空（原文引用必填）" % ew)
+        item: Dict[str, Any] = {"path": path, "line": line, "quote": quote}
+        # 引文超长=软提醒不判红（宿主令 260921；旧口径「超限即抛→整份报废」废止）：
+        # 截断保留**纯原文前缀**（不拼省略号等标记，防污染 recheck 的空白容差子串
+        # 匹配）+ 逐条人话点名（软提醒≠静默，第 N 条可对回票面清单序）。
         if len(quote) > MAX_QUOTE_CHARS:
-            raise InspectParseError("%s：quote 超长（%d > %d 字）"
-                                    % (ew, len(quote), MAX_QUOTE_CHARS))
-        evidence.append({"path": path, "line": line, "quote": quote})
-    return {
+            item["quote"] = quote[:MAX_QUOTE_CHARS]
+            item["quote_truncated"] = True
+            item["quote_original_chars"] = len(quote)
+            warns.append("第 %d 条发现 %s：引文 %d 字 > 上限 %d，已截断保留前 %d 字"
+                         "（机械复核仍按原文前缀校验）"
+                         % (idx, ew.split(".", 1)[1], len(quote),
+                            MAX_QUOTE_CHARS, MAX_QUOTE_CHARS))
+        evidence.append(item)
+    out: Dict[str, Any] = {
         "subject": subject,
         "severity": severity,
         "evidence": evidence,
@@ -172,11 +192,18 @@ def validate_finding(raw: Any, idx: int) -> Dict[str, Any]:
         "suggestion": str(raw.get("suggestion") or "").strip(),
         "confidence": round(float(confidence), 4),
     }
+    if warns:
+        out["quote_warns"] = warns
+    return out
 
 
 def parse_agent_findings(text: str) -> List[Dict[str, Any]]:
     """agent 输出全量解析：提取 + 逐条 schema 校验。任一条畸形=整体失败（不降级不猜，
-    fail-closed 由 workflow 转 blocked 点名——半信半疑的清单比没有清单更危险）。"""
+    fail-closed 由 workflow 转 blocked 点名——半信半疑的清单比没有清单更危险）。
+
+    唯一例外=引文超长（宿主令 260921「软提醒不判红」）：该条照常入册，超长引文截断
+    保原文前缀并标注/点名——t260922-01 实案（227 字擦边超限→整份拒收→当日巡检零产出）
+    证伪了旧口径「一处擦边报废整份」；判红只留无法定位/不可复核形态。"""
     out: List[Dict[str, Any]] = []
     for i, raw in enumerate(extract_findings_json(text), start=1):
         out.append(validate_finding(raw, i))
@@ -279,6 +306,19 @@ def is_counted(finding: Dict[str, Any]) -> bool:
     return not finding.get("recurring") and not finding.get("suppressed")
 
 
+def count_quote_overlong(findings: List[Dict[str, Any]]) -> int:
+    """超长引文软提醒计数（宿主令 260921 报告计数位 quote_overlong_warn 的口径单点）。
+
+    口径=给定清单**在册**条目里带 quote_truncated 标注的证据项总数（一条发现多证据
+    可贡献多条）；apply_budget 只对保留集计（被预算截掉的条目不在票面/报告在册，
+    计数也不含它），与票面 findings[].quote_warns 逐项可对账（review 条件②）。
+    畸形条目（非 dict/缺 evidence/证据项非 dict）不炸计 0。"""
+    return sum(
+        1 for f in findings if isinstance(f, dict)
+        for ev in (f.get("evidence") or [])
+        if isinstance(ev, dict) and ev.get("quote_truncated"))
+
+
 def apply_budget(findings: List[Dict[str, Any]], cap: int) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """预算截断（宿主裁定③：缺省 40，超出按 severity 截断并注明）。
 
@@ -297,7 +337,12 @@ def apply_budget(findings: List[Dict[str, Any]], cap: int) -> Tuple[List[Dict[st
             truncated += 1
             continue
         kept.append(f)
-    return kept, {"truncated": truncated}
+    # quote_overlong_warn（宿主令 260921 报告计数位）口径=**保留集**（review 条件②）：
+    # 被预算截掉的条目不在票面/报告 findings 在册，计数也不含它——计数位与票面
+    # quote_warns 逐项可对账。本 meta 经 verify 活动 **budget_meta 摊开进报告
+    # scan_meta（落账面），活动壳零改动。
+    return kept, {"truncated": truncated,
+                  "quote_overlong_warn": count_quote_overlong(kept)}
 
 
 def summarize_counts(findings: List[Dict[str, Any]]) -> Dict[str, int]:
@@ -537,7 +582,7 @@ _SKELETON = """\
 {{"findings": [
   {{"subject": "一句话概述（含 file:line）",
     "severity": "high|med|low",
-    "evidence": [{{"path": "相对基座的路径", "line": 123, "quote": "该行原文片段，≤{max_quote}字"}}],
+    "evidence": [{{"path": "相对基座的路径", "line": 123, "quote": "该行原文片段（建议精炼在 {max_quote} 字内）"}}],
     "why": "为什么这是问题（语义判断）",
     "suggestion": "建议（或『无需修，仅记录』）",
     "confidence": 0.0}}
@@ -547,8 +592,11 @@ _SKELETON = """\
 - findings 必须是列表（可为空列表=本期零发现）；围栏块**只有这一块**，之前不要再输出
   其它 ```json 代码块。
 - **不要输出 id**：id 由机械侧按内容哈希铸造，你报的任何 id 都会被丢弃。
-- evidence 每项必填 path（相对路径）/line（≥1 整数）/quote（该行原文 ≤{max_quote} 字）；
+- evidence 每项必填 path（相对路径）/line（≥1 整数）/quote（该行原文片段）；
   evidence 至少一条。
+- quote 建议精炼在 {max_quote} 字内：超出**不会被拒收**——机械侧自动截断保留原文
+  前缀并在报告点名，所以别为守字数丢证据信息；但引文必须真实抄自标注的那一行
+  （机械逐条复核，不符=该条降级 unverified 并点名）。
 - severity 只认 high|med|low；confidence 是 0.0~1.0 的小数。
 - 红线：巡检只出报告与建议，绝不改码。
 """

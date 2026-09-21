@@ -2,11 +2,15 @@
 
 覆盖（工单验收②③④的纯函数面 + 方案 §4 步骤1 清单）：
 - 输出契约：围栏 JSON 恰一块纪律（0/2 块、坏 JSON、findings 非列表）、逐条 schema
-  畸形点名（缺 subject/severity 越域/缺空 evidence/证据项缺键/行号非法/quote 空或超限/
-  confidence 越域）、多余键丢弃；
+  畸形点名（缺 subject/severity 越域/缺空 evidence/证据项缺键/行号非法/quote 空或
+  空白【超长已改软提醒，不在畸形列——宿主令 260921】/confidence 越域）、多余键丢弃；
 - id 铸造：跨期稳定（空白差异/证据顺序换同 id）、内容变即新 id；
 - 证据机械复核：坏路径/绝对路径/越界/坏行号/引文不符逐项降级 unverified + reason 点名；
   空白差异应过；多证据部分坏=unverified+坏项点名；
+- 引文超长软提醒（宿主令 260921，t260922-01 事故回归）：227 字→在册+截断标注+人话
+  点名；恰 200 不标零新键；多证据只标超长项；截断保前缀→复核仍 verified、不符仍
+  unverified；计数 quote_overlong_warn 口径=保留集（被预算截掉不计）；prompt 软语义
+  +阈值单点可配；
 - 跨期去重与假报压制、预算截断（41→40、recurring 不占预算）、汇总/心跳；
 - 上期台账与裁定台账读取（畸形输入：坏 JSON/缺 findings/非列表 → None+点名 note）；
 - verdict 纯面：词表/别名/非法、apply_verdict_to_face 命中/未命中；
@@ -83,7 +87,7 @@ def test_parse_findings_not_list():
     ({"evidence": [{"path": "", "line": 1, "quote": "q"}]}, "path"),
     ({"evidence": [{"path": "a", "line": 1, "quote": "  "}]}, "quote"),
     ({"evidence": [{"path": "a", "line": 1}]}, "quote"),
-    ({"evidence": [{"path": "a", "line": 1, "quote": "x" * 201}]}, "超长"),
+    # 注意：超长（"x"*201）不再是畸形——宿主令 260921 改软提醒，见下方专组用例
     ({"confidence": 1.5}, "confidence"),
     ({"confidence": "high"}, "confidence"),
     ({"why": ""}, "why"),
@@ -180,6 +184,111 @@ def test_recheck_partial_bad_evidence_names_only_bad_item(tree):
     (out,) = ins.recheck_evidence([f], tree)
     assert out["verified"] == "unverified"
     assert len(out["unverified_reasons"]) == 1 and "500" in out["unverified_reasons"][0]
+
+
+# ---------- 引文超长软提醒（宿主令 260921：软提醒不判红；t260922-01 事故回归） ----------
+
+def test_overlong_quote_parsed_soft_with_annotation_and_note():
+    """227 字引文（t260922-01 事故形态）→ 解析成功、条目在册、截断标注+人话点名。
+
+    旧口径：>200 字=InspectParseError→整份巡检报废（findings=0、建议全陪葬）；
+    新口径：该条照常入册，超长引文截断保纯前缀+逐条点名（软提醒≠静默）。"""
+    raw = "长" * 227
+    fs = ins.parse_agent_findings(fenced([good_finding(
+        evidence=[{"path": "src/a.py", "line": 12, "quote": raw}])]))
+    assert len(fs) == 1, "该条照常入册（不判红不报废）"
+    ev = fs[0]["evidence"][0]
+    assert ev["quote"] == raw[:ins.MAX_QUOTE_CHARS], "截断=纯原文前缀（无省略号拼接）"
+    assert ev["quote_truncated"] is True and ev["quote_original_chars"] == 227
+    (note,) = fs[0]["quote_warns"]
+    assert "第 1 条" in note and "evidence[0]" in note
+    assert "227" in note and "200" in note and "截断" in note
+
+
+def test_quote_boundary_exact_limit_not_flagged_over_by_one_flagged():
+    """恰在上限=不标（条目零新键逐字节兼容）；超 1 字即标。"""
+    fs = ins.parse_agent_findings(fenced([good_finding(
+        evidence=[{"path": "a", "line": 1, "quote": "x" * 200}])]))
+    ev = fs[0]["evidence"][0]
+    assert len(ev["quote"]) == 200
+    assert "quote_truncated" not in ev and "quote_original_chars" not in ev
+    assert "quote_warns" not in fs[0]
+    fs2 = ins.parse_agent_findings(fenced([good_finding(
+        evidence=[{"path": "a", "line": 1, "quote": "x" * 201}])]))
+    assert fs2[0]["evidence"][0]["quote_original_chars"] == 201
+
+
+def test_overlong_flags_only_the_overlong_item():
+    """多证据只标超长项，其余项零新键；点名可对回证据序。"""
+    fs = ins.parse_agent_findings(fenced([good_finding(evidence=[
+        {"path": "a", "line": 1, "quote": "短引文"},
+        {"path": "a", "line": 2, "quote": "y" * 300}])]))
+    evs = fs[0]["evidence"]
+    assert "quote_truncated" not in evs[0] and evs[1]["quote_truncated"] is True
+    assert len(fs[0]["quote_warns"]) == 1 and "evidence[1]" in fs[0]["quote_warns"][0]
+
+
+def test_overlong_parse_is_deterministic_for_id_mint():
+    """截断确定性→同内容解析两次同 id（跨期去重键不漂）。"""
+    msg = fenced([good_finding(
+        evidence=[{"path": "src/a.py", "line": 12, "quote": "z" * 227}])])
+    i1 = ins.mint_finding_id(ins.parse_agent_findings(msg)[0])
+    i2 = ins.mint_finding_id(ins.parse_agent_findings(msg)[0])
+    assert i1 == i2
+
+
+def test_recheck_truncated_quote_prefix_passes_mismatch_still_unverified(tree):
+    """复核语义不变：截断保前缀→子串校验仍过=verified；引文本身不符→仍 unverified。"""
+    long_line = "assert old_fn()  # " + "上下文补充说明" * 40    # >227 字的真实行
+    p = tree / "src" / "a.py"
+    lines = p.read_text(encoding="utf-8").splitlines()
+    lines[11] = long_line                     # 0 基 index 11 = 第 12 行（证据锚行）
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    fs = ins.parse_agent_findings(fenced([good_finding(
+        evidence=[{"path": "src/a.py", "line": 12, "quote": long_line[:227]}])]))
+    (out,) = ins.recheck_evidence(fs, tree)
+    assert out["verified"] == "verified" and "unverified_reasons" not in out
+    fs2 = ins.parse_agent_findings(fenced([good_finding(
+        evidence=[{"path": "src/a.py", "line": 12, "quote": "这句引文根本不在行内" * 30}])]))
+    (out2,) = ins.recheck_evidence(fs2, tree)
+    assert out2["verified"] == "unverified" and out2["unverified_reasons"]
+
+
+def test_count_quote_overlong_truth_table():
+    """计数口径真值表（含畸形输入不炸——消费外部输入纪律）。"""
+    f1 = {"evidence": [{"quote_truncated": True}, {}]}
+    f2 = {"evidence": [{"quote_truncated": True}, {"quote_truncated": True}]}
+    assert ins.count_quote_overlong([]) == 0
+    assert ins.count_quote_overlong([f1]) == 1
+    assert ins.count_quote_overlong([f1, f2]) == 3
+    assert ins.count_quote_overlong([{"evidence": []}, {"evidence": None}, {}]) == 0
+    assert ins.count_quote_overlong([None, "垃圾", 7]) == 0
+
+
+def test_budget_meta_counts_quote_overlong_on_kept_set():
+    """review 条件②：计数口径=保留集——被预算截掉的条目不在票面在册，计数也不含它。"""
+    over_kept = good_finding(subject="超长在册", confidence=0.9,
+                             evidence=[{"path": "a", "line": 1, "quote": "x" * 227}])
+    over_dropped = good_finding(subject="超长被截", severity="low", confidence=0.9,
+                                evidence=[{"path": "a", "line": 1, "quote": "y" * 227}])
+    fs = ins.with_ids(ins.parse_agent_findings(
+        fenced([good_finding(), over_kept, over_dropped])))
+    kept, meta = ins.apply_budget(fs, 2)
+    assert meta["truncated"] == 1 and all(f["subject"] != "超长被截" for f in kept)
+    assert meta["quote_overlong_warn"] == 1, "只计保留集（与票面 quote_warns 可对账）"
+    _, meta0 = ins.apply_budget(ins.with_ids(ins.parse_agent_findings(
+        fenced([good_finding()]))), 40)
+    assert meta0["quote_overlong_warn"] == 0, "无超长=计数位 0（键恒在场）"
+
+
+def test_prompt_quote_soft_semantics_and_limit_follows_constant(monkeypatch):
+    """prompt 软语义（验收判据⑤）：不得再写「必须 ≤N 字」必须式；阈值单点可配。"""
+    p = ins.build_inspect_prompt("i", "p", "test", "b", "h", 10)
+    assert "200 字内" in p and "截断" in p and "点名" in p
+    assert "≤200 字" not in p and "必须 ≤" not in p, "软语义：超长不判红，不逼模型守字数"
+    monkeypatch.setattr(ins, "MAX_QUOTE_CHARS", 50)
+    p50 = ins.build_inspect_prompt("i", "p", "test", "b", "h", 10)
+    assert "50 字内" in p50 and "≤50 字" not in p50, "阈值改常量单点全链生效"
 
 
 # ---------- 去重/压制/预算/汇总/心跳 ----------
