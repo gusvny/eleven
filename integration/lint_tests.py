@@ -242,6 +242,26 @@ def lint_three_state():
         ok("L6 summarize 退出码形状合规")
 
 
+def _lint_targets():
+    """L7 的待判文件集：**git 认识的文件**（已跟踪 + 未跟踪但未被忽略）。
+
+    为什么不用 REPO.rglob 全量：仓里存在宿主侧被忽略的目录（如 .suyou/ 的
+    epic 配置），它们不进版本库、别的 checkout 里根本不存在——拿它们判红是
+    「不可复现的红」，看守必须只判仓库内容。反之泳道里新写、还没提交的场景
+    文件（未跟踪但未被忽略）必须判——新用法正是在那里产生。非 git 目录
+    （或 git 不可用）退化为 rglob，宁严不松。
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(REPO), "ls-files", "-c", "-o", "--exclude-standard", "-z"],
+            capture_output=True, text=True, timeout=60)
+        if out.returncode == 0:
+            return [REPO / r for r in out.stdout.split("\0") if r]
+    except Exception:                            # noqa: BLE001 —— git 不可用=退化不判错
+        pass
+    return [p for p in REPO.rglob("*") if p.is_file()]
+
+
 def lint_terminology():
     """L7 术语废止看守（宿主令 260920）：行话旧称（被禁词，真源=docs/terminology.md「禁用对照」）不得新增。
 
@@ -273,7 +293,7 @@ def lint_terminology():
     skip_dirs = {".git", ".lane", ".sandbox", ".sandbar", "node_modules",
                  "__pycache__", ".venv", "out", "data", ".pytest_cache"}
     hits, total = [], 0
-    for p in REPO.rglob("*"):
+    for p in _lint_targets():
         if not p.is_file() or p.suffix not in exts:
             continue
         rel_parts = set(p.relative_to(REPO).parts[:-1])
