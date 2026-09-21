@@ -1,8 +1,8 @@
 {
  "term": "腿",
- "generated": "260922(批四：t260920-01 归并带入的 54 处新增用法清零，含 main 上 run_scenarios/stage_docker)",
- "note": "存量出现次数上限：新增用法即 lint 红；替换批次落地时同步下调（值只许降）。-1 = 允许出现（术语表本体/基线自身）。批二 t260920-03 清 integration/+server(engine/plugins/tools) 写集；批四 t260920-01 归并带回的 54 处新增用法清零（含 main 侧 run_scenarios.py/stage_docker.py）；写集外的存量（notes/、根 verify.yaml、server/ui-check）帽原样保留待后续处置。判红范围=git 认识的文件（未跟踪但未被忽略的也算；gitignore 的宿主配置不判，红必须可复现）。",
- "total_before_allowlist": 44,
+ "generated": "260922(批四：t260920-01 归并带回的 54 处新增用法清零)",
+ "note": "存量出现次数上限：新增用法即 lint 红；替换批次落地时同步下调（值只许降）。-1 = 允许出现（术语表本体/基线自身）。批二 t260920-03 清 integration/+server(engine/plugins/tools) 写集；批四 t260920-01 归并带回的 54 处新增用法清零（含 main 侧 run_scenarios.py/stage_docker.py）。判红范围=git 认识的文件（未跟踪但未被忽略的也算；gitignore 的宿主配置不判，红必须可复现）。帽维不许上移：本文件任何键/total 的上调由 t260920-03-terminology-baseline-floor 判红（批四曾误加 7 个 0 帽键+给草稿笔记记帽 3 被它抓住，已回退）。",
+ "total_before_allowlist": 41,
  "counts": {
   "docs/terminology.md": -1,
   "integration/README.md": 0,
@@ -410,12 +410,6 @@
   "server/plugins/workbench/tests/t260919-02-terminal-face.mjs": 0,
   "server/tools/ticket.py": 0,
   "server/ui-check/capture.mjs": 1,
-  "verify.yaml": 5,
-  "integration/t260920-01/sc_supply_assembly_seam.py": 0,
-  "integration/t260920-01/sc_supply_wait_budget_probe.py": 0,
-  "integration/t260920-01/sc_supply_ensure_wait_cap.py": 0,
-  "integration/t260920-01/sc_supply_decl_contract.py": 0,
-  "server/engine/tests/test_t260920_01_supply_wait_budget.py": 0,
-  "notes/discussions/260917-在跑工单处置.md": 3
+  "verify.yaml": 5
  }
 }
