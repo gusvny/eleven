@@ -1468,6 +1468,14 @@ SCENARIOS = [
      "术语基线帽单调看守（t260920-03 要求②「值只许降；上调=红」的机械化，灰盒 L1 离线秒级，纯标准库零子进程）：L7（兄弟条目 terminology-l7-gate 所守）只判用量不新增，对「改基线本身」全盲——抬帽/扩 allowlist/加新键都能把新增用量合法化而 L7 恒绿。本条把 S4 落地后的基线冻结为 floor 快照（integration/t260920-03/terminology-baseline-floor.json，程序化生成、只降恒绿无需随批更新）：逐键现值≤floor、键集只许收缩、allowlist（-1）面冻结为术语表本体与基线自身、汇总 total_before_allowlist 只许降，违例逐条点名（帽被抬/免红令面扩/基线扩面/汇总上调）——封死「加用量同时抬帽给自己发免红令」（t260911-03 改共享守卫期望值同族事故的术语域形态）。比较器合成数据红绿电池自证（抬帽红/下调绿/缩键绿/扩 allowlist 红/扩键红/汇总上调红/畸形红）防检测器失明；出路可达面=L7 红行指向的 docs/terminology.md「禁用对照」真源在册且真列被禁字（chr 构词断言，红行出路不得 404）。与 terminology-l7-gate 不同面（彼守用量维、本条守帽维），合壁才完整不互替；被看守文件缺损/畸形=产品红点名（仓内受控资产面，非环境缺席，无 ENV_FAIL 子用例）",
      "python3 integration/t260920-03/sc_terminology_baseline_floor.py", "ro"),
 
+    # ---- t260921-04: developer 段验证纪律（宿主令 260921：单测可跑、集成禁跑+机械判据） ----
+    ("t260921-04-discipline-clause-contract",
+     "developer 段验证纪律的派活文案契约（t260921-04，宿主令 260921 要求①④文案侧，灰盒 L2 离线秒级）：dev-lane 两个 developer agent 段（create_plan/implement）的派活契约文本必须同批携带——禁跑语义锚（集成禁跑）、五类集成入口点名（run_scenarios.py、sc_ 场景脚本、integration/baselines 基线、with_stage.sh 包装器、verify_lane 验收脚本）、受影响面单测正道（pytest+integration/lint_tests.py）、只读放行语义、集成验证归属段（run_integration_tests 闸）与违规后果（红+票面点名），文案=人话+可执行（含可执行命令形态）非口号；其余 agent 段（review_plan/design_integration_tests/arbitrate/acceptance_walkthrough）的契约文本不携禁跑执法语义与集成执行器点名（执法与文案都只对 developer 段——「文案禁了机械不判/机械判了文案没说」单边态的文案半边+越段执法文案的反向误伤）。锚派活契约文本语义词与稳定文件名不锚全句（KI-051）；与 developer L1 口径同步测试（方案 S3 渲染产物字面）intent 不同面：本场景守公开派活契约面+他段负向对称。实现落地前红属预期（TDD 信号），run_integration_tests 期必须绿；引擎模块不可导入=ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260921-04/sc_discipline_clause_contract.py", "ro"),
+    ("t260921-04-discipline-receipt-journey",
+     "developer 段集成禁跑的回执执法旅程（t260921-04，宿主令 260921 要求②③+验收①②③④引擎接线面，灰盒 L3 离线秒级，真 zstd 会话档×真活动入口缓存挂点零 spawn）：A 构造子用例——developer 会话集成入口执行（run_scenarios.py）+同回合只读提及→回执红+summary 点名完整命令+结果文件回写 integration_violations 恰 1 条+既有字段形状逐字保留（验收④）+重入幂等不双写；B 允许面——受影响面 pytest、integration/lint_tests.py、只读 grep/sed/cat→零红零点名且结果文件逐字节不动（无命中不回写）；C P1 并行防误伤（KI-093 同族）——并行 integration 角色档（双代名 session.v3）mtime 更新且含集成执行→developer 回执不背红；D P2 防漏判——developer 档真违规+integration 档更新→红不丢且点名来自 developer 档；E 角色门——同形态 integration 角色段不执法；F -c 嵌套串两合法解——递归判一条（bash -c 内执行入口红、只读 ls 不红）或 -c 边界已声明不执法（声明=执法；naive 子串粗匹配会误伤只读，两边都不占=红）。锚回执 JSON 契约与票面 summary 语义不锚内部结构；与 developer L1（方案 §5 函数级夹具/挂点单测）intent 不同面：本场景守真活动入口×真 zstd 档×结果文件落盘×角色钉档（role 钉 <ticket>-developer 目录）全链。实现落地前红属预期（TDD 信号），run_integration_tests 期必须绿；zstd/引擎模块缺席=ENV_FAIL exit 2 点名",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260921-04/sc_discipline_receipt_journey.py", "ro"),
+
 ]
 
 CMD_TIMEOUT = 900

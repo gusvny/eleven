@@ -65,6 +65,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from temporalio import activity
 import agent_runtime  # 容器执行面传输层（t260913-04）：stdlib-only；其内不得 import 本包避免环
+import integration_discipline  # t260921-04：developer 段集成禁跑执法匹配器（纯函数零 IO，声明=执法同源）
 import authz_gates
 import dsh_pin  # dsh 版本面/钉路径（t260916-24）：stdlib-only 零仓内依赖
 import failure_protocol
@@ -963,6 +964,16 @@ def _read_result(path: Path) -> Optional[StageResult]:
     if isinstance(_raw_dropped, list):
         leg_dropped = list(dict.fromkeys(
             [str(x) for x in _raw_dropped] + list(leg_dropped)))
+    # t260921-04：集成禁跑执法两字段随回执读回——已回写红的档在幂等缓存重试时
+    # 不丢红（本函数是显式字段白名单，不加读侧=重试丢红；缺省 []/""=老回执无键
+    # 零改动）。条目校形：非映射条目跳过（不改形不静默并）。
+    integration_violations: List[Dict[str, str]] = []
+    _iv = raw.get("integration_violations")
+    if isinstance(_iv, list):
+        for _x in _iv:
+            if isinstance(_x, dict):
+                integration_violations.append(
+                    {str(k): str(v) for k, v in _x.items()})
     return StageResult(
         status=str(raw.get("status") or "ok"),
         summary=str(raw.get("summary") or ""),
@@ -977,6 +988,8 @@ def _read_result(path: Path) -> Optional[StageResult]:
         env_reason=str(raw.get("env_reason") or ""),
         handover_runs=legs,
         handover_dropped=leg_dropped,
+        integration_violations=integration_violations,
+        integration_scan_note=str(raw.get("integration_scan_note") or ""),
     )
 
 
@@ -1027,6 +1040,208 @@ def _apply_env_signal(res: StageResult, log_file: str, ticket_id: str = "",
         return res
     except Exception:  # 归类失败绝不拦交付链：无信号回落现状
         return res
+
+
+# ---- t260921-04：developer 段集成禁跑执法（宿主令 260921，声明=执法） ----
+
+
+def _decompress_session_text(path: Path) -> Tuple[str, str]:
+    """会话档 → 解压文本；返回 (text, err)，err 非空=解压/读失败（响亮 note 用）。
+    流式 Popen + finally kill/wait 全终态回收（_session_jsonl_torn 先例同款）；
+    errors="replace" 解码（乱行进判级不抛——先例容错带，票方案 §6）。"""
+    proc: Optional[subprocess.Popen] = None
+    try:
+        proc = subprocess.Popen(["zstd", "-dc", str(path)],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out, _ = proc.communicate()
+        return out.decode("utf-8", errors="replace"), ""
+    except Exception as e:
+        return "", "%s: %s" % (type(e).__name__, e)
+    finally:
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+        if proc is not None:
+            try:
+                proc.wait(timeout=10)
+            except Exception:
+                pass
+
+
+def _scan_integration_sessions(cwd: Path, ticket_id: str, role: str
+                               ) -> Tuple[List[Dict[str, str]], List[str]]:
+    """developer 段集成禁跑执法扫描（票 t260921-04，宿主令 260921）。
+
+    选档口径（review C1 结构性修正：角色钉档）——扫描根
+    `.dsh/sessions/<slug>/<ticket_id>-<role>/`：会话 id 缺省=ticket-role（本文件
+    spawn 处 env 注入），glob 后按父目录名精确过滤（slug 中间层不硬编）；目录内
+    双代文件用 _pick_newest_session 消歧（其本职契约=同目录内双代）。
+    **绝不全树按 mtime 选档**——implement∥design_integration_tests 真并行下
+    integration 角色档正被活写、mtime 必最新，跨角色选档=误伤+漏判双向失真。
+
+    段归属（review C4）：只判「最后一条 user/message 帧」之后的 tool/call 执行帧
+    （=本段派活回合）；档内 user/message>1 → note「仅判最近回合」（同票同角色
+    超时重试续同会话；零行为变更、保零静默）。不按 prompt 内容锚定的理由：
+    user/message 帧文本形状真源在 dsh 仓外，包含匹配脆，计数 note 更稳。
+
+    零静默立场（review C2b/C5，与 _apply_env_signal 的 fail-open 刻意不同）：
+    零档/不可读/异常 → notes 响亮记录，不吞不误判红——执法 fail-open=静默漏判红。
+
+    返回 (violations, notes)；violations 每条 {cmd,entry,segment,seq}；
+    violations=空 + notes 非空=「未判成」，不是「判绿」。"""
+    notes: List[str] = []
+    violations: List[Dict[str, str]] = []
+    session_hint = "%s-%s" % (ticket_id, role)
+    session_path = "?"
+    try:
+        sessions_root = cwd / ".dsh" / "sessions"
+        candidates: List[Path] = []
+        if sessions_root.is_dir():
+            for f in sessions_root.glob("*/%s/*" % session_hint):
+                if f.is_file() and f.name in SESSION_FILE_NAMES:
+                    candidates.append(f)
+        if not candidates:
+            # 零发现态（review C5）：响亮 note，不静默绿。
+            notes.append("未发现 %s 会话档，本段未扫（DSH_HOME 漂移/检疫挪走等）"
+                         % session_hint)
+            return violations, notes
+        session = _pick_newest_session(candidates)
+        if session is None:
+            notes.append("会话档均不可读（stat 失败），本段未扫：%s" % session_hint)
+            return violations, notes
+        session_path = str(session)
+        text, err = _decompress_session_text(session)
+        if err:
+            notes.append("会话档解压失败 %s（%s），本段未判" % (session_path, err))
+            return violations, notes
+        # 行级解析：空行跳过不判（_session_jsonl_torn 同立场——空行非格式违约）。
+        tool_frames: List[Tuple[int, Any]] = []
+        turns = 0
+        last_user_i = -1
+        parsed = 0
+        for i, ln in enumerate(text.split("\n")):
+            line = ln.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(obj, dict):
+                continue
+            parsed += 1
+            t = obj.get("type")
+            if t == "user/message":
+                turns += 1
+                last_user_i = i
+            elif t == "tool/call":
+                tool_frames.append((i, obj))
+        if parsed == 0:
+            notes.append("会话档零可解析行（解压成功但内容不识），本段未判：%s"
+                         % session_path)
+            return violations, notes
+        # 畸形 arguments 逐条计数（零静默），不拦其余帧的判。
+        dropped = 0
+        for i, obj in tool_frames:
+            if i <= last_user_i:
+                continue  # 只判本段回合（最后一条 user/message 之后）
+            data = obj.get("data")
+            if not isinstance(data, dict):
+                dropped += 1
+                continue
+            raw_args = data.get("arguments")
+            if not isinstance(raw_args, str) or not raw_args.strip():
+                dropped += 1
+                continue
+            try:
+                tool_args = json.loads(raw_args)
+            except ValueError:
+                dropped += 1
+                continue
+            cmd = tool_args.get("command") if isinstance(tool_args, dict) else None
+            if not isinstance(cmd, str) or not cmd.strip():
+                continue  # 非 bash 形工具帧（read/grep 等）：非畸形，也不在执法面
+            for hit in integration_discipline.scan_bash_command(cmd):
+                item = dict(hit)
+                item["seq"] = str(obj.get("seq") or "")
+                violations.append(item)
+        if dropped:
+            notes.append("工具帧 arguments 畸形 %d 条（非 JSON/缺字段），未判" % dropped)
+        if turns > 1:
+            notes.append("本档共 %d 个回合，仅判最近回合，其余 %d 回合未执法"
+                         "（同票同角色续同会话）" % (turns, turns - 1))
+        if turns == 0:
+            notes.append("会话档无 user/message 帧（未定位到本段起点），已扫全档：%s"
+                         % session_path)
+        return violations, notes
+    except Exception as e:  # 执法扫描异常响亮不吞（fail-open=静默漏判红，不可取）
+        notes.append("扫描异常 %s: %s（本段未判，档=%s）"
+                     % (type(e).__name__, e, session_path))
+        return violations, notes
+
+
+def _stamp_result_file_integration(rfile: Path, res: StageResult) -> None:
+    """执法命中写回结果文件（票面点名必须落盘——结果文件是幂等锚点+票面）。
+    幂等：文件已有 integration_violations 键则不重写（重试/缓存命中安全）。"""
+    try:
+        raw = json.loads(rfile.read_text("utf-8"))
+    except Exception:
+        return
+    if not isinstance(raw, dict) or "integration_violations" in raw:
+        return
+    raw["integration_violations"] = res.integration_violations
+    raw["status"] = res.status
+    raw["summary"] = res.summary
+    try:
+        rfile.write_text(json.dumps(raw, ensure_ascii=False, indent=1) + "\n",
+                         "utf-8")
+    except Exception:
+        pass
+
+
+def _apply_integration_discipline(res: StageResult, cwd: Path,
+                                  args: "AgentStageArgs") -> StageResult:
+    """developer 段集成禁跑执法归位（票 t260921-04，宿主令 260921）。
+
+    - role != developer → 原样返回（宿主令只限 developer 段；执法集合与
+      FLOW_BRIEF 注入键严格一致=create_plan+implement，无「机械判了文案没说」
+      单边态——ui_evidence 虽 developer 但 parts=("script",) 无 agent 面）；
+    - 命中 → status=failed + summary 前缀点名首条命令 + report/evidence 追加 +
+      integration_violations 填充 + 结果文件回写（票面点名落盘）；
+    - 无命中有 note → 只填内存 integration_scan_note + 活动日志（不回写文件，
+      最小侵入；note 不翻红绿——review K2：同角色共档使多回合 note 常驻，
+      是说明性信号非失败信号）。
+    挂点与 _apply_env_signal 同款双返回点（缓存命中/真 spawn）；stub 路径（桩零
+    会话面，扫=必落零档 note 噪音）与 lane_dsh 预检拒绝路径（未 spawn 无新帧；
+    env 先例同立场：拒绝证据文案可能含敏感字样误挂污染归因）**有意不挂**——
+    取舍清单见票方案 §6。"""
+    if getattr(args, "role", "") != "developer":
+        return res
+    violations, notes = _scan_integration_sessions(cwd, args.ticket_id, args.role)
+    if notes:
+        res.integration_scan_note = "；".join(notes)
+        activity.logger.info("[%s/%s] 集成禁跑扫描注记：%s",
+                             args.ticket_id, args.stage_id,
+                             res.integration_scan_note)
+    already = bool(res.integration_violations)  # 幂等缓存重入：文件已带红，勿重复改写
+    if not violations:
+        return res
+    res.integration_violations = violations
+    if already:
+        return res
+    first = violations[0].get("cmd", "")
+    res.status = "failed"
+    res.summary = ("【红线】developer 段禁跑集成（宿主令 260921）：%s ｜ 原摘要：%s"
+                   % (first, res.summary))[:500]
+    res.report = (res.report or "") + "\n\n## 集成禁跑红线证据\n" + "\n".join(
+        "- `%s`（入口=%s，会话 seq=%s）" % (v.get("cmd", ""), v.get("entry", ""),
+                                           v.get("seq", ""))
+        for v in violations)
+    res.evidence = (res.evidence or "") + "\nintegration_violations=" + json.dumps(
+        violations, ensure_ascii=False)
+    _stamp_result_file_integration(Path(args.result_file), res)
+    activity.logger.info("[%s/%s] 集成禁跑红线：%d 条命中，首条=%s",
+                         args.ticket_id, args.stage_id, len(violations), first)
+    return res
 
 
 def _patch_result_prompt(rfile: Path, prompt: str) -> None:
@@ -2074,8 +2289,12 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
                 _apply_settle_note(cached, note, refusal=refusal or None)
             # t260917-08（M1 挂点①幂等缓存）：缓存命中仍做日志扫描补位——上次
             # worker 可能死在「agent 交付后、归位前」，日志文件仍在原处。
-            return _apply_env_signal(cached, args.log_file,
-                                     args.ticket_id, args.stage_id)
+            res = _apply_env_signal(cached, args.log_file,
+                                    args.ticket_id, args.stage_id)
+            # t260921-04（挂点①幂等缓存）：developer 段集成禁跑执法扫描——缓存
+            # 命中路径同样执法（重试/重启后红不丢：_read_result 已带回字段，
+            # 归位幂等不重复改写）。
+            return _apply_integration_discipline(res, cwd, args)
 
     if os.environ.get("SANDBAR_AGENT_STUB") == "1":
         # Self-test / demo stub: write our own result file and return (no agent
@@ -2216,8 +2435,12 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
                     # t260917-08（M1 挂点④真 spawn）：环境信号归位（自报优先，
                     # 日志扫描补位）。lane_dsh 预检拒绝路径（上方独立 return）
                     # 与 stub 路径（旋钮直注）有意不挂——见 _apply_env_signal。
-                    return _apply_env_signal(res, args.log_file,
-                                             args.ticket_id, args.stage_id)
+                    res = _apply_env_signal(res, args.log_file,
+                                            args.ticket_id, args.stage_id)
+                    # t260921-04（挂点②真 spawn）：developer 段集成禁跑执法扫描
+                    # ——stub 与 lane_dsh 预检拒绝路径同样有意不挂（理由与取舍
+                    # 清单见 _apply_integration_discipline docstring）。
+                    return _apply_integration_discipline(res, cwd, args)
             rc = proc.poll()
             if rc is not None:
                 # The agent process exited without writing a result file = an

@@ -2543,6 +2543,14 @@ class StageResult:
     # 被 normalize 丢弃/截断的条目名单（透明面：dropped 摘要进票面注记/活动日志/
     # 仲裁上下文，「不静默丢」三处可查——review M4）。
     handover_dropped: List[str] = field(default_factory=list)
+    # t260921-04（宿主令 260921「developer 段单测可跑、集成禁跑」）：执法扫描命中
+    # 清单（每条 {cmd,entry,segment,seq}）——worker 执行面扫 agent 会话流水的
+    # tool/call 执行帧得出，命中=段红+票面点名。缺省 [] = 老回执重放安全
+    # （gate_refusal/env_fail 先例）。
+    integration_violations: List[Dict[str, str]] = field(default_factory=list)
+    # 扫描未覆盖/异常的响亮注记（零静默；**不翻红绿**——K2 观察项：同票同角色续
+    # 同会话使「多回合 note」常驻，属说明性信号非失败信号）。缺省 "" 同上。
+    integration_scan_note: str = ""
 
 
 # handover_runs 的形状上限（t260917-08：防御面非功能面——条数/长度上限在 normalize

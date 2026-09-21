@@ -48,6 +48,10 @@ with workflow.unsafe.imports_passed_through():
     # t260915-05：模板拓扑导出面（纯数据零 IO；mock ④「引擎按模板导出 stage 图」，
     # 渲染器只认节点+边+kind——KI-019 线性近似泳道图的真拓扑承载）。
     import template_topology
+    # t260921-04：developer 段验证纪律文案（宿主令 260921「单测可跑、集成禁跑」）
+    # ——FLOW_BRIEF 的 clause 由其 prompt_clause() 从 FORBIDDEN_ENTRIES 渲染，
+    # 文案与执法匹配器同源（声明=执法，两侧必须同批改）。
+    import integration_discipline
     from agent_activities import (
         arbitrate,
         acceptance_walkthrough,
@@ -365,7 +369,8 @@ FLOW_BRIEF = {
         "分几步、每步怎么验证。把方案全文写进结果文件 summary/evidence。"
         "备选分解（宿主令 20260903 试行）：方案须另列 1-2 个备选切法"
         "（步骤划分/排序/分层之异，非功能取舍）并各一句说明为何不选——"
-        "逼分解成为想过的选择而非习惯模子；review_plan 可据此追问切法合理性。"),
+        "逼分解成为想过的选择而非习惯模子；review_plan 可据此追问切法合理性。"
+        + integration_discipline.prompt_clause()),
     "review_plan": (
         "你是 reviewer。审读上一步的方案（见上下文），逐条写 review comments。三态结论"
         "（summary **必须以 verdict= 开头标明**，如「verdict=pass …」；结果文件 status 与"
@@ -391,7 +396,8 @@ FLOW_BRIEF = {
         '"env_fail":true 与 "env_reason"（日志原文摘录），没能亲自跑的验证逐条写 '
         '"handover_runs":[{"name":"…","cmd":"…"}]（≤20 条，cmd 为泳道根可独立执行）——'
         "验证由集测段 worker 执行面代跑，票不停摆；不许谎报 status=failed（非实现缺位），"
-        "也不许用 status=ok 掩盖「验证未运行」。"),
+        "也不许用 status=ok 掩盖「验证未运行」。"
+        + integration_discipline.prompt_clause()),
     "design_integration_tests": (
         # t260902-12（票）：用例设计依据第三项=组件对外契约与行为规格（以修订二为准）
         "你是 integration，负责从**用户使用场景**出发为本次工单设计集成测试集（灰盒视角："

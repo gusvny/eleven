@@ -276,10 +276,14 @@ def test_d4_log_read_failure_never_blocks_delivery_chain(tmp_path):
 def test_d5_four_path_hooks_source_lock():
     # M1：挂点=幂等缓存+真 spawn 恰两处；stub 路径（旋钮直注）与 lane_dsh 预检
     # 拒绝路径有意不挂（拒绝证据含 sandbox 字样会污染归因，gate_refusal 已是真因）。
+    # t260921-04：env 归位后同位再接集成禁跑执法归位（res = …; return _apply_…），
+    # 本锁随挂点形态忠实更新，锁的意图不变：两代挂点都须双路在场，漂移必绊。
     src = _src("agent_activities.py")
     assert src.count("_apply_env_signal(") == 3          # def + 2 调用点
-    assert "return _apply_env_signal(cached" in src
-    assert "return _apply_env_signal(res" in src
+    assert src.count("_apply_integration_discipline(") == 3   # def + 2 调用点
+    assert "res = _apply_env_signal(cached" in src
+    assert "res = _apply_env_signal(res" in src
+    assert "return _apply_integration_discipline(res, cwd, args)" in src
     assert "return _apply_env_signal(stub" not in src
 
 

@@ -2,8 +2,10 @@
 """t260902-12 集成测试 B：dev_lane.py FLOW_BRIEF design_integration_tests 条款落地检测。
 
 不 import 模块（避开 temporalio 等运行时依赖）：py 语法用 compile()，FLOW_BRIEF 结构用
-ast 抽取 Assign 后 literal_eval。断言绑定公开契约（FLOW_BRIEF: Dict[str, str] 的内容），
-绑定浅：先剥空白再比对，任何源码折行变化不影响判定。失败 => 非零退出。
+ast 抽取 Assign 后读值——literal_eval 优先（纯字面量），含单点渲染调用（t260921-04
+声明=执法同源形态）时回退字面部分静态求值，短语断言语义不变。断言绑定公开契约
+（FLOW_BRIEF: Dict[str, str] 的内容），绑定浅：先剥空白再比对，任何源码折行变化不
+影响判定。失败 => 非零退出。
 运行：python3 integration/t260902-12/test_flow_brief_landed.py（cwd 不限，路径按脚本定位）。
 """
 import ast
@@ -34,14 +36,47 @@ except SyntaxError as e:
     print(f"[t260902-12][brief] SETUP FAIL: 语法错误：{e}")
     sys.exit(1)
 
-# 结构契约：FLOW_BRIEF 仍是 Dict[str, str]，且全部条目健在
+# 结构契约：FLOW_BRIEF 仍是 Dict[str, str]，且全部条目健在。
+# t260921-04 修向（守卫改读法不变契约，t260917-01 修向④先例）：FLOW_BRIEF 值允许
+# 「字面量 + 单点渲染调用」形态（integration_discipline.prompt_clause()——宿主令
+# 260921 的声明=执法单点真源，方案定稿形态）。读法：literal_eval 优先（纯字面量
+# 老形态逐值读回）；非纯字面量时回退「字面部分静态求值」（Constant/BinOp-Add 保留
+# 拼接序，渲染调用跳过）——短语断言语义不变（字面部分跨行拼接不裂），渲染产物
+# 的内容契约由 integration_discipline 自身 UT 与 t260921-04-discipline-clause-contract
+# 场景守，本守卫不重复。
 tree = ast.parse(source)
 brief = None
+computed = False
+
+
+def _literal_part(node):
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _literal_part(node.left), _literal_part(node.right)
+        return None if left is None or right is None else left + right
+    if isinstance(node, ast.Call):
+        return ""  # 单点渲染调用：字面部分之外的渲染产物，本守卫不读
+    return None
+
+
 for node in ast.walk(tree):
     if isinstance(node, ast.Assign) and any(
         isinstance(t, ast.Name) and t.id == "FLOW_BRIEF" for t in node.targets
     ):
-        brief = ast.literal_eval(node.value)
+        try:
+            brief = ast.literal_eval(node.value)
+        except ValueError:
+            print("[t260921-04][brief] NOTE: FLOW_BRIEF 含单点渲染调用"
+                  "（声明=执法同源，t260921-04 形态）——按字面部分静态求值读回，"
+                  "短语断言语义不变（守卫改读法不变契约，t260917-01 先例）")
+            if isinstance(node.value, ast.Dict):
+                brief = {}
+                for k, v in zip(node.value.keys, node.value.values):
+                    if isinstance(k, ast.Constant) and isinstance(k.value, str):
+                        part = _literal_part(v)
+                        brief[k.value] = part if part is not None else ""
+            break
         break
 check("FLOW_BRIEF 可静态求值为 dict", isinstance(brief, dict))
 expected_keys = {
