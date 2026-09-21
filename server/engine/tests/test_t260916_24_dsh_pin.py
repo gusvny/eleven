@@ -64,10 +64,11 @@ def test_default_equal_to_agent_activities_dsh_cmd():
 
 
 def test_spawn_wiring_uses_resolver_source_anchor():
-    """源码锚：_prepare_agent_spawn 的 cmd 组装走 resolve_dsh_cmd（防接线漂移回退），
-    且 DSH_CMD 缺省别名仍在（import 现状保底）。"""
+    """源码锚：_prepare_agent_spawn 的 cmd 组装走声明钉解析单点 _dsh_resolved
+    （t260921-14 接线翻新：resolve_dsh_cmd 的声明入参经 _dsh_resolved 进入，防接线
+    漂移回退到 env-only 旧锚），且 DSH_CMD 缺省别名仍在（import 现状保底）。"""
     src = (ENGINE / "agent_activities.py").read_text("utf-8")
-    assert "resolved_dsh = dsh_pin.resolve_dsh_cmd()" in src
+    assert "resolved_dsh = _dsh_resolved(project)" in src
     assert 'pin_file = artifacts_dir / ("dsh_pin_%s.json" % tag)' in src
     assert "DSH_CMD = shlex.split(" in src
 

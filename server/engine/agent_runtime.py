@@ -27,10 +27,11 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import signal
 import subprocess
 import time
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 # ---- 旋钮（环境变量名/缺省值是契约面，改名=破兼容） ----
 RUNTIME_ENV = "SANDBAR_AGENT_RUNTIME"
@@ -39,7 +40,10 @@ DEFAULT_RUNTIME = "host"          # D6：存量语义冻结；生产接线=run_w
 DOCKER_BIN_ENV = "SANDBAR_DOCKER_BIN"   # 单测注入 fake docker 的缝
 DEFAULT_DOCKER_BIN = "docker"
 IMAGE_ENV = "SANDBAR_AGENT_IMAGE"
-DEFAULT_AGENT_IMAGE = "sandbar-agent:dsh-0.1.1-rc.2-s1"   # 与 build_agent_image.sh 缺省同步（单测防漂移）
+# t260921-14 镜像同升（Q3=同升）：三处缺省同翻 0.1.5-rc.2-s1（本处+Dockerfile ARG+
+# build_agent_image.sh，test_镜像版本三处同步机械防漂移）；回退=env 指回旧 tag
+# （SANDBAR_AGENT_IMAGE=sandbar-agent:dsh-0.1.1-rc.2-s1，无需重建）或本行回改。
+DEFAULT_AGENT_IMAGE = "sandbar-agent:dsh-0.1.5-rc.2-s1"
 BASH_TIMEOUT_MS_ENV = "SANDBAR_AGENT_BASH_TIMEOUT_MS"
 BASH_TIMEOUT_MS_DEFAULT = 900000  # D8：对齐引擎 SANDBAR_INTEG_CMD_TIMEOUT_SEC 缺省 900s（有界有源）
 
@@ -97,6 +101,80 @@ def bash_timeout_ms() -> int:
     except ValueError:
         v = BASH_TIMEOUT_MS_DEFAULT
     return max(1000, v)
+
+
+# ---- 容器内 dsh 版本实测（t260921-14 交付③：三面自检的容器实证面） ----
+# 版本样 token（与 dsh_pin._VERSION_RE 同语义：semver 带预发布段；本模块禁仓内依赖
+# 故就地复制——漂移由 tri_face 的 tag-derived vs 实测对账兜住，两处表达同一契约）。
+_VERSION_LIKE_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
+DSH_PROBE_CONTAINER_PREFIX = "sandbar-dsh-probe-"
+DSH_PROBE_TIMEOUT_SEC = 60.0
+
+
+def probe_image_dsh_version(image: str, docker_bin_override: Optional[str] = None,
+                            timeout: float = DSH_PROBE_TIMEOUT_SEC) -> Dict[str, Any]:
+    """一次性容器内实测 `dsh --version`（t260921-14）：tag-derived 是弱证据，实测防
+    「tag 约定漂移无人知」（关 dsh_pin.image_tag_version 的 TODO(T3/Q3)）。
+
+    观测面原语：任何失败都不外抛，返回 {"version": str|None, "state": "ok"|"error",
+    "detail": str}——真正起容器失败自有 ensure_container/spawn 路径响亮。全终态回收：
+    正常路径 --rm 自净；超时/异常路径 killpg 收割 docker run 客户端 + 按名
+    `docker rm -f` 兜底（SIGKILL 客户端后容器可能残留至命令自然退出为止，按名强拆
+    保证无孤儿）；容器名带 pid+毫秒唯一段，防并发/复跑撞名。docker_bin_override=
+    单测注入缝（生产缺省走 docker_bin() 的 DOCKER_BIN_ENV 旋钮）。
+    """
+    dbin = docker_bin_override or docker_bin()
+    name = "%s%d-%d" % (DSH_PROBE_CONTAINER_PREFIX, os.getpid(), int(time.monotonic() * 1000) % 100000)
+    argv = [dbin, "run", "--rm", "--name", name, image, "dsh", "--version"]
+
+    def _force_remove() -> None:
+        try:
+            subprocess.run([dbin, "rm", "-f", name], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+                           timeout=DOCKER_RM_TIMEOUT_SEC, check=False)
+        except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
+            pass  # 兜底清理失败不外抛（观测面；残留容器由 gc_stale_containers 族按 label 收）
+
+    try:
+        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL, start_new_session=True)
+    except OSError as e:
+        _force_remove()
+        return {"version": None, "state": "error",
+                "detail": "起不了 docker run（镜像=%s）：%s" % (image, e)}
+    try:
+        out, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except OSError:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:  # pragma: no cover - SIGKILL 后不该发生
+            pass
+        _force_remove()
+        return {"version": None, "state": "error",
+                "detail": "容器内 dsh --version 超时（>%ss，镜像=%s），进程组已收割+容器按名强拆"
+                          % (timeout, image)}
+    except BaseException:
+        _force_remove()
+        raise
+    text = (out or b"").decode("utf-8", "replace").strip()
+    if proc.returncode != 0:
+        return {"version": None, "state": "error",
+                "detail": "容器内 dsh --version 退出码 %s（镜像=%s），输出=%r"
+                          % (proc.returncode, image, text[:200])}
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if len(lines) != 1 or not _VERSION_LIKE_RE.match(lines[0]):
+        return {"version": None, "state": "error",
+                "detail": "容器内 dsh --version 输出非单行版本样（%d 行，镜像=%s）：%r"
+                          % (len(lines), image, text[:200])}
+    return {"version": lines[0], "state": "ok",
+            "detail": "容器内实测 %s（镜像=%s）" % (lines[0], image)}
 
 
 def sandbox_pin_yaml() -> str:

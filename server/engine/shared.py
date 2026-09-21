@@ -3991,7 +3991,9 @@ def ticket_data_dir(project_key: str, ticket_id: str) -> pathlib.Path:
 
 DEFAULT_ROLES_DIR = "server/roles"   # the fallback convention: the roles directory (relative to the project root)
 
-PATHS_DECL_KEYS = ("roles_dir", "model_routes", "inspection_decl")
+# t260921-14 增 dsh_bin：dsh 二进制路径钉（机器级放宽口径，同 model_routes 家族；
+# 未知键红/重复键红由 _entry_paths_parse 的 closed set 自动覆盖新键）。
+PATHS_DECL_KEYS = ("roles_dir", "model_routes", "inspection_decl", "dsh_bin")
 
 
 class ProjectPathsError(ValueError):
@@ -4108,7 +4110,9 @@ def project_paths(project_key: str, roles_base: str = "",
     """Read the paths section of a registered entry's project.yaml (contract ①d's only
     read entry point). Returns:
       {"roles_dir": Path|None, "roles_rel": str|None,
-       "model_routes": Path|None, "model_routes_rel": str|None, "main_dir": str|None}
+       "model_routes": Path|None, "model_routes_rel": str|None,
+       "inspection_decl": Path|None, "inspection_decl_rel": str|None,
+       "dsh_bin": Path|None, "dsh_bin_rel": str|None, "main_dir": str|None}
 
     Undeclared (any of the four fallback classes) → both the Path and the rel are None and
     the consumer falls back to the current convention; declared → the resolved absolute
@@ -4124,6 +4128,7 @@ def project_paths(project_key: str, roles_base: str = "",
     info: Dict[str, Any] = {"roles_dir": None, "roles_rel": None,
                             "model_routes": None, "model_routes_rel": None,
                             "inspection_decl": None, "inspection_decl_rel": None,
+                            "dsh_bin": None, "dsh_bin_rel": None,
                             "main_dir": None, "entry": None}
     if not key or not PROJECT_KEY_RE.match(key):
         return info
@@ -4171,6 +4176,23 @@ def project_paths(project_key: str, roles_base: str = "",
         else:
             info["inspection_decl"] = pathlib.Path(base) / resolved  # 相对：项目主目录下
         info["inspection_decl_rel"] = raw
+    if "dsh_bin" in paths:
+        # dsh 二进制路径钉（t260921-14）：与 model_routes 同一机器级放宽口径（~/…、绝对、
+        # 相对拼项目主目录）；校验词法照抄 _decl_routes_path，但**回落语义不照抄路由表**
+        # （取舍清单 #14，落 test_t260921_14_dsh_path_pin.py 头注）——缺省（未声明）=裸
+        # `dsh` 走 PATH，本身是完整配置非降级；声明在场=消费侧 fail-closed（锚点缺失/
+        # 类型错位/不可执行=红，见 dsh_bin_for_spawn），绝无「仓内兜底二进制」形态。
+        base = routes_base or main_dir
+        if not base:
+            raise ProjectPathsError(
+                "%s: paths.dsh_bin 已声明但条目缺可用 dirs 首项，无法定项目主目录（畸形）" % label)
+        raw = _decl_routes_path("dsh_bin", paths["dsh_bin"], label)
+        resolved = _resolve_decl_routes_path(raw)
+        if resolved.is_absolute():
+            info["dsh_bin"] = resolved          # 机器级/绝对形态（同 t260910-14 放宽）
+        else:
+            info["dsh_bin"] = pathlib.Path(base) / resolved  # 相对：项目主目录下
+        info["dsh_bin_rel"] = raw
     if "roles_dir" in paths:
         rel = _decl_rel("roles_dir", paths["roles_dir"], label)
         info["roles_dir"] = pathlib.Path(roles_base or os.getcwd()) / rel
@@ -4205,6 +4227,26 @@ def roles_dir_for_spawn(project_key: str, cwd) -> pathlib.Path:
         _require_anchor(info["entry"], "roles_dir", info["roles_dir"], "dir")
         return info["roles_dir"]
     return pathlib.Path(cwd) / DEFAULT_ROLES_DIR
+
+
+def dsh_bin_for_spawn(project_key: str) -> Optional[pathlib.Path]:
+    """Spawn consumer ④（t260921-14）：dsh 二进制路径钉。未声明 → None（调用方保持裸
+    `dsh` 走 PATH 的现状——缺省是完整配置非降级，可见性由 dsh_pin 版本面 info/日志
+    点名，不加每-spawn warning 噪声）；声明在场 → 解析 + fail-closed 锚点判定：缺失/
+    不是文件/不可执行（os.access X_OK）一律 ProjectPathsError 点名条目与解析后路径。
+    翻钉坏了还回落旧 dsh = 票面要防的「同票两段行为分叉」本身，宁红不静默；与
+    --version 探测失败两级分明（取舍清单 #10/#13：声明面缺陷红拦 spawn，探测失败=
+    观测面照记不拦）。回退 = 删/注释该声明行（引擎层一行回退，票面交付④）。"""
+    info = project_paths(project_key)
+    p = info["dsh_bin"]
+    if p is None:
+        return None
+    _require_anchor(info["entry"], "dsh_bin", p, "file")
+    if not os.access(p, os.X_OK):
+        raise ProjectPathsError(
+            "%s: paths.dsh_bin 声明锚点不可执行（fail-closed 红；翻钉坏了不回落裸 dsh，"
+            "回退=删/注释该声明行）：%s" % (info["entry"], p))
+    return p
 
 
 def routes_file_for_spawn(project_key: str) -> Dict[str, Any]:

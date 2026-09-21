@@ -141,21 +141,102 @@ DSH_CMD = shlex.split(os.environ.get("SANDBAR_AGENT_CMD") or "dsh --profile sand
 _DSH_FACE_ONCE: Dict[str, Any] = {}
 
 
-def _dsh_face_once() -> Dict[str, Any]:
-    """worker 进程级一次的 dsh 版本面（t260916-24）：首票 spawn 计算后复用——
-    probe_dsh_version 是子进程（≤10s 超时），不必每次 spawn 重跑。坏 SANDBAR_AGENT_CMD
-    不在这里挡（cmd 组装处的 resolve_dsh_cmd 已响亮抛）；这里把异常降级为 error face，
-    保观测面照记、不挡 spawn 的其余准备步骤。"""
-    if not _DSH_FACE_ONCE:
+def _dsh_resolved(project: str) -> Dict[str, Any]:
+    """dsh 命令解析单点（t260921-14 声明钉）：SANDBAR_AGENT_CMD（env 整命令）>
+    paths.dsh_bin 声明（只钉二进制）> 缺省裸 `dsh`（现状逐字，回归锚）。cmd 组装与
+    face 组装共用同一份结果（face↔spawn 同源——翻钉后票面报的就是实际被钉的二进制）。
+    声明面缺陷（锚点缺失/类型错位/不可执行）由 shared.dsh_bin_for_spawn 在此
+    fail-closed 抛——读了解释就要对声明负责，翻钉坏了不回落裸 dsh（裁定 a，取舍清单
+    #10/#13 两级分明：声明缺陷红拦，--version 探测失败归观测面不拦）。
+    docker 形态不消费声明（cmd 在容器内解析，宿主绝对路径不可见——红线 2 只挂泳道）：
+    声明在场=warning 点名后忽略，容器内版本面由镜像承载（旋钮=SANDBAR_AGENT_IMAGE）；
+    env 遮蔽声明同此响亮点名，绝不静默吞掉任何一边。"""
+    declared = shared.dsh_bin_for_spawn(project) if project else None
+    if declared and agent_runtime.runtime_mode() == "docker":
+        activity.logger.warning(
+            "[dsh_pin] paths.dsh_bin 已声明但 docker 形态不消费（cmd 在容器内解析，宿主"
+            "路径不可见；容器内 dsh 由镜像承载，旋钮=SANDBAR_AGENT_IMAGE）：声明=%s"
+            "（project=%s）", declared, project or "-")
+        declared = None
+    declared_str = str(declared) if declared else None
+    resolved = dsh_pin.resolve_dsh_cmd(dsh_bin=declared_str)
+    if resolved.get("dsh_bin_shadowed"):
+        activity.logger.warning(
+            "[dsh_pin] SANDBAR_AGENT_CMD 与 paths.dsh_bin 并存：env 整命令优先，声明被"
+            "遮蔽（声明=%s，project=%s）", declared_str, project or "-")
+    return resolved
+
+
+def _dsh_face_once(resolved: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """worker 进程级 dsh 版本面（t260916-24；t260921-14 改按「解析形态」keyed memo）：
+    probe_dsh_version 是子进程（≤10s 超时）不必每次 spawn 重跑，但钉按项目而异——
+    memo key 必须含 cmd（单值 memo 会让翻钉后第二张票拿到第一张票的 face=串面）。
+    resolved 由 _dsh_resolved 传入=与 spawn cmd 同源（C1 贯通）；不传=env 锚现状
+    （进程级启动面语义，worker.py 调用形态）。坏 SANDBAR_AGENT_CMD 不在这里挡
+    （cmd 组装处已响亮抛）；异常降级为 error face，保观测面照记、不挡 spawn 的其余
+    准备步骤。"""
+    mode = agent_runtime.runtime_mode()
+    expected = (os.environ.get(dsh_pin.ENV_EXPECTED) or "").strip()
+    key = "%s|%s|%s|%s" % (mode, tuple((resolved or {}).get("cmd") or ()),
+                           agent_runtime.agent_image(), expected)
+    face = _DSH_FACE_ONCE.get(key)
+    if face is None:
         try:
             face = dsh_pin.dsh_face_payload(
-                mode=agent_runtime.runtime_mode(),
-                default_image=agent_runtime.DEFAULT_AGENT_IMAGE)
+                mode=mode, default_image=agent_runtime.DEFAULT_AGENT_IMAGE,
+                resolved=resolved)
         except dsh_pin.DshPinError as e:
-            face = {"mode": agent_runtime.runtime_mode(), "version_state": "error",
+            face = {"mode": mode, "version_state": "error",
                     "version_detail": str(e), "expected_state": "unset"}
-        _DSH_FACE_ONCE.update(face)
-    return _DSH_FACE_ONCE
+        _DSH_FACE_ONCE[key] = face
+    return face
+
+
+_HOST_GLOBAL_DSH: Dict[str, Dict[str, Any]] = {}
+
+
+def _host_global_dsh() -> Dict[str, Any]:
+    """宿主全局 dsh 面（PATH 解析 + 实证 `--version`；三面自检的「宿主」面，
+    t260921-14）。which() 本身便宜（PATH 逐项 stat），实测探针（子进程）按【解析出
+    的 bin 绝对路径】keyed memo——PATH 注入换桩（同一 worker 进程先后命中不同 bin）
+    时各自探，绝不串面。缺席/失效=error 面点名（三面 incomplete 的证据），不炸。"""
+    bin_path = shutil.which("dsh")
+    key = bin_path or ""
+    face = _HOST_GLOBAL_DSH.get(key)
+    if face is None:
+        if not bin_path:
+            face = {"bin": None,
+                    "probe": {"version": None, "state": "error",
+                              "detail": "宿主 PATH 上无 dsh（which 落空）——宿主全局面缺席"}}
+        else:
+            face = {"bin": bin_path, "probe": dsh_pin.probe_dsh_version(bin_path)}
+        _HOST_GLOBAL_DSH[key] = face
+    return face
+
+
+_DSH_TRI_ONCE: Dict[str, Any] = {}
+
+
+def _dsh_tri_face_once(engine_face: Dict[str, Any]) -> Dict[str, Any]:
+    """三面组装（t260921-14 交付③；进程级 memo，key=引擎 bin|镜像+宿主 bin+镜像旋钮：
+    覆盖全部输入——同 worker 进程里任何一个输入变了（翻钉/PATH 换桩/换镜像）都各
+    自重算，绝不串面）。容器实测面仅 docker 形态在（host 形态无容器面=缺席非失败）；
+    实测探针（docker run，秒级）按同一输入组只付一次。divergent/incomplete=响亮
+    warning 点名，consistent=info——点名不拦 spawn（观测面，真正 spawn 的失败自有
+    spawn 路径响亮）。"""
+    host = _host_global_dsh()
+    key = "%s|%s|%s" % (engine_face.get("bin") or engine_face.get("image") or "",
+                        host.get("bin") or "", agent_runtime.agent_image())
+    tri = _DSH_TRI_ONCE.get(key)
+    if tri is None:
+        container_probe = None
+        if engine_face.get("mode") == "docker":
+            image = engine_face.get("image") or agent_runtime.agent_image()
+            container_probe = agent_runtime.probe_image_dsh_version(image)
+        tri = dsh_pin.tri_face_payload(engine_face, host["bin"], host["probe"],
+                                       container_probe)
+        _DSH_TRI_ONCE[key] = tri
+    return tri
 
 
 def _dsh_home_candidates() -> List[Path]:
@@ -865,15 +946,17 @@ def _lane_dsh_preflight(cmd: List[str], lane_dsh: Path,
                         candidates: List[Path]) -> Optional[Dict[str, Any]]:
     """Spawn-time self-check of the lane-local .dsh (ticket t260916-28, invariant:
     the lane .dsh an agent is about to run from must be self-consistent). Only fires
-    when this spawn actually runs the dsh headless runner (cmd starts with "dsh") —
-    recorder/selftest stub commands and the SANDBAR_AGENT_STUB=1 short-circuit never
-    reach the call site. Checks profile dir + settings.yaml; credentials are
-    deliberately NOT checked (contract pin sc_it02 S4: spawn prep never fails on
-    missing credential sources — MISSING_CREDENTIAL is reported engine/agent-side).
-    Returns a structured refusal (dict, sanitize_gate_refusal-compatible: reason_code
-    namespaced lane_dsh_*) or None when the spawn may proceed. Pure: existence probes
-    only, no StageResult coupling — unit-testable."""
-    if not cmd or cmd[0] != "dsh":
+    when this spawn actually runs the dsh headless runner (cmd[0] 判定走
+    dsh_pin.is_dsh_runner 的 basename 口径——裸名与钉死的绝对路径都算，t260921-14：
+    防钉成绝对路径后本预检被静默跳过) — recorder/selftest stub commands and the
+    SANDBAR_AGENT_STUB=1 short-circuit never reach the call site. Checks profile dir
+    + settings.yaml; credentials are deliberately NOT checked (contract pin sc_it02
+    S4: spawn prep never fails on missing credential sources — MISSING_CREDENTIAL is
+    reported engine/agent-side). Returns a structured refusal (dict,
+    sanitize_gate_refusal-compatible: reason_code namespaced lane_dsh_*) or None when
+    the spawn may proceed. Pure: existence probes only, no StageResult coupling —
+    unit-testable."""
+    if not cmd or not dsh_pin.is_dsh_runner(cmd[0]):
         return None
     profile = "sandbar-headless"
     if "--profile" in cmd:
@@ -2104,10 +2187,12 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
     # settings.yaml is re-copied every time (llm-pi-ai providers registry; a change takes effect for the next agent)
     _copy_settings(local_dsh)
 
-    # dsh 命令解析走 dsh_pin.resolve_dsh_cmd（t260916-24 版本面单点）：与旧 DSH_CMD
-    # 常量同锚 SANDBAR_AGENT_CMD，缺省输出逐元素等值（不破现状）；坏 shlex 在此响亮
-    # 抛（文案带旋钮名与原文）。
-    resolved_dsh = dsh_pin.resolve_dsh_cmd()
+    # dsh 命令解析走 _dsh_resolved（t260921-14 声明钉单点）：SANDBAR_AGENT_CMD（env
+    # 整命令）> paths.dsh_bin 声明 > 缺省裸 dsh（缺省输出逐元素等值，不破现状）；坏
+    # shlex/声明面缺陷（锚点缺失/不可执行）在此响亮抛（文案带旋钮/条目名与原文）。
+    # 这一份结果同时喂下方 face 组装（face↔spawn 同源——翻钉后票面报的就是实际被钉
+    # 的二进制，enforce_expected 也比对被钉二进制的实证版）。
+    resolved_dsh = _dsh_resolved(project)
     cmd = list(resolved_dsh["cmd"])
     # Role preset patch (contract ①d, ticket t260903-03: the directory base comes
     # from the registered entry's declared paths.roles_dir, falling back to
@@ -2249,12 +2334,23 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
     # 版本面落票面 + 日志（t260916-24 验收③「版本自检落票面/日志可查」）：每次 spawn
     # 写一份 dsh_pin_<tag>.json（票面 artifacts 可查）；期望版本不符=每次 spawn warning
     # 响亮（不静默吞），SANDBAR_DSH_STRICT=1 升格硬闸在此拒绝 spawn。
-    face = _dsh_face_once()
+    # t260921-14：face 与 spawn cmd 同源（resolved_dsh 贯通——翻钉后票面报的就是实际
+    # 被钉的二进制）；票面 JSON 增 tri 块（三面版本自检：宿主全局/引擎生效/容器内实
+    # 测，docker 形态才有容器面）——既有字段全部保持（additive，KI-051）；不一致/
+    # 不完整=响亮 warning 点名，一致=info。
+    face = _dsh_face_once(resolved_dsh)
+    tri = _dsh_tri_face_once(face)
     pin_file = artifacts_dir / ("dsh_pin_%s.json" % tag)
     try:
-        pin_file.write_text(json.dumps(face, ensure_ascii=False, indent=1) + "\n", "utf-8")
+        pin_payload = dict(face)
+        pin_payload["tri"] = tri
+        pin_file.write_text(json.dumps(pin_payload, ensure_ascii=False, indent=1) + "\n", "utf-8")
     except OSError:
         pass  # 票面留痕失败不挡 spawn（观测增强，同 worker meta 的 best-effort 语义）
+    if tri.get("consistency") in ("divergent", "incomplete"):
+        activity.logger.warning("[dsh_pin] %s", tri.get("note"))
+    else:
+        activity.logger.info("[dsh_pin] %s", tri.get("note"))
     note = dsh_pin.face_note(face)
     if face.get("expected_state") == "mismatch":
         dsh_pin.enforce_expected(face)  # STRICT=1 且 mismatch → raise（硬闸）
@@ -6894,8 +6990,12 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
     pin_f = home / "patch_inspect_readonly.yml"
     pin_f.write_text(readonly_pin_patch(), encoding="utf-8")
     # SANDBAR_INSPECT_CMD（t260916-22）：UT/场景注入假 dsh 脚本的缝——真进程链
-    # （Popen/日志/超时/reap）与生产逐字节同路，只换可执行体；缺省=通用 dsh 命令。
-    cmd = (shlex.split(os.environ.get("SANDBAR_INSPECT_CMD") or "") or list(DSH_CMD)) \
+    # （Popen/日志/超时/reap）与生产逐字节同路，只换可执行体；缺省=声明贯通的 dsh 基
+    # 命令（t260921-14：与 agent spawn 同一解析单点 _dsh_resolved——巡检是 force_host
+    # 的真·宿主 dsh，不贯通声明就是接缝矩阵 #8「同票两段行为分叉」的现实通道；
+    # SANDBAR_INSPECT_CMD 仍最优先，既有注入缝不动）。
+    cmd = (shlex.split(os.environ.get("SANDBAR_INSPECT_CMD") or "")
+           or _dsh_resolved(project)["cmd"]) \
         + ["--patch", str(persona_f), "--patch", str(pin_f), prompt]
     # 本轮实际模型路由进 meta（方案 §2.1；观察期查准率核对的对账面）：只读复算同一张
     # 表（与 _prepare_agent_spawn 同源 helpers，零副作用零 patch）。表非 ok/无表/无命中

@@ -117,11 +117,27 @@ def main():
                      result_file=str(lane / ".sandbar" / "stage_implement_gen0.json"))
         res, err = run_slice(aa, lane, slice_env(tmp, "docker", fake, stub))
         entries = F.read_log(log)
-        run_e = [e for e in entries if e.split(" ")[:1] == ["run"]]
+        # run 记录二分类取样（t260921-14 起 docker 流里多了一类观测 run）：worker
+        # spawn 面（sandbar-agent-<ticket>，本节 argv 契约的对象）与三面自检探针面
+        # （sandbar-dsh-probe-*，prepare 阶段落账、先于 spawn）。混采会把探针记录
+        # 误当 spawn 契约面判（t260921-14 仲裁实证的假红根因）；契约断言只咬
+        # worker 类，探针类另立形状锚，两类之外不许有匿名 run。
+        worker_name = F.CONTAINER_FMT % TICKET
+        run_e = [e for e in entries if e.split(" ")[:1] == ["run"]
+                 and worker_name in e.split(" ")]
+        probe_e = [e for e in entries if e.split(" ")[:1] == ["run"]
+                   and any(t.startswith("sandbar-dsh-probe-") for t in e.split(" "))]
+        other_run = [e for e in entries if e.split(" ")[:1] == ["run"]
+                     and e not in run_e and e not in probe_e]
         exec_e = [e for e in entries if e.split(" ")[:1] == ["exec"]]
         C.check(bool(entries), "docker 桩被调用（执行面已接线，SANDBAR_AGENT_RUNTIME 消费）",
                 "log=%s | slice err=%s" % (entries[:3], (err or "无")[:200]))
-        C.check(bool(run_e), "ensure→run 调用在记录里（每票一容器创建面）", "entries=%d" % len(entries))
+        C.check(not other_run, "run 记录二分类完备（worker/探针外无匿名 run）",
+                "other=%s" % [e[:120] for e in other_run[:2]])
+        C.check(bool(run_e), "worker spawn run 在账（sandbar-agent-<ticket>，每票一容器创建面）",
+                "entries=%d run_all=%d worker=%d probe=%d"
+                % (len(entries), len(run_e) + len(probe_e) + len(other_run),
+                   len(run_e), len(probe_e)))
         if run_e:
             tok = run_e[0].split(" ")
             C.check(F.CONTAINER_FMT % TICKET in tok, "容器名=sandbar-agent-<ticket>（确定性票锚）",
@@ -143,6 +159,10 @@ def main():
                     and tok[ui[0] + 1] == "%d:%d" % (UID, GID),
                     "user 面=宿主 worker uid:gid（容器内新建文件宿主可提交，验收 D）",
                     "tok=%s" % ([tok[ui[0]:ui[0] + 2]] if ui else [])[:1])
+        C.check(all("--rm" in e.split(" ") for e in probe_e)
+                and all(not F.bind_sources(e.split(" ")) for e in probe_e),
+                "探针 run 恒 --rm 自清且零挂载（观测面零残留、不碰泳道，t260921-14 面）",
+                "probe_n=%d 样例=%s" % (len(probe_e), [e[:120] for e in probe_e[:1]]))
         C.check(bool(exec_e), "exec 调用在记录里（每段 docker exec 面）", "exec_n=%d" % len(exec_e))
         if exec_e:
             tok = exec_e[0].split(" ")

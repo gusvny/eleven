@@ -7,10 +7,12 @@
 # 需联网（npm registry + pypi），只在建镜像时联网一次，之后起容器零网络。
 # 版本三处同步：本脚本缺省 + Dockerfile.agent ARG 缺省 + agent_runtime.py
 # DEFAULT_AGENT_IMAGE（单测 test_agent_runtime.py 机械防漂移）。
-# 缺省产物 tag：sandbar-agent:dsh-0.1.1-rc.2-s1（观测位，与 compose 头注一致）。
+# 缺省产物 tag：sandbar-agent:dsh-0.1.5-rc.2-s1（观测位；t260921-14 镜像同升翻新——
+# 旧 tag sandbar-agent:dsh-0.1.1-rc.2-s1 本机镜像不删=回退面，SANDBAR_AGENT_IMAGE
+# 指回即可，无需重建）。
 set -eu
 
-DV="${1:-0.1.1-rc.2}"
+DV="${1:-0.1.5-rc.2}"
 SEQ="${2:-s1}"
 TAG="sandbar-agent:dsh-${DV}-${SEQ}"
 DIR="$(cd "$(dirname "$0")" && pwd)"

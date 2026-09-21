@@ -15,6 +15,10 @@
 
 旋钮一览（全部普通 env，缺省=现行为）：
 - SANDBAR_AGENT_CMD           host 形态整命令（shlex），缺省 "dsh --profile sandbar-headless"
+- paths.dsh_bin（声明键，t260921-14）host 形态只钉二进制路径（项目 per-key 条目
+  paths 节；词法校验/锚点/可执行判定归 shared.project_paths 家族，本模块收已校验
+  的绝对路径串），缺省=裸 `dsh` 走 PATH（回归锚）；与 SANDBAR_AGENT_CMD 并存=
+  env 胜 + dsh_bin_shadowed=True（调用方响亮点名遮蔽）
 - SANDBAR_AGENT_IMAGE         docker 形态镜像 tag，缺省 agent_runtime.DEFAULT_AGENT_IMAGE
                               （由调用方传参注入；本模块刻意零仓内依赖——agent_runtime
                               禁 import shared/agent_activities 一族，反向同样不 import）
@@ -22,8 +26,10 @@
 - SANDBAR_DSH_STRICT          "1"=mismatch 升格硬闸（raise）；缺省只告警
 
 docker 形态版本自镜像 tag 按 `dsh-<version>-s<seq>` 约定提取，标注 tag-derived
-非实证；TODO(T3/Q3)：镜像升版票落地时补「容器内实测 dsh --version」实证子用例，
-防约定漂移无人知。
+非实证；T3（t260921-14）落地 tri_face_payload 三面自检：宿主全局 / 引擎生效
+（=spawn 同源 face）/ 容器内实测 `dsh --version`（探针=agent_runtime
+.probe_image_dsh_version，由调用方注入——本模块零仓内依赖），不一致响亮点名，
+原 TODO(T3/Q3) 关账。
 
 fail-closed 边界（与调用方的分工）：
 - 坏 SANDBAR_AGENT_CMD（shlex 解析失败/空命令）→ DshPinError 响亮点名——与旧
@@ -72,24 +78,45 @@ def _env(env) -> Dict[str, str]:
     return os.environ if env is None else env
 
 
-def resolve_dsh_cmd(env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
-    """解析 host 形态 dsh 命令。返回 {"cmd": [...], "source": "env"|"default", "raw": str}。
+def resolve_dsh_cmd(env: Optional[Dict[str, str]] = None,
+                    dsh_bin: Optional[str] = None) -> Dict[str, Any]:
+    """解析 host 形态 dsh 命令。返回 {"cmd": [...], "source": "env"|"default"|"declared",
+    "raw": str, "dsh_bin_shadowed": bool}。
 
-    缺省（env 未设/空串）= 与 agent_activities.DSH_CMD 的旧缺省逐元素等值（不破现状）。
-    坏 shlex / 空命令 → DshPinError（点名旋钮名与原文）。
+    优先级（t260921-14）：SANDBAR_AGENT_CMD（env 整命令，最显式）> paths.dsh_bin 声明
+    （只钉二进制，参数保持文档化缺省逐元素）> 缺省裸 `dsh`（与 agent_activities.DSH_CMD
+    旧缺省逐元素等值，回归锚）。env 与声明并存 = env 胜 + dsh_bin_shadowed=True（调用方
+    响亮点名遮蔽，不静默吞掉任何一边）。坏 shlex / 空命令 → DshPinError（点名旋钮名与
+    原文）；dsh_bin 只收 shared.dsh_bin_for_spawn 已校验的路径串（词法/锚点/可执行判定
+    归声明家族，本模块不重复第二套）。
     """
     env = _env(env)
     raw = (env.get(ENV_AGENT_CMD) or "").strip()
-    if not raw:
-        return {"cmd": shlex.split(DEFAULT_DSH_CMD_TEXT),
-                "source": "default", "raw": DEFAULT_DSH_CMD_TEXT}
-    try:
-        cmd = shlex.split(raw)
-    except ValueError as e:
-        raise DshPinError("%s 解析失败（shlex：%s）：%r" % (ENV_AGENT_CMD, e, raw))
-    if not cmd or not cmd[0]:
-        raise DshPinError("%s 解析为空命令：%r" % (ENV_AGENT_CMD, raw))
-    return {"cmd": cmd, "source": "env", "raw": raw}
+    if raw:
+        try:
+            cmd = shlex.split(raw)
+        except ValueError as e:
+            raise DshPinError("%s 解析失败（shlex：%s）：%r" % (ENV_AGENT_CMD, e, raw))
+        if not cmd or not cmd[0]:
+            raise DshPinError("%s 解析为空命令：%r" % (ENV_AGENT_CMD, raw))
+        return {"cmd": cmd, "source": "env", "raw": raw,
+                "dsh_bin_shadowed": bool(dsh_bin)}
+    if dsh_bin:
+        tail = shlex.split(DEFAULT_DSH_CMD_TEXT)[1:]  # 缺省参数逐元素保持
+        return {"cmd": [dsh_bin] + tail, "source": "declared",
+                "raw": dsh_bin, "dsh_bin_shadowed": False}
+    return {"cmd": shlex.split(DEFAULT_DSH_CMD_TEXT),
+            "source": "default", "raw": DEFAULT_DSH_CMD_TEXT,
+            "dsh_bin_shadowed": False}
+
+
+def is_dsh_runner(cmd0: Optional[str]) -> bool:
+    """这条命令的首 token 是不是 dsh runner 本体（t260921-14）：裸名与钉死的绝对/相对
+    路径都算（basename 判定），桩/其他可执行体不算。泳道 .dsh 预检等判定点共用——
+    防钉成绝对路径后判定点被静默跳过（t260916-28 不变量在钉态不回归）。"""
+    if not cmd0:
+        return False
+    return os.path.basename(str(cmd0)) == "dsh"
 
 
 def probe_dsh_version(cmd0: str, timeout: float = PROBE_TIMEOUT_DEFAULT_SEC,
@@ -158,13 +185,13 @@ def image_tag_version(image: str) -> Dict[str, Any]:
     if not m:
         return {"version": None, "state": "unknown",
                 "detail": "镜像 tag %r 不含 dsh-<version>-s<seq> 约定，无法从 tag 判版"
-                          "（tag-derived 非实证；TODO(T3/Q3)：补容器内实测 --version 实证子用例）" % image}
+                          "（tag-derived 非实证；容器内实测见 tri_face 自检，t260921-14）" % image}
     ver = m.group(1)
     if not _VERSION_RE.match(ver):
         return {"version": None, "state": "unknown",
                 "detail": "镜像 tag %r 提取段 %r 非版本样" % (image, ver)}
     return {"version": ver, "state": "ok",
-            "detail": "镜像 tag 提取 %s（tag-derived 非实证；TODO(T3/Q3)：补容器内实测实证子用例）" % ver}
+            "detail": "镜像 tag 提取 %s（tag-derived 非实证；容器内实测由三面自检承担，t260921-14）" % ver}
 
 
 def expected_state_of(version: Optional[str], env: Optional[Dict[str, str]] = None) -> str:
@@ -230,7 +257,8 @@ def dsh_face_payload(mode: Optional[str] = None,
                      env: Optional[Dict[str, str]] = None,
                      default_image: Optional[str] = None,
                      probe_timeout: float = PROBE_TIMEOUT_DEFAULT_SEC,
-                     probe: bool = True) -> Dict[str, Any]:
+                     probe: bool = True,
+                     resolved: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """统一版本面。worker 启动 / 首票 spawn 各取一次（调用方自做 once 缓存）。
 
     mode：host|docker；None → 读 SANDBAR_AGENT_RUNTIME（缺省 host；非法值记
@@ -238,6 +266,10 @@ def dsh_face_payload(mode: Optional[str] = None,
     default_image：docker 形态的缺省镜像（调用方传 agent_runtime.DEFAULT_AGENT_IMAGE，
     保持本模块零仓内依赖）。
     probe=False：跳过 `--version` 子进程（docker 形态天然跳过；供纯形状 UT）。
+    resolved（t260921-14，C1 贯通）：调用方已解析的 dsh 命令结果（=spawn cmd 的同一
+    份 resolve_dsh_cmd 产物）——传入时 host 面 cmd/cmd_source/bin/dsh_bin_shadowed
+    直接取它，version 探测于 cmd[0]（即被钉二进制），face↔spawn 同源是结构事实；
+    缺省 None=内部 env 锚解析（worker 启动面现状，逐字节不变）。
     坏 SANDBAR_AGENT_CMD → DshPinError（响亮，对齐旧 import 行为）。
     """
     env = _env(env)
@@ -249,6 +281,7 @@ def dsh_face_payload(mode: Optional[str] = None,
     face: Dict[str, Any] = {
         "mode": mode,
         "cmd": None, "cmd_source": None, "bin": None, "real_bin": None,
+        "dsh_bin_shadowed": False,
         "version": None, "version_state": "not-probed", "version_detail": "",
         "image": None, "image_source": None,
         "expected": (env.get(ENV_EXPECTED) or "").strip(),
@@ -267,9 +300,10 @@ def dsh_face_payload(mode: Optional[str] = None,
             face["version_state"] = "unknown"
             face["version_detail"] = "无镜像可判（env 与缺省皆空）"
     else:
-        resolved = resolve_dsh_cmd(env)  # 坏 shlex 在此响亮抛出
+        resolved = resolved or resolve_dsh_cmd(env)  # 坏 shlex 在此响亮抛出
         face["cmd"] = resolved["cmd"]
         face["cmd_source"] = resolved["source"]
+        face["dsh_bin_shadowed"] = bool(resolved.get("dsh_bin_shadowed"))
         face["bin"] = resolved["cmd"][0]
         if os.path.sep in face["bin"] or "/" in face["bin"]:
             real = os.path.realpath(face["bin"])
@@ -284,3 +318,76 @@ def dsh_face_payload(mode: Optional[str] = None,
             face["version_detail"] = pv["detail"]
     face["expected_state"] = expected_state_of(face["version"], env)
     return face
+
+
+def tri_face_payload(engine_face: Dict[str, Any],
+                     host_bin: Optional[str],
+                     host_probe: Optional[Dict[str, Any]],
+                     container_probe: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """三面版本自检（t260921-14 交付③，接缝矩阵 #8「宿主/容器行为分叉」的点名机）。
+
+    engine_face 必须是 spawn 实际执行的同一 face（dsh_face_payload(resolved=…) 的
+    产物，face↔spawn 同源——C1 贯通；tri 不做第二次解析，engine 面与票面
+    dsh_pin_<tag>.json 是同一份数据）。host_probe / container_probe 是调用方探得的
+    {"version","state","detail"}（探针归调用方：宿主=probe_dsh_version(which("dsh"))，
+    容器=agent_runtime.probe_image_dsh_version——本模块零仓内依赖）。纯函数：只组装
+    与点名，不做 IO、不抛。
+
+    consistency 三态：
+      consistent = 所有可判面版本一致（且无失败面）；
+      divergent  = 至少两面版本可判且不等（divergences 逐对列出）；
+      incomplete = 无版本分歧但存在探测失败/缺席面（incomplete 逐面点名——判不了
+                   一致性本身就是要点名的观测缺口，不静默当一致）。
+    container 面仅 docker 形态在（host 形态无容器面，faces 不含该键=缺席非失败）。
+    """
+    def _of(p, k, default=None):
+        return (p or {}).get(k, default)
+
+    engine_state = engine_face.get("version_state")
+    faces: Dict[str, Any] = {
+        "host_global": {"bin": host_bin,
+                        "version": _of(host_probe, "version"),
+                        "version_state": _of(host_probe, "state"),
+                        "version_detail": _of(host_probe, "detail", "")},
+        "engine": {"cmd": engine_face.get("cmd"), "cmd_source": engine_face.get("cmd_source"),
+                   "bin": engine_face.get("bin"), "version": engine_face.get("version"),
+                   "version_state": engine_state,
+                   "dsh_bin_shadowed": bool(engine_face.get("dsh_bin_shadowed"))},
+    }
+    if container_probe is not None:
+        faces["container"] = {"version": _of(container_probe, "version"),
+                              "version_state": _of(container_probe, "state"),
+                              "version_detail": _of(container_probe, "detail", "")}
+    known = {"host_global": _of(host_probe, "version"), "engine": engine_face.get("version")}
+    if container_probe is not None:
+        known["container"] = _of(container_probe, "version")
+    judged = {k: v for k, v in known.items() if v}
+    failed = []
+    if _of(host_probe, "state") != "ok":
+        failed.append("host_global(%s)" % _of(host_probe, "state", "absent"))
+    if engine_state != "ok":
+        failed.append("engine(%s)" % (engine_state or "absent"))
+    if container_probe is not None and _of(container_probe, "state") != "ok":
+        failed.append("container(%s)" % _of(container_probe, "state", "absent"))
+    divergences = []
+    items = sorted(judged.items())
+    for i in range(len(items)):
+        for j in range(i + 1, len(items)):
+            if items[i][1] != items[j][1]:
+                divergences.append("%s=%s != %s=%s" % (items[i][0], items[i][1],
+                                                       items[j][0], items[j][1]))
+    if divergences:
+        consistency = "divergent"
+    elif failed:
+        consistency = "incomplete"
+    else:
+        consistency = "consistent"
+    ver_line = " ".join("%s=%s" % (k, v or "?") for k, v in items) or "（无可判版本）"
+    if consistency == "divergent":
+        note = "dsh 三面版本自检【不一致】：%s ｜ %s" % (ver_line, "；".join(divergences))
+    elif consistency == "incomplete":
+        note = "dsh 三面版本自检【不完整】：%s ｜ 判不了的面：%s" % (ver_line, "；".join(failed))
+    else:
+        note = "dsh 三面版本自检【一致】：%s" % ver_line
+    return {"faces": faces, "consistency": consistency,
+            "divergences": divergences, "incomplete": failed, "note": note}
