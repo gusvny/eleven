@@ -62,6 +62,10 @@ PROTECTED_PATHS: Tuple[str, ...] = (
     "integration/t260902-07/tests/test_route_lookup.py",
     # 共享电池的期望值/阈值档
     "integration/baselines",
+    # 术语看守自身（L7 规则文件 + 次数基线）：期望值只许在 main 侧下调；
+    # 泳道若能自行调高基线即等于废掉看守（自证绿），故与上面两类同护。
+    "integration/lint_tests.py",
+    "integration/terminology-baseline.json",
     # 配置真源
     "verify.yaml",
     "server/model-routes.yaml",
