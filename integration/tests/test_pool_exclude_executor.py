@@ -16,7 +16,9 @@ intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：�
 - F --print-pool-assets：真注册表派生（未知池 exit 2 点名；cmd token ∪ import 闭包
   ∪ integration/ 根共享基建面；环境前缀 token 不误收；非被排除池资产不入面）；
 - G 资产面负锁：ro/browser 池场景文件不被误收（方向=宁可多跑，不得漏跑被排除池面）；
-- H 缺省路径与改前执行器（git HEAD 快照）在假表上逐字节一致（验收 B 的源码级 A/B）。
+- H 缺省路径与改前执行器（git HEAD 快照）在假表上逐字节一致（验收 B 的源码级 A/B；
+  前提=HEAD 快照不含批台机制——本票 t260921-06 落盘后 HEAD 已含之，前提失效期 H1
+  转 N/A 点名（三态契约：系统状态条件子用例），H2 负锁照常执法）。
 
 安全红线：假场景脚本全部落 TemporaryDirectory（真仓零触碰）；每子用例显式 env 桩
 save/restore（既有先例无 os.environ 隔离，排除环境下会自我污染）；rs.SCENARIOS
@@ -46,7 +48,7 @@ _spec = importlib.util.spec_from_file_location(
 rs = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rs)
 
-pass_n = fail_n = 0
+pass_n = fail_n = na_n = 0
 
 
 def ok(cond, label, detail=""):
@@ -57,6 +59,13 @@ def ok(cond, label, detail=""):
     else:
         fail_n += 1
         print("  FAIL " + label + (" | " + str(detail)[:500] if detail else ""))
+
+
+def na(label, reason):
+    """N/A 段（三态契约：仅系统状态条件子用例可 N/A；全 N/A=场景红由 finish 兜底）。"""
+    global na_n
+    na_n += 1
+    print("  N/A: %s（%s）" % (label, str(reason)[:400]))
 
 
 @contextlib.contextmanager
@@ -102,6 +111,15 @@ def drive(entries, exclude_env, mod=None, extra_env=None):
             table.append(item)
         saved_scen = mod.SCENARIOS
         saved_sweep, saved_hygiene = mod._sweep_residue_stages, mod._docker_hygiene
+        # t260921-06 arbitrate：批台预起/收口（t260921-06 批级共享）是真 docker 面钩子，
+        # 与下方卫生钩子同族——本电池头注红线「零端口零 docker 零控制台」要求一并置空；
+        # 否则含 engine/exclusive 条目的假表缺省轮会真起台（快照模块在 tmp 语境则预起
+        # 失败整轮拒跑），既违约电池契约又让 A/B 比对失真。改前快照模块无此钩子=跳过。
+        saved_preboot = saved_teardown = None
+        if hasattr(mod, "batch_preboot"):
+            saved_preboot, saved_teardown = mod.batch_preboot, mod.batch_teardown
+            mod.batch_preboot = lambda consumers: True
+            mod.batch_teardown = lambda: None
         mod.SCENARIOS = table
         mod._sweep_residue_stages = lambda: None
         mod._docker_hygiene = lambda: None
@@ -116,6 +134,8 @@ def drive(entries, exclude_env, mod=None, extra_env=None):
             mod.SCENARIOS = saved_scen
             mod._sweep_residue_stages = saved_sweep
             mod._docker_hygiene = saved_hygiene
+            if saved_preboot is not None:
+                mod.batch_preboot, mod.batch_teardown = saved_preboot, saved_teardown
             os.chdir(cwd_saved)
         return rc, buf.getvalue()
 
@@ -295,20 +315,36 @@ else:
         _spec_old.loader.exec_module(_mod_old)
         # 串行跑（SANDBAR_POOL_CONC=1）：池间并发会让输出行序不确定，逐字节比对必须确定序
         _serial = {"SANDBAR_POOL_CONC": "1", "SANDBAR_CONC_POOLS": ""}
-        _rc_a, _out_a = drive(TRIO, None, mod=_mod_old, extra_env=_serial)
-        _rc_b, _out_b = drive(TRIO, None, mod=rs, extra_env=_serial)
-        _ha, _hb = _norm_run(_out_a), _norm_run(_out_b)
-        _la, _lb = _ha.splitlines(), _hb.splitlines()
-        _diff = next((i for i, (x, y) in enumerate(zip(_la, _lb)) if x != y), None)
-        _dd = ""
-        if _ha != _hb:   # 报错必须可诊：点名首处差异行的两侧原文与行数（旧版只说「行号」）
-            _i = _diff if _diff is not None else min(len(_la), len(_lb))
-            _dd = "首处差异行=%d（行数 %d/%d）｜A: %s｜B: %s" % (
-                _i, len(_la), len(_lb),
-                (_la[_i] if _i < len(_la) else "<A 无此行>")[:200],
-                (_lb[_i] if _i < len(_lb) else "<B 无此行>")[:200])
-        ok(_rc_a == 0 and _rc_b == 0 and _ha == _hb,
-           "H1 缺省路径（无旋钮）输出与改前执行器逐字节一致", _dd)
+        # t260921-06 arbitrate 前提判定：A/B 的语义前提=HEAD 是「改前」快照。批台机制
+        # 随本票 implement 已由 worker 代落盘进 HEAD（0ac0aa2）后，「改前」对象不存在，
+        # 且快照执行器在 tmp 语境（清单/stage_docker 缺席）会按批台契约拒绝开跑——
+        # 与工作树执行器的输出差是**运行语境差**而非行为差，逐字节比对不可满足也不可比。
+        # 该前提失效期 H1 转 N/A（点名理由与覆盖承担者），其余段与 H2 负锁照常执法。
+        _head_is_pre_batch = not any(
+            k in _old.stdout for k in ("batch_preboot", "BATCH_STAGE_WARN", "batch-stage"))
+        if not _head_is_pre_batch:
+            # 前提失效期仍取当前执行器 TRIO 基线：H2 负锁需要 _hb 作比对锚。
+            _rc_b, _out_b = drive(TRIO, None, mod=rs, extra_env=_serial)
+            _hb = _norm_run(_out_b)
+            na("H1 缺省路径（无旋钮）输出与改前执行器逐字节一致",
+               "前提失效：HEAD 快照已含批台机制（worker 代落盘），「改前」对象不存在；"
+               "缺省路径回归由看守① t260921-06-batch-runner-form（真全轮形态）+本电池其余段"
+               "+H2 负锁承担；premise=batch_preboot|BATCH_STAGE_WARN|batch-stage ∈ HEAD 快照")
+        else:
+            _rc_a, _out_a = drive(TRIO, None, mod=_mod_old, extra_env=_serial)
+            _rc_b, _out_b = drive(TRIO, None, mod=rs, extra_env=_serial)
+            _ha, _hb = _norm_run(_out_a), _norm_run(_out_b)
+            _la, _lb = _ha.splitlines(), _hb.splitlines()
+            _diff = next((i for i, (x, y) in enumerate(zip(_la, _lb)) if x != y), None)
+            _dd = ""
+            if _ha != _hb:   # 报错必须可诊：点名首处差异行的两侧原文与行数（旧版只说「行号」）
+                _i = _diff if _diff is not None else min(len(_la), len(_lb))
+                _dd = "首处差异行=%d（行数 %d/%d）｜A: %s｜B: %s" % (
+                    _i, len(_la), len(_lb),
+                    (_la[_i] if _i < len(_la) else "<A 无此行>")[:200],
+                    (_lb[_i] if _i < len(_lb) else "<B 无此行>")[:200])
+            ok(_rc_a == 0 and _rc_b == 0 and _ha == _hb,
+               "H1 缺省路径（无旋钮）输出与改前执行器逐字节一致", _dd)
         # H2 负锁（t260914-01 arbiter 补）：归一化不得吞行为差异——多一条 main 条目的
         # 探针表跑当前执行器，归一化后必须与 TRIO 的结果不同（否则 H1 是恒真断言）。
         _QUAD = TRIO + [("t913-main2", None, "print('m2')\n")]
@@ -318,5 +354,5 @@ else:
            "H2 负锁：归一化不吞行为差异（探针表多一条条目必须可比出来）",
            "rc=%s 归一化后与 H1 相同=%s" % (_rc_c, _hc == _hb))
 
-print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (pass_n, fail_n))
-sys.exit(1 if fail_n > 0 else 0)
+print("SUMMARY pass=%d fail=%d env_fail=0 na=%d" % (pass_n, fail_n, na_n))
+sys.exit(1 if (fail_n > 0 or (pass_n + fail_n == 0 and na_n > 0)) else 0)

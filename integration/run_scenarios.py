@@ -70,6 +70,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -1474,6 +1475,19 @@ SCENARIOS = [
      "已结束工单的 UI 终态对账与异常收口呈现契约（t260921-03 验收①③④⑤之呈现面，灰盒 L2 组件契约，node 直 import 纯函数源+源级锚，零浏览器零 3099，镜 t260919-02-failed-state-ui-model 手法）：U1 deriveTicketState 终态对账新判序——exec_status=COMPLETED→done 先于一切词面（blocked/running/failed/closed 等全词面组合暴力断言不得落 blocked/active/failed，实案形 blocked×COMPLETED 必 done——「绝不再显示在跑/阻塞」字面）、CONTINUED_AS_NEW 转场词面零扰动、失败族与缺 exec 旧值零回归 spot（全表归 t260919-02-failed-state-ui-model 不重复）、畸形 exec（数字/对象/数组/布尔/空串/缺失）不 throw；U2 closeHealthOf 部署窗镜像——键缺老行本地镜像只输出 {abnormal,failed,''} 三值绝不造 ok/unreadable（KI-052 版本错窗族的诚实防御）、降级闭合老行已知偏差显式钉值（镜像 abnormal 非 unreadable，同族不撒谎终态——review 意见2）、非法值不透传/null 行不抛；U3 徽标词表——abnormal→「已结束·异常（无报告）」/unreadable→「已结束·待核」/ok/failed 不贴（反用例③正常收口与失败态不重复标注）、与五态状态词互异、零瞬态占位语（KI-018①）；U4 排序——sortMergedTickets 端到端全序（时间戳反向构造防同档巧合绿：等你/失败→在跑→异常收口→正常收口）+档位相对关系（abnormal<ok、failed 最顶、在跑高于收口——不沉底不并入正常分组）；U5 筛选——独立 health=abnormal chip 命中 abnormal+unreadable 且与五态 chip AND、异常收口仍归 done 桶（countByState 分母——要求⑤归已结束桶）；U6 详情终态卡——buildStatusCard 对 COMPLETED×abnormal 出 amber 卡（headline 含「已结束」+点名缺了什么+blocked_reason 原因链可达+next 零 retry-qc/rework 话术）、正常收口不出异常措辞卡、畸形 detail 降级 null；U7 源级锚（宽容 guard 词探针，不绑实现形状）——详情头 stage_state 徽标/⛔受阻横幅/基本信息状态行三处陈旧词面站点必须被终态对账守卫（review 意见1 契约化：否则点开实案票详情仍见「受阻」=详情侧反向撒谎）。分工：L1 t260904-17 钉判序快照、t260919-02-failed-state-ui-model 钉失败族全表与失败面视图、t260919-02-terminal-face-board 钉引擎失败行数据面，本条独立钉「COMPLETED 终态对账+异常收口可辨」呈现契约与彼零重叠；引擎数据面归 t260921-03-close-health-board。node 缺席=ENV_FAIL exit 2 点名。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "command -v node >/dev/null 2>&1 || { echo 'ENV_FAIL: node 缺席'; exit 2; }; node integration/t260921-03/sc_close_health_ui_model.mjs", "browser-free"),
 
+    # ---- t260921-06: 批级共享 Temporal 台看守族（批内 ns 隔离；宿主令 260921「一次集成测试至多一个 temporal 容器」） ----
+    ("t260921-06-batch-runner-form",
+     "批台 runner 生命周期与真全轮 churn 形态（t260921-06，灰盒 L3 真 docker）：宿主令验收①④的执法面——含台消费者的轮恰预起 1 个批台（batch-* 工程容器/卷/网各恰 1），窗口内本泳道新现其余 compose 工程名全部∈例外清单形（清单外即红=要求4 执法半边；窗口差分按 compose working_dir label 限定本泳道防并行泳道假红）；消费缝注入面（消费者子进程 env 拿 SANDBAR_STAGE_BATCH=批台名、两消费者各自 ns 同指一个批台地址）；每票集测段形态（exclude engine,exclusive）零预起零注入（最高频路径零回归）；轮终与 SIGTERM 信号路径批台拆台零残留（拆台纪律不因批共享改变）；docker 缺席=整轮 exit 2 快速环境红不烧整套。假表注入（SCENARIOS 覆写+run_inner_runner 子进程直调 main()，既有手法不经单飞锁），条目=真消费缝探针。与 batch-ns-isolation 不同面（彼守服务端 ns 隔离语义，本条守 runner 资产计数与生命周期）；与 t260910-12/t260912-02/t260904-19 族不同 intent（彼守单台机械本体，批台=普通租约复用其判据不重复）。实现落地前红属预期（TDD 验收门），arbitrate/merge 期必须绿；docker 缺席=ENV_FAIL exit 2",
+     "python3 -B integration/t260921-06/sc_batch_runner_form.py", "engine"),
+    ("t260921-06-batch-ns-isolation",
+     "批内命名空间隔离与反用例（t260921-06，灰盒 L3 真批台+temporal CLI）：宿主令验收②③+要求2/5——同批两并发 ns-acquire A/B ⇒ A 的自定义 SA 与 workflow 不出现在 B 的命名空间（服务端作用域语义非约定）；反用例段=A 搞坏自己 ns（优先 delete，CLI 不支持则污染形态降级并留痕）⇒ B 的 SA/workflow 面完好、批台容器身份不变；不假绿段=批台不在位 ns-acquire=ENV_FAIL exit 2 点名（绝不静默回落「没跑」）、ns-drop 幂等（NotFound=ok）且释放后可重申请。双模式看守：外层真全轮注入批 env 则直消费外层批台（生产形态零自建），独立跑自管批台 finally 拆台零残留。与 batch-runner-form 不同面（彼数 docker 资产/守生命周期，本条守 temporal 服务端隔离语义与反用例）；register_namespace 幂等单面归 stage_docker selftest/L1 不重复。实现落地前红属预期（TDD 验收门），arbitrate/merge 期必须绿；docker/temporal CLI 缺席=ENV_FAIL exit 2",
+     "python3 -B integration/t260921-06/sc_batch_ns_isolation.py", "engine"),
+    ("t260921-06-batch-seam-regression",
+     "消费缝迁移回归（t260921-06，灰盒 L2 组件契约）：「批级共享不得改变任何判定口径」的缝面执法——lib_gate.require_stage（约 30 场景唯一消费缝）env 缺席=现行行为逐字（自起独立台、sa_registered 判定、stage_down 拆台零残留=直跑/例外场景零回归锚），env 在场=批模式（零新建台、ns=申请值、地址=批台端口、stage_down 绝不拆批台）；with_stage.sh 壳面桩测（cwd 桩 stage_docker 记录子命令序列）：批模式=ns-acquire→跑→ns-drop 绝不 ensure/down、env 缺席=ensure→跑→down 现行逐字、ns-acquire 红=壳 exit 2 透传不吞不改；批台护栏=--kind batch 与 --keep 互斥 usage 拒收（「不得退化整机共享」CLI 闸）。与 batch-runner-form 不同面（彼守 runner 预起/收口/窗口形态，本条守缝与壳调用序契约）；与 t260904-19 CLI 契约族不同 intent（彼守单台 up/ensure/down 本体，本条只守批模式新增分叉）。真台段 docker 缺席=环境红（桩面段照跑）。实现落地前红属预期（TDD 验收门），arbitrate/merge 期必须绿",
+     "python3 -B integration/t260921-06/sc_batch_seam_regression.py", "engine"),
+    ("t260921-06-batch-manifest-contract",
+     "例外清单机器契约与起台清点判据不变式（t260921-06，灰盒 L2 离线 ro 每票段必跑哨兵）：要求4「例外通道显式」的执法面+gen0 拒因 C1 的永久化回归网——清单（batch_stage_exceptions.json）schema 五键完整 reason/evidence 非空、条目名逐字在册（机械取自注册表防手抄漂移）、记录池=注册表池、project_pattern 合法前缀形；清点判据不变式=源码面消费模式 grep（require_stage/do_up_public/stageUp(/stage_docker up|ensure/up_stage，含 *.sh）×注册表 cmd 引用文件交叉得批消费者候选集，断言候选 ⊆ engine/exclusive ∪ 清单（两头不占=分类器漏接=每票段假环境红/全轮漏注入的 C1 形态机械化身）；判据为一级源码面已知边界=经 lib 二级消费的正当例外由人审 reason/evidence 承担（哨兵注记不判红）。与 lint_tests L4/L5 不同层（彼守注册结构完整，本条守「消费者↔池↔清单」三角一致性）；与 batch-runner-form 不同面（彼动态窗口真 docker，本条纯静态零 docker）。被看守文件缺损=产品红点名；实现落地前红属预期（TDD：清单未落=红），arbitrate/merge 期必须绿",
+     "python3 -B integration/t260921-06/sc_batch_manifest_contract.py", "ro"),
     # ---- t260921-04: developer 段验证纪律（宿主令 260921：单测可跑、集成禁跑+机械判据） ----
     ("t260921-04-discipline-clause-contract",
      "developer 段验证纪律的派活文案契约（t260921-04，宿主令 260921 要求①④文案侧，灰盒 L2 离线秒级）：dev-lane 两个 developer agent 段（create_plan/implement）的派活契约文本必须同批携带——禁跑语义锚（集成禁跑）、五类集成入口点名（run_scenarios.py、sc_ 场景脚本、integration/baselines 基线、with_stage.sh 包装器、verify_lane 验收脚本）、受影响面单测正道（pytest+integration/lint_tests.py）、只读放行语义、集成验证归属段（run_integration_tests 闸）与违规后果（红+票面点名），文案=人话+可执行（含可执行命令形态）非口号；其余 agent 段（review_plan/design_integration_tests/arbitrate/acceptance_walkthrough）的契约文本不携禁跑执法语义与集成执行器点名（执法与文案都只对 developer 段——「文案禁了机械不判/机械判了文案没说」单边态的文案半边+越段执法文案的反向误伤）。锚派活契约文本语义词与稳定文件名不锚全句（KI-051）；与 developer L1 口径同步测试（方案 S3 渲染产物字面）intent 不同面：本场景守公开派活契约面+他段负向对称。实现落地前红属预期（TDD 信号），run_integration_tests 期必须绿；引擎模块不可导入=ENV_FAIL exit 2",
@@ -1580,15 +1594,25 @@ def _sweep_residue_stages():
         p = subprocess.run([sys.executable, cli, "sweep"], capture_output=True,
                            text=True, timeout=300)
     except (OSError, subprocess.SubprocessError) as e:
-        print("[stage-sweep] 套件前清扫未跑成（%s: %s）——残台交起台时清扫/人工"
+        # 词面前缀纪律同 batch-stage（t260921-06 仲裁 A 族同根顺手清）：`[` 起首行
+        # 会被闸收成畸形规范行计红，自产通告一律 `stage-sweep: ` 起首。
+        print("stage-sweep: 套件前清扫未跑成（%s: %s）——残台交起台时清扫/人工"
               % (type(e).__name__, e), flush=True)
         return
     for stream in (p.stdout or "", p.stderr or ""):
         for line in stream.splitlines():
             if line.startswith(("[stage-sweep]", "ENV_FAIL", "STAGE_")):
-                print(line, flush=True)
+                # `[stage-sweep]` 行（cmd_sweep 扫描/判拆点名，stdout 无条件打）不能
+                # 原样转发——闸候选面会收红；剥前缀改 `stage-sweep: ` 形转发（留痕
+                # 语义不变；stage_docker 本体词面不动，t260912-02 场景断言锚定直跑
+                # 输出，且本函数的挑选条件仍认原前缀）。ENV_FAIL/STAGE_ 行两种起首
+                # 字符均安全，原样转发。
+                if line.startswith("[stage-sweep]"):
+                    print("stage-sweep:%s" % line[len("[stage-sweep]"):], flush=True)
+                else:
+                    print(line, flush=True)
     if p.returncode != 0:
-        print("[stage-sweep] 套件前清扫失败（rc=%d）——不中止套件，失败项已点名；"
+        print("stage-sweep: 套件前清扫失败（rc=%d）——不中止套件，失败项已点名；"
               "起台时清扫与下一期套件前清扫会再试" % p.returncode, flush=True)
 
 
@@ -1674,6 +1698,11 @@ def _run_entry(entry):
     # 守卫针对的递归自举不适用。
     child_env = {k: v for k, v in os.environ.items()
                  if k not in ("SANDBAR_TASK_QUEUE", "SANDBAR_WATCH_WORKFLOW")}
+    # 批台注入（t260921-06）：恰批消费者条目拿 SANDBAR_STAGE_BATCH=批台工程名——
+    # 消费缝（lib_gate.require_stage / with_stage.sh）据此走 ns 面；例外条目与
+    # 非消费者条目零注入（例外通道显式化，env 缺席=逐字旧行为）。
+    if _BATCH_STATE["project"] and name in _BATCH_STATE["consumers"]:
+        child_env[BATCH_ENV] = _BATCH_STATE["project"]
     try:
         # 解码加固（t260911-04 仲裁 gen3 实锤）：text=True 默认严格解码，任一场景输出
         # 含非法字节即抛 UnicodeDecodeError 穿透池线程 → 池级异常 → 该池未跑条目静默
@@ -1946,6 +1975,143 @@ def reprobe_main(names) -> int:
     return 0 if (ran == len(found) and failed == 0 and env_failed == 0) else 1
 
 
+# ---------------------------------------------------------------- 批级共享台（t260921-06，runner 生命周期面）
+# 宿主令 260921：「整机一个不行，顶多一次集成测试用一个 temporal 容器。」——共享
+# 粒度=批（一次跑批）：本执行器对含消费者的轮恰预起 1 个 kind=batch 台（+1 卷 +1 网），
+# 批内各场景经消费缝（lib_gate.require_stage / with_stage.sh，识别 env
+# SANDBAR_STAGE_BATCH）按命名空间隔离复用；批终 down 全灭零残留（批间隔离不变）。
+# 例外条目（batch_stage_exceptions.json 在册：被测对象就是 server 本体启停/多台机械）
+# 不注入、自管私台——例外通道显式化（要求4）。
+# 本段全部 stdout 行的词面前缀纪律（t260921-06 仲裁 A 族）：verify_lane integ 道把
+# 首字符 {/[ 的行当规范行候选、解析失败计红（malformed 非空=闸红），明细行规则另收
+# `ENV_FAIL [` 起首行为幻影条目——故通告一律 `batch-stage: ` 起首、环境红一律
+# `ENV_FAIL: ` 形（不带 `[`）。看守 t260912-01-summary-count-purity S2b 机械执法此面。
+
+BATCH_ENV = "SANDBAR_STAGE_BATCH"                # 消费缝注入键（lib_gate/with_stage.sh）
+BATCH_MANIFEST_ENV = "SANDBAR_BATCH_MANIFEST"    # 例外清单路径覆盖（看守桩测缝）
+# 进程级批台态（_run_entry 注入面读取；一进程一轮，嵌套轮=独立子进程直调本文件）。
+_BATCH_STATE = {"project": None, "consumers": frozenset()}
+
+
+def batch_exception_entries():
+    """例外清单装载（机器真源 integration/batch_stage_exceptions.json）。缺失/畸形=
+    响亮警告+空例外集——分类器 fail-safe 方向=「宁过起不漏注」（多建台可观测、
+    漏注入=批消费者静默无台假绿，方向不可反）。路径覆盖 env=看守桩测缝。"""
+    path = os.environ.get(BATCH_MANIFEST_ENV) or os.path.join(
+        _REPO_ROOT, "integration", "batch_stage_exceptions.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as e:
+        print("BATCH_STAGE_WARN 例外清单不可读（%s：%s:%s）——按空例外集分类（宁过起不漏注）"
+              % (path, type(e).__name__, e), flush=True)
+        return set()
+    if not isinstance(data, list):
+        print("BATCH_STAGE_WARN 例外清单形态非数组（%s）——按空例外集分类（宁过起不漏注）"
+              % path, flush=True)
+        return set()
+    return {str(it.get("entry")) for it in data if isinstance(it, dict) and it.get("entry")}
+
+
+def batch_consumers(entries):
+    """分类器（候选 A）：pool ∈ {engine, exclusive} ∧ entry ∉ 例外清单 ⇒ 批消费者。
+    池面依据=review gen1 交叉实证（批消费者条目 ⊆ engine∪exclusive，池外零命中；
+    每票集测段 exclude engine,exclusive ⇒ 全不在册 ⇒ 零预起零注入=最高频路径零回归）。
+    分类不变式由 t260921-06-batch-manifest-contract 每票段静态执法（候选 ⊆ 两池 ∪ 清单）。"""
+    exc = batch_exception_entries()
+    return [e for e in entries
+            if pool_of(e) in ("engine", "exclusive") and e[0] not in exc]
+
+
+def _batch_project_name():
+    """批台工程名 batch-<runid8>-<pwdhash8>：同轮稳定，跨轮/跨仓互异（pwdhash=仓根
+    md5 前 8，与 with_stage.sh 泳道化同源）；形过 stage_docker PROJECT_RE。"""
+    rid = "%08x" % (int(time.time() * 1000) % 0x100000000)
+    ph = hashlib.md5(_REPO_ROOT.encode("utf-8")).hexdigest()[:8]
+    return "batch-%s-%s" % (rid, ph)
+
+
+def _stage_cli_path():
+    return os.path.join(_REPO_ROOT, "integration", "stage_docker.py")
+
+
+def batch_preboot(consumers):
+    """批台预起（stage_docker ensure --kind batch；清扫后、场景前）。零消费者轮=零建台
+    零注入（打印留痕，最高频路径零回归）。失败=响亮 ENV_FAIL（调用方 exit 2 快速红：
+    本轮零场景开跑零注入——要求⑤不假绿，绝不带病开跑）。"""
+    if not consumers:
+        print("batch-stage: 本轮零批台消费者（engine/exclusive − 例外清单为空集）"
+              "——零建台零注入", flush=True)
+        return True
+    project = _batch_project_name()
+    names = ",".join(e[0] for e in consumers)
+    print("batch-stage: 批台预起 ensure --project %s --kind batch（消费者 %d 条：%s%s）"
+          % (project, len(consumers), names[:160], "…" if len(names) > 160 else ""),
+          flush=True)
+    try:
+        p = subprocess.run(
+            [sys.executable, "-B", _stage_cli_path(), "ensure", "--project", project,
+             "--services", "temporal", "--kind", "batch"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=600, cwd=_REPO_ROOT)
+    except subprocess.TimeoutExpired:
+        print("ENV_FAIL: 批台预起超时（>600s）——本轮拒绝开跑（不假绿；batch-stage）",
+              flush=True)
+        return False
+    tail = ((p.stdout or "") + (p.stderr or ""))[-600:]
+    state = None
+    if p.returncode == 0:
+        for line in reversed((p.stdout or "").strip().splitlines()):
+            s = line.strip()
+            if s.startswith("{"):
+                try:
+                    state = json.loads(s)
+                    break
+                except ValueError:
+                    continue
+    if p.returncode != 0 or not isinstance(state, dict) \
+            or not ((state.get("ports") or {}).get("temporal")):
+        print("ENV_FAIL: 批台预起失败（rc=%s 回执=%s）——本轮拒绝开跑"
+              "（要求⑤：不假绿；batch-stage）尾段=%s"
+              % (p.returncode, "有" if isinstance(state, dict) else "无", tail), flush=True)
+        return False
+    _BATCH_STATE["project"] = project
+    _BATCH_STATE["consumers"] = frozenset(e[0] for e in consumers)
+    return True
+
+
+def batch_teardown():
+    """批终收口（stage_docker down：容器/卷/网全灭零残留——批间隔离不变）。失败响亮
+    留痕不拦收口（拆台纪律）；幂等：未持有=零操作；调用后批态清零（重入安全）。"""
+    project = _BATCH_STATE["project"]
+    _BATCH_STATE["project"] = None
+    _BATCH_STATE["consumers"] = frozenset()
+    if not project:
+        return
+    print("batch-stage: 批终收口 down %s（容器/卷/网全灭）" % project, flush=True)
+    try:
+        p = subprocess.run([sys.executable, "-B", _stage_cli_path(), "down",
+                            "--project", project],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=300, cwd=_REPO_ROOT)
+    except (subprocess.TimeoutExpired, OSError) as e:
+        print("BATCH_STAGE_WARN 批台收口 down 异常（%s: %s）——残留已留痕（失败不拦收口）"
+              % (type(e).__name__, e), flush=True)
+        return
+    if p.returncode != 0:
+        print("BATCH_STAGE_WARN 批台收口 down 非零（rc=%s）——残留需归因：尾段=%s"
+              % (p.returncode, ((p.stdout or "") + (p.stderr or ""))[-300:]), flush=True)
+
+
+def _batch_signal_teardown(signum, frame):
+    """信号路径（SIGINT/SIGTERM，t260921-06 全终态收口段）：批台就地 down 后快速退
+    （os._exit——执行器已无完整结果，半轮=诚实中断；在飞场景子进程由自身超时/管道
+    断开兜底，批台 zero-residue 由本 down 保证）。"""
+    print("batch-stage: 收到信号 %s——批台就地收口后退出" % signum, flush=True)
+    batch_teardown()
+    os._exit(130)
+
+
 def main(exclude_pools=None) -> int:
     """Run the registry as pools (host-ordered t260902 pool split): an entry
     may carry an optional fourth element — None/absent = the "main" pool;
@@ -2095,30 +2261,53 @@ def main(exclude_pools=None) -> int:
     timings = []   # KI-060 prep 2: timing distribution (one row per scenario, with pool attribution)
     _sweep_residue_stages()   # t260912-02 清理挂点①：套件前残台清扫（判拆点名；失败响亮不中止）
     _docker_hygiene()   # 起跑前台面卫生（t260910-14 arbitrate gen2/gen3：见函数注）
+    # ---- t260921-06 批台预起（清扫后、场景前）：恰一批消费者轮=恰起 1 个批台 ----
+    selected = list(exclusives) + [e for _lst in pools.values() for (e, _s) in _lst]
+    consumers = batch_consumers(selected)
+    if not batch_preboot(consumers):
+        # 快速环境红（要求⑤不假绿）：本轮零场景开跑零注入，不烧整套
+        return 2
+    _prev_sig = {}
+    if _BATCH_STATE["project"]:
+        for _s in (signal.SIGINT, signal.SIGTERM):
+            try:
+                _prev_sig[_s] = signal.signal(_s, _batch_signal_teardown)
+            except (OSError, ValueError):
+                pass
     spec_cases = []   # t260912-01：规范行明细（只收执行器本层综合行；子进程 stdout 不进计数），INTEG_SUMMARY 以此为准
     executor_error = None   # t260911 仲裁②：池级异常必须响亮产品红，绝不静默吞
-    for e in exclusives:      # exclusives go first, overlapping no pool (always serial)
-        _drain([(e, True)], "exclusive")
     try:
-        if conc_width <= 1:
-            # SANDBAR_POOL_CONC=1 = 全串行回退语义（提速战役③步骤0 计划验收②）：
-            # 不光池内宽度收 1，池间也顺次排开——否则六个池各一路并发，负载
-            # 敏感场景（起台族/capture 全视图走查）在「回退」里仍要扛六路并发，
-            # 回退形同虚设（260910 实锤：只设池内宽度时 wall=467s 与缺省无差）。
-            for fname, pv in pools.items():
-                _drain(pv, fname or "main")
-        else:
-            with ThreadPoolExecutor(max_workers=max(1, len(pools))) as ex:
-                # 句柄必须保留逐个 .result()（t260911 仲裁②实锤：submit 不存句柄
-                # 时池级异常从不上浮=条目静默丢失照常出绿——自家注释承诺落空态）
-                futs = [ex.submit(_drain, pv, fname or "main")
-                        for fname, pv in pools.items()]
-                for f in futs:
-                    f.result()
-    except Exception as ex:   # noqa: BLE001 —— 任何池级异常 = 响亮产品红中止
-        executor_error = "池级异常（%s: %s）——条目可能丢失，响亮产品红中止" % (
-            type(ex).__name__, ex)
-        print("FAIL [__executor__] %s" % executor_error, flush=True)
+        for e in exclusives:      # exclusives go first, overlapping no pool (always serial)
+            _drain([(e, True)], "exclusive")
+        try:
+            if conc_width <= 1:
+                # SANDBAR_POOL_CONC=1 = 全串行回退语义（提速战役③步骤0 计划验收②）：
+                # 不光池内宽度收 1，池间也顺次排开——否则六个池各一路并发，负载
+                # 敏感场景（起台族/capture 全视图走查）在「回退」里仍要扛六路并发，
+                # 回退形同虚设（260910 实锤：只设池内宽度时 wall=467s 与缺省无差）。
+                for fname, pv in pools.items():
+                    _drain(pv, fname or "main")
+            else:
+                with ThreadPoolExecutor(max_workers=max(1, len(pools))) as ex:
+                    # 句柄必须保留逐个 .result()（t260911 仲裁②实锤：submit 不存句柄
+                    # 时池级异常从不上浮=条目静默丢失照常出绿——自家注释承诺落空态）
+                    futs = [ex.submit(_drain, pv, fname or "main")
+                            for fname, pv in pools.items()]
+                    for f in futs:
+                        f.result()
+        except Exception as ex:   # noqa: BLE001 —— 任何池级异常 = 响亮产品红中止
+            executor_error = "池级异常（%s: %s）——条目可能丢失，响亮产品红中止" % (
+                type(ex).__name__, ex)
+            print("FAIL [__executor__] %s" % executor_error, flush=True)
+    finally:
+        # 批终收口（t260921-06 验收④）：正常/异常/信号每条路径都 down 批台零残留；
+        # 恢复既有信号处理（外层 runner 的信号语义不被本层吞掉）。
+        batch_teardown()
+        for _s, _h in _prev_sig.items():
+            try:
+                signal.signal(_s, _h)
+            except (OSError, ValueError, TypeError):
+                pass
     # Summary five counters (t260904-12): na=N/A is a leg-level state, already
     # folded into pass/fail inside the scenario (all legs N/A = scenario red),
     # so at runner level it is always 0 — kept as a placeholder for the shape.

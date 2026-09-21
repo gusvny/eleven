@@ -8,6 +8,8 @@
 # SANDBAR_TARGET_HOST / SANDBAR_NAMESPACE（场景的「host 未显式设置=环境红」
 # 写保原样生效——台没起来就不注入，场景自己按环境红收口）→ 跑命令 →
 # 无论成败拆台，退出码透传命令本身（台没起来直接 exit 2）。
+# 批模式（t260921-06）：SANDBAR_STAGE_BATCH 在场时起台步=向批台 ns-acquire、
+# 拆台步=ns-drop（绝不 down 批台）；env 缺席时行为逐字不变。
 set -u
 
 PROJECT=$1
@@ -19,12 +21,37 @@ shift
 # 同名台）。后缀=本 worktree 路径 hash——同 worktree 稳定（幂等复用不受
 # 影响），跨 worktree 不同（互拆根治）。ensure/down/注入同值，台生命周期
 # 语义不变。
-STAGE_PROJECT="${PROJECT}-$(printf %s "$PWD" | md5 -q | cut -c1-8)"
+#
+# 批模式（t260921-06 批级共享）：SANDBAR_STAGE_BATCH 在场 ⇒ 本场景不自起台，
+# ns-acquire 向批台申请命名空间（runner 预起的 kind=batch 台，秒级零容器开销）；
+# 收尾 ns-drop 释放命名空间，**绝不 down 批台**（生命周期归 runner——本壳的
+# 拆台权限在批模式被显式褫夺，防误伤同批其它场景）。ns 名=调用方传入的
+# PROJECT（stage_docker 白名单校验，畸形=usage 红透传）。env 缺席 ⇒ 逐场景
+# 独立台行为逐字保留（STAGE_PROJECT 路径原样）。
+BATCH_PROJECT="${SANDBAR_STAGE_BATCH:-}"
 
-stage_ensure() {
-  python3 integration/stage_docker.py ensure --project "$STAGE_PROJECT" \
-    --services temporal 2>&1
+stage_teardown() {
+  if [ -n "$BATCH_PROJECT" ]; then
+    python3 integration/stage_docker.py ns-drop --project "$BATCH_PROJECT" \
+      --namespace "$PROJECT" >/dev/null 2>&1 || true
+  else
+    python3 integration/stage_docker.py down --project "$STAGE_PROJECT" \
+      >/dev/null 2>&1 || true
+  fi
 }
+
+if [ -n "$BATCH_PROJECT" ]; then
+  stage_ensure() {
+    python3 integration/stage_docker.py ns-acquire --project "$BATCH_PROJECT" \
+      --namespace "$PROJECT" 2>&1
+  }
+else
+  STAGE_PROJECT="${PROJECT}-$(printf %s "$PWD" | md5 -q | cut -c1-8)"
+  stage_ensure() {
+    python3 integration/stage_docker.py ensure --project "$STAGE_PROJECT" \
+      --services temporal 2>&1
+  }
+fi
 
 # 生命周期锚（t260910-12 回归修复）：ensure 必须作为**本壳的前台子进程**跑、
 # 输出落临时文件——绝不能放 `INFO=$(...)` 命令替换里：子壳在 ensure 返回瞬息
@@ -53,7 +80,7 @@ if [ $RC -ne 0 ]; then
   # 路径自己打崩**（调用方只见 UnicodeDecodeError，真因「台没起来」被吞）。
   # t260913-02 arbitrate 实测：t02-t260902-02-archive-legacy-e2e ENV_FAIL 的尾巴
   # 即为该形态。写集内全 shell 家族复扫仅此一处。
-  echo "with_stage: 台没起来（ensure exit=${RC}）：" >&2
+  echo "with_stage: 台没起来（ensure/ns-acquire exit=${RC}）：" >&2
   tail -5 "$INFO_FILE" >&2
   exit 2
 fi
@@ -62,8 +89,14 @@ LAST=$(tail -1 "$INFO_FILE")
 PORT=$(printf '%s' "$LAST" | python3 -c 'import json,sys; print(json.load(sys.stdin)["ports"]["temporal"])' 2>/dev/null)
 NS=$(printf '%s' "$LAST" | python3 -c 'import json,sys; print(json.load(sys.stdin)["namespace"])' 2>/dev/null)
 if [ -z "${PORT:-}" ] || [ -z "${NS:-}" ]; then
-  echo "with_stage: ensure 回报缺 ports.temporal/namespace：$LAST" >&2
-  python3 integration/stage_docker.py down --project "$STAGE_PROJECT" >/dev/null 2>&1 || true
+  echo "with_stage: ensure/ns-acquire 回报缺 ports.temporal/namespace：$LAST" >&2
+  if [ -z "${BATCH_PROJECT:-}" ]; then
+    python3 integration/stage_docker.py down --project "$STAGE_PROJECT" >/dev/null 2>&1 || true
+  elif [ -n "${NS:-}" ]; then
+    # 批模式：ns 已注册但回报畸形——释放 ns（批台不动），响亮留痕
+    python3 integration/stage_docker.py ns-drop --project "$BATCH_PROJECT" \
+      --namespace "$NS" >/dev/null 2>&1 || true
+  fi
   exit 2
 fi
 
@@ -73,5 +106,5 @@ export SANDBAR_NAMESPACE="$NS"
 "$@"
 RC=$?
 
-python3 integration/stage_docker.py down --project "$STAGE_PROJECT" >/dev/null 2>&1 || true
+stage_teardown
 exit $RC

@@ -107,7 +107,7 @@ def leg1_handover_consumed_and_executed(tmp):
     legs = [
         {"name": "ut-green", "cmd": "%s -c \"print('leg1-ok')\"" % PY},
         {"name": "ut-red", "cmd": "%s -c 'import sys; sys.exit(3)'" % PY},
-        {"name": "ut-broken", "cmd": "echo 'unbalanced"},   # 畸形：解析失败不执行
+        {"name": "ut-broken", "cmd": "echo 'unbalanced"},   # 畸形（引号不闭合）：shell 拒解析=记败
     ]
     out = asyncio.run(agent_activities.run_handover_legs(
         legs, cwd=Path(tmp)))
@@ -123,8 +123,13 @@ def leg1_handover_consumed_and_executed(tmp):
           any(d["exit"] == 3 for d in reds) and len(reds) == 2,
           [(d["name"], d["exit"]) for d in reds])
     broken = [d for d in out["details"] if d["name"] == "handover:ut-broken"][0]
-    check("子用例1：畸形 cmd 未被执行（解析失败记名，fail-closed）",
-          "解析失败" in broken["output_tail"], broken["output_tail"])
+    # 契约对齐（260920 引擎重构，agent_activities.run_handover_leg 文档串明文：
+    # 「shell 语法错误=命令自己非零退出（记败交仲裁，不猜）」——畸形串的预解析
+    # 让位给 shell 本尊当解析器）：fail-closed 语义=畸形 cmd 绝不计过、败因是
+    # shell 语法错误且可见可查（sh 拒解析=零执行副作用），非旧契约「解析失败」标记。
+    check("子用例1：畸形 cmd 记败且 shell 语法错误可见（fail-closed，260920 契约）",
+          broken["exit"] != 0 and "syntax error" in broken["output_tail"],
+          (broken["exit"], broken["output_tail"]))
     # 红线④机械面：移交命令单列计数，主口径零沾染
     ir = shared.IntegrationRunResult()
     check("子用例1：主口径保持 0（命令计数不进闸判定，IntegrationRunResult 缺省面）",

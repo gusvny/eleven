@@ -20,6 +20,23 @@ Subcommands:
                               installed; default = fall back to the main tree
                               when the lane lacks them). Decoupled from
                               --repo-dir (the tested tree).
+  ns-acquire --project <批台名> --namespace <场景ns>
+                             批内命名空间申请（t260921-06 批级共享）：批台（kind=batch
+                             租约、state=up）上幂等注册 ns+SA+retention（复用
+                             register_namespace）；批台不在位/注册失败=ENV_FAIL exit 2
+                             （诚实环境红，绝不静默回落「没跑」）；stdout 回 JSON
+                             {project, namespace, ports, ...}；ns 记入租约 namespaces
+                             账（inventory 可见）。消费者面（with_stage.sh / lib_gate
+                             require_stage）经本缝消费批台，绝不拆台。
+  ns-drop --project <批台名> --namespace <场景ns>
+                             批内命名空间释放（秒级、零容器开销）：operator namespace
+                             delete --yes；NotFound=幂等成功；删除失败响亮留痕
+                             （stderr STAGE_ 行）但 exit 0——「失败留痕不拦收口」，
+                             账面保留条目打 drop_failed 供批终归因；批终 down -v 全灭
+                             兜底。批台拆台只属于 runner 收口（down --project）。
+  up --project <name> [--kind batch]   --kind batch=批台（t260921-06）：与 --keep
+                             互斥（批终即拆，拒常驻=拒「整机共享」退化的机械闸）；
+                             批台由 runner 预起并收口，hold 锚=runner 进程。
   ensure --project <name> [--keep] [...same flags as up]   idempotent ensure:
                               a live lease (state=up + fresh heartbeat + holder
                               alive) is reused with zero docker queries; a
@@ -2222,6 +2239,18 @@ def validate_service_set(services):
     return {"temporal": ["temporal"], "dsh": ["dsh"], "full": ["temporal", "dsh"]}[services]
 
 
+def validate_kind(kind):
+    """台型标记（t260921-06）：缺省=None（场景台，现行语义）；唯一合法显式值=
+    "batch"（批台，runner 预起/收口，--keep 互斥在 _boot_new_stage 双层闸落第二道）。
+    其它值一律 usage 红（畸形 --kind 不静默吞）。"""
+    if kind is None:
+        return None
+    if kind != "batch":
+        raise StageError("--kind 不合法：%r（缺省=场景台；唯一合法值 batch）" % kind,
+                         kind="usage")
+    return "batch"
+
+
 def validate_dir(label, value, required=False):
     if not value:
         if required:
@@ -2410,6 +2439,146 @@ def register_namespace(ns, addr, timeout=30):
     cli_ok(["operator", "namespace", "update", "--retention", "876000h",
             "--namespace", ns, "--address", addr], ())  # retention is best-effort; on failure only the retention is missing
     return True, "namespace+SA 就绪"
+
+
+# ---------------------------------------------------------------- 批台命名空间（t260921-06 批级共享）
+
+def batch_lease_up(project):
+    """批台在位判定：本根租约 state=up + 心跳新鲜（lease_reusable）+ kind=batch。
+    返回租约 dict 或 None。非批台（kind 缺失/其它值）一律不算批台——ns 面绝不
+    误落在别人的场景台上（错误方向=诚实 env 红，不是接管）。"""
+    st = read_lease(project)
+    if lease_reusable(st) and st.get("kind") == "batch":
+        return st
+    return None
+
+
+def _ledger_apply(entries, ns, action, note=None):
+    """纯函数：租约 namespaces 账本合并（畸形输入安全——账本是记账面不是判定面，
+    任何畸形都绝不抛异常拖垮 ns-acquire/ns-drop 主路径）。entries 形态
+    [{ns, ts, drop_failed?, note?}]；action: "add"|"drop-ok"|"drop-failed"。"""
+    if not isinstance(entries, list):
+        entries = []
+    out = [e for e in entries if isinstance(e, dict)]
+    row = next((e for e in out if e.get("ns") == ns), None)
+    if action == "add":
+        if row is not None:
+            out.remove(row)          # 重复申请：覆盖旧条目（幂等重申，不堆账）
+        out.append({"ns": ns, "ts": int(time.time())})
+    elif action == "drop-ok":
+        if row is not None:
+            out.remove(row)          # 删成功：账实一致，移除条目
+    else:                            # drop-failed：S3——保留/补记条目打标（删失败的
+                                     # ns 真实在服务器上，未申请过也补记，账必须可见）
+        if row is None:
+            row = {"ns": ns, "ts": int(time.time())}
+            out.append(row)
+        row["drop_failed"] = True
+        row["dropped_ts"] = int(time.time())
+        if note:
+            row["note"] = str(note)[:160]
+    return out
+
+
+def _ledger_update(project, ns, action, note=None):
+    """账本落盘（读改写）：取 ensure 项目锁串行化（并发 ns-acquire 竞态下不丢条目；
+    锁不可得时尽力写——账本是观测面，不为它引入新的收口阻塞）。"""
+    lock_path = lock_root() / ("ensure-%s.lock" % project)
+    fd = None
+    try:
+        try:
+            fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            fd = None                # 锁忙：放弃互斥，尽力写（账本丢条目可容忍，判据面不受影响）
+        lease = read_lease(project)
+        if isinstance(lease, dict):
+            lease["namespaces"] = _ledger_apply(lease.get("namespaces"), ns, action, note)
+            write_lease(project, lease)
+    except OSError:
+        pass                          # 账本尽力而为：失败不阻断主路径（主判定在 ns 注册本身）
+
+
+def ns_acquire(project, namespace, timeout=30):
+    """批内命名空间申请（lib_gate.require_stage / with_stage.sh 的消费缝）。
+    批台不在位 / ns 名非法 / 注册失败 = StageError（env/usage）——调用方（场景壳）
+    按既有三态收口，绝不静默回落。返回消费 state dict（形状与 do_up_public 产出的
+    租约回执同族，供场景断言 ports/sa_registered）。"""
+    validate_project(project)         # S6：SANDBAR_STAGE_BATCH 值流入此处，同白名单
+    validate_project(namespace)       # ns 名与工程名同白名单（现有调用点实参已核全过）
+    lease = batch_lease_up(project)
+    if not lease:
+        raise StageError(
+            "ENV_FAIL: 批台 %s 不在位（runner 未预起/已收口/中途亡）——批内命名空间"
+            "申请拒绝代起、拒绝静默回落（t260921-06 要求⑤：ns 不可用=环境红）"
+            % project, kind="env")
+    port = (lease.get("ports") or {}).get("temporal")
+    if not port:
+        raise StageError(
+            "ENV_FAIL: 批台 %s 租约缺 ports.temporal（半残形态）——ns 申请拒绝盲跑"
+            % project, kind="env")
+    ok, note = register_namespace(namespace, "127.0.0.1:%d" % port, timeout=timeout)
+    if not ok:
+        raise StageError(
+            "ENV_FAIL: 命名空间注册失败（ns=%s 批台=%s）：%s——SA 依赖型子用例"
+            "没有注册就是全跑不真，诚实环境红" % (namespace, project, note),
+            kind="env")
+    _ledger_update(project, namespace, "add")
+    lease = batch_lease_up(project) or lease
+    ports = {k: v for k, v in (lease.get("ports") or {}).items()}
+    return {
+        "project": project,           # 批台工程名（消费者不再自有台）
+        "namespace": namespace,       # 本场景命名空间（隔离键）
+        "mode": "batch",
+        "services": list(lease.get("services") or []),
+        "ports": ports,
+        "container_ids": lease.get("container_ids"),
+        "sa_registered": True,
+        "sa_note": note,
+        "lease_id": lease.get("lease_id"),
+    }
+
+
+def ns_drop(project, namespace, timeout=30):
+    """批内命名空间释放。语义（工单边界「失败留痕不拦收口」）：
+    - 删成功 / NotFound（幂等二连/重复释放）→ dropped=True，账移除条目；
+    - 真删除失败 → dropped=False + drop_failed 账面打标（S3），stderr 响亮留痕，
+      **不抛错不非零退出**——批终 down -v 全灭兜底；
+    - 批台租约已不在（批已收口）→ dropped=None + note（ns 随卷消亡，无需删）。
+    返回结果 dict；usage 级畸形仍抛 StageError（调用方 bug 不留痕放过）。"""
+    validate_project(project)
+    validate_project(namespace)
+    lease = read_lease(project)
+    port = (lease or {}).get("ports", {}).get("temporal") if isinstance(lease, dict) else None
+    if not port:
+        result = {"project": project, "namespace": namespace, "dropped": None,
+                  "note": "批台租约不在（已收口/未预起）——ns 随台消亡，无需删"}
+        print("STAGE_NS_DROP: %s" % result["note"], file=sys.stderr)
+        return result
+    cli = resolve_temporal_cli()
+    if not cli or not pathlib.Path(cli).exists():
+        _ledger_update(project, namespace, "drop-failed", "temporal CLI 不可得")
+        print("STAGE_NS_DROP_WARN: temporal CLI 不可得（%s）——ns=%s 未删，账面已打标 "
+              "drop_failed；批终 down -v 全灭兜底" % (cli, namespace), file=sys.stderr)
+        return {"project": project, "namespace": namespace, "dropped": False,
+                "drop_failed": True, "note": "temporal CLI 不可得"}
+    try:
+        p = _run([cli, "operator", "namespace", "delete", "-n", namespace,
+                  "--yes", "--address", "127.0.0.1:%d" % port],
+                 timeout=timeout, check=False)
+        text = ((p.stdout or "") + (p.stderr or "")).lower()
+    except (subprocess.SubprocessError, OSError) as e:
+        p, text = None, str(e)
+    if p is not None and p.returncode == 0 or "not found" in text:
+        _ledger_update(project, namespace, "drop-ok")
+        return {"project": project, "namespace": namespace, "dropped": True,
+                "note": "deleted" if (p is not None and p.returncode == 0) else "not found（幂等）"}
+    tail = text.strip().splitlines()[-1][:160] if text.strip() else "无输出"
+    _ledger_update(project, namespace, "drop-failed", tail)
+    print("STAGE_NS_DROP_WARN: ns=%s 删除失败：%s——账面已打标 drop_failed；"
+          "批终 down -v 全灭兜底（失败留痕不拦收口）" % (namespace, tail), file=sys.stderr)
+    return {"project": project, "namespace": namespace, "dropped": False,
+            "drop_failed": True, "note": tail}
 
 
 # ---------------------------------------------------------------- up / down / ensure
@@ -2848,7 +3017,15 @@ def _boot_new_stage(project, services_list, opts, timeout, cold_cleanup=False,
     hold — no half-claimed occupancy is ever left (R1'a; the hold also
     self-exits via its bounded lease-wait as a backstop).
     keep=True：常驻基建台——租约记 keep 标，hold 分支据此禁③锚死回收（锚=
-    短命调用方 shell）；其余终态与判死回收判据原样，绝不引入存活启发式。"""
+    短命调用方 shell）；其余终态与判死回收判据原样，绝不引入存活启发式。
+    kind=batch（t260921-06）：批台——租约记 kind 标随存续透传；与 keep 互斥
+    （批终即拆，常驻=「整机共享」退化，宿主令否掉——双层闸：CLI 入口 +
+    本函数落地处）。"""
+    if keep and opts.get("kind") == "batch":
+        raise StageError(
+            "--kind batch 与 --keep 互斥：批台批终即拆（t260921-06），常驻化="
+            "「整机共享」退化（宿主令否掉）。要常驻基建台请勿标 kind=batch。",
+            kind="usage")
     _gates(services_list)
     sweep_residues_quiet()      # 起台时扫一遍（t260912-02 清理挂点②；失败响亮不阻断）
     fuse_precheck()             # 保险丝预检：失控循环在孵 hold 前刹停（权威判定在临界区）
@@ -2870,6 +3047,8 @@ def _boot_new_stage(project, services_list, opts, timeout, cold_cleanup=False,
                           anchor_token=process_start_token(anchor_pid))
         if keep:
             lease["keep"] = True   # 占位/心跳读改写全链路透传（常驻标记随租约存续）
+        if opts.get("kind"):
+            lease["kind"] = opts["kind"]   # 批台标记随租约存续（ns-acquire/拒 keep 判据面）
         capacity_acquire(project, lease, timeout)   # 保险丝判定+占位同临界区（R4 原样）
         try:
             ports = explicit_ports(services_list)
@@ -3007,9 +3186,15 @@ def do_ensure(project, services_list, opts, timeout, keep=False):
       冷路径：幂等清残留 → hold 分支 → 满员占位 → 择带 → 起台；
       租约过期但 holder pid 仍在 → 拒收诚实红（疑似 pid 复用/僵死，不对抗）。
     --keep：在跑面（活租约已在上面复用返回；无主容器在跑的孤儿台）一律不拆，
-    诚实环境红交人工。冷/半残路径按项目串行化（run K 雷群回归锚保留）。"""
+    诚实环境红交人工。冷/半残路径按项目串行化（run K 雷群回归锚保留）。
+    kind=batch（t260921-06）：复用快路径对批台同样返回（runner 预起后的幂等重入
+    合法）；但 --keep 撞批台=usage 红（批终即拆不可常驻化，双层闸的复用面）。"""
     validate_project(project)
     st = read_lease(project)
+    if keep and isinstance(st, dict) and st.get("kind") == "batch":
+        raise StageError(
+            "--keep 拒收：项目 %s 是批台（kind=batch，t260921-06）——批终即拆，"
+            "常驻化=「整机共享」退化（宿主令否掉）" % project, kind="usage")
     if lease_reusable(st):
         return _reused(st)
     lock_path = lock_root() / ("ensure-%s.lock" % project)
@@ -3284,6 +3469,31 @@ def selftest():
        and all("reason" in m for m in a["malformed"]),
        "缺 enabled/非布尔 enabled/未知 state/非对象条目 → malformed 逐条点名")
 
+    # 10. 批台命名空间面（t260921-06）：kind 校验 / 账本纯函数 / 畸形输入安全
+    ok(validate_kind(None) is None, "kind 缺省=None（场景台语义不变）")
+    ok(validate_kind("batch") == "batch", "kind=batch 合法")
+    for bad in ("", "Batch", "batch2", "keep"):
+        try:
+            validate_kind(bad)
+            ok(False, "--kind %r 应拒收" % bad)
+        except StageError as e:
+            ok(e.kind == "usage", "--kind %r 拒收 kind=usage" % bad)
+    led = _ledger_apply([], "ns-a", "add")
+    ok(len(led) == 1 and led[0]["ns"] == "ns-a" and "ts" in led[0], "账本 add 新条目")
+    led = _ledger_apply(led, "ns-a", "add")
+    ok(len(led) == 1, "账本重复 add 覆盖不堆账（幂等重申）")
+    led = _ledger_apply(led, "ns-b", "add")
+    led = _ledger_apply(led, "ns-a", "drop-ok")
+    ok([e["ns"] for e in led] == ["ns-b"], "账本 drop-ok 移除条目（账实一致）")
+    led = _ledger_apply(led, "ns-b", "drop-failed", "dial tcp 失败")
+    ok(led and led[0].get("drop_failed") is True and "dial" in (led[0].get("note") or ""),
+       "账本 drop-failed 保留条目打标（S3：失败留痕不删账）")
+    ok(_ledger_apply(None, "ns", "add")[0]["ns"] == "ns", "账本畸形 entries=None 安全重建")
+    ok(_ledger_apply(["bad", 7, {"ns": "ns-c"}], "ns-d", "add")[-1]["ns"] == "ns-d",
+       "账本畸形条目过滤不抛异常")
+    ok(_ledger_apply([{"ns": "ns-e"}], "ns-e", "drop-failed")[0].get("drop_failed") is True,
+       "账本对既有条目打标 drop_failed")
+
     print(("SELFTEST 全绿" if not fails else "SELFTEST %d 项红" % len(fails)))
     return EXIT_FAIL if fails else EXIT_OK
 
@@ -3295,7 +3505,8 @@ def _parse_opts(argv, i, opts):
              "--profile-dir": "profile_dir", "--profile-name": "profile_name",
              "--repo-dir": "repo_dir", "--nm-repo-dir": "nm_repo_dir",
              "--services": "_services", "--anchor-pid": "anchor_pid",
-             "--lease-id": "lease_id", "--console": "console", "--token": "token"}
+             "--lease-id": "lease_id", "--console": "console", "--token": "token",
+             "--kind": "kind"}   # t260921-06：批台标记（唯一合法值 batch）
     while i < len(argv):
         a = argv[i]
         if a in flags:
@@ -3402,8 +3613,15 @@ def main(argv):
                                      "（plugins 专属旗标）" % cmd, kind="usage")
             services = validate_service_set(opts.get("_services") or "temporal")
             timeout = opts.get("timeout") or DEFAULT_TIMEOUT
+            kind = validate_kind(opts.get("kind"))
+            if kind and opts.get("keep", False):
+                raise StageError(
+                    "--kind batch 与 --keep 互斥：批台批终即拆（t260921-06），常驻化="
+                    "「整机共享」退化（宿主令否掉）；常驻基建语义留给供给台 --keep",
+                    kind="usage")
             clean_opts = {
                 "namespace": opts.get("namespace"),
+                "kind": kind,
                 "fixtures_dir": validate_dir("fixtures-dir", opts.get("fixtures_dir")),
                 "profile_dir": validate_dir("profile-dir", opts.get("profile_dir")),
                 "profile_name": opts.get("profile_name"),
@@ -3457,8 +3675,26 @@ def main(argv):
             result = do_down(project)
             print(json.dumps(result, ensure_ascii=False))
             return EXIT_OK if not result["residue"] else EXIT_FAIL
+        if cmd in ("ns-acquire", "ns-drop"):
+            for stray in ("keep", "dry_run", "fixtures_dir", "profile_dir",
+                          "profile_name", "repo_dir", "nm_repo_dir", "_services"):
+                if stray in opts:
+                    raise StageError("%s 不接受起台类旗标 --%s（批台生命周期归 "
+                                     "runner，ns 面不持有台）" % (cmd, stray.replace("_", "-")),
+                                     kind="usage")
+            ns = opts.get("namespace")
+            if not project or not ns:
+                raise StageError("%s 缺 --project <批台名> / --namespace <场景ns>"
+                                 % cmd, kind="usage")
+            if cmd == "ns-acquire":
+                state = ns_acquire(project, ns, timeout=opts.get("timeout") or 30)
+                print(json.dumps(state, ensure_ascii=False))
+                return EXIT_OK
+            result = ns_drop(project, ns, timeout=opts.get("timeout") or 30)
+            print(json.dumps(result, ensure_ascii=False))
+            return EXIT_OK          # 删除失败已 stderr 留痕+账面打标——失败不拦收口
         raise StageError("未知子命令：%s（可选 up/ensure/down/hold/sweep/inventory/"
-                         "plugins/daemon-probe/selftest）" % cmd, kind="usage")
+                         "plugins/ns-acquire/ns-drop/daemon-probe/selftest）" % cmd, kind="usage")
     except StageError as e:
         print("STAGE_%s: %s" % (e.kind.upper(), e), file=sys.stderr)
         return e.exit_code

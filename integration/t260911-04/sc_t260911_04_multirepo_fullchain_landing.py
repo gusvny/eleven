@@ -448,13 +448,20 @@ def stage_legs():
     # 常驻租约台（keep=True）：hold 子用例不随锚/沙箱束死——受限沙箱曾实证短命 hold
     # 心跳被回收、宿主端口被他台重绑；常驻租约=舞台在整个两子用例窗口内确定存活，
     # 用毕显式 do_down（finally）。TTL 同步给足（两子用例约 8–10 分钟）。
+    # 批模式（t260921-06）：SANDBAR_STAGE_BATCH 在场 ⇒ 改为批台 ns 消费
+    # （ns-acquire，零容器开销；批台 hold 锚=runner 进程，比常驻租约更长寿），
+    # finally 释放 ns、绝不 down 批台。env 缺席 ⇒ 常驻台路径逐字保留。
     os.environ["SANDBAR_STAGE_LEASE_TTL_S"] = "1800"
     sys.path.insert(0, str(INTEG))
     import stage_docker as _sd
+    _batch = os.environ.get("SANDBAR_STAGE_BATCH")
     try:
-        stage = _sd.do_up_public(proj, ["temporal"],
-                                 {"namespace": proj, "keep": True},
-                                 _sd.DEFAULT_TIMEOUT, keep=True)
+        if _batch:
+            stage = _sd.ns_acquire(_batch, proj)
+        else:
+            stage = _sd.do_up_public(proj, ["temporal"],
+                                     {"namespace": proj, "keep": True},
+                                     _sd.DEFAULT_TIMEOUT, keep=True)
         if not stage.get("sa_registered"):
             try:
                 _sd.do_down(proj)
@@ -489,7 +496,10 @@ def stage_legs():
         for label, w in holder:
             stop_worker(w, label + "（收尾回收）")
         try:
-            _sd.do_down(proj)
+            if _batch:
+                _sd.ns_drop(_batch, proj)
+            else:
+                _sd.do_down(proj)
         except Exception as e:
             env_fail("拆台失败（残留需人工清理）：%s" % e)
         for k, v in saved.items():

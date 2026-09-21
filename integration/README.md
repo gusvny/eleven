@@ -119,6 +119,33 @@ python3 integration/run_scenarios.py
     down；拆台失败响亮（绝不静默）；capture 报「外部舞台已死」=拆死台冷重试
     一次再降级。C2 语义收紧：up 成功后 capture 失败（非死台）=直红不降级。
 
+  **批级共享台（t260921-06，宿主令 260921「整机一个不行，顶多一次集成测试用一个
+  temporal 容器」）**：共享粒度=**批**（一次跑批/一票集测段），批内按**命名空间**
+  隔离——run_scenarios.main() 对含消费者的轮恰预起 1 个 `kind=batch` 台
+  （工程名 `batch-<runid8>-<pwdhash8>`，+1 卷 +1 网），批终 down 全灭零残留
+  （批间隔离不变，不得退化为整机共享：`--kind batch` 与 `--keep` 互斥=CLI 闸）。
+  消费缝两条、env 键 `SANDBAR_STAGE_BATCH`（=批台工程名，仅注入给分类器命中的
+  条目子进程）：
+  - `lib_gate.require_stage/stage_down`（约 30 场景族唯一缝）：env 在场=ns-acquire
+    申请本场景命名空间（零容器开销）/收尾 ns-drop，绝不 down 批台；env 缺席=
+    逐场景独立台行为逐字保留。
+  - `with_stage.sh`：env 在场=ns-acquire→跑→ns-drop（绝不 ensure/down）；env
+    缺席=ensure→跑→down 现行逐字。
+  分类器（候选 A）=`pool ∈ {engine, exclusive} ∧ entry ∉ 例外清单`
+  （integration/batch_stage_exceptions.json，机器真源；每票集测段
+  `exclude_pools=engine,exclusive` ⇒ 两族全不在册 ⇒ 零预起零注入=最高频路径零
+  回归）。例外通道显式化（要求4）：清单行 `{entry, pool, project_pattern, reason,
+  evidence}` 五键、entry/pool 机械取自注册表（生成器
+  `integration/t260921-06/gen_batch_stage_exceptions.py` 落盘+自检，project_pattern
+  语义=本泳道 compose 工程名前缀，含重试改名面）；新增消费缝使用者若落在清单/
+  两池之外会被静态看守 `t260921-06-batch-manifest-contract`（ro，每票段必跑）
+  点红。不假绿（要求5）：ns 注册失败/批台不在位=ENV_FAIL exit 2 点名（预起失败=
+  整轮 exit 2 快速红，零场景开跑），绝不静默回落「没跑」；ns-drop 失败=响亮留痕+
+  租约账面 `drop_failed` 打标（S3）不拦收口，批终 down -v 全灭兜底。窗口形态/
+  隔离/反用例/信号收口四段由 `t260921-06-batch-runner-form`（engine）、
+  `t260921-06-batch-ns-isolation`（engine）、`t260921-06-batch-seam-regression`
+  （engine）执法。
+
 ## 环境前提
 
 Node >=22.18（type-stripping 直跑，全部测试）；其余按条目按需探测：

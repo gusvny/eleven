@@ -15,8 +15,13 @@
 私有函数、不假设参数解析写法）；该锚在同一条断言里 fail-closed（锚漂移=夹具红，不静默）。
 
 舞台桩：套件前清扫会调 <lane>/integration/stage_docker.py sweep，其输出行以 `[` 起首，
-会撞闸的「畸形规范行计红」面——夹具不测舞台工具，故放**静默退出 0 的桩**，让断言只盯
-被测特性本身。（真树该撞面另有观察记录，见本票结果文件「遗留与风险」。）
+会撞闸的「畸形规范行计红」面——夹具不测舞台工具，sweep/未知子命令仍**静默退出 0**；
+ensure/down 按 stage_docker CLI 公开回执契约应答（t260921-06 仲裁 gen0 修复语义；此前
+worker 代落盘仅收 l1 一件、本件丢失，20260921 同语义再落盘）：真执行器（20260921 起
+含批台机制）的批台预起对「rc=0 回执=无」会按不假绿要求整轮拒绝开跑（exit 2），四条
+「恒全跑」用例全红——桩对 ensure 末行回 JSON（project/ports.temporal/sa_registered）、
+down 回 ok/residue，批台生命周期在夹具内真实走通（预起→注入→收口全链），零 docker
+零端口。
 """
 import ast
 import contextlib
@@ -49,6 +54,33 @@ def _mini_script(name, ok):
             'sys.exit(1)\n' % name)
 
 
+def _stage_stub_text():
+    """秒级舞台桩（零 docker 零端口）：sweep/未知子命令静默退出 0（输出行以 `[` 起首
+    会撞闸的「畸形规范行计红」面，见头注）；ensure/down 按 stage_docker CLI 公开回执
+    契约应答——真执行器批台预起（ensure --kind batch）解析 stdout 末个 JSON 行并要求
+    ports.temporal 真值（t260921-06 batch_preboot 契约），桩据此末行回
+    {project, ports.temporal, sa_registered, ...}；down 回 {ok, residue}（批终收口
+    非零会 WARN 但不拦收口，回契约形使夹具内全链语义与真 CLI 同形）。旗标解析只认
+    --project 值，其余旗标一律容忍忽略。"""
+    return (
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "args = sys.argv[1:]\n"
+        "cmd = args[0] if args else \"\"\n"
+        "proj = args[args.index(\"--project\") + 1] if \"--project\" in args else \"stub\"\n"
+        "if cmd == \"ensure\":\n"
+        "    print(json.dumps({\"project\": proj, \"state\": \"up\", \"reused\": False,\n"
+        "                      \"services\": [\"temporal\"],\n"
+        "                      \"ports\": {\"temporal\": 21101, \"ui\": 21102},\n"
+        "                      \"sa_registered\": True, \"container_ids\": {\"temporal\": \"stub\"}}))\n"
+        "    sys.exit(0)\n"
+        "if cmd == \"down\":\n"
+        "    print(json.dumps({\"ok\": True, \"residue\": []}))\n"
+        "    sys.exit(0)\n"
+        "sys.exit(0)\n"
+    )
+
+
 def build_lane(root, spec, exclude_pools=EXCLUDE_VALUE,
                force_assets=("integration/stage_docker.py",), declare=True):
     """在 root 下造一条最小泳道。
@@ -65,8 +97,8 @@ def build_lane(root, spec, exclude_pools=EXCLUDE_VALUE,
     shutil.copy2(REPO / "integration" / "lib_result.py", root / "integration" / "lib_result.py")
     shutil.copy2(REPO / "server" / "engine" / "failure_protocol.py",
                  root / "server" / "engine" / "failure_protocol.py")
-    (root / "integration" / "stage_docker.py").write_text(
-        "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n", encoding="utf-8")
+    (root / "integration" / "stage_docker.py").write_text(_stage_stub_text(),
+                                                          encoding="utf-8")
 
     entries, files = [], {}
     for name, pool, ok in spec:

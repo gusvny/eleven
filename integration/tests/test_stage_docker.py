@@ -62,7 +62,8 @@ import stage_docker as sd  # noqa: E402  （共享缺省锁根定位：档位锁
 # ①新鲜外来工程状态（120s 内 mtime 的 project-*.json 且非本电池自家工程名）；
 # ②被持有的档位锁（band-N.lock 非阻塞 flock 抢不到=有活进程正持锁起台）。
 # 命中即诚实三态 exit 2 点名理由（环境面），不作产品判定；安静面照常 17 子用例全判。
-_OWN_PROJECTS = ("uta", "utb", "utc", "utd", "ute", "utx")
+_OWN_PROJECTS = ("uta", "utb", "utc", "utd", "ute", "utx",
+                 "utba", "utbb", "utbc")   # utba/b/c=批台 ns 面用例（t260921-06）
 _BUSY_WINDOW_S = 120
 
 
@@ -842,9 +843,169 @@ class NetFuseTest(StageCLIBase):
         self.assertFalse(sd.lease_path(proj).exists(), "不留半租约")
 
 
+# ---------------------------------------------------------------- 批台 ns 面端到端（t260921-06）
+
+FAKE_TEMPORAL = r'''#!/usr/bin/env python3
+"""假 temporal CLI（批台 ns 面 UT 用）：operator namespace create/delete/list 与
+search-attribute 按状态文件回放真实输出形状（含 delete 的 not found rc=1 面）。"""
+import os, pathlib, sys
+
+args = sys.argv[1:]
+state = pathlib.Path(os.environ["FAKE_TEMPORAL_STATE"])
+state.parent.mkdir(parents=True, exist_ok=True)
+nss = set(state.read_text().split()) if state.exists() else set()
+
+
+def _value(flag):
+    return args[args.index(flag) + 1] if flag in args and args.index(flag) + 1 < len(args) else None
+
+
+if len(args) >= 3 and args[0] == "operator" and args[1] == "namespace":
+    sub = args[2]
+    pos = [a for a in args[3:] if not a.startswith("-") and a != "namespace"]
+    ns = _value("-n") or (pos[0] if pos else None)
+    if sub == "create" and ns:
+        nss.add(ns)
+        state.write_text("\n".join(sorted(nss)))
+        print("Namespace %s successfully registered." % ns)
+        sys.exit(0)
+    if sub == "delete" and ns:
+        if ns == "ns-fail":           # UT 注入面：真删除失败（非 not found 形）
+            print("Error: unable to delete namespace %s: boom refused" % ns, file=sys.stderr)
+            sys.exit(1)
+        if ns in nss:
+            nss.discard(ns)
+            state.write_text("\n".join(sorted(nss)))
+            print("Namespace %s has been deleted." % ns)
+            sys.exit(0)
+        print("Error: unable to delete namespace %s: namespace %s is not found" % (ns, ns),
+              file=sys.stderr)
+        sys.exit(1)
+    if sub == "list":
+        for n in sorted(nss):
+            print(n)
+        sys.exit(0)
+if len(args) >= 2 and args[0] == "operator" and args[1] == "search-attribute":
+    print("Search attributes have been added")
+    sys.exit(0)
+print("fake temporal: unhandled %r" % (args[:3],), file=sys.stderr)
+sys.exit(1)
+'''
+
+
+class BatchNsTest(StageCLIBase):
+    """批台命名空间面（t260921-06，假 docker shim+假 temporal CLI 真跑 CLI 编排面）：
+    --kind batch 落 kind 租约；ns-acquire 注册+记账+重复幂等；ns-drop 删成功/NotFound
+    幂等/真失败打标 drop_failed 且 exit 0（失败留痕不拦收口）；批台不在位=诚实 env 红
+    exit 2；kind×keep 互斥双层闸（up/ensure 两入口）；ns 名畸形=usage 红。"""
+
+    def setUp(self):
+        super().setUp()
+        self.ftemp = pathlib.Path(self.bin, "temporal")
+        self.ftemp.write_text(FAKE_TEMPORAL)
+        self.ftemp.chmod(0o755)
+        self.tstate = pathlib.Path(self.state, "temporal-nss.txt")
+        self._saved_env["FAKE_TEMPORAL_STATE"] = os.environ.get("FAKE_TEMPORAL_STATE")
+
+    def env(self, **extra):
+        extra.setdefault("SANDBAR_TEMPORAL_BIN", str(self.ftemp))
+        extra.setdefault("FAKE_TEMPORAL_STATE", str(self.tstate))
+        return super().env(**extra)
+
+    def test_batch_boot_marks_kind_and_full_ns_flow(self):
+        st = self.up_json("utba", "--services", "temporal", "--kind", "batch",
+                          "--timeout", "90", _timeout=300)
+        self.assertEqual(st["project"], "utba")
+        lease = sd.read_lease("utba")
+        self.assertEqual(lease.get("kind"), "batch", "批台租约必须带 kind=batch")
+        # ns-acquire：注册 + 记账 + JSON 形状
+        p = self.cli("ns-acquire", "--project", "utba", "--namespace", "ns-a")
+        self.assertEqual(p.returncode, 0, "ns-acquire 应成功：%s %s" % (p.stdout, p.stderr))
+        out = json.loads(p.stdout.strip().splitlines()[-1])
+        self.assertEqual(out["project"], "utba")
+        self.assertEqual(out["namespace"], "ns-a")
+        self.assertEqual(out["mode"], "batch")
+        self.assertTrue(out["sa_registered"])
+        self.assertIsInstance(out["ports"]["temporal"], int)
+        ledger = sd.read_lease("utba").get("namespaces")
+        self.assertEqual([e["ns"] for e in ledger], ["ns-a"], "ns 应入租约账本")
+        # 重复申请幂等：注册 tolerate + 账覆盖不堆账
+        p = self.cli("ns-acquire", "--project", "utba", "--namespace", "ns-a")
+        self.assertEqual(p.returncode, 0)
+        self.assertEqual(len(sd.read_lease("utba").get("namespaces")), 1)
+        # 第二 ns：账本两行
+        p = self.cli("ns-acquire", "--project", "utba", "--namespace", "ns-b")
+        self.assertEqual(p.returncode, 0)
+        self.assertEqual([e["ns"] for e in sd.read_lease("utba").get("namespaces")],
+                         ["ns-a", "ns-b"])
+        # ns-drop：删成功 → 账移除；NotFound 二连 → 幂等 dropped=True
+        p = self.cli("ns-drop", "--project", "utba", "--namespace", "ns-a")
+        self.assertEqual(p.returncode, 0, "ns-drop 应 exit 0：%s %s" % (p.stdout, p.stderr))
+        self.assertTrue(json.loads(p.stdout.strip().splitlines()[-1])["dropped"])
+        self.assertEqual([e["ns"] for e in sd.read_lease("utba").get("namespaces")], ["ns-b"])
+        p = self.cli("ns-drop", "--project", "utba", "--namespace", "ns-a")
+        self.assertEqual(p.returncode, 0)
+        self.assertTrue(json.loads(p.stdout.strip().splitlines()[-1])["dropped"])
+        # ns-drop 真失败（ns-fail 注入）：exit 0 + stderr 留痕 + 账面 drop_failed（S3）
+        p = self.cli("ns-drop", "--project", "utba", "--namespace", "ns-fail")
+        self.assertEqual(p.returncode, 0, "删除失败必须留痕不拦收口（exit 0）")
+        self.assertIn("STAGE_NS_DROP_WARN", p.stderr)
+        res = json.loads(p.stdout.strip().splitlines()[-1])
+        self.assertFalse(res["dropped"])
+        self.assertTrue(res["drop_failed"])
+        row = next(e for e in sd.read_lease("utba").get("namespaces") if e["ns"] == "ns-fail")
+        self.assertTrue(row.get("drop_failed") is True, "失败必须账面打标（S3）")
+        # ns 面零拆台：批台租约仍 up、container_ids 未动
+        lease = sd.read_lease("utba")
+        self.assertEqual(lease.get("state"), "up")
+        self.assertEqual(lease.get("container_ids"), st["container_ids"])
+        self.cli("down", "--project", "utba")
+
+    def test_ns_acquire_batch_absent_or_nonbatch_env_red(self):
+        # 批台缺席：诚实 env 红 exit 2，零副作用（不代起、不落租约）
+        p = self.cli("ns-acquire", "--project", "utba-absent", "--namespace", "ns-x")
+        self.assertEqual(p.returncode, 2, "批台不在位必须 env 红（要求⑤不假绿）")
+        self.assertIn("STAGE_ENV", p.stderr)
+        self.assertFalse(sd.lease_path("utba-absent").exists(), "拒绝代起：不留半租约")
+        # 非批台（kind 缺失的场景台）：ns 面拒收——不误落别人场景台
+        self.up_json("utbb", "--services", "temporal", "--timeout", "90", _timeout=300)
+        p = self.cli("ns-acquire", "--project", "utbb", "--namespace", "ns-x")
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("不在位", p.stderr)
+        self.cli("down", "--project", "utbb")
+
+    def test_ns_malformed_usage_red(self):
+        for args, why in (
+            (("--project", "Bad_Name", "--namespace", "ns-ok"), "project 畸形"),
+            (("--project", "utbc", "--namespace", "Bad_NS"), "ns 畸形"),
+            (("--namespace", "ns-ok"), "缺 project"),
+            (("--project", "utbc"), "缺 namespace"),
+        ):
+            p = self.cli("ns-acquire", *args)
+            self.assertEqual(p.returncode, 64, "%s 应 usage 红：%s" % (why, p.stderr))
+            self.assertIn("STAGE_USAGE", p.stderr)
+
+    def test_kind_keep_mutual_exclusion_both_doors(self):
+        # 门1：up/ensure 入口旗标互斥
+        for cmd in ("up", "ensure"):
+            p = self.cli(cmd, "--project", "utbc", "--kind", "batch", "--keep")
+            self.assertEqual(p.returncode, 64, "%s kind×keep 应 usage 红" % cmd)
+            self.assertIn("互斥", p.stderr)
+        self.assertFalse(sd.lease_path("utbc").exists(), "usage 红零副作用")
+        # --kind 非法值
+        p = self.cli("up", "--project", "utbc", "--kind", "mega")
+        self.assertEqual(p.returncode, 64)
+        self.assertIn("STAGE_USAGE", p.stderr)
+        # 门2：批台在跑后，ensure --keep 撞批台=usage 红（复用面闸）
+        self.up_json("utbc", "--services", "temporal", "--kind", "batch",
+                     "--timeout", "90", _timeout=300)
+        p = self.cli("ensure", "--project", "utbc", "--keep")
+        self.assertEqual(p.returncode, 64, "批台在跑时 --keep 必须 usage 红")
+        self.assertIn("kind=batch", p.stderr)
+        self.cli("down", "--project", "utbc")
+
+
 if __name__ == "__main__":
-    # 两道供给预检并行保留（merge 冲突消解：泳道侧=共享面繁忙预检，main 侧=档位窗
-    # 外来监听者点名；两门独立命中各自 ENV_FAIL exit 2——环境红归供给面，不假红）。
     busy = _shared_plane_busy()
     if busy:
         print("[stage-docker L1] ENV_FAIL: %s" % busy, file=sys.stderr)

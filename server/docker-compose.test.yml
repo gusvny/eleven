@@ -26,6 +26,13 @@
 #   python3 integration/stage_docker.py down --project <名>              # 拆台（幂等，零残留核验）
 #   python3 integration/stage_docker.py ensure --project <名> --keep     # 幂等确保（供给台用）
 #
+# 批级共享台（t260921-06）：一次集成测试跑批经 `up/ensure --kind batch` 预起恰 1 个
+# temporal 容器（+1 卷 +1 网，工程名 batch-<runid8>-<pwdhash8>），批内场景按
+# namespace 隔离复用（stage_docker ns-acquire/ns-drop；SANDBAR_STAGE_BATCH 注入面），
+# 批终 down 全灭零残留。--kind batch 与 --keep 互斥（拒常驻化=拒「整机共享」退化，
+# 宿主令 260921）。本文件本体零改动：批台=同一 compose 服务的普通单台实例，只是
+# 生命周期纪律不同（批终即拆；消费面见 integration/README.md 批级共享台节）。
+#
 # env 旋钮（stage_docker 注入；手工调用也可设，缺省值=原行为）：
 #   SANDBAR_TEST_CONSOLE_PORT / _TEMPORAL_PORT / _TEMPORAL_UI_PORT   宿主端口（3199/17233/18233）
 #   SANDBAR_TEST_TEMPORAL_NAME / _DSH_NAME                           容器名（并行必给唯一值）

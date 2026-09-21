@@ -88,16 +88,28 @@ def main():
             fail.check(True, "生产守卫放行舞台端口基址（fail-closed 不误伤隔离台）")
 
         # ---------- ② 起双 docker 舞台（独立工程名+独立 namespace，真并发隔离面） ----------
+        # 批模式（t260921-06）断言面映射：容器级互异断言（工程名互异/端口零交集）
+        # 的 ns 级等价=「双消费者共享同一批台 + namespace 互异（隔离键）+ 同台端口
+        # 探活」——隔离语义从「台互异」升格为「ns 互异」，被测行为断言（④~⑧）
+        # 两模式逐字共用，零放宽。
         tag = "%d" % os.getpid()
+        batch = bool(os.environ.get("SANDBAR_STAGE_BATCH"))
         _, sa = require_stage(fail, "t26090402-a-%s" % tag, "stage-a-%s" % tag)
         _, sb = require_stage(fail, "t26090402-b-%s" % tag, "stage-b-%s" % tag)
         stage_a, stage_b = sa, sb
         pa, pb = sa["ports"], sb["ports"]
-        fail.check(sa["project"] != sb["project"], "双台工程名互异（%s / %s）"
-                   % (sa["project"], sb["project"]))
-        fail.check(set(pa.values()).isdisjoint(set(pb.values())),
-                   "双台端口零交集（A=%s B=%s）" % (pa, pb))
-        fail.check(sa["namespace"] != sb["namespace"], "双台 namespace 互异")
+        if batch:
+            fail.check(sa["project"] == sb["project"],
+                       "批模式双消费者同台（%s）——共享是本模式的被测语义" % sa["project"])
+            fail.check(sa["namespace"] != sb["namespace"],
+                       "批内双 namespace 互异（隔离键；%s / %s）"
+                       % (sa["namespace"], sb["namespace"]))
+        else:
+            fail.check(sa["project"] != sb["project"], "双台工程名互异（%s / %s）"
+                       % (sa["project"], sb["project"]))
+            fail.check(set(pa.values()).isdisjoint(set(pb.values())),
+                       "双台端口零交集（A=%s B=%s）" % (pa, pb))
+            fail.check(sa["namespace"] != sb["namespace"], "双台 namespace 互异")
         for label, ports in (("台A", pa), ("台B", pb)):
             for name, p in ports.items():
                 fail.check(p not in stage_docker.FORBIDDEN_PORTS,
@@ -212,28 +224,53 @@ def main():
 
         # ---------- ⑨ teardown：零残留/幂等/可复用（docker 台语义） ----------
         proj_a_name, ns_a = sa["project"], sa["namespace"]
-        d = stage_down(stage_docker, proj_a_name)
-        fail.check(d.get("residue") == [],
-                   "台A down 后零残留容器（实得 %s）" % (d.get("residue"),))
-        released, held = wait_port_released(pa["temporal"])
-        fail.check(released,
-                   "台A temporal 端口已释放（10s 宽限窗；%s）"
-                   % ("已释放" if released else
-                      "仍被占用 pid=%s——拆台未回收需归因" % held))
-        try:
-            stage_down(stage_docker, proj_a_name)
-            fail.check(True, "down 幂等二连不抛")
-        except Exception as e:
-            fail.check(False, "down 幂等二连不抛（实得异常：%s）" % e)
-        # 同工程名+同 namespace 立即可 re-up（替代槽位制 flock 复抢/kill-9 子用例：
-        # docker 台无锁可崩——容器由 daemon 持有，取舍见 stage_docker 头注对照表）
-        _, sa2 = require_stage(fail, proj_a_name, ns_a)
-        fail.check(sa2["ports"]["temporal"] not in pb.values(),
-                   "re-up 同工程名复用成功且端口不串在跑台B（实得 %s）" % sa2["ports"])
-        stage_a = sa2  # finally 统一拆
+        if batch:
+            # 批模式 ns 释放面（映射）：ns-drop 幂等二连 + 重申请复用同台同端口
+            # ——绝不 down 批台（生命周期归 runner；批终归零由看守④残留段断言）。
+            proj_req_a = "t26090402-a-%s" % tag
+            d = stage_down(stage_docker, proj_req_a)
+            fail.check(d.get("dropped") is True,
+                       "台A ns 释放成功（实得 %s）" % json.dumps(d, ensure_ascii=False)[:120])
+            try:
+                stage_down(stage_docker, proj_req_a)
+                fail.check(True, "ns-drop 幂等二连不抛")
+            except Exception as e:
+                fail.check(False, "ns-drop 幂等二连不抛（实得异常：%s）" % e)
+            _, sa2 = require_stage(fail, proj_req_a, ns_a)
+            fail.check(sa2["project"] == proj_a_name and sa2["ports"]["temporal"] == pa["temporal"],
+                       "ns 重申请复用批台成功（同台同端口，实得 %s）" % sa2["ports"])
+            stage_a = sa2  # finally 统一释放（幂等）
+        else:
+            d = stage_down(stage_docker, proj_a_name)
+            fail.check(d.get("residue") == [],
+                       "台A down 后零残留容器（实得 %s）" % (d.get("residue"),))
+            released, held = wait_port_released(pa["temporal"])
+            fail.check(released,
+                       "台A temporal 端口已释放（10s 宽限窗；%s）"
+                       % ("已释放" if released else
+                          "仍被占用 pid=%s——拆台未回收需归因" % held))
+            try:
+                stage_down(stage_docker, proj_a_name)
+                fail.check(True, "down 幂等二连不抛")
+            except Exception as e:
+                fail.check(False, "down 幂等二连不抛（实得异常：%s）" % e)
+            # 同工程名+同 namespace 立即可 re-up（替代槽位制 flock 复抢/kill-9 子用例：
+            # docker 台无锁可崩——容器由 daemon 持有，取舍见 stage_docker 头注对照表）
+            _, sa2 = require_stage(fail, proj_a_name, ns_a)
+            fail.check(sa2["ports"]["temporal"] not in pb.values(),
+                       "re-up 同工程名复用成功且端口不串在跑台B（实得 %s）" % sa2["ports"])
+            stage_a = sa2  # finally 统一拆
     finally:
         for state in (stage_a, stage_b):
-            if state is not None:
+            if state is None:
+                continue
+            if batch:
+                # 批台绝不 down——ns 已在⑨释放（幂等重放），台留给 runner 收口
+                try:
+                    stage_down(stage_docker, state)
+                except Exception:
+                    pass
+            else:
                 try:
                     stage_docker.do_down(state["project"])
                 except Exception:

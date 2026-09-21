@@ -22,6 +22,9 @@ bench 契约面（integration/bench.py 须提供；t260904-19 随槽位制退役
 temporal 引擎台（原槽位制）由 integration/stage_docker.py 供给：本文件提供
 require_stage(fail, project, namespace) 帮手——up temporal-only 台，docker 缺席/
 镜像缺席/起台不健康=exit 2 环境红（三态语义），StageError 直译。
+批模式（t260921-06）：SANDBAR_STAGE_BATCH 在场时 require_stage 改为向批台申请
+命名空间（ns-acquire，零容器开销）、stage_down 改为释放命名空间（ns-drop，
+绝不 down 批台）；env 缺席时两者逐字保留逐场景台行为。
 """
 import json
 import os
@@ -124,15 +127,41 @@ def require_bench(fail):
     return b
 
 
+# 批台登记（t260921-06）：require_stage 批模式下 project→(批台工程名, namespace)。
+# stage_down 据此判「释放 ns（绝不 down 批台）」还是「拆自有台」。键=调用方传入的
+# project 名（调用方 stage_down 传的正是此名；批模式下返回态的 project=批台名，
+# 两者分叉——所以返回态另带 request_project 备查）。
+_BATCH_REG = {}
+
+
 def require_stage(fail, project, namespace):
     """起 temporal-only docker 舞台（stage_docker 单点入口）。
 
-    退出码直译：env（docker 缺席/镜像缺席/不健康/端口段耗尽）→ exit 2 环境红；
-    conflict → exit 3；usage → 场景代码 bug 按 1 红处理（不该发生，发生了就是场景错）。
+    批模式（t260921-06 批级共享）：SANDBAR_STAGE_BATCH 在场 ⇒ 不起台——向批台
+    ns-acquire 申请本场景命名空间（零容器开销，秒级），返回态形状与起台同族
+    （project=批台名、namespace=本场景 ns、ports/sa_registered 齐全），另带
+    request_project=本调用原始 project 名。ns 名/批台名非法=usage（场景代码 bug，
+    按 1 红）；批台不在位/注册失败=exit 2 环境红（要求⑤：绝不静默回落「没跑」）。
+    env 缺席 ⇒ 逐场景台行为逐字保留。
+
+    退出码直译：env（docker 缺席/镜像缺席/不健康/端口段耗尽/批台不在位/ns 注册
+    失败）→ exit 2 环境红；conflict → exit 3；usage → 场景代码 bug 按 1 红处理
+    （不该发生，发生了就是场景错）。
     sa_registered=False（temporal CLI 不可得，KI-020③ 同源）→ exit 2 点名——
     本族场景的 ticket-start 带 project 需要 ProjectKey SA，没注册=后续子用例全跑不真。"""
     sys.path.insert(0, os.path.join(REPO, "integration"))
     import stage_docker  # noqa: E402
+    batch_project = os.environ.get("SANDBAR_STAGE_BATCH")
+    if batch_project:
+        try:
+            state = stage_docker.ns_acquire(batch_project, namespace)
+        except stage_docker.StageError as e:
+            fail.bail("批台命名空间申请失败（%s）：%s" % (e.kind, e),
+                      stage_docker.EXIT_ENV if e.kind == "env"
+                      else stage_docker.EXIT_CONFLICT if e.kind == "conflict" else 1)
+        state["request_project"] = project
+        _BATCH_REG[project] = (batch_project, namespace)
+        return stage_docker, state
     try:
         state = stage_docker.do_up_public(project, ["temporal"],
                                           {"namespace": namespace},
@@ -153,7 +182,16 @@ def require_stage(fail, project, namespace):
 
 
 def stage_down(stage_mod, project):
-    """拆台（幂等）；返回 down 结果 JSON（residue 面供场景断言零残留）。"""
+    """拆台/释放（幂等）。批模式（t260921-06）：require_stage 登记过的 project ⇒
+    ns-drop 释放命名空间并**绝不 down 批台**（批台生命周期归 runner）；未登记
+    （旧模式/直跑）⇒ do_down 拆自有台，逐字旧行为。project 可传 require_stage
+    的原始 project 名，或其返回态 dict（取 request_project）。返回结果 JSON
+    （down 形态含 residue 面供场景断言零残留；ns-drop 形态含 dropped 面）。"""
+    if isinstance(project, dict):
+        project = project.get("request_project") or project.get("project")
+    batch = _BATCH_REG.pop(project, None)
+    if batch is not None:
+        return stage_mod.ns_drop(batch[0], batch[1])
     return stage_mod.do_down(project)
 
 
