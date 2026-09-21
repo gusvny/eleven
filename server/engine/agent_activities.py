@@ -3340,6 +3340,87 @@ def _gitlink_check_item(base_ref: str, branch: str, repo: Path) -> Dict[str, Any
     return {**item, "green": True, "detail": "泳道差集无 gitlink（嵌套仓）"}
 
 
+def _lane_commits_check_item(base_ref: str, branch: str, repo: Path, tree: Path):
+    """「泳道分支有 commit」逐仓三态判定项（t260921-09；git I/O 薄壳，判定口径单点在
+    shared.lane_commit_verdict 纯函数——与 shared.review_gate_verdict 的整票级机械复核
+    口径同源对齐，本票性质=判据对齐而非新设计）。
+
+    返回 (check_item, lane_commits)：lane_commits 供 merge_check 聚合层的「整票零 commit」
+    全局闸消费（查询失败=shared.LANE_COMMITS_QUERY_FAILED 哨兵 -1，沿「0 永不表示没问到」
+    纪律）。三态：
+      有 commit → 绿（旧路径逐项零回归，绿项只带 id——旧契约不变）；
+      0 commit 且提交面（base↔branch 树差）与未提交面（工作区脏）均无差异 → 本仓确实
+        零改动=合法终态，不红但点名可见。绿项带 reason_code="no_changes_no_diff" 是
+        **新形状**（旧约定绿项只带 id）——消费面已核安全：_pin_merge_red_detail 只取
+        green is False、green 聚合 all()、冲突分类只看 rehearsal 位+conflict_files
+        （review C2），防后人把新形状当旧契约或反向误改；
+      0 commit 且任一差异面有差异 → 红（实现未落盘/分支位点异常，文案分叉，不再一律
+        指向 rework——t260920-04 实证该指向打回一轮结论不变只烧机时）。
+    查询失败/异常 → 红项 reason_code="commit_query_failed"（fail-closed），与
+    「实现未落盘」严格分叉：报错必须与事实同向。红灯不抛（本活动契约）。"""
+    item_base = "泳道分支有 commit（%s..%s）" % ((base_ref or "")[:7], branch)
+    try:
+        p = _git(["log", "--oneline", "%s..%s" % (base_ref, branch)], repo)
+        if p.returncode != 0:
+            return ({"item": item_base, "green": False,
+                     "detail": (p.stderr or p.stdout or "git log 失败").strip()[-300:],
+                     "id": "lane_commits", "reason_code": "commit_query_failed",
+                     "next_action": "泳道 commit 查询失败（git 环境类）——排查泳道仓后发 "
+                                    "retry_qc；查询失败不得断言实现未落盘"},
+                    shared.LANE_COMMITS_QUERY_FAILED)
+        n = len([ln for ln in p.stdout.splitlines() if ln.strip()])
+        if n > 0:
+            return ({"item": item_base, "green": True,
+                     "detail": "%d 个 commit" % n, "id": "lane_commits"}, n)
+        # 0 commit：查两差异面（提交面=base↔branch 树差；未提交面=SETTLE_PATHSPEC 脏，
+        # 与第 2 项同口径）——面查询失败记 -1，判定层按「不可证无差异」fail-closed
+        committed = shared.LANE_COMMITS_QUERY_FAILED
+        pd = _git(["diff", "--name-only", base_ref, branch], repo)
+        if pd.returncode == 0:
+            committed = len([ln for ln in pd.stdout.splitlines() if ln.strip()])
+        uncommitted = shared.LANE_COMMITS_QUERY_FAILED
+        ps = _git(["status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, tree)
+        if ps.returncode == 0:
+            uncommitted = len(_dirty_files_from_status_z(ps.stdout))
+        green, reason = shared.lane_commit_verdict(n, committed, uncommitted)
+        if green:  # no_changes_no_diff：确实零改动=合法终态（不红但点名，不静默）
+            return ({"item": item_base + "——零改动确认", "green": True,
+                     "detail": "0 个 commit 且提交面/未提交面均无差异——本仓确无本票改动"
+                               "（确实无需改动，非假绿；整票零 commit 另由全局闸把关）",
+                     "id": "lane_commits",
+                     # 绿项点名=新形状（见函数 docstring，review C2）
+                     "reason_code": "no_changes_no_diff"}, n)
+        if reason == "commit_query_failed":
+            return ({"item": item_base, "green": False,
+                     "detail": "0 个 commit 但差异面查询失败（git 故障）——不可判定，"
+                               "不得据此断言实现未落盘",
+                     "id": "lane_commits", "reason_code": "commit_query_failed",
+                     "next_action": "泳道 diff/status 查询失败（git 环境类）——排查泳道仓"
+                                    "后发 retry_qc"}, n)
+        # no_commits：红（实现未落盘），detail/next_action 按差异面分叉（review C3 互指）
+        faces = []
+        if uncommitted > 0:
+            faces.append("工作区有未提交改动（%d 个文件）" % uncommitted)
+        if committed > 0:
+            faces.append("泳道分支树与 base 有差异（%d 个文件）" % committed)
+        if uncommitted > 0:
+            next_action = ("实现未落盘（有改动未入轨）——排查实现段 settle 代落盘后发 "
+                           "retry_qc；若脏文件越写集，按「工作区干净」项处置（收回写集内）")
+        else:
+            next_action = ("泳道分支位点异常（0 commit 但树≠base）——人工排查分支指向后"
+                           "发 retry_qc")
+        return ({"item": item_base, "green": False,
+                 "detail": "0 个 commit；%s——实现未落盘" % "；".join(faces),
+                 "id": "lane_commits", "reason_code": "no_commits",
+                 "next_action": next_action}, n)
+    except Exception as e:  # 查询异常同查询失败：fail-closed 红，不断言未落盘
+        return ({"item": "泳道分支有 commit", "green": False,
+                 "detail": "git 查询异常: %s" % e, "id": "lane_commits",
+                 "reason_code": "commit_query_failed",
+                 "next_action": "泳道 commit 查询异常——排查泳道仓后发 retry_qc"},
+                shared.LANE_COMMITS_QUERY_FAILED)
+
+
 async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                                  lane_root: Path, multi: bool) -> Dict[str, Any]:
     """Single-scope merge_check core (extracted from merge_check in ticket B
@@ -3414,22 +3495,13 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
         activity.logger.info("[%s] merge_check 自愈前置：%s", args.ticket_id,
                              auto_settle_note)
 
-    # 1. The lane has commits
-    try:
-        p = _git(["log", "--oneline", "%s..%s" % (sc["base_ref"], sc["branch"])], sc["repo"])
-        n = len([ln for ln in p.stdout.splitlines() if ln.strip()]) if p.returncode == 0 else 0
-        checks.append({"item": "泳道分支有 commit（%s..%s）" % (sc["base_ref"][:7], sc["branch"]),
-                       "green": p.returncode == 0 and n > 0,
-                       "detail": ("%d 个 commit" % n) if n else
-                                 (p.stderr or p.stdout or "0 个 commit").strip()[-300:],
-                       "id": "lane_commits",
-                       **({} if (p.returncode == 0 and n > 0) else {
-                           "reason_code": "no_commits",
-                           "next_action": "实现未落盘（泳道 0 commit）——发 rework 回 implement，"
-                                          "或排查实现段 settle 代落盘"})})
-    except Exception as e:
-        checks.append({"item": "泳道分支有 commit", "green": False, "detail": "git log 异常: %s" % e,
-                       "id": "lane_commits", "reason_code": "no_commits"})
+    # 1. The lane has commits — t260921-09 三态判定（对齐 shared.review_gate_verdict 整票
+    #    级口径）：有 commit→绿；0 commit 且两差异面均无→本仓确实零改动=合法终态（不红
+    #    但点名）；0 commit 且有差异→红（实现未落盘）；查询失败→-1 哨兵 fail-closed 红，
+    #    不断言未落盘。逐仓计数随回执上交，供聚合层「整票零 commit」全局闸消费。
+    lane_item, lane_commits_n = _lane_commits_check_item(
+        str(sc.get("base_ref") or ""), sc["branch"], sc["repo"], sc["tree"])
+    checks.append(lane_item)
 
     # 2. Clean workspace (SETTLE_PATHSPEC stance — the .dsh/ and .sandbar/ engine
     #    runtime directories are excluded, the same stance as the worker settle; the
@@ -3780,7 +3852,10 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                        "id": "merge_rehearsal", "reason_code": "merge_conflict"})
     return {"checks": checks, "rehearsal_green": rehearsal_green,
             "conflict_files": conflict_files,
-            "merge_tree_excerpt": merge_tree_excerpt}
+            "merge_tree_excerpt": merge_tree_excerpt,
+            # t260921-09：本仓 lane commit 计数（查询失败=-1 哨兵）——聚合层整票零
+            # commit 全局闸消费；桩形态缺该键时聚合侧按「不可判」跳过全局闸（不误判全零）
+            "lane_commits": lane_commits_n}
 
 
 def _scope_dirs(dirs: List[str], sc: Dict[str, Any]) -> List[str]:
@@ -3795,10 +3870,19 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     conclusion comes from git/scripts, never from anyone's word).
 
     Only when all four are green does the ticket advance to the human-reviewed merge:
-      1. the lane branch has commits (base_ref..branch non-empty) — the very item
-         ticket t260824-01 was missing (the agent never committed, the old verify
-         gate ran the main-tree diff which was empty, and everything went green in a
-         fake closed loop);
+      1. the lane branch has commits — three-state per repo since t260921-09 (aligned
+         with the whole-ticket mechanical review gate, shared.review_gate_verdict):
+         commits → green; zero commits with zero diff on BOTH faces (committed tree
+         vs base, uncommitted worktree) → the repo genuinely needs no change = a legal
+         terminal state, not red but named visibly in the receipt (green item carrying
+         reason_code=no_changes_no_diff — a NEW shape, old green items only carry id);
+         zero commits with any diff → red (the real 「implementation never landed」);
+         query failure → -1 sentinel, fail-closed red, never asserting "not landed".
+         Plus a whole-ticket global gate (t260921-09): after excluding no_file_changes
+         tickets, all repos at zero commits still go red (the original anti-fake-green
+         requirement, host ruling ② 2026-09-21) — the very item ticket t260824-01 was
+         missing (the agent never committed, the old verify gate ran the main-tree
+         diff which was empty, and everything went green in a fake closed loop);
       2. the workspace is clean (git status --porcelain empty) — no closing out with
          uncommitted changes;
          KI-009 (ticket t260901-25): self-heal within the write set before judging
@@ -3828,6 +3912,7 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     rehearsal_green = True
     conflict_files: List[str] = []
     merge_tree_excerpt = ""
+    scope_commit_counts: Dict[str, int] = {}  # t260921-09：逐仓 commit 计数（-1=查询失败）
     for sc in scopes:
         core = await _merge_check_one_scope(args, sc, wt, multi)
         sc_checks = core["checks"]
@@ -3835,6 +3920,9 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
             for c in sc_checks:
                 c["item"] = "[%s] %s" % (sc["name"], c["item"])
         checks.extend(sc_checks)
+        lc = core.get("lane_commits")
+        if isinstance(lc, int) and not isinstance(lc, bool):
+            scope_commit_counts[str(sc.get("name") or sc.get("repo_rel") or "?")] = lc
         rehearsal_green = rehearsal_green and bool(core["rehearsal_green"])
         conflict_files.extend(core["conflict_files"])
         if core["merge_tree_excerpt"]:
@@ -3856,6 +3944,25 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
                        "green": True,
                        "detail": "多仓写集逐仓物化齐全（%d 仓）" % len(scopes),
                        "id": "fuse_b_materialize"})
+    # t260921-09 整票零 commit 全局闸（对齐 shared.review_gate_verdict 整票级口径）：
+    # 逐仓三态把「某仓确实零改动」转成合法终态后，由本闸保住宿主裁定②「整票至少一个
+    # 仓有 commit」的原防伪需求（什么都没提交却全绿）。位次=保险丝B 同款（rehearsal
+    # 必须保持 checks[-1]，冲突分类把 checks[:-1] 当非冲突类——全局红恒 blocked 交人，
+    # 绝不进自动消解回路，KI-047 同族位置风险同样适用）。查询失败仓（-1）在
+    # multirepo_zero_commit_error 内按「不可判全零」跳过——该仓红已由逐仓
+    # commit_query_failed 承担，全局闸不得叠加错误文案（review C1）。no_file_changes
+    # 票豁免（与 review gate 同一豁免口径）。
+    zero_commit_err = shared.multirepo_zero_commit_error(
+        scope_commit_counts, bool(args.no_file_changes))
+    if zero_commit_err:
+        checks.insert(max(len(checks) - 1, 0),
+                      {"item": "整票至少一个仓有 commit（t260921-09 全局闸）",
+                       "green": False, "detail": zero_commit_err,
+                       "id": "all_repos_zero_commits",
+                       "reason_code": "all_repos_zero_commits",
+                       "next_action": "整票零 commit：确无文件改动应 allow_empty_write_set "
+                                      "声明建票（no_file_changes）；否则排查实现段 settle "
+                                      "代落盘后发 retry_qc"})
     green = all(c["green"] for c in checks)
     # Ticket t260826-01 automatic conflict resolution loop: red lights split into two
     # classes —

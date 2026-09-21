@@ -26,10 +26,19 @@ _m2 = re.search(r"async def _merge_check_one_scope\(.*?\n\n\ndef _scope_dirs", s
 if not (_m1 or _m2):
     fails.append("找不到 merge_check/核心函数体")
 else:
-    body = (_m1.group(0) if _m1 else "") + "\n" + (_m2.group(0) if _m2 else "")
-    # 第 1 项：泳道有 commit，仍用 base_ref..branch（args 单仓 / sc 多仓 core 同义）
-    if not re.search(r'"%s\.\.%s" % \((args\.base_ref|sc\["base_ref"\]), (args\.branch|sc\["branch"\])\)', body):
+    # t260921-09 三态化：第 1 项判定+差异面查询迁入 _lane_commits_check_item（base 仍取
+    # sc["base_ref"]，语义锚不变）——本锁定位范围随之并入该函数（锁语义不锁实现位置）。
+    _m3 = re.search(r"def _lane_commits_check_item\(.*?\n\n\nasync def _merge_check_one_scope", src, re.S)
+    body = (_m1.group(0) if _m1 else "") + "\n" + (_m2.group(0) if _m2 else "") \
+        + "\n" + (_m3.group(0) if _m3 else "")
+    # 第 1 项：泳道有 commit，仍用 base_ref..branch（args 单仓 / sc 多仓 core / 辅助函数
+    # 局部参数 base_ref 同义——t260921-09 后判定在辅助函数内，base 由调用点从 sc 注入）
+    if not re.search(r'"%s\.\.%s" % \((args\.base_ref|sc\["base_ref"\]|base_ref), (args\.branch|sc\["branch"\]|branch)\)', body):
         fails.append("第1项「泳道有 commit」应保持 base_ref..branch（快进防误判）")
+    # 第 1 项调用点完整性（t260921-09 三态化后新增）：辅助函数的 base 必须来自
+    # sc["base_ref"]（票面钉死的 base，不回落 main——快进误判防线不撤）
+    if not re.search(r'_lane_commits_check_item\(\s*str\(sc\.get\("base_ref"\) or ""\)', body):
+        fails.append('第1项判定项调用点应传 sc["base_ref"]（t260921-09 三态化后防回落 main）')
     # 第 3 项：verify_lane 的 base 不再是 args.base_ref
     vm = re.search(r'"base":\s*([^,\n]+),\s*"require_base"', body)
     if not vm:

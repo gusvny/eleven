@@ -2761,7 +2761,11 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                                    base_ref=str(self.meta.get("base_ref") or ""),
                                    write_set=list(self.meta.get("write_set") or []),
                                    path_gate=bool(self.meta.get("path_gate")),
-                                   authorizations=self._protected_authz_records()),
+                                   authorizations=self._protected_authz_records(),
+                                   # t260921-09：建票「本票无文件改动」声明（meta 链
+                                   # client.py ticket-start → meta.no_file_changes）
+                                   # 透传给 merge_check 的整票零 commit 全局闸豁免
+                                   no_file_changes=bool(self.meta.get("no_file_changes"))),
                     start_to_close_timeout=MERGE_CHECK_TO, retry_policy=RETRY)
                 mc = raw if isinstance(raw, MergeCheckResult) else MergeCheckResult(
                     green=bool(raw.get("green")), checks=list(raw.get("checks") or []),

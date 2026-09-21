@@ -78,8 +78,12 @@ def main():
     print("== merge_check 自愈段（①写集内自愈） ==")
     # t260907-06 票B 逐树重构：自愈段语义锚迁入 _merge_check_one_scope——
     # 并集定位（锁语义不锁实现位置）。
+    # t260921-09 三态化：item 1 的 git log 判定再迁入 _lane_commits_check_item——
+    # 并集定位随之并入该函数；拼接顺序保持「自愈段在前、item 1 git log 在后」，
+    # 时序断言（自愈 settle 先于 item 1）语义不变。
     mc = (fn_body(text, "async def merge_check") + "\n"
-          + fn_body(text, "async def _merge_check_one_scope"))
+          + fn_body(text, "async def _merge_check_one_scope") + "\n"
+          + fn_body(text, "def _lane_commits_check_item"))
     ok(bool(mc), "merge_check 函数体可定位")
     if mc:
         auto_idx = mc.find("[auto-settle]")

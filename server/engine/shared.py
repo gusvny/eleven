@@ -2905,6 +2905,12 @@ class MergeCheckArgs:
     # t260912-03 人授权结构化记录（defaulted 空表，零回归）：自愈 settle 的受保护闸
     # 豁免面与 workflow 侧一致（workflow 已按票+时效过滤）。
     authorizations: List[Dict[str, Any]] = field(default_factory=list)
+    # t260921-09 三态判据（实证 nusuyou t260920-04：多仓票某仓声明在写集但本票零改动，
+    # 被逐仓「泳道分支有 commit」必判红，票在最后一道机械门前无正当出路）：建票声明
+    # 「本票无文件改动」（allow_empty_write_set → meta.no_file_changes）时豁免整票零
+    # commit 全局闸——与 review_gate_verdict 的豁免口径同源。defaulted False=老事件
+    # 回放不破（同 path_gate t260911-03 先例）。
+    no_file_changes: bool = False
 
 
 # ---- Ticket t260828-09: the UI acceptance machinery (the screenshot channel + look-at-the-image review + merge_check's evidence gate) ----
@@ -3312,6 +3318,82 @@ def review_gate_verdict(git_error: str, lane_commits: int, shots_path_error: str
     if png_count == 0 and is_ui:
         return "机械复核：UI 证据缺失（screenshots 无 png）", ""
     return "", ""
+
+
+# ---- t260921-09: 多仓 merge_check「泳道分支有 commit」三态判定（判据对齐票）----
+# 事实源：nusuyou t260920-04（4 仓 macOS 收口票，service 仓声明在写集但本票零改动）——
+# 旧判据 green=(git log 成功 and n>0) 把「许可面」当「义务清单」（本文件 refresh_write_set
+# docstring 早已写明相反口径：白名单是允许写的上限，不是必须清单），某仓合法零改动被逐仓
+# 必判红，agent 只能伪造改动过闸或整票作废。对齐先例=本文件 review_gate_verdict 的整票级
+# 口径（0 commit 且非 no_file_changes 才红）。判定粒度=仓（resolve_repos_for_paths 归属后
+# 同仓目录合并为一条判定），严禁逐条目化（工单 t260921-09 第 0 条粒度锁）。
+
+# 查询失败哨兵：沿 review_gate_verdict 的 error-precision 纪律（其 docstring：0 may never
+# mean "couldn't ask"——git 故障记 0 = 把「问不到」误报成「没落盘」）。git 故障记 -1，
+# 绝不记 0；消费方对 -1 不得产出「零 commit」类文案。
+LANE_COMMITS_QUERY_FAILED = -1
+
+
+def lane_commit_verdict(lane_commits, committed_diff_count, uncommitted_count):
+    """逐仓「泳道分支有 commit」三态判定（纯函数，零 git/零 IO）。
+
+    消费方=agent_activities._lane_commits_check_item（git I/O 薄壳）。输入：
+      lane_commits          base..branch 提交数（-1=查询失败哨兵）；
+      committed_diff_count  提交面差异数（git diff --name-only base branch 行数）；
+      uncommitted_count     未提交差异数（git status --porcelain 行数）。
+    返回 (green, reason_code)：
+      n>0                    → (True,  "has_commits")        旧绿路径，逐项零回归；
+      n==0 且两差异面均无差异 → (True,  "no_changes_no_diff") 本仓确实零改动=合法终态
+                               （不红但回执点名可见，不静默；整票零 commit 由
+                               multirepo_zero_commit_error 全局闸另行把关）；
+      n==0 且任一差异面有差异 → (False, "no_commits")        这才是「实现未落盘」；
+      n<0 / 输入畸形          → (False, "commit_query_failed")
+                               查询失败=不可判定，fail-closed 红，但绝不断言「未落盘」
+                               （error precision：报错必须与事实同向）。
+    畸形输入（None/bool/非 int/意外负数）一律不抛、按查询失败红 fail-closed；差异计数
+    畸形=不可证「无差异」→ 不给 amber（宁可红，不可假绿）。"""
+    def _bad(v):
+        return (not isinstance(v, int)) or isinstance(v, bool) or v < LANE_COMMITS_QUERY_FAILED
+
+    if _bad(lane_commits):
+        return False, "commit_query_failed"
+    if lane_commits > 0:
+        return True, "has_commits"
+    if lane_commits == LANE_COMMITS_QUERY_FAILED:
+        return False, "commit_query_failed"
+    # lane_commits == 0：无提交，看两差异面（面计数畸形=不可证无差异，fail-closed）
+    if _bad(committed_diff_count) or _bad(uncommitted_count):
+        return False, "commit_query_failed"
+    if committed_diff_count == 0 and uncommitted_count == 0:
+        return True, "no_changes_no_diff"
+    return False, "no_commits"
+
+
+def multirepo_zero_commit_error(per_repo_commits, no_file_changes):
+    """整票零 commit 全局闸（纯函数；merge_check 聚合层消费）。
+
+    宿主裁定②（2026-09-21 当面）：保留「整票至少一个仓有 commit」——逐仓三态把「某仓
+    确实零改动」转成合法终态后，由本闸保住原防伪需求（什么都没提交却全绿）。排除
+    no_file_changes 票（与 review_gate_verdict 同一豁免口径）后，全部仓计数均为 0 →
+    返回点名各仓的拒收文案；否则返回 ""（放行）。
+
+    不可判定即跳过（绝不误判「整票零 commit」）：任一仓计数为查询失败哨兵 -1（或有
+    commit / 畸形非 int）→ 返回 ""——含查询失败仓时该仓的红由逐仓 commit_query_failed
+    fail-closed 承担，全局闸不得叠加「整票零 commit」的错误文案与错误出路（review C1）。
+    真纯函数：无 git 子进程、无 IO；畸形键/值不抛。"""
+    if no_file_changes:
+        return ""
+    counts = dict(per_repo_commits or {})
+    if not counts:
+        return ""
+    zero_repos = []
+    for name, n in counts.items():
+        if (not isinstance(n, int)) or isinstance(n, bool) or n != 0:
+            return ""  # 有 commit / 查询失败(-1) / 畸形 → 全局闸不可判「全零」，跳过
+        zero_repos.append(str(name))
+    return ("整票零 commit（%s）——若各仓确无本票改动，建票时应以 allow_empty_write_set "
+            "声明（no_file_changes）；否则排查实现段 settle 代落盘后发 retry_qc"
+            % "、".join(zero_repos))
 
 
 @dataclass
