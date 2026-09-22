@@ -281,6 +281,54 @@ class TicketCrossProjectMixin:
             self._touch()
         return True
 
+    # ---------- t260922-10：记名清场信号（cancel 前置留痕，先留痕后终结） ----------
+    @workflow.signal
+    def cancel_notice(self, req: dict) -> None:
+        """记名清场预告：client.py ticket-cancel（ticket.py op=cancel 的引擎侧入口）
+        在 terminate 之前投递，把 who+reason 落进票面可见面——本 handler 受理后 log+
+        timeline 各一条（who/reason 原文）；跨项目/未声明身份经 _cross_project_gate
+        落 meta['cross_project_uses']（by/reason 原文，note≤300 既有截断口径）。
+
+        对账口径（宿主令 260922「终结后在 admin.log 与 workflow 事件历史能查到同一
+        reason 字符串」）：本信号事件由 server 落事件历史（与 worker 是否执行本 handler
+        无关，KI-081：老 worker 静默丢新信号只丢票面窗口尽力面，不破坏对账面）；
+        事件历史里 cancel_notice（载荷含 who+reason 原文）恒先于 terminated 事件
+        （terminate 的 reason=同一串）——次序纪律「留痕必须先写、后终结」的机械面。
+        终态后票面快照不可得，权威对账=事件历史×admin.log 同串；票面 log/timeline/
+        cross_project_uses 是终结前窗口尽力面。巡检票（inspection workflow 类）无本
+        信号 handler：仅事件历史+admin.log 留痕（其票面无 cross_project_uses 消费面）。
+
+        载荷=纯 dict {who, reason, caller_project, cross_project_note}：不新增 shared.py
+        dataclass（该文件不在本票写集；retry_qc 裸串先例证明非 dataclass 信号合法）。
+        无 patched marker：事件驱动 handler 只在事件存在于历史时执行（sign/rework
+        先例），老历史重放不会触达；不调 workflow.* 运行时 API → 可离线桩测（同款）。
+        畸形/越权=refused[] 落账零副作用（pause intake gate 同款纪律）。"""
+        if not isinstance(req, dict):
+            req = {}
+        who = str(req.get("who") or "").strip()
+        reason = str(req.get("reason") or "").strip()
+        if not who:
+            self.refused.append({"who": who, "want": "cancel_notice",
+                                 "why": "who 必填非空（空/纯空白拒收，零副作用）"})
+            return
+        if not reason:
+            self.refused.append({"who": who, "want": "cancel_notice",
+                                 "why": "reason 必填非空（清场理由是记名对账锚，空=拒收零副作用）"})
+            return
+        # 跨项目闸第二道（与 pause/sign 同口径）：refuse→已落 refused/log 点名，False
+        # 即 return；allow_record→cross_project_uses+timeline+log 已落（by/reason 原文）。
+        if not self._cross_project_gate(str(req.get("caller_project") or ""),
+                                        str(req.get("cross_project_note") or ""),
+                                        "cancel", who, "cancel"):
+            return
+        self._log("cancel 清场记名（%s）：%s——终结前留痕；终态后权威对账=事件历史"
+                  "（本条 cancel_notice 事件）×admin.log 同串" % (who, reason))
+        self.timeline.append({"at": self._now_iso(),
+                              "stage": str(self.meta.get("stage") or ""),
+                              "state": "cancel-noticed",
+                              "reason": "%s 请求清场：%s" % (who, reason)})
+        self._touch()
+
 
 class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
     """Shared mechanisms for the six template subclasses. A subclass only declares:

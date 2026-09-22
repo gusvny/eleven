@@ -15,6 +15,9 @@ status" entry at all**:
                             filterable by project / epic — EpicCode SA, epic-linkage)
     client.py ticket-query  single v2 ticket query (snapshot+meta+pulse heartbeat,
                             ticket t260825-03)
+    client.py ticket-cancel 记名单票终结（t260922-10：ticket.py op=cancel 的引擎侧
+                            入口——先 cancel_notice 信号留痕后 terminate（reason 同串），
+                            已终态幂等回执；跨项目闸与写 op 同口径）
 
 stdout always emits **one line of JSON**, `{"ok": true, "result": ...}` or
 `{"ok": false, "error": "..."}`, parsed directly by the node.ts plugin. Temporal's
@@ -27,6 +30,7 @@ Usage (each subcommand takes one JSON argument, default {}):
     python client.py query '{"workflow_id":"t260822-01"}'
     python client.py schedule-list
     python client.py cancel '{"workflow_id":"dispatcher-scan","reason":"清场"}'
+    python client.py ticket-cancel '{"ticket_id":"t1","who":"ops","reason":"工作空间已不存在"}'
 """
 
 from __future__ import annotations
@@ -47,6 +51,7 @@ from shared import (
     AUTHZ_SIGNAL_GATE_MARKER,
     CALLER_PROJECT_ENV,
     CALLER_UNDECLARED_MARK,
+    CROSS_PROJECT_NOTE_LIMIT,
     DISPATCHER_WF_ID,
     ENGINE_V2,
     EPIC_CODE_RE,
@@ -422,7 +427,8 @@ async def cmd_signal(args: Dict[str, Any]) -> Dict[str, Any]:
     del args  # no usable arguments
     return _err("signal 子命令已退役（260904 宿主令）：sign/retry_qc 只服务 v1 "
                 "content-pipeline 人门段，该模板已随模版退役删除；人门签字走 "
-                "ticket op=sign，清场/撤销走 cancel。")
+                "ticket op=sign，清场/撤销走 ticket op=cancel（t260922-10 记名清场，"
+                "裸 cancel 只留给引擎件清场）。")
 
 
 async def cmd_schedule_list(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -608,6 +614,108 @@ async def cmd_cancel(args: Dict[str, Any]) -> Dict[str, Any]:
         return _err(f"terminate 失败：{type(e).__name__}: {e}")
     return _gate_receipt(_ok({"workflow_id": wf_id, "terminated": True, "reason": reason}),
                          gate, "cancel")
+
+
+# t260922-10 cancel 幂等闸口径（review 条3）：与 _EXEC_ALIVE_OK 对照着读——COMPLETED
+# 虽在 _EXEC_ALIVE_OK（那是「非失败类」白名单，供 _is_failed_exec 用），但对 cancel 而
+# 言 COMPLETED=票已 closed 终态（无需清场）；活票只有 RUNNING 与 CONTINUED_AS_NEW
+# （巡检 watcher 换代中，属未收口——KI-025 红线：不许把活报成终）。
+_TICKET_CANCEL_ALIVE = ("RUNNING", "CONTINUED_AS_NEW")
+
+
+async def cmd_ticket_cancel(args: Dict[str, Any]) -> Dict[str, Any]:
+    """记名单票终结（t260922-10）：ticket.py op=cancel 的引擎侧入口——terminate 包装成
+    带身份、带理由的记名操作（裸 cmd_cancel 的记名只在 admin.log，票面查不到是谁、
+    为什么；本入口补票面留痕）。次序纪律（宿主令 260922「留痕必须先写、后终结」，
+    与同批 A3.5 票教训同源）：
+
+      参数校验 → describe → 幂等闸 → 跨项目闸(_write_gate) → 先 signal cancel_notice
+      （留痕入事件历史）→ 后 terminate(reason=同一串)
+
+    次序的机械保证：signal 事件由 server 先落事件历史，terminated 事件必然追加其后
+    ——事件历史里 cancel_notice（载荷含 who+reason 原文）恒先于 terminated（同串
+    reason）。幂等（验收③）：已终态票（执行状态不在 _TICKET_CANCEL_ALIVE）→ ok 回执
+    already_terminal，不跑闸、不写任何东西；CONTINUED_AS_NEW 属未收口，不得谎报已终态。
+    回执诚实口径（review 条1，KI-025 家族）：delivered:true=「signal 已落事件历史」，
+    不承诺 handler 已执行（KI-081：老 worker 静默丢新信号——对账面不依赖 handler 承接，
+    事件历史由 server 落账）；终态后票面查询面不可得，权威对账=workflow 事件历史
+    （cancel_notice 先于 terminated、载荷含 who+reason）×admin.log 同串（本回执即
+    _emit→audit_call 的落账源，summary 含同串 reason）；票面 log/timeline/
+    cross_project_uses 是终结前窗口尽力面。巡检票（inspection workflow 类）无本信号
+    handler：仅事件历史+admin.log 留痕。拒绝=零副作用：参数/身份/越权旗/闸任一拒收
+    都发生在任何写动作之前（被拒调用仍由 _emit 记 admin.log——留痕在运维面不在票面）。
+    裸入口 cmd_cancel（workflow_id 口径，引擎件清场）保持原样，两入口不混用。"""
+    tid = str(args.get("ticket_id") or args.get("id") or "")
+    who = str(args.get("who") or "").strip()
+    raw_reason = args.get("reason")
+    if raw_reason is not None and not isinstance(raw_reason, str):
+        # 非串 reason 不做 str() 静默归一（t260922-10 场景②R4 同口径）：["x"] 归一会
+        # 变成 "['x']" 非空放行——清场理由是对账锚，类型畸形=结构化拒收零副作用。
+        return _err("ticket-cancel 的 reason 需为字符串（收到 %s）——清场理由必须逐字"
+                    "可对账，非串不做静默归一" % type(raw_reason).__name__)
+    reason = str(raw_reason or "").strip()
+    if not tid:
+        return _err("ticket-cancel 需要 ticket_id")
+    if not who:
+        return _err("ticket-cancel 需要 who（操作人必填非空——记名清场不留 op-local）")
+    if not reason:
+        return _err("ticket-cancel 需要 reason（清场理由必填非空——终结后 admin.log 与 "
+                    "workflow 事件历史按此串精确对账，空=结构化拒收）")
+    if len(reason) > CROSS_PROJECT_NOTE_LIMIT:
+        return _err("ticket-cancel reason 超限（%d > %d 字符）——拆短后重试（建议 ≤300 "
+                    "字符，保跨项目记名条目 cross_project_uses 全文入账）"
+                    % (len(reason), CROSS_PROJECT_NOTE_LIMIT))
+    client = await _connect()
+    handle = client.get_workflow_handle(tid)
+    try:
+        desc = await handle.describe()
+    except Exception as e:
+        if _is_not_found_exc(e):
+            return _err("工单不存在：%s（Temporal 无此 workflow）" % tid, KIND_NOT_FOUND)
+        return _err("目标读取失败（%s: %s）——未执行任何动作，稍后重试"
+                    % (type(e).__name__, e), KIND_TRANSIENT)
+    exec_status = desc.status.name if desc.status is not None else ""
+    # 幂等闸（验收③）：非活=已终态 → 明确回「已终态」，零改动（也不跑闸——闸护的是写，
+    # 本分支不写任何东西；closed 票无需清场）。
+    if exec_status not in _TICKET_CANCEL_ALIVE:
+        return _ok({"ticket_id": tid, "already_terminal": True,
+                    "exec_status": exec_status or "未知",
+                    "reason": reason, "who": who,
+                    "note": "已终态（%s），未执行任何动作（幂等回执，重试安全）"
+                            % (exec_status or "未知")})
+    # 跨项目闸：与既有写 op 同一判定矩阵（_write_gate 三态，拒收单一出口）；快照瞬时
+    # 不可得=transient 拒收不终结（fail-closed，C2① 同口径——绝不无闸放行 terminate）。
+    gate = await _write_gate(handle, tid, args)
+    if gate["err"] is not None:
+        return gate["err"]
+    # 先留痕：cancel_notice 事件先落事件历史（载荷含 who+reason 原文与盖章值）。
+    # 投递失败=结构化 _err 且明确「未终结」（T9：先留痕失败即不终结，重试安全）。
+    try:
+        await handle.signal("cancel_notice",
+                            {"who": who, "reason": reason,
+                             "caller_project": gate["stamp"] if gate else "",
+                             "cross_project_note": gate["note"] if gate else ""})
+    except Exception as e:
+        return _err("cancel_notice 留痕信号投递失败：%s: %s——未执行终结（先留痕失败"
+                    "即不终结）；零票面副作用，稍后重试" % (type(e).__name__, e))
+    # 后终结：terminate 的 reason=同一 reason 串（与信号载荷、回执三方同串，== 精确对账）。
+    try:
+        await handle.terminate(reason=reason)
+    except Exception as e:
+        return _err("terminate 失败：%s: %s——cancel_notice 记名信号已入事件历史，本次"
+                    "未终结（可能自然完单/已被终结）；重试安全（已终态将回幂等回执）"
+                    % (type(e).__name__, e))
+    return _gate_receipt(_ok({"ticket_id": tid, "terminated": True,
+                              "reason": reason, "who": who,
+                              "signal": "cancel_notice", "delivered": True,
+                              "receipt_note": ("delivered=signal 已落事件历史（不承诺 "
+                                               "handler 已执行，KI-081）；终态后票面查询面"
+                                               "不可得，权威对账=workflow 事件历史"
+                                               "（cancel_notice 先于 terminated、载荷含 "
+                                               "who+reason）×admin.log 同串；票面 log/"
+                                               "timeline/cross_project_uses 为终结前窗口"
+                                               "尽力面")}),
+                         gate, "ticket-cancel")
 
 
 async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -814,7 +922,8 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
 
     return _err("未知工单操作 %r（可用：rework=打回 / ruling=宿主裁决注入 / "
                 "authorize=人授权签发（sign 信号面） / retry_qc=blocked 重跑 / "
-                "pause|resume=段间暂停·恢复 / update=更新 / sign=签字 / query=查询）" % op)
+                "pause|resume=段间暂停·恢复 / update=更新 / sign=签字 / query=查询；"
+                "记名单票终结（清场）=子命令 ticket-cancel，t260922-10）" % op)
 
 
 # ---------- M11 v2: ticket-start / ticket-list / ticket-query ----------
@@ -1588,6 +1697,28 @@ def _failure_reason_of(exc: Optional[BaseException]) -> str:
     return str(cur).strip()[:TERMINAL_FACE_REASON_MAX_CHARS]
 
 
+def _terminated_reason_of(exc: Optional[BaseException]) -> str:
+    """从 result() 异常链提取 terminate 理由（t260922-10 终态 face 增量键）。
+
+    TerminatedError 携带结构化 .reason 属性（terminate 的 reason 原文，正是记名清场的
+    对账串）——沿 __cause__ 链找第一个带非空字符串 reason 属性的异常；链断/畸形/桩/
+    无 reason → ''（调用方写「不可得」，绝不编造）。与 _failure_reason_of 并存不互替：
+    后者取消息链（FAILED 正源，既有 face 链在用不动=回归面最小），本函数取结构化
+    reason 属性（TERMINATED 正源）。纯函数零 IO。"""
+    cur = exc
+    depth = 0
+    while cur is not None and depth < TERMINAL_FACE_CAUSE_DEPTH:
+        r = getattr(cur, "reason", None)
+        if isinstance(r, str) and r.strip():
+            return r.strip()[:TERMINAL_FACE_REASON_MAX_CHARS]
+        nxt = cur.__cause__
+        if not isinstance(nxt, BaseException):
+            break
+        cur = nxt
+        depth += 1
+    return ""
+
+
 def _terminal_face_ts_of(v: Any) -> int:
     """终态时刻字段归一 → epoch 秒（0=不可得）。SDK describe 的 start/close 是 proto
     Timestamp（ToSeconds()），list 扫描行/测试桩常给 datetime 或 epoch 数值——只读
@@ -1632,6 +1763,8 @@ async def _terminal_failure_face(tid: str, handle: Any, desc: Any,
     # FAILED 抛 WorkflowFailureError 且 __cause__ 链携带失败消息（正源）。
     reason = ""
     reason_note = ""
+    # terminate 理由（t260922-10 记名清场的对账串）：只有 TERMINATED 形态才可能取到。
+    terminated_reason = ""
     try:
         await asyncio.wait_for(handle.result(), timeout=TERMINAL_FACE_RESULT_TIMEOUT_S)
         # 未抛=「状态说终态失败、结果却读成功」的矛盾形态（桩/版本错位）：不编造。
@@ -1642,6 +1775,7 @@ async def _terminal_failure_face(tid: str, handle: Any, desc: Any,
                        "返回，不编造原因" % int(TERMINAL_FACE_RESULT_TIMEOUT_S))
     except Exception as e:  # noqa: BLE001 —— 任何失败异常都只取消息链，绝不外抛
         reason = _failure_reason_of(e)
+        terminated_reason = _terminated_reason_of(e)
         if reason:
             reason_note = "来源：Temporal 工作流执行失败信息（终态执行历史回放异常链）"
         else:
@@ -1683,6 +1817,10 @@ async def _terminal_failure_face(tid: str, handle: Any, desc: Any,
         "reason": reason,
         "reason_available": bool(reason),
         "reason_source": reason_note,
+        # t260922-10 增量键（additive，只加载荷不换语义）：terminate 的 reason 原文
+        # （记名清场的对账串；非 terminate 终态/取不到=不可得，绝不编造）。
+        "terminate_reason": terminated_reason,
+        "terminate_reason_available": bool(terminated_reason),
         "snapshot_available": False,
         "snapshot_note": ("无快照：终态工作流不再运行，snapshot 查询没有执行方承接"
                           "（终态的确定性结论，不是瞬时故障，刷新无效）"),
@@ -2541,6 +2679,7 @@ COMMANDS = {
     "signal": cmd_signal,
     "schedule-list": cmd_schedule_list,
     "cancel": cmd_cancel,
+    "ticket-cancel": cmd_ticket_cancel,
     "ticket": cmd_ticket,
     "ticket-start": cmd_ticket_start,
     "ticket-list": cmd_ticket_list,
@@ -2551,7 +2690,7 @@ COMMANDS = {
 }
 
 USAGE = (
-    "用法：python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-prune|ticket-archive-legacy> [argsJSON]\n"
+    "用法：python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-cancel|ticket-prune|ticket-archive-legacy> [argsJSON]\n"
     "安全红线：工具面只暴露上述子命令，无 set-stage / force_stage / 改状态入口。\n"
     "signal 子命令已退役（260904 宿主令）：调用一律返回结构化退役报错（sign/retry_qc\n"
     "  只服务 v1 content-pipeline 人门段，该模板已删）；签字走 ticket op=sign，\n"
@@ -2570,6 +2709,11 @@ USAGE = (
     "  /畸形拒收落 refused，snapshot 的 paused/paused_phase 二态可观测），\n"
     "  update=状态维护，query 只读。\n"
     "ticket-start 创建 v2 工单（模板 id→workflow 类）；ticket-list/ticket-query=工单台数据源。\n"
+    "ticket-cancel 记名单票终结（t260922-10，ticket.py op=cancel 的引擎侧）：\n"
+    "  {ticket_id, who 必填, reason 必填}；先 cancel_notice 信号留痕（who+reason 入事件\n"
+    "  历史，跨项目/未声明身份经闸落 cross_project_uses）后 terminate（reason 同串）；\n"
+    "  已终态=幂等回执零改动；终态后票面快照不可得，权威对账=事件历史×admin.log 同串；\n"
+    "  巡检票无信号 handler，仅事件历史+admin.log 留痕。裸 cancel 留给引擎件清场。\n"
     "ticket-prune 清理 closed 且已归档工单的 workflow 历史（Temporal 回归运行态，M1-3；\n"
     "  默认 --dry-run 零删除，--execute 真删；未归档/legacy 未确认双拒删，fail-closed）。\n"
     "ticket-archive-legacy 存量诚实过账：closed 且无档票写 legacy manifest（不伪造不补产）。\n"

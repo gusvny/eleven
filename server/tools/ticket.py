@@ -36,6 +36,10 @@ op:
   sign   {id, gate?, by(who), decision(approve|reject), note?}  → 人工审批签字（signal）
   retry_qc {id, by(who)}  → blocked 重跑请求（signal 裸串 who；不收 note——workflow
                             契约只收 who，带话走 update pending_add / ruling）
+  cancel {id, by(who), reason(必填非空), cross_project?}  → 记名单票终结（t260922-10，
+      清场 runbook 判据见下节）：先 signal cancel_notice 留痕（who+reason 入票面
+      log/timeline 与跨项目记名面 cross_project_uses）后 terminate（reason 同串）；
+      已终态=幂等回执零改动；拒绝零副作用（who/reason 空在本层结构化拒收）
   pause/resume {id, by(who), note?}  → 段间暂停·恢复（signal；t260914-04 补正规入口
       ——KI-079：宪章「引擎操作面」教的此形式此前不存在，暂停只能回落裸 client.py
       ticket，且裸口只认 who 不认宪章教的 by＝事件历史 who 全落 op-local 无法追溯）。
@@ -49,13 +53,27 @@ op:
   accept/advance/dispatch-next  → v2 已取消（workflow 过门自动推进，验收=事后看产物；
                                   blocked 重跑=retry_qc op），保留 op 报结构化错误
 
+清场 runbook（残渣票/永久推不动票的判据与处置，宿主令 260922「给 ops 一个记名入口，
+或把处置写进 runbook」——docs/ 不在本票写集，判据以本工具帮助文本承载；未来成篇可挂
+docs/ops/ 同族操作手册）：
+  判据（全部满足才 cancel）：① 票 stage_state=blocked，且根因属「工作空间/夹具已物理
+  不存在、重跑必然再失败」类（如多仓夹具 /tmp 临时目录已被系统清理）；② 至少一次
+  retry_qc 实测复现失败（不是猜）；③ 票面无在飞价值（交付不依赖该票跑完）。
+  处置：先 show 留证 → ticket cancel（by|who + reason 写明根因证据，如「工作空间
+  /var/folders/…/t260910-* 已不存在，retry_qc 复现失败」）→ 异项目票带
+  cross_project={by,reason} 旗 → 终结后对账：admin.log 与 Temporal 事件历史 grep
+  同一 reason 串（终态票 show 不可查——快照不可得，事件历史是权威对账面；票面
+  log/timeline/cross_project_uses 是终结前窗口尽力面）。巡检票 cancel 仅事件历史+
+  admin.log 留痕（inspection workflow 无 cancel_notice handler）。
+  边界：只做记名单票终结；不批量清理、不自动清理历史票（自动清历史=危险默认）。
+
 全部调用经 admin.log 审计：registry.call 路径=run-id 审计（tools_registry）；
 直 spawn 路径（__main__，t260910-06）=本文件自记 source=ticket.py-direct 一行 +
 client.py 记 source=ticket 一行（call_id 关联）——双行形状是契约不是重复 bug。
 
 跨项目写操作闸（t260915-12，契约详见 server/engine/README.md §11）：写 op（create/
-update/rework/sign/retry_qc/pause/resume/authorize/ruling）带调用方项目身份与越权旗——
-身份推导=显式 caller_project > env SANDBAR_CALLER_PROJECT > cwd 窄兜底（引擎仓树内
+update/rework/sign/retry_qc/pause/resume/authorize/ruling/cancel）带调用方项目身份
+与越权旗——身份推导=显式 caller_project > env SANDBAR_CALLER_PROJECT > cwd 窄兜底（引擎仓树内
 一律不推导，防间接调用凭空造身份）；形状非法/越权旗缺 by|reason/超上限在本层
 fail-fast。declared 身份与目标票项目不符由 client.py 闸拒收（cross_project_refused）；
 确需跨项目带 cross_project={by, reason 必填}（记名留痕，show 出口可对账）。undeclared
@@ -104,7 +122,8 @@ TOOL = {
     'description': ('工单系统（真源=Temporal workflow）：create（派活，挂 workflow 模板，'
                     'project 必传）/update（结算/验收/收口/返工）'
                     '/list（结构化，可按 project/epic 过滤）/show/rework（打回）'
-                    '/pause·resume（段间暂停·恢复，t260914-04）。'
+                    '/pause·resume（段间暂停·恢复，t260914-04）'
+                    '/cancel（记名单票终结：残渣票清场，who/reason 必填，判据=模块头清场 runbook）。'
                     'accept/advance/dispatch-next 在 v2 引擎已取消（自动推进+事后看产物）。'
                     'status 状态机 dispatched→settled→verified→closed/rework，'
                     'stage_state=running/awaiting/awaiting-human/blocked 为进度维度，两者正交。'),
@@ -114,11 +133,11 @@ TOOL = {
             'op': {'type': 'string', 'enum': ['create', 'update', 'list', 'show', 'accept',
                                               'advance', 'dispatch-next', 'rework',
                                               'sign', 'retry_qc', 'pause', 'resume',
-                                              'authorize', 'ruling']},
+                                              'authorize', 'ruling', 'cancel']},
             'caller_project': {'type': 'string', 'description': '调用方项目身份（t260915-12 跨项目闸）：显式声明优先于 env/cwd 推导；写操作身份与目标票项目不符=拒收（cross_project_refused），确需跨项目带 cross_project 旗。引擎仓树内 cwd 不推导（防间接调用凭空造身份）'},
             'cross_project': {'type': 'object', 'properties': {'by': {'type': 'string', 'description': '谁在越权（记名）'}, 'reason': {'type': 'string', 'description': '为什么跨项目（理由必填入账）'}}, 'required': ['by', 'reason'], 'description': '越权豁免旗（记名留痕可查）：declared 身份跨项目写操作的显式放行钥匙；缺理由=拒收'},
             'cross_project_reason': {'type': 'string', 'description': '越权旗扁平形（理由必填；by 缺省取 by|who）——与 cross_project.reason 互斥'},
-            'id': {'type': 'string', 'description': '工单 id（update/show/accept/advance/dispatch-next/rework/sign/retry_qc/pause/resume 必填；create 可指定否则自动生成）'},
+            'id': {'type': 'string', 'description': '工单 id（update/show/accept/advance/dispatch-next/rework/sign/retry_qc/pause/resume/cancel 必填；create 可指定否则自动生成）'},
             'project': {'type': 'string', 'description': '项目 key（机器级注册表 ~/.sandbar/projects/<key>/project.yaml；create 必传、无默认值；list 可选过滤，不传=全部项目）'},
             'epic': {'type': 'string', 'description': '立项代号（epic-linkage 机制，可选）：notes/epics/<代号>.md 必须存在否则 create 拒收；合法则 workflow 打 EpicCode search attribute，可按 EpicCode 查询捞出。list 可按 epic 过滤（先强校验，不存在的代号明确报错而非空表）'},
             'workflow': {'type': 'string', 'description': '工作流模板 id（create 必填，见 workflow list）'},
@@ -138,13 +157,14 @@ TOOL = {
             'status': {'type': 'string', 'enum': ['dispatched', 'settled', 'verified', 'closed', 'rework']},
             'stage_state': {'type': 'string', 'enum': ['running', 'awaiting', 'awaiting-human', 'blocked']},
             'note': {'type': 'string', 'description': '备注（结算摘要/验收结论/返工原因；pause/resume 为可选理由，上限由 workflow intake 把关）'},
+            'reason': {'type': 'string', 'description': 'cancel 清场理由（必填非空）：终结后 admin.log 与 workflow 事件历史按此串精确对账；建议 ≤300 字符（保跨项目记名条目 cross_project_uses 全文入账；残渣票判据=模块头清场 runbook）'},
             'pending_add': {'type': 'string', 'description': '追加一条挂起项（遗留问题，不硬改交回）'},
             'to_stage': {'type': 'string', 'description': 'rework 打回目标 stage（缺省回上一段）'},
             'worktree': {'type': 'string', 'description': 'create 显式登记泳道路径（缺省 dev-lane 自动 .lane/<id>）'},
             'branch': {'type': 'string', 'description': 'create 显式登记分支名（缺省 lane/<id>）'},
             'workspace': {'type': 'object', 'description': 'create 显式登记工作空间 {type: worktree|dir, path}（缺省按模板推导：lane=worktree→泳道，模板带 workspace:dir→/tmp/sandbar-ws/<id> 隔离目录（老 base 粘滞））'},
-            'by': {'type': 'string', 'description': 'rework/sign/retry_qc/pause/resume 操作人（身份注入，who 语义由调用方负责；等价别名 who 也收；pause/resume 必填非空——正规入口不落 op-local）'},
-            'who': {'type': 'string', 'description': '操作人别名（=by，信号语义名；rework/sign/retry_qc/pause/resume 收）'},
+            'by': {'type': 'string', 'description': 'rework/sign/retry_qc/pause/resume/cancel 操作人（身份注入，who 语义由调用方负责；等价别名 who 也收；pause/resume/cancel 必填非空——正规入口不落 op-local）'},
+            'who': {'type': 'string', 'description': '操作人别名（=by，信号语义名；rework/sign/retry_qc/pause/resume/cancel 收）'},
             'gate': {'type': 'string', 'description': 'sign：审批门标识（可选，缺省空串透传）'},
             'decision': {'type': 'string', 'enum': ['approve', 'reject'], 'description': 'sign：审批决定（缺省 approve=放行推进；reject=打回）'},
         },
@@ -767,6 +787,43 @@ def _retry_qc(a):
     return _poc_ok(out)
 
 
+def _cancel(a):
+    """记名单票终结（t260922-10，宿主令「给 ops 一个记名入口」）：blocked 残渣票/
+    永久推不动票的清场出口——把 terminate 包装成带身份、带理由的**记名**操作（裸
+    client.py cancel 的记名只在 admin.log，票面查不到是谁、为什么）。who/reason 必填
+    非空本层 fail-fast（D1 同族：正规入口不落 op-local；reason 是终结后的对账锚，
+    空=结构化拒收）。跨项目闸与既有写 op 同链：_resolve_caller 身份注入 +
+    _cross_project_flag 越权旗（异项目无旗由 client.py 闸拒收 cross_project_refused，
+    带旗 cross_project_uses 记名可查）。幂等：已终态票由 client 侧回 already_terminal
+    ok 回执，零改动。清场判据（何时允许 cancel）见本文件头「清场 runbook」节。
+    次序纪律在 client.py ticket-cancel 单点：先 signal cancel_notice（who+reason 入
+    票面可见面）后 terminate（reason 同串）——本薄壳不第二真源。"""
+    tid = a.get('id')
+    if not tid:
+        raise ValueError('cancel 需要 id')
+    who = _who(a).strip()
+    if not who:
+        raise ValueError('cancel 需要 by|who（操作人身份由调用方注入，不得留空）'
+                         '——正规入口不落 op-local')
+    raw_reason = a.get('reason')
+    if raw_reason is not None and not isinstance(raw_reason, str):
+        # 非串 reason 不做 str() 静默归一（t260922-10 场景②R4）：['x'] 归一会变成
+        # "['x']" 非空放行——清场理由是对账锚，必须逐字可信，类型畸形=结构化拒收。
+        raise ValueError('cancel 的 reason 需为字符串（收到 %s）——清场理由必须逐字'
+                         '可对账，非串不做静默归一' % type(raw_reason).__name__)
+    reason = str(raw_reason or '').strip()
+    if not reason:
+        raise ValueError('cancel 需要 reason（清场理由必填非空——终结后在 admin.log 与 '
+                         'workflow 事件历史按此串精确对账；残渣票判据见本文件头清场 '
+                         'runbook 节）')
+    payload = {'op': 'cancel', 'ticket_id': tid, 'who': who, 'reason': reason}
+    flag = _cross_project_flag(a)
+    if flag:
+        payload['cross_project'] = flag
+    out = _write_op_poc('ticket-cancel', payload, a)
+    return _poc_ok(out)
+
+
 def _ruling(a):
     """宿主裁决注入（t260915-12 F2 收口：schema op enum 宣告了 ruling 而分发器无出口
     ——宣告不支持的工具面=对模型面撒谎，KI-079 同族「说明书与实际入口不符」）。薄壳
@@ -893,6 +950,8 @@ def run(args):
         return _ruling(args)
     if op == 'retry_qc':
         return _retry_qc(args)
+    if op == 'cancel':
+        return _cancel(args)
     if op in ('pause', 'resume'):
         return _pause_resume(args, op)
     raise ValueError('未知 op: %r' % (op,))
@@ -908,7 +967,7 @@ def run(args):
 
 _TICKET_CLI_USAGE = ('用法：python3 server/tools/ticket.py \'<json 对象，含 op>\'\n'
                      'op: create/update/list/show/rework/sign/authorize/retry_qc'
-                     '/pause/resume'
+                     '/pause/resume/cancel'
                      '（accept/advance/dispatch-next 已取消，报结构化错误）\n'
                      '失败契约：非零退出 + {ok:false,error,kind?}，绝不空输出。')
 
