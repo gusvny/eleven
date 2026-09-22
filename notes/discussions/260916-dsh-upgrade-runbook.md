@@ -51,10 +51,11 @@
    注意：`live-run-260922.md` 第 2 条「0.1.5 越界写可写」系目标建在 tmpdir∈可写根内的**假红**
    （原测无效，t260922-07 已改判），**改判后重判未跑**——以上述双版对照补判，不得视为已判绿。
    **260923 执行面补记（本轮实测，跑之前必读）**：①探针必须由**能写 `$HOME`** 的执行面运行
-   （越界目标位在可写三根之外；受限沙箱内会诚实地判 ENV 红并拒绝退回根内）；②npm 隔离安装需
-   **换独立缓存目录**绕开 `~/.npm` 的 root 属主文件（npm 报 `EPERM … _cacache/tmp/***`；
-   `npm_config_cache`／`--cache` 皆可，registry 本身可达）；③该安装**偏慢**（依赖树大、
-   要等全部 tarball 拉完才写 `node_modules`）——别把「prefix 尚为 0B」误读成卡死，须让 600s 预算跑满。
+   （越界目标位在可写三根之外；受限沙箱内会诚实地判 ENV 红并拒绝退回根内）；②npm 安装若在**受限沙箱**里跑，
+   会因写不了 `~/.npm` 而 EPERM——**注意 npm 的提示文案会写成「cache folder contains root-owned files」，
+   该文案具误导性**：260923 实测 `~/.npm` 下**非当前用户属主条目为 0**，根因是沙箱而非文件属主。
+   稳妥做法＝换独立缓存目录（`npm_config_cache`／`--cache`）或在宿主终端直接跑；registry 本身可达；
+   ③该安装**偏慢**（依赖树大、要等全部 tarball 拉完才写 `node_modules`）——别把「prefix 尚为 0B」误读成卡死，须让 600s 预算跑满。
 2. **场景全集**：升级候选就位后，在隔离泳道/隔离副本先跑 `python3 integration/run_scenarios.py`
    （registry 全集，条数以该文件实时为准）全绿；engine 池（docker 台）不得借
    `SANDBAR_SCENARIO_EXCLUDE_POOLS` 豁免本轮。
@@ -98,6 +99,16 @@
   - **260923 状态＝仍无人拍板（唯一真缺口）**：全仓无答复记录；`integration/t260921-14/ROLLBACK.md`
     的回退命令按**原位路径**写死（`/opt/homebrew/lib/node_modules/@deepseek-ai/dsh`），
     隐含以 A 案为前提。切换前请明确 A/B。
+  - **260923 实测纠正（代签人自查——原「二选一」的两条前提**都不成立**）**：
+    ① `npm config get prefix` = `/opt/homebrew`，而 `/opt/homebrew/lib/node_modules` 与 `/opt/homebrew/bin`
+    的**属主都是当前用户**（`user:admin`，均含写位），现装全局 dsh 也是 8/22 由该用户装的
+    ——**「用户不可写、需批 sudo」不成立，A 案不需要 sudo**；
+    ② `~/.npm` 下**非当前用户属主条目为 0**（代签人早前「root 属主缓存」的判断系受限沙箱下的误读，
+    已同步改正 §1-T4 补记与 live-run-260923-015.md）。
+    ⇒ Q2 的取舍实际只剩「敲裸 `dsh` 时命中哪一份」：**A＝原位**（零路径改动、回退剧本现成、免 sudo）；
+    **B＝用户级前缀**（「免 sudo」的动机已消失，代价是迁包＋改回退剧本路径＋PATH 归属）。
+    引擎侧无论 A/B 都走 `paths.dsh_bin` 路径钉（t260921-14 交付），**试验与切换都不依赖本项位置选择**。
+    请宿主据此复核并改判原「二选一」表述。
 - **Q3 容器镜像**：同升（推荐，版本一致避免宿主/容器行为分叉）or 先只升宿主、容器明确留 0.1.1-rc.2（镜像 tag 不动）。
   - **260923 状态＝已答并已落地**：**同升 0.1.5-rc.2**——t260921-14 完成三处同步锁
     （`DEFAULT_AGENT_IMAGE`／`Dockerfile.agent` ARG／`build_agent_image.sh` 缺省），旧 tag
