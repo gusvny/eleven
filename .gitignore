@@ -13,3 +13,5 @@ state.json
 .lane/
 .dsh/
 .suyou/
+# 运行期审计日志（轮转名 admin.log.YYYYMMDD[-HHMMSS] 不被 *.log 覆盖；t260916-21 轮转产物曾被误入库 → 夹具复制它导致 GB 级副本堆积，260922 出仓）
+server/admin.log*
