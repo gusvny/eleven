@@ -77,6 +77,14 @@ SESSION_TIMEOUT_SEC = int(os.environ.get("SANDBAR_PROBE_SESSION_TIMEOUT_SEC") or
 # npm 拉 registry 可能超 600s——超时=ENV_FAIL 点名（三态不假绿），调大重跑即可。
 INSTALL_TIMEOUT_SEC = int(os.environ.get("SANDBAR_PROBE_INSTALL_TIMEOUT_SEC") or 600)
 
+# 探针自己的会话 id（断言 e 用；t260923 修）：**两条腿必须同 id** 才构成 resume 场景
+# ——第一腿建立该 id 的会话档，resume 腿按同 id 续写、断言「正文文件集不变」。
+# 口径依据（t260922-06 源码实证，已合入 main）：0.1.1 与 0.1.5 **自定义 id 原生全链路
+# 有效**（目录名=encodeSegment(id)、头记录 id=自定义 id、resume 按该 id 扫描寻址），
+# 引擎每次 spawn 都注入该 env。旧探针只在 resume 腿注入 → 第一腿用自动生成 id，resume
+# 腿拿一个从未存在的自定义 id 去寻址，必然「Not found → 回落新建」→ 断言必红（假红）。
+PROBE_SESSION_ID = "t260916-24-probe-resume"
+
 # 凭据缺失守望（t260922-03）：dsh 会话日志自报 MISSING_CREDENTIAL 即属环境态——
 # 早停收割不空等（实测手工跑曾静默等满超时），归因见 classify_credential_failure。
 CRED_MARKER = "MISSING_CREDENTIAL"
@@ -667,10 +675,11 @@ def cleanup_escape_dir(escape_dir, keep):
     _try_rmdir_empty(escape_dir.parent)
 
 
-def probe_live(version, rounds, keep, reuse_install):
+def probe_live(version, rounds, keep, reuse_install, inplace=False):
     rows = Rows()
-    print("== dsh 接缝探针 live 档：@deepseek-ai/dsh@%s ==" % version)
-    which_or_env_fail(["zstd", "npm"], rows)
+    print("== dsh 接缝探针 live 档：@deepseek-ai/dsh@%s%s =="
+          % (version, "（--inplace：用在位二进制）" if inplace else ""))
+    which_or_env_fail(["zstd"] + ([] if inplace else ["npm"]), rows)
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="dshprobe-"))
     escape_dir = None  # 越界建位面（t260922-07②）；finally 全终态回收
     print("[INVENTORY] 工作目录：%s%s" % (tmp, "（--keep 保留）" if keep else "（结束清理）"))
@@ -690,7 +699,27 @@ def probe_live(version, rounds, keep, reuse_install):
                  aud_detail + "（t260922-07②）")
         if not aud_ok:
             return finish(rows, tmp, keep)
-        if not reuse_install:
+        inplace_bin = None
+        if inplace:
+            # --inplace（t260923 控制腿修）：**在位二进制**给「在位已验证版」腿用——
+            # 生产用的就是这份全局安装树，忠实度高于 npm 现装（实测：无 lockfile 的现装
+            # 0.1.1 依赖树与生产不同形，profile 启动即抛「user patch-layer watching
+            # requires the Cordis HMR service」→ 8 条红全是它的下游，控制腿因此无效）。
+            # 版本不匹配=fail-closed ENV 红（绝不用错版本冒充）。
+            inplace_bin = shutil.which("dsh")
+            if not inplace_bin:
+                rows.add("ENV", "inplace 二进制", "PATH 中无 dsh（--inplace 需在位安装）")
+                return finish(rows, tmp, keep)
+            p = subprocess.run([inplace_bin, "--version"], capture_output=True, text=True)
+            got = (p.stdout or "").strip()
+            if got != version:
+                rows.add("ENV", "inplace 二进制版本",
+                         "在位 dsh --version=%r ≠ 请求 %r（--inplace 只用于在位版；"
+                         "候选版用隔离安装）" % (got, version))
+                return finish(rows, tmp, keep)
+            rows.add("INVENTORY", "inplace 二进制",
+                     "%s 版本=%s（生产同形；跳过隔离安装与安装核验）" % (inplace_bin, got))
+        elif not reuse_install:
             print("[INVENTORY] npm 隔离安装中（--prefix %s，最长 %ds）…" % (prefix_dir, INSTALL_TIMEOUT_SEC))
             try:
                 p = subprocess.run(
@@ -705,9 +734,12 @@ def probe_live(version, rounds, keep, reuse_install):
                 rows.add("ENV", "npm 隔离安装", "超时（>%ds；网络/registry 慢）" % INSTALL_TIMEOUT_SEC)
         else:
             rows.add("INVENTORY", "npm 隔离安装", "--reuse-install：复用已装前缀")
-        if not verify_install(prefix_dir, version, rows):
-            return finish(rows, tmp, keep)
-        dsh_bin = prefix_dir / "node_modules" / ".bin" / "dsh"
+        if inplace:
+            dsh_bin = pathlib.Path(inplace_bin)
+        else:
+            if not verify_install(prefix_dir, version, rows):
+                return finish(rows, tmp, keep)
+            dsh_bin = prefix_dir / "node_modules" / ".bin" / "dsh"
         if not dsh_bin.exists():
             rows.add("ENV", "dsh bin", "缺 %s（.bin 实际：%s）" % (
                 dsh_bin, ", ".join(x.name for x in (prefix_dir / "node_modules" / ".bin").glob("*"))[:200]))
@@ -722,6 +754,7 @@ def probe_live(version, rounds, keep, reuse_install):
         # 延伸子用例 --rounds N：同一 home 连跑 N 轮（无 resume），汇总 cacheRead 观测（不拦停）
         total_rounds = max(1, rounds)
         cache_seen = []
+        p0_patch = build_resume_patch(tmp)  # 基线腿的 resume patch（见上注释；None=runner 缺席）
         for i in range(total_rounds):
             print("[INVENTORY] 会话 %d/%d 跑中（cwd=%s，超时 %ds）…" % (i + 1, total_rounds, lane_dir, SESSION_TIMEOUT_SEC))
             log_path = tmp / ("session_round%d.log" % (i + 1))
@@ -729,7 +762,13 @@ def probe_live(version, rounds, keep, reuse_install):
                 dsh_bin, home_dir, lane_dir,
                 render_live_prompt(lane_dir / "probe_write_here.txt",
                                    escape_main_repo / ".git" / "probe_escape.txt"),
-                log_path)
+                log_path,
+                # 第 1 轮=resume 场景的**基线腿**：与 resume 腿同 id **且同带 resume patch**
+                # （生产同形：引擎每次 spawn 都注入 DSH_HEADLESS_SESSION + resume patch，
+                # 会话由插件「续写或新建同 id」）。t260923 修——旧版两条都不带，基线腿落
+                # uuid 会话档、resume 腿按自定义 id 必然找不到，断言 e 恒红=假红。
+                extra_env={"DSH_HEADLESS_SESSION": PROBE_SESSION_ID} if i == 0 else None,
+                extra_args=(["--patch", str(p0_patch)] if (i == 0 and p0_patch) else None))
             if cred_missing:
                 # 凭据缺失=环境态：ENV 红点名路由与补救路径（exit 2 非产品红）；五断言
                 # 无会话产物可对账——显式点名跳过，绝不静默（ENV 优先级本就压过 FAIL）
@@ -745,7 +784,8 @@ def probe_live(version, rounds, keep, reuse_install):
             check_session_bundle(home_dir / "sessions", exp_provider, exp_model, rows)
             # 行为子用例只对第 1 轮判（后续轮会重复写同文件，判据失真）
             if i == 0:
-                check_sandbox_behavior(lane_dir, escape_main_repo, prefix_dir, rows)
+                check_sandbox_behavior(lane_dir, escape_main_repo,
+                                       None if inplace else prefix_dir, rows)
             for u in (usage_of(r) for r in parse_session_bundle(home_dir / "sessions")[0]):
                 if u is not None and _is_int(u.get("cacheReadTokens")) and u["cacheReadTokens"] > 0:
                     cache_seen.append(u["cacheReadTokens"])
@@ -772,6 +812,32 @@ def probe_live(version, rounds, keep, reuse_install):
     return finish(rows, tmp, keep, already_cleaned=not keep)
 
 
+def build_resume_patch(tmp):
+    """生成会话延续 patch（复刻引擎 _prepare_agent_spawn 的 resume patch 形状）。
+
+    t260923 修：**两条腿都必须带它**——引擎每次 spawn 都注入该 patch（命令行实证：
+    `dsh --profile <p> --patch roles/… --patch model_patch… --patch resume_patch…`），
+    会话 id 由插件按 DSH_HEADLESS_SESSION「续写或新建同 id」。旧探针只在 resume 腿带
+    patch：基线腿没有插件、dsh 自生成 uuid 会话档（实测 `session-<uuid>/`），resume 腿
+    按自定义 id 寻址必然落空 → 回落新建 → 断言 e 恒红（假红，与产品无关）。
+    runner 缺席返回 None（判据面响亮，由调用方判红）。"""
+    runner = REPO_ROOT / "server" / "headless-resume" / "node.ts"
+    if not runner.is_file():
+        return None
+    patch = tmp / "resume_patch.yml"
+    patch.write_text(
+        "# 探针生成的会话延续 patch（复刻引擎 _prepare_agent_spawn 的 resume patch 形状）\n"
+        "- id: headless-runner\n"
+        "  disabled: true\n"
+        "- insert:\n"
+        "    - id: headless-resume\n"
+        "      name: '%s'\n"
+        "      inject: [headlessStartup]\n"
+        "      config:\n"
+        "        task: !!js ctx.headlessStartup.task\n" % runner, "utf-8")
+    return patch
+
+
 def check_sandbox_behavior(lane_dir, escape_root, prefix_dir, rows):
     """断言 c：泳道内写成功（根内可写对照）+ 主库 .git 模拟位越界写被拒（行为子用例
     主裁，目标位=三根之外，见 build_escape_main_repo/audit_escape_target）+ 安装包
@@ -788,9 +854,14 @@ def check_sandbox_behavior(lane_dir, escape_root, prefix_dir, rows):
     else:
         rows.add("PASS", "c 行为子用例 主库 .git 越界写",
                  "%s 不可写（与现状基线一致；目标位已按 t260922-07 移出可写三根）" % escape)
-    hits = subprocess.run(["grep", "-rl", "workspace-write", str(prefix_dir / "node_modules" / "@deepseek-ai")],
-                          capture_output=True)
-    if hits.returncode == 0:
+    hits = []
+    if prefix_dir is not None:
+        hits = subprocess.run(["grep", "-rl", "workspace-write", str(prefix_dir / "node_modules" / "@deepseek-ai")],
+                              capture_output=True)
+    if prefix_dir is None:
+        rows.add("INVENTORY", "c 辅证 策略字面",
+                 "--inplace 形态无隔离安装树，跳过字面辅证（以行为子用例为准）")
+    elif hits.returncode == 0:
         rows.add("INVENTORY", "c 辅证 策略字面", "安装包内出现 workspace-write 字面（缺省策略面字面在场）")
     else:
         rows.add("INVENTORY", "c 辅证 策略字面", "安装包内未见 workspace-write 字面（可能打包形态不同；以行为子用例为准）")
@@ -809,21 +880,14 @@ def check_resume(dsh_bin, home_dir, lane_dir, tmp, rows):
     if not runner.is_file():
         rows.fail("e resume 插件", "runner 缺席：%s（引擎会话延续面真源缺失）" % runner)
         return
-    patch = tmp / "resume_patch.yml"
-    patch.write_text(
-        "# 探针生成的会话延续 patch（复刻引擎 _prepare_agent_spawn 的 resume patch 形状）\n"
-        "- id: headless-runner\n"
-        "  disabled: true\n"
-        "- insert:\n"
-        "    - id: headless-resume\n"
-        "      name: '%s'\n"
-        "      inject: [headlessStartup]\n"
-        "      config:\n"
-        "        task: !!js ctx.headlessStartup.task\n" % runner, "utf-8")
+    patch = build_resume_patch(tmp)
+    if patch is None:
+        rows.fail("e resume 插件", "runner 缺席：%s（引擎会话延续面真源缺失）" % runner)
+        return
     before = {str(f.relative_to(home_dir)) for f in collect_session_files(home_dir / "sessions")}
     rc, err, cred_missing = run_session(dsh_bin, home_dir, lane_dir, RESUME_PROMPT,
                           tmp / "session_resume.log",
-                          extra_env={"DSH_HEADLESS_SESSION": "t260916-24-probe-resume"},
+                          extra_env={"DSH_HEADLESS_SESSION": PROBE_SESSION_ID},
                           extra_args=["--patch", str(patch)])
     if cred_missing:
         classify_credential_failure(tmp / "session_resume.log", "e resume 插件", rows)
@@ -1030,11 +1094,14 @@ def main():
     ap.add_argument("--rounds", type=int, default=1, help="延伸子用例：会话轮数（≥2 汇总 cacheRead 观测）")
     ap.add_argument("--keep", action="store_true", help="保留临时目录取证")
     ap.add_argument("--reuse-install", action="store_true", help="跳过 npm 安装（复用已装前缀，调试用）")
+    ap.add_argument("--inplace", action="store_true",
+                    help="用在位 dsh 二进制（生产同形；「在位已验证版」控制腿专用，跳过隔离安装）")
     args = ap.parse_args()
     if args.selftest:
         sys.exit(selftest())
     if args.version:
-        sys.exit(probe_live(args.version, args.rounds, args.keep, args.reuse_install))
+        sys.exit(probe_live(args.version, args.rounds, args.keep, args.reuse_install,
+                            inplace=args.inplace))
     ap.print_help()
     print("\n（--selftest 或 --version <v> 二选一；见模块 docstring）")
     sys.exit(EXIT_ENV_FAIL)
