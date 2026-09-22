@@ -916,6 +916,43 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   证据＝`server/engine/data/worker-t260911-05.log`、`worker-t260912-01.log`（260913 11:19 两条）；
   票面证据＝t260912-01 / t260911-05 的 `authorizations` 从空到 3 条的时间线。
 
+## KI-095 作废票号被回收 + 泳道路径随之复用 → 新票继承旧票未落盘改动（260922 实证，已人工规避、待修）
+- 现象：260922 傍晚为「泳道主动同步 main」开票时，自动号给成 `t260922-17`——**正是同日下午因撞受保护
+  路径闸而作废的文档票号**；更要紧的是引擎把**那条旧泳道 `.lane/t260922-17` 一并复用**：新票 worktree
+  指向旧路径，工作区里带着旧票**未落盘的草稿**（`docs/README.md`、`docs/design/失败分类协议v1.md`、
+  `docs/index.json`、`integration/run_scenarios.py` 全为 M，另有未跟踪目录 `integration/t260922-17/`）。
+  新票是一张**引擎票**：带着 `docs/design`（受保护路径）的脏改动开工，一落盘即撞受保护闸——**开局即废**。
+- 根因链（三点，逐条实证）：
+  ① **号源会回收**：`_next_id` → `ticket-list(id_prefix)` 扫 Temporal 现存 id → `next_ticket_seq_from_ids`
+     取「最大序号 +1」（`server/tools/ticket.py:435-448`）。**作废（terminate）的 workflow 不再出现在该扫描里**
+     （实测：cancel 后该 id 从 list 消失）→ 其号被回收复用。宪章口径「票号全项目唯一」由此被破坏：
+     同一号先后属于两条不同 workflow，Temporal 历史里出现两条同 id 运行（show/追溯歧义）。
+  ② **泳道路径由号派生**：dev-lane 泳道＝`.lane/<票号>` + 分支 `lane/<票号>`；号一复用，路径同名。
+  ③ **建泳道是「已注册即复用」**：prepare_workspace 对已存在且已在 `git worktree list` 注册的树走
+     `reused` 路径（幂等设计，本为 retry 复用），**不做清洁校验**（源码只在「目录存在但非已注册 worktree」
+     时报错要人工处置）→ 旧票的脏残留原样交给新票。
+- 危害：①新票带着**别人未落盘的改动**开工，症状是「莫名其妙被写集/受保护闸拒」，排查方向极易跑偏；
+  ②同号两条 workflow 使票号不再唯一，`show`/审计追溯有歧义；③本次是人工先查现场才发现，换人踩就是
+  「开局即废 + 十几分钟排查」。
+- 处置（本轮已执行，规避而非修复）：作废该次 create（temporal cancel，理由入不可变历史）→ 确认旧分支
+  `lane/t260922-17` **无独有提交**（`git rev-list --count <base>..lane/t260922-17 == 0`）→
+  `git worktree remove --force` + `git branch -D` 清残留 → 以**显式号 `t260922-18`** 重建
+  （新泳道基点＝当前 main，落后 0、工作区净）。
+- 建议修复方向（只登记，未动手）：① 号源改**只增不减**（高位水线/持久发号，不因作废回收）；
+  ② 建票期加**冲突检查**（同号已存在、或 `.lane/<号>` 已被注册/非空 → 明确拒收或换号，绝不静默复用）；
+  ③ 复用泳道前加**清洁校验**（工作区脏/有未跟踪改动/分支有独有提交 → 拒复用并点名）；
+  ④ 若确要回收号，则把泳道路径与号解耦（带随机后缀）。
+- 定位：`server/tools/ticket.py:435-448`（号源单点 `next_ticket_seq_from_ids`）、dev-lane 泳道登记
+  （`.lane/<票号>` + `lane/<票号>`）、`server/engine/agent_activities.py` prepare_workspace
+  （docstring「idempotent: retries take the reuse path」+ `"[%s] reused"` 分支）；实案痕迹＝Temporal 两条
+  `t260922-17` 运行 + `server/admin.log` 该时段 create/cancel 记名行 + `.lane/t260922-18`（重建后的新泳道）。
+- 登记附记（取号纪律，本次实证）：**债册 max+1 不等于下一个可用号**。本次登记时债册最大是 KI-093，但
+  代码里 `integration/run_scenarios.py:1478` 与 `integration/t260917-04/sc_t260917_04_replay_compat.py:30`
+  已把 **KI-094** 当既有条目标引（债册漏登该条）；若只按债册 max 取号即撞号。⇒ 取号须双向核对
+  「债册已定义 ∪ 全仓引用」，本次据此改用 KI-095。另：`integration/baselines/sc_notes_write_gate.py:110`
+  里的 `KI-099` 是**测试夹具合成字符串**（非真条目），不得作为占号依据。**遗留**：KI-094 在代码有引用
+  但债册无条目，待补登（登记权在 integration 岗）。
+
 ## KI-093 并行段（arb_acc_parallel）互相残杀：一条活动的进程组 reap 杀掉另一条在飞 agent（260915 凌晨实证，待复核）
 - 现象：`t260914-04` 在 `acceptance_walkthrough` 连挂 **4 次**（23:46 / 00:18 / 01:29 / 01:35），每次都满足
   「**agent 活干完了、结果文件也写了**（gen0 38KB / gen1 38KB / gen2 37KB 均在盘上），活动仍被判
