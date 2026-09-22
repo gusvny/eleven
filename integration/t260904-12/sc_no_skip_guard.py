@@ -59,6 +59,15 @@ ALLOW = [
     re.compile(r"skipTest"),                                            # unittest 内建 API（环境前提不可测时跳过单用例），非三态状态词
     re.compile(r"skipped_budget"),                                      # 被测产品回执字段名（t260912-02 stage_docker sweep 报告
                                         # 的预算跳过清单键；acceptance 走查脚本读它=产品域，非套件状态值）
+    re.compile(r"skip_settle="),                                        # 引擎 AgentStageArgs 参数名（headless/worker 执行面；
+                                        # t260917-08/-04/-14 场景夹具同形）——执行形态开关，非套件状态值
+    re.compile(r"ScheduleOverlapPolicy\.SKIP|OverlapPolicy=SKIP"),      # Temporal 调度 API 枚举（t260917-02 资产；服务端
+                                        # overlap 语义，非本仓三态词表）
+    re.compile(r"num_actions_skipped_overlap|skipped_overlap"),         # Temporal ScheduleInfo 字段名（snake_case 内既有
+                                        # skipped\b 不出界——260922 仲裁补）
+    re.compile(r"skip_count"),                                          # Temporal deadman 回执键名（t260917-02 资产）
+    re.compile(r"SKIP；全部子用例"),                                     # 三态契约句引用（t260921-05 lib 头注；
+                                        # 「闸内无 SKIP」退役注记同族）
 ]
 
 hits = []

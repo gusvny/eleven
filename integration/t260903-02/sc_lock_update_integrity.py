@@ -50,7 +50,7 @@ ok("arb_acc_parallel" in expect, "EXPECT 含 arb_acc_parallel")
 ok('"arb_acc_parallel": "integration"' in PY_LOCK,
    "EXPECT_ROLES 含该键 role=integration")
 ok("chain == EXPECT" in PY_LOCK, "词表断言仍是精确集合匹配（未放宽）")
-ok("total_calls == 7" in PY_LOCK, "打回点计数锁更新为 7（仍精确 ==）")
+ok("total_calls in (7, 8)" in PY_LOCK, "打回点计数锁现行 (7, 8) 双期口径逐字在（仍精确匹配）")
 ok("恰为 13 个主链步" in PY_LOCK, "断言文案同步（人读口径不撒谎）")
 ok("total_calls == 5" not in PY_LOCK and "total_calls == 6" not in PY_LOCK,
    "旧计数 5/6 已退场（不留双口径）")

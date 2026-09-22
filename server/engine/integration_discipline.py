@@ -11,6 +11,15 @@
 白名单豁免（t260922-08，语义见下方边界清单）；grep/cat/sed/ls 等只读动词的参数
 提及、prompt 回显帧不算违规。
 
+切段解析（t260922-14）：切段是引号/转义感知的——旧正则切段不认引号，`grep -E
+"…|verify_lane…"` 引号内的 `|` 被当管道，`|` 之间的裸片段（恰为 `verify_lane`）撞
+入口表误红，现场两例均沉淀为 UT 夹具（t260922-12 原命令、t260922-14 会话档探针，
+后者为 heredoc 正文被逐行判=第三类误红载体）。现由 `_split_segments()` 状态机切段：
+引号外才认段分隔 `;|&` 与换行（`&&`/`||`/`;;`/`|&` 连写同作一处边界），引号内与
+`\` 转义的分隔符不切；`\`+换行按 bash 续行吞并（续行后动词保持锚定）；词首 `#` 到
+行尾按注释不判。hit 的 segment 摘要仍是原文切片（引号保留）、cmd 摘要不变——对外
+可观测字段零漂移。
+
 执法面边界（口径诚实，落字防漂移；review K1/C3 意见收口）：
 - `bash/sh -c "<串>"`：引号内串按同规则**递归**判（K1 推荐路线）——
   `bash -c 'python3 integration/run_scenarios.py'` 判红；
@@ -28,11 +37,27 @@
   （integration/tests 是集成库自身单测面）；pytest 仅在实参 basename 命中入口表时判
   （收集即 import 执行场景模块=真跑）；
 - `xargs` 二段式不追——已知局限；
-- heredoc 正文按行进入分段器：以注释 # 开头的提及行不判（# 非执行动词）；
+- heredoc 正文=数据（t260922-14）：body 不再无条件逐行判——同逻辑行组内任一段的
+  程序词（剥括号后）属于解释/执行动词（bash/sh/zsh/dash/source/./eval/xargs，含
+  `cat <<EOF | bash` 这类**管道下游消费方**、`xargs python3 <<EOF` 实参执行形）时，
+  body=真 shell 输入照旧逐行判（判据不松）；整行组无此类动词才按数据放行
+  （`python3 - <<'PYEOF'` 探针正文、`cat <<EOF` 直挂数据）；下游为非 shell 解释器
+  （python3/node 等）时 body 按 python/node 代码执行，bash 执法器不判（与 `-c`
+  内联不解析同族）。真值注记（t260922-14 实测）：eval 直挂无实参不消费 stdin、
+  source/. 直挂需文件实参、裸 xargs 默认 echo 仅回显——三者按执法原则**保守纳入**
+  照判（现状亦判，只紧不松），不夸大其真跑语义。delimiter 终止行与 delimiter
+  逐字一致（`<<-` 仅去行首 tab）；delimiter 行未出现→余文全按 body 处置不抛；
+  CRLF/尾随空白不特判；
 - `bench.py`/`cache_probe.py`/`stage_docker.py`/`lib_*` 等集成**辅助**工具面不在执法面
-  （如需收口宿主另票）。
+  （如需收口宿主另票）；
+- 既有已知漏判补全（落字防静默翻红；非本票引入、本票不收口，t260922-14）：反引号/
+  `$( )` 内藏跑、进程替换 `bash <(python3 …)` 形（尾括号粘 basename）、子壳括号内
+  多词 prog 的 heredoc 形（如 `(cd x && bash) <<EOF`——括号组内 prog 提取不追；
+  单词形 `(bash`/`(python3` 已由剥括号覆盖）。与 `-c` 内联/`xargs` 二段式/连写
+  `-mrun_scenarios` 同族同级。
 
-纯函数零 IO；畸形输入（None/非串/空/引号不平衡/超长）不抛，按兜底切词照常判。
+纯函数零 IO；畸形输入（None/非串/空/引号不平衡/超长/heredoc 未闭合）不抛，按兜底
+切词照常判。
 """
 import fnmatch
 import re
@@ -71,8 +96,14 @@ WRAPPER_TOKENS = frozenset({
 _RECURSION_DEPTH_MAX = 3
 _CMD_EXCERPT_MAX = 200
 _SEGMENT_EXCERPT_MAX = 120
-# 段分隔：&& 优先于 &（正则交替序），含 ; | 换行。
-_SEGMENT_SPLIT_RE = re.compile(r"&&|\|\||[;|&\n]")
+# heredoc body 的解释/执行动词（组级保守分流，t260922-14 取代旧 _SEGMENT_SPLIT_RE
+# 正则切段——正则不认引号，`grep -E "a|b"` 的 `|` 被当管道切段，裸片段撞入口表误红）。
+# bash 族直挂/管道下游真执行 body；source/. 直挂需文件实参、eval 直挂无实参不消费
+# stdin、裸 xargs 默认 echo 仅回显（t260922-14 真值实测）——后三者按执法保守原则
+# 一并纳入照判（现状亦判，只紧不松）。扩展本表须同批带 UT + docstring 落字。
+_HEREDOC_EXEC_TARGETS = frozenset({
+    "bash", "sh", "zsh", "dash", "source", ".", "eval", "xargs",
+})
 _ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
@@ -130,6 +161,174 @@ def _program_index(tokens):
             continue
         return i
     return None
+
+
+def _seg_prog(segment):
+    """段文本 → 小写程序词（跳过赋值/透明包装，prog 剥括号）；无程序词返回 None。"""
+    try:
+        tokens = shlex.split(segment)
+    except ValueError:
+        tokens = segment.split()
+    idx = _program_index(tokens)
+    if idx is None:
+        return None
+    prog = tokens[idx].strip("()").lower()
+    return prog or None
+
+
+def _parse_heredoc_delim(command, i, n):
+    """command[i] 指向 `<<`；返回 (delimiter, dash, next_i)。
+
+    `<<-` 容行首 tab，delimiter 可引号包裹或裸词（遇空白/`;|&<>()`/反引号止）；
+    `<<<`（here-string，非行消费）由调用方排除，不在此处理。"""
+    j = i + 2
+    dash = False
+    if j < n and command[j] == "-":
+        dash = True
+        j += 1
+    while j < n and command[j] in " \t":
+        j += 1
+    if j >= n:
+        return "", dash, j
+    ch = command[j]
+    if ch in "'\"":
+        k = command.find(ch, j + 1)
+        if k == -1:
+            return command[j + 1:], dash, n
+        return command[j + 1:k], dash, k + 1
+    k = j
+    while k < n and command[k] not in " \t\n;|&<>()`":
+        k += 1
+    return command[j:k], dash, k
+
+
+def _split_segments(command):
+    """引号/转义感知切段 + heredoc body 组级分流（纯函数，全路径不抛）。
+
+    规则（t260922-14）：
+    - 引号外才认段分隔 `;` `|` `&` 换行（`&&`/`||`/`;;`/`|&` 连写同作一处边界）；
+      引号内与 `\` 转义的分隔符不切；`\`+换行按 bash 续行吞并（逻辑行拼接）；
+    - 词首 `#` 到行尾按注释不判（与 shlex commenter 行为等价）；
+    - heredoc（`<<`/`<<-`，`<<<` 非行消费）：body 按**同逻辑行组级**保守分流——
+      组内任一段程序词 ∈ _HEREDOC_EXEC_TARGETS → body=真 shell 输入，逐行走本
+      切段器照判（管道下游消费方/直挂真跑不松）；整行组无 → body=数据放行
+      （python3/cat 等直挂）；delimiter 行未出现→余文全按 body 处置。
+    返回段文本列表（原文切片，引号保留——hit 的 segment 摘要语义不变）。"""
+    segments, cur = [], []
+    seg_delims, line_delims = [], []   # (delimiter, dash)：段内收集，行级消费
+    line_progs = []                    # 本逻辑行（顶层换行之间）各段程序词
+    quote = None
+    prev = ""
+    i, n = 0, len(command)
+
+    def _flush():
+        text = "".join(cur)
+        del cur[:]
+        prog = _seg_prog(text)
+        if prog is not None:
+            line_progs.append(prog)
+        if seg_delims:
+            line_delims.extend(seg_delims)
+            del seg_delims[:]
+        if text.strip():
+            segments.append(text)
+
+    def _emit_body(body, is_shell):
+        if is_shell:
+            for line in body.split("\n"):
+                segments.extend(_split_segments(line))
+
+    def _consume_bodies(start, is_shell):
+        pos = start
+        for delim, dash in line_delims:
+            j = pos
+            while True:
+                k = command.find("\n", j)
+                line = command[j:] if k == -1 else command[j:k]
+                probe = line.lstrip("\t") if dash else line
+                if probe == delim:
+                    _emit_body(command[pos:j], is_shell)
+                    pos = n if k == -1 else k + 1
+                    break
+                if k == -1:
+                    _emit_body(command[pos:], is_shell)
+                    pos = n
+                    break
+                j = k + 1
+        del line_delims[:]
+        del line_progs[:]
+        return pos
+
+    while i < n:
+        ch = command[i]
+        if quote == "'":
+            cur.append(ch)
+            if ch == "'":
+                quote = None
+            prev = ch
+            i += 1
+        elif quote == '"':
+            cur.append(ch)
+            if ch == "\\" and i + 1 < n:
+                cur.append(command[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                quote = None
+            prev = ch
+            i += 1
+        else:
+            if ch in "'\"":
+                quote = ch
+                cur.append(ch)
+                prev = ch
+                i += 1
+            elif ch == "\\" and i + 1 < n:
+                if command[i + 1] == "\n":
+                    i += 2
+                else:
+                    cur.append(ch)
+                    cur.append(command[i + 1])
+                    i += 2
+                    prev = command[i - 1]
+            elif ch == "<" and i + 1 < n and command[i + 1] == "<":
+                if i + 2 < n and command[i + 2] == "<":
+                    cur.append("<<<")
+                    i += 3
+                    prev = "<"
+                else:
+                    delim, dash, j = _parse_heredoc_delim(command, i, n)
+                    seg_delims.append((delim, dash))
+                    cur.append(command[i:j])
+                    i = j
+                    prev = " "
+            elif ch in ";|&\n":
+                _flush()
+                if ch == "\n":
+                    i += 1
+                    if line_delims:
+                        is_shell = any(p in _HEREDOC_EXEC_TARGETS for p in line_progs)
+                        i = _consume_bodies(i, is_shell)
+                    else:
+                        del line_progs[:]
+                    while i < n and command[i] in ";|&\n":
+                        i += 1
+                    prev = " "
+                else:
+                    while i < n and command[i] in ";|&\n":
+                        i += 1
+                    prev = " "
+            elif ch == "#" and (prev == "" or prev.isspace() or prev in ";|&"):
+                while i < n and command[i] != "\n":
+                    i += 1
+            else:
+                cur.append(ch)
+                prev = ch
+                i += 1
+    _flush()
+    del line_delims[:]
+    del line_progs[:]
+    return segments
 
 
 def _scan_tokens(tokens, segment, command, depth):
@@ -191,14 +390,14 @@ def _scan_tokens(tokens, segment, command, depth):
 def scan_bash_command(command, _depth=0):
     """一条 bash 命令串 → 命中清单（每条 {cmd,entry,segment}）；空 list=未命中。
 
-    畸形输入（None/非串/空）→ []，不抛；引号不平衡→空白切分兜底照常判；
-    递归深度（-c 嵌套）封顶防病态输入。"""
+    切段引号/转义感知（t260922-14，_split_segments）；畸形输入（None/非串/空）→ []，
+    不抛；引号不平衡段→空白切分兜底照常判；递归深度（-c 嵌套）封顶防病态输入。"""
     if not isinstance(command, str) or not command.strip():
         return []
     if _depth > _RECURSION_DEPTH_MAX:
         return []
     hits = []
-    for segment in _SEGMENT_SPLIT_RE.split(command):
+    for segment in _split_segments(command):
         seg = segment.strip()
         if not seg:
             continue
