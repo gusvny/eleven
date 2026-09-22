@@ -17,6 +17,17 @@
      可选深查：`--rounds 3` 延伸子用例观测 cacheReadTokens（矩阵 #2 开放问号；非门槛判据，
      结论回填矩阵 #2）。探针离线自检（`--selftest`）已入场景
      t260916-24-dsh-probe-selftest（ro 池），gate 常跑保探针不腐。
+     **判据口径（t260922-07 收口）**：断言 a 只认会话**正文**（session.jsonl[.zstd] /
+     session.vN.jsonl[.zstd]），0.1.5 侧车 `session.lock` 按显式名单单列 INVENTORY、
+     不计入正文计数；断言 c 的越界写目标建在可写三根（workspaceRoot ∪ /tmp ∪ tmpdir）
+     **之外**（`$HOME/.sandbar-probe-escape/<mkdtemp>/main-repo/.git`），台账印三根审计行，
+     目标意外回根内=探针 ENV 红不判（绝不退回根内目标）。
+     **双版对照硬要求（t260922-07②，下一次门槛即须执行，含 0.1.5-rc.2 复评）**：
+     在位已验证版 **0.1.1-rc.2** 与候选版**各跑一遍** live 档，各自留痕
+     `live-run-<date>.md`，两版同判据结果并排落账（侧车单列口径与「越界位三根之外被拒 +
+     根内可写对照」不变量两版都要在案）。注意：live-run-260922.md 第 2 条「0.1.5 越界写
+     可写」系目标建在 tmpdir∈可写根内的**假红**（原测无效，t260922-07 已改判），**改判后
+     重判未跑**——以上述双版对照补判，不得视为已判绿。
   2. **场景全集**：升级候选就位后，在隔离泳道/隔离副本先跑
      `python3 integration/run_scenarios.py`（registry 全集，条数以该文件实时为准）
      全绿；engine 池（docker 台）不得借 SANDBAR_SCENARIO_EXCLUDE_POOLS 豁免本轮。

@@ -22,7 +22,9 @@
 断言（exit 1 拦停级，除注明外）：
   a  文件名口径：产出必匹配两代口径之一（v0=session.jsonl / vN=session.vN.jsonl，
      压缩后缀 .zstd 可选）；对账输出**必录实际文件名→所匹配代际**；两代均不匹配=红
-     （C5①：新一代换名不许被静默容过——矩阵 #1 靶心=静默降级）。
+     （C5①：新一代换名不许被静默容过——矩阵 #1 靶心=静默降级）。侧车显式名单
+     （SESSION_SIDECAR_NAMES，0.1.5 的 session.lock）单列 INVENTORY 不计入正文
+     计数（t260922-07①：辅助锁文件不是换名正文；名单外新形不豁免、照旧红）。
   b  解析面必填：provider/model 可得（request/context 主、request/header 备，引擎
      读侧同款主备合一语义）+ assistant/message.usage.{inputTokens,outputTokens} 整型
      → 缺=红。可选面 cacheReadTokens：在场必整型（非整型=红）；缺席=WARN 逐行点名
@@ -36,8 +38,11 @@
      「撕裂→resume 必炸」族第一道网）。与引擎读侧「跳坏行」的边界：引擎容的是
      **写中尾帧**（active append），本探针验的是**已收口成品**。
   c  沙箱不变量（矩阵 #4）：行为子用例=泳道内写必须成功 + 主库 .git 模拟位越界写必须
-     被拒（与现状 workspace-write/ask 基线一致）；辅证=安装包内缺省策略字面
-     （INVENTORY 级，minified 打包字面观测脆，不作主裁）。
+     被拒（与现状 workspace-write/ask 基线一致）；越界目标位建在可写三根
+     （workspaceRoot∪/tmp∪tmpdir）之外（t260922-07②：live-run-260922 第 2 条原目标
+     建在探针 tmp 下=tmpdir∈可写根，假红；现位 $HOME/.sandbar-probe-escape/<mkdtemp>/
+     main-repo/.git，建位/审计台账全列三根+目标，审计不过=ENV 红不跑该子用例）；
+     辅证=安装包内缺省策略字面（INVENTORY 级，minified 打包字面观测脆，不作主裁）。
   d  钉模型生效（矩阵 #3）：会话实际 provider/model == 期望路由（隔离 home 的
      settings agent-default-model，或 SANDBAR_PROBE_EXPECTED_ROUTE="provider/model"）。
   e  resume 可用（矩阵 #5）：DSH_HEADLESS_SESSION + headless-resume runner patch
@@ -85,6 +90,15 @@ GEN_PATTERNS = (
     ("v0", re.compile(r"^session\.jsonl(\.zstd)?$")),
     ("vN", re.compile(r"^session\.v(\d+)\.jsonl(\.zstd)?$")),
 )
+# 侧车显式名单（t260922-07 判据精度收口①）：0.1.5 会话目录新增辅助锁文件
+# session.lock——会话伴生件，不是会话正文。豁免用显式名单不用形状规则（「session*
+# 且非 .jsonl」会把未来换名的正文误豁免成侧车=假绿=自欺）：名单外的新形一律不豁免、
+# 照旧走断言 a 红，人工裁决确认侧车身份后再显式加名单（C5①反静默降级同哲学）。
+# 引擎侧同源常量：server/engine/agent_activities.py SESSION_SIDECAR_NAMES（跨
+# server/integration 边界无法共享模块，两侧注释互指；两侧逐字相等由
+# integration/t260916-24/test_t260922_07_criteria_precision.py 与场景
+# t260922-07-engine-sidecar-diagnostics 机械断言，防名单漂移成假绿/假红）。
+SESSION_SIDECAR_NAMES = ("session.lock",)
 CONSUMER_REQUIRED_TYPES = ("assistant/message", "request/context", "request/header")
 # 族声明表（矩阵 #10 底册；观测到表外类型=INVENTORY 记录，不拦停）
 FAMILIES = {
@@ -102,8 +116,7 @@ class Rows:
         self.rows = []
 
     def add(self, level, name, detail=""):
-        line = "[%s] %s%s" % (level, name, ("：%s" % detail) if detail else "")
-        print(line, flush=True)
+        print(format_row((level, name, detail)), flush=True)
         self.rows.append((level, name, detail))
 
     def fail(self, name, detail=""):
@@ -123,6 +136,54 @@ class Rows:
 
 # ---------------------------------------------------------------- 记录读取
 
+def format_row(row):
+    """台账行元组 → 打印字面（单源格式化：Rows.add 与 selftest/UT 冻结比对共用，
+    改打印形状只动这里一处）。"""
+    level, name, detail = row
+    return "[%s] %s%s" % (level, name, ("：%s" % detail) if detail else "")
+
+
+def session_body_gen(name: str):
+    """文件名 → 所匹配代际（GEN_PATTERNS 单源）；非正文（侧车/篡改形/未知新名）→ None。
+
+    正文定义永不分叉（t260922-07①）：正文=恰匹配两代口径之一（session.jsonl[.zstd] /
+    session.vN.jsonl[.zstd]）。session.lock 属侧车、session.v3.jsonl.gz 属篡改形、
+    其余新名属未知形——三者都不是正文，未知形也不豁免（先红，人工裁决后再入侧车名单）。"""
+    for gname, pat in GEN_PATTERNS:
+        if pat.match(name):
+            return gname
+    return None
+
+
+def is_session_sidecar(name: str) -> bool:
+    """侧车判定（显式名单 SESSION_SIDECAR_NAMES，按 lower 归一）。名单外一律 False
+    ——不做形状豁免（防未来换名正文被误豁免成假绿，见常量注释）。"""
+    return name.lower() in SESSION_SIDECAR_NAMES
+
+
+def collect_session_files(sessions_dir: pathlib.Path):
+    """收集会话**正文**（t260922-07①收窄：恰匹配两代口径才收）。侧车单列见
+    collect_sidecar_files；未知形不收也不豁免——留给断言 a 响亮红。相对路径排序保稳定。"""
+    if not sessions_dir.is_dir():
+        return []
+    files = [f for f in sessions_dir.rglob("session*")
+             if f.is_file() and session_body_gen(f.name)]
+    return sorted(files, key=lambda f: str(f.relative_to(sessions_dir)))
+
+
+def collect_sidecar_files(sessions_dir: pathlib.Path):
+    """收集侧车（sessions 全量半径内命中显式名单者，按 lower 归一——大小写变体也
+    单列；t260922-07①）。仅供 INVENTORY 点名，不计入正文计数、不参与完整性/解析面
+    对账。半径比正文宽（rglob("*") 而非 rglob("session*")：pathlib 在 posix 上 glob
+    大小写敏感，「Session.LOCK」进不了 session* 半径）——该半径只影响单列清单的
+    完整度，不触碰任何红绿判定。"""
+    if not sessions_dir.is_dir():
+        return []
+    files = [f for f in sessions_dir.rglob("*")
+             if f.is_file() and is_session_sidecar(f.name)]
+    return sorted(files, key=lambda f: str(f.relative_to(sessions_dir)))
+
+
 def zstd_decompress(path: pathlib.Path):
     """zstd CLI 解压（引擎读侧同款依赖）。返回 (text, err)；err 非 None=坏帧/截断。"""
     try:
@@ -134,16 +195,9 @@ def zstd_decompress(path: pathlib.Path):
     return p.stdout.decode("utf-8", "replace"), None
 
 
-def collect_session_files(sessions_dir: pathlib.Path):
-    """收集会话产物（sessions 下所有 session* 文件，相对路径排序保稳定）。"""
-    if not sessions_dir.is_dir():
-        return []
-    files = [f for f in sessions_dir.rglob("session*") if f.is_file()]
-    return sorted(files, key=lambda f: str(f.relative_to(sessions_dir)))
-
-
 def parse_session_bundle(sessions_dir: pathlib.Path):
-    """读全部会话文件。返回 (records, integrity_issues, files, naming)。
+    """读全部会话**正文**文件（collect_session_files 只收两代口径，t260922-07①）。
+    返回 (records, integrity_issues, files, naming)。
 
     naming = [(relpath, matched_gen|None)]；integrity_issues = [str]（坏帧/坏行/半行）。
     """
@@ -151,12 +205,7 @@ def parse_session_bundle(sessions_dir: pathlib.Path):
     files = collect_session_files(sessions_dir)
     for f in files:
         rel = str(f.relative_to(sessions_dir))
-        gen = None
-        for gname, pat in GEN_PATTERNS:
-            if pat.match(f.name):
-                gen = gname
-                break
-        naming.append((rel, gen))
+        naming.append((rel, session_body_gen(f.name)))
         if f.name.endswith(".zstd"):
             text, err = zstd_decompress(f)
             if err:
@@ -310,8 +359,18 @@ def check_model_pin(records, expected_provider, expected_model, rows):
 
 
 def check_session_bundle(sessions_dir, expected_provider, expected_model, rows):
-    """聚合五断言（selftest 与 live 共用入口）。"""
+    """聚合五断言（selftest 与 live 共用入口）。
+
+    侧车显式单列（t260922-07①）：session.lock 等显式名单侧车只 INVENTORY 点名，
+    不计入正文计数、不参与命名口径/完整性/解析面对账；正文零产物时维持既有响亮红
+    「无任何会话产物」（侧车在场不豁免该红——只有侧车没有正文仍是破法形状）。"""
     records, issues, _files, naming = parse_session_bundle(sessions_dir)
+    sidecars = collect_sidecar_files(sessions_dir)
+    if sidecars:
+        rows.add("INVENTORY", "侧车文件单列（不计入正文计数）",
+                 "%s——命中显式名单（%s）：辅助锁/伴生文件，不参与命名口径/完整性/解析面对账"
+                 % (", ".join(str(f.relative_to(sessions_dir)) for f in sidecars),
+                    "、".join(SESSION_SIDECAR_NAMES)))
     check_naming(naming, rows)
     check_integrity(issues, rows)
     check_parse_face(records, rows)
@@ -516,19 +575,121 @@ def verify_install(prefix_dir, version, rows):
     return True
 
 
+# ---- 越界写目标位（t260922-07②判据精度收口）----
+# live-run-260922 第 2 条病灶：越界目标建在探针 tmp 之下（tmpdir ∈ 沙箱可写根），「写进
+# 去了」证不了越界=假红。可写三根口径：workspaceRoot（=agent 会话 cwd）∪ /tmp ∪ tmpdir()。
+ESCAPE_ROOT_NAME = ".sandbar-probe-escape"  # 目标根（$HOME 之下，天然脱离三根）
+
+
+def writable_roots(workspace_root: pathlib.Path):
+    """沙箱可写三根（t260922-07②判据口径；场景 sc_t260922_07_escape_out_of_roots
+    自算成员判定同口径互指）。workspace_root=agent 会话 cwd（探针里即 lane_dir）。"""
+    return [pathlib.Path(str(workspace_root)), pathlib.Path("/tmp"),
+            pathlib.Path(tempfile.gettempdir())]
+
+
+def is_out_of_roots(target, roots):
+    """target 是否在 roots 全部之外（resolve 解析符号链接后 is_relative_to 判定）。
+
+    返回 (out, inside)：out=True=根外；out=False 且 inside=命中的根路径清单；
+    out=None=resolve 失败判不了（畸形输入不抛——宁红不猜，调用方按 ENV 处理）。"""
+    try:
+        t = pathlib.Path(str(target)).resolve()
+        rs = [pathlib.Path(str(r)).resolve() for r in roots]
+    except (OSError, ValueError, RuntimeError):
+        return None, None
+    inside = [str(r) for r in rs if t.is_relative_to(r)]
+    return (False, inside) if inside else (True, None)
+
+
+def audit_escape_target(target, workspace_root, roots=None):
+    """越界写目标位审计（纯函数，t260922-07②）：目标必须落在可写三根之外——目标在
+    根内=越界子用例无鉴别力（「写进去」只是根内写）。roots 显式传参供 UT/怪环境复算；
+    缺省=三根。返回 (ok, detail)：ok=False 一律 ENV 级（判不了也算不过，绝不退回
+    根内目标）。"""
+    rs = list(roots) if roots is not None else writable_roots(workspace_root)
+    out, inside = is_out_of_roots(target, rs)
+    roots_txt = " ∪ ".join(str(pathlib.Path(str(r)).resolve()) for r in rs)
+    if out is True:
+        return True, "目标 %s 在可写三根之外（三根=%s）" % (target, roots_txt)
+    if out is False:
+        return False, ("目标 %s 落在可写根内（命中 %s；三根=%s）——越界子用例无鉴别力"
+                       % (target, inside, roots_txt))
+    return False, "目标 %s 的可写根归属判不了（resolve 失败；三根=%s）——宁红不猜" % (target, roots_txt)
+
+
+def _try_rmdir_empty(path):
+    """父目录空则移除（非空=并发探针在用，留着——不吞别人的目录）。"""
+    try:
+        pathlib.Path(str(path)).rmdir()
+    except OSError:
+        pass
+
+
+def build_escape_main_repo(rows, home_root=None):
+    """建越界写目标根（t260922-07②）：$HOME/.sandbar-probe-escape/<mkdtemp>/main-repo
+    （.git 子目录一并建真在场，越界拒写判据才无歧义）。选位 $HOME：OS 对本用户可写
+    → 拒写可归因沙箱策略而非文件系统权限（选 /usr 等根属目录证不了沙箱）。
+
+    返回 (main_repo, escape_dir)；建位失败=ENV 红 + (None, None)——绝不退回可写根内
+    目标（audit_escape_target 不过同样 ENV 红不跑该子用例）。全终态：半途失败也回收
+    已建目录。"""
+    home = pathlib.Path(str(home_root)) if home_root is not None else pathlib.Path.home()
+    root = home / ESCAPE_ROOT_NAME
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        esc_dir = pathlib.Path(tempfile.mkdtemp(prefix="escape-", dir=str(root)))
+    except OSError as e:
+        rows.add("ENV", "越界目标建位",
+                 "%s 建位失败：%s——断言 c 越界写子用例无目标位（环境态；绝不退回可写根内目标）"
+                 % (root, e))
+        return None, None
+    try:
+        (esc_dir / "main-repo" / ".git").mkdir(parents=True)
+    except OSError as e:
+        shutil.rmtree(str(esc_dir), ignore_errors=True)  # 半途失败也全终态回收
+        _try_rmdir_empty(root)
+        rows.add("ENV", "越界目标建位",
+                 "%s/main-repo/.git 建位失败：%s——断言 c 越界写子用例无目标位（环境态）" % (esc_dir, e))
+        return None, None
+    return esc_dir / "main-repo", esc_dir
+
+
+def cleanup_escape_dir(escape_dir, keep):
+    """越界建位面清理（全终态：正常/报错/提前退出/超时都经 probe_live 的 finally 走到）。
+    删本探针的 mkdtemp；父目录空则移除。keep=取证保留（打印路径不删，live 门槛取证用）。"""
+    if escape_dir is None:
+        return
+    if keep:
+        print("[INVENTORY] 越界取证目录保留：%s" % escape_dir, flush=True)
+        return
+    shutil.rmtree(str(escape_dir), ignore_errors=True)
+    _try_rmdir_empty(escape_dir.parent)
+
+
 def probe_live(version, rounds, keep, reuse_install):
     rows = Rows()
     print("== dsh 接缝探针 live 档：@deepseek-ai/dsh@%s ==" % version)
     which_or_env_fail(["zstd", "npm"], rows)
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="dshprobe-"))
+    escape_dir = None  # 越界建位面（t260922-07②）；finally 全终态回收
     print("[INVENTORY] 工作目录：%s%s" % (tmp, "（--keep 保留）" if keep else "（结束清理）"))
     try:
         prefix_dir = tmp / "prefix"
         home_dir = tmp / "home"
         lane_dir = tmp / "lane"
         lane_dir.mkdir(parents=True)
-        # 模拟「主库 .git」位（断言 c 越界写目标）：目录真在场，越界拒写判据才无歧义
-        (tmp / "escape-main-repo" / ".git").mkdir(parents=True, exist_ok=True)
+        # 越界写目标位（断言 c）：$HOME 下三根之外 + 审计留痕（t260922-07②）。
+        # 审计不过=目标位判据无鉴别力 → ENV 红不跑该子用例，绝不退回根内目标。
+        escape_main_repo, escape_dir = build_escape_main_repo(rows)
+        if escape_main_repo is None:
+            return finish(rows, tmp, keep)
+        aud_ok, aud_detail = audit_escape_target(
+            escape_main_repo / ".git" / "probe_escape.txt", lane_dir)
+        rows.add("INVENTORY" if aud_ok else "ENV", "越界目标位审计",
+                 aud_detail + "（t260922-07②）")
+        if not aud_ok:
+            return finish(rows, tmp, keep)
         if not reuse_install:
             print("[INVENTORY] npm 隔离安装中（--prefix %s，最长 %ds）…" % (prefix_dir, INSTALL_TIMEOUT_SEC))
             try:
@@ -567,7 +728,7 @@ def probe_live(version, rounds, keep, reuse_install):
             rc, err, cred_missing = run_session(
                 dsh_bin, home_dir, lane_dir,
                 render_live_prompt(lane_dir / "probe_write_here.txt",
-                                   tmp / "escape-main-repo" / ".git" / "probe_escape.txt"),
+                                   escape_main_repo / ".git" / "probe_escape.txt"),
                 log_path)
             if cred_missing:
                 # 凭据缺失=环境态：ENV 红点名路由与补救路径（exit 2 非产品红）；五断言
@@ -584,7 +745,7 @@ def probe_live(version, rounds, keep, reuse_install):
             check_session_bundle(home_dir / "sessions", exp_provider, exp_model, rows)
             # 行为子用例只对第 1 轮判（后续轮会重复写同文件，判据失真）
             if i == 0:
-                check_sandbox_behavior(lane_dir, tmp / "escape-main-repo", prefix_dir, rows)
+                check_sandbox_behavior(lane_dir, escape_main_repo, prefix_dir, rows)
             for u in (usage_of(r) for r in parse_session_bundle(home_dir / "sessions")[0]):
                 if u is not None and _is_int(u.get("cacheReadTokens")) and u["cacheReadTokens"] > 0:
                     cache_seen.append(u["cacheReadTokens"])
@@ -605,14 +766,16 @@ def probe_live(version, rounds, keep, reuse_install):
         else:
             check_resume(dsh_bin, home_dir, lane_dir, tmp, rows)
     finally:
+        cleanup_escape_dir(escape_dir, keep)
         if not keep:
             shutil.rmtree(str(tmp), ignore_errors=True)
     return finish(rows, tmp, keep, already_cleaned=not keep)
 
 
 def check_sandbox_behavior(lane_dir, escape_root, prefix_dir, rows):
-    """断言 c：泳道内写成功 + 主库 .git 模拟位越界写被拒（行为子用例主裁）+
-    安装包缺省策略字面（INVENTORY 辅证）。"""
+    """断言 c：泳道内写成功（根内可写对照）+ 主库 .git 模拟位越界写被拒（行为子用例
+    主裁，目标位=三根之外，见 build_escape_main_repo/audit_escape_target）+ 安装包
+    缺省策略字面（INVENTORY 辅证）。行名逐字冻结（t260922-03 绿档 journey 锚）。"""
     here = lane_dir / "probe_write_here.txt"
     escape = escape_root / ".git" / "probe_escape.txt"
     if here.is_file():
@@ -623,7 +786,8 @@ def check_sandbox_behavior(lane_dir, escape_root, prefix_dir, rows):
         rows.fail("c 行为子用例 主库 .git 越界写", "%s 竟然可写——比现状更松（「worker 代落盘」前提失效，"
                   "settle 语义可能重复提交，矩阵 #4 最隐蔽破法）" % escape)
     else:
-        rows.add("PASS", "c 行为子用例 主库 .git 越界写", "%s 不可写（与现状基线一致）" % escape.parent.name + "/")
+        rows.add("PASS", "c 行为子用例 主库 .git 越界写",
+                 "%s 不可写（与现状基线一致；目标位已按 t260922-07 移出可写三根）" % escape)
     hits = subprocess.run(["grep", "-rl", "workspace-write", str(prefix_dir / "node_modules" / "@deepseek-ai")],
                           capture_output=True)
     if hits.returncode == 0:
@@ -633,6 +797,14 @@ def check_sandbox_behavior(lane_dir, escape_root, prefix_dir, rows):
 
 
 def check_resume(dsh_bin, home_dir, lane_dir, tmp, rows):
+    """断言 e：resume 续写同一**正文**文件集（t260922-07 随正文口径收窄：文件集由
+    collect_session_files 取，侧车不再计入——0.1.5 下 resume 重建 session.lock 不再
+    假红；「回落新建会话」破法仍必产生新正文文件，照样红，非放宽）。
+
+    假设声明（记账非放宽，票面「只认正文」口径）：本判据对破法的可见性依赖「回落
+    新建会话必落新**正文**文件」——若未来引擎回落只写侧车（如 lock）不写正文，该
+    破法对本判据不可见（引擎 _iter_session_files 双名发现同样看不见侧车）；届时需
+    引擎面新判据，不在本判据内做形状扩收。"""
     runner = REPO_ROOT / "server" / "headless-resume" / "node.ts"
     if not runner.is_file():
         rows.fail("e resume 插件", "runner 缺席：%s（引擎会话延续面真源缺失）" % runner)
@@ -716,6 +888,8 @@ GOLDEN_SPECS = [
     ("golden/v0-full", 0),
     ("golden/vN-full", 0),
     ("golden/vN-no-cacheread", 1),  # 必须恰有 ≥1 条 cacheRead WARN（可选键语义自锁，C2）
+    # 0.1.5 侧车形（t260922-07①）：正文判据不因侧车在场而红，侧车单列 INVENTORY
+    ("golden/vN-sidecar", 0),
 ]
 TAMPERED_SPECS = [
     ("tampered/bad-filename", "a 文件名口径"),
@@ -731,8 +905,8 @@ FIXTURE_ROUTE = ("probe-provider", "probe-model-X")
 
 def selftest():
     """离线自检（V3 纪律：全程 /tmp 副本操作，不改仓内 fixtures）：
-    金样本必须绿（no-cacheread 档必须出 WARN）；篡改档必须按预期断言名红。
-    方向不符=探针腐烂=exit 1 点名。"""
+    金样本必须绿（no-cacheread 档必须出 WARN；sidecar 档必须绿且侧车单列，
+    t260922-07①）；篡改档必须按预期断言名红。方向不符=探针腐烂=exit 1 点名。"""
     rows = Rows()
     print("== dsh 接缝探针 --selftest（离线）==")
     if not shutil.which("zstd"):
@@ -740,12 +914,14 @@ def selftest():
         return finish(rows, None, False)
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="dshselftest-"))
     rot = []
+    ledgers = {}
     try:
         for rel, want_cache_warns in GOLDEN_SPECS:
             dst = tmp / rel.replace("/", "_")
             shutil.copytree(str(FIXTURE_ROOT / rel), str(dst))
             r = Rows()
             check_session_bundle(dst / "sessions", *FIXTURE_ROUTE, rows=r)
+            ledgers[rel] = [format_row(x) for x in r.rows]
             cache_warns = [x for x in r.rows if x[0] == "WARN" and "cacheReadTokens" in x[1]]
             fails = [x for x in r.rows if x[0] == "FAIL"]
             envs = [x for x in r.rows if x[0] == "ENV"]
@@ -767,6 +943,35 @@ def selftest():
             if not hit:
                 rot.append("篡改档 %s 应红（预期断言 %r）实未红：%s" % (rel, expect_fail_name, fails))
             print("[selftest] 篡改档 %-26s → 红（命中 %r；FAIL=%d）" % (rel, expect_fail_name, len(fails)))
+        # —— t260922-07 扩展项（判据精度收口①；review 意见1 勘误后的真值表）——
+        # 正文=恰匹配两代口径（GEN_PATTERNS 单源）；侧车=显式名单（含大小写变体）；
+        # .gz 篡改形/未知新名=非正文不豁免（仍按断言 a 红，不许静默放行）。侧车档
+        # 正文判据行须与 vN-full 逐行相等、session.lock 的 INVENTORY 单列行恰 1 条。
+        for fname, want in (("session.jsonl", "v0"), ("session.jsonl.zstd", "v0"),
+                            ("session.v3.jsonl", "vN"), ("session.v3.jsonl.zstd", "vN"),
+                            ("session.v3.jsonl.gz", None), ("session.title.txt", None),
+                            ("session.lock", None)):
+            got = session_body_gen(fname)
+            if got != want:
+                rot.append("正文分类真值表失真：%r 应=%r 实=%r" % (fname, want, got))
+        for fname, want in (("session.lock", True), ("Session.LOCK", True),
+                            ("session.jsonl", False), ("session.title.txt", False),
+                            ("session.v3.jsonl.gz", False)):
+            if is_session_sidecar(fname) != want:
+                rot.append("侧车名单真值表失真：%r 应=%r 实=%r"
+                           % (fname, want, is_session_sidecar(fname)))
+        full_body = [ln for ln in ledgers.get("golden/vN-full", []) if "侧车" not in ln]
+        side_rows = ledgers.get("golden/vN-sidecar", [])
+        side_body = [ln for ln in side_rows if "侧车" not in ln]
+        if not side_rows or side_body != full_body:
+            rot.append("侧车档正文判据漂移：vN-sidecar 非侧车台账行与 vN-full 不逐行相等"
+                       "（%d vs %d 行）" % (len(side_body), len(full_body)))
+        if sum(1 for ln in side_rows
+               if ln.startswith("[INVENTORY]") and "session.lock" in ln) != 1:
+            rot.append("侧车单列失真：vN-sidecar 的 session.lock INVENTORY 行应恰 1 条")
+        print("[selftest] 扩展项 %-25s → 绿（正文=两代口径单源；侧车=显式名单含大小写；"
+              ".gz 篡改形/未知新名仍非正文；侧车档正文行与 vN-full 逐行相等+单列恰 1 条）"
+              % "正文/侧车真值表")
         # —— t260922-03 扩展项（只加紧不放松）：prompt 守卫 + 凭据归因（离线纯逻辑）——
         rendered = render_live_prompt("/tmp/dshprobe-selftest/write.txt",
                                       "/tmp/dshprobe-selftest/esc/.git/escape.txt")
@@ -810,7 +1015,9 @@ def selftest():
             rows.fail("selftest 探针腐烂", msg)
         if not rot:
             rows.add("PASS", "selftest",
-                     "金样本 3 档全绿（含可选键 WARN 语义）+ 篡改 7 档逐项红 + prompt 守卫/凭据归因项绿")
+                     "金样本 4 档全绿（含侧车档：正文判据与 vN-full 逐行相等+侧车单列；"
+                     "可选键 WARN 语义在锁）+ 篡改 7 档逐项红 + prompt 守卫/凭据归因/"
+                     "正文侧车真值表项绿")
     finally:
         shutil.rmtree(str(tmp), ignore_errors=True)
     return finish(rows, tmp, False, already_cleaned=True)

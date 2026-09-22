@@ -330,6 +330,23 @@ def _quarantine_session_file(local_dsh: Path, f: Path, reason: str) -> None:
 # 本读侧 sub 目录名匹配规则与写/续侧同源同 id，「读得到即可续上」。
 SESSION_FILE_NAMES: Tuple[str, ...] = ("session.jsonl.zstd", "session.v3.jsonl.zstd")
 
+# 0.1.5 侧车显式名单（t260922-07 判据精度收口④）：dsh 0.1.5 会在会话目录新增辅助
+# 锁文件 session.lock——会话伴生件，不是会话本体。两处诊断面
+# （_session_suspect_unmatched 的 unknown 类 / _session_quarantine_blindspots）按名单
+# 豁免，不再把侧车当「未匹配会话文件/检疫盲区」点名污染诊断（改前是方向安全的多收
+# 噪声，但会话体检与隔离对账都靠这两面，噪声会误导人）。豁免用显式名单不用形状规则：
+# 名单外的新形先响亮、人工裁决确认侧车身份后再显式加名单——防未来换名的正文被形状
+# 规则误豁免成假绿。检疫动作面零改动：_iter_session_files 双名发现从不认侧车，
+# session.lock 从未入检疫，本名单只收窄两处诊断清单。
+# 探针侧同源常量：integration/t260916-24/probe_dsh_seam.py SESSION_SIDECAR_NAMES
+# （跨 server/integration 边界无法共享模块，注释互指；两侧逐字相等由
+# integration/t260916-24/test_t260922_07_criteria_precision.py 与场景
+# t260922-07-engine-sidecar-diagnostics 机械断言，防名单漂移成假绿/假红）。
+# workbench TS 镜像面同病（src/host/agent-live.ts scanSuspectSessionFiles 同一
+# catch-all「名字含 session 或后缀 .zst/.zstd」）在写集外未修，已作 KI 登记候选
+# 上报，收敛时须以同款名单制同步。
+SESSION_SIDECAR_NAMES: Tuple[str, ...] = ("session.lock",)
+
 
 def _iter_session_files(root: Path) -> List[Path]:
     """All session files of BOTH generations under root, any depth (quarantine sweep
@@ -519,7 +536,9 @@ def _session_suspect_unmatched(sess: Path, ticket_id: str) -> Dict[str, List[str
       tie 规则（恰等或 <ticket_id>- 前缀）——他票会话，不是格式违约；
     - legacy_flat: <slug>/session-*.zstd 旧扁平布局——已知旧代格式，不误诊；
     - unknown: 其余「名字含 session 或后缀 .zst/.zstd」的文件——名/布局双不识，
-      疑似 dsh 版本不匹配。
+      疑似 dsh 版本不匹配。显式名单 SESSION_SIDECAR_NAMES（0.1.5 侧车 session.lock
+      等伴生件）先豁免不点名（t260922-07④：侧车不是会话本体，收窄的是方向安全的
+      多收噪声；名单外新形仍响亮，豁免不做形状规则）。
     目录不存在/条目探测 OSError → 各类为空（不放大环境故障）。"""
     groups: Dict[str, List[str]] = {"unknown": [], "other_ticket": [], "legacy_flat": []}
     try:
@@ -544,6 +563,8 @@ def _session_suspect_unmatched(sess: Path, ticket_id: str) -> Dict[str, List[str
             groups["legacy_flat"].append(rel)
             continue
         low = f.name.lower()
+        if low in SESSION_SIDECAR_NAMES:
+            continue  # 0.1.5 侧车（session.lock 等伴生件）：不是会话本体，不点名（t260922-07④）
         if "session" in low or low.endswith((".zst", ".zstd")):
             groups["unknown"].append(rel)
     return groups
@@ -563,7 +584,9 @@ def _session_quarantine_blindspots(local_dsh: Path) -> List[str]:
 
     已知布局 = 现行三层双名（session.jsonl.zstd / session.v3.jsonl.zstd，取自
     SESSION_FILE_NAMES；与 workbench _sessionKbFast 的兼容位同源）+ 旧扁平 session-*.zstd。旧扁平是已知旧代格式：不点名不检疫（dsh 现行
-    版本不再产生；检疫面只为「撕坏的本代格式」服务，动旧代格式才是风险）。"""
+    版本不再产生；检疫面只为「撕坏的本代格式」服务，动旧代格式才是风险）。
+    显式名单 SESSION_SIDECAR_NAMES（0.1.5 侧车 session.lock 等伴生件）同样豁免
+    （t260922-07④：侧车不是会话档，入盲区点名只会污染隔离对账；名单外新形仍响亮）。"""
     sessions = local_dsh / "sessions"
     out: List[str] = []
     if not sessions.is_dir():
@@ -584,6 +607,8 @@ def _session_quarantine_blindspots(local_dsh: Path) -> List[str]:
         if f.name.startswith("session-") and f.name.endswith(".zstd"):
             continue  # 旧扁平布局：已知旧代，豁免
         low = f.name.lower()
+        if low in SESSION_SIDECAR_NAMES:
+            continue  # 0.1.5 侧车（session.lock 等伴生件）：不是会话档，不入盲区（t260922-07④）
         if "session" in low or low.endswith((".zst", ".zstd")):
             out.append(rel)
     return out

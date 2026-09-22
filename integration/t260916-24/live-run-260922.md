@@ -62,3 +62,21 @@ tool/result、turn/start、turn/end、user/message）——底册交 T5（t26091
   pytest（桩会话双向）+ selftest（归因形状）+ registry 场景 t260922-03-dsh-probe-live-cred-env
   （hang 档秒级 exit 2 点名路由与补救变量 / fail 档产品红保全）三面机械守卫，升级门槛遇到
   真缺凭据时按 ENV exit 2 点名补环境，不再挂死/崩栈/误判产品红。
+
+## 附记（t260922-07 判据精度收口，2026-09-22 追加；上文三条红原文不改写）
+
+- **第 1 条（a 文件名口径：session.lock）改判=判据精度问题**：0.1.5 会话目录新增的
+  `session.lock` 是辅助锁文件（**侧车**/伴生件），不是换名正文——探针按 `session*`
+  全量收才误点名（同轮 transcript 本体 `session.v3.jsonl.zstd` PASS 即证）。收口：
+  探针正文清单只认两代口径，侧车显式名单（SESSION_SIDECAR_NAMES）单列 INVENTORY、
+  不计入正文计数（t260922-07①）；引擎两诊断面同口径收窄（t260922-07④）。
+- **第 2 条（c 主库 .git 越界写「竟然可写」）原测无效=假红**：越界目标建在探针 tmp
+  之下（tmpdir ⊆ 可写根 workspaceRoot ∪ /tmp ∪ tmpdir）——目标位本来就在沙箱可写根
+  内，「0.1.5 能越界写 .git」证不了；integration 岗先前「架构级、升级前必须解决」的
+  判断据此撤回。收口：目标位改到三根之外（`$HOME/.sandbar-probe-escape/<mkdtemp>/
+  main-repo/.git`）+ 台账三根审计行 + 根内可写对照（泳道内写 PASS 同轮在案）。
+  **改判后重判未跑**——待升级门槛双版对照（0.1.1-rc.2 vs 0.1.5-rc.2 各跑 live 并
+  留痕 `live-run-<date>.md`；RUNBOOK_GATE 门槛 1 双版硬要求，下一次门槛即须执行），
+  不得从本附记读出「已重判已绿」。
+- 第 3 条（e resume 破法）不在 t260922-07 范围（resume/id 寻址接缝另票），上文原文
+  判读维持。
