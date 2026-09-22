@@ -36,9 +36,11 @@ lane=code（代码道，泳道）——**全配置驱动（t260901-08，契约�
   仅在声明在位时跑；全部并行跑（独立子进程），总时长取最长者。
 """
 import json
+import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -743,22 +745,68 @@ def _integ(args):
     baseline_enabled = _os.environ.get('SANDBAR_GATE_BASELINE', '1').lower() \
         not in ('0', 'off', 'false', 'no')
 
+    # ---------------- t260922-12 结果台账：先查账后实跑（③④） ----------------
+    # 台账缺席/无红名 → 本段全部零分支（answer 全空、need_baseline 原式），行为
+    # 与改前逐字节一致（降级路径=今天的实跑归属）。
+    ledger_mod, ledger_degraded = _ledger_module(root)
+    ledger_source = _ledger_source()
+    lane_head = _git_head(root)
+    lane_dirty = _worktree_dirty(root) if lane_head else True
+    base_ref_name = _resolve_base_ref(root, args.get('base'))
+    base_sha = _git_rev_parse(root, base_ref_name)
+    lane_width = executor_summary.get('concurrency') if executor_summary else None
+    red_names = sorted({c['name'] for c in cases_dedup if c['status'] != 'pass'})
+    (ledger_answers, ledger_hits_red,
+     ledger_hits_green, ledger_ambiguous) = _ledger_consult(
+        fp, ledger_mod, red_names, lane_fp.get('value'), lane_width,
+        base_sha, root)
+
     baseline_ok, baseline_cases, baseline_err, baseline_ref, baseline_fp = \
         True, [], None, None, None
+    baseline_deps_note = None
     # 先泳道后基线串行（C4）：只有泳道有红时才需要基线对照；全绿跳过=零额外成本。
     # K6①：基线强制 SANDBAR_POOL_CONC=1 是「降负载串行」，不是泳道缺省多宽池同口径。
     need_baseline = baseline_enabled and (legacy_red or any(
         c['status'] != 'pass' for c in cases_dedup))
+    # t260922-12 ③④：台账已答全部红名（同红欠账/绿）→ 免基线整跑；有歧义 →
+    # 基线只复跑歧义条（SANDBAR_SCENARIO_ONLY 注入，执行器 fail-closed 校验在册
+    # 性，不在册=基线缺席=保守拦，绝不松绑）。无记录/指纹不等/过期/宽度不等都在
+    # 歧义面里，照旧回退实跑——「查不到」永不等于「当绿」。
+    baseline_skipped_by_ledger = False
+    baseline_targeted = []
+    if need_baseline and ledger_mod is not None and red_names:
+        if not ledger_ambiguous:
+            need_baseline = False
+            baseline_skipped_by_ledger = True
+        elif len(ledger_ambiguous) < len(red_names):
+            baseline_targeted = list(ledger_ambiguous)
+    baseline_env_extra = ({'SANDBAR_SCENARIO_ONLY': ','.join(baseline_targeted)}
+                          if baseline_targeted else None)
+    baseline_wall_s = None
     if need_baseline:
-        (baseline_ok, baseline_cases, baseline_err,
-         baseline_ref, baseline_fp) = _run_baseline(root, cmd, args.get('base'),
-                                                    timeout, env=cmd_env)
+        _t0b = time.time()
+        _rv = _run_baseline(root, cmd, args.get('base'), timeout, env=cmd_env,
+                            extra_env=baseline_env_extra)
+        # P1 的 deps_note 是本票后加位（真函数返回 6 元组）；t260913-03 既有
+        # 护栏（test_i_baseline_inherits_exclude_env）按 5 元组桩本函数——扩展
+        # 不得破坏既有形状消费方（merge_check 真红实证回归），此处按长度兼容
+        # 补位（短=无 deps_note 记 None），既有护栏测试零改动。
+        if len(_rv) < 6:
+            _rv = tuple(_rv) + (None,) * (6 - len(_rv))
+        (baseline_ok, baseline_cases, baseline_err, baseline_ref, baseline_fp,
+         baseline_deps_note) = _rv
+        baseline_wall_s = round(time.time() - _t0b, 1)
     else:
         baseline_ref = args.get('base') or None
 
-    aff = (fp.apply_affiliation(cases_dedup, baseline_cases, lane_fp,
-                                baseline_fp, baseline_ok=baseline_ok)
-           if (cases_dedup or legacy_red) else None)
+    if ledger_mod is not None and (cases_dedup or legacy_red):
+        aff = fp.apply_affiliation_ledger(
+            cases_dedup, baseline_cases, lane_fp, baseline_fp,
+            baseline_ok=baseline_ok, ledger_answers=ledger_answers)
+    else:
+        aff = (fp.apply_affiliation(cases_dedup, baseline_cases, lane_fp,
+                                    baseline_fp, baseline_ok=baseline_ok)
+               if (cases_dedup or legacy_red) else None)
 
     # 兼容文本行红面（无规范行可判）→ fail-closed 红不猜测归属（C5 盲区明示：
     # 兼容路径无 cause/reason，违约类机械不可见，这里只保守红不归因）。
@@ -820,6 +868,65 @@ def _integ(args):
             pool_exclude['excluded_pools'] = \
                 executor_summary.get('excluded_pools') or []
         _out['pool_exclude'] = pool_exclude
+
+    # ---------------- t260922-12 写账（①⑦）+ 回执面 ----------------
+    # lane 行 + 基线行一次成批；记账面≠判定面——写失败不翻 green，但必须响亮
+    # （ledger 面 error + details 上票面）。脏树/缺 source/缺 width/缺 commit
+    # 一律不写（宁可缺行不可脏行），跳写原因点名进 ledger 面。out/ 快照（执行器
+    # 报告）只作展示，判定真源只在主账（禁第二真源）。
+    ledger_face = {
+        'available': ledger_mod is not None, 'degraded': ledger_degraded,
+        'source': ledger_source or None, 'commit': lane_head or None,
+        'base': base_sha or None, 'base_ref': base_ref_name,
+        'width': lane_width,
+        'consulted': sorted(ledger_answers),
+        'hits_red': ledger_hits_red, 'hits_green': ledger_hits_green,
+        'ambiguous': ledger_ambiguous,
+        'baseline_skipped_by_ledger': baseline_skipped_by_ledger,
+        'baseline_targeted': baseline_targeted,
+        'baseline_wall_s': baseline_wall_s,
+        # P1：基线依赖软链点名文案上回执面（原 stdout 横幅，已改 stderr+此处）。
+        'baseline_deps_note': baseline_deps_note,
+        # width 分工（review 条件 C，写明防「记了账却永不命中=台账失效」误读）：
+        # 基线行恒 conc_width=1（K6①）——对缺省宽泳道红不满足采信边界④；main
+        # 覆盖主要靠巡检同宽行（每日 main 全集）与活基线权威；基线行价值在②查询
+        # 与同宽采信。
+        'width_semantics': ('baseline rows are conc_width=1 (K6①): they do not '
+                            'satisfy trust-boundary width-equality for '
+                            'default-width lane reds; main-tip coverage comes '
+                            'from same-width inspection rows and the '
+                            'live-baseline authority'),
+    }
+    if ledger_mod is not None:
+        rows, skip_whys = [], []
+        if cases_dedup:
+            if not ledger_source:
+                skip_whys.append('source 缺失（%s/SANDBAR_TICKET_ID 均无）' % LEDGER_SOURCE_ENV)
+            if not lane_head:
+                skip_whys.append('HEAD sha 解析失败')
+            if lane_dirty:
+                skip_whys.append('泳道工作区脏（git status 非空）——宁可缺行不可脏行')
+            if not lane_width:
+                skip_whys.append('并发宽度缺失（无 INTEG_SUMMARY）')
+        if cases_dedup and not skip_whys:
+            rows += _ledger_rows_from_cases(
+                cases_dedup, commit=lane_head, env_fp=lane_fp.get('value'),
+                conc_width=lane_width, source=ledger_source)
+        if baseline_ok and baseline_fp and baseline_cases and base_sha:
+            rows += _ledger_rows_from_cases(
+                baseline_cases, commit=base_sha, env_fp=baseline_fp.get('value'),
+                conc_width=1, source='baseline')
+        ledger_face['written'] = 0
+        if rows:
+            _rcpt = _ledger_write(ledger_mod, rows)
+            ledger_face['written'] = _rcpt.get('written', 0)
+            if _rcpt.get('rejected'):
+                ledger_face['rejected'] = _rcpt['rejected'][:10]
+            if _rcpt.get('error'):
+                ledger_face['error'] = _rcpt['error']
+        elif skip_whys:
+            ledger_face['write_skipped'] = '；'.join(skip_whys)
+    _out['ledger'] = ledger_face
     return _out
 
 
@@ -863,7 +970,7 @@ def _baseline_root(_root, _ref):
     return None
 
 
-def _run_baseline(root, cmd, base, lane_timeout, env=None):
+def _run_baseline(root, cmd, base, lane_timeout, env=None, extra_env=None):
     """main 基线跑（t260910-13 机械归属）：临时 detach worktree + 同一命令 +
     SANDBAR_POOL_CONC=1（降负载串行，C4/K6①）。借鉴 prepare_workspace 先例的
     取舍清单（gen1 方案 C3）逐项落地：
@@ -871,9 +978,16 @@ def _run_baseline(root, cmd, base, lane_timeout, env=None):
     - 墙钟上限 SANDBAR_GATE_BASELINE_TIMEOUT_SEC（缺省 1800s），超时=降级+组回收；
     - 终态回收：finally 里 worktree remove --force（自建路径，KI-065 半径限界）
       + rmtree 兜底，正常/报错/超时/取消四路都到；
-    - 不带依赖引导（裸态保「main 实况」）：基线缺依赖 → 场景自身 not-checked，
+    - 依赖软链（t260922-12⑤）：建树后按 _baseline_dep_links 挂主仓共享依赖
+      （旋钮 SANDBAR_GATE_BASELINE_DEPS 缺省开；跨仓守卫见彼注）——裸态路径
+      仍可达（旋钮关/软链全败=基线维持裸态，not-checked 口径照旧，不假绿）；
+    - 不带 supply 装配（那是泳道侧的事）：基线缺依赖 → 场景自身 not-checked，
       红名单口径只收 checked fail，不污染归属（C1）。
-    返回 (ok, baseline_cases, err, baseline_ref, baseline_fp)。"""
+    extra_env：调用方追加旋钮（t260922-12 ④定点复跑注入 SANDBAR_SCENARIO_ONLY）。
+    返回 (ok, baseline_cases, err, baseline_ref, baseline_fp, deps_note)。
+    deps_note=基线依赖软链点名文案（P1，仲裁 gen1：只进 stderr 闸日志+回执
+    ledger 面，绝不进 stdout——工具 run 路径 stdout 只有唯一 JSON 信封，admin.py
+    call 按 json.loads 整体解析，横幅先行=信封解析炸=整轮验证被解析层丢弃）。"""
     import os as _os2
     import shutil as _shutil
     import tempfile as _tempfile
@@ -881,7 +995,7 @@ def _run_baseline(root, cmd, base, lane_timeout, env=None):
     import failure_protocol as fp2
     ref = _resolve_base_ref(root, base)
     if not ref:
-        return False, [], '基线缺席：base ref 解析失败（main/origin/main 均不可解析）', None, None
+        return False, [], '基线缺席：base ref 解析失败（main/origin/main 均不可解析）', None, None, None
     tmp = _tempfile.mkdtemp(prefix='sandbar-baseline-')
     try:
         try:
@@ -889,16 +1003,26 @@ def _run_baseline(root, cmd, base, lane_timeout, env=None):
                                 '--detach', tmp, ref],
                                capture_output=True, text=True, timeout=120)
         except subprocess.TimeoutExpired:
-            return False, [], '基线缺席：git worktree add 超时（>120s）', ref, None
+            return False, [], '基线缺席：git worktree add 超时（>120s）', ref, None, None
         if p.returncode != 0:
             return False, [], ('基线缺席：git worktree add 失败（目录已存在但非本仓 '
                                'worktree？不覆盖不删除）：%s'
-                               % ((p.stderr or p.stdout or '').strip()[-400:])), ref, None
+                               % ((p.stderr or p.stdout or '').strip()[-400:])), ref, None, None
         base_fp = fp2.env_fingerprint(_env_fp_parts(tmp))
+        # t260922-12⑤：主仓共享依赖软链（每条独立失败响亮不致命）。
+        # P1（仲裁 gen1）：点名文案改走 stderr（闸日志）+ 随返回值上回执 ledger
+        # 面——原先裸 print 到 stdout，在 JSON 信封前插横幅，admin.py call 的
+        # json.loads 直接炸（Expecting value: line 1 column 1）→ 机械段
+        # 「verify_lane integ 无有效输出（exit=0）」、整轮验证被解析层丢弃。
+        deps_note = _baseline_dep_links(tmp, root)
+        sys.stderr.write('BASELINE_DEPS %s\n' % deps_note)
+        sys.stderr.flush()
         bl_timeout = int(_os2.environ.get('SANDBAR_GATE_BASELINE_TIMEOUT_SEC') or 1800)
         # t260913-03：过滤开启时基线同 env（泳道/基线同口径；main 侧执行器认该 env
         # 后基线墙钟同步受益——合并前 main 版执行器无视它=恒全集，仅慢不假）
         env = dict(env if env is not None else _os2.environ, SANDBAR_POOL_CONC='1')
+        if extra_env:
+            env.update({str(k): str(v) for k, v in extra_env.items()})
         # 真进程组回收（验收走查 gen1 问题三：terminate→wait→kill 升级链，
         # 孙进程随组全灭——start_new_session 使子进程自成进程组）
         bp = subprocess.Popen(['/bin/sh', '-c', cmd], cwd=tmp,
@@ -923,7 +1047,7 @@ def _run_baseline(root, cmd, base, lane_timeout, env=None):
                     pass
                 out, _err = bp.communicate()
         if timed_out:
-            return False, [], '基线缺席：整体超时（>%ds，进程组 TERM→KILL 已终态回收）' % bl_timeout, ref, base_fp
+            return False, [], '基线缺席：整体超时（>%ds，进程组 TERM→KILL 已终态回收）' % bl_timeout, ref, base_fp, deps_note
         cases, bad = [], []
         for ln in out.splitlines():
             s = ln.strip()
@@ -935,8 +1059,8 @@ def _run_baseline(root, cmd, base, lane_timeout, env=None):
                     cases.append(fp2.normalize_case(parsed))
         if bad:
             return False, cases, ('基线输出含畸形规范行（fail-closed 降级）：%s'
-                                  % '; '.join(bad[:3])), ref, base_fp
-        return True, cases, None, ref, base_fp
+                                  % '; '.join(bad[:3])), ref, base_fp, deps_note
+        return True, cases, None, ref, base_fp, deps_note
     finally:
         # 全终态回收（四路都到；自建路径，KI-065 半径限界）
         try:
@@ -945,6 +1069,248 @@ def _run_baseline(root, cmd, base, lane_timeout, env=None):
         except subprocess.TimeoutExpired:
             pass
         _shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ---------------- t260922-12 结果台账：闸侧单写者接线（①③④⑦） ----------------
+# 单写者纪律：本工具是台账唯一写者——lane/巡检/基线三路都经 lane=integ 收口，
+# 在此一处写账；执行器/引擎 activity 只产数据不碰账。台账库本体在
+# <泳道根>/integration/scenario_ledger.py（项目侧交付件），按文件位装载；
+# 缺席/坏 = 台账面降级响亮，归属回退实跑（=改前行为），绝不静默。
+LEDGER_SOURCE_ENV = 'SANDBAR_INTEG_LEDGER_SOURCE'
+
+# 基线树依赖软链名单（t260922-12⑤）：LANE_DEP_SYMLINKS（agent_activities 泳道侧
+# 同名单）+ verify.yaml supply 的文件面等价两条。指向主仓共享依赖，基线树只读使用
+# ——不是装依赖，是把基线从「起不来场景的裸树」拉到「能检验」的水平。
+BASELINE_DEP_LINKS = (
+    'app/node_modules',
+    'server/engine/.venv',
+    'server/ui-check/node_modules/playwright-core',
+    'server/engine/bin/temporal',
+)
+
+
+def _git_common_dir(repo):
+    """仓库 git 共享目录（worktree 与主仓同值）——同仓判定的比较键；解析失败 None。"""
+    try:
+        p = subprocess.run(['git', '-C', str(repo), 'rev-parse',
+                            '--path-format=absolute', '--git-common-dir'],
+                           capture_output=True, text=True, timeout=30)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if p.returncode != 0:
+        return None
+    return str(Path(p.stdout.strip()).resolve())
+
+
+def _baseline_dep_links(baseline_root, lane_root):
+    """基线树依赖软链（t260922-12⑤；旋钮 SANDBAR_GATE_BASELINE_DEPS 缺省开）。
+    取舍清单（照搬 _ensure_lane_deps 语义族，review 条件 A 补跨仓守卫）：
+    - 同仓守卫（t260903-10 同族「依赖目录属引擎仓，跨仓不外链」）：基线树与泳道根
+      的 git 共享目录不同仓 → 一条不挂+响亮点名；
+    - 只读共享：软链指向本仓主 checkout 的共享依赖；只新增不覆盖（dst 已在跳过）；
+      src 缺席跳过（新 clone/布局不同，verify_lane 的红文案照旧给红）；单条失败
+      响亮不致命——软链全败=基线维持裸态，not-checked 口径照旧（不假绿、判据零
+      放宽）；
+    - 半径限界（KI-065）：只动本函数自建临时树内的路径，_run_baseline 的 finally
+      回收连树带链全灭。
+    返回一行点名文案（BASELINE_DEPS 行进 stderr 闸日志+随 _run_baseline 返回值
+    上回执 ledger 面——P1：绝不走 stdout，工具 run 路径 stdout 只有唯一 JSON
+    信封）。"""
+    knob = os.environ.get('SANDBAR_GATE_BASELINE_DEPS', '1')
+    if knob.strip().lower() in ('0', 'off', 'false', 'no'):
+        return ('基线依赖软链：显式关闭（SANDBAR_GATE_BASELINE_DEPS=%s）——基线维持裸态'
+                % knob)
+    common_base = _git_common_dir(baseline_root)
+    common_lane = _git_common_dir(lane_root)
+    if not common_base or not common_lane:
+        return '基线依赖软链：跳过（git common dir 解析失败）——基线维持裸态'
+    if common_base != common_lane:
+        return ('基线依赖软链：跳过（跨仓守卫：基线树与泳道根非同仓，不外链——'
+                't260903-10 同族）——基线维持裸态')
+    main_root = Path(common_base).parent
+    linked, skipped, failed = [], [], []
+    for rel in BASELINE_DEP_LINKS:
+        src = main_root / rel
+        dst = Path(baseline_root) / rel
+        if not src.exists() or os.path.lexists(dst):
+            skipped.append(rel)
+            continue
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            os.symlink(str(src), str(dst))
+            linked.append(rel)
+        except OSError as e:
+            failed.append('%s(%s:%s)' % (rel, type(e).__name__, e))
+    note = '基线依赖软链：%d 条挂上' % len(linked)
+    if linked:
+        note += '（%s）' % ','.join(linked)
+    if skipped:
+        note += '；跳过 %d 条（src 缺席或 dst 已在）' % len(skipped)
+    if failed:
+        note += '；失败=%s' % ';'.join(failed)
+    return note
+
+
+def _ledger_module(root):
+    """按文件位装载泳道树台账库（integration/scenario_ledger.py）。
+    返回 (module, None) 或 (None, reason)——缺席/坏都是降级面：不查账不写账，
+    归属回退实跑（=改前行为），reason 上 ledger 回执面响亮。"""
+    import importlib.util as _ilu
+    p = Path(root) / 'integration' / 'scenario_ledger.py'
+    if not p.is_file():
+        return None, ('台账库缺席：%s（泳道树未含台账交付件）——本轮不查账不写账，'
+                      '归属回退实跑' % p)
+    try:
+        spec = _ilu.spec_from_file_location('_scenario_ledger_lane', str(p))
+        mod = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod, None
+    except Exception as e:  # noqa: BLE001 —— 装载失败=降级面，响亮不静默
+        return None, ('台账库装载失败（%s: %s）——本轮不查账不写账，归属回退实跑'
+                      % (type(e).__name__, e))
+
+
+def _ledger_source():
+    """记账来源（source 字段）：集测段=lane:<票>、巡检段=inspection（引擎
+    activity 注入 env）；缺 env 回落 SANDBAR_TICKET_ID；再缺=空（写账跳过+点名
+    ——来源判不了就不写，宁可缺行不可脏行）。"""
+    s = (os.environ.get(LEDGER_SOURCE_ENV) or '').strip()
+    if s:
+        return s
+    tid = (os.environ.get('SANDBAR_TICKET_ID') or '').strip()
+    return ('lane:%s' % tid) if tid else ''
+
+
+def _git_head(root):
+    """泳道树 HEAD sha（lane 行的 commit 键）；解析失败空串（写账跳过）。"""
+    try:
+        p = subprocess.run(['git', '-C', str(root), 'rev-parse', 'HEAD'],
+                           capture_output=True, text=True, timeout=30)
+    except (subprocess.TimeoutExpired, OSError):
+        return ''
+    return p.stdout.strip() if p.returncode == 0 else ''
+
+
+def _git_rev_parse(root, ref):
+    """ref → 完整 sha（base 行的 commit 键/祖先判定的比较对象）；失败空串。
+    P0（仲裁 gen1）：曾拼 `^commit`——非合法 git 修订语法（rev-parse rc=128
+    「Needed a single revision」）→ base_sha 恒空 → 台账采信链全断+基线行永不
+    落账且无报错。合法的「剥到 commit」形是 `^{commit}`（tag/分支/sha 通吃）。"""
+    if not ref:
+        return ''
+    try:
+        p = subprocess.run(['git', '-C', str(root), 'rev-parse', '--verify',
+                            str(ref) + '^{commit}'],
+                           capture_output=True, text=True, timeout=30)
+    except (subprocess.TimeoutExpired, OSError):
+        return ''
+    return p.stdout.strip() if p.returncode == 0 else ''
+
+
+def _worktree_dirty(root):
+    """泳道工作区干净判（lane 行写账前提：脏树结果冒充 HEAD 状态=脏记录）。
+    git 判不了（非仓/超时）→ 按脏处理（宁可缺行不可脏行）。"""
+    try:
+        p = subprocess.run(['git', '-C', str(root), 'status', '--porcelain'],
+                           capture_output=True, text=True, timeout=30)
+    except (subprocess.TimeoutExpired, OSError):
+        return True
+    if p.returncode != 0:
+        return True
+    return bool(p.stdout.strip())
+
+
+def _is_ancestor(root, commit, base):
+    """commit 是否 base 的祖先或相同（git merge-base --is-ancestor rc=0）。
+    commit/base 缺失或 git 失败 → False（不采信，回退实跑）。"""
+    if not commit or not base:
+        return False
+    try:
+        p = subprocess.run(['git', '-C', str(root), 'merge-base', '--is-ancestor',
+                            str(commit), str(base)],
+                           capture_output=True, text=True, timeout=30)
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    return p.returncode == 0
+
+
+def _now_iso():
+    """台账 ts：本地时区 ISO8601（冒号偏移形 +08:00——老版 fromisoformat 不认
+    %z 的 +0800 无冒号形；写侧就对齐读侧解析面，failure_protocol.ledger_ts_epoch）。"""
+    import datetime as _dt
+    return _dt.datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _ledger_rows_from_cases(cases, commit, env_fp, conc_width, source):
+    """规范行用例 → 台账行（十字段）。verdict 映射：pass→pass、fail→fail、
+    not-checked→env_fail（没检验到；协议内无 skip）。ticket 仅 lane:<票> 形态
+    携带票号（inspection/baseline 无票号语义，空串）。"""
+    rows = []
+    for c in cases:
+        verdict = {'pass': 'pass', 'fail': 'fail'}.get(c.get('status'), 'env_fail')
+        rows.append({
+            'ts': _now_iso(),
+            'commit': str(commit),
+            'env_fp': str(env_fp),
+            'conc_width': int(conc_width),
+            'pool': str(c.get('suite') or ''),
+            'scenario': str(c.get('name') or ''),
+            'verdict': verdict,
+            'wall_s': c.get('dur_s'),
+            'source': str(source),
+            'ticket': (str(source)[5:] if str(source).startswith('lane:') else ''),
+        })
+    return rows
+
+
+def _ledger_consult(fp_mod, ledger_mod, red_names, lane_fp_value, lane_width,
+                    base_sha, root):
+    """红名单先查账（③）：每红名取「同指纹+同宽+检验到+祖先或相同+≤7 天」的
+    最新可信行（ts 新→旧逐条过 ledger_trust，首个可信即定）。
+    width 分工（review 条件 C，写明防误读）：基线行恒 conc_width=1（K6①）——对
+    缺省宽泳道红不满足边界④；main 覆盖主要靠巡检同宽行（每日 main 全集）与活
+    基线权威；基线行价值在②查询与同宽采信。
+    返回 (answers{name:{trusted,reason,verdict,ts,source}}, hits_red, hits_green,
+    ambiguous)。"""
+    if ledger_mod is None or not red_names:
+        return {}, [], [], []
+    try:
+        rows, _bad = ledger_mod.read_rows()
+    except Exception as e:  # noqa: BLE001 —— 读账失败=本轮无账可查（回退实跑），响亮
+        sys.stderr.write('LEDGER_WARN 主账读取失败（%s: %s）——本轮不查账，归属回退实跑\n'
+                         % (type(e).__name__, e))
+        # P4（仲裁 gen1）：此处必须回「全歧义」而非空歧义名单——空名单会被下游
+        # 「台账已答全部红名 → 免基线」门控当「无歧义」，台账临时不可读时基线被
+        # 静默跳过（违反自身「无记录/不可读=回退实跑」降级契约）。
+        return {}, [], [], list(red_names)
+    answers = {}
+    for name in red_names:
+        cands = [r for r in rows
+                 if r.get('scenario') == name and r.get('env_fp') == lane_fp_value]
+        cands.sort(key=lambda r: fp_mod.ledger_ts_epoch(r.get('ts')) or 0.0,
+                   reverse=True)
+        for r in cands:
+            anc = _is_ancestor(root, r.get('commit'), base_sha)
+            t = fp_mod.ledger_trust(r, lane_fp_value, anc, lane_width, time.time())
+            if t.get('trusted'):
+                answers[name] = dict(t, verdict=r.get('verdict'),
+                                     ts=r.get('ts'), source=r.get('source'))
+                break
+    hits_red = sorted(n for n, a in answers.items() if a.get('verdict') == 'fail')
+    hits_green = sorted(n for n, a in answers.items() if a.get('verdict') == 'pass')
+    ambiguous = sorted(n for n in red_names if n not in answers)
+    return answers, hits_red, hits_green, ambiguous
+
+
+def _ledger_write(ledger_mod, rows):
+    """写账（记账面≠判定面：失败不翻 green，但必须响亮——回执 error 上 ledger 面
+    +details，仲裁与运维可见）。返回 append_records 回执（异常折成 error 回执）。"""
+    try:
+        return ledger_mod.append_records(rows)
+    except Exception as e:  # noqa: BLE001
+        return {'written': 0, 'rejected': [],
+                'error': '台账写失败（%s: %s）——记账缺席不影响判定，点名待治理'
+                         % (type(e).__name__, e)}
 
 
 def run(args):

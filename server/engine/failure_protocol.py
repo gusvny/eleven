@@ -282,3 +282,155 @@ def apply_gate_blockers(failed, env_fail, case_status, blockers):
         elif st != "fail":
             failed += 1
     return failed, env_fail
+
+
+# ---------------- 结果台账（t260922-12）：采信边界与归属组合（纯函数，零 IO） ----------------
+# 台账本体=~/.sandbar/projects/sandbar/ledger/scenario-results.jsonl（append-only
+# JSONL，行=一次场景判定；唯一写者=闸 verify_lane，IO 在项目侧
+# integration/scenario_ledger.py）。本节只做两件纯事：①采信边界四条逐条判；
+# ②「台账×活基线」归属组合判定。零 IO 零进程零网络（祖先关系由调用方以
+# git merge-base --is-ancestor 判成布尔传入）。
+
+# 台账行 verdict 封闭词表。与协议三态的映射由闸做：pass→pass、fail→fail、
+# not-checked→env_fail；skip 为保留位（协议内无 skip，封闭防 typo 混入）。
+LEDGER_VERDICTS = ("pass", "fail", "env_fail", "skip")
+# 采信边界③：时效 ≤7 天（票据一字定死，不设旋钮——判据零放宽）。
+LEDGER_TRUST_MAX_AGE_DAYS = 7
+# 采信前提：verdict 必须是「检验到」的面。env_fail=没检验到（答不了锅，同基线
+# not-checked 口径，绝不入「main 红/绿」证据）；skip 同理。只有 pass（main 绿
+# 证据）/fail（main 红证据）可采信。
+_LEDGER_TRUSTABLE_VERDICTS = frozenset({"pass", "fail"})
+# 时钟漂移容差（秒）：记录来自「未来」超过容差=时钟倒挂污染，不采信。
+_LEDGER_TS_FUTURE_TOLERANCE_S = 300
+
+
+def ledger_ts_epoch(value):
+    """台账 ts（ISO8601）→ epoch 秒。非字符串/解析失败/无时区（naive）→ None
+    ——不猜时区：判不了的行不采信（fail-closed）。"""
+    import datetime as _dt
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        d = _dt.datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if d.tzinfo is None:
+        return None
+    return d.timestamp()
+
+
+def ledger_trust(record, env_fp, base_is_ancestor, conc_width, now_epoch):
+    """采信边界四条（票据③，缺一不可）+「检验到」前提，逐条给 reason：
+    0) record 本身可判（dict、verdict∈{pass,fail}——env_fail/skip=没检验到）；
+    1) 指纹相等：record.env_fp == env_fp（lane 现指纹；与基线指纹无关——
+       基线缺席/裸树起不来的依赖型场景正是靠这条独立翻案）；
+    2) 记录 commit 是当前 base 的祖先或相同（base_is_ancestor 布尔）；
+    3) 时效 ≤7 天（ts 距 now_epoch；超期不采信；来自未来超容差不采信）；
+    4) conc_width 一致（并发口径面，见 FP_EXCLUDED_KEYS 注）。
+    record 畸形（缺键/类型错/width 不可解析）→ 不采信并点名 reason——读取面
+    不可信时宁可回退实跑（无「查不到当绿」分支）。返回 {trusted, reason}。"""
+    if not isinstance(record, dict):
+        return {"trusted": False, "reason": "ledger_record_not_dict"}
+    verdict = record.get("verdict")
+    if verdict not in _LEDGER_TRUSTABLE_VERDICTS:
+        return {"trusted": False,
+                "reason": "verdict_unusable(%s)" % (verdict,)}
+    if record.get("env_fp") != env_fp:
+        return {"trusted": False, "reason": "fingerprint_mismatch"}
+    if not base_is_ancestor:
+        return {"trusted": False, "reason": "commit_not_ancestor_of_base"}
+    ts = ledger_ts_epoch(record.get("ts"))
+    if ts is None:
+        return {"trusted": False, "reason": "ts_unusable"}
+    age = float(now_epoch) - ts
+    if age > LEDGER_TRUST_MAX_AGE_DAYS * 86400:
+        return {"trusted": False,
+                "reason": "expired(>%dd)" % LEDGER_TRUST_MAX_AGE_DAYS}
+    if age < -_LEDGER_TS_FUTURE_TOLERANCE_S:
+        return {"trusted": False, "reason": "ts_in_future"}
+    w = record.get("conc_width")
+    if isinstance(w, bool) or not isinstance(w, int) or w < 1:
+        return {"trusted": False, "reason": "conc_width_unusable"}
+    if w != conc_width:
+        return {"trusted": False, "reason": "conc_width_mismatch"}
+    return {"trusted": True, "reason": "trusted"}
+
+
+def _baseline_answer(name, baseline_red, baseline_by_name, baseline_ok, fp_equal):
+    """活基线对该名有没有给出 checked 答案：red（checked fail）/green（跑过且
+    pass）/None（缺席=没跑（含定点复跑未点名）或 not-checked=没检验到，或基线
+    整体缺席/指纹不等=不可比）。基线 not-checked 不算答案（C1：答不了锅）。"""
+    if not baseline_ok or not fp_equal:
+        return None
+    if name in baseline_red:
+        return "red"
+    c = baseline_by_name.get(name)
+    if c is None:
+        return None
+    return "green" if c["status"] == "pass" else None
+
+
+def apply_affiliation_ledger(lane_cases, baseline_cases, lane_fp, baseline_fp,
+                             baseline_ok, ledger_answers):
+    """「台账×活基线」组合归属（t260922-12③）：apply_affiliation 的台账增广版，
+    返回形状一致（另带 ledger 面）。判定序（逐用例）：
+    a) violation 照拦（先于一切，继承决策表）；
+    b) 活基线 checked 结果权威（red→record / green→原方向），不改；
+    c) 基线答不了（缺席/超时/指纹不等/该名未跑到或 not-checked）且台账可信：
+       ledger=fail → record「ledger_red(既有欠账·台账)」（t260922-08 病灶的
+       机械解：基线裸树起不来的依赖型场景由台账补答「main 同红」）；
+       ledger=pass → 维持「main 绿」方向（原判定不动——拦/unknown 口径照旧）；
+    d) 台账不可信/无记录 → apply_affiliation 原行为逐字节（fail 保守拦、
+       not-checked 按 cause 表；「真红必拦不因基线缺席松绑」的松绑只来自 c 的
+       可信台账，不来自任何缺席）；
+    e) 已是 record 的判定（促治理不堵）不被台账改写：原 why 保留、不记
+       overridden（P3：台账红只进 hits_red 佐证面——归因叙事不被台账覆盖）。
+    ledger_answers: {name: ledger_trust 回执 + verdict/ts/source}。全绿用例永
+    不受牵连；返回值 ledger 面：{consulted, hits_red, hits_green, overridden}。"""
+    out = apply_affiliation(lane_cases, baseline_cases, lane_fp, baseline_fp,
+                            baseline_ok=baseline_ok)
+    fp_equal = bool(baseline_ok) and (
+        (lane_fp or {}).get("value") == (baseline_fp or {}).get("value"))
+    baseline_red = _baseline_red_set(baseline_cases or [])
+    baseline_by_name = {c["name"]: c for c in (baseline_cases or [])}
+    cases_by_name = {c["name"]: c for c in out["cases"]}
+    hits_red, hits_green, overridden = [], [], []
+    for idx, v in enumerate(out["verdicts"]):
+        name = v["name"]
+        if v["verdict"] == "pass" or v.get("violation"):
+            continue
+        la = (ledger_answers or {}).get(name) or {}
+        if not la.get("trusted"):
+            continue
+        if la.get("verdict") == "fail":
+            hits_red.append(name)
+        elif la.get("verdict") == "pass":
+            hits_green.append(name)
+        if _baseline_answer(name, baseline_red, baseline_by_name,
+                            baseline_ok, fp_equal) is not None:
+            continue  # b) 活基线已答：权威优先，台账只佐证
+        if la.get("verdict") != "fail":
+            continue  # c) 只有台账红改判；台账绿只佐证（方向与原判定一致）
+        if v["verdict"] == "record":
+            continue  # P3（仲裁 gen1）：本就 record（如 not-checked×external，
+            # 促治理不堵）不改判不记 overridden——原 why 承载 external 归因，
+            # 被 ledger_red 叙事覆盖会把诊断面引向错误方向（报错必须精确）；
+            # 判定类未变也非「改判」（与 overridden 语义自相矛盾）。台账红仍记
+            # hits_red 佐证面（上方已记），只是不动判定本体。
+        case = cases_by_name.get(name) or {}
+        out["verdicts"][idx] = {
+            "name": name, "verdict": "record",
+            "why": "ledger_red(既有欠账·台账)",
+            "ledger": {"ts": str(la.get("ts") or ""),
+                       "source": str(la.get("source") or "")},
+            "lane_status": case.get("status", ""),
+        }
+        overridden.append(name)
+    out["blockers"] = [v["name"] for v in out["verdicts"] if v["verdict"] == "block"]
+    out["records"] = [v["name"] for v in out["verdicts"] if v["verdict"] == "record"]
+    out["unknowns"] = [v["name"] for v in out["verdicts"] if v["verdict"] == "unknown"]
+    out["ledger"] = {"consulted": sorted((ledger_answers or {}).keys()),
+                     "hits_red": sorted(hits_red),
+                     "hits_green": sorted(hits_green),
+                     "overridden": sorted(overridden)}
+    return out

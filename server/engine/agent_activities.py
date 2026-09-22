@@ -5998,12 +5998,18 @@ async def run_handover_legs(handover_runs, cwd: Path) -> Dict[str, Any]:
 
 async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
                          apply_skip_pools: bool = False,
-                         handover_runs=None) -> IntegrationRunResult:
+                         handover_runs=None,
+                         ledger_source: str = "") -> IntegrationRunResult:
     """A thin shell (thinned by host order t260902): declaration reading, command
     execution and contract parsing all live in verify_lane lane=integ (one
     implementation + one parser); this function only places the order and translates
     the tool's JSON into an IntegrationRunResult (the field stance is unchanged:
-    ran/passed/failed/details[{name,cmd,exit,output_tail}], invisible to arbitrate)."""
+    ran/passed/failed/details[{name,cmd,exit,output_tail}], invisible to arbitrate).
+
+    ledger_source（t260922-12①⑦）：结果台账的记账来源，经 env
+    SANDBAR_INTEG_LEDGER_SOURCE 注入闸（闸=台账唯一写者）。集测段传 lane:<票>、
+    巡检段传 inspection；空=不注入（老载荷/回放形态，闸侧回落 SANDBAR_TICKET_ID，
+    再缺=不写账响亮点名——宁可缺行不可脏行）。"""
     # The lane's own toolchain copy wins (ticket t260904-18): the integ lane treats
     # **the lane as the thing under test**, so loading the lane's declaration must use
     # the lane's own toolchain — when the worker-side (main tree) copy lags behind the
@@ -6021,12 +6027,17 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     # duration and every query timed out at 8s (diagnostic note
     # notes/diag-query-starvation.md).
     # Fully async: create_subprocess + wait_for; on timeout, kill first, then report.
+    # t260922-12：台账记账来源经 env 注入闸（缺省不注入=老载荷零改动）。
+    _sub_env = None
+    if ledger_source:
+        _sub_env = dict(os.environ, SANDBAR_INTEG_LEDGER_SOURCE=str(ledger_source))
     p = await asyncio.create_subprocess_exec(
         "python3", admin, "call", "verify_lane",
         # t260913-03：载荷面薄壳只下单——是否按泳道声明排除池由调用方（每票段）显式
         # 置位，本层只透传；缺省 False=巡检/老回放形态恒全跑（验收 E 机械锁）
         json.dumps(shared.integ_verify_payload(wt, write_set, apply_skip_pools)),
-        cwd=str(wt), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        cwd=str(wt), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        env=_sub_env)
     try:
         p_out_b, p_err_b = await asyncio.wait_for(
             p.communicate(), timeout=BATCH_TIMEOUT_SEC + 300)
@@ -6096,6 +6107,30 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
                          out.blockers or "无", out.baseline_ref or "n/a")
     activity.logger.info("[%s] 场景汇总：ran=%s pass=%s fail=%s env_fail=%s",
                          ticket_id, out.ran, out.passed, out.failed, out.env_fail)
+    # ---- t260922-12 结果台账回执面：单列 details 行上票面（不进主口径，闸判定
+    # 已在闸侧机械完成）——命中红=既有欠账（诚实计数，不拦≠放行）；命中绿=佐证；
+    # 歧义/降级/写账问题全部点名，仲裁与运维可见。----
+    _led = res.get("ledger") or {}
+    if _led:
+        _led_tail = ("台账：available=%s written=%s 命中红=%s 命中绿=%s 歧义=%s "
+                     "基线免整跑=%s 基线定点=%s 基线墙钟=%s%s%s%s"
+                     % (_led.get("available"), _led.get("written"),
+                        ",".join(_led.get("hits_red") or []) or "无",
+                        ",".join(_led.get("hits_green") or []) or "无",
+                        ",".join(_led.get("ambiguous") or []) or "无",
+                        _led.get("baseline_skipped_by_ledger"),
+                        ",".join(_led.get("baseline_targeted") or []) or "无",
+                        _led.get("baseline_wall_s"),
+                        ("｜降级=" + str(_led.get("degraded"))
+                         if _led.get("degraded") else ""),
+                        ("｜写账错误=" + str(_led.get("error"))
+                         if _led.get("error") else ""),
+                        ("｜未写因=" + str(_led.get("write_skipped"))
+                         if _led.get("write_skipped") else "")))
+        out.details.append({"name": "__ledger__", "cmd": "",
+                            "exit": 0 if _led.get("available") else 1,
+                            "output_tail": _led_tail})
+        activity.logger.info("[%s] %s", ticket_id, _led_tail)
     # ---- t260917-08 移交命令：worker 执行面承接 ----
     # 前序 agent 段沙箱受限期间移交的验证命令，本段逐条代跑（整单执行器
     # run_handover_legs 单独成函数：离线桩/场景可直调真消费路径）。红线④的机械面：
@@ -6140,7 +6175,9 @@ async def _run_integration_tests_body(args: IntegrationRunArgs) -> IntegrationRu
                                 write_set=list(getattr(args, "write_set", None) or []),
                                 apply_skip_pools=bool(getattr(args, "apply_skip_pools", False)),
                                 # t260917-08：移交命令随派单下发（缺省空=老载荷/巡检零改动）
-                                handover_runs=list(getattr(args, "handover_runs", None) or []))
+                                handover_runs=list(getattr(args, "handover_runs", None) or []),
+                                # t260922-12：集测段记账来源=lane:<票>（台账单写者=闸）
+                                ledger_source="lane:%s" % args.ticket_id)
 
 
 @activity.defn
@@ -6361,7 +6398,9 @@ async def run_inspection_suite(args: Dict[str, Any]) -> Dict[str, Any]:
     wt = _abs_repo(args.get("worktree"))
     base_ref = str(args.get("base_ref") or "")
     started = time.monotonic()
-    result = await _run_scenarios(wt, ticket_id)
+    # t260922-12：巡检段记账来源=inspection（巡检泳道基点=main tip——⑦「main 的
+    # tip 永远有记录」的日常供给者；台账唯一写者=闸，来源仅作 env 注入）
+    result = await _run_scenarios(wt, ticket_id, ledger_source="inspection")
     wall = round(time.monotonic() - started, 1)
     receipt: Dict[str, Any] = {
         "ticket_id": ticket_id, "worktree": str(wt), "base_ref": base_ref,

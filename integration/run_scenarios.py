@@ -1549,6 +1549,28 @@ SCENARIOS = [
      "dsh 路径钉/镜像的回退剧本机械验证（t260921-14 交付④「回退是硬要求」，灰盒 L2，ro 离线秒级）：①A/B/A——无声明基线 B→加 paths.dsh_bin 行（钉生效前提同子用例自证）→删该行（行级手术=「配置改回一行」机械形态）：prepared cmd 与 B 逐元素等值+face 回 default（引擎层回退逐字回裸 dsh，不残留钉态尾巴）；②注释形态（# dsh_bin: … 先活后注释）=声明缺席语义同样逐字回 B（回退不留死键红）；③镜像回退=SANDBAR_AGENT_IMAGE 指回旧 tag 立即生效：face image_source=env、tag 提取版本=0.1.1-rc.2（无 docker 调用——旧镜像不删不覆盖即可指回）；④回退剧本文档守卫（review C4）：ROLLBACK.md 在场且含旧 tag 字面、dsh_bin: 回退指令、SANDBAR_AGENT_IMAGE 旋钮、宿主全局回退命令锚（事前快照 dsh-011-backup 或按版重装 @deepseek-ai/dsh）——回退面文档腐烂=红。intent 分工：镜像三处同步锁（DEFAULT_AGENT_IMAGE↔Dockerfile ARG↔build 脚本缺省）归既有 L1（test_镜像版本三处同步自动跟进），本条守回退操作行为面+剧本可读面不同对象。实现落地前红属预期（TDD：①A 态半边与④随 implement Step7 落地转绿，基线/回退半边锚现状语义应先行绿），arbitrate/merge 期必须绿；引擎模块不可导入=ENV_FAIL exit 2",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260921-14/sc_t260921_14_rollback.py", "ro"),
 
+    # ---- t260922-12: 集成门结果台账（按提交记账+查询+定点复跑，治「门永远红/反复整跑」）----
+    # integration 设计段产物（L2/L3 灰盒，真缝 admin.py call verify_lane × 真 git 临时仓 ×
+    # 桩执行器，秒级零 docker 零 console）。四条 intent 互不重叠：①查询 CLI 无假绿契约
+    # ②正例面（欠账不拦+台账命中跳基线+主账 append-only 全键行）③拦截面（记账绿×泳道红
+    # 仍拦+无记录回退实跑+基线定点复跑+脏树不写账）④基线依赖软链四态行为面。
+    # 与 developer L1（test_t260922_12_* 四电池）分工：彼测模块级行为/env 注入形状/
+    # 纯函数真值表（白盒随实现），本族测真缝组装行为、文件级不变式与用户可感知判定
+    # （黑盒行为面：台账文件内容、桩执行日志、green/blockers/summary 公开回执）。
+    # 实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
+    ("t260922-12-ledger-query-no-false-green",
+     "台账查询 CLI 的无假绿契约（t260922-12 验收②对抗面，灰盒 L2/L3，临时台账目录+子进程 CLI 黑盒）：一条命令答「commit X 上场景 Y 红不红」且输出含判定/来源/指纹/时间要素；命中→显式判定面不误报无记录；无记录→显式「无记录」且输出绝不携带 pass 字样（「查不到当绿」=票据红线①的机械化身）；主账不可读（路径被占成目录）→不静默：stderr 点名在场且绝不凭空给 verdict；主账半行/坏 JSON 畸形行在场→好行照常可读、坏行绝不捏造判定（畸形行不可回 pass）；commit 属键——同场景异 commit 必须「无记录」（键语义不放宽）；--ledger 直连+任意 cwd 与 SANDBAR_SCENARIO_LEDGER_DIR 目录覆盖缝独立可用（闸写账同缝）。与 developer L1（scenario_ledger 格式/拒写/保留/并发模块电池）intent 不同面：彼锁模块级行为与 CLI 词表对账，本条锁黑盒 CLI 的消费端无假绿语义（「台账变假绿机」的主防线）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260922-12/sc_ledger_query_no_false_green.py", "ro"),
+    ("t260922-12-gate-ledger-debt-not-blocked",
+     "门先查账后实跑·正例面（t260922-12 验收③正例/⑥正例/①⑦文件面，灰盒 L3，真缝 admin.py call verify_lane × 真 git 临时仓 × 桩执行器，夹具内嵌 scenario_ledger 库=闸按泳道树文件位装载的同构体）：R1 泳道红×活基线同红→既有欠账记录不拦（green=true、blockers 空、summary 诚实计数 fail=1 不洗数），主账落 lane:/baseline 两源行且行行十字段全键（无脏行），桩日志 ref=HEAD 证明基线相真执行；R2 同输入再跑→台账命中：基线相零执行（桩基线执行数不增+基线源行零新增）、a 仍由台账判欠账（不靠重跑）、主账字节前缀保持且增长（append-only）、新增行仍全良构、worktree 零残留。断言锚=台账文件内容、桩执行日志、green/blockers/summary 公开回执，不锚闸回执内部新增键。与 developer L1（gate_ledger 白盒电池：env 形状/回执内部键/写失败降级）不同层：本条锁真缝组装行为与文件级不变式。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；git 缺席=ENV_FAIL exit 2",
+     "python3 integration/t260922-12/sc_gate_ledger_debt_not_blocked.py", "ro"),
+    ("t260922-12-gate-ledger-regression-blocked",
+     "门先查账后实跑·拦截面（t260922-12 验收③反例1/反例2+④⑥，灰盒 L3，同真缝夹具）：种子轮落台账 a=fail、b=pass 后——RB 反例1（「台账不变假绿机」的反向锁）：泳道脏改 b 红→b 仍拦（blockers 含 b 不含 a——台账绿不改判不松绑，拦来自保守原判方向）且基线相零执行（两红皆有可信台账答案：a=fail→欠账记录、b=pass→佐证 main 绿方向，不靠重跑）、脏树轮 lane 源行零新增（脏树不写账）、主账字节逐位不变；RC 反例2+④：泳道再添从没跑过的 z 红→基线必须真跑（无记录回退实跑不得当绿）且只跑 z（桩基线执行名单恰=[case-z]+SANDBAR_SCENARIO_ONLY 传导可见——门侧歧义名单注入的用户可感知形态，不整跑）、z=基线绿→拦、a 照旧欠账不拦、z 落 baseline 源行而 a 零新增。与 developer L1（only_scenarios 执行器电池：fail-closed/expected 不变式）intent 不同面：彼锁执行器入口自身，本条锁门侧「歧义名单注入基线」的组装行为。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；git 缺席=ENV_FAIL exit 2",
+     "python3 integration/t260922-12/sc_gate_ledger_regression_blocked.py", "ro"),
+    ("t260922-12-gate-baseline-deps-links",
+     "基线树依赖软链四态行为面（t260922-12 验收⑤，灰盒 L3，真缝+真 worktree，旋钮显式置位不依赖缺省——缺省值由取证 A'/B' 实录裁定场景不钉）：SANDBAR_GATE_BASELINE_DEPS=1 时 src 在场→软链建成（桩在基线相实测 app/node_modules islink）、dst 已在（仓内已跟踪真目录）→绝不覆盖（.venv 仍为真目录）、src 缺席→跳过不致命（ui-check playwright-core 与 temporal 两路径 absent）；=0 时一条不建（旋钮真的关得掉，若实现未接旋钮此轮红点名）；两轮基线跑均正常收口、台账写账不受软链影响、worktree 零残留。软链只读语义由「src 指向主仓共享目录」的夹具同构构造保证。与 developer L1（软链四态白盒单测）intent 不同层：彼测建链函数本身，本条锁基线执行相里依赖真实可见——「回退路线必须真能跑」的物理前提。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；git 缺席=ENV_FAIL exit 2",
+     "python3 integration/t260922-12/sc_gate_baseline_deps_links.py", "ro"),
+
 ]
 
 CMD_TIMEOUT = 900
@@ -1831,6 +1853,20 @@ def parse_exclude_pools(raw):
         else:
             bad.append(tok)
     return names, bad
+
+
+def parse_only_scenarios(raw):
+    """点名串解析（t260922-12 ④定点复跑）→ 名单（逗号切分+strip+去空+去重保序）。
+
+    解析层纯面、不做注册表校验：fail-closed 判红单点在 main()——名单含不在册
+    条目时**一条都不跑**（与 --reprobe 同族语义：点名错=调用方 bug，绝不静默
+    跑剩下的）。缺省（raw 空）= 空名单 = 全量跑，主路径零分支。"""
+    names = []
+    for tok in str(raw or "").split(","):
+        tok = tok.strip()
+        if tok and tok not in names:
+            names.append(tok)
+    return names
 
 
 def _cmd_asset_tokens(cmd):
@@ -2165,7 +2201,7 @@ def _batch_signal_teardown(signum, frame):
     os._exit(130)
 
 
-def main(exclude_pools=None) -> int:
+def main(exclude_pools=None, only_scenarios=None) -> int:
     """Run the registry as pools (host-ordered t260902 pool split): an entry
     may carry an optional fourth element — None/absent = the "main" pool;
     "ro"/any other string = a named pool; "exclusive" = runs alone before all
@@ -2174,6 +2210,13 @@ def main(exclude_pools=None) -> int:
     Pools run in parallel; within a pool it is strictly serial (order and
     reproducibility). Cross-pool ordering may interleave —
     the engine/tools parse line by line and do not care about order.
+
+    只跑点名（t260922-12 ④定点复跑）：only_scenarios（缺省读 env
+    SANDBAR_SCENARIO_ONLY，与排除旋钮同注入模式，verify.yaml cmd 零改动）非空时
+    本轮只跑点名条目——名单含不在册条目=一条都不跑 rc=2（fail-closed，reprobe
+    同族）；expected/ran 口径=本轮点名在册（未被点名的条目不在本轮在册，不冒充
+    已跑）；点名与池排除可叠加（点名∩非排除池才跑）。场景判定本身与池排除口径
+    零改动。
 
     Three-state exit-code contract (t260904-12, final ruling section 7.3: no
     SKIP inside the gate): scenario exit 0=PASS / 1=FAIL (product red) /
@@ -2217,8 +2260,36 @@ def main(exclude_pools=None) -> int:
               flush=True)
         for e in excluded_entries:
             print("  跳过 [%s]（池=%s）" % (e[0], pool_of(e)), flush=True)
+    # ---- t260922-12 只跑点名（缺省零分支：无 env/CLI 时 only=[]，逐字节同改前）----
+    only_names = parse_only_scenarios(
+        os.environ.get("SANDBAR_SCENARIO_ONLY")
+        if only_scenarios is None else only_scenarios)
+    registry = SCENARIOS
+    if only_names:
+        by_name = {e[0]: e for e in SCENARIOS}
+        missing_only = [n for n in only_names if n not in by_name]
+        if missing_only:
+            # fail-closed（reprobe 同族）：点名错=调用方 bug——一条不跑、零副作用，
+            # 在任何起台/卫生钩子之前返回（不烧 docker 面）。
+            print("FAIL [__executor__] 点名名单含不在册条目：%s——一条都未跑"
+                  "（--only fail-closed，t260922-12）" % ",".join(missing_only),
+                  flush=True)
+            print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)", flush=True)
+            print("ONLY_SUMMARY %s" % json.dumps(
+                {"ran": 0, "missing": missing_only,
+                 "error": "点名名单含不在册条目"}, ensure_ascii=False), flush=True)
+            return 2
+        registry = [by_name[n] for n in only_names
+                    if not (excluded and pool_of(by_name[n]) in excluded)]
+        _skipped_only = len(only_names) - len(registry)
+        print("本轮只跑点名 %d 条（点名=%s%s）"
+              % (len(registry), ",".join(only_names),
+                 ("；其中 %d 条属被排除池未跑" % _skipped_only) if _skipped_only else ""),
+              flush=True)
+        for e in registry:
+            print("  点名 [%s]（池=%s）" % (e[0], pool_of(e)), flush=True)
     pools, exclusives = {}, []
-    for e in SCENARIOS:
+    for e in registry:
         if excluded and pool_of(e) in excluded:
             continue
         opt = e[3] if len(e) > 3 else None
@@ -2370,7 +2441,8 @@ def main(exclude_pools=None) -> int:
     wall = time.time() - t0
     # t260911 仲裁③：ran==在册数是唯一机械不变式（汇总自洽挡不住条目级丢失）
     # t260913-03：在册数=本轮在册（扣除被排除池条目——不在本轮在册，不冒充已跑）
-    expected = len(SCENARIOS) - len(excluded_entries)
+    # t260922-12：点名轮的在册=点名∩非排除池（未被点名的条目不在本轮在册）
+    expected = len(registry) if only_names else (len(SCENARIOS) - len(excluded_entries))
     complete = (ran == expected) and executor_error is None
     if ran != expected:
         print("FAIL [__executor__] 清单残缺：ran=%d != 在册 %d（条目静默丢失面，"
@@ -2419,6 +2491,8 @@ def main(exclude_pools=None) -> int:
         if excluded:
             _summary["excluded_pools"] = list(excluded)
             _summary["excluded_count"] = len(excluded_entries)
+        if only_names:
+            _summary["only_scenarios"] = list(only_names)
         print("INTEG_SUMMARY " + json.dumps(_summary, ensure_ascii=False), flush=True)
     except Exception as _ex:   # 汇总行失败不改场景红绿（观测面），但大声留痕
         print("INTEG_SUMMARY_ERROR %r" % _ex, flush=True)
@@ -2452,6 +2526,8 @@ def main(exclude_pools=None) -> int:
         if excluded:
             _report["excluded_pools"] = list(excluded)
             _report["excluded_count"] = len(excluded_entries)
+        if only_names:
+            _report["only_scenarios"] = list(only_names)
         rp.write_text(_json.dumps(_report, ensure_ascii=False, indent=1), encoding="utf-8")
         print("报告落档：%s" % rp, flush=True)
     except OSError:
@@ -2556,10 +2632,17 @@ def _cli(argv):
         return reprobe_main([x for x in raw.split(",") if x.strip()])
     if _acquire_run_lock() == -1:
         return 2
+    # --only（t260922-12 ④）：只跑点名条目；与 --exclude-pools 可叠加。None=未
+    # 指定（main 内读 env 缺省面）；空串=显式空名单（=全量跑，与未指定同效）。
+    only_raw = None
+    if "--only" in argv:
+        i = argv.index("--only")
+        only_raw = argv[i + 1] if i + 1 < len(argv) else ""
     if "--exclude-pools" in argv:
         i = argv.index("--exclude-pools")
-        return main(exclude_pools=argv[i + 1] if i + 1 < len(argv) else "")
-    return main()
+        return main(exclude_pools=argv[i + 1] if i + 1 < len(argv) else "",
+                    only_scenarios=only_raw)
+    return main(only_scenarios=only_raw)
 
 
 if __name__ == "__main__":
