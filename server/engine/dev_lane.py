@@ -42,7 +42,12 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
-    from base import TicketCrossProjectMixin, TicketPauseMixin
+    from base import (
+        TICKET_UPDATE_RECEIPT_PATCH_ID,
+        TicketCrossProjectMixin,
+        TicketPauseMixin,
+        _update_echo,
+    )
     import authz_gates
     import path_gates  # t260915-01 ②：闸拒绝结构化明细的构造/校形（纯函数零 IO）
     # t260915-05：模板拓扑导出面（纯数据零 IO；mock ④「引擎按模板导出 stage 图」，
@@ -3270,20 +3275,66 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
     # ---------- update: status maintenance (same name and payload as base.py, client.py serves both) ----------
     @workflow.update
     async def update_status(self, status: str, note: str, pending_add: str,
-                            book_path: Optional[str]) -> Dict[str, Any]:
-        if status:
-            if status not in TICKET_STATUSES:
+                            book_path: Optional[str], who: str = "") -> Dict[str, Any]:
+        """工单状态维护（t260922-09 两段式）：前置校验区 → 写入区。
+
+        前置校验区：全部拒绝判定在任何 meta 写入之前完成——拒绝=业务字段零副作用
+        （status/stage_state/updated/pending/book_path/cross_project_uses 不动，请求
+        note 原文不进 log）。被拒留痕（新历史）=refused 结构化条目（at/who/want/
+        kind/why）+ _log 拒绝行（原因+who+时间），与 _cross_project_gate 拒收家族
+        双落同构；不受信回显（status/who）过 _update_echo 有界，原文不落盘。
+        回执一致性：ok:true ⟺ 副作用已落（含 _touch()/updated 刷新）；ok:false ⟺
+        零副作用。
+
+        重放安全（t260922-09 review C5）：update handler 返回载荷入历史且重放比对，
+        回执形状变更由 workflow.patched(TICKET_UPDATE_RECEIPT_PATCH_ID) 两分支承载
+        ——旧历史（patch 前）逐字复刻旧两键回执且零留痕；新历史四键+留痕。accept
+        回执键集不变，无重放面。
+
+        who：操作人记名（可选；带默认值=老四位置参数 wire 兼容、老历史重放安全）。
+        今天 wire 侧尚无透传，缺省落 refused 记 '(未记名)'（t260922-09 §7-1 接线债，
+        接线票须激活 UT 的 N5 真名分支）。
+
+        与 base.py 同名 handler 逐行同形（家族拷贝惯例）；真值表 UT 对两个类各钉一遍。
+        """
+        receipt_v2 = workflow.patched(TICKET_UPDATE_RECEIPT_PATCH_ID)
+        if status and status not in TICKET_STATUSES:
+            if not receipt_v2:
+                # 旧历史重放分支：旧两键回执逐字复刻（旧文案含不截断回显），零留痕。
                 return {"ok": False, "error": "非法 status: %r" % status}
+            why = "非法 status: %s" % _update_echo(repr(status))
+            w = _update_echo(who)
+            at = self._now_iso()
+            self.refused.append({"at": at, "who": w or "(未记名)", "want": "update",
+                                 "kind": "illegal_status", "why": why})
+            self._log("update 被拒（非法 status）：%s（who=%s，at=%s）——未落任何改动"
+                      % (why, w or "(未记名)", at))
+            return {"ok": False, "kind": "illegal_status", "reason": why, "error": why}
+        new_status = status or str(self.meta.get("status") or "")
+        if self.meta.get("stage_state") == "blocked" \
+                and new_status not in ("dispatched", "settled", "rework"):
+            if not receipt_v2:
+                # 旧历史重放分支：旧两键回执逐字复刻（旧码写入后的 meta['status']
+                # 恒等于此处 new_status，前置判定全输入域等价），零留痕。
+                return {"ok": False, "error": "blocked 只允许 status∈{dispatched,settled,rework}（A3.5），当前 %s"
+                        % new_status}
+            why = ("blocked 只允许 status∈{dispatched,settled,rework}（A3.5），当前 %s"
+                   % _update_echo(new_status))
+            w = _update_echo(who)
+            at = self._now_iso()
+            self.refused.append({"at": at, "who": w or "(未记名)", "want": "update",
+                                 "kind": "blocked_status_guard", "why": why})
+            self._log("update 被拒（A3.5）：%s（who=%s，at=%s）——未落任何改动"
+                      % (why, w or "(未记名)", at))
+            return {"ok": False, "kind": "blocked_status_guard", "reason": why, "error": why}
+        # ——校验全过，才进写入区（与旧代码逐行同序同语义；回执键集不动=零重放面）——
+        if status:
             self.meta["status"] = status
             if status == "settled" and self.meta.get("stage_state") == "running":
                 self.meta["stage_state"] = "awaiting"
         if self.meta.get("status") == "closed" and self.meta.get("stage_state") == "awaiting-human":
             self.meta["stage_state"] = "awaiting"
             note = (note + "；" if note else "") + "closed 清 awaiting-human（A3.3）"
-        if self.meta.get("stage_state") == "blocked" \
-                and self.meta["status"] not in ("dispatched", "settled", "rework"):
-            return {"ok": False, "error": "blocked 只允许 status∈{dispatched,settled,rework}（A3.5），当前 %s"
-                    % self.meta["status"]}
         if book_path is not None:
             self.meta["book_path"] = book_path
         if pending_add:

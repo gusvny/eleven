@@ -1351,6 +1351,22 @@ SCENARIOS = [
     ("t260922-03-dsh-probe-live-cred-env",
      "探针 live 档失败归因三态（t260922-03 验收③，灰盒 L3，dsh 桩秒级零网络）：①凭据缺失子用例：桩自报 MISSING_CREDENTIAL（路由 stub-route-alpha、补救变量 STUB_API_KEY——即 0.1.5 实测报错形状的路由/变量位）后挂住不退 → 探针必须秒级早停收割（墙钟有上界，绝不复现「静默空等到会话超时 900s」的挂死形状）、ENV 红退出码 2、台账点名桩自报的路由与补救变量、零 traceback、收割后无桩孤儿进程（spawn 资源回收全终态）；②产品红保全子用例：桩退出码 3 且日志无 MISSING_CREDENTIAL 字面 → 探针维持拦停级 FAIL（退出码 1、FAIL 台账行在场）且零 ENV 行——「环境红不吞产品红、产品红不冒充环境红」双向锁（lib_env 三态契约 + RUNBOOK_GATE「环境缺=exit 2 补环境重跑」承诺的探针侧兑现；余失败语义零改动=验收④不放松的失败面）。判据不锚守望实现（轮询周期/字面量提取方式/文案措辞均可变），只锚用户可感知终态（退出码+点名字面+墙钟上界 30s+回收；守望若退化到只靠会话超时兜底，墙钟判据即红）。intent 分工：本条守 live 会话失败的归因面；t260916-24-dsh-probe-selftest 守断言逻辑自检、t260922-03-dsh-probe-live-green 守绿档对账面（三面不互替）。修复已落本工单树，语义经直驱等价实证（探针 live 档直跑面），arbitrate/merge 期必须保持绿（回归锁）；前置缺席=ENV_FAIL exit 2 点名",
      "python3 integration/t260922-03/sc_t260922_03_probe_live_cred_env.py", "ro"),
+    # ---- t260922-09: A3.5 守卫「先写后校验」修复——update 写面被拒审计面+受理/重放面 ----
+    # 两场景两面（被拒审计 / 受理+重放），共享夹具 lib_t26092209.py（无 sc_ 前缀不登记；
+    # 离线桩驱动真引擎类：t260901-23/_stub_temporalio + 引擎 UT _mk_wf 手装壳法，镜
+    # t260919-02/t260921-03 桩法）。与 developer L1（server/engine/tests/
+    # test_t260922_09_update_prevalidate.py 白盒真值表）intent 分工：L1 钉 handler 逻辑
+    # 两侧可随实现重构；本组灰盒钉用户可感知契约面（快照查询面可见的零副作用+留痕可查、
+    # wire 四位置实参形状兼容、旧历史重放两键逐字、双类 parity——client.py 按名分发
+    # 服务两类的漂移即用户可感知不一致）。重放面的存在理由=vendored temporalio 1.18.2
+    # 源码实证（do_update job 重执行+完成载荷匹配，不匹配=Nondeterminism=票僵死），
+    # 详见场景二 docstring。
+    ("t260922-09-update-reject-audit-face",
+     "工单 update 写面被拒审计面契约（t260922-09 验收①②③之被拒半边，灰盒 L2 离线桩驱动真引擎类，镜 t260921-03 桩法）：宿主 260922 实案（blocked 残渣票 update closed 被拒却已改状态、无留痕、回执说失败——四票 terminate 收尾）的直接回归锁。①结构化拒收回执：ok=false 且 kind/reason 在（不再一句 error 字符串——宿主口径原话）、error 键保留兼容旧消费者；②拒绝=业务字段零副作用（status/stage_state/pending/updated/book_path/cross_project_uses 经快照查询面逐字段全等——判查询面不翻引擎内部）；③被拒必留痕可查：快照 refused 恰增 1 条（who 非空记名位/at 时间位/want=update/kind 点名守卫族/why 含 A3.5 语义）、票面 log 恰增 1 行拒绝行（含原因词面+操作人，不含请求 note 原文——请求载荷不因被拒进事件面）；④第二出集值 verified 同形（防只钉 closed 的窄测）；⑤畸形面：非法 status→illegal 族拒收+零副作用+留痕，10 万字符畸形 status→留痕有界（数量级上界 1024/2048，灰盒钉「有界」承诺不复制 developer 验收常数）且快照查询面全文无畸形原文；⑥wire 形状兼容：恰按线上四位置实参（无 who 位）调用不炸、留痕 who 位非空显式记名（未记名也是名，不是空串）；⑦双类 parity：同一拒绝输入在 DevLaneWorkflow/TicketWorkflowBase 上回执键集与 refused 条目键集一致（同名 update 透明服务，漂移即用户可感知不一致）。intent 分工：受理与重放面归 t260922-09-update-accept-replay-face（两面不互替）；t260915-12 跨项目闸守项目归属维（update 面本就不盖章），本条只钉拒绝不触碰 cross_project_uses 的零副作用半边；t260910-06 守 CLI 包装/审计面，本条不碰 CLI 层；developer L1 真值表白盒钉 handler 两侧，本条钉查询面契约。纯离线无 ENV 子用例；引擎模块离线加载失败=产品红（被测对象即引擎模块）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260922-09/sc_t26092209_update_reject_audit_face.py", "ro"),
+    ("t260922-09-update-accept-replay-face",
+     "工单 update 写面受理真落与旧历史重放契约（t260922-09 验收③④+重放纪律，灰盒 L2 离线桩驱动真引擎类）：①受理正侧一致性——blocked 票合法 update ok:true 且副作用真的落了（status 快照面可查、updated 刷新、请求 note 原文进票面 log、回执带 status/log_len 可判定键）；②僵态恢复路径原样——status=closed×stage_state=blocked 僵态票（今日实案后遗形，旧引擎常规入口清不动只能 terminate）update dispatched 走得通（允许集三分支清出口一个不动=要求 4）；③旧历史重放兼容——patched=False 语义下同一拒绝输入回执恰 {'ok','error'} 两键（keys 相等断言，多一键=旧存活票重放即 Nondeterminism=产品红）、error 文案与新分支等值、refused/log/业务字段零变化（重放逐字节对上，旧拒绝不追溯补落——存在理由=temporalio 1.18.2 源码实证 do_update job 重执行+完成载荷匹配）；④受理面与重放旗无关——合法 update 两旗下回执键集一致且 ok:true（accept 路径零重放面承诺的可感知兑现）；⑤双类 parity（受理正例两类回执键集/status 落点一致）。intent 分工：被拒审计面归 t260922-09-update-reject-audit-face（两面不互替）；developer L1 真值表白盒钉 patched 常数推导断言（211/291/562），本条灰盒只钉用户可感知终态（两键恰好/两旗同形/僵态恢复）；t260908-01/t260914-04 守 pause/rework 旅程（signal 面）、t260912-03/t260913-01 守授权/信号送达（sign 面），不同写面不互替。纯离线无 ENV 子用例；引擎模块离线加载失败=产品红。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260922-09/sc_t26092209_update_accept_replay_face.py", "ro"),
     # ---- t260922-07: 判据精度收口——0.1.5 侧车 session.lock（探针+引擎两诊断面）+ 探针越界位三根外 ----
     # 三场景三面（探针台账分流 / 引擎两面收窄+名单同源 / 越界目标位三根外），全部秒级
     # 离线；探针/引擎改动落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
