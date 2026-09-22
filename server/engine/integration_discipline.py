@@ -7,14 +7,22 @@
   判据=同一张 FORBIDDEN_ENTRIES。
 
 判「跑」不判「读」（票面验收③防误伤）：只有执行动词（python/node/bash/sh/pytest/…、
-直接执行、-m 模块形）之后的实参 basename 命中入口表才算执行；grep/cat/sed/ls 等
-只读动词的参数提及、prompt 回显帧不算违规。
+直接执行、-m 模块形）之后的实参 basename 命中入口表才算执行；-m 形另有静态工具
+白名单豁免（t260922-08，语义见下方边界清单）；grep/cat/sed/ls 等只读动词的参数
+提及、prompt 回显帧不算违规。
 
 执法面边界（口径诚实，落字防漂移；review K1/C3 意见收口）：
 - `bash/sh -c "<串>"`：引号内串按同规则**递归**判（K1 推荐路线）——
   `bash -c 'python3 integration/run_scenarios.py'` 判红；
   `bash -c 'ls integration/baselines'` 不判（递归后只读动词照样豁免）；
 - `python3 -c "<代码>"`：内联代码不解析（导入式间接执行不可静态判定）——已知局限；
+- `-m` 模块形（t260922-08）：模块名命中入口表（run_scenarios/sc_* 尾名）→ 判红
+  （`-m run_scenarios`、`-m pytest <入口文件>`——pytest 收集即 import 执行，真跑）；
+  `-m <STATIC_TOOL_MODULES 成员>`（py_compile/compileall/ast/tokenize/dis）→ 其后
+  实参是被读/编译而非执行，本段剩余实参不判（静态自检合法；此前已记命中保留）；
+  连写形（`-mpy_compile`，CPython 接受无空格连写）仅对静态白名单成员同样豁免；
+  连写执行器模块名（`python3 -mrun_scenarios` 等）走泛化 flag 跳过分支**不判红**
+  ——既有已知漏判（与 -c 内联、xargs 同级），非本票引入、本票不收口；
 - `pytest <目录形>`（如 `pytest integration/`、`pytest integration/tests`）：不判——
   pytest 默认只收集 test_ 前缀文件，目录形实参 basename 不命中入口表
   （integration/tests 是集成库自身单测面）；pytest 仅在实参 basename 命中入口表时判
@@ -49,6 +57,13 @@ EXEC_VERBS = frozenset({
 })
 # shell 类动词：其 -c 实参=嵌套命令串，按同规则递归（K1）。
 SHELL_VERBS = frozenset({"bash", "sh", "zsh", "dash"})
+# -m 静态工具模块（t260922-08）：模块名零执行语义，其后实参是被读/编译/反汇编
+# 而非被执行——`-m <成员>` 之后本段剩余实参不再参与入口表匹配（误伤收窄）。
+# 只收静态分析面；执行器（pytest/unittest/timeit/cProfile/pdb/runpy…）禁入——
+# 扩展本表须同批带 UT + docstring 落字（声明=执法）。
+STATIC_TOOL_MODULES = frozenset({
+    "py_compile", "compileall", "ast", "tokenize", "dis",
+})
 # 透明包装 token（跳过）：其后直至程序 token 之前的 flag/数字/VAR=… 一并跳过。
 WRAPPER_TOKENS = frozenset({
     "sudo", "nohup", "env", "timeout", "time", "nice", "stdbuf", "exec",
@@ -143,13 +158,26 @@ def _scan_tokens(tokens, segment, command, depth):
             hits.extend(scan_bash_command(tokens[k + 1], depth + 1))
             k += 2
             continue
-        # -m 模块形（integration.run_scenarios / …sc_x）。
+        # -m 模块形（integration.run_scenarios / …sc_x）：模块名命中入口表先判
+        # （真跑，t260922-08 维持）；静态工具成员豁免本段剩余实参（被读/编译非执行）。
         if arg == "-m" and k + 1 < n:
-            entry = _match_entry_module(tokens[k + 1])
+            module = tokens[k + 1]
+            entry = _match_entry_module(module)
             if entry:
                 hits.append(_hit(command, entry, segment))
+                k += 2
+                continue
+            if module in STATIC_TOOL_MODULES:
+                # t260922-08：py_compile/… 的文件实参是被编译而非被执行，不再匹配
+                # 入口表（此前已记的命中保留，豁免不追溯）。
+                break
             k += 2
             continue
+        # -m<模块> 连写形（python -mtimeit 同族，CPython 接受无空格连写）：
+        # 仅静态白名单成员同样豁免；连写执行器模块名（-mrun_scenarios 等）走下方
+        # 泛化 flag 跳过——既有已知漏判，docstring 边界清单已落字（t260922-08）。
+        if arg.startswith("-m") and len(arg) > 2 and arg[2:] in STATIC_TOOL_MODULES:
+            break
         if arg.startswith("-"):
             k += 1
             continue
@@ -192,6 +220,7 @@ def prompt_clause():
         "会被机械扫描，执行过集成入口=段结果红+票面点名该命令）。"
         "【单测可跑】受影响面 pytest（指定文件/--lf，勿全量）、"
         "python3 integration/lint_tests.py（秒级静态检查）、"
+        "python3 -m py_compile <文件>（静态语法自检，t260922-08）、"
         "只读侦察（read/grep/cat/sed/ls/git log/diff）——"
         "读集成代码/文档做诊断合法，不算违规；"
         "【集成禁跑】不得在本段执行集成入口（点名）：" + entries + "——"
