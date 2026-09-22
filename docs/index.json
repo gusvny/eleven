@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-20T09:25:00+08:00",
+  "generated_at": "2026-09-22T17:40:56+08:00",
   "total": 15,
   "categories": [
     "design",
@@ -121,11 +121,12 @@
         "归属判定",
         "集成闸",
         "协议",
+        "结果台账",
         "mode: 依赖",
         "mode: 实践参考"
       ],
       "status": "active",
-      "updated": "2026-09-20",
+      "updated": "2026-09-22",
       "has_frontmatter": true
     },
     {
