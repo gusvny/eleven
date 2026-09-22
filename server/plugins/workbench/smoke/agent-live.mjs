@@ -16,6 +16,10 @@
  *      worktree ticket -> 400; normal ticket -> 200 + last N event summaries (assistant
  *      truncated / tool call name + target path); missing session file -> 200 {exists:false,
  *      reason}; the n param is clamped.
+ *   D. per-round freshness lines (KI-024, t260903-04): step/start + llm/retry each on screen.
+ *   E. two-generation vocab (t260922-02): 0.1.5-only assistant/attempt gets a live row
+ *      (defensive stream extraction); out-of-vocabulary types -> result.uncoveredTypes /
+ *      loud reason through readAgentLiveTail AND the route — never silent.
  */
 
 import { execFile } from 'node:child_process'
@@ -273,6 +277,78 @@ sys.exit(1)
       && res2.body.result.events.some(e => e.type === 'step')
       && res2.body.result.events.some(e => e.type === 'retry'),
       '路由透传 step/retry 行型（前端标签/配色按 type 消费）')
+  }
+  /* ------------------------------------------------------------ E. two-generation vocab (t260922-02)
+   * Same block as section C/D (reuses the mock route fixture). 0.1.5-only
+   * assistant/attempt gets a live row (three-level defensive stream extraction);
+   * out-of-vocabulary types surface as result.uncoveredTypes / loud reason — never silent. */
+  section('E 双代词表面（t260922-02）：assistant/attempt 上屏 + uncoveredTypes 透传')
+  if (!hasZstd) {
+    console.log('  （跳过 E 段：zstd 不在 PATH）')
+  } else {
+    const wt = join(repo, '.worktrees', 'wt')
+    const slug = projectDirKey(wt)
+    // E1: 0.1.5 fixture — real-shape attempt (chunk.text) + system/message (off-screen meta)
+    const sess15 = join(wt, '.dsh', 'sessions', slug, 't-smoke-3-developer', 'session.v3.jsonl.zstd')
+    await mkdir(join(wt, '.dsh', 'sessions', slug, 't-smoke-3-developer'), { recursive: true })
+    const events15 = [
+      { type: 'session', version: 3, id: 't-smoke-3-developer', createdAt: 1000 },
+      { type: 'turn/start', seq: 1, time: 11000, data: { turn: 1 } },
+      { type: 'system/message', seq: 2, time: 12000, data: { turn: 1, step: 1, message: { role: 'system', content: [{ type: 'text', text: 'sys prompt' }] } } },
+      { type: 'assistant/attempt', seq: 3, time: 13000, data: { turn: 1, step: 1, stream: [{ type: 'chunk', time: 13100, chunk: { type: 'text', text: '部分输出' } }] } },
+      { type: 'assistant/message', seq: 4, time: 14000, data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: '转正输出' }] }, stream: [], usage: { inputTokens: 3, outputTokens: 4 } } },
+    ]
+    const f15 = join(tmp, 'fixture-015.jsonl')
+    await writeFile(f15, events15.map(e => JSON.stringify(e)).join('\n') + '\n', 'utf8')
+    await execFileP('zstd', ['-q', '-f', f15, '-o', sess15])
+    const t15 = await readAgentLiveTail(sess15, 30)
+    ok(t15.exists === true && t15.events.some(e => e.type === 'attempt'
+      && e.summary.includes('第 1 轮 · 第 1 步') && e.summary.includes('部分输出')),
+      '0.1.5 attempt 行上屏（定位+预览，真样本 chunk.text 形状）')
+    ok(t15.events.some(e => e.type === 'assistant' && e.summary.includes('转正输出')),
+      '0.1.5 assistant/message 行不受 attempt 行影响')
+    ok(t15.uncoveredTypes === undefined, '0.1.5 健康档不加 uncoveredTypes 键')
+
+    // E2: route pass-through for attempt row type
+    const routes3 = []
+    const ws3 = { register: (r) => { routes3.push(r); return () => {} } }
+    const ctx3 = {
+      effect: (fn) => { fn() },
+      logger: { info() {}, warn() {} },
+      get: (k) => (k === 'webServer' ? ws3 : undefined),
+      on: () => () => {},
+    }
+    apply(ctx3, { repo })
+    const prefix3 = routes3.find(r => r.kind === 'prefix' && r.path === '/sandbar-workbench/api/wf/tickets')
+    const res3 = { status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } }
+    await prefix3.handler({ url: '/sandbar-workbench/api/wf/tickets/t-smoke-3/agent-live', method: 'GET', async *[Symbol.asyncIterator]() {} }, res3)
+    ok(res3.status === 200 && res3.body.ok === true
+      && res3.body.result.events.some(e => e.type === 'attempt'),
+      '路由透传 attempt 行型（前端 LIVE_TYPE_LABEL.attempt 消费）')
+
+    // E3: out-of-vocabulary type → uncoveredTypes + loud reason (never silent).
+    // 文件名必须是发现层认证双名之一（session.jsonl.zstd / session.v3.jsonl.zstd）：
+    // 改名形态由 S3 suspect 点名接住（另一层响亮出口），不经 uncovered 面。
+    const sessUncov = join(wt, '.dsh', 'sessions', slug, 't-smoke-4-developer', 'session.v3.jsonl.zstd')
+    await mkdir(join(wt, '.dsh', 'sessions', slug, 't-smoke-4-developer'), { recursive: true })
+    const eventsU = [
+      { type: 'request/context', seq: 0, time: 21000, data: { provider: 'p', model: 'm' } },
+      { type: 'v9/whatever', seq: 1, time: 22000, data: {} },
+    ]
+    const fU = join(tmp, 'fixture-uncov.jsonl')
+    await writeFile(fU, eventsU.map(e => JSON.stringify(e)).join('\n') + '\n', 'utf8')
+    await execFileP('zstd', ['-q', '-f', fU, '-o', sessUncov])
+    const tU = await readAgentLiveTail(sessUncov, 30)
+    ok(Array.isArray(tU.uncoveredTypes) && tU.uncoveredTypes[0] === 'v9/whatever',
+      '词表外类型 → uncoveredTypes 点名')
+    ok((tU.reason ?? '').includes('未覆盖') && (tU.reason ?? '').includes('v9/whatever'),
+      '零事件+未覆盖 → reason 人话点名（绝不静默空白）')
+    const res4 = { status: 0, body: null, writeHead(s) { this.status = s }, end(b) { this.body = b ? JSON.parse(b) : null } }
+    await prefix3.handler({ url: '/sandbar-workbench/api/wf/tickets/t-smoke-4/agent-live', method: 'GET', async *[Symbol.asyncIterator]() {} }, res4)
+    ok(res4.status === 200 && res4.body.ok === true
+      && Array.isArray(res4.body.result.uncoveredTypes)
+      && res4.body.result.uncoveredTypes[0] === 'v9/whatever',
+      '路由透传 uncoveredTypes（前端 ⚠ 提示行消费）')
   }
 } finally {
   await rm(tmp, { recursive: true, force: true })

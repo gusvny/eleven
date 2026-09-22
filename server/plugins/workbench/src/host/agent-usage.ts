@@ -31,7 +31,7 @@ import { readdir, stat } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import {
   SessionError, decompressSession, judgeSessionLines, sessionFaceS1Text,
-  scanSuspectSessionFiles, formatSuspectGroups, SESSION_NOTE_CAP,
+  scanSuspectSessionFiles, formatSuspectGroups, formatCappedTypes, SESSION_NOTE_CAP,
 } from './agent-live.ts'
 import { resolveAgentBaseDir } from './agent-logs.ts'
 import { existingSessionFilesIn, pickNewestSessionFile } from './session-discovery.ts'
@@ -77,6 +77,16 @@ export interface AgentUsageResult {
   /** 任一会话文件命中 S1「格式不认识」（t260917-05）——结果级置位：混合态下
    *  totals 照常来自好文件，坏文件经 suspect/suspectDetail 浮出，绝不静默。 */
   suspect?: boolean
+  /** t260922-02 加性：任一文件存在词表外类型（SESSION_TWO_GEN_TYPES 之外，疑似
+   *  更新代 dsh，相关内容可能缺失）——与 engine _aggregate_lane_usage 的
+   *  uncovered_types 旗标/note 同构对称（KI-046），绝不静默。 */
+  uncovered?: boolean
+  /** 词表外类型并集（排序去重，聚合级；显示面走 uncoveredDetail 封顶）。 */
+  uncoveredTypes?: string[]
+  /** 命中文件的绝对路径清单（同 suspectFiles 先例）。 */
+  uncoveredFiles?: string[]
+  /** 人话明细（聚合级一句，类型清单 formatCappedTypes 封顶）。 */
+  uncoveredDetail?: string
   /** S1 命中文件的绝对路径清单。 */
   suspectFiles?: string[]
   /** S1 逐文件人话明细（封顶 SESSION_NOTE_CAP 条）。 */
@@ -202,6 +212,13 @@ async function aggregateOneFile(path: string, windows: StageWindow[], out: Agent
     ;(out.suspectFiles ??= []).push(path)
     return s1
   }
+  // t260922-02 禁静默：词表外类型（疑似更新代 dsh）逐文件入聚合 union——
+  // 加性注记，totals 照常累加（engine _aggregate_lane_usage 镜像同构，改动必须同步）。
+  if (j.uncoveredCount > 0) {
+    out.uncovered = true
+    ;(out.uncoveredTypes ??= []).push(...j.uncoveredTypes)
+    ;(out.uncoveredFiles ??= []).push(path)
+  }
   // 当前模型（顺序扫描维护）；provider/model 任一缺失记 '未知'
   let cur = { provider: '', model: '' }
   let sawUsage = false
@@ -310,6 +327,12 @@ export async function aggregateTicketUsage(
     const s1s = reasons.filter(r => r.startsWith('会话记录格式不认识'))
     out.suspectDetail = s1s.slice(0, SESSION_NOTE_CAP).join('；')
       + (s1s.length > SESSION_NOTE_CAP ? `（等共 ${s1s.length} 条）` : '')
+  }
+  if (out.uncovered) {
+    // t260922-02：类型并集排序去重 + 人话明细（formatCappedTypes 封顶）——
+    // engine 侧 uncovered_types 旗标+note 的 TS 对称面，绝不静默。
+    out.uncoveredTypes = [...new Set(out.uncoveredTypes ?? [])].sort()
+    out.uncoveredDetail = `会话含本版本未覆盖的记录类型（${formatCappedTypes(out.uncoveredTypes)}）——相关内容可能缺失，疑似更新代 dsh`
   }
   out.models.sort((a, b) => (b.input + b.output) - (a.input + a.output))
   return out

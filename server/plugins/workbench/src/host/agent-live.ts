@@ -79,18 +79,80 @@ function isWithin(root: string, target: string): boolean {
   return t === abs || t.startsWith(abs + sep)
 }
 
-// ---- 会话记录解析面判据（t260917-05 会话发现面「零静默降级」）----
+// ---- 会话记录解析面判据（t260917-05 会话发现面「零静默降级」；t260922-02 双代词表）----
 // 真源分层：会话档格式真源在 dsh 侧（dsh-session-persistence-jsonl，仓外）；
-// 事件词表/usage 键名的消费面真源 = engine server/engine/agent_activities.py 的
-// SESSION_KNOWN_TYPES/SESSION_USAGE_KEYS 与本组常量（两侧同构、注释互指，改动
-// 必须同步）——本组定义是只读消费方的冻结镜像（KI-046 外部调用形状纪律）。
+// 事件词表的权威底册=各代 dsh 自带 GENERATED 目录 dsh-session/lib/types/
+// known-event-types.js（"the event vocabulary this build understands"，t260922-02
+// 实算：0.1.1=48 型 / 0.1.5=56 型 / 并集 59 / 0.1.5 独有 11 / 0.1.1 独有 3）；
+// usage 键名/判据的消费面真源 = engine server/engine/agent_activities.py 的
+// SESSION_USAGE_KEYS 与本组常量（两侧同构、注释互指，改动必须同步）——本组
+// 定义是只读消费方的冻结镜像（KI-046 外部调用形状纪律）。两张类型集合与 engine
+// SESSION_KNOWN_TYPES/SESSION_TWO_GEN_TYPES 逐项互指，双向源码锁分驻
+// workbench tests/t260922-02-session-type-face.mjs（TS←py）与 engine
+// tests/test_t260922_02_session_type_face.py（py←TS），防只改一边。
+//
+// SESSION_KNOWN_TYPES（S1 判据词表）= t260917-05 原 6 项 + 0.1.5 独有 11 项。
+// 0.1.1 计数不变的可证明口径：11 项均不在 0.1.1 目录（48 型实测），0.1.1 持久化
+// 面拒释目录外类型，本泳道真 0.1.1 会话直方图亦零命中——0.1.1 会话的 knownTypes
+// 计数逐字不变。agent/inbox/spliced、session/title-llm-request 等 0.1.1 已识型
+// **不进**本集（两代目录都在列、真会话在产，加了会改 0.1.1 计数）；它们经并集
+// 进 SESSION_TWO_GEN_TYPES。
 export const SESSION_KNOWN_TYPES: ReadonlySet<string> = new Set([
+  // -- 现行核心（t260917-05 原集，0.1.1 行为逐字不变）--
   'request/context', 'request/header', 'assistant/message',
   'assistant/chunk', 'session', 'tool/call',
+  // -- 0.1.5 独有 11 项（两代 known-event-types.js comm -13 实算）--
+  'assistant/attempt', 'system/message',
+  'deliverables/presented', 'feedback/message-delete', 'feedback/message-put',
+  'model/selection', 'session-log-deepseek/delivery-accepted',
+  'subagent/catalog', 'subagent/model-selection-policy',
+  'tool/ptc-dispatch', 'tool/ptc-dispatch-start',
+])
+
+// 双代抑制超集（t260922-02「禁静默」注记的判别集，engine SESSION_TWO_GEN_TYPES
+// 镜像）：解析成功、type 落在集外 → uncoveredTypes 点名（疑似更新代 dsh，内容
+// 可能缺失）；集内 = 本消费面认识，不注记。机械导出公式 = 两代目录并集(59) ∪
+// {session 头行标签（两代目录都不含，实测 0/0）} ∪ 0.1.1 chunk 存储行(3) =
+// 63 项。只作抑制集，不进 S1 判据、不改任何既有计数；对现网健康 0.1.1 会话
+// 注记恒空（真会话直方图 ⊆ 本集）。与 py 侧逐项互锁。
+export const SESSION_TWO_GEN_TYPES: ReadonlySet<string> = new Set([
+  // -- 0.1.1 目录全 48 项 --
+  'agent-preset/selected', 'agent/inbox/spliced', 'approval/asked',
+  'approval/decided', 'approval/policy', 'assistant/chunk',
+  'assistant/message', 'command/done', 'command/run', 'compaction/end',
+  'compaction/prune', 'compaction/start', 'compaction/summary',
+  'feedback/record', 'goal/change', 'hook/invoked', 'hook/result',
+  'llm/retry', 'llm/retry-started', 'permission/preset', 'plan/mode',
+  'request/context', 'request/header', 'sandbox/mode', 'schedule/change',
+  'session/end-seed', 'session/title', 'session/title-llm-request',
+  'step/end', 'step/start', 'subagent/descriptor', 'team/member',
+  'team/message/delivered', 'team/message/queued', 'team/task', 'todo/write',
+  'tool-workflow/agent-end', 'tool-workflow/agent-start',
+  'tool-workflow/run-end', 'tool-workflow/run-start', 'tool/call',
+  'tool/code-dispatch', 'tool/code-dispatch-start', 'tool/result',
+  'turn/end', 'turn/start', 'user/message', 'web/deepseek-search-llm-request',
+  // -- 0.1.5 独有 11 项 --
+  'assistant/attempt', 'deliverables/presented', 'feedback/message-delete',
+  'feedback/message-put', 'model/selection',
+  'session-log-deepseek/delivery-accepted', 'subagent/catalog',
+  'subagent/model-selection-policy', 'system/message', 'tool/ptc-dispatch',
+  'tool/ptc-dispatch-start',
+  // -- 头行标签（两代目录外）--
+  'session',
+  // -- 0.1.1 chunk 存储行（目录外，chunk-rows.d.ts）--
+  'text-chunks', 'reasoning-chunks', 'tool-call-chunks',
 ])
 export const SESSION_USAGE_KEYS = ['inputTokens', 'outputTokens', 'cacheReadTokens'] as const
 /** 点名清单封顶（对齐 engine SESSION_NOTE_CAP / MERGE_FILES_CAP 先例）。 */
 export const SESSION_NOTE_CAP = 20
+
+/** 类型清单 → 人话（engine _format_capped 同构：前 SESSION_NOTE_CAP 条 + 「等共 N 个」）。 */
+export function formatCappedTypes(items: readonly string[]): string {
+  const clean = items.filter(x => x !== '')
+  if (clean.length === 0) return ''
+  const tail = clean.length <= SESSION_NOTE_CAP ? '' : `（等共 ${clean.length} 个）`
+  return clean.slice(0, SESSION_NOTE_CAP).join('、') + tail
+}
 
 /** 一份会话解压文本的解析面判定（engine _judge_session_lines 的 TS 同构）。 */
 export interface SessionLineVerdict {
@@ -104,15 +166,22 @@ export interface SessionLineVerdict {
   usageRecords: number
   /** usage 对象存在但三个已知键全缺的条数（新版本改字段名的形态）。 */
   usageWithoutKnownKeys: number
+  /** 解析成功、type 为串且不在 SESSION_TWO_GEN_TYPES 的类型全集（排序去重；
+   *  t260922-02 加性键——疑似更新代 dsh 的「禁静默」点名面，显示面 formatCappedTypes 封顶）。 */
+  uncoveredTypes: string[]
+  /** uncoveredTypes 的个数。 */
+  uncoveredCount: number
   /** 可解析的映射行对象（保持原序）——聚合面金额累加复用，避免二次解析。 */
   objs: any[]
 }
 
 export function judgeSessionLines(lines: readonly unknown[]): SessionLineVerdict {
   const out: SessionLineVerdict = {
-    blank: true, parsed: 0, knownTypes: 0, usageRecords: 0, usageWithoutKnownKeys: 0, objs: [],
+    blank: true, parsed: 0, knownTypes: 0, usageRecords: 0, usageWithoutKnownKeys: 0,
+    uncoveredTypes: [], uncoveredCount: 0, objs: [],
   }
   if (!Array.isArray(lines)) return out
+  const uncovered = new Set<string>()
   for (const ln of lines) {
     if (typeof ln !== 'string') continue
     const line = ln.trim()
@@ -125,6 +194,8 @@ export function judgeSessionLines(lines: readonly unknown[]): SessionLineVerdict
     out.objs.push(obj)
     const t = obj.type
     if (typeof t === 'string' && SESSION_KNOWN_TYPES.has(t)) out.knownTypes += 1
+    // t260922-02：type 非串不入任何词表计数（known/uncovered 都不数），畸形不抛
+    if (typeof t === 'string' && !SESSION_TWO_GEN_TYPES.has(t)) uncovered.add(t)
     if (t === 'assistant/message') {
       const u = (obj.data ?? {}).usage
       if (u !== null && typeof u === 'object' && !Array.isArray(u)) {
@@ -133,6 +204,8 @@ export function judgeSessionLines(lines: readonly unknown[]): SessionLineVerdict
       }
     }
   }
+  out.uncoveredTypes = [...uncovered].sort()
+  out.uncoveredCount = out.uncoveredTypes.length
   return out
 }
 
@@ -336,10 +409,14 @@ export interface AgentLiveResult {
   truncated: boolean
   /** 人话降级原因（文件不存在/解压失败/无可展示事件），非错误。 */
   reason?: string
+  /** t260922-02 加性：解析成功但不在 SESSION_TWO_GEN_TYPES 的类型（排序去重，
+   *  显示面 formatCappedTypes 封顶）——疑似更新代 dsh，「内容可能缺失」的显式点名，绝不静默。 */
+  uncoveredTypes?: string[]
 }
 
-/** 递归挖第一段文本（content 可能是 string / 块数组 / 嵌套 tool-result 块）。 */
-function firstText(x: unknown): string {
+/** 递归挖第一段文本（content 可能是 string / 块数组 / 嵌套 tool-result 块）。
+ *  t260922-02 起导出：agent-logs 的 attempt 回扫复用同一提取实现（单一真源）。 */
+export function firstText(x: unknown): string {
   if (typeof x === 'string') return x
   if (Array.isArray(x)) {
     for (const b of x) {
@@ -370,17 +447,28 @@ function cut(s: string, n: number): string {
 }
 
 /**
- * 单条 jsonl 事件 → 面板行（不感兴趣的类型返回 null 过滤）：
- * 流式增量（assistant/chunk、text-chunks、reasoning-chunks）与大部分会话元信息
- * （session、request/*、permission/* 等）不上屏。
+ * 单条 jsonl 事件 → 面板行（不感兴趣的类型返回 null 过滤；t260922-02 起导出为
+ * 测试缝——直测 0.1.5/0.1.1 分派面，端到端另有 smoke C/D/E 段兜底）：
+ * 流式增量（assistant/chunk、text-chunks、reasoning-chunks——0.1.1 代独有，
+ * 0.1.5 已由 assistant/message{stream} 取代）与大部分会话元信息（session、
+ * request/*、permission/*、system/message 等）不上屏。
  *
  * KI-024（t260903-04）轮级新鲜度：step/start（每个执行轮的轮界）与 llm/retry
  * （上游限流/超时自动重试）上屏各一行——spawn 引导与首轮叙述之间的静默窗里，
  * 这两类是唯一规律的「还在干活」信号（t260903-01 实案：7 分钟空窗被误读为停摆，
  * 同期会话文件持续写入）。收敷新鲜度即可，不追求完整：step/end、
  * llm/retry-started（与 llm/retry 重复）、turn/* 等仍不上屏。
+ *
+ * t260922-02 双代处置（词表见 SESSION_KNOWN_TYPES/SESSION_TWO_GEN_TYPES）：
+ * - assistant/attempt（0.1.5 独有=未转正的模型尝试：失败/重试/取消/流错误）上屏
+ *   一行 attempt——0.1.5 重试/中断窗的新鲜度行（KI-024 同族收口），stream 防御性
+ *   提取短预览（真样本形状 {type:'chunk',chunk:{type:'text',text}}，畸形不抛）；
+ * - system/message（0.1.5 独有=渲染后的系统提示词）**有意不上屏**：元信息同
+ *   request/*，词表进、分派面注释点名，测试钉死；
+ * - 其余 0.1.5 独有型（deliverables/presented 等 9 项）认知级：词表进、无内容
+ *   消费需求，落 default 过滤；未来未知型由 readAgentLiveTail 的 uncoveredTypes 显式点名。
  */
-function summarizeEvent(obj: any): LiveEvent | null {
+export function summarizeEvent(obj: any): LiveEvent | null {
   const t = obj?.type
   const tsMs = typeof obj?.time === 'number' ? obj.time
     : typeof obj?.time0 === 'number' ? obj.time0 : 0
@@ -397,6 +485,26 @@ function summarizeEvent(obj: any): LiveEvent | null {
       // 纯思考/纯工具调用中转消息不上屏（工具调用本身有 tool/call 行）
       if (s === '') return null
       return { ts, type: 'assistant', summary: cut(s, 120) }
+    }
+    case 'assistant/attempt': {
+      // t260922-02：未转正尝试行（0.1.5 独有）。data={turn,step,stream[]}；
+      // stream 记录真样本形状 {type:'chunk',chunk:{type:'text',text}}——四级防御
+      // 提取：chunk.text 直取（chunk 是单块对象）→ firstText(chunk)（chunk 是块
+      // 数组）→ 记录本体 .text（记录自身即 text 块）→ firstText(记录本体)；畸形
+      // （非数组/缺字段/非串）一律得空串只出定位文案。
+      const turn = typeof d.turn === 'number' ? d.turn : null
+      const step = typeof d.step === 'number' ? d.step : null
+      const loc = turn !== null && step !== null ? `第 ${turn} 轮 · 第 ${step} 步 · ` : ''
+      let preview = ''
+      if (Array.isArray(d.stream)) {
+        for (const r of d.stream) {
+          const s = firstText(r?.chunk?.text) || firstText(r?.chunk)
+            || firstText(r?.text) || firstText(r)
+          if (s !== '') { preview = s.replace(/\s+/g, ' ').trim(); break }
+        }
+      }
+      const body = preview !== '' ? `，输出片段：${cut(preview, 60)}` : ''
+      return { ts, type: 'attempt', summary: `${loc}模型尝试未转正（重试/失败/中断）${body}` }
     }
     case 'tool/call': {
       const name = typeof d.name === 'string' ? d.name : ''
@@ -471,11 +579,16 @@ export async function readAgentLiveTail(path: string, n: number): Promise<AgentL
   out.exists = true
   const ring: LiveEvent[] = []
   let interesting = 0
+  const uncovered = new Set<string>()
   for (const rawLine of text.split('\n')) {
     const line = rawLine.trim()
     if (line === '') continue
     let obj: any
     try { obj = JSON.parse(line) } catch { continue /* 坏行跳过（文件尾可能正在写） */ }
+    // t260922-02 禁静默：词表外类型（疑似更新代 dsh）点名——与上屏分派解耦，
+    // 无论是否上屏都记；健康双代会话恒空（超集覆盖两代全型），不噪声。
+    const t = obj?.type
+    if (typeof t === 'string' && !SESSION_TWO_GEN_TYPES.has(t)) uncovered.add(t)
     const ev = summarizeEvent(obj)
     if (ev === null) continue
     interesting++
@@ -484,7 +597,14 @@ export async function readAgentLiveTail(path: string, n: number): Promise<AgentL
   }
   out.events = ring
   out.truncated = interesting > limit
-  if (ring.length === 0) {
+  if (uncovered.size > 0) {
+    // 真样本/未来代守恒：有事件也点名（UI 显式提示行），零事件则并进 reason——
+    // 「空白」必须带人话原因，绝不静默（t260922-02 本票存在的理由）。
+    out.uncoveredTypes = [...uncovered].sort()
+    if (ring.length === 0) {
+      out.reason = `会话文件无可展示事件；含本版本未覆盖的记录类型（${formatCappedTypes(out.uncoveredTypes)}）——内容可能缺失，疑似更新代 dsh`
+    }
+  } else if (ring.length === 0) {
     out.reason = '会话文件无可展示事件（agent 可能刚启动，还在读上下文）'
   }
   return out

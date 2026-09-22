@@ -51943,7 +51943,8 @@ const LIVE_TYPE_LABEL = {
 	tool: "工具",
 	result: "结果",
 	step: "轮次",
-	retry: "重试"
+	retry: "重试",
+	attempt: "尝试"
 };
 /**
 * 证据图 src 契约（t260831-08，导出供 smoke 断言）：截图只走服务端端点
@@ -52227,6 +52228,14 @@ function AgentLivePanel({ ticketId }) {
 							})
 						]
 					}, `${ev.ts}-${i}`)),
+					data.uncoveredTypes !== void 0 && data.uncoveredTypes.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-al-trunc",
+						children: [
+							"⚠ 会话含本前端未覆盖的记录类型：",
+							data.uncoveredTypes.join("、"),
+							"（内容可能缺失）。"
+						]
+					}),
 					data.truncated && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "wb-al-trunc",
 						children: "只显示最近 30 条（完整见泳道会话文件）。"
@@ -52356,6 +52365,7 @@ function UsageSummaryLine({ detail, wf, usage }) {
 	const segs = agentSegmentCount(detail, wf);
 	const names = usageModelNames(usage.models);
 	const suspectHint = usageSuspectHint(usage);
+	const uncoveredHint = usage.uncovered === true ? usage.uncoveredDetail ?? "会话含本前端未覆盖的记录类型（内容可能缺失）" : null;
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 		className: "wb-usage",
 		title: [
@@ -52363,7 +52373,8 @@ function UsageSummaryLine({ detail, wf, usage }) {
 			`in ${usage.total.input} / out ${usage.total.output} / cacheRead ${usage.total.cacheRead}`,
 			names !== "" ? `模型：${names}` : `模型：${usage.models[0]?.model ?? "—"}（单模型不显示模型名）`,
 			`会话文件 ${usage.files} 份（多角色加总）`,
-			suspectHint !== null ? usage.suspectDetail ?? suspectHint : ""
+			suspectHint !== null ? usage.suspectDetail ?? suspectHint : "",
+			uncoveredHint ?? ""
 		].filter(Boolean).join(" · "),
 		children: [
 			"🤖 ",
@@ -52375,6 +52386,11 @@ function UsageSummaryLine({ detail, wf, usage }) {
 				style: { color: "var(--dsw-derive-danger,#cf222e)" },
 				title: usage.suspectDetail ?? suspectHint,
 				children: " · ⚠"
+			}),
+			uncoveredHint !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				style: { color: "var(--dsw-derive-danger,#cf222e)" },
+				title: uncoveredHint,
+				children: " · ⚠未覆盖类型"
 			})
 		]
 	});

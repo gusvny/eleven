@@ -22,7 +22,7 @@ import { readFile, readdir, stat } from 'node:fs/promises'
 import { join, resolve, sep, dirname } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { judgeSessionLines, sessionFaceS1Text } from './agent-live.ts'
+import { judgeSessionLines, sessionFaceS1Text, firstText, formatCappedTypes } from './agent-live.ts'
 import { SESSION_FILE_NAMES } from './session-discovery.ts'
 
 const execFileP = promisify(execFile)
@@ -215,7 +215,11 @@ export async function listAgentLogs(base: string): Promise<AgentLogsResult> {
 
 /** 扫描 .dsh/sessions/ 下最新的 session 文件，返回 KB 数、存活判定与最近操作。
  *  note（t260917-05「可辨」）：会话档解压失败/格式不认识时的显式注记——日志面
- *  遇到不可解析会话不再静默吞掉（原 catch {} 行为）。 */
+ *  遇到不可解析会话不再静默吞掉（原 catch {} 行为）。
+ *  t260922-02：回扫加 assistant/attempt 分支（0.1.5 独有，未转正尝试的 stream
+ *  内嵌文本）——0.1.5 长输出轮次「最近操作」不再静默空白；既有 d.content 分支
+ *  逐字不动（0.1.1 行为逐字不变，真 0.1.1 会话不可能含 attempt 型）。note 面
+ *  加 uncovered 点名（词表外类型=内容可能缺失，绝不静默）。 */
 async function _readSessionKb(sessDir: string): Promise<{ kb: number; alive: boolean; lastActivity: string; note?: string }> {
   const info = await _sessionKbFast(sessDir)
   if (info.bytes === 0) return { kb: 0, alive: false, lastActivity: '' } // bytes 判空：kb 是取整值，<1KB 档不为 0
@@ -245,6 +249,29 @@ async function _readSessionKb(sessDir: string): Promise<{ kb: number; alive: boo
         break
       }
     }
+    // t260922-02：未转正尝试（0.1.5 独有）——stream 记录真样本形状
+    // {type:'chunk',chunk:{type:'text',text}}，四级防御提取（chunk.text 直取 →
+    // chunk 块数组 → 记录本体 .text → 记录本体）；畸形得空串自然落空（不抛、
+    // 不出半截行）。同一行只会命中一个 type 分支，分支序无关。
+    if (obj.type === 'assistant/attempt') {
+      if (Array.isArray(d.stream)) {
+        for (const r of d.stream) {
+          const s = firstText(r?.chunk?.text) || firstText(r?.chunk)
+            || firstText(r?.text) || firstText(r)
+          if (s !== '') {
+            lastActivity = '输出中(未转正): ' + s.slice(0, 80).replace(/\n/g, ' ')
+            break
+          }
+        }
+      }
+      if (lastActivity !== '') break
+    }
+  }
+  // t260922-02 禁静默：词表外类型（疑似更新代 dsh）→ note 人话点名，lastActivity
+  // 照常返回（有内容给内容，缺失类型显式声明——不混在「无注记=全可读」里）。
+  if (j.uncoveredCount > 0) {
+    return { ...info, lastActivity,
+      note: `会话含本版本未覆盖的记录类型（${formatCappedTypes(j.uncoveredTypes)}），相关内容可能缺失` }
   }
   return { ...info, lastActivity }
 }

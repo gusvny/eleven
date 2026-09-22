@@ -422,16 +422,71 @@ def _quarantine_torn_sessions(local_dsh: Path) -> None:
             _format_capped(blind))
 
 
-# ---- 会话记录解析面判定（t260917-05 会话发现面「零静默降级」）----
+# ---- 会话记录解析面判定（t260917-05 会话发现面「零静默降级」；t260922-02 双代词表）----
 # 背景：dsh 升级换事件词表/usage 键名/文件名布局时，统计面曾会静默归 0、检疫面
 # 静默失明。本组函数给「文件在、但名字/格式对不上本版本解析面」一个响亮的出口。
 # 真源分层：会话档格式真源在 dsh 侧（dsh-session-persistence-jsonl，仓外）；事件
-# 词表/usage 键名的消费面真源 = 本文件 _aggregate_lane_usage 与 workbench
+# 词表的权威底册=各代 dsh 自带 GENERATED 目录 dsh-session/lib/types/
+# known-event-types.js（文件头自述 "the event vocabulary this build understands"，
+# t260922-02 实算：0.1.1=48 型 / 0.1.5=56 型 / 并集 59 / 0.1.5 独有 11 / 0.1.1 独
+# 有 3）；usage 键名/判据的消费面真源 = 本文件 _aggregate_lane_usage 与 workbench
 # src/host/agent-usage.ts（两侧常量/判据同构、注释互指，改动必须同步）——本组
-# 定义是只读消费方的冻结镜像（KI-046 外部调用形状纪律）。
+# 定义是只读消费方的冻结镜像（KI-046 外部调用形状纪律）；两张类型集合另与
+# workbench src/host/agent-live.ts 的 SESSION_KNOWN_TYPES/SESSION_TWO_GEN_TYPES
+# 互指，双向源码锁分驻 server/engine/tests/test_t260922_02_session_type_face.py
+# 与 workbench tests/t260922-02-session-type-face.mjs（防只改一边）。
+#
+# SESSION_KNOWN_TYPES（S1 判据词表）= t260917-05 原 6 项 + 0.1.5 独有 11 项。
+# 0.1.1 计数不变的可证明口径：11 项均不在 0.1.1 目录（48 型实测），0.1.1 持久化
+# 面拒释目录外类型，本泳道真 0.1.1 会话直方图亦零命中（t260922-02 §0.2）——
+# 0.1.1 会话的 known_types 计数逐字不变。agent/inbox/spliced、
+# session/title-llm-request 等 0.1.1 已识型**不进**本集（两代目录都在列、真会话
+# 在产，加了会改 0.1.1 计数）；它们经并集进 SESSION_TWO_GEN_TYPES。
 SESSION_KNOWN_TYPES = frozenset({
+    # -- 现行核心（t260917-05 原集，0.1.1 行为逐字不变）--
     "request/context", "request/header", "assistant/message",
     "assistant/chunk", "session", "tool/call",
+    # -- 0.1.5 独有 11 项（两代 known-event-types.js comm -13 实算）--
+    "assistant/attempt", "system/message",
+    "deliverables/presented", "feedback/message-delete", "feedback/message-put",
+    "model/selection", "session-log-deepseek/delivery-accepted",
+    "subagent/catalog", "subagent/model-selection-policy",
+    "tool/ptc-dispatch", "tool/ptc-dispatch-start",
+})
+
+# 双代抑制超集（t260922-02「禁静默」注记的判别集）：解析成功的行、type 落在集外
+# → uncovered_types 点名（疑似更新代 dsh，内容可能缺失）；集内 = 本消费面认识，
+# 不注记。机械导出公式 = 两代目录并集(59) ∪ {session 头行标签（两代目录都不含，
+# 实测 grep 计数 0/0）} ∪ 0.1.1 chunk 存储行(3)（chunk-rows.d.ts：存储行非会话
+# 事件、不入 GENERATED 目录但在真会话档大量出现）= 63 项。只作抑制集，不进 S1
+# 判据、不改任何既有计数；对现网健康 0.1.1 会话注记恒空（真会话直方图 ⊆ 本集，
+# t260922-02 §0.2 实证）。与 TS 侧镜像逐项互锁。
+SESSION_TWO_GEN_TYPES = frozenset({
+    # -- 0.1.1 目录全 48 项 --
+    "agent-preset/selected", "agent/inbox/spliced", "approval/asked",
+    "approval/decided", "approval/policy", "assistant/chunk",
+    "assistant/message", "command/done", "command/run", "compaction/end",
+    "compaction/prune", "compaction/start", "compaction/summary",
+    "feedback/record", "goal/change", "hook/invoked", "hook/result",
+    "llm/retry", "llm/retry-started", "permission/preset", "plan/mode",
+    "request/context", "request/header", "sandbox/mode", "schedule/change",
+    "session/end-seed", "session/title", "session/title-llm-request",
+    "step/end", "step/start", "subagent/descriptor", "team/member",
+    "team/message/delivered", "team/message/queued", "team/task", "todo/write",
+    "tool-workflow/agent-end", "tool-workflow/agent-start",
+    "tool-workflow/run-end", "tool-workflow/run-start", "tool/call",
+    "tool/code-dispatch", "tool/code-dispatch-start", "tool/result",
+    "turn/end", "turn/start", "user/message", "web/deepseek-search-llm-request",
+    # -- 0.1.5 独有 11 项 --
+    "assistant/attempt", "deliverables/presented", "feedback/message-delete",
+    "feedback/message-put", "model/selection",
+    "session-log-deepseek/delivery-accepted", "subagent/catalog",
+    "subagent/model-selection-policy", "system/message", "tool/ptc-dispatch",
+    "tool/ptc-dispatch-start",
+    # -- 头行标签（两代目录外）--
+    "session",
+    # -- 0.1.1 chunk 存储行（目录外，chunk-rows.d.ts）--
+    "text-chunks", "reasoning-chunks", "tool-call-chunks",
 })
 SESSION_USAGE_KEYS = ("inputTokens", "outputTokens", "cacheReadTokens")
 # 点名清单封顶（先例 MERGE_FILES_CAP：无上限清单会撑爆票据台面/闸记录/账本——
@@ -452,10 +507,10 @@ def _format_capped(items: Any) -> str:
 
 
 def _judge_session_lines(lines: Any) -> Dict[str, Any]:
-    """会话解压文本的行集合 → 解析面判定（纯函数，t260917-05）。
+    """会话解压文本的行集合 → 解析面判定（纯函数，t260917-05；t260922-02 加未覆盖键）。
 
     返回 {blank, parsed, known_types, usage_records, usage_without_known_keys,
-    objs}：
+    uncovered_types, uncovered_count, objs}：
     - blank: 全部行皆空白（合法非 S1——与 _session_jsonl_torn 的 blank-skip 同
       立场，空档/纯空行不是格式违约）；
     - parsed: JSON 可解析且为映射的行数（畸形行只计数不抛）；
@@ -464,13 +519,19 @@ def _judge_session_lines(lines: Any) -> Dict[str, Any]:
       **assistant/chunk 的同名 usage 不数不加**（防翻倍红线从聚合面平移到判据面）；
     - usage_without_known_keys: usage 为映射但 SESSION_USAGE_KEYS 全缺的条数
       （新版本改字段名的形态，S1 判据③）；
+    - uncovered_types: 解析成功、type 为串且不在 SESSION_TWO_GEN_TYPES 的类型
+      全集（排序去重；t260922-02 加性键——疑似更新代 dsh 的「禁静默」点名面，
+      显示面由调用方 _format_capped 封顶）；uncovered_count = 其个数；
     - objs: 可解析的映射行对象（保持原序）——聚合面金额累加复用，避免二次解析。
-    畸形输入：非 list/条目非串 → 按空白行处理，不抛。"""
+    畸形输入：非 list/条目非串 → 按空白行处理，不抛；type 非串 → 不入任何词表
+    计数（known/uncovered 都不数）。"""
     out: Dict[str, Any] = {"blank": True, "parsed": 0, "known_types": 0,
                            "usage_records": 0, "usage_without_known_keys": 0,
+                           "uncovered_types": [], "uncovered_count": 0,
                            "objs": []}
     if not isinstance(lines, (list, tuple)):
         return out
+    uncovered: set = set()
     for ln in lines:
         if not isinstance(ln, str):
             continue
@@ -487,8 +548,12 @@ def _judge_session_lines(lines: Any) -> Dict[str, Any]:
         out["parsed"] += 1
         out["objs"].append(obj)
         t = obj.get("type")
-        if t in SESSION_KNOWN_TYPES:
+        # t 非串（畸形：对象/数组/数字）不入任何词表计数——frozenset 成员测试对
+        # 不可哈希对象会 TypeError（t260922-02 测试钉出的既有潜在崩溃点），先守后查。
+        if isinstance(t, str) and t in SESSION_KNOWN_TYPES:
             out["known_types"] += 1
+        if isinstance(t, str) and t not in SESSION_TWO_GEN_TYPES:
+            uncovered.add(t)
         if t == "assistant/message":
             d = obj.get("data")
             u = d.get("usage") if isinstance(d, dict) else None
@@ -496,6 +561,9 @@ def _judge_session_lines(lines: Any) -> Dict[str, Any]:
                 out["usage_records"] += 1
                 if not any(k in u for k in SESSION_USAGE_KEYS):
                     out["usage_without_known_keys"] += 1
+    ulist = sorted(uncovered)
+    out["uncovered_types"] = ulist
+    out["uncovered_count"] = len(ulist)
     return out
 
 
@@ -4390,6 +4458,7 @@ def _aggregate_lane_usage(wt: Path, ticket_id: str) -> Tuple[Dict[str, Any], str
     notes: List[str] = []
     saw_usage = False
     face_suspect = False  # 任一文件 S1「格式不认识」→ 结果级置位（review 意见2 混合态）
+    uncovered: set = set()  # t260922-02：跨文件词表外类型 union（禁静默点名面）
 
     def _num(x: Any) -> int:
         return int(x) if isinstance(x, (int, float)) and not isinstance(x, bool) else 0
@@ -4409,6 +4478,10 @@ def _aggregate_lane_usage(wt: Path, ticket_id: str) -> Tuple[Dict[str, Any], str
             if s1:
                 notes.append(s1)
                 face_suspect = True
+            # t260922-02 禁静默：词表外类型（疑似更新代 dsh）聚合级 union 点名——
+            # 加性注记，不改既有计数/note 结构；健康双代会话恒空（超集覆盖两代全型）。
+            if j.get("uncovered_count"):
+                uncovered.update(j.get("uncovered_types") or [])
             cur = {"provider": "", "model": ""}
             for obj in j["objs"]:  # 金额累加复用判定面的解析结果（一次解析，两不误）
                 t = obj.get("type")
@@ -4436,11 +4509,17 @@ def _aggregate_lane_usage(wt: Path, ticket_id: str) -> Tuple[Dict[str, Any], str
                     saw_usage = True
         except Exception as exc:  # one file failing never destroys the overall total
             notes.append("%s 聚合异常: %s" % (f.name, str(exc)[:120]))
+    if uncovered:
+        # t260922-02：聚合级人话点名（显示面沿用 _format_capped 封顶纪律），绝不静默。
+        notes.append("会话含本版本未覆盖的记录类型（%s）——相关内容不入统计/展示，疑似更新代 dsh"
+                     % _format_capped(sorted(uncovered)))
     tokens = {"in": total["in"], "out": total["out"], "cacheRead": total["cacheRead"],
               "by_stage": {}, "by_model": by_model, "by_stage_available": False,
               "tokens_zero": not saw_usage}
     if face_suspect:
         tokens["format_suspect"] = True  # 注记键=加法（既有按键断言/幂等比较不受扰）
+    if uncovered:
+        tokens["uncovered_types"] = True  # t260922-02：加性旗标（同上加法纪律）
     note = "；".join(notes[:SESSION_NOTE_CAP])  # S1 逐文件文案同样封顶（点名纪律）
     if len(notes) > SESSION_NOTE_CAP:
         note += "（等共 %d 条）" % len(notes)

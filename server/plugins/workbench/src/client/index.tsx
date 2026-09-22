@@ -1207,6 +1207,8 @@ interface AgentLiveResult {
   truncated: boolean
   reason?: string
   ws_root?: string
+  /* t260922-02 零静默降级：词表外记录类型（疑似更新代 dsh）显式点名——内容可能缺失 */
+  uncoveredTypes?: string[]
 }
 
 /** merge_check 等程序化门的一次运行记录（红绿 + 明细，问题区数据源）。 */
@@ -1689,6 +1691,9 @@ const LIVE_TYPE_LABEL: Record<string, string> = {
   // step/start 与 llm/retry 是唯一规律的「还在干活」信号，各出一行防误读停摆。
   step: '轮次',
   retry: '重试',
+  // t260922-02：0.1.5 独有 assistant/attempt（未转正的模型尝试）上屏行——
+  // 0.1.5 重试/中断窗的新鲜度行；无此标签时有 `?? ev.type` 安全回落，属增强非依赖。
+  attempt: '尝试',
 }
 
 /**
@@ -1895,6 +1900,11 @@ function AgentLivePanel({ ticketId }: { ticketId: string }) {
                   <span className="wb-live-sum">{ev.summary}</span>
                 </div>
               ))}
+              {/* t260922-02 零静默降级：词表外记录类型（疑似更新代 dsh）显式点名——
+                  内容可能缺失，绝不静默空白。健康双代会话恒空（超集覆盖两代全型）。 */}
+              {data.uncoveredTypes !== undefined && data.uncoveredTypes.length > 0 && (
+                <div className="wb-al-trunc">⚠ 会话含本前端未覆盖的记录类型：{data.uncoveredTypes.join('、')}（内容可能缺失）。</div>
+              )}
               {data.truncated && <div className="wb-al-trunc">只显示最近 30 条（完整见泳道会话文件）。</div>}
             </>
           )}
@@ -1945,6 +1955,9 @@ interface AgentUsageResult {
   suspect?: boolean
   suspectFiles?: string[]
   suspectDetail?: string
+  /* t260922-02 零静默降级：词表外记录类型（疑似更新代 dsh）浮出——内容可能缺失 */
+  uncovered?: boolean
+  uncoveredDetail?: string
 }
 
 /** token 数人话格式：≥1M 显 x.xxM、≥1k 显 x.xk，否则原值（悬停有精确值）。 */
@@ -2031,12 +2044,17 @@ function UsageSummaryLine({ detail, wf, usage }: { detail: TicketDetail; wf?: Wf
   const segs = agentSegmentCount(detail, wf)
   const names = usageModelNames(usage.models)
   const suspectHint = usageSuspectHint(usage)
+  // t260922-02 零静默降级：词表外记录类型（疑似更新代 dsh）与 suspect 同款独立浮出
+  const uncoveredHint = usage.uncovered === true
+    ? (usage.uncoveredDetail ?? '会话含本前端未覆盖的记录类型（内容可能缺失）')
+    : null
   const title = [
     `agent 段数 ${segs}`,
     `in ${usage.total.input} / out ${usage.total.output} / cacheRead ${usage.total.cacheRead}`,
     names !== '' ? `模型：${names}` : `模型：${usage.models[0]?.model ?? '—'}（单模型不显示模型名）`,
     `会话文件 ${usage.files} 份（多角色加总）`,
     suspectHint !== null ? (usage.suspectDetail ?? suspectHint) : '',
+    uncoveredHint ?? '',
   ].filter(Boolean).join(' · ')
   return (
     <span className="wb-usage" title={title}>
@@ -2044,6 +2062,10 @@ function UsageSummaryLine({ detail, wf, usage }: { detail: TicketDetail; wf?: Wf
       {suspectHint !== null && (
         <span style={{color: 'var(--dsw-derive-danger,#cf222e)'}}
               title={usage.suspectDetail ?? suspectHint}> · ⚠</span>
+      )}
+      {uncoveredHint !== null && (
+        <span style={{color: 'var(--dsw-derive-danger,#cf222e)'}}
+              title={uncoveredHint}> · ⚠未覆盖类型</span>
       )}
     </span>
   )
