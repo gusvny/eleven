@@ -369,7 +369,13 @@ def test_agent_activities_接线守卫():
     assert src.count("agent_runtime.spawn_agent(") == 4
     assert "subprocess.Popen(cmd" not in src
     assert "_reap_agent_proc(proc," not in src   # 调用形态清零（定义行签名不算）
-    assert src.count("proc.reap(") == 8          # +inspect 段（超时分支 + finally 兜底）
+    assert src.count("proc.reap(") == 12         # 8+4（t260922-11 撕裂点名自动隔离：
+                                                 # 主面/arbitrate/acceptance/inspect 四处
+                                                 # 失败分支各加一处「先收尸再动档」的
+                                                 # 检疫前置 reap——隔离前排干晚写者，
+                                                 # 防 move 与活写者竞态；四处各自的既有
+                                                 # finally 兜底 reap（inspect 面为超时
+                                                 # 分支 reap）保持不变、不在本 +4 内）
     assert "agent_runtime.sandbox_pin_yaml()" in src
     assert src.count("agent_runtime.remove_container(") == 2   # teardown_lane + 内联清理
     assert "agent_runtime.gc_stale_containers(" in src          # prepare_workspace 扫尾

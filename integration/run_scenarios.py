@@ -1351,6 +1351,20 @@ SCENARIOS = [
     ("t260922-03-dsh-probe-live-cred-env",
      "探针 live 档失败归因三态（t260922-03 验收③，灰盒 L3，dsh 桩秒级零网络）：①凭据缺失子用例：桩自报 MISSING_CREDENTIAL（路由 stub-route-alpha、补救变量 STUB_API_KEY——即 0.1.5 实测报错形状的路由/变量位）后挂住不退 → 探针必须秒级早停收割（墙钟有上界，绝不复现「静默空等到会话超时 900s」的挂死形状）、ENV 红退出码 2、台账点名桩自报的路由与补救变量、零 traceback、收割后无桩孤儿进程（spawn 资源回收全终态）；②产品红保全子用例：桩退出码 3 且日志无 MISSING_CREDENTIAL 字面 → 探针维持拦停级 FAIL（退出码 1、FAIL 台账行在场）且零 ENV 行——「环境红不吞产品红、产品红不冒充环境红」双向锁（lib_env 三态契约 + RUNBOOK_GATE「环境缺=exit 2 补环境重跑」承诺的探针侧兑现；余失败语义零改动=验收④不放松的失败面）。判据不锚守望实现（轮询周期/字面量提取方式/文案措辞均可变），只锚用户可感知终态（退出码+点名字面+墙钟上界 30s+回收；守望若退化到只靠会话超时兜底，墙钟判据即红）。intent 分工：本条守 live 会话失败的归因面；t260916-24-dsh-probe-selftest 守断言逻辑自检、t260922-03-dsh-probe-live-green 守绿档对账面（三面不互替）。修复已落本工单树，语义经直驱等价实证（探针 live 档直跑面），arbitrate/merge 期必须保持绿（回归锁）；前置缺席=ENV_FAIL exit 2 点名",
      "python3 integration/t260922-03/sc_t260922_03_probe_live_cred_env.py", "ro"),
+    # ---- t260922-11: dsh 点名撕裂会话档的引擎自动隔离+有界重试（KI-059 撕裂族收口）----
+    # 两场景一夹具（主面全旅程 journey / 独立活动面分型 arbitrate-face），共享垫层
+    # lib_wedge.py（无 sc_ 前缀不登记；E 类撕裂夹具=帧边界跨记录，整流全合法逐帧撕裂，
+    # 确定性构造不依赖真 dsh）。与 t260905-10-sc-torn-session-quarantine intent 分工：
+    # 彼守 spawn 前两层检疫判据面（好帧内截断行/非 JSON 行的隔离与健康对照），本组守
+    # spawn 失败后 dsh 点名通道的编排行为面（探针判净档的自动隔离/有界重试/三重留痕/
+    # 不谎报/盲区不越界）；developer L1（test_t260922_11_dsh_wedge_auto_quarantine）守
+    # helper 全矩阵与接线源级锁，本组锚活动直驱的用户可感知终态（盘面/回执/文案）。
+    ("t260922-11-wedge-recovery-journey",
+     "dsh 点名撕裂档自动隔离+重试恢复全旅程（t260922-11 验收②④主证据，灰盒 L3，进程内夹具+运行次序账本假 dsh 桩秒级零网络零 docker，全程 tmp 不触宿主全局 dsh/console 3099）：E 类撕裂档（帧边界跨记录：整流全合法=引擎探针判净、逐帧撕裂=dsh 判拒——本票立票形态确定性构造）+假 dsh 桩（首跑=现场实证撕裂两行文案 rc=1、次跑=合法回执 exit 0）真实驱动通用 agent 段活动两连（同活动重入=Temporal RETRY 等价形态）→ T1 全旅程：首轮 raise 含 rc=1 既有形状+自动隔离注记、坏档挪进隔离区字节级留档（挪不删可回溯）、事件记录恰一份（action=已隔离+dsh 原文判据+引擎探针两判据=「判净仍隔离」立票实证+会话身份）、下一轮 attempt 幂等返回成功回执且注记可见（票面可见面）、假 dsh 恰两次调用（隔离后下一轮干净 spawn，不烧第三次）；T2 无撕裂文案的失败=零改动（不隔离/无事件/不谎报，现状语义保留）；T3 隔离动作失败不谎报（隔离路径占位为文件 → 坏档留原位+无「已隔离」假记录，挪后存在性核验的记录真相面）；T4 盲区/旧扁平共存不动（同 id 目录旧扁平会话档与未知名文件原位保留=自动处置不越盲区纪律半步）；T5 会话身份双缺（SANDBAR_AGENT_RESUME=0 无固定 id+日志无有效点名行）→ 不隔离不误伤失败照旧响亮。判据全落盘面/回执/失败文案，不锚引擎内部私有命名与行号，契约不变的实现重构不得破。intent 分工：t260905-10-sc-torn-session-quarantine 守 spawn 前检疫判据面（不同通道不互替）、t260922-11-wedge-raise-face-arbitrate 守独立活动面分型（本条不重复）、developer L1 守 helper 矩阵与接线源级锁（不同深度）。实现未落地/行为退化=FAIL（TDD 信号），arbitrate/merge 期必须绿；zstd CLI/引擎模块装载缺供=ENV_FAIL exit 2 点名",
+     "python3 integration/t260922-11/sc_t260922_11_wedge_recovery_journey.py", "ro"),
+    ("t260922-11-wedge-raise-face-arbitrate",
+     "仲裁面失败路径的自动隔离分型（t260922-11 验收②编排半边，灰盒 L3，同款夹具秒级零网络）：同一套「dsh 点名撕裂→自动隔离」机制在独立活动实现的仲裁面必须同样生效且保持 raise 型失败分型——仲裁段被撕裂档楔死时用户可感知终态=infra 失败响亮（进既有有界重试链）+坏档已自动挪离字节级留档+事件记录 action=已隔离在案；接错型（软错回执吞掉）或漏接线（无隔离动作）即红=「一处实现、多处接线不漂移」的编排面回归锁。会话身份=仲裁面缺省 <票>-integration（主锚承诺面）。与 t260922-11-wedge-recovery-journey 分工：彼守主面全旅程（重试恢复/注记/盲区/双缺四态），本条只守独立活动面的分型与隔离动作；t260905-10-sc-torn-session-quarantine 守 spawn 前检疫判据面（不互替）。实现未落地/行为退化=FAIL（TDD 信号），arbitrate/merge 期必须绿；zstd CLI/引擎模块装载缺供=ENV_FAIL exit 2 点名",
+     "python3 integration/t260922-11/sc_t260922_11_wedge_raise_face_arbitrate.py", "ro"),
     # ---- t260922-09: A3.5 守卫「先写后校验」修复——update 写面被拒审计面+受理/重放面 ----
     # 两场景两面（被拒审计 / 受理+重放），共享夹具 lib_t26092209.py（无 sc_ 前缀不登记；
     # 离线桩驱动真引擎类：t260901-23/_stub_temporalio + 引擎 UT _mk_wf 手装壳法，镜

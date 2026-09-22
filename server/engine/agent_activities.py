@@ -270,16 +270,22 @@ def _session_jsonl_torn(path: Path) -> bool:
     accident is more routine than a miss; valid JSONL contains no bare blank lines,
     so skipping only loosens the check, never tightens it).
 
-    dsh 判据对照（t260917-05 要求②「判据对齐」）：dsh 侧会话校验真源在仓外
-    （dsh CLI 的 resume/读侧；dsh-session-persistence-jsonl）。本探针的判据 = 帧
-    完整（zstd -t 层）+ 逐行 JSON 合法（本函数层）。**差异核验状态：未核验**——
-    票面所引 t260916-28「dsh 判 torn 而引擎探针判干净」的原始记录不在本仓，且本票
-    实现段无真 dsh CLI 观测通道（差异待证）。已知立场：本探针刻意偏宽（只判「机器
-    层合法性」，不校会话 schema）——误隔离=反向事故（t260905-10 对照组纪律），格式
-    层的「认识不认识」由 _judge_session_lines 在统计面响亮，不在检疫面收紧。后续
-    接手者补核验时：用真 dsh resume/read 对「帧裂 / 帧好内截断行 / 空档 / 无尾换
-    行完整行」四类夹具样本观测其对端判据，把差异结论补进本注记（UT 以固定文件桩
-    复现，不依赖真 dsh）。"""
+    dsh 判据对照（t260917-05 要求②「判据对齐」；t260922-11 更新）：dsh 侧会话校验
+    真源在仓外（dsh CLI 的 resume/读侧；dsh-session-persistence-jsonl）。本探针的
+    判据 = 帧完整（zstd -t 层）+ 逐行 JSON 合法（本函数层，**整流**扫描——多帧拼接
+    后逐行看，不按帧校 record 边界）。**差异核验状态：已证真，逐类矩阵待回填**——
+    生产实证（t260922-06，三次 attempt 确定性一致）：一档两层判据全过的会话档
+    （538104 字节 / 1144 行逐行合法 / 末行带换行）被 dsh 拒读「corrupt Zstandard
+    session log: complete frame contains a torn JSONL record」⇒「dsh 判 torn 而本
+    探针判干净」的分歧为真（t260917-05 时代的「未核验」就此销案）。主假说（待观测
+    实证后回填本注记）：dsh 按帧校 JSONL record 边界，「记录跨帧界」的档整流合法
+    而逐帧撕裂——与本函数的整流判据结构性错开，探针侧永远看不见该类。已知立场
+    不变：本探针刻意偏宽（只判「机器层合法性」，不校会话 schema）——误隔离=反向
+    事故（t260905-10 对照组纪律），**不在检疫面收紧**；分歧的处置走 t260922-11 动作
+    通道（spawn 失败且日志含 DSH_TEAR_MARKERS → _wedge_quarantine_once 按 dsh 所用
+    会话 id 定点隔离，重试走既有 attempt 链）。逐类判据矩阵补核验通道：
+    python3 server/engine/tests/observe_dsh_torn.py（真 dsh 观测工单四类样本+跨帧
+    类；UT 以固定文件桩复现，不依赖真 dsh）。"""
     proc = subprocess.Popen(["zstd", "-dc", str(path)],
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     out = proc.stdout
@@ -680,6 +686,261 @@ def _session_quarantine_blindspots(local_dsh: Path) -> List[str]:
         if "session" in low or low.endswith((".zst", ".zstd")):
             out.append(rel)
     return out
+
+
+# ---- dsh 撕裂点名自动隔离（t260922-11：检疫分歧转成动作）----
+# 背景：检疫两层判据（zstd -t + _session_jsonl_torn 整流逐行）刻意偏宽；dsh 侧
+# （仓外，dsh-session-persistence-jsonl）判据更严——生产实证（t260922-06）两层
+# 全过的档 dsh 仍拒读，段被永久楔死，只能人工隔离救。本组函数把分歧转成动作：
+# spawn 失败且日志含 dsh 撕裂文案 → 按 dsh 所用会话 id 定点隔离其 newest 会话档
+# （复用 _quarantine_session_file，命名/挪不删口径不变），重试复用既有 attempt 链
+# （上一轮隔离、下一轮干净 spawn——今日人工「隔离+retry_qc→恢复」的自动化）。
+# 复用面故障模式取舍清单（方案 gen1 §3，执行钩子①）：见各函数 docstring；
+# 零静默底线：检测不命中=调用方行为逐字节不变；证据面 action 只写存在性核验过的
+# 真相（绝不谎报「已隔离」）；事件/告警写失败不挡失败路径主链。
+
+# dsh 读侧拒读会话档的判据词族（merge 门前打回扩充：原表只收工单立票原文两形态，
+# 漏检「不带 Zstandard 前缀」的 corrupt 族与第三种措辞——t260922-07/t260922-10
+# 今日各中一次人工隔离，即旧表漏检实锚）。词表真源=dsh 读侧（仓外）；仓内观测面=
+# observe_dsh_torn.py 七类对照表（.sandbar/observe_matrix_gen7.txt，260922 实测）+
+# node.ts 透传（「恢复会话 … 失败（回落新建同 id 会话）：<dsh 原文>」，仓内无字面量）。
+# 四形态与七类+live 实证逐条对齐：
+# - "corrupt session log"（**无** Zstandard 前缀族）：header line is not valid JSON
+#   （binary_in_frame，观测表 :15）/ seq gap in committed region …（第二种形态，
+#   t260922-07 live、挂起项 260922 10:40 明文属本票验收面）。
+# - "corrupt Zstandard session log"（带前缀族）：first frame is not exactly one
+#   header line（truncated_line/empty_frame/no_trailing_newline/record_across_frames）/
+#   complete frame contains a torn JSONL record（t260922-06 立票原文）。
+# - "torn JSONL record"：撕裂 record 点名行（与上条常同现一行，命中按行只计一次）。
+# - "empty or header-less"：frame_torn/empty_file 的拒读措辞（观测表 :9/:11——既无
+#   corrupt 也无 torn 字样的第三种形态；本词组为 dsh 判据专属措辞，常规日志不撞）。
+# 匹配=逐行子串扫（_dsh_tear_hit）；一行命中多 marker 只计一行。新措辞入表须同时
+# 补 UT 用例（observe_dsh_torn.py 复跑核词表，防再漏一类）。
+DSH_TEAR_MARKERS: Tuple[str, ...] = (
+    "corrupt session log",
+    "corrupt Zstandard session log",
+    "torn JSONL record",
+    "empty or header-less",
+)
+# 告警/事件里引用的命中行封顶（先例 SESSION_NOTE_CAP：无上限清单会撑爆票据台面
+# 与记录面）。
+DSH_TEAR_HIT_CAP = 3
+
+
+def _dsh_tear_hit(log_text: str) -> List[str]:
+    """spawn 日志文本里 dsh 撕裂文案的命中行（封顶 DSH_TEAR_HIT_CAP 条、每行截断）。
+
+    判据词族=DSH_TEAR_MARKERS 四形态（带/不带 Zstandard 前缀的 corrupt 族、torn
+    record 点名、empty or header-less 措辞——逐类对齐观测表，见常量块注释）。
+    输入畸形（空/二进制经 errors=replace/超长行）一律不抛——检测面 fail 方向=
+    「不命中→不隔离」，行为回落现状（t260922-11 零误伤纪律）。"""
+    hits: List[str] = []
+    for line in (log_text or "").splitlines():
+        if any(m in line for m in DSH_TEAR_MARKERS):
+            hits.append(line.strip()[:500])
+            if len(hits) >= DSH_TEAR_HIT_CAP:
+                break
+    return hits
+
+
+def _parse_dsh_named_session(log_text: str) -> Optional[str]:
+    """辅证：从 dsh/runner 日志解析点名的会话 id。
+
+    文案真源=仓内 server/headless-resume/node.ts:106-108「dsh-headless-resume:
+    恢复会话 <id> 失败（回落新建同 id 会话）：…」。主锚=接线点在手的
+    env["DSH_HEADLESS_SESSION"]（_wedge_quarantine_once 的 env_session_id 入参）；
+    本解析只是辅证——corrupt 可来自 flush/create 期异步抛出（t260922-06 现场
+    实证：日志缺「同 id 新建仍失败」行=错误逃出 runner 的 catch），可解析行可能
+    整条缺席，缺席时机制照转（漂移=失去辅证，不空转）。无匹配返回 None。"""
+    m = re.search(r"恢复会话\s+(\S+?)\s+失败", log_text or "")
+    return m.group(1) if m else None
+
+
+def _newest_session_file_for_id(local_dsh: Path, sid: str) -> Optional[Path]:
+    """按会话 id 定点选档（t260922-11）：镜像 _scan_integration_sessions 的选档
+    口径——glob「*/<id>/*」精确父目录过滤（slug 中间层不硬编）+ 名字∈
+    SESSION_FILE_NAMES + _pick_newest_session 消歧；**绝不全树按 mtime 选档**
+    （implement∥design 真并行下跨 id 选档=误伤+漏判双向失真，纪律原文互指）。
+    只做名字层发现与存在性判定：名字不属双名的同目录文件不碰（盲区纪律，
+    _session_quarantine_blindspots 同源）；旧扁平 session-*.zstd 不在此列（不碰）。
+    返回 None=无可隔离档（该 id 目录缺失/双名档全不在/全不可读）。"""
+    if not sid:
+        return None
+    sessions_root = local_dsh / "sessions"
+    if not sessions_root.is_dir():
+        return None
+    candidates: List[Path] = []
+    try:
+        for f in sessions_root.glob("*/%s/*" % sid):
+            if f.is_file() and f.name in SESSION_FILE_NAMES:
+                candidates.append(f)
+    except OSError:
+        return None
+    return _pick_newest_session(candidates)
+
+
+def _session_probe_verdict(f: Path) -> Dict[str, Any]:
+    """引擎两层探针判据快照（工单要求④：与 dsh 原文判据并存可查）。**只记录不
+    放宽**——探针偏宽是既有立场（_session_jsonl_torn docstring），分歧处置不依赖
+    探针改判。子进程/探针异常不抛（记录面 fail-open，绝不弄挂隔离主链）。"""
+    verdict: Dict[str, Any] = {"zstd_t_rc": None, "jsonl_torn": None}
+    try:
+        verdict["zstd_t_rc"] = subprocess.run(
+            ["zstd", "-t", str(f)], capture_output=True).returncode
+    except Exception as e:  # noqa: BLE001——记录面容错带（_apply_env_signal 同款）
+        verdict["zstd_t_rc"] = "error:%s" % type(e).__name__
+    try:
+        verdict["jsonl_torn"] = _session_jsonl_torn(f)
+    except Exception as e:  # noqa: BLE001
+        verdict["jsonl_torn"] = "error:%s" % type(e).__name__
+    return verdict
+
+
+def _write_wedge_record(local_dsh: Path, record: Dict[str, Any]) -> None:
+    """隔离事件 JSON 落盘（t260922-11 要求④「可查记录」）。
+
+    落盘位=lane_dot_path(local_dsh.parent, "quarantine") 与被隔离档**同源目录**
+    （C5①：老泳道 .suyou 粘滞泳道上事件与档不分家，成功注记 glob 同源）。文件名
+    带 gen/attempt/秒级时间戳防同参碰撞。记录面写失败绝不挡隔离主链（观测增强，
+    best-effort 语义+warning 点名，同 dsh_pin 落票面失败的既有立场）。"""
+    try:
+        qdir = lane_dot_path(local_dsh.parent, "quarantine", create=True)
+        name = "session-wedge-%s-%s-gen%s-a%s-%s.json" % (
+            record.get("ticket") or "ticket", record.get("stage") or "stage",
+            record.get("gen"), record.get("attempt"), time.strftime("%H%M%S"))
+        (qdir / name).write_text(
+            json.dumps(record, ensure_ascii=False, indent=1) + "\n", "utf-8")
+    except Exception as e:  # noqa: BLE001——观测面 fail-open
+        activity.logger.warning(
+            "[sessions] 隔离事件记录落盘失败（不挡隔离主链）：%s: %s",
+            type(e).__name__, e)
+
+
+def _wedge_attempt() -> int:
+    """隔离事件的 attempt 序号（C5③，来源方案定死防实现现编）：Temporal attempt
+    （重试语义真源，经 _activity_info 间接层——UT 可注假 info）；无 activity 上下文
+    （UT 直调/无 SDK 桩）回落 0。序号拿不到不挡失败路径。"""
+    try:
+        return int(getattr(_activity_info(), "attempt", 0) or 0)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _wedge_quarantine_once(local_dsh: Path, env_session_id: str, log_text: str,
+                           ticket_id: str, stage_id: str, gen: int,
+                           attempt: int) -> Optional[str]:
+    """dsh 点名撕裂 → 定点隔离一次（t260922-11 核心；接线点=四处 spawn 失败分支）。
+
+    语义（工单验收②③④ + gen1 方案 §3/§4）：
+    - 日志无撕裂文案命中 → 返回 None，调用方行为逐字节不变（零误伤）；
+    - 命中 → 会话 id 取舍（C4）：主锚=env_session_id（DSH_HEADLESS_SESSION=引擎
+      告诉 dsh 的 id）；辅证=_parse_dsh_named_session(log_text)。不一致=隔离主锚档
+      +warning 双记（两源同出自 env，不一致=日志污染，主锚优先）；主锚缺而辅证在=
+      辅证补位（dsh 自己点名的 id 仍可定位档）；两源皆缺=只告警不隔离（无会话延续
+      面不 resume 旧档，本就不会楔死）；
+    - 只隔离该 id 的 newest 会话档（dsh 读的就是 newest；动 dsh 不读的旧代健康档=
+      误隔离，反向事故——取舍清单 §3.2）；名字不属双名的文件不碰（盲区纪律）；
+    - 隔离动作复用 _quarantine_session_file（挪不删，命名/留档口径不变）。该函数
+      静默吞 OSError 且恒 None，**成败以挪后存在性核验落档**（C2；Path.exists() 对
+      stat OSError 本就返回 False，核验处不再包 try——防过度工程）。R1 语义注记：
+      dst 同名冲突时 shutil.move 是覆盖语义（同设备 os.rename 静默替换）不抛错——
+      此时原位不在+dst 在=quarantined 自洽，事件已记 dst；覆盖旧留档是既有函数既有
+      行为，本票不动其函数体即不放大；
+    - 重试载体=既有 attempt 链（隔离单调消耗+attempt 上限兜底，本函数无任何循环，
+      工单「不得静默重试成死循环」）。
+
+    返回人读 note（调用方拼进 raise/_err 文案）；None=无命中。"""
+    hits = _dsh_tear_hit(log_text)
+    if not hits:
+        return None
+    named = _parse_dsh_named_session(log_text)
+    sid = (env_session_id or "").strip()
+    id_note = "主锚env=%s" % (sid or "缺")
+    if named and sid and named != sid:
+        id_note += "（辅证日志=%s，不一致按主锚隔离并双记）" % named
+    elif named and not sid:
+        sid = named
+        id_note = "主锚env缺，辅证日志=%s" % named
+    if not sid:
+        activity.logger.warning(
+            "[sessions] dsh 撕裂点名但无法定位会话档（env 无 DSH_HEADLESS_SESSION "
+            "且日志无可解析 id；不隔离只告警，行为同现状）：%s", hits)
+        return "dsh 点名撕裂但无法定位会话档（两源皆缺，未隔离）：%s" % hits[0]
+    target = _newest_session_file_for_id(local_dsh, sid)
+    if target is None:
+        activity.logger.warning(
+            "[sessions] dsh 撕裂点名（%s）但未发现 %s 的双名会话档（可能已被上一"
+            "轮隔离或目录缺失）——不隔离只告警：%s", id_note, sid, hits)
+        return "dsh 点名撕裂但未发现会话档（id=%s，未隔离）：%s" % (sid, hits[0])
+    probe = _session_probe_verdict(target)
+    dst = lane_dot_path(local_dsh.parent, "quarantine", create=True) / (
+        "torn-%s-%s" % (target.parent.name, target.name))
+    _quarantine_session_file(local_dsh, target, "torn-jsonl-dsh-named")
+    # 成败以挪后存在性核验落档（C2）：_quarantine_session_file 静默吞 OSError 恒 None，
+    # 调用面拿不到信号——原位仍在=未隔离，绝不记「已隔离」（证据面不谎报）。
+    moved = not target.exists()
+    action = "quarantined" if moved else "move-failed"
+    _write_wedge_record(local_dsh, {
+        "ticket": ticket_id, "stage": stage_id, "gen": gen, "attempt": attempt,
+        "session_id": sid, "session_id_aux": named or "",
+        "file": str(target), "dst": str(dst), "action": action,
+        "dsh_tear_lines": hits, "probe": probe,
+    })
+    if moved:
+        activity.logger.warning(
+            "[sessions] dsh 点名撕裂会话档已自动隔离（%s，attempt=%s，gen=%s）："
+            "dst=%s；引擎探针判据=%s（探针偏宽是既有立场，以 dsh 点名为准）；"
+            "下一轮 attempt 自动重试：%s",
+            id_note, attempt, gen, dst, probe, hits[0])
+        return ("dsh 点名撕裂档已自动隔离（id=%s，dst=%s，引擎探针=%s，attempt=%s）"
+                "；下次 attempt 自动重试" % (sid, dst, probe, attempt))
+    activity.logger.warning(
+        "[sessions] dsh 点名撕裂会话档隔离未发生（move-failed，原位仍在，留待"
+        "下轮 attempt/人工）：file=%s：%s", target, hits[0])
+    return ("dsh 点名撕裂档隔离未发生（move-failed，file=%s，未隔离）：%s"
+            % (target, hits[0]))
+
+
+def _apply_session_wedge_note(res: StageResult, cwd: Path,
+                              ticket_id: str = "",
+                              stage_id: str = "") -> StageResult:
+    """段结果的自动隔离注记归位（t260922-11 要求④「票面可见面」）。
+
+    quarantine 目录下有本 (ticket, stage) 的隔离事件 → 向 res.report/evidence 追加
+    「[引擎注记]」段——隔离后重试恢复的成功案例也留票面痕。无记录零改动（report
+    逐字节不变）；quarantine 目录不存在=零改动（R2：显式短路，不靠 glob 空序隐式
+    成立）；畸形事件档跳过不判（记录面，非执法面）。全 try/except fail-open：
+    注记是观测面，绝不拦交付链（_apply_env_signal 同款纪律）。
+    挂点=主面幂等缓存+真 spawn 两个 return 点（与 _apply_env_signal 同款不对称，
+    取舍清单 §3.3/C5④：arbitrate/acceptance/inspect 三面成功注记不挂=有意选择）。"""
+    try:
+        qdir = lane_dot_path(cwd, "quarantine")
+        if not qdir.is_dir():
+            return res
+        items = sorted(qdir.glob("session-wedge-%s-%s-*.json"
+                                 % (ticket_id, stage_id)))
+        lines: List[str] = []
+        for p in items:
+            try:
+                d = json.loads(p.read_text("utf-8"))
+            except Exception:  # noqa: BLE001——单档畸形不拖垮注记
+                continue
+            lines.append("%s（action=%s，attempt=%s）→ %s" % (
+                d.get("file"), d.get("action"), d.get("attempt"), d.get("dst")))
+        if not lines:
+            return res
+        note = ("[引擎注记] 本段曾自动隔离 dsh 点名撕裂会话档 %d 件：\n%s\n"
+                "（复用既有检疫口径挪不删，重试经既有 attempt 链；t260922-11）"
+                % (len(lines), "\n".join("  - " + x for x in lines)))
+        res.report = (res.report or "") + "\n\n" + note
+        res.evidence = (res.evidence or "") + (
+            "\n[sessions] auto-quarantine records: "
+            + ", ".join(p.name for p in items))
+        activity.logger.info("[%s/%s] 会话楔死自动隔离注记归位：%d 件",
+                             ticket_id, stage_id, len(lines))
+        return res
+    except Exception:  # noqa: BLE001——观测面 fail-open，绝不拦交付链
+        return res
 
 
 # Project key whitelist (credential exit, M1-2): same character set as PROJECT_KEY_RE
@@ -2494,6 +2755,11 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
             # worker 可能死在「agent 交付后、归位前」，日志文件仍在原处。
             res = _apply_env_signal(cached, args.log_file,
                                     args.ticket_id, args.stage_id)
+            # t260922-11（挂点①幂等缓存）：会话楔死自动隔离注记归位——隔离后重试
+            # 恢复的成功案例也留票面痕（要求④）。只挂主面两 return 点=与
+            # _apply_env_signal 同款不对称（取舍清单 §3.3/C5④ 有意选择）。
+            res = _apply_session_wedge_note(res, cwd,
+                                            args.ticket_id, args.stage_id)
             # t260921-04（挂点①幂等缓存）：developer 段集成禁跑执法扫描——缓存
             # 命中路径同样执法（重试/重启后红不丢：_read_result 已带回字段，
             # 归位幂等不重复改写）。
@@ -2640,17 +2906,36 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
                     # 与 stub 路径（旋钮直注）有意不挂——见 _apply_env_signal。
                     res = _apply_env_signal(res, args.log_file,
                                             args.ticket_id, args.stage_id)
+                    # t260922-11（挂点②真 spawn）：会话楔死自动隔离注记归位
+                    # （同挂点①；成功恢复案例的票面可见痕）。
+                    res = _apply_session_wedge_note(res, cwd,
+                                                    args.ticket_id, args.stage_id)
                     # t260921-04（挂点②真 spawn）：developer 段集成禁跑执法扫描
                     # ——stub 与 lane_dsh 预检拒绝路径同样有意不挂（理由与取舍
                     # 清单见 _apply_integration_discipline docstring）。
                     return _apply_integration_discipline(res, cwd, args)
             rc = proc.poll()
             if rc is not None:
+                # t260922-11：先收尸再动档（reap 幂等——finally 的二次 reap 无害，
+                # 成功路径 :2520 已有双调先例），晚写者排干后再判定/隔离。
+                proc.reap(args.ticket_id, args.stage_id)
+                # t260922-11 分歧转动作：日志含 dsh 撕裂文案 → 按 dsh 所用会话 id
+                # 定点隔离一次（挪不删，成败以存在性核验落事件）；重试=本活动既有
+                # RETRY 链的下一轮 attempt（重进时 _quarantine_torn_sessions 扫不到
+                # 已挪档 → 干净 spawn）。无命中 → wedge 返回 None，下面的 raise 逐
+                # 字节保持现状。id 主锚=env（C4）：corrupt 可来自 flush/create 期
+                # 异步抛出，日志可解析行可能整条缺席，env 锚不受影响。
+                wedge_note = _wedge_quarantine_once(
+                    cwd / ".dsh", env.get("DSH_HEADLESS_SESSION") or "",
+                    _log_tail(args.log_file, 20000),
+                    args.ticket_id, args.stage_id, args.gen, _wedge_attempt())
                 # The agent process exited without writing a result file = an
                 # infrastructure / usage fault → raise so Temporal retries
-                raise RuntimeError(
-                    "headless agent 退出（rc=%s）但未写结果文件 %s（日志 %s）"
-                    % (rc, rfile, args.log_file))
+                detail = ("headless agent 退出（rc=%s）但未写结果文件 %s（日志 %s）"
+                          % (rc, rfile, args.log_file))
+                if wedge_note:
+                    detail += "；" + wedge_note
+                raise RuntimeError(detail)
             activity.heartbeat(json.dumps(
                 {"stage": args.stage_id, "gen": args.gen, "polls": polls,
                  "session_kb": _session_kb(cwd)}))
@@ -6664,8 +6949,18 @@ async def _arbitrate_body(args: AgentStageArgs) -> StageResult:
                     return res
             rc = proc.poll()
             if rc is not None:
-                raise RuntimeError("arbitrate agent 退出（rc=%s）但未写结果文件 %s（日志 %s）"
-                                   % (rc, rfile, args.log_file))
+                # t260922-11：先收尸再动档（幂等，finally 二次 reap 无害）；撕裂
+                # 点名 → 定点隔离一次，重试=本活动既有 retry 链下一轮 attempt。
+                proc.reap(args.ticket_id, "arbitrate")
+                wedge_note = _wedge_quarantine_once(
+                    cwd / ".dsh", env.get("DSH_HEADLESS_SESSION") or "",
+                    _log_tail(args.log_file, 20000),
+                    args.ticket_id, "arbitrate", args.gen, _wedge_attempt())
+                detail = ("arbitrate agent 退出（rc=%s）但未写结果文件 %s（日志 %s）"
+                          % (rc, rfile, args.log_file))
+                if wedge_note:
+                    detail += "；" + wedge_note
+                raise RuntimeError(detail)
             activity.heartbeat(json.dumps({"stage": "arbitrate", "gen": args.gen,
                                            "polls": polls, "session_kb": _session_kb(cwd)}))
             polls += 1
@@ -7004,8 +7299,20 @@ async def _acceptance_walkthrough_body(args: AgentStageArgs) -> StageResult:
                     return res
             rc = proc.poll()
             if rc is not None:
-                raise RuntimeError("acceptance agent 退出（rc=%s）但未写结果文件 %s（日志 %s）"
-                                   % (rc, rfile, args.log_file))
+                # t260922-11：先收尸再动档（幂等，finally 二次 reap 无害）；撕裂
+                # 点名 → 定点隔离一次（id 主锚=env 的 <ticket>-acceptance，:6802
+                # 注入）；重试=本活动既有 retry 链下一轮 attempt。
+                proc.reap(args.ticket_id, "acceptance_walkthrough")
+                wedge_note = _wedge_quarantine_once(
+                    cwd / ".dsh", env.get("DSH_HEADLESS_SESSION") or "",
+                    _log_tail(args.log_file, 20000),
+                    args.ticket_id, "acceptance_walkthrough", args.gen,
+                    _wedge_attempt())
+                detail = ("acceptance agent 退出（rc=%s）但未写结果文件 %s（日志 %s）"
+                          % (rc, rfile, args.log_file))
+                if wedge_note:
+                    detail += "；" + wedge_note
+                raise RuntimeError(detail)
             activity.heartbeat(json.dumps({"stage": "acceptance_walkthrough", "gen": args.gen,
                                            "polls": polls, "session_kb": _session_kb(cwd)}))
             polls += 1
@@ -7201,7 +7508,19 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
             await asyncio.sleep(min(float(POLL_SEC), 5.0))
         text = _read_file_tail(out_f)
         if rc != 0:
-            return _err("agent 退出码 %s（未完成）；输出尾：%s" % (rc, text[-400:]))
+            # t260922-11：软错分支接线（gen1 方案 §5 如实分型——本面无 raise，失败=
+            # _err 返回；先收尸再动档，幂等）。撕裂点名 → 定点隔离一次（local_dsh=
+            # 本面独立 agent_home=home，目录语义与该面既有检疫同源）；本面无重试链
+            # （RETRY_INSPECT=1），隔离收益落下一巡检期重进。gen 无概念取 0。
+            proc.reap(ticket_id, "inspect")
+            inspect_wedge = _wedge_quarantine_once(
+                home, env.get("DSH_HEADLESS_SESSION") or "",
+                _log_tail(out_f, 20000),
+                ticket_id, "inspect", 0, _wedge_attempt())
+            msg = "agent 退出码 %s（未完成）；输出尾：%s" % (rc, text[-400:])
+            if inspect_wedge:
+                msg += "；" + inspect_wedge
+            return _err(msg)
         try:
             findings = with_ids(parse_agent_findings(text))
         except InspectParseError as e:
