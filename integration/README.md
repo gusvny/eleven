@@ -509,3 +509,29 @@ F3 承担。设计阶段基线曾按扁平信封/钉名 staleness.ts 初钉，ca
 引擎侧配套（server/engine/）：`dsh_pin.py` 版本面解析器 + worker meta 增 `dsh` 键 +
 spawn 落票面 `dsh_pin_<tag>.json` + 四旋钮（SANDBAR_AGENT_CMD / SANDBAR_AGENT_IMAGE /
 SANDBAR_DSH_EXPECTED_VERSION / SANDBAR_DSH_STRICT，缺省=现行为）。
+
+## 第 10 组（t260922-06）—— 会话 id 寻址口径 / resume 专项收口（seam 矩阵 #5，插件半边）
+
+`integration/t260922-06/` 两场景（灰盒 L2，fake-dsh 桩缝，零 live 零凭据零网络秒级，池=ro）。
+票面根因经 create_plan 源码实证修正：0.1.5 原生支持自定义 id 寻址（单点真源=自定义 id 本身，
+无需映射表），真崩点=插件 summarize 消费 0.1.5 已移除的 `Session.events` 形状
+（`events is not iterable`，每次 spawn 跑完 exit 1）。本组守**插件半边**（写/续侧行为 +
+装载/物化缝）；读侧半边归 developer 引擎 UT（test_t260922_06_resume_addressing.py）与
+t260916-23 dualname 族；0.1.1/0.1.5 live 双版对照（验收④）归升级门槛机械段
+（RUNBOOK_GATE + probe --version；其 cold-start 缺口归 t260922-03/判据票收口）。
+
+- **t260922-06-resume-seam-plugin-faces**（ro）：以临时桩包树（@deepseek-ai/* 包名即接缝
+  契约面）驱动真实 node.ts 公共入口 apply()，八面收割 stderr/stdout/退出码/桩账本——
+  legacy(0.1.1) 与 v3(0.1.5) 双形状 resume 成功且装配级输出全等、自定义 id 原样进
+  agents.resume（不造 uuid）、形状不识别/返回缺 .agent（四处调用点全覆盖）/seq 缺口
+  一律响亮点名 exit 1、回落链（KI-059 撕裂链形状）逐级显式宣告「回落新建同 id 会话」
+  「改用全新会话 id（上下文不可恢复）」、全局判据=stderr 全行词汇表形状零裸栈。
+- **t260922-06-resume-seam-plugin-wiring**（ro）：装载/物化缝（方案 §5.1「TS loader
+  sibling 导入」遗留风险的机械代理 + t260913-04 物化缝同族）——整目录拷贝副本内按
+  node.ts 同款 URL 形状导入 summarize.js 自足可装载且双形状 golden 不变、node.ts 的
+  URL sibling 引用逐个闭合、summarize.js 零依赖契约静态守卫（破约=纯函数单测网静默
+  死亡在此响亮）、副本含全部插件文件。
+
+与 developer L1（server/headless-resume/test/summarize.test.mjs 纯函数语义）intent 分工：
+彼守 summarize.js 语义 golden/畸形族，本组守装配面（守卫接线/回落链次序/退出码）与
+物化装载面——纯函数单测过≠守卫接线在、真源单测过≠副本可装载。

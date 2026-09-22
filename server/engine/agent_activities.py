@@ -324,6 +324,10 @@ def _quarantine_session_file(local_dsh: Path, f: Path, reason: str) -> None:
 # server/plugins/workbench/src/host/session-discovery.ts，行为须一致：mtime 最新、
 # 平局旧名优先）。只做名字层发现与路径返回，不读内容、不引压缩依赖（内容解析归
 # dsh/既有 zstd CLI 通路，本票零行为变更：只有旧名文件时发现集与改前逐字节一致）。
+# id 寻址口径（t260922-06 源码实证）：0.1.5 会话目录两层半径不变
+# （<sessions>/<--projectKey(cwd)-->/<encodeSegment(id)>/），自定义 id 原生有效
+# （目录名=encodeSegment(id)、头记录 id=自定义 id、resume 按 id 全项目扫描）——
+# 本读侧 sub 目录名匹配规则与写/续侧同源同 id，「读得到即可续上」。
 SESSION_FILE_NAMES: Tuple[str, ...] = ("session.jsonl.zstd", "session.v3.jsonl.zstd")
 
 
@@ -2262,6 +2266,16 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
     # the main repo copy for old lanes, and if neither exists this section is skipped
     # (degrades to the stock one-shot, no hard failure). SANDBAR_AGENT_RESUME=0 turns
     # it off with one switch.
+    #
+    # Session-id addressing (t260922-06, source-verified against dsh 0.1.5-rc.2):
+    # no mapping is needed — the custom id itself is the single source of truth on
+    # BOTH generations (0.1.5 SessionStore.prepare adopts the caller id verbatim,
+    # header id = custom id, session dir = encodeSegment(id), resume scans every
+    # project dir for encodeSegment(id) via findLog). The stock runner's uuid dirs
+    # exist only because stock passes `session-<randomUUID()>` itself. The real
+    # 0.1.5 seam was shape-level (Session.events array removed), fixed plugin-side
+    # in server/headless-resume/summarize.js + node.ts (dual-shape reader, loud
+    # guards); engine-side this section stays byte-identical.
     if os.environ.get("SANDBAR_AGENT_RESUME", "1") != "0" and role:
         runner = cwd / "server" / "headless-resume" / "node.ts"
         if not runner.is_file() and agent_runtime.runtime_mode() == "docker":
