@@ -62,6 +62,22 @@ EXEMPT_SERVER_INTEG = {
     "integration/t260907-04/sc_naming_grep_assert.py",
     "server/admin.log",
 }
+# 运行产物根（git 忽略目录：server/engine/.gitignore 忽略 data/、根 .gitignore 忽略 out/）
+# ——里面是每轮运行新增的日志与巡检输出，历史记录非活指针，与 server/admin.log 同族。
+# **按目录根判定、不逐文件列名**：列名制必被下一轮新文件名打穿（260922 实证：命中
+# worker-t2609*.log 与 out/inspection/*.json，文件天天新增）。边界：仅此两个运行产物根；
+# 受跟踪面（含泳道新写文件、活文档）一律不豁免——收口口径未放宽，只把「运行产物」与
+# 「仓库内容」分开。改这条锚点要来 main 侧（共享守卫期望值纪律）。
+EXEMPT_RUNTIME_ROOTS = (
+    "server/engine/data/",
+    "server/engine/out/",
+)
+
+
+def _exempt(rel):
+    """豁免判定单点：历史材料列名 + 运行产物根。"""
+    return rel in EXEMPT_SERVER_INTEG or any(
+        rel.startswith(r) for r in EXEMPT_RUNTIME_ROOTS)
 # docs/ 已声明遗留票清单（本票不改 docs，命中封口在此清单内）。
 LEGACY_DOCS_ALLOW = {
     "docs/design/工单工作流台设计.md",
@@ -103,7 +119,7 @@ def scan_tokens(rel_root):
         for fn in filenames:
             full = os.path.join(dirpath, fn)
             rel = os.path.relpath(full, REPO)
-            if rel in EXEMPT_SERVER_INTEG:
+            if _exempt(rel):
                 continue
             try:
                 with open(full, "rb") as f:
@@ -117,7 +133,8 @@ def scan_tokens(rel_root):
 
 
 def main():
-    print("== 1. server/ + integration/ 旧 token 零残留（全后缀，豁免列名 %d 件）" % len(EXEMPT_SERVER_INTEG))
+    print("== 1. server/ + integration/ 旧 token 零残留（全后缀，豁免列名 %d 件 + 运行产物根 %d 个）"
+          % (len(EXEMPT_SERVER_INTEG), len(EXEMPT_RUNTIME_ROOTS)))
     hits = {}
     hits.update(scan_tokens("server"))
     hits.update(scan_tokens("integration"))

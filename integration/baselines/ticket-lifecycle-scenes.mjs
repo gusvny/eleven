@@ -44,7 +44,7 @@ const POC = join(REPO, 'server', 'engine')
 const COMPOSE = join(REPO, 'server', 'docker-compose.test.yml')
 export const PROD_ADDR = '127.0.0.1:7233'
 export const TEST_ADDR = '127.0.0.1:17233'
-export const TEST_NS = 'suyou-test'  // naming-compat
+export const TEST_NS = 'sandbar-test'
 const EPIC_CODE = 'integ-e2e'
 
 /* ------------------------------------------------------------------ assertions */
