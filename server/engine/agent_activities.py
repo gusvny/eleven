@@ -6388,7 +6388,8 @@ async def run_handover_legs(handover_runs, cwd: Path) -> Dict[str, Any]:
 async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
                          apply_skip_pools: bool = False,
                          handover_runs=None,
-                         ledger_source: str = "") -> IntegrationRunResult:
+                         ledger_source: str = "",
+                         only_names=None) -> IntegrationRunResult:
     """A thin shell (thinned by host order t260902): declaration reading, command
     execution and contract parsing all live in verify_lane lane=integ (one
     implementation + one parser); this function only places the order and translates
@@ -6418,8 +6419,17 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     # Fully async: create_subprocess + wait_for; on timeout, kill first, then report.
     # t260922-12：台账记账来源经 env 注入闸（缺省不注入=老载荷零改动）。
     _sub_env = None
+    _extra_env = {}
     if ledger_source:
-        _sub_env = dict(os.environ, SANDBAR_INTEG_LEDGER_SOURCE=str(ledger_source))
+        _extra_env["SANDBAR_INTEG_LEDGER_SOURCE"] = str(ledger_source)
+    # t260923 D 两层复跑：定点面经 SANDBAR_SCENARIO_ONLY 点名（与 t260922-12 基线
+    # 歧义点跑同注入模式，执行器 fail-closed 校验在册性、expected=点名在册——
+    # ran==expected 机械不变式对定点跑同样成立）。空/畸形名单=不注入=全量跑。
+    only_names = [str(n).strip() for n in (only_names or []) if str(n).strip()]
+    if only_names:
+        _extra_env["SANDBAR_SCENARIO_ONLY"] = ",".join(only_names)
+    if _extra_env:
+        _sub_env = dict(os.environ, **_extra_env)
     p = await asyncio.create_subprocess_exec(
         "python3", admin, "call", "verify_lane",
         # t260913-03：载荷面薄壳只下单——是否按泳道声明排除池由调用方（每票段）显式
@@ -6458,6 +6468,8 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     out.excluded_pools = [str(x) for x in (_pe.get("excluded_pools") or [])]
     out.excluded_count = int(_pe.get("excluded_count") or 0)
     out.forced_by = [str(x) for x in (_pe.get("former_force_assets") or [])]
+    # t260923 D：跑面回执回显（少跑必须可见）——空=全量；非空=定点复跑面。
+    out.only_names = list(only_names)
     if _pe.get("applied"):
         _tail = "本轮跳过池=%s（少 %d 条）" % (
             "、".join(str(x) for x in (_pe.get("declared") or out.excluded_pools)),
@@ -6565,6 +6577,8 @@ async def _run_integration_tests_body(args: IntegrationRunArgs) -> IntegrationRu
                                 apply_skip_pools=bool(getattr(args, "apply_skip_pools", False)),
                                 # t260917-08：移交命令随派单下发（缺省空=老载荷/巡检零改动）
                                 handover_runs=list(getattr(args, "handover_runs", None) or []),
+                                # t260923 D：定点复跑面透传（空=全量；决策在 dev_lane）
+                                only_names=list(getattr(args, "only_names", None) or []),
                                 # t260922-12：集测段记账来源=lane:<票>（台账单写者=闸）
                                 ledger_source="lane:%s" % args.ticket_id)
 

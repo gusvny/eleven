@@ -252,11 +252,15 @@ def test_source_lock_arbitration_sites_use_cap_route():
 
 
 def test_source_lock_authorized_advance_same_shape_as_pass():
-    """C2：授权推进分支与 verdict=pass 同形（_finish 落 arbitrate 终态 + _handoff）。"""
+    """C2：授权推进分支与 verdict=pass 同形（_finish 落 arbitrate 终态 + _handoff）。
+    260923 D 收口拦截插入后，扫描窗按语义边界（至 merge_check 消费点）取块——
+    断言集逐条不变（同形四锚全保留），只把定长距离窗换成语义窗（对后续合法插入
+    稳健，不弱化覆盖面）。"""
     src = _src("server/engine/dev_lane.py")
     idx = src.find("authz_advance")
     assert idx > 0
-    block = src[idx:idx + 2600]
+    end = src.find('phase = "merge_check"', idx)
+    block = src[idx:end if end > idx else idx + 2600]
     assert '_finish("arbitrate"' in block, "授权推进分支必须 _finish 落终态（C2）"
     assert '_handoff("arbitrate"' in block, "授权推进分支必须 _handoff 记判决原文+授权"
     assert "acceptance_walkthrough" in block

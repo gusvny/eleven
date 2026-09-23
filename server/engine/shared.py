@@ -311,6 +311,10 @@ class IntegrationRunArgs:
     # worker 执行面逐条代跑。缺省空=老载荷/巡检/老回放零改动。命令来源=dev_lane 的
     # collect_handover_runs（results + meta['env_handover_pending'] 债表，消费后销账）。
     handover_runs: List[Dict[str, str]] = field(default_factory=list)
+    # t260923 D 两层复跑：定点复跑面（SANDBAR_SCENARIO_ONLY 语义，执行器按名点跑、
+    # expected=点名在册、fail-closed 校验在册性）。空=全量跑（放行唯一依据的收口
+    # 跑形态）。爆炸半径/首轮决策在 dev_lane 调用点（单写者=targeted_rerun_plan）。
+    only_names: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -338,6 +342,9 @@ class IntegrationRunResult:
     excluded_pools: List[str] = field(default_factory=list)  # 实际排除的池名（applied 时）
     excluded_count: int = 0                                  # 被排除条目数（本轮不在册）
     forced_by: List[str] = field(default_factory=list)       # 旧口径例外分支命中面（宿主管 260914 撤除例外分支：不再拦，仅留痕）
+    # t260923 D 两层复跑：本轮实际跑面回显（少跑必须可见）——空=全量；非空=定点
+    # 复跑面（点名在册面），放行判定只认全量跑（dev_lane 收口拦截）。
+    only_names: List[str] = field(default_factory=list)
     # t260917-08 移交命令单列计数（不进 ran/passed/failed 主口径=闸判定零改动，红线④）：
     # 前序 agent 段沙箱受限期间移交的验证命令，本段 worker 执行面逐条代跑的结果。
     handover_ran: int = 0
@@ -549,6 +556,53 @@ def tests_round_step(verdict: str, tests_rounds: int, exempt_rounds: int, *,
             "env-side-red" if env_side_red
             else "jitter-green" if jitter_green else "known-red")
     return tests_rounds + 1, 0, True, "counted"
+
+
+# ---------------- D 两层复跑 + 爆炸半径（260923 宿主直修令） ----------------
+
+# 共享基座前缀（爆炸半径判据，宁宽勿窄——命中=禁定点恒全跑）：引擎内核/worker/
+# 闸工具/执行器与共享库/道声明。只有票面局部改动（票目录、app/ 等）才允许定点。
+_SHARED_BASE_PREFIXES = (
+    "server/engine/", "server/tools/", "server/dsh/", "server/admin.py",
+    "integration/run_scenarios.py", "integration/stage_docker.py",
+    "integration/lint_tests.py", "integration/scenario_ledger.py",
+    "integration/lib_", "integration/with_stage.sh", "integration/tests/",
+    "verify.yaml",
+)
+
+
+def blast_radius(write_set) -> str:
+    """爆炸半径分类（纯函数）："shared"（写集含共享基座面，禁定点）| "localized"。
+    空写集/畸形入参=shared（保守恒全跑——宁可慢不可窄，消费外部输入 fail-closed）。"""
+    if not isinstance(write_set, (list, tuple)):
+        return "shared"
+    seen = 0
+    for raw in write_set:
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        seen += 1
+        if raw.strip().lstrip("./").startswith(_SHARED_BASE_PREFIXES):
+            return "shared"
+    return "localized" if seen else "shared"
+
+
+def targeted_rerun_plan(write_set, prev_red_names, first_run: bool = False):
+    """定点复跑面（纯函数，260923 D）：上一轮红项名（去重、剔 __ 合成条目、剔空）。
+    返回空列表=全量跑语义（首轮/共享基座/无上轮红名/畸形名单——调用方不得注入
+    SANDBAR_SCENARIO_ONLY，全量是唯一放行依据的收口形态）。"""
+    if first_run or blast_radius(write_set) != "localized":
+        return []
+    if not isinstance(prev_red_names, (list, tuple)):
+        return []
+    out = []
+    for raw in prev_red_names:
+        if not isinstance(raw, str):
+            continue
+        n = raw.strip()
+        if not n or n.startswith("__") or n in out:
+            continue
+        out.append(n)
+    return out
 
 
 # 供给装配失败的机械签名（t260917-09 gen11 打回补）。真源唯一=verify_lane 乙段

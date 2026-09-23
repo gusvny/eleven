@@ -154,6 +154,7 @@ with workflow.unsafe.imports_passed_through():
         result_file_for,
         sign_face_fingerprint,
         stage_workspace,
+        targeted_rerun_plan,
     )
 
 SHORT = timedelta(minutes=2)
@@ -292,6 +293,14 @@ ARBITRATE_REFUSAL_PATCH_ID = "dev-lane-arb-refusal-v1"
 # 唤醒路径上），不存在「重放期先评 False、活唤醒须翻 True」的路径；实现后若发现绕行
 # 路径再按 _blocked_over_limit 同形补后缀。
 TESTS_STREAK_PATCH_ID = "dev-lane-tests-streak-v1"
+# t260923 D 两层复跑 + 爆炸半径（宿主直修令 260923，不开票）：中间轮定点复跑只作
+# 快反馈（上一轮红项面，SANDBAR_SCENARIO_ONLY 点名），放行只认收口全量跑——pass
+# 落在定点跑上时引擎机械补收口全量跑：零新增红（闸 blockers 空且无启动级 error）
+# → pass 成立；有新增红 → 判决作废回仲裁重裁（全量面）。爆炸半径：写集命中共享
+# 基座（引擎内核/worker/verify 闸/执行器与共享库）禁定点恒全跑；首轮恒全跑。
+# 决策单写者=shared.targeted_rerun_plan。同构布尔门：旧历史（无本 marker）逐字
+# 旧行为（恒全量跑），在途票不追溯。
+TARGETED_RERUN_PATCH_ID = "dev-lane-targeted-rerun-v1"
 # prepare_ui_evidence activity timeout: must be **clearly larger** than the subprocess
 # timeout inside the activity (agent_activities.UI_CAPTURE_TIMEOUT_SEC=240s), otherwise
 # Temporal kills the activity first and the subprocess's own timeout recovery never runs.
@@ -445,6 +454,10 @@ FLOW_BRIEF = {
         "不是让你换法子再写）；"
         "verdict=code-fault 实现问题 → report 写**集成测试报告**（失败场景、复现要点、"
         "期望 vs 实际），打回 developer 修改。除三态外不许发明其它结论。"
+        "两层复跑口径（D，260923）：中间轮可能是定点复跑面（回执 only_names 点名本轮"
+        "在册面），只作快反馈——未点名场景不在本轮在册、不是条目丢失，不得据缺失判红；"
+        "放行只认收口全量跑（你判 pass 后引擎机械补全量跑复核零新增红，有新增红则判决"
+        "作废回你重裁）。"
         "归因纪律（t260904-12 三态判据）：先固定问句「环境面还是产品面？」——"
         "ENV_FAIL（exit 2，缺环境）归 tests-fault 供给面：修复=补测试环境/供给声明"
         "（乙段 verify.yaml supply），绝不把环境红记成代码问题；FAIL（exit 1）归产品。"
@@ -906,6 +919,38 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
         if self._rework is not None or SANDBAR_TEST_DISABLE_KI061:
             return False
         return workflow.patched("%s#%d" % (KI061_WAKE_RESET_PATCH_ID, n))
+
+    # ---------- t260923 D：收口全量跑（串行/平行两分支共用） ----------
+    def _integ_run_args(self, only_names=()):
+        """集成跑入参构造（t260913-03 唯一真站锁的单写者收拢，260923 D）：
+        apply_skip_pools 策略值只此一处显式置位（语句字面量唯一命中=锁的判据）；
+        主跑传定点面（可空），收口跑传空=全量。attempt=本代数口径与既有调用点
+        逐元素等值。"""
+        return IntegrationRunArgs(
+            ticket_id=self.ticket_id,
+            worktree=str(self.meta.get("worktree") or ""),
+            attempt=self._gen("run_integration_tests") + 1,
+            # t260913-03：每票段唯一 true 站（策略面只在调用点显式置位；write_set
+            # 供例外分支求交）
+            write_set=list(self.meta.get("write_set") or []),
+            apply_skip_pools=True,
+            handover_runs=self._handover_debt_legs(),
+            only_names=list(only_names or []))
+
+    async def _closing_full_run(self):
+        """D 收口跑（260923 宿主直修令）：定点跑后的全量跑=唯一放行依据。与主跑
+        同形入参（同代数、同策略值，走 _integ_run_args 单写者），仅 only_names
+        为空（全量面，不注入 SANDBAR_SCENARIO_ONLY）。回执形状同
+        IntegrationRunResult。"""
+        rraw = await workflow.execute_activity(
+            run_integration_tests, self._integ_run_args(),
+            start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
+        return rraw if isinstance(rraw, IntegrationRunResult) else IntegrationRunResult(
+            ran=int(rraw.get("ran") or 0), passed=int(rraw.get("passed") or 0),
+            failed=int(rraw.get("failed") or 0),
+            env_fail=int(rraw.get("env_fail") or 0),
+            details=[dict(d) for d in (rraw.get("details") or [])],
+            error=str(rraw.get("error") or ""))
 
     # ---------- t260917-09：tests 连续计数（串行/平行两分支共用） ----------
     def _tests_supply_assembly_fail(self, cur_integ) -> bool:
@@ -1518,6 +1563,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
         tests_exempt_rounds = 0                   # consecutive exempted (not-counted) rounds（防活循环上限=MAX_TESTS_EXEMPT_ROUNDS）
         tests_streak = False                      # 本段是否由 tests-fault 迭代来源进入（段入口消费：False→复位计数）
         cur_integ = None                          # 本轮 IntegrationRunResult 快照（env_side_red/红项名单判据；段入口清）
+        prev_red_names = []                       # t260923 D：上一轮红项名（定点复跑面来源；每跑后刷新）
+        last_run_only = []                        # t260923 D：本轮跑面（空=全量；非空=定点——pass 收口拦截判据）
+        run_only = []                             # t260923 D：本跑入参面（异常路径兜底定义）
         acc_rounds = 0                            # acceptance-walkthrough send-backs, cumulative
         arb_format_rounds = 0                     # in-section consecutive arbitrate outputs missing the
                                                   # verdict= marker（t260917-01：进 run_integration_tests
@@ -2092,16 +2140,19 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     # 债表单源（含集测后段遗留债——rework 回 implement 的下一轮集测
                     # 自然拾取）；销账在回执无 error 时（_run_scenarios 的命令执行块在
                     # 场景执行器成功之后，error 早退=命令没跑，留债下轮）。
+                    # t260923 D：爆炸半径+定点面决策（单写者=shared.targeted_rerun_plan；
+                    # 首轮/共享基座/无上轮红名=空=全量跑）。过 patched 门——旧历史
+                    # 零行为变化（恒全量跑）。
+                    run_only = (targeted_rerun_plan(
+                        list(self.meta.get("write_set") or []), prev_red_names,
+                        first_run=(self._gen("run_integration_tests") == 0))
+                        if workflow.patched(TARGETED_RERUN_PATCH_ID) else [])
+                    if run_only:
+                        self._log("两层复跑：定点复跑面（%s）——仅快反馈，放行只认收口全量跑"
+                                  % ",".join(run_only))
                     rraw = await workflow.execute_activity(
                         run_integration_tests,
-                        IntegrationRunArgs(ticket_id=self.ticket_id,
-                                           worktree=str(self.meta.get("worktree") or ""),
-                                           attempt=self._gen("run_integration_tests") + 1,
-                                           # t260913-03：每票段唯一 true 站（策略面只在
-                                           # 调用点显式置位；write_set 供例外分支求交）
-                                           write_set=list(self.meta.get("write_set") or []),
-                                           apply_skip_pools=True,
-                                           handover_runs=self._handover_debt_legs()),
+                        self._integ_run_args(run_only),
                         start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
                     ir = rraw if isinstance(rraw, IntegrationRunResult) else IntegrationRunResult(
                         ran=int(rraw.get("ran") or 0), passed=int(rraw.get("passed") or 0),
@@ -2164,6 +2215,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 # t260917-09（R3）：本轮机械回执快照落点=翻译处（串行/平行两支共用
                 # 同一 ir）——env_side_red 与红项名单判据都从 cur_integ 取。
                 cur_integ = ir
+                # t260923 D：跑面簿记（少跑必须可见+定点面来源）——每跑后刷新。
+                last_run_only = list(run_only)
+                prev_red_names = self._tests_red_names(ir)
                 # t260917-09：_arb_json 补机械环境面三键（env_fail/闸拦/归属置信）——
                 # 仲裁 agent 首次直接看到 t260910-13 归属判定，不再只从 details 尾巴猜；
                 # 只读既有字段，与 t260917-08（环境信号一等化）零耦合。
@@ -2247,6 +2301,24 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 route = arbitration_cap_route(verdict, tests_rounds, code_rounds,
                                               arb_authz is not None)
                 if verdict == "pass":
+                    # t260923 D 收口拦截：pass 落在定点跑上=放行依据不成立——机械补
+                    # 收口全量跑；零新增红（blockers 空且无启动级 error）→ pass 成立
+                    # 继续放行；有新增红 → 判决作废回仲裁重裁（全量面）。
+                    if workflow.patched(TARGETED_RERUN_PATCH_ID) and last_run_only:
+                        closing = await self._closing_full_run()
+                        cur_integ = closing
+                        last_run_only = []
+                        prev_red_names = self._tests_red_names(closing)
+                        _new_red = list(getattr(closing, "blockers", None) or [])
+                        if _new_red or getattr(closing, "error", ""):
+                            self._log("收口全量跑有新增红（%s）——pass 判决作废，回仲裁重裁"
+                                      % (",".join(_new_red)
+                                         or ("启动级 error：" + str(closing.error))))
+                            arb_ctx = ("【收口重裁】上一轮 verdict=pass 落在定点跑上，收口"
+                                       "全量跑发现新增红（%s）。请按全量面重判三态。"
+                                       % (",".join(_new_red) or "启动级 error"))
+                            continue
+                        self._log("收口全量跑零新增红——pass 判决成立（放行只认全量）")
                     # t260917-09：连续语义复位点——pass=收敛，tests-fault 连续计数清零
                     # （留痕要求②）；门关=旧历史逐字旧行为。
                     if workflow.patched(TESTS_STREAK_PATCH_ID):
@@ -2556,6 +2628,27 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 # 并复用 pass 的在飞走查结果消费路径（C2）。
                 authz_advance = bool(verdict != "pass" and arb_authz is not None
                                      and route == "acceptance")
+                if verdict == "pass" and workflow.patched(TARGETED_RERUN_PATCH_ID) \
+                        and last_run_only:
+                    # t260923 D 收口拦截（同串行支）：pass 落在定点跑上——补收口全量跑；
+                    # 零新增红 → pass 成立继续走下方放行；有新增红 → 判决作废，仲裁边
+                    # 真重跑（arb_done 复位，同 t260917-04 复位置换语义）。
+                    closing = await self._closing_full_run()
+                    cur_integ = closing
+                    last_run_only = []
+                    prev_red_names = self._tests_red_names(closing)
+                    _new_red = list(getattr(closing, "blockers", None) or [])
+                    if _new_red or getattr(closing, "error", ""):
+                        self._log("收口全量跑有新增红（%s）——pass 判决作废，仲裁边真重跑"
+                                  % (",".join(_new_red)
+                                     or ("启动级 error：" + str(closing.error))))
+                        arb_done = False
+                        arb_res = None
+                        arb_ctx = ("【收口重裁】上一轮 verdict=pass 落在定点跑上，收口全量跑"
+                                   "发现新增红（%s）。请按全量面重判三态。"
+                                   % (",".join(_new_red) or "启动级 error"))
+                        continue
+                    self._log("收口全量跑零新增红——pass 判决成立（放行只认全量）")
                 if verdict == "pass" or authz_advance:
                     # t260917-09：连续语义复位点——pass=收敛、人工接受判决=收敛
                     # （authz_advance 两面都复位；R2 伪 verdict 复用 tests_round_step）。
