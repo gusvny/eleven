@@ -505,7 +505,8 @@ def integration_route(verdict: str, tests_rounds: int, code_rounds: int) -> str:
 
 
 def tests_round_step(verdict: str, tests_rounds: int, exempt_rounds: int, *,
-                     env_side_red: bool = False, jitter_green: bool = False):
+                     env_side_red: bool = False, jitter_green: bool = False,
+                     known_red: bool = False):
     """连续 tests-fault 轮计数器转移（纯函数，t260917-09；UT 直接驱动矩阵）。
 
     定案语义=**连续**：上限 MAX_TESTS_FAULT_ROUNDS 只数「连续被判 tests-fault 的仲裁
@@ -520,6 +521,11 @@ def tests_round_step(verdict: str, tests_rounds: int, exempt_rounds: int, *,
     连续豁免到 MAX_TESTS_EXEMPT_ROUNDS 由调用方转 tests_exempt_cap_blocked_text
     封面（防活循环）。
 
+    已知红豁免（B 零新增红口径，260923）：tests-fault 而闸 blockers 为空=红面全为
+    基线既有欠账/外部环境记录面（decide 判 record 的不堵票面）——重跑已知红不会绿、
+    只会烧轮次到超限转人工，故本轮不计入（known_red），改记连续豁免轮；豁免仍走
+    MAX_TESTS_EXEMPT_ROUNDS 独立上限（转人工触发不许归零：豁免耗尽照样见人）。
+
     返回 (tests_rounds, exempt_rounds, counted, note)。畸形入参（负数/非 int 轮次、
     非布尔信号）fail-closed：不抛、不静默清零成「复位」，按普通计轮处理——保守侧
     多计不少计（消费外部输入的纪律）。
@@ -528,6 +534,8 @@ def tests_round_step(verdict: str, tests_rounds: int, exempt_rounds: int, *,
         env_side_red = False
     if not isinstance(jitter_green, bool):
         jitter_green = False
+    if not isinstance(known_red, bool):
+        known_red = False
     if verdict != "tests-fault":
         return 0, 0, False, "streak-reset"
     if not isinstance(tests_rounds, int) or isinstance(tests_rounds, bool) \
@@ -536,9 +544,10 @@ def tests_round_step(verdict: str, tests_rounds: int, exempt_rounds: int, *,
     if not isinstance(exempt_rounds, int) or isinstance(exempt_rounds, bool) \
             or exempt_rounds < 0:
         exempt_rounds = 0
-    if env_side_red or jitter_green:
+    if env_side_red or jitter_green or known_red:
         return tests_rounds, exempt_rounds + 1, False, (
-            "env-side-red" if env_side_red else "jitter-green")
+            "env-side-red" if env_side_red
+            else "jitter-green" if jitter_green else "known-red")
     return tests_rounds + 1, 0, True, "counted"
 
 

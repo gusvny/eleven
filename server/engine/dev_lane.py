@@ -431,7 +431,11 @@ FLOW_BRIEF = {
     "arbitrate": (
         "你是 integration 仲裁。机械集成测试已跑完，结果见上下文。三态判定（summary "
         "**必须以 verdict= 开头标明**，如「verdict=code-fault …」）："
-        "verdict=pass 全部通过 → 进入验收；"
+        "verdict=pass 通过 → 进入验收（含**零新增红**判据，B 口径 260923：闸 blockers "
+        "为空=红面全是基线既有欠账/外部环境记录面，属**已知红**——判 pass 并把红名写进"
+        "报告备注，**禁止以「重跑一轮等它绿」当收敛手段**：重跑已知红不会绿、只会烧"
+        "轮次到超限转人工；只有本票新增红（blockers 非空）且落在测试面内才 tests-fault，"
+        "实现面新增红才 code-fault）；"
         "verdict=tests-fault 测试集自身问题（环境/前提/断言错）→ 红项落在测试面内"
         "（tests/ 目录、test_*.py、sc_* 场景脚本、场景登记表、本票场景目录）才**你直接迭代修正**"
         "（改动随本步落盘），summary 写清改了什么、为什么是测试的问题；红项属共享资产/受保护真源"
@@ -979,10 +983,21 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
         """
         env_side_red = self._tests_env_side_red(cur_integ)
         jitter_green = False
+        known_red = False
         probe_note = ""
         if not env_side_red:
             red_names = self._tests_red_names(cur_integ)
-            if red_names and workflow.patched(TESTS_STREAK_PATCH_ID):
+            # B 零新增红口径（260923）：闸 blockers 显式为空（isinstance 校验，
+            # 缺席/畸形不豁免——保守计轮）=红面全为基线既有欠账/外部环境记录面，
+            # 零新增红 → 本轮按「已知红」豁免不计轮、不发探针（重跑已知红不会绿，
+            # 只会烧轮次到超限转人工）。
+            _blockers = getattr(cur_integ, "blockers", None)
+            if red_names and isinstance(_blockers, list) and not _blockers:
+                known_red = True
+                probe_note = ("已知红轮（红项=%s；闸 blockers 空=零新增红，全属"
+                              "基线既有欠账/外部环境记录面）——不计入 tests-fault 轮次"
+                              % ",".join(red_names))
+            elif red_names and workflow.patched(TESTS_STREAK_PATCH_ID):
                 try:
                     rraw = await workflow.execute_activity(
                         reprobe_red_scenarios,
@@ -1002,7 +1017,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                               "复跑未证全绿（%s）" % (probe.error or "有红"))
         nr, ne, counted, step_note = tests_round_step(
             "tests-fault", tests_rounds, tests_exempt_rounds,
-            env_side_red=env_side_red, jitter_green=jitter_green)
+            env_side_red=env_side_red, jitter_green=jitter_green,
+            known_red=known_red)
         note = probe_note
         if not counted and env_side_red:
             if self._tests_supply_assembly_fail(cur_integ):
