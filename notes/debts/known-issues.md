@@ -1472,3 +1472,42 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   诊断直接被引向错误方向：我第一眼就误判成 dsh 版本问题，靠读日志才纠正）。
 - 定位：`server/engine/agent_runtime.py:353`（Popen）；调用面 `server/engine/agent_activities.py:2872`
   （`_run_agent_stage_impl` → `agent_runtime.spawn_agent`）。
+
+## KI-105 已知红轮被判 tests-fault 重跑烧轮次 → 迭代超限假封（260923 集成轮次瘦身直修发现并修；宿主直修令 260923）
+- 病灶：闸已判「红面全为基线既有欠账·记录不堵」（blockers 空=零新增红）时，仲裁仍判
+  tests-fault 重跑已知红——重跑已知红不会绿、只烧轮次到「迭代 6 轮超限转人工」。
+  43 票 22 张撞墙的主因（t260922-18 报告「零一项归属本票功能面」+verdict=tests-fault 实锤）。
+- 修法（0f51b4f）：计轮第三豁免形态 known_red（blockers 显式为空→不计轮，连续豁免
+  仍撞 MAX_TESTS_EXEMPT_ROUNDS 独立上限=转人工触发不许归零）+ 仲裁判词锚定
+  「零新增红判 pass，禁止以重跑等绿当收敛手段」。
+- 回归棒：server/engine/tests/test_t260923_known_red_exempt.py（含双车道「转人工
+  触发不许归零」棒）。
+
+## KI-106 同机锁根分裂：降级回落随机 TMPDIR 与供给钉根不一致 → 租约/孤儿判定劈叉（260923 直修发现并修）
+- 病灶：lock_root() 在 ~/.sandbar 不可写时回落 tempfile.gettempdir()/sandbar-test-stages
+  ——macOS 上 gettempdir()=TMPDIR 随机目录，而 verify.yaml supply 与场景族钉
+  /tmp/sandbar-test-stages。同机两锁根：清扫 dry-run 把共享供给误判成孤儿、并发守卫
+  把在飞台判成「外来工程」——「环境老不稳定」的一条实根。
+- 修法（1f46a00）：降级根钉死 /tmp/sandbar-test-stages（与供给同根+写探针）；不可写
+  =红点名并指路 SANDBAR_STAGE_LOCK_DIR，不静默换根。
+- 回归棒：integration/tests/test_t260923_lock_root_unify.py（行为三态子进程实证）。
+
+## KI-107 端口瞬时撞口整轮报废：探针期未见的瞬时占口 compose up 即败（260923 直修发现并修）
+- 病灶（260922-18 实证）：compose up 撞「Bind for 127.0.0.1:21060 failed: port is
+  already allocated」而 bind 探针期未见占口者——占口者常为已退瞬时占用，一次失败
+  即整轮 0 跑报废。
+- 修法（6787184）：窄签名退避重试至多 2 次自愈；耗尽照旧红但终报附占口者诊断
+  （docker ps 按被撞端口点名容器/状态/映射；无占口者如实说「已退/瞬时占用形态」）；
+  终报按最后形态点名（不许把端口撞口说成网段撞号）。
+- 回归棒：integration/tests/test_t260923_port_bind_retry.py。
+
+## KI-108 孤儿清扫多前缀族点名文案 tuple 格式化炸 + 自动清扫缺 Enable 面（260923 直修发现并修）
+- 病灶一：orphan_condemn_projects「前缀外」点名对 tuple 前缀 `%s` 格式化抛
+  TypeError（逗号族扩展才暴露的潜伏洞）。
+- 病灶二：挂点孤儿清扫因 F1 红线（真拆须宿主点头+必须有半径）缺省关，残台持续堆积。
+- 修法（5db830a）：点名文案归一逗号串；orphan_prefix 逗号族（单值语义逐字节不变）；
+  引擎集成跑环境显式启用 SANDBAR_STAGE_SWEEP_ORPHANS=on + PREFIX=t26,sandbar-test,
+  stage-console 三族半径（只在未设时注入，操作员显式 off 不覆盖；租约/新鲜/在册三阀
+  与年龄阀照旧保护在用台与共享供给）。
+- 回归棒：integration/tests/test_t260923_orphan_autosweep.py（F1 负锁「挂点缺省关
+  红线不动」在内）；t260915-18 F1 契约场景 18/0 实证不破。
