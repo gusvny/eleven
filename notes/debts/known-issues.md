@@ -916,7 +916,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   证据＝`server/engine/data/worker-t260911-05.log`、`worker-t260912-01.log`（260913 11:19 两条）；
   票面证据＝t260912-01 / t260911-05 的 `authorizations` 从空到 3 条的时间线。
 
-## KI-096 场景夹具进程泄漏占满自家端口池 → t260916-25 系列自报「高位口耗尽」（260923 实证，已清场规避、待修）
+## KI-096 场景夹具进程泄漏占满自家端口池 → t260916-25 系列自报「高位口耗尽」（260923 实证；**同日 main 侧已修**，宿主令「不开票，main 上修」）
 - 现象：跑批里 `t260916-25-stage-console-selfcheck-red` 报产品红（「降级台=红透传」）、同族场景报
   `ENV_FAIL 高位口耗尽——环境面`；表现为「这批场景在候选版上回归了」，极易误判为 dsh 升级回归。
 - 实证（260923）：夹具取口范围＝3511–3549（`lib_stage_fixture.mjs` `pickFreePort`）；实测该 **39 个口全被
@@ -931,6 +931,11 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 建议修复方向（只登记，未动手）：①夹具收尾对自己起的桩/台**无条件回收**（进程组 kill＋断言端口已释放），
   并把「退出后本场景占的口已释放」写成场景自身的一条子用例；②`pickFreePort` 找不到空口时**响亮点名占用者
   pid/cwd**，而不是笼统「高位口耗尽」；③口池不必硬钉 39 个（可动态扩窗），免得被历史残留锁死整个场景族。
+- **修复（260923，main 侧提交 `679d25a`）**：桩台自带寿命自毁（`integration/t260916-25/lib_stage_fixture.mjs`
+  的 STUB_SERVER_JS，缺省 240s、`STAGE_STUB_TTL_MS` 可调）——桩台到点 `process.exit(0)`。与 ps 清点、
+  与 kill 路径完全解耦，跑批被杀也照样自退，池子自愈。验证＝在**清理面必然失效**的环境（本沙箱禁 ps）跑
+  selfcheck-red：跑完即刻两端口仍在听（复现原病）→ 26s 后全部自退（TTL=20s）。上述①③（进程组回收与
+  动态扩窗）仍未做，留作出路；②的点名改进亦未做（本修法让池子不再被锁死，优先级下调）。
 - 定位：`integration/t260916-25/lib_stage_fixture.mjs:26-40`（FORBIDDEN_PORTS/pickFreePort）、`:161`（makeStubRoot）；
   场景记录点 `sc_stage_console_selfcheck_red.mjs:71/87/97`；实案观测量＝`lsof -nP -iTCP -sTCP:LISTEN` 全口占用 + `lsof -p` 的 cwd。
 
