@@ -1511,3 +1511,18 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   与年龄阀照旧保护在用台与共享供给）。
 - 回归棒：integration/tests/test_t260923_orphan_autosweep.py（F1 负锁「挂点缺省关
   红线不动」在内）；t260915-18 F1 契约场景 18/0 实证不破。
+
+## KI-109 测试扫描面被非代码面污染的同族两案（260923 全量跑定性发现；isolated 挂账，integration 岗登记）
+> 共同特征：**「全仓零命中」型守卫把非代码面算进扫描域**，红灯指向的位置（数据杂物/历史树）
+> 与真实意图（代码域卫生/退役字面退场）脱节，诊断被带偏——与 KI-104 同族「报错指错方向」。
+- **案一·未跟踪数据杂物入扫描根**：t260907-01-path-hygiene 报「新病灶 183 文件」——实为
+  `.probe-home/.dsh/sessions*` 会话数据转储（文件名含旧仓名 slug），非代码域引用旧仓路径。
+  扫描排除面（node_modules/.git/.suyou/.lane/docs/notes）不含探针杂物目录。
+  修法方向：代码域=git 在册面（`git ls-files`）或显式排 `.probe-home`；数据转储杂物本身应
+  清出扫描根。定位：integration/t260907-01/sc_migration_path_hygiene.mjs 判据 A。
+- **案二·冻结泳道树入扫描根**：t260916-02-decl-gate-aggregate「铸号调用形全仓零命中」命中
+  `.lane/t260908-02`、`.lane/t260907-10` 遗留泳道树的退役字面——泳道树是冻结历史（红线：
+  不动 .lane/），不是主树代码域。修法方向：扫描域限主树（排 .lane/）或限 git 在册面。
+  定位：integration/t260916-02/sc_*decl_gate* 判据 0a。
+- 两案处置=isolated 入已知红基线挂账（integration/known-red-baseline.json，home=杂物清理/
+  泳道清理工序）；结构性修法待专项（扫描域语义收紧属契约变更，须配套断言不减覆盖面）。
