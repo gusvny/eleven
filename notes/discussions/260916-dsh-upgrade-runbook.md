@@ -86,19 +86,36 @@
 #### 升级切流与回退（衔接 §2/§3）
 
 - 引擎侧只动 worker 环境旋钮：host=`SANDBAR_AGENT_CMD`（显式二进制路径）、docker=`SANDBAR_AGENT_IMAGE`
-  （镜像 tag）——console(3099) 用的全局 dsh 不受影响（红线 #1 自动满足）。
+  （镜像 tag）。**但「console(3099) 用的全局 dsh 不受影响」是错的——260923 实测推翻**：dsh 的 web
+  静态页与客户端模块是**每个请求现读磁盘**（`dsh-host-frontend-static/lib/index.js:64` `await readFile(target)`；
+  `dsh-client-modules/lib/index.js:545/753` 请求期 `readFileSync`），全程无缓存——**原位 `npm install -g`
+  会在下一秒把活着的旧 console 打挂**（旧进程启动时组好的 config 引用的包已被新版删掉 → 客户端资源 404 → 白屏）。
+  故切换前必须**由宿主先停 3099**（console 属用户操作面，引擎不代停，红线 #1 自动满足指的是「引擎不去碰它」，
+  不是「它不会坏」）——这是一条硬前置，不是可选项。
 - 回退＝旋钮切回旧路径/旧 tag ＋ `dsh --version` 复核；meta 的 `dsh` 键即时可查证。
+- **「dsh 就绪」的判据不止版本号**（260923 事故）：同一个版本号的 npm 安装会因 semver 区间解析到不同的
+  传递依赖——装完必须跑 `./start-console.sh --bits-check`（§2 步 2/3）。
 
 ## 2. 升级步骤（串行，每步可独立验证）
 
 0. [ ] **安装源核实（260916 探针实测，必读）**：包名是 **`@deepseek-ai/dsh`**（scoped）——裸 `dsh` 是另一个无关包（registry 上只有 1.0.0/1.0.1），照裸名装必失败（ETARGET 实测）。registry 现状：`latest=0.1.5-rc.1`、`next=0.1.5-rc.2`、`alpha=0.1.6-alpha.1`；**版本必须显式钉**（`@deepseek-ai/dsh@0.1.5-rc.2`），裸装会得到 rc.1。隔离预演：`npm install --prefix /tmp/dshprobe @deepseek-ai/dsh@0.1.5-rc.2 --cache /tmp/npm-cache-probe`（不碰全局安装）。
-1. [ ] 停各票专属 worker 与主 sandbox worker（优雅 SIGTERM，确认 pid 退出）；
-2. [ ] 钉版本安装：`npm install -g @deepseek-ai/dsh@0.1.5-rc.2`（前缀决策见 §4-Q2；`~/.npm` 属主问题用 `--cache /tmp/npm-cache-upgrade` 绕开）；装完确认 `@deepseek-ai/dsh` 的 version 字段 == 0.1.5-rc.2（防 dist-tag 漂移）；
-3. [ ] `dsh --version` == 0.1.5-rc.2；冒烟：`dsh` 起一个一次性会话，确认落盘 `session.v3.jsonl.zstd` 且旧 `session.jsonl` 未被改动；
-4. [ ] 容器面（若 Q3=同升）：`bash server/engine/build_agent_image.sh`（DV=0.1.5-rc.2）→ 镜像 `sandbar-agent:dsh-0.1.5-rc.2-s1`；同步改三处版本（`Dockerfile.agent` ARG、`build_agent_image.sh` DV、`agent_runtime.py DEFAULT_AGENT_IMAGE`——有测试 `test_镜像版本三处同步` 锁定）；
-5. [ ] 重启全部 worker（先主 sandbox，后按需起票 worker）；
-6. [ ] **生产冒烟**：开一张 sandbar 冒烟票走完 create_plan→…→closed 全链；确认 agent 会话可写可读、token 统计面正常、workbench 会话用量页正常；
-7. [ ] 观察一个完整巡检周期（次日 07:30 调度触发正常）后宣布完成。
+1. [ ] 停各票专属 worker 与主 sandbox worker（优雅 SIGTERM，确认 pid 退出）；**并请宿主停 3099 console**
+   （原位换包会当场打挂活着的旧 console——机制见上段；console 归宿主手动起停，引擎不代停）；
+2. [ ] 钉版本安装，**同时钉住依赖解析**：`npm install -g @deepseek-ai/dsh@0.1.5-rc.2 --before=2026-09-22T00:00:00+08:00 --cache /tmp/npm-cache-upgrade`
+   （前缀决策见 §4-Q2；`--cache` 绕开 `~/.npm` 属主问题）。`--before` 让 npm 按该时刻的 registry 状态解析依赖
+   ——**这正是「版本号相同、bits 不同」的解法**（260923 事故即当日新发的 cordis 族依赖被解析进来）；
+   已验证解析集＝`cordis 4.0.2 / cordis-plugin-loader 1.0.3 / cordis-plugin-hmr 1.0.17`；
+   装完确认 `@deepseek-ai/dsh` 的 version 字段 == 0.1.5-rc.2（防 dist-tag 漂移）；
+3. [ ] **bits 指纹对账（版本号对不代表 bits 对；260923 就是死在只校了版本号）**：`./start-console.sh --bits-check`
+   必须绿。它校验上述三个包的版本与「hmr 里是否真带 launcher 必调的 `registerConfig`」——不绿就别往下走，
+   报错会点名是哪一项不符；
+4. [ ] `dsh --version` == 0.1.5-rc.2；起一次 console 冒烟（宿主操作）：顶部不得出现
+   「Failed to load plugins」横幅、token URL 能进页面；`dsh` 起一个一次性会话，确认落盘
+   `session.v3.jsonl.zstd` 且旧 `session.jsonl` 未被改动；
+5. [ ] 容器面（若 Q3=同升）：`bash server/engine/build_agent_image.sh`（DV=0.1.5-rc.2）→ 镜像 `sandbar-agent:dsh-0.1.5-rc.2-s1`；同步改三处版本（`Dockerfile.agent` ARG、`build_agent_image.sh` DV、`agent_runtime.py DEFAULT_AGENT_IMAGE`——有测试 `test_镜像版本三处同步` 锁定）；
+6. [ ] 重启全部 worker（先主 sandbox，后按需起票 worker）；
+7. [ ] **生产冒烟**：开一张 sandbar 冒烟票走完 create_plan→…→closed 全链；确认 agent 会话可写可读、token 统计面正常、workbench 会话用量页正常；
+8. [ ] 观察一个完整巡检周期（次日 07:30 调度触发正常）后宣布完成。
 
 ## 3. 回退（任一步失败或冒烟不过即走）
 
@@ -139,10 +156,14 @@
 
 | 风险 | 缓解 |
 |---|---|
+| **同版本号 ≠ 同 bits**（260923 实弹，本手册最大盲区） | semver 区间会解析到上游当天新发的传递依赖：`cordis-plugin-hmr` 1.0.18 删掉了 launcher 在 `patchReload: live` 下必调的 `registerConfig` → 该安装**自不相容**（手动开 hmr 会撞更深的同类错，profile 侧改不动）。缓解＝装时 `--before` 钉解析（§2 步 2）+ `start-console.sh --bits-check` 当闸（§2 步 3）——**只校 `--version` 判不出可用** |
+| **原位换包打挂活着的 console**（260923 实弹，同一次事故的白屏半边） | 客户端资源/静态页按请求现读磁盘、无缓存 → `npm install -g` 即把旧 console 打成白屏（旧 config 引的包被新版删）。缓解＝切换前宿主先停 3099（§2 步 1，硬前置）；`start-console.sh` 现会在启动时对账 bits，能起来的就是对的套 |
+| **机器级 GUI preset 未纳入兼容面**（260923 实弹） | `~/.dsh/.agent-presets/<项目>-<角色>/agent.cordis.yml` 是 0.1.1 时代的**实体拷贝**：不在仓库、不在任何测试网、不在接缝矩阵里。0.1.5 把 dsh-persona 的配置 schema 由 `text:` 改成 `prefix:/suffix:`（`prefix` 必填）→ 旧拷贝**挂载即抛** → 新会话起不来、老会话续不上。缓解＝升级后重建 preset（备份原目录），流程见 §6 第 7 条；接缝矩阵已补该行（行 14） |
 | v3 会话文件打坏引擎读侧 | T1 前置票先落（双名 glob），有场景看守 |
 | npm 全局权限/属主 | `--cache` 绕 cache 目录；前缀按 Q2 决策 |
 | 升级中宿主误用 dsh | 停 worker 后立即升级+重启，窗口短；或挑你不用 dsh 的时段 |
-| 混代双写（升级后旧 worker 还活着） | 步骤 1/5 串行保证；worker.pid 检查进 checklist |
+| 混代双写（升级后旧 worker 还活着） | 步骤 1/6 串行保证；worker.pid 检查进 checklist |
+| **其它项目无 dsh 钉 → 裸 `dsh` 落坏套**（260923 查明） | 只有 sandbar 在 `~/.sandbar/projects/sandbar/project.yaml` 声明了 `paths.dsh_bin`；nusuyou/dengzhufpv 等处 worker spawn 走 `来源=default` 的裸 `dsh`（worker 日志实证），即**全局那套是它们唯一的面**——故全局 bits 出问题时坏的是所有项目的 agent 段，不只是 console。缓解＝全局安装保持指纹绿（本次已重装回已验证解析集） |
 | 回退后 v3 会话不可读 | §3.4：保留文件不删；T1 双名读侧保证下次升级可续 |
 
 ## 6. 当前就绪度快照（260923，integration 落笔；只记事实与判据）
@@ -172,7 +193,33 @@
    **Q2 已裁定＝按 A（原位、免 sudo），不必二选一**（宿主管 260923，依据见 §4）。
 5. **可切性的最短路径（建议序，260923 晚更新）**：①等 t260922-18 收口（T2 队列排空；10 已关）→
    ②§1-T4 第 2/3/4 条（候选版场景全集隔离副本整跑、巡检一轮、版本面自检；第 1 条接缝探针双版对照
-   **已于 260923 全绿**）→ ③按 §2 七步执行（只动 worker 侧旋钮，console 3099 不重启；
-   试验期原位 0.1.1 不动）→ ④生产冒烟票＋观察一个完整巡检周期。
+   **已于 260923 全绿**）→ ③按 §2 八步执行（**切换那一下必须由宿主先停 3099**——「只动 worker 侧旋钮、
+   console 不重启」的旧口径已被 260923 白屏事故推翻，见下第 6 条）→ ④生产冒烟票＋观察一个完整巡检周期。
    ~~（旧序中的「明确 Q2」「建 0.1.5 镜像」「T3 备份」三项均已办结：Q2 裁定见 §4、
    镜像 260923 已建、备份 260923 已做。）~~
+6. **260923 事故与修复（宿主报「在外头修了一下才能进 console」；宿主令「不开票，直接搞好」）**：
+   - **事故链**：09-23 10:13 `npm install -g @deepseek-ai/dsh@0.1.5-rc.2` 装出的那套，与 09-21
+     验证过的 tarball 解包**不是同一套 bits**（同版本号、240 个包中有 8 个版本不同：cordis 4.0.3／
+     loader 1.0.4／**hmr 1.0.18**／group、include、timer、cosmokit、schemastery 各高一档）；
+     `hmr@1.0.18` 删掉了 `registerConfig`，而 `dsh-app-boot/lib/index.js:1115` 的 `watchUserPatches`
+     必调它、`lib/profile-boot-Dk-7KqJc.js:321` 在 `patchReload==="live"`（自定义 profile 缺省）下
+     会动态挂 hmr 再调 → **该安装自不相容**；同时原位换包把当时活着的旧 console 静态资源打挂（白屏）。
+   - **修复（main 侧，同日）**：
+     ① 全局重装成已验证解析集——`npm install -g @deepseek-ai/dsh@0.1.5-rc.2 --before=2026-09-22T00:00:00+08:00`；
+     现全局树与 `~/.sandbar/dsh-015` **240 个包零版本差异**；
+     ② `start-console.sh` 加 bits 指纹对账（`--bits-check` 可单跑：不指定 `DSH_BIN` 时自动挑能用的那套，
+     显式指定坏套则响亮拦下、不静默替换；默认取值不再裸信 PATH，机器钉优先）——治「裸跑 `./start-console.sh`
+     必踩坏套」这个最可能复发的入口；
+     ③ 回归用例 `integration/tests/test_start_console_bits.py`（8 条，全离线、不占端口、不起服务）；
+     ④ 验证口径：用 stage 台（独立端口 3288 + 独立 `DSH_HOME`）实起修复后的全局那套 → **干净 boot +
+     `selfcheck` 全绿（pass 7 / red 0）**；起完即停、临时 home 已清、3099 全程未动。
+   - **附**：其它项目（nusuyou/dengzhufpv）未声明 `paths.dsh_bin`，worker spawn 走裸 `dsh`——
+     全局 bits 坏掉时它们一起坏（见 §5 风险表末两行）。
+7. **GUI preset（机器级）重建流程（260923 立，0.1.1→0.1.5 实案）**：
+   ① 先备份：`cp -a ~/.dsh/.agent-presets/<项目>-<角色> ~/.dsh/.agent-presets/<项目>-<角色>.bak-<日期>`；
+   ② 本体＝目标版**出厂 standard 组合**原样拷贝（保证可挂载），只改 persona 一处；
+   ③ persona 按新 schema 承载（0.1.5 起 `dsh-persona` 的 `prefix` 必填、旧 `text:` 键挂载即抛），内容
+   同步自角色真源 `server/roles/<角色>.yml` 的岗位说明书全文；
+   ④ 用 dsh 自带 YAML 解析器校验（注意文件里有 `!!js` 标签，PyYAML 会拒——用 dsh 内 `yaml@2.9.1` +
+   `tag:yaml.org,2002:js` 自定义标签解析，断言条目数与 `prefix` 非空）；
+   ⑤ 校验「preset 的 persona 文本与 `server/roles/<角色>.yml` 逐字一致」——**逐个字符比对，不靠肉眼**。

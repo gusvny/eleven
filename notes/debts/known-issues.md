@@ -1333,3 +1333,58 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 定位：`t260911-05` 泳道（`.lane/t260911-05`，HEAD 862907a 未含 main tip b614392）；
   merge_check 报文明细见其时间线 09-13 11:23；退票附注（对齐口径）见同票 09-13 07:56 事件。
 
+
+## KI-100 dsh 升级三连故障模式：同版本号 ≠ 同 bits / 原位换包打挂活着的 console / 机器级 GUI preset 不在兼容面（260923 实证；**同日 main 侧已修**，宿主令「不开票，直接搞好」）
+- 现象（宿主实报）：「在外头修了一下才能进 console」——3099 打不开、白屏；随后新建会话/续老会话全废。
+  三个症状看着像三件事，实为一轮升级暴露的三个**不同环节**的缺口。
+- **模式 A：同版本号 ≠ 同 bits（本族根因，最反直觉）**
+  - 触发：`npm install -g @deepseek-ai/dsh@0.1.5-rc.2` —— dsh 自身依赖写的是 semver 区间，
+    **同一天装**解析到的传递依赖与 09-21 验证过的 tarball 解包不同；240 个包中 8 个版本差一档：
+    `cordis 4.0.2→4.0.3`、`cordis-plugin-loader 1.0.3→1.0.4`、**`cordis-plugin-hmr 1.0.17→1.0.18`**
+    （另有 group/include/timer/cosmokit/schemastery）。
+  - 致命点：`hmr@1.0.18` **删掉了 `registerConfig`**，而 `dsh-app-boot/lib/index.js:1115`
+    （`watchUserPatches`）必调它、`lib/profile-boot-Dk-7KqJc.js:321` 在 `patchReload==="live"`
+    （自定义 profile 缺省值）下会动态挂 hmr 再调 → **该安装自不相容**；profile 侧无从绕（手动开 hmr
+    撞更深的同类错）。**「`--version` == 目标版本」这一步两套都过**——只校版本号判不出可用。
+  - 什么样的改动会踩：任何按 semver 装 dsh（npm 全局 / 换机器 / 重装 / CI）都可能解析到当天的新依赖；
+    上游只要再发一版带破坏性变更的 cordis 族依赖就会复发。
+- **模式 B：原位换包打挂活着的 console**
+  - 机制：dsh 的 web 静态页与客户端模块**每请求现读磁盘、无缓存**
+    （`dsh-host-frontend-static/lib/index.js:64` `await readFile(target)`；
+    `dsh-client-modules/lib/index.js:545/753` 请求期 `readFileSync`）。
+    故 `npm install -g` 落地的那一刻，**已在运行的旧 console 就被隔空打挂**：旧进程启动时组好的 config
+    引用的包已被新版删掉（0.1.5 移除 `dsh-client-runtime` 整包）→ 客户端资源 404 → 白屏。
+  - 被推翻的假设：runbook「升级切流与回退」段原文写「console(3099) 用的全局 dsh 不受影响」——
+    对**按请求现读的静态文件面不成立**；「运行中的进程已加载旧模块」只对内存态成立。
+- **模式 C：机器级 GUI preset 不在兼容面**
+  - `~/.dsh/.agent-presets/<项目>-<角色>/agent.cordis.yml` 是 0.1.1 时代的**实体拷贝**（不在仓库、
+    不在任何测试网、不在接缝矩阵）；0.1.5 把 `dsh-persona` 配置 schema 由 `text:` 改为
+    `prefix:/suffix:`（`prefix` 必填）→ 旧拷贝**挂载即抛** → preset 挂不上 → 新建会话失败、
+    老会话同样点名该 preset 也续不上。矩阵当时覆盖了 headless 的 roles patch（走
+    `system-prompt.persona`，该面 0.1.5 未动，所以探针没暴露），GUI 实体拷贝这一面没人对账。
+- 危害：①升级后**谁都起不来**，且报错指向 profile/hmr（把诊断引向错误方向）；②宿主手动救场
+  （改环境变量、重建 preset）＝无人知晓的旁路修复；③console 白屏期间宿主操作面全断。
+- 处置（260923，main 侧，规避+根治）：
+  ① 全局重装成已验证解析集：`npm install -g @deepseek-ai/dsh@0.1.5-rc.2 --before=2026-09-22T00:00:00+08:00`
+     （`--before` 让 npm 按该时刻 registry 状态解析依赖——**这是模式 A 的正解**，优于逐包 overrides）；
+     现全局树与 `~/.sandbar/dsh-015` **240 个包零版本差异**；
+  ② `start-console.sh` 加 bits 指纹对账：`--bits-check` 可单独跑；不指定 `DSH_BIN` 时**自动挑能用的那套**
+     （坏套跳过并点名原因），显式指定坏套则**响亮拦下、绝不静默替换**（升级预演要能信 `DSH_BIN`）；
+     默认取值不再裸信 PATH（机器钉 `~/.sandbar/dsh-015/bin/dsh` 优先）——治「裸跑 `./start-console.sh`
+     必踩坏套」这个最可能复发的入口；
+  ③ 验证口径：stage 台（独立端口 3288 + 独立 `DSH_HOME`，仓库自带工具）实起修复后的全局安装
+     → 干净 boot + `selfcheck` **全绿（pass 7 / red 0）**；起完即停、临时 home 已清、3099 全程未动。
+- 回归用例（本族，已落地）：`integration/tests/test_start_console_bits.py`（8 条，全离线、不占端口）——
+  ①好套在位→选中并启动；②漂移套→拒绝且点名实得版本；②b**版本号对但缺 `registerConfig`→仍拒**
+  （锁因果不锁版本清单）；③显式坏套→拒绝且不静默替换；③b显式路径不存在→「无法从 bin 定位安装根」；
+  ④强闯开关（`SANDBAR_SKIP_DSH_BITS_CHECK=1`）→放行但留痕；⑤壳源码静态看守（裸 `$VAR` 贴全角字符 /
+  默认取值绕过对账）。
+- 定位：`dsh-app-boot/lib/index.js:1115`（`hmr.registerConfig` 调用点）、
+  `dsh/lib/profile-boot-Dk-7KqJc.js:321-328`（`patchReload==="live"` 挂 hmr）；两套 bits 对比＝
+  `/opt/homebrew/lib/node_modules/@deepseek-ai/dsh` vs `/Users/user/.sandbar/dsh-015/...`；
+  静态读取面＝`dsh-host-frontend-static/lib/index.js:64`、`dsh-client-modules/lib/index.js:545/753`；
+  preset 面＝`~/.dsh/.agent-presets/sandbar-integration/agent.cordis.yml`（备份 `…bak-260923/`）；
+  修法落位＝`start-console.sh`（bits 闸）+ 本族回归用例；runbook 已同步（§2 步 1/2/3、§5 风险表、§6 第 6/7 条）。
+- 同族面（一并查明，未修）：nusuyou/dengzhufpv 未声明 `paths.dsh_bin` → worker spawn 走裸 `dsh`
+  （`server/engine/data/worker-t260923-04.log` 实证 `bin=dsh(→/opt/homebrew/bin/dsh) 来源=default`），
+  即全局 bits 坏掉时**所有项目**的 agent 段一起坏——全局安装保持指纹绿是跨项目公共面。

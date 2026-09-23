@@ -32,14 +32,21 @@
 | 11 | preset 目录 | cordis.patch.yml 注：$DSH_HOME/.agent-presets（软链不被扫描） | 同左 | 实体拷贝强制重拷 ✓ | 壳 prepare | 起不了新会话=查此 seam |
 | 12 | 依赖树复用 | 化石 profiles/node_modules（逐包软链 189 项→dsh 安装） | 全局布局：包内 node_modules（186 顶层项） | prefix 布局 189 项/全局 434 项（scoped 展开口径）均定位成功 ✓ | 壳两布局取条目多者 | 上游第三种布局→依赖树定位红 |
 | 13 | 进程与启动输出 | 化石 console.log：`dsh web: http://…/?token=…` | 同左 | 字面稳定 ✓；实测存在「台好了但 URL 行迟到」瞬态 | 壳字面锚+宽限 20s（R4c/gen17 收口：宽限耗尽=响亮红+收自起台+清 pidfile，「台没起成」终态同构，不留监听态无头台） | 上游改文案→URL 宽限红（台已自收，重跑 start 幂等重来） |
+| 14 | **GUI 用户 preset 组合**（机器级 `~/.dsh/.agent-presets/<项目>-<角色>/agent.cordis.yml`，260923 补行） | 260923 实弹：宿主在 3099 新建会话/续老会话全废 | 0.1.1 时代实体拷贝（`dsh-persona` 配置键＝`text:`） | **0.1.5 起该 schema 改为 `prefix:/suffix:`（`prefix` 必填）→ 旧拷贝挂载即抛**；按出厂 standard 组合二次重建（persona 用 `prefix` 承载角色真源全文）后新会话/老会话均恢复 ✓ | **不在自动断言面**（机器级文件、不属本票写集）——已入 runbook §5 风险表 + §6 第 7 条重建流程 | 起不了新会话/续不上老会话＝先查此面；升级后必须**重建**而不是沿用旧拷贝 |
+| 15 | **dsh 安装 bits 指纹**（260923 补行；同版本号 ≠ 同 bits） | 260923 实弹：全局 0.1.5-rc.2 的传递依赖当天漂到 cordis 4.0.3/loader 1.0.4/**hmr 1.0.18（无 `registerConfig`）**，launcher 在 `patchReload: live` 下必调该 API → 装了就起不来 | 0.1.1-rc.2 全局安装（依赖面未漂） | npm 那套：撞「hmr 服务激活不了」；手动开 hmr 再撞 `registerConfig is not a function`（profile 侧无解）。已验证解析集＝cordis 4.0.2/loader 1.0.3/hmr 1.0.17（`--before=2026-09-22` 可复现） | `./start-console.sh --bits-check`（启动时闸；`integration/tests/test_start_console_bits.py` 8 条离线回归看守） | 起不来但 `--version` 正常＝查此面；**只校版本号判不出可用** |
 
 ## 自检覆盖与人工清单的分工
 
 - **自动断言**（selfcheck，升级前后各跑一次）：行 1/2/3/4/6/10/11/12/13；
 - **人工清单**（checklist 子命令打印）：行 5/7/8/9 全部 + 全行抽验——自动断言
   只锚定「实测过的事实下限」，UI 观感级 break（排版/交互/主题/流式）必须人眼。
+- **行 14/15 不在本矩阵的自动/清单两轨内**：14 是机器级文件（不在仓库、不属任何票写集），
+  15 由 `start-console.sh` 启动闸 + `integration/tests/test_start_console_bits.py` 独立看守。
 
 ## 变更记录
 
 - 20260916~18 t260916-25 初版：13 接缝入表，0.1.5-rc.2 实弹回填（行 4 名集
   票面「三个」修订为实测「四个」，temporal-tools 无浏览器半单列）。
+- 20260923（事故回填，宿主令「不开票，直接搞好」）：补行 14（GUI 用户 preset 组合——
+  0.1.1 时代实体拷贝在 0.1.5 的 persona schema 变更下挂载即抛，宿主实测新/续会话全废）、
+  行 15（安装 bits 指纹——同版本号不同 bits，「版本号对＝可用」这个隐含前提被推翻）。
