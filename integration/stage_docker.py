@@ -1519,6 +1519,40 @@ _SUBNET_CONFLICT_PAT = re.compile(
     r"overlaps with (another|other) (network )?on this address space"
     r"|fully subnetted", re.I)
 
+# 端口撞口签名（C 环境自愈退避重试触发面，260923 宿主直修令）：compose up 报端口
+# 被占而探针期未见——占口者常为已退瞬时占用（260922-18 实证「占口者已退」形态），
+# 退避重试即可自愈；持久占口者重试耗尽照旧红，终报附占口者诊断（报错精确纪律：
+# 点名谁占着，不许笼统「起不来」）。窄列同 C3：只认 docker 的两形态撞口文案。
+_PORT_BIND_PAT = re.compile(
+    r"port is already allocated|Bind for [^:]+:\d+ failed", re.I)
+
+
+def parse_bind_conflict_port(tail):
+    """从 compose up 报错尾解析被撞端口（纯函数；解析不出=None，调用方降级不猜）。"""
+    if not isinstance(tail, str):
+        return None
+    m = re.search(r"Bind for [^:]+:(\d+) failed", tail)
+    return int(m.group(1)) if m else None
+
+
+def _port_holder_diag(tail):
+    """撞口终败时的占口者诊断（报错精确纪律）：点名占口容器名/状态/端口映射；
+    无占口者=如实说「已退/瞬时占用形态」；探测失败=点名降级原因，不静默。"""
+    port = parse_bind_conflict_port(tail)
+    if port is None:
+        return "（被撞端口未知——报错尾无 Bind for 形态）"
+    try:
+        p = subprocess.run(
+            ["docker", "ps", "-a", "--filter", "publish=%d" % port,
+             "--format", "{{.Names}}\t{{.Status}}\t{{.Ports}}"],
+            capture_output=True, text=True, timeout=10)
+        lines = [ln for ln in (p.stdout or "").splitlines() if ln.strip()]
+    except Exception as e:  # noqa: BLE001 —— 诊断面降级不抛（主错误已在上层）
+        return "（占口者探测失败：%s）" % type(e).__name__
+    return ("端口 %d 占口者：%s" % (port, "；".join(lines[:4]))
+            if lines else
+            "端口 %d 当前无容器占口（占口者已退/瞬时占用形态，重试可自愈）" % port)
+
 
 def net_table():
     """受管网段表全部 /24 槽（base /16 → 256 槽，含保留尾槽）。"""
@@ -2839,6 +2873,18 @@ def do_up(project, services_list, opts, timeout, lock_fd=None, lease=None):
             up_rc = p.returncode
             up_tail = ((p.stdout or "") + (p.stderr or ""))[-2000:]
             if not (_SUBNET_CONFLICT_PAT.search(up_tail) and not container_ids(project)):
+                if _PORT_BIND_PAT.search(up_tail):
+                    # 端口瞬时撞口（C 自愈，260923）：探针期未见的瞬时占口——退避重试
+                    # 自愈（占口者常已退）；重试耗尽照旧红，终报附占口者诊断点名。
+                    if attempt < 2:
+                        print("[stage_docker] 端口撞口退避重试 %d/2（报错尾：%s）"
+                              % (attempt + 1, " ".join(up_tail.split())[-140:]))
+                        time.sleep(3)
+                        continue
+                    raise StageError(
+                        "docker compose up 失败（端口撞口重试耗尽，rc=%d）：\n%s"
+                        "\n——占口者诊断：%s"
+                        % (up_rc, up_tail, _port_holder_diag(up_tail)), kind="env")
                 raise StageError("docker compose up 失败（rc=%d）：\n%s" % (up_rc, up_tail),
                                  kind="env")
             # 网段撞号（C3）：先清同名遗留网络（遗留网络+新子网的配置漂移报错字面
@@ -2856,6 +2902,12 @@ def do_up(project, services_list, opts, timeout, lock_fd=None, lease=None):
             print("[stage_docker] 网段撞号换槽重试 %d/2：%s → %s（报错尾：%s）"
                   % (attempt + 1, old, new_subnet, " ".join(up_tail.split())[-140:]))
         else:
+            # 终报按最后形态点名（报错精确纪律：不许把端口撞口说成网段撞号）
+            if _PORT_BIND_PAT.search(up_tail or ""):
+                raise StageError(
+                    "docker compose up 失败（撞口重试 3 次未解决，rc=%d）：\n%s"
+                    "\n——占口者诊断：%s"
+                    % (up_rc, up_tail, _port_holder_diag(up_tail)), kind="env")
             raise StageError("docker compose up 失败（网段撞号换槽 3 次未解决，rc=%d）：\n%s"
                              % (up_rc, up_tail), kind="env")
         if "temporal" in services_list:
