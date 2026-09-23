@@ -8,9 +8,13 @@ _auto_rework 调用点计数）。历史教训（t260831-08 / integration/README
 
   A. py 锁（sc_check_auto_rework_trace.py）：EXPECT 恰 13 键含 arb_acc_parallel、
      EXPECT_ROLES 含该键 role=integration、chain == EXPECT 精确匹配在、
-     total_calls == 7 在、断言文案「恰为 13 个主链步」在。
+     total_calls == 8 在、断言文案「恰为 13 个主链步」在。
   B. mjs 锁（sc_auto_rework_trace.mjs）：len == 13 在、旧 == 12 退场、
-     _auto_rework findall == 8 在、键集合动态比对行仍在（未被弱化成单向检查）。
+     _auto_rework findall == 9 在、键集合动态比对行仍在（未被弱化成单向检查）。
+
+260923 A 慢性红清账补同步（宿主直修令）：下级两锁已随 23a9a29/fa51e1e 有意同步
+到引擎真态（双期 (7,8)→定值 8、调用点 8→9），元锁当时漏改——按本场景自身契约
+（计数随改、仍精确匹配、旧字面退场）补齐，锁只紧不松（新增旧字面退场面）。
 
 跑法：python3 -B integration/t260903-02/sc_lock_update_integrity.py（纯源码断言，零依赖）。
 实现段（步骤 6.5）完成前运行会红。
@@ -50,16 +54,19 @@ ok("arb_acc_parallel" in expect, "EXPECT 含 arb_acc_parallel")
 ok('"arb_acc_parallel": "integration"' in PY_LOCK,
    "EXPECT_ROLES 含该键 role=integration")
 ok("chain == EXPECT" in PY_LOCK, "词表断言仍是精确集合匹配（未放宽）")
-ok("total_calls in (7, 8)" in PY_LOCK, "打回点计数锁现行 (7, 8) 双期口径逐字在（仍精确匹配）")
+ok("total_calls == 8" in PY_LOCK, "打回点计数锁现行 == 8 定值逐字在（仍精确匹配）")
 ok("恰为 13 个主链步" in PY_LOCK, "断言文案同步（人读口径不撒谎）")
-ok("total_calls == 5" not in PY_LOCK and "total_calls == 6" not in PY_LOCK,
-   "旧计数 5/6 已退场（不留双口径）")
+ok("total_calls in (7, 8)" not in PY_LOCK
+   and "total_calls == 5" not in PY_LOCK and "total_calls == 6" not in PY_LOCK,
+   "旧计数 (7,8) 双期/5/6 已退场（不留双口径）")
 
 section("B mjs 锁：精确匹配保持 + 计数随改")
 ok("len(PHASE_MAIN_CHAIN) == 13" in MJS_LOCK, "len 锁更新为 13（仍精确 ==）")
 ok("== 12" not in MJS_LOCK, "旧 len 12 已退场")
-ok(re.search(r"findall\(r'self\\._auto_rework\\\(', src\)\) == 8", MJS_LOCK) is not None,
-   "_auto_rework 调用点锁更新为 8（1 壳委托 + 7 内部）")
+ok(re.search(r"findall\(r'self\\._auto_rework\\\(', src\)\) == 9", MJS_LOCK) is not None,
+   "_auto_rework 调用点锁更新为 9（8 内部 + 1 壳委托）")
+ok(re.search(r"findall\(r'self\\._auto_rework\\\(', src\)\) == 8", MJS_LOCK) is None,
+   "旧调用点 8 已退场（不留双口径）")
 ok("set(PHASE_MAIN_ROLES) == set(PHASE_MAIN_CHAIN)" in MJS_LOCK,
    "键集合动态比对仍在（未弱化成单向包含）")
 
