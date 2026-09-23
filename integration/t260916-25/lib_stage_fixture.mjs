@@ -116,6 +116,13 @@ const STUB_SERVER_JS = [
     "  res.writeHead(200, {'content-type': 'application/json'})",
     '  res.end(JSON.stringify({ ok: true, stub: true, url: url }))',
     '}).listen(port, \'127.0.0.1\')',
+  '// 寿命自毁（260923 补，KI-096）：桩台绝不无限期占口。场景收尾的清理面（ps 清点+kill）',
+  '// 在两种情形下失效——执行面禁 ps（沙箱里整套 stage 用例正因此报 ENV_FAIL），以及跑批',
+  '// 被看门狗掐/Terminate 时 finally 根本跑不到。失效后果不是「少清一个进程」，而是夹具',
+  '// 自己的 39 口池（3511-3549）被历史残留占满 → 之后每轮都自报「高位口耗尽」假红，',
+  '// 还会被误读成产品/版本回归。TTL 到点自退，池子自己会恢复（可用 STAGE_STUB_TTL_MS 调）。',
+  'const TTL_MS = Number(process.env.STAGE_STUB_TTL_MS || 240000)',
+  'if (Number.isFinite(TTL_MS) && TTL_MS > 0) setTimeout(function () { process.exit(0) }, TTL_MS)',
   '',
 ].join('\n')
 
