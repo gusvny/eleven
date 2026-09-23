@@ -67,6 +67,9 @@ export default {}\n`)
   cp('src/client/session-ledger-store.ts')
   cp('src/client/closed-ledger-store.ts')
   cp('src/shared/sessions.ts')
+  // 260923：session-entry.tsx 新增「启动面双版解析」依赖（workspaces-compat），
+  // 本夹具按文件清单拷贝，漏拷即 ERR_MODULE_NOT_FOUND——新增模块必须同步登记。
+  cp('src/shared/workspaces-compat.ts')
   cp('src/host/session-charter.ts')
 
   const mod = await import(pathToFileURL(join(tmp, 'src/client/session-entry.ts')).href)

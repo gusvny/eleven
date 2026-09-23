@@ -1388,3 +1388,29 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 同族面（一并查明，未修）：nusuyou/dengzhufpv 未声明 `paths.dsh_bin` → worker spawn 走裸 `dsh`
   （`server/engine/data/worker-t260923-04.log` 实证 `bin=dsh(→/opt/homebrew/bin/dsh) 来源=default`），
   即全局 bits 坏掉时**所有项目**的 agent 段一起坏——全局安装保持指纹绿是跨项目公共面。
+
+## KI-101 dsh 0.1.5 客户端服务面迁移未入兼容面：`workspaces.startSession` → `uiWorkspace.startSession`（260923 实报；**同日 main 侧已修**，宿主令「不开票，直接搞好」）
+- 现象（宿主实报）：「新建会话失败：请求异常（详情见控制台）」——**所有项目一起坏**（nusuyou 与 sandbar 都炸），
+  浏览器控制台实际异常：`TypeError: workspaces.startSession is not a function at Object.handleNew`。
+- 根因：0.1.5 把客户端「UI 工作区服务」与「工作区控制器」拆成两个服务——
+  `dsh-client-ui-workspace` 以 `super(ctx, "uiWorkspace")` 提供带 `startSession` 的服务
+  （平台自己的 sidebar/agent-preset 都经 `ctx.uiWorkspace` 调它），而 `ctx.workspaces` 变成
+  `dsh-api-workspace-controller`（纯控制器，**整包无 startSession**）。0.1.1 时代 `startSession`
+  在 `ctx.workspaces` 上，本插件照它写死，升级后同一句调用必炸。
+- 为什么没被网住：`server/plugins/workbench/tests/` 里**零命中** `startSession`——这条链原先没有任何
+  测试覆盖，平台服务面换名/迁移没人管（与 KI-100 的 A/C 两个模式同族：**平台面没进任何兼容矩阵**）。
+- 危害：宿主侧「项目行 ＋ 新建会话」全项目失效、`handleOpen` 的 blank 会话自愈分支同样失效；
+  报错文案只说「请求异常」，真因只在浏览器控制台。
+- 处置（260923，main 侧）：新增 `server/plugins/workbench/src/shared/workspaces-compat.ts`
+  （`resolveStartSession(candidates)`：按候选面顺序取 `startSession`、`this` 绑回宿主、全无则抛**精确**错误——
+  点名「0.1.5 在 uiWorkspace／workspaces 现为纯控制器」，不再甩裸 TypeError）；
+  `session-entry.tsx` 两处调用点（handleNew / handleOpen 的 blank 自愈）统一走 hook 内
+  `startWorkspaceSession`；`index.tsx` 把 `uiWorkspace` 传下去且**在渲染期取值**（apply 期取会拿到
+  undefined：装载次序不保证）；**未写入插件 inject**（0.1.1 无该服务，声明＝entry 永久 pending，t260916-26 教训）。
+- 回归：`server/plugins/workbench/tests/session-start-version-shim.mjs`（21 条：双版解析纯逻辑 + 源码静态
+  看守「不得再直呼 workspaces.startSession(」+ 产物同构防「改了 src 没重建」）。
+- 验证：真起隔离台（3288 + 独立 DSH_HOME）→ 自检全绿（组合包四插件在位、workbench API 全 200）；
+  **抓浏览器实际下载的组合包（13.28MB）**：新文案命中 1、`resolveStartSession` 命中 4、旧直呼残留 0。
+- 定位：`dsh-client-ui-workspace/lib/client.js:38`（`super(ctx,"uiWorkspace")`）/`:81`（startSession 定义）/
+  `dsh-api-workspace-controller/lib/client.js`（`super(ctx,"workspaces")`，startSession 零命中）；
+  仓内旧调用点＝`server/plugins/workbench/src/client/session-entry.tsx`（handleNew/handleOpen 两处）。

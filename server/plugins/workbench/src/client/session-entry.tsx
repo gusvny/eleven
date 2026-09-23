@@ -27,8 +27,10 @@
  * 终态：tab 消失、current 不变（会话仍在运行），不会复活。
  *
  * 故障模式取舍（票 t260831-04）：
- *   - 新建走 ctx.workspaces.startSession（工厂同款）；workspaces 服务缺失：
- *     行内可见错误 + console.error，按钮不复位为假成功；
+ *   - 新建走 services 的 startSession（工厂同款）；服务缺失：行内可见错误 +
+ *     console.error，按钮不复位为假成功。**260923 起统一经 resolveStartSession
+ *     取用**：0.1.5 该 API 在 ctx.uiWorkspace、0.1.1 在 ctx.workspaces（混版
+ *     直呼旧面＝TypeError「workspaces.startSession is not a function」，实弹过）；
  *   - 工作区按项目主目录匹配（workspaceForDir：精确→前缀→realtime 归一），
  *     找不到且 projectDir 有值 → workspaces.create（host 幂等：已注册同目录
  *     返回既存工作区）；create 失败：行内提示，不落账不静默；
@@ -88,6 +90,9 @@ import {
 // session-charter 端点路径常量（t260904-07）：与 node.ts 路由注册同源派生
 // （方案 R7 防 KI-042 路径漂移）；被引模块零 node 依赖，浏览器包安全（review C1）。
 import { SESSION_CHARTER_PATH, CHARTER_MARKER } from '../host/session-charter.ts'
+// 「新建会话」启动面的双版兼容解析（260923）：0.1.1 在 ctx.workspaces 上、
+// 0.1.5 起迁到 ctx.uiWorkspace（workspaces 变纯控制器）——严禁直呼旧面。
+import { resolveStartSession } from '../shared/workspaces-compat.ts'
 
 export { LEDGER_KEY, CLOSED_LEDGER_KEY }
 
@@ -172,12 +177,20 @@ export interface SessionsFace {
  * t260831-04 取证实锤：WorkspaceBrowserInjected.open/startSession 是
  * ui-workspace 的**注册者私有注入**，slot owner props（wide/expandSidebar）里
  * 拿不到——旧代码里「slotOpen 优先」的分支恒走 sessions.open 兜底。
- * 新建的工厂同款语义在公开面 ctx.workspaces.startSession：绑工作区 + 复用
+ * 新建的工厂同款语义在**公开服务**的 startSession：绑工作区 + 复用
  * blank 会话 + 正确打开（staging）。
+ *
+ * ⚠️ 260923 勘误（升级 0.1.5 后「新建会话」全项目报 TypeError 的事故）：
+ *   0.1.1 时代该 API 在 `ctx.workspaces` 上；**0.1.5 起它随 UI 工作区服务迁到
+ *   `ctx.uiWorkspace`**（dsh-client-ui-workspace，`super(ctx,"uiWorkspace")`），
+ *   而 `ctx.workspaces` 变成纯控制器 dsh-api-workspace-controller（整包无此方法）。
+ *   故本接口的 startSession 标为可选：实际取用一律走 `resolveStartSession`
+ *   （shared/workspaces-compat.ts；双版容错 + 精确报错），**严禁再直呼
+ *   `workspaces.startSession(...)`**（有静态看守）。
  */
 export interface WorkspacesFace {
   list: ObservableSnapshot<{ items: readonly { workspaceId: string; path: string }[] }>
-  startSession(workspaceId?: string): void
+  startSession?(workspaceId?: string): void
   create(input: { path: string }): Promise<{ workspaceId: string }>
 }
 
@@ -225,8 +238,11 @@ export async function waitForListed(sessions: SessionsFace, id: string, ms = 100
 interface SessionEntryOptions {
   /** 客户端 sessions 服务（index.tsx 的 ctx.sessions）。 */
   sessions: SessionsFace
-  /** 客户端 workspaces 服务（index.tsx 的 ctx.workspaces；新建走工厂同款语义）。 */
+  /** 客户端 workspaces 服务（index.tsx 的 ctx.workspaces；0.1.5 起＝纯控制器）。 */
   workspaces?: WorkspacesFace
+  /** 客户端 uiWorkspace 服务（index.tsx 的 ctx.uiWorkspace；**0.1.5 起** startSession 在这上面）。
+   *  可选：0.1.1 没有该服务，缺失时自动回落 workspaces（见 resolveStartSession）。 */
+  uiWorkspace?: WorkspacesFace
   /** 槽注入的打开动作（WorkspaceBrowserInjected.open；由侧栏槽注入）。 */
   slotOpen?: (sessionId: string) => void
   /** 列表归属与新建落点的项目 key（空=未选项目：列表空，多项目时 + 弹项目选单）。 */
@@ -347,11 +363,18 @@ export async function injectSessionCharter(sessions: SessionsFace, staged: strin
 /**
  * 会话入口共享 hook（动作层）：账册状态 + 新建/打开/关闭动作，渲染面=项目行。
  */
-export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDir }: SessionEntryOptions) {
+export function useSessionEntry({ sessions, workspaces, uiWorkspace, slotOpen, projectKey, projectDir }: SessionEntryOptions) {
   const list = sessions.list
   const subscribe = useCallback((fn: () => void) => list.subscribe(fn), [list])
   const getSnapshot = useCallback(() => list.getSnapshot(), [list])
   const listState = useSyncExternalStore(subscribe, getSnapshot)
+  /** 「绑工作区 + 复用 blank + 正确打开」的启动动作（双版容错，260923）：
+   *  优先 0.1.5 的 ctx.uiWorkspace，回落 0.1.1 的 ctx.workspaces；两者都没有时
+   *  resolveStartSession 抛精确错误（被外层 catch 打进控制台，不再甩裸 TypeError）。 */
+  const startWorkspaceSession = useCallback(
+    (workspaceId?: string) => resolveStartSession([uiWorkspace, workspaces])(workspaceId),
+    [uiWorkspace, workspaces],
+  )
   // 账册：模块级共享 store——挂载时（首次 getSnapshot）从 localStorage 惰性读入
   // （坏数据 parseLedger 容错为空册）；persist 统一「更新单例 + 落盘 + 通知订阅者」。
   const ledger = useSyncExternalStore(subscribeLedger, getLedgerSnapshot)
@@ -435,7 +458,7 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
         })
       if (ws) {
         const prev = (() => { try { return (sessions.list.getSnapshot()?.current as string | undefined) ?? null } catch { return null } })()
-        workspaces.startSession(ws.workspaceId)
+        startWorkspaceSession(ws.workspaceId)
         const staged = await waitForStaged(sessions, prev, 10000)
         if (staged && staged !== id) {
           persist(touchEntry(removeEntry(ledger, id), {
@@ -452,11 +475,12 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
       }
     }
     await openSession(id, entry?.project)
-  }, [openSession, workspaces, sessions, ledger, persist, projectKey])
+  }, [openSession, workspaces, sessions, ledger, persist, projectKey, startWorkspaceSession])
 
   // 新建（票 t260831-04 重写）：不再走宿主端 global-session/open 自铸会话
   // （自铸会话不绑工作区 → 平台语义「hero ⟺ blank」下永远停在 hero、内容被
-  // 发到别处——仲裁 S2/S3 失败的根因）。改走 ctx.workspaces.startSession——
+  // 发到别处——仲裁 S2/S3 失败的根因）。改走 startWorkspaceSession
+  // （双版容错：0.1.5 的 ctx.uiWorkspace 优先，回落 0.1.1 的 ctx.workspaces）——
   // 与出厂 New Session 完全同款：绑当前项目工作区、复用既有 blank 会话
   // （不再累积空会话）、正确打开。staged 的会话 id 落账册（打开链路失败也
   // 不丢入口——记账层的意义）。行内可见错误态同前。
@@ -487,7 +511,7 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
         notify('新建会话失败：项目主目录未注册为工作区', pk)
         return
       }
-      workspaces.startSession(ws.workspaceId)
+      startWorkspaceSession(ws.workspaceId)
       const prev = (() => { try { return (sessions.list.getSnapshot()?.current as string | undefined) ?? null } catch { return null } })()
       const staged = await waitForStaged(sessions, prev, 10000)
       if (!staged) {
@@ -529,7 +553,7 @@ export function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, pr
     } finally {
       setCreating(false)
     }
-  }, [workspaces, sessions, projectKey, projectDir, creating, persist, notify])
+  }, [workspaces, sessions, projectKey, projectDir, creating, persist, notify, startWorkspaceSession])
 
   /* ── tab 关闭（t260831-06；t260904-01 D1 修复：closed 状态迁共享 store）──
    * 关闭=removeEntry 剔账册（tab 消失）+ 条目移入「最近关闭」列表 + 尽力调

@@ -2821,6 +2821,22 @@ const SESSION_CHARTER_PATH = "/sandbar-workbench/api/session-charter";
 */
 const CHARTER_MARKER = "<!-- workbench:kind:charter -->";
 //#endregion
+//#region src/shared/workspaces-compat.ts
+/** 不可用时的精确报错文案（点名两版各自的所在面，避免诊断被引向错误方向）。 */
+const START_SESSION_MISSING = "startSession 不可用：dsh 0.1.5 起该 API 在 uiWorkspace 上（dsh-client-ui-workspace），ctx.workspaces 现为纯控制器（dsh-api-workspace-controller，无此方法）；0.1.1 时代它在 ctx.workspaces 上。候选服务面均未提供 startSession。";
+/**
+* 从候选面里挑出可用的 startSession。
+* @param candidates - 按优先级排列的服务面（如 `[ctx.uiWorkspace, ctx.workspaces]`）。
+* @throws 所有候选都没有 startSession 时抛错（消息＝START_SESSION_MISSING）。
+*/
+function resolveStartSession(candidates) {
+	for (const face of candidates) {
+		const fn = face?.startSession;
+		if (typeof fn === "function") return (workspaceId) => fn.call(face, workspaceId);
+	}
+	throw new Error(START_SESSION_MISSING);
+}
+//#endregion
 //#region src/client/session-entry.tsx
 /**
 * sandbar-workbench · 会话动作层唯一样态（session-entry t260831-02 → 票② t260904-05 R8 退役收口）。
@@ -2851,8 +2867,10 @@ const CHARTER_MARKER = "<!-- workbench:kind:charter -->";
 * 终态：tab 消失、current 不变（会话仍在运行），不会复活。
 *
 * 故障模式取舍（票 t260831-04）：
-*   - 新建走 ctx.workspaces.startSession（工厂同款）；workspaces 服务缺失：
-*     行内可见错误 + console.error，按钮不复位为假成功；
+*   - 新建走 services 的 startSession（工厂同款）；服务缺失：行内可见错误 +
+*     console.error，按钮不复位为假成功。**260923 起统一经 resolveStartSession
+*     取用**：0.1.5 该 API 在 ctx.uiWorkspace、0.1.1 在 ctx.workspaces（混版
+*     直呼旧面＝TypeError「workspaces.startSession is not a function」，实弹过）；
 *   - 工作区按项目主目录匹配（workspaceForDir：精确→前缀→realtime 归一），
 *     找不到且 projectDir 有值 → workspaces.create（host 幂等：已注册同目录
 *     返回既存工作区）；create 失败：行内提示，不落账不静默；
@@ -3042,9 +3060,13 @@ async function injectSessionCharter(sessions, staged, projectKey, notify) {
 /**
 * 会话入口共享 hook（动作层）：账册状态 + 新建/打开/关闭动作，渲染面=项目行。
 */
-function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDir }) {
+function useSessionEntry({ sessions, workspaces, uiWorkspace, slotOpen, projectKey, projectDir }) {
 	const list = sessions.list;
 	const listState = (0, react.useSyncExternalStore)((0, react.useCallback)((fn) => list.subscribe(fn), [list]), (0, react.useCallback)(() => list.getSnapshot(), [list]));
+	/** 「绑工作区 + 复用 blank + 正确打开」的启动动作（双版容错，260923）：
+	*  优先 0.1.5 的 ctx.uiWorkspace，回落 0.1.1 的 ctx.workspaces；两者都没有时
+	*  resolveStartSession 抛精确错误（被外层 catch 打进控制台，不再甩裸 TypeError）。 */
+	const startWorkspaceSession = (0, react.useCallback)((workspaceId) => resolveStartSession([uiWorkspace, workspaces])(workspaceId), [uiWorkspace, workspaces]);
 	const ledger = (0, react.useSyncExternalStore)(subscribeLedger, getLedgerSnapshot);
 	const persist = (0, react.useCallback)((entries) => {
 		persistLedger(entries);
@@ -3126,7 +3148,7 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 						return null;
 					}
 				})();
-				workspaces.startSession(ws.workspaceId);
+				startWorkspaceSession(ws.workspaceId);
 				const staged = await waitForStaged(sessions, prev, 1e4);
 				if (staged && staged !== id) persist(touchEntry(removeEntry(ledger, id), {
 					id: staged,
@@ -3146,7 +3168,8 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 		sessions,
 		ledger,
 		persist,
-		projectKey
+		projectKey,
+		startWorkspaceSession
 	]);
 	const handleNew = (0, react.useCallback)(async (target) => {
 		const pk = target?.key ?? projectKey;
@@ -3173,7 +3196,7 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 				notify("新建会话失败：项目主目录未注册为工作区", pk);
 				return;
 			}
-			workspaces.startSession(ws.workspaceId);
+			startWorkspaceSession(ws.workspaceId);
 			const staged = await waitForStaged(sessions, (() => {
 				try {
 					return sessions.list.getSnapshot()?.current ?? null;
@@ -3214,7 +3237,8 @@ function useSessionEntry({ sessions, workspaces, slotOpen, projectKey, projectDi
 		projectDir,
 		creating,
 		persist,
-		notify
+		notify,
+		startWorkspaceSession
 	]);
 	const closedList = (0, react.useSyncExternalStore)(subscribeClosed, getClosedSnapshot);
 	return {
@@ -47589,7 +47613,7 @@ function useHideFactoryNewSession(rootRef, wide) {
 	}, [rootRef, wide]);
 }
 function WorkbenchSidebar(props) {
-	const { wide, expandSidebar, sessions, views, open: slotOpen, workspaces } = props;
+	const { wide, expandSidebar, sessions, views, open: slotOpen, workspaces, uiWorkspace } = props;
 	const [projects, setProjects] = (0, react.useState)([]);
 	/** 项目 key → 该项目的工单行（按 ?project= 逐组拉取，来源即归属，不做路径猜测）。 */
 	const [ticketsByProject, setTicketsByProject] = (0, react.useState)({});
@@ -47642,6 +47666,7 @@ function WorkbenchSidebar(props) {
 	const projectSessions = useSessionEntry({
 		sessions,
 		workspaces,
+		uiWorkspace,
 		slotOpen,
 		projectKey: viewProject || (projects.length === 1 ? projects[0].key : ""),
 		projectDir: projects.find((p) => p.key === (viewProject || (projects.length === 1 ? projects[0].key : "")))?.primary ?? ""
@@ -55826,6 +55851,7 @@ function apply(ctx) {
 	}, (props) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(WorkbenchSidebar, {
 		sessions: ctx.sessions,
 		workspaces: ctx.workspaces,
+		uiWorkspace: ctx.uiWorkspace ?? ctx.get?.("uiWorkspace"),
 		views: {
 			board: WorkbenchSection,
 			docs: DocsSection,

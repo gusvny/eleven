@@ -204,11 +204,19 @@ interface SidebarProps {
    *  注入，slot owner props 里没有 open——本 prop 恒 undefined，历史分支仅留
    *  兼容，真正的新建语义走下方 workspaces 公开服务。 */
   open?: (sessionId: string) => void
-  /** 客户端 workspaces 服务（index.tsx 的 ctx.workspaces）：顶部入口「新建会话」
-   *  走 startSession（工厂同款：绑工作区+复用 blank+正确打开，t260831-04）。 */
+  /** 客户端 workspaces 服务（index.tsx 的 ctx.workspaces）：0.1.5 起＝**纯控制器**
+   *  （dsh-api-workspace-controller），不再是 startSession 的所在面（260923 勘误）。 */
   workspaces?: {
     list: ObservableSnapshot<{ items: readonly { workspaceId: string; path: string }[] }>
-    startSession(workspaceId?: string): void
+    startSession?(workspaceId?: string): void
+    create(input: { path: string }): Promise<{ workspaceId: string }>
+  }
+  /** 客户端 uiWorkspace 服务（index.tsx 的 ctx.uiWorkspace）：**0.1.5 起**
+   *  startSession（工厂同款：绑工作区+复用 blank+正确打开）在这上面。
+   *  可选＝0.1.1 无此服务；取用一律经 resolveStartSession 双版解析。 */
+  uiWorkspace?: {
+    list: ObservableSnapshot<{ items: readonly { workspaceId: string; path: string }[] }>
+    startSession?(workspaceId?: string): void
     create(input: { path: string }): Promise<{ workspaceId: string }>
   }
   /** 中列三视图（index.tsx 注入）。 */
@@ -402,7 +410,7 @@ function useHideFactoryNewSession(rootRef: { current: HTMLElement | null }, wide
 }
 
 export function WorkbenchSidebar(props: SidebarProps) {
-  const { wide, expandSidebar, sessions, views, open: slotOpen, workspaces } = props
+  const { wide, expandSidebar, sessions, views, open: slotOpen, workspaces, uiWorkspace } = props
   const [projects, setProjects] = useState<Project[]>([])
   /** 项目 key → 该项目的工单行（按 ?project= 逐组拉取，来源即归属，不做路径猜测）。 */
   const [ticketsByProject, setTicketsByProject] = useState<Record<string, Ticket[]>>({})
@@ -478,6 +486,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
   const projectSessions = useSessionEntry({
     sessions,
     workspaces,
+    uiWorkspace,
     slotOpen,
     projectKey: viewProject || (projects.length === 1 ? projects[0].key : ''),
     projectDir: projects.find(p => p.key === (viewProject || (projects.length === 1 ? projects[0].key : '')))?.primary ?? '',

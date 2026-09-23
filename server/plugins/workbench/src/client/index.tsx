@@ -4696,14 +4696,21 @@ export function apply(ctx: ClientContext): void {
   // single 槽「lowest renders」——默认 WorkspaceBrowser 无 priority（=0），我们挂 -10 抢占；
   // 同优先级注册会 throw。chat 顶部页签不再注册（260823 用户拍板移出）。
   // t260831-02：不再注册任何 conversation.hero.* 槽——出厂落地页原样（右栏零定制）。
-  // t260831-04：workspaces 传给顶部入口——新建走 ctx.workspaces.startSession
-  // （工厂同款语义；详见 session-entry.tsx WorkspacesFace 注释）。
+  // t260831-04：workspaces 传给顶部入口——新建走「绑定工作区的启动动作」。
+  // 260923 勘误（0.1.5 升级事故）：该动作 0.1.1 在 ctx.workspaces，
+  // 0.1.5 已迁到 ctx.uiWorkspace（ctx.workspaces 变纯控制器，无 startSession）；
+  // 两面都传下去，由 resolveStartSession 双版解析（不写进 inject：声明某版不存在的
+  // 服务＝entry 永久 pending，t260916-26 教训）。详见 workspaces-compat.ts 头注。
+  // ⚠️ uiWorkspace 必须在**渲染期**取值，不能在 apply() 期取：插件装载次序不保证
+  // （uiWorkspace 与我们同为 workspaces 的消费方，谁先 apply 不定），apply 期取会拿到
+  // undefined 并把双版解析直接推向「两面都没有」。渲染发生在 boot 之后，稳定可得。
   ctx.slots.inject('sidebar.workspaces', () => ctx.slots.register({
     name: 'sidebar.workspaces',
     priority: -10,
   }, (props: any) => <WorkbenchSidebar
     sessions={ctx.sessions}
     workspaces={ctx.workspaces as any}
+    uiWorkspace={((ctx as any).uiWorkspace ?? (ctx as any).get?.('uiWorkspace')) as any}
     views={{ board: WorkbenchSection, docs: DocsSection, routes: ProvidersSection, epics: EpicSection }}
     {...props} />))
 
