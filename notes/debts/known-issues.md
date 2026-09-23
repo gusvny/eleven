@@ -1411,6 +1411,16 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   看守「不得再直呼 workspaces.startSession(」+ 产物同构防「改了 src 没重建」）。
 - 验证：真起隔离台（3288 + 独立 DSH_HOME）→ 自检全绿（组合包四插件在位、workbench API 全 200）；
   **抓浏览器实际下载的组合包（13.28MB）**：新文案命中 1、`resolveStartSession` 命中 4、旧直呼残留 0。
+- **续记（同日，本条的修复自己踩出来的二次事故——留档，教训比故障更值钱）**：第一版修法用
+  `(ctx as any).uiWorkspace ?? ctx.get('uiWorkspace')`，`??` 先求左值——而 cordis 的 proxy 对**属性形式**
+  访问未 inject 的服务**直接抛** `cannot get property "uiWorkspace" without inject`；抛点在 slot 渲染期 →
+  `slot entry crashed in 'sidebar.workspaces'` → **整个 sandbar UI 消失、退回 dsh 默认界面**（宿主实报
+  「ui 都没了」）。正路＝免注入查找口 `ctx.get(name)`（平台先例 `dsh-client-ui-sidebar:339`）；
+  且应**点击时惰性取**（避免装载次序/渲染时序）。修法见 main 提交 `c5a1f32`。
+- **验证盲区（同一条命，必须记住）**：第一版只验了「组合包命中 sandbar-workbench」＝**文件在**，
+  不等于**条目激活**；「条目在但渲染期抛错」这类故障只有**真浏览器加载页面**才看得见。现口径＝
+  隔离台 + playwright 真加载（断言我们的 DOM 锚在位、崩溃类 console 错误为 0、点一次「新建会话」成功）
+  ——回归用例已把这两条钉成静态看守（不得属性形式访问 uiWorkspace；免注入只走 ctx.get）。
 - 定位：`dsh-client-ui-workspace/lib/client.js:38`（`super(ctx,"uiWorkspace")`）/`:81`（startSession 定义）/
   `dsh-api-workspace-controller/lib/client.js`（`super(ctx,"workspaces")`，startSession 零命中）；
   仓内旧调用点＝`server/plugins/workbench/src/client/session-entry.tsx`（handleNew/handleOpen 两处）。
