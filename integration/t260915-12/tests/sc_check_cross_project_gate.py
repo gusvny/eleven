@@ -207,8 +207,8 @@ ok("class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):" in DEVLAN
 ok(DEVLANE.count("_cross_project_gate(") - DEVLANE.count("def _cross_project_gate(") == 3,
    "dev_lane 三落点（sign/rework/host_ruling，实测 %d 处调用）"
    % (DEVLANE.count("_cross_project_gate(") - DEVLANE.count("def _cross_project_gate(")))
-ok(BASE.count("_cross_project_gate(") - BASE.count("def _cross_project_gate(") == 4,
-   "base 四落点（sign/rework/pause/resume，实测 %d 处调用）"
+ok(BASE.count("_cross_project_gate(") - BASE.count("def _cross_project_gate(") == 5,
+   "base 五落点（sign/rework/pause/resume/cancel_notice，实测 %d 处调用）"
    % (BASE.count("_cross_project_gate(") - BASE.count("def _cross_project_gate(")))
 ok("def _cross_project_gate(self" in BASE and "cross_project_judge(" in BASE,
    "混入体消费单点判定（base 不自带矩阵）")
@@ -236,9 +236,11 @@ ok("_write_op_poc('ticket', payload, a)" in TICKET
    "写 op 统一出口（ticket/ticket-start 两入口同走）")
 ok("def _poc(subcmd, payload, caller=None)" in TICKET
    and "s.CALLER_PROJECT_ENV" in TICKET, "_poc env 注入身份（spawn 链出处）")
-ok(TICKET.count("_write_op_poc(") - 1 == 8,
-   "写面统一出口恰 8 调用点（rework/sign/retry_qc/authorize/ruling/update/ticket-start + "
-   "pause|resume 共用一处；ruling=F2 收口补的包装层出口，与 schema enum 宣告对齐，实测 %d）"
+ok(TICKET.count("_write_op_poc(") - 1 == 9,
+   "写面统一出口恰 9 调用点（rework/sign/retry_qc/authorize/ruling/update/ticket-start + "
+   "pause|resume 共用一处 + ticket-cancel：t260922-10（bf85990）按设计补的 cancel 接闸"
+   "走同一出口，260923 A 清账登记同步；ruling=F2 收口补的包装层出口，与 schema enum "
+   "宣告对齐，实测 %d）"
    % (TICKET.count("_write_op_poc(") - 1))
 ok("'cross_project_uses'" in TICKET, "对账白名单 cross_project_uses 在 _v2_query")
 ok("'caller_project'" in TICKET and "'cross_project'" in TICKET

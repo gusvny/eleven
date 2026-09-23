@@ -322,7 +322,7 @@ SCENARIOS = [
     # t260915-12 离线源码锁（实现段交付，方案 §4）：结构锁+真函数重放，无 docker/
     # 网络/pytest 依赖恒可跑；与 gate-real-chain 不同层（彼真链路行为面）。
     ("t260915-12-cross-project-gate",
-     "跨项目写操作闸离线源码锁+微型重放（temporalio 不可导入环境既定模式，sc_check_auto_rework_trace 同款）：锁 undeclared 策略单常量（UNDECLARED_POLICY=record——C-0② 翻严锚点：翻 A 时本场景+真链路场景相七+README 三处同步改）、四个写信号载荷盖章字段带默认值（重放安全形状）、判定矩阵单点实现（shared.cross_project_judge 唯一真源，client/workflow 两侧零复制）并直接 import 真函数重放正/负/越权/畸形四子用例（畸形子用例：旗非对象/缺 by/缺 reason/超上限/身份形状非法/路径前缀混淆/空白声明=视同未声明）、client 八写 op 全接闸+retry_qc/update 不盖章但回执 notice 分档（C3 诚实残留）、cancel 前置快照三态（transient 不判越权 KI-025/not_found/先闸后 terminate）、workflow 第二道落点（base 混入四 handler+dev_lane 三 handler+旧模板 sign 统一接闸不留分叉）、ticket.py 包装层（仓树排除的 cwd 推导=C1、越权旗本层 fail-fast、对账白名单 cross_project_uses、schema caller_project+cross_project+op enum authorize|ruling=M2）",
+     "跨项目写操作闸离线源码锁+微型重放（temporalio 不可导入环境既定模式，sc_check_auto_rework_trace 同款）：锁 undeclared 策略单常量（UNDECLARED_POLICY=record——C-0② 翻严锚点：翻 A 时本场景+真链路场景相七+README 三处同步改）、四个写信号载荷盖章字段带默认值（重放安全形状）、判定矩阵单点实现（shared.cross_project_judge 唯一真源，client/workflow 两侧零复制）并直接 import 真函数重放正/负/越权/畸形四子用例（畸形子用例：旗非对象/缺 by/缺 reason/超上限/身份形状非法/路径前缀混淆/空白声明=视同未声明）、client 八写 op 全接闸+retry_qc/update 不盖章但回执 notice 分档（C3 诚实残留）、cancel 前置快照三态（transient 不判越权 KI-025/not_found/先闸后 terminate）、workflow 第二道落点（base 混入五 handler 含 t260922-10 补接闸的 cancel_notice+dev_lane 三 handler+旧模板 sign 统一接闸不留分叉）、ticket.py 包装层（仓树排除的 cwd 推导=C1、越权旗本层 fail-fast、对账白名单 cross_project_uses、schema caller_project+cross_project+op enum authorize|ruling=M2）",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260915-12/tests/sc_check_cross_project_gate.py", "engine"),
 
     ("auto-rework-trace",
