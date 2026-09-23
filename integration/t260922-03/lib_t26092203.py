@@ -10,7 +10,8 @@
   不依赖宿主真 npm/真网，也不依赖 --reuse-install（该旗标现况结构性失灵：探针每次
   mkdtemp 新 tmp，prefix 恒在自己的空目录里——已作缺陷上报，场景不锚它）。
 - **dsh 桩**只演用户可感知面：退出码 / MISSING_CREDENTIAL 自报形状 / 会话产物落盘 /
-  DSH_HEADLESS_SESSION 续写语义。
+  会话续写语义（create-or-resume：首次会话带 id 照样落产物，已有会话档则零新文件——
+  与引擎「每次 spawn 都注入 DSH_HEADLESS_SESSION + resume patch」的生产形状同形）。
 - 判据只落探针公开契约（CLI 旗标 / 退出码 / 台账行字面 / SANDBAR_PROBE_EXPECTED_ROUTE
   旋钮），不锚探针内部实现（守望轮询周期、字面量提取方式、文案措辞均可变）。
 
@@ -74,7 +75,11 @@ _STUB_TEMPLATE = """#!/bin/sh
 echo "stub-up mode=$T26092203_STUB_MODE session=${DSH_HEADLESS_SESSION:-none}"
 case "$T26092203_STUB_MODE" in
   green)
-    if [ -z "$DSH_HEADLESS_SESSION" ]; then
+    # 首次/续跑的判据=**本会话档是否已存在**（create-or-resume 真语义），不是「有无
+    # DSH_HEADLESS_SESSION」——引擎每次 spawn 都注入该 env + resume patch（
+    # agent_activities.py:2656-2675 无条件），首次会话同样带 id；拿「有无 id」当
+    # 首次判据=把生产形状误判成续跑（t260922-03 场景 260923 假红根因）。
+    if [ ! -f "$DSH_HOME/sessions/session.v3.jsonl" ]; then
       mkdir -p "$DSH_HOME/sessions" || exit 4
       printf '%s\\n' \\
         '_L1_' '_L2_' '_L3_' > "$DSH_HOME/sessions/session.v3.jsonl" || exit 4
