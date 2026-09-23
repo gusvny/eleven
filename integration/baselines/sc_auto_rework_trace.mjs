@@ -91,11 +91,20 @@ function nestedGuard(env = process.env) {
 
 const PY = String.raw`
 import json, re, sys
+import pathlib
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 src = open(sys.argv[1], encoding='utf-8').read()
+
+# 引擎源码抽取面（t260921-04 起 PHASE_MAIN_ROLES 的值里调用 integration_discipline.prompt_clause()）：
+# 抽取出的源码要在桩命名空间里 exec，故须把引擎目录挂上 sys.path 供其解析——
+# 用**真模块**而不是假桩（判据不脱离真源）。缺失即响亮失败，不静默降级成空串。
+_engine_dir = str(pathlib.Path(sys.argv[1]).resolve().parent)
+if _engine_dir not in sys.path:
+    sys.path.insert(0, _engine_dir)
+import integration_discipline
 
 p_pass = 0
 p_fail = 0
@@ -129,6 +138,7 @@ ok(m_roles is not None, 'PHASE_MAIN_ROLES 常量可从源码抽出')
 
 ns = {
     'Dict': Dict, 'List': List, 'Any': Any, 'Optional': Optional,
+    'integration_discipline': integration_discipline,
     'workflow': SimpleNamespace(
         now=lambda: datetime(2026, 9, 1, tzinfo=timezone.utc),
         logger=SimpleNamespace(info=lambda *a, **k: None)),
@@ -254,8 +264,12 @@ ok(i_fail >= 0 and i_fin > i_fail and
 # Lock the contract: call-site count = internal auto-rework points + 1 shell
 # delegation; t260903-02 added the arb_acc_parallel branch (2 sites: acceptance
 # rejection + code-fault rejection) → 8 (7 internal + 1 shell delegation).
-ok(len(re.findall(r'self\._auto_rework\(', src)) == 8,
-   '_auto_rework 调用点=8（1 壳委托 + 7 内部自动打回点）')
+# 260923 对齐：t260916-19（4a968d5）加了第 8 个内部点——门内 rework 消费路径
+# _consume_rework（REWORK_ESCAPE_PATCH_ID 门控、别名直达/显式拒收）自带一次
+# self._auto_rework 调用 → 9（8 内部 + 1 壳委托）。核过「不双落」不变量未破：
+# 真正的 rework 时间线生产者仍恰 1 处（上一条断言），新点在其自己的拒收校验之后。
+ok(len(re.findall(r'self\._auto_rework\(', src)) == 9,
+   '_auto_rework 调用点=9（1 壳委托 + 8 内部自动打回点；末点=t260916-19 门内 _consume_rework）')
 
 print('PYDONE pass=%d fail=%d' % (p_pass, p_fail))
 sys.exit(0 if p_fail == 0 else 1)

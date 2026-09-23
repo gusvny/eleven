@@ -916,6 +916,36 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   证据＝`server/engine/data/worker-t260911-05.log`、`worker-t260912-01.log`（260913 11:19 两条）；
   票面证据＝t260912-01 / t260911-05 的 `authorizations` 从空到 3 条的时间线。
 
+## KI-096 场景夹具进程泄漏占满自家端口池 → t260916-25 系列自报「高位口耗尽」（260923 实证，已清场规避、待修）
+- 现象：跑批里 `t260916-25-stage-console-selfcheck-red` 报产品红（「降级台=红透传」）、同族场景报
+  `ENV_FAIL 高位口耗尽——环境面`；表现为「这批场景在候选版上回归了」，极易误判为 dsh 升级回归。
+- 实证（260923）：夹具取口范围＝3511–3549（`lib_stage_fixture.mjs` `pickFreePort`）；实测该 **39 个口全被
+  node 进程监听**，逐口 `lsof -p <pid>` 的 cwd 分别指向 `.lane/t260922-10`（泳道跑批）与
+  `T/sandbar-baseline-*`（基线跑批，目录早已删除）——即**每跑一轮漏一对「夹具台+桩」**，跨日累积把池占满。
+- 根因：场景自起的桩/台进程收尾未回收；`stage-sweep` 的孤儿阀（1800s）只覆盖**在册租约**，这些残留不在册 → 不判拆。
+- 危害：池满后同批场景开始**自报环境红/产品红**（假红伪装成产品缺陷），且每再跑一轮更满＝**自毒化**。
+  与 dsh 版本无关（本条即本轮误判候选版回归的真因）。
+- 处置（本轮，规避非修复）：按仓内既有 30 分钟孤儿阀，kill 3511–3548 上 38 个陈旧监听（保留 5 分钟内的 1 个；
+  用户 console 3099 / stage 台 3199 / 原生 web 3299 一律未动）；清口后同批 `--only` 复跑：
+  prepare-refresh **PASS**、selfcheck-red **PASS**（另三条因本机沙箱禁 `ps` 报 ENV，非本面）。
+- 建议修复方向（只登记，未动手）：①夹具收尾对自己起的桩/台**无条件回收**（进程组 kill＋断言端口已释放），
+  并把「退出后本场景占的口已释放」写成场景自身的一条子用例；②`pickFreePort` 找不到空口时**响亮点名占用者
+  pid/cwd**，而不是笼统「高位口耗尽」；③口池不必硬钉 39 个（可动态扩窗），免得被历史残留锁死整个场景族。
+- 定位：`integration/t260916-25/lib_stage_fixture.mjs:26-40`（FORBIDDEN_PORTS/pickFreePort）、`:161`（makeStubRoot）；
+  场景记录点 `sc_stage_console_selfcheck_red.mjs:71/87/97`；实案观测量＝`lsof -nP -iTCP -sTCP:LISTEN` 全口占用 + `lsof -p` 的 cwd。
+
+## KI-094 main 常量 id 的 patched 门「唤醒不激活」：在飞票首评落重放段 memo 固化 False（t260917-04 起在册；债册漏登，260923 据代码引用回填）
+- 来源：260923 登记 KI-095 时发现 `integration/run_scenarios.py` 与
+  `integration/t260917-04/sc_t260917_04_replay_compat.py` 已把 KI-094 当既有条目标引，但本表无条目
+  （KI-095 条内已留「待补登」，登记权在 integration 岗）。本条据那两处引用**回填**，未另行实证。
+- 内容（回填）：仲裁闸拒直落分支的 `workflow.patched` 门用 **main 常量 id** 形态时，**在飞票首评**会落进重放段
+  并被 memo 固化为 False → **唤醒不激活**：新段被唤醒、但对这类停环票不生效。t260917-04 场景因此
+  **不断言激活语义**（只锁 patched 门契约与在飞回放兼容，钉住=把缺陷写进契约）。follow-up 方向＝门升级为
+  `base#seq` **per-entry**（逐条目判，而非整门一个常量 id）。
+- 状态：open（缺口在册）。
+- 出处：`integration/run_scenarios.py:1490-1494`（场景条目注释）、
+  `integration/t260917-04/sc_t260917_04_replay_compat.py:28-32`（「断言边界：防 rot 与防钉缺陷」段）。
+
 ## KI-095 作废票号被回收 + 泳道路径随之复用 → 新票继承旧票未落盘改动（260922 实证，已人工规避、待修）
 - 现象：260922 傍晚为「泳道主动同步 main」开票时，自动号给成 `t260922-17`——**正是同日下午因撞受保护
   路径闸而作废的文档票号**；更要紧的是引擎把**那条旧泳道 `.lane/t260922-17` 一并复用**：新票 worktree
