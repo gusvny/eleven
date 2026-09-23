@@ -104,21 +104,33 @@
 2. [ ] 钉版本安装，**同时钉住依赖解析**：`npm install -g @deepseek-ai/dsh@0.1.5-rc.2 --before=2026-09-22T00:00:00+08:00 --cache /tmp/npm-cache-upgrade`
    （前缀决策见 §4-Q2；`--cache` 绕开 `~/.npm` 属主问题）。`--before` 让 npm 按该时刻的 registry 状态解析依赖
    ——**这正是「版本号相同、bits 不同」的解法**（260923 事故即当日新发的 cordis 族依赖被解析进来）；
-   已验证解析集＝`cordis 4.0.2 / cordis-plugin-loader 1.0.3 / cordis-plugin-hmr 1.0.17`；
-   装完确认 `@deepseek-ai/dsh` 的 version 字段 == 0.1.5-rc.2（防 dist-tag 漂移）；
-3. [ ] **bits 指纹对账（版本号对不代表 bits 对；260923 就是死在只校了版本号）**：`./start-console.sh --bits-check`
-   必须绿。它校验上述三个包的版本与「hmr 里是否真带 launcher 必调的 `registerConfig`」——不绿就别往下走，
-   报错会点名是哪一项不符；
+   已验证解析集＝`cordis 4.0.2 / cordis-plugin-loader 1.0.3 / cordis-plugin-hmr 1.0.17`（装完的三道对账见步 3）；
+3. [ ] **装完三道对账（版本号对不代表可用；260923 六处事故里五处落在这三道之外）**：
+   - ① 版本字段：`@deepseek-ai/dsh` 的 version == 0.1.5-rc.2（防 dist-tag 漂移）；
+   - ② **bits 指纹**：`./start-console.sh --bits-check` 绿——校验 cordis 族解析集与
+     「hmr 里是否真带 launcher 必调的 `registerConfig`」（260923 就是死在只校了 ①）；
+   - ③ **平台面对账**：`python3 integration/tools/dsh_surface_check.py`（对**目标版**跑，升级前跑更好）绿——
+     机械对账五类：A 我们 inject 的服务名在不在目标版／B 有没有「未 inject 就属性访问」的雷／
+     C 往 list 槽注册带没带 id／D roles·profile·preset 里的 config 键在不在目标版 schema
+     （**有默认值＝静默丢弃**，如 `dsh-system-prompt.persona` → `personaPrefix`）／
+     E 插件 `dsh.client.inject` 点名的包还在不在。红项逐条定性后再切。
 4. [ ] `dsh --version` == 0.1.5-rc.2；起一次 console 冒烟（宿主操作）：顶部不得出现
-   「Failed to load plugins」横幅、token URL 能进页面；`dsh` 起一个一次性会话，确认落盘
+   「Failed to load plugins」横幅、token URL 能进页面；**真浏览器加载 + 点一次「新建会话」**
+   （「组合包命中某插件」≠ 该插件激活——260923 因此漏判过一次）；`dsh` 起一个一次性会话，确认落盘
    `session.v3.jsonl.zstd` 且旧 `session.jsonl` 未被改动；
 5. [ ] 容器面（若 Q3=同升）：`bash server/engine/build_agent_image.sh`（DV=0.1.5-rc.2）→ 镜像 `sandbar-agent:dsh-0.1.5-rc.2-s1`；同步改三处版本（`Dockerfile.agent` ARG、`build_agent_image.sh` DV、`agent_runtime.py DEFAULT_AGENT_IMAGE`——有测试 `test_镜像版本三处同步` 锁定）；
 6. [ ] 重启全部 worker（先主 sandbox，后按需起票 worker）；
 7. [ ] **生产冒烟**：开一张 sandbar 冒烟票走完 create_plan→…→closed 全链；确认 agent 会话可写可读、token 统计面正常、workbench 会话用量页正常；
+   **并单独验一次「角色说明书真的进了 agent prompt」**（起一个 headless agent 问它角色名即可——
+   260923 实证：配置键改名后 agent 照常跑、票面全绿，但岗位说明书整段没了）；
 8. [ ] 观察一个完整巡检周期（次日 07:30 调度触发正常）后宣布完成。
 
 ## 3. 回退（任一步失败或冒烟不过即走）
 
+0. **回退三件套齐备**（260923 复盘补）：① 旧版安装命令**同样要钉 bits**（`--before=<0.1.1 的验证日>`
+   或 overrides），否则再吃一次依赖漂移；② GUI preset 换回 0.1.1 版（现存
+   `~/.dsh/.agent-presets/sandbar-integration.bak-260923/`；注意它现在躺在**会生效的扫描根里**，见 KI-103）；
+   ③ 容器 tag 切回 `sandbar-agent:dsh-0.1.1-rc.2-s1`（镜像在）。
 1. `npm install -g dsh@0.1.1-rc.2`（同前缀；`--cache` 同上）；
 2. 容器面若已重建：镜像 tag 切回 `sandbar-agent:dsh-0.1.1-rc.2-s1`（旧镜像不删）；
 3. 重启全部 worker；
@@ -180,8 +192,10 @@
    已写入 §1-T4 条目；探针版本体改动见 main 提交（260923）。
    ⇒ **§1-T4 第 1 条（接缝探针 live 档）已满足**；第 2/3/4 条（候选版场景全集隔离副本整跑、巡检一轮、
    版本面自检）**仍未执行**——本行未全部打勾前，不得视为「可以切」。
-3. **容器镜像面：存在一处既存不一致，切换前必办**（t260921-14 自己的 merge 关卡检查项①
-   「建 0.1.5 镜像 或 worker env 指回旧 tag，两者必居其一」）：
+3. **容器镜像面：260923 已办结（本行原写「0.1.5 镜像不存在」，实测已失效，改事实）**——
+   `docker images` 实测：`sandbar-agent:dsh-0.1.1-rc.2-s1` 与 **`sandbar-agent:dsh-0.1.5-rc.2-s1` 都在**，
+   引擎缺省 `DEFAULT_AGENT_IMAGE` 已指 0.1.5。**但 docker 形态 spawn 至今未实跑过**（当前 lane 走 host 形态），
+   下次升级前补一次。（原文如下，仅作沿革）
    - 现状：`server/engine/agent_runtime.py:46 DEFAULT_AGENT_IMAGE = "sandbar-agent:dsh-0.1.5-rc.2-s1"`
      （缺省已翻新），而 `docker images` 只有 `sandbar-agent:dsh-0.1.1-rc.2-s1`（9 天前）——
      **0.1.5 镜像不存在**，且全仓没有任何地方设 `SANDBAR_AGENT_IMAGE` 指回旧 tag。

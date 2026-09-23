@@ -1424,3 +1424,51 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 定位：`dsh-client-ui-workspace/lib/client.js:38`（`super(ctx,"uiWorkspace")`）/`:81`（startSession 定义）/
   `dsh-api-workspace-controller/lib/client.js`（`super(ctx,"workspaces")`，startSession 零命中）；
   仓内旧调用点＝`server/plugins/workbench/src/client/session-entry.tsx`（handleNew/handleOpen 两处）。
+
+## KI-102 roles patch 的角色说明书在 0.1.5 下被**静默丢弃**（260923 复盘发现；待修）
+- 现象：**没有任何报错**——agent 照常 spawn、票照常跑，但 headless agent 收到的是**空的**角色前缀，
+  即 developer / integration / 产品运营三个岗位的说明书（`server/roles/*.yml`）根本没进 prompt。
+- 根因：roles patch 写的是 `name: '@deepseek-ai/dsh-system-prompt' / config: { persona: … }`；
+  0.1.5 该包 `static Config = z.object({ includeHarnessIdentity, includeRuntimeContext,
+  personaPrefix, personaSuffix, toolOrder })`——**没有 `persona`**，且 `personaPrefix/personaSuffix`
+  都有 `.default("")`。schemastery 对未知键**不抛错**（实测 `z.object({a,b})({a:'x',oldkey:'y'})`
+  → `{a:'x',b:'',oldkey:'y'}`），于是旧键原样留着没人读、新键取默认空串 ⇒ 静默丢内容。
+- 危害：升级 0.1.5 之后**所有项目所有票**的 agent 段都在无岗位说明书状态下运行（行为、口径、
+  纪律全缺），且票面与日志都正常——最坏的一类失效（静默）。
+- 修法（细节已核）：`persona:` → `personaPrefix:`；`{{cwd}}` 是**合法注册变量**
+  （`dsh-agent-loop/lib/index.js:1536` 注册 `cwd`、`:1534/:1535` 注册 provider/model，
+  system-prompt 装配期插值，未知变量才抛 `unknown prompt variable`）——改名后不会撞该抛。
+  回退兼容（0.1.1 读的是 `persona`）：两个键都写（各自忽略对方的键）或按钉住的版本选目录。
+- 回归建议：真 spawn 一次 agent 并断言「角色说明书确实进了 prompt」（不能只断言它跑起来了）；
+  另见机械对账 `integration/tools/dsh_surface_check.py` 的 [D] 项（本条的发现者）。
+- 定位：`server/roles/{developer,integration,product-operation}.yml`；
+  目标版 schema＝`…/dsh-system-prompt/lib/index.js:200-206`；装配插值＝同包 `:104-170`。
+
+## KI-103 升级「平台面对账」四类缺口（260923 复盘登记；工具已落地，逐项待处置）
+> 共同特征：**上游改平台面，我们这边不会有编译错误、也不会有测试红**，只能靠主动对账发现。
+> 机械对账工具＝`integration/tools/dsh_surface_check.py`（A 服务面／B 访问纪律／C 槽选项／D 配置键／E 客户端模块）。
+- **[C] `sidebar.footer.action` 是 `kind: "list"` 槽，注册必须带 `id`**：我们的注册没带 →
+  浏览器控制台 `list slot "sidebar.footer.action" requires options.id`，度量入口**静默降级**回工单台下栏
+  （功能在、位置错）。已用**改动前的产物**复现＝既有缺口（非 260923 引入）。修法：补 `id: 'sandbar-metrics'`
+  （平台先例 `dsh-client-ui-cordis/lib/client.js:1340` `id: "cordis-panel"`）。
+- **[E] 四个插件的 `package.json` 仍声明 `dsh.client.inject: ['@deepseek-ai/dsh-client-runtime', …]`**，
+  而 0.1.5 **整包移除**了 `dsh-client-runtime`。今天未阻塞（组合包与该字段消费面已换），
+  但属「声明了不存在的包」，需核实语义后清理或加注。定位：`server/plugins/{ui,knowledge,providers,workbench}/package.json`。
+- **[卫生] GUI preset 的备份目录放在会生效的扫描根内**：`~/.dsh/.agent-presets/sandbar-integration.bak-260923/`
+  是**完整可识别的 preset**（且是 0.1.1 旧 schema）→ 会出现在名册里，误选即挂载失败。
+  建议挪到扫描根外（如 `~/.dsh/agent-presets.bak-<日期>/`）并写进升级流程。
+- **[脚本/机器面] `start-console.sh` 候选链里硬编码机器路径** `$HOME/.sandbar/dsh-015/bin/dsh`
+  （260923 为「裸跑就能起来」加入）。换机或清理该目录后行为变化；建议改吃 env 声明或读
+  `project.yaml` 的 `paths.dsh_bin`，并在注释里标明它是机器级便利缺省而非引擎契约。
+
+## KI-104 引擎 spawn 面 `ValueError: embedded null byte`（260923 发现，非升级相关，未修）
+- 现象：nusuyou t260923-04 的 implement 段连环失败、最终 blocked，票面只写「agent 活动故障（已重试）：
+  ActivityError: Activity task failed」。
+- 真因（日志实证）：`server/engine/data/worker-t260923-04.log` 三轮 traceback 同形——
+  `subprocess.Popen(cmd, cwd, env)` 抛 `ValueError: embedded null byte`
+  （栈底 `server/engine/agent_runtime.py:353`）。**不是 dsh bits 问题**（该轮日志里 dsh 自检一致、spawn 前一步正常）。
+  ⇒ 命令行或环境变量里混进了 NUL 字节，属引擎侧缺陷，会咬任何项目的任何 agent 段。
+- 处置建议：spawn 前对 `cmd`/`env` 做 NUL 体检并**点名是哪一个键/哪个实参**（现在的报错只说「embedded null byte」，
+  诊断直接被引向错误方向：我第一眼就误判成 dsh 版本问题，靠读日志才纠正）。
+- 定位：`server/engine/agent_runtime.py:353`（Popen）；调用面 `server/engine/agent_activities.py:2872`
+  （`_run_agent_stage_impl` → `agent_runtime.spawn_agent`）。
