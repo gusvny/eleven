@@ -146,6 +146,27 @@ python3 integration/run_scenarios.py
   `t260921-06-batch-ns-isolation`（engine）、`t260921-06-batch-seam-regression`
   （engine）执法。
 
+## worker 旧码纪律（worker 启动时一次性载入代码）
+
+worker 进程启动那一刻把引擎代码载入内存，此后泳道/main 再落新码**不会刷新在跑 worker**——
+「代码落地」≠「行为生效」。症状画像（排障先对号）：①新信号送达不生效——回执 `ok /
+delivered=true` 但票面字段不动、`refused` 也空；②旧进程 import 磁盘上新增的名字失败并**静默
+降级**（KI-081 实录 `cannot import name 'AUTH_KINDS' from 'shared'`）。凡「一切都成功但没反应」，
+先怀疑在跑 worker 持旧码。
+
+实证两条：
+
+- **260922**（dsh-upgrade epic，KI-081 同族）：dsh 0.1.5-rc.2 钉入本项目后，升级生效面
+  以 worker 重启为准——在跑 worker 仍持旧码（KI-081 的 260913 对照坐实机理：同操作在
+  当天新起 worker 的票上生效、旧 worker 票上送达不生效；重启后连排队中被丢的信号都补处理）。
+- **260923**（本冒烟票 t260923-06）：在 0.1.5-rc.2 已钉入的窗口内全链走通，确认改 worker
+  侧判定必须重启在跑 worker 方可见效。
+
+操作纪律：改 worker 侧判定（信号载荷、判定位、import 面）**必须重启在跑 worker**；重启只走
+**控制台 keepalive 补拉**（机理与处置锚=KI-081：`reap_ticket_worker`（SIGTERM）→
+`spawn_ticket_worker`，或控制台 ensure 补拉）；**受限会话里手工 spawn 不可作为重启手段**——
+手工起的进程继承当前会话沙箱（写不了主库 `.git` 等），不是引擎语义下的合法 worker。
+
 ## 环境前提
 
 Node >=22.18（type-stripping 直跑，全部测试）；其余按条目按需探测：
