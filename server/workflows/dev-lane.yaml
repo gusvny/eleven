@@ -4,7 +4,7 @@
 id: dev-lane
 name: "开发泳道"
 lane: worktree
-description: "开发泳道（developer 系唯一流程）：prepare_workspace→create_plan⇄review_plan→implement∥design_integration_tests→汇合（ui_evidence/UI 票）→run_integration_tests→arbitrate→acceptance_walkthrough→merge_check（程序化）→merge（人审）"
+description: "开发泳道（developer 系唯一流程）：prepare_workspace→create_plan⇄review_plan→implement∥design_integration_tests→汇合（ui_evidence/UI 票）→run_integration_tests（验证前主同步 main）→arbitrate→acceptance_walkthrough→merge_check（程序化）→merge（人审）"
 stages:
   - id: create_plan
     role: developer
@@ -59,7 +59,7 @@ stages:
   - id: run_integration_tests
     role: integration
     name: "跑集成测试"
-    desc: "程序化（无 agent）：跑项目声明场景执行器 integration/run_scenarios.py（cwd=泳道），结果 JSON 交仲裁判定；前置检查泳道落盘（0 commit = 实现未落盘 → blocked）"
+    desc: "程序化（无 agent）：前置检查泳道落盘（0 commit = 实现未落盘 → blocked）；跑闸前主同步 main 一次（t260922-18：worker 代并，已追平幂等；冲突走既有消解回路回 implement；不可达响亮 blocked 转人工）；然后跑项目声明场景执行器 integration/run_scenarios.py（cwd=泳道），结果 JSON 交仲裁判定"
     next: arbitrate
     parts:
       - script

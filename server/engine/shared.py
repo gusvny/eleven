@@ -1013,6 +1013,55 @@ def review_plan_route(verdict: str, plan_rounds: int) -> str:
     return "blocked:审读结论未知 verdict=%r，转人工判读" % verdict
 
 
+# ---- t260922-18：泳道「主动同步 main」（机械验证前 worker 并一次）纯函数面 ----
+
+def main_sync_conflict_route(rounds: int, files: List[str], prev_files: List[str],
+                             cap: int) -> str:
+    """主同步冲突消解路由（纯函数，dev_lane 主同步子回路消费）：返回 'resolve' 或
+    'blocked:<人话>'。
+
+    与 merge_check 既有冲突回路同一组防呆语义（cap 轮上限 + 同批文件集合连续两轮相同
+    →转人工），cap 由调用方传 MAX_CONFLICT_ROUNDS（真源留在 dev_lane，这里不复制常量）。
+    files/prev_files 由调用方带仓标识（多仓下不同仓的同名文件不构成「同批反复」，
+    review 建议④）。blocked 文案含 grep 稳定锚点：「主同步冲突消解 N 轮未收敛」
+    「同批文件反复冲突」。畸形入参（rounds 非正整数、files 非列表）不抛，按保守方向
+    照常走防呆判（该 blocked 就 blocked，绝不因畸形放行）。"""
+    try:
+        rounds_i = int(rounds)
+        cap_i = int(cap)
+    except (TypeError, ValueError):
+        rounds_i, cap_i = 10 ** 9, 0   # 畸形=视同超限，保守转人工
+    files_sig = sorted(str(f) for f in (files if isinstance(files, (list, tuple)) else []))
+    prev_sig = sorted(str(f) for f in (prev_files if isinstance(prev_files, (list, tuple)) else []))
+    files_txt = "、".join(files_sig)[:200]
+    if rounds_i > cap_i:
+        return ("blocked:主同步冲突消解 %d 轮未收敛（上限 %d），转人工处置：冲突文件 %s"
+                % (rounds_i - 1, cap_i, files_txt))
+    if prev_sig and files_sig == prev_sig:
+        return ("blocked:主同步同批文件反复冲突（连续 2 轮集合相同，第 %d 轮），转人工处置：%s"
+                % (rounds_i, files_txt))
+    return "resolve"
+
+
+def main_sync_note(receipt: Any) -> str:
+    """主同步回执 → 一行机械证据文案（纯函数；进票面 summary/evidence 与仲裁上下文）。
+
+    receipt 形状 = {"mode": "merged"|"up_to_date", "main_sha": <40hex|短>,
+    "lane_head": 短 sha 可缺}。畸形入参（None/非映射/缺键/mode 不在册/sha 空/类型错）
+    不抛，返回 ""——调用方降级为显式「无主同步证据」点名，绝不铸造文案。"""
+    if not isinstance(receipt, dict):
+        return ""
+    mode = str(receipt.get("mode") or "")
+    sha = str(receipt.get("main_sha") or "").strip()
+    head = str(receipt.get("lane_head") or "").strip()
+    if mode not in ("merged", "up_to_date") or not sha:
+        return ""
+    head_txt = ("，lane HEAD=%s" % head) if head else ""
+    if mode == "merged":
+        return "main@%s 已并入泳道（验证前主同步%s）" % (sha[:7], head_txt)
+    return "main@%s 已追平（快路径零动作%s）" % (sha[:7], head_txt)
+
+
 # ---- Singleton workflow id conventions ----
 def pipeline_wf_id(proposal_id: str) -> str:
     """One proposal = one workflow id. A repeated start is rejected by the server
@@ -3579,6 +3628,11 @@ class ConflictPrepResult:
     merge_output: str = ""                    # a truncated git merge output (the agent's conflict-resolution context)
     already_clean: bool = False               # True = the merge found no conflicts (the race backstop: base_ref untouched, go straight back to merge_check)
     error: str = ""                           # the reason on an infrastructure fault (a missing ref / a merge exception etc.)
+    # ---- t260922-18 主同步（机械验证前并 main 一次）证据面：三键全带缺省，老历史
+    # dict 回退重建点零改动兼容（漏键=缺省值，消费方按「无证据」显式点名，不猜）。
+    target_sha: str = ""                      # 本次合并目标 ref 的完整 sha（机械证据：main@sha 进票面）
+    lane_head: str = ""                       # 动作后泳道 HEAD 短 sha（快路径/干净合并/冲突现场语义见活动 docstring）
+    up_to_date: bool = False                  # True = 目标 ref 已是 HEAD 祖先（is-ancestor 快路径零动作返回，幂等）
 
 
 @dataclass

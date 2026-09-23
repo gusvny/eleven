@@ -4507,7 +4507,17 @@ async def prepare_conflict_resolution(args: ConflictPrepArgs) -> ConflictPrepRes
     Race fallback: if the merge finds no conflicts (rc=0, e.g. the conflict was
     resolved between merge_check and prep) → already_clean=True and the workflow goes
     straight back to merge_check for a re-check; a missing ref / a merge exception →
-    ok=False + error (the workflow turns blocked for a human, the loop does not spin)."""
+    ok=False + error (the workflow turns blocked for a human, the loop does not spin).
+
+    t260922-18 主同步复用本活动为「机械验证前并 main 一次」的合并动作（唯一实现纪律：
+    不另造第二个「并 ref 进泳道」），并补三件证据/幂等面：
+      - target_sha：合并目标 ref 的完整 sha（rev-parse 现场解析，机械证据 main@sha，
+        绝不读任何缓存——不加第二真源）；
+      - is-ancestor 快路径：目标已是 HEAD 祖先=已追平，零动作返回
+        (up_to_date=True, already_clean=True)——对既有 merge_check 调用方是同结果
+        提速（那种形态下 merge 本身也会 rc=0 "Already up to date"），可观察行为零变化；
+      - lane_head：动作后泳道 HEAD 短 sha（快路径=原地 HEAD；干净合并=合并提交；
+        冲突现场=合并前的 HEAD，最终 HEAD 由 settle_conflict_resolution 的 commit 给出）。"""
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
@@ -4516,22 +4526,37 @@ async def prepare_conflict_resolution(args: ConflictPrepArgs) -> ConflictPrepRes
     if p.returncode != 0:
         return ConflictPrepResult(ok=False, error="合并目标 ref %r 不存在: %s"
                                   % (target, (p.stderr or "").strip()[-200:]))
+    target_sha = (p.stdout or "").strip().splitlines()[0] if (p.stdout or "").strip() else ""
+    # t260922-18 快路径：目标 ref 已是 HEAD 祖先 = 已追平，零动作幂等返回
+    p = _git(["merge-base", "--is-ancestor", target, "HEAD"], wt)
+    if p.returncode == 0:
+        head = _git(["rev-parse", "--short", "HEAD"], wt)
+        lane_head = head.stdout.strip() if head.returncode == 0 else ""
+        activity.logger.info("[%s] merge %s 已追平（is-ancestor 快路径，零动作）",
+                             args.ticket_id, target)
+        return ConflictPrepResult(ok=True, already_clean=True, up_to_date=True,
+                                  target_sha=target_sha, lane_head=lane_head)
     p = _git(["merge", "--no-edit", target], wt, timeout=120)
     out = ((p.stdout or "") + "\n" + (p.stderr or "")).strip()
+    head = _git(["rev-parse", "--short", "HEAD"], wt)
+    lane_head = head.stdout.strip() if head.returncode == 0 else ""
     if p.returncode == 0:
         activity.logger.info("[%s] 冲突消解 prep：merge %s 零冲突（竞态兜底）",
                              args.ticket_id, target)
         return ConflictPrepResult(ok=True, already_clean=True,
+                                  target_sha=target_sha, lane_head=lane_head,
                                   merge_output=out[:1500])
     files = _unmerged_files(wt)
     if not files:
         # rc != 0 with no unmerged files = the merge itself failed (not a conflict),
         # e.g. git refused because the workspace was dirty
         return ConflictPrepResult(ok=False, error="git merge %s 失败（非冲突）: %s"
-                                  % (target, out[-400:]))
+                                  % (target, out[-400:]),
+                                  target_sha=target_sha, lane_head=lane_head)
     activity.logger.info("[%s] 冲突消解 prep：merge %s 留现场，冲突文件 %d 个：%s",
                          args.ticket_id, target, len(files), "、".join(files[:10]))
     return ConflictPrepResult(ok=True, conflict_files=files,
+                              target_sha=target_sha, lane_head=lane_head,
                               merge_output=out[:1500])
 
 

@@ -142,6 +142,9 @@ with workflow.unsafe.imports_passed_through():
         lane_workspace_gate_error,
         agent_env_failed_reason,
         env_note_for,
+        # t260922-18：主同步冲突路由与证据定形（纯函数面，UT 直测）
+        main_sync_conflict_route,
+        main_sync_note,
         normalize_files_changed,
         normalize_handover_runs,
         parse_arbitration_summary,
@@ -301,6 +304,14 @@ TESTS_STREAK_PATCH_ID = "dev-lane-tests-streak-v1"
 # 决策单写者=shared.targeted_rerun_plan。同构布尔门：旧历史（无本 marker）逐字
 # 旧行为（恒全量跑），在途票不追溯。
 TARGETED_RERUN_PATCH_ID = "dev-lane-targeted-rerun-v1"
+# t260922-18：主同步门（宿主拍板「只在机械验证前并一次」）——run_integration_tests 相位
+# 入口、0-commit 前置检查之后、跑闸之前，由 worker 活动（prepare_conflict_resolution，
+# 唯一「并 ref 进泳道」实现）把 main 并进泳道一次；已追平=is-ancestor 快路径零动作幂等。
+# 时点语义（供宿主复核留痕）：「一次」=每轮机械验证前一次，非全票仅一次——多轮 rework/
+# 迭代的长周期票若只在首轮同步，验证基点又会漂（正是本票要治的「被验证树≠被合并树」，
+# KI-082 同族）；快路径让重复同步零成本。门内新路径：未 patched 的在途实例逐字旧行为
+# （回放安全）；门求值点在主循环直线段，无 KI-061 式唤醒重放路径，不需 #seq 后缀。
+MAIN_SYNC_PATCH_ID = "dev-lane-main-sync-v1"
 # prepare_ui_evidence activity timeout: must be **clearly larger** than the subprocess
 # timeout inside the activity (agent_activities.UI_CAPTURE_TIMEOUT_SEC=240s), otherwise
 # Temporal kills the activity first and the subprocess's own timeout recovery never runs.
@@ -533,7 +544,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
     TEMPLATE_WORKSPACE_DIR = False
     TEMPLATE_DESC = ("开发泳道（developer 系唯一流程）：prepare_workspace→create_plan⇄review_plan"
                      "→implement∥design_integration_tests→汇合（ui_evidence/UI 票）"
-                     "→run_integration_tests→arbitrate→acceptance_walkthrough"
+                     "→run_integration_tests（验证前主同步 main）→arbitrate→acceptance_walkthrough"
                      "→merge_check（程序化）→merge（人审）")
     # Display/derivation metadata (the real orchestration lives in run(); same order
     # as run). parts = declaration of the executor mix (agent🤖/script⚙️/human👤,
@@ -576,8 +587,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
               parts=("script",),
               acceptance=("UI 票 .sandbar/screenshots/ 有截图（merge_check 证据闸机械查）",)),
         Stage(id="run_integration_tests", name="跑集成测试", role="integration", next="arbitrate", agent=False,
-              desc="程序化（无 agent）：跑项目声明场景执行器 integration/run_scenarios.py（cwd=泳道），"
-                   "结果 JSON 交仲裁判定；前置检查泳道落盘（0 commit = 实现未落盘 → blocked）",
+              desc="程序化（无 agent）：前置检查泳道落盘（0 commit = 实现未落盘 → blocked）；"
+                   "跑闸前主同步 main 一次（t260922-18：worker 代并，已追平幂等；冲突走既有消解"
+                   "回路回 implement；不可达响亮 blocked 转人工）；然后跑项目声明场景执行器 "
+                   "integration/run_scenarios.py（cwd=泳道），结果 JSON 交仲裁判定",
               parts=("script",),
               acceptance=("场景执行器跑完全部场景并产出结果",)),
         Stage(id="arbitrate", name="仲裁", role="integration", next="acceptance_walkthrough",
@@ -1131,6 +1144,16 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
         已由 _pin_agent_refusal 在 _run_agent_step 单点钉上 meta.blocked_detail，
         此处不重复写。"""
         await self._blocked(step_id, self._agent_failed_why(res))
+
+    def _conflict_failed_note(self, res: Any, note_fmt: str, round_no: int) -> str:
+        """冲突消解站共用的「轮次前缀＋agent 失败归因」构造单点（t260922-18）：
+        源码锁 test_f4（test_t260917_08_env_fail_signal）计 dev_lane 内联
+        「agent 报失败：%s」字面量恰 2、_agent_failed_why 调用点恰 5——M3 冲突消解
+        变体站与本票新增主同步消解站共用本 helper，两站文案逐字不回归（note_fmt
+        传各站原格式串），杜绝再有站内联漏挂 env 归因。畸形 res 不抛（同
+        _agent_failed_why 契约）。"""
+        return note_fmt % (round_no, self._agent_failed_why(
+            res, default="agent 报失败：%s" % ((res.summary or res.status)[:200])))
 
     # ---------- t260917-08：移交命令债表（meta['env_handover_pending']） ----------
     # agent 段沙箱受限期间交接的验证命令，等后续机械段（run_integration_tests 的
@@ -2135,6 +2158,163 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                             continue
                     except Exception as e:
                         self._log("落盘前置检查故障（不拦主链）：%s: %s" % (type(e).__name__, e))
+                # ---- t260922-18 主同步（宿主拍板「只在机械验证前并一次」）----
+                # 唯一同位点=本相位入口：0-commit 前置检查之后（同步落下的 merge 提交会使
+                # lane_commits +1，放前面会给「实现未落盘」放水——判据不放宽）、跑闸之前
+                # （同步与跑闸同轮直线衔接=每轮验证前同步一次、必重跑不复用旧报告）。
+                # 冲突→既有「worker 起合并（prep 留现场）→agent 解冲突→worker 代提交」回路
+                # →_auto_rework 回 implement（实现段适配 main 变更，KI-082 清偿）；不可达/
+                # 非冲突失败→响亮 blocked 转人工，绝不静默跳过同步继续验证。
+                if workflow.patched(MAIN_SYNC_PATCH_ID):
+                    _sync_stop = ""      # ""=继续本相位跑闸；"blocked"/"rework"=已处置，跳出
+                    # 多仓泳道逐仓同步（meta.repo_worktrees 唯一真源；单仓=泳道根一条）
+                    _sync_targets = [
+                        {"name": str(e.get("name") or str(e.get("repo") or "") or "root"),
+                         "rel": str(e.get("repo") or ""),
+                         "branch": str(e.get("branch") or "")}
+                        for e in (self.meta.get("repo_worktrees") or [])
+                    ] or [{"name": "root", "rel": "",
+                           "branch": str(self.meta.get("branch") or "")}]
+                    _sync_outcomes: List[str] = []
+                    for _st in _sync_targets:
+                        _wt_base = str(self.meta.get("worktree") or "")
+                        _st_wt = (_wt_base + "/" + _st["rel"]) if _st["rel"] else _wt_base
+                        praw = await workflow.execute_activity(
+                            prepare_conflict_resolution,
+                            ConflictPrepArgs(ticket_id=self.ticket_id,
+                                             worktree=_st_wt,
+                                             branch=_st["branch"],
+                                             base_ref="main"),
+                            start_to_close_timeout=SHORT, retry_policy=RETRY)
+                        prep = praw if isinstance(praw, ConflictPrepResult) else ConflictPrepResult(
+                            ok=bool(praw.get("ok")),
+                            conflict_files=[str(x) for x in (praw.get("conflict_files") or [])],
+                            merge_output=str(praw.get("merge_output") or ""),
+                            already_clean=bool(praw.get("already_clean")),
+                            error=str(praw.get("error") or ""),
+                            # t260922-18 新证据键：dict 回退重建点漏写=证据静默丢，同批补齐
+                            target_sha=str(praw.get("target_sha") or ""),
+                            lane_head=str(praw.get("lane_head") or ""),
+                            up_to_date=bool(praw.get("up_to_date")))
+                        _tag = _st["name"]
+                        _mode = ("up_to_date" if prep.up_to_date
+                                 else "merged" if prep.already_clean else "conflict")
+                        _sync_outcomes.append("%s=%s@%s" % (
+                            _tag, _mode, (prep.target_sha or "？")[:7]))
+                        if not prep.ok:
+                            # 不可达/非冲突失败：响亮转人工，绝不静默跳过同步继续验证
+                            await self._blocked(
+                                "run_integration_tests",
+                                "主同步失败（转人工，不静默跳过同步——否则被验证树≠被合并树）：%s%s"
+                                % (prep.error or "未知",
+                                   ("｜各仓同步结果：%s" % "、".join(_sync_outcomes))
+                                   if len(_sync_targets) > 1 else ""))
+                            _sync_stop = "blocked"
+                            break
+                        if prep.conflict_files:
+                            # 走既有消解回路：guard（cap/同批）→ agent 解标记 → settle 代提交
+                            conflict_rounds += 1
+                            # files_sig 带仓标识：不同仓的同名文件不构成「同批反复冲突」
+                            files_sig = sorted("%s:%s" % (_tag, f) for f in prep.conflict_files)
+                            _route = main_sync_conflict_route(
+                                conflict_rounds, files_sig, prev_conflict_files,
+                                MAX_CONFLICT_ROUNDS)
+                            if _route.startswith("blocked:"):
+                                await self._blocked("run_integration_tests",
+                                                    _route.split(":", 1)[1])
+                                _sync_stop = "blocked"
+                                break
+                            prev_conflict_files = files_sig
+                            self._log("主同步检出 merge 冲突（%s，第 %d/%d 轮），走既有消解回路：%s"
+                                      % (_tag, conflict_rounds, MAX_CONFLICT_ROUNDS,
+                                         "、".join(prep.conflict_files)[:200]))
+                            self._handoff("run_integration_tests",
+                                          "主同步冲突消解第 %d 轮（%s）：%s"
+                                          % (conflict_rounds, _tag,
+                                             "、".join(prep.conflict_files)[:200]))
+                            # 变量名 msolve_ctx（非 solve_ctx）：selfcheck E-1 用
+                            # 「_run_agent_step("implement", solve_ctx)」首次出现锚定
+                            # merge_check 分支的 prep→implement→settle 串行——主同步
+                            # 子回路同名会让该锚错位（t260922-18 实测），改名避开。
+                            msolve_ctx = (
+                                "【主同步冲突消解轮 gen%d/上限%d】本轮不是功能开发：机械验证前的主同步"
+                                "把 main 并进泳道（仓 %s），worker 已跑过 git merge main，以下文件"
+                                "留有冲突标记（<<<<<<< 泳道 / ======= / >>>>>>> main）：\n%s\n"
+                                "merge 输出摘要（ours=泳道 / theirs=main）：\n%s\n"
+                                "任务：逐个文件解掉冲突标记，保持两边语义（t260825-03 同款）；"
+                                "只动冲突文件，不做无关改动；**不要 git commit**"
+                                "（你交付结果文件后 worker 会代落盘合并提交）。解完写结果文件交付。"
+                                % (conflict_rounds, MAX_CONFLICT_ROUNDS, _tag,
+                                   "\n".join("- %s" % f for f in prep.conflict_files),
+                                   (prep.merge_output or "（无输出）")[:1200]))
+                            try:
+                                cres = await self._run_agent_step("implement", msolve_ctx)
+                            except Exception as e:
+                                await self._blocked("implement", format_agent_stage_failure(
+                                    self.ticket_id, "implement", e,
+                                    gen=self._gen("implement")))
+                                _sync_stop = "blocked"
+                                break
+                            if cres.status != "ok":
+                                # 归因构造走 _conflict_failed_note 单点（t260922-18：
+                                # 与 M3 变体站共用，源码锁字面量/调用计数恒 2/5）
+                                await self._blocked(
+                                    "implement",
+                                    self._conflict_failed_note(
+                                        cres, "主同步冲突消解第 %d 轮：%s",
+                                        conflict_rounds))
+                                _sync_stop = "blocked"
+                                break
+                            sraw = await workflow.execute_activity(
+                                settle_conflict_resolution,
+                                ConflictSettleArgs(ticket_id=self.ticket_id,
+                                                   worktree=_st_wt,
+                                                   branch=_st["branch"],
+                                                   base_ref="main",
+                                                   round_no=conflict_rounds),
+                                start_to_close_timeout=SHORT, retry_policy=RETRY)
+                            sres = sraw if isinstance(sraw, ConflictSettleResult) \
+                                else ConflictSettleResult(
+                                    ok=bool(sraw.get("ok")),
+                                    commit=str(sraw.get("commit") or ""),
+                                    remaining_files=[str(x) for x in
+                                                     (sraw.get("remaining_files") or [])],
+                                    error=str(sraw.get("error") or ""))
+                            if not sres.ok:
+                                _why = ("仍有未解冲突文件：%s" % "、".join(sres.remaining_files[:10])
+                                        ) if sres.remaining_files else (sres.error or "未知")
+                                await self._blocked(
+                                    "run_integration_tests",
+                                    "主同步冲突消解第 %d 轮未收敛（worker 代落盘校验未过），"
+                                    "转人工处置：%s。工作区现为合并进行中态——人工解冲突后发 "
+                                    "rework 回 implement 续解，或泳道内 git merge --abort "
+                                    "复位后发 retry_qc 重验" % (conflict_rounds, _why))
+                                _sync_stop = "blocked"
+                                break
+                            self._log("主同步冲突消解第 %d 轮落盘 %s（%d 个文件），回实现段适配 main 变更"
+                                      % (conflict_rounds, sres.commit, len(prep.conflict_files)))
+                            self.meta["main_sync"] = {
+                                "mode": "merged", "main_sha": prep.target_sha,
+                                "lane_head": sres.commit, "scope": _tag,
+                                "detail": "；".join(_sync_outcomes),
+                                "note": "冲突经既有消解回路落盘"}
+                            # 回实现段（宿主指定）：main 增量可能与票改动有语义耦合，
+                            # 实现段适配后经 join 重走验证；下一轮主同步已追平=快路径
+                            phase = self._auto_rework(
+                                "implement",
+                                "主同步冲突消解完成（第 %d 轮），回实现段适配 main 变更"
+                                % conflict_rounds,
+                                who="workflow", fallback="run_integration_tests")
+                            _sync_stop = "rework"
+                            break
+                        self.meta["main_sync"] = {
+                            "mode": _mode, "main_sha": prep.target_sha,
+                            "lane_head": prep.lane_head, "scope": _tag,
+                            "detail": "；".join(_sync_outcomes)}
+                        self._log("主同步（%s）：%s" % (
+                            _tag, main_sync_note(self.meta["main_sync"]) or "回执缺证据键（点名）"))
+                    if _sync_stop:
+                        continue
                 try:
                     # t260917-08（review C1 裁定①）：移交命令消费面=meta['env_handover_pending']
                     # 债表单源（含集测后段遗留债——rework 回 implement 的下一轮集测
@@ -2194,21 +2374,31 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     if _red_legs:
                         _hv_note += "（失败命令：%s%s）" % (
                             "、".join(_red_legs[:3]), "等" if len(_red_legs) > 3 else "")
+                # t260922-18：主同步证据进票面（机械证据三处之一；与闸补 baseline_ref
+                # 同轮互证——开跑时 main@sha 一致）。回执畸形/缺键=空文案，票面不铸假证据
+                #（同步被 blocked 打断时根本到不了这里）。
+                _ms_note = main_sync_note(self.meta.get("main_sync") or {})
+                _ms_sum = ("｜主同步=%s" % _ms_note) if _ms_note else ""
+                _ms_evi = ("【主同步】%s（时点=机械验证前；同步与跑闸同轮直线衔接，"
+                           "未复用旧报告）\n" % _ms_note) if _ms_note else ""
                 self.results["run_integration_tests"] = {
                     "status": "failed" if (ir.error or ir.failed or ir.env_fail) else "ok",
-                    "summary": "集成测试：%d 跑 / %d 过 / %d 败 / %d 环境红%s%s%s"
+                    "summary": "集成测试：%d 跑 / %d 过 / %d 败 / %d 环境红%s%s%s%s"
                                % (ir.ran, ir.passed, ir.failed, ir.env_fail,
-                                  ("｜" + ir.error) if ir.error else "", _pe_note, _hv_note),
+                                  ("｜" + ir.error) if ir.error else "", _pe_note, _hv_note,
+                                  _ms_sum),
                     "report": "", "deliverables": [], "files_changed": [],
-                    "evidence": json.dumps(ir.details, ensure_ascii=False)[:4000], "gen": 0}
+                    "evidence": _ms_evi + json.dumps(ir.details, ensure_ascii=False)[:4000],
+                    "gen": 0}
                 self._finish("run_integration_tests", by="run_integration_tests",
                              evidence="；".join("%s:%s" % (d.get("name"),
                                                     "过" if d.get("exit") == 0 else "败")
                                                 for d in ir.details))
                 self._handoff("run_integration_tests",
-                              "集成测试 %d 跑 / %d 过 / %d 败 / %d 环境红%s%s%s"
+                              "集成测试 %d 跑 / %d 过 / %d 败 / %d 环境红%s%s%s%s"
                               % (ir.ran, ir.passed, ir.failed, ir.env_fail,
-                                 ("｜" + ir.error) if ir.error else "", _pe_note, _hv_note))
+                                 ("｜" + ir.error) if ir.error else "", _pe_note, _hv_note,
+                                 _ms_sum))
                 # t260901-19: budget 6000→4000 with tail-keeping ([-4000:]) — details sit
                 # at the end of the JSON, so a head slice would squeeze out the failure
                 # details; keeping the tail keeps them
@@ -2256,6 +2446,14 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 if _hv_ctx:
                     arb_ctx += "\n" + _hv_ctx
                     acc_ctx += _hv_ctx + "\n"
+                # t260922-18：主同步证据进仲裁与走查上下文（机械证据三处之二/三；仲裁可
+                # 据此把红项归属对着「main+票改动」的验证树判，而不是旧基线）。同样追加
+                # 在装配块之后，不挤进 [-4000:] 尾保窗（T2 静态 pin 纪律同上）。
+                if _ms_note:
+                    _ms_ctx = ("【主同步证据】本轮验证树已并入 %s（时点=机械验证前；"
+                               "同步与跑闸同轮直线衔接，未复用旧报告）" % _ms_note)
+                    arb_ctx += "\n" + _ms_ctx
+                    acc_ctx += _ms_ctx + "\n"
                 if workflow.patched(ARB_ACC_PARALLEL_PATCH_ID):
                     # Speedup 2: arbitration ∥ acceptance walkthrough as a parallel fork
                     # (no data dependency, saves one serial stretch)
@@ -2991,10 +3189,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 if res.status != "ok":
                     # t260917-08（review M3）：前缀变体一并路由——轮次前缀保留，
                     # 后半经 _agent_failed_why 单点路由（env 归因不缺、轮次上下文不丢）
-                    await self._blocked("implement", "冲突消解第 %d 轮：%s"
-                                        % (conflict_rounds, self._agent_failed_why(
-                                            res, default="agent 报失败：%s"
-                                            % ((res.summary or res.status)[:200]))))
+                    # t260922-18：构造抽 _conflict_failed_note 单点（源码锁字面量/
+                    # 调用计数恒 2/5；本站文案逐字不回归）
+                    await self._blocked("implement", self._conflict_failed_note(
+                        res, "冲突消解第 %d 轮：%s", conflict_rounds))
                     continue
                 # (3) the worker commits the merge on the agent's behalf (verifying no
                 #     unresolved files remain; the worktree is necessarily dirty during

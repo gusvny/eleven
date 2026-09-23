@@ -138,10 +138,14 @@ total_calls = len(re.findall(r"phase = self\._auto_rework\(", src))
 # (acceptance walkthrough rework + code-fault rework) -> 7 points.
 # t260916-19 落地期过渡双态（宿主 260917 令 a′）：该票在 dev_lane 主循环新增 rework
 # 逃逸消费点（_consume_rework）→ 自动打回点 7→8。共享守卫期望值由 main 侧统一改一次
-# （本处），泳道不得就地改；t260916-19 已于 4a968d5 合入 main ⇒ 260923 收敛为定值 8
-# （过渡态 7 已删）。同批：integration/baselines/sc_auto_rework_trace.mjs 的
-# 「调用点=8」随同一条事件改为 9（8 内部 + 1 壳委托）——两守卫数的是同一次变更的两个面。
-ok(total_calls == 8, "自动打回点 8 处（t260916-19 _consume_rework 落地后定值）（实测 %d）" % total_calls)
+# （本处），泳道不得就地改。
+# t260922-18 收敛+扩容（integration 岗位 main 侧统一改一次，260922 仲裁 gen1）：
+# ①t260916-19 已合入 main，按上句既定计划收敛删 7；②宿主 260922 拍板「机械验证
+# 前主同步 main」，dev_lane 新增主同步冲突消解回 implement 的合法打回点 → 8→9。
+# 260923 两票合并入 main（宿主令）后过渡窗 (8, 9) 收敛为定值 9（8=旧、9=现，不留
+# 双口径）。同批：integration/baselines/sc_auto_rework_trace.mjs 的「调用点」
+# 随同一次变更改为 10（9 内部 + 1 壳委托）——两守卫数的是同次变更的两个面。
+ok(total_calls == 9, "自动打回点 9 处（t260922-18 主同步消解回 implement 落地后定值）（实测 %d）" % total_calls)
 # The merge point no longer stuffs self._rework (one rework must not land two timeline records)
 merge_block = src[src.find('if not mr.ok:'):src.find('if not mr.ok:') + 2000]
 ok("self._rework = ReworkRequest(" not in merge_block,
