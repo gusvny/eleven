@@ -39,7 +39,7 @@ gen4→gen5 间树态与代落盘内容（1e6f845 仅入库 gen4 走查报告；
 | --- | --- | --- |
 | L1 UT test_t260916_24_dsh_pin.py | **25 passed** | 接线+源码锚维持 |
 | sc_dsh_probe_selftest / engine-layout | **exit 0 维持绿** | 探针金样本+篡改档、守卫 39/39 |
-| no-skip-guard / naming-grep-assert | **exit 1 红（既有状态延续）** | 命中=第二次 main merge 带入的 t260917-02 资产（lib_t260917.py 的 Temporal 观测字段名/枚举 3 处；lib_inspection.py:103 勘误注释行内 suyou-test 字面），gen4 已归因非本票引入，树未变故延续 |
+| no-skip-guard / naming-grep-assert | **exit 1 红（既有状态延续）** | 命中=第二次 main merge 带入的 t260917-02 资产（lib_t260917.py 的 Temporal 观测字段名/枚举 3 处；lib_inspection.py:103 勘误注释行内旧测试命名空间字面），gen4 已归因非本票引入，树未变故延续 |
 | 本票场景族①② | gen1 实跑结论延续有效 | 交付物终局审计（见上节）证明被测对象无未审计变更 |
 | auto-rework-trace | 间歇红根因未变（namespace SA 缺失=场景外前提） | 仲裁 gen6 实测 FAIL 签名「Namespace sandbar-test has no mapping defined for search attribute ProjectKey」；修复点（共享库 ensureTestTemporal）转人工，树态仍缺席 |
 

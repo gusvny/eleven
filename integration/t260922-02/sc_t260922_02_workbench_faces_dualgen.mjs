@@ -121,7 +121,9 @@ async function main() {
 
   // ---- 3. 日志面：最近操作 golden + attempt 回扫 + 未覆盖注记 ----
   const logsOf = async (k) => {
-    const res = await logs.listAgentLogs(join(wsOf(k), '.suyou'))
+    // naming-compat：工作台真源 resolveAgentBaseDir 的泳道面至今仍定 <worktree>/.suyou
+    // （agent-logs.ts:14 在册历史欠账，随专门迁移票处置）——夹具按该面传参，非新增旧名用法。
+    const res = await logs.listAgentLogs(join(wsOf(k), '.suyou')) // naming-compat：读侧旧名面（同上注）
     return { lastActivity: res.lastActivity, sessionNote: res.sessionNote ?? null }
   }
   const l011 = await logsOf('v011')

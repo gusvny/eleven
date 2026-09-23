@@ -77,12 +77,12 @@ SESSION_TIMEOUT_SEC = int(os.environ.get("SANDBAR_PROBE_SESSION_TIMEOUT_SEC") or
 # npm 拉 registry 可能超 600s——超时=ENV_FAIL 点名（三态不假绿），调大重跑即可。
 INSTALL_TIMEOUT_SEC = int(os.environ.get("SANDBAR_PROBE_INSTALL_TIMEOUT_SEC") or 600)
 
-# 探针自己的会话 id（断言 e 用；t260923 修）：**两条腿必须同 id** 才构成 resume 场景
-# ——第一腿建立该 id 的会话档，resume 腿按同 id 续写、断言「正文文件集不变」。
+# 探针自己的会话 id（断言 e 用；t260923 修）：**两组必须同 id** 才构成 resume 场景
+# ——第一组建立该 id 的会话档，resume 组按同 id 续写、断言「正文文件集不变」。
 # 口径依据（t260922-06 源码实证，已合入 main）：0.1.1 与 0.1.5 **自定义 id 原生全链路
 # 有效**（目录名=encodeSegment(id)、头记录 id=自定义 id、resume 按该 id 扫描寻址），
-# 引擎每次 spawn 都注入该 env。旧探针只在 resume 腿注入 → 第一腿用自动生成 id，resume
-# 腿拿一个从未存在的自定义 id 去寻址，必然「Not found → 回落新建」→ 断言必红（假红）。
+# 引擎每次 spawn 都注入该 env。旧探针只在 resume 组注入 → 第一组用自动生成 id，resume
+# 组拿一个从未存在的自定义 id 去寻址，必然「Not found → 回落新建」→ 断言必红（假红）。
 PROBE_SESSION_ID = "t260916-24-probe-resume"
 
 # 凭据缺失守望（t260922-03）：dsh 会话日志自报 MISSING_CREDENTIAL 即属环境态——
@@ -701,10 +701,10 @@ def probe_live(version, rounds, keep, reuse_install, inplace=False):
             return finish(rows, tmp, keep)
         inplace_bin = None
         if inplace:
-            # --inplace（t260923 控制腿修）：**在位二进制**给「在位已验证版」腿用——
+            # --inplace（t260923 对照组修）：**在位二进制**给「在位已验证版」组用——
             # 生产用的就是这份全局安装树，忠实度高于 npm 现装（实测：无 lockfile 的现装
             # 0.1.1 依赖树与生产不同形，profile 启动即抛「user patch-layer watching
-            # requires the Cordis HMR service」→ 8 条红全是它的下游，控制腿因此无效）。
+            # requires the Cordis HMR service」→ 8 条红全是它的下游，对照组因此无效）。
             # 版本不匹配=fail-closed ENV 红（绝不用错版本冒充）。
             inplace_bin = shutil.which("dsh")
             if not inplace_bin:
@@ -754,7 +754,7 @@ def probe_live(version, rounds, keep, reuse_install, inplace=False):
         # 延伸子用例 --rounds N：同一 home 连跑 N 轮（无 resume），汇总 cacheRead 观测（不拦停）
         total_rounds = max(1, rounds)
         cache_seen = []
-        p0_patch = build_resume_patch(tmp)  # 基线腿的 resume patch（见上注释；None=runner 缺席）
+        p0_patch = build_resume_patch(tmp)  # 基线组的 resume patch（见上注释；None=runner 缺席）
         for i in range(total_rounds):
             print("[INVENTORY] 会话 %d/%d 跑中（cwd=%s，超时 %ds）…" % (i + 1, total_rounds, lane_dir, SESSION_TIMEOUT_SEC))
             log_path = tmp / ("session_round%d.log" % (i + 1))
@@ -763,10 +763,10 @@ def probe_live(version, rounds, keep, reuse_install, inplace=False):
                 render_live_prompt(lane_dir / "probe_write_here.txt",
                                    escape_main_repo / ".git" / "probe_escape.txt"),
                 log_path,
-                # 第 1 轮=resume 场景的**基线腿**：与 resume 腿同 id **且同带 resume patch**
+                # 第 1 轮=resume 场景的**基线组**：与 resume 组同 id **且同带 resume patch**
                 # （生产同形：引擎每次 spawn 都注入 DSH_HEADLESS_SESSION + resume patch，
-                # 会话由插件「续写或新建同 id」）。t260923 修——旧版两条都不带，基线腿落
-                # uuid 会话档、resume 腿按自定义 id 必然找不到，断言 e 恒红=假红。
+                # 会话由插件「续写或新建同 id」）。t260923 修——旧版两条都不带，基线组落
+                # uuid 会话档、resume 组按自定义 id 必然找不到，断言 e 恒红=假红。
                 extra_env={"DSH_HEADLESS_SESSION": PROBE_SESSION_ID} if i == 0 else None,
                 extra_args=(["--patch", str(p0_patch)] if (i == 0 and p0_patch) else None))
             if cred_missing:
@@ -815,10 +815,10 @@ def probe_live(version, rounds, keep, reuse_install, inplace=False):
 def build_resume_patch(tmp):
     """生成会话延续 patch（复刻引擎 _prepare_agent_spawn 的 resume patch 形状）。
 
-    t260923 修：**两条腿都必须带它**——引擎每次 spawn 都注入该 patch（命令行实证：
+    t260923 修：**两组都必须带它**——引擎每次 spawn 都注入该 patch（命令行实证：
     `dsh --profile <p> --patch roles/… --patch model_patch… --patch resume_patch…`），
-    会话 id 由插件按 DSH_HEADLESS_SESSION「续写或新建同 id」。旧探针只在 resume 腿带
-    patch：基线腿没有插件、dsh 自生成 uuid 会话档（实测 `session-<uuid>/`），resume 腿
+    会话 id 由插件按 DSH_HEADLESS_SESSION「续写或新建同 id」。旧探针只在 resume 组带
+    patch：基线组没有插件、dsh 自生成 uuid 会话档（实测 `session-<uuid>/`），resume 组
     按自定义 id 寻址必然落空 → 回落新建 → 断言 e 恒红（假红，与产品无关）。
     runner 缺席返回 None（判据面响亮，由调用方判红）。"""
     runner = REPO_ROOT / "server" / "headless-resume" / "node.ts"
@@ -1095,7 +1095,7 @@ def main():
     ap.add_argument("--keep", action="store_true", help="保留临时目录取证")
     ap.add_argument("--reuse-install", action="store_true", help="跳过 npm 安装（复用已装前缀，调试用）")
     ap.add_argument("--inplace", action="store_true",
-                    help="用在位 dsh 二进制（生产同形；「在位已验证版」控制腿专用，跳过隔离安装）")
+                    help="用在位 dsh 二进制（生产同形；「在位已验证版」对照组专用，跳过隔离安装）")
     args = ap.parse_args()
     if args.selftest:
         sys.exit(selftest())
