@@ -6428,6 +6428,15 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     only_names = [str(n).strip() for n in (only_names or []) if str(n).strip()]
     if only_names:
         _extra_env["SANDBAR_SCENARIO_ONLY"] = ",".join(only_names)
+    # t260923 C 自愈·孤儿自动清扫（宿主直修令=F1 红线要求的宿主点头，限本项目
+    # 测试台工程名族半径）：挂点孤儿清扫显式启用 + 半径 t26/sandbar-test/
+    # stage-console 三族；租约在场/新鲜/在册三阀与年龄阀（缺省 1800s）照旧保护
+    # 在用台。**只在未设时注入**——操作员显式 off 的逃生语义不覆盖（明示不静默）。
+    if "SANDBAR_STAGE_SWEEP_ORPHANS" not in os.environ:
+        _extra_env["SANDBAR_STAGE_SWEEP_ORPHANS"] = "on"
+    if "SANDBAR_STAGE_SWEEP_ORPHAN_PREFIX" not in os.environ:
+        _extra_env["SANDBAR_STAGE_SWEEP_ORPHAN_PREFIX"] = \
+            "t26,sandbar-test,stage-console"
     if _extra_env:
         _sub_env = dict(os.environ, **_extra_env)
     p = await asyncio.create_subprocess_exec(

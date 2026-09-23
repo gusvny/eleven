@@ -332,9 +332,16 @@ def sweep_orphans_enabled(default=True):
 def orphan_prefix():
     """孤儿清扫半径旋钮（t260915-18 场景② F1 硬契约）：设置后 condemned 仅限
     命中前缀的工程名——孤儿容器是全机全局可见面，无半径的「在管域+超龄即拆」
-    会让任一次 sweep 波及他票/宿主存量（宿主点头红线）。空/未设=不限半径。"""
+    会让任一次 sweep 波及他票/宿主存量（宿主点头红线）。空/未设=不限半径。
+    260923（宿主直修令）扩展：逗号分隔=多前缀族（任一命中即在半径内，startswith
+    元组语义）；不含逗号的单值行为与旧版逐字节一致（t260915-18 场景断言不动）。"""
     raw = str(os.environ.get("SANDBAR_STAGE_SWEEP_ORPHAN_PREFIX", "")).strip()
-    return raw or None
+    if not raw:
+        return None
+    if "," not in raw:
+        return raw
+    parts = tuple(p.strip() for p in raw.split(",") if p.strip())
+    return parts or None
 
 
 def orphan_min_age_s():
@@ -1503,9 +1510,12 @@ def orphan_condemn_projects(inv=None, now=None, enabled=None, prefix=None):
             continue
         proj = s["project"]
         if prefix and not proj.startswith(prefix):
+            # 260923：多前缀族（tuple）点名面——%s 直接格式化 tuple 会炸
+            # （TypeError: not all arguments converted），显式归一为逗号串。
+            _disp = prefix if isinstance(prefix, str) else ",".join(prefix)
             skipped.append({"project": proj,
                             "why": "前缀外（SANDBAR_STAGE_SWEEP_ORPHAN_PREFIX=%s）"
-                                   "——孤儿是全局可见面，无半径即无授权清场" % prefix})
+                                   "——孤儿是全局可见面，无半径即无授权清场" % _disp})
             continue
         age = s.get("age_s")
         if age is None:
