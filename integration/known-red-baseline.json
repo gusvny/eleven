@@ -1,0 +1,37 @@
+{
+  "meta": {
+    "policy": "集成轮次瘦身提案（260923 定稿）A 慢性红清账的已知红基线挂账册。基线只缩不增：修掉即删行并下调 max_entries；新挂账须 integration 岗位判词+home 认领，不得静默增行。verdict=booked（产品面欠账挂账）| isolated（环境/杂物/扫描面隔离，不挂产品欠账）。抖动绿（串行复跑绿）不入册。",
+    "max_entries": 27,
+    "evidence": "全量跑 370/290/29/51（out/integration-report-260923-192446.json）+ 定点串行复跑定性 + t260917-02 对照实验（31a4f6a 同型）",
+    "registered": "260923 宿主直修令清账"
+  },
+  "entries": [
+    {"name": "capture-chat-active", "verdict": "booked", "home": "workbench 捕获族欠账（KI-051 同族后续）", "note": "fail×prepare-reason 违约形态（t260910-13 决策表在案）"},
+    {"name": "capture-chat-e2e", "verdict": "booked", "home": "workbench 捕获族欠账（KI-051 同族后续）", "note": "11 视图走访族，与 capture-chat-active 同根"},
+    {"name": "t260904-05-chat-band-affiliation", "verdict": "booked", "home": "docs/UI 浏览器面存量欠账（26090x 起）", "note": "台账在册慢性红"},
+    {"name": "t260904-05-session-lifecycle-ui", "verdict": "booked", "home": "docs/UI 浏览器面存量欠账（26090x 起）", "note": "台账在册慢性红"},
+    {"name": "t260904-07-charter-injection-journey", "verdict": "booked", "home": "docs/UI 浏览器面存量欠账（26090x 起）", "note": "台账在册慢性红"},
+    {"name": "t260904-17-ticket-list-rowcard-ui", "verdict": "booked", "home": "docs/UI 浏览器面存量欠账（26090x 起）", "note": "台账在册慢性红"},
+    {"name": "t260905-06-doc-entry-present", "verdict": "booked", "home": "docs/UI 浏览器面存量欠账（26090x 起）", "note": "台账在册慢性红"},
+    {"name": "t260905-06-doc-read-through", "verdict": "booked", "home": "docs/UI 浏览器面存量欠账（26090x 起）", "note": "台账在册慢性红"},
+    {"name": "t260905-07-ticket-detail-panel", "verdict": "booked", "home": "docs/UI 浏览器面存量欠账（26090x 起）", "note": "台账在册慢性红"},
+    {"name": "t260905-08-wb-contrast-guard", "verdict": "booked", "home": "docs/UI 浏览器面存量欠账（26090x 起）", "note": "台账在册慢性红"},
+    {"name": "t260907-08-wb-contrast-quadrant", "verdict": "booked", "home": "docs/UI 浏览器面存量欠账（26090x 起）", "note": "台账在册慢性红"},
+    {"name": "t260910-10-docs-ui-mock-v1", "verdict": "booked", "home": "docs/UI 浏览器面存量欠账（26090x 起）", "note": "台账在册慢性红"},
+    {"name": "t260915-09-epics-client-project-wire", "verdict": "booked", "home": "docs/UI 浏览器面存量欠账（26090x 起）", "note": "台账在册慢性红"},
+    {"name": "t260915-10-docs-follow-project", "verdict": "booked", "home": "docs/UI 浏览器面存量欠账（26090x 起）", "note": "台账在册慢性红"},
+    {"name": "t260916-26-console-boot-no-plugin-banner", "verdict": "booked", "home": "docs/UI 浏览器面存量欠账（26090x 起）", "note": "台账在册慢性红；同票 stage-plugins-selfcheck 另有环境红族"},
+    {"name": "t260907-10-engine-layout", "verdict": "booked", "home": "t260907-10 布局守卫面", "note": "台账在册慢性红"},
+    {"name": "t260922-03-dsh-probe-live-green", "verdict": "booked", "home": "dsh 0.1.5 迁移在途面（KI-101~103 对账工作流）", "note": "台账在册慢性红，与 cred-env 同根"},
+    {"name": "t260922-03-dsh-probe-live-cred-env", "verdict": "booked", "home": "dsh 0.1.5 迁移在途面（KI-101~103 对账工作流）", "note": "桩自报路由/产品红保全五断言红（定点复跑 6/5 稳定）"},
+    {"name": "t260915-20-project-identity-realchain", "verdict": "booked", "home": "巡检发现证据复核语义面（t260915-20/t260916-02）", "note": "发现证据复核 verified 卡 unverified（J1g/J1g2，定点复跑稳定）"},
+    {"name": "t260916-02-relocation-realchain", "verdict": "booked", "home": "巡检发现证据复核语义面（t260915-20/t260916-02）", "note": "同上 T4a2/T4b2，与 t260915-20 同根"},
+    {"name": "t260917-02-legacy-fire-redirect", "verdict": "booked", "home": "t260917-02 调度路人门/台账面", "note": "R1e/R1f/R3b；对照实验 31a4f6a（本目标直修前）同型红=先于本目标存在"},
+    {"name": "t260917-02-board-unresolved-running", "verdict": "booked", "home": "t260917-02 调度路人门/台账面", "note": "B3b 同根；与 legacy-fire 同族"},
+    {"name": "t260913-04-lifecycle-gc", "verdict": "booked", "home": "t260913-04 容器生命周期 gc 面", "note": "孤儿 gc 收走+remove_container 幂等两断言红（定点复跑稳定）"},
+    {"name": "t260910-04-console-paused-list", "verdict": "booked", "home": "t260910-04 续派收口面", "note": "merge_check 红灯：泳道差集无 gitlink（嵌套仓）base_ref 缺失+续派 300s 超时"},
+    {"name": "scenario-guard-spec-landed", "verdict": "isolated", "home": "主树未提交 roles yml（0.1.5 迁移在途工序）", "note": "persona 块提取 18 项全红=未提交 yml 改动所致；不挂产品欠账，在途工序收尾即回绿"},
+    {"name": "t260907-01-path-hygiene", "verdict": "isolated", "home": "杂物 .probe-home/ 入扫描根（183 个会话数据文件含旧仓名）", "note": "扫描面被未跟踪数据杂物污染（新故障模式，KI-109 候选）；杂物清理工序处置"},
+    {"name": "t260916-02-decl-gate-aggregate", "verdict": "isolated", "home": "扫描面吞 .lane 冻结泳道树（t260908-02/t260907-10 遗留树）", "note": "全仓零命中扫描命中泳道历史树（新故障模式，KI-109 候选）；泳道清理/巡检处置"}
+  ]
+}
