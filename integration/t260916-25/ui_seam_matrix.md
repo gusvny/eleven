@@ -34,6 +34,7 @@
 | 13 | 进程与启动输出 | 化石 console.log：`dsh web: http://…/?token=…` | 同左 | 字面稳定 ✓；实测存在「台好了但 URL 行迟到」瞬态 | 壳字面锚+宽限 20s（R4c/gen17 收口：宽限耗尽=响亮红+收自起台+清 pidfile，「台没起成」终态同构，不留监听态无头台） | 上游改文案→URL 宽限红（台已自收，重跑 start 幂等重来） |
 | 14 | **GUI 用户 preset 组合**（机器级 `~/.dsh/.agent-presets/<项目>-<角色>/agent.cordis.yml`，260923 补行） | 260923 实弹：宿主在 3099 新建会话/续老会话全废 | 0.1.1 时代实体拷贝（`dsh-persona` 配置键＝`text:`） | **0.1.5 起该 schema 改为 `prefix:/suffix:`（`prefix` 必填）→ 旧拷贝挂载即抛**；按出厂 standard 组合二次重建（persona 用 `prefix` 承载角色真源全文）后新会话/老会话均恢复 ✓ | **不在自动断言面**（机器级文件、不属本票写集）——已入 runbook §5 风险表 + §6 第 7 条重建流程 | 起不了新会话/续不上老会话＝先查此面；升级后必须**重建**而不是沿用旧拷贝 |
 | 15 | **dsh 安装 bits 指纹**（260923 补行；同版本号 ≠ 同 bits） | 260923 实弹：全局 0.1.5-rc.2 的传递依赖当天漂到 cordis 4.0.3/loader 1.0.4/**hmr 1.0.18（无 `registerConfig`）**，launcher 在 `patchReload: live` 下必调该 API → 装了就起不来 | 0.1.1-rc.2 全局安装（依赖面未漂） | npm 那套：撞「hmr 服务激活不了」；手动开 hmr 再撞 `registerConfig is not a function`（profile 侧无解）。已验证解析集＝cordis 4.0.2/loader 1.0.3/hmr 1.0.17（`--before=2026-09-22` 可复现） | `./start-console.sh --bits-check`（启动时闸；`integration/tests/test_start_console_bits.py` 8 条离线回归看守） | 起不来但 `--version` 正常＝查此面；**只校版本号判不出可用** |
+| 16 | **客户端服务面迁移**（`workspaces.startSession` → `uiWorkspace.startSession`，260923 补行） | 260923 实报：点「新建会话」全项目报「请求异常」 | 0.1.1：`startSession` 在 `ctx.workspaces` 上 | **0.1.5 拆服务**：`dsh-client-ui-workspace`→`super(ctx,"uiWorkspace")` 带 `startSession`；`ctx.workspaces` 变纯控制器（`dsh-api-workspace-controller`，整包无此方法）→ 旧调用变 `TypeError: workspaces.startSession is not a function` | **原先零覆盖**（tests/ 下 grep `startSession` 0 命中）；现＝`tests/session-start-version-shim.mjs`（21 条，含源码静态看守） | 任何「平台服务名/归属变化」都先怀疑此面；改完必须重建 `lib/client.js`（浏览器按请求现读，刷新页面即生效） |
 
 ## 自检覆盖与人工清单的分工
 
@@ -50,3 +51,5 @@
 - 20260923（事故回填，宿主令「不开票，直接搞好」）：补行 14（GUI 用户 preset 组合——
   0.1.1 时代实体拷贝在 0.1.5 的 persona schema 变更下挂载即抛，宿主实测新/续会话全废）、
   行 15（安装 bits 指纹——同版本号不同 bits，「版本号对＝可用」这个隐含前提被推翻）。
+- 20260923（二次事故回填）：补行 16（客户端服务面迁移 `workspaces.startSession`→`uiWorkspace.startSession`——
+  0.1.5 拆服务，旧调用在全项目「新建会话」上炸；这条链原先零测试覆盖，事故后补了回归+静态看守）。
