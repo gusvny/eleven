@@ -494,13 +494,24 @@ def lock_root() -> pathlib.Path:
                     "SANDBAR_STAGE_LOCK_DIR=%s 不可写——env 指路的锁根必须可写" % env_val,
                     kind="usage")
             continue
-    root = pathlib.Path(tempfile.gettempdir()) / "sandbar-test-stages"
+    # 降级根钉死与供给同根（C 锁根统一，260923 宿主直修令）：verify.yaml supply
+    # 与场景族（t260916-26 等）都钉 /tmp/sandbar-test-stages——回落到
+    # tempfile.gettempdir()（macOS=TMPDIR 随机目录）会与供给锁根分裂，租约/孤儿
+    # 判定两处互相看不见（260923 实证：同机两根，dry-run 把共享供给误判成孤儿、
+    # 守卫把在飞台判成「外来工程」——环境不稳定的一条实根）。不可写=红点名，
+    # 不静默换根（换根=又一处分裂）。
+    root = pathlib.Path("/tmp/sandbar-test-stages")
     try:
         root.mkdir(parents=True, exist_ok=True)
+        probe = root / (".probe-%d-%d" % (os.getpid(), time.time_ns()))
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
     except OSError as e:
-        raise StageError("锁/状态根不可用：~/.sandbar 与临时区均不可写（%s）" % e, kind="env")
-    print("[stage_docker] ~/.sandbar 不可写——锁根降级至 %s（明示降级，可用 "
-          "SANDBAR_STAGE_LOCK_DIR 指定）" % root, file=sys.stderr)
+        raise StageError(
+            "锁/状态根不可用：~/.sandbar 与 /tmp/sandbar-test-stages 均不可写（%s）"
+            "——可用 SANDBAR_STAGE_LOCK_DIR 指定指路" % e, kind="env")
+    print("[stage_docker] ~/.sandbar 不可写——锁根降级至 %s（明示降级，与供给同根；"
+          "可用 SANDBAR_STAGE_LOCK_DIR 指定）" % root, file=sys.stderr)
     _LOCK_ROOT_CACHE = root
     return root
 
