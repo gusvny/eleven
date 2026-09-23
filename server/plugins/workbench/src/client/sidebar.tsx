@@ -211,14 +211,10 @@ interface SidebarProps {
     startSession?(workspaceId?: string): void
     create(input: { path: string }): Promise<{ workspaceId: string }>
   }
-  /** 客户端 uiWorkspace 服务（index.tsx 的 ctx.uiWorkspace）：**0.1.5 起**
-   *  startSession（工厂同款：绑工作区+复用 blank+正确打开）在这上面。
-   *  可选＝0.1.1 无此服务；取用一律经 resolveStartSession 双版解析。 */
-  uiWorkspace?: {
-    list: ObservableSnapshot<{ items: readonly { workspaceId: string; path: string }[] }>
-    startSession?(workspaceId?: string): void
-    create(input: { path: string }): Promise<{ workspaceId: string }>
-  }
+  /** 免注入的服务查找口（index.tsx 传 `ctx.get` 绑定）：**0.1.5 起** startSession
+   *  在 `uiWorkspace` 服务上，须经此口取（属性形式 `ctx.uiWorkspace` 未 inject 即抛
+   *  `cannot get property ... without inject`，260923 实弹）。点击时惰性解析。 */
+  getService?: (name: string) => unknown
   /** 中列三视图（index.tsx 注入）。 */
   views: MiddleViews
 }
@@ -410,7 +406,7 @@ function useHideFactoryNewSession(rootRef: { current: HTMLElement | null }, wide
 }
 
 export function WorkbenchSidebar(props: SidebarProps) {
-  const { wide, expandSidebar, sessions, views, open: slotOpen, workspaces, uiWorkspace } = props
+  const { wide, expandSidebar, sessions, views, open: slotOpen, workspaces, getService } = props
   const [projects, setProjects] = useState<Project[]>([])
   /** 项目 key → 该项目的工单行（按 ?project= 逐组拉取，来源即归属，不做路径猜测）。 */
   const [ticketsByProject, setTicketsByProject] = useState<Record<string, Ticket[]>>({})
@@ -486,7 +482,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
   const projectSessions = useSessionEntry({
     sessions,
     workspaces,
-    uiWorkspace,
+    getService,
     slotOpen,
     projectKey: viewProject || (projects.length === 1 ? projects[0].key : ''),
     projectDir: projects.find(p => p.key === (viewProject || (projects.length === 1 ? projects[0].key : '')))?.primary ?? '',

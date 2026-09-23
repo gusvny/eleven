@@ -3060,13 +3060,14 @@ async function injectSessionCharter(sessions, staged, projectKey, notify) {
 /**
 * 会话入口共享 hook（动作层）：账册状态 + 新建/打开/关闭动作，渲染面=项目行。
 */
-function useSessionEntry({ sessions, workspaces, uiWorkspace, slotOpen, projectKey, projectDir }) {
+function useSessionEntry({ sessions, workspaces, getService, slotOpen, projectKey, projectDir }) {
 	const list = sessions.list;
 	const listState = (0, react.useSyncExternalStore)((0, react.useCallback)((fn) => list.subscribe(fn), [list]), (0, react.useCallback)(() => list.getSnapshot(), [list]));
 	/** 「绑工作区 + 复用 blank + 正确打开」的启动动作（双版容错，260923）：
-	*  优先 0.1.5 的 ctx.uiWorkspace，回落 0.1.1 的 ctx.workspaces；两者都没有时
-	*  resolveStartSession 抛精确错误（被外层 catch 打进控制台，不再甩裸 TypeError）。 */
-	const startWorkspaceSession = (0, react.useCallback)((workspaceId) => resolveStartSession([uiWorkspace, workspaces])(workspaceId), [uiWorkspace, workspaces]);
+	*  **点击时**经 getService('uiWorkspace') 取 0.1.5 的服务面（免注入查找口，不能用
+	*  属性形式——未 inject 即抛，260923 实弹），回落 0.1.1 的 ctx.workspaces；
+	*  两者都没有时 resolveStartSession 抛精确错误（经外层 catch 进控制台）。 */
+	const startWorkspaceSession = (0, react.useCallback)((workspaceId) => resolveStartSession([getService?.("uiWorkspace"), workspaces])(workspaceId), [getService, workspaces]);
 	const ledger = (0, react.useSyncExternalStore)(subscribeLedger, getLedgerSnapshot);
 	const persist = (0, react.useCallback)((entries) => {
 		persistLedger(entries);
@@ -47613,7 +47614,7 @@ function useHideFactoryNewSession(rootRef, wide) {
 	}, [rootRef, wide]);
 }
 function WorkbenchSidebar(props) {
-	const { wide, expandSidebar, sessions, views, open: slotOpen, workspaces, uiWorkspace } = props;
+	const { wide, expandSidebar, sessions, views, open: slotOpen, workspaces, getService } = props;
 	const [projects, setProjects] = (0, react.useState)([]);
 	/** 项目 key → 该项目的工单行（按 ?project= 逐组拉取，来源即归属，不做路径猜测）。 */
 	const [ticketsByProject, setTicketsByProject] = (0, react.useState)({});
@@ -47666,7 +47667,7 @@ function WorkbenchSidebar(props) {
 	const projectSessions = useSessionEntry({
 		sessions,
 		workspaces,
-		uiWorkspace,
+		getService,
 		slotOpen,
 		projectKey: viewProject || (projects.length === 1 ? projects[0].key : ""),
 		projectDir: projects.find((p) => p.key === (viewProject || (projects.length === 1 ? projects[0].key : "")))?.primary ?? ""
@@ -55845,13 +55846,14 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 * target 与 conversation.view 槽条目 id（'workbench'）一致，与 chat/trajectory 同机制。
 */
 function apply(ctx) {
+	const getService = typeof ctx.get === "function" ? ctx.get.bind(ctx) : void 0;
 	ctx.slots.inject("sidebar.workspaces", () => ctx.slots.register({
 		name: "sidebar.workspaces",
 		priority: -10
 	}, (props) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(WorkbenchSidebar, {
 		sessions: ctx.sessions,
 		workspaces: ctx.workspaces,
-		uiWorkspace: ctx.uiWorkspace ?? ctx.get?.("uiWorkspace"),
+		getService,
 		views: {
 			board: WorkbenchSection,
 			docs: DocsSection,

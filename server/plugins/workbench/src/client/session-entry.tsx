@@ -240,9 +240,10 @@ interface SessionEntryOptions {
   sessions: SessionsFace
   /** 客户端 workspaces 服务（index.tsx 的 ctx.workspaces；0.1.5 起＝纯控制器）。 */
   workspaces?: WorkspacesFace
-  /** 客户端 uiWorkspace 服务（index.tsx 的 ctx.uiWorkspace；**0.1.5 起** startSession 在这上面）。
-   *  可选：0.1.1 没有该服务，缺失时自动回落 workspaces（见 resolveStartSession）。 */
-  uiWorkspace?: WorkspacesFace
+  /** 免注入的服务查找口（index.tsx 传 `ctx.get` 绑定）。**0.1.5 起** startSession 在
+   *  `uiWorkspace` 服务上，只能经此口取：属性形式 `ctx.uiWorkspace` 未 inject 即抛
+   *  （260923 实弹，slot 整条崩掉）；0.1.1 无该服务时查找返回 undefined → 回落 workspaces。 */
+  getService?: (name: string) => unknown
   /** 槽注入的打开动作（WorkspaceBrowserInjected.open；由侧栏槽注入）。 */
   slotOpen?: (sessionId: string) => void
   /** 列表归属与新建落点的项目 key（空=未选项目：列表空，多项目时 + 弹项目选单）。 */
@@ -363,17 +364,18 @@ export async function injectSessionCharter(sessions: SessionsFace, staged: strin
 /**
  * 会话入口共享 hook（动作层）：账册状态 + 新建/打开/关闭动作，渲染面=项目行。
  */
-export function useSessionEntry({ sessions, workspaces, uiWorkspace, slotOpen, projectKey, projectDir }: SessionEntryOptions) {
+export function useSessionEntry({ sessions, workspaces, getService, slotOpen, projectKey, projectDir }: SessionEntryOptions) {
   const list = sessions.list
   const subscribe = useCallback((fn: () => void) => list.subscribe(fn), [list])
   const getSnapshot = useCallback(() => list.getSnapshot(), [list])
   const listState = useSyncExternalStore(subscribe, getSnapshot)
   /** 「绑工作区 + 复用 blank + 正确打开」的启动动作（双版容错，260923）：
-   *  优先 0.1.5 的 ctx.uiWorkspace，回落 0.1.1 的 ctx.workspaces；两者都没有时
-   *  resolveStartSession 抛精确错误（被外层 catch 打进控制台，不再甩裸 TypeError）。 */
+   *  **点击时**经 getService('uiWorkspace') 取 0.1.5 的服务面（免注入查找口，不能用
+   *  属性形式——未 inject 即抛，260923 实弹），回落 0.1.1 的 ctx.workspaces；
+   *  两者都没有时 resolveStartSession 抛精确错误（经外层 catch 进控制台）。 */
   const startWorkspaceSession = useCallback(
-    (workspaceId?: string) => resolveStartSession([uiWorkspace, workspaces])(workspaceId),
-    [uiWorkspace, workspaces],
+    (workspaceId?: string) => resolveStartSession([getService?.('uiWorkspace'), workspaces])(workspaceId),
+    [getService, workspaces],
   )
   // 账册：模块级共享 store——挂载时（首次 getSnapshot）从 localStorage 惰性读入
   // （坏数据 parseLedger 容错为空册）；persist 统一「更新单例 + 落盘 + 通知订阅者」。

@@ -4701,16 +4701,21 @@ export function apply(ctx: ClientContext): void {
   // 0.1.5 已迁到 ctx.uiWorkspace（ctx.workspaces 变纯控制器，无 startSession）；
   // 两面都传下去，由 resolveStartSession 双版解析（不写进 inject：声明某版不存在的
   // 服务＝entry 永久 pending，t260916-26 教训）。详见 workspaces-compat.ts 头注。
-  // ⚠️ uiWorkspace 必须在**渲染期**取值，不能在 apply() 期取：插件装载次序不保证
-  // （uiWorkspace 与我们同为 workspaces 的消费方，谁先 apply 不定），apply 期取会拿到
-  // undefined 并把双版解析直接推向「两面都没有」。渲染发生在 boot 之后，稳定可得。
+  // ⚠️ 取 uiWorkspace 一律走 `ctx.get(...)`（免注入查找口），**绝不用属性形式
+  // `ctx.uiWorkspace`**：属性访问要过 cordis 的 proxy 解析，未在 inject 里声明
+  // 就抛 `cannot get property "uiWorkspace" without inject`——260923 实弹踩过：
+  // 抛在 slot 渲染期 → `slot entry crashed in 'sidebar.workspaces'` → 整个侧栏
+  // 退回 dsh 默认 UI。平台先例同：dsh-client-ui-sidebar:339 `ctx.get("uiWorkspace")`。
+  // 传 ctx.get 绑定下去（hook 在**点击时**解析），既避开装载次序，也不写进 inject
+  // （0.1.1 无此服务，声明＝entry 永久 pending，t260916-26 教训）。
+  const getService = typeof (ctx as any).get === 'function' ? (ctx as any).get.bind(ctx) : undefined
   ctx.slots.inject('sidebar.workspaces', () => ctx.slots.register({
     name: 'sidebar.workspaces',
     priority: -10,
   }, (props: any) => <WorkbenchSidebar
     sessions={ctx.sessions}
     workspaces={ctx.workspaces as any}
-    uiWorkspace={((ctx as any).uiWorkspace ?? (ctx as any).get?.('uiWorkspace')) as any}
+    getService={getService}
     views={{ board: WorkbenchSection, docs: DocsSection, routes: ProvidersSection, epics: EpicSection }}
     {...props} />))
 

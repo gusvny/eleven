@@ -19,6 +19,14 @@
  *
  * 为什么要有 B/C：这条链原先**零测试覆盖**（grep startSession 在 tests/ 下 0 命中），
  * 平台服务面换名/迁移没人管，事故就是这么漏出去的。
+ *
+ * ⚠️ 二次事故（同日）：第一版修法用属性形式取服务（`(ctx as any).uiWorkspace`），
+ * 在真实浏览器里抛 `cannot get property "uiWorkspace" without inject`，抛点=slot
+ * 渲染期 → `slot entry crashed in 'sidebar.workspaces'` → **整个 sandbar UI 消失、
+ * 退回 dsh 默认界面**。教训两条，均已钉进本用例：
+ *   ① 免注入取服务只能走 `ctx.get(name)`（平台先例 dsh-client-ui-sidebar:339）；
+ *   ② **「组合包命中 sandbar-workbench」≠ 插件真激活**——只验组合包内容会漏掉
+ *      「条目在但渲染期抛错」，验收必须真浏览器加载页面并点一次。
  */
 
 import { readFileSync } from 'node:fs'
@@ -96,16 +104,28 @@ ok(directCalls.length === 0, `session-entry.tsx 无直呼 workspaces.startSessio
 const callSites = (entry.match(/startWorkspaceSession\(ws\.workspaceId\)/g) ?? []).length
 ok(callSites === 2, `两处调用点都走 startWorkspaceSession（实测 ${callSites} 处）`)
 
-ok(/resolveStartSession\(\[uiWorkspace, workspaces\]\)/.test(entry),
-  'hook 内解析＝resolveStartSession([uiWorkspace, workspaces])（0.1.5 优先）')
-ok(/\[uiWorkspace, workspaces\],/.test(entry), 'useCallback 依赖数组含两面')
+ok(/resolveStartSession\(\[getService\?\.\('uiWorkspace'\), workspaces\]\)/.test(entry),
+  "hook 内解析＝resolveStartSession([getService?.('uiWorkspace'), workspaces])（点击时惰性、0.1.5 优先）")
+ok(/\[getService, workspaces\],/.test(entry), 'useCallback 依赖数组含查找口与旧面')
+
+// ★ 260923 二次事故的钉子：cordis 里**属性形式**访问未 inject 的服务会抛
+//   `cannot get property "X" without inject`，抛在 slot 渲染期＝整条侧栏崩
+//   （`slot entry crashed in 'sidebar.workspaces'`）→ 全站退回 dsh 默认 UI。
+//   免注入的正路是 `ctx.get(name)`（平台先例 dsh-client-ui-sidebar:339）。
+const propAccess = index.split('\n')
+  .map((line, i) => ({ line: line.trim(), no: i + 1 }))
+  .filter(({ line }) => /(as any)\.uiWorkspace|ctx\.uiWorkspace\b/.test(line) && !line.startsWith('*') && !line.startsWith('//'))
+ok(propAccess.length === 0,
+  `index.tsx 不得以属性形式访问 uiWorkspace（未 inject 即抛，实弹崩过侧栏；发现 ${propAccess.length} 处：${propAccess.map(x => x.no).join(',')}）`)
+ok(/ctx as any\)\.get\.bind\(ctx\)/.test(index), 'index.tsx 经 ctx.get 绑定传查找口（免注入正路）')
+ok(/const getService = typeof \(ctx as any\)\.get === 'function'/.test(index) && /getService=\{getService\}/.test(index),
+  'index.tsx 经 getService 传查找口（绑定 ctx.get，handler 侧不再碰属性）')
 ok(/^\s*}, \[openSession,.*startWorkspaceSession\]\)/m.test(entry), 'handleOpen 依赖数组含 startWorkspaceSession')
 ok(/^\s*}, \[workspaces, sessions, projectKey, projectDir, creating, persist, notify, startWorkspaceSession\]\)/m.test(entry),
   'handleNew 依赖数组含 startWorkspaceSession')
 
-ok(/uiWorkspace=\{\(\(ctx as any\)\.uiWorkspace \?\? \(ctx as any\)\.get\?\.\('uiWorkspace'\)\) as any\}/.test(index),
-  'index.tsx 在渲染期取 uiWorkspace（两形态：属性面 + ctx.get）')
-ok(/uiWorkspace,/.test(sidebar) && /uiWorkspace\?: \{/.test(sidebar), 'sidebar.tsx 透传 uiWorkspace（含类型声明）')
+ok(/getService\?: \(name: string\) => unknown/.test(sidebar) && /getService,\n/.test(sidebar),
+  'sidebar.tsx 透传 getService（含类型声明）')
 // inject 纪律：不得把 uiWorkspace 加进 inject（0.1.1 无此服务＝永久 pending）
 const injectLine = (index.match(/^export const inject = .*$/m) ?? [''])[0]
 ok(!/uiWorkspace/.test(injectLine), `inject 未加 uiWorkspace（0.1.1 无此服务＝entry 永久 pending）：${injectLine.trim()}`)
