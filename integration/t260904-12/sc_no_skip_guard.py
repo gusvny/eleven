@@ -81,6 +81,9 @@ ALLOW = [
                                         # 如缺 zstd CLI）——与既有 skipTest 同类：框架机制，非三态状态值。
     re.compile(r"skip_when_src_absent"),                                # 被测产品行为名（t260922-12：依赖链在 src 缺席时
                                         # 的取舍＝基线裸态方向，测试名描述产品行为，非套件状态值）。
+    re.compile(r"SKIP_DSH_BITS_CHECK|skip_switch"),                      # 产品逃生开关名（安装器版本位检查逃生门：
+                                        # env SANDBAR_SKIP_DSH_BITS_CHECK 与测试名 test_skip_switch_*，
+                                        # t260923-06 资产）——语义=明知版本位不符仍放行但留痕，非套件跳过状态值。
 ]
 
 hits = []
