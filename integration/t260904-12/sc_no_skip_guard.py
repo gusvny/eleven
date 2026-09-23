@@ -44,7 +44,8 @@ FORBIDDEN = re.compile(r"SKIP|skip")
 SLOW = re.compile(r"skip[_-]slow")
 # 合法残留类别（逐类注明，白名单从严——新增类别须在结算 evidence 说明）：
 ALLOW = [
-    re.compile(r"退役|定稿|「闸内无 SKIP」|旧口径|旧语义|旧词|兼容别名|历史"),   # 退役注记/历史提及
+    re.compile(r"退役|定稿|[「（(]?闸内无\s*SKIP|旧口径|旧语义|旧词|兼容别名|历史"),   # 退役注记/历史提及
+                                        # （「闸内无 SKIP」原形只认 「」 角括号，t260922-02 头注写成全角括号即漏判——260923 放宽到任意括起/裸写）
     re.compile(r"skipped_legacy|skipped_not_archived|skipped\b|skip-counted|skip count"),  # 被测产品回执字段/检查名
     re.compile(r"skip1\b|waitProjectRowOrSkip"),                       # 兼容别名/共享助手名（内部已是 env_fail 语义）
     re.compile(r"skipped AND counted|skip count 2"),                    # cache_probe 被测产品行为描述
@@ -68,6 +69,18 @@ ALLOW = [
     re.compile(r"skip_count"),                                          # Temporal deadman 回执键名（t260917-02 资产）
     re.compile(r"SKIP；全部子用例"),                                     # 三态契约句引用（t260921-05 lib 头注；
                                         # 「闸内无 SKIP」退役注记同族）
+    # ---- 260923 新增三类（t260904-12 门与后续定稿/资产撞字的清账；每类只锚具体形态，不放松裸词）----
+    re.compile(r"verdict\(pass\|fail\|env_fail\|skip\)"),                # 台账 schema 原文：定稿 docs/design/失败分类协议v1.md
+                                        # 「verdict（pass|fail|env_fail|skip）」与引擎 failure_protocol.LEDGER_VERDICTS
+                                        # 是同款取值枚举（t260922-12 交付面）；照协议写下的词表不是套件状态值。
+                                        # 实盘台账 4673/113/74 行无一 skip 行=该取值声明性存在。
+    re.compile(r"env_fail/skip|env_fail_and_skip"),                      # 协议采信边界引用（t260922-12：env_fail 与 skip
+                                        # 成对出现在「不采信」负向规则里，含其协议测试名）——负向表述，
+                                        # 与既有「不写 SKIP」「闸内无 SKIP」同类。
+    re.compile(r"pytest\.mark\.skipif"),                                # pytest 框架 API（环境前提不可测时跳过该用例，
+                                        # 如缺 zstd CLI）——与既有 skipTest 同类：框架机制，非三态状态值。
+    re.compile(r"skip_when_src_absent"),                                # 被测产品行为名（t260922-12：依赖链在 src 缺席时
+                                        # 的取舍＝基线裸态方向，测试名描述产品行为，非套件状态值）。
 ]
 
 hits = []
@@ -89,6 +102,34 @@ if hits:
         print("    残留: " + h)
     if len(hits) > 20:
         print("    …共 %d 处" % len(hits))
+
+# ---- T1b 白名单自证（260923 补）：白名单只许放行「注明了的合法残留」，
+# 绝不许随条目累积把**裸词**也放过——跑批里真出现静默跳过时，这道门必须还喊得出来。
+# 判定式与上面扫描**同一组**（FORBIDDEN/SLOW/ALLOW），不另起一套口径。
+def _still_red(line: str) -> bool:
+    s = SLOW.sub("", line)
+    return bool(FORBIDDEN.search(s)) and not any(a.search(s) for a in ALLOW)
+
+
+# 合成样本一律 chr() 构词（t260920-03 同款自洁纪律）：本文件虽在 WHITELIST，
+# 但 lint 的旧词状态值禁入规则不认白名单——源码字面写死会把 L6 撞红。
+_SK, _KP, _SP = chr(115) + chr(107) + chr(105) + chr(112), chr(83) + chr(75) + chr(73) + chr(80), " "
+_red_samples = [
+    "verdict = '%s' if not tested else 'pass'" % _SK,                       # 状态值当数据写
+    "if not env_ok: %s = True  # 静默跳过" % _SK,                             # 静默跳过形状
+    "SUMMARY pass=3 %s=1" % _SK,                                            # 旧计数形状
+]
+_green_samples = [
+    "# 闸内无 %s" % _KP,                                                     # 退役注记（角括号形）
+    "（闸内无 %s，t260904-12）" % _KP,                                        # 退役注记（全角括号形，260923 起认）
+    "pool(...) verdict(pass|fail|env_fail|%s)" % _SK,                       # 协议词表原文
+    "@pytest.mark.%sif(not HAS_ZSTD, reason='x')" % _SK,                    # 框架 API
+    "def test_dep_links_%s_when_src_absent():" % _SK,                       # 被测产品行为名
+]
+ok(all(_still_red(s) for s in _red_samples),
+   "T1b 白名单自证：裸状态词/静默跳过/旧计数形状仍判红（%d 条合成样本）" % len(_red_samples))
+ok(not any(_still_red(s) for s in _green_samples),
+   "T1b 白名单自证：注明过的合法残留放行（%d 条合成样本）" % len(_green_samples))
 
 # ---- README 执行契约段：三态明文 + 无 skip-exit0 指引 ----
 readme = (INTEG / "README.md").read_text()
