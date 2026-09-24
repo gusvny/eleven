@@ -1696,6 +1696,14 @@ SCENARIOS = [
      "派活文案·取证纪律声明面（t260924-09，灰盒 L1 级静态契约，ro 离线秒级）：必做①文案就是本票用户可感知交付物——走查 prompt/仲裁 prompt/integration 角色 persona 三处均须含四要素：①「闸回执」即全量证据声明 ②定点入口 --only ③闸口径 engine,exclusive 字面（必做③口径一致） ④每段全套次数上限声明——文案缺声明=「机械判了文案没说」单边态（t260921-04 对称纪律）；一致性副锁：agent_activities 机械护栏侧闸口径字面与文案同源（漂移即红）。intent 分工：机械行为面归 suite-guard-receipt 与 developer L1 真值表，本条只守声明面齐备与口径字面一致不测行为。被扫文件缺席=产品红（受控资产面）；无 ENV 子用例",
      "python3 integration/t260924-09/sc_t260924_09_walkthrough_copy_discipline.py", "ro"),
 
+    # ---- t260925-04: 引擎票爆炸半径按实际改动文件算（写集粗前缀 → 文件级）----
+    ("t260925-04-file-blast-radius",
+     "文件级爆炸半径端到端契约（t260925-04，灰盒 L3，真实 tmp git 泳道仓+真 git 子进程，ro 秒级零 docker）：引擎票（写集含 server/engine/ 等共享前缀）实际只改非共享面（app/、票目录）→ 定点面=上轮红名不再恒全量（本票经济性主张本体）；安全轨①逐族钉死——实际改动含场景执行器/verify.yaml/台账机器/引擎内核/闸工具（含未提交脏面与未跟踪目录折叠形态）→ 恒全量；merge-base 算不出 → error 点名+清单空恒全量（fail-closed）；旧签名（不传 changed_files）行为逐字（引擎写集照旧全量）。intent 分工：t260924-09 守执行器 --only 入口、t260922-12 守结果台账、t260913-03 守池排除——均与本条爆炸半径判据不同 intent；developer L1 守纯函数矩阵，本条守真仓 activity×决策组件链。git 缺席=ENV_FAIL exit 2；实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260925-04/sc_t260925_04_file_blast_radius.py", "ro"),
+    ("t260925-04-full-run-invariants",
+     "全量不变式注入面（t260925-04，灰盒 L3 决策点对抗输入，ro 秒级零 docker）：改动清单畸形（None/标量/裸字符串/dict/非串元素/空白元素/空清单）恒全量且不抛；diff_error 非空恒全量且优先于 localized 清单（计算面报错绝不放窄）；首轮恒全量不因新口径松动；定点面输出恒为红名清洗去重保序子集（__合成/空/非串剔除，红名畸形→全量）且合法清单时真解禁非恒全量换皮。intent 分工：t260925-04-file-blast-radius 守真仓三态组件链，本条只守同一决策点的畸形/边界注入不变式（对抗维度不同不互替）；developer L1 真值矩阵之外的用户级对抗复核。无 ENV 子用例；实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260925-04/sc_t260925_04_full_run_invariants.py", "ro"),
+
 ]
 
 CMD_TIMEOUT = 900

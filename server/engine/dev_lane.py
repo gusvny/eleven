@@ -62,6 +62,7 @@ with workflow.unsafe.imports_passed_through():
         arbitrate,
         acceptance_walkthrough,
         archive_ticket,
+        changed_files,
         merge,
         merge_check,
         prepare_conflict_resolution,
@@ -98,6 +99,7 @@ with workflow.unsafe.imports_passed_through():
         AUTH_PROTECTED_PATH,
         AUTHZ_SIGNAL_GATE_MARKER,
         AgentStageArgs,
+        ChangedFilesArgs,
         ConflictPrepArgs,
         ConflictPrepResult,
         ConflictSettleArgs,
@@ -305,6 +307,13 @@ TESTS_STREAK_PATCH_ID = "dev-lane-tests-streak-v1"
 # 决策单写者=shared.targeted_rerun_plan。同构布尔门：旧历史（无本 marker）逐字
 # 旧行为（恒全量跑），在途票不追溯。
 TARGETED_RERUN_PATCH_ID = "dev-lane-targeted-rerun-v1"
+# t260925-04：文件级爆炸半径——定点复跑判据从「票面写集粗前缀」换成「相对泳道基线
+# （merge-base main branch）实际改动文件」（engine 票写集必命中共享前缀表 → 旧判据
+# 恒禁定点，KI-118）。共享面判定复用同一张 _SHARED_BASE_PREFIXES 表（安全轨①）；
+# 收口全量拦截（_closing_full_run）一字不动（安全轨②）；改动清单不可得（diff 失败/
+# 空/畸形）→ fail-closed 恒全跑。同构布尔门：旧历史（无本 marker）走 v1 判据逐字
+# 旧行为，在途票不追溯。
+TARGETED_RERUN_FILE_RADIUS_PATCH_ID = "dev-lane-targeted-rerun-file-radius-v1"
 # t260922-18：主同步门（宿主拍板「只在机械验证前并一次」）——run_integration_tests 相位
 # 入口、0-commit 前置检查之后、跑闸之前，由 worker 活动（prepare_conflict_resolution，
 # 唯一「并 ref 进泳道」实现）把 main 并进泳道一次；已追平=is-ancestor 快路径零动作幂等。
@@ -2340,10 +2349,41 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     # t260923 D：爆炸半径+定点面决策（单写者=shared.targeted_rerun_plan；
                     # 首轮/共享基座/无上轮红名=空=全量跑）。过 patched 门——旧历史
                     # 零行为变化（恒全量跑）。
-                    run_only = (targeted_rerun_plan(
-                        list(self.meta.get("write_set") or []), prev_red_names,
-                        first_run=(self._gen("run_integration_tests") == 0))
-                        if workflow.patched(TARGETED_RERUN_PATCH_ID) else [])
+                    # t260925-04：v2 门=文件级爆炸半径——先收集实际改动文件
+                    # （changed_files activity：merge-base 三点 diff ∪ status 脏文件），
+                    # 传 targeted_rerun_plan(changed_files=…)；清单不可得（error 非空）
+                    # 传空清单=fail-closed 恒全跑。v1 门（旧历史）逐字旧判据（写集
+                    # 粗前缀）。两门都关=恒全量跑。
+                    _cf_files: list = []
+                    if workflow.patched(TARGETED_RERUN_FILE_RADIUS_PATCH_ID):
+                        _cf = await workflow.execute_activity(
+                            changed_files,
+                            ChangedFilesArgs(
+                                ticket_id=self.ticket_id,
+                                worktree=str(self.meta.get("worktree") or ""),
+                                branch=str(self.meta.get("branch") or "")),
+                            start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
+                        _cf_files = list(getattr(_cf, "files", None) or [])
+                        _cf_err = str(getattr(_cf, "error", "") or "")
+                        self.meta["file_blast_radius_trace"] = {
+                            "changed_files": _cf_files, "error": _cf_err}
+                        if _cf_err:
+                            # fail-closed 留痕：清单不可得 ≠ 无改动，恒全跑
+                            self._log("文件级爆炸半径：改动清单不可得（%s）——恒全跑"
+                                      % _cf_err[:200])
+                        else:
+                            self._log("文件级爆炸半径：实际改动 %d 个文件，共享面判定"
+                                      "见定点决策" % len(_cf_files))
+                        run_only = (targeted_rerun_plan(
+                            list(self.meta.get("write_set") or []), prev_red_names,
+                            first_run=(self._gen("run_integration_tests") == 0),
+                            changed_files=_cf_files, diff_error=_cf_err)
+                            if workflow.patched(TARGETED_RERUN_PATCH_ID) else [])
+                    else:
+                        run_only = (targeted_rerun_plan(
+                            list(self.meta.get("write_set") or []), prev_red_names,
+                            first_run=(self._gen("run_integration_tests") == 0))
+                            if workflow.patched(TARGETED_RERUN_PATCH_ID) else [])
                     if run_only:
                         self._log("两层复跑：定点复跑面（%s）——仅快反馈，放行只认收口全量跑"
                                   % ",".join(run_only))

@@ -7028,6 +7028,62 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
 
 
 @activity.defn
+async def changed_files(args: shared.ChangedFilesArgs) -> shared.ChangedFilesResult:
+    """t260925-04 实际改动文件清单收集（文件级爆炸半径的输入面）：
+    `git diff --name-only <merge-base>...<branch>` ∪ `git status --porcelain -z`
+    脏文件，去重返回（仓库根相对路径）。
+
+    **整函数复用既有家族件，故障模式全带**（review 意见 2 落账）：
+    - 基线= `_merge_base_ref`（merge-base(main, branch) 锚泳道仓）：多行畸形取首行
+      留痕、**绝不回退字面 main**（回退钉死基线复活 KI-010；泳道落后 main 时两点差
+      会误判）、解析失败=空 ref=fail-closed 红项文案；
+    - diff 姿态= `_ui_diff_paths` 同款三点差（base...branch）、git 失败 fail-closed
+      返回 error、subprocess 走 `_git` 族（同步有界超时，超时异常由调用方转红；
+      取消即时性是 `_git` 家族既有欠账，本活动沿用同姿态不另立口径）；
+    - 脏文件解析=`_dirty_files_from_status_z`（-z 免 quotePath 歧义、畸形条目丢弃
+      不猜、rename/copy 只取 new；status 带 `-uall` 展开——t260925-04 rework 缺陷②
+      根修：未跟踪目录不折叠成 `dir/`，共享面新文件按真实路径命中前缀表）。
+
+    **fail-closed 方向恒全跑**：branch 空 / merge-base 失败 / diff 失败 / 超时 /
+    status 失败 → error 非空、files=[]；调用方（dev_lane 定点决策）拿到非空 error
+    必须判 shared 恒全跑，**绝不因 files 空收窄**。本活动只收集不决策——爆炸半径
+    判定单写者=shared.changed_files_blast_radius（经 targeted_rerun_plan）。"""
+    wt = Path(args.worktree) if args.worktree else REPO_ROOT
+    if not wt.is_absolute():
+        wt = REPO_ROOT / wt
+    if not args.branch:
+        return shared.ChangedFilesResult(
+            files=[], error="branch 缺失，改动清单不可得，fail-closed 恒全跑")
+    base, base_err = _merge_base_ref(args.branch, wt)
+    if not base:
+        return shared.ChangedFilesResult(
+            files=[], error="merge-base 解析失败：%s" % (base_err or "空 ref")[-300:])
+    p = _git(["diff", "--name-only", "%s...%s" % (base, args.branch)], wt)
+    if p.returncode != 0:
+        return shared.ChangedFilesResult(
+            files=[], error="git diff %s...%s 失败 rc=%s：%s" % (
+                base, args.branch, p.returncode,
+                ((p.stderr or p.stdout or "").strip())[-300:]))
+    diff_files = [ln.strip() for ln in (p.stdout or "").splitlines() if ln.strip()]
+    # -uall（t260925-04 rework 缺陷②根修）：porcelain 缺省把未跟踪目录折叠成
+    # `dir/` 一条，折叠条目命中不了 integration/tests/ 等文件级前缀表项 → 共享面
+    # 新文件可漏判。展开到逐文件后前缀表按真实路径判定；changed_files_blast_radius
+    # 侧另留「尾 / 条目=shared」纵深，兜非 -uall 形态的来历不明清单。
+    st = _git(["status", "--porcelain", "-z", "--untracked-files=all"], wt)
+    if st.returncode != 0:
+        return shared.ChangedFilesResult(
+            files=[], error="git status 失败 rc=%s：%s" % (
+                st.returncode, ((st.stderr or st.stdout or "").strip())[-300:]))
+    dirty = _dirty_files_from_status_z(st.stdout or "")
+    out: List[str] = []
+    for f in list(diff_files) + list(dirty):
+        n = (f or "").strip()
+        if n and n not in out:
+            out.append(n)
+    return shared.ChangedFilesResult(files=out, error="")
+
+
+@activity.defn
 async def run_integration_tests(args: IntegrationRunArgs) -> IntegrationRunResult:
     """run_integration_tests（t260916-29：worker_termination_guard 包裹——worker 停机
     取消→在飞点名+可辨失败；gen 取 IntegrationRunArgs.attempt=工单代数口径）"""
@@ -8125,6 +8181,8 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
 ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     prepare_human_gate, prepare_workspace, merge_check, merge,
     prepare_conflict_resolution, settle_conflict_resolution,
+    # t260925-04：实际改动文件清单收集（文件级爆炸半径输入面；漏注册=运行时才炸）
+    changed_files,
     # M1-3 (t260902-02): the three-stage close-out — merge only books, archive_ticket
     # exports, teardown_lane tears the lane down.
     archive_ticket, teardown_lane,

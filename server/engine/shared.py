@@ -318,6 +318,26 @@ class IntegrationRunArgs:
 
 
 @dataclass
+class ChangedFilesArgs:
+    """t260925-04 实际改动文件清单收集入参：泳道仓内 `merge-base(main, branch)` 三点
+    diff ∪ `git status --porcelain -z` 脏文件。worktree 空=引擎仓根（单仓泳道）。"""
+
+    ticket_id: str
+    worktree: str = ""                          # 泳道根（git 命令 cwd；空=REPO_ROOT）
+    branch: str = ""                            # 泳道分支（merge-base 对象；空=fail-closed）
+
+
+@dataclass
+class ChangedFilesResult:
+    """t260925-04 收集回执。files=去重后的改动文件相对路径（仓库根相对，posix 形）。
+    **error 非空 = 改动清单不可得 = 调用方必须恒全跑**（fail-closed，绝不按空清单
+    收窄；files 与 error 同空也不允许当「无改动」消费）。"""
+
+    files: List[str] = field(default_factory=list)
+    error: str = ""
+
+
+@dataclass
 class IntegrationRunResult:
     """The run_integration_tests receipt: how many ran / how many passed / failure
     details (truncated) / raw output.
@@ -586,11 +606,62 @@ def blast_radius(write_set) -> str:
     return "localized" if seen else "shared"
 
 
-def targeted_rerun_plan(write_set, prev_red_names, first_run: bool = False):
+def changed_files_blast_radius(changed_files, diff_error: str = "") -> str:
+    """文件级爆炸半径分类（纯函数，t260925-04）：输入=相对泳道基线（merge-base
+    main branch）**实际改动文件**清单（git diff --name-only ∪ git status 脏文件）。
+    "shared"=禁定点恒全跑 | "localized"=可定点。
+
+    fail-closed 恒全跑方向（宁可慢不可窄）：diff_error 非空（merge-base 解析失败/
+    diff 失败/超时——改动清单未知）→ shared；入参非 list/tuple → shared；清单为空
+    （无改动=口径未知，绝不因「看起来没改」收窄）→ shared；**清单含畸形元素
+    （非串/空白）→ shared 恒全跑**（t260925-04 rework 缺陷①：入参形状不可信=
+    清单未知，半截数据不得放窄跑——与「跳过可忽略元素」严格区分）；**尾 `/` 的
+    目录折叠条目 → shared 恒全跑**（缺陷②纵深防御：porcelain 折叠条目范围未知，
+    宁宽勿窄；收集面已用 `-uall` 不折叠，此条兜非 `-uall` 形态的来历不明清单）。
+    共享面判定**复用同一张 _SHARED_BASE_PREFIXES 表**（安全轨①：真碰场景执行器/
+    基线/verify.yaml/写集台账机器 → 恒全跑，判据只有一份不漂移）。"""
+    if diff_error:
+        return "shared"
+    if not isinstance(changed_files, (list, tuple)):
+        return "shared"
+    seen = 0
+    for raw in changed_files:
+        if not isinstance(raw, str) or not raw.strip():
+            return "shared"  # 畸形元素=清单不可信，恒全跑（缺陷①修）
+        n = raw.strip().lstrip("./")
+        seen += 1
+        if n.endswith("/"):
+            return "shared"  # 目录折叠条目=范围未知，宁宽勿窄（缺陷②纵深）
+        if n.startswith(_SHARED_BASE_PREFIXES):
+            return "shared"
+    return "localized" if seen else "shared"
+
+
+# t260925-04 定点复跑签名扩展的哨兵：区分「调用方未传 changed_files」（旧口径，
+# 写集粗前缀判据——老历史/未升级调用点零行为变化）与「显式传了空清单」（fail-closed
+# 恒全跑）。直接用 None 当缺省做不到这个区分，故用模块级唯一对象。
+_UNSET = object()
+
+
+def targeted_rerun_plan(write_set, prev_red_names, first_run: bool = False,
+                        changed_files=_UNSET, diff_error: str = ""):
     """定点复跑面（纯函数，260923 D）：上一轮红项名（去重、剔 __ 合成条目、剔空）。
     返回空列表=全量跑语义（首轮/共享基座/无上轮红名/畸形名单——调用方不得注入
-    SANDBAR_SCENARIO_ONLY，全量是唯一放行依据的收口形态）。"""
-    if first_run or blast_radius(write_set) != "localized":
+    SANDBAR_SCENARIO_ONLY，全量是唯一放行依据的收口形态）。
+
+    t260925-04：可选 changed_files 传入**实际改动文件清单**时，爆炸半径改按文件级
+    `changed_files_blast_radius` 判（引擎票写集含粗前缀不再恒禁定点）；不传（哨兵
+    缺省）=旧口径逐字（写集粗前缀判据，老历史/未升级调用点零行为变化——回放安全）。
+    diff_error 非空（收集面报错：merge-base/diff/status 失败）=恒全跑，且优先于
+    localized 清单——计算面报错时清单再「好看」也不得放窄。共享面安全轨①与
+    fail-closed 规则见 changed_files_blast_radius。"""
+    if diff_error:
+        radius = "shared"
+    elif changed_files is _UNSET:
+        radius = blast_radius(write_set)
+    else:
+        radius = changed_files_blast_radius(changed_files)
+    if first_run or radius != "localized":
         return []
     if not isinstance(prev_red_names, (list, tuple)):
         return []
