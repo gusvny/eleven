@@ -1661,3 +1661,21 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **影响**：票永久停在 blocked（不烧资源但占位），只能弃票重开或修引擎。**修法方向**：block 清除后按 fork 语义重入
 > 分支（或把「授权后重驱」做成单一入口）；**验收**＝坏路径 block→授权→自动续跑（并行叉与串行段各一例）。
 > **现场保留**：t260925-05 泳道与授权均在场，修好后可直接用于复现与验收。
+
+## KI-121 外置模板加载口使中央工人起不来（活动双注册；合并即触发，260925 实案，integration 岗登记）
+> **实案**：t260924-04（项目外置工作流模板加载口）合并后，中央工人重启即崩：
+> `ValueError: More than one activity named ai-review`（temporalio `_activity.py:90` 注册期抛）。
+> 日志关键行：`project template modules passthrough: [... 'sandbar_ext_nusuyou_content_studio' ...]`
+> ——工人加载了 nusuyou 注册声明的 `paths.workflow_modules: workflows/content_studio.py`。
+> **机制（已核）**：`workflows/content_studio.py` **自身不含 `@activity.defn`**（纯 workflow 模块）；
+> 撞名的两侧是**引擎自己**——加载器 import 项目模块时 `agent_activities` 被以第二个模块身份**再导入一次**，
+> 于是引擎为历史回放保留的退役 content-pipeline 活动（`propose/process/ai-review/publish`，
+> agent_activities.py:1365）**被注册成两份**，首个撞名即 `ai-review`。→ 不是项目模块的错，是**加载口的
+> 双导入/去重缺陷**（且缺「活动名撞车」的显式 fail-loud 检查：现在是一崩了之，无点名）。
+> **影响**：**中央工人不可启动 → 共享队列无 poller**（巡检/周期流程全停）；每票专属工人不受影响
+> （dev-lane 票照跑）。t260924-04 的 merge_check（pytest 全绿）**测不到**此类注册期冲突=闸的盲区。
+> **修法方向**：①加载器保证引擎模块不被二次导入（模块身份去重），或对项目加载面做活动名命名空间；
+> ②加载期做「活动名唯一性」显式校验并 fail-loud 点名（不崩栈、不空过）；③闸侧补一条「工人可启动」
+> 的机械检查（worker 注册 dry-run），把这类冲突挡在合并前。
+> **现场**：nusuyou 注册声明在场（`~/.sandbar/projects/nusuyou/project.yaml` 的 `workflow_modules`），
+> 复现=中央工人启动。
