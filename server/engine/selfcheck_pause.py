@@ -55,8 +55,11 @@ def main():
           "PAUSE_NOTE_INPUT_LIMIT=20000（host_ruling intake gate 同源值，独立常量）")
     import dataclasses
     fields = {f.name: f for f in dataclasses.fields(shared.PauseRequest)}
-    check(set(fields) == {"who", "note"} and fields["note"].default == "",
-          "PauseRequest(who, note='') 形状（与 Signature/ReworkRequest 同族）")
+    # t260924-04 锁面保鲜（扩锁不拆锁）：原断言锁 {who, note}，t260915-12 pause/resume
+    # 纳入跨项目闸盖章面后扩为四字段（带默认值，重放安全）——断言对齐现状真源。
+    check(set(fields) == {"who", "note", "caller_project", "cross_project_note"}
+          and fields["note"].default == "" and fields["caller_project"].default == "",
+          "PauseRequest(who, note='') 形状（t260915-12 扩跨项目盖章四字段，带默认值）")
 
     print("== 2/3 mixin 接线与二态快照（需引擎 venv import 面）")
     try:
@@ -98,7 +101,9 @@ def main():
     ]:
         check(frag in src, "base.py 含 %s" % label)
     dl = (POC / "dev_lane.py").read_text("utf-8")
-    check("class DevLaneWorkflow(TicketPauseMixin)" in dl,
+    # t260924-04 锁面保鲜：DevLaneWorkflow 现声明含 TicketCrossProjectMixin（跨项目
+    # 闸基类，t260915-12 族）——断言锁「TicketPauseMixin 在 MRO 首位」这一原契约点。
+    check("class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin)" in dl,
           "dev_lane 类声明接线（mixin 基类）")
     check(dl.count("await self._pause_gate()") == 1,
           "dev_lane 主循环恰一个段间门调用点（接线 ≤5 行验收口径）")
@@ -114,16 +119,21 @@ def main():
           "agent_activities 零 pause/resume 信号发送面（仅人门，拍板②）")
 
     print("== 6 夹具模板 env 门（收窄守卫同门感知）")
-    check(dict(shared.TEMPLATE_CLASS_NAMES) == {"dev-lane": "DevLaneWorkflow"},
-          "默认面 TEMPLATE_CLASS_NAMES 恰 {dev-lane}（sc_template_face_narrowing 不破）")
-    check(set(shared.TEMPLATE_DISPLAY_NAMES) == {"dev-lane"},
-          "默认面 TEMPLATE_DISPLAY_NAMES 恰 {dev-lane}")
+    # t260924-04 改判（扩锁不拆锁）：默认面语义 = 内置＋当项目显式登记。空注册根
+    # 注入（无项目声明 workflow_modules）下合并视图恰为 {dev-lane}＝零登记零漂移；
+    # 夹具门子进程探针同口径注入空注册根（夹具模板照常入表，语义不动）。
+    import tempfile as _tmpmod
+    _empty_root = _tmpmod.mkdtemp(prefix="t260924-04-empty-registry-")
+    check(shared.project_template_names_merged(root=_empty_root)
+          == {"dev-lane": "DevLaneWorkflow"},
+          "默认面合并视图（空注册根）恰 {dev-lane}（=内置＋显式登记语义，收窄守卫不破）")
     probe = subprocess.run(
         [sys.executable, "-c",
          "import sys; sys.path.insert(0, %r); import shared, workflows_v2;"
          "print(sorted(shared.TEMPLATE_CLASS_NAMES), sorted(workflows_v2.TEMPLATE_CLASSES))"
          % str(POC)],
-        env={**os.environ, "SANDBAR_FIXTURE_TEMPLATES": "1"},
+        env={**os.environ, "SANDBAR_FIXTURE_TEMPLATES": "1",
+             "SANDBAR_PROJECTS_DIR": _empty_root},
         capture_output=True, text=True, timeout=60)
     check(probe.returncode == 0 and "fixture-two-step" in probe.stdout,
           "SANDBAR_FIXTURE_TEMPLATES=1 子进程：两表同门含 fixture-two-step（实得 %s%s）"

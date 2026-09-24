@@ -30,6 +30,7 @@ exit 0=PASS；exit 1=FAIL 产品红；exit 2=ENV_FAIL 环境红（缺 venv 等�
 from __future__ import annotations
 
 import os
+import pathlib
 import shutil
 import sys
 import tempfile
@@ -60,12 +61,18 @@ def env_fail(why):
 def main():
     print("== A 真源三表收窄（stdlib 恒跑）")
     shared = lib.load_shared()
-    check(dict(shared.TEMPLATE_CLASS_NAMES) == {"dev-lane": "DevLaneWorkflow"},
-          "TEMPLATE_CLASS_NAMES 恰为 {dev-lane: DevLaneWorkflow}（实得 %r）"
-          % (shared.TEMPLATE_CLASS_NAMES,))
-    check(set(shared.TEMPLATE_DISPLAY_NAMES) == {"dev-lane"},
-          "TEMPLATE_DISPLAY_NAMES key 恰为 {dev-lane}（实得 %r）"
-          % (sorted(shared.TEMPLATE_DISPLAY_NAMES),))
+    # t260924-04 改判（扩锁不拆锁）：默认面语义 = 内置＋当项目显式登记。空注册根
+    # 注入的合并视图恰 {dev-lane} = 「零登记零漂移」；真实注册表若已有项目登记模板，
+    # 名面可超集，但 dev-lane 恒在（内置先占，撞名即拒）。table_narrow 自证两例不动。
+    import tempfile as _tmp
+    _empty = _tmp.mkdtemp(prefix="t260924-04-empty-registry-")
+    check(shared.project_template_names_merged(root=_empty)
+          == {"dev-lane": "DevLaneWorkflow"},
+          "默认面合并视图（空注册根）恰 {dev-lane: DevLaneWorkflow}（实得 %r）"
+          % (shared.project_template_names_merged(root=_empty),))
+    check("dev-lane" in shared.TEMPLATE_CLASS_NAMES
+          and shared.TEMPLATE_CLASS_NAMES["dev-lane"] == "DevLaneWorkflow",
+          "dev-lane 恒在注册表（内置先占，项目模板撞名即拒不覆盖）")
 
     def table_narrow(tbl):
         """真源收窄判定（纯函数，供自证红绿与 A 段共用）。"""
@@ -155,6 +162,59 @@ def main():
     check('"type":"content-pipeline"' not in client_text,
           "USAGE/示例零 content-pipeline 调用教学（防半截清除误导操作面；"
           "带退役标注的说明行归负扫描场景豁免口径管）")
+
+    print("== F 登记面扩展：内置＋当项目显式登记（t260924-04，stdlib 恒跑）")
+    _tmp2 = tempfile.mkdtemp(prefix="t260924-04-register-")
+    try:
+        _pd = pathlib.Path(_tmp2) / "proj-ext"
+        (_pd / "mods").mkdir(parents=True)
+        (_pd / "project.yaml").write_text(
+            "schema: v1\nproject:\n  - key: proj-ext\n    name: 扩面探针\n"
+            "    dirs:\n      - %s\npaths:\n"
+            "  workflow_modules: mods/good.py,mods/collide.py,mods/rejpatch.py\n" % _pd, "utf-8")
+        (_pd / "mods" / "good.py").write_text(
+            'TEMPLATE_ID = "proj-ext-flow"\nTEMPLATE_NAME = "扩面流"\n'
+            "from temporalio import workflow\n\n"
+            "@workflow.defn\nclass ProjExtFlow:\n    pass\n", "utf-8")
+        (_pd / "mods" / "collide.py").write_text(
+            'TEMPLATE_ID = "dev-lane"\nTEMPLATE_NAME = "撞名"\n', "utf-8")
+        # 被拒探针夹具：id 唯一但 PATCH_ID 撞引擎面——名面可辨、类面拒收，
+        # 其 id 不进可用面（「被拒模板建票 fail-closed」才有真对象）。
+        (_pd / "mods" / "rejpatch.py").write_text(
+            'TEMPLATE_ID = "proj-ext-rej"\nTEMPLATE_NAME = "补丁撞面"\n'
+            'PATCH_ID = "dev-lane-review-gate"\n', "utf-8")
+        merged = shared.project_template_names_merged(root=_tmp2)
+        check("proj-ext-flow" in merged,
+              "显式登记模板进合并视图（内置＋当项目显式登记）")
+        check(merged.get("dev-lane") == "DevLaneWorkflow",
+              "dev-lane 恒在（撞名模板被拒不覆盖内置）")
+        rejs = shared.project_template_scan(import_classes=False, root=_tmp2).rejections
+        check(any(r["check"] == "撞名 id" and "占用方=dev-lane" in r["detail"]
+                  and "来件方=proj-ext/mods/collide.py" in r["detail"] for r in rejs),
+              "撞名模板结构化拒收并点名双方（不静默改名、不后到覆盖）")
+        # 建票文案可见原因（stdlib 半：create 报错附拒收明细）。gen2 走查修正：
+        # SANDBAR_PROJECTS_DIR 必须先于 load_ticket_tool（shared 模块级 glue 在装载时
+        # 现读注册根——env 后设则拒收清单是真实注册根的空集，明细恒缺＝假红）。
+        old_env = os.environ.get("SANDBAR_PROJECTS_DIR")
+        os.environ["SANDBAR_PROJECTS_DIR"] = _tmp2
+        tool = lib.load_ticket_tool()
+        try:
+            try:
+                tool.run({"op": "create", "project": "proj-ext",
+                          "workflow": "proj-ext-rej", "title": "拒收明细探针"})
+                check(False, "被拒模板建票被拒（实得：未抛错）")
+            except ValueError as e:
+                msg = str(e)
+                check("补丁标识撞引擎面" in msg and "rejpatch.py" in msg
+                      and "撞名 id" in msg and "占用方=dev-lane" in msg,
+                      "建票失败可见原因：文案附拒收明细（检查项＋双方）")
+        finally:
+            if old_env is None:
+                os.environ.pop("SANDBAR_PROJECTS_DIR", None)
+            else:
+                os.environ["SANDBAR_PROJECTS_DIR"] = old_env
+    finally:
+        shutil.rmtree(_tmp2, ignore_errors=True)
 
     print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (passed, failed, env_failed))
     return 2 if env_failed else (1 if failed else 0)

@@ -30,8 +30,15 @@ POC = Path(__file__).resolve().parent
 REPO = POC.parents[1]
 OUT_DIR = REPO / "server" / "workflows"
 
-from workflows_v2 import TEMPLATE_CLASSES  # noqa: E402
+from workflows_v2 import TEMPLATE_CLASSES, PROJECT_TEMPLATE_IDS  # noqa: E402
 from shared import PART_KINDS  # noqa: E402
+
+DOC_TEMPLATES = {tid: cls for tid, cls in TEMPLATE_CLASSES.items()
+                 if tid not in PROJECT_TEMPLATE_IDS}
+# t260924-04：外置模板（PROJECT_TEMPLATE_IDS）显式排除——其类代码与段定义住项目仓、
+# 与项目同仓演进，引擎仓不代生成参考快照（代生成=跨仓漂移面）；--check 同口径跳过，
+# 防漂移语义不变（只钉「引擎内置模板 ↔ server/workflows/*.yaml」）。排除是**声明式**
+# 的（本行注释即声明），非静默跳过：生成时逐 id 打印跳过说明。
 
 HEADER = (
     "# ⚠️ 真源=代码，勿手改 —— M11 v2 模版即代码（t260822-m11）。\n"
@@ -49,7 +56,7 @@ def _q(s: str) -> str:
 
 
 def render(tid: str) -> str:
-    cls = TEMPLATE_CLASSES[tid]
+    cls = DOC_TEMPLATES[tid]
     module = cls.__module__
     lines: List[str] = [
         HEADER.format(module=module, cls=cls.__name__).rstrip("\n"),
@@ -111,7 +118,7 @@ def _roundtrip_check() -> List[str]:
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     errors: List[str] = []
-    for tid in TEMPLATE_CLASSES:
+    for tid in DOC_TEMPLATES:
         try:
             mod.load(OUT_DIR / (tid + ".yaml"))
         except Exception as e:
@@ -126,7 +133,7 @@ def main() -> int:
 
     if a.check:
         drift = []
-        for tid in TEMPLATE_CLASSES:
+        for tid in DOC_TEMPLATES:
             p = OUT_DIR / (tid + ".yaml")
             want = render(tid)
             have = p.read_text("utf-8") if p.is_file() else ""
@@ -143,10 +150,12 @@ def main() -> int:
         return 0
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    for tid in TEMPLATE_CLASSES:
+    for tid in sorted(PROJECT_TEMPLATE_IDS):
+        print("跳过外置模板 %s（快照属项目仓，引擎仓不代生成——t260924-04 声明式排除）" % tid)
+    for tid in DOC_TEMPLATES:
         p = OUT_DIR / (tid + ".yaml")
         p.write_text(render(tid), "utf-8")
-        print("生成 %s（%s）" % (p, TEMPLATE_CLASSES[tid].__name__))
+        print("生成 %s（%s）" % (p, DOC_TEMPLATES[tid].__name__))
     errs = _roundtrip_check()
     if errs:
         print("回读校验红：%s" % "；".join(errs))

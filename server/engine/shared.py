@@ -4115,7 +4115,14 @@ DEFAULT_ROLES_DIR = "server/roles"   # the fallback convention: the roles direct
 
 # t260921-14 增 dsh_bin：dsh 二进制路径钉（机器级放宽口径，同 model_routes 家族；
 # 未知键红/重复键红由 _entry_paths_parse 的 closed set 自动覆盖新键）。
-PATHS_DECL_KEYS = ("roles_dir", "model_routes", "inspection_decl", "dsh_bin")
+# t260924-04 增 workflow_modules：项目外置工作流模板模块清单（`,` 分隔多项，每项
+# 相对项目主目录 dirs[0]；加载口语义见 project_templates.py 与加载口文档）。`,
+# 分隔是本键新语义：逐项 strip 后判空（空项=畸形点名第 N 项），逐项过 _decl_rel
+# 同款校验（绝对/.. 越界/非标量各红）；值含 # 仍按①d 既有 stance 截断（加载口
+# 文档明示不支持）；不放行机器级 ~/绝对形态（t260910-14 放宽不外溢到本键，将来
+# 要机器级另票放宽）。
+PATHS_DECL_KEYS = ("roles_dir", "model_routes", "inspection_decl", "dsh_bin",
+                   "workflow_modules")
 
 
 class ProjectPathsError(ValueError):
@@ -4251,6 +4258,7 @@ def project_paths(project_key: str, roles_base: str = "",
                             "model_routes": None, "model_routes_rel": None,
                             "inspection_decl": None, "inspection_decl_rel": None,
                             "dsh_bin": None, "dsh_bin_rel": None,
+                            "workflow_modules": None, "workflow_modules_rel": None,
                             "main_dir": None, "entry": None}
     if not key or not PROJECT_KEY_RE.match(key):
         return info
@@ -4319,6 +4327,20 @@ def project_paths(project_key: str, roles_base: str = "",
         rel = _decl_rel("roles_dir", paths["roles_dir"], label)
         info["roles_dir"] = pathlib.Path(roles_base or os.getcwd()) / rel
         info["roles_rel"] = rel
+    if "workflow_modules" in paths:
+        # 项目外置工作流模板模块清单（t260924-04）：`,` 分隔多项，每项相对项目主目录
+        # （dirs[0]）——不放行机器级形态；逐项校验（空项/绝对/.. 越界/非标量各红，点名
+        # 第 N 项）。锚点存在性不在此判（加载器按「加载失败」拒收点名，缺锚≠静默跳过）。
+        base = main_dir
+        if not base:
+            raise ProjectPathsError(
+                "%s: paths.workflow_modules 已声明但条目缺可用 dirs 首项，无法定项目主目录（畸形）" % label)
+        raw_items: List[str] = []
+        for i, item in enumerate(str(paths["workflow_modules"]).split(","), 1):
+            rel_item = _decl_rel("workflow_modules", item, "%s 第 %d 项" % (label, i))
+            raw_items.append(rel_item)
+        info["workflow_modules"] = [pathlib.Path(base) / it for it in raw_items]
+        info["workflow_modules_rel"] = ",".join(raw_items)
     return info
 
 
@@ -5037,3 +5059,120 @@ async def retry_once_on_worker_termination(run_once, *, gate, on_retry=None):
         if on_retry is not None:
             on_retry(e)
         return await run_once()
+
+
+# ============================================================================
+# 项目外置工作流模板面（t260924-04，票 1）：shared 侧名面 glue。
+# 真源 = project_templates.scan()（参数注入式，本模块绝不反向 import 它——
+# ticket.py 以 '_poc_shared' 别名 spec 装载本模块，别名双装载下 import shared
+# 会裂出第二套表）。名面（源码扫描，stdlib）在此模块级并入两表；类面（引擎 venv
+# importlib 全量）由 workflows_v2 import 时经 project_template_classes_merged
+# 并入并回写两表（深检拒掉的 id 撤下）——引擎进程内两表恒一致，交叉自检不破。
+# ============================================================================
+
+PROJECT_TEMPLATE_REJECTIONS: List[Dict[str, str]] = []
+
+
+def _load_project_templates_mod():
+    """按路径装载 project_templates（与 ticket.py 装载本模块同款 spec 手法；正常
+    import 环境下 sys.modules 已有真名则直接复用，两路同模块零裂变）。"""
+    import sys as _sys
+    existing = _sys.modules.get("project_templates")
+    if existing is not None:
+        return existing
+    import importlib.util as _ilu
+    path = POC_DIR / "project_templates.py"
+    spec = _ilu.spec_from_file_location("_poc_project_templates", path)
+    mod = _ilu.module_from_spec(spec)
+    _sys.modules["_poc_project_templates"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def project_template_scan(import_classes: bool, root=None):
+    """项目外置模板扫描（依赖全部注入；root=None 用真实注册根——env 现读语义）。
+    root 注入 = 测试钉面：扫描期间临时指 SANDBAR_PROJECTS_DIR（perkey_projects_root
+    与 project_paths 均按 env 现读语义取根，指 env 一处即两处同源），完毕恢复。"""
+    pt = _load_project_templates_mod()
+    old_env = os.environ.get("SANDBAR_PROJECTS_DIR")
+    if root is not None:
+        os.environ["SANDBAR_PROJECTS_DIR"] = str(root)
+    try:
+        if root is None:
+            keys = [p["key"] for p in load_projects_registry()[0]]
+        else:
+            rootp = pathlib.Path(root)
+            keys = sorted(d.name for d in rootp.iterdir()
+                          if d.is_dir() and (d / "project.yaml").is_file()
+                          and PROJECT_KEY_RE.match(d.name)) if rootp.is_dir() else []
+        # t260924-04 打回修复（arbitrate D1）：传给 scan 的「先占方」必须是内置∪夹具
+        # 快照（_PT_BUILTIN_KEYS，glue 并入前钉），**不得**是已被名面 glue 并入项目
+        # id 的现表——否则类面扫描把本项目自己的 id 当占用方，外置模板全量自撞拒收、
+        # v2 合并恒空（D2 标签失真同根因）。
+        _bn = {k: v for k, v in TEMPLATE_CLASS_NAMES.items() if k in _PT_BUILTIN_KEYS}
+        _bd = {k: v for k, v in TEMPLATE_DISPLAY_NAMES.items() if k in _PT_BUILTIN_KEYS}
+        return pt.scan(perkey_root=lambda: pathlib.Path(root) if root else perkey_projects_root(),
+                       project_keys=lambda: keys,
+                       resolve_decl=lambda k: project_paths(k),
+                       engine_dir=POC_DIR,
+                       builtin_names=_bn,
+                       builtin_displays=_bd,
+                       part_kinds=PART_KINDS,
+                       import_classes=import_classes)
+    finally:
+        if root is not None:
+            if old_env is None:
+                os.environ.pop("SANDBAR_PROJECTS_DIR", None)
+            else:
+                os.environ["SANDBAR_PROJECTS_DIR"] = old_env
+
+
+def project_template_names_merged(root=None) -> Dict[str, str]:
+    """合并视图：内置∪夹具∪项目名面登记（不加载类；测试注入 root 钉默认面）。"""
+    names = dict(TEMPLATE_CLASS_NAMES)
+    res = project_template_scan(import_classes=False, root=root)
+    res.merged_names(names, {})  # display 表不动（仅测试视图用）
+    return names
+
+
+def project_template_classes_merged(root=None):
+    """类面合并（引擎 venv 专用，workflows_v2 import 时调用）：全量加载＋形状深检，
+    深检结果回写 shared 两表（撤下名面已并入但深检拒掉的 id），拒收清单更新到
+    PROJECT_TEMPLATE_REJECTIONS。返回 ScanResult（.classes = id → 类）。"""
+    global PROJECT_TEMPLATE_REJECTIONS
+    res = project_template_scan(import_classes=True, root=root)
+    PROJECT_TEMPLATE_REJECTIONS = res.rejections
+    # 回写对象 = 内置∪夹具（_PT_BUILTIN_KEYS，模块级名面并入前钉快照）之外的名面项
+    res.reconcile(TEMPLATE_CLASS_NAMES, TEMPLATE_DISPLAY_NAMES,
+                  builtin_keys=set(_PT_BUILTIN_KEYS))
+    return res
+
+
+def project_template_rejection_note(project_key: str = "", root=None) -> str:
+    """建票文案的拒收明细段（fail-closed 点名：检查项＋双方/缺什么）。project_key
+    给定时只点名该项目（无 project 调用面给全量）。无拒收 = 空串（文案逐字不变）。"""
+    rejs = PROJECT_TEMPLATE_REJECTIONS
+    if root is not None:  # 测试/名面即时视图
+        rejs = project_template_scan(import_classes=False, root=root).rejections
+    if project_key:
+        rejs = [r for r in rejs if r.get("project") == project_key]
+    if not rejs:
+        return ""
+    return "；项目模板拒收明细：" + "；".join(
+        "[%s/%s] %s：%s" % (r.get("project", ""), r.get("module", ""),
+                            r.get("check", ""), r.get("detail", ""))
+        for r in rejs)
+
+
+# 模块级名面并入（置于本段末：perkey_projects_root / project_paths /
+# load_projects_registry 均已定义）。加载器自身故障不炸 import——转结构化拒收记录
+# 高声挂在建票文案面（「拒收≠装死」；绝不静默当「未声明」）。
+_PT_BUILTIN_KEYS = frozenset(TEMPLATE_CLASS_NAMES)
+try:
+    _pt_res = project_template_scan(import_classes=False)
+    PROJECT_TEMPLATE_REJECTIONS = _pt_res.rejections
+    _pt_res.merged_names(TEMPLATE_CLASS_NAMES, TEMPLATE_DISPLAY_NAMES)
+except Exception as _pt_err:  # 加载器故障：点名挂账，不静默、不炸共享装载
+    PROJECT_TEMPLATE_REJECTIONS = [{"project": "", "module": "",
+                                    "check": "加载器故障",
+                                    "detail": str(_pt_err)[:240]}]

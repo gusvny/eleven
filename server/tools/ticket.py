@@ -479,9 +479,13 @@ def _create(a):
     now = int(time.time())
     proj = _project(a.get('project') or '')  # 必传，无默认值（260823 用户拍板）
     wid = a.get('workflow')
+    # t260924-04：未知模板文案附项目外置模板拒收明细（fail-closed 点名：检查项＋
+    # 双方/缺什么；明细段置于「可用：」段之前——收窄守卫 C 半按 rsplit('可用：') 判
+    # 列表面，明细段不得落到其后）。无拒收 = 明细空串，文案逐字不变。
     if not wid or wid not in _shared().TEMPLATE_CLASS_NAMES:
-        raise ValueError('create 需要 workflow（模板 id，可用：%s）'
-                         % '、'.join(sorted(_shared().TEMPLATE_CLASS_NAMES)))
+        _note = _shared().project_template_rejection_note(proj.get('key') if isinstance(proj, dict) else '')
+        raise ValueError('create 需要 workflow（模板 id%s，可用：%s）'
+                         % (_note, '、'.join(sorted(_shared().TEMPLATE_CLASS_NAMES))))
     if not a.get('title'):
         raise ValueError('create 缺必填字段: title')
     # 短 id 生成（时序可见，260820 用户要求）：缺省 t<yymmdd>-<NN>（当天自增序号，补零两位）；

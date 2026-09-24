@@ -60,13 +60,14 @@ from temporalio.worker import Worker
 
 from activities import ALL_ACTIVITIES
 import agent_runtime
-from agent_activities import ALL_AGENT_ACTIVITIES
+from agent_activities import ALL_AGENT_ACTIVITIES, make_stage_activity
 from dsh_pin import dsh_face_payload, enforce_expected
 from agent_activities import inflight_stage_snapshot, recent_stage_outcomes
 from shared import NAMESPACE, POC_DIR, REPO_ROOT, TARGET_HOST, TASK_QUEUE, configured_task_queues
 from shared import write_worker_meta
 from workflows import ALL_WORKFLOWS
-from workflows_v2 import ALL_WORKFLOWS_V2
+from workflows_v2 import (ALL_WORKFLOWS_V2, PROJECT_TEMPLATE_PASSTHROUGH_MODULES,
+                          PROJECT_TEMPLATE_STAGE_IDS)
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
@@ -322,12 +323,39 @@ async def run_worker(args: argparse.Namespace) -> None:
     # old-prefix workflows of in-flight tickets don't strand after a worker
     # restart). The startup log prints every queue = evidence of double registration.
     workers = []
+    # D3（t260924-04 第 2 轮打回）：项目外置模板模块名注入 sandbox passthrough——
+    # temporalio workflow sandbox 在 validate/执行期按模块名 re-import 定义模块，
+    # 外置模块经 importlib 按名装载（sandbar_ext_<key>_<stem>），不在任何 import
+    # path 上，不注入即 ModuleNotFoundError 崩工人。加载器侧另有 sandbox 预校验
+    # （project_templates._sandbox_validate）：校验失败的模板根本进不了本注册表，
+    # 此注入只服务「通过了预校验的好模板」——双层防线，坏模板永不炸工人进程。
+    # 无外置模板 = 缺省 runner，零行为变化。
+    _workflow_runner = None
+    if PROJECT_TEMPLATE_PASSTHROUGH_MODULES:
+        # D4（t260924-04 第 3 轮打回）：temporalio 1.18.2 公开类名=SandboxRestrictions
+        # （workflow_sandbox 导出面：RestrictedWorkflowAccessError/SandboxMatcher/
+        #  SandboxRestrictions/SandboxedWorkflowRunner；with_passthrough_modules 在
+        #  SandboxRestrictions 上）。
+        from temporalio.worker.workflow_sandbox import (
+            SandboxedWorkflowRunner,
+            SandboxRestrictions,
+        )
+        _workflow_runner = SandboxedWorkflowRunner(
+            restrictions=SandboxRestrictions.default.with_passthrough_modules(
+                *sorted(PROJECT_TEMPLATE_PASSTHROUGH_MODULES)))
+        logging.info("project template modules passthrough: %s",
+                     sorted(PROJECT_TEMPLATE_PASSTHROUGH_MODULES))
     for _q in configured_task_queues():
+        _extra = {}
+        if _workflow_runner is not None:
+            _extra["workflow_runner"] = _workflow_runner
         workers.append(Worker(
             client,
             task_queue=_q,
             workflows=ALL_WORKFLOWS + ALL_WORKFLOWS_V2,
-            activities=ALL_ACTIVITIES + ALL_AGENT_ACTIVITIES,
+            activities=(ALL_ACTIVITIES + ALL_AGENT_ACTIVITIES
+                        + [make_stage_activity(s) for s in PROJECT_TEMPLATE_STAGE_IDS]),
+            **_extra,
             **_worker_extra_kwargs(),  # t260916-29：显式宽限（缺省 1800s，env 可调）
         ))
     logging.info("worker polling queues: %s", ", ".join(configured_task_queues()))

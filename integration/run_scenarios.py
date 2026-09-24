@@ -1657,6 +1657,22 @@ SCENARIOS = [
      "基线树依赖软链四态行为面（t260922-12 验收⑤，灰盒 L3，真缝+真 worktree，旋钮显式置位不依赖缺省——缺省值由取证 A'/B' 实录裁定场景不钉）：SANDBAR_GATE_BASELINE_DEPS=1 时 src 在场→软链建成（桩在基线相实测 app/node_modules islink）、dst 已在（仓内已跟踪真目录）→绝不覆盖（.venv 仍为真目录）、src 缺席→跳过不致命（ui-check playwright-core 与 temporal 两路径 absent）；=0 时一条不建（旋钮真的关得掉，若实现未接旋钮此轮红点名）；两轮基线跑均正常收口、台账写账不受软链影响、worktree 零残留。软链只读语义由「src 指向主仓共享目录」的夹具同构构造保证。与 developer L1（软链四态白盒单测）intent 不同层：彼测建链函数本身，本条锁基线执行相里依赖真实可见——「回退路线必须真能跑」的物理前提。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；git 缺席=ENV_FAIL exit 2",
      "python3 integration/t260922-12/sc_gate_baseline_deps_links.py", "ro"),
 
+    # ---- t260924-04: 项目外置工作流模板加载口（票1）——登记即加载＋逐模板隔离拒收＋演进纪律 ----
+    # integration 设计段产物（L2/L3 灰盒）。两条 intent 分工：
+    # ①gate（ro，离线秒级，只读探针）：加载/合并/拒收/隔离/补丁标识/夹具门/同门同源/
+    #   加载口文档与建票文案语义锚——模板注册表公开真源面的全部静态契约；
+    # ②journey（serial，docker 台全链）：外置模板建票走通全链、worker 停机后续跑、
+    #   坏模板建票 fail-closed 点名、分项目可用面帮助文本——用户旅程面。
+    # 与 developer L1（test_t260924_04_project_templates 加载器单测）不同层：彼测加载器
+    # 模块级行为，本族测引擎装配后的真源表/建票入口/全链行为。实现段落地前红属预期
+    # （TDD 信号），arbitrate/merge 期必须绿；探针缺 temporalio=ENV_FAIL exit 2；
+    # docker/镜像/舞台缺件=ENV_FAIL exit 2。
+    ("t260924-04-project-template-gate",
+     "项目外置模板登记即加载＋逐模板隔离拒收契约（t260924-04 场景①，灰盒 L2，ro 离线秒级，只读探针读 shared/workflows_v2/project_templates 公开真源表，零 docker 零 Temporal）：A2 零登记零漂移（未声明项目可用面恰 {dev-lane}、展示面/拒收清单/v2 合并面同恰）；A3a 撞名 id 拒收点名「检查项＋占用方＋来件方」且不后到覆盖不静默改名（dev-lane 仍指内置类）；A3b 畸形（缺 STAGES/段形态不合）不注册且点名缺什么；A3c 模块加载抛错拒收点名文件＋异常，同项目好模板照常注册、他项目不受扰（坏不拖好）；补丁标识纪律（项目 PATCH_ID 撞引擎内置集拒收点名双方值、项目前缀放行、引擎集动态收集不写死）；夹具门语义不动（env 未设夹具不可见；撞夹具 id 夹具先占项目后到拒收点名双方）；同门同源（外置 id 四表同现类名一致）；加载口文档面（确定性规约/新 id 并存/workflow.patched 补丁/项目前缀/生效粒度写实关键词在场）；ticket.py 建票入口接拒收明细语义锚。intent 分工：加载器模块级行为矩阵归 developer L1，本条锁引擎装配后真源表与文案面。实现落地前红属预期（TDD），arbitrate/merge 期必须绿；探针缺 temporalio=ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260924-04/sc_project_template_gate.py", "ro"),
+    ("t260924-04-project-template-journey",
+     "项目外置模板建票全链＋续跑＋建票拒收面（t260924-04 场景②，灰盒 L3，docker 台真 Temporal+真 worker+桩大脑，需求书 A1/A3/A7 旅程面）：A1 外置模板全链——项目注册 paths.workflow_modules 指向项目仓内外置两段模板（journey-two-step，clean-module 形状照 fixture_two_step）→ ticket-start 认得 → 段序走完 → closed；A1 续跑——段在飞窗口停 worker → 重起 → 同票继续到 closed（每票专属工人吃新码、幂等靠既有结果文件机制，KI-113 生效粒度行为面）；A3/A7 建票面——坏模板项目该 id 建票 fail-closed 且报错点名拒收原因（拒收≠装死）、同坏项目下内置 dev-lane 照常建票可查（别模板不受扰）；可用面帮助文本分项目可见（项目 A 未知模板文案列 dev-lane＋journey-two-step、项目 B 不见他项目登记 id=归属边界）。人门 sign 同道不重复造伪覆盖：外置模板与 dev-lane 共用 TicketWorkflowBase 同一基类，sign 旅程由在册 dev-lane 场景族承载。与场景①分工：彼锁注册表/拒收静态契约（离线），本条锁真舞台全链行为；与 developer L1 不同层。worker 从真仓工作树引擎起（加载口是本票新增面，HEAD clone 不含）；子进程 env 剥泳道标记、SANDBAR_TARGET_HOST 钉本场景舞台（写守卫单点）。实现落地前红属预期（TDD），arbitrate/merge 期必须绿；docker/镜像/舞台缺件=ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260924-04/sc_project_template_ticket_journey.py", "serial"),
     # ---- t260924-06: 巡检 inspect 段缩面（全仓普查→本期变化面定向审，治三期零产出）----
     ("t260924-06-inspect-scope-input",
      "inspect 缩面「审查范围=给定清单」输入契约（t260924-06 必做②主证据，灰盒 L2 纯离线桩缝驱动 run_inspection_inspect 真活动）：四路输入（变化面 diff --name-status/套件回执红·环境红·漏跑/上期台账/KI 册）机械给定进 scope 面——清单文件与红条目在 meta/prompt 可辨、prompt 明示「审查范围=给定清单，清单外不看」、persona patch 含禁子代理硬规则（纵深防御第二层）；分片硬上限（inspect_max_shards×每片文件数）机械截断且 scope_block/meta 双处点名截断数不静默丢；四路畸形一律不抛出不回落全仓——diff 畸形行逐行容错+计数点名、回执坏 JSON 不阻断主链并点名「回执不可读，套件红面未纳入」、KI 册缺失/烂行 note 点名、上期台账缺 lane.base_ref=显式「无基点差分」note 且 scope 零全仓普查形态（无基点≠回落整套书——三期零产出病象的反向锁）。与 sc②分工：彼守产出面（零发现显式/预算记账/decl 键），本守输入面；与 t260916-22-inspect-contract 不同面（彼守缩面前的解析/复核/去重契约，本条不复写）；与 developer L1（parse_name_status 等纯函数真值表）不同层。环境语义：temporalio 桩缺席=ENV_FAIL exit 2。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",

@@ -57,6 +57,13 @@ def test_pause_snapshot_phases(paused, at_gate, want):
 
 
 def test_default_template_tables_stay_narrow():
-    """夹具模板 env 门不污染默认面（sc_template_face_narrowing 同口径）。"""
-    assert dict(shared.TEMPLATE_CLASS_NAMES) == {"dev-lane": "DevLaneWorkflow"}
-    assert set(shared.TEMPLATE_DISPLAY_NAMES) == {"dev-lane"}
+    """夹具模板 env 门不污染默认面（sc_template_face_narrowing 同口径）。
+
+    t260924-04 改判（扩锁不拆锁）：默认面语义 = 内置＋当项目显式登记——空注册根
+    注入（无任何项目声明 workflow_modules）下合并视图恰为 {dev-lane}，即「零登记
+    零漂移」；视图按注入根计算，本机真实注册表有/无登记项目都不影响本断言。"""
+    import tempfile
+    empty_root = tempfile.mkdtemp(prefix="t260924-04-empty-registry-")
+    assert shared.project_template_names_merged(root=empty_root) == {
+        "dev-lane": "DevLaneWorkflow"}
+    assert dict(shared.TEMPLATE_CLASS_NAMES).get("dev-lane") == "DevLaneWorkflow"

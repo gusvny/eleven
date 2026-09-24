@@ -6611,6 +6611,12 @@ async def prepare_ui_evidence(args: UiEvidenceArgs) -> UiEvidenceResult:
 # invoke it from the workflow)
 AGENT_STAGE_ACTIVITIES = [_make_stage_activity(s) for s in AGENT_STAGE_IDS]
 
+# t260924-04（D7）：项目外置模板的段 activity 装配入口——worker 按「合并视图里外置
+# 模板的 agent 段清单」逐段调本工厂补注册（与 AGENT_STAGE_ACTIVITIES 同一实现、同一
+# 活动名约定=段 id）；不在这里静态并入（外置段清单 import 期才可知，且须与 workflow
+# 类合并同源，见 workflows_v2.PROJECT_TEMPLATE_STAGE_IDS）。
+make_stage_activity = _make_stage_activity
+
 # ---- Integration-test machinery (follow-on to t260829-07): the mechanical test step / unified settling / arbitration / acceptance walkthrough ----
 
 @activity.defn

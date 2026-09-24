@@ -938,7 +938,14 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
     tpl = str(args.get("template_id") or args.get("workflow") or "")
     cls = TEMPLATE_CLASSES.get(tpl)
     if cls is None:
-        return _err("未知模板 %r（可用：%s）" % (tpl, "、".join(sorted(TEMPLATE_CLASSES))))
+        # t260924-04：未知模板文案附项目外置模板拒收明细（fail-closed 点名：检查项＋
+        # 双方/缺什么）。明细段置于「可用：」段之前（收窄守卫 C 半按 rsplit('可用：')
+        # 判列表面）。已知 project 则只点名该项目的拒收。
+        from shared import project_template_rejection_note
+        _note = project_template_rejection_note(str(args.get("project") or ""))
+        _seg = ("；%s；" % _note) if _note else ""
+        return _err("未知模板 %r（%s可用：%s）"
+                    % (tpl, _seg, "、".join(sorted(TEMPLATE_CLASSES))))
     tid = str(args.get("ticket_id") or args.get("id") or "")
     if not tid:
         return _err("ticket-start 需要 ticket_id")
