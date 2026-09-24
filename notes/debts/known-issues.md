@@ -1641,6 +1641,11 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **修法方向**：console 与泳道 agent 调用 ticket/op 工具时**自动注入身份**；保留 `cross_project`
 > 记名越权旗（by+reason 必填）为唯一豁免通道；翻拒收前须有跨项目三态验收（声明匹配放行／未声明拒收／
 > 记名越权放行）。
+> **260925 实况（翻拒收落地即验证）**：t260925-08 合并后（`4aa1960`）策略**当场翻成拒收**——本会话
+> 直调 `ticket.py` 的写操作（未注入身份）立即被拒：「跨项目闸：调用方项目身份未声明
+> （SANDBAR_CALLER_PROJECT 未注入且无显式参数），引擎策略=拒收」；**显式带 `caller_project=sandbar`
+> 即放行**（同一条 rework 补参后 delivered）。→ 直调会话/运维脚本/裸入口调用方**必须显式声明身份**；
+> console 与泳道侧是否已自动注入，须在宿主醒后实测确认（本岗不碰 console，无法代测）。
 
 ## KI-120 并行叉内的路径闸 block 不可脱困（授权已放行、票停在「空原因的 blocked」，四种出路均无驱动）（260925 实案，integration 岗登记）
 > **实案** t260925-05（中央工人 supervisor 票）：仲裁段（`arbitrate ∥ acceptance_walkthrough` 并行叉）的 join-settle
