@@ -1727,6 +1727,14 @@ SCENARIOS = [
      "全量不变式注入面（t260925-04，灰盒 L3 决策点对抗输入，ro 秒级零 docker）：改动清单畸形（None/标量/裸字符串/dict/非串元素/空白元素/空清单）恒全量且不抛；diff_error 非空恒全量且优先于 localized 清单（计算面报错绝不放窄）；首轮恒全量不因新口径松动；定点面输出恒为红名清洗去重保序子集（__合成/空/非串剔除，红名畸形→全量）且合法清单时真解禁非恒全量换皮。intent 分工：t260925-04-file-blast-radius 守真仓三态组件链，本条只守同一决策点的畸形/边界注入不变式（对抗维度不同不互替）；developer L1 真值矩阵之外的用户级对抗复核。无 ENV 子用例；实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "python3 integration/t260925-04/sc_t260925_04_full_run_invariants.py", "ro"),
 
+    # ---- t260925-12: 闸段分相计时——回执可见性与老回执兼容（验收④＋residual 归账）----
+    ("t260925-12-executor-timings-receipt",
+     "闸段分相计时·执行器回执可见性（t260925-12，灰盒 L3 真执行器 CLI 黑盒子进程，ro 离线秒级零 docker）：验收④「分解在 receipt 上可见，超时不用日志考古」的执行器半边——A additive 基线：--only 定点跑离线在册条目，INTEG_SUMMARY 既有键集/ran==pass==1/exit 0 逐项不变（老消费方零感知，计量不扰动计量对象）；B 回执暴露 timings 分相块（非负数值、相位和 ≤ 子进程墙钟 +5% 误差）。intent 分工：t260924-09-fixed-rerun 守 --only 入口与逐条耗时行、t260913-03 守池排除旋钮、t260922-12 守台账定点复跑——均不守分相计时可见性；developer L1 守纯函数矩阵，本条守真 CLI 整链。实现落地前 B 红属预期（TDD 信号）；执行器缺席/定点条目自身 ENV_FAIL=exit 2",
+     "python3 integration/t260925-12/sc_t260925_12_executor_timings_receipt.py", "ro"),
+    ("t260925-12-stage-record-timings",
+     "闸段分相计时·回执拼装与老回执兼容（t260925-12，灰盒 L2 真引擎模块导入，ro 离线秒级零 docker）：验收④引擎侧半边＋review_plan 条件②的 residual 归账 owner——A 老回执零破坏：IntegrationRunResult/ConflictPrepResult 不因计时字段出现必填参（老回放/老 dict 重建点不抛）；B 拼装入口吃全套相位回执 → gate_phase_timings 相位在案且 unattributed_s=段墙钟−Σ相位；C 畸形不炸闸：缺 timings 老回执不假造 0 相位且 unattributed==全墙钟，负数/字符串/NaN/None/未知键不抛、垃圾不入归因。intent 分工：执行器回执面归 t260925-12-executor-timings-receipt，developer L1 守纯函数真值矩阵——本条守引擎模块兼容×归账×畸形三链，不互替。实现落地前 B/C 入口缺席=产品红点名缺契约（TDD 信号）；引擎模块不可导入=ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260925-12/sc_t260925_12_stage_record_timings.py", "ro"),
+
     # ---- t260925-13: KI-112 lane 残留审计与清理（audit/prune 契约面）----
     ("t260925-13-lane-audit-classify",
      "lane 审计分类面契约（t260925-13 KI-112，灰盒 L3，真实 tmp git 泳道仓+真 git 子进程+可编程桩票查询器，ro 离线秒级零 docker；锚 audit --json 公开回执逐条 verdict/reason）：A live 零触碰——dispatched 票+脏目录 verdict=keep（工单红线(2)）；B list 结构化 status=closed+干净+已合并→prunable（terminal-confirmed）；C terminal-absent——show 回执 ok:false 且 kind=not_found/kind=terminal→terminal-absent 非 unknown（v2 C1 三态主修：查不到≠真不可知）；D 守门拒收点名——terminal+未合并→blocked(unmerged)、terminal+未提交→blocked(uncommitted)（judge-not-guess）；E bare-stub 识别+嵌套 .git 拒拆点名（t260916-20 教训）；F unknown=真不可知才 unknown——查询器崩溃全 unknown→keep 零删除面、stdout 混警告行容错解析照常分类（v2 C2 实况）；G 通用性行为锚——--lane-dir 自定义布局照常分类、detached baseline worktree 只报告（工单(5)）；H audit 零副作用——worktree 注册面逐字节不变、.lane 外零触碰、登记在册目录缺失如实点名。intent 分工：developer L1（server/engine/tests/test_t260925_13_lane_audit.py）守分类纯函数真值表与 porcelain 注入矩阵，本条守真仓扫描→真桩查询器→公开回执整链与零副作用；剪除/幂等/台账归 t260925-13-lane-audit-prune-guard，真仓只读对账归 t260925-13-lane-audit-realfacet-readonly——三面不互替。git 缺席=ENV_FAIL exit 2；工具未落地=FAIL（TDD 预期红，arbitrate/merge 期必须绿）",
@@ -2559,6 +2567,7 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
             print("\n".join(block), flush=True)
 
     timings = []   # KI-060 prep 2: timing distribution (one row per scenario, with pool attribution)
+    _pre_t0 = time.time()   # t260925-12：套件前奏（清扫+台面卫生+批台预起）墙钟，闸段归因观测面
     _sweep_residue_stages()   # t260912-02 清理挂点①：套件前残台清扫（判拆点名；失败响亮不中止）
     _docker_hygiene()   # 起跑前台面卫生（t260910-14 arbitrate gen2/gen3：见函数注）
     # ---- t260921-06 批台预起（清扫后、场景前）：恰一批消费者轮=恰起 1 个批台 ----
@@ -2567,6 +2576,7 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
     if not batch_preboot(consumers):
         # 快速环境红（要求⑤不假绿）：本轮零场景开跑零注入，不烧整套
         return 2
+    _prelude_s = time.time() - _pre_t0   # t260925-12：前奏墙钟（含批台预起；失败路径不回写=观测面缺席不假值）
     _prev_sig = {}
     if _BATCH_STATE["project"]:
         for _s in (signal.SIGINT, signal.SIGTERM):
@@ -2628,6 +2638,9 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
               flush=True)
     print("SCENARIOS ran=%d pass=%d fail=%d env_fail=%d na=0 (%.0fs)"
           % (ran, passed, failed, env_failed, wall), flush=True)
+    # t260925-12：前奏耗时单独点名（观测面 stdout 行+报告 JSON+INTEG_SUMMARY timings
+    # 块，见下方汇总处）。归因口：套件 wall 含前奏；wall − prelude_s ≈ 纯场景跑面。
+    print("执行器前奏（清扫+台面卫生+批台预起）墙钟 %.1fs" % _prelude_s, flush=True)
 
     # ---- t260910-13：执行器汇总行（闸补 baseline_ref 并以规范行明细重算复核——
     # C6 分工：执行器产计数/耗时/并发/指纹，测试不写汇总；此行是执行器前置快检，
@@ -2669,6 +2682,13 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
             _summary["excluded_count"] = len(excluded_entries)
         if only_names:
             _summary["only_scenarios"] = list(only_names)
+        # t260925-12：timings 分相块（验收④执行器半边，additive 键——既有键集/
+        # 三态语义逐键不变，t260925-12-executor-timings-receipt 锁定）。前奏在
+        # wall 内（wall=t0 起含清扫/卫生/预起），场景跑面=wall−前奏；和 ≤ wall*1.05
+        # 恒真（B2 契约）。
+        _summary["timings"] = {
+            "prelude_s": round(_prelude_s, 1),
+            "scenarios_s": round(max(0.0, wall - _prelude_s), 1)}
         print("INTEG_SUMMARY " + json.dumps(_summary, ensure_ascii=False), flush=True)
     except Exception as _ex:   # 汇总行失败不改场景红绿（观测面），但大声留痕
         print("INTEG_SUMMARY_ERROR %r" % _ex, flush=True)
@@ -2695,7 +2715,8 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
                                 % _dt.datetime.now().strftime("%y%m%d-%H%M%S"))
         rp.parent.mkdir(parents=True, exist_ok=True)
         _report = {"ran": ran, "pass": passed, "fail": failed, "env_fail": env_failed,
-                   "wall_s": round(wall, 1), "generated": _dt.datetime.now().isoformat(),
+                   "wall_s": round(wall, 1), "prelude_s": round(_prelude_s, 1),
+                   "generated": _dt.datetime.now().isoformat(),
                    "conc_width": conc_width,
                    "conc_pools": sorted("%s:%s" % kv for kv in conc_pools.items()),
                    "timings": timings}

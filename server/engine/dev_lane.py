@@ -53,6 +53,7 @@ with workflow.unsafe.imports_passed_through():
     # t260915-05：模板拓扑导出面（纯数据零 IO；mock ④「引擎按模板导出 stage 图」，
     # 渲染器只认节点+边+kind——KI-019 线性近似泳道图的真拓扑承载）。
     import template_topology
+    import shared   # t260925-12：gate_phase_timings 纯函数（零 IO，沙箱安全）
     # t260921-04：developer 段验证纪律文案（宿主令 260921「单测可跑、集成禁跑」）
     # ——FLOW_BRIEF 的 clause 由其 prompt_clause() 从 FORBIDDEN_ENTRIES 渲染，
     # 文案与执法匹配器同源（声明=执法，两侧必须同批改）。
@@ -2130,6 +2131,14 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
             #      scenario runner integration/run_scenarios.py
             if phase == "run_integration_tests":
                 self._enter("run_integration_tests")
+                # t260925-12 闸段分相计时：段入口墙钟锚（workflow.now 确定性时钟）；
+                # 各活动 workflow 侧前后差=「段视角墙钟」（含调度/排队），活动回执
+                # 自报 wall_s=「执行面墙钟」——两口径之差就是排队/调度面的归因面。
+                gate_t0 = self._now_epoch()
+                gate_pre_s = 0.0      # 0-commit 前置检查（verify_review_gate）
+                gate_sync_s = 0.0     # 主同步（prepare_conflict_resolution ×各仓）
+                gate_cf_s = 0.0       # 改动清单收集（changed_files）
+                gate_integ_s = 0.0    # 场景执行活动（run_integration_tests）
                 # t260903-02 (2): single-point reset of the in-memory state (invariant:
                 # each mechanical test run produces a fresh arbitration and a fresh
                 # walkthrough) — covers every convergence path of the rework /
@@ -2163,6 +2172,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 # Pre-check, mechanical: the lane has been committed (guaranteed after
                 # the unified settle; tickets with no_file_changes are exempt)
                 if workflow.patched(REVIEW_GATE_PATCH_ID) and not self.meta.get("no_file_changes"):
+                    _pre_t = self._now_epoch()   # t260925-12
                     try:
                         graw = await workflow.execute_activity(
                             verify_review_gate,
@@ -2171,6 +2181,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                                            write_set=list(self.meta.get("write_set") or []),
                                            no_file_changes=True),
                             start_to_close_timeout=SHORT, retry_policy=RETRY)
+                        gate_pre_s += max(0, self._now_epoch() - _pre_t)
                         g = graw if isinstance(graw, ReviewGateResult) else ReviewGateResult(
                             git_error=str(graw.get("git_error") or ""),
                             lane_commits=int(graw.get("lane_commits") or -1),
@@ -2205,6 +2216,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     for _st in _sync_targets:
                         _wt_base = str(self.meta.get("worktree") or "")
                         _st_wt = (_wt_base + "/" + _st["rel"]) if _st["rel"] else _wt_base
+                        _sync_t = self._now_epoch()   # t260925-12
                         praw = await workflow.execute_activity(
                             prepare_conflict_resolution,
                             ConflictPrepArgs(ticket_id=self.ticket_id,
@@ -2212,6 +2224,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                                              branch=_st["branch"],
                                              base_ref="main"),
                             start_to_close_timeout=SHORT, retry_policy=RETRY)
+                        gate_sync_s += max(0, self._now_epoch() - _sync_t)
                         prep = praw if isinstance(praw, ConflictPrepResult) else ConflictPrepResult(
                             ok=bool(praw.get("ok")),
                             conflict_files=[str(x) for x in (praw.get("conflict_files") or [])],
@@ -2356,6 +2369,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     # 粗前缀）。两门都关=恒全量跑。
                     _cf_files: list = []
                     if workflow.patched(TARGETED_RERUN_FILE_RADIUS_PATCH_ID):
+                        _cf_t = self._now_epoch()   # t260925-12
                         _cf = await workflow.execute_activity(
                             changed_files,
                             ChangedFilesArgs(
@@ -2363,6 +2377,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                                 worktree=str(self.meta.get("worktree") or ""),
                                 branch=str(self.meta.get("branch") or "")),
                             start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
+                        gate_cf_s += max(0, self._now_epoch() - _cf_t)
                         _cf_files = list(getattr(_cf, "files", None) or [])
                         _cf_err = str(getattr(_cf, "error", "") or "")
                         self.meta["file_blast_radius_trace"] = {
@@ -2387,10 +2402,12 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     if run_only:
                         self._log("两层复跑：定点复跑面（%s）——仅快反馈，放行只认收口全量跑"
                                   % ",".join(run_only))
+                    _integ_t = self._now_epoch()   # t260925-12
                     rraw = await workflow.execute_activity(
                         run_integration_tests,
                         self._integ_run_args(run_only),
                         start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
+                    gate_integ_s += max(0, self._now_epoch() - _integ_t)
                     ir = rraw if isinstance(rraw, IntegrationRunResult) else IntegrationRunResult(
                         ran=int(rraw.get("ran") or 0), passed=int(rraw.get("passed") or 0),
                         failed=int(rraw.get("failed") or 0),
@@ -2409,6 +2426,45 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 # 命令败≠没跑，结果交仲裁/票面处置，此处只管「执行过」的账）
                 if not ir.error:
                     self._handover_debt_clear()
+                # ---- t260925-12 闸段分相计时上台面（验收④）：段墙钟=段入口→本点；
+                # 各相位=workflow 侧活动前后差（含调度/排队）；活动自报（回执 wall_s
+                # 族）=执行面。unattributed_s=段墙钟−Σ相位（review 条件②：归账口径
+                # 单写者=此处）——超时的第一嫌疑面，永远显式给数不藏。纯回执数字拼装，
+                # workflow 不取墙上钟（workflow.now 为 Temporal 确定性时钟，既有
+                # _log/_mark 同源先例），replay 零分歧。
+                _gate_phases = shared.gate_phase_timings(
+                    {"pre_check_s": gate_pre_s,
+                     "main_sync_s": gate_sync_s,
+                     "changed_files_s": gate_cf_s,
+                     "suite_s": gate_integ_s,
+                     "handover_s": getattr(ir, "handover_wall_s", 0.0) or 0.0},
+                    max(0, self._now_epoch() - gate_t0))
+                # 活动自报执行面（回执缺省 0.0=老回放/故障路径未计时，不冒充）——
+                # 观测键随拼装结果同置一个键下，不参与 unattributed 归账（0 值不假造）。
+                _gate_reported = {"integ_reported_wall_s":
+                                  float(getattr(ir, "wall_s", 0.0) or 0.0),
+                                  "integ_subprocess_wall_s":
+                                  float(getattr(ir, "subprocess_wall_s", 0.0) or 0.0)}
+                self.meta["gate_phase_timings"] = dict(_gate_phases, **_gate_reported)
+                _gate_phase_keys = ("pre_check_s", "main_sync_s",
+                                    "changed_files_s", "suite_s", "handover_s")
+                _gate_sum_s = sum(_gate_phases.get(k, 0.0)
+                                  for k in _gate_phase_keys)
+                ir.details.append({
+                    "name": "__gate_timings__", "cmd": "", "exit": 0,
+                    "output_tail": (
+                        "闸段分相（s）：段=%.0f｜前置=%.0f 主同步=%.0f 改动清单=%.0f "
+                        "跑闸=%.0f（执行面 %.0f，其中子进程 %.0f）｜Σ相位=%.0f "
+                        "unattributed=%.0f（段−Σ相位，排队/调度/段内非活动面）")
+                    % (_gate_phases["unattributed_s"] + _gate_sum_s,
+                       _gate_phases.get("pre_check_s", 0.0),
+                       _gate_phases.get("main_sync_s", 0.0),
+                       _gate_phases.get("changed_files_s", 0.0),
+                       _gate_phases.get("suite_s", 0.0),
+                       _gate_reported["integ_reported_wall_s"],
+                       _gate_reported["integ_subprocess_wall_s"],
+                       _gate_sum_s,
+                       _gate_phases["unattributed_s"])})
                 # t260904-12: the headline carries the environment-red dimension — a
                 # mixed suite can no longer tell a fake "all green" story.
                 # t260913-03: the exclusion face is named on the ticket face.

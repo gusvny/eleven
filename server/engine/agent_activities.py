@@ -4888,10 +4888,12 @@ async def prepare_conflict_resolution(args: ConflictPrepArgs) -> ConflictPrepRes
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
     target = args.base_ref or "main"
+    _t0 = time.monotonic()   # t260925-12：活动自报墙钟（执行面，供闸段分相计时）
     p = _git(["rev-parse", "--verify", target], wt)
     if p.returncode != 0:
         return ConflictPrepResult(ok=False, error="合并目标 ref %r 不存在: %s"
-                                  % (target, (p.stderr or "").strip()[-200:]))
+                                  % (target, (p.stderr or "").strip()[-200:]),
+                                  wall_s=time.monotonic() - _t0)
     target_sha = (p.stdout or "").strip().splitlines()[0] if (p.stdout or "").strip() else ""
     # t260922-18 快路径：目标 ref 已是 HEAD 祖先 = 已追平，零动作幂等返回
     p = _git(["merge-base", "--is-ancestor", target, "HEAD"], wt)
@@ -4901,7 +4903,8 @@ async def prepare_conflict_resolution(args: ConflictPrepArgs) -> ConflictPrepRes
         activity.logger.info("[%s] merge %s 已追平（is-ancestor 快路径，零动作）",
                              args.ticket_id, target)
         return ConflictPrepResult(ok=True, already_clean=True, up_to_date=True,
-                                  target_sha=target_sha, lane_head=lane_head)
+                                  target_sha=target_sha, lane_head=lane_head,
+                                  wall_s=time.monotonic() - _t0)
     p = _git(["merge", "--no-edit", target], wt, timeout=120)
     out = ((p.stdout or "") + "\n" + (p.stderr or "")).strip()
     head = _git(["rev-parse", "--short", "HEAD"], wt)
@@ -4911,19 +4914,22 @@ async def prepare_conflict_resolution(args: ConflictPrepArgs) -> ConflictPrepRes
                              args.ticket_id, target)
         return ConflictPrepResult(ok=True, already_clean=True,
                                   target_sha=target_sha, lane_head=lane_head,
-                                  merge_output=out[:1500])
+                                  merge_output=out[:1500],
+                                  wall_s=time.monotonic() - _t0)
     files = _unmerged_files(wt)
     if not files:
         # rc != 0 with no unmerged files = the merge itself failed (not a conflict),
         # e.g. git refused because the workspace was dirty
         return ConflictPrepResult(ok=False, error="git merge %s 失败（非冲突）: %s"
                                   % (target, out[-400:]),
-                                  target_sha=target_sha, lane_head=lane_head)
+                                  target_sha=target_sha, lane_head=lane_head,
+                                  wall_s=time.monotonic() - _t0)
     activity.logger.info("[%s] 冲突消解 prep：merge %s 留现场，冲突文件 %d 个：%s",
                          args.ticket_id, target, len(files), "、".join(files[:10]))
     return ConflictPrepResult(ok=True, conflict_files=files,
                               target_sha=target_sha, lane_head=lane_head,
-                              merge_output=out[:1500])
+                              merge_output=out[:1500],
+                              wall_s=time.monotonic() - _t0)
 
 
 @activity.defn
@@ -6085,6 +6091,7 @@ async def verify_review_gate(args: ReviewGateArgs) -> ReviewGateResult:
     This activity only returns data and makes no business judgement (the gate logic
     lives in the workflow, keeping the deterministic orchestration testable)."""
     res = ReviewGateResult()
+    _t0 = time.monotonic()   # t260925-12：活动自报墙钟（执行面，供闸段分相计时）
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
@@ -6108,12 +6115,14 @@ async def verify_review_gate(args: ReviewGateArgs) -> ReviewGateResult:
         res.git_error = "泳道 worktree 不存在：%s" % wt
         res.passed = False
         res.reasons.append(res.git_error)
+        res.wall_s = time.monotonic() - _t0
         return res
     rc, out, err = await _run_git("rev-list", "--count", "HEAD")
     if rc != 0:
         res.git_error = "git rev-list 失败（rc=%s）：%s" % (rc, (err or out)[-200:])
         res.passed = False
         res.reasons.append(res.git_error)
+        res.wall_s = time.monotonic() - _t0
         return res
     try:
         res.lane_commits = int(out)
@@ -6121,6 +6130,7 @@ async def verify_review_gate(args: ReviewGateArgs) -> ReviewGateResult:
         res.git_error = "git rev-list 输出非整数：%r" % out[:80]
         res.passed = False
         res.reasons.append(res.git_error)
+        res.wall_s = time.monotonic() - _t0
         return res
 
     shots_dir = ui_evidence_dir(wt)
@@ -6136,6 +6146,7 @@ async def verify_review_gate(args: ReviewGateArgs) -> ReviewGateResult:
         except OSError as e:
             res.shots_path_error = "%s 不可读：%s: %s" % (shots_dir, type(e).__name__, e)
             res.png_count = -1
+    res.wall_s = time.monotonic() - _t0
     return res
 
 
@@ -6773,29 +6784,42 @@ async def run_handover_legs(handover_runs, cwd: Path) -> Dict[str, Any]:
 
     260920（宿主令「A」）：单条起飞异常（命令进程起不来/环境异常等）就地记名**失败
     分支**，绝不外抛——实案 t260920-01：一条命令的 FileNotFoundError 把整个集测活动
-    打死、票面报成「活动故障」，一条命令的毛病不该毁掉整段证据面。"""
-    ran = passed = failed = 0
-    details: List[Dict[str, Any]] = []
-    for leg in (handover_runs or []):
+    打死、票面报成「活动故障」，一条命令的毛病不该毁掉整段证据面。
+
+    t260925-12 闸段提速②（有界并发）：移交命令彼此独立（各自子进程+各自超时回收），
+    串行逐条 await 改为有界并发（SANDBAR_HANDOVER_CONC 缺省 4；置 1=旧行为逐字），
+    段墙钟从 Σ单条 变 ≈max 单条——闸段开销归因（同票 S0）显示移交面是可减项之一时
+    的安全落点。计数/details 顺序/单条失败不毁整段/全终态回收（wait_for+killpg）四面
+    逐字不变：结果按输入序回填，不因并发乱序。"""
+    conc = _handover_conc()
+    sem = asyncio.Semaphore(max(1, conc))   # 宽度 1=旧行为逐字（串行化）
+
+    async def _one(i: int, leg: Any) -> "tuple[int, Dict[str, Any]]":
         if not isinstance(leg, dict):
-            details.append({"name": "handover:<畸形分支>", "cmd": "", "exit": -1,
-                            "output_tail": "移交命令非对象（记名不执行）"})
-            ran += 1
-            failed += 1
-            continue
+            # 前缀由段尾统一补（details 单点加 handover: 头，并发/串行同形）
+            return i, {"name": "<畸形分支>", "cmd": "", "exit": -1,
+                       "output_tail": "移交命令非对象（记名不执行）"}
         try:
-            r = await run_handover_leg(leg, cwd)
-        except Exception as e:                     # noqa: BLE001 —— 单条不毁整段（见 docstring）
+            async with sem:
+                r = await run_handover_leg(leg, cwd)
+        except Exception as e:                 # noqa: BLE001 —— 单条不毁整段（见 docstring）
             def _safe(v: Any) -> str:
                 """畸形成员读不动也不许再抛（例外分支自己再炸=白兜）。"""
                 try:
                     return str(v or "")
-                except Exception:                  # noqa: BLE001
+                except Exception:              # noqa: BLE001
                     return "<不可读>"
             r = {"name": _safe(leg.get("name")), "cmd": _safe(leg.get("cmd")),
                  "exit": None,
                  "output_tail": "移交命令起飞异常（记名失败，不影响其余命令）：%s: %s"
                                 % (type(e).__name__, e)}
+        return i, r
+
+    _rs = await asyncio.gather(*[_one(i, leg)
+                                 for i, leg in enumerate(handover_runs or [])])
+    ran = passed = failed = 0
+    details: List[Dict[str, Any]] = []
+    for _i, r in sorted(_rs, key=lambda x: x[0]):   # 输入序回填（并发不乱序）
         ran += 1
         if r["exit"] == 0:
             passed += 1
@@ -6805,6 +6829,17 @@ async def run_handover_legs(handover_runs, cwd: Path) -> Dict[str, Any]:
                         "exit": r["exit"] if r["exit"] is not None else -1,
                         "output_tail": r["output_tail"]})
     return {"ran": ran, "passed": passed, "failed": failed, "details": details}
+
+
+def _handover_conc() -> int:
+    """移交命令并发宽度（t260925-12）：SANDBAR_HANDOVER_CONC，缺省 4；畸形/非正数
+    =回落 4（fail-safe 朝缺省，不朝 0/负——0 或负会让 gather 永等）；显式 1=旧行为
+    逐字（串行）。"""
+    try:
+        v = int(os.environ.get("SANDBAR_HANDOVER_CONC") or 4)
+    except (TypeError, ValueError):
+        return 4
+    return v if v >= 1 else 4
 
 
 def integ_subprocess_env(extra: Dict[str, str] = None) -> Dict[str, str]:
@@ -6902,6 +6937,7 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     # verify_lane 不再独立读 env；老载荷缺键回落同值缺省（replay/老回放零漂移）。
     _payload = shared.integ_verify_payload(wt, write_set, apply_skip_pools)
     _payload["integ_timeout_sec"] = BATCH_TIMEOUT_SEC
+    _act_t0 = time.monotonic()   # t260925-12：活动整体墙钟起点（回执自报）
     p = await asyncio.create_subprocess_exec(
         "python3", admin, "call", "verify_lane",
         # t260913-03：载荷面薄壳只下单——是否按泳道声明排除池由调用方（每票段）显式
@@ -6912,6 +6948,7 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
         # t260924-05 KI-116：会话隔离是 killpg 回收的前提——不起新会话，子进程与
         # worker 同进程组，killpg 会杀进调用方自己（run_handover_leg 先例同款三件套）。
         start_new_session=True)
+    _sub_t0 = time.monotonic()   # t260925-12：子进程链墙钟（admin→verify_lane→执行器）
     try:
         p_out_b, p_err_b = await asyncio.wait_for(
             p.communicate(), timeout=INTEG_GUARD_SEC)
@@ -6924,17 +6961,23 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
         except (ProcessLookupError, PermissionError):
             p.kill()
         await p.wait()
-        return IntegrationRunResult(error="场景执行器整体超时（>%ds）" % BATCH_TIMEOUT_SEC)
+        return IntegrationRunResult(error="场景执行器整体超时（>%ds）" % BATCH_TIMEOUT_SEC,
+                                    wall_s=time.monotonic() - _act_t0,
+                                    subprocess_wall_s=time.monotonic() - _sub_t0)
     p_stdout = p_out_b.decode("utf-8", "replace")
     p_stderr = p_err_b.decode("utf-8", "replace")
     try:
         payload = json.loads(p_stdout)
     except json.JSONDecodeError:
         return IntegrationRunResult(error="verify_lane integ 无有效输出（exit=%s）：%s"
-                                    % (p.returncode, (p_stdout + p_stderr)[-2000:]))
+                                    % (p.returncode, (p_stdout + p_stderr)[-2000:]),
+                                    wall_s=time.monotonic() - _act_t0,
+                                    subprocess_wall_s=time.monotonic() - _sub_t0)
     _err = _integ_receipt_err(payload)
     if _err:
-        return IntegrationRunResult(error=_err)
+        return IntegrationRunResult(error=_err,
+                                    wall_s=time.monotonic() - _act_t0,
+                                    subprocess_wall_s=time.monotonic() - _sub_t0)
     res = payload.get("result") or {}
     out = IntegrationRunResult()
     out.ran = int(res.get("ran") or 0)
@@ -7023,10 +7066,14 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     # 处置语义由仲裁契约句承接（dev_lane FLOW_BRIEF['arbitrate']），不在本层
     # 改判任何红绿。
     out.handover_ran = out.handover_passed = out.handover_failed = 0
+    _hv_t0 = time.monotonic()   # t260925-12：移交命令段墙钟
     _hv = await run_handover_legs(handover_runs, wt)
+    out.handover_wall_s = time.monotonic() - _hv_t0
     out.handover_ran = _hv["ran"]
     out.handover_passed = _hv["passed"]
     out.handover_failed = _hv["failed"]
+    out.wall_s = time.monotonic() - _act_t0
+    out.subprocess_wall_s = time.monotonic() - _sub_t0
     out.details.extend(_hv["details"])
     if out.handover_ran:
         activity.logger.info("[%s] 移交命令：ran=%s pass=%s fail=%s",
@@ -7059,19 +7106,23 @@ async def changed_files(args: shared.ChangedFilesArgs) -> shared.ChangedFilesRes
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
+    _t0 = time.monotonic()   # t260925-12：活动自报墙钟
     if not args.branch:
         return shared.ChangedFilesResult(
-            files=[], error="branch 缺失，改动清单不可得，fail-closed 恒全跑")
+            files=[], error="branch 缺失，改动清单不可得，fail-closed 恒全跑",
+            wall_s=time.monotonic() - _t0)
     base, base_err = _merge_base_ref(args.branch, wt)
     if not base:
         return shared.ChangedFilesResult(
-            files=[], error="merge-base 解析失败：%s" % (base_err or "空 ref")[-300:])
+            files=[], error="merge-base 解析失败：%s" % (base_err or "空 ref")[-300:],
+                                      wall_s=time.monotonic() - _t0)
     p = _git(["diff", "--name-only", "%s...%s" % (base, args.branch)], wt)
     if p.returncode != 0:
         return shared.ChangedFilesResult(
             files=[], error="git diff %s...%s 失败 rc=%s：%s" % (
                 base, args.branch, p.returncode,
-                ((p.stderr or p.stdout or "").strip())[-300:]))
+                ((p.stderr or p.stdout or "").strip())[-300:]),
+            wall_s=time.monotonic() - _t0)
     diff_files = [ln.strip() for ln in (p.stdout or "").splitlines() if ln.strip()]
     # -uall（t260925-04 rework 缺陷②根修）：porcelain 缺省把未跟踪目录折叠成
     # `dir/` 一条，折叠条目命中不了 integration/tests/ 等文件级前缀表项 → 共享面
@@ -7081,14 +7132,16 @@ async def changed_files(args: shared.ChangedFilesArgs) -> shared.ChangedFilesRes
     if st.returncode != 0:
         return shared.ChangedFilesResult(
             files=[], error="git status 失败 rc=%s：%s" % (
-                st.returncode, ((st.stderr or st.stdout or "").strip())[-300:]))
+                st.returncode, ((st.stderr or st.stdout or "").strip())[-300:]),
+            wall_s=time.monotonic() - _t0)
     dirty = _dirty_files_from_status_z(st.stdout or "")
     out: List[str] = []
     for f in list(diff_files) + list(dirty):
         n = (f or "").strip()
         if n and n not in out:
             out.append(n)
-    return shared.ChangedFilesResult(files=out, error="")
+    return shared.ChangedFilesResult(files=out, error="",
+                                     wall_s=time.monotonic() - _t0)
 
 
 @activity.defn

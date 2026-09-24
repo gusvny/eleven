@@ -335,6 +335,42 @@ class ChangedFilesResult:
 
     files: List[str] = field(default_factory=list)
     error: str = ""
+    # t260925-12 闸段分相计时（additive）：活动自报墙钟秒（执行面，不含 Temporal
+    # 调度等待）。0.0=未计时（老回放/旧 dict 回退重建点缺键=缺省值，零行为变化）。
+    wall_s: float = 0.0
+
+
+def gate_phase_timings(phases, wall_s):
+    """t260925-12 闸段分相计时拼装（纯函数，单写者=dev_lane 段尾调用；契约场景
+    integration/t260925-12/sc_t260925_12_stage_record_timings.py 锁定签名
+    `(phases: dict, wall_s)` 与 residual 归账口径）。
+
+    口径：wall_s=段墙钟（workflow.now 段入口→回执点）；phases=各相位 workflow 侧
+    活动前后差（含 Temporal 调度/排队）。unattributed_s=段墙钟−Σ有效相位——排队/
+    调度/段内非活动面，超时归因的第一嫌疑，永远显式给数不藏。
+
+    畸形输入纪律（消费外部数值面，锁于场景 C1/C2/C3）：
+    - 值缺失/非数值/负数/NaN/0 → 该相位**不入表**（不假造 0 相位、垃圾不入归因）；
+    - 相位键白名单（pre_check_s/main_sync_s/changed_files_s/suite_s/handover_s）——
+      未知键（ghost 相位）绝不进 Σ；键名 unattributed_s 的输入忽略（保留字）；
+    - unattributed_s 可为负（Σ相位>段墙钟=亚秒抖动信号，如实给负不 clamp）。"""
+    def _num(v):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        return f if f == f and f > 0.0 else None
+    wall = _num(wall_s)
+    out = {}
+    for k, v in dict(phases or {}).items():
+        if k not in ("pre_check_s", "main_sync_s", "changed_files_s",
+                     "suite_s", "handover_s"):
+            continue
+        f = _num(v)
+        if f is not None:
+            out[k] = f
+    out["unattributed_s"] = (wall if wall is not None else 0.0) - sum(out.values())
+    return out
 
 
 @dataclass
@@ -370,6 +406,13 @@ class IntegrationRunResult:
     handover_ran: int = 0
     handover_passed: int = 0
     handover_failed: int = 0
+    # t260925-12 闸段分相计时（additive，全 0.0=老回放零漂移）：活动自报三段墙钟秒
+    # ——wall_s=活动整体执行面；subprocess_wall_s=场景执行器子进程（admin call
+    # verify_lane integ 全链）；handover_wall_s=移交命令段。差值=回执组装/解析等
+    # 活动内开销；与 workflow 侧段墙钟的差=调度/排队面（gate_phase_timings 呈现）。
+    wall_s: float = 0.0
+    subprocess_wall_s: float = 0.0
+    handover_wall_s: float = 0.0
 
 
 @dataclass
@@ -3523,6 +3566,8 @@ class ReviewGateResult:
     png_count: int = -1
     passed: bool = True
     reasons: List[str] = field(default_factory=list)
+    # t260925-12 闸段分相计时（additive，口径同 ChangedFilesResult.wall_s）。
+    wall_s: float = 0.0
 
 
 def review_gate_verdict(git_error: str, lane_commits: int, shots_path_error: str,
@@ -3747,6 +3792,8 @@ class ConflictPrepResult:
     target_sha: str = ""                      # 本次合并目标 ref 的完整 sha（机械证据：main@sha 进票面）
     lane_head: str = ""                       # 动作后泳道 HEAD 短 sha（快路径/干净合并/冲突现场语义见活动 docstring）
     up_to_date: bool = False                  # True = 目标 ref 已是 HEAD 祖先（is-ancestor 快路径零动作返回，幂等）
+    # t260925-12 闸段分相计时（additive，口径同 ChangedFilesResult.wall_s）。
+    wall_s: float = 0.0
 
 
 @dataclass
