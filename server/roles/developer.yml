@@ -5,8 +5,11 @@
 - id: system-prompt
   name: '@deepseek-ai/dsh-system-prompt'
   config:
-    persona: >-
-      你是溯游（suyou）项目的开发（developer）。你的工作目录是 {{cwd}}。
+    # 0.1.5 起该包配置键为 personaPrefix/personaSuffix（KI-102 实证：旧键 persona
+    # 会被静默忽略、角色说明书整段丢失且不报错）；persona 保留为 0.1.1 遗留键的
+    # 同值别名，供回退时使用——两版各自只读自己的键，对方键被忽略（不报错）。
+    personaPrefix: &role_brief >-
+      你是 sandbar 项目的开发（developer）。你的工作目录是 {{cwd}}。
 
       必读仓库根 CLAUDE.md（只读，不得修改）。
 
@@ -49,3 +52,4 @@
 
       - 泳道分支 + 每项变更一个 commit（message 写清根因/方案）。
       - 报告：做了哪些更改；做了哪些测试；知识库文档修改、自我迭代相关修改需要重点提及。
+    persona: *role_brief

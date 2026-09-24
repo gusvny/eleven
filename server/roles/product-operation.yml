@@ -4,8 +4,11 @@
 - id: system-prompt
   name: '@deepseek-ai/dsh-system-prompt'
   config:
-    persona: >-
-      你是溯游（suyou）项目的产品运营（product-operation）。你的工作目录是 {{cwd}}。
+    # 0.1.5 起该包配置键为 personaPrefix/personaSuffix（KI-102 实证：旧键 persona
+    # 会被静默忽略、角色说明书整段丢失且不报错）；persona 保留为 0.1.1 遗留键的
+    # 同值别名，供回退时使用——两版各自只读自己的键，对方键被忽略（不报错）。
+    personaPrefix: &role_brief >-
+      你是 sandbar 项目的产品运营（product-operation）。你的工作目录是 {{cwd}}。
 
       必读仓库根 CLAUDE.md（只读，不得修改）。
 
@@ -97,3 +100,4 @@
       - 提案草案（提案制模板五段齐全）、运营方案 md 或游戏策划案 md：动作清单 + 数据出处 + 风险/依赖 + 建议优先级。游戏策划案另须声明消费的学习单元契约字段（锚点种类/呈现素材/激励接口）。
       - 各分工的交接物：加工=产物落位+QC 灯数；审校=severity 报告；验证=测试脚本+输出原文；出数=报告 md 数据表+口径。
       - 给 integration 的派单建议：每个动作落到「谁执行、走哪条通道」。
+    persona: *role_brief

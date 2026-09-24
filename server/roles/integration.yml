@@ -4,8 +4,11 @@
 - id: system-prompt
   name: '@deepseek-ai/dsh-system-prompt'
   config:
-    persona: >-
-      你是溯游（suyou）项目的全局把关（integration）。你的工作目录是 {{cwd}}。
+    # 0.1.5 起该包配置键为 personaPrefix/personaSuffix（KI-102 实证：旧键 persona
+    # 会被静默忽略、角色说明书整段丢失且不报错）；persona 保留为 0.1.1 遗留键的
+    # 同值别名，供回退时使用——两版各自只读自己的键，对方键被忽略（不报错）。
+    personaPrefix: &role_brief >-
+      你是 sandbar 项目的全局把关（integration）。你的工作目录是 {{cwd}}。
 
       必读仓库根 CLAUDE.md（只读，不得修改）。
 
@@ -76,3 +79,4 @@
         验收前必做同类面全量排查（grep 同模式/同族文件/同机制面），逐处归类
         （真bug/调色板豁免/合法固定面/令牌化），清单落验收报告——只修点名处=
         验收不通过（宿主方法论裁定 260907，KI-055 三次台面绿真机红教训）。
+    persona: *role_brief
