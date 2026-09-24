@@ -77,6 +77,13 @@ import tempfile
 import time
 
 SCENARIOS = [
+    # t260924-05 KI-116 回归棒（必做③）：巡检等价路 vs dev-lane 路同一 integ 道的
+    # 场景信号量级一致（ran>0、差 ≤1 且 ≤10%）；integ_timeout_sec 载荷键三态与
+    # 零场景信号显式红（被拆除的静默逃逸口不复发）。夹具临时目录零 docker/console。
+    ("t260924-05-inspection-suite-ran-parity",
+     "KI-116 巡检套件零信号回归棒：最小 verify.yaml 夹具进程内直调 verify_lane._integ，断言巡检等价载荷与 dev-lane 载荷同绿同量级（ran 差≤1 且≤10%）、integ_timeout_sec 载荷键（超时显式红/畸形 fail-closed/缺键回落同源缺省=3000 与引擎内层 BATCH 同值）、零场景信号显式红不冒充绿",
+     "python3 integration/t260924-05/sc_t260924_05_inspection_suite_ran_parity.py",
+     "ro", "serial"),
     # Delisted (t260904-12 section 7.3: scenarios that can never actually reach
     # the gate (red-line forbidden zone / destructive) stay out of the gate
     # registry): ticket-lifecycle always trips the nested guardrail inside a
@@ -1650,6 +1657,11 @@ SCENARIOS = [
      "基线树依赖软链四态行为面（t260922-12 验收⑤，灰盒 L3，真缝+真 worktree，旋钮显式置位不依赖缺省——缺省值由取证 A'/B' 实录裁定场景不钉）：SANDBAR_GATE_BASELINE_DEPS=1 时 src 在场→软链建成（桩在基线相实测 app/node_modules islink）、dst 已在（仓内已跟踪真目录）→绝不覆盖（.venv 仍为真目录）、src 缺席→跳过不致命（ui-check playwright-core 与 temporal 两路径 absent）；=0 时一条不建（旋钮真的关得掉，若实现未接旋钮此轮红点名）；两轮基线跑均正常收口、台账写账不受软链影响、worktree 零残留。软链只读语义由「src 指向主仓共享目录」的夹具同构构造保证。与 developer L1（软链四态白盒单测）intent 不同层：彼测建链函数本身，本条锁基线执行相里依赖真实可见——「回退路线必须真能跑」的物理前提。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；git 缺席=ENV_FAIL exit 2",
      "python3 integration/t260922-12/sc_gate_baseline_deps_links.py", "ro"),
 
+    # ---- t260924-05: KI-116 巡检套件回执信号面（零信号永不静默绿 + 量级一致棒） ----
+    ("t260924-05-ki116-inspection-receipt-signal",
+     "KI-116 巡检套件回执信号面（t260924-05，灰盒 L3 真缝夹具，秒级 ro：生产入口 server/admin.py call verify_lane lane=integ × 临时 git 仓 verify.yaml integration.cmd→桩执行器 × SANDBAR_SCENARIO_ONLY 定点，零 docker 零端口零真仓接触，夹具自足不递归真注册表）：A 信号面——正常套件回执 ran>0、green=true、ran==pass+fail==场景行数且行名与名单一致（巡检回执必须产出真实场景信号且计数不撒谎——病象「连续 ≥6 期 ran=0」的正面锁）；B 零信号显式红——桩零选中（SANDBAR_SCENARIO_ONLY 指向缺席名，输出 JSON 行+exit 0，恰为现状「ran==0 且有 { 开头行且 exit==0→静默绿」逃逸口的触发形态）→回执必须 green=false 且 err 非空点名，绝不得 ok+绿+ran=0（病象②「260918 期 334.5s 非超时 ran=0 绿」的事故回归锁）；C 量级一致棒——同套件经生产入口重复下单两次 ran 恒等（差 0，满足「≤1 且 ≤10% 取严」双容差，必做③棒「与 dev-lane 同套件量级一致」的集成面）；D 畸形 timeout 载荷 fail-closed——timeout=非数字进载荷→显式红不静默放绿（方案 v2 步2 载荷加键的形状变更面；老形状缺键回落=本条 A/C 本就在用老形状载荷，天然覆盖 replay 安全）。intent 分工：developer 单测锁不等式组（BATCH+300<INTEG_RUN_TO<SUITE_TO 等）/env 组装纯函数/畸形回执函数级矩阵——本条不重复结构锁，只锁生产入口旅程的回执契约与事故形态；t260922-12 场景族守门侧台账采信边界（基线相/软链/欠账）——本条不触台账语义；t260913-03 锁池排除声明面——本条固定缺省 apply_skip_pools 不涉排除。实现落地前 B/D 红属预期（TDD 信号：逃逸口与 fail-closed 尚未落地），arbitrate/merge 期必须全绿；git 缺失=ENV_FAIL exit 2",
+     "python3 integration/t260924-05/sc_ki116_inspection_receipt_signal.py", "ro"),
+
 ]
 
 CMD_TIMEOUT = 900
@@ -1850,6 +1862,10 @@ def _run_entry(entry):
     # 会触发带递归守卫的场景（capture 族/auto-rework-trace）的「嵌套于 lane 步」
     # ENV_FAIL——那是运行姿势误伤，不是被测环境缺席。顶层跑场景=被授权的顶层，
     # 守卫针对的递归自举不适用。
+    # t260924-05 KI-116 注记：引擎下单层（agent_activities.integ_subprocess_env）
+    # 已按 shared 封闭元组**全剥四键**（TASK_QUEUE/TASK_QUEUES/WATCH_WORKFLOW/
+    # WATCH_INTERVAL_SEC）+ 桩旋钮；本层只剥两键、宽度**小于**下单层，系既成事实，
+    # 勿误以为两层面同宽，也不要随手扩本层半径（防双层过滤面漂移出新撒谎注释）。
     child_env = {k: v for k, v in os.environ.items()
                  if k not in ("SANDBAR_TASK_QUEUE", "SANDBAR_WATCH_WORKFLOW")}
     # 批台注入（t260921-06）：恰批消费者条目拿 SANDBAR_STAGE_BATCH=批台工程名——

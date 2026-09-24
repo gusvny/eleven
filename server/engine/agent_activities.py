@@ -6320,8 +6320,20 @@ async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
 # 且 RETRY(maximum_attempts=3) 会把每次硬杀再重试 3 轮（每轮 60min 白烧）。
 # 原默认 5400s（=95min 守卫）恒晚于 60min 外层 ⇒ 实测（260913）连续两轮 0 跑无归因。
 # 3000s（+300=55min）给正常 ~25min 套件 2× 余量，超限则走结构化回报。运维可用
-# SANDBAR_INTEG_BATCH_TIMEOUT_SEC 覆盖，但覆盖时须同步抬高 dev_lane.INTEG_RUN_TO。
-BATCH_TIMEOUT_SEC = int(os.environ.get("SANDBAR_INTEG_BATCH_TIMEOUT_SEC") or 3000)
+# SANDBAR_INTEG_BATCH_TIMEOUT_SEC 覆盖（t260924-05 KI-116 起：覆盖经下方的
+# integ_batch_timeout_sec() 单点生效，dev_lane.INTEG_RUN_TO / inspection_flow.SUITE_TO
+# 均自 INTEG_GUARD_SEC **派生**——env 一抬三处同抬，「成对锁」从人守纪律变算式事实）。
+def integ_batch_timeout_sec():
+    """内层批次超时唯一读取点（t260924-05 KI-116 单源化）：env 缺省 3000。
+    verify_lane 的 integ 道整体超时由调用方载荷显式传入（缺键回落同值缺省），
+    不再各自读 env——旧双读（本处 or 3000 / verify_lane or 5400）即本次错配病根。"""
+    return int(os.environ.get("SANDBAR_INTEG_BATCH_TIMEOUT_SEC") or 3000)
+
+
+BATCH_TIMEOUT_SEC = integ_batch_timeout_sec()
+# 内层守卫（wait_for 截止）= BATCH + 300，ki116 起是 dev_lane/inspection_flow 外层
+# 预算的派生源（严格小于它们），单一算出点在此。
+INTEG_GUARD_SEC = BATCH_TIMEOUT_SEC + 300
 
 
 # t260917-08：移交命令单条超时=场景单命令同款容量参数（INTEG_CMD_TIMEOUT_SEC，缺省
@@ -6353,8 +6365,10 @@ async def run_handover_leg(leg: Dict[str, str], cwd: Path,
     if not cmd_s.strip():
         return {"name": name, "cmd": cmd_s, "exit": None,
                 "output_tail": "移交命令为空（不执行）"}
-    env = {k: v for k, v in os.environ.items()
-           if k not in TEST_STUB_ENV_KNOBS and k not in WORKER_ROUTING_ENV_KNOBS}
+    # t260924-05 KI-116：剥除判据复用 integ_subprocess_env 单点（同元组同宽、零
+    # extra=逐字旧行为）——剥除字面判据全文件恰两处由 test_t260917_08 的 i2 单源锁
+    # 看管（扩锁不拆锁：本处从自持判据改为复用，语义零变化）。
+    env = integ_subprocess_env()
     p = await asyncio.create_subprocess_exec(
         "/bin/sh", "-c", cmd_s, cwd=str(cwd), stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT, env=env, start_new_session=True)
@@ -6421,6 +6435,43 @@ async def run_handover_legs(handover_runs, cwd: Path) -> Dict[str, Any]:
     return {"ran": ran, "passed": passed, "failed": failed, "details": details}
 
 
+def integ_subprocess_env(extra: Dict[str, str] = None) -> Dict[str, str]:
+    """集测/巡检子进程 env 组装单点（t260924-05 KI-116）：黑名单剥除
+    TEST_STUB_ENV_KNOBS + WORKER_ROUTING_ENV_KNOBS 两个封闭元组（裁定单源=shared.py，
+    与 run_handover_leg 同款、同宽），再并入 extra 显式注入面（SANDBAR_INTEG_LEDGER_
+    SOURCE / SANDBAR_STAGE_SWEEP_ORPHANS* / SANDBAR_SCENARIO_ONLY 等都在 extra，
+    剥除绝不吞它们；SANDBAR_INTEG_BATCH_TIMEOUT_SEC 不在剥除集、运维覆盖须达子进程）。
+    背景：worker 常驻进程被 ticket_worker 注入 SANDBAR_TASK_QUEUE(S)/
+    SANDBAR_WATCH_WORKFLOW，老代码原样继承进子进程链——run_scenarios.py:1850 的
+    runner 层双键剥除（t260910-08）是同一先例，本函数把它上提到下单层；两层剥除面
+    **不同宽**（runner 只剥两键、不剥 QUEUES/WATCH_INTERVAL_SEC），系既成事实勿混同，
+    本票不扩 runner 半径（防双层过滤面漂移出新撒谎注释）。"""
+    env = {k: v for k, v in os.environ.items()
+           if k not in TEST_STUB_ENV_KNOBS and k not in WORKER_ROUTING_ENV_KNOBS}
+    for k, v in (extra or {}).items():
+        env[str(k)] = str(v)
+    return env
+
+
+def _integ_receipt_err(payload: Any) -> Optional[str]:
+    """_run_scenarios 的 verify_lane 回执形状判定纯函数（t260924-05 KI-116 抽取）：
+    ok=False / 顶层非映射 / 「ok=true 但 result 缺失或非映射」/ result.err 非空
+    → 显式错误串；合法 → None。缺 result 不得落成全零回执冒充绿（零信号病象之一）。"""
+    if not isinstance(payload, dict):
+        return "verify_lane integ 回执非映射（%s）——畸形回执显式红" % type(payload).__name__
+    if not payload.get("ok"):
+        res = payload.get("result")
+        err = res.get("err") if isinstance(res, dict) else None
+        return str(err or "未知错误")
+    res = payload.get("result")
+    if not isinstance(res, dict):
+        return ("verify_lane integ 回执缺 result 对象（ok=true）——畸形回执显式红，"
+                "不落全零回执冒充绿")
+    if res.get("err"):
+        return str(res.get("err"))
+    return None
+
+
 async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
                          apply_skip_pools: bool = False,
                          handover_runs=None,
@@ -6454,7 +6505,6 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     # notes/diag-query-starvation.md).
     # Fully async: create_subprocess + wait_for; on timeout, kill first, then report.
     # t260922-12：台账记账来源经 env 注入闸（缺省不注入=老载荷零改动）。
-    _sub_env = None
     _extra_env = {}
     if ledger_source:
         _extra_env["SANDBAR_INTEG_LEDGER_SOURCE"] = str(ledger_source)
@@ -6473,20 +6523,35 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     if "SANDBAR_STAGE_SWEEP_ORPHAN_PREFIX" not in os.environ:
         _extra_env["SANDBAR_STAGE_SWEEP_ORPHAN_PREFIX"] = \
             "t26,sandbar-test,stage-console"
-    if _extra_env:
-        _sub_env = dict(os.environ, **_extra_env)
+    # t260924-05 KI-116：组装面统一走 integ_subprocess_env（剥两个封闭元组后并
+    # 显式注入面），worker 自身路由旋钮不再漏进子进程链。
+    _sub_env = integ_subprocess_env(_extra_env)
+    # t260924-05 KI-116：integ 道整体超时经载荷显式下单（=内层批次值，≤守卫），
+    # verify_lane 不再独立读 env；老载荷缺键回落同值缺省（replay/老回放零漂移）。
+    _payload = shared.integ_verify_payload(wt, write_set, apply_skip_pools)
+    _payload["integ_timeout_sec"] = BATCH_TIMEOUT_SEC
     p = await asyncio.create_subprocess_exec(
         "python3", admin, "call", "verify_lane",
         # t260913-03：载荷面薄壳只下单——是否按泳道声明排除池由调用方（每票段）显式
         # 置位，本层只透传；缺省 False=巡检/老回放形态恒全跑（验收 E 机械锁）
-        json.dumps(shared.integ_verify_payload(wt, write_set, apply_skip_pools)),
+        json.dumps(_payload),
         cwd=str(wt), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        env=_sub_env)
+        env=_sub_env,
+        # t260924-05 KI-116：会话隔离是 killpg 回收的前提——不起新会话，子进程与
+        # worker 同进程组，killpg 会杀进调用方自己（run_handover_leg 先例同款三件套）。
+        start_new_session=True)
     try:
         p_out_b, p_err_b = await asyncio.wait_for(
-            p.communicate(), timeout=BATCH_TIMEOUT_SEC + 300)
+            p.communicate(), timeout=INTEG_GUARD_SEC)
     except asyncio.TimeoutError:
-        p.kill(); await p.wait()
+        # t260924-05 KI-116：进程组回收（killpg 先例=run_handover_leg）——老裸
+        # p.kill() 只杀 admin.py 一层，verify_lane→sh→run_scenarios→node/docker
+        # 孙进程全漏，跨期孤儿累积正是泳道内锁/端口面挂死的嫌疑链一环。
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            p.kill()
+        await p.wait()
         return IntegrationRunResult(error="场景执行器整体超时（>%ds）" % BATCH_TIMEOUT_SEC)
     p_stdout = p_out_b.decode("utf-8", "replace")
     p_stderr = p_err_b.decode("utf-8", "replace")
@@ -6495,9 +6560,10 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     except json.JSONDecodeError:
         return IntegrationRunResult(error="verify_lane integ 无有效输出（exit=%s）：%s"
                                     % (p.returncode, (p_stdout + p_stderr)[-2000:]))
+    _err = _integ_receipt_err(payload)
+    if _err:
+        return IntegrationRunResult(error=_err)
     res = payload.get("result") or {}
-    if not payload.get("ok") or res.get("err"):
-        return IntegrationRunResult(error=str(res.get("err") or "未知错误"))
     out = IntegrationRunResult()
     out.ran = int(res.get("ran") or 0)
     out.passed = int(res.get("pass") or 0)
@@ -6661,16 +6727,22 @@ async def _reprobe_red_body(args: ReprobeRedArgs) -> ReprobeRedResult:
     p = await asyncio.create_subprocess_exec(
         "python3", str(runner), "--reprobe", ",".join(names),
         cwd=str(wt), stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE)
+        stderr=asyncio.subprocess.PIPE,
+        # t260924-05 KI-116：与 _run_scenarios 同款——剥旋钮组装 + 会话隔离 +
+        # 进程组回收（裸 p.kill() 漏孙进程）。
+        env=integ_subprocess_env(), start_new_session=True)
     try:
         p_out_b, p_err_b = await asyncio.wait_for(
-            p.communicate(), timeout=BATCH_TIMEOUT_SEC + 300)
+            p.communicate(), timeout=INTEG_GUARD_SEC)
     except asyncio.TimeoutError:
-        p.kill()
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            p.kill()
         await p.wait()
         return ReprobeRedResult(
             error="探针整体超时（>%ds）——进程已回收，保守计轮"
-                  % (BATCH_TIMEOUT_SEC + 300))
+                  % INTEG_GUARD_SEC)
     res = parse_reprobe_summary(p_out_b.decode("utf-8", "replace"), p.returncode or 0)
     if not res.error and (p.returncode or 0) != 0:
         res.error = "探针 exit=%s（stderr 尾=%s）" % (

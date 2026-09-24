@@ -133,16 +133,37 @@ try {
   await fx.cleanup()
 
   // ---------- D. summary-only stdout ----------
-  // 同 C 段时序注记：随乙段闸改动一并反转（仅汇总行且 env_fail>0 → 必红）。
-  section('D. 仅汇总行无明细：零场景绿（ran=0，引擎不读汇总）')
+  // t260924-05 KI-116 有意契约变更（非放水，工单必做③「零信号必须红」）：旧断言
+  // 「仅汇总行无明细=零场景绿」与 KI-116 病象（ran=0 静默绿 ≥6 期）同源——本票
+  // 在 verify_lane 装设零信号守卫：文本结果行 ∨ '{'·'[' 规范行 ∨ INTEG_SUMMARY
+  // 汇总行 ran>0，三者全空且 exit==0 = 显式红。旧式 'SCENARIOS ran=' 行不在信号
+  // 判据集（v1.8 起已退役为参考性）→ 本段夹具（仅旧式汇总行）由绿改红。
+  section('D. 仅旧式汇总行无明细无规范行：零场景信号显式红（KI-116 新契约）')
   fx = await makeFixture()
   fx.write("print('SCENARIOS ran=3 pass=3 fail=0 (0s)')\n")
   {
     const res = fx.call()
     if (res.ok) {
       const r = res.result
-      ok(r.green === true && r.ran === 0, 'D1 无 PASS/FAIL 行 → ran=0 绿（汇总行不构成明细）')
+      ok(r.green === false && typeof r.err === 'string' && r.err.includes('零场景信号'),
+        'D1 无文本行/规范行/INTEG_SUMMARY(ran>0) → 零场景信号显式红（不冒充绿）')
     } else ok(false, 'D0 调用失败: ' + (res.stderr || ''))
+  }
+  await fx.cleanup()
+
+  // ---------- D2. 仅 INTEG_SUMMARY(ran>0) 无明细：信号在场，不红（KI-116） ----------
+  // 判据与闸判定面同源：汇总行 ran>0 构成信号（防守卫误杀规范行协议回执——
+  // arbitrate 打回令修正点）；绿红仍由闸用例判定面/重算复核决定，此处只锁「不红」。
+  section('D2. 仅 INTEG_SUMMARY(ran>0)：信号在场，零信号守卫不触发')
+  fx = await makeFixture()
+  fx.write("print('INTEG_SUMMARY ' + JSON.stringify({ran: 2, pass: 2, fail: 0, wall_s: 1, concurrency: 1}))\n")
+  {
+    const res = fx.call()
+    if (res.ok) {
+      const r = res.result
+      ok(!(r.err && r.err.includes('零场景信号')),
+        'D2 汇总行 ran>0 在场 → 不判零场景信号（守卫不误杀协议形态）')
+    } else ok(false, 'D2-0 调用失败: ' + (res.stderr || ''))
   }
   await fx.cleanup()
 

@@ -67,11 +67,16 @@ MAX_WHO_LEN = 64
 RETRY = RetryPolicy(maximum_attempts=3)
 SHORT_TO = timedelta(minutes=5)
 SCAN_TO = timedelta(minutes=15)
-# 套件阶段 start_to_close：必须**显式大于** agent_activities._run_scenarios 的内部截止
-# （BATCH_TIMEOUT_SEC + 300，默认 5400+300=5700s≈95min）——否则 Temporal 先杀活动，
-# 活动内的超时清理路径永远走不到（UI_CAPTURE_TIMEOUT_SEC 头注同款纪律）。
-# 单测 test_suite_timeout_outlives_internal_deadline 锁定该不等式。
-SUITE_TO = timedelta(minutes=120)
+# 套件阶段 start_to_close（t260924-05 KI-116 单源化）：自 agent_activities.INTEG_GUARD_SEC
+# （=内层批次 BATCH_TIMEOUT_SEC+300 守卫，唯一算出点）**派生**=守卫 + 1800s 巡检余量
+# （恒全跑、不经池排除，全集比每票集测长，余量给 30min）——内层结构化超时回报必先于
+# Temporal 硬杀可达；运维覆盖 SANDBAR_INTEG_BATCH_TIMEOUT_SEC 时自动同抬（旧写死
+# 120min 形同虚设，且旧头注「默认 5400+300=5700s」与常量真值 3300s 不符——撒谎注释
+# 随单源化一并清零）。缺省 3300+1800=5100s≈85min。不等式组由
+# test_t260913_01_integ_budget_pair.py 与 test_t260924_05_ki116_budget.py 机械锁定。
+with workflow.unsafe.imports_passed_through():
+    from agent_activities import INTEG_GUARD_SEC
+SUITE_TO = timedelta(seconds=INTEG_GUARD_SEC + 1800)
 # 套件活动不自动重试：整轮全集重跑代价高（小时级），且「跑不成/跑红」本身就是票面数据
 # （进发现清单+回执，人审/次日再跑），Temporal 重试只会把同一份失败重复烧一遍墙钟。
 RETRY_SUITE = RetryPolicy(maximum_attempts=1)

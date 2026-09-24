@@ -84,6 +84,9 @@ ALLOW = [
     re.compile(r"SKIP_DSH_BITS_CHECK|skip_switch"),                      # 产品逃生开关名（安装器版本位检查逃生门：
                                         # env SANDBAR_SKIP_DSH_BITS_CHECK 与测试名 test_skip_switch_*，
                                         # t260923-06 资产）——语义=明知版本位不符仍放行但留痕，非套件跳过状态值。
+    re.compile(r"apply_skip_pools"),                                     # 引擎载荷参数名（verify_lane integ 道池排除开关，
+                                        # t260913-03 交付、t260924-05 回归棒消费）——排除面开关名，
+                                        # 非套件跳过状态值（与 skip_settle=/skipped_budget 同类）。
 ]
 
 hits = []

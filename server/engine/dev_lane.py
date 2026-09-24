@@ -58,6 +58,7 @@ with workflow.unsafe.imports_passed_through():
     # 文案与执法匹配器同源（声明=执法，两侧必须同批改）。
     import integration_discipline
     from agent_activities import (
+        INTEG_GUARD_SEC,  # t260924-05 KI-116：外层预算派生源（内层守卫 + 300）
         arbitrate,
         acceptance_walkthrough,
         archive_ticket,
@@ -166,17 +167,17 @@ MERGE_CHECK_TO = timedelta(minutes=20)   # merge_check includes the in-lane veri
 MERGE_TO = timedelta(minutes=5)
 AGENT_TO = timedelta(hours=6)
 HEARTBEAT_TO = timedelta(minutes=3)
-# 机械集成测试条目的活动超时（配对不变量，t260913-01 仲裁修 + t260913-02 实测合流）：
-# 本值必须 > agent_activities.BATCH_TIMEOUT_SEC + 300s（内层 wait_for 守卫），否则内层
-# 的结构化超时回报永远等不到、只剩 Temporal 硬杀 + 3 次重试（260913 两轮 0 跑无归因；
-# t260913-02 gen1 亦实测同形态）。单测 test_t260913_01_integ_budget_pair.py 机械锁住
-# 「内层 < 外层」与内层缺省上界；一改必查另一侧。
-# 两端各自的实测依据：内层缺省收紧为 3000+300=3300s≈55min（t260913-01：正常套件
-# ≈25min，超窗交结构化回报；exclude_pools 后每票集测实测 wall 179.5s ≪ 60min）；
-# 外层 60min 在此口径下余量充足。**全集（含 engine+exclusive 重池）的长墙钟口径不在
-# 本值**——那走每日巡检的 `inspection_flow.SUITE_TO=120min`（恒全跑、不经池排除，
-# 已按同一不等式钉住 > 5700s），两条预算各守各的面。
-INTEG_RUN_TO = timedelta(minutes=60)
+# 机械集成测试条目的活动超时（配对不变量，t260913-01 仲裁修 + t260913-02 实测合流；
+# t260924-05 KI-116 单源化）：本值自 agent_activities.INTEG_GUARD_SEC（=内层批次
+# BATCH_TIMEOUT_SEC + 300 守卫）**派生**=守卫 + 300s 余量——内层结构化超时回报必可
+# 达（Temporal 硬杀 + 3 次重试白烧的 260913 形态不再可能），且运维经
+# SANDBAR_INTEG_BATCH_TIMEOUT_SEC 覆盖内层时本值自动同抬，「成对锁」是算式事实不是
+# 人守纪律。缺省 3000+300+300=3600s=60min，与旧手写值一致（零行为漂移）。单测
+# test_t260913_01_integ_budget_pair.py 与 test_t260924_05_ki116_budget.py 锁不等式组。
+# **全集（含 engine+exclusive 重池）的长墙钟口径不在本值**——那走每日巡检的
+# inspection_flow.SUITE_TO（恒全跑、不经池排除，同式派生自 INTEG_GUARD_SEC），
+# 两条预算各守各的面。
+INTEG_RUN_TO = timedelta(seconds=INTEG_GUARD_SEC + 300)
 # t260917-09：探针活动 start_to_close——红项子集串行复跑（每条执行器侧 900s 帽），
 # 预算沿用全量跑同档（子集恒 ≤ 全量；activity 内另有 wait_for 兜底 kill→wait 回收）。
 REPROBE_TO = INTEG_RUN_TO

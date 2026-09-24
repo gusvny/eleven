@@ -491,7 +491,8 @@ def test_dev_lane_integ_run_to_outlives_internal_deadline():
     收紧为 3000+300=3300s（正常套件 ≈25min，超窗交结构化回报）并保留外层 60min，随
     verify.yaml exclude_pools 生效后每票集测变轻（实测 wall 179.5s ≪ 60min）而成立。
     解冲突取 main 侧 60min（配对不变量 inner<outer 成立；只锁下界，不锁上界）；
-    全集长墙钟口径在巡检侧 `flow.SUITE_TO=120min`（恒全跑路径，两族预算独立）。"""
+    全集长墙钟口径在巡检侧 `flow.SUITE_TO`（恒全跑路径，两族预算独立；t260924-05
+    KI-116 起两族均自 agent_activities.INTEG_GUARD_SEC 派生，手写 120min 退役）。"""
     import dev_lane
     from agent_activities import BATCH_TIMEOUT_SEC
     assert dev_lane.INTEG_RUN_TO.total_seconds() >= BATCH_TIMEOUT_SEC + 300

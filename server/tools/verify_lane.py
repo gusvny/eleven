@@ -603,6 +603,109 @@ def _integ_pool_exclude(root, integ_cfg, args):
             dict(_os.environ, SANDBAR_SCENARIO_EXCLUDE_POOLS=decl))
 
 
+# t260924-05 KI-116：integ 道整体超时**单源三级回落**（arbitrate gen1 发现 3 修正）：
+# 载荷 integ_timeout_sec → env SANDBAR_INTEG_BATCH_TIMEOUT_SEC → 常量缺省 3000。
+# 旧病根是「两个独立缺省值」（本处 or 5400 vs 引擎 or 3000）双读漂移，不是「读同一个
+# 运维旋钮」——env 是运维契约面（独立入口 admin call + env 无载荷键也须生效，引擎
+# 生产链则经载荷下发同值），单源语义=同一 env+同一缺省常量，由单测跨模块锁定。
+# 载荷畸形/非正仍 fail-closed 红；env 畸形同理（不静默回落）。
+INTEG_DEFAULT_TIMEOUT_SEC = 3000
+INTEG_TIMEOUT_ENV = 'SANDBAR_INTEG_BATCH_TIMEOUT_SEC'
+
+
+def _integ_timeout_sec(args):
+    """解析 integ 整体超时（三级回落）→ (秒, err)。缺省链尾=常量；畸形=fail-closed 红。
+    err 文案按**实际来源**点名键（acceptance gen2 打回修正）：载荷路径报
+    `integ_timeout_sec`、env 路径报 `SANDBAR_INTEG_BATCH_TIMEOUT_SEC`——报错源标错
+    会把运维排查引向错误旋钮。"""
+    src = 'integ_timeout_sec'
+    raw = args.get('integ_timeout_sec')
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        src = INTEG_TIMEOUT_ENV                            # 运维契约面（独立入口）
+        raw = os.environ.get(INTEG_TIMEOUT_ENV)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return INTEG_DEFAULT_TIMEOUT_SEC, None
+    try:
+        t = int(raw)
+    except (TypeError, ValueError):
+        return None, 'integ 整体超时畸形（%s=%r）——fail-closed，不静默回落缺省' % (src, raw)
+    if t <= 0:
+        return None, 'integ 整体超时须为正整数（%s=%d）——fail-closed' % (src, t)
+    return t, None
+
+
+def _parse_integ_run(stdout, returncode):
+    """解析执行器三态输出契约（PASS [ / FAIL [ / ENV_FAIL [ + 四空格缩进尾注）
+    → (ran, passed, failed, env_failed, scen, err)。
+
+    t260924-05 KI-116：拆除「ran==0 且 stdout 含规范行且 exit==0 → 静默绿」逃逸口，
+    但零信号判据**与闸判定面同源**（t260910-13 行权威口径；arbitrate 打回令修正——
+    首版只数文本行曾误杀规范行协议回执）：文本结果行 / '{'·'[' 开头规范行 /
+    INTEG_SUMMARY 汇总行 ran>0，任一在场=有信号、不红（绿红交闸既有判定面）；
+    三者全空且 exit==0 才是「零场景信号」红（执行器空转/坏面，不冒充绿）。
+    半截行（如 `PASS [x` 无闭括号）不计数不崩，随零信号面显式红。"""
+    ran = passed = failed = env_failed = 0
+    scen, cur = [], None
+    has_signal_row = False
+    summary_ran = 0
+    for line in stdout.splitlines():
+        s = line.strip()
+        if s[:1] in ('{', '['):
+            has_signal_row = True     # 规范行协议在场=信号（解析权威在闸，此处只判在场）
+        elif s.startswith('INTEG_SUMMARY '):
+            try:
+                summary_ran = int(json.loads(s[len('INTEG_SUMMARY '):]).get('ran') or 0)
+            except (json.JSONDecodeError, ValueError, AttributeError):
+                pass                  # 畸形汇总由闸 malformed 面点名，此处不判
+        line = line.rstrip()
+        if line.startswith('PASS ['):
+            if ']' not in line:      # 半截行：不计绿不崩（KI-116 畸形输入面）
+                continue
+            ran += 1
+            passed += 1
+            cur = None
+            # name 取第一个 ]（260908：场景行可带耗时尾注「 (X.Xs)」——KI-060 备料②；
+            # 旧无尾注形态首 ] 即行尾 ]，向后兼容）
+            scen.append({'name': line[6:line.index(']')], 'exit': 0, 'output_tail': ''})
+        elif line.startswith('ENV_FAIL ['):
+            # 三态协议（t260904-12 契约 ②b-1）：环境红行；畸形（缺 exit=2）沿 FAIL 惯例
+            # name=整行、exit=-1 计——畸形输出不静默吞。
+            m = re.match(r'ENV_FAIL \[(.+?)\] exit=(-?\d+)', line)
+            if m and int(m.group(2)) == 2:
+                name, exit_code = m.group(1), 2
+            else:
+                name, exit_code = (line if not m else line, -1)
+            ran += 1
+            env_failed += exit_code == 2
+            failed += exit_code != 2
+            cur = {'name': name, 'exit': exit_code, 'output_tail': ''}
+            scen.append(cur)
+        elif line.startswith('FAIL ['):
+            m = re.match(r'FAIL \[(.+?)\] exit=(-?\d+)', line)
+            name, exit_code = (m.group(1), int(m.group(2))) if m else (line, -1)
+            ran += 1
+            failed += 1
+            cur = {'name': name, 'exit': exit_code, 'output_tail': ''}
+            scen.append(cur)
+        elif cur is not None and line.startswith('    '):
+            cur['output_tail'] = (cur['output_tail'] + line + '\n')[-4000:]
+    if ran == 0 and (has_signal_row or summary_ran > 0):
+        # 信号在场（规范行协议/汇总行计数面）——恒交闸既有判定面（t260910-13
+        # 行权威口径），**先于 exit≠0 判定**：真红以 cases 承载、rc≠0 与用例红面的
+        # 一致性由闸自检，台账写入面也消费同一用例面——本层提前 err 会连写账路径
+        # 一起跳过（arbitrate gen1 发现 1/2 修正点），不得因缺文本行或非零退出误杀。
+        return ran, passed, failed, env_failed, scen, None
+    if ran == 0:
+        if returncode != 0:
+            return ran, passed, failed, env_failed, scen, \
+                '场景执行器未产出结果（exit=%s）：%s' % (returncode, stdout[-2000:])
+        return ran, passed, failed, env_failed, scen, \
+            ('零场景信号（exit=0 且无 PASS/FAIL/ENV_FAIL 行、无规范行、汇总行 '
+             'ran=0）——执行器空转/坏面显式红，不冒充绿（KI-116 拆除静默逃逸口）：%s'
+             % stdout[-800:])
+    return ran, passed, failed, env_failed, scen, None
+
+
 def _integ(args):
     """集成道（薄壳化，宿主令 t260902）：执行项目声明的 integration.cmd 并解析输出契约
     （PASS/FAIL 行 + 末行 SCENARIOS ran=N pass=N fail=N）。执行与解析全天下唯此一份——
@@ -637,7 +740,10 @@ def _integ(args):
             return {'lane': 'integ', 'green': False,
                     'err': 'supply 装配失败（need=%s，exit=%d）：%s——供给面红点名，不静默'
                            % (need, sp.returncode, ((sp.stdout or '') + (sp.stderr or ''))[-1500:])}
-    timeout = int(_os.environ.get('SANDBAR_INTEG_BATCH_TIMEOUT_SEC') or 5400)
+    # t260924-05 KI-116：超时由载荷显式传（_integ_timeout_sec，缺键回落同源缺省）。
+    timeout, terr = _integ_timeout_sec(args)
+    if terr:
+        return {'lane': 'integ', 'green': False, 'err': terr}
     # ---- t260913-03 池排除（每票段专用通道；apply 缺省 False=零分支）----
     pool_exclude, cmd_env = _integ_pool_exclude(root, integ_cfg, args)
     if pool_exclude is not None and pool_exclude.get('err'):
@@ -647,45 +753,12 @@ def _integ(args):
                               text=True, timeout=timeout, env=cmd_env)
     except subprocess.TimeoutExpired:
         return {'lane': 'integ', 'green': False, 'err': '场景执行器整体超时（>%ds）' % timeout}
-    ran = passed = failed = env_failed = 0
-    scen, cur = [], None
-    for line in (proc.stdout or '').splitlines():
-        line = line.rstrip()
-        if line.startswith('PASS ['):
-            ran += 1
-            passed += 1
-            cur = None
-            # name 取第一个 ]（260908：场景行可带耗时尾注「 (X.Xs)」——KI-060 备料②；
-            # 旧无尾注形态首 ] 即行尾 ]，向后兼容）
-            scen.append({'name': line[6:line.index(']')], 'exit': 0, 'output_tail': ''})
-        elif line.startswith('ENV_FAIL ['):
-            # 三态协议（t260904-12 契约 ②b-1）：环境红行；畸形（缺 exit=2）沿 FAIL 惯例
-            # name=整行、exit=-1 计——畸形输出不静默吞。
-            m = re.match(r'ENV_FAIL \[(.+?)\] exit=(-?\d+)', line)
-            if m and int(m.group(2)) == 2:
-                name, exit_code = m.group(1), 2
-            else:
-                name, exit_code = (line if not m else line, -1)
-            ran += 1
-            env_failed += exit_code == 2
-            failed += exit_code != 2
-            cur = {'name': name, 'exit': exit_code, 'output_tail': ''}
-            scen.append(cur)
-        elif line.startswith('FAIL ['):
-            m = re.match(r'FAIL \[(.+?)\] exit=(-?\d+)', line)
-            name, exit_code = (m.group(1), int(m.group(2))) if m else (line, -1)
-            ran += 1
-            failed += 1
-            cur = {'name': name, 'exit': exit_code, 'output_tail': ''}
-            scen.append(cur)
-        elif cur is not None and line.startswith('    '):
-            cur['output_tail'] = (cur['output_tail'] + line + '\n')[-4000:]
-    _has_spec = any(ln.strip()[:1] in ('{', '[')
-                    for ln in (proc.stdout or '').splitlines())
-    if ran == 0 and not _has_spec and proc.returncode != 0:
-        return {'lane': 'integ', 'green': False,
-                'err': '场景执行器未产出结果（exit=%s）：%s'
-                       % (proc.returncode, ((proc.stdout or '') + (proc.stderr or ''))[-2000:])}
+    # t260924-05 KI-116：解析面抽成 _parse_integ_run 纯函数（单测直调），并拆除
+    # 「ran==0 且含规范行且 exit==0 → 静默绿」逃逸口（零场景信号一律显式 err）。
+    ran, passed, failed, env_failed, scen, perr = \
+        _parse_integ_run(proc.stdout or '', proc.returncode)
+    if perr:
+        return {'lane': 'integ', 'green': False, 'err': perr}
 
     # ---------------- t260910-13：失败分类协议 + 机械归属判定 ----------------
     # 双解析：规范行（首字符 { 的 JSON 行）权威；旧文本行保留计数（兼容期观测面）。
