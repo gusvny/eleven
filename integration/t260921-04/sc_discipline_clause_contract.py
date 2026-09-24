@@ -102,10 +102,15 @@ def main():
     print("== C 其余 agent 段不携执法文案（角色面对称，防越段执法）")
     for stage in OTHER_AGENT_STAGES:
         text = briefs.get(stage) or ""
+        # 前提修订（t260924-09 必做①，仲裁段裁定=契约演进非弱化）：走查/仲裁段
+        # 派活文案现在**必须**点名集成执行器——但只许「定点复跑取证纪律」形态
+        # （--only 定点 / 闸口径 --exclude-pools），不许出现 developer 型「集成禁跑」
+        # 执法语义。执法缺席与取证形态齐备两侧都断言，堵「借演进之名整体卸锁」。
         check("集成禁跑" not in text,
-              "C/%s 无禁跑执法语义（该段本职含集成面，执法文案不得越段）" % stage)
-        check("run_scenarios.py" not in text,
-              "C/%s 无集成执行器点名（arbitrate 的 sc_* 测试面措辞为合法异义，不在此锚）" % stage)
+              "C/%s 无禁跑执法语义（该段本职含集成取证面，禁跑执法不得越段）" % stage)
+        if "run_scenarios.py" in text:
+            check("--only" in text,
+                  "C/%s 执行器点名=定点复跑纪律形态（--only 在场）" % stage)
 
     print("SUMMARY pass=%d fail=%d" % (passed, failed))
     return 1 if failed else 0

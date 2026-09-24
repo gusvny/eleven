@@ -1685,6 +1685,356 @@ def _apply_integration_discipline(res: StageResult, cwd: Path,
     return res
 
 
+# ================= 走查/仲裁段取证面护栏（票 t260924-09，KI-117） =================
+# 实案：t260924-04 第 2 轮走查 agent 把全量套件（374 条，两趟各约 40 分钟）当复现
+# 工具——闸 excluded_pools=[engine, exclusive] 只 294 条/10 分钟。机械护栏：integration
+# 角色 agent 段会话内每条 run_scenarios.py 调用三分类（定点豁免 / 口径漂移违规 /
+# 合规全量计数），非定点全套每段 ≤1 趟，超限=段结果红+点名（零静默）。
+
+# 闸口径真源注记：闸侧配置在项目 verify.yaml（excluded_pools: engine,exclusive），
+# 此处是守卫侧常量——两处真源靠本注释互指 + UT 夹具锁（test_t260924_09_*）；
+# 未来闸口径改池须同批同步两处。
+GATE_EXCLUDE_POOLS = ("engine", "exclusive")
+# 与 integration/run_scenarios.py parse_exclude_pools 的 token 语法一致（[a-z0-9-]+）：
+# 该解析器对违规 token 只剥离不判红（主路径静默缺省），故守卫不能凭「传了
+# --exclude-pools」豁免，必须复算 token（方案 C2 读码结论）。
+_SUITE_POOL_TOKEN_RE = re.compile(r"^[a-z0-9-]+$")
+# 非定点全套条数上限：每段 1 趟（工单必做②取「条数」支；墙钟支不做的理由：
+# 第 2 趟本就该拦，墙钟只能事后计费）。合法形态全量同样入计数（review R2）。
+_SUITE_FULL_LIMIT = 1
+_SUITES_VIOL_KEY = "full_suite_violations"
+
+
+def _suite_flag_value(argv, flag):
+    """run_scenarios._cli 同款取值：首个 `flag`，取其后一 token；缺值=空串
+    （executor 语义：空串=全量）。返回 (值, 是否出现)。"""
+    if flag not in argv:
+        return "", False
+    i = argv.index(flag)
+    return (argv[i + 1] if i + 1 < len(argv) else ""), True
+
+
+def _suite_split_pools(raw):
+    """run_scenarios.parse_exclude_pools 同款解析（逗号切分+strip+去空去重保序），
+    返回 (合法 token 列表, 违规 token 列表)。复算而非信任 flag 存在——见上方注记。"""
+    names, bad = [], []
+    for tok in str(raw or "").split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        if _SUITE_POOL_TOKEN_RE.match(tok):
+            if tok not in names:
+                names.append(tok)
+        else:
+            bad.append(tok)
+    return names, bad
+
+
+def _iter_suite_invocations(command, _depth=0):
+    """一条 bash 命令串 → run_scenarios.py 调用的入口后 argv 列表（纯函数不抛）。
+
+    切段/tokenization 复用 integration_discipline 同源实现（_split_segments/
+    shlex/程序词锚定/入口表判名/-c 递归）——不复制第二份 tokenizer，双向一致由
+    共享真源保证（方案原拟自实现同款+单测锁，改为直接共享：漂移面更小）。
+    只读动词不产出调用（与执法「判跑不判读」同口径）。"""
+    if not isinstance(command, str) or not command.strip():
+        return
+    if _depth > integration_discipline._RECURSION_DEPTH_MAX:
+        return
+    for segment in integration_discipline._split_segments(command):
+        seg = segment.strip()
+        if not seg:
+            continue
+        try:
+            tokens = shlex.split(seg)
+        except ValueError:
+            tokens = seg.split()
+        i = integration_discipline._program_index(tokens)
+        if i is None:
+            continue
+        prog = tokens[i].strip("()")
+        lower = prog.lower()
+        if lower in integration_discipline.EXEC_VERBS:
+            k = i + 1
+            n = len(tokens)
+            while k < n:
+                arg = tokens[k]
+                if arg == "-c" and lower in integration_discipline.SHELL_VERBS \
+                        and k + 1 < n:
+                    # shell -c 嵌套串按同规则递归（与执法匹配器同口径）
+                    yield from _iter_suite_invocations(tokens[k + 1], _depth + 1)
+                    k += 2
+                    continue
+                if arg == "-m" and k + 1 < n:
+                    if integration_discipline._match_entry_module(
+                            tokens[k + 1]) == "run_scenarios.py":
+                        yield tokens[k + 2:]
+                        break
+                    if tokens[k + 1] in integration_discipline.STATIC_TOOL_MODULES:
+                        break
+                    k += 2
+                    continue
+                if arg.startswith("-"):
+                    k += 1
+                    continue
+                if integration_discipline._match_entry_token(arg) == "run_scenarios.py":
+                    yield tokens[k + 1:]
+                k += 1
+        elif integration_discipline._match_entry_token(prog) == "run_scenarios.py":
+            # 直接执行形（./integration/run_scenarios.py …）
+            yield tokens[i + 1:]
+
+
+def _classify_suite_calls(cmds):
+    """走查/仲裁段取证面分类器（纯函数，票 t260924-09 必做②）。
+
+    入参 cmds=本段会话（最后 user/message 帧之后）的 bash 命令串列表；对每条
+    run_scenarios.py 调用三分类：
+    - 定点（豁免）：--only 名单非空（executor 对不在册名 fail-closed，守卫不重复判）；
+    - 口径漂移（违规，fail-loud）：无 --only（或空名单=executor 语义同全量）且
+      exclude 不构成闸口径——裸全量（未传 --exclude-pools）、缺池、含非法 token
+      致闸池缺失；
+    - 口径含非法 token（违规，独立 kind）：闸口径两池都在册生效 + 额外闸外
+      token（语法非法或未知池名；review T1：与裸全量「零排除」区分语义，避免
+      归因文案把诊断引向「零排除」的错误方向）；
+    - 合规全量（计数）：无 --only 且 exclude 恰构成闸口径。条数上限每段 ≤1 趟
+      （_SUITE_FULL_LIMIT），第 2 趟起=「全量超上限」违规（review R2：合法形态
+      全量同样入上限）。
+    返回 (violations, notes)：violations 每条 {cmd,kind,detail,cmd_index}（cmd_index=
+    源命令在 cmds 里的下标，供调用方回填会话 seq）；notes 为统计
+    （全非套件调用也有 note，绝不静默绿）。畸形输入（None/非串元素）不抛，
+    按零调用处理并留 note。"""
+    violations: List[Dict[str, str]] = []
+    notes: List[str] = []
+    if not isinstance(cmds, list) or not all(isinstance(c, str) for c in cmds):
+        notes.append("分类器入参畸形（非串列表），本段未判")
+        return violations, notes
+    targeted = 0
+    fulls = 0
+    for ci, cmd in enumerate(cmds):
+        for argv in _iter_suite_invocations(cmd):
+            only_raw, _seen = _suite_flag_value(argv, "--only")
+            only_names = [t for t in str(only_raw or "").split(",") if t.strip()]
+            if only_names:
+                targeted += 1
+                continue
+            pools_raw, pools_seen = _suite_flag_value(argv, "--exclude-pools")
+            excerpt = cmd[:integration_discipline._CMD_EXCERPT_MAX]
+            if not pools_seen:
+                violations.append({
+                    "cmd": excerpt, "cmd_index": ci, "kind": "drift",
+                    "detail": "口径漂移：裸全量（未传 --exclude-pools，零排除；"
+                              "闸口径为 --exclude-pools %s）"
+                              % ",".join(GATE_EXCLUDE_POOLS)})
+                continue
+            names, bad = _suite_split_pools(pools_raw)
+            missing = [p for p in GATE_EXCLUDE_POOLS if p not in names]
+            extra = [t for t in names if t not in GATE_EXCLUDE_POOLS]
+            if missing:
+                violations.append({
+                    "cmd": excerpt, "cmd_index": ci, "kind": "drift",
+                    "detail": "口径漂移：--exclude-pools=%r 不构成闸口径"
+                              "（缺闸池 %s%s；闸为 %s）"
+                              % (pools_raw, missing,
+                                 ("，含非法 token %r" % bad) if bad else "",
+                                 ",".join(GATE_EXCLUDE_POOLS))
+                              + "（执行器对闸外/非法 token 只剥离不判红，"
+                                "凭「传了 exclude」不豁免）"})
+                continue
+            if bad or extra:
+                # T1 分诊：闸池都在册生效 + 闸外 token（语法非法或未知池名，
+                # 如 engine,exclusive,engin）——排除已生效，非「零排除」型漂移，
+                # 记独立 kind，归因文案不得把诊断引向零排除方向。
+                violations.append({
+                    "cmd": excerpt, "cmd_index": ci, "kind": "malformed_token",
+                    "detail": "口径含非法 token %r（闸口径 engine/exclusive 排除"
+                              "已生效，非零排除型漂移；闸外 token 只剥离不判红的"
+                              "语义见 run_scenarios.parse_exclude_pools）"
+                              % (bad + extra)})
+                continue
+            fulls += 1
+            if fulls > _SUITE_FULL_LIMIT:
+                violations.append({
+                    "cmd": excerpt, "cmd_index": ci, "kind": "over_limit",
+                    "detail": "全量超上限：本段非定点全套第 %d 趟（上限 %d 趟；"
+                              "闸回执即全量证据，复现单条红用 --only 定点）"
+                              % (fulls, _SUITE_FULL_LIMIT)})
+    notes.append("套件调用分类：定点 %d 趟（豁免）、合规全量 %d 趟（上限 %d）、"
+                 "违规 %d 条" % (targeted, fulls, _SUITE_FULL_LIMIT, len(violations)))
+    return violations, notes
+
+
+def _scan_suite_sessions(cwd: Path, ticket_id: str, role: str
+                         ) -> Tuple[List[Dict[str, str]], List[str]]:
+    """integration 角色 agent 段取证面扫描（票 t260924-09）。
+
+    选档口径与 _scan_integration_sessions 同款（角色钉档+双代消歧，绝不全树按
+    mtime 选档——走查∥仲裁真并行下对方档 mtime 必最新）；段归属=最后一条
+    user/message 帧之后（review T2 裁定口径：上限计数范围=本段全部回合，即该帧
+    之后同会话内所有 tool/call 帧；不引入第二种段归属判定）。零静默与畸形帧
+    计数立场与既有执法扫描一致。"""
+    notes: List[str] = []
+    violations: List[Dict[str, str]] = []
+    session_hint = "%s-%s" % (ticket_id, role)
+    try:
+        sessions_root = cwd / ".dsh" / "sessions"
+        candidates: List[Path] = []
+        if sessions_root.is_dir():
+            for f in sessions_root.glob("*/%s/*" % session_hint):
+                if f.is_file() and f.name in SESSION_FILE_NAMES:
+                    candidates.append(f)
+        if not candidates:
+            notes.append("未发现 %s 会话档，取证面未扫（DSH_HOME 漂移/检疫挪走等）"
+                         % session_hint)
+            return violations, notes
+        session = _pick_newest_session(candidates)
+        if session is None:
+            notes.append("会话档均不可读（stat 失败），取证面未扫：%s" % session_hint)
+            return violations, notes
+        text, err = _decompress_session_text(session)
+        if err:
+            notes.append("会话档解压失败 %s（%s），取证面未判" % (session, err))
+            return violations, notes
+        last_user_i = -1
+        turns = 0
+        parsed = 0
+        frames: List[Tuple[int, Any]] = []
+        for i, ln in enumerate(text.split("\n")):
+            line = ln.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(obj, dict):
+                continue
+            parsed += 1
+            if obj.get("type") == "user/message":
+                turns += 1
+                last_user_i = i
+            elif obj.get("type") == "tool/call":
+                frames.append((i, obj))
+        if parsed == 0:
+            notes.append("会话档零可解析行，取证面未判：%s" % session)
+            return violations, notes
+        cmds: List[str] = []
+        frame_seqs: List[str] = []
+        dropped = 0
+        for i, obj in frames:
+            if i <= last_user_i:
+                continue
+            data = obj.get("data")
+            if not isinstance(data, dict):
+                dropped += 1
+                continue
+            raw_args = data.get("arguments")
+            if not isinstance(raw_args, str) or not raw_args.strip():
+                dropped += 1
+                continue
+            try:
+                tool_args = json.loads(raw_args)
+            except ValueError:
+                dropped += 1
+                continue
+            cmd = tool_args.get("command") if isinstance(tool_args, dict) else None
+            if not isinstance(cmd, str) or not cmd.strip():
+                continue  # 非 bash 形工具帧不在取证面
+            cmds.append(cmd)
+            frame_seqs.append(str(obj.get("seq") or ""))
+        # 分类整段一次跑（跨命令累计全量趟数——逐命令分类会把上限计数器每命令
+        # 清零，两趟分散在两条命令里就漏拦）；violations 与 cmds 摘要一一对应
+        # （分类器按入参顺序产出），seq 按同序回填（无 seq 的帧留空不猜）。
+        violations, class_notes = _classify_suite_calls(cmds)
+        notes.extend(class_notes)
+        for v in violations:
+            ci = v.get("cmd_index")
+            ok = isinstance(ci, int) and 0 <= ci < len(frame_seqs)
+            v["seq"] = frame_seqs[ci] if ok else ""
+        if dropped:
+            notes.append("工具帧 arguments 畸形 %d 条（非 JSON/缺字段），未判" % dropped)
+        if turns > 1:
+            # 段归属裁定（review T2）：以「最后 user/message 帧」为界——界后即本段
+            # 全部回合入计数；界前回合属前段，不判。
+            notes.append("本档共 %d 个回合，取证面只判最后 user/message 帧之后的"
+                         "本段（其余 %d 回合属前段未判）" % (turns, turns - 1))
+        kinds: Dict[str, int] = {}
+        for v in violations:
+            kinds[v.get("kind", "?")] = kinds.get(v.get("kind", "?"), 0) + 1
+        notes.append("取证面套件调用分类汇总：%s" % json.dumps(kinds, ensure_ascii=False))
+        return violations, notes
+    except Exception as e:  # fail-open=静默漏判红不可取，响亮 note（与既有执法同立场）
+        notes.append("取证面扫描异常 %s: %s（本段未判）" % (type(e).__name__, e))
+        return violations, notes
+
+
+def _stamp_result_file_suite(rfile: Path, res: "StageResult") -> None:
+    """取证面违规写回结果文件（票面点名落盘；新键 full_suite_violations）。
+    幂等：文件已有该键则不重写（重试/缓存命中安全）——与
+    _stamp_result_file_integration 同款模式，键不同互不干扰。"""
+    try:
+        raw = json.loads(rfile.read_text("utf-8"))
+    except Exception:
+        return
+    if not isinstance(raw, dict) or _SUITES_VIOL_KEY in raw:
+        return
+    raw[_SUITES_VIOL_KEY] = getattr(res, _SUITES_VIOL_KEY, [])
+    raw["status"] = res.status
+    raw["summary"] = res.summary
+    try:
+        rfile.write_text(json.dumps(raw, ensure_ascii=False, indent=1) + "\n",
+                         "utf-8")
+    except Exception:
+        pass
+
+
+def _apply_suite_budget(res: "StageResult", cwd: Path,
+                        args: "AgentStageArgs") -> "StageResult":
+    """走查/仲裁段取证面护栏归位（票 t260924-09，挂点与 _apply_integration_discipline
+    同款双返回点：缓存命中/真 spawn；stub 与 lane_dsh 预检拒绝路径有意不挂——
+    理由同 _apply_integration_discipline docstring 取舍清单）。
+
+    - role != integration → 原样返回（developer 段归集成禁跑执法管，互不越界）；
+    - 违规 → status=failed + summary 前缀点名 + report/evidence 追加 +
+      结果文件回写 full_suite_violations（幂等锚点）；
+    - 无违规 → 分类统计只进 integration_scan_note + 活动日志（不翻红绿，
+      不回写文件——note 是说明性信号非失败信号）。
+    StageResult 的 full_suite_violations 字段随本票新增（shared.py，defaulted
+    空——老事件反序列化安全）。"""
+    if getattr(args, "role", "") != "integration":
+        return res
+    violations, notes = _scan_suite_sessions(cwd, args.ticket_id, args.role)
+    if notes:
+        res.integration_scan_note = "；".join(notes)
+        activity.logger.info("[%s/%s] 取证面扫描注记：%s",
+                             args.ticket_id, args.stage_id,
+                             res.integration_scan_note)
+    already = bool(getattr(res, _SUITES_VIOL_KEY, []))  # 幂等缓存重入防重复改写
+    if not violations:
+        return res
+    setattr(res, _SUITES_VIOL_KEY, violations)
+    if already:
+        return res
+    first = violations[0]
+    res.status = "failed"
+    # summary 必点名首条命令原文（t260924-09 缺陷③）：与 t260921-04 禁跑执法
+    # 同族契约——人读台面一行须能定位是哪条命令越界，kind/detail 只作归因。
+    res.summary = ("【取证面超限】%s：`%s`（%s）｜ 原摘要：%s"
+                   % (first.get("kind", "?"), first.get("cmd", ""),
+                      first.get("detail", ""), res.summary))[:500]
+    res.report = (res.report or "") + "\n\n## 取证面护栏命中（t260924-09）\n" + "\n".join(
+        "- `%s`（%s：%s，会话 seq=%s）" % (v.get("cmd", ""), v.get("kind", ""),
+                                           v.get("detail", ""), v.get("seq", ""))
+        for v in violations)
+    res.evidence = (res.evidence or "") + "\nfull_suite_violations=" + json.dumps(
+        violations, ensure_ascii=False)
+    _stamp_result_file_suite(Path(args.result_file), res)
+    activity.logger.info("[%s/%s] 取证面护栏：%d 条命中，首类=%s",
+                         args.ticket_id, args.stage_id, len(violations),
+                         first.get("kind", "?"))
+    return res
+
+
 def _patch_result_prompt(rfile: Path, prompt: str) -> None:
     """Write the full prompt into the result JSON's prompt field (viewable from the
     ticket console's Agent log tab). Skipped when already present (no overwrite; the
@@ -2763,7 +3113,11 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
             # t260921-04（挂点①幂等缓存）：developer 段集成禁跑执法扫描——缓存
             # 命中路径同样执法（重试/重启后红不丢：_read_result 已带回字段，
             # 归位幂等不重复改写）。
-            return _apply_integration_discipline(res, cwd, args)
+            # t260924-09（挂点①幂等缓存）：走查/仲裁段取证面护栏——链在
+            # developer 集成禁跑执法之后（角色互斥，同一返回点双执法）。
+            res = _apply_suite_budget(
+                _apply_integration_discipline(res, cwd, args), cwd, args)
+            return res
 
     if os.environ.get("SANDBAR_AGENT_STUB") == "1":
         # Self-test / demo stub: write our own result file and return (no agent
@@ -2913,7 +3267,11 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
                     # t260921-04（挂点②真 spawn）：developer 段集成禁跑执法扫描
                     # ——stub 与 lane_dsh 预检拒绝路径同样有意不挂（理由与取舍
                     # 清单见 _apply_integration_discipline docstring）。
-                    return _apply_integration_discipline(res, cwd, args)
+                    # t260924-09（挂点②真 spawn）：取证面护栏同挂点链后
+                    # （stub 与 lane_dsh 预检拒绝路径有意不挂，理由同执法 docstring）。
+                    res = _apply_suite_budget(
+                        _apply_integration_discipline(res, cwd, args), cwd, args)
+                    return res
             rc = proc.poll()
             if rc is not None:
                 # t260922-11：先收尸再动档（reap 幂等——finally 的二次 reap 无害，

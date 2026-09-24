@@ -2663,6 +2663,11 @@ class StageResult:
     # 扫描未覆盖/异常的响亮注记（零静默；**不翻红绿**——K2 观察项：同票同角色续
     # 同会话使「多回合 note」常驻，属说明性信号非失败信号）。缺省 "" 同上。
     integration_scan_note: str = ""
+    # t260924-09（KI-117 走查/仲裁段取证面瘦身）：取证面护栏命中清单（每条
+    # {cmd,kind,detail,cmd_index,seq}）——worker 执行面扫 integration 角色 agent 段
+    # 会话流水得出：定点复跑豁免；口径漂移/口径含非法 token/全量超上限（每段
+    # 非定点全套 ≤1 趟）=段红+票面点名。缺省 [] = 老回执重放安全。
+    full_suite_violations: List[Dict[str, str]] = field(default_factory=list)
 
 
 # handover_runs 的形状上限（t260917-08：防御面非功能面——条数/长度上限在 normalize

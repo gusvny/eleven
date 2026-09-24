@@ -283,7 +283,9 @@ def test_d5_four_path_hooks_source_lock():
     assert src.count("_apply_integration_discipline(") == 3   # def + 2 调用点
     assert "res = _apply_env_signal(cached" in src
     assert "res = _apply_env_signal(res" in src
-    assert "return _apply_integration_discipline(res, cwd, args)" in src
+    # t260924-09：执法返回点再链取证面护栏（_apply_suite_budget 包外层），锁随
+    # 挂点形态忠实更新——链式返回双路在场，漂移必绊（锁意图不变）。
+    assert "_apply_integration_discipline(res, cwd, args), cwd, args)" in src
     assert "return _apply_env_signal(stub" not in src
 
 

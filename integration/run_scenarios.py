@@ -1670,6 +1670,16 @@ SCENARIOS = [
      "KI-116 巡检套件回执信号面（t260924-05，灰盒 L3 真缝夹具，秒级 ro：生产入口 server/admin.py call verify_lane lane=integ × 临时 git 仓 verify.yaml integration.cmd→桩执行器 × SANDBAR_SCENARIO_ONLY 定点，零 docker 零端口零真仓接触，夹具自足不递归真注册表）：A 信号面——正常套件回执 ran>0、green=true、ran==pass+fail==场景行数且行名与名单一致（巡检回执必须产出真实场景信号且计数不撒谎——病象「连续 ≥6 期 ran=0」的正面锁）；B 零信号显式红——桩零选中（SANDBAR_SCENARIO_ONLY 指向缺席名，输出 JSON 行+exit 0，恰为现状「ran==0 且有 { 开头行且 exit==0→静默绿」逃逸口的触发形态）→回执必须 green=false 且 err 非空点名，绝不得 ok+绿+ran=0（病象②「260918 期 334.5s 非超时 ran=0 绿」的事故回归锁）；C 量级一致棒——同套件经生产入口重复下单两次 ran 恒等（差 0，满足「≤1 且 ≤10% 取严」双容差，必做③棒「与 dev-lane 同套件量级一致」的集成面）；D 畸形 timeout 载荷 fail-closed——timeout=非数字进载荷→显式红不静默放绿（方案 v2 步2 载荷加键的形状变更面；老形状缺键回落=本条 A/C 本就在用老形状载荷，天然覆盖 replay 安全）。intent 分工：developer 单测锁不等式组（BATCH+300<INTEG_RUN_TO<SUITE_TO 等）/env 组装纯函数/畸形回执函数级矩阵——本条不重复结构锁，只锁生产入口旅程的回执契约与事故形态；t260922-12 场景族守门侧台账采信边界（基线相/软链/欠账）——本条不触台账语义；t260913-03 锁池排除声明面——本条固定缺省 apply_skip_pools 不涉排除。实现落地前 B/D 红属预期（TDD 信号：逃逸口与 fail-closed 尚未落地），arbitrate/merge 期必须全绿；git 缺失=ENV_FAIL exit 2",
      "python3 integration/t260924-05/sc_ki116_inspection_receipt_signal.py", "ro"),
 
+    ("t260924-09-suite-guard-receipt",
+     "走查/仲裁段全量套件守卫·归位回执契约（t260924-09，灰盒 L2/L3 真引擎模块×真会话档夹具，ro 离线秒级；判据锚公开回执面=结果文件键/status/summary 语义）：A 定点豁免——`--only` 复现单条红不翻红不落键（必做①正面通道不许被拦死）；B 口径漂移——裸全量→status=failed+结果文件 full_suite_violations+summary 点名首条命令（必做② fail-loud）；C 非法 token 分诊——`--exclude-pools engin`（执行器对违规 token 只剥离不判红=实际零排除全量）照样命中且归因含「非法」分诊语义，不与裸全量混诊（T1 报错精确）；D 次数上限——闸口径合规全量第一趟豁免、同段第二趟命中超上限且归因点名（R2：合规形态同样入计数）；E 幂等——文件已带守卫键重入不重写、非 dict 坏档不抛；F 边界——developer 段不进本守卫（禁跑执法另有通道不串味）、段归属=最后 user 帧之后前段回合不追溯（T2 单一口径）。intent 分工：developer L1 守分类纯函数真值表与命令形态矩阵，本条守真会话档→真扫描→真结果文件回写整链（单测过≠归位接了线）；t260921-04 族守 developer 禁跑面、t260913-03 守执行器排除旋钮本体，不互替。实现落地前 B/C/D 红属预期（TDD 信号），arbitrate/merge 期必须全绿；zstd 缺席/引擎模块不可导入=ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260924-09/sc_t260924_09_suite_guard_receipt.py", "ro"),
+    ("t260924-09-fixed-rerun-entry",
+     "定点复跑入口契约·走查取证可复用面（t260924-09，灰盒 L3 真执行器 CLI 黑盒子进程，ro 秒级零 docker）：A `--only <在册名>` 恰跑 1 条且 PASS 行带逐条耗时 (N.Ns)——必做④「定点 vs 全量」对照证据里定点列的机械数据前提（无逐条耗时=只能拿跨场景数字顶替，t260924-04 review C1 打回病灶）；B 定点×闸口径叠加（--only … --exclude-pools engine,exclusive=走查合规定点形态）行为与 A 一致；C 叠加下 fail-closed 保持——不在册名 exit 2 一条不跑零起台秒级短路。intent 分工：t260922-12 场景族与 developer L1 已守 --only fail-closed 与解析纯面——本条只守走查取证视角的定点复跑可用性（恰一条/逐条耗时在案/叠加不变味）；t260913-03 守池排除旋钮本体，本条把排除当既定参数消费。执行器缺席/定点对象自身 ENV_FAIL=exit 2",
+     "python3 integration/t260924-09/sc_t260924_09_fixed_rerun_entry.py", "ro"),
+    ("t260924-09-walkthrough-copy-discipline",
+     "派活文案·取证纪律声明面（t260924-09，灰盒 L1 级静态契约，ro 离线秒级）：必做①文案就是本票用户可感知交付物——走查 prompt/仲裁 prompt/integration 角色 persona 三处均须含四要素：①「闸回执」即全量证据声明 ②定点入口 --only ③闸口径 engine,exclusive 字面（必做③口径一致） ④每段全套次数上限声明——文案缺声明=「机械判了文案没说」单边态（t260921-04 对称纪律）；一致性副锁：agent_activities 机械护栏侧闸口径字面与文案同源（漂移即红）。intent 分工：机械行为面归 suite-guard-receipt 与 developer L1 真值表，本条只守声明面齐备与口径字面一致不测行为。被扫文件缺席=产品红（受控资产面）；无 ENV 子用例",
+     "python3 integration/t260924-09/sc_t260924_09_walkthrough_copy_discipline.py", "ro"),
+
 ]
 
 CMD_TIMEOUT = 900
