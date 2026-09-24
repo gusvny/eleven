@@ -727,10 +727,39 @@ def sanitize_agent_home(raw_home, fallback_root, name):
     return raw_home, ""
 
 
-def sweep_stub_dir_names(instance, target):
-    """本期目录壳候选名（纯函数）：巡检泳道目录=分支名「/」→「-」化（inspection/<实例>/
-    <期> → inspection-<实例>-<期>），另认早期 <实例>-<期> 形（260922/260924 双实案
-    都要能收）。仅定向态（target 非空）有意义；空 instance/target=[]（判不准不动）。"""
-    if not instance or not target:
+def sweep_stub_dir_names(names, instance, keep="", target=""):
+    """目录壳候选筛选（纯函数；260924 验货精修升格）：从 lane_parent 现存目录名清单里
+    挑本实例的壳候选。壳名两形：inspection-<实例>-<期>（分支名「/」→「-」化）与早期形
+    <实例>-<期>（260922/20260924/20260926 三实案都要能收）。期号=YYYYMMDD 字典序即
+    时间序：定向态（target 非空）仅收精确等于该期；水位态（keep 非空）仅收**早于**水位
+    （setup 清扫自愈面，与 worktree/分支同语义）；两者皆空=[]（判不准不动）。"""
+    if not instance or (not keep and not target):
         return []
-    return ["inspection-%s-%s" % (instance, target), "%s-%s" % (instance, target)]
+    out = []
+    for name in names:
+        for pre in ("inspection-%s-" % instance, "%s-" % instance):
+            if name.startswith(pre) and name != pre:
+                period = name[len(pre):]
+                if not period.isdigit():
+                    continue
+                if target and period == target:
+                    out.append(name)
+                elif keep and not target and period < keep:
+                    out.append(name)
+                break
+    return sorted(set(out))
+
+
+def stub_embedded_repo(stub):
+    """目录壳内嵌真仓判定（260924 验货精修；t260916-20 教训承袭）——三态分明：
+    ①顶层 .git **文件**=worktree 痕迹（对象库在主仓），壳可清，**不算**嵌套仓；
+    ②顶层 .git **目录**=独立仓根（对象库在内）→ 拒拆，返回其路径；
+    ③任意更深层 .git（文件/目录）=未注册嵌套仓 → 拒拆，返回其路径。
+    无内嵌仓 → None（可清）。"""
+    top = stub / ".git"
+    if top.is_dir():
+        return top
+    for q in stub.rglob(".git"):
+        if q != top:
+            return q
+    return None

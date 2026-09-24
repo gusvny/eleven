@@ -6818,18 +6818,21 @@ def sweep_inspection_lanes_impl(args: Dict[str, Any]) -> Dict[str, Any]:
     # 判不准不动：只认 <repo>/.lane/ 下与本期精确同名候选；内嵌 .git（未注册嵌套仓，
     # t260916-20 教训）→ 不动、点名人工处置，绝不静默销毁对象库。
     import shutil
-    from inspection_inspect import sweep_stub_dir_names
+    from inspection_inspect import stub_embedded_repo, sweep_stub_dir_names
     removed_dir_stubs: List[str] = []
-    if target:
-        lane_parent = repo / ".lane"
-        for name in sweep_stub_dir_names(instance, target):
+    lane_parent = repo / ".lane"
+    if lane_parent.is_dir():
+        names = [e.name for e in os.scandir(lane_parent) if e.is_dir()]
+        for name in sweep_stub_dir_names(names, instance, keep=keep, target=target):
             cand = lane_parent / name
             if not cand.is_dir():
                 continue
-            nested = [q for q in cand.rglob(".git")]
-            if nested:
-                errors.append("目录壳 %s 含 .git（%s；未注册嵌套仓形态，t260916-20：不静默"
-                              "销毁，人工处置）" % (cand, nested[0]))
+            # 三态守卫（260924 验货精修）：顶层 .git 文件=worktree 痕迹可清；顶层
+            # .git 目录=独立仓根、嵌套 .git=未注册嵌套仓（t260916-20）→ 拒拆点名。
+            bad = stub_embedded_repo(cand)
+            if bad is not None:
+                errors.append("目录壳 %s 内嵌真仓痕迹 %s（未注册嵌套仓形态，t260916-20："
+                              "不静默销毁，人工处置）" % (cand, bad))
                 continue
             try:
                 shutil.rmtree(cand)

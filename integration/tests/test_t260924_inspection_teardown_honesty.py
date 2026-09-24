@@ -42,7 +42,8 @@ ok(src.count("removed_dir_stubs") >= 1, "清扫回执带 removed_dir_stubs 面�
 flow_src = open(os.path.join(ENG, "inspection_flow.py"), encoding="utf-8").read()
 ok(flow_src.count("removed_dir_stubs") >= 2 and "目录壳 %d" in flow_src,
    "拆除回落渲染读 removed_dir_stubs 并点名目录壳数（读侧）")
-ok("未注册嵌套仓形态" in src and "shutil.rmtree" in src, "清扫认裸目录壳 + 嵌套仓拒拆守卫")
+ok("未注册嵌套仓形态" in src and "shutil.rmtree" in src and "stub_embedded_repo" in src,
+   "清扫认裸目录壳 + 三态守卫接线")
 ok(src.count("sanitize_agent_home(") == 1, "agent_home 守卫唯一接线点")
 
 # ---------- 棒4：纯函数矩阵 ----------
@@ -56,11 +57,35 @@ h, note = sanitize_agent_home(lane_home, fb, "it-1")
 ok(h == fb / "it-1" and "泳道锚回落" in note, "泳道锚（.lane 段）回落主仓并点名")
 h, note = sanitize_agent_home(pathlib.Path("/repo/lane-x/home"), fb, "it-1")
 ok(h == pathlib.Path("/repo/lane-x/home") and note == "", "整段匹配才拦（.lanefoo 之类不误伤）")
-ok(sweep_stub_dir_names("integration-tests", "20260924")
+from inspection_inspect import stub_embedded_repo  # noqa: E402
+listing = ["inspection-integration-tests-20260924", "integration-tests-20260924",
+           "inspection-integration-tests-20260925", "t260922-04", "dev-x"]
+ok(sweep_stub_dir_names(listing, "integration-tests", target="20260924")
    == ["inspection-integration-tests-20260924", "integration-tests-20260924"],
-   "目录壳候选名双形（分支化名+早期形）")
-ok(sweep_stub_dir_names("", "20260924") == [] and sweep_stub_dir_names("x", "") == [],
-   "空 instance/target=[]（判不准不动）")
+   "定向态：本期两形都收、别期/开发泳道不碰")
+ok(sweep_stub_dir_names(listing, "integration-tests", keep="20260926")
+   == ["inspection-integration-tests-20260924", "inspection-integration-tests-20260925",
+       "integration-tests-20260924"],
+   "水位态：早于水位的壳自愈面（20260926 本期不出手）")
+ok(sweep_stub_dir_names(listing, "integration-tests") == []
+   and sweep_stub_dir_names(listing, "") == [],
+   "空 instance/双空=[]（判不准不动）")
+ok(sweep_stub_dir_names(["inspection-integration-tests-x1", "integration-tests-abc"], "integration-tests",
+                        target="20260924") == [],
+   "非数字期号不收（畸形名判不准不动）")
+# 三态守卫矩阵（260926 验货精修：worktree 痕迹 vs 真仓）
+import tempfile  # noqa: E402
+with tempfile.TemporaryDirectory() as td:
+    t = pathlib.Path(td)
+    a = t / "gitfile_stub"; a.mkdir(); (a / ".git").write_text("gitdir: ../x")
+    (a / "junk.txt").write_text("x")
+    ok(stub_embedded_repo(a) is None, "态①顶层 .git 文件=worktree 痕迹，壳可清（不误伤）")
+    b = t / "repo_stub"; b.mkdir(); (b / ".git").mkdir()
+    ok(stub_embedded_repo(b) == b / ".git", "态②顶层 .git 目录=独立仓根，拒拆点名")
+    c = t / "nested_stub"; c.mkdir(); (c / "sub").mkdir(); (c / "sub" / ".git").mkdir()
+    ok(stub_embedded_repo(c) == c / "sub" / ".git", "态③嵌套 .git=未注册嵌套仓，拒拆点名")
+    d = t / "bare_stub"; d.mkdir(); (d / "agent-home").mkdir()
+    ok(stub_embedded_repo(d) is None, "纯杂物壳（无任何 .git）可清")
 
 print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (P, F))
 sys.exit(1 if F else 0)
