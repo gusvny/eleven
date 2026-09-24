@@ -345,6 +345,7 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                              project_key: str, repo_root: str = "",
                              scan_face: str = "test", decl_path: str = "",
                              task_queue: str = "",
+                             per_ticket_queue: bool = False,
                              workflow_cls: Any = None, input_cls: Any = None,
                              grace_sec: Optional[float] = None,
                              now_fn=time.time) -> Dict[str, Any]:
@@ -365,7 +366,8 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
 
     workflow_cls/input_cls 缺省=懒 import inspection_flow（CLI/worker 进程；单测注 fake
     免 temporalio 依赖）。grace_sec 缺省=CLAIM_GRACE_SEC（测试注入用）。"""
-    from shared import inspection_search_attributes, next_ticket_seq_from_ids
+    from shared import (inspection_search_attributes, next_ticket_seq_from_ids,
+                        ticket_task_queue)
     if workflow_cls is None or input_cls is None:
         from inspection_flow import InspectionPeriodicInput, InspectionPeriodicWorkflow
         workflow_cls = workflow_cls or InspectionPeriodicWorkflow
@@ -538,7 +540,9 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
         try:
             handle = await client.start_workflow(
                 workflow_cls, payload,
-                id=ticket_id, task_queue=task_queue,
+                id=ticket_id,
+                task_queue=(ticket_task_queue(ticket_id) if per_ticket_queue
+                            else task_queue),
                 search_attributes=inspection_search_attributes(
                     str(project_key or ""), iid, str(period)))
             if superseded_ticket_id:
@@ -634,3 +638,15 @@ async def resolve_period_ticket_id(client: Any, instance_id: str, period: str) -
                 "（瞬态）——稍后重试" % (instance_id, period)}
     return {"ok": False, "error": "（实例 %s 期 %s）查无同期巡检票（SA 查无 + 旧形票不存在）"
             "——查无此票≠连不上；起票走 inspection_trigger.py trigger" % (instance_id, period)}
+
+
+async def open_produce_period_ticket(client: Any, **kw) -> Dict[str, Any]:
+    """produce 期票起票路由（t260925-01 产出型巡检）：open_period_ticket 的
+    produce 定形薄壳——per-ticket 队列（KI-113 口径，produce 不落共享队列）+
+    InspectionProduceWorkflow/Input。kw 其余键（instance_id/period/project_key/…）
+    语义与 open_period_ticket 一致。"""
+    from inspection_flow import InspectionProduceInput, InspectionProduceWorkflow
+    kw.setdefault("per_ticket_queue", True)
+    kw.setdefault("workflow_cls", InspectionProduceWorkflow)
+    kw.setdefault("input_cls", InspectionProduceInput)
+    return await open_period_ticket(client, **kw)

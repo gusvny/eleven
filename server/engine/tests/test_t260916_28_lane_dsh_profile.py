@@ -380,8 +380,10 @@ def test_u13_constant_count_and_i02_pin():
     assert SRC_DL.count("workflow.patched(LANE_DSH_BLOCK_PATCH_ID)") == 6
     # i02 钉复述（钉实位=integration/t260901-21/i02_spawn_wiring.py:46；两钉同源同值）
     # t260916-22：巡检 inspect 段 run_inspection_inspect 新增第 4 调用点（1 定义 + 4 调用
-    # =5），i02 普查已同步 4→5——本钉随改（merge 双方全保留时的连带更新）。
-    assert SRC_AA.count("_prepare_agent_spawn(") == 5
+    # =5），i02 普查已同步 4→5；t260925-01：产出型巡检 produce 段 run_inspection_produce
+    # 新增第 5 调用点（1 定义 + 5 调用 =6），i02 普查已同步 5→6——本钉随改
+    # （extend-locks 有意同步，merge 双方全保留时的连带更新，非拆锁）。
+    assert SRC_AA.count("_prepare_agent_spawn(") == 6
 
 
 def _branch_head(src: str, anchor: int) -> int:

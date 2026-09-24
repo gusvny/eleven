@@ -8186,8 +8186,209 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
         logf.close()
 
 
+@activity.defn
+async def run_inspection_produce(args: Dict[str, Any]) -> Dict[str, Any]:
+    """巡检 produce 段（t260925-01 产出型巡检底座）：spawn 受限可写 agent 在**本期自有
+    泳道**内直接产文档 change，随后机械自检四闸（写集/保护面/零change/文档自检——
+    纯函数在 inspection_produce，本壳只做 IO 编排）。
+
+    与 run_inspection_inspect 的差异（取舍清单见方案 C1）：
+      - pin=produce_write_pin_patch(docs_root)（workspace-write 受限可写，非只读钉；
+        docs_root 粒度的越界由自检写集闸 fail-closed 拒收并点名——两层口径见该函数注）；
+      - 基座=泳道 worktree（有 base_ref 时差分=对基点 name-only；无 base_ref 的
+        隔离台/桩场景回落 status --porcelain——差分真源=git，不是 agent 自报）；
+      - 超时/退出码处理与 inspect 同款（组粒度 reap、不假绿、不自动重试）；
+      - 桩：SANDBAR_PRODUCE_STUB=1 + SANDBAR_PRODUCE_STUB_FILE（UT/场景注入缝，
+        夹具与真 agent 同一份围栏 JSON 契约；桩路径也跑差分+自检=桩-闸不同源防假绿）。
+    本活动**永不落盘 main**：产出只在泳道，落盘权在人审门后的 merge/reject。
+    """
+    from inspection_produce import (
+        ProduceParseError, SelfcheckError, build_produce_prompt,
+        check_protected_overlap, check_write_set, check_zero_change,
+        doc_selfcheck, mint_change_ids, parse_agent_changes,
+        produce_write_pin_patch)
+
+    def _err(msg: str) -> Dict[str, Any]:
+        return {"ok": False, "error": msg}
+
+    instance_id = str(args.get("instance_id") or "")
+    period = str(args.get("period") or "")
+    ticket_id = str(args.get("ticket_id") or "")
+    docs_root = str(args.get("docs_root") or "docs").strip().rstrip("/") or "docs"
+    base_dir = str(args.get("base_dir") or "")
+    base_ref = str(args.get("base_ref") or "")
+    project = str(args.get("project_key") or "")
+    timeout_sec = float(args.get("timeout_sec") or 0) or 1800.0
+    focus = [str(p) for p in (args.get("focus") or []) if str(p).strip()]
+    if not instance_id or not period or not base_dir:
+        return _err("produce 输入缺 instance/period/base_dir（fail-closed，不开空工期）")
+    base = Path(base_dir)
+    if not base.is_dir():
+        return _err("泳道工作副本不存在：%s" % base_dir)
+
+    from shared import INSPECTION_DIR, OUT_DIR as _OUT_DIR
+    from inspection_inspect import sanitize_agent_home, build_persona_patch
+    ledger_dir = Path(str(args.get("ledger_dir")
+                          or os.environ.get("SANDBAR_INSPECTION_DIR")
+                          or INSPECTION_DIR))
+    agent_home_raw = str(args.get("agent_home")
+                         or ledger_dir / "agent-home" / ("%s-%s" % (instance_id, period)))
+    home, home_note = sanitize_agent_home(
+        Path(agent_home_raw), Path(_OUT_DIR) / "inspection" / "agent-home",
+        "%s-%s" % (instance_id, period))
+    if home_note:
+        activity.logger.warning("[produce] agent_home %s（原锚 %s）", home_note, agent_home_raw)
+    home.mkdir(parents=True, exist_ok=True)
+
+    prompt = build_produce_prompt(instance_id, period, docs_root, base_dir, base_ref)
+    if focus:
+        prompt += "\n本期为授权后复跑：只处理以下保护面文件的改动：%s\n" % "、".join(focus)
+
+    # ---- 机械差分（改动了什么的真源=git，不信 agent 自报） ----
+    # 泳道内引擎协调目录（.sandbar/.dsh/.suyou）是 spawn 预备面产物，不是 agent
+    # 改动——与 dev-lane SETTLE_PATHSPEC 排除 .sandbar 同一口径，差分必须滤掉，
+    # 否则写集闸误报越界（验收 gen1 实测：.sandbar 进 diff → A2 误红）。
+    _INFRA_DIR_PREFIXES = (".sandbar/", ".dsh/", ".suyou/")
+
+    def _diff_paths() -> Tuple[List[str], str]:
+        try:
+            if base_ref:
+                proc_d = subprocess.run(
+                    ["git", "-C", str(base), "diff", "--name-only", base_ref],
+                    capture_output=True, text=True, timeout=60, check=False)
+            else:
+                proc_d = subprocess.run(
+                    ["git", "-C", str(base), "status", "--porcelain"],
+                    capture_output=True, text=True, timeout=60, check=False)
+            if proc_d.returncode != 0:
+                return [], "git 差分失败（rc=%s）：%s" % (
+                    proc_d.returncode, (proc_d.stderr or "").strip()[-200:])
+            rows = []
+            for raw in proc_d.stdout.splitlines():
+                if not raw.strip():
+                    continue
+                # porcelain（status --porcelain）行=XY<space>path；name-only 行=path
+                p = raw[3:].strip().rstrip("/") if not base_ref and len(raw) > 3 \
+                    else raw.strip().rstrip("/")
+                if p in (".sandbar", ".dsh", ".suyou") or \
+                        p.startswith(_INFRA_DIR_PREFIXES):
+                    continue
+                rows.append(p)
+            return sorted({r for r in rows if r}), ""
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return [], "git 差分不可执行：%s: %s" % (type(e).__name__, e)
+
+    def _selfcheck(agent_changes: List[Dict[str, Any]], zero_change: bool,
+                   evidence: List[str], diff_paths: List[str], diff_err: str) -> Dict[str, Any]:
+        """四闸编排（纯函数消费；IO 已在 _diff_paths 收口）。"""
+        all_paths = sorted({str(c.get("path") or "") for c in agent_changes} | set(diff_paths))
+        try:
+            out_of_root = check_write_set(all_paths, docs_root)
+        except SelfcheckError as e:
+            out_of_root = [{"path": "*", "reason": str(e)}]
+        from path_gates import PROTECTED_PATHS
+        protected = check_protected_overlap(all_paths, PROTECTED_PATHS)
+        zero_err = check_zero_change(agent_changes, zero_change, evidence)
+        doc_finds = doc_selfcheck(base, docs_root)
+        return {"all_paths": all_paths, "out_of_root": out_of_root,
+                "protected_overlap": protected, "zero_change_error": zero_err,
+                "doc_findings": doc_finds, "diff_error": diff_err}
+
+    # ---- 桩捷径（UT/场景；与真 agent 同围栏契约，差分/自检链照跑=桩-闸不同源防假绿） ----
+    if os.environ.get("SANDBAR_PRODUCE_STUB") == "1":
+        stub_file = os.environ.get("SANDBAR_PRODUCE_STUB_FILE") or ""
+        if not stub_file or not Path(stub_file).is_file():
+            return _err("produce 桩已声明（SANDBAR_PRODUCE_STUB=1）但夹具缺失：%r" % stub_file)
+        try:
+            parsed = parse_agent_changes(
+                Path(stub_file).read_text(encoding="utf-8"))
+        except (OSError, ProduceParseError) as e:
+            return _err("produce 桩夹具解析失败（与真 agent 同契约 fail-closed）：%s" % e)
+        diff_paths, diff_err = _diff_paths()
+        sc = _selfcheck(parsed["changes"], parsed["zero_change"],
+                        parsed["evidence"], diff_paths, diff_err)
+        activity.heartbeat("produce stub 完成（%d 条）" % len(parsed["changes"]))
+        return {"ok": True, "result": {
+            "changes": mint_change_ids(parsed["changes"]),
+            "zero_change": parsed["zero_change"], "evidence": parsed["evidence"],
+            "selfcheck": sc, "meta": {"stub": True, "docs_root": docs_root,
+                                      "base_dir": base_dir, "focus": focus}}}
+
+    # ---- 真 spawn（host 形态；与 inspect 同链，只换 pin 与注入缝） ----
+    try:
+        _, env = _prepare_agent_spawn(
+            base, "inspection", "", ticket_id, home, "produce", project=project,
+            agent_home=home)
+    except Exception as e:  # noqa: BLE001
+        return _err("produce spawn 预备失败：%s: %s" % (type(e).__name__, e))
+    persona_f = home / "patch_produce_persona.yml"
+    persona_f.write_text(build_persona_patch(), encoding="utf-8")
+    pin_f = home / "patch_produce_write.yml"
+    pin_f.write_text(produce_write_pin_patch(docs_root), encoding="utf-8")
+    # spawn env 卫生（merge_check gen4 实案）：runner 侧的相对 PYTHONPYCACHEPREFIX
+    # 会随 env 泄漏进泳道——agent 进程启动导入即往 cwd/out/pycache 写字节码，把
+    # 引擎产物写进工作副本 → 写集闸误报越界。agent 不需要字节码缓存：摘前缀 + 禁写。
+    env.pop("PYTHONPYCACHEPREFIX", None)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    cmd = (shlex.split(os.environ.get("SANDBAR_PRODUCE_CMD") or "")
+           or _dsh_resolved(project)["cmd"]) \
+        + ["--patch", str(persona_f), "--patch", str(pin_f), prompt]
+    out_f = home / "produce_agent_output.log"
+    activity.logger.info("[inspection/%s] spawn 产出型 agent（docs_root=%s 基座=%s）",
+                         instance_id, docs_root, base_dir)
+    logf = open(out_f, "a", buffering=1)
+    proc = agent_runtime.spawn_agent(cmd, cwd=base, env=env, logf=logf,
+                                     ticket_id=ticket_id, stage_tag="produce",
+                                     project=project, lane=base,
+                                     log=activity.logger.info, force_host=True)
+    from inspection_produce import PRODUCE_DEADLINE_MARGIN_SEC
+    deadline = time.monotonic() + timeout_sec - PRODUCE_DEADLINE_MARGIN_SEC
+    t0 = time.monotonic()
+    try:
+        while True:
+            rc = proc.poll()
+            if rc is not None:
+                break
+            if time.monotonic() > deadline:
+                proc.reap(ticket_id, "produce")
+                return _err("agent 未完成（超时：预算 %.0fs−复核余量 %.0fs 已到；"
+                            "进程组已回收，本期不假绿——下期再来或调大 produce 预算）"
+                            % (timeout_sec, PRODUCE_DEADLINE_MARGIN_SEC))
+            activity.heartbeat("produce agent 运行中（%.0fs/%.0fs）"
+                               % (time.monotonic() - t0, timeout_sec))
+            await asyncio.sleep(min(float(POLL_SEC), 5.0))
+        text = _read_file_tail(out_f)
+        proc.reap(ticket_id, "produce")
+        if rc != 0:
+            return _err("agent 退出码 %s（未完成）；输出尾：%s" % (rc, text[-400:]))
+        try:
+            parsed = parse_agent_changes(text)
+        except ProduceParseError as e:
+            return _err("agent 输出解析失败：%s；输出尾：%s" % (e, text[-400:]))
+        diff_paths, diff_err = _diff_paths()
+        sc = _selfcheck(parsed["changes"], parsed["zero_change"],
+                        parsed["evidence"], diff_paths, diff_err)
+        return {"ok": True, "result": {
+            "changes": mint_change_ids(parsed["changes"]),
+            "zero_change": parsed["zero_change"], "evidence": parsed["evidence"],
+            "selfcheck": sc,
+            "meta": {"docs_root": docs_root, "base_dir": base_dir,
+                     "base_ref": base_ref, "focus": focus, "agent_home": str(home),
+                     "output_log": str(out_f),
+                     "used_sec": round(time.monotonic() - t0, 1)}}}
+    finally:
+        # 全终态回收（KI-009 同款）：正常/报错/超时/取消四路都走到；reap 绝不外抛
+        try:
+            proc.reap(ticket_id, "produce")
+        except Exception:  # noqa: BLE001
+            pass
+        logf.close()
+
+
 ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     prepare_human_gate, prepare_workspace, merge_check, merge,
+    # t260925-01 产出型巡检 produce 段（受限可写 agent + 机械自检四闸）
+    run_inspection_produce,
     prepare_conflict_resolution, settle_conflict_resolution,
     # t260925-04：实际改动文件清单收集（文件级爆炸半径输入面；漏注册=运行时才炸）
     changed_files,

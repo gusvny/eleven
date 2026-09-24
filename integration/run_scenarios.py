@@ -77,6 +77,10 @@ import tempfile
 import time
 
 SCENARIOS = [
+    # ---- t260925-01: 产出型巡检底座 + doc 面（lane-produced doc changes for human merge） ----
+    ("t260925-01-inspection-produce-doc-face",
+     "产出型巡检底座+doc 面验收棒（t260925-01，灰盒秒级零 docker，与既有巡检场景族不同 intent=产 change 交人审而非只报告）：A 声明面——实例键 mode（词表 report|produce，缺省 report=未声明零行为）/docs_root（引擎默认 docs/、声明可覆盖），坏值 fail-closed 点名值本身，排程 payload 携带两键（A6）；B 产出契约层 inspection_produce 五函数——畸形输入（坏 JSON/多围栏/空围栏/无围栏）fail-closed、写集闸越界/`../`逃逸逐条点名（A2）、零 change 无证据判红（A5）、保护面交集点名不硬失败（A3 前半）、文档自检（索引指向缺失文件判红点名/畸形 index.json 降级不崩）；C workflow 源码锁——InspectionProduceWorkflow 类与 dev-lane 分链、两门 id=produce-close/produce-protect-authorize 不复用 inspection-close 字面值（防两类票信号串门）、reject 路径报告落账先于拆道（丢弃留痕不删台账）、produce 起票路由零共享 TASK_QUEUE 字面（KI-113 不复刻）；D A4 只读面零改动——run_inspection_inspect 不引用 produce 写钉、readonly_pin_patch 在位。实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260925-01/sc_inspection_produce_doc.py", "ro", "serial"),
     # t260924-05 KI-116 回归棒（必做③）：巡检等价路 vs dev-lane 路同一 integ 道的
     # 场景信号量级一致（ran>0、差 ≤1 且 ≤10%）；integ_timeout_sec 载荷键三态与
     # 零场景信号显式红（被拆除的静默逃逸口不复发）。夹具临时目录零 docker/console。
@@ -369,6 +373,9 @@ SCENARIOS = [
     ("check-auto-rework-trace",
      "从源码解析模块级常量：PHASE_MAIN_CHAIN（frozenset）→ set； PHASE_MAIN_ROLES（Dict）→ dict。解析失败返回 None。",
      "python3 integration/sc_check_auto_rework_trace.py"),
+    ("check-inspection-produce-chain",
+     "产出型巡检链离线源码锁+纯回放（t260925-01；temporalio 不可导入环境既定模式，sc_check_auto_rework_trace 同款）：A 声明面 mode/docs_root 两键词表与缺省 docs（A6）；B 契约面围栏强 schema 畸形回放 fail-closed+写集闸越界点名（A2）+保护面点名不硬失败（A3）+零 change 显式（A5）+受限可写 pin 形态区别于只读钉（A4）；C 活动面 run_inspection_produce 注册+桩注入缝+差分真源=git+四闸接线；D workflow 面独立 defn 无 dev-lane 段位+独立 gate id+approve 红灯闸+merge/teardown 收口（A1）；E 起票面 per_ticket_queue 参数与 trigger-produce CLI（KI-113 口径）。纯 stdlib 恒可跑，实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/sc_check_inspection_produce_chain.py"),
     ("metrics-contract-doc-structure",
      "t260901-11 M0 集成测试：契约文档存在性与结构（黑盒文档基线） // 验收对象：docs/design/metrics-api契约v1.md // - 存在、fro",
      "node integration/baselines/sc_metrics_contract_doc_structure.mjs", "ro"),

@@ -50,7 +50,7 @@ with workflow.unsafe.imports_passed_through():
 # t260913-02：复用面（与 base.py/dev_lane.py 同款——imports_passed_through 内引活动函数，
 # 让 dataclass 载荷/回执的类型提示在沙箱里正确解码；活动实现本身全在 agent_activities）。
 with workflow.unsafe.imports_passed_through():
-    from agent_activities import prepare_workspace, teardown_lane
+    from agent_activities import prepare_workspace, teardown_lane, merge
 
     from shared import MergeArgs, WorkspacePrep
 
@@ -1687,3 +1687,385 @@ async def _run_legacy_period_flow(wf: "InspectionPeriodicWorkflow",
         # 跨项目/隔离台的基点证据进票面（验收 A：基点=开跑时 main HEAD）
         wf.face["lane"] = dict(lane)
     return await wf._finalize_and_close(ticket_id, inp, period, lane)
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# t260925-01：产出型巡检 workflow（与 dev-lane 分链；段序=setup → produce → 自检
+# → 报告(含 diff) → 人审门 approve=merge / reject=discard）。
+#
+# 与 InspectionPeriodicWorkflow 的分工：报告链（本文件上方类）不动一行——produce
+# 是**独立 @workflow.defn 类**（方案备选 A 否决理由：塞进同一 defn 会把老在途票
+# replay 面拖进回归风险；工单明令「需要和 devlane 不同的工作流」）。复用面与故障
+# 模式取舍清单（create_plan v2 C1，9 项）在方案文件，此处只落差异点：
+#   - 人审唯一合并入口：sign 门（produce gate id，不带旧字面值防串门）；approve 走
+#     既有 merge 活动（squash、一票一 commit），reject 走 teardown_lane 丢弃（报告
+#     先行落账，diff 留痕可追溯——台账在门前后各写一次）；
+#   - 保护面同票授权：authorize 门（清单必须是本期 protected_overlap 子集，窄通）；
+#     授权后 produce 段对授权文件复跑一次，再回人审门；
+#   - 拒收三态（out_of_root / zero_change_error / 未授权保护面）任一在场时 approve
+#     信号拒收点名——fail-closed，绝不带红灯落 main；
+#   - 队列口径（KI-113）：produce 起票走 per-ticket 队列（open_period_ticket
+#     per_ticket_queue=True），不落共享队列。
+# ════════════════════════════════════════════════════════════════════════════════
+
+PRODUCE_DEFAULT_TIMEOUT_SEC = 1800.0
+# 产出型巡检两门 id（字面真源在本文件——workflow 消费方；produce 纯函数层的同名
+# 常量是其缺省参数镜像，等值由 UT 锁死）。不带报告链 CLOSE_GATE_ID 字面值（防串门）。
+PRODUCE_CLOSE_GATE_ID = "inspection-produce-close"
+PRODUCE_AUTHORIZE_GATE_ID = "inspection-produce-protect-authorize"
+
+
+@dataclass
+class InspectionProduceInput:
+    """产出型巡检期票输入（字段与 InspectionPeriodicInput 同名同义者语义一致；
+    compat 红线同款：多出的键老 worker 解码忽略）。"""
+
+    instance_id: str
+    # 兼容面（同 InspectionPeriodicInput.face 纪律）：open_period_ticket 起票统一传
+    # face 键——缺字段会 TypeError，故保留并给默认值；produce 链不消费该值。
+    face: str = "doc"
+    period: str = ""
+    repo_root: str = ""
+    decl_path: str = ""
+    project_key: str = ""
+
+
+@workflow.defn
+class InspectionProduceWorkflow:
+    """One produce-mode inspection period: lane → produce → self-check → report with
+    diff → human gate (approve=merge into main / reject=discard). Business refusals
+    become a blocked terminal ticket (visible, queryable), never a fake green."""
+
+    STAGES = ("setup", "produce", "selfcheck", "report", "close")
+
+    def __init__(self) -> None:
+        self.stage: str = ""
+        self.stage_state: str = "running"
+        self.status: str = "running"
+        self.decision: str = ""
+        self.face: Dict[str, Any] = {}
+        self.timeline: List[Dict[str, Any]] = []
+        self._close_sig: Optional[Dict[str, str]] = None
+        self._authorized: List[str] = []          # 已授权保护路径（窄通清单）
+        self._rerun_paths: List[str] = []         # authorize 门置；produce 复跑消费
+        self._input: Optional[InspectionProduceInput] = None
+        self._gate_err: str = ""
+
+    def _enter(self, stage: str, state: str = "running", reason: str = "") -> None:
+        self.stage = stage
+        self.stage_state = state
+        self.timeline.append({
+            "at": workflow.now().isoformat(timespec="seconds"),
+            "stage": stage, "state": state, "reason": reason})
+
+    # ---- 阻塞三态判定（纯读，approve 闸与场景共用口径） ----
+    def _approve_blockers(self, sc: Dict[str, Any]) -> List[str]:
+        blockers: List[str] = []
+        if sc.get("out_of_root"):
+            blockers.append("越界写集拒收（A2）：%s" % "、".join(
+                "%s（%s）" % (h.get("path"), h.get("reason"))
+                for h in (sc.get("out_of_root") or [])))
+        if sc.get("zero_change_error"):
+            blockers.append("零 change 声明判红（A5）：%s"
+                            % sc["zero_change_error"])
+        unauthorized = [p for p in (sc.get("protected_overlap") or [])
+                        if p not in set(self._authorized)]
+        if unauthorized:
+            blockers.append("保护面未授权（A3）：%s——签 authorize 门（gate=%s）后"
+                            "produce 段对授权文件复跑" % ("、".join(unauthorized),
+                                                      PRODUCE_AUTHORIZE_GATE_ID))
+        return blockers
+
+    # ---- signals ----
+
+    @workflow.signal
+    def sign(self, sig: Signature) -> None:
+        """人审门（approve=merge / reject=discard）。gate 不匹配忽略不误收；
+        agent 角色名拒收（agents never self-sign）；红灯在场时 approve 拒收点名。"""
+        payload, err = validate_close_signature(
+            {"who": getattr(sig, "who", ""), "gate": getattr(sig, "gate", ""),
+             "decision": getattr(sig, "decision", ""), "note": getattr(sig, "note", "")},
+            expected_gate=PRODUCE_CLOSE_GATE_ID)
+        if err:
+            self._gate_err = err
+            workflow.logger.warning("拒收签字：%s", err)
+            return
+        if payload["decision"] == "approve":
+            blockers = self._approve_blockers(self.face.get("selfcheck") or {})
+            if blockers:
+                self._gate_err = "approve 拒收（红灯在场）：%s" % "；".join(blockers)
+                workflow.logger.warning("%s", self._gate_err)
+                return
+        if self._close_sig is None:
+            self._close_sig = payload
+
+    @workflow.signal
+    def authorize(self, sig: Any) -> None:
+        """保护面同票授权（A3）：paths ⊆ 本期 protected_overlap；授权后对授权文件
+        复跑 produce（run 循环消费 _authorized）。"""
+        from inspection_produce import validate_authorize_payload  # 懒 import（沙箱纪律）
+        payload, err = validate_authorize_payload(
+            sig if isinstance(sig, dict) else {
+                "who": getattr(sig, "who", ""), "note": getattr(sig, "note", ""),
+                "gate": getattr(sig, "gate", ""), "paths": getattr(sig, "paths", [])},
+            self.face.get("selfcheck", {}).get("protected_overlap") or [])
+        if err:
+            self._gate_err = err
+            workflow.logger.warning("拒收授权：%s", err)
+            return
+        self._authorized = sorted(set(self._authorized) | set(payload["paths"]))
+        self._enter("close", self.stage_state or "running",
+                    "保护面授权（who=%s）：%s——produce 复跑中"
+                    % (payload["who"], "、".join(payload["paths"])))
+        # 标记复跑请求；run 侧 wait_condition 循环消费
+        self._rerun_paths = list(payload["paths"])
+
+    @workflow.query
+    def snapshot(self) -> Dict[str, Any]:
+        return {
+            "id": workflow.info().workflow_id,
+            "kind": "inspection",
+            "template": "inspection-produce",
+            "project": str(getattr(self._input, "project_key", "") or ""),
+            "stage": self.stage,
+            "stage_state": self.stage_state,
+            "status": self.status,
+            "decision": self.decision,
+            "face": self.face,
+            "timeline": self.timeline,
+            "gate_error": self._gate_err,
+        }
+
+    # ---- run ----
+
+    @workflow.run
+    async def run(self, inp: InspectionProduceInput) -> Dict[str, Any]:
+        ticket_id = workflow.info().workflow_id
+        repo_root = str(inp.repo_root or "")
+        # 声明决议（与报告链同源活动）：produce 模式校验 + docs_root 取声明值（A6）
+        plan_raw: Any = await workflow.execute_activity(
+            "resolve_inspection_plan",
+            args=[{"instance_id": inp.instance_id, "decl_path": inp.decl_path}],
+            start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
+        if not (plan_raw or {}).get("ok"):
+            return await self._blocked(
+                ticket_id, inp, "setup",
+                "声明决议失败：%s" % ((plan_raw or {}).get("error") or "未知"), None)
+        plan: Dict[str, Any] = (plan_raw or {}).get("result") or {}
+        if str(plan.get("mode") or "report") != "produce":
+            return await self._blocked(
+                ticket_id, inp, "setup",
+                "实例 mode=%r 非 produce（报告链实例请走 InspectionPeriodicWorkflow）"
+                % str(plan.get("mode") or "report"), None)
+        docs_root = str(plan.get("docs_root") or "docs")
+        period = inp.period or period_key_in_tz(workflow.now(), str(plan.get("tz") or ""))
+        validate_period_key(inp.instance_id, period)
+        # ---- setup：清残留 → 基点 → prepare_workspace（与报告链 _setup_lane 同源
+        #      活动序；独立实现防两链 replay 面互相牵连） ----
+        self._enter("setup", "running", "产出型巡检自有泳道（docs_root=%s）" % docs_root)
+        try:
+            worktree, branch = inspection_lane_paths(inp.instance_id, period, repo_root)
+        except ValueError as e:
+            return await self._blocked(ticket_id, inp, "setup", str(e), None)
+        swept: Any = await workflow.execute_activity(
+            "sweep_inspection_lanes",
+            args=[{"instance_id": inp.instance_id, "repo_root": repo_root,
+                   "keep_period": period}],
+            start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
+        head: Any = await workflow.execute_activity(
+            "resolve_main_head", args=[{"repo_root": repo_root}],
+            start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
+        head_res = (head or {}).get("result") or {}
+        if not (head or {}).get("ok") or not head_res.get("sha"):
+            return await self._blocked(
+                ticket_id, inp, "setup",
+                "基点解析失败（main HEAD）：%s" % ((head or {}).get("error") or "未知"), None)
+        lane = {"worktree": worktree, "branch": branch,
+                "base_ref": str(head_res["sha"]), "docs_root": docs_root,
+                "instance_id": inp.instance_id, "repo_root": repo_root,
+                "period": period}
+        prep_raw: Any = await workflow.execute_activity(
+            prepare_workspace,
+            WorkspacePrep(ticket_id=ticket_id,
+                          workspace={"type": "worktree", "path": worktree},
+                          branch=branch, base_ref=lane["base_ref"]),
+            start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
+        prep = prep_raw if isinstance(prep_raw, dict) else {
+            "ok": getattr(prep_raw, "ok", False), "action": getattr(prep_raw, "action", ""),
+            "error": getattr(prep_raw, "error", "")}
+        if not prep.get("ok"):
+            return await self._blocked(
+                ticket_id, inp, "setup",
+                "泳道搭不起来（action=%s）：%s" % (prep.get("action"), prep.get("error")),
+                lane)
+        self._enter("setup", "running", "泳道就绪：%s（基点 %s）"
+                    % (worktree, lane["base_ref"]))
+        # ---- produce → 自检（首趟；授权复跑的门循环在 _finalize_and_close） ----
+        result: Dict[str, Any] = {}
+        produce_raw: Any = await workflow.execute_activity(
+            "run_inspection_produce",
+            args=[{"instance_id": inp.instance_id, "period": period,
+                   "ticket_id": ticket_id, "docs_root": docs_root,
+                   "base_dir": worktree, "base_ref": lane["base_ref"],
+                   "project_key": getattr(inp, "project_key", ""),
+                   "timeout_sec": PRODUCE_DEFAULT_TIMEOUT_SEC,
+                   "focus": []}],
+            start_to_close_timeout=timedelta(
+                seconds=PRODUCE_DEFAULT_TIMEOUT_SEC + 300),
+            retry_policy=RetryPolicy(maximum_attempts=1))
+        if not (produce_raw or {}).get("ok"):
+            return await self._blocked(
+                ticket_id, inp, "produce",
+                str((produce_raw or {}).get("error") or "produce 段失败"), lane)
+        result = (produce_raw or {}).get("result") or {}
+        sc = dict(result.get("selfcheck") or {})
+        sc["authorized_paths"] = list(self._authorized)
+        # ---- report：面 + 台账（diff/自检/零 change 全量进报告——A5 显式，不留空壳） ----
+        self._enter("report", "running",
+                    "自检完成（diff %d 文件；越界 %d / 保护面 %d / 零change=%s / 文档自检红 %d）"
+                    % (len(sc.get("all_paths") or []), len(sc.get("out_of_root") or []),
+                       len(sc.get("protected_overlap") or []),
+                       "无" if not sc.get("zero_change_error") else "红",
+                       len(sc.get("doc_findings") or [])))
+        self.face = {
+            "ticket_id": ticket_id, "instance_id": inp.instance_id,
+            "period": period, "template": "inspection-produce",
+            "docs_root": docs_root, "lane": lane,
+            "mode": "produce",
+            "changes": result.get("changes") or [],
+            "zero_change": bool(result.get("zero_change")),
+            "zero_change_conclusion": (
+                "本期零 change（显式声明，证据 %d 条）" % len(result.get("evidence") or [])
+                if result.get("zero_change") else "本期产出 %d 条 change 待人审"
+                % len(result.get("changes") or [])),
+            "evidence": result.get("evidence") or [],
+            "selfcheck": sc,
+            "meta": dict(result.get("meta") or {}),
+        }
+        return await self._finalize_and_close(ticket_id, inp, period, lane)
+
+    def _ledger_doc(self) -> Dict[str, Any]:
+        doc: Dict[str, Any] = dict(self.face)
+        doc["stage"] = self.stage
+        doc["stage_state"] = self.stage_state
+        doc["status"] = self.status
+        doc["timeline"] = [dict(t) for t in self.timeline]
+        return doc
+
+    async def _write_ledger(self) -> None:
+        try:
+            written: Any = await workflow.execute_activity(
+                "write_inspection_report", args=[self._ledger_doc()],
+                start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
+            if (written or {}).get("ok"):
+                self.face["report_path"] = (written.get("result") or {}).get("path", "")
+            else:
+                self._enter(self.stage or "report", self.stage_state or "running",
+                            "落账失败：%s" % ((written or {}).get("error") or "未知"))
+        except Exception as e:  # noqa: BLE001
+            self._enter(self.stage or "report", self.stage_state or "running",
+                        "落账故障：%s: %s" % (type(e).__name__, e))
+
+    async def _finalize_and_close(
+        self, ticket_id: str, inp: InspectionProduceInput, period: str,
+        lane: Optional[Dict[str, str]],
+    ) -> Dict[str, Any]:
+        # 人门循环（F-1 修复，验收 gen0）：等待位 = 签字 **或** 授权复跑请求。
+        # authorize 门置 _rerun_paths → 本循环对授权文件复跑 produce → 重算
+        # selfcheck/face → 重落台账 → 回到门（授权→同票复跑产出→再人审合并）。
+        while True:
+            # 台账先落（C5：reject 也留痕——diff 已在台账，丢弃后可追溯）
+            await self._write_ledger()
+            gate_note = "人审 change：sign(gate=%s) approve=合并 main / reject=丢弃本期" \
+                        % PRODUCE_CLOSE_GATE_ID
+            if (self.face.get("selfcheck") or {}).get("protected_overlap"):
+                gate_note += "；保护面在场：authorize(gate=%s) 同票授权后复跑" \
+                             % PRODUCE_AUTHORIZE_GATE_ID
+            self._enter("close", "awaiting-human", gate_note)
+            await self._write_ledger()
+            await workflow.wait_condition(
+                lambda: self._close_sig is not None or bool(self._rerun_paths))
+            if self._close_sig is not None:
+                break
+            # ---- 授权复跑（消费 _rerun_paths；门文案承诺的动作在此兑现） ----
+            rerun_paths = list(self._rerun_paths)
+            self._rerun_paths = []
+            self._enter("produce", "running",
+                        "保护面授权复跑（focus=%s）" % "、".join(rerun_paths))
+            produce_raw: Any = await workflow.execute_activity(
+                "run_inspection_produce",
+                args=[{"instance_id": inp.instance_id, "period": period,
+                       "ticket_id": ticket_id,
+                       "docs_root": str((self.face.get("docs_root") or "docs")),
+                       "base_dir": str((lane or {}).get("worktree") or ""),
+                       "base_ref": str((lane or {}).get("base_ref") or ""),
+                       "project_key": getattr(inp, "project_key", ""),
+                       "timeout_sec": PRODUCE_DEFAULT_TIMEOUT_SEC,
+                       "focus": rerun_paths}],
+                start_to_close_timeout=timedelta(
+                    seconds=PRODUCE_DEFAULT_TIMEOUT_SEC + 300),
+                retry_policy=RetryPolicy(maximum_attempts=1))
+            if not (produce_raw or {}).get("ok"):
+                return await self._blocked(
+                    ticket_id, inp, "produce",
+                    "授权复跑失败：%s" % ((produce_raw or {}).get("error") or "未知"),
+                    lane)
+            result = (produce_raw or {}).get("result") or {}
+            sc = dict(result.get("selfcheck") or {})
+            sc["authorized_paths"] = list(self._authorized)
+            self.face["changes"] = result.get("changes") or []
+            self.face["zero_change"] = bool(result.get("zero_change"))
+            self.face["evidence"] = result.get("evidence") or []
+            self.face["selfcheck"] = sc
+            self.face["meta"] = dict(result.get("meta") or {})
+            self._enter("report", "running",
+                        "授权复跑完成（diff %d 文件；保护面 %d / 越界 %d）——回到人审门"
+                        % (len(sc.get("all_paths") or []),
+                           len(sc.get("protected_overlap") or []),
+                           len(sc.get("out_of_root") or [])))
+        self.decision = self._close_sig["decision"]  # type: ignore[index]
+        self.face["human_gate"] = dict(self._close_sig or {})
+        self._enter("close", "running",
+                    "人门决策=%s（who=%s）" % (self.decision, (self._close_sig or {}).get("who", "")))
+        merge_err = ""
+        if self.decision == "approve":
+            merged: Any = await workflow.execute_activity(
+                merge,
+                MergeArgs(ticket_id=ticket_id, worktree=str((lane or {}).get("worktree") or ""),
+                          branch=str((lane or {}).get("branch") or ""),
+                          base_ref=str((lane or {}).get("base_ref") or ""),
+                          defer_teardown=True,
+                          write_set=list((self.face.get("selfcheck") or {})
+                                         .get("all_paths") or [])),
+                start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
+            if not (merged or {}).get("ok"):
+                merge_err = str((merged or {}).get("error") or "merge 失败")
+                self.face["merge_error"] = merge_err
+        self.status = "closed"
+        # 台账再落（终态；C5：reject/approve 后台账都在，diff 可追溯）
+        await self._write_ledger()
+        # 拆道（reject=丢弃本期；approve=合并后代落）。失败不遮蔽终态（时间线点名）。
+        torn: Any = await workflow.execute_activity(
+            teardown_lane,
+            MergeArgs(ticket_id=ticket_id,
+                      worktree=str((lane or {}).get("worktree") or ""),
+                      branch=str((lane or {}).get("branch") or "")),
+            start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
+        if not (torn or {}).get("ok"):
+            self._enter("close", "done", "泳道拆除未净：%s"
+                        % ((torn or {}).get("error") or "未知"))
+        self._enter("close", "done",
+                    "产出型巡检收口（决策=%s%s）" % (
+                        self.decision, "；merge 红灯交人工" if merge_err else ""))
+        return self.snapshot()
+
+    async def _blocked(self, ticket_id: str, inp: InspectionProduceInput, stage: str,
+                       reason: str, lane: Optional[Dict[str, str]]) -> Dict[str, Any]:
+        """闭式 blocked 终态（可见可查，绝不假绿）。"""
+        self._enter(stage, "blocked", reason)
+        self.status = "blocked"
+        if lane:
+            self.face["lane"] = dict(lane)
+        self.face["blocked_reason"] = reason
+        await self._write_ledger()
+        return self.snapshot()

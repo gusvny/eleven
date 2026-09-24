@@ -785,6 +785,44 @@ marker 结构上不可达 stdout 回执——nusuyou/dengzhufpv 实测「写失�
   + terminate 挂门旧壳（id=inspection-integration-tests-period-2026-09-16T23:30:00Z）；
   deadman 落 15.4 后该风险每天自动点名。
 
+## 16. 产出型巡检底座 + doc 面（t260925-01）：泳道产 change、人审唯一合并入口
+
+与报告链（§13 的 InspectionPeriodicWorkflow，只出报告）**分链**的新 workflow：
+`InspectionProduceWorkflow`（inspection_flow.py），段序 = setup → produce → 自检 →
+报告(含 diff) → 人审门。无 dev-lane 段位（无 plan review / design_integration_tests /
+arbitrate）；一期一票沿用期票去重。
+
+- **声明面**（inspection_decl.py）：实例段新键 `mode`（`report|produce`，缺省
+  `report`=未声明零行为变化）与 `docs_root`（引擎缺省 `docs/`，无 sandbar 专属
+  路径硬编码）；词表/词法外 fail-closed 点名。产出型实例起票：
+  `inspection_trigger.py trigger-produce --instance <id>`。
+- **受限可写**（inspection_produce.produce_write_pin_patch）：produce 段 agent 的
+  pin=workspace-write（非只读钉；报告链/test 面 pin 不动，A4）。两层口径如实声明：
+  沙箱层钉「工作区可写」（当前 dsh 预设词表不携带路径参数）；docs_root 粒度由
+  **机械层** `check_write_set` 越界 fail-closed 拒收并逐条点名（A2）——越界改动
+  进不了 main，泳道是一次性工作副本，落盘权在人审。
+- **机械自检四闸**（inspection_produce.py 纯函数，活动 run_inspection_produce 编排）：
+  写集闸（A2）/ 保护面闸（A3：diff ∩ path_gates.PROTECTED_PATHS 点名进报告，不跳过
+  不硬失败）/ 零 change 闸（A5：zero_change 必须带 evidence，造假改动判红；文档自检
+  红不混入本判定，报告全量留名）/ 文档自检三查（索引双向、frontmatter、显式路径
+  引用存在性；规则集=DocCheckRules 可声明，票1 缺省=sandbar 同集，票3 通用化时随
+  项目声明化）。差分真源=git（对基点 diff / porcelain），不信 agent 自报。
+- **人审门**：`sign(gate=inspection-produce-close)` approve=走既有 merge 活动
+  （squash、一票一 commit、defer_teardown）→ teardown；reject=teardown_lane 丢弃
+  本期（报告先行落账 out/inspection/<票号>.json，diff 留痕可追溯）。agent 角色名
+  拒收（人审唯一入口）。红灯在场（越界/零change红/保护面未授权）时 approve 信号
+  拒收点名；保护面走 `authorize(gate=inspection-produce-protect-authorize)` 同票
+  授权（paths 必须是本期 protected_overlap 子集=窄通）→ produce 对授权文件复跑 →
+  再人审。
+- **队列口径（KI-113）**：produce 起票走 per-ticket 队列
+  （open_period_ticket `per_ticket_queue=True` → `ticket_task_queue(<票号>)`），
+  不落共享队列；报告链起票行为不变（缺省 False）。
+- **自测缝**：活动桩 `SANDBAR_PRODUCE_STUB=1` + `SANDBAR_PRODUCE_STUB_FILE`
+  （夹具与真 agent 同围栏契约，差分/自检照跑=桩-闸不同源）；离线源码锁场景
+  `integration/sc_check_inspection_produce_chain.py`（登记名
+  check-inspection-produce-chain）；单测
+  server/engine/tests/test_t260925_01_produce_{decl,contract,activity,flow}.py。
+
 ## 退役账（t260907-04 命名清理①：7 条过渡兼容，撤任何一条前先对表）
 
 t260907-04 把 SANDBAR_* env、suyou-poc 队列、.suyou/ 协调目录改成 sandbar 名。以下 7 条  # naming-compat

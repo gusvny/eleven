@@ -43,8 +43,8 @@ ok(sig is not None and re.search(r"project\s*[:=]", sig.group(1)) is not None,
    "_prepare_agent_spawn 签名含 project 参数")
 
 # 2/3 逐调用点接线：函数体内先 fetch 再传 project=project
-ok(src.count("_prepare_agent_spawn(") == 5,  # 1 定义 + 4 调用（t260916-22：巡检 inspect 段 run_inspection_inspect 新增第 4 调用点）
-   "调用点数 = 4（实际 _prepare_agent_spawn( 出现 %d 次，含定义）" % src.count("_prepare_agent_spawn("))
+ok(src.count("_prepare_agent_spawn(") == 6,  # 1 定义 + 5 调用（t260916-22：inspect 段第 4 调用点；t260925-01：产出型巡检 produce 段新增第 5 调用点——extend-locks 有意同步，非拆锁）
+   "调用点数 = 5（实际 _prepare_agent_spawn( 出现 %d 次，含定义）" % src.count("_prepare_agent_spawn("))
 
 # 按函数切块（顶层 async def 边界），逐块查接线
 funcs = re.split(r"\n(?=async def |def )", src)
@@ -94,6 +94,16 @@ if insp_body:
        "inspect：project 源=活动 args.project_key（巡检票身份语义，t260915-20）")
     ok(re.search(r"_prepare_agent_spawn\([^)]*project\s*=\s*project", insp_body, re.S) is not None,
        "inspect：_prepare_agent_spawn 传 project=project")
+
+# 第 5 调用点（t260925-01）：产出型巡检 produce 段同守——project 源=args.project_key
+# 且 spawn 传 project=project（巡检票身份语义随 produce 链延续，漏传=凭据静默错挂）。
+prod_body = next((f for f in funcs if f.startswith("async def run_inspection_produce(")), None)
+ok(prod_body is not None, "run_inspection_produce：函数在位（第 5 调用点 host）")
+if prod_body:
+    ok('args.get("project_key")' in prod_body,
+       "produce：project 源=活动 args.project_key（巡检票身份语义）")
+    ok(re.search(r"_prepare_agent_spawn\([^)]*project\s*=\s*project", prod_body, re.S) is not None,
+       "produce：_prepare_agent_spawn 传 project=project")
 
 print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

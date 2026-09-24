@@ -33,6 +33,7 @@ with workflow.unsafe.imports_passed_through():
     from inspection_flow import (  # noqa: F401——registered into ALL_WORKFLOWS
         InspectionPeriodicSpawnWorkflow,
         InspectionPeriodicWorkflow,
+        InspectionProduceWorkflow,
         InspectionTicketCountWatcherWorkflow,
     )
     from shared import (
@@ -298,5 +299,7 @@ class DispatcherScanWorkflow:
 # t260911-02：watcher（计数触发调度器）入注册表——workflow 注册真源只有这一行清单
 # （worker.py 只汇总导入本清单；R4 修正：不新增 per-workflow 注册点）。
 # t260916-02：spawner（cron 调度→真票起票薄壳，InspectionPeriodicSpawnWorkflow）入注册表。
+# t260925-01：产出型巡检（InspectionProduceWorkflow，独立链）入注册表。
 ALL_WORKFLOWS = [ContentPipelineWorkflow, DispatcherScanWorkflow, InspectionPeriodicWorkflow,
-                 InspectionPeriodicSpawnWorkflow, InspectionTicketCountWatcherWorkflow]
+                 InspectionPeriodicSpawnWorkflow, InspectionTicketCountWatcherWorkflow,
+                 InspectionProduceWorkflow]

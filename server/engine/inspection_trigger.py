@@ -201,6 +201,43 @@ async def cmd_trigger(args: argparse.Namespace) -> Dict[str, Any]:
     return _ok(r)
 
 
+async def cmd_trigger_produce(args: argparse.Namespace) -> Dict[str, Any]:
+    """产出型巡检手动触发（t260925-01）：与 cmd_trigger 同一声明校验与起票单点，
+    两处差异——workflow=InspectionProduceWorkflow；队列=per-ticket（KI-113 口径，
+    产出型链不落共享队列）。"""
+    period = args.period or datetime.now().strftime("%Y%m%d")
+    err = _valid_period(period)
+    if err:
+        return _err(err)
+    try:
+        spec = _enabled_spec(args.decl_path, args.instance)
+    except ValueError as e:
+        return _err(str(e))
+    except Exception as e:  # noqa: BLE001
+        return _err("声明不可用：%s" % e)
+    project_key = str(spec.get("instance_project_key") or "")
+    try:
+        repo_root = resolve_repo_root(spec, args.repo_root)
+    except ValueError as e:
+        return _err(str(e))
+    try:
+        client = await _connect()
+    except Exception as e:  # noqa: BLE001
+        return _err("temporal server 不可达：%s" % e)
+    from inspection_ticketing import open_produce_period_ticket
+    res = await open_produce_period_ticket(
+        client, instance_id=args.instance, period=period, project_key=project_key,
+        repo_root=repo_root, scan_face=str(spec.get("scan_face") or "doc"),
+        decl_path=abs_decl_path(args.decl_path))
+    if not res.get("ok"):
+        return res
+    r = dict(res["result"] or {})
+    r.update({"period": period, "workflow": "InspectionProduceWorkflow",
+              "instance": args.instance, "project": project_key,
+              "repo_root": repo_root, "queue": "per-ticket"})
+    return _ok(r)
+
+
 async def cmd_sign(args: argparse.Namespace) -> Dict[str, Any]:
     from inspection_flow import CLOSE_GATE_ID, validate_close_signature
     from shared import Signature
@@ -880,6 +917,11 @@ def main() -> None:
     p.add_argument("--period", default=None)
     p.add_argument("--repo-root", default="")
     p.add_argument("--decl-path", default=None)
+    p = sub.add_parser("trigger-produce", help="手动触发产出型巡检一期（per-ticket 队列，t260925-01）")
+    p.add_argument("--instance", required=True)
+    p.add_argument("--period", default=None)
+    p.add_argument("--repo-root", default="")
+    p.add_argument("--decl-path", default=None)
     p = sub.add_parser("sign", help="人门签字（who=签字人；agent 角色名拒收）")
     p.add_argument("--instance", required=True)
     p.add_argument("--who", required=True)
@@ -936,7 +978,8 @@ def main() -> None:
         elif args.op == "sweep-lanes":
             result = cmd_sweep_lanes(args)
         else:
-            result = asyncio.run({"trigger": cmd_trigger, "sign": cmd_sign,
+            result = asyncio.run({"trigger": cmd_trigger, "trigger-produce": cmd_trigger_produce,
+                                  "sign": cmd_sign,
                                   "describe": cmd_describe, "ticket": cmd_ticket,
                                   "watcher": cmd_watcher, "deadman": cmd_deadman,
                                   "schedule-up": cmd_schedule_up,

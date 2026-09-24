@@ -70,7 +70,7 @@ WIRED_KINDS = ("cron", "every-n-tickets", "race-first")
 # Whitelist of inspection workflow type names the engine has wired and a declaration may
 # name (fail-closed so a declaration cannot point at a nonexistent workflow and then
 # silently never trigger — same spirit as M2).
-WIRED_WORKFLOWS = ("InspectionPeriodicWorkflow",)
+WIRED_WORKFLOWS = ("InspectionPeriodicWorkflow", "InspectionProduceWorkflow")
 # 计数源词表（t260911-02）：现在只接了归档目录一源；扩源必须先扩此表+计数模块。
 TICKET_COUNT_SOURCES = ("archive-dir",)
 # 扫描面词表（t260911-02）：实例可声明 scan_face 指定跑哪个扫描器（「跑哪个巡检面」
@@ -102,6 +102,26 @@ _CRON_ATOM = r"(?:\*|\*/\d+|\d+|\d+-\d+(?:/\d+)?|[a-z]{3}(?:-[a-z]{3})?)"
 _CRON_FIELD_RE = re.compile(r"^%s(?:,%s)*$" % (_CRON_ATOM, _CRON_ATOM))
 BOOL_RE = re.compile(r"^(true|false)$")
 
+# ---- 巡检模式两键（t260925-01 产出型巡检底座）----
+# mode：report=只报告（现状，缺省=未声明零行为变化，A6）；produce=产出型（agent 在
+# 自有泳道内产 change，机械自检后交人审 merge/discard）。词表外 fail-closed 点名。
+WIRED_MODES = ("report", "produce")
+DEFAULT_MODE = "report"
+# docs_root：产出型实例的文档根（A6：引擎缺省 docs/，无 sandbar 专属路径硬编码）。
+# 词法=仓内相对 posix 路径：禁绝对路径、禁 .. 段（防越根逃逸）、禁空/尾斜杠。
+DEFAULT_DOCS_ROOT = "docs"
+DOCS_ROOT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-/]*$")
+
+
+def validate_docs_root(where: str, value: str) -> str:
+    """docs_root 词法闸（纯函数便于 UT）：非法一律 DeclError 点名。"""
+    if not DOCS_ROOT_RE.match(value) or value.endswith("/"):
+        raise DeclError("%s：docs_root %r 非法（仓内相对 posix 路径，如 docs；"
+                        "禁绝对路径/空/尾斜杠）" % (where, value))
+    if any(seg == ".." for seg in value.split("/")):
+        raise DeclError("%s：docs_root %r 含 .. 段（越根逃逸禁入）" % (where, value))
+    return value
+
 
 class DeclError(Exception):
     """Malformed or out-of-scope declaration — fail-closed; the message names the problem
@@ -131,6 +151,10 @@ class InstanceSpec:
     # （enabled 与否——身份不是调度细节，无身份的占位实例=无主票预定席）。
     instance_project_key: str = ""
     scan_face: str = "test"
+    # 巡检模式两键（t260925-01）：mode=report（缺省，只报告）| produce（产出型）；
+    # docs_root=产出型实例的文档根（引擎缺省 docs/，A6 无项目硬编码）。
+    mode: str = DEFAULT_MODE
+    docs_root: str = DEFAULT_DOCS_ROOT
     # 套件档（t260913-02）：空=不跑套件；"full"=本期在巡检自有泳道里跑集成全集。
     suite: str = ""
     # 巡检预算三键（t260916-22，宿主裁定③：预算可配置起步 40 条/30 分钟 + 分面清单）：
@@ -445,13 +469,15 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
                                       "scan_face", "suite", "tz", "project_key",
                                       "max_findings", "inspect_timeout_min",
                                       "inspect_profile", "inspect_max_shards",
-                                      "inspect_max_files_per_shard"})
+                                      "inspect_max_files_per_shard",
+                                      "mode", "docs_root"})
         if unknown:
             raise DeclError("%s：未知实例字段 %s（合法：id/enabled/schedule/workflow/template/"
                             "scan_face/suite/tz/project_key（实例级项目身份，t260915-20）/"
                             "max_findings/inspect_timeout_min/inspect_profile（inspect 段预算三键，"
                             "t260916-22）/inspect_max_shards/inspect_max_files_per_shard"
-                            "（缩面分片硬上限两键，t260924-06）；"
+                            "（缩面分片硬上限两键，t260924-06）/mode/docs_root（巡检模式两键，"
+                            "t260925-01）；"
                             "face 已于 260910 巡检校准票 t260910-11 除名——零消费者，旧声明含 face 一律拒收点名）"
                             % (where, unknown))
         inst_id = _req_str(where, item, "id")
@@ -475,6 +501,18 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
             if scan_face not in WIRED_FACES:
                 raise DeclError("%s：scan_face %r 未接线（可指名：%s）——面在项目声明，"
                                 "引擎只提供已接线的扫描器" % (where, scan_face, "、".join(WIRED_FACES)))
+        # 巡检模式两键（t260925-01）：mode 缺省 report=现状零行为（A6）；produce 实例
+        # 由产出型 workflow 消费 docs_root。词表/词法外 fail-closed 点名。
+        mode = DEFAULT_MODE
+        if item.get("mode") is not None:
+            mode = _req_str(where, item, "mode")
+            if mode not in WIRED_MODES:
+                raise DeclError("%s：mode %r 未接线（可指名：%s）——report=只报告（现状），"
+                                "produce=产出型（泳道产 change 交人审）"
+                                % (where, mode, "、".join(WIRED_MODES)))
+        docs_root = DEFAULT_DOCS_ROOT
+        if item.get("docs_root") is not None:
+            docs_root = validate_docs_root(where, _req_str(where, item, "docs_root"))
         suite = ""
         if item.get("suite") is not None:
             suite = _req_str(where, item, "suite")
@@ -540,6 +578,7 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
             id=inst_id, enabled=enabled, kind=kind, cron=cron, n=n,
             source=source, project_key=project_key,
             instance_project_key=identity_key, scan_face=scan_face,
+            mode=mode, docs_root=docs_root,
             suite=suite, tz=tz, workflow=workflow_name, template=template,
             max_findings=max_findings, inspect_timeout_min=inspect_timeout_min,
             inspect_profile=inspect_profile,
@@ -568,6 +607,8 @@ def build_schedule_specs(decl: InspectionDecl) -> List[Dict[str, Any]]:
             "instance_project_key": it.instance_project_key,
             "project_key": it.project_key,
             "scan_face": it.scan_face,
+            # 巡检模式两键（t260925-01）：additive 键——老消费者忽略，A6 零行为。
+            "mode": it.mode, "docs_root": it.docs_root,
             "suite": it.suite,
             "tz": it.tz,
             "workflow": it.workflow,
@@ -596,6 +637,7 @@ def _plan_from_decl(decl: "InspectionDecl", instance_id: str) -> Dict[str, Any]:
                          "人工处置（删调度或改回声明）" % instance_id}
     return {"ok": True, "instance_id": it.id, "enabled": True, "suite": it.suite,
             "run_suite": bool(it.suite), "scan_face": it.scan_face, "cron": it.cron,
+            "mode": it.mode, "docs_root": it.docs_root,
             "tz": it.tz,
             # inspect 段预算三键（t260916-22）：profile 空=回落 scan_face（consume 侧
             # workflow 定，声明零重复）。
