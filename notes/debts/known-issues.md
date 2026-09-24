@@ -1554,3 +1554,21 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > （不在 260924 授权清理范围，只记账不动）。与 KI-109 案二（冻结泳道树入扫描根）、t260916-27 票面
 > 「dev lane registry broken」同族。处置建议=开记名清账票甄别（登记残留走 prune、壳走定向清扫），
 > 宿主授权后动。
+
+## KI-113 巡检周期 workflow 跑共享队列=中央工人冻结码（部署拓扑缺口+注释撒谎；260924 定谳，integration 岗登记）
+> 铁证=worker.log 原文 `task_queue: 'sandbar', workflow_id: 't260924-01', workflow_type:
+> 'InspectionPeriodicWorkflow'`：巡检周期票（InspectionPeriodicWorkflow）起在共享队列 TASK_QUEUE
+> （inspection_ticketing.open_period_ticket(task_queue=TASK_QUEUE)），执行者=中央工人（data/worker.pid，
+> 无 supervisor）——普通工单（TicketWorkflow）走 per-ticket 队列+专属工人，两族拓扑不同。连带事实：
+> ①shared.py「共享队列只放 dispatcher-scan」注释与 inspection_ticketing 代码矛盾（注释撒谎，审查被
+> 误导两次——260924 亲历）；②KI-081 冻结纪律的部署后果：engine 修法上线后，巡检流水线仍跑旧码，
+> **验货/生效都必须重启中央工人（红线：需宿主明示）**。260924 处置=宿主明示授权重启（66222 起新码）；
+> 结构性修法=巡检 workflow 迁 per-ticket 队列或中央工人纳 supervisor，待专项。
+
+## KI-114 终态票期号黑洞（cancel 后重开无路；260924 实案，integration 岗登记）
+> 实案：t260925-01 记名清场后重跑 `inspection_trigger trigger --period 20260925` 回执
+> `triggered:false deduped:true dedup_source:sa_query`——open_period_ticket 的显式去重（实例+期号
+> SA 查询）**不认终态**，被终结票的检索属性永久占住期号，同号重开无路、stale_pointer_cleared 也不
+> 触发（指针三态管不到 SA 层）。后果：该期成为死槽（当日 cron 也会被去重挡回）。260924 绕行=顺延
+> 开期 20260926 验货。修法方向：去重限「非终态」查询或提供记名 force 通道；须配套审计留痕
+> （同号多 run 的对账语义）。
