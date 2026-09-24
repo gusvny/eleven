@@ -1727,6 +1727,17 @@ SCENARIOS = [
      "全量不变式注入面（t260925-04，灰盒 L3 决策点对抗输入，ro 秒级零 docker）：改动清单畸形（None/标量/裸字符串/dict/非串元素/空白元素/空清单）恒全量且不抛；diff_error 非空恒全量且优先于 localized 清单（计算面报错绝不放窄）；首轮恒全量不因新口径松动；定点面输出恒为红名清洗去重保序子集（__合成/空/非串剔除，红名畸形→全量）且合法清单时真解禁非恒全量换皮。intent 分工：t260925-04-file-blast-radius 守真仓三态组件链，本条只守同一决策点的畸形/边界注入不变式（对抗维度不同不互替）；developer L1 真值矩阵之外的用户级对抗复核。无 ENV 子用例；实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "python3 integration/t260925-04/sc_t260925_04_full_run_invariants.py", "ro"),
 
+    # ---- t260925-13: KI-112 lane 残留审计与清理（audit/prune 契约面）----
+    ("t260925-13-lane-audit-classify",
+     "lane 审计分类面契约（t260925-13 KI-112，灰盒 L3，真实 tmp git 泳道仓+真 git 子进程+可编程桩票查询器，ro 离线秒级零 docker；锚 audit --json 公开回执逐条 verdict/reason）：A live 零触碰——dispatched 票+脏目录 verdict=keep（工单红线(2)）；B list 结构化 status=closed+干净+已合并→prunable（terminal-confirmed）；C terminal-absent——show 回执 ok:false 且 kind=not_found/kind=terminal→terminal-absent 非 unknown（v2 C1 三态主修：查不到≠真不可知）；D 守门拒收点名——terminal+未合并→blocked(unmerged)、terminal+未提交→blocked(uncommitted)（judge-not-guess）；E bare-stub 识别+嵌套 .git 拒拆点名（t260916-20 教训）；F unknown=真不可知才 unknown——查询器崩溃全 unknown→keep 零删除面、stdout 混警告行容错解析照常分类（v2 C2 实况）；G 通用性行为锚——--lane-dir 自定义布局照常分类、detached baseline worktree 只报告（工单(5)）；H audit 零副作用——worktree 注册面逐字节不变、.lane 外零触碰、登记在册目录缺失如实点名。intent 分工：developer L1（server/engine/tests/test_t260925_13_lane_audit.py）守分类纯函数真值表与 porcelain 注入矩阵，本条守真仓扫描→真桩查询器→公开回执整链与零副作用；剪除/幂等/台账归 t260925-13-lane-audit-prune-guard，真仓只读对账归 t260925-13-lane-audit-realfacet-readonly——三面不互替。git 缺席=ENV_FAIL exit 2；工具未落地=FAIL（TDD 预期红，arbitrate/merge 期必须绿）",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260925-13/sc_lane_audit_classify.py", "ro"),
+    ("t260925-13-lane-audit-prune-guard",
+     "lane 剪除与清壳契约（t260925-13 KI-112，灰盒 L3 真实 tmp git 泳道仓，ro 离线秒级；锚 prune 公开回执与台账 .lane-audit-log.jsonl 逐条留痕）：A 缺省 dry-run 零改动（--apply 才动手）；B 只动 prunable——terminal+干净+已合并被 remove，live/blocked 原样（工单红线(2)(3)）；C bare-stub 清壳四纪律——清理前列内容清单（residue 文件名入台账）、拆后验目录不复存在才记 cleared、嵌套 .git 拒拆转人审（KI-110/t260916-20 教训）；D symlink 逃逸拒绝且仓外 precious 原样（路径校验红线）；E 台账逐条留痕含 keep 说法且全行合法 JSON；F 幂等二跑全 already-gone 且 dir-absent/registry-absent 措辞分开（KI-110 措辞精确纪律）、注册面零再改动；G 未守门不剪——unmerged/uncommitted 文件可读。intent 分工：分类矩阵归 t260925-13-lane-audit-classify（本条把分类当既定输出消费，只锁动了谁/没动谁/留了什么痕）；真仓只读对账归 t260925-13-lane-audit-realfacet-readonly；developer L1 守纯函数与命令形态矩阵——不互替。git 缺席=ENV_FAIL exit 2；工具未落地=FAIL（TDD 预期红，arbitrate/merge 期必须绿）",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260925-13/sc_lane_audit_prune_guard.py", "ro"),
+    ("t260925-13-lane-audit-realfacet-readonly",
+     "真仓只读对账契约（t260925-13 KI-112「first evidence run」的机器化形态，灰盒 L3 真仓 read-only 黑盒子进程，秒级零 docker 零写入）：A 真仓 audit --json 退出 0 且 stdout 整体 JSON（警告行不破 JSON 契约）；B 零副作用——跑前后 git worktree 注册面逐字节一致、.lane 条目集与目录集不变（audit 不许动真面）；C live 交叉验证——真 ticket.py（list+show 双路）查得非 closed 在册票的泳道 verdict 必须 keep（真面验证，桩面替代不了）；D 本票泳道 t260925-13 在 dispatched 期必须 keep——自己的脚不许被自己剪（票已终态该子用例 N/A）；E 每条目带 verdict+reason、unknown 必点名（不许「未产出结果」式反事实文案）。intent 分工：夹具矩阵与剪除面归同票另两条场景；本条只守真仓只读旅程与 live 交叉验证；KI-109 案二（冻结泳道树入扫描根）根修的真面验收入口。git 缺席=ENV_FAIL exit 2；真 ticket.py 不可达（引擎停机预期降级）→ C/D 相应 N/A，全 N/A=场景红；工具未落地=FAIL（TDD 预期红，arbitrate/merge 期必须绿）",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260925-13/sc_lane_audit_realfacet_readonly.py", "ro"),
+
 ]
 
 CMD_TIMEOUT = 900
