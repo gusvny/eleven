@@ -7572,10 +7572,58 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
         prev_summary = "\n".join(rows) or "（上期台账零发现）"
     if fake_notes:
         prev_summary += "\n（裁定台账注意：%s）" % "；".join(fake_notes[:5])
+
+    # ---- 缩面：本期变化面清单由活动侧机械给定（t260924-06；不靠 agent 自律） ----
+    # 四路输入逐路 fail-closed（不抛出、不回落全仓）：①上期基点→本期基点 git diff；
+    # ②本期套件回执红/环境红/漏跑；③KI 册 open 条目；④上期发现摘要（上方既有链）。
+    # 上期基点=上期台账 doc 的 lane.base_ref；缺/烂=「无基点差分」显式 note（review
+    # R1 口径 U5），绝不以全仓普查兜底。
+    from inspection_inspect import (build_change_scope_text, ki_open_entries,
+                                    parse_name_status, suite_receipt_rows)
+    scope_notes: Dict[str, Any] = {}
+    prev_base = ""
+    if isinstance(prev_doc, dict):
+        lane_doc = prev_doc.get("lane")
+        if isinstance(lane_doc, dict) and isinstance(lane_doc.get("base_ref"), str) \
+                and lane_doc.get("base_ref").strip():
+            prev_base = lane_doc["base_ref"].strip()
+    this_base = str(base_head or "").strip()
+    diff_rows: List[str] = []
+    if not prev_base:
+        scope_notes["scope_note"] = ("无基点差分：%s——变化面差分未做，审查范围只含"
+                                     "回执红/漏跑/KI/上期台账" % (prev_note or "上期台账缺 lane.base_ref"))
+    elif not this_base:
+        scope_notes["scope_note"] = ("本期基点不可得（base_head 空）——变化面差分未做，"
+                                     "审查范围只含回执红/漏跑/KI/上期台账")
+    else:
+        try:
+            proc_d = subprocess.run(
+                ["git", "-C", str(base), "diff", "--name-status",
+                 "%s..%s" % (prev_base, this_base)],
+                capture_output=True, text=True, timeout=60, check=False)
+            if proc_d.returncode != 0:
+                scope_notes["diff_error"] = "git diff 失败（rc=%s）：%s" % (
+                    proc_d.returncode, (proc_d.stderr or "").strip()[-200:])
+            else:
+                diff_rows, dmeta = parse_name_status(proc_d.stdout)
+                scope_notes.update(dmeta)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            scope_notes["diff_error"] = "git diff 不可执行：%s: %s" % (type(e).__name__, e)
+    suite_rows, smeta = suite_receipt_rows(suite_receipt)
+    scope_notes.update(smeta)
+    ki_rows, kmeta = ki_open_entries(Path(base) / "notes" / "debts" / "known-issues.md")
+    scope_notes.update(kmeta)
+    scope_block, scope_meta = build_change_scope_text(
+        diff_rows, suite_rows, ki_rows, scope_notes, prev_summary,
+        max_shards=int(args.get("inspect_max_shards") or 0) or 4,
+        max_files_per_shard=int(args.get("inspect_max_files_per_shard") or 0) or 40)
+    activity.logger.info("[inspect] 缩面范围：变化面 %d 行、套件条目 %d、KI 条目 %d",
+                         len(diff_rows), len(suite_rows), len(ki_rows))
     try:
         prompt = build_inspect_prompt(instance_id, period, profile, base_dir, base_head,
                                       max_findings, suite_receipt=suite_receipt,
-                                      prev_summary=prev_summary)
+                                      prev_summary=prev_summary,
+                                      scope_block=scope_block)
     except ValueError as e:
         return _err("inspect prompt 构建失败：%s" % e)
 
@@ -7606,7 +7654,8 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
                         % e)
         activity.heartbeat("inspect stub 完成（%d 条）" % len(findings))
         return {"ok": True, "result": {"findings": findings, "meta": {
-            "stub": True, "face": face, "profile": profile, "base_dir": base_dir}}}
+            "stub": True, "face": face, "profile": profile, "base_dir": base_dir,
+            "scope": scope_meta}}}
 
     # ---- 真 spawn（host 形态显式钉死；模型路由 miss=profile 默认+warning，meta 点名
     #      由 _prepare_agent_spawn 的 warning 面承担） ----
@@ -7696,6 +7745,9 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
             "face": face, "profile": profile, "base_dir": base_dir,
             "base_head": base_head, "agent_home": str(home),
             "model_route": route_meta,
+            # 缩面对账面（t260924-06）：范围清单与用量进 meta——零发现显式的证据面、
+            # 预算护栏（used_sec 超 90% 预算=票面点名先报实测再谈预算）的原始数据。
+            "scope": scope_meta, "used_sec": round(time.monotonic() - t0, 1),
             "output_log": str(out_f)}}}
     finally:
         # 全终态回收：正常/报错/超时/取消四路都走到（KI-009 组粒度；reap 绝不外抛）

@@ -222,13 +222,18 @@ def _decl_text(extra: str) -> str:
 def test_decl_budget_keys_parse_and_plan_passthrough(tmp_path):
     p = tmp_path / "inspection.yaml"
     p.write_text(_decl_text("    max_findings: 25\n    inspect_timeout_min: 45\n"
-                            "    inspect_profile: simplify\n"), encoding="utf-8")
+                            "    inspect_profile: simplify\n"
+                            "    inspect_max_shards: 2\n"
+                            "    inspect_max_files_per_shard: 30\n"), encoding="utf-8")
     d = decl.load_inspection_decl(p)
     it = d.instance("budget-inst")
     assert (it.max_findings, it.inspect_timeout_min, it.inspect_profile) == (25, 45, "simplify")
+    # 缩面硬上限两键（t260924-06）：声明可配
+    assert (it.inspect_max_shards, it.inspect_max_files_per_shard) == (2, 30)
     plan = decl._plan_from_decl(d, "budget-inst")
     assert plan["inspect"] == {"max_findings": 25, "timeout_min": 45,
-                               "profile": "simplify"}
+                               "profile": "simplify",
+                               "max_shards": 2, "max_files_per_shard": 30}
 
 
 def test_decl_budget_keys_defaults(tmp_path):
@@ -239,6 +244,9 @@ def test_decl_budget_keys_defaults(tmp_path):
     assert it.max_findings == ins.DEFAULT_MAX_FINDINGS
     assert it.inspect_timeout_min == ins.DEFAULT_INSPECT_TIMEOUT_MIN
     assert it.inspect_profile == ""        # 空=回落 scan_face（consume 侧）
+    # 缩面硬上限两键缺省（t260924-06）
+    assert it.inspect_max_shards == ins.DEFAULT_MAX_SHARDS
+    assert it.inspect_max_files_per_shard == ins.DEFAULT_MAX_FILES_PER_SHARD
 
 
 @pytest.mark.parametrize("extra, why", [
@@ -248,6 +256,10 @@ def test_decl_budget_keys_defaults(tmp_path):
     ("    inspect_timeout_min: 0\n", "inspect_timeout_min"),
     ("    inspect_timeout_min: 721\n", "inspect_timeout_min"),
     ("    inspect_profile: typo\n", "inspect_profile"),
+    ("    inspect_max_shards: 0\n", "inspect_max_shards"),
+    ("    inspect_max_shards: 65\n", "inspect_max_shards"),
+    ("    inspect_max_files_per_shard: 0\n", "inspect_max_files_per_shard"),
+    ("    inspect_max_files_per_shard: 10001\n", "inspect_max_files_per_shard"),
 ])
 def test_decl_budget_keys_negative_named(tmp_path, extra, why):
     p = tmp_path / "inspection.yaml"

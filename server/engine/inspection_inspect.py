@@ -60,6 +60,11 @@ SUGGEST_CONFIDENCE = 0.6
 #: 必超时、产出恒空壳「本期不假绿」——套件段 55 分钟量级下审查 30 分钟预算错配。）
 DEFAULT_MAX_FINDINGS = 40
 DEFAULT_INSPECT_TIMEOUT_MIN = 60
+#: 缩面硬上限两键（t260924-06）：inspect 段审查范围=活动侧给定的本期变化面清单，
+#: 分片（子代理）数与每片文件数在此机械封顶——防「分派 7 子代理审 368 个场景文件」
+#: 式无界扇出复发（260926 期实测：扇出恰是 dsh fatal 零产出的直接诱因）。
+DEFAULT_MAX_SHARDS = 4
+DEFAULT_MAX_FILES_PER_SHARD = 40
 #: 预算双闸 margin（活动内 deadline = workflow start_to_close − margin；不等式由
 #: test_t260916_22_inspect_flow 锁定，SUITE_TO 纪律同款）
 INSPECT_DEADLINE_MARGIN_SEC = 60
@@ -571,7 +576,8 @@ _SKELETON = """\
 - 审查基点：{base_head}
 {suite_block}
 {prev_block}
-## 分面审查清单（{face}）
+{scope_block}
+## 分面审查清单（{face}；只对上列范围内文件套用）
 {profile_text}
 
 ## 预算
@@ -604,12 +610,175 @@ _SKELETON = """\
 """
 
 
+# ========================================================================================
+# 缩面：本期变化面（t260924-06）——四路输入解析与 scope 组装，全纯函数、一律不抛出
+# ========================================================================================
+#
+# 审查目标=「本期有什么新病灶」，不是全仓普查（宿主 260924 拍定）。四路输入逐路
+# 失败语义（review R1 闭合口径）：回落值 + meta 计数 + scope_block 点名三件套，且
+# **任何一路畸形都不回落全仓**——缩面纪律在畸形路径下依然成立。
+
+
+def parse_name_status(text: str) -> Tuple[List[str], Dict[str, Any]]:
+    """`git diff --name-status` 输出 → 变化面文件行清单（「M\tpath」原样保留）。
+
+    失败语义（不抛出）：可解析行照收（首列单字母状态 + 非空路径）；不可解析行丢弃并
+    计 meta["diff_malformed_lines"]；输入整体为空=([], {"diff_error": "变化面 diff 输出
+    为空"})。路径剥首尾空白、拒含 "\\0"（二进制污染防呆）。"""
+    meta: Dict[str, Any] = {}
+    rows: List[str] = []
+    bad = 0
+    for line in str(text or "").splitlines():
+        line = line.strip("\r")
+        if "\0" in line:
+            bad += 1
+            continue
+        parts = line.split("\t", 1)
+        if len(parts) == 2 and len(parts[0]) == 1 and parts[0].strip() \
+                and parts[1].strip():
+            rows.append("%s\t%s" % (parts[0], parts[1].strip()))
+        elif line.strip():
+            bad += 1
+    if bad:
+        meta["diff_malformed_lines"] = bad
+    if not rows and not bad:
+        meta["diff_error"] = "变化面 diff 输出为空（上期基点→本期基点无差异或 diff 失败）"
+    return rows, meta
+
+
+def suite_receipt_rows(path: Any) -> Tuple[List[str], Dict[str, Any]]:
+    """本期套件回执 → 红/环境红/漏跑条目清单（人话行，进 scope_block）。
+
+    失败语义（不抛出）：文件缺失/坏 JSON/顶层非 dict/缺键=([], {"suite_note": 点名
+    原因})——该路按「无条目」处理但必须点名「回执不可读，套件红面未纳入审查范围」，
+    绝不因回执烂而阻断 inspect。"""
+    meta: Dict[str, Any] = {}
+    p = Path(path) if path else None
+    if p is None or not p.is_file():
+        return [], {"suite_note": "本期无套件回执档（%s）——套件红/漏跑面未纳入审查范围"
+                                 % (p.name if p else "<空路径>")}
+    try:
+        doc = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        return [], {"suite_note": "套件回执不可读（%s: %s）——套件红面未纳入审查范围"
+                                 % (type(e).__name__, e)}
+    if not isinstance(doc, dict):
+        return [], {"suite_note": "套件回执顶层非映射——套件红面未纳入审查范围"}
+    rows: List[str] = []
+    err = str(doc.get("error") or "").strip()
+    if err:
+        rows.append("套件整体异常：%s" % err)
+    if int(doc.get("env_fail") or 0):
+        rows.append("套件环境红（env_fail=%s）" % doc.get("env_fail"))
+    if int(doc.get("ran") or 0) == 0 and not err:
+        rows.append("套件零运行（ran=0）——漏跑嫌疑")
+    details = doc.get("details")
+    if isinstance(details, list):
+        for d in details:
+            if isinstance(d, dict) and str(d.get("status") or "") in ("FAIL", "ENV_FAIL"):
+                rows.append("场景 %s：%s" % (d.get("name") or d.get("ticket_id") or "?",
+                                             d.get("status")))
+    elif details is not None:
+        meta["suite_note"] = "套件回执 details 非列表（got %s）——逐场景条目缺席" \
+            % type(details).__name__
+    return rows, meta
+
+
+def ki_open_entries(path: Any) -> Tuple[List[str], Dict[str, Any]]:
+    """KI 册（notes/debts/known-issues.md）→ open 条目清单。
+
+    失败语义（不抛出）：文件缺失=([], {"ki_note": "KI 册不可读：<路径>"})；零 open
+    条目或全烂行=([], {"ki_note": "KI 册无 open 条目或不可解析"})。条目锚=含「KI-」
+    编号且行内标 open 的行（宽容大小写/中英冒号）。"""
+    meta: Dict[str, Any] = {}
+    p = Path(path) if path else None
+    if p is None or not p.is_file():
+        return [], {"ki_note": "KI 册不可读：%s" % (p if p else "<空路径>")}
+    try:
+        text = p.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        return [], {"ki_note": "KI 册不可读：%s（%s）" % (p, e)}
+    rows: List[str] = []
+    for line in text.splitlines():
+        s = line.strip()
+        if "KI-" in s and "open" in s.lower():
+            rows.append(s[:160])
+    if not rows:
+        return [], {"ki_note": "KI 册无 open 条目或不可解析：%s" % p.name}
+    return rows, meta
+
+
+def build_change_scope_text(diff_rows: List[str], suite_rows: List[str],
+                            ki_rows: List[str], notes: Dict[str, Any],
+                            prev_summary: str, max_shards: int,
+                            max_files_per_shard: int) -> Tuple[str, Dict[str, Any]]:
+    """四路输入 → scope_block（prompt 的「本期审查范围」段）+ scope_meta。
+
+    硬上限（U6）：变化面超 max_shards×max_files_per_shard 时截断，meta["truncated"]
+    记弃置数、scope_block 点名截断数。meta 汇聚各路 note（diff_malformed_lines/
+    diff_error/suite_note/ki_note/scope_note）。零文件也不空转：scope_block 显式
+    「本期变化面为空」——审查范围=给定清单，清单外不看，绝不回落全仓。"""
+    meta: Dict[str, Any] = dict(notes)
+    cap = max(1, int(max_shards)) * max(1, int(max_files_per_shard))
+    total = len(diff_rows)
+    meta["scope_files"] = min(total, cap)
+    kept = diff_rows
+    if total > cap:
+        kept = diff_rows[:cap]
+        meta["truncated"] = total - cap
+    lines: List[str] = [
+        "## 本期审查范围（审查范围=本清单，清单之外的文件一律不看——"
+        "目标是「本期有什么新病灶」，不是全仓普查；**禁止 spawn 任何子代理**，"
+        "分片上限 %d 片、每片 ≤%d 文件已由机械侧封顶）" % (max_shards, max_files_per_shard),
+        "",
+        "### 变化面（上期基点→本期基点，git diff --name-status）",
+    ]
+    if meta.get("truncated"):
+        lines.append("- （变化面共 %d 个文件，超出上限已截断弃置 %d 个——只审保留集）"
+                     % (total, meta["truncated"]))
+    if kept:
+        lines += ["- %s" % r for r in kept]
+    else:
+        lines.append("- （本期变化面为空）")
+    lines.append("")
+    lines.append("### 本期套件回执条目（红/环境红/漏跑）")
+    lines += ["- %s" % r for r in suite_rows] if suite_rows else ["- （无条目）"]
+    lines.append("")
+    lines.append("### KI 册 open 条目（复发征兆重点看）")
+    lines += ["- %s" % r for r in ki_rows] if ki_rows else ["- （无条目）"]
+    lines.append("")
+    lines.append("### 上期发现与裁定（重复项机械侧自动去重，勿复述上期原样内容）")
+    lines.append(prev_summary or "- （无对照）")
+    warned = [k for k in ("diff_error", "diff_malformed_lines", "suite_note",
+                          "ki_note", "scope_note") if meta.get(k)]
+    if warned:
+        lines.append("")
+        lines.append("### 输入面点名（畸形/缺席路径，机械侧已按回落语义处置）")
+        for k in warned:
+            lines.append("- %s: %s" % (k, meta[k]))
+    return "\n".join(lines), meta
+
+
 def build_inspect_prompt(instance_id: str, period: str, face: str, base_dir: str,
                          base_head: str, max_findings: int,
-                         suite_receipt: str = "", prev_summary: str = "") -> str:
-    """组装 inspect 段 prompt（骨架+分面清单+输出契约）。face 词表外=显式报错。"""
+                         suite_receipt: str = "", prev_summary: str = "",
+                         scope_block: str = "") -> str:
+    """组装 inspect 段 prompt（骨架+缩面范围+分面清单+输出契约）。face 词表外=显式报错。
+
+    scope_block（t260924-06 缩面）：活动侧给定的本期变化面清单段；空=回落旧全仓骨架
+    （老调用点/回放形态兼容——生产活动必传，测试可断言两形态）。"""
     if face not in PROFILE_FACES:
         raise ValueError("inspect_profile %r 未接线（可指名：%s）" % (face, "、".join(PROFILE_FACES)))
+    if scope_block:
+        # 缩面形态：审查范围=给定清单（scope_block 自带硬上限与禁子代理规则），
+        # 旧 suite/prev 块并入清单段，不再单列——避免同一事实两处口径漂移。
+        return _SKELETON.format(
+            instance=instance_id, period=period, face=face, persona=PERSONA,
+            base_dir=base_dir, base_head=base_head or "（未取到，以基座工作区实况为准）",
+            suite_block="", prev_block="",
+            scope_block=scope_block,
+            profile_text=PROFILE_TEXTS[face], max_findings=max_findings,
+            max_quote=MAX_QUOTE_CHARS)
     suite_block = "- 当期套件回执：%s（读它，结合套件红绿给发现；无套件档=无此文件）" % suite_receipt \
         if suite_receipt else "- 本期无套件档（没有套件回执可读）"
     prev_block = ("- 上期发现摘要（跨期对照参考；重复项机械侧自动去重，不要为了凑数复述"
@@ -618,7 +787,7 @@ def build_inspect_prompt(instance_id: str, period: str, face: str, base_dir: str
     return _SKELETON.format(
         instance=instance_id, period=period, face=face, persona=PERSONA,
         base_dir=base_dir, base_head=base_head or "（未取到，以基座工作区实况为准）",
-        suite_block=suite_block, prev_block=prev_block,
+        suite_block=suite_block, prev_block=prev_block, scope_block="",
         profile_text=PROFILE_TEXTS[face], max_findings=max_findings,
         max_quote=MAX_QUOTE_CHARS)
 
@@ -650,7 +819,11 @@ PROFILE_TEXTS: Dict[str, str] = {
 def build_persona_patch() -> str:
     """inspect agent 的一次性 cordis patch（persona 覆盖；agent_activities spawn 时
     --patch 注入）。role=inspection 不落 server/roles/ 文件（机制自有，免写集外依赖）；
-    role patch 查表缺席天然软跳过，本 patch 显式覆盖同 id。"""
+    role patch 查表缺席天然软跳过，本 patch 显式覆盖同 id。
+
+    t260924-06 缩面：追加「禁止 spawn 子代理」硬规则（纵深防御第二层——第一层是
+    活动侧给定的范围清单与 inspect_max_shards/每片文件数机械封顶；260926 期实测
+    7 子代理无界扇出正是 dsh fatal 零产出的直接诱因）。"""
     persona_yaml = PERSONA.replace("\n", " ")
     return (
         "# 本文件由 run_inspection_inspect 每次 spawn 生成（t260916-22；真源="
@@ -658,7 +831,8 @@ def build_persona_patch() -> str:
         "- id: system-prompt\n"
         "  config:\n"
         "    persona: >-\n"
-        "      %s\n" % persona_yaml)
+        "      %s 不派生任何子代理（子代理扇出被禁止：审查范围已由机械侧给定并封顶，"
+        "自行扩面=违纪）\n" % persona_yaml)
 
 
 def readonly_pin_patch() -> str:

@@ -429,6 +429,28 @@ def build_ticket_face(
         "suggested_fix_tickets": suggestions,
         "scan_meta": scan_result.get("meta") or {},
     }
+    # 零发现显式（t260924-06 必做③）：findings 空=必须显式声明「本期无新病灶」并附
+    # 证据面（审查范围计数与输入面点名），不得再出现空壳 findings=0。触发条件=meta
+    # 在册 scope 证据面（inspect 缩面链路）；无 scope 的 legacy/defaulted 路径零新键
+    # （零回归钉 test_face_without_suite_is_byte_identical_to_ticket1 不破——扩锁不拆锁）。
+    if not findings:
+        meta = scan_result.get("meta") or {}
+        scope = {}
+        if isinstance(meta.get("inspect"), dict):
+            scope = meta["inspect"].get("scope") or {}
+        elif isinstance(meta.get("scope"), dict):
+            scope = meta["scope"]
+        if scope:
+            note_keys = ("diff_error", "diff_malformed_lines", "suite_note",
+                         "ki_note", "scope_note")
+            warned = ["%s=%s" % (k, scope[k]) for k in note_keys if scope.get(k)]
+            face_out["zero_findings_note"] = (
+                "本期无新病灶（审查范围 %s 个文件；变化面差分=%s；%s）"
+                % (scope.get("scope_files", 0),
+                   "缺席/回落" if (scope.get("diff_error") or scope.get("scope_note"))
+                   else "已给定",
+                   "输入面点名：" + "、".join(warned) if warned
+                   else "四路输入无畸形点名"))
     if suite is not None:
         face_out["suite"] = suite      # 套件证据段（逐场景红绿/摘要/回执路径，验收 B）
     return face_out
@@ -981,7 +1003,10 @@ class InspectionPeriodicWorkflow:
                    "inspect_profile": inspect_profile, "base_dir": base_dir,
                    "base_head": (lane or {}).get("base_ref", ""),
                    "project_key": getattr(inp, "project_key", ""),
-                   "max_findings": max_findings, "timeout_sec": inspect_budget_sec}],
+                   "max_findings": max_findings, "timeout_sec": inspect_budget_sec,
+                   "inspect_max_shards": int((ins_cfg.get("max_shards")) or 0),
+                   "inspect_max_files_per_shard":
+                       int((ins_cfg.get("max_files_per_shard")) or 0)}],
             start_to_close_timeout=inspect_start_to_close(inspect_budget_sec),
             retry_policy=RETRY_INSPECT)
         if not (inspect_raw or {}).get("ok"):
@@ -1007,6 +1032,13 @@ class InspectionPeriodicWorkflow:
         ins_meta = dict(ins_result.get("meta") or {})
         ins_meta.pop("output_log", None)   # agent 原始日志路径进 meta 太吵，落 agent-home 留档即可
         vmeta["inspect"] = ins_meta
+        # 预算护栏（t260924-06 必做④）：缩面后 60 分钟预算内应有余量；used_sec 超 90%
+        # 预算=票面点名——先报实测数据再谈调预算，不许默认再抬。
+        used_sec = float(ins_meta.get("used_sec") or 0.0)
+        if used_sec > 0.9 * inspect_budget_sec:
+            self.face["budget_note"] = (
+                "inspect 段实测 %.0fs / 预算 %.0fs（超 90%%）——先报实测数据再谈调预算，"
+                "不默认抬" % (used_sec, inspect_budget_sec))
         self._enter("report", "running",
                     "复核完成（unverified %d / 去重 %d / 假报压制 %d / 截断 %s）"
                     % (vmeta.get("unverified", 0), vmeta.get("deduped", 0),

@@ -55,6 +55,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from inspection_inspect import (DEFAULT_INSPECT_TIMEOUT_MIN, DEFAULT_MAX_FINDINGS,
+                                DEFAULT_MAX_FILES_PER_SHARD, DEFAULT_MAX_SHARDS,
                                 PROFILE_FACES)
 
 DECL_FILE_NAME = "inspection.yaml"
@@ -139,6 +140,10 @@ class InstanceSpec:
     max_findings: int = DEFAULT_MAX_FINDINGS
     inspect_timeout_min: int = DEFAULT_INSPECT_TIMEOUT_MIN
     inspect_profile: str = ""
+    # 缩面硬上限两键（t260924-06）：inspect 分片（子代理）数与每片文件数机械封顶——
+    # 防「7 子代理审 368 个场景文件」式无界扇出复发。
+    inspect_max_shards: int = DEFAULT_MAX_SHARDS
+    inspect_max_files_per_shard: int = DEFAULT_MAX_FILES_PER_SHARD
     # 调度时区（t260913-02 实现段）：空=Temporal 缺省（UTC）；填 IANA 名（如 Asia/Shanghai）
     tz: str = ""
     workflow: str = ""
@@ -439,12 +444,14 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
         unknown = sorted(set(item) - {"id", "enabled", "schedule", "workflow", "template",
                                       "scan_face", "suite", "tz", "project_key",
                                       "max_findings", "inspect_timeout_min",
-                                      "inspect_profile"})
+                                      "inspect_profile", "inspect_max_shards",
+                                      "inspect_max_files_per_shard"})
         if unknown:
             raise DeclError("%s：未知实例字段 %s（合法：id/enabled/schedule/workflow/template/"
                             "scan_face/suite/tz/project_key（实例级项目身份，t260915-20）/"
                             "max_findings/inspect_timeout_min/inspect_profile（inspect 段预算三键，"
-                            "t260916-22）；"
+                            "t260916-22）/inspect_max_shards/inspect_max_files_per_shard"
+                            "（缩面分片硬上限两键，t260924-06）；"
                             "face 已于 260910 巡检校准票 t260910-11 除名——零消费者，旧声明含 face 一律拒收点名）"
                             % (where, unknown))
         inst_id = _req_str(where, item, "id")
@@ -502,6 +509,21 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
                 raise DeclError("%s：inspect_profile %r 未接线（可指名：%s）——分面清单真源"
                                 "在引擎（inspection_inspect.PROFILE_TEXTS）" %
                                 (where, inspect_profile, "、".join(PROFILE_FACES)))
+        # 缩面硬上限两键（t260924-06）：数字键词法+范围校验（同 max_findings 纪律）。
+        inspect_max_shards = DEFAULT_MAX_SHARDS
+        if item.get("inspect_max_shards") is not None:
+            raw_ms = _req_str(where, item, "inspect_max_shards")
+            if not re.match(r"^\d+$", raw_ms) or not (1 <= int(raw_ms) <= 64):
+                raise DeclError("%s：inspect_max_shards %r 非法（正整数 1~64；本项=inspect"
+                                " 段子代理分片数硬上限，缩面纪律 t260924-06）" % (where, raw_ms))
+            inspect_max_shards = int(raw_ms)
+        inspect_max_files_per_shard = DEFAULT_MAX_FILES_PER_SHARD
+        if item.get("inspect_max_files_per_shard") is not None:
+            raw_mp = _req_str(where, item, "inspect_max_files_per_shard")
+            if not re.match(r"^\d+$", raw_mp) or not (1 <= int(raw_mp) <= 10000):
+                raise DeclError("%s：inspect_max_files_per_shard %r 非法（正整数 1~10000；"
+                                "本项=每片文件数硬上限，缩面纪律 t260924-06）" % (where, raw_mp))
+            inspect_max_files_per_shard = int(raw_mp)
         kind, cron, n, source, project_key = _validate_schedule(where, item.get("schedule"), enabled)
         # 实例级项目身份必填（t260915-20）：校验放字段链**最后**——既有反用例事由
         # （缺 source、未知 kind、face 除名、cron 非法…）照旧先爆，断言语义零偷换；
@@ -520,7 +542,9 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
             instance_project_key=identity_key, scan_face=scan_face,
             suite=suite, tz=tz, workflow=workflow_name, template=template,
             max_findings=max_findings, inspect_timeout_min=inspect_timeout_min,
-            inspect_profile=inspect_profile))
+            inspect_profile=inspect_profile,
+            inspect_max_shards=inspect_max_shards,
+            inspect_max_files_per_shard=inspect_max_files_per_shard))
     return InspectionDecl(schema=SCHEMA, instances=instances, source=source)
 
 
@@ -577,7 +601,9 @@ def _plan_from_decl(decl: "InspectionDecl", instance_id: str) -> Dict[str, Any]:
             # workflow 定，声明零重复）。
             "inspect": {"max_findings": it.max_findings,
                         "timeout_min": it.inspect_timeout_min,
-                        "profile": it.inspect_profile},
+                        "profile": it.inspect_profile,
+                        "max_shards": it.inspect_max_shards,
+                        "max_files_per_shard": it.inspect_max_files_per_shard},
             "kind": it.kind, "workflow": it.workflow, "template": it.template,
             # t260917-02（R2 身份回退链）：实例级项目身份随 plan 出——旧调度 payload 缺
             # project_key 时（260917 实况），spawn 活动按本键回退决议归属，起票 SA
