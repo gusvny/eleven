@@ -298,7 +298,9 @@ def test_teardown_member_remove_failure_named_per_repo_not_silent(mixed, monkeyp
 
 
 def test_teardown_rerun_idempotent_named_warns_no_raise(mixed):
-    """幂等重跑（Temporal 重试形态）：第二次不抛异常、ok=True、逐仓点名。"""
+    """幂等重跑（Temporal 重试形态，260924 新契约升格）：第二次不抛异常、ok=True；
+    纯幂等形态（登记/分支本就无）**静默不谎报失败**；目录壳残留则点名（假「已清」
+    治理，260922/260924 实案）。双态都锁，扩锁不拆锁。"""
     lane, entries = _make_mixed_lane(mixed, "utt05j")
     first = _run(MergeArgs(ticket_id="utt05j", worktree=str(lane),
                            branch="lane/utt05j-root", repo_worktrees=entries))
@@ -306,7 +308,15 @@ def test_teardown_rerun_idempotent_named_warns_no_raise(mixed):
     second = _run(MergeArgs(ticket_id="utt05j", worktree=str(lane),
                             branch="lane/utt05j-root", repo_worktrees=entries))
     assert second.ok and second.action == "teardown"
-    assert "[repo_a]" in second.error and "[root]" in second.error, second.error
+    # 态①：拆净后重拆=纯幂等（not a working tree / not found 是目标态达成）→ 零告警
+    assert second.error == "", second.error
+    # 态②：目录壳复活（agent 杂物形态）→ 必须点名，绝不静默当净
+    stub = lane / "repo_a"
+    stub.mkdir(parents=True, exist_ok=True)
+    third = _run(MergeArgs(ticket_id="utt05j", worktree=str(lane),
+                           branch="lane/utt05j-root", repo_worktrees=entries))
+    assert third.ok
+    assert "目录壳残留" in third.error and "[repo_a]" in third.error, third.error
 
 
 # ---------- 同源判定（验收 D）+ payload 兼容 ----------

@@ -1219,10 +1219,14 @@ class InspectionPeriodicWorkflow:
                        "keep_period": "", "remove_period": lane.get("period", "")}],
                 start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
             res = (sw or {}).get("result") or {}
-            if (sw or {}).get("ok") and (res.get("removed_worktrees") or res.get("removed_branches")):
+            if ((sw or {}).get("ok") and (res.get("removed_worktrees")
+                                          or res.get("removed_branches")
+                                          or res.get("removed_dir_stubs"))):
                 return "已清（teardown_lane 未净后回落 repo 锚定定向 sweep：%s；原报 %s）" % (
-                    "worktree %d / 分支 %d" % (len(res.get("removed_worktrees") or []),
-                                               len(res.get("removed_branches") or [])),
+                    "worktree %d / 分支 %d / 目录壳 %d" % (
+                        len(res.get("removed_worktrees") or []),
+                        len(res.get("removed_branches") or []),
+                        len(res.get("removed_dir_stubs") or [])),
                     residue[:160])
             fallback = str((sw or {}).get("error") or "定向 sweep 无可清条目")
         except Exception as e:  # noqa: BLE001

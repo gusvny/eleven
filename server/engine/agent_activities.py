@@ -5590,10 +5590,11 @@ async def teardown_lane(args: MergeArgs) -> MergeResult:
         原样透传 error，不再笼统一条）。裸 `_git` 对缺失 cwd 会抛 FileNotFoundError，
         故动手前判 `repo.is_dir()`——一个坏仓不得把可回收残留升级成卡票。
     The cleanup recipe is idempotent in outcome (a repeated --quit is harmless). NB
-    (measured, t260913-05 acceptance F1): a rerun over an already-torn lane does NOT
-    get rc=0 per step — git says not-a-working-tree / branch-not-found (rc=128) and
-    each step records a **named** warn while the receipt stays ok=True — Temporal
-    retries are still safe (trade-off d) carries over)."""
+    （260924 幂等重拆精确化，宿主直修令）：重拆已拆泳道时 git 仍 rc=128（not-a-working-
+    tree / branch-not-found）——这两形态是「目标态已达成」不是失败，静默通过不谎报警；
+    真失败才点名。拆后逐 tree 验目录：目录壳仍在 → 点名「目录壳残留」（假「已清」治理，
+    260922/260924 双实案：agent 杂物复活壳骗过「零残留」章）。Temporal 重试照旧安全
+    （trade-off d 承袭）。"""
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
@@ -5669,11 +5670,21 @@ async def teardown_lane(args: MergeArgs) -> MergeResult:
             continue
         p = _git(["worktree", "remove", "--force", str(tree)], repo, timeout=60)
         if p.returncode != 0:
-            warns.append(_tagged(tag, "worktree remove 失败: %s"
-                                 % (p.stderr or "").strip()[-200:]))
+            err = (p.stderr or "").strip()
+            # 260924 幂等重拆精确化（宿主直修令）：登记本就无（is not a working tree）
+            # =目标态已达成，不是失败——不谎报警；真失败才点名（说哪个检查失败）。
+            if "is not a working tree" not in err:
+                warns.append(_tagged(tag, "worktree remove 失败: %s" % err[-200:]))
         p = _git(["branch", "-D", str(sc["branch"])], repo, timeout=30)
         if p.returncode != 0:
-            warns.append(_tagged(tag, "branch -D 失败: %s" % (p.stderr or "").strip()[-200:]))
+            err = (p.stderr or "").strip()
+            if "not found" not in err:
+                warns.append(_tagged(tag, "branch -D 失败: %s" % err[-200:]))
+        # 260924 拆后验证（假「已清」治理）：登记/分支清完须验目录——目录壳仍在就
+        # 点名，绝不让「已清…零残留」盖章盖在残留上（260924 实案：agent 杂物复活壳）。
+        if tree.exists():
+            warns.append(_tagged(tag, "目录壳残留：%s（worktree 登记/分支已清；目录未除）"
+                                         % tree))
     # D7②（t260913-04）：票收口即拆——agent 容器随泳道拆除（幂等；失败留痕不拦收口，
     # 与邻位 git 清理同口径；异常残留由后续票 prepare_workspace 的 gc 兜底）。放在仓树
     # 清理之后：容器挂载面=泳道根，先清干净成员/根仓树的 git 注册再拆容器。
@@ -6802,6 +6813,29 @@ def sweep_inspection_lanes_impl(args: Dict[str, Any]) -> Dict[str, Any]:
             removed_br.append(br)
         else:
             errors.append("branch -D %s 失败：%s" % (br, (r.stderr or "").strip()[-160:]))
+    # 260924（宿主直修令）：定向清扫补「目录壳」形态——agent 杂物把已拆泳道树 mkdir
+    # 复活的裸壳（无 git 登记，worktree/分支两条收不到；260922/260924 双实案躺壳）。
+    # 判不准不动：只认 <repo>/.lane/ 下与本期精确同名候选；内嵌 .git（未注册嵌套仓，
+    # t260916-20 教训）→ 不动、点名人工处置，绝不静默销毁对象库。
+    import shutil
+    from inspection_inspect import sweep_stub_dir_names
+    removed_dir_stubs: List[str] = []
+    if target:
+        lane_parent = repo / ".lane"
+        for name in sweep_stub_dir_names(instance, target):
+            cand = lane_parent / name
+            if not cand.is_dir():
+                continue
+            nested = [q for q in cand.rglob(".git")]
+            if nested:
+                errors.append("目录壳 %s 含 .git（%s；未注册嵌套仓形态，t260916-20：不静默"
+                              "销毁，人工处置）" % (cand, nested[0]))
+                continue
+            try:
+                shutil.rmtree(cand)
+                removed_dir_stubs.append(str(cand))
+            except OSError as e:
+                errors.append("目录壳 %s 清除失败：%s" % (cand, e))
     log.info("[inspection-sweep] 实例=%s keep=%s target=%s：worktree %d/%d、分支 %d/%d，"
              "跳过 %d、让行 %d、失败 %d", instance, keep or "（无水位）",
              target or "（无定向）", len(removed_wt),
@@ -6811,6 +6845,7 @@ def sweep_inspection_lanes_impl(args: Dict[str, Any]) -> Dict[str, Any]:
             "result": {"repo": str(repo), "instance_id": instance, "keep_period": keep,
                        "remove_period": target,
                        "removed_worktrees": removed_wt, "removed_branches": removed_br,
+                       "removed_dir_stubs": removed_dir_stubs,
                        "keep": plan["keep"], "deferred": plan["deferred"],
                        "skipped": plan["skipped"], "errors": errors},
             "error": "；".join(errors)}
@@ -7410,7 +7445,7 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
     from inspection_inspect import (  # 懒 import：防 activities↔inspection 模块环（同 run_inspection_scan 先例）
         DEFAULT_INSPECT_TIMEOUT_MIN, DEFAULT_MAX_FINDINGS, INSPECT_DEADLINE_MARGIN_SEC,
         InspectParseError, build_inspect_prompt, build_persona_patch,
-        parse_agent_findings, readonly_pin_patch, with_ids)
+        parse_agent_findings, readonly_pin_patch, sanitize_agent_home, with_ids)
 
     def _err(msg: str) -> Dict[str, Any]:
         return {"ok": False, "error": msg}
@@ -7469,7 +7504,16 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
     except ValueError as e:
         return _err("inspect prompt 构建失败：%s" % e)
 
-    home = Path(agent_home_raw)
+    # 260924 宿主直修令（假壳源头治理）：agent_home 绝不落泳道树——泳道随套件段拆除
+    # 后，本 mkdir 会把已拆目录壳复活（实案：agent 会话存储重建 <lane>/server/engine/
+    # out/…）。命中 .lane 锚 → 回落主仓 OUT_DIR 常量并点名原锚；场景注入的 /tmp
+    # 隔离台不受影响（sanitize_agent_home 纯函数，棒=回归棒4）。
+    from shared import OUT_DIR as _OUT_DIR
+    home, home_note = sanitize_agent_home(
+        Path(agent_home_raw), Path(_OUT_DIR) / "inspection" / "agent-home",
+        "%s-%s" % (instance_id, period))
+    if home_note:
+        activity.logger.warning("[inspect] agent_home %s（原锚 %s）", home_note, agent_home_raw)
     home.mkdir(parents=True, exist_ok=True)
 
     # ---- 桩捷径（场景/UT；夹具=与真 agent 同一份围栏 JSON 契约，桩-复核不同源防假绿
