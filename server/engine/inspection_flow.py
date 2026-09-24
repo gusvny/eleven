@@ -660,6 +660,9 @@ class InspectionPeriodicInput:
     # 缺省空=兼容老 history 重放（face 同款纪律：按字段名解码，缺键取默认不炸）——
     # 但双空（无身份也无 repo_root）的**新**票会被无主守卫拦成 blocked（PROJECT_PATCH_ID）。
     project_key: str = ""
+    # 被替代的终止票号（t260925-09 / KI-114）：终止期票重开时起票面写入的审计链接
+    # （同期的「终止旧票 → 活新票」两 run 链）。缺省空=正常起票/老 history 重放不炸。
+    supersedes_ticket_id: str = ""
 
 
 # ========================================================================================

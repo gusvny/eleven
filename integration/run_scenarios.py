@@ -1696,6 +1696,11 @@ SCENARIOS = [
      "派活文案·取证纪律声明面（t260924-09，灰盒 L1 级静态契约，ro 离线秒级）：必做①文案就是本票用户可感知交付物——走查 prompt/仲裁 prompt/integration 角色 persona 三处均须含四要素：①「闸回执」即全量证据声明 ②定点入口 --only ③闸口径 engine,exclusive 字面（必做③口径一致） ④每段全套次数上限声明——文案缺声明=「机械判了文案没说」单边态（t260921-04 对称纪律）；一致性副锁：agent_activities 机械护栏侧闸口径字面与文案同源（漂移即红）。intent 分工：机械行为面归 suite-guard-receipt 与 developer L1 真值表，本条只守声明面齐备与口径字面一致不测行为。被扫文件缺席=产品红（受控资产面）；无 ENV 子用例",
      "python3 integration/t260924-09/sc_t260924_09_walkthrough_copy_discipline.py", "ro"),
 
+    # ---- t260925-09: KI-114 终态票期号黑洞——期槽重开契约面 ----
+    ("t260925-09-period-slot-reopen",
+     "KI-114 终态票期号黑洞回归（t260925-09，灰盒 L2 真引擎模块×场景自有桩客户端，ro 离线秒级零 docker；锚公开回执契约 triggered/deduped/dedup_source/superseded_ticket_id/period_state/重开审计行）：A 主诉锁——同（实例,期）仅存 TERMINATED 票再 trigger 必开新票且回执链接旧票号、旧指针清留痕、重开审计行含新旧两票号（KI-114 病象「deduped=true/sa_query 永久吞槽」的正面锁）；B 活期防并发——RUNNING 票照旧 deduped=sa_query 零新票（既有语义不回退）；C 防双计——COMPLETED 票 deduped 且回执点名 completed；D fail-closed——FAILED/未知状态/describe 瞬态一律显式 error 零新票（含糊终态绝不静默开第二张，规格红线）；E 重开后 LIVE 收敛——再 trigger deduped 且票数恒 2 不产第三张；F 指针层黑洞——指针指向终止票（SA 查无）→ 清+重开；G 审计容错——重开 journal 既有坏 JSON 行不阻断追加。intent 分工：developer L1 守状态分类纯函数与桩结构锁，本条守用户可感知回执契约与病象旅程；t260916-02 场景族守既有去重三路语义（本条 B 仅作活期回归锚）；t260905-03 真台旅程需 exclusive 台——本条 ro 离线不触真台。实现落地前 A/C/D/E/F/G 红属预期（TDD 信号），arbitrate/merge 期必须全绿；引擎模块不可导入=ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=server/dsh/temporal-poc/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260925-09/sc_period_slot_reopen.py", "ro"),  # engine-venv-compat（arbitrate 修正：裸 python3 缺 temporalio=F1 环境性假红）
+
     # ---- t260925-04: 引擎票爆炸半径按实际改动文件算（写集粗前缀 → 文件级）----
     ("t260925-04-file-blast-radius",
      "文件级爆炸半径端到端契约（t260925-04，灰盒 L3，真实 tmp git 泳道仓+真 git 子进程，ro 秒级零 docker）：引擎票（写集含 server/engine/ 等共享前缀）实际只改非共享面（app/、票目录）→ 定点面=上轮红名不再恒全量（本票经济性主张本体）；安全轨①逐族钉死——实际改动含场景执行器/verify.yaml/台账机器/引擎内核/闸工具（含未提交脏面与未跟踪目录折叠形态）→ 恒全量；merge-base 算不出 → error 点名+清单空恒全量（fail-closed）；旧签名（不传 changed_files）行为逐字（引擎写集照旧全量）。intent 分工：t260924-09 守执行器 --only 入口、t260922-12 守结果台账、t260913-03 守池排除——均与本条爆炸半径判据不同 intent；developer L1 守纯函数矩阵，本条守真仓 activity×决策组件链。git 缺席=ENV_FAIL exit 2；实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",

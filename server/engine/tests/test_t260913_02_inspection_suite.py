@@ -506,11 +506,13 @@ def test_input_shape_has_no_suite_switch_field():
     import dataclasses
     fields = {f.name for f in dataclasses.fields(flow.InspectionPeriodicInput)}
     # t260915-20 补键期望：project_key（实例级项目身份）进 payload——开关红线不变
+    # t260925-09 补键期望：supersedes_ticket_id（终止票重开审计链接，KI-114）
     assert fields == {"instance_id", "face", "period", "repo_root", "scenarios_path",
-                      "decl_path", "project_key"}
+                      "decl_path", "project_key", "supersedes_ticket_id"}
     assert not {"suite", "run_suite"} & fields      # 开关不在 payload（红线：不进 payload）
     inp = flow.InspectionPeriodicInput(instance_id="i")
     assert inp.face == "test" and inp.period == "" and inp.decl_path == ""
+    assert inp.supersedes_ticket_id == ""           # 缺省空：正常起票/老 history 重放不炸
 
 
 def test_activities_registered():

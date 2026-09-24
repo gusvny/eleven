@@ -115,13 +115,16 @@ def pointer_age(path: Path, now_fn=time.time) -> float:
 
 
 def claim_pointer(path: Path, instance_id: str, period: str, ticket_id: str,
-                  project_key: str, now_fn=time.time) -> Tuple[str, Path]:
+                  project_key: str, now_fn=time.time,
+                  supersedes_ticket_id: str = "") -> Tuple[str, Path]:
     """原子抢占：O_CREAT|O_EXCL 写指针。返回 ("claimed", path) 抢到 / ("exists", path)
-    已有人 claim。写失败（目录不可写等）→ OSError 上抛（开票面显式报错）。"""
+    已有人 claim。写失败（目录不可写等）→ OSError 上抛（开票面显式报错）。
+    supersedes_ticket_id 非空 = 本次开票是终止票重开（KI-114），指针链路留审计痕。"""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps({"ticket_id": ticket_id, "instance_id": instance_id,
                           "period": period, "project_key": project_key,
+                          "supersedes_ticket_id": str(supersedes_ticket_id or ""),
                           "at": float(now_fn())}, ensure_ascii=False)
     try:
         fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
@@ -159,6 +162,29 @@ def clear_pointer(path: Path) -> bool:
         return False
     except OSError:
         raise
+
+
+#: 重开审计日志（KI-114）：追加一行 JSON——at/instance/period/terminated_ticket_id/
+#: new_ticket_id。后缀刻意 .jsonl（不带 .json 结尾）：deadman 台账扫描只收 `.json`
+#: 台账件，审计日志不进期号集合也不进畸形桶（不参与 deadman/ledger 会计）。
+REOPEN_JOURNAL_NAME = "inspection-reopen.jsonl"
+
+
+def append_reopen_journal(ledger_dir: Any, instance_id: str, period: str,
+                          terminated_ticket_id: str, new_ticket_id: str,
+                          now_fn=time.time) -> None:
+    """终止票重开的审计链接落盘（append-only JSONL）。既有文件哪怕内容畸形（半截行/
+    坏 JSON）也不阻断追加——本函数只写不读，畸形行留给未来消费方按行容错；写失败
+    OSError 上抛，由调用方显式报错（审计缺失绝不静默）。"""
+    p = Path(str(ledger_dir)) / REOPEN_JOURNAL_NAME
+    p.parent.mkdir(parents=True, exist_ok=True)
+    entry = json.dumps({"at": float(now_fn()), "instance": str(instance_id),
+                        "period": str(period),
+                        "terminated_ticket_id": str(terminated_ticket_id or ""),
+                        "new_ticket_id": str(new_ticket_id or "")},
+                       ensure_ascii=False)
+    with open(p, "a", encoding="utf-8") as f:
+        f.write(entry + "\n")
 
 
 # ========================================================================================
@@ -249,16 +275,49 @@ def _describe_not_found(exc: BaseException) -> Optional[bool]:
     return None
 
 
-async def describe_period_identity(client: Any, ticket_id: str) -> Tuple[Optional[bool], str, str]:
-    """验票存在 + 读本票 (实例,期) 身份。返回 (exists, instance, period)：
-    exists=True/False=确定结论（describe 的 RPC 打 workflow 状态本身，不依赖可见性索引，
-    NotFoundFailure=确定 not found）；None=瞬态不可判（调用方按不可判处理，绝不猜）。"""
+# ---- 执行状态 → 期槽位裁决（KI-114/t260925-09：终止票不得永久吞掉期槽位）----
+#: 活票（防并发去重语义不变）。CONTINUED_AS_NEW 作枚举兜底——真机 describe 对 continued
+#: 票通常返回 RUNNING（新 run），两个名字都归「活」，不猜。
+PERIOD_LIVE_STATUSES = frozenset({"RUNNING", "CONTINUED_AS_NEW"})
+#: 已服务（该期已收口落账；重开=台账双计，必须挡）。
+PERIOD_SERVED_STATUSES = frozenset({"COMPLETED"})
+#: 已终止（槽位释放：清指针→铸新号重开，审计链接终止票与新票）。
+#: 注意 FAILED/TIMED_OUT **不算**终止释放——失败票可能已写部分台账，是否重开属人工
+#: 裁量，机器绝不猜（fail-closed）。
+PERIOD_FREED_STATUSES = frozenset({"CANCELED", "TERMINATED"})
+
+
+def period_slot_verdict(status_name: Any) -> str:
+    """describe 状态名 → 期槽位裁决："live" | "served" | "freed" | "ambiguous"。
+    空串/未知枚举名一律 ambiguous（fail-closed 的分类基石：绝不把不认识的态当释放）。"""
+    s = str(status_name or "").strip().upper()
+    if s in PERIOD_LIVE_STATUSES:
+        return "live"
+    if s in PERIOD_SERVED_STATUSES:
+        return "served"
+    if s in PERIOD_FREED_STATUSES:
+        return "freed"
+    return "ambiguous"
+
+
+async def describe_period_run(client: Any, ticket_id: str) -> Tuple[Optional[bool], str, str, str]:
+    """验票存在 + 读执行状态 + (实例,期) 身份（KI-114：去重判定升级为状态感知）。
+    返回 (exists, status_name, instance, period)：exists 三态同 describe_period_identity
+    （True/False=确定结论，None=瞬态不可判，绝不猜）；status_name 取 describe 返回的
+    执行状态名（真 SDK WorkflowExecutionStatus 与 FakeClient 桩均读 .name），不可读=空串。"""
     try:
         handle = client.get_workflow_handle(ticket_id)
         desc = await handle.describe()
     except Exception as e:  # noqa: BLE001——三态翻译见 _describe_not_found
         verdict = _describe_not_found(e)
-        return ((False, "", "") if verdict is True else (None, "", ""))
+        return ((False, "", "", "") if verdict is True else (None, "", "", ""))
+    status_name = getattr(getattr(desc, "status", None), "name", "")
+    # tolerant：有的桩/形态把状态对象再包一层（status.name 仍是对象）——逐层取 .name
+    for _ in range(3):
+        if not hasattr(status_name, "name"):
+            break
+        status_name = status_name.name
+    status_name = str(status_name or "")
     instance = period = ""
     for name, val in _sa_pairs(getattr(desc, "typed_search_attributes", None)
                                or getattr(desc, "search_attributes", None)):
@@ -266,7 +325,16 @@ async def describe_period_identity(client: Any, ticket_id: str) -> Tuple[Optiona
             instance = val
         elif name == SA_PERIOD_NAME:
             period = val
-    return True, instance, period
+    return True, status_name, instance, period
+
+
+async def describe_period_identity(client: Any, ticket_id: str) -> Tuple[Optional[bool], str, str]:
+    """验票存在 + 读本票 (实例,期) 身份。返回 (exists, instance, period)：
+    exists=True/False=确定结论（describe 的 RPC 打 workflow 状态本身，不依赖可见性索引，
+    NotFoundFailure=确定 not found）；None=瞬态不可判（调用方按不可判处理，绝不猜）。
+    （KI-114 起为 describe_period_run 的投影薄壳；去重主判定请用带状态的后者。）"""
+    exists, _status, instance, period = await describe_period_run(client, ticket_id)
+    return exists, instance, period
 
 
 # ========================================================================================
@@ -287,7 +355,13 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
       dedup_source：sa_query | pointer | already_started
       stale_pointer_cleared：[路径…]（自动清残痕留痕，可观测；无=缺省）
       scan_mode：starts_with | type_only_fallback
+      period_state：live | completed（deduped 时如实报命中票状态；KI-114）
+      superseded_ticket_id：终止票重开时=被替代的终止票号（审计链接之一，另两处=
+        新指针 payload supersedes_ticket_id + inspection-reopen.jsonl；无重开=""）
     失败（ok=False）：error 单行可读，点名路径/候选号/事由；绝不静默。
+      KI-114 状态语义：活票/已服务票（COMPLETED）照旧 deduped（重开=台账双计）；
+      终止票（CANCELED/TERMINATED）槽位释放自动重开；FAILED/TIMED_OUT/未知状态/
+      describe 瞬态不可判 → fail-closed 显式报错，绝不静默开第二张。
 
     workflow_cls/input_cls 缺省=懒 import inspection_flow（CLI/worker 进程；单测注 fake
     免 temporalio 依赖）。grace_sec 缺省=CLAIM_GRACE_SEC（测试注入用）。"""
@@ -315,7 +389,9 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
         return {"ok": False,
                 "error": "%s（实例 %s 期 %s）" % (msg, iid, period)}
 
-    # ---- ① dedup 主判定：SA 查询 ----
+    # ---- ① dedup 主判定：SA 查询（KI-114：命中后必须 describe 验状态——SA 章在
+    #      ≠ 活票；终止票放行重开，活/已服务照旧 dedup，含糊态 fail-closed）----
+    superseded_ticket_id = ""
     try:
         existing = await find_period_ticket_ids(client, iid, period)
     except TicketingError as e:
@@ -323,13 +399,63 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": "同期票查询异常：%s: %s" % (type(e).__name__, e)}
     if existing:
-        if len(existing) > 1:
+        # KI-114：逐张 describe 验状态再裁决（SA 章在≠活票）。重开合法化后同期可存
+        # 「终止旧票 + 活新票」多张——收敛到活票裁决，绝不再见多张就一刀切报错。
+        live_ids: List[str] = []
+        freed_ids: List[str] = []
+        served_ids: List[str] = []
+        for tid in existing:
+            exists, estatus, _einst, _eper = await describe_period_run(client, tid)
+            if exists is None:
+                return _err("同期票 %s 验票暂不可判（瞬态）——稍后重试，不猜状态" % tid)
+            if not exists:
+                # SA 说在、RPC 说不在：可见性与权威面矛盾，fail-closed 不猜
+                return _err("同期票 %s SA 命中但 describe 不存在——可见性/权威面矛盾，"
+                            "人工处置" % tid)
+            slot = period_slot_verdict(estatus)
+            if slot == "live":
+                live_ids.append(tid)
+            elif slot == "served":
+                served_ids.append(tid)
+            elif slot == "freed":
+                freed_ids.append(tid)
+            else:
+                # FAILED/TIMED_OUT/未知状态名：绝不静默开第二张（fail-closed；失败票
+                # 可能已写部分台账，是否重开属人工裁量）。
+                return _err("同期票 %s 状态=%s（%s）——非活非终止非已服务，是否重开需"
+                            "人工判定；本面 fail-closed 不自动开票" % (tid, estatus, slot))
+        if len(live_ids) > 1:
             # 不该发生（SA 是起票时刻唯一盖章）；发生=有第二写入方，点名不猜
-            return _err("同期票出现多张：%s——每期一票被破坏，人工处置（terminate 多余票）"
-                        % "、".join(sorted(existing)))
-        return {"ok": True, "result": {"triggered": False, "deduped": True,
-                                       "ticket_id": existing[0], "dedup_source": "sa_query",
-                                       "stale_pointer_cleared": cleared}}
+            return _err("同期**活**票出现多张：%s——每期一票被破坏，人工处置"
+                        % "、".join(sorted(live_ids)))
+        if live_ids:
+            return {"ok": True, "result": {"triggered": False, "deduped": True,
+                                           "ticket_id": live_ids[0],
+                                           "dedup_source": "sa_query",
+                                           "period_state": "live",
+                                           "stale_pointer_cleared": cleared}}
+        if freed_ids:
+            # 终止票：期槽位释放（KI-114 根病因）。清残指针（留痕带旧票号）→ 放行进
+            # 铸号循环开新票；审计链接在 ④ 启动成功后落 reopen journal + 回执。
+            # （同窗还有已服务票=「服务过又终止」复杂史，fail-closed 人工判定。）
+            if served_ids:
+                return _err("同期既存已服务票 %s 又存终止票 %s——复杂史，是否重开需人工"
+                            "判定；本面 fail-closed 不自动开票"
+                            % ("、".join(sorted(served_ids)), "、".join(sorted(freed_ids))))
+            superseded_ticket_id = ",".join(sorted(freed_ids))
+            if clear_pointer(ppath):
+                cleared.append("%s（终止票 %s 重开：清旧指针）" % (ppath, superseded_ticket_id))
+            # 落到 ② 铸号循环——不 return
+        elif served_ids:
+            if len(served_ids) > 1:
+                return _err("同期已服务票出现多张：%s——每期一票被破坏，人工处置"
+                            % "、".join(sorted(served_ids)))
+            # 该期已收口落账：dedup 照旧（重开=台账双计），回执如实报 period_state。
+            return {"ok": True, "result": {"triggered": False, "deduped": True,
+                                           "ticket_id": served_ids[0],
+                                           "dedup_source": "sa_query",
+                                           "period_state": "completed",
+                                           "stale_pointer_cleared": cleared}}
 
     # ---- ② 铸号 + ③ 指针三态 + ④ 启动（撞号重试循环）----
     ids, scan_mode = await scan_prefix_ticket_ids(client, prefix)
@@ -337,7 +463,8 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
     for attempt in range(1, MAX_ALLOC_RETRIES + 1):
         ticket_id = ticket_id_from_seq(prefix, seq)
         state, cpath = claim_pointer(ppath, iid, period, ticket_id, str(project_key or ""),
-                                     now_fn=now_fn)
+                                     now_fn=now_fn,
+                                     supersedes_ticket_id=superseded_ticket_id)
         if state == "exists":
             kind, data = read_pointer_state(ppath)
             age = pointer_age(ppath, now_fn=now_fn)
@@ -350,7 +477,7 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                 return _err("去重指针畸形且在飞行窗内（%s：%s）——开票写窗中断嫌疑，"
                             "稍后重试；确认无并发可删该指针" % (ppath, (data or {}).get("reason")))
             ptid = str(data.get("ticket_id") or "")
-            exists, pinst, pper = await describe_period_identity(client, ptid)
+            exists, pstatus, pinst, pper = await describe_period_run(client, ptid)
             if exists is None:
                 return _err("去重指针指向 %s 但验票暂不可判（瞬态）——稍后重试" % ptid)
             if not exists:
@@ -362,24 +489,44 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                 return _err("去重指针在飞行窗内且票不可见（%s → %s，年龄 %.0fs≤%ss）——"
                             "并发开票中或刚崩溃，稍后重试；确认无并发可删该指针"
                             % (ppath, ptid, age, grace))
-            if pinst == iid and pper == str(period):
+            identity_match = (pinst == iid and pper == str(period))
+            legacy_match = not pinst and not pper   # 无 SA 章的历史票（可信分支，见下）
+            if not (identity_match or legacy_match):
+                return _err("去重指针与票身份不一致（指针 %s → %s；票 %s 的 SA=(%s,%s)）——"
+                            "配置事故，人工处置（不自动清除防掩盖第二写入方）"
+                            % (ppath, ptid, ptid, pinst or "空", pper or "空"))
+            # 身份相符（或 legacy 可信）→ 按执行状态裁决期槽位（KI-114）：
+            slot = period_slot_verdict(pstatus)
+            if slot == "live" or slot == "served":
+                if legacy_match:
+                    return {"ok": True, "result": {"triggered": False, "deduped": True,
+                                                   "ticket_id": ptid, "dedup_source": "pointer",
+                                                   "stale_pointer_cleared": cleared,
+                                                   "scan_mode": scan_mode,
+                                                   "legacy": True}}
                 return {"ok": True, "result": {"triggered": False, "deduped": True,
                                                "ticket_id": ptid, "dedup_source": "pointer",
+                                               "period_state": "live" if slot == "live"
+                                               else "completed",
                                                "stale_pointer_cleared": cleared,
                                                "scan_mode": scan_mode}}
-            if not pinst and not pper:
-                # 无 SA 章的旧票（t260916-02 之前起的历史票）：指针由本引擎写入、
-                # 且票已被 describe 证实在——可信 dedup，不进「SA 不一致」事故分支。
-                return {"ok": True, "result": {"triggered": False, "deduped": True,
-                                               "ticket_id": ptid, "dedup_source": "pointer",
-                                               "stale_pointer_cleared": cleared,
-                                               "scan_mode": scan_mode,
-                                               "legacy": True}}
-            return _err("去重指针与票身份不一致（指针 %s → %s；票 %s 的 SA=(%s,%s)）——"
-                        "配置事故，人工处置（不自动清除防掩盖第二写入方）"
-                        % (ppath, ptid, ptid, pinst or "空", pper or "空"))
+            if slot == "freed":
+                # 指针指向终止票：飞行窗语义已死（终止票绝不会再 start），立即清+留痕，
+                # 重走铸号（KI-114：终止票不得永久吞掉期槽位）。
+                clear_pointer(ppath)
+                cleared.append("%s（指针指向终止票 %s，状态=%s——清旧指针重开）"
+                               % (ppath, ptid, pstatus))
+                superseded_ticket_id = ptid
+                continue
+            # FAILED/TIMED_OUT/未知：fail-closed，不猜不重开（可能已写部分台账）。
+            return _err("去重指针指向 %s 状态=%s（%s）——非活非终止非已服务，是否重开"
+                        "需人工判定；本面 fail-closed 不自动开票" % (ptid, pstatus, slot))
         # claimed——本进程持有指针，启动真票
         input_kwargs: Dict[str, Any] = {}
+        if superseded_ticket_id:
+            # KI-114：重开票 input 带被替代终止票号（票内审计链接；旧 input 类不认
+            # 此键则走下方 TypeError 兼容面，链接仍由指针+reopen journal 承载）
+            input_kwargs["supersedes_ticket_id"] = superseded_ticket_id
         try:
             payload = input_cls(instance_id=iid, period=period, repo_root=str(repo_root or ""),
                                 face=str(scan_face or "test"), decl_path=str(decl_path or ""),
@@ -394,10 +541,23 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                 id=ticket_id, task_queue=task_queue,
                 search_attributes=inspection_search_attributes(
                     str(project_key or ""), iid, str(period)))
+            if superseded_ticket_id:
+                # 审计链接第三处：reopen journal（append-only JSONL）。写失败=审计缺失
+                # 显式报错（票已起，报错点名双事实，绝不静默吞掉审计缺失）。
+                try:
+                    append_reopen_journal(ledger_dir, iid, period,
+                                          superseded_ticket_id, ticket_id, now_fn=now_fn)
+                except OSError as e:
+                    return {"ok": False,
+                            "error": "新票 %s 已启动但 reopen journal 追加失败（%s: %s）——"
+                                     "审计链接缺失，人工补记（终止票 %s → 新票 %s）"
+                                     % (ticket_id, type(e).__name__, e,
+                                        superseded_ticket_id, ticket_id)}
             return {"ok": True, "result": {
                 "triggered": True, "deduped": False, "ticket_id": ticket_id,
                 "first_run_id": getattr(handle, "first_execution_run_id", ""),
-                "dedup_source": "", "stale_pointer_cleared": cleared, "scan_mode": scan_mode}}
+                "dedup_source": "", "stale_pointer_cleared": cleared, "scan_mode": scan_mode,
+                "superseded_ticket_id": superseded_ticket_id}}
         except Exception as e:  # noqa: BLE001——三路：deduped/外来撞号/其他失败
             already = type(e).__name__ == "WorkflowAlreadyStartedError" or \
                 "already started" in str(e).lower()
@@ -438,10 +598,33 @@ async def resolve_period_ticket_id(client: Any, instance_id: str, period: str) -
     except TicketingError as e:
         return {"ok": False, "error": str(e)}
     if len(ids) > 1:
-        return {"ok": False, "error": "（实例 %s 期 %s）出现多张同期票：%s——人工处置"
+        # KI-114：终止票重开后同期可 legitimately 存「终止旧票 + 活新票」两张——
+        # 按执行状态收敛到活票；活票>1 才是每期一票被破坏（fail-closed 不猜）。
+        live: List[str] = []
+        dead: List[str] = []
+        for tid in ids:
+            exists, status, inst, per = await describe_period_run(client, tid)
+            if exists is None:
+                return {"ok": False, "error": "（实例 %s 期 %s）同期票 %s 验票暂不可判"
+                        "（瞬态）——稍后重试" % (instance_id, period, tid)}
+            if exists and period_slot_verdict(status) == "live":
+                live.append(tid)
+            else:
+                dead.append(tid)
+        if len(live) > 1:
+            return {"ok": False, "error": "（实例 %s 期 %s）出现多张**活**同期票：%s——"
+                    "每期一票被破坏，人工处置" % (instance_id, period, "、".join(sorted(live)))}
+        if len(live) == 1:
+            return {"ok": True, "ticket_id": live[0], "source": "sa",
+                    "superseded": sorted(dead)}
+        return {"ok": False, "error": "（实例 %s 期 %s）仅存非活同期票：%s——已终止/已服务"
+                "票不承接在途操作；终止票重开走 trigger（自动放行），已服务票该期已收口"
                 % (instance_id, period, "、".join(sorted(ids)))}
     if ids:
-        return {"ok": True, "ticket_id": ids[0], "source": "sa"}
+        # 单命中也如实报 live 标（KI-114：终止/已服务票存在≠活票；消费方自行裁量）
+        exists, status, _i, _p = await describe_period_run(client, ids[0])
+        return {"ok": True, "ticket_id": ids[0], "source": "sa",
+                "live": bool(exists) and period_slot_verdict(status) == "live"}
     legacy = "inspection-%s-%s" % (instance_id, period)   # legacy 只读探测（历史票兼容）
     exists, _inst, _per = await describe_period_identity(client, legacy)
     if exists:
