@@ -19,3 +19,8 @@ notes/debts/sandbar-m2-migration-manifest.md。
    不再用 suyou 字样——新环境变量、路径、API 前缀、工具与文件名用 sandbar
    或中性名。存量 suyou 标识（如 SUYOU_* env、/suyou-workbench/ 前缀）是
    历史欠账，只随专门迁移票处置，不随手改。
+6. 工单（ticket）的标题与内容一律用**英文**写（宿主令 260924）：新开票的
+   title、spec、body、deliverables、acceptance，以及返工原因、签字与裁决等
+   票面文字，全用英文——票面是给跨项目收件人看的对外件。文档、知识库与
+   代码注释仍按规则 3 用现代中文（两者分工明确：**票英文、文档中文**，
+   不要把中文票面或英文文档混着来）。
