@@ -1641,3 +1641,18 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **修法方向**：console 与泳道 agent 调用 ticket/op 工具时**自动注入身份**；保留 `cross_project`
 > 记名越权旗（by+reason 必填）为唯一豁免通道；翻拒收前须有跨项目三态验收（声明匹配放行／未声明拒收／
 > 记名越权放行）。
+
+## KI-120 并行叉内的路径闸 block 不可脱困（授权已放行、票停在「空原因的 blocked」，四种出路均无驱动）（260925 实案，integration 岗登记）
+> **实案** t260925-05（中央工人 supervisor 票）：仲裁段（`arbitrate ∥ acceptance_walkthrough` 并行叉）的 join-settle
+> 命路径闸拒落盘（`integration/baselines/sc_auto_rework_trace.mjs` 属保护名单）→ 04:04:06 票转 blocked（带卡因与出路）。
+> integration 依既定流程处置：① 04:07:12 发 `authorize kind=protected_path`（单文件/限期/记名，**已 landing**）；
+> ② settle 随即两次记录「受保护路径经人授权放行」；③ **票面却停在 `acceptance_walkthrough/blocked` 且
+> blocked_reason 变为空**，04:07:14 之后再无任何活动（工作流既不推进也不重入叉）。
+> **已试尽的出路（全部 delivered 但无驱动效果）**：`retry_qc`×2（票面记 retry-requested 第 1/2 次）、
+> `pause`+`resume`（工作流日志可见 paused/resumed、票面记 resumed）、`rework to_stage=arbitrate`（并行兄弟段）、
+> `rework to_stage=implement`（上一串行段）。工人进程活着、信号被消费——**是状态机不重驱，不是工人死**。
+> **判读**：同一天里**串行段**上的同类 block 两次都能用「authorize + retry_qc」脱困（t260924-04 的 docs/design、
+> t260925-04），唯独**并行叉**内的这次脱不了 → 怀疑并行叉的 block-清除路径未复位 fork 簿记、未重驱兄弟段。
+> **影响**：票永久停在 blocked（不烧资源但占位），只能弃票重开或修引擎。**修法方向**：block 清除后按 fork 语义重入
+> 分支（或把「授权后重驱」做成单一入口）；**验收**＝坏路径 block→授权→自动续跑（并行叉与串行段各一例）。
+> **现场保留**：t260925-05 泳道与授权均在场，修好后可直接用于复现与验收。
