@@ -55,9 +55,11 @@ VERDICT_ALIASES: Dict[str, str] = {
 }
 #: 建议门置信阈值（工单要点③的「阈值」：verified && confidence≥0.6 && severity≥med）
 SUGGEST_CONFIDENCE = 0.6
-#: 预算缺省（宿主 260916 裁定③：起步 40 条 / 30 分钟；声明实例段可配，见 inspection_decl）
+#: 预算缺省（宿主 260916 裁定③：起步 40 条 / 30 分钟；声明实例段可配，见 inspection_decl。
+#: 260924 宿主直修令调大 30→60：连续两期实案（260923/260924）审查段跑满 1800s 预算
+#: 必超时、产出恒空壳「本期不假绿」——套件段 55 分钟量级下审查 30 分钟预算错配。）
 DEFAULT_MAX_FINDINGS = 40
-DEFAULT_INSPECT_TIMEOUT_MIN = 30
+DEFAULT_INSPECT_TIMEOUT_MIN = 60
 #: 预算双闸 margin（活动内 deadline = workflow start_to_close − margin；不等式由
 #: test_t260916_22_inspect_flow 锁定，SUITE_TO 纪律同款）
 INSPECT_DEADLINE_MARGIN_SEC = 60
@@ -704,3 +706,31 @@ def readonly_pin_patch() -> str:
         "        name: 'danger-full-access'\n"
         "        description: 'Full file access without approval prompts'\n"
         "    defaultPreset: 'read-only'\n")
+
+
+def sanitize_agent_home(raw_home, fallback_root, name):
+    """agent_home 泳道锚守卫（260924 宿主直修令；纯函数便于回归棒直测）。
+
+    260924 实案：agent_home 解析落进泳道树（路径含 .lane 段）后，套件段拆掉泳道、
+    agent 随后 home.mkdir(parents=True) 把目录壳**复活**（agent 会话存储重建
+    <lane>/server/engine/out/…）——拆除回执「已清零残留」与清扫「无可清条目」被这
+    种壳两头戏弄（260922/260924 双实案躺壳）。守卫：命中 .lane 段即回落
+    fallback_root/name，返回人读 note 点名原锚；场景注入的 /tmp 隔离台无 .lane
+    段，不受影响。
+    """
+    try:
+        parts = raw_home.resolve().parts
+    except OSError:  # 极端 IO 故障时退回未解析形态判定（仍只认整段 .lane）
+        parts = raw_home.parts
+    if ".lane" in parts:
+        return fallback_root / name, "泳道锚回落：%s -> %s" % (raw_home, fallback_root / name)
+    return raw_home, ""
+
+
+def sweep_stub_dir_names(instance, target):
+    """本期目录壳候选名（纯函数）：巡检泳道目录=分支名「/」→「-」化（inspection/<实例>/
+    <期> → inspection-<实例>-<期>），另认早期 <实例>-<期> 形（260922/260924 双实案
+    都要能收）。仅定向态（target 非空）有意义；空 instance/target=[]（判不准不动）。"""
+    if not instance or not target:
+        return []
+    return ["inspection-%s-%s" % (instance, target), "%s-%s" % (instance, target)]
