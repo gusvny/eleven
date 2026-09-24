@@ -1526,3 +1526,31 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   定位：integration/t260916-02/sc_*decl_gate* 判据 0a。
 - 两案处置=isolated 入已知红基线挂账（integration/known-red-baseline.json，home=杂物清理/
   泳道清理工序）；结构性修法待专项（扫描域语义收紧属契约变更，须配套断言不减覆盖面）。
+
+## KI-110 巡检泳道拆除诚实性族（假「已清」+幂等谎报+清扫不认目录壳+agent_home 泳道锚漂移；260924 已修待验，integration 岗登记）
+> 260922/260924 双期躺壳实案（.lane/inspection-integration-tests-2026092{2,4}）：
+- ①teardown_lane 只看 git 回执不验目录——agent 杂物复活的目录壳骗过「已清…零残留」章（假绿）；
+- ②幂等重拆 git rc=128（is not a working tree / branch not found）被记 warn，UI 误报「未净」（假红）；
+- ③sweep_inspection_lanes 只收 worktree/branch 两种形态，裸目录壳恒「定向 sweep 无可清条目」（清不掉）；
+- ④根因：agent_home 解析落 .lane 泳道树，套件段拆掉泳道后 agent 的 home.mkdir(parents=True) 把壳复活
+  （agent 会话存储重建 <lane>/server/engine/out/…）。触发条件=套件段拆泳道→inspect agent 起步 mkdir，
+  或超时收尾二次拆除/重跑。
+- 260924 宿主直修令修复：拆后逐 tree 验目录、壳在即点名「目录壳残留」；幂等形态静默精确化（说哪个检查
+  失败，不谎报）；定向清扫收目录壳（嵌套 .git 拒拆守卫=t260916-20 教训承袭）；sanitize_agent_home
+  泳道锚守卫堵复活源头。
+- 事故回归：teardown_multirepo 幂等双态升格棒+test_t260924_inspection_teardown_honesty.py 棒2-4。
+  待验点=下期巡检（260925）拆除回执真实性。
+
+## KI-111 巡检审查预算错配（套件段 55 分钟量级 vs 审查段 30 分钟预算；260924 已修待验，integration 岗登记）
+> 260923/260924 连续两期实案：suite 跑满 ~55 分钟后审查 agent 的 1800s 预算必超时——「agent 未完成
+> （超时…）未产出结果文件，本期不假绿」，台账恒空壳。触发条件=套件档开+审查分面走真 agent（桩面不触发）。
+> 260924 修复：DEFAULT_INSPECT_TIMEOUT_MIN 30→60（声明可配面不动；预算<workflow start_to_close 不等式
+> 仍由 test_t260916_22_inspect_flow 锁定）。事故回归=棒1。遗留观察：60 分钟若仍超时（模型慢），下期按
+> 实测续调，审查/套件并行化列为方案题回用户。
+
+## KI-112 历史工单泳道拆道欠账面（.lane/ 存量 10 个闭票泳道；待入轨，integration 岗登记）
+> 260924 盘面：.lane/ 存留 t260903-12/14、t260907-10、t260908-02、t260912-01、t260916-27、t260922-04/05/18、
+> t260923-06 共 10 个历史工单泳道（多为闭票/已合并/已清场票）——git 登记残留还是仅目录壳未逐个甄别
+> （不在 260924 授权清理范围，只记账不动）。与 KI-109 案二（冻结泳道树入扫描根）、t260916-27 票面
+> 「dev lane registry broken」同族。处置建议=开记名清账票甄别（登记残留走 prune、壳走定向清扫），
+> 宿主授权后动。
