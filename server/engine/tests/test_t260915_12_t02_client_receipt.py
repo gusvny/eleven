@@ -144,6 +144,7 @@ def test_sign_mismatch_with_flag_passes_override(monkeypatch):
 
 
 def test_sign_undeclared_sentinel_and_notice(monkeypatch):
+    monkeypatch.setenv(shared.UNDECLARED_POLICY_ENV, "record")  # t260925-08：记名=旋钮显式
     h = FakeHandle()
     _patch_connect(monkeypatch, FakeClient(h))
     r = _run(client.cmd_ticket({"op": "sign", "ticket_id": "t1",
@@ -191,6 +192,7 @@ async def _raise(e):
 # ---------- C3 分档：不盖章 op 的 undeclared notice 说实话 ----------
 
 def test_retry_qc_undeclared_notice_admin_log_only(monkeypatch):
+    monkeypatch.setenv(shared.UNDECLARED_POLICY_ENV, "record")  # t260925-08：记名=旋钮显式
     h = FakeHandle()
     _patch_connect(monkeypatch, FakeClient(h))
     r = _run(client.cmd_ticket({"op": "retry_qc", "ticket_id": "t1", "who": "宿主"}))
@@ -202,6 +204,7 @@ def test_retry_qc_undeclared_notice_admin_log_only(monkeypatch):
 
 
 def test_update_undeclared_notice_admin_log_only(monkeypatch):
+    monkeypatch.setenv(shared.UNDECLARED_POLICY_ENV, "record")  # t260925-08：记名=旋钮显式
     h = FakeHandle()
     _patch_connect(monkeypatch, FakeClient(h))
     r = _run(client.cmd_ticket({"op": "update", "ticket_id": "t1", "status": "settled"}))

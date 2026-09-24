@@ -8,7 +8,7 @@
 - C4：越权旗 by/reason 必填非空 + 上限（超长=畸形分支）；
 - 判定矩阵全部子用例：老 client 未盖章兼容、同项目、异项目无旗拒收、异项目带旗记名、
   undeclared 哨兵 record/refuse 两策略、note 入账截断；
-- C-0②：UNDECLARED_POLICY 单常量值锁（"record"）；
+- C-0②：策略值锁（缺省 refuse，t260925-08 翻严；record=旋钮显式选入）；
 - 四个写信号载荷的盖章字段带默认值（重放安全形状）。
 全程零 Temporal/零网络/零真实环境（conftest 已把引擎目录挂进 sys.path）。
 """
@@ -35,8 +35,10 @@ PROJ2 = [
 # ---------- 常量与策略锁（C-0②） ----------
 
 def test_undeclared_policy_constant_locked():
-    """B 策略值锁：翻 A（refuse）时必须连场景一起改——本测试就是那把锁的一部分。"""
-    assert shared.UNDECLARED_POLICY == "record"
+    """策略值锁：t260925-08 已翻严，缺省=refuse（KI-119 收口）；record=旋钮显式选入。"""
+    assert shared.UNDECLARED_POLICY == "refuse"
+    assert shared.UNDECLARED_POLICY_ENV == "SANDBAR_UNDECLARED_POLICY"
+    assert shared.UNDECLARED_POLICIES == ("record", "refuse")
 
 
 def test_env_and_mark_and_limits():
@@ -186,7 +188,13 @@ def test_judge_mismatch_with_flag_override():
     assert "宿主" in v["notice"] and "代管收口" in v["notice"]
 
 
-def test_judge_undeclared_record_and_refuse_flip():
+def test_judge_undeclared_record_and_refuse_flip(monkeypatch):
+    # 缺省（t260925-08 翻严）=拒收，why 点名缺失身份 env 与注入链
+    v = caller_gate.judge_caller(_ident("", "undeclared", "none"), "sandbar", None)
+    assert v["decision"] == "refuse"
+    assert shared.CALLER_PROJECT_ENV in v["why"]
+    # 旋钮显式 record=旧 B 策略逐字节语义：放行+哨兵+notice
+    monkeypatch.setenv(shared.UNDECLARED_POLICY_ENV, "record")
     v = caller_gate.judge_caller(_ident("", "undeclared", "none"), "sandbar", None)
     assert v["decision"] == "record_undeclared"
     assert v["stamp"] == shared.CALLER_UNDECLARED_MARK
@@ -195,11 +203,16 @@ def test_judge_undeclared_record_and_refuse_flip():
     v2 = caller_gate.judge_caller(_ident("", "undeclared", "none"), "sandbar",
                                   {"by": "x", "reason": "r"})
     assert v2["decision"] == "record_undeclared"
-    # 翻 A（终态）：同输入直接拒
-    v3 = caller_gate.judge_caller(_ident("", "undeclared", "none"), "sandbar", None) \
-        if shared.UNDECLARED_POLICY == "refuse" else None
-    if v3 is not None:
-        assert v3["decision"] == "refuse"
+
+
+def test_judge_undeclared_malformed_policy_refused(monkeypatch):
+    """旋钮畸形值=结构化拒收点名误配原文（不外抛、不静默回落，review N3）。"""
+    monkeypatch.setenv(shared.UNDECLARED_POLICY_ENV, "RECORD ")  # 大小写/空白=非法
+    v = caller_gate.judge_caller(_ident("", "undeclared", "none"), "sandbar", None)
+    assert v["decision"] == "refuse" and "SANDBAR_UNDECLARED_POLICY" in v["why"]
+    monkeypatch.setenv(shared.UNDECLARED_POLICY_ENV, "allow-always")
+    v2 = caller_gate.judge_caller(_ident("", "undeclared", "none"), "sandbar", None)
+    assert v2["decision"] == "refuse" and "allow-always" in v2["why"]
 
 
 def test_judge_engine_internal_target_empty():
@@ -233,11 +246,30 @@ def test_wf_judge_same_and_mismatch():
 
 
 def test_wf_judge_undeclared_sentinel_record():
+    # 缺省（翻严后）=refuse；显式 policy="record"=旧 B 策略记名放行
     g = shared.cross_project_judge(shared.CALLER_UNDECLARED_MARK, "sandbar", "")
+    assert g["action"] == "refuse"
+    g = shared.cross_project_judge(shared.CALLER_UNDECLARED_MARK, "sandbar", "",
+                                   policy="record")
     assert g["action"] == "allow_record"
     assert g["record"]["caller_project"] == shared.CALLER_UNDECLARED_MARK
     g2 = shared.cross_project_judge(shared.CALLER_UNDECLARED_MARK, "sandbar", "", policy="refuse")
     assert g2["action"] == "refuse"
+
+
+def test_wf_judge_malformed_policy_fail_closed():
+    """workflow 侧旋钮畸形值=refuse+人话 why（不外抛炸闸、不静默，review N3）。"""
+    import os
+    old = os.environ.get(shared.UNDECLARED_POLICY_ENV)
+    os.environ[shared.UNDECLARED_POLICY_ENV] = "yolo"
+    try:
+        g = shared.cross_project_judge(shared.CALLER_UNDECLARED_MARK, "sandbar", "")
+    finally:
+        if old is None:
+            os.environ.pop(shared.UNDECLARED_POLICY_ENV, None)
+        else:
+            os.environ[shared.UNDECLARED_POLICY_ENV] = old
+    assert g["action"] == "refuse" and "yolo" in g["why"]
 
 
 def test_wf_judge_note_truncated_into_record():

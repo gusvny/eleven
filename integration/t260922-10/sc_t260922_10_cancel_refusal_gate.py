@@ -84,6 +84,9 @@ def structured_reject(tag, payload, want_word, client_touch):
 
 def main():
     os.environ.pop('SANDBAR_CALLER_PROJECT', None)
+    # t260925-08：引擎缺省已翻 refuse（undeclared=拒收）。本场景 R12 锁的是 undeclared
+    # 记名放行契约（260922 实测缺口回归面），经旋钮显式选入 record——显式声明非静默。
+    os.environ['SANDBAR_UNDECLARED_POLICY'] = 'record'
     default_log = fx.tmp_admin_log()
     os.environ['SANDBAR_ADMIN_LOG'] = str(default_log)   # 进程内 audit 全落 tmp（仓库零写入）
     ticket = fx.load_ticket()
@@ -187,7 +190,7 @@ def main():
     rc12 = fx.client_cancel({'ticket_id': TID, 'who': WHO, 'reason': REASON})
     blob12 = json.dumps(rc12, ensure_ascii=False)
     res12 = rc12.get('result') if isinstance(rc12.get('result'), dict) else {}
-    check('R12 undeclared 身份 → B 策略放行清场', rc12.get('ok') is True and res12.get('terminated') is True,
+    check('R12 undeclared 身份（旋钮 record）→ 记名放行清场', rc12.get('ok') is True and res12.get('terminated') is True,
           '回执=%s' % blob12[:200])
     check('R12 回执 identity_class=undeclared 如实记名（身份键在 client 面顶层）',
           rc12.get('identity_class') == 'undeclared', '键=%r' % (rc12.get('identity_class'),))

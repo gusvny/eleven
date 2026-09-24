@@ -320,10 +320,10 @@ SCENARIOS = [
     # ---- t260915-12: 跨项目写操作闸（caller-project gate；260915 宿主实报立项） ----
     # 260915 虚惊复盘（dengzhufpv 票 t260915-02 合并签字）：签字合法但暴露引擎对写操作
     # 零项目边界校验。纪律层 charter 260915 已补，本票补机器层。实现段落地前红属预期
-    # （TDD 信号），arbitrate/merge 期必须绿；undeclared=B 策略现状契约被场景相七钉住，
-    # 跟进插件票接线后翻 A（undeclared=拒收）时由翻严票同步改写该相。
+    # （TDD 信号），arbitrate/merge 期必须绿；undeclared=record 旋钮契约由场景相七钉住
+    # （引擎缺省已翻 refuse——t260925-08 KI-119 收口，场景经旋钮显式选入 record）。
     ("t260915-12-gate-real-chain",
-     "跨项目写操作闸的真链路用户契约面（t260915-12 验收①反用例/②正用例/③越权旗+对账面，灰盒 L3，真 docker 台+真用户 CLI+真专属 worker+真 workflow）：declared 身份（SANDBAR_CALLER_PROJECT/显式参数）与目标票 project 不符→fail-closed 拒收 kind=cross_project_refused+人话点名双项目与票号（ruling/sign/ticket-start 三入口同形状）+admin.log 行 override=false 且信号不出手（snapshot 零变化）；同项目写操作零影响仅回执增身份键（caller_project/identity_src 词汇 arg|env|cwd）；出处优先级显式参数>env（env 不能救显式他项目）；越权旗 cross_project{by,reason}→放行+meta['cross_project_uses'] 按笔记名（by/reason 原文在条目）+ticket.py show 用户出口可对账+admin.log override=true；畸形旗（缺 by/缺 reason/reason 空白）fail-closed 拒收不记名；undeclared=B 策略现状契约（放行+identity_class=undeclared+记名入对账面+admin.log 行）；cwd 兜底两形=仓内子目录必须 undeclared（注册表含 dirs=[引擎仓根] 探测条目，实现只排除仓根等值即行为反转红=review C1 探测器）、cwd 在注册项目 dir 内推导 declared identity_src=cwd；workflow 第二道直发 SDK 真 stamp 解码（review C5 送达面）=带头旗记名放行/不带头旗 refused[] 点名不执行/无盖章兼容不校验；retry_qc 不盖章残留诚实（client 放行+admin.log override=true 但 meta 记名不增=方案 §8 已声明残留非漏记）；读面零闸；cancel 过闸（他项目拒/同项目 terminate 放行）。与 t260912-03 三场景不同面（彼锁人授权 authorize 载荷维，本条锁调用方项目归属维）；与 t260913-01 不同面（彼锁 authorize 嵌套载荷送达，本条锁 stamp 标量字段真投递）；与 t260908-01 不同面（彼锁 pause intake 语义，本条只把 pause/ruling 当任意状态写 op 载体）；与 developer L1（纯函数矩阵/client 桩测）及其源码锁场景不同层。docker/镜像/舞台缺件=ENV_FAIL exit 2 点名",
+     "跨项目写操作闸的真链路用户契约面（t260915-12 验收①反用例/②正用例/③越权旗+对账面，灰盒 L3，真 docker 台+真用户 CLI+真专属 worker+真 workflow）：declared 身份（SANDBAR_CALLER_PROJECT/显式参数）与目标票 project 不符→fail-closed 拒收 kind=cross_project_refused+人话点名双项目与票号（ruling/sign/ticket-start 三入口同形状）+admin.log 行 override=false 且信号不出手（snapshot 零变化）；同项目写操作零影响仅回执增身份键（caller_project/identity_src 词汇 arg|env|cwd）；出处优先级显式参数>env（env 不能救显式他项目）；越权旗 cross_project{by,reason}→放行+meta['cross_project_uses'] 按笔记名（by/reason 原文在条目）+ticket.py show 用户出口可对账+admin.log override=true；畸形旗（缺 by/缺 reason/reason 空白）fail-closed 拒收不记名；undeclared=经旋钮 SANDBAR_UNDECLARED_POLICY=record 显式选入的记名契约（放行+identity_class=undeclared+记名入对账面+admin.log 行；引擎缺省已翻 refuse，t260925-08）；cwd 兜底两形=仓内子目录必须 undeclared（注册表含 dirs=[引擎仓根] 探测条目，实现只排除仓根等值即行为反转红=review C1 探测器）、cwd 在注册项目 dir 内推导 declared identity_src=cwd；workflow 第二道直发 SDK 真 stamp 解码（review C5 送达面）=带头旗记名放行/不带头旗 refused[] 点名不执行/无盖章兼容不校验；retry_qc 不盖章残留诚实（client 放行+admin.log override=true 但 meta 记名不增=方案 §8 已声明残留非漏记）；读面零闸；cancel 过闸（他项目拒/同项目 terminate 放行）。与 t260912-03 三场景不同面（彼锁人授权 authorize 载荷维，本条锁调用方项目归属维）；与 t260913-01 不同面（彼锁 authorize 嵌套载荷送达，本条锁 stamp 标量字段真投递）；与 t260908-01 不同面（彼锁 pause intake 语义，本条只把 pause/ruling 当任意状态写 op 载体）；与 developer L1（纯函数矩阵/client 桩测）及其源码锁场景不同层。docker/镜像/舞台缺件=ENV_FAIL exit 2 点名",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260915-12/tests/sc_cross_project_gate_realchain.py", "engine"),
 
     # t260915-12 离线源码锁（实现段交付，方案 §4）：结构锁+真函数重放，无 docker/
@@ -331,6 +331,17 @@ SCENARIOS = [
     ("t260915-12-cross-project-gate",
      "跨项目写操作闸离线源码锁+微型重放（temporalio 不可导入环境既定模式，sc_check_auto_rework_trace 同款）：锁 undeclared 策略单常量（UNDECLARED_POLICY=record——C-0② 翻严锚点：翻 A 时本场景+真链路场景相七+README 三处同步改）、四个写信号载荷盖章字段带默认值（重放安全形状）、判定矩阵单点实现（shared.cross_project_judge 唯一真源，client/workflow 两侧零复制）并直接 import 真函数重放正/负/越权/畸形四子用例（畸形子用例：旗非对象/缺 by/缺 reason/超上限/身份形状非法/路径前缀混淆/空白声明=视同未声明）、client 八写 op 全接闸+retry_qc/update 不盖章但回执 notice 分档（C3 诚实残留）、cancel 前置快照三态（transient 不判越权 KI-025/not_found/先闸后 terminate）、workflow 第二道落点（base 混入五 handler 含 t260922-10 补接闸的 cancel_notice+dev_lane 三 handler+旧模板 sign 统一接闸不留分叉）、ticket.py 包装层（仓树排除的 cwd 推导=C1、越权旗本层 fail-fast、对账白名单 cross_project_uses、schema caller_project+cross_project+op enum authorize|ruling=M2）",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260915-12/tests/sc_check_cross_project_gate.py", "engine"),
+
+    # t260925-08 离线双场景（integration 交付）：KI-119 收口后新契约——缺省翻
+    # refuse+运维旋钮+lane agent 身份注入链。与 t260915-12 双场景不同面（彼锁
+    # record 现状闸矩阵与真链路，本双条锁翻严后行为与注入链；t260915-12 场景
+    # 中锁「undeclared=B 现状」的子断言随本票实现段同步翻新）。
+    ("t260925-08-undeclared-refuse-flip",
+     "undeclared 策略翻严后的闸行为契约（t260925-08 KI-119 收口，灰盒 L2 离线，shared/caller_gate 真函数重放，t260915-12 源码锁同款模式）：缺省策略=refuse（翻严锚）——undeclared 对项目票写 fail-closed 拒收且 why 点名缺失身份 env 名 SANDBAR_CALLER_PROJECT（绝不静默回落记名放行）；运维旋钮 SANDBAR_UNDECLARED_POLICY=record 显式回旧 B 策略同形（哨兵盖章+notice+undeclared 如实记名=过渡杠杆）、=refuse 合法；旋钮畸形值（大小写混写/带空白/未知值）逐个 raise 点名该值不静默回落（报错必须说哪个检查失败）、空串=unset 语义回缺省；零回归面=declared 同项目 pass 零变化、engine-internal target=\"\" 恒 pass、declared 异项目无旗 refuse 点名双项目、合规越权旗 pass_override（唯一 sanctioned escape hatch 原样）、畸形旗拒收；源码结构锚=策略消费改走 undeclared_policy() 单点（caller_gate 不再直读常量）+client 回执 injected_by 尽力面标签值域 {lane-agent, external-env} 且语义边界（非安全断言）入源码注释；畸形身份（大写/空格/路径穿越/超长）解析期 raise 点名。与 t260915-12-cross-project-gate 不同面（彼锁 record 现状与结构形状，本条锁翻严后行为与旋钮）；developer L1（undeclared_policy 纯函数真值表）不同层。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；纯离线无 ENV_FAIL 子用例",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260925-08/tests/sc_undeclared_policy_refuse.py", "ro"),
+    ("t260925-08-lane-caller-injection",
+     "lane agent 调用方身份注入链契约（t260925-08 KI-119 修法方向①引擎半边，灰盒 L2 离线，agent_runtime 可安全 import）：docker 形态 ENV_ALLOWLIST 含身份注入两键 SANDBAR_CALLER_PROJECT+SANDBAR_CALLER_SURFACE（容器边界透传身份与注入面标签的机械前提，白名单既有成员零变化只加不删）；spawn 链注入锚=agent_activities 经 _prepare_agent_spawn 单点注入（三 spawn 面—通用段/arbitrate/inspection—同经此单点，不逐面复制）且注入位带 shared.PROJECT_KEY_RE 形状校验（合法才注入不静默纠偏）+SURFACE=lane-agent 伴随标签（injected_by 判别信号）；注入端到端行为面=env 身份解析 declared src=env→同项目写 pass 零 notice（工单要求④用户可感知出口）、跨项目无旗 refuse（escape hatch 只剩显式旗）、畸形注入值解析期 raise 点名；无注入对照=缺省 refuse 拒收且 why 点名 env 名（「注入了就放行、没注入就拒且说清缺什么」对称面）；console 红线静态观察=server/admin.py 与 server/dsh/ 插件目录零本票注入落点（3099 运行面零触碰，接线归后续插件票）。与 t260915-12-gate-real-chain 不同面（彼真 docker 台锁闸行为，本条锁注入链在引擎侧的结构与解析出口）；developer L1（spawn env 构造桩测）不同层。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；纯离线无 ENV_FAIL 子用例",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260925-08/tests/sc_lane_caller_injection.py", "ro"),
 
     ("auto-rework-trace",
      "---- A1: 五个自动打回场景，各产一条横幅可见记录（用户视角主契约） ---- scenarios = [ ('acceptance', 'implement', '验收",
@@ -1629,7 +1640,7 @@ SCENARIOS = [
      "记名清场主链（t260922-10 场景①，宿主令 260922「留痕必须先写、后终结」+A3.5 同源教训，灰盒 L2，ro 离线秒级，全桩零真 Temporal）：T1-T5 成功链（blocked 残渣票 ticket op=cancel 记名终结）——回执 terminated/reason/who 原文回显、cancel_notice 信号严格先于 terminate 且恰一次（桩调用次序=次序机械观测面）、信号载荷含 who+reason 原文与盖章 caller_project、三方同串（signal.reason==terminate.reason==回执.reason，== 不模糊）、admin.log（SANDBAR_ADMIN_LOG=tmp 隔离）含同串、回执零「列不出」谎报（裸入口缺口不得回潮）；T6 已终态重复 cancel=幂等 ok 回执零新动作；T7 终态后 show=kind=terminal 结构化（快照不可得契约）；T8 terminate 失败 race=结构化报错点名「信号已留痕未终结」无第二次终结；T9 信号失败=不终结零半途副作用。intent 分工：跨项目闸矩阵本体归 t260915-12 两场景、拒收形状细节归本票场景②，本条只锁「记名+次序+同串」主链。实现落地前 T1-T5/T8/T9 红属预期（TDD），arbitrate/merge 期必须绿",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260922-10/sc_t260922_10_cancel_trace_ordering.py", "ro"),
     ("t260922-10-cancel-refusal-gate",
-     "记名清场拒收面与跨项目闸一致（t260922-10 场景②，工单验收①④+「拒绝=零副作用、被拒也留痕」，灰盒 L2，ro 离线秒级，全桩）：R1-R7 reason 缺/空/纯空白/非串归一（不 str() 静默放行）+who/id 缺+越权旗缺 reason → 结构化拒收且 client 层零触达零副作用（inproc 计数器=机械观测面）；R8 declared 异项目无旗 → kind=cross_project_refused 点名双项目+票号、零 signal/terminate、被拒调用进 admin.log（R13 CLI 同口径被拒留痕）；R9 带旗放行+载荷章=异项目+note=旗理由原文、主 reason 仍为终结同串（旗理由≠清场理由两处各自入账）；R10 票不存在 kind=not_found；R11 describe 瞬时 kind=transient 不判越权（KI-025）；R12 undeclared B 策略放行清场+identity_class=undeclared 如实记名+回执零「列不出」（260922 实测缺口主回归）；R13 CLI 子进程 reason 空=退出非零+一行 JSON+被拒留痕（KI-067 契约）。intent 分工：闸矩阵含裸 cancel 过闸归 t260915-12 两场景，本条只锁新记名入口的拒收形状/零副作用/诚实回执。实现落地前红属预期（TDD），arbitrate/merge 期必须绿",
+     "记名清场拒收面与跨项目闸一致（t260922-10 场景②，工单验收①④+「拒绝=零副作用、被拒也留痕」，灰盒 L2，ro 离线秒级，全桩）：R1-R7 reason 缺/空/纯空白/非串归一（不 str() 静默放行）+who/id 缺+越权旗缺 reason → 结构化拒收且 client 层零触达零副作用（inproc 计数器=机械观测面）；R8 declared 异项目无旗 → kind=cross_project_refused 点名双项目+票号、零 signal/terminate、被拒调用进 admin.log（R13 CLI 同口径被拒留痕）；R9 带旗放行+载荷章=异项目+note=旗理由原文、主 reason 仍为终结同串（旗理由≠清场理由两处各自入账）；R10 票不存在 kind=not_found；R11 describe 瞬时 kind=transient 不判越权（KI-025）；R12 undeclared（旋钮 record 选入，t260925-08 缺省已翻 refuse）放行清场+identity_class=undeclared 如实记名+回执零「列不出」（260922 实测缺口主回归）；R13 CLI 子进程 reason 空=退出非零+一行 JSON+被拒留痕（KI-067 契约）。intent 分工：闸矩阵含裸 cancel 过闸归 t260915-12 两场景，本条只锁新记名入口的拒收形状/零副作用/诚实回执。实现落地前红属预期（TDD），arbitrate/merge 期必须绿",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260922-10/sc_t260922_10_cancel_refusal_gate.py", "ro"),
     ("t260922-10-cancel-contract-surface",
      "记名清场说明书=入口与边界负锁（t260922-10 场景③，KI-079「说明书教了不存在的入口=掉旁路丢身份」，ro 离线秒级静态+桩）：C1 schema op enum 宣告 cancel（additionalProperties:False 下入口机读可达的必要项）；C2 schema 宣告 reason 键（顺带补 authorize 漏宣告）；C3 工具帮助文本宣告 cancel+清场 runbook 判据锚词（清场/retry_qc——帮助文本承载 runbook 是本票交付口径）；C4 client COMMANDS/USAGE 宣告 ticket-cancel；C5 幂等闸口径=CONTINUED_AS_NEW（未收口换代活票）继续走闸 cross_project_refused，绝不谎报已终态（_EXEC_ALIVE_OK 既有口径，KI-025「不许把活报成终」）；C6 边界负锁=无批量清理 op/子命令（只做记名单票终结，危险默认不上桌面）；C7 裸 cancel 子命令原样在（不改裸入口边界锚）。intent 分工：pause/resume 说明书漂移已由 KI-079 定性不属本票；t260915-12-cross-project-gate 锁 caller_project/旗/authorize 宣告面，本条只锁 cancel/reason 新宣告。实现落地前红属预期（TDD），arbitrate/merge 期必须绿",
@@ -2344,6 +2355,11 @@ def _batch_signal_teardown(signum, frame):
 
 
 def main(exclude_pools=None, only_scenarios=None) -> int:
+    # t260925-08：引擎缺省已翻 refuse（undeclared=拒收）。集成跑台是测试台：大量场景
+    # 以仓内 cwd 直调 ticket/client（身份=undeclared）做同项目票操作，语义上并非跨项目
+    # 越权——整台显式选入 record 记名策略，生产面（引擎 spawn 链已注入的 lane agent 与
+    # 接线后的 console）不受影响；setdefault=宿主仍可用环境变量覆盖。
+    os.environ.setdefault("SANDBAR_UNDECLARED_POLICY", "record")
     """Run the registry as pools (host-ordered t260902 pool split): an entry
     may carry an optional fourth element — None/absent = the "main" pool;
     "ro"/any other string = a named pool; "exclusive" = runs alone before all

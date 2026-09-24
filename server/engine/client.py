@@ -557,7 +557,12 @@ def _gate_receipt(result: Dict[str, Any], gate: Optional[Dict[str, Any]],
                   op: str) -> Dict[str, Any]:
     """闸身份键并入成功回执（外层——与拒收回执同层同形状：拒收键在 _err 顶层，成功键
     也在顶层，消费方一个层级读两种结局）；undeclared 且 op 不盖章→notice 补
-    admin.log-only 口径（C3：回执文案不许超诺——不盖章 op 的记名查询面列不出）。"""
+    admin.log-only 口径（C3：回执文案不许超诺——不盖章 op 的记名查询面列不出）。
+
+    t260925-08：keys 里的 injected_by∈{lane-agent, external-env} 由
+    caller_gate.identity_receipt 构造（identity_src=env 时附带）——尽力面标签非安全
+    断言：只回答「身份从哪个面进来」（引擎 spawn 链注入=lane-agent，手工旁路设 env=
+    external-env），不回答「谁注入的」；审计不得单凭此键下「谁操作」断言。"""
     if not gate:
         return result
     out = dict(result)
@@ -2705,8 +2710,9 @@ USAGE = (
     "ticket 子命令（步2）：op=rework|ruling|authorize|retry_qc|pause|resume|update|sign|query。\n"
     "  写 op 过跨项目闸（t260915-12）：调用方项目身份（env %s 或显式 caller_project）与目标\n"
     "  票项目不符=fail-closed 拒收（kind=cross_project_refused）；确需跨项目带越权旗\n"
-    "  cross_project={by, reason 必填}（记名留痕可查）；未声明身份按引擎策略记名放行\n"
-    "  （UNDECLARED_POLICY，契约见 server/engine/README.md）。\n"
+    "  cross_project={by, reason 必填}（记名留痕可查）；未声明身份=拒收（缺省策略，\n"
+    "  t260925-08 翻严）；过渡期可经旋钮 SANDBAR_UNDECLARED_POLICY=record 显式回记名放行\n"
+    "  （契约见 server/engine/README.md）。\n"
     "  authorize=人授权签发（t260912-03：受保护路径/仲裁上限的放行钥匙，唯一入口＝\n"
     "  sign 信号面；kind/who/scope/reason/expires 由调用方注入，agent 不得自签）。\n"
     "  v2 引擎（M11 模版即代码）：advance/accept/dispatch-next 已取消（自动推进），\n"

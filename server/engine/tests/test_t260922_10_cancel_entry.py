@@ -163,6 +163,7 @@ def test_cancel_cross_project_with_flag_stamped_and_recorded(monkeypatch):
 def test_cancel_undeclared_sentinel_no_false_notice(monkeypatch):
     """C3 分档：ticket-cancel 已盖章（workflow 侧落 cross_project_uses）——回执不得
     谎称「查询面列不出」（该诚实口径只属 _UNSTAMPED_NOTICE_OPS 的裸 cancel）。"""
+    monkeypatch.setenv(shared.UNDECLARED_POLICY_ENV, "record")  # t260925-08：记名=旋钮显式
     h = FakeHandle()
     _patch_connect(monkeypatch, FakeClient(h))
     r = _run(client.cmd_ticket_cancel({"ticket_id": "t1", "who": "ops", "reason": "r"}))
@@ -401,8 +402,9 @@ def test_cancel_notice_cross_project_without_flag_refused():
     assert len(wf.meta.get("log") or []) == 1          # 只落闸拒收 log，无受理 log
 
 
-def test_cancel_notice_undeclared_sentinel_recorded():
-    """B 策略：未声明身份（哨兵章）→ allow_record 记名放行。"""
+def test_cancel_notice_undeclared_sentinel_recorded(monkeypatch):
+    """B 策略（旋钮显式 record）：未声明身份（哨兵章）→ allow_record 记名放行。"""
+    monkeypatch.setenv(shared.UNDECLARED_POLICY_ENV, "record")  # t260925-08 翻严后须显式
     wf = _StubWf(project="proj-b")
     TicketCrossProjectMixin.cancel_notice(
         wf, {"who": "ops", "reason": "r",

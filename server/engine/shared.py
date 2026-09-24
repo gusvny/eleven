@@ -822,16 +822,44 @@ CALLER_PROJECT_ENV = "SANDBAR_CALLER_PROJECT"
 # undeclared 的写操作也要进 workflow 侧记名账（meta['cross_project_uses']），空值继续
 # 承载解码兼容语义（老历史/老 client 解码缺字段→""→不校验不记名）。
 CALLER_UNDECLARED_MARK = "__undeclared__"
-# undeclared 策略常量（review C-0 收口条件②：翻 A=改这一处+场景同步）：
-#   "record" = 放行+强制记名（本期 B 策略：console/node 注入面不在引擎写集，接线由跟进
-#              插件票完成；接线后翻 "refuse" 即终态 fail-closed。依赖与翻严路径登记在
-#              server/engine/README.md 注入契约节）。
-#   "refuse" = 终态：未声明身份一律结构化拒收。
-UNDECLARED_POLICY = "record"
+# undeclared 策略常量（review C-0②：翻严单点。**缺省已翻 "refuse"——翻严执行票
+#   =t260925-08（KI-119 收口：泳道 agent 身份注入已接线，undeclared 只剩不经 spawn 链
+#   的旁路调用面，fail-closed）**；运维过渡旋钮见 UNDECLARED_POLICY_ENV：
+#   "record" = 放行+强制记名——仅经旋钮 SANDBAR_UNDECLARED_POLICY=record 显式选入
+#              （console 注入接线前的过渡期用；显式声明、有据可查，非静默降级）。
+#   "refuse" = 终态：未声明身份一律结构化拒收（缺省）。
+UNDECLARED_POLICY = "refuse"
+# 策略旋钮（t260925-08）：值∈UNDECLARED_POLICIES 才认，畸形值=点名 raise（fail-closed，
+# 不静默回落——消费面见 undeclared_policy() 与 cross_project_judge 的 fail-closed 包装）。
+UNDECLARED_POLICY_ENV = "SANDBAR_UNDECLARED_POLICY"
+UNDECLARED_POLICIES = ("record", "refuse")
+# 注入面标签 env（t260925-08，尽力面标签非安全断言）：引擎 spawn 链（_prepare_agent_spawn）
+# 注入身份时随 CALLER_PROJECT_ENV 一并设 "lane-agent"；identity_receipt 据此区分
+# injected_by=lane-agent / external-env。标签只回答「身份从哪个面进来」，不回答
+# 「谁注入的」——手工旁路设了同名 env 也会带标签，审计不得单凭此键下「谁操作」断言。
+CALLER_SURFACE_ENV = "SANDBAR_CALLER_SURFACE"
+CALLER_SURFACE_LANE_AGENT = "lane-agent"
 # 越权旗自由文本上限（review C4，intake 上限家族：与 PAUSE/HOST_RULING_NOTE_INPUT_LIMIT、
 # AUTHZ_WHO_MAX_LEN 同值不同源——独立常量，各自演进不互相绑死）。超限=结构化拒收。
 CROSS_PROJECT_NOTE_LIMIT = 20000
 CROSS_PROJECT_BY_LIMIT = 64
+
+
+def undeclared_policy(env_raw: Optional[str] = None) -> str:
+    """undeclared 策略解析（t260925-08 单点）：旋钮 env 值∈UNDECLARED_POLICIES 才认，
+    空缺=缺省 UNDECLARED_POLICY（"refuse"），畸形值=点名 raise（fail-closed，不静默回落）。
+
+    client 侧（judge_caller）把 raise 转成结构化拒收回执；workflow 侧（cross_project_judge
+    缺省参数路径）把 raise 转 refuse+人话 why——两条路径都不静默（review N3）。"""
+    raw = (str(os.environ.get(UNDECLARED_POLICY_ENV) or "")
+           if env_raw is None else str(env_raw or ""))
+    if not raw.strip():
+        return UNDECLARED_POLICY   # 空串/纯空白=unset 语义，回落缺省（不误伤空 env 注入）
+    if raw in UNDECLARED_POLICIES:  # 严格等值：不 strip 纠偏——带空白包边=误配，fail-closed
+        return raw
+    raise ValueError(
+        "undeclared 策略旋钮 %s=%r 非法（合法值：%s）——修正或删除该 env 后重试"
+        % (UNDECLARED_POLICY_ENV, raw.strip()[:64], "|".join(UNDECLARED_POLICIES)))
 
 
 def path_under_any(path: str, roots: Sequence[str]) -> bool:
@@ -896,7 +924,7 @@ def project_key_for_dir(path: str, projects: Sequence[Dict[str, Any]],
 
 
 def cross_project_judge(caller: str, target: str, note: str,
-                        policy: str = UNDECLARED_POLICY) -> Dict[str, Any]:
+                        policy: Optional[str] = None) -> Dict[str, Any]:
     """workflow 侧第二道判定（纯函数，t260915-12；client 侧矩阵在 caller_gate.py，
     语义同源——两处各自实现原因：workflow 侧只消费盖章值、无身份解析面）。
 
@@ -907,8 +935,17 @@ def cross_project_judge(caller: str, target: str, note: str,
     - allow_record 放行+记名（record 由调用方补 ts/op 后落 meta['cross_project_uses']）：
         undeclared 哨兵（policy="record" 时）或 declared 异项目带越权旗理由；
     - refuse       declared 异项目无旗（人话点名「谁要动谁的票」）或 undeclared 且
-        policy="refuse"（终态 A）。
-    note 截断进 record（≤300 字符入账，全文不进事件历史——host_ruling 截断同族取舍）。"""
+        policy="refuse"（缺省终态，t260925-08 翻严）。
+    note 截断进 record（≤300 字符入账，全文不进事件历史——host_ruling 截断同族取舍）。
+
+    policy=None（缺省）=经 undeclared_policy() 解析旋钮；旋钮畸形值不外抛（workflow 侧
+    不让策略误配炸闸），转 refuse+人话 why（fail-closed 且可见，review N3）。"""
+    if policy is None:
+        try:
+            policy = undeclared_policy()
+        except ValueError as e:
+            return {"action": "refuse", "record": None,
+                    "why": "跨项目闸：%s（策略误配 fail-closed 拒收）" % e}
     caller = str(caller or "")
     target = str(target or "")
     note = str(note or "").strip()
@@ -924,8 +961,9 @@ def cross_project_judge(caller: str, target: str, note: str,
         return {"action": "allow_record",
                 "record": {"caller_project": CALLER_UNDECLARED_MARK, "note": note[:300]},
                 "why": "跨项目闸记名：未声明调用方身份的操作落在项目 %s 的票上"
-                       "%s（策略=记名放行，console/泳道注入接线后翻拒收）"
-                       % (target, "，理由=%s" % note[:120] if note else "")}
+                       "%s（策略=记名放行，经旋钮 %s=record 显式选入；缺省策略=拒收）"
+                       % (target, "，理由=%s" % note[:120] if note else "",
+                          UNDECLARED_POLICY_ENV)}
     if note:
         return {"action": "allow_record",
                 "record": {"caller_project": caller, "note": note[:300]},

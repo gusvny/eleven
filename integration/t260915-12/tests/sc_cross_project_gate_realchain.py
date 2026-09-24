@@ -13,9 +13,11 @@ intent（登记于 run_scenarios.py，名 t260915-12-gate-real-chain）：
     ticket.py show 用户出口对账 + admin.log override=true；重发=按笔累计）；
   ④ 身份出处可审计：显式参数 > env(SANDBAR_CALLER_PROJECT) > cwd 窄兜底 > undeclared，
     回执 identity_src 落词汇表 arg|env|cwd|none；
-  ⑤ undeclared（B 策略）→ 放行 + 强制记名（回执 identity_class=undeclared + 入越权
-    对账面）——**本子用例钉的是 B 策略现状契约**；跟进插件票接线后翻 A（undeclared=拒收）
-    时由翻严票同步改写本相，不属本票回归面；
+  ⑤ undeclared（经旋钮 SANDBAR_UNDECLARED_POLICY=record 显式选入的记名策略）→ 放行 +
+    强制记名（回执 identity_class=undeclared + 入越权对账面）——**本场景钉的是
+    record 策略契约**；t260925-08 已把引擎缺省翻为 refuse（undeclared=拒收），
+    本场景整体经旋钮选入 record 以继续钉记名面；缺省 refuse 由 sc_check 静态面
+    与单测锁定（真函数重放），不属本场景回归面；
   ⑥ cwd 兜底仓树排除（review C1 探测器）：cwd=引擎仓内子目录必须 undeclared，不得按
     注册目录前缀误判成 declared（注册表里专门放了 dirs=[引擎仓根] 的探测条目）；
   ⑦ workflow 第二道（直发 SDK 真 stamp 解码，review C5 送达面）：盖章信号真投递后
@@ -204,6 +206,9 @@ def main():
         # cwd=仓内子目录会被 longest-prefix 误判成该 declared 项目（review C1 行为反转）。
         bench.write_registry(reg_dir, REPO_KEY, REPO)
         env = stage_env(state, reg_dir)
+        # t260925-08：引擎缺省已翻 refuse（undeclared=拒收）。本场景锁的是 record 策略
+        # 契约面（记名放行全族子用例），经旋钮显式选入——显式声明，非静默降级。
+        env["SANDBAR_UNDECLARED_POLICY"] = "record"
         env["SANDBAR_ADMIN_LOG"] = admin_log
         stub_path = os.path.join(tmp, "ki061_stub.py")
         with open(stub_path, "w", encoding="utf-8") as f:
@@ -220,8 +225,8 @@ def main():
         worker = spawn_worker(py, TID, env, os.path.join(tmp, "worker.log"), stub_path,
                               stub_log, disable_ki061=False, arb_verdict="pass")
         check(worker.poll() is None, "worker 已拉起 pid=%s" % worker.pid)
-        # 建票走 undeclared（无 env、cwd=仓根=仓树内）——B 策略下放行；建票面闸的
-        # 反用例在相三专门打。
+        # 建票走 undeclared（无 env、cwd=仓根=仓树内）——record 旋钮下放行（缺省
+        # 已翻 refuse，t260925-08）；建票面闸的反用例在相三专门打。
         rc, out = run_poc_client(py, "ticket-start", {
             "ticket_id": TID, "template_id": "dev-lane", "project": PROJ_KEY,
             "title": "t260915-12 跨项目写闸真链路面", "write_set": ["docs/"]}, env)

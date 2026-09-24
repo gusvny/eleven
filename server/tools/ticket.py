@@ -77,7 +77,8 @@ update/rework/sign/retry_qc/pause/resume/authorize/ruling/cancel）带调用方�
 一律不推导，防间接调用凭空造身份）；形状非法/越权旗缺 by|reason/超上限在本层
 fail-fast。declared 身份与目标票项目不符由 client.py 闸拒收（cross_project_refused）；
 确需跨项目带 cross_project={by, reason 必填}（记名留痕，show 出口可对账）。undeclared
-=B 策略放行+记名（翻严条件见 README §11.2）。读 op 不带闸上下文。
+=拒收（t260925-08 翻严缺省；过渡期经旋钮 SANDBAR_UNDECLARED_POLICY=record 显式回记名
+放行，契约见 README §11.2）。读 op 不带闸上下文。
 
 直 spawn 形态（KI-067 根因修复）：本文件历史上没有 CLI 入口，任何直接
 `python3 ticket.py '{...}'` 都是空输出+退出 0+admin.log 无痕（260910 两实证）。

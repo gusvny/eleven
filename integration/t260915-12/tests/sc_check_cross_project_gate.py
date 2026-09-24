@@ -69,8 +69,11 @@ RUNSCEN = src_of("integration/run_scenarios.py")
 
 # ---------- A. 常量与形状锁 ----------
 section("A 常量与盖章字段形状（C-0② / 重放安全）")
-ok(shared.UNDECLARED_POLICY == "record",
-   "UNDECLARED_POLICY=record（B 策略现状；翻 A=改此一处+双场景+README 三处同步）")
+ok(shared.UNDECLARED_POLICY == "refuse",
+   "UNDECLARED_POLICY=refuse（t260925-08 翻严缺省；KI-119 收口）")
+ok(shared.UNDECLARED_POLICY_ENV == "SANDBAR_UNDECLARED_POLICY"
+   and shared.UNDECLARED_POLICIES == ("record", "refuse"),
+   "策略旋钮在位：SANDBAR_UNDECLARED_POLICY∈{record,refuse}（畸形=fail-closed）")
 ok(shared.CALLER_PROJECT_ENV == "SANDBAR_CALLER_PROJECT", "env 名=SANDBAR_CALLER_PROJECT")
 ok(shared.CALLER_UNDECLARED_MARK == "__undeclared__", "undeclared 哨兵值在位")
 ok(shared.CROSS_PROJECT_NOTE_LIMIT == 20000 and shared.CROSS_PROJECT_BY_LIMIT == 64,
@@ -118,12 +121,11 @@ ok(v_neg["decision"] == "refuse" and "dengzhufpv" in v_neg["why"]
    and "sandbar" in v_neg["why"], "负：client 侧拒收点名双项目")
 v_und = caller_gate.judge_caller({"value": "", "src": "none",
                                   "identity_class": "undeclared"}, "sandbar", None)
-ok(v_und["decision"] == "record_undeclared"
-   and v_und["stamp"] == shared.CALLER_UNDECLARED_MARK,
-   "负（现状契约）：undeclared=记名放行（哨兵盖章）")
+ok(v_und["decision"] == "refuse" and shared.CALLER_PROJECT_ENV in v_und["why"],
+   "负（t260925-08 翻严缺省）：undeclared=拒收且 why 点名缺失身份 env")
 ok(shared.cross_project_judge(shared.CALLER_UNDECLARED_MARK, "sandbar", "",
-                              policy="refuse")["action"] == "refuse",
-   "翻 A 路径真实存在：policy=refuse 时哨兵即拒（单常量可翻）")
+                              policy="record")["action"] == "allow_record",
+   "record 旋钮路径真实存在：policy=record 时哨兵记名放行（显式选入的过渡策略）")
 
 # C3 越权子用例：旗→放行+记名（by/reason 原文入账；note 截断 300）
 g_flag = shared.cross_project_judge("dengzhufpv", "sandbar", "宿主代管收口")

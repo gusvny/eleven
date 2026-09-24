@@ -213,6 +213,9 @@ class CmdTicketStartProjectAwareTest(unittest.TestCase):
             "project": project, "epic": epic,
             "lane": "dir", "title": "x",
             "write_set": ["notes/x.md"],
+            # t260925-08 翻严后 ticket-start 过跨项目闸：本类测 epic 锚定语义（非闸），
+            # 调用方身份按生产注入链形态声明为同项目（declared 同项目=pass）。
+            "caller_project": project,
         }))
 
     def test_external_epic_in_own_root_passes(self):

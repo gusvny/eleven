@@ -64,7 +64,12 @@ SANDBAR_EXEC_IN_CONTAINER = "/usr/local/bin/sandbar-exec"
 
 # env 白名单（红线 C 第一层）：宿主 env 一律【不整包透传】；沙箱旋钮（DSH_PERMISSION_MODE、
 # DSH_SANDBOX_* 等）永不入列——容器内有效模式由 sandbox_pin patch 字面量钉死（第二层）。
-ENV_ALLOWLIST = ("DSH_HOME", "DSH_HEADLESS_SESSION")
+# t260925-08：调用方身份注入两键入列（字面量就地复制：本模块禁 import shared，等值由
+# 单测 test_t260925_08 锁定 shared.CALLER_PROJECT_ENV / CALLER_SURFACE_ENV）——
+#   SANDBAR_CALLER_PROJECT=项目 key（KI-119：泳道 agent 写操作身份机制注入）；
+#   SANDBAR_CALLER_SURFACE="lane-agent"（注入面标签，identity_receipt 消费）。
+ENV_ALLOWLIST = ("DSH_HOME", "DSH_HEADLESS_SESSION",
+                 "SANDBAR_CALLER_PROJECT", "SANDBAR_CALLER_SURFACE")
 
 REAP_TERM_TIMEOUT_SEC = 15.0      # 与 agent_activities.AGENT_REAP_TERM_TIMEOUT_SEC 同值同源语义
 REAP_KILL_TIMEOUT_SEC = 5.0

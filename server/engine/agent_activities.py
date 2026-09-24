@@ -2877,6 +2877,14 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
     local_dsh.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env["DSH_HOME"] = str(local_dsh)
+    # t260925-08（KI-119）：调用方身份注入——泳道 agent 在容器/宿主内发起的 ticket/op
+    # 写操作由此获得机制注入的 caller 身份（client 闸 identity_src=env）。形状白名单：
+    # project 过 PROJECT_KEY_RE 才注入；空/形状非法不注入（不在注入处静默纠偏，回落闸
+    # 的既有 undeclared/refuse 面）。伴随 SURFACE 标签=lane-agent（identity_receipt 的
+    # injected_by 消费；尽力面标签非安全断言）。
+    if project and shared.PROJECT_KEY_RE.match(str(project)):
+        env[shared.CALLER_PROJECT_ENV] = str(project)
+        env[shared.CALLER_SURFACE_ENV] = shared.CALLER_SURFACE_LANE_AGENT
     # The guard checks the profile itself (lesson from ticket t260828-05: checking
     # the parent directory let leftovers from the first failed attempt — profiles/
     # node_modules — make every later retry skip the copy forever); idempotence is

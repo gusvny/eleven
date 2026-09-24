@@ -243,6 +243,9 @@ class TicketStartGateTest(unittest.TestCase):
         a = {
             "ticket_id": "t260904-99", "template_id": "dev-lane", "project": "bench-anchor",
             "title": "UT 硬闸", "write_set": ["notes/"], "body": "x",
+            # t260925-08 翻严后 ticket-start 过跨项目闸：本用例测锚定语义（非闸），
+            # 调用方身份按生产注入链形态声明为同项目（declared 同项目=pass）。
+            "caller_project": "bench-anchor",
         }
         a.update(over)
         return a

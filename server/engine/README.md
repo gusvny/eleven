@@ -443,7 +443,7 @@ sign 动作不在验证脚本里——红线：签字只能人。
 | 来源 | 形态 | identity_src |
 |---|---|---|
 | 显式参数 | `caller_project`（client args / ticket.py 参数） | `arg` |
-| 注入链 env | `SANDBAR_CALLER_PROJECT`（dsh 会话/ticket.py `_poc` spawn 注入） | `env` |
+| 注入链 env | `SANDBAR_CALLER_PROJECT`（t260925-08 起：引擎 spawn 链 `_prepare_agent_spawn` 对泳道 agent 自动注入 + ticket.py `_poc` spawn 注入；console 待插件票接线） | `env` |
 | cwd 窄兜底 | 真人在注册项目工作区直跑时由 cwd×注册表推导 | `cwd` |
 | 未声明 | 以上皆无 | `none`（identity_class=undeclared） |
 
@@ -460,16 +460,21 @@ spawn、console 插件的 cwd 指向引擎自身，标识「被调用的引擎�
 | declared=同项目 | 任意 | — | 放行 |
 | declared=异项目 | 有 | 无旗 | **拒收**（`kind=cross_project_refused`，文案点名双项目+目标票号） |
 | declared=异项目 | 有 | `cross_project={by, reason 必填}` | 放行+记名（by/reason 原文入账） |
-| undeclared（策略 B 现状） | 有 | — | 放行+强制记名（哨兵盖章，回执 `identity_class=undeclared`） |
+| undeclared（缺省策略=refuse，t260925-08 翻严） | 有 | — | **拒收**（文案点名缺失身份 env 与注入链） |
+| undeclared（旋钮显式 record） | 有 | — | 放行+强制记名（哨兵盖章，回执 `identity_class=undeclared`） |
 | 无比对对象（目标无 ProjectKey SA / 读面） | — | — | 放行（cancel 打在引擎件上=identity_class=engine-internal 照记 admin.log） |
 
 - 目标快照/SA **瞬时读取失败≠越权**（KI-025）：可重试的 `kind=transient` 结构化拒收，
   绝不 fail-open 放行 terminate；不存在=`kind=not_found`。
-- **undeclared 策略翻 A（拒收）路径**：改 `shared.UNDECLARED_POLICY` 一处常量
-  （`record`→`refuse`），并同步改两处场景（`t260915-12-cross-project-gate` 的策略锁子用例、
-  `t260915-12-gate-real-chain` 相七）与本节——**前提=跟进插件票把 dsh 会话/工作台的
-  身份注入收口做完**（否则 console/工具链写面会从放行变硬拒，静默行为反转）。未收口前
-  B 策略是现状契约，被场景钉住。
+- **undeclared 策略已翻 refuse（t260925-08，KI-119 收口）**：缺省=拒收；泳道 agent
+  身份已由引擎 spawn 链机制注入（`_prepare_agent_spawn` 写 `SANDBAR_CALLER_PROJECT` +
+  标签 `SANDBAR_CALLER_SURFACE=lane-agent`，两键在 `agent_runtime.ENV_ALLOWLIST`），
+  undeclared 只剩不经 spawn 链的旁路调用面。运维过渡旋钮
+  `SANDBAR_UNDECLARED_POLICY=record` 可显式选回记名放行（console 注入接线前的过渡期；
+  畸形值=fail-closed 点名报错，不静默回落）。**console 注入仍待插件票接线**（console
+  侧 admin 工具调用链不在引擎写集）：接线前 console 发起的跨项目写若未带越权旗会被拒，
+  过渡期可旋钮回 record。回执/审计标签 `injected_by`∈{lane-agent, external-env} 是
+  尽力面标签非安全断言（只答「身份从哪个面进来」，不答「谁注入的」）。
 
 ### 11.3 记名与对账（工单③：越权旗使用记录可查）
 

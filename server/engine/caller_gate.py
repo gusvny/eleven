@@ -17,8 +17,8 @@
     误配显式暴露，fail-closed 方向），回执附 caller_project_registered=false 观测键。
   - 目标票 project 读取失败≠越权（KI-025）：瞬时失败=KIND_TRANSIENT 可重试，不存在=
     KIND_NOT_FOUND，闸不把抖动当越权（客户端把这些归 client.py 的既有分级）。
-  - undeclared 策略：shared.UNDECLARED_POLICY 单常量（"record"=放行+强制记名，本期；
-    "refuse"=终态拒收）。翻严=改一处常量+场景同步（review C-0 收口条件②）。
+  - undeclared 策略：shared.undeclared_policy()（旋钮 SANDBAR_UNDECLARED_POLICY，缺省
+    "refuse"——t260925-08 翻严；record=旋钮显式选入的过渡记名）。
 """
 from typing import Any, Dict, Optional, Tuple
 
@@ -133,17 +133,33 @@ def judge_caller(identity: Dict[str, Any], target: str,
     iclass = str(identity.get("identity_class") or "undeclared")
     target = str(target or "")
     if iclass == "undeclared":
-        if shared.UNDECLARED_POLICY == "refuse":
+        # target=""（引擎件无项目面）=无比对对象，恒放行（与 declared 同项目口径一致；
+        # t260925-08 零回归：cancel 打在无 ProjectKey SA 的引擎件上仍是 pass，stamp 用
+        # 哨兵保留身份信息面，identity_class=engine-internal 由调用方覆写）。策略解析
+        # 只对有比对对象的写生效——引擎件不该被「调用方没声明项目」卡死。
+        if not target:
+            return {"decision": "pass", "why": "", "stamp": shared.CALLER_UNDECLARED_MARK,
+                    "notice": "", "override_used": False}
+        # t260925-08：策略走 undeclared_policy() 单点（旋钮 env；缺省=refuse）。
+        # 旋钮畸形值不外抛——转结构化拒收（人话点名误配原文），client 侧同形状回执（N3）。
+        try:
+            policy = shared.undeclared_policy()
+        except ValueError as e:
+            return {"decision": "refuse",
+                    "why": "跨项目闸：%s（策略误配 fail-closed 拒收）" % e,
+                    "stamp": "", "notice": "", "override_used": False}
+        if policy == "refuse":
             return {"decision": "refuse",
                     "why": "跨项目闸：调用方项目身份未声明（%s 未注入且无显式参数），"
-                           "引擎策略=拒收——经包装层/注入链声明调用方项目后再操作"
+                           "引擎策略=拒收——经注入链/包装层声明调用方项目后再操作"
                            % shared.CALLER_PROJECT_ENV,
                     "stamp": "", "notice": "", "override_used": False}
         return {"decision": "record_undeclared", "why": "",
                 "stamp": shared.CALLER_UNDECLARED_MARK,
                 "notice": ("未声明调用方项目身份（%s 未注入且无显式参数），本次写操作按"
-                           "策略记名放行（注入契约见 server/engine/README.md；console/泳道"
-                           "注入接线后将翻为拒收）" % shared.CALLER_PROJECT_ENV),
+                           "记名放行策略处理（经旋钮 %s=record 显式选入；缺省策略=拒收；"
+                           "注入契约见 server/engine/README.md）"
+                           % (shared.CALLER_PROJECT_ENV, shared.UNDECLARED_POLICY_ENV)),
                 "override_used": False}
     # declared
     if not target:
@@ -167,13 +183,23 @@ def judge_caller(identity: Dict[str, Any], target: str,
 
 def identity_receipt(identity: Dict[str, Any], verdict: Dict[str, Any],
                      identity_class: str = "") -> Dict[str, Any]:
-    """回执身份键（单一构造点；admin.log 行键由 _emit 从回执同键提取，audit.py 落账）。"""
+    """回执身份键（单一构造点；admin.log 行键由 _emit 从回执同键提取，audit.py 落账）。
+
+    injected_by（t260925-08）：**尽力面标签，非安全断言**——只当 identity_src=env 时给，
+    值域 {lane-agent, external-env}：env 伴随 CALLER_SURFACE_ENV="lane-agent"（引擎
+    spawn 链注入时设置）→ lane-agent，否则 external-env（手工旁路设 env 也落此值）。
+    标签只回答「身份从哪个面进来」，不回答「谁注入的」——审计不得单凭此键下
+    「谁操作」断言（安全断言归 spawn 链注入 + 越权旗 by/reason 必填两机制）。"""
     iclass = identity_class or str(identity.get("identity_class") or "undeclared")
     keys = {
         "caller_project": str(verdict.get("stamp") or identity.get("value") or ""),
         "identity_src": str(identity.get("src") or "none"),
         "identity_class": iclass,
     }
+    if keys["identity_src"] == "env":
+        keys["injected_by"] = shared.CALLER_SURFACE_LANE_AGENT \
+            if str(os.environ.get(shared.CALLER_SURFACE_ENV) or "").strip() \
+            == shared.CALLER_SURFACE_LANE_AGENT else "external-env"
     if keys["caller_project"] == shared.CALLER_UNDECLARED_MARK:
         keys["caller_project"] = ""  # 回执面向人：undeclared 用空值+identity_class 表达
     if verdict.get("override_used"):
