@@ -1572,3 +1572,16 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 触发（指针三态管不到 SA 层）。后果：该期成为死槽（当日 cron 也会被去重挡回）。260924 绕行=顺延
 > 开期 20260926 验货。修法方向：去重限「非终态」查询或提供记名 force 通道；须配套审计留痕
 > （同号多 run 的对账语义）。
+
+## KI-115 清扫嵌套仓守卫误伤 worktree 残壳（.git gitfile）；拆除「Directory not empty」待归因（260926 验货实案；守卫部分已修待验）
+> 260926 期实案（t260926-01 suite 收尾，04:52:50Z）：`git worktree remove --force` 报
+> `failed to delete '…/inspection-integration-tests-20260926': Directory not empty`（登记/分支已清、
+> 目录树残留）；回落定向 sweep 又因壳内顶层 `.git` **文件**（worktree 痕迹 gitfile，对象库在主仓）被
+> 判成「未注册嵌套仓」而**拒拆** → 回执如实「未净」并列名三项原因（诚实性修复生效，**非假绿**），
+> 但壳留在场（`.lane/inspection-integration-tests-20260926`）。
+> 定性：守卫粒度错——worktree 痕迹（顶层 .git 文件）与真仓（顶层 .git 目录／任意更深层 .git）必须
+> 分开判。260924 直修令续修：三态判定（文件=可清／目录=拒／嵌套=拒）+ 水位态自愈面（setup 清扫按
+> 「早于水位」收旧壳，与 worktree/分支同语义）；棒=test_t260924_inspection_teardown_honesty.py 棒3
+> 升格（定向/水位矩阵+三态矩阵，20/0）。
+> 待归因（未修）：`Directory not empty` 成因——疑似套件尾巴进程写入竞态（套件内起过服务/子进程）；
+> 下期若复现按「谁在写」定位（拆除时刻该目录的写入者）。
