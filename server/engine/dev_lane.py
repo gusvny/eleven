@@ -538,6 +538,18 @@ _LEGACY_STEPS: Dict[str, Stage] = {
 }
 
 
+# t260925-17（KI-120）：并行叉 join-settle 路径闸拒 blocked 的「醒后真重跑」复位门。
+# 实案 t260925-05：arb_acc_parallel 两边 gather 完成 → join settle 命 path_gate_reason=
+# 落 blocked，但 arb_done/arb_res 簿记不复位 → authorize+retry_qc 唤醒后 pend 恒空
+# （两边仍记「已完成」），叉不重入、agent 不重生，settle 只重跑一遍后拿滞留的陈旧
+# arb_res 走判决尾段，票定格「blocked + 空 reason」（_blocked 醒后清点①所致）零活动。
+# 复位只翻被闸挡住的仲裁边（walkthrough 边结果昂贵且与闸无关，保留——同格式纠正
+# 分支的取舍口径）；同构布尔门（旧 history 无本 marker 走旧分支不追溯，在途票重放
+# 安全，t260917-04 先例）。本门全部求值点在主循环直线段（_blocked 之前），不在
+# wait_condition 唤醒路径上，无 KI-061 式「重放期先评 False」问题。
+KI120_FORK_GATE_WAKE_RESET_PATCH_ID = "dev-lane-fork-gate-wake-reset-v1"
+
+
 def _prompt_next_no(prompt: str) -> int:
     """Largest top-level item number in the prompt, plus 1 (where FLOW_BRIEF's
     supplement gets appended).
@@ -935,6 +947,12 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
             # __init__，统一防御）。
             self.meta["blocked_reason"] = ""
             self.meta["blocked_detail"] = None
+            # t260925-17（KI-120 附条件③，review 意见）：醒后重驱观测面——本次事故
+            # 的头号排查成本就是「日志只见放行、不见重驱」。同一门内（旧 history
+            # 重放逐字旧行为，零新日志）。
+            self._log("%s blocked 解除（%s 唤醒）→ 主循环重驱"
+                      % (step_id,
+                         "rework" if self._rework is not None else "retry_qc"))
         # On wake, the main loop looks at self._rework / re-runs this step
 
     async def _blocked_over_limit(self, why: str) -> bool:
@@ -1975,6 +1993,18 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     # t260916-19 A：同批复判点名（retry_qc 无变化重跑不改变结果）
                     rep = self._gate_refusal_repeat_suffix(
                         (getattr(s, "gate_refusal", None) or {}).get("files"))
+                    # t260925-17（KI-120）：fork 来源（design_done=True＝本轮经
+                    # parallel_impl_design 叉汇入）→ 复位被闸挡住的实现边并回到叉
+                    # 相位：醒后 pend=["implement"]，实现边真重跑（agent respawn）
+                    # → 重新汇入 integ_join 重落 settle（带 _protected_authz_records()
+                    # 现取授权重判闸）。串行来源（design_done=False，本轮无叉）→
+                    # 不动簿记不回叉，醒后主循环重进本段重跑 settle（串行「原步重入」
+                    # 语义零改动）。不卡 patched 门的设计会在途票重放破确定性
+                    # （t260917-04 先例）。
+                    if workflow.patched(KI120_FORK_GATE_WAKE_RESET_PATCH_ID) \
+                            and design_done:
+                        impl_done = False
+                        phase = "parallel_impl_design"
                     await self._blocked("implement", s.error + rep)
                     continue
                 self._log("汇合统一落盘：%s（泳道 commit 数 %s）"
@@ -2864,6 +2894,21 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                         # t260916-19 A：同批闸拒复判点名（retry_qc 无变化重跑不改变结果）
                         rep = self._gate_refusal_repeat_suffix(
                             (getattr(s, "gate_refusal", None) or {}).get("files"))
+                        # t260925-17（KI-120）：复位被闸挡住的仲裁边——否则唤醒后
+                        # pend 恒空（两 done 旗仍 True），叉不重入、agent 不重生，
+                        # 票定格「blocked + 空 reason」零活动（t260925-05 实案）。
+                        # 醒后 pend=["arbitrate"]，仲裁边真重跑（agent respawn），
+                        # join settle 随重落时带 _protected_authz_records() 重新判闸
+                        # ——「authorize 已 landing 但 settle 仍拒」形态由此收口
+                        # （review 附条件①：authorizations 每轮 settle 现取现传）。
+                        # arb_ctx 同步注入授权上下文：人外部输入进新 prompt，醒后
+                        # 重裁不消费滞留的陈旧判决（KI-061 教训同源）。
+                        if workflow.patched(KI120_FORK_GATE_WAKE_RESET_PATCH_ID):
+                            arb_done = False
+                            arb_res = None
+                            arb_ctx = ("【闸拒解除】上一轮 join 落盘被受保护路径闸拒绝；"
+                                       "相关路径已经人授权放行（kind=protected_path，"
+                                       "meta.authorizations 可查）。请基于本轮全量面续裁。")
                         await self._blocked("arbitrate", s.error + rep)
                         continue
                     self._log("并行分叉统一落盘：%s（泳道 commit 数 %s）"
