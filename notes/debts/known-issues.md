@@ -1559,6 +1559,20 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > （不在 260924 授权清理范围，只记账不动）。与 KI-109 案二（冻结泳道树入扫描根）、t260916-27 票面
 > 「dev lane registry broken」同族。处置建议=开记名清账票甄别（登记残留走 prune、壳走定向清扫），
 > 宿主授权后动。
+>
+> **260926 追加（工具面实锤：`lane_audit prune` 的 worktree 分支实际不可用）**：`audit` 把已终态票的泳道
+> 判成 `prunable`（「待守门后可剪」），但 `prune --apply` 先跑 `guard_worktree`——**守门第一条是
+> `git status --porcelain` 有任何输出即 `blocked:uncommitted`**，而**每条泳道都有 `?? .sandbar/`**
+> （引擎运行期暂存：stage 结果、截图、日志、取证产物），根因是 `.gitignore` **没有 `.sandbar/`**
+> （`.lane/`、`.dsh/`、`.suyou/` 都在，唯独漏它；主仓自己 `git status` 也是 `?? .sandbar/`）。
+> 后果：`prunable` 状态**永远转不成动作**，KI-112 的清账在此路走不通（本次实测）。
+> 处置：①`.gitignore` 补 `.sandbar/`（一并解掉「工作区是否干净」的口径噪声，属引擎侧小改，待入轨）；
+> ②在那之前，终态泳道走「先列后删 .sandbar 暂存 → `git worktree remove` → `git branch -d`」，
+> OS 级复核（ticket list 无该 id 或 `kind=terminal` + `rev-list --count main..<branch>` 为 0）。
+> **260926 已按此口径清掉 `t260922-04`、`t260922-05` 两条（含分支 `lane/t260922-*`；04 的唯一一份
+> `probe-dsh-015` 取证已先搬到 `.sandbar/evidence/t260922-04-voided-duplicate/`）**。另注：
+> `git worktree list` 里还有三条 `/var/folders/.../sandbar-baseline-*` 临时 worktree（基线跑残留），
+> 归 KI-115 残壳族。
 
 ## KI-113 巡检周期 workflow 跑共享队列=中央工人冻结码（部署拓扑缺口+注释撒谎；260924 定谳，integration 岗登记）
 > 铁证=worker.log 原文 `task_queue: 'sandbar', workflow_id: 't260924-01', workflow_type:
