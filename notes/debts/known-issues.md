@@ -1845,6 +1845,18 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ②`triggered:false` 必须落到可观测面（admin.log 一行 + 巡检台账一行），不许只活在返回值里；
 > ③巡检手册补一条：期号＝当天日期的自动班被占 → 手动触发下一期（本岗 260926 按此处置）。
 >
+> **260926 追加（处置实测：该槽位「解不开」，只能换期）**：想释放 20260926 的槽位再重跑同期，
+> 实测**两条路都不通**——① `ticket.py cancel t260926-01` 回 `already_terminal:true, exec_status=COMPLETED`
+> （票面 blocked ≠ 执行未终态：**workflow 执行早已 COMPLETED**，「blocked」只是票面判决）；② 于是
+> `period_slot_verdict("COMPLETED")` 判为 **served → 照旧 deduped**（KI-114 语义：只有
+> CANCELED/TERMINATED 才释放槽位并自动重开）。**结论：一个「跑完了但判决 blocked」的期票，会把该期号
+> 永久吞掉，且现有入口无一能改判/清场**（reopen 只认终止态、cancel 幂等挡回）。处置改走换期：
+> `inspection_trigger.py trigger --instance integration-tests --period 20260927` →
+> `{"triggered":true,"deduped":false,"ticket_id":"t260927-01"}`（260926 本期记为永久丢失，证据留在
+> `out/inspection/inspection-integration-tests-20260926.json`）。**另注副作用**：提前服务下一期会让
+> 「明天 07:30 的自动班」对该期去重跳过——期号并未丢（一个期号只服务一次），但**服务日期提前一天**；
+> 宿主若在意按日节奏，修法须让 dedupe 认「served 且判决非 ok」的槽位。
+>
 > **同批巡检验收实测（260926，期 20260926）**：①期票未铸＝本 KI；②套件回执 `ran>0` **仍待验**——09-24 那期为
 > `ran=0 wall=3300s`（KI-116 零信号实案），修法 t260924-05 已合并但**此后没有任何一期真跑过**；③审查段 09-24
 > 超时 blocked（预算 3600s 用尽、无发现清单）→ 同样待验；④拆除回执「已清」**不实**——09-24/09-25 两个期号的
