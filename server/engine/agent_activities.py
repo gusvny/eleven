@@ -2691,7 +2691,12 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
     # 2) Fold workspace changes into a commit
     #    t260911-03: status 改走 -z（与 KI-009 解析器 _dirty_files_from_status_z 同源，
     #    免 quotePath 引号歧义与 rename 箭头解析）；闸判定在任何 git add 之前。
-    p = _git(["status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, cwd)
+    #    t260926-02（KI-125）：加 --untracked-files=all——缺省折叠模式把全新未跟踪
+    #    目录折叠成一条 `?? dir/`，与写集的文件级条目（dir/file.py）前缀不匹配，
+    #    judge_stage_paths 误判 unauthorized_path 把合法交付隔离进 quarantine。
+    #    展开成文件级条目后闸保持逐文件白名单判定、零放宽；嵌套仓目录 -uall 下
+    #    仍折叠（git 不跨仓下钻），gitlink 闸(a) 的尾斜杠形态前提保留（行为测试锁）。
+    p = _git(["status", "--porcelain", "-z", "--untracked-files=all", "--"] + SETTLE_PATHSPEC, cwd)
     if p.returncode != 0:
         if path_gate:
             note = path_gates.gate_refusal_note(stage_id, [], "status_failed")
@@ -2738,7 +2743,7 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
                 handled, _unhandled = _remediate_unauthorized_violations(
                     cwd, stage_id, gen, [str(v) for v in violations], entries)
                 remediation.extend(handled)
-                p = _git(["status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, cwd)
+                p = _git(["status", "--porcelain", "-z", "--untracked-files=all", "--"] + SETTLE_PATHSPEC, cwd)
                 if p.returncode != 0:
                     note = path_gates.gate_refusal_note(stage_id, [], "status_failed")
                     if refusal is not None:
@@ -4319,7 +4324,10 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
     auto_settle_note = ""
     clean_gate_refusal: Optional[Dict[str, Any]] = None  # t260915-01 ②：自愈被闸拒的结构化明细
     try:
-        p = _git(["status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, sc["tree"])
+        # t260926-02（KI-125）：-uall 与 _settle_worktree_lane 同款——缺省折叠模式把
+        # 新未跟踪目录折叠成 `?? dir/`，_dirty_within_write_set 对文件级写集条目判假
+        # → 自愈准入 fail-closed 拒绝（merge_check 仍红、票落不了地，同症同族根修）。
+        p = _git(["status", "--porcelain", "-z", "--untracked-files=all", "--"] + SETTLE_PATHSPEC, sc["tree"])
         dirty_z = p.stdout if p.returncode == 0 else ""
         dirty_files = _dirty_files_from_status_z(dirty_z)
         if p.returncode != 0:

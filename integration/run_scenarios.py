@@ -301,6 +301,14 @@ SCENARIOS = [
      "外置模板路径闸声明的加载口深检（t260925-23/KI-124 需求②③，灰盒 L2，公开扫描口 shared.project_template_scan import_classes=True，临时注册根注入零进程污染，秒级）：形状合法声明（键⊆STAGES ids、kind 在词表、prefixes 带前缀表）→模板接受不误拒；拒收矩阵=键∉STAGES 点名双方、kind 非法、prefixes 缺表、RULES 有而 PATH_GATE 非 True（死配置不许装死）、RULES 非 dict、外置模板强 kind（self_heal）越弱面子集拒收（review_plan 附条件④）；不声明 PATH_GATE→照常接受零行为变化（KI-124 回落基线，现状即绿）。与 developer L1（t260924_04 加载口矩阵/judge 纯函数）不同层（本条锁公开口用户可感知终态=接受/拒收+点名）；settle 执法终态归 t260925-23-template-pathgate-faces。实现落地前 B2-B7 红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260925-23/tests/sc_template_pathgate_load_contract.py", "ro"),
 
+    # ---- t260926-02 KI-125：越权闸不认 git 折叠的未跟踪目录（新目录×文件级写集条目）----
+    # 实案=nusuyou t260925-06（合法交付两次被隔离进 quarantine、票两轮落不了地；
+    # 目录级条目对照组 f1ca1a9a 可过）。实现段落地前红属预期（TDD 信号），
+    # arbitrate/merge 期必须绿。
+    ("t260926-02-pathgate-folded-untracked",
+     "KI-125 折叠未跟踪目录×文件级写集条目的 settle 执法面（t260926-02，灰盒 L2，真实 settle 单点直调 tmp 主仓+真注册泳道，零 Temporal 零 docker）：A 新目录整体未跟踪（git 折叠 `?? workflows/` 形态）×写集条目写具体文件→合法交付落地入库、零 unauthorized_path、不进 quarantine（事故修复面）；B 反向对照（验收硬性要求）＝同目录混写集外 evil.sh→越权件绝不入库且留档 quarantine、同批合法文件仍落地（处置不误伤），B2 纯写集外新目录零 commit（闸零放宽）；C 目录级写集条目对照组照常落地（f1ca1a9a 形态不回归）；D 泳道内新建嵌套仓→gitlink 闸仍拦零 commit（-uall 展开不得破坏嵌套仓折叠前提）；E merge_check 自愈准入同族面（review_plan 附条件⑤）＝-uall 后判脏为文件级条目、_dirty_within_write_set 对文件级写集放行（同症不残留）。与 t260911-03 系不同面（彼注入件均非折叠目录形态，锁拒绝/放行接线终态）；与 t26091619-unauth-disposal-matrix 不同面（彼平铺文件分态矩阵，本条锁折叠目录展开后混合批次收口）；与 developer L1 纯函数矩阵不同层（本条锁真实 git 折叠形态→settle→commit 磁盘终态）。实现落地前 A/D/E 红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260926-02/tests/sc_pathgate_folded_untracked.py", "ro"),
+
     # ---- t260916-19 路径闸 blocked 死结三修（B 越权状态分流处置 / C 声明=执法 / D 证据面）----
     # 实案=dengzhufpv t260916-11：并行 join 闸拒后越权件滞留工作区每轮复判同一红、
     # 出路（打回目标段）不可达。本族守 activity 级公开回执与 git 磁盘终态（A 的
