@@ -172,17 +172,21 @@ REOPEN_JOURNAL_NAME = "inspection-reopen.jsonl"
 
 def append_reopen_journal(ledger_dir: Any, instance_id: str, period: str,
                           terminated_ticket_id: str, new_ticket_id: str,
-                          now_fn=time.time) -> None:
-    """终止票重开的审计链接落盘（append-only JSONL）。既有文件哪怕内容畸形（半截行/
+                          now_fn=time.time, reason: str = "") -> None:
+    """重开票的审计链接落盘（append-only JSONL）。既有文件哪怕内容畸形（半截行/
     坏 JSON）也不阻断追加——本函数只写不读，畸形行留给未来消费方按行容错；写失败
-    OSError 上抛，由调用方显式报错（审计缺失绝不静默）。"""
+    OSError 上抛，由调用方显式报错（审计缺失绝不静默）。
+    reason（260926）：人工具名重跑时的理由；空串＝不加该键（终止票自动重开的既有
+    行形状逐字不变，老消费方零感知）。"""
     p = Path(str(ledger_dir)) / REOPEN_JOURNAL_NAME
     p.parent.mkdir(parents=True, exist_ok=True)
-    entry = json.dumps({"at": float(now_fn()), "instance": str(instance_id),
-                        "period": str(period),
-                        "terminated_ticket_id": str(terminated_ticket_id or ""),
-                        "new_ticket_id": str(new_ticket_id or "")},
-                       ensure_ascii=False)
+    payload = {"at": float(now_fn()), "instance": str(instance_id),
+               "period": str(period),
+               "terminated_ticket_id": str(terminated_ticket_id or ""),
+               "new_ticket_id": str(new_ticket_id or "")}
+    if str(reason or "").strip():
+        payload["reason"] = str(reason).strip()   # 人工具名重跑：理由进审计行
+    entry = json.dumps(payload, ensure_ascii=False)
     with open(p, "a", encoding="utf-8") as f:
         f.write(entry + "\n")
 
@@ -347,6 +351,7 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                              task_queue: str = "",
                              per_ticket_queue: bool = False,
                              workflow_cls: Any = None, input_cls: Any = None,
+                             reopen_reason: str = "",
                              grace_sec: Optional[float] = None,
                              now_fn=time.time) -> Dict[str, Any]:
     """铸号 → 显式去重 → 盖 SA → 起真票（t260916-02 三路起票单点）。
@@ -363,6 +368,12 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
       KI-114 状态语义：活票/已服务票（COMPLETED）照旧 deduped（重开=台账双计）；
       终止票（CANCELED/TERMINATED）槽位释放自动重开；FAILED/TIMED_OUT/未知状态/
       describe 瞬态不可判 → fail-closed 显式报错，绝不静默开第二张。
+
+    reopen_reason（非空＝人工/运维**具名重跑**；260926 宿主令「手动 trigger 一次巡检
+    应该支持」）：对「已服务（COMPLETED）」与「FAILED/TIMED_OUT/未知」两类槽位，带具名
+    理由即与终止票同路重开（清残指针 → 铸新号 → 审计链接三处，journal 落 reason）；
+    **在飞期（live）不接受重开**（重跑=双跑同一期；先等收口，或记名 cancel 后再来）。
+    空串＝既有语义逐字不变。
 
     workflow_cls/input_cls 缺省=懒 import inspection_flow（CLI/worker 进程；单测注 fake
     免 temporalio 依赖）。grace_sec 缺省=CLAIM_GRACE_SEC（测试注入用）。"""
@@ -386,6 +397,7 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
         ledger_dir = str(Path(__file__).resolve().parent / "out" / "inspection")
     ppath = pointer_path(ledger_dir, iid, period)
     cleared: List[str] = []
+    reason = str(reopen_reason or "").strip()   # 非空＝人工具名重跑（见 docstring）
 
     def _err(msg: str) -> Dict[str, Any]:
         return {"ok": False,
@@ -406,6 +418,7 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
         live_ids: List[str] = []
         freed_ids: List[str] = []
         served_ids: List[str] = []
+        ambiguous_ids: List[str] = []
         for tid in existing:
             exists, estatus, _einst, _eper = await describe_period_run(client, tid)
             if exists is None:
@@ -422,41 +435,60 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
             elif slot == "freed":
                 freed_ids.append(tid)
             else:
-                # FAILED/TIMED_OUT/未知状态名：绝不静默开第二张（fail-closed；失败票
-                # 可能已写部分台账，是否重开属人工裁量）。
-                return _err("同期票 %s 状态=%s（%s）——非活非终止非已服务，是否重开需"
-                            "人工判定；本面 fail-closed 不自动开票" % (tid, estatus, slot))
+                # FAILED/TIMED_OUT/未知状态名：默认绝不静默开第二张（fail-closed；失败票
+                # 可能已写部分台账）。带 reopen_reason（人工具名）时才改判为可重开。
+                if not reason:
+                    return _err("同期票 %s 状态=%s（%s）——非活非终止非已服务，是否重开需"
+                                "人工判定；本面 fail-closed 不自动开票"
+                                "（要重跑请带 reopen_reason 具名）" % (tid, estatus, slot))
+                ambiguous_ids.append(tid)
         if len(live_ids) > 1:
             # 不该发生（SA 是起票时刻唯一盖章）；发生=有第二写入方，点名不猜
             return _err("同期**活**票出现多张：%s——每期一票被破坏，人工处置"
                         % "、".join(sorted(live_ids)))
         if live_ids:
+            if reason:
+                # 在飞期不接受重开：重跑＝双跑同一期（并发两套 suite），先等收口。
+                return _err("同期已有**在飞**巡检 %s（RUNNING）——重跑会双跑同一期，在飞期"
+                            "不接受重开；等它收口，或先记名 cancel 后再重跑"
+                            % "、".join(sorted(live_ids)))
             return {"ok": True, "result": {"triggered": False, "deduped": True,
                                            "ticket_id": live_ids[0],
                                            "dedup_source": "sa_query",
                                            "period_state": "live",
                                            "stale_pointer_cleared": cleared}}
-        if freed_ids:
-            # 终止票：期槽位释放（KI-114 根病因）。清残指针（留痕带旧票号）→ 放行进
-            # 铸号循环开新票；审计链接在 ④ 启动成功后落 reopen journal + 回执。
-            # （同窗还有已服务票=「服务过又终止」复杂史，fail-closed 人工判定。）
-            if served_ids:
+        if freed_ids or ambiguous_ids or (served_ids and reason):
+            # 重开三源：①终止票（KI-114 自动放行）；②FAILED/TIMED_OUT/未知 + 人工具名；
+            # ③已服务（COMPLETED）+ 人工具名（260926 宿主令：手动重跑同期必须支持）。
+            # 清残指针（留痕带旧票号）→ 放行进铸号循环开新票；审计链接在 ④ 启动成功后
+            # 落 reopen journal + 回执。已服务票而**无**具名＝「服务过又终止/含糊」复杂史，
+            # 仍旧 fail-closed 人工判定（防台账双计）。
+            if served_ids and not reason:
                 return _err("同期既存已服务票 %s 又存终止票 %s——复杂史，是否重开需人工"
-                            "判定；本面 fail-closed 不自动开票"
+                            "判定；要重跑请带 reopen_reason 具名"
+                            "（本面 fail-closed 不自动开票）"
                             % ("、".join(sorted(served_ids)), "、".join(sorted(freed_ids))))
-            superseded_ticket_id = ",".join(sorted(freed_ids))
+            if len(served_ids) > 1:
+                return _err("同期已服务票出现多张：%s——每期一票被破坏，人工处置"
+                            % "、".join(sorted(served_ids)))
+            superseded_ticket_id = ",".join(
+                sorted(freed_ids + served_ids + ambiguous_ids))
             if clear_pointer(ppath):
-                cleared.append("%s（终止票 %s 重开：清旧指针）" % (ppath, superseded_ticket_id))
+                cleared.append("%s（重开：清旧指针 %s）"
+                               % (ppath, superseded_ticket_id))
             # 落到 ② 铸号循环——不 return
         elif served_ids:
             if len(served_ids) > 1:
                 return _err("同期已服务票出现多张：%s——每期一票被破坏，人工处置"
                             % "、".join(sorted(served_ids)))
-            # 该期已收口落账：dedup 照旧（重开=台账双计），回执如实报 period_state。
+            # 该期已收口落账：dedup 照旧（重开=台账双计），回执如实报 period_state，
+            # 并给出重跑入口提示（260926 宿主令：手动 trigger 应支持）。
             return {"ok": True, "result": {"triggered": False, "deduped": True,
                                            "ticket_id": served_ids[0],
                                            "dedup_source": "sa_query",
                                            "period_state": "completed",
+                                           "reopen_hint": "该期已服务；要重跑请带"
+                                                          " reopen_reason 具名重开",
                                            "stale_pointer_cleared": cleared}}
 
     # ---- ② 铸号 + ③ 指针三态 + ④ 启动（撞号重试循环）----
@@ -499,6 +531,18 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                             % (ppath, ptid, ptid, pinst or "空", pper or "空"))
             # 身份相符（或 legacy 可信）→ 按执行状态裁决期槽位（KI-114）：
             slot = period_slot_verdict(pstatus)
+            if reason and slot == "live":
+                # 在飞期不接受重开（重跑＝双跑同一期）
+                return _err("去重指针指向**在飞**巡检 %s（%s）——重跑会双跑同一期，在飞期"
+                            "不接受重开；等它收口，或先记名 cancel 后再重跑"
+                            % (ptid, pstatus))
+            if reason and slot == "served":
+                # 260926 宿主令：已服务期的人工具名重跑（与终止票同路：清指针→铸新号重开）
+                clear_pointer(ppath)
+                cleared.append("%s（已服务期 %s 状态=%s——人工具名重开：清旧指针）"
+                               % (ppath, ptid, pstatus))
+                superseded_ticket_id = ptid
+                continue
             if slot == "live" or slot == "served":
                 if legacy_match:
                     return {"ok": True, "result": {"triggered": False, "deduped": True,
@@ -510,6 +554,8 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                                                "ticket_id": ptid, "dedup_source": "pointer",
                                                "period_state": "live" if slot == "live"
                                                else "completed",
+                                               "reopen_hint": "" if slot == "live" else
+                                               "该期已服务；要重跑请带 reopen_reason 具名重开",
                                                "stale_pointer_cleared": cleared,
                                                "scan_mode": scan_mode}}
             if slot == "freed":
@@ -520,9 +566,17 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                                % (ppath, ptid, pstatus))
                 superseded_ticket_id = ptid
                 continue
+            if reason:
+                # 含糊态 + 人工具名：与终止票同路重开（260926 宿主令）
+                clear_pointer(ppath)
+                cleared.append("%s（%s 状态=%s——人工具名重开：清旧指针）"
+                               % (ppath, ptid, pstatus))
+                superseded_ticket_id = ptid
+                continue
             # FAILED/TIMED_OUT/未知：fail-closed，不猜不重开（可能已写部分台账）。
             return _err("去重指针指向 %s 状态=%s（%s）——非活非终止非已服务，是否重开"
-                        "需人工判定；本面 fail-closed 不自动开票" % (ptid, pstatus, slot))
+                        "需人工判定；本面 fail-closed 不自动开票"
+                        "（要重跑请带 reopen_reason 具名）" % (ptid, pstatus, slot))
         # claimed——本进程持有指针，启动真票
         input_kwargs: Dict[str, Any] = {}
         if superseded_ticket_id:
@@ -550,18 +604,21 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                 # 显式报错（票已起，报错点名双事实，绝不静默吞掉审计缺失）。
                 try:
                     append_reopen_journal(ledger_dir, iid, period,
-                                          superseded_ticket_id, ticket_id, now_fn=now_fn)
+                                          superseded_ticket_id, ticket_id,
+                                          now_fn=now_fn, reason=reason)
                 except OSError as e:
                     return {"ok": False,
                             "error": "新票 %s 已启动但 reopen journal 追加失败（%s: %s）——"
-                                     "审计链接缺失，人工补记（终止票 %s → 新票 %s）"
+                                     "审计链接缺失，人工补记（被替代票 %s → 新票 %s）"
                                      % (ticket_id, type(e).__name__, e,
                                         superseded_ticket_id, ticket_id)}
             return {"ok": True, "result": {
                 "triggered": True, "deduped": False, "ticket_id": ticket_id,
                 "first_run_id": getattr(handle, "first_execution_run_id", ""),
                 "dedup_source": "", "stale_pointer_cleared": cleared, "scan_mode": scan_mode,
-                "superseded_ticket_id": superseded_ticket_id}}
+                "superseded_ticket_id": superseded_ticket_id,
+                # 人工具名重跑：理由随回执回显（对账锚；空串=不加该键，既有形状不变）
+                **({"reopen_reason": reason} if reason else {})}}
         except Exception as e:  # noqa: BLE001——三路：deduped/外来撞号/其他失败
             already = type(e).__name__ == "WorkflowAlreadyStartedError" or \
                 "already started" in str(e).lower()

@@ -256,3 +256,81 @@ def test_sa_hit_served_plus_freed_complex_history_fail_closed(tmp_path):
     res = open_ticket(client, tmp_path)
     assert not res["ok"] and "人工" in res["error"]
     assert client.started == []
+
+
+# ============================================================ 260926 宿主令：具名重跑
+# 「不能手动 trigger 一次巡检吗，这个是应该支持的」→ reopen_reason（非空＝人工具名）：
+# 已服务(COMPLETED)/FAILED/TIMED_OUT/未知 槽位可重开（与终止票同路，审计三处+jounral
+# 落 reason）；在飞期（live）仍拒；空串＝既有语义逐字不变（上面各测试即回归锁）。
+
+class _BlindListClient(FakeClient):
+    """SA 查询面「看不见」但 describe 可见（可见性滞后的真实形态）——专打指针层分支。"""
+
+    async def list_workflows(self, query):
+        return
+        yield  # pragma: no cover —— 仅维持 async generator 形状
+
+
+def test_reopen_reason_reruns_served_period(tmp_path):
+    client = FakeClient([sa_ticket("t260916-03", "COMPLETED")])
+    res = open_ticket(client, tmp_path, reopen_reason="宿主令：本期重跑（首验零信号修复）")
+    assert res["ok"] and res["result"]["triggered"] is True
+    assert res["result"]["ticket_id"] == "t260916-04"
+    assert res["result"]["superseded_ticket_id"] == "t260916-03"
+    assert res["result"]["deduped"] is False
+    assert res["result"]["reopen_reason"].startswith("宿主令")
+    lines = journal_of(tmp_path).read_text("utf-8").strip().splitlines()
+    entry = json.loads(lines[-1])          # 审计链接：被替代票 → 新票 + 具名理由
+    assert entry["terminated_ticket_id"] == "t260916-03"
+    assert entry["new_ticket_id"] == "t260916-04"
+    assert entry["reason"].startswith("宿主令")
+    assert len(client.started) == 1
+
+
+def test_served_dedup_receipt_carries_reopen_hint(tmp_path):
+    """不带具名：既有 dedup 语义不变，但回执给出重跑入口提示（ops 面可发现性）。"""
+    client = FakeClient([sa_ticket("t260916-03", "COMPLETED")])
+    res = open_ticket(client, tmp_path)
+    assert res["ok"] and res["result"]["deduped"] is True
+    assert "reopen_reason" in res["result"]["reopen_hint"]
+    assert client.started == []
+
+
+def test_reopen_reason_reruns_ambiguous_failed_period(tmp_path):
+    for status in ("FAILED", "TIMED_OUT", "SOMETHING_ELSE"):
+        client = FakeClient([sa_ticket("t260916-03", status)])
+        res = open_ticket(client, tmp_path, reopen_reason="人工裁定重跑 %s" % status)
+        assert res["ok"] and res["result"]["triggered"] is True, status
+        assert res["result"]["superseded_ticket_id"] == "t260916-03"
+        assert len(client.started) == 1
+
+
+def test_reopen_reason_refuses_live_period(tmp_path):
+    """在飞期不接受重开：重跑＝双跑同一期（并发两套 suite）。"""
+    client = FakeClient([sa_ticket("t260916-03", "RUNNING")])
+    res = open_ticket(client, tmp_path, reopen_reason="想立刻重跑")
+    assert not res["ok"] and "在飞" in res["error"]
+    assert client.started == []
+    assert not journal_of(tmp_path).exists()
+
+
+def test_reopen_reason_pointer_layer_served_reruns(tmp_path):
+    """指针层（SA 面看不见）：指向已服务票 + 具名 → 清指针、铸新号重开。"""
+    client = _BlindListClient([sa_ticket("t260916-03", "COMPLETED")])
+    (tmp_path / "ledger").mkdir(parents=True)
+    ptr = tmp_path / "ledger" / ("inspection-%s-%s.ticket" % (INST, PERIOD))
+    tick.claim_pointer(ptr, INST, PERIOD, "t260916-03", "sandbar")
+    res = open_ticket(client, tmp_path, reopen_reason="指针层具名重跑")
+    assert res["ok"] and res["result"]["triggered"] is True
+    assert res["result"]["superseded_ticket_id"] == "t260916-03"
+    assert any("已服务期" in c for c in res["result"]["stale_pointer_cleared"])
+
+
+def test_reopen_reason_pointer_layer_live_refused(tmp_path):
+    client = _BlindListClient([sa_ticket("t260916-03", "RUNNING")])
+    (tmp_path / "ledger").mkdir(parents=True)
+    tick.claim_pointer(tmp_path / "ledger" / ("inspection-%s-%s.ticket" % (INST, PERIOD)),
+                       INST, PERIOD, "t260916-03", "sandbar")
+    res = open_ticket(client, tmp_path, reopen_reason="指针层想立刻重跑")
+    assert not res["ok"] and "在飞" in res["error"]
+    assert client.started == []

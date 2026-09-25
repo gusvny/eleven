@@ -191,7 +191,8 @@ async def cmd_trigger(args: argparse.Namespace) -> Dict[str, Any]:
     res = await open_period_ticket(
         client, instance_id=args.instance, period=period, project_key=project_key,
         repo_root=repo_root, scan_face=str(spec.get("scan_face") or "test"),
-        decl_path=abs_decl_path(args.decl_path), task_queue=TASK_QUEUE)
+        decl_path=abs_decl_path(args.decl_path), task_queue=TASK_QUEUE,
+        reopen_reason=str(getattr(args, "reopen_reason", "") or ""))
     if not res.get("ok"):
         return res
     r = dict(res["result"] or {})
@@ -228,7 +229,8 @@ async def cmd_trigger_produce(args: argparse.Namespace) -> Dict[str, Any]:
     res = await open_produce_period_ticket(
         client, instance_id=args.instance, period=period, project_key=project_key,
         repo_root=repo_root, scan_face=str(spec.get("scan_face") or "doc"),
-        decl_path=abs_decl_path(args.decl_path))
+        decl_path=abs_decl_path(args.decl_path),
+        reopen_reason=str(getattr(args, "reopen_reason", "") or ""))
     if not res.get("ok"):
         return res
     r = dict(res["result"] or {})
@@ -912,16 +914,21 @@ def main() -> None:
     sub = ap.add_subparsers(dest="op")
     p = sub.add_parser("decl", help="离线声明视图")
     p.add_argument("--decl-path", default=None)
-    p = sub.add_parser("trigger", help="手动触发一期（每期一票：同票号去重）")
+    p = sub.add_parser("trigger", help="手动触发一期（每期一票：同票号去重；--reopen-reason 可具名重跑已服务/失败期）")
     p.add_argument("--instance", required=True)
     p.add_argument("--period", default=None)
     p.add_argument("--repo-root", default="")
     p.add_argument("--decl-path", default=None)
+    p.add_argument("--reopen-reason", default="",
+                   help="人工具名重跑理由（非空=允许对「已服务(COMPLETED)/FAILED/TIMED_OUT/未知」"
+                        "槽位重开新票，审计链接三处并落 reason；在飞期仍拒。260926 宿主令）")
     p = sub.add_parser("trigger-produce", help="手动触发产出型巡检一期（per-ticket 队列，t260925-01）")
     p.add_argument("--instance", required=True)
     p.add_argument("--period", default=None)
     p.add_argument("--repo-root", default="")
     p.add_argument("--decl-path", default=None)
+    p.add_argument("--reopen-reason", default="",
+                   help="同 trigger：人工具名重跑理由（非空即允许重开已服务/失败槽位）")
     p = sub.add_parser("sign", help="人门签字（who=签字人；agent 角色名拒收）")
     p.add_argument("--instance", required=True)
     p.add_argument("--who", required=True)

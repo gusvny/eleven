@@ -1878,3 +1878,18 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 反证：全仓 39 处引用 `notes/` 的场景里，其余都是「notes 不可写」的反向守卫，只有这一条把 notes 当断言对象。
 > **处置（260926 宿主令「删 S1，不开票」）**：S1 三条断言整段删除，场景保留 S2–S5（17 检查全绿）；
 > `run_scenarios.py` 注册描述同步改写。无替代机械看守，同步责任回归人门。
+
+## KI-131 自动班「静默跳过」未被手动重跑能力覆盖（＝KI-129 自动面；手动面 260926 已修）
+> **实案口径**：期 20260926 的槽位被一张「执行 COMPLETED、判决 blocked」的期票占死（KI-129），
+> 自动班静默跳过；本岗改走换期（手动开 20260927＝t260927-01）处置。
+> **已修（260926 宿主令「不能手动 trigger 一次巡检吗，这个是应该支持的」）**：
+> `server/engine/inspection_trigger.py trigger [--reopen-reason <人工具名>]`——非空即对
+> 「已服务(COMPLETED)」「FAILED/TIMED_OUT/未知」槽位与终止票同路重开（铸新号 + 审计三处：
+> 回执 `superseded_ticket_id` / 新指针 `supersedes` / reopen journal 落 `reason`）；**在飞期（live）
+> 仍拒**（重跑＝双跑同一期，先等收口或记名 cancel）；**空串＝既有语义逐字不变**（served dedup 回执
+> 另带 `reopen_hint` 指路）。回归用例 6 支（`server/engine/tests/test_t260925_09_terminated_period_reopen.py`：
+> served/failed 具名重开、活期拒、指针层两态、hint）。
+> **仍未修（本条留 open）**：**自动班**（cron → spawner）不带具名，故对「served 但判决非 ok」的槽位
+> **仍然静默跳过**——彻底修需 spawner 侧据「上一期判决」（台账面 `out/inspection/<inst>-<period>.json`
+> 的 face）自动派生重开理由，属 activity 面改动且**需重启中央工人**（KI-113 冻结码）。这是 KI-129 安静
+> 失效的最后一块，待下一步（宿主授权后动）。
