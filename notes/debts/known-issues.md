@@ -1738,3 +1738,27 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > sandbar`，**带外置模板声明的工人正常启动** ✓，降级模式解除。→ 同时反证了本 KI 的定位链（段 id →
 > 活动名 → 撞引擎遗留活动名）。**加载口侧的结构性修法仍归 t260925-16**（注册期隔离拒收＋点名＋闸补
 > worker 启动 dry-run＋命名纪律入文档），以免下一个项目再踩。
+
+## KI-124 外置模板票的段路径闸恒关（client.py 硬编码 dev-lane）＝外置模板跑在「无写集护栏」状态（260925 nusuyou 需求书实测，integration 复核；修复票=t260925-22）
+> **实案（nusuyou 留证：其 P0 二号票 t260925-14 create_plan 报告）**：`engine/client.py:1113-1117` **硬编码**
+> `path_gate=(str(tpl) == "dev-lane")` → 项目外置模板（content-studio）的票 `path_gate` **恒 False**，
+> **段路径闸永不触发＝没有写集护栏**（他们当前即以「闸恒关」运行）；而一旦放开，
+> `path_gates.STAGE_PATH_RULES` 又**没有项目模板的八个新段规则** → 按该表语义会判 `unknown_stage`
+> （fail-closed，但缺登记方式）。
+> **风险（安全面）**：段写集闸是引擎对「段内能改哪些文件」的主要机械护栏；外置模板绕过它意味着
+> **项目模板可在任意路径落盘**（只剩 notes/ 禁写与真源保护名单两道），与「项目模板＝跑在引擎工人进程里
+> 的同权代码」叠加，信任面比设计预期更宽。
+> **修法方向**：①`path_gate` 由硬编码模板名改为**按模板/票声明**；②提供项目模板段路径规则的登记方式
+> （引擎侧登记或模板自声明二者择一），并以既有纪律「段 id 全集 ⊆ 规则键集」加单测锁定；③未声明段保持
+> fail-closed，但错误文案要点名「缺哪条规则、怎么补」。
+
+## KI-125 越权闸不认 git 折叠的未跟踪目录（写集写「新目录内具体文件」被判 unauthorized_path，交付件反复被隔离）（260925 nusuyou 需求书实测；修复票=t260925-23）
+> **实案**：票写集条目写成**文件路径** `workflows/content_studio.py`（该目录为项目根下新建目录）时，
+> 合并前回结报越权并把交付件挪进 `.sandbar/quarantine/`；票连续两轮无法提交、仲裁两度判 code-fault
+> （nusuyou t260925-06 实证）。**定位**：`path_gates.judge_stage_paths`（implement 段 kind=write_set）
+> 拿到的脏条目是 git 状态里的 **`?? workflows/`（未跟踪新目录被 git 折叠成目录名）**，而
+> `_within("workflows", ["workflows/content_studio.py"]) = False` → `unauthorized_path`。
+> **对照实证**：写集条目写成**目录** `packaging/` 时，同样场景正常入库（commit f1ca1a9a）——说明是匹配
+> 面的口径问题，不是意图判定问题。**修法方向**：匹配前把折叠的未跟踪目录**展开为文件级条目**，或让
+> 文件级/目录级条目**双向匹配**；验收须含反向对照（写集外文件仍判红）。**该项目侧绕法（已用）**：
+> 写集一律用目录级条目。
