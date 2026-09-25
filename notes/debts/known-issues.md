@@ -1679,3 +1679,10 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 的机械检查（worker 注册 dry-run），把这类冲突挡在合并前。
 > **现场**：nusuyou 注册声明在场（`~/.sandbar/projects/nusuyou/project.yaml` 的 `workflow_modules`），
 > 复现=中央工人启动。
+> **260925 停摆与临时处置（integration 记名）**：事故实际范围**远大于中央工人**——每票专属工人同样
+> 崩（t260925-16/17 的工人日志崩溃循环 **118 次**）＝**所有新工人起不来、引擎对新工单全面停摆约 3 小时**
+> （08:0x–11:09；期间集成层的票面查询因队列无 poller 而挂死，故 tick 卡住未及时识别，认账）。
+> **临时处置（宿主提议的 A 方案，可逆）**：注释掉 nusuyou 注册声明的 `workflow_modules` 一行
+> （备份 `/tmp/nusuyou-project.yaml.bak-260925`）→ 新工人立刻恢复、中央工人重启成功（pid 44791）。
+> **复原步骤（本 KI 修好、且 t260925-16 落地后必做）**：去掉该行注释（或从备份覆盖）→ 再重启中央工人 →
+> 用 content_studio 声明复跑一遍「工人可启动」验证。**在复原之前，content-studio 模板不可加载。**
