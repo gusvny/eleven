@@ -1826,3 +1826,29 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **修法方向**：①工作流版本化纪律（Temporal patching / `workflow.patched`，或「段序列与活动名变更只对新票生效」），
 > 并写进引擎改动的审查清单（这次是插段，下次不许直接插）；②非确定错误必须与瞬时抖动分开，`kind` 不得归
 > transient，文案点名「票损、不可重放」；③脱困出口：记名 terminate 不得以「票面快照可得」为前置。
+
+## KI-129 期号槽被「非终态」期票占住 → 后续自动班**静默跳过**（spawner 去重命中即 50ms 完成：无票、无报告、无告警；reopen 通道只认终态槽）（260926 巡检验收实测，integration 岗登记）
+> **实案（期 20260926）**：09-26 07:30（＝2026-09-25T23:30Z）调度**确实触发**了——spawner 工作流
+> `inspection-spawn-integration-tests-2026-09-25T23:30:00Z` 在 **50ms 内 COMPLETED**，返回值：
+> `{"dedup_source":"sa_query","deduped":true,"instance":"integration-tests","period":"20260926",
+> "ticket_id":"t260926-01","triggered":false}`。即：本期期票已存在（`t260926-01`＝09-24 手动顺延开的那期，
+> **至今停在 `inspect/blocked`**）→ 去重命中 → **本期根本没跑**：无新票、无套件回执、无审查报告、
+> 中央工人日志零行（worker.log 停在 09-25 15:02 启动行）、宿主侧零告警；期票也不在 `ticket.py list` 面，肉眼查不到。
+> **性质**：`(实例, 期)` 去重的「占位」判据**不区分占用者的终态/非终态**。终态槽有 reopen 通道
+> （`append_reopen_journal` / 期号 `-1` 后缀，见 `inspection_ticketing.py`），**非终态槽（blocked/running 卡死）
+> 没有任何通道**：既不会自动重跑，也不让位，**永久吞掉该期号**；而期号＝当天日期，于是「今天这一班」就这么没了。
+> 与 KI-114（终态票期号黑洞）、KI-125（期号槽黑洞修法）同族，是**新形态**（占用者未终态）。
+> **影响**：①「每日一班」的承诺静默失效，**没有任何 face**（唯一证据是 spawner 的 50ms 回执）；
+> ②巡检欠账被系统自己掩盖（漏跑核查只认台账文件，本期台账不存在 → 判「漏 1 期」，但要等 deadman 跑才有声）；
+> ③一张 blocked 脏票不主动清场就永久堵路。
+> **修法方向**：①去重判据并入占用者执行状态（非终态但超期未推进 → 高声报 + 允许按 reopen 口径另开「期号-1」）；
+> ②`triggered:false` 必须落到可观测面（admin.log 一行 + 巡检台账一行），不许只活在返回值里；
+> ③巡检手册补一条：期号＝当天日期的自动班被占 → 手动触发下一期（本岗 260926 按此处置）。
+>
+> **同批巡检验收实测（260926，期 20260926）**：①期票未铸＝本 KI；②套件回执 `ran>0` **仍待验**——09-24 那期为
+> `ran=0 wall=3300s`（KI-116 零信号实案），修法 t260924-05 已合并但**此后没有任何一期真跑过**；③审查段 09-24
+> 超时 blocked（预算 3600s 用尽、无发现清单）→ 同样待验；④拆除回执「已清」**不实**——09-24/09-25 两个期号的
+> 泳道目录壳一直在 `.lane/`（git 登记与分支已清、目录残留＝KI-115 实案；260926 本岗按「先列后删」口径清除）；
+> ⑤agent_home 锚**漂移实锤**——09-24 期的 agent_home 落在**泳道**里
+> （`.lane/inspection-integration-tests-20260925/server/engine/out/inspection/agent-home/integration-tests-20260924`，
+> 68 个文件），主仓 `server/engine/out/inspection/agent-home/` 无其影＝KI-110 实案；已搬回主仓 out/ 留证。
