@@ -476,17 +476,126 @@ def _check_paths_under_project(proj, ws, worktree):
 
 # ---------- 操作 ----------
 
+# ---- create 模板闸：权威模板面查询（t260926-03，KI-123）----
+# 根因：类面合并（project_template_classes_merged）只在引擎进程 import workflows_v2
+# 时一次性执行，结果进程本地；本文件 create 原只读本进程名面表（_shared().
+# TEMPLATE_CLASS_NAMES，stdlib glue），类面拒收/空转对建票方完全不可见 → 「既不
+# accepted 也不 rejected」的静默空转，项目模板的票建不出来。改法：非内置模板 id
+# 经 client.py template-faces（引擎 venv 子进程，每次现算类面，不连 Temporal）取
+# 权威面判定；拒收/不可达一律 fail-closed 点名，绝不静默回落内置面。
+# _poc 通道故障模式取舍（review 拍板清单）：子进程异常与非 JSON 回执——捕获后换壳
+# 重抛「权威模板面不可达（<原因>）」，原异常串保留括号内可追因（不带 Temporal 措辞）；
+# ok:false——不走 _poc_ok（那是「Temporal 拒绝」措辞面），自行判壳；回执畸形（缺键/
+# 类型错）——闸侧形状校验 fail-closed 点名缺什么；timeout=900/审计双行留痕——照带。
+
+def _template_faces():
+    """权威模板面回执（裸 _poc + 自判壳；任何失败路径 fail-closed 点名，无静默空表）。"""
+    try:
+        out = _poc('template-faces', {})
+    except ValueError as e:  # 子进程异常（timeout/解释器缺失）与非 JSON 回执同门换壳
+        raise ValueError('权威模板面不可达（template-faces 子进程故障）：%s' % e)
+    if not isinstance(out, dict) or not out.get('ok'):
+        raise ValueError('权威模板面不可达（client 回执 ok=false：%s）'
+                         % ((out or {}).get('error') if isinstance(out, dict) else out))
+    faces = out.get('result')
+    if not isinstance(faces, dict):
+        raise ValueError('权威模板面不可达（回执 result 非对象：%s）'
+                         % type(faces).__name__)
+    _validate_faces_shape(faces)
+    return faces
+
+
+def _validate_faces_shape(faces):
+    """回执形状校验（外部输入畸形用例纪律）：畸形即点名缺什么，不静默当空表。"""
+    bad = None
+    if not isinstance(faces.get('class_available'), list) or not all(
+            isinstance(x, str) for x in faces['class_available']):
+        bad = 'class_available 须为字符串列表'
+    elif not isinstance(faces.get('names'), dict):
+        bad = 'names 须为对象（id → 类名）'
+    elif not isinstance(faces.get('rejections'), list) or any(
+            not isinstance(r, dict) or not {'project', 'module', 'check', 'detail'} <= set(r)
+            for r in faces['rejections']):
+        bad = 'rejections 须为对象列表（每条含 project/module/check/detail）'
+    elif not isinstance(faces.get('builtin'), list):
+        bad = 'builtin 须为字符串列表'
+    elif not isinstance(faces.get('declared_projects'), int) or \
+            not isinstance(faces.get('projects_scanned'), int):
+        bad = 'declared_projects/projects_scanned 须为整数（扫描可判别性字段缺失）'
+    if bad:
+        raise ValueError('权威模板面回执畸形（%s），fail-closed 拒收不静默回落内置面' % bad)
+
+
+def _template_gate_verdict(wid, faces, project_key=''):
+    """纯函数判定（可注入单测）：返回 (是否放行, 拒收文案)。三态可判别——
+    扫了但拒（附明细）/ 注册根空转没扫（declared_projects=0 点名根路径）/
+    已声明但该 id 未登记（点名已登记集）。明细段恒置于「可用：」段之前
+    （收窄守卫 C 半按 rsplit('可用：') 判列表面）。"""
+    if wid in set(faces.get('class_available') or []):
+        return True, ''
+    rejs = [r for r in faces.get('rejections') or []
+            if not project_key or r.get('project') == project_key]
+    if rejs:
+        detail = '；项目模板拒收明细：' + '；'.join(
+            '[%s/%s] %s：%s' % (r.get('project', ''), r.get('module', ''),
+                                r.get('check', ''), r.get('detail', ''))
+            for r in rejs)
+    elif not faces.get('declared_projects'):
+        detail = ('；项目模板扫描未发现任何 workflow_modules 声明'
+                  '（projects_scanned=%s，注册根=%s）——该 id 未登记'
+                  % (faces.get('projects_scanned'), faces.get('projects_root') or '?'))
+    else:
+        detail = ('；项目模板已声明但该 id 未在类面登记（已登记：%s）'
+                  % ('、'.join(sorted(faces.get('class_available') or [])) or '（无）'))
+    avail = sorted(set(faces.get('names') or {}) | set(faces.get('class_available') or []))
+    return False, 'create 需要 workflow（模板 id%s，可用：%s）' % (detail, '、'.join(avail))
+
+
+def _template_view(wid, wfmod, faces):
+    """模板定义视图（t260926-03 第 2 轮，KI-123 残余缺陷实锤）：_create 原无条件
+    `wfmod.load(server/workflows/<id>.yaml)`——yaml 快照只随内置模板生成，项目外置
+    模板在引擎仓无 yaml → 闸放行后仍「模板不存在」，票建不出来。改：yaml 在则照旧
+    （内置/夹具路径零行为变化）；不在则吃权威面回执的 templates 视图（类属性推导，
+    与 client.py ticket-start 同源），缺视图/字段不合= fail-closed 点名，不静默。"""
+    ypath = wfmod.DIR / (wid + '.yaml')
+    if ypath.is_file():
+        return wfmod.load(ypath)
+    tpl = ((faces or {}).get('templates') or {}).get(wid)
+    if not isinstance(tpl, dict):
+        raise ValueError('模板不存在: %s（且权威模板面回执无该模板定义视图'
+                         '——类面/回执漂移，fail-closed 拒收）' % ypath)
+    lane = tpl.get('lane')
+    if lane not in ('main', 'worktree'):
+        raise ValueError('模板 %s 声明 lane 非法 %r（须 main/worktree）——'
+                         'fail-closed 拒收' % (wid, lane))
+    stages = tpl.get('stages')
+    if not isinstance(stages, list) or not stages or \
+            not (stages[0] or {}).get('role'):
+        raise ValueError('模板 %s 权威面定义视图缺最小段表（stages[0].role 不可辨）'
+                         '——fail-closed 拒收' % wid)
+    return {'id': wid, 'name': tpl.get('name') or wid, 'lane': lane,
+            'workspace': 'dir' if tpl.get('workspace_dir') else None,
+            'stages': stages}
+
+
 def _create(a):
     now = int(time.time())
     proj = _project(a.get('project') or '')  # 必传，无默认值（260823 用户拍板）
     wid = a.get('workflow')
     # t260924-04：未知模板文案附项目外置模板拒收明细（fail-closed 点名：检查项＋
     # 双方/缺什么；明细段置于「可用：」段之前——收窄守卫 C 半按 rsplit('可用：') 判
-    # 列表面，明细段不得落到其后）。无拒收 = 明细空串，文案逐字不变。
-    if not wid or wid not in _shared().TEMPLATE_CLASS_NAMES:
-        _note = _shared().project_template_rejection_note(proj.get('key') if isinstance(proj, dict) else '')
-        raise ValueError('create 需要 workflow（模板 id%s，可用：%s）'
-                         % (_note, '、'.join(sorted(_shared().TEMPLATE_CLASS_NAMES))))
+    # 列表面，明细段不得落到其后）。
+    # t260926-03（KI-123）：内置∪夹具快路径（本进程名面表即可判，零 spawn）；其余 id
+    # 一律走权威模板面（引擎 venv 现算类面）——类面通过的放行，拒收/空转/不可达点名。
+    if not wid:
+        raise ValueError('create 需要 workflow（模板 id，可用：%s）'
+                         % '、'.join(sorted(_shared().TEMPLATE_CLASS_NAMES)))
+    if wid not in _shared().BUILTIN_TEMPLATE_KEYS:
+        faces = _template_faces()
+        ok, msg = _template_gate_verdict(wid, faces,
+                                         proj.get('key') if isinstance(proj, dict) else '')
+        if not ok:
+            raise ValueError(msg)
     if not a.get('title'):
         raise ValueError('create 缺必填字段: title')
     # 短 id 生成（时序可见，260820 用户要求）：缺省 t<yymmdd>-<NN>（当天自增序号，补零两位）；
@@ -498,7 +607,7 @@ def _create(a):
         tid = 't%s-%02d' % (today, _next_seq_v2('t' + today))
     tid = _uniq_v2(tid)  # 撞 id 检查走 Temporal（一票到底）
     wfmod = _wf()
-    wf = wfmod.load(wfmod.DIR / (wid + '.yaml'))  # yaml=代码生成的快照，仅取 lane/workspace 推导
+    wf = _template_view(wid, wfmod, faces if wid not in _shared().BUILTIN_TEMPLATE_KEYS else None)
     stage0 = wf['stages'][0]
     role = a.get('role') or stage0['role']
     # dev-lane 结构性写 integration/（design_integration_tests 落场景文件+清单登记，

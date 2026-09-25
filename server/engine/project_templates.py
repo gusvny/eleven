@@ -91,6 +91,11 @@ class ScanResult:
         self.module_names: Dict[str, str] = {}   # id → sandbox 装载模块名（worker passthrough 面）
         self.module_deps: Dict[str, frozenset] = {}  # id → 引擎依赖顶层名（D6 decode 面放行）
         self.rejections: List[Dict[str, str]] = []
+        # t260926-03（KI-123）可判别性：本次扫描枚举到多少注册项目 / 其中多少声明了
+        # workflow_modules——「扫了但拒 / 注册根空转没扫 / 进程缺依赖」三类失效在
+        # template-faces 回执与建票文案里可区分（缺省 0 保持旧形状兼容）。
+        self.projects_scanned: int = 0
+        self.declared_projects: int = 0
 
     def merged_names(self, names: Dict[str, str], displays: Dict[str, str]) -> None:
         """把已接受 id 并入调用方两表（内置在前、项目后到；后到撞名已在 scan 拒）。"""
@@ -159,6 +164,7 @@ def scan(perkey_root: Callable[[], pathlib.Path],
     except Exception as e:  # 注册表枚举本身故障：高声记名，不静默当空
         res.rejections.append(_rej("", "", "注册表枚举失败", str(e)[:200]))
         return res
+    res.projects_scanned = len(keys)
     for key in keys:
         try:
             info = resolve_decl(key)
@@ -168,6 +174,7 @@ def scan(perkey_root: Callable[[], pathlib.Path],
         rel = info.get("workflow_modules_rel")
         if not rel:
             continue  # 不声明 = 零行为变化（契约①d 四类回退）
+        res.declared_projects += 1
         base = info.get("main_dir")
         for item in str(rel).split(","):
             rel_item = item.strip()
@@ -238,16 +245,49 @@ def _sandbox_validate(cls) -> Optional[str]:
     restrictions = SandboxedWorkflowRunner.restrictions.default
     try:
         import asyncio
+        import threading
         # D6（第 4 轮打回）：依赖顶层名与装载名一并放行——「预校验过了＝worker 能跑」。
         restrictions = restrictions.with_passthrough_modules(
             cls.__module__, *sorted(_module_deps(cls.__module__)))
         runner = SandboxedWorkflowRunner(restrictions=restrictions)
         # prepare_workflow 内部断言运行中事件循环——worker 侧天然在 loop 内，加载口
         # 是同步上下文，套一层临时 loop 供给同款环境。
-        asyncio.new_event_loop().run_until_complete(_prepare(runner, cls))
+        # t260926-03（KI-123 实录）：若本调用方已在事件循环内（client.py main 用
+        # asyncio.run 包 cmd → template-faces 现算类面落此），同线程再 run 一个
+        # 新 loop 即 RuntimeError「Cannot run the event loop while another loop is
+        # running」→ 好模板被误判 sandbox 拒收（假阳性拒收≠fail-closed）。改判：
+        # 有 running loop 就把预校验挪进一次性工作线程（线程内无循环，语义同款），
+        # 线程/loop 全终态回收（join + close），异常原样转拒收串。
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(_prepare(runner, cls))
+            except Exception as e:
+                return "%s: %s" % (type(e).__name__, str(e)[:200])
+            finally:
+                loop.close()
+            return None
+
+        err_box: List[str] = []
+
+        def _run_in_thread() -> None:
+            loop2 = asyncio.new_event_loop()
+            try:
+                loop2.run_until_complete(_prepare(runner, cls))
+            except Exception as e:
+                err_box.append("%s: %s" % (type(e).__name__, str(e)[:200]))
+            finally:
+                loop2.close()
+
+        th = threading.Thread(target=_run_in_thread, name="pt-sandbox-validate",
+                              daemon=True)
+        th.start()
+        th.join()
+        return err_box[0] if err_box else None
     except Exception as e:
         return "%s: %s" % (type(e).__name__, str(e)[:200])
-    return None
 
 
 def _module_deps(mod_name: str) -> set:

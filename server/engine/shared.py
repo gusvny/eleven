@@ -5347,6 +5347,10 @@ def project_template_rejection_note(project_key: str = "", root=None) -> str:
 # load_projects_registry 均已定义）。加载器自身故障不炸 import——转结构化拒收记录
 # 高声挂在建票文案面（「拒收≠装死」；绝不静默当「未声明」）。
 _PT_BUILTIN_KEYS = frozenset(TEMPLATE_CLASS_NAMES)
+# t260926-03（KI-123）：内置∪夹具快照的公开别名——ticket.py create 模板闸用它判
+# 「内置快路径（不 spawn 权威面查询）」，杜绝工具面硬编码模板名（KI-124 同纪律：
+# client.py 源码锁 `== "dev-lane"` 残留即红的既有约定，同款不落 ticket.py）。
+BUILTIN_TEMPLATE_KEYS = _PT_BUILTIN_KEYS
 try:
     _pt_res = project_template_scan(import_classes=False)
     PROJECT_TEMPLATE_REJECTIONS = _pt_res.rejections

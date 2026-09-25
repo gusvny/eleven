@@ -2688,6 +2688,66 @@ async def cmd_running_tickets(args: Dict[str, Any]) -> Dict[str, Any]:
     return _ok({"count": len(running), "running": running})
 
 
+async def cmd_template_faces(args: Dict[str, Any]) -> Dict[str, Any]:
+    """t260926-03（KI-123）：权威模板面查询（只读、纯本地、**不连 Temporal**）。
+
+    背景：类面合并（project_template_classes_merged）原是 workflows_v2 import 时
+    一次性执行、结果只活在引擎进程内存；ticket.py create 面只读本进程名面表，
+    类面拒收对它完全不可见 → 「既不 accepted 也不 rejected」的静默空转。本 op 在
+    引擎 venv 子进程里**每次现算**类面（fresh scan，不吃 import 时冻结），回执带：
+
+      names             引擎进程当前 shared.TEMPLATE_CLASS_NAMES（内置∪夹具∪名面∪类面）
+      class_available   本次现算类面通过深检、真正可起的模板 id（sorted）
+      rejections        结构化拒收清单（project/module/check/detail）
+      builtin           内置∪夹具快照（BUILTIN_TEMPLATE_KEYS）
+      projects_scanned  注册表枚举到的项目数
+      declared_projects 其中声明 workflow_modules 的项目数
+      projects_root     本次扫描的注册根（SANDBAR_PROJECTS_DIR 现读语义，空转排查面）
+
+    消费方=server/tools/ticket.py create 模板闸（三态文案可判别：扫了但拒 /
+    空转没扫 / 面不可达）。任何异常走 main() 的结构化回执兜底，绝不静默空表。
+    """
+    import shared  # noqa: PLC0415——本文件其余处 from shared import 具名清单，
+    # 此处要的是模块属性现读面（TEMPLATE_CLASS_NAMES 类回写后的活表），局部取模块对象。
+    res = shared.project_template_classes_merged()
+    # t260926-03 第 2 轮（KI-123 残余缺陷实锤）：创建体（ticket.py _create）原经
+    # server/workflows/<id>.yaml 快照取 lane/workspace/stage0 推导——项目外置模板在
+    # 引擎仓无 yaml（快照只随内置模板生成）→ 闸放行后仍「模板不存在」，票建不出来。
+    # 改：回执带 templates（id → 类属性推导视图：lane/workspace_dir/name/最小段表），
+    # 创建体对无 yaml 的外置 id 改吃本视图，与 client.py ticket-start 的类属性消费
+    # 同源（TEMPLATE_LANE/TEMPLATE_WORKSPACE_DIR/STAGES），不另造第二真源。
+    templates = {}
+    for tid, cls in sorted(res.classes.items()):
+        stages = []
+        for st in getattr(cls, "STAGES", ()):
+            stages.append({
+                "id": str(getattr(st, "id", "") or ""),
+                "role": str(getattr(st, "role", "") or ""),
+                "name": str(getattr(st, "name", "") or ""),
+                "next": str(getattr(st, "next", "") or ""),
+                "exit": str(getattr(st, "exit", "") or ""),
+                "acceptance": [str(x) for x in (getattr(st, "acceptance", ()) or ())],
+            })
+        templates[tid] = {
+            "name": str(getattr(cls, "TEMPLATE_NAME", "") or tid),
+            "lane": str(getattr(cls, "TEMPLATE_LANE", "") or "main"),
+            "workspace_dir": bool(getattr(cls, "TEMPLATE_WORKSPACE_DIR", False)),
+            "stages": stages,
+        }
+    return _ok({
+        "names": dict(shared.TEMPLATE_CLASS_NAMES),
+        "class_available": sorted(res.classes),
+        "accepted": sorted(res.accepted),
+        "rejections": [dict(r) for r in res.rejections],
+        "builtin": sorted(shared.BUILTIN_TEMPLATE_KEYS),
+        "projects_scanned": res.projects_scanned,
+        "declared_projects": res.declared_projects,
+        "projects_root": str(shared.perkey_projects_root()),
+        "templates": templates,
+    })
+
+
+
 COMMANDS = {
     "start": cmd_start,
     "query": cmd_query,
@@ -2702,10 +2762,11 @@ COMMANDS = {
     "ticket-prune": cmd_ticket_prune,
     "ticket-archive-legacy": cmd_ticket_archive_legacy,
     "running-tickets": cmd_running_tickets,
+    "template-faces": cmd_template_faces,
 }
 
 USAGE = (
-    "用法：python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-cancel|ticket-prune|ticket-archive-legacy> [argsJSON]\n"
+    "用法：python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-cancel|ticket-prune|ticket-archive-legacy|template-faces> [argsJSON]\n"
     "安全红线：工具面只暴露上述子命令，无 set-stage / force_stage / 改状态入口。\n"
     "signal 子命令已退役（260904 宿主令）：调用一律返回结构化退役报错（sign/retry_qc\n"
     "  只服务 v1 content-pipeline 人门段，该模板已删）；签字走 ticket op=sign，\n"
@@ -2732,6 +2793,10 @@ USAGE = (
     "  巡检票无信号 handler，仅事件历史+admin.log 留痕。裸 cancel 留给引擎件清场。\n"
     "ticket-prune 清理 closed 且已归档工单的 workflow 历史（Temporal 回归运行态，M1-3；\n"
     "  默认 --dry-run 零删除，--execute 真删；未归档/legacy 未确认双拒删，fail-closed）。\n"
+    "template-faces 权威模板面查询（t260926-03 KI-123；只读、纯本地、不连 Temporal）：\n"
+    "  引擎 venv 子进程现算类面（fresh importlib 深检），回执 names/class_available/\n"
+    "  rejections/builtin/projects_scanned/declared_projects/projects_root——\n"
+    "  ticket.py create 模板闸的单一权威源，类面拒收与空转在此点名而非静默。\n"
     "ticket-archive-legacy 存量诚实过账：closed 且无档票写 legacy manifest（不伪造不补产）。\n"
     "running-tickets=轻量 RUNNING 工单清单（console keepalive ensure 专用，无 snapshot 查询）。\n"
     '例：python client.py ticket-start \'{"ticket_id":"t260822-01","template_id":"dev-lane","title":"…"}\''
