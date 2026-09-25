@@ -78,6 +78,37 @@ GRACEFUL_SHUTDOWN_ENV = "SANDBAR_WORKER_GRACEFUL_SHUTDOWN_SEC"
 GRACEFUL_SHUTDOWN_DEFAULT_SEC = 1800.0  # 30min: covers the typical 10~40min agent stage tail; longer runs get the named-cancel path (README §8.3.1)
 
 
+def activity_registered_name(fn) -> str:
+    """活动在 temporalio 注册面的名字（不是 Python 函数名）：@activity.defn 可显式
+    改名（如 make_stage_activity(name=段 id)），退役段与外置段取名可能不一致——
+    判撞名必须按定义名。定义缺席（非 defn 对象）回落函数名，保证断言总有判据。"""
+    d = getattr(fn, "__temporal_activity_definition", None)
+    return getattr(d, "name", None) or getattr(fn, "__name__", repr(fn))
+
+
+def compose_worker_activities(extra_stage_ids=()):
+    """组装 worker 活动注册表并前置唯一性断言（KI-121，t260925-16）。
+
+    为什么在 Worker(...) 构造前自己查：temporalio 注册期的撞名报错是裸
+    ValueError（无点名、崩栈在第三方深处）。这里 fail-loud 点名「活动名＋
+    两个来源模块」。正常路径下加载口（workflows_v2 合并期「活动名撞引擎注册面」
+    检查）已拒收撞名模板——本断言是 Worker 构造前的最后一道防线，不信任上游。"""
+    acts = list(ALL_ACTIVITIES) + list(ALL_AGENT_ACTIVITIES) + [
+        make_stage_activity(s) for s in extra_stage_ids]
+    seen = {}
+    for a in acts:
+        name = activity_registered_name(a)
+        src = getattr(a, "__module__", "?")
+        if name in seen:
+            raise ValueError(
+                "活动名撞车（worker 注册前置断言，KI-121）：活动 %s 已由 %s 注册，"
+                "再来件 %s —— 外置模板段 id 不得与引擎注册活动同名（同名=注册期崩，"
+                "工人起不来）；加载口应已在合并期拒收，此处为最后防线"
+                % (name, seen[name], src))
+        seen[name] = src
+    return acts
+
+
 def graceful_shutdown_timeout_sec(raw: "str | None" = None) -> float:
     """Grace period for in-flight activities after shutdown is requested, in
     seconds. Env SANDBAR_WORKER_GRACEFUL_SHUTDOWN_SEC overrides; fault tolerance
@@ -353,8 +384,7 @@ async def run_worker(args: argparse.Namespace) -> None:
             client,
             task_queue=_q,
             workflows=ALL_WORKFLOWS + ALL_WORKFLOWS_V2,
-            activities=(ALL_ACTIVITIES + ALL_AGENT_ACTIVITIES
-                        + [make_stage_activity(s) for s in PROJECT_TEMPLATE_STAGE_IDS]),
+            activities=compose_worker_activities(PROJECT_TEMPLATE_STAGE_IDS),
             **_extra,
             **_worker_extra_kwargs(),  # t260916-29：显式宽限（缺省 1800s，env 可调）
         ))

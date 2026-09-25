@@ -37,6 +37,7 @@ PATCH_ID 带 `<项目key>-` 前缀——本加载器静态扫描引擎面 `*_PAT
 from __future__ import annotations
 
 import importlib.util
+import os
 import pathlib
 import re
 import sys
@@ -203,6 +204,10 @@ def scan(perkey_root: Callable[[], pathlib.Path],
                 ok, cls = _load_class(mod_path, key, rel_item, tid, cls_name,
                                       mod_name, part_kinds, res.rejections)
                 if not ok:
+                    # 拒收路径全终态回收（t260925-16 KI-121 附带）：半态模块不留
+                    # sys.modules——temporalio defn 注册面对重复执行敏感，残骸会
+                    # 污染后续装载面。
+                    sys.modules.pop(mod_name, None)
                     continue
             taken[tid] = origin
             res.accepted[tid] = {"class_name": cls_name, "display": disp,
@@ -277,16 +282,27 @@ def _load_class(mod_path: pathlib.Path, key: str, rel_item: str, tid: str,
                                "声明锚点缺失（不是文件）：%s" % mod_path))
         return False, None
     mod_name = _module_name(key, mod_path)
-    try:
-        spec = importlib.util.spec_from_file_location(mod_name, mod_path)
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[mod_name] = mod  # dataclasses/temporalio 反查 __module__ 需要
-        spec.loader.exec_module(mod)
-    except Exception as e:
-        rejections.append(_rej(key, rel_item, "加载失败",
-                               "模块 import 抛错 %s：%s: %s"
-                               % (mod_path, type(e).__name__, str(e)[:160])))
-        return False, None
+    existing = sys.modules.get(mod_name)
+    real = getattr(existing, "__file__", None)
+    if existing is not None and real and os.path.realpath(real) == os.path.realpath(str(mod_path)):
+        # 模块身份去重（t260925-16 KI-121，需求①）：同装载名且**同一源文件**已有在册
+        # 模块（同进程二次扫描/worker+client 同进程两面）→ 复用，绝不 exec_module 二次
+        # 执行——temporalio 的 @workflow.defn/@activity.defn 注册面对重复执行敏感
+        # （重复注册即崩）。同装载名但不同源文件（跨注册根/项目迁移的测试与运行态）
+        # = 不同身份，按新文件重装载并顶替旧条目（旧条目随旧根退役）。
+        mod = existing
+    else:
+        try:
+            spec = importlib.util.spec_from_file_location(mod_name, mod_path)
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[mod_name] = mod  # dataclasses/temporalio 反查 __module__ 需要
+            spec.loader.exec_module(mod)
+        except Exception as e:
+            rejections.append(_rej(key, rel_item, "加载失败",
+                                   "模块 import 抛错 %s：%s: %s"
+                                   % (mod_path, type(e).__name__, str(e)[:160])))
+            sys.modules.pop(mod_name, None)  # 抛错残骸不留（全终态回收）
+            return False, None
     cls = getattr(mod, cls_name, None)
     if cls is None:
         rejections.append(_rej(key, rel_item, "畸形",
