@@ -114,7 +114,7 @@ const libCjs = readFileSync(join(repo, 'server/plugins/workbench/lib/client.cjs'
 for (const [name, art] of [['src', src], ['lib/client.js', libJs], ['lib/client.cjs', libCjs]]) {
   ok(art.includes('wb-status-card'), `${name}: 卡类名 wb-status-card 在场`)
   ok(art.includes('原始引擎日志'), `${name}: 原始日志折叠 summary 在场`)
-  ok(art.includes('下一步：'), `${name}: 下一步安排行在场`)
+  ok(art.includes('Next: ') || /'Next: '/.test(art), `${name}: 下一步安排行在场（t260925-18 起英文「Next: 」）`)
   ok(art.includes('sc-file'), `${name}: 文件点名 chip 类名在场`)
   ok(art.includes("data-sev=blue") || art.includes("'blue'"), `${name}: 蓝卡分支接线在场`)
   ok(art.includes('sc-signwhat'), `${name}: 「签什么」区在场`)

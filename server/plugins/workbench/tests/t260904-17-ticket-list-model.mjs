@@ -39,10 +39,10 @@ ok('四态映射：未知/新增 stage_state → active 缺省（宁显活跃勿
   assert.equal(deriveTicketState(123, {}), 'active')
 })
 
-// t260919-02 伴生改（只增不放宽，票面点名）：STATE4_LABEL 词表增 failed:'已失败'。
-ok('五态短名表齐备（等你/受阻/在飞/收口/已失败，mock ⑥ chips 词表 + t260919-02）', () => {
+// t260919-02 五态词表；t260925-18 起 UI 英文化——值随 ui-labels 纪律改英文，键=引擎标识不动。
+ok('五态短名表齐备（Active/Closed/Waiting/Blocked/Failed，mock ⑥ chips 词表 + t260919-02 + t260925-18 英文化）', () => {
   assert.deepEqual(STATE4_LABEL, {
-    active: '在飞', done: '收口', waiting: '等你', blocked: '受阻', failed: '已失败',
+    active: 'Active', done: 'Closed', waiting: 'Waiting', blocked: 'Blocked', failed: 'Failed',
   })
 })
 
@@ -154,17 +154,17 @@ ok('阶段短名畸形：非对象/无名/空名 → 空（不 throw）', () => 
 /* ------------------------------------------------ 进展行（R8③ 未知 state → undefined） */
 
 ok('进展行：timeline 末条映射人话（表驱动）', () => {
-  assert.deepEqual(progressLineOf([{ stage: 'a', state: 'running', at: 'x' }]), { state: 'running', text: '执行中' })
+  assert.deepEqual(progressLineOf([{ stage: 'a', state: 'running', at: 'x' }]), { state: 'running', text: 'Running' })
   assert.deepEqual(progressLineOf([
     { stage: 'a', state: 'running' },
     { stage: 'b', state: 'awaiting-human' },
-  ]), { state: 'awaiting-human', text: '等你签字' })
-  assert.deepEqual(progressLineOf([{ stage: 'b', state: 'blocked' }]), { state: 'blocked', text: '受阻 · 原因见详情' })
+  ]), { state: 'awaiting-human', text: 'Awaiting your signature' })
+  assert.deepEqual(progressLineOf([{ stage: 'b', state: 'blocked' }]), { state: 'blocked', text: 'Blocked · see detail' })
 })
 
 ok('进展行畸形：末条畸形向前跳 / 全畸形/缺/非数组/空 → undefined', () => {
   assert.deepEqual(progressLineOf([{ state: 'running' }, null, { stage: 'b', state: 'done' }]),
-    { state: 'done', text: '本步已完成' })
+    { state: 'done', text: 'Stage done' })
   assert.equal(progressLineOf(undefined), undefined)
   assert.equal(progressLineOf([]), undefined)
   assert.equal(progressLineOf('nope'), undefined)
@@ -274,21 +274,21 @@ ok('toMillis 接线归一（F2 回归用例）：秒→×1000 / 毫秒原样 / �
     assert.ok(toMillis(bad) !== toMillis(bad) || toMillis(bad) === bad || toMillis(bad) === null,
       `畸形 ${String(bad)} 透传 relativeTime 兜底`)
   }
-  assert.equal(relativeTime(toMillis(nowS - 120)), '2 分钟前')  // 接线端到端：秒入→人话出
+  assert.equal(relativeTime(toMillis(nowS - 120)), '2m ago')  // 接线端到端：秒入→人话出
 })
 
 ok('相对时间：刚刚/分钟/小时/天 四档', () => {
-  assert.equal(relativeTime(NOW - 10_000, NOW), '刚刚')
-  assert.equal(relativeTime(NOW - 5 * 60_000, NOW), '5 分钟前')
-  assert.equal(relativeTime(NOW - 3 * 3_600_000, NOW), '3 小时前')
-  assert.equal(relativeTime(NOW - 2 * 86_400_000, NOW), '2 天前')
+  assert.equal(relativeTime(NOW - 10_000, NOW), 'just now')
+  assert.equal(relativeTime(NOW - 5 * 60_000, NOW), '5m ago')
+  assert.equal(relativeTime(NOW - 3 * 3_600_000, NOW), '3h ago')
+  assert.equal(relativeTime(NOW - 2 * 86_400_000, NOW), '2d ago')
 })
 
 ok('相对时间畸形：缺失/非数/非正数/未来超容差 → null（行卡回落绝对时间）', () => {
   for (const bad of [undefined, null, NaN, 0, -5, 'x', NOW + 61_000]) {
     assert.equal(relativeTime(bad, NOW), null)
   }
-  assert.equal(relativeTime(NOW + 30_000, NOW), '刚刚') // 1min 内时钟漂移容差
+  assert.equal(relativeTime(NOW + 30_000, NOW), 'just now') // 1min 内时钟漂移容差
 })
 
 /* ------------------------------------------------ 零硬编码守卫（C3 形态 b：整文件扫描＋显式豁免数组） */
@@ -310,7 +310,7 @@ const SCAN_FILES = [
 const EXEMPT_LITERALS = [
   'merge_check 等脚本门不落 results 也能打勾',   // index.tsx 步骤条注释（存量）
   'merge_check 等程序化门的一次运行记录',         // index.tsx 类型注释（存量）
-  '（merge_check 全绿）',                        // index.tsx 详情状态行文案（存量）
+  '(merge_check green)',                         // index.tsx 详情状态行文案（t260925-18 英文化）
   '最近一次 merge_check 红',                     // index.tsx 问题区注释（存量）
   'merge_check 红：',                            // index.tsx 问题区文案（存量）
 ]

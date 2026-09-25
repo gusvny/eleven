@@ -25,11 +25,11 @@ export type TicketState4 = 'active' | 'done' | 'waiting' | 'blocked' | 'failed'
 
 /** 五态人话短名（状态圆点旁文字，不占块）。 */
 export const STATE4_LABEL: Record<TicketState4, string> = {
-  active: '在飞',
-  done: '收口',
-  waiting: '等你',
-  blocked: '受阻',
-  failed: '已失败',
+  active: 'Active',
+  done: 'Closed',
+  waiting: 'Waiting',
+  blocked: 'Blocked',
+  failed: 'Failed',
 }
 
 /**
@@ -167,8 +167,8 @@ export function closeHealthOf(row: CloseHealthRowLike | null | undefined): Close
  */
 export function closeHealthBadgeOf(row: CloseHealthRowLike | null | undefined): string {
   const h = closeHealthOf(row)
-  if (h === 'abnormal') return '已结束·异常（无报告）'
-  if (h === 'unreadable') return '已结束·待核'
+  if (h === 'abnormal') return 'Closed·Abnormal (no report)'
+  if (h === 'unreadable') return 'Closed·Unverified'
   return ''
 }
 
@@ -186,7 +186,7 @@ export function pauseOpOf(paused: unknown): 'pause' | 'resume' {
  * at_gate=已停在段间门口；未知/空相位按 pending 文案兜底（宁可保守提示不可静默）。
  */
 export function pausedBadgeText(phase?: unknown): string {
-  return phase === 'at_gate' ? '⏸ 已暂停在段间' : '⏸ 暂停中（待段间生效）'
+  return phase === 'at_gate' ? '⏸ Paused at the stage gate' : '⏸ Pausing (takes effect between stages)'
 }
 
 /* ------------------------------------------------------------- 左栏合并排序（t260916-15） */
@@ -354,10 +354,10 @@ export interface ProgressLine {
 
 /** 引擎状态词 → 动词短语（表驱动；未知词不在表=不产出文案）。 */
 const PROGRESS_PHRASES: Record<string, string> = {
-  running: '执行中',
-  'awaiting-human': '等你签字',
-  blocked: '受阻 · 原因见详情',
-  done: '本步已完成',
+  running: 'Running',
+  'awaiting-human': 'Awaiting your signature',
+  blocked: 'Blocked · see detail',
+  done: 'Stage done',
 }
 
 /** timeline 条目的最小形状校验（外部快照不可信）。 */
@@ -493,10 +493,10 @@ export function relativeTime(ts?: number | null, nowMs: number = Date.now()): st
   if (typeof ts !== 'number' || !Number.isFinite(ts) || ts <= 0) return null
   const diff = nowMs - ts
   if (diff < -60_000) return null
-  if (diff < 60_000) return '刚刚'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
-  return `${Math.floor(diff / 86_400_000)} 天前`
+  if (diff < 60_000) return 'just now'
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
+  return `${Math.floor(diff / 86_400_000)}d ago`
 }
 
 /* ------------------------------------------------------------- 首句标题（t260905-07） */

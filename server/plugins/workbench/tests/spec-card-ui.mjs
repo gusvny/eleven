@@ -43,12 +43,13 @@ const libCjs = readFileSync(LIB_CJS, 'utf8')
 section('A. spec 卡渲染分支在 src + lib(client.js/client.cjs) 三产物同源在场')
 for (const [name, art] of [['src', src], ['lib/client.js', libJs], ['lib/client.cjs', libCjs]]) {
   ok(art.includes('wb-d2-spec'), `${name}: 卡类名 wb-d2-spec 在场`)
-  ok(art.includes('执行规格（spec）'), `${name}: ttl 文案「执行规格（spec）」在场`)
+  ok(art.includes('Execution spec'), `${name}: ttl 英文文案「Execution spec」在场（t260925-18 UI 英文化）`)
   ok(art.includes('data-v": "B"') || art.includes('data-v="B"'), `${name}: B 形态标记 data-v=B 在场`)
-  ok(art.includes('"txt"') || art.includes('className="txt"'), `${name}: 正文 .txt 包裹在场`)
+  ok(name === 'src' ? art.includes('className="txt wb-md"') : art.includes('txt wb-md'), `${name}: 正文 .txt 包裹在场（t260925-18 起与 wb-md 并用）`)
+  ok(art.includes('specMarkdownHtml(detail.spec)'), `${name}: spec 经 specMarkdownHtml→renderMarkdown 渲染（t260925-18 markdown 格式化，转义先行无裸注入）`)
   ok(art.includes('detail.spec.length'), `${name}: 字数徽标取 spec.length 在场`)
-  ok(name === 'src' ? /\{detail\.spec\.length\} 字/.test(art) : art.includes('" 字"'),
-    `${name}: 徽标「 字」单位字面在场（src=JSX 形态 / lib=字符串字面形态）`)
+  ok(name === 'src' ? /\{detail\.spec\.length\} chars/.test(art) : art.includes('" chars"'),
+    `${name}: 徽标「chars」单位字面在场（src=JSX 形态 / lib=字符串字面形态；t260925-18 英文化）`)
 }
 // 接口字段（src 侧白盒；lib 类型擦除不查）
 ok(/spec\?: string/.test(src), 'src: TicketDetail 补 spec?: string 字段')
@@ -70,7 +71,7 @@ for (const [name, art] of [['src', src], ['lib/client.js', libJs], ['lib/client.
     ok(css.includes('overflow-y:auto'), `${name}: 限高滚动 overflow-y:auto`)
     // t260905-08：写死色退役——蓝左边条改 accent 令牌（fallback 仍 #0969da，视觉语义不变）
     ok(css.includes('border-left:4px solid var(--dsw-derive-accent,#0969da)'), `${name}: 蓝左边条 accent 令牌（fallback=#0969da，与正文卡视觉区分）`)
-    ok(css.includes('white-space:pre-wrap'), `${name}: pre-wrap（多行规格原文样保留）`)
+    ok(!css.includes('white-space:pre-wrap'), `${name}: 卡级 pre-wrap 退役（t260925-18：markdown 自管换行，pre-wrap 会叠出双倍空隙）`)
     ok(css.includes('word-break:break-word'), `${name}: break-word（长行不横向撑爆）`)
   }
   const ttl = art.match(/\.wb-d2-spec \.ttl\{[^}]*\}/)
@@ -88,7 +89,7 @@ const hostDir = join(REPO, 'server', 'plugins', 'workbench', 'src', 'host')
 for (const f of readdirSync(hostDir)) backendFiles.push([join(hostDir, f), `src/host/${f}`])
 for (const [p, name] of backendFiles) {
   const art = readFileSync(p, 'utf8')
-  ok(!art.includes('wb-d2-spec') && !art.includes('执行规格'), `${name}: 无 spec 卡渲染逻辑泄漏（前端可见面只在 client bundle）`)
+  ok(!art.includes('wb-d2-spec') && !art.includes('Execution spec'), `${name}: 无 spec 卡渲染逻辑泄漏（前端可见面只在 client bundle）`)
 }
 const nodeTs = readFileSync(NODE_TS, 'utf8')
 // t260915-08 收窄为词边界：守卫意图=「无执行规格（spec）路由/分支」；裸子串 /spec/i

@@ -141,7 +141,7 @@ export function sortEpicTickets(rows: EpicTicketRow[]): EpicTicketRow[] {
  */
 export function epicBadgeOf(epic?: string): { label: string; code: string | null } {
   const code = (epic ?? '').trim()
-  return code === '' ? { label: '未归档', code: null } : { label: code, code }
+  return code === '' ? { label: 'No epic', code: null } : { label: code, code } // t260925-18：UI 英文化（引擎数据不动）
 }
 
 /** 新建工单正文首行注入的归属说明（验收标准 9：代号由界面带入，正文里留痕、不许手输改绑）。 */

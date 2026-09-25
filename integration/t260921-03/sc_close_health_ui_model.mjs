@@ -174,9 +174,9 @@ if (needFn(closeHealthOf, 'closeHealthOf', 'U2')) {
 /* ---------------- U3 徽标词表 ---------------- */
 console.log('== U3 组：异常收口徽标（可扫读 + 反用例：正常/失败不贴）==')
 if (needFn(closeHealthBadgeOf, 'closeHealthBadgeOf', 'U3')) {
-  ok(closeHealthBadgeOf(ABN_ROW) === '已结束·异常（无报告）',
+  ok(closeHealthBadgeOf(ABN_ROW) === 'Closed·Abnormal (no report)', // t260925-18 UI 英文化：词面改英文，契约=abnormal 可扫读+带无报告语义
     `abnormal→「已结束·异常（无报告）」（got ${JSON.stringify(closeHealthBadgeOf(ABN_ROW))}）`)
-  ok(closeHealthBadgeOf(UNREAD_ROW) === '已结束·待核',
+  ok(closeHealthBadgeOf(UNREAD_ROW) === 'Closed·Unverified', // 同上：unreadable 词面英文
     `unreadable→「已结束·待核」（got ${JSON.stringify(closeHealthBadgeOf(UNREAD_ROW))}）`)
   ok(closeHealthBadgeOf(OK_ROW) === '', '正常收口不贴徽标（反用例③：不得被标成异常/看起来正常即可）')
   const failRow = { status: 'failed', stage_state: 'failed', exec_status: 'FAILED', close_health: 'failed' }
@@ -277,8 +277,9 @@ console.log('== U7 组：详情头陈旧词面站点必须被终态对账守卫�
   const GUARD = /deriveTicketState\s*\(|close_health|exec_status|COMPLETED|'done'/
   const sites = [
     { name: '详情头 stage_state 徽标', lit: 'data-state={detail.stage_state}' },
-    { name: '⛔受阻原因横幅', lit: '⛔ 受阻原因' },
-    { name: '基本信息「状态」行', lit: 'MetaItem k="状态"' },
+    { name: '⛔受阻原因横幅', lit: '⛔ Blocked:' }, // t260925-18 UI 英文化：横幅固定文案改英文，站点与守卫契约不变
+    // t260925-18：基本信息区块整体从详情 UI 移除（数据面仍走 ticket CLI）——该站点
+    // 不复存在，守卫对象随之消失（契约对已删站点空真）；两处存活站点继续钉。
   ]
   for (const { name, lit } of sites) {
     const at = idxSrc.indexOf(lit)

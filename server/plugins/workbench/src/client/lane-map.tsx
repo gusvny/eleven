@@ -16,6 +16,7 @@
  *     历史已解除受阻=完成色+「曾受阻」角标（.wb-lm-ever，黄点），节点/角标
  *     hover 出经过（何时受阻、何因、如何解除；数据=blockedHistory）。
  */
+import { stageDisplayLabel } from './ui-labels.ts'
 import { LANE_KIND_ICON } from './lane-map-model.ts'
 import type { LaneMapModel, LaneNodeView, GateRunView } from './lane-map-model.ts'
 import type { LaneBlockedHistory } from './lane-states.ts'
@@ -26,31 +27,31 @@ const LM_ICON: Record<string, string> = {
 
 /** 解除方式人话（hover 经过第三拍「如何解除」；词表=lane-states resolvedBy）。 */
 const RESOLVED_HOW: Record<string, string> = {
-  rerun: '本段重跑完成',
-  advanced: '工作流已推进至后续段',
-  closed: '工单已收口',
+  rerun: 'stage rerun completed',
+  advanced: 'workflow advanced to later stages',
+  closed: 'ticket closed',
 }
 
 /** 「曾受阻」经过（何时受阻、何因、如何解除）：角标与节点 hover 共用一段话。 */
 function everBlockedTitle(h: LaneBlockedHistory): string {
-  const bits = [`曾受阻 ${h.passes.length} 次`]
+  const bits = [`Blocked ${h.passes.length}× before`]
   if (h.last.at) bits.push(h.last.at)
   if (h.last.reason) bits.push(h.last.reason)
-  if (h.last.gen !== undefined) bits.push(`第${h.last.gen}轮`)
+  if (h.last.gen !== undefined) bits.push(`Round ${h.last.gen}`)
   if (h.resolved) {
-    bits.push(`已解除（${RESOLVED_HOW[h.resolvedBy ?? ''] || '已解除'}${h.resolvedAt ? `：${h.resolvedAt}` : ''}）`)
+    bits.push(`Resolved (${RESOLVED_HOW[h.resolvedBy ?? ''] || 'resolved'}${h.resolvedAt ? `: ${h.resolvedAt}` : ''})`)
   }
   return bits.join(' · ')
 }
 
 function roundTitle(nv: LaneNodeView, gen: number, state: string): string {
   const r = nv.rounds.find(x => x.gen === gen)
-  if (!r) return `第${gen}轮`
-  const bits = [`第${r.gen}轮`]
+  if (!r) return `Round ${gen}`
+  const bits = [`Round ${r.gen}`]
   if (r.at) bits.push(r.at)
-  bits.push(state === 'rework' ? '被打回' : state)
+  bits.push(state === 'rework' ? 'reworked' : state)
   if (r.reason) bits.push(r.reason)
-  if (r.phase) bits.push(`相位 ${r.phase}`)
+  if (r.phase) bits.push(`Phase ${r.phase}`)
   if (r.handoffSummary) bits.push(r.handoffSummary)
   return bits.join(' · ')
 }
@@ -63,7 +64,7 @@ function LaneMapNode({ nv, inGroup }: { nv: LaneNodeView; inGroup: boolean }) {
   const ever = nv.blockedHistory?.resolved === true
     && nv.blockedHistory.passes.length > 0 && nv.vis === 'done'
   const everTitle = ever && nv.blockedHistory ? everBlockedTitle(nv.blockedHistory) : ''
-  const title = `${n.label} · ${n.role} · ${n.kind}${n.optional ? ` · ${n.optional}` : ''}${everTitle ? ` · ${everTitle}` : ''}`
+  const title = `${stageDisplayLabel(n.id, n.label)} · ${n.role} · ${n.kind}${n.optional ? ` · ${n.optional}` : ''}${everTitle ? ` · ${everTitle}` : ''}`
   return (
     <span
       className={`wb-lm-node${inGroup ? ' wb-lm-node-inlane' : ''}`}
@@ -75,11 +76,11 @@ function LaneMapNode({ nv, inGroup }: { nv: LaneNodeView; inGroup: boolean }) {
     >
       <i className="wb-lm-dot">{glyph}</i>
       <span className="wb-lm-name">
-        {n.label}
-        {n.optional ? <em className="wb-lm-opt" title={`条件段：${n.optional}`}>{n.optional}</em> : null}
-        {nv.badge ? <b className="wb-lm-badge" title={`该段共 ${nv.rounds.length} 轮（返工史见打回横幅）`}>{nv.badge}</b> : null}
+        {stageDisplayLabel(n.id, n.label)}
+        {n.optional ? <em className="wb-lm-opt" title={`Conditional stage: ${n.optional}`}>{n.optional}</em> : null}
+        {nv.badge ? <b className="wb-lm-badge" title={`${nv.rounds.length} rounds at this stage (rework history in the rework banner)`}>{nv.badge}</b> : null}
         {ever && nv.blockedHistory
-          ? <i className="wb-lm-ever" title={everBlockedTitle(nv.blockedHistory)}>曾受阻</i>
+          ? <i className="wb-lm-ever" title={everBlockedTitle(nv.blockedHistory)}>was blocked</i>
           : null}
       </span>
       {nv.rounds.length > 0 && (
@@ -107,7 +108,7 @@ function LaneMapGroup({ model, groupId }: { model: LaneMapModel; groupId: string
   if (!g) return null
   return (
     <span className="wb-lm-parallel" data-group={g.def.id} data-active={g.active ? 'true' : 'false'} data-done={g.allDone ? 'true' : 'false'}>
-      <span className="wb-lm-plabel">并行 · {g.members.length} 道</span>
+      <span className="wb-lm-plabel">Parallel · {g.members.length} lanes</span>
       <span className="wb-lm-branches">
         {g.members.map(m => <LaneMapNode key={m.node.id} nv={m} inGroup />)}
       </span>
@@ -147,19 +148,19 @@ export function ChecksDetail({ runs, cap = 3 }: { runs: GateRunView[]; cap?: num
   if (!runs || runs.length === 0) return null
   return (
     <div className="wb-checks">
-      <div className="wb-checks-ttl">检查明细 · {runs.length} 轮门记录（引擎结构化数据直译，点行展开原始输出）</div>
+      <div className="wb-checks-ttl">Check details · {runs.length} gate runs (engine structured data verbatim; click a row for raw output)</div>
       {runs.slice(0, cap).map((run, i) => (
         <div key={`${run.stage}-${i}`} className="wb-ck-run" data-stage={run.stage} data-green={run.green ? 'true' : 'false'}>
           <div className="wb-ck-run-head">
             <b>{run.label}</b>
-            {run.gen !== undefined ? <span className="wb-ck-run-gen">第 {run.gen} 轮</span> : null}
-            <span className="wb-ck-run-verdict">{run.green ? '全绿' : `${run.redCount} 项红灯`}</span>
+            {run.gen !== undefined ? <span className="wb-ck-run-gen">Round {run.gen}</span> : null}
+            <span className="wb-ck-run-verdict">{run.green ? 'all green' : `${run.redCount} red`}</span>
           </div>
           {run.rows.map((row, j) => (
             <details key={j} className="wb-ck-row" data-green={row.green ? 'true' : 'false'}>
               <summary>
                 <b className={`wb-ck-mark ${row.green ? 'g' : 'r'}`}>{row.green ? '✓' : '✗'}</b>
-                <span className="wb-ck-name">{row.item || row.checkId || '（未命名检查项）'}</span>
+                <span className="wb-ck-name">{row.item || row.checkId || '(unnamed check)'}</span>
                 {row.detail ? <span className="wb-ck-detail">{row.detail}</span> : null}
               </summary>
               <div className="wb-ck-more">

@@ -112,7 +112,7 @@ if (model.err) {
   const L = model.mod.STATE4_LABEL
   ok(L && typeof L === 'object', 'STATE4_LABEL 词表在位')
   if (L && typeof L === 'object') {
-    ok(L.failed === '已失败', `failed 文案=「已失败」（got=${JSON.stringify(L.failed)}）`)
+    ok(L.failed === 'Failed', `failed 文案=Failed（t260925-18 UI 英文化后的词面；契约核心=与四态互异可辨）（got=${JSON.stringify(L.failed)}）`)
     const vals = Object.values(L)
     ok(new Set(vals).size === vals.length, `五态文案互异（${JSON.stringify(L)}）`)
     ok(STATES.every(s => s in L), `五键齐（缺=${STATES.filter(s => !(s in L))}）`)
@@ -190,7 +190,7 @@ if (face.err) {
     let v2 = null, threw2 = false
     try { v2 = viewOf({ exec_status: 'FAILED' }) } catch (e) { threw2 = true }
     const t2 = JSON.stringify(v2)
-    ok(!threw2 && t2.includes('原因不可得'),
+    ok(!threw2 && /原因不可得|Reason unavailable/.test(t2),
        `原因不可得 face → 显式「原因不可得」（got=${t2.slice(0, 120)}）`)
     ok(!threw2 && t2.includes('FAILED'), '原因不可得时执行状态保留（绝不编造绝不丢状态）')
     // 畸形 face：全降级不抛

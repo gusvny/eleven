@@ -150,7 +150,7 @@ ok(cardSrc.includes('kindBadge?: { text: string }'), 'kindBadge=通用 prop（�
 ok(!cardSrc.includes('inspection'), 'ticket-row-card 仍零 inspection 专属词（t260915-08 守卫边界保持）')
 
 const faceSrc = readFileSync(join(repo, 'server/plugins/workbench/src/host/inspection-face.ts'), 'utf8')
-ok(faceSrc.includes("export const INSPECTION_ROW_BADGE = '巡检'"), '徽标词表单点在 host 层')
+ok(faceSrc.includes("export const INSPECTION_ROW_BADGE = 'Inspection'"), '徽标词表单点在 host 层（t260925-18 英文化）')
 ok(!/const INSPECTION_ROW_BADGE\s*=/.test(sbSrc), '侧栏不本地定义徽标词（走单点 import）')
 
 const modelSrc = readFileSync(join(repo, 'server/plugins/workbench/src/client/ticket-list-model.ts'), 'utf8')

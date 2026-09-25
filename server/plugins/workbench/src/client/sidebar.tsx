@@ -637,7 +637,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
           // ok:false（host 502 body 原文）或网络错：原文进横幅不进数据（KI-018①），
           // 快照保持不动（不吞成空列表——review gen0 意见与 t260910-04 R3 同纪律）。
           setInspectionNote(inspectionDegradedNote(
-            ir?.error !== undefined ? ir.error : `HTTP 无 JSON 回执：${JSON.stringify(ir).slice(0, 120)}`))
+            ir?.error !== undefined ? ir.error : `HTTP response has no JSON body: ${JSON.stringify(ir).slice(0, 120)}`))
         }
       } catch (err) {
         if (cancelled) return
@@ -741,7 +741,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
     return (
       <div ref={rootRef} className="wb-sb rail">
         <style>{CSS}</style>
-        <div className="wb-sb-icon" onClick={expandSidebar} title="工单台">⊞</div>
+        <div className="wb-sb-icon" onClick={expandSidebar} title="Ticket Board">⊞</div>
       </div>
     )
   }
@@ -766,7 +766,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
             </div>
           )}
           {loading ? (
-            <div style={{padding:16,color:'var(--dsw-derive-fg,#888)'}}>加载中…</div>
+            <div style={{padding:16,color:'var(--dsw-derive-fg,#888)'}}>Loading…</div>
           ) : groups.map(g => (
             <div key={g.project.key}>
               <div className="wb-group-head" onClick={() => setCollapsed(c => ({ ...c, [g.project.key]: !c[g.project.key] }))}>
@@ -785,26 +785,26 @@ export function WorkbenchSidebar(props: SidebarProps) {
                 <span className="wb-view-icons" onClick={e => e.stopPropagation()}>
                   <span
                     className={`wb-view-icon ${rightView === 'board' && viewProject === g.project.key ? 'active' : ''}`}
-                    title="工单列表" aria-label="工单列表"
+                    title="Tickets" aria-label="Tickets"
                     onClick={() => handleViewIcon(g.project.key, 'board')}><ProjectIcon name="board" /></span>
                   {/* 键盘可达（t260905-06 验收①）：span 非原生可聚焦——role+tabIndex+Enter 键位补齐。 */}
                   <span
                     className={`wb-view-icon ${rightView === 'docs' ? 'active' : ''}`}
                     role="button" tabIndex={0}
-                    title="文档" aria-label="文档"
+                    title="Docs" aria-label="Docs"
                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleViewIcon(g.project.key, 'docs') }}
                     onClick={() => handleViewIcon(g.project.key, 'docs')}><ProjectIcon name="docs" /></span>
                   <span
                     className={`wb-view-icon ${rightView === 'routes' && viewProject === g.project.key ? 'active' : ''}`}
-                    title="模型路由" aria-label="模型路由"
+                    title="Model Routes" aria-label="Model Routes"
                     onClick={() => handleViewIcon(g.project.key, 'routes')}><ProjectIcon name="routes" /></span>
                   <span
                     className={`wb-view-icon ${rightView === 'epics' && viewProject === g.project.key ? 'active' : ''}`}
-                    title="立项单" aria-label="立项单"
+                    title="Epics" aria-label="Epics"
                     onClick={() => handleViewIcon(g.project.key, 'epics')}><ProjectIcon name="epics" /></span>
                   {/* 第五枚=项目设置（票③面D）：常驻可见，开设置弹层（只读+danger 区摘除）。 */}
                   <span className="wb-view-icon" data-wb-project-settings-entry=""
-                    title="项目设置" aria-label="项目设置"
+                    title="Project Settings" aria-label="Project Settings"
                     onClick={() => { setModal({ kind: 'settings', project: g.project }) }}><ProjectIcon name="settings" /></span>
                 </span>
               </div>
@@ -830,7 +830,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
                     onClose={projectSessions.handleClose}
                   />
                   {g.tickets.length === 0 ? (
-                    <div className="wb-group-empty">无进行中工单</div>
+                    <div className="wb-group-empty">No active tickets</div>
                   ) : g.tickets.map(t => {
                     // t260915-19：组内巡检行（t260915-20 起带项目身份，ProjectKey SA
                     // 归组）走最小适配——行1 标题引擎已给「巡检 <实例> · 期 <期号>」
@@ -887,7 +887,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
               隔离期间无组头无项目设置入口（无装载条目可设置）。 */}
           {quarantined.map(q => (
             <div key={q.key} className="wb-quar-row" data-wb-quarantine-row=""
-              role="button" aria-label={`隔离条目 ${q.key}`}
+              role="button" aria-label={`Quarantined entry ${q.key}`}
               onClick={() => setModal({ kind: 'quarantine', entry: q })}>
               ⚠ {q.key} · 注册条目被隔离
             </div>
@@ -895,9 +895,9 @@ export function WorkbenchSidebar(props: SidebarProps) {
           {/* 「＋ 接入项目」行（票③面D）：项目组列表末尾常驻——空/全隔离注册表
               也渲染（首个项目接入恰恰发生在空注册表时）。方框＋，语言同会话区。 */}
           <div className="wb-project-add-row" data-wb-project-add-row=""
-            role="button" aria-label="接入项目"
+            role="button" aria-label="Add project"
             onClick={() => setModal({ kind: 'add' })}>
-            <span className="wb-project-add-plus">＋</span>接入项目
+            <span className="wb-project-add-plus">＋</span>Add project
           </div>
         </div>
       </div>
@@ -912,9 +912,9 @@ export function WorkbenchSidebar(props: SidebarProps) {
           <div className="wb-stale-banner" data-stale-kind={staleBanner} role="alert">
             <span className="wb-stale-msg">
               ⚠️ {staleBanner === 'restart' ? STALE_BANNER_TEXT : STALE_RELOAD_TEXT}
-              （{staleBanner === 'restart' ? '当前控制台进程仍在跑旧代码' : '当前页面仍在跑旧代码'}，度量/diff 可能异常）。
+              ({staleBanner === 'restart' ? 'console process still runs old code' : 'this page still runs old code'}; metrics/diff may be stale).
             </span>
-            <button className="wb-stale-dismiss" title="本页签暂时隐藏" onClick={() => setStaleDismissed(true)}>知道了</button>
+            <button className="wb-stale-dismiss" title="Hide in this tab" onClick={() => setStaleDismissed(true)}>Got it</button>
           </div>
         )}
         <div className="wb-right-content">
@@ -954,19 +954,19 @@ export function WorkbenchSidebar(props: SidebarProps) {
         <div className="wb-sb-foot">
           {!footerSlotOk() && !shellActive && (
             <button ref={metricsBtnRef} className="wb-sb-foot-btn" data-on={metricsOpen}
-              title="度量面板（stage 时长 / 交付 / Token / 系统健康）"
+              title="Metrics (stage durations / delivery / tokens / system health)"
               onClick={() => { setSettingsOpen(false); setMetricsOpen(o => !o) }}>📊 度量</button>
           )}
           <span className="wb-sb-foot-sp" />
-          <button className="wb-sb-foot-btn" data-on={settingsOpen} title="设置"
+          <button className="wb-sb-foot-btn" data-on={settingsOpen} title="Settings"
             onClick={() => { setMetricsOpen(false); setSettingsOpen(o => !o) }}>⚙</button>
         </div>
         {settingsOpen && (
-          <div className="wb-sb-setpop" role="dialog" aria-label="设置">
-            <div className="t">设置</div>
+          <div className="wb-sb-setpop" role="dialog" aria-label="Settings">
+            <div className="t">Settings</div>
             {/* sandbar 驻留输入（原 board 筛选行内联输入迁来；localStorage key 与
                 sandbarHours/setSandbarHours 语义不变，侧栏轮询每次现读）。 */}
-            <label className="row" title="已完成工单在左栏项目组里再驻留多少小时（0=立即消失）">
+            <label className="row" title="How long closed tickets stay in the sidebar groups (hours; 0 = hide immediately)">
               sandbar 驻留
               <input type="number" min={0} step={1} value={sandbar}
                 onChange={e => {
@@ -976,7 +976,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
                 }} />
               小时
             </label>
-            <div className="m2c">静默在制阈值（分钟）：随 M2c 系统健康 tab 开放。</div>
+            <div className="m2c">Quiet in-progress threshold (minutes): ships with the M2c system-health tab.</div>
           </div>
         )}
         {/* 项目生命周期四弹层（票③面D）：设置（只读+danger 区）→ 摘除四步流 →

@@ -265,13 +265,13 @@ export function fmtDur(ms: number | null | undefined): string {
 export function stageDurationTitle(d: StageDuration, nowMs?: number): string {
   const parts: string[] = []
   const total = stageTotalMs(d, nowMs)
-  if (total !== null) parts.push(`耗时 ${fmtDur(total)}`)
+  if (total !== null) parts.push(`took ${fmtDur(total)}`)
   d.rounds.forEach((r, i) => {
-    parts.push(`第${i + 1}轮 ${fmtDur(windowMs(r, nowMs))}`)
+    parts.push(`Round ${i + 1} ${fmtDur(windowMs(r, nowMs))}`)
   })
   if (d.humanWaits.length > 0) {
     const seg = d.humanWaits.map(w => fmtDur(windowMs(w, nowMs))).join(' + ')
-    parts.push(`人等 ${fmtDur(humanWaitTotalMs(d, nowMs))}（${seg}）`)
+    parts.push(`human wait ${fmtDur(humanWaitTotalMs(d, nowMs))} (${seg})`)
   }
   return parts.join(' · ')
 }

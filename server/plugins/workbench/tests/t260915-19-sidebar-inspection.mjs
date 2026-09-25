@@ -81,13 +81,13 @@ ok(allOwned.unowned.length === 0, '全归属→unowned 空（兜底组整组不�
 // ---- inspectionDegradedNote（原文透传，不吞空列表）
 const note = inspectionDegradedNote('ticket-list(inspection) 失败: 连接超时')
 ok(note.includes('ticket-list(inspection) 失败: 连接超时'), '错误原文透传在文案')
-ok(note.includes('显示上次快照'), '保快照语义显式（不静默）')
-ok(note.includes('自动重试中'), '重试语义与中列词表同源')
+ok(note.includes('showing last snapshot'), '保快照语义显式（不静默；t260925-18 英文化）')
+ok(note.includes('auto-retrying'), '重试语义与中列词表同源（t260925-18 英文化）')
 ok(inspectionDegradedNote(123).includes('123')
   && inspectionDegradedNote({ code: 'ECONNREFUSED' }).includes('[object Object]')
-  && inspectionDegradedNote(undefined).endsWith('：')
-  && inspectionDegradedNote(null).endsWith('：')
-  && inspectionDegradedNote('').endsWith('：'), '畸形 err 不抛；无原文不编造（尾巴可空，主体文案恒在）')
+  && inspectionDegradedNote(undefined).endsWith(': ')
+  && inspectionDegradedNote(null).endsWith(': ')
+  && inspectionDegradedNote('').endsWith(': '), '畸形 err 不抛；无原文不编造（尾巴可空，主体文案恒在；t260925-18 英文分隔符）')
 
 // ---- 源级锚（KI-051：语义锚；实现漂移在此点名）
 const sbSrc = readFileSync(join(repo, 'server/plugins/workbench/src/client/sidebar.tsx'), 'utf8')

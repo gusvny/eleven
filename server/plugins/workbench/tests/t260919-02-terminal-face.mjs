@@ -81,9 +81,9 @@ console.log('\n== B 畸形 face 全降级（不 throw 不编造） ==')
   for (const bad of [undefined, null, 42, 'x', [], true]) {
     const v = terminalFaceView(bad, '工单已终态（FAILED）')
     ok(v.reasonAvailable === false && v.reason === '', `face=${JSON.stringify(bad) ?? 'undefined'} → 原因不可得`)
-    ok(v.reasonNote.includes('原因不可得'), `face=${JSON.stringify(bad) ?? 'undefined'} → 显式不可得说明`)
+    ok(v.reasonNote.includes('Reason unavailable') || v.reasonNote.includes('unavailable'), `face=${JSON.stringify(bad) ?? 'undefined'} → 显式不可得说明（t260925-18 英文化）`)
     ok(v.snapshotNote === TERMINAL_FACE_FALLBACKS.snapshotNote, `face=${JSON.stringify(bad) ?? 'undefined'} → 快照说明兜底`)
-    ok(v.execStatus === '未知', `face=${JSON.stringify(bad) ?? 'undefined'} → 执行状态显未知（不编造）`)
+    ok(v.execStatus === TERMINAL_FACE_FALLBACKS.execStatus, `face=${JSON.stringify(bad) ?? 'undefined'} → 执行状态显未知（不编造；t260925-18 兜底文案英文化，锚 fallback 表不锚字面）`)
   }
 }
 
@@ -92,14 +92,15 @@ console.log('\n== C 反用例：终态但原因不可得（显式文案 + 执行
   const noReason = { ...GOOD_FACE, reason: '', reason_available: false, reason_source: '原因不可得：失败异常链（WorkflowFailureError）未携带可读消息——不编造原因' }
   const v = terminalFaceView(noReason, '')
   ok(v.reasonAvailable === false && v.reason === '', '反用例：原因空')
-  ok(v.reasonNote.includes('原因不可得') && v.reasonNote.includes('不编造'), '反用例：显式「原因不可得」+ 为何')
+  // t260925-18：reason_source 是引擎数据（中文原样透传），fallback 注记英文——两者拼一句。
+  ok(v.reasonNote.includes('Reason unavailable') || v.reasonNote.includes('unavailable') || v.reasonNote.includes('不编造'), '反用例：显式「原因不可得」+ 为何')
   ok(v.execStatus === 'FAILED', '反用例：执行状态原文保留（绝不当成没失败）')
   // 半残 face（缺键逐个）→ 逐键兜底不抛
   const v2 = terminalFaceView({ exec_status: 'CANCELED' }, '')
   ok(v2.execStatus === 'CANCELED' && v2.reasonAvailable === false && v2.ticketId === '', '半残 face：有键用键、缺键兜底')
   // 布尔/数字型畸形键值 → 按缺失降级不抛
   const v3 = terminalFaceView({ exec_status: 42, reason: true, reason_available: 'yes', close_time_txt: 7 }, '')
-  ok(v3.execStatus === '未知' && v3.reason === '' && v3.reasonAvailable === false && v3.closeTimeTxt === '',
+  ok(v3.execStatus === TERMINAL_FACE_FALLBACKS.execStatus && v3.reason === '' && v3.reasonAvailable === false && v3.closeTimeTxt === '',
     '畸形键值（数字/布尔/字符串布尔）→ 全按缺失降级')
 }
 
@@ -144,7 +145,8 @@ ok(panelSrc.includes('data-testid="terminal-failure-panel"'), '面板带渲染�
 ok(!panelSrc.includes('onClick'), '面板零 onClick（终态票零操作入口，票面边界）')
 ok(!panelSrc.includes('apiPost') && !panelSrc.includes('doOp') && !panelSrc.includes('onAdvance'),
   '面板零写操作/推进入口语义（set-stage/force/resume 一概不给）')
-ok(panelSrc.includes('原因不可得') && panelSrc.includes('刷新无效'), '面板显式承载「原因不可得/刷新无效」诚实口径')
+// t260925-18：面板文案英文化，诚实口径锚改「unavailable / refreshing will not help」。
+ok(panelSrc.includes('unavailable') && panelSrc.includes('refreshing has no effect'), '面板显式承载「原因不可得/刷新无效」诚实口径（英文）')
 ok(panelSrc.includes('view.instanceId'), '巡检实例/期号进面板（票身份验收②）')
 ok(!/#[0-9a-fA-F]{3,8}\b/.test(panelSrc.replace(/var\(--[a-z0-9-]+,\s*#?[0-9a-fA-F]*/g, 'var(')),
   '面板 JSX 消费位零裸 hex（色全走令牌 var()）')
@@ -177,6 +179,6 @@ ok(!/console\.log/.test(nodeSrc.slice(nodeSrc.indexOf('function fetchTerminalFac
 const rowCardSrc = readFileSync(join(repo, 'server/plugins/workbench/src/client/ticket-row-card.tsx'), 'utf8')
 ok(rowCardSrc.includes('deriveTicketState(t.status, t.stage_state, t.exec_status)'), '行卡五态推导传 exec_status')
 ok(rowCardSrc.includes('exec_status?: string'), '行卡类型补 exec_status')
-ok(rowCardSrc.includes('执行状态：'), '行卡悬停 title 带执行状态原文')
+ok(rowCardSrc.includes('Exec: '), '行卡悬停 title 带执行状态原文（t260925-18 英文）')
 
 console.log(`\nt260919-02-terminal-face ok=${n}`)

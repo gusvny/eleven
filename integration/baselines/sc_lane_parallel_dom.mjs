@@ -77,7 +77,9 @@ function buildContract() {
     record('S0 build-contract', 'fail', 'lib/client.js and lib/client.cjs out of sync — rebuild')
     return false
   }
-  const anchors = ['wb-d2-step', 'data-s=', 'wb-d2-par', '并行分叉中', 'deriveStageStates']
+  // t260925-18 UI 英文化：并行状态行词面「并行分叉中：」→「Forked in parallel:」——
+  // 契约本体（双边 data-s=running + ∥ 标记 + 状态行点名两分支）不变，只改词面锚。
+  const anchors = ['wb-d2-step', 'data-s=', 'wb-d2-par', 'Forked in parallel', 'deriveStageStates']
   const missing = anchors.filter(a => !js.includes(a))
   if (missing.length) {
     record('S0 build-contract', 'fail', `shipped bundle missing parallel-render anchors: ${missing.join(', ')}`)
@@ -318,7 +320,7 @@ async function scenarioDoubleLit(page) {
   if (!impl.parTitle.includes('设计集成测试') || !dsgn.parTitle.includes('实现')) {
     return `∥ hover titles do not cross-reference peers: implement="${impl.parTitle}" design="${dsgn.parTitle}"`
   }
-  if (!status || !status.includes('并行分叉中')) return `status line missing 并行分叉中: ${JSON.stringify(status)}`
+  if (!status || !status.includes('Forked in parallel')) return `status line missing Forked in parallel: ${JSON.stringify(status)}`
   if (!status.includes('实现') || !status.includes('设计集成测试')) {
     return `status line missing both branch names: ${JSON.stringify(status)}`
   }
@@ -333,7 +335,7 @@ async function scenarioSingleLit(page) {
     return `expected exactly 1 lit step (design), got: ${JSON.stringify(steps)}`
   }
   if (steps.some(x => x.par)) return '∥ marker present in single-running state'
-  if (status && status.includes('并行分叉中')) return `status line wrongly reports parallel: ${JSON.stringify(status)}`
+  if (status && status.includes('Forked in parallel')) return `status line wrongly reports parallel: ${JSON.stringify(status)}`
   return null
 }
 

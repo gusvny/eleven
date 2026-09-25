@@ -99,6 +99,7 @@ import { WorkbenchSidebar } from './sidebar.tsx'
 import { MetricsFooterButton, markFooterSlot } from './metrics-entry.tsx'
 // 立项单 Tier 3（t260904-17 保留）：中列第四视图 + 所属立项徽标（口径单点 ./epics-model.ts）。
 import { EpicBadge, EpicSection } from './epics.tsx'
+import { STATE_LABEL, workflowLabel } from './ui-labels.ts'
 // 「文档」视图（t260905-06 立；t260915-10 接壳层 projectKey）：docs/ 定稿库人读视图 +
 // notes/ 观察窗，默认跟随壳层当前项目（页内选择器可手动切且手动优先）。
 import { DocsSection } from './docs.tsx'
@@ -106,8 +107,7 @@ import { DocsSection } from './docs.tsx'
 import { TicketRowCard, type CardOp } from './ticket-row-card.tsx'
 import {
   deriveTicketState, countByState, filterRows, progressLineOf, epicColorOf,
-  STATE4_LABEL, firstSentenceOf, snapshotDigest, type SnapshotDigest,
-  pauseOpOf, type TicketState4, closeHealthOf,
+  STATE4_LABEL, firstSentenceOf,   pauseOpOf, type TicketState4, closeHealthOf,
 } from './ticket-list-model.ts'
 // t260919-02 终态失败票详情面：视图模型纯函数（畸形 face 全降级不编造，单测直跑）。
 import { terminalFaceView, type TerminalFaceView } from './terminal-face.ts'
@@ -654,9 +654,9 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-scan-meta{display:flex;gap:6px 16px;flex-wrap:wrap;font-size:12px;color:var(--dsw-derive-muted,#57606a);align-items:center}
 .wb-scan-chips{display:flex;gap:8px;flex-wrap:wrap}
 .wb-sug{font-size:12px;border-radius:6px;padding:1px 8px;font-weight:600;white-space:nowrap}
-.wb-sug[data-sug="可签"]{background:var(--dsw-derive-success-bg,#dafbe1);color:var(--dsw-derive-success-deep,#116329)}
-.wb-sug[data-sug="待补"]{background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
-.wb-sug[data-sug="疑似卡死"]{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e)}
+.wb-sug[data-sug="Signable"]{background:var(--dsw-derive-success-bg,#dafbe1);color:var(--dsw-derive-success-deep,#116329)}
+.wb-sug[data-sug="Needs info"]{background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
+.wb-sug[data-sug="Maybe stuck"]{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e)}
 .wb-scan-table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--dsw-derive-surface-2,#e8ebef);
   border-radius:8px;font-size:12px;overflow:hidden}
 .wb-scan-table th{background:var(--dsw-derive-surface,#f6f8fa);color:var(--dsw-derive-muted,#57606a);font-weight:600;text-align:left;padding:6px 10px;
@@ -780,8 +780,10 @@ const CSS = `${DERIVE_TOKENS_CSS}
    spec=开票会话蒸馏的执行规格）；B 形态=默认展开+限高滚动（样张 260904-spec-card-mockup B 卡）。
    样张已评审拍板进方案（impl 段无需回读样张；样式/文案/结构见下方三条规则）。 */
 .wb-d2-spec{margin-top:10px;border:1px solid var(--dsw-derive-surface-2,#e8ebef);border-left:4px solid var(--dsw-derive-accent,#0969da);border-radius:8px;background:var(--dsw-derive-canvas,#fff);
-  padding:10px 14px;font-size:13px;line-height:1.75;color:var(--dsw-derive-fg,#1f2328);white-space:pre-wrap;
+  padding:10px 14px;font-size:13px;line-height:1.75;color:var(--dsw-derive-fg,#1f2328);
   word-break:break-word;max-height:260px;overflow-y:auto}
+.wb-d2-spec .txt{max-height:230px;overflow-y:auto}
+.wb-d2-spec .txt :first-child{margin-top:0}
 .wb-d2-spec .ttl{font-size:11px;color:var(--dsw-derive-muted,#57606a);margin-bottom:4px;font-weight:600;
   display:flex;align-items:baseline;gap:8px}
 .wb-d2-spec .cnt{font-weight:400;color:var(--dsw-derive-muted,#8c959f);font-family:ui-monospace,Menlo,monospace;font-size:10px}
@@ -1068,7 +1070,7 @@ interface Wf {
 /** 巡检拓扑的 Wf 形态适配（t260915-08）：行卡迷你站道数据源，stages=宿主声明面
  *  （host/inspection-face.ts 单点；client 不内置阶段词表）。 */
 const INSPECTION_WF: Wf = {
-  id: 'inspection-lite', name: '巡检', lane: 'inspection',
+  id: 'inspection-lite', name: 'Inspection', lane: 'inspection',
   stages: INSPECTION_TOPOLOGY as unknown as WfStage[],
 }
 
@@ -1281,14 +1283,8 @@ interface ScanReportResult {
 /* ------------------------------------------------------------- 台面卡片 */
 
 /** 状态文字（色板对应：running绿/awaiting黄/awaiting-human蓝/blocked红/done灰）。 */
-const STATE_LABEL: Record<string, string> = {
-  running: '进行中',
-  awaiting: '待分派',
-  'awaiting-human': '待审批',
-  blocked: '卡住',
-  closed: '已完成',
-  done: '已完成',
-}
+// STATE_LABEL 迁 ui-labels.ts（t260925-18：控制台 UI 英文文案唯一映射表，
+// 以引擎既有英文标识为真源；未知值回落原标识，永不空白/中文）。
 
 /**
  * 状态语义优先级（260820 迁移遗留修复，UI 层不改数据）：
@@ -1307,7 +1303,7 @@ function ticketState(t: { status: string; stage_state: string }): string {
  */
 function stageTextOf(t: { status: string; stage: string | null }, wf?: Wf): string {
   if (!wf || wf.stages.length === 0) return '—'
-  if (t.status === 'closed') return '已完成'
+  if (t.status === 'closed') return 'Done'
   const total = wf.stages.length
   const idx = t.stage !== null ? wf.stages.findIndex(s => s.id === t.stage) : -1
   if (idx < 0) return '—'
@@ -1345,23 +1341,7 @@ function fmtTs(ts?: number): string {
   return new Date(ts * 1000).toLocaleString('zh-CN', { hour12: false })
 }
 
-/** 快照要点的时间显示（t260905-07）：引擎快照时间字段可能是秒级数值、毫秒数值、
- *  数字串或人话时间串（老票/引擎版本差）——数字按量级判别（<1e11 秒 / ≥1e11 毫秒，
- *  toMillis 同款口径），非数字原样显示，null → ''。畸形（NaN/负数）原样透传不猜
- *  （时间失真面显性化，与 untime 标注同纪律）。 */
-function fmtSnapshotTs(v: string | null): string {
-  if (v === null) return ''
-  const n = Number(v)
-  if (v !== '' && Number.isFinite(n) && n > 0) {
-    // 量级判别（toMillis 同款口径）：<1e11 视为秒、≥1e11 视为毫秒——引擎老票秒级
-    // 与 fixture/引擎新面毫秒级两域在可预见时间无重叠。
-    const ms = n < 1e11 ? n * 1000 : n
-    return new Date(ms).toLocaleString('zh-CN', { hour12: false })
-  }
-  return v
-}
 
-/* ------------------------------------------------- M14 详情五分组（层次化 section） */
 
 /**
  * 终态失败票详情面板（t260919-02）：终态回执 kind=terminal 时详情抽屉的唯一详情面
@@ -1379,38 +1359,38 @@ export function TerminalFailurePanel({ view }: { view: TerminalFaceView }) {
     <div className="wb-tf-panel" data-testid="terminal-failure-panel" data-exec={view.execStatus}>
       <div className="wb-tf-head">
         <span className="wb-tf-mark">⛔</span>
-        <span className="wb-tf-title">工单已终态失败</span>
-        <span className="wb-tf-exec" title="Temporal 执行状态">{view.execStatus}</span>
+        <span className="wb-tf-title">Ticket ended in failure</span>
+        <span className="wb-tf-exec" title="Temporal execution status">{view.execStatus}</span>
       </div>
       {view.receiptError !== '' && <div className="wb-tf-receipt">{view.receiptError}</div>}
       <div className="wb-tf-reason">
-        <div className="wb-tf-k">失败原因</div>
+        <div className="wb-tf-k">Failure reason</div>
         {view.reasonAvailable
           ? <div className="wb-tf-reason-txt">{view.reason}</div>
-          : <div className="wb-tf-reason-txt wb-tf-unavailable">原因不可得{view.reasonNote ? `——${view.reasonNote}` : ''}</div>}
+          : <div className="wb-tf-reason-txt wb-tf-unavailable">Reason unavailable{view.reasonNote ? ` — ${view.reasonNote}` : ''}</div>}
         {view.reasonAvailable && view.reasonNote !== '' && (
           <div className="wb-tf-src">{view.reasonNote}</div>
         )}
       </div>
       <div className="wb-tf-grid">
-        <span className="wb-tf-k">票号</span><span className="wb-tf-v">{view.ticketId || '不可得'}</span>
-        <span className="wb-tf-k">项目</span><span className="wb-tf-v">{view.project || '—'}</span>
-        <span className="wb-tf-k">立项</span><span className="wb-tf-v">{view.epic || '未归档'}</span>
+        <span className="wb-tf-k">Ticket</span><span className="wb-tf-v">{view.ticketId || 'unavailable'}</span>
+        <span className="wb-tf-k">Project</span><span className="wb-tf-v">{view.project || '—'}</span>
+        <span className="wb-tf-k">Epic</span><span className="wb-tf-v">{view.epic || 'No epic'}</span>
         {view.instanceId !== '' && (
           <>
-            <span className="wb-tf-k">巡检实例</span>
-            <span className="wb-tf-v">{view.instanceId}{view.period !== '' ? ` · 期 ${view.period}` : ''}</span>
+            <span className="wb-tf-k">Inspection instance</span>
+            <span className="wb-tf-v">{view.instanceId}{view.period !== '' ? ` · Period ${view.period}` : ''}</span>
           </>
         )}
-        <span className="wb-tf-k">最后已知阶段</span>
+        <span className="wb-tf-k">Last known stage</span>
         <span className="wb-tf-v">{view.lastStage !== '' ? view.lastStage : view.lastStageNote}</span>
-        <span className="wb-tf-k">起跑时间</span>
-        <span className="wb-tf-v">{view.startTimeTxt !== '' ? view.startTimeTxt : '不可得'}</span>
-        <span className="wb-tf-k">终态时间</span>
-        <span className="wb-tf-v">{view.closeTimeTxt !== '' ? view.closeTimeTxt : '不可得'}</span>
+        <span className="wb-tf-k">Started</span>
+        <span className="wb-tf-v">{view.startTimeTxt !== '' ? view.startTimeTxt : 'unavailable'}</span>
+        <span className="wb-tf-k">Closed at</span>
+        <span className="wb-tf-v">{view.closeTimeTxt !== '' ? view.closeTimeTxt : 'unavailable'}</span>
       </div>
       <div className="wb-tf-snapshot">{view.snapshotNote}</div>
-      <div className="wb-tf-honesty">终态票不再推进，刷新无效；本面板只读，无任何推进/重试入口。</div>
+      <div className="wb-tf-honesty">Closed tickets no longer advance; refreshing has no effect. This panel is read-only — no advance/retry entry.</div>
     </div>
   )
 }
@@ -1425,17 +1405,7 @@ function SectionTitle({ num, title, desc }: { num: string; title: string; desc?:
   )
 }
 
-/** 基本信息网格条目：键（灰）值（黑），超长省略悬停全文。 */
-function MetaItem({ k, children, title }: { k: string; children: ReactNode; title?: string }) {
-  return (
-    <span className="wb-meta-item">
-      <span className="wb-meta-k">{k}</span>
-      <span title={title}>{children}</span>
-    </span>
-  )
-}
 
-/* ------------------------------------------------- 详情页 v2（260824 重设计） */
 
 /** 阶段视觉态推导住在纯模块 lane-states.ts（零依赖，node 可裸 import 做行为测试）；
  *  index.tsx 只做消费。推导口径（优先级/回退/畸形输入）见 lane-states.ts 头注。 */
@@ -1513,7 +1483,7 @@ function StageDurationInline({ d, vis, nowMs }: { d: StageDuration; vis: D2Visua
   // running / awaiting-human：开放窗用 nowMs 实时走秒。
   const openWait = d.humanWaits.some(w => w.toMs === null)
   const text = vis === 'awaiting-human' && openWait
-    ? `人等 ${fmtDurMs(humanWaitTotalMs(d, nowMs))}`
+    ? `Human wait ${fmtDurMs(humanWaitTotalMs(d, nowMs))}`
     : (() => { const t = stageTotalMs(d, nowMs); return t === null ? null : fmtDurMs(t) })()
   if (text === null) return null
   return (
@@ -1551,7 +1521,7 @@ function D2Stepper({ detail, wf, usage, durs, nowMs }: {
             <span className="wb-d2-step" data-s={vis} title={`${s.id} · ${s.role} · ${partsTitle(s.parts)}`}>
               <i className="ico">{D2_ICON[vis]}</i>{s.name} <PartsBadges parts={s.parts} />
               {parallelPeers.length > 0 && (
-                <span className="wb-d2-par" title={`与 ${parallelPeers.join('、')} 并行（分叉渲染）`}> ∥</span>
+                <span className="wb-d2-par" title={`Parallel with ${parallelPeers.join(', ')} (forked rendering)`}> ∥</span>
               )}
               {(s.parts ?? []).includes('agent') && <StageUsageInline stageId={s.id} usage={usage} />}
               {durs?.[s.id] && nowMs !== undefined && (
@@ -1573,7 +1543,7 @@ function D2Reworks({ detail, wf }: { detail: TicketDetail; wf?: Wf }) {
   const nameOf = (id: string) => wf?.stages.find(s => s.id === id)?.name ?? id
   return (
     <div className="wb-d2-reworks">
-      <div className="ttl">⤺ 被打回过 {reworks.length} 次（最新在最上）</div>
+      <div className="ttl">⤺ Reworked {reworks.length}× (newest first)</div>
       {[...reworks].reverse().map((t, i) => (
         <div className="row" key={i}>
           <span className="when">{fmtAt(t.at)}</span>
@@ -1590,16 +1560,16 @@ function D2Reworks({ detail, wf }: { detail: TicketDetail; wf?: Wf }) {
 function d2StatusLine(detail: TicketDetail, wf?: Wf): { s: D2Visual | 'done'; text: string } {
   if (detail.status === 'closed') {
     const sig = detail.signatures?.merge
-    return { s: 'done', text: `已收口关闭${sig ? `（merge 签字人 ${sig.who}）` : ''}` }
+    return { s: 'done', text: `Closed${sig ? ` (merged by ${sig.who})` : ''}` }
   }
   const name = detail.stage_name || detail.stage || '—'
   if (detail.stage_state === 'blocked') {
     const lastBlocked = [...(detail.timeline ?? [])].reverse().find(t => t.state === 'blocked')
-    return { s: 'blocked', text: `卡在 ${name}：${lastBlocked?.reason || '原因见下方问题区'}` }
+    return { s: 'blocked', text: `Stuck at ${name}: ${lastBlocked?.reason || 'see problems section below'}` }
   }
   if (detail.stage_state === 'awaiting-human') {
     const g = detail.gate_runs?.[detail.gate_runs.length - 1]
-    return { s: 'awaiting-human', text: `等你审批：${name}${g?.green ? '（merge_check 全绿）' : ''}` }
+    return { s: 'awaiting-human', text: `Awaiting your approval: ${name}${g?.green ? ' (merge_check green)' : ''}` }
   }
   if (detail.stage_state === 'running') {
     // 并行分叉：活跃步数组 ≥2 步时统报并行（避免「文字报单步、图上双高亮」分裂）。
@@ -1608,12 +1578,12 @@ function d2StatusLine(detail: TicketDetail, wf?: Wf): { s: D2Visual | 'done'; te
       const derived = deriveStageStates(detail, order)
       if (!derived.fallback && derived.active.length > 1) {
         const names = derived.active.map(id => wf!.stages.find(x => x.id === id)?.name ?? id)
-        return { s: 'running', text: `并行分叉中：${names.join(' ∥ ')}` }
+        return { s: 'running', text: `Forked in parallel: ${names.join(' ∥ ')}` }
       }
     }
     const enters = (detail.timeline ?? []).filter(t => t.stage === detail.stage && t.state === 'running').length
-    const kb = detail.session_kb ? `，agent 已读 ${detail.session_kb}KB` : ''
-    return { s: 'running', text: `${name} 进行中（第 ${enters || 1} 次进本步${kb}）` }
+    const kb = detail.session_kb ? `, agent read ${detail.session_kb}KB` : ''
+    return { s: 'running', text: `${name} in progress (enter #${enters || 1}${kb})` }
   }
   return { s: 'todo', text: `${name} · ${STATE_LABEL[detail.stage_state] ?? detail.stage_state}` }
 }
@@ -1621,9 +1591,9 @@ function d2StatusLine(detail: TicketDetail, wf?: Wf): { s: D2Visual | 'done'; te
 /** 时长人话：75s → 1分15秒；3700s → 1时1分。 */
 function fmtDur(sec: number): string {
   const s = Math.max(0, Math.floor(sec))
-  if (s < 60) return `${s}秒`
-  if (s < 3600) return `${Math.floor(s / 60)}分${s % 60 > 0 ? `${s % 60}秒` : ''}`
-  return `${Math.floor(s / 3600)}时${Math.floor((s % 3600) / 60)}分`
+  if (s < 60) return `${s}s`
+  if (s < 3600) return `${Math.floor(s / 60)}m${s % 60 > 0 ? ` ${s % 60}s` : ''}`
+  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
 }
 
 /** 运行脉搏行（t260825-03）：当前阶段 gen + 本段已运行时长 + 会话日志 KB 及增速 + 心跳年龄。
@@ -1648,7 +1618,7 @@ function PulseLine({ detail }: { detail: TicketDetail }) {
   if (detail.stage_state !== 'running') return null
   const pulse = detail.pulse ?? null
   if (pulse === null) {
-    return <div className="wb-pulse" data-s="none">运行脉搏：无心跳（非 agent 段或 worker 不在）</div>
+    return <div className="wb-pulse" data-s="none">Pulse: no heartbeat (non-agent stage or worker down)</div>
   }
   const now = Math.floor(Date.now() / 1000)
   const hb = pulse.heartbeat ?? {}
@@ -1665,35 +1635,51 @@ function PulseLine({ detail }: { detail: TicketDetail }) {
   const warn = !stuck && ((hbAge !== null && hbAge > 30) || stallSec >= 120)
   return (
     <div className="wb-pulse" data-s={stuck ? 'stuck' : (warn ? 'warn' : 'ok')}>
-      运行脉搏：{detail.stage_name || detail.stage || pulse.activity || '—'}
-      {gen !== null ? ` · 第 ${gen + 1} 次进段（gen${gen}）` : ''}
-      {runSec !== null ? ` · 本段已运行 ${fmtDur(runSec)}${startedTs > 0 ? '' : '（按心跳次数推算）'}` : ''}
-      {' · 会话日志 '}{kb > 0
-        ? `${kb}KB（${stallSec >= 60
-          ? `停涨 ${fmtDur(stallSec)}`
+      Pulse: {detail.stage_name || detail.stage || pulse.activity || '—'}
+      {gen !== null ? ` · enter #${gen + 1} (gen${gen})` : ''}
+      {runSec !== null ? ` · stage running ${fmtDur(runSec)}${startedTs > 0 ? '' : ' (estimated from heartbeat count)'}` : ''}
+      {' · session log '}{kb > 0
+        ? `${kb}KB (${stallSec >= 60
+          ? `stalled ${fmtDur(stallSec)}`
           : (kbChangeRef.current !== null && kbChangeRef.current.id === detail.id && kbChangeRef.current.delta !== null
-            ? `较上次 ${kbChangeRef.current.delta >= 0 ? '+' : ''}${kbChangeRef.current.delta}KB`
-            : '增长中')}）`
+            ? `delta ${kbChangeRef.current.delta >= 0 ? '+' : ''}${kbChangeRef.current.delta}KB`
+            : 'growing')})`
         : '—'}
-      {hbAge !== null ? ` · 心跳 ${hbAge < 5 ? '刚刚' : `${hbAge} 秒前`}` : ' · 尚无心跳'}
-      {pulse.heartbeat_raw !== undefined ? ` · 心跳原文：${pulse.heartbeat_raw.slice(0, 60)}` : ''}
-      {stuck ? ' —— 疑似卡死（只提示，不自动处置）' : ''}
+      {hbAge !== null ? ` · heartbeat ${hbAge < 5 ? 'just now' : `${hbAge}s ago`}` : ' · no heartbeat yet'}
+      {pulse.heartbeat_raw !== undefined ? ` · heartbeat raw: ${pulse.heartbeat_raw.slice(0, 60)}` : ''}
+      {stuck ? ' — possibly stuck (advisory only, no auto-action)' : ''}
     </div>
   )
 }
 
+/** 巡检报告 summary 键（引擎中文数据键）→ 英文显示标签；未知键回落原键。 */
+const SUGGESTION_LABEL: Record<string, string> = {
+  '疑似卡死': 'Maybe stuck',
+  '待补': 'Needs info',
+  '可签': 'Signable',
+}
+
 const LIVE_TYPE_LABEL: Record<string, string> = {
-  user: '用户',
+  user: 'user',
   assistant: 'agent',
-  tool: '工具',
-  result: '结果',
+  tool: 'tool',
+  result: 'result',
   // KI-024（t260903-04）：轮级新鲜度行——静默窗（spawn 引导/LLM 上游重试）里
   // step/start 与 llm/retry 是唯一规律的「还在干活」信号，各出一行防误读停摆。
-  step: '轮次',
-  retry: '重试',
+  step: 'round',
+  retry: 'retry',
   // t260922-02：0.1.5 独有 assistant/attempt（未转正的模型尝试）上屏行——
   // 0.1.5 重试/中断窗的新鲜度行；无此标签时有 `?? ev.type` 安全回落，属增强非依赖。
-  attempt: '尝试',
+  attempt: 'attempt',
+}
+
+/**
+ * spec 卡 markdown HTML（t260925-18）：renderMarkdown（knowledge，转义先行）产出后，
+ * 把渲染器自带的中文按钮文案「复制」在显示层改英文——knowledge 源不在本票写集，
+ * 不改共享渲染器；字符串级后处理纯函数，tests/ui-labels.mjs 可测。
+ */
+export function specMarkdownHtml(spec: string): string {
+  return renderMarkdown(spec).replace('>复制</button>', '>Copy</button>')
 }
 
 /**
@@ -1759,28 +1745,28 @@ function EvidenceLightbox({ ticketId, files, index, onClose, onNav: nav }: {
   return (
     <div className="wb-lb" onClick={onClose}>
       {files.length > 1 && (
-        <button type="button" className="wb-lb-nav" aria-label="上一张"
+        <button type="button" className="wb-lb-nav" aria-label="Previous"
           onClick={(e) => { e.stopPropagation(); nav(files, index, -1) }}>‹</button>
       )}
       {broken
-        ? <div className="wb-lb-miss">截图加载失败：{f}</div>
+        ? <div className="wb-lb-miss">Screenshot failed to load: {f}</div>
         : (
             <img
               className="wb-lb-img"
-              alt={`截图证据 ${f}`}
+              alt={`Screenshot evidence ${f}`}
               src={evidenceImgSrc(ticketId, f)}
               onClick={(e) => e.stopPropagation()}
               onError={() => setBroken(true)}
             />
           )}
       {files.length > 1 && (
-        <button type="button" className="wb-lb-nav" aria-label="下一张"
+        <button type="button" className="wb-lb-nav" aria-label="Next"
           onClick={(e) => { e.stopPropagation(); nav(files, index, 1) }}>›</button>
       )}
       <div className="wb-lb-bar" onClick={(e) => e.stopPropagation()}>
         <span>{files.length > 0 ? `${index + 1} / ${files.length}` : '0 / 0'}</span>
         <span className="wb-lb-name">{f}</span>
-        <button type="button" className="wb-lb-close" onClick={onClose}>关闭（Esc）</button>
+        <button type="button" className="wb-lb-close" onClick={onClose}>Close (Esc)</button>
       </div>
     </div>
   )
@@ -1812,20 +1798,20 @@ function EvidenceImages({ ticketId }: { ticketId: string }) {
   if (files === null || files.length === 0) return null
   return (
     <div className="wb-eimgs">
-      <div className="ttl">截图证据</div>
+      <div className="ttl">Screenshot evidence</div>
       <div className="wb-eimgs-grid">
         {files.map((f, i) => (
           <figure key={f} className="wb-eimgs-item" role="button" tabIndex={0}
-            aria-label={`放大查看 ${f}`}
+            aria-label={`Zoom in ${f}`}
             onClick={() => setOpen(i)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(i) } }}>
             {broken[f]
-              ? <div className="wb-eimgs-miss">截图加载失败：{f}</div>
+              ? <div className="wb-eimgs-miss">Screenshot failed to load: {f}</div>
               : (
                   <img
                     className="wb-eimgs-img"
                     loading="lazy"
-                    alt={`截图证据 ${f}`}
+                    alt={`Screenshot evidence ${f}`}
                     title={f}
                     src={evidenceImgSrc(ticketId, f)}
                     onError={() => setBroken(b => ({ ...b, [f]: true }))}
@@ -1862,7 +1848,7 @@ function AgentLivePanel({ ticketId }: { ticketId: string }) {
         const r = await apiGet(`${API}/tickets/${encodeURIComponent(ticketId)}/agent-live?n=30`)
         if (dead) return
         if (r?.ok === true) { setData(r.result as AgentLiveResult); setErr('') }
-        else setErr(String(r?.error ?? '读取失败'))
+        else setErr(String(r?.error ?? 'read failed'))
       } catch (e) {
         if (!dead) setErr(String(e instanceof Error ? e.message : e))
       }
@@ -1875,24 +1861,24 @@ function AgentLivePanel({ ticketId }: { ticketId: string }) {
   return (
     <div className="wb-live">
       <div className="wb-live-head" onClick={() => setOpen(o => !o)}>
-        <span className="wb-live-title">{open ? '▾' : '▸'} 实时动态</span>
+        <span className="wb-live-title">{open ? '▾' : '▸'} Live activity</span>
         {open && data?.exists === true && (
           <span className="wb-live-meta">
             最近 {data.events.length} 条 · 会话 {data.sizeKb ?? 0}KB · 更新于 {fmtTs(data.mtime)} · 每 8s 自动刷新
           </span>
         )}
-        {!open && <span className="wb-live-meta">agent 最近动作流（展开后每 8s 自动刷新）</span>}
+        {!open && <span className="wb-live-meta">Recent agent event stream (auto-refresh every 8s when expanded)</span>}
       </div>
       {open && (
         <div className="wb-live-body">
-          {err !== '' && <div className="wb-err">实时动态读取失败：{err}</div>}
-          {err === '' && data === undefined && <div className="wb-empty">加载中…</div>}
+          {err !== '' && <div className="wb-err">Live activity read failed: {err}</div>}
+          {err === '' && data === undefined && <div className="wb-empty">Loading…</div>}
           {err === '' && data !== undefined && !data.exists && (
-            <div className="wb-empty">{data.reason ?? '暂无会话数据'}</div>
+            <div className="wb-empty">{data.reason ?? 'No session data yet'}</div>
           )}
           {err === '' && data !== undefined && data.exists && (
             <>
-              {data.events.length === 0 && <div className="wb-empty">{data.reason ?? '暂无可展示事件'}</div>}
+              {data.events.length === 0 && <div className="wb-empty">{data.reason ?? 'No events to show'}</div>}
               {[...data.events].reverse().map((ev, i) => (
                 <div className="wb-live-row" key={`${ev.ts}-${i}`}>
                   <span className="wb-live-ts">{fmtTs(ev.ts)}</span>
@@ -1903,9 +1889,9 @@ function AgentLivePanel({ ticketId }: { ticketId: string }) {
               {/* t260922-02 零静默降级：词表外记录类型（疑似更新代 dsh）显式点名——
                   内容可能缺失，绝不静默空白。健康双代会话恒空（超集覆盖两代全型）。 */}
               {data.uncoveredTypes !== undefined && data.uncoveredTypes.length > 0 && (
-                <div className="wb-al-trunc">⚠ 会话含本前端未覆盖的记录类型：{data.uncoveredTypes.join('、')}（内容可能缺失）。</div>
+                <div className="wb-al-trunc">⚠ Session contains record types this UI does not render: {data.uncoveredTypes.join('; ')} (content may be missing).</div>
               )}
-              {data.truncated && <div className="wb-al-trunc">只显示最近 30 条（完整见泳道会话文件）。</div>}
+              {data.truncated && <div className="wb-al-trunc">Showing latest 30 entries only (full log in the lane session file).</div>}
             </>
           )}
         </div>
@@ -1932,10 +1918,10 @@ function D2Problems({ detail }: { detail: TicketDetail }) {
   if (rows.length === 0 && lastBlocked?.reason) {
     rows.push(<div className="row" key="why">{lastBlocked.reason}</div>)
   }
-  if (rows.length === 0) rows.push(<div className="row" key="w">卡在 {detail.stage_name || detail.stage}，原因未落档</div>)
+  if (rows.length === 0) rows.push(<div className="row" key="w">Stuck at {detail.stage_name || detail.stage}; reason not recorded</div>)
   return (
     <div className="wb-d2-problems">
-      <div className="ttl">⛔ 有问题，需要处置</div>
+      <div className="ttl">⛔ Problems need attention</div>
       {rows}
     </div>
   )
@@ -1993,7 +1979,7 @@ function agentSegmentCount(detail: TicketDetail, wf?: Wf): number {
 function stageUsageTitle(s: UsageSum & { models: Record<string, UsageSum> }): string {
   const parts = [`in ${s.input} / out ${s.output} / cacheRead ${s.cacheRead}`]
   const names = Object.keys(s.models)
-  if (names.length > 0) parts.push(`模型：${names.join('、')}`)
+  if (names.length > 0) parts.push(`Models: ${names.join(', ')}`)
   return parts.join(' · ')
 }
 
@@ -2021,7 +2007,7 @@ function useAgentUsage(ticketId: string, enabled: boolean): AgentUsageResult | u
 function UsageSummaryLine({ detail, wf, usage }: { detail: TicketDetail; wf?: Wf; usage: AgentUsageResult | undefined }) {
   if (usage === undefined) {
     if (detail.status === 'closed') return null // 历史已合并单：泳道已清，连「—」都可省
-    return <span className="wb-usage" title="token 消耗加载中…">tokens …</span>
+    return <span className="wb-usage" title="loading token usage…">tokens …</span>
   }
   if (!usage.exists) {
     // 历史已合并工单：泳道清理后无会话文件，只有图标没有数字（验收 5，用户拍板不固化）
@@ -2036,7 +2022,7 @@ function UsageSummaryLine({ detail, wf, usage }: { detail: TicketDetail; wf?: Wf
       )
     }
     return (
-      <span className="wb-usage" data-s="none" title={usage.reason ?? '无会话数据'}>
+      <span className="wb-usage" data-s="none" title={usage.reason ?? 'no session data'}>
         tokens —
       </span>
     )
@@ -2046,19 +2032,19 @@ function UsageSummaryLine({ detail, wf, usage }: { detail: TicketDetail; wf?: Wf
   const suspectHint = usageSuspectHint(usage)
   // t260922-02 零静默降级：词表外记录类型（疑似更新代 dsh）与 suspect 同款独立浮出
   const uncoveredHint = usage.uncovered === true
-    ? (usage.uncoveredDetail ?? '会话含本前端未覆盖的记录类型（内容可能缺失）')
+    ? (usage.uncoveredDetail ?? 'session contains record types this UI does not render (content may be missing)')
     : null
   const title = [
-    `agent 段数 ${segs}`,
+    `agent stages ${segs}`,
     `in ${usage.total.input} / out ${usage.total.output} / cacheRead ${usage.total.cacheRead}`,
-    names !== '' ? `模型：${names}` : `模型：${usage.models[0]?.model ?? '—'}（单模型不显示模型名）`,
-    `会话文件 ${usage.files} 份（多角色加总）`,
+    names !== '' ? `Models: ${names}` : `Model: ${usage.models[0]?.model ?? '—'} (single model)`,
+    `session files ${usage.files} (all roles)`,
     suspectHint !== null ? (usage.suspectDetail ?? suspectHint) : '',
     uncoveredHint ?? '',
   ].filter(Boolean).join(' · ')
   return (
     <span className="wb-usage" title={title}>
-      🤖 {segs} 段 · {usageSum(usage.total)}{names !== '' ? ` · ${names}` : ''}
+      🤖 {segs} stages · {usageSum(usage.total)}{names !== '' ? ` · ${names}` : ''}
       {suspectHint !== null && (
         <span style={{color: 'var(--dsw-derive-danger,#cf222e)'}}
               title={usage.suspectDetail ?? suspectHint}> · ⚠</span>
@@ -2087,72 +2073,7 @@ function StageUsageInline({ stageId, usage }: { stageId: string; usage: AgentUsa
   )
 }
 
-/** 快照要点（t260905-07）：ticket show snapshot 直读的四块观测（阶段时间线/最近
- *  交接/门与签字记录/工作流快照要点），纯裁剪零派生语义（snapshotDigest 纯函数层
- *  承担畸形防御与 KI-019 呈现口径——排序归位+缺 at 沉底标注）。时间线只显尾 20 条
- *  （行卡场景无此诉求，详情下钻要「最近的来龙去脉」），交接尾 5 条，门与签字合并
- *  记录表按时间降序。各块带 data-block 锚（3199 隔离台场景断言用）。 */
-function D2SnapshotDigest({ detail }: { detail: TicketDetail }) {
-  const digest = useMemo(() => snapshotDigest(detail), [detail])
-  const { workflow } = digest
-  return (
-    <details className="wb-d2-snapshot">
-      <summary>快照要点（时间线 · 最近交接 · 门与签字 · 工作流快照）</summary>
-      <div>
-        <div className="wb-dsnap-block" data-wb-digest="workflow">
-          <h4>工作流快照要点</h4>
-          <div className="wb-dsnap-row">
-            <span className="st">工作流</span><span>{workflow.id || '—'}</span>
-            <span className="st">当前段</span><span>{workflow.stage || '—'}{workflow.stageState ? ` · ${STATE_LABEL[workflow.stageState] ?? workflow.stageState}` : ''}</span>
-            <span className="st">状态</span><span>{workflow.status || '—'}</span>
-            <span className="st">修订</span><span>{workflow.revisions === null ? '—' : `${workflow.revisions} 轮`}</span>
-            {workflow.worktree && <><span className="st">工作区</span><span data-wb-digest-worktree>{workflow.worktree}</span></>}
-          </div>
-        </div>
-        <div className="wb-dsnap-block" data-wb-digest="timeline">
-          <h4>阶段时间线（最近 {digest.timeline.length} 条，按时间正序）</h4>
-          {digest.timeline.length === 0
-            ? <div className="wb-dsnap-empty">无时间线条目</div>
-            : digest.timeline.map((e, i) => (
-              <div className="wb-dsnap-row" key={`${e.stage}-${i}`} data-untime={e.untime}
-                data-wb-tl-at={e.at ?? ''} data-wb-tl-stage={e.stage} data-wb-tl-state={e.state}>
-                <span className="st">{e.stage || '—'}</span>
-                <span>{STATE_LABEL[e.state] ?? e.state}</span>
-                <span className="at">{e.untime ? "时间缺失" : fmtSnapshotTs(e.at)}</span>
-              </div>
-            ))}
-        </div>
-        <div className="wb-dsnap-block" data-wb-digest="handoffs">
-          <h4>最近交接（{digest.handoffs.length} 条）</h4>
-          {digest.handoffs.length === 0
-            ? <div className="wb-dsnap-empty">无交接记录</div>
-            : digest.handoffs.map((h, i) => (
-              <div className="wb-dsnap-row" key={i}>
-                <span>{h.from || '—'} → {h.to || '—'}</span>
-                <span className="at">{h.at === null ? "" : fmtSnapshotTs(h.at)}</span>
-              </div>
-            ))}
-        </div>
-        <div className="wb-dsnap-block" data-wb-digest="signatures">
-          <h4>门与签字记录（{digest.gates.length} 条，最近在前）</h4>
-          {digest.gates.length === 0
-            ? <div className="wb-dsnap-empty">无门/签字记录</div>
-            : digest.gates.map((g, i) => (
-              <div className="wb-dsnap-row" key={`${g.kind}-${g.stage}-${i}`}>
-                <span className="wb-dsnap-chip" data-kind={g.kind}>{g.kind === 'signature' ? '签字' : '门'}</span>
-                <span className="st">{g.stage || '—'}</span>
-                <span>{g.who || '—'} · {g.decision || '—'}</span>
-                {g.note && <span>{g.note}</span>}
-                <span className="at">{g.at === null ? "" : fmtSnapshotTs(g.at)}</span>
-              </div>
-            ))}
-        </div>
-      </div>
-    </details>
-  )
-}
 
-/** 进展主体：一步一张卡（状态图标 + 该步产出摘要一句话 + 可展开 evidence/产物）。 */
 function D2Stages({ detail, wf, usage, durs, nowMs }: {
   detail: TicketDetail
   wf?: Wf
@@ -2178,7 +2099,7 @@ function D2Stages({ detail, wf, usage, durs, nowMs }: {
               <i className="ico">{D2_ICON[vis]}</i>
               <span className="nm">{s.name}</span> <PartsBadges parts={s.parts} />
               <span className="meta">
-                {s.role}{enters > 1 ? ` · 第 ${enters} 次` : ''}{h?.ts ? ` · ${fmtTs(h.ts)}` : ''}
+                {s.role}{enters > 1 ? ` · enter #${enters}` : ''}{h?.ts ? ` · ${fmtTs(h.ts)}` : ''}
               </span>
               {(s.parts ?? []).includes('agent') && <StageUsageInline stageId={s.id} usage={usage} />}
               {durs?.[s.id] && nowMs !== undefined && (
@@ -2196,9 +2117,9 @@ function D2Stages({ detail, wf, usage, durs, nowMs }: {
               <details>
                 <summary>明细（evidence / 产物清单）</summary>
                 {(r.files_changed?.length ?? 0) > 0 && (
-                  <div className="ev">改动文件：{(r.files_changed ?? []).join('、')}</div>)}
+                  <div className="ev">Files changed: {(r.files_changed ?? []).join('; ')}</div>)}
                 {(r.deliverables?.length ?? 0) > 0 && (
-                  <div className="ev">产物：{(r.deliverables ?? []).join('、')}</div>)}
+                  <div className="ev">Deliverables: {(r.deliverables ?? []).join('; ')}</div>)}
                 {r.evidence && <div className="ev">{r.evidence}</div>}
               </details>
             )}
@@ -2267,28 +2188,28 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }: {
     <div className="wb-insp" data-kind="inspection">
       <style>{INSPECTION_FACE_CSS}</style>
       <div className="wb-insp-head" data-testid="inspection-face">
-        <span className="wb-insp-k">巡检</span>
+        <span className="wb-insp-k">Inspection</span>
         <span className="wb-insp-v">{detail.instance_id || '—'}</span>
-        <span className="wb-insp-k">期号</span>
+        <span className="wb-insp-k">Period</span>
         <span className="wb-insp-v">{detail.period || '—'}</span>
-        <span className="wb-insp-k">心跳</span>
+        <span className="wb-insp-k">Heartbeat</span>
         <span className="wb-insp-v" data-heartbeat={detail.heartbeat ? '1' : '0'}>
-          {detail.heartbeat ? '全绿证明期' : '非心跳期'}
+          {detail.heartbeat ? 'green-proof period' : 'non-heartbeat period'}
         </span>
         <span className="wb-insp-sev" data-testid="inspection-findings">
-          <i data-sev="high">高 {c.high}</i>
-          <i data-sev="med">中 {c.med}</i>
-          <i data-sev="low">低 {c.low}</i>
+          <i data-sev="high">H {c.high}</i>
+          <i data-sev="med">M {c.med}</i>
+          <i data-sev="low">L {c.low}</i>
         </span>
       </div>
       {/* 人门「签什么」+ 签字区——行卡「去签字→」的 review 锚点落点（R6） */}
       <div className="wb-insp-gate" data-wb-anchor="review" data-testid="inspection-gate">
-        <div className="ttl">人审门（{detail.gate_id || 'inspection-close'}）——签什么</div>
+        <div className="ttl">Human gate ({detail.gate_id || 'inspection-close'}) — what to sign</div>
         <div className="wb-insp-gate-txt">
           approve=收口（发现转 dev-lane 修复票跟踪）；reject=毙单收口（本期作废留痕）。
           红线：{detail.red_line || '—'}
         </div>
-        {detail.gate_error && <div className="wb-insp-gateerr">⚠ 拒收记录：{detail.gate_error}</div>}
+        {detail.gate_error && <div className="wb-insp-gateerr">⚠ Rejection record: {detail.gate_error}</div>}
         {signed ? (
           <div className="wb-insp-signed" data-testid="inspection-signed">
             已签：{signed.decision}（{signed.who}）{signed.note ? ` · ${signed.note}` : ''}
@@ -2296,23 +2217,23 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }: {
         ) : awaiting ? (
           <div className="wb-insp-signrow">
             <input className="wb-insp-note" value={note} onChange={e => setNote(e.target.value)}
-              placeholder="签字备注（可空）" data-testid="inspection-sign-note" />
+              placeholder="Signature note (optional)" data-testid="inspection-sign-note" />
             <button className="wb-btn wb-btn-green" disabled={opBusy}
               data-testid="inspection-sign-approve"
-              onClick={() => onSign('approve', note)}>✓ approve 收口</button>
+              onClick={() => onSign('approve', note)}>✓ approve (close ticket)</button>
             <button className="wb-btn wb-btn-danger" disabled={opBusy}
               data-testid="inspection-sign-reject"
-              onClick={() => onSign('reject', note)}>✗ reject 毙单</button>
-            <span className="wb-sub">签字人：{operator}</span>
+              onClick={() => onSign('reject', note)}>✗ reject (kill ticket)</button>
+            <span className="wb-sub">Signer: {operator}</span>
           </div>
         ) : (
-          <div className="wb-sub">当前不在人审门（阶段：{detail.stage ?? '—'} · {detail.stage_state}）</div>
+          <div className="wb-sub">Not at a human gate (stage: {detail.stage ?? '—'} · {detail.stage_state})</div>
         )}
       </div>
       <details className="wb-insp-block" open data-testid="inspection-timeline">
         <summary>阶段时间线（{timeline.length} 条）</summary>
         <div>
-          {timeline.length === 0 && <div className="wb-sub">暂无时间线条目</div>}
+          {timeline.length === 0 && <div className="wb-sub">No timeline entries</div>}
           {timeline.map((e, i) => (
             <div className="wb-insp-tl" key={i} data-state={String(e?.state ?? '')}>
               <code>{String(e?.at ?? '—')}</code>
@@ -2326,7 +2247,7 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }: {
       <details className="wb-insp-block" open data-testid="inspection-findings-list">
         <summary>发现清单（{findings.length} 条）</summary>
         <div>
-          {findings.length === 0 && <div className="wb-sub">零发现（心跳证明期）</div>}
+          {findings.length === 0 && <div className="wb-sub">No findings (green-proof period)</div>}
           {findings.map((f, i) => (
             <div className="wb-insp-f" key={i}>
               <span className="wb-insp-sev-tag" data-sev={String(f?.severity ?? '')}>{String(f?.severity ?? '?')}</span>
@@ -2339,10 +2260,10 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }: {
       </details>
       <div className="wb-insp-block">
         {(detail.report_path ?? '') !== '' && (
-          <div className="wb-insp-rep">报告：<code>{detail.report_path}</code></div>
+          <div className="wb-insp-rep">Report: <code>{detail.report_path}</code></div>
         )}
         {(detail.suggested_fix_tickets?.length ?? 0) > 0 && (
-          <div className="wb-sub">建议修复票 {detail.suggested_fix_tickets!.length} 张（dev-lane，引用本票号溯源）</div>
+          <div className="wb-sub">Suggested fix tickets: {detail.suggested_fix_tickets!.length} (dev-lane, referencing this ticket)</div>
         )}
       </div>
     </div>
@@ -2480,14 +2401,14 @@ interface ReviewFile { path: string; rounds: ReviewRound[] }
 interface BlockReview { decision?: 'approve' | 'reject'; comment?: string; open?: boolean }
 
 const TYPE_LABEL: Record<string, string> = {
-  frontmatter: 'frontmatter', heading: '标题', paragraph: '段落', 'list-item': '列表项',
-  'table-head': '表头', 'table-row': '表格行', code: '代码块', quote: '引用', image: '图片', hr: '分隔线',
-  doc: '文档', data: '数据', file: '文件',
+  frontmatter: 'frontmatter', heading: 'Heading', paragraph: 'Paragraph', 'list-item': 'List item',
+  'table-head': 'Table head', 'table-row': 'Table row', code: 'Code block', quote: 'Quote', image: 'Image', hr: 'Divider',
+  doc: 'Doc', data: 'Data', file: 'File',
 }
-const STATUS_LABEL: Record<string, string> = { added: '新增', removed: '删除', modified: '修改', unchanged: '未变' }
-const KIND_LABEL: Record<string, string> = { doc: '文档', code: '代码', data: '数据' }
+const STATUS_LABEL: Record<string, string> = { added: 'Added', removed: 'Removed', modified: 'Modified', unchanged: 'Unchanged' }
+const KIND_LABEL: Record<string, string> = { doc: 'Doc', code: 'Code', data: 'Data' }
 const CONCLUDE_LABEL: Record<string, string> = {
-  approved: 'approved（通过）', 'changes-requested': 'changes-requested（要求修改）', 'in-progress': 'in-progress（审阅中）',
+  approved: 'approved', 'changes-requested': 'changes-requested', 'in-progress': 'in-progress',
 }
 
 /** 审批意见的稳定 key：doc 块=「路径#块key」（块 key 本身含内容哈希）；
@@ -2502,28 +2423,28 @@ function buildReworkInstruction(ticketId: string, round: ReviewRound, roundNo: n
   const rejected = round.blocks.filter(b => b.decision === 'reject')
   const commented = round.blocks.filter(b => b.decision !== 'reject' && b.comment !== undefined && b.comment !== '')
   const lines: string[] = [
-    '## 返工指令（PR 式审批 review）',
+    '## Rework instruction (PR-style review)',
     '',
-    `- 工单：${ticketId}`,
-    `- base：${round.base || '（无）'}`,
-    `- 整轮结论：${round.conclude}`,
-    `- 轮次：第 ${roundNo} 轮 · ${round.reviewer} · ${fmtTs(round.ts)}`,
-    `- 落盘：server/reviews/${ticketId}.json`,
+    `- Ticket: ${ticketId}`,
+    `- base: ${round.base || '(none)'}`,
+    `- Round conclusion: ${round.conclude}`,
+    `- Round #${roundNo} · ${round.reviewer} · ${fmtTs(round.ts)}`,
+    `- Written to: server/reviews/${ticketId}.json`,
     '',
   ]
   if (rejected.length === 0 && commented.length === 0) {
-    lines.push('无驳回项。')
+    lines.push('No rejected blocks.')
   } else {
     if (rejected.length > 0) {
-      lines.push(`### 驳回项清单（${rejected.length}）`, '')
+      lines.push(`### Rejected blocks (${rejected.length})`, '')
       rejected.forEach((b, i) => {
         lines.push(`${i + 1}. [${TYPE_LABEL[b.type] ?? b.type} / ${STATUS_LABEL[b.status] ?? b.status}] ${b.summary}`)
-        if (b.comment !== undefined && b.comment !== '') lines.push(`   - 意见：${b.comment}`)
+        if (b.comment !== undefined && b.comment !== '') lines.push(`   - Comment: ${b.comment}`)
         lines.push(`   - key：\`${b.block_key}\``)
       })
     }
     if (commented.length > 0) {
-      lines.push('', `### 其他意见（${commented.length}）`, '')
+      lines.push('', `### Other comments (${commented.length})`, '')
       commented.forEach((b, i) => {
         lines.push(`${i + 1}. [${TYPE_LABEL[b.type] ?? b.type}] ${b.summary} —— ${b.comment ?? ''}`)
       })
@@ -2540,7 +2461,7 @@ function buildApproveSummary(ticketId: string, file: ReviewFile): string {
   const a = latest.blocks.filter(b => b.decision === 'approve').length
   const r = latest.blocks.filter(b => b.decision === 'reject').length
   const c = latest.blocks.filter(b => b.comment !== undefined && b.comment !== '').length
-  return `审批意见第${n}轮：conclude=${latest.conclude}，块 approve ${a}/reject ${r}/带注释 ${c}（落盘 server/reviews/${ticketId}.json，reviewer ${latest.reviewer}）`
+  return `Review round ${n}: conclude=${latest.conclude}, blocks approve ${a}/reject ${r}/commented ${c} (written to server/reviews/${ticketId}.json, reviewer ${latest.reviewer})`
 }
 
 /** 渲染态 block diff 主视图（制式照 knowledge：未变渲染新文本；新增绿；删除红；修改上下红/绿；表格行单元格级对齐）。 */
@@ -2583,11 +2504,11 @@ function DiffBlockBody({ b }: { b: DiffBlock }) {
   return (
     <>
       <div className="wb-d-md wb-d-md-old wb-md">
-        <div className="wb-d-md-tag">旧</div>
+        <div className="wb-d-md-tag">Old</div>
         <div dangerouslySetInnerHTML={{ __html: renderMarkdown(b.oldText ?? '') }} />
       </div>
       <div className="wb-d-md wb-d-md-new wb-md">
-        <div className="wb-d-md-tag">新</div>
+        <div className="wb-d-md-tag">New</div>
         <div dangerouslySetInnerHTML={{ __html: renderMarkdown(b.newText ?? '') }} />
       </div>
     </>
@@ -2612,7 +2533,7 @@ function UnifiedDiffView({ text }: { text: string }) {
 
 /** 数据前后值对账表。 */
 function ReconTable({ recon }: { recon: ReconEntry[] }) {
-  if (recon.length === 0) return <div className="wb-empty">结构无差异（仅格式/键序变化或无变化）。</div>
+  if (recon.length === 0) return <div className="wb-empty">No structural diff (formatting/key order only, or no change).</div>
   return (
     <table className="wb-d-recon">
       <thead><tr><th>JSON 路径</th><th>旧值</th><th>新值</th><th>变化</th></tr></thead>
@@ -2622,7 +2543,7 @@ function ReconTable({ recon }: { recon: ReconEntry[] }) {
             <td data-k="path">{e.path}</td>
             <td className={e.kind !== 'added' ? 'wb-d-old' : ''}>{e.before ?? '—'}</td>
             <td className={e.kind !== 'removed' ? 'wb-d-new' : ''}>{e.after ?? '—'}</td>
-            <td>{e.kind === 'added' ? '新增' : e.kind === 'removed' ? '删除' : '改'}</td>
+            <td>{e.kind === 'added' ? 'Added' : e.kind === 'removed' ? 'Removed' : 'Changed'}</td>
           </tr>
         ))}
       </tbody>
@@ -2639,19 +2560,19 @@ function ReviewActions({ rv, onPatch }: {
   return (
     <div className="wb-d-actions">
       <button className={'wb-d-btn wb-d-btn-ap' + (decision === 'approve' ? ' on' : '')}
-        onClick={() => onPatch({ decision: decision === 'approve' ? undefined : 'approve' })}>通过</button>
+        onClick={() => onPatch({ decision: decision === 'approve' ? undefined : 'approve' })}>Approve</button>
       <button className={'wb-d-btn wb-d-btn-rj' + (decision === 'reject' ? ' on' : '')}
-        onClick={() => onPatch({ decision: decision === 'reject' ? undefined : 'reject', open: decision === 'reject' ? rv?.open : true })}>驳回</button>
+        onClick={() => onPatch({ decision: decision === 'reject' ? undefined : 'reject', open: decision === 'reject' ? rv?.open : true })}>Reject</button>
       <button className="wb-d-btn" onClick={() => onPatch({ open: !(rv?.open ?? false) })}>
-        {rv?.open ? '收起注释' : (rv?.comment ? '注释 ✎' : '注释')}
+        {rv?.open ? 'Collapse comments' : (rv?.comment ? 'Comment ✎' : 'Comment')}
       </button>
       {decision !== undefined && (
         <span className="wb-d-badge" data-s={decision === 'approve' ? 'added' : 'removed'}>
-          {decision === 'approve' ? '已通过' : '已驳回'}
+          {decision === 'approve' ? 'Approved' : 'Rejected'}
         </span>
       )}
       {(rv?.open ?? false) && (
-        <textarea className="wb-d-cmt" placeholder="审批意见（驳回块的意见会进返工指令）"
+        <textarea className="wb-d-cmt" placeholder="Review comments (rejected-block comments become the rework instruction)"
           value={rv?.comment ?? ''} onChange={e => onPatch({ comment: e.target.value })} />
       )}
     </div>
@@ -2703,7 +2624,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
       setLoadErr('')
       try {
         const r = await apiGet(`${API}/tickets/${encodeURIComponent(detail.id)}/diff`)
-        if (r?.ok !== true) throw new Error(r?.error ?? 'diff 读取失败')
+        if (r?.ok !== true) throw new Error(r?.error ?? 'diff read failed')
         if (dead) return
         const d = r.result as TicketDiffResult
         setDiff(d)
@@ -2774,13 +2695,13 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
       const r = await apiPost(`${API}/tickets/${encodeURIComponent(detail.id)}/review`, {
         base: diff.base, conclude, reviewer: operator, blocks,
       })
-      if (r?.ok !== true) throw new Error(r?.error ?? '保存失败')
+      if (r?.ok !== true) throw new Error(r?.error ?? 'save failed')
       const round = r.result?.round as ReviewRound
       const rounds = Number(r.result?.rounds ?? 0)
       setSaveState({ runId: String(r.run_id ?? '') })
       setReviewFile(prev => ({ path: detail.id, rounds: [...(prev?.rounds ?? []), round] }))
       setReworkMd(buildReworkInstruction(detail.id, round, rounds))
-      onMsg(`审批意见已落盘（第 ${rounds} 轮，run_id ${String(r.run_id ?? '')}）`)
+      onMsg(`Review saved (round ${rounds}, run_id ${String(r.run_id ?? '')})`)
     } catch (err) {
       setSaveState({ error: String(err instanceof Error ? err.message : err) })
     }
@@ -2801,8 +2722,8 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
     }
   }
 
-  if (loading) return <div className="wb-empty">变更集计算中（git diff）…</div>
-  if (loadErr !== '') return <div className="wb-err">变更加载失败：{loadErr}</div>
+  if (loading) return <div className="wb-empty">Computing changeset (git diff)…</div>
+  if (loadErr !== '') return <div className="wb-err">Changeset load failed: {loadErr}</div>
   if (diff === undefined) return null
 
   const latestRound = reviewFile !== undefined && reviewFile.rounds.length > 0
@@ -2817,9 +2738,9 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
   // 构建产物（lib/ bundle）与真源码分开：产物折叠成组，真变更一眼可见
   const realFiles = diff.files.filter(f => !isGenArtifact(f.path))
   const genFiles = diff.files.filter(f => isGenArtifact(f.path))
-  const sourceLabel = diff.source === 'worktree' ? '泳道 worktree vs base'
-    : diff.source === 'merged' ? '已合入 main（merge commit 回放）'
-    : diff.source === 'main' ? '主树 write_set + git log' : '无来源'
+  const sourceLabel = diff.source === 'worktree' ? 'lane worktree vs base'
+    : diff.source === 'merged' ? 'merged into main (merge commit replay)'
+    : diff.source === 'main' ? 'main tree write_set + git log' : 'no source'
 
   // 单文件渲染体（t260911-01 抽取：单仓列表与多仓分组共用同一套文件级 UI/意见通路）。
   const renderFile = (f: FileDiffEntry) => (
@@ -2827,7 +2748,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
       <div className="wb-d-fhead">
         <span className="wb-d-badge" data-s={f.status}>{STATUS_LABEL[f.status]}</span>
         <span className="wb-d-type">{KIND_LABEL[f.kind]}</span>
-        <button className="wb-d-fpath wb-d-flink" title="以本票时刻的版本只读打开"
+        <button className="wb-d-fpath wb-d-flink" title="Open read-only as of this ticket"
           onClick={() => onOpenFile(f.path, 'settle')}>{f.path}</button>
         {f.kind === 'code' && f.unified !== undefined && (() => {
           const st = unifiedStats(f.unified)
@@ -2854,14 +2775,14 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
         })}
       {f.kind === 'code' && (
         <>
-          {f.unifiedTruncated === true && <div className="wb-d-trunc">diff 超长已截断（完整见泳道 git diff）。</div>}
-          <UnifiedDiffView text={f.unified ?? '（无 unified diff）'} />
+          {f.unifiedTruncated === true && <div className="wb-d-trunc">Diff truncated (full diff in lane git).</div>}
+          <UnifiedDiffView text={f.unified ?? '(no unified diff)'} />
           <ReviewActions rv={reviews[entryKeyOf(f)]} onPatch={p => patchReview(entryKeyOf(f), p)} />
         </>
       )}
       {f.kind === 'data' && (
         <>
-          {f.reconTruncated === true && <div className="wb-d-trunc">对账条目超封顶已截断。</div>}
+          {f.reconTruncated === true && <div className="wb-d-trunc">Reconciliation entries truncated (over cap).</div>}
           <ReconTable recon={f.recon ?? []} />
           <ReviewActions rv={reviews[entryKeyOf(f)]} onPatch={p => patchReview(entryKeyOf(f), p)} />
         </>
@@ -2876,10 +2797,10 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
     return (
       <div className="wb-d-repo" key={r.repo || '(root)'}>
         <div className="wb-d-repohead">
-          <span className="wb-d-fpath">{r.repo === '' ? '根仓（root）' : r.repo}</span>
+          <span className="wb-d-fpath">{r.repo === '' ? 'root repo' : r.repo}</span>
           <span className="wb-sub">{r.name} · {r.branch}</span>
-          <span>base：<code>{r.base === '' ? '（无）' : r.base.slice(0, 12)}</code></span>
-          <span>文件 {r.files.length}{r.filesTruncated ? '（超封顶截断）' : ''}</span>
+          <span>base: <code>{r.base === '' ? '(none)' : r.base.slice(0, 12)}</code></span>
+          <span>Files {r.files.length}{r.filesTruncated ? ' (truncated)' : ''}</span>
           {r.emptyReason !== undefined && <span className="wb-sub">{r.emptyReason}</span>}
           {r.excludedCount !== undefined && r.excludedCount > 0 && (
             <span style={{color: 'var(--dsw-derive-muted,#57606a)'}}>
@@ -2895,11 +2816,11 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
   return (
     <>
       <div className="wb-section">
-        <div className="wb-section-title">变更集（{sourceLabel}）</div>
+        <div className="wb-section-title">Changeset ({sourceLabel})</div>
         <div className="wb-d-sum">
-          <span>{diff.source === 'merged' ? 'merge' : 'base'}：<code>{diff.base === '' ? '（无）' : diff.base.slice(0, 12)}</code></span>
+          <span>{diff.source === 'merged' ? 'merge' : 'base'}: <code>{diff.base === '' ? '(none)' : diff.base.slice(0, 12)}</code></span>
           {diff.worktree !== undefined && <span>泳道：{shortSlug(diff.worktree)}</span>}
-          <span>文件 {diff.files.length}{diff.filesTruncated ? '（超封顶截断）' : ''}（文档 {summary.doc} / 代码 {summary.code} / 数据 {summary.data}）</span>
+          <span>Files {diff.files.length}{diff.filesTruncated ? ' (truncated)' : ''} (docs {summary.doc} / code {summary.code} / data {summary.data})</span>
           {diff.excludedEngineFiles !== undefined && diff.excludedEngineFiles > 0 && (
             <span style={{color: 'var(--dsw-derive-muted,#57606a)'}}>
               已排除 {diff.excludedEngineFiles} 个引擎过程物
@@ -2916,7 +2837,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
         {diff.emptyReason !== undefined && <div className="wb-empty">{diff.emptyReason}</div>}
         {diff.files.length > 0 && (
           <label style={{ fontSize: 12, color: 'var(--dsw-derive-muted,#57606a)' }}>
-            <input type="checkbox" checked={showUnchanged} onChange={e => setShowUnchanged(e.target.checked)} /> 显示文档未变块
+            <input type="checkbox" checked={showUnchanged} onChange={e => setShowUnchanged(e.target.checked)} /> Show unchanged doc blocks
           </label>
         )}
       </div>
@@ -2944,7 +2865,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
 
       {diff.files.length > 0 && (
         <div className="wb-section">
-          <div className="wb-section-title">审批意见（落盘 server/reviews/{detail.id}.json）</div>
+          <div className="wb-section-title">Review (written to server/reviews/{detail.id}.json)</div>
           <div className="wb-ops">
             <select className="wb-d-conclude" value={conclude}
               onChange={e => setConclude(e.target.value as typeof conclude)}>
@@ -2953,19 +2874,19 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
             </select>
             <button className="wb-btn wb-btn-blue" disabled={saveState.saving === true}
               onClick={() => { void saveReview() }}>
-              {saveState.saving === true ? '保存中…' : '保存审批意见（落盘一轮）'}
+              {saveState.saving === true ? 'Saving…' : 'Save review (one round)'}
             </button>
             <button className="wb-btn"
               disabled={reviewFile === undefined || reviewFile.rounds.length === 0}
-              title="reject 意见即返工指令，可复制贴进工单/打回理由"
+              title="reject comments become the rework instruction; copy into the ticket/rework reason"
               onClick={() => {
                 const file = reviewFile
                 if (file === undefined || file.rounds.length === 0) return
                 void copyText(buildReworkInstruction(detail.id, file.rounds[file.rounds.length - 1], file.rounds.length))
               }}>
-              {copied ? '已复制 ✓' : '复制返工指令'}
+              {copied ? 'Copied ✓' : 'Copy rework instruction'}
             </button>
-            {saveState.runId !== undefined && <span className="wb-copied">已落盘 ✓ run_id {saveState.runId}</span>}
+            {saveState.runId !== undefined && <span className="wb-copied">saved ✓ run_id {saveState.runId}</span>}
             {saveState.error !== undefined && <span className="wb-err">{saveState.error}</span>}
           </div>
 
@@ -2974,7 +2895,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
               <div style={{ fontWeight: 600, marginBottom: 4 }}>已过期意见（{expired.length}）——块/文件内容已变，key 失效，不回填：</div>
               {expired.map((eb, i) => (
                 <div key={i} className="wb-d-expired-item">
-                  <span className="wb-d-badge" data-s="expired">已过期</span>{' '}
+                  <span className="wb-d-badge" data-s="expired">Expired</span>{' '}
                   [{TYPE_LABEL[eb.type] ?? eb.type}] {eb.summary}
                   {eb.comment !== undefined && eb.comment !== '' && ` —— ${eb.comment}`}
                 </div>
@@ -2984,11 +2905,11 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
 
           {reworkMd !== undefined && (
             <div className="wb-d-rework">
-              <div className="wb-sub">返工指令（随本轮保存生成；reject 块清单，可贴工单）</div>
+              <div className="wb-sub">Rework instruction (generated on save; rejected-block list, paste into ticket)</div>
               <pre>{reworkMd}</pre>
               <div className="wb-ops">
-                <button className="wb-btn" onClick={() => { void copyText(reworkMd) }}>{copied ? '已复制 ✓' : '复制'}</button>
-                <button className="wb-btn" onClick={() => setReworkMd(undefined)}>收起</button>
+                <button className="wb-btn" onClick={() => { void copyText(reworkMd) }}>{copied ? 'Copied ✓' : 'Copy'}</button>
+                <button className="wb-btn" onClick={() => setReworkMd(undefined)}>Collapse</button>
               </div>
             </div>
           )}
@@ -3049,7 +2970,7 @@ function AgentLogsTab({ detail, wf, onMsg }: { detail: TicketDetail; wf?: Wf; on
       setLoadErr('')
       try {
         const r = await apiGet(`${API}/tickets/${encodeURIComponent(detail.id)}/agent-logs`)
-        if (r?.ok !== true) throw new Error(r?.error ?? 'agent 日志读取失败')
+        if (r?.ok !== true) throw new Error(r?.error ?? 'agent log read failed')
         if (dead) return
         setLogs(r.result as AgentLogsResult)
         if (r.result?.reason !== undefined && r.result?.reason !== '') onMsg(String(r.result.reason))
@@ -3062,8 +2983,8 @@ function AgentLogsTab({ detail, wf, onMsg }: { detail: TicketDetail; wf?: Wf; on
     return () => { dead = true }
   }, [detail.id])
 
-  if (loadErr !== '') return <div className="wb-err">agent 日志加载失败：{loadErr}</div>
-  if (loading) return <div className="wb-empty">agent 日志加载中…</div>
+  if (loadErr !== '') return <div className="wb-err">Agent log load failed: {loadErr}</div>
+  if (loading) return <div className="wb-empty">Loading agent logs…</div>
   if (logs === undefined) return null
 
   // 分组：stage → 按 gen 的尝试列表（log 与 result 配对成一次尝试）
@@ -3095,34 +3016,34 @@ function AgentLogsTab({ detail, wf, onMsg }: { detail: TicketDetail; wf?: Wf; on
   return (
     <>
       <div className="wb-section">
-        <div className="wb-section-title">agent 日志（.suyou/）</div>
+        <div className="wb-section-title">Agent logs (.suyou/)</div>
         <div className="wb-al-meta">
           <span className="wb-meta-k">{logs.base}</span>
           {logs.agentAlive && logs.sessionKb > 0 ? (
-            <span style={{color: 'var(--dsw-derive-accent,#0969da)'}}>agent 运行中 · 已读 {logs.sessionKb}KB{logs.lastActivity ? ' · ' + logs.lastActivity : ''}</span>
+            <span style={{color: 'var(--dsw-derive-accent,#0969da)'}}>agent running · read {logs.sessionKb}KB{logs.lastActivity ? ' · ' + logs.lastActivity : ''}</span>
           ) : null}
           {logs.sessionNote ? (
             // t260917-05「可辨」：会话档不可解析 → 可见警示而非「最近操作」静默留空
             <span style={{color: 'var(--dsw-derive-danger,#cf222e)'}}>⚠ {logs.sessionNote}</span>
           ) : null}
           {logs.exists ? (
-            <span>{logs.files.length} 个文件{logs.truncated ? `（超出封顶，截断显示）` : ''}</span>
+            <span>{logs.files.length} files{logs.truncated ? ` (over cap, truncated)` : ''}</span>
           ) : (
-            <span>{logs.reason ?? '目录不存在'}</span>
+            <span>{logs.reason ?? 'directory missing'}</span>
           )}
           <button className="wb-btn" disabled={loading}
             onClick={() => { void (async () => {
               setLoading(true)
               try {
                 const r = await apiGet(`${API}/tickets/${encodeURIComponent(detail.id)}/agent-logs`)
-                if (r?.ok === true) { setLogs(r.result as AgentLogsResult); onMsg('已刷新') }
+                if (r?.ok === true) { setLogs(r.result as AgentLogsResult); onMsg('Refreshed') }
               } finally { setLoading(false) }
             })() }}>
             刷 新
           </button>
         </div>
         {logs.files.length === 0 && (
-          <div className="wb-empty">暂无 agent 日志/段结果文件（{logs.reason ?? '目录为空'}）。</div>
+          <div className="wb-empty">No agent log / stage result files ({logs.reason ?? 'directory empty'}).</div>
         )}
       </div>
 
@@ -3135,12 +3056,12 @@ function AgentLogsTab({ detail, wf, onMsg }: { detail: TicketDetail; wf?: Wf; on
             <div className="wb-al-shead">
               <i className="ico" style={{ color: D2_COLOR[vis] }}>{D2_ICON[vis]}</i>
               <span className="nm">{stageName(stageId)}</span>
-              <span className="meta">{attempts.length} 次尝试{lastMtime > 0 ? ` · 最近 ${fmtTs(lastMtime)}` : ''}</span>
+              <span className="meta">{attempts.length} attempts{lastMtime > 0 ? ` · latest ${fmtTs(lastMtime)}` : ''}</span>
             </div>
             {attempts.map(a => {
               const r = (a.result !== undefined && typeof a.result.result === 'object' && a.result.result !== null)
                 ? a.result.result as Record<string, unknown> : undefined
-              const status = r !== undefined ? String(r.status ?? 'ok') : '无结算'
+              const status = r !== undefined ? String(r.status ?? 'ok') : 'no result'
               const summary = typeof r?.summary === 'string' ? r.summary : ''
               const pkey = `${stageId}:${a.gen}`
               return (
@@ -3175,7 +3096,7 @@ function AgentLogsTab({ detail, wf, onMsg }: { detail: TicketDetail; wf?: Wf; on
                           <div style={{marginTop: 6}}>
                             <span className="wb-d-btn"
                               onClick={() => setPromptOpen(o => ({ ...o, [pkey]: !o[pkey] }))}>
-                              {promptOpen[pkey] ? '收起注入的 prompt ▲' : '查看注入的 prompt ▼'}
+                              {promptOpen[pkey] ? 'Hide injected prompt ▲' : 'View injected prompt ▼'}
                             </span>
                             {promptOpen[pkey] && (
                               <pre className="wb-al-pre" style={{maxHeight: 360, marginTop: 4}}>{r.prompt}</pre>
@@ -3189,15 +3110,15 @@ function AgentLogsTab({ detail, wf, onMsg }: { detail: TicketDetail; wf?: Wf; on
                     )}
                     {a.log !== undefined && a.log.content !== undefined && a.log.content.trim() !== '' && (
                       <>
-                        <div className="wb-al-result-key" style={{padding: '6px 12px 0'}}>agent 输出尾部（{a.log.name}）</div>
+                        <div className="wb-al-result-key" style={{padding: '6px 12px 0'}}>Agent output tail ({a.log.name})</div>
                         <pre className="wb-al-pre">{a.log.content}</pre>
                         {a.log.contentTruncated === true && (
-                          <div className="wb-al-trunc">内容过长已截断（完整见 泳道 .suyou/{a.log.name}）。</div>
+                          <div className="wb-al-trunc">Content truncated (full content in lane .suyou/{a.log.name}).</div>
                         )}
                       </>
                     )}
                     {a.result === undefined && a.log === undefined && (
-                      <div className="wb-empty">内容读取失败。</div>
+                      <div className="wb-empty">Failed to read content.</div>
                     )}
                   </div>
                 </details>
@@ -3218,29 +3139,30 @@ function ScanReportSection({ scan, onOpen }: {
   const rep = scan?.report
   return (
     <div className="wb-section">
-      <div className="wb-section-title">巡 检 报 告</div>
+      <div className="wb-section-title">Inspection Report</div>
       <div className="wb-scan-meta">
         {rep !== null && rep !== undefined && (
           <>
-            <span>生成于 {rep.generated_at}</span>
-            <span>报告文件 {scan?.file}</span>
-            <span>全量 {rep.total_tickets} 张 · 待决 {rep.pending_decision_count} 张</span>
-            <span>卡死阈值 {rep.stuck_threshold_hours}h</span>
+            <span>Generated {rep.generated_at}</span>
+            <span>Report file {scan?.file}</span>
+            <span>Total {rep.total_tickets} · pending {rep.pending_decision_count}</span>
+            <span>Stuck threshold {rep.stuck_threshold_hours}h</span>
             <span className="wb-scan-chips">
-              {['疑似卡死', '待补', '可签'].map(k => (
-                <span key={k} className="wb-sug" data-sug={k}>{k} {rep.summary?.[k] ?? 0}</span>
-              ))}
+              {(['疑似卡死', '待补', '可签'] as const).map(k => {
+                const lab = SUGGESTION_LABEL[k] ?? k
+                return <span key={k} className="wb-sug" data-sug={lab}>{lab} {rep.summary?.[k] ?? 0}</span>
+              })}
             </span>
           </>
         )}
         {(rep === null || rep === undefined) && (
-          <span>{scan?.reason || '巡检报告加载中…'}</span>
+          <span>{scan?.reason || 'Loading inspection report…'}</span>
         )}
       </div>
       {rep !== null && rep !== undefined && (
         <>
           {rep.items.length === 0 && (
-            <div className="wb-empty">本轮无待决工单（settled/awaiting-human 为零）。</div>
+            <div className="wb-empty">No pending tickets this round (settled/awaiting-human = 0).</div>
           )}
           {rep.items.length > 0 && (
             <table className="wb-scan-table">
@@ -3253,7 +3175,7 @@ function ScanReportSection({ scan, onOpen }: {
               <tbody>
                 {rep.items.map(it => (
                   <tr key={it.ticket_id} onClick={() => onOpen(it.ticket_id)}
-                    title="点开工单详情">
+                    title="Open ticket detail">
                     <td>
                       <span className="wb-scan-id">{it.ticket_id}</span>
                       <div className="wb-scan-title">{it.title}</div>
@@ -3266,10 +3188,10 @@ function ScanReportSection({ scan, onOpen }: {
                     <td>
                       <span className="wb-dot" data-state={
                         it.gate_green === true ? 'running' : it.gate_green === false ? 'blocked' : 'done'} />
-                      <span className="wb-state-text">{it.gate_label || '无记录'}</span>
+                      <span className="wb-state-text">{it.gate_label || 'no record'}</span>
                     </td>
                     <td>{it.pending_count > 0 ? it.pending_count : '—'}</td>
-                    <td><span className="wb-sug" data-sug={it.suggestion}>{it.suggestion}</span></td>
+                    <td><span className="wb-sug" data-sug={SUGGESTION_LABEL[it.suggestion] ?? it.suggestion}>{SUGGESTION_LABEL[it.suggestion] ?? it.suggestion}</span></td>
                     <td>
                       <ul className="wb-scan-reasons">
                         {it.reasons.map((r, i) => <li key={i}>{r}</li>)}
@@ -3340,7 +3262,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   const [approveRemark, setApproveRemark] = useState('')
   /** approve 摘要 fetch 的请求序号：迟到回调若与当前弹层不同批，丢弃不误写。 */
   const approveSeqRef = useRef(0)
-  const [evInput, setEvInput] = useState<Record<string, string>>({})
   const [copied, setCopied] = useState(false)
   const [preview, setPreview] = useState<PreviewData | undefined>(undefined)
   // 「本票时刻」查看器打开态（t260915-17）：文件行链接的落点。ticketId 随打开时快照
@@ -3392,8 +3313,8 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       setError('')
     } else if (next.degraded) {
       setError(outcome === 'retryable'
-        ? `工单台连续 ${next.failStreak} 次刷新失败，数据可能滞后；已转慢速自动重试，无需手动刷新。最后错误：${errMsg}`
-        : `选中工单不可查（不存在或已终态），详见详情区提示；其余工单数据可能滞后。`)
+        ? `Board refresh failed ${next.failStreak}× in a row; data may be stale. Switched to slow auto-retry — no manual refresh needed. Last error: ${errMsg}`
+        : `Selected ticket not queryable (missing or terminal) — see detail panel note; other tickets may be stale.`)
     }
   }
 
@@ -3415,14 +3336,14 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
         apiGet(`${API}/tickets`),
         apiGet(INSPECTION_TICKETS_URL).catch(() => undefined),
       ])
-      if (data?.ok !== true) throw new Error(data?.error ?? '台面加载失败')
+      if (data?.ok !== true) throw new Error(data?.error ?? 'board load failed')
       const baseRows = (data.result?.tickets ?? []) as TicketRow[]
       if (insp?.ok === true) {
         inspectionRowsRef.current = (insp.result?.tickets ?? []) as TicketRow[]
         const f = insp.result?.inspection_filter
-        setInspectionNote(f?.degraded ? String(f.note ?? '巡检板面降级') : '')
+        setInspectionNote(f?.degraded ? String(f.note ?? 'inspection panel degraded') : '')
       } else {
-        setInspectionNote('巡检板面拉取失败，显示上次快照（自动重试中）')
+        setInspectionNote('inspection panel fetch failed; showing last snapshot (auto-retrying)')
       }
       setTickets([...baseRows, ...inspectionRowsRef.current])
       setWorkflows((data.workflows ?? []) as Wf[])
@@ -3446,7 +3367,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       detailOpen ? refreshDetailSilent() : Promise.resolve('ok' as PollOutcome),
     ])
     const out = worstOutcome(listOut, detailOut)
-    applyPollOutcome(out, out === 'ok' ? '' : 'snapshot 查询瞬时失败（阶段切换窗？）')
+    applyPollOutcome(out, out === 'ok' ? '' : 'snapshot query transient failure (stage switch window?)')
   }
 
   /** Temporal server/worker 状态点：读 temporal-health（真实探测，静默失败灰显）。 */
@@ -3507,7 +3428,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     presenceRef.current = p
     const unsub = p.onRemoteWrite((w) => {
       if (selectedIdRef.current !== null && w.ticket === selectedIdRef.current) {
-        setPeerNote(`工单 ${w.ticket} 刚被另一页签操作过（${w.op} · ${w.who}），已自动刷新`)
+        setPeerNote(`Ticket ${w.ticket} was just operated from another tab (${w.op} · ${w.who}); auto-refreshed`)
         void pollOnce()
       }
     })
@@ -3550,7 +3471,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
         // 精确报「不存在/已终态」，瞬时类引导「自动重试中」而非手动刷新。
         // t260919-02：terminal 回执 body 可带 face（host 直读桥附带）——随错误对象
         // 带起，终态失败票在详情抽屉渲染结构化失败面，不再是空面板。
-        const e = new Error(data?.error ?? '详情加载失败') as Error & { kind?: unknown; face?: unknown }
+        const e = new Error(data?.error ?? 'detail load failed') as Error & { kind?: unknown; face?: unknown }
         e.kind = data?.kind
         e.face = data?.face
         throw e
@@ -3562,7 +3483,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       if (selectedIdRef.current === id) {
         const kind = (err as { kind?: unknown } | null)?.kind
         if (kind === 'not_found') {
-          setOpMsg(`工单不存在：${id}（Temporal 无此 workflow）`)
+          setOpMsg(`Ticket not found: ${id} (no such Temporal workflow)`)
         } else if (kind === 'terminal') {
           // t260919-02：终态不再是「只闪一句错误」——装配失败面视图（face 缺失/
           // 畸形由 terminalFaceView 显式降级为「原因不可得」，绝不空面板、绝不把
@@ -3572,7 +3493,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
           setOpMsg(String(err instanceof Error ? err.message : err))
         } else {
           // 瞬时故障（超时/连接/取消）：不弹窗打断——保留占位提示，轮询自动补拉。
-          setOpMsg(`详情加载失败（查询瞬时故障），自动重试中：${String(err instanceof Error ? err.message : err)}`)
+          setOpMsg(`Detail load failed (transient query error), retrying: ${String(err instanceof Error ? err.message : err)}`)
         }
       }
     } finally {
@@ -3591,17 +3512,17 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     if (hit === undefined && viewers.length === 0) return true
     const lines: string[] = []
     if (hit !== undefined) {
-      lines.push(`另一页签 ${hit.who} ${Math.max(1, Math.round(hit.ageMs / 1000))}s 前刚对该工单执行过「${hit.op}」`)
+      lines.push(`Another tab (${hit.who}) ran "${hit.op}" on this ticket ${Math.max(1, Math.round(hit.ageMs / 1000))}s ago`)
     }
     if (viewers.length > 0) {
-      lines.push(`另一页签正在查看此工单（${viewers.map(v => v.who).join('、')}）`)
+      lines.push(`Another tab is viewing this ticket (${viewers.map(v => v.who).join(', ')})`)
     }
-    return window.confirm(`确认继续对工单 ${id} 执行「${op}」？\n${lines.join('\n')}`)
+    return window.confirm(`Continue "${op}" on ticket ${id}?\n${lines.join('\n')}`)
   }
 
   async function doOp(id: string, op: string, args: unknown, msgOk: string): Promise<void> {
     if (!peerWriteAllowed(id, op)) {
-      setOpMsg('已取消：另一页签刚操作过该工单')
+      setOpMsg('Cancelled: another tab just operated this ticket')
       return
     }
     setOpBusy(true)
@@ -3609,7 +3530,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     try {
       const data = await apiPost(`${API}/tickets/${encodeURIComponent(id)}/${op}`, args)
       if (data?.ok !== true) {
-        setOpMsg(`失败：${data?.error ?? '未知错误'}${data?.run_id ? `（run_id ${data.run_id}）` : ''}`)
+        setOpMsg(`Failed: ${data?.error ?? 'unknown error'}${data?.run_id ? ` (run_id ${data.run_id})` : ''}`)
         return
       }
       const result = data.result
@@ -3622,17 +3543,10 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       // 列表必刷；若该行详情已打开（selectedId===id）同步刷详情。
       await Promise.all([reloadTickets(), ...(id === selectedId ? [openDetail(id)] : [])])
     } catch (err) {
-      setOpMsg(`操作失败：${String(err instanceof Error ? err.message : err)}`)
+      setOpMsg(`Operation failed: ${String(err instanceof Error ? err.message : err)}`)
     } finally {
       setOpBusy(false)
     }
-  }
-
-  function doAccept(item: string, done: boolean): void {
-    if (!selectedId) return
-    const evidence = (evInput[item] ?? '').trim()
-    void doOp(selectedId, 'accept', { item, done, by: operator, ...(evidence ? { evidence } : {}) },
-      done ? `验收项已打勾：${item.slice(0, 24)}` : `已取消打勾：${item.slice(0, 24)}`)
   }
 
   /** 读工单审批意见（server/reviews/<id>.json；没有=undefined，不报错）。 */
@@ -3653,7 +3567,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     // 字样只留在徽标场景，不进签字确认区）。
     if (stageState === 'awaiting-human') {
       const code = (epic ?? '').trim()
-      const epicLine = code !== '' ? `所属立项: ${code}` : ''
+      const epicLine = code !== '' ? `Epic: ${code}` : ''
       // KI-004：先 await 摘要再开弹层（与现状 confirm 前 await 的时序一致，无空态）；
       // 请求序号守卫迟到回调——弹层已取消/换单时不把旧摘要写进来；
       // fetch 失败（fetchReviewFile 静默返回 undefined）照开弹层，摘要位走「无统计摘要」文案，
@@ -3668,14 +3582,14 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       })()
       return
     }
-    void doOp(id, 'advance', {}, '已推进到下一阶段')
+    void doOp(id, 'advance', {}, 'Advanced to next stage')
   }
 
   function doSign(id: string, decision: string, note: string, gate?: string): void {
     // t260915-08：gate 可选透传——dev-lane 调用方不传（host 按当前门兜底，零变化）；
     // 巡检详情面带 detail.gate_id（引擎单点下发），workflow intake 按它放行。
     void doOp(id, 'sign', gate ? { decision, note, who: operator, gate } : { decision, note, who: operator },
-      decision === 'approve' ? '已审批通过并推进' : '已打回（sign reject）')
+      decision === 'approve' ? 'Approved and advanced' : 'Rework requested (sign reject)')
   }
 
   /** KI-004 approve 弹层确认：同 doRework 口径——先复位弹层 state 再签字，
@@ -3715,14 +3629,14 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   function doRework(): void {
     if (!reworkId) return
     if (reworkNote.trim() === '') {
-      setOpMsg('需要填写返工理由')
+      setOpMsg('Rework reason required')
       return
     }
     if (reworkHuman) {
       // 待审批工单打回 = sign reject（理由 note 进事件历史）。
       void doSign(reworkId, 'reject', reworkNote)
     } else {
-      void doOp(reworkId, 'rework', { note: reworkNote, ...(reworkTo ? { to_stage: reworkTo } : {}) }, '已打回')
+      void doOp(reworkId, 'rework', { note: reworkNote, ...(reworkTo ? { to_stage: reworkTo } : {}) }, 'Rework requested')
     }
     setReworkNote('')
     setReworkTo('')
@@ -3753,12 +3667,12 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     try {
       const data = await apiGet(`${API}/book?path=${encodeURIComponent(detail.book_path)}&limit=5`)
       if (data?.ok !== true) {
-        setOpMsg(`预览失败：${data?.error ?? '未知错误'}`)
+        setOpMsg(`Preview failed: ${data?.error ?? 'unknown error'}`)
         return
       }
       setPreview(data.result as PreviewData)
     } catch (err) {
-      setOpMsg(`预览失败：${String(err instanceof Error ? err.message : err)}`)
+      setOpMsg(`Preview failed: ${String(err instanceof Error ? err.message : err)}`)
     } finally {
       setPreviewLoading(false)
     }
@@ -3780,7 +3694,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       }
       const out = classifyPollBody(data)
       if (out !== 'retryable' && selectedIdRef.current === id) {
-        setOpMsg(String(data?.error ?? '工单查询失败'))
+        setOpMsg(String(data?.error ?? 'ticket query failed'))
       }
       return out
     } catch {
@@ -3904,10 +3818,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   )
   // 检查明细区（mock ① ck-rows）：gate_runs 逐轮逐条直译。
   const checksRuns = useMemo(() => (detail ? buildChecksDetail(detail) : []), [detail])
-  const detailWs = workspaceInfoOf(detail)
-  const instItems = detail?.acceptance?.length ? detail.acceptance
-    : (detail?.stage_acceptance?.length ? detail.stage_acceptance : [])
-  const curChecks = detail?.checks?.[detail?.stage ?? ''] ?? []
+  // t260925-18：验收清单折叠区块移除，instItems/curChecks 消费点消失（数据字段不动）。
   const ops = detail ? availableOps(detail, selWf) : []
   const reworkStages = selWf?.stages.map(s => s.id) ?? []
   // t260921-03 详情终态对账：巡检详情 meta 带 close_health（引擎键只加）；dev-lane
@@ -3941,31 +3852,31 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   return (
     <div className="wb-root">
       <div className="wb-head">
-        <span className="wb-title">工 单 台</span>
+        <span className="wb-title">Ticket Board</span>
         <span className="wb-head-spacer" />
         <span className="wb-health">
           <a className="wb-health-link" href="http://127.0.0.1:8233" target="_blank" rel="noreferrer"
             title="打开 Temporal 控制台（http://127.0.0.1:8233）">
             <span className="wb-health-item" data-online={health?.server.online ?? false}
               title={health
-                ? `server · ${health.server.detail}${health.server.online ? '' : `\n重启：${health.restart_hint.server}`}`
-                : 'temporal server 状态探测中…'}>
-              <span className="wb-health-dot" data-online={health?.server.online ?? false} />Temporal 控制台 ↗
+                ? `server · ${health.server.detail}${health.server.online ? '' : `\nrestart: ${health.restart_hint.server}`}`
+                : 'probing temporal server status…'}>
+              <span className="wb-health-dot" data-online={health?.server.online ?? false} />Temporal UI ↗
             </span>
           </a>
           <button className="wb-status-btn" data-open={workersOpen}
             data-online={workers === undefined ? undefined : workers.count_alive > 0}
             title={workers
-              ? `worker ${workers.count_alive}/${workers.count} 在线 · 点开看逐 worker 状态`
-              : 'worker 清单接口未挂载（需重启 dsh 后生效）'}
+              ? `workers ${workers.count_alive}/${workers.count} online · click for per-worker status`
+              : 'workers API not mounted (takes effect after dsh restart)'}
             onClick={() => { if (!workersOpen) void reloadWorkers(); setWorkersOpen(!workersOpen) }}>
             {workers ? `${workers.count_alive} workers` : '— workers'}
           </button>
           <button className="wb-status-btn" data-open={page === 'scan'}
             data-online={scan?.report ? scan.report.pending_decision_count === 0 : undefined}
             title={scan?.report
-              ? `巡检报告 · 待决 ${scan.report.pending_decision_count} 张 · 点开看全表`
-              : (scan?.reason ?? '巡检报告加载中…')}
+              ? `Inspection report · ${scan.report.pending_decision_count} pending · click for full table`
+              : (scan?.reason ?? 'Loading inspection report…')}
             onClick={() => setPage(page === 'scan' ? 'tickets' : 'scan')}>
             巡检{scan?.report ? ` ${scan.report.pending_decision_count}` : ''}
           </button>
@@ -3973,11 +3884,11 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
         {workersOpen && (
           <div className="wb-workers-panel">
             <div className="wb-workers-head">
-              worker 清单{workers ? ` · ${workers.count_alive}/${workers.count} 在线` : ''}
+              workers{workers ? ` · ${workers.count_alive}/${workers.count} online` : ''}
             </div>
-            {workers === undefined && <div className="wb-empty">接口未挂载（需重启 dsh 后生效）。</div>}
+            {workers === undefined && <div className="wb-empty">API not mounted (takes effect after dsh restart).</div>}
             {workers !== undefined && workers.workers.length === 0 && (
-              <div className="wb-empty">没有 worker pidfile。</div>
+              <div className="wb-empty">No worker pidfiles.</div>
             )}
             {workers !== undefined && workers.workers.length > 0 && (
               <table className="wb-workers-table">
@@ -3988,11 +3899,11 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                   {workers.workers.map(w => (
                     <tr key={w.queue} data-offline={!w.online}>
                       <td className="wb-id">{w.queue}</td>
-                      <td>{w.ticket ?? '（共享池）'}</td>
+                      <td>{w.ticket ?? '(shared pool)'}</td>
                       <td>{w.pid ?? '—'}</td>
                       <td>
                         <span className="wb-health-dot" data-online={w.online} />
-                        {w.online ? ' 在线' : ' 离线'}
+                        {w.online ? ' online' : ' offline'}
                       </td>
                       <td>{w.log_mtime ? new Date(w.log_mtime * 1000).toLocaleString() : '—'}</td>
                     </tr>
@@ -4011,11 +3922,11 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       )}
       {workers !== undefined && workers.count > 0 && workers.count_alive === 0 && (
         <div className="wb-health-offline">
-          <span>所有 worker 离线（{workers.count} 个 pidfile 均不存活）→ {health?.restart_hint.worker ?? '重启 worker'}</span>
+          <span>All workers offline ({workers.count} pidfiles, none alive) → {health?.restart_hint.worker ?? 'restart worker'}</span>
         </div>
       )}
 
-      {error !== '' && <div className="wb-err">{error}{'\n'}（工单台 API 未挂载？headless profile 无 webServer。）</div>}
+      {error !== '' && <div className="wb-err">{error}{'\n'}(Board API not mounted? headless profile has no webServer.)</div>}
 
       {page === 'tickets' && (<>
       <div className="wb-filters">
@@ -4031,39 +3942,39 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
             异常收口（无报告/快照未读到）」的票单独可筛出（要求⑤）。异常收口行仍在
             「收口」桶计数里（桶归属不变）。data-health=渲染断言锚。 */}
         <button className="wb-chip-btn wb-chip-health" data-health="abnormal" data-on={filterHealth === 'abnormal'}
-          title="只看已结束但异常收口的票（本期无报告/收口面不可读）"
+          title="Only tickets closed abnormally (no report / unreadable close face)"
           onClick={() => setFilterHealth(filterHealth === 'abnormal' ? '' : 'abnormal')}>
           异常收口 {abnormalCloseCount}
         </button>
         <button className="wb-chip-btn" data-on={filterState4 === '' && filterHealth === ''}
-          onClick={() => { setFilterState4(''); setFilterHealth('') }}>全部 {tickets?.length ?? 0}</button>
+          onClick={() => { setFilterState4(''); setFilterHealth('') }}>All {tickets?.length ?? 0}</button>
         {epicList.length > 0 && <span className="wb-sub">epic：</span>}
         {epicList.map(e => (
           <button key={e.code} className="wb-chip-btn wb-chip-epic" data-on={filterEpic === e.code}
             style={{ borderColor: epicColorOf(e.code), ...({ '--epic-c': epicColorOf(e.code) } as React.CSSProperties), color: epicChipColor() }}
-            title={`按立项 ${e.code} 过滤`}
+            title={`Filter by epic ${e.code}`}
             onClick={() => setFilterEpic(filterEpic === e.code ? '' : e.code)}>
             {e.code} ·{e.count}
           </button>
         ))}
-        <input className="wb-search" type="search" placeholder="搜索 id / 标题…" value={q}
+        <input className="wb-search" type="search" placeholder="Search id / title…" value={q}
           onChange={e => setQ(e.target.value)} />
         <select className="wb-select" value={sortKey} onChange={e => setSortKey(e.target.value as 'created' | 'updated')}>
-          <option value="updated">最近活动 ↓</option>
-          <option value="created">创建时间 ↓</option>
+          <option value="updated">Last activity ↓</option>
+          <option value="created">Created ↓</option>
         </select>
-        <button className="wb-btn" onClick={() => { void pollOnce() }}>刷 新</button>
+        <button className="wb-btn" onClick={() => { void pollOnce() }}>Refresh</button>
         {/* KI-003③（t260903-06）：轮询失败不弹窗——静默重试期间保留上次成功快照，
             角标提示「数据可能滞后」；连续 3 次失败才升错误条（见上方 wb-err）。 */}
         {pollHealth.failStreak > 0 && !pollHealth.degraded && (
           <span
             className="wb-sub"
-            title={pollLastError || '上次刷新失败，当前展示的是上次成功快照，正在自动重试'}
+            title={pollLastError || 'Last refresh failed; showing last good snapshot, auto-retrying'}
           >
             ⟳ 数据可能滞后（自动重试中）
           </span>
         )}
-        <span className="wb-sub">{openList.length + doneList.length}/{tickets?.length ?? 0} 张</span>
+        <span className="wb-sub">{openList.length + doneList.length}/{tickets?.length ?? 0} tickets</span>
       </div>
 
       {/* t260915-08 巡检板面降级提示：拉取失败/声明降级=显式横幅（不静默清空） */}
@@ -4092,23 +4003,23 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
               void openDetail(t.id)
             }}
             onAdvance={() => { doAdvance(t.id, t.stage_state, t.epic) }}
-            onDispatch={() => { void doOp(t.id, 'dispatch-next', {}, '已生成派活指令') }}
+            onDispatch={() => { void doOp(t.id, 'dispatch-next', {}, 'Dispatch prompt generated') }}
             onRework={() => { openRework(t.id, t.stage_state === 'awaiting-human') }}
-            onPause={() => { void doOp(t.id, 'pause', { who: operator }, '已发送段间暂停（当前段跑完后停住）') }}
-            onResume={() => { void doOp(t.id, 'resume', { who: operator }, '已发送恢复，继续派段') }}
+            onPause={() => { void doOp(t.id, 'pause', { who: operator }, 'Pause sent (stops after current stage finishes)') }}
+            onResume={() => { void doOp(t.id, 'resume', { who: operator }, 'Resume sent; dispatching continues') }}
             onUnblock={() => {
               if (t.engine === 'template-as-code-v2') {
-                void doOp(t.id, 'retry-qc', { who: operator }, '已请求重跑（retry_qc）')
+                void doOp(t.id, 'retry-qc', { who: operator }, 'Retry requested (retry_qc)')
               } else {
-                void doOp(t.id, 'update', { stage_state: 'awaiting', note: '（工单台）解除阻塞' }, '已解除阻塞')
+                void doOp(t.id, 'update', { stage_state: 'awaiting', note: '(board) unblock' }, 'Unblocked')
               }
             }}
-            onClose={() => { if (window.confirm('标记为已完成（closed）？')) void doOp(t.id, 'update', { status: 'closed', note: '（工单台）完成' }, '已标记完成') }}
+            onClose={() => { if (window.confirm('Mark as completed (closed)?')) void doOp(t.id, 'update', { status: 'closed', note: '(board) done' }, 'Marked closed') }}
             onOpenEpic={onOpenEpic} />
         )
       })}
       {paged.length === 0 && openList.length === 0 && (
-        <div className="wb-empty">没有符合筛选的工单。</div>
+        <div className="wb-empty">No tickets match the filter.</div>
       )}
 
       {/* 异常收口段（t260921-03）：不折叠恒展开，排在正常收口折叠行之前——不沉底、
@@ -4127,7 +4038,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       {doneOk.length > 0 && (
         showDone ? (
           <>
-            <button className="wb-done-row" onClick={() => setShowDone(false)}>▾ 收口 · {doneOk.length}（点击折叠）</button>
+            <button className="wb-done-row" onClick={() => setShowDone(false)}>▾ Closed · {doneOk.length} (click to collapse)</button>
             {doneOk.map(t => (
               <TicketRowCard key={t.id} t={{ ...t, title_or_first: t.title_or_first ?? titleFirstMap[t.id] }} wf={wfById[t.workflow]} compact={false}
                 active={t.id === selectedId} busy={opBusy} ops={[]}
@@ -4136,17 +4047,17 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
             ))}
           </>
         ) : (
-          <button className="wb-done-row" onClick={() => setShowDone(true)}>✓ 收口 · {doneOk.length}（点击展开）</button>
+          <button className="wb-done-row" onClick={() => setShowDone(true)}>✓ Closed · {doneOk.length} (click to expand)</button>
         )
       )}
 
       {pageCount > 1 && (
         <div className="wb-pager">
           <button className="wb-btn" disabled={pageNo <= 1}
-            onClick={() => setPageNo(p => Math.max(1, p - 1))}>上一页</button>
-          <span className="wb-sub">第 {pageNo}/{pageCount} 页 · 未收口 {openList.length} 张</span>
+            onClick={() => setPageNo(p => Math.max(1, p - 1))}>Prev page</button>
+          <span className="wb-sub">Page {pageNo}/{pageCount} · {openList.length} open</span>
           <button className="wb-btn" disabled={pageNo >= pageCount}
-            onClick={() => setPageNo(p => Math.min(pageCount, p + 1))}>下一页</button>
+            onClick={() => setPageNo(p => Math.min(pageCount, p + 1))}>Next page</button>
         </div>
       )}
       </>)}
@@ -4154,7 +4065,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       {page === 'scan' && (
         <>
           <div className="wb-scan-backbar">
-            <button className="wb-btn" onClick={() => setPage('tickets')}>← 返回工单列表</button>
+            <button className="wb-btn" onClick={() => setPage('tickets')}>← Back to ticket list</button>
           </div>
           <ScanReportSection scan={scan} onOpen={(id) => { setPage('tickets'); void openDetail(id) }} />
         </>
@@ -4171,7 +4082,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                 onClick={() => { setPeerNote('') }}>×</button>
             </div>
           )}
-          {detailLoading && <div className="wb-empty">加载详情…</div>}
+          {detailLoading && <div className="wb-empty">Loading detail…</div>}
           {/* t260919-02：终态失败票详情面——kind=terminal 时 detail 恒 undefined，
               本面板是抽屉唯一详情体（绝不空面板）；零操作入口（组件契约见定义处）。 */}
           {!detailLoading && terminalFace !== null && (
@@ -4195,14 +4106,16 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                     dev-lane 详情无该键=else 分支原样（零变化）。 */}
                 {detail.close_health === 'abnormal' || detail.close_health === 'unreadable' ? (
                   <span className="wb-badge" data-state="done" data-close-health={detailCloseHealth}>
-                    {detailCloseHealth === 'unreadable' ? '已结束·待核' : '已结束·异常'}
+                    {detailCloseHealth === 'unreadable' ? 'Closed·Unverified' : 'Closed·Abnormal'}
                   </span>
                 ) : (
                   detail.status !== 'closed' && (
                     <span className="wb-badge" data-state={detail.stage_state}>{STATE_LABEL[detail.stage_state] ?? detail.stage_state}</span>
                   )
                 )}
-                <span className="wb-sub">{selWf?.name ?? '未挂模板'}</span>
+                {/* t260925-18 rework：模板名是 UI 文案——按 workflow id 走映射表英文
+                    （引擎 name 是中文数据不动）；未知模板 id 由 labelOf 回落原 id。 */}
+                <span className="wb-sub">{selWf ? workflowLabel(selWf.id) : 'no template'}</span>
                 {/* 所属立项徽标（t260826-02）：点击跳中列立项单详情；无 epic 显灰「未归档」 */}
                 <EpicBadge epic={detail.epic} onNavigate={onOpenEpic} />
                 {/* token 一行合计（t260828-07，验收 3）：agent 段数 + in/out 总量 + 模型 */}
@@ -4214,7 +4127,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                   abnormal/unreadable（已结束票）不让 ⛔受阻框架双开（原因在终态
                   收口卡里以事实措辞呈现）。 */}
               {detail.blocked_reason && detail.close_health !== 'abnormal' && detail.close_health !== 'unreadable' && (
-                <div className="wb-d2-blocked">⛔ 受阻原因：{detail.blocked_reason}</div>
+                <div className="wb-d2-blocked">⛔ Blocked: {detail.blocked_reason}</div>
               )}
               {/* KI-048（t260911-05）人话状态卡（mock 260904 A 块口径，四件：人话
                   主文案／挡事文件点名／下一步安排／原始日志折叠）。视图模型由
@@ -4240,12 +4153,12 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                     {/* 词条表缺此原因码=回落引擎原文（mock C：不翻译没拿到的信息，宁显原文不猜测）；
                         终态卡主文案是本卡措辞非词条翻译，跳过该注记。 */}
                     {!card.headlineFromTable && !card.terminal && (
-                      <div className="sc-fallback">以上为引擎原文（词条表缺此原因码，不猜测翻译）</div>
+                      <div className="sc-fallback">Above is engine verbatim (no lexicon entry for this reason code; not guessed)</div>
                     )}
                     {/* 蓝卡「签什么」（mock 屏③ callout E）：人门上下文/验收口径/门结论。 */}
                     {card.severity === 'blue' && card.signWhat.length > 0 && (
                       <div className="sc-signwhat" data-testid="sign-what">
-                        <div className="sc-signwhat-ttl">签什么</div>
+                        <div className="sc-signwhat-ttl">What to sign</div>
                         <ul>{card.signWhat.map((s, i) => <li key={i}>{s}</li>)}</ul>
                       </div>
                     )}
@@ -4254,13 +4167,13 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                         {/* 文件行=链接（mock 260904 标注 D）：点开以本票时刻（收口版）只读
                             打开；在飞票收口版不可得 → 查看器人话点名（fail-closed 预期）。 */}
                         {card.files.map((f) => (
-                          <button className="sc-file" key={f} title="以本票时刻的版本只读打开"
+                          <button className="sc-file" key={f} title="Open read-only as of this ticket"
                             onClick={() => setFileViewer({ ticketId: detail.id, path: f, mode: 'settle' })}>{f}</button>
                         ))}
                         {card.filesMore > 0 && <span className="sc-file-more">+{card.filesMore} more</span>}
                       </div>
                     )}
-                    <div className="sc-next"><b>{card.severity === 'blue' ? '等你：' : card.terminal ? '说明：' : '下一步：'}</b> {card.next}</div>
+                    <div className="sc-next"><b>{card.severity === 'blue' ? 'Waiting on you: ' : card.terminal ? 'Note: ' : 'Next: '}</b> {card.next}</div>
                     <details className="sc-raw">
                       <summary>原始引擎日志（调试用）</summary>
                       <pre>{card.rawLog.join('\n')}</pre>
@@ -4279,10 +4192,10 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                 if (refs.length === 0) return null
                 return (
                   <div className="wb-refs" data-testid="ticket-refs">
-                    <div className="ttl">背景引用（非本票改动 · 点开看开票基线版）</div>
+                    <div className="ttl">Background references (not part of this ticket · open to see baseline version)</div>
                     <div className="wb-refs-files">
                       {refs.map((f) => (
-                        <button className="wb-ref-file" key={f} title="以开票基线版只读打开"
+                        <button className="wb-ref-file" key={f} title="Open read-only at ticket-open baseline"
                           onClick={() => setFileViewer({ ticketId: detail.id, path: f, mode: 'base' })}>{f}</button>
                       ))}
                     </div>
@@ -4293,14 +4206,14 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
               {drawerPeerViewers.length > 0 && (
                 <div style={{ background: 'var(--dsw-derive-accent-bg,#ddf4ff)', border: '1px solid var(--dsw-derive-accent-border,#54aeff)', borderRadius: 6,
                   padding: '6px 10px', fontSize: 12, color: 'var(--dsw-derive-accent-deep,#0a3069)' }}>
-                  👀 另一页签正在查看此工单：{drawerPeerViewers.map(v => v.who).join('、')}
+                  👀 Another tab is viewing this ticket: {drawerPeerViewers.map(v => v.who).join(', ')}
                 </div>
               )}
               {/* 详情页 v2.1（260824 二轮）：工单正文钉最顶（所有页签可见）→ 打回横幅 →
                   步骤条/一句话现状/问题区/操作条——任何页签都能看到状态、直接操作。 */}
               {detail.body && (
                 <div className="wb-d2-body">
-                  <div className="ttl">工单正文（原始需求）</div>
+                  <div className="ttl">Body (original request)</div>
                   {detail.body}
                 </div>
               )}
@@ -4308,8 +4221,10 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                   （老票兼容）。B 形态=默认展开+限高 260px 滚动；字数徽标取 .length（UTF-16 码元）。 */}
               {detail.spec && (
                 <div className="wb-d2-spec" data-v="B">
-                  <div className="ttl">执行规格（spec）<span className="cnt">{detail.spec.length} 字</span></div>
-                  <div className="txt">{detail.spec}</div>
+                  <div className="ttl">Execution spec<span className="cnt">{detail.spec.length} chars</span></div>
+                  {/* t260925-18：spec 基本格式化——renderMarkdown 转义先行（knowledge 浏览器半
+                      同款，index.tsx 顶部既有 import），spec 内容来自 agent/用户，无裸注入面。 */}
+                  <div className="txt wb-md" dangerouslySetInnerHTML={{ __html: specMarkdownHtml(detail.spec) }} />
                 </div>
               )}
               {/* t260915-08 巡检票：详情面直接进巡检面（时间线/发现/人门签字，R6）——
@@ -4343,16 +4258,16 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                 {ops.includes('advance') && (
                   <button className="wb-btn wb-btn-green" disabled={opBusy}
                     onClick={() => { doAdvance(detail.id, detail.stage_state, detail.epic) }}>
-                    {detail.stage_state === 'awaiting-human' ? '✓ 审批通过' : '推进'}
+                    {detail.stage_state === 'awaiting-human' ? '✓ Approve' : 'Advance'}
                   </button>
                 )}
                 {ops.includes('unblock') && (
                   <button className="wb-btn wb-btn-blue" disabled={opBusy}
                     onClick={() => {
                       if ((detail as { engine?: string }).engine === 'template-as-code-v2') {
-                        void doOp(detail.id, 'retry-qc', { who: operator }, '已请求重跑（retry_qc）')
+                        void doOp(detail.id, 'retry-qc', { who: operator }, 'Retry requested (retry_qc)')
                       } else {
-                        void doOp(detail.id, 'update', { stage_state: 'awaiting', note: '（工单台）解除阻塞' }, '已解除阻塞')
+                        void doOp(detail.id, 'update', { stage_state: 'awaiting', note: '(board) unblock' }, 'Unblocked')
                       }
                     }}>
                     重跑本步
@@ -4365,35 +4280,35 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                   </button>
                 )}
                 {detail.stage_state === 'awaiting-human' && detail.kind !== 'inspection' && (
-                  <span className="wb-d2-hint">审批前请先在「变更」页签过 diff</span>
+                  <span className="wb-d2-hint">Review the diff in the Changes tab before approving</span>
                 )}
                 {ops.length === 0 && detail.status !== 'closed' && detail.kind !== 'inspection' && (
-                  <span className="wb-d2-hint">当前状态无可用操作（{detail.status}×{detail.stage_state}）</span>
+                  <span className="wb-d2-hint">No operation available for this state ({detail.status}×{detail.stage_state})</span>
                 )}
                 <details className="wb-d2-more">
                   <summary>更多</summary>
                   <div className="wb-d2-more-body">
                     {ops.includes('dispatch-next') && (
                       <button className="wb-btn" disabled={opBusy}
-                        onClick={() => { void doOp(detail.id, 'dispatch-next', {}, '已生成派活指令') }}>
+                        onClick={() => { void doOp(detail.id, 'dispatch-next', {}, 'Dispatch prompt generated') }}>
                         派下一棒
                       </button>
                     )}
                     {ops.includes('close') && (
                       <button className="wb-btn wb-btn-green" disabled={opBusy}
-                        onClick={() => { if (window.confirm('标记为已完成（closed）？')) void doOp(detail.id, 'update', { status: 'closed', note: '（工单台）完成' }, '已标记完成') }}>
+                        onClick={() => { if (window.confirm('Mark as completed (closed)?')) void doOp(detail.id, 'update', { status: 'closed', note: '(board) done' }, 'Marked closed') }}>
                         完成
                       </button>
                     )}
                     {detail.book_path && (
                       <button className="wb-btn" disabled={opBusy || previewLoading}
                         onClick={() => { void openPreview() }}>
-                        {previewLoading ? '读取中…' : '预览内容'}
+                        {previewLoading ? 'Loading…' : 'Preview content'}
                       </button>
                     )}
                     <a className="wb-meta-link"
                       href={`http://127.0.0.1:8233/namespaces/default/workflows/${encodeURIComponent(detail.id)}`}
-                      target="_blank" rel="noreferrer">Temporal 执行 ↗</a>
+                      target="_blank" rel="noreferrer">Temporal execution ↗</a>
                   </div>
                 </details>
               </div>
@@ -4401,10 +4316,10 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 
               {/* 巡检票无变更页签（无 diff 面板），进展+Agent 日志两页签足够 */}
               <div className="wb-dtabs">
-                <button className="wb-dtab" data-on={drawerTab === 'detail'} onClick={() => setDrawerTab('detail')}>进展</button>
+                <button className="wb-dtab" data-on={drawerTab === 'detail'} onClick={() => setDrawerTab('detail')}>Progress</button>
                 {detail.kind !== 'inspection' && (
                   <button className="wb-dtab" data-on={drawerTab === 'changes'} onClick={() => setDrawerTab('changes')}>
-                    变更{detail.stage_state === 'awaiting-human' ? '（审批必看 diff）' : ''}
+                    Changes{detail.stage_state === 'awaiting-human' ? ' (diff required before approval)' : ''}
                   </button>
                 )}
                 <button className="wb-dtab" data-on={drawerTab === 'agent'} onClick={() => setDrawerTab('agent')}>
@@ -4427,154 +4342,11 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
               {/* 详情页 v2.1：正文已上移到头部（所有页签可见）；本页签=进展阶段卡 + 深查折叠。
                   旧 M14 五 section 内容全保留在深查区，一项不丢。 */}
               <D2Stages detail={detail} wf={selWf} usage={usage} durs={stageDurs.durs} nowMs={stageDurs.nowMs} />
-
-              {/* 快照要点（t260905-07）：ticket show 直读四块观测（时间线/交接/门与签字/
-                  工作流快照），收口成折叠块放深查区首位——下钻即见来龙去脉 */}
-              <div className="wb-d2-deep">
-                <D2SnapshotDigest detail={detail} />
-              </div>
-
-              <div className="wb-d2-deep">
-                <details>
-                  <summary>基本信息（工作区 · 分支 · 写集 · 时间）</summary>
-                  <div>
-                    <div className="wb-meta-grid">
-                      <MetaItem k="工单">{detail.id}</MetaItem>
-                      <MetaItem k="工作流">{selWf?.name ?? '未挂模板'}</MetaItem>
-                      <MetaItem k="状态">{detail.status}
-                        {/* t260921-03：引擎 close_health=abnormal/unreadable（已结束票）
-                            不再拼「·受阻」词面（与详情头/终态卡同一引擎键判定），改拼
-                            「·已结束（…）」——列表行与详情状态一致。 */}
-                        {detail.close_health === 'abnormal' || detail.close_health === 'unreadable'
-                          ? ` · 已结束（${detailCloseHealth === 'unreadable' ? '待核' : '异常收口'}）`
-                          : (detail.status !== 'closed' && detail.stage_state
-                            ? ` · ${STATE_LABEL[detail.stage_state] ?? detail.stage_state}` : '')}
-                      </MetaItem>
-                      <MetaItem k="当前阶段">{detail.stage_name || detail.stage || '—'}</MetaItem>
-                      <MetaItem k="角色">{detail.role || '—'}</MetaItem>
-                      <MetaItem k="工作区" title={detailWs.path || undefined}>
-                        {detailWs.type === 'main' ? (
-                          <span className="wb-type-chip" data-empty={true}>主树</span>
-                        ) : (
-                          <><span className="wb-chip">{detailWs.type === 'worktree' ? '泳道' : '目录'}</span> {detailWs.label}</>
-                        )}
-                      </MetaItem>
-                      {detail.branch && <MetaItem k="分支">{detail.branch}</MetaItem>}
-                      {detail.base_ref && <MetaItem k="base" title={detail.base_ref}>{detail.base_ref.slice(0, 12)}</MetaItem>}
-                      {detail.proposal_id && <MetaItem k="提案">{detail.proposal_id}</MetaItem>}
-                      <MetaItem k="创建">{fmtTs(detail.created)}</MetaItem>
-                      <MetaItem k="更新">{fmtTs(detail.updated)}</MetaItem>
-                      <MetaItem k="修订">{detail.revision_count ?? 0} 轮</MetaItem>
-                      <MetaItem k="接力">{detail.handoffs?.length ?? 0} 棒</MetaItem>
-                      <MetaItem k="挂起">{detail.pending?.length ?? 0} 项</MetaItem>
-                    </div>
-                    {detail.write_set && detail.write_set.length > 0 && (
-                      <div className="wb-meta-row"><span className="wb-meta-k">写集</span>
-                        {detail.write_set.map(w => <span className="wb-chip" key={w}>{w}</span>)}
-                      </div>
-                    )}
-                  </div>
-                </details>
-
-              {detail.workflow_input ? (
-                <details>
-                  <summary>入参（workflow 启动参数快照）</summary>
-                  <div>
-                    <div className="wb-md" style={{fontSize: '12px'}}>
-                      <table style={{width: '100%', borderCollapse: 'collapse'}}>
-                        <tbody>
-                          {Object.entries(detail.workflow_input).map(([k, v]) => (
-                            <tr key={k}>
-                              <td style={{color: 'var(--dsw-derive-muted,#57606a)', padding: '2px 8px', whiteSpace: 'nowrap', verticalAlign: 'top'}}>{k}</td>
-                              <td style={{padding: '2px 8px', wordBreak: 'break-word'}}>
-                                {Array.isArray(v) ? v.join(', ') : String(v ?? '—')}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </details>
-              ) : null}
-
-              <details>
-                <summary>验收清单（当前阶段{detail.stage ? ` ${detail.stage}` : ''}）</summary>
-                <div>
-                  {instItems.length === 0 && <div className="wb-empty">当前阶段无验收清单。</div>}
-                  {instItems.map(item => {
-                    const c = curChecks.find(x => x.item === item)
-                    const done = c?.done ?? false
-                    return (
-                      <div className="wb-check" key={item}>
-                        <div className="wb-check-line">
-                          <input type="checkbox" checked={done}
-                            disabled={opBusy || detail.status === 'closed' || (detail.stage_state === 'running' && detail.status === 'dispatched')}
-                            onChange={() => { doAccept(item, !done) }} />
-                          <span className="wb-check-item" data-done={done}>{item}</span>
-                          {c?.by && <span className="wb-check-by">by {c.by}</span>}
-                          {c?.agent && <span className="wb-check-by">分片 {c.agent}</span>}
-                        </div>
-                        {c?.evidence && <pre className="wb-evidence">证据：{c.evidence}</pre>}
-                        {!done && detail.status === 'settled' && (
-                          <input className="wb-ev-input" placeholder="证据（脚本输出原文/产物路径；可选）"
-                            value={evInput[item] ?? ''}
-                            onChange={e => setEvInput(v => ({ ...v, [item]: e.target.value }))} />
-                        )}
-                      </div>
-                    )
-                  })}
-                  {detail.pending && detail.pending.length > 0 && (
-                    <>
-                      <div className="wb-sub-sec">挂起项（审批理由 / 遗留问题）</div>
-                      {detail.pending.map((p, i) => (
-                        <div className="wb-pending" key={i}>
-                          <span className="wb-log-time">{fmtTs(p.ts)}</span> {p.note}
-                        </div>
-                      ))}
-                    </>
-                  )}
-                </div>
-              </details>
-
-              <details>
-                <summary>流水 log（状态/阶段流转历史）</summary>
-                <div>
-                  {[...(detail.log ?? [])].reverse().map((l, i) => (
-                    <div className="wb-log" key={i}>
-                      <span className="wb-log-time">{fmtTs(l.ts)}</span>
-                      {l.status && <span className="wb-badge" data-kind="status">{l.status}</span>}
-                      <span className="wb-log-note">{l.note}</span>
-                    </div>
-                  ))}
-                </div>
-              </details>
-
-              <details>
-                <summary>接力时间线（handoff · 每棒带产物）</summary>
-                <div>
-                  {detail.deliverables && <div className="wb-meta-row"><span className="wb-meta-k">交接物</span>{detail.deliverables}</div>}
-                  {detail.handoffs && detail.handoffs.length > 0 ? (
-                    [...(detail.handoffs)].reverse().map((h, i) => (
-                      <div className="wb-hl" key={i}>
-                        <div>
-                          <span className="wb-hl-stage">[{h.stage}]</span>
-                          <span className="wb-log-time"> {fmtTs(h.ts)}</span>
-                          {h.agent_id && <span className="wb-check-by"> · {h.agent_id}</span>}
-                        </div>
-                        <div>{h.summary || '（无摘要）'}</div>
-                        {h.artifacts && h.artifacts.length > 0 && (
-                          <div>{h.artifacts.map((a, j) => <span className="wb-chip" key={j}>{a}</span>)}</div>
-                        )}
-                      </div>
-                    ))
-                  ) : (
-                    <div className="wb-empty">暂无交接记录。</div>
-                  )}
-                </div>
-              </details>
-              </div>
+              {/* t260925-18：深查区六折叠（快照要点/基本信息/入参/验收清单/流水 log/接力时间线）
+                  整体移除——只删 UI 不删数据；同字段仍可经 ticket CLI / Temporal query 观测
+                  （triage 全走 ticket CLI，票面已声明）。 */}
               </>)}
+
             </>
           )}
         </div>
@@ -4583,60 +4355,60 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       {/* t260905-05：四类 wb-modal 补 role="dialog"/aria-modal/aria-label——a11y 语义 +
           集成场景可测性（[role=dialog] 消费面此前恒空）。纯属性零视觉差异。 */}
       {approveBox !== null && (
-        <div className="wb-modal" role="dialog" aria-modal="true" aria-label="审批通过并推进">
+        <div className="wb-modal" role="dialog" aria-modal="true" aria-label="Approve and advance">
           <div className="wb-modal-box">
-            <div className="wb-modal-title">审批通过并推进 — {approveBox.id}</div>
+            <div className="wb-modal-title">Approve and advance — {approveBox.id}</div>
             <div className="wb-modal-body">
               <div className="wb-ops" style={{ justifyContent: 'flex-start', marginBottom: 6 }}>
-                <span className="wb-d-badge" data-s="added">自动摘要（不可编辑）</span>
+                <span className="wb-d-badge" data-s="added">Auto summary (read-only)</span>
               </div>
               <pre className="wb-prompt" style={{ maxHeight: 120, overflow: 'auto' }}>
-                {approveBox.summary !== '' ? approveBox.summary : '（无已存审批意见，本轮无统计摘要）'}
+                {approveBox.summary !== '' ? approveBox.summary : '(no stored review; no summary this round)'}
               </pre>
               {approveBox.epicLine !== '' && <div style={{ margin: '6px 0', color: epicChipMuted() }}>{approveBox.epicLine}</div>}
               <textarea className="wb-ev-input" style={{ minHeight: 80 }} maxLength={2000}
-                placeholder="自由备注（可空，有内容随签字进不可变历史，≤2000 字）"
+                placeholder="Free-form note (optional; stored immutably with the signature, ≤2000 chars)"
                 value={approveRemark} onChange={e => setApproveRemark(e.target.value)} />
             </div>
             <div className="wb-ops">
-              <button className="wb-btn wb-btn-green" disabled={opBusy} onClick={doApprove}>确认通过并推进</button>
-              <button className="wb-btn" onClick={closeApprove}>取消</button>
+              <button className="wb-btn wb-btn-green" disabled={opBusy} onClick={doApprove}>Approve and advance</button>
+              <button className="wb-btn" onClick={closeApprove}>Cancel</button>
             </div>
           </div>
         </div>
       )}
 
       {reworkId !== null && (
-        <div className="wb-modal" role="dialog" aria-modal="true" aria-label="打回">
+        <div className="wb-modal" role="dialog" aria-modal="true" aria-label="Rework">
           <div className="wb-modal-box">
-            <div className="wb-modal-title">{reworkHuman ? '打回（走 Temporal sign，decision=reject）' : '打回'} — {reworkId}</div>
+            <div className="wb-modal-title">{reworkHuman ? 'Rework (Temporal sign, decision=reject)' : 'Rework'} — {reworkId}</div>
             <div className="wb-modal-body">
               <select className="wb-select" value={reworkTo} onChange={e => setReworkTo(e.target.value)}>
-                <option value="">回退目标：缺省（按阶段语义自动）</option>
+                <option value="">Rework target: default (auto by stage semantics)</option>
                 {reworkStages.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
-              <textarea className="wb-ev-input" style={{ minHeight: 80 }} placeholder="返工原因（必填）"
+              <textarea className="wb-ev-input" style={{ minHeight: 80 }} placeholder="Rework reason (required)"
                 value={reworkNote} onChange={e => setReworkNote(e.target.value)} />
             </div>
             <div className="wb-ops">
-              <button className="wb-btn wb-btn-danger" disabled={opBusy} onClick={doRework}>确认打回</button>
-              <button className="wb-btn" onClick={() => { setReworkId(null); setReworkNote(''); setReworkTo('') }}>取消</button>
+              <button className="wb-btn wb-btn-danger" disabled={opBusy} onClick={doRework}>Confirm rework</button>
+              <button className="wb-btn" onClick={() => { setReworkId(null); setReworkNote(''); setReworkTo('') }}>Cancel</button>
             </div>
           </div>
         </div>
       )}
 
       {promptBox !== null && (
-        <div className="wb-modal" role="dialog" aria-modal="true" aria-label="派活指令">
+        <div className="wb-modal" role="dialog" aria-modal="true" aria-label="Dispatch prompt">
           <div className="wb-modal-box">
-            <div className="wb-modal-title">派活指令（dispatch-next · {promptBox.role}@{promptBox.stage}）</div>
+            <div className="wb-modal-title">Dispatch prompt (dispatch-next · {promptBox.role}@{promptBox.stage})</div>
             <div className="wb-modal-body">
               <pre className="wb-prompt">{promptBox.prompt}</pre>
               <div className="wb-ops">
                 <button className="wb-btn" onClick={() => { void copyPrompt(promptBox.prompt) }}>
-                  {copied ? '已复制 ✓' : '复制 prompt'}
+                  {copied ? 'Copied ✓' : 'Copy prompt'}
                 </button>
-                <button className="wb-btn" onClick={() => { setPromptBox(null); setCopied(false) }}>关 闭</button>
+                <button className="wb-btn" onClick={() => { setPromptBox(null); setCopied(false) }}>Close</button>
               </div>
             </div>
           </div>
@@ -4644,13 +4416,13 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       )}
 
       {preview !== undefined && (
-        <div className="wb-modal" role="dialog" aria-modal="true" aria-label="内容预览">
+        <div className="wb-modal" role="dialog" aria-modal="true" aria-label="Content preview">
           <div className="wb-modal-box wb-preview-box">
             <div className="wb-modal-title">
-              内容预览 · {preview.meta.主题 || '後漢書'}{preview.meta.期次 ? `（${preview.meta.期次}）` : ''}
-              <span className="wb-sub"> {preview.meta.类型} · 共 {preview.meta.total_chapters} 章 · 预览前 {preview.chapters.length} 章 · {preview.meta.size_kb}KB</span>
+              Content preview · {preview.meta.主题 || '後漢書'}{preview.meta.期次 ? ` (${preview.meta.期次})` : ''}
+              <span className="wb-sub"> {preview.meta.类型} · {preview.meta.total_chapters} chapters · previewing first {preview.chapters.length} · {preview.meta.size_kb}KB</span>
             </div>
-            <div className="wb-preview-notice">预览 · 正式渲染以 app 为准（繁体原文，可滚动浏览）</div>
+            <div className="wb-preview-notice">Preview · final rendering lives in the app (traditional Chinese, scrollable)</div>
             <div className="wb-modal-body">
               {preview.chapters.map(ch => (
                 <div className="wb-preview-ch" key={ch.id}>
@@ -4660,10 +4432,10 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                   ))}
                 </div>
               ))}
-              {preview.chapters.length === 0 && <div className="wb-empty">该文件无可预览章节。</div>}
+              {preview.chapters.length === 0 && <div className="wb-empty">No previewable chapters in this file.</div>}
             </div>
             <div className="wb-ops">
-              <button className="wb-btn" onClick={() => { setPreview(undefined) }}>关 闭</button>
+              <button className="wb-btn" onClick={() => { setPreview(undefined) }}>Close</button>
             </div>
           </div>
         </div>

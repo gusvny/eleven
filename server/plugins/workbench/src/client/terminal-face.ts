@@ -45,10 +45,10 @@ export interface TerminalFaceView {
 
 /** 恒定兜底文案（与引擎 face 面语义一致；face 缺失时 UI 侧唯一免责声明源）。 */
 export const TERMINAL_FACE_FALLBACKS = {
-  execStatus: '未知',
-  reasonNote: '原因不可得：失败面数据缺失或形态异常——不编造原因',
-  snapshotNote: '无快照：终态工作流不再运行，snapshot 查询没有执行方承接（终态的确定性结论，不是瞬时故障，刷新无效）',
-  lastStageNote: '最后已知阶段不可得：宁缺不猜',
+  execStatus: 'Unknown',
+  reasonNote: 'Reason unavailable: failure-face data missing or malformed — not invented',
+  snapshotNote: 'No snapshot: a closed workflow no longer runs and no worker answers the snapshot query (deterministic for terminal state, not transient; refreshing will not help)',
+  lastStageNote: 'Last known stage unavailable: omitted rather than guessed',
 } as const
 
 /** str 消费：非字符串 → ''（畸形降级，不抛）。 */
@@ -95,7 +95,7 @@ export function terminalFaceView(face: unknown, receiptError?: unknown): Termina
     reason,
     reasonAvailable,
     reasonNote: reasonAvailable
-      ? (strOf(f.reason_source) || '来源：Temporal 工作流执行失败信息')
+      ? (strOf(f.reason_source) || 'source: Temporal workflow execution failure info')
       : (strOf(f.reason_source) || strOf(f.reason_unavailable_note) || TERMINAL_FACE_FALLBACKS.reasonNote),
     receiptError: errTxt,
     snapshotNote: strOf(f.snapshot_note) || TERMINAL_FACE_FALLBACKS.snapshotNote,

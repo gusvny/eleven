@@ -88,10 +88,10 @@ try {
     const empty1 = epicBadgeOf('')
     const empty2 = epicBadgeOf(undefined)
     const empty3 = epicBadgeOf('  ')
-    ok(empty1.label === '未归档' && empty1.code === null
-      && empty2.label === '未归档' && empty2.code === null
-      && empty3.label === '未归档' && empty3.code === null,
-      'epicBadgeOf：空串/undefined/纯空白 → 灰「未归档」chip（code=null）')
+    ok(empty1.label === 'No epic' && empty1.code === null
+      && empty2.label === 'No epic' && empty2.code === null
+      && empty3.label === 'No epic' && empty3.code === null,
+      'epicBadgeOf：空串/undefined/纯空白 → 灰「No epic」chip（code=null；t260925-18 英文化）')
   }
 
   {

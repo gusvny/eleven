@@ -44,8 +44,8 @@ ok(JSON.stringify(findingsCountOf({ findings: 'garbage' })) === JSON.stringify({
 ok(findingsCountOf({ findings: { high: 'x', med: NaN } }).high === 0, '非数值降 0 不抛')
 
 // ---- inspectionStageShort（拓扑短名 + 未命中截断 + 畸形）
-ok(inspectionStageShort('inspect') === '审查', '拓扑短名命中')
-ok(inspectionStageShort('close') === '收口', 'close 短名')
+ok(inspectionStageShort('inspect') === 'Inspect', '拓扑短名命中（t260925-18 短名英文）')
+ok(inspectionStageShort('close') === 'Close', 'close 短名')
 ok(inspectionStageShort('mystery') === 'myst…', '未命中阶段截断')
 ok(inspectionStageShort('') === '' && inspectionStageShort(null) === '' && inspectionStageShort(7) === '', '畸形→空串')
 
@@ -54,16 +54,16 @@ const awaiting = inspectionProgressOf({
   stage: 'close', stage_state: 'awaiting-human', status: 'running',
   findings: { high: 1, med: 2, low: 0, total: 3 },
 })
-ok(awaiting && awaiting.state === 'awaiting-human' && awaiting.text.includes('等你签字')
-  && awaiting.text.includes('高1/中2/低0'), '等你签字行文（含发现数）')
+ok(awaiting && awaiting.state === 'awaiting-human' && awaiting.text.includes('Awaiting your signature')
+  && awaiting.text.includes('H1/M2/L0'), '等你签字行文（含发现数；t260925-18 英文化）')
 ok(inspectionProgressOf({ stage_state: 'running', awaiting_gate: true, findings: { total: 0 } })?.state
   === 'awaiting-human', 'awaiting_gate 推导等效（human_gate 缺键常态）')
 const closed = inspectionProgressOf({ stage_state: 'done', status: 'closed', findings: { high: 0, med: 0, low: 1, total: 1 } })
-ok(closed && closed.state === 'done' && closed.text.includes('已收口'), '闭合→done')
+ok(closed && closed.state === 'done' && closed.text.includes('Closed'), '闭合→done（t260925-18 英文）')
 const blocked = inspectionProgressOf({ stage_state: 'blocked', blocked_reason: '声明决议失败', findings: {} })
 ok(blocked && blocked.state === 'blocked' && blocked.text.includes('声明决议失败'), '受阻带原因')
 const running = inspectionProgressOf({ stage: 'suite', stage_state: 'running', findings: { high: 0, med: 0, low: 0, total: 0 } })
-ok(running && running.state === 'running' && running.text.includes('套件'), '运行中带阶段短名')
+ok(running && running.state === 'running' && running.text.includes('Suite'), '运行中带阶段短名（英文）')
 ok(inspectionProgressOf(null) === undefined && inspectionProgressOf('x') === undefined, '畸形行→undefined（行卡降级）')
 
 // ---- inspectionSummaryOf（详情面形状：summary 字典优先，findings 清单重计兜底）

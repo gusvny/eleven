@@ -31,13 +31,13 @@ export const INSPECTION_TOPOLOGY: {
   name: string
   short: string
 }[] = [
-  { id: 'setup', name: '泳道准备', short: '备道' },
-  { id: 'suite', name: '巡检泳道套件', short: '套件' },
+  { id: 'setup', name: '泳道准备', short: 'Setup' },
+  { id: 'suite', name: '巡检泳道套件', short: 'Suite' },
   // t260916-22：scan 段退役、inspect 段（只读 agent 审查）接位——本表随引擎
   // STAGES 同步改（一致性锁=t260916-05-inspection-topology-lock.mjs）。
-  { id: 'inspect', name: '巡检审查', short: '审查' },
-  { id: 'report', name: '落账', short: '落账' },
-  { id: 'close', name: '人审收口', short: '收口' },
+  { id: 'inspect', name: '巡检审查', short: 'Inspect' },
+  { id: 'report', name: '落账', short: 'Report' },
+  { id: 'close', name: '人审收口', short: 'Close' },
 ]
 
 /** 行卡/详情消费的巡检行最小字段面（对齐引擎行，多字段不关心）。 */
@@ -122,18 +122,18 @@ export function inspectionProgressOf(row: InspectionRowLike): { state: string; t
   const stageState = strOf(row.stage_state)
   const status = strOf(row.status)
   const c = findingsCountOf(row)
-  const findingsTxt = `发现 高${c.high}/中${c.med}/低${c.low}`
-  if (status === 'closed') return { state: 'done', text: `已收口 · ${findingsTxt}` }
+  const findingsTxt = `findings H${c.high}/M${c.med}/L${c.low}`
+  if (status === 'closed') return { state: 'done', text: `Closed · ${findingsTxt}` }
   if (stageState === 'awaiting-human' || row.awaiting_gate === true) {
-    return { state: 'awaiting-human', text: `等你签字 · ${findingsTxt}` }
+    return { state: 'awaiting-human', text: `Awaiting your signature · ${findingsTxt}` }
   }
   if (stageState === 'blocked') {
     const reason = strOf(row.blocked_reason)
-    return { state: 'blocked', text: `受阻${reason ? '：' + reason : ' · 原因见详情'}` }
+    return { state: 'blocked', text: `Blocked${reason ? ': ' + reason : ' · see detail'}` }
   }
   if (stageState === 'running' || stageState === 'awaiting' || stageState === '') {
     const stage = inspectionStageShort(row.stage)
-    return { state: 'running', text: `${stage ? stage + '中 · ' : ''}${findingsTxt}` }
+    return { state: 'running', text: `${stage ? stage + ' · ' : ''}${findingsTxt}` }
   }
   return { state: stageState, text: findingsTxt }
 }
@@ -152,7 +152,7 @@ export function inspectionTitleOf(row: InspectionRowLike): string {
  * 左栏巡检行类别徽标词（t260916-15）：行1 小 chip 文本单点——sidebar 项目组行徽标
  * 与兜底组头共用本常量，防「巡检」字面两处漂移；词面=组头既有叫法（宿主口语）。
  */
-export const INSPECTION_ROW_BADGE = '巡检'
+export const INSPECTION_ROW_BADGE = 'Inspection'
 
 /**
  * 巡检板面端点（t260915-08 建的引擎 ticket-list{kind:inspection} 薄壳）。左栏
@@ -202,5 +202,5 @@ export function inspectionSplitByProject(
  */
 export function inspectionDegradedNote(err: unknown): string {
   const msg = typeof err === 'string' ? err : String(err ?? '')
-  return `巡检板面拉取失败（显示上次快照，自动重试中）：${msg}`
+  return `Inspection panel fetch failed (showing last snapshot, auto-retrying): ${msg}`
 }

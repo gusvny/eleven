@@ -77,6 +77,10 @@ import tempfile
 import time
 
 SCENARIOS = [
+    # ---- t260925-18: console 详情英文化 + spec markdown + 底部六区块移除 ----
+    ("t260925-18-ui-english-spec-markdown",
+     "控制台工单详情英文化×spec markdown×底部六区块移除的 payload→像素验收（t260925-18，灰盒 L3，隔离台+API 桩，红线零接触 3099）：E1 界面文案全英文（卡标题/计数徽标/步骤条无 CJK）而数据不译（中文正文/中文票标题原样在）——「英文界面+中文内容」契约双向锚；E1b 未知枚举（stage/stage_state/status 三路 weird_* 标识）回落原始标识可见（永不空白永不中文，映射表契约的可判定锚，不锚英文措辞）；E2 spec 卡基本 markdown 结构化（标题/列表/粗体/行内码/栅栏逐元素在）+注入消毒三件（<script> 零元素/<img onerror> 无属性/javascript: 链接拒绝/原文转义字面可见）+注入零执行（无 dialog/window.__pwned）+中文数据段保留；E2c 无 spec 老票零扰动；E3 底部六区块（基本信息/入参/验收清单/流水/接力时间线/快照要点）界面标题不在抽屉（只锁 UI 移除，不锁数据面——CLI 面另有人覆盖）；E4 泳道图阶段标签来自 stage id 映射（引擎中文模板 label 做方案/审方案不泄漏、未知节点 id 原样回落）；E5 全旅程零 pageerror/console.error。与 t260915-05（拓扑渲染/降级面）、t260911-05（blocked 四件 payload→pixel）intent 不同面；推翻并接替 t260904-06 spec-card-dom 的旧形态断言（中文标题/纯文本保真），后者归 implement 段随票同步改写。实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿；browser 依赖缺席=ENV_FAIL 点名（KI-036 家族）",
+     "node integration/t260925-18/sc_ui_english_spec_markdown.mjs", "browser-free"),
     # ---- t260925-01: 产出型巡检底座 + doc 面（lane-produced doc changes for human merge） ----
     ("t260925-01-inspection-produce-doc-face",
      "产出型巡检底座+doc 面验收棒（t260925-01，灰盒秒级零 docker，与既有巡检场景族不同 intent=产 change 交人审而非只报告）：A 声明面——实例键 mode（词表 report|produce，缺省 report=未声明零行为）/docs_root（引擎默认 docs/、声明可覆盖），坏值 fail-closed 点名值本身，排程 payload 携带两键（A6）；B 产出契约层 inspection_produce 五函数——畸形输入（坏 JSON/多围栏/空围栏/无围栏）fail-closed、写集闸越界/`../`逃逸逐条点名（A2）、零 change 无证据判红（A5）、保护面交集点名不硬失败（A3 前半）、文档自检（索引指向缺失文件判红点名/畸形 index.json 降级不崩）；C workflow 源码锁——InspectionProduceWorkflow 类与 dev-lane 分链、两门 id=produce-close/produce-protect-authorize 不复用 inspection-close 字面值（防两类票信号串门）、reject 路径报告落账先于拆道（丢弃留痕不删台账）、produce 起票路由零共享 TASK_QUEUE 字面（KI-113 不复刻）；D A4 只读面零改动——run_inspection_inspect 不引用 produce 写钉、readonly_pin_patch 在位。实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿",

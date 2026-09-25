@@ -216,42 +216,6 @@ function splitCells(line) {
 	return s.split("|").map((c) => c.trim());
 }
 //#endregion
-//#region src/shared/workspace.ts
-/** 路径末段（短 slug 展示：.worktrees/t260822-x → t260822-x）。 */
-function shortSlug$1(path) {
-	const segs = path.split("/").filter(Boolean);
-	return segs[segs.length - 1] ?? path;
-}
-/**
-* 由工单行/详情的工作空间字段计算展示信息。
-* 旧工单（workspace=null）回退读 worktree 字段；两者皆无 → 主树（数据道/审读/回归
-* 等直接改主树的工单，设计 v0.3 模板 lane: main）。
-*/
-function workspaceInfoOf(t) {
-	const ws = t?.workspace;
-	if (ws && ws.type === "worktree" && typeof ws.path === "string" && ws.path !== "") return {
-		type: "worktree",
-		label: shortSlug$1(ws.path),
-		path: ws.path
-	};
-	if (ws && ws.type === "dir" && typeof ws.path === "string" && ws.path !== "") return {
-		type: "dir",
-		label: ws.path,
-		path: ws.path
-	};
-	const wt = t?.worktree;
-	if (typeof wt === "string" && wt !== "") return {
-		type: "worktree",
-		label: shortSlug$1(wt),
-		path: wt
-	};
-	return {
-		type: "main",
-		label: "主树",
-		path: ""
-	};
-}
-//#endregion
 //#region src/shared/parts.ts
 const PART_ICON = {
 	agent: "🤖",
@@ -689,13 +653,13 @@ function fmtDur$1(ms) {
 function stageDurationTitle(d, nowMs) {
 	const parts = [];
 	const total = stageTotalMs(d, nowMs);
-	if (total !== null) parts.push(`耗时 ${fmtDur$1(total)}`);
+	if (total !== null) parts.push(`took ${fmtDur$1(total)}`);
 	d.rounds.forEach((r, i) => {
-		parts.push(`第${i + 1}轮 ${fmtDur$1(windowMs(r, nowMs))}`);
+		parts.push(`Round ${i + 1} ${fmtDur$1(windowMs(r, nowMs))}`);
 	});
 	if (d.humanWaits.length > 0) {
 		const seg = d.humanWaits.map((w) => fmtDur$1(windowMs(w, nowMs))).join(" + ");
-		parts.push(`人等 ${fmtDur$1(humanWaitTotalMs(d, nowMs))}（${seg}）`);
+		parts.push(`human wait ${fmtDur$1(humanWaitTotalMs(d, nowMs))} (${seg})`);
 	}
 	return parts.join(" · ");
 }
@@ -1005,6 +969,78 @@ function buildLaneMap(topologyRaw, detailRaw) {
 	};
 }
 //#endregion
+//#region src/client/ui-labels.ts
+/**
+* ui-labels —— 控制台 UI 英文文案唯一映射表（t260925-18，CLAUDE.md 规则 6 补充令）。
+*
+* 口径（宿主令 260925）：
+*  - 界面文案一律英文；数据不译（票面正文/交接报告/台账保持原语言）。
+*  - 英文标签以**引擎既有英文标识**为真源（stage id / stage_state / status /
+*    workflow 模板 id），由本表统一映射；不另造词、不逐页各译。
+*  - 未知值回落原始标识本身（永不空白、永不中文）——engine 加新段/新态时
+*    UI 显示原 id，等待本表补条目，不做静默降级。
+*
+* 纯函数层：无 DOM / 无 IO，node 直跑可测（tests/ui-labels.mjs）。
+*/
+/** 查表回落：表内无此键 → 返回原始标识（trim 后空白串也视为未知）。 */
+function labelOf$1(table, id) {
+	if (typeof id !== "string") return "";
+	const key = id.trim();
+	if (key === "") return "";
+	return table[key] ?? key;
+}
+/** 阶段 id → 英文段名（真源：dev_lane.py / inspection_flow.py Stage(id=…)）。 */
+const STAGE_TABLE = {
+	create_plan: "Create Plan",
+	review_plan: "Review Plan",
+	implement: "Implement",
+	design_integration_tests: "Design Integration Tests",
+	ui_evidence: "UI Evidence",
+	run_integration_tests: "Run Integration Tests",
+	arbitrate: "Arbitrate",
+	acceptance_walkthrough: "Acceptance Walkthrough",
+	merge_check: "Merge Check",
+	merge: "Merge (Human Review)",
+	setup: "Setup",
+	suite: "Suite",
+	inspect: "Inspect",
+	produce: "Produce",
+	selfcheck: "Self-check",
+	report: "Report",
+	close: "Close"
+};
+/** 阶段态 stage_state → 英文（真源：base.py stage_state 写入点）。 */
+const STATE_TABLE = {
+	running: "In Progress",
+	awaiting: "Awaiting Dispatch",
+	"awaiting-human": "Awaiting Approval",
+	blocked: "Blocked",
+	rework: "Rework",
+	done: "Done",
+	closed: "Done"
+};
+/** 工作流模板 id → 英文名（真源：模板注册 id；模板 name 字段是中文数据，不译不显）。 */
+const WORKFLOW_TABLE = {
+	"dev-lane": "Dev Lane",
+	"inspection-lite": "Inspection",
+	"chore-lane": "Chore Lane"
+};
+const STATE_LABEL = STATE_TABLE;
+function stageLabel(id) {
+	return labelOf$1(STAGE_TABLE, id);
+}
+function workflowLabel(id) {
+	return labelOf$1(WORKFLOW_TABLE, id);
+}
+/** 段名优先级：拓扑/模板节点自带英文时数据侧已可用；此处只认 id 映射（显示层覆盖，
+*  不改引擎数据——review 260925 裁定：引擎中文 label 数据不动，仅显示层按 id 覆盖）。 */
+function stageDisplayLabel(stageId, engineName) {
+	const mapped = stageLabel(stageId);
+	if (mapped !== "" && mapped !== stageId) return mapped;
+	if (mapped === "" && typeof engineName === "string" && engineName.trim() !== "") return engineName;
+	return mapped;
+}
+//#endregion
 //#region src/client/lane-map.tsx
 /**
 * lane-map.tsx —— 真泳道图（拓扑驱动）+ 检查明细区组件（t260915-05，mock ①③④）。
@@ -1034,27 +1070,27 @@ const LM_ICON = {
 };
 /** 解除方式人话（hover 经过第三拍「如何解除」；词表=lane-states resolvedBy）。 */
 const RESOLVED_HOW = {
-	rerun: "本段重跑完成",
-	advanced: "工作流已推进至后续段",
-	closed: "工单已收口"
+	rerun: "stage rerun completed",
+	advanced: "workflow advanced to later stages",
+	closed: "ticket closed"
 };
 /** 「曾受阻」经过（何时受阻、何因、如何解除）：角标与节点 hover 共用一段话。 */
 function everBlockedTitle(h) {
-	const bits = [`曾受阻 ${h.passes.length} 次`];
+	const bits = [`Blocked ${h.passes.length}× before`];
 	if (h.last.at) bits.push(h.last.at);
 	if (h.last.reason) bits.push(h.last.reason);
-	if (h.last.gen !== void 0) bits.push(`第${h.last.gen}轮`);
-	if (h.resolved) bits.push(`已解除（${RESOLVED_HOW[h.resolvedBy ?? ""] || "已解除"}${h.resolvedAt ? `：${h.resolvedAt}` : ""}）`);
+	if (h.last.gen !== void 0) bits.push(`Round ${h.last.gen}`);
+	if (h.resolved) bits.push(`Resolved (${RESOLVED_HOW[h.resolvedBy ?? ""] || "resolved"}${h.resolvedAt ? `: ${h.resolvedAt}` : ""})`);
 	return bits.join(" · ");
 }
 function roundTitle(nv, gen, state) {
 	const r = nv.rounds.find((x) => x.gen === gen);
-	if (!r) return `第${gen}轮`;
-	const bits = [`第${r.gen}轮`];
+	if (!r) return `Round ${gen}`;
+	const bits = [`Round ${r.gen}`];
 	if (r.at) bits.push(r.at);
-	bits.push(state === "rework" ? "被打回" : state);
+	bits.push(state === "rework" ? "reworked" : state);
 	if (r.reason) bits.push(r.reason);
-	if (r.phase) bits.push(`相位 ${r.phase}`);
+	if (r.phase) bits.push(`Phase ${r.phase}`);
 	if (r.handoffSummary) bits.push(r.handoffSummary);
 	return bits.join(" · ");
 }
@@ -1064,7 +1100,7 @@ function LaneMapNode({ nv, inGroup }) {
 	const glyph = n.kind === "human" ? LANE_KIND_ICON.human : LM_ICON[nv.vis] ?? LM_ICON.todo;
 	const ever = nv.blockedHistory?.resolved === true && nv.blockedHistory.passes.length > 0 && nv.vis === "done";
 	const everTitle = ever && nv.blockedHistory ? everBlockedTitle(nv.blockedHistory) : "";
-	const title = `${n.label} · ${n.role} · ${n.kind}${n.optional ? ` · ${n.optional}` : ""}${everTitle ? ` · ${everTitle}` : ""}`;
+	const title = `${stageDisplayLabel(n.id, n.label)} · ${n.role} · ${n.kind}${n.optional ? ` · ${n.optional}` : ""}${everTitle ? ` · ${everTitle}` : ""}`;
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 		className: `wb-lm-node${inGroup ? " wb-lm-node-inlane" : ""}`,
 		"data-id": n.id,
@@ -1080,21 +1116,21 @@ function LaneMapNode({ nv, inGroup }) {
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 				className: "wb-lm-name",
 				children: [
-					n.label,
+					stageDisplayLabel(n.id, n.label),
 					n.optional ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("em", {
 						className: "wb-lm-opt",
-						title: `条件段：${n.optional}`,
+						title: `Conditional stage: ${n.optional}`,
 						children: n.optional
 					}) : null,
 					nv.badge ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", {
 						className: "wb-lm-badge",
-						title: `该段共 ${nv.rounds.length} 轮（返工史见打回横幅）`,
+						title: `${nv.rounds.length} rounds at this stage (rework history in the rework banner)`,
 						children: nv.badge
 					}) : null,
 					ever && nv.blockedHistory ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {
 						className: "wb-lm-ever",
 						title: everBlockedTitle(nv.blockedHistory),
-						children: "曾受阻"
+						children: "was blocked"
 					}) : null
 				]
 			}),
@@ -1123,9 +1159,9 @@ function LaneMapGroup({ model, groupId }) {
 		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 			className: "wb-lm-plabel",
 			children: [
-				"并行 · ",
+				"Parallel · ",
 				g.members.length,
-				" 道"
+				" lanes"
 			]
 		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 			className: "wb-lm-branches",
@@ -1170,9 +1206,9 @@ function ChecksDetail({ runs, cap = 3 }) {
 		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 			className: "wb-checks-ttl",
 			children: [
-				"检查明细 · ",
+				"Check details · ",
 				runs.length,
-				" 轮门记录（引擎结构化数据直译，点行展开原始输出）"
+				" gate runs (engine structured data verbatim; click a row for raw output)"
 			]
 		}), runs.slice(0, cap).map((run, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 			className: "wb-ck-run",
@@ -1184,15 +1220,11 @@ function ChecksDetail({ runs, cap = 3 }) {
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: run.label }),
 					run.gen !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 						className: "wb-ck-run-gen",
-						children: [
-							"第 ",
-							run.gen,
-							" 轮"
-						]
+						children: ["Round ", run.gen]
 					}) : null,
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-ck-run-verdict",
-						children: run.green ? "全绿" : `${run.redCount} 项红灯`
+						children: run.green ? "all green" : `${run.redCount} red`
 					})
 				]
 			}), run.rows.map((row, j) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
@@ -1205,7 +1237,7 @@ function ChecksDetail({ runs, cap = 3 }) {
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-ck-name",
-						children: row.item || row.checkId || "（未命名检查项）"
+						children: row.item || row.checkId || "(unnamed check)"
 					}),
 					row.detail ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-ck-detail",
@@ -5699,11 +5731,11 @@ function QuarantineModal(props) {
 */
 /** 五态人话短名（状态圆点旁文字，不占块）。 */
 const STATE4_LABEL = {
-	active: "在飞",
-	done: "收口",
-	waiting: "等你",
-	blocked: "受阻",
-	failed: "已失败"
+	active: "Active",
+	done: "Closed",
+	waiting: "Waiting",
+	blocked: "Blocked",
+	failed: "Failed"
 };
 /**
 * 终态「成功收口」与「在飞」执行状态词表（t260921-03 从 t260919-02 的活/成混称
@@ -5808,8 +5840,8 @@ function closeHealthOf(row) {
 */
 function closeHealthBadgeOf(row) {
 	const h = closeHealthOf(row);
-	if (h === "abnormal") return "已结束·异常（无报告）";
-	if (h === "unreadable") return "已结束·待核";
+	if (h === "abnormal") return "Closed·Abnormal (no report)";
+	if (h === "unreadable") return "Closed·Unverified";
 	return "";
 }
 /**
@@ -5825,7 +5857,7 @@ function pauseOpOf(paused) {
 * at_gate=已停在段间门口；未知/空相位按 pending 文案兜底（宁可保守提示不可静默）。
 */
 function pausedBadgeText(phase) {
-	return phase === "at_gate" ? "⏸ 已暂停在段间" : "⏸ 暂停中（待段间生效）";
+	return phase === "at_gate" ? "⏸ Paused at the stage gate" : "⏸ Pausing (takes effect between stages)";
 }
 /**
 * 排序层（t260916-15；t260919-02 增第三参 execStatus 与 failed 档；t260921-03 done
@@ -5940,10 +5972,10 @@ function stageShortOf(stage) {
 }
 /** 引擎状态词 → 动词短语（表驱动；未知词不在表=不产出文案）。 */
 const PROGRESS_PHRASES = {
-	running: "执行中",
-	"awaiting-human": "等你签字",
-	blocked: "受阻 · 原因见详情",
-	done: "本步已完成"
+	running: "Running",
+	"awaiting-human": "Awaiting your signature",
+	blocked: "Blocked · see detail",
+	done: "Stage done"
 };
 /** timeline 条目的最小形状校验（外部快照不可信）。 */
 function timelineEntryLike(e) {
@@ -6037,10 +6069,10 @@ function relativeTime(ts, nowMs = Date.now()) {
 	if (typeof ts !== "number" || !Number.isFinite(ts) || ts <= 0) return null;
 	const diff = nowMs - ts;
 	if (diff < -6e4) return null;
-	if (diff < 6e4) return "刚刚";
-	if (diff < 36e5) return `${Math.floor(diff / 6e4)} 分钟前`;
-	if (diff < 864e5) return `${Math.floor(diff / 36e5)} 小时前`;
-	return `${Math.floor(diff / 864e5)} 天前`;
+	if (diff < 6e4) return "just now";
+	if (diff < 36e5) return `${Math.floor(diff / 6e4)}m ago`;
+	if (diff < 864e5) return `${Math.floor(diff / 36e5)}h ago`;
+	return `${Math.floor(diff / 864e5)}d ago`;
 }
 /** 首句展示截断上限（字符）：超过即截断加省略号——行卡单行放不下长句。 */
 const FIRST_SENTENCE_MAX = 48;
@@ -6078,129 +6110,6 @@ function ticketDisplayTitle(t) {
 	if (first !== "") return first;
 	return t.id;
 }
-/**
-* ticket show 详情 → 快照要点（阶段时间线/最近交接/门与签字记录/工作流快照要点）。
-* 畸形输入纪律（消费外部快照=不可信输入，单测必带畸形用例）：
-*   - 非对象/全空 → 各字段空形状，不抛；
-*   - timeline 按 at 升序排序后裁尾 20 条（KI-019 呈现口径钉死：乱序到达被归位；
-*     缺 at/畸形 at 条目沉底并带 untime 标注——排序失真面显性化，不静默混排）；
-*   - handoffs 取尾部 5 条（最近交接）；gate_runs + signatures 合并为记录表
-*     （按 at 降序=最近在前；条目畸形逐条跳过）。
-*/
-function snapshotDigest(detail) {
-	const empty = {
-		workflow: {
-			id: "",
-			stage: "",
-			stageState: "",
-			status: "",
-			revisions: null,
-			worktree: ""
-		},
-		timeline: [],
-		handoffs: [],
-		gates: []
-	};
-	if (detail === null || typeof detail !== "object") return empty;
-	const d = detail;
-	const str = (v) => typeof v === "string" ? v : "";
-	const workflow = {
-		id: str(d.id),
-		stage: str(d.stage),
-		stageState: str(d.stage_state),
-		status: str(d.status),
-		revisions: typeof d.revision_count === "number" && Number.isFinite(d.revision_count) ? d.revision_count : null,
-		worktree: str(d.worktree)
-	};
-	const rawTl = Array.isArray(d.timeline) ? d.timeline : [];
-	const timed = [];
-	const untimed = [];
-	for (const e of rawTl) {
-		if (e === null || typeof e !== "object") continue;
-		const o = e;
-		const stage = str(o.stage);
-		const state = str(o.state);
-		if (stage === "" && state === "") continue;
-		const at = o.at;
-		const ms = typeof at === "number" && Number.isFinite(at) ? at : typeof at === "string" && at.trim() !== "" && Number.isFinite(Number(at)) ? Number(at) : null;
-		if (ms === null) untimed.push({
-			stage,
-			state,
-			at: null,
-			untime: true
-		});
-		else timed.push({
-			stage,
-			state,
-			at: String(at),
-			ms
-		});
-	}
-	timed.sort((a, b) => a.ms - b.ms);
-	const timeline = [...timed.slice(-20).map((e) => ({
-		stage: e.stage,
-		state: e.state,
-		at: e.at,
-		untime: false
-	})), ...untimed];
-	const rawHo = Array.isArray(d.handoffs) ? d.handoffs : [];
-	const handoffs = [];
-	for (let i = rawHo.length - 1; i >= 0 && handoffs.length < 5; i--) {
-		const o = rawHo[i];
-		if (o === null || typeof o !== "object") continue;
-		const h = o;
-		handoffs.push({
-			from: str(h.from),
-			to: str(h.to),
-			at: typeof h.at === "string" ? h.at : null
-		});
-	}
-	const gates = [];
-	const gateMs = (v) => {
-		const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
-		return Number.isFinite(n) ? n : NaN;
-	};
-	const rawGateRuns = Array.isArray(d.gate_runs) ? d.gate_runs : [];
-	for (const g of rawGateRuns) {
-		if (g === null || typeof g !== "object") continue;
-		const o = g;
-		gates.push({
-			kind: "gate",
-			stage: str(o.stage),
-			who: str(o.kind) || "script",
-			decision: str(o.status) || str(o.result),
-			note: str(o.note),
-			at: typeof o.at === "string" ? o.at : null
-		});
-	}
-	const sigs = d.signatures;
-	if (sigs !== null && typeof sigs === "object") for (const [stage, v] of Object.entries(sigs)) {
-		if (v === null || typeof v !== "object") continue;
-		const o = v;
-		gates.push({
-			kind: "signature",
-			stage,
-			who: str(o.who),
-			decision: str(o.decision),
-			note: str(o.note),
-			at: typeof o.at === "string" ? o.at : null
-		});
-	}
-	gates.sort((a, b) => {
-		const am = gateMs(a.at);
-		const bm = gateMs(b.at);
-		if (Number.isNaN(am) && Number.isNaN(bm)) return 0;
-		if (Number.isNaN(am)) return 1;
-		if (Number.isNaN(bm)) return -1;
-		return bm - am;
-	});
-	return {
-		workflow,
-		timeline,
-		handoffs,
-		gates
-	};
-}
 //#endregion
 //#region src/client/ticket-row-card.tsx
 /** 悬停 title：id＋阶段语境（C2 消费点：阶段短名拓扑驱动）＋阻塞原因＋执行状态原文
@@ -6209,11 +6118,11 @@ function snapshotDigest(detail) {
 function cardTitle(t, wf) {
 	const parts = [t.id];
 	const short = stageShortOf((wf?.stages ?? []).find((s) => s?.id === t.stage));
-	if (short !== "") parts.push(`阶段：${short}`);
-	if (t.blocked_reason) parts.push(`阻塞原因：${t.blocked_reason}`);
-	if (t.exec_status) parts.push(`执行状态：${t.exec_status}`);
-	if (t.close_health_reason) parts.push(`收口：${t.close_health_reason}`);
-	if (t.updated) parts.push(`更新 ${t.updated}`);
+	if (short !== "") parts.push(`Stage: ${short}`);
+	if (t.blocked_reason) parts.push(`Blocked: ${t.blocked_reason}`);
+	if (t.exec_status) parts.push(`Exec: ${t.exec_status}`);
+	if (t.close_health_reason) parts.push(`Close: ${t.close_health_reason}`);
+	if (t.updated) parts.push(`Updated ${t.updated}`);
 	return parts.join("\n");
 }
 function TicketRowCard({ t, wf, progress, compact = false, active = false, busy = false, updatedTsMs, kindBadge, ops = [], peerViewers = [], onOpen, onAdvance, onDispatch, onRework, onUnblock, onClose, onPause, onResume, onOpenEpic }) {
@@ -6253,13 +6162,13 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 						className: "wb-card-paused",
 						"data-paused": "1",
 						"data-paused-phase": t.paused_phase || "pending",
-						title: t.paused_phase === "at_gate" ? "已停在段间门口：不派下一段，点「恢复」继续" : "暂停已受理：当前段（含在飞 agent）自然跑完后停住",
+						title: t.paused_phase === "at_gate" ? "Halted at the stage gate: next stage not dispatched; click Resume to continue" : "Pause accepted: the current stage (incl. in-flight agent) finishes, then stops",
 						children: pausedBadgeText(t.paused_phase)
 					}),
 					kindBadge && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-card-kind",
 						"data-kind-badge": kindBadge.text,
-						title: `类别：${kindBadge.text}`,
+						title: `Kind: ${kindBadge.text}`,
 						children: kindBadge.text
 					}),
 					(() => {
@@ -6276,7 +6185,7 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 						children: t.id
 					}),
 					(peerViewers?.length ?? 0) > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						title: `另一页签正在查看：${(peerViewers ?? []).map((v) => v.who).join("、")}`,
+						title: `Viewed from another tab: ${(peerViewers ?? []).map((v) => v.who).join(", ")}`,
 						children: "👀"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
@@ -6292,7 +6201,7 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 							["--epic-c"]: epicColor,
 							color: epicChipColor()
 						},
-						title: `所属立项：${t.epic}`,
+						title: `Epic: ${t.epic}`,
 						onClick: (ev) => {
 							ev.stopPropagation();
 							onOpenEpic?.(t.epic ?? "");
@@ -6319,7 +6228,7 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 					}),
 					!compact && dots.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-card-lane",
-						title: `站道（${dots.length} 站）`,
+						title: `Stage dots (${dots.length})`,
 						children: dots.map((d, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 							className: "wb-card-lane-dot",
 							"data-visual": d,
@@ -6338,7 +6247,7 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 							ev.stopPropagation();
 							onOpen("review");
 						},
-						children: "去签字 →"
+						children: "Sign →"
 					}),
 					state4 === "blocked" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						className: "wb-card-btn wb-card-btn-blue",
@@ -6352,45 +6261,45 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 						className: "wb-card-btn",
 						disabled: busy,
 						onClick: stop(onAdvance),
-						children: "推进"
+						children: "Advance"
 					}),
 					!compact && ops.includes("dispatch-next") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						className: "wb-card-btn",
 						disabled: busy,
 						onClick: stop(onDispatch),
-						children: "派下一棒"
+						children: "Dispatch next"
 					}),
 					!compact && ops.includes("unblock") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						className: "wb-card-btn",
 						disabled: busy,
 						onClick: stop(onUnblock),
-						children: "解除阻塞"
+						children: "Unblock"
 					}),
 					!compact && ops.includes("rework") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						className: "wb-card-btn wb-card-btn-danger",
 						disabled: busy,
 						onClick: stop(onRework),
-						children: "打回"
+						children: "Rework"
 					}),
 					!compact && ops.includes("pause") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						className: "wb-card-btn",
 						disabled: busy,
 						onClick: stop(onPause),
-						title: "段间暂停：当前段（含在飞 agent）自然跑完后停住，不派下一段",
-						children: "暂停"
+						title: "Pause between stages: current stage (incl. in-flight agent) finishes, then stops; no next stage",
+						children: "Pause"
 					}),
 					!compact && ops.includes("resume") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						className: "wb-card-btn wb-card-btn-green",
 						disabled: busy,
 						onClick: stop(onResume),
-						title: "恢复：段间门口放行，继续派段",
-						children: "恢复"
+						title: "Resume: release the stage gate and keep dispatching",
+						children: "Resume"
 					}),
 					!compact && ops.includes("close") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						className: "wb-card-btn wb-card-btn-green",
 						disabled: busy,
 						onClick: stop(onClose),
-						children: "完成"
+						children: "Done"
 					})
 				]
 			})
@@ -6430,27 +6339,27 @@ const INSPECTION_TOPOLOGY = [
 	{
 		id: "setup",
 		name: "泳道准备",
-		short: "备道"
+		short: "Setup"
 	},
 	{
 		id: "suite",
 		name: "巡检泳道套件",
-		short: "套件"
+		short: "Suite"
 	},
 	{
 		id: "inspect",
 		name: "巡检审查",
-		short: "审查"
+		short: "Inspect"
 	},
 	{
 		id: "report",
 		name: "落账",
-		short: "落账"
+		short: "Report"
 	},
 	{
 		id: "close",
 		name: "人审收口",
-		short: "收口"
+		short: "Close"
 	}
 ];
 /** 消费外部行=不可信输入的取串助手（非串→''）。 */
@@ -6535,27 +6444,27 @@ function inspectionProgressOf(row) {
 	const stageState = strOf$1(row.stage_state);
 	const status = strOf$1(row.status);
 	const c = findingsCountOf(row);
-	const findingsTxt = `发现 高${c.high}/中${c.med}/低${c.low}`;
+	const findingsTxt = `findings H${c.high}/M${c.med}/L${c.low}`;
 	if (status === "closed") return {
 		state: "done",
-		text: `已收口 · ${findingsTxt}`
+		text: `Closed · ${findingsTxt}`
 	};
 	if (stageState === "awaiting-human" || row.awaiting_gate === true) return {
 		state: "awaiting-human",
-		text: `等你签字 · ${findingsTxt}`
+		text: `Awaiting your signature · ${findingsTxt}`
 	};
 	if (stageState === "blocked") {
 		const reason = strOf$1(row.blocked_reason);
 		return {
 			state: "blocked",
-			text: `受阻${reason ? "：" + reason : " · 原因见详情"}`
+			text: `Blocked${reason ? ": " + reason : " · see detail"}`
 		};
 	}
 	if (stageState === "running" || stageState === "awaiting" || stageState === "") {
 		const stage = inspectionStageShort(row.stage);
 		return {
 			state: "running",
-			text: `${stage ? stage + "中 · " : ""}${findingsTxt}`
+			text: `${stage ? stage + " · " : ""}${findingsTxt}`
 		};
 	}
 	return {
@@ -6604,7 +6513,7 @@ function inspectionSplitByProject(rows, registeredKeys) {
 * 非串 err 走 String() 兜底不抛。
 */
 function inspectionDegradedNote(err) {
-	return `巡检板面拉取失败（显示上次快照，自动重试中）：${typeof err === "string" ? err : String(err ?? "")}`;
+	return `Inspection panel fetch failed (showing last snapshot, auto-retrying): ${typeof err === "string" ? err : String(err ?? "")}`;
 }
 //#endregion
 //#region src/client/metrics-model.ts
@@ -47794,7 +47703,7 @@ function WorkbenchSidebar(props) {
 					inspectionRowsRef.current = ir.result?.tickets ?? [];
 					setInspectionRows(inspectionRowsRef.current);
 					setInspectionNote("");
-				} else setInspectionNote(inspectionDegradedNote(ir?.error !== void 0 ? ir.error : `HTTP 无 JSON 回执：${JSON.stringify(ir).slice(0, 120)}`));
+				} else setInspectionNote(inspectionDegradedNote(ir?.error !== void 0 ? ir.error : `HTTP response has no JSON body: ${JSON.stringify(ir).slice(0, 120)}`));
 			} catch (err) {
 				if (cancelled) return;
 				setInspectionNote(inspectionDegradedNote(err instanceof Error ? err.message : String(err)));
@@ -47859,7 +47768,7 @@ function WorkbenchSidebar(props) {
 		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: CSS$2 }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 			className: "wb-sb-icon",
 			onClick: expandSidebar,
-			title: "工单台",
+			title: "Ticket Board",
 			children: "⊞"
 		})]
 	});
@@ -47884,7 +47793,7 @@ function WorkbenchSidebar(props) {
 								padding: 16,
 								color: "var(--dsw-derive-fg,#888)"
 							},
-							children: "加载中…"
+							children: "Loading…"
 						}) : groups.map((g) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-group-head",
 							onClick: () => setCollapsed((c) => ({
@@ -47923,8 +47832,8 @@ function WorkbenchSidebar(props) {
 									children: [
 										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 											className: `wb-view-icon ${rightView === "board" && viewProject === g.project.key ? "active" : ""}`,
-											title: "工单列表",
-											"aria-label": "工单列表",
+											title: "Tickets",
+											"aria-label": "Tickets",
 											onClick: () => handleViewIcon(g.project.key, "board"),
 											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "board" })
 										}),
@@ -47932,8 +47841,8 @@ function WorkbenchSidebar(props) {
 											className: `wb-view-icon ${rightView === "docs" ? "active" : ""}`,
 											role: "button",
 											tabIndex: 0,
-											title: "文档",
-											"aria-label": "文档",
+											title: "Docs",
+											"aria-label": "Docs",
 											onKeyDown: (e) => {
 												if (e.key === "Enter" || e.key === " ") handleViewIcon(g.project.key, "docs");
 											},
@@ -47942,23 +47851,23 @@ function WorkbenchSidebar(props) {
 										}),
 										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 											className: `wb-view-icon ${rightView === "routes" && viewProject === g.project.key ? "active" : ""}`,
-											title: "模型路由",
-											"aria-label": "模型路由",
+											title: "Model Routes",
+											"aria-label": "Model Routes",
 											onClick: () => handleViewIcon(g.project.key, "routes"),
 											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "routes" })
 										}),
 										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 											className: `wb-view-icon ${rightView === "epics" && viewProject === g.project.key ? "active" : ""}`,
-											title: "立项单",
-											"aria-label": "立项单",
+											title: "Epics",
+											"aria-label": "Epics",
 											onClick: () => handleViewIcon(g.project.key, "epics"),
 											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "epics" })
 										}),
 										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 											className: "wb-view-icon",
 											"data-wb-project-settings-entry": "",
-											title: "项目设置",
-											"aria-label": "项目设置",
+											title: "Project Settings",
+											"aria-label": "Project Settings",
 											onClick: () => {
 												setModal({
 													kind: "settings",
@@ -47992,7 +47901,7 @@ function WorkbenchSidebar(props) {
 							onClose: projectSessions.handleClose
 						}), g.tickets.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 							className: "wb-group-empty",
-							children: "无进行中工单"
+							children: "No active tickets"
 						}) : g.tickets.map((t) => {
 							const insp = isInspectionRow(t);
 							return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
@@ -48000,7 +47909,7 @@ function WorkbenchSidebar(props) {
 								compact: true,
 								wf: insp ? INSPECTION_WF_LIKE : void 0,
 								progress: insp ? inspectionProgressOf(t) : void 0,
-								kindBadge: insp ? { text: "巡检" } : void 0,
+								kindBadge: insp ? { text: "Inspection" } : void 0,
 								active: selectedId === t.id,
 								updatedTsMs: (isOpen(t) ? t.created : t.close_ts || t.created) !== void 0 ? (isOpen(t) ? t.created : t.close_ts || t.created) * 1e3 : void 0,
 								onOpen: () => handleTicketClick(t, g.project.key)
@@ -48017,7 +47926,7 @@ function WorkbenchSidebar(props) {
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 									className: "wb-group-name",
-									children: "巡检"
+									children: "Inspection"
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 									className: "wb-group-count",
@@ -48029,7 +47938,7 @@ function WorkbenchSidebar(props) {
 							compact: true,
 							wf: INSPECTION_WF_LIKE,
 							progress: inspectionProgressOf(t),
-							kindBadge: { text: "巡检" },
+							kindBadge: { text: "Inspection" },
 							active: selectedId === t.id,
 							updatedTsMs: (isOpen(t) ? t.created : t.close_ts || t.created) !== void 0 ? (isOpen(t) ? t.created : t.close_ts || t.created) * 1e3 : void 0,
 							onOpen: () => handleTicketClick(t, "")
@@ -48038,7 +47947,7 @@ function WorkbenchSidebar(props) {
 							className: "wb-quar-row",
 							"data-wb-quarantine-row": "",
 							role: "button",
-							"aria-label": `隔离条目 ${q.key}`,
+							"aria-label": `Quarantined entry ${q.key}`,
 							onClick: () => setModal({
 								kind: "quarantine",
 								entry: q
@@ -48053,12 +47962,12 @@ function WorkbenchSidebar(props) {
 							className: "wb-project-add-row",
 							"data-wb-project-add-row": "",
 							role: "button",
-							"aria-label": "接入项目",
+							"aria-label": "Add project",
 							onClick: () => setModal({ kind: "add" }),
 							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 								className: "wb-project-add-plus",
 								children: "＋"
-							}), "接入项目"]
+							}), "Add project"]
 						})
 					]
 				})
@@ -48075,15 +47984,15 @@ function WorkbenchSidebar(props) {
 							children: [
 								"⚠️ ",
 								staleBanner === "restart" ? "有更新，重启控制台生效" : "有更新，刷新页面生效",
-								"（",
-								staleBanner === "restart" ? "当前控制台进程仍在跑旧代码" : "当前页面仍在跑旧代码",
-								"，度量/diff 可能异常）。"
+								"(",
+								staleBanner === "restart" ? "console process still runs old code" : "this page still runs old code",
+								"; metrics/diff may be stale)."
 							]
 						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 							className: "wb-stale-dismiss",
-							title: "本页签暂时隐藏",
+							title: "Hide in this tab",
 							onClick: () => setStaleDismissed(true),
-							children: "知道了"
+							children: "Got it"
 						})]
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -48134,7 +48043,7 @@ function WorkbenchSidebar(props) {
 								ref: metricsBtnRef,
 								className: "wb-sb-foot-btn",
 								"data-on": metricsOpen,
-								title: "度量面板（stage 时长 / 交付 / Token / 系统健康）",
+								title: "Metrics (stage durations / delivery / tokens / system health)",
 								onClick: () => {
 									setSettingsOpen(false);
 									setMetricsOpen((o) => !o);
@@ -48145,7 +48054,7 @@ function WorkbenchSidebar(props) {
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								className: "wb-sb-foot-btn",
 								"data-on": settingsOpen,
-								title: "设置",
+								title: "Settings",
 								onClick: () => {
 									setMetricsOpen(false);
 									setSettingsOpen((o) => !o);
@@ -48157,15 +48066,15 @@ function WorkbenchSidebar(props) {
 					settingsOpen && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "wb-sb-setpop",
 						role: "dialog",
-						"aria-label": "设置",
+						"aria-label": "Settings",
 						children: [
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 								className: "t",
-								children: "设置"
+								children: "Settings"
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
 								className: "row",
-								title: "已完成工单在左栏项目组里再驻留多少小时（0=立即消失）",
+								title: "How long closed tickets stay in the sidebar groups (hours; 0 = hide immediately)",
 								children: [
 									"sandbar 驻留",
 									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
@@ -48184,7 +48093,7 @@ function WorkbenchSidebar(props) {
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 								className: "m2c",
-								children: "静默在制阈值（分钟）：随 M2c 系统健康 tab 开放。"
+								children: "Quiet in-progress threshold (minutes): ships with the M2c system-health tab."
 							})
 						]
 					}),
@@ -48304,7 +48213,7 @@ function sortEpicTickets(rows) {
 function epicBadgeOf(epic) {
 	const code = (epic ?? "").trim();
 	return code === "" ? {
-		label: "未归档",
+		label: "No epic",
 		code: null
 	} : {
 		label: code,
@@ -49695,10 +49604,10 @@ function DocsSection({ projectKey: shellProjectKey }) {
 //#region src/client/terminal-face.ts
 /** 恒定兜底文案（与引擎 face 面语义一致；face 缺失时 UI 侧唯一免责声明源）。 */
 const TERMINAL_FACE_FALLBACKS = {
-	execStatus: "未知",
-	reasonNote: "原因不可得：失败面数据缺失或形态异常——不编造原因",
-	snapshotNote: "无快照：终态工作流不再运行，snapshot 查询没有执行方承接（终态的确定性结论，不是瞬时故障，刷新无效）",
-	lastStageNote: "最后已知阶段不可得：宁缺不猜"
+	execStatus: "Unknown",
+	reasonNote: "Reason unavailable: failure-face data missing or malformed — not invented",
+	snapshotNote: "No snapshot: a closed workflow no longer runs and no worker answers the snapshot query (deterministic for terminal state, not transient; refreshing will not help)",
+	lastStageNote: "Last known stage unavailable: omitted rather than guessed"
 };
 /** str 消费：非字符串 → ''（畸形降级，不抛）。 */
 function strOf(v) {
@@ -49735,7 +49644,7 @@ function terminalFaceView(face, receiptError) {
 		execStatus: strOf(f.exec_status) || TERMINAL_FACE_FALLBACKS.execStatus,
 		reason,
 		reasonAvailable,
-		reasonNote: reasonAvailable ? strOf(f.reason_source) || "来源：Temporal 工作流执行失败信息" : strOf(f.reason_source) || strOf(f.reason_unavailable_note) || TERMINAL_FACE_FALLBACKS.reasonNote,
+		reasonNote: reasonAvailable ? strOf(f.reason_source) || "source: Temporal workflow execution failure info" : strOf(f.reason_source) || strOf(f.reason_unavailable_note) || TERMINAL_FACE_FALLBACKS.reasonNote,
 		receiptError: errTxt,
 		snapshotNote: strOf(f.snapshot_note) || TERMINAL_FACE_FALLBACKS.snapshotNote,
 		lastStage,
@@ -51226,9 +51135,9 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-scan-meta{display:flex;gap:6px 16px;flex-wrap:wrap;font-size:12px;color:var(--dsw-derive-muted,#57606a);align-items:center}
 .wb-scan-chips{display:flex;gap:8px;flex-wrap:wrap}
 .wb-sug{font-size:12px;border-radius:6px;padding:1px 8px;font-weight:600;white-space:nowrap}
-.wb-sug[data-sug="可签"]{background:var(--dsw-derive-success-bg,#dafbe1);color:var(--dsw-derive-success-deep,#116329)}
-.wb-sug[data-sug="待补"]{background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
-.wb-sug[data-sug="疑似卡死"]{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e)}
+.wb-sug[data-sug="Signable"]{background:var(--dsw-derive-success-bg,#dafbe1);color:var(--dsw-derive-success-deep,#116329)}
+.wb-sug[data-sug="Needs info"]{background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
+.wb-sug[data-sug="Maybe stuck"]{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e)}
 .wb-scan-table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--dsw-derive-surface-2,#e8ebef);
   border-radius:8px;font-size:12px;overflow:hidden}
 .wb-scan-table th{background:var(--dsw-derive-surface,#f6f8fa);color:var(--dsw-derive-muted,#57606a);font-weight:600;text-align:left;padding:6px 10px;
@@ -51352,8 +51261,10 @@ const CSS = `${DERIVE_TOKENS_CSS}
    spec=开票会话蒸馏的执行规格）；B 形态=默认展开+限高滚动（样张 260904-spec-card-mockup B 卡）。
    样张已评审拍板进方案（impl 段无需回读样张；样式/文案/结构见下方三条规则）。 */
 .wb-d2-spec{margin-top:10px;border:1px solid var(--dsw-derive-surface-2,#e8ebef);border-left:4px solid var(--dsw-derive-accent,#0969da);border-radius:8px;background:var(--dsw-derive-canvas,#fff);
-  padding:10px 14px;font-size:13px;line-height:1.75;color:var(--dsw-derive-fg,#1f2328);white-space:pre-wrap;
+  padding:10px 14px;font-size:13px;line-height:1.75;color:var(--dsw-derive-fg,#1f2328);
   word-break:break-word;max-height:260px;overflow-y:auto}
+.wb-d2-spec .txt{max-height:230px;overflow-y:auto}
+.wb-d2-spec .txt :first-child{margin-top:0}
 .wb-d2-spec .ttl{font-size:11px;color:var(--dsw-derive-muted,#57606a);margin-bottom:4px;font-weight:600;
   display:flex;align-items:baseline;gap:8px}
 .wb-d2-spec .cnt{font-weight:400;color:var(--dsw-derive-muted,#8c959f);font-family:ui-monospace,Menlo,monospace;font-size:10px}
@@ -51503,18 +51414,9 @@ async function apiPost(path, body) {
 *  （host/inspection-face.ts 单点；client 不内置阶段词表）。 */
 const INSPECTION_WF = {
 	id: "inspection-lite",
-	name: "巡检",
+	name: "Inspection",
 	lane: "inspection",
 	stages: INSPECTION_TOPOLOGY
-};
-/** 状态文字（色板对应：running绿/awaiting黄/awaiting-human蓝/blocked红/done灰）。 */
-const STATE_LABEL = {
-	running: "进行中",
-	awaiting: "待分派",
-	"awaiting-human": "待审批",
-	blocked: "卡住",
-	closed: "已完成",
-	done: "已完成"
 };
 function shortSlug(worktree) {
 	return worktree.split("/").pop() || worktree;
@@ -51546,19 +51448,6 @@ function fmtTs(ts) {
 	if (!ts) return "—";
 	return (/* @__PURE__ */ new Date(ts * 1e3)).toLocaleString("zh-CN", { hour12: false });
 }
-/** 快照要点的时间显示（t260905-07）：引擎快照时间字段可能是秒级数值、毫秒数值、
-*  数字串或人话时间串（老票/引擎版本差）——数字按量级判别（<1e11 秒 / ≥1e11 毫秒，
-*  toMillis 同款口径），非数字原样显示，null → ''。畸形（NaN/负数）原样透传不猜
-*  （时间失真面显性化，与 untime 标注同纪律）。 */
-function fmtSnapshotTs(v) {
-	if (v === null) return "";
-	const n = Number(v);
-	if (v !== "" && Number.isFinite(n) && n > 0) {
-		const ms = n < 1e11 ? n * 1e3 : n;
-		return new Date(ms).toLocaleString("zh-CN", { hour12: false });
-	}
-	return v;
-}
 /**
 * 终态失败票详情面板（t260919-02）：终态回执 kind=terminal 时详情抽屉的唯一详情面
 * ——「已失败 + 原因」结构化呈现，绝不出现空面板。
@@ -51585,11 +51474,11 @@ function TerminalFailurePanel({ view }) {
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-tf-title",
-						children: "工单已终态失败"
+						children: "Ticket ended in failure"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-tf-exec",
-						title: "Temporal 执行状态",
+						title: "Temporal execution status",
 						children: view.execStatus
 					})
 				]
@@ -51603,14 +51492,14 @@ function TerminalFailurePanel({ view }) {
 				children: [
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "wb-tf-k",
-						children: "失败原因"
+						children: "Failure reason"
 					}),
 					view.reasonAvailable ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "wb-tf-reason-txt",
 						children: view.reason
 					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "wb-tf-reason-txt wb-tf-unavailable",
-						children: ["原因不可得", view.reasonNote ? `——${view.reasonNote}` : ""]
+						children: ["Reason unavailable", view.reasonNote ? ` — ${view.reasonNote}` : ""]
 					}),
 					view.reasonAvailable && view.reasonNote !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "wb-tf-src",
@@ -51623,15 +51512,15 @@ function TerminalFailurePanel({ view }) {
 				children: [
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-tf-k",
-						children: "票号"
+						children: "Ticket"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-tf-v",
-						children: view.ticketId || "不可得"
+						children: view.ticketId || "unavailable"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-tf-k",
-						children: "项目"
+						children: "Project"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-tf-v",
@@ -51639,22 +51528,22 @@ function TerminalFailurePanel({ view }) {
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-tf-k",
-						children: "立项"
+						children: "Epic"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-tf-v",
-						children: view.epic || "未归档"
+						children: view.epic || "No epic"
 					}),
 					view.instanceId !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-tf-k",
-						children: "巡检实例"
+						children: "Inspection instance"
 					}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 						className: "wb-tf-v",
-						children: [view.instanceId, view.period !== "" ? ` · 期 ${view.period}` : ""]
+						children: [view.instanceId, view.period !== "" ? ` · Period ${view.period}` : ""]
 					})] }),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-tf-k",
-						children: "最后已知阶段"
+						children: "Last known stage"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-tf-v",
@@ -51662,19 +51551,19 @@ function TerminalFailurePanel({ view }) {
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-tf-k",
-						children: "起跑时间"
+						children: "Started"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-tf-v",
-						children: view.startTimeTxt !== "" ? view.startTimeTxt : "不可得"
+						children: view.startTimeTxt !== "" ? view.startTimeTxt : "unavailable"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-tf-k",
-						children: "终态时间"
+						children: "Closed at"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-tf-v",
-						children: view.closeTimeTxt !== "" ? view.closeTimeTxt : "不可得"
+						children: view.closeTimeTxt !== "" ? view.closeTimeTxt : "unavailable"
 					})
 				]
 			}),
@@ -51684,22 +51573,9 @@ function TerminalFailurePanel({ view }) {
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "wb-tf-honesty",
-				children: "终态票不再推进，刷新无效；本面板只读，无任何推进/重试入口。"
+				children: "Closed tickets no longer advance; refreshing has no effect. This panel is read-only — no advance/retry entry."
 			})
 		]
-	});
-}
-/** 基本信息网格条目：键（灰）值（黑），超长省略悬停全文。 */
-function MetaItem({ k, children, title }) {
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-		className: "wb-meta-item",
-		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-			className: "wb-meta-k",
-			children: k
-		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-			title,
-			children
-		})]
 	});
 }
 /** 阶段视觉态推导住在纯模块 lane-states.ts（零依赖，node 可裸 import 做行为测试）；
@@ -51767,7 +51643,7 @@ function StageDurationInline({ d, vis, nowMs }) {
 		});
 	}
 	const openWait = d.humanWaits.some((w) => w.toMs === null);
-	const text = vis === "awaiting-human" && openWait ? `人等 ${fmtDur$1(humanWaitTotalMs(d, nowMs))}` : (() => {
+	const text = vis === "awaiting-human" && openWait ? `Human wait ${fmtDur$1(humanWaitTotalMs(d, nowMs))}` : (() => {
 		const t = stageTotalMs(d, nowMs);
 		return t === null ? null : fmtDur$1(t);
 	})();
@@ -51810,7 +51686,7 @@ function D2Stepper({ detail, wf, usage, durs, nowMs }) {
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(PartsBadges, { parts: s.parts }),
 						parallelPeers.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 							className: "wb-d2-par",
-							title: `与 ${parallelPeers.join("、")} 并行（分叉渲染）`,
+							title: `Parallel with ${parallelPeers.join(", ")} (forked rendering)`,
 							children: " ∥"
 						}),
 						(s.parts ?? []).includes("agent") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(StageUsageInline, {
@@ -51839,9 +51715,9 @@ function D2Reworks({ detail, wf }) {
 		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 			className: "ttl",
 			children: [
-				"⤺ 被打回过 ",
+				"⤺ Reworked ",
 				reworks.length,
-				" 次（最新在最上）"
+				"× (newest first)"
 			]
 		}), [...reworks].reverse().map((t, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 			className: "row",
@@ -51867,17 +51743,17 @@ function d2StatusLine(detail, wf) {
 		const sig = detail.signatures?.merge;
 		return {
 			s: "done",
-			text: `已收口关闭${sig ? `（merge 签字人 ${sig.who}）` : ""}`
+			text: `Closed${sig ? ` (merged by ${sig.who})` : ""}`
 		};
 	}
 	const name = detail.stage_name || detail.stage || "—";
 	if (detail.stage_state === "blocked") return {
 		s: "blocked",
-		text: `卡在 ${name}：${[...detail.timeline ?? []].reverse().find((t) => t.state === "blocked")?.reason || "原因见下方问题区"}`
+		text: `Stuck at ${name}: ${[...detail.timeline ?? []].reverse().find((t) => t.state === "blocked")?.reason || "see problems section below"}`
 	};
 	if (detail.stage_state === "awaiting-human") return {
 		s: "awaiting-human",
-		text: `等你审批：${name}${(detail.gate_runs?.[detail.gate_runs.length - 1])?.green ? "（merge_check 全绿）" : ""}`
+		text: `Awaiting your approval: ${name}${(detail.gate_runs?.[detail.gate_runs.length - 1])?.green ? " (merge_check green)" : ""}`
 	};
 	if (detail.stage_state === "running") {
 		const order = wf?.stages.map((s) => s.id) ?? [];
@@ -51885,14 +51761,14 @@ function d2StatusLine(detail, wf) {
 			const derived = deriveStageStates(detail, order);
 			if (!derived.fallback && derived.active.length > 1) return {
 				s: "running",
-				text: `并行分叉中：${derived.active.map((id) => wf.stages.find((x) => x.id === id)?.name ?? id).join(" ∥ ")}`
+				text: `Forked in parallel: ${derived.active.map((id) => wf.stages.find((x) => x.id === id)?.name ?? id).join(" ∥ ")}`
 			};
 		}
 		const enters = (detail.timeline ?? []).filter((t) => t.stage === detail.stage && t.state === "running").length;
-		const kb = detail.session_kb ? `，agent 已读 ${detail.session_kb}KB` : "";
+		const kb = detail.session_kb ? `, agent read ${detail.session_kb}KB` : "";
 		return {
 			s: "running",
-			text: `${name} 进行中（第 ${enters || 1} 次进本步${kb}）`
+			text: `${name} in progress (enter #${enters || 1}${kb})`
 		};
 	}
 	return {
@@ -51903,9 +51779,9 @@ function d2StatusLine(detail, wf) {
 /** 时长人话：75s → 1分15秒；3700s → 1时1分。 */
 function fmtDur(sec) {
 	const s = Math.max(0, Math.floor(sec));
-	if (s < 60) return `${s}秒`;
-	if (s < 3600) return `${Math.floor(s / 60)}分${s % 60 > 0 ? `${s % 60}秒` : ""}`;
-	return `${Math.floor(s / 3600)}时${Math.floor(s % 3600 / 60)}分`;
+	if (s < 60) return `${s}s`;
+	if (s < 3600) return `${Math.floor(s / 60)}m${s % 60 > 0 ? ` ${s % 60}s` : ""}`;
+	return `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m`;
 }
 /** 运行脉搏行（t260825-03）：当前阶段 gen + 本段已运行时长 + 会话日志 KB 及增速 + 心跳年龄。
 *  数据源：detail.pulse（Temporal pending activity 心跳，详情 5s 静默刷新自动带上）
@@ -51936,7 +51812,7 @@ function PulseLine({ detail }) {
 	if (pulse === null) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 		className: "wb-pulse",
 		"data-s": "none",
-		children: "运行脉搏：无心跳（非 agent 段或 worker 不在）"
+		children: "Pulse: no heartbeat (non-agent stage or worker down)"
 	});
 	const now = Math.floor(Date.now() / 1e3);
 	const hb = pulse.heartbeat ?? {};
@@ -51951,27 +51827,41 @@ function PulseLine({ detail }) {
 		className: "wb-pulse",
 		"data-s": stuck ? "stuck" : !stuck && (hbAge !== null && hbAge > 30 || stallSec >= 120) ? "warn" : "ok",
 		children: [
-			"运行脉搏：",
+			"Pulse: ",
 			detail.stage_name || detail.stage || pulse.activity || "—",
-			gen !== null ? ` · 第 ${gen + 1} 次进段（gen${gen}）` : "",
-			runSec !== null ? ` · 本段已运行 ${fmtDur(runSec)}${startedTs > 0 ? "" : "（按心跳次数推算）"}` : "",
-			" · 会话日志 ",
-			kb > 0 ? `${kb}KB（${stallSec >= 60 ? `停涨 ${fmtDur(stallSec)}` : kbChangeRef.current !== null && kbChangeRef.current.id === detail.id && kbChangeRef.current.delta !== null ? `较上次 ${kbChangeRef.current.delta >= 0 ? "+" : ""}${kbChangeRef.current.delta}KB` : "增长中"}）` : "—",
-			hbAge !== null ? ` · 心跳 ${hbAge < 5 ? "刚刚" : `${hbAge} 秒前`}` : " · 尚无心跳",
-			pulse.heartbeat_raw !== void 0 ? ` · 心跳原文：${pulse.heartbeat_raw.slice(0, 60)}` : "",
-			stuck ? " —— 疑似卡死（只提示，不自动处置）" : ""
+			gen !== null ? ` · enter #${gen + 1} (gen${gen})` : "",
+			runSec !== null ? ` · stage running ${fmtDur(runSec)}${startedTs > 0 ? "" : " (estimated from heartbeat count)"}` : "",
+			" · session log ",
+			kb > 0 ? `${kb}KB (${stallSec >= 60 ? `stalled ${fmtDur(stallSec)}` : kbChangeRef.current !== null && kbChangeRef.current.id === detail.id && kbChangeRef.current.delta !== null ? `delta ${kbChangeRef.current.delta >= 0 ? "+" : ""}${kbChangeRef.current.delta}KB` : "growing"})` : "—",
+			hbAge !== null ? ` · heartbeat ${hbAge < 5 ? "just now" : `${hbAge}s ago`}` : " · no heartbeat yet",
+			pulse.heartbeat_raw !== void 0 ? ` · heartbeat raw: ${pulse.heartbeat_raw.slice(0, 60)}` : "",
+			stuck ? " — possibly stuck (advisory only, no auto-action)" : ""
 		]
 	});
 }
-const LIVE_TYPE_LABEL = {
-	user: "用户",
-	assistant: "agent",
-	tool: "工具",
-	result: "结果",
-	step: "轮次",
-	retry: "重试",
-	attempt: "尝试"
+/** 巡检报告 summary 键（引擎中文数据键）→ 英文显示标签；未知键回落原键。 */
+const SUGGESTION_LABEL = {
+	"疑似卡死": "Maybe stuck",
+	"待补": "Needs info",
+	"可签": "Signable"
 };
+const LIVE_TYPE_LABEL = {
+	user: "user",
+	assistant: "agent",
+	tool: "tool",
+	result: "result",
+	step: "round",
+	retry: "retry",
+	attempt: "attempt"
+};
+/**
+* spec 卡 markdown HTML（t260925-18）：renderMarkdown（knowledge，转义先行）产出后，
+* 把渲染器自带的中文按钮文案「复制」在显示层改英文——knowledge 源不在本票写集，
+* 不改共享渲染器；字符串级后处理纯函数，tests/ui-labels.mjs 可测。
+*/
+function specMarkdownHtml(spec) {
+	return renderMarkdown(spec).replace(">复制</button>", ">Copy</button>");
+}
 /**
 * 证据图 src 契约（t260831-08，导出供 smoke 断言）：截图只走服务端端点
 * （归档/泳道读取 + 防穿收口 host 一处），不内联 base64（取舍清单 #4：
@@ -52041,7 +51931,7 @@ function EvidenceLightbox({ ticketId, files, index, onClose, onNav: nav }) {
 			files.length > 1 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 				type: "button",
 				className: "wb-lb-nav",
-				"aria-label": "上一张",
+				"aria-label": "Previous",
 				onClick: (e) => {
 					e.stopPropagation();
 					nav(files, index, -1);
@@ -52050,10 +51940,10 @@ function EvidenceLightbox({ ticketId, files, index, onClose, onNav: nav }) {
 			}),
 			broken ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "wb-lb-miss",
-				children: ["截图加载失败：", f]
+				children: ["Screenshot failed to load: ", f]
 			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
 				className: "wb-lb-img",
-				alt: `截图证据 ${f}`,
+				alt: `Screenshot evidence ${f}`,
 				src: evidenceImgSrc(ticketId, f),
 				onClick: (e) => e.stopPropagation(),
 				onError: () => setBroken(true)
@@ -52061,7 +51951,7 @@ function EvidenceLightbox({ ticketId, files, index, onClose, onNav: nav }) {
 			files.length > 1 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 				type: "button",
 				className: "wb-lb-nav",
-				"aria-label": "下一张",
+				"aria-label": "Next",
 				onClick: (e) => {
 					e.stopPropagation();
 					nav(files, index, 1);
@@ -52081,7 +51971,7 @@ function EvidenceLightbox({ ticketId, files, index, onClose, onNav: nav }) {
 						type: "button",
 						className: "wb-lb-close",
 						onClick: onClose,
-						children: "关闭（Esc）"
+						children: "Close (Esc)"
 					})
 				]
 			})
@@ -52117,7 +52007,7 @@ function EvidenceImages({ ticketId }) {
 		children: [
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "ttl",
-				children: "截图证据"
+				children: "Screenshot evidence"
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "wb-eimgs-grid",
@@ -52125,7 +52015,7 @@ function EvidenceImages({ ticketId }) {
 					className: "wb-eimgs-item",
 					role: "button",
 					tabIndex: 0,
-					"aria-label": `放大查看 ${f}`,
+					"aria-label": `Zoom in ${f}`,
 					onClick: () => setOpen(i),
 					onKeyDown: (e) => {
 						if (e.key === "Enter" || e.key === " ") {
@@ -52135,11 +52025,11 @@ function EvidenceImages({ ticketId }) {
 					},
 					children: [broken[f] ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "wb-eimgs-miss",
-						children: ["截图加载失败：", f]
+						children: ["Screenshot failed to load: ", f]
 					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
 						className: "wb-eimgs-img",
 						loading: "lazy",
-						alt: `截图证据 ${f}`,
+						alt: `Screenshot evidence ${f}`,
 						title: f,
 						src: evidenceImgSrc(ticketId, f),
 						onError: () => setBroken((b) => ({
@@ -52175,7 +52065,7 @@ function AgentLivePanel({ ticketId }) {
 				if (r?.ok === true) {
 					setData(r.result);
 					setErr("");
-				} else setErr(String(r?.error ?? "读取失败"));
+				} else setErr(String(r?.error ?? "read failed"));
 			} catch (e) {
 				if (!dead) setErr(String(e instanceof Error ? e.message : e));
 			}
@@ -52197,7 +52087,7 @@ function AgentLivePanel({ ticketId }) {
 			children: [
 				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 					className: "wb-live-title",
-					children: [open ? "▾" : "▸", " 实时动态"]
+					children: [open ? "▾" : "▸", " Live activity"]
 				}),
 				open && data?.exists === true && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 					className: "wb-live-meta",
@@ -52213,7 +52103,7 @@ function AgentLivePanel({ ticketId }) {
 				}),
 				!open && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 					className: "wb-live-meta",
-					children: "agent 最近动作流（展开后每 8s 自动刷新）"
+					children: "Recent agent event stream (auto-refresh every 8s when expanded)"
 				})
 			]
 		}), open && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -52221,20 +52111,20 @@ function AgentLivePanel({ ticketId }) {
 			children: [
 				err !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-err",
-					children: ["实时动态读取失败：", err]
+					children: ["Live activity read failed: ", err]
 				}),
 				err === "" && data === void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "wb-empty",
-					children: "加载中…"
+					children: "Loading…"
 				}),
 				err === "" && data !== void 0 && !data.exists && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "wb-empty",
-					children: data.reason ?? "暂无会话数据"
+					children: data.reason ?? "No session data yet"
 				}),
 				err === "" && data !== void 0 && data.exists && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 					data.events.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "wb-empty",
-						children: data.reason ?? "暂无可展示事件"
+						children: data.reason ?? "No events to show"
 					}),
 					[...data.events].reverse().map((ev, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "wb-live-row",
@@ -52257,14 +52147,14 @@ function AgentLivePanel({ ticketId }) {
 					data.uncoveredTypes !== void 0 && data.uncoveredTypes.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "wb-al-trunc",
 						children: [
-							"⚠ 会话含本前端未覆盖的记录类型：",
-							data.uncoveredTypes.join("、"),
-							"（内容可能缺失）。"
+							"⚠ Session contains record types this UI does not render: ",
+							data.uncoveredTypes.join("; "),
+							" (content may be missing)."
 						]
 					}),
 					data.truncated && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "wb-al-trunc",
-						children: "只显示最近 30 条（完整见泳道会话文件）。"
+						children: "Showing latest 30 entries only (full log in the lane session file)."
 					})
 				] })
 			]
@@ -52296,16 +52186,16 @@ function D2Problems({ detail }) {
 	if (rows.length === 0) rows.push(/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "row",
 		children: [
-			"卡在 ",
+			"Stuck at ",
 			detail.stage_name || detail.stage,
-			"，原因未落档"
+			"; reason not recorded"
 		]
 	}, "w"));
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-d2-problems",
 		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 			className: "ttl",
-			children: "⛔ 有问题，需要处置"
+			children: "⛔ Problems need attention"
 		}), rows]
 	});
 }
@@ -52337,7 +52227,7 @@ function agentSegmentCount(detail, wf) {
 function stageUsageTitle(s) {
 	const parts = [`in ${s.input} / out ${s.output} / cacheRead ${s.cacheRead}`];
 	const names = Object.keys(s.models);
-	if (names.length > 0) parts.push(`模型：${names.join("、")}`);
+	if (names.length > 0) parts.push(`Models: ${names.join(", ")}`);
 	return parts.join(" · ");
 }
 /** token 消耗拉取（t260828-07）：详情抽屉打开时拉一次 agent-usage（不进轮询，克制）。
@@ -52367,7 +52257,7 @@ function UsageSummaryLine({ detail, wf, usage }) {
 		if (detail.status === "closed") return null;
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 			className: "wb-usage",
-			title: "token 消耗加载中…",
+			title: "loading token usage…",
 			children: "tokens …"
 		});
 	}
@@ -52384,28 +52274,28 @@ function UsageSummaryLine({ detail, wf, usage }) {
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 			className: "wb-usage",
 			"data-s": "none",
-			title: usage.reason ?? "无会话数据",
+			title: usage.reason ?? "no session data",
 			children: "tokens —"
 		});
 	}
 	const segs = agentSegmentCount(detail, wf);
 	const names = usageModelNames(usage.models);
 	const suspectHint = usageSuspectHint(usage);
-	const uncoveredHint = usage.uncovered === true ? usage.uncoveredDetail ?? "会话含本前端未覆盖的记录类型（内容可能缺失）" : null;
+	const uncoveredHint = usage.uncovered === true ? usage.uncoveredDetail ?? "session contains record types this UI does not render (content may be missing)" : null;
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 		className: "wb-usage",
 		title: [
-			`agent 段数 ${segs}`,
+			`agent stages ${segs}`,
 			`in ${usage.total.input} / out ${usage.total.output} / cacheRead ${usage.total.cacheRead}`,
-			names !== "" ? `模型：${names}` : `模型：${usage.models[0]?.model ?? "—"}（单模型不显示模型名）`,
-			`会话文件 ${usage.files} 份（多角色加总）`,
+			names !== "" ? `Models: ${names}` : `Model: ${usage.models[0]?.model ?? "—"} (single model)`,
+			`session files ${usage.files} (all roles)`,
 			suspectHint !== null ? usage.suspectDetail ?? suspectHint : "",
 			uncoveredHint ?? ""
 		].filter(Boolean).join(" · "),
 		children: [
 			"🤖 ",
 			segs,
-			" 段 · ",
+			" stages · ",
 			usageSum(usage.total),
 			names !== "" ? ` · ${names}` : "",
 			suspectHint !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
@@ -52434,143 +52324,6 @@ function StageUsageInline({ stageId, usage }) {
 		children: [usageSum(s), multi]
 	});
 }
-/** 快照要点（t260905-07）：ticket show snapshot 直读的四块观测（阶段时间线/最近
-*  交接/门与签字记录/工作流快照要点），纯裁剪零派生语义（snapshotDigest 纯函数层
-*  承担畸形防御与 KI-019 呈现口径——排序归位+缺 at 沉底标注）。时间线只显尾 20 条
-*  （行卡场景无此诉求，详情下钻要「最近的来龙去脉」），交接尾 5 条，门与签字合并
-*  记录表按时间降序。各块带 data-block 锚（3199 隔离台场景断言用）。 */
-function D2SnapshotDigest({ detail }) {
-	const digest = (0, react.useMemo)(() => snapshotDigest(detail), [detail]);
-	const { workflow } = digest;
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
-		className: "wb-d2-snapshot",
-		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "快照要点（时间线 · 最近交接 · 门与签字 · 工作流快照）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-dsnap-block",
-				"data-wb-digest": "workflow",
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h4", { children: "工作流快照要点" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "wb-dsnap-row",
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "st",
-							children: "工作流"
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: workflow.id || "—" }),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "st",
-							children: "当前段"
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [workflow.stage || "—", workflow.stageState ? ` · ${STATE_LABEL[workflow.stageState] ?? workflow.stageState}` : ""] }),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "st",
-							children: "状态"
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: workflow.status || "—" }),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "st",
-							children: "修订"
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: workflow.revisions === null ? "—" : `${workflow.revisions} 轮` }),
-						workflow.worktree && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "st",
-							children: "工作区"
-						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							"data-wb-digest-worktree": true,
-							children: workflow.worktree
-						})] })
-					]
-				})]
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-dsnap-block",
-				"data-wb-digest": "timeline",
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h4", { children: [
-					"阶段时间线（最近 ",
-					digest.timeline.length,
-					" 条，按时间正序）"
-				] }), digest.timeline.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					className: "wb-dsnap-empty",
-					children: "无时间线条目"
-				}) : digest.timeline.map((e, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "wb-dsnap-row",
-					"data-untime": e.untime,
-					"data-wb-tl-at": e.at ?? "",
-					"data-wb-tl-stage": e.stage,
-					"data-wb-tl-state": e.state,
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "st",
-							children: e.stage || "—"
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: STATE_LABEL[e.state] ?? e.state }),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "at",
-							children: e.untime ? "时间缺失" : fmtSnapshotTs(e.at)
-						})
-					]
-				}, `${e.stage}-${i}`))]
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-dsnap-block",
-				"data-wb-digest": "handoffs",
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h4", { children: [
-					"最近交接（",
-					digest.handoffs.length,
-					" 条）"
-				] }), digest.handoffs.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					className: "wb-dsnap-empty",
-					children: "无交接记录"
-				}) : digest.handoffs.map((h, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "wb-dsnap-row",
-					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
-						h.from || "—",
-						" → ",
-						h.to || "—"
-					] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "at",
-						children: h.at === null ? "" : fmtSnapshotTs(h.at)
-					})]
-				}, i))]
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-dsnap-block",
-				"data-wb-digest": "signatures",
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h4", { children: [
-					"门与签字记录（",
-					digest.gates.length,
-					" 条，最近在前）"
-				] }), digest.gates.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					className: "wb-dsnap-empty",
-					children: "无门/签字记录"
-				}) : digest.gates.map((g, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "wb-dsnap-row",
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "wb-dsnap-chip",
-							"data-kind": g.kind,
-							children: g.kind === "signature" ? "签字" : "门"
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "st",
-							children: g.stage || "—"
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
-							g.who || "—",
-							" · ",
-							g.decision || "—"
-						] }),
-						g.note && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: g.note }),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "at",
-							children: g.at === null ? "" : fmtSnapshotTs(g.at)
-						})
-					]
-				}, `${g.kind}-${g.stage}-${i}`))]
-			})
-		] })]
-	});
-}
-/** 进展主体：一步一张卡（状态图标 + 该步产出摘要一句话 + 可展开 evidence/产物）。 */
 function D2Stages({ detail, wf, usage, durs, nowMs }) {
 	if (!wf || wf.stages.length === 0) return null;
 	const tl = detail.timeline ?? [];
@@ -52604,7 +52357,7 @@ function D2Stages({ detail, wf, usage, durs, nowMs }) {
 								className: "meta",
 								children: [
 									s.role,
-									enters > 1 ? ` · 第 ${enters} 次` : "",
+									enters > 1 ? ` · enter #${enters}` : "",
 									h?.ts ? ` · ${fmtTs(h.ts)}` : ""
 								]
 							}),
@@ -52631,11 +52384,11 @@ function D2Stages({ detail, wf, usage, durs, nowMs }) {
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "明细（evidence / 产物清单）" }),
 						(r.files_changed?.length ?? 0) > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "ev",
-							children: ["改动文件：", (r.files_changed ?? []).join("、")]
+							children: ["Files changed: ", (r.files_changed ?? []).join("; ")]
 						}),
 						(r.deliverables?.length ?? 0) > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "ev",
-							children: ["产物：", (r.deliverables ?? []).join("、")]
+							children: ["Deliverables: ", (r.deliverables ?? []).join("; ")]
 						}),
 						r.evidence && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 							className: "ev",
@@ -52698,7 +52451,7 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }) {
 				children: [
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-insp-k",
-						children: "巡检"
+						children: "Inspection"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-insp-v",
@@ -52706,7 +52459,7 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }) {
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-insp-k",
-						children: "期号"
+						children: "Period"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-insp-v",
@@ -52714,12 +52467,12 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }) {
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-insp-k",
-						children: "心跳"
+						children: "Heartbeat"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-insp-v",
 						"data-heartbeat": detail.heartbeat ? "1" : "0",
-						children: detail.heartbeat ? "全绿证明期" : "非心跳期"
+						children: detail.heartbeat ? "green-proof period" : "non-heartbeat period"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 						className: "wb-insp-sev",
@@ -52727,15 +52480,15 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }) {
 						children: [
 							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("i", {
 								"data-sev": "high",
-								children: ["高 ", c.high]
+								children: ["H ", c.high]
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("i", {
 								"data-sev": "med",
-								children: ["中 ", c.med]
+								children: ["M ", c.med]
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("i", {
 								"data-sev": "low",
-								children: ["低 ", c.low]
+								children: ["L ", c.low]
 							})
 						]
 					})
@@ -52749,9 +52502,9 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }) {
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "ttl",
 						children: [
-							"人审门（",
+							"Human gate (",
 							detail.gate_id || "inspection-close",
-							"）——签什么"
+							") — what to sign"
 						]
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -52760,7 +52513,7 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }) {
 					}),
 					detail.gate_error && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "wb-insp-gateerr",
-						children: ["⚠ 拒收记录：", detail.gate_error]
+						children: ["⚠ Rejection record: ", detail.gate_error]
 					}),
 					signed ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "wb-insp-signed",
@@ -52780,7 +52533,7 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }) {
 								className: "wb-insp-note",
 								value: note,
 								onChange: (e) => setNote(e.target.value),
-								placeholder: "签字备注（可空）",
+								placeholder: "Signature note (optional)",
 								"data-testid": "inspection-sign-note"
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
@@ -52788,28 +52541,28 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }) {
 								disabled: opBusy,
 								"data-testid": "inspection-sign-approve",
 								onClick: () => onSign("approve", note),
-								children: "✓ approve 收口"
+								children: "✓ approve (close ticket)"
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								className: "wb-btn wb-btn-danger",
 								disabled: opBusy,
 								"data-testid": "inspection-sign-reject",
 								onClick: () => onSign("reject", note),
-								children: "✗ reject 毙单"
+								children: "✗ reject (kill ticket)"
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 								className: "wb-sub",
-								children: ["签字人：", operator]
+								children: ["Signer: ", operator]
 							})
 						]
 					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "wb-sub",
 						children: [
-							"当前不在人审门（阶段：",
+							"Not at a human gate (stage: ",
 							detail.stage ?? "—",
 							" · ",
 							detail.stage_state,
-							"）"
+							")"
 						]
 					})
 				]
@@ -52824,7 +52577,7 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }) {
 					" 条）"
 				] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [timeline.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "wb-sub",
-					children: "暂无时间线条目"
+					children: "No timeline entries"
 				}), timeline.map((e, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-insp-tl",
 					"data-state": String(e?.state ?? ""),
@@ -52849,7 +52602,7 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }) {
 					" 条）"
 				] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [findings.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "wb-sub",
-					children: "零发现（心跳证明期）"
+					children: "No findings (green-proof period)"
 				}), findings.map((f, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-insp-f",
 					children: [
@@ -52871,13 +52624,13 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }) {
 				className: "wb-insp-block",
 				children: [(detail.report_path ?? "") !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-insp-rep",
-					children: ["报告：", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: detail.report_path })]
+					children: ["Report: ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: detail.report_path })]
 				}), (detail.suggested_fix_tickets?.length ?? 0) > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-sub",
 					children: [
-						"建议修复票 ",
+						"Suggested fix tickets: ",
 						detail.suggested_fix_tickets.length,
-						" 张（dev-lane，引用本票号溯源）"
+						" (dev-lane, referencing this ticket)"
 					]
 				})]
 			})
@@ -52925,34 +52678,34 @@ function availableOps(t, wf) {
 }
 const TYPE_LABEL = {
 	frontmatter: "frontmatter",
-	heading: "标题",
-	paragraph: "段落",
-	"list-item": "列表项",
-	"table-head": "表头",
-	"table-row": "表格行",
-	code: "代码块",
-	quote: "引用",
-	image: "图片",
-	hr: "分隔线",
-	doc: "文档",
-	data: "数据",
-	file: "文件"
+	heading: "Heading",
+	paragraph: "Paragraph",
+	"list-item": "List item",
+	"table-head": "Table head",
+	"table-row": "Table row",
+	code: "Code block",
+	quote: "Quote",
+	image: "Image",
+	hr: "Divider",
+	doc: "Doc",
+	data: "Data",
+	file: "File"
 };
 const STATUS_LABEL = {
-	added: "新增",
-	removed: "删除",
-	modified: "修改",
-	unchanged: "未变"
+	added: "Added",
+	removed: "Removed",
+	modified: "Modified",
+	unchanged: "Unchanged"
 };
 const KIND_LABEL = {
-	doc: "文档",
-	code: "代码",
-	data: "数据"
+	doc: "Doc",
+	code: "Code",
+	data: "Data"
 };
 const CONCLUDE_LABEL = {
-	approved: "approved（通过）",
-	"changes-requested": "changes-requested（要求修改）",
-	"in-progress": "in-progress（审阅中）"
+	approved: "approved",
+	"changes-requested": "changes-requested",
+	"in-progress": "in-progress"
 };
 /** 审批意见的稳定 key：doc 块=「路径#块key」（块 key 本身含内容哈希）；
 *  code/data 文件=「种类:路径:内容哈希」——内容变 key 失效，旧意见自然「已过期」。 */
@@ -52965,27 +52718,27 @@ function buildReworkInstruction(ticketId, round, roundNo) {
 	const rejected = round.blocks.filter((b) => b.decision === "reject");
 	const commented = round.blocks.filter((b) => b.decision !== "reject" && b.comment !== void 0 && b.comment !== "");
 	const lines = [
-		"## 返工指令（PR 式审批 review）",
+		"## Rework instruction (PR-style review)",
 		"",
-		`- 工单：${ticketId}`,
-		`- base：${round.base || "（无）"}`,
-		`- 整轮结论：${round.conclude}`,
-		`- 轮次：第 ${roundNo} 轮 · ${round.reviewer} · ${fmtTs(round.ts)}`,
-		`- 落盘：server/reviews/${ticketId}.json`,
+		`- Ticket: ${ticketId}`,
+		`- base: ${round.base || "(none)"}`,
+		`- Round conclusion: ${round.conclude}`,
+		`- Round #${roundNo} · ${round.reviewer} · ${fmtTs(round.ts)}`,
+		`- Written to: server/reviews/${ticketId}.json`,
 		""
 	];
-	if (rejected.length === 0 && commented.length === 0) lines.push("无驳回项。");
+	if (rejected.length === 0 && commented.length === 0) lines.push("No rejected blocks.");
 	else {
 		if (rejected.length > 0) {
-			lines.push(`### 驳回项清单（${rejected.length}）`, "");
+			lines.push(`### Rejected blocks (${rejected.length})`, "");
 			rejected.forEach((b, i) => {
 				lines.push(`${i + 1}. [${TYPE_LABEL[b.type] ?? b.type} / ${STATUS_LABEL[b.status] ?? b.status}] ${b.summary}`);
-				if (b.comment !== void 0 && b.comment !== "") lines.push(`   - 意见：${b.comment}`);
+				if (b.comment !== void 0 && b.comment !== "") lines.push(`   - Comment: ${b.comment}`);
 				lines.push(`   - key：\`${b.block_key}\``);
 			});
 		}
 		if (commented.length > 0) {
-			lines.push("", `### 其他意见（${commented.length}）`, "");
+			lines.push("", `### Other comments (${commented.length})`, "");
 			commented.forEach((b, i) => {
 				lines.push(`${i + 1}. [${TYPE_LABEL[b.type] ?? b.type}] ${b.summary} —— ${b.comment ?? ""}`);
 			});
@@ -53001,7 +52754,7 @@ function buildApproveSummary(ticketId, file) {
 	const a = latest.blocks.filter((b) => b.decision === "approve").length;
 	const r = latest.blocks.filter((b) => b.decision === "reject").length;
 	const c = latest.blocks.filter((b) => b.comment !== void 0 && b.comment !== "").length;
-	return `审批意见第${n}轮：conclude=${latest.conclude}，块 approve ${a}/reject ${r}/带注释 ${c}（落盘 server/reviews/${ticketId}.json，reviewer ${latest.reviewer}）`;
+	return `Review round ${n}: conclude=${latest.conclude}, blocks approve ${a}/reject ${r}/commented ${c} (written to server/reviews/${ticketId}.json, reviewer ${latest.reviewer})`;
 }
 /** 渲染态 block diff 主视图（制式照 knowledge：未变渲染新文本；新增绿；删除红；修改上下红/绿；表格行单元格级对齐）。 */
 function DiffBlockBody({ b }) {
@@ -53040,13 +52793,13 @@ function DiffBlockBody({ b }) {
 		className: "wb-d-md wb-d-md-old wb-md",
 		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 			className: "wb-d-md-tag",
-			children: "旧"
+			children: "Old"
 		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { dangerouslySetInnerHTML: { __html: renderMarkdown(b.oldText ?? "") } })]
 	}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-d-md wb-d-md-new wb-md",
 		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 			className: "wb-d-md-tag",
-			children: "新"
+			children: "New"
 		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { dangerouslySetInnerHTML: { __html: renderMarkdown(b.newText ?? "") } })]
 	})] });
 }
@@ -53067,7 +52820,7 @@ function UnifiedDiffView({ text }) {
 function ReconTable({ recon }) {
 	if (recon.length === 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 		className: "wb-empty",
-		children: "结构无差异（仅格式/键序变化或无变化）。"
+		children: "No structural diff (formatting/key order only, or no change)."
 	});
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
 		className: "wb-d-recon",
@@ -53089,7 +52842,7 @@ function ReconTable({ recon }) {
 				className: e.kind !== "removed" ? "wb-d-new" : "",
 				children: e.after ?? "—"
 			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: e.kind === "added" ? "新增" : e.kind === "removed" ? "删除" : "改" })
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: e.kind === "added" ? "Added" : e.kind === "removed" ? "Removed" : "Changed" })
 		] }, i)) })]
 	});
 }
@@ -53102,7 +52855,7 @@ function ReviewActions({ rv, onPatch }) {
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 				className: "wb-d-btn wb-d-btn-ap" + (decision === "approve" ? " on" : ""),
 				onClick: () => onPatch({ decision: decision === "approve" ? void 0 : "approve" }),
-				children: "通过"
+				children: "Approve"
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 				className: "wb-d-btn wb-d-btn-rj" + (decision === "reject" ? " on" : ""),
@@ -53110,21 +52863,21 @@ function ReviewActions({ rv, onPatch }) {
 					decision: decision === "reject" ? void 0 : "reject",
 					open: decision === "reject" ? rv?.open : true
 				}),
-				children: "驳回"
+				children: "Reject"
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 				className: "wb-d-btn",
 				onClick: () => onPatch({ open: !(rv?.open ?? false) }),
-				children: rv?.open ? "收起注释" : rv?.comment ? "注释 ✎" : "注释"
+				children: rv?.open ? "Collapse comments" : rv?.comment ? "Comment ✎" : "Comment"
 			}),
 			decision !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 				className: "wb-d-badge",
 				"data-s": decision === "approve" ? "added" : "removed",
-				children: decision === "approve" ? "已通过" : "已驳回"
+				children: decision === "approve" ? "Approved" : "Rejected"
 			}),
 			(rv?.open ?? false) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
 				className: "wb-d-cmt",
-				placeholder: "审批意见（驳回块的意见会进返工指令）",
+				placeholder: "Review comments (rejected-block comments become the rework instruction)",
 				value: rv?.comment ?? "",
 				onChange: (e) => onPatch({ comment: e.target.value })
 			})
@@ -53170,7 +52923,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 			setLoadErr("");
 			try {
 				const r = await apiGet(`${API}/tickets/${encodeURIComponent(detail.id)}/diff`);
-				if (r?.ok !== true) throw new Error(r?.error ?? "diff 读取失败");
+				if (r?.ok !== true) throw new Error(r?.error ?? "diff read failed");
 				if (dead) return;
 				const d = r.result;
 				setDiff(d);
@@ -53253,7 +53006,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 				reviewer: operator,
 				blocks
 			});
-			if (r?.ok !== true) throw new Error(r?.error ?? "保存失败");
+			if (r?.ok !== true) throw new Error(r?.error ?? "save failed");
 			const round = r.result?.round;
 			const rounds = Number(r.result?.rounds ?? 0);
 			setSaveState({ runId: String(r.run_id ?? "") });
@@ -53262,7 +53015,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 				rounds: [...prev?.rounds ?? [], round]
 			}));
 			setReworkMd(buildReworkInstruction(detail.id, round, rounds));
-			onMsg(`审批意见已落盘（第 ${rounds} 轮，run_id ${String(r.run_id ?? "")}）`);
+			onMsg(`Review saved (round ${rounds}, run_id ${String(r.run_id ?? "")})`);
 		} catch (err) {
 			setSaveState({ error: String(err instanceof Error ? err.message : err) });
 		}
@@ -53286,11 +53039,11 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 	}
 	if (loading) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 		className: "wb-empty",
-		children: "变更集计算中（git diff）…"
+		children: "Computing changeset (git diff)…"
 	});
 	if (loadErr !== "") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-err",
-		children: ["变更加载失败：", loadErr]
+		children: ["Changeset load failed: ", loadErr]
 	});
 	if (diff === void 0) return null;
 	const latestRound = reviewFile !== void 0 && reviewFile.rounds.length > 0 ? reviewFile.rounds[reviewFile.rounds.length - 1] : void 0;
@@ -53303,7 +53056,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 	};
 	const realFiles = diff.files.filter((f) => !isGenArtifact(f.path));
 	const genFiles = diff.files.filter((f) => isGenArtifact(f.path));
-	const sourceLabel = diff.source === "worktree" ? "泳道 worktree vs base" : diff.source === "merged" ? "已合入 main（merge commit 回放）" : diff.source === "main" ? "主树 write_set + git log" : "无来源";
+	const sourceLabel = diff.source === "worktree" ? "lane worktree vs base" : diff.source === "merged" ? "merged into main (merge commit replay)" : diff.source === "main" ? "main tree write_set + git log" : "no source";
 	const renderFile = (f) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-d-file",
 		children: [
@@ -53321,7 +53074,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						className: "wb-d-fpath wb-d-flink",
-						title: "以本票时刻的版本只读打开",
+						title: "Open read-only as of this ticket",
 						onClick: () => onOpenFile(f.path, "settle"),
 						children: f.path
 					}),
@@ -53378,9 +53131,9 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 			f.kind === "code" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 				f.unifiedTruncated === true && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "wb-d-trunc",
-					children: "diff 超长已截断（完整见泳道 git diff）。"
+					children: "Diff truncated (full diff in lane git)."
 				}),
-				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(UnifiedDiffView, { text: f.unified ?? "（无 unified diff）" }),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(UnifiedDiffView, { text: f.unified ?? "(no unified diff)" }),
 				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ReviewActions, {
 					rv: reviews[entryKeyOf(f)],
 					onPatch: (p) => patchReview(entryKeyOf(f), p)
@@ -53389,7 +53142,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 			f.kind === "data" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 				f.reconTruncated === true && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "wb-d-trunc",
-					children: "对账条目超封顶已截断。"
+					children: "Reconciliation entries truncated (over cap)."
 				}),
 				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ReconTable, { recon: f.recon ?? [] }),
 				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ReviewActions, {
@@ -53408,7 +53161,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 				children: [
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-d-fpath",
-						children: r.repo === "" ? "根仓（root）" : r.repo
+						children: r.repo === "" ? "root repo" : r.repo
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 						className: "wb-sub",
@@ -53418,11 +53171,11 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 							r.branch
 						]
 					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: ["base：", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: r.base === "" ? "（无）" : r.base.slice(0, 12) })] }),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: ["base: ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: r.base === "" ? "(none)" : r.base.slice(0, 12) })] }),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
-						"文件 ",
+						"Files ",
 						r.files.length,
-						r.filesTruncated ? "（超封顶截断）" : ""
+						r.filesTruncated ? " (truncated)" : ""
 					] }),
 					r.emptyReason !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-sub",
@@ -53451,9 +53204,9 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-section-title",
 					children: [
-						"变更集（",
+						"Changeset (",
 						sourceLabel,
-						"）"
+						")"
 					]
 				}),
 				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -53461,21 +53214,21 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 					children: [
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
 							diff.source === "merged" ? "merge" : "base",
-							"：",
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: diff.base === "" ? "（无）" : diff.base.slice(0, 12) })
+							": ",
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: diff.base === "" ? "(none)" : diff.base.slice(0, 12) })
 						] }),
 						diff.worktree !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: ["泳道：", shortSlug(diff.worktree)] }),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
-							"文件 ",
+							"Files ",
 							diff.files.length,
-							diff.filesTruncated ? "（超封顶截断）" : "",
-							"（文档 ",
+							diff.filesTruncated ? " (truncated)" : "",
+							" (docs ",
 							summary.doc,
-							" / 代码 ",
+							" / code ",
 							summary.code,
-							" / 数据 ",
+							" / data ",
 							summary.data,
-							"）"
+							")"
 						] }),
 						diff.excludedEngineFiles !== void 0 && diff.excludedEngineFiles > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 							style: { color: "var(--dsw-derive-muted,#57606a)" },
@@ -53518,7 +53271,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 						type: "checkbox",
 						checked: showUnchanged,
 						onChange: (e) => setShowUnchanged(e.target.checked)
-					}), " 显示文档未变块"]
+					}), " Show unchanged doc blocks"]
 				})
 			]
 		}),
@@ -53570,9 +53323,9 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-section-title",
 					children: [
-						"审批意见（落盘 server/reviews/",
+						"Review (written to server/reviews/",
 						detail.id,
-						".json）"
+						".json)"
 					]
 				}),
 				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -53597,22 +53350,22 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 							onClick: () => {
 								saveReview();
 							},
-							children: saveState.saving === true ? "保存中…" : "保存审批意见（落盘一轮）"
+							children: saveState.saving === true ? "Saving…" : "Save review (one round)"
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 							className: "wb-btn",
 							disabled: reviewFile === void 0 || reviewFile.rounds.length === 0,
-							title: "reject 意见即返工指令，可复制贴进工单/打回理由",
+							title: "reject comments become the rework instruction; copy into the ticket/rework reason",
 							onClick: () => {
 								const file = reviewFile;
 								if (file === void 0 || file.rounds.length === 0) return;
 								copyText(buildReworkInstruction(detail.id, file.rounds[file.rounds.length - 1], file.rounds.length));
 							},
-							children: copied ? "已复制 ✓" : "复制返工指令"
+							children: copied ? "Copied ✓" : "Copy rework instruction"
 						}),
 						saveState.runId !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 							className: "wb-copied",
-							children: ["已落盘 ✓ run_id ", saveState.runId]
+							children: ["saved ✓ run_id ", saveState.runId]
 						}),
 						saveState.error !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 							className: "wb-err",
@@ -53638,7 +53391,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 								className: "wb-d-badge",
 								"data-s": "expired",
-								children: "已过期"
+								children: "Expired"
 							}),
 							" ",
 							"[",
@@ -53654,7 +53407,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 					children: [
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 							className: "wb-sub",
-							children: "返工指令（随本轮保存生成；reject 块清单，可贴工单）"
+							children: "Rework instruction (generated on save; rejected-block list, paste into ticket)"
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", { children: reworkMd }),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -53664,11 +53417,11 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 								onClick: () => {
 									copyText(reworkMd);
 								},
-								children: copied ? "已复制 ✓" : "复制"
+								children: copied ? "Copied ✓" : "Copy"
 							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								className: "wb-btn",
 								onClick: () => setReworkMd(void 0),
-								children: "收起"
+								children: "Collapse"
 							})]
 						})
 					]
@@ -53692,7 +53445,7 @@ function AgentLogsTab({ detail, wf, onMsg }) {
 			setLoadErr("");
 			try {
 				const r = await apiGet(`${API}/tickets/${encodeURIComponent(detail.id)}/agent-logs`);
-				if (r?.ok !== true) throw new Error(r?.error ?? "agent 日志读取失败");
+				if (r?.ok !== true) throw new Error(r?.error ?? "agent log read failed");
 				if (dead) return;
 				setLogs(r.result);
 				if (r.result?.reason !== void 0 && r.result?.reason !== "") onMsg(String(r.result.reason));
@@ -53708,11 +53461,11 @@ function AgentLogsTab({ detail, wf, onMsg }) {
 	}, [detail.id]);
 	if (loadErr !== "") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-err",
-		children: ["agent 日志加载失败：", loadErr]
+		children: ["Agent log load failed: ", loadErr]
 	});
 	if (loading) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 		className: "wb-empty",
-		children: "agent 日志加载中…"
+		children: "Loading agent logs…"
 	});
 	if (logs === void 0) return null;
 	const byStage = /* @__PURE__ */ new Map();
@@ -53744,7 +53497,7 @@ function AgentLogsTab({ detail, wf, onMsg }) {
 		children: [
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "wb-section-title",
-				children: "agent 日志（.suyou/）"
+				children: "Agent logs (.suyou/)"
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "wb-al-meta",
@@ -53756,7 +53509,7 @@ function AgentLogsTab({ detail, wf, onMsg }) {
 					logs.agentAlive && logs.sessionKb > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 						style: { color: "var(--dsw-derive-accent,#0969da)" },
 						children: [
-							"agent 运行中 · 已读 ",
+							"agent running · read ",
 							logs.sessionKb,
 							"KB",
 							logs.lastActivity ? " · " + logs.lastActivity : ""
@@ -53768,9 +53521,9 @@ function AgentLogsTab({ detail, wf, onMsg }) {
 					}) : null,
 					logs.exists ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
 						logs.files.length,
-						" 个文件",
-						logs.truncated ? `（超出封顶，截断显示）` : ""
-					] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: logs.reason ?? "目录不存在" }),
+						" files",
+						logs.truncated ? ` (over cap, truncated)` : ""
+					] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: logs.reason ?? "directory missing" }),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						className: "wb-btn",
 						disabled: loading,
@@ -53781,7 +53534,7 @@ function AgentLogsTab({ detail, wf, onMsg }) {
 									const r = await apiGet(`${API}/tickets/${encodeURIComponent(detail.id)}/agent-logs`);
 									if (r?.ok === true) {
 										setLogs(r.result);
-										onMsg("已刷新");
+										onMsg("Refreshed");
 									}
 								} finally {
 									setLoading(false);
@@ -53795,9 +53548,9 @@ function AgentLogsTab({ detail, wf, onMsg }) {
 			logs.files.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "wb-empty",
 				children: [
-					"暂无 agent 日志/段结果文件（",
-					logs.reason ?? "目录为空",
-					"）。"
+					"No agent log / stage result files (",
+					logs.reason ?? "directory empty",
+					")."
 				]
 			})
 		]
@@ -53823,14 +53576,14 @@ function AgentLogsTab({ detail, wf, onMsg }) {
 						className: "meta",
 						children: [
 							attempts.length,
-							" 次尝试",
-							lastMtime > 0 ? ` · 最近 ${fmtTs(lastMtime)}` : ""
+							" attempts",
+							lastMtime > 0 ? ` · latest ${fmtTs(lastMtime)}` : ""
 						]
 					})
 				]
 			}), attempts.map((a) => {
 				const r = a.result !== void 0 && typeof a.result.result === "object" && a.result.result !== null ? a.result.result : void 0;
-				const status = r !== void 0 ? String(r.status ?? "ok") : "无结算";
+				const status = r !== void 0 ? String(r.status ?? "ok") : "no result";
 				const summary = typeof r?.summary === "string" ? r.summary : "";
 				const pkey = `${stageId}:${a.gen}`;
 				return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
@@ -53905,7 +53658,7 @@ function AgentLogsTab({ detail, wf, onMsg }) {
 											...o,
 											[pkey]: !o[pkey]
 										})),
-										children: promptOpen[pkey] ? "收起注入的 prompt ▲" : "查看注入的 prompt ▼"
+										children: promptOpen[pkey] ? "Hide injected prompt ▲" : "View injected prompt ▼"
 									}), promptOpen[pkey] && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", {
 										className: "wb-al-pre",
 										style: {
@@ -53925,9 +53678,9 @@ function AgentLogsTab({ detail, wf, onMsg }) {
 									className: "wb-al-result-key",
 									style: { padding: "6px 12px 0" },
 									children: [
-										"agent 输出尾部（",
+										"Agent output tail (",
 										a.log.name,
-										"）"
+										")"
 									]
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", {
@@ -53937,15 +53690,15 @@ function AgentLogsTab({ detail, wf, onMsg }) {
 								a.log.contentTruncated === true && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 									className: "wb-al-trunc",
 									children: [
-										"内容过长已截断（完整见 泳道 .suyou/",
+										"Content truncated (full content in lane .suyou/",
 										a.log.name,
-										"）。"
+										")."
 									]
 								})
 							] }),
 							a.result === void 0 && a.log === void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 								className: "wb-empty",
-								children: "内容读取失败。"
+								children: "Failed to read content."
 							})
 						]
 					})]
@@ -53962,22 +53715,21 @@ function ScanReportSection({ scan, onOpen }) {
 		children: [
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "wb-section-title",
-				children: "巡 检 报 告"
+				children: "Inspection Report"
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "wb-scan-meta",
 				children: [rep !== null && rep !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: ["生成于 ", rep.generated_at] }),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: ["报告文件 ", scan?.file] }),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: ["Generated ", rep.generated_at] }),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: ["Report file ", scan?.file] }),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
-						"全量 ",
+						"Total ",
 						rep.total_tickets,
-						" 张 · 待决 ",
-						rep.pending_decision_count,
-						" 张"
+						" · pending ",
+						rep.pending_decision_count
 					] }),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
-						"卡死阈值 ",
+						"Stuck threshold ",
 						rep.stuck_threshold_hours,
 						"h"
 					] }),
@@ -53987,22 +53739,25 @@ function ScanReportSection({ scan, onOpen }) {
 							"疑似卡死",
 							"待补",
 							"可签"
-						].map((k) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-							className: "wb-sug",
-							"data-sug": k,
-							children: [
-								k,
-								" ",
-								rep.summary?.[k] ?? 0
-							]
-						}, k))
+						].map((k) => {
+							const lab = SUGGESTION_LABEL[k] ?? k;
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								className: "wb-sug",
+								"data-sug": lab,
+								children: [
+									lab,
+									" ",
+									rep.summary?.[k] ?? 0
+								]
+							}, k);
+						})
 					})
-				] }), (rep === null || rep === void 0) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: scan?.reason || "巡检报告加载中…" })]
+				] }), (rep === null || rep === void 0) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: scan?.reason || "Loading inspection report…" })]
 			}),
 			rep !== null && rep !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 				rep.items.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "wb-empty",
-					children: "本轮无待决工单（settled/awaiting-human 为零）。"
+					children: "No pending tickets this round (settled/awaiting-human = 0)."
 				}),
 				rep.items.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
 					className: "wb-scan-table",
@@ -54017,7 +53772,7 @@ function ScanReportSection({ scan, onOpen }) {
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "理由" })
 					] }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tbody", { children: rep.items.map((it) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", {
 						onClick: () => onOpen(it.ticket_id),
-						title: "点开工单详情",
+						title: "Open ticket detail",
 						children: [
 							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("td", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 								className: "wb-scan-id",
@@ -54037,13 +53792,13 @@ function ScanReportSection({ scan, onOpen }) {
 								"data-state": it.gate_green === true ? "running" : it.gate_green === false ? "blocked" : "done"
 							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 								className: "wb-state-text",
-								children: it.gate_label || "无记录"
+								children: it.gate_label || "no record"
 							})] }),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: it.pending_count > 0 ? it.pending_count : "—" }),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 								className: "wb-sug",
-								"data-sug": it.suggestion,
-								children: it.suggestion
+								"data-sug": SUGGESTION_LABEL[it.suggestion] ?? it.suggestion,
+								children: SUGGESTION_LABEL[it.suggestion] ?? it.suggestion
 							}) }),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", {
 								className: "wb-scan-reasons",
@@ -54097,7 +53852,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 	const [approveRemark, setApproveRemark] = (0, react.useState)("");
 	/** approve 摘要 fetch 的请求序号：迟到回调若与当前弹层不同批，丢弃不误写。 */
 	const approveSeqRef = (0, react.useRef)(0);
-	const [evInput, setEvInput] = (0, react.useState)({});
 	const [copied, setCopied] = (0, react.useState)(false);
 	const [preview, setPreview] = (0, react.useState)(void 0);
 	const [fileViewer, setFileViewer] = (0, react.useState)(null);
@@ -54141,7 +53895,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 		setPollHealth(next);
 		setPollLastError(errMsg);
 		if (outcome === "ok") setError("");
-		else if (next.degraded) setError(outcome === "retryable" ? `工单台连续 ${next.failStreak} 次刷新失败，数据可能滞后；已转慢速自动重试，无需手动刷新。最后错误：${errMsg}` : `选中工单不可查（不存在或已终态），详见详情区提示；其余工单数据可能滞后。`);
+		else if (next.degraded) setError(outcome === "retryable" ? `Board refresh failed ${next.failStreak}× in a row; data may be stale. Switched to slow auto-retry — no manual refresh needed. Last error: ${errMsg}` : `Selected ticket not queryable (missing or terminal) — see detail panel note; other tickets may be stale.`);
 	}
 	const wfById = (0, react.useMemo)(() => {
 		const m = {};
@@ -54154,13 +53908,13 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 		listInFlight.current = true;
 		try {
 			const [data, insp] = await Promise.all([apiGet(`${API}/tickets`), apiGet(INSPECTION_TICKETS_URL).catch(() => void 0)]);
-			if (data?.ok !== true) throw new Error(data?.error ?? "台面加载失败");
+			if (data?.ok !== true) throw new Error(data?.error ?? "board load failed");
 			const baseRows = data.result?.tickets ?? [];
 			if (insp?.ok === true) {
 				inspectionRowsRef.current = insp.result?.tickets ?? [];
 				const f = insp.result?.inspection_filter;
-				setInspectionNote(f?.degraded ? String(f.note ?? "巡检板面降级") : "");
-			} else setInspectionNote("巡检板面拉取失败，显示上次快照（自动重试中）");
+				setInspectionNote(f?.degraded ? String(f.note ?? "inspection panel degraded") : "");
+			} else setInspectionNote("inspection panel fetch failed; showing last snapshot (auto-retrying)");
 			setTickets([...baseRows, ...inspectionRowsRef.current]);
 			setWorkflows(data.workflows ?? []);
 			return "ok";
@@ -54177,7 +53931,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 		const detailOpen = selectedIdRef.current !== null;
 		const [listOut, detailOut] = await Promise.all([reloadTickets(), detailOpen ? refreshDetailSilent() : Promise.resolve("ok")]);
 		const out = worstOutcome(listOut, detailOut);
-		applyPollOutcome(out, out === "ok" ? "" : "snapshot 查询瞬时失败（阶段切换窗？）");
+		applyPollOutcome(out, out === "ok" ? "" : "snapshot query transient failure (stage switch window?)");
 	}
 	/** Temporal server/worker 状态点：读 temporal-health（真实探测，静默失败灰显）。 */
 	async function reloadHealth() {
@@ -54216,7 +53970,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 		presenceRef.current = p;
 		const unsub = p.onRemoteWrite((w) => {
 			if (selectedIdRef.current !== null && w.ticket === selectedIdRef.current) {
-				setPeerNote(`工单 ${w.ticket} 刚被另一页签操作过（${w.op} · ${w.who}），已自动刷新`);
+				setPeerNote(`Ticket ${w.ticket} was just operated from another tab (${w.op} · ${w.who}); auto-refreshed`);
 				pollOnce();
 			}
 		});
@@ -54250,7 +54004,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 		try {
 			const data = await apiGet(`${API}/tickets/${encodeURIComponent(id)}`);
 			if (data?.ok !== true) {
-				const e = new Error(data?.error ?? "详情加载失败");
+				const e = new Error(data?.error ?? "detail load failed");
 				e.kind = data?.kind;
 				e.face = data?.face;
 				throw e;
@@ -54260,11 +54014,11 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 		} catch (err) {
 			if (selectedIdRef.current === id) {
 				const kind = err?.kind;
-				if (kind === "not_found") setOpMsg(`工单不存在：${id}（Temporal 无此 workflow）`);
+				if (kind === "not_found") setOpMsg(`Ticket not found: ${id} (no such Temporal workflow)`);
 				else if (kind === "terminal") {
 					setTerminalFace(terminalFaceView(err?.face, err instanceof Error ? err.message : String(err)));
 					setOpMsg(String(err instanceof Error ? err.message : err));
-				} else setOpMsg(`详情加载失败（查询瞬时故障），自动重试中：${String(err instanceof Error ? err.message : err)}`);
+				} else setOpMsg(`Detail load failed (transient query error), retrying: ${String(err instanceof Error ? err.message : err)}`);
 			}
 		} finally {
 			if (selectedIdRef.current === id) setDetailLoading(false);
@@ -54280,13 +54034,13 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 		const viewers = p.viewersOf(id);
 		if (hit === void 0 && viewers.length === 0) return true;
 		const lines = [];
-		if (hit !== void 0) lines.push(`另一页签 ${hit.who} ${Math.max(1, Math.round(hit.ageMs / 1e3))}s 前刚对该工单执行过「${hit.op}」`);
-		if (viewers.length > 0) lines.push(`另一页签正在查看此工单（${viewers.map((v) => v.who).join("、")}）`);
-		return window.confirm(`确认继续对工单 ${id} 执行「${op}」？\n${lines.join("\n")}`);
+		if (hit !== void 0) lines.push(`Another tab (${hit.who}) ran "${hit.op}" on this ticket ${Math.max(1, Math.round(hit.ageMs / 1e3))}s ago`);
+		if (viewers.length > 0) lines.push(`Another tab is viewing this ticket (${viewers.map((v) => v.who).join(", ")})`);
+		return window.confirm(`Continue "${op}" on ticket ${id}?\n${lines.join("\n")}`);
 	}
 	async function doOp(id, op, args, msgOk) {
 		if (!peerWriteAllowed(id, op)) {
-			setOpMsg("已取消：另一页签刚操作过该工单");
+			setOpMsg("Cancelled: another tab just operated this ticket");
 			return;
 		}
 		setOpBusy(true);
@@ -54294,7 +54048,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 		try {
 			const data = await apiPost(`${API}/tickets/${encodeURIComponent(id)}/${op}`, args);
 			if (data?.ok !== true) {
-				setOpMsg(`失败：${data?.error ?? "未知错误"}${data?.run_id ? `（run_id ${data.run_id}）` : ""}`);
+				setOpMsg(`Failed: ${data?.error ?? "unknown error"}${data?.run_id ? ` (run_id ${data.run_id})` : ""}`);
 				return;
 			}
 			const result = data.result;
@@ -54307,20 +54061,10 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 			presenceRef.current?.notifyWrite(id, op);
 			await Promise.all([reloadTickets(), ...id === selectedId ? [openDetail(id)] : []]);
 		} catch (err) {
-			setOpMsg(`操作失败：${String(err instanceof Error ? err.message : err)}`);
+			setOpMsg(`Operation failed: ${String(err instanceof Error ? err.message : err)}`);
 		} finally {
 			setOpBusy(false);
 		}
-	}
-	function doAccept(item, done) {
-		if (!selectedId) return;
-		const evidence = (evInput[item] ?? "").trim();
-		doOp(selectedId, "accept", {
-			item,
-			done,
-			by: operator,
-			...evidence ? { evidence } : {}
-		}, done ? `验收项已打勾：${item.slice(0, 24)}` : `已取消打勾：${item.slice(0, 24)}`);
 	}
 	/** 读工单审批意见（server/reviews/<id>.json；没有=undefined，不报错）。 */
 	async function fetchReviewFile(id) {
@@ -54332,7 +54076,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 	function doAdvance(id, stageState, epic) {
 		if (stageState === "awaiting-human") {
 			const code = (epic ?? "").trim();
-			const epicLine = code !== "" ? `所属立项: ${code}` : "";
+			const epicLine = code !== "" ? `Epic: ${code}` : "";
 			const seq = ++approveSeqRef.current;
 			(async () => {
 				const file = await fetchReviewFile(id);
@@ -54347,7 +54091,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 			})();
 			return;
 		}
-		doOp(id, "advance", {}, "已推进到下一阶段");
+		doOp(id, "advance", {}, "Advanced to next stage");
 	}
 	function doSign(id, decision, note, gate) {
 		doOp(id, "sign", gate ? {
@@ -54359,7 +54103,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 			decision,
 			note,
 			who: operator
-		}, decision === "approve" ? "已审批通过并推进" : "已打回（sign reject）");
+		}, decision === "approve" ? "Approved and advanced" : "Rework requested (sign reject)");
 	}
 	/** KI-004 approve 弹层确认：同 doRework 口径——先复位弹层 state 再签字，
 	*  失败信息由 doOp 的 setOpMsg 外露；buildApproveNote 兜底 remark 可空。 */
@@ -54392,14 +54136,14 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 	function doRework() {
 		if (!reworkId) return;
 		if (reworkNote.trim() === "") {
-			setOpMsg("需要填写返工理由");
+			setOpMsg("Rework reason required");
 			return;
 		}
 		if (reworkHuman) doSign(reworkId, "reject", reworkNote);
 		else doOp(reworkId, "rework", {
 			note: reworkNote,
 			...reworkTo ? { to_stage: reworkTo } : {}
-		}, "已打回");
+		}, "Rework requested");
 		setReworkNote("");
 		setReworkTo("");
 		setReworkId(null);
@@ -54430,12 +54174,12 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 		try {
 			const data = await apiGet(`${API}/book?path=${encodeURIComponent(detail.book_path)}&limit=5`);
 			if (data?.ok !== true) {
-				setOpMsg(`预览失败：${data?.error ?? "未知错误"}`);
+				setOpMsg(`Preview failed: ${data?.error ?? "unknown error"}`);
 				return;
 			}
 			setPreview(data.result);
 		} catch (err) {
-			setOpMsg(`预览失败：${String(err instanceof Error ? err.message : err)}`);
+			setOpMsg(`Preview failed: ${String(err instanceof Error ? err.message : err)}`);
 		} finally {
 			setPreviewLoading(false);
 		}
@@ -54455,7 +54199,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 				return "ok";
 			}
 			const out = classifyPollBody(data);
-			if (out !== "retryable" && selectedIdRef.current === id) setOpMsg(String(data?.error ?? "工单查询失败"));
+			if (out !== "retryable" && selectedIdRef.current === id) setOpMsg(String(data?.error ?? "ticket query failed"));
 			return out;
 		} catch {
 			return "retryable";
@@ -54573,9 +54317,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 	const stageDurs = useStageDurations(detail, selWf);
 	const laneModel = (0, react.useMemo)(() => buildLaneMap(detail?.topology ?? selWf?.topology ?? null, detail), [detail, selWf]);
 	const checksRuns = (0, react.useMemo)(() => detail ? buildChecksDetail(detail) : [], [detail]);
-	const detailWs = workspaceInfoOf(detail);
-	const instItems = detail?.acceptance?.length ? detail.acceptance : detail?.stage_acceptance?.length ? detail.stage_acceptance : [];
-	const curChecks = detail?.checks?.[detail?.stage ?? ""] ?? [];
 	const ops = detail ? availableOps(detail, selWf) : [];
 	const reworkStages = selWf?.stages.map((s) => s.id) ?? [];
 	const detailCloseHealth = detail ? closeHealthOf(detail) : "";
@@ -54604,7 +54345,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 				children: [
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-title",
-						children: "工 单 台"
+						children: "Ticket Board"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "wb-head-spacer" }),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
@@ -54619,18 +54360,18 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 									className: "wb-health-item",
 									"data-online": health?.server.online ?? false,
-									title: health ? `server · ${health.server.detail}${health.server.online ? "" : `\n重启：${health.restart_hint.server}`}` : "temporal server 状态探测中…",
+									title: health ? `server · ${health.server.detail}${health.server.online ? "" : `\nrestart: ${health.restart_hint.server}`}` : "probing temporal server status…",
 									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 										className: "wb-health-dot",
 										"data-online": health?.server.online ?? false
-									}), "Temporal 控制台 ↗"]
+									}), "Temporal UI ↗"]
 								})
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								className: "wb-status-btn",
 								"data-open": workersOpen,
 								"data-online": workers === void 0 ? void 0 : workers.count_alive > 0,
-								title: workers ? `worker ${workers.count_alive}/${workers.count} 在线 · 点开看逐 worker 状态` : "worker 清单接口未挂载（需重启 dsh 后生效）",
+								title: workers ? `workers ${workers.count_alive}/${workers.count} online · click for per-worker status` : "workers API not mounted (takes effect after dsh restart)",
 								onClick: () => {
 									if (!workersOpen) reloadWorkers();
 									setWorkersOpen(!workersOpen);
@@ -54641,7 +54382,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								className: "wb-status-btn",
 								"data-open": page === "scan",
 								"data-online": scan?.report ? scan.report.pending_decision_count === 0 : void 0,
-								title: scan?.report ? `巡检报告 · 待决 ${scan.report.pending_decision_count} 张 · 点开看全表` : scan?.reason ?? "巡检报告加载中…",
+								title: scan?.report ? `Inspection report · ${scan.report.pending_decision_count} pending · click for full table` : scan?.reason ?? "Loading inspection report…",
 								onClick: () => setPage(page === "scan" ? "tickets" : "scan"),
 								children: ["巡检", scan?.report ? ` ${scan.report.pending_decision_count}` : ""]
 							})
@@ -54652,15 +54393,15 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 						children: [
 							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 								className: "wb-workers-head",
-								children: ["worker 清单", workers ? ` · ${workers.count_alive}/${workers.count} 在线` : ""]
+								children: ["workers", workers ? ` · ${workers.count_alive}/${workers.count} online` : ""]
 							}),
 							workers === void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 								className: "wb-empty",
-								children: "接口未挂载（需重启 dsh 后生效）。"
+								children: "API not mounted (takes effect after dsh restart)."
 							}),
 							workers !== void 0 && workers.workers.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 								className: "wb-empty",
-								children: "没有 worker pidfile。"
+								children: "No worker pidfiles."
 							}),
 							workers !== void 0 && workers.workers.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
 								className: "wb-workers-table",
@@ -54677,12 +54418,12 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 											className: "wb-id",
 											children: w.queue
 										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: w.ticket ?? "（共享池）" }),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: w.ticket ?? "(shared pool)" }),
 										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: w.pid ?? "—" }),
 										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("td", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 											className: "wb-health-dot",
 											"data-online": w.online
-										}), w.online ? " 在线" : " 离线"] }),
+										}), w.online ? " online" : " offline"] }),
 										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: w.log_mtime ? (/* @__PURE__ */ new Date(w.log_mtime * 1e3)).toLocaleString() : "—" })
 									]
 								}, w.queue)) })]
@@ -54703,10 +54444,10 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 			workers !== void 0 && workers.count > 0 && workers.count_alive === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "wb-health-offline",
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
-					"所有 worker 离线（",
+					"All workers offline (",
 					workers.count,
-					" 个 pidfile 均不存活）→ ",
-					health?.restart_hint.worker ?? "重启 worker"
+					" pidfiles, none alive) → ",
+					health?.restart_hint.worker ?? "restart worker"
 				] })
 			}),
 			error !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -54714,7 +54455,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 				children: [
 					error,
 					"\n",
-					"（工单台 API 未挂载？headless profile 无 webServer。）"
+					"(Board API not mounted? headless profile has no webServer.)"
 				]
 			}),
 			page === "tickets" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
@@ -54742,7 +54483,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 							className: "wb-chip-btn wb-chip-health",
 							"data-health": "abnormal",
 							"data-on": filterHealth === "abnormal",
-							title: "只看已结束但异常收口的票（本期无报告/收口面不可读）",
+							title: "Only tickets closed abnormally (no report / unreadable close face)",
 							onClick: () => setFilterHealth(filterHealth === "abnormal" ? "" : "abnormal"),
 							children: ["异常收口 ", abnormalCloseCount]
 						}),
@@ -54753,7 +54494,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								setFilterState4("");
 								setFilterHealth("");
 							},
-							children: ["全部 ", tickets?.length ?? 0]
+							children: ["All ", tickets?.length ?? 0]
 						}),
 						epicList.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 							className: "wb-sub",
@@ -54767,7 +54508,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								"--epic-c": epicColorOf(e.code),
 								color: epicChipColor()
 							},
-							title: `按立项 ${e.code} 过滤`,
+							title: `Filter by epic ${e.code}`,
 							onClick: () => setFilterEpic(filterEpic === e.code ? "" : e.code),
 							children: [
 								e.code,
@@ -54778,7 +54519,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
 							className: "wb-search",
 							type: "search",
-							placeholder: "搜索 id / 标题…",
+							placeholder: "Search id / title…",
 							value: q,
 							onChange: (e) => setQ(e.target.value)
 						}),
@@ -54788,10 +54529,10 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 							onChange: (e) => setSortKey(e.target.value),
 							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
 								value: "updated",
-								children: "最近活动 ↓"
+								children: "Last activity ↓"
 							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
 								value: "created",
-								children: "创建时间 ↓"
+								children: "Created ↓"
 							})]
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
@@ -54799,11 +54540,11 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 							onClick: () => {
 								pollOnce();
 							},
-							children: "刷 新"
+							children: "Refresh"
 						}),
 						pollHealth.failStreak > 0 && !pollHealth.degraded && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 							className: "wb-sub",
-							title: pollLastError || "上次刷新失败，当前展示的是上次成功快照，正在自动重试",
+							title: pollLastError || "Last refresh failed; showing last good snapshot, auto-retrying",
 							children: "⟳ 数据可能滞后（自动重试中）"
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
@@ -54812,7 +54553,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								openList.length + doneList.length,
 								"/",
 								tickets?.length ?? 0,
-								" 张"
+								" tickets"
 							]
 						})
 					]
@@ -54845,36 +54586,36 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 							doAdvance(t.id, t.stage_state, t.epic);
 						},
 						onDispatch: () => {
-							doOp(t.id, "dispatch-next", {}, "已生成派活指令");
+							doOp(t.id, "dispatch-next", {}, "Dispatch prompt generated");
 						},
 						onRework: () => {
 							openRework(t.id, t.stage_state === "awaiting-human");
 						},
 						onPause: () => {
-							doOp(t.id, "pause", { who: operator }, "已发送段间暂停（当前段跑完后停住）");
+							doOp(t.id, "pause", { who: operator }, "Pause sent (stops after current stage finishes)");
 						},
 						onResume: () => {
-							doOp(t.id, "resume", { who: operator }, "已发送恢复，继续派段");
+							doOp(t.id, "resume", { who: operator }, "Resume sent; dispatching continues");
 						},
 						onUnblock: () => {
-							if (t.engine === "template-as-code-v2") doOp(t.id, "retry-qc", { who: operator }, "已请求重跑（retry_qc）");
+							if (t.engine === "template-as-code-v2") doOp(t.id, "retry-qc", { who: operator }, "Retry requested (retry_qc)");
 							else doOp(t.id, "update", {
 								stage_state: "awaiting",
-								note: "（工单台）解除阻塞"
-							}, "已解除阻塞");
+								note: "(board) unblock"
+							}, "Unblocked");
 						},
 						onClose: () => {
-							if (window.confirm("标记为已完成（closed）？")) doOp(t.id, "update", {
+							if (window.confirm("Mark as completed (closed)?")) doOp(t.id, "update", {
 								status: "closed",
-								note: "（工单台）完成"
-							}, "已标记完成");
+								note: "(board) done"
+							}, "Marked closed");
 						},
 						onOpenEpic
 					}, t.id);
 				}),
 				paged.length === 0 && openList.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "wb-empty",
-					children: "没有符合筛选的工单。"
+					children: "No tickets match the filter."
 				}),
 				doneAbn.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
 					t: {
@@ -54896,9 +54637,9 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 					className: "wb-done-row",
 					onClick: () => setShowDone(false),
 					children: [
-						"▾ 收口 · ",
+						"▾ Closed · ",
 						doneOk.length,
-						"（点击折叠）"
+						" (click to collapse)"
 					]
 				}), doneOk.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
 					t: {
@@ -54919,9 +54660,9 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 					className: "wb-done-row",
 					onClick: () => setShowDone(true),
 					children: [
-						"✓ 收口 · ",
+						"✓ Closed · ",
 						doneOk.length,
-						"（点击展开）"
+						" (click to expand)"
 					]
 				})),
 				pageCount > 1 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -54931,25 +54672,25 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 							className: "wb-btn",
 							disabled: pageNo <= 1,
 							onClick: () => setPageNo((p) => Math.max(1, p - 1)),
-							children: "上一页"
+							children: "Prev page"
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 							className: "wb-sub",
 							children: [
-								"第 ",
+								"Page ",
 								pageNo,
 								"/",
 								pageCount,
-								" 页 · 未收口 ",
+								" · ",
 								openList.length,
-								" 张"
+								" open"
 							]
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 							className: "wb-btn",
 							disabled: pageNo >= pageCount,
 							onClick: () => setPageNo((p) => Math.min(pageCount, p + 1)),
-							children: "下一页"
+							children: "Next page"
 						})
 					]
 				})
@@ -54959,7 +54700,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 					className: "wb-btn",
 					onClick: () => setPage("tickets"),
-					children: "← 返回工单列表"
+					children: "← Back to ticket list"
 				})
 			}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ScanReportSection, {
 				scan,
@@ -55007,7 +54748,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 					}),
 					detailLoading && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "wb-empty",
-						children: "加载详情…"
+						children: "Loading detail…"
 					}),
 					!detailLoading && terminalFace !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TerminalFailurePanel, { view: terminalFace }),
 					!detailLoading && detail !== void 0 && detail.id === selectedId && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
@@ -55032,7 +54773,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 									className: "wb-badge",
 									"data-state": "done",
 									"data-close-health": detailCloseHealth,
-									children: detailCloseHealth === "unreadable" ? "已结束·待核" : "已结束·异常"
+									children: detailCloseHealth === "unreadable" ? "Closed·Unverified" : "Closed·Abnormal"
 								}) : detail.status !== "closed" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 									className: "wb-badge",
 									"data-state": detail.stage_state,
@@ -55040,7 +54781,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 									className: "wb-sub",
-									children: selWf?.name ?? "未挂模板"
+									children: selWf ? workflowLabel(selWf.id) : "no template"
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(EpicBadge, {
 									epic: detail.epic,
@@ -55055,7 +54796,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 						}),
 						detail.blocked_reason && detail.close_health !== "abnormal" && detail.close_health !== "unreadable" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-d2-blocked",
-							children: ["⛔ 受阻原因：", detail.blocked_reason]
+							children: ["⛔ Blocked: ", detail.blocked_reason]
 						}),
 						(() => {
 							const card = buildStatusCard(detail);
@@ -55081,21 +54822,21 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 									}, i)),
 									!card.headlineFromTable && !card.terminal && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 										className: "sc-fallback",
-										children: "以上为引擎原文（词条表缺此原因码，不猜测翻译）"
+										children: "Above is engine verbatim (no lexicon entry for this reason code; not guessed)"
 									}),
 									card.severity === "blue" && card.signWhat.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 										className: "sc-signwhat",
 										"data-testid": "sign-what",
 										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 											className: "sc-signwhat-ttl",
-											children: "签什么"
+											children: "What to sign"
 										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", { children: card.signWhat.map((s, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("li", { children: s }, i)) })]
 									}),
 									(card.files.length > 0 || card.filesMore > 0) && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 										className: "sc-files",
 										children: [card.files.map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 											className: "sc-file",
-											title: "以本票时刻的版本只读打开",
+											title: "Open read-only as of this ticket",
 											onClick: () => setFileViewer({
 												ticketId: detail.id,
 												path: f,
@@ -55114,7 +54855,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 										className: "sc-next",
 										children: [
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: card.severity === "blue" ? "等你：" : card.terminal ? "说明：" : "下一步：" }),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: card.severity === "blue" ? "Waiting on you: " : card.terminal ? "Note: " : "Next: " }),
 											" ",
 											card.next
 										]
@@ -55134,12 +54875,12 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								"data-testid": "ticket-refs",
 								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 									className: "ttl",
-									children: "背景引用（非本票改动 · 点开看开票基线版）"
+									children: "Background references (not part of this ticket · open to see baseline version)"
 								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 									className: "wb-refs-files",
 									children: refs.map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 										className: "wb-ref-file",
-										title: "以开票基线版只读打开",
+										title: "Open read-only at ticket-open baseline",
 										onClick: () => setFileViewer({
 											ticketId: detail.id,
 											path: f,
@@ -55159,13 +54900,13 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								fontSize: 12,
 								color: "var(--dsw-derive-accent-deep,#0a3069)"
 							},
-							children: ["👀 另一页签正在查看此工单：", drawerPeerViewers.map((v) => v.who).join("、")]
+							children: ["👀 Another tab is viewing this ticket: ", drawerPeerViewers.map((v) => v.who).join(", ")]
 						}),
 						detail.body && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-d2-body",
 							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 								className: "ttl",
-								children: "工单正文（原始需求）"
+								children: "Body (original request)"
 							}), detail.body]
 						}),
 						detail.spec && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -55173,13 +54914,13 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 							"data-v": "B",
 							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 								className: "ttl",
-								children: ["执行规格（spec）", /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								children: ["Execution spec", /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 									className: "cnt",
-									children: [detail.spec.length, " 字"]
+									children: [detail.spec.length, " chars"]
 								})]
 							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "txt",
-								children: detail.spec
+								className: "txt wb-md",
+								dangerouslySetInnerHTML: { __html: specMarkdownHtml(detail.spec) }
 							})]
 						}),
 						detail.kind === "inspection" && laneModel && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMap, { model: laneModel }),
@@ -55222,17 +54963,17 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 									onClick: () => {
 										doAdvance(detail.id, detail.stage_state, detail.epic);
 									},
-									children: detail.stage_state === "awaiting-human" ? "✓ 审批通过" : "推进"
+									children: detail.stage_state === "awaiting-human" ? "✓ Approve" : "Advance"
 								}),
 								ops.includes("unblock") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 									className: "wb-btn wb-btn-blue",
 									disabled: opBusy,
 									onClick: () => {
-										if (detail.engine === "template-as-code-v2") doOp(detail.id, "retry-qc", { who: operator }, "已请求重跑（retry_qc）");
+										if (detail.engine === "template-as-code-v2") doOp(detail.id, "retry-qc", { who: operator }, "Retry requested (retry_qc)");
 										else doOp(detail.id, "update", {
 											stage_state: "awaiting",
-											note: "（工单台）解除阻塞"
-										}, "已解除阻塞");
+											note: "(board) unblock"
+										}, "Unblocked");
 									},
 									children: "重跑本步"
 								}),
@@ -55246,16 +54987,16 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								}),
 								detail.stage_state === "awaiting-human" && detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 									className: "wb-d2-hint",
-									children: "审批前请先在「变更」页签过 diff"
+									children: "Review the diff in the Changes tab before approving"
 								}),
 								ops.length === 0 && detail.status !== "closed" && detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 									className: "wb-d2-hint",
 									children: [
-										"当前状态无可用操作（",
+										"No operation available for this state (",
 										detail.status,
 										"×",
 										detail.stage_state,
-										"）"
+										")"
 									]
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
@@ -55267,7 +55008,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 												className: "wb-btn",
 												disabled: opBusy,
 												onClick: () => {
-													doOp(detail.id, "dispatch-next", {}, "已生成派活指令");
+													doOp(detail.id, "dispatch-next", {}, "Dispatch prompt generated");
 												},
 												children: "派下一棒"
 											}),
@@ -55275,10 +55016,10 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 												className: "wb-btn wb-btn-green",
 												disabled: opBusy,
 												onClick: () => {
-													if (window.confirm("标记为已完成（closed）？")) doOp(detail.id, "update", {
+													if (window.confirm("Mark as completed (closed)?")) doOp(detail.id, "update", {
 														status: "closed",
-														note: "（工单台）完成"
-													}, "已标记完成");
+														note: "(board) done"
+													}, "Marked closed");
 												},
 												children: "完成"
 											}),
@@ -55288,14 +55029,14 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 												onClick: () => {
 													openPreview();
 												},
-												children: previewLoading ? "读取中…" : "预览内容"
+												children: previewLoading ? "Loading…" : "Preview content"
 											}),
 											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("a", {
 												className: "wb-meta-link",
 												href: `http://127.0.0.1:8233/namespaces/default/workflows/${encodeURIComponent(detail.id)}`,
 												target: "_blank",
 												rel: "noreferrer",
-												children: "Temporal 执行 ↗"
+												children: "Temporal execution ↗"
 											})
 										]
 									})]
@@ -55314,13 +55055,13 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 									className: "wb-dtab",
 									"data-on": drawerTab === "detail",
 									onClick: () => setDrawerTab("detail"),
-									children: "进展"
+									children: "Progress"
 								}),
 								detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 									className: "wb-dtab",
 									"data-on": drawerTab === "changes",
 									onClick: () => setDrawerTab("changes"),
-									children: ["变更", detail.stage_state === "awaiting-human" ? "（审批必看 diff）" : ""]
+									children: ["Changes", detail.stage_state === "awaiting-human" ? " (diff required before approval)" : ""]
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 									className: "wb-dtab",
@@ -55345,259 +55086,13 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 							wf: selWf,
 							onMsg: setOpMsg
 						}),
-						drawerTab === "detail" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2Stages, {
-								detail,
-								wf: selWf,
-								usage,
-								durs: stageDurs.durs,
-								nowMs: stageDurs.nowMs
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "wb-d2-deep",
-								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2SnapshotDigest, { detail })
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "wb-d2-deep",
-								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "基本信息（工作区 · 分支 · 写集 · 时间）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "wb-meta-grid",
-										children: [
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-												k: "工单",
-												children: detail.id
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-												k: "工作流",
-												children: selWf?.name ?? "未挂模板"
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(MetaItem, {
-												k: "状态",
-												children: [detail.status, detail.close_health === "abnormal" || detail.close_health === "unreadable" ? ` · 已结束（${detailCloseHealth === "unreadable" ? "待核" : "异常收口"}）` : detail.status !== "closed" && detail.stage_state ? ` · ${STATE_LABEL[detail.stage_state] ?? detail.stage_state}` : ""]
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-												k: "当前阶段",
-												children: detail.stage_name || detail.stage || "—"
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-												k: "角色",
-												children: detail.role || "—"
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-												k: "工作区",
-												title: detailWs.path || void 0,
-												children: detailWs.type === "main" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-													className: "wb-type-chip",
-													"data-empty": true,
-													children: "主树"
-												}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-														className: "wb-chip",
-														children: detailWs.type === "worktree" ? "泳道" : "目录"
-													}),
-													" ",
-													detailWs.label
-												] })
-											}),
-											detail.branch && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-												k: "分支",
-												children: detail.branch
-											}),
-											detail.base_ref && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-												k: "base",
-												title: detail.base_ref,
-												children: detail.base_ref.slice(0, 12)
-											}),
-											detail.proposal_id && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-												k: "提案",
-												children: detail.proposal_id
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-												k: "创建",
-												children: fmtTs(detail.created)
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(MetaItem, {
-												k: "更新",
-												children: fmtTs(detail.updated)
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(MetaItem, {
-												k: "修订",
-												children: [detail.revision_count ?? 0, " 轮"]
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(MetaItem, {
-												k: "接力",
-												children: [detail.handoffs?.length ?? 0, " 棒"]
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(MetaItem, {
-												k: "挂起",
-												children: [detail.pending?.length ?? 0, " 项"]
-											})
-										]
-									}), detail.write_set && detail.write_set.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "wb-meta-row",
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "wb-meta-k",
-											children: "写集"
-										}), detail.write_set.map((w) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "wb-chip",
-											children: w
-										}, w))]
-									})] })] }),
-									detail.workflow_input ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "入参（workflow 启动参数快照）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-										className: "wb-md",
-										style: { fontSize: "12px" },
-										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("table", {
-											style: {
-												width: "100%",
-												borderCollapse: "collapse"
-											},
-											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tbody", { children: Object.entries(detail.workflow_input).map(([k, v]) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
-												style: {
-													color: "var(--dsw-derive-muted,#57606a)",
-													padding: "2px 8px",
-													whiteSpace: "nowrap",
-													verticalAlign: "top"
-												},
-												children: k
-											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
-												style: {
-													padding: "2px 8px",
-													wordBreak: "break-word"
-												},
-												children: Array.isArray(v) ? v.join(", ") : String(v ?? "—")
-											})] }, k)) })
-										})
-									}) })] }) : null,
-									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("summary", { children: [
-										"验收清单（当前阶段",
-										detail.stage ? ` ${detail.stage}` : "",
-										"）"
-									] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [
-										instItems.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-											className: "wb-empty",
-											children: "当前阶段无验收清单。"
-										}),
-										instItems.map((item) => {
-											const c = curChecks.find((x) => x.item === item);
-											const done = c?.done ?? false;
-											return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-												className: "wb-check",
-												children: [
-													/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-														className: "wb-check-line",
-														children: [
-															/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-																type: "checkbox",
-																checked: done,
-																disabled: opBusy || detail.status === "closed" || detail.stage_state === "running" && detail.status === "dispatched",
-																onChange: () => {
-																	doAccept(item, !done);
-																}
-															}),
-															/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-																className: "wb-check-item",
-																"data-done": done,
-																children: item
-															}),
-															c?.by && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-																className: "wb-check-by",
-																children: ["by ", c.by]
-															}),
-															c?.agent && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-																className: "wb-check-by",
-																children: ["分片 ", c.agent]
-															})
-														]
-													}),
-													c?.evidence && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("pre", {
-														className: "wb-evidence",
-														children: ["证据：", c.evidence]
-													}),
-													!done && detail.status === "settled" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-														className: "wb-ev-input",
-														placeholder: "证据（脚本输出原文/产物路径；可选）",
-														value: evInput[item] ?? "",
-														onChange: (e) => setEvInput((v) => ({
-															...v,
-															[item]: e.target.value
-														}))
-													})
-												]
-											}, item);
-										}),
-										detail.pending && detail.pending.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-											className: "wb-sub-sec",
-											children: "挂起项（审批理由 / 遗留问题）"
-										}), detail.pending.map((p, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-											className: "wb-pending",
-											children: [
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-													className: "wb-log-time",
-													children: fmtTs(p.ts)
-												}),
-												" ",
-												p.note
-											]
-										}, i))] })
-									] })] }),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "流水 log（状态/阶段流转历史）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: [...detail.log ?? []].reverse().map((l, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "wb-log",
-										children: [
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-												className: "wb-log-time",
-												children: fmtTs(l.ts)
-											}),
-											l.status && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-												className: "wb-badge",
-												"data-kind": "status",
-												children: l.status
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-												className: "wb-log-note",
-												children: l.note
-											})
-										]
-									}, i)) })] }),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "接力时间线（handoff · 每棒带产物）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [detail.deliverables && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "wb-meta-row",
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "wb-meta-k",
-											children: "交接物"
-										}), detail.deliverables]
-									}), detail.handoffs && detail.handoffs.length > 0 ? [...detail.handoffs].reverse().map((h, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "wb-hl",
-										children: [
-											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [
-												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-													className: "wb-hl-stage",
-													children: [
-														"[",
-														h.stage,
-														"]"
-													]
-												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-													className: "wb-log-time",
-													children: [" ", fmtTs(h.ts)]
-												}),
-												h.agent_id && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-													className: "wb-check-by",
-													children: [" · ", h.agent_id]
-												})
-											] }),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: h.summary || "（无摘要）" }),
-											h.artifacts && h.artifacts.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: h.artifacts.map((a, j) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-												className: "wb-chip",
-												children: a
-											}, j)) })
-										]
-									}, i)) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-										className: "wb-empty",
-										children: "暂无交接记录。"
-									})] })] })
-								]
-							})
-						] })
+						drawerTab === "detail" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(react_jsx_runtime.Fragment, { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2Stages, {
+							detail,
+							wf: selWf,
+							usage,
+							durs: stageDurs.durs,
+							nowMs: stageDurs.nowMs
+						}) })
 					] })
 				]
 			}),
@@ -55605,13 +55100,13 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 				className: "wb-modal",
 				role: "dialog",
 				"aria-modal": "true",
-				"aria-label": "审批通过并推进",
+				"aria-label": "Approve and advance",
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-modal-box",
 					children: [
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-modal-title",
-							children: ["审批通过并推进 — ", approveBox.id]
+							children: ["Approve and advance — ", approveBox.id]
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-modal-body",
@@ -55625,7 +55120,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 										className: "wb-d-badge",
 										"data-s": "added",
-										children: "自动摘要（不可编辑）"
+										children: "Auto summary (read-only)"
 									})
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", {
@@ -55634,7 +55129,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 										maxHeight: 120,
 										overflow: "auto"
 									},
-									children: approveBox.summary !== "" ? approveBox.summary : "（无已存审批意见，本轮无统计摘要）"
+									children: approveBox.summary !== "" ? approveBox.summary : "(no stored review; no summary this round)"
 								}),
 								approveBox.epicLine !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 									style: {
@@ -55647,7 +55142,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 									className: "wb-ev-input",
 									style: { minHeight: 80 },
 									maxLength: 2e3,
-									placeholder: "自由备注（可空，有内容随签字进不可变历史，≤2000 字）",
+									placeholder: "Free-form note (optional; stored immutably with the signature, ≤2000 chars)",
 									value: approveRemark,
 									onChange: (e) => setApproveRemark(e.target.value)
 								})
@@ -55659,11 +55154,11 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								className: "wb-btn wb-btn-green",
 								disabled: opBusy,
 								onClick: doApprove,
-								children: "确认通过并推进"
+								children: "Approve and advance"
 							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								className: "wb-btn",
 								onClick: closeApprove,
-								children: "取消"
+								children: "Cancel"
 							})]
 						})
 					]
@@ -55673,14 +55168,14 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 				className: "wb-modal",
 				role: "dialog",
 				"aria-modal": "true",
-				"aria-label": "打回",
+				"aria-label": "Rework",
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-modal-box",
 					children: [
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-modal-title",
 							children: [
-								reworkHuman ? "打回（走 Temporal sign，decision=reject）" : "打回",
+								reworkHuman ? "Rework (Temporal sign, decision=reject)" : "Rework",
 								" — ",
 								reworkId
 							]
@@ -55693,7 +55188,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								onChange: (e) => setReworkTo(e.target.value),
 								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
 									value: "",
-									children: "回退目标：缺省（按阶段语义自动）"
+									children: "Rework target: default (auto by stage semantics)"
 								}), reworkStages.map((s) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
 									value: s,
 									children: s
@@ -55701,7 +55196,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
 								className: "wb-ev-input",
 								style: { minHeight: 80 },
-								placeholder: "返工原因（必填）",
+								placeholder: "Rework reason (required)",
 								value: reworkNote,
 								onChange: (e) => setReworkNote(e.target.value)
 							})]
@@ -55712,7 +55207,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								className: "wb-btn wb-btn-danger",
 								disabled: opBusy,
 								onClick: doRework,
-								children: "确认打回"
+								children: "Confirm rework"
 							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								className: "wb-btn",
 								onClick: () => {
@@ -55720,7 +55215,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 									setReworkNote("");
 									setReworkTo("");
 								},
-								children: "取消"
+								children: "Cancel"
 							})]
 						})
 					]
@@ -55730,17 +55225,17 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 				className: "wb-modal",
 				role: "dialog",
 				"aria-modal": "true",
-				"aria-label": "派活指令",
+				"aria-label": "Dispatch prompt",
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-modal-box",
 					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "wb-modal-title",
 						children: [
-							"派活指令（dispatch-next · ",
+							"Dispatch prompt (dispatch-next · ",
 							promptBox.role,
 							"@",
 							promptBox.stage,
-							"）"
+							")"
 						]
 					}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "wb-modal-body",
@@ -55754,14 +55249,14 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								onClick: () => {
 									copyPrompt(promptBox.prompt);
 								},
-								children: copied ? "已复制 ✓" : "复制 prompt"
+								children: copied ? "Copied ✓" : "Copy prompt"
 							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								className: "wb-btn",
 								onClick: () => {
 									setPromptBox(null);
 									setCopied(false);
 								},
-								children: "关 闭"
+								children: "Close"
 							})]
 						})]
 					})]
@@ -55771,26 +55266,26 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 				className: "wb-modal",
 				role: "dialog",
 				"aria-modal": "true",
-				"aria-label": "内容预览",
+				"aria-label": "Content preview",
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-modal-box wb-preview-box",
 					children: [
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-modal-title",
 							children: [
-								"内容预览 · ",
+								"Content preview · ",
 								preview.meta.主题 || "後漢書",
-								preview.meta.期次 ? `（${preview.meta.期次}）` : "",
+								preview.meta.期次 ? ` (${preview.meta.期次})` : "",
 								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 									className: "wb-sub",
 									children: [
 										" ",
 										preview.meta.类型,
-										" · 共 ",
+										" · ",
 										preview.meta.total_chapters,
-										" 章 · 预览前 ",
+										" chapters · previewing first ",
 										preview.chapters.length,
-										" 章 · ",
+										" · ",
 										preview.meta.size_kb,
 										"KB"
 									]
@@ -55799,7 +55294,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 							className: "wb-preview-notice",
-							children: "预览 · 正式渲染以 app 为准（繁体原文，可滚动浏览）"
+							children: "Preview · final rendering lives in the app (traditional Chinese, scrollable)"
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-modal-body",
@@ -55814,7 +55309,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								}, i))]
 							}, ch.id)), preview.chapters.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 								className: "wb-empty",
-								children: "该文件无可预览章节。"
+								children: "No previewable chapters in this file."
 							})]
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -55824,7 +55319,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								onClick: () => {
 									setPreview(void 0);
 								},
-								children: "关 闭"
+								children: "Close"
 							})
 						})
 					]
@@ -55884,5 +55379,6 @@ exports.evidenceLightboxKeys = evidenceLightboxKeys;
 exports.evidenceNav = evidenceNav;
 exports.inject = inject;
 exports.name = name;
+exports.specMarkdownHtml = specMarkdownHtml;
 
 return module.exports; } });

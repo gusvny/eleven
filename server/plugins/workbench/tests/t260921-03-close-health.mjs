@@ -139,8 +139,8 @@ ok('已知偏差（钉死不掩盖）：degraded 老行兜底判 abnormal（非 
   const { close_health, ...unreadableNoKey } = UNREADABLE_ROW
   assert.equal(closeHealthOf(UNREADABLE_ROW), 'unreadable', '新引擎行：待核')
   assert.equal(closeHealthOf(unreadableNoKey), 'abnormal', '部署窗老行：兜底 only 能判到 abnormal（面缺失⇒无报告）')
-  assert.equal(closeHealthBadgeOf(UNREADABLE_ROW), '已结束·待核')
-  assert.equal(closeHealthBadgeOf(unreadableNoKey), '已结束·异常（无报告）', '徽标降级形态随偏差钉死')
+  assert.equal(closeHealthBadgeOf(UNREADABLE_ROW), 'Closed·Unverified')
+  assert.equal(closeHealthBadgeOf(unreadableNoKey), 'Closed·Abnormal (no report)', '徽标降级形态随偏差钉死')
 })
 
 console.log('\n== C 实案复现（验收用例②） ==')
@@ -151,8 +151,8 @@ ok('t260920-02 行：state=done（绝不 blocked/running）+ 异常收口徽标 
   assert.notEqual(deriveTicketState(REALCASE_ROW.status, REALCASE_ROW.stage_state, REALCASE_ROW.exec_status), 'blocked')
   assert.notEqual(deriveTicketState(REALCASE_ROW.status, REALCASE_ROW.stage_state, REALCASE_ROW.exec_status), 'active')
   // 徽标可扫读 + 不许无因异常（引擎 reason 键随行，详情卡/悬停有料）
-  assert.equal(closeHealthBadgeOf(REALCASE_ROW), '已结束·异常（无报告）')
-  assert.equal(closeHealthBadgeOf(LIVE_REALCASE_ROW), '已结束·异常（无报告）', '实案真形（落账镜像）同徽标')
+  assert.equal(closeHealthBadgeOf(REALCASE_ROW), 'Closed·Abnormal (no report)')
+  assert.equal(closeHealthBadgeOf(LIVE_REALCASE_ROW), 'Closed·Abnormal (no report)', '实案真形（落账镜像）同徽标')
   assert.ok(REALCASE_ROW.close_health_reason.includes('read-only'), '原因含实案根因原文')
   // 排序插层：异常收口 tier2（不沉底、不并入正常收口档）
   assert.equal(ticketMergeTierOf(REALCASE_ROW.status, REALCASE_ROW.stage_state, REALCASE_ROW.exec_status, REALCASE_ROW), 2)
@@ -165,7 +165,7 @@ ok('矩阵六格：行标记与详情一致（state/health/badge 三元组逐格
   const cells = [
     // [终态, 有产物, 期望 state, 期望 health, 期望 badge]
     ['COMPLETED', true, 'done', 'ok', ''],
-    ['COMPLETED', false, 'done', 'abnormal', '已结束·异常（无报告）'],
+    ['COMPLETED', false, 'done', 'abnormal', 'Closed·Abnormal (no report)'],
     ['FAILED', true, 'failed', 'failed', ''],
     ['FAILED', false, 'failed', 'failed', ''],
     ['TERMINATED', true, 'failed', 'failed', ''],

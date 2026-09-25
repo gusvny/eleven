@@ -75,7 +75,7 @@ function lockClient(src, label) {
     `${label}：textarea maxLength=2000 软防呆`)
   ok(src.includes('approveSeqRef'),
     `${label}：fetch 迟到回调有请求序号守卫`)
-  ok(src.includes('确认通过并推进'),
+  ok(src.includes('Approve and advance'), // t260925-18：approve 弹层主按钮英文化
     `${label}：approve 弹层确认文案在位`)
 }
 

@@ -35,10 +35,10 @@ ok('pauseOpOf：畸形输入不 throw 且按真值性归位（undefined→pause�
 /* ------------------------------------------------ pausedBadgeText 二态文案 */
 
 ok('pausedBadgeText：at_gate/pending/未知相位 三行真值', () => {
-  assert.equal(pausedBadgeText('at_gate'), '⏸ 已暂停在段间')
-  assert.equal(pausedBadgeText('pending'), '⏸ 暂停中（待段间生效）')
-  assert.equal(pausedBadgeText(undefined), '⏸ 暂停中（待段间生效）') // 未知兜底=保守提示
-  assert.equal(pausedBadgeText('some_future_phase'), '⏸ 暂停中（待段间生效）')
+  assert.equal(pausedBadgeText('at_gate'), '⏸ Paused at the stage gate')
+  assert.equal(pausedBadgeText('pending'), '⏸ Pausing (takes effect between stages)')
+  assert.equal(pausedBadgeText(undefined), '⏸ Pausing (takes effect between stages)') // 未知兜底=保守提示
+  assert.equal(pausedBadgeText('some_future_phase'), '⏸ Pausing (takes effect between stages)')
 })
 
 /* ------------------------------------------------ 源码锁（防消费面漂移） */

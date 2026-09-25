@@ -39,11 +39,12 @@ section('1 src 弹层角色配齐')
 
 // 逐类点名（审批/打回/派活/预览），防「配了三处漏一处」——review C1 口径：
 // 按实际枚举，不按类计数。
+// t260925-18：aria-label（=UI 文案）随界面英文化改英文；语义锚一致，label 列保留中文备注。
 const MODALS = [
-  { label: '审批通过并推进', anchor: 'aria-label="审批通过并推进"' },
-  { label: '打回', anchor: 'aria-label="打回"' },
-  { label: '派活指令', anchor: 'aria-label="派活指令"' },
-  { label: '内容预览', anchor: 'aria-label="内容预览"' },
+  { label: 'Approve and advance', anchor: 'aria-label="Approve and advance"' },
+  { label: 'Rework', anchor: 'aria-label="Rework"' },
+  { label: 'Dispatch prompt', anchor: 'aria-label="Dispatch prompt"' },
+  { label: 'Content preview', anchor: 'aria-label="Content preview"' },
 ]
 // 容器行形状：className="wb-modal" + role + aria-modal 同标签行内出现
 const containerRe = /<div className="wb-modal" role="dialog" aria-modal="true" aria-label="([^"]+)">/g

@@ -35,14 +35,14 @@ const bundle = await readFile(path.join(WB, 'lib', 'client.js'), 'utf8')
 
 /* ---- 1) 防连点：确认钮 opBusy 禁用 + doOp 先置 busy 后放行 ---- */
 section('1 防重复签字')
-ok(/disabled=\{[^}]*opBusy[^}]*\}[^>]*>[^<]*确认通过并推进/.test(src),
+ok(/disabled=\{[^}]*opBusy[^}]*\}[^>]*>[^<]*Approve and advance/.test(src),
   'src：确认钮 disabled={opBusy}（执行期连点无效）')
 ok(/setOpBusy\(true\)[\s\S]{0,2000}await apiPost[\s\S]{0,3000}finally[\s\S]{0,200}setOpBusy\(false\)/
   .test(src), 'src：doOp 先 setOpBusy(true) → await → finally setOpBusy(false)（busy 必复位）')
 
 /* ---- 2) 摘要 fetch 迟到/失败的行为确定 ---- */
 section('2 摘要 fetch 竞态与失败')
-ok(/无已存审批意见|无统计摘要/.test(bundle), '产物：fetch 失败时弹层有「无已存审批意见」类文案（照开不白屏）')
+ok(/no stored review|no summary this round/.test(bundle), '产物：fetch 失败时弹层有 no-stored-review 类文案（照开不白屏；t260925-18 UI 英文化后锚英文串）')
 ok(/await fetchReviewFile[\s\S]{0,400}setApproveBox|setApproveBox[\s\S]{0,80}fetchReviewFile/
   .test(src) || /fetchReviewFile[\s\S]{0,600}setApproveBox/.test(src),
   'src：弹层在 fetch 摘要之后打开（不同时开着弹层等摘要）')

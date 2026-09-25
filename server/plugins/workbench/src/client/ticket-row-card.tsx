@@ -98,11 +98,11 @@ function cardTitle(t: CardTicket, wf?: WfLike | null): string {
   const parts = [t.id]
   const stage = (wf?.stages ?? []).find(s => s?.id === t.stage)
   const short = stageShortOf(stage)
-  if (short !== '') parts.push(`阶段：${short}`)
-  if (t.blocked_reason) parts.push(`阻塞原因：${t.blocked_reason}`)
-  if (t.exec_status) parts.push(`执行状态：${t.exec_status}`)
-  if (t.close_health_reason) parts.push(`收口：${t.close_health_reason}`)
-  if (t.updated) parts.push(`更新 ${t.updated}`)
+  if (short !== '') parts.push(`Stage: ${short}`)
+  if (t.blocked_reason) parts.push(`Blocked: ${t.blocked_reason}`)
+  if (t.exec_status) parts.push(`Exec: ${t.exec_status}`)
+  if (t.close_health_reason) parts.push(`Close: ${t.close_health_reason}`)
+  if (t.updated) parts.push(`Updated ${t.updated}`)
   return parts.join('\n')
 }
 
@@ -145,8 +145,8 @@ export function TicketRowCard({
           <span className="wb-card-paused" data-paused="1"
             data-paused-phase={t.paused_phase || 'pending'}
             title={t.paused_phase === 'at_gate'
-              ? '已停在段间门口：不派下一段，点「恢复」继续'
-              : '暂停已受理：当前段（含在飞 agent）自然跑完后停住'}>
+              ? 'Halted at the stage gate: next stage not dispatched; click Resume to continue'
+              : 'Pause accepted: the current stage (incl. in-flight agent) finishes, then stops'}>
             {pausedBadgeText(t.paused_phase)}
           </span>
         )}
@@ -154,7 +154,7 @@ export function TicketRowCard({
             之后、编号之前=扫视起点区；缺省不渲染（中列板面零变化）。 */}
         {kindBadge && (
           <span className="wb-card-kind" data-kind-badge={kindBadge.text}
-            title={`类别：${kindBadge.text}`}>
+            title={`Kind: ${kindBadge.text}`}>
             {kindBadge.text}
           </span>
         )}
@@ -172,7 +172,7 @@ export function TicketRowCard({
         })()}
         <span className="wb-card-id">{t.id}</span>
         {(peerViewers?.length ?? 0) > 0 && (
-          <span title={`另一页签正在查看：${(peerViewers ?? []).map(v => v.who).join('、')}`}>👀</span>
+          <span title={`Viewed from another tab: ${(peerViewers ?? []).map(v => v.who).join(', ')}`}>👀</span>
         )}
         {/* 标题展示选择（t260905-07）：title → title_or_first（无标题票首句，t260903-10
             现场）→ 工单号（enrichment 失败的最后兜底，宁显编号不显「（无标题）」） */}
@@ -184,7 +184,7 @@ export function TicketRowCard({
         {t.epic && (
           <span className="wb-card-epic"
             style={{ borderColor: epicColor, ['--epic-c' as string]: epicColor, color: epicChipColor() }}
-            title={`所属立项：${t.epic}`}
+            title={`Epic: ${t.epic}`}
             onClick={(ev) => { ev.stopPropagation(); onOpenEpic?.(t.epic ?? '') }}>
             {t.epic}
           </span>
@@ -198,7 +198,7 @@ export function TicketRowCard({
         <span className="wb-card-time">{rel ?? (t.updated || '')}</span>
         {t.role && !compact && <span className="wb-card-role">· {t.role}</span>}
         {!compact && dots.length > 0 && (
-          <span className="wb-card-lane" title={`站道（${dots.length} 站）`}>
+          <span className="wb-card-lane" title={`Stage dots (${dots.length})`}>
             {dots.map((d, i) => (
               <span key={i} className="wb-card-lane-dot" data-visual={d} data-state={state4} />
             ))}
@@ -209,7 +209,7 @@ export function TicketRowCard({
         {/* 衍生动作位=纯导航（R3）：等你→去签字（详情审批区）；受阻→看原因（阻塞原因区） */}
         {state4 === 'waiting' && (
           <button className="wb-card-btn wb-card-btn-primary" onClick={(ev) => { ev.stopPropagation(); onOpen('review') }}>
-            去签字 →
+            Sign →
           </button>
         )}
         {state4 === 'blocked' && (
@@ -218,27 +218,27 @@ export function TicketRowCard({
           </button>
         )}
         {!compact && ops.includes('advance') && (
-          <button className="wb-card-btn" disabled={busy} onClick={stop(onAdvance)}>推进</button>
+          <button className="wb-card-btn" disabled={busy} onClick={stop(onAdvance)}>Advance</button>
         )}
         {!compact && ops.includes('dispatch-next') && (
-          <button className="wb-card-btn" disabled={busy} onClick={stop(onDispatch)}>派下一棒</button>
+          <button className="wb-card-btn" disabled={busy} onClick={stop(onDispatch)}>Dispatch next</button>
         )}
         {!compact && ops.includes('unblock') && (
-          <button className="wb-card-btn" disabled={busy} onClick={stop(onUnblock)}>解除阻塞</button>
+          <button className="wb-card-btn" disabled={busy} onClick={stop(onUnblock)}>Unblock</button>
         )}
         {!compact && ops.includes('rework') && (
-          <button className="wb-card-btn wb-card-btn-danger" disabled={busy} onClick={stop(onRework)}>打回</button>
+          <button className="wb-card-btn wb-card-btn-danger" disabled={busy} onClick={stop(onRework)}>Rework</button>
         )}
         {!compact && ops.includes('pause') && (
           <button className="wb-card-btn" disabled={busy} onClick={stop(onPause)}
-            title="段间暂停：当前段（含在飞 agent）自然跑完后停住，不派下一段">暂停</button>
+            title="Pause between stages: current stage (incl. in-flight agent) finishes, then stops; no next stage">Pause</button>
         )}
         {!compact && ops.includes('resume') && (
           <button className="wb-card-btn wb-card-btn-green" disabled={busy} onClick={stop(onResume)}
-            title="恢复：段间门口放行，继续派段">恢复</button>
+            title="Resume: release the stage gate and keep dispatching">Resume</button>
         )}
         {!compact && ops.includes('close') && (
-          <button className="wb-card-btn wb-card-btn-green" disabled={busy} onClick={stop(onClose)}>完成</button>
+          <button className="wb-card-btn wb-card-btn-green" disabled={busy} onClick={stop(onClose)}>Done</button>
         )}
       </div>
     </div>
