@@ -1775,3 +1775,40 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **修法方向**：①段 agent 无产出/退出异常 → 活动层显式判失败并让工作流落 blocked（点名）或按策略重试；
 > ②票级 watchdog：`running` 超过阈值无进展即在票面高声标红/落 pending 告警（可与 dispatcher-scan 或巡检
 > 的漏跑核查同源）；③僵尸票清场入口（记名 cancel）——本 KI 当场无处置，待宿主一句话。
+>
+> **260926 处置**：宿主令「cancel 掉」——`t260922-04/05` 已记名 terminate（清场根因另立 KI-127），
+> 僵尸清场完成；**机制面（无超时升级/无 watchdog）仍待修**，本 KI 保持 open。
+
+## KI-127 「作废/关票不杀流程」：票面 closed 但 workflow 未 terminate → 在飞活动把票推回 dispatched，成永久僵尸（260926 清场实测，integration 岗登记；实案=t260922-04/05）
+> **实案**：09-22 07:39 建 04/05 两票（建票口径错：`user_request` 与 `body` 同时传，引擎口径
+> `user_request or body` → agent 只读到一行宿主令、看不到需求正文），07:41 作废改号重建为 `t260922-06/07`
+> （两张均已合并收口）。票面 log 留了 `status=closed` 的记名（作废 + 跨项目闸「策略=拒收」），**数据目录也被拆**
+> （`data/tickets/t260922-04/05` 今已不存在），**但那张 Temporal workflow 从未 terminate**：当时已在飞的
+> `create_plan` 活动照跑完（07:56 / 08:00），workflow 随即推进到 `review_plan/running`，并把它自己的票面
+> **推回 `status=dispatched`** —— 两张僵尸票挂了 4 天（KI-126 的实案就是它们）；两张专属 worker 也一直挂着
+> （260926 07:07 terminate 后才自退，日志尾部即「watch：workflow 已收口（TERMINATED），专属 worker 自退」）。
+> **关键机制**：`ticket.py list/show` 均走 **v2 查 Temporal**——workflow 活着就等于「进行中」，数据目录被拆
+> 不影响它继续出现在名册里；**票面 log 的终态记录与 workflow 实际状态之间没有对账**。
+> **影响**：①名册与负载失真（僵尸长期占位，掩盖真实在途）；②泳道壳永久滞留（KI-112 清账被「非终态票」卡住）；
+> ③只能靠人工辨认，无任何告警。
+> **修法方向**：①cancel/作废路径统一「先留痕、后 terminate」，terminate 结果进票面可判（t260925-05 反证：
+> terminate 失败=票面完全不可得）；②新增对账巡检项——票面已 closed 而 workflow 仍 RUNNING（或反之）=不一致，
+> 高声报；③活动收尾落盘前复核票面终态：**已 closed 的票不得被活动推回 dispatched**。
+
+## KI-128 段序列变更打在飞票＝永久不可重放僵尸（Temporal 非确定性）：票面查询恒失败、正规记名取消入口进不去（260926 清场实测，integration 岗登记；实案=t260925-05）
+> **实案**：`t260925-05`（中央工人新鲜度/轮换票）的专属 worker 自 09-25 22:47 起刷
+> `[TMPRL1100] Nondeterminism error: Activity type of scheduled event 'implement' does not match activity type
+> of activity command 'verify_review_gate'`，**11656 条 / 8.2MB 日志**（来源=控制台与 CLI 的持续轮询）；该票在
+> `list` 里显示 `stage=None, updated=epoch0`（查询面已废），`ticket.py show/cancel` 全线失败——cancel 的
+> 跨项目闸**前置读快照**先失败，被归成 `kind=transient`「瞬时抖动？请刷新重试」（**误导：这是永久性票损**），
+> 于是「未执行任何动作」；最后只能走**裸 `client.py cancel`** terminate（记名只落 admin.log，票面留痕不可得），
+> worker 07:08 收口自退。
+> **性质**：dev-lane 在 implement 前插了 `verify_review_gate`（t260829-07 / t260922-18 一族）——**在段序列里
+> 插入或改名 activity 是 Temporal 破坏性变更**：历史里没有该事件的在飞 workflow 一重放即非确定，票永久推不动；
+> 且 **Query 也要重放**，所以连读都读不到——是 KI-025「查询失败说谎」的升级形态（那次是误报不存在，这次是
+> 查询面结构性报废）。
+> **影响**：①在飞票静默变僵尸且无告警；②读不到 → 记名取消入口结构上够不着（只能裸 terminate，丢票面记名）；
+> ③轮询持续刷 worker 日志（8.2MB/8h，无人察觉）。
+> **修法方向**：①工作流版本化纪律（Temporal patching / `workflow.patched`，或「段序列与活动名变更只对新票生效」），
+> 并写进引擎改动的审查清单（这次是插段，下次不许直接插）；②非确定错误必须与瞬时抖动分开，`kind` 不得归
+> transient，文案点名「票损、不可重放」；③脱困出口：记名 terminate 不得以「票面快照可得」为前置。
