@@ -5284,8 +5284,18 @@ def project_template_scan(import_classes: bool, root=None):
 
 
 def project_template_names_merged(root=None) -> Dict[str, str]:
-    """合并视图：内置∪夹具∪项目名面登记（不加载类；测试注入 root 钉默认面）。"""
-    names = dict(TEMPLATE_CLASS_NAMES)
+    """合并视图：内置∪夹具∪项目名面登记（不加载类；测试注入 root 钉默认面）。
+
+    260925 修（兑现本函数自己的契约——文档承诺「注入 root 时本机真实注册表有/无登记
+    都不影响断言」）：起点按注入态分岔。root 注入=测试/自检钉面，起点取**内置∪夹具
+    快照 `_PT_BUILTIN_KEYS`**；若沿用活的 `TEMPLATE_CLASS_NAMES`，导入期名面 glue 已把
+    本机真实登记的项目 id 并进该表 → 注入形同虚设（t260924-04 的 A2/默认面收窄两锁在
+    「机器上有注册」时必红：t260925 复原 nusuyou 声明即触发）。root=None 走真实语义，
+    起点仍是活表（含 glue 并入项），行为逐字不变。"""
+    if root is not None:
+        names = {k: v for k, v in TEMPLATE_CLASS_NAMES.items() if k in _PT_BUILTIN_KEYS}
+    else:
+        names = dict(TEMPLATE_CLASS_NAMES)
     res = project_template_scan(import_classes=False, root=root)
     res.merged_names(names, {})  # display 表不动（仅测试视图用）
     return names
