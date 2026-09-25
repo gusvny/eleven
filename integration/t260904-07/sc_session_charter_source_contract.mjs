@@ -1,19 +1,21 @@
 // Integration scenario t260904-07 ① — session-charter 交付契约冻结（ro 静态面）。
 //
 // Intent (gray-box, user perspective):
-//   用户验收口径第一依据=宿主定稿真源（notes/discussions/260904-project-session-charter.md
-//   附录模板，拍板④）：server/session_charter.md 必须与真源附录逐字同步——该文件
-//   是「当前在案授权」栏的授权档案第一环（git 版本化），漂移=授权声明与定稿脱钩；
-//   宿主合法定稿变更须两处同步（回真源补口径），本场景红即提示同步缺失或落地缺失。
-//   同时冻结端点接线的可感知契约三件：注册路径与客户端请求路径同源（KI-042 同族
-//   「两端路径漂移→恒 404 静默吞」的对症看守）、内置回落模板在位（缺文件不 5xx 的
-//   前提）。与随票 smoke intent 级不同层：smoke 锚实现守卫源文本锚（L1/L2），本场景
-//   锚「交付物↔宿主定稿真源一致性」与跨端接线一致性（用户验收真源面）。
+//   冻结会话宪章（server/session_charter.md ＝ 会话开局注入源，其「当前在案授权」栏是
+//   agent 行使权限的依据）在**工作台链路上的可感知契约**：交付物在位、结构要素在文、
+//   端点两端同源、内置回落在位、打标同源。
+//   **S1「charter ↔ notes/discussions 真源附录逐字一致」已于 260926 删除**（宿主令
+//   「删 S1，不开票」）：它把运行时文本锚死到一份 notes 讨论档，而 notes/ 不在任何
+//   泳道写集内（有意设计）→ 任何交付涉及 charter 的票对该断言**结构性不可满足**，
+//   只能靠人回主仓手写；实测代价＝卡死 t260925-21 九轮仲裁（每轮附一趟全量）、
+//   t260907-05 一次、附录回写当刻主仓立刻出现镜像红；且与本场景 S2 自己的原则
+//   （授权栏内容会合法变更 → 不锚内容）自相矛盾——同一套契约不该一边说「内容可变
+//   不锚」一边把整份文件的逐字相等焊到另一份文档上。真源同步自此交回**人的流程**：
+//   charter 改动落票 + 人审签字时由主审核对（这条风险的真实闸门是 git 版本化 +
+//   人门，不是文档复本比对）。
 //
 // High-level steps:
-//   S1 真源附录（最后一个 ```markdown fenced block）与 server/session_charter.md
-//      逐字一致（去尾空白后比对；文件缺失=红——实现段落地前红属预期，TDD 信号，
-//      arbitrate/merge 期必须绿）。
+//   S1 已删（历史面＝260904 拍板④，260926 宿主令删除；见上）。
 //   S2 结构契约要素在文：四占位符、两纪律语义锚（notes 落盘攒批 / 点名修复先告知）、
 //      「## 当前在案授权」节存在（只锚节存在不锚内容——授权栏被宿主合法写入是设计
 //      内变更）、project:sandbar / project:suyou 两分段。
@@ -28,9 +30,9 @@
 //
 // Execution contract (三态，定稿 §7.3 闸内无 SKIP): stdout last line
 // `SUMMARY pass=<n> fail=<k> env_fail=<e> na=<w>`; FAIL>0 或全 na → exit 1,
-// ENV_FAIL>0 → exit 2. 纯只读（双源读取+源码扫描），零写入。
+// ENV_FAIL>0 → exit 2. 纯只读（单源读取+源码扫描），零写入。
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => {
@@ -38,46 +40,16 @@ const check = (name, ok, detail = '') => {
   else { fail++; console.log(`FAIL ${name}${detail ? ' — ' + detail : ''}`); }
 };
 
-const SRC_DISCUSSION = 'notes/discussions/260904-project-session-charter.md';
 const SRC_CHARTER = 'server/session_charter.md';
 const WB = 'server/plugins/workbench';
 const EP = '/sandbar-workbench/api/session-charter';
 
 const read = (p) => { try { return readFileSync(p, 'utf8'); } catch { return null; } };
-const stripTail = (s) => s.replace(/\s+$/, '');
 
-// ---- S1 真源附录 ↔ charter 文件逐字同步 ----
-const discussion = read(SRC_DISCUSSION);
-check('真源讨论档在位（只读参考源）', discussion !== null, SRC_DISCUSSION);
-
-const fenceRe = /```markdown\n([\s\S]*?)```/g;
-let appendix = null, m;
-while (discussion && (m = fenceRe.exec(discussion)) !== null) appendix = m[1]; // 取最后一个=附录定稿
-check('真源附录模板可提取（```markdown fenced block）', appendix !== null && appendix.trim().length > 0);
-
+// ---- 交付物在位（S1 删除后此处只保「存在」信号；不锚任何票外文档）----
 const charter = read(SRC_CHARTER);
-// 命名迁移 token 容忍（t260907-05 仲裁归因）：charter 文件随宿主令在写集内把插件名/
-// 前缀改新（suyou-*→sandbar-*），而其逐字真源附录在 notes/（票外只读，归宿主/后续
-// docs 票）——命名迁移票对「两处同步」结构性不可满足。比对分两层：①内容漂移检测=
-// 双方命名 token 归一到占位后逐字比对（有人改 charter 不回写真源仍红）；②纯命名
-// 迁移差异（归一后逐字一致）有声放行并点名，不静默。断言力不降：非 token 差异=
-// 红不变。
-const NAME_TOKEN_RE = /\b(?:sandbar|suyou)-(?:workbench|admin-ui|knowledge|providers|temporal-tools|ui-check|tools)\b/g;
-const normNames = (s) => s.replace(NAME_TOKEN_RE, '⟪plugin-token⟫');
-if (charter === null) {
-  check('charter 文件落地', false, `${SRC_CHARTER} 不存在（实现段落地前红属预期；merge 期必须绿）`);
-} else {
-  const literalEqual = stripTail(charter) === stripTail(appendix ?? '\u0000');
-  const normEqual = stripTail(normNames(charter)) === stripTail(normNames(appendix ?? '\u0000'));
-  const migratedOnly = !literalEqual && normEqual;
-  check('charter 文件与真源附录逐字一致',
-    literalEqual || migratedOnly,
-    literalEqual
-      ? '逐字一致'
-      : (migratedOnly
-        ? '逐字差异全部为命名迁移 token（t260907-05 宿主令：charter 在写集内改新名，真源附录在 notes/ 票外不可同票同步；归一后逐字一致=零内容漂移；宿主更新 notes 真源后自回逐字一致）'
-        : '漂移=授权档案与宿主定稿脱钩（归一后仍不一致）；合法定稿变更须两处同步（回真源补口径后本条自回绿）'));
-}
+check('charter 文件落地', charter !== null,
+  `${SRC_CHARTER} 不存在（实现段落地前红属预期；merge 期必须绿）`);
 
 // ---- S2 结构契约要素（锚语义与节存在，不锚会随合法授权变更的内容）----
 const body = charter ?? '';

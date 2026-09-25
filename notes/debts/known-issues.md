@@ -1852,3 +1852,17 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ⑤agent_home 锚**漂移实锤**——09-24 期的 agent_home 落在**泳道**里
 > （`.lane/inspection-integration-tests-20260925/server/engine/out/inspection/agent-home/integration-tests-20260924`，
 > 68 个文件），主仓 `server/engine/out/inspection/agent-home/` 无其影＝KI-110 实案；已搬回主仓 out/ 留证。
+
+## KI-130 集成断言锚定「票外文档」＝泳道结构性不可满足（S1 charter↔notes 附录逐字；实测卡死九轮，260926 宿主令删除）（integration 岗登记）
+> **实案**：`integration/t260904-07/sc_session_charter_source_contract.mjs` 的 S1 要求 `server/session_charter.md`
+> 与 `notes/discussions/260904-project-session-charter.md` 附录 ```markdown 块**逐字一致**。而 `notes/` 不在任何
+> 泳道写集内（有意设计），于是**任何交付涉及 charter 的票对该断言结构性无解**——只能等人回主仓手写。
+> 实测代价：`t260925-21` 同一条件连判 **9 轮** tests-fault（每轮附一趟全量、10 次仲裁，最后靠 pause 止血）；
+> `t260907-05`（命名迁移票）已被卡过一次，当时靠加「命名 token 归一」容忍面绕过；260926 附录回写当刻，
+> main 立刻出现**镜像红**（附录 99 行 / charter 94 行）。另：该断言与本场景 S2 自身原则**自相矛盾**——
+> S2 明写「授权栏内容会合法变更 → 不锚内容」，S1 却把整份可变文件的逐字相等焊到另一份文档上。
+> **规律（集成设计纪律）**：断言只可锚「调用方/用户可感知的承诺面」（公开接口、行为、交付物自身要素）；
+> **不得锚定票外文档，尤其 notes/ 过程材料**——那类同步属**人的流程**（落票 + 人审签字时核对），不是机械红。
+> 反证：全仓 39 处引用 `notes/` 的场景里，其余都是「notes 不可写」的反向守卫，只有这一条把 notes 当断言对象。
+> **处置（260926 宿主令「删 S1，不开票」）**：S1 三条断言整段删除，场景保留 S2–S5（17 检查全绿）；
+> `run_scenarios.py` 注册描述同步改写。无替代机械看守，同步责任回归人门。
