@@ -1708,3 +1708,9 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > （备份 `/tmp/nusuyou-project.yaml.bak-260925`）→ 新工人立刻恢复、中央工人重启成功（pid 44791）。
 > **复原步骤（本 KI 修好、且 t260925-16 落地后必做）**：去掉该行注释（或从备份覆盖）→ 再重启中央工人 →
 > 用 content_studio 声明复跑一遍「工人可启动」验证。**在复原之前，content-studio 模板不可加载。**
+> **260925 15:0x 复原已完成（integration 记名）**：nusuyou 侧按同源需求书自行修好段名（八段 id 全加
+> `cs-` 前缀，裸名仅剩 CLI marker 参数，非段 id），integration 随即复原声明并重启中央工人（pid 19995）——
+> 日志 `project template modules passthrough: [... 'sandbar_ext_nusuyou_...']` ＋ `worker polling queues:
+> sandbar`，**带外置模板声明的工人正常启动** ✓，降级模式解除。→ 同时反证了本 KI 的定位链（段 id →
+> 活动名 → 撞引擎遗留活动名）。**加载口侧的结构性修法仍归 t260925-16**（注册期隔离拒收＋点名＋闸补
+> worker 启动 dry-run＋命名纪律入文档），以免下一个项目再踩。
