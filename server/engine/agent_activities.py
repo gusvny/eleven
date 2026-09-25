@@ -2562,11 +2562,13 @@ def _settle_with_gate(args: AgentStageArgs, cwd: Path,
     _settle_worktree_lane——单一拼装点，generic 段/缓存命中分支/arbitrate 系共用，
     两侧不可能漂移。t260912-03：人授权结构化记录（已由 workflow 侧按票+时效过滤）
     一并下传，受保护闸据此做豁免摘除。t260915-01：refusal 收集口（缺省 None=
-    既有直调场景逐字不变；传 dict 时闸拒绝的结构化明细写入其中随回执上台面）。"""
+    既有直调场景逐字不变；传 dict 时闸拒绝的结构化明细写入其中随回执上台面）。
+    KI-124：本票模板段规则表随 args 下传（defaulted 空表=回落内建规则表）。"""
     return _settle_worktree_lane(
         cwd, args.ticket_id, args.stage_id, args.gen,
         write_set=list(args.write_set or []),
         path_gate=bool(args.path_gate),
+        path_gate_rules=dict(getattr(args, "path_gate_rules", None) or {}),
         base_ref=str(args.base_ref or ""),
         authorizations=list(getattr(args, "authorizations", None) or []),
         refusal=refusal,
@@ -2599,6 +2601,7 @@ def _apply_settle_note(res: StageResult, note: str,
 def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
                           repo: Optional[Path] = None, write_set: Optional[List[str]] = None,
                           path_gate: bool = False, base_ref: str = "",
+                          path_gate_rules: Optional[Dict[str, Any]] = None,
                           authorizations: Optional[List[Dict[str, Any]]] = None,
                           refusal: Optional[Dict[str, Any]] = None,
                           *, face: str) -> str:
@@ -2710,7 +2713,8 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
         remediated = False
         while True:
             allowed, violations, reason = path_gates.judge_stage_paths(
-                stage_id, dirty, write_set=write_set, ticket_id=ticket_id)
+                stage_id, dirty, write_set=write_set, ticket_id=ticket_id,
+                template_rules=path_gate_rules)
             # 闸②：受保护路径（真源与期望值，「存在才拦」，锚=泳道分叉点 base_ref）
             # t260912-03：定性仍走 judge_protected_paths 单点（判定严格先于任何 git add），
             # 随后按本票生效中的人授权做「豁免摘除」——无授权/不匹配时 violations 与
@@ -4331,6 +4335,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                         sc["tree"], args.ticket_id, "merge_check", 0,
                         write_set=list(sc.get("write_set") or []),
                         path_gate=bool(getattr(args, "path_gate", False)),
+                        path_gate_rules=dict(getattr(args, "path_gate_rules", None) or {}),
                         base_ref=str(sc.get("base_ref") or getattr(args, "base_ref", "") or ""),
                         authorizations=list(getattr(args, "authorizations", None) or []),
                         refusal=heal_refusal,
@@ -6677,6 +6682,7 @@ async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
                                         args.gen, repo=sc["repo"],
                                         write_set=list(sc.get("write_set") or []),
                                         path_gate=bool(args.path_gate),
+                                        path_gate_rules=dict(getattr(args, "path_gate_rules", None) or {}),
                                         base_ref=str(sc.get("base_ref") or args.base_ref or ""),
                                         authorizations=list(getattr(args, "authorizations", None) or []),
                                         refusal=sc_refusal,

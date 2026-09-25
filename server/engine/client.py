@@ -1111,10 +1111,13 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         body=str(args.get("body") or ""),
         created=int(args.get("created") or 0),
         gate_overrides=overrides,
-        # t260911-03 路径闸总开关：新派单钉死进输入（replay 稳定）——只对 dev-lane 模板
-        # 开（段×面规则表的键集=dev-lane 段链；退役模板/fixture 模板不受闸，回归面为零）。
-        # 老在途票的已记录输入无此字段 → 永远 False，不追溯。
-        path_gate=(str(tpl) == "dev-lane"),
+        # t260911-03 路径闸总开关 + KI-124（t260925-23）声明化：不再硬编码模板名——
+        # 改读模板类声明（DevLaneWorkflow.PATH_GATE=True 保持现行为；项目外置模板在
+        # 自己的模板类声明 PATH_GATE / PATH_GATE_RULES 即可开闸并登记段×允许面规则，
+        # 声明合法性由加载口深检把守）。派单钉死进输入（replay 稳定）；老在途票的
+        # 已记录输入无此字段 → 永远 False，不追溯。
+        path_gate=bool(getattr(cls, "PATH_GATE", False)),
+        path_gate_rules=dict(getattr(cls, "PATH_GATE_RULES", None) or {}),
     )
     client = await _connect()
     try:

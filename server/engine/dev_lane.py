@@ -579,6 +579,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
     PATCH_ID = "dev-lane-v1"
     TEMPLATE_ID = "dev-lane"
     TEMPLATE_NAME = "开发泳道"
+    # KI-124（t260925-23）：段路径闸总开关改为模板类声明（client.py ticket-start 读
+    # 类属性，不再硬编码模板名）。dev-lane 恒 True=现行为不变（闸今天就是开的）；段×
+    # 允许面规则仍走内建 STAGE_PATH_RULES（本类不声明 PATH_GATE_RULES）。
+    PATH_GATE = True
     TEMPLATE_LANE = "worktree"
     TEMPLATE_WORKSPACE_DIR = False
     TEMPLATE_DESC = ("开发泳道（developer 系唯一流程）：prepare_workspace→create_plan⇄review_plan"
@@ -791,6 +795,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
             # t260911-03 路径闸总开关：随派单输入钉死（getattr 缺省 False=老在途票
             # 永远关闸，patch 门保护不追溯）
             "path_gate": bool(getattr(inp, "path_gate", False)),
+            # KI-124：本票模板段规则表随派单钉死（replay 稳定；空表=回落内建规则表）
+            "path_gate_rules": dict(getattr(inp, "path_gate_rules", None) or {}),
             "acceptance": acc,
             "checks": {s.id: [{"item": it, "done": False, "by": ""} for it in s.acceptance]
                        for s in self.STAGES},
@@ -812,6 +818,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 "worktree": inp.worktree, "branch": inp.branch,
                 "base_ref": inp.base_ref, "write_set": list(inp.write_set),
                 "path_gate": bool(getattr(inp, "path_gate", False)),
+                # KI-124：台账输入镜像同步（consumers read defensively, extra keys safe）
+                "path_gate_rules": dict(getattr(inp, "path_gate_rules", None) or {}),
                 # t260910-08: mirror the two new carries so the ledger keeps a
                 # complete input record (consumers read defensively, extra keys safe)
                 "repo_worktrees": list(getattr(inp, "repo_worktrees", None) or []),
@@ -1349,6 +1357,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
             write_set=list(self.meta.get("write_set") or []),
             base_ref=str(self.meta.get("base_ref") or ""),
             path_gate=bool(self.meta.get("path_gate")),
+            path_gate_rules=dict(self.meta.get("path_gate_rules") or {}),
             # t260912-03：生效中的受保护授权结构化记录（who/issued/reason/scope 逐条
             # 下传，activity 据此豁免+记名点名；时效判定只在此处用 workflow.now()）
             authorizations=self._protected_authz_records())
@@ -1976,6 +1985,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                                    write_set=list(self.meta.get("write_set") or []),
                                    base_ref=str(self.meta.get("base_ref") or ""),
                                    path_gate=bool(self.meta.get("path_gate")),
+                                   path_gate_rules=dict(self.meta.get("path_gate_rules") or {}),
                                    authorizations=self._protected_authz_records()),
                     start_to_close_timeout=SHORT, retry_policy=RETRY)
                 s = sraw if isinstance(sraw, SettleLaneResult) else SettleLaneResult(
@@ -2877,6 +2887,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                                        write_set=list(self.meta.get("write_set") or []),
                                        base_ref=str(self.meta.get("base_ref") or ""),
                                        path_gate=bool(self.meta.get("path_gate")),
+                                       path_gate_rules=dict(self.meta.get("path_gate_rules") or {}),
                                        authorizations=self._protected_authz_records()),
                         start_to_close_timeout=SHORT, retry_policy=RETRY)
                     s = sraw if isinstance(sraw, SettleLaneResult) else SettleLaneResult(
@@ -3235,6 +3246,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                                    base_ref=str(self.meta.get("base_ref") or ""),
                                    write_set=list(self.meta.get("write_set") or []),
                                    path_gate=bool(self.meta.get("path_gate")),
+                                   path_gate_rules=dict(self.meta.get("path_gate_rules") or {}),
                                    authorizations=self._protected_authz_records(),
                                    # t260921-09：建票「本票无文件改动」声明（meta 链
                                    # client.py ticket-start → meta.no_file_changes）

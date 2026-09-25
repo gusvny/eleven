@@ -510,6 +510,8 @@ class SettleLaneArgs:
     write_set: List[str] = field(default_factory=list)   # 逐仓 rebase 前的工单写集
     base_ref: str = ""                                   # 泳道分叉点（单仓锚；多仓以清单 per-repo base_ref 优先）
     path_gate: bool = False                              # 闸总开关
+    # KI-124：本票模板段规则表（defaulted 空表=老事件 replay 不破；空表回落内建表）。
+    path_gate_rules: Dict[str, Any] = field(default_factory=dict)
     # t260912-03 人授权结构化记录（defaulted 空表，零回归）：join 点落盘的受保护闸
     # 豁免面（workflow 侧已按票+时效过滤，activity 不读墙钟）。
     authorizations: List[Dict[str, Any]] = field(default_factory=list)
@@ -2760,6 +2762,12 @@ class TicketInput:
     # ——老在途票的已记录输入无此字段 → getattr 缺省 False，永久关闸（patch 门保护，
     # 不追溯）；新 dev-lane 票由 dispatch 入口置 True（见 client.py ticket-start）。
     path_gate: bool = False
+    # KI-124（t260925-23）：段路径闸的本票模板规则表——建票时自模板类 PATH_GATE_RULES
+    # 声明钉死（client.py ticket-start 读类属性，replay 稳定；键=段 id，值=允许面 kind
+    # 串或 {"kind":…, "prefixes":…}）。缺省空表=老在途票/不声明模板回落内建
+    # STAGE_PATH_RULES，零行为变化。声明面合法性（键 ⊆ STAGES ids、kind ∈ 弱面白名单）
+    # 由加载口深检把守（project_templates），此处只透传不校验。
+    path_gate_rules: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -3058,6 +3066,9 @@ class AgentStageArgs:
     ui_dirs: List[str] = field(default_factory=list)     # 段允许面：ui_evidence 的 verify.yaml ui_evidence.dirs
     base_ref: str = ""                                   # 泳道分叉点（受保护闸「存在才拦」的锚，非 HEAD）
     path_gate: bool = False                              # 闸总开关
+    # KI-124：本票模板段规则表（TicketInput.path_gate_rules 透传，defaulted 空表=
+    # 老事件 replay 不破；空表回落内建 STAGE_PATH_RULES，语义不变）。
+    path_gate_rules: Dict[str, Any] = field(default_factory=dict)
     # t260912-03 人授权结构化记录（defaulted 空表——老事件 replay 缺字段→[]，零回归）：
     # workflow 侧已按「kind=protected_path + 本票 + expires>workflow.now()」过滤；
     # activity 侧只据此做受保护闸的豁免摘除与记名，不读墙钟（重放/复跑判定不吃时钟）。
@@ -3171,6 +3182,8 @@ class MergeCheckArgs:
     # t260911-03 路径闸：merge_check 的 KI-009 自愈 settle 同受闸（defaulted，老事件
     # 缺字段→False=不自愈受闸、行为与旧版一致）；base_ref/write_set 复用上两字段。
     path_gate: bool = False
+    # KI-124：本票模板段规则表（defaulted 空表=老事件 replay 不破；空表回落内建表）。
+    path_gate_rules: Dict[str, Any] = field(default_factory=dict)
     # t260912-03 人授权结构化记录（defaulted 空表，零回归）：自愈 settle 的受保护闸
     # 豁免面与 workflow 侧一致（workflow 已按票+时效过滤）。
     authorizations: List[Dict[str, Any]] = field(default_factory=list)

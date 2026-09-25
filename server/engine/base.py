@@ -457,6 +457,12 @@ class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
             "stage": first.id,
             "stage_state": "awaiting",
             "write_set": list(inp.write_set),
+            # KI-124（t260925-23）：段路径闸对基类通用模板链生效——总开关随派单输入
+            # 钉死（getattr 缺省 False=老在途票不追溯）；本票模板段规则表同源钉死
+            # （client.py ticket-start 自模板类 PATH_GATE_RULES 声明读取，空表=回落
+            # 内建 STAGE_PATH_RULES）。不声明 PATH_GATE 的模板两键皆缺省，零行为变化。
+            "path_gate": bool(getattr(inp, "path_gate", False)),
+            "path_gate_rules": dict(getattr(inp, "path_gate_rules", None) or {}),
             "acceptance": acc,
             "checks": {first.id: [{"item": it, "done": False, "by": ""} for it in acc]},
             "deliverables": inp.deliverables,
@@ -546,7 +552,13 @@ class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
             log_file=agent_log_for(self.ticket_id, st.id, gen, ws),
             gen=gen,
             workflow_id=str(self.meta.get("workflow_id") or ""),
-            previous_context=previous_context)
+            previous_context=previous_context,
+            # KI-124：闸四件随段活动下传（write_set/base_ref/path_gate/path_gate_rules
+            # ——与 dev-lane 同款；meta 缺键=缺省 False/空表=关闸，老实例 replay 不破）
+            write_set=list(self.meta.get("write_set") or []),
+            base_ref=str(self.meta.get("base_ref") or ""),
+            path_gate=bool(self.meta.get("path_gate")),
+            path_gate_rules=dict(self.meta.get("path_gate_rules") or {}))
         def _exec_once():
             return workflow.execute_activity(
                 st.id, args,                    # activity name = stage name (stage as activity)

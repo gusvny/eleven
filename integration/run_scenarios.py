@@ -291,6 +291,16 @@ SCENARIOS = [
      "阶段路径闸·正常面不误伤（t260911-03 验收 c 反例三连，灰盒 L3）：implement 写集内两文件、design_integration_tests 只改 integration/、arbitrate 只改本票 tests/ 测试面——三子用例全部放行且回执零原因码、commit 真落地（git show 逐文件点名在 HEAD）；仲裁段碰产品代码反用例仍拒+点名（code-fault 只许打回 implement，260910 实证另一半回归）。机械闸不得堵死正常流；与 developer L1 judge 矩阵不同层（本条锁「放行=真落地」终态）。t260916-19 B 契约修订：C4 反用例改删除型（D 态）注入——??/M 态改自动处置，处置旅程归 t26091619-unauth-disposal-matrix",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260911-03/tests/sc_pathgate_normal_faces_land.py", "ro"),
 
+    # ---- t260925-23 外置模板路径闸（KI-124：闸永关+规则无登记口，声明驱动）----
+    # 实现段落地前 B2-B7/A1-A3 红属预期（TDD 验收门，先例=t260911-03 族），arbitrate/merge 期必须绿；
+    # load_contract B1/B8（合法声明接受、无声明零变化基线）现状即绿。
+    ("t260925-23-template-pathgate-faces",
+     "外置模板声明驱动的段路径闸·settle 执法面（t260925-23/KI-124 需求①④，灰盒 L3，真实 settle 单点直调，零 Temporal）：外置模板自有段（不在内建 STAGE_PATH_RULES 键集）自声明规则后——面外改动拒绝落盘+path_gate_reason=unauthorized_path+点名段 id+0 commit、面内结果文件照常落盘（声明真放行，非全拒假绿）；声明空/假值规则（内建表同段有面）绝不静默跌回内建面（review_plan 附条件③ falsy 遮蔽坑，fail-closed）；两侧皆未声明段→拒+unknown_stage+文案点名段 id 与 PATH_GATE_RULES 补法（需求④无裸 unknown_stage）。与 t260911-03 系不同面（彼锁 dev-lane 内建表执法与老票兼容，本条锁模板声明规则驱动闸的透传与终态）；加载口声明进出归 t260925-23-template-pathgate-load；developer L1 judge 纯函数矩阵不同层。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260925-23/tests/sc_template_pathgate_faces.py", "ro"),
+    ("t260925-23-template-pathgate-load",
+     "外置模板路径闸声明的加载口深检（t260925-23/KI-124 需求②③，灰盒 L2，公开扫描口 shared.project_template_scan import_classes=True，临时注册根注入零进程污染，秒级）：形状合法声明（键⊆STAGES ids、kind 在词表、prefixes 带前缀表）→模板接受不误拒；拒收矩阵=键∉STAGES 点名双方、kind 非法、prefixes 缺表、RULES 有而 PATH_GATE 非 True（死配置不许装死）、RULES 非 dict、外置模板强 kind（self_heal）越弱面子集拒收（review_plan 附条件④）；不声明 PATH_GATE→照常接受零行为变化（KI-124 回落基线，现状即绿）。与 developer L1（t260924_04 加载口矩阵/judge 纯函数）不同层（本条锁公开口用户可感知终态=接受/拒收+点名）；settle 执法终态归 t260925-23-template-pathgate-faces。实现落地前 B2-B7 红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260925-23/tests/sc_template_pathgate_load_contract.py", "ro"),
+
     # ---- t260916-19 路径闸 blocked 死结三修（B 越权状态分流处置 / C 声明=执法 / D 证据面）----
     # 实案=dengzhufpv t260916-11：并行 join 闸拒后越权件滞留工作区每轮复判同一红、
     # 出路（打回目标段）不可达。本族守 activity 级公开回执与 git 磁盘终态（A 的

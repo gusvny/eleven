@@ -118,6 +118,14 @@ _STAGE_FACE_DESC = {
     "prefixes": None,  # prefixes 用规则里的前缀拼
 }
 
+# 项目外置模板可声明的允许面 kind 白名单（KI-124，t260925-23）：外置模板是跨项目
+# 收件面，强 kind（self_heal/test_face/ui_dirs/ticket_receipts——分别等于授权动引擎
+# 自愈面/测试裁决面/UI 证据声明面/场景回执面）缺省就该关；dev-lane 走内建表不受限。
+# 加载口深检（project_templates，零 shared/path_gates import、依赖参数注入）以此表
+# 拒收越面声明——两表漂移由单测交叉锁（tests/test_t260925_23_template_path_gate.py：
+# 本表 ⊆ STAGE_PATH_RULES 全 kind 词表）。
+TEMPLATE_WEAK_KINDS: Tuple[str, ...] = ("result_files", "write_set", "join", "prefixes")
+
 # 出路文案（按原因码分派）。t260916-19 ③A 联动：出路点名可达动作——rework 打回
 # design_integration_tests 只对 integration/ 面内容成立（design 段允许面=
 # prefixes("integration",)）；其它面内容（如 server/ 文件在仲裁段被改）的出路是
@@ -217,24 +225,49 @@ def is_test_face(path: str) -> bool:
         or base.endswith("_test.py")
 
 
+def _resolve_stage_rule(stage_id: str, template_rules: Any) -> Optional[Dict[str, Any]]:
+    """段规则解析单点（KI-124）：先查本票模板声明表（TicketInput.path_gate_rules，
+    建票时自模板类 PATH_GATE_RULES 钉死），再回落内建 STAGE_PATH_RULES。
+
+    成员判断（`in`）而非 `.get() or`——声明即真源：模板声明了空/假值规则（{}、""、
+    None）时**不得**静默跌回内建表（falsy 遮蔽=装死），返回 kind 为空的规则让
+    judge 走「规则表内未知 kind → fail-closed」既有出口。畸形 template_rules
+    （非 dict）整体忽略回内建表（fail-closed 不放大，加载口深检才是畸形声明的主拦面）。"""
+    sid = str(stage_id or "")
+    if isinstance(template_rules, dict) and sid in template_rules:
+        raw = template_rules[sid]
+        if isinstance(raw, str) and raw.strip():
+            return {"kind": raw.strip()}
+        if isinstance(raw, dict) and isinstance(raw.get("kind"), str) and raw.get("kind").strip():
+            out = dict(raw)
+            out["kind"] = raw["kind"].strip()
+            return out
+        return {"kind": ""}  # 声明了假值：不回落、fail-closed（unknown kind 出口）
+    return STAGE_PATH_RULES.get(sid)
+
+
 # ---------------- ① 阶段路径闸 ----------------
 
 def judge_stage_paths(stage_id: str, files: Iterable[Any], write_set: Any = None,
-                      ticket_id: str = "", ui_dirs: Any = None
+                      ticket_id: str = "", ui_dirs: Any = None,
+                      template_rules: Any = None
                       ) -> Tuple[bool, List[str], str]:
     """段 × 允许面判定。返回 (allowed, violations, reason_code)；allowed=True 时
     violations 为空、reason_code 为 ""。
 
-    - 键不在 STAGE_PATH_RULES → fail-closed 拒绝（reason=unknown_stage），不允许
+    - 规则解析单点 _resolve_stage_rule：先本票模板声明表（template_rules，KI-124
+      随派单钉死进 TicketInput.path_gate_rules），再回落内建 STAGE_PATH_RULES。
+    - 两边皆无此段键 → fail-closed 拒绝（reason=unknown_stage），不允许
       「未知段=放行」——新段/新模板忘配规则 = 被拦 + 单测锁定（源码锁定测试断言
-      DevLaneWorkflow.STAGES id 全集 ⊆ 规则键集）。
+      DevLaneWorkflow.STAGES id 全集 ⊆ 规则键集；外置模板=加载口深检
+      PATH_GATE_RULES 键 ⊆ 本模板 STAGES id 全集，声明缺失进拒绝回执文案点名补法）。
     - 写集空/缺失（write_set/write_join/self_heal 类）→ reason=write_set_missing，
       出路=补配写集（沿用既有 helper 空写集 fail-closed 立场，显式化）。
     - 结果文件（.sandbar/.suyou）对所有段放行（不进 commit，与 SETTLE_PATHSPEC 排除  # naming-compat
       现实一致）。
     """
     clean = _clean_files(files)
-    rule = STAGE_PATH_RULES.get(str(stage_id or ""))
+    rule = _resolve_stage_rule(stage_id, template_rules)
     if rule is None:
         return (False, list(clean), "unknown_stage")
     rest = [f for f in clean if not _is_result_file(f)]
@@ -328,8 +361,11 @@ def gate_refusal_note(stage_id: str, violations: Sequence[str], reason_code: str
                 % (PATH_GATE_REASON_KEY, names, _OUT_PROTECTED))
     if reason_code == "unknown_stage":
         return ("阶段路径闸拒绝落盘（%sunknown_stage）：段 %s 未配置允许改动面"
-                "（fail-closed，不静默免检）——%s"
-                % (PATH_GATE_REASON_KEY, stage_id, _OUT_CONFIG))
+                "（fail-closed，不静默免检）——合法出路：在该模板类补声明 "
+                "PATH_GATE_RULES[\"%s\"]=<允许面 kind>（外置模板只收弱面：%s），"
+                "或改用已配置段；%s"
+                % (PATH_GATE_REASON_KEY, stage_id, stage_id,
+                   "/".join(TEMPLATE_WEAK_KINDS), _OUT_CONFIG))
     if reason_code == "write_set_missing":
         return ("阶段路径闸拒绝落盘（%swrite_set_missing）：段 %s 无写集可判（写集空/缺失），"
                 "改动 %s 出白名单面——%s"
@@ -364,7 +400,9 @@ _NEXT_ACTION_HINTS = {
                          "删除与暂存态留人工）；内容确需改动：integration/ 面走 rework "
                          "打回 design_integration_tests，其余面建票把文件列入写集",
     "protected_path": "共享真源与守卫的改动走 main 侧专用票；本票只读不写",
-    "unknown_stage": "给该段配置允许改动面（fail-closed 缺省=拒），或改用已配置段",
+    "unknown_stage": "给该段补声明模板类 PATH_GATE_RULES[\"<段id>\"]=<允许面 kind>"
+                     "（外置模板只收弱面 result_files/write_set/join/prefixes），"
+                     "或改用已配置段",
     "write_set_missing": "工单写集为空/缺失——回 create_plan 补结构化回执后再实现",
     "ui_dirs_missing": "补 verify.yaml 的 ui_evidence.dirs 声明（或按项目口径补截图证据）",
     "status_failed": "修复泳道 git 环境（git status 失败=改动清单未知，fail-closed）后发 retry_qc 重验",

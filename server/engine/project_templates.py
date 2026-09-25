@@ -54,6 +54,12 @@ RE_ENGINE_PATCH = re.compile(r'^[A-Z0-9_]*PATCH_ID[ \t]*=[ \t]*["\']([^"\']+)["\
 # 项目模板后到——后到撞名即拒收点名双方，不覆盖。
 _BUILTIN_ORIGIN = {"dev-lane": "内置模板", "fixture-two-step": "夹具模板（SANDBAR_FIXTURE_TEMPLATES 门）"}
 
+# KI-124（t260925-23）：外置模板段路径闸可声明的允许面 kind 白名单（弱面子集——
+# 外置模板是跨项目收件面，self_heal/test_face 等强 kind 缺省就关）。本模块零
+# shared/path_gates import（依赖注入纪律），故本地常量；与 path_gates.TEMPLATE_WEAK_KINDS
+# 的漂移由单测交叉锁（两表相等）。
+_PATH_GATE_KINDS = ("result_files", "write_set", "join", "prefixes")
+
 
 def _rej(project: str, module: str, check: str, detail: str) -> Dict[str, str]:
     return {"project": project, "module": module, "check": check, "detail": detail}
@@ -312,6 +318,51 @@ def _load_class(mod_path: pathlib.Path, key: str, rel_item: str, tid: str,
                                    "段形态不合：段 %s parts 含非法值 %r（合法集 %s）"
                                    % (getattr(st, "id", i + 1), tuple(parts), part_kinds)))
             return False, None
+    # KI-124（t260925-23）：段路径闸声明深检（PATH_GATE / PATH_GATE_RULES）。声明面
+    # fail-closed 且精确点名：键 ⊆ STAGES id 全集（子集纪律的模板侧机械锁）、kind ∈
+    # 弱面白名单（外置模板是跨项目收件面，self_heal/test_face 等强 kind 缺省就关）、
+    # 声明了规则却不开闸=死配置拒收。白名单本地常量（本模块零 shared/path_gates
+    # import 的依赖注入纪律），两表漂移由单测交叉锁（TEMPLATE_WEAK_KINDS ⊆
+    # STAGE_PATH_RULES 全词表）。
+    pg_decl = getattr(cls, "PATH_GATE", False)
+    pg_rules = getattr(cls, "PATH_GATE_RULES", None)
+    if pg_rules not in (None, {}) and not pg_decl:
+        rejections.append(_rej(key, rel_item, "畸形",
+                               "路径闸声明不合：声明了 PATH_GATE_RULES 但 PATH_GATE "
+                               "非 True（死配置，声明即开闸或整体不声明）："
+                               "PATH_GATE=%r" % (pg_decl,)))
+        return False, None
+    if pg_decl:
+        if not isinstance(pg_rules, dict) or not pg_rules:
+            rejections.append(_rej(key, rel_item, "畸形",
+                                   "路径闸声明不合：PATH_GATE=True 须配套非空 "
+                                   "PATH_GATE_RULES dict（键=段 id；实得 %s）"
+                                   % type(pg_rules).__name__))
+            return False, None
+        stage_ids = {getattr(st, "id", None) for st in stages}
+        bad_keys = sorted(str(k) for k in pg_rules if k not in stage_ids)
+        if bad_keys:
+            rejections.append(_rej(key, rel_item, "畸形",
+                                   "路径闸声明不合：PATH_GATE_RULES 键 ⊄ STAGES id 全集"
+                                   "（fail-closed：未声明段会被闸拦成 unknown_stage）——"
+                                   "越界键=%s；段集=%s" % (bad_keys, sorted(map(str, stage_ids)))))
+            return False, None
+        for k, v in sorted(pg_rules.items(), key=lambda x: str(x[0])):
+            kind = v.get("kind") if isinstance(v, dict) else v
+            if not isinstance(kind, str) or kind not in _PATH_GATE_KINDS:
+                rejections.append(_rej(key, rel_item, "畸形",
+                                       "路径闸声明不合：段 %s 规则 kind 非法 %r"
+                                       "（外置模板弱面白名单=%s；强 kind 走建票把需求"
+                                       "带进引擎侧）" % (k, v, list(_PATH_GATE_KINDS))))
+                return False, None
+            if kind == "prefixes":
+                pfs = v.get("prefixes") if isinstance(v, dict) else None
+                if not isinstance(pfs, (list, tuple)) or not pfs or \
+                        not all(isinstance(x, str) and x.strip() for x in pfs):
+                    rejections.append(_rej(key, rel_item, "畸形",
+                                           "路径闸声明不合：段 %s kind=prefixes 须配套"
+                                           "非空前缀表 prefixes（字符串列表）" % (k,)))
+                    return False, None
     # sandbox 预校验（D3 兜底）：校验失败=模板级拒收点名，永不进 worker 注册表
     sandbox_err = _sandbox_validate(cls)
     if sandbox_err:

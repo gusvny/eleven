@@ -410,8 +410,12 @@ def test_source_lock_dev_lane_wiring():
 
 
 def test_source_lock_client_dispatch_pins_gate():
+    """KI-124（t260925-23）：总开关改模板类声明——硬编码拆除锁 + 声明读取在位
+    （dev-lane 的 PATH_GATE=True 由 test_t260925_23 源码锁钉住）。"""
     src = _src("client.py")
-    assert 'path_gate=(str(tpl) == "dev-lane")' in src
+    assert 'path_gate=(str(tpl) == "dev-lane")' not in src
+    assert 'path_gate=bool(getattr(cls, "PATH_GATE", False))' in src
+    assert 'path_gate_rules=dict(getattr(cls, "PATH_GATE_RULES", None) or {})' in src
 
 
 # ---------------- 数据类缺字段默认值（老在途票 replay 兼容） ----------------
