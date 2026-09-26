@@ -197,7 +197,8 @@ def test_g1_derivation_failure_is_fail_closed(tmp_path):
     lane = build_lane(tmp_path, DECL, registry=MINI_REGISTRY_BAD)
     res = run_lane(lane, apply_skip_pools=True, write_set=["server/engine/shared.py"])
     assert res["green"] is False
-    assert "派生失败" in (res.get("err") or "")
+    # 260927 报告英文面（宿主令）：闸 err 改英文——锚点同步（语义不变：派生失败 fail-closed）
+    assert "asset derivation failed" in (res.get("err") or "")
     assert probe_of(lane) is None
 
 

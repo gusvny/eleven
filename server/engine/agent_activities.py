@@ -58,6 +58,11 @@ import subprocess
 import shutil
 import tempfile
 import time
+
+# 260927 code_stamp：本模块被 worker 载入的时刻（shared.worker_code_stamp 读它判 stale——
+# 「盘上 mtime 晚于本时刻」= 进程跑的是改动前的旧码，磁盘修复对这个进程无效）
+import datetime as _dt_code
+CODE_LOADED_AT = _dt_code.datetime.now().isoformat(timespec="seconds")
 from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -7228,11 +7233,11 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
         _n = int((_partial or {}).get("ran") or 0)
         return IntegrationRunResult(
             warnings=list(_warnings),
-            error="verify_lane integ 无有效输出（exit=%s%s）：%s"
+            error="verify_lane integ produced no valid output (exit=%s%s): %s"
                   % (p.returncode,
-                     "，已跑 %d 条但无汇总（进度件见 %s）" % (_n, _extra_env.get(
-                         SANDBAR_INTEG_PROGRESS_ENV, "")) if _n > 0
-                     else "，未产出任何场景结果",
+                     ", %d scenarios ran but there is no summary (progress file %s)"
+                     % (_n, _extra_env.get(SANDBAR_INTEG_PROGRESS_ENV, "")) if _n > 0
+                     else ", no scenario results at all",
                      (p_stdout + p_stderr)[-2000:]),
             ran=_n,
             interrupted=bool(_n > 0),
@@ -7751,6 +7756,7 @@ async def run_inspection_suite(args: Dict[str, Any]) -> Dict[str, Any]:
                                   supply_timeout_sec=supply_to,
                                   suite_timeout_sec=suite_to)
     wall = round(time.monotonic() - started, 1)
+    _stamp = shared.worker_code_stamp()
     receipt: Dict[str, Any] = {
         "ticket_id": ticket_id, "worktree": str(wt), "base_ref": base_ref,
         "ran": result.ran, "passed": result.passed, "failed": result.failed,
@@ -7796,6 +7802,12 @@ async def run_inspection_suite(args: Dict[str, Any]) -> Dict[str, Any]:
     # 重启时，票面看不出跑的是旧码，归因只能靠猜；这一行让它一眼可判）。
     try:
         _exec_here = inspect_integ_exec_timeout_sec() if run_budget > 0 else 0.0
+        # 260927 code_stamp（宿主裁定②）：**代码身份自证**——worker 启动时刻 + 四模块
+        # 「载入时刻 vs 盘上 mtime」+ stale 名单。两起实案（t260928-01 的 >3000s、
+        # t260930-01 的 deadman 中文）都是「长命 worker 内存旧模块」，靠人肉比 mtime 才发现；
+        # 这一行让它机械可判（stale 名单非 none = 本进程跑的是旧码，重启 worker 才生效）。
+        receipt["code_stamp"] = shared.code_stamp_line(_stamp)
+        receipt["code_stamp_detail"] = dict(_stamp)
         receipt["budget_plan"] = {
             "suite_to_sec": int(suite_to) if suite_to else None,
             "supply_timeout_sec": int(supply_to) if supply_to else None,
@@ -7804,6 +7816,7 @@ async def run_inspection_suite(args: Dict[str, Any]) -> Dict[str, Any]:
             if _exec_here else None,
             "chain_timeout_sec": int(_chain_sec),
             "worker_module_mtime": __code_mtime(),
+            "code_stamp_stale": list(_stamp.get("stale") or []),
         }
     except Exception as e:  # noqa: BLE001——身份面故障绝不拦回执
         receipt["budget_plan"] = {"error": "%s: %s" % (type(e).__name__, e)}

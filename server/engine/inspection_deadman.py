@@ -20,6 +20,10 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, time, timedelta
+
+# 260927 code_stamp（同 agent_activities）：本模块的 worker 载入时刻
+import datetime as _dt_code
+CODE_LOADED_AT = _dt_code.datetime.now().isoformat(timespec="seconds")
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
@@ -419,6 +423,11 @@ def suite_section(receipt: Dict[str, Any], wall_seconds: Any = None) -> Dict[str
             out["progress"] = dict(receipt["progress"])
     if isinstance(receipt.get("budget"), dict) and receipt["budget"]:
         out["budget"] = dict(receipt["budget"])
+    # 260927 code_stamp：套件段带一行代码身份（票面据此一眼判「跑的是哪版码」）
+    if receipt.get("code_stamp"):
+        out["code_stamp"] = str(receipt["code_stamp"])
+    if isinstance(receipt.get("code_stamp_detail"), dict) and receipt["code_stamp_detail"]:
+        out["code_stamp_detail"] = dict(receipt["code_stamp_detail"])
     for k in ("supply_used_sec", "runner_used_sec", "run_budget_sec", "supply_timeout_sec"):
         if receipt.get(k) is not None:
             out[k] = receipt[k]

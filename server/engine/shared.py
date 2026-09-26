@@ -20,6 +20,7 @@ in-flight old lanes — see the individual # naming-compat markers).
 from __future__ import annotations
 
 import dataclasses
+import datetime as _dt
 import hashlib
 import logging
 import os
@@ -763,6 +764,9 @@ SUPPLY_ASSEMBLY_SIGS = SUPPLY_STATE_SIGS + (SUPPLY_SIDE_SIG,)
 #: 老（260927 前）中文双标记——**只为重放兼容**保留：改动当时仍在途的票，history 里记的
 #: 是旧中文 error，重放时判据必须给出与当初**相同**的结论（否则 workflow 决策分叉=
 #: 非确定、票卡死）。窄度与 token 形态等价（同一双标记合取），不是放宽。
+#: **宿主 260927 裁定：保留**（那里的中文是历史 error「数据」不是界面文案；删掉=在途票
+#: 重放决策分叉，KI-128 同族）——后人勿以「报告面零 CJK」为由删它：报告面守门只扫
+#: **引擎自产文案**，历史数据不在其列。
 LEGACY_SUPPLY_ASSEMBLY_MARKS = ("supply 装配", "供给面红")
 
 
@@ -5424,3 +5428,114 @@ except Exception as _pt_err:  # 加载器故障：点名挂账，不静默、不
     PROJECT_TEMPLATE_REJECTIONS = [{"project": "", "module": "",
                                     "check": "加载器故障",
                                     "detail": str(_pt_err)[:240]}]
+
+
+# ========================================================================================
+# 260927 code_stamp：**代码身份自证**（宿主裁定②，两起实案催生）
+#   t260928-01：活动超时回执里 `>3000s` 的旧码值 —— 事后靠人肉比 mtime 才发现「跑的是旧模块」；
+#   t260930-01：deadman 发现仍是中文 —— 同因（长命 worker 内存里是改动前的模块）。
+# 判据要**机械可判**：每份巡检回执/票面带一行 `code_stamp`，写明
+#   · worker 启动时刻与 pid（哪个进程在跑）；
+#   · 四个关键模块各自的「载入时刻 vs 盘上 mtime」；
+#   · **stale 名单**（盘上 mtime 晚于载入时刻 ⇒ 该模块的修复对这个进程无效）。
+# 本模块 stdlib-only（temporalio 只在函数内 import），故三个活动/工作流模块都可安全引用它。
+# ========================================================================================
+
+#: 进程启动时刻（本模块被 worker import 的时刻≈worker 启动；测试可显式传入覆盖）
+WORKER_STARTED_AT = _dt.datetime.now().isoformat(timespec="seconds")
+WORKER_PID = os.getpid()
+
+#: 关键模块 → (模块名, 相对本仓根的路径)。前三个由 worker 直接载入，第四个由闸子进程载入
+#: （worker 侧只报盘上 mtime，`loaded_at=None`——不假装它载入过）。
+CODE_STAMP_MODULES: Tuple[Tuple[str, str], ...] = (
+    ("agent_activities", "server/engine/agent_activities.py"),
+    ("inspection_flow", "server/engine/inspection_flow.py"),
+    ("inspection_deadman", "server/engine/inspection_deadman.py"),
+    ("verify_lane", "server/tools/verify_lane.py"),
+)
+
+
+def _repo_root_from_shared() -> pathlib.Path:
+    """本仓根（server/engine/shared.py → parents[2]）。"""
+    return pathlib.Path(__file__).resolve().parents[2]
+
+
+def _module_loaded_at(name: str) -> str:
+    """模块**载入时刻**：模块自报的 `CODE_LOADED_AT`（import 时写死）优先——它才是
+    「这个进程拿到的到底是哪一版」的真话；缺席（未载入/老版本模块）回落 worker 启动时刻。"""
+    import sys as _sys
+    mod = _sys.modules.get(name)
+    stamp = getattr(mod, "CODE_LOADED_AT", "") if mod is not None else ""
+    return str(stamp or WORKER_STARTED_AT)
+
+
+def worker_code_stamp(mtime_fn=None, started_at: Optional[str] = None,
+                      pid: Optional[int] = None,
+                      repo_root: Any = None) -> Dict[str, Any]:
+    """代码身份自证（纯函数，`mtime_fn`/`started_at` 可注入 → 可判定测试）。
+
+    返回：{worker_started_at, worker_pid, modules:{name:{path,mtime,loaded_at,stale,role}},
+           stale:[name...], stamp_line:"<一行可读>"}。
+    `stale` 判据=盘上 mtime **晚于**该模块载入时刻（即文件在进程载入之后又被改过 ⇒ 这个
+    进程跑的是改动前的旧码，磁盘上的修复对它无效）。畸形/读不到 mtime 一律不判 stale
+    （宁可少报不可误报），并在 `mtime` 上留空串。"""
+    import datetime as _dt
+
+    root = pathlib.Path(repo_root) if repo_root else _repo_root_from_shared()
+
+    def _mt(path: pathlib.Path) -> float:
+        try:
+            if mtime_fn is not None:
+                return float(mtime_fn(path))
+            return float(path.stat().st_mtime)
+        except (OSError, TypeError, ValueError):
+            return -1.0
+
+    def _iso(ts: float) -> str:
+        if ts < 0:
+            return ""
+        try:
+            return _dt.datetime.fromtimestamp(ts).isoformat(timespec="seconds")
+        except (OSError, OverflowError, ValueError):
+            return ""
+
+    start = str(started_at or WORKER_STARTED_AT)
+    modules: Dict[str, Any] = {}
+    stale: List[str] = []
+    for name, rel in CODE_STAMP_MODULES:
+        path = root / rel
+        mtime = _mt(path)
+        loaded = _module_loaded_at(name)
+        is_worker_loaded = name != "verify_lane"
+        # 载入时刻与 mtime 都拿得到才判（缺一不判：宁可不报，不误报）
+        is_stale = False
+        if mtime >= 0 and is_worker_loaded:
+            try:
+                is_stale = _dt.datetime.fromtimestamp(mtime).isoformat(timespec="seconds") > loaded
+            except (OSError, OverflowError, ValueError):
+                is_stale = False
+        modules[name] = {"path": str(path), "mtime": _iso(mtime), "loaded_at": loaded,
+                         "stale": is_stale,
+                         "role": "worker-loaded" if is_worker_loaded
+                                 else "gate subprocess (engine or lane copy)"}
+        if is_stale:
+            stale.append(name)
+    out = {"worker_started_at": start, "worker_pid": int(WORKER_PID if pid is None else pid),
+           "modules": modules, "stale": stale}
+    out["stamp_line"] = code_stamp_line(out)
+    return out
+
+
+def code_stamp_line(stamp: Dict[str, Any]) -> str:
+    """可读一行（进巡检 face/receipt；英文、零 CJK、可 grep）。"""
+    if not isinstance(stamp, dict) or not stamp:
+        return ""
+    mods = stamp.get("modules") or {}
+    parts = []
+    for name in ("agent_activities", "inspection_flow", "inspection_deadman", "verify_lane"):
+        m = mods.get(name) or {}
+        parts.append("%s@%s" % (name, m.get("mtime") or "?"))
+    stale = [str(x) for x in (stamp.get("stale") or [])]
+    return ("code_stamp: worker pid=%s started=%s | %s | stale=%s"
+            % (stamp.get("worker_pid"), stamp.get("worker_started_at"),
+               " ".join(parts), ",".join(stale) if stale else "none"))

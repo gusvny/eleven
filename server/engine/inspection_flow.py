@@ -34,6 +34,10 @@ import json
 import os
 import re
 import time
+
+# 260927 code_stamp（同 agent_activities）：本模块的 worker 载入时刻
+import datetime as _dt_code
+CODE_LOADED_AT = _dt_code.datetime.now().isoformat(timespec="seconds")
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -607,6 +611,10 @@ def build_ticket_face(
                    else "no malformed input face across the four sources"))
     if suite is not None:
         face_out["suite"] = suite      # 套件证据段（逐场景红绿/摘要/回执路径，验收 B）
+        # 260927 code_stamp（宿主裁定②）：票面落**一行可读**代码身份（值来自活动的
+        # 回执数据——活动结果进 history，重放拿回同值，故不引入非确定面）。
+        if suite.get("code_stamp"):
+            face_out["code_stamp"] = str(suite["code_stamp"])
     return face_out
 
 
@@ -1002,6 +1010,7 @@ class InspectionPeriodicWorkflow:
         self._close_sig: Optional[Dict[str, str]] = None
         self._gate_err: str = ""
         self._patched: bool = False      # 版本门结果（老 history 缺标记 → 走票① 旧路径）
+        self._code_stamp: str = ""       # 260927：活动带回的代码身份行（票面兜底用）
         self._input: Optional[InspectionPeriodicInput] = None  # run 入口钉存（sign 闸 payload 回退链）
 
     def _enter(self, stage: str, state: str = "running", reason: str = "") -> None:
@@ -1267,6 +1276,9 @@ class InspectionPeriodicWorkflow:
                        vmeta.get("suppressed", 0), vmeta.get("truncated", 0)))
         self.face = build_ticket_face(ticket_id, inp.instance_id, period, result,
                                       extra_findings=extra_findings, suite=suite_section)
+        # 260927 code_stamp 兜底：套件段没带（无套件档的期）而漏跑活动带了 → 补进票面
+        if not self.face.get("code_stamp") and self._code_stamp:
+            self.face["code_stamp"] = self._code_stamp
         self.face["scan_meta"] = vmeta
         if lane:
             self.face["lane"] = dict(lane)
@@ -1522,6 +1534,9 @@ class InspectionPeriodicWorkflow:
             return [make_finding("deadman", "high", "Dead-man check did not run",
                              str((raw or {}).get("error") or "unknown"), suggest=False)]
         res = (raw or {}).get("result") or {}
+        # 260927 code_stamp：漏跑活动带回的代码身份暂存（无套件档的期也能上票面；
+        # 值来自活动结果=重放同值，安全）
+        self._code_stamp = str(res.get("code_stamp") or self._code_stamp)
         findings = res.get("findings") if isinstance(res.get("findings"), list) else []
         if res.get("malformed"):
             findings = findings + [make_finding(

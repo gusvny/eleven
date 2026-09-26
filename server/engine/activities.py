@@ -610,7 +610,11 @@ async def run_inspection_deadman(args: Dict[str, Any]) -> Dict[str, Any]:
     activity.logger.info("[%s] 漏跑核查（tz=%s）：台账 %d 期（exist=%s）、漏 %d 期、畸形 %d 条",
                          instance, tz_name or "进程缺省", ledger["count"], ledger["exist"],
                          len(missed), len(ledger["malformed"]))
+    # 260927 code_stamp（宿主裁定②）：漏跑核查活动同样落一行代码身份（无套件档的期也有）
+    from shared import code_stamp_line, worker_code_stamp
+    _stamp = worker_code_stamp()
     return {"ok": True, "result": {
+        "code_stamp": code_stamp_line(_stamp), "code_stamp_detail": _stamp,
         "instance_id": instance, "cron": cron, "lookback_days": lookback,
         "tz": tz_name,
         "ledger_dir": str(ledger_dir), "ledger_exist": ledger["exist"],

@@ -542,27 +542,30 @@ def _pool_exclude_assets(root, pools, declared):
     assets = set(str(x).strip() for x in (declared or []) if str(x).strip())
     runner = Path(root) / 'integration' / 'run_scenarios.py'
     if not runner.is_file():
-        return [], ('池排除资产派生失败：泳道缺 integration/run_scenarios.py（%s）'
-                    '——例外分支判据不可得，fail-closed' % runner)
+        return [], ('pool-exclusion asset derivation failed: the lane has no '
+                    'integration/run_scenarios.py (%s) — the exemption-branch criterion '
+                    'is unavailable, fail-closed' % runner)
     try:
         p = subprocess.run(['python3', str(runner), '--print-pool-assets',
                             ','.join(pools)],
                            cwd=str(root), capture_output=True, text=True, timeout=120)
     except subprocess.TimeoutExpired:
-        return [], ('池排除资产派生超时（>120s）：--print-pool-assets %s'
-                    % ','.join(pools))
+        return [], ('pool-exclusion asset derivation timed out (>120s): '
+                    '--print-pool-assets %s' % ','.join(pools))
     except OSError as ex:
-        return [], ('池排除资产派生 spawn 失败（%s: %s）'
+        return [], ('pool-exclusion asset derivation failed to spawn (%s: %s)'
                     % (type(ex).__name__, ex))
     if p.returncode != 0:
-        return [], ('池排除资产派生失败（--print-pool-assets %s，exit=%d）：%s'
+        return [], ('pool-exclusion asset derivation failed (--print-pool-assets %s, '
+                    'exit=%d): %s'
                     % (','.join(pools), p.returncode,
                        ((p.stdout or '') + (p.stderr or ''))[-800:]))
     try:
         data = json.loads((p.stdout or '').strip().splitlines()[-1])
         derived = [str(x) for x in (data.get('assets') or [])]
     except (ValueError, IndexError, AttributeError):
-        return [], ('池排除资产派生输出畸形（坏 JSON）：%s' % (p.stdout or '')[-300:])
+        return [], ('pool-exclusion asset derivation output malformed (bad JSON): %s'
+                    % (p.stdout or '')[-300:])
     assets.update(a for a in derived if a)
     return sorted(assets), None
 
@@ -636,10 +639,10 @@ def _supply_timeout_sec():
     try:
         t = int(raw)
     except (TypeError, ValueError):
-        return None, ('供给段预算畸形（%s=%r）——fail-closed，不静默回落缺省'
-                      % (SUPPLY_TIMEOUT_ENV, raw))
+        return None, ('supply-stage budget malformed (%s=%r) — fail-closed, no silent fallback '
+                      'to the default' % (SUPPLY_TIMEOUT_ENV, raw))
     if t <= 0:
-        return None, ('供给段预算须为正整数（%s=%d）——fail-closed'
+        return None, ('supply-stage budget must be a positive integer (%s=%d) — fail-closed'
                       % (SUPPLY_TIMEOUT_ENV, t))
     return t, None
 
@@ -659,9 +662,9 @@ def _integ_timeout_sec(args):
     try:
         t = int(raw)
     except (TypeError, ValueError):
-        return None, 'integ 整体超时畸形（%s=%r）——fail-closed，不静默回落缺省' % (src, raw)
+        return None, 'integ overall timeout malformed (%s=%r) — fail-closed, no silent fallback' % (src, raw)
     if t <= 0:
-        return None, 'integ 整体超时须为正整数（%s=%d）——fail-closed' % (src, t)
+        return None, 'integ overall timeout must be a positive integer (%s=%d) — fail-closed' % (src, t)
     return t, None
 
 
@@ -798,11 +801,12 @@ def _parse_integ_run(stdout, returncode):
     if ran == 0:
         if returncode != 0:
             return ran, passed, failed, env_failed, scen, \
-                '场景执行器未产出结果（exit=%s）：%s' % (returncode, stdout[-2000:])
+                ('scenario executor produced no result (exit=%s): %s'
+                 % (returncode, stdout[-2000:]))
         return ran, passed, failed, env_failed, scen, \
-            ('零场景信号（exit=0 且无 PASS/FAIL/ENV_FAIL 行、无规范行、汇总行 '
-             'ran=0）——执行器空转/坏面显式红，不冒充绿（KI-116 拆除静默逃逸口）：%s'
-             % stdout[-800:])
+            ('zero scenario signal (exit=0 with no PASS/FAIL/ENV_FAIL rows, no spec rows, '
+             'summary ran=0) — an idle/broken executor is an explicit red, never a fake '
+             'green (the KI-116 silent escape hatch is gone): %s' % stdout[-800:])
     return ran, passed, failed, env_failed, scen, None
 
 
@@ -836,13 +840,15 @@ def _integ(args):
                 'warnings': list(_warnings)}
     if cfg is None:
         return {'lane': 'integ', 'green': False,
-                'err': 'verify.yaml 缺失：integration 道 fail-closed（本道无声明级关闭态，凡调道必判；契约②b）'}
+                'err': 'verify.yaml missing: the integ lane fails closed (no declaration-level off state; '
+                       'any call is judged; contract 2b)'}
     integ_cfg = cfg.get('integration') or {}
     cmd = str(integ_cfg.get('cmd') or '').strip()
     if not cmd:
         return {'lane': 'integ', 'green': False,
-                'err': 'integration.cmd 缺失或为空 = 畸形 fail-closed；要表达「该道无事可做」，'
-                       '声明恒成功空命令（如 true）得零场景绿（契约②b）'}
+                'err': 'integration.cmd missing or empty = malformed, fail-closed; to express "this lane '
+                       'has nothing to do", declare an always-succeeding empty command '
+                       '(e.g. true) and the round is green with zero scenarios (contract 2b)'}
     # supply 供给声明（t260904-12 乙段，契约 ②a）：逐条幂等装配命令先于 integration.cmd
     # 执行；失败/超时 = 显式红点名 need，不静默继续（契约「装配失败=红点名 need」）。
     #
@@ -958,7 +964,7 @@ def _integ(args):
         _rc = proc.returncode if proc.returncode is not None else -9
     except OSError as e:
         return {'lane': 'integ', 'green': False,
-                'err': '场景执行器起不来（%s: %s）' % (type(e).__name__, e),
+                'err': 'executor could not start (%s: %s)' % (type(e).__name__, e),
                 'supply_used_sec': supply_used,
                 'runner_used_sec': round(time.time() - _run_t0, 1),
                 'warnings': _warnings}
@@ -992,7 +998,7 @@ def _integ(args):
         _partials = [{'name': s.get('name', ''), 'exit': int(s.get('exit') or 0),
                       'output_tail': s.get('output_tail') or ''} for s in (_pscen or [])]
         return {'lane': 'integ', 'green': False,
-                'err': '场景执行器整体超时（>%ds）：%s' % (timeout, tail),
+                'err': 'scenario executor wall timed out (>%ds): %s' % (timeout, tail),
                 'ran': n,
                 'pass': max(int(prog.get('pass') or 0), int(_pp or 0)),
                 'fail': max(int(prog.get('fail') or 0), int(_pf or 0)),
@@ -1065,12 +1071,12 @@ def _integ(args):
                 or real['fail'] + real['not_checked']
                 != (executor_summary.get('fail') or 0)
                 + (executor_summary.get('not_checked') or 0)):
-            recount_mismatch = '闸重算 %r 与执行器汇总 %r 不一致（汇总谎报=红）' % (
-                real, executor_summary)
+            recount_mismatch = ('gate recount %r does not match the executor summary %r '
+                            '(a lying summary is red)' % (real, executor_summary))
         elif executor_summary.get('expected') is not None \
                 and int(executor_summary['expected']) != executor_summary.get('ran'):
-            recount_mismatch = ('清单残缺：ran=%s != 在册 expected=%s'
-                                '（条目静默丢失面，t260911）'
+            recount_mismatch = ('manifest incomplete: ran=%s != registered expected=%s '
+                                '(silent item loss, t260911)'
                                 % (executor_summary.get('ran'),
                                    executor_summary['expected']))
 
@@ -1159,8 +1165,10 @@ def _integ(args):
                         and (executor_summary is None
                              or (proc.returncode != 0 and not _real_red)
                              or (proc.returncode == 0 and _real_red)))
-    crash_note = ('执行器异常退出（exit=%s）或汇总行缺席/与用例集不一致——用例集可能残缺，'
-                  'fail-closed 不出绿（协议纪律：非正常退出≠绿）' % proc.returncode)
+    crash_note = ('executor exited abnormally (exit=%s) or the summary row is absent / '
+                  'inconsistent with the case set — the case set may be incomplete, '
+                  'fail-closed never returns green (protocol discipline: abnormal exit '
+                  'is not green)' % proc.returncode)
     if protocol_mode:
         # 规范行模式：红绿由用例判定面决定（旧退出码被用例 status 收编——
         # 「基线红只记录不堵票」的机械面就是 record 用例不抬 green=false）；
@@ -1191,10 +1199,12 @@ def _integ(args):
             'detail_red': ([{'malformed': m} for m in malformed]
                            + ([{'executor_crashed': crash_note}] if executor_crashed else [])
                            + ([{'recount': recount_mismatch}] if recount_mismatch else [])
-                           + ([{'compat_unparsed_red': '兼容文本行红无规范行，fail-closed 不归因'}]
+                           + ([{'compat_unparsed_red': 'legacy text rows are red with no spec rows; fail-closed, '
+                                         'no attribution'}]
                               if compat_unparsed_red else [])),
             'deprecation': (sorted(set(dupes)) and
-                            ['重复规范行（一行=一个用例被破坏）：%s' % ', '.join(sorted(set(dupes)))] or [])}
+                            ['duplicate spec rows (one row = one case, broken): %s'
+                             % ', '.join(sorted(set(dupes)))] or [])}
     # 260927 分相墙钟（供给 / 跑者两笔分别落账，事后归因要能读出「供给吃掉了多少」）：
     # 两键恒在（additive；NaN 面用 -1 表「未跑到」而不是 0=「瞬时完成」的假值）。
     _out['supply_used_sec'] = supply_used
@@ -1210,9 +1220,10 @@ def _integ(args):
     if _budget_face:
         _out['budget'] = _budget_face        # 结构化未跑清单（票面/回执据此点名）
         _out['green'] = False                # 没跑完=不绿（红线：不得以截断换绿）
-        _out['err'] = ('套件总预算耗尽：已跑 %d 条、未跑 %d 条未开跑——不是产品红（这些场景'
-                       '根本没验到），是容量/预算面；未跑清单见 budget.unrun 与逐条 ENV_FAIL '
-                       '明细｜%s'
+        _out['err'] = ('suite total budget exhausted: %d scenarios ran, %d never started — NOT a '
+                       'product red (those scenarios were never verified), it is a '
+                       'capacity/budget face; the unrun list is in budget.unrun and the '
+                       'per-item ENV_FAIL lines | %s'
                        % (ran, int(_budget_face.get('unrun_count') or 0),
                           _budget_face.get('line') or ''))
         _out['detail_red'].append({'budget_exhausted': _out['err']})
@@ -1256,13 +1267,14 @@ def _integ(args):
         rows, skip_whys = [], []
         if cases_dedup:
             if not ledger_source:
-                skip_whys.append('source 缺失（%s/SANDBAR_TICKET_ID 均无）' % LEDGER_SOURCE_ENV)
+                skip_whys.append('source missing (neither %s nor SANDBAR_TICKET_ID set)' % LEDGER_SOURCE_ENV)
             if not lane_head:
-                skip_whys.append('HEAD sha 解析失败')
+                skip_whys.append('HEAD sha could not be resolved')
             if lane_dirty:
-                skip_whys.append('泳道工作区脏（git status 非空）——宁可缺行不可脏行')
+                skip_whys.append('lane worktree is dirty (git status non-empty) — a missing row beats '
+                             'a dirty row')
             if not lane_width:
-                skip_whys.append('并发宽度缺失（无 INTEG_SUMMARY）')
+                skip_whys.append('concurrency width missing (no INTEG_SUMMARY)')
         if cases_dedup and not skip_whys:
             rows += _ledger_rows_from_cases(
                 cases_dedup, commit=lane_head, env_fp=lane_fp.get('value'),

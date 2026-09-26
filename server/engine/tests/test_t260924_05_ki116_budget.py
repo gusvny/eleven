@@ -205,11 +205,11 @@ def test_parse_integ_run_zero_signal_explicit_red():
     """零场景信号显式红（真空转面）：空输出 exit=0；纯噪音 exit=0；非零退出。
     判据与闸判定面同源（文本行 ∨ 规范行 ∨ INTEG_SUMMARY.ran>0，arbitrate 打回令）。"""
     _, _, _, _, _, e1 = vl._parse_integ_run("", 0)
-    assert e1 and "零场景信号" in e1
+    assert e1 and "zero scenario signal" in e1
     _, _, _, _, _, e2 = vl._parse_integ_run("some noise, no contract lines\n", 0)
-    assert e2 and "零场景信号" in e2
+    assert e2 and "zero scenario signal" in e2
     _, _, _, _, _, e3 = vl._parse_integ_run("some crash log\n", 3)
-    assert e3 and "未产出结果" in e3 and "exit=3" in e3
+    assert e3 and "produced no result" in e3 and "exit=3" in e3
 
 
 def test_parse_integ_run_spec_protocol_not_miskilled():
@@ -226,10 +226,10 @@ def test_parse_integ_run_spec_protocol_not_miskilled():
     assert vl._parse_integ_run('{"name":"c","status":"pass"}\n', 1)[5] is None
     assert vl._parse_integ_run('INTEG_SUMMARY {"ran":2,"pass":2}\n', 1)[5] is None
     _, _, _, _, _, err4 = vl._parse_integ_run('INTEG_SUMMARY {"ran":0}\n', 0)
-    assert err4 and "零场景信号" in err4
-    # 无信号 + exit≠0 仍是「未产出结果」红（fail-closed 不放松）
+    assert err4 and "zero scenario signal" in err4
+    # 无信号 + exit≠0 仍是「no result produced」红（fail-closed 不放松）
     _, _, _, _, _, err5 = vl._parse_integ_run("noise\n", 1)
-    assert err5 and "未产出结果" in err5
+    assert err5 and "produced no result" in err5
 
 
 def test_parse_integ_run_half_line_no_crash():

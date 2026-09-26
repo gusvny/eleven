@@ -301,8 +301,8 @@ res = call_gate(repo, BASELINE_OFF)
 res9a = res.get("result") or {}
 ok(res9a.get("green") is False, "S9a 崩溃面（rc!=0+汇总缺席）→ 红（不得 fail-open）")
 ok_judged(res9a, "S9a 判定面")
-ok(has_string(res9a, "残缺") or has_string(res9a, "异常退出"),
-   "S9a 红因点名用例集可能残缺（报错精确）")
+ok(has_string(res9a, "incomplete") or has_string(res9a, "abnormally"),
+   "S9a 红因点名用例集可能残缺（报错精确；260927 报告英文面）")
 # 对照子用例：同样 pass 规范行 + 汇总在场 + rc=0 → 绿（区分「场景级红」与「崩溃面」）
 ok_body = stub_src(row("pass", evidence="ok"), 0).replace(
     "import json\n", "import json\nprint('PASS [case-x] (0.1s)')\n", 1)

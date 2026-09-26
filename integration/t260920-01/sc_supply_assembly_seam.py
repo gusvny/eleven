@@ -182,7 +182,7 @@ res = call_gate(repo, extra_env={"SANDBAR_INTEG_BATCH_TIMEOUT_SEC": "1"})
 if res.get("ok"):
     r = res["result"]
     err = str(r.get("err") or "")
-    ok(r.get("green") is False and "场景执行器整体超时" in err,
+    ok(r.get("green") is False and "scenario executor wall timed out" in err,
        "C  执行器整体超时 → 闸红且出口为非签名启动级文案")
     sig, counted, note = judge_receipt(shared, dev_lane, err)
     ok(sig is False, "C2  非签名文案不命中供给签名（宁窄勿宽）")

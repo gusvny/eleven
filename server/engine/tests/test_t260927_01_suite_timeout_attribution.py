@@ -30,7 +30,11 @@ sys.path.insert(0, os.path.join(ENGINE, "..", "tools"))
 
 import agent_activities as aa  # noqa: E402
 import inspection_deadman as deadman  # noqa: E402
+import activities as engine_activities  # noqa: E402
+import shared  # noqa: E402
 import inspection_flow as flow  # noqa: E402
+
+engine_activities_run_deadman = engine_activities.run_inspection_deadman
 
 # 执行器模块（只读 import：注册表是数据，模块顶层零 IO 零重依赖）——跨模块单源锁要
 # 直读它的常量与纯函数，不靠字符串复述。
@@ -718,6 +722,79 @@ def test_deadman_activity_finding_is_english_end_to_end(tmp_path, monkeypatch):
         two[0]["subject"]
     for k in ("subject", "evidence", "suggestion"):
         assert not han.search(str(two[0].get(k) or "")), two[0].get(k)
+
+
+def test_code_stamp_present_with_four_modules_and_worker_start(tmp_path, monkeypatch):
+    """宿主裁定②（code_stamp 升级）：回执/票面必须带**代码身份自证**——worker 启动时刻 +
+    四模块（agent_activities/inspection_flow/inspection_deadman/verify_lane）的「载入时刻
+    vs 盘上 mtime」+ stale 名单，且票面有一行可读 `code_stamp`。
+
+    为什么立这条：同一个「长命 worker 内存旧模块」的坑今天咬了两次（t260928-01 的
+    `>3000s`、t260930-01 的 deadman 中文），两次都靠人肉比 mtime 才发现——本测试把
+    「机械可判」钉死：`stale` 名单非 none = 本进程跑的是改动前的旧码（磁盘修复对它无效）。
+    """
+    import asyncio
+    import inspect as _inspect
+    stamp = shared.worker_code_stamp()
+    assert stamp["worker_started_at"] and isinstance(stamp["worker_pid"], int)
+    mods = stamp["modules"]
+    for name in ("agent_activities", "inspection_flow", "inspection_deadman", "verify_lane"):
+        m = mods.get(name)
+        assert m, "code_stamp 缺模块：%s" % name
+        assert m.get("mtime"), "code_stamp 缺 mtime：%s" % name
+        assert m.get("path", "").endswith(".py")
+        assert m.get("stale") is False, (name, m)      # 当前源码 mtime 早于载入时刻=非 stale
+    assert stamp["stale"] == []
+    assert "worker pid=" in stamp["stamp_line"] and "started=" in stamp["stamp_line"]
+    assert "stale=none" in stamp["stamp_line"]
+    for name in mods:
+        assert name in stamp["stamp_line"]
+    # 齿：盘上 mtime 晚于载入时刻 → 该模块进 stale 名单（注入 mtime 判据，确定性）
+    stale_stamp = shared.worker_code_stamp(mtime_fn=lambda p: 9e9,
+                                           started_at="2020-01-01T00:00:00")
+    assert set(stale_stamp["stale"]) == {"agent_activities", "inspection_flow",
+                                         "inspection_deadman"}, stale_stamp["stale"]
+    assert "verify_lane" not in stale_stamp["stale"]      # 闸子进程载入：worker 侧不判 stale
+    assert "stale=agent_activities" in stale_stamp["stamp_line"]
+    # 端到端①：套件回执行程带 code_stamp（活动内部产 → 重放安全）
+    lane = tmp_path / "lane"
+    (lane / "server").mkdir(parents=True)
+    monkeypatch.setenv("SANDBAR_INSPECTION_DIR", str(tmp_path / "out"))
+
+    class _Proc:
+        returncode = 0
+
+        async def communicate(self):
+            return b"", b""
+
+    async def _fake_create(*argv, **kw):
+        return _Proc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create)
+    out = asyncio.run(aa.run_inspection_suite({
+        "ticket_id": "t260927-01", "worktree": str(lane),
+        "instance_id": "integration-tests", "period": "20260930", "base_ref": "abc",
+        "run_budget_sec": flow.SUITE_RUN_BUDGET_SEC,
+        "supply_timeout_sec": flow.INTEG_SUPPLY_TO_SEC,
+        "suite_timeout_sec": flow.SUITE_TO.total_seconds()}))
+    r = out["result"]
+    assert r.get("code_stamp", "").startswith("code_stamp: worker pid=")
+    assert (r.get("code_stamp_detail") or {}).get("modules", {}).keys() >= \
+        {"agent_activities", "inspection_flow", "inspection_deadman", "verify_lane"}
+    doc = json.loads(open(r["report_path"], encoding="utf-8").read())
+    assert doc["code_stamp"] == r["code_stamp"]
+    assert doc["budget_plan"]["code_stamp_stale"] == []
+    # 端到端②：套件段透出 ↔ 票面一行可读（值来自活动结果=重放同值）
+    section = deadman.suite_section(r)
+    assert section["code_stamp"] == r["code_stamp"]
+    face = flow.build_ticket_face(
+        "t260927-01", "integration-tests", "20260930",
+        {"findings": [], "summary": {"high": 0, "med": 0, "low": 0}, "heartbeat": False},
+        suite=section)
+    assert face["code_stamp"] == r["code_stamp"]
+    assert _report_cjk(face) == []            # 身份行同样零 CJK（报告面守门）
+    # 源代码面锁：漏跑活动也带（无套件档的期也有身份面）
+    assert "code_stamp" in _inspect.getsource(engine_activities_run_deadman)
 
 
 def test_engine_reason_literals_are_english():

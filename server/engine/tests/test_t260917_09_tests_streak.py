@@ -156,8 +156,8 @@ def test_c2_supply_signature_variants_match():
 def test_c2_supply_signature_narrow_and_malformed():
     # 窄签名（fail-closed）：其他启动级 error / 半标记文案不命中——照旧保守计轮，
     # 绝不因豁免口径扩大放走产品面/声明面红（gen11：宁窄勿宽）
-    for err in ("场景执行器整体超时（>3000s）",
-                "verify_lane integ 无有效输出（exit=1）：garbage",
+    for err in ("scenario executor wall timed out (>3000s)",
+                "verify_lane integ produced no valid output (exit=1): garbage",
                 "integration 未知键: foo", "未知错误",
                 # 单 token 各自不命中（窄度：状态 ∧ 侧面，缺一不可）
                 shared.SUPPLY_TIMEOUT_SIG + ": no side token here",
@@ -177,7 +177,7 @@ def test_c2_supply_signature_narrow_and_malformed():
         "supply 装配失败（need=x，exit=1）：boom——供给面红点名，不静默",
         "supply 装配好了——供给面红",            # 已知近似命中面（旧式也命中，等价保持）
         "——供给面红点名，不静默",
-        "场景执行器整体超时（>3000s）",
+        "scenario executor wall timed out (>3000s)",
     ]
     for sample in legacy_samples:
         assert supply_sig(sample) == _legacy_matcher(sample), sample
@@ -191,7 +191,7 @@ def test_c2_supply_shape_exempt_judgement():
     assert wf._tests_env_side_red(_supply_receipt(error=SUPPLY_FAIL_ERR))
     # 边角（口径宁窄勿宽）：非供给 error / 有跑 / 产品红 / 闸拦 / 字段畸形 → 不豁免
     assert not wf._tests_env_side_red(
-        _supply_receipt(error="场景执行器整体超时（>3000s）"))
+        _supply_receipt(error="scenario executor wall timed out (>3000s)"))
     assert not wf._tests_env_side_red(_supply_receipt(ran=3))
     assert not wf._tests_env_side_red(_supply_receipt(failed=1))
     assert not wf._tests_env_side_red(_supply_receipt(blockers=["gate-x"]))
