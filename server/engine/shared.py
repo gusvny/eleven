@@ -5442,8 +5442,22 @@ except Exception as _pt_err:  # 加载器故障：点名挂账，不静默、不
 # ========================================================================================
 
 #: 进程启动时刻（本模块被 worker import 的时刻≈worker 启动；测试可显式传入覆盖）
-WORKER_STARTED_AT = _dt.datetime.now().isoformat(timespec="seconds")
-WORKER_PID = os.getpid()
+def _worker_started_at() -> str:
+    """模块内访问器（裸名引用不能走 __getattr__）：首个访问时惰性算 worker 启动时刻。"""
+    global _WORKER_STARTED_AT_CACHE
+    if not _WORKER_STARTED_AT_CACHE:
+        _WORKER_STARTED_AT_CACHE = __import__("datetime").datetime.now().isoformat(timespec="seconds")
+    return _WORKER_STARTED_AT_CACHE
+
+
+def _worker_pid() -> int:
+    global _WORKER_PID_CACHE
+    if not _WORKER_PID_CACHE:
+        _WORKER_PID_CACHE = str(__import__("os").getpid())
+    return int(_WORKER_PID_CACHE)
+
+_WORKER_STARTED_AT_CACHE = ""  # 惰性（见下方 __getattr__）
+_WORKER_PID_CACHE = ""  # 惰性（见下方 __getattr__）
 
 #: 关键模块 → (模块名, 相对本仓根的路径)。前三个由 worker 直接载入，第四个由闸子进程载入
 #: （worker 侧只报盘上 mtime，`loaded_at=None`——不假装它载入过）。
@@ -5466,7 +5480,7 @@ def _module_loaded_at(name: str) -> str:
     import sys as _sys
     mod = _sys.modules.get(name)
     stamp = getattr(mod, "CODE_LOADED_AT", "") if mod is not None else ""
-    return str(stamp or WORKER_STARTED_AT)
+    return str(stamp or _worker_started_at())
 
 
 def worker_code_stamp(mtime_fn=None, started_at: Optional[str] = None,
@@ -5499,7 +5513,7 @@ def worker_code_stamp(mtime_fn=None, started_at: Optional[str] = None,
         except (OSError, OverflowError, ValueError):
             return ""
 
-    start = str(started_at or WORKER_STARTED_AT)
+    start = str(started_at or _worker_started_at())
     modules: Dict[str, Any] = {}
     stale: List[str] = []
     for name, rel in CODE_STAMP_MODULES:
@@ -5520,7 +5534,7 @@ def worker_code_stamp(mtime_fn=None, started_at: Optional[str] = None,
                                  else "gate subprocess (engine or lane copy)"}
         if is_stale:
             stale.append(name)
-    out = {"worker_started_at": start, "worker_pid": int(WORKER_PID if pid is None else pid),
+    out = {"worker_started_at": start, "worker_pid": int(_worker_pid() if pid is None else pid),
            "modules": modules, "stale": stale}
     out["stamp_line"] = code_stamp_line(out)
     return out
@@ -5539,3 +5553,33 @@ def code_stamp_line(stamp: Dict[str, Any]) -> str:
     return ("code_stamp: worker pid=%s started=%s | %s | stale=%s"
             % (stamp.get("worker_pid"), stamp.get("worker_started_at"),
                " ".join(parts), ",".join(stale) if stale else "none"))
+
+# 260930（实测事故）：import 期调用 datetime.now() 会被 Temporal **工作流沙箱**拒收
+# （RestrictedWorkflowAccessError: Cannot access datetime.datetime.now from inside a
+# workflow → worker 起不来：Failed validating workflow InspectionPeriodicWorkflow）。
+# 改为**首个访问时惰性计算**：只有活动侧会访问它，import 期零副作用。
+_WORKER_STARTED_AT_CACHE = ""
+
+
+def __getattr__(name):
+    if name == "WORKER_STARTED_AT":
+        global _WORKER_STARTED_AT_CACHE
+        if not _WORKER_STARTED_AT_CACHE:
+            _WORKER_STARTED_AT_CACHE = __import__("datetime").datetime.now().isoformat(timespec="seconds")
+        return _WORKER_STARTED_AT_CACHE
+    raise AttributeError("module %r has no attribute %r" % (__name__, name))
+
+# 260930（实测事故）：import 期调用 datetime.now() 会被 Temporal **工作流沙箱**拒收
+# （RestrictedWorkflowAccessError: Cannot access datetime.datetime.now from inside a
+# workflow → worker 起不来：Failed validating workflow InspectionPeriodicWorkflow）。
+# 改为**首个访问时惰性计算**：只有活动侧会访问它，import 期零副作用。
+_WORKER_PID_CACHE = ""
+
+
+def __getattr__(name):
+    if name == "WORKER_PID":
+        global _WORKER_PID_CACHE
+        if not _WORKER_PID_CACHE:
+            _WORKER_PID_CACHE = __import__("datetime").datetime.now().isoformat(timespec="seconds")
+        return _WORKER_PID_CACHE
+    raise AttributeError("module %r has no attribute %r" % (__name__, name))
