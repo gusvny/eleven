@@ -1922,3 +1922,10 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **修法方向**：① spawn 结果面识别 AUTH 403/quota/rate-limit 关键字 → 段结果落 `env_fail` 语义 + 票面/巡检 face 点名
 > 「模型供应商额度耗尽（哪家/何时重置）」，且**不重试**（额度不会因重试恢复）；② 巡检审查段遇此态记为「环境红」而非「agent 未完成」，
 > 免得把它算进「巡检连续零信号」的家族里。
+
+> **260926 追加（我自己的 reopen 能力有缺口）**：`--reopen-reason` 可重开一次，但**同一期重开第二次就被守卫拒**：
+> `trigger --period 20260927 --reopen-reason …` 第二次返回 `ok:false「同期已服务票出现多张：t260927-01、t260927-02
+> ——每期一票被破坏，人工处置」`（`inspection_ticketing.open_period_ticket` 的 `len(served_ids) > 1` 守卫把
+> 「多次重开留下的多张已服务票」误判成破窗）。修法方向：带 `reopen_reason` 时允许 N 张已服务票共存
+> （supersede 链式记名 + reopen journal 逐行留痕），只对**无具名**的多张已服务票保持 fail-closed。
+> 当下的绕法＝换新期（本岗当日即改用期 20260928 验收）。
