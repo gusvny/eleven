@@ -658,6 +658,68 @@ def test_report_face_cjk_gate_has_teeth():
     assert _report_cjk({"a": {"b": ["中文"]}}) != []
 
 
+def test_deadman_activity_finding_is_english_end_to_end(tmp_path, monkeypatch):
+    """**生产点端到端**（宿主要求：把这条生产点纳入零 CJK 覆盖）。
+
+    定位（本轮实测复核）：唯一的产出点是 `inspection_deadman.deadman_findings`，由活动壳
+    `activities.run_inspection_deadman`（服务器侧真入口）调用——没有第二个字面量副本
+    （全仓 grep 零命中；改完该函数的文案后产物即变英文）。本测试**真调那个活动函数**：
+    临时台账 + 桩 activity 上下文（`activity.logger` 只在活动上下文可用），断言
+      · subject/evidence/suggestion 零 CJK；
+      · **数据原样保留**：期号、cron 串、台账路径形态、CLI/调度命令原文逐字在场；
+      · 该活动回执里的 findings 与纯函数同源（单点）。
+    历史注记：期 20260930 产物里这条仍是中文的成因是**工人进程载入的模块快照**落在两次
+    改动之间（产物 mtime 晚于源码 mtime，且同批 'Suite red:' 已是英文）——非第二生产点。
+    """
+    import asyncio
+    import activities as engine_activities
+
+    class _Log:
+        def info(self, *a, **k):
+            pass
+
+        def warning(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(engine_activities, "activity",
+                        type("A", (), {"logger": _Log()})(), raising=True)
+    inst, cron = "integration-tests", "30 7 * * *"
+    ledger = tmp_path / "inspection"
+    ledger.mkdir()
+    # 台账里只放一期（有意漏掉 20260919/20260925 两期，复刻宿主实测形态）
+    (ledger / ("inspection-%s-20260926.json" % inst)).write_text("{}", encoding="utf-8")
+    out = asyncio.run(engine_activities.run_inspection_deadman({
+        "instance_id": inst, "cron": cron, "lookback_days": 7,
+        "ledger_dir": str(ledger)}))
+    assert out["ok"] is True, out
+    findings = out["result"]["findings"]
+    assert findings, out["result"]
+    han = re.compile(r"[\u4e00-\u9fff]")
+    for f in findings:
+        for k in ("subject", "evidence", "suggestion"):
+            assert not han.search(str(f.get(k) or "")), \
+                "deadman 发现含中文（%s）：%r" % (k, f.get(k))
+    f = findings[0]
+    assert f["scan"] == "deadman" and f["severity"] == "high" and f["suggest"] is False
+    # 数据不译：cron 串 / 实例名 / 路径形态 / 命令原文逐字在场
+    assert cron in f["evidence"] and inst in f["evidence"]
+    assert "inspection-%s-" % inst in f["evidence"]
+    assert "inspection_trigger.py deadman --instance %s" % inst in f["evidence"]
+    assert "sandbar-inspection-%s" % inst in f["evidence"]
+    assert f["subject"].startswith("Missed ") and "period" in f["subject"]
+    # 期号全列不截断（活动按本地日历算窗口，故期望值由同一判据函数导出，不写死日期）
+    for p_ in out["result"]["missed"]:
+        assert p_ in f["subject"], (p_, f["subject"])
+    # 与纯函数单点同源（同参同值）
+    assert findings == deadman.deadman_findings(out["result"]["missed"], inst, cron, 7)
+    # 宿主实测形态（两期）的形状锁：subject 逐字可读、零 CJK、数据未译
+    two = deadman.deadman_findings(["20260919", "20260925"], inst, cron, 7)
+    assert two and two[0]["subject"] == "Missed 2 period(s): 20260919, 20260925", \
+        two[0]["subject"]
+    for k in ("subject", "evidence", "suggestion"):
+        assert not han.search(str(two[0].get(k) or "")), two[0].get(k)
+
+
 def test_engine_reason_literals_are_english():
     """静态锁：`inspection_flow` 里进报告面的**实参文案**（`_enter`/`_blocked` 的 reason，
     即 ledger 的 `timeline[].reason` 与 `blocked_reason`）零 CJK——动态守门只能覆盖
