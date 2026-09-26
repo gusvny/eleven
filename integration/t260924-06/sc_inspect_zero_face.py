@@ -30,7 +30,7 @@ import lib_scope as lib  # noqa: E402
 PASS = 0
 FAIL = 0
 FAILURES = []
-MARK_ZERO = ["本期无新病灶", "审查范围"]
+MARK_ZERO = ["No new defects this period", "review scope"]   # 260927 报告英文面（宿主令）
 
 
 def ok(cond, msg):

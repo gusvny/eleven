@@ -43,22 +43,23 @@ def test_u2_parse_name_status_empty_named():
     rows, meta = ins.parse_name_status("")
     assert rows == [] and "diff_error" in meta
     rows, meta = ins.parse_name_status("\n\n")
-    assert rows == [] and "变化面 diff 输出为空" in meta["diff_error"]
+    assert rows == [] and "diff output is empty" in meta["diff_error"]   # 260927 报告英文面
 
 
 # ---------------------------------------------------------------- U3 suite_receipt_rows
 
 def test_u3_suite_receipt_rows_malformed_fail_closed(tmp_path):
     rows, meta = ins.suite_receipt_rows(tmp_path / "absent.json")
-    assert rows == [] and "套件回执" in meta["suite_note"] and "未纳入审查范围" in meta["suite_note"]
+    assert rows == [] and "suite receipt" in meta["suite_note"] \
+        and "not part of the review scope" in meta["suite_note"]   # 260927 报告英文面
     bad = tmp_path / "bad.json"
     bad.write_text("{not json", encoding="utf-8")
     rows, meta = ins.suite_receipt_rows(bad)
-    assert rows == [] and "不可读" in meta["suite_note"]
+    assert rows == [] and "unreadable" in meta["suite_note"]   # 260927 报告英文面
     notdict = tmp_path / "arr.json"
     notdict.write_text("[]", encoding="utf-8")
     rows, meta = ins.suite_receipt_rows(notdict)
-    assert rows == [] and "顶层非映射" in meta["suite_note"]
+    assert rows == [] and "not a mapping at the top level" in meta["suite_note"]  # 英文面
     # 常规：error/env_fail/ran=0/details 红条目照收
     ok = tmp_path / "ok.json"
     ok.write_text(json.dumps({"error": "场景执行器整体超时", "env_fail": 0, "ran": 0,
@@ -73,11 +74,11 @@ def test_u3_suite_receipt_rows_malformed_fail_closed(tmp_path):
 
 def test_u4_ki_open_entries_missing_and_empty(tmp_path):
     rows, meta = ins.ki_open_entries(tmp_path / "absent.md")
-    assert rows == [] and "KI 册不可读" in meta["ki_note"]
+    assert rows == [] and "KI register unreadable" in meta["ki_note"]   # 260927 报告英文面
     empty = tmp_path / "ki.md"
     empty.write_text("# 已全部关闭\n", encoding="utf-8")
     rows, meta = ins.ki_open_entries(empty)
-    assert rows == [] and "无 open 条目或不可解析" in meta["ki_note"]
+    assert rows == [] and "no open entries or is unparseable" in meta["ki_note"]  # 英文面
     ok = tmp_path / "ki2.md"
     ok.write_text("- KI-009 组粒度回收 open：待修\n- KI-002 closed\n", encoding="utf-8")
     rows, meta = ins.ki_open_entries(ok)
@@ -203,7 +204,9 @@ def test_u7_e2e_scoped_prompt_and_explicit_zero_findings(
         "findings": [], "summary": {"high": 0, "med": 0, "low": 0},
         "meta": {"inspect": {"scope": result["meta"]["scope"]}}})
     note = face["zero_findings_note"]
-    assert "本期无新病灶" in note and "输入面点名" in note and "diff_error" in note
+    # 260927 报告英文面（宿主令）：零发现声明的措辞改英文——断言 re-point（意图不变）
+    assert "No new defects this period" in note and "input face named" in note \
+        and "diff_error" in note
     # 有发现时绝不出零发现声明（对偶断言）
     face2 = flow.build_ticket_face("t1", "inst", "20260926", {
         "findings": [{"subject": "s", "severity": "low", "scan": "agent"}],

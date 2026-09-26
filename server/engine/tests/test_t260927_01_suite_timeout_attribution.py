@@ -18,6 +18,7 @@
 import asyncio
 import json
 import os
+import re
 import sys
 import sys as _sys
 
@@ -513,11 +514,8 @@ def test_report_text_is_english_and_prompt_requires_english():
     import inspection_inspect as ins
     han = _re.compile(r"[\u4e00-\u9fff]")
     cases = [
-        deadman.suite_findings({"error": "boom", "ran": 0, "details": []}),
-        # 注：ran=0 那一条是**唯一豁免**（subject 被既有场景断言钉住：
-        # integration/t260913-02/sc_inspection_schedule_daily.py:187 断言含「未真正执行」；
-        # 「不动既有场景断言」是硬边界）——故不列入本案，另由
-        # test_english_report_has_one_documented_exemption 钉住豁免集不大不小。
+        # 260927 收尾：ran=0 那条原先的中文豁免已随宿主改锚同批英文化（今无豁免）
+        deadman.suite_findings({"error": "", "ran": 0, "details": []}),
         deadman.suite_findings({"ran": 2, "failed": 2,
                                 "details": [{"name": "a", "exit": 1},
                                             {"name": "b", "exit": 1}]}),
@@ -540,16 +538,145 @@ def test_report_text_is_english_and_prompt_requires_english():
             for k in ("subject", "evidence", "suggestion"):
                 assert not han.search(str(f.get(k) or "")), \
                     "报告制品含中文（宿主令：report 用英语写）：%r=%r" % (k, f.get(k))
-    # 豁免集**恰一条**且理由在册（防「豁免」变成放水口：多出中文就是漏改）
+    # 豁免集**已空**（260927 收尾：原 ran=0 中文 subject 已英文化，场景锚同批改；
+    # 此处一旦再冒中文即红——不许悄悄长回豁免）
     han2 = _re.compile(r"[\u4e00-\u9fff]")
     leftovers = [f for f in deadman.suite_findings({"error": "", "ran": 0, "details": []})
                  if han2.search(str(f.get("subject") or ""))]
-    assert len(leftovers) == 1, [f.get("subject") for f in leftovers]
-    assert "未真正执行" in leftovers[0]["subject"], "豁免串变了=场景断言锚点也跟着变，须同批复核"
+    assert leftovers == [], [f.get("subject") for f in leftovers]
     # prompt 侧：英文要求在场，且「数据不译」显式
     p = ins.build_inspect_prompt("i", "20260927", "test", "/tmp/base", "abc", 10)
     assert "in English" in p and "verbatim" in p
     assert "输出契约" in p                       # 既有契约块仍在（只加不减）
+
+
+# ========================================================================================
+# ④ 报告面零 CJK 守门（宿主令 260927 收尾：报告用英文写）
+# ========================================================================================
+
+#: 数据字段白名单（这些键的值是**数据**：引文/路径/命令原文/标识符——不译，允许任意语言）。
+#: 判据只允许放这些键，键名写死=扩白名单必须显式改代码（不许静默放宽）。
+REPORT_DATA_KEYS = frozenset({
+    "evidence", "quote", "path", "cmd", "command", "output_tail", "stdout_tail",
+    "instance_id", "period", "ticket_id", "report_path", "worktree", "base_ref",
+    "baseline_ref", "id", "source_ticket", "verdict_note", "subject_data",
+    "scan", "file", "suggest", "severity", "confidence", "who", "note_data",
+    "arm", "kind", "why_data", "excerpt", "snippet", "match",
+})
+
+
+def _walk_report_strings(obj, key=None, path=""):
+    """递归收集报告制品里的字符串值 → [(路径, 键, 值)]（白名单键除外）。"""
+    out = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            out += _walk_report_strings(v, key=k, path="%s.%s" % (path, k))
+    elif isinstance(obj, (list, tuple)):
+        for i, v in enumerate(obj):
+            out += _walk_report_strings(v, key=key, path="%s[%d]" % (path, i))
+    elif isinstance(obj, str):
+        if key not in REPORT_DATA_KEYS:
+            out.append((path, key, obj))
+    return out
+
+
+def _report_cjk(artifact, allow_keys=frozenset()):
+    han = re.compile(r"[\u4e00-\u9fff]")
+    return [(p_, k, v_) for (p_, k, v_) in _walk_report_strings(artifact)
+            if k not in allow_keys and han.search(v_)]
+
+
+def test_report_face_has_no_cjk_except_data_fields():
+    """报告面零 CJK 守门：**所有会进报告制品/票面的引擎自产文案必须英文**。
+
+    覆盖面（三件制品 + 票面）：
+      ①发现清单（suite 全态 + 漏跑 + 跳火）；
+      ②face（build_ticket_face：含 suite 段、开票建议 title/urgency、notes）；
+      ③落账文档（`_ledger_doc` = face + stage/status/timeline）；
+      ④套件回执（具名超时回执 + 落盘文档）。
+    豁免**只有数据字段白名单**（quote/path/cmd/标识符等）——新增豁免必须改代码（可见）。
+    """
+    import inspection_flow as flow
+    han = re.compile(r"[\u4e00-\u9fff]")
+    receipt = {"ticket_id": "t260927-01", "ran": 2, "passed": 1, "failed": 1, "env_fail": 0,
+               "error": "", "results": "missing intentionally",
+               "details": [{"name": "sc-a", "exit": 1, "output_tail": "boom"}]}
+    findings = []
+    for r in ({"error": "boom", "ran": 0, "details": []},
+              {"error": "", "ran": 0, "details": []},
+              {"ran": 2, "passed": 0, "failed": 2,
+               "details": [{"name": "a", "exit": 1}, {"name": "b", "exit": 1}]},
+              {"ran": 1, "env_fail": 1, "details": [{"name": "a", "exit": 2}]},
+              {"ran": 1, "interrupted": True, "progress": {"last": "x"}, "details": []},
+              {"ran": 1, "late": True, "late_error": "orphan", "details": []},
+              {"ran": 1, "details": [],
+               "budget": {"exhausted": True, "unrun_count": 1, "unrun": ["a"]}},
+              "junk", None, {"ran": "many"}):
+        findings += deadman.suite_findings(r)
+    findings += deadman.deadman_findings(["20260901", "20260902"], "inst", "0 7 * * *", 7)
+    findings += deadman.skip_findings(2, 1, {"workflow": "old"}, [])
+    findings += deadman.skip_findings(None, None, {"workflow": "old"}, ["20260901"])
+    bad = _report_cjk(findings)
+    assert bad == [], "发现清单含非数据中文：%r" % bad[:4]
+    # ② face（含 suite 段与开票建议）
+    section = deadman.suite_section(receipt)
+    face = flow.build_ticket_face(
+        "t260927-01", "integration-tests", "20260927",
+        {"findings": [], "summary": {"high": 0, "med": 0, "low": 0}, "heartbeat": False,
+         "meta": {"scope": {"scope_files": 3, "diff_error": "x", "ki_note": "y"}}},
+        extra_findings=findings, suite=section)
+    bad = _report_cjk(face, allow_keys=frozenset({"red_line_data"}))
+    assert bad == [], "票面 face 含非数据中文：%r" % bad[:4]
+    assert not han.search(flow.INSPECTION_RED_LINE), "红线文案未英文化"
+    for s_ in [t["title"] for t in face["suggested_fix_tickets"]] + \
+              [t["urgency"] for t in face["suggested_fix_tickets"]]:
+        assert not han.search(s_), s_
+    # ③ 落账文档（_ledger_doc：face + timeline）
+    wf = object.__new__(flow.InspectionPeriodicWorkflow)
+    wf.face = dict(face)
+    wf.stage = "close"
+    wf.stage_state = "done"
+    wf.status = "closed"
+    wf.timeline = [{"at": "2026-09-27T00:00:00+00:00", "stage": "suite", "state": "running",
+                    "reason": "Running the full integration suite in the inspection lane "
+                              "(lane base abc)"}]
+    doc = wf._ledger_doc()
+    bad = _report_cjk(doc)
+    assert bad == [], "落账文档含非数据中文：%r" % bad[:4]
+    # ④ 套件回执（具名超时/故障两态 + 落盘文档）
+    for r_ in (flow.suite_failure_receipt(_sdk_activity_timeout(), 10800),
+               flow.suite_failure_receipt(RuntimeError("boom"), 10800)):
+        assert _report_cjk(r_) == [], _report_cjk(r_)[:3]
+
+
+def test_report_face_cjk_gate_has_teeth():
+    """守门自证（有牙齿）：白名单外的中文必须被抓到——不然「零 CJK」是空话。"""
+    assert _report_cjk({"subject": "套件红：x"}) != []
+    assert _report_cjk({"subject": "套件红：x"}, allow_keys=frozenset({"subject"})) == []
+    assert _report_cjk({"evidence": "数据里的中文不译：引文/路径"}) == []      # 数据字段豁免
+    assert _report_cjk({"urgency": "立即开票"}) != []
+    assert _report_cjk({"a": {"b": ["中文"]}}) != []
+
+
+def test_engine_reason_literals_are_english():
+    """静态锁：`inspection_flow` 里进报告面的**实参文案**（`_enter`/`_blocked` 的 reason，
+    即 ledger 的 `timeline[].reason` 与 `blocked_reason`）零 CJK——动态守门只能覆盖
+    我构造得出的路径，本锁覆盖其余分支（含 blocked/produce 轨）。"""
+    import ast as _ast
+    import inspection_flow as flow
+    han = re.compile(r"[\u4e00-\u9fff]")
+    src = open(flow.__file__, encoding="utf-8").read()
+    bad = []
+    for node in _ast.walk(_ast.parse(src)):
+        if isinstance(node, _ast.Call):
+            nm = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+            if nm in ("_enter", "_blocked"):
+                for arg in node.args:
+                    for n in _ast.walk(arg):
+                        if isinstance(n, _ast.Constant) and isinstance(n.value, str) \
+                                and han.search(n.value):
+                            bad.append((nm, n.lineno, n.value[:60]))
+    assert bad == [], "报告面 reason 含中文：%r" % bad[:5]
 
 
 # ========================================================================================

@@ -56,7 +56,8 @@ with workflow.unsafe.imports_passed_through():
     from shared import MergeArgs, WorkspacePrep
 
 CLOSE_GATE_ID = "inspection-close"
-INSPECTION_RED_LINE = "巡检只出报告与开票建议，绝不直接改码；修复一律走 dev-lane 工单。"
+INSPECTION_RED_LINE = ("Inspection only produces reports and ticket-opening suggestions; it never "
+                       "changes code. Every fix goes through a dev-lane ticket.")
 # Agents may not sign for themselves (reusing Signature semantics): the human gate's who
 # must not be one of the M10 five agent role names.
 AGENT_ROLE_NAMES = frozenset({"developer", "integration", "ops", "product-operation", "artist"})
@@ -321,9 +322,9 @@ def inspection_lane_name(instance_id: str, period: str) -> str:
     自锚定（cwd.parent.name == ".lane"），再深一层就落回 REPO_ROOT 回落分支；
     扁平同时保证与开发泳道 `.lane/t<date>-<alias>` 前缀零交集（命名空间隔离的机械面）。"""
     if not INSTANCE_ID_RE.match(str(instance_id or "")):
-        raise ValueError("实例 id 非法（泳道命名空间）：%r" % instance_id)
+        raise ValueError("invalid instance id (lane namespace): %r" % instance_id)
     if not PERIOD_RE.match(str(period or "")):
-        raise ValueError("期号非法（泳道命名空间）：%r" % period)
+        raise ValueError("invalid period (lane namespace): %r" % period)
     return "%s%s-%s" % (LANE_DIR_PREFIX, instance_id, period)
 
 
@@ -360,7 +361,7 @@ def sweep_plan(worktree_entries: Any, branch_names: Any, instance_id: str,
     畸形条目逐项降级进 skipped（不崩、不误删：判不准的一律不动）。"""
     inst = str(instance_id or "")
     if not INSTANCE_ID_RE.match(inst):
-        raise ValueError("实例 id 非法（sweep）：%r" % instance_id)
+        raise ValueError("invalid instance id (sweep): %r" % instance_id)
     dir_prefix = "%s%s-" % (LANE_DIR_PREFIX, inst)
     br_prefix = "%s%s/" % (LANE_BRANCH_NS, inst)
     keep = str(keep_period or "")
@@ -493,9 +494,9 @@ def validate_trigger_args(instance_id: str, period: str) -> Optional[str]:
     """Trigger arguments fail-closed (an extension of trade-off list item 6); returns an
     error message or None."""
     if not instance_id or not re.match(r"^[a-z0-9][a-z0-9-]{0,63}$", instance_id):
-        return "instance 非法：%r（小写 slug）" % instance_id
+        return "invalid instance: %r (lowercase slug)" % instance_id
     if not PERIOD_RE.match(period or ""):
-        return "period 非法：%r（须 YYYYMMDD 或 YYYYMMDD-<bucket>）" % period
+        return "invalid period: %r (expected YYYYMMDD or YYYYMMDD-<bucket>)" % period
     return None
 
 
@@ -564,9 +565,9 @@ def build_ticket_face(
                 continue
         suggestions.append({
             "template": "dev-lane",
-            "title": "修:%s %s" % (f.get("scan", ""), str(f.get("subject", ""))[:60]),
+            "title": "fix: %s %s" % (f.get("scan", ""), str(f.get("subject", ""))[:60]),
             "source_inspection": ticket_id,           # the fix ticket references the inspection ticket id (epic tickets 1/4)
-            "urgency": "立即开票" if f.get("severity") == "high" else "人审后定",
+            "urgency": "open now" if f.get("severity") == "high" else "after human review",
             "evidence": f.get("evidence", ""),
         })
     face_out = {
@@ -598,12 +599,12 @@ def build_ticket_face(
                          "ki_note", "scope_note")
             warned = ["%s=%s" % (k, scope[k]) for k in note_keys if scope.get(k)]
             face_out["zero_findings_note"] = (
-                "本期无新病灶（审查范围 %s 个文件；变化面差分=%s；%s）"
+                "No new defects this period (review scope: %s files; change-face diff=%s; %s)"
                 % (scope.get("scope_files", 0),
-                   "缺席/回落" if (scope.get("diff_error") or scope.get("scope_note"))
-                   else "已给定",
-                   "输入面点名：" + "、".join(warned) if warned
-                   else "四路输入无畸形点名"))
+                   "absent/fallback" if (scope.get("diff_error") or scope.get("scope_note"))
+                   else "given",
+                   "input face named: " + ", ".join(warned) if warned
+                   else "no malformed input face across the four sources"))
     if suite is not None:
         face_out["suite"] = suite      # 套件证据段（逐场景红绿/摘要/回执路径，验收 B）
     return face_out
@@ -639,6 +640,13 @@ def validate_close_signature(sig: Any, expected_gate: str = CLOSE_GATE_ID) -> Tu
 LEDGER_ARCHIVE_DIRNAME = "archive"
 
 
+#: 泳道拆除结果**机器 token**（260927 单源改造同纪律）：下游判「是否未净」认 token，
+#: 不认人话——文案可英文化/可改写，判据不受影响（旧版 startswith("未净") 把判据钉在
+#: 会被翻译的中文上，正是「改文案即静默改行为」的形态）。
+TEARDOWN_OK = "TEARDOWN_OK"
+TEARDOWN_RESIDUE = "TEARDOWN_RESIDUE"
+
+
 def _archive_ticket_token(old_ticket_id: str) -> str:
     """归档名里的被归档票号 token（t260917-02）：只留文件名安全字符，其余压 '-'——
     t 形号/旧形号/服务端后缀形（含冒号、T/Z）都能安全落名；空/不可判 → 'corrupt'
@@ -669,7 +677,7 @@ def _archive_if_other_run(path: Path, incoming_ticket_id: str,
     except FileNotFoundError:
         return out                                  # 首次落账：无旧件可归档
     except OSError as e:
-        out["archive_error"] = "旧件不可读（不归档，新写照常）：%s: %s" % (type(e).__name__, e)
+        out["archive_error"] = "old file unreadable (not archived, new write proceeds): %s: %s" % (type(e).__name__, e)
         return out
     old_ticket_id = ""
     old_corrupt = False
@@ -691,7 +699,7 @@ def _archive_if_other_run(path: Path, incoming_ticket_id: str,
     try:
         archive_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        out["archive_error"] = "归档目录不可建（不归档，新写照常）：%s: %s" % (type(e).__name__, e)
+        out["archive_error"] = "archive dir not creatable (not archived, new write proceeds): %s: %s" % (type(e).__name__, e)
         return out
     base = "%s-%s-%s" % (path.stem, token, stamp)
     for n in range(1, 100):                         # 无静默覆盖：存在即换号，绝不覆写
@@ -704,10 +712,11 @@ def _archive_if_other_run(path: Path, incoming_ticket_id: str,
         except FileExistsError:
             continue                                # 同秒同 token 残撞 → -2/-3…
         except OSError as e:
-            out["archive_error"] = "归档写入失败（不归档，新写照常）：%s: %s" % (type(e).__name__, e)
+            out["archive_error"] = "archive write failed (not archived, new write proceeds): %s: %s" % (type(e).__name__, e)
             return out
     else:
-        out["archive_error"] = ("归档重试耗尽（%s-*.%s 已有 99 件，不归档不覆写，新写照常）"
+        out["archive_error"] = ("archive retries exhausted (%s-*.%s already has 99 files; "
+                                "nothing archived, nothing overwritten, new write proceeds)"
                                 % (base, path.suffix.lstrip(".")))
         return out
     try:
@@ -715,7 +724,7 @@ def _archive_if_other_run(path: Path, incoming_ticket_id: str,
     except OSError as e:
         # 归档已落定但原件移除失败：canonical 新写将覆盖同名原件——留史不丢（archive 已有），
         # 事由仍要点名（「归档了但 canonical 写入前的原件删除失败」是异常形态）。
-        out["archive_error"] = "归档后原件移除失败：%s: %s" % (type(e).__name__, e)
+        out["archive_error"] = "original not removed after archiving: %s: %s" % (type(e).__name__, e)
     out["archived"] = True
     out["archive_path"] = str(candidate)
     return out
@@ -1010,7 +1019,8 @@ class InspectionPeriodicWorkflow:
         t260912-03：本巡检模板无授权面——带 authorize 的载荷在 validate 之前显式拒收
         （validate_close_signature 不感知 authorize，若放行会被当作普通人门签字）。"""
         if getattr(sig, "authorize", None) is not None:
-            self._gate_err = "本巡检模板无人授权面，authorize 载荷拒收（不落签字）"
+            self._gate_err = ("this inspection template has no authorization face; authorize payload "
+                          "rejected (no signature recorded)")
             workflow.logger.warning("拒收 authorize 载荷：本巡检模板无人授权面")
             return
         # t260915-12 跨项目闸（第二道，统一接闸不留分叉）；t260915-20 升级：target=
@@ -1050,7 +1060,8 @@ class InspectionPeriodicWorkflow:
         写齐（跨期压制消费），收口后的裁定走 CLI 直写台账。拒收（载荷坏/门不匹配/
         agent 名）只记 _gate_err 不炸不误收——sign 闸同语义。"""
         if not getattr(self, "_patched", False):
-            self._gate_err = "finding_verdict 为 t260916-22 新命令：老票重放不注入（拒收）"
+            self._gate_err = ("finding_verdict is a t260916-22 command: not injected on replay of an "
+                          "old ticket (rejected)")
             return
         payload, err = validate_finding_verdict_payload(sig)
         if err:
@@ -1061,13 +1072,13 @@ class InspectionPeriodicWorkflow:
         err = apply_verdict_to_face(self.face, payload["finding_id"], payload["verdict"],
                                     payload["who"], payload["note"])
         if err:
-            self._gate_err = "裁定未落：%s" % err
+            self._gate_err = "verdict not recorded: %s" % err
             workflow.logger.warning("裁定未落：%s", err)
             return
         self._enter("close", self.stage_state or "running",
-                    "发现裁定：%s → %s（who=%s%s）"
+                    "Finding verdict: %s -> %s (who=%s%s)"
                     % (payload["finding_id"], payload["verdict"], payload["who"],
-                       "，note=%s" % payload["note"] if payload["note"] else ""))
+                       ", note=%s" % payload["note"] if payload["note"] else ""))
 
     @workflow.query
     def snapshot(self) -> Dict[str, Any]:
@@ -1141,7 +1152,7 @@ class InspectionPeriodicWorkflow:
         if not (plan_raw or {}).get("ok"):
             return await self._blocked(
                 ticket_id, inp, period, "setup",
-                "声明决议失败：%s" % ((plan_raw or {}).get("error") or "未知"), None)
+                "Declaration resolution failed: %s" % ((plan_raw or {}).get("error") or "unknown"), None)
         # ---- 重定向守卫（t260917-02，REDIRECT_PATCH_ID 新命令；replay 安全不变量：
         # 本分支内的新 activity 调用对老 history 永不可达——patched()=False 时零新命令）。
         # 非 t 形 fire（旧调度 action 直发）在此改道起票单点铸 t 形票承接，本壳即返：
@@ -1171,7 +1182,8 @@ class InspectionPeriodicWorkflow:
             if blocked is not None:
                 return blocked
             self._enter("suite", "running",
-                        "巡检自有泳道跑集成全集（lane 基点 %s）" % (lane or {}).get("base_ref", ""))
+                        "Running the full integration suite in the inspection lane (lane base %s)"
+                      % (lane or {}).get("base_ref", ""))
             suite_section, suite_findings, teardown_note = await self._run_suite(
                 ticket_id, inp, period, lane or {})
             extra_findings += suite_findings
@@ -1180,13 +1192,14 @@ class InspectionPeriodicWorkflow:
                 # 不与**未被回收的子进程链**抢目录（它们此刻还能写盘，抢了就会产出
                 # 「admin.log ENOENT」那种把真因引偏的迟到回执，t260927-01 实况）。
                 self._enter("suite", "running",
-                            "套件段硬超时：%s" % (suite_section.get("error") or "")[:160])
+                            "Suite stage hard timeout: %s" % (suite_section.get("error") or "")[:160])
                 await workflow.sleep(SUITE_TIMEOUT_TEARDOWN_GRACE)
                 self._enter("suite", "running",
-                            "套件段硬超时：等待 %ds 后拆泳道（不与未回收的子进程抢目录）"
+                            "Suite stage hard timeout: waiting %ds before tearing the lane down (never races a "
+                            "child chain that was not reaped)"
                             % int(SUITE_TIMEOUT_TEARDOWN_GRACE.total_seconds()))
-            self._enter("suite", "running", "泳道拆除：%s" % teardown_note)
-            if teardown_note.startswith("未净"):
+            self._enter("suite", "running", "Lane teardown: %s" % teardown_note)
+            if teardown_note.startswith(TEARDOWN_RESIDUE):
                 from inspection_deadman import make_finding
                 extra_findings.append(make_finding(
                     "suite", "med", "Lane teardown left residue",
@@ -1198,9 +1211,9 @@ class InspectionPeriodicWorkflow:
         # （无套件档的期不进 suite 段——suite_only 语义由源码锁钉死；档位状态并入
         # inspect 段文案可见，不静默）
         self._enter("inspect", "running",
-                    "只读 agent 审查（分面 %s，预算 %d 条 / %d 分钟%s）"
+                    "Read-only agent review (face %s, budget %d findings / %d minutes%s)"
                     % (inspect_profile, max_findings, timeout_min,
-                       "" if run_suite else "；本期无套件档（声明未开），无套件回执可读"))
+                       "" if run_suite else "; no suite tier this period (not enabled in the declaration), no suite receipt to read"))
         base_dir = repo_root or "."
         # 套件回执/agent_home/台账目录路径由活动侧按 INSPECTION_DIR 派生（worker 进程
         # 无沙箱面；workflow 体零路径计算零模块级属性读——头注纪律）。
@@ -1220,11 +1233,11 @@ class InspectionPeriodicWorkflow:
         if not (inspect_raw or {}).get("ok"):
             return await self._blocked(
                 ticket_id, inp, period, "inspect",
-                str((inspect_raw or {}).get("error") or "inspect 段失败"), lane)
+                str((inspect_raw or {}).get("error") or "inspect stage failed"), lane)
         ins_result = (inspect_raw or {}).get("result") or {}
         # ---- report 段：机械复核（证据复核/去重压制/预算/汇总——纯函数链在活动内） ----
         self._enter("report", "running",
-                    "证据机械复核（agent 发现 %d 条）" % len(ins_result.get("findings") or []))
+                    "Mechanical evidence recheck (%d agent findings)" % len(ins_result.get("findings") or []))
         verify_raw: Any = await workflow.execute_activity(
             "verify_inspection_findings",
             args=[{"instance_id": inp.instance_id, "period": period,
@@ -1234,7 +1247,7 @@ class InspectionPeriodicWorkflow:
         if not (verify_raw or {}).get("ok"):
             return await self._blocked(
                 ticket_id, inp, period, "report",
-                str((verify_raw or {}).get("error") or "复核失败"), lane)
+                str((verify_raw or {}).get("error") or "recheck failed"), lane)
         result = (verify_raw or {}).get("result") or {}
         vmeta = dict(result.get("meta") or {})
         ins_meta = dict(ins_result.get("meta") or {})
@@ -1249,7 +1262,7 @@ class InspectionPeriodicWorkflow:
                 "measurement before discussing a budget raise; do not raise it by default"
                 % (used_sec, inspect_budget_sec))
         self._enter("report", "running",
-                    "复核完成（unverified %d / 去重 %d / 假报压制 %d / 截断 %s）"
+                    "Recheck done (unverified %d / deduped %d / suppressed %d / truncated %s)"
                     % (vmeta.get("unverified", 0), vmeta.get("deduped", 0),
                        vmeta.get("suppressed", 0), vmeta.get("truncated", 0)))
         self.face = build_ticket_face(ticket_id, inp.instance_id, period, result,
@@ -1271,7 +1284,7 @@ class InspectionPeriodicWorkflow:
         if written.get("ok"):
             self.face["report_path"] = written["result"].get("path", "")
         # Human gate: closing is unreachable before approval (awaiting-human really blocks)
-        self._enter("close", "awaiting-human", "人审发现清单：sign(gate=%s) approve=收口 / reject=毙单收口" % CLOSE_GATE_ID)
+        self._enter("close", "awaiting-human", "Human review of the finding list: sign(gate=%s) approve=close / reject=kill the ticket" % CLOSE_GATE_ID)
         # 人门一落就再落一次账：列表可读面（离线读者）要能看见「本期已跑完、正等人审」，
         # 否则它只在 report 段那一版（stage 序列停在 report，读者以为流程没走到门）。
         if self._patched:      # 新命令：老在途票不注入（replay 安全）
@@ -1280,7 +1293,7 @@ class InspectionPeriodicWorkflow:
         self.decision = self._close_sig["decision"]  # type: ignore[index]
         self.status = "closed"
         self.face["human_gate"] = dict(self._close_sig or {})
-        self._enter("close", "running", "收口：人门决策=%s（who=%s）" % (self.decision, (self._close_sig or {}).get("who", "")))
+        self._enter("close", "running", "Closing: human-gate decision=%s (who=%s)" % (self.decision, (self._close_sig or {}).get("who", "")))
         # 票面裁定落 verdicts 台账（t260916-22 要点⑥：签内 signal 只改内存票面（回放
         # 安全零活动），跨期压制消费的台账在收口时一次写齐；已收口后的裁定走 CLI 直写）。
         entries = [{"finding_id": str(f.get("id") or ""), "verdict": str(f.get("verdict")),
@@ -1299,7 +1312,7 @@ class InspectionPeriodicWorkflow:
             start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
         if final.get("ok"):
             self.face["report_path"] = final["result"].get("path", "")
-        self._enter("close", "done", "巡检票收口（决策=%s，发现 high=%s/med=%s/low=%s）" % (
+        self._enter("close", "done", "Inspection ticket closed (decision=%s, findings high=%s/med=%s/low=%s)" % (
             self.decision, self.face.get("summary", {}).get("high", 0),
             self.face.get("summary", {}).get("med", 0), self.face.get("summary", {}).get("low", 0)))
         return self.snapshot()
@@ -1330,10 +1343,10 @@ class InspectionPeriodicWorkflow:
                 self.face["report_path"] = (written.get("result") or {}).get("path", "")
             else:
                 self._enter(self.stage or "report", self.stage_state or "running",
-                            "落账失败：%s" % ((written or {}).get("error") or "未知"))
+                            "Ledger write failed: %s" % ((written or {}).get("error") or "unknown"))
         except Exception as e:  # noqa: BLE001
             self._enter(self.stage or "report", self.stage_state or "running",
-                        "落账故障：%s: %s" % (type(e).__name__, e))
+                        "Ledger write error: %s: %s" % (type(e).__name__, e))
 
     async def _setup_lane(
         self, ticket_id: str, inp: "InspectionPeriodicInput", period: str, repo_root: str,
@@ -1344,7 +1357,7 @@ class InspectionPeriodicWorkflow:
         且不校验基点——不清残留就搭，上一期崩下来的同路径目录会让本期静默建在旧基点，
         直接顶撞验收 A。返回值 (lane, blocked_snapshot)；blocked 非空=终态已收口。"""
         self._enter("setup", "running",
-                    "巡检自有泳道：搭本期工作副本（实例 %s 期 %s）" % (inp.instance_id, period))
+                    "Inspection lane: preparing this period's working copy (instance %s period %s)" % (inp.instance_id, period))
         try:
             worktree, branch = inspection_lane_paths(inp.instance_id, period, repo_root)
         except ValueError as e:      # 输入形状问题：闭式 blocked，不进活动
@@ -1356,12 +1369,12 @@ class InspectionPeriodicWorkflow:
             start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
         sweep_res = (swept or {}).get("result") or {}
         self._enter("setup", "running",
-                    "残留清扫：worktree %d / 分支 %d（keep=%s，让行 %d%s）"
+                    "Residue sweep: worktrees %d / branches %d (keep=%s, deferred %d%s)"
                     % (len(sweep_res.get("removed_worktrees") or []),
                        len(sweep_res.get("removed_branches") or []), period,
                        len(sweep_res.get("deferred") or []),
                        "" if (swept or {}).get("ok") else
-                       "；清扫失败：%s" % ((swept or {}).get("error") or "")))
+                       "; sweep failed: %s" % ((swept or {}).get("error") or "")))
         head: Any = await workflow.execute_activity(
             "resolve_main_head", args=[{"repo_root": repo_root}],
             start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
@@ -1369,7 +1382,7 @@ class InspectionPeriodicWorkflow:
         if not (head or {}).get("ok") or not head_res.get("sha"):
             return None, await self._blocked(
                 ticket_id, inp, period, "setup",
-                "基点解析失败（main HEAD）：%s" % ((head or {}).get("error") or "未知"), None)
+                "Base resolution failed (main HEAD): %s" % ((head or {}).get("error") or "unknown"), None)
         lane = {"worktree": worktree, "branch": branch, "base_ref": str(head_res["sha"]),
                 "base_ref_name": str(head_res.get("ref") or "main"),
                 # 拆除回落清扫用的锚（repo 锚定，跨项目不锚错仓）
@@ -1387,17 +1400,18 @@ class InspectionPeriodicWorkflow:
             # 半建（分支可能已生）也要清：尝试拆除但不当残留报警（这次本来就没搭成）
             return None, await self._blocked(
                 ticket_id, inp, period, "setup",
-                "泳道搭不起来（action=%s）：%s" % (prep.get("action"), prep.get("error")),
+                "Lane could not be prepared (action=%s): %s" % (prep.get("action"), prep.get("error")),
                 dict(lane, _suppress_residue="1"))
         lane["action"] = str(prep.get("action") or "")
         self._enter("setup", "running",
-                    "泳道就绪：%s（%s，基点 %s）"
+                    "Lane ready: %s (%s, base %s)"
                     % (prep.get("path") or worktree, lane["action"], lane["base_ref"]))
         if "reused" in lane["action"]:
             # C2 验证面：残留未清干净时这里会显形（票面可读），不静默
             self._enter("setup", "running",
-                        "注意：本期泳道走 reused（目录已是本仓 worktree）——sweep 未覆盖的残留，"
-                        "基点以 git 实况为准")
+                        "Note: this period's lane is reused (the directory is already a worktree of this "
+                        "repo) — residue the sweep did not cover; the base is whatever git "
+                        "actually reports")
         return lane, None
 
     async def _run_suite(
@@ -1430,7 +1444,7 @@ class InspectionPeriodicWorkflow:
             if (raw or {}).get("ok"):
                 receipt = dict((raw or {}).get("result") or {})
             else:
-                receipt = {"error": str((raw or {}).get("error") or "套件活动失败"),
+                receipt = {"error": str((raw or {}).get("error") or "suite activity failed"),
                            "details": [], "ran": 0, "passed": 0, "failed": 0, "env_fail": 0}
         except Exception as e:  # noqa: BLE001——活动故障=可见数据（high 发现），不是期票崩塌
             receipt = suite_failure_receipt(e, SUITE_TO.total_seconds())
@@ -1447,7 +1461,7 @@ class InspectionPeriodicWorkflow:
         所以回执不干净时回落到 repo 锚定的定向 sweep（remove_period=本期，只清本期，
         不碰并发期/开发泳道）——残留收敛仍然有界且可读，不是静默放过。"""
         if not lane or not lane.get("worktree") or not lane.get("branch"):
-            return "无泳道（无需拆除）"
+            return "%s: no lane (nothing to tear down)" % TEARDOWN_OK
         residue = ""
         try:
             td: Any = await workflow.execute_activity(
@@ -1457,10 +1471,10 @@ class InspectionPeriodicWorkflow:
             ok = bool(getattr(td, "ok", False)) if not isinstance(td, dict) else bool(td.get("ok"))
             err = getattr(td, "error", "") if not isinstance(td, dict) else str(td.get("error") or "")
             if ok and not err:
-                return "已清（teardown_lane：worktree+branch 零残留）"
-            residue = err or "teardown 回执 ok 但带告警"
+                return "%s: cleaned (teardown_lane: worktree+branch, zero residue)" % TEARDOWN_OK
+            residue = err or "teardown receipt ok but with a warning"
         except Exception as e:  # noqa: BLE001——拆除故障=残留（有界收敛：定向 sweep/次日/CLI）
-            residue = "teardown 活动故障 %s: %s" % (type(e).__name__, e)
+            residue = "teardown activity error %s: %s" % (type(e).__name__, e)
         # 回落：repo 锚定的定向清扫（只清本期）
         fallback = ""
         try:
@@ -1474,18 +1488,19 @@ class InspectionPeriodicWorkflow:
             if ((sw or {}).get("ok") and (res.get("removed_worktrees")
                                           or res.get("removed_branches")
                                           or res.get("removed_dir_stubs"))):
-                return "已清（teardown_lane 未净后回落 repo 锚定定向 sweep：%s；原报 %s）" % (
+                return ("%s: cleaned (fell back to the repo-anchored targeted sweep after "
+                    "teardown_lane residue: %s; original report %s)") % (TEARDOWN_OK, 
                     "worktree %d / 分支 %d / 目录壳 %d" % (
                         len(res.get("removed_worktrees") or []),
                         len(res.get("removed_branches") or []),
                         len(res.get("removed_dir_stubs") or [])),
                     residue[:160])
-            fallback = str((sw or {}).get("error") or "定向 sweep 无可清条目")
+            fallback = str((sw or {}).get("error") or "targeted sweep found nothing to clean")
         except Exception as e:  # noqa: BLE001
-            fallback = "定向 sweep 故障 %s: %s" % (type(e).__name__, e)
+            fallback = "targeted sweep error %s: %s" % (type(e).__name__, e)
         if not report_residue:
-            return "拆除尝试（本期未搭成，告警面不启用）：%s" % residue
-        return "未净：%s；回落清扫亦未净：%s" % (residue, fallback)
+            return "%s: teardown attempted (lane never came up; residue warning disabled): %s" % (TEARDOWN_OK, residue)
+        return "%s: %s; fallback sweep also left residue: %s" % (TEARDOWN_RESIDUE, residue, fallback)
 
     async def _deadman_findings(self, inp: "InspectionPeriodicInput",
                                 plan: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -1546,17 +1561,19 @@ class InspectionPeriodicWorkflow:
             deduped = bool(result.get("deduped"))
             source = str(result.get("dedup_source") or "-")
             self._enter("setup", "redirected",
-                        "旧形 fire 重定向完成：本期由 t 形票 %s 承接（%s；dedup_source=%s）"
+                        "Legacy-fire redirect done: this period is carried by t-shaped ticket %s (%s; "
+                        "dedup_source=%s)"
                         % (target or "?",
-                           "deduped 复用既有票" if deduped else "新起票", source))
+                           "deduped: reusing the existing ticket" if deduped else "newly opened", source))
             self.face["redirect"] = {"from": ticket_id, "to": target, "deduped": deduped,
                                      "dedup_source": source, "period": period,
                                      "instance": inp.instance_id, "reason": redirect_reason}
             return self.snapshot()
         return await self._blocked(
             ticket_id, inp, period, "setup",
-            "重定向失败：%s ｜ spawn 回执：%s ｜ 本壳不落账——该期 deadman 漏跑是唯一绊线"
-            % (redirect_reason, str((spawn_res or {}).get("error") or "未知")),
+            "Redirect failed: %s | spawn receipt: %s | this shell writes no ledger — the "
+            "period's dead-man miss is the only tripwire"
+            % (redirect_reason, str((spawn_res or {}).get("error") or "unknown")),
             None, write_ledger=False)
 
     async def _blocked(self, ticket_id: str, inp: "InspectionPeriodicInput", period: str,
@@ -1575,7 +1592,7 @@ class InspectionPeriodicWorkflow:
             note = await self._teardown(ticket_id, lane, report_residue=not suppress)
             self.face["lane"] = {k: v for k, v in lane.items() if not k.startswith("_")}
             self.face["lane_teardown"] = note
-            self._enter(stage, "blocked", "泳道拆除：%s" % note)
+            self._enter(stage, "blocked", "Lane teardown: %s" % note)
         # blocked 也落账（dead-man 面：不落账的 blocked 在列表面不可见），并带阶段机证据；
         # 老在途票不注入该新命令（replay 安全；它们的 blocked 面仍走票① 的纯快照语义）。
         # write_ledger=False（t260917-02 重定向失败路径）：本壳名下不落账——它的台账名
@@ -1679,8 +1696,8 @@ class InspectionTicketCountWatcherWorkflow:
         anchor: datetime = (datetime.fromisoformat(inp.cron_anchor)
                             if inp.cron_anchor else workflow.now())
         self._next_fire = next_cron_fire(inp.cron, anchor) if inp.cron else None
-        self._enter("poll", "running", "计数 watcher 运行（实例 %s，n=%d，源=archive-dir:%s，"
-                    "cron=%s）" % (inp.instance_id, inp.n, inp.project_key, inp.cron or "无"))
+        self._enter("poll", "running", "Counting watcher running (instance %s, n=%d, source=archive-dir:%s, "
+                    "cron=%s)" % (inp.instance_id, inp.n, inp.project_key, inp.cron or "none"))
         while True:
             res: Dict[str, Any] = await workflow.execute_activity(
                 "count_archived_tickets",
@@ -1700,7 +1717,7 @@ class InspectionTicketCountWatcherWorkflow:
             else:
                 # 计数失败：如实进快照，绝不拿旧计数或 0 假判（「数不了」≠「0 张」）
                 self.last_error = str(res.get("error") or "count failed")
-                self._enter("poll", "running", "计数失败（本轮不判触发）：%s" % self.last_error)
+                self._enter("poll", "running", "count failed (no trigger decision this round): %s" % self.last_error)
             if res.get("ok") and self._baseline >= 0:
                 d = decide(self.last_count, self._baseline, inp.n, cron_due, now)
                 if d["trigger"]:
@@ -1722,7 +1739,7 @@ class InspectionTicketCountWatcherWorkflow:
                     anchor = now                          # R2：任一侧触发都推进 cron 相位
                     self._next_fire = next_cron_fire(inp.cron, anchor) if inp.cron else None
                     self._enter("trigger", "running",
-                                "%s 触发 → 期 %s（deduped=%s，基线=%d）"
+                                "%s trigger -> period %s (deduped=%s, baseline=%d)"
                                 % (d["trigger"], d["period"], deduped, self._baseline))
             self.iterations += 1
             if self.iterations >= WATCHER_MAX_ITERATIONS:
@@ -1852,7 +1869,7 @@ async def _run_legacy_period_flow(wf: "InspectionPeriodicWorkflow",
     if wf._patched and not (plan_raw or {}).get("ok"):
         return await wf._blocked(
             ticket_id, inp, period, "setup",
-            "声明决议失败：%s" % ((plan_raw or {}).get("error") or "未知"), None)
+            "Declaration resolution failed: %s" % ((plan_raw or {}).get("error") or "unknown"), None)
     run_suite = bool(plan.get("run_suite"))
     lane: Optional[Dict[str, str]] = None
     suite_section: Optional[Dict[str, Any]] = None
@@ -1862,7 +1879,7 @@ async def _run_legacy_period_flow(wf: "InspectionPeriodicWorkflow",
         if blocked is not None:
             return blocked
     # C4（t260910-09 review）：时间线文案带 face 值——新面票不再误写「测试面」；face 字段透传进 activity 分派
-    wf._enter("scan", "running", "%s 面扫描（实例 %s 期 %s）" % (inp.face, inp.instance_id, period))
+    wf._enter("scan", "running", "%s-face scan (instance %s period %s)" % (inp.face, inp.instance_id, period))
     scan_result: Dict[str, Any] = await workflow.execute_activity(
         "run_inspection_scan",
         args=[{"repo_root": inp.repo_root, "scenarios_path": inp.scenarios_path,
@@ -1871,18 +1888,19 @@ async def _run_legacy_period_flow(wf: "InspectionPeriodicWorkflow",
     if not scan_result.get("ok"):
         return await wf._blocked(
             ticket_id, inp, period, "scan",
-            str(scan_result.get("error") or "扫描失败"), lane)
+            str(scan_result.get("error") or "scan failed"), lane)
     if run_suite:
         # 漏跑核查（dead-man 面①：进本期票面；面②=inspection_trigger.py deadman）
         extra_findings += await wf._deadman_findings(inp, plan)
     if run_suite:
         wf._enter("suite", "running",
-                  "巡检自有泳道跑集成全集（lane 基点 %s）" % (lane or {}).get("base_ref", ""))
+                  "Running the full integration suite in the inspection lane (lane base %s)"
+                      % (lane or {}).get("base_ref", ""))
         suite_section, suite_findings, teardown_note = await wf._run_suite(
             ticket_id, inp, period, lane or {})
         extra_findings += suite_findings
-        wf._enter("suite", "running", "泳道拆除：%s" % teardown_note)
-        if teardown_note.startswith("未净"):
+        wf._enter("suite", "running", "Lane teardown: %s" % teardown_note)
+        if teardown_note.startswith(TEARDOWN_RESIDUE):
             # 残留=可恢复垃圾（既有 teardown 语义：不拦收口），但要可见（验收 D 的
             # 「不得静默」）；不进开票建议——它不是代码缺陷，清场入口=sweep/CLI。
             from inspection_deadman import make_finding
@@ -1893,8 +1911,8 @@ async def _run_legacy_period_flow(wf: "InspectionPeriodicWorkflow",
     # 时间线文案：无追加发现时与票①逐字一致（零回归面）；有追加才展开两段计数
     scan_n = len(scan_result["result"].get("findings") or [])
     wf._enter("report", "running",
-              ("发现清单落票面（扫描 %d + 追加 %d 条）" % (scan_n, len(extra_findings)))
-              if extra_findings else ("发现清单落票面（%d 条）" % scan_n))
+              ("Finding list posted to the ticket face (scan %d + extra %d)" % (scan_n, len(extra_findings)))
+              if extra_findings else ("Finding list posted to the ticket face (%d items)" % scan_n))
     wf.face = build_ticket_face(ticket_id, inp.instance_id, period, scan_result["result"],
                                 extra_findings=extra_findings, suite=suite_section)
     if lane:
@@ -2029,7 +2047,7 @@ class InspectionProduceWorkflow:
             return
         self._authorized = sorted(set(self._authorized) | set(payload["paths"]))
         self._enter("close", self.stage_state or "running",
-                    "保护面授权（who=%s）：%s——produce 复跑中"
+                    "Protected-face authorization (who=%s): %s — produce rerun in progress"
                     % (payload["who"], "、".join(payload["paths"])))
         # 标记复跑请求；run 侧 wait_condition 循环消费
         self._rerun_paths = list(payload["paths"])
@@ -2064,19 +2082,19 @@ class InspectionProduceWorkflow:
         if not (plan_raw or {}).get("ok"):
             return await self._blocked(
                 ticket_id, inp, "setup",
-                "声明决议失败：%s" % ((plan_raw or {}).get("error") or "未知"), None)
+                "Declaration resolution failed: %s" % ((plan_raw or {}).get("error") or "unknown"), None)
         plan: Dict[str, Any] = (plan_raw or {}).get("result") or {}
         if str(plan.get("mode") or "report") != "produce":
             return await self._blocked(
                 ticket_id, inp, "setup",
-                "实例 mode=%r 非 produce（报告链实例请走 InspectionPeriodicWorkflow）"
+                "instance mode=%r is not produce (report-chain instances use InspectionPeriodicWorkflow)"
                 % str(plan.get("mode") or "report"), None)
         docs_root = str(plan.get("docs_root") or "docs")
         period = inp.period or period_key_in_tz(workflow.now(), str(plan.get("tz") or ""))
         validate_period_key(inp.instance_id, period)
         # ---- setup：清残留 → 基点 → prepare_workspace（与报告链 _setup_lane 同源
         #      活动序；独立实现防两链 replay 面互相牵连） ----
-        self._enter("setup", "running", "产出型巡检自有泳道（docs_root=%s）" % docs_root)
+        self._enter("setup", "running", "produce-mode inspection lane (docs_root=%s)" % docs_root)
         try:
             worktree, branch = inspection_lane_paths(inp.instance_id, period, repo_root)
         except ValueError as e:
@@ -2093,7 +2111,7 @@ class InspectionProduceWorkflow:
         if not (head or {}).get("ok") or not head_res.get("sha"):
             return await self._blocked(
                 ticket_id, inp, "setup",
-                "基点解析失败（main HEAD）：%s" % ((head or {}).get("error") or "未知"), None)
+                "Base resolution failed (main HEAD): %s" % ((head or {}).get("error") or "unknown"), None)
         lane = {"worktree": worktree, "branch": branch,
                 "base_ref": str(head_res["sha"]), "docs_root": docs_root,
                 "instance_id": inp.instance_id, "repo_root": repo_root,
@@ -2110,9 +2128,9 @@ class InspectionProduceWorkflow:
         if not prep.get("ok"):
             return await self._blocked(
                 ticket_id, inp, "setup",
-                "泳道搭不起来（action=%s）：%s" % (prep.get("action"), prep.get("error")),
+                "Lane could not be prepared (action=%s): %s" % (prep.get("action"), prep.get("error")),
                 lane)
-        self._enter("setup", "running", "泳道就绪：%s（基点 %s）"
+        self._enter("setup", "running", "Lane ready: %s (base %s)"
                     % (worktree, lane["base_ref"]))
         # ---- produce → 自检（首趟；授权复跑的门循环在 _finalize_and_close） ----
         result: Dict[str, Any] = {}
@@ -2130,16 +2148,17 @@ class InspectionProduceWorkflow:
         if not (produce_raw or {}).get("ok"):
             return await self._blocked(
                 ticket_id, inp, "produce",
-                str((produce_raw or {}).get("error") or "produce 段失败"), lane)
+                str((produce_raw or {}).get("error") or "produce stage failed"), lane)
         result = (produce_raw or {}).get("result") or {}
         sc = dict(result.get("selfcheck") or {})
         sc["authorized_paths"] = list(self._authorized)
         # ---- report：面 + 台账（diff/自检/零 change 全量进报告——A5 显式，不留空壳） ----
         self._enter("report", "running",
-                    "自检完成（diff %d 文件；越界 %d / 保护面 %d / 零change=%s / 文档自检红 %d）"
+                    "Self-check done (diff %d files; out-of-scope %d / protected %d / zero-change=%s / "
+                  "doc-check red %d)"
                     % (len(sc.get("all_paths") or []), len(sc.get("out_of_root") or []),
                        len(sc.get("protected_overlap") or []),
-                       "无" if not sc.get("zero_change_error") else "红",
+                       "none" if not sc.get("zero_change_error") else "red",
                        len(sc.get("doc_findings") or [])))
         self.face = {
             "ticket_id": ticket_id, "instance_id": inp.instance_id,
@@ -2175,10 +2194,10 @@ class InspectionProduceWorkflow:
                 self.face["report_path"] = (written.get("result") or {}).get("path", "")
             else:
                 self._enter(self.stage or "report", self.stage_state or "running",
-                            "落账失败：%s" % ((written or {}).get("error") or "未知"))
+                            "Ledger write failed: %s" % ((written or {}).get("error") or "unknown"))
         except Exception as e:  # noqa: BLE001
             self._enter(self.stage or "report", self.stage_state or "running",
-                        "落账故障：%s: %s" % (type(e).__name__, e))
+                        "Ledger write error: %s: %s" % (type(e).__name__, e))
 
     async def _finalize_and_close(
         self, ticket_id: str, inp: InspectionProduceInput, period: str,
@@ -2205,7 +2224,7 @@ class InspectionProduceWorkflow:
             rerun_paths = list(self._rerun_paths)
             self._rerun_paths = []
             self._enter("produce", "running",
-                        "保护面授权复跑（focus=%s）" % "、".join(rerun_paths))
+                        "Protected-face authorized rerun (focus=%s)" % ", ".join(rerun_paths))
             produce_raw: Any = await workflow.execute_activity(
                 "run_inspection_produce",
                 args=[{"instance_id": inp.instance_id, "period": period,
@@ -2222,7 +2241,7 @@ class InspectionProduceWorkflow:
             if not (produce_raw or {}).get("ok"):
                 return await self._blocked(
                     ticket_id, inp, "produce",
-                    "授权复跑失败：%s" % ((produce_raw or {}).get("error") or "未知"),
+                    "Authorized rerun failed: %s" % ((produce_raw or {}).get("error") or "unknown"),
                     lane)
             result = (produce_raw or {}).get("result") or {}
             sc = dict(result.get("selfcheck") or {})
@@ -2233,14 +2252,15 @@ class InspectionProduceWorkflow:
             self.face["selfcheck"] = sc
             self.face["meta"] = dict(result.get("meta") or {})
             self._enter("report", "running",
-                        "授权复跑完成（diff %d 文件；保护面 %d / 越界 %d）——回到人审门"
+                        "Authorized rerun done (diff %d files; protected %d / out-of-scope %d) — back to "
+                  "the human gate"
                         % (len(sc.get("all_paths") or []),
                            len(sc.get("protected_overlap") or []),
                            len(sc.get("out_of_root") or [])))
         self.decision = self._close_sig["decision"]  # type: ignore[index]
         self.face["human_gate"] = dict(self._close_sig or {})
         self._enter("close", "running",
-                    "人门决策=%s（who=%s）" % (self.decision, (self._close_sig or {}).get("who", "")))
+                    "Human-gate decision=%s (who=%s)" % (self.decision, (self._close_sig or {}).get("who", "")))
         merge_err = ""
         if self.decision == "approve":
             merged: Any = await workflow.execute_activity(
@@ -2266,11 +2286,11 @@ class InspectionProduceWorkflow:
                       branch=str((lane or {}).get("branch") or "")),
             start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
         if not (torn or {}).get("ok"):
-            self._enter("close", "done", "泳道拆除未净：%s"
-                        % ((torn or {}).get("error") or "未知"))
+            self._enter("close", "done", "Lane teardown left residue: %s"
+                        % ((torn or {}).get("error") or "unknown"))
         self._enter("close", "done",
-                    "产出型巡检收口（决策=%s%s）" % (
-                        self.decision, "；merge 红灯交人工" if merge_err else ""))
+                    "Produce-mode inspection closed (decision=%s%s)" % (
+                        self.decision, "; merge red handed to a human" if merge_err else ""))
         return self.snapshot()
 
     async def _blocked(self, ticket_id: str, inp: InspectionProduceInput, stage: str,

@@ -161,7 +161,7 @@ def test_face_legacy_findings_gate_byte_identical():
     scan = {"findings": [legacy_ok, legacy_nosuggest, legacy_low],
             "summary": {"high": 1, "med": 1, "low": 1}, "heartbeat": True}
     face = flow.build_ticket_face("t1", "inst", "20260916", scan)
-    assert [s["title"] for s in face["suggested_fix_tickets"]] == ["修:test 旧发现A"]
+    assert [s["title"] for s in face["suggested_fix_tickets"]] == ["fix: test 旧发现A"]
     assert face["heartbeat"] is True
 
 

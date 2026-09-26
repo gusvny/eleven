@@ -236,7 +236,8 @@ def test_inspection_sign_guard_refuses_authorize():
         fn(wf, _authz_sig(_auth()))
     finally:
         inspection_flow.workflow = old
-    assert wf._close_sig is None and "无人授权面" in wf._gate_err
+    # 260927 报告英文面：拒收事由改英文（语义不变：无授权面 → 拒收不落签字）
+    assert wf._close_sig is None and "no authorization face" in wf._gate_err
 
 
 # ---------- 源码锁（接线不漂移） ----------

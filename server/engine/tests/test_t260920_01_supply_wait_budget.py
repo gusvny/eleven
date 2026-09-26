@@ -5,7 +5,7 @@
 覆盖（工单验收①②③④ + review_plan 条件②③④）：
 - ① 供给失败用例（真实出口形态贯通）：tmp 泳道 verify.yaml supply → 真进程
   stage_docker daemon-probe（PATH 假 docker）→ verify_lane._integ 真实包装
-  err（「supply 装配失败（need=…，exit=2）…供给面红点名」）→ IntegrationRunResult
+  err（token 双标记形态：`SUPPLY_ASSEMBLY_FAILED … need=… → SUPPLY_SIDE_RED`）→ IntegrationRunResult
   → _tests_supply_assembly_fail → _tests_round_account：不计轮 + 留痕含
   「不计入」+ 点名供给面（review 条件④：贯通用例用真实输出形态，不用手工串）。
 - ② 等待超预算用例：daemon-probe（预算内未就绪 exit 2 + STAGE_WAIT 点名）、
@@ -138,8 +138,8 @@ def _devlane_wf():
 def test_a_e2e_exit2_receipt_exempt_and_named(tmp_path, monkeypatch):
     err = _run_e2e_supply_exit2(tmp_path, monkeypatch)
     # 真闸出口三要素（verify_lane 包装 + stage_docker 真负载）
-    assert "supply 装配失败（need=测试台供给（UT 假台）" in err
-    assert "exit=2" in err and "供给面红点名" in err
+    assert shared.SUPPLY_FAIL_SIG in err and shared.SUPPLY_SIDE_SIG in err   # token 双标记
+    assert "need=" in err and "exit=2" in err
     assert "docker daemon 等待超预算" in err and "已等" in err
     # 判据面：零跑回执（agent_activities err 翻译形态：仅 error 字段非零默认）
     ir = shared.IntegrationRunResult(error=err)
@@ -149,7 +149,7 @@ def test_a_e2e_exit2_receipt_exempt_and_named(tmp_path, monkeypatch):
     # 计路面：不计轮 + 豁免账 + 留痕（要求①：含「不计入」+ 点名供给面）
     tr, ex, counted, note = asyncio.run(wf._tests_round_account(3, 0, ir))
     assert (tr, ex, counted) == (3, 1, False)
-    assert "不计入" in note and "供给" in note and "supply 装配" in note
+    assert "不计入" in note and "供给" in note and shared.SUPPLY_FAIL_SIG in note
     # 原始证据随留痕上台面：留痕带 error 前缀截断窗（既有口径 [:120]），
     # 窗内是 STAGE_WAIT 点名头（真实负载），完整 ENV_FAIL 尾在 err 全文已断言
     assert "仍在等 docker daemon" in note
@@ -159,13 +159,14 @@ def test_a_e2e_exit2_receipt_exempt_and_named(tmp_path, monkeypatch):
 
 def test_a_timeout_state_signature_and_note():
     """超时态（预算兜底前的另一供给失败形态）同命中签名与留痕单写者。"""
-    err = ("supply 装配超时（need=测试台供给（UT 假台），>60s）——供给面红点名，不静默")
+    err = ("%s: supply assembly timed out (need=UT fake stage, >60s) — supply-side red, "
+           "named, not silent %s" % (shared.SUPPLY_TIMEOUT_SIG, shared.SUPPLY_SIDE_SIG))
     assert supply_sig(err)
     ir = shared.IntegrationRunResult(error=err)
     wf = _devlane_wf()
     tr, ex, counted, note = asyncio.run(wf._tests_round_account(0, 0, ir))
     assert (tr, ex, counted) == (0, 1, False)
-    assert "不计入" in note and "supply 装配超时" in note
+    assert "不计入" in note and shared.SUPPLY_TIMEOUT_SIG in note
 
 
 def test_a_signature_gate_exit_drift_lock():
@@ -175,20 +176,43 @@ def test_a_signature_gate_exit_drift_lock():
     260927 追加第三态：供给**段级预算**（SUPPLY_TIMEOUT_ENV）耗尽时的台词——它同样
     必须点名 need 且同样命中签名（新增断言；旧两态断言逐字保留不删）。"""
     src = (REPO / "server" / "tools" / "verify_lane.py").read_text("utf-8")
-    fail_fmt = ("'supply 装配失败（need=%s，exit=%d）：%s——供给面红点名，不静默'")
-    time_fmt = "'supply 装配超时（need=%s，>%ds）——供给面红点名，不静默'"
-    stage_fmt = "'供给段超时（段预算耗尽，need=%s，已耗 %.0fs，上限 %s=%ds）——'"
-    assert fail_fmt % ("x", 2, "boom") and fail_fmt in src
-    assert time_fmt % ("x", 60) and time_fmt in src
-    assert stage_fmt in src, "供给段级预算耗尽的台词缺席（段预算漏接=硬等或静默）"
-    for err in (fail_fmt % ("need-x", 2, "ENV_FAIL: boom——不硬等"),
-                time_fmt % ("need-x", 60),
-                # 段预算态：dev_lane 的供给签名吃「supply」词根——本态实测命中同一签名
-                # （段内/段外两态「不计入 tests-fault 轮次」同口径）
-                "supply 装配超时（need=need-x，>3600s）——供给面红点名，不静默"):
+    # 单源漂移锁（260927 单源改造）：闸出口**只认 token 拼装**（三态各一），人话文案
+    # 不许再出现在签名判据里——`SUPPLY_*_SIG` 缺席即红。
+    assert "SUPPLY_FAIL_SIG" in src and "SUPPLY_TIMEOUT_SIG" in src \
+        and "SUPPLY_STAGE_TIMEOUT_SIG" in src and "SUPPLY_SIDE_SIG" in src
+    # 单源：token 值只在 shared（闸侧 import 使用），故不锚字面值而锚「中文签名标记绝迹」
+    # ——闸出口再出现中文标记=人话又进了签名面（改文案即静默失联的旧病复发）。
+    # 只扫 **代码里的字符串常量**（去掉 docstring；文档/注释中文是仓规允许的，不入签名面）。
+    import ast as _ast
+    _tree = _ast.parse(src)
+    _docs = set()
+    for _n in _ast.walk(_tree):
+        if isinstance(_n, (_ast.Module, _ast.ClassDef, _ast.FunctionDef,
+                           _ast.AsyncFunctionDef)):
+            _d = _ast.get_docstring(_n, clean=False)
+            if _d is not None:
+                _docs.add(_d)
+    _lits = [x.value for x in _ast.walk(_tree)
+             if isinstance(x, _ast.Constant) and isinstance(x.value, str)
+             and x.value not in _docs]
+    for legacy in shared.LEGACY_SUPPLY_ASSEMBLY_MARKS:
+        assert not any(legacy in x for x in _lits), \
+            "闸出口字符串常量里仍有中文签名标记 %r（签名不许吃人话）" % legacy
+    # 出口真形态（真跑闸产出的形状）→ 必命中签名，且点名 need
+    for state_tok, err in (
+            (shared.SUPPLY_FAIL_SIG,
+             shared.SUPPLY_FAIL_SIG + ": supply assembly failed (need=need-x, exit=2): "
+             "ENV_FAIL: boom — supply-side red, named, not silent " + shared.SUPPLY_SIDE_SIG),
+            (shared.SUPPLY_TIMEOUT_SIG,
+             shared.SUPPLY_TIMEOUT_SIG + ": supply assembly timed out (need=need-x, >60s) — "
+             "supply-side red, named, not silent " + shared.SUPPLY_SIDE_SIG),
+            (shared.SUPPLY_STAGE_TIMEOUT_SIG,
+             shared.SUPPLY_STAGE_TIMEOUT_SIG + ": supply stage budget exhausted "
+             "(need=need-x, elapsed 3600s, cap SANDBAR_SUPPLY_TIMEOUT_SEC=3600s) — "
+             "supply-side red, named, not silent " + shared.SUPPLY_SIDE_SIG)):
         assert supply_sig(err), err
-        for m in shared.SUPPLY_ASSEMBLY_ERROR_MARKS:
-            assert m in err
+        assert "need=" in err
+        assert state_tok in err and shared.SUPPLY_SIDE_SIG in err   # 双标记各在场
 
 
 def test_a_supply_note_single_writer_and_malformed():
@@ -197,7 +221,8 @@ def test_a_supply_note_single_writer_and_malformed():
         n = supply_note(bad)
         assert "不计入" in n and "供给" in n
     assert supply_note("").endswith("：<空>）——不计入 tests-fault 轮次")
-    long_err = "supply 装配失败（need=x，exit=2）：" + "长" * 300 + "——供给面红点名，不静默"
+    long_err = (shared.SUPPLY_FAIL_SIG + ": supply assembly failed (need=x, exit=2): "
+                + "x" * 300 + " — supply-side red, named, not silent " + shared.SUPPLY_SIDE_SIG)
     assert len(supply_note(long_err)) < len(long_err)
     assert long_err[:120] in supply_note(long_err)
 
@@ -372,7 +397,8 @@ def test_d_budget_never_caps_own_boot_window(lockroot, monkeypatch):
 
 def _supply_ir(**kw):
     d = dict(ran=0, passed=0, failed=0, env_fail=0,
-             error="supply 装配失败（need=x，exit=2）：ENV_FAIL——供给面红点名，不静默")
+             error=(shared.SUPPLY_FAIL_SIG + ": supply assembly failed (need=x, exit=2): "
+                    "ENV_FAIL — supply-side red, named, not silent " + shared.SUPPLY_SIDE_SIG))
     d.update(kw)
     return shared.IntegrationRunResult(**d)
 
@@ -385,8 +411,9 @@ def test_e_field_malformed_shapes_stay_conservative():
     # C2 未覆盖的负例形态：activity 故障文案（H2 家族——非签名启动级出口）
     assert not wf._tests_supply_assembly_fail(_supply_ir(
         error="集成测试 activity 故障：CancelledError: cancelled"))
-    # 半标记：只有「供给面红」无「supply 装配」→ 不命中（宁窄勿宽）
-    assert not supply_sig("——供给面红点名，不静默")
+    # 半标记：只有侧面 token 无状态 token → 不命中（宁窄勿宽，token 形态同窄）
+    assert not supply_sig(shared.SUPPLY_SIDE_SIG + ": red, named")
+    assert not supply_sig("——供给面红点名，不静默")           # 老形态半标记同样不命中
 
 
 def test_e_product_red_still_counts():

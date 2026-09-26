@@ -127,11 +127,17 @@ def test_c_malformed_inputs_fail_closed():
 
 # ---------- C2. 装配级供给失败形态（gen11 打回补：豁免判定/豁免账本/封面文案） ----------
 
-# verify_lane 乙段 supply 装配两态真文案（签名单写者=shared.SUPPLY_ASSEMBLY_ERROR_MARKS）
-SUPPLY_TIMEOUT_ERR = ("supply 装配超时（need=docker 测试台在位（t260904-19），>900s）"
-                      "——供给面红点名，不静默")
-SUPPLY_FAIL_ERR = ("supply 装配失败（need=测试台供给，exit=1）：boom"
-                   "——供给面红点名，不静默")
+# verify_lane 乙段 supply 装配三态真文案（260927 单源改造：出口=「状态 token + 英文人话
+# + 侧面 token」，签名判据认 token 不认人话——签名单写者=shared.SUPPLY_STATE_SIGS ∧
+# shared.SUPPLY_SIDE_SIG）
+SUPPLY_TIMEOUT_ERR = ("%s: supply assembly timed out (need=docker test stage, >900s) — "
+                      "supply-side red, named, not silent %s"
+                      % (shared.SUPPLY_TIMEOUT_SIG, shared.SUPPLY_SIDE_SIG))
+SUPPLY_FAIL_ERR = ("%s: supply assembly failed (need=test supply, exit=1): boom — "
+                   "supply-side red, named, not silent %s"
+                   % (shared.SUPPLY_FAIL_SIG, shared.SUPPLY_SIDE_SIG))
+#: 260927 前的中文双标记形态——**只为重放兼容**保留的夹具（在途票 history 里是这个）
+LEGACY_SUPPLY_TIMEOUT_ERR = ("supply 装配超时（need=x，>900s）——供给面红点名，不静默")
 
 
 def _supply_receipt(**kw):
@@ -153,11 +159,28 @@ def test_c2_supply_signature_narrow_and_malformed():
     for err in ("场景执行器整体超时（>3000s）",
                 "verify_lane integ 无有效输出（exit=1）：garbage",
                 "integration 未知键: foo", "未知错误",
-                "supply 装配好了", "装配超时（need=x）"):
+                # 单 token 各自不命中（窄度：状态 ∧ 侧面，缺一不可）
+                shared.SUPPLY_TIMEOUT_SIG + ": no side token here",
+                shared.SUPPLY_SIDE_SIG + ": no state token here",
+                "the supply assembly timed out (prose only, no token)"):
         assert not supply_sig(err), err
-    for bad in (None, 0, 3.5, ["supply 装配超时"], {"e": 1}, "",
-                b"supply-assembly-timeout"):
+    for bad in (None, 0, 3.5, [shared.SUPPLY_TIMEOUT_SIG], {"e": 1}, "",
+                b"SUPPLY_ASSEMBLY_TIMEOUT"):
         assert not supply_sig(bad)
+    # 重放兼容＝**逐字等价**（宿主口径：签名语义不许放宽/收紧）：对老形态输入，新匹配器
+    # 必须与 260927 前的旧匹配器给出**完全相同**的结论（在途票 history 里就是老文案，
+    # 判据翻面=workflow 决策分叉=非确定）。这里把旧式判据现地重实现做对照。
+    def _legacy_matcher(text):
+        return all(m in text for m in ("supply 装配", "供给面红"))
+    legacy_samples = [
+        LEGACY_SUPPLY_TIMEOUT_ERR,
+        "supply 装配失败（need=x，exit=1）：boom——供给面红点名，不静默",
+        "supply 装配好了——供给面红",            # 已知近似命中面（旧式也命中，等价保持）
+        "——供给面红点名，不静默",
+        "场景执行器整体超时（>3000s）",
+    ]
+    for sample in legacy_samples:
+        assert supply_sig(sample) == _legacy_matcher(sample), sample
 
 
 def test_c2_supply_shape_exempt_judgement():
@@ -187,7 +210,7 @@ def test_c2_supply_shape_exempt_ledger_names_supply_face():
     tr, ex, counted, note = asyncio.run(
         wf._tests_round_account(3, 0, _supply_receipt()))
     assert (tr, ex, counted) == (3, 1, False)
-    assert "供给" in note and "不计入" in note and "supply 装配" in note
+    assert "供给" in note and "不计入" in note and shared.SUPPLY_TIMEOUT_SIG in note
     _, _, counted2, note2 = asyncio.run(
         wf._tests_round_account(0, 0, _supply_receipt(error=SUPPLY_FAIL_ERR)))
     assert not counted2 and "供给" in note2

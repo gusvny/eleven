@@ -138,8 +138,8 @@ def main() -> int:
         pay = drv.run(args, stub_findings=[])
         m = drv.meta(pay)
         ok(drv.result_ok(pay), "④坏回执不阻断主链（ok=true）")
-        ok("不可读" in str(m.get("scope", {}).get("suite_note")),
-           "④meta.scope.suite_note 点名回执不可读")
+        ok("unreadable" in str(m.get("scope", {}).get("suite_note")),
+           "④meta.scope.suite_note names the unreadable receipt (260927 English report face)")
 
         # --- ⑤ KI 册缺失：note 点名不炸 ---
         inst5 = "it-scope-kibad"
@@ -148,8 +148,8 @@ def main() -> int:
         args = lib.scope_args(inst5, "20260924", repo5, this5)
         pay = drv.run(args, stub_findings=[])
         m = drv.meta(pay)
-        ok(drv.result_ok(pay) and "不可读" in str(m.get("scope", {}).get("ki_note")),
-           "⑤KI 册缺失：活动不炸且 meta.scope.ki_note 点名")
+        ok(drv.result_ok(pay) and "unreadable" in str(m.get("scope", {}).get("ki_note")),
+           "⑤KI register missing: activity does not crash and meta.scope.ki_note names it")
 
         # --- ⑥ 无基点差分：绝不回落全仓 ---
         inst6 = "it-scope-nobase"

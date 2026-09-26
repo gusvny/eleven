@@ -150,7 +150,7 @@ def test_archive_failure_does_not_block_new_write(tmp_path):
     flow.write_inspection_report_impl(_face("t260916-13"), tmp_path)
     out = flow.write_inspection_report_impl(_face("t260917-01"), tmp_path)
     assert out["archived"] is False
-    assert "归档目录不可建" in out["archive_error"]
+    assert "archive dir not creatable" in out["archive_error"]   # 260927 报告英文面
     assert json.loads(Path(out["path"]).read_text(encoding="utf-8"))["ticket_id"] == "t260917-01"
 
 

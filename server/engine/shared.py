@@ -740,22 +740,46 @@ def targeted_rerun_plan(write_set, prev_red_names, first_run: bool = False,
     return out
 
 
-# 供给装配失败的机械签名（t260917-09 gen11 打回补）。真源唯一=verify_lane 乙段
-# supply 装配（server/tools/verify_lane.py）两态文案：「supply 装配超时」「supply
-# 装配失败」，尾巴皆带「供给面红点名，不静默」。签名取**双标记合取**——窄而准：
-# 其他启动级 error（执行器整体超时/无有效输出/声明未知键）不命中、照旧保守计轮；
-# 单标记误命中面（如「supply 装配好了」）被另一标记兜住。
-SUPPLY_ASSEMBLY_ERROR_MARKS = ("supply 装配", "供给面红")
+# 供给装配失败的机械签名（t260917-09 gen11；260927 单源改造=机器 token 化）。
+#
+# 真源唯一=verify_lane 乙段 supply 装配（server/tools/verify_lane.py）的出口文案。
+# 260927 前它是**中文双标记合取**（「supply 装配」∧「供给面红」）——报告面英文化后，
+# 签名若继续吃中文，就等于把「机器判据」钉在会被翻译的人话上（改文案即静默失联）。
+# 故拆两件：
+#   ① 机器 token（下面四串，英文、稳定、只给机器认）：状态 token（三态任一）∧ 侧面 token；
+#   ② 人话文案（英文，给报告面读）——由 verify_lane 拼在 token 之后，随时可改不影响签名。
+# 签名语义**逐字等价**（仍窄而准的双标记合取）：单 token 不命中、非供给面的启动级 error
+# （执行器整体超时/无有效输出/声明未知键）不命中、`SUPPLY_ASSEMBLY` 子串误命中面被侧面
+# token 兜住。三态里 SUPPLY_STAGE_TIMEOUT 是 260927 新增的段级预算态（我引入的新状态，
+# 语义同属供给面，与另两态合取同一侧面 token——不是放宽窄度）。
+SUPPLY_TIMEOUT_SIG = "SUPPLY_ASSEMBLY_TIMEOUT"
+SUPPLY_FAIL_SIG = "SUPPLY_ASSEMBLY_FAILED"
+SUPPLY_STAGE_TIMEOUT_SIG = "SUPPLY_STAGE_TIMEOUT"
+SUPPLY_SIDE_SIG = "SUPPLY_SIDE_RED"
+#: 状态 token 全集（任一命中即「供给面某一态」）
+SUPPLY_STATE_SIGS = (SUPPLY_TIMEOUT_SIG, SUPPLY_FAIL_SIG, SUPPLY_STAGE_TIMEOUT_SIG)
+#: 全标记表（状态 token × 侧面 token；漂移锁/运维文档消费）
+SUPPLY_ASSEMBLY_SIGS = SUPPLY_STATE_SIGS + (SUPPLY_SIDE_SIG,)
+#: 老（260927 前）中文双标记——**只为重放兼容**保留：改动当时仍在途的票，history 里记的
+#: 是旧中文 error，重放时判据必须给出与当初**相同**的结论（否则 workflow 决策分叉=
+#: 非确定、票卡死）。窄度与 token 形态等价（同一双标记合取），不是放宽。
+LEGACY_SUPPLY_ASSEMBLY_MARKS = ("supply 装配", "供给面红")
 
 
 def tests_supply_assembly_error(error: Any) -> bool:
     """回执 error 是否命中「供给装配失败」机械签名（纯函数，t260917-09 gen11；
     UT 直驱）。命中=该轮 tests-fault 属环境面豁免（供给波动，工单要求③字面兑现，
     不计入 tests-fault 轮次）；畸形/不命中=False（保守计轮——绝不因签名解析不出
-    放行，消费外部输入的 fail-closed 纪律）。"""
+    放行，消费外部输入的 fail-closed 纪律）。
+
+    判据两形态等价（同一「状态 ∧ 侧面」双标记合取）：
+      - 新形态：机器 token（`SUPPLY_*_SIG`）——生产链现在只产这一种；
+      - 老形态：260927 前的中文双标记——**重放兼容**（见上注），不改窄度。"""
     if not isinstance(error, str) or not error:
         return False
-    return all(m in error for m in SUPPLY_ASSEMBLY_ERROR_MARKS)
+    if any(s in error for s in SUPPLY_STATE_SIGS) and SUPPLY_SIDE_SIG in error:
+        return True
+    return all(m in error for m in LEGACY_SUPPLY_ASSEMBLY_MARKS)
 
 
 def tests_supply_assembly_note(error: Any) -> str:

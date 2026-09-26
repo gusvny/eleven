@@ -300,11 +300,7 @@ def suite_findings(receipt: Dict[str, Any]) -> List[Dict[str, Any]]:
         return findings
     if not err and ran == 0:
         findings.append(make_finding(
-            # 260927 报告英文面的**唯一豁免**（须宿主裁定）：本条的 subject 被既有场景断言钉住
-        # （integration/t260913-02/sc_inspection_schedule_daily.py:187 断言 subject 含
-        # 「未真正执行」）；「不动既有场景断言」是硬边界，故此处保留中文原文并上报，
-        # 待宿主授权后连同那一行场景断言一起改英文（其余发现面文案已全英文化）。
-        SUITE_SCAN, "high", "full suite did not really run (ran=0)",
+            SUITE_SCAN, "high", "full suite did not really run (ran=0)",
             "verify_lane lane=integ reported 0 scenarios — skipping or trimming scenarios must never buy "
             "green; check the scenario registry by hand | receipt file %s" % (receipt.get("report_path") or "(no receipt written)"),
             suggest=False))

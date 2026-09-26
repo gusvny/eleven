@@ -101,7 +101,8 @@ def test_activity_wired_faces_dispatch(tmp_path):
 def test_flow_passes_face_into_activity_args_and_timeline():
     """flow 源码序锁：activity args 带 face 键；时间线文案含 face 值（C4，不再写死「测试面」）。"""
     assert '"face": inp.face' in FLOW_SRC
-    assert '"%s 面扫描（实例 %s 期 %s）" % (inp.face' in FLOW_SRC
+    # 260927 报告英文面：时间线文案改英文——锚点同步（语义不变：face 值透传进文案）
+    assert '"%s-face scan (instance %s period %s)" % (inp.face' in FLOW_SRC
     assert "测试面扫描（实例" not in FLOW_SRC
 
 

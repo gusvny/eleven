@@ -71,7 +71,7 @@ def test_build_ticket_face_renders_findings_and_suggestions():
     assert len(face["findings"]) == 3
     assert "face" not in face  # 报告形状已无 face 键（t260910-11 除名，防与 self.face 撞名）
     sug = face["suggested_fix_tickets"]
-    assert [s["urgency"] for s in sug] == ["立即开票", "人审后定"]      # low 不立票
+    assert [s["urgency"] for s in sug] == ["open now", "after human review"]   # low 不立票
     assert all(s["source_inspection"] == "inspection-integration-tests-20260905" for s in sug)
     assert all(s["template"] == "dev-lane" for s in sug)               # 修复一律 dev-lane
 

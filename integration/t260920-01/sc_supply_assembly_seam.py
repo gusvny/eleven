@@ -9,7 +9,7 @@
 
 收口后用户可感知行为（工单要求①④）：
   A. 供给装配失败两态（失败/超时）真跑 verify_lane（admin.py 真入口 + 真声明
-     解析 + 真 supply 执行）产出的 err 文案含双标记（「supply 装配」+「供给面红」）
+     解析 + 真 supply 执行）产出的 err 文案含双标记机器 token（SUPPLY_ASSEMBLY_{TIMEOUT,FAILED} ∧ SUPPLY_SIDE_RED）
      且点名 need——引擎签名判据命中；
   B. 该回执形态（ran=0+零产品红+零闸拦+零环境红+签名 error）→ 该轮不计入
      tests-fault 轮次，留痕含「不计入」且点名供给面（不静默）；
@@ -141,8 +141,8 @@ if res.get("ok"):
     r = res["result"]
     err = str(r.get("err") or "")
     ok(r.get("green") is False, "A1 供给失败 → 闸红")
-    ok("supply 装配失败" in err, "A1b 出口文案含「supply 装配失败」真态")
-    ok("供给面红" in err, "A1c 出口文案含「供给面红」（双标记第二元）")
+    ok(shared.SUPPLY_FAIL_SIG in err, "A1b 出口文案含状态 token SUPPLY_ASSEMBLY_FAILED")
+    ok(shared.SUPPLY_SIDE_SIG in err, "A1c 出口文案含侧面 token SUPPLY_SIDE_RED（双标记第二元）")
     ok("测试台供给" in err, "A1d 出口点名 need（不静默）")
     sig, counted, note = judge_receipt(shared, dev_lane, err)
     ok(sig is True, "A1e 真出口 err 命中引擎供给签名")
@@ -165,7 +165,7 @@ if res.get("ok"):
     r = res["result"]
     err = str(r.get("err") or "")
     ok(r.get("green") is False, "A2 供给超时 → 闸红")
-    ok("supply 装配超时" in err and "供给面红" in err,
+    ok(shared.SUPPLY_TIMEOUT_SIG in err and shared.SUPPLY_SIDE_SIG in err,
        "A2b 超时态出口含双标记（got: %s）" % err[:80])
     sig, counted, note = judge_receipt(shared, dev_lane, err)
     ok(sig is True and counted is False and "不计入" in note,

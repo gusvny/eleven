@@ -37,6 +37,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import shared  # noqa: E402
+
 POC = Path(__file__).resolve().parent
 sys.path.insert(0, str(POC))
 
@@ -155,8 +158,9 @@ ok((r2.error or "") == "" and r2.passed == 1 and r2.failed == 0,
     "integration:\n  cmd: python3 integ_stub.py\n  supply:\n"
     "    - need: 假供给\n      cmd: 'exit 3'\n", encoding="utf-8")
 r = _run_scenarios_sync(tmp, "t-x")
-ok(r.error != "" and "假供给" in r.error and "supply 装配失败" in r.error,
-   "supply 装配失败 → err 点名 need（供给面红，不静默）")
+ok(r.error != "" and "假供给" in r.error
+   and shared.SUPPLY_FAIL_SIG in r.error and shared.SUPPLY_SIDE_SIG in r.error,
+   "supply assembly failed → err names the need (token-signed supply-side red)")
 (tmp / "verify.yaml").write_text(
     "schema: v1\nlanes:\n  code:\n    write_allow:\n      - .\n"
     "integration:\n  cmd: python3 integ_stub.py\n  supply:\n"

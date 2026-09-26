@@ -46,6 +46,12 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent / 'engine'))
+# 机器 token 单源（shared.py）：供给面出口文案=「状态 token + 英文人话 + 侧面 token」，
+# 签名判据认 token 不认人话（改文案不影响签名；t260927 单源改造）。
+from shared import (  # noqa: E402
+    SUPPLY_FAIL_SIG, SUPPLY_SIDE_SIG, SUPPLY_STAGE_TIMEOUT_SIG, SUPPLY_TIMEOUT_SIG,
+)
 
 TOOL = {
     'name': 'verify_lane',
@@ -857,9 +863,11 @@ def _integ(args):
         _remain = _supply_to - _spent
         if _remain <= 0:
             return {'lane': 'integ', 'green': False,
-                    'err': ('供给段超时（>%ds，已耗 %.0fs）：尚未跑到 need=%s——供给面红点名，'
-                            '不静默；供给预算独立于跑者场景预算（%s 可调）'
-                            % (_supply_to, _spent, need, SUPPLY_TIMEOUT_ENV)),
+                    'err': ('%s: supply stage timed out (>%ds, elapsed %.0fs) before reaching '
+                            'need=%s — supply-side red, named, not silent; the supply budget is '
+                            'independent of the runner scenario budget (%s is the knob) %s'
+                            % (SUPPLY_STAGE_TIMEOUT_SIG, _supply_to, _spent, need,
+                               SUPPLY_TIMEOUT_ENV, SUPPLY_SIDE_SIG)),
                     'supply': {'timeout_sec': int(_supply_to), 'used_sec': round(_spent, 1),
                                'stage_timeout': True, 'need': need}}
         _item_to = min(sto, _remain)
@@ -870,25 +878,29 @@ def _integ(args):
             _stage_hit = _item_to < sto          # 撞的是段级预算还是单条预算
             if _stage_hit:
                 return {'lane': 'integ', 'green': False, 'warnings': list(_warnings),
-                        'err': ('供给段超时（段预算耗尽，need=%s，已耗 %.0fs，上限 %s=%ds）——'
-                                '供给面红点名，不静默；供给预算独立于跑者场景预算'
-                                % (need, time.time() - _sup_t0, SUPPLY_TIMEOUT_ENV,
-                                   int(_supply_to))),
+                        'err': ('%s: supply stage budget exhausted (need=%s, elapsed %.0fs, '
+                                'cap %s=%ds) — supply-side red, named, not silent; the supply '
+                                'budget is independent of the runner scenario budget %s'
+                                % (SUPPLY_STAGE_TIMEOUT_SIG, need, time.time() - _sup_t0,
+                                   SUPPLY_TIMEOUT_ENV, int(_supply_to), SUPPLY_SIDE_SIG)),
                         'supply': {'timeout_sec': int(_supply_to),
                                    'used_sec': round(time.time() - _sup_t0, 1),
                                    'stage_timeout': True, 'need': need}}
             # 单条 timeout（段预算没撞上）：文案与旧契约逐字同口径——dev_lane 的
             # 「供给失败不计入 tests-fault 轮次」签名就吃这句话，措辞漂了签名就漂。
             return {'lane': 'integ', 'green': False, 'warnings': list(_warnings),
-                    'err': 'supply 装配超时（need=%s，>%ds）——供给面红点名，不静默'
-                           % (need, sto),
+                    'err': '%s: supply assembly timed out (need=%s, >%ds) — supply-side red, '
+                           'named, not silent %s'
+                           % (SUPPLY_TIMEOUT_SIG, need, sto, SUPPLY_SIDE_SIG),
                     'supply': {'timeout_sec': int(_supply_to),
                                'used_sec': round(time.time() - _sup_t0, 1),
                                'stage_timeout': False, 'need': need}}
         if sp.returncode != 0:
             return {'lane': 'integ', 'green': False, 'warnings': list(_warnings),
-                    'err': 'supply 装配失败（need=%s，exit=%d）：%s——供给面红点名，不静默'
-                           % (need, sp.returncode, ((sp.stdout or '') + (sp.stderr or ''))[-1500:]),
+                    'err': '%s: supply assembly failed (need=%s, exit=%d): %s — supply-side '
+                           'red, named, not silent %s'
+                           % (SUPPLY_FAIL_SIG, need, sp.returncode,
+                              ((sp.stdout or '') + (sp.stderr or ''))[-1500:], SUPPLY_SIDE_SIG),
                     'supply': {'timeout_sec': int(_supply_to),
                                'used_sec': round(time.time() - _sup_t0, 1),
                                'stage_timeout': False, 'need': need}}

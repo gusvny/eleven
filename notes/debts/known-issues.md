@@ -1929,3 +1929,12 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 「多次重开留下的多张已服务票」误判成破窗）。修法方向：带 `reopen_reason` 时允许 N 张已服务票共存
 > （supersede 链式记名 + reopen journal 逐行留痕），只对**无具名**的多张已服务票保持 fail-closed。
 > 当下的绕法＝换新期（本岗当日即改用期 20260928 验收）。
+
+## KI-134 两处预先存在的巡检/自检失败（260926 期 20260929 收尾时挖出，非当轮改动引入；integration 岗登记）
+> 子代理「stash 全部改动后复跑＝同样失败」的双证下，两条与本轮改动面无关的既有红：
+> ① `server/engine/selfcheck_integ_loop.py` → `FAIL 明细逐条带 exit 与尾段（…末条恒为 __pool_exclude__ 少跑点名条）`：
+>    实际末条是 `__ledger__`（**台账面在场时 details 多一条**）——判据钉在「末条恰为某固定项」上，台账面一开就假红；
+> ② `integration/t260924-06/sc_inspect_zero_face.py`：**带引擎 venv 跑**时 `RuntimeError('Not in activity context')`
+>    （不带 venv 走 env-red 路径时 pass=9/0）——场景在 venv 形态下越界调用了活动上下文里的东西。
+> 影响：两条都是「判据/形态耦合」型假红，会污染闸侧归因；修法方向＝①改成「集合包含」而非「末条等值」；
+> ②场景在 venv 形态下改用不依赖活动上下文的桩或显式 ENV_FAIL 点名。待排期。

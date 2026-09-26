@@ -457,7 +457,7 @@ def read_verdicts_file(path: Any) -> Dict[str, Any]:
         return {"entries": [], "error": "%s: %s" % (type(e).__name__, e)}
     entries = doc.get("entries") if isinstance(doc, dict) else None
     if not isinstance(entries, list):
-        return {"entries": [], "error": "entries 非列表（%s）" % p.name}
+        return {"entries": [], "error": "entries is not a list (%s)" % p.name}
     return {"entries": [e for e in entries if isinstance(e, dict)], "error": ""}
 
 
@@ -651,7 +651,8 @@ def parse_name_status(text: str) -> Tuple[List[str], Dict[str, Any]]:
     if bad:
         meta["diff_malformed_lines"] = bad
     if not rows and not bad:
-        meta["diff_error"] = "变化面 diff 输出为空（上期基点→本期基点无差异或 diff 失败）"
+        meta["diff_error"] = ("change-face diff output is empty (no difference between the previous "
+                              "base and this period's base, or the diff failed)")
     return rows, meta
 
 
@@ -664,15 +665,18 @@ def suite_receipt_rows(path: Any) -> Tuple[List[str], Dict[str, Any]]:
     meta: Dict[str, Any] = {}
     p = Path(path) if path else None
     if p is None or not p.is_file():
-        return [], {"suite_note": "本期无套件回执档（%s）——套件红/漏跑面未纳入审查范围"
-                                 % (p.name if p else "<空路径>")}
+        return [], {"suite_note": ("no suite receipt for this period (%s) — the suite "
+                                   "red/missed faces are not part of the review scope"
+                                   % (p.name if p else "<empty path>"))}
     try:
         doc = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
-        return [], {"suite_note": "套件回执不可读（%s: %s）——套件红面未纳入审查范围"
-                                 % (type(e).__name__, e)}
+        return [], {"suite_note": ("suite receipt unreadable (%s: %s) — the suite red face "
+                                   "is not part of the review scope"
+                                   % (type(e).__name__, e))}
     if not isinstance(doc, dict):
-        return [], {"suite_note": "套件回执顶层非映射——套件红面未纳入审查范围"}
+        return [], {"suite_note": ("suite receipt is not a mapping at the top level — the suite red "
+                               "face is not part of the review scope")}
     rows: List[str] = []
     err = str(doc.get("error") or "").strip()
     if err:
@@ -702,18 +706,18 @@ def ki_open_entries(path: Any) -> Tuple[List[str], Dict[str, Any]]:
     meta: Dict[str, Any] = {}
     p = Path(path) if path else None
     if p is None or not p.is_file():
-        return [], {"ki_note": "KI 册不可读：%s" % (p if p else "<空路径>")}
+        return [], {"ki_note": "KI register unreadable: %s" % (p if p else "<empty path>")}
     try:
         text = p.read_text(encoding="utf-8", errors="replace")
     except OSError as e:
-        return [], {"ki_note": "KI 册不可读：%s（%s）" % (p, e)}
+        return [], {"ki_note": "KI register unreadable: %s (%s)" % (p, e)}
     rows: List[str] = []
     for line in text.splitlines():
         s = line.strip()
         if "KI-" in s and "open" in s.lower():
             rows.append(s[:160])
     if not rows:
-        return [], {"ki_note": "KI 册无 open 条目或不可解析：%s" % p.name}
+        return [], {"ki_note": "KI register has no open entries or is unparseable: %s" % p.name}
     return rows, meta
 
 
@@ -738,7 +742,8 @@ def build_change_scope_text(diff_rows: List[str], suite_rows: List[str],
     lines: List[str] = [
         "## 本期审查范围（审查范围=本清单，清单之外的文件一律不看——"
         "目标是「本期有什么新病灶」，不是全仓普查；**禁止 spawn 任何子代理**，"
-        "分片上限 %d 片、每片 ≤%d 文件已由机械侧封顶）" % (max_shards, max_files_per_shard),
+        "the shard cap (%d shards, <=%d files each) was enforced by the mechanical side)"
+        % (max_shards, max_files_per_shard),
         "",
         "### 变化面（上期基点→本期基点，git diff --name-status）",
     ]
