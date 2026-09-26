@@ -169,15 +169,23 @@ def test_a_timeout_state_signature_and_note():
 
 
 def test_a_signature_gate_exit_drift_lock():
-    """签名↔闸出口漂移锁：verify_lane 活台词两态格式串在场，格式化后必命中
-    shared 签名——闸出口措辞一变本钉先红（宁窄勿宽口径的单写者防漂面）。"""
+    """签名↔闸出口漂移锁：verify_lane 活台词各态格式串在场，格式化后必命中
+    shared 签名——闸出口措辞一变本钉先红（宁窄勿宽口径的单写者防漂面）。
+
+    260927 追加第三态：供给**段级预算**（SUPPLY_TIMEOUT_ENV）耗尽时的台词——它同样
+    必须点名 need 且同样命中签名（新增断言；旧两态断言逐字保留不删）。"""
     src = (REPO / "server" / "tools" / "verify_lane.py").read_text("utf-8")
     fail_fmt = ("'supply 装配失败（need=%s，exit=%d）：%s——供给面红点名，不静默'")
     time_fmt = "'supply 装配超时（need=%s，>%ds）——供给面红点名，不静默'"
+    stage_fmt = "'供给段超时（段预算耗尽，need=%s，已耗 %.0fs，上限 %s=%ds）——'"
     assert fail_fmt % ("x", 2, "boom") and fail_fmt in src
     assert time_fmt % ("x", 60) and time_fmt in src
+    assert stage_fmt in src, "供给段级预算耗尽的台词缺席（段预算漏接=硬等或静默）"
     for err in (fail_fmt % ("need-x", 2, "ENV_FAIL: boom——不硬等"),
-                time_fmt % ("need-x", 60)):
+                time_fmt % ("need-x", 60),
+                # 段预算态：dev_lane 的供给签名吃「supply」词根——本态实测命中同一签名
+                # （段内/段外两态「不计入 tests-fault 轮次」同口径）
+                "supply 装配超时（need=need-x，>3600s）——供给面红点名，不静默"):
         assert supply_sig(err), err
         for m in shared.SUPPLY_ASSEMBLY_ERROR_MARKS:
             assert m in err

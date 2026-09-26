@@ -36,9 +36,70 @@ def test_inequality_group_default():
 
 
 def test_derived_from_single_source():
-    """外层预算必须**派生**自 INTEG_GUARD_SEC（算式成对锁），不允许再手写常量。"""
+    """外层预算必须**派生**自内层守卫（算式成对锁），不允许再手写常量。
+
+    260927 更新：套件段活动超时 SUITE_TO 的算式**升级**（不是放宽）——
+    旧式 `INTEG_GUARD_SEC + 1800`（缺省 5100s≈85min）被实测套件墙钟 87min 击穿
+    （供给 ≈40min + 跑者 ≈47min），活动在跑者差约 2 分钟收尾时被判死，随即拆泳道、
+    孤儿写盘撞 ENOENT、迟到回执覆盖权威件。新式 = 供给上限 + 跑者总预算 + 余量
+    （见下方 test_suite_budget_* 三条新断言）；旧式的语义（「必须严格大于内层守卫」
+    「必须是同一算出点的派生量」）由 test_inequality_group_default 与本函数保留。"""
     assert dev_lane.INTEG_RUN_TO == timedelta(seconds=aa.INTEG_GUARD_SEC + 300)
-    assert flow.SUITE_TO == timedelta(seconds=aa.INTEG_GUARD_SEC + 1800)
+    assert flow.SUITE_TO == timedelta(seconds=flow.suite_timeout_of(
+        flow.INTEG_SUPPLY_TO_SEC, flow.SUITE_RUN_BUDGET_SEC, flow.SUITE_MARGIN_SEC))
+    # 旧式（guard+1800）已退役：这里显式钉住「新算式不是手写常量」——
+    # 三项任一被改，SUITE_TO 必须跟着动（改常量不改算式=本行必红）。
+    for _delta in (-60.0, 60.0):
+        assert flow.suite_timeout_of(flow.INTEG_SUPPLY_TO_SEC,
+                                     flow.SUITE_RUN_BUDGET_SEC + _delta,
+                                     flow.SUITE_MARGIN_SEC) \
+            != flow.SUITE_TO.total_seconds()
+
+
+# ---------------- A2. 260927 套件段三段预算（供给 / 跑者 / 活动超时） ----------------
+
+def test_suite_budget_three_stage_inequalities():
+    """260927 新不等式组（旧断言只加不减）：
+      INTEG_GUARD_SEC < 跑者总预算 < SUITE_TO
+      供给上限 + 跑者总预算 + 余量 ≤ SUITE_TO
+    三段必须同源派生——任何一处手写都会重新长出「活动比实际需要更早判死」的错配。"""
+    guard = float(aa.INTEG_GUARD_SEC)
+    budget = float(flow.SUITE_RUN_BUDGET_SEC)
+    suite_to = flow.SUITE_TO.total_seconds()
+    assert guard < budget < suite_to, (guard, budget, suite_to)
+    assert (flow.INTEG_SUPPLY_TO_SEC + budget + flow.SUITE_MARGIN_SEC) <= suite_to
+    # 供给段是**独立具名预算**：必须给足实测 40min 量级（不是 900s 单条上限冒充段预算）
+    assert flow.INTEG_SUPPLY_TO_SEC >= 3600.0
+    # 跑者总预算不低于实测量化基线（319 场景 sum(wall)=2630s，最慢单场景 310s）
+    assert budget >= flow.MIN_SUITE_RUN_BUDGET_SEC >= 5400.0
+
+
+def test_suite_run_budget_from_single_source():
+    """跑者总预算算式唯一算出点 = suite_run_budget_of（派生自守卫，落地下限）：
+    运维抬 SANDBAR_INTEG_BATCH_TIMEOUT_SEC 时预算自动同抬；往小调时不缩到截断真套件
+    的地步（floor）。"""
+    assert flow.SUITE_RUN_BUDGET_SEC == flow.suite_run_budget_of(aa.INTEG_GUARD_SEC)
+    assert flow.suite_run_budget_of(6000.0) == 12000.0          # 抬守卫 → 同抬
+    assert flow.suite_run_budget_of(100.0) == flow.MIN_SUITE_RUN_BUDGET_SEC  # 缩守卫 → floor
+    # 显式投影入口与单一真源同值（旧调用面 `timeout − margin` 保留）
+    assert flow.suite_run_budget_sec() == flow.SUITE_RUN_BUDGET_SEC
+
+
+def test_inspection_chain_and_gate_outlive_runner_budget():
+    """跑者必须**先于**闸内截止与活动超时收口（否则「点名收口」又变成「硬杀」）：
+      跑者总预算 < 子进程链截止 < SUITE_TO；跑者总预算 < 闸内截止 ≤ SUITE_TO。
+    闸内截止 = 供给 + 跑者 + 余量（闸只做上界，不替谁判预算）。"""
+    budget = float(flow.SUITE_RUN_BUDGET_SEC)
+    chain = aa.integ_subprocess_timeout(budget)
+    gate = aa._inspection_gate_timeout(budget, flow.INTEG_SUPPLY_TO_SEC)
+    suite_to = flow.SUITE_TO.total_seconds()
+    assert budget < chain < suite_to, (budget, chain, suite_to)
+    assert budget < gate <= suite_to, (budget, gate, suite_to)
+    # 闸内截止 + 余量 = 活动超时（两数同源于同一组三段预算，不多出第四个手写数）
+    assert gate + aa.INTEG_CHAIN_MARGIN_SEC <= suite_to
+    # 每票集测段（预算缺省 0）逐字回落旧行为：链截止 = 内层守卫、闸截止 = 内层守卫
+    assert aa.integ_subprocess_timeout(0.0) == float(aa.INTEG_GUARD_SEC)
+    assert aa._inspection_gate_timeout(0.0, 0.0) == float(aa.INTEG_GUARD_SEC)
 
 
 def test_env_override_single_knob(monkeypatch):

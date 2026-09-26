@@ -611,6 +611,31 @@ def _integ_pool_exclude(root, integ_cfg, args):
 # 载荷畸形/非正仍 fail-closed 红；env 畸形同理（不静默回落）。
 INTEG_DEFAULT_TIMEOUT_SEC = 3000
 INTEG_TIMEOUT_ENV = 'SANDBAR_INTEG_BATCH_TIMEOUT_SEC'
+# 260927 供给段（integration.supply）**独立具名预算**：供给是「起台/装依赖」的前置面，
+# 与跑者的场景预算是**两条**预算——混成一笔就会互相吃（t260927-01 实况：供给
+# `stage_docker ensure --services full` ≈40min + 跑者本体 ≈47min 合计 87min，比活动超时
+# 85min 还长，活动在跑者差约 2 分钟收尾时被判死）。到点/失败都返回**点名供给段**的红：
+# 既不一言不发，也不伪装成「套件零信号」（那种归因会把人引到错误方向）。
+# 缺省 3600s（=实测 40min 量级 + 余量）；env 可覆盖（运维契约面，同 INTEG_TIMEOUT_ENV 的
+# 单源纪律：一个旋钮决定一处预算，不各自读 env）。
+SUPPLY_TIMEOUT_DEFAULT_SEC = 3600
+SUPPLY_TIMEOUT_ENV = 'SANDBAR_SUPPLY_TIMEOUT_SEC'
+
+
+def _supply_timeout_sec():
+    """供给段预算解析 → (秒, err)。缺省链尾=常量；畸形/非正=fail-closed 红（绝不静默回缺省）。"""
+    raw = os.environ.get(SUPPLY_TIMEOUT_ENV)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return SUPPLY_TIMEOUT_DEFAULT_SEC, None
+    try:
+        t = int(raw)
+    except (TypeError, ValueError):
+        return None, ('供给段预算畸形（%s=%r）——fail-closed，不静默回落缺省'
+                      % (SUPPLY_TIMEOUT_ENV, raw))
+    if t <= 0:
+        return None, ('供给段预算须为正整数（%s=%d）——fail-closed'
+                      % (SUPPLY_TIMEOUT_ENV, t))
+    return t, None
 
 
 def _integ_timeout_sec(args):
@@ -632,6 +657,39 @@ def _integ_timeout_sec(args):
     if t <= 0:
         return None, 'integ 整体超时须为正整数（%s=%d）——fail-closed' % (src, t)
     return t, None
+
+
+#: 执行器总预算耗尽的标记行前缀（run_scenarios._budget_exhausted_exit 唯一产出口；
+#: 两侧同串=契约，改一侧必改另一侧——单测跨模块锁定）。
+BUDGET_SIGNAL_PREFIX = 'INTEG_BUDGET_EXHAUSTED'
+
+
+def _parse_budget_signal(stdout):
+    """执行器「总预算耗尽」信号解析 → {} 或 {exhausted, unrun_count, unrun, line}。
+
+    260927 必做②：套件预算耗尽必须是**独立的可见发现**，不能落成中性 ran=0，也不能
+    诬成产品红（那些场景根本没验到）。执行器给三种痕迹：`FAIL [__budget__]` 汇总行、
+    逐条未跑 ENV_FAIL 行、以及本标记行；结构化未跑清单优先取 INTEG_SUMMARY 的 budget
+    块（同源），标记行缺 INTEG_SUMMARY 时按标记行文本兜底——**两者都缺才返回 {}**（缺
+    信号=老执行器形态，本段零分支，老路径逐字节不变）。"""
+    out = {}
+    for ln in (stdout or '').splitlines():
+        if ln.startswith(BUDGET_SIGNAL_PREFIX):
+            out = {'exhausted': True, 'line': ln.strip()[:600],
+                   'unrun_count': 0, 'unrun': []}
+        elif ln.startswith('INTEG_SUMMARY '):
+            try:
+                payload = json.loads(ln[len('INTEG_SUMMARY '):])
+            except (json.JSONDecodeError, ValueError):
+                continue
+            b = payload.get('budget') if isinstance(payload, dict) else None
+            if isinstance(b, dict) and b.get('exhausted'):
+                out = {'exhausted': True,
+                       'line': out.get('line', ''),
+                       'unrun_count': int(b.get('unrun_count') or 0),
+                       'unrun': [str(x) for x in (b.get('unrun') or [])][:200],
+                       'budget_sec': b.get('budget_sec')}
+    return out
 
 
 def _parse_integ_run(stdout, returncode):
@@ -726,20 +784,59 @@ def _integ(args):
                        '声明恒成功空命令（如 true）得零场景绿（契约②b）'}
     # supply 供给声明（t260904-12 乙段，契约 ②a）：逐条幂等装配命令先于 integration.cmd
     # 执行；失败/超时 = 显式红点名 need，不静默继续（契约「装配失败=红点名 need」）。
+    #
+    # 260927 供给段预算（宿主实测校准）：供给是**独立预算的前置面**，到点/失败一律点名
+    # 「供给段」，绝不让它把跑者的场景预算吃掉、也绝不落成「套件零信号」的模糊归因。
+    # 预算形态：段级 SUPPLY_TO（整段上限）与逐条 timeout（单条上限）取小——任一命中都
+    # 返回红并带上已耗墙钟（事后归因要能读出「供给吃掉了多少」）。
+    _supply_to, _supply_err = _supply_timeout_sec()
+    if _supply_err:
+        return {'lane': 'integ', 'green': False, 'err': _supply_err}
+    _sup_t0 = time.time()
     for e in (integ_cfg.get('supply') or []):
         need, scmd = str(e.get('need')), str(e.get('cmd'))
         scwd = root / str(e.get('cwd') or '.')
         sto = int(e.get('timeout') or 900)
+        _spent = time.time() - _sup_t0
+        _remain = _supply_to - _spent
+        if _remain <= 0:
+            return {'lane': 'integ', 'green': False,
+                    'err': ('供给段超时（>%ds，已耗 %.0fs）：尚未跑到 need=%s——供给面红点名，'
+                            '不静默；供给预算独立于跑者场景预算（%s 可调）'
+                            % (_supply_to, _spent, need, SUPPLY_TIMEOUT_ENV)),
+                    'supply': {'timeout_sec': int(_supply_to), 'used_sec': round(_spent, 1),
+                               'stage_timeout': True, 'need': need}}
+        _item_to = min(sto, _remain)
         try:
             sp = subprocess.run(['/bin/sh', '-c', scmd], cwd=str(scwd), capture_output=True,
-                                text=True, timeout=sto)
+                                text=True, timeout=_item_to)
         except subprocess.TimeoutExpired:
+            _stage_hit = _item_to < sto          # 撞的是段级预算还是单条预算
+            if _stage_hit:
+                return {'lane': 'integ', 'green': False,
+                        'err': ('供给段超时（段预算耗尽，need=%s，已耗 %.0fs，上限 %s=%ds）——'
+                                '供给面红点名，不静默；供给预算独立于跑者场景预算'
+                                % (need, time.time() - _sup_t0, SUPPLY_TIMEOUT_ENV,
+                                   int(_supply_to))),
+                        'supply': {'timeout_sec': int(_supply_to),
+                                   'used_sec': round(time.time() - _sup_t0, 1),
+                                   'stage_timeout': True, 'need': need}}
+            # 单条 timeout（段预算没撞上）：文案与旧契约逐字同口径——dev_lane 的
+            # 「供给失败不计入 tests-fault 轮次」签名就吃这句话，措辞漂了签名就漂。
             return {'lane': 'integ', 'green': False,
-                    'err': 'supply 装配超时（need=%s，>%ds）——供给面红点名，不静默' % (need, sto)}
+                    'err': 'supply 装配超时（need=%s，>%ds）——供给面红点名，不静默'
+                           % (need, sto),
+                    'supply': {'timeout_sec': int(_supply_to),
+                               'used_sec': round(time.time() - _sup_t0, 1),
+                               'stage_timeout': False, 'need': need}}
         if sp.returncode != 0:
             return {'lane': 'integ', 'green': False,
                     'err': 'supply 装配失败（need=%s，exit=%d）：%s——供给面红点名，不静默'
-                           % (need, sp.returncode, ((sp.stdout or '') + (sp.stderr or ''))[-1500:])}
+                           % (need, sp.returncode, ((sp.stdout or '') + (sp.stderr or ''))[-1500:]),
+                    'supply': {'timeout_sec': int(_supply_to),
+                               'used_sec': round(time.time() - _sup_t0, 1),
+                               'stage_timeout': False, 'need': need}}
+    supply_used = round(time.time() - _sup_t0, 1)   # 供给墙钟（回执观测面：与跑者分别落账）
     # t260924-05 KI-116：超时由载荷显式传（_integ_timeout_sec，缺键回落同源缺省）。
     timeout, terr = _integ_timeout_sec(args)
     if terr:
@@ -748,17 +845,30 @@ def _integ(args):
     pool_exclude, cmd_env = _integ_pool_exclude(root, integ_cfg, args)
     if pool_exclude is not None and pool_exclude.get('err'):
         return {'lane': 'integ', 'green': False, 'err': pool_exclude['err']}
+    # 260927：执行器自己也有总预算（SANDBAR_INTEG_RUN_BUDGET_SEC，引擎侧下发）——闸的子
+    # 进程截止恒晚于它（跑者自行收口），这里只把同一份预算回执给下游同源可见。
+    _run_budget_env = os.environ.get('SANDBAR_INTEG_RUN_BUDGET_SEC')
+    _run_t0 = time.time()
     try:
         proc = subprocess.run(['/bin/sh', '-c', cmd], cwd=str(root), capture_output=True,
                               text=True, timeout=timeout, env=cmd_env)
     except subprocess.TimeoutExpired:
-        return {'lane': 'integ', 'green': False, 'err': '场景执行器整体超时（>%ds）' % timeout}
+        return {'lane': 'integ', 'green': False,
+                'err': '场景执行器整体超时（>%ds）' % timeout,
+                'supply_used_sec': supply_used,
+                'runner_used_sec': round(time.time() - _run_t0, 1),
+                'run_budget_sec': int(float(_run_budget_env)) if _run_budget_env else None}
+    runner_used = round(time.time() - _run_t0, 1)
     # t260924-05 KI-116：解析面抽成 _parse_integ_run 纯函数（单测直调），并拆除
     # 「ran==0 且含规范行且 exit==0 → 静默绿」逃逸口（零场景信号一律显式 err）。
     ran, passed, failed, env_failed, scen, perr = \
         _parse_integ_run(proc.stdout or '', proc.returncode)
     if perr:
-        return {'lane': 'integ', 'green': False, 'err': perr}
+        return {'lane': 'integ', 'green': False, 'err': perr,
+                'supply_used_sec': supply_used, 'runner_used_sec': runner_used}
+    # 260927 总预算耗尽（执行器自行收口的形态）：**独立可见发现**——不是产品红（那些
+    # 场景根本没验到），也不是「零信号」；点名已跑/未跑数量，明细在明细行与执行器汇总。
+    _budget_face = _parse_budget_signal(proc.stdout or '')
 
     # ---------------- t260910-13：失败分类协议 + 机械归属判定 ----------------
     # 双解析：规范行（首字符 { 的 JSON 行）权威；旧文本行保留计数（兼容期观测面）。
@@ -859,7 +969,8 @@ def _integ(args):
     if need_baseline:
         _t0b = time.time()
         _rv = _run_baseline(root, cmd, args.get('base'), timeout, env=cmd_env,
-                            extra_env=baseline_env_extra)
+                            extra_env=baseline_env_extra,
+                            lane_wall=supply_used + runner_used)
         # P1 的 deps_note 是本票后加位（真函数返回 6 元组）；t260913-03 既有
         # 护栏（test_i_baseline_inherits_exclude_env）按 5 元组桩本函数——扩展
         # 不得破坏既有形状消费方（merge_check 真红实证回归），此处按长度兼容
@@ -934,6 +1045,25 @@ def _integ(args):
                               if compat_unparsed_red else [])),
             'deprecation': (sorted(set(dupes)) and
                             ['重复规范行（一行=一个用例被破坏）：%s' % ', '.join(sorted(set(dupes)))] or [])}
+    # 260927 分相墙钟（供给 / 跑者两笔分别落账，事后归因要能读出「供给吃掉了多少」）：
+    # 两键恒在（additive；NaN 面用 -1 表「未跑到」而不是 0=「瞬时完成」的假值）。
+    _out['supply_used_sec'] = supply_used
+    _out['runner_used_sec'] = runner_used
+    if _run_budget_env:
+        try:
+            _out['run_budget_sec'] = int(float(_run_budget_env))
+        except (TypeError, ValueError):
+            _out['run_budget_sec'] = None
+    # ---- 260927 总预算耗尽：独立可见发现（不是产品红、不是零信号、不是绿）----
+    if _budget_face:
+        _out['budget'] = _budget_face        # 结构化未跑清单（票面/回执据此点名）
+        _out['green'] = False                # 没跑完=不绿（红线：不得以截断换绿）
+        _out['err'] = ('套件总预算耗尽：已跑 %d 条、未跑 %d 条未开跑——不是产品红（这些场景'
+                       '根本没验到），是容量/预算面；未跑清单见 budget.unrun 与逐条 ENV_FAIL '
+                       '明细｜%s'
+                       % (ran, int(_budget_face.get('unrun_count') or 0),
+                          _budget_face.get('line') or ''))
+        _out['detail_red'].append({'budget_exhausted': _out['err']})
     if pool_exclude is not None:
         # t260913-03：排除面/例外分支必须点名到消费面（红线：少跑不得静默）
         if pool_exclude.get('applied') and executor_summary is not None:
@@ -1043,7 +1173,8 @@ def _baseline_root(_root, _ref):
     return None
 
 
-def _run_baseline(root, cmd, base, lane_timeout, env=None, extra_env=None):
+def _run_baseline(root, cmd, base, lane_timeout, env=None, extra_env=None,
+                  lane_wall=None):
     """main 基线跑（t260910-13 机械归属）：临时 detach worktree + 同一命令 +
     SANDBAR_POOL_CONC=1（降负载串行，C4/K6①）。借鉴 prepare_workspace 先例的
     取舍清单（gen1 方案 C3）逐项落地：
@@ -1057,6 +1188,8 @@ def _run_baseline(root, cmd, base, lane_timeout, env=None, extra_env=None):
     - 不带 supply 装配（那是泳道侧的事）：基线缺依赖 → 场景自身 not-checked，
       红名单口径只收 checked fail，不污染归属（C1）。
     extra_env：调用方追加旋钮（t260922-12 ④定点复跑注入 SANDBAR_SCENARIO_ONLY）。
+    lane_wall（260927）：调用方带上的**本道已耗墙钟**（供给 + 泳道跑面）——基线墙钟上限
+    由它从 lane_timeout 里扣出来，基线不越闸内截止（越了整轮验证被解析层丢弃）。
     返回 (ok, baseline_cases, err, baseline_ref, baseline_fp, deps_note)。
     deps_note=基线依赖软链点名文案（P1，仲裁 gen1：只进 stderr 闸日志+回执
     ledger 面，绝不进 stdout——工具 run 路径 stdout 只有唯一 JSON 信封，admin.py
@@ -1091,9 +1224,24 @@ def _run_baseline(root, cmd, base, lane_timeout, env=None, extra_env=None):
         sys.stderr.write('BASELINE_DEPS %s\n' % deps_note)
         sys.stderr.flush()
         bl_timeout = int(_os2.environ.get('SANDBAR_GATE_BASELINE_TIMEOUT_SEC') or 1800)
+        # 260927：基线是自己的**一趟**（泳道侧收口后另跑干净 worktree），它的墙钟只能
+        # 从「本道整体截止 − 已耗供给 − 泳道跑面」剩下的时间里出——不 min 就会越闸
+        # （基线 1800s 叠在满预算的泳道之上 = 闸内截止被越过 = 整轮验证被解析层丢弃）。
+        _elapsed = float(lane_wall or 0.0)
+        _remain = lane_timeout - _elapsed
+        if _remain < bl_timeout:
+            bl_timeout = max(1, int(_remain))
         # t260913-03：过滤开启时基线同 env（泳道/基线同口径；main 侧执行器认该 env
         # 后基线墙钟同步受益——合并前 main 版执行器无视它=恒全集，仅慢不假）
         env = dict(env if env is not None else _os2.environ, SANDBAR_POOL_CONC='1')
+        # 260927 基线**不吃跑者总预算**：该预算的语义是「套件本体（泳道侧场景跑面）到点
+        # 自行收口」，而基线是**另一趟**（干净 worktree 同命令）——继承同一份预算时它
+        # 一开跑就「预算已耗尽」（预算按进程起始算），会把自己的每一条都点名成
+        # 「未开跑/ENV_FAIL」，归属判定就吃到一份假基线（把没验到记成环境红）。
+        # **无条件摘除**（不看上游 env 在不在）：调用方（活动/场景/手跑）可能带着这份
+        # env 一路下来，基线必须自己免疫，而不是赌上游有没有。基线的墙钟由 bl_timeout
+        # 单独界定（上面按已耗墙钟 min 过，不越闸内截止）。
+        env.pop('SANDBAR_INTEG_RUN_BUDGET_SEC', None)
         if extra_env:
             env.update({str(k): str(v) for k, v in extra_env.items()})
         # 真进程组回收（验收走查 gen1 问题三：terminate→wait→kill 升级链，

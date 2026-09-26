@@ -413,6 +413,16 @@ class IntegrationRunResult:
     wall_s: float = 0.0
     subprocess_wall_s: float = 0.0
     handover_wall_s: float = 0.0
+    # 260927 跑者侧总预算回执面（additive；空=非预算轮，老回放零漂移）：执行器总预算
+    # 到点**自行收口**时，把「已跑/未跑」点名面结构化带上来（票面与回执据此点名是哪一段
+    # 没跑完，不得只落一个中性 ran=0）。
+    budget: Dict[str, Any] = field(default_factory=dict)
+    # 260927 供给段墙钟（闸回执 supply_used_sec；None=未测到→回执侧落 -1，绝不落 0 假值）：
+    # 供给与跑者两笔预算必须分别落账，事后归因才答得出「供给吃掉了多少」。
+    supply_used_sec: Optional[float] = None
+    # 260927 跑者**本体**墙钟（闸回执 runner_used_sec=integration.cmd 那一段；不含供给）：
+    # 与 wall_s/subprocess_wall_s 的分工——后两者是活动/子进程链整体，本键是场景跑面本身。
+    runner_used_sec: Optional[float] = None
 
 
 @dataclass

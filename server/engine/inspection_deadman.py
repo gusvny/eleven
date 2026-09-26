@@ -139,8 +139,9 @@ def ledger_periods(ledger_dir: Any, instance_id: str) -> Dict[str, Any]:
         if not name.endswith(LEDGER_SUFFIX) or not name.startswith("inspection-"):
             continue
         if name.endswith(SUITE_RECEIPT_SUFFIX) \
-                or name.endswith(VERDICTS_RECEIPT_SUFFIX):
-            continue  # 已知非台账件（套件回执 / t260916-22 裁定台账）
+                or name.endswith(VERDICTS_RECEIPT_SUFFIX) \
+                or re.search(r"-suite-late(?:-\d+)?\.json$", name):
+            continue  # 已知非台账件（套件回执 / 裁定台账 / 迟到孤儿回执 t260927）
         m = LEDGER_NAME_RE.match(name)
         if m is not None:
             if m.group("inst") == inst:
@@ -318,6 +319,33 @@ def suite_findings(receipt: Dict[str, Any]) -> List[Dict[str, Any]]:
             "环境红=不是代码红（供应/依赖/镜像缺席）；先修环境再判代码 ｜ 回执文件 %s"
             % (receipt.get("report_path") or "（未落回执）"),
             suggest=False))
+    # 260927 总预算耗尽（必做②）：**独立可见发现**——不是产品红（未跑的场景根本没验到）、
+    # 也不是「零信号」（中性 ran=0 会把诊断引向错误方向），更不是绿。点名已跑/未跑计数
+    # 与未跑批清单（执行器结构化带上来的 budget.unrun）；severity=high 且 suggest=false
+    # （容量/预算面，开「修码票」是错配）。
+    budget = receipt.get("budget") if isinstance(receipt.get("budget"), dict) else {}
+    if budget.get("exhausted"):
+        unrun = [str(x) for x in (budget.get("unrun") or [])]
+        findings.append(make_finding(
+            SUITE_SCAN, "high",
+            "套件总预算耗尽：未跑完 %s 条" % (budget.get("unrun_count") or len(unrun)),
+            "已跑 %s 条后到点自行收口（预算 %ss）——未跑批清单：%s ｜ 不是产品红：这些场景"
+            "根本没验到；处置=抬预算/缩面/拆批后再跑，不得以截断换绿 ｜ 回执文件 %s"
+            % (receipt.get("ran", 0), budget.get("budget_sec") or "未记",
+               "、".join(unrun[:20]) if unrun else "（执行器未带清单，见回执逐条 ENV_FAIL 行）",
+               receipt.get("report_path") or "（未落回执）"),
+            suggest=False))
+    # 260927 迟到孤儿回执（必做③）：这份件不代表套件结果（活动超时后孤儿进程写的）——
+    # 点名它并显式说明「不得当套件结论消费」；它的 error 已在上方按「未跑成」报过红，
+    # 这里补一条可读的处置指引（重跑下一期 / 手查泳道）。
+    if receipt.get("late"):
+        findings.append(make_finding(
+            SUITE_SCAN, "high", "套件回执是迟到孤儿件（不代表套件结果）",
+            "活动超时后孤儿进程写盘，已换名落 -suite-late.json 不覆盖权威件：%s ｜ "
+            "权威结论见本期落账/时段与下一期 ｜ 回执文件 %s"
+            % (_tail(receipt.get("late_error"), 300),
+               receipt.get("report_path") or "（未落回执）"),
+            suggest=False))
     return findings
 
 
@@ -331,7 +359,10 @@ def suite_section(receipt: Dict[str, Any], wall_seconds: Any = None) -> Dict[str
     details = receipt.get("details") if isinstance(receipt.get("details"), list) else []
     cases = [{"name": str(d.get("name") or ""), "exit": int(d.get("exit") or 0)}
              for d in details if isinstance(d, dict)]
-    return {
+    # 260927：套件段透出「超时/预算耗尽/迟到孤儿」三态与两笔分相墙钟（供给/跑者）——
+    # 票面与报告要能把「跑不完」与「没跑成」分开读，不得只剩一个中性 ran=0。
+    # 缺键（老回放/老载荷形态）一律不进新键，逐字节零回归。
+    out = {
         "ok": not str(receipt.get("error") or "").strip(),
         "error": str(receipt.get("error") or ""),
         "ran": int(receipt.get("ran") or 0),
@@ -346,6 +377,18 @@ def suite_section(receipt: Dict[str, Any], wall_seconds: Any = None) -> Dict[str
         "blockers": [str(b) for b in (receipt.get("blockers") or [])],
         "cases": cases,
     }
+    if receipt.get("suite_timeout"):
+        out["suite_timeout"] = True
+        out["suite_timeout_sec"] = float(receipt.get("suite_timeout_sec") or 0.0)
+    if receipt.get("late"):
+        out["late"] = True
+        out["late_error"] = str(receipt.get("late_error") or "")
+    if isinstance(receipt.get("budget"), dict) and receipt["budget"]:
+        out["budget"] = dict(receipt["budget"])
+    for k in ("supply_used_sec", "runner_used_sec", "run_budget_sec", "supply_timeout_sec"):
+        if receipt.get(k) is not None:
+            out[k] = receipt[k]
+    return out
 
 
 def suite_green(section: Any) -> bool:

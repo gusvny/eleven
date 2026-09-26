@@ -29,6 +29,7 @@ run_inspection_scan remains only on the legacy replay path — t260916-22).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -76,10 +77,78 @@ SCAN_TO = timedelta(minutes=15)
 # test_t260913_01_integ_budget_pair.py 与 test_t260924_05_ki116_budget.py 机械锁定。
 with workflow.unsafe.imports_passed_through():
     from agent_activities import INTEG_GUARD_SEC
-SUITE_TO = timedelta(seconds=INTEG_GUARD_SEC + 1800)
+# 260927 套件段三段预算（宿主实测校准；单一算出点全在本区块，锁测试=budget 文件）：
+#
+#  ① 供给上限 INTEG_SUPPLY_TO_SEC（integration.supply：daemon-probe + `stage_docker
+#     ensure --services full`）——实测 ≈40min（活动 23:41:19 派出 → 跑者 integration.cmd
+#     约 08:21 才启动）。给 3600s（60min，实测 + 余量）。它是**独立具名预算**：到点/失败
+#     返回点名「供给段」的红，绝不与跑者的场景预算混成一笔（混成一笔就会互相吃，正是
+#     t260927-01 的病根：供给 40min + 跑者 47min = 87min > 活动超时 85min，活动在跑者
+#     差约 2 分钟收尾时被判死，随即拆泳道、孤儿写盘撞 ENOENT、迟到回执覆盖权威件）。
+#  ② 跑者总预算 SUITE_RUN_BUDGET_SEC（套件本体）——实测 319 场景 sum(wall_s)=2630s
+#     （≈44min），最慢单场景 310s，量化基线 179~2834s 波动。缺省按算式（下）得 5400s
+#     （90min，实测 2× 余量，给并发抖动与长尾场景）；下限硬钉 MIN_SUITE_RUN_BUDGET_SEC
+#     =5400s：运维把 SANDBAR_INTEG_BATCH_TIMEOUT_SEC 往**小**调时预算不许跟着缩到截断真
+#     套件的地步（往大调则自动同抬——算式在，人守纪律退役）。
+#  ③ 活动超时 SUITE_TO = 供给上限 + 跑者总预算 + 余量 SUITE_MARGIN_SEC（600s：跑者收口
+#     打印 + 闸解析 + 活动确认泳道并写盘）。缺省 3600+5400+600=9600s（160min）。
+#
+# 三条不等式（锁测试 test_t260924_05_ki116_budget.py 新增断言，旧断言只加不减）：
+#   INTEG_GUARD_SEC < 跑者总预算 < SUITE_TO
+#   供给上限 + 跑者总预算 + 余量 ≤ SUITE_TO
+#   （另有：跑者总预算 < 子进程链截止 < SUITE_TO，见 integ_subprocess_timeout。）
+INTEG_SUPPLY_TO_SEC = 3600.0          # 供给段上限（env SANDBAR_SUPPLY_TIMEOUT_SEC 同名单点）
+MIN_SUITE_RUN_BUDGET_SEC = 5400.0     # 跑者总预算下限（实测 2630s 串行 + 并发/抖动余量）
+SUITE_MARGIN_SEC = 600.0              # 活动超时相对「供给+跑者」的余量
+
+
+def suite_run_budget_of(guard_sec: float = INTEG_GUARD_SEC) -> float:
+    """跑者侧总预算算式（唯一算出点；单测直调）：派生自内层守卫，落地下限。
+
+    算式 `2×guard = 2×(BATCH+300)`：运维抬 SANDBAR_INTEG_BATCH_TIMEOUT_SEC 时预算自动
+    同抬（旧写死值的病根清零）。floor 到 MIN_SUITE_RUN_BUDGET_SEC：守卫被调小时预算不
+    缩水（截断真套件 ≠ 预算纪律）。"""
+    return max(2.0 * float(guard_sec), MIN_SUITE_RUN_BUDGET_SEC)
+
+
+def suite_timeout_of(supply_sec: float = INTEG_SUPPLY_TO_SEC,
+                     run_budget_sec: Optional[float] = None,
+                     margin_sec: float = SUITE_MARGIN_SEC) -> float:
+    """活动超时算式（唯一算出点；单测直调）= 供给上限 + 跑者总预算 + 余量。
+
+    三者必须同源派生（供给与跑者各是**独立具名预算**，活动超时是它们的上界）——任何
+    一处手写都会重新长出「活动比实际需要更早判死」的错配。"""
+    budget = suite_run_budget_of() if run_budget_sec is None else float(run_budget_sec)
+    return float(supply_sec) + budget + float(margin_sec)
+
+
+# 跑者总预算（workflow 下单给活动 → 活动经 env 下发给执行器）
+SUITE_RUN_BUDGET_SEC = suite_run_budget_of()
+# 套件阶段 start_to_close（旧注记 t260924-05 KI-116 单源化保留在下方）：自供给上限与跑者
+# 总预算**派生**=两者之和 + 巡检余量（恒全跑、不经池排除，全集比每票集测长）。
+# 缺省 3600+5400+600=9600s≈160min（旧值 5100s≈85min 被实测 87min 击穿——见上方①）。
+SUITE_TO = timedelta(seconds=suite_timeout_of(INTEG_SUPPLY_TO_SEC, SUITE_RUN_BUDGET_SEC))
+# 跑者总预算余量（套件段超时修复，260927 实况）：跑者必须在活动判死之前**自行收口**，
+# 余量给三段：跑者收口打印 + 闸解析 + 活动确认泳道并写盘。
+SUITE_RUN_MARGIN_SEC = 600.0
+
+
+def suite_run_budget_sec(timeout_sec: float = None,
+                         margin_sec: float = SUITE_RUN_MARGIN_SEC) -> float:
+    """跑者总预算（与 SUITE_TO 同一算出点；给需要显式投影的调用方）。
+
+    缺省（timeout 未给）=模块级 SUITE_RUN_BUDGET_SEC——**单一真源**：算式改了这里跟着
+    改，调用方不重算。显式传 timeout 的旧调用面保留（`timeout − margin`），仅作投影。"""
+    if timeout_sec is None:
+        return float(SUITE_RUN_BUDGET_SEC)
+    return float(timeout_sec) - float(margin_sec)
 # 套件活动不自动重试：整轮全集重跑代价高（小时级），且「跑不成/跑红」本身就是票面数据
 # （进发现清单+回执，人审/次日再跑），Temporal 重试只会把同一份失败重复烧一遍墙钟。
 RETRY_SUITE = RetryPolicy(maximum_attempts=1)
+# 套件段硬超时后的拆泳道宽限（必做④「teardown 不得与仍在跑的活动抢目录」）：Temporal
+# 判死活动时**子进程链不被回收**（活动被杀≠孙进程死），立刻拆泳道会让孤儿进程写盘时
+# 撞 ENOENT，产出误导回执。故超时分支先等这一小段（给跑者自己到点收口的时间窗），再拆。
+SUITE_TIMEOUT_TEARDOWN_GRACE = timedelta(seconds=120)
 # inspect 段不自动重试（t260916-22）：重试=重烧一次 LLM 配额，且「agent 未完成/输出
 # 不合格」本身就是票面数据（blocked 可见、下期再来）——同 RETRY_SUITE 纪律。
 RETRY_INSPECT = RetryPolicy(maximum_attempts=1)
@@ -334,6 +403,89 @@ def sweep_plan(worktree_entries: Any, branch_names: Any, instance_id: str,
             out["remove_branches"].append(br)
     return out
 
+
+
+# ========================================================================================
+# 套件段故障具名（260927 修复，必做②/④）：超时必须点名是哪一段，且不得与一般故障混装
+# ========================================================================================
+
+def is_activity_timeout_error(exc: Any) -> bool:
+    """异常是否为 Temporal 活动**超时**（区别于一般故障，必做④的判据单点）。
+
+    判据只认类型，不认文案：temporalio 在 start_to_close 到点时抛
+    `temporalio.exceptions.TimeoutError`（**实测签名/SDK 形态**，ActivityError 是
+    「活动失败」的另一族，不承载超时）——故本函数认三处：
+      ① temporalio 的 TimeoutError 本体（生产链真形态）；
+      ② asyncio.TimeoutError（工作流体/桩态直调、SDK 版本差异形态）；
+      ③ 任何异常的 __cause__/__context__ 链上的上述两类（包装层形态）。
+    **绝不靠 str(e) 里有没有 "timeout" 字样**——文案随 SDK 版本漂移，判据随文案漂移
+    就是下一次「归因错」。未知类型一律 False（保守：落一般故障分支，可见且点名类型）。"""
+    try:
+        from temporalio.exceptions import TimeoutError as _ActivityTimeoutError
+    except Exception:                     # noqa: BLE001——SDK 不在场（纯单测环境）：只认 asyncio
+        _ActivityTimeoutError = ()        # type: ignore[assignment]
+    hits = (asyncio.TimeoutError,) if not _ActivityTimeoutError \
+        else (asyncio.TimeoutError, _ActivityTimeoutError)
+    if isinstance(exc, hits):
+        return True
+    cur: Any = exc
+    for _ in range(6):                      # 因果链有限深度，防自引用死循环
+        cause = getattr(cur, "__cause__", None) or getattr(cur, "__context__", None)
+        if cause is None or cause is cur:
+            break
+        if isinstance(cause, hits):
+            return True
+        cur = cause
+    return False
+
+
+def suite_failure_receipt(exc: BaseException, timeout_sec: float) -> Dict[str, Any]:
+    """套件活动异常 → 具名回执（纯函数，单测主面）。
+
+    两态必须可辨（必做④）：超时 → `suite_timeout=True` 且 error 点名套件段超时与超时值；
+    一般故障 → `suite_timeout=False` 且 error 点名异常类型。两态 ran/passed/failed/
+    env_fail 都是 0 **但 error 非空**——「回执是故障台账，不是套件结果」这句话必须写在
+    回执里（旧实现只给 ran=0 与一句含糊 error，归因指向「零场景信号」，把诊断引向错误
+    方向：真因是活动超时，不是套件没跑）。"""
+    if is_activity_timeout_error(exc):
+        err = ("套件段超时：SUITE_TO=%ds 内未返回（活动被判死；本回执是故障台账，"
+               "不代表套件结果——套件可能仍在跑，权威结论见本期时段与下一期）"
+               % int(timeout_sec))
+    else:
+        err = "套件活动故障：%s: %s" % (type(exc).__name__, exc)
+    return {"error": err, "details": [], "ran": 0, "passed": 0, "failed": 0,
+            "env_fail": 0, "suite_timeout": bool(is_activity_timeout_error(exc)),
+            "suite_timeout_sec": float(timeout_sec) if is_activity_timeout_error(exc) else 0.0}
+
+
+# 迟到套件回执换名后缀（必做③）：活动超时后仍存活的孤儿进程写盘时泳道/目录可能已不在，
+# 它的回执**不代表套件结果**，绝不能覆盖权威回执文件。名字单点在此（inspection_deadman
+# 的台账扫描认这个后缀为「已知非台账件」）。
+SUITE_LATE_SUFFIX = "-suite-late"
+#: 迟到回执 error 文案头（点名它是谁、为什么不可信；单测与 scene 都读这一串）。
+SUITE_LATE_ERROR_PREFIX = "活动超时后孤儿进程"
+
+
+def suite_late_receipt_name(base_name: str, index: int = 1) -> str:
+    """迟到回执文件名：`<base>-suite-late.json`（碰撞时 `-2/-3…`，绝不覆写）。
+
+    base_name 是 canonical 回执名（`inspection-<实例>-<期>-suite.json`）——迟到件与
+    canonical 同目录、名字显式带 late，读者一眼可辨「这份不是套件结果」。"""
+    stem = str(base_name or "")
+    if stem.endswith(".json"):
+        stem = stem[:-len(".json")]
+    else:                                   # 非 .json / 空名：仍给可辨名，不抛（写面 fail-loud）
+        stem = stem or "inspection-suite"
+    tail = ".json" if index <= 1 else "-%d.json" % int(index)
+    return "%s%s%s" % (stem, SUITE_LATE_SUFFIX, tail)
+
+
+def _write_exclusive(path: Path, text: str) -> Path:
+    """exclusive create 写入（'x' 模式）：目标已存在 → FileExistsError 冒泡给调用方
+    换号。迟到回执**绝不覆写**任何已有文件（无静默覆盖纪律，_archive_if_other_run 同款）。"""
+    with open(path, "x", encoding="utf-8") as fh:
+        fh.write(text)
+    return path
 
 
 def validate_trigger_args(instance_id: str, period: str) -> Optional[str]:
@@ -597,7 +749,9 @@ def write_inspection_report_impl(face: Dict[str, Any], out_dir: Path,
 
 def write_inspection_suite_receipt_impl(instance_id: str, period: str,
                                         receipt: Dict[str, Any], out_dir: Path,
-                                        now_fn: Callable[[], float] = time.time) -> Dict[str, Any]:
+                                        now_fn: Callable[[], float] = time.time,
+                                        fallback_name: str = "",
+                                        late_error: str = "") -> Dict[str, Any]:
     """套件回执落盘（t260913-02；t260916-02 文件名按实例+期派生）：
     out/inspection/inspection-<实例>-<期>-suite.json（同票重跑覆盖）。
 
@@ -605,7 +759,17 @@ def write_inspection_suite_receipt_impl(instance_id: str, period: str,
     与 deadman 条目都指回这个文件（可下钻，验收 B/D 的「可读」面）。文件名以 -suite.json
     结尾，台账扫描（inspection_deadman.ledger_periods）显式识别为已知非台账件。
     instance/period 双缺时回落**legacy 只读解析** receipt.ticket_id（旧形 id 含实例/期；
-    服务老在途票重放——读面，绝不铸造旧形新票）。"""
+    服务老在途票重放——读面，绝不铸造旧形新票）。
+
+    fallback_name / late_error（260927 迟到孤儿面，必做③）：活动在写盘前已确认泳道/目录
+    不在（给出迟到原因）→ 本回执**不代表套件结果**，绝不写 canonical 名（那会覆盖权威
+    回执，t260927-01 实况），改落 `-suite-late[-N].json`（exclusive create，碰撞换号，
+    绝不覆写任何已有文件），error 点名「活动超时后孤儿进程…」。回执键 additive：
+    late=True + late_error 便于读者与运维一眼分流。两参数任一非空即迟到（换名一律由
+    本函数按单点算，调用方不自己拼文件名）。
+
+    两态（canonical / late）都先经 _archive_if_other_run 留史：跨票覆盖前旧件搬 archive/，
+    同票自身重写不归档（旧语义逐字不变）。"""
     instance_id = str(instance_id or "")
     period = str(period or "")
     if not instance_id or not period:
@@ -616,14 +780,44 @@ def write_inspection_suite_receipt_impl(instance_id: str, period: str,
         instance_id, period = m.group(1), m.group(2)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / (inspection_ledger_name(instance_id, period)[:-len(".json")]
-                      + "-suite.json")
-    archived = _archive_if_other_run(path, str((receipt or {}).get("ticket_id") or ""), now_fn=now_fn)
-    path.write_text(json.dumps(dict(receipt or {}), ensure_ascii=False, indent=2),
+    base_name = (inspection_ledger_name(instance_id, period)[:-len(".json")]
+                 + "-suite.json")
+    payload = dict(receipt or {})
+    # 迟到判据：调用方给出迟到**原因**（late_error）或显式换名（fallback_name）即迟到——
+    # 两个入口都收（调用点只给原因；换名由本函数按单点算，调用方不自己拼文件名）。
+    late = bool(str(fallback_name or "").strip() or str(late_error or "").strip())
+    if late:
+        payload["late"] = True
+        payload["late_error"] = str(late_error or "")
+        target = None
+        for n in range(1, 100):              # 迟到件绝不覆写：存在即换号
+            cand = out_dir / suite_late_receipt_name(base_name, n)
+            try:
+                _write_exclusive(
+                    cand, json.dumps(payload, ensure_ascii=False, indent=2))
+                target = cand
+                break
+            except FileExistsError:
+                continue
+            except OSError as e:
+                raise OSError("迟到套件回执落盘失败（不覆写 canonical）：%s: %s"
+                              % (type(e).__name__, e)) from e
+        if target is None:
+            raise OSError("迟到套件回执换号耗尽（%s-*.json 已有 99 件，绝不覆写）"
+                          % (base_name[:-len(".json")] + SUITE_LATE_SUFFIX))
+        return {"file": target.name, "path": str(target),
+                "ticket_id": str(payload.get("ticket_id") or ""),
+                "instance_id": instance_id, "period": period,
+                "late": True, "late_error": str(late_error or ""),
+                "archived": False, "archive_path": "", "archive_error": ""}
+    path = out_dir / base_name
+    archived = _archive_if_other_run(path, str(payload.get("ticket_id") or ""),
+                                     now_fn=now_fn)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
                     encoding="utf-8")
     return {"file": path.name, "path": str(path),
-            "ticket_id": str((receipt or {}).get("ticket_id") or ""),
-            "instance_id": instance_id, "period": period,
+            "ticket_id": str(payload.get("ticket_id") or ""),
+            "instance_id": instance_id, "period": period, "late": False,
             "archived": archived["archived"],
             "archive_path": archived["archive_path"],
             "archive_error": archived["archive_error"]}
@@ -980,6 +1174,16 @@ class InspectionPeriodicWorkflow:
             suite_section, suite_findings, teardown_note = await self._run_suite(
                 ticket_id, inp, period, lane or {})
             extra_findings += suite_findings
+            if suite_section.get("suite_timeout"):
+                # 套件段硬超时（活动被判死）：本段必须自己点名——拆泳道前先等一小段，
+                # 不与**未被回收的子进程链**抢目录（它们此刻还能写盘，抢了就会产出
+                # 「admin.log ENOENT」那种把真因引偏的迟到回执，t260927-01 实况）。
+                self._enter("suite", "running",
+                            "套件段硬超时：%s" % (suite_section.get("error") or "")[:160])
+                await workflow.sleep(SUITE_TIMEOUT_TEARDOWN_GRACE)
+                self._enter("suite", "running",
+                            "套件段硬超时：等待 %ds 后拆泳道（不与未回收的子进程抢目录）"
+                            % int(SUITE_TIMEOUT_TEARDOWN_GRACE.total_seconds()))
             self._enter("suite", "running", "泳道拆除：%s" % teardown_note)
             if teardown_note.startswith("未净"):
                 from inspection_deadman import make_finding
@@ -1204,7 +1408,11 @@ class InspectionPeriodicWorkflow:
         由人审/次日消化——绝不让一次套件故障把巡检期票变成不可读的崩。
         t260916-02：activity args 增 instance_id/period（套件回执文件名按实例+期派生，
         票号 t 形化后不再能从票号反解；老 history 重放用记录的旧 args，activity 侧对
-        缺键回落 legacy 只读解析，确定性不受影响）。"""
+        缺键回落 legacy 只读解析，确定性不受影响）。
+        260927：args 增 run_budget_sec（跑者侧总预算）与 supply_timeout_sec（供给段独立
+        上限）——套件到点自行收口返回，供给到点点名报红，两者都不再等 Temporal 判死；
+        异常分支两态具名（超时 vs 一般故障，见 suite_failure_receipt），超时后拆泳道前先
+        等一小段（不与被判死后仍存活的子进程抢目录，免得产出 ENOENT 那种误导回执）。"""
         from inspection_deadman import suite_findings, suite_section
         receipt: Dict[str, Any]
         try:
@@ -1212,7 +1420,10 @@ class InspectionPeriodicWorkflow:
                 "run_inspection_suite",
                 args=[{"ticket_id": ticket_id, "worktree": lane.get("worktree", ""),
                        "base_ref": lane.get("base_ref", ""),
-                       "instance_id": inp.instance_id, "period": period}],
+                       "instance_id": inp.instance_id, "period": period,
+                       "run_budget_sec": float(SUITE_RUN_BUDGET_SEC),
+                       "supply_timeout_sec": float(INTEG_SUPPLY_TO_SEC),
+                       "suite_timeout_sec": float(SUITE_TO.total_seconds())}],
                 start_to_close_timeout=SUITE_TO, retry_policy=RETRY_SUITE)
             if (raw or {}).get("ok"):
                 receipt = dict((raw or {}).get("result") or {})
@@ -1220,8 +1431,7 @@ class InspectionPeriodicWorkflow:
                 receipt = {"error": str((raw or {}).get("error") or "套件活动失败"),
                            "details": [], "ran": 0, "passed": 0, "failed": 0, "env_fail": 0}
         except Exception as e:  # noqa: BLE001——活动故障=可见数据（high 发现），不是期票崩塌
-            receipt = {"error": "套件活动故障：%s: %s" % (type(e).__name__, e),
-                       "details": [], "ran": 0, "passed": 0, "failed": 0, "env_fail": 0}
+            receipt = suite_failure_receipt(e, SUITE_TO.total_seconds())
         findings = suite_findings(receipt)
         teardown_note = await self._teardown(ticket_id, lane, report_residue=True)
         return suite_section(receipt), findings, teardown_note

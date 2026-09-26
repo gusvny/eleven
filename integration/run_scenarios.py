@@ -2419,6 +2419,99 @@ def _batch_signal_teardown(signum, frame):
     os._exit(130)
 
 
+# ========================================================================================
+# 总预算（260927）：巡检套件段必须在活动超时之前**自行收口**返回，而不是被 Temporal
+# 判死。硬杀=零信号+迟到孤儿回执覆盖权威件（t260927-01 实况：活动 85min 被判死，
+# 超时后 2.5min 才落一行中性 ran=0；真因是超时，不是「套件没跑」）。
+# ========================================================================================
+
+#: 总预算 env（引擎侧 = inspection_flow.SUITE_RUN_BUDGET_SEC 派生，经活动载荷下发）。
+#: 缺省/畸形/非正 = 不启用（每票集测段与历史手跑逐字节零改动）。
+RUN_BUDGET_ENV = "SANDBAR_INTEG_RUN_BUDGET_SEC"
+
+
+def parse_run_budget(raw):
+    """总预算解析（纯函数）：缺省/空/畸形/非正 → 0.0（不启用，绝不猜一个预算出来）。"""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return 0.0
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    return v if v > 0 else 0.0
+
+
+def _deadline_of(t0, budget):
+    """总预算截止（单调钟）；budget<=0 → None（不启用）。"""
+    return (t0 + budget) if budget > 0 else None
+
+
+def _budget_left(t0, budget):
+    """剩余预算秒；不启用 → None。"""
+    if budget <= 0:
+        return None
+    return budget - (time.monotonic() - t0)
+
+
+def _fmt_left(left):
+    return "未启用" if left is None else "还剩 %.0fs" % left
+
+
+def _budget_exhausted_exit(t0, budget, run_unrun, ran, passed, failed, env_failed,
+                           wall, expected, prelude_s=0.0):
+    """总预算耗尽收口（260927）：点名「跑了几条/还剩哪些没跑」后**立刻退出**。
+
+    为什么是 os._exit 而不是正常返回：预算耗尽意味着外层截止近在眼前，而存活池线程
+    里可能还压着小时级场景（等它 join 就等于把硬杀又请回来，且会盖掉本收口面的点名）。
+    收口次序=先拆批台（有界超时，不让「拆台」这一段又把预算吃掉）→ 打全点名面 → flush
+    → os._exit(2)。exit=2=环境红（容量/预算面，非代码红）——绝不 exit 0 冒充绿，也绝不
+    exit 1 诬成产品红（跑不完的场景根本没验到，不是它们红了）。
+
+    点名面三件（必做②）：
+      - `FAIL [__budget__]` 一行汇总（谁把预算吃完了、已跑/未跑计数）；
+      - 逐条未跑 `ENV_FAIL [<名字>] exit=2`（哪几条没跑，闸/票面据此可读，且与
+        「跑红」显式分流——env_fail 而非 fail 计数）；
+      - `INTEG_BUDGET_EXHAUSTED` 标记行 + INTEG_SUMMARY 的 `budget` 块（未跑批清单
+        结构化），闸侧据此把「未跑完」当**独立可见发现**上报，不当零信号、不当产品红。
+
+    计数口径：未跑条目计入 **env_fail**（容量面环境红），并**计入 ran**——这样
+    `ran == pass+fail+env_fail` 与 `ran == expected` 两条自洽不变式同时成立：既不给
+    「清单残缺」伪红，也不让未跑的条目冒充已跑（明细行逐条点名它的名字与原因）。
+    「**已跑**」在文案里只算到点前真正开跑的那些（ran 计入未跑条目之后 print 会撒谎）。"""
+    executed = int(ran)                     # 到点时真正跑完的条数（未跑条**不计入此数**）
+    env_failed += len(run_unrun)
+    ran += len(run_unrun)
+    print("FAIL [__budget__] 总预算耗尽（%ds）：已跑 %d/%d 条、未跑 %d 条——"
+          "执行器自行收口，不等外层硬杀（260927 套件段预算纪律）"
+          % (int(budget), executed, expected, len(run_unrun)), flush=True)
+    for name, pool in run_unrun:
+        print("ENV_FAIL [%s] exit=2 (0.0s)\n    总预算耗尽：未开跑（池=%s）——"
+              "本条不是跑红，是没验到（容量面）" % (name, pool), flush=True)
+    print("SCENARIOS ran=%d pass=%d fail=%d env_fail=%d na=0 (%.0fs)"
+          % (ran, passed, failed, env_failed, wall), flush=True)
+    print("INTEG_BUDGET_EXHAUSTED 总预算耗尽：已跑 %d/%d 条、未跑 %d 条、墙钟 %.0fs／预算 %ds"
+          % (executed, expected, len(run_unrun), wall, int(budget)), flush=True)
+    try:
+        print("INTEG_SUMMARY " + json.dumps(
+            {"ran": ran, "pass": passed, "fail": failed, "not_checked": env_failed,
+             "wall_s": round(wall, 1), "expected": expected,
+             "timings": {"prelude_s": round(float(prelude_s), 1),
+                         "scenarios_s": round(max(0.0, wall - float(prelude_s)), 1)},
+             "budget": {"exhausted": True, "budget_sec": int(budget),
+                        "executed": executed, "unrun_count": len(run_unrun),
+                        "unrun": [n for n, _p in run_unrun][:200]}},
+            ensure_ascii=False), flush=True)
+    except Exception as _ex:   # noqa: BLE001——汇总行失败不改收口（观测面）
+        print("INTEG_SUMMARY_ERROR %r" % _ex, flush=True)
+    batch_teardown()
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except (OSError, ValueError):
+        pass
+    os._exit(2)
+
+
 def main(exclude_pools=None, only_scenarios=None) -> int:
     # t260925-08：引擎缺省已翻 refuse（undeclared=拒收）。集成跑台是测试台：大量场景
     # 以仓内 cwd 直调 ticket/client（身份=undeclared）做同项目票操作，语义上并非跨项目
@@ -2464,6 +2557,15 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
     ran = passed = failed = env_failed = 0
     t0 = time.time()
     lock = threading.Lock()
+    # ---- 260927 总预算（缺省零分支：env 缺席=0=本段一行不启用，逐字节同改前）----
+    # 单调钟计预算：墙钟可能被 NTP 跳变影响，截止判定用它不稳。
+    run_budget = parse_run_budget(os.environ.get(RUN_BUDGET_ENV))
+    t_mono = time.monotonic()
+    #: 预算耗尽时**未开跑**的条目（name, pool），收口面逐条点名（必做②「未跑批清单」）。
+    run_unrun = []
+    if run_budget > 0:
+        print("INTEG_BUDGET 总预算 %ds 生效（%s）：到点自行收口并点名已跑/未跑，"
+              "不等外层硬杀" % (int(run_budget), RUN_BUDGET_ENV), flush=True)
     # ---- t260913-03 池排除（缺省零分支：无 env/CLI 时 excluded=[]，逐字节同改前）----
     excluded, bad_tokens = parse_exclude_pools(
         os.environ.get("SANDBAR_SCENARIO_EXCLUDE_POOLS")
@@ -2543,21 +2645,44 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
 
     def _drain(entries, pool_name):
         """Run one pool: serial entries strictly one after another (relative
-        order preserved), the rest fan out at the concurrency width."""
+        order preserved), the rest fan out at the concurrency width.
+
+        260927 总预算：串行面**逐条**判预算（到点即把剩余条目记进未跑清单并返回），
+        并发面在提交阶段判（已在飞的条目跑到自己结束——预算余量就是留给这一段的）。
+        预算未启用（env 缺席）时两个判据恒 None 短路，行为逐字节同改前。"""
         nonlocal ran, passed, failed, env_failed
         serials = [e for e, s in entries if s]
         concs = [e for e, s in entries if not s]
         for e in serials:
+            left = _budget_left(t_mono, run_budget)
+            if left is not None and left <= 0:
+                run_unrun.append((e[0], pool_name))
+                continue
             _emit(e, pool_name)
         if not concs:
             return
         width = conc_pools.get(pool_name, 1)
         if width <= 1:
             for e in concs:
+                left = _budget_left(t_mono, run_budget)
+                if left is not None and left <= 0:
+                    run_unrun.append((e[0], pool_name))
+                    continue
                 _emit(e, pool_name)
             return
-        with ThreadPoolExecutor(max_workers=min(width, len(concs))) as tex:
-            futs = [tex.submit(_emit, e, pool_name) for e in concs]
+        launch, held = [], []
+        for e in concs:
+            left = _budget_left(t_mono, run_budget)
+            if left is not None and left <= 0:
+                held.append(e)
+            else:
+                launch.append(e)
+        for e in held:
+            run_unrun.append((e[0], pool_name))
+        if not launch:
+            return
+        with ThreadPoolExecutor(max_workers=min(width, len(launch))) as tex:
+            futs = [tex.submit(_emit, e, pool_name) for e in launch]
             for f in futs:
                 f.result()   # re-raise scenario exceptions = product-red attribution, never swallowed
 
@@ -2609,6 +2734,17 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
     _pre_t0 = time.time()   # t260925-12：套件前奏（清扫+台面卫生+批台预起）墙钟，闸段归因观测面
     _sweep_residue_stages()   # t260912-02 清理挂点①：套件前残台清扫（判拆点名；失败响亮不中止）
     _docker_hygiene()   # 起跑前台面卫生（t260910-14 arbitrate gen2/gen3：见函数注）
+    # ---- 260927 前奏预算闸：前奏（清扫+卫生+预起）把预算吃掉了就在此收口，绝不开跑 ----
+    # （预起失败分支同样是环境红 2；两者都「零场景开跑」，只是归因不同，不混装）
+    _prelude_left = _budget_left(t_mono, run_budget)
+    if _prelude_left is not None and _prelude_left <= 0:
+        all_entries = list(exclusives) + [e for _lst in pools.values() for (e, _s) in _lst]
+        run_unrun.extend((e[0], pool_of(e)) for e in all_entries)
+        print("FAIL [__budget__] 总预算在前奏（清扫+台面卫生+批台预起）里已耗尽——"
+              "本轮零场景开跑（%s）" % _fmt_left(_prelude_left), flush=True)
+        _budget_exhausted_exit(t_mono, run_budget, run_unrun, ran, passed, failed,
+                               env_failed, time.time() - t0, len(registry),
+                               prelude_s=time.time() - _pre_t0)
     # ---- t260921-06 批台预起（清扫后、场景前）：恰一批消费者轮=恰起 1 个批台 ----
     selected = list(exclusives) + [e for _lst in pools.values() for (e, _s) in _lst]
     consumers = batch_consumers(selected)
@@ -2662,6 +2798,27 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
     # so at runner level it is always 0 — kept as a placeholder for the shape.
     # ran=pass+fail+env_fail is the "clean in both directions" invariant;
     # violating it = the summary is lying, exit product red (runner self-check).
+    #
+    # 260927 总预算耗尽的收口（**先于**这里的正常汇总）：预算被场景吃光时不再等任何
+    # 存活线程，立刻点名收口（墙钟恰在预算上=外层截止近在眼前，等 join 等于把硬杀请
+    # 回来，还会盖掉点名面）。次序=逐条未跑点名 → 自洽的 SCENARIOS 行 → 汇总行 →
+    # INTEG_BUDGET_EXHAUSTED 标记行 → 拆批台 → os._exit(2)。
+    _left_now = _budget_left(t_mono, run_budget)
+    if run_unrun:
+        # 真·耗尽：有条目**没开跑**（预算被前面的场景吃光）→ 未跑清单收口（exit 2）
+        expected_b = len(registry) if only_names \
+            else (len(SCENARIOS) - len(excluded_entries))
+        wall_b = time.time() - t0
+        _budget_exhausted_exit(t_mono, run_budget, run_unrun, ran, passed, failed,
+                               env_failed, wall_b, expected_b,
+                               prelude_s=_prelude_s)
+    if _left_now is not None and _left_now <= 0:
+        # 越窗（**不是**「没跑完」）：全部条目都跑了，只是墙钟越过了预算——观测面点名
+        # （additive 行，绝不改判红绿：跑完且全绿就是绿）。与「耗尽」严格分流：混成一个
+        # 词就是把「跑完了但慢」诬成「没跑完」，归因就又被引偏了。
+        print("INTEG_BUDGET_OVERRUN 总预算 %.0fs 已越窗（实际墙钟 %.0fs）：本轮 %d 条都跑了，"
+              "绿红照常判——本行只是观测面点名"
+              % (run_budget, time.time() - t0, ran), flush=True)
     consistent = (ran == passed + failed + env_failed)
     wall = time.time() - t0
     # t260911 仲裁③：ran==在册数是唯一机械不变式（汇总自洽挡不住条目级丢失）
