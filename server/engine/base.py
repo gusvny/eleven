@@ -87,7 +87,13 @@ GATE_TO = timedelta(minutes=15)
 # Agent stages: a headless agent is a long runner — give start_to_close plenty of
 # room, heartbeats keep it alive (the activity side heartbeats every 5s).
 AGENT_TO = timedelta(hours=6)
-HEARTBEAT_TO = timedelta(minutes=3)
+# 260927（宿主令直修；实案 t260926-05/t260927-03/t260927-04 一小时内三票同形 blocked）：
+#   3 分钟静默阈值会**误杀仍在干活的 agent**——实锤：验收 agent 02:09 spawn、02:41 被判死后
+#   会话文件最后写入时刻恰是 02:41（一直有产出），AGENT_TO=6h 远未到 ⇒ 死因=心跳断供≥3min。
+#   切到更慢的路由（zai-coding-cn/glm-5.3）后单次调用更长，长模型/长工具步内 3 分钟无心跳是常态。
+#   故放宽到 15 分钟（宁可晚发现真卡死，不可续杀在干活的 agent）；后续应改成「进展驱动心跳」
+#   （会话文件/mtime 增长即续），见 KI-138 修法方向。
+HEARTBEAT_TO = timedelta(minutes=15)
 RETRY = RetryPolicy(maximum_attempts=3)  # only for infrastructure failures; business failures go through StageResult.status
 # KI-003: versioned marker for the stage-transition yield point (consumed by
 # workflow.patched inside _breathe; old running instances replaying old history

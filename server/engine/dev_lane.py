@@ -174,7 +174,8 @@ MERGE_CHECK_TO = timedelta(minutes=20)   # merge_check includes the in-lane veri
                                          # (tsc/smoke, can take minutes)
 MERGE_TO = timedelta(minutes=5)
 AGENT_TO = timedelta(hours=6)
-HEARTBEAT_TO = timedelta(minutes=3)
+# 260927 同 base.py：3 分钟静默误杀在干活的 agent（实案见 base.py 同注与 KI-138）→ 15 分钟。
+HEARTBEAT_TO = timedelta(minutes=15)
 # 机械集成测试条目的活动超时（配对不变量，t260913-01 仲裁修 + t260913-02 实测合流；
 # t260924-05 KI-116 单源化）：本值自 agent_activities.INTEG_GUARD_SEC（=内层批次
 # BATCH_TIMEOUT_SEC + 300 守卫）**派生**=守卫 + 300s 余量——内层结构化超时回报必可
