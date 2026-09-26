@@ -59,6 +59,17 @@ instances:
       cron: 30 7 * * *
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
+    # lane/watchdog 面阈值档（260926，KI-122 追加面 / KI-126 同源）：本期**只读**扫
+    # **非终态票**的工作流时间线/快照，出三类发现——①同票重跑轮次 > rerun_rounds；
+    # ②停在 tests-fault 回路超 fault_loop_min（判决已下却不收敛）；③在飞静默超
+    # inflight_silent_min（僵尸票）。三键均为正整数（轮次 / 分钟）。
+    # 本行值 = 模块缺省（显式声明与缺省等价；改本行即改阈值）。键缺失/畸形 → 回落缺省，
+    # 且票面 lane 段点名「阈值来源=declaration|default」+ 逐键回落原因（不静默）。
+    # 取值理由：rerun_rounds=3 抓得住「同一票 5 轮 × ~2h 全量」的活锁（t260926-05 实案）。
+    watchdog:
+      rerun_rounds: 3
+      fault_loop_min: 90
+      inflight_silent_min: 120
   - id: docs-sync
     enabled: true
     project_key: sandbar

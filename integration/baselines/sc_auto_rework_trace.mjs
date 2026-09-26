@@ -381,7 +381,10 @@ async function envHalf() {
     const api = makeApi(sdkPython, fixture)
     await sceneF(t, api, sdkPython, fixture)
   } finally {
-    dispose()
+    // await（260926 磁盘泄漏修）：此前是不 await 的 dispose()，紧接着 main() 就
+    // process.exit()——异步 rm 被进程退出掐死，夹具目录每跑必留。终态兜底（exit/
+    // SIGINT/SIGTERM）在 ticket-lifecycle-scenes.mjs 里另行武装。
+    await dispose()
     stamp('envHalf: fixture dispose 回')
   }
   pass += t.pass; fail += t.fail; envFail += t.envFail

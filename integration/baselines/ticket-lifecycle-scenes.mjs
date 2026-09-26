@@ -29,11 +29,18 @@
  * Safety: same write-guard trio as ticket-validate.mjs (target env unset ->
  * env_fail; explicit production default -> FAIL; otherwise pinned to
  * 17233/suyou-test).  (naming-compat)
+ *
+ * Fixture reclamation (260926 disk-leak fix, 1086 dirs / 391G): the fixture
+ * temp dir is reclaimed on every terminal state — callers await dispose() in a
+ * finally, buildFixture arms process-level fallbacks (exit / SIGINT / SIGTERM /
+ * uncaughtException / unhandledRejection), and every run first sweeps stale
+ * `integ-e2e-fixture-*` dirs (see reapStaleFixtures). SIGKILL cannot be caught
+ * in-process, so the entry sweep is the net for it.
  */
 
 import { spawn, spawnSync } from 'node:child_process'
 import { connect } from 'node:net'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -176,20 +183,231 @@ export function targetEnv(extra = {}) {
 
 /* ------------------------------------------------------------------ fixture repo */
 
+/** Fixture dir prefix: shared by the single creation point and the entry sweep. */
+export const FIXTURE_PREFIX = 'integ-e2e-fixture-'
+
+/** Reaper guardrail defaults (env knobs: see reapStaleFixtures). */
+export const FIXTURE_REAPER_DEFAULTS = {
+  maxAgeSec: 6 * 3600,   // SANDBAR_FIXTURE_MAX_AGE_SEC
+  maxCount: 50,          // SANDBAR_FIXTURE_MAX_COUNT
+  maxTotalMb: 8192,      // SANDBAR_FIXTURE_MAX_TOTAL_MB (0 = size guardrail off)
+  minLiveSec: 60,        // live floor for the count/size guardrails: never touch anything younger
+}
+
+/** Fixture root: the system temp dir by default; env-injectable so tests stay hermetic. */
+function fixtureRoot() {
+  return process.env.SANDBAR_FIXTURE_TMPDIR || tmpdir()
+}
+
+/** Read a non-negative integer env knob; missing/malformed falls back (a bad knob warns, never crashes a suite). */
+export function fixtureKnob(name, fallback) {
+  const raw = process.env[name]
+  if (raw === undefined || raw === '') return fallback
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) {
+    console.error(`fixture reaper: malformed ${name}=${JSON.stringify(raw)} -> default ${fallback}`)
+    return fallback
+  }
+  return Math.floor(n)
+}
+
+/* ---- Process-level fallbacks: every in-process terminal state reclaims the fixture ----
+   Terminal-state matrix (each one checked):
+   - normal completion / assertion failure / throw / process.exit() / uncaughtException /
+     unhandledRejection -> the 'exit' event (node fires it for crashes and explicit exits alike);
+   - SIGINT / SIGTERM -> explicit handlers (the default signal disposition does NOT fire 'exit'),
+     reclaim synchronously, then exit 130 / 143;
+   - SIGKILL (the executor's 900s timeout cap, or a plain kill -9) -> physically impossible to
+     catch in-process; the entry sweep (reapStaleFixtures) is the net that reclaims it. */
+const LIVE_FIXTURES = new Set()
+let fallbacksArmed = false
+
+/** Remove one fixture dir synchronously; a fallback path warns instead of throwing. */
+function dropSync(p) {
+  try { rmSync(p, { recursive: true, force: true, maxRetries: 3 }) }
+  catch (e) { console.error(`fixture cleanup: sync rm failed for ${p}: ${e?.message || e}`) }
+}
+
+/** Reclaim every fixture registered by this process (synchronous); idempotent, safe next to dispose. */
+export function reapLiveFixturesSync() {
+  for (const p of [...LIVE_FIXTURES]) { LIVE_FIXTURES.delete(p); dropSync(p) }
+}
+
+/** Arm the process-level fallbacks (idempotent; registered when the first fixture is created). */
+function armFixtureFallbacks() {
+  if (fallbacksArmed) return
+  fallbacksArmed = true
+  process.on('exit', () => reapLiveFixturesSync())
+  process.on('SIGINT', () => {
+    console.error('fixture cleanup: SIGINT -> reaping live fixtures')
+    reapLiveFixturesSync(); process.exit(130)
+  })
+  process.on('SIGTERM', () => {
+    console.error('fixture cleanup: SIGTERM -> reaping live fixtures')
+    reapLiveFixturesSync(); process.exit(143)
+  })
+  // Crash paths still exit non-zero: cleanup must never swallow a crash into green.
+  process.on('uncaughtException', (e) => {
+    console.error('FATAL uncaughtException:', e?.stack || e)
+    reapLiveFixturesSync(); process.exit(1)
+  })
+  process.on('unhandledRejection', (e) => {
+    console.error('FATAL unhandledRejection:', e?.stack || e)
+    reapLiveFixturesSync(); process.exit(1)
+  })
+}
+
+/** Bounded directory size: never follows symlinks (the fixture links node_modules/.venv), stops at the budget. */
+function boundedDirSize(dir, budget = { entries: 20000, deadlineMs: 3000 }) {
+  const deadline = Date.now() + budget.deadlineMs
+  let bytes = 0, walked = 0, truncated = false
+  const stack = [dir]
+  while (stack.length) {
+    if (Date.now() > deadline) { truncated = true; break }
+    const cur = stack.pop()
+    let ents
+    try { ents = readdirSync(cur, { withFileTypes: true }) } catch { continue }
+    for (const ent of ents) {
+      if (walked++ >= budget.entries) { truncated = true; stack.length = 0; break }
+      try {
+        if (ent.isSymbolicLink()) continue
+        const p = join(cur, ent.name)
+        if (ent.isDirectory()) stack.push(p)
+        else if (ent.isFile()) bytes += statSync(p).size
+      } catch { /* race: the entry vanished or is unreadable — skip */ }
+    }
+  }
+  return { bytes, truncated }
+}
+
 /**
- * Build a throwaway fixture repo (the stub worker's home): clone the local
- * checkout (--depth 1), symlink gitignored dependency dirs (node_modules /
- * engine/.venv — verify_lane needs them inside the lane), and drop the epic
- * file suggest_next needs. Returns { fixture, dispose }; returns null when
- * impossible (with an ENV_FAIL note).
+ * Entry sweep (stale reaper): before a fixture is created, clean same-prefix leftovers.
+ * Criteria (mtime only — no implementation detail is anchored):
+ *  1. age >= maxAgeSec -> always removed (default 6h; SANDBAR_FIXTURE_MAX_AGE_SEC);
+ *  2. count guardrail: more than maxCount dirs (default 50; SANDBAR_FIXTURE_MAX_COUNT)
+ *     -> oldest first until maxCount;
+ *  3. size guardrail: total above maxTotalMb (default 8192; SANDBAR_FIXTURE_MAX_TOTAL_MB,
+ *     0 disables) -> oldest first until inside the cap.
+ * (2)/(3) never touch a dir younger than minLiveSec (60s): a parallel suite may be using it.
+ * Scan/remove failures only warn — the sweep must never take a suite down.
+ * Returns { root, removed, kept, removedByCount, removedBySize, totalBytes, truncated, error }.
  */
-export async function buildFixture(t) {
-  const tmp = await mkdtemp(join(tmpdir(), 'integ-e2e-fixture-'))
-  const common = run('git', ['-C', REPO, 'rev-parse', '--path-format=absolute', '--git-common-dir'])
-  const mainCheckout = common.status === 0 ? dirname(common.stdout.trim()) : ''
+export async function reapStaleFixtures(opts = {}) {
+  const root = opts.dir || fixtureRoot()
+  const maxAgeSec = opts.maxAgeSec ?? fixtureKnob('SANDBAR_FIXTURE_MAX_AGE_SEC', FIXTURE_REAPER_DEFAULTS.maxAgeSec)
+  const maxCount = opts.maxCount ?? fixtureKnob('SANDBAR_FIXTURE_MAX_COUNT', FIXTURE_REAPER_DEFAULTS.maxCount)
+  const maxTotalMb = opts.maxTotalMb ?? fixtureKnob('SANDBAR_FIXTURE_MAX_TOTAL_MB', FIXTURE_REAPER_DEFAULTS.maxTotalMb)
+  const minLiveSec = opts.minLiveSec ?? FIXTURE_REAPER_DEFAULTS.minLiveSec
+  const log = opts.log ?? ((m) => console.log(m))
+  const warn = opts.warn ?? ((m) => console.error(m))
+  const now = opts.now ?? Date.now()
+  const out = {
+    root, removed: 0, kept: 0, removedByCount: 0, removedBySize: 0,
+    totalBytes: 0, truncated: false, error: '',
+  }
+  let entries
+  try {
+    entries = readdirSync(root, { withFileTypes: true })
+      .filter((e) => e.name.startsWith(FIXTURE_PREFIX) && e.isDirectory())
+      .map((e) => {
+        const p = join(root, e.name)
+        return { name: e.name, path: p, ageSec: Math.max(0, Math.round((now - statSync(p).mtimeMs) / 1000)) }
+      })
+  } catch (e) {
+    out.error = String(e?.message || e)
+    warn(`fixture reaper: scan failed for ${root}: ${out.error}`)   // warn only, never block
+    return out
+  }
+  if (maxAgeSec < minLiveSec) {
+    warn(`fixture reaper: SANDBAR_FIXTURE_MAX_AGE_SEC=${maxAgeSec}s is aggressive (<${minLiveSec}s): live parallel suites can be reclaimed`)
+  }
+
+  const del = async (item, why) => {
+    try { await rm(item.path, { recursive: true, force: true, maxRetries: 3 }); item.gone = true; return true }
+    catch (e) { warn(`fixture reaper: ${why} failed for ${item.path}: ${e?.message || e}`); return false }
+  }
+
+  // 1) anything at or above the age threshold goes
+  const stale = entries.filter((e) => e.ageSec >= maxAgeSec)
+  const live = entries.filter((e) => e.ageSec < maxAgeSec)
+  for (const s of stale) if (await del(s, 'stale removal')) out.removed++
+
+  // 2)/3) guardrails: oldest first, protected by the live floor
+  const pool = live.filter((e) => e.ageSec >= minLiveSec).sort((a, b) => b.ageSec - a.ageSec)
+  let liveCount = live.length
+  if (liveCount > maxCount) {
+    const named = []
+    for (const item of pool) {
+      if (liveCount <= maxCount) break
+      if (await del(item, 'count-cap removal')) { liveCount--; out.removedByCount++; named.push(`${item.name}(${item.ageSec}s)`) }
+    }
+    log(`fixture reaper: count cap ${maxCount} exceeded (live=${live.length}) -> removed ${out.removedByCount} oldest (>=${minLiveSec}s floor)${named.length ? ': ' + named.join(', ') : ''}`)
+  }
+  if (maxTotalMb > 0 && live.some((e) => !e.gone)) {
+    for (const item of live.filter((e) => !e.gone)) {
+      const measured = boundedDirSize(item.path)
+      item.bytes = measured.bytes
+      out.truncated = out.truncated || measured.truncated
+      out.totalBytes += measured.bytes
+    }
+    const capBytes = maxTotalMb * 1024 * 1024
+    if (out.totalBytes > capBytes) {
+      const named = []
+      let total = out.totalBytes
+      for (const item of pool) {          // pool = oldest first, live floor already applied
+        if (total <= capBytes) break
+        if (item.bytes === undefined || item.gone) continue
+        if (await del(item, 'size-cap removal')) {
+          total -= item.bytes; out.removedBySize++
+          named.push(`${item.name}(${Math.round(item.bytes / 1048576)}MB,${item.ageSec}s)`)
+        }
+      }
+      out.totalBytes = total
+      log(`fixture reaper: total size cap ${maxTotalMb}MB exceeded -> removed ${out.removedBySize} oldest (>=${minLiveSec}s floor)${named.length ? ': ' + named.join(', ') : ''}`
+        + (out.truncated ? ' [measurement truncated: the size cap is best-effort, the count cap is the primary net]' : ''))
+    }
+  }
+  out.kept = entries.length - out.removed - out.removedByCount - out.removedBySize
+  log(`fixture reaper: removed ${out.removed} stale dirs (>=${maxAgeSec}s) | kept ${out.kept} live`)
+  return out
+}
+
+/**
+ * Build a throwaway fixture repo (the stub worker's home): sweep stale fixtures,
+ * clone the local checkout (--depth 1), symlink gitignored dependency dirs (node_modules /
+ * engine/.venv — verify_lane needs them inside the lane), and drop the epic
+ * file suggest_next needs. Returns { fixture, mainCheckout, tmp, dispose, disposeSync };
+ * returns null when impossible (with an ENV_FAIL note; the fixture dir is reclaimed either way).
+ * opts (all optional, injection points for the L1 regression): repo / mainCheckout /
+ * tmpBase / reap=false.
+ */
+export async function buildFixture(t, opts = {}) {
+  const root = opts.tmpBase || fixtureRoot()
+  if (opts.reap !== false) {
+    try { await reapStaleFixtures({ dir: root, ...(opts.reapOpts || {}) }) }
+    catch (e) { console.error(`fixture reaper: unexpected failure (not blocking): ${e?.message || e}`) }
+  }
+  const tmp = await mkdtemp(join(root, FIXTURE_PREFIX))
+  armFixtureFallbacks()
+  LIVE_FIXTURES.add(tmp)
+  let disposed = false
+  /** Reclaim the fixture dir; idempotent (safe twice, safe next to the process fallbacks). */
+  const dispose = async () => {
+    if (disposed) return
+    disposed = true
+    LIVE_FIXTURES.delete(tmp)
+    try { await rm(tmp, { recursive: true, force: true, maxRetries: 3 }) }
+    catch (e) { console.error(`fixture cleanup: dispose failed for ${tmp}: ${e?.message || e}`) }
+  }
+  const disposeSync = () => { if (disposed) return; disposed = true; LIVE_FIXTURES.delete(tmp); dropSync(tmp) }
+  const srcRepo = opts.repo || REPO
+  const common = opts.mainCheckout
+    ? { status: 0, stdout: opts.mainCheckout, stderr: '' }
+    : run('git', ['-C', srcRepo, 'rev-parse', '--path-format=absolute', '--git-common-dir'])
+  const mainCheckout = opts.mainCheckout || (common.status === 0 ? dirname(common.stdout.trim()) : '')
   if (!mainCheckout || !existsSync(mainCheckout)) {
     t?.envFailNote?.(`cannot locate the local main checkout (${common.stderr.trim().slice(0, 120)}): fixture clone source unavailable`)
-    await rm(tmp, { recursive: true, force: true }).catch(() => {})
+    await dispose()
     return null
   }
   const fixture = join(tmp, 'fixture')
@@ -198,55 +416,61 @@ export async function buildFixture(t) {
   // (ticket t260907-04 proven: the lane client starts workflows under the new
   // queue name, but a fixture worker on the old engine waits forever on the
   // old env=workflow). After merge lane==main and behavior is unchanged.
-  const clone = run('git', ['clone', '--depth', '1', REPO, fixture], { timeoutMs: 300_000 })
+  const clone = run('git', ['clone', '--depth', '1', srcRepo, fixture], { timeoutMs: 300_000 })
   if (clone.status !== 0) {
     t?.envFailNote?.(`git clone main failed: ${(clone.stderr || clone.stdout).trim().slice(0, 200)}`)
-    await rm(tmp, { recursive: true, force: true }).catch(() => {})
+    await dispose()
     return null
   }
   run('git', ['-C', fixture, 'config', 'user.email', 'e2e@suyou.test'])
   run('git', ['-C', fixture, 'config', 'user.name', 'integ-e2e'])
-  // Fixture-ize the project registry (ticket t260907-04): the machine-level
-  // registry's suyou key points at the retired repo (auto-migration residue,
-  // dirs are dead paths), so lane derivation would always blow up on a dead
-  // project root (symptom: prepare_workspace reports missing git identity).
-  // The scenario pins the registry into the fixture: the key stays the same
-  // (the engine must keep serving existing keys), dirs point at the fixture
-  // itself, and the whole chain stays hermetic off machine state.
-  const projectsDir = join(fixture, '.e2e-projects', 'suyou')
-  await mkdir(projectsDir, { recursive: true })
-  // .migrated marker: the fixture table and the migration source (the
-  // projects.yaml seed cloned inside the fixture) share keys but differ in
-  // content, so the consistency check would judge a "mixed scene" fail-closed
-  // — the fixture table is a self-contained manual registry, so add the
-  // marker to pass the "already migrated" criterion.
-  await writeFile(join(fixture, '.e2e-projects', '.migrated'), 'fixture-local hermetic registry (t260907-04)\n')
-  await writeFile(join(projectsDir, 'project.yaml'),
-    `# fixture-local registry (t260907-04): hermetic project entry, dirs -> fixture itself\n`
-    + 'schema: v1\n'
-    + 'project:\n'
-    + '  - key: suyou\n'
-    + '    name: integ-e2e-fixture\n'
-    + '    dirs:\n'
-    + `      - ${fixture}\n`)
-  // Dependency symlinks: prepare_workspace symlinks gitignored dirs from the
-  // worker REPO_ROOT (=fixture) into the lane; prepare the link targets in
-  // the fixture first.
-  for (const [link, target] of [
-    [join(fixture, 'app', 'node_modules'), join(mainCheckout, 'app', 'node_modules')],
-    [join(fixture, 'server', 'engine', '.venv'), join(mainCheckout, 'server', 'engine', '.venv')],
-  ]) {
-    if (existsSync(target)) {
-      await mkdir(dirname(link), { recursive: true })
-      await symlink(target, link).catch(() => {})
+  // Everything below runs inside the post-mkdtemp guard: any throw here reclaims the
+  // fixture dir before the error leaves buildFixture (no "fixture made, then failed" window).
+  try {
+    // Fixture-ize the project registry (ticket t260907-04): the machine-level
+    // registry's suyou key points at the retired repo (auto-migration residue,
+    // dirs are dead paths), so lane derivation would always blow up on a dead
+    // project root (symptom: prepare_workspace reports missing git identity).
+    // The scenario pins the registry into the fixture: the key stays the same
+    // (the engine must keep serving existing keys), dirs point at the fixture
+    // itself, and the whole chain stays hermetic off machine state.
+    const projectsDir = join(fixture, '.e2e-projects', 'suyou')
+    await mkdir(projectsDir, { recursive: true })
+    // .migrated marker: the fixture table and the migration source (the
+    // projects.yaml seed cloned inside the fixture) share keys but differ in
+    // content, so the consistency check would judge a "mixed scene" fail-closed
+    // — the fixture table is a self-contained manual registry, so add the
+    // marker to pass the "already migrated" criterion.
+    await writeFile(join(fixture, '.e2e-projects', '.migrated'), 'fixture-local hermetic registry (t260907-04)\n')
+    await writeFile(join(projectsDir, 'project.yaml'),
+      `# fixture-local registry (t260907-04): hermetic project entry, dirs -> fixture itself\n`
+      + 'schema: v1\n'
+      + 'project:\n'
+      + '  - key: suyou\n'
+      + '    name: integ-e2e-fixture\n'
+      + '    dirs:\n'
+      + `      - ${fixture}\n`)
+    // Dependency symlinks: prepare_workspace symlinks gitignored dirs from the
+    // worker REPO_ROOT (=fixture) into the lane; prepare the link targets in
+    // the fixture first.
+    for (const [link, target] of [
+      [join(fixture, 'app', 'node_modules'), join(mainCheckout, 'app', 'node_modules')],
+      [join(fixture, 'server', 'engine', '.venv'), join(mainCheckout, 'server', 'engine', '.venv')],
+    ]) {
+      if (existsSync(target)) {
+        await mkdir(dirname(link), { recursive: true })
+        await symlink(target, link).catch(() => {})
+      }
     }
+    // The epic archive file suggest_next needs (worker-side EPICS_DIR=fixture).
+    await mkdir(join(fixture, 'notes', 'epics'), { recursive: true })
+    await writeFile(join(fixture, 'notes', 'epics', `${EPIC_CODE}.md`),
+      '# 立项单：integ-e2e\n\n| 字段 | 值 |\n| --- | --- |\n| 代号 | `integ-e2e` |\n| 状态 | 已立项（执行中） |\n', 'utf8')
+  } catch (e) {
+    await dispose()
+    throw e
   }
-  // The epic archive file suggest_next needs (worker-side EPICS_DIR=fixture).
-  await mkdir(join(fixture, 'notes', 'epics'), { recursive: true })
-  await writeFile(join(fixture, 'notes', 'epics', `${EPIC_CODE}.md`),
-    '# 立项单：integ-e2e\n\n| 字段 | 值 |\n| --- | --- |\n| 代号 | `integ-e2e` |\n| 状态 | 已立项（执行中） |\n', 'utf8')
-  const dispose = async () => { await rm(tmp, { recursive: true, force: true }).catch(() => {}) }
-  return { fixture, mainCheckout, tmp, dispose }
+  return { fixture, mainCheckout, tmp, dispose, disposeSync }
 }
 
 /* ------------------------------------------------------------------ client.py bridge */

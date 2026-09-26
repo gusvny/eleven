@@ -136,18 +136,23 @@ async function main() {
     ['D round limit -> blocked -> revive', sceneD],
     ['E write-set lifecycle', sceneE],
   ]
-  for (const [label, fn] of scenes) {
-    const t = makeTally()
-    t.section(label)
-    try {
-      await fn(t, api, sdkPython, fixture)
-    } catch (e) {
-      t.ok(false, `scene crashed: ${e?.stack || e}`)
+  // 夹具回收放 finally（260926 磁盘泄漏修）：正常/断言失败/抛异常/超时早退一律走 dispose，
+  // 进程内兜底（exit/SIGINT/SIGTERM）在 ticket-lifecycle-scenes.mjs 里另行武装。
+  try {
+    for (const [label, fn] of scenes) {
+      const t = makeTally()
+      t.section(label)
+      try {
+        await fn(t, api, sdkPython, fixture)
+      } catch (e) {
+        t.ok(false, `scene crashed: ${e?.stack || e}`)
+      }
+      summarize(label, t)
     }
-    summarize(label, t)
+  } finally {
+    await dispose()
   }
 
-  await dispose()
   foldTally()
   console.log(`\nSUMMARY pass=${pass} fail=${fail} env_fail=${envFail}`)
   process.exit(fail > 0 ? 1 : envFail > 0 ? 2 : 0)

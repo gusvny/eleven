@@ -188,6 +188,19 @@ def inspect_start_to_close(timeout_sec: float) -> timedelta:
 # in-flight 票（含 260917 的 awaiting-human 旧形壳）history 无此标记 → patched()=False
 # 走旧路径收口，零影响。机器化验证=replay_check.py --workflow <老票 id>（S4 自测实测）。
 REDIRECT_PATCH_ID = "t260917-02-inspection-legacy-fire-redirect"
+# 版本门 id（260926，replay 安全）：lane/watchdog 面（**只读**扫非终态票的工作流时间线/
+# 快照——同票重跑轮次 / tests-fault 回路停留 / 在飞静默僵尸；KI-122 追加面，KI-126 同源）
+# 只在新 run 生效。老 in-flight 巡检票 history 无此标记 → patched()=False → 不注入新活动
+# 命令（否则 Temporal replay 非确定 → workflow task 永久失败、老票卡死）；repo 先例=上述
+# 四门同形。门求值点在 run 直线上（无 KI-061 式唤醒重放路径），不需 #seq 后缀。
+LANE_WATCHDOG_PATCH_ID = "inspection-lane-watchdog-v1"
+# lane/watchdog 面预算（260926）：活动内部自设扫描总预算（有界——在册非终态票可能上百张，
+# 没有 worker 应答的僵尸票每次 query 都要等到超时）；Temporal 侧 start_to_close 必须**晚于**
+# 内部预算，否则 Temporal 先杀、活动自己的「预算用尽」收口永远跑不到（SUITE/INSPECT 双闸
+# 同款纪律，不等式由 UT 锁定）。只一次尝试（重试会把这张面翻倍，且失败本身已具名上票面）。
+WATCHDOG_SCAN_BUDGET_SEC = 90.0
+LANE_WATCHDOG_TO = timedelta(seconds=WATCHDOG_SCAN_BUDGET_SEC + 60)
+RETRY_LANE_WATCHDOG = RetryPolicy(maximum_attempts=1)
 
 with workflow.unsafe.imports_passed_through():
     from inspection_ticketing import has_ticket_id_shape
@@ -510,6 +523,7 @@ def build_ticket_face(
     scan_result: Dict[str, Any],
     extra_findings: Optional[List[Dict[str, Any]]] = None,
     suite: Optional[Dict[str, Any]] = None,
+    lane: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Put the finding list onto the ticket face (rendering data): per-severity with
     evidence + heartbeat + ticket-opening suggestions (zero code changes).
@@ -550,6 +564,10 @@ def build_ticket_face(
         # 里按需加载（与 inspection_ticket_count 同款纪律）。
         from inspection_deadman import suite_green
         heartbeat = heartbeat and suite_green(suite)
+    if lane is not None and int(lane.get("finding_count") or 0) > 0:
+        # 心跳合成（260926 lane 面）：票卡在泳道里（重跑/回路/僵尸）也不是「全绿」——
+        # 流程层故障不该被一张「零发现绿票」盖住（KI-122 的教训：活锁期间票面全绿）。
+        heartbeat = False
     suggestions: List[Dict[str, Any]] = []
     for f in findings:
         if f.get("severity") not in ("high", "med"):
@@ -614,6 +632,11 @@ def build_ticket_face(
         # 回执数据——活动结果进 history，重放拿回同值，故不引入非确定面）。
         if suite.get("code_stamp"):
             face_out["code_stamp"] = str(suite["code_stamp"])
+    if lane is not None:
+        # lane/watchdog 证据段（260926）：计数（scanned/finding_count/by_leg）+ 阈值与
+        # **阈值来源**（declaration|default，逐键回落原因）——不静默；报告面零 CJK 守门
+        # 同样覆盖本段（文案全英文，数据字段=票号/stage id 不译）。
+        face_out["lane"] = lane
     return face_out
 
 
@@ -1215,6 +1238,22 @@ class InspectionPeriodicWorkflow:
                     % (teardown_note, inp.instance_id), suggest=False))
             # 漏跑核查（dead-man 面①）仍在 suite 块内、不占段位（与旧轨道同源）
             extra_findings += await self._deadman_findings(inp, plan)
+        # ---- lane/watchdog 面（260926）：只读扫非终态票的工作流时间线/快照 ----
+        # （KI-122 追加面：巡检各面此前只读制品与代码、没有一面读票时间线，而活锁只体现在
+        # 泳道层；KI-126 僵尸票同源。绝不写状态、绝不推进票——只 list + query。）
+        lane_section: Optional[Dict[str, Any]] = None
+        if workflow.patched(LANE_WATCHDOG_PATCH_ID):
+            self._enter("inspect", "running",
+                        "Read-only lane/watchdog sweep (non-terminal ticket timelines: "
+                        "re-run rounds / tests-fault loop dwell / in-flight silence)")
+            lane_section, lane_findings = await self._lane_watchdog(inp, plan)
+            extra_findings += lane_findings
+            if lane_section:
+                self._enter("inspect", "running",
+                            "Lane/watchdog sweep done (scanned %s non-terminal tickets, %s "
+                            "finding(s); %s)"
+                            % (lane_section.get("scanned"), lane_section.get("finding_count"),
+                               lane_section.get("threshold_note") or ""))
         # ---- inspect 段：只读 agent 审查（预算双闸：内部 deadline=预算−60s） ----
         # （无套件档的期不进 suite 段——suite_only 语义由源码锁钉死；档位状态并入
         # inspect 段文案可见，不静默）
@@ -1274,7 +1313,8 @@ class InspectionPeriodicWorkflow:
                     % (vmeta.get("unverified", 0), vmeta.get("deduped", 0),
                        vmeta.get("suppressed", 0), vmeta.get("truncated", 0)))
         self.face = build_ticket_face(ticket_id, inp.instance_id, period, result,
-                                      extra_findings=extra_findings, suite=suite_section)
+                                      extra_findings=extra_findings, suite=suite_section,
+                                      lane=lane_section)
         # 260927 code_stamp 兜底：套件段没带（无套件档的期）而漏跑活动带了 → 补进票面
         if not self.face.get("code_stamp") and self._code_stamp:
             self.face["code_stamp"] = self._code_stamp
@@ -1544,6 +1584,57 @@ class InspectionPeriodicWorkflow:
                 "lexeme: %s"
                 % "、".join(str(x) for x in res["malformed"][:10]), suggest=False)]
         return findings
+
+    async def _lane_watchdog(self, inp: "InspectionPeriodicInput",
+                             plan: Dict[str, Any]):
+        """lane/watchdog 面（260926，KI-122 追加面 / KI-126 同源）：只读扫非终态票的
+        工作流时间线/快照 → (票面 lane 段, 发现清单)。
+
+        活动失败=显式 high 发现（**这个面本身不能静默**——否则「巡检没发现」的盲区会
+        再长回来）；阈值档来自声明 plan.watchdog（缺省/畸形的回落与来源点名由纯函数面
+        resolve_thresholds 给，随 lane 段上票面）。"""
+        from inspection_deadman import make_finding
+        try:
+            raw: Any = await workflow.execute_activity(
+                "run_inspection_lane_watchdog",
+                args=[{"watchdog": dict(plan.get("watchdog") or {}),
+                       "scan_budget_sec": float(WATCHDOG_SCAN_BUDGET_SEC)}],
+                start_to_close_timeout=LANE_WATCHDOG_TO, retry_policy=RETRY_LANE_WATCHDOG)
+        except Exception as e:  # noqa: BLE001
+            return None, [make_finding(
+                "lane", "high", "Lane/watchdog sweep did not run",
+                "run_inspection_lane_watchdog failed: %s: %s (this period has no verdict "
+                "on stuck in-flight tickets — re-run the inspection period)"
+                % (type(e).__name__, e), suggest=False)]
+        if not (raw or {}).get("ok"):
+            return None, [make_finding(
+                "lane", "high", "Lane/watchdog sweep did not run",
+                str((raw or {}).get("error") or "unknown"), suggest=False)]
+        res = (raw or {}).get("result") or {}
+        findings = res.get("findings") if isinstance(res.get("findings"), list) else []
+        section = res.get("section") if isinstance(res.get("section"), dict) else None
+        meta = res.get("meta") if isinstance(res.get("meta"), dict) else {}
+        # 查询/枚举面的故障点名进票面（单票快照查不到=点名，绝不静默当「这票没问题」）
+        errs = [str(x) for x in (meta.get("unreadable") or [])]
+        if errs:
+            findings = findings + [make_finding(
+                "lane", "med", "Lane/watchdog sweep had %d unreadable ticket(s)" % len(errs),
+                "in-scope non-terminal tickets whose timeline could not be read (their "
+                "stuck-state verdict is unknown this period; a RUNNING ticket with no worker "
+                "to answer the snapshot query is itself the KI-126 zombie shape): %s"
+                % "; ".join(errs[:10]), suggest=False)]
+        skipped = [str(x) for x in (meta.get("errors") or [])]
+        if skipped:
+            findings = findings + [make_finding(
+                "lane", "low", "Lane/watchdog sweep skipped %d ticket(s)" % len(skipped),
+                "out-of-scope non-terminal tickets (project not in the registry / no "
+                "ProjectKey identity) — named for completeness, not a stuck-state verdict: %s"
+                % "; ".join(skipped[:10]), suggest=False)]
+        if meta.get("enum_note"):
+            findings = findings + [make_finding(
+                "lane", "low", "Lane/watchdog sweep was truncated",
+                str(meta["enum_note"]), suggest=False)]
+        return section, findings
 
     async def _redirect_and_finish(self, ticket_id: str, inp: "InspectionPeriodicInput",
                                    period: str, redirect_reason: str) -> Dict[str, Any]:

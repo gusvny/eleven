@@ -57,6 +57,10 @@ from typing import Any, Dict, List, Optional
 from inspection_inspect import (DEFAULT_INSPECT_TIMEOUT_MIN, DEFAULT_MAX_FINDINGS,
                                 DEFAULT_MAX_FILES_PER_SHARD, DEFAULT_MAX_SHARDS,
                                 PROFILE_FACES)
+# lane/watchdog 面阈值（260926，KI-122 追加面）：**单源**在 inspection_lane_watchdog
+# （纯函数模块，零 IO）——声明解析件只做词法/范围校验，值语义与运行期回落规则同源，
+# 绝不在这里另造一份缺省（两套默认值必然漂移）。
+from inspection_lane_watchdog import WATCHDOG_DEFAULTS, WATCHDOG_KEYS, WATCHDOG_RANGES
 
 DECL_FILE_NAME = "inspection.yaml"
 
@@ -168,6 +172,10 @@ class InstanceSpec:
     # 防「7 子代理审 368 个场景文件」式无界扇出复发。
     inspect_max_shards: int = DEFAULT_MAX_SHARDS
     inspect_max_files_per_shard: int = DEFAULT_MAX_FILES_PER_SHARD
+    # lane/watchdog 面阈值档（260926，KI-122 追加面）：声明原值（YAML 子集无类型推断，
+    # 逐字 str）——解析期已过词法/范围校验；运行期由 inspection_lane_watchdog.
+    # resolve_thresholds 归一并在面/回执上点名来源（declaration|default）。空=全缺省。
+    watchdog: Dict[str, str] = field(default_factory=dict)
     # 调度时区（t260913-02 实现段）：空=Temporal 缺省（UTC）；填 IANA 名（如 Asia/Shanghai）
     tz: str = ""
     workflow: str = ""
@@ -372,6 +380,36 @@ def _req_str(where: str, data: Dict[str, Any], key: str, no: str = "") -> str:
     return val.strip()
 
 
+def _validate_watchdog(where: str, raw: Any) -> Dict[str, str]:
+    """lane/watchdog 阈值档校验（260926，KI-122 追加面）：缺省段=空档（全缺省值）；
+    非映射/未知键/非正整数或越界 → DeclError 点名（与 inspect 预算键同款 fail-closed 纪律）。
+    范围与缺省**同源**自 inspection_lane_watchdog（WATCHDOG_RANGES/DEFAULTS）——本函数
+    只做词法闸，值语义单点在运行期 resolve_thresholds。"""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise DeclError("%s：watchdog 必须是映射（got %r；合法键：%s）"
+                        % (where, raw, "/".join(WATCHDOG_KEYS)))
+    unknown = sorted(set(raw) - set(WATCHDOG_KEYS))
+    if unknown:
+        raise DeclError("%s：watchdog 未知字段 %s（合法：%s）"
+                        % (where, unknown, "/".join(WATCHDOG_KEYS)))
+    out: Dict[str, str] = {}
+    for k in WATCHDOG_KEYS:
+        if k not in raw:
+            continue
+        v = raw[k]
+        lo, hi = WATCHDOG_RANGES[k]
+        if not isinstance(v, str) or not re.match(r"^\d+$", v) or not (lo <= int(v) <= hi):
+            raise DeclError("%s：watchdog.%s %r 非法（正整数 %d~%d；缺省 %d——本项=%s）"
+                            % (where, k, v, lo, hi, WATCHDOG_DEFAULTS[k],
+                               {"rerun_rounds": "同票重跑轮次阈值",
+                                "fault_loop_min": "tests-fault 回路停留阈值（分钟）",
+                                "inflight_silent_min": "在飞静默阈值（分钟）"}[k]))
+        out[k] = v
+    return out
+
+
 def _validate_schedule(where: str, sched: Any, enabled: bool) -> tuple:
     if not isinstance(sched, dict):
         raise DeclError("%s：schedule 必须是映射（got %r）" % (where, sched))
@@ -470,14 +508,14 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
                                       "max_findings", "inspect_timeout_min",
                                       "inspect_profile", "inspect_max_shards",
                                       "inspect_max_files_per_shard",
-                                      "mode", "docs_root"})
+                                      "mode", "docs_root", "watchdog"})
         if unknown:
             raise DeclError("%s：未知实例字段 %s（合法：id/enabled/schedule/workflow/template/"
                             "scan_face/suite/tz/project_key（实例级项目身份，t260915-20）/"
                             "max_findings/inspect_timeout_min/inspect_profile（inspect 段预算三键，"
                             "t260916-22）/inspect_max_shards/inspect_max_files_per_shard"
                             "（缩面分片硬上限两键，t260924-06）/mode/docs_root（巡检模式两键，"
-                            "t260925-01）；"
+                            "t260925-01）/watchdog（lane 巡检面阈值档三键，260926）；"
                             "face 已于 260910 巡检校准票 t260910-11 除名——零消费者，旧声明含 face 一律拒收点名）"
                             % (where, unknown))
         inst_id = _req_str(where, item, "id")
@@ -562,6 +600,7 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
                 raise DeclError("%s：inspect_max_files_per_shard %r 非法（正整数 1~10000；"
                                 "本项=每片文件数硬上限，缩面纪律 t260924-06）" % (where, raw_mp))
             inspect_max_files_per_shard = int(raw_mp)
+        watchdog = _validate_watchdog(where, item.get("watchdog"))
         kind, cron, n, source, project_key = _validate_schedule(where, item.get("schedule"), enabled)
         # 实例级项目身份必填（t260915-20）：校验放字段链**最后**——既有反用例事由
         # （缺 source、未知 kind、face 除名、cron 非法…）照旧先爆，断言语义零偷换；
@@ -583,7 +622,8 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
             max_findings=max_findings, inspect_timeout_min=inspect_timeout_min,
             inspect_profile=inspect_profile,
             inspect_max_shards=inspect_max_shards,
-            inspect_max_files_per_shard=inspect_max_files_per_shard))
+            inspect_max_files_per_shard=inspect_max_files_per_shard,
+            watchdog=watchdog))
     return InspectionDecl(schema=SCHEMA, instances=instances, source=source)
 
 
@@ -646,6 +686,9 @@ def _plan_from_decl(decl: "InspectionDecl", instance_id: str) -> Dict[str, Any]:
                         "profile": it.inspect_profile,
                         "max_shards": it.inspect_max_shards,
                         "max_files_per_shard": it.inspect_max_files_per_shard},
+            # lane/watchdog 阈值档（260926）：additive 键，声明原值透传——运行期活动
+            # 归一并在面/回执上点名来源（declaration|default）；旧消费者忽略本键零行为。
+            "watchdog": dict(it.watchdog),
             "kind": it.kind, "workflow": it.workflow, "template": it.template,
             # t260917-02（R2 身份回退链）：实例级项目身份随 plan 出——旧调度 payload 缺
             # project_key 时（260917 实况），spawn 活动按本键回退决议归属，起票 SA

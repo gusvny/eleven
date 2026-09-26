@@ -3,7 +3,7 @@
 // 可达子用例探测只连测试台 17233）。断言锚公开契约（CLI 旗标面/装载器/env 契约），不锚实现。
 import { spawnSync, spawn } from 'node:child_process';
 import {
-  mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync,
+  mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync, rmSync,
   readdirSync, statSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -15,8 +15,17 @@ export const SANDBAR = path.join(REPO_ROOT, 'sandbar');
 export const DEAD_TARGET = '127.0.0.1:1';
 export const TEST_TARGET = '127.0.0.1:17233';
 
+// 260926 磁盘泄漏修（同类普查）：tmpRoot 建的夹具目录此前从不回收——宿主 $TMPDIR 实测
+// `fix10-*` 同族同类（量级见验收报告的普查清单）。进程任何终态（正常/走完/抛异常/process.exit）统一同步回收；
+// SIGKILL（执行器 900s 超时帽）进程内兜底物理失效，由「同类外壳清理」另议（见验收报告清单）。
+const LIVE_TMP = new Set();
+process.on('exit', () => {
+  for (const d of LIVE_TMP) { try { rmSync(d, { recursive: true, force: true }); } catch { /* 兜底路径不抛 */ } }
+});
 export function tmpRoot(prefix) {
-  return mkdtempSync(path.join(tmpdir(), prefix));
+  const d = mkdtempSync(path.join(tmpdir(), prefix));
+  LIVE_TMP.add(d);
+  return d;
 }
 
 // 本票 CLI 契约面（三场景共同冻结；改动须三场景+ops 手册同步）：

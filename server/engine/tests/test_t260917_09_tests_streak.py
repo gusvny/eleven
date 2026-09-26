@@ -463,7 +463,13 @@ def test_i_dead_manifest_gone():
 # ---------- J. 豁免超限封面两分支登记自证（merge 后 gen3 补） ----------
 
 EXEMPT_CAP_ANCHOR = ("dev_lane.py#run#await self._blocked_over_limit("
-                     "tests_exempt_cap_blocked_text(tests_exempt_rounds))")
+                     "tests_exempt_cap_blocked_text(tests_exempt_rounds, "
+                     "audit=tests_fault_cap_audit_text(tests_rounds, "
+                     "MAX_TESTS_FAULT_ROUNDS, tests_e")
+# 260926 锚点 re-point（KI-122②，宿主直修令）：本钉的判据（AST 两处 + 祖先链在
+# TESTS_STREAK 门内 + 锚在守卫登记表）一字未改；变的是**锚串文本**——封面调用多了一个
+# 具名审计尾注实参（audit=tests_fault_cap_audit_text(...)；锚串按守卫工具的窗口截断口径
+# 写到 tests_e 为止）。分支/门/自守机制均未动。
 
 
 def test_j_exempt_cap_sites_inside_tests_streak_gate():

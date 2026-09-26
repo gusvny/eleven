@@ -336,12 +336,16 @@ BRANCH_REGISTRY = {
     # test_t260917_09_tests_streak.py::test_j_exempt_cap_sites_inside_tests_streak_gate
     # ——分支挪出门外该钉先红）。旧 history（无 marker）重放整块缺席=分支不可达；
     # _blocked_over_limit 体内另有 KI-061 unique-per-entry 门自守（同上两款）。
-    "dev_lane.py#run#await self._blocked_over_limit(tests_exempt_cap_blocked_text(tests_exempt_rounds))#0":
-        "t260917-09：外层 workflow.patched(TESTS_STREAK_PATCH_ID) 门内（旧 history "
-        "重放走旧分支，分支不可达=重放安全）；体内 KI-061 unique-per-entry 自守。"
-        "串行仲裁侧连续豁免超限封面。",
-    "dev_lane.py#run#await self._blocked_over_limit(tests_exempt_cap_blocked_text(tests_exempt_rounds))#1":
-        "同上（并行汇合侧 arb_acc_parallel 同形分支，t260917-09 连续豁免超限封面）。",
+    # 260926 锚点 re-point（KI-122②，宿主直修令）：**分支与门一字未动**——只是封面文案
+    # 多了一个具名审计尾注实参（audit=tests_fault_cap_audit_text(...)），锚点文本随之
+    # 升级；语义不变（同分支/同门/同 KI-061 自守），「外层门内」自证钉照旧有效。
+    "dev_lane.py#run#await self._blocked_over_limit(tests_exempt_cap_blocked_text(tests_exempt_rounds, audit=tests_fault_cap_audit_text(tests_rounds, MAX_TESTS_FAULT_ROUNDS, tests_e#0":
+        "t260917-09 + KI-122②：外层 workflow.patched(TESTS_STREAK_PATCH_ID) 门内（旧 "
+        "history 重放走旧分支，分支不可达=重放安全）；体内 KI-061 unique-per-entry 自守。"
+        "串行仲裁侧连续豁免超限封面（260926 加具名审计尾注实参，语义不变）。",
+    "dev_lane.py#run#await self._blocked_over_limit(tests_exempt_cap_blocked_text(tests_exempt_rounds, audit=tests_fault_cap_audit_text(tests_rounds, MAX_TESTS_FAULT_ROUNDS, tests_e#1":
+        "同上（并行汇合侧 arb_acc_parallel 同形分支，t260917-09 连续豁免超限封面；"
+        "260926 同款具名审计尾注实参）。",
 }
 
 

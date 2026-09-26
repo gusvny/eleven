@@ -277,19 +277,24 @@ async function main() {
     ['L1 gate refusal honest face + way-out revival', legGateRefusal],
     ['L2 format counter reset across rework', legCounterReset],
   ]
-  for (const [label, fn] of legs) {
-    const g = makeTally()
-    g.section(label)
-    try {
-      await fn(g, api, sdkPython, fixture)
-    } catch (e) {
-      g.ok(false, `leg crashed: ${e?.stack || e}`)
+  // 夹具回收放 finally（260926 磁盘泄漏修）：正常/断言失败/抛异常/超时早退一律走 dispose，
+  // 进程内兜底（exit/SIGINT/SIGTERM）在 ticket-lifecycle-scenes.mjs 里另行武装。
+  try {
+    for (const [label, fn] of legs) {
+      const g = makeTally()
+      g.section(label)
+      try {
+        await fn(g, api, sdkPython, fixture)
+      } catch (e) {
+        g.ok(false, `leg crashed: ${e?.stack || e}`)
+      }
+      pass += g.pass; fail += g.fail; envFail += g.envFail
+      if (g.envFail) console.log(`  (${label}: ${g.envFail} env_fail note(s) above)`)
     }
-    pass += g.pass; fail += g.fail; envFail += g.envFail
-    if (g.envFail) console.log(`  (${label}: ${g.envFail} env_fail note(s) above)`)
+  } finally {
+    await dispose()
   }
 
-  await dispose()
   printSummaryAndExit(fail > 0 ? 1 : envFail > 0 ? 2 : 0)
 }
 

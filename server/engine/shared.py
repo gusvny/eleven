@@ -297,6 +297,21 @@ MAX_REVIEW_ROUNDS = 5          # plan-review bounce cap (the review_plan reject 
 
 ARBITRATION_VERDICTS = ("pass", "tests-fault", "code-fault")
 
+# ---- KI-122（260926 实案）：已知红名册归属 + 仲裁 tests-fault 判决采纳 ----
+# 实案 t260926-05（报告 UI 票）空转 5 轮：仲裁每轮判 tests-fault 且判词自写「本票零新增红、
+# 转人工」，但闸拦名单（blockers）非空（逐条都**已在册**于 known-red-baseline.json）→ 旧逻辑
+# 走「探针复跑未证全绿 → 保守计轮 → 重跑集成测试」，于是每轮烧一趟全量（~2h）、代码零变化、
+# 判词不变，直到通用轮次 cap 才可能见人。**仲裁的「转人工」没有被工作流采纳**。
+# 归属纪律：**不新造第二套红绿判据**——闸的 block/record 判定、活基线对照与计数一字不动；
+# 这里只补一步既有的名册归属（「这条 blocker 是否已经挂账」），据此决定**下一步是重跑还是
+# 推进**。名册是只缩不增的挂账册（卫生+棘轮棒=integration/tests/test_t260923_known_red_baseline.py）。
+#
+#: 名册落位（**仓根相对**：闸与 integration 岗位读的是被审仓根那份，不是泳道副本）
+KNOWN_RED_BASELINE_REL = "integration/known-red-baseline.json"
+#: 名册 verdict 词表（真源=integration/known-red-baseline.json 的 meta.policy 与卫生测试）：
+#: booked=产品面欠账挂账（有 home 认领）| isolated=环境/杂物/扫描面隔离（不挂产品欠账）
+KNOWN_RED_VERDICTS = ("booked", "isolated")
+
 
 @dataclass
 class IntegrationRunArgs:
@@ -796,13 +811,137 @@ def tests_supply_assembly_note(error: Any) -> str:
             % ((e or "<空>")[:120]))
 
 
-def tests_exempt_cap_blocked_text(exempt_rounds: int) -> str:
+def tests_exempt_cap_blocked_text(exempt_rounds: int, audit: str = "") -> str:
     """连续豁免轮超限的 blocked 文案（纯函数，t260917-09）：与 cap 超限同族——
     含「超限」关键词供场景/快照判据，出路四条全是 ticket.py 真实 op。authorize 的
-    消费点在 dev_lane 豁免超限分支（授权在场=接受本判决复位推进，不落本封面）。"""
+    消费点在 dev_lane 豁免超限分支（授权在场=接受本判决复位推进，不落本封面）。
+    audit（KI-122② 追加位，缺省空=既有文案逐字节不变）：具名审计尾注，由调用方给
+    tests_fault_cap_audit_text 的产出——谁判的/依据/下一步，不在本函数内造。"""
     return ("测试集连续 %d 轮红项均属环境面/负载抖动（连续豁免超限，上限 %d），"
-            "转人工判读%s" % (exempt_rounds, MAX_TESTS_EXEMPT_ROUNDS,
-                              _ARBITRATION_CAP_EXITS))
+            "转人工判读%s%s" % (exempt_rounds, MAX_TESTS_EXEMPT_ROUNDS,
+                                _ARBITRATION_CAP_EXITS, audit))
+
+
+# ---- KI-122 ①：已知红名册归属（纯函数面，零 IO；IO 在活动壳 read_known_red_roster）----
+
+def known_red_roster(payload: Any):
+    """名册载荷 → (entries, error)：entries={name: {"verdict","home"}}，error=非空即不可用。
+
+    **fail-closed 口径**（宿主 260926 护栏）：畸形一律判整册不可用（error 非空），调用方
+    据此照旧拦、照旧重跑——绝不因「读不到名册」放行。严：条目缺键/名字非串或空白/
+    verdict 出词表/home 空白 → 整册不可用（「只缩不增」的挂账册没有容错读法：一个坏条目
+    就让「在册」这句话不成立）；重名条目取后见者本可容错，但同名两判词=账面自相矛盾，
+    同判不可用。入参形态（dict/entries 列表）与字段类型逐项校验，不抛。"""
+    if not isinstance(payload, dict):
+        return {}, "roster payload is not a JSON object"
+    raw = payload.get("entries")
+    if not isinstance(raw, list):
+        return {}, "roster payload has no entries list"
+    entries: Dict[str, Dict[str, str]] = {}
+    for i, e in enumerate(raw):
+        if not isinstance(e, dict):
+            return {}, "roster entry #%d is not an object" % i
+        name = e.get("name")
+        verdict = e.get("verdict")
+        home = e.get("home")
+        if not isinstance(name, str) or not name.strip():
+            return {}, "roster entry #%d has an empty/non-string name" % i
+        if verdict not in KNOWN_RED_VERDICTS:
+            return {}, "roster entry %s has an out-of-vocabulary verdict %r" % (
+                name.strip(), verdict)
+        if not isinstance(home, str) or not home.strip():
+            return {}, "roster entry %s has no home owner" % name.strip()
+        if name.strip() in entries:
+            return {}, "roster entry %s appears twice" % name.strip()
+        entries[name.strip()] = {"verdict": str(verdict), "home": home.strip()}
+    return entries, ""
+
+
+def blockers_known_red_adoption(blockers: Any, roster_payload: Any,
+                                roster_error: str = "", *,
+                                run_error: Any = "", env_side_red: Any = False):
+    """KI-122①：仲裁 tests-fault 判决可否采纳（纯函数，UT 主面）。
+
+    采纳（adopt=True）当且仅当四条同时成立（少一条即照旧拦、照旧重跑）：
+      ① blockers 是**非空**名单且逐条为非空字符串——空名单不在此改判（那是既有
+         known_red 豁免车道，语义不动）；
+      ② 名册可读可解且**逐条在册**（booked/isolated 都算「已挂账」，本函数不下产品结论）；
+      ③ 本轮没有启动级 error（零跑/装配失败/超时前缀——「没检验到」不得当零新增红）；
+      ④ 本轮不是环境面红（产品红 0/闸拦 0/环境红≥1，或供给装配失败）。
+    返回 {adopt, why, known, new, roster_ok, note}：
+      - why 是机器 token：adopted | no-blockers | new-red | roster-unavailable |
+        startup-error | env-side-red（后四者即 fail-closed 的具名原因）；
+      - known=[{name,verdict,home}...]（审计锚：凭什么放行）、new=[非在册名字...]；
+      - note=上票面/banner 的**英文**审计锚（逐条列 blocker 名 + 名册 verdict/home），
+        四条不满足时 note 也点名原因（名册路径与失败原因进票面，不静默）。
+    畸形入参不抛：env_side_red 非 bool、run_error 非串等一律按「拦」的一侧读。"""
+    roster, err = known_red_roster(roster_payload)
+    if isinstance(roster_error, str) and roster_error:
+        err = roster_error
+    env_red = env_side_red is True
+    run_err = run_error if isinstance(run_error, str) else ""
+    names = [b.strip() for b in (blockers if isinstance(blockers, (list, tuple)) else [])
+             if isinstance(b, str) and b.strip()]
+    known = [{"name": n, **roster[n]} for n in names if n in roster]
+    new = [n for n in names if n not in roster]
+    base = {"known": known, "new": new, "roster_ok": not err}
+    if not names:
+        return dict(base, adopt=False, why="no-blockers", note=(
+            "No gate blocker to attribute: the round keeps the existing known-red "
+            "exemption lane (unchanged), it is not adopted here."))
+    if err:
+        return dict(base, adopt=False, why="roster-unavailable", note=(
+            "Known-red roster unreadable (%s): %s — fail-closed, the round is still "
+            "counted and the suite is re-run instead of adopting the verdict."
+            % (KNOWN_RED_BASELINE_REL, err)))
+    if new:
+        return dict(base, adopt=False, why="new-red", note=(
+            "New red outside the known-red roster (%s): %s — the gate blocker is not "
+            "registered debt, the verdict is NOT adopted and the suite is re-run."
+            % (", ".join(new), KNOWN_RED_BASELINE_REL)))
+    if run_err:
+        return dict(base, adopt=False, why="startup-error", note=(
+            "Startup-level error in this round (%s): nothing was verified, so zero new "
+            "red cannot be claimed — the verdict is NOT adopted." % (run_err or "<empty>")[:160]))
+    if env_red:
+        return dict(base, adopt=False, why="env-side-red", note=(
+            "Environment-side red this round (product red 0 / gate blockers 0 / env red>=1 "
+            "or supply-assembly failure): the known-red exemption lane handles it, the "
+            "verdict is not adopted here."))
+    detail = "; ".join("%s [%s: %s]" % (k["name"], k["verdict"], k["home"]) for k in known)
+    return dict(base, adopt=True, why="adopted", note=(
+        "Arbitration verdict ADOPTED (verdict=tests-fault, zero new red): every gate "
+        "blocker is registered debt in %s, so the workflow advances to "
+        "acceptance_walkthrough instead of re-running the full suite. | basis: zero new "
+        "red = no blocker outside the roster | blockers: %s"
+        % (KNOWN_RED_BASELINE_REL, detail)))
+
+
+def tests_fault_cap_audit_text(rounds: Any, cap: Any, exempt_rounds: Any = 0,
+                               exempt_cap: Any = 0, roster_note: str = "") -> str:
+    """超限封面的**具名审计尾注**（KI-122②：谁判的、依据、下一步，且不再自动重跑）。
+
+    与 integration_route / tests_exempt_cap_blocked_text 的封闭前缀是**追加**关系：
+    既有断言 startswith(前缀) 逐字节不变，本函数只出尾注。纯函数零 IO；畸形入参保守
+    截断成可读前缀（不抛——封面文案绝不让 blocked 路径炸）。"""
+    try:
+        r, c = int(rounds), int(cap)
+    except (TypeError, ValueError):
+        r, c = -1, -1
+    try:
+        er, ec = int(exempt_rounds), int(exempt_cap)
+    except (TypeError, ValueError):
+        er, ec = -1, -1
+    tail = (" | super-limit basis: arbitration judged verdict=tests-fault for %d "
+            "consecutive round(s) (consecutive cap %d; exempt rounds %d of cap %d), and "
+            "the round counter no longer resets on external handling (rework / retry_qc "
+            "/ pause) — only a genuinely cleared red (verdict=pass) or an explicit human "
+            "acceptance resets it. judged by: the lane tests-round accounting over the "
+            "arbitration verdict (no human judged this) | next step: the workflow does "
+            "NOT re-run the suite automatically; a human exit from the list above is "
+            "required" % (r, c, er, ec))
+    note = roster_note if isinstance(roster_note, str) else ""
+    return tail + ((" | known-red roster: %s" % note[:240]) if note else "")
 
 
 # ---- 仲裁段 settle 闸拒可辨（工单 t260917-01）----

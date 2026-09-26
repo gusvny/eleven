@@ -13,7 +13,7 @@
 //    env_fail（三态契约 §7.3：缺测试环境绝不 exit 0 假绿，exit 2；C3 表唯一豁免子用例）。
 import { spawnSync, spawn } from 'node:child_process';
 import {
-  mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync,
+  mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync, rmSync,
   readdirSync, statSync, copyFileSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -27,8 +27,17 @@ export const SANDBAR = path.join(REPO_ROOT, 'sandbar');
 export const POC_REAL = path.join(REPO_ROOT, 'server', 'engine');
 export const DEAD_TARGET = '127.0.0.1:1';
 
+// 260926 磁盘泄漏修（同类普查）：tmpRoot 建的夹具目录此前从不回收——宿主 $TMPDIR 实测
+// `fix14-*` 攒了 37519 个 / 约 1.76GB（13.9 天）。进程任何终态（正常/走完/抛异常/process.exit）统一同步回收；
+// SIGKILL（执行器 900s 超时帽）进程内兜底物理失效，由「同类外壳清理」另议（见验收报告清单）。
+const LIVE_TMP = new Set();
+process.on('exit', () => {
+  for (const d of LIVE_TMP) { try { rmSync(d, { recursive: true, force: true }); } catch { /* 兜底路径不抛 */ } }
+});
 export function tmpRoot(prefix) {
-  return mkdtempSync(path.join(tmpdir(), prefix));
+  const d = mkdtempSync(path.join(tmpdir(), prefix));
+  LIVE_TMP.add(d);
+  return d;
 }
 
 // 注册表根隔离（env 契约）+ legacy env 只在 legacy 查询路径显式注入（沿 lib_fix10 语义）

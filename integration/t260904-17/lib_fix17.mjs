@@ -23,8 +23,17 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DEAD_TEMPORAL = '127.0.0.1:1'; // 死端口兜底红线。勿用 17233——那是供给台 Temporal 的实占端口（260910 实锤：列表直走引擎通道后「死端口」连上了供给台，ok:true 空行=隔离假绿）；夹具票源全走桩
 
+// 260926 磁盘泄漏修（同类普查）：tmpRoot 建的夹具目录此前从不回收——宿主 $TMPDIR 实测
+// `fix17-shim*` 攒了 12145 个 / 约 75MB（10.7 天）。进程任何终态（正常/走完/抛异常/process.exit）统一同步回收；
+// SIGKILL（执行器 900s 超时帽）进程内兜底物理失效，由「同类外壳清理」另议（见验收报告清单）。
+const LIVE_TMP = new Set();
+process.on('exit', () => {
+  for (const d of LIVE_TMP) { try { rmSync(d, { recursive: true, force: true }); } catch { /* 兜底路径不抛 */ } }
+});
 export function tmpRoot(prefix) {
-  return mkdtempSync(path.join(tmpdir(), prefix));
+  const d = mkdtempSync(path.join(tmpdir(), prefix));
+  LIVE_TMP.add(d);
+  return d;
 }
 
 export function freePort() {

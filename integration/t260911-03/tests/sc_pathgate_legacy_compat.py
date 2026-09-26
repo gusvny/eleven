@@ -21,6 +21,7 @@
 三态：PASS exit 0 / FAIL exit 1 / ENV_FAIL exit 2（三态契约，无第四态）。
 D1 现状即绿；D2/D3 实现段落地前红属预期（TDD 验收门），arbitrate/merge 期必须绿。
 """
+import atexit
 import inspect
 import shutil
 import subprocess
@@ -77,6 +78,9 @@ BASE = {
 def mk_lane():
     """tmp 主仓（带本地 git 身份）+ 真注册泳道 worktree → (tmp, main, lane, 分叉sha)。"""
     tmp = Path(tempfile.mkdtemp(prefix="pathgate-s4-"))
+    # 260926 磁盘泄漏修（同类普查）：本夹具此前从不回收——$TMPDIR 实测 `pathgate-*`
+    # 攒了 5449 个 / 约 171MB。atexit 覆盖正常/异常/早退所有终态（含断言失败直接 sys.exit）。
+    atexit.register(shutil.rmtree, tmp, ignore_errors=True)
     main = tmp / "main"
     main.mkdir()
     for rel, content in BASE.items():

@@ -32,7 +32,9 @@ from temporalio.client import Client
 from shared import (
     ADMIN_PY,
     INSPECTION_DIR,
+    KNOWN_RED_BASELINE_REL,
     NAMESPACE,
+    PROJECT_SA_NAME,
     REPO_ROOT,
     SCAN_DIR,
     SCAN_RED_LINE,
@@ -52,6 +54,8 @@ from shared import (
     build_scan_item,
     gate_from_log,
     is_pending_decision,
+    known_red_roster,
+    list_registered_projects,
     scan_summary,
 )
 
@@ -342,6 +346,34 @@ async def reconcile_ticket_workers() -> Dict[str, Any]:
 
 
 @activity.defn
+async def read_known_red_roster(args: Dict[str, Any]) -> Dict[str, Any]:
+    """KI-122①：读仓根已知红挂账册（integration/known-red-baseline.json）——**只读**面。
+
+    裁决采纳判据要用「这条闸拦（blocker）是否已挂账」这一既有名册归属，而名册是仓内文件：
+    workflow 体零 IO 纪律不破，IO 全在本壳。回执形状：
+      {ok: True, result: {entries: {name: {verdict, home}}, error: "", path: <绝对路径>}}
+    名册读不到 / JSON 畸形 / 条目畸形 → **不抛**，error 非空（fail-closed 由调用方判定：
+    照旧拦、照旧重跑，并把路径与原因点名进票面）——「名册确实缺失」不是基础设施故障，
+    不该被 Temporal 重试成无限循环。零写零信号：绝不改文件、绝不碰票态。"""
+    rel = str((args or {}).get("rel") or KNOWN_RED_BASELINE_REL)
+    root = Path(str((args or {}).get("repo_root") or REPO_ROOT))
+    path = root / rel
+    entries: Dict[str, Any] = {}
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        return {"ok": True, "result": {"entries": entries, "path": str(path),
+                                       "error": "cannot read %s: %s" % (rel, type(e).__name__)}}
+    try:
+        payload = json.loads(text)
+    except (ValueError, TypeError) as e:
+        return {"ok": True, "result": {"entries": entries, "path": str(path),
+                                       "error": "malformed JSON in %s: %s" % (rel, type(e).__name__)}}
+    entries, err = known_red_roster(payload)
+    return {"ok": True, "result": {"entries": entries, "path": str(path), "error": err}}
+
+
+@activity.defn
 async def write_scan_report(report: ScanReport) -> Dict[str, Any]:
     """Write the report to out/scan/<date>.json (same-day reruns overwrite that day's file; at most one file per day)."""
     import dataclasses
@@ -584,6 +616,146 @@ async def write_inspection_report(face: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @activity.defn
+async def run_inspection_lane_watchdog(args: Dict[str, Any]) -> Dict[str, Any]:
+    """lane/watchdog 面（KI-122 追加面 / KI-126 同源）：扫**非终态票**的工作流快照与时间线。
+
+    宿主追问（260926）「巡检发现这个问题了吗」→ 没有：巡检各面只读制品与代码（套件回执/
+    变化面 diff/KI 清单/台账），**没有一面读票的工作流时间线**——而活锁只体现在泳道层
+    （同一票 `gate → tests-fault → 重跑`）。本面补这一路，与 `suite`/`deadman` 族并列。
+
+    **只读铁律**：只 `list_workflows`（筛 RUNNING）与 `query("snapshot")`——**零写零信号**，
+    绝不 update/signal/cancel/terminate 任何票，绝不改文件（与巡检红线一致）。
+    判定全部在纯函数面 inspection_lane_watchdog（UT 主面）；本壳只做 IO（注册表解析、
+    枚举、快照查询、时钟）。
+
+    范围：按项目注册表解析出的**全部项目**的非终态票（票的 ProjectKey SA ∈ 注册表 key），
+    不只宿主项目——逐票超阈出发现（同票多族由纯函数聚合为一条）。回执含计数（scanned /
+    with_findings / by_leg）与阈值来源（declaration|default + 逐键回落原因），不静默。
+    单票查询失败=点名进 errors（绝不静默吞成「这票没问题」）。"""
+    from inspection_lane_watchdog import (facts_from_snapshot, lane_findings,
+                                          lane_section, resolve_thresholds)
+
+    thresholds, thr_source, thr_note, _problems = resolve_thresholds(args.get("watchdog"))
+    try:
+        max_tickets = int(args.get("max_tickets") or 200)
+    except (TypeError, ValueError):
+        max_tickets = 200
+    max_tickets = max(1, min(max_tickets, 2000))   # 硬上限：防呆（一次扫描的票数上界）
+    try:
+        q_to = float(args.get("query_timeout_sec") or 5.0)
+    except (TypeError, ValueError):
+        q_to = 5.0
+    try:
+        concurrency = int(args.get("concurrency") or 12)
+    except (TypeError, ValueError):
+        concurrency = 12
+    try:
+        scan_budget_sec = float(args.get("scan_budget_sec") or 90.0)
+    except (TypeError, ValueError):
+        scan_budget_sec = 90.0
+
+    # ---- 项目注册表（"全部项目"的真源；读不到=fail-closed 点名，不静默扫零票）----
+    try:
+        projects, quarantined = await asyncio.to_thread(list_registered_projects)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "项目注册表读取失败（lane/watchdog 面无从确定范围）：%s: %s"
+                                      % (type(e).__name__, e)}
+    known_keys = {str(p.get("key") or "") for p in (projects or []) if isinstance(p, dict)}
+    known_keys.discard("")
+
+    from temporalio.common import SearchAttributeKey
+    from workflows_v2 import TEMPLATE_CLASSES
+
+    try:
+        client = await Client.connect(TARGET_HOST, namespace=NAMESPACE)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "temporal server 不可达：%s: %s" % (type(e).__name__, e)}
+    type_filter = " OR ".join('WorkflowType="%s"' % c.__name__
+                              for c in TEMPLATE_CLASSES.values())
+    now_ts = time.time()
+    facts: List[Dict[str, Any]] = []
+    errors: List[str] = []          # 跳过的（不在扫面口径内：无身份/非注册项目）
+    unreadable: List[str] = []      # 在册非终态票但快照读不到（僵尸形态候选，逐票点名）
+    enum_note = ""
+    # ---- 枚举（快：只 list + 读 SA；真在册项目的非终态票）----
+    targets: List[tuple] = []          # (ticket_id, run_id, project)
+    try:
+        async for wf in client.list_workflows('%s AND ExecutionStatus="Running"' % type_filter):
+            try:
+                sa_project = str(wf.typed_search_attributes.get(
+                    SearchAttributeKey.for_keyword(PROJECT_SA_NAME)) or "")
+            except Exception:  # noqa: BLE001 —— SA 读不出=归属未知，点名（不静默扫）
+                sa_project = ""
+            if not sa_project:
+                errors.append("%s: no ProjectKey search attribute (ownership unknown, skipped)"
+                              % wf.id)
+                continue
+            if known_keys and sa_project not in known_keys:
+                # 非注册项目的票不属于本投影面（点名进 errors，不静默）
+                errors.append("%s: project %r not in the project registry (skipped)"
+                              % (wf.id, sa_project))
+                continue
+            if len(targets) >= max_tickets:
+                enum_note = ("scan truncated at max_tickets=%d (more in-scope non-terminal "
+                             "tickets exist)" % max_tickets)
+                break
+            targets.append((wf.id, wf.run_id, sa_project))
+    except Exception as e:  # noqa: BLE001 —— 枚举面故障显式化（不静默零发现）
+        return {"ok": False, "error": "非终态票枚举失败：%s: %s" % (type(e).__name__, e)}
+    non_terminal = len(targets)
+
+    # ---- 并发取快照（有界：并发度 + 总预算 + 单票超时；死票查询会等到超时，
+    #     故必须三闸齐备——否则一次巡检被几百张无 worker 的 RUNNING 票拖死）----
+    deadline = time.monotonic() + scan_budget_sec
+    sem = asyncio.Semaphore(concurrency)
+    budget_note: List[str] = []
+
+    async def _read(tid: str, run_id: str, project: str):
+        async with sem:
+            if time.monotonic() >= deadline:
+                budget_note.append(tid)
+                return tid, project, None, "scan budget (%ds) exhausted before this ticket "
+            try:
+                snap = await asyncio.wait_for(
+                    client.get_workflow_handle(tid, run_id=run_id).query("snapshot"),
+                    timeout=q_to)
+            except Exception as e:  # noqa: BLE001 —— 查不到=点名，绝不当「无问题」
+                return tid, project, None, "snapshot query failed: %s: %s" % (type(e).__name__, e)
+            return tid, project, snap, ""
+
+    for tid, project, snap, err in await asyncio.gather(
+            *[_read(*t) for t in targets]):
+        if err:
+            unreadable.append("%s: %s" % (tid, err))
+            continue
+        facts.append(facts_from_snapshot(tid, project, snap, workflow_id=tid, now_ts=now_ts))
+    if budget_note:
+        enum_note = (enum_note + " | " if enum_note else "") + (
+            "%d ticket(s) not read within the %ds scan budget (first: %s)"
+            % (len(budget_note), int(scan_budget_sec), budget_note[0]))
+
+    findings, meta = lane_findings(facts, now_ts=now_ts, thresholds=thresholds,
+                                   tickets_meta={"non_terminal": non_terminal})
+    meta["errors"] = errors
+    meta["unreadable"] = unreadable
+    meta["quarantined_projects"] = [str(q.get("dir") or "") for q in (quarantined or [])
+                                    if isinstance(q, dict)]
+    meta["enum_note"] = enum_note
+    meta["scan_budget_sec"] = scan_budget_sec
+    meta["concurrency"] = concurrency
+    meta["threshold_source"] = thr_source
+    meta["threshold_note"] = thr_note
+    meta["scanned_at"] = now_ts
+    activity.logger.info("lane/watchdog：非终态票 %d 张（读到 %d 张；注册项目 %d 个），发现 %d 条（%s）",
+                         meta["non_terminal"], meta["scanned"], len(known_keys), len(findings),
+                         ", ".join("%s=%d" % (k, v) for k, v in meta["by_leg"].items()))
+    return {"ok": True, "result": {
+        "findings": findings,
+        "section": lane_section(findings, meta, source=thr_source, source_note=thr_note),
+        "meta": meta}}
+
+
+@activity.defn
 async def resolve_inspection_plan(args: Dict[str, Any]) -> Dict[str, Any]:
     """运行期「本期怎么跑」决议（t260913-02）：读**当前**巡检声明 → 是否跑套件 / cron /
     扫描面。纯实现=inspection_decl.resolve_instance_plan（本壳零业务判断）。
@@ -790,6 +962,8 @@ ALL_ACTIVITIES = [
     ticket_scan,
     scan_tickets_report,
     reconcile_ticket_workers,
+    # KI-122①（260926 宿主直修令）：已知红名册只读面（裁决采纳判据的名册归属）
+    read_known_red_roster,
     write_scan_report,
     run_inspection_scan,
     write_inspection_report,
@@ -798,6 +972,9 @@ ALL_ACTIVITIES = [
     # t260913-02：运行期声明决议（套件开关）+ 漏跑核查（票面注入面）
     resolve_inspection_plan,
     run_inspection_deadman,
+    # 260926（KI-122 追加面 / KI-126 同源）：lane/watchdog 只读面——扫非终态票的
+    # 工作流快照与时间线（同票重跑轮次 / tests-fault 回路停留 / 在飞静默僵尸）
+    run_inspection_lane_watchdog,
     # t260916-02：spawner→真票起票薄壳（cron 调度铸 t 形号的载体）
     spawn_inspection_period,
     # t260916-22：inspect 段 report 面机械复核（证据复核/去重压制/预算/汇总）；

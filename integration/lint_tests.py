@@ -18,9 +18,11 @@ practice:
 
 Usage: python3 integration/lint_tests.py (cwd = repo root; exit 0 = pass)
 """
+import atexit
 import json
 import py_compile
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -31,7 +33,11 @@ INTEG = REPO / "integration"
 WB_TESTS = REPO / "server/plugins/workbench/tests"          # ← project parameter (fork: change here)
 TP_TESTS = REPO / "server/engine/tests"          # ← project parameter
 VENV_PY = REPO / "server/engine/.venv/bin/python"  # ← project parameter
+# 260926 磁盘泄漏修（同类普查发现）：本目录此前从不回收——宿主 $TMPDIR 实测
+# `lint-pyc-*` 攒了 6153 个 / 约 6.0GB（每次 lint 落一份全仓 pyc，10.7 天）。
+# atexit 兜底：正常/异常/早退所有终态都回收；导入本模块的场景（t260920-03）同样受此回收。
 PYC = tempfile.mkdtemp(prefix="lint-pyc-")
+atexit.register(shutil.rmtree, PYC, ignore_errors=True)
 
 errors, warns = [], []
 
