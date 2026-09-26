@@ -284,7 +284,7 @@ async function openBoard(page) {
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(2500)
   await dismissOverlays(page)
-  const boardIcon = page.locator('span.wb-view-icon[title="工单列表"]').first()
+  const boardIcon = page.locator('span.wb-view-icon[title="Tickets"]').first()
   if (!(await waitFor(async () => (await boardIcon.count()) > 0, 10000))) return false
   await boardIcon.click()
   // t260905-05 re-anchored: the row-card contract (boardCard, above) replaces

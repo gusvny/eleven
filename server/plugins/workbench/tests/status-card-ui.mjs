@@ -44,7 +44,7 @@ section('A. 视图模型真值表')
   // t260915-05：主文案走 red-light-lexicon 词条表（中文人话，表驱动而非硬编码——
   // 与 REASON_LEXICON 同源断言，改表即改文案）。
   ok(card.headline === REASON_LEXICON.main_dirty.headline, '主文案=词条表 main_dirty 条目（改表即改文案）')
-  ok(card.headline.includes('未提交的改动') && card.headline.includes('不是冲突'), '主文案人话三问之一：出了什么/非冲突')
+  ok(card.headline.includes('uncommitted changes') && card.headline.includes('not a conflict'), '主文案人话三问之一：出了什么/非冲突')
   ok(card.headlineFromTable === true, 'headlineFromTable=true（词条表命中）')
   ok(card.files.length === 1 && card.files[0] === 'server/model-routes.yaml', '文件点名取结构化 files')
   ok(card.next.includes('retry_qc') || card.next.includes('retry-qc'), '下一步取结构化 next_action（谁做什么）')
@@ -113,7 +113,7 @@ const libJs = readFileSync(join(repo, 'server/plugins/workbench/lib/client.js'),
 const libCjs = readFileSync(join(repo, 'server/plugins/workbench/lib/client.cjs'), 'utf8')
 for (const [name, art] of [['src', src], ['lib/client.js', libJs], ['lib/client.cjs', libCjs]]) {
   ok(art.includes('wb-status-card'), `${name}: 卡类名 wb-status-card 在场`)
-  ok(art.includes('原始引擎日志'), `${name}: 原始日志折叠 summary 在场`)
+  ok(art.includes('Raw engine log'), `${name}: 原始日志折叠 summary 在场（t260926 UI 英文化：'原始引擎日志（调试用）'→'Raw engine log (debug only)'）`)
   ok(art.includes('Next: ') || /'Next: '/.test(art), `${name}: 下一步安排行在场（t260925-18 起英文「Next: 」）`)
   ok(art.includes('sc-file'), `${name}: 文件点名 chip 类名在场`)
   ok(art.includes("data-sev=blue") || art.includes("'blue'"), `${name}: 蓝卡分支接线在场`)
@@ -154,8 +154,8 @@ section('C. 翻译层表驱动 + 蓝卡「签什么」')
   ok(blue !== null && blue.severity === 'blue', 'awaiting-human → 蓝卡')
   ok(blue.headline === REASON_LEXICON['awaiting-human'].headline, '蓝卡主文案=词条表 awaiting-human 条目')
   ok(blue.signWhat.some(s => s.includes('变更：a.py')), '签什么收人门上下文（空行跳过）')
-  ok(blue.signWhat.some(s => s.startsWith('验收口径：人审签字')), '签什么收验收口径')
-  ok(blue.signWhat.some(s => s.includes('merge_check') && s.includes('全绿')), '签什么收门结论')
+  ok(blue.signWhat.some(s => s.startsWith('Acceptance criterion: 人审签字')), '签什么收验收口径')
+  ok(blue.signWhat.some(s => s.includes('merge_check') && s.includes('All prior gates green')), '签什么收门结论')
   ok(blue.signWhat.length <= STATUS_CARD_SIGN_WHAT_CAP, `签什么封顶 ${STATUS_CARD_SIGN_WHAT_CAP}`)
   ok(blue.files.length === 0, '蓝卡无文件点名（无受阻面）')
   // 畸形人门上下文：非串/缺 context_text → 逐条跳过不抛

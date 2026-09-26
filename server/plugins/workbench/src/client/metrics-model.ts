@@ -157,7 +157,7 @@ export function sanitizeMetricsResponse(body: unknown): MetricsResponse {
     kpis: { tickets: 0, closed: 0, avg_delivery_min: 0, tokens_total: 0 },
     primary: null, secondaries: [], generatedAt: '', cache: {}, error: msg, reason: '',
   })
-  if (typeof body !== 'object' || body === null) return bad('响应不是 JSON 对象')
+  if (typeof body !== 'object' || body === null) return bad('Response is not a JSON object')
   const b = body as Record<string, unknown>
   if (typeof b.error === 'string' && b.error.length > 0) return bad(b.error.slice(0, 300))
   const kp = (typeof b.kpis === 'object' && b.kpis !== null ? b.kpis : {}) as Record<string, unknown>
@@ -309,10 +309,10 @@ export function formatTokens(n: number): string {
 /** KPI 四卡（契约冻结四字段，常量序）。 */
 export function kpiCards(k: MetricsKpis): KpiCard[] {
   return [
-    { label: '工单数', value: fmtInt(k.tickets), title: '时间窗内纳票总数（closed 票按闭单时刻、未结票按创建时刻归窗）' },
-    { label: '关闭数', value: fmtInt(k.closed), title: '时间窗内已收口票数' },
-    { label: '均交付时长', value: `${formatMinutes(k.avg_delivery_min)} 分钟`, title: '窗口内 closed 票交付时长均值（v1 = handoff 近似口径，v2 = 08 终态精确）' },
-    { label: 'Token 总量', value: formatTokens(k.tokens_total), title: 'in + out 合计，不含 cacheRead（cacheRead 数见 Token tab，M2b）' },
+    { label: 'Tickets', value: fmtInt(k.tickets), title: 'Total tickets in the window (closed tickets binned by close time, open ones by creation time)' },
+    { label: 'Closed', value: fmtInt(k.closed), title: 'Tickets closed inside the window' },
+    { label: 'Avg delivery', value: `${formatMinutes(k.avg_delivery_min)} min`, title: 'Mean delivery time of tickets closed in the window (v1 = handoff approximation, v2 = exact from the 08 terminal state)' },
+    { label: 'Tokens total', value: formatTokens(k.tokens_total), title: 'in + out, excluding cacheRead (cacheRead counts live in the Token tab, M2b)' },
   ]
 }
 

@@ -332,7 +332,7 @@ async function runBrowser(browser) {
     })
 
     // 经第一个项目组的 📋 打开工单板（workbench 需先有 projectKey 才渲染列表）。
-    const boardIcon = page.locator('span.wb-view-icon[title="工单列表"]').first()
+    const boardIcon = page.locator('span.wb-view-icon[title="Tickets"]').first()
     if (!(await waitFor(async () => (await boardIcon.count()) > 0, 10000))) {
       record('S1 precheck', 'env_fail', `no project group 📋 found on ${BASE} (console not provisioned for board view)`)
       return

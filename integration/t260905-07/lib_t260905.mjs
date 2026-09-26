@@ -36,8 +36,8 @@ import { freePort, mainRoot } from '../t260904-17/lib_fix17.mjs';
 
 /** 字面量仅作常量模块缺席时的机制分支回退（该缺席本身会被 sb/anchor-constants 判 FAIL）。 */
 export const FALLBACK_TEXTS = Object.freeze({
-  STALE_BANNER_TEXT: '有更新，重启控制台生效',
-  STALE_RELOAD_TEXT: '有更新，刷新页面生效',
+  STALE_BANNER_TEXT: 'Update available — restart the console to apply',
+  STALE_RELOAD_TEXT: 'Update available — refresh the page to apply',
 })
 
 /** 源码侧加载横幅文案常量；模块缺席/不可解析 → null（调用方点名 FAIL，不静默回退）。 */

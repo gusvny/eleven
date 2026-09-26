@@ -46,10 +46,10 @@ ok(sidebar.includes('onRemove={() => setModal({ kind: \'remove\', project: modal
 section('B 设置弹层（只读+降级口径）')
 ok(modals.includes('data-wb-pmod-settings=""'), '只读信息面锚')
 ok(modals.includes('data-wb-pmod-settings-tickets=""'), '票计数锚')
-ok(modals.includes('tickets_state') && modals.includes('—（'), '降级「—」+提示（不红；tickets_state 非 ok 走降级分支）')
+ok(modals.includes('tickets_state') && modals.includes('— ('), '降级「—」+提示（不红；tickets_state 非 ok 走降级分支）')
 ok(modals.includes('data-wb-pmod-settings-health=""') && modals.includes('体检数据源未接入'), '体检降档中性占位（R2b：不谎报无黄牌）')
 ok(modals.includes('data-wb-pmod-remove-danger=""'), 'danger 区摘除入口')
-ok(modals.includes('本期无编辑器'), '只读口径成文（编辑器=Nongoal）')
+ok(modals.includes('no editor yet'), '只读口径成文（编辑器=Nongoal）')
 
 section('C 接入弹层（预检先行[本地形状检查，F1 降档]+就地错误）')
 ok(modals.includes('data-wb-pmod-add-precheck=""') && modals.includes('本地形状检查'), '预检钮（本地形状检查口径，F1）')
@@ -70,7 +70,7 @@ ok(modals.includes('locked={busy || step === \'executing\'}'), 'executing 态弹
 section('E 隔离弹层')
 ok(modals.includes('data-wb-pmod-quarantine-detail=""'), '隔离原因锚')
 ok(modals.includes('/project.yaml'), '原因含 <dir>/project.yaml 定位')
-ok(modals.includes('手工订正该 project.yaml 后自动恢复装载'), '修复指路')
+ok(modals.includes('correct that project.yaml by hand'), '修复指路')
 
 section('F 骨架纪律')
 ok(/e\.key === 'Escape'/.test(modals) && /e\.target === overlayRef\.current/.test(modals), 'ESC/遮罩关闭带（session-entry 先例取舍）')

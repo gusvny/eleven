@@ -558,7 +558,7 @@ async function scenarioRedCardDirtyFiles(page) {
 async function scenarioBlueCard(page) {
   const card = await cardOf(page)
   if (!card) return '状态卡未渲染（awaiting-human 子用例）'
-  if (!/blue|awaiting/i.test(card.cls) && !/等你审批|人门/.test(card.text)) {
+  if (!/blue|awaiting/i.test(card.cls) && !/Waiting on your approval|人门/.test(card.text)) {
     return `蓝卡语义缺席（cls=${card.cls.slice(0, 80)}）`
   }
   if (!card.text.includes('签')) return `蓝卡未列「签什么」：${card.text.slice(0, 160)}`
@@ -686,7 +686,7 @@ async function runBrowser(pw, browser) {
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, result: currentWorkflows }) })
     })
 
-    const boardIcon = page.locator('span.wb-view-icon[title="工单列表"]').first()
+    const boardIcon = page.locator('span.wb-view-icon[title="Tickets"]').first()
     if (!(await waitFor(async () => (await boardIcon.count()) > 0, 10000))) {
       record('S1 precheck', 'env_fail', `no project group 📋 found on ${BASE} (console not provisioned for board view)`)
       return

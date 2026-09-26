@@ -23,9 +23,9 @@ export const PART_ICON: Record<PartKind, string> = {
 
 /** 悬停说明里的人读标签。 */
 export const PART_LABEL: Record<PartKind, string> = {
-  agent: 'agent 执行',
-  script: '脚本/程序化',
-  human: '人工',
+  agent: 'agent',
+  script: 'script / programmatic',
+  human: 'human',
 }
 
 /** 徽标串：parts 直接拼接（如 ['agent','script'] → '🤖⚙️'）；空/undefined → '—'。 */
@@ -36,11 +36,11 @@ export function partsIcons(parts?: string[]): string {
 
 /** 悬停一行说明：「执行主体：🤖 agent 执行 + ⚙️ 脚本/程序化」；空/undefined → 旧数据口径说明。 */
 export function partsTitle(parts?: string[]): string {
-  if (!parts || parts.length === 0) return '执行主体：—（旧数据无 parts 静态声明，以实际运行为准）'
+  if (!parts || parts.length === 0) return 'Executed by: — (legacy data has no static parts declaration; actual runtime is authoritative)'
   const seg = parts.map(p => {
     const icon = PART_ICON[p as PartKind]
     const label = PART_LABEL[p as PartKind]
-    return icon ? `${icon} ${label}` : `❓ 未知执行主体 ${p}`
+    return icon ? `${icon} ${label}` : `❓ unknown executor ${p}`
   })
-  return `执行主体：${seg.join(' + ')}（静态声明；动态真源=Temporal history）`
+  return `Executed by: ${seg.join(' + ')} (static declaration; dynamic source of truth = Temporal history)`
 }

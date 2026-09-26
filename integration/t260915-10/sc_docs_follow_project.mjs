@@ -149,7 +149,7 @@ try {
   // 夹具甲 span=空转假绿）；组头 hasText 找图标 + span 标签限定双保险，消去序数与装饰
   // 节点两类错位。.wb-group-head 仅作导航定位不作断言锚。
   const docsIconOf = (name) => page.locator('.wb-group-head', { hasText: name }).locator('span[aria-label="文档"]');
-  const boardIconOf = (name) => page.locator('.wb-group-head', { hasText: name }).locator('span[aria-label="工单列表"]');
+  const boardIconOf = (name) => page.locator('.wb-group-head', { hasText: name }).locator('span[aria-label="Tickets"]');
   const projKeyOf = () => page.evaluate(() => document.querySelector('[data-wb-docs-root]')?.getAttribute('data-wb-doc-project-key') ?? null);
   const waitProjKey = (want, timeout = 8000) => page.waitForFunction(
     (w) => document.querySelector('[data-wb-docs-root]')?.getAttribute('data-wb-doc-project-key') === w,

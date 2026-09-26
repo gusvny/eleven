@@ -54,13 +54,13 @@ section('C workspace 缺/空 → 回退旧 worktree 字段（legacy code-lane）
 section('D 两者皆无 → 主树（lane: main 数据道）')
 {
   const r = workspaceInfoOf({ workspace: null, worktree: '' })
-  ok(r.type === 'main' && r.label === '主树' && r.path === '', '空 worktree+空 workspace → 主树')
+  ok(r.type === 'main' && r.label === 'Main tree' && r.path === '', '空 worktree+空 workspace → 主树')
   const r2 = workspaceInfoOf({})
-  ok(r2.type === 'main' && r2.label === '主树', '空对象 → 主树')
+  ok(r2.type === 'main' && r2.label === 'Main tree', '空对象 → 主树')
   const r3 = workspaceInfoOf(undefined)
-  ok(r3.type === 'main' && r3.label === '主树', 'undefined → 主树（不抛错）')
+  ok(r3.type === 'main' && r3.label === 'Main tree', 'undefined → 主树（不抛错）')
   const r4 = workspaceInfoOf(null)
-  ok(r4.type === 'main' && r4.label === '主树', 'null → 主树（不抛错）')
+  ok(r4.type === 'main' && r4.label === 'Main tree', 'null → 主树（不抛错）')
 }
 
 section('E 边界：type 非 worktree/dir 的 workspace 不误判')
@@ -74,9 +74,9 @@ section('E 边界：type 非 worktree/dir 的 workspace 不误判')
 section('F workspaceTextOf 紧凑文本（行悬停 title）')
 {
   ok(workspaceTextOf({ workspace: { type: 'worktree', path: '.worktrees/t260822-m14-detail-refactor' } })
-    === '泳道 t260822-m14-detail-refactor', 'worktree → 「泳道 <slug>」')
-  ok(workspaceTextOf({ workspace: { type: 'dir', path: '/tmp/suyou-ws/t-x' } }) === '目录 /tmp/suyou-ws/t-x', 'dir → 「目录 <path>」')
-  ok(workspaceTextOf({ worktree: '' }) === '主树', '无工作空间 → 「主树」')
+    === 'Lane t260822-m14-detail-refactor', 'worktree → 「Lane <slug>」')
+  ok(workspaceTextOf({ workspace: { type: 'dir', path: '/tmp/suyou-ws/t-x' } }) === 'Directory /tmp/suyou-ws/t-x', 'dir → 「Directory <path>」')
+  ok(workspaceTextOf({ worktree: '' }) === 'Main tree', '无工作空间 → 「主树」')
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

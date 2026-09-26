@@ -36,12 +36,12 @@ const modal = readFileSync(srcModal, 'utf8');
 const lib = readFileSync(libClient, 'utf8');
 
 // ---- A：空态带字按钮（src 源锚）----
-c.check('「＋ 新建会话」带字文案在 src', row.includes('新建会话'), 'label missing');
+c.check('「＋ 新建会话」带字文案在 src', row.includes('New session'), 'label missing');
 c.check('labeled 变体类 wb-psess-new-labeled 在 src', row.includes('wb-psess-new-labeled'));
 c.check('空态条件分支 tabs.length === 0 在 src', /tabs\.length\s*===\s*0/.test(row));
 
 // ---- B：lib 产物同批（bundle 重建看守，KI-052 错窗防线）----
-c.check('「新建会话」锚在 lib/client.js', lib.includes('新建会话'), 'lib bundle 未重建？');
+c.check('「新建会话」锚在 lib/client.js', lib.includes('New session'), 'lib bundle 未重建？');
 c.check('wb-psess-new-labeled 锚在 lib/client.js', lib.includes('wb-psess-new-labeled'),
   'lib bundle 未重建？');
 
@@ -56,7 +56,7 @@ const offenders = modal.split('\n')
   .filter((l) => l.includes('存在性') && !l.trim().startsWith('*') && !l.trim().startsWith('/*'));
 c.check('弹层渲染文案无「存在性」旧口径（注释行豁免）', offenders.length === 0,
   offenders.join(' | ').slice(0, 300));
-c.check('弹层预检口径含「自动创建」', modal.includes('自动创建'), '新口径缺');
-c.check('弹层口径锚同批在 lib/client.js', lib.includes('自动创建'), 'lib bundle 未重建？');
+c.check('弹层预检口径含「自动创建」', modal.includes('created automatically'), '新口径缺');
+c.check('弹层口径锚同批在 lib/client.js', lib.includes('created automatically'), 'lib bundle 未重建？');
 
 c.finish();

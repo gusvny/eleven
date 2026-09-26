@@ -99,7 +99,7 @@ import { WorkbenchSidebar } from './sidebar.tsx'
 import { MetricsFooterButton, markFooterSlot } from './metrics-entry.tsx'
 // 立项单 Tier 3（t260904-17 保留）：中列第四视图 + 所属立项徽标（口径单点 ./epics-model.ts）。
 import { EpicBadge, EpicSection } from './epics.tsx'
-import { STATE_LABEL, workflowLabel } from './ui-labels.ts'
+import { STATE_LABEL, stageDisplayLabel, workflowLabel } from './ui-labels.ts'
 // 「文档」视图（t260905-06 立；t260915-10 接壳层 projectKey）：docs/ 定稿库人读视图 +
 // notes/ 观察窗，默认跟随壳层当前项目（页内选择器可手动切且手动优先）。
 import { DocsSection } from './docs.tsx'
@@ -1513,13 +1513,13 @@ function D2Stepper({ detail, wf, usage, durs, nowMs }: {
       {wf.stages.map((s, i) => {
         const vis: D2Visual = derived.states[s.id] ?? 'todo'
         const parallelPeers = isParallel && vis === 'running'
-          ? derived.active.filter(id => id !== s.id).map(id => wf.stages.find(x => x.id === id)?.name ?? id)
+          ? derived.active.filter(id => id !== s.id).map(id => stageDisplayLabel(id, wf.stages.find(x => x.id === id)?.name))
           : []
         return (
           <span key={s.id} style={{ display: 'inline-flex', alignItems: 'center' }}>
             {i > 0 && <span className="wb-d2-link" />}
             <span className="wb-d2-step" data-s={vis} title={`${s.id} · ${s.role} · ${partsTitle(s.parts)}`}>
-              <i className="ico">{D2_ICON[vis]}</i>{s.name} <PartsBadges parts={s.parts} />
+              <i className="ico">{D2_ICON[vis]}</i>{stageDisplayLabel(s.id, s.name)} <PartsBadges parts={s.parts} />
               {parallelPeers.length > 0 && (
                 <span className="wb-d2-par" title={`Parallel with ${parallelPeers.join(', ')} (forked rendering)`}> ∥</span>
               )}
@@ -1540,15 +1540,15 @@ function D2Stepper({ detail, wf, usage, durs, nowMs }: {
 function D2Reworks({ detail, wf }: { detail: TicketDetail; wf?: Wf }) {
   const reworks = (detail.timeline ?? []).filter(t => t.state === 'rework')
   if (reworks.length === 0) return null
-  const nameOf = (id: string) => wf?.stages.find(s => s.id === id)?.name ?? id
+  const nameOf = (id: string) => stageDisplayLabel(id, wf?.stages.find(s => s.id === id)?.name)
   return (
     <div className="wb-d2-reworks">
       <div className="ttl">⤺ Reworked {reworks.length}× (newest first)</div>
       {[...reworks].reverse().map((t, i) => (
         <div className="row" key={i}>
           <span className="when">{fmtAt(t.at)}</span>
-          打回到 <span className="tgt">{nameOf(t.stage)}</span>
-          {t.reason ? `：${t.reason}` : ''}
+          Sent back to <span className="tgt">{nameOf(t.stage)}</span>
+          {t.reason ? `: ${t.reason}` : ''}
         </div>
       ))}
     </div>
@@ -1562,7 +1562,7 @@ function d2StatusLine(detail: TicketDetail, wf?: Wf): { s: D2Visual | 'done'; te
     const sig = detail.signatures?.merge
     return { s: 'done', text: `Closed${sig ? ` (merged by ${sig.who})` : ''}` }
   }
-  const name = detail.stage_name || detail.stage || '—'
+  const name = stageDisplayLabel(detail.stage, detail.stage_name) || detail.stage || '—'
   if (detail.stage_state === 'blocked') {
     const lastBlocked = [...(detail.timeline ?? [])].reverse().find(t => t.state === 'blocked')
     return { s: 'blocked', text: `Stuck at ${name}: ${lastBlocked?.reason || 'see problems section below'}` }
@@ -1577,7 +1577,7 @@ function d2StatusLine(detail: TicketDetail, wf?: Wf): { s: D2Visual | 'done'; te
     if (order.length > 0) {
       const derived = deriveStageStates(detail, order)
       if (!derived.fallback && derived.active.length > 1) {
-        const names = derived.active.map(id => wf!.stages.find(x => x.id === id)?.name ?? id)
+        const names = derived.active.map(id => stageDisplayLabel(id, wf!.stages.find(x => x.id === id)?.name))
         return { s: 'running', text: `Forked in parallel: ${names.join(' ∥ ')}` }
       }
     }
@@ -1635,7 +1635,7 @@ function PulseLine({ detail }: { detail: TicketDetail }) {
   const warn = !stuck && ((hbAge !== null && hbAge > 30) || stallSec >= 120)
   return (
     <div className="wb-pulse" data-s={stuck ? 'stuck' : (warn ? 'warn' : 'ok')}>
-      Pulse: {detail.stage_name || detail.stage || pulse.activity || '—'}
+      Pulse: {stageDisplayLabel(detail.stage, detail.stage_name) || detail.stage || pulse.activity || '—'}
       {gen !== null ? ` · enter #${gen + 1} (gen${gen})` : ''}
       {runSec !== null ? ` · stage running ${fmtDur(runSec)}${startedTs > 0 ? '' : ' (estimated from heartbeat count)'}` : ''}
       {' · session log '}{kb > 0
@@ -1864,7 +1864,7 @@ function AgentLivePanel({ ticketId }: { ticketId: string }) {
         <span className="wb-live-title">{open ? '▾' : '▸'} Live activity</span>
         {open && data?.exists === true && (
           <span className="wb-live-meta">
-            最近 {data.events.length} 条 · 会话 {data.sizeKb ?? 0}KB · 更新于 {fmtTs(data.mtime)} · 每 8s 自动刷新
+            Latest {data.events.length} entries · session {data.sizeKb ?? 0}KB · updated {fmtTs(data.mtime)} · auto-refresh every 8s
           </span>
         )}
         {!open && <span className="wb-live-meta">Recent agent event stream (auto-refresh every 8s when expanded)</span>}
@@ -1911,14 +1911,14 @@ function D2Problems({ detail }: { detail: TicketDetail }) {
     for (const c of g.checks.filter(x => !x.green)) {
       rows.push(
         <div className="row" key={c.item}>
-          merge_check 红：{c.item}{c.detail ? <span className="dim"> — {c.detail}</span> : null}
+          merge_check red: {c.item}{c.detail ? <span className="dim"> — {c.detail}</span> : null}
         </div>)
     }
   }
   if (rows.length === 0 && lastBlocked?.reason) {
     rows.push(<div className="row" key="why">{lastBlocked.reason}</div>)
   }
-  if (rows.length === 0) rows.push(<div className="row" key="w">Stuck at {detail.stage_name || detail.stage}; reason not recorded</div>)
+  if (rows.length === 0) rows.push(<div className="row" key="w">Stuck at {stageDisplayLabel(detail.stage, detail.stage_name) || detail.stage || '—'}; reason not recorded</div>)
   return (
     <div className="wb-d2-problems">
       <div className="ttl">⛔ Problems need attention</div>
@@ -1960,7 +1960,7 @@ function usageSum(s: UsageSum): string {
 /** 阶段/整单的模型名串：≥2 个模型才显示（验收口径：多模型才显示模型名），按消耗排序。 */
 function usageModelNames(models: { provider: string; model: string }[]): string {
   if (models.length < 2) return ''
-  return models.map(m => m.model).filter(Boolean).join('、')
+  return models.map(m => m.model).filter(Boolean).join(', ')
 }
 
 /** 某阶段的使用（无该段数据 → null，UI 软降级不渲染数字）。 */
@@ -2051,7 +2051,7 @@ function UsageSummaryLine({ detail, wf, usage }: { detail: TicketDetail; wf?: Wf
       )}
       {uncoveredHint !== null && (
         <span style={{color: 'var(--dsw-derive-danger,#cf222e)'}}
-              title={uncoveredHint}> · ⚠未覆盖类型</span>
+              title={uncoveredHint}> · ⚠ unrendered types</span>
       )}
     </span>
   )
@@ -2065,7 +2065,7 @@ function StageUsageInline({ stageId, usage }: { stageId: string; usage: AgentUsa
   const names = Object.entries(s.models)
     .sort((a, b) => (b[1].input + b[1].output) - (a[1].input + a[1].output))
     .map(([k]) => k.split('/')[1] ?? k)
-  const multi = names.length >= 2 ? ` · ${names.join('、')}` : ''
+  const multi = names.length >= 2 ? ` · ${names.join(', ')}` : ''
   return (
     <span className="wb-stage-usage" title={stageUsageTitle(s)}>
       {usageSum(s)}{multi}
@@ -2097,7 +2097,7 @@ function D2Stages({ detail, wf, usage, durs, nowMs }: {
           <div className="wb-d2-card" data-s={vis} key={s.id}>
             <div className="hd">
               <i className="ico">{D2_ICON[vis]}</i>
-              <span className="nm">{s.name}</span> <PartsBadges parts={s.parts} />
+              <span className="nm">{stageDisplayLabel(s.id, s.name)}</span> <PartsBadges parts={s.parts} />
               <span className="meta">
                 {s.role}{enters > 1 ? ` · enter #${enters}` : ''}{h?.ts ? ` · ${fmtTs(h.ts)}` : ''}
               </span>
@@ -2115,7 +2115,7 @@ function D2Stages({ detail, wf, usage, durs, nowMs }: {
             )}
             {r && (r.evidence || (r.files_changed?.length ?? 0) > 0 || (r.deliverables?.length ?? 0) > 0) && (
               <details>
-                <summary>明细（evidence / 产物清单）</summary>
+                <summary>Details (evidence / deliverables)</summary>
                 {(r.files_changed?.length ?? 0) > 0 && (
                   <div className="ev">Files changed: {(r.files_changed ?? []).join('; ')}</div>)}
                 {(r.deliverables?.length ?? 0) > 0 && (
@@ -2206,13 +2206,13 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }: {
       <div className="wb-insp-gate" data-wb-anchor="review" data-testid="inspection-gate">
         <div className="ttl">Human gate ({detail.gate_id || 'inspection-close'}) — what to sign</div>
         <div className="wb-insp-gate-txt">
-          approve=收口（发现转 dev-lane 修复票跟踪）；reject=毙单收口（本期作废留痕）。
-          红线：{detail.red_line || '—'}
+          approve=close (findings tracked as dev-lane fix tickets); reject=kill the ticket (this period voided, kept on record).
+          Red line: {detail.red_line || '—'}
         </div>
         {detail.gate_error && <div className="wb-insp-gateerr">⚠ Rejection record: {detail.gate_error}</div>}
         {signed ? (
           <div className="wb-insp-signed" data-testid="inspection-signed">
-            已签：{signed.decision}（{signed.who}）{signed.note ? ` · ${signed.note}` : ''}
+            Signed: {signed.decision} ({signed.who}){signed.note ? ` · ${signed.note}` : ''}
           </div>
         ) : awaiting ? (
           <div className="wb-insp-signrow">
@@ -2231,7 +2231,7 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }: {
         )}
       </div>
       <details className="wb-insp-block" open data-testid="inspection-timeline">
-        <summary>阶段时间线（{timeline.length} 条）</summary>
+        <summary>Stage timeline ({timeline.length} entries)</summary>
         <div>
           {timeline.length === 0 && <div className="wb-sub">No timeline entries</div>}
           {timeline.map((e, i) => (
@@ -2245,7 +2245,7 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }: {
         </div>
       </details>
       <details className="wb-insp-block" open data-testid="inspection-findings-list">
-        <summary>发现清单（{findings.length} 条）</summary>
+        <summary>Findings ({findings.length} entries)</summary>
         <div>
           {findings.length === 0 && <div className="wb-sub">No findings (green-proof period)</div>}
           {findings.map((f, i) => (
@@ -2440,13 +2440,13 @@ function buildReworkInstruction(ticketId: string, round: ReviewRound, roundNo: n
       rejected.forEach((b, i) => {
         lines.push(`${i + 1}. [${TYPE_LABEL[b.type] ?? b.type} / ${STATUS_LABEL[b.status] ?? b.status}] ${b.summary}`)
         if (b.comment !== undefined && b.comment !== '') lines.push(`   - Comment: ${b.comment}`)
-        lines.push(`   - key：\`${b.block_key}\``)
+        lines.push(`   - key: \`${b.block_key}\``)
       })
     }
     if (commented.length > 0) {
       lines.push('', `### Other comments (${commented.length})`, '')
       commented.forEach((b, i) => {
-        lines.push(`${i + 1}. [${TYPE_LABEL[b.type] ?? b.type}] ${b.summary} —— ${b.comment ?? ''}`)
+        lines.push(`${i + 1}. [${TYPE_LABEL[b.type] ?? b.type}] ${b.summary} — ${b.comment ?? ''}`)
       })
     }
   }
@@ -2481,17 +2481,17 @@ function DiffBlockBody({ b }: { b: DiffBlock }) {
     const cols = Math.max(oc.length, nc.length)
     return (
       <table className="wb-d-cells">
-        <thead><tr><th style={{ width: 40 }}></th>{Array.from({ length: cols }, (_, c) => <th key={c}>列 {c + 1}</th>)}</tr></thead>
+        <thead><tr><th style={{ width: 40 }}></th>{Array.from({ length: cols }, (_, c) => <th key={c}>Column {c + 1}</th>)}</tr></thead>
         <tbody>
           <tr>
-            <th>旧</th>
+            <th>Old</th>
             {Array.from({ length: cols }, (_, c) => {
               const chg = (oc[c] ?? '') !== (nc[c] ?? '')
               return <td key={c} className={chg ? 'wb-d-cell-old' : ''}>{oc[c] ?? '—'}</td>
             })}
           </tr>
           <tr>
-            <th>新</th>
+            <th>New</th>
             {Array.from({ length: cols }, (_, c) => {
               const chg = (oc[c] ?? '') !== (nc[c] ?? '')
               return <td key={c} className={chg ? 'wb-d-cell-new' : ''}>{nc[c] ?? '—'}</td>
@@ -2536,7 +2536,7 @@ function ReconTable({ recon }: { recon: ReconEntry[] }) {
   if (recon.length === 0) return <div className="wb-empty">No structural diff (formatting/key order only, or no change).</div>
   return (
     <table className="wb-d-recon">
-      <thead><tr><th>JSON 路径</th><th>旧值</th><th>新值</th><th>变化</th></tr></thead>
+      <thead><tr><th>JSON path</th><th>Old</th><th>New</th><th>Change</th></tr></thead>
       <tbody>
         {recon.map((e, i) => (
           <tr key={i}>
@@ -2680,7 +2680,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
           for (const b of (f.blocks ?? []).filter(x => x.status !== 'unchanged')) {
             const key = entryKeyOf(f, b)
             blocks.push({
-              block_key: key, summary: `${f.path}：${b.summary}`, type: b.type, status: b.status,
+              block_key: key, summary: `${f.path}: ${b.summary}`, type: b.type, status: b.status,
               decision: reviews[key]?.decision, comment: reviews[key]?.comment,
             })
           }
@@ -2804,7 +2804,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
           {r.emptyReason !== undefined && <span className="wb-sub">{r.emptyReason}</span>}
           {r.excludedCount !== undefined && r.excludedCount > 0 && (
             <span style={{color: 'var(--dsw-derive-muted,#57606a)'}}>
-              已排除 {r.excludedCount} 个过程物{r.excludedPaths !== undefined && r.excludedPaths.length > 0 ? `：${r.excludedPaths.join('、')}` : ''}
+              Excluded {r.excludedCount} process artifacts{r.excludedPaths !== undefined && r.excludedPaths.length > 0 ? `: ${r.excludedPaths.join(', ')}` : ''}
             </span>
           )}
         </div>
@@ -2819,19 +2819,19 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
         <div className="wb-section-title">Changeset ({sourceLabel})</div>
         <div className="wb-d-sum">
           <span>{diff.source === 'merged' ? 'merge' : 'base'}: <code>{diff.base === '' ? '(none)' : diff.base.slice(0, 12)}</code></span>
-          {diff.worktree !== undefined && <span>泳道：{shortSlug(diff.worktree)}</span>}
+          {diff.worktree !== undefined && <span>Worktree: {shortSlug(diff.worktree)}</span>}
           <span>Files {diff.files.length}{diff.filesTruncated ? ' (truncated)' : ''} (docs {summary.doc} / code {summary.code} / data {summary.data})</span>
           {diff.excludedEngineFiles !== undefined && diff.excludedEngineFiles > 0 && (
             <span style={{color: 'var(--dsw-derive-muted,#57606a)'}}>
-              已排除 {diff.excludedEngineFiles} 个引擎过程物
+              Excluded {diff.excludedEngineFiles} engine process artifacts
               {diff.excludedPaths !== undefined && diff.excludedPaths.length > 0
-                ? `：${diff.excludedPaths.join('、')}${diff.excludedPaths.length < diff.excludedEngineFiles ? '…' : ''}`
+                ? `: ${diff.excludedPaths.join(', ')}${diff.excludedPaths.length < diff.excludedEngineFiles ? '…' : ''}`
                 : ''}
             </span>
           )}
-          <span>意见：通过 {summary.approved} / 驳回 {summary.rejected}</span>
+          <span>Review: approve {summary.approved} / reject {summary.rejected}</span>
           {latestRound !== undefined && (
-            <span>已存 {reviewFile!.rounds.length} 轮（最近：{CONCLUDE_LABEL[latestRound.conclude] ?? latestRound.conclude} · {latestRound.reviewer} · {fmtTs(latestRound.ts)}）</span>
+            <span>Saved {reviewFile!.rounds.length} rounds (latest: {CONCLUDE_LABEL[latestRound.conclude] ?? latestRound.conclude} · {latestRound.reviewer} · {fmtTs(latestRound.ts)})</span>
           )}
         </div>
         {diff.emptyReason !== undefined && <div className="wb-empty">{diff.emptyReason}</div>}
@@ -2847,7 +2847,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
 
       {genFiles.length > 0 && (
         <details className="wb-d-gen">
-          <summary>构建产物（{genFiles.length} 个）——编译生成的 lib/ bundle，随源码自动重出，一般不用审</summary>
+          <summary>Build artifacts ({genFiles.length}) — compiled lib/ bundles, regenerated from source, normally no need to review</summary>
           <div className="wb-d-gen-list">
             {genFiles.map(f => (
               <div className="wb-d-gen-row" key={f.path}>
@@ -2892,12 +2892,12 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
 
           {expired.length > 0 && (
             <div className="wb-d-expired">
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>已过期意见（{expired.length}）——块/文件内容已变，key 失效，不回填：</div>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>Expired comments ({expired.length}) — block/file content changed, key no longer valid, not backfilled:</div>
               {expired.map((eb, i) => (
                 <div key={i} className="wb-d-expired-item">
                   <span className="wb-d-badge" data-s="expired">Expired</span>{' '}
                   [{TYPE_LABEL[eb.type] ?? eb.type}] {eb.summary}
-                  {eb.comment !== undefined && eb.comment !== '' && ` —— ${eb.comment}`}
+                  {eb.comment !== undefined && eb.comment !== '' && ` — ${eb.comment}`}
                 </div>
               ))}
             </div>
@@ -2999,7 +2999,7 @@ function AgentLogsTab({ detail, wf, onMsg }: { detail: TicketDetail; wf?: Wf; on
     byStage.set(f.stage, arr)
   }
   const wfOrder = wf?.stages.map(s => s.id) ?? []
-  const stageName = (id: string) => wf?.stages.find(s => s.id === id)?.name ?? id
+  const stageName = (id: string) => stageDisplayLabel(id, wf?.stages.find(s => s.id === id)?.name)
   const stageIds = [...byStage.keys()].sort((a, b) => {
     const ia = wfOrder.indexOf(a)
     const ib = wfOrder.indexOf(b)
@@ -3039,7 +3039,7 @@ function AgentLogsTab({ detail, wf, onMsg }: { detail: TicketDetail; wf?: Wf; on
                 if (r?.ok === true) { setLogs(r.result as AgentLogsResult); onMsg('Refreshed') }
               } finally { setLoading(false) }
             })() }}>
-            刷 新
+            Refresh
           </button>
         </div>
         {logs.files.length === 0 && (
@@ -3069,7 +3069,7 @@ function AgentLogsTab({ detail, wf, onMsg }: { detail: TicketDetail; wf?: Wf; on
                   open={stageId === lastStage && a.gen === lastGen}>
                   <summary>
                     <span className="wb-al-status" data-ok={status !== 'failed'}>{status}</span>
-                    <span>第 {a.gen + 1} 次（gen{a.gen}）</span>
+                    <span>Attempt {a.gen + 1} (gen{a.gen})</span>
                     <span className="wb-al-fmeta">{fmtTs(a.result?.mtime ?? a.log?.mtime ?? 0)}</span>
                     <span className="sum">{summary}</span>
                   </summary>
@@ -3082,7 +3082,7 @@ function AgentLogsTab({ detail, wf, onMsg }: { detail: TicketDetail; wf?: Wf; on
                           <span><span className="wb-al-result-key">files_changed</span>{' '}
                             {Array.isArray(r.files_changed) ? (r.files_changed as unknown[]).length : '—'}</span>
                           {Array.isArray(r.files_changed) && (r.files_changed as unknown[]).length > 0 && (
-                            <span style={{wordBreak: 'break-all'}}>{(r.files_changed as unknown[]).map(String).join('、')}</span>
+                            <span style={{wordBreak: 'break-all'}}>{(r.files_changed as unknown[]).map(String).join(', ')}</span>
                           )}
                         </div>
                         {summary !== '' && <div className="wb-al-summ">{summary}</div>}
@@ -3168,8 +3168,8 @@ function ScanReportSection({ scan, onOpen }: {
             <table className="wb-scan-table">
               <thead>
                 <tr>
-                  <th>工单</th><th>阶段</th><th>停留</th><th>验收</th><th>脚本门</th>
-                  <th>pending</th><th>建议</th><th>理由</th>
+                  <th>Ticket</th><th>Stage</th><th>Dwell</th><th>Acceptance</th><th>Gate</th>
+                  <th>pending</th><th>Suggestion</th><th>Reasons</th>
                 </tr>
               </thead>
               <tbody>
@@ -3183,7 +3183,7 @@ function ScanReportSection({ scan, onOpen }: {
                     <td>{it.stage || '—'}<div className="wb-scan-title">{STATE_LABEL[it.stage_state] ?? it.stage_state}</div></td>
                     <td>{it.dwell_hours}h</td>
                     <td>{it.acceptance_total > 0
-                      ? `${it.acceptance_done}/${it.acceptance_total}（${Math.round(it.acceptance_done / it.acceptance_total * 100)}%）`
+                      ? `${it.acceptance_done}/${it.acceptance_total} (${Math.round(it.acceptance_done / it.acceptance_total * 100)}%)`
                       : '—'}</td>
                     <td>
                       <span className="wb-dot" data-state={
@@ -3537,7 +3537,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       if (op === 'dispatch-next') {
         setPromptBox({ role: result?.role ?? '', stage: result?.stage ?? '', prompt: result?.prompt ?? '' })
       }
-      setOpMsg(msgOk + (data.run_id ? `（run_id ${data.run_id}）` : ''))
+      setOpMsg(msgOk + (data.run_id ? ` (run_id ${data.run_id})` : ''))
       // t260901-15：写成功后广播写事件——其它页签收到即刷新 + 黄条（写前守门据此二次确认）。
       presenceRef.current?.notifyWrite(id, op)
       // 列表必刷；若该行详情已打开（selectedId===id）同步刷详情。
@@ -3843,7 +3843,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     return (
       <div className="wb-root">
         <div style={{ padding: 32, color: 'var(--dsw-alias-label-secondary, #888)', fontSize: 13 }}>
-          从左侧项目行点工单列表图标打开该项目的工单台。
+          Pick a project row on the left and click its ticket-list icon to open that project board.
         </div>
       </div>
     )
@@ -3856,7 +3856,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
         <span className="wb-head-spacer" />
         <span className="wb-health">
           <a className="wb-health-link" href="http://127.0.0.1:8233" target="_blank" rel="noreferrer"
-            title="打开 Temporal 控制台（http://127.0.0.1:8233）">
+            title="Open the Temporal console (http://127.0.0.1:8233)">
             <span className="wb-health-item" data-online={health?.server.online ?? false}
               title={health
                 ? `server · ${health.server.detail}${health.server.online ? '' : `\nrestart: ${health.restart_hint.server}`}`
@@ -3878,7 +3878,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
               ? `Inspection report · ${scan.report.pending_decision_count} pending · click for full table`
               : (scan?.reason ?? 'Loading inspection report…')}
             onClick={() => setPage(page === 'scan' ? 'tickets' : 'scan')}>
-            巡检{scan?.report ? ` ${scan.report.pending_decision_count}` : ''}
+            Inspection{scan?.report ? ` ${scan.report.pending_decision_count}` : ''}
           </button>
         </span>
         {workersOpen && (
@@ -3893,7 +3893,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
             {workers !== undefined && workers.workers.length > 0 && (
               <table className="wb-workers-table">
                 <thead>
-                  <tr><th>队列</th><th>工单</th><th>pid</th><th>状态</th><th>日志时间</th></tr>
+                  <tr><th>Queue</th><th>Ticket</th><th>pid</th><th>Status</th><th>Log time</th></tr>
                 </thead>
                 <tbody>
                   {workers.workers.map(w => (
@@ -3917,7 +3917,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 
       {health !== undefined && !health.server.online && (
         <div className="wb-health-offline">
-          <span>Temporal server 离线（{health.server.detail}）→ {health.restart_hint.server}</span>
+          <span>Temporal server offline ({health.server.detail}) → {health.restart_hint.server}</span>
         </div>
       )}
       {workers !== undefined && workers.count > 0 && workers.count_alive === 0 && (
@@ -3944,11 +3944,11 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
         <button className="wb-chip-btn wb-chip-health" data-health="abnormal" data-on={filterHealth === 'abnormal'}
           title="Only tickets closed abnormally (no report / unreadable close face)"
           onClick={() => setFilterHealth(filterHealth === 'abnormal' ? '' : 'abnormal')}>
-          异常收口 {abnormalCloseCount}
+          Abnormal close {abnormalCloseCount}
         </button>
         <button className="wb-chip-btn" data-on={filterState4 === '' && filterHealth === ''}
           onClick={() => { setFilterState4(''); setFilterHealth('') }}>All {tickets?.length ?? 0}</button>
-        {epicList.length > 0 && <span className="wb-sub">epic：</span>}
+        {epicList.length > 0 && <span className="wb-sub">epic:</span>}
         {epicList.map(e => (
           <button key={e.code} className="wb-chip-btn wb-chip-epic" data-on={filterEpic === e.code}
             style={{ borderColor: epicColorOf(e.code), ...({ '--epic-c': epicColorOf(e.code) } as React.CSSProperties), color: epicChipColor() }}
@@ -3971,7 +3971,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
             className="wb-sub"
             title={pollLastError || 'Last refresh failed; showing last good snapshot, auto-retrying'}
           >
-            ⟳ 数据可能滞后（自动重试中）
+            ⟳ Data may be stale (auto-retrying)
           </span>
         )}
         <span className="wb-sub">{openList.length + doneList.length}/{tickets?.length ?? 0} tickets</span>
@@ -4175,7 +4175,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                     )}
                     <div className="sc-next"><b>{card.severity === 'blue' ? 'Waiting on you: ' : card.terminal ? 'Note: ' : 'Next: '}</b> {card.next}</div>
                     <details className="sc-raw">
-                      <summary>原始引擎日志（调试用）</summary>
+                      <summary>Raw engine log (debug only)</summary>
                       <pre>{card.rawLog.join('\n')}</pre>
                     </details>
                   </div>
@@ -4270,13 +4270,13 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                         void doOp(detail.id, 'update', { stage_state: 'awaiting', note: '(board) unblock' }, 'Unblocked')
                       }
                     }}>
-                    重跑本步
+                    Rerun this step
                   </button>
                 )}
                 {ops.includes('rework') && (
                   <button className="wb-btn wb-btn-danger" disabled={opBusy}
                     onClick={() => { openRework(detail.id, detail.stage_state === 'awaiting-human') }}>
-                    打回
+                    Rework
                   </button>
                 )}
                 {detail.stage_state === 'awaiting-human' && detail.kind !== 'inspection' && (
@@ -4286,18 +4286,18 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                   <span className="wb-d2-hint">No operation available for this state ({detail.status}×{detail.stage_state})</span>
                 )}
                 <details className="wb-d2-more">
-                  <summary>更多</summary>
+                  <summary>More</summary>
                   <div className="wb-d2-more-body">
                     {ops.includes('dispatch-next') && (
                       <button className="wb-btn" disabled={opBusy}
                         onClick={() => { void doOp(detail.id, 'dispatch-next', {}, 'Dispatch prompt generated') }}>
-                        派下一棒
+                        Dispatch next
                       </button>
                     )}
                     {ops.includes('close') && (
                       <button className="wb-btn wb-btn-green" disabled={opBusy}
                         onClick={() => { if (window.confirm('Mark as completed (closed)?')) void doOp(detail.id, 'update', { status: 'closed', note: '(board) done' }, 'Marked closed') }}>
-                        完成
+                        Done
                       </button>
                     )}
                     {detail.book_path && (
@@ -4323,7 +4323,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                   </button>
                 )}
                 <button className="wb-dtab" data-on={drawerTab === 'agent'} onClick={() => setDrawerTab('agent')}>
-                  Agent 日志
+                  Agent log
                 </button>
               </div>
 

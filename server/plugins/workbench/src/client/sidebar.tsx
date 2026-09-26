@@ -889,7 +889,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
             <div key={q.key} className="wb-quar-row" data-wb-quarantine-row=""
               role="button" aria-label={`Quarantined entry ${q.key}`}
               onClick={() => setModal({ kind: 'quarantine', entry: q })}>
-              ⚠ {q.key} · 注册条目被隔离
+              ⚠ {q.key} · registry entry quarantined
             </div>
           ))}
           {/* 「＋ 接入项目」行（票③面D）：项目组列表末尾常驻——空/全隔离注册表
@@ -920,9 +920,9 @@ export function WorkbenchSidebar(props: SidebarProps) {
         <div className="wb-right-content">
           {!viewProject && (
             <div className="wb-placeholder">
-              从左侧项目行点图标打开视图：
-              <br />工单列表 · 文档 · 模型路由 · 立项单 · 项目设置
-              <br />（按行项目分流；立项单为跨项目清单，点立项单图标后中列显示列表）
+              Open a view from a project row on the left:
+              <br />Tickets · Docs · Model Routes · Epics · Project Settings
+              <br />(routed by the row's project; Epics is a cross-project list — clicking its icon shows the list in the middle column)
             </div>
           )}
           {viewProject && rightView === 'board' && <Board focusId={selectedId || undefined} focusNonce={focusNonce} listNonce={listNonce} projectKey={viewProject} onOpenEpic={openEpic} />}
@@ -955,7 +955,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
           {!footerSlotOk() && !shellActive && (
             <button ref={metricsBtnRef} className="wb-sb-foot-btn" data-on={metricsOpen}
               title="Metrics (stage durations / delivery / tokens / system health)"
-              onClick={() => { setSettingsOpen(false); setMetricsOpen(o => !o) }}>📊 度量</button>
+              onClick={() => { setSettingsOpen(false); setMetricsOpen(o => !o) }}>📊 Metrics</button>
           )}
           <span className="wb-sb-foot-sp" />
           <button className="wb-sb-foot-btn" data-on={settingsOpen} title="Settings"
@@ -967,14 +967,14 @@ export function WorkbenchSidebar(props: SidebarProps) {
             {/* sandbar 驻留输入（原 board 筛选行内联输入迁来；localStorage key 与
                 sandbarHours/setSandbarHours 语义不变，侧栏轮询每次现读）。 */}
             <label className="row" title="How long closed tickets stay in the sidebar groups (hours; 0 = hide immediately)">
-              sandbar 驻留
+              Sandbar dwell
               <input type="number" min={0} step={1} value={sandbar}
                 onChange={e => {
                   const h = Math.max(0, Number(e.target.value) || 0)
                   setSandbar(h)
                   setSandbarHours(h)
                 }} />
-              小时
+              hours
             </label>
             <div className="m2c">Quiet in-progress threshold (minutes): ships with the M2c system-health tab.</div>
           </div>

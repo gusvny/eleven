@@ -59,10 +59,10 @@ ok(!isSettleCapableStatus('dispatched') && !isSettleCapableStatus('rework') && !
 /* ── D. reason 构表 ── */
 const kinds = ['bad-status', 'in-flight', 'main-lane', 'lane-gone', 'path-not-in-version', 'no-base', 'member-repo-no-base', 'invalid-base', 'binary', 'current-missing', 'repo-error']
 const phrases = {
-  'in-flight': '还在飞', 'main-lane': '主树道', 'lane-gone': '泳道已拆除',
-  'path-not-in-version': '不在该版本', 'no-base': '未登记开票基点',
-  'member-repo-no-base': '成员仓路径未登记开票基点', 'invalid-base': 'ref 无效',
-  'binary': '二进制', 'current-missing': '当前工作树不存在',
+  'in-flight': 'still in flight', 'main-lane': 'main-lane ticket', 'lane-gone': 'lane was torn down',
+  'path-not-in-version': 'is not in that version', 'no-base': 'no recorded base ref',
+  'member-repo-no-base': 'No base ref is recorded for the member-repo path', 'invalid-base': 'Invalid base ref',
+  'binary': 'Binary file', 'current-missing': 'does not exist in the current working tree',
 }
 for (const k of kinds) {
   const r = ticketTimeFailReason(k, 'DET')
@@ -78,11 +78,11 @@ ok(ticketTimeFailReason('lane-gone', 't260915-17').includes('t260915-17'), 'D3: 
 /* ── E. 横幅视图模型 ── */
 {
   const b1 = buildTicketTimeBanner('settle', 'squash-commit', 'a1b2c3d4e5f6')
-  ok(b1 !== null && b1.text === '🕰 本票时刻 · 只读' && b1.canJumpCurrent === true
-    && b1.version.includes('收口版') && b1.version.includes('a1b2c3d4e5f6') && b1.version.includes('squash 收口提交'),
+  ok(b1 !== null && b1.text === '🕰 Ticket time · read-only' && b1.canJumpCurrent === true
+    && b1.version.includes('Settled') && b1.version.includes('a1b2c3d4e5f6') && b1.version.includes('squash settle commit'),
     'E1: settle 横幅=mock D 原话主文案+版本副文案+跳链在场')
   const b2 = buildTicketTimeBanner('base', 'base-ref', '07e36415ff12')
-  ok(b2 !== null && b2.version.includes('开票基线版') && b2.canJumpCurrent === true, 'E2: base 横幅同构')
+  ok(b2 !== null && b2.version.includes('Baseline') && b2.canJumpCurrent === true, 'E2: base 横幅同构')
   ok(buildTicketTimeBanner('current', 'base-ref', 'a1b2c3d4e5f6') === null, 'E3: current → 横幅消失（切到当前版的可见信号）')
   for (const badRef of [undefined, null, 42, '', '   ']) {
     if (buildTicketTimeBanner('settle', 'merge-commit', badRef) !== null) ok(false, `E4: refShort 畸形应不渲染横幅（${String(badRef)}）`)

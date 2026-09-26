@@ -170,7 +170,7 @@ function mainCard(page) {
 }
 
 async function openBoard(page) {
-  const icon = page.locator('span.wb-view-icon[title="工单列表"]').first()
+  const icon = page.locator('span.wb-view-icon[title="Tickets"]').first()
   let there = false
   for (let i = 0; i < 40; i++) {
     if (await icon.count()) { there = true; break }

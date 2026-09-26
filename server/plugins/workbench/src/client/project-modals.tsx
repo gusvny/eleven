@@ -95,7 +95,7 @@ function ModalShell(props: {
     >
       <style>{PMOD_CSS}</style>
       <div className="wb-pmod-panel">
-        <button type="button" className="wb-pmod-x" data-wb-pmod-close="" aria-label="关闭弹层"
+        <button type="button" className="wb-pmod-x" data-wb-pmod-close="" aria-label="Close dialog"
           disabled={props.locked} onClick={props.onClose}>✕</button>
         {props.children}
       </div>
@@ -148,32 +148,32 @@ export function ProjectSettingsModal(props: {
   const t = detail?.tickets
   const degraded = detail != null && detail.tickets_state !== 'ok'
   return (
-    <ModalShell label={`项目设置 · ${project.name}`} onClose={onClose}>
-      <h3>项目设置 · {project.name} <span className="wb-pmod-mono wb-pmod-dim">{project.key}</span></h3>
-      <p className="wb-pmod-sub">注册表条目 · 只读（本期无编辑器）· ~/.sandbar/projects/{project.key}/project.yaml</p>
+    <ModalShell label={`Project Settings · ${project.name}`} onClose={onClose}>
+      <h3>Project Settings · {project.name} <span className="wb-pmod-mono wb-pmod-dim">{project.key}</span></h3>
+      <p className="wb-pmod-sub">Registry entry · read-only (no editor yet) · ~/.sandbar/projects/{project.key}/project.yaml</p>
       <div className="wb-pmod-grid" data-wb-pmod-settings="">
-        <span className="k">项目 key</span><span className="wb-pmod-mono">{project.key}</span>
-        <span className="k">显示名</span><span>{project.name}</span>
-        <span className="k">根目录</span><span className="wb-pmod-mono">{project.primary}</span>
-        <span className="k">票计数</span>
+        <span className="k">Project key</span><span className="wb-pmod-mono">{project.key}</span>
+        <span className="k">Display name</span><span>{project.name}</span>
+        <span className="k">Root dir</span><span className="wb-pmod-mono">{project.primary}</span>
+        <span className="k">Ticket counts</span>
         <span data-wb-pmod-settings-tickets="">
           {detail == null
-            ? (error ? <span className="wb-pmod-dim">—（{error}）</span> : <span className="wb-pmod-dim">读取中…</span>)
+            ? (error ? <span className="wb-pmod-dim">— ({error})</span> : <span className="wb-pmod-dim">Loading…</span>)
             : degraded
-              ? <span className="wb-pmod-dim">—（{detail.tickets_note || 'Temporal 不可达，票计数暂缺'}）</span>
-              : <span>在飞 {t?.open ?? 0} · 完结 {t?.closed ?? 0} · 已归档 {t?.archived ?? 0}</span>}
+              ? <span className="wb-pmod-dim">— ({detail.tickets_note || 'Temporal unreachable; ticket counts unavailable'})</span>
+              : <span>Open {t?.open ?? 0} · Closed {t?.closed ?? 0} · Archived {t?.archived ?? 0}</span>}
         </span>
-        <span className="k">接入体检</span>
+        <span className="k">Onboarding health</span>
         <span data-wb-pmod-settings-health="">
-          <span className="wb-pmod-chip">体检数据源未接入（待 CLI list 增补，本弹层只读展示）</span>
+          <span className="wb-pmod-chip">Health data source not wired up yet (pending a CLI list addition; this dialog only displays it)</span>
         </span>
       </div>
       {error && detail == null && <div className="wb-pmod-err">{error}</div>}
       <div className="wb-pmod-danger">
-        <div className="wb-pmod-dim" style={{ marginBottom: 8 }}>危险区——操作走 CLI 单源，与命令行同口径</div>
+        <div className="wb-pmod-dim" style={{ marginBottom: 8 }}>Danger zone — actions go through the single CLI source and behave exactly like the command line</div>
         <button type="button" className="wb-pmod-btn wb-pmod-btn-danger" data-wb-pmod-remove-danger=""
-          onClick={onRemove}>摘除项目…</button>
-        <span className="wb-pmod-dim" style={{ marginLeft: 8 }}>默认可逆：退役注册条目，数据全保留</span>
+          onClick={onRemove}>Remove project…</button>
+        <span className="wb-pmod-dim" style={{ marginLeft: 8 }}>Reversible by default: retires the registry entry, keeps all data</span>
       </div>
     </ModalShell>
   )
@@ -199,9 +199,9 @@ export function ProjectAddModal(props: { onClose: () => void; onAdded: () => voi
   /** 预检（本地形状检查，F1 降档口径）：纯白名单正则/绝对路径/非空，不调 CLI、零落盘。 */
   const localCheck = (): string[] => {
     const problems: string[] = []
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(key)) problems.push(`key 形状非法：${key || '（空）'}（白名单=小写字母/数字/连字符，不以连字符开头）`)
-    if (!name.trim()) problems.push('显示名不能为空')
-    if (!dir.startsWith('/')) problems.push(`根目录必须是绝对路径：${dir || '（空）'}`)
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(key)) problems.push(`Invalid key shape: ${key || '(empty)'} (allowed: lowercase letters, digits and hyphens; must not start with a hyphen)`)
+    if (!name.trim()) problems.push('Display name must not be empty')
+    if (!dir.startsWith('/')) problems.push(`Root dir must be an absolute path: ${dir || '(empty)'}`)
     return problems
   }
   const submit = async (): Promise<void> => {
@@ -225,21 +225,21 @@ export function ProjectAddModal(props: { onClose: () => void; onAdded: () => voi
   /** 预检产物：本地形状问题的提示条（黄牌语义——不阻塞确认，但深度校验仍会拒）。 */
   const warnings: string[] = Array.isArray(pre?.problems) ? pre.problems : []
   return (
-    <ModalShell label="接入项目" locked={busy} onClose={onClose}>
-      <h3>接入项目</h3>
-      <p className="wb-pmod-sub">注册到 ~/.sandbar/projects/&lt;key&gt;/ · 单根模型：多 repo 项目填父目录（票的空间=根下 .lane/） · 根目录不存在会自动创建（含父目录）并生成容器脚手架（全程零 git：容器未含仓库，开工单前需建/clone repo）</p>
-      <div className="wb-pmod-field"><label>项目 key</label>
-        <input className="wb-pmod-mono" data-wb-pmod-add-key="" value={key} onChange={e => setKey(e.target.value)} placeholder="小写字母/数字/连字符" /></div>
-      <div className="wb-pmod-field"><label>显示名</label>
+    <ModalShell label="Add project" locked={busy} onClose={onClose}>
+      <h3>Add project</h3>
+      <p className="wb-pmod-sub">Registers into ~/.sandbar/projects/&lt;key&gt;/ · single-root model: multi-repo projects use the parent directory (ticket space = .lane/ under the root) · a missing root dir is created automatically (with parents) plus the container scaffold (zero git throughout: the container holds no repo, so create/clone one before opening tickets)</p>
+      <div className="wb-pmod-field"><label>Project key</label>
+        <input className="wb-pmod-mono" data-wb-pmod-add-key="" value={key} onChange={e => setKey(e.target.value)} placeholder="lowercase letters / digits / hyphens" /></div>
+      <div className="wb-pmod-field"><label>Display name</label>
         <input data-wb-pmod-add-name="" value={name} onChange={e => setName(e.target.value)} /></div>
-      <div className="wb-pmod-field"><label>根目录</label>
+      <div className="wb-pmod-field"><label>Root dir</label>
         <input className="wb-pmod-mono" data-wb-pmod-add-dir="" value={dir} onChange={e => setDir(e.target.value)} placeholder="/absolute/path" /></div>
       {error && <div className="wb-pmod-err" data-wb-pmod-add-error="">{error}</div>}
       {pre && (
         <div data-wb-pmod-add-pre="">
-          <div className="wb-pmod-ok">本地形状检查通过（未落盘）——确认后由 CLI 做深度校验（交叉/重复/legacy；根目录不存在将自动创建并生成容器脚手架），拒收原因将就地显示。</div>
+          <div className="wb-pmod-ok">Local shape check passed (nothing written) — the CLI runs the deep validation on confirm (cross/duplicate/legacy; a missing root dir is created with the container scaffold); rejection reasons show up in place.</div>
           {warnings.map((w, i) => (
-            <div key={i} className="wb-pmod-warn">⚠ {w}（形状问题不阻塞确认，但 CLI 深度校验仍会拒收）</div>
+            <div key={i} className="wb-pmod-warn">⚠ {w} (a shape problem does not block confirmation, but the deep CLI validation may still reject)</div>
           ))}
         </div>
       )}
@@ -249,11 +249,11 @@ export function ProjectAddModal(props: { onClose: () => void; onAdded: () => voi
             const problems = localCheck()
             setPre({ problems })
             setError('')
-          }}>预检（本地形状检查，不落盘）</button>
+          }}>Precheck (local shape check, nothing written)</button>
         <button type="button" className="wb-pmod-btn" data-wb-pmod-add-submit=""
-          disabled={busy || !pre} onClick={() => { void submit() }}>确认接入</button>
+          disabled={busy || !pre} onClick={() => { void submit() }}>Confirm</button>
       </div>
-      <div className="wb-pmod-dim" style={{ marginTop: 8 }}>先预检再接入；拒收原因就地显示，无需翻后端日志。</div>
+      <div className="wb-pmod-dim" style={{ marginTop: 8 }}>Precheck first, then add; rejection reasons show in place, no need to dig through backend logs.</div>
     </ModalShell>
   )
 }
@@ -336,31 +336,31 @@ export function ProjectRemoveModal(props: { project: ProjectEntryLike; onClose: 
   }
   const purgeNeedsConfirm = purgeData || purgeCred
   return (
-    <ModalShell label={`摘除项目 · ${project.key}`} locked={busy || step === 'executing'} onClose={onClose}>
-      <h3>摘除项目 · {project.name} <span className="wb-pmod-mono wb-pmod-dim">{project.key}</span></h3>
-      <p className="wb-pmod-sub">默认可逆：只退役注册条目，数据全保留；re-add 同 key 即恢复</p>
+    <ModalShell label={`Remove project · ${project.key}`} locked={busy || step === 'executing'} onClose={onClose}>
+      <h3>Remove project · {project.name} <span className="wb-pmod-mono wb-pmod-dim">{project.key}</span></h3>
+      <p className="wb-pmod-sub">Reversible by default: only the registry entry is retired, all data is kept; re-adding the same key restores it</p>
       <div className="wb-pmod-check">
         <label><input type="checkbox" data-wb-pmod-remove-purge-data="" checked={purgeData}
-          onChange={e => setPurgeData(e.target.checked)} />{' '}删数据 data/（归档+metrics，不可逆，需二次确认）</label><br />
+          onChange={e => setPurgeData(e.target.checked)} />{' '}Delete data/ (archive + metrics; irreversible, needs a second confirmation)</label><br />
         <label><input type="checkbox" data-wb-pmod-remove-purge-cred="" checked={purgeCred}
-          onChange={e => setPurgeCred(e.target.checked)} />{' '}删 credentials.yaml</label>
-        <div className="wb-pmod-dim">处置默认全保留——不勾任何 purge 即可逆摘除。</div>
+          onChange={e => setPurgeCred(e.target.checked)} />{' '}Delete credentials.yaml</label>
+        <div className="wb-pmod-dim">Disposition keeps everything by default — checking no purge box means a reversible removal.</div>
       </div>
       {error && <div className="wb-pmod-err" data-wb-pmod-remove-error="">{error}</div>}
       {step === 'gate' && (
         <div data-wb-pmod-remove-gate="">
           <button type="button" className="wb-pmod-btn wb-pmod-btn-blue" data-wb-pmod-remove-precheck=""
-            disabled={busy} onClick={() => { void precheck() }}>预检（在飞闸）</button>
+            disabled={busy} onClick={() => { void precheck() }}>Precheck (in-flight gate)</button>
           <div className="wb-pmod-dim" style={{ marginTop: 6 }}>
-            在飞工单（Temporal 按 ProjectKey 查询）未收口=拒摘并报票号；Temporal 不可达同样拒摘
-            （fail-closed 无绕过旗）：先 sandbar up。
+            Any in-flight ticket (Temporal query by ProjectKey) not yet closed refuses the removal and reports the ticket ids; an unreachable Temporal refuses too
+            (fail-closed, no bypass flag): run sandbar up first.
           </div>
         </div>
       )}
       {step === 'dispose' && (
         <div data-wb-pmod-remove-dry="">
-          <div className="wb-pmod-ok">✓ 预检通过：无在飞工单闸阻（在飞闸结果见 CLI dry-run 口径）。</div>
-          <button type="button" className="wb-pmod-btn" disabled={busy} onClick={() => { void showDry() }}>摘除清单（dry-run）</button>
+          <div className="wb-pmod-ok">✓ Precheck passed: no in-flight ticket blocks the removal (same gate result as the CLI dry-run).</div>
+          <button type="button" className="wb-pmod-btn" disabled={busy} onClick={() => { void showDry() }}>Removal list (dry-run)</button>
         </div>
       )}
       {step === 'confirm' && (
@@ -368,19 +368,19 @@ export function ProjectRemoveModal(props: { project: ProjectEntryLike; onClose: 
           {dry && <pre className="wb-pmod-dim wb-pmod-mono" style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(dry, null, 2)}</pre>}
           {purgeNeedsConfirm && (
             <div className="wb-pmod-field">
-              <label style={{ width: 130 }}>输入 {project.key} 确认</label>
+              <label style={{ width: 130 }}>Type {project.key} to confirm</label>
               <input className="wb-pmod-mono" data-wb-pmod-remove-key="" value={confirmKey}
                 onChange={e => setConfirmKey(e.target.value)} placeholder={project.key} />
             </div>
           )}
           <button type="button" className="wb-pmod-btn wb-pmod-btn-danger" data-wb-pmod-remove-submit=""
             disabled={busy || (purgeNeedsConfirm && confirmKey !== project.key)}
-            onClick={() => { void execute() }}>确认摘除</button>
-          <span className="wb-pmod-dim" style={{ marginLeft: 8 }}>执行 sandbar project remove {project.key} --json，结果与 CLI 同口径</span>
+            onClick={() => { void execute() }}>Confirm removal</button>
+          <span className="wb-pmod-dim" style={{ marginLeft: 8 }}>Runs sandbar project remove {project.key} --json; same result as the CLI</span>
         </div>
       )}
-      {step === 'executing' && <div className="wb-pmod-warn">执行中…（弹层已锁定）</div>}
-      {result && <div className="wb-pmod-ok" data-wb-pmod-remove-result="">摘除完成：{JSON.stringify(result)}</div>}
+      {step === 'executing' && <div className="wb-pmod-warn">Running… (dialog locked)</div>}
+      {result && <div className="wb-pmod-ok" data-wb-pmod-remove-result="">Removal done: {JSON.stringify(result)}</div>}
     </ModalShell>
   )
 }
@@ -394,14 +394,14 @@ export function QuarantineModal(props: {
 }) {
   const { entry, onClose } = props
   return (
-    <ModalShell label={`隔离条目 · ${entry.key}`} onClose={onClose}>
-      <h3>隔离条目 · <span className="wb-pmod-mono">{entry.key}</span></h3>
-      <p className="wb-pmod-sub">装载器 fail-closed 隔离，不影响其余项目装载；按 key 查询会显式报隔离原因</p>
+    <ModalShell label={`Quarantined entry · ${entry.key}`} onClose={onClose}>
+      <h3>Quarantined entry · <span className="wb-pmod-mono">{entry.key}</span></h3>
+      <p className="wb-pmod-sub">Loader fail-closed quarantine; other projects still load. A query by key reports the quarantine reason explicitly</p>
       <div className="wb-pmod-err wb-pmod-mono" data-wb-pmod-quarantine-detail="">{entry.error}</div>
       <div className="wb-pmod-dim">
-        定位：<span className="wb-pmod-mono">{entry.dir}/project.yaml</span>。
-        修复：手工订正该 project.yaml 后自动恢复装载（左栏重新出现项目组）。
-        隔离期间无组头无项目设置入口（无装载条目可设置）。
+        Location: <span className="wb-pmod-mono">{entry.dir}/project.yaml</span>.
+        Fix: correct that project.yaml by hand and loading resumes automatically (the project group reappears in the left column).
+        While quarantined there is no group header and no project settings entry (nothing loaded to configure).
       </div>
     </ModalShell>
   )

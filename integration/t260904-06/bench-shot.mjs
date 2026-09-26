@@ -224,7 +224,7 @@ async function shootInner(page, url, fixtures, variant, outDir) {
   });
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
   console.log(`[${variant}] ${await dismissAdmission(page) ?? "无准入模态"}`);
-  const icon = page.locator('.wb-view-icon[title="工单列表"]').first();
+  const icon = page.locator('.wb-view-icon[title="Tickets"]').first();
   await icon.waitFor({ state: "visible", timeout: 10000 });
   await forceClick(icon);
   await page.waitForSelector("tr.wb-row", { timeout: 10000 });
@@ -263,8 +263,8 @@ async function shootInner(page, url, fixtures, variant, outDir) {
   // 视图②：无 spec 老票（空整卡不渲染对照；before 基线天然 0 卡，仅 after 出图）
   if (variant === "after") {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.locator('.wb-view-icon[title="工单列表"]').first().waitFor({ state: "visible", timeout: 10000 });
-    await forceClick(page.locator('.wb-view-icon[title="工单列表"]').first());
+    await page.locator('.wb-view-icon[title="Tickets"]').first().waitFor({ state: "visible", timeout: 10000 });
+    await forceClick(page.locator('.wb-view-icon[title="Tickets"]').first());
     await page.waitForSelector("tr.wb-row", { timeout: 10000 });
     await forceClick(page.locator("tr.wb-row", { hasText: "T-SPEC-EMPTY" }).first());
     await page.waitForSelector(".wb-drawer-head", { timeout: 10000 });

@@ -257,7 +257,7 @@ const clickish = async (loc) => {
 };
 
 async function openBoard(page) {
-  const entry = page.locator('[title="工单列表"], [aria-label="工单列表"]').first();
+  const entry = page.locator('[title="Tickets"], [aria-label="Tickets"]').first();
   const visible = await entry.isVisible().catch(() => false);
   if (visible) await clickish(entry);
   await page.locator('.wb-root').first().waitFor({ state: 'visible', timeout: 8000 }).catch(() => {});
@@ -420,7 +420,7 @@ try {
     record(`surface/epics-open/${leg}`, epicsOpened ? true : 'na',
       epicsOpened ? `立项单面入扫（区域计数 epics=${scan.regions.epics || 0}）` : '立项单入口未达');
     // 回板面再开 metrics（弹层随视图卸载，区域账不串）
-    const boardIcon = page.locator('[title="工单列表"], [aria-label="工单列表"]').first();
+    const boardIcon = page.locator('[title="Tickets"], [aria-label="Tickets"]').first();
     if (await boardIcon.isVisible().catch(() => false)) await clickish(boardIcon);
     await page.waitForTimeout(400);
     await page.evaluate(() => {

@@ -48,7 +48,7 @@ if (!opened) summarize();
 const { browser, page } = opened;
 
 // 第一个项目行的局部查询（夹具=第一组；全操作限定该行内，多组互不干扰）
-const rowSel = '[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])';
+const rowSel = '[data-wb-psess-row]:has([aria-label="New SeedWs session"])';
 const readRow = () => page.evaluate((sel) => {
   const row = document.querySelector(sel);
   const tabs = [...(row?.querySelectorAll('[data-wb-psess-tab]') ?? [])];

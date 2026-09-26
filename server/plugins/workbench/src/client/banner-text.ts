@@ -12,6 +12,6 @@
  */
 
 /** 服务端旧横幅（M1/M2/M3）。 */
-export const STALE_BANNER_TEXT = '有更新，重启控制台生效'
+export const STALE_BANNER_TEXT = 'Update available — restart the console to apply'
 /** 浏览器旧横幅（M4）。 */
-export const STALE_RELOAD_TEXT = '有更新，刷新页面生效'
+export const STALE_RELOAD_TEXT = 'Update available — refresh the page to apply'

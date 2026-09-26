@@ -410,7 +410,7 @@ async function runBrowser(BASE, pw, browser) {
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, result: [] }) })
     })
 
-    const boardIcon = page.locator('span.wb-view-icon[title="工单列表"]').first()
+    const boardIcon = page.locator('span.wb-view-icon[title="Tickets"]').first()
     if (!(await waitFor(async () => (await boardIcon.count()) > 0, 10000))) {
       record('S1 precheck', 'env_fail', `no project group 📋 found on ${BASE} (console not provisioned for board view)`)
       return

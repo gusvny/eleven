@@ -49,13 +49,13 @@ export function workspaceInfoOf(t: WorkspaceInput | null | undefined): Workspace
   if (typeof wt === 'string' && wt !== '') {
     return { type: 'worktree', label: shortSlug(wt), path: wt }
   }
-  return { type: 'main', label: '主树', path: '' }
+  return { type: 'main', label: 'Main tree', path: '' }
 }
 
 /** 行内/元信息的紧凑文本（title 与 aria 用；含类型前缀，如「泳道 t260822-x」「目录 /tmp/…」「主树」）。 */
 export function workspaceTextOf(t: WorkspaceInput | null | undefined): string {
   const info = workspaceInfoOf(t)
   if (info.type === 'main') return info.label
-  if (info.type === 'worktree') return `泳道 ${info.label}`
-  return `目录 ${info.label}`
+  if (info.type === 'worktree') return `Lane ${info.label}`
+  return `Directory ${info.label}`
 }

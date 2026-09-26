@@ -82,27 +82,27 @@ export type TicketTimeFailKind =
 export function ticketTimeFailReason(kind: TicketTimeFailKind, detail?: string): string {
   switch (kind) {
     case 'bad-status':
-      return `票面 status 缺失或畸形（${detail ?? '未知'}），无法判定本票收口态——本票时刻不可得`
+      return `Ticket status missing or malformed (${detail ?? 'unknown'}); cannot determine the settle state — the ticket-time version is unavailable`
     case 'in-flight':
-      return '本票还在飞，改动尚未收口——收口版要等本票结算合并后才有（当前改动可在「变更」页签看 diff）'
+      return 'This ticket is still in flight and its changes are not settled yet — the settled version only exists after this ticket is merged (the current changes are visible as a diff in the Changes tab)'
     case 'main-lane':
-      return '主树道工单无泳道提交，本票时刻的收口版不可得'
+      return 'A main-lane ticket has no lane commit, so the settled version at ticket time is unavailable'
     case 'lane-gone':
-      return `泳道已拆除，且 main 上找不到本票（${detail ?? ''}）的收口提交——本票时刻不可得`
+      return `The lane was torn down and no settle commit for this ticket (${detail ?? ''}) can be found on main — the ticket-time version is unavailable`
     case 'path-not-in-version':
-      return `路径 ${detail ?? ''} 不在该版本里（该时刻此文件不存在或未纳入）`
+      return `Path ${detail ?? ''} is not in that version (the file did not exist or was not tracked at that time)`
     case 'no-base':
-      return '本票未登记开票基点（base_ref 为空——主树道工单不登记基点），开票基线版不可得'
+      return 'This ticket has no recorded base ref (base_ref is empty — main-lane tickets record none), so the ticket-time baseline is unavailable'
     case 'member-repo-no-base':
-      return '成员仓路径未登记开票基点（逐仓基点不回写票面），开票基线版不可得'
+      return 'No base ref is recorded for the member-repo path (per-repo bases are not written back to the ticket), so the ticket-time baseline is unavailable'
     case 'invalid-base':
-      return `开票基点 ref 无效：${detail ?? ''}`
+      return `Invalid base ref: ${detail ?? ''}`
     case 'binary':
-      return '二进制文件，本查看器不渲染'
+      return 'Binary file; this viewer does not render it'
     case 'current-missing':
-      return `路径 ${detail ?? ''} 在当前工作树不存在（可能已删除）`
+      return `Path ${detail ?? ''} does not exist in the current working tree (it may have been deleted)`
     case 'repo-error':
-      return `本票时刻读取失败：${detail ?? '仓库读面异常'}`
+      return `Ticket-time read failed: ${detail ?? 'repo read error'}`
   }
 }
 
@@ -111,10 +111,10 @@ export type RefSource = 'branch-tip' | 'merge-commit' | 'squash-commit' | 'base-
 
 export function refSourceLabel(s: RefSource): string {
   switch (s) {
-    case 'branch-tip': return '泳道分支提交（未合并）'
-    case 'merge-commit': return 'merge 收口提交'
-    case 'squash-commit': return 'squash 收口提交'
-    case 'base-ref': return '开票基点'
+    case 'branch-tip': return 'Lane branch commit (unmerged)'
+    case 'merge-commit': return 'merge settle commit'
+    case 'squash-commit': return 'squash settle commit'
+    case 'base-ref': return 'base ref'
   }
 }
 
@@ -141,7 +141,7 @@ export function buildTicketTimeBanner(
   if (mode !== 'settle' && mode !== 'base') return null
   if (typeof refShort !== 'string' || refShort.trim() === '') return null
   const version = mode === 'settle'
-    ? `收口版 ${refShort} · ${refSourceLabel(refSource)}`
-    : `开票基线版 ${refShort} · ${refSourceLabel(refSource)}`
-  return { text: '🕰 本票时刻 · 只读', version, canJumpCurrent: true }
+    ? `Settled ${refShort} · ${refSourceLabel(refSource)}`
+    : `Baseline ${refShort} · ${refSourceLabel(refSource)}`
+  return { text: '🕰 Ticket time · read-only', version, canJumpCurrent: true }
 }

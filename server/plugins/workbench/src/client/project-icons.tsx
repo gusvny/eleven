@@ -28,11 +28,11 @@ export type ProjectIconName = 'board' | 'docs' | 'routes' | 'epics' | 'settings'
 
 /** 图标语义元数据：title 与 aria-label 恒同值（可辨识纪律，验收 11b）。 */
 export const PROJECT_ICON_SPECS: Record<ProjectIconName, { title: string; ariaLabel: string }> = {
-  board: { title: '工单列表', ariaLabel: '工单列表' },
-  docs: { title: '文档', ariaLabel: '文档' },
-  routes: { title: '模型路由', ariaLabel: '模型路由' },
-  epics: { title: '立项单', ariaLabel: '立项单' },
-  settings: { title: '项目设置', ariaLabel: '项目设置' },
+  board: { title: 'Tickets', ariaLabel: 'Tickets' },
+  docs: { title: 'Docs', ariaLabel: 'Docs' },
+  routes: { title: 'Model Routes', ariaLabel: 'Model Routes' },
+  epics: { title: 'Epics', ariaLabel: 'Epics' },
+  settings: { title: 'Project Settings', ariaLabel: 'Project Settings' },
 }
 
 /** 统一规格常量（单源；显形尺寸由消费方 CSS 定，几何常量在此）。 */

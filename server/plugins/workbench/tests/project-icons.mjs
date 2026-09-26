@@ -34,7 +34,7 @@ section('A 图标模块：五枚 specs + 规格单源')
 for (const name of ['board', 'docs', 'routes', 'epics', 'settings']) {
   ok(icons.includes(`${name}: { title:`), `spec ${name} 在案`)
 }
-for (const title of ['工单列表', '文档', '模型路由', '立项单', '项目设置']) {
+for (const title of ['Tickets', 'Docs', 'Model Routes', 'Epics', 'Project Settings']) {
   ok(icons.includes(`'${title}'`), `title/aria「${title}」齐备`)
 }
 ok(icons.includes("PROJECT_ICON_VIEWBOX = '0 0 20 20'"), 'viewBox 20×20 单源')

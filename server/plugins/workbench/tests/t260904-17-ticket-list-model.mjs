@@ -312,7 +312,7 @@ const EXEMPT_LITERALS = [
   'merge_check 等程序化门的一次运行记录',         // index.tsx 类型注释（存量）
   '(merge_check green)',                         // index.tsx 详情状态行文案（t260925-18 英文化）
   '最近一次 merge_check 红',                     // index.tsx 问题区注释（存量）
-  'merge_check 红：',                            // index.tsx 问题区文案（存量）
+  'merge_check red:',                            // index.tsx 问题区文案（存量）
 ]
 
 ok('零硬编码守卫：列表面四文件禁现 dev-lane 段名常量（豁免清单显式化）', () => {

@@ -90,7 +90,7 @@ const sbA = sidebarOf(pa);
 
 // T1 设置弹层
 {
-  const setIcon = sbA.locator('[title="项目设置"], [aria-label="项目设置"]').first();
+  const setIcon = sbA.locator('[title="Project Settings"], [aria-label="Project Settings"]').first();
   await forceClick(setIcon);
   await pa.waitForTimeout(600);
   const dlg = dialogOf(pa);

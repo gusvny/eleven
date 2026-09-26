@@ -55,10 +55,10 @@ try {
     ok(partsIcons([]) === '—', '空数组 → — 软降级')
     ok(partsIcons(['agent', 'robot']) === '🤖❓', '未知枚举值 → ❓ 兜底不炸')
 
-    ok(partsTitle(['agent', 'script']) === `执行主体：🤖 ${PART_LABEL.agent} + ⚙️ ${PART_LABEL.script}（静态声明；动态真源=Temporal history）`,
+    ok(partsTitle(['agent', 'script']) === `Executed by: 🤖 ${PART_LABEL.agent} + ⚙️ ${PART_LABEL.script} (static declaration; dynamic source of truth = Temporal history)`,
       '悬停一行说明（组合态）')
-    ok(partsTitle(undefined).includes('旧数据无 parts'), '无 parts 悬停行说明降级口径')
-    ok(partsTitle(['robot']).includes('未知执行主体 robot'), '未知值在悬停行点名')
+    ok(partsTitle(undefined).includes('no static parts declaration'), '无 parts 悬停行说明降级口径')
+    ok(partsTitle(['robot']).includes('unknown executor robot'), '未知值在悬停行点名')
     // the three icons/labels map 1:1 onto the enum (guards against a missed enum branch)
     ok(PART_ICON.agent === '🤖' && PART_ICON.script === '⚙️' && PART_ICON.human === '👤',
       '图标表 agent🤖/script⚙️/human👤')

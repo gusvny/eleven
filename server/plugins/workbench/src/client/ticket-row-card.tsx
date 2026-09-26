@@ -18,6 +18,7 @@ import {
   laneDots, toMillis, ticketDisplayTitle, pausedBadgeText, closeHealthOf, closeHealthBadgeOf,
   type WfLike,
 } from './ticket-list-model.ts'
+import { stageDisplayLabel } from './ui-labels.ts'
 
 /** 行卡消费的工单最小字段面（对齐 index.tsx TicketRow，多字段不关心）。 */
 export interface CardTicket {
@@ -97,7 +98,7 @@ export interface TicketRowCardProps {
 function cardTitle(t: CardTicket, wf?: WfLike | null): string {
   const parts = [t.id]
   const stage = (wf?.stages ?? []).find(s => s?.id === t.stage)
-  const short = stageShortOf(stage)
+  const short = stageDisplayLabel(stage?.id ?? t.stage, stageShortOf(stage))
   if (short !== '') parts.push(`Stage: ${short}`)
   if (t.blocked_reason) parts.push(`Blocked: ${t.blocked_reason}`)
   if (t.exec_status) parts.push(`Exec: ${t.exec_status}`)
@@ -214,7 +215,7 @@ export function TicketRowCard({
         )}
         {state4 === 'blocked' && (
           <button className="wb-card-btn wb-card-btn-blue" onClick={(ev) => { ev.stopPropagation(); onOpen('blocked') }}>
-            看原因
+            View Reason
           </button>
         )}
         {!compact && ops.includes('advance') && (

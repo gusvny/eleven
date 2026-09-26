@@ -33,6 +33,7 @@ import {
 } from './epics-model.ts'
 import type { EpicMeta, EpicStatus, EpicTicketsResult } from './epics-model.ts'
 import { EPIC_NOTE_INPUT_MAX, EPIC_STATUS_OPTIONS, isEpicStatusValue } from './epics-model.ts'
+import { workflowLabel } from './ui-labels.ts'
 import { startVisibleInterval } from './visibility-poll.ts'
 import { DERIVE_TOKENS_CSS } from './theme';
 
@@ -146,7 +147,7 @@ export function EpicBadge({ epic, onNavigate }: {
     <span
       className="wb-epic-chip"
       data-archived={b.code === null}
-      title={b.code !== null ? `所属立项：${b.code}（点击查看立项单）` : '未归档到任何立项单'}
+      title={b.code !== null ? `Epic: ${b.code} (click to open the epic)` : 'Not linked to any epic'}
       onClick={b.code !== null && onNavigate ? (ev) => { ev.stopPropagation(); onNavigate(b.code as string) } : undefined}
     >{b.label}</span>
   )
@@ -236,7 +237,7 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
       try {
         const d = await getJson(withEpicProject(`${EPICS_API}/${encodeURIComponent(code)}`, projectKey))
         if (cancelled) return
-        if (d?.ok !== true) { setError(d?.error ?? '立项单加载失败'); return }
+        if (d?.ok !== true) { setError(d?.error ?? 'Failed to load the epic'); return }
         setDetail(d.result as EpicMeta & { markdown: string })
       } catch (err) {
         if (!cancelled) setError(String(err instanceof Error ? err.message : err))
@@ -261,8 +262,8 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
   const saveStatus = useCallback(async () => {
     if (saveBusy) return
     // t260915-09：写端点空项目=不裸调（与建票禁用口径同款——状态写落错项目=跨项目串写）。
-    if (!projectKey) { setSaveMsg('未知当前项目——无法保存状态'); return }
-    if (editStatus === '') { setSaveMsg('保存失败：请先选择一个状态'); return }
+    if (!projectKey) { setSaveMsg('Unknown current project — cannot save the status'); return }
+    if (editStatus === '') { setSaveMsg('Save failed: select a status first'); return }
     setSaveBusy(true)
     setSaveMsg('')
     try {
@@ -273,16 +274,16 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
       })
       const d = await res.json()
       if (d?.ok !== true) {
-        setSaveMsg(`保存失败：${String(d?.error ?? '未知错误')}`)
+        setSaveMsg(`Save failed: ${String(d?.error ?? 'unknown error')}`)
         return
       }
-      setSaveMsg(`已保存：${String(d?.result?.status ?? '')}`)
+      setSaveMsg(`Saved: ${String(d?.result?.status ?? '')}`)
       try {
         const e = await getJson(withEpicProject(`${EPICS_API}/${encodeURIComponent(code)}`, projectKey))
         if (e?.ok === true) setDetail(e.result as EpicMeta & { markdown: string })
       } catch { /* 静默：保存已成功，详情留旧值 */ }
     } catch (err) {
-      setSaveMsg(`保存请求异常：${String(err instanceof Error ? err.message : err)}`)
+      setSaveMsg(`Save request failed: ${String(err instanceof Error ? err.message : err)}`)
     } finally {
       setSaveBusy(false)
     }
@@ -328,13 +329,13 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
 
   const submitCreate = useCallback(async () => {
     if (createBusy) return
-    if (!projectKey) { setCreateMsg('未知新建落点项目——请先从左侧点选一个项目'); return }
-    if (!createWf) { setCreateMsg('请选择工单模板'); return }
-    if (createTitle.trim() === '') { setCreateMsg('请填写工单标题'); return }
+    if (!projectKey) { setCreateMsg('Unknown target project for the new ticket — select a project on the left first'); return }
+    if (!createWf) { setCreateMsg('Select a ticket template'); return }
+    if (createTitle.trim() === '') { setCreateMsg('Enter a ticket title'); return }
     // 写集校验（t260829-07）：有非法行 → 拦截提交（建票口空写集拒收，宁可在前端挡）。
     const badWs = invalidWriteSetLines(createWsText)
     if (badWs.length > 0) {
-      setCreateMsg(`写集含非法路径（须为仓库内相对路径，禁绝对路径与 '..'）：${badWs.slice(0, 3).join('、')}`)
+      setCreateMsg(`Write set contains invalid paths (must be repo-relative; absolute paths and '..' are rejected): ${badWs.slice(0, 3).join(', ')}`)
       return
     }
     // 空写集拦截（t260901-01）：未勾「无文件改动」声明 → 前端先挡（文案=两条出路口径）。
@@ -358,7 +359,7 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
       const d = await res.json()
       if (d?.ok !== true) {
         // epic 强校验拒收等引擎错误原文透传（host 只透传不重复校验）。
-        setCreateMsg(`创建失败：${d?.error ?? '未知错误'}`)
+        setCreateMsg(`Create failed: ${d?.error ?? 'unknown error'}`)
         return
       }
       const newId = String(d.result?.id ?? '')
@@ -368,9 +369,9 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
         if (t?.ok === true) setTickets(t.result as EpicTicketsResult)
       } catch { /* 静默 */ }
       setCreateOpen(false)
-      setCreateMsg(`已创建工单 ${newId}（所属立项 ${code}）`)
+      setCreateMsg(`Created ticket ${newId} (epic ${code})`)
     } catch (err) {
-      setCreateMsg(`创建请求异常：${String(err instanceof Error ? err.message : err)}`)
+      setCreateMsg(`Create request failed: ${String(err instanceof Error ? err.message : err)}`)
     } finally {
       setCreateBusy(false)
     }
@@ -382,27 +383,27 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
       <div className="wb-ep-root">
         <style>{CSS}</style>
         <div className="wb-ep-head">
-          <span className="wb-ep-title">立项单</span>
-          <span className="wb-ep-sub">真源 = notes/epics/*.md（编辑走仓库，此处只读）</span>
+          <span className="wb-ep-title">Epics</span>
+          <span className="wb-ep-sub">Source = notes/epics/*.md (edited in the repo; read-only here)</span>
           <span style={{ flex: 1 }} />
           {/* 状态筛选（t260831-05）：按四枚举值纯前端过滤，'' = 全部。 */}
           <label className="wb-ep-sub" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            状态筛选
+            Status filter
             <select className="wb-ep-input" data-testid="epic-status-filter"
               value={statusFilter} onChange={(ev) => setStatusFilter((ev.target.value || '') as EpicStatus | '')}>
-              <option value="">全部</option>
+              <option value="">All</option>
               {EPIC_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </label>
         </div>
         {list === undefined ? (
-          <div className="wb-ep-empty">加载中…</div>
+          <div className="wb-ep-empty">Loading…</div>
         ) : list.length === 0 ? (
-          <div className="wb-ep-empty">暂无立项单（notes/epics/ 目录为空或不存在）。</div>
+          <div className="wb-ep-empty">No epics yet (notes/epics/ is empty or missing).</div>
         ) : (
           <table className="wb-ep-table">
             <thead>
-              <tr><th>代号</th><th>标题</th><th>状态</th><th>备注</th><th>立项日期</th></tr>
+              <tr><th>Code</th><th>Title</th><th>Status</th><th>Note</th><th>Created</th></tr>
             </thead>
             <tbody>
               {filterEpicsByStatus(list, statusFilter).map(e => (
@@ -429,33 +430,33 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
     <div className="wb-ep-root">
       <style>{CSS}</style>
       <div className="wb-ep-head">
-        <button className="wb-ep-btn" onClick={() => setCode('')}>← 返回列表</button>
+        <button className="wb-ep-btn" onClick={() => setCode('')}>← Back to list</button>
         <span className="wb-ep-code">{code}</span>
         <span className="wb-ep-title">{detail?.title ?? ''}</span>
-        {detail?.created && <span className="wb-ep-sub">立项 {detail.created}</span>}
+        {detail?.created && <span className="wb-ep-sub">Created {detail.created}</span>}
         {/* 状态编辑（t260831-05）：下拉只出四枚举值（白名单内），备注输入框未改动时
             保存不携带 note 字段（防误清空）；后端写前自动 /tmp 备份。 */}
         <select className="wb-ep-input" data-testid="epic-status-edit" style={{ maxWidth: 180 }}
-          title="立项状态（枚举四值，保存即外科改写 notes/epics/<代号>.md 状态行）"
+          title="Epic status (one of four enum values; saving rewrites the status row of notes/epics/<code>.md)"
           value={editStatus} disabled={detail === undefined}
           onChange={(ev) => setEditStatus((ev.target.value || '') as EpicStatus | '')}>
-          <option value="">选择状态…</option>
+          <option value="">Select status…</option>
           {EPIC_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
         <input className="wb-ep-input" data-testid="epic-note-edit" style={{ width: 260 }}
-          title="备注（单行，≤200 字符；留空保存 = 清空备注；不改动 = 不动备注列）"
-          placeholder="备注（可空）" maxLength={EPIC_NOTE_INPUT_MAX}
+          title="Note (single line, ≤200 chars; empty = clear the note; untouched = leave the note column alone)"
+          placeholder="Note (optional)" maxLength={EPIC_NOTE_INPUT_MAX}
           value={editNote} disabled={detail === undefined}
           onChange={(ev) => { setEditNote(ev.target.value); setNoteDirty(true) }} />
         <button className="wb-ep-btn" data-testid="epic-status-save" disabled={saveBusy || detail === undefined || editStatus === ''}
-          title="保存状态（可选备注）到 notes/epics/<code>.md（写前 /tmp 备份）"
+          title="Save the status (with optional note) to notes/epics/<code>.md (backed up to /tmp first)"
           onClick={() => { void saveStatus() }}>
-          {saveBusy ? '保存中…' : '保存状态'}
+          {saveBusy ? 'Saving…' : 'Save status'}
         </button>
         {saveMsg !== '' && <span className="wb-ep-sub">{saveMsg}</span>}
         <span style={{ flex: 1 }} />
         <button className="wb-ep-btn wb-ep-btn-green" onClick={openCreate}
-          title="从本立项发起新工单（代号自动带入，不可手输）">＋ 新建工单</button>
+          title="Start a new ticket from this epic (the code is carried in automatically, not hand-typed)">＋ New Ticket</button>
       </div>
       {createMsg !== '' && !createOpen && <div className="wb-ep-msgok">{createMsg}</div>}
       {error !== '' && <div className="wb-ep-err">{error}</div>}
@@ -463,7 +464,7 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
         {/* 左：立项单 Markdown 全文（renderMarkdown 复用 knowledge 渲染器 + wb-md 样式作用域） */}
         <div className="wb-ep-md">
           {detail === undefined ? (
-            <div className="wb-ep-empty">加载立项单…</div>
+            <div className="wb-ep-empty">Loading epic…</div>
           ) : (
             <div className="wb-md" dangerouslySetInnerHTML={{ __html: renderMarkdown(detail.markdown) }} />
           )}
@@ -471,22 +472,22 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
         {/* 右：关联工单状态汇总（8s 轮询；degraded 黄条人话降级） */}
         <div className="wb-ep-side">
           <div className="wb-ep-panel">
-            <div className="wb-ep-panel-title">关联工单{tickets?.count !== undefined ? `（${tickets.count}）` : ''}</div>
+            <div className="wb-ep-panel-title">Related tickets{tickets?.count !== undefined ? ` (${tickets.count})` : ''}</div>
             {tickets?.degraded === true ? (
-              <div className="wb-ep-degraded">{tickets.reason ?? '工单状态查询降级'}</div>
+              <div className="wb-ep-degraded">{tickets.reason ?? 'Ticket status query degraded'}</div>
             ) : tickets === undefined ? (
-              <div className="wb-ep-empty">加载工单状态…</div>
+              <div className="wb-ep-empty">Loading ticket status…</div>
             ) : (
               <>
                 <div className="wb-ep-chips">
                   {bucketKeys.map(k => (
                     <span key={k} className="wb-ep-bucket" data-b={k}>{k} × {merged[k] ?? 0}</span>
                   ))}
-                  {bucketKeys.length === 0 && <span className="wb-ep-empty">本立项暂无关联工单。</span>}
+                  {bucketKeys.length === 0 && <span className="wb-ep-empty">No tickets linked to this epic yet.</span>}
                 </div>
                 {sorted.map(t => (
                   <div key={t.id} className="wb-ep-ticket"
-                    title={onOpenTicket ? `${t.id}\n${t.title}\n点击查看工单详情` : t.id}
+                    title={onOpenTicket ? `${t.id}\n${t.title}\nClick to open the ticket detail` : t.id}
                     onClick={() => onOpenTicket?.(t.id)}>
                     <div className="l1"><span className="id">{t.id}</span><span className="ti">{t.title}</span></div>
                     <div className="l2">{t.status}{t.stage ? ` · ${t.stage}` : ''}{t.stage_state ? ` · ${t.stage_state}` : ''}</div>
@@ -502,30 +503,30 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
       {createOpen && (
         <div className="wb-ep-modal">
           <div className="wb-ep-modal-box">
-            <div className="wb-ep-modal-title">新建工单 — 从立项 {code} 发起</div>
+            <div className="wb-ep-modal-title">New Ticket — from epic {code}</div>
             <div className="wb-ep-field">
-              所属立项（界面带入，不可修改）
+              Epic (carried in by the UI, read-only)
               <div className="wb-ep-readonly">{code}</div>
             </div>
             <div className="wb-ep-field">
-              工单模板
+              Ticket template
               <select className="wb-ep-input" value={createWf} onChange={e => { setCreateWf(e.target.value); setCreateAllowEmpty(false) }}>
-                <option value="">请选择模板…</option>
-                {templates.map(w => <option key={w.id} value={w.id}>{w.name}（{w.id}）</option>)}
+                <option value="">Select a template…</option>
+                {templates.map(w => <option key={w.id} value={w.id}>{workflowLabel(w.id)} ({w.id})</option>)}
               </select>
             </div>
             <div className="wb-ep-field">
-              工单标题
+              Ticket title
               <input className="wb-ep-input" value={createTitle} onChange={e => setCreateTitle(e.target.value)}
-                placeholder="一句话说明这张工单要做什么" />
+                placeholder="One line on what this ticket should do" />
             </div>
             <div className="wb-ep-field">
-              工单正文（首行归属说明自动注入，可续写需求原文）
+              Ticket body (the epic note is injected as the first line; continue with the request text)
               <textarea className="wb-ep-input" style={{ minHeight: 140 }} value={createBody}
                 onChange={e => setCreateBody(e.target.value)} />
             </div>
             <div className="wb-ep-field">
-              写集（预计改动文件，每行一条；建票后为 agent 白名单护栏，方案定稿后自动扩展）
+              Write set (files expected to change, one per line; enforced as the agent allow-list after creation and auto-extended once the plan is final)
               <textarea className="wb-ep-input" style={{ minHeight: 64, fontFamily: 'monospace' }}
                 value={createWsText} onChange={e => setCreateWsText(e.target.value)}
                 placeholder={'server/engine/client.py\nserver/plugins/workbench/src/client/epics.tsx'} />
@@ -536,19 +537,19 @@ export function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }: {
               <input type="checkbox" style={{ marginTop: 3 }} checked={createAllowEmpty}
                 onChange={e => setCreateAllowEmpty(e.target.checked)} />
               <span>
-                本票无文件改动（allow_empty_write_set）——勾选后建票放行，meta 记 no_file_changes；
-                <strong style={{ color: 'var(--dsw-derive-warn,#9a6700)' }}>仅限确无文件改动的票，有改动请填写集</strong>
+                No file changes in this ticket (allow_empty_write_set) — checking this lets creation through, and meta records no_file_changes;
+                <strong style={{ color: 'var(--dsw-derive-warn,#9a6700)' }}>Only for tickets with truly no file changes; otherwise fill in the write set</strong>
               </span>
             </label>
             {createMsg !== '' && <div className="wb-ep-err">{createMsg}</div>}
             <div className="wb-ep-ops">
               <button className="wb-ep-btn wb-ep-btn-green" disabled={createBusy || !projectKey}
                 onClick={() => { void submitCreate() }}
-                title={projectKey ? '' : '先在左侧点选一个项目'}>
-                {createBusy ? '创建中…' : '创建工单'}
+                title={projectKey ? '' : 'Select a project on the left first'}>
+                {createBusy ? 'Creating…' : 'Create Ticket'}
               </button>
-              <button className="wb-ep-btn" onClick={() => { setCreateAllowEmpty(false); setCreateOpen(false) }}>取消</button>
-              {!projectKey && <span className="wb-ep-sub">未知新建落点项目——请先从左侧点选一个项目</span>}
+              <button className="wb-ep-btn" onClick={() => { setCreateAllowEmpty(false); setCreateOpen(false) }}>Cancel</button>
+              {!projectKey && <span className="wb-ep-sub">Unknown target project for the new ticket — select a project on the left first</span>}
             </div>
           </div>
         </div>

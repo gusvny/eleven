@@ -252,7 +252,7 @@ section('S2 确认框（R5：锚全集 + 非原生 confirm + fixed 定位）')
   }
   ok(!/[^a-zA-Z.]confirm\(/.test(row), '无原生 confirm( 调用（插件内轻量弹层）')
   ok(row.includes('position:fixed'), '弹层 position:fixed（C1：滚动容器 .wb-ticket-list 裁剪对策）')
-  ok(row.includes('仅关闭入口，不删除会话内容'), '确认文案明示「仅关闭入口不删内容」（拍板 3）')
+  ok(row.includes('Only the entry is closed; the session content is not deleted'), '确认文案明示「仅关闭入口不删内容」（拍板 3）')
   // The lib-side anchor assertions omit '=': after bundling, JSX attribute names appear as object keys ("data-wb-…":)
   const lib = readFileSync(libClient, 'utf8')
   ok(lib.includes('data-wb-psess-confirm-ok'), 'lib 产物确认锚在场（同批重建证据）')
@@ -339,7 +339,7 @@ section('S9 右栏色带锚（票② R7 拍板 6：data-wb-chat-projband + 平�
 section('S10 确认文案（票②拍板 2：↺ 表述删除）')
 {
   const row = readFileSync(join(here, '..', 'src', 'client', 'project-session-row.tsx'), 'utf8')
-  ok(row.includes('仅关闭入口，不删除会话内容'), '确认文案明示「仅关闭入口不删内容」')
+  ok(row.includes('Only the entry is closed; the session content is not deleted'), '确认文案明示「仅关闭入口不删内容」')
   ok(!row.includes('↺') && !row.includes('最近关闭找回'), '无 ↺/最近关闭找回表述（恢复菜单已退役）')
   const lib = readFileSync(libClient, 'utf8')
   ok(!lib.includes('最近关闭找回'), 'lib 产物文案同步')

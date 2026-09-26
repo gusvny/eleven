@@ -238,7 +238,7 @@ if (needFn(buildStatusCard, 'buildStatusCard', 'U6')) {
   ok(card !== null && typeof card === 'object', 'COMPLETED×abnormal 详情出状态卡（不为 null——点开可见原因）')
   if (card) {
     ok(card.severity === 'amber', `终态收口卡 severity=amber（复用既有 warn 面；got ${card.severity}）`)
-    ok(String(card.headline ?? '').includes('已结束'), `headline 含「已结束」（got ${JSON.stringify(card.headline)}——结束方式可表达）`)
+    ok(String(card.headline ?? '').includes('Closed'), `headline 含「已结束」（got ${JSON.stringify(card.headline)}——结束方式可表达）`)
     const all = JSON.stringify(card, (k, v) => typeof v === 'function' ? '<fn>' : v)
     ok(all.includes('无报告') || all.includes('report_path'), '卡面点名缺了什么（要求④「缺了什么」）')
     ok(all.includes('退出码 1') || all.includes('read-only'), '卡面携带异常原因事实（blocked_reason 链可达——不许无因异常）')
@@ -265,8 +265,8 @@ if (needFn(buildStatusCard, 'buildStatusCard', 'U6')) {
   const mirrorAll = JSON.stringify(mirrorCard ?? {})
   ok(mirrorCard !== null && !mirrorAll.includes('报告已在') && !mirrorAll.includes('不该出现'),
     '落账镜像形态「缺了什么」无「报告已在/不该出现」矛盾文案（gen1 问题1 防回潮）')
-  ok(mirrorAll.includes('本期报告未落盘（落账文件为受阻面镜像）'),
-    `落账镜像形态缺了什么=引擎 reason 同口径（got ${JSON.stringify(mirrorCard?.closeFacts?.find(f => String(f).startsWith('缺了什么')) ?? '')}）`)
+  ok(mirrorAll.includes('Missing: No report for this period'),
+    `落账镜像形态缺了什么=引擎 reason 同口径（got ${JSON.stringify(mirrorCard?.closeFacts?.find(f => String(f).startsWith('Missing:')) ?? '')}）`)
 }
 
 console.log('== U7 组：详情头陈旧词面站点必须被终态对账守卫（review 意见1 源级锚，宽容 guard 探针）==')

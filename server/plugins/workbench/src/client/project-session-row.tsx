@@ -216,10 +216,10 @@ export function ProjectSessionRow(props: ProjectSessionRowProps) {
         data-wb-psess-new=""
         data-empty={tabs.length === 0}
         disabled={creating}
-        title={`新建 ${projectName} 会话（主目录${projectDir ? `：${projectDir}` : ''}）`}
-        aria-label={`新建 ${projectName} 会话`}
+        title={`New ${projectName} session (main dir${projectDir ? `: ${projectDir}` : ''})`}
+        aria-label={`New ${projectName} session`}
         onClick={onNew}
-      >{tabs.length === 0 ? '＋ 新建会话' : '+'}</button>
+      >{tabs.length === 0 ? '＋ New session' : '+'}</button>
       {tabs.map(t => (
         <div
           key={t.id}
@@ -229,7 +229,7 @@ export function ProjectSessionRow(props: ProjectSessionRowProps) {
           data-active={t.active}
           role="button"
           tabIndex={0}
-          title={`${projectName} 会话 ${t.seq}：${t.title}\n${t.id}`}
+          title={`${projectName} session ${t.seq}: ${t.title}\n${t.id}`}
           onClick={() => { setConfirmId(null); onOpen(t.id) }}
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -244,8 +244,8 @@ export function ProjectSessionRow(props: ProjectSessionRowProps) {
             type="button"
             className="wb-psess-close"
             data-wb-psess-close=""
-            title="关闭该会话入口（需确认；不删除会话内容）"
-            aria-label={`关闭会话入口 ${t.seq}`}
+            title="Close this session entry (needs confirmation; session content is not deleted)"
+            aria-label={`Close session entry ${t.seq}`}
             onClick={e => { e.stopPropagation(); setConfirmId(t.id) }}
           >×</button>
         </div>
@@ -255,25 +255,25 @@ export function ProjectSessionRow(props: ProjectSessionRowProps) {
           className="wb-psess-confirm"
           data-wb-psess-confirm=""
           role="dialog"
-          aria-label="关闭会话入口确认"
+          aria-label="Confirm closing the session entry"
           ref={popRef}
         >
-          <div className="wb-psess-confirm-t">关闭会话 {confirmTab.seq}？</div>
+          <div className="wb-psess-confirm-t">Close session {confirmTab.seq}?</div>
           <div className="wb-psess-confirm-d" title={confirmTab.title}>{confirmTab.title}</div>
-          <div className="wb-psess-confirm-m">仅关闭入口，不删除会话内容。</div>
+          <div className="wb-psess-confirm-m">Only the entry is closed; the session content is not deleted.</div>
           <div className="wb-psess-confirm-btns">
             <button
               type="button"
               className="wb-psess-confirm-cancel"
               data-wb-psess-confirm-cancel=""
               onClick={() => setConfirmId(null)}
-            >取消</button>
+            >Cancel</button>
             <button
               type="button"
               className="wb-psess-confirm-ok"
               data-wb-psess-confirm-ok=""
               onClick={() => { setConfirmId(null); onClose(confirmTab.id) }}
-            >关闭</button>
+            >Close</button>
           </div>
         </div>
       )}

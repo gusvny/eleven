@@ -166,7 +166,7 @@ section('D. KPI 卡与数字格式化边界')
   ok(formatTokens(0) === '0' && formatTokens(-1) === '0' && formatTokens(NaN) === '0', 'token 0/负/NaN')
   ok(formatTokens(9999) === '9,999' && formatTokens(15000) === '15k' && formatTokens(2_500_000) === '2.5M', 'token 分档')
   const cards = kpiCards({ tickets: 3, closed: 2, avg_delivery_min: 45.6, tokens_total: 12345 })
-  ok(cards.length === 4 && cards[0].label === '工单数' && cards[2].value === '45.6 分钟', '四卡序与格式化')
+  ok(cards.length === 4 && cards[0].label === 'Tickets' && cards[2].value === '45.6 min', '四卡序与格式化')
   ok(kpiCards({ tickets: NaN, closed: NaN, avg_delivery_min: NaN, tokens_total: NaN })[3].value === '0', 'KPI NaN 全边界')
 }
 

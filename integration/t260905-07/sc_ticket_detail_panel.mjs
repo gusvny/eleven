@@ -128,7 +128,7 @@ const clickish = async (page, loc) => {
 const gotoBoard = async (page) => {
   await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
   await dismissNotice(page);
-  const board = page.locator('[title="工单列表"], [aria-label="工单列表"]').first();
+  const board = page.locator('[title="Tickets"], [aria-label="Tickets"]').first();
   try { await board.click({ timeout: 4000 }); } catch { await board.evaluate((el) => el.click()).catch(() => {}); }
   await boardCard(page, 't260903-10').waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {});
   await page.waitForTimeout(400);

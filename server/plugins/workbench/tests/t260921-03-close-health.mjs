@@ -243,13 +243,13 @@ ok('COMPLETED×abnormal 详情出 amber 终态卡：事实链四件齐、零推�
   assert.ok(card !== null)
   assert.equal(card.severity, 'amber')
   assert.equal(card.terminal, true)
-  assert.ok(card.headline.includes('已结束'))
+  assert.ok(card.headline.includes('Closed'))
   const all = JSON.stringify(card)
-  assert.ok(card.closeFacts.some(f => f.includes('结束方式：')), '结束方式事实行')
-  assert.ok(card.closeFacts.some(f => f.includes('异常原因：')), '异常原因事实行')
-  assert.ok(card.closeFacts.some(f => f.includes('受阻记录（终态前）') && f.includes('read-only')),
+  assert.ok(card.closeFacts.some(f => f.includes('Ended: workflow')), '结束方式事实行')
+  assert.ok(card.closeFacts.some(f => f.includes('Close reason:')), '异常原因事实行')
+  assert.ok(card.closeFacts.some(f => f.includes('Blocked record (before terminal)') && f.includes('read-only')),
     '终态前受阻记录链可达（blocked_reason 不丢）')
-  assert.ok(card.closeFacts.some(f => f.includes('缺了什么：') && f.includes('报告')), '缺了什么事实行')
+  assert.ok(card.closeFacts.some(f => f.includes('Missing:') && /report/i.test(f)), '缺了什么事实行')
   assert.ok(/retry[- ]qc|rework|unblock|打回|重试/i.test(card.next) === false, 'next 零推进入口语义')
   assert.ok(!all.includes('刷新重试') && !all.includes('查询超时'), 'KI-018① 瞬态占位语不进卡')
 })
@@ -265,7 +265,7 @@ ok('正常收口（close_health=ok）不出异常措辞卡（反用例③：不�
   assert.equal(buildStatusCard('x'), null)
   // unreadable 也出终态卡（显式存疑措辞），原因链允许缺席但不许冒充 ok
   const uCard = buildStatusCard({ exec_status: 'COMPLETED', close_health: 'unreadable', close_health_reason: '收口面读取失败：已结束但票面不可读（显式存疑，未判定产物）' })
-  assert.ok(uCard !== null && uCard.terminal === true && uCard.headline.includes('已结束'))
+  assert.ok(uCard !== null && uCard.terminal === true && uCard.headline.includes('Closed'))
 })
 
 ok('gen1 修订（验收走查问题1）：落账镜像形态（abnormal×report_path 在）的「缺了什么」与引擎 reason 同口径——绝不输出「报告已在/不该出现」矛盾文案', () => {
@@ -278,9 +278,9 @@ ok('gen1 修订（验收走查问题1）：落账镜像形态（abnormal×report
     report_path: '/Users/user/Documents/sandbar/server/engine/out/inspection/inspection-integration-tests-20260920.json',
   })
   assert.ok(card !== null && card.terminal === true)
-  const missing = card.closeFacts.find(f => f.startsWith('缺了什么：'))
+  const missing = card.closeFacts.find(f => f.startsWith('Missing:'))
   assert.ok(missing, '缺了什么事实行在场')
-  assert.equal(missing, '缺了什么：本期报告未落盘（落账文件为受阻面镜像）')
+  assert.equal(missing, 'Missing: No report for this period (the ledger file is the blocked-face mirror)')
   const all = JSON.stringify(card)
   assert.ok(!all.includes('报告已在') && !all.includes('不该出现'), '矛盾防线措辞零残留')
   assert.ok(!/retry[- ]qc|rework|unblock|打回|重试/i.test(card.next), '零推进入口语义不回潮')

@@ -193,7 +193,7 @@ async function scenarioBlockedCard(page) {
   // t260915-05：折叠 summary 固定文案随词条表迁移改中文（「原始引擎日志」）——
   // 原断言语义=「summary 是固定文案、不随引擎数据漂移」，改锚固定中文串＋
   // 不得泄漏引擎原文（RAW_ANCHOR 是 timeline 数据，出现在 summary=数据串进文案）。
-  if (!c.summaryText.includes('原始引擎日志')) return `folding summary must be the fixed copy (原始引擎日志), got ${JSON.stringify(c.summaryText)}`
+  if (!c.summaryText.includes('Raw engine log')) return `folding summary must be the fixed copy (Raw engine log), got ${JSON.stringify(c.summaryText)}`
   if (c.summaryText.includes(RAW_ANCHOR)) return `folding summary leaked engine data (${RAW_ANCHOR})`
   const banner = await page.evaluate(domBanner)
   if (!banner.includes('非冲突')) return `blocked_reason banner must surface the reason on the ticket face (验收d), got ${JSON.stringify(banner.slice(0, 160))}`
@@ -295,7 +295,7 @@ async function run() {
   })
 
   // 经第一个项目组的 📋 打开工单板（workbench 需先有 projectKey 才渲染列表）。
-  const boardIcon = page.locator('span.wb-view-icon[title="工单列表"]').first()
+  const boardIcon = page.locator('span.wb-view-icon[title="Tickets"]').first()
   if (!(await waitFor(async () => (await boardIcon.count()) > 0, 10000))) {
     record('S1 precheck', 'env_fail', `no project group 📋 found on ${BASE} (console not provisioned for board view)`)
     summarize()

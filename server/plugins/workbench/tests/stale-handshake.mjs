@@ -93,7 +93,7 @@ for (const [desc, fn] of [
 }
 
 /* ── 锚常量与矩阵键一致（KI-051：文案锚单一事实，场景 import 断言不走字面量） ── */
-ok(STALE_BANNER_TEXT === '有更新，重启控制台生效' && STALE_RELOAD_TEXT === '有更新，刷新页面生效',
+ok(STALE_BANNER_TEXT === 'Update available — restart the console to apply' && STALE_RELOAD_TEXT === 'Update available — refresh the page to apply',
   '锚常量: 两支文案在册（restart=重启 / reload=刷新，与消除动作一一对应）')
 
 console.log(`\nSUMMARY pass=${passed} fail=${failed}`)

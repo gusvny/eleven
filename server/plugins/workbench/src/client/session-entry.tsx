@@ -357,7 +357,7 @@ export async function injectSessionCharter(sessions: SessionsFace, staged: strin
     }
   } catch (err) {
     console.error('[workbench] 会话开局 charter 注入失败（会话创建不受影响）：', staged, err)
-    notify('会话开局提示注入失败（详情见控制台），会话已正常创建', projectKey)
+    notify('Session charter injection failed (see the console for details); the session was created normally', projectKey)
   }
 }
 
@@ -420,7 +420,7 @@ export function useSessionEntry({ sessions, workspaces, getService, slotOpen, pr
     const listed = await waitForListed(sessions, id, 10000)
     if (!listed) {
       console.warn('[workbench] 打开会话：会话未进客户端列表（wire 同步慢或会话已被磁盘清理；账册条目保留，可稍后重试）：', id)
-      notify('会话打开超时：列表同步未完成，条目已保留，可重试', projectHint)
+      notify('Session open timed out: the list has not synced yet; the entry was kept, retry later', projectHint)
       return false
     }
     try {
@@ -428,7 +428,7 @@ export function useSessionEntry({ sessions, workspaces, getService, slotOpen, pr
       else sessions.open(id)
     } catch (err) {
       console.error('[workbench] 打开会话失败：', id, err)
-      notify('会话打开失败（详情见控制台）', projectHint)
+      notify('Failed to open the session (see the console for details)', projectHint)
       return false
     }
     // open 生效性自检：留一拍让 select/通知走完，再读 current 比对。
@@ -493,7 +493,7 @@ export function useSessionEntry({ sessions, workspaces, getService, slotOpen, pr
     const pd = target?.dir ?? projectDir
     if (!pk || creating) return
     if (!workspaces) {
-      notify('新建会话失败：workspaces 服务不可用', pk)
+      notify('New session failed: the workspaces service is unavailable', pk)
       console.error('[workbench] 新建会话失败：ctx.workspaces 未注入（index.tsx inject 列表缺 workspaces）')
       return
     }
@@ -504,13 +504,13 @@ export function useSessionEntry({ sessions, workspaces, getService, slotOpen, pr
       if (!ws && pd) {
         ws = await workspaces.create({ path: pd }).then(w => ({ ...w, path: pd })).catch((err: unknown) => {
           console.error('[workbench] 新建会话失败：工作区创建失败：', pd, err)
-          notify('新建会话失败：工作区创建失败（详情见控制台）', pk)
+          notify('New session failed: workspace creation failed (see the console for details)', pk)
           return undefined
         })
       }
       if (!ws) {
         console.error('[workbench] 新建会话失败：项目无对应工作区且无法创建：', pk, pd)
-        notify('新建会话失败：项目主目录未注册为工作区', pk)
+        notify('New session failed: the project main directory is not registered as a workspace', pk)
         return
       }
       startWorkspaceSession(ws.workspaceId)
@@ -518,7 +518,7 @@ export function useSessionEntry({ sessions, workspaces, getService, slotOpen, pr
       const staged = await waitForStaged(sessions, prev, 10000)
       if (!staged) {
         console.warn('[workbench] 新建会话：staging 未落定（current 未更新）；工作区已连接，可从列表进入：', ws.workspaceId)
-        notify('会话打开超时：列表同步未完成，可重试', pk)
+        notify('Session open timed out: the list has not synced yet, retry later', pk)
         return
       }
       // 编号分配（第 3 面①，拍板 1「不回收」）：
@@ -551,7 +551,7 @@ export function useSessionEntry({ sessions, workspaces, getService, slotOpen, pr
       await injectSessionCharter(sessions, staged, pk, notify)
     } catch (err) {
       console.error('[workbench] 新建会话请求异常：', err)
-      notify('新建会话失败：请求异常（详情见控制台）', pk)
+      notify('New session failed: request error (see the console for details)', pk)
     } finally {
       setCreating(false)
     }

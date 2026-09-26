@@ -33,89 +33,89 @@ export interface LexiconEntry {
 export const REASON_LEXICON: Record<string, LexiconEntry> = {
   /* ① merge 分类（KI-048） */
   main_staged: {
-    headline: '合并被挡：main 工作区有已暂存未提交的改动（本地改动保护，不是冲突）',
-    next: '在 main 提交或暂存（git stash）这些改动，然后发 retry_qc 重验；引擎绝不自动 stash/提交',
+    headline: 'Merge blocked: the main worktree has staged but uncommitted changes (local-change protection, not a conflict)',
+    next: 'Commit or stash (git stash) these changes in main, then send retry_qc to re-verify; the engine never auto-stashes or auto-commits',
   },
   main_dirty: {
-    headline: '合并被挡：main 工作区有未提交的改动（本地改动保护，不是冲突）',
-    next: '在 main 提交或暂存（git stash）这些改动，然后发 retry_qc 重验；引擎绝不自动 stash/提交',
+    headline: 'Merge blocked: the main worktree has uncommitted changes (local-change protection, not a conflict)',
+    next: 'Commit or stash (git stash) these changes in main, then send retry_qc to re-verify; the engine never auto-stashes or auto-commits',
   },
   untracked_collision: {
-    headline: '合并被挡：main 工作区有未跟踪文件与本次合并路径相撞',
-    next: '把相撞文件移走或提交，然后发 retry_qc 重验；引擎绝不自动 stash/提交',
+    headline: 'Merge blocked: untracked files in the main worktree collide with paths in this merge',
+    next: 'Move the colliding files away or commit them, then send retry_qc to re-verify; the engine never auto-stashes or auto-commits',
   },
   merge_fault: {
-    headline: '合并没有收口：合并执行出现故障（不是冲突）',
-    next: '人工处置后发 retry_qc 重验',
+    headline: 'Merge did not settle: the merge run hit a fault (not a conflict)',
+    next: 'Handle it manually, then send retry_qc to re-verify',
   },
   conflict: {
-    headline: '合并与 main 有冲突',
-    next: '按冲突文件清单消解后发 retry_qc 重验',
+    headline: 'Merge conflicts with main',
+    next: 'Resolve the conflicting files, then send retry_qc to re-verify',
   },
 
   /* ② merge_check 检查项 */
   no_commits: {
-    headline: '实现还没落盘：泳道分支还没有提交',
-    next: '发 rework 回实现段补落盘',
+    headline: 'Implementation not on disk yet: the lane branch has no commits',
+    next: 'Send rework back to the implement stage to write results to disk',
   },
   worktree_dirty: {
-    headline: '泳道工作区不干净：有未提交的改动',
-    next: '泳道内提交或清理后发 retry_qc 重验',
+    headline: 'Lane worktree is dirty: uncommitted changes',
+    next: 'Commit or clean up inside the lane, then send retry_qc to re-verify',
   },
   status_failed: {
-    headline: 'git 状态读取失败（环境类）',
-    next: '排查泳道仓后发 retry_qc 重验',
+    headline: 'Failed to read git status (environment issue)',
+    next: 'Check the lane repo, then send retry_qc to re-verify',
   },
   merge_base_failed: {
-    headline: '泳道 merge-base 失败（git 环境类）',
-    next: '排查泳道仓后发 retry_qc 重验',
+    headline: 'Lane merge-base failed (git environment issue)',
+    next: 'Check the lane repo, then send retry_qc to re-verify',
   },
   verify_red: {
-    headline: '泳道自检红灯：改动未通过本票验证',
-    next: '按明细里的红灯项修复后发 retry_qc 重验',
+    headline: 'Lane self-check red: the change did not pass this ticket\'s verification',
+    next: 'Fix the red items listed in the details, then send retry_qc to re-verify',
   },
   bundle_stale: {
-    headline: '前端构建产物过期：源码与 lib 产物不同步',
-    next: '泳道内重建产物（tsdown）后发 retry_qc 重验',
+    headline: 'Frontend build artifacts are stale: source and lib output are out of sync',
+    next: 'Rebuild the artifacts in the lane (tsdown), then send retry_qc to re-verify',
   },
   ui_evidence_malformed: {
-    headline: 'UI 截图证据缺失或畸形（验收闸兜底）',
-    next: '重跑 UI 截图（ui-check/capture-lane）后发 retry_qc 重验',
+    headline: 'UI screenshot evidence missing or malformed (acceptance gate fallback)',
+    next: 'Re-run UI screenshots (ui-check/capture-lane), then send retry_qc to re-verify',
   },
 
   /* ③ 段路径闸 / 受保护路径闸 */
   unauthorized_path: {
-    headline: '改动超出本票声明的范围（写集越界）',
-    next: '返工回方案段补报改动清单，或把越界文件移出提交',
+    headline: 'Change exceeds the scope this ticket declared (write-set violation)',
+    next: 'Send rework back to the plan stage to declare the changed files, or move the out-of-scope files out of the commit',
   },
   protected_path: {
-    headline: '改动碰到受保护路径（本票无权改的真源）',
-    next: '把改动移出受保护路径；确需改动走授权通道（sign authorize）',
+    headline: 'Change touches a protected path (a source of truth this ticket may not modify)',
+    next: 'Move the change out of the protected path; if the change is really needed, go through the authorization channel (sign authorize)',
   },
   unknown_stage: {
-    headline: '闸判定找不到所属段（配置/版本错位）',
-    next: '排查模板规则表后发 retry_qc 重验',
+    headline: 'Gate could not resolve the owning stage (config/version mismatch)',
+    next: 'Check the template rule table, then send retry_qc to re-verify',
   },
   write_set_missing: {
-    headline: '工单没有声明写集（开票缺改动清单）',
-    next: '返工回方案段补报改动清单',
+    headline: 'Ticket declares no write set (no change list at filing time)',
+    next: 'Send rework back to the plan stage to declare the change list',
   },
   ui_dirs_missing: {
-    headline: 'UI 截图目录缺失（闸无法核对截图面）',
-    next: '重跑 UI 截图（ui-check/capture-lane）后发 retry_qc 重验',
+    headline: 'UI screenshot directory missing (the gate cannot check the screenshot surface)',
+    next: 'Re-run UI screenshots (ui-check/capture-lane), then send retry_qc to re-verify',
   },
   gate_refusal_unknown: {
-    headline: '段闸拒绝（原因码缺失）',
-    next: '按 worker 日志核对该拒绝原因后处置',
+    headline: 'Stage gate refused (reason code missing)',
+    next: 'Check the worker log for this refusal, then handle it',
   },
   gate_refusal_malformed: {
-    headline: '段闸拒绝回执畸形（原因码不可读）',
-    next: '按 worker 日志核对该拒绝原因后处置',
+    headline: 'Stage gate refusal receipt malformed (reason code unreadable)',
+    next: 'Check the worker log for this refusal, then handle it',
   },
 
   /* ④ 人门（引擎状态词） */
   'awaiting-human': {
-    headline: '等你审批：流程停在人门，引擎不会自动过',
+    headline: 'Waiting on your approval: the flow is parked at the human gate; the engine will not auto-advance',
   },
 }
 
@@ -142,6 +142,6 @@ export function translateReason(code: unknown, fallbackText?: unknown): Translat
   }
   const fb = typeof fallbackText === 'string' ? fallbackText.trim() : ''
   if (fb) return { headline: fb, fromTable: false }
-  if (c) return { headline: `受阻（原因码 ${c}）`, fromTable: false }
-  return { headline: '工单受阻（引擎未给原因）', fromTable: false }
+  if (c) return { headline: `Blocked (reason code ${c})`, fromTable: false }
+  return { headline: 'Ticket blocked (engine gave no reason)', fromTable: false }
 }

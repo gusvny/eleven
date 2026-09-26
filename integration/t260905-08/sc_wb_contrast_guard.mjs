@@ -196,7 +196,7 @@ const fmtUnchecked = (u) => u.slice(0, 8).map((x) =>
   `${x.region}/${x.el} color=${x.color}`).join('；');
 
 async function openBoard(page) {
-  const board = page.locator('[title="工单列表"], [aria-label="工单列表"]').first();
+  const board = page.locator('[title="Tickets"], [aria-label="Tickets"]').first();
   const clickish = async (loc) => {
     try { await loc.click({ timeout: 4000 }); }
     catch { await loc.evaluate((el) => el.click()).catch(() => {}); }

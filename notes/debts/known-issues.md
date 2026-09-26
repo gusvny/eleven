@@ -1893,3 +1893,18 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **仍然静默跳过**——彻底修需 spawner 侧据「上一期判决」（台账面 `out/inspection/<inst>-<period>.json`
 > 的 face）自动派生重开理由，属 activity 面改动且**需重启中央工人**（KI-113 冻结码）。这是 KI-129 安静
 > 失效的最后一块，待下一步（宿主授权后动）。
+
+
+## KI-132 巡检套件「零信号」未修好：套件活动以 `server/admin.log` ENOENT 收场（ran=0），流程照常推进到审查段（260926 期 20260927 首次真验实测，integration 岗登记）
+> **实案**：手动开的期 20260927（t260927-01，base=main `dcfc627`）跑满套件段后，
+> `out/inspection/inspection-integration-tests-20260927-suite.json` 回执 **ran=0 pass=0 fail=0 env_fail=0 墙钟=2834.4s**，
+> `error="verify_lane integ 无有效输出（exit=1）：Traceback … .lane/inspection-integration-tests-20260927/server/admin.py:178 → tools_registry.call:116 → audit:90 → FileNotFoundError:
+> '/Users/user/Documents/sandbar/.lane/inspection-integration-tests-20260927/server/admin.log'"`。
+> 中央工人日志同一活动的行在 **09:08:56** 才出现，而流程时间线在 **09:06:20** 已记「suite → 泳道拆除：已清」
+> 并进入 `inspect` —— **拆除先于套件回报**，套件进程随后写盘时目标已不在（ENOENT 的候选机制）。
+> **结论**：KI-116 的「套件零信号」**未修好**（这是修复合并后的第一次真跑：ran 仍为 0，且这回拿到了具体报错面）；
+> 修法面（预算/拆除次序 vs 落地活动回报）与 KI-131 的自动班堵塞是同一张巡检工程的下一刀。
+> **旁证**：本次期票铸出、`lane_teardown=已清（零残留）`、`agent_home` 落主仓 `out/inspection/agent-home/integration-tests-20260927`
+> ——清单 ①④⑤ 三项过，②（ran>0）**不过**，③（审查段）被供应商周额度打断（见下，环境因非引擎因）。
+> **环境因（非 KI，留证）**：审查段 `inspect` blocked，原因为 `dsh: AUTH: 403 … You've reached your weekly (7-day) usage limit`
+> ——**模型供应商 7 天额度用尽**，故本期无发现清单；额度恢复后需重跑一期。

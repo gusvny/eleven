@@ -168,8 +168,8 @@ export function MetricsPanel(props: {
           const msg = err instanceof Error && err.name === 'AbortError' ? '' : String(err instanceof Error ? err.message : err)
           // 全量失败：已有快照则保留快照+降级说明（不白屏），无快照才报错
           setData(prev => prev !== null && prev.error === null && prev.cache?.status === 'stale'
-            ? { ...prev, reason: `全量刷新失败（保留缓存快照）：${msg || '网络错误'}` }
-            : sanitizeMetricsResponse({ error: `请求失败：${msg || '网络错误'}` }))
+            ? { ...prev, reason: `Full refresh failed (kept the cache snapshot): ${msg || 'network error'}` }
+            : sanitizeMetricsResponse({ error: `Request failed: ${msg || 'network error'}` }))
         }
       } finally {
         if (!ac.signal.aborted) {
@@ -202,43 +202,43 @@ export function MetricsPanel(props: {
 
   const cards = useMemo(() => (data ? kpiCards(data.kpis) : []), [data])
   const cacheStatus = data?.cache?.status
-  const cacheTitle = `时长 v1 = handoff 近似（v2 = 08 终态精确）；token 不含 cacheRead、按窗口内票的全生涯 in+out 合计（口径对账见 integration/t260902-05）；饼图 = 全窗口合计占比（单票平均口径待契约 bump）；归档口径交付含多提交（预解/记账提交计入，行数可能高于 squash 真值，见契约增补段）；缓存 ${typeof cacheStatus === 'string' ? cacheStatus : '—'} · source_version ${typeof data?.cache?.source_version === 'string' ? data.cache.source_version : '—'}${data?.generatedAt ? ` · ${data.generatedAt}` : ''}`
+  const cacheTitle = `Time v1 = handoff approximation (v2 = exact from the 08 terminal state); tokens exclude cacheRead and sum in+out over the full lifetime of tickets in the window (reconciliation in integration/t260902-05); donut = share of the whole-window total (per-ticket average pending a contract bump); archived delivery counts multiple commits (pre-solve/bookkeeping commits included, so line counts may exceed the squash truth — see the contract addendum); cache ${typeof cacheStatus === 'string' ? cacheStatus : '—'} · source_version ${typeof data?.cache?.source_version === 'string' ? data.cache.source_version : '—'}${data?.generatedAt ? ` · ${data.generatedAt}` : ''}`
   const isTime = state.view === 'time'
 
   /* 四 tab（t260902-05③）：后端四视图同实现，全部开放。 */
   const TABS: { key: PanelState['view']; label: string }[] = [
-    { key: 'time', label: '时间' },
-    { key: 'delivery', label: '交付' },
+    { key: 'time', label: 'Time' },
+    { key: 'delivery', label: 'Delivery' },
     { key: 'token', label: 'Token' },
-    { key: 'health', label: '系统健康' },
+    { key: 'health', label: 'System Health' },
   ]
 
   /* 空态显式（t260902-05⑥）：spec/donut 全零或缺失 → 文案，不渲染空白画布。 */
-  const blankText = '窗口内无可绘图数据（或聚合被 SKIP，见降级说明）。'
+  const blankText = 'No drawable data in the window (or the aggregation was skipped — see the degradation note).'
 
   return (
-    <div ref={rootRef} className="wb-m" tabIndex={-1} role="dialog" aria-label="度量面板">
+    <div ref={rootRef} className="wb-m" tabIndex={-1} role="dialog" aria-label="Metrics panel">
       <style>{CSS}</style>
       {/* 头部：标题/筛选/口径ⓘ/刷新/✕（§3 骨架第一行） */}
       <div className="wb-m-head">
-        <span className="wb-m-title">度量</span>
-        <select value={state.window} title="时间窗"
+        <span className="wb-m-title">Metrics</span>
+        <select value={state.window} title="Time window"
           onChange={e => setState(s => ({ ...s, window: e.target.value }))}>
           {PANEL_WINDOWS.map(w => <option key={w} value={w}>{w}</option>)}
         </select>
-        <select value={state.project} title="项目（多项目注册表筛选；默认=后端缺省项目）"
+        <select value={state.project} title="Project (filter by the multi-project registry; default = the backend default project)"
           onChange={e => setState(s => ({ ...s, project: e.target.value }))}>
-          <option value="">项目：默认</option>
-          {projects.map(p => <option key={p.key} value={p.key}>{p.name ? `项目：${p.name}（${p.key}）` : `项目：${p.key}`}</option>)}
+          <option value="">Project: default</option>
+          {projects.map(p => <option key={p.key} value={p.key}>{p.name ? `Project: ${p.name} (${p.key})` : `Project: ${p.key}`}</option>)}
         </select>
         {/* 泳道（模板）与立项下拉已退役（t260904-04 宿主令，KI-042）：模板恒 dev-lane、
             立项恒 all，由 loadPanelState 归一常量透传后端，不渲染选择器。 */}
-        <span className="wb-m-hint" title={cacheTitle}>口径ⓘ</span>
+        <span className="wb-m-hint" title={cacheTitle}>Method ⓘ</span>
         {data?.cache?.status === 'stale' && (
-          <span className="wb-m-degrade" title="当前展示的是缓存快照（可能缺最新票），后台全量刷新中，完成后自动替换">缓存快照 · 刷新中</span>
+          <span className="wb-m-degrade" title="Showing a cache snapshot (it may miss the newest tickets); a full refresh runs in the background and replaces it when done">Cache snapshot · refreshing</span>
         )}
-        <button className="wb-m-refresh" onClick={() => { setNonce(n => n + 1) }}>刷 新</button>
-        <button className="wb-m-x" title="关闭（Esc）" onClick={props.onClose}>✕</button>
+        <button className="wb-m-refresh" onClick={() => { setNonce(n => n + 1) }}>Refresh</button>
+        <button className="wb-m-x" title="Close (Esc)" onClick={props.onClose}>✕</button>
       </div>
 
       {/* KPI 条：四卡常驻（§3 第二行，任何 tab 都显示） */}
@@ -260,29 +260,29 @@ export function MetricsPanel(props: {
       </div>
 
       <div className="wb-m-body">
-        {loading && <div className="wb-m-empty">加载中…</div>}
+        {loading && <div className="wb-m-empty">Loading…</div>}
         {!loading && data?.error && <div className="wb-m-empty">{data.error}</div>}
         {/* 快照空态不显「无数据」（后台全量在途，refreshing=true 时保持加载语义） */}
-        {!loading && refreshing && !data?.error && <div className="wb-m-empty">缓存快照已上台，全量刷新中…</div>}
+        {!loading && refreshing && !data?.error && <div className="wb-m-empty">Cache snapshot shown; full refresh in progress…</div>}
         {!loading && !refreshing && !data?.error && !data?.primary && data?.secondaries.length === 0 && (
-          <div className="wb-m-empty">窗口内无可聚合数据（或聚合被 SKIP）。</div>
+          <div className="wb-m-empty">No aggregatable data in the window (or the aggregation was skipped).</div>
         )}
         {!loading && !data?.error && data?.reason && (
-          <div className="wb-m-degrade" title={data.reason}>降级说明：{data.reason.length > 120 ? `${data.reason.slice(0, 120)}…` : data.reason}</div>
+          <div className="wb-m-degrade" title={data.reason}>Degraded: {data.reason.length > 120 ? `${data.reason.slice(0, 120)}…` : data.reason}</div>
         )}
         {!loading && !data?.error && data && (data.primary || data.secondaries.length > 0) && (
           <>
             {/* 主图：时间视图柱↔饼双形态；其余视图按后端 primary 单形态渲染（全零→空态） */}
             <div className="wb-m-main">
               <div className="wb-m-main-head">
-                <span className="t">{isTime && state.shape === 'donut' ? '时间去哪了' : (data.primary?.title ?? '')}</span>
-                {isTime && donutInput?.degraded && <span className="wb-m-degrade" title="模板数据缺失，退化为「人审 vs 机器」二分环">模板缺失 · 已降级</span>}
+                <span className="t">{isTime && state.shape === 'donut' ? 'Where does time go' : (data.primary?.title ?? '')}</span>
+                {isTime && donutInput?.degraded && <span className="wb-m-degrade" title="Template data missing; degraded to the human vs machine two-slice ring">Template missing · degraded</span>}
                 {isTime && (
                   <span className="wb-m-shape">
-                    <button data-on={state.shape === 'bar'} title="柱形态（stage 时长合计）"
-                      onClick={() => setState(s => ({ ...s, shape: 'bar' }))}>柱</button>
-                    <button data-on={state.shape === 'donut'} title="饼形态（占比环形，人审等待独立橙块）"
-                      onClick={() => setState(s => ({ ...s, shape: 'donut' }))}>饼</button>
+                    <button data-on={state.shape === 'bar'} title="Bar shape (total stage durations)"
+                      onClick={() => setState(s => ({ ...s, shape: 'bar' }))}>Bar</button>
+                    <button data-on={state.shape === 'donut'} title="Donut shape (share ring; human wait is its own orange slice)"
+                      onClick={() => setState(s => ({ ...s, shape: 'donut' }))}>Donut</button>
                   </span>
                 )}
               </div>
@@ -293,8 +293,8 @@ export function MetricsPanel(props: {
                     <div className="wb-m-donut-wrap">
                       <ChartMount donutInput={donutInput} />
                       <div className="wb-m-donut-center">
-                        <div className="n">{donutInput.totalMin} 分钟</div>
-                        <div className="s">其中人等 {Math.round(donutInput.humanRatio * 100)}%</div>
+                        <div className="n">{donutInput.totalMin} min</div>
+                        <div className="s">Human wait {Math.round(donutInput.humanRatio * 100)}%</div>
                       </div>
                     </div>
                   ))

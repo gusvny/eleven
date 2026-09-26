@@ -99,7 +99,7 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
 
 // T1 三处就位
 {
-  const setIcon = sidebar.locator('[title="项目设置"], [aria-label="项目设置"]').first();
+  const setIcon = sidebar.locator('[title="Project Settings"], [aria-label="Project Settings"]').first();
   const addRow = sidebar.getByText('接入项目', { exact: false }).first();
   const isoRow = sidebar.getByText('badkey', { exact: false }).first();
   const setOk = await setIcon.isVisible().catch(() => false)
@@ -107,7 +107,7 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
   record('rail/settings-icon-svg', setOk);
   record('rail/add-row', await addRow.isVisible().catch(() => false));
   const isoVisible = await isoRow.isVisible().catch(() => false);
-  const isoNoHeaderIcons = isoVisible && !(await isoRow.locator('xpath=ancestor::*[contains(@class,"group")][1]//*[self::*[contains(@title,"工单列表")] or @title="项目设置"]').count());
+  const isoNoHeaderIcons = isoVisible && !(await isoRow.locator('xpath=ancestor::*[contains(@class,"group")][1]//*[self::*[contains(@title,"Tickets")] or @title="项目设置"]').count());
   record('rail/quarantine-row', isoVisible && isoNoHeaderIcons !== false, `visible=${isoVisible}`);
 }
 
@@ -127,7 +127,7 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
   if (allSvg) record('icons/four-views-svg', 'pass', '含 t260905-06「文档」替代「知识库」');
   const retired = await sidebar.locator('[title="知识库"], [aria-label="知识库"]').count();
   record('icons/knowledge-retired', retired === 0, `旧「知识库」图标计数=${retired}（应为 0，宿主令退役）`);
-  const board = sidebar.locator('[title="工单列表"], [aria-label="工单列表"]').first();
+  const board = sidebar.locator('[title="Tickets"], [aria-label="Tickets"]').first();
   await forceClick(board);
   await page.waitForTimeout(300);
   // active 断言=图标自身或宿主容器类名（隔离台探针实证：点击后 className="wb-view-icon active"；
@@ -189,7 +189,7 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
 
 // T4 摘除四步（fixa；Temporal 死 → 最终 fail-closed 文案就地）
 {
-  const setIcon = sidebar.locator('[title="项目设置"], [aria-label="项目设置"]').first();
+  const setIcon = sidebar.locator('[title="Project Settings"], [aria-label="Project Settings"]').first();
   await forceClick(setIcon);
   // 弹层定位锚 [data-wb-pmod-overlay]（smoke/project-modals 既定公开语义锚）——
   // 勿用泛 [class*=overlay].last()：会抓到平台 Internal Testing Notice 弹层（隔离台实证）。
@@ -260,7 +260,7 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
       // 组头第五枚设置图标=按组锚：先锚「真台乙」组，再取组内设置图标（两项目组，first 会错锚）。
       const group = sidebar2.getByText('真台乙', { exact: false }).first()
         .locator('xpath=ancestor::*[contains(@class,"group")][1]');
-      await forceClick(group.locator('[title="项目设置"], [aria-label="项目设置"]').first());
+      await forceClick(group.locator('[title="Project Settings"], [aria-label="Project Settings"]').first());
       const dlg = page2.locator('[data-wb-pmod-overlay]').last();
       await page2.waitForTimeout(600);
       record('remove-real/entry', (await dlg.innerText().catch(() => '')).includes('rmb'),

@@ -97,7 +97,7 @@ function buildSignWhat(detail: Record<string, unknown>): string[] {
   const acceptance = asStringArray(detail.stage_acceptance)
   for (const a of acceptance) {
     if (out.length >= STATUS_CARD_SIGN_WHAT_CAP) break
-    if (!out.includes(a)) out.push(`验收口径：${a}`)
+    if (!out.includes(a)) out.push(`Acceptance criterion: ${a}`)
   }
   const gateRuns = Array.isArray(detail.gate_runs) ? detail.gate_runs as unknown[] : []
   for (let i = gateRuns.length - 1; i >= 0; i--) {
@@ -106,7 +106,7 @@ function buildSignWhat(detail: Record<string, unknown>): string[] {
     const go = g as Record<string, unknown>
     if (go.green !== true) continue
     const stage = typeof go.stage === 'string' ? go.stage : ''
-    out.push(`前置门已全绿：${stage || '程序化检查'}（可签字）`)
+    out.push(`All prior gates green: ${stage || 'programmatic check'} (ready to sign)`)
     break
   }
   return out.slice(0, STATUS_CARD_SIGN_WHAT_CAP)
@@ -155,27 +155,27 @@ export function buildStatusCard(detail: unknown): StatusCardView | null {
     const findingsTotal = typeof findingsObj.total === 'number' && Number.isFinite(findingsObj.total)
       ? findingsObj.total : null
     const missingTxt = reportPath !== ''
-      ? '本期报告未落盘（落账文件为受阻面镜像）'
-      : (findingsTotal !== null ? `本期报告未落盘（发现 ${findingsTotal} 条）` : '本期报告未落盘')
-    const closeWay = `结束方式：工作流${execStatus ? ` ${execStatus}` : '已结束（终态）'}（Temporal 终态，不再推进）` +
-      (strOf(d.close_time_txt) ? `，终态时刻 ${strOf(d.close_time_txt)}` : '')
+      ? 'No report for this period (the ledger file is the blocked-face mirror)'
+      : (findingsTotal !== null ? `No report for this period (${findingsTotal} findings)` : 'No report for this period')
+    const closeWay = `Ended: workflow${execStatus ? ` ${execStatus}` : ' completed (terminal)'} (Temporal terminal state; no further progress)` +
+      (strOf(d.close_time_txt) ? `; terminal at ${strOf(d.close_time_txt)}` : '')
     const closeFacts = [
       closeWay,
-      ...(reason ? [`异常原因：${reason}`] : []),
+      ...(reason ? [`Close reason: ${reason}`] : []),
       // 终态前的受阻记录原样带出（blocked_reason 链可达——实案根因往往只在这里，
       // 如 dsh unknown preset；与健康度原因重复时省略，不编造不清洗）。
       ...(blockedReason && !reason.includes(blockedReason)
-        ? [`受阻记录（终态前）：${blockedReason}`] : []),
-      ...(closeHealth === 'abnormal' ? [`缺了什么：${missingTxt}`] : ['缺了什么：收口面不可读，产物待核']),
+        ? [`Blocked record (before terminal): ${blockedReason}`] : []),
+      ...(closeHealth === 'abnormal' ? [`Missing: ${missingTxt}`] : ['Missing: close face unreadable; artifacts unverified']),
     ]
     return {
-      headline: closeHealth === 'abnormal' ? '已结束（异常收口）' : '已结束（快照未读到，待核）',
+      headline: closeHealth === 'abnormal' ? 'Closed (abnormal close)' : 'Closed (snapshot unreadable; needs review)',
       headlineFromTable: true,
       files: [],
       filesMore: 0,
       next: closeHealth === 'abnormal'
-        ? '终态票零推进入口：本卡不提供推进/重跑操作；下期巡检按计划再跑，需要重跑走既有通道。'
-        : '终态票零推进入口：工作流已结束；刷新只可能读出面快照（不改变终态结论）。',
+        ? 'Terminal ticket, no advance action here: this card offers no advance or rerun action; the next inspection runs on schedule, and reruns go through the existing channel.'
+        : 'Terminal ticket, no advance action here: the workflow has ended; a refresh can only re-read the snapshot (the terminal conclusion does not change).',
       rawLog: formatLogTail(d),
       severity: 'amber',
       signWhat: [],
@@ -194,7 +194,7 @@ export function buildStatusCard(detail: unknown): StatusCardView | null {
       headlineFromTable: tr.fromTable,
       files: [],
       filesMore: 0,
-      next: '人工审批：通过=批准签字；有意见=打回并附原因。引擎在你签字前不会动。',
+      next: 'Human approval: approve = sign off; disagree = send back with a reason. The engine does not move until you sign.',
       rawLog,
       severity: 'blue',
       signWhat,

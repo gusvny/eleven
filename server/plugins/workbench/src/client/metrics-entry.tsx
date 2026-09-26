@@ -93,9 +93,9 @@ export function MetricsFooterButton(_props: Record<string, never>) {
       ref={ref}
       className="wb-sb-foot-btn"
       data-on={open}
-      title="度量面板（stage 时长 / 交付 / Token / 系统健康）"
+      title="Metrics panel (stage durations / delivery / tokens / system health)"
       onClick={() => { document.dispatchEvent(new CustomEvent(METRICS_TOGGLE_EVENT)) }}
-    >📊 度量</button>
+    >📊 Metrics</button>
   )
 }
 
@@ -142,7 +142,7 @@ export function mountMetricsIntoSettingsRow(root: HTMLElement): () => void {
     btn = document.createElement('button')
     btn.id = SHELL_BTN_ID
     btn.type = 'button'
-    btn.title = '度量面板（stage 时长 / 交付 / Token / 系统健康）'
+    btn.title = 'Metrics panel (stage durations / delivery / tokens / system health)'
     btn.textContent = '📊'
     btn.style.cssText = 'position:fixed;z-index:1200;display:none;border:none;background:none;'
       + 'cursor:pointer;font:inherit;font-size:14px;padding:2px 6px;border-radius:6px;opacity:.75'

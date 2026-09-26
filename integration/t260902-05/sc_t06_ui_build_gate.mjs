@@ -69,9 +69,9 @@ console.log('D. tab 灰置移除')
 }
 
 console.log('E. 入口与交互纪律残留')
-ok('「📊 度量」入口在产物中', js.includes('📊 度量'))
+ok('「📊 度量」入口在产物中', js.includes('📊 Metrics'))
 ok('出厂 footer.action 注入点在产物中', js.includes('footer.action'), '入口迁移的实现路径必须真实存在于交付产物')
-ok('面板 aria-label「度量面板」在产物中', js.includes('度量面板'))
+ok('面板 aria-label「度量面板」在产物中', js.includes('Metrics panel'))
 ok('Esc 关闭处理在产物中', js.includes('Escape'))
 ok('面板状态持久化 key 在产物中', js.includes('sandbar-workbench-metrics-panel-v1'))
 

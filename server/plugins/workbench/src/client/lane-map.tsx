@@ -164,12 +164,12 @@ export function ChecksDetail({ runs, cap = 3 }: { runs: GateRunView[]; cap?: num
                 {row.detail ? <span className="wb-ck-detail">{row.detail}</span> : null}
               </summary>
               <div className="wb-ck-more">
-                {row.checkId ? <div>check_id：{row.checkId}</div> : null}
-                {row.reasonCode ? <div>reason_code：{row.reasonCode}</div> : null}
+                {row.checkId ? <div>check_id: {row.checkId}</div> : null}
+                {row.reasonCode ? <div>reason_code: {row.reasonCode}</div> : null}
                 {row.files && row.files.length > 0 ? (
-                  <div>文件：{row.files.join('、')}</div>
+                  <div>Files: {row.files.join(', ')}</div>
                 ) : null}
-                {row.nextAction ? <div>下一步：{row.nextAction}</div> : null}
+                {row.nextAction ? <div>Next: {row.nextAction}</div> : null}
                 {row.detail ? <pre>{row.detail}</pre> : null}
               </div>
             </details>

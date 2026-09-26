@@ -407,7 +407,7 @@ async function runBrowser(pw, browser) {
 
     // Open the ticket board via the first project group's 📋 (workbench needs a
     // projectKey before it renders the ticket list).
-    const boardIcon = page.locator('span.wb-view-icon[title="工单列表"]').first()
+    const boardIcon = page.locator('span.wb-view-icon[title="Tickets"]').first()
     if (!(await waitFor(async () => (await boardIcon.count()) > 0, 10000))) {
       record('S1 precheck', 'env_fail', `no project group 📋 found on ${BASE} (console not provisioned for board view)`)
       return
@@ -456,7 +456,7 @@ async function runBrowser(pw, browser) {
       await boardIcon.click().catch(() => {})
       // (1) silent window (failStreak=1): badge up, no red bar
       const badgeShown = await waitFor(async () =>
-        (await page.locator('.wb-sub', { hasText: '数据可能滞后' }).count()) > 0, 10000)
+        (await page.locator('.wb-sub', { hasText: 'Data may be stale' }).count()) > 0, 10000)
       const earlyErr = (await page.locator('.wb-err').count()) > 0
       // (2) second consecutive failure (+4s < beat 3 at ~10s): still silent
       await page.waitForTimeout(4000)
@@ -474,7 +474,7 @@ async function runBrowser(pw, browser) {
         const errGone = await waitFor(async () =>
           (await page.locator('.wb-err').count()) === 0, 60000)
         const badgeGone = await waitFor(async () =>
-          (await page.locator('.wb-sub', { hasText: '数据可能滞后' }).count()) === 0, 10000)
+          (await page.locator('.wb-sub', { hasText: 'Data may be stale' }).count()) === 0, 10000)
         if (errGone && badgeGone) record('P5 malformed list payload', 'pass')
         else record('P5 malformed list payload', 'fail',
           `recovery stuck: errGone=${errGone} badgeGone=${badgeGone} @ ${await snap(page)}`)

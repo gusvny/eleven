@@ -42,6 +42,10 @@ function clientFiles() {
     if (!/\.(tsx?|ts)$/.test(n)) continue
     out.push({ file: n, text: readFileSync(join(CLIENT_DIR, n), 'utf8') })
   }
+  // 横幅文案真源在 src/shared/ticket-time-model.ts（渲染层 index.tsx 只留注释锚）——
+  // 不把 shared 纳入扫描，本条「横幅人话文案在场」会因文案搬家而假红（260926 UI 英文化实测）。
+  const sharedModel = join(REPO_ROOT, 'server/plugins/workbench/src/shared/ticket-time-model.ts')
+  try { out.push({ file: 'shared/ticket-time-model.ts', text: readFileSync(sharedModel, 'utf8') }) } catch { /* 缺席按缺件处理 */ }
   return out
 }
 const files = clientFiles()
@@ -51,7 +55,7 @@ ok(files.length > 0, 'workbench client 源目录可读（' + files.length + ' �
 /* 锚定义（用户契约，mock/方案钉死）。KI-051 锚语义不锚字面：testid 锚「值」——
  * 字面量 data-testid="…" 与常量定义 TICKET_TIME_*_TESTID='…' 两种写法都认。 */
 const ANCHOR_TESTID_VALUE = 'ticket-time-banner'
-const ANCHOR_BANNER = '🕰 本票时刻 · 只读'
+const ANCHOR_BANNER = '🕰 Ticket time · read-only'
 const ANCHOR_JUMP = '跳到当前版'
 function stripComments(t) { return t.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ') }
 
@@ -123,7 +127,7 @@ for (const n of ['client.cjs', 'client.js']) {
 }
 if (!libText) { ok(false, '重建产物 lib/client.cjs|client.js 均不可读（build 缺席）') } else {
   ok(libText.includes(ANCHOR_TESTID_VALUE), 'bundle 含横幅契约锚值（ticket-time-banner）')
-  ok(libText.includes('本票时刻'), 'bundle 含横幅人话文案（本票时刻）')
+  ok(libText.includes('Ticket time'), 'bundle 含横幅人话文案（本票时刻）')
 }
 
 console.log('\nSUMMARY pass=' + PASS + ' fail=' + FAIL + ' env_fail=' + ENVFAIL + ' na=' + NA)

@@ -107,7 +107,7 @@ try {
   await dismissNotice(page);
 
   // T1 导航：工单列表 → 项目夹具甲 → 行卡在场
-  const board = page.locator('[title="工单列表"], [aria-label="工单列表"]').first();
+  const board = page.locator('[title="Tickets"], [aria-label="Tickets"]').first();
   await clickish(page, board);
   await page.waitForTimeout(500);
   const proj = page.getByText('夹具甲', { exact: false }).first();
@@ -133,9 +133,9 @@ try {
       chip(/等你1/) && chip(/受阻1/) && chip(/在飞3/) && chip(/收口1/),
       `筛选 chips 计数实况=等你1/受阻1/在飞3/收口1 期望全命中（在飞3 含未知 stage_state 票=四态缺省分支 UI 交叉验证）`);
     const twaitTxt = (await vis('twait').innerText().catch(() => '')) || '';
-    record('ui/waiting-action-gosign', twaitTxt.includes('去签字'), twaitTxt.slice(0, 80));
+    record('ui/waiting-action-gosign', twaitTxt.includes('Sign →'), twaitTxt.slice(0, 80));
     const tblockTxt = (await vis('tblock').innerText().catch(() => '')) || '';
-    record('ui/blocked-action-see-reason', tblockTxt.includes('看原因'), tblockTxt.slice(0, 80));
+    record('ui/blocked-action-see-reason', tblockTxt.includes('View Reason'), tblockTxt.slice(0, 80));
     record('ui/done-collapse', /收口\s*·\s*1|✓\s*收口/.test(body), body.match(/.{0,20}收口.{0,20}/)?.[0] ?? '未找到收口折叠行');
     // F2 回归用例（走查打回 260904）：引擎 updated_ts=秒，行卡误当毫秒曾显「20680 天前」——
     // fixture trun=NOW-300（5 分钟前量级），必须落「分钟前」域，不得落天/小时域。
@@ -153,7 +153,7 @@ try {
   // （实现钉：去签字→变更页签=审批必看 diff 区；正文断言只作佐证不作判据）。
   {
     writes.length = 0;
-    const btn = vis('twait').getByText('去签字').first();
+    const btn = vis('twait').getByText('Sign →').first();
     await clickish(page, btn);
     await page.waitForTimeout(1200);
     const drawerVisible = await page.locator('.wb-drawer').isVisible().catch(() => false);
@@ -161,16 +161,16 @@ try {
     const reviewish = /审批|签字|变更集/.test(body);
     record('ui/gosign-opens-detail', drawerVisible, drawerVisible
       ? `详情抽屉已呈现（变更页签语境在场=${reviewish}）`
-      : '点击「去签字」后未见 .wb-drawer 详情抽屉');
+      : 'clicking Sign → did not open the .wb-drawer detail panel');
     record('ui/gosign-zero-write-api', writePosts().length === 0,
-      writePosts().length ? `检测到写请求=${JSON.stringify(writePosts())}（R3：去签字若绑 advance=静默签字，必红）` : '点击「去签字」零写请求');
+      writePosts().length ? `write request detected=${JSON.stringify(writePosts())} (R3: Sign → must be pure navigation; binding advance = silent sign-off, always red)` : 'clicking Sign → produced zero write requests');
   }
 
   // T4 看原因 → 阻塞原文可达（详情受阻横幅）
   {
-    await vis('tblock').getByText('看原因').first()
+    await vis('tblock').getByText('View Reason').first()
       .click({ timeout: 4000 }).catch(async () => {
-        await vis('tblock').getByText('看原因').first().evaluate((el) => el.click());
+        await vis('tblock').getByText('View Reason').first().evaluate((el) => el.click());
       });
     await page.waitForTimeout(1000);
     const body = await page.locator('body').innerText();

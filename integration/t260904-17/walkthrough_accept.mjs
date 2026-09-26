@@ -123,7 +123,7 @@ const FALLBACK_RGB = 'rgb(156, 163, 175)'; // EPIC_FALLBACK_COLOR #9ca3af
 async function gotoBoard(page) {
   await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
   await dismissNotice(page);
-  const board = page.locator('[title="工单列表"], [aria-label="工单列表"]').first();
+  const board = page.locator('[title="Tickets"], [aria-label="Tickets"]').first();
   try { await board.click({ timeout: 4000 }); } catch { await board.evaluate((el) => el.click()).catch(() => {}); }
   await boardCard(page, 'trun').waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
   await page.waitForTimeout(400);
@@ -227,7 +227,7 @@ summarize();
 
 /** reload 后工单列表视图会回落缺省——补一次导航（首次 gotoBoard 内含首次导航）。 */
 async function gotoBoardNavOnly(page) {
-  const board = page.locator('[title="工单列表"], [aria-label="工单列表"]').first();
+  const board = page.locator('[title="Tickets"], [aria-label="Tickets"]').first();
   try { await board.click({ timeout: 4000 }); } catch { await board.evaluate((el) => el.click()).catch(() => {}); }
   await boardCard(page, 'trun').waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
   await page.waitForTimeout(400);

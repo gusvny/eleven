@@ -127,7 +127,7 @@ function buildContract() {
     record('S0 build-contract', 'fail', 'lib/client.js and lib/client.cjs out of sync — rebuild')
     return
   }
-  const anchors = ['wf/inspection/tickets', 'inspection-close', '签什么', 'awaiting_gate']
+  const anchors = ['wf/inspection/tickets', 'inspection-close', 'What to sign', 'awaiting_gate']
   const missing = anchors.filter(a => !js.includes(a))
   if (missing.length) {
     record('S0 bundle-anchors', 'fail', `shipped bundle missing inspection anchors: ${missing.join(', ')}`)
@@ -236,7 +236,7 @@ async function runBrowser(pw, browser) {
     })
 
     // 开板：workbench 需要项目视图才渲染工单列表（镜 B 同款入口）
-    const boardIcon = page.locator('span.wb-view-icon[title="工单列表"]').first()
+    const boardIcon = page.locator('span.wb-view-icon[title="Tickets"]').first()
     if (!(await waitFor(async () => (await boardIcon.count()) > 0, 10000))) {
       record('S1 precheck', 'env_fail', `no project group 📋 found on ${BASE} (console not provisioned for board view)`)
       return
@@ -319,7 +319,7 @@ async function runBrowser(pw, browser) {
     }
 
     // ④「去签字→」钮在场
-    const signBtn = card.locator('button', { hasText: '去签字' }).first()
+    const signBtn = card.locator('button', { hasText: 'Sign →' }).first()
     const hasSignBtn = await waitFor(async () => (await signBtn.count()) > 0, 3000)
     record('S1 sign-nav-button', hasSignBtn ? 'pass' : 'fail',
       hasSignBtn ? '「去签字 →」钮在场' : '等你行缺「去签字 →」导航钮（ticket-row-card waiting 面）')
@@ -340,7 +340,7 @@ async function runBrowser(pw, browser) {
     const missDetail = [['阶段时间线', /inspect|report|close|时间线|阶段/.test(dText)],
     ['发现摘要', /发现/.test(dText) && dText.includes('1')],
     ['报告路径', dText.includes('out/inspection/')],
-    ['签什么', /签什么|签字/.test(dText)]]
+    ['What to sign', /What to sign/.test(dText)]]
       .filter(([, good]) => !good).map(([label]) => label)
     record('S1 detail-drilldown', missDetail.length ? 'fail' : 'pass',
       missDetail.length ? `详情缺段：${missDetail.join(',')}；drawer text=${dText.slice(0, 200)}` : '时间线/发现摘要/报告路径/签什么齐')
@@ -361,8 +361,8 @@ async function runBrowser(pw, browser) {
       } catch (e) {
         // 点击失败=取证先行：谁在挡？（overlay 计数+按钮中心 elementFromPoint）
         anchorEvidence = await page.evaluate(() => {
-          const b = [...document.querySelectorAll('.wb-card-btn')].find(x => x.textContent.includes('去签字'))
-          if (!b) return '去签字钮不在 DOM'
+          const b = [...document.querySelectorAll('.wb-card-btn')].find(x => x.textContent.includes('Sign →'))
+          if (!b) return 'Sign → button not in DOM'
           const r = b.getBoundingClientRect()
           const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
           return `overlays: .wb-drawer=${document.querySelectorAll('.wb-drawer').length} [role=dialog]=${document.querySelectorAll('[role="dialog"]').length}; btn rect=[${[r.x, r.y, r.width, r.height].map(Math.round)}]; elementFromPoint=${top ? top.tagName + '.' + String(top.className).slice(0, 50) : 'null'}; topInDrawer=${!!(top && top.closest('.wb-drawer, [role="dialog"]'))}`
@@ -372,8 +372,8 @@ async function runBrowser(pw, browser) {
       const gateOk = anchorEvidence === '' && await waitFor(
         async () => (await page.locator('[data-testid="inspection-gate"]').count()) > 0, 10000)
       const dText2 = gateOk ? await page.locator('[data-testid="inspection-gate"]').innerText().catch(() => '') : ''
-      record('S1 review-anchor', gateOk && /签什么/.test(dText2) ? 'pass' : 'fail',
-        gateOk && /签什么/.test(dText2) ? '去签字→落人门「签什么」段（review 锚点衔接）'
+      record('S1 review-anchor', gateOk && /What to sign/.test(dText2) ? 'pass' : 'fail',
+        gateOk && /What to sign/.test(dText2) ? '去签字→落人门「签什么」段（review 锚点衔接）'
           : `去签字→未落签什么段：${anchorEvidence || `gate=${gateOk} text=${dText2.slice(0, 100)}`}`)
     } else {
       record('S1 review-anchor', 'na', '无「去签字→」钮可点（前子用例已红）')
