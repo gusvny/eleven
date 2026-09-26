@@ -593,6 +593,9 @@ def _report_cjk(artifact, allow_keys=frozenset()):
 def test_report_face_has_no_cjk_except_data_fields():
     """报告面零 CJK 守门：**所有会进报告制品/票面的引擎自产文案必须英文**。
 
+    口径（重要）：本守门扫的是**引擎自产文案**——agent 自写且被语言闸标红的原文按设计
+    保留在票面可见（不静默，另由 `non_english` 计数 + 聚合条点名），不属本守门范围。
+
     覆盖面（三件制品 + 票面）：
       ①发现清单（suite 全态 + 漏跑 + 跳火）；
       ②face（build_ticket_face：含 suite 段、开票建议 title/urgency、notes）；
@@ -735,23 +738,56 @@ def test_code_stamp_present_with_four_modules_and_worker_start(tmp_path, monkeyp
     """
     import asyncio
     import inspect as _inspect
+    # —— 三类回归必须被抓（260930 宿主紧急补丁的三个 bug，逐条钉死）——
+    # ① None：启动时刻/pid 不许为空
+    assert getattr(shared, "WORKER_STARTED_AT", None), "WORKER_STARTED_AT 为 None/空"
+    assert getattr(shared, "WORKER_PID", None), "WORKER_PID 为 None/空"
+    # ② AttributeError：两个惰性名都必须可读（两个同名 __getattr__ 会遮蔽其一 → 直接炸）
+    for lazy in ("WORKER_STARTED_AT", "WORKER_PID"):
+        try:
+            getattr(shared, lazy)
+        except AttributeError as e:      # noqa: PERF203
+            raise AssertionError("shared.%s 触发 AttributeError：%s" % (lazy, e))
+    # ③ pid 非整数（曾返回 ISO 时间戳）
+    assert isinstance(getattr(shared, "WORKER_PID"), int), \
+        "WORKER_PID 非整数：%r" % (getattr(shared, "WORKER_PID"),)
+    assert getattr(shared, "WORKER_PID") == os.getpid()
+    # 静态锁：shared.py 只许**一个** `def __getattr__`（两个=后者遮蔽前者，正是 260930 病根）
+    import ast as _ast2
+    _src = open(shared.__file__, encoding="utf-8").read()
+    _defs = [n for n in _ast2.walk(_ast2.parse(_src))
+             if isinstance(n, _ast2.FunctionDef) and n.name == "__getattr__"]
+    assert len(_defs) == 1, "shared.py 有 %d 个 __getattr__（后者遮蔽前者）" % len(_defs)
+    assert _ast2.get_docstring(_defs[0]) and "唯一" in _ast2.get_docstring(_defs[0])
+    # 三个模块不再各挂一个惰性 __getattr__（已随「取消按模块判 stale」删除）
+    for _m in ("agent_activities.py", "inspection_flow.py", "inspection_deadman.py"):
+        _ms = open(os.path.join(ENGINE, _m), encoding="utf-8").read()
+        assert "def __getattr__" not in _ms, "%s 里仍有惰性 __getattr__" % _m
+        assert "CODE_LOADED_AT" not in _ms, "%s 里仍有 CODE_LOADED_AT（语义已废）" % _m
     stamp = shared.worker_code_stamp()
-    assert stamp["worker_started_at"] and isinstance(stamp["worker_pid"], int)
+    assert isinstance(stamp["worker_started_at"], str) and stamp["worker_started_at"]
+    assert isinstance(stamp["worker_pid"], int) and stamp["worker_pid"] > 0
+    assert stamp["worker_pid"] == os.getpid()
+    assert stamp["stale_rule"]                      # 判据文字在册（语义写清）
+    assert "start baseline" in stamp["stale_rule"]
     mods = stamp["modules"]
     for name in ("agent_activities", "inspection_flow", "inspection_deadman", "verify_lane"):
         m = mods.get(name)
         assert m, "code_stamp 缺模块：%s" % name
         assert m.get("mtime"), "code_stamp 缺 mtime：%s" % name
         assert m.get("path", "").endswith(".py")
-        assert m.get("stale") is False, (name, m)      # 当前源码 mtime 早于载入时刻=非 stale
+        assert "loaded_at" not in m, "按模块判 stale 的旧字段仍在：%s" % name
+        assert m.get("stale") is False, (name, m)      # 源码 mtime 早于启动基准=非 stale
     assert stamp["stale"] == []
     assert "worker pid=" in stamp["stamp_line"] and "started=" in stamp["stamp_line"]
     assert "stale=none" in stamp["stamp_line"]
     for name in mods:
         assert name in stamp["stamp_line"]
-    # 齿：盘上 mtime 晚于载入时刻 → 该模块进 stale 名单（注入 mtime 判据，确定性）
+    # 齿：盘上 mtime 晚于**启动基准** → 该模块进 stale 名单（注入判据，确定性）
     stale_stamp = shared.worker_code_stamp(mtime_fn=lambda p: 9e9,
                                            started_at="2020-01-01T00:00:00")
+    # 反向：基准晚于 mtime（正常启动后的稳定树）→ 名单空
+    assert shared.worker_code_stamp(started_at="2999-01-01T00:00:00")["stale"] == []
     assert set(stale_stamp["stale"]) == {"agent_activities", "inspection_flow",
                                          "inspection_deadman"}, stale_stamp["stale"]
     assert "verify_lane" not in stale_stamp["stale"]      # 闸子进程载入：worker 侧不判 stale
@@ -795,6 +831,97 @@ def test_code_stamp_present_with_four_modules_and_worker_start(tmp_path, monkeyp
     assert _report_cjk(face) == []            # 身份行同样零 CJK（报告面守门）
     # 源代码面锁：漏跑活动也带（无套件档的期也有身份面）
     assert "code_stamp" in _inspect.getsource(engine_activities_run_deadman)
+
+
+def test_agent_findings_language_gate_downgrades_and_names(tmp_path, monkeypatch):
+    """(B) 报告面语言闸（宿主令「report 用英语写」+ 实案：agent 自写 findings 仍有中文）。
+
+    定位：提示词只是**引导**（LLM 会漂），故在 report 段机械复核链里加一道**可判**的闸：
+    `inspection_inspect.finding_language_violations` 扫叙述字段（subject/why/suggestion）→
+    `mark_non_english` 降级 unverified + 点名 `non_english_text`；活动侧计数进 meta。
+    数据字段（evidence.quote / path）不扫（不译）。
+    """
+    import asyncio
+    import inspection_inspect as ins
+    han = re.compile(r"[\u4e00-\u9fff]")
+    # ① 纯函数判据：只咬叙述字段，不咬数据字段
+    fs = [{"id": "a", "subject": "中文标题", "why": "ok", "suggestion": "do it",
+           "evidence": [{"path": "中文路径", "quote": "中文引文"}]},
+          {"id": "b", "subject": "English subject", "why": "ok", "suggestion": "do it",
+           "evidence": [{"path": "中文路径", "quote": "中文引文"}]},
+          {"id": "c", "subject": "English", "why": "中文原因", "suggestion": "fix it"},
+          {"id": "d", "subject": "English", "why": "English", "suggestion": "中文建议"}]
+    v = ins.finding_language_violations(fs)
+    assert [(x["id"], x["fields"]) for x in v] == [("a", ["subject"]),
+                                                   ("c", ["why"]), ("d", ["suggestion"])]
+    ins.mark_non_english(fs)
+    assert fs[0]["verified"] == "unverified"
+    assert ins.NON_ENGLISH_REASON in fs[0]["unverified_reasons"][0]
+    assert "subject" in fs[0]["unverified_reasons"][0]
+    assert fs[1].get("verified") is None            # 合规条不被触碰（不误伤）
+    # 畸形输入保守（不抛、不误判）
+    assert ins.finding_language_violations(None) == []
+    assert ins.finding_language_violations([1, "x", {}, {"subject": None}]) == []
+    assert ins.finding_language_violations(
+        [{"subject": "English", "evidence": "not-a-list"}]) == []
+    # ② 活动级端到端：真跑 verify_inspection_findings（真基线目录 + 真文件/行/引文）
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "mod.py").write_text("line one\nline two\n", encoding="utf-8")
+    ledger = tmp_path / "out"
+    ledger.mkdir()
+    monkeypatch.setenv("SANDBAR_INSPECTION_DIR", str(ledger))
+    good_ev = [{"path": "mod.py", "line": 2, "quote": "line two"}]
+    findings = [
+        {"id": "ok-1", "scan": "agent", "subject": "English finding", "severity": "med",
+         "why": "because", "suggestion": "fix it", "confidence": 0.9, "evidence": good_ev},
+        {"id": "cn-1", "scan": "agent", "subject": "中文发现标题", "severity": "med",
+         "why": "because", "suggestion": "fix it", "confidence": 0.9, "evidence": good_ev},
+    ]
+    out = asyncio.run(engine_activities.verify_inspection_findings({
+        "instance_id": "integration-tests", "period": "20261001",
+        "base_dir": str(base), "findings": findings, "max_findings": 40,
+        "ledger_dir": str(ledger)}))
+    assert out["ok"] is True, out
+    res = out["result"]
+    by_id = {f["id"]: f for f in res["findings"]}
+    assert by_id["ok-1"]["verified"] == "verified"          # 英文条照常走
+    assert by_id["cn-1"]["verified"] == "unverified"        # 中文条被判红（可见不静默）
+    assert ins.NON_ENGLISH_REASON in " ".join(by_id["cn-1"]["unverified_reasons"])
+    assert res["meta"]["non_english"] == 1
+    assert res["meta"]["non_english_findings"][0]["fields"] == ["subject"]
+    # ③ 降级条不生成修码建议票（verified 门消费）；票面仍可见
+    section = deadman.suite_section({"ran": 1, "passed": 1, "failed": 0, "env_fail": 0,
+                                     "error": "", "details": []})
+    face = flow.build_ticket_face("t260930-01", "integration-tests", "20261001",
+                                  {"findings": res["findings"],
+                                   "summary": res["summary"], "heartbeat": False},
+                                  suite=section)
+    assert [s["title"] for s in face["suggested_fix_tickets"]] == ["fix: agent English finding"]
+    # 票面**显式标红**：语言闸聚合出一条 med 机械发现（suggest=False 不开票），
+    # 逐条原因在各自 unverified_reasons 里（可下钻）——三条都在票面（透明）
+    assert len(face["findings"]) == 3
+    agg = [f for f in face["findings"] if "not written in English" in str(f.get("subject"))]
+    assert len(agg) == 1 and agg[0]["severity"] == "med" and agg[0]["suggest"] is False
+    assert "cn-1(subject)" in agg[0]["evidence"] and ins.NON_ENGLISH_REASON in agg[0]["evidence"]
+    # 摘要口径不变：unverified 发现**照旧计入**（可见=不静默），只有开票门拦它；
+    # med = 两条 agent 发现（含被降级的 cn-1）+ 语言闸聚合条
+    assert face["summary"]["med"] == 3
+    # 设计意图（写清，防误读）：被标红的 agent 原文**按设计保留可见**（不静默），
+    # 但引擎自产文案（聚合条等）必须零 CJK——语言闸自身不许再引入中文。
+    assert [v[2] for v in _report_cjk(face["findings"])] == ["中文发现标题"]
+    assert _report_cjk(agg) == []
+    assert [v[2] for v in _report_cjk([f for f in face["findings"]
+                                       if f not in agg])] == ["中文发现标题"]
+    # ④ 提示词把语言要求写成硬约束 + 机械后果（不是建议措辞）
+    prompt = ins.build_inspect_prompt("i", "20261001", "test", "/tmp/base", "abc", 10)
+    flat = " ".join(prompt.split())          # 折叠换行（措辞复排不破锁）
+    assert "non_english_text" in flat
+    assert "subject/why/suggestion MUST be English" in flat     # 英文硬规则
+    assert "必须全英文" in flat and "机械执法" in flat            # 中文硬规则
+    assert "copied verbatim and never translated" in flat       # 数据不译
+    # 机械闸与提示词同源：prompt 里的原因 token 必须就是判据函数写的那个
+    assert ins.NON_ENGLISH_REASON in flat
 
 
 def test_engine_reason_literals_are_english():

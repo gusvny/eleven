@@ -5441,23 +5441,57 @@ except Exception as _pt_err:  # 加载器故障：点名挂账，不静默、不
 # 本模块 stdlib-only（temporalio 只在函数内 import），故三个活动/工作流模块都可安全引用它。
 # ========================================================================================
 
-#: 进程启动时刻（本模块被 worker import 的时刻≈worker 启动；测试可显式传入覆盖）
-def _worker_started_at() -> str:
-    """模块内访问器（裸名引用不能走 __getattr__）：首个访问时惰性算 worker 启动时刻。"""
-    global _WORKER_STARTED_AT_CACHE
-    if not _WORKER_STARTED_AT_CACHE:
-        _WORKER_STARTED_AT_CACHE = __import__("datetime").datetime.now().isoformat(timespec="seconds")
-    return _WORKER_STARTED_AT_CACHE
+# —— code_stamp 的进程基准（260930 修：单源、无重复 __getattr__、pid 是真 pid） ——
+#
+# 为什么不在 import 期取时间：本模块被 workflow 模块 import，import 期调 `datetime.now()`
+# 会被 Temporal **工作流沙箱**拒收（RestrictedWorkflowAccessError：Cannot access
+# datetime.datetime.now from inside a workflow → worker 起不来；260930 实案）。
+# 故：**优先由进程入口钉真值**（worker.py 非沙箱，允许读墙钟）→ `note_process_start()`；
+# 未钉到时（CLI/测试/别处起的进程）在**首个访问**时惰性兜底。
+_PROCESS_STARTED_AT = ""
+_PROCESS_PID = 0
 
 
-def _worker_pid() -> int:
-    global _WORKER_PID_CACHE
-    if not _WORKER_PID_CACHE:
-        _WORKER_PID_CACHE = str(__import__("os").getpid())
-    return int(_WORKER_PID_CACHE)
+def note_process_start(when: Optional[str] = None) -> str:
+    """进程入口（worker.py）调用：把**真·启动时刻**钉进本进程。幂等：首钉为准。
 
-_WORKER_STARTED_AT_CACHE = ""  # 惰性（见下方 __getattr__）
-_WORKER_PID_CACHE = ""  # 惰性（见下方 __getattr__）
+    为什么必须由入口钉：若只靠惰性兜底，基准时刻=「本进程首次取 stamp 的时刻」（活动里），
+    那么「worker 启动后、首次取 stamp 前发生的改动」就永远判不出 stale——正是 t260928-01
+    （`>3000s` 旧码值）与 t260930-01（deadman 中文）两次实案的形态。"""
+    global _PROCESS_STARTED_AT
+    if not _PROCESS_STARTED_AT:
+        _PROCESS_STARTED_AT = str(when or _dt.datetime.now().isoformat(timespec="seconds"))
+    return _PROCESS_STARTED_AT
+
+
+def worker_started_at() -> str:
+    """进程启动基准时刻（模块内访问器——裸名引用不走 `__getattr__`）。"""
+    global _PROCESS_STARTED_AT
+    if not _PROCESS_STARTED_AT:
+        _PROCESS_STARTED_AT = _dt.datetime.now().isoformat(timespec="seconds")
+    return _PROCESS_STARTED_AT
+
+
+def worker_pid() -> int:
+    """本进程 pid（**整数**；模块内访问器）。"""
+    global _PROCESS_PID
+    if not _PROCESS_PID:
+        _PROCESS_PID = int(os.getpid())
+    return _PROCESS_PID
+
+
+def __getattr__(name):
+    """PEP 562 惰性模块属性——**全模块只有这一个** `__getattr__`，两个名字都处理。
+
+    教训（260930 实案）：同一模块里写两个 `__getattr__`，后者**遮蔽**前者 →
+    `shared.WORKER_STARTED_AT` 直接 AttributeError（票面 code_stamp 变 None）。
+    本函数是唯一入口；新增惰性名在此加分支，不得另起一个 `def __getattr__`。"""
+    if name == "WORKER_STARTED_AT":
+        return worker_started_at()
+    if name == "WORKER_PID":
+        return worker_pid()
+    raise AttributeError("module %r has no attribute %r" % (__name__, name))
+
 
 #: 关键模块 → (模块名, 相对本仓根的路径)。前三个由 worker 直接载入，第四个由闸子进程载入
 #: （worker 侧只报盘上 mtime，`loaded_at=None`——不假装它载入过）。
@@ -5474,25 +5508,21 @@ def _repo_root_from_shared() -> pathlib.Path:
     return pathlib.Path(__file__).resolve().parents[2]
 
 
-def _module_loaded_at(name: str) -> str:
-    """模块**载入时刻**：模块自报的 `CODE_LOADED_AT`（import 时写死）优先——它才是
-    「这个进程拿到的到底是哪一版」的真话；缺席（未载入/老版本模块）回落 worker 启动时刻。"""
-    import sys as _sys
-    mod = _sys.modules.get(name)
-    stamp = getattr(mod, "CODE_LOADED_AT", "") if mod is not None else ""
-    return str(stamp or _worker_started_at())
-
-
 def worker_code_stamp(mtime_fn=None, started_at: Optional[str] = None,
                       pid: Optional[int] = None,
                       repo_root: Any = None) -> Dict[str, Any]:
     """代码身份自证（纯函数，`mtime_fn`/`started_at` 可注入 → 可判定测试）。
 
-    返回：{worker_started_at, worker_pid, modules:{name:{path,mtime,loaded_at,stale,role}},
-           stale:[name...], stamp_line:"<一行可读>"}。
-    `stale` 判据=盘上 mtime **晚于**该模块载入时刻（即文件在进程载入之后又被改过 ⇒ 这个
-    进程跑的是改动前的旧码，磁盘上的修复对它无效）。畸形/读不到 mtime 一律不判 stale
-    （宁可少报不可误报），并在 `mtime` 上留空串。"""
+    返回：{worker_started_at, worker_pid, modules:{name:{path,mtime,stale,role}},
+           stale:[name...], stamp_line:"<一行可读>", stale_rule:"<判据文字>"}。
+
+    **stale 判据（260930 定稿，语义写清）**= 该模块**盘上 mtime 晚于本进程启动基准时刻**
+    （基准=worker.py 入口 `note_process_start()` 钉的真启动时刻；未钉时=首个访问时刻）。
+    含义：文件在本进程启动之后又被改过 ⇒ **本进程内存里跑的很可能是改动前的旧码**，
+    磁盘上的修复对这个进程无效（t260928-01 的 `>3000s`、t260930-01 的 deadman 中文都是此形）。
+    这是**保守提示**（不区分「模块在改动后才被懒载入」的良性情形）——出现 stale 就按名单
+    人工确认，绝不静默放过。
+    畸形/读不到 mtime 一律不判 stale（宁可少报不可误报），`mtime` 留空串。"""
     import datetime as _dt
 
     root = pathlib.Path(repo_root) if repo_root else _repo_root_from_shared()
@@ -5513,29 +5543,30 @@ def worker_code_stamp(mtime_fn=None, started_at: Optional[str] = None,
         except (OSError, OverflowError, ValueError):
             return ""
 
-    start = str(started_at or _worker_started_at())
+    start = str(started_at or worker_started_at())
     modules: Dict[str, Any] = {}
     stale: List[str] = []
     for name, rel in CODE_STAMP_MODULES:
         path = root / rel
         mtime = _mt(path)
-        loaded = _module_loaded_at(name)
         is_worker_loaded = name != "verify_lane"
-        # 载入时刻与 mtime 都拿得到才判（缺一不判：宁可不报，不误报）
+        # 基准时刻与 mtime 都拿得到才判（缺一不判：宁可不报，不误报）
         is_stale = False
         if mtime >= 0 and is_worker_loaded:
             try:
-                is_stale = _dt.datetime.fromtimestamp(mtime).isoformat(timespec="seconds") > loaded
+                is_stale = _dt.datetime.fromtimestamp(mtime).isoformat(timespec="seconds") > start
             except (OSError, OverflowError, ValueError):
                 is_stale = False
-        modules[name] = {"path": str(path), "mtime": _iso(mtime), "loaded_at": loaded,
-                         "stale": is_stale,
+        modules[name] = {"path": str(path), "mtime": _iso(mtime), "stale": is_stale,
                          "role": "worker-loaded" if is_worker_loaded
                                  else "gate subprocess (engine or lane copy)"}
         if is_stale:
             stale.append(name)
-    out = {"worker_started_at": start, "worker_pid": int(_worker_pid() if pid is None else pid),
-           "modules": modules, "stale": stale}
+    out = {"worker_started_at": start, "worker_pid": int(worker_pid() if pid is None else pid),
+           "modules": modules, "stale": stale,
+           "stale_rule": ("module file mtime newer than this process's start baseline "
+                          "(file changed after the process started => it may be running "
+                          "pre-change code; conservative hint, never silent)")}
     out["stamp_line"] = code_stamp_line(out)
     return out
 
@@ -5554,32 +5585,3 @@ def code_stamp_line(stamp: Dict[str, Any]) -> str:
             % (stamp.get("worker_pid"), stamp.get("worker_started_at"),
                " ".join(parts), ",".join(stale) if stale else "none"))
 
-# 260930（实测事故）：import 期调用 datetime.now() 会被 Temporal **工作流沙箱**拒收
-# （RestrictedWorkflowAccessError: Cannot access datetime.datetime.now from inside a
-# workflow → worker 起不来：Failed validating workflow InspectionPeriodicWorkflow）。
-# 改为**首个访问时惰性计算**：只有活动侧会访问它，import 期零副作用。
-_WORKER_STARTED_AT_CACHE = ""
-
-
-def __getattr__(name):
-    if name == "WORKER_STARTED_AT":
-        global _WORKER_STARTED_AT_CACHE
-        if not _WORKER_STARTED_AT_CACHE:
-            _WORKER_STARTED_AT_CACHE = __import__("datetime").datetime.now().isoformat(timespec="seconds")
-        return _WORKER_STARTED_AT_CACHE
-    raise AttributeError("module %r has no attribute %r" % (__name__, name))
-
-# 260930（实测事故）：import 期调用 datetime.now() 会被 Temporal **工作流沙箱**拒收
-# （RestrictedWorkflowAccessError: Cannot access datetime.datetime.now from inside a
-# workflow → worker 起不来：Failed validating workflow InspectionPeriodicWorkflow）。
-# 改为**首个访问时惰性计算**：只有活动侧会访问它，import 期零副作用。
-_WORKER_PID_CACHE = ""
-
-
-def __getattr__(name):
-    if name == "WORKER_PID":
-        global _WORKER_PID_CACHE
-        if not _WORKER_PID_CACHE:
-            _WORKER_PID_CACHE = __import__("datetime").datetime.now().isoformat(timespec="seconds")
-        return _WORKER_PID_CACHE
-    raise AttributeError("module %r has no attribute %r" % (__name__, name))

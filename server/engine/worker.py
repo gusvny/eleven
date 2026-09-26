@@ -439,6 +439,17 @@ async def run_worker(args: argparse.Namespace) -> None:
 
 def main() -> None:
     args = parse_args()
+    # 260930 code_stamp：在**进程入口**钉真·启动时刻（此处非沙箱，允许读墙钟）。
+    # 为什么必须在这里钉：shared 的惰性兜底只能给「首次访问时刻」（活动里），那么
+    # 「worker 启动后、首次取 stamp 前落盘的改动」永远判不出 stale——正是 t260928-01
+    # （`>3000s` 旧码值）与 t260930-01（deadman 中文）两次实案的形态。
+    # 放 daemonize **之前**：父进程（daemon 化后立即返回的那个）也钉同一值，
+    # 子进程继承的模块状态不受影响（子进程自己会在自己的 main 里钉）。
+    try:
+        import shared as _shared
+        _shared.note_process_start()
+    except Exception:  # noqa: BLE001——身份面故障绝不拦 worker 启动
+        pass
     # 信号面运输自检（t260913-01）在 daemonize 之前跑：坏 worker 在前台 loud 死掉，
     # 不留一个静默丢字段的后台进程。窄效力声明见 verify_signal_transport。
     boot_problems = verify_signal_transport()

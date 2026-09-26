@@ -62,7 +62,6 @@ import time
 # 260927 code_stamp：本模块被 worker 载入的时刻（shared.worker_code_stamp 读它判 stale——
 # 「盘上 mtime 晚于本时刻」= 进程跑的是改动前的旧码，磁盘修复对这个进程无效）
 import datetime as _dt_code
-_CODE_LOADED_AT_CACHE = ""  # 惰性（见下方 __getattr__）
 from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -8922,17 +8921,3 @@ ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     run_inspection_inspect,
 ]
 
-# 260930（实测事故）：import 期调用 datetime.now() 会被 Temporal **工作流沙箱**拒收
-# （RestrictedWorkflowAccessError: Cannot access datetime.datetime.now from inside a
-# workflow → worker 起不来：Failed validating workflow InspectionPeriodicWorkflow）。
-# 改为**首个访问时惰性计算**：只有活动侧会访问它，import 期零副作用。
-_CODE_LOADED_AT_CACHE = ""
-
-
-def __getattr__(name):
-    if name == "CODE_LOADED_AT":
-        global _CODE_LOADED_AT_CACHE
-        if not _CODE_LOADED_AT_CACHE:
-            _CODE_LOADED_AT_CACHE = __import__("datetime").datetime.now().isoformat(timespec="seconds")
-        return _CODE_LOADED_AT_CACHE
-    raise AttributeError("module %r has no attribute %r" % (__name__, name))

@@ -453,7 +453,8 @@ async def verify_inspection_findings(args: Dict[str, Any]) -> Dict[str, Any]:
     上期台账/裁定台账读不出 → 对应去重分支缺席但 meta 点名（不静默当空集，R7②）。
     复核不过的发现**保留**（降级 unverified 并逐项点名，不静默丢——工单要点②）。"""
     from inspection_inspect import (  # 懒 import：同 run_inspection_scan 防环先例
-        apply_budget, collect_fake_ids, dedupe_and_suppress, heartbeat_of,
+        NON_ENGLISH_REASON, apply_budget, collect_fake_ids, dedupe_and_suppress,
+        finding_language_violations, heartbeat_of, mark_non_english,
         read_prev_ledger_ids, recheck_evidence, summarize_counts)
 
     instance_id = str(args.get("instance_id") or "")
@@ -478,6 +479,25 @@ async def verify_inspection_findings(args: Dict[str, Any]) -> Dict[str, Any]:
     prev_ids, prev_note = read_prev_ledger_ids(ledger_dir, instance_id, period)
     fake_ids, fake_notes = collect_fake_ids(ledger_dir, instance_id, period)
     findings = recheck_evidence(findings, base_dir)
+    # 260930 报告面语言闸（宿主令「report 用英语写」）：agent 自写的叙述字段含 CJK ⇒
+    # 降级 unverified 并点名 non_english_text（提示词只是引导，机械面必须可判且可见；
+    # 降级后 verified 门自动不生成修码建议票——数据字段 quote/path 不扫，不译）。
+    lang_violations = finding_language_violations(findings)
+    if lang_violations:
+        mark_non_english(findings)
+        # 票面**显式标红**（不是只在 meta 里记一笔）：聚合成一条 med 机械发现——
+        # 「agent 有 N 条叙述字段没按英文写」是流程质量信号，suggest=False（不是代码缺陷，
+        # 不开修码票）；逐条原因在各条的 unverified_reasons 里（可下钻）。
+        from inspection_deadman import make_finding
+        findings.append(make_finding(
+            "agent", "med",
+            "%d agent finding(s) are not written in English" % len(lang_violations),
+            "the report face and the ticket face are English-only: %s | each such finding is "
+            "marked unverified (%s) and opens no fix ticket; re-run the inspect stage or fix "
+            "the wording"
+            % (", ".join("%s(%s)" % (v["id"] or v["index"], "/".join(v["fields"]))
+                         for v in lang_violations[:10]), NON_ENGLISH_REASON),
+            suggest=False))
     dedupe_and_suppress(findings, prev_ids or set(), fake_ids)
     if max_findings > 0:
         findings, budget_meta = apply_budget(findings, max_findings)
@@ -487,6 +507,10 @@ async def verify_inspection_findings(args: Dict[str, Any]) -> Dict[str, Any]:
     n_unverified = sum(1 for f in findings if f.get("verified") == "unverified")
     meta = {
         "base_dir": base_dir,
+        # 语言闸计数与逐条点名（报告/票面可见；0=全英文）
+        "non_english": len(lang_violations),
+        "non_english_findings": [{"id": v["id"] or v["index"], "fields": v["fields"]}
+                                 for v in lang_violations],
         "prev_ledger": prev_note,
         "fake_notes": fake_notes,
         "fake_pool": len(fake_ids),

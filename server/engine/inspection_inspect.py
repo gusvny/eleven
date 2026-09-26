@@ -243,6 +243,50 @@ def with_ids(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # report 段机械复核链：证据复核 → 跨期去重/假报压制 → 预算截断 → 汇总/心跳
 # ========================================================================================
 
+# —— 报告面语言闸（260930 宿主令 + 实案：agent 自写的 findings 仍有中文 subject）——
+# 提示词只是**引导**，LLM 会漂；机械面必须有一道**可判**的闸：叙述字段（subject/why/
+# suggestion）出现 CJK ⇒ 该发现降级 unverified 并点名 `non_english_text` 原因（可见、
+# 且因 verified 门不生成修码建议票）。**数据字段不译**：evidence 的 quote / path（被测
+# 文件原文与路径）允许任意语言——那是数据不是文案。
+CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+#: 必须英文的叙述字段（报告制品直接消费它们）
+NARRATIVE_FIELDS: Tuple[str, ...] = ("subject", "why", "suggestion")
+#: 语言违规的机器原因 token（进 unverified_reasons / meta，运维可 grep）
+NON_ENGLISH_REASON = "non_english_text"
+
+
+def finding_language_violations(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """逐条查「叙述字段含 CJK」→ [{index,id,fields:[...]}]（纯函数，UT 主面）。
+
+    判据只扫 `NARRATIVE_FIELDS`；evidence 的 quote/path 与其它标识符**不扫**（数据不译）。
+    畸形输入一律保守（非 dict/字段非串/空=跳过，不抛）——语言闸绝不让整轮复核炸。"""
+    out: List[Dict[str, Any]] = []
+    for i, f in enumerate(findings if isinstance(findings, list) else []):
+        if not isinstance(f, dict):
+            continue
+        bad = [k for k in NARRATIVE_FIELDS
+               if isinstance(f.get(k), str) and CJK_RE.search(f[k])]
+        if bad:
+            out.append({"index": i, "id": str(f.get("id") or ""), "fields": bad})
+    return out
+
+
+def mark_non_english(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """语言闸动作面（纯函数）：叙述字段含 CJK 的发现 → verified="unverified" +
+    `unverified_reasons` 追加一条点名（保留判定理由，不静默丢；已 unverified 的条目保留
+    原证据理由并追加）。返回入参列表（就地改，链式调用方便）。"""
+    for v in finding_language_violations(findings):
+        f = findings[v["index"]]
+        reasons = [r for r in (f.get("unverified_reasons") or []) if isinstance(r, str)]
+        reasons.append(
+            "%s: narrative fields must be English (report face is English): %s — the "
+            "finding is kept visible but marked unverified and produces no fix ticket"
+            % (NON_ENGLISH_REASON, ", ".join(v["fields"])))
+        f["verified"] = "unverified"
+        f["unverified_reasons"] = reasons
+    return findings
+
+
 def recheck_evidence(findings: List[Dict[str, Any]], base_dir: Any) -> List[Dict[str, Any]]:
     """逐条逐证据机械复核（工单要点②）：文件存在、行号在范围、引文匹配（容空白差异）。
 
@@ -614,7 +658,15 @@ _SKELETON = """\
   前缀并在报告点名，所以别为守字数丢证据信息；但引文必须真实抄自标注的那一行
   （机械逐条复核，不符=该条降级 unverified 并点名）。
 - severity 只认 high|med|low；confidence 是 0.0~1.0 的小数。
-- **subject / why / suggestion 用英文写**（evidence 的 quote/path 与命令原文照抄不译）。
+- **硬约束（机械执法，不是建议）：subject / why / suggestion 必须全英文**——任何 CJK
+  出现在这三段里，机械复核会把该条**判为 unverified 并点名 `non_english_text`**（票面可见，
+  但不会生成修码建议票）。即：写中文=白写这条发现。
+  - 例外只有**数据**：evidence 的 `quote`（被测文件原文）、`path`、命令原文可含任意语言，
+    照抄不译；被测文件里的中文**不要**搬到 subject/why 里复述，要用英文概括。
+- HARD RULE (mechanically enforced, not a suggestion): subject/why/suggestion MUST be
+  English. Any CJK there makes the mechanical recheck mark that finding unverified with
+  reason `non_english_text` — it stays visible on the ticket face but opens no fix ticket.
+  Data (evidence `quote`/`path`, command text) is copied verbatim and never translated.
 - 红线：巡检只出报告与建议，绝不改码。
 """
 

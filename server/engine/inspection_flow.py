@@ -37,7 +37,6 @@ import time
 
 # 260927 code_stamp（同 agent_activities）：本模块的 worker 载入时刻
 import datetime as _dt_code
-_CODE_LOADED_AT_CACHE = ""  # 惰性（见下方 __getattr__）
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -2319,17 +2318,3 @@ class InspectionProduceWorkflow:
         await self._write_ledger()
         return self.snapshot()
 
-# 260930（实测事故）：import 期调用 datetime.now() 会被 Temporal **工作流沙箱**拒收
-# （RestrictedWorkflowAccessError: Cannot access datetime.datetime.now from inside a
-# workflow → worker 起不来：Failed validating workflow InspectionPeriodicWorkflow）。
-# 改为**首个访问时惰性计算**：只有活动侧会访问它，import 期零副作用。
-_CODE_LOADED_AT_CACHE = ""
-
-
-def __getattr__(name):
-    if name == "CODE_LOADED_AT":
-        global _CODE_LOADED_AT_CACHE
-        if not _CODE_LOADED_AT_CACHE:
-            _CODE_LOADED_AT_CACHE = __import__("datetime").datetime.now().isoformat(timespec="seconds")
-        return _CODE_LOADED_AT_CACHE
-    raise AttributeError("module %r has no attribute %r" % (__name__, name))
